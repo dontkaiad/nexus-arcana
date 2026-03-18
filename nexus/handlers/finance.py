@@ -396,7 +396,7 @@ async def handle_finance_summary(query: str = "") -> str:
     # Запрос по конкретной категории
     if category_filter:
         total = 0.0
-        count = 0
+        matched = []
         for r in records:
             props = r["properties"]
             amount = props.get("Сумма", {}).get("number") or 0
@@ -409,15 +409,32 @@ async def handle_finance_summary(query: str = "") -> str:
             if type_filter == "income" and "Доход" not in type_name:
                 continue
             total += amount
-            count += 1
+            date_str = (props.get("Дата", {}).get("date") or {}).get("start", "")
+            desc = ""
+            title_items = (props.get("Описание", {}).get("title") or [])
+            if title_items:
+                desc = title_items[0].get("text", {}).get("content", "")
+            matched.append((date_str, desc, amount))
 
         icon = "💸" if type_filter == "expense" else ("💰" if type_filter == "income" else "📊")
         label = "Расходы" if type_filter == "expense" else ("Доходы" if type_filter == "income" else "Итого")
-        return (
-            f"{icon} <b>{category_filter} — {now.strftime('%B %Y')}</b>\n\n"
-            f"{label}: <b>{total:,.0f}₽</b>\n"
-            f"📝 Записей: {count}"
-        )
+
+        lines = [
+            f"{icon} <b>{category_filter} — {now.strftime('%B %Y')}</b>\n",
+            f"{label}: <b>{total:,.0f}₽</b>  📝 {len(matched)} зап.",
+        ]
+        if matched:
+            last5 = sorted(matched, key=lambda x: x[0], reverse=True)[:5]
+            lines.append("")
+            for date_str, desc, amount in last5:
+                try:
+                    d = datetime.strptime(date_str[:10], "%Y-%m-%d")
+                    day = f"{d.day} {('янв фев мар апр май июн июл авг сен окт ноя дек'.split())[d.month - 1]}"
+                except Exception:
+                    day = date_str[:10]
+                lines.append(f"• {day} — {desc or '—'} — {amount:,.0f}₽")
+
+        return "\n".join(lines)
 
     # Общая сводка
     income_nexus_salary = 0.0
