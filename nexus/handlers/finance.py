@@ -375,7 +375,8 @@ async def handle_bank_screenshot(message: Message, bot_label: str = "☀️ Nexu
     await message.answer(f"✅ Записано {len(saved)}:\n" + "\n".join(saved[:15]))
 
 
-async def handle_finance_summary(message: Message, query: str = "") -> None:
+async def handle_finance_summary(query: str = "") -> str:
+    """Возвращает строку со статистикой. Вызывающий сам отправляет её пользователю."""
     # Попробовать распарсить категорию из запроса
     category_filter: str | None = None
     type_filter: str | None = None
@@ -412,12 +413,11 @@ async def handle_finance_summary(message: Message, query: str = "") -> None:
 
         icon = "💸" if type_filter == "expense" else ("💰" if type_filter == "income" else "📊")
         label = "Расходы" if type_filter == "expense" else ("Доходы" if type_filter == "income" else "Итого")
-        await message.answer(
+        return (
             f"{icon} <b>{category_filter} — {now.strftime('%B %Y')}</b>\n\n"
             f"{label}: <b>{total:,.0f}₽</b>\n"
             f"📝 Записей: {count}"
         )
-        return
 
     # Общая сводка
     income_nexus_salary = 0.0
@@ -455,7 +455,7 @@ async def handle_finance_summary(message: Message, query: str = "") -> None:
             f"\n  🌒 Arcana: <b>{income_arcana_salary:,.0f}₽</b>"
         )
 
-    await message.answer(
+    return (
         f"📊 <b>Финансы — {now.strftime('%B %Y')}</b>\n\n"
         f"💰 Доходы: <b>{income_total:,.0f}₽</b>{salary_line}\n"
         f"💸 Расходы: <b>{expense_total:,.0f}₽</b>\n"
