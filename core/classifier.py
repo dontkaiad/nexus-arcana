@@ -178,7 +178,8 @@ async def process_item(data: Dict[str, Any], original_text: str, msg, clarify: d
     if kind == "parse_error":
         logged = await log_error(original_text, "parse_error", _classify_last_raw, error_code="–")
         notion_status = "записано в ⚠️Ошибки" if logged else "лог недоступен"
-        return f"❌ Ошибка парсинга · {notion_status}"
+        raw_preview = _classify_last_raw[:200] if _classify_last_raw else "—"
+        return f"❌ Не понял: <code>{raw_preview}</code>\n{notion_status}"
 
     # АРКАНА РЕДИРЕКТ
     if kind == "arcana_redirect":
