@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List
 
@@ -131,9 +132,24 @@ def build_system() -> str:
     ])
 
 
+_STATS_RE = re.compile(
+    r"(скол?ько|скок|сколько)\s+(потратил[аи]?|ушло|израсходовал[аи]?|трачу|потрачено)"
+    r"|расходы\s+за\s+(месяц|неделю|период|март|апрел|май|июн|июл|август|сентябр|октябр|ноябр|декабр|январ|феврал)"
+    r"|(финансовая?\s+)?сводка"
+    r"|статистика\s+(за|расходов|доходов)",
+    re.IGNORECASE,
+)
+
+
 async def classify(text: str) -> list[dict]:
     """Классифицировать текст через Claude."""
     logger.info("classify: input text=%r", text[:100])
+
+    # Быстрый pre-фильтр: stats-запросы не отдаём Claude — он их путает с task
+    if _STATS_RE.search(text):
+        logger.info("classify: stats pattern matched, bypassing Claude")
+        return [{"type": "stats", "query": text}]
+
     raw = await ask_claude(text, system=build_system(), max_tokens=1024)
     global _classify_last_raw
     _classify_last_raw = raw
