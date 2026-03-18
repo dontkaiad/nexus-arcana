@@ -490,7 +490,7 @@ async def client_add(
         "Имя":      _title(name),
         "Контакт":  _text(contact),
         "Запрос":   _text(request),
-        "Статус":   _select("🟢 Активный"),
+        "Статус":   _status("🟢 Активный"),
     })
 
 async def client_find(name: str) -> Optional[dict]:
