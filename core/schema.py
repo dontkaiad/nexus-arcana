@@ -92,7 +92,7 @@ CLIENTS_SCHEMA = {
     "notes": {"field": "Заметки", "type": "rich_text"},
     "status": {
         "field": "Статус",
-        "type": "select",
+        "type": "status",
         "options": ["🟢 Активный", "🌙 Разовый", "⛔ Закрыт"],
         "aliases": {
             "активный": "🟢 Активный",
