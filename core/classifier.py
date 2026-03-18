@@ -278,8 +278,7 @@ async def process_item(data: Dict[str, Any], original_text: str, msg, clarify: d
     if kind == "stats":
         logger.info("process_item: stats request - query=%r", data.get("query", ""))
         from nexus.handlers.finance import handle_finance_summary
-        await handle_finance_summary(msg, query=data.get("query", ""))
-        return ""
+        return await handle_finance_summary(query=data.get("query", ""))
 
     # ПОМОЩЬ
     if kind == "help":
