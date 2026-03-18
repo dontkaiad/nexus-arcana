@@ -25,6 +25,21 @@ CATEGORIES = [
 
 SOURCES = ["💳 Карта", "💵 Наличные", "🔄 Бартер"]
 
+STATS_SYSTEM = f"""Определи, запрашивает ли пользователь статистику по конкретной категории.
+Ответь ТОЛЬКО JSON без markdown:
+{{
+  "category": "одна из: {', '.join(CATEGORIES)} или null если запрос общей сводки",
+  "type_": "expense если спрашивает о расходах, income если о доходах, null если оба"
+}}
+
+Примеры:
+"сколько потратила на коты" → {{"category": "🐾 Коты", "type_": "expense"}}
+"расходы на транспорт" → {{"category": "🚕 Транспорт", "type_": "expense"}}
+"кола" → {{"category": "🚬 Привычки", "type_": "expense"}}
+"заработала на практике" → {{"category": "🔮 Практика", "type_": "income"}}
+"сводка за месяц" → {{"category": null, "type_": null}}
+"статистика" → {{"category": null, "type_": null}}"""
+
 PARSE_SYSTEM = f"""Извлеки финансовую запись. Исправляй опечатки. Ответь ТОЛЬКО JSON без markdown:
 {{
   "amount": число,
@@ -360,9 +375,51 @@ async def handle_bank_screenshot(message: Message, bot_label: str = "☀️ Nexu
     await message.answer(f"✅ Записано {len(saved)}:\n" + "\n".join(saved[:15]))
 
 
-async def handle_finance_summary(message: Message) -> None:
-    records = await finance_month(_month())
+async def handle_finance_summary(message: Message, query: str = "") -> None:
+    # Попробовать распарсить категорию из запроса
+    category_filter: str | None = None
+    type_filter: str | None = None
+    if query:
+        raw = await ask_claude(query, system=STATS_SYSTEM, max_tokens=100)
+        try:
+            raw = raw.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
+            parsed = json.loads(raw)
+            category_filter = parsed.get("category") or None
+            type_filter = parsed.get("type_") or None
+        except Exception:
+            pass
 
+    records = await finance_month(_month())
+    now = datetime.now(MOSCOW_TZ)
+
+    # Запрос по конкретной категории
+    if category_filter:
+        total = 0.0
+        count = 0
+        for r in records:
+            props = r["properties"]
+            amount = props.get("Сумма", {}).get("number") or 0
+            cat_name = (props.get("Категория", {}).get("select") or {}).get("name", "")
+            type_name = (props.get("Тип", {}).get("select") or {}).get("name", "")
+            if cat_name != category_filter:
+                continue
+            if type_filter == "expense" and "Расход" not in type_name:
+                continue
+            if type_filter == "income" and "Доход" not in type_name:
+                continue
+            total += amount
+            count += 1
+
+        icon = "💸" if type_filter == "expense" else ("💰" if type_filter == "income" else "📊")
+        label = "Расходы" if type_filter == "expense" else ("Доходы" if type_filter == "income" else "Итого")
+        await message.answer(
+            f"{icon} <b>{category_filter} — {now.strftime('%B %Y')}</b>\n\n"
+            f"{label}: <b>{total:,.0f}₽</b>\n"
+            f"📝 Записей: {count}"
+        )
+        return
+
+    # Общая сводка
     income_nexus_salary = 0.0
     income_arcana_salary = 0.0
     income_other = 0.0
@@ -390,7 +447,6 @@ async def handle_finance_summary(message: Message) -> None:
 
     income_total = income_nexus_salary + income_arcana_salary + income_other
     balance = income_total - expense_total
-    now = datetime.now(MOSCOW_TZ)
 
     salary_line = ""
     if income_nexus_salary or income_arcana_salary:
