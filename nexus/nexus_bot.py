@@ -269,7 +269,12 @@ async def handle_text(msg: Message) -> None:
             code, suffix = "–", "что-то сломалось · пусть Кай правит код"
         logged = await log_error(text, "processing_error", "", trace, error_code=code)
         notion_status = "записано в ⚠️Ошибки" if logged else "лог недоступен"
-        await msg.answer(f"❌ {suffix} · {notion_status}")
+        short_err = err_str[:200] if err_str else "—"
+        await msg.answer(
+            f"❌ {suffix}\n"
+            f"<code>{short_err}</code>\n"
+            f"{notion_status}"
+        )
 
 
 @dp.callback_query(lambda c: c.data and c.data.startswith("note_"))
