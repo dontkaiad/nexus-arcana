@@ -109,6 +109,8 @@ def _extract_select(prop: dict) -> str:
 # ─── Generic ──────────────────────────────────────────────────────────────────
 
 async def page_create(db_id: str, props: dict) -> Optional[str]:
+    import json as _json
+    logger.info("page_create db=%s props=%s", db_id[:8], _json.dumps(props, ensure_ascii=False, default=str))
     try:
         return await _notion().create_page(db_id, props)
     except Exception as e:
