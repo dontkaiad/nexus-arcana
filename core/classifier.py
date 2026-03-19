@@ -60,6 +60,15 @@ def build_system() -> str:
         '{"type":"update","target":"<expense|income>","field":"<source|category|amount>","new_value":"новое значение"}',
         "Примеры: исправь на налик/карту → field=source; на категорию → field=category; сумму → field=amount",
         "",
+        "task_done — пользователь сообщает что уже выполнил какое-то дело:",
+        '{"type":"task_done","task_hint":"ключевые слова названия задачи"}',
+        "Примеры: 'сделала покупку корма' → task_done hint='покупка корм'",
+        "         'позвонила в клинику' → task_done hint='позвонить клиника'",
+        "         'написала отчёт' → task_done hint='написать отчёт'",
+        "         'купила корм готово' → task_done hint='купить корм'",
+        "         'отметь врача выполненным' → task_done hint='врач'",
+        "ВАЖНО: task_done только если речь идёт о чём-то уже сделанном (прошедшее время глагола или слово 'готово'/'выполнено')",
+        "",
         "task — задача на Нексус (БЕЗ слов из Арканы!):",
         '{"type":"task","title":"что сделать","category":"<из кат>","priority":"Высокий|Средний|Низкий","deadline":"YYYY-MM-DD или YYYY-MM-DDTHH:MM или null","confidence":"high если есть дата, low если даты нет"}',
         "",
@@ -89,6 +98,8 @@ def build_system() -> str:
         "- arcana_redirect: явно для Арканы (слова типа 'ритуал', 'практика', 'сеанс', 'гримуар', 'таро') → сразу редирект без вопросов",
         "- arcana_clarify: подозрительные слова (свечи, травы, масла, пентаграмма), которые могут быть и обычной задачей и для ритуала → спросить пользователя",
         "- type task: только для Нексуса. Обычные задачи/дела: глаголы действия (купить, позвонить, написать, отправить, запросить, посетить, встретиться, забрать, принести, исправить, отремонтировать и т.д.)",
+        "- task_done: глагол прошедшего времени (сделала/выполнила/купила/написала/позвонила/закончила/отправила) БЕЗ суммы → task_done, НЕ task!",
+        "- task_done vs expense: 'купила корм' БЕЗ суммы → task_done; 'купила корм 500₽' → expense",
         "- ПРИОРИТЕТ stats: фразы 'сколько потратила/потратил', 'скок потратила', 'сколько ушло', 'сколько израсходовала' → ВСЕГДА stats, даже если есть категория или слово 'на'! НЕ task, НЕ expense.",
         "- ВАЖНО: Короткие глаголы ВСЕГДА задача (type=task), даже без деталей! Примеры: 'позвонить'→task, 'написать'→task, 'купить'→task (confidence=low если нет деталей)",
         "- Если просто глагол БЕЗ объекта (типа 'написать') → task с title=исходный глагол, confidence=low",
@@ -132,6 +143,14 @@ def build_system() -> str:
     ])
 
 
+_DONE_RE = re.compile(
+    r"\b(сделал[аи]?\b|выполнил[аи]?\b|закончил[аи]?\b|завершил[аи]?\b|"
+    r"позвонил[аи]\b|написал[аи]\b|отправил[аи]\b|забрал[аи]\b|"
+    r"готово\b|готова\b|выполнено\b|сделано\b|"
+    r"отметь\s+\w+\s+выполненным|отметь\s+выполненным|уже\s+сделал[аи]?\b)",
+    re.IGNORECASE,
+)
+
 _TZ_RE = re.compile(
     r"(я\s+в\s+\w+|переезжаю\s+в\s+\w+|мой\s+часовой\s+пояс|utc[+-]\d|в\s+спб\b|в\s+москве\b|"
     r"в\s+екб\b|в\s+екатеринбурге\b|в\s+новосибирске\b|в\s+владивостоке\b|"
@@ -152,6 +171,11 @@ _STATS_RE = re.compile(
 async def classify(text: str) -> list[dict]:
     """Классифицировать текст через Claude."""
     logger.info("classify: input text=%r", text[:100])
+
+    # Быстрый pre-фильтр: задача выполнена ("сделала X", "X готово")
+    if _DONE_RE.search(text):
+        logger.info("classify: task_done pattern matched")
+        return [{"type": "task_done", "task_hint": text}]
 
     # Быстрый pre-фильтр: timezone
     if _TZ_RE.search(text):
@@ -184,6 +208,12 @@ async def process_item(data: Dict[str, Any], original_text: str, msg, clarify: d
     """Обработка классифицированного элемента."""
     kind = data.get("type", "unknown")
     logger.info("process_item: type=%r data=%s", kind, data)
+
+    # TASK DONE
+    if kind == "task_done":
+        from nexus.handlers.tasks import handle_task_done
+        await handle_task_done(msg, data.get("task_hint", original_text), user_notion_id=user_notion_id)
+        return ""
 
     # TIMEZONE UPDATE
     if kind == "timezone_update":
