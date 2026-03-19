@@ -73,6 +73,36 @@ def _pending_pop(uid: int) -> Optional[dict]:
 def _pending_has(uid: int) -> bool:
     return _pending_get(uid) is not None
 
+
+# ── last_record: запоминаем последнюю созданную запись пользователя ─────────────
+def _lrdb() -> _sqlite3.Connection:
+    con = _sqlite3.connect(_PENDING_DB)
+    con.execute(
+        "CREATE TABLE IF NOT EXISTS last_record "
+        "(uid INTEGER PRIMARY KEY, db_type TEXT, page_id TEXT)"
+    )
+    con.commit()
+    return con
+
+
+def last_record_set(uid: int, db_type: str, page_id: str) -> None:
+    """Сохранить последнюю запись пользователя. db_type: 'task' | 'finance'."""
+    with _lrdb() as con:
+        con.execute(
+            "INSERT OR REPLACE INTO last_record (uid, db_type, page_id) VALUES (?,?,?)",
+            (uid, db_type, page_id),
+        )
+
+
+def last_record_get(uid: int) -> Optional[tuple]:
+    """Вернуть (db_type, page_id) или None."""
+    with _lrdb() as con:
+        row = con.execute(
+            "SELECT db_type, page_id FROM last_record WHERE uid=?", (uid,)
+        ).fetchone()
+    return row  # (db_type, page_id) or None
+
+
 # ── Global state ───────────────────────────────────────────────────────────────
 _user_tz_offset: dict = {}
 _scheduler = None
@@ -808,6 +838,9 @@ async def _do_save_task(message: Message, data: dict, chat_id: int = None, uid: 
         await message.answer("⚠️ Ошибка записи в Notion.")
         return
 
+    # Запоминаем последнюю созданную запись для контекстного редактирования
+    last_record_set(uid, "task", result)
+
     # Планируем напоминание и дедлайн
     cid = chat_id or message.chat.id
     tz_offset = await _get_user_tz(uid)
@@ -982,17 +1015,15 @@ async def handle_edit_record(
     record_type: str = "task",
     user_notion_id: str = "",
 ) -> None:
-    """Найти задачу по ключевым словам и обновить поле."""
-    from core.notion_client import update_task_status, match_select, update_page
+    """Найти запись по ключевым словам (или последнюю) и обновить поле."""
+    from core.notion_client import match_select, update_page
     from core.config import config
 
-    if record_type != "task":
-        await message.answer("✏️ Редактирование финансовых записей: используй формат «исправь на …»")
-        return
+    uid = message.from_user.id
 
     if not field or not new_value:
         await message.answer("⚠️ Не понял что и на что менять. Уточни:\n"
-                             "<code>поменяй категорию [задача] на [новая категория]</code>")
+                             "<code>поменяй категорию [запись] на [новое значение]</code>")
         return
 
     # Нормализуем field-синонимы
@@ -1000,19 +1031,29 @@ async def handle_edit_record(
         "name": "title", "имя": "title", "название": "title",
         "категория": "category", "категорию": "category",
         "приоритет": "priority", "дедлайн": "deadline",
+        "источник": "source",
     }
     field = field_map.get(field.lower(), field.lower())
 
     hint_words = _hint_words(record_hint)
+
+    # Пустой hint → берём последнюю запись пользователя из SQLite
     if not hint_words:
-        await message.answer("⚠️ Не понял какую задачу найти. Напиши точнее.")
+        last = last_record_get(uid)
+        if not last:
+            await message.answer("⚠️ Не понял какую запись изменить. Напиши точнее, например:\n"
+                                 "<code>поменяй категорию [название] на [новое]</code>")
+            return
+        db_type_last, page_id_last = last
+        # Определяем тип записи из контекста если не задан явно
+        if record_type == "task" and db_type_last == "finance":
+            record_type = "finance"
+        await _apply_edit(message, record_type, page_id_last, None, field, new_value,
+                          user_notion_id=user_notion_id, from_context=True)
         return
 
+    # Поиск задачи по hint_words
     tasks = await tasks_active(user_notion_id=user_notion_id)
-    if not tasks:
-        await message.answer("📭 Нет активных задач.")
-        return
-
     scored = []
     for t in tasks:
         title_parts = t["properties"].get("Задача", {}).get("title", [])
@@ -1029,35 +1070,63 @@ async def handle_edit_record(
 
     scored.sort(key=lambda x: x[0], reverse=True)
     _, title, task_id = scored[0]
+    await _apply_edit(message, "task", task_id, title, field, new_value,
+                      user_notion_id=user_notion_id)
 
-    db_id = config.nexus.db_tasks
+
+async def _apply_edit(
+    message: Message,
+    record_type: str,
+    page_id: str,
+    title: Optional[str],
+    field: str,
+    new_value: str,
+    user_notion_id: str = "",
+    from_context: bool = False,
+) -> None:
+    """Применить правку к Notion-странице (задача или финансы)."""
+    from core.notion_client import match_select, update_page, _title as _t, _select as _s, _date as _d
+    from core.config import config
+
+    ctx_label = " (последняя запись)" if from_context else ""
+
     try:
-        if field == "title":
-            from core.notion_client import _title as _t
-            await update_page(task_id, {"Задача": _t(new_value)})
-            await message.answer(f"✏️ Переименовано:\n«{title}» → «{new_value}»")
+        if record_type == "finance":
+            db_id = config.nexus.db_finance
+            if field == "category":
+                real_cat = await match_select(db_id, "Категория", new_value)
+                await update_page(page_id, {"Категория": _s(real_cat)})
+                label = title or "последняя запись"
+                await message.answer(f"✏️ Категория{ctx_label}:\n🏷 → {real_cat}")
+            elif field == "source":
+                real_src = await match_select(db_id, "Источник", new_value)
+                await update_page(page_id, {"Источник": _s(real_src)})
+                await message.answer(f"✏️ Источник{ctx_label}:\n💳 → {real_src}")
+            else:
+                await message.answer(f"⚠️ Для финансов могу менять: категорию, источник.")
+            return
 
+        # Задача
+        db_id = config.nexus.db_tasks
+        label = title or "последняя задача"
+        if field == "title":
+            await update_page(page_id, {"Задача": _t(new_value)})
+            await message.answer(f"✏️ Переименовано{ctx_label}:\n«{label}» → «{new_value}»")
         elif field == "category":
             real_cat = await match_select(db_id, "Категория", new_value)
-            from core.notion_client import _select as _s
-            await update_page(task_id, {"Категория": _s(real_cat)})
-            await message.answer(f"✏️ Категория обновлена:\n📌 {title}\n🏷 → {real_cat}")
-
+            await update_page(page_id, {"Категория": _s(real_cat)})
+            await message.answer(f"✏️ Категория{ctx_label}:\n📌 {label}\n🏷 → {real_cat}")
         elif field == "priority":
             real_pr = await match_select(db_id, "Приоритет", new_value)
-            from core.notion_client import _select as _s
-            await update_page(task_id, {"Приоритет": _s(real_pr)})
-            await message.answer(f"✏️ Приоритет обновлён:\n📌 {title}\n⚡ → {real_pr}")
-
+            await update_page(page_id, {"Приоритет": _s(real_pr)})
+            await message.answer(f"✏️ Приоритет{ctx_label}:\n📌 {label}\n⚡ → {real_pr}")
         elif field == "deadline":
-            from core.notion_client import _date as _d
-            await update_page(task_id, {"Дедлайн": _d(new_value)})
-            await message.answer(f"✏️ Дедлайн обновлён:\n📌 {title}\n📅 → {new_value}")
-
+            await update_page(page_id, {"Дедлайн": _d(new_value)})
+            await message.answer(f"✏️ Дедлайн{ctx_label}:\n📌 {label}\n📅 → {new_value}")
         else:
             await message.answer(f"⚠️ Не знаю поле «{field}». Могу менять: категорию, приоритет, название, дедлайн.")
     except Exception as e:
-        logger.error("handle_edit_record error: %s", e)
+        logger.error("_apply_edit error: %s", e)
         await message.answer("⚠️ Ошибка при обновлении.")
 
 
