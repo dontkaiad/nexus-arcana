@@ -285,29 +285,49 @@ async def handle_task_parsed(message: Message, data: dict) -> None:
     # Определяем оригинальный текст из message
     original_text = message.text or ""
 
-    # Pre-filter: "через N мин/часов/дней" в оригинальном тексте → считаем до Claude
-    # Claude путает "через 2 мин" → 00:02 вместо now+2min
+    has_remind = _has_remind_word(original_text)
+
+    # Pre-filter: "через N мин/часов/дней" → вычислить до Claude
+    # Баг Claude: "через 2 мин" → "00:02" вместо now+2min
     tz_offset = await _get_user_tz(uid)
     rel_match = _REL_TIME_RE.search(original_text)
     if rel_match:
         relative_time = _parse_relative_time(original_text, tz_offset)
         unit = rel_match.group(2).lower()
         if unit.startswith("мин") or unit.startswith("ч"):
-            # минуты / часы → всегда reminder, не дедлайн
+            # минуты / часы → reminder_time (никогда не дедлайн)
             logger.info("handle_task_parsed: pre-filter relative reminder=%s", relative_time)
             data["reminder_time"] = relative_time
             data["deadline"] = None  # сброс неверного дедлайна от Claude
+            if has_remind:
+                # reminder уже известен — сразу спрашиваем только дедлайн
+                reminder_display = relative_time.replace("T", " ")
+                msg = await message.answer(
+                    f"📌 <b>{data.get('title')}</b>\n"
+                    f"🏷 {data.get('category', '?')} · {data.get('priority', 'Средний')}\n"
+                    f"🔔 Напомню: {reminder_display}\n\n"
+                    f"<b>📅 Дедлайн?</b>",
+                    reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
+                        InlineKeyboardButton(text="✅ Тот же день", callback_data="task_deadline_same"),
+                        InlineKeyboardButton(text="📅 +1 день", callback_data="task_deadline_plus1"),
+                    ], [
+                        InlineKeyboardButton(text="📅 +3 дня", callback_data="task_deadline_plus3"),
+                        InlineKeyboardButton(text="🚫 Без дедлайна", callback_data="task_save"),
+                    ], [
+                        InlineKeyboardButton(text="❌ Отмена", callback_data="task_cancel"),
+                    ]])
+                )
+                data["msg_id"] = msg.message_id
+                data["_awaiting_deadline"] = True
+                _pending_set(uid, data)
+                return
         else:
-            # дни → дедлайн (только если Claude не поставил осмысленную дату)
+            # дни → дедлайн
             logger.info("handle_task_parsed: pre-filter relative deadline=%s", relative_time)
             data["deadline"] = relative_time
 
-    # Если в сообщении есть "напомни" + в data уже есть deadline (как reminder_time из deadline)
-    # → reminder_time = deadline из data, спрашиваем дедлайн
-    has_remind = _has_remind_word(original_text)
-
+    # "напомни [дата из Claude]" — reminder_time = deadline, спросить дедлайн
     if has_remind and data.get("deadline"):
-        # "напомни завтра в 11" → deadline = reminder_time, спросить дедлайн
         data["reminder_time"] = data["deadline"]
         data["deadline"] = None
 
