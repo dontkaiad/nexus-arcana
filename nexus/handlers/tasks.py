@@ -463,11 +463,12 @@ async def handle_reschedule_reminder(message: Message) -> None:
 
 async def _do_save_task(message: Message, data: dict, chat_id: int = None, uid: int = 0) -> None:
     from core.config import config
-    from core.notion_client import match_select
+    from core.notion_client import match_select, _relation
 
     db_id = config.nexus.db_tasks
     real_priority = await match_select(db_id, "Приоритет", data.get("priority", "Средний"))
     real_category = await match_select(db_id, "Категория", data.get("category", "💳 Прочее"))
+    user_notion_id = data.get("user_notion_id", "")
 
     props = {
         "Задача":    _title(data["title"]),
@@ -479,6 +480,8 @@ async def _do_save_task(message: Message, data: dict, chat_id: int = None, uid: 
         props["Дедлайн"] = _date(data["deadline"])
     if data.get("reminder_time"):
         props["Напоминание"] = _date(data["reminder_time"])
+    if user_notion_id:
+        props["Пользователь"] = _relation(user_notion_id)
 
     result = await page_create(db_id, props)
     if not result:
@@ -544,8 +547,8 @@ async def _do_save_task(message: Message, data: dict, chat_id: int = None, uid: 
     else:
         await message.answer(text_content, parse_mode="HTML")
 
-async def handle_tasks_today(message: Message) -> None:
-    tasks = await tasks_active()
+async def handle_tasks_today(message: Message, user_notion_id: str = "") -> None:
+    tasks = await tasks_active(user_notion_id=user_notion_id)
     if not tasks:
         await message.answer("📭 Активных задач нет.")
         return

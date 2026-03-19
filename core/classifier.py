@@ -167,7 +167,7 @@ async def classify(text: str) -> list[dict]:
         return [{"type": "parse_error"}]
 
 
-async def process_item(data: Dict[str, Any], original_text: str, msg, clarify: dict) -> str:
+async def process_item(data: Dict[str, Any], original_text: str, msg, clarify: dict, user_notion_id: str = "") -> str:
     """Обработка классифицированного элемента."""
     kind = data.get("type", "unknown")
     logger.info("process_item: type=%r data=%s", kind, data)
@@ -235,6 +235,7 @@ async def process_item(data: Dict[str, Any], original_text: str, msg, clarify: d
             type_=type_label,
             source=source,
             description=title,
+            user_notion_id=user_notion_id,
         )
         if result:
             sign = "−" if kind == "expense" else "+"
@@ -261,9 +262,10 @@ async def process_item(data: Dict[str, Any], original_text: str, msg, clarify: d
         return "❌ Ошибка при обновлении записи"
     if kind == "task":
         from nexus.handlers.tasks import handle_task_parsed
-        logger.info("classifier: task detected - title=%r category=%r deadline=%r priority=%r", 
+        logger.info("classifier: task detected - title=%r category=%r deadline=%r priority=%r",
                    data.get("title"), data.get("category"), data.get("deadline"), data.get("priority"))
         logger.info("classifier: calling handle_task_parsed with full data=%s", data)
+        data["user_notion_id"] = user_notion_id
         await handle_task_parsed(msg, data)
         return ""
 
@@ -288,14 +290,15 @@ async def process_item(data: Dict[str, Any], original_text: str, msg, clarify: d
                     enriched_tags.append(tag)
             raw_tags = ", ".join(enriched_tags)
         
-        await handle_note(msg, data.get("text", original_text), config.nexus.db_notes, raw_tags)
+        await handle_note(msg, data.get("text", original_text), config.nexus.db_notes, raw_tags,
+                          user_notion_id=user_notion_id)
         return ""
 
     # СТАТИСТИКА
     if kind == "stats":
         logger.info("process_item: stats request - query=%r", data.get("query", ""))
         from nexus.handlers.finance import handle_finance_summary
-        return await handle_finance_summary(query=data.get("query", ""))
+        return await handle_finance_summary(query=data.get("query", ""), user_notion_id=user_notion_id)
 
     # ПОМОЩЬ
     if kind == "help":

@@ -93,20 +93,22 @@ def _format_record(data: dict) -> str:
     )
 
 
-async def _save_finance(data: dict, db_id: str, bot_label: str = "☀️ Nexus") -> str:
+async def _save_finance(data: dict, db_id: str, bot_label: str = "☀️ Nexus",
+                        user_notion_id: str = "") -> str:
     """Создаёт запись в Notion. Возвращает page_id или None."""
-    return await page_create(
-        db_id,
-        {
-            "Описание": _title(data.get("description") or ""),
-            "Дата":     _date(_today()),
-            "Сумма":    _number(float(data["amount"])),
-            "Категория": _select(data.get("category", "💳 Прочее")),
-            "Тип":      _select(data.get("type_", "💸 Расход")),
-            "Источник": _select(data.get("source", "💳 Карта")),
-            "Бот":      _select(bot_label),
-        }
-    )
+    from core.notion_client import _relation
+    props = {
+        "Описание": _title(data.get("description") or ""),
+        "Дата":     _date(_today()),
+        "Сумма":    _number(float(data["amount"])),
+        "Категория": _select(data.get("category", "💳 Прочее")),
+        "Тип":      _select(data.get("type_", "💸 Расход")),
+        "Источник": _select(data.get("source", "💳 Карта")),
+        "Бот":      _select(bot_label),
+    }
+    if user_notion_id:
+        props["Пользователь"] = _relation(user_notion_id)
+    return await page_create(db_id, props)
 
 
 async def _update_last_finance(uid: int, field: str, value: str) -> bool:
@@ -133,7 +135,8 @@ async def _update_last_finance(uid: int, field: str, value: str) -> bool:
         return False
 
 
-async def handle_finance_text(message: Message, text: str, bot_label: str = "☀️ Nexus") -> None:
+async def handle_finance_text(message: Message, text: str, bot_label: str = "☀️ Nexus",
+                              user_notion_id: str = "") -> None:
     from core.config import config
 
     raw = await ask_claude(text, system=PARSE_SYSTEM, max_tokens=400)
@@ -166,11 +169,11 @@ async def handle_finance_text(message: Message, text: str, bot_label: str = "☀
 
     # Низкая уверенность — уточняем
     if data.get("confidence") == "low" and data.get("question"):
-        _pending_finance[uid] = data
+        _pending_finance[uid] = (data, user_notion_id)
 
         amount = data.get("amount", 0)
         description = data.get("description", "?")
-        
+
         kb = InlineKeyboardMarkup(inline_keyboard=[
             [
                 InlineKeyboardButton(text="💸 Расход", callback_data="fin_expense"),
@@ -186,7 +189,7 @@ async def handle_finance_text(message: Message, text: str, bot_label: str = "☀
         return
 
     # Высокая уверенность — пишем сразу
-    page_id = await _save_finance(data, config.nexus.db_finance, bot_label)
+    page_id = await _save_finance(data, config.nexus.db_finance, bot_label, user_notion_id)
     if not page_id:
         await message.answer("⚠️ Ошибка записи в Notion.")
         return
@@ -196,14 +199,20 @@ async def handle_finance_text(message: Message, text: str, bot_label: str = "☀
 
 
 @router.message(F.text)
-async def handle_finance_clarification(message: Message) -> None:
+async def handle_finance_clarification(message: Message, user_notion_id: str = "") -> None:
     """Текстовые ответы на уточнение: вместо кнопок или уточнение данных."""
     from core.config import config
 
     uid = message.from_user.id
-    pending = _pending_finance.get(uid)
-    if not pending:
+    pending_entry = _pending_finance.get(uid)
+    if not pending_entry:
         return
+    # Support both formats: data dict (old) or (data, user_notion_id) tuple (new)
+    if isinstance(pending_entry, tuple):
+        pending, stored_uid = pending_entry
+    else:
+        pending = pending_entry
+        stored_uid = user_notion_id
 
     text_lower = (message.text or "").strip().lower()
 
@@ -214,7 +223,7 @@ async def handle_finance_clarification(message: Message) -> None:
 
     if text_lower in ("записать", "да", "ок", "ok", "✅", "записать как есть"):
         _pending_finance.pop(uid, None)
-        page_id = await _save_finance(pending, config.nexus.db_finance)
+        page_id = await _save_finance(pending, config.nexus.db_finance, user_notion_id=stored_uid)
         if page_id:
             _last_page_id[uid] = page_id
             await message.answer(_format_record(pending))
@@ -238,7 +247,7 @@ async def handle_finance_clarification(message: Message) -> None:
         pass
 
     _pending_finance.pop(uid, None)
-    page_id = await _save_finance(pending, config.nexus.db_finance)
+    page_id = await _save_finance(pending, config.nexus.db_finance, user_notion_id=stored_uid)
     if not page_id:
         await message.answer("⚠️ Ошибка записи в Notion.")
         return
@@ -270,48 +279,49 @@ async def fin_cancel(call: CallbackQuery) -> None:
 
 
 @router.callback_query(F.data.startswith("fin_expense") | F.data.startswith("fin_income") | F.data.startswith("fin_barter"))
-async def handle_finance_clarify(call: CallbackQuery) -> None:
+async def handle_finance_clarify(call: CallbackQuery, user_notion_id: str = "") -> None:
     """Обработчик уточнения доход/расход/бартер для неясных операций."""
     from core.config import config
-    from core.notion_client import match_select
-    
-    # Определяем выбор: fin_expense, fin_income, fin_barter
+    from core.notion_client import match_select, _relation
+
     action = call.data.split("_")[1]  # expense, income или barter
     uid = call.from_user.id
-    
-    # Получаем pending финансовую операцию
-    pending = _pending_finance.get(uid)
-    if not pending:
+
+    pending_entry = _pending_finance.get(uid)
+    if not pending_entry:
         await call.answer("⚠️ Сессия истекла. Отправь операцию ещё раз.")
         await call.message.edit_text("⚠️ Сессия истекла.")
         return
-    
+
     await call.answer()
-    
-    # Обновляем данные в зависимости от выбора
+
+    # Support both formats
+    if isinstance(pending_entry, tuple):
+        pending, stored_uid = pending_entry
+    else:
+        pending = pending_entry
+        stored_uid = user_notion_id
+
     amount = float(pending.get("amount", 0))
     category = pending.get("category", "💳 Прочее")
     source = pending.get("source", "💳 Карта")
     description = pending.get("description", "")
-    
+
     db_id = config.nexus.db_finance
-    
-    # Определяем тип и источник
+
     if action == "barter":
         type_label = "💸 Расход"
         source = "🔄 Бартер"
     elif action == "income":
         type_label = "💰 Доход"
-    else:  # expense
+    else:
         type_label = "💸 Расход"
-    
-    # Матчим к реальным опциям БД
+
     real_category = await match_select(db_id, "Категория", category)
     real_source = await match_select(db_id, "Источник", source)
     real_type = await match_select(db_id, "Тип", type_label)
-    
-    # Сохраняем в Notion
-    result = await page_create(db_id, {
+
+    props = {
         "Описание": _title(description),
         "Дата": _date(datetime.now(MOSCOW_TZ).strftime("%Y-%m-%d")),
         "Сумма": _number(amount),
@@ -319,8 +329,13 @@ async def handle_finance_clarify(call: CallbackQuery) -> None:
         "Тип": _select(real_type),
         "Источник": _select(real_source),
         "Бот": _select("☀️ Nexus"),
-    })
-    
+    }
+    eff_uid = stored_uid or user_notion_id
+    if eff_uid:
+        props["Пользователь"] = _relation(eff_uid)
+
+    result = await page_create(db_id, props)
+
     if result:
         sign = "−" if action != "income" else "+"
         icon = "💸" if action != "income" else "💰"
@@ -375,7 +390,7 @@ async def handle_bank_screenshot(message: Message, bot_label: str = "☀️ Nexu
     await message.answer(f"✅ Записано {len(saved)}:\n" + "\n".join(saved[:15]))
 
 
-async def handle_finance_summary(query: str = "") -> str:
+async def handle_finance_summary(query: str = "", user_notion_id: str = "") -> str:
     """Возвращает строку со статистикой. Вызывающий сам отправляет её пользователю."""
     # Попробовать распарсить категорию из запроса
     category_filter: str | None = None
@@ -390,7 +405,7 @@ async def handle_finance_summary(query: str = "") -> str:
         except Exception:
             pass
 
-    records = await finance_month(_month())
+    records = await finance_month(_month(), user_notion_id=user_notion_id)
     now = datetime.now(MOSCOW_TZ)
 
     # Запрос по конкретной категории
