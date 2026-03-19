@@ -36,7 +36,7 @@ def _now_iso() -> str:
     return datetime.now(MOSCOW_TZ).isoformat()
 
 
-async def handle_add_session(message: Message, text: str) -> None:
+async def handle_add_session(message: Message, text: str, user_notion_id: str = "") -> None:
     raw = await ask_claude(text, system=PARSE_SESSION_SYSTEM, max_tokens=300)
     try:
         raw = raw.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
@@ -51,7 +51,7 @@ async def handle_add_session(message: Message, text: str) -> None:
     client_id = None
 
     if not is_personal:
-        client = await client_find(client_name)
+        client = await client_find(client_name, user_notion_id=user_notion_id)
         if client:
             client_id = client["id"]
 
@@ -74,6 +74,7 @@ async def handle_add_session(message: Message, text: str) -> None:
         paid=float(data.get("paid") or 0),
         session_type="Личный" if is_personal else "Клиентский",
         client_id=client_id,
+        user_notion_id=user_notion_id,
     )
 
     debt = max(0, float(data.get("amount") or 0) - float(data.get("paid") or 0))

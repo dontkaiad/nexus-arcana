@@ -45,7 +45,7 @@ async def cmd_start(message: Message) -> None:
 
 
 @router.message()
-async def route_message(message: Message) -> None:
+async def route_message(message: Message, user_notion_id: str = "") -> None:
     try:
         if message.photo:
             from arcana.handlers.sessions import handle_tarot_photo
@@ -90,11 +90,11 @@ async def route_message(message: Message) -> None:
         from arcana.handlers.delete import handle_delete
 
         dispatch = {
-            "new_client":   lambda: handle_add_client(message, text),
-            "session":      lambda: handle_add_session(message, text),
-            "ritual":       lambda: handle_add_ritual(message, text),
-            "client_info":  lambda: handle_client_info(message, text),
-            "debt":         lambda: handle_debts(message),
+            "new_client":   lambda: handle_add_client(message, text, user_notion_id),
+            "session":      lambda: handle_add_session(message, text, user_notion_id),
+            "ritual":       lambda: handle_add_ritual(message, text, user_notion_id),
+            "client_info":  lambda: handle_client_info(message, text, user_notion_id),
+            "debt":         lambda: handle_debts(message, user_notion_id),
             "tarot_interp": lambda: handle_tarot_interpret(message, text),
             "delete":       lambda: handle_delete(message, text),
         }
