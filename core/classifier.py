@@ -374,9 +374,26 @@ async def process_item(data: Dict[str, Any], original_text: str, msg, clarify: d
         
         return "❌ Ошибка при обновлении записи"
     if kind == "task":
-        from nexus.handlers.tasks import handle_task_parsed
+        from nexus.handlers.tasks import handle_task_parsed, _REL_TIME_RE, _parse_relative_time, _get_user_tz
         logger.info("classifier: task detected - title=%r category=%r deadline=%r priority=%r",
                    data.get("title"), data.get("category"), data.get("deadline"), data.get("priority"))
+
+        # Post-processing: исправить относительное время которое Claude мог понять неверно
+        # "через 2 мин" → Claude пишет "00:02", правильно: datetime.now() + timedelta(minutes=2)
+        rel_match = _REL_TIME_RE.search(original_text)
+        if rel_match:
+            uid = msg.from_user.id
+            tz_offset = await _get_user_tz(uid)
+            relative_time = _parse_relative_time(original_text, tz_offset)
+            unit = rel_match.group(2).lower()
+            if unit.startswith("мин") or unit.startswith("ч"):
+                logger.info("classifier: overriding deadline→reminder_time with relative=%s", relative_time)
+                data["reminder_time"] = relative_time
+                data["deadline"] = None
+            else:
+                logger.info("classifier: overriding deadline with relative=%s", relative_time)
+                data["deadline"] = relative_time
+
         logger.info("classifier: calling handle_task_parsed with full data=%s", data)
         data["user_notion_id"] = user_notion_id
         await handle_task_parsed(msg, data)
