@@ -64,6 +64,7 @@ class NexusConfig:
     db_notes: str
     db_passwords: str
     db_errors: str
+    page_reports: str = ""  # Родительская страница для отчётов (опционально)
 
 
 @dataclass
@@ -107,6 +108,7 @@ def load_config() -> AppConfig:
             db_notes     = _require("NOTION_DB_NOTES"),
             db_passwords = _require("NOTION_DB_PASSWORDS"),
             db_errors    = _optional("NOTION_DB_ERRORS"),
+            page_reports = _optional("NOTION_PAGE_REPORTS"),
         ),
         arcana = ArcanaConfig(
             tg_token    = _optional("ARCANA_BOT_TOKEN"),

@@ -5,11 +5,12 @@ import base64
 import json
 import logging
 from datetime import datetime, timezone, timedelta
+from typing import List
 
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram import Router, F
 from core.claude_client import ask_claude, ask_claude_vision
-from core.notion_client import finance_month, log_error, page_create, update_page, _title, _number, _select, _date, _text
+from core.notion_client import finance_month, log_error, page_create, update_page, create_report_page, _title, _number, _select, _date, _text
 
 logger = logging.getLogger("nexus.finance")
 MOSCOW_TZ = timezone(timedelta(hours=3))
@@ -465,9 +466,10 @@ async def handle_finance_summary(query: str = "", user_notion_id: str = "") -> s
             header_parts.append(f"«{description_search}»")
         header = " · ".join(header_parts) if header_parts else "Фильтр"
 
+        report_title = f"{header} — {now.strftime('%B %Y')}"
         lines = [
-            f"{icon} <b>{header} — {now.strftime('%B %Y')}</b>\n",
-            f"{label}: <b>{total:,.0f}₽</b>  📝 {len(matched)} зап.",
+            f"{icon} {header} — {now.strftime('%B %Y')}",
+            f"{label}: {total:,.0f}₽  ({len(matched)} зап.)",
         ]
         if matched:
             last5 = sorted(matched, key=lambda x: x[0], reverse=True)[:5]
@@ -480,13 +482,14 @@ async def handle_finance_summary(query: str = "", user_notion_id: str = "") -> s
                     day = date_str[:10]
                 lines.append(f"• {day} — {desc or '—'} — {amount:,.0f}₽")
 
-        return "\n".join(lines)
+        return await _stats_publish(report_title, lines)
 
     # Общая сводка
     income_nexus_salary = 0.0
     income_arcana_salary = 0.0
     income_other = 0.0
     expense_total = 0.0
+    cat_totals: dict = {}
 
     for r in records:
         props = r["properties"]
@@ -507,21 +510,59 @@ async def handle_finance_summary(query: str = "", user_notion_id: str = "") -> s
                 income_other += amount
         elif "Расход" in type_name:
             expense_total += amount
+            cat_totals[cat_name] = cat_totals.get(cat_name, 0.0) + amount
 
     income_total = income_nexus_salary + income_arcana_salary + income_other
     balance = income_total - expense_total
 
-    salary_line = ""
+    report_title = f"Финансы — {now.strftime('%B %Y')}"
+
+    salary_detail = ""
     if income_nexus_salary or income_arcana_salary:
-        salary_line = (
-            f"\n  ☀️ Nexus: <b>{income_nexus_salary:,.0f}₽</b>"
-            f"\n  🌒 Arcana: <b>{income_arcana_salary:,.0f}₽</b>"
+        salary_detail = (
+            f"  ☀️ Nexus: {income_nexus_salary:,.0f}₽"
+            f" | 🌒 Arcana: {income_arcana_salary:,.0f}₽"
         )
 
-    return (
-        f"📊 <b>Финансы — {now.strftime('%B %Y')}</b>\n\n"
-        f"💰 Доходы: <b>{income_total:,.0f}₽</b>{salary_line}\n"
-        f"💸 Расходы: <b>{expense_total:,.0f}₽</b>\n"
-        f"{'🟢' if balance >= 0 else '🔴'} Баланс: "
-        f"<b>{'+' if balance >= 0 else ''}{balance:,.0f}₽</b>"
-    )
+    lines = [
+        report_title,
+        "",
+        f"💰 Доходы: {income_total:,.0f}₽",
+    ]
+    if salary_detail:
+        lines.append(salary_detail)
+    lines += [
+        f"💸 Расходы: {expense_total:,.0f}₽",
+        f"{'🟢' if balance >= 0 else '🔴'} Баланс: {'+' if balance >= 0 else ''}{balance:,.0f}₽",
+    ]
+    # Топ категорий расходов
+    if cat_totals:
+        lines.append("")
+        lines.append("Топ категорий:")
+        for cat, amt in sorted(cat_totals.items(), key=lambda x: x[1], reverse=True)[:5]:
+            lines.append(f"  {cat}: {amt:,.0f}₽")
+
+    return await _stats_publish(report_title, lines)
+
+
+async def _stats_publish(title: str, lines: List[str]) -> str:
+    """Создать Notion-страницу отчёта (если настроена) или вернуть текст."""
+    from core.config import config
+    page_reports = config.nexus.page_reports
+    if page_reports:
+        url = await create_report_page(title, lines, page_reports)
+        if url:
+            return f"📊 <b>Отчёт готов:</b> <a href=\"{url}\">{title}</a>"
+
+    # Fallback: форматированный текст с HTML
+    out = []
+    for line in lines:
+        if not line:
+            out.append("")
+        elif line == lines[0]:  # title
+            out.append(f"📊 <b>{line}</b>")
+        elif line.startswith("💰") or line.startswith("💸") or line.startswith("🟢") or line.startswith("🔴"):
+            out.append(f"<b>{line}</b>")
+        else:
+            out.append(line)
+    return "\n".join(out)
