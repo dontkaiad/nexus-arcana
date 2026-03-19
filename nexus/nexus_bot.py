@@ -8,10 +8,11 @@ from datetime import datetime, timezone, timedelta
 from aiogram import Bot, Dispatcher, F
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
-from aiogram.filters import BaseFilter, Command
+from aiogram.filters import Command
 from aiogram.types import Message, CallbackQuery
 
 from core.config import config
+from core.middleware import WhitelistMiddleware
 from core.notion_client import log_error
 from core.classifier import classify, process_item
 
@@ -30,6 +31,8 @@ bot = Bot(
     default=DefaultBotProperties(parse_mode=ParseMode.HTML),
 )
 dp = Dispatcher()
+dp.message.middleware(WhitelistMiddleware())
+dp.callback_query.middleware(WhitelistMiddleware())
 
 from nexus.handlers.tasks import router as tasks_router
 from nexus.handlers.finance import router as finance_router
@@ -42,82 +45,79 @@ _pending_finance: dict = {}  # user_id → (kind, amount, category, source, titl
 _pending_arcana: dict = {}  # user_id → text (оригинальный для arcana_clarify)
 
 
-class WhitelistFilter(BaseFilter):
-    async def __call__(self, message: Message) -> bool:  # type: ignore[override]
-        return message.from_user is not None and message.from_user.id in config.allowed_ids
-
-
-@dp.message(WhitelistFilter(), Command("start"))
-async def cmd_start(msg: Message) -> None:
+@dp.message(Command("start"))
+async def cmd_start(msg: Message, user_notion_id: str = "") -> None:
     await msg.answer(
         "☀️ <b>Nexus запущен!</b>\n\n"
         "<b>Что это?</b>\n"
         "Твой личный AI-ассистент для оптимизации рутины и хаоса. "
         "Просто пиши как есть — я разберусь.\n\n"
-        
+
         "<b>Что я умею:</b>\n"
         "💰 Финансы (расходы, доходы, статистика)\n"
         "✅ Задачи (с дедлайнами и напоминаниями)\n"
         "💡 Заметки (с тегами и категориями)\n"
         "🧠 Память (запомню факты о твоей жизни)\n"
         "🔮 Редирект в 🌒 Arcana (для ритуалов и практик)\n\n"
-        
+
         "Напиши <code>/help</code> для полного гайда 📋\n\n"
-        
+
         "<b>Создатель:</b> Кай Ларк\n"
         "❓ Ошибки/вопросы? <a href=\"https://t.me/witchcommit\">@witchcommit</a>"
     )
 
 
-@dp.message(WhitelistFilter(), Command("help"))
-async def cmd_help(msg: Message) -> None:
+@dp.message(Command("help"))
+async def cmd_help(msg: Message, user_notion_id: str = "") -> None:
     await msg.answer(
         "📋 <b>Гайд Nexus</b>\n\n"
         "<b>Базовый принцип:</b> просто пиши как есть. Claude определит тип, занесёт в Notion.\n\n"
-        
+
         "<b>💰 ФИНАНСЫ:</b>\n"
         "450 такси | пришла 50000 | 100 кофе бартер | исправь на наличные\n\n"
-        
+
         "<b>✅ ЗАДАЧИ:</b>\n"
         "купить корм коту | записаться к врачу в пятницу | позвонить маме\n\n"
-        
+
         "<b>💡 ЗАМЕТКИ:</b>\n"
         "заметка про масло розы | идея: подкаст про таро #идея\n\n"
-        
+
         "<b>🌒 ARCANA:</b>\n"
         "провести ритуал защиты | практика медитации → перейдёт в 🌒 Arcana\n\n"
-        
+
         "<b>🧠 ПАМЯТЬ:</b>\n"
         "Я запомню факты о твоей жизни и смогу собрать ревью (месяц, год, период)\n\n"
-        
+
         "<b>⌛ Напоминания:</b> автоматически отправлю напоминание по дедлайну\n\n"
-        
+
         "<b>📊 Статистика:</b> посчитаю финансы, дам список задач\n\n"
 
         "<b>⚙️ Настройки:</b> скажи, где находишься, чтобы обновить часовой пояс\n\n"
-        
+
         "<b>👨‍💻 Создатель:</b> Кай Ларк\n"
         "<b>❓ Ошибки/вопросы?</b> Напиши <a href=\"https://t.me/witchcommit\">@witchcommit</a>"
     )
 
 
-@dp.message(WhitelistFilter(), Command("tz"))
-async def set_tz(msg: Message) -> None:
+@dp.message(Command("tz"))
+async def set_tz(msg: Message, user_notion_id: str = "") -> None:
     """Установить часовой пояс. /tz UTC+5 или /tz Екатеринбург"""
     from nexus.handlers.tasks import _update_user_tz
     await _update_user_tz(msg, msg.text.replace("/tz", "").strip())
 
-@dp.message(WhitelistFilter(), F.text)
-async def handle_text(msg: Message) -> None:
+
+@dp.message(F.text)
+async def handle_text(msg: Message, user_notion_id: str = "") -> None:
     from core.layout import maybe_convert
     from nexus.handlers.tasks import _pending_has, _pending_get, handle_task_clarification, handle_reschedule_reminder, _update_user_tz
 
     # Проверяем смену часового пояса
     text_lower = msg.text.lower()
-    tz_keywords = ["в екб", "в екатеринбурге", "в башкирии", "в новосибирске", "в якутске", 
+    tz_keywords = ["в екб", "в екатеринбурге", "в башкирии", "в новосибирске", "в якутске",
                    "в иркутске", "в красноярске", "в магадане", "в беринге", "в камчатке",
-                   "часовой пояс", "timezone", "utc+", "мск", "в москве"]
-    
+                   "часовой пояс", "timezone", "utc+", "мск", "в москве", "я в спб",
+                   "я в москве", "я в екб", "переезжаю в"]
+
     if any(kw in text_lower for kw in tz_keywords):
         await _update_user_tz(msg, msg.text)
         return
@@ -131,7 +131,7 @@ async def handle_text(msg: Message) -> None:
         return
 
     text = maybe_convert(msg.text.strip())
-    
+
     # ── Исправляем опечатки через Claude Haiku ───────────────────────────
     from core.claude_client import ask_claude
     try:
@@ -160,7 +160,7 @@ async def handle_text(msg: Message) -> None:
             if items and items[0].get("type") not in ("unknown", "parse_error", None):
                 lines = []
                 for data in items:
-                    line = await process_item(data, combined, msg, _clarify)
+                    line = await process_item(data, combined, msg, _clarify, user_notion_id=user_notion_id)
                     if line:
                         lines.append(line)
                 if lines:
@@ -180,17 +180,17 @@ async def handle_text(msg: Message) -> None:
     try:
         items = await classify(text)
         logger.info("handle_text: classify returned %d items: %s", len(items), [i.get("type") for i in items])
-        
+
         lines = []
         has_clarify = False
         finance_data = None
         arcana_clarify_text = None
-        
+
         for data in items:
             logger.info("handle_text: processing item type=%s", data.get("type"))
-            line = await process_item(data, text, msg, _clarify)
+            line = await process_item(data, text, msg, _clarify, user_notion_id=user_notion_id)
             logger.info("handle_text: process_item returned: %s", line[:50] if line else "None/empty")
-            
+
             if line and line.startswith("finance_clarify:"):
                 # Распарсить: finance_clarify:kind:amount:category:source:title
                 parts = line.split(":", 5)
@@ -203,17 +203,16 @@ async def handle_text(msg: Message) -> None:
                         "source": source,
                         "title": title,
                     }
-                    _pending_finance[msg.from_user.id] = (finance_data, text)
+                    _pending_finance[msg.from_user.id] = (finance_data, text, user_notion_id)
                     has_clarify = True
             elif line and line.startswith("arcana_clarify:"):
-                # Распарсить: arcana_clarify:text
                 parts = line.split(":", 1)
                 if len(parts) == 2:
                     arcana_clarify_text = parts[1]
                     _pending_arcana[msg.from_user.id] = arcana_clarify_text
             elif line:
                 lines.append(line)
-        
+
         # Show UI if arcana clarify needed
         if arcana_clarify_text:
             from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
@@ -246,7 +245,6 @@ async def handle_text(msg: Message) -> None:
             )
             await msg.answer(text_msg, reply_markup=kb)
         else:
-            # Show normal response
             if len(lines) == 1:
                 await msg.answer(lines[0])
             elif len(lines) > 1:
@@ -278,26 +276,24 @@ async def handle_text(msg: Message) -> None:
 
 
 @dp.callback_query(lambda c: c.data and c.data.startswith("note_"))
-async def on_note_callback(query: CallbackQuery) -> None:
+async def on_note_callback(query: CallbackQuery, user_notion_id: str = "") -> None:
     from nexus.handlers.notes import handle_note_callback
     await handle_note_callback(query)
 
 
 @dp.callback_query(lambda c: c.data and c.data.startswith("arcana_choice_"))
-async def on_arcana_choice(query: CallbackQuery) -> None:
+async def on_arcana_choice(query: CallbackQuery, user_notion_id: str = "") -> None:
     """Handle: выбор между Аркана и Задача."""
     uid = query.from_user.id
     if uid not in _pending_arcana:
         await query.answer("⏱ Время истекло, попробуй снова")
         return
-    
+
     text = _pending_arcana.pop(uid)
-    # callback_data = "arcana_choice_yes_{uid}" или "arcana_choice_no_{uid}"
     parts = query.data.split("_")
-    choice = parts[2]  # yes или no (индекс 2, не -1!)
-    
+    choice = parts[2]  # yes или no
+
     if choice == "yes":
-        # Редирект в Аркану
         msg_text = (
             "🔮 <b>Это работа для Арканы!</b>\n\n"
             "Перейди в <a href=\"https://t.me/arcana_kailark_bot\">🌒 Arcana</a> и отправь туда:\n"
@@ -305,57 +301,57 @@ async def on_arcana_choice(query: CallbackQuery) -> None:
             "Там я помогу с ритуалами, практикой и сеансами."
         )
     else:
-        # Создать задачу в Нексусе
         from core.notion_client import task_add
-        result = await task_add(title=text, category="💳 Прочее", priority="Средний")
+        result = await task_add(title=text, category="💳 Прочее", priority="Средний",
+                                user_notion_id=user_notion_id)
         if result:
             msg_text = f"✓ <b>{text}</b>\n🟡 Средний · 💳 Прочее"
         else:
             msg_text = "❌ Ошибка при создании задачи"
-    
+
     await query.message.edit_text(msg_text)
     await query.answer("✅ Выбор принят")
 
 
 @dp.callback_query(lambda c: c.data and c.data.startswith("fin_type_"))
-async def on_finance_clarify(query: CallbackQuery) -> None:
+async def on_finance_clarify(query: CallbackQuery, user_notion_id: str = "") -> None:
     """Handle finance type clarification (expense/income/barter)."""
     from core.notion_client import finance_add
     from core.classifier import today_moscow
-    
+
     uid = query.from_user.id
     if uid not in _pending_finance:
         await query.answer("⏱ Время истекло, попробуй снова")
         return
-    
-    # Parse callback: fin_type_expense_123456
+
     parts = query.data.split("_")
     if len(parts) < 3:
         return
-    
+
     fin_type = parts[2]  # expense, income, barter
-    finance_data, original_text = _pending_finance.pop(uid)
-    
-    # Determine type_label and adjust source if barter
+    pending_entry = _pending_finance.pop(uid)
+    # Support both old (2-tuple) and new (3-tuple with user_notion_id) formats
+    if len(pending_entry) == 3:
+        finance_data, original_text, stored_uid = pending_entry
+    else:
+        finance_data, original_text = pending_entry
+        stored_uid = user_notion_id
+
     if fin_type == "expense":
         type_label = "💸 Расход"
-        icon = "💸"
-        sign = "−"
+        icon, sign = "💸", "−"
         source = finance_data["source"]
     elif fin_type == "income":
         type_label = "💰 Доход"
-        icon = "💰"
-        sign = "+"
+        icon, sign = "💰", "+"
         source = finance_data["source"]
     elif fin_type == "barter":
         type_label = "💸 Расход"
-        icon = "💸"
-        sign = "−"
+        icon, sign = "💸", "−"
         source = "🔄 Бартер"
     else:
         return
-    
-    # Save to Notion
+
     result = await finance_add(
         date=today_moscow(),
         amount=finance_data["amount"],
@@ -363,8 +359,9 @@ async def on_finance_clarify(query: CallbackQuery) -> None:
         type_=type_label,
         source=source,
         description=finance_data["title"],
+        user_notion_id=stored_uid or user_notion_id,
     )
-    
+
     if result:
         text_msg = (
             f"{icon} <b>{sign}{finance_data['amount']:,.0f}₽</b> · "
@@ -373,7 +370,7 @@ async def on_finance_clarify(query: CallbackQuery) -> None:
         )
     else:
         text_msg = "❌ Ошибка записи в Notion"
-    
+
     await query.message.edit_text(text_msg)
     await query.answer("✅ Сохранено")
 
@@ -390,13 +387,12 @@ async def main() -> None:
     logger.info("Nexus bot starting...")
     from nexus.handlers.tasks import init_scheduler
     from aiogram.types import BotCommand
-    
-    # Регистрировать команды в меню
+
     await bot.set_my_commands([
         BotCommand(command="start", description="Запустить Nexus"),
         BotCommand(command="help", description="Гайд по использованию"),
     ])
-    
+
     init_scheduler(bot)
     await dp.start_polling(bot, allowed_updates=["message", "callback_query"])
 

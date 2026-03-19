@@ -21,7 +21,7 @@ PARSE_CLIENT_SYSTEM = (
 )
 
 
-async def handle_add_client(message: Message, text: str) -> None:
+async def handle_add_client(message: Message, text: str, user_notion_id: str = "") -> None:
     raw = await ask_claude(text, system=PARSE_CLIENT_SYSTEM, max_tokens=256)
     try:
         raw = raw.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
@@ -42,6 +42,7 @@ async def handle_add_client(message: Message, text: str) -> None:
         contact=data.get("contact") or "",
         request=data.get("request") or "",
         date=today,
+        user_notion_id=user_notion_id,
     )
     if not result:
         await message.answer("⚠️ Ошибка записи в Notion.")
@@ -55,14 +56,14 @@ async def handle_add_client(message: Message, text: str) -> None:
     )
 
 
-async def handle_client_info(message: Message, text: str) -> None:
+async def handle_client_info(message: Message, text: str, user_notion_id: str = "") -> None:
     name = (await ask_claude(
         text,
         system="Извлеки только имя клиента. Ответь ТОЛЬКО именем.",
         max_tokens=30,
     )).strip()
 
-    client = await client_find(name)
+    client = await client_find(name, user_notion_id=user_notion_id)
     if not client:
         await message.answer(f"❌ Клиент «{name}» не найден.")
         return
@@ -74,8 +75,8 @@ async def handle_client_info(message: Message, text: str) -> None:
     request = _extract_text(props.get("Запрос", {}))
     notes = _extract_text(props.get("Заметки", {}))
 
-    sessions = await sessions_by_client(cid)
-    rituals = await rituals_by_client(cid)
+    sessions = await sessions_by_client(cid, user_notion_id=user_notion_id)
+    rituals = await rituals_by_client(cid, user_notion_id=user_notion_id)
 
     total = 0.0
     debt = 0.0
@@ -106,8 +107,8 @@ async def handle_client_info(message: Message, text: str) -> None:
     )
 
 
-async def handle_debts(message: Message) -> None:
-    items = await arcana_all_debts()
+async def handle_debts(message: Message, user_notion_id: str = "") -> None:
+    items = await arcana_all_debts(user_notion_id=user_notion_id)
     if not items:
         await message.answer("✅ Долгов нет.")
         return

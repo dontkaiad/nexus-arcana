@@ -21,7 +21,7 @@ PARSE_RITUAL_SYSTEM = (
 )
 
 
-async def handle_add_ritual(message: Message, text: str) -> None:
+async def handle_add_ritual(message: Message, text: str, user_notion_id: str = "") -> None:
     raw = await ask_claude(text, system=PARSE_RITUAL_SYSTEM, max_tokens=600)
     try:
         raw = raw.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
@@ -34,7 +34,7 @@ async def handle_add_ritual(message: Message, text: str) -> None:
     client_name = data.get("client_name")
     client_id = None
     if client_name:
-        client = await client_find(client_name)
+        client = await client_find(client_name, user_notion_id=user_notion_id)
         if client:
             client_id = client["id"]
 
@@ -52,6 +52,7 @@ async def handle_add_ritual(message: Message, text: str) -> None:
         amount=float(data.get("amount") or 0),
         paid=float(data.get("paid") or 0),
         client_id=client_id,
+        user_notion_id=user_notion_id,
     )
     if not result:
         await message.answer("⚠️ Ошибка записи в Notion.")
