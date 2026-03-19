@@ -118,6 +118,66 @@ async def page_create(db_id: str, props: dict) -> Optional[str]:
 async def update_page(page_id: str, props: dict) -> None:
     await _notion().update_page(page_id, props)
 
+
+def _strip_html(text: str) -> str:
+    """Удалить HTML-теги из строки (для Notion блоков)."""
+    import re as _re
+    return _re.sub(r"<[^>]+>", "", text).strip()
+
+
+async def create_report_page(title: str, lines: List[str], parent_page_id: str) -> Optional[str]:
+    """Создать standalone-страницу с отчётом через Blocks API.
+
+    Args:
+        title: Заголовок страницы
+        lines: Строки текста отчёта (могут содержать HTML-теги)
+        parent_page_id: ID родительской страницы в Notion
+
+    Returns:
+        URL созданной страницы или None при ошибке
+    """
+    client = get_notion()
+
+    # Строим блоки
+    blocks = [
+        {
+            "object": "block",
+            "type": "heading_2",
+            "heading_2": {
+                "rich_text": [{"type": "text", "text": {"content": _strip_html(title)}}]
+            },
+        },
+        {"object": "block", "type": "divider", "divider": {}},
+    ]
+
+    for line in lines:
+        clean = _strip_html(line)
+        if not clean:
+            continue
+        blocks.append({
+            "object": "block",
+            "type": "paragraph",
+            "paragraph": {
+                "rich_text": [{"type": "text", "text": {"content": clean}}]
+            },
+        })
+
+    try:
+        resp = await client.pages.create(
+            parent={"page_id": parent_page_id},
+            properties={
+                "title": [{"type": "text", "text": {"content": _strip_html(title)}}]
+            },
+            children=blocks,
+        )
+        page_id = resp["id"].replace("-", "")
+        url = f"https://notion.so/{page_id}"
+        logger.info("create_report_page: created %s", url)
+        return url
+    except Exception as e:
+        logger.error("create_report_page error: %s", e)
+        return None
+
 async def query_pages(
     db_id: str,
     filters: Optional[dict] = None,
