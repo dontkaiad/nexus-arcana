@@ -111,17 +111,6 @@ async def handle_text(msg: Message, user_notion_id: str = "") -> None:
     from core.layout import maybe_convert
     from nexus.handlers.tasks import _pending_has, _pending_get, handle_task_clarification, handle_reschedule_reminder, _update_user_tz
 
-    # Проверяем смену часового пояса
-    text_lower = msg.text.lower()
-    tz_keywords = ["в екб", "в екатеринбурге", "в башкирии", "в новосибирске", "в якутске",
-                   "в иркутске", "в красноярске", "в магадане", "в беринге", "в камчатке",
-                   "часовой пояс", "timezone", "utc+", "мск", "в москве", "я в спб",
-                   "я в москве", "я в екб", "переезжаю в"]
-
-    if any(kw in text_lower for kw in tz_keywords):
-        await _update_user_tz(msg, msg.text)
-        return
-
     if _pending_has(msg.from_user.id):
         pending = _pending_get(msg.from_user.id)
         if pending and pending.get("action") == "reschedule":
