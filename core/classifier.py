@@ -132,6 +132,14 @@ def build_system() -> str:
     ])
 
 
+_TZ_RE = re.compile(
+    r"(я\s+в\s+\w+|переезжаю\s+в\s+\w+|мой\s+часовой\s+пояс|utc[+-]\d|в\s+спб\b|в\s+москве\b|"
+    r"в\s+екб\b|в\s+екатеринбурге\b|в\s+новосибирске\b|в\s+владивостоке\b|"
+    r"в\s+иркутске\b|в\s+красноярске\b|в\s+хабаровске\b|в\s+омске\b|в\s+челябинске\b|"
+    r"часовой\s+пояс|timezone)",
+    re.IGNORECASE,
+)
+
 _STATS_RE = re.compile(
     r"(скол?ько|скок|сколько)\s+(потратил[аи]?|ушло|израсходовал[аи]?|трачу|потрачено)"
     r"|расходы\s+за\s+(месяц|неделю|период|март|апрел|май|июн|июл|август|сентябр|октябр|ноябр|декабр|январ|феврал)"
@@ -144,6 +152,11 @@ _STATS_RE = re.compile(
 async def classify(text: str) -> list[dict]:
     """Классифицировать текст через Claude."""
     logger.info("classify: input text=%r", text[:100])
+
+    # Быстрый pre-фильтр: timezone
+    if _TZ_RE.search(text):
+        logger.info("classify: timezone pattern matched")
+        return [{"type": "timezone_update", "text": text}]
 
     # Быстрый pre-фильтр: stats-запросы не отдаём Claude — он их путает с task
     if _STATS_RE.search(text):
@@ -171,6 +184,12 @@ async def process_item(data: Dict[str, Any], original_text: str, msg, clarify: d
     """Обработка классифицированного элемента."""
     kind = data.get("type", "unknown")
     logger.info("process_item: type=%r data=%s", kind, data)
+
+    # TIMEZONE UPDATE
+    if kind == "timezone_update":
+        from nexus.handlers.tasks import _update_user_tz
+        await _update_user_tz(msg, data.get("text", original_text))
+        return ""
 
     if kind == "unknown":
         return "❓ Не смог разобрать. Попробуй переформулировать."
