@@ -352,6 +352,29 @@ async def handle_task_parsed(message: Message, data: dict) -> None:
         _pending_set(uid, data)
         return
 
+    # reminder_time уже установлен (pre-filter или classifier) — не спрашивать время, сразу дедлайн
+    if data.get("reminder_time"):
+        reminder_display = data["reminder_time"].replace("T", " ")
+        msg = await message.answer(
+            f"📌 <b>{data.get('title')}</b>\n"
+            f"🏷 {data.get('category', '?')} · {data.get('priority', 'Средний')}\n"
+            f"🔔 Напомню: {reminder_display}\n\n"
+            f"<b>📅 Дедлайн?</b>",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
+                InlineKeyboardButton(text="✅ Тот же день", callback_data="task_deadline_same"),
+                InlineKeyboardButton(text="📅 +1 день", callback_data="task_deadline_plus1"),
+            ], [
+                InlineKeyboardButton(text="📅 +3 дня", callback_data="task_deadline_plus3"),
+                InlineKeyboardButton(text="🚫 Без дедлайна", callback_data="task_save"),
+            ], [
+                InlineKeyboardButton(text="❌ Отмена", callback_data="task_cancel"),
+            ]])
+        )
+        data["msg_id"] = msg.message_id
+        data["_awaiting_deadline"] = True
+        _pending_set(uid, data)
+        return
+
     deadline_str = data.get("deadline") or "не указана"
     deadline_display = deadline_str.replace("T", " ") if deadline_str != "не указана" else deadline_str
 
