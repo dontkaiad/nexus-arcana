@@ -1,5 +1,5 @@
 # SYSTEM_MAP — AI_Agents Architecture
-> Версия 4.0 | Март 2026 | RPi3
+> Версия 5.0 | Март 2026 | RPi3
 
 ---
 
@@ -7,28 +7,40 @@
 
 ```
 AI_Agents (root)
+├── 🪪 Пользователи        32842b3b1ac080f4b4bde1aaa3b9d312  ← мультиаккаунт + права
 ├── ☀️ Nexus
 │   ├── ✅ Задачи          31a42b3b1ac08051a3ccde86e6233d30
 │   ├── 🧠 Память          31a42b3b1ac0801f8e3cf1441b61bc69
 │   ├── 💡 Заметки         31a42b3b1ac0807ba68fd700ab695e7c
 │   └── 🔐 Пароли          31a42b3b1ac0804faae6f599d91e08a8
 ├── 🌒 Arcana
-│   ├── 👥 Клиенты         31b42b3b1ac08022baafffbcc8237bbd
-│   ├── 🃏 Сеансы          31b42b3b1ac08038b4a7e88c8c382875
+│   ├── 👤 Клиенты         31b42b3b1ac08022baafffbcc8237bbd
+│   ├── 🔮 Сеансы          31b42b3b1ac08038b4a7e88c8c382875
 │   └── 🕯️ Ритуалы         31b42b3b1ac0800b81a3cf9cbcc7cd6b
 ├── 💰 Финансы             31a42b3b1ac080ae8b6ad8ba84d141bb
 └── ⚠️ Ошибки              31a42b3b1ac080558c68fe885ece5b2a
 ```
 
+Все базы имеют поле `Пользователь` (Relation → 🪪 Пользователи).
+Все запросы фильтруются по этому полю.
+
 ---
 
-## 2. БЕЗОПАСНОСТЬ
+## 2. БЕЗОПАСНОСТЬ И МУЛЬТИАККАУНТ
 
 ```
-Whitelist TG IDs: [67686090, 790273371]
-Любой другой ID → игнор, без ответа
-Реализация: Middleware в aiogram 3.x
-Токены: только .env, никогда в коде
+Слой 1 — Whitelist Middleware:
+  TG IDs: [67686090, 790273371]
+  Любой другой ID → игнор, без ответа
+
+Слой 2 — База Пользователи:
+  Проверка TG ID → читаем права (checkboxes)
+  ☀️ Nexus / 🌒 Arcana / 💰 Финансы / 🔐 Пароли
+  Нет записи → игнор
+  Нет нужного checkbox → "⛔ Нет доступа к [функция]"
+
+Роли: Владелец / Друг / Тест
+Права меняются прямо в Notion UI, без деплоя
 ```
 
 ---
@@ -36,44 +48,43 @@ Whitelist TG IDs: [67686090, 790273371]
 ## 3. СТРУКТУРА КОДА
 
 ```
-ai_agents/
+AI_AGENTS/
 ├── core/
+│   ├── config.py           # .env загрузка + NOTION_DB_USERS
+│   ├── user_manager.py     # get_user(), check_permission(), кэш 5 мин
 │   ├── schema.py           # Все поля Notion, ID, варианты select
-│   ├── notion_client.py    # CRUD для всех баз
+│   ├── notion_client.py    # CRUD для всех баз + _with_user_filter
+│   ├── classifier.py       # Классификатор + timezone pre-filter
 │   ├── field_mapper.py     # Ответ Claude → Notion поля
 │   ├── claude_client.py    # Haiku / Sonnet вызовы
-│   ├── whisper_client.py   # Голос → текст
-│   ├── finance_sync.py     # Arcana оплата → Финансы
-│   └── config.py           # .env загрузка
+│   ├── middleware.py       # Whitelist + DI user_notion_id
+│   ├── layout.py           # maybe_convert (ru/en раскладка)
+│   └── time_manager.py     # Парсинг времени + ночная логика до 05:00
 │
 ├── nexus/
-│   ├── bot.py
-│   ├── middleware.py       # Whitelist
+│   ├── nexus_bot.py
 │   └── handlers/
-│       ├── tasks.py
+│       ├── tasks.py        # task_done fuzzy, reminder/deadline логика
 │       ├── notes.py
-│       ├── finance.py
+│       ├── finance.py      # description_search, статистика → Notion
 │       ├── memory.py
 │       ├── passwords.py
 │       └── voice.py
 │
 ├── arcana/
 │   ├── bot.py
-│   ├── middleware.py       # Whitelist
+│   ├── middleware.py       # Whitelist + Arcana checkbox проверка
 │   └── handlers/
+│       ├── base.py
 │       ├── clients.py
 │       ├── sessions.py
 │       ├── rituals.py
-│       ├── tarot.py        # Vision
-│       ├── finance.py
-│       ├── grimoire.py     # Blocks API
-│       └── voice.py
+│       └── delete.py
 │
 ├── .env
-├── .env.template
+├── .gitignore
 ├── requirements.txt
-├── run_nexus.py
-├── run_arcana.py
+├── run.sh                  # Запуск обоих ботов через watchfiles
 └── app.log
 ```
 
@@ -92,6 +103,11 @@ ai_agents/
   2. Добавить в schema.py в словарь базы
   3. Добавить обработку в field_mapper.py
   Код ботов не трогать.
+
+Новый пользователь:
+  1. Создать запись в 🪪 Пользователи в Notion UI
+  2. Указать TG ID и выставить нужные чекбоксы
+  Код не трогать.
 ```
 
 ---
@@ -99,24 +115,23 @@ ai_agents/
 ## 5. МОДЕЛИ CLAUDE
 
 ```
-Парсинг текста, простая логика   → claude-haiku-4-5-20251001
-Vision, сложная трактовка таро   → claude-sonnet-4-6
+Парсинг текста, классификация   → claude-haiku-4-5-20251001
+Vision, сложная трактовка таро  → claude-sonnet-4-6
 ```
 
 ---
 
-## 6. ДЕПЛОЙ RPi3
+## 6. ДЕПЛОЙ (сейчас — Mac, потом — RPi3)
 
 ```bash
-pip3 install aiogram notion-client anthropic openai cloudinary python-dotenv
+# Запуск
+cd /Users/dontkaiad/PROJECTS/ai-agents/AI_AGENTS && ./run.sh
 
-nohup python3 run_nexus.py >> app.log 2>&1 &
-nohup python3 run_arcana.py >> app.log 2>&1 &
-
-# Автозапуск (crontab -e):
-@reboot sleep 30 && cd /home/pi/ai_agents && python3 run_nexus.py >> app.log 2>&1 &
-@reboot sleep 35 && cd /home/pi/ai_agents && python3 run_arcana.py >> app.log 2>&1 &
+# Перезапуск с обновлением
+git pull origin main && find . -name "*.pyc" -delete && ./run.sh
 ```
+
+RPi3 — после стабилизации всего функционала на Mac.
 
 ---
 
@@ -127,4 +142,5 @@ Arcana: оплата сеанса/ритуала
   → finance_sync.py → запись в 💰 Финансы
   → Категория: 🔮 Практика | Тип: 💰 Доход | Бот: 🌒 Arcana
   → Источник оплаты: копируется из записи
+  → Пользователь: прокидывается из контекста
 ```
