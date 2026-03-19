@@ -106,6 +106,8 @@ def build_system(tz_offset: int = 3) -> str:
         "",
         "ПРАВИЛА:",
         "- ИСПРАВЛЯЙ ОПЕЧАТКИ во всех полях, включая title: 'вадмму'→'вадиму', 'молко'→'молоко'",
+        "- СЛЕНГ: энергосы/энерги/сигетки/сиги/бабки/бабосы/нал — это сленг, НЕ опечатки! Оставлять как есть в title, не исправлять.",
+        "- ЭНЕРГЕТИКИ → 🚬 Привычки: энергосы/энерги/монстр/monster/ред булл/редбулл/redbull/burn → category='🚬 Привычки'",
         "- source: нал/наличные/кэш/налик → '💵 Наличные'; бартер → '🔄 Бартер'; иначе '💳 Карта'",
         "- type task/expense/income/note: если в тексте есть явное слово ('заметка', 'расход', 'доход', 'задача') - это приоритет! Даже если есть ARCANA_KEYWORDS → определить точный тип БЕЗ redirection",
         "- type task/expense/income: если есть ключевое слово из ARCANA_KEYWORDS (ритуал, практика, расходники, клиент, сеанс...) И нет явного типа → НЕ task/expense/income, а arcana_redirect!",
@@ -197,30 +199,37 @@ _STATS_RE = re.compile(
 
 
 _EDIT_PARSE_SYSTEM = (
-    "Извлеки параметры редактирования записи. Ответь ТОЛЬКО JSON без markdown:\n"
-    '{"type":"edit_record","record_type":"task","record_hint":"ключевые слова для поиска","field":"category|priority|title|deadline","new_value":"новое значение"}\n'
+    "Извлеки параметры редактирования записи. Если несколько изменений — верни все в списке edits. Ответь ТОЛЬКО JSON без markdown:\n"
+    '{"type":"edit_record","record_type":"task","record_hint":"ключевые слова для поиска","edits":[{"field":"category|priority|title|deadline","new_value":"новое значение"}]}\n'
     "\nПравила:\n"
     "- record_type: 'task' если о задаче, 'finance' если о финансовой записи\n"
     "- field: 'category' для категории; 'priority' для приоритета; 'title' или 'name' для переименования; 'deadline' для дедлайна\n"
-    "- record_hint: фраза для поиска записи (название задачи/финансовой операции)\n"
-    "- new_value: новое значение\n"
+    "- record_hint: фраза для поиска записи (название задачи/финансовой операции), пустая строка если не указано\n"
+    "- edits: список всех изменений (одно или несколько)\n"
     "\nПримеры:\n"
-    "'поменяй категорию задачи купить корм на Продукты' → record_type=task, record_hint='купить корм', field=category, new_value='Продукты'\n"
-    "'переименуй задачу купить корм в купить корм котам' → record_type=task, record_hint='купить корм', field=title, new_value='купить корм котам'\n"
-    "'смени приоритет купить молоко на высокий' → record_type=task, record_hint='купить молоко', field=priority, new_value='Высокий'\n"
+    "'поменяй категорию задачи купить корм на Продукты' → record_hint='купить корм', edits=[{\"field\":\"category\",\"new_value\":\"Продукты\"}]\n"
+    "'переименуй задачу купить корм в купить корм котам' → record_hint='купить корм', edits=[{\"field\":\"title\",\"new_value\":\"купить корм котам\"}]\n"
+    "'смени приоритет купить молоко на высокий' → record_hint='купить молоко', edits=[{\"field\":\"priority\",\"new_value\":\"Высокий\"}]\n"
+    "'измени название на Икеа и категорию на Хобби' → record_hint='', edits=[{\"field\":\"title\",\"new_value\":\"Икеа\"},{\"field\":\"category\",\"new_value\":\"Хобби\"}]\n"
+    "'поменяй категорию на привычки и источник на нал' → record_hint='', edits=[{\"field\":\"category\",\"new_value\":\"привычки\"},{\"field\":\"source\",\"new_value\":\"нал\"}]\n"
 )
 
 
 async def _parse_edit_record(text: str) -> dict:
-    """Распарсить запрос на редактирование записи."""
-    raw = await ask_claude(text, system=_EDIT_PARSE_SYSTEM, max_tokens=200, model="claude-haiku-4-5-20251001")
+    """Распарсить запрос на редактирование записи. Всегда возвращает edits-список."""
+    raw = await ask_claude(text, system=_EDIT_PARSE_SYSTEM, max_tokens=300, model="claude-haiku-4-5-20251001")
     try:
         raw = raw.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
         data = json.loads(raw)
         data["type"] = "edit_record"
+        # Нормализация: если Claude вернул старый формат field/new_value — конвертируем в edits список
+        if "edits" not in data and "field" in data:
+            data["edits"] = [{"field": data.pop("field"), "new_value": data.pop("new_value", "")}]
+        elif "edits" not in data:
+            data["edits"] = []
         return data
     except Exception:
-        return {"type": "edit_record", "record_hint": text, "field": "unknown", "new_value": ""}
+        return {"type": "edit_record", "record_hint": text, "edits": [{"field": "unknown", "new_value": ""}]}
 
 
 async def classify(text: str, tz_offset: int = 3) -> list[dict]:
@@ -276,6 +285,7 @@ async def process_item(data: Dict[str, Any], original_text: str, msg, clarify: d
         await handle_edit_record(
             msg,
             record_hint=data.get("record_hint", original_text),
+            edits=data.get("edits"),
             field=data.get("field", ""),
             new_value=data.get("new_value", ""),
             record_type=data.get("record_type", "task"),
