@@ -139,6 +139,18 @@ async def db_query(
     """Алиас query_pages с сигнатурой под filter_obj (для deleter.py и tasks.py)."""
     return await query_pages(db_id, filters=filter_obj, sorts=sorts, page_size=page_size)
 
+
+def _with_user_filter(existing_filter: Optional[dict], user_notion_id: str) -> Optional[dict]:
+    """Добавить фильтр по пользователю к существующему фильтру."""
+    if not user_notion_id:
+        return existing_filter
+    user_filter = {"property": "Пользователь", "relation": {"contains": user_notion_id}}
+    if existing_filter is None:
+        return user_filter
+    if "and" in existing_filter:
+        return {"and": list(existing_filter["and"]) + [user_filter]}
+    return {"and": [existing_filter, user_filter]}
+
 _db_options_cache: dict = {}  # {db_id:prop_name: [options]}
 _db_options_cache: dict = {}  # {db_id:prop_name: [options]}
 _db_options_cache: dict = {}
@@ -222,13 +234,14 @@ async def finance_add(
     source: str = "💳 Карта",
     bot_label: str = "☀️ Nexus",
     description: str = "",
+    user_notion_id: str = "",
 ) -> Optional[str]:
     from core.config import config
     db_id = config.nexus.db_finance
     real_category = await match_select(db_id, "Категория", category)
     real_source   = await match_select(db_id, "Источник", source)
     real_type     = await match_select(db_id, "Тип", type_)
-    return await page_create(db_id, {
+    props = {
         "Описание":  _title(description),
         "Дата":      _date(date),
         "Сумма":     _number(amount),
@@ -236,9 +249,12 @@ async def finance_add(
         "Тип":       _select(real_type),
         "Источник":  _select(real_source),
         "Бот":       _select(bot_label),
-    })
+    }
+    if user_notion_id:
+        props["Пользователь"] = _relation(user_notion_id)
+    return await page_create(db_id, props)
 
-async def finance_month(month: str) -> List[dict]:
+async def finance_month(month: str, user_notion_id: str = "") -> List[dict]:
     """Возвращает все записи за месяц (YYYY-MM)."""
     from core.config import config
     start = f"{month}-01"
@@ -253,6 +269,7 @@ async def finance_month(month: str) -> List[dict]:
             {"property": "Дата", "date": {"before": end}},
         ]
     }
+    filters = _with_user_filter(filters, user_notion_id)
     return await query_pages(config.nexus.db_finance, filters=filters, page_size=100)
 
 async def finance_update(target_type: str, field: str, new_value: str) -> bool:
@@ -299,6 +316,7 @@ async def task_add(
     priority: str = "Средний",
     deadline: Optional[str] = None,
     reminder: str = "",
+    user_notion_id: str = "",
 ) -> Optional[str]:
     """Простое добавление задачи без уточнений.
     Для полного флоу с дедлайном/напоминаниями — используй handle_task из tasks.py.
@@ -315,19 +333,23 @@ async def task_add(
     }
     if deadline:
         props["Дедлайн"] = _date(deadline)
+    if user_notion_id:
+        props["Пользователь"] = _relation(user_notion_id)
     return await page_create(db_id, props)
 
-async def tasks_active() -> List[dict]:
+async def tasks_active(user_notion_id: str = "") -> List[dict]:
     """Возвращает все незавершённые задачи."""
     from core.config import config
+    base_filter = {
+        "and": [
+            {"property": "Статус", "status": {"does_not_equal": "Done"}},
+            {"property": "Статус", "status": {"does_not_equal": "Archived"}},
+        ]
+    }
+    filters = _with_user_filter(base_filter, user_notion_id)
     return await query_pages(
         config.nexus.db_tasks,
-        filters={
-            "and": [
-                {"property": "Статус", "status": {"does_not_equal": "Done"}},
-                {"property": "Статус", "status": {"does_not_equal": "Archived"}},
-            ]
-        },
+        filters=filters,
         sorts=[{"property": "Приоритет", "direction": "descending"}],
         page_size=50,
     )
@@ -374,6 +396,7 @@ async def note_add(
     text: str,
     tags: Optional[List[str]] = None,
     date: Optional[str] = None,
+    user_notion_id: str = "",
 ) -> Optional[str]:
     from core.config import config
     if not date:
@@ -384,14 +407,18 @@ async def note_add(
     }
     if tags:
         props["Теги"] = _multi_select(tags)
+    if user_notion_id:
+        props["Пользователь"] = _relation(user_notion_id)
     return await page_create(config.nexus.db_notes, props)
 
-async def notes_search(query: str) -> List[dict]:
+async def notes_search(query: str, user_notion_id: str = "") -> List[dict]:
     """Поиск заметок по тексту заголовка."""
     from core.config import config
+    base_filter = {"property": "Заголовок", "title": {"contains": query}}
+    filters = _with_user_filter(base_filter, user_notion_id)
     return await query_pages(
         config.nexus.db_notes,
-        filters={"property": "Заголовок", "title": {"contains": query}},
+        filters=filters,
         page_size=10,
     )
 
@@ -482,47 +509,60 @@ async def client_add(
     contact: str = "",
     request: str = "",
     date: Optional[str] = None,
+    user_notion_id: str = "",
 ) -> Optional[str]:
     from core.config import config
     if not date:
         date = datetime.now(MOSCOW_TZ).strftime("%Y-%m-%d")
-    return await page_create(config.arcana.db_clients, {
+    props = {
         "Имя":      _title(name),
         "Контакт":  _text(contact),
         "Запрос":   _text(request),
         "Статус":   _status("🟢 Активный"),
-    })
+    }
+    if user_notion_id:
+        props["Пользователь"] = _relation(user_notion_id)
+    return await page_create(config.arcana.db_clients, props)
 
-async def client_find(name: str) -> Optional[dict]:
+async def client_find(name: str, user_notion_id: str = "") -> Optional[dict]:
     from core.config import config
+    base_filter = {"property": "Имя", "title": {"contains": name}}
+    filters = _with_user_filter(base_filter, user_notion_id)
     results = await query_pages(
         config.arcana.db_clients,
-        filters={"property": "Имя", "title": {"contains": name}},
+        filters=filters,
         page_size=1,
     )
     return results[0] if results else None
 
-async def sessions_by_client(client_id: str) -> List[dict]:
+async def sessions_by_client(client_id: str, user_notion_id: str = "") -> List[dict]:
     from core.config import config
+    base_filter = {"property": "Клиенты", "relation": {"contains": client_id}}
+    filters = _with_user_filter(base_filter, user_notion_id)
     return await query_pages(
         config.arcana.db_sessions,
-        filters={"property": "Клиенты", "relation": {"contains": client_id}},
+        filters=filters,
         page_size=50,
     )
 
-async def rituals_by_client(client_id: str) -> List[dict]:
+async def rituals_by_client(client_id: str, user_notion_id: str = "") -> List[dict]:
     from core.config import config
+    base_filter = {"property": "Клиенты", "relation": {"contains": client_id}}
+    filters = _with_user_filter(base_filter, user_notion_id)
     return await query_pages(
         config.arcana.db_rituals,
-        filters={"property": "Клиенты", "relation": {"contains": client_id}},
+        filters=filters,
         page_size=50,
     )
 
-async def arcana_all_debts() -> List[dict]:
+async def arcana_all_debts(user_notion_id: str = "") -> List[dict]:
     """Все сеансы и ритуалы с долгом > 0."""
     from core.config import config
-    sessions = await query_pages(config.arcana.db_sessions, page_size=100)
-    rituals  = await query_pages(config.arcana.db_rituals, page_size=100)
+    user_filter = None
+    if user_notion_id:
+        user_filter = {"property": "Пользователь", "relation": {"contains": user_notion_id}}
+    sessions = await query_pages(config.arcana.db_sessions, filters=user_filter, page_size=100)
+    rituals  = await query_pages(config.arcana.db_rituals, filters=user_filter, page_size=100)
     result = []
     for item in sessions + rituals:
         props  = item["properties"]
@@ -545,6 +585,7 @@ async def session_add(
     paid: float = 0,
     session_type: str = "Личный",
     client_id: Optional[str] = None,
+    user_notion_id: str = "",
 ) -> Optional[str]:
     from core.config import config
     props = {
@@ -560,6 +601,8 @@ async def session_add(
         props["Трактовка"] = _text(interpretation[:2000])
     if client_id:
         props["Клиенты"] = _relation(client_id)
+    if user_notion_id:
+        props["Пользователь"] = _relation(user_notion_id)
     return await page_create(config.arcana.db_sessions, props)
 
 
@@ -578,6 +621,7 @@ async def ritual_add(
     amount: float = 0,
     paid: float = 0,
     client_id: Optional[str] = None,
+    user_notion_id: str = "",
 ) -> Optional[str]:
     from core.config import config
     props = {
@@ -596,6 +640,8 @@ async def ritual_add(
     }
     if client_id:
         props["Клиенты"] = _relation(client_id)
+    if user_notion_id:
+        props["Пользователь"] = _relation(user_notion_id)
     return await page_create(config.arcana.db_rituals, props)
 
 def clear_db_options_cache() -> None:

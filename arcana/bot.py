@@ -12,7 +12,8 @@ async def main():
     logging.basicConfig(level=logging.INFO)
     bot = Bot(token=config.arcana.tg_token, default=DefaultBotProperties(parse_mode="HTML"))
     dp = Dispatcher()
-    dp.message.middleware(WhitelistMiddleware())
+    dp.message.middleware(WhitelistMiddleware(require_feature="arcana"))
+    dp.callback_query.middleware(WhitelistMiddleware(require_feature="arcana"))
     dp.include_router(router)
 
     @dp.message(F.photo)

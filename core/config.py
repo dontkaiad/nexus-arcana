@@ -85,6 +85,7 @@ class AppConfig:
     anthropic_key: str
     nexus: NexusConfig
     arcana: ArcanaConfig
+    db_users: str = ""
     finance_categories: List[str] = field(default_factory=lambda: FINANCE_CATEGORIES)
     finance_sources: List[str]    = field(default_factory=lambda: FINANCE_SOURCES)
     finance_types: List[str]      = field(default_factory=lambda: FINANCE_TYPES)
@@ -97,6 +98,7 @@ def load_config() -> AppConfig:
         allowed_ids   = _id_list("ALLOWED_TELEGRAM_IDS"),
         notion_token  = _require("NOTION_TOKEN"),
         anthropic_key = _require("ANTHROPIC_API_KEY"),
+        db_users      = _optional("NOTION_DB_USERS"),
         nexus = NexusConfig(
             tg_token     = _require("NEXUS_BOT_TOKEN"),
             db_finance   = _require("NOTION_DB_FINANCE"),
