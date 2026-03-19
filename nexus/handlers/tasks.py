@@ -434,21 +434,29 @@ async def handle_task_parsed(message: Message, data: dict) -> None:
         _pending_set(uid, data)
         return
 
-    deadline_str = data.get("deadline") or "не указана"
-    deadline_display = deadline_str.replace("T", " ") if deadline_str != "не указана" else deadline_str
+    # Нет "напомни" и нет reminder_time → сначала спрашиваем дедлайн, потом напоминание
+    deadline_str = data.get("deadline") or ""
+    deadline_hint = f"📅 Предлагаемый: {deadline_str.replace('T', ' ')}\n" if deadline_str else ""
 
     msg = await message.answer(
         f"📌 <b>{data.get('title')}</b>\n"
         f"🏷 {data.get('category', '?')} · {data.get('priority', 'Средний')}\n"
-        f"📅 Дедлайн: {deadline_display}\n\n"
-        f"<b>⏰ Когда напомнить?</b>\n"
-        f"Примеры: <code>завтра в 10:00</code>, <code>в 15:00</code>, <code>через 2 часа</code>",
+        f"{deadline_hint}\n"
+        f"<b>📅 Дедлайн задачи?</b>",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
+            InlineKeyboardButton(text="📅 Сегодня", callback_data="task_deadline_same"),
+            InlineKeyboardButton(text="📅 +1 день", callback_data="task_deadline_plus1"),
+        ], [
+            InlineKeyboardButton(text="📅 +3 дня", callback_data="task_deadline_plus3"),
+            InlineKeyboardButton(text="🚫 Без дедлайна", callback_data="task_deadline_skip"),
+        ], [
             InlineKeyboardButton(text="❌ Отмена", callback_data="task_cancel"),
         ]])
     )
 
     data["msg_id"] = msg.message_id
+    data["_awaiting_deadline"] = True
+    data["_then_ask_remind"] = True  # после дедлайна → спросить напоминание
     _pending_set(uid, data)
 
 async def handle_task_clarification(message: Message) -> None:
@@ -625,10 +633,30 @@ async def task_deadline_choice(call: CallbackQuery) -> None:
     if deadline:
         d["deadline"] = deadline
     d.pop("_awaiting_deadline", None)
+    then_ask_remind = d.pop("_then_ask_remind", False)
     _pending_set(uid, d)
 
     await call.message.edit_reply_markup()
     await call.answer()
+
+    # Поток "без напомни": после дедлайна → спросить когда напомнить
+    if then_ask_remind:
+        deadline_display = (d.get("deadline") or "без даты").replace("T", " ")
+        msg = await call.message.answer(
+            f"📌 <b>{d.get('title')}</b>\n"
+            f"🏷 {d.get('category', '?')} · {d.get('priority', 'Средний')}\n"
+            f"📅 Дедлайн: {deadline_display}\n\n"
+            f"<b>⏰ Когда напомнить?</b>\n"
+            f"Примеры: <code>завтра в 10:00</code>, <code>в 15:00</code>, <code>через 2 часа</code>",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
+                InlineKeyboardButton(text="🚫 Без напоминания", callback_data="task_save"),
+                InlineKeyboardButton(text="❌ Отмена", callback_data="task_cancel"),
+            ]])
+        )
+        d["msg_id"] = msg.message_id
+        _pending_set(uid, d)
+        return
+
     await _do_save_task(call.message, d, chat_id=call.message.chat.id, uid=uid)
     _pending_del(uid)
 
