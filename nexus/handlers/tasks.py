@@ -801,6 +801,95 @@ async def task_done_select(call: CallbackQuery) -> None:
         await call.answer("⚠️ Ошибка обновления", show_alert=True)
 
 
+# ── Edit record (fuzzy) ────────────────────────────────────────────────────────
+
+async def handle_edit_record(
+    message: Message,
+    record_hint: str,
+    field: str,
+    new_value: str,
+    record_type: str = "task",
+    user_notion_id: str = "",
+) -> None:
+    """Найти задачу по ключевым словам и обновить поле."""
+    from core.notion_client import update_task_status, match_select, update_page
+    from core.config import config
+
+    if record_type != "task":
+        await message.answer("✏️ Редактирование финансовых записей: используй формат «исправь на …»")
+        return
+
+    if not field or not new_value:
+        await message.answer("⚠️ Не понял что и на что менять. Уточни:\n"
+                             "<code>поменяй категорию [задача] на [новая категория]</code>")
+        return
+
+    # Нормализуем field-синонимы
+    field_map = {
+        "name": "title", "имя": "title", "название": "title",
+        "категория": "category", "категорию": "category",
+        "приоритет": "priority", "дедлайн": "deadline",
+    }
+    field = field_map.get(field.lower(), field.lower())
+
+    hint_words = _hint_words(record_hint)
+    if not hint_words:
+        await message.answer("⚠️ Не понял какую задачу найти. Напиши точнее.")
+        return
+
+    tasks = await tasks_active(user_notion_id=user_notion_id)
+    if not tasks:
+        await message.answer("📭 Нет активных задач.")
+        return
+
+    scored = []
+    for t in tasks:
+        title_parts = t["properties"].get("Задача", {}).get("title", [])
+        title = title_parts[0]["plain_text"] if title_parts else ""
+        if not title:
+            continue
+        score = _task_score(title, hint_words)
+        if score > 0:
+            scored.append((score, title, t["id"]))
+
+    if not scored:
+        await message.answer(f"🔍 Не нашла задачу по: «{record_hint[:60]}»")
+        return
+
+    scored.sort(key=lambda x: x[0], reverse=True)
+    _, title, task_id = scored[0]
+
+    db_id = config.nexus.db_tasks
+    try:
+        if field == "title":
+            from core.notion_client import _title as _t
+            await update_page(task_id, {"Задача": _t(new_value)})
+            await message.answer(f"✏️ Переименовано:\n«{title}» → «{new_value}»")
+
+        elif field == "category":
+            real_cat = await match_select(db_id, "Категория", new_value)
+            from core.notion_client import _select as _s
+            await update_page(task_id, {"Категория": _s(real_cat)})
+            await message.answer(f"✏️ Категория обновлена:\n📌 {title}\n🏷 → {real_cat}")
+
+        elif field == "priority":
+            real_pr = await match_select(db_id, "Приоритет", new_value)
+            from core.notion_client import _select as _s
+            await update_page(task_id, {"Приоритет": _s(real_pr)})
+            await message.answer(f"✏️ Приоритет обновлён:\n📌 {title}\n⚡ → {real_pr}")
+
+        elif field == "deadline":
+            from core.notion_client import _date as _d
+            await update_page(task_id, {"Дедлайн": _d(new_value)})
+            await message.answer(f"✏️ Дедлайн обновлён:\n📌 {title}\n📅 → {new_value}")
+
+        else:
+            await message.answer(f"⚠️ Не знаю поле «{field}». Могу менять: категорию, приоритет, название, дедлайн.")
+    except Exception as e:
+        logger.error("handle_edit_record error: %s", e)
+        await message.answer("⚠️ Ошибка при обновлении.")
+
+
 async def handle_tasks_today(message: Message, user_notion_id: str = "") -> None:
     tasks = await tasks_active(user_notion_id=user_notion_id)
     if not tasks:
