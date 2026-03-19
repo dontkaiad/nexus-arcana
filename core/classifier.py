@@ -60,6 +60,13 @@ def build_system() -> str:
         '{"type":"update","target":"<expense|income>","field":"<source|category|amount>","new_value":"новое значение"}',
         "Примеры: исправь на налик/карту → field=source; на категорию → field=category; сумму → field=amount",
         "",
+        "edit_record — изменить поле существующей записи (задачи или финансовой):",
+        '{"type":"edit_record","record_type":"task|finance","record_hint":"поисковые слова","field":"category|priority|title|deadline","new_value":"новое значение"}',
+        "Примеры: 'поменяй категорию задачи купить корм на продукты' → edit_record",
+        "         'переименуй задачу купить корм в купить корм котам' → edit_record",
+        "         'смени приоритет купить молоко на высокий' → edit_record",
+        "ВАЖНО: edit_record только если явно упомянуто изменение поля существующей записи!",
+        "",
         "task_done — пользователь сообщает что уже выполнил какое-то дело:",
         '{"type":"task_done","task_hint":"ключевые слова названия задачи"}',
         "Примеры: 'сделала покупку корма' → task_done hint='покупка корм'",
@@ -143,6 +150,17 @@ def build_system() -> str:
     ])
 
 
+_EDIT_RE = re.compile(
+    r"\b(поменяй|измени|обнови|переименуй|переимен|смени|измените|переименовать)\b"
+    r".{0,40}\b(категорию|приоритет|название|дедлайн|имя|статус)\b",
+    re.IGNORECASE,
+)
+
+_RENAME_RE = re.compile(
+    r"\bпереименуй\b.{0,60}\bв\b",
+    re.IGNORECASE,
+)
+
 _DONE_RE = re.compile(
     r"\b(сделал[аи]?\b|выполнил[аи]?\b|закончил[аи]?\b|завершил[аи]?\b|"
     r"позвонил[аи]\b|написал[аи]\b|отправил[аи]\b|забрал[аи]\b|"
@@ -168,9 +186,42 @@ _STATS_RE = re.compile(
 )
 
 
+_EDIT_PARSE_SYSTEM = (
+    "Извлеки параметры редактирования записи. Ответь ТОЛЬКО JSON без markdown:\n"
+    '{"type":"edit_record","record_type":"task","record_hint":"ключевые слова для поиска","field":"category|priority|title|deadline","new_value":"новое значение"}\n'
+    "\nПравила:\n"
+    "- record_type: 'task' если о задаче, 'finance' если о финансовой записи\n"
+    "- field: 'category' для категории; 'priority' для приоритета; 'title' или 'name' для переименования; 'deadline' для дедлайна\n"
+    "- record_hint: фраза для поиска записи (название задачи/финансовой операции)\n"
+    "- new_value: новое значение\n"
+    "\nПримеры:\n"
+    "'поменяй категорию задачи купить корм на Продукты' → record_type=task, record_hint='купить корм', field=category, new_value='Продукты'\n"
+    "'переименуй задачу купить корм в купить корм котам' → record_type=task, record_hint='купить корм', field=title, new_value='купить корм котам'\n"
+    "'смени приоритет купить молоко на высокий' → record_type=task, record_hint='купить молоко', field=priority, new_value='Высокий'\n"
+)
+
+
+async def _parse_edit_record(text: str) -> dict:
+    """Распарсить запрос на редактирование записи."""
+    raw = await ask_claude(text, system=_EDIT_PARSE_SYSTEM, max_tokens=200, model="claude-haiku-4-5-20251001")
+    try:
+        raw = raw.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
+        data = json.loads(raw)
+        data["type"] = "edit_record"
+        return data
+    except Exception:
+        return {"type": "edit_record", "record_hint": text, "field": "unknown", "new_value": ""}
+
+
 async def classify(text: str) -> list[dict]:
     """Классифицировать текст через Claude."""
     logger.info("classify: input text=%r", text[:100])
+
+    # Быстрый pre-фильтр: изменение записи ("поменяй категорию X на Y", "переименуй X в Y")
+    if _EDIT_RE.search(text) or _RENAME_RE.search(text):
+        logger.info("classify: edit_record pattern matched")
+        parsed = await _parse_edit_record(text)
+        return [parsed]
 
     # Быстрый pre-фильтр: задача выполнена ("сделала X", "X готово")
     if _DONE_RE.search(text):
@@ -208,6 +259,19 @@ async def process_item(data: Dict[str, Any], original_text: str, msg, clarify: d
     """Обработка классифицированного элемента."""
     kind = data.get("type", "unknown")
     logger.info("process_item: type=%r data=%s", kind, data)
+
+    # EDIT RECORD
+    if kind == "edit_record":
+        from nexus.handlers.tasks import handle_edit_record
+        await handle_edit_record(
+            msg,
+            record_hint=data.get("record_hint", original_text),
+            field=data.get("field", ""),
+            new_value=data.get("new_value", ""),
+            record_type=data.get("record_type", "task"),
+            user_notion_id=user_notion_id,
+        )
+        return ""
 
     # TASK DONE
     if kind == "task_done":
