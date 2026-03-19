@@ -204,7 +204,7 @@ def _with_user_filter(existing_filter: Optional[dict], user_notion_id: str) -> O
     """Добавить фильтр по пользователю к существующему фильтру."""
     if not user_notion_id:
         return existing_filter
-    user_filter = {"property": "Пользователи", "relation": {"contains": user_notion_id}}
+    user_filter = {"property": "🪪 Пользователи", "relation": {"contains": user_notion_id}}
     if existing_filter is None:
         return user_filter
     if "and" in existing_filter:
@@ -311,7 +311,7 @@ async def finance_add(
         "Бот":       _select(bot_label),
     }
     if user_notion_id:
-        props["Пользователи"] = _relation(user_notion_id)
+        props["🪪 Пользователи"] = _relation(user_notion_id)
     return await page_create(db_id, props)
 
 async def finance_month(month: str, user_notion_id: str = "") -> List[dict]:
@@ -394,7 +394,7 @@ async def task_add(
     if deadline:
         props["Дедлайн"] = _date(deadline)
     if user_notion_id:
-        props["Пользователи"] = _relation(user_notion_id)
+        props["🪪 Пользователи"] = _relation(user_notion_id)
     return await page_create(db_id, props)
 
 async def tasks_active(user_notion_id: str = "") -> List[dict]:
@@ -468,7 +468,7 @@ async def note_add(
     if tags:
         props["Теги"] = _multi_select(tags)
     if user_notion_id:
-        props["Пользователи"] = _relation(user_notion_id)
+        props["🪪 Пользователи"] = _relation(user_notion_id)
     return await page_create(config.nexus.db_notes, props)
 
 async def notes_search(query: str, user_notion_id: str = "") -> List[dict]:
@@ -581,7 +581,7 @@ async def client_add(
         "Статус":   _status("🟢 Активный"),
     }
     if user_notion_id:
-        props["Пользователи"] = _relation(user_notion_id)
+        props["🪪 Пользователи"] = _relation(user_notion_id)
     return await page_create(config.arcana.db_clients, props)
 
 async def client_find(name: str, user_notion_id: str = "") -> Optional[dict]:
@@ -620,7 +620,7 @@ async def arcana_all_debts(user_notion_id: str = "") -> List[dict]:
     from core.config import config
     user_filter = None
     if user_notion_id:
-        user_filter = {"property": "Пользователи", "relation": {"contains": user_notion_id}}
+        user_filter = {"property": "🪪 Пользователи", "relation": {"contains": user_notion_id}}
     sessions = await query_pages(config.arcana.db_sessions, filters=user_filter, page_size=100)
     rituals  = await query_pages(config.arcana.db_rituals, filters=user_filter, page_size=100)
     result = []
@@ -662,7 +662,7 @@ async def session_add(
     if client_id:
         props["Клиенты"] = _relation(client_id)
     if user_notion_id:
-        props["Пользователи"] = _relation(user_notion_id)
+        props["🪪 Пользователи"] = _relation(user_notion_id)
     return await page_create(config.arcana.db_sessions, props)
 
 
@@ -701,7 +701,7 @@ async def ritual_add(
     if client_id:
         props["Клиенты"] = _relation(client_id)
     if user_notion_id:
-        props["Пользователи"] = _relation(user_notion_id)
+        props["🪪 Пользователи"] = _relation(user_notion_id)
     return await page_create(config.arcana.db_rituals, props)
 
 def clear_db_options_cache() -> None:
