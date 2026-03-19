@@ -169,24 +169,64 @@ async def _get_user_tz(uid: int) -> int:
             pass
     return 3
 
+_CITY_TZ = {
+    # Россия
+    "москва": 3, "мск": 3, "московск": 3,
+    "спб": 3, "санкт-петербург": 3, "питер": 3, "петербург": 3,
+    "калининград": 2,
+    "самара": 4, "удмуртия": 5, "ижевск": 5,
+    "екатеринбург": 5, "екб": 5, "ебург": 5, "свердловск": 5, "уфа": 5,
+    "челябинск": 5, "тюмень": 5, "башкирия": 5, "пермь": 5,
+    "омск": 6,
+    "новосибирск": 7, "новосиб": 7, "красноярск": 7, "томск": 7, "барнаул": 7,
+    "иркутск": 8, "улан-удэ": 8,
+    "якутск": 9, "хабаровск": 10, "владивосток": 10, "магадан": 11,
+    "сахалин": 11, "камчатка": 12,
+    # Другие
+    "дубай": 4, "абу-даби": 4,
+    "берлин": 1, "варшава": 1, "рим": 1, "париж": 1,
+    "лондон": 0,
+    "бангкок": 7, "токио": 9, "сеул": 9, "пекин": 8,
+}
+
+
 async def _update_user_tz(message: Message, text: str) -> None:
     from core.notion_client import memory_set
     uid = message.from_user.id
-    
-    system = """Пользователь указывает часовой пояс. Ответь ТОЛЬКО числом — смещение UTC в часах.
-Примеры: Екатеринбург=5, Москва=3, Дубай=4, Берлин=1, Бангкок=7, Токио=9, Новосибирск=7, Иркутск=8
+    text_low = text.lower()
+
+    # Сначала пробуем словарь городов (быстро, без API)
+    offset = None
+    for city, tz in _CITY_TZ.items():
+        if city in text_low:
+            offset = tz
+            break
+
+    # Потом пробуем UTC±X паттерн
+    if offset is None:
+        import re as _re
+        m = _re.search(r"utc\s*([+-]?\d+)", text_low)
+        if m:
+            try:
+                offset = int(m.group(1))
+            except ValueError:
+                pass
+
+    # Крайний случай — спрашиваем Claude
+    if offset is None:
+        system = """Пользователь указывает часовой пояс. Ответь ТОЛЬКО числом — смещение UTC в часах.
+Примеры: Екатеринбург=5, Москва=3, Спб=3, Дубай=4, Берлин=1, Бангкок=7, Токио=9, Новосибирск=7, Иркутск=8
 Если не понял → 3"""
-    
-    try:
-        raw = await ask_claude(text, system=system, max_tokens=5, model="claude-haiku-4-5-20251001")
-        offset = int(raw.strip().split()[0])
-    except Exception:
-        offset = 3
-    
+        try:
+            raw = await ask_claude(text, system=system, max_tokens=5, model="claude-haiku-4-5-20251001")
+            offset = int(raw.strip().split()[0])
+        except Exception:
+            offset = 3
+
     _user_tz_offset[uid] = offset
     await memory_set(f"tz_{uid}", str(offset), "Настройки")
     sign = "+" if offset >= 0 else ""
-    await message.answer(f"🌍 Запомнила: ты в UTC{sign}{offset}. Все расчёты будут по твоему времени!")
+    await message.answer(f"🕐 Часовой пояс обновлён: UTC{sign}{offset}")
 
 # ── Handlers ───────────────────────────────────────────────────────────────────
 
