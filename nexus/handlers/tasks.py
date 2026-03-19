@@ -228,6 +228,37 @@ async def _update_user_tz(message: Message, text: str) -> None:
     sign = "+" if offset >= 0 else ""
     await message.answer(f"🕐 Часовой пояс обновлён: UTC{sign}{offset}")
 
+# ── Relative time parser ───────────────────────────────────────────────────────
+
+import re as _re
+
+_REL_TIME_RE = _re.compile(
+    r"через\s+(\d+)\s*(мин[а-я]*|час[а-я]*|ч\b|дн[а-я]*|день|дней)",
+    _re.IGNORECASE,
+)
+
+
+def _parse_relative_time(text: str, tz_offset: int) -> Optional[str]:
+    """Парсить 'через N минут/часов/дней' → 'YYYY-MM-DDTHH:MM'.
+
+    Возвращает строку или None если паттерн не найден.
+    Не использует Claude — вычисляет offset от datetime.now().
+    """
+    m = _REL_TIME_RE.search(text)
+    if not m:
+        return None
+    n = int(m.group(1))
+    unit = m.group(2).lower()
+    now = datetime.now(timezone(timedelta(hours=tz_offset)))
+    if unit.startswith("мин"):
+        result = now + timedelta(minutes=n)
+    elif unit.startswith("ч") or unit.startswith("час"):
+        result = now + timedelta(hours=n)
+    else:  # день / дней / дня
+        result = now + timedelta(days=n)
+    return result.strftime("%Y-%m-%dT%H:%M")
+
+
 # ── Handlers ───────────────────────────────────────────────────────────────────
 
 _REMIND_WORDS = {"напомни", "напоминай", "remind", "напомнить", "напомни мне"}
@@ -309,12 +340,56 @@ async def handle_task_clarification(message: Message) -> None:
         return
     
     text = maybe_convert(message.text.strip())
-    
+
     try:
         tz_offset = await _get_user_tz(uid)
+
+        # Быстрый парсер для "через N мин/часов/дней" — не доверяем Claude
+        relative = _parse_relative_time(text, tz_offset)
+        if relative:
+            logger.info("handle_task_clarification: relative time parsed locally: %s", relative)
+            pending["reminder_time"] = relative
+            _pending_set(uid, pending)
+            is_practice_cat = pending.get("category", "") in PRACTICE_CATEGORIES
+            deadline_display = (pending.get("deadline") or "не указана").replace("T", " ")
+            reminder_display = relative.replace("T", " ")
+            text_content = (
+                f"📌 <b>{pending['title']}</b>\n"
+                f"🏷 {pending.get('category', '?')} · {pending.get('priority', 'Средний')}\n"
+                f"📅 Дедлайн: {deadline_display}\n"
+                f"🔔 Напомню: {reminder_display}\n\n"
+            )
+            if is_practice_cat:
+                text_content += "🕯️ Это для практики (Arcana) или для себя?"
+                kb = InlineKeyboardMarkup(inline_keyboard=[[
+                    InlineKeyboardButton(text="🔮 Да, для практики", callback_data="task_practice"),
+                    InlineKeyboardButton(text="🏠 Нет, для себя", callback_data="task_personal"),
+                ], [
+                    InlineKeyboardButton(text="✅ Сохранить", callback_data="task_save"),
+                    InlineKeyboardButton(text="❌ Отмена", callback_data="task_cancel"),
+                ]])
+            else:
+                text_content += "<i>Всё верно?</i>"
+                kb = InlineKeyboardMarkup(inline_keyboard=[[
+                    InlineKeyboardButton(text="✅ Сохранить", callback_data="task_save"),
+                    InlineKeyboardButton(text="❌ Отмена", callback_data="task_cancel"),
+                ]])
+            msg_id = pending.get("msg_id")
+            if msg_id:
+                try:
+                    await message.bot.edit_message_text(
+                        chat_id=message.chat.id, message_id=msg_id,
+                        text=text_content, parse_mode="HTML", reply_markup=kb,
+                    )
+                except Exception:
+                    await message.answer(text_content, parse_mode="HTML", reply_markup=kb)
+            else:
+                await message.answer(text_content, parse_mode="HTML", reply_markup=kb)
+            return
+
         now_str = datetime.now(timezone(timedelta(hours=tz_offset))).strftime("%Y-%m-%d %H:%M")
         deadline_str = pending.get("deadline") or "не указана"
-        
+
         now_dt = datetime.now(timezone(timedelta(hours=tz_offset)))
         is_night = now_dt.hour < 5
         tomorrow_note = "ВАЖНО: сейчас ночь (до 05:00) — 'завтра' означает СЕГОДНЯ (тот же календарный день)!" if is_night else ""
@@ -323,10 +398,8 @@ async def handle_task_clarification(message: Message) -> None:
 {{"reminder_time": "YYYY-MM-DDTHH:MM или null"}}
 
 Правила:
-- "через 2 мин" → через 2 минуты от сейчас
 - "в 10:00" → в 10:00 (если прошло то завтра)
 - "завтра в 15:00" → завтра в 15:00
-- "через час" → через час от сейчас
 {tomorrow_note}
 
 Сейчас: {now_str} (UTC+{tz_offset})
@@ -580,19 +653,28 @@ async def handle_reschedule_reminder(message: Message) -> None:
                 pass
         
         tz_offset = await _get_user_tz(uid)
+        text = maybe_convert(message.text)
+
+        # Быстрый парсер для "через N мин/часов/дней"
+        relative = _parse_relative_time(text, tz_offset)
+        if relative:
+            logger.info("handle_reschedule_reminder: relative time parsed locally: %s", relative)
+            await _schedule_reminder(message.chat.id, task_title, relative, task_id, tz_offset)
+            _pending_del(uid)
+            await message.answer(f"✅ Напоминание перенесено на {relative.replace('T', ' ')}")
+            return
+
         now_str = datetime.now(timezone(timedelta(hours=tz_offset))).strftime("%Y-%m-%d %H:%M")
-        
+
         system = f"""Пользователь указывает новое напоминание. Парсь и верни ТОЛЬКО JSON без markdown:
 {{"reminder_time": "YYYY-MM-DDTHH:MM"}}
 
 Правила:
-- "через 2 часа" → через 2 часа от сейчас
 - "завтра в 10:00" → завтра в 10:00
 - "в понедельник" → в понедельник в 09:00
 
 Сейчас: {now_str} (МСК, UTC+{tz_offset})"""
-        
-        text = maybe_convert(message.text)
+
         raw = await ask_claude(text, system=system, max_tokens=100, model="claude-haiku-4-5-20251001")
         raw = raw.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
         parsed = json.loads(raw)
@@ -630,7 +712,7 @@ async def _do_save_task(message: Message, data: dict, chat_id: int = None, uid: 
     if data.get("reminder_time"):
         props["Напоминание"] = _date(data["reminder_time"])
     if user_notion_id:
-        props["Пользователи"] = _relation(user_notion_id)
+        props["🪪 Пользователи"] = _relation(user_notion_id)
 
     result = await page_create(db_id, props)
     if not result:
