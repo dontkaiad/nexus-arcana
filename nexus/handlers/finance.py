@@ -117,7 +117,7 @@ async def _save_finance(data: dict, db_id: str, bot_label: str = "☀️ Nexus",
         "Бот":      _select(bot_label),
     }
     if user_notion_id:
-        props["Пользователи"] = _relation(user_notion_id)
+        props["🪪 Пользователи"] = _relation(user_notion_id)
     return await page_create(db_id, props)
 
 
@@ -342,7 +342,7 @@ async def handle_finance_clarify(call: CallbackQuery, user_notion_id: str = "") 
     }
     eff_uid = stored_uid or user_notion_id
     if eff_uid:
-        props["Пользователи"] = _relation(eff_uid)
+        props["🪪 Пользователи"] = _relation(eff_uid)
 
     result = await page_create(db_id, props)
 
