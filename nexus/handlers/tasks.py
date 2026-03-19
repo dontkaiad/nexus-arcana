@@ -190,20 +190,63 @@ async def _update_user_tz(message: Message, text: str) -> None:
 
 # ── Handlers ───────────────────────────────────────────────────────────────────
 
+_REMIND_WORDS = {"напомни", "напоминай", "remind", "напомнить", "напомни мне"}
+
+
+def _has_remind_word(text: str) -> bool:
+    """Проверить что в тексте есть слово-триггер напоминания."""
+    low = text.lower()
+    return any(w in low for w in _REMIND_WORDS)
+
+
 async def handle_task_parsed(message: Message, data: dict) -> None:
-    """Парсим задачу и спрашиваем напоминание."""
+    """Парсим задачу. Если есть 'напомни' — уже знаем reminder, спрашиваем дедлайн.
+    Иначе — спрашиваем когда напомнить."""
     uid = message.from_user.id
     logger.info("handle_task_parsed: title=%s deadline=%s", data.get("title"), data.get("deadline"))
-    
+
     if not data.get("title"):
         await message.answer("⚠️ Не нашёл название задачи.")
         return
-    
+
     data.setdefault("for_practice", False)
-    
+
+    # Определяем оригинальный текст из message
+    original_text = message.text or ""
+
+    # Если в сообщении есть "напомни" + в data уже есть deadline (как reminder_time из deadline)
+    # → reminder_time = deadline из data, спрашиваем дедлайн
+    has_remind = _has_remind_word(original_text)
+
+    if has_remind and data.get("deadline"):
+        # "напомни завтра в 11" → deadline = reminder_time, спросить дедлайн
+        data["reminder_time"] = data["deadline"]
+        data["deadline"] = None
+
+        reminder_display = data["reminder_time"].replace("T", " ")
+        msg = await message.answer(
+            f"📌 <b>{data.get('title')}</b>\n"
+            f"🏷 {data.get('category', '?')} · {data.get('priority', 'Средний')}\n"
+            f"🔔 Напомню: {reminder_display}\n\n"
+            f"<b>📅 Дедлайн?</b>",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
+                InlineKeyboardButton(text="✅ Тот же день", callback_data="task_deadline_same"),
+                InlineKeyboardButton(text="📅 +1 день", callback_data="task_deadline_plus1"),
+            ], [
+                InlineKeyboardButton(text="📅 +3 дня", callback_data="task_deadline_plus3"),
+                InlineKeyboardButton(text="🚫 Без дедлайна", callback_data="task_save"),
+            ], [
+                InlineKeyboardButton(text="❌ Отмена", callback_data="task_cancel"),
+            ]])
+        )
+        data["msg_id"] = msg.message_id
+        data["_awaiting_deadline"] = True
+        _pending_set(uid, data)
+        return
+
     deadline_str = data.get("deadline") or "не указана"
     deadline_display = deadline_str.replace("T", " ") if deadline_str != "не указана" else deadline_str
-    
+
     msg = await message.answer(
         f"📌 <b>{data.get('title')}</b>\n"
         f"🏷 {data.get('category', '?')} · {data.get('priority', 'Средний')}\n"
@@ -214,8 +257,7 @@ async def handle_task_parsed(message: Message, data: dict) -> None:
             InlineKeyboardButton(text="❌ Отмена", callback_data="task_cancel"),
         ]])
     )
-    
-    # Сохраняем message_id для редактирования
+
     data["msg_id"] = msg.message_id
     _pending_set(uid, data)
 
@@ -233,6 +275,10 @@ async def handle_task_clarification(message: Message) -> None:
         now_str = datetime.now(timezone(timedelta(hours=tz_offset))).strftime("%Y-%m-%d %H:%M")
         deadline_str = pending.get("deadline") or "не указана"
         
+        now_dt = datetime.now(timezone(timedelta(hours=tz_offset)))
+        is_night = now_dt.hour < 5
+        tomorrow_note = "ВАЖНО: сейчас ночь (до 05:00) — 'завтра' означает СЕГОДНЯ (тот же календарный день)!" if is_night else ""
+
         system = f"""Пользователь указывает когда напомнить. Парсь и верни ТОЛЬКО JSON без markdown:
 {{"reminder_time": "YYYY-MM-DDTHH:MM или null"}}
 
@@ -241,8 +287,9 @@ async def handle_task_clarification(message: Message) -> None:
 - "в 10:00" → в 10:00 (если прошло то завтра)
 - "завтра в 15:00" → завтра в 15:00
 - "через час" → через час от сейчас
+{tomorrow_note}
 
-Сейчас: {now_str} (МСК, UTC+{tz_offset})
+Сейчас: {now_str} (UTC+{tz_offset})
 Дедлайн: {deadline_str}"""
         
         raw = await ask_claude(text, system=system, max_tokens=100, model="claude-haiku-4-5-20251001")
@@ -308,6 +355,51 @@ async def handle_task_clarification(message: Message) -> None:
         logger.error("parse reminder error: %s", e)
         await message.answer("❌ Ошибка при обработке. Попробуй ещё раз")
 # ── Callbacks ──────────────────────────────────────────────────────────────────
+
+@router.callback_query(F.data.startswith("task_deadline_"))
+async def task_deadline_choice(call: CallbackQuery) -> None:
+    """Выбор дедлайна после того как напоминание уже задано (поток 'напомни')."""
+    from datetime import timedelta
+    uid = call.from_user.id
+    d = _pending_get(uid)
+    if not d:
+        await call.answer("Нет данных.")
+        return
+
+    choice = call.data  # task_deadline_same / task_deadline_plus1 / task_deadline_plus3
+    reminder_time = d.get("reminder_time", "")
+
+    if reminder_time and "T" in reminder_time:
+        reminder_date = reminder_time.split("T")[0]
+    elif reminder_time:
+        reminder_date = reminder_time[:10]
+    else:
+        reminder_date = datetime.now(MOSCOW_TZ).strftime("%Y-%m-%d")
+
+    try:
+        base_dt = datetime.strptime(reminder_date, "%Y-%m-%d")
+    except ValueError:
+        base_dt = datetime.now(MOSCOW_TZ)
+
+    if choice == "task_deadline_same":
+        deadline = base_dt.strftime("%Y-%m-%d")
+    elif choice == "task_deadline_plus1":
+        deadline = (base_dt + timedelta(days=1)).strftime("%Y-%m-%d")
+    elif choice == "task_deadline_plus3":
+        deadline = (base_dt + timedelta(days=3)).strftime("%Y-%m-%d")
+    else:
+        deadline = None
+
+    if deadline:
+        d["deadline"] = deadline
+    d.pop("_awaiting_deadline", None)
+    _pending_set(uid, d)
+
+    await call.message.edit_reply_markup()
+    await call.answer()
+    await _do_save_task(call.message, d, chat_id=call.message.chat.id, uid=uid)
+    _pending_del(uid)
+
 
 @router.callback_query(F.data == "task_practice")
 async def task_practice(call: CallbackQuery) -> None:
