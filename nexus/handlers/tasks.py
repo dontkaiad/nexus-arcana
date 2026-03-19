@@ -331,6 +331,21 @@ async def handle_task_parsed(message: Message, data: dict) -> None:
         data["reminder_time"] = data["deadline"]
         data["deadline"] = None
 
+        # Если Claude вернул только дату без времени → спрашиваем время сразу
+        if "T" not in data["reminder_time"]:
+            msg_obj = await message.answer(
+                f"📌 <b>{data.get('title')}</b>\n"
+                f"🏷 {data.get('category', '?')} · {data.get('priority', 'Средний')}\n\n"
+                f"<b>⏰ В какое время напомнить?</b>\n"
+                f"Примеры: <code>в 10:00</code>, <code>в 18:30</code>, <code>через 2 часа</code>",
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
+                    InlineKeyboardButton(text="❌ Отмена", callback_data="task_cancel"),
+                ]])
+            )
+            data["msg_id"] = msg_obj.message_id
+            _pending_set(uid, data)
+            return
+
         reminder_display = data["reminder_time"].replace("T", " ")
         msg = await message.answer(
             f"📌 <b>{data.get('title')}</b>\n"
@@ -354,6 +369,20 @@ async def handle_task_parsed(message: Message, data: dict) -> None:
 
     # reminder_time уже установлен (pre-filter или classifier) — не спрашивать время, сразу дедлайн
     if data.get("reminder_time"):
+        # Если только дата без времени — сначала спрашиваем время
+        if "T" not in data["reminder_time"]:
+            msg_obj = await message.answer(
+                f"📌 <b>{data.get('title')}</b>\n"
+                f"🏷 {data.get('category', '?')} · {data.get('priority', 'Средний')}\n\n"
+                f"<b>⏰ В какое время напомнить?</b>\n"
+                f"Примеры: <code>в 10:00</code>, <code>в 18:30</code>, <code>через 2 часа</code>",
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
+                    InlineKeyboardButton(text="❌ Отмена", callback_data="task_cancel"),
+                ]])
+            )
+            data["msg_id"] = msg_obj.message_id
+            _pending_set(uid, data)
+            return
         reminder_display = data["reminder_time"].replace("T", " ")
         msg = await message.answer(
             f"📌 <b>{data.get('title')}</b>\n"
