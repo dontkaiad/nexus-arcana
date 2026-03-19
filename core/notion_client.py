@@ -316,8 +316,14 @@ async def finance_add(
         props["🪪 Пользователи"] = _relation(user_notion_id)
     return await page_create(db_id, props)
 
-async def finance_month(month: str, user_notion_id: str = "") -> List[dict]:
-    """Возвращает все записи за месяц (YYYY-MM)."""
+async def finance_month(month: str, user_notion_id: str = "",
+                        description_filter: str = "",
+                        type_filter: str = "") -> List[dict]:
+    """Возвращает записи за месяц (YYYY-MM).
+
+    description_filter — Notion title contains (передавай 4-5 символов для fuzzy).
+    type_filter        — 'income' → Тип=💰 Доход, 'expense' → Тип=💸 Расход.
+    """
     from core.config import config
     start = f"{month}-01"
     y, m = int(month[:4]), int(month[5:7])
@@ -325,12 +331,17 @@ async def finance_month(month: str, user_notion_id: str = "") -> List[dict]:
         end = f"{y+1}-01-01"
     else:
         end = f"{y}-{m+1:02d}-01"
-    filters = {
-        "and": [
-            {"property": "Дата", "date": {"on_or_after": start}},
-            {"property": "Дата", "date": {"before": end}},
-        ]
-    }
+    conditions = [
+        {"property": "Дата", "date": {"on_or_after": start}},
+        {"property": "Дата", "date": {"before": end}},
+    ]
+    if description_filter:
+        conditions.append({"property": "Описание", "title": {"contains": description_filter}})
+    if type_filter == "income":
+        conditions.append({"property": "Тип", "select": {"equals": "💰 Доход"}})
+    elif type_filter == "expense":
+        conditions.append({"property": "Тип", "select": {"equals": "💸 Расход"}})
+    filters = {"and": conditions}
     filters = _with_user_filter(filters, user_notion_id)
     return await query_pages(config.nexus.db_finance, filters=filters, page_size=100)
 
