@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from datetime import datetime, timezone, timedelta
 from typing import Optional, List
 
@@ -213,8 +214,55 @@ def _with_user_filter(existing_filter: Optional[dict], user_notion_id: str) -> O
         return {"and": list(existing_filter["and"]) + [user_filter]}
     return {"and": [existing_filter, user_filter]}
 
-_db_options_cache: dict = {}  # {db_id:prop_name: [options]}
-_db_options_cache: dict = {}  # {db_id:prop_name: [options]}
+_owner_ids_cache: dict = {"ids": [], "_ts": 0.0}
+_OWNER_CACHE_TTL = 600  # 10 минут
+
+
+async def get_owner_notion_ids() -> List[str]:
+    """Вернуть page ID всех пользователей с Роль='Владелец'. Кэш 10 мин."""
+    if time.time() - _owner_ids_cache["_ts"] < _OWNER_CACHE_TTL and _owner_ids_cache["ids"]:
+        return _owner_ids_cache["ids"]
+    from core.config import config
+    db_id = config.db_users
+    if not db_id:
+        return []
+    try:
+        pages = await query_pages(
+            db_id,
+            filters={"property": "Роль", "select": {"equals": "Владелец"}},
+            page_size=50,
+        )
+        ids = [p["id"] for p in pages]
+        _owner_ids_cache["ids"] = ids
+        _owner_ids_cache["_ts"] = time.time()
+        logger.info("get_owner_notion_ids: нашли %d владельцев: %s", len(ids), ids)
+        return ids
+    except Exception as e:
+        logger.error("get_owner_notion_ids error: %s", e)
+        return []
+
+
+def _with_owners_filter(existing_filter: Optional[dict], owner_ids: List[str]) -> Optional[dict]:
+    """Добавить OR-фильтр по списку owner_ids к existing_filter.
+
+    Если owner_ids пустой — фильтр по пользователям не добавляется (видно всё).
+    Если один ID — adds simple relation contains.
+    Если несколько — adds {"or": [contains(id1), contains(id2), ...]}.
+    """
+    if not owner_ids:
+        return existing_filter
+    rel_filters = [
+        {"property": "🪪 Пользователи", "relation": {"contains": oid}}
+        for oid in owner_ids
+    ]
+    owners_filter = rel_filters[0] if len(rel_filters) == 1 else {"or": rel_filters}
+    if existing_filter is None:
+        return owners_filter
+    if "and" in existing_filter:
+        return {"and": list(existing_filter["and"]) + [owners_filter]}
+    return {"and": [existing_filter, owners_filter]}
+
+
 _db_options_cache: dict = {}
 
 async def get_db_options(db_id: str, prop_name: str) -> List[str]:
@@ -323,6 +371,8 @@ async def finance_month(month: str, user_notion_id: str = "",
 
     description_filter — Notion title contains (передавай 4-5 символов для fuzzy).
     type_filter        — 'income' → Тип=💰 Доход, 'expense' → Тип=💸 Расход.
+    user_notion_id     — не используется для фильтрации (оставлен для совместимости);
+                         фильтр строится по всем Владельцам из базы Пользователи.
     """
     from core.config import config
     start = f"{month}-01"
@@ -342,7 +392,11 @@ async def finance_month(month: str, user_notion_id: str = "",
     elif type_filter == "expense":
         conditions.append({"property": "Тип", "select": {"equals": "💸 Расход"}})
     filters = {"and": conditions}
-    filters = _with_user_filter(filters, user_notion_id)
+    # Фильтр по всем Владельцам (OR по их page ID)
+    owner_ids = await get_owner_notion_ids()
+    filters = _with_owners_filter(filters, owner_ids)
+    import json as _json
+    logger.info("finance_month filter:\n%s", _json.dumps(filters, ensure_ascii=False, indent=2))
     return await query_pages(config.nexus.db_finance, filters=filters, page_size=100)
 
 async def finance_update(target_type: str, field: str, new_value: str) -> bool:
