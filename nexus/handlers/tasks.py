@@ -695,6 +695,112 @@ async def _do_save_task(message: Message, data: dict, chat_id: int = None, uid: 
     else:
         await message.answer(text_content, parse_mode="HTML")
 
+# ── Task done (fuzzy) ──────────────────────────────────────────────────────────
+
+_DONE_STOP_WORDS = {
+    "сделала", "сделал", "сделано", "выполнила", "выполнил", "выполнено",
+    "закончила", "закончил", "завершила", "завершил", "готово", "готова",
+    "позвонила", "позвонил", "написала", "написал", "отправила", "отправил",
+    "забрала", "забрал", "купила", "купил", "отметь", "выполненным",
+    "уже", "я", "и", "в", "на", "к", "за",
+}
+
+
+def _hint_words(text: str):
+    """Извлечь значимые слова из фразы (без стоп-слов и коротких)."""
+    result = set()
+    for w in text.lower().split():
+        w_clean = w.strip(".,!?;:—–\"'")
+        if w_clean and w_clean not in _DONE_STOP_WORDS and len(w_clean) > 2:
+            result.add(w_clean)
+    return result
+
+
+def _task_score(task_title: str, hint_words) -> int:
+    """Сколько слов из hint_words есть в title задачи."""
+    if not hint_words:
+        return 0
+    title_low = task_title.lower()
+    return sum(1 for w in hint_words if w in title_low)
+
+
+async def handle_task_done(message: Message, task_hint: str, user_notion_id: str = "") -> None:
+    """Найти активную задачу по ключевым словам и отметить выполненной."""
+    import random
+    from core.notion_client import update_task_status
+
+    hint_words = _hint_words(task_hint)
+    if not hint_words:
+        await message.answer("⚠️ Не понял о какой задаче речь. Напиши точнее.")
+        return
+
+    tasks = await tasks_active(user_notion_id=user_notion_id)
+    if not tasks:
+        await message.answer("📭 Нет активных задач.")
+        return
+
+    # Оценить каждую задачу
+    scored = []
+    for t in tasks:
+        title_parts = t["properties"].get("Задача", {}).get("title", [])
+        title = title_parts[0]["plain_text"] if title_parts else ""
+        if not title:
+            continue
+        score = _task_score(title, hint_words)
+        if score > 0:
+            scored.append((score, title, t["id"]))
+
+    if not scored:
+        await message.answer(
+            f"🔍 Не нашла задачу по: «{task_hint[:60]}»\n"
+            f"Проверь активные задачи: /tasks"
+        )
+        return
+
+    scored.sort(key=lambda x: x[0], reverse=True)
+
+    # Единственный хороший матч — отметить сразу
+    if len(scored) == 1 or scored[0][0] > scored[1][0]:
+        _, title, task_id = scored[0]
+        result = await update_task_status(task_id, "Done")
+        if result:
+            phrase = random.choice(_DONE_PHRASES)
+            await message.answer(f"{phrase}\n✅ {title} — выполнено")
+        else:
+            await message.answer("⚠️ Ошибка обновления в Notion.")
+        return
+
+    # Несколько одинаковых матчей — показать кнопки выбора (до 5)
+    top = scored[:5]
+    buttons = []
+    for _, title, task_id in top:
+        short_title = title[:32] + ("…" if len(title) > 32 else "")
+        buttons.append([InlineKeyboardButton(
+            text=f"✅ {short_title}",
+            callback_data=f"task_done_select_{task_id}"
+        )])
+    buttons.append([InlineKeyboardButton(text="❌ Отмена", callback_data="task_cancel")])
+    await message.answer(
+        "🔍 Нашла несколько подходящих задач. Какую отметить выполненной?",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons)
+    )
+
+
+@router.callback_query(F.data.startswith("task_done_select_"))
+async def task_done_select(call: CallbackQuery) -> None:
+    import random
+    from core.notion_client import update_task_status
+    task_id = call.data[len("task_done_select_"):]
+    result = await update_task_status(task_id, "Done")
+    if result:
+        phrase = random.choice(_DONE_PHRASES)
+        await call.message.edit_reply_markup()
+        await call.answer("✅ Записано!")
+        await call.message.reply(phrase + "\n✅ Выполнено")
+    else:
+        await call.answer("⚠️ Ошибка обновления", show_alert=True)
+
+
 async def handle_tasks_today(message: Message, user_notion_id: str = "") -> None:
     tasks = await tasks_active(user_notion_id=user_notion_id)
     if not tasks:
