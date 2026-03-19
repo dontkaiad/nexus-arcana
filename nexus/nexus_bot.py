@@ -141,11 +141,14 @@ async def handle_text(msg: Message, user_notion_id: str = "") -> None:
     await msg.bot.send_chat_action(msg.chat.id, "typing")
     uid = msg.from_user.id
 
+    from nexus.handlers.tasks import _get_user_tz
+    tz_offset = await _get_user_tz(uid)
+
     if uid in _clarify:
         original = _clarify.pop(uid)
         combined = f"{original}\nУточнение: {text}"
         try:
-            items = await classify(combined)
+            items = await classify(combined, tz_offset=tz_offset)
             if items and items[0].get("type") not in ("unknown", "parse_error", None):
                 lines = []
                 for data in items:
@@ -167,7 +170,7 @@ async def handle_text(msg: Message, user_notion_id: str = "") -> None:
         return
 
     try:
-        items = await classify(text)
+        items = await classify(text, tz_offset=tz_offset)
         logger.info("handle_text: classify returned %d items: %s", len(items), [i.get("type") for i in items])
 
         lines = []
