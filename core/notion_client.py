@@ -464,13 +464,14 @@ async def task_add(
         props["🪪 Пользователи"] = _relation(user_notion_id)
     return await page_create(db_id, props)
 
-async def tasks_active(user_notion_id: str = "") -> List[dict]:
+async def tasks_active(user_notion_id: str = "", include_in_progress: bool = True) -> List[dict]:
     """Возвращает все незавершённые задачи."""
     from core.config import config
+    # Реальные статусы Notion: "Not started", "In progress", "Done", "To-do", "Complete"
     base_filter = {
         "and": [
             {"property": "Статус", "status": {"does_not_equal": "Done"}},
-            {"property": "Статус", "status": {"does_not_equal": "Archived"}},
+            {"property": "Статус", "status": {"does_not_equal": "Complete"}},
         ]
     }
     filters = _with_user_filter(base_filter, user_notion_id)
@@ -484,7 +485,7 @@ async def tasks_active(user_notion_id: str = "") -> List[dict]:
 
 async def update_task_status(page_id: str, status: str) -> bool:
     """Обновить статус задачи.
-    Статусы: 'Not started', 'In progress', 'Done', 'Archived'
+    Реальные статусы: 'Not started', 'In progress', 'To-do', 'Done', 'Complete'
     """
     try:
         await update_page(page_id, {"Статус": _status(status)})
