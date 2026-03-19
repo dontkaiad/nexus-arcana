@@ -285,6 +285,23 @@ async def handle_task_parsed(message: Message, data: dict) -> None:
     # Определяем оригинальный текст из message
     original_text = message.text or ""
 
+    # Pre-filter: "через N мин/часов/дней" в оригинальном тексте → считаем до Claude
+    # Claude путает "через 2 мин" → 00:02 вместо now+2min
+    tz_offset = await _get_user_tz(uid)
+    rel_match = _REL_TIME_RE.search(original_text)
+    if rel_match:
+        relative_time = _parse_relative_time(original_text, tz_offset)
+        unit = rel_match.group(2).lower()
+        if unit.startswith("мин") or unit.startswith("ч"):
+            # минуты / часы → всегда reminder, не дедлайн
+            logger.info("handle_task_parsed: pre-filter relative reminder=%s", relative_time)
+            data["reminder_time"] = relative_time
+            data["deadline"] = None  # сброс неверного дедлайна от Claude
+        else:
+            # дни → дедлайн (только если Claude не поставил осмысленную дату)
+            logger.info("handle_task_parsed: pre-filter relative deadline=%s", relative_time)
+            data["deadline"] = relative_time
+
     # Если в сообщении есть "напомни" + в data уже есть deadline (как reminder_time из deadline)
     # → reminder_time = deadline из data, спрашиваем дедлайн
     has_remind = _has_remind_word(original_text)
