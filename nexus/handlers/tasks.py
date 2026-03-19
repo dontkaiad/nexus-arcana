@@ -1010,30 +1010,35 @@ async def task_done_select(call: CallbackQuery) -> None:
 async def handle_edit_record(
     message: Message,
     record_hint: str,
-    field: str,
-    new_value: str,
+    field: str = "",
+    new_value: str = "",
+    edits: list | None = None,
     record_type: str = "task",
     user_notion_id: str = "",
 ) -> None:
-    """Найти запись по ключевым словам (или последнюю) и обновить поле."""
+    """Найти запись по ключевым словам (или последнюю) и обновить поле(я)."""
     from core.notion_client import match_select, update_page
     from core.config import config
 
     uid = message.from_user.id
 
-    if not field or not new_value:
-        await message.answer("⚠️ Не понял что и на что менять. Уточни:\n"
-                             "<code>поменяй категорию [запись] на [новое значение]</code>")
-        return
-
-    # Нормализуем field-синонимы
+    # Нормализуем к списку edits
     field_map = {
         "name": "title", "имя": "title", "название": "title",
         "категория": "category", "категорию": "category",
         "приоритет": "priority", "дедлайн": "deadline",
         "источник": "source",
     }
-    field = field_map.get(field.lower(), field.lower())
+    if not edits:
+        if field and new_value:
+            edits = [{"field": field, "new_value": new_value}]
+        else:
+            await message.answer("⚠️ Не понял что и на что менять. Уточни:\n"
+                                 "<code>поменяй категорию [запись] на [новое значение]</code>")
+            return
+
+    # Нормализуем field-синонимы во всех edits
+    edits = [{"field": field_map.get(e["field"].lower(), e["field"].lower()), "new_value": e["new_value"]} for e in edits]
 
     hint_words = _hint_words(record_hint)
 
@@ -1048,8 +1053,9 @@ async def handle_edit_record(
         # Определяем тип записи из контекста если не задан явно
         if record_type == "task" and db_type_last == "finance":
             record_type = "finance"
-        await _apply_edit(message, record_type, page_id_last, None, field, new_value,
-                          user_notion_id=user_notion_id, from_context=True)
+        for edit in edits:
+            await _apply_edit(message, record_type, page_id_last, None, edit["field"], edit["new_value"],
+                              user_notion_id=user_notion_id, from_context=True)
         return
 
     # Поиск задачи по hint_words
@@ -1070,8 +1076,9 @@ async def handle_edit_record(
 
     scored.sort(key=lambda x: x[0], reverse=True)
     _, title, task_id = scored[0]
-    await _apply_edit(message, "task", task_id, title, field, new_value,
-                      user_notion_id=user_notion_id)
+    for edit in edits:
+        await _apply_edit(message, "task", task_id, title, edit["field"], edit["new_value"],
+                          user_notion_id=user_notion_id)
 
 
 async def _apply_edit(
