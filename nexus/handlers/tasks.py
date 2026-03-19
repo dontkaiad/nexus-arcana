@@ -630,7 +630,7 @@ async def _do_save_task(message: Message, data: dict, chat_id: int = None, uid: 
     if data.get("reminder_time"):
         props["Напоминание"] = _date(data["reminder_time"])
     if user_notion_id:
-        props["Пользователь"] = _relation(user_notion_id)
+        props["Пользователи"] = _relation(user_notion_id)
 
     result = await page_create(db_id, props)
     if not result:
