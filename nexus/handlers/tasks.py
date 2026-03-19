@@ -346,21 +346,38 @@ async def task_cancel(call: CallbackQuery) -> None:
     await call.message.edit_text("❌ Отмена.")
     await call.answer()
 
+_DONE_PHRASES = [
+    "🎉 Кай, ты просто огонь!",
+    "✨ Ты просто магия!",
+    "🔥 Красавица, сделала!",
+    "💅 Готово, как всегда на высоте",
+    "⚡ Кай справилась!",
+    "🌟 Вот это продуктивность!",
+]
+
+
 @router.callback_query(F.data.startswith("task_complete_"))
 async def task_complete(call: CallbackQuery) -> None:
+    import random
     from core.notion_client import update_task_status
     task_id = call.data.split("_", 2)[2]
-    
+
     result = await update_task_status(task_id, "Done")
     if result:
+        # Получить название задачи из текста сообщения
+        msg_text = call.message.text or ""
+        task_title = ""
+        if "Напоминание:" in msg_text:
+            task_title = msg_text.split("Напоминание:")[1].strip().split("\n")[0].strip()
+        elif "Дедлайн:" in msg_text:
+            task_title = msg_text.split("Дедлайн:")[1].strip().split(".")[0].strip()
+
+        phrase = random.choice(_DONE_PHRASES)
+        title_line = f"\n✅ {task_title} — выполнено" if task_title else "\n✅ Выполнено"
+
         await call.message.edit_reply_markup()
         await call.answer("✅ Записано!")
-        await call.message.reply(
-            "🎉 <b>Молодец, Кай!</b> 🎉\n"
-            "✨ Ты просто магия! Продолжай в том же духе!\n\n"
-            "📊 Статус обновлён: <b>ВЫПОЛНЕНО</b> ✅\n"
-            "💪 Одной задачей меньше, одним шагом ближе к цели!"
-        )
+        await call.message.reply(f"{phrase}{title_line}")
     else:
         await call.answer("⚠️ Ошибка обновления", show_alert=True)
 
@@ -528,8 +545,7 @@ async def _do_save_task(message: Message, data: dict, chat_id: int = None, uid: 
         f"📌 {data['title']}\n"
         f"🏷 {real_category} · {real_priority}\n"
         f"📅 Дедлайн: {deadline_display}\n"
-        f"🔔 Напоминание: {reminder_display}\n\n"
-        f"✨ Готово! Напомню вовремя{extra}"
+        f"🔔 Напоминание: {reminder_display}{extra}"
     )
     
     # Редактируем старое сообщение вместо создания нового
