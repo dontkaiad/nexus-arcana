@@ -110,7 +110,7 @@ def _format_record(data: dict) -> str:
 
 
 async def _save_finance(data: dict, db_id: str, bot_label: str = "☀️ Nexus",
-                        user_notion_id: str = "") -> str:
+                        user_notion_id: str = "", uid: int = 0) -> str:
     """Создаёт запись в Notion. Возвращает page_id или None."""
     from core.notion_client import _relation
     props = {
@@ -124,7 +124,11 @@ async def _save_finance(data: dict, db_id: str, bot_label: str = "☀️ Nexus",
     }
     if user_notion_id:
         props["🪪 Пользователи"] = _relation(user_notion_id)
-    return await page_create(db_id, props)
+    page_id = await page_create(db_id, props)
+    if page_id and uid:
+        from nexus.handlers.tasks import last_record_set
+        last_record_set(uid, "finance", page_id)
+    return page_id
 
 
 async def _update_last_finance(uid: int, field: str, value: str) -> bool:
@@ -205,7 +209,7 @@ async def handle_finance_text(message: Message, text: str, bot_label: str = "☀
         return
 
     # Высокая уверенность — пишем сразу
-    page_id = await _save_finance(data, config.nexus.db_finance, bot_label, user_notion_id)
+    page_id = await _save_finance(data, config.nexus.db_finance, bot_label, user_notion_id, uid=uid)
     if not page_id:
         await message.answer("⚠️ Ошибка записи в Notion.")
         return
@@ -239,7 +243,7 @@ async def handle_finance_clarification(message: Message, user_notion_id: str = "
 
     if text_lower in ("записать", "да", "ок", "ok", "✅", "записать как есть"):
         _pending_finance.pop(uid, None)
-        page_id = await _save_finance(pending, config.nexus.db_finance, user_notion_id=stored_uid)
+        page_id = await _save_finance(pending, config.nexus.db_finance, user_notion_id=stored_uid, uid=uid)
         if page_id:
             _last_page_id[uid] = page_id
             await message.answer(_format_record(pending))
@@ -263,7 +267,7 @@ async def handle_finance_clarification(message: Message, user_notion_id: str = "
         pass
 
     _pending_finance.pop(uid, None)
-    page_id = await _save_finance(pending, config.nexus.db_finance, user_notion_id=stored_uid)
+    page_id = await _save_finance(pending, config.nexus.db_finance, user_notion_id=stored_uid, uid=uid)
     if not page_id:
         await message.answer("⚠️ Ошибка записи в Notion.")
         return
@@ -353,6 +357,8 @@ async def handle_finance_clarify(call: CallbackQuery, user_notion_id: str = "") 
     result = await page_create(db_id, props)
 
     if result:
+        from nexus.handlers.tasks import last_record_set
+        last_record_set(uid, "finance", result)
         sign = "−" if action != "income" else "+"
         icon = "💸" if action != "income" else "💰"
         text = f"{icon} <b>{sign}{amount:,.0f}₽</b> · <b>{description}</b>\n🏷 {real_category} <i>{real_source}</i>"
