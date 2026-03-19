@@ -39,8 +39,13 @@ def _today() -> str:
     return datetime.now(MOSCOW_TZ).isoformat()[:10]
 
 
-def build_system() -> str:
-    today = today_moscow()
+def build_system(tz_offset: int = 3) -> str:
+    now_local = datetime.now(timezone(timedelta(hours=tz_offset)))
+    today = now_local.strftime("%Y-%m-%d")
+    night_rule = (
+        f"- НОЧНАЯ ЛОГИКА: сейчас {now_local.strftime('%H:%M')} (ночь до 05:00) — "
+        f"'завтра' = СЕГОДНЯ ({today}), 'послезавтра' = завтра ({(now_local + timedelta(days=1)).strftime('%Y-%m-%d')})"
+    ) if now_local.hour < 5 else ""
     cats = ", ".join(["🐾 Коты", "🏠 Жилье", "🚬 Привычки", "🍜 Продукты",
                       "🍱 Кафе/Доставка", "🚕 Транспорт", "💅 Бьюти", "👗 Гардероб",
                       "💻 Подписки", "🏥 Здоровье", "📚 Хобби/Учеба",
@@ -115,8 +120,9 @@ def build_system() -> str:
         "- confidence: high если есть явное слово (доход/расход/бартер); low если только сумма+имя (спросить потом)",
         "- title: ВСЕГДА объединяй всё остальное в одну строку. Пример: '450 такси карта вадмму' → title='такси вадиму' (исправленная опечатка)",
         "- priority: срочно/важно/сегодня → 'Высокий'; потом → 'Низкий'; иначе 'Средний'",
-        "- deadline: день недели → вычисли ISO дату от " + today,
+        "- deadline: день недели → вычисли ISO дату от " + today + "; сегодня=" + today,
         "- deadline с временем: парсить 'завтра в 15:00' → YYYY-MM-DDTHH:MM; 'в 14:30 без даты' → сегодня+время",
+    ] + ([night_rule] if night_rule else []) + [
         "- к/тыс в суммах: 35к = 35000",
         "- tags: из [практика, таро, ритуал, идея, рецепт, здоровье, финансы, мысль]",
         '- неизвестная строка -> {"type":"unknown"}',
@@ -213,9 +219,9 @@ async def _parse_edit_record(text: str) -> dict:
         return {"type": "edit_record", "record_hint": text, "field": "unknown", "new_value": ""}
 
 
-async def classify(text: str) -> list[dict]:
+async def classify(text: str, tz_offset: int = 3) -> list[dict]:
     """Классифицировать текст через Claude."""
-    logger.info("classify: input text=%r", text[:100])
+    logger.info("classify: input text=%r tz_offset=%d", text[:100], tz_offset)
 
     # Быстрый pre-фильтр: изменение записи ("поменяй категорию X на Y", "переименуй X в Y")
     if _EDIT_RE.search(text) or _RENAME_RE.search(text):
@@ -238,7 +244,7 @@ async def classify(text: str) -> list[dict]:
         logger.info("classify: stats pattern matched, bypassing Claude")
         return [{"type": "stats", "query": text}]
 
-    raw = await ask_claude(text, system=build_system(), max_tokens=1024)
+    raw = await ask_claude(text, system=build_system(tz_offset), max_tokens=1024)
     global _classify_last_raw
     _classify_last_raw = raw
     
@@ -426,7 +432,11 @@ async def process_item(data: Dict[str, Any], original_text: str, msg, clarify: d
 
     # СТАТИСТИКА
     if kind == "stats":
-        logger.info("process_item: stats request - query=%r", data.get("query", ""))
+        tg_id = msg.from_user.id if msg and msg.from_user else "unknown"
+        logger.info(
+            "process_item: stats request - tg_id=%s user_notion_id=%r query=%r",
+            tg_id, user_notion_id, data.get("query", ""),
+        )
         from nexus.handlers.finance import handle_finance_summary
         return await handle_finance_summary(query=data.get("query", ""), user_notion_id=user_notion_id)
 
