@@ -25,20 +25,29 @@ CATEGORIES = [
 
 SOURCES = ["💳 Карта", "💵 Наличные", "🔄 Бартер"]
 
-STATS_SYSTEM = f"""Определи, запрашивает ли пользователь статистику по конкретной категории.
+STATS_SYSTEM = f"""Определи, запрашивает ли пользователь статистику по конкретной категории или конкретному имени/объекту.
 Ответь ТОЛЬКО JSON без markdown:
 {{
   "category": "одна из: {', '.join(CATEGORIES)} или null если запрос общей сводки",
-  "type_": "expense если спрашивает о расходах, income если о доходах, null если оба"
+  "type_": "expense если спрашивает о расходах, income если о доходах, null если оба",
+  "description_search": "ключевое слово/имя для фильтра описания или null. Извлекай имена людей, магазины, организации после слов 'на/у/за/для/от'. Пример: 'у вадима' → 'вадим', 'на клинику' → 'клиника', 'за маму' → 'мама'"
 }}
 
+Правила:
+- Если в запросе есть имя/магазин/организация рядом со словами 'на/у/за/для/от' → description_search = это слово
+- Категория и description_search могут быть вместе: 'расходы на транспорт для вадима' → category=Транспорт, description_search=вадим
+- Если категория явно указана (коты, транспорт, продукты...) → category; если имя/человек → description_search
+
 Примеры:
-"сколько потратила на коты" → {{"category": "🐾 Коты", "type_": "expense"}}
-"расходы на транспорт" → {{"category": "🚕 Транспорт", "type_": "expense"}}
-"кола" → {{"category": "🚬 Привычки", "type_": "expense"}}
-"заработала на практике" → {{"category": "🔮 Практика", "type_": "income"}}
-"сводка за месяц" → {{"category": null, "type_": null}}
-"статистика" → {{"category": null, "type_": null}}"""
+"сколько потратила на коты" → {{"category": "🐾 Коты", "type_": "expense", "description_search": null}}
+"расходы на транспорт" → {{"category": "🚕 Транспорт", "type_": "expense", "description_search": null}}
+"кола" → {{"category": "🚬 Привычки", "type_": "expense", "description_search": null}}
+"заработала на практике" → {{"category": "🔮 Практика", "type_": "income", "description_search": null}}
+"сколько перевела вадиму" → {{"category": null, "type_": "expense", "description_search": "вадим"}}
+"расходы на клинику" → {{"category": "🏥 Здоровье", "type_": "expense", "description_search": "клиника"}}
+"у мамы" → {{"category": null, "type_": null, "description_search": "мама"}}
+"сводка за месяц" → {{"category": null, "type_": null, "description_search": null}}
+"статистика" → {{"category": null, "type_": null, "description_search": null}}"""
 
 PARSE_SYSTEM = f"""Извлеки финансовую запись. Исправляй опечатки. Ответь ТОЛЬКО JSON без markdown:
 {{
@@ -392,24 +401,34 @@ async def handle_bank_screenshot(message: Message, bot_label: str = "☀️ Nexu
 
 async def handle_finance_summary(query: str = "", user_notion_id: str = "") -> str:
     """Возвращает строку со статистикой. Вызывающий сам отправляет её пользователю."""
-    # Попробовать распарсить категорию из запроса
-    category_filter: str | None = None
-    type_filter: str | None = None
+    # Попробовать распарсить категорию и имя из запроса
+    category_filter = None
+    type_filter = None
+    description_search = None
     if query:
-        raw = await ask_claude(query, system=STATS_SYSTEM, max_tokens=100)
+        raw = await ask_claude(query, system=STATS_SYSTEM, max_tokens=150)
         try:
             raw = raw.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
             parsed = json.loads(raw)
             category_filter = parsed.get("category") or None
             type_filter = parsed.get("type_") or None
+            description_search = parsed.get("description_search") or None
+            if description_search:
+                description_search = description_search.lower().strip()
         except Exception:
             pass
 
     records = await finance_month(_month(), user_notion_id=user_notion_id)
     now = datetime.now(MOSCOW_TZ)
 
-    # Запрос по конкретной категории
-    if category_filter:
+    def _get_desc(props):
+        title_items = (props.get("Описание", {}).get("title") or [])
+        if title_items:
+            return title_items[0].get("text", {}).get("content", "")
+        return ""
+
+    # Запрос по конкретной категории ИЛИ имени/описанию
+    if category_filter or description_search:
         total = 0.0
         matched = []
         for r in records:
@@ -417,25 +436,37 @@ async def handle_finance_summary(query: str = "", user_notion_id: str = "") -> s
             amount = props.get("Сумма", {}).get("number") or 0
             cat_name = (props.get("Категория", {}).get("select") or {}).get("name", "")
             type_name = (props.get("Тип", {}).get("select") or {}).get("name", "")
-            if cat_name != category_filter:
+            desc = _get_desc(props)
+
+            # Фильтр по категории
+            if category_filter and cat_name != category_filter:
                 continue
+            # Фильтр по описанию (подстрока, без учёта регистра)
+            if description_search and description_search not in desc.lower():
+                continue
+            # Фильтр по типу
             if type_filter == "expense" and "Расход" not in type_name:
                 continue
             if type_filter == "income" and "Доход" not in type_name:
                 continue
+
             total += amount
             date_str = (props.get("Дата", {}).get("date") or {}).get("start", "")
-            desc = ""
-            title_items = (props.get("Описание", {}).get("title") or [])
-            if title_items:
-                desc = title_items[0].get("text", {}).get("content", "")
             matched.append((date_str, desc, amount))
 
         icon = "💸" if type_filter == "expense" else ("💰" if type_filter == "income" else "📊")
         label = "Расходы" if type_filter == "expense" else ("Доходы" if type_filter == "income" else "Итого")
 
+        # Заголовок
+        header_parts = []
+        if category_filter:
+            header_parts.append(category_filter)
+        if description_search:
+            header_parts.append(f"«{description_search}»")
+        header = " · ".join(header_parts) if header_parts else "Фильтр"
+
         lines = [
-            f"{icon} <b>{category_filter} — {now.strftime('%B %Y')}</b>\n",
+            f"{icon} <b>{header} — {now.strftime('%B %Y')}</b>\n",
             f"{label}: <b>{total:,.0f}₽</b>  📝 {len(matched)} зап.",
         ]
         if matched:
