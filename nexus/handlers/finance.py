@@ -4,6 +4,7 @@ from __future__ import annotations
 import base64
 import json
 import logging
+import re
 from datetime import datetime, timezone, timedelta
 from typing import List
 
@@ -405,8 +406,53 @@ async def handle_bank_screenshot(message: Message, bot_label: str = "☀️ Nexu
     await message.answer(f"✅ Записано {len(saved)}:\n" + "\n".join(saved[:15]))
 
 
+_MONTH_MAP = {
+    "январ": 1,  "янв": 1,
+    "феврал": 2, "фев": 2,
+    "март": 3,   "мар": 3,
+    "апрел": 4,  "апр": 4,
+    "май": 5,    "мая": 5,
+    "июн": 6,
+    "июл": 7,
+    "август": 8, "авг": 8,
+    "сентябр": 9,  "сен": 9,
+    "октябр": 10,  "окт": 10,
+    "ноябр": 11,   "ноя": 11,
+    "декабр": 12,  "дек": 12,
+}
+_MONTH_RE = re.compile(
+    r"\b(январ[яеь]?|янв|феврал[яеь]?|фев|март[ае]?|мар|апрел[яеь]?|апр"
+    r"|май|мая|июн[яеь]?|июл[яеь]?|август[ае]?|авг"
+    r"|сентябр[яеь]?|сен|октябр[яеь]?|окт|ноябр[яеь]?|ноя|декабр[яеь]?|дек)\b",
+    re.IGNORECASE,
+)
+
+
+def _parse_month_from_query(text: str) -> str:
+    """Вернуть 'YYYY-MM' из текста или текущий месяц."""
+    now = datetime.now(MOSCOW_TZ)
+    m = _MONTH_RE.search(text.lower())
+    if not m:
+        return _month()
+    word = m.group(1).lower()
+    # Найти номер месяца по максимальному совпадению префикса
+    month_num = None
+    for prefix, num in _MONTH_MAP.items():
+        if word.startswith(prefix) or prefix.startswith(word[:3]):
+            month_num = num
+            break
+    if month_num is None:
+        return _month()
+    # Год: текущий, но если месяц ещё не наступил — тот же год (не будущий)
+    year = now.year
+    if month_num > now.month:
+        year -= 1  # "в декабре" в январе → прошлый декабрь
+    return f"{year}-{month_num:02d}"
+
+
 async def handle_finance_summary(query: str = "", user_notion_id: str = "") -> str:
     """Возвращает строку со статистикой. Вызывающий сам отправляет её пользователю."""
+    logger.info("handle_finance_summary: user_notion_id=%r query=%r", user_notion_id, query)
     # Попробовать распарсить категорию и имя из запроса
     category_filter = None
     type_filter = None
@@ -424,12 +470,15 @@ async def handle_finance_summary(query: str = "", user_notion_id: str = "") -> s
         except Exception:
             pass
 
+    # Месяц: из текста запроса или текущий
+    month_str = _parse_month_from_query(query) if query else _month()
+
     # Первые 4-5 символов для Notion title contains (fuzzy: "вадима" → "вади" → найдёт "вадиму")
     notion_desc_kw = (description_search or "")[:5].strip() if description_search else ""
 
     # Notion делает фильтрацию по описанию и типу на стороне API
     records = await finance_month(
-        _month(),
+        month_str,
         user_notion_id=user_notion_id,
         description_filter=notion_desc_kw,
         type_filter=type_filter or "",
@@ -477,15 +526,22 @@ async def handle_finance_summary(query: str = "", user_notion_id: str = "") -> s
             header_parts.append(f"«{description_search}»")
         header = " · ".join(header_parts) if header_parts else "Фильтр"
 
-        report_title = f"{header} — {now.strftime('%B %Y')}"
+        # Человекочитаемый заголовок месяца
+        try:
+            month_dt = datetime.strptime(month_str, "%Y-%m")
+            month_label = f"{('январь февраль март апрель май июнь июль август сентябрь октябрь ноябрь декабрь'.split())[month_dt.month - 1]} {month_dt.year}"
+        except Exception:
+            month_label = now.strftime("%B %Y")
+
+        report_title = f"{header} — {month_label}"
         lines = [
-            f"{icon} {header} — {now.strftime('%B %Y')}",
+            f"{icon} {header} — {month_label}",
             f"{label}: {total:,.0f}₽  ({len(matched)} зап.)",
         ]
         if matched:
-            last5 = sorted(matched, key=lambda x: x[0], reverse=True)[:5]
+            all_sorted = sorted(matched, key=lambda x: x[0], reverse=True)
             lines.append("")
-            for date_str, desc, amount in last5:
+            for date_str, desc, amount in all_sorted:
                 try:
                     d = datetime.strptime(date_str[:10], "%Y-%m-%d")
                     day = f"{d.day} {('янв фев мар апр май июн июл авг сен окт ноя дек'.split())[d.month - 1]}"
