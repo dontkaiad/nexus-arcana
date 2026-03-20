@@ -101,15 +101,16 @@ async def cmd_help(msg: Message, user_notion_id: str = "") -> None:
 
 @dp.message(Command("tasks"))
 async def cmd_tasks(msg: Message, user_notion_id: str = "") -> None:
-    """Показать активные задачи из Notion (до 10)."""
+    """Показать активные задачи из Notion с пагинацией если > PAGE_SIZE."""
     from core.notion_client import tasks_active
+    from core.pagination import PAGE_SIZE, register_pages, get_page_text, get_page_keyboard
     tasks = await tasks_active(user_notion_id=user_notion_id)
     if not tasks:
         await msg.answer("📭 Активных задач нет.")
         return
-    icons = {"Высокий": "🔴", "Средний": "🟡", "Низкий": "⚪"}
-    lines = []
-    for t in tasks[:10]:
+    _icons = {"Высокий": "🔴", "Средний": "🟡", "Низкий": "⚪"}
+    task_items = []
+    for t in tasks:
         props = t["properties"]
         title_parts = props.get("Задача", {}).get("title", [])
         title = title_parts[0]["plain_text"] if title_parts else "—"
@@ -117,12 +118,24 @@ async def cmd_tasks(msg: Message, user_notion_id: str = "") -> None:
         deadline = (props.get("Дедлайн", {}).get("date") or {}).get("start", "")[:10]
         repeat = (props.get("Повтор", {}).get("select") or {}).get("name", "")
         repeat_mark = " 🔄" if repeat and repeat != "Нет" else ""
-        line = f"{icons.get(priority, '⚪')} {title}"
-        if deadline:
-            line += f" · {deadline}"
-        line += repeat_mark
-        lines.append(line)
-    await msg.answer("📋 <b>Активные задачи:</b>\n\n" + "\n".join(lines))
+        task_items.append({
+            "icon": _icons.get(priority, "⚪"),
+            "title": title + repeat_mark,
+            "deadline": deadline,
+        })
+
+    def _task_fmt(it: dict) -> str:
+        line = f"{it['icon']} {it['title']}"
+        if it.get("deadline"):
+            line += f" · {it['deadline']}"
+        return line
+
+    if len(task_items) > PAGE_SIZE:
+        uid = msg.from_user.id
+        register_pages(uid, task_items, "📋 Активные задачи", _task_fmt)
+        await msg.answer(get_page_text(uid), reply_markup=get_page_keyboard(uid))
+    else:
+        await msg.answer("📋 <b>Активные задачи:</b>\n\n" + "\n".join(_task_fmt(t) for t in task_items))
 
 
 @dp.message(Command("notes"))
@@ -374,10 +387,10 @@ async def on_note_opt_callback(query: CallbackQuery, user_notion_id: str = "") -
     await handle_note_callback(query)
 
 
-@dp.callback_query(lambda c: c.data and c.data.startswith("notes_page:"))
-async def on_notes_page_callback(query: CallbackQuery, user_notion_id: str = "") -> None:
-    from nexus.handlers.notes import handle_notes_page_callback
-    await handle_notes_page_callback(query)
+@dp.callback_query(lambda c: c.data and c.data.startswith("page:"))
+async def on_page_callback(query: CallbackQuery, user_notion_id: str = "") -> None:
+    from core.pagination import handle_page_callback
+    await handle_page_callback(query)
 
 
 @dp.callback_query(lambda c: c.data and c.data.startswith("arcana_choice_"))
