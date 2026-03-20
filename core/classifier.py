@@ -513,9 +513,7 @@ async def process_item(data: Dict[str, Any], original_text: str, msg, clarify: d
     # РЕДАКТИРОВАНИЕ ЗАМЕТКИ
     if kind == "edit_note":
         from nexus.handlers.notes import handle_edit_note
-        logger.info("process_item: edit_note hint=%r field=%r new_value=%r",
-                    data.get("hint"), data.get("field"), data.get("new_value"))
-        await handle_edit_note(msg, data, user_notion_id=user_notion_id)
+        await handle_edit_note(msg, data, user_notion_id)
         return ""
 
     # ПОИСК ЗАМЕТОК

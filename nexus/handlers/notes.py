@@ -228,53 +228,30 @@ async def _save_note(
         await message.answer(reply)
 
 
-async def handle_edit_note(
-    message: Message,
-    data: dict,
-    user_notion_id: str = "",
-) -> None:
-    """Редактировать поле (теги) существующей заметки."""
-    from core.notion_client import notes_search, match_select
+async def handle_edit_note(message, data: dict, user_notion_id: str) -> None:
     from core.config import config
-
-    hint = data.get("hint", "последняя")
-    field = data.get("field", "tags")
-    new_value = data.get("new_value", "").strip()
-
-    # Найти заметку
-    if hint == "последняя":
-        pages = await query_pages(
-            config.nexus.db_notes,
-            filters=None,
-            sorts=[{"property": "Дата", "direction": "descending"}],
-            page_size=1,
-        )
-    else:
-        pages = await notes_search(hint, user_notion_id=user_notion_id)
-
-    if not pages:
-        await message.answer("Заметка не найдена")
+    from core.notion_client import db_query, get_db_options, match_select
+    hint = (data.get("hint") or "последняя").strip()
+    new_value = (data.get("new_value") or "").strip()
+    if not new_value:
+        await message.answer("❌ Не указан новый тег")
         return
-
-    page = pages[0]
-    page_id = page["id"]
-    props = page.get("properties", {})
-    title_parts = props.get("Заголовок", {}).get("title", [])
-    title = title_parts[0]["plain_text"] if title_parts else "—"
-
-    if field == "tags" and new_value:
-        # Найти тег в Notion (или создать новый)
-        db_notes_id = config.nexus.db_notes
-        options = await get_db_options(db_notes_id, "Теги")
-        normalized = await match_select(db_notes_id, "Теги", new_value)
-        if normalized not in options:
-            # Тег не найден — использовать new_value как есть
-            normalized = new_value
-
-        await update_page(page_id, {"Теги": {"multi_select": [{"name": normalized}]}})
-        await message.answer(f"✏️ Тег обновлён: <b>{normalized}</b>\n💡 Заметка: {title}")
+    db_id = config.notion.db_notes
+    if hint == "последняя":
+        results = await db_query(db_id, filters={}, sorts=[{"property": "Дата", "direction": "descending"}], limit=1, user_notion_id=user_notion_id)
     else:
-        await message.answer("❌ Не удалось обновить заметку: неизвестное поле или пустое значение")
+        results = await db_query(db_id, filters={"property": "Заголовок", "rich_text": {"contains": hint}}, sorts=[], limit=1, user_notion_id=user_notion_id)
+    if not results:
+        await message.answer("❌ Заметка не найдена")
+        return
+    page_id = results[0]["id"]
+    existing = await get_db_options(db_id, "Теги")
+    normalized = await match_select(db_id, "Теги", new_value)
+    tag_name = normalized if normalized else new_value
+    from core.notion_client import get_notion
+    notion = get_notion()
+    await notion.pages.update(page_id=page_id, properties={"Теги": {"multi_select": [{"name": tag_name}]}})
+    await message.answer(f"✏️ Тег обновлён: {tag_name}")
 
 
 async def handle_note_search(
