@@ -99,6 +99,92 @@ async def cmd_help(msg: Message, user_notion_id: str = "") -> None:
     )
 
 
+@dp.message(Command("tasks"))
+async def cmd_tasks(msg: Message, user_notion_id: str = "") -> None:
+    """Показать активные задачи из Notion (до 10)."""
+    from core.notion_client import tasks_active
+    tasks = await tasks_active(user_notion_id=user_notion_id)
+    if not tasks:
+        await msg.answer("📭 Активных задач нет.")
+        return
+    icons = {"Высокий": "🔴", "Средний": "🟡", "Низкий": "⚪"}
+    lines = []
+    for t in tasks[:10]:
+        props = t["properties"]
+        title_parts = props.get("Задача", {}).get("title", [])
+        title = title_parts[0]["plain_text"] if title_parts else "—"
+        priority = (props.get("Приоритет", {}).get("select") or {}).get("name", "Низкий")
+        deadline = (props.get("Дедлайн", {}).get("date") or {}).get("start", "")[:10]
+        repeat = (props.get("Повтор", {}).get("select") or {}).get("name", "")
+        repeat_mark = " 🔄" if repeat and repeat != "Нет" else ""
+        line = f"{icons.get(priority, '⚪')} {title}"
+        if deadline:
+            line += f" · {deadline}"
+        line += repeat_mark
+        lines.append(line)
+    await msg.answer("📋 <b>Активные задачи:</b>\n\n" + "\n".join(lines))
+
+
+@dp.message(Command("notes"))
+async def cmd_notes(msg: Message, user_notion_id: str = "") -> None:
+    """Показать последние 5 заметок из Notion."""
+    from core.notion_client import db_query
+    pages = await db_query(
+        config.nexus.db_notes,
+        sorts=[{"property": "Дата", "direction": "descending"}],
+        page_size=5,
+    )
+    if not pages:
+        await msg.answer("📭 Заметок нет.")
+        return
+    lines = []
+    for p in pages:
+        props = p["properties"]
+        title_parts = props.get("Заголовок", {}).get("title", [])
+        title = title_parts[0]["plain_text"] if title_parts else "—"
+        tags_items = props.get("Теги", {}).get("multi_select", [])
+        tags_str = " ".join(f"#{t['name']}" for t in tags_items)
+        date = (props.get("Дата", {}).get("date") or {}).get("start", "")[:10]
+        line = f"💡 {title}"
+        if tags_str:
+            line += f" {tags_str}"
+        if date:
+            line += f" · {date}"
+        lines.append(line)
+    await msg.answer("📝 <b>Последние заметки:</b>\n\n" + "\n".join(lines))
+
+
+@dp.message(Command("finance"))
+async def cmd_finance(msg: Message, user_notion_id: str = "") -> None:
+    """Показать расходы за сегодня + итого."""
+    from core.notion_client import finance_month
+    from core.classifier import today_moscow
+    today = today_moscow()
+    month = today[:7]
+    records = await finance_month(month, user_notion_id=user_notion_id)
+    lines = []
+    total = 0.0
+    for r in records:
+        props = r["properties"]
+        date = (props.get("Дата", {}).get("date") or {}).get("start", "")[:10]
+        if date != today:
+            continue
+        amount = props.get("Сумма", {}).get("number") or 0
+        type_name = (props.get("Тип", {}).get("select") or {}).get("name", "")
+        if "Расход" not in type_name:
+            continue
+        desc_parts = props.get("Описание", {}).get("title", [])
+        desc = desc_parts[0]["plain_text"] if desc_parts else "—"
+        cat = (props.get("Категория", {}).get("select") or {}).get("name", "")
+        lines.append(f"  💸 {desc} · {cat} · {amount:,.0f}₽")
+        total += amount
+    if not lines:
+        await msg.answer(f"💸 Расходов за {today} нет.")
+        return
+    text = f"💸 <b>Расходы за {today}:</b>\n" + "\n".join(lines) + f"\n\n💰 Итого: <b>{total:,.0f}₽</b>"
+    await msg.answer(text)
+
+
 @dp.message(Command("tz"))
 async def set_tz(msg: Message, user_notion_id: str = "") -> None:
     """Установить часовой пояс. /tz UTC+5 или /tz Екатеринбург"""
@@ -383,6 +469,9 @@ async def main() -> None:
     await bot.set_my_commands([
         BotCommand(command="start", description="Запустить Nexus"),
         BotCommand(command="help", description="Гайд по использованию"),
+        BotCommand(command="tasks", description="Активные задачи"),
+        BotCommand(command="notes", description="Последние 5 заметок"),
+        BotCommand(command="finance", description="Расходы за сегодня"),
     ])
 
     init_scheduler(bot)

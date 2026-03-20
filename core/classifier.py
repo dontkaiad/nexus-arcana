@@ -95,8 +95,10 @@ def build_system(tz_offset: int = 3) -> str:
         "arcana_clarify — уточнить у пользователя: это для Арканы или обычная задача?",
         '{"type":"arcana_clarify","text":"оригинальный текст","confidence":"low"}',
         "Примеры: 'купить свечи' (может быть и задача и для ритуала) → arcana_clarify с confidence=low",
-        "note — заметка:",
+        "note — заметка (в т.ч. 'запомни ...' → всегда note):",
         '{"type":"note","text":"содержание","tags":"<список тегов через запятую>"}',
+        "Примеры note: 'запомни идею про подкаст' → {\"type\":\"note\",\"text\":\"идея про подкаст\",\"tags\":\"идея\"}",
+        "              'запомни мысль' → note; 'запомни заметку' → note",
         "",
         "note_search — поиск заметок по ключевым словам:",
         '{"type":"note_search","query":"ключевые слова"}',
@@ -203,6 +205,9 @@ _DONE_RE = re.compile(
     re.IGNORECASE,
 )
 
+# Тексты начинающиеся с "запомни" — это заметки/память, НЕ task_done
+_ZAPOMNI_RE = re.compile(r"^\s*запомни\b", re.IGNORECASE)
+
 _TZ_RE = re.compile(
     r"(я\s+в\s+\w+|переезжаю\s+в\s+\w+|мой\s+часовой\s+пояс|utc[+-]\d|в\s+спб\b|в\s+москве\b|"
     r"в\s+екб\b|в\s+екатеринбурге\b|в\s+новосибирске\b|в\s+владивостоке\b|"
@@ -265,7 +270,8 @@ async def classify(text: str, tz_offset: int = 3) -> list[dict]:
         return [parsed]
 
     # Быстрый pre-фильтр: задача выполнена ("сделала X", "X готово")
-    if _DONE_RE.search(text):
+    # Исключение: "запомни ..." → это заметка, пропустить к Claude
+    if _DONE_RE.search(text) and not _ZAPOMNI_RE.search(text):
         logger.info("classify: task_done pattern matched")
         return [{"type": "task_done", "task_hint": text}]
 
