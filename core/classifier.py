@@ -107,6 +107,14 @@ def build_system(tz_offset: int = 3) -> str:
         "Примеры: 'найди заметку про таро' → note_search; 'найди мою запись про масло' → note_search",
         "ВАЖНО: note_search только если явно просят найти/показать/искать заметку!",
         "",
+        "edit_note — редактировать поле существующей заметки (теги):",
+        '{"type":"edit_note","hint":"ключевые слова для поиска заметки или \'последняя\'","field":"tags","new_value":"новое значение"}',
+        "Примеры: 'измени тег на расклады' → {\"type\":\"edit_note\",\"hint\":\"последняя\",\"field\":\"tags\",\"new_value\":\"расклады\"}",
+        "         'поменяй тег заметки про таро на практика' → {\"type\":\"edit_note\",\"hint\":\"таро\",\"field\":\"tags\",\"new_value\":\"практика\"}",
+        "         'переименуй тег последней заметки в расклады' → {\"type\":\"edit_note\",\"hint\":\"последняя\",\"field\":\"tags\",\"new_value\":\"расклады\"}",
+        "         'обнови тег последней заметки' → edit_note",
+        "ВАЖНО: edit_note только если явно упомянуто изменение тега заметки!",
+        "",
         "stats — статистика / сводка / вопрос о расходах по категории:",
         '{"type":"stats","query":"<запрос>"}',
         "Примеры stats: 'сколько потратила на коты', 'скок ушло на транспорт', 'сколько потратила на котов в этом месяце',",
@@ -199,6 +207,12 @@ _RENAME_RE = re.compile(
     re.IGNORECASE,
 )
 
+_EDIT_NOTE_RE = re.compile(
+    r"\b(поменяй|измени|обнови|исправь|смени|замени|переименуй)\b.{0,60}\bтег\b"
+    r"|\bтег\b.{0,40}\b(поменяй|измени|обнови|исправь|смени|замени)\b",
+    re.IGNORECASE,
+)
+
 _DONE_RE = re.compile(
     r"\b(сделал[аи]?\b|выполнил[аи]?\b|закончил[аи]?\b|завершил[аи]?\b|"
     r"позвонил[аи]\b|написал[аи]\b|отправил[аи]\b|забрал[аи]\b|"
@@ -264,6 +278,20 @@ async def _parse_edit_record(text: str) -> dict:
 async def classify(text: str, tz_offset: int = 3) -> list[dict]:
     """Классифицировать текст через Claude."""
     logger.info("classify: input text=%r tz_offset=%d", text[:100], tz_offset)
+
+    # Быстрый pre-фильтр: редактирование тега заметки
+    if _EDIT_NOTE_RE.search(text):
+        logger.info("classify: edit_note pattern matched")
+        # Извлечь new_value из "на X" / "в X"
+        new_val_match = re.search(r"\b(?:на|в)\s+(\S+)", text, re.IGNORECASE)
+        new_value = new_val_match.group(1).rstrip(".,!?") if new_val_match else ""
+        # Попытаться найти hint (название заметки) между "заметки" и "тег" / после "тег"
+        hint_match = re.search(r"\bзаметки\s+про\s+(\w+)\b|\bзаметки\s+(\w+)\b", text, re.IGNORECASE)
+        if hint_match:
+            hint = hint_match.group(1) or hint_match.group(2) or "последняя"
+        else:
+            hint = "последняя"
+        return [{"type": "edit_note", "hint": hint, "field": "tags", "new_value": new_value}]
 
     # Быстрый pre-фильтр: изменение записи ("поменяй категорию X на Y", "переименуй X в Y")
     if _EDIT_RE.search(text) or _RENAME_RE.search(text):
@@ -476,6 +504,14 @@ async def process_item(data: Dict[str, Any], original_text: str, msg, clarify: d
         
         await handle_note(msg, data.get("text", original_text), config.nexus.db_notes, raw_tags,
                           user_notion_id=user_notion_id)
+        return ""
+
+    # РЕДАКТИРОВАНИЕ ЗАМЕТКИ
+    if kind == "edit_note":
+        from nexus.handlers.notes import handle_edit_note
+        logger.info("process_item: edit_note hint=%r field=%r new_value=%r",
+                    data.get("hint"), data.get("field"), data.get("new_value"))
+        await handle_edit_note(msg, data, user_notion_id=user_notion_id)
         return ""
 
     # ПОИСК ЗАМЕТОК
