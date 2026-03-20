@@ -238,9 +238,9 @@ async def handle_edit_note(message, data: dict, user_notion_id: str) -> None:
         return
     db_id = config.nexus.db_notes
     if hint == "последняя":
-        results = await db_query(db_id, filters={}, sorts=[{"property": "Дата", "direction": "descending"}], limit=1, user_notion_id=user_notion_id)
+        results = await db_query(db_id, sorts=[{"property": "Дата", "direction": "descending"}], page_size=1)
     else:
-        results = await db_query(db_id, filters={"property": "Заголовок", "rich_text": {"contains": hint}}, sorts=[], limit=1, user_notion_id=user_notion_id)
+        results = await db_query(db_id, filter_obj={"property": "Заголовок", "title": {"contains": hint}}, page_size=1)
     if not results:
         await message.answer("❌ Заметка не найдена")
         return
