@@ -391,6 +391,24 @@ async def handle_task_parsed(message: Message, data: dict) -> None:
 
     data.setdefault("for_practice", False)
 
+    # Повторяющаяся задача → первый дедлайн вычисляем автоматически, UI пропускаем
+    _repeat = data.get("repeat") or "Нет"
+    if _repeat and _repeat != "Нет":
+        tz_offset = await _get_user_tz(uid)
+        now = datetime.now(timezone(timedelta(hours=tz_offset)))
+        _rtime = (data.get("repeat_time") or "09:00").strip()
+        try:
+            _h, _m = int(_rtime[:2]), int(_rtime[3:5])
+        except (ValueError, IndexError):
+            _h, _m = 9, 0
+        first_deadline = now.replace(hour=_h, minute=_m, second=0, microsecond=0)
+        if first_deadline <= now:
+            first_deadline = first_deadline + timedelta(days=1)
+        data["deadline"] = first_deadline.strftime("%Y-%m-%dT%H:%M")
+        logger.info("handle_task_parsed: repeat=%s → auto deadline=%s", _repeat, data["deadline"])
+        await _do_save_task(message, data, chat_id=message.chat.id, uid=uid)
+        return
+
     # Определяем оригинальный текст из message
     original_text = message.text or ""
 
