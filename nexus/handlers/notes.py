@@ -192,14 +192,16 @@ async def _save_note(
 
 
 async def handle_edit_note(message: Message, data: dict, user_notion_id: str) -> None:
-    from core.config import config
-    from core.notion_client import db_query, get_db_options, match_select
+    from core.notion_client import db_query, get_notion
     hint = (data.get("hint") or "последняя").strip()
     new_value = (data.get("new_value") or "").strip()
     if not new_value:
         await message.answer("❌ Не указан новый тег")
         return
-    db_id = os.environ.get("NOTION_DB_NOTES") or config.nexus.db_notes
+    db_id = os.environ.get("NOTION_DB_NOTES")
+    if not db_id:
+        await message.answer("❌ NOTION_DB_NOTES не задан")
+        return
     if hint == "последняя":
         results = await db_query(db_id, sorts=[{"property": "Дата", "direction": "descending"}], page_size=1)
     else:
@@ -208,10 +210,7 @@ async def handle_edit_note(message: Message, data: dict, user_notion_id: str) ->
         await message.answer("❌ Заметка не найдена")
         return
     page_id = results[0]["id"]
-    normalized = await match_select(db_id, "Теги", new_value)
-    options = await get_db_options(db_id, "Теги")
-    tag_name = normalized if normalized in options else format_option(new_value)
-    from core.notion_client import get_notion
+    tag_name = format_option(new_value)
     notion = get_notion()
     await notion.pages.update(page_id=page_id, properties={"Теги": {"multi_select": [{"name": tag_name}]}})
     await message.answer(f"✏️ Тег обновлён: {tag_name}")
