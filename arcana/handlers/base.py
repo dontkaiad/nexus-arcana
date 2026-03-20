@@ -5,8 +5,8 @@ import logging
 import traceback as tb
 
 from aiogram import Router
-from aiogram.filters import CommandStart
-from aiogram.types import Message
+from aiogram.filters import CommandStart, Command
+from aiogram.types import Message, CallbackQuery
 from core.claude_client import ask_claude
 from core.notion_client import log_error
 
@@ -17,7 +17,7 @@ _clarify: dict = {}  # user_id → original_text
 
 ROUTER_SYSTEM = """Сначала исправь опечатки, потом определи тип. Ответь ТОЛЬКО одним словом.
 
-Примеры исправлений: расклд→расклад, ртуал→ритуал, клент→клиент.
+Примеры исправлений: расклд→расклад, ртуал→ритуал, клент→клиент, сенс→сеанс, расклд→расклад, клиент→клиент, ртуал→ритуал.
 
 Типы:
 new_client   — новый клиент
@@ -29,6 +29,13 @@ tarot_interp — трактовка таро
 delete       — удалить записи («удали», «удалить», «убери»)
 nexus        — финансы, расходы, доходы, задачи, заметки, покупки
 unknown      — остальное"""
+
+
+@router.message(Command("tz"))
+async def cmd_tz(message: Message, user_notion_id: str = "") -> None:
+    """Установить часовой пояс. /tz UTC+5 или /tz Екатеринбург"""
+    from core.shared_handlers import handle_tz_command
+    await handle_tz_command(message, user_notion_id)
 
 
 @router.message(CommandStart())
