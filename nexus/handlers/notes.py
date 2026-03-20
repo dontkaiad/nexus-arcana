@@ -64,15 +64,45 @@ async def handle_note(
 
         if tag_list:
             normalized_tags = []
+            unknown_tags = []
             for tag in tag_list:
                 if tag in TAGS_EMOJI:
                     tag_with_emoji = f"{TAGS_EMOJI[tag]} {tag.capitalize()}"
                     normalized = await match_select(db_notes_id, "Теги", tag_with_emoji)
                 else:
                     normalized = await match_select(db_notes_id, "Теги", tag)
-                if normalized:
+                # match_select возвращает исходное значение если не нашёл
+                options = await get_db_options(db_notes_id, "Теги")
+                if normalized in options:
                     normalized_tags.append(normalized)
+                else:
+                    unknown_tags.append(tag)
 
+            if unknown_tags:
+                uid = message.from_user.id
+                _pending[uid] = {
+                    "text": text,
+                    "selected": normalized_tags,
+                    "new": unknown_tags,
+                    "existing": existing,
+                    "date": date,
+                    "user_notion_id": user_notion_id,
+                }
+                new_str = " · ".join(f"#{t}" for t in unknown_tags)
+                existing_str = ", ".join(existing) if existing else "нет"
+                kb = InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(text=f"✅ Добавить {new_str}", callback_data=f"note_new:{uid}")],
+                    [InlineKeyboardButton(text="📋 Выбрать из существующих", callback_data=f"note_pick:{uid}")],
+                    [InlineKeyboardButton(text="💾 Сохранить без новых тегов", callback_data=f"note_skip:{uid}")],
+                ])
+                await message.answer(
+                    f"💡 Не нашёл в Notion тег(и): <b>{new_str}</b>\n"
+                    f"Существующие: <i>{existing_str}</i>",
+                    reply_markup=kb,
+                )
+                return
+
+            # Все теги найдены — сохранить сразу
             if normalized_tags:
                 await _save_note(message, text, normalized_tags, date, user_notion_id=user_notion_id)
                 return
