@@ -274,27 +274,58 @@ async def handle_note_search(
     query_text: str,
     user_notion_id: str = "",
 ) -> None:
-    """Поиск заметок по тексту заголовка. Выводит до 5 результатов."""
-    from core.notion_client import notes_search
+    """Поиск заметок: два параллельных запроса по тегу и по заголовку, дедупликация."""
+    import asyncio
+    from core.notion_client import db_query
 
-    results = await notes_search(query_text, user_notion_id=user_notion_id)
-    if not results:
-        await message.answer("Заметок не найдено")
+    db_id = os.environ.get("NOTION_DB_NOTES")
+    if not db_id:
+        await message.answer("❌ NOTION_DB_NOTES не задан")
+        return
+
+    q = query_text.strip()
+    if not q:
+        await message.answer("💡 Укажи что искать")
+        return
+
+    # Два параллельных поиска: по тегу и по заголовку
+    tag_filter   = {"property": "Теги",      "multi_select": {"contains": q}}
+    title_filter = {"property": "Заголовок", "title":        {"contains": q}}
+
+    tag_results, title_results = await asyncio.gather(
+        db_query(db_id, filter_obj=tag_filter,   page_size=7),
+        db_query(db_id, filter_obj=title_filter, page_size=7),
+    )
+
+    # Дедупликация по page_id, максимум 7
+    seen: set = set()
+    combined = []
+    for page in tag_results + title_results:
+        pid = page["id"]
+        if pid not in seen:
+            seen.add(pid)
+            combined.append(page)
+        if len(combined) >= 7:
+            break
+
+    if not combined:
+        await message.answer("💡 Заметок не найдено")
         return
 
     lines = []
-    for page in results[:5]:
+    for page in combined:
         props = page["properties"]
         title_parts = props.get("Заголовок", {}).get("title", [])
         title = title_parts[0]["plain_text"] if title_parts else "—"
         tags_items = props.get("Теги", {}).get("multi_select", [])
-        tags_str = ", ".join(t["name"] for t in tags_items)
+        tags_str = " ".join(f"#{t['name']}" for t in tags_items)
         date = (props.get("Дата", {}).get("date") or {}).get("start", "")[:10]
         line = f"💡 {title}"
         if tags_str:
-            line += f" [{tags_str}]"
+            line += f"\n   {tags_str}"
         if date:
             line += f" · {date}"
         lines.append(line)
 
-    await message.answer("\n".join(lines))
+    n = len(combined)
+    await message.answer(f"🔍 Нашла {n} заметок:\n\n" + "\n\n".join(lines))
