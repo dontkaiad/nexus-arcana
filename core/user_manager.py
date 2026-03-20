@@ -57,18 +57,32 @@ async def get_user(tg_id: int) -> Optional[dict]:
         props = page.get("properties", {})
         logger.info("get_user(%s): используем page_id=%s", tg_id, page["id"])
 
+        # Дебаг: показать все ключи и checkbox-значения для диагностики
+        checkbox_fields = {k: v.get("checkbox") for k, v in props.items() if v.get("type") == "checkbox"}
+        logger.info("get_user(%s): checkbox fields в базе: %s", tg_id, checkbox_fields)
+
         name_items = props.get("Имя", {}).get("title", [])
         name = name_items[0]["text"]["content"] if name_items else ""
 
         role_sel = props.get("Роль", {}).get("select") or {}
         role = role_sel.get("name", "")
 
+        def _checkbox(primary: str, fallback: str = "") -> bool:
+            """Читает checkbox поле, пробуя оба варианта имени (с эмодзи и без)."""
+            val = props.get(primary, {}).get("checkbox", None)
+            if val is not None:
+                return val
+            if fallback:
+                return props.get(fallback, {}).get("checkbox", False)
+            return False
+
         permissions = {
-            "nexus":     props.get("Nexus",    {}).get("checkbox", False),
-            "arcana":    props.get("Arcana",   {}).get("checkbox", False),
-            "finance":   props.get("Финансы",  {}).get("checkbox", False),
-            "passwords": props.get("Пароли",   {}).get("checkbox", False),
+            "nexus":     _checkbox("☀️ Nexus",   "Nexus"),
+            "arcana":    _checkbox("🌒 Arcana",  "Arcana"),
+            "finance":   _checkbox("💰 Финансы", "Финансы"),
+            "passwords": _checkbox("🔑 Пароли",  "Пароли"),
         }
+        logger.info("get_user(%s): permissions resolved = %s", tg_id, permissions)
 
         user_data = {
             "notion_page_id": page["id"],
@@ -99,3 +113,12 @@ async def get_user_notion_id(tg_id: int) -> Optional[str]:
     if user is None:
         return None
     return user.get("notion_page_id")
+
+
+def invalidate_cache(tg_id: int = 0) -> None:
+    """Сбросить кэш пользователя (или всех если tg_id=0)."""
+    if tg_id:
+        _user_cache.pop(tg_id, None)
+    else:
+        _user_cache.clear()
+    logger.info("invalidate_cache: tg_id=%s", tg_id or "ALL")
