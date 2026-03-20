@@ -518,6 +518,27 @@ async def update_task_completion_time(page_id: str, completion_time: str) -> boo
         return False
 
 
+async def update_task_repeat_fields(
+    page_id: str,
+    repeat: str,
+    day_of_week: Optional[str] = None,
+    repeat_time: Optional[str] = None,
+) -> bool:
+    """Обновить поля повторения задачи: Повтор, День недели, Время повтора."""
+    props = {"Повтор": _select(repeat)}
+    if day_of_week:
+        props["День недели"] = _select(day_of_week)
+    if repeat_time:
+        props["Время повтора"] = _text(repeat_time)
+    try:
+        await update_page(page_id, props)
+        logger.info("update_task_repeat_fields: page=%s repeat=%s", page_id[:8], repeat)
+        return True
+    except Exception as e:
+        logger.error("update_task_repeat_fields error: %s", e)
+        return False
+
+
 # ─── Notes ────────────────────────────────────────────────────────────────────
 
 async def note_add(
