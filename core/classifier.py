@@ -330,6 +330,17 @@ async def classify(text: str, tz_offset: int = 3) -> list[dict]:
         logger.info("classify: stats pattern matched, bypassing Claude")
         return [{"type": "stats", "query": text}]
 
+    # Guard: если text выглядит как разговорный ответ Claude (утечка из spell correction) —
+    # не отправлять обратно в Claude, вернуть unknown сразу
+    _LEAKED_PREFIXES = (
+        "я не имею", "я не могу", "извините", "к сожалению",
+        "не имею доступа", "у меня нет доступа", "как языковая модель",
+        "как ии", "i don't have access", "i cannot",
+    )
+    if any(text.lower().startswith(p) for p in _LEAKED_PREFIXES):
+        logger.warning("classify: detected leaked Claude response as input, returning unknown. text=%r", text[:80])
+        return [{"type": "unknown"}]
+
     raw = await ask_claude(text, system=build_system(tz_offset), max_tokens=1024)
     global _classify_last_raw
     _classify_last_raw = raw

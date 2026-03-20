@@ -208,6 +208,12 @@ async def handle_text(msg: Message, user_notion_id: str = "") -> None:
     text = maybe_convert(msg.text.strip())
 
     # ── Исправляем опечатки через Claude Haiku ───────────────────────────
+    # ВАЖНО: проверяем что ответ — исправленный текст, а не разговорный ответ Claude.
+    # Если ответ намного длиннее оригинала или начинается как разговорная фраза → используем оригинал.
+    _CONVERSATIONAL_STARTS = (
+        "я не", "извините", "к сожалению", "я имею", "я могу", "я не могу",
+        "не имею", "у меня нет", "мне не", "как ии", "как ai",
+    )
     from core.claude_client import ask_claude
     try:
         corrected = await ask_claude(
@@ -216,7 +222,16 @@ async def handle_text(msg: Message, user_notion_id: str = "") -> None:
             max_tokens=100,
             model="claude-haiku-4-5-20251001"
         )
-        text = corrected.strip() if corrected else text
+        if corrected:
+            c = corrected.strip()
+            c_low = c.lower()
+            # Отклоняем если: ответ в 2+ раза длиннее оригинала ИЛИ начинается разговорно
+            too_long = len(c) > len(text) * 2 + 30
+            conversational = any(c_low.startswith(s) for s in _CONVERSATIONAL_STARTS)
+            if too_long or conversational:
+                logger.warning("spell correction rejected (too_long=%s conversational=%s): %r", too_long, conversational, c[:80])
+            else:
+                text = c
     except Exception as e:
         logger.error("spell correction error: %s", e)
 
