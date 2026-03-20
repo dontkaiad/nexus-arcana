@@ -269,28 +269,35 @@ async def handle_edit_note(message: Message, data: dict, user_notion_id: str) ->
     await message.answer(f"✏️ Тег обновлён: {tag_name}")
 
 
+PAGE_SIZE = 10
+
+
 async def handle_note_search(
     message: Message,
-    query_text: str,
+    data,  # dict с "query" или строка (legacy)
     user_notion_id: str = "",
 ) -> None:
-    """Поиск заметок: два параллельных запроса по тегу и по заголовку, дедупликация."""
+    """Поиск заметок с пагинацией. data = {"query": "..."}."""
     import asyncio
     from core.notion_client import db_query
+
+    # Поддержка старого вызова со строкой и нового с dict
+    if isinstance(data, dict):
+        q = (data.get("query") or "").strip()
+    else:
+        q = (data or "").strip()
 
     db_id = os.environ.get("NOTION_DB_NOTES")
     if not db_id:
         await message.answer("❌ NOTION_DB_NOTES не задан")
         return
 
-    q = query_text.strip()
-
     if not q:
-        # Пустой запрос — показать последние 7 заметок
+        # Пустой запрос — все заметки по дате
         combined = await db_query(
             db_id,
             sorts=[{"property": "Дата", "direction": "descending"}],
-            page_size=7,
+            page_size=50,
         )
     else:
         # Два параллельных поиска: по тегу и по заголовку
@@ -298,11 +305,11 @@ async def handle_note_search(
         title_filter = {"property": "Заголовок", "title":        {"contains": q}}
 
         tag_results, title_results = await asyncio.gather(
-            db_query(db_id, filter_obj=tag_filter,   page_size=7),
-            db_query(db_id, filter_obj=title_filter, page_size=7),
+            db_query(db_id, filter_obj=tag_filter,   page_size=30),
+            db_query(db_id, filter_obj=title_filter, page_size=30),
         )
 
-        # Дедупликация по page_id, максимум 7
+        # Дедупликация по page_id
         seen: set = set()
         combined = []
         for page in tag_results + title_results:
@@ -310,16 +317,34 @@ async def handle_note_search(
             if pid not in seen:
                 seen.add(pid)
                 combined.append(page)
-            if len(combined) >= 7:
-                break
 
     if not combined:
         await message.answer("💡 Заметок не найдено")
         return
 
+    uid = message.from_user.id
+    _pending[uid] = {"results": combined, "query": q, "page": 0}
+    await _show_notes_page(message, uid, edit=False)
+
+
+async def _show_notes_page(target, uid: int, edit: bool = False) -> None:
+    """Отобразить страницу результатов поиска заметок."""
+    pending = _pending.get(uid)
+    if not pending:
+        return
+
+    results = pending["results"]
+    query   = pending.get("query", "")
+    page    = pending.get("page", 0)
+    total   = len(results)
+    total_pages = max(1, (total + PAGE_SIZE - 1) // PAGE_SIZE)
+
+    start = page * PAGE_SIZE
+    chunk = results[start : start + PAGE_SIZE]
+
     lines = []
-    for page in combined:
-        props = page["properties"]
+    for item in chunk:
+        props = item["properties"]
         title_parts = props.get("Заголовок", {}).get("title", [])
         title = title_parts[0]["plain_text"] if title_parts else "—"
         tags_items = props.get("Теги", {}).get("multi_select", [])
@@ -332,5 +357,52 @@ async def handle_note_search(
             line += f" · {date}"
         lines.append(line)
 
-    n = len(combined)
-    await message.answer(f"🔍 Нашла {n} заметок:\n\n" + "\n\n".join(lines))
+    header_query = query if query else "Все заметки"
+    header = f"🔍 {header_query} · {total} заметок · стр {page + 1}/{total_pages}"
+    text = header + "\n\n" + "\n\n".join(lines)
+
+    # Кнопки навигации
+    nav_buttons = []
+    if page > 0:
+        nav_buttons.append(InlineKeyboardButton(text="← Назад",  callback_data=f"notes_page:{uid}:prev"))
+    if start + PAGE_SIZE < total:
+        nav_buttons.append(InlineKeyboardButton(text="Ещё →",    callback_data=f"notes_page:{uid}:next"))
+    nav_buttons.append(InlineKeyboardButton(    text="✕ Закрыть", callback_data=f"notes_page:{uid}:close"))
+
+    kb = InlineKeyboardMarkup(inline_keyboard=[nav_buttons])
+
+    if edit:
+        await target.edit_text(text, reply_markup=kb)
+    else:
+        await target.answer(text, reply_markup=kb)
+
+
+async def handle_notes_page_callback(query: CallbackQuery) -> None:
+    """Пагинация notes_page:{uid}:{prev|next|close}."""
+    await query.answer()
+    parts = (query.data or "").split(":")
+    if len(parts) != 3:
+        return
+    _, uid_str, action = parts
+    uid = query.from_user.id
+
+    pending = _pending.get(uid)
+    if not pending:
+        await query.message.edit_text("⏱ Сессия истекла, поищи заново.")
+        return
+
+    if action == "close":
+        del _pending[uid]
+        await query.message.edit_text("🔍 Поиск закрыт.")
+        return
+
+    page = pending.get("page", 0)
+    total = len(pending["results"])
+    total_pages = max(1, (total + PAGE_SIZE - 1) // PAGE_SIZE)
+
+    if action == "prev":
+        pending["page"] = max(0, page - 1)
+    elif action == "next":
+        pending["page"] = min(total_pages - 1, page + 1)
+
+    await _show_notes_page(query.message, uid, edit=True)
