@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from datetime import datetime, timezone, timedelta
 from typing import Dict, List, Optional
 
@@ -10,11 +11,12 @@ from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKe
 
 from core.claude_client import ask_claude
 from core.notion_client import note_add, get_db_options, log_error, update_page, query_pages
+from core.option_helper import find_or_prepare, confirm_keyboard, pick_keyboard, format_option
 
 logger = logging.getLogger("nexus.notes")
 MOSCOW_TZ = timezone(timedelta(hours=3))
 
-# Pending: user_id → {text, suggested_tags, existing_tags, date, user_notion_id}
+# Pending: user_id → {text, selected, new, existing, date, user_notion_id, chosen}
 _pending: Dict[int, dict] = {}
 
 TAGS_SYSTEM = """Выбери теги для заметки из предложенного списка существующих.
@@ -33,69 +35,45 @@ async def handle_note(
     user_notion_id: str = "",
 ) -> None:
     """Основной обработчик заметки со smart-select тегов."""
-    from core.notion_client import match_select
-
     date = datetime.now(MOSCOW_TZ).strftime("%Y-%m-%d")
     existing = await get_db_options(db_notes_id, "Теги")
 
-    # Маппинг известных тегов на эмодзи (fallback если не добавился в classifier)
-    TAGS_EMOJI = {
-        "практика": "🔮",
-        "таро": "🔮",
-        "ленорман": "🃏",
-        "ритуал": "🕯️",
-        "расходники": "🕯️",
-        "идея": "💡",
-        "рецепт": "🍳",
-        "здоровье": "❤️",
-        "финансы": "💰",
-        "мысль": "🧠",
-    }
-
-    # Если теги переданы из classifier — нормализовать и сохранить
+    # Если теги переданы из classifier — нормализовать через find_or_prepare
     if tags:
         tag_list = []
         for item in tags.split(","):
             item = item.strip()
             if not item:
                 continue
-            item_clean = item.lstrip("🔮🕯️💡🍳❤️💰🧠").strip().lower()
+            from core.option_helper import strip_emoji
+            item_clean = strip_emoji(item).lower()
             if item_clean:
                 tag_list.append(item_clean)
 
         if tag_list:
-            normalized_tags = []
-            unknown_tags = []
-            for tag in tag_list:
-                if tag in TAGS_EMOJI:
-                    tag_with_emoji = f"{TAGS_EMOJI[tag]} {tag.capitalize()}"
-                    normalized = await match_select(db_notes_id, "Теги", tag_with_emoji)
-                else:
-                    normalized = await match_select(db_notes_id, "Теги", tag)
-                # match_select возвращает исходное значение если не нашёл
-                options = await get_db_options(db_notes_id, "Теги")
-                if normalized in options:
-                    normalized_tags.append(normalized)
-                else:
-                    unknown_tags.append(tag)
+            confirmed = []   # is_new=False, существующие
+            pending_new = [] # is_new=True, новые
 
-            if unknown_tags:
+            for tag in tag_list:
+                value, is_new = await find_or_prepare(db_notes_id, "Теги", tag)
+                if is_new:
+                    pending_new.append(value)
+                else:
+                    confirmed.append(value)
+
+            if pending_new:
                 uid = message.from_user.id
                 _pending[uid] = {
                     "text": text,
-                    "selected": normalized_tags,
-                    "new": unknown_tags,
+                    "selected": confirmed,
+                    "new": pending_new,
                     "existing": existing,
                     "date": date,
                     "user_notion_id": user_notion_id,
                 }
-                new_str = " · ".join(f"#{t}" for t in unknown_tags)
+                new_str = " · ".join(f"#{t}" for t in pending_new)
                 existing_str = ", ".join(existing) if existing else "нет"
-                kb = InlineKeyboardMarkup(inline_keyboard=[
-                    [InlineKeyboardButton(text=f"✅ Добавить {new_str}", callback_data=f"note_new:{uid}")],
-                    [InlineKeyboardButton(text="📋 Выбрать из существующих", callback_data=f"note_pick:{uid}")],
-                    [InlineKeyboardButton(text="💾 Сохранить без новых тегов", callback_data=f"note_skip:{uid}")],
-                ])
+                kb = confirm_keyboard(uid, pending_new, existing)
                 await message.answer(
                     f"💡 Не нашёл в Notion тег(и): <b>{new_str}</b>\n"
                     f"Существующие: <i>{existing_str}</i>",
@@ -104,8 +82,8 @@ async def handle_note(
                 return
 
             # Все теги найдены — сохранить сразу
-            if normalized_tags:
-                await _save_note(message, text, normalized_tags, date, user_notion_id=user_notion_id)
+            if confirmed:
+                await _save_note(message, text, confirmed, date, user_notion_id=user_notion_id)
                 return
 
     # Иначе — спросить Claude
@@ -122,7 +100,6 @@ async def handle_note(
     needs_confirm: bool = data.get("needs_confirm", False) and bool(new_tags)
 
     if not needs_confirm:
-        # Только существующие теги — new_tags не сохранять без подтверждения
         final_tags = selected if selected else ["🧠 Мысль"]
         await _save_note(message, text, final_tags, date, user_notion_id=user_notion_id)
         return
@@ -139,24 +116,17 @@ async def handle_note(
     }
 
     existing_str = ", ".join(existing) if existing else "нет"
-    new_str = " · ".join(f"#{t}" for t in new_tags)
-
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text=f"✅ Добавить {new_str}", callback_data=f"note_new:{uid}")],
-        [InlineKeyboardButton(text="📋 Выбрать из существующих", callback_data=f"note_pick:{uid}")],
-        [InlineKeyboardButton(text="💾 Сохранить без тегов", callback_data=f"note_skip:{uid}")],
-    ])
-
+    kb = confirm_keyboard(uid, new_tags, existing)
     await message.answer(
         f"💡 Не нашёл подходящих тегов среди существующих:\n"
         f"<i>{existing_str}</i>\n\n"
-        f"Предлагаю новые: <b>{new_str}</b>",
+        f"Предлагаю новые: <b>{' · '.join('#' + t for t in new_tags)}</b>",
         reply_markup=kb,
     )
 
 
 async def handle_note_callback(query: CallbackQuery) -> None:
-    """Обрабатывает выбор пользователя по тегам."""
+    """Обрабатывает opt_add/opt_pick/opt_skip/opt_sel/opt_done колбэки."""
     await query.answer()
     data = query.data or ""
     uid = query.from_user.id
@@ -173,27 +143,20 @@ async def handle_note_callback(query: CallbackQuery) -> None:
     existing = pending["existing"]
     user_notion_id = pending.get("user_notion_id", "")
 
-    if data.startswith("note_new:"):
+    if data.startswith("opt_add:"):
         tags = selected + new_tags
         del _pending[uid]
         await _save_note(query.message, text, tags, date, edit=True, user_notion_id=user_notion_id)
 
-    elif data.startswith("note_pick:"):
+    elif data.startswith("opt_pick:"):
         if not existing:
             del _pending[uid]
-            await _save_note(query.message, text, selected or ["мысль"], date, edit=True, user_notion_id=user_notion_id)
+            await _save_note(query.message, text, selected or ["🧠 Мысль"], date, edit=True, user_notion_id=user_notion_id)
             return
-        buttons = [
-            [InlineKeyboardButton(text=t, callback_data=f"note_tag:{uid}:{t}")]
-            for t in existing
-        ]
-        buttons.append([InlineKeyboardButton(text="✅ Готово", callback_data=f"note_done:{uid}")])
-        kb = InlineKeyboardMarkup(inline_keyboard=buttons)
         _pending[uid]["chosen"] = list(selected)
-        await query.message.edit_text("Выбери теги (можно несколько):", reply_markup=kb)
+        await query.message.edit_text("Выбери теги (можно несколько):", reply_markup=pick_keyboard(uid, existing))
 
-    elif data.startswith("note_tag:") or data.startswith("note_sel:"):
-        # note_tag:{uid}:{tag} — выбор тега из списка
+    elif data.startswith("opt_sel:"):
         parts = data.split(":", 2)
         tag = parts[2] if len(parts) == 3 else ""
         chosen = _pending[uid].setdefault("chosen", [])
@@ -201,14 +164,14 @@ async def handle_note_callback(query: CallbackQuery) -> None:
             chosen.append(tag)
         await query.answer(f"✓ {tag}")
 
-    elif data.startswith("note_done:"):
-        chosen = _pending.get(uid, {}).get("chosen", selected or ["мысль"])
+    elif data.startswith("opt_done:"):
+        chosen = _pending.get(uid, {}).get("chosen", selected or ["🧠 Мысль"])
         del _pending[uid]
         await _save_note(query.message, text, chosen, date, edit=True, user_notion_id=user_notion_id)
 
-    elif data.startswith("note_skip:"):
+    elif data.startswith("opt_skip:"):
         del _pending[uid]
-        await _save_note(query.message, text, [], date, edit=True, user_notion_id=user_notion_id)
+        await _save_note(query.message, text, selected or [], date, edit=True, user_notion_id=user_notion_id)
 
 
 async def _save_note(
@@ -228,7 +191,7 @@ async def _save_note(
         await message.answer(reply)
 
 
-async def handle_edit_note(message, data: dict, user_notion_id: str) -> None:
+async def handle_edit_note(message: Message, data: dict, user_notion_id: str) -> None:
     from core.config import config
     from core.notion_client import db_query, get_db_options, match_select
     hint = (data.get("hint") or "последняя").strip()
@@ -236,7 +199,7 @@ async def handle_edit_note(message, data: dict, user_notion_id: str) -> None:
     if not new_value:
         await message.answer("❌ Не указан новый тег")
         return
-    db_id = config.nexus.db_notes
+    db_id = os.environ.get("NOTION_DB_NOTES") or config.nexus.db_notes
     if hint == "последняя":
         results = await db_query(db_id, sorts=[{"property": "Дата", "direction": "descending"}], page_size=1)
     else:
@@ -245,9 +208,9 @@ async def handle_edit_note(message, data: dict, user_notion_id: str) -> None:
         await message.answer("❌ Заметка не найдена")
         return
     page_id = results[0]["id"]
-    existing = await get_db_options(db_id, "Теги")
     normalized = await match_select(db_id, "Теги", new_value)
-    tag_name = normalized if normalized else new_value
+    options = await get_db_options(db_id, "Теги")
+    tag_name = normalized if normalized in options else format_option(new_value)
     from core.notion_client import get_notion
     notion = get_notion()
     await notion.pages.update(page_id=page_id, properties={"Теги": {"multi_select": [{"name": tag_name}]}})
