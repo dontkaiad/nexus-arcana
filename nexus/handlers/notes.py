@@ -236,7 +236,7 @@ async def handle_edit_note(message, data: dict, user_notion_id: str) -> None:
     if not new_value:
         await message.answer("❌ Не указан новый тег")
         return
-    db_id = config.notion.db_notes
+    db_id = config.nexus.db_notes
     if hint == "последняя":
         results = await db_query(db_id, filters={}, sorts=[{"property": "Дата", "direction": "descending"}], limit=1, user_notion_id=user_notion_id)
     else:
