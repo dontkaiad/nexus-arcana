@@ -941,9 +941,10 @@ async def _do_save_task(message: Message, data: dict, chat_id: int = None, uid: 
     from core.config import config
     from core.notion_client import match_select, _relation
 
+    from core.option_helper import format_option
     db_id = config.nexus.db_tasks
     real_priority = await match_select(db_id, "Приоритет", data.get("priority", "Средний"))
-    real_category = await match_select(db_id, "Категория", data.get("category", "💳 Прочее"))
+    real_category = await match_select(db_id, "Категория", format_option(data.get("category", "💳 Прочее")))
     user_notion_id = data.get("user_notion_id", "")
 
     props = {

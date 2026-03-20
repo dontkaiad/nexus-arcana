@@ -9,6 +9,7 @@ from datetime import datetime, timezone, timedelta
 from aiogram.types import Message
 from core.claude_client import ask_claude, ask_claude_vision
 from core.notion_client import session_add, client_find, log_error
+from core.option_helper import format_option
 
 logger = logging.getLogger("arcana.sessions")
 MOSCOW_TZ = timezone(timedelta(hours=3))
@@ -66,7 +67,7 @@ async def handle_add_session(message: Message, text: str, user_notion_id: str = 
 
     await session_add(
         date=_now_iso(),
-        spread_type=data.get("spread_type", "Другой"),
+        spread_type=format_option(data.get("spread_type", "Другой")),
         question=data.get("question", ""),
         cards=cards_text,
         interpretation=interpretation,
