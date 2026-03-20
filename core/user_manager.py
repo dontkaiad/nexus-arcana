@@ -30,13 +30,32 @@ async def get_user(tg_id: int) -> Optional[dict]:
         results = await query_pages(
             db_id,
             filters={"property": "TG ID", "number": {"equals": tg_id}},
-            page_size=1,
+            page_size=5,  # берём 5 чтобы увидеть дубли
+        )
+        logger.info(
+            "get_user(%s): Notion вернул %d записей: %s",
+            tg_id,
+            len(results),
+            [
+                {
+                    "id": p["id"],
+                    "name": (
+                        (p.get("properties", {}).get("Имя", {}).get("title") or [{}])[0]
+                        .get("text", {}).get("content", "?")
+                    ),
+                    "tg_id_field": (
+                        p.get("properties", {}).get("TG ID", {}).get("number")
+                    ),
+                }
+                for p in results
+            ],
         )
         if not results:
             return None
 
         page = results[0]
         props = page.get("properties", {})
+        logger.info("get_user(%s): используем page_id=%s", tg_id, page["id"])
 
         name_items = props.get("Имя", {}).get("title", [])
         name = name_items[0]["text"]["content"] if name_items else ""
