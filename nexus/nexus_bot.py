@@ -374,6 +374,12 @@ async def on_note_opt_callback(query: CallbackQuery, user_notion_id: str = "") -
     await handle_note_callback(query)
 
 
+@dp.callback_query(lambda c: c.data and c.data.startswith("notes_page:"))
+async def on_notes_page_callback(query: CallbackQuery, user_notion_id: str = "") -> None:
+    from nexus.handlers.notes import handle_notes_page_callback
+    await handle_notes_page_callback(query)
+
+
 @dp.callback_query(lambda c: c.data and c.data.startswith("arcana_choice_"))
 async def on_arcana_choice(query: CallbackQuery, user_notion_id: str = "") -> None:
     """Handle: выбор между Аркана и Задача."""

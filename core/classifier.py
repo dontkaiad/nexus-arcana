@@ -542,7 +542,7 @@ async def process_item(data: Dict[str, Any], original_text: str, msg, clarify: d
     if kind == "note_search":
         from nexus.handlers.notes import handle_note_search
         logger.info("process_item: note_search query=%r", data.get("query", ""))
-        await handle_note_search(msg, data.get("query", original_text), user_notion_id=user_notion_id)
+        await handle_note_search(msg, data, user_notion_id=user_notion_id)
         return ""
 
     # СТАТИСТИКА
