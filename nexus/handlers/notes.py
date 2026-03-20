@@ -126,10 +126,35 @@ async def handle_note(
 
 
 async def handle_note_callback(query: CallbackQuery) -> None:
-    """Обрабатывает opt_add/opt_pick/opt_skip/opt_sel/opt_done колбэки."""
+    """Обрабатывает opt_add/opt_pick/opt_skip/opt_sel/opt_done и note_replace колбэки."""
     await query.answer()
     data = query.data or ""
     uid = query.from_user.id
+
+    # ── note_replace:{uid}:{old_tag}:{new_value} ─────────────────────────────
+    if data.startswith("note_replace:"):
+        parts = data.split(":", 3)
+        if len(parts) != 4:
+            return
+        old_tag = parts[2]
+        new_tag = parts[3]
+        pending = _pending.pop(uid, {})
+        page_id = pending.get("page_id")
+        current_tags = pending.get("current_tags", [])
+        if not page_id:
+            await query.message.edit_text("⏱ Сессия истекла, попробуй ещё раз.")
+            return
+        # Заменить old_tag на new_tag, остальные оставить
+        updated = [new_tag if t == old_tag else t for t in current_tags]
+        from core.notion_client import get_notion
+        notion = get_notion()
+        await notion.pages.update(
+            page_id=page_id,
+            properties={"Теги": {"multi_select": [{"name": t} for t in updated]}},
+        )
+        await query.message.edit_text(f"✏️ Тег <b>{old_tag}</b> → <b>{new_tag}</b>")
+        return
+
     pending = _pending.get(uid)
 
     if not pending:
@@ -209,10 +234,38 @@ async def handle_edit_note(message: Message, data: dict, user_notion_id: str) ->
     if not results:
         await message.answer("❌ Заметка не найдена")
         return
-    page_id = results[0]["id"]
+    page = results[0]
+    page_id = page["id"]
+    current_tags = [
+        t["name"]
+        for t in (page["properties"].get("Теги") or {}).get("multi_select", [])
+    ]
     tag_name = format_option(new_value)
+    uid = message.from_user.id
+
+    if len(current_tags) > 1:
+        # Спросить, какой тег заменить
+        _pending[uid] = {"page_id": page_id, "current_tags": current_tags, "new_value": tag_name}
+        buttons = [
+            [InlineKeyboardButton(
+                text=t,
+                callback_data=f"note_replace:{uid}:{t}:{tag_name}"
+            )]
+            for t in current_tags
+        ]
+        kb = InlineKeyboardMarkup(inline_keyboard=buttons)
+        await message.answer(
+            f"Какой тег заменить на <b>{tag_name}</b>?",
+            reply_markup=kb,
+        )
+        return
+
+    # 0 или 1 тег — заменяем сразу (или просто выставляем новый)
     notion = get_notion()
-    await notion.pages.update(page_id=page_id, properties={"Теги": {"multi_select": [{"name": tag_name}]}})
+    await notion.pages.update(
+        page_id=page_id,
+        properties={"Теги": {"multi_select": [{"name": tag_name}]}},
+    )
     await message.answer(f"✏️ Тег обновлён: {tag_name}")
 
 
