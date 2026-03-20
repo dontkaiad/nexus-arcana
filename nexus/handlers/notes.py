@@ -284,29 +284,34 @@ async def handle_note_search(
         return
 
     q = query_text.strip()
+
     if not q:
-        await message.answer("💡 Укажи что искать")
-        return
+        # Пустой запрос — показать последние 7 заметок
+        combined = await db_query(
+            db_id,
+            sorts=[{"property": "Дата", "direction": "descending"}],
+            page_size=7,
+        )
+    else:
+        # Два параллельных поиска: по тегу и по заголовку
+        tag_filter   = {"property": "Теги",      "multi_select": {"contains": q}}
+        title_filter = {"property": "Заголовок", "title":        {"contains": q}}
 
-    # Два параллельных поиска: по тегу и по заголовку
-    tag_filter   = {"property": "Теги",      "multi_select": {"contains": q}}
-    title_filter = {"property": "Заголовок", "title":        {"contains": q}}
+        tag_results, title_results = await asyncio.gather(
+            db_query(db_id, filter_obj=tag_filter,   page_size=7),
+            db_query(db_id, filter_obj=title_filter, page_size=7),
+        )
 
-    tag_results, title_results = await asyncio.gather(
-        db_query(db_id, filter_obj=tag_filter,   page_size=7),
-        db_query(db_id, filter_obj=title_filter, page_size=7),
-    )
-
-    # Дедупликация по page_id, максимум 7
-    seen: set = set()
-    combined = []
-    for page in tag_results + title_results:
-        pid = page["id"]
-        if pid not in seen:
-            seen.add(pid)
-            combined.append(page)
-        if len(combined) >= 7:
-            break
+        # Дедупликация по page_id, максимум 7
+        seen: set = set()
+        combined = []
+        for page in tag_results + title_results:
+            pid = page["id"]
+            if pid not in seen:
+                seen.add(pid)
+                combined.append(page)
+            if len(combined) >= 7:
+                break
 
     if not combined:
         await message.answer("💡 Заметок не найдено")
