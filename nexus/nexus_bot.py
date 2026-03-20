@@ -353,8 +353,8 @@ async def handle_text(msg: Message, user_notion_id: str = "") -> None:
         )
 
 
-@dp.callback_query(lambda c: c.data and c.data.startswith("opt_"))
-async def on_opt_callback(query: CallbackQuery, user_notion_id: str = "") -> None:
+@dp.callback_query(lambda c: c.data and (c.data.startswith("opt_") or c.data.startswith("note_replace:")))
+async def on_note_opt_callback(query: CallbackQuery, user_notion_id: str = "") -> None:
     from nexus.handlers.notes import handle_note_callback
     await handle_note_callback(query)
 
