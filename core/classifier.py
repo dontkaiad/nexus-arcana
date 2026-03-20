@@ -154,14 +154,14 @@ def build_system(tz_offset: int = 3) -> str:
         '  Ответ: {"type":"stats","query":"скок потратила на котов в этом месяце"}',
         "",
         "ПРИМЕР ПОВТОРОВ:",
-        "  Ввод: 'купить корм каждый день в 10'",
-        '  Ответ: {"type":"task","title":"купить корм","category":"🐾 Коты","priority":"Средний","deadline":null,"repeat":"Ежедневно","day_of_week":null,"repeat_time":"10:00","confidence":"low"}',
-        "  Ввод: 'тренировка каждую пятницу в 18'",
-        '  Ответ: {"type":"task","title":"тренировка","category":"📚 Хобби/Учеба","priority":"Средний","deadline":null,"repeat":"Еженедельно","day_of_week":"Пт","repeat_time":"18:00","confidence":"low"}',
+        "  Ввод: 'погладить кота каждый день в 9'",
+        '  Ответ: {"type":"task","title":"погладить кота","category":"🐾 Коты","priority":"Средний","deadline":null,"repeat":"Ежедневно","repeat_time":"09:00","day_of_week":null,"confidence":"low"}',
+        "  Ввод: 'йога каждую пятницу в 18'",
+        '  Ответ: {"type":"task","title":"йога","category":"📚 Хобби/Учеба","priority":"Средний","deadline":null,"repeat":"Еженедельно","repeat_time":"18:00","day_of_week":"Пт","confidence":"low"}',
         "  Ввод: 'каждое утро пить воду'",
-        '  Ответ: {"type":"task","title":"пить воду","category":"🏥 Здоровье","priority":"Средний","deadline":null,"repeat":"Ежедневно","day_of_week":null,"repeat_time":"09:00","confidence":"low"}',
+        '  Ответ: {"type":"task","title":"пить воду","category":"🏥 Здоровье","priority":"Средний","deadline":null,"repeat":"Ежедневно","repeat_time":"09:00","day_of_week":null,"confidence":"low"}',
         "  Ввод: 'платить за аренду раз в месяц'",
-        '  Ответ: {"type":"task","title":"платить за аренду","category":"🏠 Жилье","priority":"Средний","deadline":null,"repeat":"Ежемесячно","day_of_week":null,"repeat_time":null,"confidence":"low"}',
+        '  Ответ: {"type":"task","title":"платить за аренду","category":"🏠 Жилье","priority":"Средний","deadline":null,"repeat":"Ежемесячно","repeat_time":null,"day_of_week":null,"confidence":"low"}',
         "",
         "ПРИМЕР ARCANA_REDIRECT:",
         "  Ввод: 'провести ритуал защиты'",
@@ -409,8 +409,12 @@ async def process_item(data: Dict[str, Any], original_text: str, msg, clarify: d
         return "❌ Ошибка при обновлении записи"
     if kind == "task":
         from nexus.handlers.tasks import handle_task_parsed, _REL_TIME_RE, _parse_relative_time, _get_user_tz
-        logger.info("classifier: task detected - title=%r category=%r deadline=%r priority=%r",
-                   data.get("title"), data.get("category"), data.get("deadline"), data.get("priority"))
+        logger.info(
+            "classifier: task detected - title=%r category=%r deadline=%r priority=%r "
+            "repeat=%r day_of_week=%r repeat_time=%r",
+            data.get("title"), data.get("category"), data.get("deadline"), data.get("priority"),
+            data.get("repeat"), data.get("day_of_week"), data.get("repeat_time"),
+        )
 
         # Post-processing: исправить относительное время которое Claude мог понять неверно
         # "через 2 мин" → Claude пишет "00:02", правильно: datetime.now() + timedelta(minutes=2)
