@@ -91,8 +91,9 @@ async def handle_note(
     needs_confirm: bool = data.get("needs_confirm", False) and bool(new_tags)
 
     if not needs_confirm:
-        all_tags = selected + new_tags
-        await _save_note(message, text, all_tags, date, user_notion_id=user_notion_id)
+        # Только существующие теги — new_tags не сохранять без подтверждения
+        final_tags = selected if selected else ["🧠 Мысль"]
+        await _save_note(message, text, final_tags, date, user_notion_id=user_notion_id)
         return
 
     # Нужно подтверждение новых тегов
