@@ -507,7 +507,7 @@ def _parse_month_from_query(text: str) -> str:
     return f"{year}-{month_num:02d}"
 
 
-async def handle_finance_summary(query: str = "", user_notion_id: str = "") -> str:
+async def handle_finance_summary(query: str = "", user_notion_id: str = "", uid: int = 0) -> str:
     """Возвращает строку со статистикой. Вызывающий сам отправляет её пользователю."""
     logger.info("handle_finance_summary: user_notion_id=%r query=%r", user_notion_id, query)
     # Попробовать распарсить категорию и имя из запроса
@@ -591,13 +591,35 @@ async def handle_finance_summary(query: str = "", user_notion_id: str = "") -> s
             month_label = now.strftime("%B %Y")
 
         report_title = f"{header} — {month_label}"
-        lines = [
-            f"{icon} {header} — {month_label}",
-            f"{label}: {total:,.0f}₽  ({len(matched)} зап.)",
-        ]
+
         if matched:
             all_sorted = sorted(matched, key=lambda x: x[0], reverse=True)
-            lines.append("")
+
+            # Пагинация если записей > PAGE_SIZE и есть uid
+            from core.pagination import PAGE_SIZE as _PS, register_pages
+            if uid and len(all_sorted) > _PS:
+                _MONTHS = "янв фев мар апр май июн июл авг сен окт ноя дек".split()
+
+                def _finance_fmt(it: dict) -> str:
+                    try:
+                        d = datetime.strptime(it["date"][:10], "%Y-%m-%d")
+                        day = f"{d.day} {_MONTHS[d.month - 1]}"
+                    except Exception:
+                        day = it["date"][:10]
+                    return f"• {day} — {it['desc'] or '—'} — {it['amount']:,.0f}₽"
+
+                finance_items = [
+                    {"date": ds, "desc": desc, "amount": amt}
+                    for ds, desc, amt in all_sorted
+                ]
+                register_pages(uid, finance_items, f"{icon} {report_title} · {total:,.0f}₽", _finance_fmt)
+                return "__paginated__"
+
+            lines = [
+                f"{icon} {header} — {month_label}",
+                f"{label}: {total:,.0f}₽  ({len(matched)} зап.)",
+                "",
+            ]
             for date_str, desc, amount in all_sorted:
                 try:
                     d = datetime.strptime(date_str[:10], "%Y-%m-%d")
@@ -605,6 +627,11 @@ async def handle_finance_summary(query: str = "", user_notion_id: str = "") -> s
                 except Exception:
                     day = date_str[:10]
                 lines.append(f"• {day} — {desc or '—'} — {amount:,.0f}₽")
+        else:
+            lines = [
+                f"{icon} {header} — {month_label}",
+                f"{label}: {total:,.0f}₽  (0 зап.)",
+            ]
 
         return await _stats_publish(report_title, lines)
 
