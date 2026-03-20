@@ -14,7 +14,7 @@ from core.notion_client import note_add, get_db_options, log_error
 logger = logging.getLogger("nexus.notes")
 MOSCOW_TZ = timezone(timedelta(hours=3))
 
-# Pending: user_id → {text, suggested_tags, existing_tags, date}
+# Pending: user_id → {text, suggested_tags, existing_tags, date, user_notion_id}
 _pending: Dict[int, dict] = {}
 
 TAGS_SYSTEM = """Выбери теги для заметки из предложенного списка существующих.
@@ -25,13 +25,19 @@ TAGS_SYSTEM = """Выбери теги для заметки из предлож
 - new: [] если все нужные теги есть в existing"""
 
 
-async def handle_note(message: Message, text: str, db_notes_id: str, tags: str = "") -> None:
+async def handle_note(
+    message: Message,
+    text: str,
+    db_notes_id: str,
+    tags: str = "",
+    user_notion_id: str = "",
+) -> None:
     """Основной обработчик заметки со smart-select тегов."""
     from core.notion_client import match_select
-    
+
     date = datetime.now(MOSCOW_TZ).strftime("%Y-%m-%d")
     existing = await get_db_options(db_notes_id, "Теги")
-    
+
     # Маппинг известных тегов на эмодзи (fallback если не добавился в classifier)
     TAGS_EMOJI = {
         "практика": "🔮",
@@ -44,38 +50,33 @@ async def handle_note(message: Message, text: str, db_notes_id: str, tags: str =
         "финансы": "💰",
         "мысль": "🧠",
     }
-    
+
     # Если теги переданы из classifier — нормализовать и сохранить
     if tags:
-        # Парсить строку тегов (может быть "🕯️ расходники" или просто "расходники")
         tag_list = []
         for item in tags.split(","):
             item = item.strip()
             if not item:
                 continue
-            # Если есть эмодзи в начале, убрать его
             item_clean = item.lstrip("🔮🕯️💡🍳❤️💰🧠").strip().lower()
             if item_clean:
                 tag_list.append(item_clean)
-        
+
         if tag_list:
-            # Нормализовать теги через match_select
             normalized_tags = []
             for tag in tag_list:
-                # Если тег известный — добавить эмодзи перед поиском
                 if tag in TAGS_EMOJI:
                     tag_with_emoji = f"{TAGS_EMOJI[tag]} {tag.capitalize()}"
                     normalized = await match_select(db_notes_id, "Теги", tag_with_emoji)
                 else:
                     normalized = await match_select(db_notes_id, "Теги", tag)
-                
                 if normalized:
                     normalized_tags.append(normalized)
-            
+
             if normalized_tags:
-                await _save_note(message, text, normalized_tags, date)
+                await _save_note(message, text, normalized_tags, date, user_notion_id=user_notion_id)
                 return
-    
+
     # Иначе — спросить Claude
     prompt = f"Заметка: {text}\nСуществующие теги: {existing}"
     raw = await ask_claude(prompt, system=TAGS_SYSTEM, max_tokens=100)
@@ -90,15 +91,20 @@ async def handle_note(message: Message, text: str, db_notes_id: str, tags: str =
     needs_confirm: bool = data.get("needs_confirm", False) and bool(new_tags)
 
     if not needs_confirm:
-        # Всё хорошо — сохраняем сразу
-        tags = selected + new_tags
-        await _save_note(message, text, tags, date)
+        all_tags = selected + new_tags
+        await _save_note(message, text, all_tags, date, user_notion_id=user_notion_id)
         return
 
     # Нужно подтверждение новых тегов
     uid = message.from_user.id
-    _pending[uid] = {"text": text, "selected": selected, "new": new_tags,
-                     "existing": existing, "date": date}
+    _pending[uid] = {
+        "text": text,
+        "selected": selected,
+        "new": new_tags,
+        "existing": existing,
+        "date": date,
+        "user_notion_id": user_notion_id,
+    }
 
     existing_str = ", ".join(existing) if existing else "нет"
     new_str = " · ".join(f"#{t}" for t in new_tags)
@@ -133,30 +139,29 @@ async def handle_note_callback(query: CallbackQuery) -> None:
     selected = pending["selected"]
     new_tags = pending["new"]
     existing = pending["existing"]
+    user_notion_id = pending.get("user_notion_id", "")
 
     if data.startswith("note_new:"):
         tags = selected + new_tags
         del _pending[uid]
-        await query.message.edit_text(f"💡 Сохраняю с новыми тегами: {' '.join(f'#{t}' for t in tags)}")
-        await _save_note(query.message, text, tags, date, edit=True)
+        await _save_note(query.message, text, tags, date, edit=True, user_notion_id=user_notion_id)
 
     elif data.startswith("note_pick:"):
-        # Показываем кнопки с существующими тегами
         if not existing:
             del _pending[uid]
-            await _save_note(query.message, text, selected or ["мысль"], date, edit=True)
+            await _save_note(query.message, text, selected or ["мысль"], date, edit=True, user_notion_id=user_notion_id)
             return
         buttons = [
-            [InlineKeyboardButton(text=t, callback_data=f"note_sel:{uid}:{t}")]
+            [InlineKeyboardButton(text=t, callback_data=f"note_tag:{uid}:{t}")]
             for t in existing
         ]
         buttons.append([InlineKeyboardButton(text="✅ Готово", callback_data=f"note_done:{uid}")])
         kb = InlineKeyboardMarkup(inline_keyboard=buttons)
-        # Запоминаем выбор в pending
         _pending[uid]["chosen"] = list(selected)
         await query.message.edit_text("Выбери теги (можно несколько):", reply_markup=kb)
 
-    elif data.startswith("note_sel:"):
+    elif data.startswith("note_tag:") or data.startswith("note_sel:"):
+        # note_tag:{uid}:{tag} — выбор тега из списка
         parts = data.split(":", 2)
         tag = parts[2] if len(parts) == 3 else ""
         chosen = _pending[uid].setdefault("chosen", [])
@@ -167,41 +172,56 @@ async def handle_note_callback(query: CallbackQuery) -> None:
     elif data.startswith("note_done:"):
         chosen = _pending.get(uid, {}).get("chosen", selected or ["мысль"])
         del _pending[uid]
-        await query.message.edit_text(f"💡 Сохраняю: {' '.join(f'#{t}' for t in chosen)}")
-        await _save_note(query.message, text, chosen, date, edit=True)
+        await _save_note(query.message, text, chosen, date, edit=True, user_notion_id=user_notion_id)
 
     elif data.startswith("note_skip:"):
         del _pending[uid]
-        await _save_note(query.message, text, [], date, edit=True)
+        await _save_note(query.message, text, [], date, edit=True, user_notion_id=user_notion_id)
 
 
-async def _save_note(message: Message, text: str, tags: List[str], date: str, edit: bool = False) -> None:
-    result = await note_add(text=text, tags=tags, date=date)
-    reply = f"💡 Заметка сохранена\n{' '.join(f'#{t}' for t in tags)}" if result else "⚠️ Ошибка записи в Notion."
+async def _save_note(
+    message: Message,
+    text: str,
+    tags: List[str],
+    date: str,
+    edit: bool = False,
+    user_notion_id: str = "",
+) -> None:
+    result = await note_add(text=text, tags=tags, date=date, user_notion_id=user_notion_id)
+    tags_str = ", ".join(tags) if tags else "нет"
+    reply = f"💡 Заметка сохранена! Теги: {tags_str}" if result else "⚠️ Ошибка записи в Notion."
     if edit:
         await message.edit_text(reply)
     else:
         await message.answer(reply)
 
 
-# ──────────────────────────────────────────────────────────────────────────────
-# РЕГИСТРАЦИЯ В nexus_bot.py
-# ──────────────────────────────────────────────────────────────────────────────
-# 1. Добавить импорт:
-#    from nexus.handlers.notes import handle_note_callback
-#
-# 2. Добавить handler в dp (ПЕРЕД handle_unauthorized):
-#
-# @dp.callback_query(lambda c: c.data and c.data.startswith("note_"))
-# async def on_note_callback(query: CallbackQuery) -> None:
-#     await handle_note_callback(query)
-#
-# 3. В _process_item, блок kind == "note":
-#    Заменить вызов note_add на:
-#
-#    from core.config import config
-#    from nexus.handlers.notes import handle_note as _handle_note
-#    await _handle_note(msg_obj, data.get("text", original_text), config.nexus.db_notes)
-#    return ""   # ответ отправляет сам handler
-#
-#    (нужно передать msg объект — добавить msg как параметр в _process_item)
+async def handle_note_search(
+    message: Message,
+    query_text: str,
+    user_notion_id: str = "",
+) -> None:
+    """Поиск заметок по тексту заголовка. Выводит до 5 результатов."""
+    from core.notion_client import notes_search
+
+    results = await notes_search(query_text, user_notion_id=user_notion_id)
+    if not results:
+        await message.answer("Заметок не найдено")
+        return
+
+    lines = []
+    for page in results[:5]:
+        props = page["properties"]
+        title_parts = props.get("Заголовок", {}).get("title", [])
+        title = title_parts[0]["plain_text"] if title_parts else "—"
+        tags_items = props.get("Теги", {}).get("multi_select", [])
+        tags_str = ", ".join(t["name"] for t in tags_items)
+        date = (props.get("Дата", {}).get("date") or {}).get("start", "")[:10]
+        line = f"💡 {title}"
+        if tags_str:
+            line += f" [{tags_str}]"
+        if date:
+            line += f" · {date}"
+        lines.append(line)
+
+    await message.answer("\n".join(lines))

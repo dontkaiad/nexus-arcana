@@ -98,6 +98,11 @@ def build_system(tz_offset: int = 3) -> str:
         "note — заметка:",
         '{"type":"note","text":"содержание","tags":"<список тегов через запятую>"}',
         "",
+        "note_search — поиск заметок по ключевым словам:",
+        '{"type":"note_search","query":"ключевые слова"}',
+        "Примеры: 'найди заметку про таро' → note_search; 'найди мою запись про масло' → note_search",
+        "ВАЖНО: note_search только если явно просят найти/показать/искать заметку!",
+        "",
         "stats — статистика / сводка / вопрос о расходах по категории:",
         '{"type":"stats","query":"<запрос>"}',
         "Примеры stats: 'сколько потратила на коты', 'скок ушло на транспорт', 'сколько потратила на котов в этом месяце',",
@@ -463,6 +468,13 @@ async def process_item(data: Dict[str, Any], original_text: str, msg, clarify: d
         
         await handle_note(msg, data.get("text", original_text), config.nexus.db_notes, raw_tags,
                           user_notion_id=user_notion_id)
+        return ""
+
+    # ПОИСК ЗАМЕТОК
+    if kind == "note_search":
+        from nexus.handlers.notes import handle_note_search
+        logger.info("process_item: note_search query=%r", data.get("query", ""))
+        await handle_note_search(msg, data.get("query", original_text), user_notion_id=user_notion_id)
         return ""
 
     # СТАТИСТИКА
