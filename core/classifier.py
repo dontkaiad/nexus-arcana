@@ -547,13 +547,20 @@ async def process_item(data: Dict[str, Any], original_text: str, msg, clarify: d
 
     # СТАТИСТИКА
     if kind == "stats":
-        tg_id = msg.from_user.id if msg and msg.from_user else "unknown"
+        tg_id = msg.from_user.id if msg and msg.from_user else 0
         logger.info(
             "process_item: stats request - tg_id=%s user_notion_id=%r query=%r",
             tg_id, user_notion_id, data.get("query", ""),
         )
         from nexus.handlers.finance import handle_finance_summary
-        return await handle_finance_summary(query=data.get("query", ""), user_notion_id=user_notion_id)
+        result = await handle_finance_summary(
+            query=data.get("query", ""), user_notion_id=user_notion_id, uid=int(tg_id) if tg_id else 0
+        )
+        if result == "__paginated__" and tg_id:
+            from core.pagination import get_page_text, get_page_keyboard
+            await msg.answer(get_page_text(int(tg_id)), reply_markup=get_page_keyboard(int(tg_id)))
+            return ""
+        return result
 
     # ПОМОЩЬ
     if kind == "help":
