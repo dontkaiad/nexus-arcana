@@ -12,7 +12,7 @@ from aiogram import Router, F, Bot
 from aiogram.filters import BaseFilter
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from core.claude_client import ask_claude
-from core.notion_client import tasks_active, log_error, page_create, _title, _select, _date, db_query, get_notion
+from core.notion_client import tasks_active, log_error, page_create, _title, _select, _date, _status, update_page, db_query, get_notion
 from core.layout import maybe_convert
 
 logger = logging.getLogger("nexus.tasks")
@@ -287,6 +287,85 @@ def _parse_relative_time(text: str, tz_offset: int) -> Optional[str]:
     else:  # день / дней / дня
         result = now + timedelta(days=n)
     return result.strftime("%Y-%m-%dT%H:%M")
+
+
+import calendar as _calendar
+
+
+def _next_cycle_date(current_date_str: str, repeat: str, tz_offset: int = 3) -> str:
+    """Вычислить дату следующего цикла для повторяющейся задачи.
+
+    Если входная строка содержит время (YYYY-MM-DDTHH:MM) — время сохраняется.
+    Возвращает YYYY-MM-DD или YYYY-MM-DDTHH:MM.
+    """
+    has_time = "T" in (current_date_str or "")
+    now = datetime.now(timezone(timedelta(hours=tz_offset)))
+    if current_date_str:
+        try:
+            base = datetime.strptime(current_date_str[:10], "%Y-%m-%d").date()
+        except ValueError:
+            base = now.date()
+    else:
+        base = now.date()
+
+    if repeat == "Ежедневно":
+        next_date = base + timedelta(days=1)
+    elif repeat == "Еженедельно":
+        next_date = base + timedelta(weeks=1)
+    elif repeat == "Ежемесячно":
+        month = base.month + 1
+        year = base.year
+        if month > 12:
+            month = 1
+            year += 1
+        try:
+            next_date = base.replace(year=year, month=month)
+        except ValueError:
+            last_day = _calendar.monthrange(year, month)[1]
+            next_date = base.replace(year=year, month=month, day=last_day)
+    else:
+        next_date = base + timedelta(days=1)
+
+    result = next_date.strftime("%Y-%m-%d")
+    if has_time:
+        time_part = current_date_str.split("T")[1][:5]
+        result = result + "T" + time_part
+    return result
+
+
+async def _handle_recurring_task_reset(
+    message: Message,
+    task_id: str,
+    task_props: dict,
+    repeat: str,
+    title: str,
+    uid: int = 0,
+) -> None:
+    """Сбросить повторяющуюся задачу: сдвинуть дедлайн/напоминание, статус → Not started."""
+    tz_offset = await _get_user_tz(uid)
+
+    deadline_prop = task_props.get("Дедлайн", {}).get("date") or {}
+    current_deadline = deadline_prop.get("start", "")
+
+    reminder_prop = task_props.get("Напоминание", {}).get("date") or {}
+    current_reminder = reminder_prop.get("start", "")
+
+    new_deadline = _next_cycle_date(current_deadline, repeat, tz_offset)
+
+    update_props = {"Статус": _status("Not started")}
+    if current_deadline:
+        update_props["Дедлайн"] = _date(new_deadline[:10])
+    if current_reminder:
+        new_reminder = _next_cycle_date(current_reminder, repeat, tz_offset)
+        update_props["Напоминание"] = _date(new_reminder)
+
+    try:
+        await update_page(task_id, update_props)
+        next_display = new_deadline[:10]
+        await message.answer(f"🔄 Повторяющаяся задача сброшена. Следующий раз: {next_display}")
+    except Exception as e:
+        logger.error("_handle_recurring_task_reset error: %s", e)
+        await message.answer("⚠️ Ошибка обновления повторяющейся задачи.")
 
 
 # ── Handlers ───────────────────────────────────────────────────────────────────
@@ -869,6 +948,12 @@ async def _do_save_task(message: Message, data: dict, chat_id: int = None, uid: 
     # Запоминаем последнюю созданную запись для контекстного редактирования
     last_record_set(uid, "task", result)
 
+    # Сохраняем поля повторения если задача повторяющаяся
+    _repeat = data.get("repeat") or "Нет"
+    if _repeat and _repeat != "Нет":
+        from core.notion_client import update_task_repeat_fields
+        await update_task_repeat_fields(result, _repeat, data.get("day_of_week"), data.get("repeat_time"))
+
     # Планируем напоминание и дедлайн
     cid = chat_id or message.chat.id
     tz_offset = await _get_user_tz(uid)
@@ -902,14 +987,26 @@ async def _do_save_task(message: Message, data: dict, chat_id: int = None, uid: 
 
     deadline_display = (data.get("deadline") or "без даты").replace("T", " ")
     reminder_display = (data.get("reminder_time") or "").replace("T", " ")
-    
+
+    repeat_line = ""
+    _repeat = data.get("repeat") or "Нет"
+    if _repeat and _repeat != "Нет":
+        repeat_parts = [_repeat]
+        _dow = data.get("day_of_week") or ""
+        _rtime = data.get("repeat_time") or ""
+        if _dow:
+            repeat_parts.append(_dow)
+        if _rtime:
+            repeat_parts.append(f"в {_rtime}")
+        repeat_line = f"\n🔄 Повтор: {' '.join(repeat_parts)}"
+
     msg_id = data.get("msg_id")
     text_content = (
         f"✅ <b>Задача создана!</b>\n"
         f"📌 {data['title']}\n"
         f"🏷 {real_category} · {real_priority}\n"
         f"📅 Дедлайн: {deadline_display}\n"
-        f"🔔 Напоминание: {reminder_display}{extra}"
+        f"🔔 Напоминание: {reminder_display}{repeat_line}{extra}"
     )
     
     # Редактируем старое сообщение вместо создания нового
@@ -961,6 +1058,7 @@ async def handle_task_done(message: Message, task_hint: str, user_notion_id: str
     import random
     from core.notion_client import update_task_status
 
+    uid = message.from_user.id
     hint_words = _hint_words(task_hint)
     if not hint_words:
         await message.answer("⚠️ Не понял о какой задаче речь. Напиши точнее.")
@@ -971,7 +1069,7 @@ async def handle_task_done(message: Message, task_hint: str, user_notion_id: str
         await message.answer("📭 Нет активных задач.")
         return
 
-    # Оценить каждую задачу
+    # Оценить каждую задачу (сохраняем props для проверки повтора)
     scored = []
     for t in tasks:
         title_parts = t["properties"].get("Задача", {}).get("title", [])
@@ -980,7 +1078,7 @@ async def handle_task_done(message: Message, task_hint: str, user_notion_id: str
             continue
         score = _task_score(title, hint_words)
         if score > 0:
-            scored.append((score, title, t["id"]))
+            scored.append((score, title, t["id"], t["properties"]))
 
     if not scored:
         await message.answer(
@@ -993,7 +1091,11 @@ async def handle_task_done(message: Message, task_hint: str, user_notion_id: str
 
     # Единственный хороший матч — отметить сразу
     if len(scored) == 1 or scored[0][0] > scored[1][0]:
-        _, title, task_id = scored[0]
+        _, title, task_id, task_props = scored[0]
+        repeat = (task_props.get("Повтор", {}).get("select") or {}).get("name", "Нет")
+        if repeat and repeat != "Нет":
+            await _handle_recurring_task_reset(message, task_id, task_props, repeat, title, uid)
+            return
         result = await update_task_status(task_id, "Done")
         if result:
             phrase = random.choice(_DONE_PHRASES)
@@ -1005,7 +1107,7 @@ async def handle_task_done(message: Message, task_hint: str, user_notion_id: str
     # Несколько одинаковых матчей — показать кнопки выбора (до 5)
     top = scored[:5]
     buttons = []
-    for _, title, task_id in top:
+    for _, title, task_id, _ in top:
         short_title = title[:32] + ("…" if len(title) > 32 else "")
         buttons.append([InlineKeyboardButton(
             text=f"✅ {short_title}",
@@ -1023,10 +1125,32 @@ async def task_done_select(call: CallbackQuery) -> None:
     import random
     from core.notion_client import update_task_status
     task_id = call.data[len("task_done_select_"):]
+    uid = call.from_user.id
+
+    # Получить props задачи чтобы проверить повтор
+    repeat = "Нет"
+    task_props = {}
+    title_text = ""
+    try:
+        client = get_notion()
+        page = await client.pages.retrieve(page_id=task_id)
+        task_props = page.get("properties", {})
+        repeat = (task_props.get("Повтор", {}).get("select") or {}).get("name", "Нет")
+        title_parts = task_props.get("Задача", {}).get("title", [])
+        title_text = title_parts[0]["plain_text"] if title_parts else ""
+    except Exception as e:
+        logger.warning("task_done_select: не удалось получить props: %s", e)
+
+    await call.message.edit_reply_markup()
+
+    if repeat and repeat != "Нет":
+        await call.answer("🔄 Сброс повтора")
+        await _handle_recurring_task_reset(call.message, task_id, task_props, repeat, title_text, uid)
+        return
+
     result = await update_task_status(task_id, "Done")
     if result:
         phrase = random.choice(_DONE_PHRASES)
-        await call.message.edit_reply_markup()
         await call.answer("✅ Записано!")
         await call.message.reply(phrase + "\n✅ Выполнено")
     else:
