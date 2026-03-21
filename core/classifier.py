@@ -271,6 +271,41 @@ _MEMORY_DELETE_RE = re.compile(
 _BUY_TASK_RE = re.compile(r"^\s*(купить|купи)\b", re.IGNORECASE)
 _CURRENCY_RE = re.compile(r"\d+\s*(₽|руб\.?|р\b)", re.IGNORECASE)
 
+_TASK_CATS = ["🐾 Коты", "🏠 Жилье", "🚬 Привычки", "🍜 Продукты",
+              "🍱 Кафе/Доставка", "🚕 Транспорт", "💅 Бьюти", "👗 Гардероб",
+              "💻 Подписки", "🏥 Здоровье", "📚 Хобби/Учеба", "💳 Прочее"]
+
+_CATEGORY_SYSTEM = (
+    "Определи категорию задачи из списка ниже. "
+    "Отвечай ТОЛЬКО одним значением из списка, без пояснений.\n"
+    "Категории: " + ", ".join(_TASK_CATS) + "\n"
+    "Примеры:\n"
+    "  'купить royal canin' → 🐾 Коты\n"
+    "  'купить хлеб молоко' → 🍜 Продукты\n"
+    "  'купить шампунь' → 💅 Бьюти\n"
+    "  'купить корм коту' → 🐾 Коты\n"
+    "  'купить кофе' → 🍜 Продукты\n"
+    "  'купить кроссовки' → 👗 Гардероб"
+)
+
+
+async def _haiku_task_category(title: str) -> str:
+    """Определить категорию задачи через Haiku. Fallback — 💳 Прочее."""
+    try:
+        raw = await ask_claude(
+            title,
+            system=_CATEGORY_SYSTEM,
+            max_tokens=20,
+            model="claude-haiku-4-5-20251001",
+        )
+        raw = raw.strip()
+        for cat in _TASK_CATS:
+            if cat in raw or cat.split(" ", 1)[-1].lower() in raw.lower():
+                return cat
+    except Exception as e:
+        logger.error("_haiku_task_category: %s", e)
+    return "💳 Прочее"
+
 _TZ_RE = re.compile(
     r"(utc\s*[+-]\d+"
     r"|мой\s+часовой\s+пояс|часовой\s+пояс|мой\s+пояс|timezone"
@@ -400,7 +435,9 @@ async def classify(text: str, tz_offset: int = 3) -> list[dict]:
     # Быстрый pre-фильтр: "купить/купи X" без явной суммы → задача, не финансы
     if _BUY_TASK_RE.match(text) and not _CURRENCY_RE.search(text):
         logger.info("classify: buy_task matched (no currency)")
-        return [{"type": "task", "title": text.strip(), "category": "🛒 Предпочтения",
+        category = await _haiku_task_category(text)
+        logger.info("classify: buy_task category=%r", category)
+        return [{"type": "task", "title": text.strip(), "category": category,
                  "priority": "Средний", "deadline": None, "repeat": "Нет",
                  "repeat_time": None, "day_of_week": None, "confidence": "low"}]
 
