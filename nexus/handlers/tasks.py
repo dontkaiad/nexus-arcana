@@ -121,6 +121,61 @@ def init_scheduler(bot: Bot) -> None:
     _scheduler.start()
     logger.info("APScheduler started")
 
+
+async def restore_reminders_on_startup() -> None:
+    """Восстановить APScheduler jobs для задач с будущими напоминаниями."""
+    from core.config import config
+    from core.user_manager import get_user
+    from core.notion_client import db_query
+    import os
+
+    db_id = os.environ.get("NOTION_DB_TASKS") or config.nexus.db_tasks
+    if not db_id or not _scheduler or not _bot:
+        logger.warning("restore_reminders_on_startup: scheduler/bot/db not ready")
+        return
+
+    now_utc = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+    restored = 0
+
+    for tg_id in config.allowed_ids:
+        try:
+            user_data = await get_user(tg_id)
+            if not user_data:
+                continue
+            user_notion_id = user_data.get("notion_page_id", "")
+
+            filter_obj: dict = {
+                "and": [
+                    {"property": "Напоминание", "date": {"after": now_utc}},
+                    {"property": "Статус", "status": {"does_not_equal": "Done"}},
+                ]
+            }
+            if user_notion_id:
+                filter_obj["and"].append(
+                    {"property": "🪪 Пользователи", "relation": {"contains": user_notion_id}}
+                )
+
+            pages = await db_query(db_id, filter_obj=filter_obj, page_size=100)
+            tz_offset = await _get_user_tz(tg_id)
+
+            for page in pages:
+                try:
+                    props = page["properties"]
+                    task_id = page["id"]
+                    title_parts = props.get("Задача", {}).get("title", [])
+                    title = title_parts[0]["plain_text"] if title_parts else "Задача"
+                    reminder_start = (props.get("Напоминание", {}).get("date") or {}).get("start", "")
+                    if reminder_start:
+                        await _schedule_reminder(tg_id, title, reminder_start[:16], task_id, tz_offset)
+                        restored += 1
+                except Exception as e:
+                    logger.error("restore_reminders_on_startup: task %s error: %s", page.get("id"), e)
+        except Exception as e:
+            logger.error("restore_reminders_on_startup: tg_id=%s error: %s", tg_id, e)
+
+    logger.info("restore_reminders_on_startup: restored %d reminder jobs", restored)
+
+
 def _now(uid: int = 0) -> datetime:
     offset = _user_tz_offset.get(uid, 3)
     return datetime.now(timezone(timedelta(hours=offset)))
@@ -148,7 +203,7 @@ async def _schedule_reminder(chat_id: int, title: str, reminder_dt: str, task_id
                 reply_markup=kb
             )
 
-        job_id = f"rem_{chat_id}_{title[:15]}_{reminder_dt}"
+        job_id = f"reminder_{task_id}" if task_id else f"rem_{chat_id}_{title[:15]}_{reminder_dt}"
         _scheduler.add_job(send_reminder, trigger="date", run_date=dt,
                            id=job_id, replace_existing=True)
         logger.info("Reminder scheduled: %s at %s", title, dt)
@@ -178,7 +233,7 @@ async def _schedule_deadline_check(chat_id: int, title: str, deadline_dt: str, t
                 reply_markup=kb
             )
 
-        job_id = f"deadline_{chat_id}_{title[:15]}_{deadline_dt}"
+        job_id = f"deadline_{task_id}" if task_id else f"deadline_{chat_id}_{title[:15]}_{deadline_dt}"
         _scheduler.add_job(check_deadline, trigger="date", run_date=dt,
                            id=job_id, replace_existing=True)
         logger.info("Deadline check scheduled: %s at %s", title, dt)
@@ -362,6 +417,26 @@ async def _handle_recurring_task_reset(
     try:
         await update_page(task_id, update_props)
         next_display = new_deadline[:10]
+
+        # Пересоздать scheduler jobs с новыми датами
+        chat_id = message.chat.id
+        if _scheduler:
+            # Напоминание
+            if current_reminder:
+                new_reminder = _next_cycle_date(current_reminder, repeat, tz_offset)
+                try:
+                    _scheduler.remove_job(f"reminder_{task_id}")
+                except Exception:
+                    pass
+                await _schedule_reminder(chat_id, title, new_reminder, task_id, tz_offset)
+            # Дедлайн
+            if current_deadline:
+                try:
+                    _scheduler.remove_job(f"deadline_{task_id}")
+                except Exception:
+                    pass
+                await _schedule_deadline_check(chat_id, title, new_deadline, task_id, tz_offset)
+
         await message.answer(f"🔄 Повторяющаяся задача сброшена. Следующий раз: {next_display}")
     except Exception as e:
         logger.error("_handle_recurring_task_reset error: %s", e)
@@ -532,39 +607,83 @@ async def handle_task_parsed(message: Message, data: dict) -> None:
         _pending_set(uid, data)
         return
 
-    # Нет "напомни" и нет reminder_time → сначала спрашиваем дедлайн, потом напоминание
+    # Нет "напомни" и нет reminder_time → один объединённый вопрос
     deadline_str = data.get("deadline") or ""
-    deadline_hint = f"📅 Предлагаемый: {deadline_str.replace('T', ' ')}\n" if deadline_str else ""
+    deadline_hint = deadline_str.replace("T", " ") if deadline_str else "не указан"
 
     msg = await message.answer(
         f"📌 <b>{data.get('title')}</b>\n"
-        f"🏷 {data.get('category', '?')} · {data.get('priority', 'Средний')}\n"
-        f"{deadline_hint}\n"
-        f"<b>📅 Дедлайн задачи?</b>",
+        f"🗂 {data.get('category', '?')} · {data.get('priority', 'Средний')}\n"
+        f"📅 Дедлайн: {deadline_hint}\n"
+        f"🔔 Напоминание: нет\n\n"
+        f"❓ Уточни:\n"
+        f"— Когда сделать? («завтра», «15 марта», «через 2 дня»)\n"
+        f"— Напомнить? («в 10:00», «за час», «завтра в 15»)\n\n"
+        f"<i>Или нажми «Сохранить» как есть</i>",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
-            InlineKeyboardButton(text="📅 Сегодня", callback_data="task_deadline_same"),
-            InlineKeyboardButton(text="📅 +1 день", callback_data="task_deadline_plus1"),
-        ], [
-            InlineKeyboardButton(text="📅 +3 дня", callback_data="task_deadline_plus3"),
-            InlineKeyboardButton(text="🚫 Без дедлайна", callback_data="task_deadline_skip"),
-        ], [
+            InlineKeyboardButton(text="✅ Сохранить", callback_data="task_save"),
             InlineKeyboardButton(text="❌ Отмена", callback_data="task_cancel"),
         ]])
     )
 
     data["msg_id"] = msg.message_id
-    data["_awaiting_deadline"] = True
-    data["_then_ask_remind"] = True  # после дедлайна → спросить напоминание
+    data["_awaiting_combined"] = True
     _pending_set(uid, data)
 
+async def _show_task_confirm(message: Message, pending: dict, uid: int) -> None:
+    """Показать карточку подтверждения задачи (редактируем старое сообщение)."""
+    is_practice_cat = pending.get("category", "") in PRACTICE_CATEGORIES
+    deadline_display = (pending.get("deadline") or "не указана").replace("T", " ")
+    reminder_display = (pending.get("reminder_time") or "нет").replace("T", " ")
+
+    text_content = (
+        f"📌 <b>{pending['title']}</b>\n"
+        f"🏷 {pending.get('category', '?')} · {pending.get('priority', 'Средний')}\n"
+        f"📅 Дедлайн: {deadline_display}\n"
+        f"🔔 Напомню: {reminder_display}\n\n"
+    )
+    if is_practice_cat:
+        text_content += "🕯️ Это для практики (Arcana) или для себя?"
+        kb = InlineKeyboardMarkup(inline_keyboard=[[
+            InlineKeyboardButton(text="🔮 Да, для практики", callback_data="task_practice"),
+            InlineKeyboardButton(text="🏠 Нет, для себя", callback_data="task_personal"),
+        ], [
+            InlineKeyboardButton(text="✅ Сохранить", callback_data="task_save"),
+            InlineKeyboardButton(text="❌ Отмена", callback_data="task_cancel"),
+        ]])
+    else:
+        text_content += "<i>Всё верно?</i>"
+        kb = InlineKeyboardMarkup(inline_keyboard=[[
+            InlineKeyboardButton(text="✅ Сохранить", callback_data="task_save"),
+            InlineKeyboardButton(text="❌ Отмена", callback_data="task_cancel"),
+        ]])
+
+    msg_id = pending.get("msg_id")
+    if msg_id:
+        try:
+            await message.bot.edit_message_text(
+                chat_id=message.chat.id, message_id=msg_id,
+                text=text_content, parse_mode="HTML", reply_markup=kb,
+            )
+        except Exception:
+            await message.answer(text_content, parse_mode="HTML", reply_markup=kb)
+    else:
+        await message.answer(text_content, parse_mode="HTML", reply_markup=kb)
+
+
 async def handle_task_clarification(message: Message) -> None:
-    """Обработка уточнений по задаче - парсим напоминание."""
+    """Обработка уточнений по задаче - парсим напоминание (и дедлайн в combined-режиме)."""
     uid = message.from_user.id
     pending = _pending_get(uid)
     if not pending:
         return
-    
+
     text = maybe_convert(message.text.strip())
+
+    # Combined-режим: один вопрос про дедлайн + напоминание
+    if pending.get("_awaiting_combined"):
+        await _handle_combined_clarification(message, text, pending, uid)
+        return
 
     try:
         tz_offset = await _get_user_tz(uid)
@@ -575,41 +694,7 @@ async def handle_task_clarification(message: Message) -> None:
             logger.info("handle_task_clarification: relative time parsed locally: %s", relative)
             pending["reminder_time"] = relative
             _pending_set(uid, pending)
-            is_practice_cat = pending.get("category", "") in PRACTICE_CATEGORIES
-            deadline_display = (pending.get("deadline") or "не указана").replace("T", " ")
-            reminder_display = relative.replace("T", " ")
-            text_content = (
-                f"📌 <b>{pending['title']}</b>\n"
-                f"🏷 {pending.get('category', '?')} · {pending.get('priority', 'Средний')}\n"
-                f"📅 Дедлайн: {deadline_display}\n"
-                f"🔔 Напомню: {reminder_display}\n\n"
-            )
-            if is_practice_cat:
-                text_content += "🕯️ Это для практики (Arcana) или для себя?"
-                kb = InlineKeyboardMarkup(inline_keyboard=[[
-                    InlineKeyboardButton(text="🔮 Да, для практики", callback_data="task_practice"),
-                    InlineKeyboardButton(text="🏠 Нет, для себя", callback_data="task_personal"),
-                ], [
-                    InlineKeyboardButton(text="✅ Сохранить", callback_data="task_save"),
-                    InlineKeyboardButton(text="❌ Отмена", callback_data="task_cancel"),
-                ]])
-            else:
-                text_content += "<i>Всё верно?</i>"
-                kb = InlineKeyboardMarkup(inline_keyboard=[[
-                    InlineKeyboardButton(text="✅ Сохранить", callback_data="task_save"),
-                    InlineKeyboardButton(text="❌ Отмена", callback_data="task_cancel"),
-                ]])
-            msg_id = pending.get("msg_id")
-            if msg_id:
-                try:
-                    await message.bot.edit_message_text(
-                        chat_id=message.chat.id, message_id=msg_id,
-                        text=text_content, parse_mode="HTML", reply_markup=kb,
-                    )
-                except Exception:
-                    await message.answer(text_content, parse_mode="HTML", reply_markup=kb)
-            else:
-                await message.answer(text_content, parse_mode="HTML", reply_markup=kb)
+            await _show_task_confirm(message, pending, uid)
             return
 
         now_str = datetime.now(timezone(timedelta(hours=tz_offset))).strftime("%Y-%m-%d %H:%M")
@@ -639,50 +724,7 @@ async def handle_task_clarification(message: Message) -> None:
             pending["reminder_time"] = parsed["reminder_time"]
             _pending_set(uid, pending)
             logger.info("parsed reminder_time: %s", pending["reminder_time"])
-            
-            is_practice_cat = pending.get("category", "") in PRACTICE_CATEGORIES
-            deadline_display = (pending.get("deadline") or "не указана").replace("T", " ")
-            reminder_display = pending["reminder_time"].replace("T", " ")
-            
-            text_content = (
-                f"📌 <b>{pending['title']}</b>\n"
-                f"🏷 {pending.get('category', '?')} · {pending.get('priority', 'Средний')}\n"
-                f"📅 Дедлайн: {deadline_display}\n"
-                f"🔔 Напомню: {reminder_display}\n\n"
-            )
-            
-            if is_practice_cat:
-                text_content += "🕯️ Это для практики (Arcana) или для себя?"
-                kb = InlineKeyboardMarkup(inline_keyboard=[[
-                    InlineKeyboardButton(text="🔮 Да, для практики", callback_data="task_practice"),
-                    InlineKeyboardButton(text="🏠 Нет, для себя", callback_data="task_personal"),
-                ], [
-                    InlineKeyboardButton(text="✅ Сохранить", callback_data="task_save"),
-                    InlineKeyboardButton(text="❌ Отмена", callback_data="task_cancel"),
-                ]])
-            else:
-                text_content += "<i>Всё верно?</i>"
-                kb = InlineKeyboardMarkup(inline_keyboard=[[
-                    InlineKeyboardButton(text="✅ Сохранить", callback_data="task_save"),
-                    InlineKeyboardButton(text="❌ Отмена", callback_data="task_cancel"),
-                ]])
-            
-            # Редактируем существующее сообщение вместо создания нового
-            msg_id = pending.get("msg_id")
-            if msg_id:
-                try:
-                    await message.bot.edit_message_text(
-                        chat_id=message.chat.id,
-                        message_id=msg_id,
-                        text=text_content,
-                        parse_mode="HTML",
-                        reply_markup=kb
-                    )
-                except Exception as e:
-                    logger.warning("edit_message error: %s, fallback to answer", e)
-                    await message.answer(text_content, parse_mode="HTML", reply_markup=kb)
-            else:
-                await message.answer(text_content, parse_mode="HTML", reply_markup=kb)
+            await _show_task_confirm(message, pending, uid)
             return
         else:
             logger.warning("Claude returned no reminder_time: %s", parsed)
@@ -692,6 +734,58 @@ async def handle_task_clarification(message: Message) -> None:
     except Exception as e:
         logger.error("parse reminder error: %s", e)
         await message.answer("❌ Ошибка при обработке. Попробуй ещё раз")
+
+
+async def _handle_combined_clarification(message: Message, text: str, pending: dict, uid: int) -> None:
+    """Парсим и дедлайн и напоминание из одного сообщения пользователя."""
+    try:
+        tz_offset = await _get_user_tz(uid)
+
+        # Быстрый парсер для "через N мин/часов/дней" → treat as reminder
+        relative = _parse_relative_time(text, tz_offset)
+        if relative:
+            logger.info("_handle_combined_clarification: relative time=%s", relative)
+            pending["reminder_time"] = relative
+            pending.pop("_awaiting_combined", None)
+            _pending_set(uid, pending)
+            await _show_task_confirm(message, pending, uid)
+            return
+
+        now_str = datetime.now(timezone(timedelta(hours=tz_offset))).strftime("%Y-%m-%d %H:%M")
+        now_dt = datetime.now(timezone(timedelta(hours=tz_offset)))
+        is_night = now_dt.hour < 5
+        tomorrow_note = "ВАЖНО: сейчас ночь (до 05:00) — 'завтра' означает СЕГОДНЯ (тот же календарный день)!" if is_night else ""
+
+        system = f"""Пользователь указывает дедлайн и/или напоминание для задачи. Парсь и верни ТОЛЬКО JSON без markdown:
+{{"deadline": "YYYY-MM-DD или null", "reminder_time": "YYYY-MM-DDTHH:MM или null"}}
+
+Правила:
+- "завтра в 15" → deadline=завтра, reminder_time=завтра в 15:00
+- "в пятницу" → deadline=пятница, reminder_time=null
+- "в 10:00" → deadline=null, reminder_time=сегодня или завтра в 10:00
+- "через 2 дня" → deadline=через 2 дня, reminder_time=null
+{tomorrow_note}
+Сейчас: {now_str} (UTC+{tz_offset})"""
+
+        raw = await ask_claude(text, system=system, max_tokens=150, model="claude-haiku-4-5-20251001")
+        raw = raw.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
+        logger.info("_handle_combined_clarification Claude returned: %s", raw)
+        parsed = json.loads(raw)
+
+        if parsed.get("deadline"):
+            pending["deadline"] = parsed["deadline"]
+        if parsed.get("reminder_time"):
+            pending["reminder_time"] = parsed["reminder_time"]
+
+        pending.pop("_awaiting_combined", None)
+        _pending_set(uid, pending)
+        await _show_task_confirm(message, pending, uid)
+
+    except Exception as e:
+        logger.error("_handle_combined_clarification error: %s", e)
+        await message.answer("❌ Ошибка при обработке. Попробуй ещё раз")
+
+
 # ── Callbacks ──────────────────────────────────────────────────────────────────
 
 @router.callback_query(F.data.startswith("task_deadline_"))
