@@ -250,9 +250,11 @@ _DONE_RE = re.compile(
 # Тексты начинающиеся с "запомни" — это память (memory_save), НЕ task_done и НЕ note
 _ZAPOMNI_RE = re.compile(r"^\s*запомни\b", re.IGNORECASE)
 
-# Фраза "запомни что/:" — явный сигнал сохранить в память
+# Явные команды сохранения в память
 _MEMORY_SAVE_RE = re.compile(
-    r"^\s*запомни\b",
+    r"^\s*запомни\b"
+    r"|^\s*сохрани\s+в\s+памяти?\b"
+    r"|^\s*запиши\s+в\s+памяти?\b",
     re.IGNORECASE,
 )
 
