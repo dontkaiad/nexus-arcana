@@ -416,6 +416,47 @@ async def process_item(data: Dict[str, Any], original_text: str, msg, clarify: d
         await _update_user_tz(msg, data.get("text", original_text))
         return ""
 
+    # ПАМЯТЬ (memory_save)
+    if kind == "memory_save":
+        text_to_save = data.get("text", original_text)
+        logger.info("process_item: memory_save - text=%r", text_to_save[:60])
+
+        _MEMORY_SYSTEM = (
+            "Ты парсишь факт для сохранения в память. "
+            "Отвечай ТОЛЬКО валидным JSON без пояснений:\n"
+            '{"key": "короткий ключ (имя или тема, snake_case)", "fact": "краткий факт одной строкой"}\n'
+            "Примеры:\n"
+            "  'запомни что маша не ест мясо' → {\"key\": \"маша\", \"fact\": \"не ест мясо\"}\n"
+            "  'запомни мой день рождения 15 апреля' → {\"key\": \"день_рождения\", \"fact\": \"15 апреля\"}\n"
+            "  'запомни что у васи аллергия на пыль' → {\"key\": \"вася\", \"fact\": \"аллергия на пыль\"}"
+        )
+
+        try:
+            raw = await ask_claude(
+                text_to_save,
+                system=_MEMORY_SYSTEM,
+                max_tokens=100,
+                model="claude-haiku-4-5-20251001",
+            )
+            raw = raw.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
+            parsed = json.loads(raw)
+            key = (parsed.get("key") or "").strip()
+            fact = (parsed.get("fact") or "").strip()
+        except Exception as e:
+            logger.error("process_item: memory_save parse error: %s", e)
+            key, fact = "", ""
+
+        if not key or not fact:
+            # Fallback: сохранить весь текст как есть под ключом из первых слов
+            words = text_to_save.lower().split()
+            key = "_".join(w for w in words[1:4] if w.isalpha()) or "факт"
+            fact = text_to_save
+
+        from core.notion_client import memory_set
+        await memory_set(key, fact)
+        logger.info("process_item: memory_save saved key=%r fact=%r", key, fact)
+        return f"🧠 Запомнила: <b>{key}</b> — {fact}"
+
     if kind == "unknown":
         return "❓ Не смог разобрать. Попробуй переформулировать."
     
