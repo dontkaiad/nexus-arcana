@@ -36,8 +36,10 @@ dp.callback_query.middleware(WhitelistMiddleware())
 
 from nexus.handlers.tasks import router as tasks_router
 from nexus.handlers.finance import router as finance_router
+from nexus.handlers.memory import router as memory_router
 dp.include_router(tasks_router)
 dp.include_router(finance_router)
+dp.include_router(memory_router)
 
 MOSCOW_TZ = timezone(timedelta(hours=3))
 _clarify: dict = {}
