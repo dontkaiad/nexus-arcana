@@ -198,6 +198,13 @@ async def cmd_finance(msg: Message, user_notion_id: str = "") -> None:
     await msg.answer(text)
 
 
+@dp.message(Command("notes_digest"))
+async def cmd_notes_digest(msg: Message, user_notion_id: str = "") -> None:
+    """Ручной запуск дайджеста заметок."""
+    from nexus.handlers.notes import send_notes_digest
+    await send_notes_digest(bot, msg.from_user.id, user_notion_id)
+
+
 @dp.message(Command("tz"))
 async def set_tz(msg: Message, user_notion_id: str = "") -> None:
     """Установить часовой пояс. /tz UTC+5 или /tz Екатеринбург"""
@@ -219,6 +226,7 @@ async def handle_text(msg: Message, user_notion_id: str = "") -> None:
         return
 
     text = maybe_convert(msg.text.strip())
+    original_text = text  # ВАЖНО: сохранить до spell correction
 
     # ── Исправляем опечатки через Claude Haiku ───────────────────────────
     # ВАЖНО: проверяем что ответ — исправленный текст, а не разговорный ответ Claude.
@@ -284,7 +292,7 @@ async def handle_text(msg: Message, user_notion_id: str = "") -> None:
         return
 
     try:
-        items = await classify(text, tz_offset=tz_offset)
+        items = await classify(original_text, tz_offset=tz_offset)
         logger.info("handle_text: classify returned %d items: %s", len(items), [i.get("type") for i in items])
 
         lines = []
@@ -294,7 +302,7 @@ async def handle_text(msg: Message, user_notion_id: str = "") -> None:
 
         for data in items:
             logger.info("handle_text: processing item type=%s", data.get("type"))
-            line = await process_item(data, text, msg, _clarify, user_notion_id=user_notion_id)
+            line = await process_item(data, original_text, msg, _clarify, user_notion_id=user_notion_id)
             logger.info("handle_text: process_item returned: %s", line[:50] if line else "None/empty")
 
             if line and line.startswith("finance_clarify:"):
@@ -506,9 +514,24 @@ async def main() -> None:
         BotCommand(command="tasks", description="Активные задачи"),
         BotCommand(command="notes", description="Последние 5 заметок"),
         BotCommand(command="finance", description="Расходы за сегодня"),
+        BotCommand(command="notes_digest", description="Дайджест старых заметок"),
     ])
 
     init_scheduler(bot)
+    from nexus.handlers.tasks import restore_reminders_on_startup
+    from nexus.handlers.notes import send_notes_digest_all
+    from apscheduler.triggers.cron import CronTrigger
+    from nexus.handlers.tasks import _scheduler as nexus_scheduler
+    # Еженедельный дайджест заметок: каждое воскресенье в 07:00 UTC (12:00 UTC+5)
+    if nexus_scheduler:
+        nexus_scheduler.add_job(
+            send_notes_digest_all,
+            args=[bot],
+            trigger=CronTrigger(day_of_week="sun", hour=7, minute=0),
+            id="notes_digest_weekly",
+            replace_existing=True,
+        )
+    await restore_reminders_on_startup()
     await dp.start_polling(bot, allowed_updates=["message", "callback_query"])
 
 
