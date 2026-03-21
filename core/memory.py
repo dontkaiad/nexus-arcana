@@ -20,6 +20,10 @@ logger = logging.getLogger("core.memory")
 
 DB_ID_ENV = "NOTION_DB_MEMORY"
 
+# Последние результаты поиска по памяти: uid → list of pages
+# Используется для "неактуально" / "удали все" без повторного поиска
+_last_memory_results: Dict[int, List[dict]] = {}
+
 # Точные значения категорий из Notion (Select)
 CATEGORIES: List[str] = [
     "🧠 СДВГ", "👥 Люди", "🏥 Здоровье", "🛒 Предпочтения",
@@ -326,6 +330,10 @@ async def search_memory(
         await message.answer(f"🧠 Ничего не нашла в памяти{suffix}")
         return
 
+    # Сохраняем для последующих команд "неактуально" / "удали"
+    uid = message.from_user.id
+    _last_memory_results[uid] = pages
+
     lines = []
     buttons = []
     for page in pages:
@@ -354,16 +362,44 @@ async def deactivate_memory(
     hint: str,
     user_notion_id: str,
 ) -> None:
-    """Пометить запись памяти как неактуальную (Актуально = False)."""
-    pages = await _find_pages_by_hint(hint) if hint else []
-    if not pages:
-        tokens = _tokenize_hint(hint)
-        subject = tokens[0] if tokens else hint
-        await message.answer(f"🧠 Не нашла записей о <b>{subject}</b>")
-        return
+    """Пометить запись памяти как неактуальную (Актуально = False).
+
+    hint == ""    → деактивировать все из последних результатов поиска
+    hint == "все" → то же
+    hint == "2"   → деактивировать вторую запись из последних результатов
+    иначе         → поиск по hint
+    """
+    uid = message.from_user.id
+    last = _last_memory_results.get(uid, [])
+
+    # Определяем с какими страницами работать
+    if not hint or hint.lower() == "все":
+        if not last:
+            await message.answer("🧠 Сначала найди записи — например: «напомни про машу»")
+            return
+        pages = last
+    elif hint.isdigit():
+        if not last:
+            await message.answer("🧠 Сначала найди записи — например: «напомни про машу»")
+            return
+        idx = int(hint) - 1
+        if not (0 <= idx < len(last)):
+            await message.answer(f"🧠 Записи №{hint} нет в результатах поиска (всего {len(last)})")
+            return
+        pages = [last[idx]]
+    else:
+        pages = await _find_pages_by_hint(hint) if hint else []
+        if not pages:
+            tokens = _tokenize_hint(hint)
+            subject = tokens[0] if tokens else hint
+            await message.answer(f"🧠 Не нашла записей о <b>{subject}</b>")
+            return
+
     try:
-        await update_page(pages[0]["id"], {"Актуально": {"checkbox": False}})
-        await message.answer(f"🧠 Помечено как неактуальное: <b>{_page_fact(pages[0])}</b>")
+        for page in pages:
+            await update_page(page["id"], {"Актуально": {"checkbox": False}})
+        facts = ", ".join(f"<b>{_page_fact(p)}</b>" for p in pages)
+        await message.answer(f"🧠 Помечено как неактуальное: {facts}")
     except Exception as e:
         logger.error("memory deactivate: %s", e)
         await message.answer("⚠️ Ошибка обновления")
@@ -376,25 +412,50 @@ async def delete_memory(
     del_prefix: str = "mem_del",
     cancel_cb: str = "mem_cancel",
 ) -> None:
-    """Удалить (архивировать) запись памяти. При нескольких совпадениях — кнопки выбора."""
-    pages = await _find_pages_by_hint(hint) if hint else []
-    if not pages:
-        tokens = _tokenize_hint(hint)
-        subject = tokens[0] if tokens else hint
-        await message.answer(f"🧠 Не нашла записей о <b>{subject}</b>")
-        return
+    """Удалить (архивировать) запись памяти.
+
+    hint == ""    → удалить все из последних результатов (с подтверждением кнопками)
+    hint == "все" → то же
+    hint == "2"   → удалить вторую запись из последних результатов
+    иначе         → поиск по hint
+    """
+    uid = message.from_user.id
+    last = _last_memory_results.get(uid, [])
+
+    if not hint or hint.lower() == "все":
+        if not last:
+            await message.answer("🧠 Сначала найди записи — например: «напомни про машу»")
+            return
+        pages = last
+    elif hint.isdigit():
+        if not last:
+            await message.answer("🧠 Сначала найди записи — например: «напомни про машу»")
+            return
+        idx = int(hint) - 1
+        if not (0 <= idx < len(last)):
+            await message.answer(f"🧠 Записи №{hint} нет в результатах поиска (всего {len(last)})")
+            return
+        pages = [last[idx]]
+    else:
+        pages = await _find_pages_by_hint(hint) if hint else []
+        if not pages:
+            tokens = _tokenize_hint(hint)
+            subject = tokens[0] if tokens else hint
+            await message.answer(f"🧠 Не нашла записей о <b>{subject}</b>")
+            return
 
     if len(pages) == 1:
         await _archive_page(pages[0]["id"])
+        # Убираем из last_results чтобы не пытаться удалить снова
+        _last_memory_results[uid] = [p for p in last if p["id"] != pages[0]["id"]]
         await message.answer(f"🗑 Удалено из памяти: <b>{_page_fact(pages[0])}</b>")
         return
 
     buttons = []
     for page in pages[:5]:
         fact = _page_fact(page)
-        key  = _page_key(page)
         buttons.append([InlineKeyboardButton(
-            text=f"🗑 {key}: {fact[:40]}",
+            text=f"🗑 {fact[:45]}",
             callback_data=f"{del_prefix}:{page['id']}",
         )])
     buttons.append([InlineKeyboardButton(text="❌ Отмена", callback_data=cancel_cb)])
