@@ -176,7 +176,8 @@ async def save_memory(
         result = await page_create(db_id, props)
         if result:
             logger.info("memory save: created page id=%s", result)
-            await message.answer(f"🧠 Запомнила: {fact}")
+            cat_label = f" [{category}]" if category else ""
+            await message.answer(f"🧠 Запомнила{cat_label}: {fact}")
         else:
             logger.error("memory save: Notion error page_create returned None")
             await message.answer("⚠️ Ошибка записи в Notion")
