@@ -240,10 +240,24 @@ _DONE_RE = re.compile(
 _ZAPOMNI_RE = re.compile(r"^\s*запомни\b", re.IGNORECASE)
 
 _TZ_RE = re.compile(
-    r"(я\s+в\s+\w+|переезжаю\s+в\s+\w+|мой\s+часовой\s+пояс|utc[+-]\d|в\s+спб\b|в\s+москве\b|"
-    r"в\s+екб\b|в\s+екатеринбурге\b|в\s+новосибирске\b|в\s+владивостоке\b|"
-    r"в\s+иркутске\b|в\s+красноярске\b|в\s+хабаровске\b|в\s+омске\b|в\s+челябинске\b|"
-    r"часовой\s+пояс|timezone)",
+    r"(utc\s*[+-]\d+"
+    r"|мой\s+часовой\s+пояс|часовой\s+пояс|мой\s+пояс|timezone"
+    r"|живу\s+в\s+\w+"
+    r"|я\s+в\s+\w+"
+    r"|нахожусь\s+в\s+\w+"
+    r"|переезжаю\s+в\s+\w+"
+    r"|переехал[аи]?\s+в\s+\w+"
+    r"|сейчас\s+в\s+\w+"
+    r"|у\s+меня\s+сейчас\s+\d{1,2}:\d{2}"
+    r"|у\s+меня\s+\d{1,2}:\d{2}"
+    r")",
+    re.IGNORECASE,
+)
+
+# Слова-триггеры задачи — если они есть, _TZ_RE не должен срабатывать
+_TASK_KEYWORDS_RE = re.compile(
+    r"\b(напомни|напоминай|напомнить|напоминание|сделай|сделать|купи|купить|"
+    r"позвони|позвонить|закинь|запиши|поставь|нужно\s+сделать|надо\s+сделать)\b",
     re.IGNORECASE,
 )
 
@@ -320,8 +334,8 @@ async def classify(text: str, tz_offset: int = 3) -> list[dict]:
         logger.info("classify: task_done pattern matched")
         return [{"type": "task_done", "task_hint": text}]
 
-    # Быстрый pre-фильтр: timezone
-    if _TZ_RE.search(text):
+    # Быстрый pre-фильтр: timezone — только если нет слов-триггеров задачи
+    if _TZ_RE.search(text) and not _TASK_KEYWORDS_RE.search(text):
         logger.info("classify: timezone pattern matched")
         return [{"type": "timezone_update", "text": text}]
 
