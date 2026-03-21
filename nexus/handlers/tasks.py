@@ -1139,11 +1139,10 @@ async def _do_save_task(message: Message, data: dict, chat_id: int = None, uid: 
         await message.answer(text_content, parse_mode="HTML")
 
     try:
-        from core.memory import auto_suggest_memory
-        original_text = data.get("original_text") or data.get("title", "")
-        user_notion_id = data.get("user_notion_id", "")
-        if original_text:
-            await auto_suggest_memory(message, original_text, user_notion_id, "☀️ Nexus")
+        from nexus.handlers.memory import suggest_memory
+        suggest_text = data.get("original_text") or data.get("title", "")
+        if suggest_text:
+            await suggest_memory(message, suggest_text, data.get("user_notion_id", ""))
     except Exception as e:
         logger.debug("auto_suggest skip: %s", e)
 
