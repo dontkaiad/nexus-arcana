@@ -108,7 +108,8 @@ async def cb_arcmem_auto_yes(call: CallbackQuery) -> None:
     props = mem._build_props(fact, category, связь, ключ, BOT_LABEL, pending.get("user_notion_id", ""))
     result = await page_create(db_id, props)
     if result:
-        await call.message.edit_text(f"🧠 Запомнила: <b>{ключ}</b> — {fact}")
+        cat_label = f" [{category}]" if category else ""
+        await call.message.edit_text(f"🧠 Запомнила{cat_label}: {fact}")
     else:
         await call.message.edit_text("⚠️ Ошибка записи в Notion")
 
