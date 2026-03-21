@@ -242,7 +242,7 @@ async def _find_pages_by_hint(hint: str, page_size: int = 10) -> List[dict]:
 
 async def _archive_page(page_id: str) -> None:
     notion = get_notion()
-    await notion._client.pages.update(page_id=page_id, archived=True)
+    await notion.pages.update(page_id=page_id, archived=True)
     logger.info("memory: archived page %s", page_id[:8])
 
 
