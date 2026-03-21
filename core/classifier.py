@@ -96,13 +96,24 @@ def build_system(tz_offset: int = 3) -> str:
         "arcana_clarify — уточнить у пользователя: это для Арканы или обычная задача?",
         '{"type":"arcana_clarify","text":"оригинальный текст","confidence":"low"}',
         "Примеры: 'купить свечи' (может быть и задача и для ритуала) → arcana_clarify с confidence=low",
-        "note — заметка (в т.ч. 'запомни ...' → всегда note):",
+        "memory_save — факт о человеке/предмете для долгосрочной памяти:",
+        '{"type":"memory_save","text":"<оригинальный текст>"}',
+        "Примеры memory_save:",
+        "  'запомни что маша не ест мясо' → memory_save",
+        "  'маша это моя подруга' → memory_save",
+        "  'батон весит 4 кг' → memory_save",
+        "  'у меня аллергия на пыль' → memory_save",
+        "  'кот боится пылесоса' → memory_save",
+        "  'мой день рождения 15 апреля' → memory_save",
+        "ПРАВИЛО memory_save: '[имя/предмет] это [описание]', '[имя] [факт]', 'у меня [факт]', 'запомни что [факт]'",
+        "ВАЖНО: memory_save — только если это факт/характеристика о ком-то или чём-то. Идеи и мысли → note.",
+        "",
+        "note — заметка (идея, мысль, рецепт, что хочу попробовать):",
         '{"type":"note","text":"<краткий заголовок максимум 80 символов из слов пользователя, не пересказ>","tags":"<список тегов через запятую>"}',
         "Примеры note:",
         "  'запомни идею про подкаст таро' → {\"type\":\"note\",\"text\":\"идея про подкаст таро\",\"tags\":\"идея,таро\"}",
         "  'идея про ленорман расклады' → {\"type\":\"note\",\"text\":\"идея про ленорман расклады\",\"tags\":\"идея,ленорман\"}",
         "  'хочу попробовать масло розы для ритуалов' → {\"type\":\"note\",\"text\":\"попробовать масло розы для ритуалов\",\"tags\":\"рецепт,практика\"}",
-        "  'запомни мысль' → note; 'запомни заметку' → note",
         "",
         "note_search — поиск заметок по ключевым словам:",
         '{"type":"note_search","query":"ключевые слова"}',
@@ -453,7 +464,7 @@ async def process_item(data: Dict[str, Any], original_text: str, msg, clarify: d
             fact = text_to_save
 
         from core.notion_client import memory_set
-        await memory_set(key, fact)
+        await memory_set(key, fact, user_notion_id=user_notion_id)
         logger.info("process_item: memory_save saved key=%r fact=%r", key, fact)
         return f"🧠 Запомнила: <b>{key}</b> — {fact}"
 
