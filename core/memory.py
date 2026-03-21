@@ -127,7 +127,42 @@ async def _parse_fact(text: str) -> Tuple[str, str, str, str]:
 
 # ── Поиск страниц ──────────────────────────────────────────────────────────────
 
+# Стоп-слова, которые не несут смысла при поиске
+_SEARCH_STOP = {"про", "о", "об", "и", "не", "это", "что", "как", "из", "по",
+                "для", "на", "в", "с", "к", "у", "за", "от"}
+
+
+def _normalize_word(word: str) -> str:
+    """
+    Нормализация слова: убрать падежные окончания для поиска contains.
+    Работает только для слов длиннее 4 букв, чтобы не обрезать короткие.
+    машу → маш, батона → батон, мясом → мясо, маше → маш
+    """
+    if len(word) <= 4:
+        return word
+    # Порядок важен: длинные суффиксы первыми
+    for suffix in ("ами", "ями", "ому", "ему", "ого", "его", "ях", "ах",
+                   "ом", "ем", "ём", "ий", "ый", "ой", "ей",
+                   "у", "ю", "а", "я", "е", "и"):
+        stem = word[:-len(suffix)]
+        if word.endswith(suffix) and len(stem) >= 3:
+            return stem
+    return word
+
+
+def _tokenize_hint(hint: str) -> List[str]:
+    """Разбить hint на нормализованные токены, отфильтровав стоп-слова."""
+    tokens = []
+    for w in hint.lower().split():
+        # убрать знаки препинания
+        w = w.strip(".,!?;:«»\"'")
+        if len(w) >= 2 and w not in _SEARCH_STOP:
+            tokens.append(_normalize_word(w))
+    return tokens
+
+
 async def _find_pages(query: str, page_size: int = 5) -> List[dict]:
+    """Точный поиск: query как одна строка в Текст/Ключ/Связь."""
     db_id = _get_db_id()
     if not db_id or not query.strip():
         return []
@@ -142,6 +177,66 @@ async def _find_pages(query: str, page_size: int = 5) -> List[dict]:
         return await db_query(db_id, filter_obj=filter_obj, page_size=page_size)
     except Exception as e:
         logger.error("memory _find_pages: %s", e)
+        return []
+
+
+async def _find_pages_by_hint(hint: str, page_size: int = 10) -> List[dict]:
+    """
+    Умный поиск по hint из нескольких слов.
+    1. Токенизирует и нормализует падежи.
+    2. Ищет первый токен (имя/объект) в поле Связь + Актуально=True.
+    3. Если есть доп. токены — постфильтр: оставить страницы, где Текст
+       содержит хотя бы один из них.
+    4. Fallback: OR по всем токенам в Текст/Ключ/Связь.
+    """
+    db_id = _get_db_id()
+    if not db_id or not hint.strip():
+        return []
+
+    tokens = _tokenize_hint(hint)
+    logger.info("memory _find_pages_by_hint: hint=%r tokens=%s", hint, tokens)
+
+    if not tokens:
+        return await _find_pages(hint, page_size)
+
+    first = tokens[0]
+    rest  = tokens[1:]
+
+    try:
+        # Шаг 1: первый токен → Связь (скорее всего имя/объект), Актуально=True
+        pages = await db_query(db_id, filter_obj={
+            "and": [
+                {"property": "Актуально", "checkbox": {"equals": True}},
+                {"property": "Связь", "rich_text": {"contains": first}},
+            ]
+        }, page_size=page_size)
+
+        # Шаг 2: постфильтр по остальным токенам
+        if pages and rest:
+            refined = [
+                p for p in pages
+                if any(tok in _page_fact(p).lower() for tok in rest)
+            ]
+            if refined:
+                logger.info("memory _find_pages_by_hint: refined %d→%d pages", len(pages), len(refined))
+                return refined
+
+        if pages:
+            return pages
+
+        # Шаг 3: fallback — OR по всем токенам во всех полях
+        or_filters: List[dict] = []
+        for tok in tokens:
+            or_filters += [
+                {"property": "Текст", "title":     {"contains": tok}},
+                {"property": "Ключ",  "rich_text": {"contains": tok}},
+                {"property": "Связь", "rich_text": {"contains": tok}},
+            ]
+        pages = await db_query(db_id, filter_obj={"or": or_filters}, page_size=page_size)
+        return pages
+
+    except Exception as e:
+        logger.error("memory _find_pages_by_hint: %s", e)
         return []
 
 
@@ -201,7 +296,7 @@ async def search_memory(
     query = query.strip()
     pages: List[dict] = []
     if query:
-        pages = await _find_pages(query, page_size=10)
+        pages = await _find_pages_by_hint(query, page_size=10)
     else:
         try:
             filter_obj = {"property": "Актуально", "checkbox": {"equals": True}}
@@ -243,9 +338,11 @@ async def deactivate_memory(
     user_notion_id: str,
 ) -> None:
     """Пометить запись памяти как неактуальную (Актуально = False)."""
-    pages = await _find_pages(hint)
+    pages = await _find_pages_by_hint(hint) if hint else []
     if not pages:
-        await message.answer(f"🧠 Не нашла запись по «{hint}»")
+        tokens = _tokenize_hint(hint)
+        subject = tokens[0] if tokens else hint
+        await message.answer(f"🧠 Не нашла записей о <b>{subject}</b>")
         return
     try:
         await update_page(pages[0]["id"], {"Актуально": {"checkbox": False}})
@@ -263,9 +360,11 @@ async def delete_memory(
     cancel_cb: str = "mem_cancel",
 ) -> None:
     """Удалить (архивировать) запись памяти. При нескольких совпадениях — кнопки выбора."""
-    pages = await _find_pages(hint)
+    pages = await _find_pages_by_hint(hint) if hint else []
     if not pages:
-        await message.answer(f"🧠 Не нашла запись по «{hint}»")
+        tokens = _tokenize_hint(hint)
+        subject = tokens[0] if tokens else hint
+        await message.answer(f"🧠 Не нашла записей о <b>{subject}</b>")
         return
 
     if len(pages) == 1:
