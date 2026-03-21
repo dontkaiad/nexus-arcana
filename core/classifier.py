@@ -236,8 +236,14 @@ _DONE_RE = re.compile(
     re.IGNORECASE,
 )
 
-# Тексты начинающиеся с "запомни" — это заметки/память, НЕ task_done
+# Тексты начинающиеся с "запомни" — это память (memory_save), НЕ task_done и НЕ note
 _ZAPOMNI_RE = re.compile(r"^\s*запомни\b", re.IGNORECASE)
+
+# Фраза "запомни что/:" — явный сигнал сохранить в память
+_MEMORY_SAVE_RE = re.compile(
+    r"^\s*запомни\b",
+    re.IGNORECASE,
+)
 
 _TZ_RE = re.compile(
     r"(utc\s*[+-]\d+"
@@ -307,6 +313,13 @@ async def _parse_edit_record(text: str) -> dict:
 async def classify(text: str, tz_offset: int = 3) -> list[dict]:
     """Классифицировать текст через Claude."""
     logger.info("classify: input text=%r tz_offset=%d", text[:100], tz_offset)
+
+    # Быстрый pre-фильтр: память ("запомни ...")
+    logger.info("classify: checking memory_save pre-filter for: '%s'", text[:50])
+    logger.info("classify: memory_save match result: %s", bool(_MEMORY_SAVE_RE.match(text)))
+    if _MEMORY_SAVE_RE.match(text):
+        logger.info("classify: memory_save pattern matched")
+        return [{"type": "memory_save", "text": text}]
 
     # Быстрый pre-фильтр: редактирование тега заметки
     if _EDIT_NOTE_RE.search(text):
