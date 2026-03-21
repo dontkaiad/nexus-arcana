@@ -269,6 +269,80 @@ async def handle_edit_note(message: Message, data: dict, user_notion_id: str) ->
     await message.answer(f"✏️ Тег обновлён: {tag_name}")
 
 
+async def send_notes_digest(bot, user_tg_id: int, user_notion_id: str) -> None:
+    """Отправить дайджест старых заметок (>7 дней) одному пользователю."""
+    from core.notion_client import db_query
+
+    db_id = os.environ.get("NOTION_DB_NOTES")
+    if not db_id:
+        return
+
+    cutoff = (datetime.now(MOSCOW_TZ) - timedelta(days=7)).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+    filter_obj: dict = {"property": "Дата", "date": {"before": cutoff}}
+    if user_notion_id:
+        filter_obj = {
+            "and": [
+                filter_obj,
+                {"property": "🪪 Пользователи", "relation": {"contains": user_notion_id}},
+            ]
+        }
+
+    try:
+        pages = await db_query(
+            db_id,
+            filter_obj=filter_obj,
+            sorts=[{"property": "Дата", "direction": "ascending"}],
+            page_size=5,
+        )
+    except Exception as e:
+        logger.error("send_notes_digest: query error: %s", e)
+        return
+
+    if not pages:
+        return
+
+    lines = []
+    for page in pages:
+        props = page["properties"]
+        title_parts = props.get("Заголовок", {}).get("title", [])
+        title = title_parts[0]["plain_text"] if title_parts else "—"
+        tags_items = props.get("Теги", {}).get("multi_select", [])
+        icon = tags_items[0]["name"].split()[0] if tags_items else "💡"
+        date = (props.get("Дата", {}).get("date") or {}).get("start", "")[:10]
+        lines.append(f"— {icon} {title} — {date}")
+
+    n = len(pages)
+    text = (
+        f"💡 У тебя {n} заметок без действий:\n"
+        + "\n".join(lines)
+        + "\n\nХочешь разобрать? Можешь:\n"
+        "— превратить в задачу: «сделай задачу из заметки про таро»\n"
+        "— удалить: «удали заметку про рецепт»\n"
+        "— оставить как есть"
+    )
+
+    try:
+        await bot.send_message(user_tg_id, text)
+    except Exception as e:
+        logger.error("send_notes_digest: send error tg_id=%s: %s", user_tg_id, e)
+
+
+async def send_notes_digest_all(bot) -> None:
+    """Отправить дайджест заметок всем разрешённым пользователям."""
+    from core.config import config
+    from core.user_manager import get_user
+
+    for tg_id in config.allowed_ids:
+        try:
+            user_data = await get_user(tg_id)
+            if not user_data:
+                continue
+            user_notion_id = user_data.get("notion_page_id", "")
+            await send_notes_digest(bot, tg_id, user_notion_id)
+        except Exception as e:
+            logger.error("send_notes_digest_all: tg_id=%s error: %s", tg_id, e)
+
+
 async def handle_note_search(
     message: Message,
     data,  # dict с "query" или строка (legacy)
