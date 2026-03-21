@@ -1140,7 +1140,14 @@ async def _do_save_task(message: Message, data: dict, chat_id: int = None, uid: 
 
     try:
         from nexus.handlers.memory import suggest_memory
-        suggest_text = data.get("original_text") or data.get("title", "")
+        title    = data.get("title", "")
+        category = data.get("category", "")
+        # Убираем "купить/купи" из начала, оставляем только объект
+        import re as _re
+        item = _re.sub(r"^\s*(купить|купи)\s+", "", title, flags=_re.IGNORECASE).strip() or title
+        # Имя категории без эмодзи ("🐾 Коты" → "Коты")
+        cat_name = _re.sub(r"^[\s\U00010000-\U0010ffff\u2600-\u27ff\u2300-\u23ff]+", "", category).strip()
+        suggest_text = f"{item} ({cat_name})" if cat_name else item
         if suggest_text:
             await suggest_memory(message, suggest_text, data.get("user_notion_id", ""))
     except Exception as e:
