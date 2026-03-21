@@ -258,6 +258,19 @@ _MEMORY_SAVE_RE = re.compile(
     re.IGNORECASE,
 )
 
+# Деактивация записи памяти: "неактуально", "неактуально 1", "неактуально маша"
+_DEACTIVATE_RE = re.compile(r"^\s*неактуально\b", re.IGNORECASE)
+
+# Удаление из памяти: "удали из памяти ...", "забудь про ...", "убери запись ..."
+_MEMORY_DELETE_RE = re.compile(
+    r"^\s*(удали|забудь|удалить|стёр|убери)\s+(из\s+памяти|из\s+памят\w+|факт|запись)?",
+    re.IGNORECASE,
+)
+
+# "купить/купи X" без явной суммы → задача, не финансы
+_BUY_TASK_RE = re.compile(r"^\s*(купить|купи)\b", re.IGNORECASE)
+_CURRENCY_RE = re.compile(r"\d+\s*(₽|руб\.?|р\b)", re.IGNORECASE)
+
 _TZ_RE = re.compile(
     r"(utc\s*[+-]\d+"
     r"|мой\s+часовой\s+пояс|часовой\s+пояс|мой\s+пояс|timezone"
@@ -327,6 +340,20 @@ async def classify(text: str, tz_offset: int = 3) -> list[dict]:
     """Классифицировать текст через Claude."""
     logger.info("classify: input text=%r tz_offset=%d", text[:100], tz_offset)
 
+    # ПЕРВЫЙ pre-фильтр: деактивация записи памяти ("неактуально", "неактуально 1")
+    if _DEACTIVATE_RE.match(text):
+        hint = re.sub(r"^\s*неактуально\s*", "", text, flags=re.IGNORECASE).strip()
+        logger.info("classify: memory_deactivate matched, hint=%r", hint)
+        return [{"type": "memory_deactivate", "hint": hint, "text": text}]
+
+    # Быстрый pre-фильтр: удаление из памяти ("удали из памяти ...", "забудь про ...")
+    m = _MEMORY_DELETE_RE.match(text)
+    if m:
+        hint = text[m.end():].strip()
+        hint = re.sub(r"^\s*(про|о|об)\s+", "", hint, flags=re.IGNORECASE).strip()
+        logger.info("classify: memory_delete matched, hint=%r", hint)
+        return [{"type": "memory_delete", "hint": hint, "text": text}]
+
     # Быстрый pre-фильтр: память ("запомни ...")
     logger.info("classify: checking memory_save pre-filter for: '%s'", text[:50])
     logger.info("classify: memory_save match result: %s", bool(_MEMORY_SAVE_RE.match(text)))
@@ -369,6 +396,13 @@ async def classify(text: str, tz_offset: int = 3) -> list[dict]:
     if _STATS_RE.search(text):
         logger.info("classify: stats pattern matched, bypassing Claude")
         return [{"type": "stats", "query": text}]
+
+    # Быстрый pre-фильтр: "купить/купи X" без явной суммы → задача, не финансы
+    if _BUY_TASK_RE.match(text) and not _CURRENCY_RE.search(text):
+        logger.info("classify: buy_task matched (no currency)")
+        return [{"type": "task", "title": text.strip(), "category": "🛒 Предпочтения",
+                 "priority": "Средний", "deadline": None, "repeat": "Нет",
+                 "repeat_time": None, "day_of_week": None, "confidence": "low"}]
 
     # Guard: если text выглядит как разговорный ответ Claude (утечка из spell correction) —
     # не отправлять обратно в Claude, вернуть unknown сразу
@@ -434,6 +468,18 @@ async def process_item(data: Dict[str, Any], original_text: str, msg, clarify: d
         from nexus.handlers.memory import handle_memory_save
         data["text"] = data.get("text", original_text)
         await handle_memory_save(msg, data, user_notion_id=user_notion_id)
+        return ""
+
+    # ПАМЯТЬ (memory_deactivate)
+    if kind == "memory_deactivate":
+        from nexus.handlers.memory import handle_memory_deactivate
+        await handle_memory_deactivate(msg, data, user_notion_id=user_notion_id)
+        return ""
+
+    # ПАМЯТЬ (memory_delete)
+    if kind == "memory_delete":
+        from nexus.handlers.memory import handle_memory_delete
+        await handle_memory_delete(msg, data, user_notion_id=user_notion_id)
         return ""
 
     if kind == "unknown":
