@@ -1138,18 +1138,6 @@ async def _do_save_task(message: Message, data: dict, chat_id: int = None, uid: 
     else:
         await message.answer(text_content, parse_mode="HTML")
 
-    # Предложить запомнить факт в память
-    try:
-        from core.memory import auto_suggest_memory
-        suggest_text = data.get("original_text") or data.get("title", "")
-        if suggest_text:
-            await auto_suggest_memory(
-                message, suggest_text,
-                data.get("user_notion_id", ""), "☀️ Nexus",
-            )
-    except Exception:
-        pass
-
 # ── Task done (fuzzy) ──────────────────────────────────────────────────────────
 
 _DONE_STOP_WORDS = {
