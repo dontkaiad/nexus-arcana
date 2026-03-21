@@ -96,6 +96,15 @@ def _page_key(page: dict) -> str:
     return parts[0]["plain_text"] if parts else "—"
 
 
+def _page_category(page: dict) -> str:
+    sel = page.get("properties", {}).get("Категория", {}).get("select")
+    return sel["name"] if sel else ""
+
+
+def _page_date(page: dict) -> str:
+    return (page.get("created_time") or "")[:10]
+
+
 # ── Парсинг факта через Haiku ──────────────────────────────────────────────────
 
 async def _parse_fact(text: str) -> Tuple[str, str, str, str]:
@@ -320,17 +329,20 @@ async def search_memory(
     lines = []
     buttons = []
     for page in pages:
-        pid  = page["id"]
-        fact = _page_fact(page)
-        key  = _page_key(page)
-        lines.append(f"• <b>{key}</b> — {fact}")
+        pid      = page["id"]
+        fact     = _page_fact(page)
+        category = _page_category(page)
+        date     = _page_date(page)
+        cat_line = f"{category} · {date}" if category else date
+        lines.append(f"{fact}\n  <i>{cat_line}</i>")
+        btn_label = fact[:35] if fact else "—"
         buttons.append([InlineKeyboardButton(
-            text=f"🗑 {key}: {fact[:30]}",
+            text=f"🗑 {btn_label}",
             callback_data=f"{del_prefix}:{pid}",
         )])
 
     await message.answer(
-        f"🧠 <b>Память</b> (найдено {len(pages)}):\n\n" + "\n".join(lines),
+        f"🧠 <b>Память</b> (найдено {len(pages)}):\n\n" + "\n\n".join(lines),
         reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons),
     )
 
