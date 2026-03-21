@@ -79,7 +79,7 @@ def _build_props(
     if связь:
         props["Связь"] = _text(связь)        # Text
     if user_notion_id:
-        props["Пользователь"] = _relation(user_notion_id)
+        props["Пользователи"] = _relation(user_notion_id)
     return props
 
 
