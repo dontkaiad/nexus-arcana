@@ -331,13 +331,15 @@ async def search_memory(
     for page in pages:
         pid      = page["id"]
         fact     = _page_fact(page)
-        category = _page_category(page)
-        date     = _page_date(page)
-        cat_line = f"{category} · {date}" if category else date
-        lines.append(f"{fact}\n  <i>{cat_line}</i>")
-        btn_label = fact[:35] if fact else "—"
+        category = _page_category(page)          # "👥 Люди"
+        date     = _page_date(page)              # "2026-03-21"
+        # Извлечь эмодзи из категории ("👥 Люди" → "👥"), fallback → "💡"
+        cat_emoji = category.split(" ")[0] if category else "💡"
+        line1 = f"{cat_emoji} {fact}"
+        line2 = f"<i>{category} · {date}</i>" if category else f"<i>{date}</i>"
+        lines.append(f"{line1}\n{line2}")
         buttons.append([InlineKeyboardButton(
-            text=f"🗑 {btn_label}",
+            text=f"🗑 {fact[:35]}",
             callback_data=f"{del_prefix}:{pid}",
         )])
 
