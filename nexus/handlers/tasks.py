@@ -1138,6 +1138,15 @@ async def _do_save_task(message: Message, data: dict, chat_id: int = None, uid: 
     else:
         await message.answer(text_content, parse_mode="HTML")
 
+    try:
+        from core.memory import auto_suggest_memory
+        original_text = data.get("original_text") or data.get("title", "")
+        user_notion_id = data.get("user_notion_id", "")
+        if original_text:
+            await auto_suggest_memory(message, original_text, user_notion_id, "☀️ Nexus")
+    except Exception as e:
+        logger.debug("auto_suggest skip: %s", e)
+
 # ── Task done (fuzzy) ──────────────────────────────────────────────────────────
 
 _DONE_STOP_WORDS = {
