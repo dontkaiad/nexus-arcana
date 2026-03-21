@@ -108,6 +108,15 @@ def build_system(tz_offset: int = 3) -> str:
         "ПРАВИЛО memory_save: '[имя/предмет] это [описание]', '[имя] [факт]', 'у меня [факт]', 'запомни что [факт]'",
         "ВАЖНО: memory_save — только если это факт/характеристика о ком-то или чём-то. Идеи и мысли → note.",
         "",
+        "memory_search — поиск в долгосрочной памяти (что бот запомнил о людях/котах/предметах):",
+        '{"type":"memory_search","query":"ключевые слова для поиска"}',
+        "Примеры memory_search:",
+        "  'что ты помнишь о маше' → {\"type\":\"memory_search\",\"query\":\"маша\"}",
+        "  'напомни про котов' → {\"type\":\"memory_search\",\"query\":\"коты\"}",
+        "  'что знаешь о батоне' → {\"type\":\"memory_search\",\"query\":\"батон\"}",
+        "  'расскажи про алуну' → {\"type\":\"memory_search\",\"query\":\"алуна\"}",
+        "ВАЖНО: memory_search — только если спрашивают о том, что БОТ запомнил. Поиск заметок/идей → note_search.",
+        "",
         "note — заметка (идея, мысль, рецепт, что хочу попробовать):",
         '{"type":"note","text":"<краткий заголовок максимум 80 символов из слов пользователя, не пересказ>","tags":"<список тегов через запятую>"}',
         "Примеры note:",
@@ -271,6 +280,14 @@ _MEMORY_DELETE_RE = re.compile(
 _BUY_TASK_RE = re.compile(r"^\s*(купить|купи)\b", re.IGNORECASE)
 _CURRENCY_RE = re.compile(r"\d+\s*(₽|руб\.?|р\b)", re.IGNORECASE)
 
+# Поиск по долгосрочной памяти (НЕ заметки)
+_MEMORY_SEARCH_RE = re.compile(
+    r"(что\s+(ты\s+)?помнишь|что\s+знаешь\s+о|расскажи\s+про"
+    r"|напомни\s+про|покажи\s+памят|покажи\s+что\s+помнишь"
+    r"|что\s+помнишь\s+о|напомни\s+о|вспомни\s+про|вспомни\s+о)",
+    re.IGNORECASE,
+)
+
 _TASK_CATS = ["🐾 Коты", "🏠 Жилье", "🚬 Привычки", "🍜 Продукты",
               "🍱 Кафе/Доставка", "🚕 Транспорт", "💅 Бьюти", "👗 Гардероб",
               "💻 Подписки", "🏥 Здоровье", "📚 Хобби/Учеба", "💳 Прочее"]
@@ -432,6 +449,17 @@ async def classify(text: str, tz_offset: int = 3) -> list[dict]:
         logger.info("classify: stats pattern matched, bypassing Claude")
         return [{"type": "stats", "query": text}]
 
+    # Быстрый pre-фильтр: поиск по долгосрочной памяти (до Claude, чтобы не попал в note_search)
+    if _MEMORY_SEARCH_RE.search(text):
+        hint = re.sub(
+            r"(что\s+(ты\s+)?помнишь\s*(о|про)?|что\s+знаешь\s+о|расскажи\s+про"
+            r"|напомни\s+(про|о)|покажи\s+памят\w*|покажи\s+что\s+помнишь"
+            r"|что\s+помнишь\s+о|вспомни\s+(про|о))\s*",
+            "", text, flags=re.IGNORECASE,
+        ).strip()
+        logger.info("classify: memory_search matched, hint=%r", hint)
+        return [{"type": "memory_search", "query": hint, "text": text}]
+
     # Быстрый pre-фильтр: "купить/купи X" без явной суммы → задача, не финансы
     if _BUY_TASK_RE.match(text) and not _CURRENCY_RE.search(text):
         logger.info("classify: buy_task matched (no currency)")
@@ -505,6 +533,12 @@ async def process_item(data: Dict[str, Any], original_text: str, msg, clarify: d
         from nexus.handlers.memory import handle_memory_save
         data["text"] = data.get("text", original_text)
         await handle_memory_save(msg, data, user_notion_id=user_notion_id)
+        return ""
+
+    # ПАМЯТЬ (memory_search)
+    if kind == "memory_search":
+        from nexus.handlers.memory import handle_memory_search
+        await handle_memory_search(msg, data, user_notion_id=user_notion_id)
         return ""
 
     # ПАМЯТЬ (memory_deactivate)
