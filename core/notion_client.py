@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import time
 from datetime import datetime, timezone, timedelta
 from typing import Optional, List
@@ -575,47 +576,61 @@ async def notes_search(query: str, user_notion_id: str = "") -> List[dict]:
 # ─── Memory ───────────────────────────────────────────────────────────────────
 
 async def memory_get(key: str) -> Optional[str]:
-    """Читает значение из базы Memory по ключу."""
+    """Читает значение из базы Memory по ключу (поле Ключ — rich_text)."""
     from core.config import config
-    db_id = config.nexus.db_memory
+    db_id = os.environ.get("NOTION_DB_MEMORY") or config.nexus.db_memory
     if not db_id:
         return None
     try:
         results = await query_pages(
             db_id,
-            filters={"property": "Ключ", "title": {"equals": key}},
+            filters={"property": "Ключ", "rich_text": {"equals": key}},
             page_size=1,
         )
         if not results:
             return None
-        return _extract_text(results[0].get("properties", {}).get("Значение", {})) or None
+        # Текст (Title) содержит сам факт
+        return _extract_text(results[0].get("properties", {}).get("Текст", {})) or None
     except Exception as e:
         logger.error("memory_get %s: %s", key, e)
         return None
 
-async def memory_set(key: str, value: str, category: str = "") -> None:
-    """Записывает или обновляет значение в базе Memory."""
+async def memory_set(key: str, value: str, category: str = "", user_notion_id: str = "") -> None:
+    """Записывает или обновляет значение в базе Memory.
+    Схема Notion: Текст (Title), Ключ (rich_text), Бот, Актуально, Пользователь."""
     from core.config import config
-    db_id = config.nexus.db_memory
+    db_id = os.environ.get("NOTION_DB_MEMORY") or config.nexus.db_memory
     if not db_id:
+        logger.error("memory_set: NOTION_DB_MEMORY не задан")
         return
     try:
+        # Ищем по Ключу (rich_text) для upsert
         results = await query_pages(
             db_id,
-            filters={"property": "Ключ", "title": {"equals": key}},
+            filters={"property": "Ключ", "rich_text": {"equals": key}},
             page_size=1,
         )
         props: dict = {
-            "Ключ":     _title(key),
-            "Значение": _text(value),
+            "Текст":      _title(value),          # Title — сам факт
+            "Ключ":       _text(key),             # rich_text — тема/имя
+            "Бот":        _text("☀️ Nexus"),
+            "Актуально":  {"checkbox": True},
         }
         if category:
             props["Категория"] = _select(category)
+        if user_notion_id:
+            props["Пользователь"] = _relation(user_notion_id)
 
+        logger.info("memory_save: writing to Notion db=%s props=%s", db_id, list(props.keys()))
         if results:
             await _notion().update_page(results[0]["id"], props)
+            logger.info("memory_save: updated existing page id=%s", results[0]["id"])
         else:
-            await page_create(db_id, props)
+            result = await page_create(db_id, props)
+            if result:
+                logger.info("memory_save: created new page id=%s", result)
+            else:
+                logger.error("memory_save: page_create returned None — проверь схему Notion")
     except Exception as e:
         logger.error("memory_set %s=%s: %s", key, value, e)
 
