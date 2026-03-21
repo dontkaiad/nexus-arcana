@@ -72,6 +72,14 @@ async def handle_memory_auto_suggest(
     )
 
 
+async def suggest_memory(message: Message, text: str, user_notion_id: str = "") -> None:
+    """Удобная обёртка для вызова из других хендлеров (tasks.py и т.д.)."""
+    await mem.auto_suggest_memory(
+        message, text, user_notion_id, BOT_LABEL, _pending_auto,
+        yes_prefix="mem_auto_yes", no_prefix="mem_auto_no",
+    )
+
+
 # ── Callbacks ────────────────────────────────────────────────────────────────
 
 @router.callback_query(F.data.startswith("mem_del:"))
