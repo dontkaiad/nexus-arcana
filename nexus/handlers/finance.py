@@ -905,6 +905,39 @@ async def handle_finance_summary(query: str = "", user_notion_id: str = "", uid:
                 f"{label}: {total:,.0f}₽  (0 зап.)",
             ]
 
+        # Ревью по лимиту — только для запросов по категории (расходы)
+        if category_filter and type_filter != "income":
+            try:
+                from core.praise import get_praise
+                mem_db = os.environ.get("NOTION_DB_MEMORY")
+                if mem_db:
+                    limits = await _get_limits(mem_db)
+                    link = _cat_link(category_filter)
+                    limit_val: Optional[float] = None
+                    for key, val in limits.items():
+                        if key in link or link in key:
+                            limit_val = val
+                            break
+                    if limit_val:
+                        pct = total / limit_val * 100
+                        if pct > 100:
+                            over = total - limit_val
+                            lines.append(
+                                f"\n😬 Лимит превышен на {over:,.0f}₽ "
+                                f"({total:,.0f}₽ из {limit_val:,.0f}₽)"
+                            )
+                        elif pct >= 80:
+                            lines.append(
+                                f"\n⚠️ Почти весь лимит — {total:,.0f}₽ из {limit_val:,.0f}₽ ({pct:.0f}%)"
+                            )
+                        elif pct < 50:
+                            praise = get_praise("finance_under_limit")
+                            lines.append(
+                                f"\n🎉 Отличный результат! {total:,.0f}₽ из {limit_val:,.0f}₽\n{praise}"
+                            )
+            except Exception as e:
+                logger.debug("stats limit review: %s", e)
+
         return await _stats_publish(report_title, lines)
 
     # Общая сводка
