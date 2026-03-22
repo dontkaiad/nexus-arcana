@@ -33,6 +33,7 @@ _mem_selected: Dict[int, Set[str]] = {}  # uid → set of page_id
 CATEGORIES: List[str] = [
     "🧠 СДВГ", "👥 Люди", "🏥 Здоровье", "🛒 Предпочтения",
     "💼 Работа", "🏠 Быт", "🔄 Паттерн", "💡 Инсайт", "🔮 Практика", "🐾 Коты",
+    "💰 Лимит",
 ]
 _CATEGORIES_STR = " / ".join(CATEGORIES)
 
@@ -58,7 +59,10 @@ _PARSE_SYSTEM = (
     '  "у меня дислексия" → {"fact":"дислексия","category":"🧠 СДВГ","связь":"","ключ":"дислексия"}\n'
     '  "royal canin indoor 2кг" → {"fact":"royal canin indoor 2кг","category":"🐾 Коты","связь":"коты","ключ":"royal_canin"}\n'
     '  "батон весит 4 кг" → {"fact":"батон весит 4 кг","category":"🐾 Коты","связь":"батон","ключ":"батон"}\n'
-    '  "алуна не ест курицу" → {"fact":"алуна не ест курицу","category":"🐾 Коты","связь":"алуна","ключ":"алуна_еда"}'
+    '  "алуна не ест курицу" → {"fact":"алуна не ест курицу","category":"🐾 Коты","связь":"алуна","ключ":"алуна_еда"}\n'
+    '  "лимит на сигареты 3000р в месяц" → {"fact":"лимит: 🚬 Привычки — 3000₽/мес","category":"💰 Лимит","связь":"привычки","ключ":"лимит_привычки"}\n'
+    '  "поставь лимит на кафе 5000р" → {"fact":"лимит: 🍱 Кафе/Доставка — 5000₽/мес","category":"💰 Лимит","связь":"кафе","ключ":"лимит_кафе"}\n'
+    '  "лимит на продукты 8000р" → {"fact":"лимит: 🍜 Продукты — 8000₽/мес","category":"💰 Лимит","связь":"продукты","ключ":"лимит_продукты"}'
 )
 
 _STRIP_RE = re.compile(r"^\s*запомни\s+(что\s+)?", re.IGNORECASE)
@@ -301,6 +305,18 @@ async def save_memory(
 
     logger.info("memory save: writing to Notion %s (key=%s cat=%s)", fact, ключ, category)
     try:
+        # Лимиты: обновить существующую запись с тем же ключом если есть
+        if category == "💰 Лимит" and ключ:
+            existing = await db_query(db_id, filter_obj={"and": [
+                {"property": "Ключ", "rich_text": {"contains": ключ}},
+                {"property": "Категория", "select": {"equals": "💰 Лимит"}},
+            ]}, page_size=1)
+            if existing:
+                await update_page(existing[0]["id"], props)
+                logger.info("memory save: updated limit page id=%s", existing[0]["id"])
+                await message.answer(f"🧠 Обновила лимит: {fact}")
+                return
+
         result = await page_create(db_id, props)
         if result:
             logger.info("memory save: created page id=%s", result)
