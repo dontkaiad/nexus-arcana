@@ -219,13 +219,15 @@ async def _find_pages_by_hint(hint: str, page_size: int = 10) -> List[dict]:
     rest  = tokens[1:]
 
     try:
-        # Шаг 1: первый токен → Связь (скорее всего имя/объект), Актуально=True
+        # Шаг 1: первый токен → Связь ИЛИ Текст, Актуально != false (включая пустые)
         pages = await db_query(db_id, filter_obj={
-            "and": [
-                {"property": "Актуально", "checkbox": {"equals": True}},
+            "or": [
                 {"property": "Связь", "rich_text": {"contains": first}},
+                {"property": "Текст", "title": {"contains": first}},
             ]
         }, page_size=page_size)
+        # Исключить явно деактивированные (Актуально=False), пустые checkbox пропускаем
+        pages = [p for p in pages if p["properties"].get("Актуально", {}).get("checkbox") is not False]
 
         # Шаг 2: постфильтр по остальным токенам
         if pages and rest:
