@@ -9,6 +9,7 @@ from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery
 
 import core.memory as mem
+from core.claude_client import ask_claude
 from core.notion_client import page_create
 
 logger = logging.getLogger("nexus.memory")
@@ -114,6 +115,102 @@ async def handle_memory_list(
         await message.answer(get_page_text(uid), reply_markup=get_page_keyboard(uid))
     else:
         await message.answer("\n".join(lines), parse_mode="HTML")
+
+_ADHD_SUMMARY_SYSTEM = """На основе списка фактов о человеке с СДВГ
+напиши личный профиль — 3-4 предложения.
+Конкретно, без банальщины, как будто описываешь именно этого человека.
+Фокус: что это значит для его повседневной жизни.
+Только текст, без заголовков."""
+
+
+async def handle_adhd_command(message: Message, user_notion_id: str = "") -> None:
+    """/adhd — личный СДВГ-профиль с группировкой и саммари от Sonnet."""
+    from core.notion_client import db_query
+    from core.pagination import PAGE_SIZE, register_pages
+
+    db_id = os.environ.get("NOTION_DB_MEMORY")
+    if not db_id:
+        await message.answer("⚠️ NOTION_DB_MEMORY не задан")
+        return
+    try:
+        pages = await db_query(db_id, filter_obj={"and": [
+            {"property": "Категория", "select": {"equals": "🧠 СДВГ"}},
+            {"property": "Актуально", "checkbox": {"equals": True}},
+        ]}, page_size=100)
+    except Exception as e:
+        logger.error("handle_adhd_command: %s", e)
+        await message.answer("⚠️ Ошибка загрузки")
+        return
+
+    if not pages:
+        await message.answer("🧠 Пока нет фактов о СДВГ в памяти.")
+        return
+
+    PATTERN_KW = ("забыва", "теря", "откладыва", "прокрастин", "кладёт",
+                  "громко", "быстро говор", "утро начинается", "сова",
+                  "не существует", "неосознанно", "гиперфокус")
+    STRATEGY_KW = ("помогают", "помогает", "стратеги", "витамин", "кольц",
+                   "будильник", "список", "порядок", "структур", "Monster", "Chapman")
+    TRIGGER_KW = ("мешает", "триггер", "хуже", "шум", "раздраж",
+                  "плохой сон", "не может найти", "не на виду", "не могу")
+
+    groups = {"🔄 Паттерны": [], "💡 Стратегии": [], "⚡ Триггеры": [], "📌 Особенности": []}
+    all_facts = []
+    for p in pages:
+        parts = p["properties"].get("Текст", {}).get("title", [])
+        fact = parts[0]["plain_text"] if parts else "—"
+        all_facts.append(fact)
+        fact_lower = fact.lower()
+        if any(kw in fact_lower for kw in PATTERN_KW):
+            groups["🔄 Паттерны"].append(fact)
+        elif any(kw in fact_lower for kw in STRATEGY_KW):
+            groups["💡 Стратегии"].append(fact)
+        elif any(kw in fact_lower for kw in TRIGGER_KW):
+            groups["⚡ Триггеры"].append(fact)
+        else:
+            groups["📌 Особенности"].append(fact)
+
+    # Sonnet генерирует личный профиль
+    facts_text = "\n".join(f"• {f}" for f in all_facts)
+    try:
+        summary = await ask_claude(
+            facts_text,
+            system=_ADHD_SUMMARY_SYSTEM,
+            max_tokens=200,
+            model="claude-sonnet-4-6",
+        )
+    except Exception:
+        summary = ""
+
+    lines = ["🧠 <b>СДВГ — твой профиль</b>"]
+    if summary:
+        lines.append("")
+        lines.append(summary.strip())
+    lines.append("")
+    for group_name in ["🔄 Паттерны", "💡 Стратегии", "⚡ Триггеры", "📌 Особенности"]:
+        items = groups.get(group_name, [])
+        if items:
+            lines.append(f"<b>{group_name} ({len(items)}):</b>")
+            for item in items:
+                lines.append(f"  • {item}")
+            lines.append("")
+
+    uid = message.from_user.id
+    flat_items = []
+    for group_name in ["🔄 Паттерны", "💡 Стратегии", "⚡ Триггеры", "📌 Особенности"]:
+        for item in groups.get(group_name, []):
+            flat_items.append({"group": group_name, "text": item})
+
+    if len(flat_items) > PAGE_SIZE:
+        from core.pagination import get_page_text, get_page_keyboard
+        def _fmt(it: dict) -> str:
+            return f"{it['group']} · {it['text']}"
+        register_pages(uid, flat_items, "🧠 СДВГ — профиль", _fmt)
+        await message.answer("\n".join(lines), parse_mode="HTML")
+        await message.answer(get_page_text(uid), reply_markup=get_page_keyboard(uid))
+    else:
+        await message.answer("\n".join(lines), parse_mode="HTML")
+
 
 async def send_adhd_digest(bot) -> None:
     """Еженедельно напоминает 2 случайных факта из категории 🧠 СДВГ."""

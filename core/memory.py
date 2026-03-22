@@ -449,6 +449,8 @@ async def search_memory(
         fin_coro = _search_finance(query, page_size=5)
         task_coro = _search_tasks(query, page_size=5)
         pages, fin_pages, task_pages = await asyncio.gather(mem_coro, fin_coro, task_coro)
+        logger.info("memory search: hint=%r pages_found=%d fin=%d tasks=%d",
+                     query, len(pages), len(fin_pages), len(task_pages))
     else:
         try:
             filter_obj = {"property": "Актуально", "checkbox": {"equals": True}}
