@@ -1007,26 +1007,46 @@ async def task_complete(call: CallbackQuery) -> None:
     import random
     from core.notion_client import update_task_status
     task_id = call.data.split("_", 2)[2]
+    uid = call.from_user.id
     logger.info("task_complete: task_id=%s", task_id)
 
-    result = await update_task_status(task_id, "Done")
-    if result:
-        # Получить название задачи из текста сообщения
-        msg_text = call.message.text or ""
+    # Проверяем повторяющаяся ли задача
+    try:
+        client = get_notion()
+        page = await client.pages.retrieve(page_id=task_id)
+        task_props = page.get("properties", {})
+        repeat = (task_props.get("Повтор", {}).get("select") or {}).get("name", "Нет")
+        title_parts = task_props.get("Задача", {}).get("title", [])
+        task_title = title_parts[0]["plain_text"] if title_parts else ""
+    except Exception as e:
+        logger.error("task_complete: failed to fetch task props: %s", e)
+        repeat = "Нет"
+        task_props = {}
         task_title = ""
+
+    # Fallback: название из текста сообщения
+    if not task_title:
+        msg_text = call.message.text or ""
         if "Напоминание:" in msg_text:
             task_title = msg_text.split("Напоминание:")[1].strip().split("\n")[0].strip()
         elif "Дедлайн:" in msg_text:
             task_title = msg_text.split("Дедлайн:")[1].strip().split(".")[0].strip()
 
-        phrase = random.choice(_DONE_PHRASES)
-        title_line = f"\n✅ {task_title} — выполнено" if task_title else "\n✅ Выполнено"
+    await call.message.edit_reply_markup()
 
-        await call.message.edit_reply_markup()
-        await call.answer("✅ Записано!")
-        await call.message.reply(f"{phrase}{title_line}")
+    if repeat and repeat != "Нет":
+        # Повторяющаяся задача → сброс на следующий цикл
+        await _handle_recurring_task_reset(call.message, task_id, task_props, repeat, task_title, uid)
+        await call.answer("🔄 Сброшено на следующий цикл")
     else:
-        await call.answer("⚠️ Ошибка обновления", show_alert=True)
+        result = await update_task_status(task_id, "Done")
+        if result:
+            phrase = random.choice(_DONE_PHRASES)
+            title_line = f"\n✅ {task_title} — выполнено" if task_title else "\n✅ Выполнено"
+            await call.answer("✅ Записано!")
+            await call.message.reply(f"{phrase}{title_line}")
+        else:
+            await call.answer("⚠️ Ошибка обновления", show_alert=True)
 
 @router.callback_query(F.data.startswith("task_failed_"))
 async def task_failed(call: CallbackQuery) -> None:
