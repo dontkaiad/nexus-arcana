@@ -363,7 +363,10 @@ async def search_memory(
         lines.append(f"{cat_emoji} {fact}{inactive_mark}\n{line2}")
 
     text = f"🧠 <b>Память</b> (найдено {len(pages)}):\n\n" + "\n\n".join(lines)
-    await message.answer(text, reply_markup=_build_delete_keyboard(uid, pages))
+    await message.answer(text, reply_markup=_build_delete_keyboard(
+        uid, pages,
+        reactivate_cb="mem_reactivate_selected",
+    ))
 
 
 async def deactivate_memory(
@@ -423,6 +426,8 @@ def _build_delete_keyboard(
     all_cb: str = "mem_deactivate_all",
     all_label: str = "☑️ Отметить все неактуальными",
     cancel_label: str = "❌ Закрыть",
+    reactivate_cb: str = "",
+    reactivate_label: str = "↩️ Восстановить выбранные",
 ) -> InlineKeyboardMarkup:
     """Клавиатура чекбоксов для записей памяти.
     Чекбокс = выбор. Действие применяется кнопкой.
@@ -436,9 +441,11 @@ def _build_delete_keyboard(
     for page in pages:
         pid = page["id"]
         fact = _page_fact(page)
+        is_inactive = page["properties"].get("Актуально", {}).get("checkbox") is False
         icon = "✅" if pid in selected else "☐"
+        label = f"{icon} {fact[:40]}" + (" ·· неакт." if is_inactive else "")
         buttons.append([InlineKeyboardButton(
-            text=f"{icon} {fact[:45]}",
+            text=label,
             callback_data=f"{toggle_prefix}:{pid}",
         )])
     if n_selected:
@@ -446,6 +453,11 @@ def _build_delete_keyboard(
             text=f"{selected_label} ({n_selected})",
             callback_data=f"{selected_cb}:{uid}",
         )])
+        if reactivate_cb:
+            buttons.append([InlineKeyboardButton(
+                text=f"{reactivate_label} ({n_selected})",
+                callback_data=f"{reactivate_cb}:{uid}",
+            )])
     buttons.append([InlineKeyboardButton(
         text=f"{all_label} ({len(pages)})",
         callback_data=f"{all_cb}:{uid}",
