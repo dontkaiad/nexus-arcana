@@ -5,7 +5,7 @@ import json
 import logging
 import os
 import re
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Set, Tuple
 
 from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
 
@@ -23,6 +23,10 @@ DB_ID_ENV = "NOTION_DB_MEMORY"
 # Последние результаты поиска по памяти: uid → list of pages
 # Используется для "неактуально" / "удали все" без повторного поиска
 _last_memory_results: Dict[int, List[dict]] = {}
+
+# Мульти-выбор удаления: страницы показанные в UI и выбранные юзером
+_mem_delete_pages: Dict[int, List[dict]] = {}
+_mem_selected: Dict[int, Set[str]] = {}  # uid → set of page_id
 
 # Точные значения категорий из Notion (Select)
 CATEGORIES: List[str] = [
@@ -420,6 +424,31 @@ async def deactivate_memory(
         await message.answer("⚠️ Ошибка обновления")
 
 
+def _build_delete_keyboard(uid: int, pages: List[dict]) -> InlineKeyboardMarkup:
+    """Клавиатура мульти-выбора для удаления записей из памяти."""
+    selected = _mem_selected.get(uid, set())
+    buttons = []
+    for page in pages:
+        pid = page["id"]
+        icon = "✅" if pid in selected else "☐"
+        fact = _page_fact(page)
+        buttons.append([InlineKeyboardButton(
+            text=f"{icon} {fact[:45]}",
+            callback_data=f"mem_toggle:{pid}",
+        )])
+    # Нижний ряд: "Удалить выбранные" (если есть выбор), затем "Удалить все" и "Отмена"
+    if selected:
+        buttons.append([InlineKeyboardButton(
+            text=f"🗑️ Удалить выбранные ({len(selected)})",
+            callback_data="mem_delete_selected",
+        )])
+    buttons.append([
+        InlineKeyboardButton(text="🗑️ Удалить все", callback_data="mem_delete_all"),
+        InlineKeyboardButton(text="❌ Отмена", callback_data="mem_cancel"),
+    ])
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+
 async def delete_memory(
     message: Message,
     hint: str,
@@ -461,22 +490,17 @@ async def delete_memory(
 
     if len(pages) == 1:
         await _archive_page(pages[0]["id"])
-        # Убираем из last_results чтобы не пытаться удалить снова
         _last_memory_results[uid] = [p for p in last if p["id"] != pages[0]["id"]]
         await message.answer(f"🗑 Удалено из памяти: <b>{_page_fact(pages[0])}</b>")
         return
 
-    buttons = []
-    for page in pages[:5]:
-        fact = _page_fact(page)
-        buttons.append([InlineKeyboardButton(
-            text=f"🗑 {fact[:45]}",
-            callback_data=f"{del_prefix}:{page['id']}",
-        )])
-    buttons.append([InlineKeyboardButton(text="❌ Отмена", callback_data=cancel_cb)])
+    # Мульти-выбор для нескольких записей
+    shown = pages[:10]
+    _mem_delete_pages[uid] = shown
+    _mem_selected[uid] = set()
     await message.answer(
-        "🧠 Нашла несколько записей. Какую удалить?",
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons),
+        "🧠 Выбери записи для удаления:",
+        reply_markup=_build_delete_keyboard(uid, shown),
     )
 
 
