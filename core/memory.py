@@ -479,55 +479,70 @@ async def search_memory(
 
     # ── Память ──
     if pages:
-        adhd_pages = []
-        other_pages = []
-        for page in pages:
-            cat = _page_category(page)
-            if cat == "🧠 СДВГ":
-                adhd_pages.append(page)
-            else:
-                other_pages.append(page)
-
         lines = []
-        # СДВГ — группировка по подтипу
-        if adhd_pages:
-            _ADHD_GROUPS = [
-                ("🔄 Паттерны", ["паттерн", "забыва", "теря", "откладыва", "не существует", "неосознанно"]),
-                ("💡 Стратегии", ["помога", "стратеги", "лучше", "кольц", "витамин", "таймер"]),
-                ("⚡ Триггеры", ["мешает", "триггер", "хуже", "не могу", "белый", "шум", "раздраж"]),
-            ]
-            grouped: dict = {}
-            for page in adhd_pages:
-                fact = _page_fact(page)
-                low = fact.lower()
-                placed = False
-                for group_name, keywords in _ADHD_GROUPS:
-                    if any(kw in low for kw in keywords):
-                        grouped.setdefault(group_name, []).append(fact)
-                        placed = True
-                        break
-                if not placed:
-                    grouped.setdefault("📌 Особенности", []).append(fact)
+        try:
+            adhd_pages = []
+            other_pages = []
+            for page in pages:
+                cat = _page_category(page)
+                if cat == "🧠 СДВГ":
+                    adhd_pages.append(page)
+                else:
+                    other_pages.append(page)
 
-            adhd_lines = ["🧠 <b>СДВГ:</b>"]
-            for group_name in ["🔄 Паттерны", "💡 Стратегии", "⚡ Триггеры", "📌 Особенности"]:
-                items = grouped.get(group_name, [])
-                if items:
-                    adhd_lines.append(f"  <b>{group_name}:</b>")
-                    for item in items:
-                        adhd_lines.append(f"    • {item}")
-            lines.append("\n".join(adhd_lines))
+            # СДВГ — группировка по подтипу
+            if adhd_pages:
+                _ADHD_GROUPS = [
+                    ("🔄 Паттерны", ["паттерн", "забыва", "теря", "откладыва", "не существует", "неосознанно"]),
+                    ("💡 Стратегии", ["помога", "стратеги", "лучше", "кольц", "витамин", "таймер"]),
+                    ("⚡ Триггеры", ["мешает", "триггер", "хуже", "не могу", "белый", "шум", "раздраж"]),
+                ]
+                grouped: dict = {}
+                for page in adhd_pages:
+                    fact = _page_fact(page)
+                    low = fact.lower()
+                    placed = False
+                    for group_name, keywords in _ADHD_GROUPS:
+                        if any(kw in low for kw in keywords):
+                            grouped.setdefault(group_name, []).append(fact)
+                            placed = True
+                            break
+                    if not placed:
+                        grouped.setdefault("📌 Особенности", []).append(fact)
 
-        # Остальные категории — как раньше
-        for page in other_pages:
-            fact      = _page_fact(page)
-            category  = _page_category(page)
-            date      = _page_date(page)
-            cat_emoji = category.split(" ")[0] if category else "💡"
-            is_inactive = page["properties"].get("Актуально", {}).get("checkbox") is False
-            inactive_mark = " <i>(неактуально)</i>" if is_inactive else ""
-            line2 = f"<i>{category} · {date}</i>" if category else f"<i>{date}</i>"
-            lines.append(f"{cat_emoji} {fact}{inactive_mark}\n{line2}")
+                adhd_lines = ["🧠 <b>СДВГ:</b>"]
+                for group_name in ["🔄 Паттерны", "💡 Стратегии", "⚡ Триггеры", "📌 Особенности"]:
+                    items = grouped.get(group_name, [])
+                    if items:
+                        adhd_lines.append(f"  <b>{group_name}:</b>")
+                        for item in items:
+                            adhd_lines.append(f"    • {item}")
+                lines.append("\n".join(adhd_lines))
+
+            # Остальные категории — как раньше
+            for page in other_pages:
+                fact      = _page_fact(page)
+                category  = _page_category(page)
+                date      = _page_date(page)
+                cat_emoji = category.split(" ")[0] if category else "💡"
+                is_inactive = page["properties"].get("Актуально", {}).get("checkbox") is False
+                inactive_mark = " <i>(неактуально)</i>" if is_inactive else ""
+                line2 = f"<i>{category} · {date}</i>" if category else f"<i>{date}</i>"
+                lines.append(f"{cat_emoji} {fact}{inactive_mark}\n{line2}")
+        except Exception as e:
+            logger.error("search_memory ADHD formatting error: %s", e, exc_info=True)
+            # Fallback — обычный формат без группировки
+            lines = []
+            for page in pages:
+                fact      = _page_fact(page)
+                category  = _page_category(page)
+                date      = _page_date(page)
+                cat_emoji = category.split(" ")[0] if category else "💡"
+                is_inactive = page["properties"].get("Актуально", {}).get("checkbox") is False
+                inactive_mark = " <i>(неактуально)</i>" if is_inactive else ""
+                line2 = f"<i>{category} · {date}</i>" if category else f"<i>{date}</i>"
+                lines.append(f"{cat_emoji} {fact}{inactive_mark}\n{line2}")
+
         # Если все записи из одной категории — показать её название
         all_cats = set(_page_category(p) for p in pages)
         if len(all_cats) == 1:
@@ -539,30 +554,42 @@ async def search_memory(
 
     # ── Финансы ──
     if fin_pages:
-        fin_lines = []
-        for p in fin_pages:
-            props = p.get("properties", {})
-            desc_parts = props.get("Описание", {}).get("title", [])
-            desc = desc_parts[0]["plain_text"] if desc_parts else "—"
-            amount = props.get("Сумма", {}).get("number") or ""
-            date = (props.get("Дата", {}).get("date") or {}).get("start", "")[:10]
-            amount_str = f"{amount:g}₽" if amount else ""
-            fin_lines.append(f"· {desc} {amount_str} · {date}".strip())
-        parts.append("💰 <b>Финансы:</b>\n" + "\n".join(fin_lines))
+        try:
+            fin_lines = []
+            for p in fin_pages:
+                props = p.get("properties", {})
+                desc_parts = props.get("Описание", {}).get("title", [])
+                desc = desc_parts[0]["plain_text"] if desc_parts else "—"
+                amount = props.get("Сумма", {}).get("number") or ""
+                date = (props.get("Дата", {}).get("date") or {}).get("start", "")[:10]
+                amount_str = f"{amount:g}₽" if amount else ""
+                fin_lines.append(f"· {desc} {amount_str} · {date}".strip())
+            parts.append("💰 <b>Финансы:</b>\n" + "\n".join(fin_lines))
+        except Exception as e:
+            logger.error("search_memory finance formatting error: %s", e, exc_info=True)
 
     # ── Задачи ──
     if task_pages:
-        task_lines = []
-        for p in task_pages:
-            props = p.get("properties", {})
-            title_parts = props.get("Задача", {}).get("title", [])
-            title = title_parts[0]["plain_text"] if title_parts else "—"
-            deadline = (props.get("Дедлайн", {}).get("date") or {}).get("start", "")[:10]
-            deadline_str = f" · до {deadline}" if deadline else ""
-            task_lines.append(f"· {title}{deadline_str}")
-        parts.append("✅ <b>Задачи:</b>\n" + "\n".join(task_lines))
+        try:
+            task_lines = []
+            for p in task_pages:
+                props = p.get("properties", {})
+                title_parts = props.get("Задача", {}).get("title", [])
+                title = title_parts[0]["plain_text"] if title_parts else "—"
+                deadline = (props.get("Дедлайн", {}).get("date") or {}).get("start", "")[:10]
+                deadline_str = f" · до {deadline}" if deadline else ""
+                task_lines.append(f"· {title}{deadline_str}")
+            parts.append("✅ <b>Задачи:</b>\n" + "\n".join(task_lines))
+        except Exception as e:
+            logger.error("search_memory tasks formatting error: %s", e, exc_info=True)
 
     text = "\n\n".join(parts)
+    if not text.strip():
+        logger.error("search_memory: parts empty despite pages=%d fin=%d tasks=%d",
+                      len(pages), len(fin_pages), len(task_pages))
+        suffix = f" по «{query}»" if query else ""
+        await message.answer(f"🧠 Ничего не нашла в памяти{suffix}")
+        return
     kb = _build_delete_keyboard(uid, pages, reactivate_cb="mem_reactivate_selected") if pages else None
     await message.answer(text, reply_markup=kb)
 
