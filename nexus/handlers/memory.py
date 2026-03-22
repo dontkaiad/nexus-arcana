@@ -175,6 +175,29 @@ async def cb_mem_deactivate_all(call: CallbackQuery) -> None:
     await call.message.edit_text(f"☑️ Помечено неактуальными: {done} {noun}.")
 
 
+@router.callback_query(F.data.startswith("mem_reactivate_all:"))
+async def cb_mem_reactivate_all(call: CallbackQuery) -> None:
+    """Восстановить все записи (Актуально=True)."""
+    await call.answer()
+    uid = call.from_user.id
+    pages = mem._mem_delete_pages.pop(uid, [])
+    mem._mem_selected.pop(uid, None)
+    if not pages:
+        await call.message.edit_text("⏱ Сессия истекла.")
+        return
+    from core.notion_client import update_page
+    done = 0
+    for page in pages:
+        if page["properties"].get("Актуально", {}).get("checkbox") is False:
+            try:
+                await update_page(page["id"], {"Актуально": {"checkbox": True}})
+                done += 1
+            except Exception as e:
+                logger.error("cb_mem_reactivate_all: %s", e)
+    noun = "запись" if done == 1 else "записи" if done < 5 else "записей"
+    await call.message.edit_text(f"↩️ Восстановлено: {done} {noun}.")
+
+
 @router.callback_query(F.data.startswith("mem_reactivate_selected:"))
 async def cb_mem_reactivate_selected(call: CallbackQuery) -> None:
     """Восстановить выбранные записи (Актуально=True)."""
