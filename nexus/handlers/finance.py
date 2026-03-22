@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import base64
+import calendar
 import json
 import logging
 import os
@@ -159,17 +160,18 @@ async def _check_budget_limit(category: str, message: Message, user_notion_id: s
             f"⚠️ Уже потрачено <b>{month_total:,.0f}₽</b> из {limit_amount:,.0f}₽ на {category} ({pct:.0f}%)"
         )
 
-    # Прогноз до конца месяца (только если не уже превышен и >= 5 дней данных)
-    import calendar as _cal2
-    now2 = datetime.now(MOSCOW_TZ)
-    day2 = now2.day
-    if pct < 100 and day2 >= 5 and day2 < 25 and limit_amount:
-        days_in_month = _cal2.monthrange(now2.year, now2.month)[1]
-        forecast = month_total / day2 * days_in_month
-        if forecast > limit_amount:
-            await message.answer(
-                f"📈 Прогноз до конца месяца: ~{forecast:,.0f}₽ (лимит {limit_amount:,.0f}₽) — темп высоковат"
-            )
+    # Прогноз до конца месяца (только если ещё не превышен и >= 5 дней данных)
+    if pct < 100 and limit_amount:
+        now2 = datetime.now(MOSCOW_TZ)
+        day2 = now2.day
+        if 5 <= day2 <= 24:
+            days_in_month = calendar.monthrange(now2.year, now2.month)[1]
+            projected = month_total / day2 * days_in_month
+            if projected > limit_amount:
+                await message.answer(
+                    f"📈 Прогноз до конца месяца: ~{projected:,.0f}₽ "
+                    f"(лимит {limit_amount:,.0f}₽) — темп высоковат"
+                )
 
 
 async def get_finance_stats(month: str, user_notion_id: str = "", compare_prev: bool = False) -> str:
@@ -197,6 +199,58 @@ async def get_finance_stats(month: str, user_notion_id: str = "", compare_prev: 
             total_expense += amount
             if cat:
                 by_cat[cat] = by_cat.get(cat, 0) + amount
+
+    # Сравнение с предыдущим месяцем — отдельный чистый вид
+    if compare_prev:
+        try:
+            prev_month = _month_offset(1)
+            prev_records = await finance_month(prev_month, user_notion_id=user_notion_id)
+            prev_by_cat: Dict[str, float] = {}
+            prev_expense_total = 0.0
+            for r in prev_records:
+                props = r["properties"]
+                amount = props.get("Сумма", {}).get("number") or 0
+                type_name = (props.get("Тип", {}).get("select") or {}).get("name", "")
+                cat = (props.get("Категория", {}).get("select") or {}).get("name", "")
+                if "Расход" in type_name:
+                    prev_expense_total += amount
+                    if cat:
+                        prev_by_cat[cat] = prev_by_cat.get(cat, 0) + amount
+
+            m_num = int(month[5:7])
+            prev_m_num = int(prev_month[5:7])
+            cur_label = _RU_MONTHS.get(m_num, month)
+            prev_label = _RU_MONTHS.get(prev_m_num, prev_month)
+
+            cmp_lines = [f"📊 Сравнение: {cur_label} vs {prev_label}", ""]
+            all_cats = set(list(by_cat.keys()) + list(prev_by_cat.keys()))
+            for cat in sorted(all_cats, key=lambda c: -by_cat.get(c, 0.0)):
+                cur = by_cat.get(cat, 0.0)
+                prev = prev_by_cat.get(cat, 0.0)
+                delta = cur - prev
+                if delta > 50:
+                    arrow = f"↑ +{delta:,.0f}₽"
+                elif delta < -50:
+                    arrow = f"↓ {delta:,.0f}₽"
+                else:
+                    arrow = "→ без изм."
+                cmp_lines.append(f"{cat}: {cur:,.0f}₽ ({arrow})")
+
+            cmp_lines.append("")
+            exp_delta = total_expense - prev_expense_total
+            if exp_delta > 50:
+                exp_arrow = f"↑ +{exp_delta:,.0f}₽"
+            elif exp_delta < -50:
+                exp_arrow = f"↓ {exp_delta:,.0f}₽"
+            else:
+                exp_arrow = "→ без изм."
+            cmp_lines.append(f"Итого расходы: {total_expense:,.0f}₽ ({exp_arrow})")
+
+            report_title = f"Сравнение: {cur_label} vs {prev_label}"
+            return await _stats_publish(report_title, cmp_lines)
+        except Exception as e:
+            logger.error("compare_prev: %s", e, exc_info=True)
+            # fallback — продолжить обычный вывод
 
     limits: Dict[str, float] = {}
     if mem_db:
@@ -284,43 +338,6 @@ async def get_finance_stats(month: str, user_notion_id: str = "", compare_prev: 
             lines.append("")
             lines.extend(forecast_lines)
 
-    # Сравнение с предыдущим месяцем
-    if compare_prev:
-        try:
-            prev_month = _month_offset(1)
-            prev_records = await finance_month(prev_month, user_notion_id=user_notion_id)
-            prev_by_cat: Dict[str, float] = {}
-            for r in prev_records:
-                props = r["properties"]
-                amount = props.get("Сумма", {}).get("number") or 0
-                type_name = (props.get("Тип", {}).get("select") or {}).get("name", "")
-                cat = (props.get("Категория", {}).get("select") or {}).get("name", "")
-                if "Расход" in type_name and cat:
-                    prev_by_cat[cat] = prev_by_cat.get(cat, 0) + amount
-
-            prev_m_num = int(prev_month[5:7])
-            prev_label = _RU_MONTHS.get(prev_m_num, prev_month)
-
-            compare_lines: List[str] = []
-            all_cats = set(list(by_cat.keys()) + list(prev_by_cat.keys()))
-            for cat in sorted(all_cats, key=lambda c: -by_cat.get(c, 0.0)):
-                cur = by_cat.get(cat, 0.0)
-                prev = prev_by_cat.get(cat, 0.0)
-                delta = cur - prev
-                if delta > 0:
-                    arrow = f"↑ +{delta:,.0f}₽"
-                elif delta < 0:
-                    arrow = f"↓ {delta:,.0f}₽"
-                else:
-                    arrow = "→ без изменений"
-                compare_lines.append(f"{cat}: {cur:,.0f}₽ ({arrow} vs {prev_label})")
-
-            if compare_lines:
-                lines.append(f"\n<b>Сравнение с {prev_label}:</b>")
-                lines.extend(compare_lines)
-        except Exception as e:
-            logger.debug("compare_prev: %s", e)
-
     return "\n".join(lines)
 
 CATEGORIES = [
@@ -367,7 +384,8 @@ STATS_SYSTEM = f"""Определи, запрашивает ли пользов�
 "сколько потратила на еду за 3 месяца" → {{"category": "🍜 Продукты", "type_": "expense", "description_search": null, "months": 3, "compare": false}}
 "расходы на кафе за 2 месяца" → {{"category": "🍱 Кафе/Доставка", "type_": "expense", "description_search": null, "months": 2, "compare": false}}
 "статистика за полгода" → {{"category": null, "type_": null, "description_search": null, "months": 6, "compare": false}}
-"сравни месяцы" → {{"category": null, "type_": null, "description_search": null, "months": 3, "compare": true}}
+"сравни месяцы" → {{"category": null, "type_": null, "description_search": null, "months": 2, "compare": true}}
+"сравнение расходов" → {{"category": null, "type_": null, "description_search": null, "months": 2, "compare": true}}
 "сравни расходы на кафе" → {{"category": "🍱 Кафе/Доставка", "type_": "expense", "description_search": null, "months": 2, "compare": true}}"""
 
 PARSE_SYSTEM = f"""Извлеки финансовую запись. Исправляй опечатки. Ответь ТОЛЬКО JSON без markdown:
@@ -980,6 +998,10 @@ async def handle_finance_summary(query: str = "", user_notion_id: str = "", uid:
 
     months_count = max(1, int(parsed.get("months") or 1))
     compare_mode = bool(parsed.get("compare"))
+
+    # Сравнение текущий vs предыдущий — приоритет над мультимесячным режимом
+    if compare_mode:
+        return await get_finance_stats(_month(), user_notion_id=user_notion_id, compare_prev=True)
 
     # Мультимесячный режим
     if months_count > 1:
