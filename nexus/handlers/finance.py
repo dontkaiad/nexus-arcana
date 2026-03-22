@@ -20,6 +20,12 @@ MOSCOW_TZ = timezone(timedelta(hours=3))
 router = Router()
 
 _LIMIT_AMOUNT_RE = re.compile(r'(\d[\d\s]*(?:[.,]\d+)?)\s*[₽р]')
+_INCOME_MARKERS_RE = re.compile(
+    r'\b(получила|получил|заработала|заработал|зарплата|доход|перевели|перевёл|перевел'
+    r'|вернули|вернул|пришло|пришла|поступил[аио]?|аванс)\b',
+    re.IGNORECASE,
+)
+_BARTER_MARKERS_RE = re.compile(r'\b(бартер|обмен|в\s+обмен)\b', re.IGNORECASE)
 
 _RU_MONTHS = {
     1: "январь", 2: "февраль", 3: "март", 4: "апрель",
@@ -58,7 +64,7 @@ async def _get_limits(mem_db: str) -> Dict[str, float]:
 
 async def _check_budget_limit(category: str, message: Message, user_notion_id: str = "") -> None:
     """После записи расхода — проверить бюджетный лимит по категории."""
-    logger.info("budget check: category=%s", category)
+    logger.info("_check_budget_limit called: category=%s", category)
     mem_db = os.environ.get("NOTION_DB_MEMORY")
     if not mem_db:
         return
@@ -377,26 +383,32 @@ async def handle_finance_text(message: Message, text: str, bot_label: str = "☀
         await message.answer("⚠️ Не нашёл сумму.")
         return
 
-    # Низкая уверенность — уточняем
+    # Низкая уверенность — уточняем только если есть маркеры дохода/бартера
     if data.get("confidence") == "low" and data.get("question"):
-        _pending_finance[uid] = (data, user_notion_id)
-
-        amount = data.get("amount", 0)
-        description = data.get("description", "?")
-
-        kb = InlineKeyboardMarkup(inline_keyboard=[
-            [
-                InlineKeyboardButton(text="💸 Расход", callback_data="fin_expense"),
-                InlineKeyboardButton(text="💰 Доход", callback_data="fin_income"),
-                InlineKeyboardButton(text="🔄 Бартер", callback_data="fin_barter"),
-            ]
-        ])
-        await message.answer(
-            f"❓ <b>{amount:,.0f}₽ — {description}</b>\n\n"
-            f"Это доход, расход или бартер?",
-            reply_markup=kb,
-        )
-        return
+        has_income = bool(_INCOME_MARKERS_RE.search(text))
+        has_barter = bool(_BARTER_MARKERS_RE.search(text))
+        if not has_income and not has_barter:
+            # Нет маркеров дохода/бартера → автоматически расход
+            logger.info("finance: low confidence but no income/barter markers → auto-expense")
+            data["type_"] = "💸 Расход"
+            data["confidence"] = "high"
+        else:
+            _pending_finance[uid] = (data, user_notion_id)
+            amount = data.get("amount", 0)
+            description = data.get("description", "?")
+            kb = InlineKeyboardMarkup(inline_keyboard=[
+                [
+                    InlineKeyboardButton(text="💸 Расход", callback_data="fin_expense"),
+                    InlineKeyboardButton(text="💰 Доход", callback_data="fin_income"),
+                    InlineKeyboardButton(text="🔄 Бартер", callback_data="fin_barter"),
+                ]
+            ])
+            await message.answer(
+                f"❓ <b>{amount:,.0f}₽ — {description}</b>\n\n"
+                f"Это доход, расход или бартер?",
+                reply_markup=kb,
+            )
+            return
 
     # Высокая уверенность — пишем сразу
     page_id = await _save_finance(data, config.nexus.db_finance, bot_label, user_notion_id, uid=uid)
@@ -407,7 +419,11 @@ async def handle_finance_text(message: Message, text: str, bot_label: str = "☀
     _last_page_id[uid] = page_id
     await message.answer(_format_record(data))
     if "Расход" in data.get("type_", ""):
-        await _check_budget_limit(data.get("category", ""), message)
+        logger.info("finance saved: category=%s — calling budget check", data.get("category", ""))
+        try:
+            await _check_budget_limit(data.get("category", ""), message, user_notion_id)
+        except Exception as e:
+            logger.error("budget check error: %s", e, exc_info=True)
 
 
 @router.message(F.text)
@@ -482,19 +498,24 @@ async def handle_finance_clarification(message: Message, user_notion_id: str = "
 async def fin_save_asis(call: CallbackQuery) -> None:
     from core.config import config
     uid = call.from_user.id
-    pending = _pending_finance.pop(uid, None)
-    if not pending:
+    pending_entry = _pending_finance.pop(uid, None)
+    if not pending_entry:
         await call.answer("Нет данных.")
         return
-    page_id = await _save_finance(pending, config.nexus.db_finance)
+    if isinstance(pending_entry, tuple):
+        pending, stored_uid = pending_entry
+    else:
+        pending, stored_uid = pending_entry, ""
+    page_id = await _save_finance(pending, config.nexus.db_finance, user_notion_id=stored_uid, uid=uid)
     if page_id:
         _last_page_id[uid] = page_id
     await call.message.edit_text(_format_record(pending))
     if "Расход" in pending.get("type_", ""):
+        logger.info("finance saved (asis): category=%s — calling budget check", pending.get("category", ""))
         try:
-            await _check_budget_limit(pending.get("category", ""), call.message, "")
+            await _check_budget_limit(pending.get("category", ""), call.message, stored_uid)
         except Exception as e:
-            logger.debug("budget check skip: %s", e)
+            logger.error("budget check error: %s", e, exc_info=True)
     await call.answer()
 
 
