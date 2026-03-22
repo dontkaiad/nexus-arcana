@@ -72,7 +72,7 @@ async def cmd_start(msg: Message, user_notion_id: str = "") -> None:
 @dp.message(Command("help"))
 async def cmd_help(msg: Message, user_notion_id: str = "") -> None:
     await msg.answer(
-        "☀️ <b>Гайд Nexus</b>\n"
+        "☀️ <b>Гайд NEXUS</b>\n"
         "Понимаю естественный язык — команды учить не нужно, просто пиши.\n\n"
 
         "✅ <b>ЗАДАЧИ</b>\n"
@@ -88,14 +88,12 @@ async def cmd_help(msg: Message, user_notion_id: str = "") -> None:
         "Доход: «получил 50к», «пришла зарплата», «аренда 35000».\n"
         "Лимит: «лимит на кафе 5000р» — предупрежу при 80% и 100%.\n"
         "Исправить запись: «измени категорию на продукты», «поменяй карту на нал».\n"
-        "<code>/finance</code> — расходы за сегодня.\n"
-        "<code>/finance_stats</code> — сводка месяца: баланс, категории, ревью лимитов.\n\n"
+        "<code>/finance</code> — расходы за сегодня · <code>/finance_stats</code> — сводка месяца.\n\n"
 
         "💡 <b>ЗАМЕТКИ</b>\n"
         "Создать: «заметка: ...», «идея: ...», «запомни: ...», «рецепт: ...».\n"
         "Теги подбирает сам из существующих; новые — с подтверждением.\n"
-        "<code>/notes</code> — последние заметки.\n"
-        "<code>/notes_digest</code> — дайджест давно не открывавшихся заметок.\n\n"
+        "<code>/notes</code> — последние заметки · <code>/notes_digest</code> — дайджест старых.\n\n"
 
         "🧠 <b>ПАМЯТЬ</b>\n"
         "Запоминаю факты: люди, животные, здоровье, предпочтения, паттерны.\n"
@@ -114,19 +112,9 @@ async def cmd_help(msg: Message, user_notion_id: str = "") -> None:
         "«все доходы», «сколько заработал на практике» — и по доходам тоже.\n"
         "<code>/finance_stats</code> — полная сводка месяца с балансом и ревью.\n\n"
 
-        "📋 <b>ВСЕ КОМАНДЫ</b>\n"
-        "<code>/tasks</code> — активные задачи\n"
-        "<code>/finance</code> — расходы сегодня\n"
-        "<code>/finance_stats</code> — сводка месяца\n"
-        "<code>/notes</code> — последние заметки\n"
-        "<code>/notes_digest</code> — дайджест старых заметок\n"
-        "<code>/tz UTC+3</code> — установить часовой пояс\n"
-        "<code>/help</code> — этот гайд\n\n"
-
         "👨‍💻 <b>Создатель:</b> <a href=\"https://github.com/dontkaiad\">Кай Ларк</a>\n"
         "❓ Ошибки/вопросы? Напиши <a href=\"https://t.me/witchcommit\">@witchcommit</a>",
         parse_mode="HTML",
-        disable_web_page_preview=True,
     )
 
 
