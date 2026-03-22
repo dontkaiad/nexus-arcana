@@ -295,6 +295,36 @@ async def _archive_page(page_id: str) -> None:
 
 # ── Public API ──────────────────────────────────────────────────────────────────
 
+_ADHD_TIP_SYSTEM = """Ты знаешь конкретного человека с СДВГ. Вот его профиль:
+- Быстро забывает контент (книги, сериалы) — помнит только впечатление
+- Если вещь не на виду — её не существует
+- В гиперфокусе нельзя отвлекать
+- В тревоге кладёт вещи неосознанно и теряет
+- Белый шум и лишние звуки мешают
+- Нужен один фоновый звук (музыка/видос)
+- Помогают СДВГ-кольца, витамины, коты, режим дня
+- Плохой сон или еда = раздражительность
+- Прокрастинация и руминация — сильные
+- Помогают будильники, списки, визуальный порядок
+- Вещи должны лежать на своих местах всегда
+- Утро начинается с энергетика Monster и сигареты Chapman Green
+- Сова, но лучше живёт при солнечном свете
+Человек только что записал в память факт про себя (категория СДВГ).
+Дай ОДИН конкретный, не банальный совет именно под этот факт и этого человека.
+Учитывай профиль — не советуй то, что уже делает.
+Совет = 1-2 предложения максимум. Начни с эмодзи. Без вступлений."""
+
+
+async def _get_adhd_tip(fact: str) -> str:
+    tip = await ask_claude(
+        fact,
+        system=_ADHD_TIP_SYSTEM,
+        max_tokens=150,
+        model="claude-sonnet-4-6",
+    )
+    return tip.strip()
+
+
 async def save_memory(
     message: Message,
     text: str,
@@ -332,6 +362,13 @@ async def save_memory(
             logger.info("memory save: created page id=%s", result)
             cat_label = f" [{category}]" if category else ""
             await message.answer(f"🧠 Запомнила{cat_label}: {fact}")
+            if category == "🧠 СДВГ":
+                try:
+                    tip = await _get_adhd_tip(fact)
+                    if tip:
+                        await message.answer(tip)
+                except Exception as e:
+                    logger.debug("adhd tip error: %s", e)
         else:
             logger.error("memory save: Notion error page_create returned None")
             await message.answer("⚠️ Ошибка записи в Notion")
