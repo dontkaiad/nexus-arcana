@@ -115,6 +115,40 @@ async def handle_memory_list(
     else:
         await message.answer("\n".join(lines), parse_mode="HTML")
 
+async def send_adhd_digest(bot) -> None:
+    """Еженедельно напоминает 2 случайных факта из категории 🧠 СДВГ."""
+    import random
+    from core.notion_client import db_query
+
+    db_id = os.environ.get("NOTION_DB_MEMORY")
+    if not db_id:
+        return
+    try:
+        pages = await db_query(db_id, filter_obj={"and": [
+            {"property": "Категория", "select": {"equals": "🧠 СДВГ"}},
+            {"property": "Актуально", "checkbox": {"equals": True}},
+        ]}, page_size=100)
+    except Exception as e:
+        logger.error("send_adhd_digest: %s", e)
+        return
+    if not pages:
+        return
+    picked = random.sample(pages, min(2, len(pages)))
+    facts = []
+    for p in picked:
+        parts = p["properties"].get("Текст", {}).get("title", [])
+        facts.append(parts[0]["plain_text"] if parts else "—")
+    text = "🧠 <b>Напоминание о себе:</b>\n\n" + "\n".join(f"• {f}" for f in facts)
+    ids_str = os.environ.get("ALLOWED_TELEGRAM_IDS", "")
+    for uid_str in ids_str.split(","):
+        uid_str = uid_str.strip()
+        if uid_str.isdigit():
+            try:
+                await bot.send_message(int(uid_str), text, parse_mode="HTML")
+            except Exception as e:
+                logger.warning("send_adhd_digest: uid=%s err=%s", uid_str, e)
+
+
 # Pending auto-suggest: uid → {"text": ..., "user_notion_id": ...}
 _pending_auto: Dict[int, dict] = {}
 
