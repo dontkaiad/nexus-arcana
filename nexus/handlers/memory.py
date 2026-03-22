@@ -83,7 +83,10 @@ async def suggest_memory(message: Message, text: str, user_notion_id: str = "") 
 # ── Callbacks ────────────────────────────────────────────────────────────────
 
 def _search_kb(uid: int) -> "InlineKeyboardMarkup":
-    return mem._build_delete_keyboard(uid, mem._mem_delete_pages.get(uid, []))
+    return mem._build_delete_keyboard(
+        uid, mem._mem_delete_pages.get(uid, []),
+        reactivate_cb="mem_reactivate_selected",
+    )
 
 
 def _delete_kb(uid: int) -> "InlineKeyboardMarkup":
@@ -170,6 +173,32 @@ async def cb_mem_deactivate_all(call: CallbackQuery) -> None:
             logger.error("cb_mem_deactivate_all: %s", e)
     noun = "запись" if done == 1 else "записи" if done < 5 else "записей"
     await call.message.edit_text(f"☑️ Помечено неактуальными: {done} {noun}.")
+
+
+@router.callback_query(F.data.startswith("mem_reactivate_selected:"))
+async def cb_mem_reactivate_selected(call: CallbackQuery) -> None:
+    """Восстановить выбранные записи (Актуально=True)."""
+    await call.answer()
+    uid = call.from_user.id
+    selected = mem._mem_selected.pop(uid, set())
+    pages = mem._mem_delete_pages.get(uid, [])
+    if not selected:
+        await call.message.edit_text("☐ Ничего не выбрано.")
+        return
+    from core.notion_client import update_page
+    done = 0
+    for pid in selected:
+        try:
+            await update_page(pid, {"Актуально": {"checkbox": True}})
+            done += 1
+            # обновить флаг в кэше
+            for p in pages:
+                if p["id"] == pid:
+                    p.setdefault("properties", {}).setdefault("Актуально", {})["checkbox"] = True
+        except Exception as e:
+            logger.error("cb_mem_reactivate_selected: %s", e)
+    noun = "запись" if done == 1 else "записи" if done < 5 else "записей"
+    await call.message.edit_text(f"↩️ Восстановлено: {done} {noun}.")
 
 
 @router.callback_query(F.data.startswith("mem_delete_selected:"))
