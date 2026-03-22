@@ -1315,7 +1315,7 @@ async def handle_task_done(message: Message, task_hint: str, user_notion_id: str
 
     if not scored:
         await message.answer(
-            f"🔍 Не нашла задачу по: «{task_hint[:60]}»\n"
+            f"🔍 Не нашёл задачу по: «{task_hint[:60]}»\n"
             f"Проверь активные задачи: /tasks"
         )
         return
@@ -1348,7 +1348,7 @@ async def handle_task_done(message: Message, task_hint: str, user_notion_id: str
         )])
     buttons.append([InlineKeyboardButton(text="❌ Отмена", callback_data="task_cancel")])
     await message.answer(
-        "🔍 Нашла несколько подходящих задач. Какую отметить выполненной?",
+        "🔍 Нашёл несколько подходящих задач. Какую отметить выполненной?",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons)
     )
 
@@ -1458,7 +1458,7 @@ async def handle_edit_record(
             scored.append((score, title, t["id"]))
 
     if not scored:
-        await message.answer(f"🔍 Не нашла задачу по: «{record_hint[:60]}»")
+        await message.answer(f"🔍 Не нашёл задачу по: «{record_hint[:60]}»")
         return
 
     scored.sort(key=lambda x: x[0], reverse=True)
