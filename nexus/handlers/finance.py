@@ -114,6 +114,7 @@ async def _check_budget_limit(category: str, message: Message, user_notion_id: s
 
 async def get_finance_stats(month: str, user_notion_id: str = "") -> str:
     """Сводка за месяц с лимитами. month = 'YYYY-MM'."""
+    from core.praise import get_praise
     mem_db = os.environ.get("NOTION_DB_MEMORY")
     try:
         records = await finance_month(month, user_notion_id=user_notion_id)
@@ -149,6 +150,9 @@ async def get_finance_stats(month: str, user_notion_id: str = "") -> str:
              f"Доходы: <b>{total_income:,.0f}₽</b>",
              "", "<b>По категориям:</b>"]
 
+    # cat → (spent, limit_val) для ревью
+    cat_review: list[tuple[str, float, float]] = []
+
     for cat, amount in sorted(by_cat.items(), key=lambda x: -x[1]):
         link = _cat_link(cat)
         limit_val: Optional[float] = None
@@ -165,12 +169,40 @@ async def get_finance_stats(month: str, user_notion_id: str = "") -> str:
             else:
                 status = f"🟢 ({pct:.0f}%)"
             lines.append(f"{cat}: {amount:,.0f}₽ / лимит {limit_val:,.0f}₽ {status}")
+            cat_review.append((cat, amount, limit_val))
         else:
             lines.append(f"{cat}: {amount:,.0f}₽")
 
     balance = total_income - total_expense
     sign = "+" if balance >= 0 else ""
     lines.append(f"\n💰 <b>Баланс: {sign}{balance:,.0f}₽</b>")
+
+    # Ревью по лимитам — только если есть хотя бы один лимит
+    if cat_review:
+        review_lines: list[str] = []
+        for cat, spent, lim in cat_review:
+            pct = spent / lim * 100
+            if pct > 100:
+                over = spent - lim
+                review_lines.append(
+                    f"😬 <b>{cat}</b>: лимит превышен на {over:,.0f}₽. "
+                    f"В следующем месяце попробуй уложиться в {lim:,.0f}₽"
+                )
+            elif pct >= 80:
+                review_lines.append(
+                    f"⚠️ <b>{cat}</b>: почти весь лимит — {spent:,.0f}₽ из {lim:,.0f}₽"
+                )
+            elif pct < 50:
+                praise = get_praise("finance_under_limit")
+                review_lines.append(
+                    f"🎉 <b>{cat}</b>: отличный результат! Потратила {spent:,.0f}₽ из {lim:,.0f}₽\n"
+                    + praise
+                )
+            # 50-80% — без комментария
+        if review_lines:
+            lines.append("\n<b>Ревью по лимитам:</b>")
+            lines.extend(review_lines)
+
     return "\n".join(lines)
 
 CATEGORIES = [
