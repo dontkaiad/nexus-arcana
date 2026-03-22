@@ -219,13 +219,20 @@ async def _find_pages_by_hint(hint: str, page_size: int = 10) -> List[dict]:
     rest  = tokens[1:]
 
     try:
-        # Шаг 1: первый токен → Связь ИЛИ Текст, Актуально != false (включая пустые)
-        pages = await db_query(db_id, filter_obj={
-            "or": [
-                {"property": "Связь", "rich_text": {"contains": first}},
-                {"property": "Текст", "title": {"contains": first}},
+        # Шаг 1: первый токен → Связь ИЛИ Текст, Актуально != false (включая пустые).
+        # Для 4-символьных токенов (не нормализуются _normalize_word) добавляем
+        # усечённый вариант (маш|машу → маш), чтобы найти "маша" по запросу "машу".
+        step1_or: List[dict] = [
+            {"property": "Связь", "rich_text": {"contains": first}},
+            {"property": "Текст", "title": {"contains": first}},
+        ]
+        if len(first) == 4:
+            stem = first[:-1]  # "машу"→"маш", "маше"→"маш", "маши"→"маш"
+            step1_or += [
+                {"property": "Связь", "rich_text": {"contains": stem}},
+                {"property": "Текст", "title": {"contains": stem}},
             ]
-        }, page_size=page_size)
+        pages = await db_query(db_id, filter_obj={"or": step1_or}, page_size=page_size)
         # Исключить явно деактивированные (Актуально=False), пустые checkbox пропускаем
         pages = [p for p in pages if p["properties"].get("Актуально", {}).get("checkbox") is not False]
 
@@ -242,7 +249,7 @@ async def _find_pages_by_hint(hint: str, page_size: int = 10) -> List[dict]:
         if pages:
             return pages
 
-        # Шаг 3: fallback — OR по всем токенам во всех полях
+        # Шаг 3: fallback — OR по всем токенам во всех полях (+ усечённые 4-символьные)
         or_filters: List[dict] = []
         for tok in tokens:
             or_filters += [
@@ -250,7 +257,14 @@ async def _find_pages_by_hint(hint: str, page_size: int = 10) -> List[dict]:
                 {"property": "Ключ",  "rich_text": {"contains": tok}},
                 {"property": "Связь", "rich_text": {"contains": tok}},
             ]
+            if len(tok) == 4:
+                s = tok[:-1]
+                or_filters += [
+                    {"property": "Связь", "rich_text": {"contains": s}},
+                    {"property": "Текст", "title":     {"contains": s}},
+                ]
         pages = await db_query(db_id, filter_obj={"or": or_filters}, page_size=page_size)
+        pages = [p for p in pages if p["properties"].get("Актуально", {}).get("checkbox") is not False]
         return pages
 
     except Exception as e:
