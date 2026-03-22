@@ -453,8 +453,47 @@ async def search_memory(
 
     # ── Память ──
     if pages:
-        lines = []
+        adhd_pages = []
+        other_pages = []
         for page in pages:
+            cat = _page_category(page)
+            if cat == "🧠 СДВГ":
+                adhd_pages.append(page)
+            else:
+                other_pages.append(page)
+
+        lines = []
+        # СДВГ — группировка по подтипу
+        if adhd_pages:
+            _ADHD_GROUPS = [
+                ("🔄 Паттерны", ["паттерн", "забыва", "теря", "откладыва", "не существует", "неосознанно"]),
+                ("💡 Стратегии", ["помога", "стратеги", "лучше", "кольц", "витамин", "таймер"]),
+                ("⚡ Триггеры", ["мешает", "триггер", "хуже", "не могу", "белый", "шум", "раздраж"]),
+            ]
+            grouped: dict = {}
+            for page in adhd_pages:
+                fact = _page_fact(page)
+                low = fact.lower()
+                placed = False
+                for group_name, keywords in _ADHD_GROUPS:
+                    if any(kw in low for kw in keywords):
+                        grouped.setdefault(group_name, []).append(fact)
+                        placed = True
+                        break
+                if not placed:
+                    grouped.setdefault("📌 Особенности", []).append(fact)
+
+            adhd_lines = ["🧠 <b>СДВГ:</b>"]
+            for group_name in ["🔄 Паттерны", "💡 Стратегии", "⚡ Триггеры", "📌 Особенности"]:
+                items = grouped.get(group_name, [])
+                if items:
+                    adhd_lines.append(f"  <b>{group_name}:</b>")
+                    for item in items:
+                        adhd_lines.append(f"    • {item}")
+            lines.append("\n".join(adhd_lines))
+
+        # Остальные категории — как раньше
+        for page in other_pages:
             fact      = _page_fact(page)
             category  = _page_category(page)
             date      = _page_date(page)

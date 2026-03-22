@@ -518,6 +518,35 @@ def _has_remind_word(text: str) -> bool:
     return any(w in low for w in _REMIND_WORDS)
 
 
+_NUDGE_SYSTEM = """Ты знаешь человека с СДВГ. Его паттерны прокрастинации:
+- Откладывает задачи без чёткого дедлайна
+- Откладывает административные/бюрократические дела
+- Откладывает дела требующие длительной концентрации
+- Откладывает неприятные но важные дела (врач, документы, звонки)
+- Легко забывает задачи без напоминания
+Пользователь только что создал задачу. Определи: есть ли риск прокрастинации?
+Если ДА — дай ОДИН короткий, не банальный совет (1 предложение, начни с эмодзи).
+Учитывай что у человека уже есть напоминания и дедлайны — не советуй их ставить.
+Если риска нет (задача срочная/простая/приятная) — верни пустую строку.
+Отвечай ТОЛЬКО советом или пустой строкой. Без объяснений."""
+
+
+async def _check_procrastination_nudge(title: str) -> str:
+    try:
+        result = await ask_claude(
+            title,
+            system=_NUDGE_SYSTEM,
+            max_tokens=100,
+            model="claude-haiku-4-5-20251001",
+        )
+        result = result.strip()
+        if not result or result.lower() in ("нет", "no", ""):
+            return ""
+        return result
+    except Exception:
+        return ""
+
+
 async def handle_task_parsed(message: Message, data: dict) -> None:
     """Парсим задачу. Если есть 'напомни' — уже знаем reminder, спрашиваем дедлайн.
     Иначе — спрашиваем когда напомнить."""
@@ -1222,6 +1251,9 @@ async def _do_save_task(message: Message, data: dict, chat_id: int = None, uid: 
         suggest_text = f"{item} ({cat_name})" if cat_name else item
         if suggest_text:
             await suggest_memory(message, suggest_text, data.get("user_notion_id", ""))
+        nudge = await _check_procrastination_nudge(data.get("title", ""))
+        if nudge:
+            await message.answer(nudge)
     except Exception as e:
         logger.debug("auto_suggest skip: %s", e)
 

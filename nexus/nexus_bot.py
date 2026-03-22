@@ -576,6 +576,15 @@ async def main() -> None:
             id="notes_digest_weekly",
             replace_existing=True,
         )
+        # СДВГ-дайджест: каждое воскресенье в 08:00 UTC (13:00 UTC+5)
+        from nexus.handlers.memory import send_adhd_digest
+        nexus_scheduler.add_job(
+            send_adhd_digest,
+            args=[bot],
+            trigger=CronTrigger(day_of_week="sun", hour=8, minute=0),
+            id="adhd_digest_weekly",
+            replace_existing=True,
+        )
     await restore_reminders_on_startup()
     await dp.start_polling(bot, allowed_updates=["message", "callback_query"])
 
