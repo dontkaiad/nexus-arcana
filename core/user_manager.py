@@ -80,7 +80,6 @@ async def get_user(tg_id: int) -> Optional[dict]:
             "nexus":     _checkbox("☀️ Nexus",   "Nexus"),
             "arcana":    _checkbox("🌒 Arcana",  "Arcana"),
             "finance":   _checkbox("💰 Финансы", "Финансы"),
-            "passwords": _checkbox("🔑 Пароли",  "Пароли"),
         }
         logger.info("get_user(%s): permissions resolved = %s", tg_id, permissions)
 
@@ -100,7 +99,7 @@ async def get_user(tg_id: int) -> Optional[dict]:
 
 
 async def check_permission(tg_id: int, feature: str) -> bool:
-    """Проверить что у пользователя есть доступ к feature (nexus/arcana/finance/passwords)."""
+    """Проверить что у пользователя есть доступ к feature (nexus/arcana/finance)."""
     user = await get_user(tg_id)
     if user is None:
         return False
