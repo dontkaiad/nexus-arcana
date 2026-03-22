@@ -82,21 +82,72 @@ async def suggest_memory(message: Message, text: str, user_notion_id: str = "") 
 
 # ── Callbacks ────────────────────────────────────────────────────────────────
 
-@router.callback_query(F.data.startswith("mem_del:"))
-async def cb_mem_del(call: CallbackQuery) -> None:
+@router.callback_query(F.data.startswith("mem_toggle:"))
+async def cb_mem_toggle(call: CallbackQuery) -> None:
     await call.answer()
+    uid = call.from_user.id
     page_id = call.data.split(":", 1)[1]
-    try:
-        await mem._archive_page(page_id)
-        await call.message.edit_text("🗑 Запись удалена из памяти.")
-    except Exception as e:
-        logger.error("cb_mem_del: %s", e)
-        await call.message.edit_text(f"⚠️ Ошибка удаления: {e}")
+    selected = mem._mem_selected.setdefault(uid, set())
+    if page_id in selected:
+        selected.discard(page_id)
+    else:
+        selected.add(page_id)
+    pages = mem._mem_delete_pages.get(uid, [])
+    if not pages:
+        await call.message.edit_text("⏱ Сессия истекла.")
+        return
+    await call.message.edit_reply_markup(reply_markup=mem._build_delete_keyboard(uid, pages))
+
+
+@router.callback_query(F.data == "mem_delete_selected")
+async def cb_mem_delete_selected(call: CallbackQuery) -> None:
+    await call.answer()
+    uid = call.from_user.id
+    selected = mem._mem_selected.pop(uid, set())
+    pages = mem._mem_delete_pages.pop(uid, [])
+    if not selected:
+        await call.message.edit_text("☐ Ничего не выбрано.")
+        return
+    targets = [p for p in pages if p["id"] in selected]
+    deleted = 0
+    for page in targets:
+        try:
+            await mem._archive_page(page["id"])
+            deleted += 1
+        except Exception as e:
+            logger.error("cb_mem_delete_selected: %s", e)
+    n = deleted
+    suffix = "у" if n == 1 else "и" if n < 5 else ""
+    await call.message.edit_text(f"🗑 Удалена{suffix} {n} запис{suffix} из памяти.")
+
+
+@router.callback_query(F.data == "mem_delete_all")
+async def cb_mem_delete_all(call: CallbackQuery) -> None:
+    await call.answer()
+    uid = call.from_user.id
+    mem._mem_selected.pop(uid, None)
+    pages = mem._mem_delete_pages.pop(uid, [])
+    if not pages:
+        await call.message.edit_text("⏱ Сессия истекла.")
+        return
+    deleted = 0
+    for page in pages:
+        try:
+            await mem._archive_page(page["id"])
+            deleted += 1
+        except Exception as e:
+            logger.error("cb_mem_delete_all: %s", e)
+    n = deleted
+    suffix = "у" if n == 1 else "и" if n < 5 else ""
+    await call.message.edit_text(f"🗑 Удалена{suffix} {n} запис{suffix} из памяти.")
 
 
 @router.callback_query(F.data == "mem_cancel")
 async def cb_mem_cancel(call: CallbackQuery) -> None:
     await call.answer()
+    uid = call.from_user.id
+    mem._mem_selected.pop(uid, None)
+    mem._mem_delete_pages.pop(uid, None)
     await call.message.edit_text("❌ Отмена.")
 
 
