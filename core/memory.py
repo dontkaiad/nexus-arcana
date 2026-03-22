@@ -322,7 +322,7 @@ async def search_memory(
     user_notion_id: str,
     del_prefix: str = "mem_del",
 ) -> None:
-    """Поиск по памяти. del_prefix — prefix для callback кнопки удаления."""
+    """Поиск по памяти. Показывает результаты + чекбоксы удаления одним сообщением."""
     db_id = _get_db_id()
     if not db_id:
         await message.answer("⚠️ NOTION_DB_MEMORY не задан")
@@ -349,31 +349,22 @@ async def search_memory(
         await message.answer(f"🧠 Ничего не нашла в памяти{suffix}")
         return
 
-    # Сохраняем для последующих команд "неактуально" / "удали"
     uid = message.from_user.id
     _last_memory_results[uid] = pages
+    _mem_delete_pages[uid] = pages
+    _mem_selected[uid] = set()
 
     lines = []
-    buttons = []
     for page in pages:
-        pid      = page["id"]
         fact     = _page_fact(page)
-        category = _page_category(page)          # "👥 Люди"
-        date     = _page_date(page)              # "2026-03-21"
-        # Извлечь эмодзи из категории ("👥 Люди" → "👥"), fallback → "💡"
+        category = _page_category(page)
+        date     = _page_date(page)
         cat_emoji = category.split(" ")[0] if category else "💡"
-        line1 = f"{cat_emoji} {fact}"
         line2 = f"<i>{category} · {date}</i>" if category else f"<i>{date}</i>"
-        lines.append(f"{line1}\n{line2}")
-        buttons.append([InlineKeyboardButton(
-            text=f"🗑 {fact[:35]}",
-            callback_data=f"{del_prefix}:{pid}",
-        )])
+        lines.append(f"{cat_emoji} {fact}\n{line2}")
 
-    await message.answer(
-        f"🧠 <b>Память</b> (найдено {len(pages)}):\n\n" + "\n\n".join(lines),
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons),
-    )
+    text = f"🧠 <b>Память</b> (найдено {len(pages)}):\n\n" + "\n\n".join(lines)
+    await message.answer(text, reply_markup=_build_delete_keyboard(uid, pages))
 
 
 async def deactivate_memory(
