@@ -16,6 +16,11 @@ def register_pages(uid: int, items: List[Any], title: str, formatter: Callable) 
     _pages[uid] = {"items": items, "page": 0, "title": title, "formatter": formatter}
 
 
+def has_pages(uid: int) -> bool:
+    """Есть ли зарегистрированная пагинация для этого пользователя."""
+    return uid in _pages
+
+
 def get_page_text(uid: int) -> str:
     """Получить текст текущей страницы."""
     state = _pages.get(uid)
