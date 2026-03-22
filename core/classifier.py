@@ -808,10 +808,15 @@ async def process_item(data: Dict[str, Any], original_text: str, msg, clarify: d
         result = await handle_finance_summary(
             query=data.get("query", ""), user_notion_id=user_notion_id, uid=int(tg_id) if tg_id else 0
         )
-        if result == "__paginated__" and tg_id:
-            from core.pagination import get_page_text, get_page_keyboard
-            await msg.answer(get_page_text(int(tg_id)), reply_markup=get_page_keyboard(int(tg_id)))
-            return ""
+        # Если есть пагинация — отправить сводку + список отдельными сообщениями
+        if tg_id:
+            from core.pagination import has_pages, get_page_text, get_page_keyboard
+            uid_int = int(tg_id)
+            if has_pages(uid_int):
+                if result and result != "__paginated__":
+                    await msg.answer(result, parse_mode="HTML")
+                await msg.answer(get_page_text(uid_int), reply_markup=get_page_keyboard(uid_int))
+                return ""
         return result
 
     # ПОМОЩЬ
