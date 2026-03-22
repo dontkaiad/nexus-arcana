@@ -56,8 +56,9 @@ async def _get_limits(mem_db: str) -> Dict[str, float]:
     return limits
 
 
-async def _check_budget_limit(category: str, message: Message) -> None:
+async def _check_budget_limit(category: str, message: Message, user_notion_id: str = "") -> None:
     """После записи расхода — проверить бюджетный лимит по категории."""
+    logger.info("budget check: category=%s", category)
     mem_db = os.environ.get("NOTION_DB_MEMORY")
     if not mem_db:
         return
@@ -438,6 +439,11 @@ async def handle_finance_clarification(message: Message, user_notion_id: str = "
         if page_id:
             _last_page_id[uid] = page_id
             await message.answer(_format_record(pending))
+            if "Расход" in pending.get("type_", ""):
+                try:
+                    await _check_budget_limit(pending.get("category", ""), message, stored_uid)
+                except Exception as e:
+                    logger.debug("budget check skip: %s", e)
         else:
             await message.answer("⚠️ Ошибка записи в Notion.")
         return
@@ -465,6 +471,11 @@ async def handle_finance_clarification(message: Message, user_notion_id: str = "
 
     _last_page_id[uid] = page_id
     await message.answer(_format_record(pending))
+    if "Расход" in pending.get("type_", ""):
+        try:
+            await _check_budget_limit(pending.get("category", ""), message, stored_uid)
+        except Exception as e:
+            logger.debug("budget check skip: %s", e)
 
 
 @router.callback_query(F.data == "fin_save_asis")
@@ -479,6 +490,11 @@ async def fin_save_asis(call: CallbackQuery) -> None:
     if page_id:
         _last_page_id[uid] = page_id
     await call.message.edit_text(_format_record(pending))
+    if "Расход" in pending.get("type_", ""):
+        try:
+            await _check_budget_limit(pending.get("category", ""), call.message, "")
+        except Exception as e:
+            logger.debug("budget check skip: %s", e)
     await call.answer()
 
 
