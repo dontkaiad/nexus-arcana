@@ -583,7 +583,7 @@ async def main() -> None:
     from nexus.handlers.notes import send_notes_digest_all
     from apscheduler.triggers.cron import CronTrigger
     from nexus.handlers.tasks import _scheduler as nexus_scheduler
-    # Еженедельный дайджест заметок: каждое воскресенье в 07:00 UTC (12:00 UTC+5)
+    # Еженедельный дайджест заметок: каждое воскресенье в 07:00 UTC (10:00 UTC+3 СПб)
     if nexus_scheduler:
         nexus_scheduler.add_job(
             send_notes_digest_all,
@@ -592,7 +592,7 @@ async def main() -> None:
             id="notes_digest_weekly",
             replace_existing=True,
         )
-        # СДВГ-дайджест: каждое воскресенье в 08:00 UTC (13:00 UTC+5)
+        # СДВГ-дайджест: каждое воскресенье в 08:00 UTC (11:00 UTC+3 СПб)
         from nexus.handlers.memory import send_adhd_digest
         nexus_scheduler.add_job(
             send_adhd_digest,
