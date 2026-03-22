@@ -72,6 +72,7 @@ async def cmd_start(msg: Message, user_notion_id: str = "") -> None:
 @dp.message(Command("help"))
 async def cmd_help(msg: Message, user_notion_id: str = "") -> None:
     await msg.answer(
+        "☀️ <b>Гайд Nexus</b>\n"
         "Я понимаю естественный язык — команды учить не нужно, просто пиши.\n\n"
         "✅ <b>ЗАДАЧИ</b>\n"
         "Просто напиши текст — создам задачу автоматически.\n"
@@ -106,7 +107,6 @@ async def cmd_help(msg: Message, user_notion_id: str = "") -> None:
         "<code>/finance_stats</code> — полная сводка месяца, ревью лимитов, баланс.\n"
         "«сколько потратила на кафе?» — статистика по любой категории.\n\n"
 
-        "Я понимаю естественный язык — команды учить не нужно, просто пиши.\n\n"
         "👨‍💻 <b>Создатель:</b> Кай Ларк\n"
         "❓ Ошибки/вопросы? Напиши <a href=\"https://t.me/witchcommit\">@witchcommit</a>"
     )
