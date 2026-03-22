@@ -228,6 +228,28 @@ async def _find_pages_by_hint(hint: str, page_size: int = 10) -> List[dict]:
     if not db_id or not hint.strip():
         return []
 
+    # Приоритетный шорткат: если hint — название категории, искать по ней сразу
+    _CAT_MAP = {
+        "сдвг": "🧠 СДВГ", "люди": "👥 Люди", "здоровье": "🏥 Здоровье",
+        "предпочтения": "🛒 Предпочтения", "работа": "💼 Работа", "быт": "🏠 Быт",
+        "паттерн": "🔄 Паттерн", "инсайт": "💡 Инсайт", "практика": "🔮 Практика",
+        "коты": "🐾 Коты", "лимит": "💰 Лимит",
+    }
+    hint_lower = hint.lower().strip()
+    if hint_lower in _CAT_MAP:
+        matched_cat = _CAT_MAP[hint_lower]
+        logger.info("_find_pages_by_hint: category shortcut → %s", matched_cat)
+        try:
+            pages = await db_query(db_id, filter_obj={"and": [
+                {"property": "Категория", "select": {"equals": matched_cat}},
+                {"property": "Актуально", "checkbox": {"equals": True}},
+            ]}, page_size=100)
+            logger.info("_find_pages_by_hint category shortcut: found=%d", len(pages))
+            return pages
+        except Exception as e:
+            logger.error("_find_pages_by_hint category shortcut error: %s", e)
+            # fallthrough к обычному поиску
+
     tokens = _tokenize_hint(hint)
     logger.info("memory _find_pages_by_hint: hint=%r tokens=%s", hint, tokens)
 
@@ -286,29 +308,6 @@ async def _find_pages_by_hint(hint: str, page_size: int = 10) -> List[dict]:
         logger.info("_find_pages_by_hint step 3: found=%d", len(pages))
         if pages:
             logger.info("_find_pages_by_hint RETURN: %d pages (step 3)", len(pages))
-            return pages
-
-        # Шаг 4: fallback — поиск по категории
-        _CAT_MAP = {
-            "сдвг": "🧠 СДВГ", "люди": "👥 Люди", "здоровье": "🏥 Здоровье",
-            "предпочтения": "🛒 Предпочтения", "работа": "💼 Работа", "быт": "🏠 Быт",
-            "паттерн": "🔄 Паттерн", "инсайт": "💡 Инсайт", "практика": "🔮 Практика",
-            "коты": "🐾 Коты", "лимит": "💰 Лимит",
-        }
-        low = hint.lower().strip()
-        matched_cat = _CAT_MAP.get(low, "")
-        if not matched_cat:
-            for k, v in _CAT_MAP.items():
-                if low in k or k in low:
-                    matched_cat = v
-                    break
-        if matched_cat:
-            pages = await db_query(db_id, filter_obj={"and": [
-                {"property": "Категория", "select": {"equals": matched_cat}},
-                {"property": "Актуально", "checkbox": {"equals": True}},
-            ]}, page_size=page_size)
-            logger.info("_find_pages_by_hint step 4 (category=%s): found=%d", matched_cat, len(pages))
-            logger.info("_find_pages_by_hint RETURN: %d pages (step 4)", len(pages))
             return pages
 
         logger.info("_find_pages_by_hint RETURN: 0 pages (no match)")
