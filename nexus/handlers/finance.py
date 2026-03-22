@@ -20,6 +20,11 @@ MOSCOW_TZ = timezone(timedelta(hours=3))
 router = Router()
 
 _LIMIT_AMOUNT_RE = re.compile(r'(\d[\d\s]*(?:[.,]\d+)?)\s*[₽р]')
+# Парсит "лимит: 🍱 Кафе/Доставка — 9000₽/мес" → group(1)=категория, group(2)=сумма
+_LIMIT_FACT_RE = re.compile(
+    r'лимит[:\s]+([^—\-\d]+?)\s*[—\-]\s*(\d[\d\s]*(?:[.,]\d+)?)\s*[₽р]',
+    re.IGNORECASE | re.UNICODE,
+)
 _INCOME_MARKERS_RE = re.compile(
     r'\b(получила|получил|заработала|заработал|зарплата|доход|перевели|перевёл|перевел'
     r'|вернули|вернул|пришло|пришла|поступил[аио]?|аванс)\b',
@@ -41,28 +46,67 @@ def _cat_link(cat: str) -> str:
 
 
 async def _get_limits(mem_db: str) -> Dict[str, float]:
-    """Загрузить все лимиты из памяти. Возвращает {связь_lower: amount}."""
+    """Загрузить все лимиты из памяти. Возвращает {cat_link: amount}.
+
+    Стратегия: сначала фильтр по Категория="💰 Лимит", если упал —
+    забираем все записи и ищем те, у которых текст начинается с "лимит:".
+    Ключ берётся из поля Связь или парсится из факт-текста через _LIMIT_FACT_RE.
+    """
     from core.notion_client import db_query
+    from core.config import config
+    db = mem_db or config.nexus.db_memory
+    if not db:
+        logger.warning("_get_limits: no memory db configured")
+        return {}
     limits: Dict[str, float] = {}
+    pages: list = []
     try:
-        pages = await db_query(mem_db, filter_obj={
+        pages = await db_query(db, filter_obj={
             "property": "Категория", "select": {"equals": "💰 Лимит"}
-        }, page_size=50)
-        logger.info("_get_limits: found %d limit pages", len(pages))
-        for p in pages:
-            props = p["properties"]
-            связь_parts = props.get("Связь", {}).get("rich_text", [])
-            связь = связь_parts[0]["plain_text"].strip().lower() if связь_parts else ""
-            fact_parts = props.get("Текст", {}).get("title", [])
-            fact = fact_parts[0]["plain_text"] if fact_parts else ""
-            m = _LIMIT_AMOUNT_RE.search(fact)
-            logger.info("_get_limits: page связь=%r fact=%r regex_match=%r", связь, fact, m.group(0) if m else None)
-            if связь and m:
-                limits[связь] = float(m.group(1).replace(' ', '').replace(',', '.'))
-            else:
-                logger.warning("_get_limits: skip page — связь=%r fact=%r (no match)", связь, fact)
+        }, page_size=100)
+        logger.info("_get_limits: category filter → %d pages", len(pages))
     except Exception as e:
-        logger.error("_get_limits: %s", e, exc_info=True)
+        logger.warning("_get_limits: category filter failed (%s), trying text search", e)
+
+    # Если фильтр вернул 0 или упал — берём все страницы и фильтруем сами
+    if not pages:
+        try:
+            all_pages = await db_query(db, page_size=200)
+            pages = [
+                p for p in all_pages
+                if (p["properties"].get("Текст", {}).get("title") or [{}])[0]
+                   .get("plain_text", "").lower().startswith("лимит")
+            ]
+            logger.info("_get_limits: text fallback → %d limit pages from %d total", len(pages), len(all_pages))
+        except Exception as e2:
+            logger.error("_get_limits: fallback failed: %s", e2, exc_info=True)
+            return {}
+
+    for p in pages:
+        props = p["properties"]
+        fact_parts = props.get("Текст", {}).get("title", [])
+        fact = fact_parts[0]["plain_text"] if fact_parts else ""
+
+        # Стратегия 1: поле Связь
+        связь_parts = props.get("Связь", {}).get("rich_text", [])
+        связь = связь_parts[0]["plain_text"].strip().lower() if связь_parts else ""
+
+        # Стратегия 2: парсим категорию из текста "лимит: 🍱 Кафе/Доставка — 9000₽/мес"
+        fact_match = _LIMIT_FACT_RE.search(fact)
+        if fact_match and not связь:
+            связь = _cat_link(fact_match.group(1).strip())
+
+        # Сумма из текста
+        amount_match = _LIMIT_AMOUNT_RE.search(fact)
+        logger.info("_get_limits: fact=%r связь=%r amount=%r",
+                    fact, связь, amount_match.group(0) if amount_match else None)
+
+        if связь and amount_match:
+            limits[связь] = float(amount_match.group(1).replace(' ', '').replace(',', '.'))
+        else:
+            logger.warning("_get_limits: skip — связь=%r fact=%r", связь, fact)
+
+    logger.info("_get_limits: result=%s", limits)
     return limits
 
 
