@@ -48,6 +48,7 @@ async def _get_limits(mem_db: str) -> Dict[str, float]:
         pages = await db_query(mem_db, filter_obj={
             "property": "Категория", "select": {"equals": "💰 Лимит"}
         }, page_size=50)
+        logger.info("_get_limits: found %d limit pages", len(pages))
         for p in pages:
             props = p["properties"]
             связь_parts = props.get("Связь", {}).get("rich_text", [])
@@ -55,10 +56,13 @@ async def _get_limits(mem_db: str) -> Dict[str, float]:
             fact_parts = props.get("Текст", {}).get("title", [])
             fact = fact_parts[0]["plain_text"] if fact_parts else ""
             m = _LIMIT_AMOUNT_RE.search(fact)
+            logger.info("_get_limits: page связь=%r fact=%r regex_match=%r", связь, fact, m.group(0) if m else None)
             if связь and m:
                 limits[связь] = float(m.group(1).replace(' ', '').replace(',', '.'))
+            else:
+                logger.warning("_get_limits: skip page — связь=%r fact=%r (no match)", связь, fact)
     except Exception as e:
-        logger.error("_get_limits: %s", e)
+        logger.error("_get_limits: %s", e, exc_info=True)
     return limits
 
 
@@ -141,6 +145,7 @@ async def get_finance_stats(month: str, user_notion_id: str = "") -> str:
     limits: Dict[str, float] = {}
     if mem_db:
         limits = await _get_limits(mem_db)
+    logger.info("get_finance_stats: mem_db=%r limits=%s by_cat=%s", mem_db, limits, by_cat)
 
     y, m = int(month[:4]), int(month[5:7])
     month_label = f"{_RU_MONTHS.get(m, month)} {y}"
@@ -157,6 +162,8 @@ async def get_finance_stats(month: str, user_notion_id: str = "") -> str:
         link = _cat_link(cat)
         limit_val: Optional[float] = None
         for key, val in limits.items():
+            logger.info("get_finance_stats: matching cat=%r link=%r key=%r → %s",
+                        cat, link, key, key in link or link in key)
             if key in link or link in key:
                 limit_val = val
                 break
