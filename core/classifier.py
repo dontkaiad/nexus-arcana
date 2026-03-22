@@ -31,6 +31,25 @@ TAGS_EMOJI = {
 
 _classify_last_raw: str = ""
 
+# ── Парсинг "до [день_недели]" в дедлайне ──────────────────────────────────────
+_WEEKDAY_DEADLINE_RE = re.compile(
+    r'\bдо\s+(понедельника|вторника|среды|четверга|пятницы|субботы|воскресенья)\b',
+    re.IGNORECASE,
+)
+_RU_WEEKDAY_NUM = {
+    'понедельника': 0, 'вторника': 1, 'среды': 2, 'четверга': 3,
+    'пятницы': 4, 'субботы': 5, 'воскресенья': 6,
+}
+
+
+def _nearest_weekday_iso(target_wd: int, tz_offset: int) -> str:
+    """Ближайший target_wd от завтра включительно. Если сегодня уже этот день → +7."""
+    today = datetime.now(timezone(timedelta(hours=tz_offset))).date()
+    days_ahead = (target_wd - today.weekday()) % 7
+    if days_ahead == 0:
+        days_ahead = 7
+    return (today + timedelta(days=days_ahead)).strftime("%Y-%m-%d")
+
 
 def today_moscow() -> str:
     return datetime.now(MOSCOW_TZ).strftime("%Y-%m-%d")
@@ -181,7 +200,7 @@ def build_system(tz_offset: int = 3) -> str:
         "- confidence: high если есть явное слово (доход/расход/бартер); low если только сумма+имя (спросить потом)",
         "- title: ВСЕГДА объединяй всё остальное в одну строку. Пример: '450 такси карта вадмму' → title='такси вадиму' (исправленная опечатка)",
         "- priority: срочно/важно/сегодня → 'Высокий'; потом → 'Низкий'; иначе 'Средний'",
-        "- deadline: день недели → вычисли ISO дату от " + today + "; сегодня=" + today,
+        "- deadline: 'до пятницы/среды/понедельника' → ISO дата ближайшего такого дня (если сегодня этот день → следующая неделя). 'до пятницы' ≠ 'каждую пятницу'. Пример: сегодня=" + today + " воскресенье → 'до пятницы'=2026-03-28, 'до понедельника'=2026-03-23",
         "- deadline с временем: парсить 'завтра в 15:00' → YYYY-MM-DDTHH:MM; 'в 14:30 без даты' → сегодня+время",
         "- repeat: 'каждый день/ежедневно/каждое утро/каждый вечер/каждую ночь' → 'Ежедневно'; 'каждую [день недели]/каждый [день недели]' → 'Еженедельно'; 'раз в месяц/ежемесячно/каждый месяц' → 'Ежемесячно'; иначе → 'Нет'",
         "- day_of_week: только если repeat='Еженедельно': пн/понедельник→'Пн'; вт/вторник→'Вт'; ср/среда→'Ср'; чт/четверг→'Чт'; пт/пятница→'Пт'; сб/суббота→'Сб'; вс/воскресенье→'Вс'",
@@ -694,6 +713,15 @@ async def process_item(data: Dict[str, Any], original_text: str, msg, clarify: d
             else:
                 logger.info("classifier: overriding deadline with relative=%s", relative_time)
                 data["deadline"] = relative_time
+
+        # Post-processing: "до пятницы/среды/etc." → ближайший день недели
+        wd_match = _WEEKDAY_DEADLINE_RE.search(original_text)
+        if wd_match:
+            tz_offset = await _get_user_tz(msg.from_user.id)
+            target_wd = _RU_WEEKDAY_NUM[wd_match.group(1).lower()]
+            correct_deadline = _nearest_weekday_iso(target_wd, tz_offset)
+            logger.info("classifier: weekday deadline '%s' → %s", wd_match.group(1), correct_deadline)
+            data["deadline"] = correct_deadline
 
         logger.info("classifier: calling handle_task_parsed with full data=%s", data)
         data["user_notion_id"] = user_notion_id
