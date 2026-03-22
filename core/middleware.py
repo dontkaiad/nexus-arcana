@@ -16,7 +16,7 @@ class WhitelistMiddleware(BaseMiddleware):
     Двухслойная проверка:
     1. Whitelist (allowed_ids) — быстрый gate
     2. База Пользователей в Notion — права и user_notion_id
-    require_feature: если задано, проверяет checkbox у пользователя (arcana/nexus/finance/passwords)
+    require_feature: если задано, проверяет checkbox у пользователя (arcana/nexus/finance)
     """
 
     def __init__(self, require_feature: str = "") -> None:
@@ -61,7 +61,6 @@ class WhitelistMiddleware(BaseMiddleware):
                     feature_labels = {
                         "arcana":    "Arcana 🌒",
                         "finance":   "Финансы 💰",
-                        "passwords": "Пароли 🔑",
                         "nexus":     "Nexus ☀️",
                     }
                     label = feature_labels.get(self.require_feature, self.require_feature)

@@ -12,7 +12,7 @@ AI_Agents (root)
 │   ├── ✅ Задачи          31a42b3b1ac08051a3ccde86e6233d30
 │   ├── 🧠 Память          31a42b3b1ac0801f8e3cf1441b61bc69
 │   ├── 💡 Заметки         31a42b3b1ac0807ba68fd700ab695e7c
-│   └── 🔐 Пароли          31a42b3b1ac0804faae6f599d91e08a8
+│   └── (🔐 Пароли — ОТМЕНЕНО, Bitwarden)
 ├── 🌒 Arcana
 │   ├── 👤 Клиенты         31b42b3b1ac08022baafffbcc8237bbd
 │   ├── 🃏 Расклады        31b42b3b1ac08038b4a7e88c8c382875  ← бывшие Сеансы
@@ -36,7 +36,7 @@ AI_Agents (root)
 
 Слой 2 — База Пользователи:
   Проверка TG ID → читаем права (checkboxes)
-  ☀️ Nexus / 🌒 Arcana / 💰 Финансы / 🔐 Пароли
+  ☀️ Nexus / 🌒 Arcana / 💰 Финансы
   Нет записи → игнор
   Нет нужного checkbox → "⛔ Нет доступа к [функция]"
 
@@ -69,7 +69,7 @@ AI_AGENTS/
 │       ├── notes.py
 │       ├── finance.py      # description_search, статистика → Notion
 │       ├── memory.py
-│       ├── passwords.py
+│       ├── # passwords.py — УДАЛЕНО (Bitwarden)
 │       └── voice.py
 │
 ├── arcana/
@@ -155,7 +155,7 @@ Arcana: оплата сеанса/ритуала
 ✅ Финансы (расходы/доходы, лимиты, /finance_stats, Phase 10: мультимесяц/сравнение/прогноз)
 ✅ Заметки (теги, поиск, редактирование, дайджест)
 ✅ Память (сохранение, поиск, /memory, /adhd, СДВГ-фичи, auto-suggest)
-⏳ Пароли — следующий спринт
+❌ Пароли — ОТМЕНЕНО (Bitwarden)
 
 🌒 **ARCANA:**
 ✅ Клиенты, расклады, ритуалы (базово)
