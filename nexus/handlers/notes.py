@@ -19,6 +19,9 @@ MOSCOW_TZ = timezone(timedelta(hours=3))
 # Pending: user_id → {text, selected, new, existing, date, user_notion_id, chosen}
 _pending: Dict[int, dict] = {}
 
+# Последний дайджест: user_id → [{"page_id": ..., "title": ..., "tags": [...]}]
+_last_digest_results: Dict[int, List[dict]] = {}
+
 TAGS_SYSTEM = """Выбери теги для заметки из предложенного списка существующих.
 Если ни один не подходит — предложи новые (максимум 2).
 Ответь ТОЛЬКО JSON без markdown:
@@ -301,15 +304,19 @@ async def send_notes_digest(bot, user_tg_id: int, user_notion_id: str) -> None:
     if not pages:
         return
 
+    digest_cache = []
     lines = []
     for page in pages:
         props = page["properties"]
         title_parts = props.get("Заголовок", {}).get("title", [])
         title = title_parts[0]["plain_text"] if title_parts else "—"
         tags_items = props.get("Теги", {}).get("multi_select", [])
-        icon = tags_items[0]["name"].split()[0] if tags_items else "💡"
+        tags = [t["name"] for t in tags_items]
         date = (props.get("Дата", {}).get("date") or {}).get("start", "")[:10]
-        lines.append(f"— {icon} {title} — {date}")
+        digest_cache.append({"page_id": page["id"], "title": title, "tags": tags})
+        lines.append(f"— 💡 {title} — {date}")
+
+    _last_digest_results[user_tg_id] = digest_cache
 
     n = len(pages)
     text = (
@@ -411,3 +418,51 @@ async def handle_note_search(
     items = [_parse(p) for p in combined]
     register_pages(uid, items, f"🔍 {q or 'Заметки'}", _fmt)
     await message.answer(get_page_text(uid), reply_markup=get_page_keyboard(uid))
+
+
+async def handle_note_delete(message: Message, data: dict, user_notion_id: str = "") -> None:
+    """Удалить заметки из последнего дайджеста по ключевому слову."""
+    from core.notion_client import get_notion
+
+    uid = message.from_user.id
+    hint = (data.get("hint") or "").strip().lower()
+    delete_all = data.get("delete_all", False)
+
+    digest_pages = _last_digest_results.get(uid, [])
+
+    if not digest_pages:
+        await message.answer("❌ Нет свежего дайджеста — отправь запрос ещё раз после дайджеста")
+        return
+
+    if delete_all and not hint:
+        targets = digest_pages
+    elif hint:
+        targets = [
+            p for p in digest_pages
+            if hint in p["title"].lower() or any(hint in t.lower() for t in p["tags"])
+        ]
+    else:
+        targets = []
+
+    if not targets:
+        hint_display = f" про «{hint}»" if hint else ""
+        await message.answer(f"❌ Не нашла заметок{hint_display} в последнем дайджесте")
+        return
+
+    notion = get_notion()
+    deleted = 0
+    for p in targets:
+        try:
+            await notion.pages.update(page_id=p["page_id"], archived=True)
+            deleted += 1
+        except Exception as e:
+            logger.error("handle_note_delete: page_id=%s error=%s", p["page_id"], e)
+
+    # Убрать удалённые из кэша
+    deleted_ids = {p["page_id"] for p in targets}
+    _last_digest_results[uid] = [p for p in digest_pages if p["page_id"] not in deleted_ids]
+
+    hint_display = f" про «{hint}»" if hint else ""
+    n = deleted
+    suffix = "у" if n == 1 else "и" if n < 5 else ""
+    await message.answer(f"🗑️ Удалила {n} заметк{suffix}{hint_display}")
