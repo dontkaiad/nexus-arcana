@@ -4,9 +4,10 @@ from __future__ import annotations
 import base64
 import json
 import logging
+import os
 import re
 from datetime import datetime, timezone, timedelta
-from typing import List
+from typing import Dict, List, Optional
 
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram import Router, F
@@ -17,6 +18,143 @@ logger = logging.getLogger("nexus.finance")
 MOSCOW_TZ = timezone(timedelta(hours=3))
 
 router = Router()
+
+_LIMIT_AMOUNT_RE = re.compile(r'(\d[\d\s]*(?:[.,]\d+)?)\s*[₽р]')
+
+_RU_MONTHS = {
+    1: "январь", 2: "февраль", 3: "март", 4: "апрель",
+    5: "май", 6: "июнь", 7: "июль", 8: "август",
+    9: "сентябрь", 10: "октябрь", 11: "ноябрь", 12: "декабрь",
+}
+
+
+def _cat_link(cat: str) -> str:
+    """'🚬 Привычки' → 'привычки', '🍱 Кафе/Доставка' → 'кафе'"""
+    name = re.sub(r'^[^\w\u0400-\u04FF]+', '', cat, flags=re.UNICODE).strip()
+    return name.split('/')[0].strip().lower()
+
+
+async def _get_limits(mem_db: str) -> Dict[str, float]:
+    """Загрузить все лимиты из памяти. Возвращает {связь_lower: amount}."""
+    from core.notion_client import db_query
+    limits: Dict[str, float] = {}
+    try:
+        pages = await db_query(mem_db, filter_obj={
+            "property": "Категория", "select": {"equals": "💰 Лимит"}
+        }, page_size=50)
+        for p in pages:
+            props = p["properties"]
+            связь_parts = props.get("Связь", {}).get("rich_text", [])
+            связь = связь_parts[0]["plain_text"].strip().lower() if связь_parts else ""
+            fact_parts = props.get("Текст", {}).get("title", [])
+            fact = fact_parts[0]["plain_text"] if fact_parts else ""
+            m = _LIMIT_AMOUNT_RE.search(fact)
+            if связь and m:
+                limits[связь] = float(m.group(1).replace(' ', '').replace(',', '.'))
+    except Exception as e:
+        logger.error("_get_limits: %s", e)
+    return limits
+
+
+async def _check_budget_limit(category: str, message: Message) -> None:
+    """После записи расхода — проверить бюджетный лимит по категории."""
+    mem_db = os.environ.get("NOTION_DB_MEMORY")
+    if not mem_db:
+        return
+    link = _cat_link(category)
+    limits = await _get_limits(mem_db)
+    limit_amount: Optional[float] = None
+    for key, val in limits.items():
+        if key in link or link in key:
+            limit_amount = val
+            break
+    if not limit_amount:
+        return
+
+    month = datetime.now(MOSCOW_TZ).strftime("%Y-%m")
+    try:
+        records = await finance_month(month, type_filter="expense")
+        month_total = sum(
+            (p["properties"].get("Сумма", {}).get("number") or 0)
+            for p in records
+            if (p["properties"].get("Категория", {}).get("select") or {}).get("name", "") == category
+        )
+    except Exception as e:
+        logger.error("_check_budget_limit finance_month: %s", e)
+        return
+
+    pct = month_total / limit_amount * 100 if limit_amount else 0
+    if pct >= 100:
+        over = month_total - limit_amount
+        await message.answer(
+            f"🚨 Превышен лимит на {category}: <b>{month_total:,.0f}₽</b> из {limit_amount:,.0f}₽ (+{over:,.0f}₽)"
+        )
+    elif pct >= 80:
+        await message.answer(
+            f"⚠️ Уже потрачено <b>{month_total:,.0f}₽</b> из {limit_amount:,.0f}₽ на {category} ({pct:.0f}%)"
+        )
+
+
+async def get_finance_stats(month: str, user_notion_id: str = "") -> str:
+    """Сводка за месяц с лимитами. month = 'YYYY-MM'."""
+    mem_db = os.environ.get("NOTION_DB_MEMORY")
+    try:
+        records = await finance_month(month, user_notion_id=user_notion_id)
+    except Exception as e:
+        logger.error("get_finance_stats: %s", e)
+        return "⚠️ Ошибка получения данных"
+
+    total_expense = 0.0
+    total_income = 0.0
+    by_cat: Dict[str, float] = {}
+
+    for r in records:
+        props = r["properties"]
+        amount = props.get("Сумма", {}).get("number") or 0
+        type_name = (props.get("Тип", {}).get("select") or {}).get("name", "")
+        cat = (props.get("Категория", {}).get("select") or {}).get("name", "")
+        if "Доход" in type_name:
+            total_income += amount
+        elif "Расход" in type_name:
+            total_expense += amount
+            if cat:
+                by_cat[cat] = by_cat.get(cat, 0) + amount
+
+    limits: Dict[str, float] = {}
+    if mem_db:
+        limits = await _get_limits(mem_db)
+
+    y, m = int(month[:4]), int(month[5:7])
+    month_label = f"{_RU_MONTHS.get(m, month)} {y}"
+
+    lines = [f"📊 <b>Финансы за {month_label}:</b>",
+             f"Расходы: <b>{total_expense:,.0f}₽</b>",
+             f"Доходы: <b>{total_income:,.0f}₽</b>",
+             "", "<b>По категориям:</b>"]
+
+    for cat, amount in sorted(by_cat.items(), key=lambda x: -x[1]):
+        link = _cat_link(cat)
+        limit_val: Optional[float] = None
+        for key, val in limits.items():
+            if key in link or link in key:
+                limit_val = val
+                break
+        if limit_val:
+            pct = amount / limit_val * 100
+            if pct > 100:
+                status = f"🔴 (+{amount - limit_val:,.0f}₽)"
+            elif pct >= 80:
+                status = f"🟡 ({pct:.0f}%)"
+            else:
+                status = f"🟢 ({pct:.0f}%)"
+            lines.append(f"{cat}: {amount:,.0f}₽ / лимит {limit_val:,.0f}₽ {status}")
+        else:
+            lines.append(f"{cat}: {amount:,.0f}₽")
+
+    balance = total_income - total_expense
+    sign = "+" if balance >= 0 else ""
+    lines.append(f"\n💰 <b>Баланс: {sign}{balance:,.0f}₽</b>")
+    return "\n".join(lines)
 
 CATEGORIES = [
     "🐾 Коты", "🏠 Жилье", "🚬 Привычки", "🍜 Продукты",
@@ -267,6 +405,8 @@ async def handle_finance_text(message: Message, text: str, bot_label: str = "☀
 
     _last_page_id[uid] = page_id
     await message.answer(_format_record(data))
+    if "Расход" in data.get("type_", ""):
+        await _check_budget_limit(data.get("category", ""), message)
 
 
 @router.message(F.text)
@@ -415,6 +555,8 @@ async def handle_finance_clarify(call: CallbackQuery, user_notion_id: str = "") 
         text = f"{icon} <b>{sign}{amount:,.0f}₽</b> · <b>{description}</b>\n🏷 {real_category} <i>{real_source}</i>"
         await call.message.edit_text(text, parse_mode="HTML")
         _pending_finance.pop(uid, None)
+        if action != "income":
+            await _check_budget_limit(real_category, call.message)
     else:
         await call.message.edit_text("⚠️ Ошибка записи. Попробуй позже.")
 

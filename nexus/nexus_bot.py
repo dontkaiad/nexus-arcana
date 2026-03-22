@@ -200,6 +200,15 @@ async def cmd_finance(msg: Message, user_notion_id: str = "") -> None:
     await msg.answer(text)
 
 
+@dp.message(Command("finance_stats"))
+async def cmd_finance_stats(msg: Message, user_notion_id: str = "") -> None:
+    """Финансовая сводка за текущий месяц с бюджетными лимитами."""
+    from nexus.handlers.finance import get_finance_stats
+    month = datetime.now(timezone(timedelta(hours=3))).strftime("%Y-%m")
+    text = await get_finance_stats(month, user_notion_id)
+    await msg.answer(text)
+
+
 @dp.message(Command("notes_digest"))
 async def cmd_notes_digest(msg: Message, user_notion_id: str = "") -> None:
     """Ручной запуск дайджеста заметок."""
@@ -516,6 +525,7 @@ async def main() -> None:
         BotCommand(command="tasks", description="Активные задачи"),
         BotCommand(command="notes", description="Последние 5 заметок"),
         BotCommand(command="finance", description="Расходы за сегодня"),
+        BotCommand(command="finance_stats", description="Сводка за месяц + лимиты"),
         BotCommand(command="notes_digest", description="Дайджест старых заметок"),
     ])
 
