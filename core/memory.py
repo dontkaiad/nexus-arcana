@@ -1,6 +1,7 @@
 """core/memory.py — общая логика долгосрочной памяти (Nexus + Arcana)."""
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -313,22 +314,54 @@ async def save_memory(
         await message.answer(f"⚠️ Ошибка записи: {e}")
 
 
+async def _search_finance(query: str, page_size: int = 5) -> List[dict]:
+    """Поиск по базе финансов: поле Описание contains query."""
+    db_id = os.environ.get("NOTION_DB_FINANCE")
+    if not db_id or not query:
+        return []
+    try:
+        return await db_query(db_id, filter_obj={
+            "property": "Описание", "title": {"contains": query}
+        }, page_size=page_size)
+    except Exception as e:
+        logger.error("memory search_finance: %s", e)
+        return []
+
+
+async def _search_tasks(query: str, page_size: int = 5) -> List[dict]:
+    """Поиск по базе задач: Задача contains query, статус != Done."""
+    db_id = os.environ.get("NOTION_DB_TASKS")
+    if not db_id or not query:
+        return []
+    try:
+        return await db_query(db_id, filter_obj={"and": [
+            {"property": "Задача", "title": {"contains": query}},
+            {"property": "Статус", "status": {"does_not_equal": "Done"}},
+        ]}, page_size=page_size)
+    except Exception as e:
+        logger.error("memory search_tasks: %s", e)
+        return []
+
+
 async def search_memory(
     message: Message,
     query: str,
     user_notion_id: str,
     del_prefix: str = "mem_del",
 ) -> None:
-    """Поиск по памяти. Показывает результаты + чекбоксы удаления одним сообщением."""
+    """Поиск по памяти + финансам + задачам параллельно."""
     db_id = _get_db_id()
     if not db_id:
         await message.answer("⚠️ NOTION_DB_MEMORY не задан")
         return
 
     query = query.strip()
-    pages: List[dict] = []
+
     if query:
-        pages = await _find_pages_by_hint(query, page_size=10)
+        mem_coro = _find_pages_by_hint(query, page_size=10)
+        fin_coro = _search_finance(query, page_size=5)
+        task_coro = _search_tasks(query, page_size=5)
+        pages, fin_pages, task_pages = await asyncio.gather(mem_coro, fin_coro, task_coro)
     else:
         try:
             filter_obj = {"property": "Актуально", "checkbox": {"equals": True}}
@@ -340,8 +373,10 @@ async def search_memory(
             )
         except Exception as e:
             logger.error("memory search: %s", e)
+            pages = []
+        fin_pages, task_pages = [], []
 
-    if not pages:
+    if not pages and not fin_pages and not task_pages:
         suffix = f" по «{query}»" if query else ""
         await message.answer(f"🧠 Ничего не нашла в памяти{suffix}")
         return
@@ -351,22 +386,50 @@ async def search_memory(
     _mem_delete_pages[uid] = pages
     _mem_selected[uid] = set()
 
-    lines = []
-    for page in pages:
-        fact     = _page_fact(page)
-        category = _page_category(page)
-        date     = _page_date(page)
-        cat_emoji = category.split(" ")[0] if category else "💡"
-        is_inactive = page["properties"].get("Актуально", {}).get("checkbox") is False
-        inactive_mark = " <i>(неактуально)</i>" if is_inactive else ""
-        line2 = f"<i>{category} · {date}</i>" if category else f"<i>{date}</i>"
-        lines.append(f"{cat_emoji} {fact}{inactive_mark}\n{line2}")
+    parts: List[str] = []
 
-    text = f"🧠 <b>Память</b> (найдено {len(pages)}):\n\n" + "\n\n".join(lines)
-    await message.answer(text, reply_markup=_build_delete_keyboard(
-        uid, pages,
-        reactivate_cb="mem_reactivate_selected",
-    ))
+    # ── Память ──
+    if pages:
+        lines = []
+        for page in pages:
+            fact      = _page_fact(page)
+            category  = _page_category(page)
+            date      = _page_date(page)
+            cat_emoji = category.split(" ")[0] if category else "💡"
+            is_inactive = page["properties"].get("Актуально", {}).get("checkbox") is False
+            inactive_mark = " <i>(неактуально)</i>" if is_inactive else ""
+            line2 = f"<i>{category} · {date}</i>" if category else f"<i>{date}</i>"
+            lines.append(f"{cat_emoji} {fact}{inactive_mark}\n{line2}")
+        parts.append(f"🧠 <b>Память</b> (найдено {len(pages)}):\n\n" + "\n\n".join(lines))
+
+    # ── Финансы ──
+    if fin_pages:
+        fin_lines = []
+        for p in fin_pages:
+            props = p.get("properties", {})
+            desc_parts = props.get("Описание", {}).get("title", [])
+            desc = desc_parts[0]["plain_text"] if desc_parts else "—"
+            amount = props.get("Сумма", {}).get("number") or ""
+            date = (props.get("Дата", {}).get("date") or {}).get("start", "")[:10]
+            amount_str = f"{amount:g}₽" if amount else ""
+            fin_lines.append(f"· {desc} {amount_str} · {date}".strip())
+        parts.append("💰 <b>Финансы:</b>\n" + "\n".join(fin_lines))
+
+    # ── Задачи ──
+    if task_pages:
+        task_lines = []
+        for p in task_pages:
+            props = p.get("properties", {})
+            title_parts = props.get("Задача", {}).get("title", [])
+            title = title_parts[0]["plain_text"] if title_parts else "—"
+            deadline = (props.get("Дедлайн", {}).get("date") or {}).get("start", "")[:10]
+            deadline_str = f" · до {deadline}" if deadline else ""
+            task_lines.append(f"· {title}{deadline_str}")
+        parts.append("✅ <b>Задачи:</b>\n" + "\n".join(task_lines))
+
+    text = "\n\n".join(parts)
+    kb = _build_delete_keyboard(uid, pages, reactivate_cb="mem_reactivate_selected") if pages else None
+    await message.answer(text, reply_markup=kb)
 
 
 async def deactivate_memory(
