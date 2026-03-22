@@ -82,83 +82,117 @@ async def suggest_memory(message: Message, text: str, user_notion_id: str = "") 
 
 # ── Callbacks ────────────────────────────────────────────────────────────────
 
-@router.callback_query(F.data == "mem_noop")
-async def cb_mem_noop(call: CallbackQuery) -> None:
-    await call.answer()
+def _search_kb(uid: int) -> "InlineKeyboardMarkup":
+    return mem._build_delete_keyboard(uid, mem._mem_delete_pages.get(uid, []))
+
+
+def _delete_kb(uid: int) -> "InlineKeyboardMarkup":
+    return mem._build_delete_keyboard(
+        uid, mem._mem_delete_pages.get(uid, []),
+        toggle_prefix="mem_del_toggle",
+        selected_cb="mem_delete_selected",
+        selected_label="🗑️ Удалить выбранные",
+        all_cb="mem_delete_all",
+        all_label="🗑️ Удалить все",
+        cancel_label="❌ Отмена",
+    )
 
 
 @router.callback_query(F.data.startswith("mem_toggle:"))
 async def cb_mem_toggle(call: CallbackQuery) -> None:
-    """Деактивировать запись (Актуально=false) — режим поиска."""
+    """Переключить выбор записи — режим поиска (без действия в Notion)."""
+    await call.answer()
     uid = call.from_user.id
     page_id = call.data.split(":", 1)[1]
     selected = mem._mem_selected.setdefault(uid, set())
-    if page_id not in selected:
-        try:
-            from core.notion_client import update_page
-            await update_page(page_id, {"Актуально": {"checkbox": False}})
-            selected.add(page_id)
-        except Exception as e:
-            logger.error("cb_mem_toggle deactivate: %s", e)
-            await call.answer("⚠️ Ошибка", show_alert=True)
-            return
-    await call.answer()
+    selected.discard(page_id) if page_id in selected else selected.add(page_id)
     pages = mem._mem_delete_pages.get(uid, [])
     if not pages:
         await call.message.edit_text("⏱ Сессия истекла.")
         return
-    await call.message.edit_reply_markup(reply_markup=mem._build_delete_keyboard(uid, pages))
+    await call.message.edit_reply_markup(reply_markup=_search_kb(uid))
 
 
 @router.callback_query(F.data.startswith("mem_del_toggle:"))
 async def cb_mem_del_toggle(call: CallbackQuery) -> None:
-    """Архивировать запись — режим удаления."""
+    """Переключить выбор записи — режим удаления (без действия в Notion)."""
+    await call.answer()
     uid = call.from_user.id
     page_id = call.data.split(":", 1)[1]
     selected = mem._mem_selected.setdefault(uid, set())
-    if page_id not in selected:
-        try:
-            await mem._archive_page(page_id)
-            selected.add(page_id)
-        except Exception as e:
-            logger.error("cb_mem_del_toggle: %s", e)
-            await call.answer("⚠️ Ошибка", show_alert=True)
-            return
-    await call.answer()
+    selected.discard(page_id) if page_id in selected else selected.add(page_id)
     pages = mem._mem_delete_pages.get(uid, [])
     if not pages:
         await call.message.edit_text("⏱ Сессия истекла.")
         return
-    await call.message.edit_reply_markup(reply_markup=mem._build_delete_keyboard(
-        uid, pages,
-        toggle_prefix="mem_del_toggle",
-        acted_label="удалено",
-        all_cb="mem_delete_all",
-        all_label="🗑️ Удалить все",
-        cancel_label="❌ Отмена",
-    ))
+    await call.message.edit_reply_markup(reply_markup=_delete_kb(uid))
+
+
+@router.callback_query(F.data.startswith("mem_deactivate_selected:"))
+async def cb_mem_deactivate_selected(call: CallbackQuery) -> None:
+    """Деактивировать выбранные записи (Актуально=false)."""
+    await call.answer()
+    uid = call.from_user.id
+    selected = mem._mem_selected.pop(uid, set())
+    mem._mem_delete_pages.pop(uid, None)
+    if not selected:
+        await call.message.edit_text("☐ Ничего не выбрано.")
+        return
+    from core.notion_client import update_page
+    done = 0
+    for pid in selected:
+        try:
+            await update_page(pid, {"Актуально": {"checkbox": False}})
+            done += 1
+        except Exception as e:
+            logger.error("cb_mem_deactivate_selected: %s", e)
+    noun = "запись" if done == 1 else "записи" if done < 5 else "записей"
+    await call.message.edit_text(f"☑️ Помечено неактуальными: {done} {noun}.")
 
 
 @router.callback_query(F.data.startswith("mem_deactivate_all:"))
 async def cb_mem_deactivate_all(call: CallbackQuery) -> None:
-    """Деактивировать все оставшиеся записи (Актуально=false) — режим поиска."""
+    """Деактивировать все записи (Актуально=false)."""
     await call.answer()
     uid = call.from_user.id
-    selected = mem._mem_selected.setdefault(uid, set())
-    pages = mem._mem_delete_pages.get(uid, [])
+    pages = mem._mem_delete_pages.pop(uid, [])
+    mem._mem_selected.pop(uid, None)
     if not pages:
         await call.message.edit_text("⏱ Сессия истекла.")
         return
     from core.notion_client import update_page
+    done = 0
     for page in pages:
-        pid = page["id"]
-        if pid not in selected:
-            try:
-                await update_page(pid, {"Актуально": {"checkbox": False}})
-                selected.add(pid)
-            except Exception as e:
-                logger.error("cb_mem_deactivate_all: %s", e)
-    await call.message.edit_reply_markup(reply_markup=mem._build_delete_keyboard(uid, pages))
+        try:
+            await update_page(page["id"], {"Актуально": {"checkbox": False}})
+            done += 1
+        except Exception as e:
+            logger.error("cb_mem_deactivate_all: %s", e)
+    noun = "запись" if done == 1 else "записи" if done < 5 else "записей"
+    await call.message.edit_text(f"☑️ Помечено неактуальными: {done} {noun}.")
+
+
+@router.callback_query(F.data.startswith("mem_delete_selected:"))
+async def cb_mem_delete_selected(call: CallbackQuery) -> None:
+    """Архивировать выбранные записи."""
+    await call.answer()
+    uid = call.from_user.id
+    selected = mem._mem_selected.pop(uid, set())
+    pages = mem._mem_delete_pages.pop(uid, [])
+    if not selected:
+        await call.message.edit_text("☐ Ничего не выбрано.")
+        return
+    targets = [p for p in pages if p["id"] in selected]
+    done = 0
+    for page in targets:
+        try:
+            await mem._archive_page(page["id"])
+            done += 1
+        except Exception as e:
+            logger.error("cb_mem_delete_selected: %s", e)
+    verb = "Удалена" if done == 1 else "Удалено"
+    noun = "запись" if done == 1 else "записи" if done < 5 else "записей"
+    await call.message.edit_text(f"🗑 {verb} {done} {noun} из памяти.")
 
 
 @router.callback_query(F.data.startswith("mem_delete_all:"))
