@@ -62,7 +62,6 @@ class NexusConfig:
     db_tasks: str
     db_memory: str
     db_notes: str
-    db_passwords: str
     db_errors: str
     page_reports: str = ""  # Родительская страница для отчётов (опционально)
 
@@ -106,7 +105,6 @@ def load_config() -> AppConfig:
             db_tasks     = _require("NOTION_DB_TASKS"),
             db_memory    = _require("NOTION_DB_MEMORY"),
             db_notes     = _require("NOTION_DB_NOTES"),
-            db_passwords = _require("NOTION_DB_PASSWORDS"),
             db_errors    = _optional("NOTION_DB_ERRORS"),
             page_reports = _optional("NOTION_PAGE_REPORTS"),
         ),
