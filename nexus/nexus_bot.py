@@ -558,6 +558,7 @@ async def main() -> None:
         BotCommand(command="notes", description="Последние 5 заметок"),
         BotCommand(command="finance", description="Расходы за сегодня"),
         BotCommand(command="finance_stats", description="Сводка за месяц + лимиты"),
+        BotCommand(command="memory", description="Список памяти"),
         BotCommand(command="notes_digest", description="Дайджест старых заметок"),
     ])
 
