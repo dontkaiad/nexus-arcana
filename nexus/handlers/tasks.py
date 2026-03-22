@@ -204,6 +204,7 @@ async def _schedule_reminder(chat_id: int, title: str, reminder_dt: str, task_id
             )
 
         job_id = f"reminder_{task_id}" if task_id else f"rem_{chat_id}_{title[:15]}_{reminder_dt}"
+        logger.info("scheduling reminder: task_id=%s chat_id=%s job_id=%s callback_data=task_complete_%s", task_id, chat_id, job_id, task_id)
         _scheduler.add_job(send_reminder, trigger="date", run_date=dt,
                            id=job_id, replace_existing=True)
         logger.info("Reminder scheduled: %s at %s", title, dt)
@@ -234,6 +235,7 @@ async def _schedule_deadline_check(chat_id: int, title: str, deadline_dt: str, t
             )
 
         job_id = f"deadline_{task_id}" if task_id else f"deadline_{chat_id}_{title[:15]}_{deadline_dt}"
+        logger.info("scheduling deadline: task_id=%s chat_id=%s job_id=%s callback_data=task_complete_%s", task_id, chat_id, job_id, task_id)
         _scheduler.add_job(check_deadline, trigger="date", run_date=dt,
                            id=job_id, replace_existing=True)
         logger.info("Deadline check scheduled: %s at %s", title, dt)
@@ -902,9 +904,11 @@ _DONE_PHRASES = [
 
 @router.callback_query(F.data.startswith("task_complete_"))
 async def task_complete(call: CallbackQuery) -> None:
+    logger.info("task_complete callback: data=%s uid=%s", call.data, call.from_user.id)
     import random
     from core.notion_client import update_task_status
     task_id = call.data.split("_", 2)[2]
+    logger.info("task_complete: task_id=%s", task_id)
 
     result = await update_task_status(task_id, "Done")
     if result:
@@ -927,8 +931,10 @@ async def task_complete(call: CallbackQuery) -> None:
 
 @router.callback_query(F.data.startswith("task_failed_"))
 async def task_failed(call: CallbackQuery) -> None:
+    logger.info("task_failed callback: data=%s uid=%s", call.data, call.from_user.id)
     uid = call.from_user.id
     task_id = call.data.split("_", 2)[2]
+    logger.info("task_failed: task_id=%s", task_id)
     
     # Получаем название из сообщения (если есть)
     msg_text = call.message.text or ""
@@ -945,8 +951,10 @@ async def task_failed(call: CallbackQuery) -> None:
 
 @router.callback_query(F.data.startswith("task_reschedule_"))
 async def task_reschedule(call: CallbackQuery) -> None:
+    logger.info("task_reschedule callback: data=%s uid=%s", call.data, call.from_user.id)
     uid = call.from_user.id
     task_id = call.data.split("_", 2)[2]
+    logger.info("task_reschedule: task_id=%s", task_id)
     
     # Получаем название из сообщения (если есть)
     msg_text = call.message.text or ""
@@ -1251,10 +1259,12 @@ async def handle_task_done(message: Message, task_hint: str, user_notion_id: str
 
 @router.callback_query(F.data.startswith("task_done_select_"))
 async def task_done_select(call: CallbackQuery) -> None:
+    logger.info("task_done_select callback: data=%s uid=%s", call.data, call.from_user.id)
     import random
     from core.notion_client import update_task_status
     task_id = call.data[len("task_done_select_"):]
     uid = call.from_user.id
+    logger.info("task_done_select: task_id=%s", task_id)
 
     # Получить props задачи чтобы проверить повтор
     repeat = "Нет"
