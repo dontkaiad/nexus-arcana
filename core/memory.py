@@ -241,8 +241,6 @@ async def _find_pages_by_hint(hint: str, page_size: int = 10) -> List[dict]:
         pages = await db_query(db_id, filter_obj={
             "or": _or_clauses(_search_terms(first))
         }, page_size=page_size)
-        # Исключить явно деактивированные (Актуально=False), пустые checkbox пропускаем
-        pages = [p for p in pages if p["properties"].get("Актуально", {}).get("checkbox") is not False]
 
         # Шаг 2: постфильтр по остальным токенам
         if pages and rest:
@@ -267,7 +265,6 @@ async def _find_pages_by_hint(hint: str, page_size: int = 10) -> List[dict]:
                     {"property": "Связь", "rich_text": {"contains": t}},
                 ]
         pages = await db_query(db_id, filter_obj={"or": or_filters}, page_size=page_size)
-        pages = [p for p in pages if p["properties"].get("Актуально", {}).get("checkbox") is not False]
         return pages
 
     except Exception as e:
@@ -360,8 +357,10 @@ async def search_memory(
         category = _page_category(page)
         date     = _page_date(page)
         cat_emoji = category.split(" ")[0] if category else "💡"
+        is_inactive = page["properties"].get("Актуально", {}).get("checkbox") is False
+        inactive_mark = " <i>(неактуально)</i>" if is_inactive else ""
         line2 = f"<i>{category} · {date}</i>" if category else f"<i>{date}</i>"
-        lines.append(f"{cat_emoji} {fact}\n{line2}")
+        lines.append(f"{cat_emoji} {fact}{inactive_mark}\n{line2}")
 
     text = f"🧠 <b>Память</b> (найдено {len(pages)}):\n\n" + "\n\n".join(lines)
     await message.answer(text, reply_markup=_build_delete_keyboard(uid, pages))
