@@ -280,7 +280,31 @@ async def _find_pages_by_hint(hint: str, page_size: int = 10) -> List[dict]:
                     {"property": "Связь", "rich_text": {"contains": t}},
                 ]
         pages = await db_query(db_id, filter_obj={"or": or_filters}, page_size=page_size)
-        return pages
+        if pages:
+            return pages
+
+        # Шаг 4: fallback — поиск по категории
+        _CAT_MAP = {
+            "сдвг": "🧠 СДВГ", "люди": "👥 Люди", "здоровье": "🏥 Здоровье",
+            "предпочтения": "🛒 Предпочтения", "работа": "💼 Работа", "быт": "🏠 Быт",
+            "паттерн": "🔄 Паттерн", "инсайт": "💡 Инсайт", "практика": "🔮 Практика",
+            "коты": "🐾 Коты", "лимит": "💰 Лимит",
+        }
+        low = hint.lower().strip()
+        matched_cat = _CAT_MAP.get(low, "")
+        if not matched_cat:
+            for k, v in _CAT_MAP.items():
+                if low in k or k in low:
+                    matched_cat = v
+                    break
+        if matched_cat:
+            pages = await db_query(db_id, filter_obj={"and": [
+                {"property": "Категория", "select": {"equals": matched_cat}},
+                {"property": "Актуально", "checkbox": {"equals": True}},
+            ]}, page_size=page_size)
+            return pages
+
+        return []
 
     except Exception as e:
         logger.error("memory _find_pages_by_hint: %s", e)
@@ -502,7 +526,14 @@ async def search_memory(
             inactive_mark = " <i>(неактуально)</i>" if is_inactive else ""
             line2 = f"<i>{category} · {date}</i>" if category else f"<i>{date}</i>"
             lines.append(f"{cat_emoji} {fact}{inactive_mark}\n{line2}")
-        parts.append(f"🧠 <b>Память</b> (найдено {len(pages)}):\n\n" + "\n\n".join(lines))
+        # Если все записи из одной категории — показать её название
+        all_cats = set(_page_category(p) for p in pages)
+        if len(all_cats) == 1:
+            single_cat = all_cats.pop()
+            header = f"{single_cat} ({len(pages)} зап.)"
+        else:
+            header = f"🧠 <b>Память</b> (найдено {len(pages)})"
+        parts.append(f"{header}:\n\n" + "\n\n".join(lines))
 
     # ── Финансы ──
     if fin_pages:
