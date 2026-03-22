@@ -415,29 +415,42 @@ async def deactivate_memory(
         await message.answer("⚠️ Ошибка обновления")
 
 
-def _build_delete_keyboard(uid: int, pages: List[dict]) -> InlineKeyboardMarkup:
-    """Клавиатура мульти-выбора для удаления записей из памяти."""
+def _build_delete_keyboard(
+    uid: int,
+    pages: List[dict],
+    toggle_prefix: str = "mem_toggle",
+    acted_label: str = "неактуально",
+    cancel_label: str = "❌ Закрыть",
+) -> InlineKeyboardMarkup:
+    """Клавиатура чекбоксов для записей памяти.
+
+    toggle_prefix="mem_toggle"     → деактивация (поиск)
+    toggle_prefix="mem_del_toggle" → архивирование (удаление)
+    """
     selected = _mem_selected.get(uid, set())
     buttons = []
+    active_count = 0
     for page in pages:
         pid = page["id"]
-        icon = "✅" if pid in selected else "☐"
         fact = _page_fact(page)
+        if pid in selected:
+            buttons.append([InlineKeyboardButton(
+                text=f"✅ {fact[:40]} ({acted_label})",
+                callback_data="mem_noop",
+            )])
+        else:
+            active_count += 1
+            buttons.append([InlineKeyboardButton(
+                text=f"☐ {fact[:45]}",
+                callback_data=f"{toggle_prefix}:{pid}",
+            )])
+    if active_count > 0:
         buttons.append([InlineKeyboardButton(
-            text=f"{icon} {fact[:45]}",
-            callback_data=f"mem_toggle:{pid}",
-        )])
-    if selected:
-        buttons.append([InlineKeyboardButton(
-            text=f"🗑️ Удалить выбранные ({len(selected)})",
-            callback_data=f"mem_delete_selected:{uid}",
+            text=f"🗑️ Удалить все ({active_count})",
+            callback_data=f"mem_delete_all:{uid}",
         )])
     buttons.append([InlineKeyboardButton(
-        text=f"🗑️ Удалить все ({len(pages)})",
-        callback_data=f"mem_delete_all:{uid}",
-    )])
-    buttons.append([InlineKeyboardButton(
-        text="❌ Отмена",
+        text=cancel_label,
         callback_data=f"mem_cancel:{uid}",
     )])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
@@ -494,7 +507,12 @@ async def delete_memory(
     _mem_selected[uid] = set()
     await message.answer(
         "🧠 Выбери записи для удаления:",
-        reply_markup=_build_delete_keyboard(uid, shown),
+        reply_markup=_build_delete_keyboard(
+            uid, shown,
+            toggle_prefix="mem_del_toggle",
+            acted_label="удалено",
+            cancel_label="❌ Отмена",
+        ),
     )
 
 
