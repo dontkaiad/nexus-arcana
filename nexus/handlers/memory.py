@@ -16,6 +16,105 @@ router = Router()
 
 BOT_LABEL = "☀️ Nexus"
 
+CATEGORIES_ORDER = [
+    "🧠 СДВГ", "👥 Люди", "🏥 Здоровье", "🛒 Предпочтения",
+    "💼 Работа", "🏠 Быт", "🔄 Паттерн", "💡 Инсайт",
+    "🔮 Практика", "🐾 Коты", "💰 Лимит",
+]
+
+CAT_MAP = {
+    "сдвг": "🧠 СДВГ",
+    "люди": "👥 Люди",
+    "здоровье": "🏥 Здоровье",
+    "предпочтения": "🛒 Предпочтения",
+    "работа": "💼 Работа",
+    "быт": "🏠 Быт",
+    "паттерн": "🔄 Паттерн",
+    "инсайт": "💡 Инсайт",
+    "практика": "🔮 Практика",
+    "коты": "🐾 Коты",
+    "лимит": "💰 Лимит",
+}
+
+
+async def handle_memory_list(
+    message: Message,
+    category_filter: str = "",
+    user_notion_id: str = "",
+) -> None:
+    """/memory — все активные записи, сгруппированные по категориям."""
+    from core.notion_client import db_query
+    from core.pagination import PAGE_SIZE, register_pages, get_page_text, get_page_keyboard
+
+    db_id = os.environ.get("NOTION_DB_MEMORY")
+    if not db_id:
+        await message.answer("⚠️ NOTION_DB_MEMORY не задан")
+        return
+
+    filters = [{"property": "Актуально", "checkbox": {"equals": True}}]
+
+    matched_cat = ""
+    if category_filter:
+        key = category_filter.lower().strip()
+        matched_cat = CAT_MAP.get(key, "")
+        if not matched_cat:
+            for k, v in CAT_MAP.items():
+                if key in k or k in key:
+                    matched_cat = v
+                    break
+        if matched_cat:
+            filters.append({"property": "Категория", "select": {"equals": matched_cat}})
+
+    filter_obj = {"and": filters} if len(filters) > 1 else filters[0]
+
+    try:
+        pages = await db_query(db_id, filter_obj=filter_obj, page_size=200)
+    except Exception as e:
+        logger.error("handle_memory_list: %s", e)
+        await message.answer("⚠️ Ошибка загрузки памяти")
+        return
+
+    if not pages:
+        msg_text = f"🧠 В категории {matched_cat} пусто." if matched_cat else "🧠 Память пуста."
+        await message.answer(msg_text)
+        return
+
+    # Группируем по категории
+    grouped: dict = {}
+    all_items = []
+    for p in pages:
+        props = p["properties"]
+        cat = (props.get("Категория", {}).get("select") or {}).get("name", "❓ Без категории")
+        text_parts = props.get("Текст", {}).get("title", [])
+        text = text_parts[0]["plain_text"] if text_parts else "—"
+        grouped.setdefault(cat, []).append(text)
+        all_items.append({"cat": cat, "text": text})
+
+    lines = [f"🧠 <b>Память</b> ({len(pages)} зап.)\n"]
+    for cat in CATEGORIES_ORDER:
+        if cat in grouped:
+            lines.append(f"<b>{cat}</b>")
+            for item in grouped[cat]:
+                lines.append(f"  • {item}")
+            lines.append("")
+    for cat, items in grouped.items():
+        if cat not in CATEGORIES_ORDER:
+            lines.append(f"<b>{cat}</b>")
+            for item in items:
+                lines.append(f"  • {item}")
+            lines.append("")
+
+    uid = message.from_user.id
+    if len(pages) > PAGE_SIZE:
+        def _fmt(item: dict) -> str:
+            return f"{item['cat']} · {item['text']}"
+        title = f"🧠 Память{' · ' + matched_cat if matched_cat else ''}"
+        register_pages(uid, all_items, title, _fmt)
+        await message.answer("\n".join(lines), parse_mode="HTML")
+        await message.answer(get_page_text(uid), reply_markup=get_page_keyboard(uid))
+    else:
+        await message.answer("\n".join(lines), parse_mode="HTML")
+
 # Pending auto-suggest: uid → {"text": ..., "user_notion_id": ...}
 _pending_auto: Dict[int, dict] = {}
 
