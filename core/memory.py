@@ -448,20 +448,35 @@ def _build_delete_keyboard(
             text=label,
             callback_data=f"{toggle_prefix}:{pid}",
         )])
+    n_inactive = sum(1 for p in pages if p["properties"].get("Актуально", {}).get("checkbox") is False)
+    n_active = len(pages) - n_inactive
+
     if n_selected:
-        buttons.append([InlineKeyboardButton(
-            text=f"{selected_label} ({n_selected})",
-            callback_data=f"{selected_cb}:{uid}",
-        )])
+        # Кнопка деактивации выбранных — только если среди выбранных есть активные
+        selected_active = any(
+            p["properties"].get("Актуально", {}).get("checkbox") is not False
+            for p in pages if p["id"] in selected
+        )
+        if selected_active:
+            buttons.append([InlineKeyboardButton(
+                text=f"{selected_label} ({n_selected})",
+                callback_data=f"{selected_cb}:{uid}",
+            )])
         if reactivate_cb:
             buttons.append([InlineKeyboardButton(
                 text=f"{reactivate_label} ({n_selected})",
                 callback_data=f"{reactivate_cb}:{uid}",
             )])
-    buttons.append([InlineKeyboardButton(
-        text=f"{all_label} ({len(pages)})",
-        callback_data=f"{all_cb}:{uid}",
-    )])
+    if n_active:
+        buttons.append([InlineKeyboardButton(
+            text=f"{all_label} ({n_active})",
+            callback_data=f"{all_cb}:{uid}",
+        )])
+    if reactivate_cb and n_inactive:
+        buttons.append([InlineKeyboardButton(
+            text=f"↩️ Восстановить все ({n_inactive})",
+            callback_data=f"mem_reactivate_all:{uid}",
+        )])
     buttons.append([InlineKeyboardButton(
         text=cancel_label,
         callback_data=f"mem_cancel:{uid}",
