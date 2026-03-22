@@ -82,16 +82,27 @@ async def suggest_memory(message: Message, text: str, user_notion_id: str = "") 
 
 # ── Callbacks ────────────────────────────────────────────────────────────────
 
+@router.callback_query(F.data == "mem_noop")
+async def cb_mem_noop(call: CallbackQuery) -> None:
+    await call.answer()
+
+
 @router.callback_query(F.data.startswith("mem_toggle:"))
 async def cb_mem_toggle(call: CallbackQuery) -> None:
-    await call.answer()
+    """Деактивировать запись (Актуально=false) — режим поиска."""
     uid = call.from_user.id
     page_id = call.data.split(":", 1)[1]
     selected = mem._mem_selected.setdefault(uid, set())
-    if page_id in selected:
-        selected.discard(page_id)
-    else:
-        selected.add(page_id)
+    if page_id not in selected:
+        try:
+            from core.notion_client import update_page
+            await update_page(page_id, {"Актуально": {"checkbox": False}})
+            selected.add(page_id)
+        except Exception as e:
+            logger.error("cb_mem_toggle deactivate: %s", e)
+            await call.answer("⚠️ Ошибка", show_alert=True)
+            return
+    await call.answer()
     pages = mem._mem_delete_pages.get(uid, [])
     if not pages:
         await call.message.edit_text("⏱ Сессия истекла.")
@@ -99,27 +110,28 @@ async def cb_mem_toggle(call: CallbackQuery) -> None:
     await call.message.edit_reply_markup(reply_markup=mem._build_delete_keyboard(uid, pages))
 
 
-@router.callback_query(F.data.startswith("mem_delete_selected:"))
-async def cb_mem_delete_selected(call: CallbackQuery) -> None:
-    await call.answer()
+@router.callback_query(F.data.startswith("mem_del_toggle:"))
+async def cb_mem_del_toggle(call: CallbackQuery) -> None:
+    """Архивировать запись — режим удаления."""
     uid = call.from_user.id
-    selected = mem._mem_selected.pop(uid, set())
-    pages = mem._mem_delete_pages.pop(uid, [])
-    if not selected:
-        await call.message.edit_text("☐ Ничего не выбрано.")
-        return
-    targets = [p for p in pages if p["id"] in selected]
-    deleted = 0
-    for page in targets:
+    page_id = call.data.split(":", 1)[1]
+    selected = mem._mem_selected.setdefault(uid, set())
+    if page_id not in selected:
         try:
-            await mem._archive_page(page["id"])
-            deleted += 1
+            await mem._archive_page(page_id)
+            selected.add(page_id)
         except Exception as e:
-            logger.error("cb_mem_delete_selected: %s", e)
-    n = deleted
-    verb = "Удалена" if n == 1 else "Удалено"
-    noun = "запись" if n == 1 else "записи" if n < 5 else "записей"
-    await call.message.edit_text(f"🗑 {verb} {n} {noun} из памяти.")
+            logger.error("cb_mem_del_toggle: %s", e)
+            await call.answer("⚠️ Ошибка", show_alert=True)
+            return
+    await call.answer()
+    pages = mem._mem_delete_pages.get(uid, [])
+    if not pages:
+        await call.message.edit_text("⏱ Сессия истекла.")
+        return
+    await call.message.edit_reply_markup(reply_markup=mem._build_delete_keyboard(
+        uid, pages, toggle_prefix="mem_del_toggle", acted_label="удалено", cancel_label="❌ Отмена",
+    ))
 
 
 @router.callback_query(F.data.startswith("mem_delete_all:"))
