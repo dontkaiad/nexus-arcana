@@ -420,6 +420,8 @@ def _build_delete_keyboard(
     pages: List[dict],
     toggle_prefix: str = "mem_toggle",
     acted_label: str = "неактуально",
+    all_cb: str = "mem_deactivate_all",
+    all_label: str = "☑️ Отметить все неактуальными",
     cancel_label: str = "❌ Закрыть",
 ) -> InlineKeyboardMarkup:
     """Клавиатура чекбоксов для записей памяти.
@@ -446,8 +448,8 @@ def _build_delete_keyboard(
             )])
     if active_count > 0:
         buttons.append([InlineKeyboardButton(
-            text=f"🗑️ Удалить все ({active_count})",
-            callback_data=f"mem_delete_all:{uid}",
+            text=f"{all_label} ({active_count})",
+            callback_data=f"{all_cb}:{uid}",
         )])
     buttons.append([InlineKeyboardButton(
         text=cancel_label,
@@ -511,6 +513,8 @@ async def delete_memory(
             uid, shown,
             toggle_prefix="mem_del_toggle",
             acted_label="удалено",
+            all_cb="mem_delete_all",
+            all_label="🗑️ Удалить все",
             cancel_label="❌ Отмена",
         ),
     )
