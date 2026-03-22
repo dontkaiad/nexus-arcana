@@ -920,20 +920,23 @@ async def handle_finance_summary(query: str = "", user_notion_id: str = "", uid:
                             break
                     if limit_val:
                         pct = total / limit_val * 100
+                        remaining = limit_val - total
                         if pct > 100:
                             over = total - limit_val
                             lines.append(
-                                f"\n😬 Лимит превышен на {over:,.0f}₽ "
-                                f"({total:,.0f}₽ из {limit_val:,.0f}₽)"
+                                f"\n📊 Лимит: {total:,.0f}₽ / {limit_val:,.0f}₽ ({pct:.0f}%)"
+                                f"\n😬 Превышен на {over:,.0f}₽ — постараемся уложиться в следующем месяце"
                             )
                         elif pct >= 80:
                             lines.append(
-                                f"\n⚠️ Почти весь лимит — {total:,.0f}₽ из {limit_val:,.0f}₽ ({pct:.0f}%)"
+                                f"\n📊 Лимит: {total:,.0f}₽ / {limit_val:,.0f}₽ ({pct:.0f}%)"
+                                f"\n⚠️ Осталось {remaining:,.0f}₽ — почти весь бюджет"
                             )
-                        elif pct < 50:
+                        else:
                             praise = get_praise("finance_under_limit")
                             lines.append(
-                                f"\n🎉 Отличный результат! {total:,.0f}₽ из {limit_val:,.0f}₽\n{praise}"
+                                f"\n📊 Лимит: {total:,.0f}₽ / {limit_val:,.0f}₽ ({pct:.0f}%)"
+                                f"\n✅ Осталось {remaining:,.0f}₽\n{praise}"
                             )
             except Exception as e:
                 logger.debug("stats limit review: %s", e)
