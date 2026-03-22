@@ -446,7 +446,7 @@ async def handle_note_delete(message: Message, data: dict, user_notion_id: str =
 
     if not targets:
         hint_display = f" про «{hint}»" if hint else ""
-        await message.answer(f"❌ Не нашла заметок{hint_display} в последнем дайджесте")
+        await message.answer(f"❌ Не нашёл заметок{hint_display} в последнем дайджесте")
         return
 
     notion = get_notion()
@@ -465,4 +465,4 @@ async def handle_note_delete(message: Message, data: dict, user_notion_id: str =
     hint_display = f" про «{hint}»" if hint else ""
     n = deleted
     suffix = "у" if n == 1 else "и" if n < 5 else ""
-    await message.answer(f"🗑️ Удалила {n} заметк{suffix}{hint_display}")
+    await message.answer(f"🗑️ Удалил {n} заметк{suffix}{hint_display}")
