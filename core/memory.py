@@ -256,6 +256,7 @@ async def _find_pages_by_hint(hint: str, page_size: int = 10) -> List[dict]:
         pages = await db_query(db_id, filter_obj={
             "or": _or_clauses(_search_terms(first))
         }, page_size=page_size)
+        logger.info("_find_pages_by_hint step 1: found=%d", len(pages))
 
         # Шаг 2: постфильтр по остальным токенам
         if pages and rest:
@@ -263,11 +264,13 @@ async def _find_pages_by_hint(hint: str, page_size: int = 10) -> List[dict]:
                 p for p in pages
                 if any(tok in _page_fact(p).lower() for tok in rest)
             ]
+            logger.info("_find_pages_by_hint step 2: refined %d→%d", len(pages), len(refined))
             if refined:
-                logger.info("memory _find_pages_by_hint: refined %d→%d pages", len(pages), len(refined))
+                logger.info("_find_pages_by_hint RETURN: %d pages (step 2)", len(refined))
                 return refined
 
         if pages:
+            logger.info("_find_pages_by_hint RETURN: %d pages (step 1)", len(pages))
             return pages
 
         # Шаг 3: fallback — OR по всем токенам (оригинал + основа) во всех полях
@@ -280,7 +283,9 @@ async def _find_pages_by_hint(hint: str, page_size: int = 10) -> List[dict]:
                     {"property": "Связь", "rich_text": {"contains": t}},
                 ]
         pages = await db_query(db_id, filter_obj={"or": or_filters}, page_size=page_size)
+        logger.info("_find_pages_by_hint step 3: found=%d", len(pages))
         if pages:
+            logger.info("_find_pages_by_hint RETURN: %d pages (step 3)", len(pages))
             return pages
 
         # Шаг 4: fallback — поиск по категории
@@ -302,12 +307,15 @@ async def _find_pages_by_hint(hint: str, page_size: int = 10) -> List[dict]:
                 {"property": "Категория", "select": {"equals": matched_cat}},
                 {"property": "Актуально", "checkbox": {"equals": True}},
             ]}, page_size=page_size)
+            logger.info("_find_pages_by_hint step 4 (category=%s): found=%d", matched_cat, len(pages))
+            logger.info("_find_pages_by_hint RETURN: %d pages (step 4)", len(pages))
             return pages
 
+        logger.info("_find_pages_by_hint RETURN: 0 pages (no match)")
         return []
 
     except Exception as e:
-        logger.error("memory _find_pages_by_hint: %s", e)
+        logger.error("memory _find_pages_by_hint: %s", e, exc_info=True)
         return []
 
 
