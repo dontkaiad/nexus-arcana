@@ -117,8 +117,9 @@ async def cb_mem_delete_selected(call: CallbackQuery) -> None:
         except Exception as e:
             logger.error("cb_mem_delete_selected: %s", e)
     n = deleted
+    verb = "Удалена" if n == 1 else "Удалено"
     noun = "запись" if n == 1 else "записи" if n < 5 else "записей"
-    await call.message.edit_text(f"🗑 Удалена {n} {noun} из памяти.")
+    await call.message.edit_text(f"🗑 {verb} {n} {noun} из памяти.")
 
 
 @router.callback_query(F.data.startswith("mem_delete_all:"))
@@ -138,8 +139,9 @@ async def cb_mem_delete_all(call: CallbackQuery) -> None:
         except Exception as e:
             logger.error("cb_mem_delete_all: %s", e)
     n = deleted
+    verb = "Удалена" if n == 1 else "Удалено"
     noun = "запись" if n == 1 else "записи" if n < 5 else "записей"
-    await call.message.edit_text(f"🗑 Удалена {n} {noun} из памяти.")
+    await call.message.edit_text(f"🗑 {verb} {n} {noun} из памяти.")
 
 
 @router.callback_query(F.data.startswith("mem_cancel:"))
