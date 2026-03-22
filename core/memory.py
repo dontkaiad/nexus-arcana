@@ -436,16 +436,19 @@ def _build_delete_keyboard(uid: int, pages: List[dict]) -> InlineKeyboardMarkup:
             text=f"{icon} {fact[:45]}",
             callback_data=f"mem_toggle:{pid}",
         )])
-    # Нижний ряд: "Удалить выбранные" (если есть выбор), затем "Удалить все" и "Отмена"
     if selected:
         buttons.append([InlineKeyboardButton(
             text=f"🗑️ Удалить выбранные ({len(selected)})",
-            callback_data="mem_delete_selected",
+            callback_data=f"mem_delete_selected:{uid}",
         )])
-    buttons.append([
-        InlineKeyboardButton(text="🗑️ Удалить все", callback_data="mem_delete_all"),
-        InlineKeyboardButton(text="❌ Отмена", callback_data="mem_cancel"),
-    ])
+    buttons.append([InlineKeyboardButton(
+        text=f"🗑️ Удалить все ({len(pages)})",
+        callback_data=f"mem_delete_all:{uid}",
+    )])
+    buttons.append([InlineKeyboardButton(
+        text="❌ Отмена",
+        callback_data=f"mem_cancel:{uid}",
+    )])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
