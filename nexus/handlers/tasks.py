@@ -249,10 +249,6 @@ async def _schedule_reminder(chat_id: int, title: str, reminder_dt: str, task_id
         dt = datetime.strptime(reminder_dt, "%Y-%m-%dT%H:%M").replace(
             tzinfo=timezone(timedelta(hours=tz_offset))
         )
-        if dt <= _now():
-            logger.warning("Reminder in the past: %s", reminder_dt)
-            return
-
         async def send_reminder() -> None:
             kb = InlineKeyboardMarkup(inline_keyboard=[[
                 InlineKeyboardButton(text="✅ Сделано!", callback_data=f"task_complete_{task_id}"),
@@ -264,6 +260,16 @@ async def _schedule_reminder(chat_id: int, title: str, reminder_dt: str, task_id
                 parse_mode="HTML",
                 reply_markup=kb
             )
+
+        now = _now()
+        if dt <= now:
+            missed_seconds = (now - dt).total_seconds()
+            if missed_seconds <= 120:
+                logger.info("Reminder just passed (%ds ago), sending immediately: %s", missed_seconds, title)
+                await send_reminder()
+            else:
+                logger.warning("Reminder in the past (%ds ago), skipping: %s", missed_seconds, reminder_dt)
+            return
 
         job_id = f"reminder_{task_id}" if task_id else f"rem_{chat_id}_{title[:15]}_{reminder_dt}"
         logger.info("scheduling reminder: task_id=%s chat_id=%s job_id=%s callback_data=task_complete_%s", task_id, chat_id, job_id, task_id)
