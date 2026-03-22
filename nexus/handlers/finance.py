@@ -222,7 +222,7 @@ async def get_finance_stats(month: str, user_notion_id: str = "", compare_prev: 
             cur_label = _RU_MONTHS.get(m_num, month)
             prev_label = _RU_MONTHS.get(prev_m_num, prev_month)
 
-            cmp_lines = [f"📊 Сравнение: {cur_label} vs {prev_label}", ""]
+            cmp_lines = [f"📊 <b>Сравнение: {cur_label} vs {prev_label}</b>", ""]
             all_cats = set(list(by_cat.keys()) + list(prev_by_cat.keys()))
             cat_deltas: List[tuple] = []  # (cat, cur, prev, delta)
             for cat in sorted(all_cats, key=lambda c: -by_cat.get(c, 0.0)):
@@ -239,7 +239,7 @@ async def get_finance_stats(month: str, user_notion_id: str = "", compare_prev: 
                 else:
                     arrow = "→ без изм."
                 prev_str = f" ← {prev:,.0f}₽" if prev else ""
-                cmp_lines.append(f"{cat}: {cur:,.0f}₽{prev_str}  ({arrow})")
+                cmp_lines.append(f"<b>{cat}</b>: {cur:,.0f}₽{prev_str}  <i>({arrow})</i>")
 
             cmp_lines.append("")
             exp_delta = total_expense - prev_expense_total
@@ -249,7 +249,7 @@ async def get_finance_stats(month: str, user_notion_id: str = "", compare_prev: 
                 exp_arrow = f"↓ {exp_delta:,.0f}₽"
             else:
                 exp_arrow = "→ без изм."
-            cmp_lines.append(f"Итого расходы: {total_expense:,.0f}₽ ({exp_arrow})")
+            cmp_lines.append(f"<b>Итого расходы: {total_expense:,.0f}₽</b>  <i>({exp_arrow})</i>")
 
             # Краткое ревью на основе дельт
             improved = sorted(
@@ -263,17 +263,17 @@ async def get_finance_stats(month: str, user_notion_id: str = "", compare_prev: 
 
             review: List[str] = []
             if improved:
-                parts = ", ".join(f"{cat} ({d:,.0f}₽)" for cat, d in improved)
+                parts = ", ".join(f"<b>{cat}</b> (<i>{d:,.0f}₽</i>)" for cat, d in improved)
                 review.append(f"✅ Сократил: {parts}")
             if worsened:
-                parts = ", ".join(f"{cat} (+{d:,.0f}₽)" for cat, d in worsened)
+                parts = ", ".join(f"<b>{cat}</b> (<i>+{d:,.0f}₽</i>)" for cat, d in worsened)
                 review.append(f"⚠️ Выросло: {parts}")
             if not improved and not worsened:
                 review.append("→ Расходы стабильны, существенных изменений нет")
             elif exp_delta < -200:
-                review.append(f"💚 Отличный результат — в целом на {abs(exp_delta):,.0f}₽ меньше")
+                review.append(f"💚 Отличный результат — в целом на <b>{abs(exp_delta):,.0f}₽</b> меньше")
             elif exp_delta > 200:
-                review.append(f"💡 Общий перерасход +{exp_delta:,.0f}₽ — есть над чем поработать")
+                review.append(f"💡 Общий перерасход <b>+{exp_delta:,.0f}₽</b> — есть над чем поработать")
 
             if review:
                 cmp_lines.append("")
@@ -317,15 +317,15 @@ async def get_finance_stats(month: str, user_notion_id: str = "", compare_prev: 
         if limit_val:
             pct = amount / limit_val * 100
             if pct > 100:
-                status = f"🔴 (+{amount - limit_val:,.0f}₽)"
+                status = f"🔴 <i>(+{amount - limit_val:,.0f}₽)</i>"
             elif pct >= 80:
-                status = f"🟡 ({pct:.0f}%)"
+                status = f"🟡 <i>({pct:.0f}%)</i>"
             else:
-                status = f"🟢 ({pct:.0f}%)"
-            lines.append(f"{cat}: {amount:,.0f}₽ / лимит {limit_val:,.0f}₽ {status}")
+                status = f"🟢 <i>({pct:.0f}%)</i>"
+            lines.append(f"<b>{cat}</b>: {amount:,.0f}₽ / лимит {limit_val:,.0f}₽ {status}")
             cat_review.append((cat, amount, limit_val))
         else:
-            lines.append(f"{cat}: {amount:,.0f}₽")
+            lines.append(f"<b>{cat}</b>: {amount:,.0f}₽")
 
     balance = total_income - total_expense
     sign = "+" if balance >= 0 else ""
@@ -996,7 +996,7 @@ async def _handle_multimonth_stats(
         label_parts.append(f"«{description_search}»")
     label = " · ".join(label_parts) if label_parts else "Общая статистика"
 
-    lines = [f"{icon} {label} — {months_count} мес."]
+    lines = [f"{icon} <b>{label} — {months_count} мес.</b>"]
 
     grand_total = 0.0
     for ms, total in month_totals:
@@ -1005,11 +1005,11 @@ async def _handle_multimonth_stats(
             ml = f"{_MONTHS_SHORT[m - 1]} {y}"
         except Exception:
             ml = ms
-        lines.append(f"{ml}: {total:,.0f}₽")
+        lines.append(f"<b>{ml}:</b> {total:,.0f}₽")
         grand_total += total
 
     avg = grand_total / months_count if months_count else 0
-    lines.append(f"\nИтого: {grand_total:,.0f}₽ · среднее: {avg:,.0f}₽/мес")
+    lines.append(f"\n<b>Итого: {grand_total:,.0f}₽</b>  <i>· среднее: {avg:,.0f}₽/мес</i>")
 
     # Лимит если есть категория расходов
     if category_filter and type_filter != "income":
@@ -1152,8 +1152,8 @@ async def handle_finance_summary(query: str = "", user_notion_id: str = "", uid:
 
         # Сводка — строим всегда, независимо от пагинации
         lines = [
-            f"{icon} {header} — {month_label}",
-            f"{label}: {total:,.0f}₽  ({len(matched)} зап.)" if matched else f"{label}: {total:,.0f}₽  (0 зап.)",
+            f"{icon} <b>{header} — {month_label}</b>",
+            f"{label}: <b>{total:,.0f}₽</b>  <i>({len(matched)} зап.)</i>" if matched else f"{label}: <b>{total:,.0f}₽</b>  <i>(0 зап.)</i>",
         ]
 
         if matched:
@@ -1284,9 +1284,9 @@ async def handle_finance_summary(query: str = "", user_notion_id: str = "", uid:
     # Топ категорий расходов
     if cat_totals:
         lines.append("")
-        lines.append("Топ категорий:")
+        lines.append("<b>Топ категорий:</b>")
         for cat, amt in sorted(cat_totals.items(), key=lambda x: x[1], reverse=True)[:5]:
-            lines.append(f"  {cat}: {amt:,.0f}₽")
+            lines.append(f"  <b>{cat}</b>: {amt:,.0f}₽")
 
     if expense_total > 0:
         advice = await _get_finance_advice("\n".join(lines))
