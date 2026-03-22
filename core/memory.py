@@ -419,38 +419,38 @@ def _build_delete_keyboard(
     uid: int,
     pages: List[dict],
     toggle_prefix: str = "mem_toggle",
-    acted_label: str = "неактуально",
+    selected_cb: str = "mem_deactivate_selected",
+    selected_label: str = "☑️ Отметить неактуальными",
     all_cb: str = "mem_deactivate_all",
     all_label: str = "☑️ Отметить все неактуальными",
     cancel_label: str = "❌ Закрыть",
 ) -> InlineKeyboardMarkup:
     """Клавиатура чекбоксов для записей памяти.
+    Чекбокс = выбор. Действие применяется кнопкой.
 
-    toggle_prefix="mem_toggle"     → деактивация (поиск)
-    toggle_prefix="mem_del_toggle" → архивирование (удаление)
+    Режим поиска:  toggle_prefix="mem_toggle",     selected_cb="mem_deactivate_selected"
+    Режим удаления: toggle_prefix="mem_del_toggle", selected_cb="mem_delete_selected"
     """
     selected = _mem_selected.get(uid, set())
+    n_selected = len(selected)
     buttons = []
-    active_count = 0
     for page in pages:
         pid = page["id"]
         fact = _page_fact(page)
-        if pid in selected:
-            buttons.append([InlineKeyboardButton(
-                text=f"✅ {fact[:40]} ({acted_label})",
-                callback_data="mem_noop",
-            )])
-        else:
-            active_count += 1
-            buttons.append([InlineKeyboardButton(
-                text=f"☐ {fact[:45]}",
-                callback_data=f"{toggle_prefix}:{pid}",
-            )])
-    if active_count > 0:
+        icon = "✅" if pid in selected else "☐"
         buttons.append([InlineKeyboardButton(
-            text=f"{all_label} ({active_count})",
-            callback_data=f"{all_cb}:{uid}",
+            text=f"{icon} {fact[:45]}",
+            callback_data=f"{toggle_prefix}:{pid}",
         )])
+    if n_selected:
+        buttons.append([InlineKeyboardButton(
+            text=f"{selected_label} ({n_selected})",
+            callback_data=f"{selected_cb}:{uid}",
+        )])
+    buttons.append([InlineKeyboardButton(
+        text=f"{all_label} ({len(pages)})",
+        callback_data=f"{all_cb}:{uid}",
+    )])
     buttons.append([InlineKeyboardButton(
         text=cancel_label,
         callback_data=f"mem_cancel:{uid}",
@@ -512,7 +512,8 @@ async def delete_memory(
         reply_markup=_build_delete_keyboard(
             uid, shown,
             toggle_prefix="mem_del_toggle",
-            acted_label="удалено",
+            selected_cb="mem_delete_selected",
+            selected_label="🗑️ Удалить выбранные",
             all_cb="mem_delete_all",
             all_label="🗑️ Удалить все",
             cancel_label="❌ Отмена",
