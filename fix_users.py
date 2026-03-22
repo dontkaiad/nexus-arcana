@@ -21,7 +21,6 @@ DATABASES = {
     "TASKS":     "31a42b3b-1ac0-8051-a3cc-de86e6233d30",
     "NOTES":     "31a42b3b-1ac0-807b-a68f-d700ab695e7c",
     "MEMORY":    "31a42b3b-1ac0-801f-8e3c-f1441b61bc69",
-    "PASSWORDS": "31a42b3b-1ac0-804f-aae6-f599d91e08a8",
 }
 
 HEADERS = {
