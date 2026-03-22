@@ -654,19 +654,31 @@ async def process_item(data: Dict[str, Any], original_text: str, msg, clarify: d
         source = data.get("source", "💳 Карта")
         title = data.get("title", original_text[:50])
         
-        logger.info("process_item: finance %s - amount=%.0f category=%r source=%r confidence=%r", 
+        logger.info("process_item: finance %s - amount=%.0f category=%r source=%r confidence=%r",
                    kind, amount, category, source, confidence)
-        
-        # Low confidence → UI вместо сохранения (даже если amount=0)
+
+        # Low confidence → проверяем маркеры дохода/бартера
         if confidence == "low":
-            logger.info("process_item: low confidence finance, showing UI for clarification")
-            return f"finance_clarify:{kind}:{amount}:{category}:{source}:{title}"
-        
+            _income_m = re.compile(
+                r'\b(получила|получил|заработала|заработал|зарплата|доход'
+                r'|пришло|пришла|вернули|вернул|поступил[аио]?|аванс)\b',
+                re.IGNORECASE,
+            )
+            _barter_m = re.compile(r'\b(бартер|обмен)\b', re.IGNORECASE)
+            if not _income_m.search(original_text) and not _barter_m.search(original_text):
+                logger.info("process_item: low confidence, no income/barter markers → auto-expense")
+                confidence = "high"
+                kind = "expense"
+                type_label = "💸 Расход"
+            else:
+                logger.info("process_item: low confidence finance, showing UI for clarification")
+                return f"finance_clarify:{kind}:{amount}:{category}:{source}:{title}"
+
         # High confidence + amount=0 → пропустить
         if amount == 0:
             logger.info("process_item: high confidence but amount=0, skipping")
             return ""
-        
+
         # High confidence + amount > 0 → сохранить в Notion
         logger.info("process_item: saving to Notion - %s %s %s", type_label, amount, category)
         result = await finance_add(
@@ -681,6 +693,13 @@ async def process_item(data: Dict[str, Any], original_text: str, msg, clarify: d
         if result:
             sign = "−" if kind == "expense" else "+"
             icon = "💸" if kind == "expense" else "💰"
+            if kind == "expense":
+                logger.info("finance saved via classifier: category=%s — calling budget check", category)
+                try:
+                    from nexus.handlers.finance import _check_budget_limit
+                    await _check_budget_limit(category, msg, user_notion_id)
+                except Exception as e:
+                    logger.error("budget check error: %s", e, exc_info=True)
             return f"{icon} <b>{sign}{amount:,.0f}₽</b> · <b>{title}</b>\n🏷 {category} <i>{source}</i>"
         
         logged = await log_error(original_text, "processing_error", _classify_last_raw,
