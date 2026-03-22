@@ -1150,12 +1150,17 @@ async def handle_finance_summary(query: str = "", user_notion_id: str = "", uid:
 
         report_title = f"{header} — {month_label}"
 
+        # Сводка — строим всегда, независимо от пагинации
+        lines = [
+            f"{icon} {header} — {month_label}",
+            f"{label}: {total:,.0f}₽  ({len(matched)} зап.)" if matched else f"{label}: {total:,.0f}₽  (0 зап.)",
+        ]
+
         if matched:
             all_sorted = sorted(matched, key=lambda x: x[0], reverse=True)
-
-            # Пагинация если записей > PAGE_SIZE и есть uid
             from core.pagination import PAGE_SIZE as _PS, register_pages
             if uid and len(all_sorted) > _PS:
+                # Регистрируем пагинацию для детального списка, в сводке добавляем подсказку
                 _MONTHS = "янв фев мар апр май июн июл авг сен окт ноя дек".split()
 
                 def _finance_fmt(it: dict) -> str:
@@ -1171,25 +1176,16 @@ async def handle_finance_summary(query: str = "", user_notion_id: str = "", uid:
                     for ds, desc, amt in all_sorted
                 ]
                 register_pages(uid, finance_items, f"{icon} {report_title} · {total:,.0f}₽", _finance_fmt)
-                return "__paginated__"
-
-            lines = [
-                f"{icon} {header} — {month_label}",
-                f"{label}: {total:,.0f}₽  ({len(matched)} зап.)",
-                "",
-            ]
-            for date_str, desc, amount in all_sorted:
-                try:
-                    d = datetime.strptime(date_str[:10], "%Y-%m-%d")
-                    day = f"{d.day} {('янв фев мар апр май июн июл авг сен окт ноя дек'.split())[d.month - 1]}"
-                except Exception:
-                    day = date_str[:10]
-                lines.append(f"• {day} — {desc or '—'} — {amount:,.0f}₽")
-        else:
-            lines = [
-                f"{icon} {header} — {month_label}",
-                f"{label}: {total:,.0f}₽  (0 зап.)",
-            ]
+                lines.append(f"\n📋 Записей много — список ниже ↓")
+            else:
+                lines.append("")
+                for date_str, desc, amount in all_sorted:
+                    try:
+                        d = datetime.strptime(date_str[:10], "%Y-%m-%d")
+                        day = f"{d.day} {('янв фев мар апр май июн июл авг сен окт ноя дек'.split())[d.month - 1]}"
+                    except Exception:
+                        day = date_str[:10]
+                    lines.append(f"• {day} — {desc or '—'} — {amount:,.0f}₽")
 
         # Ревью по лимиту — только для запросов по категории (расходы)
         if category_filter and type_filter != "income":
