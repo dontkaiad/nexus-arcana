@@ -270,6 +270,12 @@ _MEMORY_SAVE_RE = re.compile(
 # Деактивация записи памяти: "неактуально", "неактуально 1", "неактуально маша"
 _DEACTIVATE_RE = re.compile(r"^\s*неактуально\b", re.IGNORECASE)
 
+# Удаление заметки из дайджеста: "удали заметку про расходники", "удали все заметки"
+_NOTE_DELETE_RE = re.compile(
+    r"^\s*удали\s+(все\s+)?заметк\w+(\s+про|\s+по|\s+о)?\s*(.+)?$",
+    re.IGNORECASE,
+)
+
 # Удаление из памяти: "удали из памяти ...", "забудь про ...", "убери запись ..."
 _MEMORY_DELETE_RE = re.compile(
     r"^\s*(удали|забудь|удалить|стёр|убери)\s+(из\s+памяти|из\s+памят\w+|факт|запись)?",
@@ -397,6 +403,15 @@ async def classify(text: str, tz_offset: int = 3) -> list[dict]:
         hint = re.sub(r"^\s*неактуально\s*", "", text, flags=re.IGNORECASE).strip()
         logger.info("classify: memory_deactivate matched, hint=%r", hint)
         return [{"type": "memory_deactivate", "hint": hint, "text": text}]
+
+    # Быстрый pre-фильтр: удаление заметок ("удали заметку про X", "удали все заметки")
+    m = _NOTE_DELETE_RE.match(text)
+    if m:
+        delete_all = bool(m.group(1))
+        hint = (m.group(3) or "").strip()
+        hint = re.sub(r"^\s*(про|по|о|об)\s+", "", hint, flags=re.IGNORECASE).strip()
+        logger.info("classify: note_delete matched, delete_all=%s hint=%r", delete_all, hint)
+        return [{"type": "note_delete", "hint": hint, "delete_all": delete_all, "text": text}]
 
     # Быстрый pre-фильтр: удаление из памяти ("удали из памяти ...", "забудь про ...")
     m = _MEMORY_DELETE_RE.match(text)
@@ -556,6 +571,12 @@ async def process_item(data: Dict[str, Any], original_text: str, msg, clarify: d
     if kind == "memory_delete":
         from nexus.handlers.memory import handle_memory_delete
         await handle_memory_delete(msg, data, user_notion_id=user_notion_id)
+        return ""
+
+    # ЗАМЕТКИ (note_delete из дайджеста)
+    if kind == "note_delete":
+        from nexus.handlers.notes import handle_note_delete
+        await handle_note_delete(msg, data, user_notion_id=user_notion_id)
         return ""
 
     if kind == "unknown":
