@@ -107,7 +107,7 @@ async def cmd_help(msg: Message, user_notion_id: str = "") -> None:
         "<code>/finance_stats</code> — полная сводка месяца, ревью лимитов, баланс.\n"
         "«сколько потратила на кафе?» — статистика по любой категории.\n\n"
 
-        "👨‍💻 <b>Создатель:</b> Кай Ларк\n"
+        "👨‍💻 <b>Создатель:</b> <a href=\"https://github.com/dontkaiad\">Кай Ларк</a>\n"
         "❓ Ошибки/вопросы? Напиши <a href=\"https://t.me/witchcommit\">@witchcommit</a>"
     )
 
