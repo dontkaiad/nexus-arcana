@@ -101,7 +101,9 @@ async def cmd_help(msg: Message, user_notion_id: str = "") -> None:
         "Запоминаю факты: люди, животные, здоровье, предпочтения, паттерны.\n"
         "Сохранить: «запомни что маша не ест мясо», «у меня аллергия на пыль».\n"
         "Найти: «что знаешь о маше», «напомни про батона».\n"
-        "Деактивация и удаление — прямо из результатов поиска.\n\n"
+        "Деактивация и удаление — прямо из результатов поиска.\n"
+        "  <code>/memory</code> — вся память, сгруппированная по категориям\n"
+        "  <code>/memory коты</code> — только нужная категория\n\n"
 
         "🌍 <b>ЧАСОВОЙ ПОЯС</b>\n"
         "«я в москве», «utc+5» — или явно:\n"
@@ -186,6 +188,17 @@ async def cmd_notes(msg: Message, user_notion_id: str = "") -> None:
             line += f" · {date}"
         lines.append(line)
     await msg.answer("📝 <b>Последние заметки:</b>\n\n" + "\n".join(lines))
+
+
+@dp.message(Command("memory"))
+async def cmd_memory(msg: Message, user_notion_id: str = "") -> None:
+    """/memory [категория] — все активные записи памяти, сгруппированные по категориям."""
+    from core.layout import maybe_convert
+    text = maybe_convert(msg.text or "")
+    parts = text.strip().split(maxsplit=1)
+    category_filter = parts[1] if len(parts) > 1 else ""
+    from nexus.handlers.memory import handle_memory_list
+    await handle_memory_list(msg, category_filter=category_filter, user_notion_id=user_notion_id)
 
 
 @dp.message(Command("finance"))
