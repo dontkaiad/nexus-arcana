@@ -130,8 +130,35 @@ async def cb_mem_del_toggle(call: CallbackQuery) -> None:
         await call.message.edit_text("⏱ Сессия истекла.")
         return
     await call.message.edit_reply_markup(reply_markup=mem._build_delete_keyboard(
-        uid, pages, toggle_prefix="mem_del_toggle", acted_label="удалено", cancel_label="❌ Отмена",
+        uid, pages,
+        toggle_prefix="mem_del_toggle",
+        acted_label="удалено",
+        all_cb="mem_delete_all",
+        all_label="🗑️ Удалить все",
+        cancel_label="❌ Отмена",
     ))
+
+
+@router.callback_query(F.data.startswith("mem_deactivate_all:"))
+async def cb_mem_deactivate_all(call: CallbackQuery) -> None:
+    """Деактивировать все оставшиеся записи (Актуально=false) — режим поиска."""
+    await call.answer()
+    uid = call.from_user.id
+    selected = mem._mem_selected.setdefault(uid, set())
+    pages = mem._mem_delete_pages.get(uid, [])
+    if not pages:
+        await call.message.edit_text("⏱ Сессия истекла.")
+        return
+    from core.notion_client import update_page
+    for page in pages:
+        pid = page["id"]
+        if pid not in selected:
+            try:
+                await update_page(pid, {"Актуально": {"checkbox": False}})
+                selected.add(pid)
+            except Exception as e:
+                logger.error("cb_mem_deactivate_all: %s", e)
+    await call.message.edit_reply_markup(reply_markup=mem._build_delete_keyboard(uid, pages))
 
 
 @router.callback_query(F.data.startswith("mem_delete_all:"))
