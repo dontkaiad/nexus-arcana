@@ -67,27 +67,37 @@ async def _check_budget_limit(category: str, message: Message, user_notion_id: s
     logger.info("_check_budget_limit called: category=%s", category)
     mem_db = os.environ.get("NOTION_DB_MEMORY")
     if not mem_db:
+        logger.info("_check_budget_limit: NOTION_DB_MEMORY not set, skip")
         return
     link = _cat_link(category)
     limits = await _get_limits(mem_db)
+    logger.info("_check_budget_limit: limits=%s link=%r", limits, link)
     limit_amount: Optional[float] = None
     for key, val in limits.items():
         if key in link or link in key:
             limit_amount = val
             break
     if not limit_amount:
+        logger.info("_check_budget_limit: no limit for category=%r, skip", category)
         return
 
-    month = datetime.now(MOSCOW_TZ).strftime("%Y-%m")
+    from core.config import config
+    from core.notion_client import db_query
+    now = datetime.now(MOSCOW_TZ)
+    month_start = now.strftime("%Y-%m-01")
+    today_str = now.strftime("%Y-%m-%d")
     try:
-        records = await finance_month(month, type_filter="expense")
-        month_total = sum(
-            (p["properties"].get("Сумма", {}).get("number") or 0)
-            for p in records
-            if (p["properties"].get("Категория", {}).get("select") or {}).get("name", "") == category
-        )
+        records = await db_query(config.nexus.db_finance, filter_obj={"and": [
+            {"property": "Тип",       "select": {"equals": "💸 Расход"}},
+            {"property": "Категория", "select": {"equals": category}},
+            {"property": "Дата",      "date":   {"on_or_after": month_start}},
+            {"property": "Дата",      "date":   {"on_or_before": today_str}},
+        ]}, page_size=200)
+        month_total = sum((p["properties"].get("Сумма", {}).get("number") or 0) for p in records)
+        logger.info("_check_budget_limit: month_total=%.0f limit=%.0f category=%s",
+                    month_total, limit_amount, category)
     except Exception as e:
-        logger.error("_check_budget_limit finance_month: %s", e)
+        logger.error("_check_budget_limit db_query: %s", e, exc_info=True)
         return
 
     pct = month_total / limit_amount * 100 if limit_amount else 0
