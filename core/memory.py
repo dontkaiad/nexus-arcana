@@ -385,14 +385,14 @@ async def save_memory(
             if existing:
                 await update_page(existing[0]["id"], props)
                 logger.info("memory save: updated limit page id=%s", existing[0]["id"])
-                await message.answer(f"🧠 Обновила лимит: {fact}")
+                await message.answer(f"🧠 Обновил лимит: {fact}")
                 return
 
         result = await page_create(db_id, props)
         if result:
             logger.info("memory save: created page id=%s", result)
             cat_label = f" [{category}]" if category else ""
-            await message.answer(f"🧠 Запомнила{cat_label}: {fact}")
+            await message.answer(f"🧠 Запомнил{cat_label}: {fact}")
             if category == "🧠 СДВГ":
                 try:
                     tip = await _get_adhd_tip(fact)
@@ -474,7 +474,7 @@ async def search_memory(
 
     if not pages and not fin_pages and not task_pages:
         suffix = f" по «{query}»" if query else ""
-        await message.answer(f"🧠 Ничего не нашла в памяти{suffix}")
+        await message.answer(f"🧠 Ничего не нашёл в памяти{suffix}")
         return
 
     uid = message.from_user.id
@@ -595,7 +595,7 @@ async def search_memory(
         logger.error("search_memory: parts empty despite pages=%d fin=%d tasks=%d",
                       len(pages), len(fin_pages), len(task_pages))
         suffix = f" по «{query}»" if query else ""
-        await message.answer(f"🧠 Ничего не нашла в памяти{suffix}")
+        await message.answer(f"🧠 Ничего не нашёл в памяти{suffix}")
         return
     kb = _build_delete_keyboard(uid, pages, reactivate_cb="mem_reactivate_selected") if pages else None
     await message.answer(text, reply_markup=kb)
@@ -636,7 +636,7 @@ async def deactivate_memory(
         if not pages:
             tokens = _tokenize_hint(hint)
             subject = tokens[0] if tokens else hint
-            await message.answer(f"🧠 Не нашла записей о <b>{subject}</b>")
+            await message.answer(f"🧠 Не нашёл записей о <b>{subject}</b>")
             return
 
     try:
@@ -752,7 +752,7 @@ async def delete_memory(
         if not pages:
             tokens = _tokenize_hint(hint)
             subject = tokens[0] if tokens else hint
-            await message.answer(f"🧠 Не нашла записей о <b>{subject}</b>")
+            await message.answer(f"🧠 Не нашёл записей о <b>{subject}</b>")
             return
 
     if len(pages) == 1:

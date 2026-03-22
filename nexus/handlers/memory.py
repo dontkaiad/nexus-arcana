@@ -526,7 +526,7 @@ async def cb_mem_auto_yes(call: CallbackQuery) -> None:
     result = await page_create(db_id, props)
     if result:
         cat_label = f" [{category}]" if category else ""
-        await call.message.edit_text(f"🧠 Запомнила{cat_label}: {fact}")
+        await call.message.edit_text(f"🧠 Запомнил{cat_label}: {fact}")
     else:
         await call.message.edit_text("⚠️ Ошибка записи в Notion")
 
