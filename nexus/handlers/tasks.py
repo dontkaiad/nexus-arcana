@@ -123,7 +123,12 @@ def init_scheduler(bot: Bot) -> None:
 
 
 async def restore_reminders_on_startup() -> None:
-    """Восстановить APScheduler jobs для задач с будущими напоминаниями."""
+    """Восстановить APScheduler jobs для задач с напоминаниями.
+
+    Проход 1: задачи с будущим напоминанием — планируем как есть.
+    Проход 2: повторяющиеся задачи с прошедшим напоминанием —
+              сдвигаем до ближайшей будущей даты, обновляем Notion, планируем.
+    """
     from core.config import config
     from core.user_manager import get_user
     from core.notion_client import db_query
@@ -134,7 +139,8 @@ async def restore_reminders_on_startup() -> None:
         logger.warning("restore_reminders_on_startup: scheduler/bot/db not ready")
         return
 
-    now_utc = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+    now_utc = datetime.now(timezone.utc)
+    now_utc_str = now_utc.strftime("%Y-%m-%dT%H:%M:%S.000Z")
     restored = 0
 
     for tg_id in config.allowed_ids:
@@ -143,22 +149,18 @@ async def restore_reminders_on_startup() -> None:
             if not user_data:
                 continue
             user_notion_id = user_data.get("notion_page_id", "")
-
-            filter_obj: dict = {
-                "and": [
-                    {"property": "Напоминание", "date": {"after": now_utc}},
-                    {"property": "Статус", "status": {"does_not_equal": "Done"}},
-                ]
-            }
-            if user_notion_id:
-                filter_obj["and"].append(
-                    {"property": "🪪 Пользователи", "relation": {"contains": user_notion_id}}
-                )
-
-            pages = await db_query(db_id, filter_obj=filter_obj, page_size=100)
             tz_offset = await _get_user_tz(tg_id)
+            user_filter = {"property": "🪪 Пользователи", "relation": {"contains": user_notion_id}} if user_notion_id else None
 
-            for page in pages:
+            # ── Проход 1: будущие напоминания ────────────────────────────────────
+            filter1: dict = {"and": [
+                {"property": "Напоминание", "date": {"after": now_utc_str}},
+                {"property": "Статус", "status": {"does_not_equal": "Done"}},
+            ]}
+            if user_filter:
+                filter1["and"].append(user_filter)
+
+            for page in await db_query(db_id, filter_obj=filter1, page_size=100):
                 try:
                     props = page["properties"]
                     task_id = page["id"]
@@ -169,7 +171,67 @@ async def restore_reminders_on_startup() -> None:
                         await _schedule_reminder(tg_id, title, reminder_start[:16], task_id, tz_offset)
                         restored += 1
                 except Exception as e:
-                    logger.error("restore_reminders_on_startup: task %s error: %s", page.get("id"), e)
+                    logger.error("restore pass1: task %s error: %s", page.get("id"), e)
+
+            # ── Проход 2: повторяющиеся задачи с прошедшим напоминанием ─────────
+            filter2: dict = {"and": [
+                {"property": "Статус", "status": {"does_not_equal": "Done"}},
+                {"property": "Повтор", "select": {"does_not_equal": "Нет"}},
+                {"property": "Напоминание", "date": {"before": now_utc_str}},
+            ]}
+            if user_filter:
+                filter2["and"].append(user_filter)
+
+            for page in await db_query(db_id, filter_obj=filter2, page_size=100):
+                try:
+                    props = page["properties"]
+                    task_id = page["id"]
+                    title_parts = props.get("Задача", {}).get("title", [])
+                    title = title_parts[0]["plain_text"] if title_parts else "Задача"
+                    repeat = (props.get("Повтор", {}).get("select") or {}).get("name", "Нет")
+                    if repeat == "Нет":
+                        continue
+                    reminder_start = (props.get("Напоминание", {}).get("date") or {}).get("start", "")
+                    if not reminder_start:
+                        continue
+
+                    # Сдвигаем до ближайшей будущей даты (может потребоваться несколько циклов)
+                    new_reminder = reminder_start[:16]
+                    for _ in range(400):  # защита от зацикливания
+                        new_reminder = _next_cycle_date(new_reminder, repeat, tz_offset)
+                        try:
+                            rem_dt = datetime.strptime(new_reminder[:16], "%Y-%m-%dT%H:%M").replace(
+                                tzinfo=timezone(timedelta(hours=tz_offset))
+                            )
+                        except ValueError:
+                            break
+                        if rem_dt > now_utc:
+                            break
+
+                    # Обновляем дедлайн тоже если он есть
+                    deadline_start = (props.get("Дедлайн", {}).get("date") or {}).get("start", "")
+                    update_props: dict = {"Напоминание": _date(new_reminder)}
+                    if deadline_start:
+                        new_deadline = deadline_start[:16]
+                        for _ in range(400):
+                            new_deadline = _next_cycle_date(new_deadline, repeat, tz_offset)
+                            try:
+                                dl_dt = datetime.strptime(new_deadline[:10], "%Y-%m-%d").replace(
+                                    tzinfo=timezone(timedelta(hours=tz_offset))
+                                )
+                            except ValueError:
+                                break
+                            if dl_dt > now_utc:
+                                break
+                        update_props["Дедлайн"] = _date(new_deadline[:10])
+
+                    await update_page(task_id, update_props)
+                    await _schedule_reminder(tg_id, title, new_reminder, task_id, tz_offset)
+                    logger.info("restore pass2: rescheduled '%s' repeat=%s next=%s", title, repeat, new_reminder)
+                    restored += 1
+                except Exception as e:
+                    logger.error("restore pass2: task %s error: %s", page.get("id"), e)
+
         except Exception as e:
             logger.error("restore_reminders_on_startup: tg_id=%s error: %s", tg_id, e)
 
