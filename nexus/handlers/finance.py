@@ -224,17 +224,22 @@ async def get_finance_stats(month: str, user_notion_id: str = "", compare_prev: 
 
             cmp_lines = [f"📊 Сравнение: {cur_label} vs {prev_label}", ""]
             all_cats = set(list(by_cat.keys()) + list(prev_by_cat.keys()))
+            cat_deltas: List[tuple] = []  # (cat, cur, prev, delta)
             for cat in sorted(all_cats, key=lambda c: -by_cat.get(c, 0.0)):
                 cur = by_cat.get(cat, 0.0)
                 prev = prev_by_cat.get(cat, 0.0)
                 delta = cur - prev
+                cat_deltas.append((cat, cur, prev, delta))
                 if delta > 50:
-                    arrow = f"↑ +{delta:,.0f}₽"
+                    pct_str = f"+{delta / prev * 100:.0f}%" if prev else ""
+                    arrow = f"↑ +{delta:,.0f}₽" + (f" / {pct_str}" if pct_str else "")
                 elif delta < -50:
-                    arrow = f"↓ {delta:,.0f}₽"
+                    pct_str = f"{delta / prev * 100:.0f}%" if prev else ""
+                    arrow = f"↓ {delta:,.0f}₽" + (f" / {pct_str}" if pct_str else "")
                 else:
                     arrow = "→ без изм."
-                cmp_lines.append(f"{cat}: {cur:,.0f}₽ ({arrow})")
+                prev_str = f" ← {prev:,.0f}₽" if prev else ""
+                cmp_lines.append(f"{cat}: {cur:,.0f}₽{prev_str}  ({arrow})")
 
             cmp_lines.append("")
             exp_delta = total_expense - prev_expense_total
@@ -245,6 +250,34 @@ async def get_finance_stats(month: str, user_notion_id: str = "", compare_prev: 
             else:
                 exp_arrow = "→ без изм."
             cmp_lines.append(f"Итого расходы: {total_expense:,.0f}₽ ({exp_arrow})")
+
+            # Краткое ревью на основе дельт
+            improved = sorted(
+                [(cat, d) for cat, cur, prev, d in cat_deltas if d < -100],
+                key=lambda x: x[1]
+            )[:3]
+            worsened = sorted(
+                [(cat, d) for cat, cur, prev, d in cat_deltas if d > 100],
+                key=lambda x: -x[1]
+            )[:3]
+
+            review: List[str] = []
+            if improved:
+                parts = ", ".join(f"{cat} ({d:,.0f}₽)" for cat, d in improved)
+                review.append(f"✅ Сократил: {parts}")
+            if worsened:
+                parts = ", ".join(f"{cat} (+{d:,.0f}₽)" for cat, d in worsened)
+                review.append(f"⚠️ Выросло: {parts}")
+            if not improved and not worsened:
+                review.append("→ Расходы стабильны, существенных изменений нет")
+            elif exp_delta < -200:
+                review.append(f"💚 Отличный результат — в целом на {abs(exp_delta):,.0f}₽ меньше")
+            elif exp_delta > 200:
+                review.append(f"💡 Общий перерасход +{exp_delta:,.0f}₽ — есть над чем поработать")
+
+            if review:
+                cmp_lines.append("")
+                cmp_lines.extend(review)
 
             report_title = f"Сравнение: {cur_label} vs {prev_label}"
             return await _stats_publish(report_title, cmp_lines)
