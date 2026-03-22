@@ -9,7 +9,6 @@ DB = {
     "tasks":     "31a42b3b1ac08051a3ccde86e6233d30",
     "memory":    "31a42b3b1ac0801f8e3cf1441b61bc69",
     "notes":     "31a42b3b1ac0807ba68fd700ab695e7c",
-    "passwords": "31a42b3b1ac0804faae6f599d91e08a8",
     # 🌒 Arcana
     "clients":   "31b42b3b1ac08022baafffbcc8237bbd",
     "sessions":  "31b42b3b1ac08038b4a7e88c8c382875",
@@ -70,17 +69,6 @@ NOTES_SCHEMA = {
         "options": ["🛒 Покупки", "🎧 Послушать", "📌 Важное", "📝 Список", "🎬 Посмотреть", "🧠 Идея"],
     },
     "date": {"field": "Дата", "type": "date"},
-}
-
-PASSWORDS_SCHEMA = {
-    "title_field": "Ресурс",
-    "login": {"field": "Логин", "type": "rich_text"},
-    "password": {"field": "Пароль", "type": "rich_text"},
-    "tags": {
-        "field": "Теги",
-        "type": "select",
-        "options": ["💼 Работа", "💳 Финансы", "🏠 Дом", "🖥️ Сервисы", "🌐 Соцсети"],
-    },
 }
 
 # ─── ARCANA ──────────────────────────────────────────────────────────────────
@@ -368,7 +356,6 @@ SCHEMAS = {
     "tasks": TASKS_SCHEMA,
     "memory": MEMORY_SCHEMA,
     "notes": NOTES_SCHEMA,
-    "passwords": PASSWORDS_SCHEMA,
     "clients": CLIENTS_SCHEMA,
     "sessions": SESSIONS_SCHEMA,
     "rituals": RITUALS_SCHEMA,
