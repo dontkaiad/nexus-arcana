@@ -99,7 +99,7 @@ async def cb_mem_toggle(call: CallbackQuery) -> None:
     await call.message.edit_reply_markup(reply_markup=mem._build_delete_keyboard(uid, pages))
 
 
-@router.callback_query(F.data == "mem_delete_selected")
+@router.callback_query(F.data.startswith("mem_delete_selected:"))
 async def cb_mem_delete_selected(call: CallbackQuery) -> None:
     await call.answer()
     uid = call.from_user.id
@@ -121,7 +121,7 @@ async def cb_mem_delete_selected(call: CallbackQuery) -> None:
     await call.message.edit_text(f"🗑 Удалена{suffix} {n} запис{suffix} из памяти.")
 
 
-@router.callback_query(F.data == "mem_delete_all")
+@router.callback_query(F.data.startswith("mem_delete_all:"))
 async def cb_mem_delete_all(call: CallbackQuery) -> None:
     await call.answer()
     uid = call.from_user.id
@@ -142,7 +142,7 @@ async def cb_mem_delete_all(call: CallbackQuery) -> None:
     await call.message.edit_text(f"🗑 Удалена{suffix} {n} запис{suffix} из памяти.")
 
 
-@router.callback_query(F.data == "mem_cancel")
+@router.callback_query(F.data.startswith("mem_cancel:"))
 async def cb_mem_cancel(call: CallbackQuery) -> None:
     await call.answer()
     uid = call.from_user.id
