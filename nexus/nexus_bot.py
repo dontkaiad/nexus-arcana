@@ -103,7 +103,8 @@ async def cmd_help(msg: Message, user_notion_id: str = "") -> None:
         "Найти: «что знаешь о маше», «напомни про батона».\n"
         "Деактивация и удаление — прямо из результатов поиска.\n"
         "  <code>/memory</code> — вся память, сгруппированная по категориям\n"
-        "  <code>/memory коты</code> — только нужная категория\n\n"
+        "  <code>/memory коты</code> — только нужная категория\n"
+        "  <code>/adhd</code> — твой личный СДВГ-профиль\n\n"
 
         "🌍 <b>ЧАСОВОЙ ПОЯС</b>\n"
         "«я в москве», «utc+5» — или явно:\n"
@@ -199,6 +200,12 @@ async def cmd_memory(msg: Message, user_notion_id: str = "") -> None:
     category_filter = parts[1] if len(parts) > 1 else ""
     from nexus.handlers.memory import handle_memory_list
     await handle_memory_list(msg, category_filter=category_filter, user_notion_id=user_notion_id)
+
+
+@dp.message(Command("adhd"))
+async def cmd_adhd(msg: Message, user_notion_id: str = "") -> None:
+    from nexus.handlers.memory import handle_adhd_command
+    await handle_adhd_command(msg, user_notion_id=user_notion_id)
 
 
 @dp.message(Command("finance"))
@@ -559,6 +566,7 @@ async def main() -> None:
         BotCommand(command="finance", description="Расходы за сегодня"),
         BotCommand(command="finance_stats", description="Сводка за месяц + лимиты"),
         BotCommand(command="memory", description="Список памяти"),
+        BotCommand(command="adhd", description="Мой СДВГ-профиль"),
         BotCommand(command="notes_digest", description="Дайджест старых заметок"),
     ])
 
