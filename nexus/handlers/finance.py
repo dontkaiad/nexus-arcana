@@ -6,9 +6,10 @@ import calendar
 import json
 import logging
 import os
-import re
-from datetime import datetime, timezone, timedelta
 import random
+import re
+from dataclasses import dataclass, field
+from datetime import datetime, timezone, timedelta
 from typing import Dict, List, Optional, Set, Tuple
 
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
@@ -1755,3 +1756,386 @@ async def _stats_publish(title: str, lines: List[str]) -> str:
         else:
             out.append(line)
     return "\n".join(out)
+
+
+# ── Budget Setup Wizard ──────────────────────────────────────────────────────
+
+# Категории расходов для настройки бюджета (без доходных)
+_BUDGET_EXPENSE_CATS = [
+    "🐾 Коты", "🏠 Жилье", "🚬 Привычки", "🍜 Продукты",
+    "🍱 Кафе/Доставка", "🚕 Транспорт", "💅 Бьюти", "👗 Гардероб",
+    "💻 Подписки", "🏥 Здоровье", "📚 Хобби/Учеба",
+]
+
+
+@dataclass
+class BudgetSetupState:
+    """Состояние пошаговой настройки бюджета."""
+    step: str = "pick_cats"           # pick_cats → enter_amounts → goals → debts → done
+    selected_cats: list = field(default_factory=list)
+    amounts: dict = field(default_factory=dict)    # cat → amount
+    pending_cat_idx: int = 0          # текущий индекс в selected_cats
+    user_notion_id: str = ""
+
+
+_budget_setup: Dict[int, BudgetSetupState] = {}
+
+
+async def start_budget_setup(message: Message, user_notion_id: str = "") -> None:
+    """Начать пошаговую настройку бюджета."""
+    uid = message.from_user.id
+    _budget_setup[uid] = BudgetSetupState(user_notion_id=user_notion_id)
+
+    # Показать категории для выбора обязательных расходов
+    rows = []
+    for i in range(0, len(_BUDGET_EXPENSE_CATS), 2):
+        row = []
+        for cat in _BUDGET_EXPENSE_CATS[i:i+2]:
+            row.append(InlineKeyboardButton(text=cat, callback_data=f"bsetup_cat_{i + _BUDGET_EXPENSE_CATS[i:i+2].index(cat)}"))
+        rows.append(row)
+    rows.append([
+        InlineKeyboardButton(text="✅ Готово — перейти к суммам", callback_data="bsetup_cats_done"),
+    ])
+
+    await message.answer(
+        "📋 <b>Настройка бюджета — шаг 1/3</b>\n\n"
+        "Выбери категории <b>обязательных</b> ежемесячных расходов.\n"
+        "Нажимай на категории — выбранные отмечу ✅.\n"
+        "Когда всё выбрано — жми «Готово».",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=rows),
+        parse_mode="HTML",
+    )
+
+
+def _build_cat_keyboard(selected: list) -> InlineKeyboardMarkup:
+    """Клавиатура категорий с отметками выбранных."""
+    rows = []
+    for i in range(0, len(_BUDGET_EXPENSE_CATS), 2):
+        row = []
+        for j, cat in enumerate(_BUDGET_EXPENSE_CATS[i:i+2]):
+            idx = i + j
+            mark = "✅ " if idx in selected else ""
+            row.append(InlineKeyboardButton(
+                text=f"{mark}{cat}",
+                callback_data=f"bsetup_cat_{idx}",
+            ))
+        rows.append(row)
+    rows.append([
+        InlineKeyboardButton(text="✅ Готово — перейти к суммам", callback_data="bsetup_cats_done"),
+    ])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+@router.callback_query(F.data.startswith("bsetup_cat_"))
+async def on_budget_setup_cat(call: CallbackQuery) -> None:
+    """Тоггл выбора категории."""
+    uid = call.from_user.id
+    state = _budget_setup.get(uid)
+    if not state or state.step != "pick_cats":
+        await call.answer()
+        return
+
+    idx = int(call.data.split("_")[-1])
+    if idx in state.selected_cats:
+        state.selected_cats.remove(idx)
+    else:
+        state.selected_cats.append(idx)
+
+    await call.message.edit_reply_markup(reply_markup=_build_cat_keyboard(state.selected_cats))
+    selected_names = [_BUDGET_EXPENSE_CATS[i] for i in state.selected_cats]
+    await call.answer(f"Выбрано: {len(selected_names)}")
+
+
+@router.callback_query(F.data == "bsetup_cats_done")
+async def on_budget_setup_cats_done(call: CallbackQuery) -> None:
+    """Завершён выбор категорий → переход к вводу сумм."""
+    uid = call.from_user.id
+    state = _budget_setup.get(uid)
+    if not state:
+        await call.answer()
+        return
+
+    if not state.selected_cats:
+        await call.answer("Выбери хотя бы одну категорию!")
+        return
+
+    state.step = "enter_amounts"
+    state.pending_cat_idx = 0
+
+    cat = _BUDGET_EXPENSE_CATS[state.selected_cats[0]]
+    await call.message.edit_text(
+        f"📋 <b>Настройка бюджета — шаг 2/3</b>\n\n"
+        f"Сколько в месяц уходит на <b>{cat}</b>?\n"
+        f"Напиши сумму (число в рублях).",
+        parse_mode="HTML",
+    )
+    await call.answer()
+
+
+@router.callback_query(F.data == "bsetup_skip_goals")
+async def on_budget_skip_goals(call: CallbackQuery, user_notion_id: str = "") -> None:
+    """Пропустить цели → спросить про долги."""
+    uid = call.from_user.id
+    state = _budget_setup.get(uid)
+    if not state:
+        await call.answer()
+        return
+    state.step = "debts"
+    await call.message.edit_text(
+        "📋 <b>Настройка бюджета — шаг 3/3</b>\n\n"
+        "Есть долги? Напиши в формате:\n"
+        "<code>подружка 50000 до апреля</code>\n\n"
+        "Или нажми «Пропустить» если долгов нет.",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
+            InlineKeyboardButton(text="Пропустить — завершить", callback_data="bsetup_finish"),
+        ]]),
+        parse_mode="HTML",
+    )
+    await call.answer()
+
+
+@router.callback_query(F.data == "bsetup_skip_debts")
+async def on_budget_skip_debts(call: CallbackQuery, user_notion_id: str = "") -> None:
+    """Пропустить долги → завершить."""
+    uid = call.from_user.id
+    state = _budget_setup.get(uid)
+    if not state:
+        await call.answer()
+        return
+    await _finish_budget_setup(call.message, uid)
+    await call.answer()
+
+
+@router.callback_query(F.data == "bsetup_finish")
+async def on_budget_finish(call: CallbackQuery, user_notion_id: str = "") -> None:
+    """Завершить настройку бюджета."""
+    uid = call.from_user.id
+    await _finish_budget_setup(call.message, uid)
+    await call.answer()
+
+
+async def handle_budget_setup_text(message: Message, user_notion_id: str = "") -> bool:
+    """Обработка текстовых ответов в процессе настройки бюджета.
+    Возвращает True если обработано, False если не в режиме setup."""
+    uid = message.from_user.id
+    state = _budget_setup.get(uid)
+    if not state:
+        return False
+
+    text = (message.text or "").strip()
+
+    if text.lower() in ("отмена", "cancel", "стоп"):
+        _budget_setup.pop(uid, None)
+        await message.answer("❌ Настройка бюджета отменена.")
+        return True
+
+    # Шаг: ввод сумм обязательных расходов
+    if state.step == "enter_amounts":
+        # Парсим число
+        amount_str = text.replace(" ", "").replace("₽", "").replace("р", "").replace(",", ".")
+        try:
+            amount = int(float(amount_str))
+        except ValueError:
+            await message.answer("⚠️ Напиши число. Например: <b>25000</b>", parse_mode="HTML")
+            return True
+
+        cat_idx = state.selected_cats[state.pending_cat_idx]
+        cat = _BUDGET_EXPENSE_CATS[cat_idx]
+        state.amounts[cat] = amount
+        state.pending_cat_idx += 1
+
+        # Есть ещё категории?
+        if state.pending_cat_idx < len(state.selected_cats):
+            next_cat = _BUDGET_EXPENSE_CATS[state.selected_cats[state.pending_cat_idx]]
+            await message.answer(
+                f"✅ {cat} — <b>{amount:,}₽/мес</b>\n\n"
+                f"Сколько на <b>{next_cat}</b>?",
+                parse_mode="HTML",
+            )
+        else:
+            # Все суммы введены → сохранить и перейти к целям
+            await message.answer(f"✅ {cat} — <b>{amount:,}₽/мес</b>", parse_mode="HTML")
+            await _save_obligatory_batch(state, user_notion_id)
+            state.step = "goals"
+            await message.answer(
+                "📋 <b>Настройка бюджета — шаг 2.5/3</b>\n\n"
+                "Есть цели накопления? Напиши:\n"
+                "<code>телефон 100000</code>\n"
+                "<code>ПК 200000</code>\n\n"
+                "Или нажми «Пропустить».",
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
+                    InlineKeyboardButton(text="Пропустить → долги", callback_data="bsetup_skip_goals"),
+                ]]),
+                parse_mode="HTML",
+            )
+        return True
+
+    # Шаг: ввод целей
+    if state.step == "goals":
+        # Парсим "телефон 100000"
+        parts = text.rsplit(maxsplit=1)
+        if len(parts) == 2:
+            name, amount_str = parts
+            amount_str = amount_str.replace(" ", "").replace("₽", "").replace("р", "")
+            try:
+                amount = int(float(amount_str))
+                await _save_goal(name.strip(), amount, state.user_notion_id or user_notion_id)
+                await message.answer(
+                    f"🎯 Цель: <b>{name.strip()}</b> — {amount:,}₽\n\n"
+                    "Ещё цель? Или нажми «Пропустить».",
+                    reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
+                        InlineKeyboardButton(text="Пропустить → долги", callback_data="bsetup_skip_goals"),
+                    ]]),
+                    parse_mode="HTML",
+                )
+                return True
+            except ValueError:
+                pass
+        await message.answer("⚠️ Формат: <code>название сумма</code>\nНапример: <code>телефон 100000</code>", parse_mode="HTML")
+        return True
+
+    # Шаг: ввод долгов
+    if state.step == "debts":
+        # Парсим "подружка 50000 до апреля"
+        import re as _re
+        m = _re.match(r'(.+?)\s+(\d[\d\s]*)\s*(?:до\s+(.+))?$', text.strip(), _re.IGNORECASE)
+        if m:
+            name = m.group(1).strip()
+            amount = int(m.group(2).replace(" ", ""))
+            deadline = (m.group(3) or "").strip()
+            await _save_debt(name, amount, deadline, state.user_notion_id or user_notion_id)
+            dl_text = f" до {deadline}" if deadline else ""
+            await message.answer(
+                f"📋 Долг: <b>{name}</b> — {amount:,}₽{dl_text}\n\n"
+                "Ещё долг? Или нажми «Завершить».",
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
+                    InlineKeyboardButton(text="Завершить настройку", callback_data="bsetup_finish"),
+                ]]),
+                parse_mode="HTML",
+            )
+            return True
+        await message.answer(
+            "⚠️ Формат: <code>имя сумма до дедлайн</code>\n"
+            "Например: <code>подружка 50000 до апреля</code>",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
+                InlineKeyboardButton(text="Завершить настройку", callback_data="bsetup_finish"),
+            ]]),
+            parse_mode="HTML",
+        )
+        return True
+
+    return False
+
+
+async def _save_obligatory_batch(state: BudgetSetupState, user_notion_id: str = "") -> None:
+    """Сохранить все обязательные расходы разом."""
+    uid = user_notion_id or state.user_notion_id
+    mem_db = os.environ.get("NOTION_DB_MEMORY")
+    if not mem_db:
+        return
+
+    for cat, amount in state.amounts.items():
+        cat_link = _cat_link(cat)
+        key = f"обязательно_{cat_link}"
+        fact = f"обязательно: {cat} — {amount}₽/мес"
+        props = {
+            "Текст": _title(fact),
+            "Ключ": _text(key),
+            "Категория": _select("💰 Лимит"),
+            "Связь": _text(cat_link),
+            "Бот": _select("☀️ Nexus"),
+            "Актуально": {"checkbox": True},
+        }
+        if uid:
+            from core.notion_client import _relation
+            props["🪪 Пользователи"] = _relation(uid)
+        try:
+            from core.notion_client import db_query
+            existing = await db_query(mem_db, filter_obj={"and": [
+                {"property": "Ключ", "rich_text": {"contains": key}},
+                {"property": "Категория", "select": {"equals": "💰 Лимит"}},
+            ]}, page_size=1)
+            if existing:
+                await update_page(existing[0]["id"], props)
+            else:
+                await page_create(mem_db, props)
+        except Exception as e:
+            logger.error("_save_obligatory_batch: %s for %s", e, cat)
+
+
+async def _save_goal(name: str, amount: int, user_notion_id: str = "") -> None:
+    """Сохранить цель в Память."""
+    mem_db = os.environ.get("NOTION_DB_MEMORY")
+    if not mem_db:
+        return
+    key = f"цель_{name.lower().replace(' ', '_')}"
+    fact = f"цель: {name} — {amount}₽ · откладываю 0₽/мес"
+    props = {
+        "Текст": _title(fact),
+        "Ключ": _text(key),
+        "Категория": _select("💰 Лимит"),
+        "Связь": _text(name.lower()),
+        "Бот": _select("☀️ Nexus"),
+        "Актуально": {"checkbox": True},
+    }
+    if user_notion_id:
+        from core.notion_client import _relation
+        props["🪪 Пользователи"] = _relation(user_notion_id)
+    try:
+        from core.notion_client import db_query
+        existing = await db_query(mem_db, filter_obj={"and": [
+            {"property": "Ключ", "rich_text": {"contains": key}},
+            {"property": "Категория", "select": {"equals": "💰 Лимит"}},
+        ]}, page_size=1)
+        if existing:
+            await update_page(existing[0]["id"], props)
+        else:
+            await page_create(mem_db, props)
+    except Exception as e:
+        logger.error("_save_goal: %s", e)
+
+
+async def _save_debt(name: str, amount: int, deadline: str = "", user_notion_id: str = "") -> None:
+    """Сохранить долг в Память."""
+    mem_db = os.environ.get("NOTION_DB_MEMORY")
+    if not mem_db:
+        return
+    key = f"долг_{name.lower().replace(' ', '_')}"
+    dl_part = f" · дедлайн: {deadline}" if deadline else ""
+    fact = f"долг: {name} — {amount}₽{dl_part}"
+    props = {
+        "Текст": _title(fact),
+        "Ключ": _text(key),
+        "Категория": _select("💰 Лимит"),
+        "Связь": _text(name.lower()),
+        "Бот": _select("☀️ Nexus"),
+        "Актуально": {"checkbox": True},
+    }
+    if user_notion_id:
+        from core.notion_client import _relation
+        props["🪪 Пользователи"] = _relation(user_notion_id)
+    try:
+        from core.notion_client import db_query
+        existing = await db_query(mem_db, filter_obj={"and": [
+            {"property": "Ключ", "rich_text": {"contains": key}},
+            {"property": "Категория", "select": {"equals": "💰 Лимит"}},
+        ]}, page_size=1)
+        if existing:
+            await update_page(existing[0]["id"], props)
+        else:
+            await page_create(mem_db, props)
+    except Exception as e:
+        logger.error("_save_debt: %s", e)
+
+
+async def _finish_budget_setup(message: Message, uid: int) -> None:
+    """Завершить настройку и показать бюджет."""
+    state = _budget_setup.pop(uid, None)
+    if not state:
+        return
+    user_notion_id = state.user_notion_id
+    budget_msg = await build_budget_message(user_notion_id)
+    if budget_msg:
+        await message.answer(f"🎉 <b>Бюджет настроен!</b>\n\n{budget_msg}", parse_mode="HTML")
+    else:
+        await message.answer("✅ Данные сохранены! Запиши доход и вызови /budget.")
