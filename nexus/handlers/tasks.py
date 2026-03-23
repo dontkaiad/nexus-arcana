@@ -485,18 +485,24 @@ import calendar as _calendar
 def _next_cycle_date(current_date_str: str, repeat: str, tz_offset: int = 3) -> str:
     """Вычислить дату следующего цикла для повторяющейся задачи.
 
+    base = max(old_date, today) — чтобы не прыгать в прошлое если задача просрочена.
     Если входная строка содержит время (YYYY-MM-DDTHH:MM) — время сохраняется.
     Возвращает YYYY-MM-DD или YYYY-MM-DDTHH:MM.
     """
     has_time = "T" in (current_date_str or "")
     now = datetime.now(timezone(timedelta(hours=tz_offset)))
+    today = now.date()
+
     if current_date_str:
         try:
-            base = datetime.strptime(current_date_str[:10], "%Y-%m-%d").date()
+            old_date = datetime.strptime(current_date_str[:10], "%Y-%m-%d").date()
         except ValueError:
-            base = now.date()
+            old_date = today
     else:
-        base = now.date()
+        old_date = today
+
+    # Всегда считаем от сегодня или позже — не от просроченной даты
+    base = max(old_date, today)
 
     if repeat == "Ежедневно":
         next_date = base + timedelta(days=1)
