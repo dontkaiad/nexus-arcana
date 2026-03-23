@@ -42,6 +42,7 @@ async def handle_memory_list(
     message: Message,
     category_filter: str = "",
     user_notion_id: str = "",
+    exclude_adhd: bool = False,
 ) -> None:
     """/memory — все активные записи, сгруппированные по категориям."""
     from core.notion_client import db_query
@@ -65,6 +66,10 @@ async def handle_memory_list(
                     break
         if matched_cat:
             filters.append({"property": "Категория", "select": {"equals": matched_cat}})
+
+    # Скрываем СДВГ-факты если не запрошены явно
+    if exclude_adhd and not matched_cat:
+        filters.append({"property": "Категория", "select": {"does_not_equal": "🧠 СДВГ"}})
 
     filter_obj = {"and": filters} if len(filters) > 1 else filters[0]
 
@@ -104,6 +109,9 @@ async def handle_memory_list(
             for item in items:
                 lines.append(f"  • {item}")
             lines.append("")
+
+    if exclude_adhd and not matched_cat:
+        lines.append("ℹ️ Факты про СДВГ → /adhd")
 
     uid = message.from_user.id
     if len(pages) > PAGE_SIZE:
