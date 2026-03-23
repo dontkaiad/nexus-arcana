@@ -789,6 +789,8 @@ async def auto_suggest_memory(
     no_prefix: str  = "mem_auto_no",
 ) -> None:
     """Предложить сохранить факт в память (inline да/нет). pending_store — dict из хендлера."""
+    if not text or not text.strip() or text.strip() in ("()", "(  )"):
+        return
     uid = message.from_user.id
     pending_store[uid] = {"text": text, "user_notion_id": user_notion_id}
     kb = InlineKeyboardMarkup(inline_keyboard=[[
