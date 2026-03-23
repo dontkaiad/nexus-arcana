@@ -174,6 +174,59 @@ async def _check_budget_limit(category: str, message: Message, user_notion_id: s
                 )
 
 
+async def get_finance_period(start_date: str, end_date: str, label: str,
+                             user_notion_id: str = "", show_daily_avg: bool = False) -> str:
+    """Сводка за произвольный период. start_date/end_date = 'YYYY-MM-DD'."""
+    from core.notion_client import query_pages
+    from core.config import config
+
+    db_id = os.environ.get("NOTION_DB_FINANCE") or config.nexus.db_finance
+    conditions = [
+        {"property": "Дата", "date": {"on_or_after": start_date}},
+        {"property": "Дата", "date": {"on_or_before": end_date}},
+    ]
+    records = await query_pages(db_id, filters={"and": conditions}, page_size=200)
+
+    total_expense = 0.0
+    total_income = 0.0
+    by_cat: Dict[str, float] = {}
+
+    for r in records:
+        props = r["properties"]
+        amount = props.get("Сумма", {}).get("number") or 0
+        type_name = (props.get("Тип", {}).get("select") or {}).get("name", "")
+        cat = (props.get("Категория", {}).get("select") or {}).get("name", "")
+        if "Доход" in type_name:
+            total_income += amount
+        elif "Расход" in type_name:
+            total_expense += amount
+            if cat:
+                by_cat[cat] = by_cat.get(cat, 0) + amount
+
+    if not by_cat and total_income == 0:
+        return f"💰 {label}\n\nРасходов нет 🎉"
+
+    lines = [f"💰 <b>{label}</b>\n"]
+    for cat in sorted(by_cat, key=lambda c: -by_cat[c]):
+        lines.append(f"  {cat} — {by_cat[cat]:,.0f}₽")
+
+    lines.append(f"\n💸 Итого расходы: <b>{total_expense:,.0f}₽</b>")
+    if total_income > 0:
+        lines.append(f"💰 Доходы: <b>{total_income:,.0f}₽</b>")
+
+    if show_daily_avg and total_expense > 0:
+        try:
+            d1 = datetime.strptime(start_date, "%Y-%m-%d").date()
+            d2 = datetime.strptime(end_date, "%Y-%m-%d").date()
+            days = max((d2 - d1).days + 1, 1)
+            avg = total_expense / days
+            lines.append(f"📊 В среднем {avg:,.0f}₽/день")
+        except Exception:
+            pass
+
+    return "\n".join(lines)
+
+
 async def get_finance_stats(month: str, user_notion_id: str = "", compare_prev: bool = False) -> str:
     """Сводка за месяц с лимитами. month = 'YYYY-MM'."""
     from core.praise import get_praise
