@@ -385,23 +385,12 @@ async def cmd_adhd(msg: Message, user_notion_id: str = "") -> None:
 @dp.message(Command("budget"))
 async def cmd_budget(msg: Message, user_notion_id: str = "") -> None:
     """Полная финансовая картина: доход, обязательные, свободные, долги, цели."""
-    from nexus.handlers.finance import build_budget_message
+    from nexus.handlers.finance import build_budget_message, start_budget_setup
     budget_msg = await build_budget_message(user_notion_id)
     if budget_msg:
         await msg.answer(budget_msg, parse_mode="HTML")
     else:
-        await msg.answer(
-            "📋 У тебя ещё нет бюджета.\n\n"
-            "Напиши обязательные траты в формате:\n"
-            "<code>обязательный расход квартира 25000</code>\n"
-            "<code>обязательный расход подписки 10700</code>\n"
-            "<code>обязательный расход коты 10000</code>\n\n"
-            "А также цели и долги:\n"
-            "<code>цель телефон 100000</code>\n"
-            "<code>долг подружке 50000 до апреля</code>\n\n"
-            "После настройки — /budget покажет полную картину.",
-            parse_mode="HTML",
-        )
+        await start_budget_setup(msg, user_notion_id)
 
 
 @dp.message(Command("finance"))
@@ -486,6 +475,11 @@ async def set_tz(msg: Message, user_notion_id: str = "") -> None:
 async def handle_text(msg: Message, user_notion_id: str = "") -> None:
     from core.layout import maybe_convert
     from nexus.handlers.tasks import _pending_has, _pending_get, handle_task_clarification, handle_reschedule_reminder, _update_user_tz
+
+    # Budget setup wizard — перехватывает текст пока идёт настройка
+    from nexus.handlers.finance import handle_budget_setup_text
+    if await handle_budget_setup_text(msg, user_notion_id):
+        return
 
     if _pending_has(msg.from_user.id):
         pending = _pending_get(msg.from_user.id)
