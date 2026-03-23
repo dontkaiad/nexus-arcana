@@ -84,7 +84,8 @@ async def cmd_help(msg: Message, user_notion_id: str = "") -> None:
         "Дедлайн: ✅ Выполнено · ⏳ Отложить.\n"
         "Редактировать: «поменяй категорию на продукты», «переименуй задачу X в Y».\n"
         "  <code>/tasks</code> — все задачи по приоритету\n"
-        "  <code>/today</code> — задачи на сегодня + СДВГ-совет\n\n"
+        "  <code>/today</code> — задачи на сегодня + СДВГ-совет\n"
+        "  <code>/stats</code> — статистика и стрики\n\n"
 
         "💰 <b>ФИНАНСЫ</b>\n"
         "Расход: «450р такси», «кофе 180», «монстр 120».\n"
@@ -92,7 +93,9 @@ async def cmd_help(msg: Message, user_notion_id: str = "") -> None:
         "Лимит: «лимит на кафе 5000р» — предупрежу при 80% и 100%.\n"
         "Исправить: «измени категорию на продукты», «поменяй карту на нал».\n"
         "  <code>/finance</code> — расходы за сегодня\n"
-        "  <code>/finance_stats</code> — сводка месяца с балансом и ревью\n\n"
+        "  <code>/finance_stats</code> — сводка за месяц\n"
+        "  <code>/finance_stats неделя</code> — за неделю\n"
+        "  <code>/finance_stats сегодня</code> — за день\n\n"
 
         "💡 <b>ЗАМЕТКИ</b>\n"
         "Создать: «заметка: ...», «идея: ...», «запомни: ...», «рецепт: ...».\n"
@@ -381,11 +384,35 @@ async def cmd_finance(msg: Message, user_notion_id: str = "") -> None:
 
 @dp.message(Command("finance_stats"))
 async def cmd_finance_stats(msg: Message, user_notion_id: str = "") -> None:
-    """Финансовая сводка за текущий месяц с бюджетными лимитами."""
-    from nexus.handlers.finance import get_finance_stats
-    month = datetime.now(timezone(timedelta(hours=3))).strftime("%Y-%m")
-    text = await get_finance_stats(month, user_notion_id)
+    """Финансовая сводка. /finance_stats [сегодня|неделя] — по умолчанию месяц."""
+    from nexus.handlers.finance import get_finance_stats, get_finance_period
+    from core.layout import maybe_convert
+    text_raw = maybe_convert(msg.text or "")
+    arg = text_raw.strip().split(maxsplit=1)[1].lower().strip() if len(text_raw.strip().split(maxsplit=1)) > 1 else ""
+
+    now = datetime.now(timezone(timedelta(hours=3)))
+    today = now.date()
+
+    if arg in ("сегодня", "день", "today"):
+        d_str = today.isoformat()
+        label = f"Расходы за сегодня · {today.strftime('%d.%m')}"
+        text = await get_finance_period(d_str, d_str, label, user_notion_id)
+    elif arg in ("неделя", "week", "нед"):
+        week_start = today - timedelta(days=today.weekday())
+        label = f"Расходы за неделю · {week_start.strftime('%d.%m')}-{today.strftime('%d.%m')}"
+        text = await get_finance_period(week_start.isoformat(), today.isoformat(), label,
+                                        user_notion_id, show_daily_avg=True)
+    else:
+        month = now.strftime("%Y-%m")
+        text = await get_finance_stats(month, user_notion_id)
     await msg.answer(text)
+
+
+@dp.message(Command("stats"))
+async def cmd_stats(msg: Message, user_notion_id: str = "") -> None:
+    """Статистика задач и стрики."""
+    from nexus.handlers.tasks import handle_task_stats
+    await handle_task_stats(msg, user_notion_id=user_notion_id)
 
 
 @dp.message(Command("notes_digest"))
@@ -703,9 +730,10 @@ async def main() -> None:
         BotCommand(command="help", description="Гайд по использованию"),
         BotCommand(command="tasks", description="Все задачи"),
         BotCommand(command="today", description="Задачи на сегодня"),
+        BotCommand(command="stats", description="Статистика задач и стрики"),
         BotCommand(command="notes", description="Последние 5 заметок"),
         BotCommand(command="finance", description="Расходы за сегодня"),
-        BotCommand(command="finance_stats", description="Сводка за месяц + лимиты"),
+        BotCommand(command="finance_stats", description="Финансы: месяц/неделя/день"),
         BotCommand(command="memory", description="Список памяти"),
         BotCommand(command="adhd", description="Мой СДВГ-профиль"),
         BotCommand(command="notes_digest", description="Дайджест старых заметок"),
