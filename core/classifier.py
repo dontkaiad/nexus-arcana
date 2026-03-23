@@ -213,7 +213,7 @@ def build_system(tz_offset: int = 3) -> str:
         "- category для income: ТОЛЬКО если явно 'зарплата' → '💰 Зарплата'; иначе '💳 Прочее' (даже если просто 'доход')",
         "- confidence: high если есть явное слово (доход/расход/бартер); low если только сумма+имя (спросить потом)",
         "- title: ВСЕГДА объединяй всё остальное в одну строку. Пример: '450 такси карта вадмму' → title='такси вадиму' (исправленная опечатка)",
-        "- priority: срочно/важно/сегодня → 'Высокий'; потом → 'Низкий'; иначе 'Средний'",
+        "- priority: срочно/немедленно/деньги/документы/дедлайн сегодня → 'Срочно'; здоровье/работа/дедлайн скоро → 'Важно'; мелочь/развлечение → 'Можно потом'",
         "- deadline: 'до пятницы/среды/понедельника' → ISO дата ближайшего такого дня (если сегодня этот день → следующая неделя). 'до пятницы' ≠ 'каждую пятницу'. Пример: сегодня=" + today + " воскресенье → 'до пятницы'=2026-03-28, 'до понедельника'=2026-03-23",
         "- deadline с временем: парсить 'завтра в 15:00' → YYYY-MM-DDTHH:MM; 'в 14:30 без даты' → сегодня+время",
         "- repeat: 'каждый день/ежедневно/каждое утро/каждый вечер/каждую ночь' → 'Ежедневно'; 'каждую [день недели]/каждый [день недели]' → 'Еженедельно'; 'раз в месяц/ежемесячно/каждый месяц' → 'Ежемесячно'; иначе → 'Нет'",
@@ -246,13 +246,13 @@ def build_system(tz_offset: int = 3) -> str:
         "",
         "ПРИМЕР ПОВТОРОВ:",
         "  Ввод: 'погладить кота каждый день в 9'",
-        '  Ответ: {"type":"task","title":"погладить кота","category":"🐾 Коты","priority":"Средний","deadline":null,"repeat":"Ежедневно","repeat_time":"09:00","day_of_week":null,"confidence":"high"}',
+        '  Ответ: {"type":"task","title":"погладить кота","category":"🐾 Коты","priority":"Можно потом","deadline":null,"repeat":"Ежедневно","repeat_time":"09:00","day_of_week":null,"confidence":"high"}',
         "  Ввод: 'йога каждую пятницу в 18'",
-        '  Ответ: {"type":"task","title":"йога","category":"📚 Хобби/Учеба","priority":"Средний","deadline":null,"repeat":"Еженедельно","repeat_time":"18:00","day_of_week":"Пт","confidence":"high"}',
+        '  Ответ: {"type":"task","title":"йога","category":"📚 Хобби/Учеба","priority":"Важно","deadline":null,"repeat":"Еженедельно","repeat_time":"18:00","day_of_week":"Пт","confidence":"high"}',
         "  Ввод: 'каждое утро пить воду'",
-        '  Ответ: {"type":"task","title":"пить воду","category":"🏥 Здоровье","priority":"Средний","deadline":null,"repeat":"Ежедневно","repeat_time":"09:00","day_of_week":null,"confidence":"low"}',
+        '  Ответ: {"type":"task","title":"пить воду","category":"🏥 Здоровье","priority":"Важно","deadline":null,"repeat":"Ежедневно","repeat_time":"09:00","day_of_week":null,"confidence":"low"}',
         "  Ввод: 'платить за аренду раз в месяц'",
-        '  Ответ: {"type":"task","title":"платить за аренду","category":"🏠 Жилье","priority":"Средний","deadline":null,"repeat":"Ежемесячно","repeat_time":null,"day_of_week":null,"confidence":"low"}',
+        '  Ответ: {"type":"task","title":"платить за аренду","category":"🏠 Жилье","priority":"Срочно","deadline":null,"repeat":"Ежемесячно","repeat_time":null,"day_of_week":null,"confidence":"low"}',
         "",
         "ПРИМЕР ARCANA_REDIRECT:",
         "  Ввод: 'провести ритуал защиты'",
@@ -531,7 +531,7 @@ async def classify(text: str, tz_offset: int = 3) -> list[dict]:
         category = await _haiku_task_category(text)
         logger.info("classify: buy_task category=%r", category)
         return [{"type": "task", "title": text.strip(), "category": category,
-                 "priority": "Средний", "deadline": None, "repeat": "Нет",
+                 "priority": "Важно", "deadline": None, "repeat": "Нет",
                  "repeat_time": None, "day_of_week": None, "confidence": "low"}]
 
     # Guard: если text выглядит как разговорный ответ Claude (утечка из spell correction) —
