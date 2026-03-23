@@ -92,6 +92,8 @@ async def cmd_help(msg: Message, user_notion_id: str = "") -> None:
         "Доход: «получил 50к», «пришла зарплата», «аренда 35000».\n"
         "Лимит: «лимит на кафе 5000р» — предупрежу при 80% и 100%.\n"
         "Исправить: «измени категорию на продукты», «поменяй карту на нал».\n"
+        "Бюджет: «обязательный расход квартира 25000», «цель телефон 100000», «долг подружке 50000 до апреля».\n"
+        "  <code>/budget</code> — бюджет (доход, обязательные, свободные, долги, цели)\n"
         "  <code>/finance</code> — расходы за сегодня\n"
         "  <code>/finance_stats</code> — сводка за месяц\n"
         "  <code>/finance_stats неделя</code> — за неделю\n"
@@ -369,6 +371,28 @@ async def cmd_memory(msg: Message, user_notion_id: str = "") -> None:
 async def cmd_adhd(msg: Message, user_notion_id: str = "") -> None:
     from nexus.handlers.memory import handle_adhd_command
     await handle_adhd_command(msg, user_notion_id=user_notion_id)
+
+
+@dp.message(Command("budget"))
+async def cmd_budget(msg: Message, user_notion_id: str = "") -> None:
+    """Полная финансовая картина: доход, обязательные, свободные, долги, цели."""
+    from nexus.handlers.finance import build_budget_message
+    budget_msg = await build_budget_message(user_notion_id)
+    if budget_msg:
+        await msg.answer(budget_msg, parse_mode="HTML")
+    else:
+        await msg.answer(
+            "📋 У тебя ещё нет бюджета.\n\n"
+            "Напиши обязательные траты в формате:\n"
+            "<code>обязательный расход квартира 25000</code>\n"
+            "<code>обязательный расход подписки 10700</code>\n"
+            "<code>обязательный расход коты 10000</code>\n\n"
+            "А также цели и долги:\n"
+            "<code>цель телефон 100000</code>\n"
+            "<code>долг подружке 50000 до апреля</code>\n\n"
+            "После настройки — /budget покажет полную картину.",
+            parse_mode="HTML",
+        )
 
 
 @dp.message(Command("finance"))
@@ -786,6 +810,7 @@ async def main() -> None:
         BotCommand(command="today", description="Задачи на сегодня"),
         BotCommand(command="stats", description="Статистика задач и стрики"),
         BotCommand(command="notes", description="Последние 5 заметок"),
+        BotCommand(command="budget", description="Бюджет: доходы, обязательные, свободные, долги, цели"),
         BotCommand(command="finance", description="Расходы за сегодня"),
         BotCommand(command="finance_stats", description="Финансы: месяц/неделя/день"),
         BotCommand(command="memory", description="Список памяти"),
