@@ -140,26 +140,31 @@ async def cmd_tasks(msg: Message, user_notion_id: str = "") -> None:
     if not tasks:
         await msg.answer("📭 Активных задач нет.")
         return
-    _icons = {"Срочно": "🔴", "Важно": "🟡", "Можно потом": "⚪"}
+    _priority_icons = {"Срочно": "🔴", "Важно": "🟡", "Можно потом": "⚪"}
     task_items = []
     for t in tasks:
         props = t["properties"]
         title_parts = props.get("Задача", {}).get("title", [])
         title = title_parts[0]["plain_text"] if title_parts else "—"
-        priority = (props.get("Приоритет", {}).get("select") or {}).get("name", "Низкий")
+        priority = (props.get("Приоритет", {}).get("select") or {}).get("name", "Важно")
+        category = (props.get("Категория", {}).get("select") or {}).get("name", "")
         deadline = (props.get("Дедлайн", {}).get("date") or {}).get("start", "")[:10]
         repeat = (props.get("Повтор", {}).get("select") or {}).get("name", "")
         repeat_mark = " 🔄" if repeat and repeat != "Нет" else ""
+        # Первый символ категории как иконка (🐾 из "🐾 Коты")
+        cat_icon = category[0] if category else "📌"
+        pri_icon = _priority_icons.get(priority, "⚪")
         task_items.append({
-            "icon": _icons.get(priority, "⚪"),
+            "cat_icon": cat_icon,
+            "pri_icon": pri_icon,
             "title": title + repeat_mark,
             "deadline": deadline,
         })
 
     def _task_fmt(it: dict) -> str:
-        line = f"{it['icon']} {it['title']}"
+        line = f"{it['cat_icon']} {it['title']} · {it['pri_icon']}"
         if it.get("deadline"):
-            line += f" · {it['deadline']}"
+            line += f" · до {it['deadline']}"
         return line
 
     if len(task_items) > PAGE_SIZE:
