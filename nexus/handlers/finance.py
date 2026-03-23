@@ -8,7 +8,8 @@ import logging
 import os
 import re
 from datetime import datetime, timezone, timedelta
-from typing import Dict, List, Optional
+import random
+from typing import Dict, List, Optional, Set, Tuple
 
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram import Router, F
@@ -32,6 +33,36 @@ _INCOME_MARKERS_RE = re.compile(
     re.IGNORECASE,
 )
 _BARTER_MARKERS_RE = re.compile(r'\b(бартер|обмен|в\s+обмен)\b', re.IGNORECASE)
+
+# ── Бюджет: предупреждения по привычкам ──────────────────────────────────────
+HABIT_WARNINGS = [
+    "💡 17 500₽/мес на привычки = 210 000₽/год. Это Samsung Flip за полгода.",
+    "💡 Пачка сигарет в день = 8 500₽/мес. За год — ноутбук.",
+    "💡 Монстр каждый день = 6 600₽/мес = 79 000₽/год.",
+    "💡 Кола + монстр = 11 000₽/мес. Это больше чем коты.",
+    "💡 Если сократить привычки на 30% — через полгода будет подушка.",
+    "💡 210к/год на привычки — за 3 года это первый взнос на квартиру.",
+    "💡 Одна пачка в два дня вместо одной = 4 250₽ экономии/мес.",
+]
+
+# ── Бюджет: regex для парсинга записей из памяти ─────────────────────────────
+_OBLIGATORY_RE = re.compile(
+    r'обязательно:\s*(.+?)\s*[—\-]\s*(\d[\d\s]*(?:[.,]\d+)?)\s*[₽р]',
+    re.IGNORECASE,
+)
+_GOAL_RE = re.compile(
+    r'цель:\s*(.+?)\s*[—\-]\s*(\d[\d\s]*(?:[.,]\d+)?)\s*[₽р]'
+    r'(?:.*?откладываю\s*(\d[\d\s]*(?:[.,]\d+)?)\s*[₽р])?',
+    re.IGNORECASE,
+)
+_DEBT_RE = re.compile(
+    r'долг:\s*(.+?)\s*[—\-]\s*(\d[\d\s]*(?:[.,]\d+)?)\s*[₽р]'
+    r'(?:.*?дедлайн:\s*(.+?))?$',
+    re.IGNORECASE,
+)
+
+# Трекинг: не предлагать лимит повторно в одной сессии
+_limit_suggested: Set[Tuple[int, str]] = set()
 
 _RU_MONTHS = {
     1: "январь", 2: "февраль", 3: "март", 4: "апрель",
@@ -111,6 +142,214 @@ async def _get_limits(mem_db: str) -> Dict[str, float]:
     return limits
 
 
+def _parse_amount(s: str) -> float:
+    """Парсит строку суммы: убирает пробелы, заменяет запятую."""
+    return float(s.replace(' ', '').replace(',', '.'))
+
+
+async def _load_budget_data(user_notion_id: str = "") -> Dict[str, list]:
+    """Загрузить все бюджетные записи из Памяти (💰 Лимит).
+
+    Возвращает {"обязательные": [...], "цели": [...], "долги": [...], "лимиты": [...]}.
+    Каждый элемент — dict с name, amount, (saving, deadline и т.д.).
+    """
+    from core.notion_client import db_query
+    mem_db = os.environ.get("NOTION_DB_MEMORY")
+    if not mem_db:
+        return {"обязательные": [], "цели": [], "долги": [], "лимиты": []}
+
+    filt = {"property": "Категория", "select": {"equals": "💰 Лимит"}}
+    if user_notion_id:
+        filt = {"and": [filt, {"property": "🪪 Пользователи", "relation": {"contains": user_notion_id}}]}
+    try:
+        pages = await db_query(mem_db, filter_obj=filt, page_size=200)
+    except Exception as e:
+        logger.error("_load_budget_data: %s", e)
+        return {"обязательные": [], "цели": [], "долги": [], "лимиты": []}
+
+    result: Dict[str, list] = {"обязательные": [], "цели": [], "долги": [], "лимиты": []}
+    for p in pages:
+        props = p["properties"]
+        fact_parts = props.get("Текст", {}).get("title", [])
+        fact = fact_parts[0]["plain_text"] if fact_parts else ""
+        key_parts = props.get("Ключ", {}).get("rich_text", [])
+        key = key_parts[0]["plain_text"].strip().lower() if key_parts else ""
+        active = props.get("Актуально", {}).get("checkbox", True)
+        if not active:
+            continue
+
+        if key.startswith("обязательно_"):
+            m = _OBLIGATORY_RE.search(fact)
+            if m:
+                amt = _parse_amount(m.group(2))
+                if amt > 0:  # 0₽ = деактивировано
+                    result["обязательные"].append({"name": m.group(1).strip(), "amount": amt})
+        elif key.startswith("цель_"):
+            m = _GOAL_RE.search(fact)
+            if m:
+                saving = _parse_amount(m.group(3)) if m.group(3) else 0
+                result["цели"].append({"name": m.group(1).strip(), "target": _parse_amount(m.group(2)), "saving": saving})
+        elif key.startswith("долг_"):
+            m = _DEBT_RE.search(fact)
+            if m:
+                result["долги"].append({
+                    "name": m.group(1).strip(),
+                    "amount": _parse_amount(m.group(2)),
+                    "deadline": (m.group(3) or "").strip(),
+                })
+        elif key.startswith("лимит_"):
+            amount_m = _LIMIT_AMOUNT_RE.search(fact)
+            if amount_m:
+                связь_parts = props.get("Связь", {}).get("rich_text", [])
+                связь = связь_parts[0]["plain_text"].strip() if связь_parts else ""
+                result["лимиты"].append({"name": связь or key, "amount": _parse_amount(amount_m.group(1))})
+
+    return result
+
+
+async def _calc_free_remaining(user_notion_id: str = "") -> Optional[Tuple[float, int]]:
+    """Возвращает (остаток_свободных, дней_до_конца_месяца) или None."""
+    from core.config import config
+    from core.notion_client import db_query
+
+    mem_db = os.environ.get("NOTION_DB_MEMORY")
+    if not mem_db:
+        return None
+
+    budget = await _load_budget_data(user_notion_id)
+    obligatory_total = sum(o["amount"] for o in budget["обязательные"])
+    savings_total = sum(g["saving"] for g in budget["цели"])
+
+    now = datetime.now(MOSCOW_TZ)
+    month_str = now.strftime("%Y-%m")
+    month_start = f"{month_str}-01"
+    today_str = now.strftime("%Y-%m-%d")
+    days_in_month = calendar.monthrange(now.year, now.month)[1]
+    days_remaining = days_in_month - now.day
+
+    # Доходы за месяц
+    try:
+        income_records = await db_query(config.nexus.db_finance, filter_obj={"and": [
+            {"property": "Тип", "select": {"equals": "💰 Доход"}},
+            {"property": "Дата", "date": {"on_or_after": month_start}},
+            {"property": "Дата", "date": {"on_or_before": today_str}},
+        ]}, page_size=200)
+        total_income = sum((p["properties"].get("Сумма", {}).get("number") or 0) for p in income_records)
+    except Exception:
+        total_income = 0
+
+    if total_income == 0:
+        return None  # нет дохода — нечего считать
+
+    # Расходы за месяц
+    try:
+        expense_records = await db_query(config.nexus.db_finance, filter_obj={"and": [
+            {"property": "Тип", "select": {"equals": "💸 Расход"}},
+            {"property": "Дата", "date": {"on_or_after": month_start}},
+            {"property": "Дата", "date": {"on_or_before": today_str}},
+        ]}, page_size=500)
+        total_expenses = sum((p["properties"].get("Сумма", {}).get("number") or 0) for p in expense_records)
+    except Exception:
+        total_expenses = 0
+
+    free_total = total_income - obligatory_total - savings_total
+    free_left = free_total - total_expenses
+    return (free_left, days_remaining)
+
+
+async def build_budget_message(user_notion_id: str = "") -> Optional[str]:
+    """Формирует полное сообщение /budget. Возвращает HTML-строку или None."""
+    from core.config import config
+    from core.notion_client import db_query
+
+    budget = await _load_budget_data(user_notion_id)
+    has_data = any(budget[k] for k in budget)
+
+    now = datetime.now(MOSCOW_TZ)
+    month_str = now.strftime("%Y-%m")
+    month_start = f"{month_str}-01"
+    today_str = now.strftime("%Y-%m-%d")
+    days_in_month = calendar.monthrange(now.year, now.month)[1]
+    days_remaining = days_in_month - now.day
+    ru_month = _RU_MONTHS.get(now.month, "")
+
+    # Доходы за месяц
+    try:
+        income_records = await db_query(config.nexus.db_finance, filter_obj={"and": [
+            {"property": "Тип", "select": {"equals": "💰 Доход"}},
+            {"property": "Дата", "date": {"on_or_after": month_start}},
+            {"property": "Дата", "date": {"on_or_before": today_str}},
+        ]}, page_size=200)
+    except Exception:
+        income_records = []
+    total_income = sum((p["properties"].get("Сумма", {}).get("number") or 0) for p in income_records)
+
+    # Расходы за месяц
+    try:
+        expense_records = await db_query(config.nexus.db_finance, filter_obj={"and": [
+            {"property": "Тип", "select": {"equals": "💸 Расход"}},
+            {"property": "Дата", "date": {"on_or_after": month_start}},
+            {"property": "Дата", "date": {"on_or_before": today_str}},
+        ]}, page_size=500)
+    except Exception:
+        expense_records = []
+    total_expenses = sum((p["properties"].get("Сумма", {}).get("number") or 0) for p in expense_records)
+
+    if not has_data and total_income == 0:
+        return None  # нет данных
+
+    # ── Формируем сообщение ──
+    lines = [f"<b>💰 Бюджет на {ru_month}</b>"]
+
+    # Доход
+    if total_income:
+        lines.append(f"\n<b>📥 Доход: {total_income:,.0f}₽</b>")
+        # Разбивка по категориям дохода
+        by_cat: Dict[str, float] = {}
+        for r in income_records:
+            cat = (r["properties"].get("Категория", {}).get("select") or {}).get("name", "💳 Прочее")
+            amt = r["properties"].get("Сумма", {}).get("number") or 0
+            by_cat[cat] = by_cat.get(cat, 0) + amt
+        for cat, amt in sorted(by_cat.items(), key=lambda x: -x[1]):
+            lines.append(f"  {cat} — {amt:,.0f}₽")
+
+    # Обязательные
+    obligatory_total = sum(o["amount"] for o in budget["обязательные"])
+    if budget["обязательные"]:
+        lines.append(f"\n<b>📌 Обязательные: {obligatory_total:,.0f}₽</b>")
+        for o in sorted(budget["обязательные"], key=lambda x: -x["amount"]):
+            lines.append(f"  {o['name']} — {o['amount']:,.0f}₽")
+
+    # Свободные
+    savings_total = sum(g["saving"] for g in budget["цели"])
+    free_total = total_income - obligatory_total - savings_total
+    if total_income > 0:
+        free_left = free_total - total_expenses
+        daily = free_left / max(days_remaining, 1)
+        lines.append(f"\n<b>💳 Свободные: {free_total:,.0f}₽</b>")
+        lines.append(f"  📊 Уже потрачено: {total_expenses:,.0f}₽")
+        lines.append(f"  ✅ Ещё можно: {free_left:,.0f}₽")
+        lines.append(f"  📅 Осталось дней: {days_remaining}")
+        lines.append(f"  💸 В день: {daily:,.0f}₽")
+
+    # Долги
+    if budget["долги"]:
+        debt_total = sum(d["amount"] for d in budget["долги"])
+        lines.append(f"\n<b>📋 Долги: {debt_total:,.0f}₽</b>")
+        for d in budget["долги"]:
+            dl = f" · {d['deadline']}" if d["deadline"] else ""
+            lines.append(f"  {d['name']} — {d['amount']:,.0f}₽{dl}")
+
+    # Цели
+    if budget["цели"]:
+        lines.append(f"\n<b>🎯 Цели:</b>")
+        for g in budget["цели"]:
+            saving_label = f" · откладываю {g['saving']:,.0f}₽/мес" if g["saving"] else ""
+            lines.append(f"  {g['name']} — {g['target']:,.0f}₽{saving_label}")
+
+    return "\n".join(lines)
+
+
 async def _check_budget_limit(category: str, message: Message, user_notion_id: str = "") -> None:
     """После записи расхода — проверить бюджетный лимит по категории."""
     logger.info("_check_budget_limit called: category=%s", category)
@@ -128,6 +367,27 @@ async def _check_budget_limit(category: str, message: Message, user_notion_id: s
             break
     if not limit_amount:
         logger.info("_check_budget_limit: no limit for category=%r, skip", category)
+        # Предложить установить лимит (1 раз за сессию)
+        uid = getattr(message, "from_user", None)
+        uid_id = uid.id if uid else 0
+        if uid_id and (uid_id, link) not in _limit_suggested:
+            _limit_suggested.add((uid_id, link))
+            try:
+                await message.answer(
+                    f"💡 Хочешь поставить лимит на <b>{category}</b>?",
+                    reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
+                        InlineKeyboardButton(text="5 000₽", callback_data=f"setlim_{link}_5000"),
+                        InlineKeyboardButton(text="10 000₽", callback_data=f"setlim_{link}_10000"),
+                        InlineKeyboardButton(text="15 000₽", callback_data=f"setlim_{link}_15000"),
+                    ], [
+                        InlineKeyboardButton(text="Другая сумма", callback_data=f"setlim_{link}_custom"),
+                        InlineKeyboardButton(text="Не надо", callback_data="setlim_skip"),
+                    ]]),
+                )
+            except Exception as e:
+                logger.debug("limit suggest error: %s", e)
+        # Показать остаток свободных даже без лимита
+        await _show_free_remaining(message, user_notion_id)
         return
 
     from core.config import config
@@ -172,6 +432,29 @@ async def _check_budget_limit(category: str, message: Message, user_notion_id: s
                     f"📈 Прогноз до конца месяца: ~{projected:,.0f}₽ "
                     f"(лимит {limit_amount:,.0f}₽) — темп высоковат"
                 )
+
+    # Предупреждения по привычкам
+    if "Привычки" in category or "привычки" in category.lower():
+        show_warning = random.random() < 0.2  # 20% шанс
+        if pct >= 80:
+            show_warning = True  # всегда при 80%+ лимита
+        if show_warning:
+            await message.answer(random.choice(HABIT_WARNINGS))
+
+    # Показать остаток свободных после каждого расхода
+    await _show_free_remaining(message, user_notion_id)
+
+
+async def _show_free_remaining(message: Message, user_notion_id: str = "") -> None:
+    """Показать остаток свободных денег после расхода."""
+    try:
+        result = await _calc_free_remaining(user_notion_id)
+        if result:
+            free_left, days_rem = result
+            daily = free_left / max(days_rem, 1)
+            await message.answer(f"💳 Свободных: {free_left:,.0f}₽ · {daily:,.0f}₽/день")
+    except Exception as e:
+        logger.debug("free remaining skip: %s", e)
 
 
 async def get_finance_period(start_date: str, end_date: str, label: str,
@@ -731,6 +1014,15 @@ async def handle_finance_text(message: Message, text: str, bot_label: str = "☀
         except Exception as e:
             logger.error("budget check error: %s", e, exc_info=True)
 
+    # Триггер при зарплате: показать краткий бюджет
+    if "Доход" in data.get("type_", "") and "Зарплата" in data.get("category", ""):
+        try:
+            budget_msg = await build_budget_message(user_notion_id)
+            if budget_msg:
+                await message.answer(f"💰 Зарплата получена! Твой бюджет на месяц:\n\n{budget_msg}", parse_mode="HTML")
+        except Exception as e:
+            logger.debug("salary budget trigger: %s", e)
+
 
 @router.message(F.text)
 async def handle_finance_clarification(message: Message, user_notion_id: str = "") -> None:
@@ -738,6 +1030,22 @@ async def handle_finance_clarification(message: Message, user_notion_id: str = "
     from core.config import config
 
     uid = message.from_user.id
+
+    # Обработка ввода кастомного лимита
+    cat_link = _pending_limit.get(uid)
+    if cat_link:
+        text_raw = (message.text or "").strip().replace(" ", "")
+        if text_raw.isdigit():
+            _pending_limit.pop(uid, None)
+            amount = int(text_raw)
+            await _save_limit_to_memory(cat_link, amount, user_notion_id)
+            await message.answer(f"✅ Лимит на {cat_link}: <b>{amount:,}₽/мес</b>")
+            return
+        elif text_raw.lower() in ("отмена", "нет", "cancel"):
+            _pending_limit.pop(uid, None)
+            await message.answer("❌ Отмена.")
+            return
+
     pending_entry = _pending_finance.get(uid)
     if not pending_entry:
         return
@@ -825,11 +1133,76 @@ async def fin_save_asis(call: CallbackQuery) -> None:
     await call.answer()
 
 
+# ── Pending custom limit: uid → cat_link (ждём число от пользователя) ─────────
+_pending_limit: Dict[int, str] = {}
+
+
 @router.callback_query(F.data == "fin_cancel")
 async def fin_cancel(call: CallbackQuery) -> None:
     _pending_finance.pop(call.from_user.id, None)
     await call.message.edit_text("❌ Отмена.")
     await call.answer()
+
+
+@router.callback_query(F.data.startswith("setlim_"))
+async def on_set_limit(call: CallbackQuery, user_notion_id: str = "") -> None:
+    """Обработчик кнопок установки лимита."""
+    data = call.data  # setlim_{link}_{amount} or setlim_skip or setlim_{link}_custom
+    if data == "setlim_skip":
+        await call.message.edit_text("👌 Ок, без лимита.")
+        await call.answer()
+        return
+
+    parts = data.split("_", 2)  # ['setlim', link, amount/custom]
+    if len(parts) < 3:
+        await call.answer()
+        return
+    cat_link = parts[1]
+    value = parts[2]
+
+    if value == "custom":
+        _pending_limit[call.from_user.id] = cat_link
+        await call.message.edit_text(f"💬 Напиши сумму лимита на <b>{cat_link}</b> (число в рублях):")
+        await call.answer()
+        return
+
+    # Сохранить лимит
+    amount = int(value)
+    await _save_limit_to_memory(cat_link, amount, user_notion_id)
+    await call.message.edit_text(f"✅ Лимит на {cat_link}: <b>{amount:,}₽/мес</b>")
+    await call.answer()
+
+
+async def _save_limit_to_memory(cat_link: str, amount: int, user_notion_id: str = "") -> None:
+    """Сохранить лимит в Память."""
+    from core.notion_client import db_query, _relation
+    mem_db = os.environ.get("NOTION_DB_MEMORY")
+    if not mem_db:
+        return
+    key = f"лимит_{cat_link}"
+    fact = f"лимит: {cat_link} — {amount}₽/мес"
+    props = {
+        "Текст": _title(fact),
+        "Ключ": _text(key),
+        "Категория": _select("💰 Лимит"),
+        "Связь": _text(cat_link),
+        "Бот": _select("☀️ Nexus"),
+        "Актуально": {"checkbox": True},
+    }
+    if user_notion_id:
+        props["🪪 Пользователи"] = _relation(user_notion_id)
+    # Обновить если существует
+    try:
+        existing = await db_query(mem_db, filter_obj={"and": [
+            {"property": "Ключ", "rich_text": {"contains": key}},
+            {"property": "Категория", "select": {"equals": "💰 Лимит"}},
+        ]}, page_size=1)
+        if existing:
+            await update_page(existing[0]["id"], props)
+        else:
+            await page_create(mem_db, props)
+    except Exception as e:
+        logger.error("_save_limit_to_memory: %s", e)
 
 
 @router.callback_query(F.data.startswith("fin_expense") | F.data.startswith("fin_income") | F.data.startswith("fin_barter"))

@@ -310,7 +310,19 @@ _MEMORY_SAVE_RE = re.compile(
     r"|^\s*запиши\s+в\s+памяти?\b"
     r"|^\s*лимит\b"
     r"|^\s*поставь\s+лимит\b"
-    r"|^\s*установи\s+лимит\b",
+    r"|^\s*установи\s+лимит\b"
+    r"|^\s*обязательн\w*\s+расход\b"
+    r"|^\s*цель\s+\S+"
+    r"|^\s*долг\s+\S+"
+    r"|^\s*убери\s+обязательн"
+    r"|^\s*измени\s+обязательн",
+    re.IGNORECASE,
+)
+
+# Показать бюджет текстовым триггером
+_BUDGET_RE = re.compile(
+    r"^\s*(покажи\s+бюджет|сколько\s+могу\s+тратить|сколько\s+свободных"
+    r"|бюджет\s+на\s+месяц|мой\s+бюджет|свободные\s+деньги)\s*$",
     re.IGNORECASE,
 )
 
@@ -472,6 +484,11 @@ async def classify(text: str, tz_offset: int = 3) -> list[dict]:
         logger.info("classify: memory_delete matched, hint=%r", hint)
         return [{"type": "memory_delete", "hint": hint, "text": text}]
 
+    # Быстрый pre-фильтр: показать бюджет
+    if _BUDGET_RE.match(text):
+        logger.info("classify: budget pattern matched")
+        return [{"type": "budget", "text": text}]
+
     # Быстрый pre-фильтр: память ("запомни ...")
     logger.info("classify: checking memory_save pre-filter for: '%s'", text[:50])
     logger.info("classify: memory_save match result: %s", bool(_MEMORY_SAVE_RE.match(text)))
@@ -608,6 +625,18 @@ async def process_item(data: Dict[str, Any], original_text: str, msg, clarify: d
             await save_memory(msg, original_text, user_notion_id, "☀️ Nexus")
         except Exception:
             pass
+        return ""
+
+    # БЮДЖЕТ
+    if kind == "budget":
+        from nexus.handlers.finance import build_budget_message
+        budget_msg = await build_budget_message(user_notion_id)
+        if budget_msg:
+            await msg.answer(budget_msg, parse_mode="HTML")
+        else:
+            await msg.answer(
+                "📋 У тебя ещё нет бюджета. Настрой через /budget",
+            )
         return ""
 
     # ПАМЯТЬ (memory_save)
