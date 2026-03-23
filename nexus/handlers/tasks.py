@@ -1391,12 +1391,27 @@ async def _do_save_task(message: Message, data: dict, chat_id: int = None, uid: 
         import re as _re
         title = data.get("title", "")
         priority = data.get("priority") or ""
+
+        # Smart recall: ищем в памяти по объекту покупки
+        _purchase_match = _re.match(
+            r"^\s*(купить|купи|заказать|закажи|поесть|съесть|приготовить|покормить)\s+(.+)",
+            title, _re.IGNORECASE,
+        )
+        _recall_shown = False
+        if _purchase_match:
+            from core.memory import recall_from_memory
+            _obj = _purchase_match.group(2).strip()
+            _fact = await recall_from_memory(_obj)
+            if _fact:
+                await message.answer(f"💡 <i>{_fact} — как обычно?</i>")
+                _recall_shown = True
+
         # Auto-suggest: пропускаем рутинные покупки, мелочи и низкий приоритет
         _is_routine = bool(_re.match(r"^\s*(купить|купи|заказать|закажи|выкинуть|убрать|погладить|помыть|постирать|протереть|вынести|выбросить|поесть|съесть|приготовить|сварить|разогреть|покормить)\s+", title, _re.IGNORECASE))
         _routine_cats = ("🍜 Продукты",)
         _is_routine = _is_routine or data.get("category", "") in _routine_cats
         _is_low_priority = "Можно потом" in priority
-        if title and title.strip() and not _is_routine and not _is_low_priority:
+        if title and title.strip() and not _is_routine and not _is_low_priority and not _recall_shown:
             await suggest_memory(message, title.strip(), data.get("user_notion_id", ""))
         nudge = await _check_procrastination_nudge(data.get("title", ""))
         if nudge:

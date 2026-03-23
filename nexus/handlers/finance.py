@@ -712,6 +712,18 @@ async def handle_finance_text(message: Message, text: str, bot_label: str = "☀
 
     _last_page_id[uid] = page_id
     await message.answer(_format_record(data))
+
+    # Smart recall: ищем в памяти по описанию покупки
+    try:
+        desc = (data.get("description") or "").strip()
+        if desc and "Расход" in data.get("type_", ""):
+            from core.memory import recall_from_memory
+            _fact = await recall_from_memory(desc)
+            if _fact:
+                await message.answer(f"💡 <i>{_fact} — как обычно?</i>")
+    except Exception as e:
+        logger.debug("finance recall skip: %s", e)
+
     if "Расход" in data.get("type_", ""):
         logger.info("finance saved: category=%s — calling budget check", data.get("category", ""))
         try:
