@@ -718,9 +718,12 @@ async def handle_task_parsed(message: Message, data: dict) -> None:
             data["deadline"] = relative_time
 
     # "напомни [дата из Claude]" — reminder_time = deadline, спросить дедлайн
+    # Но если пользователь явно написал "дедлайн" — не обнулять его
+    _has_explicit_deadline = bool(re.search(r"\bдедлайн\b|\bдо\s+\d", original_text, re.IGNORECASE))
     if has_remind and data.get("deadline"):
         data["reminder_time"] = data["deadline"]
-        data["deadline"] = None
+        if not _has_explicit_deadline:
+            data["deadline"] = None
 
         # Если Claude вернул только дату без времени → спрашиваем время сразу
         if "T" not in data["reminder_time"]:
@@ -735,6 +738,11 @@ async def handle_task_parsed(message: Message, data: dict) -> None:
             )
             data["msg_id"] = msg_obj.message_id
             _pending_set(uid, data)
+            return
+
+        # Если дедлайн уже задан явно пользователем — сохраняем сразу
+        if data.get("deadline"):
+            await _do_save_task(message, data, chat_id=message.chat.id, uid=uid)
             return
 
         reminder_display = data["reminder_time"].replace("T", " ")
