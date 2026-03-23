@@ -27,6 +27,17 @@ CATEGORIES = [
 ]
 PRACTICE_CATEGORIES = {"🕯️ Расходники", "🔮 Практика"}
 
+_PRIORITY_ICONS = {"Срочно": "🔴", "Важно": "🟡", "Можно потом": "⚪"}
+
+
+def _priority_display(priority: str) -> str:
+    """'Важно' → '🟡 Важно', '🟡 Важно' → '🟡 Важно'."""
+    p = (priority or "Важно").strip()
+    for name, icon in _PRIORITY_ICONS.items():
+        if name in p:
+            return f"{icon} {name}"
+    return f"🟡 {p}"
+
 # ── SQLite persistent pending ──────────────────────────────────────────────────
 import os as _os
 _PENDING_DB = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "../../pending_tasks.db")
@@ -679,7 +690,7 @@ async def handle_task_parsed(message: Message, data: dict) -> None:
                 reminder_display = relative_time.replace("T", " ")
                 msg = await message.answer(
                     f"📌 <b>{data.get('title')}</b>\n"
-                    f"🏷 {data.get('category', '?')} · {data.get('priority') or 'Важно'}\n"
+                    f"🏷 {data.get('category', '?')} · {_priority_display(data.get('priority'))}\n"
                     f"🔔 Напомню: {reminder_display}\n\n"
                     f"<b>📅 Дедлайн?</b>",
                     reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
@@ -710,7 +721,7 @@ async def handle_task_parsed(message: Message, data: dict) -> None:
         if "T" not in data["reminder_time"]:
             msg_obj = await message.answer(
                 f"📌 <b>{data.get('title')}</b>\n"
-                f"🏷 {data.get('category', '?')} · {data.get('priority') or 'Важно'}\n\n"
+                f"🏷 {data.get('category', '?')} · {_priority_display(data.get('priority'))}\n\n"
                 f"<b>⏰ В какое время напомнить?</b>\n"
                 f"Примеры: <code>в 10:00</code>, <code>в 18:30</code>, <code>через 2 часа</code>",
                 reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
@@ -724,7 +735,7 @@ async def handle_task_parsed(message: Message, data: dict) -> None:
         reminder_display = data["reminder_time"].replace("T", " ")
         msg = await message.answer(
             f"📌 <b>{data.get('title')}</b>\n"
-            f"🏷 {data.get('category', '?')} · {data.get('priority') or 'Важно'}\n"
+            f"🏷 {data.get('category', '?')} · {_priority_display(data.get('priority'))}\n"
             f"🔔 Напомню: {reminder_display}\n\n"
             f"<b>📅 Дедлайн?</b>",
             reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
@@ -748,7 +759,7 @@ async def handle_task_parsed(message: Message, data: dict) -> None:
         if "T" not in data["reminder_time"]:
             msg_obj = await message.answer(
                 f"📌 <b>{data.get('title')}</b>\n"
-                f"🏷 {data.get('category', '?')} · {data.get('priority') or 'Важно'}\n\n"
+                f"🏷 {data.get('category', '?')} · {_priority_display(data.get('priority'))}\n\n"
                 f"<b>⏰ В какое время напомнить?</b>\n"
                 f"Примеры: <code>в 10:00</code>, <code>в 18:30</code>, <code>через 2 часа</code>",
                 reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
@@ -761,7 +772,7 @@ async def handle_task_parsed(message: Message, data: dict) -> None:
         reminder_display = data["reminder_time"].replace("T", " ")
         msg = await message.answer(
             f"📌 <b>{data.get('title')}</b>\n"
-            f"🏷 {data.get('category', '?')} · {data.get('priority') or 'Важно'}\n"
+            f"🏷 {data.get('category', '?')} · {_priority_display(data.get('priority'))}\n"
             f"🔔 Напомню: {reminder_display}\n\n"
             f"<b>📅 Дедлайн?</b>",
             reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
@@ -785,7 +796,7 @@ async def handle_task_parsed(message: Message, data: dict) -> None:
 
     msg = await message.answer(
         f"📌 <b>{data.get('title')}</b>\n"
-        f"🗂 {data.get('category', '?')} · {data.get('priority') or 'Важно'}\n"
+        f"🗂 {data.get('category', '?')} · {_priority_display(data.get('priority'))}\n"
         f"📅 Дедлайн: {deadline_hint}\n"
         f"🔔 Напоминание: нет\n\n"
         f"❓ Уточни:\n"
@@ -810,7 +821,7 @@ async def _show_task_confirm(message: Message, pending: dict, uid: int) -> None:
 
     text_content = (
         f"📌 <b>{pending['title']}</b>\n"
-        f"🏷 {pending.get('category', '?')} · {pending.get('priority') or 'Важно'}\n"
+        f"🏷 {pending.get('category', '?')} · {_priority_display(pending.get('priority'))}\n"
         f"📅 Дедлайн: {deadline_display}\n"
         f"🔔 Напомню: {reminder_display}\n\n"
     )
@@ -1008,7 +1019,7 @@ async def task_deadline_choice(call: CallbackQuery) -> None:
         deadline_display = (d.get("deadline") or "без даты").replace("T", " ")
         msg = await call.message.answer(
             f"📌 <b>{d.get('title')}</b>\n"
-            f"🏷 {d.get('category', '?')} · {d.get('priority') or 'Важно'}\n"
+            f"🏷 {d.get('category', '?')} · {_priority_display(d.get('priority'))}\n"
             f"📅 Дедлайн: {deadline_display}\n\n"
             f"<b>⏰ Когда напомнить?</b>\n"
             f"Примеры: <code>завтра в 10:00</code>, <code>в 15:00</code>, <code>через 2 часа</code>",
@@ -1316,7 +1327,7 @@ async def _do_save_task(message: Message, data: dict, chat_id: int = None, uid: 
     text_content = (
         f"✅ <b>Задача создана!</b>\n"
         f"📌 {data['title']}\n"
-        f"🏷 {real_category} · {real_priority}\n"
+        f"🏷 {real_category} · {_priority_display(real_priority)}\n"
         f"📅 Дедлайн: {deadline_display}\n"
         f"🔔 Напоминание: {reminder_display}{repeat_line}{extra}"
     )
@@ -1339,7 +1350,9 @@ async def _do_save_task(message: Message, data: dict, chat_id: int = None, uid: 
     try:
         from nexus.handlers.memory import suggest_memory
         title = data.get("title", "")
-        if title and title.strip():
+        priority = data.get("priority") or "Важно"
+        # Auto-suggest только для Срочно/Важно — рутинные мелочи не предлагаем запоминать
+        if title and title.strip() and priority in ("Срочно", "Важно"):
             await suggest_memory(message, title.strip(), data.get("user_notion_id", ""))
         nudge = await _check_procrastination_nudge(data.get("title", ""))
         if nudge:
