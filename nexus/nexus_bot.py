@@ -480,10 +480,10 @@ async def on_arcana_choice(query: CallbackQuery, user_notion_id: str = "") -> No
         )
     else:
         from core.notion_client import task_add
-        result = await task_add(title=text, category="💳 Прочее", priority="Можно потом",
+        result = await task_add(title=text, category="💳 Прочее", priority="Важно",
                                 user_notion_id=user_notion_id)
         if result:
-            msg_text = f"✓ <b>{text}</b>\n⚪ Можно потом · 💳 Прочее"
+            msg_text = f"✓ <b>{text}</b>\n🟡 Важно · 💳 Прочее"
         else:
             msg_text = "❌ Ошибка при создании задачи"
 
