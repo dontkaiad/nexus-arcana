@@ -133,27 +133,41 @@ async def cmd_help(msg: Message, user_notion_id: str = "") -> None:
 
 @dp.message(Command("tasks"))
 async def cmd_tasks(msg: Message, user_notion_id: str = "") -> None:
-    """Показать активные задачи: дедлайн сегодня → приоритет → статус."""
-    from core.notion_client import tasks_active
-    from core.pagination import PAGE_SIZE, register_pages, get_page_text, get_page_keyboard
+    """Показать ВСЕ задачи, сгруппированные по статусу → дедлайну → приоритету."""
+    from core.notion_client import query_pages
+    from core.config import config
+    from core.notion_client import _with_user_filter
     from datetime import date as _date
 
-    tasks = await tasks_active(user_notion_id=user_notion_id)
-    if not tasks:
-        await msg.answer("📭 Активных задач нет.")
+    # Получаем ВСЕ задачи без фильтра по статусу
+    filters = _with_user_filter(None, user_notion_id)
+    all_tasks = await query_pages(
+        config.nexus.db_tasks,
+        filters=filters,
+        sorts=[{"property": "Приоритет", "direction": "descending"}],
+        page_size=100,
+    )
+    if not all_tasks:
+        await msg.answer("📭 Задач нет.")
         return
 
-    today_str = _date.today().isoformat()  # "2026-03-23"
+    today_str = _date.today().isoformat()
     _priority_order = {"Срочно": 0, "Важно": 1, "Можно потом": 2}
     _priority_icons = {"Срочно": "🔴", "Важно": "🟡", "Можно потом": "⚪"}
     _priority_labels = {"Срочно": "СРОЧНО", "Важно": "ВАЖНО", "Можно потом": "МОЖНО ПОТОМ"}
-    _status_order = {"In progress": 0, "Not started": 1}
-    _status_icons = {"In progress": "🔄 в процессе", "Not started": "⏳ не начато"}
+    _status_icons = {
+        "In progress": "⏳",
+        "Not started": "❌",
+        "Done": "✅",
+        "Complete": "✅",
+        "Archived": "🗄",
+    }
+    _status_order = {"In progress": 0, "Not started": 1, "Done": 2, "Complete": 2, "Archived": 3}
     _repeat_labels = {"Ежедневно": "ежедневно", "Еженедельно": "еженедельно", "Ежемесячно": "ежемесячно"}
 
-    # Собираем задачи
+    # Парсим задачи
     items = []
-    for t in tasks:
+    for t in all_tasks:
         props = t["properties"]
         title_parts = props.get("Задача", {}).get("title", [])
         title = title_parts[0]["plain_text"] if title_parts else "—"
@@ -165,9 +179,9 @@ async def cmd_tasks(msg: Message, user_notion_id: str = "") -> None:
         is_repeat = repeat and repeat != "Нет"
         cat_icon = category[0] if category else "📌"
 
-        # Дедлайн сегодня/просрочен?
         deadline_date = deadline_raw[:10] if deadline_raw else ""
-        is_today_or_overdue = bool(deadline_date and deadline_date <= today_str) and not is_repeat
+        is_active = status in ("In progress", "Not started")
+        is_today_or_overdue = bool(deadline_date and deadline_date <= today_str and is_active) and not is_repeat
 
         # Форматируем дедлайн / повтор
         if is_repeat:
@@ -186,62 +200,86 @@ async def cmd_tasks(msg: Message, user_notion_id: str = "") -> None:
         else:
             deadline_display = ""
 
-        status_display = _status_icons.get(status, f"⏳ {status}")
+        status_icon = _status_icons.get(status, "❔")
 
         items.append({
             "cat_icon": cat_icon,
             "title": title,
             "priority": priority,
-            "status_display": status_display,
+            "status": status,
+            "status_icon": status_icon,
             "deadline_display": deadline_display,
             "is_today": is_today_or_overdue,
             "pri_order": _priority_order.get(priority, 1),
             "st_order": _status_order.get(status, 1),
         })
 
-    # Сортировка: сегодня/просрочено → приоритет → статус
+    # Сортировка: сегодня → приоритет → статус
     items.sort(key=lambda x: (0 if x["is_today"] else 1, x["pri_order"], x["st_order"]))
 
     total = len(items)
 
-    def _task_fmt(it: dict) -> str:
-        line = f"{it['cat_icon']} {it['title']} · {it['status_display']}"
+    def _task_line(it: dict) -> str:
+        line = f"{it['cat_icon']} {it['title']} · {it['status_icon']}"
         if it.get("deadline_display"):
-            line += f" · {it['deadline_display']}"
+            line += f" {it['deadline_display']}"
         return line
 
-    # Строим строки с заголовками групп
+    # Строим вывод с группами
     from itertools import groupby
 
-    all_lines: list[str] = []
+    lines: list[str] = []
 
-    # Разделяем на "сегодня/просрочено" и остальные
     today_items = [x for x in items if x["is_today"]]
-    rest_items = [x for x in items if not x["is_today"]]
+    active_items = [x for x in items if not x["is_today"] and x["status"] in ("In progress", "Not started")]
+    done_items = [x for x in items if x["status"] in ("Done", "Complete")]
+    archived_items = [x for x in items if x["status"] == "Archived"]
 
     if today_items:
-        all_lines.append(f"<b>📅 СЕГОДНЯ / ПРОСРОЧЕНО</b>")
+        lines.append(f"<b>📅 СЕГОДНЯ / ПРОСРОЧЕНО</b>")
         for it in today_items:
-            all_lines.append(_task_fmt(it))
-        all_lines.append("")
+            lines.append(_task_line(it))
+        lines.append("")
 
-    for priority, group in groupby(rest_items, key=lambda x: x["priority"]):
-        icon = _priority_icons.get(priority, "⚪")
-        label = _priority_labels.get(priority, priority.upper())
-        all_lines.append(f"<b>{icon} {label}</b>")
-        for it in group:
-            all_lines.append(_task_fmt(it))
-        all_lines.append("")
+    if active_items:
+        for priority, group in groupby(active_items, key=lambda x: x["priority"]):
+            icon = _priority_icons.get(priority, "⚪")
+            label = _priority_labels.get(priority, priority.upper())
+            lines.append(f"<b>{icon} {label}</b>")
+            for it in group:
+                lines.append(_task_line(it))
+        lines.append("")
 
-    header = f"📋 <b>Активные задачи · {total} шт</b>\n\n"
+    if done_items:
+        lines.append(f"<b>✅ ВЫПОЛНЕНО ({len(done_items)})</b>")
+        for it in done_items:
+            lines.append(f"{it['cat_icon']} <s>{it['title']}</s>")
+        lines.append("")
 
-    if total > PAGE_SIZE:
-        # Пагинация по готовым строкам
-        uid = msg.from_user.id
-        register_pages(uid, all_lines, f"📋 Активные задачи · {total} шт", lambda s: s)
-        await msg.answer(get_page_text(uid), reply_markup=get_page_keyboard(uid))
+    if archived_items:
+        lines.append(f"<b>🗄 АРХИВ ({len(archived_items)})</b>")
+        for it in archived_items:
+            lines.append(f"{it['cat_icon']} <s>{it['title']}</s>")
+
+    header = f"📋 <b>Все задачи · {total} шт</b>\n\n"
+    text = header + "\n".join(lines)
+
+    # Telegram лимит ~4096 символов — разбиваем если не влезает
+    if len(text) <= 4000:
+        await msg.answer(text)
     else:
-        await msg.answer(header + "\n".join(all_lines))
+        # Отправляем частями по ~4000 символов, разбивая по строкам
+        chunks = []
+        current = header
+        for line in lines:
+            if len(current) + len(line) + 1 > 4000:
+                chunks.append(current)
+                current = ""
+            current += line + "\n"
+        if current.strip():
+            chunks.append(current)
+        for chunk in chunks:
+            await msg.answer(chunk)
 
 
 @dp.message(Command("notes"))
