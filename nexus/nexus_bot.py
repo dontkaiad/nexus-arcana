@@ -251,10 +251,9 @@ async def cmd_tasks(msg: Message, user_notion_id: str = "") -> None:
         for priority, group in groupby(active_items, key=lambda x: x["priority"]):
             icon = _priority_icons.get(priority, "⚪")
             label = _priority_labels.get(priority, priority.upper())
-            lines.append(f"<b>{icon} {label}</b>")
+            lines.append(f"\n<b>{icon} {label}</b>")
             for it in group:
                 lines.append(_task_line(it))
-        lines.append("")
 
     if done_items:
         lines.append(f"<b>✅ ВЫПОЛНЕНО ({len(done_items)})</b>")
