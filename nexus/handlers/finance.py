@@ -296,8 +296,8 @@ async def build_budget_message(user_notion_id: str = "") -> Optional[str]:
         expense_records = []
     total_expenses = sum((p["properties"].get("Сумма", {}).get("number") or 0) for p in expense_records)
 
-    if not has_data and total_income == 0:
-        return None  # нет данных
+    if not budget["обязательные"]:
+        return None  # нет обязательных → нужна настройка
 
     # ── Формируем сообщение ──
     lines = [f"<b>💰 Бюджет на {ru_month}</b>"]
@@ -1771,11 +1771,15 @@ _BUDGET_EXPENSE_CATS = [
 @dataclass
 class BudgetSetupState:
     """Состояние пошаговой настройки бюджета."""
-    step: str = "pick_cats"           # pick_cats → enter_amounts → goals → debts → done
+    step: str = "pick_cats"           # pick_cats → enter_amounts → limits → goals → debts → done
     selected_cats: list = field(default_factory=list)
     amounts: dict = field(default_factory=dict)    # cat → amount
     pending_cat_idx: int = 0          # текущий индекс в selected_cats
     user_notion_id: str = ""
+    # Лимиты на категории расходов
+    limit_cats: list = field(default_factory=list)   # индексы категорий для лимитов
+    limits: dict = field(default_factory=dict)       # cat → amount
+    pending_limit_idx: int = 0
 
 
 _budget_setup: Dict[int, BudgetSetupState] = {}
@@ -1953,21 +1957,10 @@ async def handle_budget_setup_text(message: Message, user_notion_id: str = "") -
                 parse_mode="HTML",
             )
         else:
-            # Все суммы введены → сохранить и перейти к целям
+            # Все суммы введены → сохранить и перейти к лимитам
             await message.answer(f"✅ {cat} — <b>{amount:,}₽/мес</b>", parse_mode="HTML")
             await _save_obligatory_batch(state, user_notion_id)
-            state.step = "goals"
-            await message.answer(
-                "📋 <b>Настройка бюджета — шаг 2.5/3</b>\n\n"
-                "Есть цели накопления? Напиши:\n"
-                "<code>телефон 100000</code>\n"
-                "<code>ПК 200000</code>\n\n"
-                "Или нажми «Пропустить».",
-                reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
-                    InlineKeyboardButton(text="Пропустить → долги", callback_data="bsetup_skip_goals"),
-                ]]),
-                parse_mode="HTML",
-            )
+            await _start_limits_step(message, state)
         return True
 
     # Шаг: ввод целей
@@ -2024,7 +2017,199 @@ async def handle_budget_setup_text(message: Message, user_notion_id: str = "") -
         )
         return True
 
+    # Шаг: ввод лимитов на категории
+    if state.step == "enter_limits":
+        amount_str = text.replace(" ", "").replace("₽", "").replace("р", "").replace(",", ".")
+        try:
+            amount = int(float(amount_str))
+        except ValueError:
+            await message.answer("⚠️ Напиши число. Например: <b>9000</b>", parse_mode="HTML")
+            return True
+
+        cat_idx = state.limit_cats[state.pending_limit_idx]
+        cat = _BUDGET_EXPENSE_CATS[cat_idx]
+        state.limits[cat] = amount
+        state.pending_limit_idx += 1
+
+        if state.pending_limit_idx < len(state.limit_cats):
+            next_cat = _BUDGET_EXPENSE_CATS[state.limit_cats[state.pending_limit_idx]]
+            await message.answer(
+                f"✅ {cat} — лимит <b>{amount:,}₽/мес</b>\n\n"
+                f"Лимит на <b>{next_cat}</b>?",
+                parse_mode="HTML",
+            )
+        else:
+            await message.answer(f"✅ {cat} — лимит <b>{amount:,}₽/мес</b>", parse_mode="HTML")
+            await _save_limits_batch(state, user_notion_id)
+            await _start_goals_step(message, state)
+        return True
+
     return False
+
+
+# ── Вспомогательные шаги wizard ─────────────────────────────────────────────
+
+async def _start_limits_step(message: Message, state: BudgetSetupState) -> None:
+    """Показать выбор категорий для установки лимитов."""
+    state.step = "pick_limits"
+    state.limit_cats = []
+    # Показать ВСЕ категории расходов (не только обязательные) для лимитов
+    rows = []
+    for i in range(0, len(_BUDGET_EXPENSE_CATS), 2):
+        row = []
+        for j, cat in enumerate(_BUDGET_EXPENSE_CATS[i:i+2]):
+            idx = i + j
+            row.append(InlineKeyboardButton(
+                text=cat, callback_data=f"bsetup_lcat_{idx}",
+            ))
+        rows.append(row)
+    rows.append([
+        InlineKeyboardButton(text="✅ Готово — ввести лимиты", callback_data="bsetup_lcats_done"),
+    ])
+    rows.append([
+        InlineKeyboardButton(text="Пропустить → цели", callback_data="bsetup_skip_limits"),
+    ])
+
+    await message.answer(
+        "📋 <b>Настройка бюджета — лимиты</b>\n\n"
+        "На какие категории установить <b>месячные лимиты</b>?\n"
+        "Лимит — это максимум, который ты хочешь тратить.\n"
+        "Например: кафе — 9 000₽, привычки — 17 500₽.\n\n"
+        "Выбери категории и нажми «Готово».",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=rows),
+        parse_mode="HTML",
+    )
+
+
+def _build_limit_cat_keyboard(selected: list) -> InlineKeyboardMarkup:
+    """Клавиатура категорий лимитов с отметками выбранных."""
+    rows = []
+    for i in range(0, len(_BUDGET_EXPENSE_CATS), 2):
+        row = []
+        for j, cat in enumerate(_BUDGET_EXPENSE_CATS[i:i+2]):
+            idx = i + j
+            mark = "✅ " if idx in selected else ""
+            row.append(InlineKeyboardButton(
+                text=f"{mark}{cat}",
+                callback_data=f"bsetup_lcat_{idx}",
+            ))
+        rows.append(row)
+    rows.append([
+        InlineKeyboardButton(text="✅ Готово — ввести лимиты", callback_data="bsetup_lcats_done"),
+    ])
+    rows.append([
+        InlineKeyboardButton(text="Пропустить → цели", callback_data="bsetup_skip_limits"),
+    ])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+@router.callback_query(F.data.startswith("bsetup_lcat_"))
+async def on_budget_setup_limit_cat(call: CallbackQuery) -> None:
+    """Тоггл выбора категории для лимита."""
+    uid = call.from_user.id
+    state = _budget_setup.get(uid)
+    if not state or state.step != "pick_limits":
+        await call.answer()
+        return
+
+    idx = int(call.data.split("_")[-1])
+    if idx in state.limit_cats:
+        state.limit_cats.remove(idx)
+    else:
+        state.limit_cats.append(idx)
+
+    await call.message.edit_reply_markup(reply_markup=_build_limit_cat_keyboard(state.limit_cats))
+    await call.answer(f"Выбрано: {len(state.limit_cats)}")
+
+
+@router.callback_query(F.data == "bsetup_lcats_done")
+async def on_budget_setup_lcats_done(call: CallbackQuery) -> None:
+    """Завершён выбор категорий для лимитов → ввод сумм."""
+    uid = call.from_user.id
+    state = _budget_setup.get(uid)
+    if not state:
+        await call.answer()
+        return
+
+    if not state.limit_cats:
+        await call.answer("Выбери хотя бы одну категорию!")
+        return
+
+    state.step = "enter_limits"
+    state.pending_limit_idx = 0
+
+    cat = _BUDGET_EXPENSE_CATS[state.limit_cats[0]]
+    await call.message.edit_text(
+        f"📋 <b>Лимиты — ввод сумм</b>\n\n"
+        f"Какой месячный лимит на <b>{cat}</b>?\n"
+        f"Напиши сумму (число в рублях).",
+        parse_mode="HTML",
+    )
+    await call.answer()
+
+
+@router.callback_query(F.data == "bsetup_skip_limits")
+async def on_budget_skip_limits(call: CallbackQuery) -> None:
+    """Пропустить лимиты → цели."""
+    uid = call.from_user.id
+    state = _budget_setup.get(uid)
+    if not state:
+        await call.answer()
+        return
+    await _start_goals_step(call.message, state)
+    await call.answer()
+
+
+async def _start_goals_step(message: Message, state: BudgetSetupState) -> None:
+    """Переход к шагу целей."""
+    state.step = "goals"
+    await message.answer(
+        "📋 <b>Настройка бюджета — цели</b>\n\n"
+        "Есть цели накопления? Напиши:\n"
+        "<code>телефон 100000</code>\n"
+        "<code>ПК 200000</code>\n\n"
+        "Или нажми «Пропустить».",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
+            InlineKeyboardButton(text="Пропустить → долги", callback_data="bsetup_skip_goals"),
+        ]]),
+        parse_mode="HTML",
+    )
+
+
+async def _save_limits_batch(state: BudgetSetupState, user_notion_id: str = "") -> None:
+    """Сохранить все лимиты разом."""
+    uid = user_notion_id or state.user_notion_id
+    mem_db = os.environ.get("NOTION_DB_MEMORY")
+    if not mem_db:
+        return
+
+    for cat, amount in state.limits.items():
+        cat_link = _cat_link(cat)
+        key = f"лимит_{cat_link}"
+        fact = f"лимит: {cat} — {amount}₽/мес"
+        props = {
+            "Текст": _title(fact),
+            "Ключ": _text(key),
+            "Категория": _select("💰 Лимит"),
+            "Связь": _text(cat_link),
+            "Бот": _select("☀️ Nexus"),
+            "Актуально": {"checkbox": True},
+        }
+        if uid:
+            from core.notion_client import _relation
+            props["🪪 Пользователи"] = _relation(uid)
+        try:
+            from core.notion_client import db_query
+            existing = await db_query(mem_db, filter_obj={"and": [
+                {"property": "Ключ", "rich_text": {"contains": key}},
+                {"property": "Категория", "select": {"equals": "💰 Лимит"}},
+            ]}, page_size=1)
+            if existing:
+                await update_page(existing[0]["id"], props)
+            else:
+                await page_create(mem_db, props)
+        except Exception as e:
+            logger.error("_save_limits_batch: %s for %s", e, cat)
 
 
 async def _save_obligatory_batch(state: BudgetSetupState, user_notion_id: str = "") -> None:
