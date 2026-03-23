@@ -229,11 +229,10 @@ async def cmd_tasks(msg: Message, user_notion_id: str = "") -> None:
     total = len(items)
 
     def _task_line(it: dict) -> str:
-        """Форматирует задачу с отступом."""
-        meta = it['status_icon']
+        line = f"  <i>{it['cat_icon']} {it['title']}</i> · {it['status_icon']}"
         if it.get("deadline_display"):
-            meta += f" · {it['deadline_display']}"
-        return f"  {it['cat_icon']} {it['title']}\n       <i>{meta}</i>"
+            line += f" · {it['deadline_display']}"
+        return line
 
     # Строим вывод с группами
     from itertools import groupby
