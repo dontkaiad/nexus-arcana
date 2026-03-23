@@ -804,7 +804,7 @@ async def _show_task_confirm(message: Message, pending: dict, uid: int) -> None:
 
     text_content = (
         f"📌 <b>{pending['title']}</b>\n"
-        f"🏷 {pending.get('category', '?')} · {pending.get('priority', 'Средний')}\n"
+        f"🏷 {pending.get('category', '?')} · {pending.get('priority') or 'Можно потом'}\n"
         f"📅 Дедлайн: {deadline_display}\n"
         f"🔔 Напомню: {reminder_display}\n\n"
     )
@@ -1002,7 +1002,7 @@ async def task_deadline_choice(call: CallbackQuery) -> None:
         deadline_display = (d.get("deadline") or "без даты").replace("T", " ")
         msg = await call.message.answer(
             f"📌 <b>{d.get('title')}</b>\n"
-            f"🏷 {d.get('category', '?')} · {d.get('priority', 'Средний')}\n"
+            f"🏷 {d.get('category', '?')} · {d.get('priority') or 'Можно потом'}\n"
             f"📅 Дедлайн: {deadline_display}\n\n"
             f"<b>⏰ Когда напомнить?</b>\n"
             f"Примеры: <code>завтра в 10:00</code>, <code>в 15:00</code>, <code>через 2 часа</code>",
@@ -1229,7 +1229,7 @@ async def _do_save_task(message: Message, data: dict, chat_id: int = None, uid: 
 
     from core.option_helper import format_option
     db_id = config.nexus.db_tasks
-    real_priority = await match_select(db_id, "Приоритет", data.get("priority", "Средний"))
+    real_priority = await match_select(db_id, "Приоритет", data.get("priority") or "Можно потом")
     real_category = await match_select(db_id, "Категория", format_option(data.get("category", "💳 Прочее")))
     user_notion_id = data.get("user_notion_id", "")
 
@@ -1275,7 +1275,7 @@ async def _do_save_task(message: Message, data: dict, chat_id: int = None, uid: 
 
     extra = ""
     if data.get("for_practice") and config.arcana.db_tasks:
-        real_priority = await match_select(config.arcana.db_tasks, "Приоритет", data.get("priority", "Средний"))
+        real_priority = await match_select(config.arcana.db_tasks, "Приоритет", data.get("priority") or "Можно потом")
         real_category = await match_select(config.arcana.db_tasks, "Категория", data.get("category", "💳 Прочее"))
         
         arcana_props = {
@@ -1332,16 +1332,9 @@ async def _do_save_task(message: Message, data: dict, chat_id: int = None, uid: 
 
     try:
         from nexus.handlers.memory import suggest_memory
-        title    = data.get("title", "")
-        category = data.get("category", "")
-        # Убираем "купить/купи" из начала, оставляем только объект
-        import re as _re
-        item = _re.sub(r"^\s*(купить|купи)\s+", "", title, flags=_re.IGNORECASE).strip() or title
-        # Имя категории без эмодзи ("🐾 Коты" → "Коты")
-        cat_name = _re.sub(r"^[\s\U00010000-\U0010ffff\u2600-\u27ff\u2300-\u23ff]+", "", category).strip()
-        suggest_text = f"{item} ({cat_name})" if cat_name else item
-        if suggest_text and suggest_text.strip():
-            await suggest_memory(message, suggest_text.strip(), data.get("user_notion_id", ""))
+        title = data.get("title", "")
+        if title and title.strip():
+            await suggest_memory(message, title.strip(), data.get("user_notion_id", ""))
         nudge = await _check_procrastination_nudge(data.get("title", ""))
         if nudge:
             await message.answer(nudge)
@@ -1680,7 +1673,7 @@ async def handle_tasks_today(message: Message, user_notion_id: str = "") -> None
         await message.answer("📭 Активных задач нет.")
         return
 
-    icons = {"Высокий": "🔴", "Средний": "🟡", "Низкий": "⚪"}
+    icons = {"Срочно": "🔴", "Важно": "🟡", "Можно потом": "⚪"}
     lines = []
     for t in tasks:
         props = t["properties"]
