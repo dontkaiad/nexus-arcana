@@ -334,8 +334,12 @@ async def cmd_memory(msg: Message, user_notion_id: str = "") -> None:
     text = maybe_convert(msg.text or "")
     parts = text.strip().split(maxsplit=1)
     category_filter = parts[1] if len(parts) > 1 else ""
+    # Скрываем СДВГ если не запрошен явно (/memory сдвг, /memory adhd)
+    is_adhd_request = category_filter.lower().strip() in ("сдвг", "adhd", "🧠 сдвг")
     from nexus.handlers.memory import handle_memory_list
-    await handle_memory_list(msg, category_filter=category_filter, user_notion_id=user_notion_id)
+    await handle_memory_list(msg, category_filter=category_filter,
+                             user_notion_id=user_notion_id,
+                             exclude_adhd=not is_adhd_request)
 
 
 @dp.message(Command("adhd"))
