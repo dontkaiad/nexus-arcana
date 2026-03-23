@@ -1722,19 +1722,118 @@ async def _apply_edit(
 
 
 async def handle_tasks_today(message: Message, user_notion_id: str = "") -> None:
-    tasks = await tasks_active(user_notion_id=user_notion_id)
-    if not tasks:
-        await message.answer("📭 Активных задач нет.")
-        return
+    """Задачи на сегодня: дедлайн сегодня/просрочен, напоминание сегодня, ежедневные."""
+    from core.notion_client import query_pages, _with_user_filter
+    from core.config import config
+    from datetime import date as _date, timedelta
 
-    icons = {"Срочно": "🔴", "Важно": "🟡", "Можно потом": "⚪"}
-    lines = []
-    for t in tasks:
+    uid = message.from_user.id if message.from_user else 0
+    tz_offset = await _get_user_tz(uid)
+    user_tz = timezone(timedelta(hours=tz_offset))
+    today_str = datetime.now(user_tz).strftime("%Y-%m-%d")
+
+    # Все активные задачи
+    base_filter = {
+        "and": [
+            {"property": "Статус", "status": {"does_not_equal": "Done"}},
+            {"property": "Статус", "status": {"does_not_equal": "Archived"}},
+            {"property": "Статус", "status": {"does_not_equal": "Complete"}},
+        ]
+    }
+    filters = _with_user_filter(base_filter, user_notion_id)
+    all_tasks = await query_pages(
+        config.nexus.db_tasks, filters=filters,
+        sorts=[{"property": "Приоритет", "direction": "descending"}],
+        page_size=100,
+    )
+
+    _priority_icons = {"Срочно": "🔴", "Важно": "🟡", "Можно потом": "⚪"}
+    _status_icons = {"In progress": "⏳", "Not started": "❌"}
+    _repeat_labels = {"Ежедневно": "ежедневно", "Еженедельно": "еженедельно", "Ежемесячно": "ежемесячно"}
+
+    overdue = []
+    today_tasks = []
+    daily = []
+
+    for t in all_tasks:
         props = t["properties"]
         title_parts = props.get("Задача", {}).get("title", [])
         title = title_parts[0]["plain_text"] if title_parts else "—"
-        priority = (props.get("Приоритет", {}).get("select") or {}).get("name", "Низкий")
-        deadline = (props.get("Дедлайн", {}).get("date") or {}).get("start", "")[:10]
-        lines.append(f"{icons.get(priority, '⚪')} {title}{(' · ' + deadline) if deadline else ''}")
+        priority_raw = (props.get("Приоритет", {}).get("select") or {}).get("name", "Важно")
+        priority = priority_raw
+        for _pk in _priority_icons:
+            if _pk in priority_raw:
+                priority = _pk
+                break
+        status = (props.get("Статус", {}).get("status") or {}).get("name", "Not started")
+        category = (props.get("Категория", {}).get("select") or {}).get("name", "")
+        deadline_raw = (props.get("Дедлайн", {}).get("date") or {}).get("start", "")
+        reminder_raw = (props.get("Напоминание", {}).get("date") or {}).get("start", "")
+        repeat = (props.get("Повтор", {}).get("select") or {}).get("name", "")
+        is_repeat = repeat and repeat != "Нет"
 
-    await message.answer("📋 <b>Активные задачи:</b>\n\n" + "\n".join(lines))
+        deadline_date = deadline_raw[:10] if deadline_raw else ""
+        reminder_date = reminder_raw[:10] if reminder_raw else ""
+        cat_icon = category[0] if category else "📌"
+        status_icon = _status_icons.get(status, "❔")
+
+        # Время из дедлайна или напоминания
+        time_str = ""
+        if "T" in reminder_raw:
+            time_str = reminder_raw.split("T")[1][:5]
+        elif "T" in deadline_raw:
+            time_str = deadline_raw.split("T")[1][:5]
+
+        item = {
+            "cat_icon": cat_icon,
+            "title": title,
+            "priority": priority,
+            "pri_icon": _priority_icons.get(priority, "⚪"),
+            "status_icon": status_icon,
+            "time_str": time_str,
+            "is_repeat": is_repeat,
+            "repeat": repeat,
+        }
+
+        # Ежедневные задачи
+        if is_repeat and repeat == "Ежедневно":
+            daily.append(item)
+        # Просроченные
+        elif deadline_date and deadline_date < today_str:
+            overdue.append(item)
+        # Дедлайн сегодня или напоминание сегодня
+        elif deadline_date == today_str or reminder_date == today_str:
+            today_tasks.append(item)
+
+    total = len(overdue) + len(today_tasks) + len(daily)
+
+    if total == 0:
+        await message.answer("🌟 На сегодня задач нет — свободный день!")
+        return
+
+    def _fmt(it: dict) -> str:
+        line = f"  <i>{it['cat_icon']} {it['title']}</i> · {it['status_icon']}"
+        if it.get("time_str"):
+            line += f" · {it['time_str']}"
+        return line
+
+    lines: list[str] = []
+
+    if overdue:
+        lines.append(f"<b>🔥 ПРОСРОЧЕНО</b>")
+        for it in overdue:
+            lines.append(_fmt(it))
+
+    if today_tasks:
+        lines.append(f"\n<b>📅 СЕГОДНЯ</b>")
+        for it in today_tasks:
+            lines.append(_fmt(it))
+
+    if daily:
+        lines.append(f"\n<b>🔄 ЕЖЕДНЕВНЫЕ</b>")
+        for it in daily:
+            time_part = f" · {it['time_str']}" if it.get("time_str") else ""
+            lines.append(f"  <i>{it['cat_icon']} {it['title']}</i>{time_part}")
+
+    header = f"☀️ <b>Задачи на сегодня · {total} шт</b>\n"
+    await message.answer(header + "\n".join(lines))

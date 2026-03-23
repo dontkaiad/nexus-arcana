@@ -289,6 +289,13 @@ async def cmd_tasks(msg: Message, user_notion_id: str = "") -> None:
             await msg.answer(chunk)
 
 
+@dp.message(Command("today"))
+async def cmd_today(msg: Message, user_notion_id: str = "") -> None:
+    """Задачи на сегодня."""
+    from nexus.handlers.tasks import handle_tasks_today
+    await handle_tasks_today(msg, user_notion_id=user_notion_id)
+
+
 @dp.message(Command("notes"))
 async def cmd_notes(msg: Message, user_notion_id: str = "") -> None:
     """Показать последние 5 заметок из Notion."""
@@ -688,7 +695,8 @@ async def main() -> None:
     await bot.set_my_commands([
         BotCommand(command="start", description="Запустить Nexus"),
         BotCommand(command="help", description="Гайд по использованию"),
-        BotCommand(command="tasks", description="Активные задачи"),
+        BotCommand(command="tasks", description="Все задачи"),
+        BotCommand(command="today", description="Задачи на сегодня"),
         BotCommand(command="notes", description="Последние 5 заметок"),
         BotCommand(command="finance", description="Расходы за сегодня"),
         BotCommand(command="finance_stats", description="Сводка за месяц + лимиты"),
