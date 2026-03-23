@@ -442,7 +442,7 @@ async def finance_update(target_type: str, field: str, new_value: str) -> bool:
 async def task_add(
     title: str,
     category: str = "Другое",
-    priority: str = "Средний",
+    priority: str = "Важно",
     deadline: Optional[str] = None,
     reminder: str = "",
     user_notion_id: str = "",
