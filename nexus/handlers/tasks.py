@@ -1393,7 +1393,7 @@ async def _do_save_task(message: Message, data: dict, chat_id: int = None, uid: 
         priority = data.get("priority") or ""
         # Auto-suggest: пропускаем рутинные покупки, мелочи и низкий приоритет
         _is_routine = bool(_re.match(r"^\s*(купить|купи|заказать|закажи|выкинуть|убрать|погладить|помыть|постирать|протереть|вынести|выбросить|поесть|съесть|приготовить|сварить|разогреть|покормить)\s+", title, _re.IGNORECASE))
-        _routine_cats = ("🍜 Продукты", "🐾 Коты")
+        _routine_cats = ("🍜 Продукты",)
         _is_routine = _is_routine or data.get("category", "") in _routine_cats
         _is_low_priority = "Можно потом" in priority
         if title and title.strip() and not _is_routine and not _is_low_priority:
