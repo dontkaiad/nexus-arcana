@@ -247,7 +247,6 @@ async def cmd_tasks(msg: Message, user_notion_id: str = "") -> None:
     today_items = [x for x in items if x["is_today"]]
     active_items = [x for x in items if not x["is_today"] and x["status"] in ("In progress", "Not started")]
     done_items = [x for x in items if x["status"] in ("Done", "Complete")]
-    archived_items = [x for x in items if x["status"] == "Archived"]
 
     if today_items:
         lines.append(f"<b>📅 СЕГОДНЯ / ПРОСРОЧЕНО</b>")
@@ -263,17 +262,38 @@ async def cmd_tasks(msg: Message, user_notion_id: str = "") -> None:
             for it in group:
                 lines.append(_task_line(it))
 
+    # Done за неделю — макс 5
     if done_items:
-        lines.append(f"\n<b>✅ ВЫПОЛНЕНО</b> <i>({len(done_items)})</i>")
-        for it in done_items:
-            lines.append(f"  {it['cat_icon']} <s>{it['title']}</s>")
+        week_start = (_date.today() - timedelta(days=_date.today().weekday())).isoformat()
+        # Фильтруем по дате изменения (Notion last_edited_time)
+        done_week = []
+        for t in all_tasks:
+            props = t["properties"]
+            status = (props.get("Статус", {}).get("status") or {}).get("name", "")
+            if status not in ("Done", "Complete"):
+                continue
+            # Время завершения → last_edited_time
+            compl = (props.get("Время завершения", {}).get("date") or {}).get("start", "")
+            if not compl:
+                compl = t.get("last_edited_time", "")
+            compl_date = compl[:10] if compl else ""
+            if compl_date >= week_start:
+                title_parts = props.get("Задача", {}).get("title", [])
+                title = title_parts[0]["plain_text"] if title_parts else "—"
+                cat = (props.get("Категория", {}).get("select") or {}).get("name", "")
+                cat_icon = cat[0] if cat else "📌"
+                d_display = f"{compl_date[8:10]}.{compl_date[5:7]}" if compl_date else ""
+                done_week.append((title, cat_icon, d_display, compl_date))
+        done_week.sort(key=lambda x: x[3], reverse=True)
+        done_week = done_week[:5]
+        if done_week:
+            lines.append(f"\n───────────────")
+            lines.append(f"<b>✅ Выполнено за неделю · {len(done_week)} шт</b>")
+            for title, ci, dd, _ in done_week:
+                lines.append(f"  ✓ {ci} {title}" + (f" · {dd}" if dd else ""))
 
-    if archived_items:
-        lines.append(f"\n<b>🗄 АРХИВ</b> <i>({len(archived_items)})</i>")
-        for it in archived_items:
-            lines.append(f"  {it['cat_icon']} <s>{it['title']}</s>")
-
-    header = f"📋 <b>Все задачи · {total} шт</b>\n"
+    active_total = len(today_items) + len(active_items)
+    header = f"📋 <b>Активные задачи · {active_total} шт</b>\n"
     text = header + "\n".join(lines)
 
     # Telegram лимит ~4096 символов — разбиваем если не влезает
@@ -439,8 +459,17 @@ async def handle_text(msg: Message, user_notion_id: str = "") -> None:
         if pending and pending.get("action") == "reschedule":
             await handle_reschedule_reminder(msg)
             return
-        await handle_task_clarification(msg)
-        return
+        # Если это edit-команда — не перехватываем, пусть пойдёт в classify
+        import re as _re
+        _text_low = (msg.text or "").strip()
+        _is_edit_cmd = bool(_re.search(
+            r"\b(поменяй|измени|обнови|смени|замени|исправь)\b.{0,50}"
+            r"\b(категорию|приоритет|название|дедлайн|статус)\b",
+            _text_low, _re.IGNORECASE,
+        ))
+        if not _is_edit_cmd:
+            await handle_task_clarification(msg)
+            return
 
     text = maybe_convert(msg.text.strip())
     original_text = text  # ВАЖНО: сохранить до spell correction
