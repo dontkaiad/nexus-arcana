@@ -140,7 +140,7 @@ async def cmd_tasks(msg: Message, user_notion_id: str = "") -> None:
     if not tasks:
         await msg.answer("📭 Активных задач нет.")
         return
-    _icons = {"Высокий": "🔴", "Средний": "🟡", "Низкий": "⚪"}
+    _icons = {"Срочно": "🔴", "Важно": "🟡", "Можно потом": "⚪"}
     task_items = []
     for t in tasks:
         props = t["properties"]
@@ -480,10 +480,10 @@ async def on_arcana_choice(query: CallbackQuery, user_notion_id: str = "") -> No
         )
     else:
         from core.notion_client import task_add
-        result = await task_add(title=text, category="💳 Прочее", priority="Средний",
+        result = await task_add(title=text, category="💳 Прочее", priority="Можно потом",
                                 user_notion_id=user_notion_id)
         if result:
-            msg_text = f"✓ <b>{text}</b>\n🟡 Средний · 💳 Прочее"
+            msg_text = f"✓ <b>{text}</b>\n⚪ Можно потом · 💳 Прочее"
         else:
             msg_text = "❌ Ошибка при создании задачи"
 
