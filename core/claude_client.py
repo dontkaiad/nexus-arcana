@@ -124,7 +124,7 @@ async def parse_task(text: str) -> Dict:
         "Поля:\n"
         "  title: string\n"
         "  category: Покупки | Бьюти | Встречи | Дом | Здоровье | Финансы | Работа | Другое\n"
-        "  priority: Высокий | Средний | Низкий\n"
+        "  priority: Срочно | Важно | Можно потом\n"
         "  deadline: ISO date string или null\n"
         "  reminder: string (например 'за 1 час') или ''"
     )
