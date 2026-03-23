@@ -1095,6 +1095,22 @@ _DONE_PHRASES = [
     "🌟 Вот это продуктивность!",
 ]
 
+_SUPPORT_NOT_DONE = [
+    "Ничего страшного, бывает! 💛",
+    "Не корю — завтра новый день 🌅",
+    "Окей, отложим. Ты всё равно молодец что трекаешь 💪",
+    "Без давления — перенесём? 🤗",
+    "СДВГ-мозг такой, это нормально 🧠💜",
+    "Главное что помнишь о задаче! 🌟",
+]
+
+_SUPPORT_POSTPONE = [
+    "Разумно! Лучше перенести чем забить 📌",
+    "Ок, сдвигаем. Главное — не потерять 👌",
+    "Перенесено! Напомню, не переживай 🔔",
+    "Иногда отложить = правильное решение ✨",
+]
+
 
 @router.callback_query(F.data.startswith("task_complete_"))
 async def task_complete(call: CallbackQuery) -> None:
@@ -1146,19 +1162,22 @@ async def task_complete(call: CallbackQuery) -> None:
 @router.callback_query(F.data.startswith("task_failed_"))
 async def task_failed(call: CallbackQuery) -> None:
     logger.info("task_failed callback: data=%s uid=%s", call.data, call.from_user.id)
+    import random
     uid = call.from_user.id
     task_id = call.data.split("_", 2)[2]
     logger.info("task_failed: task_id=%s", task_id)
-    
+
     # Получаем название из сообщения (если есть)
     msg_text = call.message.text or ""
     task_title = ""
     if "Напоминание:" in msg_text:
         task_title = msg_text.split("Напоминание:")[1].strip().split("\n")[0].strip()
-    
+
     _pending_set(uid, {"task_id": task_id, "action": "reschedule", "title": task_title})
     await call.message.edit_reply_markup()
+    support = random.choice(_SUPPORT_NOT_DONE)
     await call.message.answer(
+        f"{support}\n\n"
         "⏰ <b>Когда напомнить снова?</b>\n"
         "Примеры: <code>завтра в 10:00</code>, <code>через 2 часа</code>, <code>в понедельник</code>"
     )
@@ -1166,19 +1185,22 @@ async def task_failed(call: CallbackQuery) -> None:
 @router.callback_query(F.data.startswith("task_reschedule_"))
 async def task_reschedule(call: CallbackQuery) -> None:
     logger.info("task_reschedule callback: data=%s uid=%s", call.data, call.from_user.id)
+    import random
     uid = call.from_user.id
     task_id = call.data.split("_", 2)[2]
     logger.info("task_reschedule: task_id=%s", task_id)
-    
+
     # Получаем название из сообщения (если есть)
     msg_text = call.message.text or ""
     task_title = ""
     if "Дедлайн:" in msg_text:
         task_title = msg_text.split("Дедлайн:")[1].strip().split(".")[0].strip()
-    
+
     _pending_set(uid, {"task_id": task_id, "action": "reschedule", "title": task_title})
     await call.message.edit_reply_markup()
+    support = random.choice(_SUPPORT_POSTPONE)
     await call.message.answer(
+        f"{support}\n\n"
         "⏰ <b>Когда напомнить снова?</b>\n"
         "Примеры: <code>завтра в 10:00</code>, <code>через 2 часа</code>, <code>в понедельник</code>"
     )
@@ -1896,3 +1918,140 @@ async def handle_tasks_today(message: Message, user_notion_id: str = "") -> None
 
     header = f"☀️ <b>Задачи на сегодня · {total} шт</b>\n"
     await message.answer(header + "\n".join(lines))
+
+
+# ── /stats — статистика задач ─────────────────────────────────────────────────
+
+async def handle_task_stats(message: Message, user_notion_id: str = "") -> None:
+    """Статистика задач: за неделю, месяц, стрики, топ категорий."""
+    from core.notion_client import query_pages, _with_user_filter
+    from core.config import config
+    import random
+    from collections import Counter
+
+    uid = message.from_user.id if message.from_user else 0
+    tz_offset = await _get_user_tz(uid)
+    user_tz = timezone(timedelta(hours=tz_offset))
+    now = datetime.now(user_tz)
+    today = now.date()
+    week_start = today - timedelta(days=today.weekday())  # Понедельник
+    month_start = today.replace(day=1)
+
+    # Все задачи пользователя (без фильтра по статусу)
+    filters = _with_user_filter(None, user_notion_id)
+    all_tasks = await query_pages(
+        config.nexus.db_tasks, filters=filters,
+        sorts=[{"timestamp": "last_edited_time", "direction": "descending"}],
+        page_size=200,
+    )
+
+    done_week = 0
+    done_month = 0
+    cancelled_week = 0
+    cancelled_month = 0
+    active = 0
+    done_dates: list[str] = []
+    cat_done: Counter = Counter()
+
+    for t in all_tasks:
+        props = t["properties"]
+        status = (props.get("Статус", {}).get("status") or {}).get("name", "Not started")
+        category = (props.get("Категория", {}).get("select") or {}).get("name", "")
+
+        # Дата завершения: "Время завершения" → last_edited_time → created_time
+        completion_raw = (props.get("Время завершения", {}).get("date") or {}).get("start", "")
+        if not completion_raw:
+            completion_raw = t.get("last_edited_time", "")
+        completion_date_str = completion_raw[:10] if completion_raw else ""
+
+        if status in ("Done", "Complete"):
+            if completion_date_str:
+                done_dates.append(completion_date_str)
+                try:
+                    cd = datetime.strptime(completion_date_str, "%Y-%m-%d").date()
+                    if cd >= week_start:
+                        done_week += 1
+                    if cd >= month_start:
+                        done_month += 1
+                        if category:
+                            cat_done[category] += 1
+                except ValueError:
+                    done_month += 1
+        elif status == "Archived":
+            if completion_date_str:
+                try:
+                    cd = datetime.strptime(completion_date_str, "%Y-%m-%d").date()
+                    if cd >= week_start:
+                        cancelled_week += 1
+                    if cd >= month_start:
+                        cancelled_month += 1
+                except ValueError:
+                    cancelled_month += 1
+        elif status in ("Not started", "In progress"):
+            active += 1
+
+    # Стрик
+    unique_done_dates = sorted(set(done_dates), reverse=True)
+    streak = 0
+    best_streak = 0
+    current_streak = 0
+    check_date = today
+    for d_str in unique_done_dates:
+        try:
+            d = datetime.strptime(d_str, "%Y-%m-%d").date()
+        except ValueError:
+            continue
+        if d == check_date:
+            current_streak += 1
+            check_date -= timedelta(days=1)
+        elif d < check_date:
+            if streak == 0:
+                streak = current_streak
+            best_streak = max(best_streak, current_streak)
+            # Попробуем продолжить с этой даты
+            current_streak = 1
+            check_date = d - timedelta(days=1)
+    if streak == 0:
+        streak = current_streak
+    best_streak = max(best_streak, current_streak)
+
+    # Топ-3 категории
+    top_cats = cat_done.most_common(3)
+
+    # Совет от Haiku
+    advice = ""
+    try:
+        advice = await ask_claude(
+            f"Кай (женский род, СДВГ). За неделю выполнено {done_week} задач, "
+            f"стрик {streak} дней. Дай ОДИН короткий мотивирующий совет. Макс 1 предложение.",
+            max_tokens=80, model="claude-haiku-4-5-20251001",
+        )
+    except Exception:
+        pass
+
+    # Формируем вывод
+    lines = [
+        f"📊 <b>Статистика задач</b>\n",
+        f"<b>📅 Эта неделя:</b>",
+        f"  ✅ Выполнено: {done_week}",
+        f"  ❌ Отменено: {cancelled_week}",
+        f"  ⏳ Активных: {active}",
+        f"",
+        f"<b>📅 Этот месяц:</b>",
+        f"  ✅ Выполнено: {done_month}",
+        f"  ❌ Отменено: {cancelled_month}",
+        f"  ⏳ Активных: {active}",
+        f"",
+        f"<b>🔥 Стрик:</b> {streak} {'дней' if streak != 1 else 'день'} подряд",
+        f"<b>🏆 Лучший стрик:</b> {best_streak} {'дней' if best_streak != 1 else 'день'}",
+    ]
+
+    if top_cats:
+        lines.append(f"\n<b>📈 Топ категорий (месяц):</b>")
+        for cat, count in top_cats:
+            lines.append(f"  {cat} — {count}")
+
+    if advice:
+        lines.append(f"\n💡 {advice.strip()}")
+
+    await message.answer("\n".join(lines))
