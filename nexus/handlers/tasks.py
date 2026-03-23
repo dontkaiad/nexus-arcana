@@ -1349,10 +1349,11 @@ async def _do_save_task(message: Message, data: dict, chat_id: int = None, uid: 
 
     try:
         from nexus.handlers.memory import suggest_memory
+        import re as _re
         title = data.get("title", "")
-        priority = data.get("priority") or "Важно"
-        # Auto-suggest только для Срочно/Важно — рутинные мелочи не предлагаем запоминать
-        if title and title.strip() and priority in ("Срочно", "Важно"):
+        # Auto-suggest: пропускаем рутинные покупки и мелочи
+        _is_routine = bool(_re.match(r"^\s*(купить|купи|выкинуть|убрать|погладить)\s+", title, _re.IGNORECASE))
+        if title and title.strip() and not _is_routine:
             await suggest_memory(message, title.strip(), data.get("user_notion_id", ""))
         nudge = await _check_procrastination_nudge(data.get("title", ""))
         if nudge:
