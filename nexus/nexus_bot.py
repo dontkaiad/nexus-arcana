@@ -141,39 +141,61 @@ async def cmd_tasks(msg: Message, user_notion_id: str = "") -> None:
         await msg.answer("📭 Активных задач нет.")
         return
     _priority_icons = {"Срочно": "🔴", "Важно": "🟡", "Можно потом": "⚪"}
-    task_items = []
+    _status_labels = {"In progress": "🔄 В процессе", "Not started": "📋 Не начато"}
+
+    # Собираем задачи
+    in_progress = []
+    not_started = []
     for t in tasks:
         props = t["properties"]
         title_parts = props.get("Задача", {}).get("title", [])
         title = title_parts[0]["plain_text"] if title_parts else "—"
         priority = (props.get("Приоритет", {}).get("select") or {}).get("name", "Важно")
+        status = (props.get("Статус", {}).get("status") or {}).get("name", "Not started")
         category = (props.get("Категория", {}).get("select") or {}).get("name", "")
         deadline = (props.get("Дедлайн", {}).get("date") or {}).get("start", "")[:10]
         repeat = (props.get("Повтор", {}).get("select") or {}).get("name", "")
         repeat_mark = " 🔄" if repeat and repeat != "Нет" else ""
-        # Первый символ категории как иконка (🐾 из "🐾 Коты")
         cat_icon = category[0] if category else "📌"
         pri_icon = _priority_icons.get(priority, "⚪")
-        pri_name = priority if priority in _priority_icons else "Важно"
-        task_items.append({
+
+        item = {
             "cat_icon": cat_icon,
-            "pri_label": f"{pri_icon} {pri_name}",
+            "pri_icon": pri_icon,
             "title": title + repeat_mark,
             "deadline": deadline,
-        })
+        }
+        if status == "In progress":
+            in_progress.append(item)
+        else:
+            not_started.append(item)
 
     def _task_fmt(it: dict) -> str:
-        line = f"{it['cat_icon']} {it['title']} · {it['pri_label']}"
+        line = f"{it['cat_icon']} {it['title']} · {it['pri_icon']}"
         if it.get("deadline"):
             line += f" · до {it['deadline']}"
         return line
 
-    if len(task_items) > PAGE_SIZE:
+    # Формируем вывод с группировкой по статусу
+    lines = []
+    if in_progress:
+        lines.append(f"<b>🔄 В процессе ({len(in_progress)})</b>")
+        lines.extend(_task_fmt(t) for t in in_progress)
+        lines.append("")
+    if not_started:
+        lines.append(f"<b>📋 Не начато ({len(not_started)})</b>")
+        lines.extend(_task_fmt(t) for t in not_started)
+
+    total = len(in_progress) + len(not_started)
+
+    if total > PAGE_SIZE:
+        # Пагинация для всех задач как единый список
+        all_items = in_progress + not_started
         uid = msg.from_user.id
-        register_pages(uid, task_items, "📋 Активные задачи", _task_fmt)
+        register_pages(uid, all_items, "📋 Активные задачи", _task_fmt)
         await msg.answer(get_page_text(uid), reply_markup=get_page_keyboard(uid))
     else:
-        await msg.answer("📋 <b>Активные задачи:</b>\n\n" + "\n".join(_task_fmt(t) for t in task_items))
+        await msg.answer("📋 <b>Активные задачи:</b>\n\n" + "\n".join(lines))
 
 
 @dp.message(Command("notes"))
