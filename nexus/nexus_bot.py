@@ -459,17 +459,42 @@ async def handle_text(msg: Message, user_notion_id: str = "") -> None:
         if pending and pending.get("action") == "reschedule":
             await handle_reschedule_reminder(msg)
             return
-        # Если это edit-команда — не перехватываем, пусть пойдёт в classify
+        # Если это edit-команда — обновляем pending задачу напрямую
         import re as _re
         _text_low = (msg.text or "").strip()
-        _is_edit_cmd = bool(_re.search(
-            r"\b(поменяй|измени|обнови|смени|замени|исправь)\b.{0,50}"
-            r"\b(категорию|приоритет|название|дедлайн|статус)\b",
+        _edit_match = _re.search(
+            r"\b(?:поменяй|измени|обнови|смени|замени|исправь)\s+(?:категорию|категория)\s+(?:на\s+)?(.+)",
             _text_low, _re.IGNORECASE,
-        ))
-        if not _is_edit_cmd:
-            await handle_task_clarification(msg)
+        )
+        if _edit_match:
+            from nexus.handlers.tasks import _pending_set
+            from core.classifier import _TASK_CATS
+            new_cat = _edit_match.group(1).strip()
+            # Ищем в _TASK_CATS
+            real_cat = new_cat
+            for tc in _TASK_CATS:
+                if new_cat.lower() in tc.lower():
+                    real_cat = tc
+                    break
+            pending["category"] = real_cat
+            _pending_set(msg.from_user.id, pending)
+            await msg.answer(f"✏️ Категория обновлена: {real_cat}\n\n<i>Уточни дедлайн или нажми «Сохранить»</i>")
             return
+        _edit_pri = _re.search(
+            r"\b(?:поменяй|измени|обнови|смени|замени|исправь)\s+(?:приоритет)\s+(?:на\s+)?(.+)",
+            _text_low, _re.IGNORECASE,
+        )
+        if _edit_pri:
+            from nexus.handlers.tasks import _pending_set
+            new_pri = _edit_pri.group(1).strip()
+            _pri_map = {"срочно": "Срочно", "важно": "Важно", "можно потом": "Можно потом", "потом": "Можно потом"}
+            real_pri = _pri_map.get(new_pri.lower(), new_pri)
+            pending["priority"] = real_pri
+            _pending_set(msg.from_user.id, pending)
+            await msg.answer(f"✏️ Приоритет обновлён: {real_pri}\n\n<i>Уточни дедлайн или нажми «Сохранить»</i>")
+            return
+        await handle_task_clarification(msg)
+        return
 
     text = maybe_convert(msg.text.strip())
     original_text = text  # ВАЖНО: сохранить до spell correction
