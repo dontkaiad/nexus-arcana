@@ -383,6 +383,71 @@ async def _update_user_tz(message: Message, text: str) -> None:
     sign = "+" if offset >= 0 else ""
     await message.answer(f"🕐 Часовой пояс обновлён: UTC{sign}{offset}")
 
+# ── Human date → ISO converter ────────────────────────────────────────────────
+
+_HUMAN_DATE_MAP = {
+    "сегодня": 0, "завтра": 1, "послезавтра": 2,
+}
+_WEEKDAY_MAP = {
+    "понедельник": 0, "вторник": 1, "среда": 2, "четверг": 3,
+    "пятница": 4, "пятницу": 4, "суббота": 5, "субботу": 5,
+    "воскресенье": 6, "воскресение": 6,
+}
+
+
+async def _human_date_to_iso(value: str, uid: int = 0) -> Optional[str]:
+    """Конвертировать человекочитаемую дату в ISO строку.
+
+    Обрабатывает: ISO даты (passthrough), 'завтра', 'послезавтра',
+    'через N дней', дни недели, fallback через Claude Haiku.
+    """
+    import re as _re
+    v = value.strip()
+
+    # Уже ISO дата
+    if _re.match(r"^\d{4}-\d{2}-\d{2}", v):
+        return v
+
+    tz_offset = await _get_user_tz(uid)
+    now = datetime.now(timezone(timedelta(hours=tz_offset)))
+
+    # "завтра", "послезавтра", "сегодня"
+    low = v.lower().strip()
+    if low in _HUMAN_DATE_MAP:
+        result = now + timedelta(days=_HUMAN_DATE_MAP[low])
+        return result.strftime("%Y-%m-%d")
+
+    # "через N дней"
+    m = _re.search(r"через\s+(\d+)\s*(дн[а-я]*|день|дней)", low)
+    if m:
+        days = int(m.group(1))
+        result = now + timedelta(days=days)
+        return result.strftime("%Y-%m-%d")
+
+    # День недели: "в пятницу", "в понедельник"
+    for day_name, wd in _WEEKDAY_MAP.items():
+        if day_name in low:
+            current_wd = now.weekday()
+            diff = (wd - current_wd) % 7
+            if diff == 0:
+                diff = 7  # следующая неделя
+            result = now + timedelta(days=diff)
+            return result.strftime("%Y-%m-%d")
+
+    # Fallback: Claude Haiku
+    try:
+        now_str = now.strftime("%Y-%m-%d %H:%M")
+        system = f"Пользователь указывает дату. Верни ТОЛЬКО дату в формате YYYY-MM-DD. Без объяснений.\nСейчас: {now_str} (UTC+{tz_offset})"
+        raw = await ask_claude(v, system=system, max_tokens=20, model="claude-haiku-4-5-20251001")
+        raw = raw.strip()
+        if _re.match(r"^\d{4}-\d{2}-\d{2}$", raw):
+            return raw
+    except Exception as e:
+        logger.error("_human_date_to_iso Claude fallback error: %s", e)
+
+    return None
+
+
 # ── Relative time parser ───────────────────────────────────────────────────────
 
 import re as _re
@@ -1275,8 +1340,8 @@ async def _do_save_task(message: Message, data: dict, chat_id: int = None, uid: 
         # Имя категории без эмодзи ("🐾 Коты" → "Коты")
         cat_name = _re.sub(r"^[\s\U00010000-\U0010ffff\u2600-\u27ff\u2300-\u23ff]+", "", category).strip()
         suggest_text = f"{item} ({cat_name})" if cat_name else item
-        if suggest_text:
-            await suggest_memory(message, suggest_text, data.get("user_notion_id", ""))
+        if suggest_text and suggest_text.strip():
+            await suggest_memory(message, suggest_text.strip(), data.get("user_notion_id", ""))
         nudge = await _check_procrastination_nudge(data.get("title", ""))
         if nudge:
             await message.answer(nudge)
@@ -1310,6 +1375,56 @@ def _task_score(task_title: str, hint_words) -> int:
         return 0
     title_low = task_title.lower()
     return sum(1 for w in hint_words if w in title_low)
+
+
+_CANCEL_STOP_WORDS = {
+    "отмени", "отменить", "отмена", "удали", "убери", "задачу", "задачи", "задач",
+}
+
+
+async def handle_task_cancel(message: Message, task_hint: str, user_notion_id: str = "") -> None:
+    """Найти активную задачу по ключевым словам и отменить (статус Archived)."""
+    from core.notion_client import update_page
+
+    # Убираем стоп-слова отмены из hint
+    cancel_words = set()
+    for w in task_hint.lower().split():
+        w_clean = w.strip(".,!?;:—–\"'")
+        if w_clean and w_clean not in _CANCEL_STOP_WORDS and len(w_clean) > 2:
+            cancel_words.add(w_clean)
+
+    if not cancel_words:
+        await message.answer("⚠️ Укажи какую задачу отменить. Например: «отмени задачу написать Маше»")
+        return
+
+    tasks = await tasks_active(user_notion_id=user_notion_id)
+    if not tasks:
+        await message.answer("📭 Нет активных задач.")
+        return
+
+    scored = []
+    for t in tasks:
+        title_parts = t["properties"].get("Задача", {}).get("title", [])
+        title = title_parts[0]["plain_text"] if title_parts else ""
+        if not title:
+            continue
+        score = _task_score(title, cancel_words)
+        if score > 0:
+            scored.append((score, title, t["id"]))
+
+    if not scored:
+        await message.answer(f"🔍 Не нашёл задачу по: «{task_hint[:60]}»\nПроверь активные: /tasks")
+        return
+
+    scored.sort(key=lambda x: x[0], reverse=True)
+    _, title, task_id = scored[0]
+
+    try:
+        await update_page(task_id, {"Статус": _status("Archived")})
+        await message.answer(f"🗑️ Задача «{title}» отменена")
+    except Exception as e:
+        logger.error("handle_task_cancel error: %s", e)
+        await message.answer("⚠️ Ошибка при отмене задачи.")
 
 
 async def handle_task_done(message: Message, task_hint: str, user_notion_id: str = "") -> None:
@@ -1540,9 +1655,18 @@ async def _apply_edit(
             real_pr = await match_select(db_id, "Приоритет", new_value)
             await update_page(page_id, {"Приоритет": _s(real_pr)})
             await message.answer(f"✏️ Приоритет{ctx_label}:\n📌 {label}\n⚡ → {real_pr}")
-        elif field == "deadline":
-            await update_page(page_id, {"Дедлайн": _d(new_value)})
-            await message.answer(f"✏️ Дедлайн{ctx_label}:\n📌 {label}\n📅 → {new_value}")
+        elif field in ("deadline", "reminder"):
+            # Конвертируем человекочитаемые даты в ISO
+            iso_value = await _human_date_to_iso(new_value, message.from_user.id if message.from_user else 0)
+            if not iso_value:
+                await message.answer(f"⚠️ Не удалось распарсить дату: «{new_value}»")
+                return
+            if field == "deadline":
+                await update_page(page_id, {"Дедлайн": _d(iso_value)})
+                await message.answer(f"✏️ Дедлайн{ctx_label}:\n📌 {label}\n📅 → {iso_value}")
+            else:
+                await update_page(page_id, {"Напоминание": _d(iso_value)})
+                await message.answer(f"✏️ Напоминание{ctx_label}:\n📌 {label}\n🔔 → {iso_value}")
         else:
             await message.answer(f"⚠️ Не знаю поле «{field}». Могу менять: категорию, приоритет, название, дедлайн.")
     except Exception as e:
