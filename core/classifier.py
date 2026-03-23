@@ -94,10 +94,11 @@ def build_system(tz_offset: int = 3) -> str:
         "Примеры: исправь на налик/карту → field=source; на категорию → field=category; сумму → field=amount",
         "",
         "edit_record — изменить поле существующей записи (задачи или финансовой):",
-        '{"type":"edit_record","record_type":"task|finance","record_hint":"поисковые слова","field":"category|priority|title|deadline","new_value":"новое значение"}',
+        '{"type":"edit_record","record_type":"task|finance","record_hint":"поисковые слова","field":"category|priority|title|deadline|status","new_value":"новое значение"}',
         "Примеры: 'поменяй категорию задачи купить корм на продукты' → edit_record",
         "         'переименуй задачу купить корм в купить корм котам' → edit_record",
-        "         'смени приоритет купить молоко на высокий' → edit_record",
+        "         'смени приоритет купить молоко на срочно' → edit_record field=priority new_value=Срочно",
+        "         'поставь статус в процессе для купить корм' → edit_record field=status new_value=В процессе",
         "ВАЖНО: edit_record только если явно упомянуто изменение поля существующей записи!",
         "",
         'Вход: "погладить кота каждый день в 9" → {"type":"task","title":"погладить кота","category":"🐾 Коты","priority":"Можно потом","deadline":null,"repeat":"Ежедневно","repeat_time":"09:00","day_of_week":null,"confidence":"high"}',
@@ -407,16 +408,17 @@ _STATS_RE = re.compile(
 
 _EDIT_PARSE_SYSTEM = (
     "Извлеки параметры редактирования записи. Если несколько изменений — верни все в списке edits. Ответь ТОЛЬКО JSON без markdown:\n"
-    '{"type":"edit_record","record_type":"task","record_hint":"ключевые слова для поиска","edits":[{"field":"category|priority|title|deadline","new_value":"новое значение"}]}\n'
+    '{"type":"edit_record","record_type":"task","record_hint":"ключевые слова для поиска","edits":[{"field":"category|priority|title|deadline|status","new_value":"новое значение"}]}\n'
     "\nПравила:\n"
     "- record_type: 'task' если о задаче, 'finance' если о финансовой записи\n"
-    "- field: 'category' для категории; 'priority' для приоритета; 'title' или 'name' для переименования; 'deadline' для дедлайна\n"
+    "- field: 'category' для категории; 'priority' для приоритета (Срочно/Важно/Можно потом); 'title' или 'name' для переименования; 'deadline' для дедлайна; 'status' для статуса (Not started/In progress/Done/Archived)\n"
     "- record_hint: фраза для поиска записи (название задачи/финансовой операции), пустая строка если не указано\n"
     "- edits: список всех изменений (одно или несколько)\n"
     "\nПримеры:\n"
     "'поменяй категорию задачи купить корм на Продукты' → record_hint='купить корм', edits=[{\"field\":\"category\",\"new_value\":\"Продукты\"}]\n"
     "'переименуй задачу купить корм в купить корм котам' → record_hint='купить корм', edits=[{\"field\":\"title\",\"new_value\":\"купить корм котам\"}]\n"
-    "'смени приоритет купить молоко на высокий' → record_hint='купить молоко', edits=[{\"field\":\"priority\",\"new_value\":\"Высокий\"}]\n"
+    "'смени приоритет купить молоко на срочно' → record_hint='купить молоко', edits=[{\"field\":\"priority\",\"new_value\":\"Срочно\"}]\n"
+    "'поставь статус в процессе для купить корм' → record_hint='купить корм', edits=[{\"field\":\"status\",\"new_value\":\"In progress\"}]\n"
     "'измени название на Икеа и категорию на Хобби' → record_hint='', edits=[{\"field\":\"title\",\"new_value\":\"Икеа\"},{\"field\":\"category\",\"new_value\":\"Хобби\"}]\n"
     "'поменяй категорию на привычки и источник на нал' → record_hint='', edits=[{\"field\":\"category\",\"new_value\":\"привычки\"},{\"field\":\"source\",\"new_value\":\"нал\"}]\n"
 )
