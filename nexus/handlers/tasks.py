@@ -1700,12 +1700,21 @@ async def _apply_edit(
     from_context: bool = False,
 ) -> None:
     """Применить правку к Notion-странице (задача или финансы)."""
-    from core.notion_client import match_select, update_page, _title as _t, _select as _s, _date as _d
+    from core.notion_client import match_select, update_page, _title as _t, _select as _s, _date as _d, get_notion
     from core.config import config
 
     ctx_label = " (последняя запись)" if from_context else ""
 
     try:
+        # Проверяем что страница не архивирована
+        try:
+            client = get_notion()
+            page = await client.pages.retrieve(page_id=page_id)
+            if page.get("archived", False):
+                await message.answer("⚠️ Эта запись архивирована — редактировать нельзя.")
+                return
+        except Exception:
+            pass  # Если не смогли проверить — пробуем редактировать
         if record_type == "finance":
             db_id = config.nexus.db_finance
             if field == "category":
@@ -1729,6 +1738,14 @@ async def _apply_edit(
             await message.answer(f"✏️ Переименовано{ctx_label}:\n«{label}» → «{new_value}»")
         elif field == "category":
             real_cat = await match_select(db_id, "Категория", new_value)
+            # Если match_select не нашёл — попробуем _TASK_CATS
+            if real_cat == new_value:
+                from core.classifier import _TASK_CATS
+                _nv = new_value.lower().strip()
+                for tc in _TASK_CATS:
+                    if _nv in tc.lower():
+                        real_cat = tc
+                        break
             await update_page(page_id, {"Категория": _s(real_cat)})
             await message.answer(f"✏️ Категория{ctx_label}:\n📌 {label}\n🏷 → {real_cat}")
         elif field == "priority":
