@@ -779,6 +779,33 @@ async def delete_memory(
     )
 
 
+async def recall_from_memory(keyword: str) -> Optional[str]:
+    """Ищет в памяти факт по ключевому слову. Возвращает текст первого совпадения или None.
+
+    Используется для smart-recall: «купить корм» → ищем «корм» → «Ambrosia 5 кг».
+    """
+    if not keyword or not keyword.strip():
+        return None
+    norm = _normalize_word(keyword.lower().strip())
+    if len(norm) < 2:
+        return None
+    pages = await _find_pages(norm, page_size=3)
+    if not pages:
+        # Пробуем оригинальное слово
+        pages = await _find_pages(keyword.strip(), page_size=3)
+    for p in pages:
+        props = p.get("properties", {})
+        # Только актуальные
+        is_actual = (props.get("Актуально", {}).get("checkbox", True))
+        if not is_actual:
+            continue
+        title_parts = props.get("Текст", {}).get("title", [])
+        text = title_parts[0]["plain_text"] if title_parts else ""
+        if text:
+            return text
+    return None
+
+
 async def auto_suggest_memory(
     message: Message,
     text: str,
