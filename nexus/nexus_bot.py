@@ -171,7 +171,13 @@ async def cmd_tasks(msg: Message, user_notion_id: str = "") -> None:
         props = t["properties"]
         title_parts = props.get("Задача", {}).get("title", [])
         title = title_parts[0]["plain_text"] if title_parts else "—"
-        priority = (props.get("Приоритет", {}).get("select") or {}).get("name", "Важно")
+        priority_raw = (props.get("Приоритет", {}).get("select") or {}).get("name", "Важно")
+        # Notion может вернуть "🟡 Важно" — нормализуем к "Важно"
+        priority = priority_raw
+        for _pk in _priority_icons:
+            if _pk in priority_raw:
+                priority = _pk
+                break
         status = (props.get("Статус", {}).get("status") or {}).get("name", "Not started")
         category = (props.get("Категория", {}).get("select") or {}).get("name", "")
         deadline_raw = (props.get("Дедлайн", {}).get("date") or {}).get("start", "")
