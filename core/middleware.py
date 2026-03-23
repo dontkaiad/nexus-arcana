@@ -35,7 +35,7 @@ class WhitelistMiddleware(BaseMiddleware):
 
         # Слой 1: быстрый gate по whitelist
         if user.id not in config.allowed_ids:
-            logger.warning("Blocked TG ID: %s", user.id)
+            logger.warning("Blocked TG ID: %s (@%s, %s %s)", user.id, user.username, user.first_name, user.last_name or "")
             if isinstance(event, Message):
                 await event.answer("⛔ Доступ запрещён.")
             return
