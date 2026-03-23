@@ -804,7 +804,7 @@ async def _show_task_confirm(message: Message, pending: dict, uid: int) -> None:
 
     text_content = (
         f"📌 <b>{pending['title']}</b>\n"
-        f"🏷 {pending.get('category', '?')} · {pending.get('priority') or 'Можно потом'}\n"
+        f"🏷 {pending.get('category', '?')} · {pending.get('priority') or 'Важно'}\n"
         f"📅 Дедлайн: {deadline_display}\n"
         f"🔔 Напомню: {reminder_display}\n\n"
     )
@@ -1002,7 +1002,7 @@ async def task_deadline_choice(call: CallbackQuery) -> None:
         deadline_display = (d.get("deadline") or "без даты").replace("T", " ")
         msg = await call.message.answer(
             f"📌 <b>{d.get('title')}</b>\n"
-            f"🏷 {d.get('category', '?')} · {d.get('priority') or 'Можно потом'}\n"
+            f"🏷 {d.get('category', '?')} · {d.get('priority') or 'Важно'}\n"
             f"📅 Дедлайн: {deadline_display}\n\n"
             f"<b>⏰ Когда напомнить?</b>\n"
             f"Примеры: <code>завтра в 10:00</code>, <code>в 15:00</code>, <code>через 2 часа</code>",
@@ -1229,7 +1229,7 @@ async def _do_save_task(message: Message, data: dict, chat_id: int = None, uid: 
 
     from core.option_helper import format_option
     db_id = config.nexus.db_tasks
-    real_priority = await match_select(db_id, "Приоритет", data.get("priority") or "Можно потом")
+    real_priority = await match_select(db_id, "Приоритет", data.get("priority") or "Важно")
     real_category = await match_select(db_id, "Категория", format_option(data.get("category", "💳 Прочее")))
     user_notion_id = data.get("user_notion_id", "")
 
@@ -1275,7 +1275,7 @@ async def _do_save_task(message: Message, data: dict, chat_id: int = None, uid: 
 
     extra = ""
     if data.get("for_practice") and config.arcana.db_tasks:
-        real_priority = await match_select(config.arcana.db_tasks, "Приоритет", data.get("priority") or "Можно потом")
+        real_priority = await match_select(config.arcana.db_tasks, "Приоритет", data.get("priority") or "Важно")
         real_category = await match_select(config.arcana.db_tasks, "Категория", data.get("category", "💳 Прочее"))
         
         arcana_props = {
