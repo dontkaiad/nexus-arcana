@@ -279,6 +279,12 @@ _EDIT_NOTE_RE = re.compile(
     re.IGNORECASE,
 )
 
+_CANCEL_RE = re.compile(
+    r"\b(отмени|отменить|отмена)\b.{0,50}\b(задач\w*)\b"
+    r"|\b(удали|убери)\s+задач\w*",
+    re.IGNORECASE,
+)
+
 _DONE_RE = re.compile(
     r"\b(сделал[аи]?\b|выполнил[аи]?\b|закончил[аи]?\b|завершил[аи]?\b|"
     r"позвонил[аи]\b|написал[аи]\b|отправил[аи]\b|забрал[аи]\b|"
@@ -482,6 +488,11 @@ async def classify(text: str, tz_offset: int = 3) -> list[dict]:
         parsed = await _parse_edit_record(text)
         return [parsed]
 
+    # Быстрый pre-фильтр: отмена задачи ("отмени задачу X", "удали задачу X")
+    if _CANCEL_RE.search(text):
+        logger.info("classify: task_cancel pattern matched")
+        return [{"type": "task_cancel", "task_hint": text}]
+
     # Быстрый pre-фильтр: задача выполнена ("сделала X", "X готово")
     # Исключение: "запомни ..." → это заметка, пропустить к Claude
     if _DONE_RE.search(text) and not _ZAPOMNI_RE.search(text):
@@ -563,6 +574,12 @@ async def process_item(data: Dict[str, Any], original_text: str, msg, clarify: d
             record_type=data.get("record_type", "task"),
             user_notion_id=user_notion_id,
         )
+        return ""
+
+    # TASK CANCEL
+    if kind == "task_cancel":
+        from nexus.handlers.tasks import handle_task_cancel
+        await handle_task_cancel(msg, data.get("task_hint", original_text), user_notion_id=user_notion_id)
         return ""
 
     # TASK DONE
