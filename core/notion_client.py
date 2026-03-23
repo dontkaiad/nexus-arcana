@@ -331,9 +331,9 @@ async def match_select(db_id: str, prop_name: str, value: str) -> str:
         if opt_clean in val_clean:
             return opt
     
-    # Не нашли — возвращаем первую опцию как fallback (не создаём новую)
-    logger.warning("match_select: '%s' not found in %s options for %s, using fallback", value, len(options), prop_name)
-    return options[0] if options else value
+    # Не нашли — возвращаем оригинал (Notion создаст новую опцию при записи)
+    logger.warning("match_select: '%s' not found in %s options for %s, using as-is", value, len(options), prop_name)
+    return value
 
 
 # ─── Finance ──────────────────────────────────────────────────────────────────
