@@ -719,7 +719,7 @@ async def handle_task_parsed(message: Message, data: dict) -> None:
 
     # "напомни [дата из Claude]" — reminder_time = deadline, спросить дедлайн
     # Но если пользователь явно написал "дедлайн" — не обнулять его
-    _has_explicit_deadline = bool(re.search(r"\bдедлайн\b|\bдо\s+\d", original_text, re.IGNORECASE))
+    _has_explicit_deadline = bool(_re.search(r"\bдедлайн\b|\bдо\s+\d", original_text, _re.IGNORECASE))
     if has_remind and data.get("deadline"):
         data["reminder_time"] = data["deadline"]
         if not _has_explicit_deadline:
