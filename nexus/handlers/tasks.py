@@ -1806,9 +1806,50 @@ async def handle_tasks_today(message: Message, user_notion_id: str = "") -> None
             today_tasks.append(item)
 
     total = len(overdue) + len(today_tasks) + len(daily)
+    all_today = overdue + today_tasks + daily
+    n_urgent = sum(1 for it in all_today if it["priority"] == "Срочно")
+    n_important = sum(1 for it in all_today if it["priority"] == "Важно")
+    n_low = sum(1 for it in all_today if it["priority"] == "Можно потом")
+    n_overdue = len(overdue)
+
+    # Время суток для совета
+    hour = datetime.now(user_tz).hour
+    if hour < 12:
+        time_of_day = "утро"
+    elif hour < 18:
+        time_of_day = "день"
+    else:
+        time_of_day = "вечер"
+
+    # СДВГ-совет от Haiku
+    async def _get_advice() -> str:
+        try:
+            prompt = (
+                f"Ты ассистент Кай (женский род, у неё СДВГ). "
+                f"Дай ОДИН короткий тёплый совет на день. "
+                f"Задач на сегодня: {total}, срочных: {n_urgent}, просроченных: {n_overdue}. "
+                f"Сейчас {time_of_day}. "
+                f"Макс 1-2 предложения. Без пафоса, по-дружески."
+            )
+            return await ask_claude(prompt, max_tokens=100, model="claude-haiku-4-5-20251001")
+        except Exception:
+            return ""
 
     if total == 0:
-        await message.answer("🌟 На сегодня задач нет — свободный день!")
+        advice = ""
+        try:
+            advice = await ask_claude(
+                "Ты ассистент Кай (женский род, у неё СДВГ). "
+                f"Свободный день, 0 задач. Сейчас {time_of_day}. "
+                "Подскажи что-то приятное. Макс 1-2 предложения, по-дружески.",
+                max_tokens=100, model="claude-haiku-4-5-20251001",
+            )
+        except Exception:
+            pass
+        text = "🌟 На сегодня задач нет — свободный день!"
+        if advice:
+            text += f"\n\n💡 {advice.strip()}"
+        await message.answer(text)
         return
 
     def _fmt(it: dict) -> str:
@@ -1819,8 +1860,21 @@ async def handle_tasks_today(message: Message, user_notion_id: str = "") -> None
 
     lines: list[str] = []
 
+    # Статистика
+    stats_parts = []
+    if n_urgent:
+        stats_parts.append(f"🔴 {n_urgent} срочных")
+    if n_important:
+        stats_parts.append(f"🟡 {n_important} важных")
+    if n_low:
+        stats_parts.append(f"⚪ {n_low} мелочей")
+    if stats_parts:
+        lines.append(" · ".join(stats_parts))
+    if n_overdue:
+        lines.append(f"⚠️ {n_overdue} просроченных!")
+
     if overdue:
-        lines.append(f"<b>🔥 ПРОСРОЧЕНО</b>")
+        lines.append(f"\n<b>🔥 ПРОСРОЧЕНО</b>")
         for it in overdue:
             lines.append(_fmt(it))
 
@@ -1834,6 +1888,11 @@ async def handle_tasks_today(message: Message, user_notion_id: str = "") -> None
         for it in daily:
             time_part = f" · {it['time_str']}" if it.get("time_str") else ""
             lines.append(f"  <i>{it['cat_icon']} {it['title']}</i>{time_part}")
+
+    # Совет
+    advice = await _get_advice()
+    if advice:
+        lines.append(f"\n💡 {advice.strip()}")
 
     header = f"☀️ <b>Задачи на сегодня · {total} шт</b>\n"
     await message.answer(header + "\n".join(lines))
