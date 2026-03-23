@@ -261,12 +261,17 @@ async def _schedule_reminder(chat_id: int, title: str, reminder_dt: str, task_id
             tzinfo=timezone(timedelta(hours=tz_offset))
         )
         async def send_reminder() -> None:
+            # Ставим статус "In progress" при срабатывании напоминания
+            try:
+                await update_page(task_id, {"Статус": _status("In progress")})
+            except Exception as e:
+                logger.warning("send_reminder: failed to set In progress: %s", e)
             kb = InlineKeyboardMarkup(inline_keyboard=[[
                 InlineKeyboardButton(text="✅ Сделано!", callback_data=f"task_complete_{task_id}"),
                 InlineKeyboardButton(text="❌ Не сделал", callback_data=f"task_failed_{task_id}"),
             ]])
             await _bot.send_message(
-                chat_id, 
+                chat_id,
                 f"🔔 <b>Напоминание:</b> {title}\n\nСделано?",
                 parse_mode="HTML",
                 reply_markup=kb
@@ -1577,6 +1582,7 @@ async def handle_edit_record(
         "категория": "category", "категорию": "category",
         "приоритет": "priority", "дедлайн": "deadline",
         "источник": "source",
+        "статус": "status", "status": "status",
     }
     if not edits:
         if field and new_value:
@@ -1675,7 +1681,17 @@ async def _apply_edit(
         elif field == "priority":
             real_pr = await match_select(db_id, "Приоритет", new_value)
             await update_page(page_id, {"Приоритет": _s(real_pr)})
-            await message.answer(f"✏️ Приоритет{ctx_label}:\n📌 {label}\n⚡ → {real_pr}")
+            await message.answer(f"✏️ Приоритет{ctx_label}:\n📌 {label}\n⚡ → {_priority_display(real_pr)}")
+        elif field == "status":
+            _status_map = {
+                "не начато": "Not started", "not started": "Not started",
+                "в процессе": "In progress", "in progress": "In progress",
+                "готово": "Done", "done": "Done", "сделано": "Done",
+                "архив": "Archived", "archived": "Archived", "отменено": "Archived",
+            }
+            real_status = _status_map.get(new_value.lower(), new_value)
+            await update_page(page_id, {"Статус": _status(real_status)})
+            await message.answer(f"✏️ Статус{ctx_label}:\n📌 {label}\n📊 → {real_status}")
         elif field in ("deadline", "reminder"):
             # Конвертируем человекочитаемые даты в ISO
             iso_value = await _human_date_to_iso(new_value, message.from_user.id if message.from_user else 0)
