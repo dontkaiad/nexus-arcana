@@ -673,7 +673,7 @@ async def handle_task_parsed(message: Message, data: dict) -> None:
                 reminder_display = relative_time.replace("T", " ")
                 msg = await message.answer(
                     f"📌 <b>{data.get('title')}</b>\n"
-                    f"🏷 {data.get('category', '?')} · {data.get('priority', 'Средний')}\n"
+                    f"🏷 {data.get('category', '?')} · {data.get('priority') or 'Важно'}\n"
                     f"🔔 Напомню: {reminder_display}\n\n"
                     f"<b>📅 Дедлайн?</b>",
                     reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
@@ -704,7 +704,7 @@ async def handle_task_parsed(message: Message, data: dict) -> None:
         if "T" not in data["reminder_time"]:
             msg_obj = await message.answer(
                 f"📌 <b>{data.get('title')}</b>\n"
-                f"🏷 {data.get('category', '?')} · {data.get('priority', 'Средний')}\n\n"
+                f"🏷 {data.get('category', '?')} · {data.get('priority') or 'Важно'}\n\n"
                 f"<b>⏰ В какое время напомнить?</b>\n"
                 f"Примеры: <code>в 10:00</code>, <code>в 18:30</code>, <code>через 2 часа</code>",
                 reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
@@ -718,7 +718,7 @@ async def handle_task_parsed(message: Message, data: dict) -> None:
         reminder_display = data["reminder_time"].replace("T", " ")
         msg = await message.answer(
             f"📌 <b>{data.get('title')}</b>\n"
-            f"🏷 {data.get('category', '?')} · {data.get('priority', 'Средний')}\n"
+            f"🏷 {data.get('category', '?')} · {data.get('priority') or 'Важно'}\n"
             f"🔔 Напомню: {reminder_display}\n\n"
             f"<b>📅 Дедлайн?</b>",
             reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
@@ -742,7 +742,7 @@ async def handle_task_parsed(message: Message, data: dict) -> None:
         if "T" not in data["reminder_time"]:
             msg_obj = await message.answer(
                 f"📌 <b>{data.get('title')}</b>\n"
-                f"🏷 {data.get('category', '?')} · {data.get('priority', 'Средний')}\n\n"
+                f"🏷 {data.get('category', '?')} · {data.get('priority') or 'Важно'}\n\n"
                 f"<b>⏰ В какое время напомнить?</b>\n"
                 f"Примеры: <code>в 10:00</code>, <code>в 18:30</code>, <code>через 2 часа</code>",
                 reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
@@ -755,7 +755,7 @@ async def handle_task_parsed(message: Message, data: dict) -> None:
         reminder_display = data["reminder_time"].replace("T", " ")
         msg = await message.answer(
             f"📌 <b>{data.get('title')}</b>\n"
-            f"🏷 {data.get('category', '?')} · {data.get('priority', 'Средний')}\n"
+            f"🏷 {data.get('category', '?')} · {data.get('priority') or 'Важно'}\n"
             f"🔔 Напомню: {reminder_display}\n\n"
             f"<b>📅 Дедлайн?</b>",
             reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
@@ -779,7 +779,7 @@ async def handle_task_parsed(message: Message, data: dict) -> None:
 
     msg = await message.answer(
         f"📌 <b>{data.get('title')}</b>\n"
-        f"🗂 {data.get('category', '?')} · {data.get('priority', 'Средний')}\n"
+        f"🗂 {data.get('category', '?')} · {data.get('priority') or 'Важно'}\n"
         f"📅 Дедлайн: {deadline_hint}\n"
         f"🔔 Напоминание: нет\n\n"
         f"❓ Уточни:\n"
@@ -1414,6 +1414,14 @@ async def handle_task_cancel(message: Message, task_hint: str, user_notion_id: s
 
     try:
         await update_page(task_id, {"Статус": _status("Archived")})
+        # Удаляем scheduler jobs
+        if _scheduler:
+            for prefix in ("reminder_", "deadline_"):
+                try:
+                    _scheduler.remove_job(f"{prefix}{task_id}")
+                    logger.info("Cancelled %s job: %s%s", prefix.rstrip("_"), prefix, task_id)
+                except Exception:
+                    pass
         await message.answer(f"🗑️ Задача «{title}» отменена")
     except Exception as e:
         logger.error("handle_task_cancel error: %s", e)
