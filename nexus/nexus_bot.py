@@ -200,7 +200,10 @@ async def cmd_tasks(msg: Message, user_notion_id: str = "") -> None:
         elif deadline_date:
             try:
                 d, m = deadline_date[8:10], deadline_date[5:7]
-                deadline_display = f"до {d}.{m}"
+                time_suffix = ""
+                if "T" in deadline_raw:
+                    time_suffix = " " + deadline_raw.split("T")[1][:5]
+                deadline_display = f"до {d}.{m}{time_suffix}"
             except Exception:
                 deadline_display = f"до {deadline_date}"
         else:
@@ -226,10 +229,11 @@ async def cmd_tasks(msg: Message, user_notion_id: str = "") -> None:
     total = len(items)
 
     def _task_line(it: dict) -> str:
-        line = f"{it['cat_icon']} {it['title']} · {it['status_icon']}"
+        """Форматирует задачу с отступом."""
+        meta = it['status_icon']
         if it.get("deadline_display"):
-            line += f" {it['deadline_display']}"
-        return line
+            meta += f" · {it['deadline_display']}"
+        return f"  {it['cat_icon']} {it['title']}\n       <i>{meta}</i>"
 
     # Строим вывод с группами
     from itertools import groupby
@@ -256,17 +260,16 @@ async def cmd_tasks(msg: Message, user_notion_id: str = "") -> None:
                 lines.append(_task_line(it))
 
     if done_items:
-        lines.append(f"<b>✅ ВЫПОЛНЕНО ({len(done_items)})</b>")
+        lines.append(f"\n<b>✅ ВЫПОЛНЕНО</b> <i>({len(done_items)})</i>")
         for it in done_items:
-            lines.append(f"{it['cat_icon']} <s>{it['title']}</s>")
-        lines.append("")
+            lines.append(f"  {it['cat_icon']} <s>{it['title']}</s>")
 
     if archived_items:
-        lines.append(f"<b>🗄 АРХИВ ({len(archived_items)})</b>")
+        lines.append(f"\n<b>🗄 АРХИВ</b> <i>({len(archived_items)})</i>")
         for it in archived_items:
-            lines.append(f"{it['cat_icon']} <s>{it['title']}</s>")
+            lines.append(f"  {it['cat_icon']} <s>{it['title']}</s>")
 
-    header = f"📋 <b>Все задачи · {total} шт</b>\n\n"
+    header = f"📋 <b>Все задачи · {total} шт</b>\n"
     text = header + "\n".join(lines)
 
     # Telegram лимит ~4096 символов — разбиваем если не влезает
