@@ -154,15 +154,16 @@ async def cmd_tasks(msg: Message, user_notion_id: str = "") -> None:
         # Первый символ категории как иконка (🐾 из "🐾 Коты")
         cat_icon = category[0] if category else "📌"
         pri_icon = _priority_icons.get(priority, "⚪")
+        pri_name = priority if priority in _priority_icons else "Важно"
         task_items.append({
             "cat_icon": cat_icon,
-            "pri_icon": pri_icon,
+            "pri_label": f"{pri_icon} {pri_name}",
             "title": title + repeat_mark,
             "deadline": deadline,
         })
 
     def _task_fmt(it: dict) -> str:
-        line = f"{it['cat_icon']} {it['title']} · {it['pri_icon']}"
+        line = f"{it['cat_icon']} {it['title']} · {it['pri_label']}"
         if it.get("deadline"):
             line += f" · до {it['deadline']}"
         return line
