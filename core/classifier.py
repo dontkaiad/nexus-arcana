@@ -326,6 +326,24 @@ _BUDGET_RE = re.compile(
     re.IGNORECASE,
 )
 
+# Budget v2: управление долгами
+_DEBT_CMD_RE = re.compile(
+    r"(?:закрыла?\s+долг|новый\s+долг|отдала?\s.*долг|погасила?)",
+    re.IGNORECASE,
+)
+
+# Budget v2: управление целями
+_GOAL_CMD_RE = re.compile(
+    r"(?:новая\s+цель|убери\s+цель|достигла?\s+цель|купила?\s.*цель)",
+    re.IGNORECASE,
+)
+
+# Budget v2: ручной лимит ("лимит привычки 15к", "лимит на кафе 10000")
+_LIMIT_OVERRIDE_RE = re.compile(
+    r"лимит\s+(?:на\s+)?(\w+)\s+(\d+[кk]?\d*)",
+    re.IGNORECASE,
+)
+
 # Деактивация записи памяти: "неактуально", "неактуально 1", "неактуально маша"
 _DEACTIVATE_RE = re.compile(r"^\s*неактуально\b", re.IGNORECASE)
 
@@ -484,6 +502,22 @@ async def classify(text: str, tz_offset: int = 3) -> list[dict]:
         logger.info("classify: memory_delete matched, hint=%r", hint)
         return [{"type": "memory_delete", "hint": hint, "text": text}]
 
+    # Budget v2: команды долгов → budget handler (ПЕРЕД budget и memory_save!)
+    if _DEBT_CMD_RE.search(text):
+        logger.info("classify: debt_command matched")
+        return [{"type": "debt_command", "text": text}]
+
+    # Budget v2: команды целей → budget handler
+    if _GOAL_CMD_RE.search(text):
+        logger.info("classify: goal_command matched")
+        return [{"type": "goal_command", "text": text}]
+
+    # Budget v2: ручной лимит → budget handler (ПЕРЕД memory_save "лимит...")
+    m = _LIMIT_OVERRIDE_RE.search(text)
+    if m:
+        logger.info("classify: limit_override matched cat=%s amt=%s", m.group(1), m.group(2))
+        return [{"type": "limit_override", "text": text, "category": m.group(1), "amount": m.group(2)}]
+
     # Быстрый pre-фильтр: показать бюджет
     if _BUDGET_RE.match(text):
         logger.info("classify: budget pattern matched")
@@ -627,16 +661,28 @@ async def process_item(data: Dict[str, Any], original_text: str, msg, clarify: d
             pass
         return ""
 
-    # БЮДЖЕТ
+    # БЮДЖЕТ — v2: всегда Sonnet
     if kind == "budget":
-        from nexus.handlers.finance import build_budget_message
-        budget_msg = await build_budget_message(user_notion_id)
-        if budget_msg:
-            await msg.answer(budget_msg, parse_mode="HTML")
-        else:
-            await msg.answer(
-                "📋 У тебя ещё нет бюджета. Настрой через /budget",
-            )
+        from nexus.handlers.finance import start_budget_analysis
+        await start_budget_analysis(msg, user_notion_id)
+        return ""
+
+    # ДОЛГИ — v2
+    if kind == "debt_command":
+        from nexus.handlers.finance import handle_debt_command
+        await handle_debt_command(msg, user_notion_id)
+        return ""
+
+    # ЦЕЛИ — v2
+    if kind == "goal_command":
+        from nexus.handlers.finance import handle_goal_command
+        await handle_goal_command(msg, user_notion_id)
+        return ""
+
+    # РУЧНОЙ ЛИМИТ — v2
+    if kind == "limit_override":
+        from nexus.handlers.finance import handle_limit_override
+        await handle_limit_override(msg, data.get("category", ""), data.get("amount", "0"), user_notion_id)
         return ""
 
     # ПАМЯТЬ (memory_save)
@@ -754,7 +800,7 @@ async def process_item(data: Dict[str, Any], original_text: str, msg, clarify: d
                 logger.info("finance saved via classifier: category=%s — calling budget check", category)
                 try:
                     from nexus.handlers.finance import _check_budget_limit
-                    await _check_budget_limit(category, msg, user_notion_id)
+                    await _check_budget_limit(category, msg, user_notion_id, amount=amount)
                 except Exception as e:
                     logger.error("budget check error: %s", e, exc_info=True)
             return f"{icon} <b>{sign}{amount:,.0f}₽</b> · <b>{title}</b>\n🏷 {category} <i>{source}</i>"
