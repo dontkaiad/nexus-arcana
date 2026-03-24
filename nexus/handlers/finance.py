@@ -2241,10 +2241,15 @@ BUDGET_SONNET_SYSTEM = (
     "Тон: тёплый, поддерживающий, без менторства. Женский род.\n\n"
     "АЛГОРИТМ РАСЧЁТА (СТРОГО ПО ШАГАМ):\n"
     "Шаг 1: Доход − Фикс = Распределяемые\n"
-    "Шаг 2: Долги ПЕРВЫМИ (сортировать по дедлайну, ближайший первый)\n"
-    "  - Платёж = сумма / месяцев до дедлайна (просрочен → вся сумма)\n"
-    "  - Вычесть из распределяемых\n"
-    "Шаг 3: Оценить остаток после долгов:\n"
+    "Шаг 2: ОДИН ДОЛГ ЗА РАЗ (СТРОГО!):\n"
+    "  - Сортировать долги по дедлайну (ближайший первый)\n"
+    "  - ПРИОРИТЕТНЫЙ ДОЛГ = только ОДИН (ближайший дедлайн)\n"
+    "  - Платёж за приоритетный долг: вся сумма если 1 мес, или сумма/мес до дедлайна\n"
+    "  - Все ОСТАЛЬНЫЕ долги → НЕ включать в расчёт. Писать 'после [имя]'\n"
+    "  - В debts_monthly включить ТОЛЬКО приоритетный долг\n"
+    "  - Остальные долги → в поле 'queued_debts' (информативно, без платежей)\n"
+    "  - Вычесть ТОЛЬКО платёж за приоритетный долг из распределяемых\n"
+    "Шаг 3: Оценить остаток после ОДНОГО долга:\n"
     "  - Остаток >= 30000₽ → НОРМАЛЬНЫЙ МЕСЯЦ → один план\n"
     "  - Остаток < 30000₽ → ТЯЖЁЛЫЙ МЕСЯЦ → ДВА ВАРИАНТА (A и B)\n\n"
     "НОРМАЛЬНЫЙ МЕСЯЦ (один план):\n"
@@ -2264,10 +2269,11 @@ BUDGET_SONNET_SYSTEM = (
     "    - creditor_script: что сказать кредитору (1 предложение)\n"
     "    - relief: когда закроется полностью\n\n"
     "АБСОЛЮТНЫЕ МИНИМУМЫ (нельзя ниже даже в жёстком плане):\n"
-    "  💅 Бьюти — 3000₽ (ногти)\n"
-    "  🎲 Импульсивные — 1000₽ (СДВГ, дофамин)\n"
-    "  🚬 Привычки — макс -10%/мес. В экстренном месяце допустимо больше "
-    "С ПРЕДУПРЕЖДЕНИЕМ: \"СДВГ-риск: сокращение на X% — высокий риск срыва\"\n\n"
+    "  🚬 Привычки — минимум 10,000₽ (СДВГ, невозможно ниже). "
+    "Макс -10%/мес. В экстренном — допустимо больше С ПРЕДУПРЕЖДЕНИЕМ об СДВГ-рисках\n"
+    "  💅 Бьюти — минимум 3,000₽ (ногти)\n"
+    "  🚕 Транспорт — минимум 1,500₽ (СПб, метро)\n"
+    "  🎲 Импульсивные — минимум 1,000₽ (СДВГ, дофамин)\n\n"
     "ОГРАНИЧЕНИЯ:\n"
     "- Лимит с пометкой [ручной] — НЕ ТРОГАТЬ, распределять остаток вокруг него\n"
     "- Коты = ФИКСИРОВАННЫЕ расходы (живые существа!)\n"
@@ -2277,14 +2283,17 @@ BUDGET_SONNET_SYSTEM = (
     "- note/summary/habit_strategy — максимум 15 слов\n"
     "- relief_timeline обязательно если есть долги\n"
     "- НЕ выдумывать деньги, НЕ показывать отрицательные суммы\n"
-    "- НИКОГДА не ставить ВСЕ лимиты в 0₽\n\n"
+    "- НИКОГДА не ставить ВСЕ лимиты в 0₽\n"
+    "- Если savings_from_last_period > 0: 'В прошлом периоде сэкономила X₽ — молодец!' в summary\n\n"
     "Ответ: ТОЛЬКО JSON, без markdown, без пояснений.\n"
     "Схема JSON:\n"
     '{"income": [{"source": "X", "amount": N}], "income_total": N,\n'
     ' "fixed": [{"name": "X", "category": "X", "amount": N}], "fixed_total": N,\n'
     ' "distributable": N,\n'
     ' "debts_monthly": [{"name": "X", "total": N, "monthly": N, "deadline": "X", "months_left": N}],\n'
-    ' "debts_monthly_total": N, "free_after_debts": N,\n'
+    ' "debts_monthly_total": N,\n'
+    ' "queued_debts": [{"name": "X", "total": N, "deadline": "X", "after": "имя приоритетного"}],\n'
+    ' "free_after_debts": N,\n'
     ' "is_tight_month": false,\n'
     ' "variant_a": null or {"label": "Отдать 50к сразу", "debt_payment": N, "remaining": N,\n'
     '   "limits": [{"category": "X", "amount": N}], "limits_total": N,\n'
@@ -2348,12 +2357,16 @@ async def _build_sonnet_input(uid: int, user_notion_id: str) -> str:
             if m:
                 manual_limits[m.group(1).strip()] = True
 
+    # Savings from last period review (if available)
+    savings_bonus = state.get("savings_from_last_period", 0)
+
     context = {
         "user_messages": user_messages,
         "current_date": now.strftime("%d.%m.%Y"),
         "period": f"{period_start} — {period_end}",
         "payday": payday,
         "income_this_period": income_total,
+        "savings_from_last_period": savings_bonus,
         "obligatory": budget.get("обязательные", []),
         "debts": budget.get("долги", []),
         "goals": budget.get("цели", []),
@@ -2891,17 +2904,26 @@ def _format_plan(plan: dict) -> str:
     if distributable:
         lines.append("\n💳 Распределяемые: <b>{:,}₽</b>".format(distributable))
 
-    # Долги
+    # Долги — один приоритетный + очередь
     debts_monthly = plan.get("debts_monthly", plan.get("debts", []))
+    queued = plan.get("queued_debts", [])
     if debts_monthly:
-        debts_total = plan.get("debts_monthly_total", sum(d.get("monthly", d.get("amount", 0)) for d in debts_monthly))
-        lines.append("\n<b>📋 Долги: {:,}₽/мес</b>".format(debts_total))
-        for d in debts_monthly:
-            dl = " · {}".format(d.get("deadline", "")) if d.get("deadline") else ""
-            mon = " {:,}₽/мес".format(d.get("monthly", 0)) if d.get("monthly") else ""
-            left = " ({} мес)".format(d.get("months_left", "?")) if d.get("months_left") else ""
-            lines.append("  {} — {:,}₽{}{} →{}".format(
-                d.get("name", "?"), d.get("total", d.get("amount", 0)), dl, left, mon))
+        d = debts_monthly[0] if debts_monthly else {}
+        dl = d.get("deadline", "")
+        lines.append("\n<b>📋 Долг (приоритет): {} — {:,}₽</b> · дедлайн {}".format(
+            d.get("name", "?"), d.get("total", d.get("amount", 0)), dl or "?"))
+        mon = d.get("monthly", 0)
+        if mon:
+            lines.append("  Платёж: {:,}₽/мес".format(mon))
+    if queued:
+        q_parts = []
+        for q in queued:
+            after = q.get("after", "")
+            q_parts.append("{} {:,}₽ ({})".format(
+                q.get("name", "?"), q.get("total", 0), q.get("deadline", "?")))
+        lines.append("⏳ Следующие: {} — после {}".format(
+            ", ".join(q_parts),
+            debts_monthly[0].get("name", "?") if debts_monthly else "?"))
 
     # Свободные после долгов
     free = plan.get("free_after_debts")
@@ -3141,11 +3163,111 @@ async def _save_memory_entry(key: str, fact: str, user_notion_id: str = "") -> N
         logger.error("_save_memory_entry FAILED: %s for key=%s", e, key)
 
 
-# ── Payday Reminder ──────────────────────────────────────────────────────────
+# ── Payday Review + Reminder ─────────────────────────────────────────────────
+
+
+async def _budget_period_review(user_notion_id: str = "") -> Tuple[str, float]:
+    """Review spending vs limits for the PREVIOUS period. Returns (formatted_text, savings_total)."""
+    payday = await _get_payday()
+    now = datetime.now(MOSCOW_TZ)
+
+    # Calculate PREVIOUS period bounds (the one just ended)
+    if now.day >= payday:
+        # Previous period: payday of prev month → payday-1 of this month
+        if now.month == 1:
+            prev_start = datetime(now.year - 1, 12, payday, tzinfo=MOSCOW_TZ)
+        else:
+            prev_start = datetime(now.year, now.month - 1, payday, tzinfo=MOSCOW_TZ)
+        prev_end = now.replace(day=payday, hour=0, minute=0, second=0, microsecond=0) - timedelta(days=1)
+    else:
+        if now.month <= 2:
+            prev_start = datetime(now.year - 1, now.month + 10, payday, tzinfo=MOSCOW_TZ)
+        else:
+            prev_start = datetime(now.year, now.month - 2, payday, tzinfo=MOSCOW_TZ)
+        if now.month == 1:
+            prev_end = datetime(now.year - 1, 12, payday, tzinfo=MOSCOW_TZ) - timedelta(days=1)
+        else:
+            prev_end = datetime(now.year, now.month - 1, payday, tzinfo=MOSCOW_TZ) - timedelta(days=1)
+
+    period_start_str = prev_start.strftime("%Y-%m-%d")
+    period_end_str = prev_end.strftime("%Y-%m-%d")
+
+    # Get spending for that period
+    from core.config import config
+    from core.notion_client import db_query
+    records = await db_query(config.nexus.db_finance, filter_obj={"and": [
+        {"property": "Тип", "select": {"equals": "🌿 Расход"}},
+        {"property": "Дата", "date": {"on_or_after": period_start_str}},
+        {"property": "Дата", "date": {"on_or_before": period_end_str}},
+    ]}, page_size=500)
+
+    spending_by_cat: Dict[str, float] = {}
+    for r in records:
+        props = r.get("properties", {})
+        amt = props.get("Сумма", {}).get("number") or 0
+        cat_sel = props.get("Категория", {}).get("select")
+        cat = cat_sel.get("name", "Прочее") if cat_sel else "Прочее"
+        spending_by_cat[cat] = spending_by_cat.get(cat, 0) + amt
+
+    # Get limits from Memory
+    mem_db = os.environ.get("NOTION_DB_MEMORY")
+    limits = await _get_limits(mem_db) if mem_db else {}
+
+    # Get debt payments
+    budget_data = await _load_budget_data(user_notion_id)
+    debts = budget_data.get("долги", [])
+
+    # Format review
+    month_name = _RU_MONTHS.get(prev_start.month, str(prev_start.month))
+    lines = ["📊 <b>Ревью за {} ({} → {})</b>".format(
+        month_name, prev_start.strftime("%d.%m"), prev_end.strftime("%d.%m"))]
+
+    total_saved = 0.0
+    cat_lines = []
+    for cat_link, limit_amount in sorted(limits.items(), key=lambda x: -x[1]):
+        # Find matching full category name
+        full_cat = None
+        for c in CATEGORIES:
+            if _cat_link(c) == cat_link or cat_link in _cat_link(c):
+                full_cat = c
+                break
+        if not full_cat:
+            full_cat = cat_link
+
+        spent = spending_by_cat.get(full_cat, 0)
+        diff = limit_amount - spent
+        if diff >= 0:
+            cat_lines.append("  {} {:,.0f} / {:,.0f}₽ — сэкономила {:,.0f}₽ 🟢".format(
+                full_cat, spent, limit_amount, diff))
+            total_saved += diff
+        else:
+            cat_lines.append("  {} {:,.0f} / {:,.0f}₽ — перерасход {:,.0f}₽ 🔴".format(
+                full_cat, spent, limit_amount, abs(diff)))
+            total_saved += diff  # negative
+
+    if cat_lines:
+        lines.append("\n📊 По категориям:")
+        lines.extend(cat_lines)
+
+    if total_saved >= 0:
+        lines.append("\n💰 Итого: сэкономила <b>{:,.0f}₽</b>".format(total_saved))
+    else:
+        lines.append("\n💸 Итого: перерасход <b>{:,.0f}₽</b>".format(abs(total_saved)))
+
+    # Debt info
+    for d in debts:
+        fact = d.get("fact", "")
+        m = _DEBT_RE.search(fact)
+        if m:
+            name = m.group(1).strip()
+            amt = int(re.sub(r'[\s.,]', '', m.group(2)))
+            lines.append("\n📋 Долг {}: осталось {:,.0f}₽".format(name, amt))
+
+    return "\n".join(lines), total_saved
 
 
 async def maybe_payday_reminder(message: Message, user_notion_id: str = "") -> None:
-    """Send payday reminder once per period start."""
+    """Send period review + payday reminder once per period start."""
     payday = await _get_payday()
     if payday <= 1:
         return  # No custom payday set
@@ -3159,9 +3281,20 @@ async def maybe_payday_reminder(message: Message, user_notion_id: str = "") -> N
         return
     state["last_payday_reminder"] = today_str
     state["notion_uid"] = state.get("notion_uid", user_notion_id)
-    _budget_set(uid, state)
+
+    # Generate period review first
+    try:
+        review_text, savings_total = await _budget_period_review(user_notion_id)
+        state["savings_from_last_period"] = savings_total
+        _budget_set(uid, state)
+        await message.answer(review_text, parse_mode="HTML")
+    except Exception as e:
+        logger.error("payday review error: %s", e, exc_info=True)
+        _budget_set(uid, state)
+
+    # Then the reminder
     await message.answer(
-        "📊 <b>Пора обновить бюджет!</b> Новый период начался.",
+        "📊 <b>Пора обновить бюджет на следующий период!</b>",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
             InlineKeyboardButton(text="📊 Обновить", callback_data="budget_recalc_full"),
             InlineKeyboardButton(text="✅ Без изменений", callback_data="msg_hide"),
