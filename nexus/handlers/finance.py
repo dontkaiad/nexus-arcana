@@ -486,6 +486,43 @@ async def _check_budget_limit(category: str, message: Message, user_notion_id: s
     if pct >= 100:
         over = month_total - limit_amount
         parts[0] = f"🚨 {category}: <b>{month_total:,.0f}₽</b> из {limit_amount:,.0f}₽ (+{over:,.0f}₽)"
+        # Импульсивный: overflow из резерва
+        try:
+            impulse_limit = 0.0
+            for ik, iv in limits.items():
+                if "импульсивн" in ik.lower():
+                    impulse_limit = iv
+                    break
+            if impulse_limit > 0:
+                # Считаем суммарное превышение по всем категориям
+                impulse_used = 0.0
+                for lk, lv in limits.items():
+                    if "импульсивн" in lk.lower():
+                        continue
+                    for cname in CATEGORIES:
+                        cl = _cat_link(cname)
+                        if lk in cl or cl in lk:
+                            try:
+                                cat_recs = await db_query(config.nexus.db_finance, filter_obj={"and": [
+                                    {"property": "Тип", "select": {"equals": "💸 Расход"}},
+                                    {"property": "Категория", "select": {"equals": cname}},
+                                    {"property": "Дата", "date": {"on_or_after": month_start}},
+                                    {"property": "Дата", "date": {"on_or_before": today_str}},
+                                ]}, page_size=200)
+                                cs = sum((p["properties"].get("Сумма", {}).get("number") or 0) for p in cat_recs)
+                                if cs > lv:
+                                    impulse_used += (cs - lv)
+                            except Exception:
+                                pass
+                            break
+                impulse_left = impulse_limit - impulse_used
+                if impulse_left > 0:
+                    parts.append(f"  Превышение {over:,.0f}₽ → из импульсивного")
+                    parts.append(f"🎲 Импульсивный: {impulse_used:,.0f} / {impulse_limit:,.0f}₽")
+                else:
+                    parts.append("🚨 Импульсивный бюджет исчерпан!")
+        except Exception as _e:
+            logger.debug("impulse calc: %s", _e)
     elif pct >= 80:
         parts[0] = f"⚠️ {category}: <b>{month_total:,.0f}₽</b> из {limit_amount:,.0f}₽ ({pct:.0f}%)"
 
@@ -1221,6 +1258,16 @@ async def fin_cancel(call: CallbackQuery) -> None:
     await call.answer()
 
 
+@router.callback_query(F.data == "msg_hide")
+async def on_msg_hide(call: CallbackQuery) -> None:
+    """Кнопка 🙈 Скрыть — удалить сообщение."""
+    try:
+        await call.message.delete()
+    except Exception:
+        await call.message.edit_text("🙈")
+    await call.answer()
+
+
 @router.callback_query(F.data.startswith("setlim_"))
 async def on_set_limit(call: CallbackQuery, user_notion_id: str = "") -> None:
     """Обработчик кнопок установки лимита."""
@@ -1852,56 +1899,78 @@ _budget_plan: Dict[int, dict] = {}
 # uid → bot message id (for editing)
 _budget_msg: Dict[int, int] = {}
 
-BUDGET_PARSE_PROMPT = """Ты финансовый советник для человека с СДВГ (женский род).
+HABIT_WARNINGS = [
+    "💡 20к/мес на привычки = 240 000₽/год. Это Samsung Flip за год.",
+    "💡 Пачка сигарет в день = 8 500₽/мес. За год — ноутбук.",
+    "💡 Монстр каждый день = 6 600₽/мес = 79 000₽/год.",
+    "💡 Кола + монстр = 11 000₽/мес. Это больше чем коты.",
+    "💡 Если сократить привычки на 30% — через полгода будет подушка.",
+    "💡 240к/год на привычки — за 3 года это первый взнос на квартиру.",
+    "💡 Одна пачка в два дня вместо одной = 4 250₽ экономии/мес.",
+]
 
-Входной текст (может быть с опечатками, сокращениями, в свободной форме):
+BUDGET_PARSE_PROMPT = """Ты финансовый советник для Кай (женский род, СДВГ).
+
+КОНТЕКСТ:
+- Chapman (Чапман) — марка СИГАРЕТ (не чай!)
+- СДВГ: нужен быстрый дофамин, резкие ограничения → срыв
+- Импульсивный бюджет = резервный фонд на превышения лимитов, НЕ отдельная категория трат
+
+Входной текст (опечатки, сокращения, свободная форма):
 {all_messages}
 
-Извлеки и структурируй:
-1. Доходы (зп, аренда, фриланс и тд)
-2. Фиксированные траты (жилье, коммуналка, подписки, интернет, вода, коты — НЕЛЬЗЯ сократить)
-3. Вариативные траты (привычки, бьюти, транспорт, продукты, кафе — можно оптимизировать)
-4. Долги (кому, сколько, дедлайн)
-5. Цели (что, сколько стоит)
+Доступные категории финансов: {finance_categories}
 
-"к" = тысяч, "млн" = миллионов.
-Диапазон (15-20к) — бери верхнюю границу для безопасности.
-"в год" — раздели на 12. Пример: "впн 6к в год" = 500₽/мес.
+АЛГОРИТМ РАСЧЁТА (строго по порядку):
+1. ДОХОД — все источники
+2. ФИКС = жилье + коммуналка + подписки + интернет + вода + коты (живые существа = фикс). НЕ трогать.
+3. ДОЛГИ = обязательные ежемесячные платежи (сумма_долга / месяцев_до_дедлайна от текущей даты). Просроченный = вся сумма сразу.
+4. СВОБОДНЫЕ = доход - фикс - ежемесячные_платежи_по_долгам
+5. Если СВОБОДНЫЕ <= 0: честно — всё на долги. Минимум на еду. НЕ ВЫДУМЫВАТЬ деньги.
+6. ПОДУШКА = 10% от свободных (минимум 2000₽). Если невозможно — 0₽ и объяснить когда получится.
+7. ЛИМИТЫ = свободные - подушка, по КАЖДОЙ вариативной категории
+8. ИМПУЛЬСИВНЫЙ = 3-5к из лимитов. Резерв на превышения, НЕ отдельная категория.
+9. ЦЕЛИ = после долгов, подушки и лимитов. Если 0₽ — честно.
 
-ЗАТЕМ — оптимальный финансовый план. ПРАВИЛА:
-- Фикс не трогать
-- Коты = ФИКС (живые существа)
+"к" = тысяч, "млн" = миллионов. Диапазон (15-20к) → верхняя граница. "в год" → /12.
+
+ПРАВИЛА ЛИМИТОВ:
 - Привычки: -10% макс от текущего (СДВГ = резкий отказ → срыв)
-- ОБЯЗАТЕЛЬНО 3-5к "импульсивный бюджет" — дофамин без вины (СДВГ)
-- ДОЛГИ ПРИОРИТЕТНЕЕ ЦЕЛЕЙ. Дедлайн → обязательный платёж
-- Цели: дешёвые сначала (мотивация), подушка минимум всегда
-- Дорогие цели — реалистично (не мучить)
-- Остаток >= 0. Не хватает — сокращай цели, не лимиты
-- Объясни КАЖДОЕ решение
+- По КАЖДОЙ категории из доступных предложить лимит
+- Сумма лимитов + подушка + импульсивный <= свободные
+- Мало денег → сокращать цели и подушку, НЕ еду и транспорт
+- НЕ советовать "пить/курить меньше" → "превышения списываются из импульсивного"
 
-Ответ СТРОГО в JSON (без markdown):
+ПРАВИЛА ДОЛГОВ:
+- ПРИОРИТЕТНЕЕ ВСЕХ ЦЕЛЕЙ И ПОДУШКИ
+- Показать КОГДА станет легче: "После {{месяц}} долг {{имя}} закрыт → +{{сумма}}₽/мес"
+
+ПРАВИЛА ЦЕЛЕЙ:
+- ТОЛЬКО после долгов и подушки. Дешёвые первыми (мотивация СДВГ).
+- Дорогие (квартира) — реалистично.
+
+Ответ СТРОГО в JSON (без markdown, без ```):
 {{
   "income": [{{"source": "ЗП", "amount": 100000}}],
   "income_total": 115000,
-  "fixed": [
-    {{"name": "Съём квартиры", "category": "🏠 Жилье", "amount": 20000}},
-    {{"name": "Корм коты", "category": "🐾 Коты", "amount": 5000}}
-  ],
+  "fixed": [{{"name": "Съём", "category": "🏠 Жилье", "amount": 20000}}],
   "fixed_total": 54200,
+  "debts_monthly": [
+    {{"name": "Вика", "total": 50000, "deadline": "апрель 2026", "monthly": 50000, "months_left": 1}}
+  ],
+  "debts_monthly_total": 74667,
+  "free_after_debts": 40000,
+  "savings": {{"name": "Подушка", "amount": 3000, "note": "10% от свободных"}},
   "limits": [
-    {{"category": "🚬 Привычки", "amount": 18000, "current": 20000, "change": "-10%", "note": "плавно"}}
+    {{"category": "🚬 Привычки", "amount": 17685, "current": 19650, "change": "-10%", "note": "..."}}
   ],
+  "limits_total": 35000,
   "impulse_budget": 5000,
-  "impulse_note": "Дофамин — трать без вины",
-  "debts": [
-    {{"name": "Вика", "amount": 50000, "deadline": "апрель 2026", "monthly": 50000, "note": "разом с ЗП", "priority": 1}}
-  ],
-  "debts_total": 190000,
-  "goals": [
-    {{"name": "Подушка", "total": 200000, "monthly": 3000, "months": 67, "priority": 1}}
-  ],
+  "impulse_note": "Резерв на превышения лимитов",
+  "goals": [{{"name": "Телефон", "monthly": 0, "total": 100000, "note": "после долгов"}}],
+  "relief_timeline": "После апреля: -50к долга → +50к свободных. К сентябрю все долги закрыты.",
   "summary": "2-3 предложения: стратегия и прогноз",
-  "habit_strategy": "Стратегия сокращения привычек"
+  "habit_strategy": "2-3 предложения (без нравоучений, только математика)"
 }}"""
 
 
@@ -1916,7 +1985,7 @@ async def start_budget_setup(message: Message, user_notion_id: str = "") -> None
 
     sent = await message.answer(
         "💰 <b>Давай настроим бюджет!</b>\n\n"
-        "Напиши всё что знаешь о своих финансах — я сама разберу.\n"
+        "Напиши всё что знаешь о своих финансах — я сам разберу.\n"
         "Можно в свободной форме, например:\n\n"
         "<i>зп 100к, аренда 15к\n"
         "квартира 20к, коммуналка 7к, своя кв 4к\n"
@@ -2084,7 +2153,9 @@ async def _run_budget_analysis(message: Message, uid: int) -> None:
     )
     _budget_msg[uid] = loading.message_id
 
-    prompt = BUDGET_PARSE_PROMPT.format(all_messages=all_text)
+    # Получить список категорий из БД финансов
+    finance_cats_str = ", ".join(CATEGORIES) if CATEGORIES else "неизвестно"
+    prompt = BUDGET_PARSE_PROMPT.format(all_messages=all_text, finance_categories=finance_cats_str)
     try:
         from core.config import config as _cfg
         raw = await ask_claude(prompt, model=_cfg.model_sonnet, max_tokens=4096)
@@ -2164,10 +2235,33 @@ def _format_plan(plan: dict) -> str:
             cat_emoji = f.get("category", "").split()[0] if f.get("category") else "📌"
             lines.append("  {} {} — {:,}₽".format(cat_emoji, f.get("name", "?"), f.get("amount", 0)))
 
+    # Долги с ежемесячными платежами
+    debts_monthly = plan.get("debts_monthly", plan.get("debts", []))
+    if debts_monthly:
+        debts_total = plan.get("debts_monthly_total", sum(d.get("monthly", d.get("amount", 0)) for d in debts_monthly))
+        lines.append("\n<b>📋 Долги: {:,}₽/мес</b>".format(debts_total))
+        for d in debts_monthly:
+            dl = " · {}".format(d["deadline"]) if d.get("deadline") else ""
+            mon = " {:,}₽/мес".format(d["monthly"]) if d.get("monthly") else ""
+            left = " ({} мес)".format(d["months_left"]) if d.get("months_left") else ""
+            lines.append("  {} — {:,}₽{}{} →{}".format(d["name"], d.get("total", d.get("amount", 0)), dl, left, mon))
+
+    # Свободные после долгов
+    free = plan.get("free_after_debts")
+    if free is not None:
+        lines.append("\n💳 Свободных после долгов: <b>{:,}₽</b>".format(free))
+
+    # Подушка
+    savings = plan.get("savings", {})
+    if savings and savings.get("amount", 0) > 0:
+        lines.append("\n💰 Подушка: <b>{:,}₽/мес</b>".format(savings["amount"]))
+        if savings.get("note"):
+            lines.append("  <i>{}</i>".format(savings["note"]))
+
     # Лимиты
     limits = plan.get("limits", [])
     if limits:
-        limits_total = sum(l.get("amount", 0) for l in limits)
+        limits_total = plan.get("limits_total", sum(l.get("amount", 0) for l in limits))
         lines.append("\n<b>📊 Лимиты: {:,}₽</b>".format(limits_total))
         for l in limits:
             change = ""
@@ -2182,27 +2276,20 @@ def _format_plan(plan: dict) -> str:
     impulse = plan.get("impulse_budget", 0)
     if impulse:
         lines.append("\n<b>🎲 Импульсивный: {:,}₽</b>".format(impulse))
-        lines.append("  <i>{}</i>".format(plan.get("impulse_note", "Трать без вины!")))
-
-    # Долги
-    debts = plan.get("debts", [])
-    if debts:
-        debts_total = plan.get("debts_total", sum(d.get("amount", 0) for d in debts))
-        lines.append("\n<b>📋 Долги (приоритет!): {:,}₽</b>".format(debts_total))
-        for d in debts:
-            dl = " · {}".format(d["deadline"]) if d.get("deadline") else ""
-            mon = " · {:,}₽/мес".format(d["monthly"]) if d.get("monthly") else ""
-            lines.append("  {} — {:,}₽{}{}".format(d["name"], d["amount"], dl, mon))
+        lines.append("  <i>{}</i>".format(plan.get("impulse_note", "Резерв на превышения лимитов")))
 
     # Цели
     goals = plan.get("goals", [])
     if goals:
         lines.append("\n<b>🎯 Цели (после долгов):</b>")
         for g in goals:
-            mon = " {:,}₽/мес →".format(g["monthly"]) if g.get("monthly") else ""
-            months = " {} мес".format(g["months"]) if g.get("months") else ""
-            lines.append("  {} —{}{} (всего {:,}₽)".format(
-                g["name"], mon, months, g.get("total", 0)))
+            mon = " {:,}₽/мес".format(g["monthly"]) if g.get("monthly") else " 0₽/мес"
+            note = " — <i>{}</i>".format(g["note"]) if g.get("note") else ""
+            lines.append("  {} — {:,}₽ ·{}{}".format(g["name"], g.get("total", 0), mon, note))
+
+    # Timeline
+    if plan.get("relief_timeline"):
+        lines.append("\n📅 <i>{}</i>".format(plan["relief_timeline"]))
 
     # Summary
     if plan.get("summary"):
@@ -2285,10 +2372,19 @@ async def _save_budget_plan(message: Message, uid: int) -> None:
             notion_uid,
         )
 
-    # Долги
-    for d in plan.get("debts", []):
+    # Подушка
+    savings = plan.get("savings", {})
+    if savings and savings.get("amount", 0) > 0:
+        await _save_memory_entry(
+            "цель_подушка",
+            "цель: 💰 Подушка — 100000₽ · откладываю {}₽/мес".format(savings["amount"]),
+            notion_uid,
+        )
+
+    # Долги (поддержка и debts_monthly и debts)
+    for d in plan.get("debts_monthly", plan.get("debts", [])):
         name = d["name"]
-        amt = d["amount"]
+        amt = d.get("total", d.get("amount", 0))
         dl = d.get("deadline", "")
         dl_part = " · дедлайн: {}".format(dl) if dl else ""
         mon_part = " · платёж: {}₽/мес".format(d["monthly"]) if d.get("monthly") else ""
