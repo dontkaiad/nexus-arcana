@@ -8,6 +8,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Dict, List, Optional
 
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
+from nexus.handlers.utils import react
 
 from core.claude_client import ask_claude
 from core.notion_client import note_add, get_db_options, log_error, update_page, query_pages
@@ -213,6 +214,8 @@ async def _save_note(
     result = await note_add(text=text, tags=tags, date=date, user_notion_id=user_notion_id)
     tags_str = ", ".join(tags) if tags else "нет"
     reply = f"💡 Заметка сохранена! Теги: {tags_str}" if result else "⚠️ Ошибка записи в Notion."
+    if result:
+        await react(message, "📝")
     if edit:
         await message.edit_text(reply)
     else:
