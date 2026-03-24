@@ -1208,7 +1208,18 @@ async def task_complete(call: CallbackQuery) -> None:
             title_line = f"\n✅ {task_title} — выполнено" if task_title else "\n✅ Выполнено"
             await call.answer("✅ Записано!")
             await react(call, "🎉")
-            await call.message.reply(f"{phrase}{title_line}")
+            # Стрик
+            streak_line = ""
+            try:
+                from nexus.handlers.streaks import update_streak, format_streak_msg
+                tz = await _get_user_tz(uid) or 3
+                streak_data = await update_streak(uid, tz)
+                if streak_data:
+                    streak_line = "\n" + format_streak_msg(
+                        streak_data["streak"], streak_data["best"], streak_data.get("is_new_best", False))
+            except Exception as e:
+                logger.debug("streak update error: %s", e)
+            await call.message.reply(f"{phrase}{title_line}{streak_line}")
         else:
             await call.answer("⚠️ Ошибка обновления", show_alert=True)
 
