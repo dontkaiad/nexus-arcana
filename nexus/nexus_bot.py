@@ -128,7 +128,7 @@ async def cmd_help(msg: Message, user_notion_id: str = "") -> None:
         "  <code>/memory</code> — вся память по категориям\n"
         "  <code>/memory коты</code> — только нужная категория\n\n"
 
-        "🧠 <b>СДВГ</b>\n"
+        "💜 <b>СДВГ</b>\n"
         "Факты о паттернах, триггерах и стратегиях — в категории СДВГ.\n"
         "При сохранении факта — персональный совет от Sonnet.\n"
         "Еженедельный дайджест: 2 случайных факта по воскресеньям.\n"
@@ -850,7 +850,14 @@ async def main() -> None:
             id="adhd_digest_weekly",
             replace_existing=True,
         )
-    await restore_reminders_on_startup()
+    # restore_reminders планируем ПОСЛЕ старта polling,
+    # иначе бот не может отправлять сообщения (missed reminders)
+    import asyncio as _asyncio
+
+    async def _on_startup(_bot) -> None:
+        await restore_reminders_on_startup()
+
+    dp.startup.register(_on_startup)
     await dp.start_polling(bot, allowed_updates=["message", "callback_query"])
 
 
