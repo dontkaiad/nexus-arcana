@@ -7,6 +7,7 @@ from typing import Dict
 
 from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery
+from nexus.handlers.utils import react
 
 import core.memory as mem
 from core.claude_client import ask_claude
@@ -534,6 +535,7 @@ async def cb_mem_auto_yes(call: CallbackQuery) -> None:
     result = await page_create(db_id, props)
     if result:
         cat_label = f" [{category}]" if category else ""
+        await react(call, "🧠")
         await call.message.edit_text(f"🧠 Запомнил{cat_label}: {fact}")
     else:
         await call.message.edit_text("⚠️ Ошибка записи в Notion")
