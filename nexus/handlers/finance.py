@@ -2027,20 +2027,33 @@ async def handle_budget_setup_text(message: Message, user_notion_id: str = "") -
         await message.answer("❌ Настройка бюджета отменена.")
         return True
 
-    # "готово" → запустить анализ
+    # "готово" → запустить анализ из накопленного буфера
     if text.lower() in ("готово", "готов", "всё", "все", "давай", "считай", "поехали"):
         if not _budget_buf[uid]:
-            await message.answer("⚠️ Ты ещё ничего не написала. Напиши данные о финансах.")
+            await message.answer("⚠️ Ты ещё ничего не написал. Напиши данные о финансах.")
             return True
         await _run_budget_analysis(message, uid)
         return True
 
-    # Копим в буфер, ставим реакцию
+    # Добавляем в буфер
     _budget_buf[uid].append(text)
-    try:
-        await message.react([{"type": "emoji", "emoji": "👀"}])
-    except Exception:
-        pass  # Реакции могут быть недоступны
+
+    # Если сообщение содержит числа (= финансовые данные) и достаточно длинное — сразу анализ
+    has_numbers = bool(re.search(r'\d{3,}', text))
+    is_substantial = len(text) > 30 and has_numbers
+    if is_substantial:
+        # Ставим реакцию и сразу запускаем анализ
+        try:
+            await message.react([{"type": "emoji", "emoji": "🔍"}])
+        except Exception:
+            pass
+        await _run_budget_analysis(message, uid)
+    else:
+        # Короткое сообщение — копим, ждём ещё
+        try:
+            await message.react([{"type": "emoji", "emoji": "👀"}])
+        except Exception:
+            pass
     return True
 
 
@@ -2051,8 +2064,8 @@ async def on_budget_go(call: CallbackQuery) -> None:
     if uid not in _budget_buf or not _budget_buf[uid]:
         await call.answer("⚠️ Сначала напиши данные о финансах!", show_alert=True)
         return
+    await call.answer("🔍 Считаю...")  # СНАЧАЛА ответить, потом долгая операция
     await _run_budget_analysis(call.message, uid)
-    await call.answer()
 
 
 @router.callback_query(F.data == "bsetup_accept")
@@ -2063,8 +2076,8 @@ async def on_budget_accept(call: CallbackQuery) -> None:
     if not plan:
         await call.answer("⚠️ Сессия устарела — /budget заново", show_alert=True)
         return
+    await call.answer("💾 Сохраняю...")
     await _save_budget_plan(call.message, uid)
-    await call.answer()
 
 
 @router.callback_query(F.data == "bsetup_recalc")
@@ -2074,9 +2087,9 @@ async def on_budget_recalc(call: CallbackQuery) -> None:
     if uid not in _budget_buf:
         await call.answer("⚠️ Сессия устарела — /budget заново", show_alert=True)
         return
+    await call.answer("🔍 Пересчитываю...")
     _budget_msg[uid] = call.message.message_id
     await _run_budget_analysis(call.message, uid)
-    await call.answer()
 
 
 @router.callback_query(F.data == "bsetup_adjust")
@@ -2159,12 +2172,18 @@ async def _run_budget_analysis(message: Message, uid: int) -> None:
     try:
         from core.config import config as _cfg
         raw = await ask_claude(prompt, model=_cfg.model_sonnet, max_tokens=4096)
+        if not raw or not raw.strip():
+            raise ValueError("Empty response from Sonnet")
         raw = raw.strip()
-        if raw.startswith("```"):
-            raw = re.sub(r'^```\w*\n?', '', raw)
-            raw = re.sub(r'\n?```$', '', raw)
+        logger.info("Sonnet budget raw response length: %d chars", len(raw))
+        # Извлечь JSON из ответа — Sonnet может обернуть в ```json...``` или добавить текст
+        json_match = re.search(r'\{[\s\S]*\}', raw)
+        if json_match:
+            raw = json_match.group(0)
         plan = json.loads(raw)
         _budget_plan[uid] = plan
+    except json.JSONDecodeError as e:
+        logger.error("Sonnet budget JSON parse failed: %s\nRaw (first 500): %s", e, raw[:500] if raw else "EMPTY")
     except Exception as e:
         logger.error("Sonnet budget analysis failed: %s", e)
         await loading.edit_text(
