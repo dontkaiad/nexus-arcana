@@ -2239,33 +2239,72 @@ def _budget_del(uid: int) -> None:
 BUDGET_SONNET_SYSTEM = (
     "Ты финансовый аналитик. Пользователь — Кай, женщина с СДВГ.\n"
     "Тон: тёплый, поддерживающий, без менторства. Женский род.\n\n"
-    "ПРАВИЛА РАСЧЁТА:\n"
-    "Доход − Обязательные = Распределяемое\n"
-    "1) Долги (приоритет #1)\n"
-    "2) Подушка + Цели\n"
-    "3) Лимиты по категориям\n"
-    "4) Импульсивные (ВСЕГДА > 0, минимум 2000₽)\n\n"
+    "АЛГОРИТМ РАСЧЁТА (СТРОГО ПО ШАГАМ):\n"
+    "Шаг 1: Доход − Фикс = Распределяемые\n"
+    "Шаг 2: Долги ПЕРВЫМИ (сортировать по дедлайну, ближайший первый)\n"
+    "  - Платёж = сумма / месяцев до дедлайна (просрочен → вся сумма)\n"
+    "  - Вычесть из распределяемых\n"
+    "Шаг 3: Оценить остаток после долгов:\n"
+    "  - Остаток >= 30000₽ → НОРМАЛЬНЫЙ МЕСЯЦ → один план\n"
+    "  - Остаток < 30000₽ → ТЯЖЁЛЫЙ МЕСЯЦ → ДВА ВАРИАНТА (A и B)\n\n"
+    "НОРМАЛЬНЫЙ МЕСЯЦ (один план):\n"
+    "  Из остатка: лимиты по категориям → подушка → цели → импульсивные\n"
+    "  is_tight_month: false, variant_a и variant_b: null\n\n"
+    "ТЯЖЁЛЫЙ МЕСЯЦ (два варианта):\n"
+    "  is_tight_month: true\n"
+    "  variant_a: \"Отдать долг сразу\"\n"
+    "    - Полная сумма долга вычитается\n"
+    "    - Жёсткий но РЕАЛЬНЫЙ план из маленького остатка\n"
+    "    - adhd_survival_plan: КОНКРЕТНЫЙ план как пережить месяц\n"
+    "      (что покупать, где экономить, рецепты, замены — НЕ абстракции)\n"
+    "    - relief: когда станет легче (\"С мая +50к свободных!\")\n"
+    "  variant_b: \"Рассрочка\"\n"
+    "    - Предложить разбить долг (50к → 25к+25к)\n"
+    "    - Комфортный план из большего остатка\n"
+    "    - creditor_script: что сказать кредитору (1 предложение)\n"
+    "    - relief: когда закроется полностью\n\n"
+    "АБСОЛЮТНЫЕ МИНИМУМЫ (нельзя ниже даже в жёстком плане):\n"
+    "  💅 Бьюти — 3000₽ (ногти)\n"
+    "  🎲 Импульсивные — 1000₽ (СДВГ, дофамин)\n"
+    "  🚬 Привычки — макс -10%/мес. В экстренном месяце допустимо больше "
+    "С ПРЕДУПРЕЖДЕНИЕМ: \"СДВГ-риск: сокращение на X% — высокий риск срыва\"\n\n"
     "ОГРАНИЧЕНИЯ:\n"
     "- Лимит с пометкой [ручной] — НЕ ТРОГАТЬ, распределять остаток вокруг него\n"
     "- Коты = ФИКСИРОВАННЫЕ расходы (живые существа!)\n"
     "- Привычки: Chapman = СИГАРЕТЫ (не чай!). Детализируй в habit_strategy "
     "(сигареты, кола, монстр) но итоговый лимит = одна строка 🚬 Привычки\n"
-    "- Привычки: макс снижение -10%/мес (СДВГ → срыв при резком)\n"
-    "- Импульсивные ВСЕГДА > 0\n"
-    "- Поля note/summary/habit_strategy — максимум 15 слов каждое\n"
+    "- Импульсивные ВСЕГДА > 0 (мин 1000₽)\n"
+    "- note/summary/habit_strategy — максимум 15 слов\n"
     "- relief_timeline обязательно если есть долги\n"
-    "- Не выдумывать деньги, отрицательные суммы не показывать\n\n"
+    "- НЕ выдумывать деньги, НЕ показывать отрицательные суммы\n"
+    "- НИКОГДА не ставить ВСЕ лимиты в 0₽\n\n"
     "Ответ: ТОЛЬКО JSON, без markdown, без пояснений.\n"
     "Схема JSON:\n"
-    '{"income": [{"source": "ЗП", "amount": N}], "income_total": N,\n'
-    ' "fixed": [{"name": "X", "category": "🏠 Жилье", "amount": N}], "fixed_total": N,\n'
+    '{"income": [{"source": "X", "amount": N}], "income_total": N,\n'
+    ' "fixed": [{"name": "X", "category": "X", "amount": N}], "fixed_total": N,\n'
+    ' "distributable": N,\n'
     ' "debts_monthly": [{"name": "X", "total": N, "monthly": N, "deadline": "X", "months_left": N}],\n'
     ' "debts_monthly_total": N, "free_after_debts": N,\n'
+    ' "is_tight_month": false,\n'
+    ' "variant_a": null or {"label": "Отдать 50к сразу", "debt_payment": N, "remaining": N,\n'
+    '   "limits": [{"category": "X", "amount": N}], "limits_total": N,\n'
+    '   "impulse_budget": N, "savings": {"amount": N, "note": "X"},\n'
+    '   "adhd_survival_plan": "КОНКРЕТНЫЙ план: что купить, где сэкономить, как не сорваться",\n'
+    '   "relief": "С мая +50к свободных!",\n'
+    '   "warning": "СДВГ-риск: привычки -30%, высокий риск срыва" or null},\n'
+    ' "variant_b": null or {"label": "25к сейчас + 25к в мае", "debt_payment": N, "remaining": N,\n'
+    '   "limits": [{"category": "X", "amount": N}], "limits_total": N,\n'
+    '   "impulse_budget": N, "savings": {"amount": N, "note": "X"},\n'
+    '   "creditor_script": "Что сказать кредитору",\n'
+    '   "relief": "Долг закроется в мае"},\n'
     ' "savings": {"amount": N, "note": "X"},\n'
-    ' "limits": [{"category": "🚬 Привычки", "amount": N, "current": N, "change": "-10%", "manual": false}],\n'
+    ' "limits": [{"category": "X", "amount": N, "current": N, "change": "X", "manual": false}],\n'
     ' "limits_total": N, "impulse_budget": N,\n'
     ' "goals": [{"name": "X", "monthly": N, "total": N, "starts_after": "X or null"}],\n'
-    ' "relief_timeline": "X", "summary": "X", "habit_strategy": "X"}'
+    ' "relief_timeline": "X", "summary": "X", "habit_strategy": "X"}\n'
+    "ВАЖНО: При нормальном месяце variant_a=null, variant_b=null, заполнить limits/savings/impulse_budget на верхнем уровне.\n"
+    "При тяжёлом месяце limits/savings/impulse_budget на верхнем уровне = null, "
+    "заполнить ВНУТРИ variant_a и variant_b."
 )
 
 
@@ -2337,12 +2376,17 @@ _BUDGET_PARSE_PROMPT_LEGACY = """Финансовый советник. Поль
 РАСЧЁТ:
 1. ДОХОД — все источники. "к"=тысяч, "млн"=миллионов, "в год"→/12. Диапазон→верхняя граница.
 2. ФИКС = жилье+коммуналка+подписки+интернет+вода+коты(живые существа). Не трогать.
-3. ДОЛГИ = сумма/месяцев_до_дедлайна. Просрочен → вся сумма. ПРИОРИТЕТНЕЕ ЦЕЛЕЙ.
-4. СВОБОДНЫЕ = доход - фикс - платежи_по_долгам. Если <=0 → честно сказать.
-5. ПОДУШКА = 10% свободных (мин 2000₽, или 0₽ если нереально).
-6. ЛИМИТЫ по каждой вариативной категории. Сумма <= свободные - подушка - импульсивный.
-7. ИМПУЛЬСИВНЫЙ = 3-5к. Резерв на превышения лимитов (НЕ отдельная категория трат).
-8. ЦЕЛИ = остаток после всего. Если 0₽ → указать КОГДА начнём копить.
+3. ДОЛГИ: сортировать по дедлайну, ближайший первый. Платёж = сумма/месяцев_до_дедлайна.
+4. РАСПРЕДЕЛЯЕМЫЕ = доход - фикс. Вычесть долги первыми.
+5. Если остаток после долгов >= 30к → НОРМАЛЬНЫЙ МЕСЯЦ (is_tight_month: false)
+   Если остаток < 30к → ТЯЖЁЛЫЙ МЕСЯЦ (is_tight_month: true) → ДВА ВАРИАНТА:
+   variant_a: отдать долг сразу, жёсткий план + adhd_survival_plan
+   variant_b: рассрочка, комфортный план + creditor_script
+6. ЛИМИТЫ по каждой вариативной категории из остатка.
+7. ИМПУЛЬСИВНЫЙ — минимум 1000₽. ВСЕГДА > 0.
+8. ПОДУШКА — по возможности. ЦЕЛИ — из остатка или "после долгов".
+АБСОЛЮТНЫЕ МИНИМУМЫ: 💅 Бьюти 3000₽, 🎲 Импульсивные 1000₽.
+НИКОГДА: не ставить ВСЕ лимиты в 0₽, не показывать отрицательные.
 
 ПРАВИЛА:
 - Привычки (сигареты+кола+энергетики) = ОДНА категория "🚬 Привычки". НЕ разбивать!
@@ -2359,14 +2403,25 @@ JSON (без markdown):
   "income_total": 115000,
   "fixed": [{{"name": "Съём", "category": "🏠 Жилье", "amount": 20000}}],
   "fixed_total": 54200,
+  "distributable": 62716,
   "debts_monthly": [{{"name": "Вика", "total": 50000, "deadline": "апрель 2026", "monthly": 50000, "months_left": 1}}],
   "debts_monthly_total": 50000,
-  "free_after_debts": 12800,
-  "savings": {{"amount": 2000, "note": "10% свободных"}},
-  "limits": [{{"category": "🚬 Привычки", "amount": 17685, "current": 19650, "change": "-10%"}}],
-  "limits_total": 35000,
-  "impulse_budget": 4000,
-  "impulse_note": "Резерв на превышения",
+  "free_after_debts": 12716,
+  "is_tight_month": true,
+  "variant_a": {{"label": "Отдать 50к сразу", "debt_payment": 50000, "remaining": 12716,
+    "limits": [{{"category": "🚬 Привычки", "amount": 9000}}], "limits_total": 11716,
+    "impulse_budget": 1000, "savings": {{"amount": 0, "note": "тяжёлый месяц"}},
+    "adhd_survival_plan": "Продукты 6к: закупка в Ленте 1.5к/нед. Без кафе. Запас лапши на ленивые дни.",
+    "warning": "СДВГ-риск: привычки -50%", "relief": "С мая +50к свободных!"}},
+  "variant_b": {{"label": "25к сейчас + 25к в мае", "debt_payment": 25000, "remaining": 37716,
+    "limits": [{{"category": "🚬 Привычки", "amount": 17685}}], "limits_total": 35716,
+    "impulse_budget": 2000, "savings": {{"amount": 0, "note": "после долгов"}},
+    "creditor_script": "Вика, могу 25к сейчас и 25к в мае — ок?",
+    "relief": "Долг закроется в мае"}},
+  "savings": null,
+  "limits": null,
+  "limits_total": null,
+  "impulse_budget": null,
   "goals": [{{"name": "Телефон", "monthly": 0, "total": 100000, "starts_after": "сентябрь 2026"}}],
   "relief_timeline": "Апрель: -50к Вика. Сентябрь: все долги закрыты → копим.",
   "summary": "Макс 2 предложения",
@@ -2535,6 +2590,60 @@ async def on_budget_recalc_full(call: CallbackQuery) -> None:
     await start_budget_analysis(call.message, notion_uid)
 
 
+@router.callback_query(F.data.in_({"bsetup_variant_a", "bsetup_variant_b"}))
+async def on_budget_variant_choice(call: CallbackQuery) -> None:
+    """Кай выбрала вариант А или Б при тяжёлом месяце."""
+    uid = call.from_user.id
+    state = _budget_get(uid)
+    if not state or not state.get("plan"):
+        await call.answer("⚠️ Сессия устарела — /budget заново", show_alert=True)
+        return
+    plan = state["plan"]
+    chosen_key = "variant_a" if call.data == "bsetup_variant_a" else "variant_b"
+    variant = plan.get(chosen_key)
+    if not variant:
+        await call.answer("⚠️ Вариант не найден", show_alert=True)
+        return
+
+    label = "А" if chosen_key == "variant_a" else "Б"
+    await call.answer("✅ Вариант {} выбран!".format(label))
+
+    # Merge variant into top-level plan for saving
+    plan["limits"] = variant.get("limits", [])
+    plan["limits_total"] = variant.get("limits_total", 0)
+    plan["impulse_budget"] = variant.get("impulse_budget", 0)
+    plan["savings"] = variant.get("savings", {})
+    plan["chosen_variant"] = chosen_key
+    plan["debts_monthly_total"] = variant.get("debt_payment", plan.get("debts_monthly_total", 0))
+    plan["free_after_debts"] = variant.get("remaining", 0)
+    # Clear variants so _save_budget_plan uses top-level data
+    plan["variant_a"] = None
+    plan["variant_b"] = None
+    plan["is_tight_month"] = False
+
+    state["plan"] = plan
+    state["state"] = "has_plan"
+    _budget_set(uid, state)
+
+    # Show chosen plan with accept button
+    plan_text = "✅ <b>Вариант {} выбран</b>\n\n".format(label) + _format_plan(plan)
+    buttons = [[
+        InlineKeyboardButton(text="✅ Принять", callback_data="bsetup_accept"),
+        InlineKeyboardButton(text="✏️ Изменить", callback_data="bsetup_adjust"),
+        InlineKeyboardButton(text="🔄 Пересчитать", callback_data="bsetup_recalc"),
+    ]]
+    try:
+        await call.message.edit_text(
+            plan_text, parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons),
+        )
+    except Exception:
+        await call.message.answer(
+            plan_text, parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons),
+        )
+
+
 @router.callback_query(F.data.startswith("bsetup_prio_"))
 async def on_budget_priority_goal(call: CallbackQuery) -> None:
     """Выбор приоритетной цели — пересортировать."""
@@ -2654,11 +2763,25 @@ async def _run_budget_analysis(message: Message, uid: int) -> None:
 
     # Показать план + кнопки выбора приоритетной цели (если есть)
     plan_text = _format_plan(plan)
-    buttons = [[
-        InlineKeyboardButton(text="✅ Принять", callback_data="bsetup_accept"),
-        InlineKeyboardButton(text="✏️ Изменить", callback_data="bsetup_adjust"),
-        InlineKeyboardButton(text="🔄 Пересчитать", callback_data="bsetup_recalc"),
-    ]]
+
+    is_tight = plan.get("is_tight_month", False) and plan.get("variant_a") and plan.get("variant_b")
+
+    if is_tight:
+        # Тяжёлый месяц → кнопки выбора варианта
+        buttons = [[
+            InlineKeyboardButton(text="🅰️ Вариант А", callback_data="bsetup_variant_a"),
+            InlineKeyboardButton(text="🅱️ Вариант Б", callback_data="bsetup_variant_b"),
+        ], [
+            InlineKeyboardButton(text="✏️ Изменить", callback_data="bsetup_adjust"),
+            InlineKeyboardButton(text="🔄 Пересчитать", callback_data="bsetup_recalc"),
+        ]]
+    else:
+        # Нормальный месяц → стандартные кнопки
+        buttons = [[
+            InlineKeyboardButton(text="✅ Принять", callback_data="bsetup_accept"),
+            InlineKeyboardButton(text="✏️ Изменить", callback_data="bsetup_adjust"),
+            InlineKeyboardButton(text="🔄 Пересчитать", callback_data="bsetup_recalc"),
+        ]]
 
     # Кнопки приоритетных целей
     goals = plan.get("goals", [])
@@ -2691,6 +2814,58 @@ async def _run_budget_analysis(message: Message, uid: int) -> None:
         _budget_set(uid, state)
 
 
+def _format_limits_block(limits: list, limits_total: int = 0) -> list:
+    """Format limits into lines."""
+    lines = []
+    if not limits:
+        return lines
+    total = limits_total or sum(l.get("amount", 0) for l in limits)
+    lines.append("<b>📊 Лимиты: {:,}₽</b>".format(total))
+    for l in limits:
+        change = " ({})".format(l["change"]) if l.get("change") else ""
+        amt = l.get("amount", 0)
+        manual = " 🔒" if l.get("manual") else ""
+        lines.append("  {} — {:,}₽{}{}".format(l.get("category", "?"), amt, change, manual))
+    return lines
+
+
+def _format_variant(v: dict, label: str) -> list:
+    """Format a single variant (A or B) block."""
+    lines = []
+    lines.append("\n━━━ {} ━━━".format(label))
+    remaining = v.get("remaining", 0)
+    debt_pay = v.get("debt_payment", 0)
+    if debt_pay:
+        lines.append("📋 Платёж: {:,}₽ → остаётся {:,}₽".format(debt_pay, remaining))
+    # Limits
+    limits = v.get("limits", [])
+    if limits:
+        lines.append("")
+        lines.extend(_format_limits_block(limits, v.get("limits_total", 0)))
+    # Impulse
+    impulse = v.get("impulse_budget", 0)
+    if impulse:
+        lines.append("\n🎲 Импульсивный: {:,}₽".format(impulse))
+    # Savings
+    savings = v.get("savings", {})
+    if savings and savings.get("amount", 0) > 0:
+        lines.append("💰 Подушка: {:,}₽/мес".format(savings["amount"]))
+    # Warning (ADHD risk)
+    if v.get("warning"):
+        lines.append("\n⚠️ <b>{}</b>".format(v["warning"]))
+    # ADHD survival plan
+    if v.get("adhd_survival_plan"):
+        lines.append("\n📋 <b>План как пережить месяц:</b>")
+        lines.append("<i>{}</i>".format(v["adhd_survival_plan"]))
+    # Creditor script
+    if v.get("creditor_script"):
+        lines.append("\n💬 <i>Сказать кредитору: «{}»</i>".format(v["creditor_script"]))
+    # Relief
+    if v.get("relief"):
+        lines.append("\n📅 <i>{}</i>".format(v["relief"]))
+    return lines
+
+
 def _format_plan(plan: dict) -> str:
     """Форматирует Sonnet-план в красивое сообщение."""
     lines = ["<b>💰 Финансовый план</b>"]
@@ -2711,7 +2886,12 @@ def _format_plan(plan: dict) -> str:
             cat_emoji = f.get("category", "").split()[0] if f.get("category") else "📌"
             lines.append("  {} {} — {:,}₽".format(cat_emoji, f.get("name", "?"), f.get("amount", 0)))
 
-    # Долги с ежемесячными платежами
+    # Распределяемые
+    distributable = plan.get("distributable", 0)
+    if distributable:
+        lines.append("\n💳 Распределяемые: <b>{:,}₽</b>".format(distributable))
+
+    # Долги
     debts_monthly = plan.get("debts_monthly", plan.get("debts", []))
     if debts_monthly:
         debts_total = plan.get("debts_monthly_total", sum(d.get("monthly", d.get("amount", 0)) for d in debts_monthly))
@@ -2720,38 +2900,47 @@ def _format_plan(plan: dict) -> str:
             dl = " · {}".format(d.get("deadline", "")) if d.get("deadline") else ""
             mon = " {:,}₽/мес".format(d.get("monthly", 0)) if d.get("monthly") else ""
             left = " ({} мес)".format(d.get("months_left", "?")) if d.get("months_left") else ""
-            lines.append("  {} — {:,}₽{}{} →{}".format(d.get("name", "?"), d.get("total", d.get("amount", 0)), dl, left, mon))
+            lines.append("  {} — {:,}₽{}{} →{}".format(
+                d.get("name", "?"), d.get("total", d.get("amount", 0)), dl, left, mon))
 
     # Свободные после долгов
     free = plan.get("free_after_debts")
     if free is not None:
         lines.append("\n💳 Свободных после долгов: <b>{:,}₽</b>".format(free))
 
-    # Подушка
-    savings = plan.get("savings", {})
-    if savings and savings.get("amount", 0) > 0:
-        lines.append("\n💰 Подушка: <b>{:,}₽/мес</b>".format(savings["amount"]))
-        if savings.get("note"):
-            lines.append("  <i>{}</i>".format(savings["note"]))
+    # ── ТЯЖЁЛЫЙ МЕСЯЦ: два варианта ──
+    is_tight = plan.get("is_tight_month", False)
+    variant_a = plan.get("variant_a")
+    variant_b = plan.get("variant_b")
 
-    # Лимиты — компактно, без длинных note
-    limits = plan.get("limits", [])
-    if limits:
-        limits_total = plan.get("limits_total", sum(l.get("amount", 0) for l in limits))
-        lines.append("\n<b>📊 Лимиты: {:,}₽</b>".format(limits_total))
-        for l in limits:
-            change = " ({})".format(l["change"]) if l.get("change") else ""
-            amt = l.get("amount", 0)
-            manual = " 🔒" if l.get("manual") else ""
-            lines.append("  {} — {:,}₽{}{}".format(l.get("category", "?"), amt, change, manual))
+    if is_tight and variant_a and variant_b:
+        lines.append("\n⚠️ <b>После долга остаётся мало. Два варианта:</b>")
+        lines.extend(_format_variant(variant_a, "Вариант А: {}".format(
+            variant_a.get("label", "Отдать сразу"))))
+        lines.extend(_format_variant(variant_b, "Вариант Б: {}".format(
+            variant_b.get("label", "Рассрочка"))))
+    else:
+        # ── НОРМАЛЬНЫЙ МЕСЯЦ: один план ──
+        # Подушка
+        savings = plan.get("savings") or {}
+        if savings and savings.get("amount", 0) > 0:
+            lines.append("\n💰 Подушка: <b>{:,}₽/мес</b>".format(savings["amount"]))
+            if savings.get("note"):
+                lines.append("  <i>{}</i>".format(savings["note"]))
 
-    # Импульсивный
-    impulse = plan.get("impulse_budget", 0)
-    if impulse:
-        lines.append("\n<b>🎲 Импульсивный: {:,}₽</b>".format(impulse))
-        lines.append("  <i>Резерв на превышения лимитов</i>")
+        # Лимиты
+        limits = plan.get("limits", [])
+        if limits:
+            lines.append("")
+            lines.extend(_format_limits_block(limits, plan.get("limits_total", 0)))
 
-    # Цели — показать timeline вместо 0₽
+        # Импульсивный
+        impulse = plan.get("impulse_budget", 0)
+        if impulse:
+            lines.append("\n<b>🎲 Импульсивный: {:,}₽</b>".format(impulse))
+            lines.append("  <i>Резерв на превышения лимитов</i>")
+
+    # Цели (всегда)
     goals = plan.get("goals", [])
     if goals:
         lines.append("\n<b>🎯 Цели:</b>")
@@ -2773,7 +2962,7 @@ def _format_plan(plan: dict) -> str:
     if plan.get("relief_timeline"):
         lines.append("\n📅 <i>{}</i>".format(plan["relief_timeline"]))
 
-    # Summary + habits — коротко внизу
+    # Summary + habits
     if plan.get("summary"):
         lines.append("\n💡 <i>{}</i>".format(plan["summary"]))
     if plan.get("habit_strategy"):
