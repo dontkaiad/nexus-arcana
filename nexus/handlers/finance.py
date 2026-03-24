@@ -27,6 +27,7 @@ router = Router()
 
 # Маппинг ключ → категория Notion для бюджетных записей
 _BUDGET_KEY_TO_CATEGORY = {
+    "income_": "🔒 Обязательные",
     "обязательно_": "🔒 Обязательные",
     "лимит_": "💰 Лимит",
     "цель_": "🎯 Цели",
@@ -59,6 +60,10 @@ HABIT_WARNINGS = [
 ]
 
 # ── Бюджет: regex для парсинга записей из памяти ─────────────────────────────
+_INCOME_RE = re.compile(
+    r'доход:\s*(.+?)\s*[—\-]\s*(\d[\d\s]*(?:[.,]\d+)?)\s*[₽р]',
+    re.IGNORECASE,
+)
 _OBLIGATORY_RE = re.compile(
     r'обязательно:\s*(.+?)\s*[—\-]\s*(\d[\d\s]*(?:[.,]\d+)?)\s*[₽р]',
     re.IGNORECASE,
@@ -204,6 +209,7 @@ async def _load_budget_data(user_notion_id: str = "") -> Dict[str, list]:
 
     # Ищем по ключу (prefix-based) — не зависит от существования категорий в Notion
     key_filter = {"or": [
+        {"property": "Ключ", "rich_text": {"starts_with": "income_"}},
         {"property": "Ключ", "rich_text": {"starts_with": "обязательно_"}},
         {"property": "Ключ", "rich_text": {"starts_with": "лимит_"}},
         {"property": "Ключ", "rich_text": {"starts_with": "цель_"}},
@@ -219,7 +225,7 @@ async def _load_budget_data(user_notion_id: str = "") -> Dict[str, list]:
         logger.error("_load_budget_data: %s", e)
         return {"обязательные": [], "цели": [], "долги": [], "лимиты": []}
 
-    result: Dict[str, list] = {"обязательные": [], "цели": [], "долги": [], "лимиты": []}
+    result: Dict[str, list] = {"доходы": [], "обязательные": [], "цели": [], "долги": [], "лимиты": []}
     for p in pages:
         props = p["properties"]
         fact_parts = props.get("Текст", {}).get("title", [])
@@ -230,7 +236,13 @@ async def _load_budget_data(user_notion_id: str = "") -> Dict[str, list]:
         if not active:
             continue
 
-        if key.startswith("обязательно_"):
+        if key.startswith("income_"):
+            m = _INCOME_RE.search(fact)
+            if m:
+                amt = _parse_amount(m.group(2))
+                if amt > 0:
+                    result["доходы"].append({"name": m.group(1).strip(), "amount": amt})
+        elif key.startswith("обязательно_"):
             m = _OBLIGATORY_RE.search(fact)
             if m:
                 amt = _parse_amount(m.group(2))
@@ -2323,7 +2335,7 @@ BUDGET_SONNET_SYSTEM = (
     ' "queued_debts": [{"name": "X", "total": N, "deadline": "X", "after": "имя приоритетного"}],\n'
     ' "free_after_debts": N,\n'
     ' "is_tight_month": false,\n'
-    ' "variant_a": null or {"label": "Отдать 50к сразу", "debt_payment": N, "remaining": N,\n'
+    ' "variant_a": null or {"viable": true, "label": "Отдать 50к сразу", "debt_payment": N, "remaining": N,\n'
     '   "limits": [{"category": "X", "amount": N}], "limits_total": N,\n'
     '   "impulse_budget": N, "savings": {"amount": N, "note": "X"},\n'
     '   "adhd_survival_plan": "КОНКРЕТНЫЙ план: что купить, где сэкономить, как не сорваться",\n'
@@ -2395,6 +2407,7 @@ async def _build_sonnet_input(uid: int, user_notion_id: str) -> str:
         "payday": payday,
         "income_this_period": income_total,
         "savings_from_last_period": savings_bonus,
+        "income_from_memory": budget.get("доходы", []),
         "obligatory": budget.get("обязательные", []),
         "debts": budget.get("долги", []),
         "goals": budget.get("цели", []),
@@ -2809,10 +2822,17 @@ async def _run_budget_analysis(message: Message, uid: int) -> None:
 
     if is_tight:
         # Тяжёлый месяц → кнопки выбора варианта
-        buttons = [[
-            InlineKeyboardButton(text="🅰️ Вариант А", callback_data="bsetup_variant_a"),
-            InlineKeyboardButton(text="🅱️ Вариант Б", callback_data="bsetup_variant_b"),
-        ], [
+        a_viable = (plan.get("variant_a") or {}).get("viable", True)
+        if a_viable:
+            variant_btns = [
+                InlineKeyboardButton(text="🅰️ Вариант А", callback_data="bsetup_variant_a"),
+                InlineKeyboardButton(text="🅱️ Вариант Б", callback_data="bsetup_variant_b"),
+            ]
+        else:
+            variant_btns = [
+                InlineKeyboardButton(text="✅ Принять Вариант Б", callback_data="bsetup_variant_b"),
+            ]
+        buttons = [variant_btns, [
             InlineKeyboardButton(text="✏️ Изменить", callback_data="bsetup_adjust"),
             InlineKeyboardButton(text="🔄 Пересчитать", callback_data="bsetup_recalc"),
         ]]
@@ -2927,8 +2947,14 @@ def _format_plan(plan: dict) -> str:
             cat_emoji = f.get("category", "").split()[0] if f.get("category") else "📌"
             lines.append("  {} {} — {:,}₽".format(cat_emoji, f.get("name", "?"), f.get("amount", 0)))
 
-    # Распределяемые
-    distributable = plan.get("distributable", 0)
+    # Распределяемые = Доход - Фикс (ВСЕГДА)
+    income_total = plan.get("income_total", 0)
+    fixed_total = plan.get("fixed_total", sum(f.get("amount", 0) for f in plan.get("fixed", [])))
+    distributable = income_total - fixed_total if income_total > 0 else plan.get("distributable", 0)
+    if distributable < 0:
+        lines.append("\n⚠️ <b>Обязательные расходы ({:,}₽) превышают доход ({:,}₽). Проверь данные.</b>".format(
+            fixed_total, income_total))
+        return "\n".join(lines)
     if distributable:
         lines.append("\n💳 Распределяемые: <b>{:,}₽</b>".format(distributable))
 
@@ -2972,8 +2998,14 @@ def _format_plan(plan: dict) -> str:
             lines.append("\n💳 Свободных после долгов: <b>{:,}₽</b>".format(free))
 
     if is_tight and variant_a and variant_b:
-        lines.extend(_format_variant(variant_a, "Вариант А: {}".format(
-            variant_a.get("label", "Отдать сразу"))))
+        a_viable = variant_a.get("viable", True)
+        if a_viable:
+            lines.extend(_format_variant(variant_a, "Вариант А: {}".format(
+                variant_a.get("label", "Отдать сразу"))))
+        else:
+            remaining_a = variant_a.get("remaining", 0)
+            lines.append("\n⛔ <b>Вариант А нежизнеспособен</b> — на жизнь {:,}₽ при минимуме 15,500₽".format(
+                max(remaining_a, 0)))
         lines.extend(_format_variant(variant_b, "Вариант Б: {}".format(
             variant_b.get("label", "Рассрочка"))))
     else:
@@ -3070,6 +3102,14 @@ async def _save_budget_plan(message: Message, uid: int) -> None:
         except Exception:
             pass
     loading = await message.answer("💾 <b>Сохраняю план...</b>", parse_mode="HTML")
+
+    # Доходы — категория 🔒 Обязательные, ключ income_*
+    for inc in plan.get("income", []):
+        name = inc.get("source", inc.get("name", "?"))
+        amt = inc.get("amount", 0)
+        key = "income_{}".format(name.lower().replace(" ", "_"))
+        text = "доход: {} — {}₽/мес".format(name, amt)
+        await _save_memory_entry(key, text, notion_uid)
 
     # Фиксы
     for f in plan.get("fixed", []):
