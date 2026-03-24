@@ -143,6 +143,26 @@ async def _get_limits(mem_db: str) -> Dict[str, float]:
     return limits
 
 
+def _parse_user_amount(text: str) -> Optional[int]:
+    """Парсит сумму из пользовательского ввода: '20к', '31000', '15 000₽', '20к съем'."""
+    # Извлечь первое число с возможным 'к'
+    m = re.search(r'(\d[\d\s]*(?:[.,]\d+)?)\s*к\b', text, re.IGNORECASE)
+    if m:
+        raw = m.group(1).replace(" ", "").replace(",", ".")
+        try:
+            return int(float(raw) * 1000)
+        except ValueError:
+            return None
+    m = re.search(r'(\d[\d\s]*(?:[.,]\d+)?)', text)
+    if m:
+        raw = m.group(1).replace(" ", "").replace(",", ".")
+        try:
+            return int(float(raw))
+        except ValueError:
+            return None
+    return None
+
+
 def _parse_amount(s: str) -> float:
     """Парсит строку суммы: убирает пробелы, заменяет запятую."""
     return float(s.replace(' ', '').replace(',', '.'))
@@ -2079,13 +2099,17 @@ async def handle_budget_setup_text(message: Message, user_notion_id: str = "") -
         for line in lines:
             parts = line.rsplit(maxsplit=1)
             if len(parts) == 2:
-                name, amt_str = parts
-                amt_str = amt_str.replace(" ", "").replace("₽", "").replace("р", "").replace("к", "000").replace(",", ".")
-                try:
-                    amt = int(float(amt_str))
-                    state.income_items[name.strip()] = amt
-                except ValueError:
-                    pass
+                name = parts[0].strip()
+                amt = _parse_user_amount(parts[1])
+                if amt and amt > 0:
+                    state.income_items[name] = amt
+            elif len(parts) == 1:
+                # Может быть "зп100к" слитно
+                m = re.match(r'([а-яёa-z]+)\s*(\d.*)$', line, re.IGNORECASE)
+                if m:
+                    amt = _parse_user_amount(m.group(2))
+                    if amt and amt > 0:
+                        state.income_items[m.group(1).strip()] = amt
         if not state.income_items:
             await _bot_edit_or_send(message, state,
                 "⚠️ Не удалось распознать. Формат:\n<code>зп 100000\nаренда 15000</code>")
@@ -2109,17 +2133,29 @@ async def handle_budget_setup_text(message: Message, user_notion_id: str = "") -
 
     # ── Шаг 2: Ввод сумм фиксов ──
     if state.step == "enter_fixed":
-        amount_str = text.replace(" ", "").replace("₽", "").replace("р", "").replace(",", ".")
-        try:
-            amount = int(float(amount_str))
-        except ValueError:
-            await _bot_edit_or_send(message, state, "⚠️ Напиши число. Например: <b>31000</b>")
-            return True
-
-        cat_idx = state.selected_fixed[state.pending_fixed_idx]
-        cat = _BUDGET_FIXED_CATS[cat_idx]
-        state.fixed_amounts[cat] = amount
-        state.pending_fixed_idx += 1
+        # Поддержка multi-line: "20к съем квартиры\n7к коммуналка"
+        lines = [l.strip() for l in text.split("\n") if l.strip()]
+        if len(lines) > 1:
+            # Multi-line: парсим все строки, привязываем к оставшимся категориям
+            for line in lines:
+                if state.pending_fixed_idx >= len(state.selected_fixed):
+                    break
+                amt = _parse_user_amount(line)
+                if amt and amt > 0:
+                    cat_idx = state.selected_fixed[state.pending_fixed_idx]
+                    cat = _BUDGET_FIXED_CATS[cat_idx]
+                    state.fixed_amounts[cat] = amt
+                    state.pending_fixed_idx += 1
+        else:
+            # Single line
+            amt = _parse_user_amount(text)
+            if not amt or amt <= 0:
+                await _bot_edit_or_send(message, state, "⚠️ Напиши число. Например: <b>31000</b> или <b>31к</b>")
+                return True
+            cat_idx = state.selected_fixed[state.pending_fixed_idx]
+            cat = _BUDGET_FIXED_CATS[cat_idx]
+            state.fixed_amounts[cat] = amt
+            state.pending_fixed_idx += 1
 
         if state.pending_fixed_idx < len(state.selected_fixed):
             next_cat = _BUDGET_FIXED_CATS[state.selected_fixed[state.pending_fixed_idx]]
@@ -2133,7 +2169,6 @@ async def handle_budget_setup_text(message: Message, user_notion_id: str = "") -
             summary = "\n".join("  {} — {:,}₽".format(c, a) for c, a in state.fixed_amounts.items())
             total = sum(state.fixed_amounts.values())
             state.step = "variable"
-            var_cats = "\n".join("  " + c for c in _BUDGET_VARIABLE_CATS)
             await _bot_edit_or_send(
                 message, state,
                 "✅ <b>Фикс: {:,}₽/мес</b>\n{}\n\n"
