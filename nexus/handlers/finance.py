@@ -2133,29 +2133,23 @@ async def handle_budget_setup_text(message: Message, user_notion_id: str = "") -
 
     # ── Шаг 2: Ввод сумм фиксов ──
     if state.step == "enter_fixed":
-        # Поддержка multi-line: "20к съем квартиры\n7к коммуналка"
+        # Multi-line: суммируем ВСЕ числа в ТЕКУЩУЮ категорию
+        # "20к съем квартиры\n7к коммуналка\n4к коммуналка сдаваемой" → всё = Жилье
         lines = [l.strip() for l in text.split("\n") if l.strip()]
-        if len(lines) > 1:
-            # Multi-line: парсим все строки, привязываем к оставшимся категориям
-            for line in lines:
-                if state.pending_fixed_idx >= len(state.selected_fixed):
-                    break
-                amt = _parse_user_amount(line)
-                if amt and amt > 0:
-                    cat_idx = state.selected_fixed[state.pending_fixed_idx]
-                    cat = _BUDGET_FIXED_CATS[cat_idx]
-                    state.fixed_amounts[cat] = amt
-                    state.pending_fixed_idx += 1
-        else:
-            # Single line
-            amt = _parse_user_amount(text)
-            if not amt or amt <= 0:
-                await _bot_edit_or_send(message, state, "⚠️ Напиши число. Например: <b>31000</b> или <b>31к</b>")
-                return True
-            cat_idx = state.selected_fixed[state.pending_fixed_idx]
-            cat = _BUDGET_FIXED_CATS[cat_idx]
-            state.fixed_amounts[cat] = amt
-            state.pending_fixed_idx += 1
+        total_amt = 0
+        for line in lines:
+            amt = _parse_user_amount(line)
+            if amt and amt > 0:
+                total_amt += amt
+
+        if total_amt <= 0:
+            await _bot_edit_or_send(message, state, "⚠️ Напиши число. Например: <b>31000</b> или <b>31к</b>")
+            return True
+
+        cat_idx = state.selected_fixed[state.pending_fixed_idx]
+        cat = _BUDGET_FIXED_CATS[cat_idx]
+        state.fixed_amounts[cat] = total_amt
+        state.pending_fixed_idx += 1
 
         if state.pending_fixed_idx < len(state.selected_fixed):
             next_cat = _BUDGET_FIXED_CATS[state.selected_fixed[state.pending_fixed_idx]]
