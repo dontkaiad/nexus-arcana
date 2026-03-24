@@ -386,15 +386,9 @@ async def cmd_adhd(msg: Message, user_notion_id: str = "") -> None:
 
 @dp.message(Command("budget"))
 async def cmd_budget(msg: Message, user_notion_id: str = "") -> None:
-    """Полная финансовая картина: доход, обязательные, свободные, долги, цели."""
-    from nexus.handlers.finance import build_budget_message, start_budget_setup
-    from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-    budget_msg = await build_budget_message(user_notion_id)
-    if budget_msg:
-        await msg.answer(budget_msg, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(
-            inline_keyboard=[[InlineKeyboardButton(text="🙈 Скрыть", callback_data="msg_hide")]]))
-    else:
-        await start_budget_setup(msg, user_notion_id)
+    """v2: всегда Sonnet-анализ с текущими данными."""
+    from nexus.handlers.finance import start_budget_analysis
+    await start_budget_analysis(msg, user_notion_id)
 
 
 @dp.message(Command("finance"))
@@ -480,6 +474,13 @@ async def handle_text(msg: Message, user_notion_id: str = "") -> None:
     from core.layout import maybe_convert
     from nexus.handlers.tasks import _pending_has, _pending_get, handle_task_clarification, handle_reschedule_reminder, _update_user_tz
 
+    # Budget v2: payday reminder (once per period start)
+    try:
+        from nexus.handlers.finance import maybe_payday_reminder
+        await maybe_payday_reminder(msg, user_notion_id)
+    except Exception:
+        pass
+
     # Budget setup — перехватывает текст пока идёт настройка
     from nexus.handlers.finance import handle_budget_setup_text
     if await handle_budget_setup_text(msg, user_notion_id):
@@ -488,17 +489,11 @@ async def handle_text(msg: Message, user_notion_id: str = "") -> None:
     # Quick triggers (до классификатора)
     _tl = (msg.text or "").strip().lower()
 
-    # Бюджет
+    # Бюджет — v2: всегда Sonnet
     import re as _quick_re
     if _quick_re.search(r"покажи бюджет|сколько (могу тратить|свободных)|бюджет на месяц", _tl):
-        from nexus.handlers.finance import build_budget_message, start_budget_setup
-        budget_msg = await build_budget_message(user_notion_id)
-        if budget_msg:
-            from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-            await msg.answer(budget_msg, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(
-                inline_keyboard=[[InlineKeyboardButton(text="🙈 Скрыть", callback_data="msg_hide")]]))
-        else:
-            await start_budget_setup(msg, user_notion_id)
+        from nexus.handlers.finance import start_budget_analysis
+        await start_budget_analysis(msg, user_notion_id)
         return
 
     # День отдыха (стрик)
