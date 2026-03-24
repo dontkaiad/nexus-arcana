@@ -805,8 +805,8 @@ async def process_item(data: Dict[str, Any], original_text: str, msg, clarify: d
                     logger.error("budget check error: %s", e, exc_info=True)
             elif kind == "income":
                 # Любой доход (кроме ЗП/аренды/практики) → предложить пересчёт бюджета
-                _skip_cats = {"💰 Зарплата", "🔮 Практика"}
-                _skip_desc = {"аренда"}
+                _skip_cats = {"💰 Зарплата", "🔮 Практика", "🏠 Жильё"}
+                _skip_desc = {"аренда", "зарплата", "зп"}
                 title_lower = (title or "").lower()
                 if category not in _skip_cats and not any(w in title_lower for w in _skip_desc):
                     try:
