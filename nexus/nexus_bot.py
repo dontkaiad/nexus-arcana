@@ -97,18 +97,18 @@ async def cmd_help(msg: Message, user_notion_id: str = "") -> None:
         "  <code>/finance_stats</code> — сводка за месяц/неделю/день\n\n"
 
         "📊 <b>БЮДЖЕТ + ФИНАНСОВЫЙ СОВЕТНИК</b>\n"
-        "Sonnet анализирует твои финансы и строит план.\n"
-        "Первый запуск <code>/budget</code> — пошаговый wizard:\n"
-        "  1️⃣ Доход (все источники)\n"
-        "  2️⃣ Фиксированные траты (жилье, коты, подписки)\n"
-        "  3️⃣ Текущие вариативные (привычки, кафе, продукты)\n"
-        "  4️⃣ Долги и цели\n"
-        "  5️⃣ Sonnet считает оптимальный план + импульсивный бюджет\n"
-        "🎲 Импульсивный бюджет — трать без вины (СДВГ-friendly).\n"
+        "Sonnet анализирует финансы и строит оптимальный план.\n"
+        "  <code>/budget</code> — текущий бюджет с прогрессом\n"
+        "  <code>/budget_setup</code> — настроить бюджет заново\n"
+        "Пиши все данные в свободной форме — Sonnet сам разберёт.\n"
+        "🎲 Импульсивный бюджет = резерв на превышения лимитов.\n"
         "После каждой траты — остаток + лимит + ₽/день.\n"
-        "  «покажи бюджет», «сколько свободных» — быстрый вызов\n"
-        "  <code>/budget</code> — полный бюджет на месяц\n"
-        "  <code>/budget</code> (без данных) — настроить заново\n\n"
+        "  «покажи бюджет», «сколько свободных» — быстрый вызов\n\n"
+
+        "🔥 <b>СТРИКИ</b>\n"
+        "Выполняй задачи каждый день → копи стрик.\n"
+        "«день отдыха» — передышка без потери стрика (1 раз в 5 дней).\n"
+        "Предупреждение в 19:00 если стрик на волоске.\n\n"
 
         "💡 <b>ЗАМЕТКИ</b>\n"
         "Создать: «заметка: ...», «идея: ...», «запомни: ...», «рецепт: ...».\n"
@@ -388,9 +388,11 @@ async def cmd_adhd(msg: Message, user_notion_id: str = "") -> None:
 async def cmd_budget(msg: Message, user_notion_id: str = "") -> None:
     """Полная финансовая картина: доход, обязательные, свободные, долги, цели."""
     from nexus.handlers.finance import build_budget_message, start_budget_setup
+    from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
     budget_msg = await build_budget_message(user_notion_id)
     if budget_msg:
-        await msg.answer(budget_msg, parse_mode="HTML")
+        await msg.answer(budget_msg, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(
+            inline_keyboard=[[InlineKeyboardButton(text="🙈 Скрыть", callback_data="msg_hide")]]))
     else:
         await start_budget_setup(msg, user_notion_id)
 
@@ -478,9 +480,37 @@ async def handle_text(msg: Message, user_notion_id: str = "") -> None:
     from core.layout import maybe_convert
     from nexus.handlers.tasks import _pending_has, _pending_get, handle_task_clarification, handle_reschedule_reminder, _update_user_tz
 
-    # Budget setup wizard — перехватывает текст пока идёт настройка
+    # Budget setup — перехватывает текст пока идёт настройка
     from nexus.handlers.finance import handle_budget_setup_text
     if await handle_budget_setup_text(msg, user_notion_id):
+        return
+
+    # Quick triggers (до классификатора)
+    _tl = (msg.text or "").strip().lower()
+
+    # Бюджет
+    import re as _quick_re
+    if _quick_re.search(r"покажи бюджет|сколько (могу тратить|свободных)|бюджет на месяц", _tl):
+        from nexus.handlers.finance import build_budget_message, start_budget_setup
+        budget_msg = await build_budget_message(user_notion_id)
+        if budget_msg:
+            from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+            await msg.answer(budget_msg, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(
+                inline_keyboard=[[InlineKeyboardButton(text="🙈 Скрыть", callback_data="msg_hide")]]))
+        else:
+            await start_budget_setup(msg, user_notion_id)
+        return
+
+    # День отдыха (стрик)
+    if _quick_re.search(r"день\s+отдыха|передышка|отдыхаю\s+сегодня", _tl):
+        try:
+            from nexus.handlers.streaks import request_rest_day
+            from nexus.handlers.tasks import _get_user_tz
+            tz = await _get_user_tz(msg.from_user.id) or 3
+            result = await request_rest_day(msg.from_user.id, tz)
+            await msg.answer(result)
+        except Exception as e:
+            await msg.answer("⚠️ Ошибка: {}".format(e))
         return
 
     if _pending_has(msg.from_user.id):
