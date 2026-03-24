@@ -13,6 +13,7 @@ from aiogram.filters import BaseFilter
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from core.claude_client import ask_claude
 from core.notion_client import tasks_active, log_error, page_create, _title, _select, _date, _status, update_page, db_query, get_notion
+from nexus.handlers.utils import react
 from core.layout import maybe_convert
 
 logger = logging.getLogger("nexus.tasks")
@@ -1206,6 +1207,7 @@ async def task_complete(call: CallbackQuery) -> None:
             phrase = random.choice(_DONE_PHRASES)
             title_line = f"\n✅ {task_title} — выполнено" if task_title else "\n✅ Выполнено"
             await call.answer("✅ Записано!")
+            await react(call, "🎉")
             await call.message.reply(f"{phrase}{title_line}")
         else:
             await call.answer("⚠️ Ошибка обновления", show_alert=True)
@@ -1295,6 +1297,7 @@ async def handle_reschedule_reminder(message: Message) -> None:
             logger.info("handle_reschedule_reminder: relative time parsed locally: %s", relative)
             await _schedule_reminder(message.chat.id, task_title, relative, task_id, tz_offset)
             _pending_del(uid)
+            await react(message, "⏰")
             await message.answer(f"✅ Напоминание перенесено на {relative.replace('T', ' ')}")
             return
 
@@ -1317,6 +1320,7 @@ async def handle_reschedule_reminder(message: Message) -> None:
             reminder_time = parsed["reminder_time"]
             await _schedule_reminder(message.chat.id, task_title, reminder_time, task_id, tz_offset)
             _pending_del(uid)
+            await react(message, "⏰")
             await message.answer(f"✅ Напоминание перенесено на {reminder_time.replace('T', ' ')}")
         else:
             await message.answer("❌ Не смог парсить дату. Попробуй ещё раз")
@@ -1418,6 +1422,8 @@ async def _do_save_task(message: Message, data: dict, chat_id: int = None, uid: 
         f"🔔 Напоминание: {reminder_display}{repeat_line}{extra}"
     )
     
+    await react(message, "✅")
+
     # Редактируем старое сообщение вместо создания нового
     if msg_id:
         try:
