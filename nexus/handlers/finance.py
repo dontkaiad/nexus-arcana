@@ -1941,7 +1941,10 @@ async def on_budget_fixed_cat(call: CallbackQuery) -> None:
     """Тоггл выбора фиксированной категории."""
     uid = call.from_user.id
     state = _budget_setup.get(uid)
-    if not state or state.step != "pick_fixed":
+    if not state:
+        await call.answer("⚠️ Сессия устарела — /budget заново", show_alert=True)
+        return
+    if state.step != "pick_fixed":
         await call.answer()
         return
     idx = int(call.data.split("_")[-1])
@@ -1956,11 +1959,10 @@ async def on_budget_fixed_cat(call: CallbackQuery) -> None:
 @router.callback_query(F.data == "bsetup_fixed_done")
 async def on_budget_fixed_done(call: CallbackQuery) -> None:
     """Завершён выбор фиксированных → ввод сумм."""
-    uid = call.from_user.id
-    state = _budget_setup.get(uid)
+    state = await _check_bsetup_state(call)
     if not state:
-        await call.answer()
         return
+    uid = call.from_user.id
     if not state.selected_fixed:
         await call.answer("Выбери хотя бы одну категорию!")
         return
@@ -1979,10 +1981,8 @@ async def on_budget_fixed_done(call: CallbackQuery) -> None:
 @router.callback_query(F.data == "bsetup_skip_variable")
 async def on_budget_skip_variable(call: CallbackQuery) -> None:
     """Пропустить вариативные → долги."""
-    uid = call.from_user.id
-    state = _budget_setup.get(uid)
+    state = await _check_bsetup_state(call)
     if not state:
-        await call.answer()
         return
     state.step = "debts"
     state.bot_msg_id = call.message.message_id
@@ -2003,10 +2003,8 @@ async def on_budget_skip_variable(call: CallbackQuery) -> None:
 @router.callback_query(F.data == "bsetup_skip_debts")
 async def on_budget_skip_debts(call: CallbackQuery) -> None:
     """Пропустить долги → цели."""
-    uid = call.from_user.id
-    state = _budget_setup.get(uid)
+    state = await _check_bsetup_state(call)
     if not state:
-        await call.answer()
         return
     state.step = "goals"
     state.bot_msg_id = call.message.message_id
@@ -2029,23 +2027,30 @@ async def on_budget_skip_debts(call: CallbackQuery) -> None:
 async def on_budget_skip_goals(call: CallbackQuery) -> None:
     """Пропустить цели → Sonnet анализ."""
     uid = call.from_user.id
-    state = _budget_setup.get(uid)
+    state = await _check_bsetup_state(call)
     if not state:
-        await call.answer()
         return
     state.bot_msg_id = call.message.message_id
     await _run_sonnet_analysis(call.message, state, uid)
     await call.answer()
 
 
-@router.callback_query(F.data == "bsetup_accept")
-async def on_budget_accept(call: CallbackQuery) -> None:
-    """Принять план Sonnet → сохранить всё."""
+async def _check_bsetup_state(call: CallbackQuery) -> Optional[BudgetSetupState]:
+    """Проверить state wizard. Если потеряно — сообщить и вернуть None."""
     uid = call.from_user.id
     state = _budget_setup.get(uid)
     if not state:
-        await call.answer()
+        await call.answer("⚠️ Сессия устарела — вызови /budget заново", show_alert=True)
+    return state
+
+
+@router.callback_query(F.data == "bsetup_accept")
+async def on_budget_accept(call: CallbackQuery) -> None:
+    """Принять план Sonnet → сохранить всё."""
+    state = await _check_bsetup_state(call)
+    if not state:
         return
+    uid = call.from_user.id
     state.bot_msg_id = call.message.message_id
     await _save_sonnet_plan(call.message, state, uid)
     await call.answer()
@@ -2054,11 +2059,10 @@ async def on_budget_accept(call: CallbackQuery) -> None:
 @router.callback_query(F.data == "bsetup_recalc")
 async def on_budget_recalc(call: CallbackQuery) -> None:
     """Пересчитать план → снова вызвать Sonnet."""
-    uid = call.from_user.id
-    state = _budget_setup.get(uid)
+    state = await _check_bsetup_state(call)
     if not state:
-        await call.answer()
         return
+    uid = call.from_user.id
     state.bot_msg_id = call.message.message_id
     await _run_sonnet_analysis(call.message, state, uid)
     await call.answer()
@@ -2067,11 +2071,10 @@ async def on_budget_recalc(call: CallbackQuery) -> None:
 @router.callback_query(F.data == "bsetup_adjust")
 async def on_budget_adjust(call: CallbackQuery) -> None:
     """Режим корректировки → ждёт текст."""
-    uid = call.from_user.id
-    state = _budget_setup.get(uid)
+    state = await _check_bsetup_state(call)
     if not state:
-        await call.answer()
         return
+    uid = call.from_user.id
     state.step = "adjust"
     state.bot_msg_id = call.message.message_id
     await call.message.edit_text(
