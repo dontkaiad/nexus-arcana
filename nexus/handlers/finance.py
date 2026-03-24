@@ -2411,7 +2411,8 @@ async def _run_sonnet_analysis(message: Message, state: BudgetSetupState, uid: i
     )
 
     try:
-        raw = await ask_claude(prompt, model="sonnet")
+        from core.config import config as _config
+        raw = await ask_claude(prompt, model=_config.model_sonnet)
         # Извлечь JSON из ответа
         raw = raw.strip()
         if raw.startswith("```"):
