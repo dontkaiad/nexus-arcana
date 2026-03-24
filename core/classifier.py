@@ -803,6 +803,23 @@ async def process_item(data: Dict[str, Any], original_text: str, msg, clarify: d
                     await _check_budget_limit(category, msg, user_notion_id, amount=amount)
                 except Exception as e:
                     logger.error("budget check error: %s", e, exc_info=True)
+            elif kind == "income":
+                # Любой доход (кроме ЗП/аренды/практики) → предложить пересчёт бюджета
+                _skip_cats = {"💰 Зарплата", "🔮 Практика"}
+                _skip_desc = {"аренда"}
+                title_lower = (title or "").lower()
+                if category not in _skip_cats and not any(w in title_lower for w in _skip_desc):
+                    try:
+                        from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+                        await msg.answer(
+                            "📊 Пересчитать бюджет с учётом дохода?",
+                            reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
+                                InlineKeyboardButton(text="📊 Да", callback_data="budget_recalc_full"),
+                                InlineKeyboardButton(text="❌ Нет", callback_data="msg_hide"),
+                            ]]),
+                        )
+                    except Exception as e:
+                        logger.error("income recalc prompt error: %s", e)
             return f"{icon} <b>{sign}{amount:,.0f}₽</b> · <b>{title}</b>\n🏷 {category} <i>{source}</i>"
         
         logged = await log_error(original_text, "processing_error", _classify_last_raw,
