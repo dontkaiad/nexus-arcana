@@ -1907,8 +1907,8 @@ async def _get_payday() -> int:
     return 1
 
 
-def _period_bounds(payday: int) -> Tuple[str, str]:
-    """Calculate start/end of current budget period based on payday."""
+def _period_bounds(payday: int, previous: bool = False) -> Tuple[str, str]:
+    """Calculate start/end of budget period. If previous=True, return the PREVIOUS period."""
     now = datetime.now(MOSCOW_TZ)
     if now.day >= payday:
         start = now.replace(day=payday, hour=0, minute=0, second=0, microsecond=0)
@@ -1922,6 +1922,15 @@ def _period_bounds(payday: int) -> Tuple[str, str]:
         else:
             start = datetime(now.year, now.month - 1, payday, tzinfo=MOSCOW_TZ)
         end = now.replace(day=payday, hour=0, minute=0, second=0, microsecond=0) - timedelta(days=1)
+
+    if previous:
+        # Shift back one period: end = start - 1 day, start = one month before start
+        prev_end = start - timedelta(days=1)
+        prev_start_month = start.month - 1 if start.month > 1 else 12
+        prev_start_year = start.year if start.month > 1 else start.year - 1
+        prev_start = datetime(prev_start_year, prev_start_month, payday, tzinfo=MOSCOW_TZ)
+        return prev_start.strftime("%Y-%m-%d"), prev_end.strftime("%Y-%m-%d")
+
     return start.strftime("%Y-%m-%d"), end.strftime("%Y-%m-%d")
 
 
@@ -2249,6 +2258,13 @@ BUDGET_SONNET_SYSTEM = (
     "  - В debts_monthly включить ТОЛЬКО приоритетный долг\n"
     "  - Остальные долги → в поле 'queued_debts' (информативно, без платежей)\n"
     "  - Вычесть ТОЛЬКО платёж за приоритетный долг из распределяемых\n"
+    "  СЧЁТ МЕСЯЦЕВ ДЛЯ ДОЛГОВ:\n"
+    "  - months_left для приоритетного = месяцев от ТЕКУЩЕГО месяца до дедлайна\n"
+    "  - months_left для queued = месяцев от НАЧАЛА ПЛАТЕЖЕЙ (после закрытия предыдущего)\n"
+    "  - Пример: Вика 50к (дедлайн апрель), платим в апреле → 1 мес → 50к/мес\n"
+    "    Дядя 100к (дедлайн август), платим с МАЯ (после Вики) → 4 мес → 25к/мес\n"
+    "    Илья 40к (дедлайн сентябрь), платим с МАЯ → 5 мес → 8к/мес\n"
+    "  - НЕ считать от текущего месяца для неприоритетных! Считать от начала платежей.\n"
     "Шаг 3: Оценить остаток после ОДНОГО долга:\n"
     "  - Остаток >= 30000₽ → НОРМАЛЬНЫЙ МЕСЯЦ → один план\n"
     "  - Остаток < 30000₽ → ТЯЖЁЛЫЙ МЕСЯЦ → ДВА ВАРИАНТА (A и B)\n\n"
@@ -2273,7 +2289,19 @@ BUDGET_SONNET_SYSTEM = (
     "Макс -10%/мес. В экстренном — допустимо больше С ПРЕДУПРЕЖДЕНИЕМ об СДВГ-рисках\n"
     "  💅 Бьюти — минимум 3,000₽ (ногти)\n"
     "  🚕 Транспорт — минимум 1,500₽ (СПб, метро)\n"
-    "  🎲 Импульсивные — минимум 1,000₽ (СДВГ, дофамин)\n\n"
+    "  🎲 Импульсивные — минимум 1,000₽ (СДВГ, дофамин)\n"
+    "  Сумма минимумов = 15,500₽ (привычки 10к + бьюти 3к + транспорт 1.5к + импульсивные 1к)\n\n"
+    "ЛОГИКА РАСПРЕДЕЛЕНИЯ ПРИ КОНФЛИКТЕ:\n"
+    "  Если остаток после долга < суммы минимумов (15,500₽):\n"
+    "    → Вариант А НЕЖИЗНЕСПОСОБЕН. Писать: 'Вариант А нежизнеспособен — "
+    "на жизнь остаётся X₽ при минимуме 15.5к. Рекомендую Вариант Б.'\n"
+    "  Если остаток >= 15,500₽ но < 30,000₽:\n"
+    "    → Жёсткий но реальный. Распределять ПРОПОРЦИОНАЛЬНО:\n"
+    "    - Привычки: мин 10к (абсолютный пол)\n"
+    "    - Продукты: мин 3к (НЕ меньше)\n"
+    "    - Бьюти: 3к (фикс), Транспорт: 1.5к (фикс), Импульсивные: 1к (фикс)\n"
+    "    - Кафе, гардероб, хобби: 0₽ в тяжёлый месяц — это ок\n"
+    "  НЕ ставить продукты 2к при привычках 9к — это нелогично.\n\n"
     "ОГРАНИЧЕНИЯ:\n"
     "- Лимит с пометкой [ручной] — НЕ ТРОГАТЬ, распределять остаток вокруг него\n"
     "- Коты = ФИКСИРОВАННЫЕ расходы (живые существа!)\n"
@@ -2925,18 +2953,25 @@ def _format_plan(plan: dict) -> str:
             ", ".join(q_parts),
             debts_monthly[0].get("name", "?") if debts_monthly else "?"))
 
-    # Свободные после долгов
-    free = plan.get("free_after_debts")
-    if free is not None:
-        lines.append("\n💳 Свободных после долгов: <b>{:,}₽</b>".format(free))
-
     # ── ТЯЖЁЛЫЙ МЕСЯЦ: два варианта ──
     is_tight = plan.get("is_tight_month", False)
     variant_a = plan.get("variant_a")
     variant_b = plan.get("variant_b")
 
     if is_tight and variant_a and variant_b:
-        lines.append("\n⚠️ <b>После долга остаётся мало. Два варианта:</b>")
+        # При тяжёлом месяце НЕ показываем отрицательные "свободных"
+        free = plan.get("free_after_debts", 0)
+        debts_total = plan.get("debts_monthly_total", 0)
+        distributable = plan.get("distributable", 0)
+        lines.append("\n⚠️ <b>Долг ({:,}₽) забирает большую часть бюджета ({:,}₽). Два варианта:</b>".format(
+            debts_total, distributable))
+    else:
+        # Свободные после долгов — только для нормального месяца
+        free = plan.get("free_after_debts")
+        if free is not None and free > 0:
+            lines.append("\n💳 Свободных после долгов: <b>{:,}₽</b>".format(free))
+
+    if is_tight and variant_a and variant_b:
         lines.extend(_format_variant(variant_a, "Вариант А: {}".format(
             variant_a.get("label", "Отдать сразу"))))
         lines.extend(_format_variant(variant_b, "Вариант Б: {}".format(
@@ -3169,28 +3204,7 @@ async def _save_memory_entry(key: str, fact: str, user_notion_id: str = "") -> N
 async def _budget_period_review(user_notion_id: str = "") -> Tuple[str, float]:
     """Review spending vs limits for the PREVIOUS period. Returns (formatted_text, savings_total)."""
     payday = await _get_payday()
-    now = datetime.now(MOSCOW_TZ)
-
-    # Calculate PREVIOUS period bounds (the one just ended)
-    if now.day >= payday:
-        # Previous period: payday of prev month → payday-1 of this month
-        if now.month == 1:
-            prev_start = datetime(now.year - 1, 12, payday, tzinfo=MOSCOW_TZ)
-        else:
-            prev_start = datetime(now.year, now.month - 1, payday, tzinfo=MOSCOW_TZ)
-        prev_end = now.replace(day=payday, hour=0, minute=0, second=0, microsecond=0) - timedelta(days=1)
-    else:
-        if now.month <= 2:
-            prev_start = datetime(now.year - 1, now.month + 10, payday, tzinfo=MOSCOW_TZ)
-        else:
-            prev_start = datetime(now.year, now.month - 2, payday, tzinfo=MOSCOW_TZ)
-        if now.month == 1:
-            prev_end = datetime(now.year - 1, 12, payday, tzinfo=MOSCOW_TZ) - timedelta(days=1)
-        else:
-            prev_end = datetime(now.year, now.month - 1, payday, tzinfo=MOSCOW_TZ) - timedelta(days=1)
-
-    period_start_str = prev_start.strftime("%Y-%m-%d")
-    period_end_str = prev_end.strftime("%Y-%m-%d")
+    period_start_str, period_end_str = _period_bounds(payday, previous=True)
 
     # Get spending for that period
     from core.config import config
@@ -3218,9 +3232,13 @@ async def _budget_period_review(user_notion_id: str = "") -> Tuple[str, float]:
     debts = budget_data.get("долги", [])
 
     # Format review
-    month_name = _RU_MONTHS.get(prev_start.month, str(prev_start.month))
+    start_date = datetime.strptime(period_start_str, "%Y-%m-%d")
+    month_name = _RU_MONTHS.get(start_date.month, str(start_date.month))
     lines = ["📊 <b>Ревью за {} ({} → {})</b>".format(
-        month_name, prev_start.strftime("%d.%m"), prev_end.strftime("%d.%m"))]
+        month_name,
+        start_date.strftime("%d.%m"),
+        datetime.strptime(period_end_str, "%Y-%m-%d").strftime("%d.%m"),
+    )]
 
     total_saved = 0.0
     cat_lines = []
