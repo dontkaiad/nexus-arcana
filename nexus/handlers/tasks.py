@@ -184,62 +184,109 @@ async def restore_reminders_on_startup() -> None:
                 except Exception as e:
                     logger.error("restore pass1: task %s error: %s", page.get("id"), e)
 
-            # ── Проход 2: повторяющиеся задачи с прошедшим напоминанием ─────────
-            filter2: dict = {"and": [
+            # ── Проход 2: одноразовые задачи с пропущенным напоминанием ─────────
+            # (повтор = Нет, напоминание < now, статус не Done)
+            filter2_once: dict = {"and": [
                 {"property": "Статус", "status": {"does_not_equal": "Done"}},
-                {"property": "Повтор", "select": {"does_not_equal": "Нет"}},
                 {"property": "Напоминание", "date": {"before": now_utc_str}},
             ]}
             if user_filter:
-                filter2["and"].append(user_filter)
+                filter2_once["and"].append(user_filter)
 
-            for page in await db_query(db_id, filter_obj=filter2, page_size=100):
+            for page in await db_query(db_id, filter_obj=filter2_once, page_size=100):
                 try:
                     props = page["properties"]
                     task_id = page["id"]
+                    repeat = (props.get("Повтор", {}).get("select") or {}).get("name", "Нет")
                     title_parts = props.get("Задача", {}).get("title", [])
                     title = title_parts[0]["plain_text"] if title_parts else "Задача"
-                    repeat = (props.get("Повтор", {}).get("select") or {}).get("name", "Нет")
-                    if repeat == "Нет":
-                        continue
                     reminder_start = (props.get("Напоминание", {}).get("date") or {}).get("start", "")
                     if not reminder_start:
                         continue
 
-                    # Сдвигаем до ближайшей будущей даты (может потребоваться несколько циклов)
-                    new_reminder = reminder_start[:16]
-                    for _ in range(400):  # защита от зацикливания
-                        new_reminder = _next_cycle_date(new_reminder, repeat, tz_offset)
+                    if repeat == "Нет":
+                        # ── Одноразовая задача — отправить "пропущено" СРАЗУ ──
                         try:
-                            rem_dt = datetime.strptime(new_reminder[:16], "%Y-%m-%dT%H:%M").replace(
+                            rem_dt = datetime.strptime(reminder_start[:16], "%Y-%m-%dT%H:%M").replace(
                                 tzinfo=timezone(timedelta(hours=tz_offset))
                             )
+                            missed_time = rem_dt.strftime("%d.%m в %H:%M")
                         except ValueError:
-                            break
-                        if rem_dt > now_utc:
-                            break
+                            missed_time = reminder_start[:16]
 
-                    # Обновляем дедлайн тоже если он есть
-                    deadline_start = (props.get("Дедлайн", {}).get("date") or {}).get("start", "")
-                    update_props: dict = {"Напоминание": _date(new_reminder)}
-                    if deadline_start:
-                        new_deadline = deadline_start[:16]
+                        kb = InlineKeyboardMarkup(inline_keyboard=[[
+                            InlineKeyboardButton(text="✅ Сделано!", callback_data=f"task_complete_{task_id}"),
+                            InlineKeyboardButton(text="❌ Не сделал", callback_data=f"task_failed_{task_id}"),
+                        ]])
+                        try:
+                            await _bot.send_message(
+                                tg_id,
+                                f"⏰ <b>Пропущено ({missed_time}):</b> {title}\n\nСделано?",
+                                parse_mode="HTML",
+                                reply_markup=kb,
+                            )
+                            logger.info("restore pass2: sent missed reminder '%s' (was at %s)", title, missed_time)
+                            restored += 1
+                        except Exception as e:
+                            logger.error("restore pass2: failed to send missed '%s': %s", title, e)
+                    else:
+                        # ── Повторяющаяся задача — уведомить + сдвинуть ──
+                        try:
+                            rem_dt = datetime.strptime(reminder_start[:16], "%Y-%m-%dT%H:%M").replace(
+                                tzinfo=timezone(timedelta(hours=tz_offset))
+                            )
+                            missed_time = rem_dt.strftime("%d.%m в %H:%M")
+                        except ValueError:
+                            missed_time = reminder_start[:16]
+
+                        kb = InlineKeyboardMarkup(inline_keyboard=[[
+                            InlineKeyboardButton(text="✅ Сделано!", callback_data=f"task_complete_{task_id}"),
+                            InlineKeyboardButton(text="❌ Не сделал", callback_data=f"task_failed_{task_id}"),
+                        ]])
+                        try:
+                            await _bot.send_message(
+                                tg_id,
+                                f"⏰ <b>Пропущено ({missed_time}):</b> {title}\n"
+                                f"🔄 Повтор: {repeat} — переношу.\n\nСделано?",
+                                parse_mode="HTML",
+                                reply_markup=kb,
+                            )
+                        except Exception as e:
+                            logger.error("restore pass2: failed to send missed repeat '%s': %s", title, e)
+
+                        # Сдвигаем до ближайшей будущей даты
+                        new_reminder = reminder_start[:16]
                         for _ in range(400):
-                            new_deadline = _next_cycle_date(new_deadline, repeat, tz_offset)
+                            new_reminder = _next_cycle_date(new_reminder, repeat, tz_offset)
                             try:
-                                dl_dt = datetime.strptime(new_deadline[:10], "%Y-%m-%d").replace(
+                                nrem_dt = datetime.strptime(new_reminder[:16], "%Y-%m-%dT%H:%M").replace(
                                     tzinfo=timezone(timedelta(hours=tz_offset))
                                 )
                             except ValueError:
                                 break
-                            if dl_dt > now_utc:
+                            if nrem_dt > now_utc:
                                 break
-                        update_props["Дедлайн"] = _date(new_deadline[:10])
 
-                    await update_page(task_id, update_props)
-                    await _schedule_reminder(tg_id, title, new_reminder, task_id, tz_offset)
-                    logger.info("restore pass2: rescheduled '%s' repeat=%s next=%s", title, repeat, new_reminder)
-                    restored += 1
+                        deadline_start = (props.get("Дедлайн", {}).get("date") or {}).get("start", "")
+                        update_props: dict = {"Напоминание": _date(new_reminder)}
+                        if deadline_start:
+                            new_deadline = deadline_start[:16]
+                            for _ in range(400):
+                                new_deadline = _next_cycle_date(new_deadline, repeat, tz_offset)
+                                try:
+                                    dl_dt = datetime.strptime(new_deadline[:10], "%Y-%m-%d").replace(
+                                        tzinfo=timezone(timedelta(hours=tz_offset))
+                                    )
+                                except ValueError:
+                                    break
+                                if dl_dt > now_utc:
+                                    break
+                            update_props["Дедлайн"] = _date(new_deadline[:10])
+
+                        await update_page(task_id, update_props)
+                        await _schedule_reminder(tg_id, title, new_reminder, task_id, tz_offset)
+                        logger.info("restore pass2: rescheduled '%s' repeat=%s next=%s", title, repeat, new_reminder)
+                        restored += 1
                 except Exception as e:
                     logger.error("restore pass2: task %s error: %s", page.get("id"), e)
 
