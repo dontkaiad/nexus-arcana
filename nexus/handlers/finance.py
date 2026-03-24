@@ -368,6 +368,18 @@ async def _check_budget_limit(category: str, message: Message, user_notion_id: s
             break
     if not limit_amount:
         logger.info("_check_budget_limit: no limit for category=%r, skip", category)
+        # Показать остаток свободных даже без лимита
+        try:
+            result = await _calc_free_remaining(user_notion_id)
+            if result:
+                free_left, days_rem = result
+                daily = free_left / max(days_rem, 1)
+                await message.answer(
+                    f"💳 Свободных: {free_left:,.0f}₽ · {daily:,.0f}₽/день",
+                    parse_mode="HTML",
+                )
+        except Exception:
+            pass
         # Предложить установить лимит (1 раз за сессию)
         uid = getattr(message, "from_user", None)
         uid_id = uid.id if uid else 0
@@ -384,11 +396,10 @@ async def _check_budget_limit(category: str, message: Message, user_notion_id: s
                         InlineKeyboardButton(text="Другая сумма", callback_data=f"setlim_{link}_custom"),
                         InlineKeyboardButton(text="Не надо", callback_data="setlim_skip"),
                     ]]),
+                    parse_mode="HTML",
                 )
             except Exception as e:
                 logger.debug("limit suggest error: %s", e)
-        # Показать остаток свободных даже без лимита
-        await _show_free_remaining(message, user_notion_id)
         return
 
     from core.config import config
@@ -411,17 +422,20 @@ async def _check_budget_limit(category: str, message: Message, user_notion_id: s
         return
 
     pct = month_total / limit_amount * 100 if limit_amount else 0
+
+    # Собираем всё в ОДНО сообщение
+    parts = []
+
+    # Прогресс по категории
+    parts.append(f"📊 {category}: {month_total:,.0f} / {limit_amount:,.0f}₽ ({pct:.0f}%)")
+
     if pct >= 100:
         over = month_total - limit_amount
-        await message.answer(
-            f"🚨 Превышен лимит на {category}: <b>{month_total:,.0f}₽</b> из {limit_amount:,.0f}₽ (+{over:,.0f}₽)"
-        )
+        parts[0] = f"🚨 {category}: <b>{month_total:,.0f}₽</b> из {limit_amount:,.0f}₽ (+{over:,.0f}₽)"
     elif pct >= 80:
-        await message.answer(
-            f"⚠️ Уже потрачено <b>{month_total:,.0f}₽</b> из {limit_amount:,.0f}₽ на {category} ({pct:.0f}%)"
-        )
+        parts[0] = f"⚠️ {category}: <b>{month_total:,.0f}₽</b> из {limit_amount:,.0f}₽ ({pct:.0f}%)"
 
-    # Прогноз до конца месяца (только если ещё не превышен и >= 5 дней данных)
+    # Прогноз до конца месяца
     if pct < 100 and limit_amount:
         now2 = datetime.now(MOSCOW_TZ)
         day2 = now2.day
@@ -429,21 +443,27 @@ async def _check_budget_limit(category: str, message: Message, user_notion_id: s
             days_in_month = calendar.monthrange(now2.year, now2.month)[1]
             projected = month_total / day2 * days_in_month
             if projected > limit_amount:
-                await message.answer(
-                    f"📈 Прогноз до конца месяца: ~{projected:,.0f}₽ "
-                    f"(лимит {limit_amount:,.0f}₽) — темп высоковат"
-                )
+                parts.append(f"📈 Прогноз: ~{projected:,.0f}₽ — темп высоковат")
+
+    # Остаток свободных
+    try:
+        result = await _calc_free_remaining(user_notion_id)
+        if result:
+            free_left, days_rem = result
+            daily = free_left / max(days_rem, 1)
+            parts.append(f"💳 Свободных: {free_left:,.0f}₽ · {daily:,.0f}₽/день")
+    except Exception:
+        pass
 
     # Предупреждения по привычкам
     if "Привычки" in category or "привычки" in category.lower():
-        show_warning = random.random() < 0.2  # 20% шанс
+        show_warning = random.random() < 0.2
         if pct >= 80:
-            show_warning = True  # всегда при 80%+ лимита
+            show_warning = True
         if show_warning:
-            await message.answer(random.choice(HABIT_WARNINGS))
+            parts.append(random.choice(HABIT_WARNINGS))
 
-    # Показать остаток свободных после каждого расхода
-    await _show_free_remaining(message, user_notion_id)
+    await message.answer("\n".join(parts), parse_mode="HTML")
 
 
 async def _show_free_remaining(message: Message, user_notion_id: str = "") -> None:
@@ -1760,41 +1780,87 @@ async def _stats_publish(title: str, lines: List[str]) -> str:
 
 # ── Budget Setup Wizard ──────────────────────────────────────────────────────
 
-# Категории расходов для настройки бюджета (без доходных)
-_BUDGET_EXPENSE_CATS = [
-    "🐾 Коты", "🏠 Жилье", "🚬 Привычки", "🍜 Продукты",
-    "🍱 Кафе/Доставка", "🚕 Транспорт", "💅 Бьюти", "👗 Гардероб",
-    "💻 Подписки", "🏥 Здоровье", "📚 Хобби/Учеба",
+# ── Категории для wizard ─────────────────────────────────────────────────────
+_BUDGET_FIXED_CATS = [
+    "🏠 Жилье", "💧 Вода+Нет", "💻 Подписки", "🐾 Коты",
 ]
+_BUDGET_VARIABLE_CATS = [
+    "🚬 Привычки", "💅 Бьюти", "🚕 Транспорт", "🍜 Продукты",
+    "🍱 Кафе/Доставка", "🏥 Здоровье", "👗 Гардероб", "📚 Хобби/Учеба",
+]
+_BUDGET_EXPENSE_CATS = _BUDGET_FIXED_CATS + _BUDGET_VARIABLE_CATS
 
-_BUDGET_ADVICE_PROMPT = (
-    "Ты — дружелюбный финансовый ассистент. Пользователь только что настроил бюджет.\n"
-    "Данные:\n{data}\n\n"
-    "Напиши КОРОТКИЙ (2-4 предложения) позитивный отзыв:\n"
-    "- Похвали что взял финансы под контроль\n"
-    "- Дай один конкретный совет на основе цифр\n"
-    "- Если есть долги — подбодри, если нет — порадуйся\n"
-    "- Тон: дружеский, без нравоучений, с цифрами\n"
-    "Отвечай на русском, без markdown."
-)
+BUDGET_ADVISOR_PROMPT = """Ты финансовый советник для Кай (женский род, СДВГ).
+
+ВХОДНЫЕ ДАННЫЕ:
+Доход: {income}₽/мес
+Фиксированные: {fixed_total}₽ ({fixed_breakdown})
+Текущие вариативные: {variable_breakdown}
+Долги: {debts}
+Цели: {goals}
+
+ЗАДАЧА — распредели доход оптимально. Правила:
+
+1. ФИКС — не трогать (жилье, коммуналка, подписки, интернет, вода, коты)
+2. ВАРИАТИВНЫЕ — предложи реалистичные лимиты:
+   - Привычки: сокращай МАКСИМУМ на 10% от текущего за месяц. СДВГ = резкий отказ → срыв и откат. Стратегия: -10%/мес, через 3 мес ревью.
+   - Коты — ФИКС, не лимит (живые существа + ветеринарка)
+   - Остальное — оптимизируй разумно
+3. ИМПУЛЬСИВНЫЙ БЮДЖЕТ — ОБЯЗАТЕЛЬНО выдели 3-5к на "что хочу без вины"
+   Критично для СДВГ: запрет = срыв, разрешённый лимит = контроль
+4. ДОЛГИ — учти дедлайны. Скорый дедлайн = приоритет выше целей
+5. ЦЕЛИ — распредели остаток по приоритету:
+   - Сначала дешёвые (быстрее закрыть = мотивация для СДВГ)
+   - Подушка всегда в приоритете (хотя бы минимум)
+   - Дорогие цели (квартира) — реалистично оценить срок
+6. ОСТАТОК >= 0. Не хватает — сокращай цели, не лимиты.
+7. ОБЪЯСНИ каждое решение — почему такой лимит, почему такой приоритет целей.
+
+Ответ СТРОГО в JSON (без markdown code block):
+{{
+  "fixed": [
+    {{"category": "🏠 Жилье", "amount": 31000}},
+    {{"category": "🐾 Коты", "amount": 10000, "note": "фикс, живые существа"}}
+  ],
+  "limits": [
+    {{"category": "🚬 Привычки", "amount": 15750, "current": 17500, "change": "-10%", "note": "плавно"}},
+    {{"category": "🍜 Продукты", "amount": 12000, "note": "базовая потребность"}}
+  ],
+  "impulse_budget": 5000,
+  "impulse_note": "Твой дофамин-бюджет — трать на что хочешь без вины",
+  "debts_plan": [
+    {{"name": "Вика", "amount": 50000, "monthly": 50000, "note": "разом в апреле"}}
+  ],
+  "goals_plan": [
+    {{"name": "Подушка", "monthly": 5000, "total": 100000, "months": 20, "priority": 1}}
+  ],
+  "summary": "2-3 предложения: общая стратегия",
+  "habit_strategy": "Стратегия сокращения привычек на 2-3 предложения"
+}}"""
+
+
 
 
 @dataclass
 class BudgetSetupState:
     """Состояние пошаговой настройки бюджета."""
-    step: str = "pick_cats"           # pick_cats → enter_amounts → goals → debts → limits → done
-    selected_cats: list = field(default_factory=list)
-    amounts: dict = field(default_factory=dict)    # cat → amount
-    pending_cat_idx: int = 0          # текущий индекс в selected_cats
+    step: str = "income"
     user_notion_id: str = ""
-    bot_msg_id: int = 0               # ID последнего сообщения бота для edit
-    # Лимиты на категории расходов
-    limit_cats: list = field(default_factory=list)
-    limits: dict = field(default_factory=dict)
-    pending_limit_idx: int = 0
-    # Собранные цели/долги для итогового отчёта
-    saved_goals: list = field(default_factory=list)
+    bot_msg_id: int = 0
+    # Шаг 1: доход
+    income_items: dict = field(default_factory=dict)   # source → amount
+    # Шаг 2: фиксы
+    selected_fixed: list = field(default_factory=list)  # индексы в _BUDGET_FIXED_CATS
+    fixed_amounts: dict = field(default_factory=dict)   # cat → amount
+    pending_fixed_idx: int = 0
+    # Шаг 3: вариативные (текущие примерные)
+    variable_amounts: dict = field(default_factory=dict)  # cat → amount
+    # Шаг 4: долги
     saved_debts: list = field(default_factory=list)
+    # Шаг 5: цели
+    saved_goals: list = field(default_factory=list)
+    # Шаг 6: Sonnet план (JSON)
+    sonnet_plan: dict = field(default_factory=dict)
 
 
 _budget_setup: Dict[int, BudgetSetupState] = {}
@@ -1819,100 +1885,69 @@ async def _bot_edit_or_send(message: Message, state: BudgetSetupState, text: str
     state.bot_msg_id = sent.message_id
 
 
+# ── Запуск wizard ────────────────────────────────────────────────────────────
+
 async def start_budget_setup(message: Message, user_notion_id: str = "") -> None:
     """Начать пошаговую настройку бюджета."""
     uid = message.from_user.id
-    _budget_setup[uid] = BudgetSetupState(user_notion_id=user_notion_id)
-
-    rows = []
-    for i in range(0, len(_BUDGET_EXPENSE_CATS), 2):
-        row = []
-        for cat in _BUDGET_EXPENSE_CATS[i:i+2]:
-            row.append(InlineKeyboardButton(text=cat, callback_data=f"bsetup_cat_{i + _BUDGET_EXPENSE_CATS[i:i+2].index(cat)}"))
-        rows.append(row)
-    rows.append([
-        InlineKeyboardButton(text="✅ Готово — перейти к суммам", callback_data="bsetup_cats_done"),
-    ])
+    state = BudgetSetupState(user_notion_id=user_notion_id)
+    _budget_setup[uid] = state
 
     sent = await message.answer(
-        "📋 <b>Настройка бюджета — шаг 1/4</b>\n\n"
-        "Выбери категории <b>обязательных</b> ежемесячных расходов.\n"
-        "Нажимай на категории — выбранные отмечу ✅.\n"
-        "Когда всё выбрано — жми «Готово».",
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=rows),
+        "📋 <b>Настройка бюджета — шаг 1/5: Доход</b>\n\n"
+        "Какой доход в месяц? Все источники.\n"
+        "Напиши в формате (можно несколько строк):\n"
+        "<code>зп 100000\nаренда 15000</code>",
         parse_mode="HTML",
     )
-    _budget_setup[uid].bot_msg_id = sent.message_id
+    state.bot_msg_id = sent.message_id
 
 
-def _build_cat_keyboard(selected: list) -> InlineKeyboardMarkup:
-    """Клавиатура категорий с отметками выбранных."""
-    rows = []
-    for i in range(0, len(_BUDGET_EXPENSE_CATS), 2):
-        row = []
-        for j, cat in enumerate(_BUDGET_EXPENSE_CATS[i:i+2]):
-            idx = i + j
-            mark = "✅ " if idx in selected else ""
-            row.append(InlineKeyboardButton(
-                text=f"{mark}{cat}",
-                callback_data=f"bsetup_cat_{idx}",
-            ))
-        rows.append(row)
-    rows.append([
-        InlineKeyboardButton(text="✅ Готово — перейти к суммам", callback_data="bsetup_cats_done"),
-    ])
-    return InlineKeyboardMarkup(inline_keyboard=rows)
+# ── Callback handlers ────────────────────────────────────────────────────────
 
-
-@router.callback_query(F.data.startswith("bsetup_cat_"))
-async def on_budget_setup_cat(call: CallbackQuery) -> None:
-    """Тоггл выбора категории."""
+@router.callback_query(F.data.startswith("bsetup_fcat_"))
+async def on_budget_fixed_cat(call: CallbackQuery) -> None:
+    """Тоггл выбора фиксированной категории."""
     uid = call.from_user.id
     state = _budget_setup.get(uid)
-    if not state or state.step != "pick_cats":
+    if not state or state.step != "pick_fixed":
         await call.answer()
         return
-
     idx = int(call.data.split("_")[-1])
-    if idx in state.selected_cats:
-        state.selected_cats.remove(idx)
+    if idx in state.selected_fixed:
+        state.selected_fixed.remove(idx)
     else:
-        state.selected_cats.append(idx)
+        state.selected_fixed.append(idx)
+    await call.message.edit_reply_markup(reply_markup=_build_fixed_keyboard(state.selected_fixed))
+    await call.answer("Выбрано: {}".format(len(state.selected_fixed)))
 
-    await call.message.edit_reply_markup(reply_markup=_build_cat_keyboard(state.selected_cats))
-    await call.answer(f"Выбрано: {len(state.selected_cats)}")
 
-
-@router.callback_query(F.data == "bsetup_cats_done")
-async def on_budget_setup_cats_done(call: CallbackQuery) -> None:
-    """Завершён выбор категорий → переход к вводу сумм."""
+@router.callback_query(F.data == "bsetup_fixed_done")
+async def on_budget_fixed_done(call: CallbackQuery) -> None:
+    """Завершён выбор фиксированных → ввод сумм."""
     uid = call.from_user.id
     state = _budget_setup.get(uid)
     if not state:
         await call.answer()
         return
-
-    if not state.selected_cats:
+    if not state.selected_fixed:
         await call.answer("Выбери хотя бы одну категорию!")
         return
-
-    state.step = "enter_amounts"
-    state.pending_cat_idx = 0
+    state.step = "enter_fixed"
+    state.pending_fixed_idx = 0
     state.bot_msg_id = call.message.message_id
-
-    cat = _BUDGET_EXPENSE_CATS[state.selected_cats[0]]
+    cat = _BUDGET_FIXED_CATS[state.selected_fixed[0]]
     await call.message.edit_text(
-        f"📋 <b>Настройка бюджета — шаг 2/4</b>\n\n"
-        f"Сколько в месяц уходит на <b>{cat}</b>?\n"
-        f"Напиши сумму (число в рублях).",
+        "📋 <b>Фиксированные — ввод сумм</b>\n\n"
+        "Сколько в месяц на <b>{}</b>?".format(cat),
         parse_mode="HTML",
     )
     await call.answer()
 
 
-@router.callback_query(F.data == "bsetup_skip_goals")
-async def on_budget_skip_goals(call: CallbackQuery, user_notion_id: str = "") -> None:
-    """Пропустить цели → спросить про долги."""
+@router.callback_query(F.data == "bsetup_skip_variable")
+async def on_budget_skip_variable(call: CallbackQuery) -> None:
+    """Пропустить вариативные → долги."""
     uid = call.from_user.id
     state = _budget_setup.get(uid)
     if not state:
@@ -1921,481 +1956,654 @@ async def on_budget_skip_goals(call: CallbackQuery, user_notion_id: str = "") ->
     state.step = "debts"
     state.bot_msg_id = call.message.message_id
     await call.message.edit_text(
-        "📋 <b>Настройка бюджета — шаг 4/4</b>\n\n"
-        "Есть долги? Напиши <b>всё сразу</b>, каждый с новой строки:\n"
+        "📋 <b>Настройка бюджета — шаг 4/5: Долги</b>\n\n"
+        "Есть долги? Напиши <b>всё сразу</b>:\n"
         "<code>Вика 50000 до апреля\n"
-        "Илья 40000 до августа\n"
-        "дядя 100000 до сентября</code>\n\n"
-        "Или нажми «Пропустить» если долгов нет.",
+        "Илья 40000 до августа</code>\n\n"
+        "Или нажми «Пропустить».",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
-            InlineKeyboardButton(text="Пропустить — завершить", callback_data="bsetup_finish"),
+            InlineKeyboardButton(text="Нет долгов → цели", callback_data="bsetup_skip_debts"),
         ]]),
         parse_mode="HTML",
     )
     await call.answer()
 
 
-@router.callback_query(F.data == "bsetup_finish")
-async def on_budget_finish(call: CallbackQuery, user_notion_id: str = "") -> None:
-    """Завершить настройку бюджета."""
+@router.callback_query(F.data == "bsetup_skip_debts")
+async def on_budget_skip_debts(call: CallbackQuery) -> None:
+    """Пропустить долги → цели."""
     uid = call.from_user.id
     state = _budget_setup.get(uid)
-    if state:
-        state.bot_msg_id = call.message.message_id
-    await _finish_budget_setup(call.message, uid)
+    if not state:
+        await call.answer()
+        return
+    state.step = "goals"
+    state.bot_msg_id = call.message.message_id
+    await call.message.edit_text(
+        "📋 <b>Настройка бюджета — шаг 5/5: Цели</b>\n\n"
+        "На что копишь? Напиши <b>всё сразу</b>:\n"
+        "<code>телефон 100000\n"
+        "ПК 200000\n"
+        "подушка 100000</code>\n\n"
+        "Или нажми «Пропустить» — Sonnet предложит сам.",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
+            InlineKeyboardButton(text="Пропустить → анализ", callback_data="bsetup_skip_goals"),
+        ]]),
+        parse_mode="HTML",
+    )
     await call.answer()
 
 
+@router.callback_query(F.data == "bsetup_skip_goals")
+async def on_budget_skip_goals(call: CallbackQuery) -> None:
+    """Пропустить цели → Sonnet анализ."""
+    uid = call.from_user.id
+    state = _budget_setup.get(uid)
+    if not state:
+        await call.answer()
+        return
+    state.bot_msg_id = call.message.message_id
+    await _run_sonnet_analysis(call.message, state, uid)
+    await call.answer()
+
+
+@router.callback_query(F.data == "bsetup_accept")
+async def on_budget_accept(call: CallbackQuery) -> None:
+    """Принять план Sonnet → сохранить всё."""
+    uid = call.from_user.id
+    state = _budget_setup.get(uid)
+    if not state:
+        await call.answer()
+        return
+    state.bot_msg_id = call.message.message_id
+    await _save_sonnet_plan(call.message, state, uid)
+    await call.answer()
+
+
+@router.callback_query(F.data == "bsetup_recalc")
+async def on_budget_recalc(call: CallbackQuery) -> None:
+    """Пересчитать план → снова вызвать Sonnet."""
+    uid = call.from_user.id
+    state = _budget_setup.get(uid)
+    if not state:
+        await call.answer()
+        return
+    state.bot_msg_id = call.message.message_id
+    await _run_sonnet_analysis(call.message, state, uid)
+    await call.answer()
+
+
+@router.callback_query(F.data == "bsetup_adjust")
+async def on_budget_adjust(call: CallbackQuery) -> None:
+    """Режим корректировки → ждёт текст."""
+    uid = call.from_user.id
+    state = _budget_setup.get(uid)
+    if not state:
+        await call.answer()
+        return
+    state.step = "adjust"
+    state.bot_msg_id = call.message.message_id
+    await call.message.edit_text(
+        "✏️ <b>Корректировка</b>\n\n"
+        "Напиши что изменить, например:\n"
+        "<code>привычки 12000\n"
+        "убрать цель пк\n"
+        "добавить цель отпуск 80000</code>\n\n"
+        "Пересчитаю после всех правок.",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
+            InlineKeyboardButton(text="Готово → пересчитать", callback_data="bsetup_recalc"),
+        ]]),
+        parse_mode="HTML",
+    )
+    await call.answer()
+
+
+# ── Обработка текстовых ответов wizard ───────────────────────────────────────
+
 async def handle_budget_setup_text(message: Message, user_notion_id: str = "") -> bool:
-    """Обработка текстовых ответов в процессе настройки бюджета.
-    Возвращает True если обработано, False если не в режиме setup."""
+    """Обработка текстовых ответов в процессе настройки бюджета."""
     uid = message.from_user.id
     state = _budget_setup.get(uid)
     if not state:
         return False
 
     text = (message.text or "").strip()
-
     if text.lower() in ("отмена", "cancel", "стоп"):
         _budget_setup.pop(uid, None)
         await message.answer("❌ Настройка бюджета отменена.")
         return True
 
-    # ── Шаг: ввод сумм обязательных расходов ──
-    if state.step == "enter_amounts":
+    # ── Шаг 1: Доход ──
+    if state.step == "income":
+        lines = [l.strip() for l in text.split("\n") if l.strip()]
+        for line in lines:
+            parts = line.rsplit(maxsplit=1)
+            if len(parts) == 2:
+                name, amt_str = parts
+                amt_str = amt_str.replace(" ", "").replace("₽", "").replace("р", "").replace("к", "000").replace(",", ".")
+                try:
+                    amt = int(float(amt_str))
+                    state.income_items[name.strip()] = amt
+                except ValueError:
+                    pass
+        if not state.income_items:
+            await _bot_edit_or_send(message, state,
+                "⚠️ Не удалось распознать. Формат:\n<code>зп 100000\nаренда 15000</code>")
+            return True
+
+        total = sum(state.income_items.values())
+        summary = "\n".join("  {} — {:,}₽".format(k, v) for k, v in state.income_items.items())
+
+        # Переход к фиксам
+        state.step = "pick_fixed"
+        state.selected_fixed = list(range(len(_BUDGET_FIXED_CATS)))  # все выбраны по умолчанию
+        await _bot_edit_or_send(
+            message, state,
+            "✅ <b>Доход: {:,}₽/мес</b>\n{}\n\n"
+            "📋 <b>Шаг 2/5: Фиксированные траты</b>\n"
+            "Нельзя сократить: жилье, коммуналка, подписки, коты.\n"
+            "Убери лишнее и жми «Готово».".format(total, summary),
+            reply_markup=_build_fixed_keyboard(state.selected_fixed),
+        )
+        return True
+
+    # ── Шаг 2: Ввод сумм фиксов ──
+    if state.step == "enter_fixed":
         amount_str = text.replace(" ", "").replace("₽", "").replace("р", "").replace(",", ".")
         try:
             amount = int(float(amount_str))
         except ValueError:
-            await _bot_edit_or_send(message, state, "⚠️ Напиши число. Например: <b>25000</b>")
+            await _bot_edit_or_send(message, state, "⚠️ Напиши число. Например: <b>31000</b>")
             return True
 
-        cat_idx = state.selected_cats[state.pending_cat_idx]
-        cat = _BUDGET_EXPENSE_CATS[cat_idx]
-        state.amounts[cat] = amount
-        state.pending_cat_idx += 1
+        cat_idx = state.selected_fixed[state.pending_fixed_idx]
+        cat = _BUDGET_FIXED_CATS[cat_idx]
+        state.fixed_amounts[cat] = amount
+        state.pending_fixed_idx += 1
 
-        if state.pending_cat_idx < len(state.selected_cats):
-            next_cat = _BUDGET_EXPENSE_CATS[state.selected_cats[state.pending_cat_idx]]
-            # Сводка введённых + следующий вопрос
-            summary = "\n".join(f"  {c} — {a:,}₽" for c, a in state.amounts.items())
+        if state.pending_fixed_idx < len(state.selected_fixed):
+            next_cat = _BUDGET_FIXED_CATS[state.selected_fixed[state.pending_fixed_idx]]
+            summary = "\n".join("  {} — {:,}₽".format(c, a) for c, a in state.fixed_amounts.items())
             await _bot_edit_or_send(
                 message, state,
-                f"📋 <b>Обязательные расходы</b>\n{summary}\n\n"
-                f"Сколько на <b>{next_cat}</b>?",
+                "📋 <b>Фиксированные</b>\n{}\n\nСколько на <b>{}</b>?".format(summary, next_cat),
             )
         else:
-            await _save_obligatory_batch(state, user_notion_id)
-            # Показать итог и перейти к целям
-            summary = "\n".join(f"  {c} — {a:,}₽" for c, a in state.amounts.items())
-            total = sum(state.amounts.values())
+            # Переход к вариативным
+            summary = "\n".join("  {} — {:,}₽".format(c, a) for c, a in state.fixed_amounts.items())
+            total = sum(state.fixed_amounts.values())
+            state.step = "variable"
+            var_cats = "\n".join("  " + c for c in _BUDGET_VARIABLE_CATS)
             await _bot_edit_or_send(
                 message, state,
-                f"✅ <b>Обязательные расходы: {total:,}₽/мес</b>\n{summary}\n\n"
-                f"📋 <b>Настройка бюджета — шаг 3/4</b>\n\n"
-                f"Есть цели накопления? Напиши <b>всё сразу</b>:\n"
-                f"<code>телефон 100000\n"
-                f"ПК 200000\n"
-                f"подушка 100000</code>\n\n"
-                f"Или нажми «Пропустить».",
+                "✅ <b>Фикс: {:,}₽/мес</b>\n{}\n\n"
+                "📋 <b>Шаг 3/5: Вариативные траты</b>\n"
+                "Сколько <b>сейчас</b> примерно тратишь? Каждая с новой строки:\n"
+                "<code>привычки 17500\n"
+                "продукты 12000\n"
+                "кафе 5000\n"
+                "бьюти 3500\n"
+                "транспорт 3000</code>\n\n"
+                "Sonnet учтёт и предложит оптимальные лимиты.\n"
+                "Или пропусти — Sonnet разберётся сам.".format(total, summary),
                 reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
-                    InlineKeyboardButton(text="Пропустить → долги", callback_data="bsetup_skip_goals"),
+                    InlineKeyboardButton(text="Пропустить → долги", callback_data="bsetup_skip_variable"),
                 ]]),
             )
-            state.step = "goals"
         return True
 
-    # ── Шаг: ввод целей (multi-line) ──
-    if state.step == "goals":
+    # ── Шаг 3: Вариативные (multi-line) ──
+    if state.step == "variable":
         lines = [l.strip() for l in text.split("\n") if l.strip()]
-        parsed_goals = []
         for line in lines:
             parts = line.rsplit(maxsplit=1)
             if len(parts) == 2:
-                name, amount_str = parts
-                amount_str = amount_str.replace(" ", "").replace("₽", "").replace("р", "")
+                name, amt_str = parts
+                amt_str = amt_str.replace(" ", "").replace("₽", "").replace("р", "").replace(",", ".")
                 try:
-                    amount = int(float(amount_str))
-                    parsed_goals.append((name.strip(), amount))
+                    amt = int(float(amt_str))
+                    # Найти ближайшую категорию
+                    name_l = name.strip().lower()
+                    matched = None
+                    for vcat in _BUDGET_VARIABLE_CATS:
+                        if name_l in vcat.lower() or _cat_link(vcat) in name_l:
+                            matched = vcat
+                            break
+                    if matched:
+                        state.variable_amounts[matched] = amt
+                    else:
+                        state.variable_amounts[name.strip()] = amt
                 except ValueError:
                     pass
-        if not parsed_goals:
+
+        state.step = "debts"
+        if state.variable_amounts:
+            summary = "\n".join("  {} — {:,}₽".format(c, a) for c, a in state.variable_amounts.items())
             await _bot_edit_or_send(
                 message, state,
-                "⚠️ Формат: <code>название сумма</code> (каждая цель с новой строки)\n"
-                "Например:\n<code>телефон 100000\nПК 200000</code>",
+                "✅ <b>Текущие траты:</b>\n{}\n\n"
+                "📋 <b>Шаг 4/5: Долги</b>\n\n"
+                "Есть долги? Напиши <b>всё сразу</b>:\n"
+                "<code>Вика 50000 до апреля\nИлья 40000 до августа</code>\n\n"
+                "Или нажми «Пропустить».".format(summary),
                 reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
-                    InlineKeyboardButton(text="Пропустить → долги", callback_data="bsetup_skip_goals"),
+                    InlineKeyboardButton(text="Нет долгов → цели", callback_data="bsetup_skip_debts"),
                 ]]),
             )
-            return True
-
-        for name, amount in parsed_goals:
-            await _save_goal(name, amount, state.user_notion_id or user_notion_id)
-            state.saved_goals.append({"name": name, "target": amount})
-
-        summary = "\n".join(f"  🎯 {g['name']} — {g['target']:,}₽" for g in state.saved_goals)
-        state.step = "debts"
-        await _bot_edit_or_send(
-            message, state,
-            f"✅ <b>Цели сохранены:</b>\n{summary}\n\n"
-            f"📋 <b>Настройка бюджета — шаг 4/4</b>\n\n"
-            f"Есть долги? Напиши <b>всё сразу</b>:\n"
-            f"<code>Вика 50000 до апреля\n"
-            f"Илья 40000 до августа\n"
-            f"дядя 100000 до сентября</code>\n\n"
-            f"Или нажми «Пропустить».",
-            reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
-                InlineKeyboardButton(text="Пропустить — завершить", callback_data="bsetup_finish"),
-            ]]),
-        )
+        else:
+            await _bot_edit_or_send(
+                message, state,
+                "📋 <b>Шаг 4/5: Долги</b>\n\n"
+                "Есть долги? Напиши <b>всё сразу</b>:\n"
+                "<code>Вика 50000 до апреля\nИлья 40000 до августа</code>",
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
+                    InlineKeyboardButton(text="Нет долгов → цели", callback_data="bsetup_skip_debts"),
+                ]]),
+            )
         return True
 
-    # ── Шаг: ввод долгов (multi-line) ──
+    # ── Шаг 4: Долги (multi-line) ──
     if state.step == "debts":
         lines = [l.strip() for l in text.split("\n") if l.strip()]
-        parsed_debts = []
         import re as _re
         for line in lines:
             m = _re.match(r'(.+?)\s+(\d[\d\s]*)\s*(?:до\s+(.+))?$', line, _re.IGNORECASE)
             if m:
-                parsed_debts.append((m.group(1).strip(), int(m.group(2).replace(" ", "")), (m.group(3) or "").strip()))
+                state.saved_debts.append({
+                    "name": m.group(1).strip(),
+                    "amount": int(m.group(2).replace(" ", "")),
+                    "deadline": (m.group(3) or "").strip(),
+                })
 
-        if not parsed_debts:
+        if not state.saved_debts:
             await _bot_edit_or_send(
                 message, state,
-                "⚠️ Формат: <code>имя сумма до дедлайн</code> (каждый долг с новой строки)\n"
-                "Например:\n<code>Вика 50000 до апреля\nИлья 40000 до августа</code>",
+                "⚠️ Формат: <code>имя сумма до дедлайн</code>\n"
+                "Например: <code>Вика 50000 до апреля</code>",
                 reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
-                    InlineKeyboardButton(text="Завершить настройку", callback_data="bsetup_finish"),
+                    InlineKeyboardButton(text="Нет долгов → цели", callback_data="bsetup_skip_debts"),
                 ]]),
             )
             return True
 
-        for name, amount, deadline in parsed_debts:
-            await _save_debt(name, amount, deadline, state.user_notion_id or user_notion_id)
-            state.saved_debts.append({"name": name, "amount": amount, "deadline": deadline})
-
-        await _finish_budget_setup(message, uid)
+        summary = "\n".join(
+            "  {} — {:,}₽{}".format(d["name"], d["amount"], " до " + d["deadline"] if d["deadline"] else "")
+            for d in state.saved_debts
+        )
+        state.step = "goals"
+        await _bot_edit_or_send(
+            message, state,
+            "✅ <b>Долги:</b>\n{}\n\n"
+            "📋 <b>Шаг 5/5: Цели</b>\n\n"
+            "На что копишь? Напиши <b>всё сразу</b>:\n"
+            "<code>телефон 100000\nПК 200000\nподушка 100000</code>\n\n"
+            "Или пропусти — Sonnet предложит сам.".format(summary),
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
+                InlineKeyboardButton(text="Пропустить → анализ", callback_data="bsetup_skip_goals"),
+            ]]),
+        )
         return True
 
-    # ── Шаг: ввод лимитов ──
-    if state.step == "enter_limits":
-        amount_str = text.replace(" ", "").replace("₽", "").replace("р", "").replace(",", ".")
-        try:
-            amount = int(float(amount_str))
-        except ValueError:
-            await _bot_edit_or_send(message, state, "⚠️ Напиши число. Например: <b>9000</b>")
-            return True
+    # ── Шаг 5: Цели (multi-line) ──
+    if state.step == "goals":
+        lines = [l.strip() for l in text.split("\n") if l.strip()]
+        for line in lines:
+            parts = line.rsplit(maxsplit=1)
+            if len(parts) == 2:
+                name, amt_str = parts
+                amt_str = amt_str.replace(" ", "").replace("₽", "").replace("р", "").replace(",", ".")
+                try:
+                    amt = int(float(amt_str))
+                    state.saved_goals.append({"name": name.strip(), "target": amt})
+                except ValueError:
+                    pass
 
-        cat_idx = state.limit_cats[state.pending_limit_idx]
-        cat = _BUDGET_EXPENSE_CATS[cat_idx]
-        state.limits[cat] = amount
-        state.pending_limit_idx += 1
-
-        if state.pending_limit_idx < len(state.limit_cats):
-            next_cat = _BUDGET_EXPENSE_CATS[state.limit_cats[state.pending_limit_idx]]
-            summary = "\n".join(f"  {c} — {a:,}₽/мес" for c, a in state.limits.items())
+        if not state.saved_goals:
             await _bot_edit_or_send(
                 message, state,
-                f"📋 <b>Лимиты</b>\n{summary}\n\n"
-                f"Лимит на <b>{next_cat}</b>?",
+                "⚠️ Формат: <code>название сумма</code>\nНапример: <code>телефон 100000</code>",
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
+                    InlineKeyboardButton(text="Пропустить → анализ", callback_data="bsetup_skip_goals"),
+                ]]),
+            )
+            return True
+
+        await _run_sonnet_analysis(message, state, uid)
+        return True
+
+    # ── Шаг: корректировка ──
+    if state.step == "adjust":
+        # Парсим корректировки
+        lines = [l.strip() for l in text.split("\n") if l.strip()]
+        applied = []
+        for line in lines:
+            ll = line.lower()
+            if ll.startswith("убрать цель"):
+                name = line[len("убрать цель"):].strip()
+                state.saved_goals = [g for g in state.saved_goals if name.lower() not in g["name"].lower()]
+                applied.append("Убрана цель: " + name)
+            elif ll.startswith("добавить цель"):
+                rest = line[len("добавить цель"):].strip()
+                parts = rest.rsplit(maxsplit=1)
+                if len(parts) == 2:
+                    try:
+                        amt = int(float(parts[1].replace("₽", "").replace("р", "")))
+                        state.saved_goals.append({"name": parts[0].strip(), "target": amt})
+                        applied.append("Добавлена цель: {} {:,}₽".format(parts[0].strip(), amt))
+                    except ValueError:
+                        pass
+            else:
+                # "привычки 12000" → обновить вариативные
+                parts = line.rsplit(maxsplit=1)
+                if len(parts) == 2:
+                    name, amt_str = parts
+                    amt_str = amt_str.replace("₽", "").replace("р", "").replace(" ", "")
+                    try:
+                        amt = int(float(amt_str))
+                        name_l = name.strip().lower()
+                        matched = False
+                        for vcat in _BUDGET_VARIABLE_CATS:
+                            if name_l in vcat.lower() or _cat_link(vcat) in name_l:
+                                state.variable_amounts[vcat] = amt
+                                applied.append("{} → {:,}₽".format(vcat, amt))
+                                matched = True
+                                break
+                        if not matched:
+                            state.variable_amounts[name.strip()] = amt
+                            applied.append("{} → {:,}₽".format(name.strip(), amt))
+                    except ValueError:
+                        pass
+
+        if applied:
+            summary = "\n".join("  ✅ " + a for a in applied)
+            await _bot_edit_or_send(
+                message, state,
+                "✏️ <b>Применено:</b>\n{}\n\n"
+                "Ещё правки? Или жми «Готово → пересчитать».".format(summary),
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
+                    InlineKeyboardButton(text="Готово → пересчитать", callback_data="bsetup_recalc"),
+                ]]),
             )
         else:
-            await _save_limits_batch(state, user_notion_id)
-            _budget_setup.pop(uid, None)
-            # Показать обновлённый бюджет
-            budget_msg = await build_budget_message(state.user_notion_id)
-            if budget_msg:
-                await _bot_edit_or_send(message, state, f"✅ <b>Лимиты установлены!</b>\n\n{budget_msg}")
-            else:
-                await _bot_edit_or_send(message, state, "✅ Лимиты сохранены!")
+            await _bot_edit_or_send(message, state, "⚠️ Не понял. Примеры:\n<code>привычки 12000\nубрать цель пк</code>")
         return True
 
     return False
 
 
-# ── Вспомогательные шаги wizard ─────────────────────────────────────────────
+# ── Клавиатуры ───────────────────────────────────────────────────────────────
 
-def _build_limit_cat_keyboard(selected: list) -> InlineKeyboardMarkup:
-    """Клавиатура категорий лимитов с отметками выбранных."""
+def _build_fixed_keyboard(selected: list) -> InlineKeyboardMarkup:
     rows = []
-    for i in range(0, len(_BUDGET_EXPENSE_CATS), 2):
+    for i in range(0, len(_BUDGET_FIXED_CATS), 2):
         row = []
-        for j, cat in enumerate(_BUDGET_EXPENSE_CATS[i:i+2]):
+        for j, cat in enumerate(_BUDGET_FIXED_CATS[i:i+2]):
             idx = i + j
             mark = "✅ " if idx in selected else ""
             row.append(InlineKeyboardButton(
-                text=f"{mark}{cat}",
-                callback_data=f"bsetup_lcat_{idx}",
+                text="{}{}".format(mark, cat),
+                callback_data="bsetup_fcat_{}".format(idx),
             ))
         rows.append(row)
-    rows.append([
-        InlineKeyboardButton(text="✅ Готово — ввести лимиты", callback_data="bsetup_lcats_done"),
-    ])
-    rows.append([
-        InlineKeyboardButton(text="Пропустить", callback_data="bsetup_skip_limits"),
-    ])
+    rows.append([InlineKeyboardButton(text="✅ Готово → суммы", callback_data="bsetup_fixed_done")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-@router.callback_query(F.data.startswith("bsetup_lcat_"))
-async def on_budget_setup_limit_cat(call: CallbackQuery) -> None:
-    """Тоггл выбора категории для лимита."""
-    uid = call.from_user.id
-    state = _budget_setup.get(uid)
-    if not state or state.step != "pick_limits":
-        await call.answer()
-        return
+# ── Sonnet анализ ────────────────────────────────────────────────────────────
 
-    idx = int(call.data.split("_")[-1])
-    if idx in state.limit_cats:
-        state.limit_cats.remove(idx)
-    else:
-        state.limit_cats.append(idx)
+async def _run_sonnet_analysis(message: Message, state: BudgetSetupState, uid: int) -> None:
+    """Вызвать Sonnet для анализа бюджета и показать план."""
+    state.step = "sonnet_wait"
+    await _bot_edit_or_send(message, state, "🔍 <b>Анализирую бюджет...</b>\nSonnet считает оптимальный план.")
 
-    await call.message.edit_reply_markup(reply_markup=_build_limit_cat_keyboard(state.limit_cats))
-    await call.answer(f"Выбрано: {len(state.limit_cats)}")
+    total_income = sum(state.income_items.values())
+    fixed_total = sum(state.fixed_amounts.values())
+    fixed_bd = ", ".join("{} {}₽".format(c, a) for c, a in state.fixed_amounts.items())
+    var_bd = ", ".join("{} {}₽".format(c, a) for c, a in state.variable_amounts.items()) if state.variable_amounts else "не указаны"
+    debts_str = ", ".join(
+        "{} {}₽{}".format(d["name"], d["amount"], " до " + d["deadline"] if d["deadline"] else "")
+        for d in state.saved_debts
+    ) if state.saved_debts else "нет"
+    goals_str = ", ".join(
+        "{} {}₽".format(g["name"], g["target"]) for g in state.saved_goals
+    ) if state.saved_goals else "нет"
 
-
-@router.callback_query(F.data == "bsetup_lcats_done")
-async def on_budget_setup_lcats_done(call: CallbackQuery) -> None:
-    """Завершён выбор категорий для лимитов → ввод сумм."""
-    uid = call.from_user.id
-    state = _budget_setup.get(uid)
-    if not state:
-        await call.answer()
-        return
-
-    if not state.limit_cats:
-        await call.answer("Выбери хотя бы одну категорию!")
-        return
-
-    state.step = "enter_limits"
-    state.pending_limit_idx = 0
-    state.bot_msg_id = call.message.message_id
-
-    cat = _BUDGET_EXPENSE_CATS[state.limit_cats[0]]
-    await call.message.edit_text(
-        f"📋 <b>Лимиты — ввод сумм</b>\n\n"
-        f"Какой месячный лимит на <b>{cat}</b>?\n"
-        f"Напиши сумму (число в рублях).",
-        parse_mode="HTML",
+    prompt = BUDGET_ADVISOR_PROMPT.format(
+        income=total_income,
+        fixed_total=fixed_total,
+        fixed_breakdown=fixed_bd,
+        variable_breakdown=var_bd,
+        debts=debts_str,
+        goals=goals_str,
     )
-    await call.answer()
 
-
-@router.callback_query(F.data == "bsetup_skip_limits")
-async def on_budget_skip_limits(call: CallbackQuery) -> None:
-    """Пропустить лимиты → завершить полностью."""
-    uid = call.from_user.id
-    state = _budget_setup.get(uid)
-    if not state:
-        await call.answer()
-        return
-    _budget_setup.pop(uid, None)
-    await call.message.edit_text("✅ <b>Настройка завершена!</b> Лимиты можно добавить позже.", parse_mode="HTML")
-    await call.answer()
-
-
-async def _save_limits_batch(state: BudgetSetupState, user_notion_id: str = "") -> None:
-    """Сохранить все лимиты разом."""
-    uid = user_notion_id or state.user_notion_id
-    mem_db = os.environ.get("NOTION_DB_MEMORY")
-    if not mem_db:
-        return
-
-    for cat, amount in state.limits.items():
-        cat_link = _cat_link(cat)
-        key = f"лимит_{cat_link}"
-        fact = f"лимит: {cat} — {amount}₽/мес"
-        props = {
-            "Текст": _title(fact),
-            "Ключ": _text(key),
-            "Категория": _select("💰 Лимит"),
-            "Связь": _text(cat_link),
-            "Бот": _select("☀️ Nexus"),
-            "Актуально": {"checkbox": True},
-        }
-        if uid:
-            from core.notion_client import _relation
-            props["🪪 Пользователи"] = _relation(uid)
-        try:
-            from core.notion_client import db_query
-            existing = await db_query(mem_db, filter_obj={"and": [
-                {"property": "Ключ", "rich_text": {"contains": key}},
-                {"property": "Категория", "select": {"equals": "💰 Лимит"}},
-            ]}, page_size=1)
-            if existing:
-                await update_page(existing[0]["id"], props)
-            else:
-                await page_create(mem_db, props)
-        except Exception as e:
-            logger.error("_save_limits_batch: %s for %s", e, cat)
-
-
-async def _save_obligatory_batch(state: BudgetSetupState, user_notion_id: str = "") -> None:
-    """Сохранить все обязательные расходы разом."""
-    uid = user_notion_id or state.user_notion_id
-    mem_db = os.environ.get("NOTION_DB_MEMORY")
-    if not mem_db:
-        return
-
-    for cat, amount in state.amounts.items():
-        cat_link = _cat_link(cat)
-        key = f"обязательно_{cat_link}"
-        fact = f"обязательно: {cat} — {amount}₽/мес"
-        props = {
-            "Текст": _title(fact),
-            "Ключ": _text(key),
-            "Категория": _select("💰 Лимит"),
-            "Связь": _text(cat_link),
-            "Бот": _select("☀️ Nexus"),
-            "Актуально": {"checkbox": True},
-        }
-        if uid:
-            from core.notion_client import _relation
-            props["🪪 Пользователи"] = _relation(uid)
-        try:
-            from core.notion_client import db_query
-            existing = await db_query(mem_db, filter_obj={"and": [
-                {"property": "Ключ", "rich_text": {"contains": key}},
-                {"property": "Категория", "select": {"equals": "💰 Лимит"}},
-            ]}, page_size=1)
-            if existing:
-                await update_page(existing[0]["id"], props)
-            else:
-                await page_create(mem_db, props)
-        except Exception as e:
-            logger.error("_save_obligatory_batch: %s for %s", e, cat)
-
-
-async def _save_goal(name: str, amount: int, user_notion_id: str = "") -> None:
-    """Сохранить цель в Память."""
-    mem_db = os.environ.get("NOTION_DB_MEMORY")
-    if not mem_db:
-        return
-    key = f"цель_{name.lower().replace(' ', '_')}"
-    fact = f"цель: {name} — {amount}₽ · откладываю 0₽/мес"
-    props = {
-        "Текст": _title(fact),
-        "Ключ": _text(key),
-        "Категория": _select("💰 Лимит"),
-        "Связь": _text(name.lower()),
-        "Бот": _select("☀️ Nexus"),
-        "Актуально": {"checkbox": True},
-    }
-    if user_notion_id:
-        from core.notion_client import _relation
-        props["🪪 Пользователи"] = _relation(user_notion_id)
     try:
-        from core.notion_client import db_query
-        existing = await db_query(mem_db, filter_obj={"and": [
-            {"property": "Ключ", "rich_text": {"contains": key}},
-            {"property": "Категория", "select": {"equals": "💰 Лимит"}},
-        ]}, page_size=1)
-        if existing:
-            await update_page(existing[0]["id"], props)
-        else:
-            await page_create(mem_db, props)
+        raw = await ask_claude(prompt, model="sonnet")
+        # Извлечь JSON из ответа
+        raw = raw.strip()
+        if raw.startswith("```"):
+            raw = re.sub(r'^```\w*\n?', '', raw)
+            raw = re.sub(r'\n?```$', '', raw)
+        plan = json.loads(raw)
+        state.sonnet_plan = plan
     except Exception as e:
-        logger.error("_save_goal: %s", e)
-
-
-async def _save_debt(name: str, amount: int, deadline: str = "", user_notion_id: str = "") -> None:
-    """Сохранить долг в Память."""
-    mem_db = os.environ.get("NOTION_DB_MEMORY")
-    if not mem_db:
-        return
-    key = f"долг_{name.lower().replace(' ', '_')}"
-    dl_part = f" · дедлайн: {deadline}" if deadline else ""
-    fact = f"долг: {name} — {amount}₽{dl_part}"
-    props = {
-        "Текст": _title(fact),
-        "Ключ": _text(key),
-        "Категория": _select("💰 Лимит"),
-        "Связь": _text(name.lower()),
-        "Бот": _select("☀️ Nexus"),
-        "Актуально": {"checkbox": True},
-    }
-    if user_notion_id:
-        from core.notion_client import _relation
-        props["🪪 Пользователи"] = _relation(user_notion_id)
-    try:
-        from core.notion_client import db_query
-        existing = await db_query(mem_db, filter_obj={"and": [
-            {"property": "Ключ", "rich_text": {"contains": key}},
-            {"property": "Категория", "select": {"equals": "💰 Лимит"}},
-        ]}, page_size=1)
-        if existing:
-            await update_page(existing[0]["id"], props)
-        else:
-            await page_create(mem_db, props)
-    except Exception as e:
-        logger.error("_save_debt: %s", e)
-
-
-async def _finish_budget_setup(message: Message, uid: int) -> None:
-    """Завершить настройку: показать бюджет + совет от Sonnet + предложить лимиты."""
-    state = _budget_setup.get(uid)
-    if not state:
-        _budget_setup.pop(uid, None)
-        return
-    user_notion_id = state.user_notion_id
-
-    budget_msg = await build_budget_message(user_notion_id)
-    if budget_msg:
-        # Генерируем совет от Sonnet
-        advice = ""
-        try:
-            data_summary = []
-            if state.amounts:
-                total_obl = sum(state.amounts.values())
-                obl_items = ", ".join("{} {}₽".format(c, a) for c, a in state.amounts.items())
-                data_summary.append("Обязательные: {:,}₽/мес ({})".format(total_obl, obl_items))
-            if state.saved_goals:
-                goal_items = ", ".join("{} {:,}₽".format(g["name"], g["target"]) for g in state.saved_goals)
-                data_summary.append("Цели: " + goal_items)
-            if state.saved_debts:
-                total_debt = sum(d["amount"] for d in state.saved_debts)
-                debt_items = ", ".join("{} {:,}₽".format(d["name"], d["amount"]) for d in state.saved_debts)
-                data_summary.append("Долги: {:,}₽ ({})".format(total_debt, debt_items))
-            if data_summary:
-                prompt = _BUDGET_ADVICE_PROMPT.format(data="\n".join(data_summary))
-                advice = await ask_claude(prompt, model="sonnet")
-                advice = f"\n\n💬 {advice.strip()}"
-        except Exception as e:
-            logger.warning("_finish_budget_setup advice: %s", e)
-
+        logger.error("Sonnet budget analysis failed: %s", e)
+        state.sonnet_plan = {}
         await _bot_edit_or_send(
             message, state,
-            f"🎉 <b>Бюджет настроен!</b>\n\n{budget_msg}{advice}",
+            "⚠️ Не удалось получить анализ. Попробуй ещё раз.",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
+                InlineKeyboardButton(text="🔄 Попробовать снова", callback_data="bsetup_recalc"),
+            ]]),
+        )
+        return
+
+    # Форматируем план
+    plan_text = _format_sonnet_plan(state)
+    await _bot_edit_or_send(
+        message, state, plan_text,
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
+            InlineKeyboardButton(text="✅ Принять", callback_data="bsetup_accept"),
+            InlineKeyboardButton(text="✏️ Скорректировать", callback_data="bsetup_adjust"),
+            InlineKeyboardButton(text="🔄 Пересчитать", callback_data="bsetup_recalc"),
+        ]]),
+    )
+
+
+def _format_sonnet_plan(state: BudgetSetupState) -> str:
+    """Форматирует план Sonnet в красивое сообщение."""
+    plan = state.sonnet_plan
+    total_income = sum(state.income_items.values())
+    lines = ["<b>💰 Финансовый план от Nexus</b>"]
+    lines.append("\n<b>📥 Доход: {:,}₽</b>".format(total_income))
+
+    # Фиксы
+    fixed = plan.get("fixed", [])
+    if fixed:
+        fixed_total = sum(f.get("amount", 0) for f in fixed)
+        lines.append("\n<b>🔒 Фикс (нельзя сократить): {:,}₽</b>".format(fixed_total))
+        for f in fixed:
+            note = " <i>({})</i>".format(f["note"]) if f.get("note") else ""
+            lines.append("  {} — {:,}₽{}".format(f["category"], f["amount"], note))
+
+    # Лимиты
+    limits = plan.get("limits", [])
+    if limits:
+        limits_total = sum(l.get("amount", 0) for l in limits)
+        lines.append("\n<b>📊 Лимиты (рекомендация): {:,}₽</b>".format(limits_total))
+        for l in limits:
+            change = ""
+            if l.get("change"):
+                change = " ({})".format(l["change"])
+            elif l.get("current"):
+                change = " (было {:,})".format(l["current"])
+            note = ""
+            if l.get("note"):
+                note = " — <i>{}</i>".format(l["note"])
+            lines.append("  {} — {:,}₽{}{}".format(l["category"], l["amount"], change, note))
+
+    # Импульсивный
+    impulse = plan.get("impulse_budget", 0)
+    if impulse:
+        note = plan.get("impulse_note", "Трать без вины!")
+        lines.append("\n<b>🎲 Импульсивный: {:,}₽</b>".format(impulse))
+        lines.append("  <i>{}</i>".format(note))
+
+    # Долги
+    debts_plan = plan.get("debts_plan", [])
+    if debts_plan:
+        debt_total = sum(d.get("amount", 0) for d in debts_plan)
+        lines.append("\n<b>📋 Долги: {:,}₽</b>".format(debt_total))
+        for d in debts_plan:
+            monthly = " · {:,}₽/мес".format(d["monthly"]) if d.get("monthly") else ""
+            note = " — <i>{}</i>".format(d["note"]) if d.get("note") else ""
+            lines.append("  {} — {:,}₽{}{}".format(d["name"], d["amount"], monthly, note))
+
+    # Цели
+    goals_plan = plan.get("goals_plan", [])
+    if goals_plan:
+        lines.append("\n<b>🎯 Цели:</b>")
+        for g in goals_plan:
+            months = " → {} мес".format(g["months"]) if g.get("months") else ""
+            lines.append("  {} — {:,}₽/мес{} (всего {:,}₽)".format(
+                g["name"], g.get("monthly", 0), months, g.get("total", 0)))
+
+    # Summary
+    summary = plan.get("summary", "")
+    if summary:
+        lines.append("\n💡 <i>{}</i>".format(summary))
+
+    habit_strategy = plan.get("habit_strategy", "")
+    if habit_strategy:
+        lines.append("\n🚬 <i>{}</i>".format(habit_strategy))
+
+    return "\n".join(lines)
+
+
+# ── Сохранение плана ─────────────────────────────────────────────────────────
+
+async def _save_sonnet_plan(message: Message, state: BudgetSetupState, uid: int) -> None:
+    """Сохранить принятый план Sonnet в Notion Память."""
+    plan = state.sonnet_plan
+    notion_uid = state.user_notion_id
+
+    await _bot_edit_or_send(message, state, "💾 <b>Сохраняю план...</b>")
+
+    # Сохранить фиксы как обязательно_*
+    for f in plan.get("fixed", []):
+        cat = f["category"]
+        amt = f["amount"]
+        await _save_memory_entry(
+            "обязательно_{}".format(_cat_link(cat)),
+            "обязательно: {} — {}₽/мес".format(cat, amt),
+            notion_uid,
         )
 
-        # Предложить установить лимиты
-        state.step = "pick_limits"
-        state.limit_cats = []
-        rows = []
-        for i in range(0, len(_BUDGET_EXPENSE_CATS), 2):
-            row = []
-            for j, cat in enumerate(_BUDGET_EXPENSE_CATS[i:i+2]):
-                idx = i + j
-                row.append(InlineKeyboardButton(text=cat, callback_data=f"bsetup_lcat_{idx}"))
-            rows.append(row)
-        rows.append([InlineKeyboardButton(text="✅ Готово — ввести лимиты", callback_data="bsetup_lcats_done")])
-        rows.append([InlineKeyboardButton(text="Пропустить", callback_data="bsetup_skip_limits")])
-
-        sent = await message.answer(
-            "📋 <b>Последний шаг: лимиты на категории</b>\n\n"
-            "Теперь когда бюджет видно — хочешь установить лимиты?\n"
-            "Лимит — максимум, сколько тратить в месяц на категорию.\n"
-            "Предупрежу при 80% и заблокирую при 100%.\n\n"
-            "Выбери категории или пропусти.",
-            reply_markup=InlineKeyboardMarkup(inline_keyboard=rows),
-            parse_mode="HTML",
+    # Сохранить лимиты
+    for l in plan.get("limits", []):
+        cat = l["category"]
+        amt = l["amount"]
+        await _save_memory_entry(
+            "лимит_{}".format(_cat_link(cat)),
+            "лимит: {} — {}₽/мес".format(cat, amt),
+            notion_uid,
         )
-        state.bot_msg_id = sent.message_id
-        # НЕ удаляем state из _budget_setup — лимиты ещё впереди
+
+    # Сохранить импульсивный бюджет как лимит
+    impulse = plan.get("impulse_budget", 0)
+    if impulse:
+        await _save_memory_entry(
+            "лимит_импульсивный",
+            "лимит: 🎲 Импульсивный — {}₽/мес".format(impulse),
+            notion_uid,
+        )
+
+    # Сохранить долги
+    for d in plan.get("debts_plan", []):
+        name = d["name"]
+        amt = d["amount"]
+        monthly = d.get("monthly", 0)
+        note = d.get("note", "")
+        deadline = ""
+        # Попробуем найти дедлайн из state.saved_debts
+        for sd in state.saved_debts:
+            if sd["name"].lower() == name.lower():
+                deadline = sd.get("deadline", "")
+                break
+        dl_part = " · дедлайн: {}".format(deadline) if deadline else ""
+        mon_part = " · платёж: {}₽/мес".format(monthly) if monthly else ""
+        await _save_memory_entry(
+            "долг_{}".format(name.lower().replace(" ", "_")),
+            "долг: {} — {}₽{}{}".format(name, amt, dl_part, mon_part),
+            notion_uid,
+        )
+
+    # Сохранить цели
+    for g in plan.get("goals_plan", []):
+        name = g["name"]
+        total = g.get("total", 0)
+        monthly = g.get("monthly", 0)
+        await _save_memory_entry(
+            "цель_{}".format(name.lower().replace(" ", "_")),
+            "цель: {} — {}₽ · откладываю {}₽/мес".format(name, total, monthly),
+            notion_uid,
+        )
+
+    _budget_setup.pop(uid, None)
+
+    # Показать итоговый бюджет
+    budget_msg = await build_budget_message(notion_uid)
+    if budget_msg:
+        await _bot_edit_or_send(
+            message, state,
+            "🎉 <b>План принят и сохранён!</b>\n\n{}".format(budget_msg),
+        )
     else:
-        _budget_setup.pop(uid, None)
-        await _bot_edit_or_send(message, state, "✅ Данные сохранены! Запиши доход и вызови /budget.")
+        await _bot_edit_or_send(message, state, "✅ План сохранён! Запиши доход и вызови /budget.")
+
+
+async def _save_memory_entry(key: str, fact: str, user_notion_id: str = "") -> None:
+    """Сохранить или обновить запись в Памяти (💰 Лимит)."""
+    mem_db = os.environ.get("NOTION_DB_MEMORY")
+    if not mem_db:
+        return
+    props = {
+        "Текст": _title(fact),
+        "Ключ": _text(key),
+        "Категория": _select("💰 Лимит"),
+        "Бот": _select("☀️ Nexus"),
+        "Актуально": {"checkbox": True},
+    }
+    if user_notion_id:
+        from core.notion_client import _relation
+        props["🪪 Пользователи"] = _relation(user_notion_id)
+    try:
+        from core.notion_client import db_query
+        existing = await db_query(mem_db, filter_obj={"and": [
+            {"property": "Ключ", "rich_text": {"contains": key}},
+            {"property": "Категория", "select": {"equals": "💰 Лимит"}},
+        ]}, page_size=1)
+        if existing:
+            await update_page(existing[0]["id"], props)
+        else:
+            await page_create(mem_db, props)
+    except Exception as e:
+        logger.error("_save_memory_entry: %s for key=%s", e, key)
+
+
+# ── Старые save-функции (для совместимости с text triggers) ──────────────────
+
+async def _save_goal(name: str, amount: int, user_notion_id: str = "") -> None:
+    await _save_memory_entry(
+        "цель_{}".format(name.lower().replace(" ", "_")),
+        "цель: {} — {}₽ · откладываю 0₽/мес".format(name, amount),
+        user_notion_id,
+    )
+
+async def _save_debt(name: str, amount: int, deadline: str = "", user_notion_id: str = "") -> None:
+    dl_part = " · дедлайн: {}".format(deadline) if deadline else ""
+    await _save_memory_entry(
+        "долг_{}".format(name.lower().replace(" ", "_")),
+        "долг: {} — {}₽{}".format(name, amount, dl_part),
+        user_notion_id,
+    )
