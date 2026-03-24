@@ -1915,68 +1915,51 @@ HABIT_WARNINGS = [
     "💡 Одна пачка в два дня вместо одной = 4 250₽ экономии/мес.",
 ]
 
-BUDGET_PARSE_PROMPT = """Ты финансовый советник для Кай (женский род, СДВГ).
+BUDGET_PARSE_PROMPT = """Финансовый советник. Пользователь с СДВГ (женский род).
 
-КОНТЕКСТ:
-- Chapman (Чапман) — марка СИГАРЕТ (не чай!)
-- СДВГ: нужен быстрый дофамин, резкие ограничения → срыв
-- Импульсивный бюджет = резервный фонд на превышения лимитов, НЕ отдельная категория трат
+КОНТЕКСТ: Chapman = СИГАРЕТЫ (не чай!). СДВГ → резкие ограничения = срыв.
+Текущая дата: {current_date}.
 
-Входной текст (опечатки, сокращения, свободная форма):
-{all_messages}
+Входные данные: {all_messages}
+Категории финансов: {finance_categories}
 
-Доступные категории финансов: {finance_categories}
+РАСЧЁТ:
+1. ДОХОД — все источники. "к"=тысяч, "млн"=миллионов, "в год"→/12. Диапазон→верхняя граница.
+2. ФИКС = жилье+коммуналка+подписки+интернет+вода+коты(живые существа). Не трогать.
+3. ДОЛГИ = сумма/месяцев_до_дедлайна. Просрочен → вся сумма. ПРИОРИТЕТНЕЕ ЦЕЛЕЙ.
+4. СВОБОДНЫЕ = доход - фикс - платежи_по_долгам. Если <=0 → честно сказать.
+5. ПОДУШКА = 10% свободных (мин 2000₽, или 0₽ если нереально).
+6. ЛИМИТЫ по каждой вариативной категории. Сумма <= свободные - подушка - импульсивный.
+7. ИМПУЛЬСИВНЫЙ = 3-5к. Резерв на превышения лимитов (НЕ отдельная категория трат).
+8. ЦЕЛИ = остаток после всего. Если 0₽ → указать КОГДА начнём копить.
 
-АЛГОРИТМ РАСЧЁТА (строго по порядку):
-1. ДОХОД — все источники
-2. ФИКС = жилье + коммуналка + подписки + интернет + вода + коты (живые существа = фикс). НЕ трогать.
-3. ДОЛГИ = обязательные ежемесячные платежи (сумма_долга / месяцев_до_дедлайна от текущей даты). Просроченный = вся сумма сразу.
-4. СВОБОДНЫЕ = доход - фикс - ежемесячные_платежи_по_долгам
-5. Если СВОБОДНЫЕ <= 0: честно — всё на долги. Минимум на еду. НЕ ВЫДУМЫВАТЬ деньги.
-6. ПОДУШКА = 10% от свободных (минимум 2000₽). Если невозможно — 0₽ и объяснить когда получится.
-7. ЛИМИТЫ = свободные - подушка, по КАЖДОЙ вариативной категории
-8. ИМПУЛЬСИВНЫЙ = 3-5к из лимитов. Резерв на превышения, НЕ отдельная категория.
-9. ЦЕЛИ = после долгов, подушки и лимитов. Если 0₽ — честно.
+ПРАВИЛА:
+- Привычки (сигареты+кола+энергетики) = ОДНА категория "🚬 Привычки". НЕ разбивать!
+- Привычки: -10% макс (СДВГ=срыв при резком сокращении)
+- НЕ советовать "пить/курить меньше". Превышения → из импульсивного.
+- Долги: показать когда станет легче
+- Цели: если 0₽/мес → вместо "0₽" написать "после долгов (месяц год)"
 
-"к" = тысяч, "млн" = миллионов. Диапазон (15-20к) → верхняя граница. "в год" → /12.
+ВАЖНО: JSON КОМПАКТНЫЙ. Поля note — макс 10 слов. Без эссе.
 
-ПРАВИЛА ЛИМИТОВ:
-- Привычки: -10% макс от текущего (СДВГ = резкий отказ → срыв)
-- По КАЖДОЙ категории из доступных предложить лимит
-- Сумма лимитов + подушка + импульсивный <= свободные
-- Мало денег → сокращать цели и подушку, НЕ еду и транспорт
-- НЕ советовать "пить/курить меньше" → "превышения списываются из импульсивного"
-
-ПРАВИЛА ДОЛГОВ:
-- ПРИОРИТЕТНЕЕ ВСЕХ ЦЕЛЕЙ И ПОДУШКИ
-- Показать КОГДА станет легче: "После {{месяц}} долг {{имя}} закрыт → +{{сумма}}₽/мес"
-
-ПРАВИЛА ЦЕЛЕЙ:
-- ТОЛЬКО после долгов и подушки. Дешёвые первыми (мотивация СДВГ).
-- Дорогие (квартира) — реалистично.
-
-Ответ СТРОГО в JSON (без markdown, без ```):
+JSON (без markdown):
 {{
   "income": [{{"source": "ЗП", "amount": 100000}}],
   "income_total": 115000,
   "fixed": [{{"name": "Съём", "category": "🏠 Жилье", "amount": 20000}}],
   "fixed_total": 54200,
-  "debts_monthly": [
-    {{"name": "Вика", "total": 50000, "deadline": "апрель 2026", "monthly": 50000, "months_left": 1}}
-  ],
-  "debts_monthly_total": 74667,
-  "free_after_debts": 40000,
-  "savings": {{"name": "Подушка", "amount": 3000, "note": "10% от свободных"}},
-  "limits": [
-    {{"category": "🚬 Привычки", "amount": 17685, "current": 19650, "change": "-10%", "note": "..."}}
-  ],
+  "debts_monthly": [{{"name": "Вика", "total": 50000, "deadline": "апрель 2026", "monthly": 50000, "months_left": 1}}],
+  "debts_monthly_total": 50000,
+  "free_after_debts": 12800,
+  "savings": {{"amount": 2000, "note": "10% свободных"}},
+  "limits": [{{"category": "🚬 Привычки", "amount": 17685, "current": 19650, "change": "-10%"}}],
   "limits_total": 35000,
-  "impulse_budget": 5000,
-  "impulse_note": "Резерв на превышения лимитов",
-  "goals": [{{"name": "Телефон", "monthly": 0, "total": 100000, "note": "после долгов"}}],
-  "relief_timeline": "После апреля: -50к долга → +50к свободных. К сентябрю все долги закрыты.",
-  "summary": "2-3 предложения: стратегия и прогноз",
-  "habit_strategy": "2-3 предложения (без нравоучений, только математика)"
+  "impulse_budget": 4000,
+  "impulse_note": "Резерв на превышения",
+  "goals": [{{"name": "Телефон", "monthly": 0, "total": 100000, "starts_after": "сентябрь 2026"}}],
+  "relief_timeline": "Апрель: -50к Вика. Сентябрь: все долги закрыты → копим.",
+  "summary": "Макс 2 предложения",
+  "habit_strategy": "Макс 2 предложения"
 }}"""
 
 
@@ -2041,25 +2024,12 @@ async def handle_budget_setup_text(message: Message, user_notion_id: str = "") -
         await _run_budget_analysis(message, uid)
         return True
 
-    # Добавляем в буфер
+    # Копим в буфер, ставим 👀. Анализ — только по кнопке или "готово".
     _budget_buf[uid].append(text)
-
-    # Если сообщение содержит числа (= финансовые данные) и достаточно длинное — сразу анализ
-    has_numbers = bool(re.search(r'\d{3,}', text))
-    is_substantial = len(text) > 30 and has_numbers
-    if is_substantial:
-        # Ставим реакцию и сразу запускаем анализ
-        try:
-            await message.react([{"type": "emoji", "emoji": "🔍"}])
-        except Exception:
-            pass
-        await _run_budget_analysis(message, uid)
-    else:
-        # Короткое сообщение — копим, ждём ещё
-        try:
-            await message.react([{"type": "emoji", "emoji": "👀"}])
-        except Exception:
-            pass
+    try:
+        await message.react([{"type": "emoji", "emoji": "👀"}])
+    except Exception:
+        pass
     return True
 
 
@@ -2174,7 +2144,12 @@ async def _run_budget_analysis(message: Message, uid: int) -> None:
 
     # Получить список категорий из БД финансов
     finance_cats_str = ", ".join(CATEGORIES) if CATEGORIES else "неизвестно"
-    prompt = BUDGET_PARSE_PROMPT.format(all_messages=all_text, finance_categories=finance_cats_str)
+    current_date = datetime.now(MOSCOW_TZ).strftime("%d.%m.%Y")
+    prompt = BUDGET_PARSE_PROMPT.format(
+        all_messages=all_text, finance_categories=finance_cats_str, current_date=current_date,
+    )
+    plan = None
+    raw = ""
     try:
         from core.config import config as _cfg
         raw = await ask_claude(prompt, model=_cfg.model_sonnet, max_tokens=4096)
@@ -2182,16 +2157,30 @@ async def _run_budget_analysis(message: Message, uid: int) -> None:
             raise ValueError("Empty response from Sonnet")
         raw = raw.strip()
         logger.info("Sonnet budget raw response length: %d chars", len(raw))
-        # Извлечь JSON из ответа — Sonnet может обернуть в ```json...``` или добавить текст
+        # Извлечь JSON — Sonnet может обернуть в ```json...``` или добавить текст
         json_match = re.search(r'\{[\s\S]*\}', raw)
         if json_match:
             raw = json_match.group(0)
         plan = json.loads(raw)
-        _budget_plan[uid] = plan
     except json.JSONDecodeError as e:
-        logger.error("Sonnet budget JSON parse failed: %s\nRaw (first 500): %s", e, raw[:500] if raw else "EMPTY")
+        logger.error("Sonnet budget JSON parse failed: %s\nRaw (first 300): %s", e, raw[:300])
+        # Попытка починить обрезанный JSON — добавить закрывающие скобки
+        try:
+            fixed = raw.rstrip()
+            # Считаем незакрытые скобки
+            open_braces = fixed.count("{") - fixed.count("}")
+            open_brackets = fixed.count("[") - fixed.count("]")
+            if open_braces > 0 or open_brackets > 0:
+                fixed = fixed.rstrip(",\n ")
+                fixed += "]" * max(0, open_brackets) + "}" * max(0, open_braces)
+                plan = json.loads(fixed)
+                logger.info("Sonnet budget JSON fixed by closing brackets")
+        except Exception:
+            pass
     except Exception as e:
         logger.error("Sonnet budget analysis failed: %s", e)
+
+    if plan is None:
         await loading.edit_text(
             "⚠️ Не удалось получить анализ. Попробуй ещё раз.",
             reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
@@ -2199,6 +2188,8 @@ async def _run_budget_analysis(message: Message, uid: int) -> None:
             ]]),
         )
         return
+
+    _budget_plan[uid] = plan
 
     # Показать план + кнопки выбора приоритетной цели (если есть)
     plan_text = _format_plan(plan)
@@ -2283,45 +2274,49 @@ def _format_plan(plan: dict) -> str:
         if savings.get("note"):
             lines.append("  <i>{}</i>".format(savings["note"]))
 
-    # Лимиты
+    # Лимиты — компактно, без длинных note
     limits = plan.get("limits", [])
     if limits:
         limits_total = plan.get("limits_total", sum(l.get("amount", 0) for l in limits))
         lines.append("\n<b>📊 Лимиты: {:,}₽</b>".format(limits_total))
         for l in limits:
-            change = ""
-            if l.get("change"):
-                change = " ({})".format(l["change"])
-            elif l.get("current"):
-                change = " (было {:,})".format(l["current"])
-            note = " — <i>{}</i>".format(l["note"]) if l.get("note") else ""
+            change = " ({})".format(l["change"]) if l.get("change") else ""
             amt = l.get("amount", 0)
-            lines.append("  {} — {:,}₽{}{}".format(l.get("category", "?"), amt, change, note))
+            lines.append("  {} — {:,}₽{}".format(l.get("category", "?"), amt, change))
 
     # Импульсивный
     impulse = plan.get("impulse_budget", 0)
     if impulse:
         lines.append("\n<b>🎲 Импульсивный: {:,}₽</b>".format(impulse))
-        lines.append("  <i>{}</i>".format(plan.get("impulse_note", "Резерв на превышения лимитов")))
+        lines.append("  <i>Резерв на превышения лимитов</i>")
 
-    # Цели
+    # Цели — показать timeline вместо 0₽
     goals = plan.get("goals", [])
     if goals:
-        lines.append("\n<b>🎯 Цели (после долгов):</b>")
+        lines.append("\n<b>🎯 Цели:</b>")
         for g in goals:
-            mon = " {:,}₽/мес".format(g.get("monthly", 0)) if g.get("monthly") else " 0₽/мес"
-            note = " — <i>{}</i>".format(g["note"]) if g.get("note") else ""
-            lines.append("  {} — {:,}₽ ·{}{}".format(g.get("name", "?"), g.get("total", 0), mon, note))
+            monthly = g.get("monthly", 0)
+            total = g.get("total", 0)
+            if monthly and monthly > 0:
+                months = g.get("months", 0)
+                time_str = " → {} мес".format(months) if months else ""
+                lines.append("  {} — {:,}₽/мес{}".format(g.get("name", "?"), monthly, time_str))
+            else:
+                starts = g.get("starts_after", g.get("note", ""))
+                if starts:
+                    lines.append("  {} — {:,}₽ · после {}".format(g.get("name", "?"), total, starts))
+                else:
+                    lines.append("  {} — {:,}₽ · после закрытия долгов".format(g.get("name", "?"), total))
 
     # Timeline
     if plan.get("relief_timeline"):
         lines.append("\n📅 <i>{}</i>".format(plan["relief_timeline"]))
 
-    # Summary
+    # Summary + habits — коротко внизу
     if plan.get("summary"):
         lines.append("\n💡 <i>{}</i>".format(plan["summary"]))
     if plan.get("habit_strategy"):
-        lines.append("\n🚬 <i>{}</i>".format(plan["habit_strategy"]))
+        lines.append("🚬 <i>{}</i>".format(plan["habit_strategy"]))
 
     return "\n".join(lines)
 
