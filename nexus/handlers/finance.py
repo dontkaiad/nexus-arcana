@@ -15,6 +15,7 @@ from typing import Dict, List, Optional, Set, Tuple
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram import Router, F
 from core.claude_client import ask_claude, ask_claude_vision
+from nexus.handlers.utils import react
 from core.notion_client import finance_month, log_error, page_create, update_page, create_report_page, _title, _number, _select, _date, _text
 
 logger = logging.getLogger("nexus.finance")
@@ -1046,6 +1047,7 @@ async def handle_finance_text(message: Message, text: str, bot_label: str = "☀
         return
 
     _last_page_id[uid] = page_id
+    await react(message, "💸" if "Расход" in data.get("type_", "") else "💰")
     await message.answer(_format_record(data))
 
     # Smart recall: ищем в памяти по описанию покупки
@@ -1120,6 +1122,7 @@ async def handle_finance_clarification(message: Message, user_notion_id: str = "
         page_id = await _save_finance(pending, config.nexus.db_finance, user_notion_id=stored_uid, uid=uid)
         if page_id:
             _last_page_id[uid] = page_id
+            await react(message, "💸" if "Расход" in pending.get("type_", "") else "💰")
             await message.answer(_format_record(pending))
             if "Расход" in pending.get("type_", ""):
                 try:
@@ -2008,34 +2011,56 @@ async def on_budget_adjust(call: CallbackQuery) -> None:
     await call.answer()
 
 
+@router.callback_query(F.data.startswith("bsetup_prio_"))
+async def on_budget_priority_goal(call: CallbackQuery) -> None:
+    """Выбор приоритетной цели — пересортировать."""
+    uid = call.from_user.id
+    plan = _budget_plan.get(uid)
+    if not plan:
+        await call.answer("⚠️ Сессия устарела", show_alert=True)
+        return
+    idx = int(call.data.split("_")[-1])
+    goals = plan.get("goals", [])
+    if idx >= len(goals):
+        await call.answer()
+        return
+
+    chosen = goals.pop(idx)
+    chosen["priority"] = 1
+    goals.insert(0, chosen)
+    for i, g in enumerate(goals):
+        g["priority"] = i + 1
+    plan["goals"] = goals
+
+    # Добавить в буфер для пересчёта
+    if uid in _budget_buf:
+        _budget_buf[uid].append("ПРИОРИТЕТ: главная цель — {}".format(chosen.get("name", "?")))
+    await call.answer("⭐ {} — приоритет №1".format(chosen.get("name", "?")))
+
+    # Пересчитать
+    _budget_msg[uid] = call.message.message_id
+    await _run_budget_analysis(call.message, uid)
+
+
 # ── Sonnet Analysis ──────────────────────────────────────────────────────────
 
 async def _run_budget_analysis(message: Message, uid: int) -> None:
     """Собрать буфер, отправить Sonnet, показать план."""
     all_text = "\n".join(_budget_buf.get(uid, []))
 
-    # Показать "считаю..."
-    bot_msg_id = _budget_msg.get(uid, 0)
-    try:
-        if bot_msg_id:
-            await message.bot.edit_message_text(
-                "🔍 <b>Анализирую бюджет...</b>\nSonnet считает оптимальный план.",
-                chat_id=message.chat.id, message_id=bot_msg_id, parse_mode="HTML",
-            )
-        else:
-            sent = await message.answer(
-                "🔍 <b>Анализирую бюджет...</b>\nSonnet считает оптимальный план.",
-                parse_mode="HTML",
-            )
-            _budget_msg[uid] = sent.message_id
-            bot_msg_id = sent.message_id
-    except Exception:
-        sent = await message.answer(
-            "🔍 <b>Анализирую бюджет...</b>\nSonnet считает оптимальный план.",
-            parse_mode="HTML",
-        )
-        _budget_msg[uid] = sent.message_id
-        bot_msg_id = sent.message_id
+    # Удалить старое сообщение-инструкцию и отправить "считаю" НИЖЕ чата
+    old_msg_id = _budget_msg.get(uid, 0)
+    if old_msg_id:
+        try:
+            await message.bot.delete_message(message.chat.id, old_msg_id)
+        except Exception:
+            pass
+
+    loading = await message.answer(
+        "🔍 <b>Анализирую бюджет...</b>\nSonnet считает оптимальный план.",
+        parse_mode="HTML",
+    )
+    _budget_msg[uid] = loading.message_id
 
     prompt = BUDGET_PARSE_PROMPT.format(all_messages=all_text)
     try:
@@ -2049,37 +2074,50 @@ async def _run_budget_analysis(message: Message, uid: int) -> None:
         _budget_plan[uid] = plan
     except Exception as e:
         logger.error("Sonnet budget analysis failed: %s", e)
-        try:
-            await message.bot.edit_message_text(
-                "⚠️ Не удалось получить анализ. Попробуй ещё раз.",
-                chat_id=message.chat.id, message_id=bot_msg_id, parse_mode="HTML",
-                reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
-                    InlineKeyboardButton(text="🔄 Попробовать снова", callback_data="bsetup_recalc"),
-                ]]),
-            )
-        except Exception:
-            await message.answer("⚠️ Не удалось получить анализ. Попробуй /budget заново.")
-        return
-
-    plan_text = _format_plan(plan)
-    try:
-        await message.bot.edit_message_text(
-            plan_text, chat_id=message.chat.id, message_id=bot_msg_id,
-            parse_mode="HTML",
+        await loading.edit_text(
+            "⚠️ Не удалось получить анализ. Попробуй ещё раз.",
             reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
-                InlineKeyboardButton(text="✅ Принять", callback_data="bsetup_accept"),
-                InlineKeyboardButton(text="✏️ Изменить", callback_data="bsetup_adjust"),
-                InlineKeyboardButton(text="🔄 Пересчитать", callback_data="bsetup_recalc"),
+                InlineKeyboardButton(text="🔄 Попробовать снова", callback_data="bsetup_recalc"),
             ]]),
         )
+        return
+
+    # Показать план + кнопки выбора приоритетной цели (если есть)
+    plan_text = _format_plan(plan)
+    buttons = [[
+        InlineKeyboardButton(text="✅ Принять", callback_data="bsetup_accept"),
+        InlineKeyboardButton(text="✏️ Изменить", callback_data="bsetup_adjust"),
+        InlineKeyboardButton(text="🔄 Пересчитать", callback_data="bsetup_recalc"),
+    ]]
+
+    # Кнопки приоритетных целей
+    goals = plan.get("goals", [])
+    if len(goals) > 1:
+        goal_buttons = []
+        for i, g in enumerate(goals[:6]):
+            goal_buttons.append(InlineKeyboardButton(
+                text="⭐ {}".format(g.get("name", "?")),
+                callback_data="bsetup_prio_{}".format(i),
+            ))
+        # По 2 в ряд
+        for j in range(0, len(goal_buttons), 2):
+            buttons.append(goal_buttons[j:j+2])
+        plan_text += "\n\n⭐ <b>Какая цель важнее всего?</b> Нажми — пересортирую."
+
+    try:
+        await loading.edit_text(
+            plan_text, parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons),
+        )
     except Exception:
+        # Текст слишком длинный для edit — отправим новым
+        try:
+            await message.bot.delete_message(message.chat.id, loading.message_id)
+        except Exception:
+            pass
         sent = await message.answer(
             plan_text, parse_mode="HTML",
-            reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
-                InlineKeyboardButton(text="✅ Принять", callback_data="bsetup_accept"),
-                InlineKeyboardButton(text="✏️ Изменить", callback_data="bsetup_adjust"),
-                InlineKeyboardButton(text="🔄 Пересчитать", callback_data="bsetup_recalc"),
-            ]]),
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons),
         )
         _budget_msg[uid] = sent.message_id
 
