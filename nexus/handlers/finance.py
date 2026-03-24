@@ -1984,23 +1984,32 @@ async def start_budget_setup(message: Message, user_notion_id: str = "") -> None
         "привычки 15-20к, бьюти 12к, транспорт 3-4к\n"
         "долги: вика 50к до апреля, илья 40к до августа\n"
         "цели: телефон 100к, подушка 200к</i>\n\n"
-        "Пиши как удобно — одним сообщением или несколькими.\n"
-        "Когда закончишь — напиши <b>готово</b> или нажми кнопку.",
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
-            InlineKeyboardButton(text="✅ Готово, считай!", callback_data="bsetup_go"),
-        ]]),
+        "Пиши одним сообщением — я сразу посчитаю.",
         parse_mode="HTML",
     )
     _budget_msg[uid] = sent.message_id
 
 
 async def handle_budget_setup_text(message: Message, user_notion_id: str = "") -> bool:
-    """Перехват текста во время сбора бюджета. Возвращает True если обработано."""
+    """Перехват текста во время настройки бюджета. Возвращает True если обработано."""
     uid = message.from_user.id
 
-    # Режим корректировки
-    if uid in _budget_plan and _budget_plan[uid].get("_adjusting"):
-        return await _handle_adjust_text(message, uid)
+    # Если есть план и пользователь пишет текст — считать как корректировку
+    if uid in _budget_plan:
+        plan = _budget_plan[uid]
+        if plan.get("_adjusting"):
+            return await _handle_adjust_text(message, uid)
+        # План уже показан, новое сообщение = корректировка → пересчитать
+        text = (message.text or "").strip()
+        if text and text.lower() not in ("отмена", "cancel", "стоп"):
+            _budget_buf[uid] = _budget_buf.get(uid, [])
+            _budget_buf[uid].append("КОРРЕКТИРОВКА: " + text)
+            try:
+                await message.react([{"type": "emoji", "emoji": "✏️"}])
+            except Exception:
+                pass
+            await _run_budget_analysis(message, uid)
+            return True
 
     if uid not in _budget_buf:
         return False
@@ -2013,35 +2022,18 @@ async def handle_budget_setup_text(message: Message, user_notion_id: str = "") -
         _budget_buf.pop(uid, None)
         _budget_uid.pop(uid, None)
         _budget_msg.pop(uid, None)
+        _budget_plan.pop(uid, None)
         await message.answer("❌ Настройка бюджета отменена.")
         return True
 
-    # "готово" → запустить анализ из накопленного буфера
-    if text.lower() in ("готово", "готов", "всё", "все", "давай", "считай", "поехали"):
-        if not _budget_buf[uid]:
-            await message.answer("⚠️ Ты ещё ничего не написал. Напиши данные о финансах.")
-            return True
-        await _run_budget_analysis(message, uid)
-        return True
-
-    # Копим в буфер, ставим 👀. Анализ — только по кнопке или "готово".
+    # Получил данные → 👀 → сразу анализ
     _budget_buf[uid].append(text)
     try:
         await message.react([{"type": "emoji", "emoji": "👀"}])
     except Exception:
         pass
+    await _run_budget_analysis(message, uid)
     return True
-
-
-@router.callback_query(F.data == "bsetup_go")
-async def on_budget_go(call: CallbackQuery) -> None:
-    """Кнопка 'Готово, считай!'"""
-    uid = call.from_user.id
-    if uid not in _budget_buf or not _budget_buf[uid]:
-        await call.answer("⚠️ Сначала напиши данные о финансах!", show_alert=True)
-        return
-    await call.answer("🔍 Считаю...")  # СНАЧАЛА ответить, потом долгая операция
-    await _run_budget_analysis(call.message, uid)
 
 
 @router.callback_query(F.data == "bsetup_accept")
