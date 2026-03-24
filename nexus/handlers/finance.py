@@ -23,6 +23,15 @@ MOSCOW_TZ = timezone(timedelta(hours=3))
 
 router = Router()
 
+# Маппинг ключ → категория Notion для бюджетных записей
+_BUDGET_KEY_TO_CATEGORY = {
+    "обязательно_": "🔒 Обязательные",
+    "лимит_": "💰 Лимит",
+    "цель_": "🎯 Цели",
+    "долг_": "📋 Долги",
+}
+_BUDGET_ALL_CATEGORIES = list(_BUDGET_KEY_TO_CATEGORY.values())
+
 _LIMIT_AMOUNT_RE = re.compile(r'(\d[\d\s]*(?:[.,]\d+)?)\s*[₽р]')
 # Парсит "лимит: 🍱 Кафе/Доставка — 9000₽/мес" → group(1)=категория, group(2)=сумма
 _LIMIT_FACT_RE = re.compile(
@@ -191,9 +200,11 @@ async def _load_budget_data(user_notion_id: str = "") -> Dict[str, list]:
     if not mem_db:
         return {"обязательные": [], "цели": [], "долги": [], "лимиты": []}
 
-    filt = {"property": "Категория", "select": {"equals": "💰 Лимит"}}
+    cat_filter = {"or": [{"property": "Категория", "select": {"equals": c}} for c in _BUDGET_ALL_CATEGORIES]}
+    conditions = [cat_filter, {"property": "Актуально", "checkbox": {"equals": True}}]
     if user_notion_id:
-        filt = {"and": [filt, {"property": "🪪 Пользователи", "relation": {"contains": user_notion_id}}]}
+        conditions.append({"property": "🪪 Пользователи", "relation": {"contains": user_notion_id}})
+    filt = {"and": conditions}
     try:
         pages = await db_query(mem_db, filter_obj=filt, page_size=200)
     except Exception as e:
@@ -328,57 +339,68 @@ async def build_budget_message(user_notion_id: str = "") -> Optional[str]:
         expense_records = []
     total_expenses = sum((p["properties"].get("Сумма", {}).get("number") or 0) for p in expense_records)
 
-    if not budget["обязательные"]:
-        return None  # нет обязательных → нужна настройка
+    has_data = budget["обязательные"] or budget["лимиты"]
+    if not has_data:
+        return None  # нет данных → нужна настройка
+
+    # Расходы по категориям
+    by_expense_cat: Dict[str, float] = {}
+    for r in expense_records:
+        cat = (r["properties"].get("Категория", {}).get("select") or {}).get("name", "💳 Прочее")
+        amt = r["properties"].get("Сумма", {}).get("number") or 0
+        by_expense_cat[cat] = by_expense_cat.get(cat, 0) + amt
 
     # ── Формируем сообщение ──
-    lines = [f"<b>💰 Бюджет на {ru_month}</b>"]
+    lines = ["<b>💰 Бюджет на {} · день {}</b>".format(ru_month, now.day)]
 
-    # Доход
-    if total_income:
-        lines.append(f"\n<b>📥 Доход: {total_income:,.0f}₽</b>")
-        # Разбивка по категориям дохода
-        by_cat: Dict[str, float] = {}
-        for r in income_records:
-            cat = (r["properties"].get("Категория", {}).get("select") or {}).get("name", "💳 Прочее")
-            amt = r["properties"].get("Сумма", {}).get("number") or 0
-            by_cat[cat] = by_cat.get(cat, 0) + amt
-        for cat, amt in sorted(by_cat.items(), key=lambda x: -x[1]):
-            lines.append(f"  {cat} — {amt:,.0f}₽")
-
-    # Обязательные
-    obligatory_total = sum(o["amount"] for o in budget["обязательные"])
-    if budget["обязательные"]:
-        lines.append(f"\n<b>📌 Обязательные: {obligatory_total:,.0f}₽</b>")
-        for o in sorted(budget["обязательные"], key=lambda x: -x["amount"]):
-            lines.append(f"  {o['name']} — {o['amount']:,.0f}₽")
+    # Лимиты с прогрессом
+    if budget["лимиты"]:
+        lines.append("\n<b>📊 Лимиты:</b>")
+        for l in budget["лимиты"]:
+            limit_name = l["name"]
+            limit_amt = l["amount"]
+            # Найти расход по этой категории
+            spent = 0.0
+            for cat_key, cat_spent in by_expense_cat.items():
+                cat_link = _cat_link(cat_key)
+                if limit_name in cat_link or cat_link in limit_name or limit_name.lower() in cat_key.lower():
+                    spent += cat_spent
+            pct = int(spent / limit_amt * 100) if limit_amt else 0
+            indicator = "🟢" if pct < 70 else ("🟡" if pct < 90 else "🔴")
+            lines.append("  {} {:,.0f} / {:,.0f}₽ ({}%) {}".format(
+                limit_name if any(c in limit_name for c in "🚬💅🍜🍱🚕🏥👗📚🎲") else "📊 " + limit_name,
+                spent, limit_amt, pct, indicator))
 
     # Свободные
+    obligatory_total = sum(o["amount"] for o in budget["обязательные"])
     savings_total = sum(g["saving"] for g in budget["цели"])
-    free_total = total_income - obligatory_total - savings_total
+    limits_total = sum(l["amount"] for l in budget["лимиты"])
     if total_income > 0:
-        free_left = free_total - total_expenses
+        free_total = total_income - obligatory_total - limits_total - savings_total
+        free_left = free_total - max(0, total_expenses - limits_total)
+        # Простой расчёт: свободные = доход - фикс - лимиты - цели - уже потрачено вне лимитов
         daily = free_left / max(days_remaining, 1)
-        lines.append(f"\n<b>💳 Свободные: {free_total:,.0f}₽</b>")
-        lines.append(f"  📊 Уже потрачено: {total_expenses:,.0f}₽")
-        lines.append(f"  ✅ Ещё можно: {free_left:,.0f}₽")
-        lines.append(f"  📅 Осталось дней: {days_remaining}")
-        lines.append(f"  💸 В день: {daily:,.0f}₽")
+        lines.append("\n💳 <b>Свободных: {:,.0f}₽</b>".format(max(0, free_left)))
+        lines.append("📅 Осталось дней: {}".format(days_remaining))
+        lines.append("💸 В день: {:,.0f}₽".format(max(0, daily)))
 
     # Долги
     if budget["долги"]:
         debt_total = sum(d["amount"] for d in budget["долги"])
-        lines.append(f"\n<b>📋 Долги: {debt_total:,.0f}₽</b>")
+        lines.append("\n<b>📋 Долги: {:,.0f}₽</b>".format(debt_total))
         for d in budget["долги"]:
-            dl = f" · {d['deadline']}" if d["deadline"] else ""
-            lines.append(f"  {d['name']} — {d['amount']:,.0f}₽{dl}")
+            dl = " · {}".format(d["deadline"]) if d["deadline"] else ""
+            lines.append("  {} — {:,.0f}₽{}".format(d["name"], d["amount"], dl))
 
     # Цели
     if budget["цели"]:
-        lines.append(f"\n<b>🎯 Цели:</b>")
+        goal_parts = []
         for g in budget["цели"]:
-            saving_label = f" · откладываю {g['saving']:,.0f}₽/мес" if g["saving"] else ""
-            lines.append(f"  {g['name']} — {g['target']:,.0f}₽{saving_label}")
+            if g["saving"]:
+                goal_parts.append("{} {:,.0f}₽/мес".format(g["name"], g["saving"]))
+            else:
+                goal_parts.append("{} {:,.0f}₽".format(g["name"], g["target"]))
+        lines.append("\n🎯 Цели: {}".format(", ".join(goal_parts)))
 
     return "\n".join(lines)
 
@@ -2222,14 +2244,16 @@ async def _save_budget_plan(message: Message, uid: int) -> None:
     notion_uid = _budget_uid.get(uid, "")
     bot_msg_id = _budget_msg.get(uid, 0)
 
-    try:
-        if bot_msg_id:
-            await message.bot.edit_message_text(
-                "💾 <b>Сохраняю план...</b>",
-                chat_id=message.chat.id, message_id=bot_msg_id, parse_mode="HTML",
-            )
-    except Exception:
-        pass
+    logger.info("_save_budget_plan: uid=%s notion_uid=%s plan_keys=%s", uid, notion_uid[:8] if notion_uid else "none", list(plan.keys()))
+
+    # Удаляем старое сообщение и шлём статус ниже
+    if bot_msg_id:
+        try:
+            await message.bot.delete_message(message.chat.id, bot_msg_id)
+        except Exception:
+            pass
+    loading = await message.answer("💾 <b>Сохраняю план...</b>", parse_mode="HTML")
+    _budget_msg[uid] = loading.message_id
 
     # Фиксы
     for f in plan.get("fixed", []):
@@ -2290,35 +2314,43 @@ async def _save_budget_plan(message: Message, uid: int) -> None:
     _budget_uid.pop(uid, None)
     _budget_plan.pop(uid, None)
 
+    logger.info("_save_budget_plan: all entries saved, building budget message")
     # Показать итоговый бюджет
     budget_msg = await build_budget_message(notion_uid)
+    result_text = "🎉 <b>План принят и сохранён!</b>\n\n{}".format(budget_msg or "Вызови /budget для просмотра.")
     try:
-        if bot_msg_id:
-            await message.bot.edit_message_text(
-                "🎉 <b>План принят и сохранён!</b>\n\n{}".format(budget_msg or "Вызови /budget для просмотра."),
-                chat_id=message.chat.id, message_id=bot_msg_id, parse_mode="HTML",
-            )
-        else:
-            await message.answer(
-                "🎉 <b>План принят и сохранён!</b>\n\n{}".format(budget_msg or "Вызови /budget для просмотра."),
-                parse_mode="HTML",
-            )
+        await loading.edit_text(result_text, parse_mode="HTML")
     except Exception:
-        await message.answer("✅ План сохранён! Вызови /budget для просмотра.")
+        try:
+            await message.answer(result_text, parse_mode="HTML")
+        except Exception:
+            await message.answer("✅ План сохранён! Вызови /budget для просмотра.")
     _budget_msg.pop(uid, None)
 
 
 # ── Save to Memory ───────────────────────────────────────────────────────────
 
+
+def _notion_cat_for_key(key: str) -> str:
+    """Определить категорию Notion по префиксу ключа."""
+    for prefix, cat in _BUDGET_KEY_TO_CATEGORY.items():
+        if key.startswith(prefix):
+            return cat
+    return "💰 Лимит"
+
+
 async def _save_memory_entry(key: str, fact: str, user_notion_id: str = "") -> None:
-    """Сохранить или обновить запись в Памяти (💰 Лимит)."""
+    """Сохранить или обновить запись в Памяти с правильной категорией."""
     mem_db = os.environ.get("NOTION_DB_MEMORY")
     if not mem_db:
+        logger.error("_save_memory_entry: NOTION_DB_MEMORY not set!")
         return
+    notion_cat = _notion_cat_for_key(key)
+    logger.info("_save_memory_entry: key=%s cat=%s user=%s", key, notion_cat, user_notion_id[:8] if user_notion_id else "none")
     props = {
         "Текст": _title(fact),
         "Ключ": _text(key),
-        "Категория": _select("💰 Лимит"),
+        "Категория": _select(notion_cat),
         "Бот": _select("☀️ Nexus"),
         "Актуально": {"checkbox": True},
     }
@@ -2327,16 +2359,20 @@ async def _save_memory_entry(key: str, fact: str, user_notion_id: str = "") -> N
         props["🪪 Пользователи"] = _relation(user_notion_id)
     try:
         from core.notion_client import db_query
+        # Ищем существующую запись по ключу (в ЛЮБОЙ бюджетной категории — на случай миграции)
         existing = await db_query(mem_db, filter_obj={"and": [
-            {"property": "Ключ", "rich_text": {"contains": key}},
-            {"property": "Категория", "select": {"equals": "💰 Лимит"}},
+            {"property": "Ключ", "rich_text": {"equals": key}},
+            {"property": "Бот", "select": {"equals": "☀️ Nexus"}},
         ]}, page_size=1)
         if existing:
+            logger.info("_save_memory_entry: updating existing page %s", existing[0]["id"])
             await update_page(existing[0]["id"], props)
         else:
-            await page_create(mem_db, props)
+            logger.info("_save_memory_entry: creating new page")
+            result = await page_create(mem_db, props)
+            logger.info("_save_memory_entry: created page %s", result)
     except Exception as e:
-        logger.error("_save_memory_entry: %s for key=%s", e, key)
+        logger.error("_save_memory_entry FAILED: %s for key=%s", e, key)
 
 
 # ── Compat save functions ────────────────────────────────────────────────────
