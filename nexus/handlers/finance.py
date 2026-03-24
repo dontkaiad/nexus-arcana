@@ -144,8 +144,18 @@ async def _get_limits(mem_db: str) -> Dict[str, float]:
 
 
 def _parse_user_amount(text: str) -> Optional[int]:
-    """Парсит сумму из пользовательского ввода: '20к', '31000', '15 000₽', '20к съем'."""
-    # Извлечь первое число с возможным 'к'
+    """Парсит сумму из пользовательского ввода.
+
+    Поддерживает: '20к', '31000', '15 000₽', '20к съем', '15-20к' (среднее), '500р'.
+    """
+    # Диапазон: "15-20к" → среднее
+    m = re.search(r'(\d+)\s*[-–]\s*(\d+)\s*к\b', text, re.IGNORECASE)
+    if m:
+        try:
+            return int((int(m.group(1)) + int(m.group(2))) / 2 * 1000)
+        except ValueError:
+            pass
+    # Число + "к": "20к", "5к"
     m = re.search(r'(\d[\d\s]*(?:[.,]\d+)?)\s*к\b', text, re.IGNORECASE)
     if m:
         raw = m.group(1).replace(" ", "").replace(",", ".")
@@ -153,7 +163,8 @@ def _parse_user_amount(text: str) -> Optional[int]:
             return int(float(raw) * 1000)
         except ValueError:
             return None
-    m = re.search(r'(\d[\d\s]*(?:[.,]\d+)?)', text)
+    # Обычное число: "31000", "15 000₽", "500р"
+    m = re.search(r'(\d[\d\s]*(?:[.,]\d+)?)\s*[₽р]?\b', text)
     if m:
         raw = m.group(1).replace(" ", "").replace(",", ".")
         try:
@@ -2185,25 +2196,23 @@ async def handle_budget_setup_text(message: Message, user_notion_id: str = "") -
     if state.step == "variable":
         lines = [l.strip() for l in text.split("\n") if l.strip()]
         for line in lines:
-            parts = line.rsplit(maxsplit=1)
-            if len(parts) == 2:
-                name, amt_str = parts
-                amt_str = amt_str.replace(" ", "").replace("₽", "").replace("р", "").replace(",", ".")
-                try:
-                    amt = int(float(amt_str))
-                    # Найти ближайшую категорию
-                    name_l = name.strip().lower()
-                    matched = None
-                    for vcat in _BUDGET_VARIABLE_CATS:
-                        if name_l in vcat.lower() or _cat_link(vcat) in name_l:
-                            matched = vcat
-                            break
-                    if matched:
-                        state.variable_amounts[matched] = amt
-                    else:
-                        state.variable_amounts[name.strip()] = amt
-                except ValueError:
-                    pass
+            # Извлечь название и сумму: "привычки 15-20к", "бьюти 12к"
+            amt = _parse_user_amount(line)
+            if amt and amt > 0:
+                # Убрать число/суффикс из строки → остаётся название
+                name_part = re.sub(r'\d[\d\s]*(?:[.,]\d+)?\s*[-–]?\s*\d*\s*[кКkK]?\s*[₽р]?', '', line).strip()
+                if not name_part:
+                    name_part = line.split()[0] if line.split() else line
+                name_l = name_part.lower()
+                matched = None
+                for vcat in _BUDGET_VARIABLE_CATS:
+                    if name_l in vcat.lower() or _cat_link(vcat) in name_l:
+                        matched = vcat
+                        break
+                if matched:
+                    state.variable_amounts[matched] = amt
+                else:
+                    state.variable_amounts[name_part] = amt
 
         state.step = "debts"
         if state.variable_amounts:
@@ -2234,15 +2243,17 @@ async def handle_budget_setup_text(message: Message, user_notion_id: str = "") -
     # ── Шаг 4: Долги (multi-line) ──
     if state.step == "debts":
         lines = [l.strip() for l in text.split("\n") if l.strip()]
-        import re as _re
         for line in lines:
-            m = _re.match(r'(.+?)\s+(\d[\d\s]*)\s*(?:до\s+(.+))?$', line, _re.IGNORECASE)
+            # "вика 50к до апреля", "илья 40000 до августа", "дядя 100к до сентября"
+            m = re.match(r'(.+?)\s+(\d[\d\s]*(?:[.,]\d+)?\s*[кКkK]?)\s*(?:до\s+(.+))?$', line, re.IGNORECASE)
             if m:
-                state.saved_debts.append({
-                    "name": m.group(1).strip(),
-                    "amount": int(m.group(2).replace(" ", "")),
-                    "deadline": (m.group(3) or "").strip(),
-                })
+                amt = _parse_user_amount(m.group(2))
+                if amt and amt > 0:
+                    state.saved_debts.append({
+                        "name": m.group(1).strip(),
+                        "amount": amt,
+                        "deadline": (m.group(3) or "").strip(),
+                    })
 
         if not state.saved_debts:
             await _bot_edit_or_send(
@@ -2277,15 +2288,13 @@ async def handle_budget_setup_text(message: Message, user_notion_id: str = "") -
     if state.step == "goals":
         lines = [l.strip() for l in text.split("\n") if l.strip()]
         for line in lines:
-            parts = line.rsplit(maxsplit=1)
-            if len(parts) == 2:
-                name, amt_str = parts
-                amt_str = amt_str.replace(" ", "").replace("₽", "").replace("р", "").replace(",", ".")
-                try:
-                    amt = int(float(amt_str))
-                    state.saved_goals.append({"name": name.strip(), "target": amt})
-                except ValueError:
-                    pass
+            amt = _parse_user_amount(line)
+            if amt and amt > 0:
+                # Убрать число из строки → название
+                name_part = re.sub(r'\d[\d\s]*(?:[.,]\d+)?\s*[-–]?\s*\d*\s*[кКkK]?\s*[₽р]?', '', line).strip()
+                if not name_part:
+                    name_part = line.split()[0] if line.split() else "цель"
+                state.saved_goals.append({"name": name_part, "target": amt})
 
         if not state.saved_goals:
             await _bot_edit_or_send(
@@ -2313,23 +2322,20 @@ async def handle_budget_setup_text(message: Message, user_notion_id: str = "") -
                 applied.append("Убрана цель: " + name)
             elif ll.startswith("добавить цель"):
                 rest = line[len("добавить цель"):].strip()
-                parts = rest.rsplit(maxsplit=1)
-                if len(parts) == 2:
-                    try:
-                        amt = int(float(parts[1].replace("₽", "").replace("р", "")))
-                        state.saved_goals.append({"name": parts[0].strip(), "target": amt})
-                        applied.append("Добавлена цель: {} {:,}₽".format(parts[0].strip(), amt))
-                    except ValueError:
-                        pass
+                amt = _parse_user_amount(rest)
+                if amt and amt > 0:
+                    name_part = re.sub(r'\d[\d\s]*(?:[.,]\d+)?\s*[-–]?\s*\d*\s*[кКkK]?\s*[₽р]?', '', rest).strip()
+                    if not name_part:
+                        name_part = "цель"
+                    state.saved_goals.append({"name": name_part, "target": amt})
+                    applied.append("Добавлена цель: {} {:,}₽".format(name_part, amt))
             else:
-                # "привычки 12000" → обновить вариативные
-                parts = line.rsplit(maxsplit=1)
-                if len(parts) == 2:
-                    name, amt_str = parts
-                    amt_str = amt_str.replace("₽", "").replace("р", "").replace(" ", "")
-                    try:
-                        amt = int(float(amt_str))
-                        name_l = name.strip().lower()
+                # "привычки 12к" → обновить вариативные
+                amt = _parse_user_amount(line)
+                if amt and amt > 0:
+                    name_part = re.sub(r'\d[\d\s]*(?:[.,]\d+)?\s*[-–]?\s*\d*\s*[кКkK]?\s*[₽р]?', '', line).strip()
+                    if name_part:
+                        name_l = name_part.lower()
                         matched = False
                         for vcat in _BUDGET_VARIABLE_CATS:
                             if name_l in vcat.lower() or _cat_link(vcat) in name_l:
@@ -2338,10 +2344,8 @@ async def handle_budget_setup_text(message: Message, user_notion_id: str = "") -
                                 matched = True
                                 break
                         if not matched:
-                            state.variable_amounts[name.strip()] = amt
-                            applied.append("{} → {:,}₽".format(name.strip(), amt))
-                    except ValueError:
-                        pass
+                            state.variable_amounts[name_part] = amt
+                            applied.append("{} → {:,}₽".format(name_part, amt))
 
         if applied:
             summary = "\n".join("  ✅ " + a for a in applied)
