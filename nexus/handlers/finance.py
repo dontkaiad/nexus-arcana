@@ -200,8 +200,14 @@ async def _load_budget_data(user_notion_id: str = "") -> Dict[str, list]:
     if not mem_db:
         return {"обязательные": [], "цели": [], "долги": [], "лимиты": []}
 
-    cat_filter = {"or": [{"property": "Категория", "select": {"equals": c}} for c in _BUDGET_ALL_CATEGORIES]}
-    conditions = [cat_filter, {"property": "Актуально", "checkbox": {"equals": True}}]
+    # Ищем по ключу (prefix-based) — не зависит от существования категорий в Notion
+    key_filter = {"or": [
+        {"property": "Ключ", "rich_text": {"starts_with": "обязательно_"}},
+        {"property": "Ключ", "rich_text": {"starts_with": "лимит_"}},
+        {"property": "Ключ", "rich_text": {"starts_with": "цель_"}},
+        {"property": "Ключ", "rich_text": {"starts_with": "долг_"}},
+    ]}
+    conditions = [key_filter, {"property": "Актуально", "checkbox": {"equals": True}}]
     if user_notion_id:
         conditions.append({"property": "🪪 Пользователи", "relation": {"contains": user_notion_id}})
     filt = {"and": conditions}
@@ -2260,10 +2266,10 @@ def _format_plan(plan: dict) -> str:
         debts_total = plan.get("debts_monthly_total", sum(d.get("monthly", d.get("amount", 0)) for d in debts_monthly))
         lines.append("\n<b>📋 Долги: {:,}₽/мес</b>".format(debts_total))
         for d in debts_monthly:
-            dl = " · {}".format(d["deadline"]) if d.get("deadline") else ""
-            mon = " {:,}₽/мес".format(d["monthly"]) if d.get("monthly") else ""
-            left = " ({} мес)".format(d["months_left"]) if d.get("months_left") else ""
-            lines.append("  {} — {:,}₽{}{} →{}".format(d["name"], d.get("total", d.get("amount", 0)), dl, left, mon))
+            dl = " · {}".format(d.get("deadline", "")) if d.get("deadline") else ""
+            mon = " {:,}₽/мес".format(d.get("monthly", 0)) if d.get("monthly") else ""
+            left = " ({} мес)".format(d.get("months_left", "?")) if d.get("months_left") else ""
+            lines.append("  {} — {:,}₽{}{} →{}".format(d.get("name", "?"), d.get("total", d.get("amount", 0)), dl, left, mon))
 
     # Свободные после долгов
     free = plan.get("free_after_debts")
@@ -2289,7 +2295,8 @@ def _format_plan(plan: dict) -> str:
             elif l.get("current"):
                 change = " (было {:,})".format(l["current"])
             note = " — <i>{}</i>".format(l["note"]) if l.get("note") else ""
-            lines.append("  {} — {:,}₽{}{}".format(l.get("category", "?"), l["amount"], change, note))
+            amt = l.get("amount", 0)
+            lines.append("  {} — {:,}₽{}{}".format(l.get("category", "?"), amt, change, note))
 
     # Импульсивный
     impulse = plan.get("impulse_budget", 0)
@@ -2302,9 +2309,9 @@ def _format_plan(plan: dict) -> str:
     if goals:
         lines.append("\n<b>🎯 Цели (после долгов):</b>")
         for g in goals:
-            mon = " {:,}₽/мес".format(g["monthly"]) if g.get("monthly") else " 0₽/мес"
+            mon = " {:,}₽/мес".format(g.get("monthly", 0)) if g.get("monthly") else " 0₽/мес"
             note = " — <i>{}</i>".format(g["note"]) if g.get("note") else ""
-            lines.append("  {} — {:,}₽ ·{}{}".format(g["name"], g.get("total", 0), mon, note))
+            lines.append("  {} — {:,}₽ ·{}{}".format(g.get("name", "?"), g.get("total", 0), mon, note))
 
     # Timeline
     if plan.get("relief_timeline"):
