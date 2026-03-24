@@ -854,7 +854,7 @@ async def main() -> None:
     # иначе бот не может отправлять сообщения (missed reminders)
     import asyncio as _asyncio
 
-    async def _on_startup(_bot) -> None:
+    async def _on_startup(**kwargs) -> None:
         await restore_reminders_on_startup()
 
     dp.startup.register(_on_startup)
