@@ -717,9 +717,10 @@ async def handle_task_parsed(message: Message, data: dict) -> None:
         first_run = now.replace(hour=h, minute=m, second=0, microsecond=0)
         if first_run <= now:
             first_run = first_run + timedelta(days=1)
-        # Дедлайн перезаписываем только если пользователь не задал явный (напр. "до пт")
+        # Повторяющаяся задача: дедлайн НЕ ставим (только reminder_time для повтора)
+        # Дедлайн оставляем только если пользователь задал его явно (напр. "до пт")
         if not data.get("deadline"):
-            data["deadline"] = first_run.strftime("%Y-%m-%dT%H:%M")
+            data["deadline"] = None
         data["reminder_time"] = first_run.strftime("%Y-%m-%dT%H:%M")
         logger.info("handle_task_parsed: repeat=%s → first_run=%s deadline=%s", repeat, first_run, data["deadline"])
         await _do_save_task(message, data, chat_id=message.chat.id, uid=uid)
