@@ -20,6 +20,13 @@ async def main():
     dp.include_router(memory_router)
     dp.include_router(lists_router)
 
+    from aiogram.filters import Command as ArcanaCommand
+    from arcana.handlers.lists import handle_list_command as arcana_list_cmd
+
+    @dp.message(ArcanaCommand("list"))
+    async def cmd_list(msg: Message, user_notion_id: str = "") -> None:
+        await arcana_list_cmd(msg, user_notion_id=user_notion_id)
+
     @dp.message(F.photo)
     async def p(m: Message):
         f = await bot.get_file(m.photo[-1].file_id)
