@@ -383,7 +383,7 @@ async def build_budget_message(user_notion_id: str = "") -> Optional[str]:
     total_expenses = 0
     try:
         expense_records = await db_query(config.nexus.db_finance, filter_obj={"and": [
-            {"property": "Тип", "select": {"equals": "🌿 Расход"}},
+            {"property": "Тип", "select": {"equals": "💸 Расход"}},
             {"property": "Дата", "date": {"on_or_after": period_start}},
             {"property": "Дата", "date": {"on_or_before": today_str}},
         ]}, page_size=500)
@@ -2241,7 +2241,7 @@ async def _handle_impulse_overflow(category: str, overflow: float, message: Mess
         date=datetime.now(MOSCOW_TZ).strftime("%Y-%m-%d"),
         amount=overflow,
         category="🎲 Импульсивные",
-        type_="🌿 Расход",
+        type_="💸 Расход",
         source="💳 Карта",
         description=f"Превышение {category}: {overflow:.0f}₽",
         user_notion_id=user_notion_id,
@@ -2264,7 +2264,7 @@ async def _calc_impulse_status(period_start: str, user_notion_id: str = "") -> T
     from core.notion_client import db_query
     now = datetime.now(MOSCOW_TZ)
     records = await db_query(config.nexus.db_finance, filter_obj={"and": [
-        {"property": "Тип", "select": {"equals": "🌿 Расход"}},
+        {"property": "Тип", "select": {"equals": "💸 Расход"}},
         {"property": "Категория", "select": {"equals": "🎲 Импульсивные"}},
         {"property": "Дата", "date": {"on_or_after": period_start}},
         {"property": "Дата", "date": {"on_or_before": now.strftime("%Y-%m-%d")}},
@@ -2350,6 +2350,16 @@ BUDGET_SONNET_SYSTEM = (
     "  variant_a: \"Платить по плану\"\n"
     "    - Все monthly_payment вычитаются\n"
     "    - Жёсткий но РЕАЛЬНЫЙ план из маленького остатка\n"
+    "    - ДАЖЕ В ВАРИАНТЕ А соблюдай ЖЕЛЕЗНЫЕ минимумы:\n"
+    "      🍜 Продукты — минимум 3,000₽ (человек должен есть!)\n"
+    "      💅 Бьюти — минимум 3,000₽ (ногти = фикс)\n"
+    "      🚕 Транспорт — минимум 1,500₽ (метро)\n"
+    "      🎲 Импульсивные — минимум 1,000₽\n"
+    "      Итого железные минимумы = 8,500₽\n"
+    "      Привычки = остаток ПОСЛЕ железных минимумов.\n"
+    "      Пример: остаток 12,716₽ → 12,716 - 8,500 = 4,216₽ на привычки.\n"
+    "      Привычки — ЕДИНСТВЕННАЯ категория которая может быть ниже 10к в варианте А.\n"
+    "      НИКОГДА не обнуляй продукты/бьюти/транспорт ради привычек!\n"
     "    - adhd_survival_plan: КОНКРЕТНЫЙ план как пережить месяц\n"
     "    - relief: когда станет легче\n"
     "  variant_b: \"Пересмотреть стратегию\"\n"
@@ -2560,6 +2570,9 @@ products_min = max(3000, habits / 2)
 
 ТЯЖЁЛЫЙ МЕСЯЦ:
 variant_a: "Платить по плану" — все monthly_payment
+  ДАЖЕ В ВАРИАНТЕ А — железные минимумы: продукты 3к, бьюти 3к, транспорт 1.5к, импульсивные 1к = 8.5к.
+  Привычки = остаток после железных минимумов. ТОЛЬКО привычки могут быть < 10к.
+  НИКОГДА не обнуляй продукты/бьюти/транспорт ради привычек!
 variant_b: "Уменьшить платежи" — предложить снизить
 
 ПРАВИЛА:
@@ -3670,7 +3683,7 @@ async def _budget_period_review(user_notion_id: str = "") -> Tuple[str, float]:
     from core.config import config
     from core.notion_client import db_query
     records = await db_query(config.nexus.db_finance, filter_obj={"and": [
-        {"property": "Тип", "select": {"equals": "🌿 Расход"}},
+        {"property": "Тип", "select": {"equals": "💸 Расход"}},
         {"property": "Дата", "date": {"on_or_after": period_start_str}},
         {"property": "Дата", "date": {"on_or_before": period_end_str}},
     ]}, page_size=500)
