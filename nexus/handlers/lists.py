@@ -162,7 +162,7 @@ def _build_list_text_and_buttons(
             lines.append(f"\n<b>📦 ИНВЕНТАРЬ</b> ({len(group)})")
             for it in group:
                 cat_emoji = (it.get("category", "").split(" ")[0]) if it.get("category") else ""
-                qty = it.get("quantity", 0)
+                qty = it.get("quantity") or 0
                 extra = f" × {int(qty)}" if qty else ""
                 if it.get("expiry"):
                     extra += f" · до {it['expiry'][:10]}"
@@ -486,7 +486,7 @@ async def handle_list_done(msg: Message, data: dict, user_notion_id: str = "") -
     done_type = parsed.get("type", "list_done") if isinstance(parsed, dict) else "list_done"
 
     if done_type == "list_done_bulk":
-        result = await check_items_bulk(parsed.get("total", 0), parsed.get("breakdown", []), BOT_NAME, user_notion_id)
+        result = await check_items_bulk(parsed.get("total") or 0, parsed.get("breakdown", []), BOT_NAME, user_notion_id)
         lines = [f"🧾 <b>Чек: {parsed.get('total', 0)}₽</b>"]
         for fr in result.get("finance_results", []):
             lines.append(f"  💸 {fr['category']}: {int(fr['amount'])}₽")
@@ -508,7 +508,7 @@ async def handle_list_done(msg: Message, data: dict, user_notion_id: str = "") -
         lines = ["✅ <b>Чек записан:</b>"]
         total = 0
         for ch in result.get("checked", []):
-            price = ch.get("price", 0)
+            price = ch.get("price") or 0
             total += price
             nf = " (не в списке)" if ch.get("not_found") else ""
             lines.append(f"  ✓ {ch['name']}: {int(price)}₽{nf}")
@@ -580,7 +580,7 @@ async def handle_list_inv_add(msg: Message, data: dict, user_notion_id: str = ""
         return
     items = [{
         "name": parsed.get("item", ""),
-        "quantity": parsed.get("quantity", 1),
+        "quantity": parsed.get("quantity") or 1,
         "note": parsed.get("note", ""),
         "category": parsed.get("category", "💳 Прочее"),
     }]
@@ -620,7 +620,7 @@ async def handle_list_inv_update(msg: Message, data: dict, user_notion_id: str =
         logger.error("handle_list_inv_update parse error: %s", e)
         await msg.answer("⚠️ Не смог разобрать.")
         return
-    result = await inventory_update(parsed.get("item", ""), parsed.get("quantity", 0), BOT_NAME, user_notion_id)
+    result = await inventory_update(parsed.get("item", ""), parsed.get("quantity") or 0, BOT_NAME, user_notion_id)
     if result.get("error") == "not_found":
         await msg.answer(f"❓ «{parsed.get('item', '')}» не найден в инвентаре.")
         return
@@ -682,12 +682,12 @@ async def handle_list_pending(msg: Message, user_notion_id: str = "") -> bool:
             await msg.answer("⚠️ Не смог разобрать. Попробуй: «2500 картой»")
             return True
 
-        total = parsed.get("total", 0)
+        total = parsed.get("total") or 0
         source = parsed.get("source", "💳 Карта")
         breakdown = parsed.get("breakdown", [])
 
         # Если total не указан — сумма named
-        named_sum = sum(b.get("amount", 0) for b in breakdown)
+        named_sum = sum(b.get("amount") or 0 for b in breakdown)
         if not total:
             total = named_sum
 
@@ -695,7 +695,7 @@ async def handle_list_pending(msg: Message, user_notion_id: str = "") -> bool:
         named_cats: dict[str, float] = {}
         for b in breakdown:
             raw_cat = b.get("category", "")
-            amount = b.get("amount", 0)
+            amount = b.get("amount") or 0
             # Найти полное имя категории
             matched = None
             for full_cat in categories:
@@ -772,7 +772,7 @@ async def handle_list_pending(msg: Message, user_notion_id: str = "") -> bool:
         named_cats[asking_cat] = amount
 
         remaining_cats: list[str] = pending.get("remaining_cats", [])
-        remainder = pending.get("remainder", 0) - amount
+        remainder = pending.get("remainder") or 0 - amount
 
         if len(remaining_cats) == 1 and remainder > 0:
             # Последняя — получает остаток
