@@ -49,23 +49,15 @@ _pending_arcana: dict = {}  # user_id → text (оригинальный для 
 
 @dp.message(Command("start"))
 async def cmd_start(msg: Message, user_notion_id: str = "") -> None:
+    if not user_notion_id:
+        await msg.answer("⛔ У тебя нет доступа. Обратись к владельцу.")
+        return
     await msg.answer(
-        "☀️ <b>Nexus запущен!</b>\n\n"
-        "<b>Что это?</b>\n"
-        "Твой личный AI-ассистент для оптимизации рутины и хаоса. "
-        "Просто пиши как есть — я разберусь.\n\n"
-
-        "<b>Что я умею:</b>\n"
-        "💰 Финансы (расходы, доходы, статистика)\n"
-        "✅ Задачи (с дедлайнами и напоминаниями)\n"
-        "💡 Заметки (с тегами и категориями)\n"
-        "🧠 Память (запомню факты о твоей жизни)\n"
-        "🔮 Редирект в 🌒 Arcana (для ритуалов и практик)\n\n"
-
-        "Напиши <code>/help</code> для полного гайда 📋\n\n"
-
-        "<b>Создатель:</b> Кай Ларк\n"
-        "❓ Ошибки/вопросы? <a href=\"https://t.me/witchcommit\">@witchcommit</a>"
+        "☀️ <b>Привет, Кай! Я Nexus, твой ассистент.</b>\n\n"
+        "Задачи, финансы, заметки, память — просто пиши как есть, я разберусь.\n\n"
+        "<code>/help</code> — полный гайд по командам\n\n"
+        "👨‍💻 <a href=\"https://github.com/dontkaiad\">GitHub</a> · "
+        "❓ <a href=\"https://t.me/witchcommit\">@witchcommit</a>"
     )
 
 
@@ -391,6 +383,13 @@ async def cmd_budget(msg: Message, user_notion_id: str = "") -> None:
     await start_budget_analysis(msg, user_notion_id)
 
 
+@dp.message(Command("budget_setup"))
+async def cmd_budget_setup(msg: Message, user_notion_id: str = "") -> None:
+    """Настроить бюджет заново."""
+    from nexus.handlers.finance import start_budget_setup
+    await start_budget_setup(msg, user_notion_id)
+
+
 @dp.message(Command("finance"))
 async def cmd_finance(msg: Message, user_notion_id: str = "") -> None:
     """Показать расходы за сегодня + итого."""
@@ -585,6 +584,8 @@ async def handle_text(msg: Message, user_notion_id: str = "") -> None:
         prev = maybe_convert(msg.reply_to_message.text.strip())
         text = f"[контекст: {prev[:100]}]\n{text}"
 
+    from nexus.handlers.utils import react
+    await react(msg, "👀")
     await msg.bot.send_chat_action(msg.chat.id, "typing")
     uid = msg.from_user.id
 
@@ -841,6 +842,7 @@ async def main() -> None:
         BotCommand(command="stats", description="Статистика задач и стрики"),
         BotCommand(command="notes", description="Последние 5 заметок"),
         BotCommand(command="budget", description="Бюджет: доходы, обязательные, свободные, долги, цели"),
+        BotCommand(command="budget_setup", description="Настроить бюджет заново"),
         BotCommand(command="finance", description="Расходы за сегодня"),
         BotCommand(command="finance_stats", description="Финансы: месяц/неделя/день"),
         BotCommand(command="memory", description="Список памяти"),

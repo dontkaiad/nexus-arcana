@@ -135,6 +135,7 @@ _ADHD_SUMMARY_SYSTEM = """Пишешь о человеке по имени Ка�
 
 async def handle_adhd_command(message: Message, user_notion_id: str = "") -> None:
     """/adhd — личный СДВГ-профиль с группировкой и саммари от Sonnet."""
+    await react(message, "🧠")
     from core.notion_client import db_query
     from core.pagination import PAGE_SIZE, register_pages
 
@@ -205,21 +206,24 @@ async def handle_adhd_command(message: Message, user_notion_id: str = "") -> Non
                 lines.append(f"  • {item}")
             lines.append("")
 
-    uid = message.from_user.id
-    flat_items = []
-    for group_name in ["🔄 Паттерны", "💡 Стратегии", "⚡ Триггеры", "📌 Особенности"]:
-        for item in groups.get(group_name, []):
-            flat_items.append({"group": group_name, "text": item})
+    full_text = "\n".join(lines)
 
-    if len(flat_items) > PAGE_SIZE:
-        from core.pagination import get_page_text, get_page_keyboard
-        def _fmt(it: dict) -> str:
-            return f"{it['group']} · {it['text']}"
-        register_pages(uid, flat_items, "🧠 СДВГ — профиль", _fmt)
-        await message.answer("\n".join(lines), parse_mode="HTML")
-        await message.answer(get_page_text(uid), reply_markup=get_page_keyboard(uid))
+    # Telegram limit 4096 — split by paragraphs if needed
+    if len(full_text) <= 4000:
+        await message.answer(full_text, parse_mode="HTML")
     else:
-        await message.answer("\n".join(lines), parse_mode="HTML")
+        chunks: list[str] = []
+        current = ""
+        for line in lines:
+            if len(current) + len(line) + 1 > 4000:
+                if current.strip():
+                    chunks.append(current)
+                current = ""
+            current += line + "\n"
+        if current.strip():
+            chunks.append(current)
+        for chunk in chunks:
+            await message.answer(chunk, parse_mode="HTML")
 
 
 async def send_adhd_digest(bot) -> None:
