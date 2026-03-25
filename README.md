@@ -48,13 +48,11 @@ Python 3.9 · aiogram 3.x · Notion API · Claude API (Haiku + Sonnet) · APSche
 
 ## Vibe Coding
 
-This entire project was built without writing a single line of code manually. Development workflow:
+Development workflow:
 
 1. **Strategy & architecture** → Claude.ai (Pro)
 2. **Code execution** → Claude Code (Mac app)  
 3. **Version control** → GitHub Desktop
-
-Every feature, every bug fix, every refactor — directed through AI prompts.
 
 ## Setup
 
