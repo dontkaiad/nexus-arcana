@@ -7,6 +7,7 @@ from core.middleware import WhitelistMiddleware
 from core.claude_client import analyze_image
 from arcana.handlers.base import router
 from arcana.handlers.memory import router as memory_router
+from arcana.handlers.lists import router as lists_router
 
 async def main():
     if not config.arcana.tg_token: return
@@ -17,6 +18,7 @@ async def main():
     dp.callback_query.middleware(WhitelistMiddleware(require_feature="arcana"))
     dp.include_router(router)
     dp.include_router(memory_router)
+    dp.include_router(lists_router)
 
     @dp.message(F.photo)
     async def p(m: Message):
