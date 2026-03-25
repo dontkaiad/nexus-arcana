@@ -522,6 +522,30 @@ async def buy_mark_done_by_id(page_id: str, price: float, bot_name: str, user_pa
     return {"name": page_data["name"], "category": page_data.get("category", ""), "finance": finance_result}
 
 
+async def archive_items(page_ids: list[str]) -> int:
+    """Архивировать айтемы по списку page_id. Возвращает количество архивированных."""
+    archived = 0
+    for pid in page_ids:
+        try:
+            await update_page(pid, {"Статус": _status("Archived")})
+            archived += 1
+        except Exception as e:
+            logger.error("archive_items %s: %s", pid, e)
+    return archived
+
+
+async def mark_items_done(page_ids: list[str]) -> int:
+    """Отметить айтемы Done по списку page_id."""
+    done = 0
+    for pid in page_ids:
+        try:
+            await update_page(pid, {"Статус": _status("Done")})
+            done += 1
+        except Exception as e:
+            logger.error("mark_items_done %s: %s", pid, e)
+    return done
+
+
 async def inventory_search(
     query: str,
     bot_name: str,
