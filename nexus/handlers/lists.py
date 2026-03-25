@@ -104,6 +104,8 @@ def _checkout_parse_system(categories: dict[str, list[str]]) -> str:
         '- "из них X 600" → ищи X среди категорий\n'
         "- Число без категории = total\n"
         "- к/тыс = ×1000: 4к=4000\n"
+        '- "остальное/прочее/остаток 4000" → category="остальное" (спец.слово, НЕ категория 💳 Прочее!)\n'
+        "- В breakdown записывай ТОЛЬКО явно названные категории из контекста + остальное\n"
     )
 
 
@@ -722,10 +724,17 @@ async def handle_list_pending(msg: Message, user_notion_id: str = "") -> bool:
             total = named_sum
 
         # Маппинг named категорий к полным именам
+        # "остальное/прочее/остаток" — спец.слова, не реальная категория
+        _REST_WORDS = {"остальное", "прочее", "остаток", "rest", "другое"}
         named_cats: dict[str, float] = {}
+        rest_amount: float = 0
         for b in breakdown:
             raw_cat = b.get("category", "")
             amount = b.get("amount") or 0
+            # Проверяем: это слово "остальное"?
+            if raw_cat.lower().strip() in _REST_WORDS:
+                rest_amount += amount
+                continue
             # Найти полное имя категории
             matched = None
             for full_cat in categories:
@@ -738,14 +747,24 @@ async def handle_list_pending(msg: Message, user_notion_id: str = "") -> bool:
             else:
                 named_cats[raw_cat] = amount
 
-        # Считаем остаток
+        # Считаем остаток (явный total минус названные + "остальное" как нераспределённое)
         remaining_cats = [c for c in categories if c not in named_cats]
         named_total = sum(named_cats.values())
-        remainder = total - named_total
+        # rest_amount = то что Haiku вернул как "остальное/прочее"
+        # remainder = total - named_total - уже включает rest_amount если total указан
+        if total:
+            remainder = total - named_total
+        else:
+            remainder = rest_amount
 
         if len(remaining_cats) == 1 and remainder > 0:
             # Одна оставшаяся → получает остаток
             named_cats[remaining_cats[0]] = remainder
+        elif len(remaining_cats) == 0 and rest_amount > 0:
+            # Все категории уже названы, но есть "остальное" — не сходится, спросить
+            pending_del(uid)
+            await msg.answer(f"⚠️ Все категории уже указаны, но осталось {int(rest_amount)}₽. Куда записать?")
+            return True
         elif len(remaining_cats) == 0 and abs(named_total - total) > 1:
             # Не сходится
             diff = total - named_total
