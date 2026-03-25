@@ -521,6 +521,22 @@ async def _check_budget_limit(category: str, message: Message, user_notion_id: s
                 )
         except Exception:
             pass
+        # Проверить: если категория — обязательный расход, НЕ предлагать лимит
+        is_obligatory = False
+        try:
+            budget = await _load_budget_data(user_notion_id)
+            for ob in budget.get("обязательные", []):
+                ob_link = _cat_link(ob.get("name", ""))
+                if ob_link in link or link in ob_link:
+                    is_obligatory = True
+                    break
+        except Exception:
+            pass
+
+        if is_obligatory:
+            logger.info("_check_budget_limit: %r is obligatory, skip limit suggestion", category)
+            return
+
         # Предложить установить лимит (1 раз за сессию)
         uid = getattr(message, "from_user", None)
         uid_id = uid.id if uid else 0
