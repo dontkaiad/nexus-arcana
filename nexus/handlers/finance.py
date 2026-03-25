@@ -2747,7 +2747,7 @@ async def handle_budget_setup_text(message: Message, user_notion_id: str = "") -
     return True
 
 
-@router.callback_query(F.data == "bsetup_change_strategy")
+@router.callback_query(F.data.in_({"bsetup_change_strategy", "budget_change_strategy"}))
 async def on_budget_change_strategy(call: CallbackQuery) -> None:
     """Re-ask debt strategy."""
     uid = call.from_user.id
@@ -2877,7 +2877,7 @@ async def on_budget_variant_choice(call: CallbackQuery) -> None:
     plan_text = "✅ <b>Вариант {} выбран</b>\n\n".format(label) + _format_plan(plan)
     buttons = [[
         InlineKeyboardButton(text="✅ Принять", callback_data="bsetup_accept"),
-        InlineKeyboardButton(text="✏️ Изменить", callback_data="bsetup_adjust"),
+        InlineKeyboardButton(text="📋 Изменить стратегию", callback_data="bsetup_change_strategy"),
         InlineKeyboardButton(text="🔄 Пересчитать", callback_data="bsetup_recalc"),
     ]]
     try:
@@ -2894,37 +2894,44 @@ async def on_budget_variant_choice(call: CallbackQuery) -> None:
 
 @router.callback_query(F.data.startswith("bsetup_prio_"))
 async def on_budget_priority_goal(call: CallbackQuery) -> None:
-    """Выбор приоритетной цели — пересортировать."""
+    """Выбор приоритетной цели — ТОЛЬКО сохранить в Память, НЕ пересчитывать."""
     uid = call.from_user.id
     state = _budget_get(uid)
-    if not state or not state.get("plan"):
-        await call.answer("⚠️ Сессия устарела", show_alert=True)
-        return
-    plan = state["plan"]
+    notion_uid = state.get("notion_uid", "") if state else ""
     idx = int(call.data.split("_")[-1])
+
+    # Get goals from plan (may still be in state) or from saved data
+    plan = state.get("plan", {}) if state else {}
     goals = plan.get("goals", [])
     if idx >= len(goals):
         await call.answer()
         return
 
-    chosen = goals.pop(idx)
-    chosen["priority"] = 1
-    goals.insert(0, chosen)
-    for i, g in enumerate(goals):
-        g["priority"] = i + 1
-    plan["goals"] = goals
-    state["plan"] = plan
+    chosen = goals[idx]
+    goal_name = chosen.get("name", "?")
 
-    # Добавить в буфер для пересчёта
-    buf = state.get("buf", [])
-    buf.append("ПРИОРИТЕТ: главная цель — {}".format(chosen.get("name", "?")))
-    state["buf"] = buf
-    state["msg_id"] = call.message.message_id
-    _budget_set(uid, state)
-    await call.answer("⭐ {} — приоритет №1".format(chosen.get("name", "?")))
+    # Save priority to Memory — just a marker, no recalculation
+    if notion_uid:
+        await _save_memory_entry(
+            "goal_priority",
+            "приоритет цели: {}".format(goal_name),
+            notion_uid,
+        )
 
-    # Пересчитать
-    await _run_budget_analysis(call.message, uid)
+    # Cleanup state after goal selection
+    if state:
+        _budget_del(uid)
+
+    await call.answer("🎯 Приоритет: {}".format(goal_name))
+    try:
+        # Remove goal buttons, show selection
+        existing_text = call.message.html_text or call.message.text or ""
+        # Remove the "Какая цель важнее?" line
+        existing_text = existing_text.replace("🎯 <b>Какая цель важнее?</b>", "").strip()
+        new_text = existing_text + "\n\n🎯 <b>Приоритет: {}</b>".format(goal_name)
+        await call.message.edit_text(new_text, parse_mode="HTML")
+    except Exception:
+        pass
 
 
 # ── Sonnet Analysis ──────────────────────────────────────────────────────────
@@ -3061,19 +3068,6 @@ async def _run_budget_analysis(message: Message, uid: int) -> None:
             InlineKeyboardButton(text="✏️ Изменить", callback_data="bsetup_adjust"),
             InlineKeyboardButton(text="🔄 Пересчитать", callback_data="bsetup_recalc"),
         ]]
-
-    # Кнопки приоритетных целей
-    goals = plan.get("goals", [])
-    if len(goals) > 1:
-        goal_buttons = []
-        for i, g in enumerate(goals[:6]):
-            goal_buttons.append(InlineKeyboardButton(
-                text="⭐ {}".format(g.get("name", "?")),
-                callback_data="bsetup_prio_{}".format(i),
-            ))
-        for j in range(0, len(goal_buttons), 2):
-            buttons.append(goal_buttons[j:j+2])
-        plan_text += "\n\n⭐ <b>Какая цель важнее всего?</b> Нажми — пересортирую."
 
     try:
         await loading.edit_text(
@@ -3337,13 +3331,37 @@ async def _save_budget_plan(message: Message, uid: int) -> None:
             notion_uid,
         )
 
-    # Лимиты
+    # Лимиты — НЕ перезаписывать [ручной]
+    existing_limits = await _get_limits(os.environ.get("NOTION_DB_MEMORY", ""))
     for l in plan.get("limits", []):
         cat = l.get("category", "📌 Прочее")
         amt = l.get("amount", 0)
-        manual_tag = " [ручной]" if l.get("manual") else ""
+        cat_key = _cat_link(cat)
+        # Check if existing limit is manual — don't overwrite
+        if l.get("manual"):
+            manual_tag = " [ручной]"
+        else:
+            # Check existing memory for manual tag
+            from core.notion_client import db_query as _dbq
+            mem_db = os.environ.get("NOTION_DB_MEMORY", "")
+            _skip = False
+            if mem_db:
+                try:
+                    _existing = await _dbq(mem_db, filter_obj={"and": [
+                        {"property": "Ключ", "rich_text": {"equals": "лимит_{}".format(cat_key)}},
+                        {"property": "Бот", "select": {"equals": "☀️ Nexus"}},
+                    ]}, page_size=1)
+                    if _existing:
+                        _fact = (_existing[0]["properties"].get("Текст", {}).get("title", [{}])[0].get("plain_text", ""))
+                        if "[ручной]" in _fact:
+                            _skip = True
+                except Exception:
+                    pass
+            if _skip:
+                continue
+            manual_tag = ""
         await _save_memory_entry(
-            "лимит_{}".format(_cat_link(cat)),
+            "лимит_{}".format(cat_key),
             "лимит: {} — {}₽/мес{}".format(cat, amt, manual_tag),
             notion_uid,
         )
@@ -3403,18 +3421,51 @@ async def _save_budget_plan(message: Message, uid: int) -> None:
             notion_uid,
         )
 
-    # Cleanup
-    _budget_del(uid)
-
     logger.info("_save_budget_plan: all entries saved, building budget message")
+
+    # Build goal priority buttons — only for goals with monthly > 0 (not "после долгов")
+    goals = plan.get("goals", [])
+    active_goals = [g for g in goals if g.get("monthly", 0) > 0]
+    goal_buttons_rows = []
+    if len(active_goals) > 1:
+        goal_btns = []
+        for i, g in enumerate(goals[:6]):
+            if g.get("monthly", 0) > 0:
+                goal_btns.append(InlineKeyboardButton(
+                    text="🎯 {}".format(g.get("name", "?")),
+                    callback_data="bsetup_prio_{}".format(i),
+                ))
+        for j in range(0, len(goal_btns), 2):
+            goal_buttons_rows.append(goal_btns[j:j+2])
+
     # Показать итоговый бюджет
     budget_msg = await build_budget_message(notion_uid)
-    result_text = "🎉 <b>План принят и сохранён!</b>\n\n{}".format(budget_msg or "Вызови /budget для просмотра.")
+    result_text = "✅ <b>План на {} принят и сохранён!</b>\n\n{}".format(
+        _RU_MONTHS.get(datetime.now(MOSCOW_TZ).month, "месяц"),
+        budget_msg or "Вызови /budget для просмотра.",
+    )
+
+    if active_goals and len(active_goals) > 1:
+        result_text += "\n\n🎯 <b>Какая цель важнее?</b>"
+    elif goals and not active_goals:
+        # All goals are deferred
+        result_text += "\n\n🎯 Цели стартуют после закрытия долгов"
+
+    markup = InlineKeyboardMarkup(inline_keyboard=goal_buttons_rows) if goal_buttons_rows else None
+
+    # Cleanup state AFTER showing result (keep plan for goal priority callback)
+    if not goal_buttons_rows:
+        _budget_del(uid)
+    else:
+        # Keep state briefly for goal callback
+        state["state"] = "goal_priority"
+        _budget_set(uid, state)
+
     try:
-        await loading.edit_text(result_text, parse_mode="HTML")
+        await loading.edit_text(result_text, parse_mode="HTML", reply_markup=markup)
     except Exception:
         try:
-            await message.answer(result_text, parse_mode="HTML")
+            await message.answer(result_text, parse_mode="HTML", reply_markup=markup)
         except Exception:
             await message.answer("✅ План сохранён! Вызови /budget для просмотра.")
 
