@@ -113,12 +113,12 @@ def _build_list_text_and_buttons(
                 for it in gitems:
                     is_done = it.get("status") == "Done"
                     is_sel = it["id"] in selected
-                    icon = "✅" if is_done else ("🔲" if is_sel else "⬜")
+                    icon = "✅" if (is_done or is_sel) else "◻️"
                     lines.append(f"  {icon} {it['name']}")
                     if not is_done:
-                        btn_icon = "🔲" if is_sel else "⬜"
+                        btn_text = f"✅ {it['name']}" if is_sel else it['name']
                         buttons.append([InlineKeyboardButton(
-                            text=f"{btn_icon} {it['name']}",
+                            text=btn_text,
                             callback_data=f"lt_{it['id'][:28]}",
                         )])
         elif lt == "🛒 Покупки":
@@ -127,10 +127,11 @@ def _build_list_text_and_buttons(
             for it in not_done:
                 cat_emoji = (it.get("category", "").split(" ")[0]) if it.get("category") else ""
                 is_sel = it["id"] in selected
-                icon = "🔲" if is_sel else "⬜"
+                icon = "✅" if is_sel else "◻️"
                 lines.append(f"  {icon} {it['name']} · {cat_emoji}")
+                btn_text = f"✅ {it['name']}" if is_sel else it['name']
                 buttons.append([InlineKeyboardButton(
-                    text=f"{icon} {it['name']}",
+                    text=btn_text,
                     callback_data=f"lt_{it['id'][:28]}",
                 )])
         else:
@@ -431,7 +432,7 @@ async def handle_list_check(msg: Message, data: dict, user_notion_id: str = "") 
     created = await add_items(items, "📋 Чеклист", BOT_NAME, user_notion_id)
     lines = [f"📋 <b>{name}</b> ({len(created)} пунктов)"]
     for c in created:
-        lines.append(f"  ⬜ {c['name']}")
+        lines.append(f"  ◻️ {c['name']}")
     await msg.answer("\n".join(lines), parse_mode="HTML")
 
 
@@ -507,7 +508,7 @@ async def handle_list_pending(msg: Message, user_notion_id: str = "") -> bool:
         created = await add_items(items, "📋 Чеклист", BOT_NAME, pending.get("user_notion_id", user_notion_id))
         lines = [f"📋 <b>{group}</b> ({len(created)} пунктов)"]
         for c in created:
-            lines.append(f"  ⬜ {c['name']}")
+            lines.append(f"  ◻️ {c['name']}")
         await msg.answer("\n".join(lines), parse_mode="HTML")
         return True
 
