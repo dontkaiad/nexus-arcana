@@ -221,7 +221,7 @@ async def handle_list_command(msg: Message, user_notion_id: str = "") -> None:
 
 # ── Callback: toggle (multiselect) ───────────────────────────────────────────
 
-@router.callback_query(lambda c: c.data and c.data.startswith("lt_") and c.data != "lt_checkout")
+@router.callback_query(lambda c: c.data and c.data.startswith("lt_") and c.data != "lt_checkout" and not c.data.startswith("lt_remain_"))
 async def on_list_toggle(query: CallbackQuery, user_notion_id: str = "") -> None:
     uid = query.from_user.id
     page_id_short = query.data.replace("lt_", "")
@@ -650,6 +650,7 @@ async def handle_list_pending(msg: Message, user_notion_id: str = "") -> bool:
         return False
 
     if action == "checklist_items":
+        await react(msg, "🗒️")
         pending_del(uid)
         raw_items = []
         for line in text.split("\n"):
@@ -668,6 +669,7 @@ async def handle_list_pending(msg: Message, user_notion_id: str = "") -> bool:
         return True
 
     if action == "list_checkout":
+        await react(msg, "💸")
         # Парсим текст чека через Haiku
         categories = pending.get("categories", {})
         selected_data = pending.get("selected", {})
@@ -755,6 +757,7 @@ async def handle_list_pending(msg: Message, user_notion_id: str = "") -> bool:
         return True
 
     if action == "list_checkout_split":
+        await react(msg, "💸")
         # Ответ на "сколько на X?"
         price_match = re.search(r"(\d+(?:[.,]\d+)?)\s*[кk]?", text)
         if not price_match:
