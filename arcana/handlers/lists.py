@@ -349,8 +349,7 @@ async def on_checkout(query: CallbackQuery, user_notion_id: str = "") -> None:
 
         lines = ["🛒 <b>Выбрано:</b>"]
         for cat, names in categories.items():
-            cat_emoji = cat.split(" ")[0] if " " in cat else ""
-            lines.append(f"  {cat_emoji} {cat}: {', '.join(names)}")
+            lines.append(f"  {cat}: {', '.join(names)}")
         lines.append("\nСколько потратила? 💳 карта / 💵 наличные?")
         await query.message.answer("\n".join(lines), parse_mode="HTML")
 
@@ -647,8 +646,7 @@ async def _finalize_checkout(msg, named_cats, source, selected_data, categories,
         await finance_add(date=_today_iso(), amount=float(amount), category=finance_cat,
                           type_="💸 Расход", source=source, description=title,
                           bot_label=BOT_NAME, user_notion_id=user_page_id)
-        cat_emoji = cat.split(" ")[0] if " " in cat else ""
-        lines.append(f"  {cat_emoji} {cat}: {int(amount)}₽ ({title})")
+        lines.append(f"  {cat}: {int(amount)}₽ ({title})")
 
     page_ids = list(selected_data.keys())
     if page_ids:
