@@ -1,4 +1,4 @@
-# 🤖 AI_AGENTS
+# 🤖 nexus-arcana
 
 Dual Telegram bot system built with **vibe coding** — AI-directed development via [Claude Code](https://claude.ai) + [Claude.ai](https://claude.ai).
 
