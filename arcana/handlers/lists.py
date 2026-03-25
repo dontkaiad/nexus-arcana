@@ -188,7 +188,7 @@ async def handle_list_command(msg: Message, user_notion_id: str = "") -> None:
 
 # ── Callback: toggle ─────────────────────────────────────────────────────────
 
-@router.callback_query(lambda c: c.data and c.data.startswith("lt_") and c.data != "lt_checkout")
+@router.callback_query(lambda c: c.data and c.data.startswith("lt_") and c.data != "lt_checkout" and not c.data.startswith("lt_remain_"))
 async def on_list_toggle(query: CallbackQuery, user_notion_id: str = "") -> None:
     uid = query.from_user.id
     page_id_short = query.data.replace("lt_", "")
