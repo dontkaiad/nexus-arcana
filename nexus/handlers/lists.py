@@ -669,6 +669,10 @@ async def handle_list_pending(msg: Message, user_notion_id: str = "") -> bool:
         return True
 
     if action == "list_checkout":
+        # Если в тексте нет цифр — это не ответ на чек, сбросить pending
+        if not re.search(r"\d", text):
+            pending_del(uid)
+            return False
         await react(msg, "💸")
         # Парсим текст чека через Haiku
         categories = pending.get("categories", {})
@@ -757,6 +761,9 @@ async def handle_list_pending(msg: Message, user_notion_id: str = "") -> bool:
         return True
 
     if action == "list_checkout_split":
+        if not re.search(r"\d", text):
+            pending_del(uid)
+            return False
         await react(msg, "💸")
         # Ответ на "сколько на X?"
         price_match = re.search(r"(\d+(?:[.,]\d+)?)\s*[кk]?", text)

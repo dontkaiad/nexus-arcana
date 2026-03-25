@@ -513,6 +513,9 @@ async def handle_list_pending(msg: Message, user_notion_id: str = "") -> bool:
         return True
 
     if action == "list_checkout":
+        if not re.search(r"\d", text):
+            pending_del(uid)
+            return False
         categories = pending.get("categories", {})
         selected_data = pending.get("selected", {})
         p_user_id = pending.get("user_notion_id", user_notion_id)
@@ -569,6 +572,9 @@ async def handle_list_pending(msg: Message, user_notion_id: str = "") -> bool:
         return True
 
     if action == "list_checkout_split":
+        if not re.search(r"\d", text):
+            pending_del(uid)
+            return False
         price_match = re.search(r"(\d+(?:[.,]\d+)?)\s*[кk]?", text)
         if not price_match:
             await msg.answer("⚠️ Напиши число, например: 800")
