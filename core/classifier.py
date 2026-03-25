@@ -11,6 +11,11 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from core.claude_client import ask_claude
 from core.notion_client import finance_add, log_error
 from core.config import ARCANA_KEYWORDS
+from core.list_classifier import (
+    _LIST_BUY_RE, _LIST_CHECK_RE, _LIST_INV_ADD_RE,
+    _LIST_INV_SEARCH_RE, _LIST_DONE_RE, _LIST_INV_UPDATE_RE,
+    LIST_HAIKU_TYPES,
+)
 from nexus.handlers.utils import react
 
 logger = logging.getLogger("nexus.classifier")
@@ -191,6 +196,8 @@ def build_system(tz_offset: int = 3) -> str:
         "Примеры stats: 'сколько потратила на коты', 'скок ушло на транспорт', 'сколько потратила на котов в этом месяце',",
         "  'расходы за месяц', 'сводка', 'статистика', 'сколько потратила', 'сколько ушло на продукты'",
         "ВАЖНО: любой вопрос со словами 'сколько/скок потратила/потратил/ушло/израсходовала' → ВСЕГДА stats, НЕ task!",
+        "",
+    ] + LIST_HAIKU_TYPES + [
         "",
         "help:",
         '{"type":"help"}',
@@ -559,7 +566,8 @@ async def classify(text: str, tz_offset: int = 3) -> list[dict]:
 
     # Быстрый pre-фильтр: задача выполнена ("сделала X", "X готово")
     # Исключение: "запомни ..." → это заметка, пропустить к Claude
-    if _DONE_RE.search(text) and not _ZAPOMNI_RE.search(text):
+    # Исключение: "купила X 89р" (с ценой) → это list_done, пропустить к списковым фильтрам
+    if _DONE_RE.search(text) and not _ZAPOMNI_RE.search(text) and not _CURRENCY_RE.search(text):
         logger.info("classify: task_done pattern matched")
         return [{"type": "task_done", "task_hint": text}]
 
@@ -572,6 +580,37 @@ async def classify(text: str, tz_offset: int = 3) -> list[dict]:
     if _STATS_RE.search(text):
         logger.info("classify: stats pattern matched, bypassing Claude")
         return [{"type": "stats", "query": text}]
+
+    # ── Списки pre-filters (ПОРЯДОК ВАЖЕН: list_done ПЕРЕД list_buy!) ────────
+    # "купила молоко 89р" → list_done (НЕ list_buy!)
+    if _LIST_DONE_RE.search(text):
+        logger.info("classify: list_done pattern matched")
+        return [{"type": "list_done", "text": text}]
+
+    # "купить молоко, яйца" → list_buy (только если НЕТ цены — иначе это list_done)
+    if _LIST_BUY_RE.search(text) and not _CURRENCY_RE.search(text):
+        logger.info("classify: list_buy pattern matched")
+        return [{"type": "list_buy", "text": text}]
+
+    # "список: паспорт, зарядка" / "чеклист" → list_check
+    if _LIST_CHECK_RE.search(text):
+        logger.info("classify: list_check pattern matched")
+        return [{"type": "list_check", "text": text}]
+
+    # "закончился парацетамол" / "осталась 1 пачка" → list_inventory_update
+    if _LIST_INV_UPDATE_RE.search(text):
+        logger.info("classify: list_inventory_update pattern matched")
+        return [{"type": "list_inventory_update", "text": text}]
+
+    # "дома есть: парацетамол" / "добавь в инвентарь" → list_inventory_add
+    if _LIST_INV_ADD_RE.search(text):
+        logger.info("classify: list_inventory_add pattern matched")
+        return [{"type": "list_inventory_add", "text": text}]
+
+    # "есть ибупрофен?" → list_inventory_search
+    if _LIST_INV_SEARCH_RE.search(text):
+        logger.info("classify: list_inventory_search pattern matched")
+        return [{"type": "list_inventory_search", "text": text}]
 
     # Быстрый pre-фильтр: поиск по долгосрочной памяти (до Claude, чтобы не попал в note_search)
     if _MEMORY_SEARCH_RE.search(text):
