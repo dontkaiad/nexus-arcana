@@ -182,4 +182,5 @@ cython_debug/
 .cursorindexingignore
 .DS_Store
 jobs.sqlite
-pending_tasks.db
+pending_tasks.dbNOTION_DATABASES.md
+NEXUS_CAPABILITIES.md
