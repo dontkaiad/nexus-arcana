@@ -16,6 +16,7 @@ from core.list_manager import (
     add_items, get_list, check_items, check_items_bulk,
     checklist_toggle, checklist_toggle_by_id, buy_mark_done_by_id,
     inventory_search, inventory_update, archive_items, mark_items_done,
+    search_memory_categories,
     pending_get, pending_set, pending_del,
     CATEGORY_TO_FINANCE, LIST_CATEGORIES,
 )
@@ -456,8 +457,27 @@ async def on_remain_action(query: CallbackQuery, user_notion_id: str = "") -> No
 async def handle_list_buy(msg: Message, data: dict, user_notion_id: str = "") -> None:
     await react(msg, "🗒️")
     text = data.get("text", msg.text or "")
+
+    # Ищем предпочтения в Памяти для определения категорий
+    # Извлекаем потенциальные названия из текста (убираем "купить/купи/добавь")
+    clean = re.sub(r"^\s*(купить|купи|добавь в (?:покупки|список)|надо купить|нужно купить)\s*", "", text, flags=re.IGNORECASE).strip()
+    potential_items = [w.strip() for w in re.split(r"[,\s]+и\s+|,\s*", clean) if w.strip()]
+
+    memory_cats: dict[str, str] = {}
+    if potential_items:
+        try:
+            memory_cats = await search_memory_categories(potential_items)
+        except Exception as e:
+            logger.debug("memory category search: %s", e)
+
+    # Дополняем промпт маппингами из Памяти
+    system = _PARSE_BUY_SYSTEM
+    if memory_cats:
+        mem_lines = "\n".join(f"- {name} → {cat}" for name, cat in memory_cats.items())
+        system = system + f"\nИзвестные предпочтения из памяти (ПРИОРИТЕТ):\n{mem_lines}\n"
+
     try:
-        parsed = await _haiku_parse(text, _PARSE_BUY_SYSTEM)
+        parsed = await _haiku_parse(text, system)
         if not isinstance(parsed, list):
             parsed = [parsed]
     except Exception as e:
