@@ -883,6 +883,29 @@ async def process_item(data: Dict[str, Any], original_text: str, msg, clarify: d
                     await _check_budget_limit(category, msg, user_notion_id, amount=amount)
                 except Exception as e:
                     logger.error("budget check error: %s", e, exc_info=True)
+                # Предложить вычеркнуть из списка покупок
+                try:
+                    from core.list_manager import find_matching_items
+                    from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+                    matches = await find_matching_items(title, category, "☀️ Nexus", user_notion_id)
+                    if matches:
+                        buttons = []
+                        item_names = []
+                        for m in matches[:3]:
+                            cat_e = (m.get("category") or "").split(" ")[0]
+                            item_names.append(f"◻️ {m['name']} · {cat_e}")
+                            buttons.append([InlineKeyboardButton(
+                                text=f"✅ {m['name']}",
+                                callback_data=f"list_cross_{m['id'][:28]}",
+                            )])
+                        buttons.append([InlineKeyboardButton(text="Нет", callback_data="list_cross_no")])
+                        await msg.answer(
+                            f"🛒 Есть в списке:\n" + "\n".join(item_names),
+                            reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons),
+                            parse_mode="HTML",
+                        )
+                except Exception as e:
+                    logger.debug("list cross-off check: %s", e)
             elif kind == "income":
                 # Любой доход (кроме ЗП/аренды/практики) → предложить пересчёт бюджета
                 _skip_cats = {"💰 Зарплата", "🔮 Практика", "🏠 Жильё"}
