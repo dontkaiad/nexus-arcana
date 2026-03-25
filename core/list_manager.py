@@ -116,6 +116,50 @@ def _checkbox(val: bool) -> dict:
     return {"checkbox": val}
 
 
+async def search_memory_categories(item_names: list[str]) -> dict[str, str]:
+    """Ищет в 🧠 Память маппинги категорий для списка айтемов.
+
+    Ищет записи содержащие название айтема + слово "категория" или название категории.
+    Возвращает {item_name: "🚬 Привычки", ...} для найденных.
+    """
+    from core.notion_client import query_pages as qp
+    db_mem = os.environ.get("NOTION_DB_MEMORY") or config.nexus.db_memory
+    if not db_mem or not item_names:
+        return {}
+
+    result: dict[str, str] = {}
+    # Один запрос: ищем все записи содержащие любое из имён
+    for name in item_names:
+        name_clean = name.lower().strip()
+        if not name_clean or len(name_clean) < 2:
+            continue
+        try:
+            pages = await qp(
+                db_mem,
+                filters={"and": [
+                    {"property": "Текст", "title": {"contains": name_clean}},
+                    {"property": "Актуально", "checkbox": {"equals": True}},
+                ]},
+                page_size=3,
+            )
+            for p in pages:
+                title_parts = p.get("properties", {}).get("Текст", {}).get("title", [])
+                fact = title_parts[0].get("plain_text", "") if title_parts else ""
+                fact_lower = fact.lower()
+                # Ищем упоминание категории в тексте факта
+                for cat in LIST_CATEGORIES:
+                    cat_name = cat.split(" ", 1)[-1].lower() if " " in cat else cat.lower()
+                    if cat_name in fact_lower:
+                        result[name] = cat
+                        break
+                if name in result:
+                    break
+        except Exception as e:
+            logger.warning("search_memory_categories(%s): %s", name, e)
+
+    return result
+
+
 async def _search_memory_for_prefs(item_name: str) -> str:
     """Ищет в 🧠 Память предпочтения по названию айтема (бренд, магазин, размер)."""
     from core.notion_client import query_pages as qp
