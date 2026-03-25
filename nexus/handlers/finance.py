@@ -75,8 +75,8 @@ _GOAL_RE = re.compile(
 )
 _DEBT_RE = re.compile(
     r'долг:\s*(.+?)\s*[—\-]\s*(\d[\d\s]*(?:[.,]\d+)?)\s*[₽р]'
-    r'(?:.*?дедлайн:\s*([^·]+?))?'
-    r'(?:.*?стратегия:\s*([^·]+?))?'
+    r'(?:.*?дедлайн:\s*([^·]+))?'
+    r'(?:.*?стратегия:\s*([^·]+))?'
     r'(?:.*?платёж:\s*(\d[\d\s]*(?:[.,]\d+)?))?'
     r'\s*$',
     re.IGNORECASE,
@@ -330,109 +330,164 @@ async def _calc_free_remaining(user_notion_id: str = "") -> Optional[Tuple[float
     return (free_left, days_remaining)
 
 
+_LIMIT_DISPLAY = {
+    "привычки": "🚬 Привычки",
+    "продукты": "🍜 Продукты",
+    "кафе": "🍱 Кафе/Доставка",
+    "транспорт": "🚕 Транспорт",
+    "бьюти": "💅 Бьюти",
+    "гардероб": "👗 Гардероб",
+    "здоровье": "🏥 Здоровье",
+    "хобби": "📚 Хобби/Учеба",
+    "импульсивные": "🎲 Импульсивные",
+    "импульсивный": "🎲 Импульсивные",
+    "подушка": "🛡️ Подушка",
+    "расходники": "🕯️ Расходники",
+}
+
+
+def _display_limit_name(raw_name: str) -> str:
+    """'привычки' -> '🚬 Привычки', 'лимит_привычки' -> '🚬 Привычки'."""
+    key = raw_name.lower().replace("лимит_", "").strip()
+    return _LIMIT_DISPLAY.get(key, raw_name)
+
+
 async def build_budget_message(user_notion_id: str = "") -> Optional[str]:
-    """Формирует полное сообщение /budget. Возвращает HTML-строку или None."""
+    """Формирует полное сообщение /budget из сохранённых данных. НЕ вызывает Sonnet."""
     from core.config import config
     from core.notion_client import db_query
 
     budget = await _load_budget_data(user_notion_id)
-    has_data = any(budget[k] for k in budget)
+    has_data = budget.get("обязательные") or budget.get("лимиты")
+    if not has_data:
+        return None
 
     now = datetime.now(MOSCOW_TZ)
     payday = await _get_payday()
     period_start, period_end = _period_bounds(payday)
     today_str = now.strftime("%Y-%m-%d")
     try:
+        start_dt = datetime.strptime(period_start, "%Y-%m-%d")
         end_dt = datetime.strptime(period_end, "%Y-%m-%d")
+        days_in_period = max(1, (end_dt - start_dt).days)
+        day_of_period = max(1, (now.replace(hour=0, minute=0, second=0, microsecond=0) - start_dt).days + 1)
         days_remaining = max(0, (end_dt - now.replace(hour=0, minute=0, second=0, microsecond=0)).days)
     except Exception:
+        days_in_period = 30
+        day_of_period = now.day
         days_remaining = 30 - now.day
     ru_month = _RU_MONTHS.get(now.month, "")
 
-    # Доходы за период
-    try:
-        income_records = await db_query(config.nexus.db_finance, filter_obj={"and": [
-            {"property": "Тип", "select": {"equals": "💰 Доход"}},
-            {"property": "Дата", "date": {"on_or_after": period_start}},
-            {"property": "Дата", "date": {"on_or_before": today_str}},
-        ]}, page_size=200)
-    except Exception:
-        income_records = []
-    total_income = sum((p["properties"].get("Сумма", {}).get("number") or 0) for p in income_records)
-
-    # Расходы за период
+    # Расходы за период по категориям
+    by_expense_cat: Dict[str, float] = {}
+    total_expenses = 0
     try:
         expense_records = await db_query(config.nexus.db_finance, filter_obj={"and": [
-            {"property": "Тип", "select": {"equals": "💸 Расход"}},
+            {"property": "Тип", "select": {"equals": "🌿 Расход"}},
             {"property": "Дата", "date": {"on_or_after": period_start}},
             {"property": "Дата", "date": {"on_or_before": today_str}},
         ]}, page_size=500)
+        for r in expense_records:
+            cat = (r["properties"].get("Категория", {}).get("select") or {}).get("name", "💳 Прочее")
+            amt = r["properties"].get("Сумма", {}).get("number") or 0
+            by_expense_cat[cat] = by_expense_cat.get(cat, 0) + amt
+            total_expenses += amt
     except Exception:
-        expense_records = []
-    total_expenses = sum((p["properties"].get("Сумма", {}).get("number") or 0) for p in expense_records)
-
-    has_data = budget["обязательные"] or budget["лимиты"]
-    if not has_data:
-        return None  # нет данных → нужна настройка
-
-    # Расходы по категориям
-    by_expense_cat: Dict[str, float] = {}
-    for r in expense_records:
-        cat = (r["properties"].get("Категория", {}).get("select") or {}).get("name", "💳 Прочее")
-        amt = r["properties"].get("Сумма", {}).get("number") or 0
-        by_expense_cat[cat] = by_expense_cat.get(cat, 0) + amt
+        pass
 
     # ── Формируем сообщение ──
-    lines = ["<b>💰 Бюджет на {} · день {}</b>".format(ru_month, now.day)]
+    lines = ["<b>💰 Бюджет на {} (день {}/{})</b>".format(ru_month, day_of_period, days_in_period)]
+
+    # Доходы из памяти
+    income_total = sum(d.get("amount", 0) for d in budget.get("доходы", []))
+    if income_total:
+        lines.append("\n<b>📥 Доход: {:,}₽</b>".format(int(income_total)))
+
+    # Фикс
+    obligatory_total = sum(o["amount"] for o in budget.get("обязательные", []))
+    if obligatory_total:
+        lines.append("<b>🔒 Фикс: {:,}₽</b>".format(int(obligatory_total)))
+
+    distributable = income_total - obligatory_total
+    if distributable > 0:
+        lines.append("💳 Распределяемые: <b>{:,}₽</b>".format(int(distributable)))
+
+    # Долги с полной стратегией
+    debts = budget.get("долги", [])
+    total_debt_payments = 0
+    if debts:
+        lines.append("\n<b>📋 Долги:</b>")
+        for d in debts:
+            mp = d.get("monthly_payment", 0)
+            total_debt_payments += mp
+            strategy = d.get("strategy", "").strip()
+            if mp > 0:
+                lines.append("  {} — {:,}₽ · {:,}₽/мес".format(
+                    d["name"], int(d["amount"]), int(mp)))
+                if strategy:
+                    lines.append("    💬 {}".format(strategy))
+            else:
+                strat_display = strategy if strategy else "отложен"
+                lines.append("  {} — {:,}₽ · {}".format(
+                    d["name"], int(d["amount"]), strat_display))
+        lines.append("  ─────────────")
+        lines.append("  💳 Платежей: <b>{:,}₽/мес</b>".format(int(total_debt_payments)))
 
     # Лимиты с прогрессом
-    if budget["лимиты"]:
-        lines.append("\n<b>📊 Лимиты:</b>")
-        for l in budget["лимиты"]:
-            limit_name = l["name"]
+    limits = budget.get("лимиты", [])
+    if limits:
+        limits_total = sum(l["amount"] for l in limits)
+        lines.append("\n<b>📊 Лимиты · {}:</b>".format(ru_month))
+        spent_in_limits = 0
+        for l in limits:
+            display_name = _display_limit_name(l["name"])
             limit_amt = l["amount"]
-            # Найти расход по этой категории
+            # Match spent amount
             spent = 0.0
             for cat_key, cat_spent in by_expense_cat.items():
-                cat_link = _cat_link(cat_key)
-                if limit_name in cat_link or cat_link in limit_name or limit_name.lower() in cat_key.lower():
+                cat_link_key = _cat_link(cat_key)
+                name_key = l["name"].lower().replace("лимит_", "")
+                if name_key in cat_link_key or cat_link_key in name_key or name_key in cat_key.lower():
                     spent += cat_spent
+            spent_in_limits += spent
             pct = int(spent / limit_amt * 100) if limit_amt else 0
             indicator = "🟢" if pct < 70 else ("🟡" if pct < 90 else "🔴")
-            lines.append("  {} {:,.0f} / {:,.0f}₽ ({}%) {}".format(
-                limit_name if any(c in limit_name for c in "🚬💅🍜🍱🚕🏥👗📚🎲") else "📊 " + limit_name,
-                spent, limit_amt, pct, indicator))
-
-    # Свободные
-    obligatory_total = sum(o["amount"] for o in budget["обязательные"])
-    savings_total = sum(g["saving"] for g in budget["цели"])
-    limits_total = sum(l["amount"] for l in budget["лимиты"])
-    if total_income > 0:
-        free_total = total_income - obligatory_total - limits_total - savings_total
-        free_left = free_total - max(0, total_expenses - limits_total)
-        # Простой расчёт: свободные = доход - фикс - лимиты - цели - уже потрачено вне лимитов
-        daily = free_left / max(days_remaining, 1)
-        lines.append("\n💳 <b>Свободных: {:,.0f}₽</b>".format(max(0, free_left)))
-        lines.append("📅 Осталось дней: {}".format(days_remaining))
-        lines.append("💸 В день: {:,.0f}₽".format(max(0, daily)))
-
-    # Долги
-    if budget["долги"]:
-        debt_total = sum(d["amount"] for d in budget["долги"])
-        lines.append("\n<b>📋 Долги: {:,.0f}₽</b>".format(debt_total))
-        for d in budget["долги"]:
-            dl = " · {}".format(d["deadline"]) if d["deadline"] else ""
-            lines.append("  {} — {:,.0f}₽{}".format(d["name"], d["amount"], dl))
+            if day_of_period > 1:
+                lines.append("  {} — {:,} / {:,}₽ ({}%) {}".format(
+                    display_name, int(spent), int(limit_amt), pct, indicator))
+            else:
+                lines.append("  {} — {:,}₽".format(display_name, int(limit_amt)))
+        lines.append("  ─────────────")
+        if day_of_period > 1:
+            lines.append("  💳 Потрачено: {:,} / {:,}₽".format(int(spent_in_limits), int(limits_total)))
+            free_in_limits = limits_total - spent_in_limits
+            daily_left = free_in_limits / max(days_remaining, 1)
+            lines.append("  💳 Свободных: <b>{:,}₽</b> · {:,}₽/день".format(
+                int(max(0, free_in_limits)), int(max(0, daily_left))))
+        else:
+            lines.append("  💳 Итого: {:,}₽".format(int(limits_total)))
 
     # Цели
-    if budget["цели"]:
-        goal_parts = []
-        for g in budget["цели"]:
-            if g["saving"]:
-                goal_parts.append("{} {:,.0f}₽/мес".format(g["name"], g["saving"]))
-            else:
-                goal_parts.append("{} {:,.0f}₽".format(g["name"], g["target"]))
-        lines.append("\n🎯 Цели: {}".format(", ".join(goal_parts)))
+    goals = budget.get("цели", [])
+    if goals:
+        has_active_goals = any(g.get("saving", 0) > 0 for g in goals)
+        if has_active_goals:
+            lines.append("\n<b>🎯 Цели:</b>")
+            for i, g in enumerate(goals, 1):
+                saving = g.get("saving", 0)
+                target = g.get("target", 0)
+                if saving > 0:
+                    months_to = int(target / saving) if saving else 0
+                    lines.append("  {}. {} — {:,}₽ · {:,}₽/мес → ~{} мес".format(
+                        i, g["name"], int(target), int(saving), months_to))
+                else:
+                    lines.append("  {}. {} — {:,}₽ · после долгов".format(
+                        i, g["name"], int(target)))
+        else:
+            # All deferred
+            lines.append("\n🎯 Цели (после закрытия долгов):")
+            for i, g in enumerate(goals, 1):
+                lines.append("  {}. {} — {:,}₽".format(i, g["name"], int(g.get("target", 0))))
 
     return "\n".join(lines)
 
@@ -2311,8 +2366,17 @@ BUDGET_SONNET_SYSTEM = (
     "  Если остаток < 18,500₽ → вариант НЕЖИЗНЕСПОСОБЕН\n"
     "  Если остаток >= 18,500₽ → распределить пропорционально:\n"
     "    1. Сначала выделить минимумы по всем обязательным категориям\n"
-    "    2. Оставшееся → добавить к привычкам (до комфортного уровня) и другим категориям\n"
+    "    2. Оставшееся → распределить между привычками, продуктами, и другими\n"
     "    3. Кафе, гардероб, хобби, прочее — могут быть 0₽ в тяжёлый месяц\n\n"
+    "  БАЛАНС ПРИВЫЧКИ / ПРОДУКТЫ:\n"
+    "  Продукты НИКОГДА не меньше привычек более чем в 2 раза.\n"
+    "  products_min = max(3000, habits / 2)\n"
+    "  Если привычки 14к → продукты минимум 7к.\n"
+    "  Если привычки 10к → продукты минимум 5к.\n"
+    "  Не засовывать ВСЁ лишнее в привычки — делить между привычками и продуктами.\n\n"
+    "  СОВЕТ СДВГ при сокращении привычек:\n"
+    "  Если привычки урезаны — дать КОНКРЕТНЫЙ совет в habit_strategy:\n"
+    "  купить блок Chapman заранее, заменить колу водой 3 дня/нед, 1 монстр вместо 2.\n\n"
     "ОГРАНИЧЕНИЯ:\n"
     "- Лимит с пометкой [ручной] — НЕ ТРОГАТЬ, распределять остаток вокруг него\n"
     "- Коты = ФИКСИРОВАННЫЕ расходы (живые существа!)\n"
@@ -2479,8 +2543,14 @@ _BUDGET_PARSE_PROMPT_LEGACY = """Финансовый советник. Поль
 Если остаток < 18,500₽ → вариант НЕЖИЗНЕСПОСОБЕН (viable: false)
 Если остаток >= 18,500₽ → распределить пропорционально:
 1. Минимумы по всем обязательным
-2. Остаток → привычки (до комфорта) и другие
+2. Остаток → распределить между привычками, продуктами, и другими
 3. Кафе, гардероб, хобби — могут быть 0₽
+
+БАЛАНС ПРИВЫЧКИ / ПРОДУКТЫ:
+Продукты НИКОГДА не меньше привычек более чем в 2 раза.
+products_min = max(3000, habits / 2)
+Если привычки 14к → продукты минимум 7к.
+Не засовывать ВСЁ лишнее в привычки.
 
 ТЯЖЁЛЫЙ МЕСЯЦ:
 variant_a: "Платить по плану" — все monthly_payment
@@ -2645,22 +2715,37 @@ def _months_until(deadline_str: str) -> int:
 # ── Start / Collect / Finish ─────────────────────────────────────────────────
 
 async def start_budget_analysis(message: Message, user_notion_id: str = "") -> None:
-    """v2.0: /budget always runs Sonnet analysis with current data."""
+    """v3.0: /budget shows SAVED plan from Memory. Recalc only via button."""
     uid = message.from_user.id
     budget = await _load_budget_data(user_notion_id)
-    has_data = any(budget.get(k) for k in budget)
+    has_data = budget.get("лимиты") or budget.get("обязательные")
 
     if not has_data:
         await start_budget_setup(message, user_notion_id)
         return
 
-    # Has data -> run Sonnet analysis immediately
+    # Has data → show saved plan with progress (NO Sonnet call)
+    budget_text = await build_budget_message(user_notion_id)
+    if not budget_text:
+        await start_budget_setup(message, user_notion_id)
+        return
+
+    # Store notion_uid for callbacks
     state = _budget_get(uid) or {}
-    state["buf"] = state.get("buf", [])
     state["notion_uid"] = user_notion_id
-    state["state"] = "analyzing"
     _budget_set(uid, state)
-    await _run_budget_analysis(message, uid)
+
+    buttons = [[
+        InlineKeyboardButton(text="🔄 Пересчитать", callback_data="budget_recalc_full"),
+        InlineKeyboardButton(text="📋 Стратегия долгов", callback_data="bsetup_change_strategy"),
+    ], [
+        InlineKeyboardButton(text="✏️ Изменить данные", callback_data="bsetup_adjust"),
+    ]]
+    await message.answer(
+        budget_text,
+        parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons),
+    )
 
 
 async def start_budget_setup(message: Message, user_notion_id: str = "") -> None:
@@ -2896,12 +2981,17 @@ async def on_budget_adjust(call: CallbackQuery) -> None:
 
 @router.callback_query(F.data == "budget_recalc_full")
 async def on_budget_recalc_full(call: CallbackQuery) -> None:
-    """Full budget recalculation trigger."""
+    """Full budget recalculation via Sonnet."""
     uid = call.from_user.id
     state = _budget_get(uid) or {}
     notion_uid = state.get("notion_uid", "")
     await call.answer("📊 Пересчитываю...")
-    await start_budget_analysis(call.message, notion_uid)
+    # Force Sonnet recalculation (not just show saved)
+    state["buf"] = state.get("buf", [])
+    state["notion_uid"] = notion_uid
+    state["state"] = "analyzing"
+    _budget_set(uid, state)
+    await _run_budget_analysis(call.message, uid)
 
 
 @router.callback_query(F.data.in_({"bsetup_variant_a", "bsetup_variant_b"}))
