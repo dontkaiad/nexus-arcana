@@ -78,6 +78,7 @@ def _checkout_parse_system(categories: dict[str, list[str]]) -> str:
         '{"total": 2500, "source": "💳 Карта", "breakdown": [{"category": "🕯️ Расходники", "amount": 600}]}\n'
         '- "карта/картой" → "💳 Карта", "наличка/нал/наличные" → "💵 Наличные"\n'
         "- к/тыс = ×1000\n"
+        '- "остальное/прочее/остаток 4000" → category="остальное" (спец.слово, НЕ реальная категория)\n'
     )
 
 
@@ -553,10 +554,15 @@ async def handle_list_pending(msg: Message, user_notion_id: str = "") -> bool:
         if not total:
             total = named_sum
 
+        _REST_WORDS = {"остальное", "прочее", "остаток", "rest", "другое"}
         named_cats: dict[str, float] = {}
+        rest_amount: float = 0
         for b in breakdown:
             raw_cat = b.get("category", "")
             amount = b.get("amount") or 0
+            if raw_cat.lower().strip() in _REST_WORDS:
+                rest_amount += amount
+                continue
             matched = None
             for full_cat in categories:
                 clean = full_cat.split(" ", 1)[-1].lower() if " " in full_cat else full_cat.lower()
@@ -567,7 +573,10 @@ async def handle_list_pending(msg: Message, user_notion_id: str = "") -> bool:
 
         remaining_cats = [c for c in categories if c not in named_cats]
         named_total = sum(named_cats.values())
-        remainder = total - named_total
+        if total:
+            remainder = total - named_total
+        else:
+            remainder = rest_amount
 
         if len(remaining_cats) == 1 and remainder > 0:
             named_cats[remaining_cats[0]] = remainder
