@@ -1,6 +1,6 @@
 # 🤖 AI_AGENTS
 
-Dual Telegram bot system built with **vibe coding** — no manual code, 100% AI-directed development via [Claude Code](https://claude.ai) + [Claude.ai](https://claude.ai).
+Dual Telegram bot system built with **vibe coding** — AI-directed development via [Claude Code](https://claude.ai) + [Claude.ai](https://claude.ai).
 
 ## ☀️ Nexus — Personal AI Assistant
 > *Life management hub*
