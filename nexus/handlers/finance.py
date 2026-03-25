@@ -1219,6 +1219,31 @@ async def handle_finance_text(message: Message, text: str, bot_label: str = "☀
             await _check_budget_limit(data.get("category", ""), message, user_notion_id)
         except Exception as e:
             logger.error("budget check error: %s", e, exc_info=True)
+        # Предложить вычеркнуть из списка покупок
+        try:
+            from core.list_manager import find_matching_items
+            desc = (data.get("description") or "").strip()
+            cat = data.get("category") or ""
+            if desc:
+                matches = await find_matching_items(desc, cat, bot_label, user_notion_id)
+                if matches:
+                    buttons = []
+                    item_names = []
+                    for m in matches[:3]:
+                        cat_e = (m.get("category") or "").split(" ")[0]
+                        item_names.append(f"◻️ {m['name']} · {cat_e}")
+                        buttons.append([InlineKeyboardButton(
+                            text=f"✅ {m['name']}",
+                            callback_data=f"list_cross_{m['id'][:28]}",
+                        )])
+                    buttons.append([InlineKeyboardButton(text="Нет", callback_data="list_cross_no")])
+                    await message.answer(
+                        f"🛒 Есть в списке:\n" + "\n".join(item_names),
+                        reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons),
+                        parse_mode="HTML",
+                    )
+        except Exception as e:
+            logger.debug("list cross-off check: %s", e)
 
     # Триггер при зарплате: показать краткий бюджет
     if "Доход" in data.get("type_", "") and "Зарплата" in data.get("category", ""):

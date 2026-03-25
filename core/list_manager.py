@@ -546,6 +546,44 @@ async def mark_items_done(page_ids: list[str]) -> int:
     return done
 
 
+async def find_matching_items(
+    description: str,
+    category: str,
+    bot_name: str,
+    user_page_id: str,
+) -> list[dict]:
+    """Ищет в списке покупок Not started айтемы, совпадающие с описанием расхода.
+
+    Матчинг: item_name.lower() in description.lower()
+             OR description.lower() in item_name.lower()
+    + категория совпадает (если указана).
+    """
+    db = _db_id()
+    if not db or not description:
+        return []
+
+    conditions: list[dict] = [
+        {"property": "Бот", "select": {"equals": bot_name}},
+        {"property": "Тип", "select": {"equals": "🛒 Покупки"}},
+        {"property": "Статус", "status": {"equals": "Not started"}},
+    ]
+    if user_page_id:
+        conditions.append({"property": "🪪 Пользователи", "relation": {"contains": user_page_id}})
+
+    pages = await db_query(db, filter_obj={"and": conditions}, page_size=50)
+    desc_lower = description.lower().strip()
+    matches = []
+    for p in pages:
+        data = _extract_page_data(p)
+        item_name = (data.get("name") or "").lower().strip()
+        if not item_name:
+            continue
+        # Нестрогий матч: "молоко" ↔ "молоко", но НЕ "молочко"
+        if item_name in desc_lower or desc_lower in item_name:
+            matches.append(data)
+    return matches
+
+
 async def inventory_search(
     query: str,
     bot_name: str,
