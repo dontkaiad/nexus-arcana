@@ -11,6 +11,7 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from core.claude_client import ask_claude
 from core.notion_client import finance_add, log_error
 from core.config import ARCANA_KEYWORDS
+from nexus.handlers.utils import react
 
 logger = logging.getLogger("nexus.classifier")
 MOSCOW_TZ = timezone(timedelta(hours=3))
@@ -218,6 +219,7 @@ def build_system(tz_offset: int = 3) -> str:
         "- priority: срочно/немедленно/деньги/документы/дедлайн сегодня → 'Срочно'; здоровье/работа/дедлайн скоро → 'Важно'; мелочь/развлечение → 'Можно потом'",
         "- deadline: 'до пятницы/среды/понедельника' → ISO дата ближайшего такого дня (если сегодня этот день → следующая неделя). 'до пятницы' ≠ 'каждую пятницу'. Пример: сегодня=" + today + " воскресенье → 'до пятницы'=2026-03-28, 'до понедельника'=2026-03-23",
         "- deadline с временем: парсить 'завтра в 15:00' → YYYY-MM-DDTHH:MM; 'в 14:30 без даты' → сегодня+время",
+        "- ПОВТОРЯЮЩИЕСЯ ЗАДАЧИ: если есть 'каждый день/неделю/месяц' → repeat != 'Нет', deadline = null (НЕ ставить текущую дату!), repeat_time = указанное время",
         "- repeat: 'каждый день/ежедневно/каждое утро/каждый вечер/каждую ночь' → 'Ежедневно'; 'каждую [день недели]/каждый [день недели]' → 'Еженедельно'; 'раз в месяц/ежемесячно/каждый месяц' → 'Ежемесячно'; иначе → 'Нет'",
         "- day_of_week: только если repeat='Еженедельно': пн/понедельник→'Пн'; вт/вторник→'Вт'; ср/среда→'Ср'; чт/четверг→'Чт'; пт/пятница→'Пт'; сб/суббота→'Сб'; вс/воскресенье→'Вс'",
         "- repeat_time: 'каждый день в 10' → '10:00'; 'каждое утро' → '09:00'; 'каждый вечер' → '20:00'; 'каждую ночь' → '23:00'; если время не указано → null",
@@ -646,6 +648,7 @@ async def process_item(data: Dict[str, Any], original_text: str, msg, clarify: d
 
     # TASK DONE
     if kind == "task_done":
+        await react(msg, "🎉")
         from nexus.handlers.tasks import handle_task_done
         await handle_task_done(msg, data.get("task_hint", original_text), user_notion_id=user_notion_id)
         return ""
@@ -687,6 +690,7 @@ async def process_item(data: Dict[str, Any], original_text: str, msg, clarify: d
 
     # ПАМЯТЬ (memory_save)
     if kind == "memory_save":
+        await react(msg, "🧠")
         from nexus.handlers.memory import handle_memory_save
         data["text"] = data.get("text", original_text)
         await handle_memory_save(msg, data, user_notion_id=user_notion_id)
@@ -745,6 +749,7 @@ async def process_item(data: Dict[str, Any], original_text: str, msg, clarify: d
 
     # ФИНАНСЫ
     if kind in ("expense", "income"):
+        await react(msg, "💸" if kind == "expense" else "💰")
         confidence = data.get("confidence", "high")
         type_label = "💸 Расход" if kind == "expense" else "💰 Доход"
         
@@ -841,6 +846,7 @@ async def process_item(data: Dict[str, Any], original_text: str, msg, clarify: d
         
         return "❌ Ошибка при обновлении записи"
     if kind == "task":
+        await react(msg, "✅")
         from nexus.handlers.tasks import handle_task_parsed, _REL_TIME_RE, _parse_relative_time, _get_user_tz
         logger.info(
             "classifier: task detected - title=%r category=%r deadline=%r priority=%r "
@@ -881,9 +887,10 @@ async def process_item(data: Dict[str, Any], original_text: str, msg, clarify: d
 
     # ЗАМЕТКИ
     if kind == "note":
+        await react(msg, "📝")
         from nexus.handlers.notes import handle_note
         from core.config import config
-        
+
         logger.info("process_item: note - text=%r tags=%r", data.get("text", "")[:50], data.get("tags", ""))
         
         # Получить теги из classifier
