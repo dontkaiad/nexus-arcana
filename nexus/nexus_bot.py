@@ -37,9 +37,11 @@ dp.callback_query.middleware(WhitelistMiddleware())
 from nexus.handlers.tasks import router as tasks_router
 from nexus.handlers.finance import router as finance_router
 from nexus.handlers.memory import router as memory_router
+from nexus.handlers.lists import router as lists_router
 dp.include_router(tasks_router)
 dp.include_router(finance_router)
 dp.include_router(memory_router)
+dp.include_router(lists_router)
 
 MOSCOW_TZ = timezone(timedelta(hours=3))
 _clarify: dict = {}
@@ -485,6 +487,11 @@ async def handle_text(msg: Message, user_notion_id: str = "") -> None:
     if await handle_budget_setup_text(msg, user_notion_id):
         return
 
+    # Lists pending — чеклист пункты, срок годности
+    from nexus.handlers.lists import handle_list_pending
+    if await handle_list_pending(msg, user_notion_id):
+        return
+
     # Quick triggers (до классификатора)
     _tl = (msg.text or "").strip().lower()
 
@@ -846,6 +853,7 @@ async def main() -> None:
         BotCommand(command="finance", description="Расходы за сегодня"),
         BotCommand(command="finance_stats", description="Финансы: месяц/неделя/день"),
         BotCommand(command="memory", description="Список памяти"),
+        BotCommand(command="list", description="Списки: покупки, чеклисты, инвентарь"),
         BotCommand(command="adhd", description="Мой СДВГ-профиль"),
         BotCommand(command="notes_digest", description="Дайджест старых заметок"),
     ])
@@ -871,6 +879,22 @@ async def main() -> None:
             args=[bot],
             trigger=CronTrigger(day_of_week="sun", hour=8, minute=0),
             id="adhd_digest_weekly",
+            replace_existing=True,
+        )
+        # 🗒️ Списки: клон повторяющихся покупок — ежедневно 00:00 UTC (03:00 СПб)
+        from core.list_manager import clone_recurring, check_expiry
+        nexus_scheduler.add_job(
+            clone_recurring,
+            trigger=CronTrigger(hour=0, minute=0),
+            id="list_recurring",
+            replace_existing=True,
+        )
+        # 🗒️ Списки: проверка сроков годности — ежедневно 07:00 UTC (10:00 СПб)
+        nexus_scheduler.add_job(
+            check_expiry,
+            args=[bot, 3],
+            trigger=CronTrigger(hour=7, minute=0),
+            id="list_expiry",
             replace_existing=True,
         )
     # restore_reminders планируем ПОСЛЕ старта polling,
