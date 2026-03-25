@@ -759,6 +759,42 @@ async def process_item(data: Dict[str, Any], original_text: str, msg, clarify: d
         await handle_note_delete(msg, data, user_notion_id=user_notion_id)
         return ""
 
+    # ── СПИСКИ ────────────────────────────────────────────────────────────────
+    if kind == "list_buy":
+        await react(msg, "🗒️")
+        from nexus.handlers.lists import handle_list_buy
+        await handle_list_buy(msg, data, user_notion_id=user_notion_id)
+        return ""
+
+    if kind in ("list_done", "list_done_bulk"):
+        await react(msg, "💸")
+        from nexus.handlers.lists import handle_list_done
+        await handle_list_done(msg, data, user_notion_id=user_notion_id)
+        return ""
+
+    if kind == "list_check":
+        await react(msg, "🗒️")
+        from nexus.handlers.lists import handle_list_check
+        await handle_list_check(msg, data, user_notion_id=user_notion_id)
+        return ""
+
+    if kind == "list_inventory_add":
+        await react(msg, "🗒️")
+        from nexus.handlers.lists import handle_list_inv_add
+        await handle_list_inv_add(msg, data, user_notion_id=user_notion_id)
+        return ""
+
+    if kind == "list_inventory_search":
+        from nexus.handlers.lists import handle_list_inv_search
+        await handle_list_inv_search(msg, data, user_notion_id=user_notion_id)
+        return ""
+
+    if kind == "list_inventory_update":
+        await react(msg, "🗒️")
+        from nexus.handlers.lists import handle_list_inv_update
+        await handle_list_inv_update(msg, data, user_notion_id=user_notion_id)
+        return ""
+
     if kind == "unknown":
         return "❓ Не смог разобрать. Попробуй переформулировать."
     
