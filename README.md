@@ -1,30 +1,30 @@
-# 🤖 nexus-arcana
+# nexus-arcana
 
-Dual Telegram bot system built with **vibe coding** — AI-directed development via [Claude Code](https://claude.ai) + [Claude.ai](https://claude.ai).
+Dual Telegram bot system — two AI assistants sharing a Notion backend.
+
+**Telegram:** [@hey_lark](https://t.me/hey_lark)
 
 ## ☀️ Nexus — Personal AI Assistant
-> *Life management hub*
 
-Smart task manager, expense tracker, budget analyst, notes, memory — with ADHD-friendly features.
+Smart life management hub with ADHD-friendly features.
 
-**What it does:**
-- 📝 **Smart tasks** — understands natural language, sets priorities, deadlines, reminders, recurring tasks
-- 💰 **Finance tracker** — expenses/income with category detection, budget limits, impulse overflow
-- 📊 **Budget analyst** (Sonnet) — autonomous financial advisor with ADHD-adapted plans
-- 🔥 **Streaks** — task completion tracking with rest days
-- 🧠 **Memory** — remembers preferences, patterns, people
-- 🧠 **ADHD features** — procrastination nudges, warm support, digest, profile
+- 📋 **Tasks** — natural language, deadlines, reminders, recurring, streaks
+- 💰 **Finance** — expense/income tracking, category detection, budget limits
+- 💰 **Budget** — Sonnet-powered financial advisor with impulse reserves
+- 🗒️ **Lists** — shopping lists, checklists, inventory with multi-select checkout
+- 📝 **Notes** — auto-tagged, weekly digests
+- 🧠 **Memory** — preferences, patterns, people, ADHD profile
+- 🔥 **Streaks** — daily task completion tracking with rest days
 
-## 🌒 Arcana — Esoteric Practice CRM  
-> *Digital grimoire*
+## 🌒 Arcana — Esoteric Practice CRM
 
-Client management, tarot sessions, rituals, practice finances — for esoteric practitioners.
+Digital grimoire for esoteric practitioners.
 
-**What it does:**
 - 👥 **Client CRM** — sessions history, debts, notes
-- 🃏 **Tarot journal** — readings with card tracking and accuracy stats
-- 🕯️ **Ritual log** — structured ritual documentation
-- 📊 **Practice analytics** — income, prediction accuracy, client stats
+- 🃏 **Tarot journal** — photo recognition, readings, accuracy stats
+- 🕯️ **Ritual log** — structured documentation with results
+- 🗒️ **Lists** — ritual supplies inventory, checklists
+- 💰 **Practice finances** — income tracking, category analytics
 
 ## Stack
 
@@ -35,24 +35,24 @@ Python 3.9 · aiogram 3.x · Notion API · Claude API (Haiku + Sonnet) · APSche
 ## Architecture
 
 ```
-├── core/           # Shared: classifier, Notion client, Claude client, memory
-├── nexus/          # ☀️ Nexus bot handlers
-├── arcana/         # 🌒 Arcana bot handlers
-├── run.sh          # Auto-pull + watchfiles launcher
+├── core/               # Shared: classifier, Notion client, Claude, memory, lists
+│   ├── classifier.py       # Regex pre-filters + Claude routing
+│   ├── notion_client.py    # CRUD for all Notion databases
+│   ├── claude_client.py    # Haiku / Sonnet calls
+│   ├── list_manager.py     # Shopping lists, checklists, inventory
+│   ├── list_classifier.py  # List-specific regex patterns
+│   └── config.py           # .env loading
+├── nexus/              # ☀️ Nexus bot
+│   └── handlers/           # tasks, finance, memory, notes, lists, streaks
+├── arcana/             # 🌒 Arcana bot
+│   └── handlers/           # clients, sessions, rituals, lists, memory
+├── run.sh              # Auto-pull + watchfiles launcher
 └── requirements.txt
 ```
 
-**Data:** Notion as sole database. No local DB except SQLite for pending state and scheduler jobs.
+**Data:** Notion as sole database. SQLite only for pending state and scheduler jobs.
 
-**AI routing:** Messages go through layout converter → spell correction (Haiku) → classifier with regex pre-filters → Claude routing → handler.
-
-## Vibe Coding
-
-Development workflow:
-
-1. **Strategy & architecture** → Claude.ai (Pro)
-2. **Code execution** → Claude Code (Mac app)  
-3. **Version control** → GitHub Desktop
+**AI routing:** Layout converter → spell correction (Haiku) → regex pre-filters → Claude classification → handler.
 
 ## Setup
 
@@ -66,9 +66,9 @@ Required tokens: Telegram Bot, Anthropic API, Notion API.
 
 ## Links
 
-- 📱 Telegram: [@witchcommit](https://t.me/witchcommit)
-- 🐙 GitHub: [@dontkaiad](https://github.com/dontkaiad)
+- Telegram: [@hey_lark](https://t.me/hey_lark)
+- GitHub: [@dontkaiad](https://github.com/dontkaiad)
 
 ---
 
-*Built by Kai · Powered by Claude · March 2026*
+*Built by Kai Lark with Claude Code*
