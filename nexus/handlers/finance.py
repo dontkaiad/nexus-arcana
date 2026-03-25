@@ -2439,7 +2439,8 @@ async def _build_sonnet_input(uid: int, user_notion_id: str) -> str:
     return json.dumps(context, ensure_ascii=False, indent=2)
 
 
-_BUDGET_PARSE_PROMPT_LEGACY = """Финансовый советник. Пользователь с СДВГ (женский род).
+_BUDGET_PARSE_PROMPT_LEGACY = """Финансовый советник. Пользователь — Кай, женщина с СДВГ (женский род).
+Тон: тёплый, поддерживающий, без менторства.
 
 КОНТЕКСТ: Chapman = СИГАРЕТЫ (не чай!). СДВГ → резкие ограничения = срыв.
 Текущая дата: {current_date}.
@@ -2450,57 +2451,82 @@ _BUDGET_PARSE_PROMPT_LEGACY = """Финансовый советник. Поль
 РАСЧЁТ:
 1. ДОХОД — все источники. "к"=тысяч, "млн"=миллионов, "в год"→/12. Диапазон→верхняя граница.
 2. ФИКС = жилье+коммуналка+подписки+интернет+вода+коты(живые существа). Не трогать.
-3. ДОЛГИ: сортировать по дедлайну, ближайший первый. Платёж = сумма/месяцев_до_дедлайна.
-4. РАСПРЕДЕЛЯЕМЫЕ = доход - фикс. Вычесть долги первыми.
-5. Если остаток после долгов >= 30к → НОРМАЛЬНЫЙ МЕСЯЦ (is_tight_month: false)
-   Если остаток < 30к → ТЯЖЁЛЫЙ МЕСЯЦ (is_tight_month: true) → ДВА ВАРИАНТА:
-   variant_a: отдать долг сразу, жёсткий план + adhd_survival_plan
-   variant_b: рассрочка, комфортный план + creditor_script
-6. ЛИМИТЫ по каждой вариативной категории из остатка.
-7. ИМПУЛЬСИВНЫЙ — минимум 1000₽. ВСЕГДА > 0.
-8. ПОДУШКА — по возможности. ЦЕЛИ — из остатка или "после долгов".
-АБСОЛЮТНЫЕ МИНИМУМЫ: 💅 Бьюти 3000₽, 🎲 Импульсивные 1000₽.
-НИКОГДА: не ставить ВСЕ лимиты в 0₽, не показывать отрицательные.
+3. РАСПРЕДЕЛЯЕМЫЕ = доход - фикс.
+4. ДОЛГИ — использовать ТОЛЬКО monthly_payment из данных:
+   - Каждый долг имеет поле monthly_payment — это сумма которую Кай РЕАЛЬНО платит
+   - Если monthly_payment > 0 → вычитай из распределяемых
+   - Если monthly_payment = 0 → НЕ вычитай (наследство, отложен)
+   - НИКОГДА не пересчитывай monthly_payment. Кай уже решила.
+   - total_debt_payment = сумма всех monthly_payment > 0
+   - В debts_monthly — долги с monthly_payment > 0
+   - В queued_debts — долги с monthly_payment = 0
+5. Остаток = распределяемые - total_debt_payment
+6. Остаток >= 30к → НОРМАЛЬНЫЙ МЕСЯЦ (is_tight_month: false)
+   Остаток < 30к → ТЯЖЁЛЫЙ МЕСЯЦ (is_tight_month: true) → ДВА ВАРИАНТА
+
+РАСПРЕДЕЛЕНИЕ ЛИМИТОВ:
+После вычета долгов — остаток по ВСЕМ жизненным категориям.
+НИКОГДА не ставить 0₽ на продукты или транспорт.
+
+АБСОЛЮТНЫЕ МИНИМУМЫ (НЕ может ниже):
+🚬 Привычки — 10,000₽ (СДВГ, невозможно ниже)
+🍜 Продукты — 3,000₽ (человек должен есть)
+💅 Бьюти — 3,000₽ (ногти = фикс)
+🚕 Транспорт — 1,500₽ (СПб, метро)
+🎲 Импульсивные — 1,000₽ (СДВГ, дофамин)
+Сумма минимумов = 18,500₽
+
+Если остаток < 18,500₽ → вариант НЕЖИЗНЕСПОСОБЕН (viable: false)
+Если остаток >= 18,500₽ → распределить пропорционально:
+1. Минимумы по всем обязательным
+2. Остаток → привычки (до комфорта) и другие
+3. Кафе, гардероб, хобби — могут быть 0₽
+
+ТЯЖЁЛЫЙ МЕСЯЦ:
+variant_a: "Платить по плану" — все monthly_payment
+variant_b: "Уменьшить платежи" — предложить снизить
 
 ПРАВИЛА:
 - Привычки (сигареты+кола+энергетики) = ОДНА категория "🚬 Привычки". НЕ разбивать!
-- Привычки: -10% макс (СДВГ=срыв при резком сокращении)
-- НЕ советовать "пить/курить меньше". Превышения → из импульсивного.
-- Долги: показать когда станет легче
-- Цели: если 0₽/мес → вместо "0₽" написать "после долгов (месяц год)"
+- Коты = фиксированные расходы (живые существа!)
+- Цели: если 0₽/мес → "после долгов (месяц год)"
+- note/summary/habit_strategy — макс 15 слов
 
-ВАЖНО: JSON КОМПАКТНЫЙ. Поля note — макс 10 слов. Без эссе.
+Ответ: ТОЛЬКО JSON, без markdown.
+Схема JSON:
+{{"income": [{{"source": "X", "amount": N}}], "income_total": N,
+ "fixed": [{{"name": "X", "category": "X", "amount": N}}], "fixed_total": N,
+ "distributable": N,
+ "debts_monthly": [{{"name": "X", "total": N, "monthly": N, "deadline": "X", "strategy": "X"}}],
+ "debts_monthly_total": N,
+ "queued_debts": [{{"name": "X", "total": N, "deadline": "X", "strategy": "X"}}],
+ "free_after_debts": N,
+ "is_tight_month": false,
+ "variant_a": null or {{"viable": true, "label": "X", "debt_payment": N, "remaining": N,
+   "limits": [{{"category": "X", "amount": N}}], "limits_total": N,
+   "impulse_budget": N, "savings": {{"amount": N, "note": "X"}},
+   "adhd_survival_plan": "X", "relief": "X", "warning": "X or null"}},
+ "variant_b": null or {{"label": "X", "debt_payment": N, "remaining": N,
+   "limits": [{{"category": "X", "amount": N}}], "limits_total": N,
+   "impulse_budget": N, "savings": {{"amount": N, "note": "X"}},
+   "creditor_script": "X", "relief": "X"}},
+ "savings": {{"amount": N, "note": "X"}},
+ "limits": [{{"category": "X", "amount": N, "current": N, "change": "X", "manual": false}}],
+ "limits_total": N, "impulse_budget": N,
+ "goals": [{{"name": "X", "monthly": N, "total": N, "starts_after": "X or null"}}],
+ "relief_timeline": "X", "summary": "X", "habit_strategy": "X"}}
+ВАЖНО: При нормальном месяце variant_a=null, variant_b=null, заполнить limits/savings/impulse_budget на верхнем уровне.
+При тяжёлом — limits/savings/impulse_budget на верхнем уровне = null, заполнить ВНУТРИ variant_a и variant_b."""
 
-JSON (без markdown):
-{{
-  "income": [{{"source": "ЗП", "amount": 100000}}],
-  "income_total": 115000,
-  "fixed": [{{"name": "Съём", "category": "🏠 Жилье", "amount": 20000}}],
-  "fixed_total": 54200,
-  "distributable": 62716,
-  "debts_monthly": [{{"name": "Вика", "total": 50000, "deadline": "апрель 2026", "monthly": 50000, "months_left": 1}}],
-  "debts_monthly_total": 50000,
-  "free_after_debts": 12716,
-  "is_tight_month": true,
-  "variant_a": {{"label": "Отдать 50к сразу", "debt_payment": 50000, "remaining": 12716,
-    "limits": [{{"category": "🚬 Привычки", "amount": 9000}}], "limits_total": 11716,
-    "impulse_budget": 1000, "savings": {{"amount": 0, "note": "тяжёлый месяц"}},
-    "adhd_survival_plan": "Продукты 6к: закупка в Ленте 1.5к/нед. Без кафе. Запас лапши на ленивые дни.",
-    "warning": "СДВГ-риск: привычки -50%", "relief": "С мая +50к свободных!"}},
-  "variant_b": {{"label": "25к сейчас + 25к в мае", "debt_payment": 25000, "remaining": 37716,
-    "limits": [{{"category": "🚬 Привычки", "amount": 17685}}], "limits_total": 35716,
-    "impulse_budget": 2000, "savings": {{"amount": 0, "note": "после долгов"}},
-    "creditor_script": "Вика, могу 25к сейчас и 25к в мае — ок?",
-    "relief": "Долг закроется в мае"}},
-  "savings": null,
-  "limits": null,
-  "limits_total": null,
-  "impulse_budget": null,
-  "goals": [{{"name": "Телефон", "monthly": 0, "total": 100000, "starts_after": "сентябрь 2026"}}],
-  "relief_timeline": "Апрель: -50к Вика. Сентябрь: все долги закрыты → копим.",
-  "summary": "Макс 2 предложения",
-  "habit_strategy": "Макс 2 предложения"
-}}"""
+
+_DEBT_EXTRACT_HAIKU_PROMPT = """Извлеки долги из текста пользователя. Ищи паттерны:
+- "долг вике 50к до апреля" → name=Вика, amount=50000, deadline=апрель 2026
+- "дядя 100к август" → name=Дядя, amount=100000, deadline=август 2026
+- "должна илье 40к до сентября" → name=Илья, amount=40000, deadline=сентябрь 2026
+"к" = тысяч. Если год не указан — текущий (2026) или следующий.
+Текст: {user_text}
+Верни ТОЛЬКО JSON массив (без markdown). Если долгов нет — верни [].
+[{{"name": "Вика", "amount": 50000, "deadline": "апрель 2026"}}]"""
 
 
 _DEBT_STRATEGY_HAIKU_PROMPT = """Определи стратегию погашения для каждого долга из текста пользователя.
@@ -2540,6 +2566,24 @@ def _format_debts_for_haiku(debts: list) -> str:
         lines.append("- {} — {:,.0f}₽, дедлайн: {}".format(
             d.get("name", "?"), d.get("amount", 0), dl))
     return "\n".join(lines)
+
+
+async def _extract_debts_from_text(user_text: str) -> list:
+    """Use Haiku to extract debts from freeform user text."""
+    from core.config import config as _cfg
+    prompt = _DEBT_EXTRACT_HAIKU_PROMPT.format(user_text=user_text)
+    try:
+        raw = await ask_claude(prompt, model=_cfg.model_haiku, max_tokens=512)
+        raw = raw.strip()
+        json_match = re.search(r'\[[\s\S]*\]', raw)
+        if json_match:
+            raw = json_match.group(0)
+        parsed = json.loads(raw)
+        if isinstance(parsed, list):
+            return parsed
+    except Exception as e:
+        logger.error("_extract_debts_from_text failed: %s", e)
+    return []
 
 
 async def _parse_debt_strategy_with_haiku(debts: list, user_text: str) -> list:
@@ -2717,23 +2761,30 @@ async def handle_budget_setup_text(message: Message, user_notion_id: str = "") -
     except Exception:
         pass
 
-    # Check: does user text mention multiple debts? And do we have existing strategies?
-    # Quick parse debts from user text
-    debt_pattern = re.compile(
-        r'(?:долг[иа]?\s*:?\s*)?(\w+)\s+(\d[\d\s]*(?:[.,]\d+)?)\s*[₽ркК]?\s*(?:до\s+(.+?)(?:[,;\n]|$))?',
-        re.IGNORECASE,
-    )
-    # Better approach: check if budget memory already has strategies
-    budget_data = await _load_budget_data(state.get("notion_uid", ""))
+    # Check for debts: first from Notion Memory, then from user text
+    notion_uid = state.get("notion_uid", "")
+    budget_data = await _load_budget_data(notion_uid)
     existing_debts = budget_data.get("долги", [])
     has_strategies = any(d.get("strategy") for d in existing_debts)
 
-    if not has_strategies and len(existing_debts) > 1:
+    if has_strategies:
+        # Strategies already in Memory — run analysis directly
+        await _run_budget_analysis(message, uid)
+        return True
+
+    # If no debts in Memory — try to extract from user text with Haiku
+    debts_to_check = existing_debts
+    if not debts_to_check:
+        all_text = "\n".join(state.get("buf", []))
+        debts_to_check = await _extract_debts_from_text(all_text)
+        logger.info("handle_budget_setup_text: extracted %d debts from text", len(debts_to_check))
+
+    if len(debts_to_check) > 1:
         # Multiple debts without strategies — ask
         state["state"] = "awaiting_debt_strategy"
-        state["pending_debts"] = existing_debts
+        state["pending_debts"] = debts_to_check
         _budget_set(uid, state)
-        debts_text = _format_debts_for_strategy_question(existing_debts)
+        debts_text = _format_debts_for_strategy_question(debts_to_check)
         await message.answer(
             "📋 <b>Нашла долги:</b>\n{}\n\n"
             "Как планируешь отдавать? Напиши своими словами.\n"
@@ -2742,7 +2793,22 @@ async def handle_budget_setup_text(message: Message, user_notion_id: str = "") -
         )
         return True
 
-    # If debts have strategies already or <= 1 debt — run analysis directly
+    if len(debts_to_check) == 1:
+        # Single debt — auto-calculate: amount / months_until_deadline
+        d = debts_to_check[0]
+        months = _months_until(d.get("deadline", "")) or 1
+        mp = int(d.get("amount", 0) / months)
+        state["debt_strategies"] = [{
+            "name": d.get("name", "?"),
+            "strategy": "{:,}₽/мес".format(mp),
+            "monthly_payment": mp,
+        }]
+        buf = state.get("buf", [])
+        buf.append("СТРАТЕГИЯ ДОЛГА: {} — {:,}₽/мес".format(d.get("name", "?"), mp))
+        state["buf"] = buf
+        _budget_set(uid, state)
+
+    # Run analysis
     await _run_budget_analysis(message, uid)
     return True
 
@@ -3213,7 +3279,7 @@ def _format_plan(plan: dict) -> str:
                 variant_a.get("label", "Отдать сразу"))))
         else:
             remaining_a = variant_a.get("remaining", 0)
-            lines.append("\n⛔ <b>Вариант А нежизнеспособен</b> — на жизнь {:,}₽ при минимуме 15,500₽".format(
+            lines.append("\n⛔ <b>Вариант А нежизнеспособен</b> — на жизнь {:,}₽ при минимуме 18,500₽".format(
                 max(remaining_a, 0)))
         lines.extend(_format_variant(variant_b, "Вариант Б: {}".format(
             variant_b.get("label", "Рассрочка"))))
