@@ -457,6 +457,71 @@ async def checklist_toggle(
     }
 
 
+async def checklist_toggle_by_id(page_id: str, bot_name: str) -> dict:
+    """Toggle чеклист-айтема по page_id. Возвращает {name, group, group_complete}."""
+    db = _db_id()
+    if not db:
+        return {"error": "db_not_set"}
+
+    from core.notion_client import get_notion
+    try:
+        raw = await get_notion().pages.retrieve(page_id)
+    except Exception as e:
+        logger.error("checklist_toggle_by_id retrieve %s: %s", page_id, e)
+        return {"error": "not_found"}
+
+    page_data = _extract_page_data(raw)
+    await update_page(page_id, {"Статус": _status("Done")})
+
+    group = page_data.get("group", "")
+    group_complete = False
+    if group:
+        remaining = await db_query(db, filter_obj={"and": [
+            {"property": "Бот", "select": {"equals": bot_name}},
+            {"property": "Группа", "rich_text": {"equals": group}},
+            {"property": "Тип", "select": {"equals": "📋 Чеклист"}},
+            {"property": "Статус", "status": {"does_not_equal": "Done"}},
+            {"property": "Статус", "status": {"does_not_equal": "Archived"}},
+        ]}, page_size=1)
+        group_complete = len(remaining) == 0
+
+    return {"name": page_data["name"], "group": group, "group_complete": group_complete}
+
+
+async def buy_mark_done_by_id(page_id: str, price: float, bot_name: str, user_page_id: str) -> dict:
+    """Отметить покупку Done по page_id, записать цену и в Финансы."""
+    from core.notion_client import get_notion
+    try:
+        raw = await get_notion().pages.retrieve(page_id)
+    except Exception as e:
+        logger.error("buy_mark_done_by_id retrieve %s: %s", page_id, e)
+        return {"error": "not_found"}
+
+    page_data = _extract_page_data(raw)
+    update_props: dict = {"Статус": _status("Done")}
+    if price:
+        update_props["Цена"] = _number(price)
+    await update_page(page_id, update_props)
+
+    finance_result = None
+    if price:
+        item_category = page_data.get("category", "💳 Прочее")
+        finance_cat = CATEGORY_TO_FINANCE.get(item_category, "💳 Прочее")
+        fin_id = await finance_add(
+            date=_today_iso(),
+            amount=price,
+            category=finance_cat,
+            type_="💸 Расход",
+            source="💳 Карта",
+            description=page_data["name"],
+            bot_label=bot_name,
+            user_notion_id=user_page_id,
+        )
+        finance_result = {"page_id": fin_id, "amount": price, "category": finance_cat}
+
+    return {"name": page_data["name"], "category": page_data.get("category", ""), "finance": finance_result}
+
+
 async def inventory_search(
     query: str,
     bot_name: str,

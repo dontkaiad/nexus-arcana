@@ -11,10 +11,12 @@ from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
 from core.claude_client import ask_claude
 from core.list_manager import (
     add_items, get_list, check_items, check_items_bulk,
-    checklist_toggle, inventory_search, inventory_update,
+    checklist_toggle, checklist_toggle_by_id, buy_mark_done_by_id,
+    inventory_search, inventory_update,
     pending_get, pending_set, pending_del, pending_pop,
     CATEGORY_TO_FINANCE, LIST_CATEGORIES,
 )
+from aiogram.types import CallbackQuery
 
 logger = logging.getLogger("arcana.lists")
 router = Router()
@@ -68,27 +70,29 @@ async def _haiku_parse(text: str, system: str) -> dict | list:
     return json.loads(raw)
 
 
-# ── /list command (registered in arcana/bot.py on dp level) ───────────────────
+# ── Build list text + keyboard ────────────────────────────────────────────────
 
-async def handle_list_command(msg: Message, user_notion_id: str = "") -> None:
-    args = (msg.text or "").split(maxsplit=1)
-    sub = args[1].strip().lower() if len(args) > 1 else ""
+async def _build_list_view(
+    list_type: str | None,
+    bot_name: str,
+    user_page_id: str,
+) -> tuple[str, InlineKeyboardMarkup | None]:
+    active = await get_list(list_type=list_type, bot_name=bot_name, user_page_id=user_page_id, status="Not started")
+    done_checks: list[dict] = []
+    if list_type is None or list_type == "📋 Чеклист":
+        done_checks = await get_list(list_type="📋 Чеклист", bot_name=bot_name, user_page_id=user_page_id, status="Done")
 
-    type_map = {"buy": "🛒 Покупки", "check": "📋 Чеклист", "inv": "📦 Инвентарь"}
-    list_type = type_map.get(sub)
-
-    items = await get_list(list_type=list_type, bot_name=BOT_NAME, user_page_id=user_notion_id)
-    if not items:
-        label = list_type or "списков"
-        await msg.answer(f"📭 Нет активных {label}.")
-        return
+    all_items = active + done_checks
+    if not all_items:
+        return "", None
 
     by_type: dict[str, list] = {}
-    for it in items:
+    for it in all_items:
         t = it.get("type", "🛒 Покупки")
         by_type.setdefault(t, []).append(it)
 
     lines = [f"<b>{HEADER}</b>\n"]
+    buttons: list[list[InlineKeyboardButton]] = []
 
     for lt in ["🛒 Покупки", "📋 Чеклист", "📦 Инвентарь"]:
         group = by_type.get(lt, [])
@@ -104,24 +108,57 @@ async def handle_list_command(msg: Message, user_notion_id: str = "") -> None:
                 done = sum(1 for i in gitems if i.get("status") == "Done")
                 lines.append(f"\n<b>📋 {gname}</b> ({done}/{len(gitems)})")
                 for it in gitems:
-                    icon = "✅" if it.get("status") == "Done" else "⬜"
+                    is_done = it.get("status") == "Done"
+                    icon = "✅" if is_done else "⬜"
                     lines.append(f"  {icon} {it['name']}")
+                    if not is_done:
+                        buttons.append([InlineKeyboardButton(
+                            text=f"⬜ {it['name']}",
+                            callback_data=f"list_chk_{it['id']}",
+                        )])
+        elif lt == "🛒 Покупки":
+            not_done = [it for it in group if it.get("status") != "Done"]
+            emoji_l = lt.split(" ")[0]
+            label_l = lt.split(" ", 1)[1] if " " in lt else lt
+            lines.append(f"\n<b>{emoji_l} {label_l.upper()}</b> ({len(not_done)})")
+            for it in not_done:
+                cat_emoji = (it.get("category", "").split(" ")[0]) if it.get("category") else ""
+                lines.append(f"  ⬜ {it['name']} · {cat_emoji}")
+                buttons.append([InlineKeyboardButton(
+                    text=f"⬜ {it['name']}",
+                    callback_data=f"list_buy_{it['id']}",
+                )])
         else:
-            emoji = lt.split(" ")[0]
-            label = lt.split(" ", 1)[1] if " " in lt else lt
-            lines.append(f"\n<b>{emoji} {label.upper()}</b> ({len(group)})")
+            emoji_l = lt.split(" ")[0]
+            label_l = lt.split(" ", 1)[1] if " " in lt else lt
+            lines.append(f"\n<b>{emoji_l} {label_l.upper()}</b> ({len(group)})")
             for it in group:
                 cat_emoji = (it.get("category", "").split(" ")[0]) if it.get("category") else ""
-                extra = ""
-                if lt == "📦 Инвентарь":
-                    qty = it.get("quantity", 0)
-                    if qty:
-                        extra = f" × {int(qty)}"
-                    if it.get("expiry"):
-                        extra += f" · до {it['expiry'][:10]}"
-                lines.append(f"  ⬜ {it['name']}{extra} · {cat_emoji}")
+                qty = it.get("quantity", 0)
+                extra = f" × {int(qty)}" if qty else ""
+                if it.get("expiry"):
+                    extra += f" · до {it['expiry'][:10]}"
+                lines.append(f"  📦 {it['name']}{extra} · {cat_emoji}")
 
-    await msg.answer("\n".join(lines), parse_mode="HTML")
+    kb = InlineKeyboardMarkup(inline_keyboard=buttons) if buttons else None
+    return "\n".join(lines), kb
+
+
+# ── /list command (registered in arcana/bot.py on dp level) ───────────────────
+
+async def handle_list_command(msg: Message, user_notion_id: str = "") -> None:
+    args = (msg.text or "").split(maxsplit=1)
+    sub = args[1].strip().lower() if len(args) > 1 else ""
+
+    type_map = {"buy": "🛒 Покупки", "check": "📋 Чеклист", "inv": "📦 Инвентарь"}
+    list_type = type_map.get(sub)
+
+    text, kb = await _build_list_view(list_type, BOT_NAME, user_notion_id)
+    if not text:
+        label = list_type or "списков"
+        await msg.answer(f"📭 Нет активных {label}.")
+        return
+    await msg.answer(text, parse_mode="HTML", reply_markup=kb)
 
 
 async def handle_list_buy(msg: Message, data: dict, user_notion_id: str = "") -> None:
@@ -301,4 +338,78 @@ async def handle_list_pending(msg: Message, user_notion_id: str = "") -> bool:
         await msg.answer("\n".join(lines), parse_mode="HTML")
         return True
 
+    if action == "buy_price":
+        pending_del(uid)
+        price_match = re.search(r"(\d+(?:[.,]\d+)?)\s*[кk]?", text)
+        if not price_match:
+            await msg.answer("⚠️ Не смог разобрать цену. Напиши число, например: 120")
+            return True
+        price_str = price_match.group(1).replace(",", ".")
+        price = float(price_str)
+        if "к" in text.lower() or "k" in text.lower():
+            price *= 1000
+
+        page_id = pending.get("page_id", "")
+        p_user_id = pending.get("user_notion_id", user_notion_id)
+        result = await buy_mark_done_by_id(page_id, price, BOT_NAME, p_user_id)
+
+        if result.get("error"):
+            await msg.answer("⚠️ Айтем не найден.")
+            return True
+
+        await msg.answer(f"✅ {result['name']}: {int(price)}₽ → 💰 Финансы", parse_mode="HTML")
+        return True
+
     return False
+
+
+# ── Callback: чеклист toggle ──────────────────────────────────────────────────
+
+@router.callback_query(lambda c: c.data and c.data.startswith("list_chk_"))
+async def on_checklist_toggle(query: CallbackQuery, user_notion_id: str = "") -> None:
+    page_id = query.data.replace("list_chk_", "")
+    result = await checklist_toggle_by_id(page_id, BOT_NAME)
+
+    if result.get("error"):
+        await query.answer("⚠️ Не удалось обновить.")
+        return
+
+    note = f"🎉 Чеклист «{result['group']}» завершён!" if result.get("group_complete") else ""
+    await query.answer(f"✅ {result['name']}" + (f" · {note}" if note else ""))
+
+    try:
+        text, kb = await _build_list_view(None, BOT_NAME, user_notion_id)
+        if text:
+            await query.message.edit_text(text, parse_mode="HTML", reply_markup=kb)
+        else:
+            await query.message.edit_text("🎉 Все списки выполнены!", parse_mode="HTML")
+    except Exception as e:
+        logger.warning("on_checklist_toggle edit: %s", e)
+
+
+# ── Callback: покупка → спросить цену ─────────────────────────────────────────
+
+@router.callback_query(lambda c: c.data and c.data.startswith("list_buy_"))
+async def on_buy_toggle(query: CallbackQuery, user_notion_id: str = "") -> None:
+    page_id = query.data.replace("list_buy_", "")
+
+    from core.notion_client import get_notion
+    try:
+        raw = await get_notion().pages.retrieve(page_id)
+        props = raw.get("properties", {})
+        title_parts = props.get("Название", {}).get("title", [])
+        item_name = title_parts[0]["plain_text"] if title_parts else "айтем"
+    except Exception:
+        item_name = "айтем"
+
+    uid = query.from_user.id
+    pending_set(uid, {
+        "action": "buy_price",
+        "page_id": page_id,
+        "item_name": item_name,
+        "user_notion_id": user_notion_id,
+        "bot": "arcana",
+    })
+
+    await query.answer(f"✅ {item_name}")
+    await query.message.answer(f"✅ <b>{item_name}</b> — сколько потратила?", parse_mode="HTML")
