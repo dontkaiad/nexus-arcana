@@ -470,6 +470,12 @@ async def set_tz(msg: Message, user_notion_id: str = "") -> None:
     await _update_user_tz(msg, msg.text.replace("/tz", "").strip())
 
 
+@dp.message(Command("list"))
+async def cmd_list(msg: Message, user_notion_id: str = "") -> None:
+    from nexus.handlers.lists import handle_list_command
+    await handle_list_command(msg, user_notion_id=user_notion_id)
+
+
 @dp.message(F.text)
 async def handle_text(msg: Message, user_notion_id: str = "") -> None:
     from core.layout import maybe_convert

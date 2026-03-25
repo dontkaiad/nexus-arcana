@@ -6,7 +6,6 @@ import logging
 import re
 
 from aiogram import Router
-from aiogram.filters import Command
 from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
 
 from core.claude_client import ask_claude
@@ -69,9 +68,8 @@ async def _haiku_parse(text: str, system: str) -> dict | list:
     return json.loads(raw)
 
 
-# ── /list command ─────────────────────────────────────────────────────────────
+# ── /list command (registered in arcana/bot.py on dp level) ───────────────────
 
-@router.message(Command("list"))
 async def handle_list_command(msg: Message, user_notion_id: str = "") -> None:
     args = (msg.text or "").split(maxsplit=1)
     sub = args[1].strip().lower() if len(args) > 1 else ""
