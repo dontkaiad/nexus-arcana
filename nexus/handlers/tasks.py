@@ -215,6 +215,10 @@ async def restore_reminders_on_startup() -> None:
                         except ValueError:
                             missed_time = reminder_start[:16]
 
+                        try:
+                            await update_page(task_id, {"Статус": _status("In progress")})
+                        except Exception as e:
+                            logger.warning("restore pass2: failed to set In progress for '%s': %s", title, e)
                         kb = InlineKeyboardMarkup(inline_keyboard=[[
                             InlineKeyboardButton(text="✅ Сделано!", callback_data=f"task_complete_{task_id}"),
                             InlineKeyboardButton(text="❌ Не сделал", callback_data=f"task_failed_{task_id}"),
@@ -269,7 +273,7 @@ async def restore_reminders_on_startup() -> None:
                                 break
 
                         deadline_start = (props.get("Дедлайн", {}).get("date") or {}).get("start", "")
-                        update_props: dict = {"Напоминание": _date(new_reminder)}
+                        update_props: dict = {"Напоминание": _date(new_reminder), "Статус": _status("In progress")}
                         if deadline_start:
                             new_deadline = deadline_start[:16]
                             for _ in range(400):
