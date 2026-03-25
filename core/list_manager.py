@@ -284,7 +284,7 @@ async def check_items(
 
     for item in items:
         name = item.get("name", "")
-        price = item.get("price", 0)
+        price = item.get("price") or 0
         category = item.get("category")
 
         # Найти айтем в списке
@@ -363,7 +363,7 @@ async def check_items_bulk(
 
     for entry in breakdown:
         raw_cat = entry.get("category", "")
-        amount = entry.get("amount", 0)
+        amount = entry.get("amount") or 0
         if not amount:
             continue
 
@@ -694,7 +694,7 @@ async def check_expiry(bot, user_tz_offset: int = 3) -> int:
         except ValueError:
             continue
 
-        remind_days = int(data.get("remind_days", 0)) or 7
+        remind_days = int(data.get("remind_days") or 0) or 7
         remind_date = expiry_date - timedelta(days=remind_days)
 
         if remind_date <= today <= expiry_date:
