@@ -630,3 +630,41 @@ async def _finalize_checkout(msg, named_cats, source, selected_data, categories,
     total = sum(named_cats.values())
     lines.append(f"\n💰 Итого: {int(total)}₽ · {source}")
     await msg.answer("\n".join(lines), parse_mode="HTML")
+
+
+# ── Callback: вычеркнуть из списка после записи расхода ──────────────────────
+
+@router.callback_query(lambda c: c.data and c.data.startswith("list_cross_") and c.data != "list_cross_no")
+async def on_list_cross(query: CallbackQuery, user_notion_id: str = "") -> None:
+    page_id_short = query.data.replace("list_cross_", "")
+    items = await get_list("🛒 Покупки", BOT_NAME, user_notion_id, status="Not started")
+    full_id = None
+    item_name = ""
+    for it in items:
+        if it["id"].startswith(page_id_short):
+            full_id = it["id"]
+            item_name = it.get("name", "")
+            break
+    if not full_id:
+        await query.answer("❓ Уже вычеркнуто или не найдено.")
+        try:
+            await query.message.edit_reply_markup(reply_markup=None)
+        except Exception:
+            pass
+        return
+    from core.notion_client import update_page, _status
+    await update_page(full_id, {"Статус": _status("Done")})
+    await query.answer(f"✅ {item_name} вычеркнуто")
+    try:
+        await query.message.edit_text(f"🛒 ✅ {item_name} — вычеркнуто из списка", parse_mode="HTML")
+    except Exception:
+        pass
+
+
+@router.callback_query(lambda c: c.data == "list_cross_no")
+async def on_list_cross_no(query: CallbackQuery, user_notion_id: str = "") -> None:
+    await query.answer("👌")
+    try:
+        await query.message.edit_reply_markup(reply_markup=None)
+    except Exception:
+        pass
