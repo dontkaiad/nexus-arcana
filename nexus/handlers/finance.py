@@ -2326,14 +2326,18 @@ BUDGET_SONNET_SYSTEM = (
     "Тон: тёплый, поддерживающий, без менторства. Женский род.\n\n"
     "АЛГОРИТМ РАСЧЁТА (СТРОГО ПО ШАГАМ):\n"
     "Шаг 1: Доход − Фикс = Распределяемые\n"
-    "Шаг 2: ДОЛГИ — использовать ТОЛЬКО monthly_payment из данных:\n"
-    "  - Каждый долг имеет поле monthly_payment — это сумма которую Кай РЕАЛЬНО платит в этом месяце\n"
-    "  - Если monthly_payment > 0 → вычитай из распределяемых\n"
-    "  - Если monthly_payment = 0 → НЕ вычитай (наследство, отложен, и т.д.)\n"
+    "Шаг 2: ДОЛГИ — ОДИН ДОЛГ ЗА РАЗ:\n"
+    "  - Каждый долг имеет поле monthly_payment — это сумма которую Кай РЕАЛЬНО платит\n"
+    "  - КЛЮЧЕВОЕ ПРАВИЛО: считай monthly_payment ТОЛЬКО для ПЕРВОГО долга по дедлайну!\n"
+    "  - Остальные долги с monthly_payment > 0 — ПЕРЕНЕСИ на месяц после закрытия первого\n"
+    "  - НЕ СКЛАДЫВАЙ все платежи одновременно!\n"
+    "  - Пример: Вика 50к (апрель), Илья 20к/мес → в марте платёж = ТОЛЬКО Вика.\n"
+    "    Илья начнёт С АПРЕЛЯ (после закрытия Вики)\n"
+    "  - Если monthly_payment = 0 → НЕ вычитай (наследство, отложен)\n"
     "  - НИКОГДА не пересчитывай monthly_payment самостоятельно. Кай уже решила.\n"
-    "  - total_debt_payment = сумма всех monthly_payment > 0\n"
-    "  - В debts_monthly включить ВСЕ долги с monthly_payment > 0\n"
-    "  - В queued_debts включить долги с monthly_payment = 0 (информативно)\n"
+    "  - total_debt_payment = monthly_payment ПЕРВОГО горящего долга\n"
+    "  - В debts_monthly включить ТОЛЬКО текущий долг (первый по дедлайну с monthly_payment > 0)\n"
+    "  - В queued_debts — все остальные долги (информативно, с пометкой 'с [месяц]')\n"
     "  - Остаток = распределяемые - total_debt_payment\n"
     "Шаг 3: Оценить остаток:\n"
     "  - Остаток >= 30000₽ → НОРМАЛЬНЫЙ МЕСЯЦ → один план\n"
@@ -2363,7 +2367,7 @@ BUDGET_SONNET_SYSTEM = (
     "  🚕 Транспорт — 1,500₽ (СПб, метро)\n"
     "  🎲 Импульсивные — 1,000₽ (СДВГ, дофамин)\n"
     "  Сумма минимумов = 18,500₽\n\n"
-    "  Если остаток < 18,500₽ → вариант НЕЖИЗНЕСПОСОБЕН\n"
+    "  Если остаток < 18,500₽ → ЖЁСТКИЙ вариант, но ВСЕГДА показывать план. Кай решит сама.\n"
     "  Если остаток >= 18,500₽ → распределить пропорционально:\n"
     "    1. Сначала выделить минимумы по всем обязательным категориям\n"
     "    2. Оставшееся → распределить между привычками, продуктами, и другими\n"
@@ -2398,7 +2402,7 @@ BUDGET_SONNET_SYSTEM = (
     ' "queued_debts": [{"name": "X", "total": N, "deadline": "X", "strategy": "X"}],\n'
     ' "free_after_debts": N,\n'
     ' "is_tight_month": false,\n'
-    ' "variant_a": null or {"viable": true, "label": "Платить по плану", "debt_payment": N, "remaining": N,\n'
+    ' "variant_a": null or {"label": "Платить по плану", "debt_payment": N, "remaining": N,\n'
     '   "limits": [{"category": "X", "amount": N}], "limits_total": N,\n'
     '   "impulse_budget": N, "savings": {"amount": N, "note": "X"},\n'
     '   "adhd_survival_plan": "КОНКРЕТНЫЙ план: что купить, где сэкономить, как не сорваться",\n'
@@ -2518,12 +2522,14 @@ _BUDGET_PARSE_PROMPT_LEGACY = """Финансовый советник. Поль
 3. РАСПРЕДЕЛЯЕМЫЕ = доход - фикс.
 4. ДОЛГИ — использовать ТОЛЬКО monthly_payment из данных:
    - Каждый долг имеет поле monthly_payment — это сумма которую Кай РЕАЛЬНО платит
-   - Если monthly_payment > 0 → вычитай из распределяемых
+   - КЛЮЧЕВОЕ ПРАВИЛО: считай ТОЛЬКО ПЕРВЫЙ долг по дедлайну!
+   - Остальные долги с monthly_payment > 0 — перенеси на месяц после закрытия первого
+   - НЕ СКЛАДЫВАЙ все платежи одновременно!
    - Если monthly_payment = 0 → НЕ вычитай (наследство, отложен)
    - НИКОГДА не пересчитывай monthly_payment. Кай уже решила.
-   - total_debt_payment = сумма всех monthly_payment > 0
-   - В debts_monthly — долги с monthly_payment > 0
-   - В queued_debts — долги с monthly_payment = 0
+   - total_debt_payment = monthly_payment ПЕРВОГО горящего долга
+   - В debts_monthly — ТОЛЬКО текущий долг (первый по дедлайну)
+   - В queued_debts — все остальные (с пометкой "с [месяц]")
 5. Остаток = распределяемые - total_debt_payment
 6. Остаток >= 30к → НОРМАЛЬНЫЙ МЕСЯЦ (is_tight_month: false)
    Остаток < 30к → ТЯЖЁЛЫЙ МЕСЯЦ (is_tight_month: true) → ДВА ВАРИАНТА
@@ -2540,7 +2546,7 @@ _BUDGET_PARSE_PROMPT_LEGACY = """Финансовый советник. Поль
 🎲 Импульсивные — 1,000₽ (СДВГ, дофамин)
 Сумма минимумов = 18,500₽
 
-Если остаток < 18,500₽ → вариант НЕЖИЗНЕСПОСОБЕН (viable: false)
+Если остаток < 18,500₽ → ЖЁСТКИЙ вариант, но ВСЕГДА показывать. Кай решит сама.
 Если остаток >= 18,500₽ → распределить пропорционально:
 1. Минимумы по всем обязательным
 2. Остаток → распределить между привычками, продуктами, и другими
@@ -3176,45 +3182,22 @@ async def _run_budget_analysis(message: Message, uid: int) -> None:
     plan_text = _format_plan(plan)
 
     is_tight = plan.get("is_tight_month", False) and plan.get("variant_a") and plan.get("variant_b")
-
-    # Check if deficit (free_after_debts < 0) — non-viable, only show change strategy
     free_after = plan.get("free_after_debts", 0)
-    MIN_LIFE = 18500
-    deficit = free_after < 0
-    non_viable = 0 < free_after < MIN_LIFE
 
-    if deficit:
-        # Deficit — even payments don't fit
-        plan_text += "\n\n⚠️ <b>После платежей дефицит {:,}₽ — даже платежи не влезают.</b>\n".format(abs(free_after))
-        plan_text += "Рекомендую пересмотреть стратегию долгов."
+    # Дефицит / мало — предупреждение, но ВСЕГДА показываем план + кнопки
+    if free_after < 0:
+        plan_text += "\n\n⚠️ <b>После платежей дефицит {:,}₽.</b>\n".format(abs(free_after))
+        plan_text += "Можно пересмотреть стратегию долгов."
+    elif 0 < free_after < 18500 and not is_tight:
+        plan_text += "\n\n⚠️ <b>После платежей остаётся {:,}₽ — жёстко.</b>".format(free_after)
+
+    if is_tight:
+        # Тяжёлый месяц → ВСЕГДА оба варианта, Кай сама решит
         buttons = [[
+            InlineKeyboardButton(text="🅰️ Вариант А", callback_data="bsetup_variant_a"),
+            InlineKeyboardButton(text="🅱️ Вариант Б", callback_data="bsetup_variant_b"),
+        ], [
             InlineKeyboardButton(text="📋 Изменить стратегию", callback_data="bsetup_change_strategy"),
-            InlineKeyboardButton(text="✏️ Изменить", callback_data="bsetup_adjust"),
-        ]]
-    elif non_viable and not is_tight:
-        # Payments fit but not enough for life
-        plan_text += "\n\n⚠️ <b>После платежей остаётся {:,}₽ — недостаточно для жизни (минимум 18.5к).</b>\n".format(free_after)
-        plan_text += "Рекомендую пересмотреть стратегию долгов."
-        buttons = [[
-            InlineKeyboardButton(text="📋 Изменить стратегию", callback_data="bsetup_change_strategy"),
-            InlineKeyboardButton(text="✏️ Изменить", callback_data="bsetup_adjust"),
-            InlineKeyboardButton(text="🔄 Пересчитать", callback_data="bsetup_recalc"),
-        ]]
-    elif is_tight:
-        # Тяжёлый месяц → кнопки выбора варианта
-        a_viable = (plan.get("variant_a") or {}).get("viable", True)
-        if a_viable:
-            variant_btns = [
-                InlineKeyboardButton(text="🅰️ Вариант А", callback_data="bsetup_variant_a"),
-                InlineKeyboardButton(text="🅱️ Вариант Б", callback_data="bsetup_variant_b"),
-            ]
-        else:
-            variant_btns = [
-                InlineKeyboardButton(text="✅ Принять Вариант Б", callback_data="bsetup_variant_b"),
-            ]
-        buttons = [variant_btns, [
-            InlineKeyboardButton(text="📋 Изменить стратегию", callback_data="bsetup_change_strategy"),
-            InlineKeyboardButton(text="✏️ Изменить", callback_data="bsetup_adjust"),
             InlineKeyboardButton(text="🔄 Пересчитать", callback_data="bsetup_recalc"),
         ]]
     else:
@@ -3363,14 +3346,16 @@ def _format_plan(plan: dict) -> str:
             lines.append("\n💳 Свободных после долгов: <b>{:,}₽</b>".format(free))
 
     if is_tight and variant_a and variant_b:
-        a_viable = variant_a.get("viable", True)
-        if a_viable:
-            lines.extend(_format_variant(variant_a, "Вариант А: {}".format(
-                variant_a.get("label", "Отдать сразу"))))
-        else:
-            remaining_a = variant_a.get("remaining", 0)
-            lines.append("\n⛔ <b>Вариант А нежизнеспособен</b> — на жизнь {:,}₽ при минимуме 18,500₽".format(
+        # ВСЕГДА показывать оба варианта — Кай сама решит
+        remaining_a = variant_a.get("remaining", 0)
+        if remaining_a < 18500:
+            lines.extend(_format_variant(variant_a, "Вариант А: {} ⚠️ жёстко".format(
+                variant_a.get("label", "Платить по плану"))))
+            lines.append("\n⚠️ <i>Остаётся {:,}₽ — жёстко, но реально если готова.</i>".format(
                 max(remaining_a, 0)))
+        else:
+            lines.extend(_format_variant(variant_a, "Вариант А: {}".format(
+                variant_a.get("label", "Платить по плану"))))
         lines.extend(_format_variant(variant_b, "Вариант Б: {}".format(
             variant_b.get("label", "Рассрочка"))))
     else:
