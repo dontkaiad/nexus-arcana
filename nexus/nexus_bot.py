@@ -61,11 +61,13 @@ async def cmd_start(msg: Message, user_notion_id: str = "") -> None:
         "💰 <b>Финансы</b> — расходы, доходы, лимиты\n"
         "💰 <b>Бюджет</b> — планирование, долги, цели\n"
         "🗒️ <b>Списки</b> — покупки, чеклисты, инвентарь\n"
-        "📝 <b>Заметки</b> — сохранять, искать по тегам, напоминание разбирать раз в 2 недели\n"
+        "📝 <b>Заметки</b> — сохранять и искать по тегам\n"
         "🧠 <b>Память</b> — запоминать предпочтения и привычки\n"
-        "🧠 <b>СДВГ</b> — персональный профиль, нудж, поддержка\n\n"
-        "Подробнее — <code>/help</code>\n\n"
-        '👨‍💻 Создатель: <a href="https://github.com/dontkaiad">Кай Ларк</a>\n'
+        "🦋 <b>СДВГ</b> — персональный профиль, нудж, поддержка\n"
+        "📸 <b>Фото</b> — скрины из банка → автопарсинг\n"
+        "🎤 <b>Голосовые</b> — надиктуй, я пойму\n\n"
+        "Подробнее — /help\n\n"
+        '👩‍💻 Создатель: <a href="https://github.com/dontkaiad">Кай Ларк</a>\n'
         '❓ Ошибки/вопросы? <a href="https://t.me/hey_lark">@hey_lark</a>',
         parse_mode="HTML",
         disable_web_page_preview=True,
@@ -76,99 +78,72 @@ async def cmd_start(msg: Message, user_notion_id: str = "") -> None:
 async def cmd_help(msg: Message, user_notion_id: str = "") -> None:
     await msg.answer(
         "ГАЙД ☀️ <b>NEXUS</b>\n"
-        "Понимаю естественный язык — команды учить не нужно, просто пиши.\n\n"
+        "Понимаю текст, голосовые 🎤 и фото 📸 — команды учить не нужно.\n\n"
 
         "📋 <b>ЗАДАЧИ</b>\n"
-        "<code>/tasks</code> — список задач\n"
-        "<code>/today</code> — задачи на сегодня + СДВГ-совет\n"
-        "<code>/stats</code> — статистика + стрики\n"
-        "Текстом: «купить корм коту», «напомни завтра в 10», "
-        "«перенеси на пятницу», «сделал пробежку»\n"
+        "/tasks — задачи на сегодня + все остальные\n"
+        "/today — экспресс: сегодня + бюджет + совет\n"
+        "/stats — статистика + стрики 🔥\n"
+        "Текстом: «купить корм коту», «напомни завтра в 10»\n"
         "Повторы: «напоминай пить воду каждый день в 9:00»\n\n"
 
         "💰 <b>ФИНАНСЫ</b>\n"
-        "<code>/finance</code> — расходы за сегодня + сводка за месяц\n"
-        "Текстом: «450р такси», «доход 50000»\n\n"
+        "/finance — расходы за сегодня + сводка за месяц\n"
+        "Текстом: «450р такси», «доход 50000»\n"
+        "📸 Фото: скрин из банка → автопарсинг\n\n"
 
         "💰 <b>БЮДЖЕТ</b>\n"
-        "<code>/budget</code> — текущий бюджетный план\n"
-        "<code>/budget_setup</code> — настроить бюджет с нуля\n"
+        "/budget — текущий бюджетный план\n"
+        "/budget_setup — настроить бюджет с нуля\n"
         "Текстом: «лимит привычки 15к», «закрыла долг Вике»\n\n"
 
         "🗒️ <b>СПИСКИ</b>\n"
-        "<code>/list</code> — покупки + чеклисты\n"
-        "<code>/list buy</code> / <code>check</code> / <code>inv</code> — фильтр по типу\n"
-        "Текстом: «купить молоко, яйца» — добавить\n"
-        "«дома есть: парацетамол 2 пачки» — инвентарь\n"
-        "«есть ибупрофен?» — поиск\n\n"
+        "/list — покупки + чеклисты + инвентарь\n"
+        "Текстом: «купить молоко, яйца» → добавить\n"
+        "«дома есть: парацетамол 2 пачки» → инвентарь\n"
+        "«есть ибупрофен?» → поиск\n"
+        "«разбей задачу X на подзадачи» → чеклист\n\n"
 
         "📝 <b>ЗАМЕТКИ</b>\n"
-        "<code>/notes</code> — все заметки с тегами и категорией\n"
-        "Текстом: «запиши: идея для проекта» — создать\n"
-        "Раз в 2 недели напомню разобрать накопившиеся\n\n"
+        "/notes — все заметки с тегами\n"
+        "Текстом: «запиши: идея для проекта»\n\n"
 
-        "🧠 <b>ПАМЯТЬ И СДВГ</b>\n"
-        "<code>/memory</code> — что я помню о тебе\n"
-        "<code>/adhd</code> — СДВГ-профиль\n"
+        "🧠 <b>ПАМЯТЬ</b> И 🦋 <b>СДВГ</b>\n"
+        "/memory — что я помню о тебе\n"
+        "/adhd — СДВГ-профиль\n"
         "Текстом: «запомни: монстры = привычки»\n\n"
 
         "⚙️ <b>ПРОЧЕЕ</b>\n"
-        "<code>/start</code> — приветствие\n"
-        "<code>/help</code> — этот гайд\n\n"
+        "/start — приветствие\n"
+        "/help — этот гайд\n\n"
 
-        '👨‍💻 Создатель: <a href="https://github.com/dontkaiad">Кай Ларк</a>\n'
+        '👩‍💻 Создатель: <a href="https://github.com/dontkaiad">Кай Ларк</a>\n'
         '❓ Ошибки/вопросы? <a href="https://t.me/hey_lark">@hey_lark</a>',
         parse_mode="HTML",
         disable_web_page_preview=True,
     )
 
 
-@dp.message(Command("test_reactions"))
-async def test_reactions(msg: Message, user_notion_id: str = "") -> None:
-    """Тест: какие эмодзи поддерживаются как реакции Telegram."""
-    import asyncio
-    from aiogram.types import ReactionTypeEmoji
-    all_emojis = [
-        "👍","👎","❤️","🔥","🥰","👏","😁","🤔","🤯","😱",
-        "😢","🎉","🤩","🙏","👌","🤡","😍","⚡","🏆","💔",
-        "🤨","😐","🍾","💋","😈","😴","😭","🤓","👻","👨‍💻",
-        "👀","🎃","😇","🤝","✍️","🤗","🫡","🎅","💅","🤪",
-        "🗿","🆒","💘","🦄","😘","💊","😎","👾","🤷","😡",
-        "🖕","❤️‍🔥","🌚","🌭","💯","🤣","💩","🐳","🎄",
-        "☃️","💤","🫢","✅","❌","💸","📝","🧠","🗒️","💰","⏰","✨",
-    ]
-    valid = []
-    invalid = []
-    for emoji in all_emojis:
-        try:
-            await msg.bot.set_message_reaction(
-                chat_id=msg.chat.id,
-                message_id=msg.message_id,
-                reaction=[ReactionTypeEmoji(emoji=emoji)],
-            )
-            valid.append(emoji)
-            await asyncio.sleep(0.3)
-        except Exception as e:
-            invalid.append(f"{emoji}")
-    await msg.answer(
-        f"✅ Валидные ({len(valid)}):\n{' '.join(valid)}\n\n"
-        f"❌ Невалидные ({len(invalid)}):\n{' '.join(invalid)}"
-    )
-
 
 @dp.message(Command("tasks"))
 async def cmd_tasks(msg: Message, user_notion_id: str = "") -> None:
-    """Показать ВСЕ задачи, сгруппированные по статусу → дедлайну → приоритету."""
-    from core.notion_client import query_pages
+    """Задачи: СЕГОДНЯ + стрик + все остальные + СДВГ-совет."""
+    from core.notion_client import query_pages, _with_user_filter
     from core.config import config
-    from core.notion_client import _with_user_filter
     from datetime import date as _date
+    import random
 
-    # Получаем ВСЕ задачи без фильтра по статусу
-    filters = _with_user_filter(None, user_notion_id)
+    uid = msg.from_user.id if msg.from_user else 0
+
+    # Все активные задачи
+    base_filter = {"and": [
+        {"property": "Статус", "status": {"does_not_equal": "Done"}},
+        {"property": "Статус", "status": {"does_not_equal": "Archived"}},
+        {"property": "Статус", "status": {"does_not_equal": "Complete"}},
+    ]}
+    filters = _with_user_filter(base_filter, user_notion_id)
     all_tasks = await query_pages(
-        config.nexus.db_tasks,
-        filters=filters,
+        config.nexus.db_tasks, filters=filters,
         sorts=[{"property": "Приоритет", "direction": "descending"}],
         page_size=100,
     )
@@ -177,173 +152,124 @@ async def cmd_tasks(msg: Message, user_notion_id: str = "") -> None:
         return
 
     today_str = _date.today().isoformat()
-    _priority_order = {"Срочно": 0, "Важно": 1, "Можно потом": 2}
-    _priority_icons = {"Срочно": "🔴", "Важно": "🟡", "Можно потом": "⚪"}
-    _priority_labels = {"Срочно": "СРОЧНО", "Важно": "ВАЖНО", "Можно потом": "МОЖНО ПОТОМ"}
-    _status_icons = {
-        "In progress": "⏳",
-        "Not started": "❌",
-        "Done": "✅",
-        "Complete": "✅",
-        "Archived": "🗄",
-    }
-    _status_order = {"In progress": 0, "Not started": 1, "Done": 2, "Complete": 2, "Archived": 3}
-    _repeat_labels = {"Ежедневно": "ежедневно", "Еженедельно": "еженедельно", "Ежемесячно": "ежемесячно"}
+    _pri_icons = {"Срочно": "🔴", "Важно": "🟡", "Можно потом": "⚪"}
+    _rep_labels = {"Ежедневно": "ежедневно", "Еженедельно": "еженедельно", "Ежемесячно": "ежемесячно"}
 
-    # Парсим задачи
-    items = []
+    today_items = []
+    other_items = []
+
     for t in all_tasks:
         props = t["properties"]
         title_parts = props.get("Задача", {}).get("title", [])
         title = title_parts[0]["plain_text"] if title_parts else "—"
         priority_raw = (props.get("Приоритет", {}).get("select") or {}).get("name", "Важно")
-        # Notion может вернуть "🟡 Важно" — нормализуем к "Важно"
         priority = priority_raw
-        for _pk in _priority_icons:
+        for _pk in _pri_icons:
             if _pk in priority_raw:
                 priority = _pk
                 break
-        status = (props.get("Статус", {}).get("status") or {}).get("name", "Not started")
         category = (props.get("Категория", {}).get("select") or {}).get("name", "")
         deadline_raw = (props.get("Дедлайн", {}).get("date") or {}).get("start", "")
+        reminder_raw = (props.get("Напоминание", {}).get("date") or {}).get("start", "")
         repeat = (props.get("Повтор", {}).get("select") or {}).get("name", "")
         is_repeat = repeat and repeat != "Нет"
         cat_icon = category[0] if category else "📌"
 
         deadline_date = deadline_raw[:10] if deadline_raw else ""
-        is_active = status in ("In progress", "Not started")
-        is_today_or_overdue = bool(deadline_date and deadline_date <= today_str and is_active) and not is_repeat
+        reminder_date = reminder_raw[:10] if reminder_raw else ""
 
-        # Форматируем дедлайн / повтор
+        # Время
+        time_str = ""
+        if "T" in reminder_raw:
+            time_str = reminder_raw.split("T")[1][:5]
+        elif "T" in deadline_raw:
+            time_str = deadline_raw.split("T")[1][:5]
+
+        # Дедлайн дисплей
         if is_repeat:
-            rep_label = _repeat_labels.get(repeat, repeat.lower())
-            if "T" in deadline_raw:
-                time_part = deadline_raw.split("T")[1][:5]
-                deadline_display = f"🔄 {rep_label} {time_part}"
-            else:
-                deadline_display = f"🔄 {rep_label}"
+            dl = f"🔄 {_rep_labels.get(repeat, repeat.lower())}"
         elif deadline_date:
-            try:
-                d, m = deadline_date[8:10], deadline_date[5:7]
-                time_suffix = ""
-                if "T" in deadline_raw:
-                    time_suffix = " " + deadline_raw.split("T")[1][:5]
-                deadline_display = f"до {d}.{m}{time_suffix}"
-            except Exception:
-                deadline_display = f"до {deadline_date}"
+            dl = f"до {deadline_date[8:10]}.{deadline_date[5:7]}"
         else:
-            deadline_display = ""
+            dl = ""
+        if time_str and not is_repeat:
+            dl += f" {time_str}" if dl else time_str
 
-        status_icon = _status_icons.get(status, "❔")
+        pri_icon = _pri_icons.get(priority, "⚪")
+        item = {"pri_icon": pri_icon, "cat_icon": cat_icon, "title": title, "dl": dl,
+                "priority": priority, "is_repeat": is_repeat}
 
-        items.append({
-            "cat_icon": cat_icon,
-            "title": title,
-            "priority": priority,
-            "status": status,
-            "status_icon": status_icon,
-            "deadline_display": deadline_display,
-            "is_today": is_today_or_overdue,
-            "pri_order": _priority_order.get(priority, 1),
-            "st_order": _status_order.get(status, 1),
-        })
+        # Сегодня: просроченные + сегодняшние + ежедневные
+        is_today = (
+            (is_repeat and repeat == "Ежедневно")
+            or (deadline_date and deadline_date <= today_str and not is_repeat)
+            or reminder_date == today_str
+        )
+        if is_today:
+            today_items.append(item)
+        else:
+            other_items.append(item)
 
-    # Сортировка: сегодня → приоритет → статус
-    items.sort(key=lambda x: (0 if x["is_today"] else 1, x["pri_order"], x["st_order"]))
+    lines: list[str] = ["📋 <b>Задачи · ☀️ Nexus</b>\n"]
 
-    total = len(items)
-
-    def _task_line(it: dict) -> str:
-        line = f"  <i>{it['cat_icon']} {it['title']}</i> · {it['status_icon']}"
-        if it.get("deadline_display"):
-            line += f" · {it['deadline_display']}"
-        return line
-
-    # Строим вывод с группами
-    from itertools import groupby
-
-    lines: list[str] = []
-
-    today_items = [x for x in items if x["is_today"]]
-    active_items = [x for x in items if not x["is_today"] and x["status"] in ("In progress", "Not started")]
-    done_items = [x for x in items if x["status"] in ("Done", "Complete")]
-
+    # СЕГОДНЯ
     if today_items:
-        lines.append(f"<b>📅 СЕГОДНЯ / ПРОСРОЧЕНО</b>")
+        lines.append("<b>📅 СЕГОДНЯ</b>")
         for it in today_items:
-            lines.append(_task_line(it))
+            line = f"  {it['pri_icon']} {it['title']} · {it['cat_icon']}"
+            if it["dl"]:
+                line += f" · {it['dl']}"
+            lines.append(line)
         lines.append("")
 
-    if active_items:
-        for priority, group in groupby(active_items, key=lambda x: x["priority"]):
-            icon = _priority_icons.get(priority, "⚪")
-            label = _priority_labels.get(priority, priority.upper())
-            lines.append(f"\n<b>{icon} {label}</b>")
-            for it in group:
-                lines.append(_task_line(it))
+    # Стрик
+    try:
+        from nexus.handlers.streaks import get_streak
+        from nexus.handlers.tasks import _get_user_tz
+        tz = await _get_user_tz(uid) or 3
+        streak_data = await get_streak(uid, tz)
+        if streak_data and streak_data.get("streak", 0) > 0:
+            s = streak_data["streak"]
+            fire = "🔥" * min(s, 5)
+            lines.append(f"{fire} {s} дней подряд\n")
+    except Exception:
+        pass
 
-    # Done за неделю — макс 5
-    if done_items:
-        week_start = (_date.today() - timedelta(days=_date.today().weekday())).isoformat()
-        # Фильтруем по дате изменения (Notion last_edited_time)
-        done_week = []
-        for t in all_tasks:
-            props = t["properties"]
-            status = (props.get("Статус", {}).get("status") or {}).get("name", "")
-            if status not in ("Done", "Complete"):
-                continue
-            # Время завершения → last_edited_time
-            compl = (props.get("Время завершения", {}).get("date") or {}).get("start", "")
-            if not compl:
-                compl = t.get("last_edited_time", "")
-            compl_date = compl[:10] if compl else ""
-            if compl_date >= week_start:
-                title_parts = props.get("Задача", {}).get("title", [])
-                title = title_parts[0]["plain_text"] if title_parts else "—"
-                cat = (props.get("Категория", {}).get("select") or {}).get("name", "")
-                cat_icon = cat[0] if cat else "📌"
-                d_display = f"{compl_date[8:10]}.{compl_date[5:7]}" if compl_date else ""
-                done_week.append((title, cat_icon, d_display, compl_date))
-        done_week.sort(key=lambda x: x[3], reverse=True)
-        done_week = done_week[:5]
-        if done_week:
-            lines.append(f"\n───────────────")
-            lines.append(f"<b>✅ Выполнено за неделю · {len(done_week)} шт</b>")
-            for title, ci, dd, _ in done_week:
-                lines.append(f"  ✓ {ci} {title}" + (f" · {dd}" if dd else ""))
+    # ВСЕ ОСТАЛЬНЫЕ
+    if other_items:
+        lines.append(f"<b>📋 ВСЕ ЗАДАЧИ</b> (ещё {len(other_items)})")
+        for it in other_items[:10]:
+            line = f"  {it['pri_icon']} {it['title']} · {it['cat_icon']}"
+            if it["dl"]:
+                line += f" · {it['dl']}"
+            lines.append(line)
+        if len(other_items) > 10:
+            lines.append(f"  <i>...и ещё {len(other_items) - 10}</i>")
 
     # СДВГ-совет
-    import random
-    _TASK_ADHD_TIPS = [
+    _TIPS = [
         "💡 Начни с одной задачи — не пытайся охватить всё сразу.",
-        "🧠 Если задач много — выбери 3 главных, остальные подождут.",
+        "🦋 Если задач много — выбери 3 главных, остальные подождут.",
         "⚡ Правило 2 минут: если можно сделать за 2 минуты — делай сейчас.",
         "🎯 Застрял? Разбей задачу на шаги поменьше.",
         "🌀 Переключение между задачами тратит энергию — заверши одну, потом следующую.",
         "✨ Не жди мотивации — начни делать, мотивация подтянется.",
         "🔥 Идеально не бывает. Сделано лучше чем идеально.",
     ]
-    lines.append(f"\n{random.choice(_TASK_ADHD_TIPS)}")
+    lines.append(f"\n{random.choice(_TIPS)}")
 
-    active_total = len(today_items) + len(active_items)
-    header = f"📋 <b>Активные задачи · {active_total} шт</b>\n"
-    text = header + "\n".join(lines)
-
-    # Telegram лимит ~4096 символов — разбиваем если не влезает
+    text = "\n".join(lines)
     if len(text) <= 4000:
         await msg.answer(text)
     else:
-        # Отправляем частями по ~4000 символов, разбивая по строкам
-        chunks = []
-        current = header
-        for line in lines:
-            if len(current) + len(line) + 1 > 4000:
-                chunks.append(current)
-                current = ""
-            current += line + "\n"
-        if current.strip():
-            chunks.append(current)
-        for chunk in chunks:
+        parts = text.split("\n")
+        chunk = ""
+        for line in parts:
+            if len(chunk) + len(line) + 1 > 4000:
+                await msg.answer(chunk)
+                chunk = ""
+            chunk += line + "\n"
+        if chunk.strip():
             await msg.answer(chunk)
 
 
