@@ -840,6 +840,15 @@ async def handle_list_inv_add(msg: Message, data: dict, user_notion_id: str = ""
     if created:
         c = created[0]
         await msg.answer(f"📦 <b>Инвентарь:</b> {c['name']} добавлен · {c.get('category', '')}", parse_mode="HTML")
+        # Спросить срок годности
+        uid = msg.from_user.id
+        pending_set(uid, {
+            "action": "inv_expiry",
+            "item_id": c["id"],
+            "item_name": c["name"],
+            "user_notion_id": user_notion_id,
+        })
+        await msg.answer("📅 Срок годности? (напиши дату, например <code>2026-06-15</code>, или «пропустить»)", parse_mode="HTML")
     else:
         await msg.answer("⚠️ Не удалось добавить.")
 
@@ -1083,16 +1092,23 @@ async def handle_list_pending(msg: Message, user_notion_id: str = "") -> bool:
         return True
 
     if action == "inv_expiry":
-        pending_del(uid)
+        skip_words = {"пропустить", "пропусти", "нет", "—", "-", "skip", "не надо", "без"}
+        if text.lower().strip() in skip_words:
+            pending_del(uid)
+            await msg.answer("📦 Ок, без срока годности.")
+            return True
         date_match = re.search(r"\d{4}-\d{2}-\d{2}", text)
         if date_match:
+            pending_del(uid)
             from core.notion_client import update_page as up, _date
             item_id = pending.get("item_id", "")
             if item_id:
                 await up(item_id, {"Срок годности": _date(date_match.group())})
-                await msg.answer(f"📦 Срок годности: {date_match.group()}")
+                item_name = pending.get("item_name", "")
+                await msg.answer(f"📦 {item_name} — срок годности: {date_match.group()}")
             return True
-        await msg.answer("⚠️ Формат даты: YYYY-MM-DD")
+        pending_del(uid)
+        await msg.answer("⚠️ Не распознал дату. Формат: <code>YYYY-MM-DD</code>. Пропускаю.", parse_mode="HTML")
         return True
 
     return False
