@@ -661,7 +661,17 @@ async def handle_list_inv_add(msg: Message, data: dict, user_notion_id: str = ""
     items = [{"name": parsed.get("item", ""), "quantity": parsed.get("quantity") or 1, "note": parsed.get("note", ""), "category": parsed.get("category", "🕯️ Расходники")}]
     created = await add_items(items, "📦 Инвентарь", BOT_NAME, user_notion_id)
     if created:
-        await msg.answer(f"📦 <b>Инвентарь:</b> {created[0]['name']} добавлен · {created[0].get('category', '')}", parse_mode="HTML")
+        c = created[0]
+        await msg.answer(f"📦 <b>Инвентарь:</b> {c['name']} добавлен · {c.get('category', '')}", parse_mode="HTML")
+        uid = msg.from_user.id
+        pending_set(uid, {
+            "action": "inv_expiry",
+            "item_id": c["id"],
+            "item_name": c["name"],
+            "user_notion_id": user_notion_id,
+            "bot": "arcana",
+        })
+        await msg.answer("📅 Срок годности? (напиши дату, например <code>2026-06-15</code>, или «пропустить»)", parse_mode="HTML")
 
 
 async def handle_list_inv_search(msg: Message, data: dict, user_notion_id: str = "") -> None:
@@ -831,6 +841,26 @@ async def handle_list_pending(msg: Message, user_notion_id: str = "") -> bool:
             await _finalize_checkout(msg, named_cats, pending.get("source", "💳 Карта"),
                                      pending.get("selected", {}), pending.get("categories", {}),
                                      pending.get("user_notion_id", user_notion_id))
+        return True
+
+    if action == "inv_expiry":
+        skip_words = {"пропустить", "пропусти", "нет", "—", "-", "skip", "не надо", "без"}
+        if text.lower().strip() in skip_words:
+            pending_del(uid)
+            await msg.answer("📦 Ок, без срока годности.")
+            return True
+        date_match = re.search(r"\d{4}-\d{2}-\d{2}", text)
+        if date_match:
+            pending_del(uid)
+            from core.notion_client import update_page as up, _date
+            item_id = pending.get("item_id", "")
+            if item_id:
+                await up(item_id, {"Срок годности": _date(date_match.group())})
+                item_name = pending.get("item_name", "")
+                await msg.answer(f"📦 {item_name} — срок годности: {date_match.group()}")
+            return True
+        pending_del(uid)
+        await msg.answer("⚠️ Не распознал дату. Формат: <code>YYYY-MM-DD</code>. Пропускаю.", parse_mode="HTML")
         return True
 
     return False
