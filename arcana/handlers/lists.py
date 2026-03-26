@@ -164,22 +164,172 @@ async def _fetch_all_display_items(list_type, bot_name, user_page_id):
     return active + done_checks
 
 
+# ── Navigation render functions ───────────────────────────────────────────────
+
+_BACK_BTN = InlineKeyboardButton(text="🔙 Назад", callback_data="list_nav_back")
+
+
+def _items_by_type(all_items: list[dict]) -> dict[str, list[dict]]:
+    by_type: dict[str, list[dict]] = {}
+    for it in all_items:
+        t = it.get("type", "🛒 Покупки")
+        by_type.setdefault(t, []).append(it)
+    return by_type
+
+
+def render_overview(
+    all_items: list[dict], header: str = HEADER,
+) -> tuple[str, list[list[InlineKeyboardButton]]]:
+    by_type = _items_by_type(all_items)
+    lines = [f"<b>{header}</b>\n"]
+
+    buy = [it for it in by_type.get("🛒 Покупки", []) if it.get("status") != "Done"]
+    if buy:
+        preview = ", ".join(it["name"] for it in buy[:3])
+        if len(buy) > 3:
+            preview += " …"
+        lines.append(f"🛒 Покупки ({len(buy)}) · {preview}")
+    else:
+        lines.append("🛒 Покупки (0)")
+
+    checks = by_type.get("📋 Чеклист", [])
+    if checks:
+        by_group: dict[str, list] = {}
+        for it in checks:
+            g = it.get("group", "") or "Без группы"
+            by_group.setdefault(g, []).append(it)
+        parts = []
+        for gname, gitems in by_group.items():
+            done = sum(1 for i in gitems if i.get("status") == "Done")
+            parts.append(f"{gname} ({done}/{len(gitems)})")
+        lines.append(f"📋 Чеклисты ({len(by_group)}) · {', '.join(parts)}")
+    else:
+        lines.append("📋 Чеклисты (0)")
+
+    inv = by_type.get("📦 Инвентарь", [])
+    lines.append(f"📦 Инвентарь ({len(inv)})")
+
+    buttons = [[
+        InlineKeyboardButton(text="🛒 Покупки", callback_data="list_nav_buy"),
+        InlineKeyboardButton(text="📋 Чеклисты", callback_data="list_nav_check"),
+        InlineKeyboardButton(text="📦 Инвентарь", callback_data="list_nav_inv"),
+    ]]
+    return "\n".join(lines), buttons
+
+
+def render_buy_screen(
+    all_items: list[dict], selected: set[str],
+) -> tuple[str, list[list[InlineKeyboardButton]]]:
+    by_type = _items_by_type(all_items)
+    buy = [it for it in by_type.get("🛒 Покупки", []) if it.get("status") != "Done"]
+    buttons: list[list[InlineKeyboardButton]] = []
+    if not buy:
+        text = "<b>🛒 Покупки</b>\n\nПусто. Напиши «купить ...» чтобы добавить."
+        buttons.append([_BACK_BTN])
+        return text, buttons
+    lines = [f"<b>🛒 Покупки ({len(buy)})</b>\n"]
+    for it in buy:
+        cat_emoji = (it.get("category", "").split(" ")[0]) if it.get("category") else ""
+        is_sel = it["id"] in selected
+        icon = "✅" if is_sel else "⬜"
+        lines.append(f"  {icon} {it['name']} · {cat_emoji}")
+        btn_text = f"✅ {it['name']}" if is_sel else it["name"]
+        buttons.append([InlineKeyboardButton(text=btn_text, callback_data=f"lt_{it['id'][:28]}")])
+    bottom = []
+    if selected:
+        bottom.append(InlineKeyboardButton(text="✅ Чек", callback_data="lt_checkout"))
+    bottom.append(_BACK_BTN)
+    buttons.append(bottom)
+    return "\n".join(lines), buttons
+
+
+def render_check_screen(
+    all_items: list[dict], selected: set[str],
+) -> tuple[str, list[list[InlineKeyboardButton]]]:
+    by_type = _items_by_type(all_items)
+    checks = by_type.get("📋 Чеклист", [])
+    buttons: list[list[InlineKeyboardButton]] = []
+    if not checks:
+        text = "<b>📋 Чеклисты</b>\n\nПусто. Напиши «список: ...» чтобы создать."
+        buttons.append([_BACK_BTN])
+        return text, buttons
+    by_group: dict[str, list] = {}
+    for it in checks:
+        g = it.get("group", "") or "Без группы"
+        by_group.setdefault(g, []).append(it)
+    lines = [f"<b>📋 Чеклисты</b>\n"]
+    for gname, gitems in by_group.items():
+        done = sum(1 for i in gitems if i.get("status") == "Done")
+        lines.append(f"<b>📋 {gname}</b> ({done}/{len(gitems)})")
+        for it in gitems:
+            is_done = it.get("status") == "Done"
+            is_sel = it["id"] in selected
+            icon = "✅" if (is_done or is_sel) else "⬜"
+            lines.append(f"  {icon} {it['name']}")
+            if not is_done:
+                btn_text = f"✅ {it['name']}" if is_sel else it["name"]
+                buttons.append([InlineKeyboardButton(text=btn_text, callback_data=f"lt_{it['id'][:28]}")])
+        lines.append("")
+    bottom = []
+    if selected:
+        bottom.append(InlineKeyboardButton(text="✅ Готово", callback_data="lt_checkout"))
+    bottom.append(_BACK_BTN)
+    buttons.append(bottom)
+    return "\n".join(lines), buttons
+
+
+def render_inv_screen(
+    all_items: list[dict],
+) -> tuple[str, list[list[InlineKeyboardButton]]]:
+    by_type = _items_by_type(all_items)
+    inv = by_type.get("📦 Инвентарь", [])
+    buttons: list[list[InlineKeyboardButton]] = []
+    if not inv:
+        text = "<b>📦 Инвентарь</b>\n\nПусто. Напиши «дома есть: ...» чтобы добавить."
+        buttons.append([_BACK_BTN])
+        return text, buttons
+    lines = [f"<b>📦 Инвентарь ({len(inv)})</b>\n"]
+    for it in inv:
+        cat_emoji = (it.get("category", "").split(" ")[0]) if it.get("category") else ""
+        qty = it.get("quantity") or 0
+        parts = [it["name"]]
+        if qty:
+            parts.append(f"{int(qty)}шт")
+        if it.get("note"):
+            parts.append(it["note"])
+        if it.get("expiry"):
+            parts.append(f"до {it['expiry'][:10]}")
+        lines.append(f"  {cat_emoji} {' · '.join(parts)}")
+    buttons.append([_BACK_BTN])
+    return "\n".join(lines), buttons
+
+
 # ── /list command ─────────────────────────────────────────────────────────────
 
 async def handle_list_command(msg: Message, user_notion_id: str = "") -> None:
     args = (msg.text or "").split(maxsplit=1)
     sub = args[1].strip().lower() if len(args) > 1 else ""
-    type_map = {"buy": "🛒 Покупки", "check": "📋 Чеклист", "inv": "📦 Инвентарь"}
-    list_type = type_map.get(sub)
+    screen_map = {"buy": "buy", "check": "check", "inv": "inv"}
+    screen = screen_map.get(sub, "overview")
 
-    all_items = await _fetch_all_display_items(list_type, BOT_NAME, user_notion_id)
-    if not all_items:
-        await msg.answer(f"📭 Нет активных {list_type or 'списков'}.")
-        return
+    all_items = await _fetch_all_display_items(None, BOT_NAME, user_notion_id)
 
     uid = msg.from_user.id
     pending_del(uid)
-    text, buttons = _build_list_text_and_buttons(all_items, set(), HEADER)
+
+    sel: set[str] = set()
+    if screen == "buy":
+        text, buttons = render_buy_screen(all_items, sel)
+    elif screen == "check":
+        text, buttons = render_check_screen(all_items, sel)
+    elif screen == "inv":
+        text, buttons = render_inv_screen(all_items)
+    else:
+        if not all_items:
+            await msg.answer("📭 Списки пусты.")
+            return
+        text, buttons = render_overview(all_items)
+
     kb = InlineKeyboardMarkup(inline_keyboard=buttons) if buttons else None
     sent = await msg.answer(text, parse_mode="HTML", reply_markup=kb)
     pending_set(uid, {
@@ -187,9 +337,44 @@ async def handle_list_command(msg: Message, user_notion_id: str = "") -> None:
         "selected": [],
         "msg_id": sent.message_id,
         "user_notion_id": user_notion_id,
-        "list_type": list_type,
+        "list_type": None,
         "bot": "arcana",
+        "screen": screen,
     })
+
+
+# ── Callback: navigation ──────────────────────────────────────────────────────
+
+@router.callback_query(lambda c: c.data and c.data.startswith("list_nav_"))
+async def on_list_nav(query: CallbackQuery, user_notion_id: str = "") -> None:
+    uid = query.from_user.id
+    pending = pending_get(uid)
+    if not pending or pending.get("action") not in ("list_select",):
+        await query.answer("⏰ Сессия истекла. Отправь /list заново.")
+        return
+    p_user_id = pending.get("user_notion_id", user_notion_id)
+    all_items = await _fetch_all_display_items(None, BOT_NAME, p_user_id)
+    nav = query.data.replace("list_nav_", "")
+    screen = nav if nav != "back" else "overview"
+    if nav == "back":
+        pending["selected"] = []
+    sel = set(pending.get("selected", []))
+    if screen == "buy":
+        text, buttons = render_buy_screen(all_items, sel)
+    elif screen == "check":
+        text, buttons = render_check_screen(all_items, sel)
+    elif screen == "inv":
+        text, buttons = render_inv_screen(all_items)
+    else:
+        text, buttons = render_overview(all_items)
+    pending["screen"] = screen
+    pending_set(uid, pending)
+    kb = InlineKeyboardMarkup(inline_keyboard=buttons) if buttons else None
+    try:
+        await query.message.edit_text(text, parse_mode="HTML", reply_markup=kb)
+    except Exception:
+        pass
+    await query.answer()
 
 
 # ── Callback: toggle ─────────────────────────────────────────────────────────
@@ -228,9 +413,10 @@ async def on_list_toggle(query: CallbackQuery, user_notion_id: str = "") -> None
     pending_set(uid, pending)
 
     is_remain = pending.get("action") == "list_remain_select"
-    text, buttons = _build_list_text_and_buttons(all_items, set(selected), HEADER)
+    sel_set = set(selected)
 
     if is_remain:
+        text, buttons = _build_list_text_and_buttons(all_items, sel_set, HEADER)
         buttons = [b for b in buttons if b[0].callback_data != "lt_checkout"]
         bottom = []
         if selected:
@@ -240,6 +426,14 @@ async def on_list_toggle(query: CallbackQuery, user_notion_id: str = "") -> None
             InlineKeyboardButton(text="🗑️ Архивировать всё", callback_data="lt_remain_archive_all"),
         ])
         buttons.extend(bottom)
+    else:
+        screen = pending.get("screen", "overview")
+        if screen == "buy":
+            text, buttons = render_buy_screen(all_items, sel_set)
+        elif screen == "check":
+            text, buttons = render_check_screen(all_items, sel_set)
+        else:
+            text, buttons = _build_list_text_and_buttons(all_items, sel_set, HEADER)
 
     kb = InlineKeyboardMarkup(inline_keyboard=buttons) if buttons else None
     try:
