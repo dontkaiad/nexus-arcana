@@ -55,35 +55,41 @@ async def cmd_start(msg: Message, user_notion_id: str = "") -> None:
         await msg.answer("⛔ У тебя нет доступа. Обратись к владельцу.")
         return
     await msg.answer(
-        "☀️ <b>Привет! Я Nexus — твой персональный ИИ-ассистент.</b>\n\n"
-        "Я умею:\n"
-        "📋 <b>Задачи</b> — создавать, напоминать, повторять, отслеживать стрики\n"
-        "💰 <b>Финансы</b> — записывать расходы/доходы, следить за лимитами\n"
-        "💰 <b>Бюджет</b> — планировать бюджет, долги, цели (Sonnet)\n"
-        "🗒️ <b>Списки</b> — покупки, чеклисты, инвентарь с умным чеком\n"
-        "📝 <b>Заметки</b> — сохранять и дайджестить\n"
+        "☀️ <b>Привет! Я NEXUS — твой персональный ИИ-ассистент.</b>\n\n"
+        "Понимаю естественный язык — команды учить не нужно, просто пиши.\n\n"
+        "📋 <b>Задачи</b> — создавать, напоминать, повторять, стрики\n"
+        "💰 <b>Финансы</b> — расходы, доходы, лимиты\n"
+        "💰 <b>Бюджет</b> — планирование, долги, цели\n"
+        "🗒️ <b>Списки</b> — покупки, чеклисты, инвентарь\n"
+        "📝 <b>Заметки</b> — сохранять, искать по тегам, напоминание разбирать раз в 2 недели\n"
         "🧠 <b>Память</b> — запоминать предпочтения и привычки\n"
         "🧠 <b>СДВГ</b> — персональный профиль, нудж, поддержка\n\n"
-        "Просто пиши мне текстом — я пойму.\n"
-        "Или используй <code>/help</code> для списка команд."
+        "Подробнее — <code>/help</code>\n\n"
+        '👨‍💻 Создатель: <a href="https://github.com/dontkaiad">Кай Ларк</a>\n'
+        '❓ Ошибки/вопросы? <a href="https://t.me/hey_lark">@hey_lark</a>',
+        parse_mode="HTML",
+        disable_web_page_preview=True,
     )
 
 
 @dp.message(Command("help"))
 async def cmd_help(msg: Message, user_notion_id: str = "") -> None:
     await msg.answer(
-        "<b>☀️ Nexus — Команды</b>\n\n"
+        "ГАЙД ☀️ <b>NEXUS</b>\n"
+        "Понимаю естественный язык — команды учить не нужно, просто пиши.\n\n"
 
         "📋 <b>ЗАДАЧИ</b>\n"
         "<code>/tasks</code> — список задач\n"
-        "<code>/today</code> — задачи на сегодня + совет\n"
+        "<code>/today</code> — задачи на сегодня + СДВГ-совет\n"
         "<code>/stats</code> — статистика + стрики\n"
-        "Текстом: «купить корм коту», «перенеси на завтра», «отмени задачу X»\n\n"
+        "Текстом: «купить корм коту», «напомни завтра в 10», "
+        "«перенеси на пятницу», «сделал пробежку»\n"
+        "Повторы: «напоминай пить воду каждый день в 9:00»\n\n"
 
         "💰 <b>ФИНАНСЫ</b>\n"
         "<code>/finance</code> — история операций\n"
         "<code>/finance_stats</code> — статистика (месяц/неделя/сегодня)\n"
-        "Текстом: «450р такси», «доход 5000»\n\n"
+        "Текстом: «450р такси», «доход 50000»\n\n"
 
         "💰 <b>БЮДЖЕТ</b>\n"
         "<code>/budget</code> — текущий бюджетный план\n"
@@ -92,27 +98,29 @@ async def cmd_help(msg: Message, user_notion_id: str = "") -> None:
 
         "🗒️ <b>СПИСКИ</b>\n"
         "<code>/list</code> — покупки + чеклисты\n"
-        "<code>/list buy</code> — только покупки\n"
-        "<code>/list check</code> — только чеклисты\n"
-        "<code>/list inv</code> — инвентарь (что есть дома)\n"
-        "Текстом: «купить молоко, яйца, корм» — добавить\n"
-        "В /list выбери ✅ → [Чек] → напиши сумму\n"
+        "<code>/list buy</code> / <code>check</code> / <code>inv</code> — фильтр по типу\n"
+        "Текстом: «купить молоко, яйца» — добавить\n"
         "«дома есть: парацетамол 2 пачки» — инвентарь\n"
         "«есть ибупрофен?» — поиск\n\n"
 
         "📝 <b>ЗАМЕТКИ</b>\n"
-        "<code>/notes</code> — список заметок\n"
-        "<code>/notes_digest</code> — дайджест за неделю\n\n"
+        "<code>/notes</code> — все заметки с тегами и категорией\n"
+        "Текстом: «запиши: идея для проекта» — создать\n"
+        "Раз в 2 недели напомню разобрать накопившиеся\n\n"
 
-        "🧠 <b>ПАМЯТЬ</b>\n"
+        "🧠 <b>ПАМЯТЬ И СДВГ</b>\n"
         "<code>/memory</code> — что я помню о тебе\n"
         "<code>/adhd</code> — СДВГ-профиль\n"
         "Текстом: «запомни: монстры = привычки»\n\n"
 
         "⚙️ <b>ПРОЧЕЕ</b>\n"
         "<code>/start</code> — приветствие\n"
-        "<code>/help</code> — эта справка",
+        "<code>/help</code> — этот гайд\n\n"
+
+        '👨‍💻 Создатель: <a href="https://github.com/dontkaiad">Кай Ларк</a>\n'
+        '❓ Ошибки/вопросы? <a href="https://t.me/hey_lark">@hey_lark</a>',
         parse_mode="HTML",
+        disable_web_page_preview=True,
     )
 
 
@@ -303,31 +311,9 @@ async def cmd_today(msg: Message, user_notion_id: str = "") -> None:
 
 @dp.message(Command("notes"))
 async def cmd_notes(msg: Message, user_notion_id: str = "") -> None:
-    """Показать последние 5 заметок из Notion."""
-    from core.notion_client import db_query
-    pages = await db_query(
-        config.nexus.db_notes,
-        sorts=[{"property": "Дата", "direction": "descending"}],
-        page_size=5,
-    )
-    if not pages:
-        await msg.answer("📭 Заметок нет.")
-        return
-    lines = []
-    for p in pages:
-        props = p["properties"]
-        title_parts = props.get("Заголовок", {}).get("title", [])
-        title = title_parts[0]["plain_text"] if title_parts else "—"
-        tags_items = props.get("Теги", {}).get("multi_select", [])
-        tags_str = " ".join(f"#{t['name']}" for t in tags_items)
-        date = (props.get("Дата", {}).get("date") or {}).get("start", "")[:10]
-        line = f"💡 {title}"
-        if tags_str:
-            line += f" {tags_str}"
-        if date:
-            line += f" · {date}"
-        lines.append(line)
-    await msg.answer("📝 <b>Последние заметки:</b>\n\n" + "\n".join(lines))
+    """Показать все заметки с пагинацией."""
+    from nexus.handlers.notes import handle_note_search
+    await handle_note_search(msg, {"query": ""}, user_notion_id=user_notion_id)
 
 
 @dp.message(Command("memory"))
@@ -428,12 +414,6 @@ async def cmd_stats(msg: Message, user_notion_id: str = "") -> None:
     from nexus.handlers.tasks import handle_task_stats
     await handle_task_stats(msg, user_notion_id=user_notion_id)
 
-
-@dp.message(Command("notes_digest"))
-async def cmd_notes_digest(msg: Message, user_notion_id: str = "") -> None:
-    """Ручной запуск дайджеста заметок."""
-    from nexus.handlers.notes import send_notes_digest
-    await send_notes_digest(bot, msg.from_user.id, user_notion_id)
 
 
 @dp.message(Command("tz"))
@@ -832,7 +812,6 @@ async def main() -> None:
         BotCommand(command="budget_setup", description="Настроить бюджет"),
         BotCommand(command="list", description="Списки покупок"),
         BotCommand(command="notes", description="Заметки"),
-        BotCommand(command="notes_digest", description="Дайджест заметок"),
         BotCommand(command="memory", description="Память"),
         BotCommand(command="adhd", description="СДВГ-профиль"),
     ])
@@ -842,13 +821,13 @@ async def main() -> None:
     from nexus.handlers.notes import send_notes_digest_all
     from apscheduler.triggers.cron import CronTrigger
     from nexus.handlers.tasks import _scheduler as nexus_scheduler
-    # Еженедельный дайджест заметок: каждое воскресенье в 07:00 UTC (10:00 UTC+3 СПб)
+    # Напоминание о заметках: 1-го и 15-го числа в 09:00 UTC (12:00 МСК)
     if nexus_scheduler:
         nexus_scheduler.add_job(
             send_notes_digest_all,
             args=[bot],
-            trigger=CronTrigger(day_of_week="sun", hour=7, minute=0),
-            id="notes_digest_weekly",
+            trigger=CronTrigger(day="1,15", hour=9, minute=0),
+            id="notes_reminder_biweekly",
             replace_existing=True,
         )
         # СДВГ-дайджест: каждое воскресенье в 08:00 UTC (11:00 UTC+3 СПб)
