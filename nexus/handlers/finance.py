@@ -400,12 +400,15 @@ async def build_budget_message(user_notion_id: str = "") -> Optional[str]:
     # ── Формируем сообщение ──
     lines = ["<b>💰 Бюджет на {} (день {}/{})</b>".format(ru_month, day_of_period, days_in_period)]
 
-    # Доходы из памяти
-    income_total = sum(d.get("amount", 0) for d in budget.get("доходы", []))
-    if income_total:
-        lines.append("\n<b>📥 Доход: {:,}₽</b>".format(int(income_total)))
+    # Доходы — с источниками
+    income_items = budget.get("доходы", [])
+    income_total = sum(d.get("amount", 0) for d in income_items)
+    if income_items:
+        lines.append("\n<b>📥 Доход ({:,}₽):</b>".format(int(income_total)))
+        for d in income_items:
+            lines.append("  {} — {:,}₽".format(d["name"], int(d["amount"])))
 
-    # Обязательные расходы
+    # Обязательные — сгруппированы по категории
     obligatory_items = budget.get("обязательные", [])
     obligatory_total = sum(o["amount"] for o in obligatory_items)
     if obligatory_items:
@@ -415,13 +418,14 @@ async def build_budget_message(user_notion_id: str = "") -> Optional[str]:
 
     distributable = income_total - obligatory_total
     if distributable > 0:
-        lines.append("💳 Распределяемые: <b>{:,}₽</b>".format(int(distributable)))
+        lines.append("\n💳 Распределяемые: <b>{:,}₽</b>".format(int(distributable)))
 
-    # Долги с полной стратегией
+    # Долги
     debts = budget.get("долги", [])
     total_debt_payments = 0
+    total_debt_amount = sum(d.get("amount", 0) for d in debts)
     if debts:
-        lines.append("\n<b>📋 Долги:</b>")
+        lines.append("\n<b>📋 Долги ({:,}₽):</b>".format(int(total_debt_amount)))
         for d in debts:
             mp = d.get("monthly_payment", 0)
             total_debt_payments += mp
@@ -435,8 +439,7 @@ async def build_budget_message(user_notion_id: str = "") -> Optional[str]:
                 strat_display = strategy if strategy else "отложен"
                 lines.append("  {} — {:,}₽ · {}".format(
                     d["name"], int(d["amount"]), strat_display))
-        lines.append("  ─────────────")
-        lines.append("  💳 Платежей: <b>{:,}₽/мес</b>".format(int(total_debt_payments)))
+        lines.append("\n💳 Платежей: <b>{:,}₽/мес</b>".format(int(total_debt_payments)))
 
     # Лимиты с прогрессом
     limits = budget.get("лимиты", [])
@@ -447,7 +450,6 @@ async def build_budget_message(user_notion_id: str = "") -> Optional[str]:
         for l in limits:
             display_name = _display_limit_name(l["name"])
             limit_amt = l["amount"]
-            # Match spent amount
             spent = 0.0
             for cat_key, cat_spent in by_expense_cat.items():
                 cat_link_key = _cat_link(cat_key)
@@ -462,15 +464,15 @@ async def build_budget_message(user_notion_id: str = "") -> Optional[str]:
                     display_name, int(spent), int(limit_amt), pct, indicator))
             else:
                 lines.append("  {} — {:,}₽".format(display_name, int(limit_amt)))
-        lines.append("  ─────────────")
+
         if day_of_period > 1:
-            lines.append("  💳 Потрачено: {:,} / {:,}₽".format(int(spent_in_limits), int(limits_total)))
+            lines.append("\n💳 Потрачено: {:,} / {:,}₽".format(int(spent_in_limits), int(limits_total)))
             free_in_limits = limits_total - spent_in_limits
             daily_left = free_in_limits / max(days_remaining, 1)
-            lines.append("  💳 Свободных: <b>{:,}₽</b> · {:,}₽/день".format(
+            lines.append("💳 Свободных: <b>{:,}₽</b> · {:,}₽/день".format(
                 int(max(0, free_in_limits)), int(max(0, daily_left))))
         else:
-            lines.append("  💳 Итого: {:,}₽".format(int(limits_total)))
+            lines.append("\n💳 Итого: {:,}₽".format(int(limits_total)))
 
     # Цели
     goals = budget.get("цели", [])
@@ -489,8 +491,7 @@ async def build_budget_message(user_notion_id: str = "") -> Optional[str]:
                     lines.append("  {}. {} — {:,}₽ · после долгов".format(
                         i, g["name"], int(target)))
         else:
-            # All deferred
-            lines.append("\n🎯 Цели (после закрытия долгов):")
+            lines.append("\n<b>🎯 Цели (после закрытия долгов):</b>")
             for i, g in enumerate(goals, 1):
                 lines.append("  {}. {} — {:,}₽".format(i, g["name"], int(g.get("target", 0))))
 
