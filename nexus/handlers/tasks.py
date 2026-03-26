@@ -652,6 +652,36 @@ async def _handle_recurring_task_reset(
         await message.answer("⚠️ Ошибка обновления повторяющейся задачи.")
 
 
+async def _handle_recurring_reminder_done(
+    message: Message,
+    task_id: str,
+    title: str,
+) -> None:
+    """Повторяющаяся задача: напоминание выполнено → статус 'In progress', ждём дедлайн."""
+    try:
+        await update_page(task_id, {"Статус": _status("In progress")})
+        await message.answer(f"👍 {title} — в процессе. Жду выполнения к дедлайну.")
+    except Exception as e:
+        logger.error("_handle_recurring_reminder_done error: %s", e)
+        await message.answer("⚠️ Ошибка обновления статуса.")
+
+
+async def _handle_recurring_deadline_done(
+    message: Message,
+    task_id: str,
+    task_props: dict,
+    repeat: str,
+    title: str,
+    uid: int = 0,
+) -> None:
+    """Повторяющаяся задача: дедлайн выполнен → Done, затем сброс на следующий цикл."""
+    try:
+        await update_page(task_id, {"Статус": _status("Done")})
+    except Exception as e:
+        logger.warning("_handle_recurring_deadline_done: failed to set Done: %s", e)
+    await _handle_recurring_task_reset(message, task_id, task_props, repeat, title, uid)
+
+
 # ── Handlers ───────────────────────────────────────────────────────────────────
 
 _REMIND_WORDS = {"напомни", "напоминай", "remind", "напомнить", "напомни мне"}
@@ -1203,9 +1233,15 @@ async def task_complete(call: CallbackQuery) -> None:
     await call.message.edit_reply_markup()
 
     if repeat and repeat != "Нет":
-        # Повторяющаяся задача → сброс на следующий цикл
-        await _handle_recurring_task_reset(call.message, task_id, task_props, repeat, task_title, uid)
-        await call.answer("🔄 Сброшено на следующий цикл")
+        # Повторяющаяся задача: различаем напоминание и дедлайн
+        msg_text = call.message.text or ""
+        is_deadline = "Дедлайн:" in msg_text
+        if is_deadline:
+            await _handle_recurring_deadline_done(call.message, task_id, task_props, repeat, task_title, uid)
+            await call.answer("✅ Выполнено!")
+        else:
+            await _handle_recurring_reminder_done(call.message, task_id, task_title)
+            await call.answer("👍 В процессе")
     else:
         result = await update_task_status(task_id, "Done")
         if result:
@@ -1616,7 +1652,7 @@ async def handle_task_done(message: Message, task_hint: str, user_notion_id: str
         _, title, task_id, task_props = scored[0]
         repeat = (task_props.get("Повтор", {}).get("select") or {}).get("name", "Нет")
         if repeat and repeat != "Нет":
-            await _handle_recurring_task_reset(message, task_id, task_props, repeat, title, uid)
+            await _handle_recurring_deadline_done(message, task_id, task_props, repeat, title, uid)
             return
         result = await update_task_status(task_id, "Done")
         if result:
@@ -1668,8 +1704,8 @@ async def task_done_select(call: CallbackQuery) -> None:
     await call.message.edit_reply_markup()
 
     if repeat and repeat != "Нет":
-        await call.answer("🔄 Сброс повтора")
-        await _handle_recurring_task_reset(call.message, task_id, task_props, repeat, title_text, uid)
+        await call.answer("✅ Выполнено!")
+        await _handle_recurring_deadline_done(call.message, task_id, task_props, repeat, title_text, uid)
         return
 
     result = await update_task_status(task_id, "Done")

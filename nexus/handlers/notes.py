@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import random
 from datetime import datetime, timezone, timedelta
 from typing import Dict, List, Optional
 
@@ -275,8 +276,19 @@ async def handle_edit_note(message: Message, data: dict, user_notion_id: str) ->
     await message.answer(f"✏️ Тег обновлён: {tag_name}")
 
 
+_ADHD_TIPS = [
+    "💡 Совет: разбери хотя бы одну — мозгу нравится закрывать гештальты",
+    "🧠 Трюк: поставь таймер на 5 минут и разбери сколько успеешь",
+    "🎯 Факт: решение «удалить или оставить» — тоже действие, и оно считается",
+    "⚡ Лайфхак: начни с самой короткой заметки — дофамин от быстрой победы",
+    "🌀 Напоминание: незакрытые заметки занимают RAM в голове, даже если ты о них не думаешь",
+    "✨ Мотивация: будущий ты скажет спасибо за каждую разобранную заметку",
+    "🔥 Приём: не надо идеально — просто реши: задача, удалить или оставить",
+]
+
+
 async def send_notes_digest(bot, user_tg_id: int, user_notion_id: str) -> None:
-    """Отправить дайджест старых заметок (>7 дней) одному пользователю."""
+    """Напоминание о неразобранных заметках (>7 дней)."""
     from core.notion_client import db_query
 
     db_id = os.environ.get("NOTION_DB_NOTES")
@@ -298,7 +310,7 @@ async def send_notes_digest(bot, user_tg_id: int, user_notion_id: str) -> None:
             db_id,
             filter_obj=filter_obj,
             sorts=[{"property": "Дата", "direction": "ascending"}],
-            page_size=5,
+            page_size=50,
         )
     except Exception as e:
         logger.error("send_notes_digest: query error: %s", e)
@@ -307,29 +319,9 @@ async def send_notes_digest(bot, user_tg_id: int, user_notion_id: str) -> None:
     if not pages:
         return
 
-    digest_cache = []
-    lines = []
-    for page in pages:
-        props = page["properties"]
-        title_parts = props.get("Заголовок", {}).get("title", [])
-        title = title_parts[0]["plain_text"] if title_parts else "—"
-        tags_items = props.get("Теги", {}).get("multi_select", [])
-        tags = [t["name"] for t in tags_items]
-        date = (props.get("Дата", {}).get("date") or {}).get("start", "")[:10]
-        digest_cache.append({"page_id": page["id"], "title": title, "tags": tags})
-        lines.append(f"— 💡 {title} — {date}")
-
-    _last_digest_results[user_tg_id] = digest_cache
-
     n = len(pages)
-    text = (
-        f"💡 У тебя {n} заметок без действий:\n"
-        + "\n".join(lines)
-        + "\n\nХочешь разобрать? Можешь:\n"
-        "— превратить в задачу: «сделай задачу из заметки про таро»\n"
-        "— удалить: «удали заметку про рецепт»\n"
-        "— оставить как есть"
-    )
+    tip = random.choice(_ADHD_TIPS)
+    text = f"📝 У тебя {n} не разобранных заметок\n\n{tip}\n\nЕсли хочешь разобрать сейчас — /notes"
 
     try:
         await bot.send_message(user_tg_id, text)
@@ -358,7 +350,7 @@ async def handle_note_search(
     data,  # dict с "query" или строка (legacy)
     user_notion_id: str = "",
 ) -> None:
-    """Поиск заметок с пагинацией через core.pagination."""
+    """Поиск заметок с пагинацией + дайджест неразобранных (объединение notes + notes_digest)."""
     import asyncio
     from core.notion_client import db_query
     from core.pagination import register_pages, get_page_text, get_page_keyboard
@@ -399,6 +391,18 @@ async def handle_note_search(
         await message.answer("💡 Заметок не найдено")
         return
 
+    # Считаем неразобранные (старше 7 дней) для дайджест-шапки
+    digest_header = ""
+    if not q:
+        cutoff = (datetime.now(MOSCOW_TZ) - timedelta(days=7)).strftime("%Y-%m-%d")
+        old_count = sum(
+            1 for p in combined
+            if ((p["properties"].get("Дата", {}).get("date") or {}).get("start", "")[:10] or "9999") < cutoff
+        )
+        if old_count > 0:
+            tip = random.choice(_ADHD_TIPS)
+            digest_header = f"📬 Не разобрано: {old_count} шт.\n{tip}\n\n"
+
     # Преобразовать Notion-страницы в простые dict для formatter
     def _parse(item: dict) -> dict:
         props = item["properties"]
@@ -406,20 +410,30 @@ async def handle_note_search(
         title = title_parts[0]["plain_text"] if title_parts else "—"
         tags_items = props.get("Теги", {}).get("multi_select", [])
         tags_str = " ".join(f"#{t['name']}" for t in tags_items)
+        # Категория (select property, если есть)
+        cat = (props.get("Категория", {}).get("select") or {}).get("name", "")
         date = (props.get("Дата", {}).get("date") or {}).get("start", "")[:10]
-        return {"title": title, "tags": tags_str, "date": date}
+        return {"title": title, "tags": tags_str, "cat": cat, "date": date}
 
     def _fmt(it: dict) -> str:
         line = f"💡 {it['title']}"
+        meta_parts = []
+        if it.get("cat"):
+            meta_parts.append(it["cat"])
         if it.get("tags"):
-            line += f"\n   {it['tags']}"
+            meta_parts.append(it["tags"])
         if it.get("date"):
-            line += f" · {it['date']}"
+            meta_parts.append(it["date"])
+        if meta_parts:
+            line += "\n   " + " · ".join(meta_parts)
         return line
 
     uid = message.from_user.id
     items = [_parse(p) for p in combined]
-    register_pages(uid, items, f"🔍 {q or 'Заметки'}", _fmt)
+    header = f"🔍 {q}" if q else "📝 Заметки"
+    if digest_header:
+        header = digest_header + header
+    register_pages(uid, items, header, _fmt)
     await message.answer(get_page_text(uid), reply_markup=get_page_keyboard(uid))
 
 
