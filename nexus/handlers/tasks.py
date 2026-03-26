@@ -1257,7 +1257,7 @@ async def task_complete(call: CallbackQuery) -> None:
             phrase = random.choice(_DONE_PHRASES)
             title_line = f"\n✅ {task_title} — выполнено" if task_title else "\n✅ Выполнено"
             await call.answer("✅ Записано!")
-            await react(call, "🎉")
+            await react(call, "🔥")
             # Стрик
             streak_line = ""
             try:
@@ -1358,7 +1358,7 @@ async def handle_reschedule_reminder(message: Message) -> None:
             logger.info("handle_reschedule_reminder: relative time parsed locally: %s", relative)
             await _schedule_reminder(message.chat.id, task_title, relative, task_id, tz_offset)
             _pending_del(uid)
-            await react(message, "⏰")
+            await react(message, "⚡")
             await message.answer(f"✅ Напоминание перенесено на {relative.replace('T', ' ')}")
             return
 
@@ -1381,7 +1381,7 @@ async def handle_reschedule_reminder(message: Message) -> None:
             reminder_time = parsed["reminder_time"]
             await _schedule_reminder(message.chat.id, task_title, reminder_time, task_id, tz_offset)
             _pending_del(uid)
-            await react(message, "⏰")
+            await react(message, "⚡")
             await message.answer(f"✅ Напоминание перенесено на {reminder_time.replace('T', ' ')}")
         else:
             await message.answer("❌ Не смог парсить дату. Попробуй ещё раз")
@@ -1483,7 +1483,7 @@ async def _do_save_task(message: Message, data: dict, chat_id: int = None, uid: 
         f"🔔 Напоминание: {reminder_display}{repeat_line}{extra}"
     )
     
-    await react(message, "✅")
+    await react(message, "⚡")
 
     # Редактируем старое сообщение вместо создания нового
     if msg_id:
