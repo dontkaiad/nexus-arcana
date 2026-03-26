@@ -213,14 +213,23 @@ async def cmd_tasks(msg: Message, user_notion_id: str = "") -> None:
     lines: list[str] = ["📋 <b>Задачи · ☀️ Nexus</b>\n"]
 
     # СЕГОДНЯ
+    lines.append("<b>📅 СЕГОДНЯ</b>")
     if today_items:
-        lines.append("<b>📅 СЕГОДНЯ</b>")
         for it in today_items:
             line = f"  {it['pri_icon']} {it['title']} · {it['cat_icon']}"
             if it["dl"]:
                 line += f" · {it['dl']}"
             lines.append(line)
-        lines.append("")
+    else:
+        _FREE_TIPS = [
+            "🌟 На сегодня чисто — иди отдыхай!",
+            "✨ Свободный день — можно просто быть.",
+            "🎉 Ноль задач на сегодня — ты заслужила.",
+            "🌈 Сегодня без дедлайнов — редкая радость.",
+            "🦋 Ничего срочного — мозг скажет спасибо за паузу.",
+        ]
+        lines.append(f"  {random.choice(_FREE_TIPS)}")
+    lines.append("")
 
     # Стрик
     try:
@@ -275,9 +284,20 @@ async def cmd_tasks(msg: Message, user_notion_id: str = "") -> None:
 
 @dp.message(Command("today"))
 async def cmd_today(msg: Message, user_notion_id: str = "") -> None:
-    """Задачи на сегодня."""
+    """Экспресс: сегодня + бюджет + совет."""
     from nexus.handlers.tasks import handle_tasks_today
     await handle_tasks_today(msg, user_notion_id=user_notion_id)
+
+    # Бюджет на день
+    try:
+        from nexus.handlers.finance import _calc_free_remaining
+        result = await _calc_free_remaining(user_notion_id)
+        if result:
+            free_left, days_rem = result
+            daily = free_left / max(days_rem, 1)
+            await msg.answer(f"💰 Бюджет: <b>{daily:,.0f}₽/день</b>", parse_mode="HTML")
+    except Exception:
+        pass
 
 
 @dp.message(Command("notes"))
