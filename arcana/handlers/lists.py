@@ -599,7 +599,7 @@ async def handle_list_buy(msg: Message, data: dict, user_notion_id: str = "") ->
         lines.append("🛒 <b>Добавлено (Arcana):</b>")
         for c in created:
             cat_emoji = c.get("category", "").split(" ")[0] if c.get("category") else ""
-            lines.append(f"  ✓ {c['name']} · {cat_emoji}")
+            lines.append(f"  ⬜ {c['name']} · {cat_emoji}")
     if nexus_items:
         names = ", ".join(it["name"] for it in nexus_items)
         lines.append(f"\n☀️ {names} — это к Nexus! Напиши @nexus_kailark_bot")
