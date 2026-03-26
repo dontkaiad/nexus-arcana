@@ -602,15 +602,15 @@ async def classify(text: str, tz_offset: int = 3) -> list[dict]:
         logger.info("classify: list_inventory_update pattern matched")
         return [{"type": "list_inventory_update", "text": text}]
 
+    # "есть ибупрофен?", "дома есть ибупрофен?" → list_inventory_search (ПЕРЕД ADD!)
+    if _LIST_INV_SEARCH_RE.search(text):
+        logger.info("classify: list_inventory_search pattern matched")
+        return [{"type": "list_inventory_search", "text": text}]
+
     # "дома есть: парацетамол" / "добавь в инвентарь" → list_inventory_add
     if _LIST_INV_ADD_RE.search(text):
         logger.info("classify: list_inventory_add pattern matched")
         return [{"type": "list_inventory_add", "text": text}]
-
-    # "есть ибупрофен?" → list_inventory_search
-    if _LIST_INV_SEARCH_RE.search(text):
-        logger.info("classify: list_inventory_search pattern matched")
-        return [{"type": "list_inventory_search", "text": text}]
 
     # Быстрый pre-фильтр: поиск по долгосрочной памяти (до Claude, чтобы не попал в note_search)
     if _MEMORY_SEARCH_RE.search(text):

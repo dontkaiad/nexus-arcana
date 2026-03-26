@@ -671,7 +671,13 @@ async def handle_list_inv_add(msg: Message, data: dict, user_notion_id: str = ""
             "user_notion_id": user_notion_id,
             "bot": "arcana",
         })
-        await msg.answer("📅 Срок годности? (напиши дату, например <code>2026-06-15</code>, или «пропустить»)", parse_mode="HTML")
+        kb = InlineKeyboardMarkup(inline_keyboard=[[
+            InlineKeyboardButton(text="⏭️ Пропустить", callback_data="list_skip_expiry"),
+        ]])
+        await msg.answer(
+            "📅 Срок годности? (напиши дату, например <code>2026-06-15</code>)",
+            parse_mode="HTML", reply_markup=kb,
+        )
 
 
 async def handle_list_inv_search(msg: Message, data: dict, user_notion_id: str = "") -> None:
@@ -894,6 +900,19 @@ async def _finalize_checkout(msg, named_cats, source, selected_data, categories,
     total = sum(named_cats.values())
     lines.append(f"\n💰 Итого: {int(total)}₽ · {source}")
     await msg.answer("\n".join(lines), parse_mode="HTML")
+
+
+# ── Callback: пропустить срок годности ────────────────────────────────────────
+
+@router.callback_query(lambda c: c.data == "list_skip_expiry")
+async def on_skip_expiry(query: CallbackQuery, user_notion_id: str = "") -> None:
+    uid = query.from_user.id
+    pending_del(uid)
+    try:
+        await query.message.edit_text("📦 Готово, без срока годности.")
+    except Exception:
+        pass
+    await query.answer()
 
 
 # ── Callback: вычеркнуть из списка после записи расхода ──────────────────────
