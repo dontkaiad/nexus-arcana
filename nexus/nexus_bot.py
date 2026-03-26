@@ -284,20 +284,9 @@ async def cmd_tasks(msg: Message, user_notion_id: str = "") -> None:
 
 @dp.message(Command("today"))
 async def cmd_today(msg: Message, user_notion_id: str = "") -> None:
-    """Экспресс: сегодня + бюджет + совет."""
+    """Экспресс: сегодня + стрик + бюджет + совет — всё в одном."""
     from nexus.handlers.tasks import handle_tasks_today
     await handle_tasks_today(msg, user_notion_id=user_notion_id)
-
-    # Бюджет на день
-    try:
-        from nexus.handlers.finance import _calc_free_remaining
-        result = await _calc_free_remaining(user_notion_id)
-        if result:
-            free_left, days_rem = result
-            daily = free_left / max(days_rem, 1)
-            await msg.answer(f"💰 Бюджет: <b>{daily:,.0f}₽/день</b>", parse_mode="HTML")
-    except Exception:
-        pass
 
 
 @dp.message(Command("notes"))
