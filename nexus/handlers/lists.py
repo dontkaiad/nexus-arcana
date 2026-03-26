@@ -726,7 +726,7 @@ async def handle_list_buy(msg: Message, data: dict, user_notion_id: str = "") ->
         lines.append("🛒 <b>Добавлено в покупки:</b>")
         for c in created:
             cat_emoji = c.get("category", "").split(" ")[0] if c.get("category") else ""
-            lines.append(f"  ✓ {c['name']} · {cat_emoji}")
+            lines.append(f"  ⬜ {c['name']} · {cat_emoji}")
     if arcana_items:
         names = ", ".join(it["name"] for it in arcana_items)
         lines.append(f"\n🌒 {names} — это к Аркане! Напиши @arcana_kailark_bot")
