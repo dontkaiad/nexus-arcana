@@ -437,7 +437,7 @@ async def build_budget_message(user_notion_id: str = "") -> Optional[str]:
             else:
                 for name, amt in items_list:
                     lines.append("  <i>{} — {:,}₽</i>".format(name, int(amt)))
-    lines.append("\n💳 Распределяемые: <b>{:,}₽</b>".format(int(max(0, income_total - obligatory_total))))
+    lines.append("💳 Распределяемые: <b>{:,}₽</b>".format(int(max(0, income_total - obligatory_total))))
 
     # Долги
     debts = budget.get("долги", [])
@@ -460,7 +460,7 @@ async def build_budget_message(user_notion_id: str = "") -> Optional[str]:
                 strat_display = strategy if strategy else "отложен"
                 lines.append("  <i>{} — {:,}₽ · {}</i>".format(
                     d["name"], int(d["amount"]), strat_display))
-        lines.append("\n💳 Платежей: <b>{:,}₽/мес</b>".format(int(total_debt_payments)))
+        lines.append("💳 Платежей: <b>{:,}₽/мес</b>".format(int(total_debt_payments)))
 
     # Лимиты с прогрессом
     limits = budget.get("лимиты", [])
@@ -487,13 +487,13 @@ async def build_budget_message(user_notion_id: str = "") -> Optional[str]:
                 lines.append("  <i>{} — {:,}₽</i>".format(display_name, int(limit_amt)))
 
         if day_of_period > 1:
-            lines.append("\n📉 Потрачено: {:,} / {:,}₽".format(int(spent_in_limits), int(limits_total)))
+            lines.append("📉 Потрачено: {:,} / {:,}₽".format(int(spent_in_limits), int(limits_total)))
             free_in_limits = limits_total - spent_in_limits
             daily_left = free_in_limits / max(days_remaining, 1)
             lines.append("💳 Свободных: <b>{:,}₽</b> · {:,}₽/день".format(
                 int(max(0, free_in_limits)), int(max(0, daily_left))))
         else:
-            lines.append("\n💳 Итого: {:,}₽".format(int(limits_total)))
+            lines.append("💳 Итого: {:,}₽".format(int(limits_total)))
 
     # Цели
     goals = budget.get("цели", [])
