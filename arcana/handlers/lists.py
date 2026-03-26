@@ -583,15 +583,28 @@ async def handle_list_buy(msg: Message, data: dict, user_notion_id: str = "") ->
         logger.error("handle_list_buy parse error: %s", e)
         await msg.answer("⚠️ Не смог разобрать список.")
         return
-    items = [{"name": p.get("name", ""), "category": p.get("category", "🕯️ Расходники")} for p in parsed if p.get("name")]
-    if not items:
+    _ARCANA_CATS = {"🕯️ Расходники", "🌿 Травы/Масла", "🃏 Карты/Колоды", "💳 Прочее"}
+    all_parsed = [{"name": p.get("name", ""), "category": p.get("category", "🕯️ Расходники")} for p in parsed if p.get("name")]
+    if not all_parsed:
         await msg.answer("⚠️ Не нашёл айтемов.")
         return
-    created = await add_items(items, "🛒 Покупки", BOT_NAME, user_notion_id)
-    lines = ["🛒 <b>Добавлено (Arcana):</b>"]
-    for c in created:
-        cat_emoji = c.get("category", "").split(" ")[0] if c.get("category") else ""
-        lines.append(f"  ✓ {c['name']} · {cat_emoji}")
+
+    # Разделить: Arcana vs Nexus
+    arcana_items = [it for it in all_parsed if it["category"] in _ARCANA_CATS]
+    nexus_items = [it for it in all_parsed if it["category"] not in _ARCANA_CATS]
+
+    lines: list[str] = []
+    if arcana_items:
+        created = await add_items(arcana_items, "🛒 Покупки", BOT_NAME, user_notion_id)
+        lines.append("🛒 <b>Добавлено (Arcana):</b>")
+        for c in created:
+            cat_emoji = c.get("category", "").split(" ")[0] if c.get("category") else ""
+            lines.append(f"  ✓ {c['name']} · {cat_emoji}")
+    if nexus_items:
+        names = ", ".join(it["name"] for it in nexus_items)
+        lines.append(f"\n☀️ {names} — это к Nexus! Напиши @nexus_kailark_bot")
+    if not arcana_items and nexus_items:
+        lines = [f"☀️ Это к Nexus! Напиши @nexus_kailark_bot"]
     await msg.answer("\n".join(lines), parse_mode="HTML")
 
 
