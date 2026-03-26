@@ -839,7 +839,7 @@ async def main() -> None:
         BotCommand(command="finance", description="Финансы (сегодня + месяц)"),
         BotCommand(command="budget", description="Бюджетный план"),
         BotCommand(command="budget_setup", description="Настроить бюджет"),
-        BotCommand(command="list", description="Списки покупок"),
+        BotCommand(command="list", description="Списки (покупки, чеклисты, инвентарь)"),
         BotCommand(command="notes", description="Заметки"),
         BotCommand(command="memory", description="Память"),
         BotCommand(command="adhd", description="СДВГ-профиль"),
