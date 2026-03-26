@@ -595,11 +595,21 @@ async def handle_list_buy(msg: Message, data: dict, user_notion_id: str = "") ->
 
     lines: list[str] = []
     if arcana_items:
-        created = await add_items(arcana_items, "🛒 Покупки", BOT_NAME, user_notion_id)
-        lines.append("🛒 <b>Добавлено (Arcana):</b>")
-        for c in created:
-            cat_emoji = c.get("category", "").split(" ")[0] if c.get("category") else ""
-            lines.append(f"  ⬜ {c['name']} · {cat_emoji}")
+        existing = await get_list(list_type="🛒 Покупки", bot_name=BOT_NAME,
+                                  user_page_id=user_notion_id, status="Not started")
+        existing_names = {it["name"].lower() for it in existing}
+        new_items = [it for it in arcana_items if it["name"].lower() not in existing_names]
+        dupes = [it for it in arcana_items if it["name"].lower() in existing_names]
+
+        if new_items:
+            created = await add_items(new_items, "🛒 Покупки", BOT_NAME, user_notion_id)
+            lines.append("🛒 <b>Добавлено (Arcana):</b>")
+            for c in created:
+                cat_emoji = c.get("category", "").split(" ")[0] if c.get("category") else ""
+                lines.append(f"  ⬜ {c['name']} · {cat_emoji}")
+        if dupes:
+            dupe_names = ", ".join(it["name"] for it in dupes)
+            lines.append(f"ℹ️ Уже в списке: {dupe_names}")
     if nexus_items:
         names = ", ".join(it["name"] for it in nexus_items)
         lines.append(f"\n☀️ {names} — это к Nexus! Напиши @nexus_kailark_bot")
