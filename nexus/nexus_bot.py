@@ -87,8 +87,7 @@ async def cmd_help(msg: Message, user_notion_id: str = "") -> None:
         "Повторы: «напоминай пить воду каждый день в 9:00»\n\n"
 
         "💰 <b>ФИНАНСЫ</b>\n"
-        "<code>/finance</code> — история операций\n"
-        "<code>/finance_stats</code> — статистика (месяц/неделя/сегодня)\n"
+        "<code>/finance</code> — расходы за сегодня + сводка за месяц\n"
         "Текстом: «450р такси», «доход 50000»\n\n"
 
         "💰 <b>БЮДЖЕТ</b>\n"
@@ -280,6 +279,19 @@ async def cmd_tasks(msg: Message, user_notion_id: str = "") -> None:
             for title, ci, dd, _ in done_week:
                 lines.append(f"  ✓ {ci} {title}" + (f" · {dd}" if dd else ""))
 
+    # СДВГ-совет
+    import random
+    _TASK_ADHD_TIPS = [
+        "💡 Начни с одной задачи — не пытайся охватить всё сразу.",
+        "🧠 Если задач много — выбери 3 главных, остальные подождут.",
+        "⚡ Правило 2 минут: если можно сделать за 2 минуты — делай сейчас.",
+        "🎯 Застрял? Разбей задачу на шаги поменьше.",
+        "🌀 Переключение между задачами тратит энергию — заверши одну, потом следующую.",
+        "✨ Не жди мотивации — начни делать, мотивация подтянется.",
+        "🔥 Идеально не бывает. Сделано лучше чем идеально.",
+    ]
+    lines.append(f"\n{random.choice(_TASK_ADHD_TIPS)}")
+
     active_total = len(today_items) + len(active_items)
     header = f"📋 <b>Активные задачи · {active_total} шт</b>\n"
     text = header + "\n".join(lines)
@@ -323,12 +335,15 @@ async def cmd_memory(msg: Message, user_notion_id: str = "") -> None:
     text = maybe_convert(msg.text or "")
     parts = text.strip().split(maxsplit=1)
     category_filter = parts[1] if len(parts) > 1 else ""
-    # Скрываем СДВГ если не запрошен явно (/memory сдвг, /memory adhd)
-    is_adhd_request = category_filter.lower().strip() in ("сдвг", "adhd", "🧠 сдвг")
+    # Скрываем СДВГ и Лимит если не запрошены явно
+    cat_low = category_filter.lower().strip()
+    is_adhd_request = cat_low in ("сдвг", "adhd", "🧠 сдвг")
+    is_budget_request = cat_low in ("лимит", "бюджет", "💰 лимит", "финансы")
     from nexus.handlers.memory import handle_memory_list
     await handle_memory_list(msg, category_filter=category_filter,
                              user_notion_id=user_notion_id,
-                             exclude_adhd=not is_adhd_request)
+                             exclude_adhd=not is_adhd_request,
+                             exclude_budget=not is_budget_request)
 
 
 @dp.message(Command("adhd"))
@@ -353,14 +368,29 @@ async def cmd_budget_setup(msg: Message, user_notion_id: str = "") -> None:
 
 @dp.message(Command("finance"))
 async def cmd_finance(msg: Message, user_notion_id: str = "") -> None:
-    """Показать расходы за сегодня + итого."""
+    """Финансы: сверху расходы за сегодня, снизу сводка за месяц, СДВГ-совет."""
+    import random
     from core.notion_client import finance_month
     from core.classifier import today_moscow
+    from nexus.handlers.finance import get_finance_stats
+
+    _FINANCE_ADHD_TIPS = [
+        "💡 Записал — значит контролируешь. Мозг с СДВГ не считает в фоне.",
+        "🧠 Не ругай себя за траты — анализируй и корректируй.",
+        "⚡ Лайфхак: записывай расход сразу, потом забудешь.",
+        "🎯 Маленькие траты незаметны по одной, но складываются в тысячи.",
+        "🌀 Импульсивная покупка? Подожди 24 часа — часто отпускает.",
+        "✨ Каждая записанная трата — шаг к финансовой осознанности.",
+    ]
+
     today = today_moscow()
     month = today[:7]
     records = await finance_month(month, user_notion_id=user_notion_id)
-    lines = []
-    total = 0.0
+
+    # ── Сегодня ──
+    today_lines = []
+    today_total = 0.0
+    today_income = 0.0
     for r in records:
         props = r["properties"]
         date = (props.get("Дата", {}).get("date") or {}).get("start", "")[:10]
@@ -368,44 +398,44 @@ async def cmd_finance(msg: Message, user_notion_id: str = "") -> None:
             continue
         amount = props.get("Сумма", {}).get("number") or 0
         type_name = (props.get("Тип", {}).get("select") or {}).get("name", "")
+        if "Доход" in type_name:
+            today_income += amount
+            continue
         if "Расход" not in type_name:
             continue
         desc_parts = props.get("Описание", {}).get("title", [])
         desc = desc_parts[0]["plain_text"] if desc_parts else "—"
         cat = (props.get("Категория", {}).get("select") or {}).get("name", "")
-        lines.append(f"  💸 {desc} · {cat} · {amount:,.0f}₽")
-        total += amount
-    if not lines:
-        await msg.answer(f"💸 Расходов за {today} нет.")
-        return
-    text = f"💸 <b>Расходы за {today}:</b>\n" + "\n".join(lines) + f"\n\n💰 Итого: <b>{total:,.0f}₽</b>"
-    await msg.answer(text)
+        today_lines.append(f"  💸 {desc} · {cat} · {amount:,.0f}₽")
+        today_total += amount
+
+    parts = []
+
+    # Блок «Сегодня»
+    if today_lines:
+        header = f"💸 <b>Сегодня · {today[5:7]}.{today[8:10]}:</b>"
+        block = header + "\n" + "\n".join(today_lines) + f"\n  💰 Итого: <b>{today_total:,.0f}₽</b>"
+        if today_income > 0:
+            block += f"\n  📥 Доход: <b>{today_income:,.0f}₽</b>"
+        parts.append(block)
+    else:
+        parts.append(f"💸 Сегодня расходов нет.")
+
+    # ── Месяц ──
+    month_stats = await get_finance_stats(month, user_notion_id)
+    parts.append("───────────────")
+    parts.append(month_stats)
+
+    # СДВГ-совет
+    parts.append(f"\n{random.choice(_FINANCE_ADHD_TIPS)}")
+
+    await msg.answer("\n".join(parts))
 
 
 @dp.message(Command("finance_stats"))
 async def cmd_finance_stats(msg: Message, user_notion_id: str = "") -> None:
-    """Финансовая сводка. /finance_stats [сегодня|неделя] — по умолчанию месяц."""
-    from nexus.handlers.finance import get_finance_stats, get_finance_period
-    from core.layout import maybe_convert
-    text_raw = maybe_convert(msg.text or "")
-    arg = text_raw.strip().split(maxsplit=1)[1].lower().strip() if len(text_raw.strip().split(maxsplit=1)) > 1 else ""
-
-    now = datetime.now(timezone(timedelta(hours=3)))
-    today = now.date()
-
-    if arg in ("сегодня", "день", "today"):
-        d_str = today.isoformat()
-        label = f"Расходы за сегодня · {today.strftime('%d.%m')}"
-        text = await get_finance_period(d_str, d_str, label, user_notion_id)
-    elif arg in ("неделя", "week", "нед"):
-        week_start = today - timedelta(days=today.weekday())
-        label = f"Расходы за неделю · {week_start.strftime('%d.%m')}-{today.strftime('%d.%m')}"
-        text = await get_finance_period(week_start.isoformat(), today.isoformat(), label,
-                                        user_notion_id, show_daily_avg=True)
-    else:
-        month = now.strftime("%Y-%m")
-        text = await get_finance_stats(month, user_notion_id)
-    await msg.answer(text)
+    """Алиас → /finance."""
+    await cmd_finance(msg, user_notion_id=user_notion_id)
 
 
 @dp.message(Command("stats"))
@@ -806,8 +836,7 @@ async def main() -> None:
         BotCommand(command="tasks", description="Задачи"),
         BotCommand(command="today", description="Задачи на сегодня"),
         BotCommand(command="stats", description="Статистика + стрики"),
-        BotCommand(command="finance", description="Финансы"),
-        BotCommand(command="finance_stats", description="Статистика финансов"),
+        BotCommand(command="finance", description="Финансы (сегодня + месяц)"),
         BotCommand(command="budget", description="Бюджетный план"),
         BotCommand(command="budget_setup", description="Настроить бюджет"),
         BotCommand(command="list", description="Списки покупок"),
