@@ -518,6 +518,11 @@ async def handle_text(msg: Message, user_notion_id: str = "") -> None:
         await react(msg, "🫡")
         return
 
+    # Receipt clarify pending — уточнение категорий фото-чека текстом
+    if await _handle_receipt_clarify(msg, user_notion_id):
+        await react(msg, "👌")
+        return
+
     # Quick triggers (до классификатора)
     _tl = (msg.text or "").strip().lower()
 
@@ -837,22 +842,39 @@ async def handle_voice(msg: Message, user_notion_id: str = "") -> None:
 
 # ── Photo messages (receipts) ──────────────────────────────────────────────
 
-_RECEIPT_CATS = ["🐾 Коты", "🍜 Продукты", "🚬 Привычки", "🏥 Здоровье",
-                 "👗 Гардероб", "🏠 Жилье", "💻 Подписки", "💳 Прочее"]
+_RECEIPT_CATS_MAP = {
+    "коты": "🐾 Коты", "кот": "🐾 Коты", "корм": "🐾 Коты",
+    "продукты": "🍜 Продукты", "еда": "🍜 Продукты",
+    "кафе": "🍱 Кафе/Доставка", "доставка": "🍱 Кафе/Доставка",
+    "транспорт": "🚕 Транспорт", "такси": "🚕 Транспорт",
+    "сигареты": "🚬 Привычки", "привычки": "🚬 Привычки", "табак": "🚬 Привычки",
+    "бьюти": "💅 Бьюти", "салон": "💅 Бьюти", "ногти": "💅 Бьюти",
+    "здоровье": "🏥 Здоровье", "аптека": "🏥 Здоровье", "лекарства": "🏥 Здоровье",
+    "подписки": "💻 Подписки", "подписка": "💻 Подписки",
+    "жилье": "🏠 Жилье", "быт": "🏠 Жилье", "жкх": "🏠 Жилье",
+    "одежда": "👗 Гардероб", "гардероб": "👗 Гардероб", "обувь": "👗 Гардероб",
+    "прочее": "💳 Прочее",
+}
 
+_RECEIPT_CLARIFY_SYSTEM = """Пользователь уточняет категории для позиций из чека.
+Позиции, требующие уточнения:
+{unclear_list}
 
-def _receipt_cat_kb() -> InlineKeyboardMarkup:
-    """Клавиатура выбора категории для фото-чеков."""
-    buttons, row = [], []
-    for i, cat in enumerate(_RECEIPT_CATS):
-        short = cat.split(" ", 1)[0]
-        row.append(InlineKeyboardButton(text=short, callback_data=f"rcat_{i}"))
-        if len(row) == 4:
-            buttons.append(row)
-            row = []
-    if row:
-        buttons.append(row)
-    return InlineKeyboardMarkup(inline_keyboard=buttons)
+Все позиции в чеке:
+{all_items}
+
+Пользователь написал: "{user_text}"
+
+Допустимые категории:
+🐾 Коты, 🍜 Продукты, 🍱 Кафе/Доставка, 🚕 Транспорт, 🚬 Привычки,
+💅 Бьюти, 🏥 Здоровье, 💻 Подписки, 🏠 Жилье, 👗 Гардероб, 💳 Прочее
+
+Задача: определи какие позиции пользователь уточняет и какую категорию назначает.
+Пользователь может уточнить ЛЮБУЮ позицию (не только ❓), может переопределить категорию.
+
+Верни JSON: {{"overrides": [{{"name": "точное имя позиции", "category": "🍜 Продукты"}}]}}
+Только JSON, без пояснений. Если пользователь написал "нет"/"пропустить" → {{"overrides": []}}
+"""
 
 
 def _receipt_summary_lines(items: list[dict]) -> list[str]:
@@ -861,7 +883,8 @@ def _receipt_summary_lines(items: list[dict]) -> list[str]:
     for item in items:
         typ = item.get("type", "expense")
         sign = "+" if typ == "income" else ""
-        lines.append(f"  {item.get('category', '💳')} {item['name']} — {sign}{item['amount']}₽")
+        marker = "❓" if item.get("need_clarify") else item.get("category", "💳")
+        lines.append(f"  {marker} {item['name']} — {sign}{item['amount']}₽")
     expenses = sum(it["amount"] for it in items if it.get("type") != "income")
     income = sum(it["amount"] for it in items if it.get("type") == "income")
     totals = []
@@ -872,6 +895,110 @@ def _receipt_summary_lines(items: list[dict]) -> list[str]:
     if totals:
         lines.append("\n" + " · ".join(totals))
     return lines
+
+
+async def _handle_receipt_clarify(msg: Message, user_notion_id: str = "") -> bool:
+    """Обработка текстового уточнения категорий фото-чека."""
+    from core.list_manager import pending_get, pending_set, pending_del
+    from core.vision import _VALID_EXPENSE_CATS
+
+    uid = msg.from_user.id
+    pending = pending_get(uid)
+    if not pending or pending.get("action") != "receipt_clarify":
+        return False
+
+    text = (msg.text or "").strip()
+    if not text:
+        return False
+
+    items = pending.get("items", [])
+    is_bank = pending.get("is_bank", False)
+    p_user_id = pending.get("user_notion_id", user_notion_id)
+
+    skip_words = {"нет", "пропустить", "skip", "no", "—", "-"}
+    if text.lower() in skip_words:
+        # Записать ❓ как 💳 Прочее
+        for it in items:
+            if it.get("need_clarify"):
+                it["category"] = "💳 Прочее"
+                it["need_clarify"] = False
+    else:
+        # Haiku парсит уточнение
+        unclear = [it for it in items if it.get("need_clarify")]
+        unclear_list = "\n".join(f"- {it['name']} {it['amount']}₽" for it in unclear)
+        all_items_list = "\n".join(
+            f"- {it['name']} {it['amount']}₽ (текущая: {it.get('category', '?')})"
+            for it in items
+        )
+        system = _RECEIPT_CLARIFY_SYSTEM.format(
+            unclear_list=unclear_list,
+            all_items=all_items_list,
+            user_text=text,
+        )
+        try:
+            from core.claude_client import ask_claude
+            raw = await ask_claude(
+                prompt=f"Уточнение категорий: {text}",
+                system=system,
+                max_tokens=256,
+            )
+            raw = raw.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
+            import json as _json
+            parsed = _json.loads(raw)
+            overrides = parsed.get("overrides", [])
+
+            # Применить overrides
+            for ov in overrides:
+                ov_name = ov.get("name", "").lower()
+                ov_cat = ov.get("category", "")
+                if ov_cat not in _VALID_EXPENSE_CATS:
+                    continue
+                for it in items:
+                    if it["name"].lower() == ov_name:
+                        it["category"] = ov_cat
+                        it["need_clarify"] = False
+                        break
+        except Exception as e:
+            logger.warning("receipt clarify Haiku error: %s, trying local", e)
+            # Fallback: простой local парсинг
+            pass
+
+        # Local fallback для необработанных: ищем слова-категории в тексте
+        text_lower = text.lower()
+        for it in items:
+            if not it.get("need_clarify"):
+                continue
+            it_name_lower = it["name"].lower()
+            # Ищем упоминание имени айтема рядом с категорией
+            for keyword, cat in _RECEIPT_CATS_MAP.items():
+                if keyword in text_lower and (
+                    it_name_lower[:4] in text_lower  # грубый матч по началу имени
+                    or len([x for x in items if x.get("need_clarify")]) == 1  # один ❓ — точно о нём
+                ):
+                    it["category"] = cat
+                    it["need_clarify"] = False
+                    break
+
+        # Оставшиеся ❓ → Прочее
+        for it in items:
+            if it.get("need_clarify"):
+                it["category"] = "💳 Прочее"
+                it["need_clarify"] = False
+
+    # Показать итог и спросить подтверждение
+    pending_del(uid)
+    pending_set(uid, {
+        "action": "photo_receipt",
+        "items": items,
+        "is_bank": is_bank,
+        "user_notion_id": p_user_id,
+    })
+
+    lines = _receipt_summary_lines(items)
+    lines.append("Записать в финансы?")
+    await msg.answer("\n".join(lines), parse_mode="HTML",
+                     reply_markup=_receipt_confirm_kb(is_bank))
+    return True
 
 
 def _receipt_confirm_kb(is_bank: bool) -> InlineKeyboardMarkup:
@@ -909,38 +1036,34 @@ async def handle_photo(msg: Message, user_notion_id: str = "") -> None:
         is_bank = result.get("source") == "bank_app"
         uid = msg.from_user.id
 
-        # Есть ли айтемы, требующие уточнения категории?
-        need_clarify = [i for i, it in enumerate(items) if it.get("need_clarify")]
+        # Показать чек
+        lines = _receipt_summary_lines(items)
 
-        if need_clarify:
-            # Спрашиваем категорию для первого неопределённого
-            first_idx = need_clarify[0]
-            it = items[first_idx]
+        # Есть ли айтемы, требующие уточнения?
+        unclear = [it for it in items if it.get("need_clarify")]
+        if unclear:
+            # Текстовое уточнение
+            unclear_desc = ", ".join(f"{it['name']} {it['amount']}₽" for it in unclear)
+            lines.append(f"\nУточни непонятные (❓):\n<code>{unclear_desc}</code>")
+            lines.append("\nНапиши категории (или «нет» чтобы записать как Прочее)")
             pending_set(uid, {
-                "action": "receipt_clarify_cat",
+                "action": "receipt_clarify",
                 "items": items,
-                "clarify_idx": first_idx,
                 "is_bank": is_bank,
                 "user_notion_id": user_notion_id,
             })
-            await msg.answer(
-                f"📸 <b>{it['name']}</b> — {it['amount']}₽\n\nКакая категория?",
-                parse_mode="HTML", reply_markup=_receipt_cat_kb())
-            return
-
-        # Всё определено — показать чек
-        lines = _receipt_summary_lines(items)
-        lines.append("Записать в финансы?")
-
-        pending_set(uid, {
-            "action": "photo_receipt",
-            "items": items,
-            "is_bank": is_bank,
-            "user_notion_id": user_notion_id,
-        })
-
-        await msg.answer("\n".join(lines), parse_mode="HTML",
-                         reply_markup=_receipt_confirm_kb(is_bank))
+            await msg.answer("\n".join(lines), parse_mode="HTML")
+        else:
+            # Всё определено — сразу подтверждение
+            lines.append("Записать в финансы?")
+            pending_set(uid, {
+                "action": "photo_receipt",
+                "items": items,
+                "is_bank": is_bank,
+                "user_notion_id": user_notion_id,
+            })
+            await msg.answer("\n".join(lines), parse_mode="HTML",
+                             reply_markup=_receipt_confirm_kb(is_bank))
     elif msg.caption:
         from core.layout import maybe_convert
         text = maybe_convert(msg.caption.strip())
@@ -1032,74 +1155,6 @@ async def on_receipt(query: CallbackQuery, user_notion_id: str = "") -> None:
                 pass
 
     await query.answer("👌 Записано!")
-
-
-@dp.callback_query(lambda c: c.data and c.data.startswith("rcat_"))
-async def on_receipt_clarify_cat(query: CallbackQuery, user_notion_id: str = "") -> None:
-    """Уточнение категории для маркетплейсов и неопределённых."""
-    from core.list_manager import pending_get, pending_set, pending_del
-
-    uid = query.from_user.id
-    pending = pending_get(uid)
-    if not pending or pending.get("action") != "receipt_clarify_cat":
-        await query.answer("⏰ Сессия истекла.")
-        return
-
-    idx = int(query.data.replace("rcat_", ""))
-    chosen_cat = _RECEIPT_CATS[idx] if idx < len(_RECEIPT_CATS) else "💳 Прочее"
-
-    items = pending.get("items", [])
-    clarify_idx = pending.get("clarify_idx", 0)
-    is_bank = pending.get("is_bank", False)
-
-    # Применить категорию к текущему айтему
-    if clarify_idx < len(items):
-        items[clarify_idx]["category"] = chosen_cat
-        items[clarify_idx]["need_clarify"] = False
-
-    # Есть ли ещё айтемы для уточнения?
-    next_idx = None
-    for i in range(clarify_idx + 1, len(items)):
-        if items[i].get("need_clarify"):
-            next_idx = i
-            break
-
-    if next_idx is not None:
-        pending["clarify_idx"] = next_idx
-        pending["items"] = items
-        pending_set(uid, pending)
-        it = items[next_idx]
-        try:
-            await query.message.edit_text(
-                f"📸 <b>{it['name']}</b> — {it['amount']}₽\n\nКакая категория?",
-                parse_mode="HTML", reply_markup=_receipt_cat_kb())
-        except Exception:
-            pass
-        await query.answer(chosen_cat)
-        return
-
-    # Все уточнены — показать итоговый чек для подтверждения
-    pending_del(uid)
-    from core.list_manager import pending_set as ps
-    ps(uid, {
-        "action": "photo_receipt",
-        "items": items,
-        "is_bank": is_bank,
-        "user_notion_id": pending.get("user_notion_id", user_notion_id),
-    })
-
-    lines = _receipt_summary_lines(items)
-    lines.append("Записать в финансы?")
-
-    try:
-        await query.message.edit_text(
-            "\n".join(lines), parse_mode="HTML",
-            reply_markup=_receipt_confirm_kb(is_bank))
-    except Exception:
-        await query.message.answer(
-            "\n".join(lines), parse_mode="HTML",
-            reply_markup=_receipt_confirm_kb(is_bank))
-    await query.answer(chosen_cat)
 
 
 @dp.callback_query(lambda c: c.data and (c.data.startswith("opt_") or c.data.startswith("note_replace:")))
