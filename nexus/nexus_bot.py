@@ -123,6 +123,39 @@ async def cmd_help(msg: Message, user_notion_id: str = "") -> None:
     )
 
 
+@dp.message(Command("test_reactions"))
+async def test_reactions(msg: Message, user_notion_id: str = "") -> None:
+    """Тест: какие эмодзи поддерживаются как реакции Telegram."""
+    import asyncio
+    from aiogram.types import ReactionTypeEmoji
+    all_emojis = [
+        "👍","👎","❤️","🔥","🥰","👏","😁","🤔","🤯","😱",
+        "😢","🎉","🤩","🙏","👌","🤡","😍","⚡","🏆","💔",
+        "🤨","😐","🍾","💋","😈","😴","😭","🤓","👻","👨‍💻",
+        "👀","🎃","😇","🤝","✍️","🤗","🫡","🎅","💅","🤪",
+        "🗿","🆒","💘","🦄","😘","💊","😎","👾","🤷","😡",
+        "🖕","❤️‍🔥","🌚","🌭","💯","🤣","💩","🐳","🎄",
+        "☃️","💤","🫢","✅","❌","💸","📝","🧠","🗒️","💰","⏰","✨",
+    ]
+    valid = []
+    invalid = []
+    for emoji in all_emojis:
+        try:
+            await msg.bot.set_message_reaction(
+                chat_id=msg.chat.id,
+                message_id=msg.message_id,
+                reaction=[ReactionTypeEmoji(emoji=emoji)],
+            )
+            valid.append(emoji)
+            await asyncio.sleep(0.3)
+        except Exception as e:
+            invalid.append(f"{emoji}")
+    await msg.answer(
+        f"✅ Валидные ({len(valid)}):\n{' '.join(valid)}\n\n"
+        f"❌ Невалидные ({len(invalid)}):\n{' '.join(invalid)}"
+    )
+
+
 @dp.message(Command("tasks"))
 async def cmd_tasks(msg: Message, user_notion_id: str = "") -> None:
     """Показать ВСЕ задачи, сгруппированные по статусу → дедлайну → приоритету."""
