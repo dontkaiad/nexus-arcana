@@ -695,7 +695,12 @@ async def handle_list_subtask(msg: Message, data: dict, user_notion_id: str = ""
         return
 
     from core.config import config as app_config
-    tasks = await find_task_by_name(task_query, user_notion_id, db_id=app_config.arcana.db_tasks)
+    db_works = app_config.arcana.db_works
+    tasks = await find_task_by_name(
+        task_query, user_notion_id,
+        db_id=db_works or app_config.arcana.db_tasks,
+        title_prop="Работа" if db_works else "Задача",
+    )
     uid = msg.from_user.id
 
     if not tasks:
@@ -703,15 +708,18 @@ async def handle_list_subtask(msg: Message, data: dict, user_notion_id: str = ""
             "action": "subtask_items",
             "task_id": "",
             "task_name": task_query,
+            "rel_type": "work" if db_works else "task",
             "user_notion_id": user_notion_id,
             "bot": "arcana",
         })
         await msg.answer(
-            f"❓ Задача «{task_query}» не найдена.\nСоздам чеклист без привязки.\n\n"
+            f"❓ Работа «{task_query}» не найдена.\nСоздам чеклист без привязки.\n\n"
             f"📋 <b>{task_query}</b>\nНапиши пункты:",
             parse_mode="HTML",
         )
         return
+
+    _rel_type = "work" if db_works else "task"
 
     if len(tasks) == 1:
         t = tasks[0]
@@ -719,6 +727,7 @@ async def handle_list_subtask(msg: Message, data: dict, user_notion_id: str = ""
             "action": "subtask_items",
             "task_id": t["id"],
             "task_name": t["name"],
+            "rel_type": _rel_type,
             "user_notion_id": user_notion_id,
             "bot": "arcana",
         })
@@ -740,6 +749,7 @@ async def handle_list_subtask(msg: Message, data: dict, user_notion_id: str = ""
     pending_set(uid, {
         "action": "subtask_pick",
         "tasks": [{"id": t["id"], "name": t["name"]} for t in tasks[:5]],
+        "rel_type": _rel_type,
         "user_notion_id": user_notion_id,
         "bot": "arcana",
     })
@@ -763,11 +773,13 @@ async def on_subtask_pick(query: CallbackQuery, user_notion_id: str = "") -> Non
         await query.answer("❓ Не найдена.")
         return
     p_user_id = pending.get("user_notion_id", user_notion_id)
+    _rel_type = pending.get("rel_type", "task")
     pending_del(uid)
     pending_set(uid, {
         "action": "subtask_items",
         "task_id": matched["id"],
         "task_name": matched["name"],
+        "rel_type": _rel_type,
         "user_notion_id": p_user_id,
         "bot": "arcana",
     })
@@ -896,9 +908,12 @@ async def handle_list_pending(msg: Message, user_notion_id: str = "") -> bool:
                     raw_items.append(part)
         task_id = pending.get("task_id", "")
         task_name = pending.get("task_name", "Подзадачи")
+        rel_type = pending.get("rel_type", "task")
         p_user_id = pending.get("user_notion_id", user_notion_id)
-        items = [{"name": it, "group": task_name, "task_rel": task_id} for it in raw_items]
-        if not task_id:
+        if task_id:
+            rel_key = "work_rel" if rel_type == "work" else "task_rel"
+            items = [{"name": it, "group": task_name, rel_key: task_id} for it in raw_items]
+        else:
             items = [{"name": it, "group": task_name} for it in raw_items]
         created = await add_items(items, "📋 Чеклист", BOT_NAME, p_user_id)
         lines = [f"📋 <b>{task_name}</b> — {len(created)} подзадач:"]
