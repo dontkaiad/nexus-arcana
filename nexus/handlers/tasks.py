@@ -1995,81 +1995,81 @@ async def handle_tasks_today(message: Message, user_notion_id: str = "") -> None
     else:
         time_of_day = "вечер"
 
-    # СДВГ-совет от Haiku
-    async def _get_advice() -> str:
-        try:
-            prompt = (
-                f"Ты ассистент Кай (женский род, у неё СДВГ). "
-                f"Дай ОДИН короткий тёплый совет на день. "
-                f"Задач на сегодня: {total}, срочных: {n_urgent}, просроченных: {n_overdue}. "
-                f"Сейчас {time_of_day}. "
-                f"Макс 1-2 предложения. Без пафоса, по-дружески."
-            )
-            return await ask_claude(prompt, max_tokens=100, model="claude-haiku-4-5-20251001")
-        except Exception:
-            return ""
+    # Стрик
+    streak_line = ""
+    try:
+        from nexus.handlers.streaks import get_streak
+        streak_data = await get_streak(uid, tz_offset)
+        if streak_data:
+            s = streak_data.get("streak", 0)
+            if s > 0:
+                fire = "🔥" * min(s, 5)
+                streak_line = f"{fire} {s} дней подряд"
+            else:
+                streak_line = "🔥 Стрик: 0 — начни сегодня!"
+    except Exception:
+        pass
 
-    if total == 0:
-        advice = ""
-        try:
-            advice = await ask_claude(
-                "Ты ассистент Кай (женский род, у неё СДВГ). "
-                f"Свободный день, 0 задач. Сейчас {time_of_day}. "
-                "Подскажи что-то приятное. Макс 1-2 предложения, по-дружески.",
-                max_tokens=100, model="claude-haiku-4-5-20251001",
-            )
-        except Exception:
-            pass
-        text = "🌟 На сегодня задач нет — свободный день!"
-        if advice:
-            text += f"\n\n💡 {advice.strip()}"
-        await message.answer(text)
-        return
+    # Бюджет на день
+    budget_line = ""
+    try:
+        from nexus.handlers.finance import _calc_free_remaining
+        result = await _calc_free_remaining(user_notion_id)
+        if result:
+            free_left, days_rem = result
+            daily = free_left / max(days_rem, 1)
+            budget_line = f"💰 Бюджет: <b>{daily:,.0f}₽/день</b>"
+    except Exception:
+        pass
 
     def _fmt(it: dict) -> str:
-        line = f"  <i>{it['cat_icon']} {it['title']}</i> · {it['status_icon']}"
+        line = f"  {it['pri_icon']} {it['title']} · {it['cat_icon']}"
         if it.get("time_str"):
             line += f" · {it['time_str']}"
         return line
 
-    lines: list[str] = []
+    lines: list[str] = [f"📅 <b>Сегодня · ☀️ Nexus</b>\n"]
 
-    # Статистика
-    stats_parts = []
-    if n_urgent:
-        stats_parts.append(f"🔴 {n_urgent} срочных")
-    if n_important:
-        stats_parts.append(f"🟡 {n_important} важных")
-    if n_low:
-        stats_parts.append(f"⚪ {n_low} мелочей")
-    if stats_parts:
-        lines.append(" · ".join(stats_parts))
-    if n_overdue:
-        lines.append(f"⚠️ {n_overdue} просроченных!")
+    if total == 0:
+        lines.append("🌟 На сегодня задач нет — свободный день!")
+    else:
+        if overdue:
+            lines.append(f"<b>🔥 ПРОСРОЧЕНО</b>")
+            for it in overdue:
+                lines.append(_fmt(it))
 
-    if overdue:
-        lines.append(f"\n<b>🔥 ПРОСРОЧЕНО</b>")
-        for it in overdue:
-            lines.append(_fmt(it))
+        if today_tasks:
+            lines.append(f"\n<b>📅 СЕГОДНЯ</b>")
+            for it in today_tasks:
+                lines.append(_fmt(it))
 
-    if today_tasks:
-        lines.append(f"\n<b>📅 СЕГОДНЯ</b>")
-        for it in today_tasks:
-            lines.append(_fmt(it))
+        if daily:
+            lines.append(f"\n<b>🔄 ЕЖЕДНЕВНЫЕ</b>")
+            for it in daily:
+                time_part = f" · {it['time_str']}" if it.get("time_str") else ""
+                lines.append(f"  {it['pri_icon']} {it['title']} · {it['cat_icon']}{time_part}")
 
-    if daily:
-        lines.append(f"\n<b>🔄 ЕЖЕДНЕВНЫЕ</b>")
-        for it in daily:
-            time_part = f" · {it['time_str']}" if it.get("time_str") else ""
-            lines.append(f"  <i>{it['cat_icon']} {it['title']}</i>{time_part}")
+    if streak_line:
+        lines.append(f"\n{streak_line}")
+    if budget_line:
+        lines.append(budget_line)
 
-    # Совет
-    advice = await _get_advice()
-    if advice:
-        lines.append(f"\n💡 {advice.strip()}")
+    # СДВГ-совет от Haiku (учитывает контекст)
+    try:
+        prompt = (
+            f"Ты ассистент Кай (женский род, у неё СДВГ). "
+            f"Дай ОДИН короткий тёплый совет на день. "
+            f"Задач на сегодня: {total}, срочных: {n_urgent}, просроченных: {n_overdue}. "
+            f"Сейчас {time_of_day}. "
+            f"Макс 1-2 предложения. Без пафоса, по-дружески."
+        )
+        advice = await ask_claude(prompt, max_tokens=100, model="claude-haiku-4-5-20251001")
+        if advice:
+            lines.append(f"\n💡 {advice.strip()}")
+    except Exception:
+        pass
 
-    header = f"☀️ <b>Задачи на сегодня · {total} шт</b>\n"
-    await message.answer(header + "\n".join(lines))
+    await message.answer("\n".join(lines), parse_mode="HTML")
 
 
 # ── /stats — статистика задач ─────────────────────────────────────────────────
