@@ -1199,7 +1199,7 @@ async def handle_finance_text(message: Message, text: str, bot_label: str = "☀
         return
 
     _last_page_id[uid] = page_id
-    await react(message, "💸" if "Расход" in data.get("type_", "") else "💰")
+    await react(message, "👌" if "Расход" in data.get("type_", "") else "🏆")
     await message.answer(_format_record(data))
 
     # Smart recall: ищем в памяти по описанию покупки
@@ -1299,7 +1299,7 @@ async def handle_finance_clarification(message: Message, user_notion_id: str = "
         page_id = await _save_finance(pending, config.nexus.db_finance, user_notion_id=stored_uid, uid=uid)
         if page_id:
             _last_page_id[uid] = page_id
-            await react(message, "💸" if "Расход" in pending.get("type_", "") else "💰")
+            await react(message, "👌" if "Расход" in pending.get("type_", "") else "🏆")
             await message.answer(_format_record(pending))
             if "Расход" in pending.get("type_", ""):
                 try:

@@ -698,7 +698,7 @@ async def on_remain_action(query: CallbackQuery, user_notion_id: str = "") -> No
 # ── list_buy handler (text "купить X") ────────────────────────────────────────
 
 async def handle_list_buy(msg: Message, data: dict, user_notion_id: str = "") -> None:
-    await react(msg, "🗒️")
+    await react(msg, "🫡")
     text = data.get("text", msg.text or "")
 
     # Ищем предпочтения в Памяти для определения категорий
@@ -769,7 +769,7 @@ async def handle_list_buy(msg: Message, data: dict, user_notion_id: str = "") ->
 # ── list_done handler (text "купила X 89р") ───────────────────────────────────
 
 async def handle_list_done(msg: Message, data: dict, user_notion_id: str = "") -> None:
-    await react(msg, "💸")
+    await react(msg, "🏆")
     text = data.get("text", msg.text or "")
     try:
         parsed = await _haiku_parse(text, _PARSE_DONE_SYSTEM)
@@ -821,7 +821,7 @@ async def handle_list_done(msg: Message, data: dict, user_notion_id: str = "") -
 # ── list_check handler ────────────────────────────────────────────────────────
 
 async def handle_list_check(msg: Message, data: dict, user_notion_id: str = "") -> None:
-    await react(msg, "🗒️")
+    await react(msg, "🫡")
     text = data.get("text", msg.text or "")
     try:
         parsed = await _haiku_parse(text, _PARSE_CHECK_SYSTEM)
@@ -862,7 +862,7 @@ _PARSE_SUBTASK_SYSTEM = (
 
 async def handle_list_subtask(msg: Message, data: dict, user_notion_id: str = "") -> None:
     """Разбить задачу на подзадачи (чеклист с Relation к задаче)."""
-    await react(msg, "📋")
+    await react(msg, "🫡")
     text = data.get("text", msg.text or "")
 
     # Извлечь название задачи
@@ -1018,7 +1018,7 @@ async def on_keep_task(query: CallbackQuery, user_notion_id: str = "") -> None:
 # ── Unchanged text handlers ──────────────────────────────────────────────────
 
 async def handle_list_checklist_toggle(msg: Message, data: dict, user_notion_id: str = "") -> None:
-    await react(msg, "✅")
+    await react(msg, "⚡")
     item_name = data.get("item", data.get("text", msg.text or ""))
     result = await checklist_toggle(item_name, BOT_NAME, user_notion_id)
     if result.get("error") == "not_found":
@@ -1031,7 +1031,7 @@ async def handle_list_checklist_toggle(msg: Message, data: dict, user_notion_id:
 
 
 async def handle_list_inv_add(msg: Message, data: dict, user_notion_id: str = "") -> None:
-    await react(msg, "🗒️")
+    await react(msg, "🫡")
     text = data.get("text", msg.text or "")
     try:
         parsed = await _haiku_parse(text, _PARSE_INV_SYSTEM)
@@ -1095,7 +1095,7 @@ async def handle_list_inv_search(msg: Message, data: dict, user_notion_id: str =
 
 
 async def handle_list_inv_update(msg: Message, data: dict, user_notion_id: str = "") -> None:
-    await react(msg, "🗒️")
+    await react(msg, "🫡")
     text = data.get("text", msg.text or "")
     try:
         parsed = await _haiku_parse(text, _PARSE_INV_UPDATE_SYSTEM)
@@ -1133,7 +1133,7 @@ async def handle_list_pending(msg: Message, user_notion_id: str = "") -> bool:
         return False
 
     if action == "checklist_items":
-        await react(msg, "🗒️")
+        await react(msg, "🫡")
         pending_del(uid)
         raw_items = []
         for line in text.split("\n"):
@@ -1152,7 +1152,7 @@ async def handle_list_pending(msg: Message, user_notion_id: str = "") -> bool:
         return True
 
     if action == "subtask_items":
-        await react(msg, "📋")
+        await react(msg, "🫡")
         pending_del(uid)
         raw_items = []
         for line in text.split("\n"):
@@ -1178,7 +1178,7 @@ async def handle_list_pending(msg: Message, user_notion_id: str = "") -> bool:
         if not re.search(r"\d", text):
             pending_del(uid)
             return False
-        await react(msg, "💸")
+        await react(msg, "🏆")
         # Парсим текст чека через Haiku
         categories = pending.get("categories", {})
         selected_data = pending.get("selected", {})
@@ -1286,7 +1286,7 @@ async def handle_list_pending(msg: Message, user_notion_id: str = "") -> bool:
         if not re.search(r"\d", text):
             pending_del(uid)
             return False
-        await react(msg, "💸")
+        await react(msg, "🏆")
         # Ответ на "сколько на X?"
         price_match = re.search(r"(\d+(?:[.,]\d+)?)\s*[кk]?", text)
         if not price_match:
