@@ -603,7 +603,7 @@ async def on_checkout(query: CallbackQuery, user_notion_id: str = "") -> None:
         for pid, it in buy_items.items():
             cat = it.get("category", "💳 Прочее")
             categories.setdefault(cat, []).append(it["name"])
-            selected_data[pid] = {"name": it["name"], "category": cat}
+            selected_data[pid] = {"name": it["name"], "category": cat, "recurring": it.get("recurring", False)}
 
         # Обновить pending → checkout
         pending_del(uid)
@@ -1399,7 +1399,83 @@ async def _finalize_checkout(
         except Exception as e:
             logger.error("checkout budget check: %s", e)
 
-    # 4. Оставшиеся покупки
+    # 4. Предложить задачу-напоминание / инвентарь (макс 1+1, не для крупных чеков)
+    _REMIND_CATS = {"🐾 Коты", "🏥 Здоровье", "🍜 Продукты"}
+    _INV_CATS = {"🏥 Здоровье", "🐾 Коты"}
+    all_items_flat = list(selected_data.values())
+    if len(all_items_flat) <= 4:
+        # --- Задача-напоминание ---
+        remind_candidate = None
+        for it in all_items_flat:
+            if it.get("recurring"):
+                continue  # клонируется cron-ом
+            if it.get("category") in _REMIND_CATS:
+                remind_candidate = it
+                break
+        if remind_candidate:
+            import hashlib
+            name_hash = hashlib.md5(remind_candidate["name"].encode()).hexdigest()[:8]
+            kb = InlineKeyboardMarkup(inline_keyboard=[[
+                InlineKeyboardButton(text="Через неделю", callback_data=f"list_remind_7_{name_hash}"),
+                InlineKeyboardButton(text="Через 2 нед", callback_data=f"list_remind_14_{name_hash}"),
+                InlineKeyboardButton(text="Через месяц", callback_data=f"list_remind_30_{name_hash}"),
+                InlineKeyboardButton(text="Нет", callback_data="list_remind_no"),
+            ]])
+            # Сохраняем name для callback
+            pending_set(msg.from_user.id, {
+                "action": "list_remind_meta",
+                "item_name": remind_candidate["name"],
+                "category": remind_candidate["category"],
+                "user_notion_id": user_page_id,
+                "name_hash": name_hash,
+            })
+            await msg.answer(
+                f"⏰ Напомнить купить «{remind_candidate['name']}» снова?",
+                reply_markup=kb,
+            )
+
+        # --- Инвентарь ---
+        inv_candidate = None
+        for it in all_items_flat:
+            if it.get("category") in _INV_CATS:
+                inv_candidate = it
+                break
+        if inv_candidate:
+            # Проверить: был ли в инвентаре (Archived)?
+            try:
+                inv_results = await inventory_search(inv_candidate["name"], BOT_NAME, user_page_id)
+            except Exception:
+                inv_results = []
+            if not inv_results:
+                import hashlib
+                nh = hashlib.md5(inv_candidate["name"].encode()).hexdigest()[:8]
+                kb = InlineKeyboardMarkup(inline_keyboard=[[
+                    InlineKeyboardButton(text=f"📦 {inv_candidate['name']}", callback_data=f"list_to_inv_{nh}"),
+                    InlineKeyboardButton(text="Нет", callback_data="list_to_inv_no"),
+                ]])
+                # Сохраняем мета для callback
+                uid = msg.from_user.id
+                old_pending = pending_get(uid)
+                if not old_pending or old_pending.get("action") != "list_remind_meta":
+                    pending_set(uid, {
+                        "action": "list_inv_meta",
+                        "item_name": inv_candidate["name"],
+                        "category": inv_candidate["category"],
+                        "user_notion_id": user_page_id,
+                        "name_hash": nh,
+                    })
+                else:
+                    # Добавляем к existing pending
+                    old_pending["inv_name"] = inv_candidate["name"]
+                    old_pending["inv_category"] = inv_candidate["category"]
+                    old_pending["inv_hash"] = nh
+                    pending_set(uid, old_pending)
+                await msg.answer(
+                    f"📦 Добавить в инвентарь?",
+                    reply_markup=kb,
+                )
+
+    # 5. Оставшиеся покупки
     remaining = await get_list("🛒 Покупки", BOT_NAME, user_page_id, status="Not started")
     if remaining:
         uid = msg.from_user.id
@@ -1425,6 +1501,139 @@ async def _finalize_checkout(
             "user_notion_id": user_page_id,
             "list_type": "🛒 Покупки",
         })
+
+
+# ── Callback: напомнить купить снова ─────────────────────────────────────────
+
+@router.callback_query(lambda c: c.data and c.data.startswith("list_remind_") and c.data != "list_remind_no")
+async def on_list_remind(query: CallbackQuery, user_notion_id: str = "") -> None:
+    uid = query.from_user.id
+    pending = pending_get(uid)
+    if not pending:
+        await query.answer("⏰ Сессия истекла.")
+        return
+    # Извлечь дни из callback: list_remind_7_abc12345
+    parts = query.data.split("_")  # ["list", "remind", "7", "abc12345"]
+    days = int(parts[2]) if len(parts) >= 4 else 14
+    item_name = pending.get("item_name", "")
+    category = pending.get("category", "")
+    p_user_id = pending.get("user_notion_id", user_notion_id)
+
+    # Создать задачу-напоминание
+    from datetime import date, timedelta
+    from core.notion_client import page_create, _title, _select, _status, _date
+    from core.config import config as app_config
+    deadline = (date.today() + timedelta(days=days)).isoformat()
+    reminder = (date.today() + timedelta(days=max(days - 1, 1))).isoformat()
+    try:
+        db_tasks = app_config.nexus.db_tasks
+        props = {
+            "Задача": _title(f"Купить {item_name}"),
+            "Статус": _status("Not started"),
+            "Дедлайн": _date(deadline),
+            "Напоминание": _date(reminder + "T10:00"),
+            "Приоритет": _select("Важно"),
+        }
+        if category:
+            props["Категория"] = _select(category)
+        if p_user_id:
+            from core.notion_client import _relation
+            props["🪪 Пользователи"] = _relation(p_user_id)
+        await page_create(db_tasks, props)
+    except Exception as e:
+        logger.error("on_list_remind create task: %s", e)
+        await query.answer("⚠️ Не удалось создать напоминание.", show_alert=True)
+        return
+
+    # Очистить только remind-мету из pending (оставить inv-мету если есть)
+    if pending.get("action") == "list_remind_meta":
+        if pending.get("inv_name"):
+            pending["action"] = "list_inv_meta"
+            pending_set(uid, pending)
+        else:
+            pending_del(uid)
+
+    try:
+        await query.message.edit_text(f"⏰ Напоминание: купить «{item_name}» через {days} дн.")
+    except Exception:
+        pass
+    await query.answer("✅ Напоминание создано!")
+
+
+@router.callback_query(lambda c: c.data == "list_remind_no")
+async def on_list_remind_no(query: CallbackQuery, user_notion_id: str = "") -> None:
+    uid = query.from_user.id
+    pending = pending_get(uid)
+    if pending and pending.get("action") == "list_remind_meta":
+        if pending.get("inv_name"):
+            pending["action"] = "list_inv_meta"
+            pending_set(uid, pending)
+        else:
+            pending_del(uid)
+    try:
+        await query.message.edit_reply_markup()
+    except Exception:
+        pass
+    await query.answer()
+
+
+# ── Callback: добавить в инвентарь после чека ────────────────────────────────
+
+@router.callback_query(lambda c: c.data and c.data.startswith("list_to_inv_") and c.data != "list_to_inv_no")
+async def on_list_to_inv(query: CallbackQuery, user_notion_id: str = "") -> None:
+    uid = query.from_user.id
+    pending = pending_get(uid)
+    item_name = ""
+    category = ""
+    p_user_id = user_notion_id
+    if pending:
+        item_name = pending.get("inv_name") or pending.get("item_name", "")
+        category = pending.get("inv_category") or pending.get("category", "")
+        p_user_id = pending.get("user_notion_id", user_notion_id)
+        pending_del(uid)
+    if not item_name:
+        await query.answer("⏰ Сессия истекла.")
+        return
+
+    created = await add_items(
+        [{"name": item_name, "category": category, "quantity": 1}],
+        "📦 Инвентарь", BOT_NAME, p_user_id,
+    )
+    if created:
+        c = created[0]
+        pending_set(uid, {
+            "action": "inv_expiry",
+            "item_id": c["id"],
+            "item_name": c["name"],
+            "user_notion_id": p_user_id,
+        })
+        kb = InlineKeyboardMarkup(inline_keyboard=[[
+            InlineKeyboardButton(text="⏭️ Пропустить", callback_data="list_skip_expiry"),
+        ]])
+        try:
+            await query.message.edit_text(f"📦 {item_name} добавлен в инвентарь!")
+        except Exception:
+            pass
+        await query.message.answer(
+            "📅 Срок годности?",
+            reply_markup=kb,
+        )
+    else:
+        await query.answer("⚠️ Не удалось добавить.")
+    await query.answer()
+
+
+@router.callback_query(lambda c: c.data == "list_to_inv_no")
+async def on_list_to_inv_no(query: CallbackQuery, user_notion_id: str = "") -> None:
+    uid = query.from_user.id
+    pending = pending_get(uid)
+    if pending and pending.get("action") in ("list_inv_meta", "list_remind_meta"):
+        pending_del(uid)
+    try:
+        await query.message.edit_reply_markup()
+    except Exception:
+        pass
+    await query.answer()
 
 
 # ── Callback: добавить в покупки из инвентаря ─────────────────────────────────
