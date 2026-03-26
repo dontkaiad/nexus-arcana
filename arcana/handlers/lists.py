@@ -679,7 +679,13 @@ async def handle_list_inv_search(msg: Message, data: dict, user_notion_id: str =
     query = re.sub(r"^есть\s+(?:ли\s+)?(?:у меня\s+)?", "", text, flags=re.IGNORECASE).strip().rstrip("?")
     results = await inventory_search(query, BOT_NAME, user_notion_id)
     if not results:
-        await msg.answer(f"❌ «{query}» не найден в инвентаре.")
+        existing_buy = await get_list(list_type="🛒 Покупки", bot_name=BOT_NAME,
+                                      user_page_id=user_notion_id, status="Not started")
+        already = any(query.lower() in it["name"].lower() for it in existing_buy)
+        if already:
+            await msg.answer(f"📦 «{query}» нет в инвентаре. Уже в списке покупок ✅")
+        else:
+            await msg.answer(f"❌ «{query}» не найден в инвентаре.")
         return
     lines = [f"📦 <b>Инвентарь: {query}</b>"]
     for r in results:
