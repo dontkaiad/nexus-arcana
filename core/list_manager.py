@@ -206,6 +206,37 @@ async def _search_memory_for_prefs(item_name: str) -> str:
         return ""
 
 
+async def find_task_by_name(query: str, user_page_id: str, db_id: str = "") -> list[dict]:
+    """Поиск задачи по названию. Фильтр: Статус != Done, != Archived.
+
+    Возвращает [{id, name, status}].
+    """
+    if not db_id:
+        db_id = os.environ.get("NOTION_DB_TASKS") or config.nexus.db_tasks
+    if not db_id:
+        return []
+    conditions: list[dict] = [
+        {"property": "Задача", "title": {"contains": query}},
+        {"property": "Статус", "status": {"does_not_equal": "Done"}},
+        {"property": "Статус", "status": {"does_not_equal": "Archived"}},
+    ]
+    if user_page_id:
+        conditions.append({"property": "🪪 Пользователи", "relation": {"contains": user_page_id}})
+    try:
+        pages = await query_pages(db_id, filters={"and": conditions}, page_size=10)
+    except Exception as e:
+        logger.error("find_task_by_name(%s): %s", query, e)
+        return []
+    results = []
+    for p in pages:
+        props = p.get("properties", {})
+        title_parts = props.get("Задача", {}).get("title", [])
+        name = title_parts[0]["plain_text"] if title_parts else "—"
+        status = (props.get("Статус", {}).get("status") or {}).get("name", "")
+        results.append({"id": p["id"], "name": name, "status": status})
+    return results
+
+
 def _extract_page_data(page: dict) -> dict:
     """Извлечь данные из Notion page для ответа."""
     props = page.get("properties", {})
@@ -223,6 +254,8 @@ def _extract_page_data(page: dict) -> dict:
         "priority": _extract_select(props.get("Приоритет", {})),
         "recurring": (props.get("Повторяющийся", {}).get("checkbox") or False),
         "group": _extract_text(props.get("Группа", {})),
+        "task_rel": (props.get("✅ Задачи", {}).get("relation") or [{}])[0].get("id", ""),
+        "work_rel": (props.get("🔮 Работы", {}).get("relation") or [{}])[0].get("id", ""),
     }
 
 

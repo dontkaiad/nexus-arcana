@@ -16,7 +16,7 @@ from core.list_manager import (
     add_items, get_list, check_items, check_items_bulk,
     checklist_toggle, checklist_toggle_by_id, buy_mark_done_by_id,
     inventory_search, inventory_update, archive_items, mark_items_done,
-    search_memory_categories,
+    search_memory_categories, find_task_by_name,
     pending_get, pending_set, pending_del,
     CATEGORY_TO_FINANCE, LIST_CATEGORIES,
 )
@@ -664,6 +664,130 @@ async def handle_list_check(msg: Message, data: dict, user_notion_id: str = "") 
     await msg.answer("\n".join(lines), parse_mode="HTML")
 
 
+# ── Subtask: разбивка задачи на чеклист ────────────────────────────────────
+
+_PARSE_SUBTASK_SYSTEM = (
+    "Пользователь хочет разбить задачу/работу на подзадачи. "
+    "Извлеки название задачи. Ответь ТОЛЬКО JSON без markdown:\n"
+    '{"task_name": "подготовка к ритуалу"}\n'
+    "- Убери служебные слова (разбей задачу, на подзадачи, и т.д.)\n"
+    "- Оставь только суть"
+)
+
+
+async def _haiku_parse_subtask(text: str) -> str:
+    try:
+        parsed = await _haiku_parse(text, _PARSE_SUBTASK_SYSTEM)
+        return parsed.get("task_name", "").strip()
+    except Exception:
+        return re.sub(
+            r"разб(?:ей|ить)\s+(?:задачу|работу)\s*|\s*на\s+подзадачи\s*",
+            "", text, flags=re.IGNORECASE
+        ).strip()
+
+
+async def handle_list_subtask(msg: Message, data: dict, user_notion_id: str = "") -> None:
+    """Разбить задачу на подзадачи (чеклист с Relation к задаче)."""
+    text = data.get("text", msg.text or "")
+    task_query = await _haiku_parse_subtask(text)
+    if not task_query:
+        await msg.answer("⚠️ Не понял какую задачу разбить.")
+        return
+
+    from core.config import config as app_config
+    tasks = await find_task_by_name(task_query, user_notion_id, db_id=app_config.arcana.db_tasks)
+    uid = msg.from_user.id
+
+    if not tasks:
+        pending_set(uid, {
+            "action": "subtask_items",
+            "task_id": "",
+            "task_name": task_query,
+            "user_notion_id": user_notion_id,
+            "bot": "arcana",
+        })
+        await msg.answer(
+            f"❓ Задача «{task_query}» не найдена.\nСоздам чеклист без привязки.\n\n"
+            f"📋 <b>{task_query}</b>\nНапиши пункты:",
+            parse_mode="HTML",
+        )
+        return
+
+    if len(tasks) == 1:
+        t = tasks[0]
+        pending_set(uid, {
+            "action": "subtask_items",
+            "task_id": t["id"],
+            "task_name": t["name"],
+            "user_notion_id": user_notion_id,
+            "bot": "arcana",
+        })
+        await msg.answer(
+            f"📋 Разбиваю «{t['name']}» на подзадачи\nНапиши пункты:",
+            parse_mode="HTML",
+        )
+        return
+
+    buttons = []
+    for t in tasks[:5]:
+        short = t["name"][:30] + ("…" if len(t["name"]) > 30 else "")
+        buttons.append([InlineKeyboardButton(
+            text=f"📋 {short}",
+            callback_data=f"subtask_pick_{t['id'][:28]}",
+        )])
+    buttons.append([InlineKeyboardButton(text="❌ Отмена", callback_data="subtask_cancel")])
+    kb = InlineKeyboardMarkup(inline_keyboard=buttons)
+    pending_set(uid, {
+        "action": "subtask_pick",
+        "tasks": [{"id": t["id"], "name": t["name"]} for t in tasks[:5]],
+        "user_notion_id": user_notion_id,
+        "bot": "arcana",
+    })
+    await msg.answer("Нашёл несколько задач. Какую разбить?", reply_markup=kb)
+
+
+@router.callback_query(lambda c: c.data and c.data.startswith("subtask_pick_"))
+async def on_subtask_pick(query: CallbackQuery, user_notion_id: str = "") -> None:
+    uid = query.from_user.id
+    pending = pending_get(uid)
+    if not pending or pending.get("action") != "subtask_pick":
+        await query.answer("⏰ Сессия истекла.")
+        return
+    id_prefix = query.data.replace("subtask_pick_", "")
+    matched = None
+    for t in pending.get("tasks", []):
+        if t["id"].startswith(id_prefix):
+            matched = t
+            break
+    if not matched:
+        await query.answer("❓ Не найдена.")
+        return
+    p_user_id = pending.get("user_notion_id", user_notion_id)
+    pending_del(uid)
+    pending_set(uid, {
+        "action": "subtask_items",
+        "task_id": matched["id"],
+        "task_name": matched["name"],
+        "user_notion_id": p_user_id,
+        "bot": "arcana",
+    })
+    await query.message.edit_text(
+        f"📋 Разбиваю «{matched['name']}» на подзадачи\nНапиши пункты:",
+        parse_mode="HTML",
+    )
+    await query.answer()
+
+
+@router.callback_query(lambda c: c.data == "subtask_cancel")
+async def on_subtask_cancel(query: CallbackQuery, user_notion_id: str = "") -> None:
+    pending_del(query.from_user.id)
+    try:
+        await query.message.edit_text("❌ Отменено.")
+    except Exception:
+        pass
+    await query.answer()
+
+
 async def handle_list_inv_add(msg: Message, data: dict, user_notion_id: str = "") -> None:
     text = data.get("text", msg.text or "")
     try:
@@ -759,6 +883,27 @@ async def handle_list_pending(msg: Message, user_notion_id: str = "") -> bool:
         lines = [f"📋 <b>{group}</b> ({len(created)} пунктов)"]
         for c in created:
             lines.append(f"  ◻️ {c['name']}")
+        await msg.answer("\n".join(lines), parse_mode="HTML")
+        return True
+
+    if action == "subtask_items":
+        pending_del(uid)
+        raw_items = []
+        for line in text.split("\n"):
+            for part in line.split(","):
+                part = part.strip().lstrip("•·-–— ").strip()
+                if part:
+                    raw_items.append(part)
+        task_id = pending.get("task_id", "")
+        task_name = pending.get("task_name", "Подзадачи")
+        p_user_id = pending.get("user_notion_id", user_notion_id)
+        items = [{"name": it, "group": task_name, "task_rel": task_id} for it in raw_items]
+        if not task_id:
+            items = [{"name": it, "group": task_name} for it in raw_items]
+        created = await add_items(items, "📋 Чеклист", BOT_NAME, p_user_id)
+        lines = [f"📋 <b>{task_name}</b> — {len(created)} подзадач:"]
+        for c in created:
+            lines.append(f"  ⬜ {c['name']}")
         await msg.answer("\n".join(lines), parse_mode="HTML")
         return True
 

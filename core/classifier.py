@@ -12,7 +12,7 @@ from core.claude_client import ask_claude
 from core.notion_client import finance_add, log_error
 from core.config import ARCANA_KEYWORDS
 from core.list_classifier import (
-    _LIST_BUY_RE, _LIST_CHECK_RE, _LIST_INV_ADD_RE,
+    _LIST_BUY_RE, _LIST_CHECK_RE, _SUBTASK_RE, _LIST_INV_ADD_RE,
     _LIST_INV_SEARCH_RE, _LIST_DONE_RE, _LIST_INV_UPDATE_RE,
     LIST_HAIKU_TYPES,
 )
@@ -592,6 +592,11 @@ async def classify(text: str, tz_offset: int = 3) -> list[dict]:
         logger.info("classify: list_buy pattern matched")
         return [{"type": "list_buy", "text": text}]
 
+    # "разбей задачу X на подзадачи" → list_subtask (ПЕРЕД list_check!)
+    if _SUBTASK_RE.search(text):
+        logger.info("classify: list_subtask pattern matched")
+        return [{"type": "list_subtask", "text": text}]
+
     # "список: паспорт, зарядка" / "чеклист" → list_check
     if _LIST_CHECK_RE.search(text):
         logger.info("classify: list_check pattern matched")
@@ -776,6 +781,12 @@ async def process_item(data: Dict[str, Any], original_text: str, msg, clarify: d
         await react(msg, "🗒️")
         from nexus.handlers.lists import handle_list_check
         await handle_list_check(msg, data, user_notion_id=user_notion_id)
+        return ""
+
+    if kind == "list_subtask":
+        await react(msg, "📋")
+        from nexus.handlers.lists import handle_list_subtask
+        await handle_list_subtask(msg, data, user_notion_id=user_notion_id)
         return ""
 
     if kind == "list_inventory_add":
