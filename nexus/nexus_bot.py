@@ -854,11 +854,49 @@ async def handle_photo(msg: Message, user_notion_id: str = "") -> None:
     result = await parse_receipt(content)
 
     if result and result.get("items"):
+        items = result["items"]
+
+        # Проверяем: есть ли айтемы с неопределённой категорией (маркетплейс / уточнить)?
+        need_clarify = [it for it in items if it.get("category", "").startswith("❓")]
+        normal_items = [it for it in items if not it.get("category", "").startswith("❓")]
+
+        uid = msg.from_user.id
+
+        if need_clarify and not normal_items:
+            # Все айтемы нужно уточнить — спрашиваем категорию
+            it = need_clarify[0]
+            pending_set(uid, {
+                "action": "receipt_clarify_cat",
+                "items": items,
+                "clarify_idx": 0,
+                "user_notion_id": user_notion_id,
+            })
+            cats = ["🐾 Коты", "🍜 Продукты", "🚬 Привычки", "🏥 Здоровье",
+                    "👗 Гардероб", "🏠 Жилье", "💻 Подписки", "💳 Прочее"]
+            buttons = []
+            row = []
+            for cat in cats:
+                short = cat.split(" ", 1)[0]
+                row.append(InlineKeyboardButton(
+                    text=short, callback_data=f"rcat_{cats.index(cat)}"))
+                if len(row) == 4:
+                    buttons.append(row)
+                    row = []
+            if row:
+                buttons.append(row)
+            kb = InlineKeyboardMarkup(inline_keyboard=buttons)
+            await msg.answer(
+                f"📸 <b>{it['name']}</b> — {it['amount']}₽\n\nКакая категория?",
+                parse_mode="HTML", reply_markup=kb)
+            return
+
         # Показать распознанный чек
         lines = ["📸 <b>Чек распознан:</b>"]
-        for item in result["items"]:
-            lines.append(f"  {item.get('category', '💳')} {item['name']} — {int(item.get('amount', 0))}₽")
-        lines.append(f"\n💰 Итого: {int(result['total'])}₽")
+        for item in items:
+            typ = item.get("type", "expense")
+            sign = "+" if typ == "income" else ""
+            lines.append(f"  {item.get('category', '💳')} {item['name']} — {sign}{item['amount']}₽")
+        lines.append(f"\n💰 Итого: {result['total']}₽")
         lines.append("Записать в финансы?")
 
         kb = InlineKeyboardMarkup(inline_keyboard=[[
@@ -867,10 +905,9 @@ async def handle_photo(msg: Message, user_notion_id: str = "") -> None:
             InlineKeyboardButton(text="Нет", callback_data="receipt_cancel"),
         ]])
 
-        uid = msg.from_user.id
         pending_set(uid, {
             "action": "photo_receipt",
-            "items": result["items"],
+            "items": items,
             "total": result["total"],
             "user_notion_id": user_notion_id,
         })
@@ -914,29 +951,33 @@ async def on_receipt(query: CallbackQuery, user_notion_id: str = "") -> None:
     p_user_id = pending.get("user_notion_id", user_notion_id)
     pending_del(uid)
 
-    # Группировать по категориям
+    # Группировать по типу + категории
     by_cat: dict[str, dict] = {}
     for item in items:
         cat = item.get("category", "💳 Прочее")
-        if cat not in by_cat:
-            by_cat[cat] = {"names": [], "total": 0}
-        by_cat[cat]["names"].append(item["name"])
-        by_cat[cat]["total"] += item.get("amount", 0)
+        typ = item.get("type", "expense")
+        key = f"{typ}:{cat}"
+        if key not in by_cat:
+            by_cat[key] = {"names": [], "total": 0, "type": typ, "cat": cat}
+        by_cat[key]["names"].append(item["name"])
+        by_cat[key]["total"] += item.get("amount", 0)
 
     lines = ["✅ <b>Чек записан:</b>"]
-    for cat, data in by_cat.items():
+    for key, data in by_cat.items():
         desc = ", ".join(data["names"])
+        fin_type = "💰 Доход" if data["type"] == "income" else "💸 Расход"
         await finance_add(
             date=today_moscow(),
             amount=float(data["total"]),
-            category=cat,
-            type_="💸 Расход",
+            category=data["cat"],
+            type_=fin_type,
             source=source,
             description=desc,
             bot_label="☀️ Nexus",
             user_notion_id=p_user_id,
         )
-        lines.append(f"  {cat}: {int(data['total'])}₽ ({desc})")
+        sign = "+" if data["type"] == "income" else ""
+        lines.append(f"  {data['cat']}: {sign}{int(data['total'])}₽ ({desc})")
 
     total = sum(d["total"] for d in by_cat.values())
     lines.append(f"\n💰 Итого: {int(total)}₽ · {source}")
@@ -946,15 +987,103 @@ async def on_receipt(query: CallbackQuery, user_notion_id: str = "") -> None:
     except Exception:
         await query.message.answer("\n".join(lines), parse_mode="HTML")
 
-    # Лимиты
-    for cat in by_cat:
+    # Лимиты (только для расходов)
+    for key, data in by_cat.items():
+        if data["type"] == "expense":
+            try:
+                from nexus.handlers.finance import _check_budget_limit
+                await _check_budget_limit(data["cat"], query.message, p_user_id, amount=data["total"])
+            except Exception:
+                pass
+
+    await query.answer("👌 Записано!")
+
+
+@dp.callback_query(lambda c: c.data and c.data.startswith("rcat_"))
+async def on_receipt_clarify_cat(query: CallbackQuery, user_notion_id: str = "") -> None:
+    """Уточнение категории для маркетплейсов и неопределённых."""
+    from core.list_manager import pending_get, pending_set, pending_del
+
+    uid = query.from_user.id
+    pending = pending_get(uid)
+    if not pending or pending.get("action") != "receipt_clarify_cat":
+        await query.answer("⏰ Сессия истекла.")
+        return
+
+    cats = ["🐾 Коты", "🍜 Продукты", "🚬 Привычки", "🏥 Здоровье",
+            "👗 Гардероб", "🏠 Жилье", "💻 Подписки", "💳 Прочее"]
+    idx = int(query.data.replace("rcat_", ""))
+    chosen_cat = cats[idx] if idx < len(cats) else "💳 Прочее"
+
+    items = pending.get("items", [])
+    clarify_idx = pending.get("clarify_idx", 0)
+
+    # Применить категорию к текущему айтему
+    if clarify_idx < len(items):
+        items[clarify_idx]["category"] = chosen_cat
+
+    # Есть ли ещё айтемы для уточнения?
+    next_idx = None
+    for i in range(clarify_idx + 1, len(items)):
+        if items[i].get("category", "").startswith("❓"):
+            next_idx = i
+            break
+
+    if next_idx is not None:
+        # Спрашиваем следующий
+        pending["clarify_idx"] = next_idx
+        pending["items"] = items
+        pending_set(uid, pending)
+        it = items[next_idx]
+        buttons = []
+        row = []
+        for ci, cat in enumerate(cats):
+            short = cat.split(" ", 1)[0]
+            row.append(InlineKeyboardButton(text=short, callback_data=f"rcat_{ci}"))
+            if len(row) == 4:
+                buttons.append(row)
+                row = []
+        if row:
+            buttons.append(row)
+        kb = InlineKeyboardMarkup(inline_keyboard=buttons)
         try:
-            from nexus.handlers.finance import _check_budget_limit
-            await _check_budget_limit(cat, query.message, p_user_id, amount=by_cat[cat]["total"])
+            await query.message.edit_text(
+                f"📸 <b>{it['name']}</b> — {it['amount']}₽\n\nКакая категория?",
+                parse_mode="HTML", reply_markup=kb)
         except Exception:
             pass
+        await query.answer(f"{chosen_cat}")
+        return
 
-    await query.answer("💸 Записано!")
+    # Все уточнены — показать итоговый чек для подтверждения
+    total = sum(it.get("amount", 0) for it in items)
+    pending_del(uid)
+    from core.list_manager import pending_set as ps
+    ps(uid, {
+        "action": "photo_receipt",
+        "items": items,
+        "total": total,
+        "user_notion_id": pending.get("user_notion_id", user_notion_id),
+    })
+
+    lines = ["📸 <b>Чек распознан:</b>"]
+    for item in items:
+        typ = item.get("type", "expense")
+        sign = "+" if typ == "income" else ""
+        lines.append(f"  {item.get('category', '💳')} {item['name']} — {sign}{item['amount']}₽")
+    lines.append(f"\n💰 Итого: {total}₽")
+    lines.append("Записать в финансы?")
+
+    kb = InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text="💳 Карта", callback_data="receipt_card"),
+        InlineKeyboardButton(text="💵 Наличные", callback_data="receipt_cash"),
+        InlineKeyboardButton(text="Нет", callback_data="receipt_cancel"),
+    ]])
+    try:
+        await query.message.edit_text("\n".join(lines), parse_mode="HTML", reply_markup=kb)
+    except Exception:
+        await query.message.answer("\n".join(lines), parse_mode="HTML", reply_markup=kb)
+    await query.answer(f"{chosen_cat}")
 
 
 @dp.callback_query(lambda c: c.data and (c.data.startswith("opt_") or c.data.startswith("note_replace:")))

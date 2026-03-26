@@ -4,6 +4,7 @@ from __future__ import annotations
 import base64
 import json
 import logging
+import math
 from typing import Optional
 
 from core.claude_client import ask_claude_vision
@@ -18,8 +19,14 @@ _RECEIPT_SYSTEM = """Ты парсишь изображение финансов
 Извлеки:
 1. Каждую операцию/позицию: название (получатель или товар) и сумму
 2. Общую сумму
+3. Тип: доход или расход
 
-Определи категорию:
+РАЗЛИЧАЙ ДОХОДЫ И РАСХОДЫ:
+- Сумма с "+" или написано "зачисление/пополнение/перевод от/входящий" → type: "income"
+- Сумма с "-" или написано "покупка/оплата/списание/перевод/исходящий" → type: "expense"
+- Если непонятно → type: "expense"
+
+КАТЕГОРИИ РАСХОДОВ:
 🐾 Коты: зоомагазин, корм, ветеринар
 🍜 Продукты: супермаркет, Лента, Пятёрочка, Магнит, продукты
 🍱 Кафе/Доставка: ресторан, кафе, Яндекс Еда, Delivery Club
@@ -29,11 +36,24 @@ _RECEIPT_SYSTEM = """Ты парсишь изображение финансов
 🏥 Здоровье: аптека, клиника, врач
 💻 Подписки: подписка, Netflix, Spotify, YouTube
 🏠 Жилье: ЖКХ, аренда, электричество
-👗 Гардероб: одежда, обувь, Wildberries, Ozon
+👗 Гардероб: одежда, обувь
 💳 Прочее: если не подходит ни одна
 
+КАТЕГОРИИ ДОХОДОВ:
+💰 Зарплата: зарплата, аванс
+💳 Прочее: переводы, возвраты, прочее
+
+МАРКЕТПЛЕЙСЫ (Ozon, Wildberries, Яндекс Маркет):
+Если видна только общая сумма без конкретных позиций → category: "❓ Маркетплейс"
+Не угадывай категорию для маркетплейсов!
+
+МАГАЗИНЫ С РАЗНЫМИ ТОВАРАМИ (Красное&Белое, Лента, Ашан, Fix Price):
+Если видны конкретные позиции чека → разбей по категориям.
+Если видна только общая сумма → category: "❓ Уточнить"
+(лучше спросить, чем угадать неправильно)
+
 Ответь ТОЛЬКО JSON без markdown:
-{"items": [{"name": "название", "amount": число, "category": "🍜 Продукты"}], "total": число}
+{"items": [{"name": "название", "amount": число, "type": "expense", "category": "🍜 Продукты"}], "total": число}
 Если не удалось распознать → {"items": [], "total": 0}
 """
 
@@ -42,7 +62,9 @@ async def parse_receipt(image_bytes: bytes, media_type: str = "image/jpeg") -> O
     """Парсить фото финансовой операции через Claude Vision.
 
     Возвращает {"items": [...], "total": N} или None если не распознано/ошибка.
+    Суммы округляются вверх до целых рублей.
     """
+    raw = ""
     try:
         image_b64 = base64.b64encode(image_bytes).decode("utf-8")
         raw = await ask_claude_vision(
@@ -61,7 +83,17 @@ async def parse_receipt(image_bytes: bytes, media_type: str = "image/jpeg") -> O
         if not items:
             return None
 
+        # Округление сумм до целых (ceil)
+        for item in items:
+            amt = item.get("amount", 0)
+            if isinstance(amt, (int, float)):
+                item["amount"] = math.ceil(abs(amt))
+            # Дефолт типа
+            if "type" not in item:
+                item["type"] = "expense"
+
         total = result.get("total") or sum(it.get("amount", 0) for it in items)
+        total = math.ceil(abs(total)) if isinstance(total, (int, float)) else total
         return {"items": items, "total": total}
 
     except json.JSONDecodeError as e:
