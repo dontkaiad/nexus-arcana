@@ -848,7 +848,13 @@ async def handle_list_inv_add(msg: Message, data: dict, user_notion_id: str = ""
             "item_name": c["name"],
             "user_notion_id": user_notion_id,
         })
-        await msg.answer("📅 Срок годности? (напиши дату, например <code>2026-06-15</code>, или «пропустить»)", parse_mode="HTML")
+        kb = InlineKeyboardMarkup(inline_keyboard=[[
+            InlineKeyboardButton(text="⏭️ Пропустить", callback_data="list_skip_expiry"),
+        ]])
+        await msg.answer(
+            "📅 Срок годности? (напиши дату, например <code>2026-06-15</code>)",
+            parse_mode="HTML", reply_markup=kb,
+        )
     else:
         await msg.answer("⚠️ Не удалось добавить.")
 
@@ -1204,6 +1210,17 @@ async def _finalize_checkout(
 
 
 # ── Callback: добавить в покупки из инвентаря ─────────────────────────────────
+
+@router.callback_query(lambda c: c.data == "list_skip_expiry")
+async def on_skip_expiry(query: CallbackQuery, user_notion_id: str = "") -> None:
+    uid = query.from_user.id
+    pending_del(uid)
+    try:
+        await query.message.edit_text("📦 Готово, без срока годности.")
+    except Exception:
+        pass
+    await query.answer()
+
 
 @router.callback_query(lambda c: c.data and c.data.startswith("list_to_buy_"))
 async def on_list_to_buy(query: CallbackQuery, user_notion_id: str = "") -> None:
