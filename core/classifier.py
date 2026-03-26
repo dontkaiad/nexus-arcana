@@ -697,7 +697,7 @@ async def process_item(data: Dict[str, Any], original_text: str, msg, clarify: d
 
     # TASK DONE
     if kind == "task_done":
-        await react(msg, "🎉")
+        await react(msg, "🔥")
         from nexus.handlers.tasks import handle_task_done
         await handle_task_done(msg, data.get("task_hint", original_text), user_notion_id=user_notion_id)
         return ""
@@ -739,7 +739,7 @@ async def process_item(data: Dict[str, Any], original_text: str, msg, clarify: d
 
     # ПАМЯТЬ (memory_save)
     if kind == "memory_save":
-        await react(msg, "🧠")
+        await react(msg, "💅")
         from nexus.handlers.memory import handle_memory_save
         data["text"] = data.get("text", original_text)
         await handle_memory_save(msg, data, user_notion_id=user_notion_id)
@@ -771,7 +771,7 @@ async def process_item(data: Dict[str, Any], original_text: str, msg, clarify: d
 
     # ── СПИСКИ ────────────────────────────────────────────────────────────────
     if kind == "list_buy":
-        await react(msg, "🗒️")
+        await react(msg, "🫡")
         from nexus.handlers.lists import handle_list_buy
         await handle_list_buy(msg, data, user_notion_id=user_notion_id)
         return ""
@@ -783,19 +783,19 @@ async def process_item(data: Dict[str, Any], original_text: str, msg, clarify: d
         return ""
 
     if kind == "list_check":
-        await react(msg, "🗒️")
+        await react(msg, "🫡")
         from nexus.handlers.lists import handle_list_check
         await handle_list_check(msg, data, user_notion_id=user_notion_id)
         return ""
 
     if kind == "list_subtask":
-        await react(msg, "📋")
+        await react(msg, "🫡")
         from nexus.handlers.lists import handle_list_subtask
         await handle_list_subtask(msg, data, user_notion_id=user_notion_id)
         return ""
 
     if kind == "list_inventory_add":
-        await react(msg, "🗒️")
+        await react(msg, "🫡")
         from nexus.handlers.lists import handle_list_inv_add
         await handle_list_inv_add(msg, data, user_notion_id=user_notion_id)
         return ""
@@ -806,7 +806,7 @@ async def process_item(data: Dict[str, Any], original_text: str, msg, clarify: d
         return ""
 
     if kind == "list_inventory_update":
-        await react(msg, "🗒️")
+        await react(msg, "🫡")
         from nexus.handlers.lists import handle_list_inv_update
         await handle_list_inv_update(msg, data, user_notion_id=user_notion_id)
         return ""
@@ -840,7 +840,7 @@ async def process_item(data: Dict[str, Any], original_text: str, msg, clarify: d
 
     # ФИНАНСЫ
     if kind in ("expense", "income"):
-        await react(msg, "💸" if kind == "expense" else "💰")
+        await react(msg, "👌" if kind == "expense" else "🏆")
         confidence = data.get("confidence", "high")
         type_label = "💸 Расход" if kind == "expense" else "💰 Доход"
         
@@ -960,7 +960,7 @@ async def process_item(data: Dict[str, Any], original_text: str, msg, clarify: d
         
         return "❌ Ошибка при обновлении записи"
     if kind == "task":
-        await react(msg, "✅")
+        await react(msg, "⚡")
         from nexus.handlers.tasks import handle_task_parsed, _REL_TIME_RE, _parse_relative_time, _get_user_tz
         logger.info(
             "classifier: task detected - title=%r category=%r deadline=%r priority=%r "
@@ -1001,7 +1001,7 @@ async def process_item(data: Dict[str, Any], original_text: str, msg, clarify: d
 
     # ЗАМЕТКИ
     if kind == "note":
-        await react(msg, "📝")
+        await react(msg, "✍️")
         from nexus.handlers.notes import handle_note
         from core.config import config
 

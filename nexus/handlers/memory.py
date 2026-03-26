@@ -142,7 +142,7 @@ _ADHD_SUMMARY_SYSTEM = """Пишешь о человеке по имени Ка�
 
 async def handle_adhd_command(message: Message, user_notion_id: str = "") -> None:
     """/adhd — личный СДВГ-профиль с группировкой и саммари от Sonnet."""
-    await react(message, "🧠")
+    await react(message, "💅")
     from core.notion_client import db_query
     from core.pagination import PAGE_SIZE, register_pages
 
@@ -546,7 +546,7 @@ async def cb_mem_auto_yes(call: CallbackQuery) -> None:
     result = await page_create(db_id, props)
     if result:
         cat_label = f" [{category}]" if category else ""
-        await react(call, "🧠")
+        await react(call, "💅")
         await call.message.edit_text(f"🧠 Запомнил{cat_label}: {fact}")
     else:
         await call.message.edit_text("⚠️ Ошибка записи в Notion")
