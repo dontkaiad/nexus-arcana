@@ -9,7 +9,7 @@ from aiogram import Bot, Dispatcher, F
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.filters import Command
-from aiogram.types import Message, CallbackQuery
+from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 
 from core.config import config
 from core.middleware import WhitelistMiddleware
@@ -546,6 +546,18 @@ async def handle_text(msg: Message, user_notion_id: str = "") -> None:
         return
 
     text = maybe_convert(msg.text.strip())
+    await process_text(msg, text, user_notion_id)
+
+
+async def process_text(msg: Message, text: str, user_notion_id: str = "") -> None:
+    """Ядро обработки текста: spell correction → classify → process_item → ответ.
+
+    Вызывается из handle_text, handle_voice, handle_photo (caption).
+    """
+    from core.layout import maybe_convert
+    from nexus.handlers.tasks import _get_user_tz
+    from nexus.handlers.utils import react
+
     original_text = text  # ВАЖНО: сохранить до spell correction
 
     # ── Исправляем опечатки через Claude Haiku ───────────────────────────
@@ -709,6 +721,164 @@ async def handle_text(msg: Message, user_notion_id: str = "") -> None:
             f"<code>{short_err}</code>\n"
             f"{notion_status}"
         )
+
+
+# ── Voice messages ──────────────────────────────────────────────────────────
+
+@dp.message(F.voice | F.audio)
+async def handle_voice(msg: Message, user_notion_id: str = "") -> None:
+    """Голосовое → Whisper → текст → pipeline."""
+    from nexus.handlers.utils import react
+    from core.voice import transcribe
+
+    if msg.voice:
+        file = await msg.bot.get_file(msg.voice.file_id)
+    else:
+        file = await msg.bot.get_file(msg.audio.file_id)
+
+    file_io = await msg.bot.download_file(file.file_path)
+    content = file_io.read()
+
+    await react(msg, "👂")
+
+    text = await transcribe(content)
+    if text is None:
+        await msg.answer("🎤 Голосовые не настроены (OPENAI_API_KEY).")
+        return
+    if not text:
+        await msg.answer("🎤 Не удалось распознать голосовое.")
+        return
+
+    await msg.answer(f"🎤 <i>«{text}»</i>", parse_mode="HTML")
+
+    # Lists pending — могут ждать ответ на чек/чеклист
+    from nexus.handlers.lists import handle_list_pending
+    if await handle_list_pending(msg, user_notion_id):
+        return
+
+    await process_text(msg, text, user_notion_id)
+
+
+# ── Photo messages (receipts) ──────────────────────────────────────────────
+
+@dp.message(F.photo)
+async def handle_photo(msg: Message, user_notion_id: str = "") -> None:
+    """Фото → Vision → парсинг чека ИЛИ caption → текст."""
+    from nexus.handlers.utils import react
+    from core.vision import parse_receipt
+    from core.list_manager import pending_set, pending_get
+
+    photo = msg.photo[-1]
+    file = await msg.bot.get_file(photo.file_id)
+    file_io = await msg.bot.download_file(file.file_path)
+    content = file_io.read()
+
+    await react(msg, "📸")
+
+    result = await parse_receipt(content)
+
+    if result and result.get("items"):
+        # Показать распознанный чек
+        lines = ["📸 <b>Чек распознан:</b>"]
+        for item in result["items"]:
+            lines.append(f"  {item.get('category', '💳')} {item['name']} — {int(item.get('amount', 0))}₽")
+        lines.append(f"\n💰 Итого: {int(result['total'])}₽")
+        lines.append("Записать в финансы?")
+
+        kb = InlineKeyboardMarkup(inline_keyboard=[[
+            InlineKeyboardButton(text="💳 Карта", callback_data="receipt_card"),
+            InlineKeyboardButton(text="💵 Наличные", callback_data="receipt_cash"),
+            InlineKeyboardButton(text="Нет", callback_data="receipt_cancel"),
+        ]])
+
+        uid = msg.from_user.id
+        pending_set(uid, {
+            "action": "photo_receipt",
+            "items": result["items"],
+            "total": result["total"],
+            "user_notion_id": user_notion_id,
+        })
+
+        await msg.answer("\n".join(lines), parse_mode="HTML", reply_markup=kb)
+    elif msg.caption:
+        # Не чек, но есть подпись — обработать как текст
+        from core.layout import maybe_convert
+        text = maybe_convert(msg.caption.strip())
+        await process_text(msg, text, user_notion_id)
+    else:
+        await msg.answer("📸 Не смог распознать чек. Попробуй сфоткать ровнее или напиши текстом.")
+
+
+@dp.callback_query(lambda c: c.data and c.data.startswith("receipt_"))
+async def on_receipt(query: CallbackQuery, user_notion_id: str = "") -> None:
+    """Подтверждение записи фото-чека в финансы."""
+    from core.list_manager import pending_get, pending_del
+    from core.notion_client import finance_add
+    from core.classifier import today_moscow
+    from nexus.handlers.utils import react
+
+    uid = query.from_user.id
+    pending = pending_get(uid)
+    if not pending or pending.get("action") != "photo_receipt":
+        await query.answer("⏰ Сессия истекла.")
+        return
+
+    action = query.data.replace("receipt_", "")
+    if action == "cancel":
+        pending_del(uid)
+        try:
+            await query.message.edit_reply_markup()
+        except Exception:
+            pass
+        await query.answer("Отменено")
+        return
+
+    source = "💳 Карта" if action == "card" else "💵 Наличные"
+    items = pending.get("items", [])
+    p_user_id = pending.get("user_notion_id", user_notion_id)
+    pending_del(uid)
+
+    # Группировать по категориям
+    by_cat: dict[str, dict] = {}
+    for item in items:
+        cat = item.get("category", "💳 Прочее")
+        if cat not in by_cat:
+            by_cat[cat] = {"names": [], "total": 0}
+        by_cat[cat]["names"].append(item["name"])
+        by_cat[cat]["total"] += item.get("amount", 0)
+
+    lines = ["✅ <b>Чек записан:</b>"]
+    for cat, data in by_cat.items():
+        desc = ", ".join(data["names"])
+        await finance_add(
+            date=today_moscow(),
+            amount=float(data["total"]),
+            category=cat,
+            type_="💸 Расход",
+            source=source,
+            description=desc,
+            bot_label="☀️ Nexus",
+            user_notion_id=p_user_id,
+        )
+        lines.append(f"  {cat}: {int(data['total'])}₽ ({desc})")
+
+    total = sum(d["total"] for d in by_cat.values())
+    lines.append(f"\n💰 Итого: {int(total)}₽ · {source}")
+
+    try:
+        await query.message.edit_text("\n".join(lines), parse_mode="HTML")
+    except Exception:
+        await query.message.answer("\n".join(lines), parse_mode="HTML")
+
+    # Лимиты
+    for cat in by_cat:
+        try:
+            from nexus.handlers.finance import _check_budget_limit
+            await _check_budget_limit(cat, query.message, p_user_id, amount=by_cat[cat]["total"])
+        except Exception:
+            pass
+
+    await query.answer("💸 Записано!")
 
 
 @dp.callback_query(lambda c: c.data and (c.data.startswith("opt_") or c.data.startswith("note_replace:")))
