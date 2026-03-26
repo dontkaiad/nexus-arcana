@@ -365,24 +365,24 @@ async def cmd_finance(msg: Message, user_notion_id: str = "") -> None:
         desc_parts = props.get("Описание", {}).get("title", [])
         desc = desc_parts[0]["plain_text"] if desc_parts else "—"
         cat = (props.get("Категория", {}).get("select") or {}).get("name", "")
-        today_lines.append(f"  💸 {desc} · {cat} · {amount:,.0f}₽")
+        today_lines.append(f"  <i>💸 {desc} · {cat} · {amount:,.0f}₽</i>")
         today_total += amount
 
     parts = []
 
     # Блок «Сегодня»
     if today_lines:
-        header = f"💸 <b>Сегодня · {today[5:7]}.{today[8:10]}:</b>"
-        block = header + "\n" + "\n".join(today_lines) + f"\n  💰 Итого: <b>{today_total:,.0f}₽</b>"
+        header = f"<b>💸 Сегодня · {today[5:7]}.{today[8:10]}:</b>"
+        block = header + "\n" + "\n".join(today_lines)
+        block += f"\n<b>💰 Итого: {today_total:,.0f}₽</b>"
         if today_income > 0:
-            block += f"\n  📥 Доход: <b>{today_income:,.0f}₽</b>"
+            block += f"\n<b>📥 Доход: {today_income:,.0f}₽</b>"
         parts.append(block)
     else:
         parts.append(f"💸 Сегодня расходов нет.")
 
     # ── Месяц ──
     month_stats = await get_finance_stats(month, user_notion_id)
-    parts.append("───────────────")
     parts.append(month_stats)
 
     # СДВГ-совет

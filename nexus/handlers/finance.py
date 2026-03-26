@@ -866,10 +866,7 @@ async def get_finance_stats(month: str, user_notion_id: str = "", compare_prev: 
     y, m = int(month[:4]), int(month[5:7])
     month_label = f"{_RU_MONTHS.get(m, month)} {y}"
 
-    lines = [f"📊 <b>Финансы за {month_label}:</b>",
-             f"Расходы: <b>{total_expense:,.0f}₽</b>",
-             f"Доходы: <b>{total_income:,.0f}₽</b>",
-             "", "<b>По категориям:</b>"]
+    lines = [f"\n<b>📊 Финансы за {month_label}:</b>"]
 
     # cat → (spent, limit_val) для ревью
     cat_review: list[tuple[str, float, float]] = []
@@ -886,19 +883,21 @@ async def get_finance_stats(month: str, user_notion_id: str = "", compare_prev: 
         if limit_val:
             pct = amount / limit_val * 100
             if pct > 100:
-                status = f"🔴 <i>(+{amount - limit_val:,.0f}₽)</i>"
+                status = f"🔴 (+{amount - limit_val:,.0f}₽)"
             elif pct >= 80:
-                status = f"🟡 <i>({pct:.0f}%)</i>"
+                status = f"🟡 ({pct:.0f}%)"
             else:
-                status = f"🟢 <i>({pct:.0f}%)</i>"
-            lines.append(f"<b>{cat}</b>: {amount:,.0f}₽ / лимит {limit_val:,.0f}₽ {status}")
+                status = f"🟢 ({pct:.0f}%)"
+            lines.append(f"  <i>{cat}: {amount:,.0f}₽ / {limit_val:,.0f}₽ {status}</i>")
             cat_review.append((cat, amount, limit_val))
         else:
-            lines.append(f"<b>{cat}</b>: {amount:,.0f}₽")
+            lines.append(f"  <i>{cat}: {amount:,.0f}₽</i>")
 
+    lines.append(f"<b>💸 Расходы: {total_expense:,.0f}₽</b>")
+    lines.append(f"<b>📥 Доходы: {total_income:,.0f}₽</b>")
     balance = total_income - total_expense
     sign = "+" if balance >= 0 else ""
-    lines.append(f"\n💰 <b>Баланс: {sign}{balance:,.0f}₽</b>")
+    lines.append(f"<b>💰 Баланс: {sign}{balance:,.0f}₽</b>")
 
     # Ревью по лимитам — только если есть хотя бы один лимит
     if cat_review:
