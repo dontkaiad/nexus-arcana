@@ -1401,7 +1401,7 @@ async def _finalize_checkout(
 
     # 4. Предложить задачу-напоминание / инвентарь (макс 1+1, не для крупных чеков)
     _REMIND_CATS = {"🐾 Коты", "🏥 Здоровье", "🍜 Продукты"}
-    _INV_CATS = {"🏥 Здоровье", "🐾 Коты"}
+    _INV_CATS = {"🏥 Здоровье"}
     all_items_flat = list(selected_data.values())
     if len(all_items_flat) <= 4:
         # --- Задача-напоминание ---
@@ -1416,9 +1416,9 @@ async def _finalize_checkout(
             import hashlib
             name_hash = hashlib.md5(remind_candidate["name"].encode()).hexdigest()[:8]
             kb = InlineKeyboardMarkup(inline_keyboard=[[
-                InlineKeyboardButton(text="Через неделю", callback_data=f"list_remind_7_{name_hash}"),
-                InlineKeyboardButton(text="Через 2 нед", callback_data=f"list_remind_14_{name_hash}"),
-                InlineKeyboardButton(text="Через месяц", callback_data=f"list_remind_30_{name_hash}"),
+                InlineKeyboardButton(text="7 дн", callback_data=f"list_remind_7_{name_hash}"),
+                InlineKeyboardButton(text="14 дн", callback_data=f"list_remind_14_{name_hash}"),
+                InlineKeyboardButton(text="30 дн", callback_data=f"list_remind_30_{name_hash}"),
                 InlineKeyboardButton(text="Нет", callback_data="list_remind_no"),
             ]])
             # Сохраняем name для callback
