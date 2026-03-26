@@ -773,7 +773,7 @@ async def process_text(msg: Message, text: str, user_notion_id: str = "") -> Non
             f"<code>{short_err}</code>\n"
             f"{notion_status}"
         )
-        await react(msg, "😱")
+        await react(msg, "🤡")
         return
 
     # Безусловная финальная реакция по типу classify
@@ -792,7 +792,7 @@ async def process_text(msg: Message, text: str, user_notion_id: str = "") -> Non
         "budget": "🏆", "debt_command": "🏆",
         "goal_command": "🏆", "limit_override": "🏆",
         "timezone_update": "⚡",
-        "unknown": "🤔", "parse_error": "😱",
+        "unknown": "🤔", "parse_error": "🤡",
         "arcana_redirect": "🌚",
         "adhd": "❤️‍🔥",
     }
