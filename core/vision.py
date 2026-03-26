@@ -11,57 +11,68 @@ from core.claude_client import ask_claude_vision
 
 logger = logging.getLogger("nexus.vision")
 
+# Валидные категории — ТОЛЬКО из существующих в Notion
+_VALID_EXPENSE_CATS = {
+    "🐾 Коты", "🍜 Продукты", "🍱 Кафе/Доставка", "🚕 Транспорт",
+    "🚬 Привычки", "💅 Бьюти", "🏥 Здоровье", "💻 Подписки",
+    "🏠 Жилье", "👗 Гардероб", "💳 Прочее",
+}
+_VALID_INCOME_CATS = {"💰 Зарплата", "💳 Прочее"}
+
 _RECEIPT_SYSTEM = """Ты парсишь изображение финансовой операции. Это может быть:
 - Скриншот из банковского приложения (Сбер, Тинькофф, Альфа и др.)
 - Скриншот истории операций
 - Бумажный чек из магазина
 
+Определи ИСТОЧНИК изображения:
+- "bank_app" — скриншот банковского приложения (есть логотип банка, интерфейс приложения)
+- "paper_receipt" — бумажный чек или скан
+
 Извлеки:
 1. Каждую операцию/позицию: название (получатель или товар) и сумму
-2. Общую сумму
-3. Тип: доход или расход
+2. Тип каждой операции: доход или расход
 
 РАЗЛИЧАЙ ДОХОДЫ И РАСХОДЫ:
 - Сумма с "+" или написано "зачисление/пополнение/перевод от/входящий" → type: "income"
 - Сумма с "-" или написано "покупка/оплата/списание/перевод/исходящий" → type: "expense"
+- Переводы ОТ других людей (входящие) = income
+- Переводы другим людям (исходящие) = expense
 - Если непонятно → type: "expense"
 
-КАТЕГОРИИ РАСХОДОВ:
+КАТЕГОРИИ РАСХОДОВ (ТОЛЬКО из этого списка, других нет):
 🐾 Коты: зоомагазин, корм, ветеринар
-🍜 Продукты: супермаркет, Лента, Пятёрочка, Магнит, продукты
+🍜 Продукты: супермаркет, Лента, Пятёрочка, Магнит
 🍱 Кафе/Доставка: ресторан, кафе, Яндекс Еда, Delivery Club
 🚕 Транспорт: такси, Яндекс Go, метро, автобус
-🚬 Привычки: табак, сигареты
+🚬 Привычки: табак, сигареты, энергетики
 💅 Бьюти: салон, маникюр, парикмахерская
 🏥 Здоровье: аптека, клиника, врач
 💻 Подписки: подписка, Netflix, Spotify, YouTube
 🏠 Жилье: ЖКХ, аренда, электричество
 👗 Гардероб: одежда, обувь
-💳 Прочее: если не подходит ни одна
+💳 Прочее: всё остальное (маркетплейсы без позиций, неизвестное)
 
-КАТЕГОРИИ ДОХОДОВ:
+КАТЕГОРИИ ДОХОДОВ (ТОЛЬКО из этого списка):
 💰 Зарплата: зарплата, аванс
-💳 Прочее: переводы, возвраты, прочее
+💳 Прочее: переводы, возвраты
 
-МАРКЕТПЛЕЙСЫ (Ozon, Wildberries, Яндекс Маркет):
-Если видна только общая сумма без конкретных позиций → category: "❓ Маркетплейс"
-Не угадывай категорию для маркетплейсов!
+МАРКЕТПЛЕЙСЫ (Ozon, Wildberries, Яндекс Маркет) без видимых позиций:
+Ставь category = "💳 Прочее" и need_clarify = true
 
-МАГАЗИНЫ С РАЗНЫМИ ТОВАРАМИ (Красное&Белое, Лента, Ашан, Fix Price):
-Если видны конкретные позиции чека → разбей по категориям.
-Если видна только общая сумма → category: "❓ Уточнить"
-(лучше спросить, чем угадать неправильно)
+МАГАЗИНЫ (Красное&Белое, Лента) без видимых позиций чека:
+Ставь category = "💳 Прочее" и need_clarify = true
 
 Ответь ТОЛЬКО JSON без markdown:
-{"items": [{"name": "название", "amount": число, "type": "expense", "category": "🍜 Продукты"}], "total": число}
-Если не удалось распознать → {"items": [], "total": 0}
+{"source": "bank_app", "items": [{"name": "...", "amount": число, "type": "expense", "category": "🍜 Продукты", "need_clarify": false}]}
+Если не удалось распознать → {"source": "unknown", "items": []}
 """
 
 
 async def parse_receipt(image_bytes: bytes, media_type: str = "image/jpeg") -> Optional[dict]:
     """Парсить фото финансовой операции через Claude Vision.
 
-    Возвращает {"items": [...], "total": N} или None если не распознано/ошибка.
+    Возвращает {"source": str, "items": [...], "total_expense": N, "total_income": N}
+    или None если не распознано/ошибка.
     Суммы округляются вверх до целых рублей.
     """
     raw = ""
@@ -83,18 +94,34 @@ async def parse_receipt(image_bytes: bytes, media_type: str = "image/jpeg") -> O
         if not items:
             return None
 
-        # Округление сумм до целых (ceil)
+        source = result.get("source", "unknown")
+
+        # Валидация и округление
         for item in items:
             amt = item.get("amount", 0)
             if isinstance(amt, (int, float)):
                 item["amount"] = math.ceil(abs(amt))
+
             # Дефолт типа
-            if "type" not in item:
+            if item.get("type") not in ("income", "expense"):
                 item["type"] = "expense"
 
-        total = result.get("total") or sum(it.get("amount", 0) for it in items)
-        total = math.ceil(abs(total)) if isinstance(total, (int, float)) else total
-        return {"items": items, "total": total}
+            # Валидация категории — только из разрешённых
+            cat = item.get("category", "💳 Прочее")
+            valid = _VALID_INCOME_CATS if item["type"] == "income" else _VALID_EXPENSE_CATS
+            if cat not in valid:
+                item["category"] = "💳 Прочее"
+                item["need_clarify"] = True
+
+        total_expense = sum(it["amount"] for it in items if it["type"] == "expense")
+        total_income = sum(it["amount"] for it in items if it["type"] == "income")
+
+        return {
+            "source": source,
+            "items": items,
+            "total_expense": total_expense,
+            "total_income": total_income,
+        }
 
     except json.JSONDecodeError as e:
         logger.warning("parse_receipt: JSON parse error: %s (raw=%s)", e, raw[:200] if raw else "")
