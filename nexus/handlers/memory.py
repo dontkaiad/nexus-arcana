@@ -73,9 +73,10 @@ async def handle_memory_list(
     if exclude_adhd and not matched_cat:
         filters.append({"property": "Категория", "select": {"does_not_equal": "🧠 СДВГ"}})
 
-    # Скрываем лимиты/бюджет если не запрошены явно
+    # Скрываем все финансовые категории если не запрошены явно
     if exclude_budget and not matched_cat:
-        filters.append({"property": "Категория", "select": {"does_not_equal": "💰 Лимит"}})
+        for _bcat in ("💰 Лимит", "📥 Доход", "🔒 Обязательные", "🎯 Цели", "📋 Долги"):
+            filters.append({"property": "Категория", "select": {"does_not_equal": _bcat}})
 
     filter_obj = {"and": filters} if len(filters) > 1 else filters[0]
 
