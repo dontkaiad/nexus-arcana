@@ -509,13 +509,13 @@ async def handle_text(msg: Message, user_notion_id: str = "") -> None:
     # Budget setup — перехватывает текст пока идёт настройка
     from nexus.handlers.finance import handle_budget_setup_text
     if await handle_budget_setup_text(msg, user_notion_id):
-        await react(msg, "✅")
+        await react(msg, "⚡")
         return
 
     # Lists pending — чеклист пункты, срок годности
     from nexus.handlers.lists import handle_list_pending
     if await handle_list_pending(msg, user_notion_id):
-        await react(msg, "🗒️")
+        await react(msg, "🫡")
         return
 
     # Quick triggers (до классификатора)
@@ -526,7 +526,7 @@ async def handle_text(msg: Message, user_notion_id: str = "") -> None:
     if _quick_re.search(r"покажи бюджет|сколько (могу тратить|свободных)|бюджет на месяц", _tl):
         from nexus.handlers.finance import start_budget_analysis
         await start_budget_analysis(msg, user_notion_id)
-        await react(msg, "💰")
+        await react(msg, "🏆")
         return
 
     # День отдыха (стрик)
@@ -539,14 +539,14 @@ async def handle_text(msg: Message, user_notion_id: str = "") -> None:
             await msg.answer(result)
         except Exception as e:
             await msg.answer("⚠️ Ошибка: {}".format(e))
-        await react(msg, "✅")
+        await react(msg, "⚡")
         return
 
     if _pending_has(msg.from_user.id):
         pending = _pending_get(msg.from_user.id)
         if pending and pending.get("action") == "reschedule":
             await handle_reschedule_reminder(msg)
-            await react(msg, "⏰")
+            await react(msg, "⚡")
             return
         # Если это edit-команда — обновляем pending задачу напрямую
         import re as _re
@@ -568,7 +568,7 @@ async def handle_text(msg: Message, user_notion_id: str = "") -> None:
             pending["category"] = real_cat
             _pending_set(msg.from_user.id, pending)
             await msg.answer(f"✏️ Категория обновлена: {real_cat}\n\n<i>Уточни дедлайн или нажми «Сохранить»</i>")
-            await react(msg, "✅")
+            await react(msg, "⚡")
             return
         _edit_pri = _re.search(
             r"\b(?:поменяй|измени|обнови|смени|замени|исправь)\s+(?:приоритет)\s+(?:на\s+)?(.+)",
@@ -582,10 +582,10 @@ async def handle_text(msg: Message, user_notion_id: str = "") -> None:
             pending["priority"] = real_pri
             _pending_set(msg.from_user.id, pending)
             await msg.answer(f"✏️ Приоритет обновлён: {real_pri}\n\n<i>Уточни дедлайн или нажми «Сохранить»</i>")
-            await react(msg, "✅")
+            await react(msg, "⚡")
             return
         await handle_task_clarification(msg)
-        await react(msg, "✅")
+        await react(msg, "⚡")
         return
 
     text = maybe_convert(msg.text.strip())
@@ -667,7 +667,7 @@ async def process_text(msg: Message, text: str, user_notion_id: str = "") -> Non
         logged = await log_error(combined, "unknown_type", "", error_code="–")
         notion_status = "записано в ⚠️Ошибки" if logged else "лог недоступен"
         await msg.answer(f"🌒 Так и не понял · {notion_status}")
-        await react(msg, "❓")
+        await react(msg, "🤔")
         return
 
     try:
@@ -720,7 +720,7 @@ async def process_text(msg: Message, text: str, user_notion_id: str = "") -> Non
                 f"Это для ритуалов/практики (Аркана) или обычная задача?"
             )
             await msg.answer(text_msg, reply_markup=kb)
-            await react(msg, "❓")
+            await react(msg, "🤔")
         # Show UI if low confidence finance
         elif has_clarify and finance_data:
             from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
@@ -738,7 +738,7 @@ async def process_text(msg: Message, text: str, user_notion_id: str = "") -> Non
                 f"Это расход, доход или бартер?"
             )
             await msg.answer(text_msg, reply_markup=kb)
-            await react(msg, "❓")
+            await react(msg, "🤔")
         else:
             if len(lines) == 1:
                 await msg.answer(lines[0])
@@ -773,28 +773,30 @@ async def process_text(msg: Message, text: str, user_notion_id: str = "") -> Non
             f"<code>{short_err}</code>\n"
             f"{notion_status}"
         )
-        await react(msg, "❌")
+        await react(msg, "😱")
         return
 
     # Безусловная финальная реакция по типу classify
+    # Только валидные Telegram реакции!
     _REACTION_MAP = {
-        "task": "✅", "expense": "💸", "income": "💰",
-        "note": "📝", "memory_save": "🧠", "memory_search": "🧠",
-        "memory_delete": "🧠", "memory_deactivate": "🧠",
-        "edit_note": "📝", "note_search": "📝", "note_delete": "📝",
-        "task_done": "🎉", "task_cancel": "🗑️",
-        "list_buy": "🗒️", "list_done": "💸", "list_done_bulk": "💸",
-        "list_check": "🗒️", "list_subtask": "📋",
-        "list_inventory_add": "🗒️", "list_inventory_search": "🔍",
-        "list_inventory_update": "🗒️",
-        "edit_record": "✏️", "stats": "📊",
-        "budget": "💰", "debt_command": "💰",
-        "goal_command": "💰", "limit_override": "💰",
-        "timezone_update": "⏰",
-        "unknown": "❓", "parse_error": "❌",
-        "arcana_redirect": "🔮",
+        "task": "⚡", "expense": "👌", "income": "🏆",
+        "note": "✍️", "memory_save": "💅", "memory_search": "👀",
+        "memory_delete": "💅", "memory_deactivate": "💅",
+        "edit_note": "✍️", "note_search": "👀", "note_delete": "✍️",
+        "task_done": "🔥", "task_cancel": "😈",
+        "list_buy": "🫡", "list_done": "🏆", "list_done_bulk": "🏆",
+        "list_check": "🫡", "list_subtask": "🫡",
+        "list_inventory_add": "🌚", "list_inventory_search": "👀",
+        "list_inventory_update": "🌚",
+        "edit_record": "⚡", "stats": "🤓",
+        "budget": "🏆", "debt_command": "🏆",
+        "goal_command": "🏆", "limit_override": "🏆",
+        "timezone_update": "⚡",
+        "unknown": "🤔", "parse_error": "😱",
+        "arcana_redirect": "🌚",
+        "adhd": "❤️‍🔥",
     }
-    await react(msg, _REACTION_MAP.get(_final_react, "✅"))
+    await react(msg, _REACTION_MAP.get(_final_react, "⚡"))
 
 
 # ── Voice messages ──────────────────────────────────────────────────────────
@@ -847,7 +849,7 @@ async def handle_photo(msg: Message, user_notion_id: str = "") -> None:
     file_io = await msg.bot.download_file(file.file_path)
     content = file_io.read()
 
-    await react(msg, "📸")
+    await react(msg, "👀")
 
     result = await parse_receipt(content)
 

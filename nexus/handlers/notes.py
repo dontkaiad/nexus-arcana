@@ -216,7 +216,7 @@ async def _save_note(
     tags_str = ", ".join(tags) if tags else "нет"
     reply = f"💡 Заметка сохранена! Теги: {tags_str}" if result else "⚠️ Ошибка записи в Notion."
     if result:
-        await react(message, "📝")
+        await react(message, "✍️")
     if edit:
         await message.edit_text(reply)
     else:
