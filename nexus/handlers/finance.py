@@ -437,15 +437,16 @@ async def build_budget_message(user_notion_id: str = "") -> Optional[str]:
             else:
                 for name, amt in items_list:
                     lines.append("  <i>{} — {:,}₽</i>".format(name, int(amt)))
-    lines.append("💳 Распределяемые: <b>{:,}₽</b>".format(int(max(0, income_total - obligatory_total))))
+    lines.append("<b>💳 Распределяемые: {:,}₽</b>".format(int(max(0, income_total - obligatory_total))))
 
-    # Долги
+    # Долги — сортировка: сначала с платежами (по убыванию платежа), потом отложенные
     debts = budget.get("долги", [])
     total_debt_payments = 0
     total_debt_amount = sum(d.get("amount", 0) for d in debts)
     if debts:
+        debts_sorted = sorted(debts, key=lambda d: (0 if d.get("monthly_payment", 0) > 0 else 1, -d.get("monthly_payment", 0)))
         lines.append("\n<b>📋 Долги ({:,}₽):</b>".format(int(total_debt_amount)))
-        for d in debts:
+        for d in debts_sorted:
             mp = d.get("monthly_payment", 0)
             total_debt_payments += mp
             strategy = d.get("strategy", "").strip()
@@ -460,7 +461,7 @@ async def build_budget_message(user_notion_id: str = "") -> Optional[str]:
                 strat_display = strategy if strategy else "отложен"
                 lines.append("  <i>{} — {:,}₽ · {}</i>".format(
                     d["name"], int(d["amount"]), strat_display))
-        lines.append("💳 Платежей: <b>{:,}₽/мес</b>".format(int(total_debt_payments)))
+        lines.append("<b>💳 Платежей: {:,}₽/мес</b>".format(int(total_debt_payments)))
 
     # Лимиты с прогрессом
     limits = budget.get("лимиты", [])
@@ -487,13 +488,13 @@ async def build_budget_message(user_notion_id: str = "") -> Optional[str]:
                 lines.append("  <i>{} — {:,}₽</i>".format(display_name, int(limit_amt)))
 
         if day_of_period > 1:
-            lines.append("📉 Потрачено: {:,} / {:,}₽".format(int(spent_in_limits), int(limits_total)))
+            lines.append("<b>📉 Потрачено: {:,} / {:,}₽</b>".format(int(spent_in_limits), int(limits_total)))
             free_in_limits = limits_total - spent_in_limits
             daily_left = free_in_limits / max(days_remaining, 1)
-            lines.append("💳 Свободных: <b>{:,}₽</b> · {:,}₽/день".format(
+            lines.append("<b>💳 Свободных: {:,}₽ · {:,}₽/день</b>".format(
                 int(max(0, free_in_limits)), int(max(0, daily_left))))
         else:
-            lines.append("💳 Итого: {:,}₽".format(int(limits_total)))
+            lines.append("<b>💳 Итого: {:,}₽</b>".format(int(limits_total)))
 
     # Цели
     goals = budget.get("цели", [])
