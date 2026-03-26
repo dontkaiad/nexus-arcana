@@ -861,7 +861,7 @@ async def handle_list_inv_add(msg: Message, data: dict, user_notion_id: str = ""
 
 async def handle_list_inv_search(msg: Message, data: dict, user_notion_id: str = "") -> None:
     text = data.get("text", msg.text or "")
-    query = re.sub(r"^есть\s*(?:ли)?\s*(?:у меня)?\s*(?:дома)?\s*", "", text, flags=re.IGNORECASE).strip().rstrip("?")
+    query = re.sub(r"(?:дома\s+)?есть\s*(?:ли)?\s*(?:у меня)?\s*(?:дома)?\s*", "", text, flags=re.IGNORECASE).strip().rstrip("?")
     results = await inventory_search(query, BOT_NAME, user_notion_id)
     if not results:
         # Проверить: уже в покупках?
