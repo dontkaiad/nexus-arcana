@@ -234,9 +234,7 @@ async def cmd_tasks(msg: Message, user_notion_id: str = "") -> None:
     # Стрик
     try:
         from nexus.handlers.streaks import get_streak
-        from nexus.handlers.tasks import _get_user_tz
-        tz = await _get_user_tz(uid) or 3
-        streak_data = await get_streak(uid, tz)
+        streak_data = get_streak(uid)
         if streak_data and streak_data.get("streak", 0) > 0:
             s = streak_data["streak"]
             fire = "🔥" * min(s, 5)
