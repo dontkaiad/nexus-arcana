@@ -93,6 +93,7 @@ class AppConfig:
     finance_types: List[str]      = field(default_factory=lambda: FINANCE_TYPES)
     model_haiku: str  = MODEL_HAIKU
     model_sonnet: str = MODEL_SONNET
+    openai_key: str = ""
 
 
 def load_config() -> AppConfig:
@@ -102,6 +103,7 @@ def load_config() -> AppConfig:
         anthropic_key = _require("ANTHROPIC_API_KEY"),
         db_users      = _optional("NOTION_DB_USERS"),
         db_lists      = _optional("NOTION_DB_LISTS"),
+        openai_key    = _optional("OPENAI_API_KEY"),
         nexus = NexusConfig(
             tg_token     = _require("NEXUS_BOT_TOKEN"),
             db_finance   = _require("NOTION_DB_FINANCE"),
