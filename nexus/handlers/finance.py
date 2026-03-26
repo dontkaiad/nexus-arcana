@@ -325,8 +325,10 @@ async def _calc_free_remaining(user_notion_id: str = "") -> Optional[Tuple[float
     except Exception:
         total_expenses = 0
 
-    free_total = total_income - obligatory_total - savings_total
-    free_left = free_total - total_expenses
+    # Свободные = доход - все расходы - накопления
+    # obligatory_total НЕ вычитаем отдельно — обязательные платежи
+    # уже записаны в расходы когда оплачены
+    free_left = total_income - total_expenses - savings_total
     return (free_left, days_remaining)
 
 
