@@ -200,7 +200,7 @@ async def handle_adhd_command(message: Message, user_notion_id: str = "") -> Non
     except Exception:
         summary = ""
 
-    lines = ["🧠 <b>СДВГ — твой профиль</b>"]
+    lines = ["🦋 <b>СДВГ — твой профиль</b>"]
     if summary:
         lines.append("")
         lines.append(summary.strip())
