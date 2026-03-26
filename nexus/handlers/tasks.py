@@ -1999,7 +1999,7 @@ async def handle_tasks_today(message: Message, user_notion_id: str = "") -> None
     streak_line = ""
     try:
         from nexus.handlers.streaks import get_streak
-        streak_data = await get_streak(uid, tz_offset)
+        streak_data = get_streak(uid)  # sync, one arg
         if streak_data:
             s = streak_data.get("streak", 0)
             if s > 0:
