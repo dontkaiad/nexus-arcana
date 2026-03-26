@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import sqlite3
 import time
 from datetime import datetime, timezone, timedelta
@@ -160,8 +161,18 @@ async def search_memory_categories(item_names: list[str]) -> dict[str, str]:
     return result
 
 
+_PREF_KEYWORDS = re.compile(
+    r"(бренд|марк[аи]|магазин|размер|объ[её]м|вкус|литр|мл|гр|упаковк|пачк|штук|покупа[ейю]|бер[уёе]|предпочита)",
+    re.IGNORECASE,
+)
+
+
 async def _search_memory_for_prefs(item_name: str) -> str:
-    """Ищет в 🧠 Память предпочтения по названию айтема (бренд, магазин, размер)."""
+    """Ищет в 🧠 Память предпочтения по названию айтема (бренд, магазин, размер).
+
+    Возвращает текст ТОЛЬКО если в записи есть полезная инфо (бренд/магазин/размер).
+    Записи-маппинги категорий (вида "X = категория") пропускаются.
+    """
     from core.notion_client import query_pages as qp
     db_mem = os.environ.get("NOTION_DB_MEMORY") or config.nexus.db_memory
     if not db_mem:
@@ -180,8 +191,15 @@ async def _search_memory_for_prefs(item_name: str) -> str:
         texts = []
         for r in results:
             title_parts = r.get("properties", {}).get("Текст", {}).get("title", [])
-            if title_parts:
-                texts.append(title_parts[0].get("plain_text", ""))
+            if not title_parts:
+                continue
+            fact = title_parts[0].get("plain_text", "")
+            # Пропускаем маппинги категорий ("монстр = привычки") и короткие записи
+            if not fact or len(fact) < 5:
+                continue
+            # Только записи с полезной инфой (бренд, магазин, размер, объём)
+            if _PREF_KEYWORDS.search(fact):
+                texts.append(fact)
         return "; ".join(texts) if texts else ""
     except Exception as e:
         logger.warning("_search_memory_for_prefs(%s): %s", item_name, e)
@@ -238,6 +256,10 @@ async def add_items(
         category = item.get("category", "💳 Прочее")
         note = item.get("note", "")
 
+        # Для чеклистов — категория не нужна
+        if list_type == "📋 Чеклист":
+            category = ""
+
         # Для покупок — поиск предпочтений в Памяти
         if list_type == "🛒 Покупки":
             pref = await _search_memory_for_prefs(name)
@@ -253,9 +275,10 @@ async def add_items(
             "Название": _title(name),
             "Тип": _select(list_type),
             "Статус": _status("Not started"),
-            "Категория": _select(category),
             "Бот": _select(bot_name),
         }
+        if category:
+            props["Категория"] = _select(category)
 
         if item.get("quantity"):
             props["Количество"] = _number(float(item["quantity"]))
