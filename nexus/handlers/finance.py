@@ -405,10 +405,13 @@ async def build_budget_message(user_notion_id: str = "") -> Optional[str]:
     if income_total:
         lines.append("\n<b>📥 Доход: {:,}₽</b>".format(int(income_total)))
 
-    # Фикс
-    obligatory_total = sum(o["amount"] for o in budget.get("обязательные", []))
-    if obligatory_total:
-        lines.append("<b>🔒 Фикс: {:,}₽</b>".format(int(obligatory_total)))
+    # Обязательные расходы
+    obligatory_items = budget.get("обязательные", [])
+    obligatory_total = sum(o["amount"] for o in obligatory_items)
+    if obligatory_items:
+        lines.append("\n<b>🔒 Обязательные ({:,}₽):</b>".format(int(obligatory_total)))
+        for ob in obligatory_items:
+            lines.append("  {} — {:,}₽".format(ob["name"], int(ob["amount"])))
 
     distributable = income_total - obligatory_total
     if distributable > 0:
