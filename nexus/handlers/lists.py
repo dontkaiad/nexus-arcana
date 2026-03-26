@@ -1225,9 +1225,18 @@ async def on_skip_expiry(query: CallbackQuery, user_notion_id: str = "") -> None
 @router.callback_query(lambda c: c.data and c.data.startswith("list_to_buy_"))
 async def on_list_to_buy(query: CallbackQuery, user_notion_id: str = "") -> None:
     item_name = query.data.replace("list_to_buy_", "")
-    created = await add_items([{"name": item_name}], "🛒 Покупки", BOT_NAME, user_notion_id)
+    # Попробовать взять категорию из инвентаря
+    category = "💳 Прочее"
+    try:
+        inv_results = await inventory_search(item_name, BOT_NAME, user_notion_id)
+        if inv_results and inv_results[0].get("category"):
+            category = inv_results[0]["category"]
+    except Exception:
+        pass
+    created = await add_items([{"name": item_name, "category": category}], "🛒 Покупки", BOT_NAME, user_notion_id)
     if created:
-        await query.message.edit_text(f"🛒 «{item_name}» добавлен в покупки!")
+        cat_emoji = category.split(" ")[0] if " " in category else ""
+        await query.message.edit_text(f"🛒 «{item_name}» добавлен в покупки! {cat_emoji}")
     else:
         await query.answer("⚠️ Не удалось добавить.")
 
