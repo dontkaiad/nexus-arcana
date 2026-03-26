@@ -93,8 +93,7 @@ async def cmd_help(msg: Message, user_notion_id: str = "") -> None:
         "📸 Фото: скрин из банка → автопарсинг\n\n"
 
         "💰 <b>БЮДЖЕТ</b>\n"
-        "/budget — текущий бюджетный план\n"
-        "/budget_setup — настроить бюджет с нуля\n"
+        "/budget — бюджет + кнопка «Изменить данные»\n"
         "Текстом: «лимит привычки 15к», «закрыла долг Вике»\n\n"
 
         "🗒️ <b>СПИСКИ</b>\n"
@@ -324,12 +323,6 @@ async def cmd_budget(msg: Message, user_notion_id: str = "") -> None:
     from nexus.handlers.finance import start_budget_analysis
     await start_budget_analysis(msg, user_notion_id)
 
-
-@dp.message(Command("budget_setup"))
-async def cmd_budget_setup(msg: Message, user_notion_id: str = "") -> None:
-    """Настроить бюджет заново."""
-    from nexus.handlers.finance import start_budget_setup
-    await start_budget_setup(msg, user_notion_id)
 
 
 @dp.message(Command("finance"))
@@ -1212,7 +1205,6 @@ async def main() -> None:
         BotCommand(command="stats", description="Статистика + стрики"),
         BotCommand(command="finance", description="Финансы (сегодня + месяц)"),
         BotCommand(command="budget", description="Бюджетный план"),
-        BotCommand(command="budget_setup", description="Настроить бюджет"),
         BotCommand(command="list", description="Списки (покупки, чеклисты, инвентарь)"),
         BotCommand(command="notes", description="Заметки"),
         BotCommand(command="memory", description="Память"),
