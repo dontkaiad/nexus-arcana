@@ -1996,19 +1996,16 @@ async def handle_tasks_today(message: Message, user_notion_id: str = "") -> None
         time_of_day = "вечер"
 
     # Стрик
-    streak_line = ""
+    streak_line = "🔥 Стрик: 0 — начни сегодня!"
     try:
         from nexus.handlers.streaks import get_streak
         streak_data = get_streak(uid)  # sync, one arg
-        if streak_data:
-            s = streak_data.get("streak", 0)
-            if s > 0:
-                fire = "🔥" * min(s, 5)
-                streak_line = f"{fire} {s} дней подряд"
-            else:
-                streak_line = "🔥 Стрик: 0 — начни сегодня!"
-    except Exception:
-        pass
+        s = streak_data.get("streak", 0) if streak_data else 0
+        if s > 0:
+            fire = "🔥" * min(s, 5)
+            streak_line = f"{fire} {s} дней подряд"
+    except Exception as e:
+        logger.warning("today streak error: %s", e)
 
     # Бюджет на день
     budget_line = ""
