@@ -812,7 +812,16 @@ async def handle_task_parsed(message: Message, data: dict) -> None:
         if not _has_explicit_deadline:
             data["deadline"] = None
 
-        # Если Claude вернул только дату без времени → спрашиваем время сразу
+        # Проверяем: пользователь РЕАЛЬНО указал время? (не Claude додумал)
+        _user_specified_time = bool(_re.search(
+            r"\b\d{1,2}[:.]\d{2}\b|\bв\s+\d{1,2}\b|\bутр\w*\b|\bвечер\w*\b|\bднём\b|\bночь\w*\b",
+            original_text, _re.IGNORECASE
+        ))
+        # Если Claude добавил T09:00 но юзер не писал время → убрать время, спросить
+        if "T" in data["reminder_time"] and not _user_specified_time:
+            data["reminder_time"] = data["reminder_time"][:10]
+
+        # Если только дата без времени → спрашиваем время
         if "T" not in data["reminder_time"]:
             msg_obj = await message.answer(
                 f"📌 <b>{data.get('title')}</b>\n"
