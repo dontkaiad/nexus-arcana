@@ -76,6 +76,7 @@ class ArcanaConfig:
     db_stats: str
     db_notes: str
     db_finance: str
+    db_works: str = ""
 
 
 @dataclass
@@ -119,6 +120,7 @@ def load_config() -> AppConfig:
             db_stats    = _optional("NOTION_DB_STATS"),
             db_notes    = _optional("NOTION_DB_NOTES"),
             db_finance  = _optional("NOTION_DB_FINANCE"),
+            db_works    = _optional("NOTION_DB_WORKS"),
         ),
     )
 

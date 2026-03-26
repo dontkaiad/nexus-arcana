@@ -206,9 +206,12 @@ async def _search_memory_for_prefs(item_name: str) -> str:
         return ""
 
 
-async def find_task_by_name(query: str, user_page_id: str, db_id: str = "") -> list[dict]:
-    """Поиск задачи по названию. Фильтр: Статус != Done, != Archived.
+async def find_task_by_name(
+    query: str, user_page_id: str, db_id: str = "", title_prop: str = "Задача",
+) -> list[dict]:
+    """Поиск задачи/работы по названию. Фильтр: Статус != Done, != Archived.
 
+    title_prop: название title-свойства в БД (по умолчанию "Задача", для Работ — "Работа").
     Возвращает [{id, name, status}].
     """
     if not db_id:
@@ -216,7 +219,7 @@ async def find_task_by_name(query: str, user_page_id: str, db_id: str = "") -> l
     if not db_id:
         return []
     conditions: list[dict] = [
-        {"property": "Задача", "title": {"contains": query}},
+        {"property": title_prop, "title": {"contains": query}},
         {"property": "Статус", "status": {"does_not_equal": "Done"}},
         {"property": "Статус", "status": {"does_not_equal": "Archived"}},
     ]
@@ -230,7 +233,7 @@ async def find_task_by_name(query: str, user_page_id: str, db_id: str = "") -> l
     results = []
     for p in pages:
         props = p.get("properties", {})
-        title_parts = props.get("Задача", {}).get("title", [])
+        title_parts = props.get(title_prop, {}).get("title", [])
         name = title_parts[0]["plain_text"] if title_parts else "—"
         status = (props.get("Статус", {}).get("status") or {}).get("name", "")
         results.append({"id": p["id"], "name": name, "status": status})
