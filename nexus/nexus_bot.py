@@ -713,6 +713,28 @@ async def process_text(msg: Message, text: str, user_notion_id: str = "") -> Non
                 body = "\n".join(f"{i+1}. {l}" for i, l in enumerate(lines))
                 await msg.answer(f"Записано {len(lines)} операций:\n\n{body}")
 
+        # Финальная реакция по типу из classify (не по результату process_item)
+        _REACTION_MAP = {
+            "task": "✅", "expense": "💸", "income": "💰",
+            "note": "📝", "memory_save": "🧠", "memory_search": "🧠",
+            "memory_delete": "🧠", "memory_deactivate": "🧠",
+            "edit_note": "📝", "note_search": "📝", "note_delete": "📝",
+            "task_done": "🎉", "task_cancel": "🗑️",
+            "list_buy": "🗒️", "list_done": "💸", "list_done_bulk": "💸",
+            "list_check": "🗒️", "list_subtask": "📋",
+            "list_inventory_add": "🗒️", "list_inventory_search": "🔍",
+            "list_inventory_update": "🗒️",
+            "edit_record": "✏️", "stats": "📊",
+            "budget": "💰", "debt_command": "💰",
+            "goal_command": "💰", "limit_override": "💰",
+            "timezone_update": "⏰",
+            "unknown": "❓", "parse_error": "❌",
+            "arcana_redirect": "🔮",
+        }
+        if not arcana_clarify_text and not has_clarify:
+            item_type = items[0].get("type", "unknown") if items else "unknown"
+            await react(msg, _REACTION_MAP.get(item_type, "✅"))
+
     except Exception as e:
         trace = tb.format_exc()
         logger.error("handle_text error: %s", trace)
