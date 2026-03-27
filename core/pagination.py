@@ -32,8 +32,8 @@ def get_page_text(uid: int) -> str:
     total_pages = max(1, (total + PAGE_SIZE - 1) // PAGE_SIZE)
     chunk = items[page * PAGE_SIZE : (page + 1) * PAGE_SIZE]
     lines = [state["formatter"](it) for it in chunk]
-    header = f"{state['title']} · {total} шт · стр {page + 1}/{total_pages}"
-    return header + "\n\n" + "\n".join(lines)
+    header = f"<b>{state['title']}</b> · {total} шт · стр {page + 1}/{total_pages}"
+    return header + "\n" + "\n".join(lines)
 
 
 def get_page_keyboard(uid: int):
@@ -81,5 +81,6 @@ async def handle_page_callback(query, bot=None) -> None:
     await query.message.edit_text(
         get_page_text(uid),
         reply_markup=get_page_keyboard(uid),
+        parse_mode="HTML",
     )
     await query.answer()
