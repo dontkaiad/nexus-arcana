@@ -977,6 +977,14 @@ async def handle_task_clarification(message: Message) -> None:
         await _handle_combined_clarification(message, text, pending, uid)
         return
 
+    # Если нет _awaiting_* флагов → задача в режиме подтверждения ("Всё верно?")
+    # Любой текст = уточнение задачи (дедлайн, напоминание, категория, приоритет)
+    _is_confirm_mode = not pending.get("_awaiting_deadline") and not pending.get("_awaiting_combined")
+
+    if _is_confirm_mode:
+        await _handle_task_refinement(message, text, pending, uid)
+        return
+
     try:
         tz_offset = await _get_user_tz(uid)
 
@@ -1025,6 +1033,100 @@ async def handle_task_clarification(message: Message) -> None:
 
     except Exception as e:
         logger.error("parse reminder error: %s", e)
+        await message.answer("❌ Ошибка при обработке. Попробуй ещё раз")
+
+
+async def _handle_task_refinement(message: Message, text: str, pending: dict, uid: int) -> None:
+    """Уточнение задачи в режиме подтверждения — парсим любые поля через Haiku."""
+    try:
+        tz_offset = await _get_user_tz(uid)
+
+        # Быстрый парсер для "через N мин/часов/дней" → treat as reminder
+        relative = _parse_relative_time(text, tz_offset)
+        if relative:
+            pending["reminder_time"] = relative
+            _pending_set(uid, pending)
+            await _show_task_confirm(message, pending, uid)
+            return
+
+        from core.classifier import _TASK_CATS
+
+        now_str = datetime.now(timezone(timedelta(hours=tz_offset))).strftime("%Y-%m-%d %H:%M")
+        now_dt = datetime.now(timezone(timedelta(hours=tz_offset)))
+        is_night = now_dt.hour < 5
+        tomorrow_note = "ВАЖНО: сейчас ночь (до 05:00) — 'завтра' означает СЕГОДНЯ (тот же календарный день)!" if is_night else ""
+
+        cats_str = ", ".join(_TASK_CATS)
+        system = f"""Пользователь уточняет задачу. Парсь и верни ТОЛЬКО JSON без markdown.
+Текущая задача: "{pending.get('title', '')}"
+
+Верни ТОЛЬКО изменённые поля:
+{{"deadline": "YYYY-MM-DD или null", "reminder_time": "YYYY-MM-DDTHH:MM или null", "category": "категория или null", "priority": "Срочно|Важно|Можно потом или null", "not_refinement": true/false}}
+
+Правила:
+- "дедлайн в воскресенье" → deadline=ближайшее вс
+- "напомни в 19" / "напомни в воскресенье в 19" → reminder_time=YYYY-MM-DDTHH:MM
+- "срочно" / "это срочно" → priority="Срочно"
+- "важно" → priority="Важно"
+- "потом" / "не срочно" → priority="Можно потом"
+- "категория коты" → category=ближайшая из: {cats_str}
+- Если текст НЕ похож на уточнение задачи (новая задача, вопрос, другая тема) → not_refinement=true
+{tomorrow_note}
+Сейчас: {now_str} (UTC+{tz_offset})"""
+
+        raw = await ask_claude(text, system=system, max_tokens=200, model="claude-haiku-4-5-20251001")
+        raw = raw.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
+        logger.info("_handle_task_refinement Claude returned: %s", raw)
+        parsed = json.loads(raw)
+
+        force = pending.pop("_force_refine", False)
+        if force:
+            _pending_set(uid, pending)
+
+        if parsed.get("not_refinement") and not force:
+            # Не уточнение — спросить пользователя
+            kb = InlineKeyboardMarkup(inline_keyboard=[[
+                InlineKeyboardButton(text="✏️ Уточнение", callback_data="task_refine_yes"),
+                InlineKeyboardButton(text="💬 Новое сообщение", callback_data="task_refine_no"),
+            ]])
+            await message.answer(
+                "🤔 Это уточнение задачи или новое сообщение?",
+                reply_markup=kb,
+            )
+            # Сохраняем текст в pending для обработки
+            pending["_refine_text"] = text
+            _pending_set(uid, pending)
+            return
+
+        updated = False
+        if parsed.get("deadline"):
+            pending["deadline"] = parsed["deadline"]
+            updated = True
+        if parsed.get("reminder_time"):
+            pending["reminder_time"] = parsed["reminder_time"]
+            updated = True
+        if parsed.get("category"):
+            # Найти ближайшую категорию
+            raw_cat = parsed["category"]
+            best = raw_cat
+            for tc in _TASK_CATS:
+                if raw_cat.lower() in tc.lower():
+                    best = tc
+                    break
+            pending["category"] = best
+            updated = True
+        if parsed.get("priority") and parsed["priority"] in ("Срочно", "Важно", "Можно потом"):
+            pending["priority"] = parsed["priority"]
+            updated = True
+
+        if updated:
+            _pending_set(uid, pending)
+            await _show_task_confirm(message, pending, uid)
+        else:
+            await message.answer("🤔 Не понял уточнение. Попробуй:\n<code>дедлайн завтра</code>, <code>напомни в 19</code>, <code>срочно</code>", parse_mode="HTML")
+
+    except Exception as e:
+        logger.error("_handle_task_refinement error: %s", e)
         await message.answer("❌ Ошибка при обработке. Попробуй ещё раз")
 
 
@@ -1143,6 +1245,36 @@ async def task_deadline_choice(call: CallbackQuery) -> None:
 
     await _do_save_task(call.message, d, chat_id=call.message.chat.id, uid=uid)
     _pending_del(uid)
+
+
+@router.callback_query(F.data == "task_refine_yes")
+async def task_refine_yes(call: CallbackQuery) -> None:
+    """Пользователь подтвердил что это уточнение задачи."""
+    uid = call.from_user.id
+    d = _pending_get(uid)
+    if not d or not d.get("_refine_text"):
+        await call.answer("⏰ Сессия истекла.")
+        return
+    text = d.pop("_refine_text")
+    d["_force_refine"] = True
+    _pending_set(uid, d)
+    await call.message.edit_reply_markup()
+    await call.answer()
+    await _handle_task_refinement(call.message, text, d, uid)
+
+
+@router.callback_query(F.data == "task_refine_no")
+async def task_refine_no(call: CallbackQuery) -> None:
+    """Пользователь сказал что это новое сообщение — сбросить pending и обработать."""
+    uid = call.from_user.id
+    d = _pending_get(uid)
+    text = d.get("_refine_text", "") if d else ""
+    _pending_del(uid)
+    await call.message.edit_reply_markup()
+    await call.answer()
+    if text:
+        from nexus.nexus_bot import process_text
+        await process_text(call.message, text)
 
 
 @router.callback_query(F.data == "task_practice")
