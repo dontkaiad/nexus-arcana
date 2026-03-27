@@ -409,14 +409,13 @@ async def handle_note_search(
         title_parts = props.get("Заголовок", {}).get("title", [])
         title = title_parts[0]["plain_text"] if title_parts else "—"
         tags_items = props.get("Теги", {}).get("multi_select", [])
-        tags_str = " ".join(f"#{t['name']}" for t in tags_items)
+        tags_str = " ".join(t["name"] for t in tags_items)
         # Категория (select property, если есть)
         cat = (props.get("Категория", {}).get("select") or {}).get("name", "")
         date = (props.get("Дата", {}).get("date") or {}).get("start", "")[:10]
         return {"title": title, "tags": tags_str, "cat": cat, "date": date}
 
     def _fmt(it: dict) -> str:
-        line = f"💡 {it['title']}"
         meta_parts = []
         if it.get("cat"):
             meta_parts.append(it["cat"])
@@ -424,8 +423,11 @@ async def handle_note_search(
             meta_parts.append(it["tags"])
         if it.get("date"):
             meta_parts.append(it["date"])
-        if meta_parts:
-            line += "\n   " + " · ".join(meta_parts)
+        meta = " · ".join(meta_parts)
+        line = f"<i>💡 {it['title']}"
+        if meta:
+            line += f" · {meta}"
+        line += "</i>"
         return line
 
     uid = message.from_user.id
@@ -434,7 +436,7 @@ async def handle_note_search(
     if digest_header:
         header = digest_header + header
     register_pages(uid, items, header, _fmt)
-    await message.answer(get_page_text(uid), reply_markup=get_page_keyboard(uid))
+    await message.answer(get_page_text(uid), reply_markup=get_page_keyboard(uid), parse_mode="HTML")
 
 
 async def handle_note_delete(message: Message, data: dict, user_notion_id: str = "") -> None:
