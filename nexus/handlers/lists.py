@@ -1162,9 +1162,12 @@ async def handle_list_pending(msg: Message, user_notion_id: str = "") -> bool:
                     raw_items.append(part)
         task_id = pending.get("task_id", "")
         task_name = pending.get("task_name", "Подзадачи")
+        rel_type = pending.get("rel_type", "task")
         p_user_id = pending.get("user_notion_id", user_notion_id)
-        items = [{"name": it, "group": task_name, "task_rel": task_id} for it in raw_items]
-        if not task_id:
+        if task_id:
+            rel_key = "work_rel" if rel_type == "work" else "task_rel"
+            items = [{"name": it, "group": task_name, rel_key: task_id} for it in raw_items]
+        else:
             items = [{"name": it, "group": task_name} for it in raw_items]
         created = await add_items(items, "📋 Чеклист", BOT_NAME, p_user_id)
         lines = [f"📋 <b>{task_name}</b> — {len(created)} подзадач:"]
