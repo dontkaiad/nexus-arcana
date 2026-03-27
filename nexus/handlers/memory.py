@@ -19,13 +19,13 @@ router = Router()
 BOT_LABEL = "☀️ Nexus"
 
 CATEGORIES_ORDER = [
-    "🧠 СДВГ", "👥 Люди", "🏥 Здоровье", "🛒 Предпочтения",
+    "🦋 СДВГ", "👥 Люди", "🏥 Здоровье", "🛒 Предпочтения",
     "💼 Работа", "🏠 Быт", "🔄 Паттерн", "💡 Инсайт",
     "🔮 Практика", "🐾 Коты", "💰 Лимит",
 ]
 
 CAT_MAP = {
-    "сдвг": "🧠 СДВГ",
+    "сдвг": "🦋 СДВГ",
     "люди": "👥 Люди",
     "здоровье": "🏥 Здоровье",
     "предпочтения": "🛒 Предпочтения",
@@ -71,7 +71,7 @@ async def handle_memory_list(
 
     # Скрываем СДВГ-факты если не запрошены явно
     if exclude_adhd and not matched_cat:
-        filters.append({"property": "Категория", "select": {"does_not_equal": "🧠 СДВГ"}})
+        filters.append({"property": "Категория", "select": {"does_not_equal": "🦋 СДВГ"}})
 
     # Скрываем все финансовые категории если не запрошены явно
     if exclude_budget and not matched_cat:
@@ -108,13 +108,13 @@ async def handle_memory_list(
         if cat in grouped:
             lines.append(f"<b>{cat}</b>")
             for item in grouped[cat]:
-                lines.append(f"  • {item}")
+                lines.append(f"  <i>• {item}</i>")
             lines.append("")
     for cat, items in grouped.items():
         if cat not in CATEGORIES_ORDER:
             lines.append(f"<b>{cat}</b>")
             for item in items:
-                lines.append(f"  • {item}")
+                lines.append(f"  <i>• {item}</i>")
             lines.append("")
 
     if exclude_adhd and not matched_cat:
@@ -152,7 +152,7 @@ async def handle_adhd_command(message: Message, user_notion_id: str = "") -> Non
         return
     try:
         pages = await db_query(db_id, filter_obj={"and": [
-            {"property": "Категория", "select": {"equals": "🧠 СДВГ"}},
+            {"property": "Категория", "select": {"equals": "🦋 СДВГ"}},
             {"property": "Актуально", "checkbox": {"equals": True}},
         ]}, page_size=100)
     except Exception as e:
@@ -234,7 +234,7 @@ async def handle_adhd_command(message: Message, user_notion_id: str = "") -> Non
 
 
 async def send_adhd_digest(bot) -> None:
-    """Еженедельно напоминает 2 случайных факта из категории 🧠 СДВГ."""
+    """Еженедельно напоминает 2 случайных факта из категории 🦋 СДВГ."""
     import random
     from core.notion_client import db_query
 
@@ -243,7 +243,7 @@ async def send_adhd_digest(bot) -> None:
         return
     try:
         pages = await db_query(db_id, filter_obj={"and": [
-            {"property": "Категория", "select": {"equals": "🧠 СДВГ"}},
+            {"property": "Категория", "select": {"equals": "🦋 СДВГ"}},
             {"property": "Актуально", "checkbox": {"equals": True}},
         ]}, page_size=100)
     except Exception as e:
