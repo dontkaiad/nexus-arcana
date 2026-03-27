@@ -244,7 +244,10 @@ async def cmd_tasks(msg: Message, user_notion_id: str = "") -> None:
 
     # ВСЕ ОСТАЛЬНЫЕ
     if other_items:
-        lines.append(f"<b>📋 ВСЕ ЗАДАЧИ</b> (ещё {len(other_items)})")
+        if today_items:
+            lines.append(f"<b>📋 ВСЕ ЗАДАЧИ</b> (ещё {len(other_items)})")
+        else:
+            lines.append(f"<b>📋 ВСЕ ЗАДАЧИ ({len(other_items)})</b>")
         for it in other_items[:10]:
             line = f"  <i>{it['pri_icon']} {it['title']} · {it['cat_icon']}"
             if it["dl"]:
