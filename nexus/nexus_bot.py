@@ -215,9 +215,10 @@ async def cmd_tasks(msg: Message, user_notion_id: str = "") -> None:
     lines.append("<b>📅 СЕГОДНЯ</b>")
     if today_items:
         for it in today_items:
-            line = f"  {it['pri_icon']} {it['title']} · {it['cat_icon']}"
+            line = f"  <i>{it['pri_icon']} {it['title']} · {it['cat_icon']}"
             if it["dl"]:
                 line += f" · {it['dl']}"
+            line += "</i>"
             lines.append(line)
     else:
         _FREE_TIPS = [
@@ -245,9 +246,10 @@ async def cmd_tasks(msg: Message, user_notion_id: str = "") -> None:
     if other_items:
         lines.append(f"<b>📋 ВСЕ ЗАДАЧИ</b> (ещё {len(other_items)})")
         for it in other_items[:10]:
-            line = f"  {it['pri_icon']} {it['title']} · {it['cat_icon']}"
+            line = f"  <i>{it['pri_icon']} {it['title']} · {it['cat_icon']}"
             if it["dl"]:
                 line += f" · {it['dl']}"
+            line += "</i>"
             lines.append(line)
         if len(other_items) > 10:
             lines.append(f"  <i>...и ещё {len(other_items) - 10}</i>")
