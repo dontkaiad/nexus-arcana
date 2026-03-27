@@ -2007,15 +2007,57 @@ async def handle_tasks_today(message: Message, user_notion_id: str = "") -> None
     except Exception as e:
         logger.warning("today streak error: %s", e)
 
-    # Бюджет на день
+    # Бюджет на день + лимиты на грани
     budget_line = ""
     try:
-        from nexus.handlers.finance import _calc_free_remaining
+        from nexus.handlers.finance import _calc_free_remaining, _get_limits, _cat_link, build_budget_message
+        import os as _os
         result = await _calc_free_remaining(user_notion_id)
         if result:
             free_left, days_rem = result
             daily = free_left / max(days_rem, 1)
             budget_line = f"💰 Бюджет: <b>{daily:,.0f}₽/день</b>"
+
+            # Лимиты на грани (>50%)
+            mem_db = _os.environ.get("NOTION_DB_MEMORY")
+            if mem_db:
+                from core.notion_client import db_query
+                from core.config import config
+                from core.classifier import today_moscow
+                limits = await _get_limits(mem_db)
+                if limits:
+                    today_str_b = today_moscow()
+                    month_start = today_str_b[:7] + "-01"
+                    try:
+                        expense_recs = await db_query(config.nexus.db_finance, filter_obj={"and": [
+                            {"property": "Тип", "select": {"equals": "💸 Расход"}},
+                            {"property": "Дата", "date": {"on_or_after": month_start}},
+                            {"property": "Дата", "date": {"on_or_before": today_str_b}},
+                        ]}, page_size=500)
+                        by_cat_b: dict[str, float] = {}
+                        for r in expense_recs:
+                            cat_r = (r["properties"].get("Категория", {}).get("select") or {}).get("name", "")
+                            amt_r = r["properties"].get("Сумма", {}).get("number") or 0
+                            by_cat_b[cat_r] = by_cat_b.get(cat_r, 0) + amt_r
+                    except Exception:
+                        by_cat_b = {}
+
+                    warns = []
+                    for lim_key, lim_val in limits.items():
+                        if lim_val <= 0:
+                            continue
+                        spent_b = 0.0
+                        for cat_k, cat_s in by_cat_b.items():
+                            cl = _cat_link(cat_k)
+                            if lim_key in cl or cl in lim_key:
+                                spent_b += cat_s
+                        pct = int(spent_b / lim_val * 100)
+                        if pct >= 50:
+                            color = "🔴" if pct >= 90 else "🟡" if pct >= 70 else "🟢"
+                            short = lim_key.capitalize()
+                            warns.append(f"{short} {pct}% {color}")
+                    if warns:
+                        budget_line += "\n📊 " + " · ".join(warns[:4])
     except Exception:
         pass
 

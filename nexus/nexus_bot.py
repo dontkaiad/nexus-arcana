@@ -307,7 +307,7 @@ async def cmd_memory(msg: Message, user_notion_id: str = "") -> None:
     category_filter = parts[1] if len(parts) > 1 else ""
     # Скрываем СДВГ и Лимит если не запрошены явно
     cat_low = category_filter.lower().strip()
-    is_adhd_request = cat_low in ("сдвг", "adhd", "🧠 сдвг")
+    is_adhd_request = cat_low in ("сдвг", "adhd", "🧠 сдвг", "🦋 сдвг")
     is_budget_request = cat_low in ("лимит", "бюджет", "💰 лимит", "финансы")
     from nexus.handlers.memory import handle_memory_list
     await handle_memory_list(msg, category_filter=category_filter,
