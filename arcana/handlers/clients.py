@@ -9,7 +9,7 @@ from aiogram.types import Message
 from core.claude_client import ask_claude
 from core.notion_client import (
     client_add, client_find, sessions_by_client, rituals_by_client,
-    arcana_all_debts, _extract_text, _extract_number, log_error,
+    arcana_all_debts, get_page, _extract_text, _extract_number, log_error,
 )
 
 logger = logging.getLogger("arcana.clients")
@@ -31,9 +31,15 @@ async def handle_add_client(message: Message, text: str, user_notion_id: str = "
         await message.answer("⚠️ Не смог разобрать данные клиента.")
         return
 
-    name = data.get("name", "")
+    name = data.get("name") or ""
     if not name:
         await message.answer("⚠️ Не нашёл имя клиента.")
+        return
+
+    existing = await client_find(name, user_notion_id=user_notion_id)
+    if existing:
+        existing_name = _extract_text(existing["properties"].get("Имя", {}))
+        await message.answer(f"👤 Клиент «{existing_name}» уже есть. Обновить данные?")
         return
 
     today = datetime.now(MOSCOW_TZ).strftime("%Y-%m-%d")
@@ -115,6 +121,7 @@ async def handle_debts(message: Message, user_notion_id: str = "") -> None:
 
     total_debt = 0.0
     lines = []
+    client_name_cache: dict[str, str] = {}
     for item in items:
         p = item["properties"]
         amount = _extract_number(p.get("Сумма", {})) or 0
@@ -122,7 +129,18 @@ async def handle_debts(message: Message, user_notion_id: str = "") -> None:
         debt = amount - paid
         total_debt += debt
         rel = p.get("Клиент", {}).get("relation", [])
-        client_label = rel[0]["id"][:8] + "…" if rel else "Личный"
+        client_label = "Личный"
+        if rel:
+            cid = rel[0]["id"]
+            if cid in client_name_cache:
+                client_label = client_name_cache[cid]
+            else:
+                try:
+                    page = await get_page(cid)
+                    client_label = _extract_text(page.get("properties", {}).get("Имя", {})) or cid[:8] + "…"
+                except Exception:
+                    client_label = cid[:8] + "…"
+                client_name_cache[cid] = client_label
         name_items = p.get("Название", p.get("Вопрос", {}))
         desc = _extract_text(name_items)[:40]
         lines.append(f"• {client_label} — {desc}: <b>{debt:,.0f}₽</b>")
