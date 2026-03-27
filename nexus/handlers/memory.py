@@ -211,7 +211,7 @@ async def handle_adhd_command(message: Message, user_notion_id: str = "") -> Non
         if items:
             lines.append(f"<b>{group_name} ({len(items)}):</b>")
             for item in items:
-                lines.append(f"  • {item}")
+                lines.append(f"  <i>• {item}</i>")
             lines.append("")
 
     full_text = "\n".join(lines)
