@@ -1182,6 +1182,64 @@ async def task_cancel(call: CallbackQuery) -> None:
     await call.message.edit_text("❌ Отмена.")
     await call.answer()
 
+@router.callback_query(F.data == "task_ok")
+async def task_ok_cb(call: CallbackQuery) -> None:
+    """Кнопка «👌 Ок» — просто убрать клавиатуру."""
+    await call.message.edit_reply_markup()
+    await call.answer()
+
+
+@router.callback_query(F.data.startswith("task_subtask_"))
+async def task_subtask_cb(call: CallbackQuery) -> None:
+    """Кнопка «📋 Разбить на подзадачи» после создания задачи."""
+    from core.list_manager import pending_set as list_pending_set
+    uid = call.from_user.id
+
+    # callback_data = "task_subtask_{rel_type}_{id_prefix}"
+    parts = call.data.split("_", 3)  # ['task', 'subtask', 'work|task', id_prefix]
+    rel_type = parts[2] if len(parts) > 2 else "task"
+    id_prefix = parts[3] if len(parts) > 3 else ""
+
+    # Получаем название задачи из текста сообщения (строка с 📌)
+    task_name = "Подзадачи"
+    if call.message and call.message.text:
+        for line in call.message.text.split("\n"):
+            if line.startswith("📌"):
+                task_name = line.replace("📌", "").strip()
+                break
+
+    # Ищем полный task_id по префиксу через Notion
+    task_id = id_prefix
+    try:
+        from core.config import config
+        from core.notion_client import db_query
+        db_id = config.arcana.db_works if rel_type == "work" else config.nexus.db_tasks
+        if db_id and id_prefix:
+            pages = await db_query(db_id, page_size=20)
+            for page in pages:
+                if page.get("id", "").replace("-", "").startswith(id_prefix.replace("-", "")):
+                    task_id = page["id"]
+                    break
+    except Exception as e:
+        logger.warning("task_subtask: lookup error: %s", e)
+
+    list_pending_set(uid, {
+        "action": "subtask_items",
+        "task_id": task_id,
+        "task_name": task_name,
+        "rel_type": rel_type,
+        "user_notion_id": "",
+    })
+
+    await call.message.edit_reply_markup()
+    await call.message.answer(
+        f"📋 Разбиваю «{task_name}» на подзадачи\n"
+        f"Напиши пункты (каждый с новой строки или через запятую):",
+        parse_mode="HTML",
+    )
+    await call.answer()
+
+
 _DONE_PHRASES = [
     "🎉 Кай, ты просто огонь!",
     "✨ Ты просто магия!",
@@ -1442,6 +1500,7 @@ async def _do_save_task(message: Message, data: dict, chat_id: int = None, uid: 
         await _schedule_deadline_check(cid, data["title"], deadline, result, tz_offset)
 
     extra = ""
+    arcana_result = None
     if data.get("for_practice") and config.arcana.db_tasks:
         real_priority = await match_select(config.arcana.db_tasks, "Приоритет", data.get("priority") or "Важно")
         real_category = await match_select(config.arcana.db_tasks, "Категория", data.get("category", "💳 Прочее"))
@@ -1476,13 +1535,21 @@ async def _do_save_task(message: Message, data: dict, chat_id: int = None, uid: 
 
     msg_id = data.get("msg_id")
     text_content = (
-        f"✅ <b>Задача создана!</b>\n"
+        f"⚡ <b>Задача создана!</b>\n"
         f"📌 {data['title']}\n"
         f"🏷 {real_category} · {_priority_display(real_priority)}\n"
         f"📅 Дедлайн: {deadline_display}\n"
         f"🔔 Напоминание: {reminder_display}{repeat_line}{extra}"
     )
-    
+
+    # Inline-кнопки: предложить разбить на подзадачи
+    _rel = "work" if (data.get("for_practice") and arcana_result) else "task"
+    _tid = arcana_result if _rel == "work" else result
+    _suggest_kb = InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text="📋 Разбить на подзадачи", callback_data=f"task_subtask_{_rel}_{_tid[:24]}"),
+        InlineKeyboardButton(text="👌 Ок", callback_data="task_ok"),
+    ]])
+
     await react(message, "⚡")
 
     # Редактируем старое сообщение вместо создания нового
@@ -1492,13 +1559,14 @@ async def _do_save_task(message: Message, data: dict, chat_id: int = None, uid: 
                 chat_id=message.chat.id,
                 message_id=msg_id,
                 text=text_content,
-                parse_mode="HTML"
+                parse_mode="HTML",
+                reply_markup=_suggest_kb,
             )
         except Exception as e:
             logger.warning("edit_message error: %s, fallback to answer", e)
-            await message.answer(text_content, parse_mode="HTML")
+            await message.answer(text_content, parse_mode="HTML", reply_markup=_suggest_kb)
     else:
-        await message.answer(text_content, parse_mode="HTML")
+        await message.answer(text_content, parse_mode="HTML", reply_markup=_suggest_kb)
 
     try:
         from nexus.handlers.memory import suggest_memory
