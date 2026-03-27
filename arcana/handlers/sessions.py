@@ -9,10 +9,45 @@ from datetime import datetime, timezone, timedelta
 from aiogram.types import Message
 from core.claude_client import ask_claude, ask_claude_vision
 from core.notion_client import session_add, client_find, log_error
-from core.option_helper import format_option
 
 logger = logging.getLogger("arcana.sessions")
 MOSCOW_TZ = timezone(timedelta(hours=3))
+
+SPREAD_MAP = {
+    "триплет": "🔺 Триплет",
+    "3 карты": "🔺 Триплет",
+    "три карты": "🔺 Триплет",
+    "сфера": "🌐 Сфера жизни",
+    "сфера жизни": "🌐 Сфера жизни",
+    "кельтский": "✝️ Кельтский крест",
+    "кельтский крест": "✝️ Кельтский крест",
+    "celtic cross": "✝️ Кельтский крест",
+    "воздействия": "⚡ Магические воздействия",
+    "магические воздействия": "⚡ Магические воздействия",
+    "диагностика перед ритуалом": "🔍 Диагностика перед ритуалом",
+    "диагностика": "🔍 Диагностика перед ритуалом",
+    "способности": "✨ Диагностика способностей",
+    "диагностика способностей": "✨ Диагностика способностей",
+    "родовой": "🌳 Родовой узел",
+    "родовой узел": "🌳 Родовой узел",
+}
+
+
+def _match_spread(text: str) -> str:
+    """Fuzzy-матч текста от Claude → emoji-prefixed значение для Notion multi-select."""
+    if not text:
+        return ""
+    low = text.strip().lower()
+    # exact match
+    if low in SPREAD_MAP:
+        return SPREAD_MAP[low]
+    # partial match — ключ содержится в тексте или текст содержится в ключе
+    for key, value in SPREAD_MAP.items():
+        if key in low or low in key:
+            return value
+    # fallback — вернуть оригинал (лучше чем ошибка)
+    return text.strip()
+
 
 PARSE_SESSION_SYSTEM = (
     "Извлеки данные о сеансе таро. Ответь ТОЛЬКО JSON без markdown:\n"
@@ -65,9 +100,11 @@ async def handle_add_session(message: Message, text: str, user_notion_id: str = 
             max_tokens=2000,
         )
 
+    spread = _match_spread(data.get("spread_type") or "")
+
     await session_add(
         date=_now_iso(),
-        spread_type=format_option(data.get("spread_type", "Другой")),
+        spread_type=spread,
         question=data.get("question", ""),
         cards=cards_text,
         interpretation=interpretation,

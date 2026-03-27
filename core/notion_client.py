@@ -119,6 +119,12 @@ async def page_create(db_id: str, props: dict) -> Optional[str]:
         logger.error("page_create error: %s", e)
         return None
 
+async def get_page(page_id: str) -> dict:
+    """Получить страницу Notion по ID."""
+    resp = await _notion()._client.pages.retrieve(page_id=page_id)
+    return resp
+
+
 async def update_page(page_id: str, props: dict) -> None:
     await _notion().update_page(page_id, props)
 
@@ -760,6 +766,8 @@ async def session_add(
         "Сумма":      _number(amount),
         "Оплачено":   _number(paid),
     }
+    if spread_type:
+        props["Тип расклада"] = _multi_select([spread_type])
     if cards:
         props["Карты"] = _text(cards)
     if interpretation:
