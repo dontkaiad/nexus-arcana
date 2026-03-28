@@ -670,7 +670,6 @@ async def process_text(msg: Message, text: str, user_notion_id: str = "") -> Non
             await react(msg, "🤔")
         # Show UI if arcana clarify needed
         elif arcana_clarify_text:
-            from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
             kb = InlineKeyboardMarkup(inline_keyboard=[
                 [
                     InlineKeyboardButton(text="🔮 Это для Арканы", callback_data=f"arcana_choice_yes_{msg.from_user.id}"),
@@ -685,7 +684,6 @@ async def process_text(msg: Message, text: str, user_notion_id: str = "") -> Non
             await react(msg, "🤔")
         # Show UI if low confidence finance
         elif has_clarify and finance_data:
-            from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
             kb = InlineKeyboardMarkup(inline_keyboard=[
                 [
                     InlineKeyboardButton(text="💸 Расход", callback_data=f"fin_type_expense_{msg.from_user.id}"),
