@@ -834,7 +834,7 @@ async def process_item(data: Dict[str, Any], original_text: str, msg, clarify: d
         return ""
 
     if kind == "unknown":
-        return "❓ Не смог разобрать. Попробуй переформулировать."
+        return f"unknown_clarify:{original_text}"
     
     if kind == "parse_error":
         logged = await log_error(original_text, "parse_error", _classify_last_raw, error_code="–")
