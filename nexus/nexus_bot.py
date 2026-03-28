@@ -47,6 +47,7 @@ MOSCOW_TZ = timezone(timedelta(hours=3))
 _clarify: dict = {}
 _pending_finance: dict = {}  # user_id → (kind, amount, category, source, title)
 _pending_arcana: dict = {}  # user_id → text (оригинальный для arcana_clarify)
+_pending_unknown: dict = {}  # user_id → (text, user_notion_id, ts)
 
 
 @dp.message(Command("start"))
@@ -616,6 +617,7 @@ async def process_text(msg: Message, text: str, user_notion_id: str = "") -> Non
         has_clarify = False
         finance_data = None
         arcana_clarify_text = None
+        unknown_clarify_text = None
 
         for data in items:
             logger.info("handle_text: processing item type=%s", data.get("type"))
@@ -641,11 +643,33 @@ async def process_text(msg: Message, text: str, user_notion_id: str = "") -> Non
                 if len(parts) == 2:
                     arcana_clarify_text = parts[1]
                     _pending_arcana[msg.from_user.id] = arcana_clarify_text
+            elif line and line.startswith("unknown_clarify:"):
+                unknown_clarify_text = line.split(":", 1)[1]
+                import time as _time
+                _pending_unknown[msg.from_user.id] = (unknown_clarify_text, user_notion_id, _time.time())
             elif line:
                 lines.append(line)
 
+        # Show UI if unknown — offer action buttons
+        if unknown_clarify_text:
+            short = unknown_clarify_text[:60]
+            kb = InlineKeyboardMarkup(inline_keyboard=[
+                [
+                    InlineKeyboardButton(text="🛒 В покупки", callback_data=f"unk_buy_{msg.from_user.id}"),
+                    InlineKeyboardButton(text="📋 Задача", callback_data=f"unk_task_{msg.from_user.id}"),
+                ],
+                [
+                    InlineKeyboardButton(text="📝 Заметка", callback_data=f"unk_note_{msg.from_user.id}"),
+                    InlineKeyboardButton(text="🧠 Запомнить", callback_data=f"unk_mem_{msg.from_user.id}"),
+                ]
+            ])
+            await msg.answer(
+                f"🤔 Не понял «<b>{short}</b>»\nЧто сделать?",
+                reply_markup=kb,
+            )
+            await react(msg, "🤔")
         # Show UI if arcana clarify needed
-        if arcana_clarify_text:
+        elif arcana_clarify_text:
             from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
             kb = InlineKeyboardMarkup(inline_keyboard=[
                 [
@@ -1189,6 +1213,55 @@ async def on_finance_clarify(query: CallbackQuery, user_notion_id: str = "") -> 
 
     await query.message.edit_text(text_msg)
     await query.answer("✅ Сохранено")
+
+
+_UNKNOWN_TTL = 300  # 5 min
+
+
+@dp.callback_query(lambda c: c.data and c.data.startswith("unk_"))
+async def on_unknown_clarify(query: CallbackQuery, user_notion_id: str = "") -> None:
+    """Handle unknown text → user chose action type."""
+    import time as _time
+
+    uid = query.from_user.id
+    pending = _pending_unknown.pop(uid, None)
+    if not pending or _time.time() - pending[2] > _UNKNOWN_TTL:
+        await query.answer("⏰ Время истекло, отправь текст ещё раз")
+        return
+
+    original_text, stored_uid, _ = pending
+    notion_id = stored_uid or user_notion_id
+
+    # Parse action: unk_buy_123, unk_task_123, unk_note_123, unk_mem_123
+    action = query.data.split("_")[1]  # buy, task, note, mem
+
+    if action == "buy":
+        from nexus.handlers.lists import handle_list_buy
+        fake_data = {"text": original_text}
+        await handle_list_buy(query.message, fake_data, user_notion_id=notion_id)
+        await query.answer("🛒 Добавляю в покупки")
+
+    elif action == "task":
+        from core.notion_client import task_add
+        result = await task_add(title=original_text, category="💳 Прочее", priority="Важно",
+                                user_notion_id=notion_id)
+        if result:
+            await query.message.edit_text(f"📋 <b>{original_text}</b>\n🟡 Важно · 💳 Прочее")
+        else:
+            await query.message.edit_text("❌ Ошибка при создании задачи")
+        await query.answer("📋 Задача создана" if result else "❌ Ошибка")
+
+    elif action == "note":
+        from nexus.handlers.notes import handle_note
+        await handle_note(query.message, original_text, config.nexus.db_notes,
+                          user_notion_id=notion_id)
+        await query.answer("📝 Создаю заметку")
+
+    elif action == "mem":
+        from nexus.handlers.memory import handle_memory_save
+        fake_data = {"text": original_text}
+        await handle_memory_save(query.message, fake_data, user_notion_id=notion_id)
+        await query.answer("🧠 Сохраняю в память")
 
 
 @dp.message()
