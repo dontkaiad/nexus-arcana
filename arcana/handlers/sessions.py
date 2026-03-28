@@ -8,10 +8,10 @@ from datetime import datetime, timezone, timedelta
 
 from aiogram.types import Message
 from core.claude_client import ask_claude, ask_claude_vision
-from core.notion_client import session_add, client_find, log_error
+from core.notion_client import session_add, client_find, log_error, finance_add
+from core.shared_handlers import get_user_tz
 
 logger = logging.getLogger("arcana.sessions")
-MOSCOW_TZ = timezone(timedelta(hours=3))
 
 SPREAD_MAP = {
     "триплет": "🔺 Триплет",
@@ -49,10 +49,20 @@ def _match_spread(text: str) -> str:
     return text.strip()
 
 
+PAYMENT_SOURCE_MAP = {
+    "карта": "💳 Карта",
+    "наличные": "💵 Наличные",
+    "бартер": "🔄 Бартер",
+}
+
 PARSE_SESSION_SYSTEM = (
     "Извлеки данные о сеансе таро. Ответь ТОЛЬКО JSON без markdown:\n"
-    '{"client_name": "имя или null", "spread_type": "Кельтский крест|3 карты|Расклад на месяц|Другой", '
-    '"question": "тема", "cards": "карты через запятую или null", "amount": число, "paid": число}'
+    '{"client_name": "имя или null", "spread_type": "тип расклада", '
+    '"question": "тема/вопрос", "cards": "карты через запятую или null", '
+    '"area": "Отношения|Финансы|Работа|Здоровье|Род|Общая ситуация или null", '
+    '"deck": "Уэйта|Dark Wood Tarot|Ленорман|Игральные|Deviant Moon или null", '
+    '"amount": число, "paid": число, '
+    '"payment_source": "карта|наличные|бартер или null"}'
 )
 
 TAROT_SYSTEM = (
@@ -68,11 +78,15 @@ VISION_SYSTEM = (
 )
 
 
-def _now_iso() -> str:
-    return datetime.now(MOSCOW_TZ).isoformat()
+def _now_iso(tz) -> str:
+    return datetime.now(tz).isoformat()
 
 
 async def handle_add_session(message: Message, text: str, user_notion_id: str = "") -> None:
+    tg_id = message.from_user.id
+    tz_offset = await get_user_tz(tg_id)
+    tz = timezone(timedelta(hours=tz_offset))
+
     raw = await ask_claude(text, system=PARSE_SESSION_SYSTEM, max_tokens=300)
     try:
         raw = raw.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
@@ -101,26 +115,47 @@ async def handle_add_session(message: Message, text: str, user_notion_id: str = 
         )
 
     spread = _match_spread(data.get("spread_type") or "")
+    area = data.get("area") or None
+    deck = data.get("deck") or None
+    payment_source_raw = data.get("payment_source") or None
+    payment_source = PAYMENT_SOURCE_MAP.get((payment_source_raw or "").lower(), payment_source_raw) if payment_source_raw else None
+    amount = float(data.get("amount") or 0)
+    paid = float(data.get("paid") or 0)
 
     await session_add(
-        date=_now_iso(),
+        date=_now_iso(tz),
         spread_type=spread,
         question=data.get("question", ""),
         cards=cards_text,
         interpretation=interpretation,
-        amount=float(data.get("amount") or 0),
-        paid=float(data.get("paid") or 0),
+        amount=amount,
+        paid=paid,
         session_type="Личный" if is_personal else "Клиентский",
         client_id=client_id,
         user_notion_id=user_notion_id,
+        area=area,
+        deck=deck,
+        payment_source=payment_source,
     )
 
-    debt = max(0, float(data.get("amount") or 0) - float(data.get("paid") or 0))
+    if amount > 0:
+        await finance_add(
+            date=datetime.now(tz).strftime("%Y-%m-%d"),
+            amount=amount,
+            category="🔮 Практика",
+            type_="💰 Доход",
+            source=payment_source or "💳 Карта",
+            bot_label="🌒 Arcana",
+            description=f"🃏 {data.get('spread_type') or 'Расклад'}" + (f" — {client_name}" if client_name else ""),
+            user_notion_id=user_notion_id,
+        )
+
+    debt = max(0, amount - paid)
     reply = (
         f"✅ Сеанс записан\n"
         f"{'🔮 Личный' if is_personal else '👤 ' + client_name}\n"
         f"🃏 {data.get('spread_type', '')}\n"
-        f"{'💰 ' + str(int(data.get('amount'))) + '₽' if data.get('amount') else ''}"
+        f"{'💰 ' + str(int(amount)) + '₽' if amount else ''}"
         f"{'  ⚠️ долг ' + str(int(debt)) + '₽' if debt > 0 else ''}"
     )
 
