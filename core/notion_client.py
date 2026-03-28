@@ -871,6 +871,92 @@ async def ritual_add(
         props["Сумма подношений"] = _number(offerings_cost)
     return await page_create(db_id, props)
 
+# ─── Arcana: Works ───────────────────────────────────────────────────────────
+
+async def work_add(
+    title: str,
+    date: str = "",
+    priority: str = "Можно потом",
+    category: Optional[str] = None,
+    work_type: Optional[str] = None,
+    client_id: Optional[str] = None,
+    user_notion_id: str = "",
+) -> Optional[str]:
+    """Создать работу в 🔮 Работы."""
+    from core.config import config
+    db_id = config.arcana.db_works or os.environ.get("NOTION_DB_WORKS", "")
+    if not db_id:
+        logger.error("work_add: NOTION_DB_WORKS not configured")
+        return None
+    real_priority = await match_select(db_id, "Приоритет", priority)
+    props: dict = {
+        "Работа": _title(title),
+        "Status": _status("Not started"),
+        "Приоритет": _select(real_priority),
+    }
+    if category:
+        real_category = await match_select(db_id, "Категория", category)
+        props["Категория"] = _select(real_category)
+    if work_type:
+        real_type = await match_select(db_id, "Тип", work_type)
+        props["Тип"] = _select(real_type)
+    if date:
+        props["Дедлайн"] = _date(date)
+    if client_id:
+        props["Клиенты"] = _relation(client_id)
+    if user_notion_id:
+        props["🪪 Пользователи"] = _relation(user_notion_id)
+    return await page_create(db_id, props)
+
+
+async def works_list(
+    user_notion_id: str = "",
+    status_filter: Optional[str] = None,
+) -> List[dict]:
+    """Все работы пользователя, отсортированные по дедлайну."""
+    from core.config import config
+    db_id = config.arcana.db_works or os.environ.get("NOTION_DB_WORKS", "")
+    if not db_id:
+        return []
+    base_filter: Optional[dict] = {
+        "and": [
+            {"property": "Status", "status": {"does_not_equal": "Done"}},
+            {"property": "Status", "status": {"does_not_equal": "Complete"}},
+        ]
+    }
+    if status_filter:
+        base_filter = {"property": "Status", "status": {"equals": status_filter}}
+    filters = _with_user_filter(base_filter, user_notion_id)
+    return await query_pages(
+        db_id,
+        filters=filters,
+        sorts=[{"property": "Дедлайн", "direction": "ascending"}],
+        page_size=50,
+    )
+
+
+async def work_done(page_id: str) -> bool:
+    """Пометить работу как Done."""
+    try:
+        await update_page(page_id, {"Status": _status("Done")})
+        logger.info("work_done: page=%s", page_id[:8])
+        return True
+    except Exception as e:
+        logger.error("work_done error: %s", e)
+        return False
+
+
+async def work_update(page_id: str, props: dict) -> bool:
+    """Обновить поля работы."""
+    try:
+        await update_page(page_id, props)
+        logger.info("work_update: page=%s", page_id[:8])
+        return True
+    except Exception as e:
+        logger.error("work_update error: %s", e)
+        return False
+
+
 def clear_db_options_cache() -> None:
     """Очистить кеш опций БД (если схема изменилась)."""
     global _db_options_cache
