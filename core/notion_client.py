@@ -757,8 +757,12 @@ async def session_add(
     session_type: str = "Личный",
     client_id: Optional[str] = None,
     user_notion_id: str = "",
+    area: Optional[str] = None,
+    deck: Optional[str] = None,
+    payment_source: Optional[str] = None,
 ) -> Optional[str]:
     from core.config import config
+    db_id = config.arcana.db_sessions
     props = {
         "Тема":       _title(question or spread_type or "Сеанс"),
         "Дата":       _date(date[:10]),
@@ -776,10 +780,41 @@ async def session_add(
         props["Клиенты"] = _relation(client_id)
     if user_notion_id:
         props["🪪 Пользователи"] = _relation(user_notion_id)
-    return await page_create(config.arcana.db_sessions, props)
+    if area:
+        props["Область"] = _select(area)
+    if deck:
+        props["Колоды"] = _multi_select([deck])
+    if payment_source:
+        real_src = await match_select(db_id, "Источник", payment_source)
+        props["Источник"] = _select(real_src)
+    return await page_create(db_id, props)
 
 
 # ─── Arcana: Rituals ──────────────────────────────────────────────────────────
+
+_RITUAL_GOAL_MAP = {
+    "привлечение": "🧲 Привлечение",
+    "защита": "🛡️ Защита",
+    "очищение": "🌊 Очищение",
+    "любовь": "💕 Любовь",
+    "финансы": "💰 Финансы",
+    "деструктив": "💀 Деструктив",
+    "развязка": "⚔️ Развязка",
+    "приворот": "💘 Приворот",
+    "другое": "🔮 Другое",
+}
+
+_RITUAL_PLACE_MAP = {
+    "дома": "🏠 Дома",
+    "лес": "🌲 Лес",
+    "погост": "✝️ Погост",
+    "перекрёсток": "🛤️ Перекрёсток",
+    "церковь": "⛪ Церковь",
+    "водоём": "🌊 Водоём",
+    "поле": "🌾 Поле",
+    "другое": "📍 Другое",
+}
+
 
 async def ritual_add(
     name: str,
@@ -795,8 +830,14 @@ async def ritual_add(
     paid: float = 0,
     client_id: Optional[str] = None,
     user_notion_id: str = "",
+    goal: Optional[str] = None,
+    place: Optional[str] = None,
+    notes: Optional[str] = None,
+    payment_source: Optional[str] = None,
+    offerings_cost: Optional[float] = None,
 ) -> Optional[str]:
     from core.config import config
+    db_id = config.arcana.db_rituals
     props = {
         "Название":         _title(name),
         "Дата":             _date(date),
@@ -815,7 +856,20 @@ async def ritual_add(
         props["Клиенты"] = _relation(client_id)
     if user_notion_id:
         props["🪪 Пользователи"] = _relation(user_notion_id)
-    return await page_create(config.arcana.db_rituals, props)
+    if goal:
+        mapped_goal = _RITUAL_GOAL_MAP.get(goal.lower(), goal)
+        props["Цель"] = _multi_select([mapped_goal])
+    if place:
+        mapped_place = _RITUAL_PLACE_MAP.get(place.lower(), place)
+        props["Место"] = _select(mapped_place)
+    if notes:
+        props["Заметки"] = _text(notes)
+    if payment_source:
+        real_src = await match_select(db_id, "Источник оплаты", payment_source)
+        props["Источник оплаты"] = _select(real_src)
+    if offerings_cost and offerings_cost > 0:
+        props["Сумма подношений"] = _number(offerings_cost)
+    return await page_create(db_id, props)
 
 def clear_db_options_cache() -> None:
     """Очистить кеш опций БД (если схема изменилась)."""
