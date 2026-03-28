@@ -28,7 +28,10 @@ client_info  — инфо о клиенте
 debt         — долги клиентов
 tarot_interp — трактовка таро
 delete       — удалить записи («удали», «удалить», «убери»)
-nexus        — финансы, расходы, доходы, задачи, заметки, покупки
+work         — работа, задача, напомни, сделать, дедлайн
+work_done    — работа сделана, выполнил работу
+work_list    — список работ, что делать
+nexus        — финансы, расходы, доходы, заметки, покупки
 unknown      — остальное"""
 
 
@@ -130,6 +133,7 @@ async def route_message(message: Message, user_notion_id: str = "") -> None:
         from arcana.handlers.sessions import handle_add_session, handle_tarot_interpret
         from arcana.handlers.rituals import handle_add_ritual
         from arcana.handlers.delete import handle_delete
+        from arcana.handlers.works import handle_add_work, handle_work_done, handle_works_list
 
         dispatch = {
             "new_client":   lambda: handle_add_client(message, text, user_notion_id),
@@ -139,6 +143,9 @@ async def route_message(message: Message, user_notion_id: str = "") -> None:
             "debt":         lambda: handle_debts(message, user_notion_id),
             "tarot_interp": lambda: handle_tarot_interpret(message, text),
             "delete":       lambda: handle_delete(message, text),
+            "work":         lambda: handle_add_work(message, text, user_notion_id),
+            "work_done":    lambda: handle_work_done(message, text, user_notion_id),
+            "work_list":    lambda: handle_works_list(message, user_notion_id),
         }
 
         handler = dispatch.get(intent)

@@ -4,6 +4,7 @@ from __future__ import annotations
 import base64
 import json
 import logging
+import traceback as tb
 from datetime import datetime, timezone, timedelta
 
 from aiogram.types import Message
@@ -83,89 +84,111 @@ def _now_iso(tz) -> str:
 
 
 async def handle_add_session(message: Message, text: str, user_notion_id: str = "") -> None:
-    tg_id = message.from_user.id
-    tz_offset = await get_user_tz(tg_id)
-    tz = timezone(timedelta(hours=tz_offset))
-
-    raw = await ask_claude(text, system=PARSE_SESSION_SYSTEM, max_tokens=300)
     try:
-        raw = raw.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
-        data = json.loads(raw)
-    except Exception:
-        await log_error(text, "parse_error", raw)
-        await message.answer("⚠️ Не смог разобрать данные сеанса.")
-        return
+        tg_id = message.from_user.id
+        tz_offset = await get_user_tz(tg_id)
+        tz = timezone(timedelta(hours=tz_offset))
 
-    client_name = data.get("client_name")
-    is_personal = not client_name
-    client_id = None
+        raw = await ask_claude(text, system=PARSE_SESSION_SYSTEM, max_tokens=300)
+        try:
+            raw = raw.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
+            data = json.loads(raw)
+        except Exception:
+            await log_error(text, "parse_error", bot_label="🌒 Arcana", error_code="–")
+            await message.answer("⚠️ Не смог разобрать данные сеанса.")
+            return
 
-    if not is_personal:
-        client = await client_find(client_name, user_notion_id=user_notion_id)
-        if client:
-            client_id = client["id"]
+        client_name = data.get("client_name")
+        is_personal = not client_name
+        client_id = None
 
-    cards_text = data.get("cards") or ""
-    interpretation = ""
-    if cards_text:
-        interpretation = await ask_claude(
-            f"Расклад: {data.get('spread_type', '')}\nВопрос: {data.get('question', '')}\nКарты: {cards_text}",
-            system=TAROT_SYSTEM,
-            max_tokens=2000,
-        )
+        if not is_personal:
+            client = await client_find(client_name, user_notion_id=user_notion_id)
+            if client:
+                client_id = client["id"]
 
-    spread = _match_spread(data.get("spread_type") or "")
-    area = data.get("area") or None
-    deck = data.get("deck") or None
-    payment_source_raw = data.get("payment_source") or None
-    payment_source = PAYMENT_SOURCE_MAP.get((payment_source_raw or "").lower(), payment_source_raw) if payment_source_raw else None
-    amount = float(data.get("amount") or 0)
-    paid = float(data.get("paid") or 0)
+        cards_text = data.get("cards") or ""
+        interpretation = ""
+        if cards_text:
+            interpretation = await ask_claude(
+                f"Расклад: {data.get('spread_type', '')}\nВопрос: {data.get('question', '')}\nКарты: {cards_text}",
+                system=TAROT_SYSTEM,
+                max_tokens=2000,
+            )
 
-    await session_add(
-        date=_now_iso(tz),
-        spread_type=spread,
-        question=data.get("question", ""),
-        cards=cards_text,
-        interpretation=interpretation,
-        amount=amount,
-        paid=paid,
-        session_type="Личный" if is_personal else "Клиентский",
-        client_id=client_id,
-        user_notion_id=user_notion_id,
-        area=area,
-        deck=deck,
-        payment_source=payment_source,
-    )
+        spread = _match_spread(data.get("spread_type") or "")
+        area = data.get("area") or None
+        deck = data.get("deck") or None
+        payment_source_raw = data.get("payment_source") or None
+        payment_source = PAYMENT_SOURCE_MAP.get((payment_source_raw or "").lower(), payment_source_raw) if payment_source_raw else None
+        amount = float(data.get("amount") or 0)
+        paid = float(data.get("paid") or 0)
 
-    if amount > 0:
-        await finance_add(
-            date=datetime.now(tz).strftime("%Y-%m-%d"),
+        await session_add(
+            date=_now_iso(tz),
+            spread_type=spread,
+            question=data.get("question", ""),
+            cards=cards_text,
+            interpretation=interpretation,
             amount=amount,
-            category="🔮 Практика",
-            type_="💰 Доход",
-            source=payment_source or "💳 Карта",
-            bot_label="🌒 Arcana",
-            description=f"🃏 {data.get('spread_type') or 'Расклад'}" + (f" — {client_name}" if client_name else ""),
+            paid=paid,
+            session_type="Личный" if is_personal else "Клиентский",
+            client_id=client_id,
             user_notion_id=user_notion_id,
+            area=area,
+            deck=deck,
+            payment_source=payment_source,
         )
 
-    debt = max(0, amount - paid)
-    reply = (
-        f"✅ Сеанс записан\n"
-        f"{'🔮 Личный' if is_personal else '👤 ' + client_name}\n"
-        f"🃏 {data.get('spread_type', '')}\n"
-        f"{'💰 ' + str(int(amount)) + '₽' if amount else ''}"
-        f"{'  ⚠️ долг ' + str(int(debt)) + '₽' if debt > 0 else ''}"
-    )
+        if amount > 0:
+            await finance_add(
+                date=datetime.now(tz).strftime("%Y-%m-%d"),
+                amount=amount,
+                category="🔮 Практика",
+                type_="💰 Доход",
+                source=payment_source or "💳 Карта",
+                bot_label="🌒 Arcana",
+                description=f"🃏 {data.get('spread_type') or 'Расклад'}" + (f" — {client_name}" if client_name else ""),
+                user_notion_id=user_notion_id,
+            )
 
-    if interpretation:
-        await message.answer(reply)
-        for chunk_start in range(0, min(len(interpretation), 7000), 4000):
-            await message.answer(f"🔮 <b>Трактовка:</b>\n\n{interpretation[chunk_start:chunk_start+4000]}"
-                                 if chunk_start == 0 else interpretation[chunk_start:chunk_start+4000])
-    else:
-        await message.answer(reply)
+        debt = max(0, amount - paid)
+        reply = (
+            f"✅ Сеанс записан\n"
+            f"{'🔮 Личный' if is_personal else '👤 ' + client_name}\n"
+            f"🃏 {data.get('spread_type', '')}\n"
+            f"{'💰 ' + str(int(amount)) + '₽' if amount else ''}"
+            f"{'  ⚠️ долг ' + str(int(debt)) + '₽' if debt > 0 else ''}"
+        )
+
+        if interpretation:
+            await message.answer(reply)
+            for chunk_start in range(0, min(len(interpretation), 7000), 4000):
+                await message.answer(f"🔮 <b>Трактовка:</b>\n\n{interpretation[chunk_start:chunk_start+4000]}"
+                                     if chunk_start == 0 else interpretation[chunk_start:chunk_start+4000])
+        else:
+            await message.answer(reply)
+
+    except Exception as e:
+        trace = tb.format_exc()
+        logger.error("handle_add_session error: %s", trace)
+        err_str = str(e)
+        if "529" in err_str:
+            code, suffix = "529", "серверная ошибка Anthropic · попробуй позже"
+        elif any(x in err_str for x in ("500", "502", "503")):
+            code, suffix = "5xx", "серверная ошибка · попробуй позже"
+        elif "timeout" in err_str.lower():
+            code, suffix = "timeout", "запрос завис · попробуй ещё раз"
+        elif any(x in err_str for x in ("401", "403", "404")):
+            code, suffix = "4xx", "ошибка конфигурации · пусть Кай правит код"
+        else:
+            code, suffix = "–", "что-то сломалось · пусть Кай правит код"
+        logged = await log_error(
+            (message.text or "")[:200], "processing_error",
+            traceback=trace, bot_label="🌒 Arcana", error_code=code
+        )
+        notion_status = "записано в ⚠️Ошибки" if logged else "лог недоступен"
+        await message.answer(f"❌ {suffix} · {notion_status}")
 
 
 async def handle_tarot_photo(message: Message) -> None:

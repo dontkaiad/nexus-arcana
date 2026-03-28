@@ -22,10 +22,15 @@ async def main():
 
     from aiogram.filters import Command as ArcanaCommand
     from arcana.handlers.lists import handle_list_command as arcana_list_cmd
+    from arcana.handlers.works import handle_works_list as arcana_works_list
 
     @dp.message(ArcanaCommand("list"))
     async def cmd_list(msg: Message, user_notion_id: str = "") -> None:
         await arcana_list_cmd(msg, user_notion_id=user_notion_id)
+
+    @dp.message(ArcanaCommand("works"))
+    async def cmd_works(msg: Message, user_notion_id: str = "") -> None:
+        await arcana_works_list(msg, user_notion_id)
 
     @dp.message(F.voice | F.audio)
     async def handle_voice(msg: Message, user_notion_id: str = "") -> None:
