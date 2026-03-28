@@ -7,21 +7,36 @@ from datetime import datetime, timezone, timedelta
 
 from aiogram.types import Message
 from core.claude_client import ask_claude
-from core.notion_client import ritual_add, client_find, log_error
+from core.notion_client import ritual_add, client_find, log_error, finance_add
+from core.shared_handlers import get_user_tz
 
 logger = logging.getLogger("arcana.rituals")
-MOSCOW_TZ = timezone(timedelta(hours=3))
+
+PAYMENT_SOURCE_MAP = {
+    "карта": "💳 Карта",
+    "наличные": "💵 Наличные",
+    "бартер": "🔄 Бартер",
+}
 
 PARSE_RITUAL_SYSTEM = (
     "Извлеки данные ритуала. Ответь ТОЛЬКО JSON без markdown:\n"
     '{"client_name": "имя или null", "name": "название", '
+    '"goal": "привлечение|защита|очищение|любовь|финансы|деструктив|развязка|приворот|другое или null", '
+    '"place": "дома|лес|погост|перекрёсток|церковь|водоём|поле|другое или null", '
     '"consumables": "расходники строкой", "consumables_cost": число, '
-    '"duration_min": число, "offerings": "подношения", "forces": "силы", '
-    '"structure": "последовательность", "amount": число, "paid": число}'
+    '"duration_min": число, "offerings": "подношения", "offerings_cost": число, '
+    '"forces": "силы", "structure": "последовательность", '
+    '"notes": "заметки или null", '
+    '"amount": число, "paid": число, '
+    '"payment_source": "карта|наличные|бартер или null"}'
 )
 
 
 async def handle_add_ritual(message: Message, text: str, user_notion_id: str = "") -> None:
+    tg_id = message.from_user.id
+    tz_offset = await get_user_tz(tg_id)
+    tz = timezone(timedelta(hours=tz_offset))
+
     raw = await ask_claude(text, system=PARSE_RITUAL_SYSTEM, max_tokens=600)
     try:
         raw = raw.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
@@ -38,7 +53,16 @@ async def handle_add_ritual(message: Message, text: str, user_notion_id: str = "
         if client:
             client_id = client["id"]
 
-    today = datetime.now(MOSCOW_TZ).strftime("%Y-%m-%d")
+    goal = data.get("goal") or None
+    place = data.get("place") or None
+    notes = data.get("notes") or None
+    offerings_cost = float(data.get("offerings_cost") or 0)
+    payment_source_raw = data.get("payment_source") or None
+    payment_source = PAYMENT_SOURCE_MAP.get((payment_source_raw or "").lower(), payment_source_raw) if payment_source_raw else None
+    amount = float(data.get("amount") or 0)
+    paid = float(data.get("paid") or 0)
+
+    today = datetime.now(tz).strftime("%Y-%m-%d")
     result = await ritual_add(
         name=data.get("name", "Ритуал"),
         date=today,
@@ -49,21 +73,38 @@ async def handle_add_ritual(message: Message, text: str, user_notion_id: str = "
         offerings=data.get("offerings") or "",
         forces=data.get("forces") or "",
         structure=data.get("structure") or "",
-        amount=float(data.get("amount") or 0),
-        paid=float(data.get("paid") or 0),
+        amount=amount,
+        paid=paid,
         client_id=client_id,
         user_notion_id=user_notion_id,
+        goal=goal,
+        place=place,
+        notes=notes,
+        payment_source=payment_source,
+        offerings_cost=offerings_cost if offerings_cost > 0 else None,
     )
     if not result:
         await message.answer("⚠️ Ошибка записи в Notion.")
         return
 
-    debt = max(0, float(data.get("amount") or 0) - float(data.get("paid") or 0))
+    if amount > 0:
+        await finance_add(
+            date=today,
+            amount=amount,
+            category="🔮 Практика",
+            type_="💰 Доход",
+            source=payment_source or "💳 Карта",
+            bot_label="🌒 Arcana",
+            description=f"🕯️ {data.get('name') or 'Ритуал'}" + (f" — {client_name}" if client_name else ""),
+            user_notion_id=user_notion_id,
+        )
+
+    debt = max(0, amount - paid)
     await message.answer(
         f"✅ Ритуал записан\n"
         f"🕯️ <b>{data.get('name', 'Ритуал')}</b>\n"
         f"{'👤 ' + client_name if client_name else '🔮 Личный'}\n"
         f"⏱ {data.get('duration_min') or '?'} мин · 🌿 расходники {data.get('consumables_cost') or 0}₽\n"
-        f"{'💰 ' + str(int(data.get('amount'))) + '₽' if data.get('amount') else ''}"
+        f"{'💰 ' + str(int(amount)) + '₽' if amount else ''}"
         f"{'  ⚠️ долг ' + str(int(debt)) + '₽' if debt > 0 else ''}"
     )
