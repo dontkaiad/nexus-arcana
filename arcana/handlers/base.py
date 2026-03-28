@@ -14,6 +14,7 @@ router = Router()
 logger = logging.getLogger("arcana.base")
 
 _clarify: dict = {}  # user_id → original_text
+_pending_unknown: dict = {}  # user_id → (text, user_notion_id, ts)
 
 ROUTER_SYSTEM = """Сначала исправь опечатки, потом определи тип. Ответь ТОЛЬКО одним словом.
 
@@ -146,9 +147,25 @@ async def route_message(message: Message, user_notion_id: str = "") -> None:
         elif intent == "nexus":
             await message.answer("☀️ Это для бота Nexus — перешли туда: @nexus_kailark_bot")
         elif intent in ("unknown", "") or not intent:
-            # Первый раз не поняла — переспрашиваем
-            _clarify[uid] = text
-            await message.answer("🤔 Не поняла — уточни, что сделать?")
+            # Первый раз не поняла — показать кнопки
+            import time as _time
+            from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+            _pending_unknown[uid] = (text, user_notion_id, _time.time())
+            short = text[:60]
+            kb = InlineKeyboardMarkup(inline_keyboard=[
+                [
+                    InlineKeyboardButton(text="🔮 Сеанс", callback_data=f"aunk_session_{uid}"),
+                    InlineKeyboardButton(text="✨ Ритуал", callback_data=f"aunk_ritual_{uid}"),
+                ],
+                [
+                    InlineKeyboardButton(text="👤 Клиент", callback_data=f"aunk_client_{uid}"),
+                    InlineKeyboardButton(text="🃏 Расклад", callback_data=f"aunk_tarot_{uid}"),
+                ]
+            ])
+            await message.answer(
+                f"🤔 Не поняла «<b>{short}</b>»\nЧто сделать?",
+                reply_markup=kb,
+            )
         else:
             logged = await log_error(text, "parse_error", bot_label="🌒 Arcana", error_code="–")
             notion_status = "записано в ⚠️Ошибки" if logged else "лог недоступен"
@@ -174,3 +191,41 @@ async def route_message(message: Message, user_notion_id: str = "") -> None:
         )
         notion_status = "записано в ⚠️Ошибки" if logged else "лог недоступен"
         await message.answer(f"❌ {suffix} · {notion_status}")
+
+
+_UNKNOWN_TTL = 300  # 5 min
+
+
+@router.callback_query(lambda c: c.data and c.data.startswith("aunk_"))
+async def on_arcana_unknown(query: CallbackQuery, user_notion_id: str = "") -> None:
+    """Handle arcana unknown text → user chose action type."""
+    import time as _time
+
+    uid = query.from_user.id
+    pending = _pending_unknown.pop(uid, None)
+    if not pending or _time.time() - pending[2] > _UNKNOWN_TTL:
+        await query.answer("⏰ Время истекло, отправь текст ещё раз")
+        return
+
+    original_text, stored_uid, _ = pending
+    notion_id = stored_uid or user_notion_id
+
+    # Parse action: aunk_session_123, aunk_ritual_123, etc.
+    action = query.data.split("_")[1]  # session, ritual, client, tarot
+
+    from arcana.handlers.clients import handle_add_client, handle_client_info
+    from arcana.handlers.sessions import handle_add_session, handle_tarot_interpret
+    from arcana.handlers.rituals import handle_add_ritual
+
+    if action == "session":
+        await handle_add_session(query.message, original_text, notion_id)
+        await query.answer("🔮 Записываю сеанс")
+    elif action == "ritual":
+        await handle_add_ritual(query.message, original_text, notion_id)
+        await query.answer("✨ Записываю ритуал")
+    elif action == "client":
+        await handle_add_client(query.message, original_text, notion_id)
+        await query.answer("👤 Добавляю клиента")
+    elif action == "tarot":
+        await handle_tarot_interpret(query.message, original_text)
+        await query.answer("🃏 Трактую расклад")
