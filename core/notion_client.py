@@ -107,6 +107,13 @@ def _extract_select(prop: dict) -> str:
     sel = prop.get("select")
     return sel["name"] if sel else ""
 
+def _extract_rollup_number(prop: dict) -> float:
+    """Извлечь число из Rollup поля Notion."""
+    rollup = prop.get("rollup", {})
+    if rollup.get("type") == "number":
+        return float(rollup.get("number") or 0)
+    return 0.0
+
 
 # ─── Generic ──────────────────────────────────────────────────────────────────
 
@@ -756,6 +763,38 @@ async def update_page_select(page_id: str, field_name: str, value: str) -> bool:
     except Exception as e:
         logger.error("update_page_select error: %s", e)
         return False
+
+
+async def arcana_finance_summary(
+    user_notion_id: str = "",
+    month: Optional[int] = None,
+    year: Optional[int] = None,
+) -> List[dict]:
+    """Финансовые записи Арканы (Бот=🌒 Arcana) за указанный месяц или все."""
+    from core.config import config
+    conditions: List[dict] = [
+        {"property": "Бот", "select": {"equals": "🌒 Arcana"}},
+    ]
+    if month and year:
+        start = f"{year}-{month:02d}-01"
+        if month == 12:
+            end = f"{year + 1}-01-01"
+        else:
+            end = f"{year}-{month + 1:02d}-01"
+        conditions.append({"property": "Дата", "date": {"on_or_after": start}})
+        conditions.append({"property": "Дата", "date": {"before": end}})
+    base_filter: Optional[dict] = {"and": conditions}
+    filters = _with_user_filter(base_filter, user_notion_id)
+    sorts = [{"property": "Дата", "direction": "descending"}]
+    return await query_pages(config.nexus.db_finance, filters=filters, sorts=sorts, page_size=200)
+
+
+async def arcana_clients_summary(user_notion_id: str = "") -> List[dict]:
+    """Все клиенты с rollup-полями: Всего оплачено, Общий долг, Кол-во сеансов, Кол-во ритуалов."""
+    from core.config import config
+    filters = _with_user_filter(None, user_notion_id)
+    sorts = [{"property": "Имя", "direction": "ascending"}]
+    return await query_pages(config.arcana.db_clients, filters=filters, sorts=sorts, page_size=200)
 
 
 async def arcana_all_debts(user_notion_id: str = "") -> List[dict]:
