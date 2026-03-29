@@ -151,8 +151,9 @@ def _parse_json_safe(raw: str) -> dict:
 async def handle_add_client(message: Message, text: str, user_notion_id: str = "") -> None:
     """Явное создание клиента («создай клиента»).
 
-    Создаёт сразу с той инфой что есть. Если контакта/запроса нет —
-    сохраняет pending и ждёт следующих сообщений с доп. инфой.
+    Сначала ищет в базе. Если нашла — показывает краткую инфу и предлагает
+    дополнить карточку. Если не нашла — создаёт сразу с имеющейся инфой,
+    при нехватке данных уходит в pending awaiting_info.
     """
     from arcana.pending_clients import save_pending_client
 
@@ -164,16 +165,42 @@ async def handle_add_client(message: Message, text: str, user_notion_id: str = "
         await message.answer("⚠️ Не нашла имя клиента.")
         return
 
+    uid = message.from_user.id
+
+    # ── Поиск в базе ────────────────────────────────────────────────────────────
     existing = await client_find(name, user_notion_id=user_notion_id)
     if existing:
-        existing_name = _extract_text(existing["properties"].get("Имя", {}))
-        await message.answer(f"👤 Клиент «{existing_name}» уже есть в базе.")
+        existing_id = existing["id"]
+        props = existing["properties"]
+        existing_name = _extract_text(props.get("Имя", {}))
+        contact = _extract_text(props.get("Контакт", {}))
+        request = _extract_text(props.get("Запрос", {}))
+        since = (props.get("Первое обращение", {}).get("date") or {}).get("start", "")[:10]
+
+        # Сохраняем pending с page_id существующего клиента для дополнения
+        await save_pending_client(uid, {
+            "step": "awaiting_info",
+            "name": existing_name,
+            "page_id": existing_id,
+            "contacts": [{"value": contact, "label": ""}] if contact else [],
+            "request": request,
+            "notes": "",
+            "user_notion_id": user_notion_id,
+        })
+        await message.answer(
+            f"👤 Нашла <b>{existing_name}</b>\n"
+            f"📱 {contact or '—'} · с {since or '—'}\n"
+            f"💬 {request or '—'}\n\n"
+            f"Дополнить карточку? Пришли новые контакты/фото/запрос,\nили нажми Готово.",
+            reply_markup=_done_kb(uid),
+            parse_mode="HTML",
+        )
         return
 
+    # ── Не нашла — создаём сразу ────────────────────────────────────────────────
     today = datetime.now(MOSCOW_TZ).strftime("%Y-%m-%d")
     contact = data.get("contact") or ""
     request = data.get("request") or ""
-    uid = message.from_user.id
 
     page_id = await client_add(
         name=name,
@@ -186,7 +213,7 @@ async def handle_add_client(message: Message, text: str, user_notion_id: str = "
         await message.answer("⚠️ Ошибка записи в Notion.")
         return
 
-    # Если чего-то не хватает — сохраняем pending и просим дослать
+    # Если чего-то не хватает — уходим в pending и ждём дополнения
     missing = []
     if not contact:
         missing.append("контакт (@ник / телефон)")
