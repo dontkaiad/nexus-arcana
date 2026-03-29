@@ -130,13 +130,30 @@ async def main():
         if await handle_list_pending(msg, user_notion_id):
             return
 
-        # Передать в base router как текст — имитируем текстовое сообщение
-        # Base router использует message.text, поэтому просто отвечаем подсказкой
-        await msg.answer("🌒 Распознано. Отправь этот текст сообщением для обработки.")
+        # Pending: правка трактовки таро
+        from arcana.pending_tarot import get_pending
+        pending = await get_pending(msg.from_user.id)
+        if pending and pending.get("awaiting_edit"):
+            from arcana.handlers.base import _handle_tarot_correction
+            msg.text = text
+            await _handle_tarot_correction(msg, text, pending, user_notion_id)
+            return
+
+        # Полный pipeline — подменяем text и роутим
+        msg.text = text
+        from arcana.handlers.base import route_message
+        await route_message(msg, user_notion_id=user_notion_id)
 
     @dp.message(F.photo)
     async def handle_photo(msg: Message, user_notion_id: str = "") -> None:
-        """Фото расклада → Vision → справочник → трактовка → pending + кнопки."""
+        """Фото с подписью → route_message. Фото без подписи → таро (Vision)."""
+        if msg.caption:
+            # Подпись есть — роутим как текст (может быть чек, расклад с именем и т.п.)
+            msg.text = msg.caption
+            from arcana.handlers.base import route_message
+            await route_message(msg, user_notion_id=user_notion_id)
+            return
+        # Без подписи → таро
         from arcana.handlers.sessions import handle_tarot_photo
         await handle_tarot_photo(msg, user_notion_id)
 
