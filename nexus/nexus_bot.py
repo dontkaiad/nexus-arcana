@@ -413,6 +413,44 @@ async def cmd_stats(msg: Message, user_notion_id: str = "") -> None:
 
 
 
+@dp.message(Command("fixstreak"))
+async def cmd_fixstreak(msg: Message, user_notion_id: str = "") -> None:
+    """Пересчитать стрик из истории Notion."""
+    from core.notion_client import query_pages, _with_user_filter
+    from core.config import config
+    from nexus.handlers.streaks import rebuild_streak_from_dates
+    from nexus.handlers.tasks import _get_user_tz
+
+    uid = msg.from_user.id
+    tz_offset = await _get_user_tz(uid)
+
+    filters = _with_user_filter(None, user_notion_id)
+    all_tasks = await query_pages(
+        config.nexus.db_tasks, filters=filters,
+        sorts=[{"timestamp": "last_edited_time", "direction": "descending"}],
+        page_size=500,
+    )
+
+    done_dates = []
+    for t in all_tasks:
+        props = t["properties"]
+        status = (props.get("Статус", {}).get("status") or {}).get("name", "")
+        if status not in ("Done", "Complete"):
+            continue
+        completion_raw = (props.get("Время завершения", {}).get("date") or {}).get("start", "")
+        if not completion_raw:
+            completion_raw = t.get("last_edited_time", "")
+        if completion_raw:
+            done_dates.append(completion_raw[:10])
+
+    result = rebuild_streak_from_dates(uid, done_dates, tz_offset)
+    await msg.answer(
+        f"✅ Стрик пересчитан из {len(done_dates)} выполненных задач\n"
+        f"🔥 Текущий стрик: {result['streak']} дней\n"
+        f"🏆 Лучший: {result['best']} дней"
+    )
+
+
 @dp.message(Command("tz"))
 async def set_tz(msg: Message, user_notion_id: str = "") -> None:
     """Установить часовой пояс. /tz UTC+5 или /tz Екатеринбург"""
