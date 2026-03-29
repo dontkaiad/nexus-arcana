@@ -60,3 +60,10 @@ async def delete_pending_client(user_id: int) -> None:
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute("DELETE FROM pending_clients WHERE user_id = ?", (user_id,))
         await db.commit()
+
+
+async def update_pending_client(user_id: int, updates: Dict[str, Any]) -> None:
+    state = await get_pending_client(user_id)
+    if state is not None:
+        state.update(updates)
+        await save_pending_client(user_id, state)
