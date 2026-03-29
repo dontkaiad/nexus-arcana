@@ -27,17 +27,17 @@ PARSE_CLIENT_SYSTEM = (
 
 PARSE_INFO_SYSTEM = (
     "Извлеки данные клиента из свободного текста. Ответь ТОЛЬКО JSON без markdown:\n"
-    '{"contact": "@ник или телефон или null", '
-    '"contact_type": "telegram/телефон/email/null", '
+    '{"contacts": [{"value": "@ник или телефон", "label": "личный/рабочий/основной или null"}], '
     '"request": "запрос/тема обращения или null", '
     '"notes": "заметки о характере/подходе или null"}'
+    "\ncontacts — список всех контактов упомянутых в тексте. Если контактов нет — пустой список."
 )
 
 VISION_CONTACT_SYSTEM = (
-    "Это скриншот контакта. Извлеки данные. Ответь ТОЛЬКО JSON без markdown:\n"
-    '{"contact": "@ник или номер телефона", '
-    '"contact_type": "telegram/телефон/whatsapp", '
-    '"name": "имя если видно или null"}'
+    "Это скриншот профиля/контакта в Telegram. Извлеки данные. Ответь ТОЛЬКО JSON без markdown:\n"
+    '{"contacts": [{"value": "@username", "label": null}, {"value": "+телефон", "label": null}], '
+    '"name": "имя из профиля или null"}'
+    "\ncontacts — все контакты видимые на экране (username, телефон). label оставь null."
 )
 
 
@@ -219,28 +219,43 @@ async def handle_client_info(message: Message, text: str, user_notion_id: str = 
         await message.answer("⚠️ Ошибка загрузки клиента.")
 
 
+def _format_contacts(contacts_list: list) -> str:
+    """Форматирует список контактов: '@ник (личный), +375... (рабочий)'."""
+    parts = []
+    for c in contacts_list:
+        val = c.get("value") or ""
+        label = c.get("label") or ""
+        if not val or val.lower() in ("null", "none", ""):
+            continue
+        parts.append(f"{val} ({label})" if label and label.lower() not in ("null", "none") else val)
+    return ", ".join(parts)
+
+
 async def handle_client_info_input(message: Message, text: str, pending: dict) -> None:
-    """Юзер прислал инфу о клиенте (текст/голосовое) — парсим и создаём."""
+    """Юзер прислал инфу о клиенте текстом/голосовым — парсим, мёрджим, создаём."""
     uid = message.from_user.id
     name = pending.get("name", "")
     user_notion_id = pending.get("user_notion_id", "")
 
     try:
-        raw = await ask_claude(text, system=PARSE_INFO_SYSTEM, max_tokens=200)
+        raw = await ask_claude(text, system=PARSE_INFO_SYSTEM, max_tokens=300)
         data = _parse_json_safe(raw)
 
-        contact = data.get("contact") or ""
-        contact_type = data.get("contact_type") or ""
+        # Новые контакты из текста (с метками)
+        new_contacts: list = data.get("contacts") or []
         request = data.get("request") or ""
         notes = data.get("notes") or ""
 
-        if contact and contact_type and contact_type.lower() not in ("null", ""):
-            contact = f"{contact} ({contact_type})"
+        # Накопленные контакты из фото
+        accumulated: list = pending.get("contacts", [])
+        all_contacts = accumulated + [c for c in new_contacts if c.get("value")]
+
+        contact_str = _format_contacts(all_contacts)
 
         from arcana.pending_clients import delete_pending_client
         await delete_pending_client(uid)
 
-        await _create_and_confirm(message, name, contact, request, notes, user_notion_id)
+        await _create_and_confirm(message, name, contact_str, request, notes, user_notion_id)
     except Exception as e:
         logger.exception("handle_client_info_input: %s", e)
         await log_error(str(e), context="handle_client_info_input", bot_label="🌒 Arcana")
@@ -248,33 +263,42 @@ async def handle_client_info_input(message: Message, text: str, pending: dict) -
 
 
 async def handle_client_photo_input(message: Message, image_b64: str, pending: dict) -> None:
-    """Юзер прислал скрин контакта — Vision парсит, создаём клиента."""
+    """Скрин контакта — Vision парсит, НАКАПЛИВАЕТ в pending (не создаёт сразу)."""
     uid = message.from_user.id
     name = pending.get("name", "")
-    user_notion_id = pending.get("user_notion_id", "")
 
     try:
         from core.claude_client import ask_claude_vision
         raw = await ask_claude_vision(
-            "Извлеки контактные данные с этого скриншота.",
+            "Извлеки все контакты с этого скриншота.",
             image_b64,
             system=VISION_CONTACT_SYSTEM,
         )
         data = _parse_json_safe(raw)
 
-        contact = data.get("contact") or ""
-        contact_type = data.get("contact_type") or ""
-        if contact and contact_type and contact_type.lower() not in ("null", ""):
-            contact = f"{contact} ({contact_type})"
+        new_contacts: list = data.get("contacts") or []
+        # Фильтруем пустые/null
+        new_contacts = [c for c in new_contacts if c.get("value") and c["value"].lower() not in ("null", "none")]
 
-        # Если Vision нашёл имя и у нас не было — использовать
+        # Если Vision нашёл имя и у нас нет — использовать
         if not name:
-            name = data.get("name") or "Клиент"
+            name = data.get("name") or pending.get("name") or "Клиент"
 
-        from arcana.pending_clients import delete_pending_client
-        await delete_pending_client(uid)
+        # Добавляем к накопленным
+        accumulated: list = pending.get("contacts", [])
+        accumulated.extend(new_contacts)
 
-        await _create_and_confirm(message, name, contact, "", "", user_notion_id)
+        from arcana.pending_clients import update_pending_client
+        await update_pending_client(uid, {"contacts": accumulated, "name": name})
+
+        added_str = _format_contacts(new_contacts)
+        total = len(accumulated)
+        await message.answer(
+            f"📱 Контакт добавлен: {added_str}\n"
+            f"Всего контактов: {total}\n\n"
+            "Пришли ещё скрин, текст с деталями или нажми «Создать без деталей»",
+            reply_markup=_awaiting_kb(uid),
+        )
     except Exception as e:
         logger.exception("handle_client_photo_input: %s", e)
         await log_error(str(e), context="handle_client_photo_input", bot_label="🌒 Arcana")
@@ -329,14 +353,19 @@ async def cb_create_empty(callback: CallbackQuery, user_notion_id: str = "") -> 
             await callback.message.edit_text("⏱ Сессия истекла.")
             return
         name = pending.get("name", "")
+        contact_str = _format_contacts(pending.get("contacts", []))
         result = await client_add(
             name=name,
+            contact=contact_str,
             date=_today(),
             user_notion_id=pending.get("user_notion_id", ""),
         )
         await delete_pending_client(uid)
         if result:
-            await callback.message.edit_text(f"✅ Клиент <b>{name}</b> создан", parse_mode="HTML")
+            reply = f"✅ Клиент <b>{name}</b> создан"
+            if contact_str:
+                reply += f"\n📱 {contact_str}"
+            await callback.message.edit_text(reply, parse_mode="HTML")
         else:
             await callback.message.edit_text("⚠️ Ошибка записи в Notion.")
     except Exception as e:
