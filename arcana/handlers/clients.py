@@ -100,7 +100,7 @@ async def _create_and_confirm(
 
 async def handle_add_client(message: Message, text: str, user_notion_id: str = "") -> None:
     try:
-        raw = await ask_claude(text, system=PARSE_CLIENT_SYSTEM, max_tokens=256, model="haiku")
+        raw = await ask_claude(text, system=PARSE_CLIENT_SYSTEM, max_tokens=256)
         data = _parse_json_safe(raw)
         name = data.get("name") or ""
         if not name:
@@ -151,7 +151,6 @@ async def handle_client_info(message: Message, text: str, user_notion_id: str = 
             text,
             system="Извлеки только имя клиента. Ответь ТОЛЬКО именем.",
             max_tokens=30,
-            model="haiku",
         )).strip()
 
         client = await client_find(name, user_notion_id=user_notion_id)
@@ -225,7 +224,7 @@ async def handle_client_info_input(message: Message, text: str, pending: dict) -
     user_notion_id = pending.get("user_notion_id", "")
 
     try:
-        raw = await ask_claude(text, system=PARSE_INFO_SYSTEM, max_tokens=200, model="haiku")
+        raw = await ask_claude(text, system=PARSE_INFO_SYSTEM, max_tokens=200)
         data = _parse_json_safe(raw)
 
         contact = data.get("contact") or ""
