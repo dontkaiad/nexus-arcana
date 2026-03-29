@@ -139,7 +139,7 @@ def build_system(tz_offset: int = 3) -> str:
         "ВАЖНО: task_done только если речь идёт о чём-то уже сделанном (прошедшее время глагола или слово 'готово'/'выполнено')",
         "",
         "task — задача на Нексус (БЕЗ слов из Арканы!):",
-        '{"type":"task","title":"что сделать","category":"<из кат>","priority":"Срочно|Важно|Можно потом","deadline":"YYYY-MM-DDTHH:MM или null","repeat":"Нет|Ежедневно|Еженедельно|Ежемесячно","repeat_time":"HH:MM или null","day_of_week":"Пн|Вт|Ср|Чт|Пт|Сб|Вс или null","confidence":"high если есть дата или repeat, low иначе"}',
+        '{"type":"task","title":"что сделать","category":"<из кат>","priority":"Срочно|Важно|Можно потом","deadline":"YYYY-MM-DDTHH:MM или null","reminder":"YYYY-MM-DDTHH:MM или null (только если явно указано напомни/напоминалку с отдельной датой)","repeat":"Нет|Ежедневно|Еженедельно|Ежемесячно","repeat_time":"HH:MM или null","day_of_week":"Пн|Вт|Ср|Чт|Пт|Сб|Вс или null","confidence":"high если есть дата или repeat, low иначе"}',
         "Приоритет — определяй по СМЫСЛУ задачи, всегда ставь один из трёх:",
         "  🔴 Срочно: слова 'срочно/немедленно/сейчас/asap', дедлайн сегодня, деньги (оплата, долг, счёт, квартплата), документы (налоговая, паспорт, справка, заявление)",
         "  🟡 Важно: здоровье (врач, лекарства, анализы), работа, дедлайн скоро (не сегодня), продукты, обычные покупки, рутинные дела",
@@ -484,10 +484,10 @@ _STATS_RE = re.compile(
 
 _EDIT_PARSE_SYSTEM = (
     "Извлеки параметры редактирования записи. Если несколько изменений — верни все в списке edits. Ответь ТОЛЬКО JSON без markdown:\n"
-    '{"type":"edit_record","record_type":"task","record_hint":"ключевые слова для поиска","edits":[{"field":"category|priority|title|deadline|status","new_value":"новое значение"}]}\n'
+    '{"type":"edit_record","record_type":"task","record_hint":"ключевые слова для поиска","edits":[{"field":"category|priority|title|deadline|reminder|status","new_value":"новое значение"}]}\n'
     "\nПравила:\n"
     "- record_type: 'task' если о задаче, 'finance' если о финансовой записи\n"
-    "- field: 'category' для категории; 'priority' для приоритета (Срочно/Важно/Можно потом); 'title' или 'name' для переименования; 'deadline' для дедлайна; 'status' для статуса (Not started/In progress/Done/Archived)\n"
+    "- field: 'category' для категории; 'priority' для приоритета (Срочно/Важно/Можно потом); 'title' или 'name' для переименования; 'deadline' для дедлайна; 'reminder' для напоминания (напоминалку/напомни/напоминание); 'status' для статуса (Not started/In progress/Done/Archived)\n"
     "- record_hint: фраза для поиска записи (название задачи/финансовой операции), пустая строка если не указано\n"
     "- edits: список всех изменений (одно или несколько)\n"
     "\nПримеры:\n"
@@ -497,6 +497,7 @@ _EDIT_PARSE_SYSTEM = (
     "'поставь статус в процессе для купить корм' → record_hint='купить корм', edits=[{\"field\":\"status\",\"new_value\":\"In progress\"}]\n"
     "'измени название на Икеа и категорию на Хобби' → record_hint='', edits=[{\"field\":\"title\",\"new_value\":\"Икеа\"},{\"field\":\"category\",\"new_value\":\"Хобби\"}]\n"
     "'поменяй категорию на привычки и источник на нал' → record_hint='', edits=[{\"field\":\"category\",\"new_value\":\"привычки\"},{\"field\":\"source\",\"new_value\":\"нал\"}]\n"
+    "'поставь дедлайн 15 мая и напоминалку 1 мая для задачи гардероб' → record_hint='гардероб', edits=[{\"field\":\"deadline\",\"new_value\":\"15 мая\"},{\"field\":\"reminder\",\"new_value\":\"1 мая\"}]\n"
 )
 
 
