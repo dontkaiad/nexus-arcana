@@ -156,6 +156,18 @@ def init_scheduler(bot: Bot) -> None:
     logger.info("APScheduler started")
 
 
+def _remove_task_jobs(task_id: str) -> None:
+    """Remove all APScheduler jobs for a task (reminder + deadline)."""
+    if not _scheduler:
+        return
+    for prefix in ("reminder_", "deadline_"):
+        try:
+            _scheduler.remove_job(f"{prefix}{task_id}")
+            logger.info("removed job %s%s", prefix, task_id)
+        except Exception:
+            pass
+
+
 async def restore_reminders_on_startup() -> None:
     """Восстановить APScheduler jobs для задач с напоминаниями.
 
@@ -1537,6 +1549,7 @@ async def task_complete(call: CallbackQuery) -> None:
     else:
         result = await update_task_status(task_id, "Done")
         if result:
+            _remove_task_jobs(task_id)
             phrase = random.choice(_DONE_PHRASES)
             title_line = f"\n✅ {task_title} — выполнено" if task_title else "\n✅ Выполнено"
             await call.answer("✅ Записано!")
@@ -1954,6 +1967,7 @@ async def handle_task_done(message: Message, task_hint: str, user_notion_id: str
             return
         result = await update_task_status(task_id, "Done")
         if result:
+            _remove_task_jobs(task_id)
             phrase = random.choice(_DONE_PHRASES)
             streak_line = await _update_streak_line(uid)
             await message.answer(f"{phrase}\n✅ {title} — выполнено{streak_line}")
@@ -2003,6 +2017,7 @@ async def task_done_select(call: CallbackQuery) -> None:
 
     result = await update_task_status(task_id, "Done")
     if result:
+        _remove_task_jobs(task_id)
         phrase = random.choice(_DONE_PHRASES)
         streak_line = await _update_streak_line(uid)
         await call.answer("✅ Записано!")
@@ -2045,6 +2060,7 @@ async def cb_done_multi_confirm(call: CallbackQuery) -> None:
         else:
             result = await update_task_status(task_id, "Done")
             if result:
+                _remove_task_jobs(task_id)
                 done_titles.append(title)
     if done_titles:
         phrase = _random.choice(_DONE_PHRASES)
