@@ -89,12 +89,67 @@ async def cmd_help(message: Message, user_notion_id: str = "") -> None:
     )
 
 
+async def _handle_tarot_correction(
+    message: Message, correction_text: str, pending: dict, user_notion_id: str
+) -> None:
+    """Юзер правит трактовку — Claude корректирует по справочнику."""
+    uid = message.from_user.id
+    from arcana.handlers.sessions import TAROT_SYSTEM
+    from arcana.pending_tarot import save_pending
+    from arcana.tarot_loader import get_cards_context
+    from core.claude_client import ask_claude
+    from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+
+    deck = pending.get("deck") or "Уэйта"
+    card_names = [c.strip() for c in (pending.get("cards") or "").split(",") if c.strip()]
+    cards_context = get_cards_context(deck, card_names)
+
+    system = (
+        "Ты — ассистент-таролог. Пользователь правит трактовку.\n"
+        "Скорректируй трактовку согласно замечанию. Остальное оставь как было.\n"
+        "Ответь ПОЛНОЙ исправленной трактовкой.\n"
+    )
+    if cards_context:
+        system += f"\n--- СПРАВОЧНИК КАРТ ---\n{cards_context}"
+
+    old_interp = pending.get("interpretation") or ""
+    prompt = (
+        f"Предыдущая трактовка:\n{old_interp}\n\n"
+        f"Замечание: {correction_text}\n\n"
+        f"Карты: {pending.get('cards')}\n"
+        f"Вопрос: {pending.get('question')}\n"
+        f"Дай исправленную трактовку целиком."
+    )
+
+    new_interp = await ask_claude(
+        prompt, system=system,
+        model="claude-sonnet-4-20250514",
+        max_tokens=2000,
+    )
+
+    pending["interpretation"] = new_interp
+    pending["awaiting_edit"] = False
+    await save_pending(uid, pending)
+
+    kb = InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text="✅ Сохранить",      callback_data=f"tarot_save:{uid}"),
+        InlineKeyboardButton(text="✏️ Поправить ещё",  callback_data=f"tarot_edit:{uid}"),
+        InlineKeyboardButton(text="❌ Отмена",          callback_data=f"tarot_cancel:{uid}"),
+    ]])
+    await message.answer(
+        f"✏️ <b>Исправленная трактовка:</b>\n\n{new_interp[:3500]}",
+        reply_markup=kb,
+    )
+    if len(new_interp) > 3500:
+        await message.answer(new_interp[3500:7000])
+
+
 @router.message()
 async def route_message(message: Message, user_notion_id: str = "") -> None:
     try:
         if message.photo:
             from arcana.handlers.sessions import handle_tarot_photo
-            await handle_tarot_photo(message)
+            await handle_tarot_photo(message, user_notion_id)
             return
 
         from core.layout import maybe_convert
@@ -109,6 +164,13 @@ async def route_message(message: Message, user_notion_id: str = "") -> None:
             text = f"[контекст: {prev[:100]}]\n{text}"
 
         uid = message.from_user.id
+
+        # ── Pending: правка трактовки ─────────────────────────────────────
+        from arcana.pending_tarot import get_pending
+        pending = await get_pending(uid)
+        if pending and pending.get("awaiting_edit"):
+            await _handle_tarot_correction(message, text, pending, user_notion_id)
+            return
 
         # ── Флоу переспроса ──────────────────────────────────────────────────
         if uid in _clarify:
