@@ -65,5 +65,13 @@ async def delete_pending_client(user_id: int) -> None:
 async def update_pending_client(user_id: int, updates: Dict[str, Any]) -> None:
     state = await get_pending_client(user_id)
     if state is not None:
+        # Контакты накапливаются (append уникальных), не перезаписываются
+        if "contacts" in updates and "contacts" in state:
+            existing = state["contacts"]
+            seen = {c["value"] for c in existing}
+            for c in updates.pop("contacts"):
+                if c.get("value") and c["value"] not in seen:
+                    existing.append(c)
+                    seen.add(c["value"])
         state.update(updates)
         await save_pending_client(user_id, state)

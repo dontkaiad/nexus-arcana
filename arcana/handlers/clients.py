@@ -28,38 +28,40 @@ PARSE_CLIENT_SYSTEM = (
     '{"name": "имя", "contact": "@ник или телефон или null", "request": "запрос или null"}'
 )
 
-PARSE_INFO_SYSTEM = (
-    "Извлеки контактную информацию и запрос. Ответь ТОЛЬКО JSON без markdown:\n"
-    '{"contacts": [{"value": "@ник_или_телефон", "label": "TG/WhatsApp/Phone/etc"}], '
-    '"request": "запрос клиента или null", "notes": "заметки или null"}'
+PARSE_CLIENT_INFO = (
+    "Извлеки ВСЕ данные о клиенте из текста. Ответь ТОЛЬКО JSON без markdown:\n"
+    '{"contacts": [{"value": "@ник или телефон", "label": "личный/рабочий/null"}], '
+    '"request": "запрос/тема обращения или null", '
+    '"notes": "заметки о характере/подходе или null"}'
 )
 
-VISION_CONTACT_SYSTEM = (
-    "Извлеки все контакты из скриншота. Ответь ТОЛЬКО JSON без markdown:\n"
-    '{"contacts": [{"value": "контакт", "label": "TG/WhatsApp/Phone/etc"}], '
-    '"name": "имя человека или null"}'
+VISION_CONTACT = (
+    "Это скриншот контакта из Telegram или телефона. "
+    "Извлеки ВСЕ контактные данные. Ответь ТОЛЬКО JSON без markdown:\n"
+    '{"contacts": [{"value": "@username или номер", "label": "описание если есть или null"}], '
+    '"name": "имя если видно или null"}'
 )
 
 # ── Keyboards ─────────────────────────────────────────────────────────────────
 
 def _confirm_kb(uid: int) -> InlineKeyboardMarkup:
-    """Подтверждение: создать нового или нет."""
+    """«Не найден. Создать?» — из client_info."""
     return InlineKeyboardMarkup(inline_keyboard=[[
-        InlineKeyboardButton(text="➕ Создать", callback_data=f"client_start_create:{uid}"),
+        InlineKeyboardButton(text="➕ Создать", callback_data=f"client_create_from_search:{uid}"),
         InlineKeyboardButton(text="❌ Нет",     callback_data=f"client_cancel:{uid}"),
     ]])
 
 
-def _awaiting_kb(uid: int) -> InlineKeyboardMarkup:
-    """Кнопки пока накапливаем инфо (клиент ещё не создан)."""
+def _duplicate_kb(uid: int) -> InlineKeyboardMarkup:
+    """«Нашла совпадение» — из new_client."""
     return InlineKeyboardMarkup(inline_keyboard=[[
-        InlineKeyboardButton(text="✅ Создать", callback_data=f"client_create_final:{uid}"),
-        InlineKeyboardButton(text="❌ Отмена",  callback_data=f"client_cancel:{uid}"),
+        InlineKeyboardButton(text="✅ Да, это она",  callback_data=f"client_update_existing:{uid}"),
+        InlineKeyboardButton(text="➕ Нет, новый",   callback_data=f"client_create_new:{uid}"),
     ]])
 
 
-def _done_kb(uid: int) -> InlineKeyboardMarkup:
-    """Кнопка Готово — клиент уже создан, просто закрываем pending."""
+def _collecting_kb(uid: int) -> InlineKeyboardMarkup:
+    """Режим сбора — всегда виден [✅ Готово]."""
     return InlineKeyboardMarkup(inline_keyboard=[[
         InlineKeyboardButton(text="✅ Готово", callback_data=f"client_done:{uid}"),
     ]])
@@ -73,68 +75,18 @@ def _format_contacts(contacts: List[Dict[str, str]]) -> str:
     parts = []
     for c in contacts:
         val = c.get("value", "")
-        label = c.get("label", "")
+        label = c.get("label") or ""
         parts.append(f"{val} ({label})" if label else val)
     return ", ".join(parts)
 
 
-def _pending_summary(pending: dict) -> str:
-    name = pending.get("name") or "—"
-    contacts = _format_contacts(pending.get("contacts") or [])
-    request = pending.get("request") or "—"
-    notes = pending.get("notes") or "—"
+def _card(pending: dict) -> str:
+    """Текущее состояние карточки клиента."""
     return (
-        f"👤 <b>{name}</b>\n"
-        f"📱 {contacts}\n"
-        f"💬 {request}\n"
-        f"📝 {notes}"
-    )
-
-
-async def _do_create_from_pending(message: Message, uid: int, pending: dict) -> None:
-    """Создать клиента из накопленного pending-состояния."""
-    from arcana.pending_clients import delete_pending_client
-
-    name = pending.get("name") or ""
-    contacts = pending.get("contacts") or []
-    request = pending.get("request") or ""
-    notes = pending.get("notes") or ""
-    user_notion_id = pending.get("user_notion_id") or ""
-
-    if not name:
-        await message.answer("⚠️ Не знаю имя клиента. Напиши «клиент Имя».")
-        return
-
-    contact_str = _format_contacts(contacts)
-    today = datetime.now(MOSCOW_TZ).strftime("%Y-%m-%d")
-
-    page_id = await client_add(
-        name=name,
-        contact=contact_str if contact_str != "—" else "",
-        request=request,
-        date=today,
-        user_notion_id=user_notion_id,
-    )
-    await delete_pending_client(uid)
-
-    if not page_id:
-        await message.answer("⚠️ Ошибка записи в Notion.")
-        return
-
-    # Записать заметки отдельно если есть
-    if notes and page_id:
-        try:
-            await update_page(page_id, {"Заметки": _ntext(notes)})
-        except Exception as e:
-            logger.warning("_do_create_from_pending notes update: %s", e)
-
-    await message.answer(
-        f"✅ Клиент создан\n"
-        f"👤 <b>{name}</b>\n"
-        f"📱 {contact_str}\n"
-        f"💬 {request or '—'}\n"
-        f"📝 {notes or '—'}",
-        parse_mode="HTML",
+        f"👤 <b>{pending.get('name') or '—'}</b>\n"
+        f"📱 {_format_contacts(pending.get('contacts') or [])}\n"
+        f"💬 {pending.get('request') or '—'}\n"
+        f"📝 {pending.get('notes') or '—'}"
     )
 
 
@@ -146,110 +98,27 @@ def _parse_json_safe(raw: str) -> dict:
         return {}
 
 
+async def _update_notion(page_id: str, pending: dict) -> None:
+    """Записать все накопленные поля в Notion page."""
+    props: Dict[str, Any] = {}
+    contact_str = _format_contacts(pending.get("contacts") or [])
+    if contact_str and contact_str != "—":
+        props["Контакт"] = _ntext(contact_str)
+    if pending.get("request"):
+        props["Запрос"] = _ntext(pending["request"])
+    if pending.get("notes"):
+        props["Заметки"] = _ntext(pending["notes"])
+    if props:
+        try:
+            await update_page(page_id, props)
+        except Exception as e:
+            logger.warning("_update_notion: %s", e)
+
+
 # ── Main handlers ─────────────────────────────────────────────────────────────
 
-async def handle_add_client(message: Message, text: str, user_notion_id: str = "") -> None:
-    """Явное создание клиента («создай клиента»).
-
-    Сначала ищет в базе. Если нашла — показывает краткую инфу и предлагает
-    дополнить карточку. Если не нашла — создаёт сразу с имеющейся инфой,
-    при нехватке данных уходит в pending awaiting_info.
-    """
-    from arcana.pending_clients import save_pending_client
-
-    raw = await ask_claude(text, system=PARSE_CLIENT_SYSTEM, max_tokens=256)
-    data = _parse_json_safe(raw)
-
-    name = data.get("name") or ""
-    if not name:
-        await message.answer("⚠️ Не нашла имя клиента.")
-        return
-
-    uid = message.from_user.id
-
-    # ── Поиск в базе ────────────────────────────────────────────────────────────
-    existing = await client_find(name, user_notion_id=user_notion_id)
-    if existing:
-        existing_id = existing["id"]
-        props = existing["properties"]
-        existing_name = _extract_text(props.get("Имя", {}))
-        contact = _extract_text(props.get("Контакт", {}))
-        request = _extract_text(props.get("Запрос", {}))
-        since = (props.get("Первое обращение", {}).get("date") or {}).get("start", "")[:10]
-
-        # Сохраняем pending с page_id существующего клиента для дополнения
-        await save_pending_client(uid, {
-            "step": "awaiting_info",
-            "name": existing_name,
-            "page_id": existing_id,
-            "contacts": [{"value": contact, "label": ""}] if contact else [],
-            "request": request,
-            "notes": "",
-            "user_notion_id": user_notion_id,
-        })
-        await message.answer(
-            f"👤 Нашла <b>{existing_name}</b>\n"
-            f"📱 {contact or '—'} · с {since or '—'}\n"
-            f"💬 {request or '—'}\n\n"
-            f"Дополнить карточку? Пришли новые контакты/фото/запрос,\nили нажми Готово.",
-            reply_markup=_done_kb(uid),
-            parse_mode="HTML",
-        )
-        return
-
-    # ── Не нашла — создаём сразу ────────────────────────────────────────────────
-    today = datetime.now(MOSCOW_TZ).strftime("%Y-%m-%d")
-    contact = data.get("contact") or ""
-    request = data.get("request") or ""
-
-    page_id = await client_add(
-        name=name,
-        contact=contact,
-        request=request,
-        date=today,
-        user_notion_id=user_notion_id,
-    )
-    if not page_id:
-        await message.answer("⚠️ Ошибка записи в Notion.")
-        return
-
-    # Если чего-то не хватает — уходим в pending и ждём дополнения
-    missing = []
-    if not contact:
-        missing.append("контакт (@ник / телефон)")
-    if not request:
-        missing.append("запрос клиента")
-
-    if missing:
-        await save_pending_client(uid, {
-            "step": "awaiting_info",
-            "name": name,
-            "page_id": page_id,
-            "contacts": [],
-            "request": request,
-            "notes": "",
-            "user_notion_id": user_notion_id,
-        })
-        missing_str = " и ".join(missing)
-        await message.answer(
-            f"✅ Клиент <b>{name}</b> создан.\n\n"
-            f"Пришли ещё: {missing_str}.\n"
-            f"Или нажми Готово если всё.",
-            reply_markup=_done_kb(uid),
-            parse_mode="HTML",
-        )
-    else:
-        await message.answer(
-            f"✅ Клиент добавлен\n"
-            f"👤 <b>{name}</b>\n"
-            f"📱 {contact}\n"
-            f"💬 {request}",
-            parse_mode="HTML",
-        )
-
-
 async def handle_client_info(message: Message, text: str, user_notion_id: str = "") -> None:
-    """Поиск клиента («клиент Оля»). Если не найден — предлагает создать."""
+    """«клиент Оля» / «что у Оли» → поиск. Найден: полное досье. Нет: предложить создать."""
     from arcana.pending_clients import save_pending_client
 
     name = (await ask_claude(
@@ -270,7 +139,7 @@ async def handle_client_info(message: Message, text: str, user_notion_id: str = 
             "user_notion_id": user_notion_id,
         })
         await message.answer(
-            f"👤 Клиента «<b>{name}</b>» нет в базе. Создать?",
+            f"❌ Не нашла «<b>{name}</b>» в базе. Создать?",
             reply_markup=_confirm_kb(uid),
             parse_mode="HTML",
         )
@@ -308,9 +177,10 @@ async def handle_client_info(message: Message, text: str, user_notion_id: str = 
     memory_context = await get_memories_for_context(user_notion_id, [client_name])
     mem_block = f"\n\n🧠 <b>Из памяти:</b>\n{memory_context}" if memory_context else ""
 
+    since = (props.get("Первое обращение", {}).get("date") or {}).get("start", "—")[:10]
     await message.answer(
         f"👤 <b>{client_name}</b>\n"
-        f"📱 {contact or '—'} · с {props.get('Первое обращение', {}).get('date', {}).get('start', '—')[:10]}\n"
+        f"📱 {contact or '—'} · с {since}\n"
         f"💬 {request or '—'}\n"
         f"📝 {notes or '—'}\n\n"
         f"💰 Всего: {total:,.0f}₽ | Долг: {debt_str}\n"
@@ -321,67 +191,132 @@ async def handle_client_info(message: Message, text: str, user_notion_id: str = 
     )
 
 
-async def handle_client_info_input(message: Message, text: str, pending: dict) -> None:
-    """Текст пока ожидаем инфо. Если клиент уже создан (page_id) — пишем в Notion сразу."""
+async def handle_add_client(message: Message, text: str, user_notion_id: str = "") -> None:
+    """«создай клиента Оля» → проверка дублей → создать / дополнить / сбор инфы."""
+    from arcana.pending_clients import save_pending_client
+
+    raw = await ask_claude(text, system=PARSE_CLIENT_SYSTEM, max_tokens=256)
+    data = _parse_json_safe(raw)
+    name = data.get("name") or ""
+    if not name:
+        await message.answer("⚠️ Не нашла имя клиента.")
+        return
+
+    uid = message.from_user.id
+
+    # ── Проверка дублей ──────────────────────────────────────────────────────
+    existing = await client_find(name, user_notion_id=user_notion_id)
+    if existing:
+        existing_id = existing["id"]
+        props = existing["properties"]
+        existing_name = _extract_text(props.get("Имя", {}))
+        contact = _extract_text(props.get("Контакт", {}))
+        request = _extract_text(props.get("Запрос", {}))
+        since = (props.get("Первое обращение", {}).get("date") or {}).get("start", "")[:10]
+
+        await save_pending_client(uid, {
+            "step": "confirm_duplicate",
+            "name": existing_name,
+            "page_id": existing_id,
+            "contacts": [{"value": contact, "label": ""}] if contact else [],
+            "request": request,
+            "notes": "",
+            "user_notion_id": user_notion_id,
+        })
+        await message.answer(
+            f"👤 Нашла <b>{existing_name}</b>\n"
+            f"📱 {contact or '—'} · с {since or '—'}\n"
+            f"💬 {request or '—'}\n\n"
+            f"Дополнить карточку?",
+            reply_markup=_duplicate_kb(uid),
+            parse_mode="HTML",
+        )
+        return
+
+    # ── Не найден — создаём сразу ────────────────────────────────────────────
+    contact = data.get("contact") or ""
+    request = data.get("request") or ""
+    today = datetime.now(MOSCOW_TZ).strftime("%Y-%m-%d")
+
+    page_id = await client_add(
+        name=name,
+        contact=contact,
+        request=request,
+        date=today,
+        user_notion_id=user_notion_id,
+    )
+    if not page_id:
+        await message.answer("⚠️ Ошибка записи в Notion.")
+        return
+
+    contacts_list = [{"value": contact, "label": ""}] if contact else []
+
+    if not contact or not request:
+        # Нет всей инфы — режим сбора
+        await save_pending_client(uid, {
+            "step": "collecting",
+            "name": name,
+            "page_id": page_id,
+            "contacts": contacts_list,
+            "request": request,
+            "notes": "",
+            "user_notion_id": user_notion_id,
+        })
+        pending_stub = {"name": name, "contacts": contacts_list, "request": request, "notes": ""}
+        await message.answer(
+            f"✅ <b>{name}</b> создан\n\n{_card(pending_stub)}\n\n"
+            f"Скинь инфу: контакт, запрос, заметки.",
+            reply_markup=_collecting_kb(uid),
+            parse_mode="HTML",
+        )
+    else:
+        pending_stub = {"name": name, "contacts": contacts_list, "request": request, "notes": ""}
+        await message.answer(
+            f"✅ <b>{name}</b> создан\n\n{_card(pending_stub)}",
+            parse_mode="HTML",
+        )
+
+
+async def _handle_collecting(
+    message: Message, text: str, pending: dict, user_notion_id: str = ""
+) -> None:
+    """Режим сбора инфы — каждый текст дополняет карточку и сразу пишет в Notion."""
     from arcana.pending_clients import update_pending_client, get_pending_client
 
     uid = message.from_user.id
     page_id = pending.get("page_id")
 
-    raw = await ask_claude(text, system=PARSE_INFO_SYSTEM, max_tokens=300)
+    raw = await ask_claude(text, system=PARSE_CLIENT_INFO, max_tokens=300)
     data = _parse_json_safe(raw)
 
-    # Merge contacts
+    updates: Dict[str, Any] = {}
     new_contacts = data.get("contacts") or []
-    existing_contacts = list(pending.get("contacts") or [])
-    seen = {c["value"] for c in existing_contacts}
-    for c in new_contacts:
-        if c.get("value") and c["value"] not in seen:
-            existing_contacts.append(c)
-            seen.add(c["value"])
-
-    updates: Dict[str, Any] = {"contacts": existing_contacts}
+    if new_contacts:
+        updates["contacts"] = new_contacts  # накапливается в update_pending_client
     if data.get("request"):
         updates["request"] = data["request"]
     if data.get("notes"):
-        updates["notes"] = (pending.get("notes") or "") + (" " + data["notes"]).strip()
+        existing_notes = pending.get("notes") or ""
+        updates["notes"] = (existing_notes + " " + data["notes"]).strip()
 
-    await update_pending_client(uid, updates)
+    if updates:
+        await update_pending_client(uid, updates)
+
     fresh = await get_pending_client(uid) or {**pending, **updates}
 
-    # Если клиент уже создан — обновляем Notion немедленно
     if page_id:
-        notion_updates: Dict[str, Any] = {}
-        contact_str = _format_contacts(existing_contacts)
-        if contact_str and contact_str != "—":
-            notion_updates["Контакт"] = _ntext(contact_str)
-        if updates.get("request"):
-            notion_updates["Запрос"] = _ntext(updates["request"])
-        if updates.get("notes"):
-            notion_updates["Заметки"] = _ntext(updates["notes"])
-        if notion_updates:
-            try:
-                await update_page(page_id, notion_updates)
-            except Exception as e:
-                logger.warning("handle_client_info_input update_page: %s", e)
+        await _update_notion(page_id, fresh)
 
-        await message.answer(
-            f"✅ <b>{fresh.get('name')}</b> обновлён\n\n{_pending_summary(fresh)}\n\n"
-            f"Можешь прислать ещё или нажать Готово.",
-            reply_markup=_done_kb(uid),
-            parse_mode="HTML",
-        )
-    else:
-        await message.answer(
-            f"📋 <b>Данные клиента</b>\n\n{_pending_summary(fresh)}\n\n"
-            f"Добавь ещё контакты/фото, или нажми Создать.",
-            reply_markup=_awaiting_kb(uid),
-            parse_mode="HTML",
-        )
+    await message.answer(
+        f"✅ <b>{fresh.get('name')}</b> обновлён\n\n{_card(fresh)}\n\n"
+        f"Можешь прислать ещё или нажать Готово.",
+        reply_markup=_collecting_kb(uid),
+        parse_mode="HTML",
+    )
 
 
 async def handle_client_photo_input(message: Message, image_b64: str, pending: dict) -> None:
-    """Фото во время ожидания инфо — Vision извлекает контакты, накапливает."""
+    """Фото в режиме collecting — Vision извлекает контакты, накапливает."""
     from arcana.pending_clients import update_pending_client, get_pending_client
 
     uid = message.from_user.id
@@ -390,40 +325,29 @@ async def handle_client_photo_input(message: Message, image_b64: str, pending: d
     raw = await analyze_image(
         image_b64,
         prompt="Извлеки все контакты из скриншота.",
-        system=VISION_CONTACT_SYSTEM,
+        system=VISION_CONTACT,
     )
     data = _parse_json_safe(raw) if raw else {}
 
+    updates: Dict[str, Any] = {}
     new_contacts = data.get("contacts") or []
-    existing_contacts = list(pending.get("contacts") or [])
-    seen = {c["value"] for c in existing_contacts}
-    for c in new_contacts:
-        if c.get("value") and c["value"] not in seen:
-            existing_contacts.append(c)
-            seen.add(c["value"])
-
-    updates: Dict[str, Any] = {"contacts": existing_contacts, "step": "awaiting_info"}
+    if new_contacts:
+        updates["contacts"] = new_contacts  # накапливается
     if data.get("name") and not pending.get("name"):
         updates["name"] = data["name"]
 
-    await update_pending_client(uid, updates)
+    if updates:
+        await update_pending_client(uid, updates)
+
     fresh = await get_pending_client(uid) or {**pending, **updates}
-    contact_str = _format_contacts(existing_contacts) if existing_contacts else "—"
 
-    # Если клиент уже создан — обновляем Notion сразу
-    if page_id and contact_str != "—":
-        try:
-            await update_page(page_id, {"Контакт": _ntext(contact_str)})
-        except Exception as e:
-            logger.warning("handle_client_photo_input update_page: %s", e)
+    if page_id:
+        await _update_notion(page_id, fresh)
 
-    kb = _done_kb(uid) if page_id else _awaiting_kb(uid)
-    action = "обновлён" if page_id else "будет создан"
     await message.answer(
-        f"📸 Контакт: {contact_str} → {action}\n\n"
-        f"{_pending_summary(fresh)}\n\n"
-        f"Добавь ещё или нажми {'Готово' if page_id else 'Создать'}.",
-        reply_markup=kb,
+        f"📸 Контакт добавлен\n\n{_card(fresh)}\n\n"
+        f"Добавь ещё или нажми Готово.",
+        reply_markup=_collecting_kb(uid),
         parse_mode="HTML",
     )
 
@@ -470,80 +394,122 @@ async def handle_debts(message: Message, user_notion_id: str = "") -> None:
 
 # ── Callback handlers ─────────────────────────────────────────────────────────
 
-@router.callback_query(F.data.startswith("client_start_create:"))
-async def cb_start_create(callback: CallbackQuery, user_notion_id: str = "") -> None:
-    """Подтверждение создания → перейти в режим ожидания инфо."""
+@router.callback_query(F.data.startswith("client_create_from_search:"))
+async def cb_create_from_search(callback: CallbackQuery, user_notion_id: str = "") -> None:
+    """«Не найден» → юзер нажал [➕ Создать] → создаём в Notion → collecting."""
+    uid = int(callback.data.split(":", 1)[1])
+    if uid != callback.from_user.id:
+        return
+    await callback.answer()
+
+    from arcana.pending_clients import get_pending_client, update_pending_client
+
+    pending = await get_pending_client(uid)
+    if not pending:
+        await callback.message.edit_text("⏱ Сессия истекла.")
+        return
+
+    name = pending.get("name") or ""
+    user_nid = pending.get("user_notion_id") or user_notion_id
+    today = datetime.now(MOSCOW_TZ).strftime("%Y-%m-%d")
+
+    page_id = await client_add(name=name, date=today, user_notion_id=user_nid)
+    if not page_id:
+        await callback.message.edit_text("⚠️ Ошибка создания в Notion.")
+        return
+
+    await update_pending_client(uid, {"step": "collecting", "page_id": page_id})
+    pending_stub = {"name": name, "contacts": [], "request": "", "notes": ""}
+
+    await callback.message.edit_text(
+        f"✅ <b>{name}</b> создан\n\n{_card(pending_stub)}\n\n"
+        f"Скинь инфу: контакт, запрос, заметки.",
+        reply_markup=_collecting_kb(uid),
+        parse_mode="HTML",
+    )
+
+
+@router.callback_query(F.data.startswith("client_update_existing:"))
+async def cb_update_existing(callback: CallbackQuery, user_notion_id: str = "") -> None:
+    """«Да, это она» → дополняем существующую карточку → collecting."""
     uid = int(callback.data.split(":", 1)[1])
     if uid != callback.from_user.id:
         return
     await callback.answer()
 
     from arcana.pending_clients import update_pending_client, get_pending_client
-    await update_pending_client(uid, {"step": "awaiting_info"})
+    await update_pending_client(uid, {"step": "collecting"})
     pending = await get_pending_client(uid) or {}
-    name = pending.get("name") or "клиент"
 
     await callback.message.edit_text(
-        f"👤 Создаю «<b>{name}</b>»\n\n"
-        f"Отправь контакты (фото скриншота, @ник, телефон) или напиши запрос.\n"
-        f"Когда готова — нажми Создать.",
-        reply_markup=_awaiting_kb(uid),
+        f"✅ Дополняем <b>{pending.get('name')}</b>\n\n{_card(pending)}\n\n"
+        f"Скинь новые контакты, запрос или заметки.",
+        reply_markup=_collecting_kb(uid),
         parse_mode="HTML",
     )
 
 
-@router.callback_query(F.data.startswith("client_create_final:"))
-async def cb_create_final(callback: CallbackQuery, user_notion_id: str = "") -> None:
-    """Создать клиента со всеми накопленными данными."""
+@router.callback_query(F.data.startswith("client_create_new:"))
+async def cb_create_new(callback: CallbackQuery, user_notion_id: str = "") -> None:
+    """«Нет, новый клиент» → создаём нового → collecting."""
     uid = int(callback.data.split(":", 1)[1])
     if uid != callback.from_user.id:
         return
     await callback.answer()
 
-    from arcana.pending_clients import get_pending_client
+    from arcana.pending_clients import get_pending_client, update_pending_client
+
     pending = await get_pending_client(uid)
     if not pending:
-        await callback.message.edit_text("⏱ Сессия истекла. Начни заново.")
+        await callback.message.edit_text("⏱ Сессия истекла.")
         return
 
-    await _do_create_from_pending(callback.message, uid, pending)
+    name = pending.get("name") or ""
+    user_nid = pending.get("user_notion_id") or user_notion_id
+    today = datetime.now(MOSCOW_TZ).strftime("%Y-%m-%d")
 
-
-@router.callback_query(F.data.startswith("client_create_empty:"))
-async def cb_create_empty(callback: CallbackQuery, user_notion_id: str = "") -> None:
-    """Создать клиента без доп. инфо (только имя)."""
-    uid = int(callback.data.split(":", 1)[1])
-    if uid != callback.from_user.id:
-        return
-    await callback.answer()
-
-    from arcana.pending_clients import get_pending_client
-    pending = await get_pending_client(uid)
-    if not pending:
-        await callback.message.edit_text("⏱ Сессия истекла. Начни заново.")
+    page_id = await client_add(name=name, date=today, user_notion_id=user_nid)
+    if not page_id:
+        await callback.message.edit_text("⚠️ Ошибка создания.")
         return
 
-    await _do_create_from_pending(callback.message, uid, pending)
+    await update_pending_client(uid, {
+        "step": "collecting",
+        "page_id": page_id,
+        "contacts": [],
+        "request": "",
+        "notes": "",
+    })
+    pending_stub = {"name": name, "contacts": [], "request": "", "notes": ""}
+
+    await callback.message.edit_text(
+        f"✅ Новый клиент <b>{name}</b> создан\n\n{_card(pending_stub)}\n\n"
+        f"Скинь инфу: контакт, запрос, заметки.",
+        reply_markup=_collecting_kb(uid),
+        parse_mode="HTML",
+    )
 
 
 @router.callback_query(F.data.startswith("client_done:"))
 async def cb_done(callback: CallbackQuery, user_notion_id: str = "") -> None:
-    """Клиент уже создан и обновлён — закрываем pending."""
+    """Завершить сбор — показать итоговую карточку, очистить pending."""
     uid = int(callback.data.split(":", 1)[1])
     if uid != callback.from_user.id:
         return
-    await callback.answer("Готово")
+    await callback.answer("Сохранено")
 
     from arcana.pending_clients import get_pending_client, delete_pending_client
     pending = await get_pending_client(uid) or {}
     await delete_pending_client(uid)
-    name = pending.get("name") or "клиент"
-    await callback.message.edit_text(f"✅ <b>{name}</b> сохранён.", parse_mode="HTML")
+
+    await callback.message.edit_text(
+        f"✅ <b>{pending.get('name') or 'Клиент'}</b> сохранён\n\n{_card(pending)}",
+        parse_mode="HTML",
+    )
 
 
 @router.callback_query(F.data.startswith("client_cancel:"))
 async def cb_cancel(callback: CallbackQuery, user_notion_id: str = "") -> None:
-    """Отмена создания клиента."""
     uid = int(callback.data.split(":", 1)[1])
     if uid != callback.from_user.id:
         return
@@ -551,4 +517,4 @@ async def cb_cancel(callback: CallbackQuery, user_notion_id: str = "") -> None:
 
     from arcana.pending_clients import delete_pending_client
     await delete_pending_client(uid)
-    await callback.message.edit_text("❌ Создание клиента отменено.")
+    await callback.message.edit_text("❌ Отменено.")
