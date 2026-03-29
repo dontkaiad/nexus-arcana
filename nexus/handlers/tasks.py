@@ -1707,7 +1707,7 @@ async def _do_save_task(message: Message, data: dict, chat_id: int = None, uid: 
     _rel = "work" if (data.get("for_practice") and arcana_result) else "task"
     _tid = arcana_result if _rel == "work" else result
     _suggest_kb = InlineKeyboardMarkup(inline_keyboard=[[
-        InlineKeyboardButton(text="📋 Разбить на подзадачи", callback_data=f"task_subtask_{_rel}_{_tid[:24]}"),
+        InlineKeyboardButton(text="📋 Подзадачи", callback_data=f"task_subtask_{_rel}_{_tid[:24]}"),
         InlineKeyboardButton(text="👌 Ок", callback_data="task_ok"),
     ]])
 
