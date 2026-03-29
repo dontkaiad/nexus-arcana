@@ -844,6 +844,71 @@ async def recall_from_memory(keyword: str) -> Optional[str]:
     return None
 
 
+def extract_context_keywords(data: dict, client_name: Optional[str] = None) -> List[str]:
+    """Извлекает ключевые слова для поиска в памяти из распарсенных данных."""
+    keywords: List[str] = []
+    if client_name:
+        keywords.append(client_name)
+    for key in ("spread_type", "deck", "category", "goal", "place", "name"):
+        val = data.get(key)
+        if val and isinstance(val, str) and len(val) > 2:
+            keywords.append(val)
+    return keywords
+
+
+async def get_memories_for_context(
+    user_notion_id: str,
+    keywords: List[str],
+    bot_label: str = "🌒 Arcana",
+    max_results: int = 10,
+) -> str:
+    """Подтягивает релевантные записи из Памяти для вставки в промпт.
+
+    Переиспользует _find_pages_by_hint() (Актуально=True + умный поиск).
+    Постфильтр: Бот == bot_label ИЛИ Бот пустой (общие записи).
+    Если ничего не найдено или Память недоступна — возвращает "".
+    """
+    if not keywords:
+        return ""
+    try:
+        seen_ids: Set[str] = set()
+        pages: List[dict] = []
+        for kw in keywords:
+            if not kw or len(kw) < 2:
+                continue
+            found = await _find_pages_by_hint(kw, page_size=max_results)
+            for page in found:
+                pid = page.get("id", "")
+                if pid in seen_ids:
+                    continue
+                # Фильтр по Бот: оставить если Бот == bot_label ИЛИ Бот пустой
+                bot_sel = (page.get("properties", {}).get("Бот", {}).get("select") or {})
+                bot_val = bot_sel.get("name", "")
+                if bot_val and bot_val != bot_label:
+                    continue
+                seen_ids.add(pid)
+                pages.append(page)
+                if len(pages) >= max_results:
+                    break
+            if len(pages) >= max_results:
+                break
+
+        if not pages:
+            return ""
+
+        lines = ["Контекст из памяти:"]
+        for page in pages:
+            fact = _page_fact(page)[:200]
+            category = _page_category(page)
+            cat_str = f" [{category}]" if category else ""
+            lines.append(f"- {fact}{cat_str}")
+
+        return "\n".join(lines)
+    except Exception:
+        logger.warning("get_memories_for_context failed, continuing without context")
+        return ""
+
+
 async def auto_suggest_memory(
     message: Message,
     text: str,
