@@ -134,6 +134,14 @@ async def main():
         if await handle_list_pending(msg, user_notion_id):
             return
 
+        # Pending: создание клиента (приоритет выше таро)
+        from arcana.pending_clients import get_pending_client
+        pending_client = await get_pending_client(msg.from_user.id)
+        if pending_client and pending_client.get("step") == "awaiting_info":
+            from arcana.handlers.clients import handle_client_info_input
+            await handle_client_info_input(msg, text, pending_client)
+            return
+
         # Pending: правка трактовки таро
         from arcana.pending_tarot import get_pending
         pending = await get_pending(msg.from_user.id)
@@ -150,9 +158,20 @@ async def main():
 
     @dp.message(F.photo)
     async def handle_photo(msg: Message, user_notion_id: str = "") -> None:
-        """Фото с подписью → route_message. Фото без подписи → таро (Vision)."""
+        """Фото: pending_client → скрин контакта. С подписью → route_message. Без → таро."""
+        # Pending клиент — скрин контакта
+        from arcana.pending_clients import get_pending_client
+        pending_client = await get_pending_client(msg.from_user.id)
+        if pending_client and pending_client.get("step") == "awaiting_info":
+            import base64
+            f = await bot.get_file(msg.photo[-1].file_id)
+            bio = await bot.download_file(f.file_path)
+            image_b64 = base64.standard_b64encode(bio.read()).decode()
+            from arcana.handlers.clients import handle_client_photo_input
+            await handle_client_photo_input(msg, image_b64, pending_client)
+            return
+
         if msg.caption:
-            # Подпись есть — роутим как текст (может быть чек, расклад с именем и т.п.)
             msg.text = msg.caption
             from arcana.handlers.base import route_message
             await route_message(msg, user_notion_id=user_notion_id)
@@ -160,6 +179,40 @@ async def main():
         # Без подписи → таро
         from arcana.handlers.sessions import handle_tarot_photo
         await handle_tarot_photo(msg, user_notion_id)
+
+    @dp.message(F.contact)
+    async def handle_contact(msg: Message, user_notion_id: str = "") -> None:
+        """TG контакт (share contact) → создать клиента если есть pending."""
+        from arcana.pending_clients import get_pending_client, delete_pending_client
+        from arcana.handlers.clients import client_add
+
+        pending = await get_pending_client(msg.from_user.id)
+        if not pending or pending.get("step") != "awaiting_info":
+            await msg.answer("🤔 Не жду контакт. Сначала скажи «клиент Имя».")
+            return
+
+        name = pending.get("name", "")
+        contact_name = f"{msg.contact.first_name or ''} {msg.contact.last_name or ''}".strip()
+        phone = msg.contact.phone_number or ""
+        contact_str = phone
+        if msg.contact.user_id:
+            contact_str = f"{phone} (TG ID: {msg.contact.user_id})"
+
+        from datetime import datetime, timezone, timedelta
+        today = datetime.now(timezone(timedelta(hours=3))).strftime("%Y-%m-%d")
+
+        result = await client_add(
+            name=name or contact_name,
+            contact=contact_str,
+            date=today,
+            user_notion_id=pending.get("user_notion_id", ""),
+        )
+        await delete_pending_client(msg.from_user.id)
+
+        if result:
+            await msg.answer(f"✅ Клиент <b>{name or contact_name}</b> создан\n📱 {contact_str}", parse_mode="HTML")
+        else:
+            await msg.answer("⚠️ Ошибка записи в Notion.")
 
     @dp.callback_query(lambda c: c.data and c.data.startswith("opt_"))
     async def on_opt_callback(query: CallbackQuery, user_notion_id: str = "") -> None:

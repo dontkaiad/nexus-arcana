@@ -171,6 +171,14 @@ async def route_message(message: Message, user_notion_id: str = "") -> None:
 
         uid = message.from_user.id
 
+        # ── Pending: создание клиента (приоритет выше таро) ─────────────
+        from arcana.pending_clients import get_pending_client
+        pending_client = await get_pending_client(uid)
+        if pending_client and pending_client.get("step") == "awaiting_info":
+            from arcana.handlers.clients import handle_client_info_input
+            await handle_client_info_input(message, text, pending_client)
+            return
+
         # ── Pending: поиск в гримуаре ────────────────────────────────────
         from arcana.handlers.grimoire import check_pending_search
         if await check_pending_search(message, text):
