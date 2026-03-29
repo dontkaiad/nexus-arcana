@@ -8,6 +8,7 @@ from core.claude_client import analyze_image
 from arcana.handlers.base import router
 from arcana.handlers.memory import router as memory_router
 from arcana.handlers.lists import router as lists_router
+from arcana.handlers.sessions import router as sessions_router
 
 async def main():
     if not config.arcana.tg_token: return
@@ -16,6 +17,7 @@ async def main():
     dp = Dispatcher()
     dp.message.middleware(WhitelistMiddleware(require_feature="arcana"))
     dp.callback_query.middleware(WhitelistMiddleware(require_feature="arcana"))
+    dp.include_router(sessions_router)   # callbacks tarot_save/edit/cancel — ПЕРВЫМ
     dp.include_router(router)
     dp.include_router(memory_router)
     dp.include_router(lists_router)
@@ -71,18 +73,9 @@ async def main():
 
     @dp.message(F.photo)
     async def handle_photo(msg: Message, user_notion_id: str = "") -> None:
-        """Фото: если есть caption → base router, иначе → трактовка таро."""
-        if msg.caption:
-            # Caption → передать как подсказку
-            await msg.answer(f"📸 Подпись: <i>«{msg.caption}»</i>\nОтправь текстом для обработки.", parse_mode="HTML")
-            return
-
-        # Без подписи → таро (как раньше)
-        f = await bot.get_file(msg.photo[-1].file_id)
-        b = await bot.download_file(f.file_path)
-        await msg.answer("🔮 Анализирую...")
-        ans = await analyze_image("Это Таро. Дай трактовку.", b.read())
-        await msg.answer(ans[:4000])
+        """Фото расклада → Vision → справочник → трактовка → pending + кнопки."""
+        from arcana.handlers.sessions import handle_tarot_photo
+        await handle_tarot_photo(msg, user_notion_id)
 
     @dp.callback_query(lambda c: c.data and c.data.startswith("opt_"))
     async def on_opt_callback(query: CallbackQuery, user_notion_id: str = "") -> None:
