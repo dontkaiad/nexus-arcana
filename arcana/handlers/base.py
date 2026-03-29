@@ -171,12 +171,12 @@ async def route_message(message: Message, user_notion_id: str = "", _text: str =
 
         uid = message.from_user.id
 
-        # ── Pending: создание клиента (приоритет выше таро) ─────────────
+        # ── Pending: режим сбора инфы о клиенте ─────────────────────────
         from arcana.pending_clients import get_pending_client
         pending_client = await get_pending_client(uid)
-        if pending_client:
-            from arcana.handlers.clients import handle_client_info_input
-            await handle_client_info_input(message, text, pending_client)
+        if pending_client and pending_client.get("step") == "collecting":
+            from arcana.handlers.clients import _handle_collecting
+            await _handle_collecting(message, text, pending_client, user_notion_id)
             return
 
         # ── Pending: поиск в гримуаре ────────────────────────────────────

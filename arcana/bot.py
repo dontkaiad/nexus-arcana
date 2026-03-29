@@ -137,12 +137,12 @@ async def main():
         if await handle_list_pending(msg, user_notion_id):
             return
 
-        # Pending: создание клиента (приоритет выше таро)
+        # Pending: режим сбора инфы о клиенте
         from arcana.pending_clients import get_pending_client
         pending_client = await get_pending_client(msg.from_user.id)
-        if pending_client:
-            from arcana.handlers.clients import handle_client_info_input
-            await handle_client_info_input(msg, text, pending_client)
+        if pending_client and pending_client.get("step") == "collecting":
+            from arcana.handlers.clients import _handle_collecting
+            await _handle_collecting(msg, text, pending_client, user_notion_id)
             return
 
         # Pending: правка трактовки таро
@@ -159,11 +159,10 @@ async def main():
 
     @dp.message(F.photo)
     async def handle_photo(msg: Message, user_notion_id: str = "") -> None:
-        """Фото: pending_client → скрин контакта. С подписью → route_message. Без → спросить."""
-        # Pending клиент — скрин контакта
+        """Фото: collecting → скрин контакта. С подписью → route_message. Без → спросить."""
         from arcana.pending_clients import get_pending_client
         pending_client = await get_pending_client(msg.from_user.id)
-        if pending_client:
+        if pending_client and pending_client.get("step") == "collecting":
             import base64
             f = await bot.get_file(msg.photo[-1].file_id)
             bio = await bot.download_file(f.file_path)
@@ -192,37 +191,40 @@ async def main():
 
     @dp.message(F.contact)
     async def handle_contact(msg: Message, user_notion_id: str = "") -> None:
-        """TG контакт (share contact) → создать клиента если есть pending."""
-        from arcana.pending_clients import get_pending_client, delete_pending_client
-        from arcana.handlers.clients import client_add
+        """TG контакт (share contact) → дополнить карточку если есть collecting."""
+        from arcana.pending_clients import get_pending_client, update_pending_client
 
         pending = await get_pending_client(msg.from_user.id)
-        if not pending or pending.get("step") != "awaiting_info":
-            await msg.answer("🤔 Не жду контакт. Сначала скажи «клиент Имя».")
+        if not pending or pending.get("step") != "collecting":
+            await msg.answer("🤔 Не жду контакт. Скажи «создай клиента Имя» сначала.")
             return
 
-        name = pending.get("name", "")
-        contact_name = f"{msg.contact.first_name or ''} {msg.contact.last_name or ''}".strip()
+        uid = msg.from_user.id
         phone = msg.contact.phone_number or ""
-        contact_str = phone
-        if msg.contact.user_id:
-            contact_str = f"{phone} (TG ID: {msg.contact.user_id})"
+        tg_user_id = msg.contact.user_id
+        contact_name = f"{msg.contact.first_name or ''} {msg.contact.last_name or ''}".strip()
 
-        from datetime import datetime, timezone, timedelta
-        today = datetime.now(timezone(timedelta(hours=3))).strftime("%Y-%m-%d")
+        value = phone
+        if tg_user_id:
+            value = f"{phone} (TG: {tg_user_id})" if phone else f"TG: {tg_user_id}"
+        label = contact_name or ""
 
-        result = await client_add(
-            name=name or contact_name,
-            contact=contact_str,
-            date=today,
-            user_notion_id=pending.get("user_notion_id", ""),
+        await update_pending_client(uid, {"contacts": [{"value": value, "label": label}]})
+
+        from arcana.pending_clients import get_pending_client as _get
+        fresh = await _get(uid) or pending
+
+        page_id = fresh.get("page_id")
+        if page_id:
+            from arcana.handlers.clients import _update_notion
+            await _update_notion(page_id, fresh)
+
+        from arcana.handlers.clients import _collecting_kb, _card
+        await msg.answer(
+            f"📱 Контакт добавлен\n\n{_card(fresh)}\n\nДобавь ещё или нажми Готово.",
+            reply_markup=_collecting_kb(uid),
+            parse_mode="HTML",
         )
-        await delete_pending_client(msg.from_user.id)
-
-        if result:
-            await msg.answer(f"✅ Клиент <b>{name or contact_name}</b> создан\n📱 {contact_str}", parse_mode="HTML")
-        else:
-            await msg.answer("⚠️ Ошибка записи в Notion.")
 
     @dp.callback_query(lambda c: c.data and c.data.startswith("opt_"))
     async def on_opt_callback(query: CallbackQuery, user_notion_id: str = "") -> None:
