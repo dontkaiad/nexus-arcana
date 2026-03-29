@@ -9,6 +9,7 @@ from arcana.handlers.base import router
 from arcana.handlers.memory import router as memory_router
 from arcana.handlers.lists import router as lists_router
 from arcana.handlers.sessions import router as sessions_router
+from arcana.handlers.grimoire import router as grimoire_router
 
 logger = logging.getLogger("arcana.bot")
 
@@ -20,6 +21,7 @@ async def main():
     dp.message.middleware(WhitelistMiddleware(require_feature="arcana"))
     dp.callback_query.middleware(WhitelistMiddleware(require_feature="arcana"))
     dp.include_router(sessions_router)   # callbacks tarot_save/edit/cancel — ПЕРВЫМ
+    dp.include_router(grimoire_router)   # callbacks grim_* — до base router
     dp.include_router(router)
     dp.include_router(memory_router)
     dp.include_router(lists_router)
@@ -45,6 +47,11 @@ async def main():
     async def cmd_finance(msg: Message, user_notion_id: str = "") -> None:
         from arcana.handlers.finance import handle_arcana_finance
         await handle_arcana_finance(msg, user_notion_id)
+
+    @dp.message(ArcanaCommand("grimoire"))
+    async def cmd_grimoire(msg: Message, user_notion_id: str = "") -> None:
+        from arcana.handlers.grimoire import handle_grimoire_menu
+        await handle_grimoire_menu(msg, user_notion_id)
 
     # ── Ежемесячный cron-напоминалка ─────────────────────────────────────────
     try:
