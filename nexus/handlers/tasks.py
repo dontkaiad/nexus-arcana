@@ -115,6 +115,47 @@ def last_record_get(uid: int) -> Optional[tuple]:
     return row  # (db_type, page_id) or None
 
 
+# ── last_task: последняя созданная задача (TTL 5 мин) для уточнений ─────────────
+_LAST_TASK_TTL = 300  # 5 minutes
+
+
+def _ltdb() -> _sqlite3.Connection:
+    con = _sqlite3.connect(_PENDING_DB)
+    con.execute(
+        "CREATE TABLE IF NOT EXISTS last_task "
+        "(uid INTEGER PRIMARY KEY, page_id TEXT, ts REAL)"
+    )
+    con.commit()
+    return con
+
+
+def _last_task_set(uid: int, page_id: str) -> None:
+    with _ltdb() as con:
+        con.execute(
+            "INSERT OR REPLACE INTO last_task (uid, page_id, ts) VALUES (?,?,?)",
+            (uid, page_id, _time.time()),
+        )
+
+
+def _last_task_get(uid: int) -> Optional[str]:
+    """Вернуть page_id последней задачи или None если истёк TTL."""
+    with _ltdb() as con:
+        row = con.execute(
+            "SELECT page_id, ts FROM last_task WHERE uid=?", (uid,)
+        ).fetchone()
+    if not row:
+        return None
+    if _time.time() - row[1] > _LAST_TASK_TTL:
+        _last_task_del(uid)
+        return None
+    return row[0]
+
+
+def _last_task_del(uid: int) -> None:
+    with _ltdb() as con:
+        con.execute("DELETE FROM last_task WHERE uid=?", (uid,))
+
+
 # ── Global state ───────────────────────────────────────────────────────────────
 _user_tz_offset: dict = {}
 _scheduler = None
@@ -594,8 +635,143 @@ def _parse_relative_time(text: str, tz_offset: int) -> Optional[str]:
     return result.strftime("%Y-%m-%dT%H:%M")
 
 
+# ── Follow-up clarification after task creation ────────────────────────────────
+
+_CLARIFY_REMINDER_RE = _re.compile(
+    r"(?:напоминалк[уа]?|напомни(?:лку)?|поставь\s+напоминани[ея]|добавь\s+напоминани[ея])"
+    r"\s+(?:в\s+)?(\d{1,2})(?::(\d{2}))?\s*(?:часов?|ч\.?)?\b",
+    _re.IGNORECASE,
+)
+
+_CLARIFY_DEADLINE_RE = _re.compile(
+    r"^(?:дедлайн|до|срок(?:\s+до)?)\s+(.+)$",
+    _re.IGNORECASE,
+)
+
+_CLARIFY_CATEGORY_RE = _re.compile(
+    r"^(?:категори[яю])(?:\s*[—:\-])?\s+(.+)$",
+    _re.IGNORECASE,
+)
+
+_CLARIFY_PRIORITY_RE = _re.compile(
+    r"^(?:приоритет)(?:\s*[—:\-])?\s+(.+)$",
+    _re.IGNORECASE,
+)
+
+# Combined: any of these → potential clarification
+_CLARIFY_RE = _re.compile(
+    r"(?:напоминалк[уа]?|напомни(?:лку)?|поставь\s+напоминани[ея]|добавь\s+напоминани[ея]"
+    r"|дедлайн\s+\S|до\s+\S|срок\s+до"
+    r"|категори[яю]\s+\S"
+    r"|приоритет\s+\S)",
+    _re.IGNORECASE,
+)
+
+
+async def handle_last_task_clarify(
+    message: Message,
+    text: str,
+    uid: int,
+    user_notion_id: str = "",
+) -> bool:
+    """Обработать уточнение после создания задачи (5-мин окно).
+
+    Парсит напоминание/дедлайн/категорию/приоритет и применяет к последней задаче.
+    Возвращает True если уточнение обработано.
+    """
+    from core.notion_client import update_page
+
+    page_id = _last_task_get(uid)
+    if not page_id:
+        return False
+
+    tz_offset = await _get_user_tz(uid)
+    now = datetime.now(timezone(timedelta(hours=tz_offset)))
+
+    update_props: dict = {}
+    response_text = ""
+    reschedule_reminder: Optional[tuple] = None
+
+    # ── Напоминание ──────────────────────────────────────────────────────────────
+    m_rem = _CLARIFY_REMINDER_RE.search(text)
+    if m_rem:
+        h = int(m_rem.group(1))
+        mi = int(m_rem.group(2)) if m_rem.group(2) else 0
+        run_dt = now.replace(hour=h, minute=mi, second=0, microsecond=0)
+        if run_dt <= now:
+            run_dt += timedelta(days=1)
+        dt_str = run_dt.strftime("%Y-%m-%dT%H:%M")
+        update_props["Напоминание"] = _date(dt_str)
+        reschedule_reminder = (dt_str, page_id)
+        response_text = f"🔔 Напоминание: {run_dt.strftime('%d.%m в %H:%M')}"
+
+    # ── Дедлайн ──────────────────────────────────────────────────────────────────
+    elif _CLARIFY_DEADLINE_RE.search(text):
+        m_dl = _CLARIFY_DEADLINE_RE.search(text)
+        dl_raw = m_dl.group(1).strip()
+        iso_date = await _human_date_to_iso(dl_raw, uid)
+        if iso_date:
+            update_props["Дедлайн"] = _date(iso_date)
+            response_text = f"📅 Дедлайн: {iso_date}"
+
+    # ── Категория ─────────────────────────────────────────────────────────────────
+    elif _CLARIFY_CATEGORY_RE.search(text):
+        m_cat = _CLARIFY_CATEGORY_RE.search(text)
+        from core.classifier import _TASK_CATS
+        cat_raw = m_cat.group(1).strip()
+        real_cat = cat_raw
+        for tc in _TASK_CATS:
+            if cat_raw.lower() in tc.lower():
+                real_cat = tc
+                break
+        update_props["Категория"] = _select(real_cat)
+        response_text = f"🏷 Категория: {real_cat}"
+
+    # ── Приоритет ─────────────────────────────────────────────────────────────────
+    elif _CLARIFY_PRIORITY_RE.search(text):
+        m_pri = _CLARIFY_PRIORITY_RE.search(text)
+        pri_raw = m_pri.group(1).strip().lower()
+        _pri_map = {
+            "срочно": "Срочно", "важно": "Важно",
+            "можно потом": "Можно потом", "потом": "Можно потом",
+        }
+        real_pri = _pri_map.get(pri_raw, pri_raw.capitalize())
+        update_props["Приоритет"] = _select(real_pri)
+        response_text = f"🎯 Приоритет: {real_pri}"
+
+    if not update_props:
+        return False
+
+    try:
+        await update_page(page_id, update_props)
+
+        if reschedule_reminder:
+            dt_str, tid = reschedule_reminder
+            if _scheduler:
+                try:
+                    _scheduler.remove_job(f"reminder_{tid}")
+                except Exception:
+                    pass
+            # Получить название задачи для нового job
+            title_str = "задача"
+            try:
+                client = get_notion()
+                pg = await client.pages.retrieve(page_id=tid)
+                tp = pg.get("properties", {}).get("Задача", {}).get("title", [])
+                title_str = tp[0]["plain_text"] if tp else "задача"
+            except Exception:
+                pass
+            await _schedule_reminder(message.chat.id, title_str, dt_str, tid, tz_offset)
+
+        _last_task_del(uid)
+        await message.answer(f"✏️ {response_text}")
+        return True
+    except Exception as e:
+        logger.error("handle_last_task_clarify error: %s", e)
+        return False
+
+
 import calendar as _calendar
-import re as _re
 
 
 def _parse_repeat_time(raw: str) -> tuple:
@@ -1707,6 +1883,7 @@ async def _do_save_task(message: Message, data: dict, chat_id: int = None, uid: 
 
     # Запоминаем последнюю созданную запись для контекстного редактирования
     last_record_set(uid, "task", result)
+    _last_task_set(uid, result)  # 5-мин окно для уточнений
 
     # Сохраняем поля повторения если задача повторяющаяся
     _repeat = data.get("repeat") or "Нет"
