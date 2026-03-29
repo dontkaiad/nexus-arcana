@@ -765,6 +765,73 @@ async def update_page_select(page_id: str, field_name: str, value: str) -> bool:
         return False
 
 
+_GRIMOIRE_DB_FALLBACK = "33142b3b1ac080a39976cecd4cfde4ce"
+
+
+def _grimoire_db_id() -> str:
+    from core.config import config
+    return config.arcana.db_grimoire or os.environ.get("NOTION_DB_GRIMOIRE", _GRIMOIRE_DB_FALLBACK)
+
+
+async def grimoire_add(
+    title: str,
+    category: str,
+    themes: Optional[List[str]] = None,
+    text: str = "",
+    source: str = "",
+    user_notion_id: str = "",
+) -> Optional[str]:
+    """Создать запись в 📖 Гримуар."""
+    db_id = _grimoire_db_id()
+    real_category = await match_select(db_id, "Категория", category)
+    props: dict = {
+        "Название":  _title(title),
+        "Категория": _select(real_category),
+        "Текст":     _text(text),
+        "Проверено": {"checkbox": False},
+    }
+    if themes:
+        props["Тема"] = _multi_select(themes)
+    if source:
+        props["Источник"] = _text(source)
+    if user_notion_id:
+        props["🪪 Пользователи"] = _relation(user_notion_id)
+    return await page_create(db_id, props)
+
+
+async def grimoire_list_by_category(
+    category: str,
+    user_notion_id: str = "",
+) -> List[dict]:
+    """Все записи Гримуара по категории."""
+    db_id = _grimoire_db_id()
+    base_filter: Optional[dict] = {"property": "Категория", "select": {"equals": category}}
+    filters = _with_user_filter(base_filter, user_notion_id)
+    sorts = [{"property": "Название", "direction": "ascending"}]
+    return await query_pages(db_id, filters=filters, sorts=sorts, page_size=100)
+
+
+async def grimoire_search(
+    query: str = "",
+    category: Optional[str] = None,
+    theme: Optional[str] = None,
+    user_notion_id: str = "",
+) -> List[dict]:
+    """Поиск в Гримуаре по тексту/категории/теме."""
+    db_id = _grimoire_db_id()
+    conditions: List[dict] = []
+    if query:
+        conditions.append({"property": "Название", "title": {"contains": query}})
+    if category:
+        conditions.append({"property": "Категория", "select": {"equals": category}})
+    if theme:
+        conditions.append({"property": "Тема", "multi_select": {"contains": theme}})
+    base_filter: Optional[dict] = {"and": conditions} if conditions else None
+    filters = _with_user_filter(base_filter, user_notion_id)
+    sorts = [{"property": "Название", "direction": "ascending"}]
+    return await query_pages(db_id, filters=filters, sorts=sorts, page_size=50)
+
+
 async def arcana_finance_summary(
     user_notion_id: str = "",
     month: Optional[int] = None,
