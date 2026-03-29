@@ -113,9 +113,13 @@ async def cmd_help(msg: Message, user_notion_id: str = "") -> None:
         "/adhd — СДВГ-профиль\n"
         "Текстом: «запомни: монстры = привычки»\n\n"
 
+        "🔮 <b>ЭЗОТЕРИКА И ПРАКТИКА</b>\n"
+        'Всё про таро, ритуалы, клиентов, расходники → <a href="https://t.me/arcana_kailark_bot">🌒 Аркана</a>\n\n'
+
         "⚙️ <b>ПРОЧЕЕ</b>\n"
         "/start — приветствие\n"
-        "/help — этот гайд\n\n"
+        "/help — этот гайд\n"
+        "/fixstreak — восстановить стрик из истории задач\n\n"
 
         '👩‍💻 Создатель: <a href="https://github.com/dontkaiad">Кай Ларк</a>\n'
         '❓ Ошибки/вопросы? <a href="https://t.me/hey_lark">@hey_lark</a>',
