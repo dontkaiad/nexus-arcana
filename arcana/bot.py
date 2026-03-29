@@ -15,6 +15,9 @@ from arcana.handlers.clients import router as clients_router
 
 logger = logging.getLogger("arcana.bot")
 
+_photo_pending: dict = {}  # uid → (message_id, user_notion_id, ts)
+_PHOTO_TTL = 120  # 2 минуты
+
 async def main():
     if not config.arcana.tg_token: return
     logging.basicConfig(level=logging.INFO)
@@ -156,7 +159,7 @@ async def main():
 
     @dp.message(F.photo)
     async def handle_photo(msg: Message, user_notion_id: str = "") -> None:
-        """Фото: pending_client → скрин контакта. С подписью → route_message. Без → таро."""
+        """Фото: pending_client → скрин контакта. С подписью → route_message. Без → спросить."""
         # Pending клиент — скрин контакта
         from arcana.pending_clients import get_pending_client
         pending_client = await get_pending_client(msg.from_user.id)
@@ -173,9 +176,19 @@ async def main():
             from arcana.handlers.base import route_message
             await route_message(msg, user_notion_id=user_notion_id, _text=msg.caption)
             return
-        # Без подписи → таро
-        from arcana.handlers.sessions import handle_tarot_photo
-        await handle_tarot_photo(msg, user_notion_id)
+
+        # Фото без подписи и без контекста — спросить что это
+        uid = msg.from_user.id
+        from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+        import time as _t
+        # Сохраняем message_id фото для последующей обработки
+        _photo_pending[uid] = (msg.message_id, user_notion_id, _t.time())
+        kb = InlineKeyboardMarkup(inline_keyboard=[[
+            InlineKeyboardButton(text="🃏 Расклад",          callback_data=f"photo_tarot:{uid}"),
+            InlineKeyboardButton(text="👤 Контакт клиента",  callback_data=f"photo_client:{uid}"),
+            InlineKeyboardButton(text="❌ Отмена",            callback_data=f"photo_cancel:{uid}"),
+        ]])
+        await msg.reply("Что это за фото?", reply_markup=kb)
 
     @dp.message(F.contact)
     async def handle_contact(msg: Message, user_notion_id: str = "") -> None:
@@ -215,6 +228,59 @@ async def main():
     async def on_opt_callback(query: CallbackQuery, user_notion_id: str = "") -> None:
         from nexus.handlers.notes import handle_note_callback
         await handle_note_callback(query)
+
+    @dp.callback_query(lambda c: c.data and c.data.startswith("photo_"))
+    async def on_photo_choice(query: CallbackQuery, user_notion_id: str = "") -> None:
+        import time as _t, base64
+        uid = query.from_user.id
+        pending = _photo_pending.pop(uid, None)
+
+        if not pending or _t.time() - pending[2] > _PHOTO_TTL:
+            await query.answer("⏰ Время истекло")
+            await query.message.edit_text("⏰ Время истекло — отправь фото ещё раз.")
+            return
+
+        msg_id, notion_id, _ = pending
+        action = query.data.split(":")[0]  # photo_tarot / photo_client / photo_cancel
+
+        if action == "photo_cancel":
+            await query.answer("Отменено")
+            await query.message.edit_text("❌ Фото проигнорировано.")
+            return
+
+        # Скачиваем оригинальное фото по reply / forward нет — ищем в chat history
+        # В aiogram нет прямого доступа к сообщению по id без хранения,
+        # поэтому используем фото из сообщения с кнопками (предыдущее)
+        # reply_to_message если бот ответил на фото
+        photo_msg = query.message.reply_to_message
+        if not photo_msg or not photo_msg.photo:
+            await query.answer("❌ Не могу найти фото")
+            await query.message.edit_text("⚠️ Не нашла фото. Отправь ещё раз.")
+            return
+
+        f = await bot.get_file(photo_msg.photo[-1].file_id)
+        bio = await bot.download_file(f.file_path)
+        image_b64 = base64.standard_b64encode(bio.read()).decode()
+
+        if action == "photo_tarot":
+            await query.answer("🃏 Распознаю расклад")
+            await query.message.edit_text("🔍 Распознаю карты...")
+            from arcana.handlers.sessions import handle_tarot_photo
+            # Передаём управление в tarot через photo_msg (там есть photo)
+            await handle_tarot_photo(photo_msg, notion_id or user_notion_id)
+
+        elif action == "photo_client":
+            await query.answer("👤 Извлекаю контакт")
+            from arcana.pending_clients import get_pending_client
+            pending_client = await get_pending_client(uid)
+            if not pending_client:
+                await query.message.edit_text(
+                    "👤 Для какого клиента этот контакт? Напиши «клиент Имя» сначала."
+                )
+                return
+            from arcana.handlers.clients import handle_client_photo_input
+            await query.message.edit_text("📸 Извлекаю контакты...")
+            await handle_client_photo_input(photo_msg, image_b64, pending_client)
 
     await dp.start_polling(bot)
 
