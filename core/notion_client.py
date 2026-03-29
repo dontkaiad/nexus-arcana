@@ -726,6 +726,38 @@ async def rituals_by_client(client_id: str, user_notion_id: str = "") -> List[di
         page_size=50,
     )
 
+async def sessions_all(user_notion_id: str = "", sbylos_filter: Optional[str] = None) -> List[dict]:
+    """Все расклады пользователя. sbylos_filter: '✅ Да'/'❌ Нет'/'〰️ Частично'/'⏳ Не проверено' или None."""
+    from core.config import config
+    base_filter: Optional[dict] = None
+    if sbylos_filter:
+        base_filter = {"property": "Сбылось", "select": {"equals": sbylos_filter}}
+    filters = _with_user_filter(base_filter, user_notion_id)
+    sorts = [{"property": "Дата", "direction": "descending"}]
+    return await query_pages(config.arcana.db_sessions, filters=filters, sorts=sorts, page_size=200)
+
+
+async def rituals_all(user_notion_id: str = "", result_filter: Optional[str] = None) -> List[dict]:
+    """Все ритуалы пользователя. result_filter: '✅ Сработало'/'❌ Не сработало'/'〰️ Частично'/'⏳ Не проверено' или None."""
+    from core.config import config
+    base_filter: Optional[dict] = None
+    if result_filter:
+        base_filter = {"property": "Результат", "select": {"equals": result_filter}}
+    filters = _with_user_filter(base_filter, user_notion_id)
+    sorts = [{"property": "Дата", "direction": "descending"}]
+    return await query_pages(config.arcana.db_rituals, filters=filters, sorts=sorts, page_size=200)
+
+
+async def update_page_select(page_id: str, field_name: str, value: str) -> bool:
+    """Обновить Select-поле страницы Notion."""
+    try:
+        await update_page(page_id, {field_name: _select(value)})
+        return True
+    except Exception as e:
+        logger.error("update_page_select error: %s", e)
+        return False
+
+
 async def arcana_all_debts(user_notion_id: str = "") -> List[dict]:
     """Все сеансы и ритуалы с долгом > 0."""
     from core.config import config
