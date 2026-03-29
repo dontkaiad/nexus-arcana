@@ -41,6 +41,11 @@ async def main():
     async def cmd_stats(msg: Message, user_notion_id: str = "") -> None:
         await handle_stats(msg, user_notion_id)
 
+    @dp.message(ArcanaCommand("finance"))
+    async def cmd_finance(msg: Message, user_notion_id: str = "") -> None:
+        from arcana.handlers.finance import handle_arcana_finance
+        await handle_arcana_finance(msg, user_notion_id)
+
     # ── Ежемесячный cron-напоминалка ─────────────────────────────────────────
     try:
         from apscheduler.schedulers.asyncio import AsyncIOScheduler
