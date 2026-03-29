@@ -171,20 +171,6 @@ async def route_message(message: Message, user_notion_id: str = "", _text: str =
 
         uid = message.from_user.id
 
-        # ── Pending: режим сбора инфы о клиенте → в буфер коллектора ────
-        from arcana.pending_clients import get_pending_client
-        pending_client = await get_pending_client(uid)
-        if pending_client and pending_client.get("step") == "collecting":
-            from core.message_collector import add_message, schedule_processing, get_registered_callback
-            cb = get_registered_callback()
-            if cb:
-                await add_message(uid, "text", text)
-                schedule_processing(uid, cb)
-            else:
-                from arcana.handlers.clients import _handle_collecting
-                await _handle_collecting(message, text, pending_client, user_notion_id)
-            return
-
         # ── Pending: поиск в гримуаре ────────────────────────────────────
         from arcana.handlers.grimoire import check_pending_search
         if await check_pending_search(message, text):

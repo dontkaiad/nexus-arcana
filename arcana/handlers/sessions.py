@@ -385,12 +385,13 @@ async def cb_tarot_cancel(call: CallbackQuery) -> None:
 
 # ────────────────────────── Фото расклада ──────────────────────────────────
 
-async def handle_tarot_photo(message: Message, user_notion_id: str = "") -> None:
+async def handle_tarot_photo(message: Message, user_notion_id: str = "", image_b64: str = "") -> None:
     try:
-        photo = message.photo[-1]
-        file = await message.bot.get_file(photo.file_id)
-        bio = await message.bot.download_file(file.file_path)
-        image_b64 = base64.standard_b64encode(bio.read()).decode()
+        if not image_b64:
+            photo = message.photo[-1]
+            file = await message.bot.get_file(photo.file_id)
+            bio = await message.bot.download_file(file.file_path)
+            image_b64 = base64.standard_b64encode(bio.read()).decode()
 
         await message.answer("🔍 Распознаю карты...")
 

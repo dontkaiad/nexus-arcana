@@ -27,6 +27,17 @@ DEBOUNCE_SEC = 5  # секунд тишины перед обработкой
 
 _timers: Dict[int, asyncio.Task] = {}  # uid → debounce task
 _batch_callback: Optional[Callable[[int], Awaitable[None]]] = None
+_user_notion_ids: Dict[int, str] = {}  # uid → notion_id (in-memory, stable per user)
+
+
+def save_user_notion_id(user_id: int, notion_id: str) -> None:
+    """Сохранить notion_id юзера для использования в batch callback."""
+    _user_notion_ids[user_id] = notion_id
+
+
+def get_user_notion_id(user_id: int) -> str:
+    """Получить notion_id юзера."""
+    return _user_notion_ids.get(user_id, "")
 
 
 def register_batch_callback(cb: Callable[[int], Awaitable[None]]) -> None:

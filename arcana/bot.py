@@ -15,8 +15,9 @@ from arcana.handlers.clients import router as clients_router
 
 logger = logging.getLogger("arcana.bot")
 
-_photo_pending: dict = {}  # uid → (message_id, user_notion_id, ts)
+_photo_pending: dict = {}  # uid → (image_b64, user_notion_id, ts)
 _PHOTO_TTL = 120  # 2 минуты
+_last_message: dict = {}  # uid → last Message object (для reply из batch callback)
 
 async def main():
     if not config.arcana.tg_token: return
@@ -104,28 +105,17 @@ async def main():
     except ImportError:
         logger.warning("apscheduler not installed — monthly reminder disabled")
 
-    async def _process_client_batch_final(user_id: int) -> None:
-        """После debounce — обработать весь батч сообщений для collecting клиента."""
-        from core.message_collector import get_buffer, clear_buffer
+    async def _process_client_batch(user_id: int, buffer: list, pending: dict) -> None:
+        """Обработать батч в collecting mode: фото через Vision, тексты через Claude."""
         from arcana.pending_clients import get_pending_client, update_pending_client
         from arcana.handlers.clients import (
             _update_notion, _card, _collecting_kb,
             _parse_json_safe, PARSE_CLIENT_INFO, VISION_CONTACT,
         )
 
-        buffer = await get_buffer(user_id)
-        if not buffer:
-            return
-        await clear_buffer(user_id)
-
-        pending = await get_pending_client(user_id)
-        if not pending:
-            return
-
         texts = []
         updates: dict = {}
 
-        # 1. Фото → Vision извлекает контакты; текст/голос/контакт → в texts
         for item in buffer:
             if item["type"] == "photo":
                 try:
@@ -139,7 +129,7 @@ async def main():
                     if new_contacts:
                         updates.setdefault("contacts", []).extend(new_contacts)
                 except Exception as e:
-                    logger.error("batch photo vision uid=%s: %s", user_id, e)
+                    logger.error("client_batch photo vision uid=%s: %s", user_id, e)
                 if item["caption"]:
                     texts.append(item["caption"])
             elif item["type"] in ("text", "voice"):
@@ -149,7 +139,6 @@ async def main():
                     {"value": item["content"], "label": ""}
                 )
 
-        # 2. Тексты → Claude парсит всё вместе
         if texts:
             combined = "\n".join(texts)
             try:
@@ -163,9 +152,8 @@ async def main():
                     existing = pending.get("notes") or ""
                     updates["notes"] = (existing + " " + data["notes"]).strip()
             except Exception as e:
-                logger.error("batch text parse uid=%s: %s", user_id, e)
+                logger.error("client_batch text parse uid=%s: %s", user_id, e)
 
-        # 3. Обновить pending + Notion
         if updates:
             await update_pending_client(user_id, updates)
 
@@ -175,9 +163,8 @@ async def main():
             try:
                 await _update_notion(page_id, fresh)
             except Exception as e:
-                logger.error("batch _update_notion uid=%s: %s", user_id, e)
+                logger.error("client_batch _update_notion uid=%s: %s", user_id, e)
 
-        # 4. Отправить итог
         try:
             await bot.send_message(
                 user_id,
@@ -187,15 +174,89 @@ async def main():
                 parse_mode="HTML",
             )
         except Exception as e:
-            logger.error("batch send_message uid=%s: %s", user_id, e)
+            logger.error("client_batch send_message uid=%s: %s", user_id, e)
 
-    # Регистрируем callback чтобы base.py мог его использовать без circular import
+    async def _process_batch(user_id: int) -> None:
+        """Унифицированный обработчик: все сообщения из буфера после debounce."""
+        from core.message_collector import get_buffer, clear_buffer, get_user_notion_id
+
+        buffer = await get_buffer(user_id)
+        if not buffer:
+            return
+        await clear_buffer(user_id)
+
+        user_notion_id = get_user_notion_id(user_id)
+        msg = _last_message.get(user_id)
+
+        texts = [i["content"] for i in buffer if i["type"] in ("text", "voice")]
+        texts += [i["caption"] for i in buffer if i["type"] == "photo" and i["caption"]]
+        photos = [i for i in buffer if i["type"] == "photo"]
+        combined_text = "\n".join(texts)
+
+        # ── Collecting mode ──────────────────────────────────────────────
+        from arcana.pending_clients import get_pending_client
+        pending_client = await get_pending_client(user_id)
+        if pending_client and pending_client.get("step") == "collecting":
+            await _process_client_batch(user_id, buffer, pending_client)
+            return
+
+        if not msg:
+            logger.error("_process_batch: no last_message for uid=%s", user_id)
+            return
+
+        # ── Lists pending ──────────────────────────────────────────────
+        if combined_text:
+            from arcana.handlers.lists import handle_list_pending
+            if await handle_list_pending(msg, user_notion_id):
+                return
+
+        # ── Tarot edit ─────────────────────────────────────────────────
+        if combined_text:
+            from arcana.pending_tarot import get_pending
+            pending_tarot = await get_pending(user_id)
+            if pending_tarot and pending_tarot.get("awaiting_edit"):
+                from arcana.handlers.base import _handle_tarot_correction
+                await _handle_tarot_correction(msg, combined_text, pending_tarot, user_notion_id)
+                return
+
+        # ── Normal routing ─────────────────────────────────────────────
+        if combined_text:
+            from arcana.handlers.base import route_message
+            await route_message(msg, user_notion_id=user_notion_id, _text=combined_text)
+            # Если route_message создал collecting mode и в буфере были фото — обработать
+            pending_after = await get_pending_client(user_id)
+            if pending_after and pending_after.get("step") == "collecting" and photos:
+                await _process_client_batch(user_id, [p for p in buffer if p["type"] == "photo"], pending_after)
+            return
+
+        if photos:
+            # Только фото без текста — спросить что это
+            import time as _t
+            from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+            _photo_pending[user_id] = (photos[0]["content"], user_notion_id, _t.time())
+            kb = InlineKeyboardMarkup(inline_keyboard=[[
+                InlineKeyboardButton(text="🃏 Расклад",         callback_data=f"photo_tarot:{user_id}"),
+                InlineKeyboardButton(text="👤 Контакт клиента", callback_data=f"photo_client:{user_id}"),
+                InlineKeyboardButton(text="❌ Отмена",           callback_data=f"photo_cancel:{user_id}"),
+            ]])
+            await bot.send_message(user_id, "Что это за фото?", reply_markup=kb)
+
     from core.message_collector import register_batch_callback
-    register_batch_callback(_process_client_batch_final)
+    register_batch_callback(_process_batch)
+
+    @dp.message(F.text & ~F.text.startswith("/"))
+    async def handle_text(msg: Message, user_notion_id: str = "") -> None:
+        """Весь обычный текст (не команды) → буфер → _process_batch."""
+        from core.message_collector import add_message, schedule_processing, save_user_notion_id
+        uid = msg.from_user.id
+        save_user_notion_id(uid, user_notion_id)
+        _last_message[uid] = msg
+        await add_message(uid, "text", msg.text or "")
+        schedule_processing(uid, _process_batch)
 
     @dp.message(F.voice | F.audio)
     async def handle_voice(msg: Message, user_notion_id: str = "") -> None:
-        """Голосовое → Whisper → текст → base router."""
+        """Голосовое → Whisper → транскрипция в буфер → _process_batch."""
         from core.voice import transcribe
 
         if msg.voice:
@@ -221,68 +282,30 @@ async def main():
 
         await msg.answer(f"🎤 <i>«{text}»</i>", parse_mode="HTML")
 
-        # Lists pending
-        from arcana.handlers.lists import handle_list_pending
-        if await handle_list_pending(msg, user_notion_id):
-            return
-
-        # Pending: режим сбора инфы о клиенте → в буфер
-        from arcana.pending_clients import get_pending_client
-        pending_client = await get_pending_client(msg.from_user.id)
-        if pending_client and pending_client.get("step") == "collecting":
-            from core.message_collector import add_message, schedule_processing
-            await add_message(msg.from_user.id, "voice", text)
-            schedule_processing(msg.from_user.id, _process_client_batch_final)
-            return
-
-        # Pending: правка трактовки таро
-        from arcana.pending_tarot import get_pending
-        pending = await get_pending(msg.from_user.id)
-        if pending and pending.get("awaiting_edit"):
-            from arcana.handlers.base import _handle_tarot_correction
-            await _handle_tarot_correction(msg, text, pending, user_notion_id)
-            return
-
-        # Полный pipeline — передаём текст явно (msg заморожен)
-        from arcana.handlers.base import route_message
-        await route_message(msg, user_notion_id=user_notion_id, _text=text)
+        from core.message_collector import add_message, schedule_processing, save_user_notion_id
+        uid = msg.from_user.id
+        save_user_notion_id(uid, user_notion_id)
+        _last_message[uid] = msg
+        await add_message(uid, "voice", text)
+        schedule_processing(uid, _process_batch)
 
     @dp.message(F.photo)
     async def handle_photo(msg: Message, user_notion_id: str = "") -> None:
-        """Фото: collecting → в буфер. С подписью → route_message. Без → спросить."""
-        from arcana.pending_clients import get_pending_client
-        pending_client = await get_pending_client(msg.from_user.id)
-        if pending_client and pending_client.get("step") == "collecting":
-            import base64
-            from core.message_collector import add_message, schedule_processing
-            f = await bot.get_file(msg.photo[-1].file_id)
-            bio = await bot.download_file(f.file_path)
-            image_b64 = base64.standard_b64encode(bio.read()).decode()
-            await add_message(msg.from_user.id, "photo", image_b64, caption=msg.caption or "")
-            schedule_processing(msg.from_user.id, _process_client_batch_final)
-            return
-
-        if msg.caption:
-            from arcana.handlers.base import route_message
-            await route_message(msg, user_notion_id=user_notion_id, _text=msg.caption)
-            return
-
-        # Фото без подписи и без контекста — спросить что это
+        """Фото → всегда в буфер → _process_batch."""
+        import base64
+        from core.message_collector import add_message, schedule_processing, save_user_notion_id
         uid = msg.from_user.id
-        from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-        import time as _t
-        # Сохраняем message_id фото для последующей обработки
-        _photo_pending[uid] = (msg.message_id, user_notion_id, _t.time())
-        kb = InlineKeyboardMarkup(inline_keyboard=[[
-            InlineKeyboardButton(text="🃏 Расклад",          callback_data=f"photo_tarot:{uid}"),
-            InlineKeyboardButton(text="👤 Контакт клиента",  callback_data=f"photo_client:{uid}"),
-            InlineKeyboardButton(text="❌ Отмена",            callback_data=f"photo_cancel:{uid}"),
-        ]])
-        await msg.reply("Что это за фото?", reply_markup=kb)
+        save_user_notion_id(uid, user_notion_id)
+        _last_message[uid] = msg
+        f = await bot.get_file(msg.photo[-1].file_id)
+        bio = await bot.download_file(f.file_path)
+        image_b64 = base64.standard_b64encode(bio.read()).decode()
+        await add_message(uid, "photo", image_b64, caption=msg.caption or "")
+        schedule_processing(uid, _process_batch)
 
     @dp.message(F.contact)
     async def handle_contact(msg: Message, user_notion_id: str = "") -> None:
-        """TG контакт (share contact) → в буфер если collecting, иначе отклонить."""
+        """TG контакт → буфер если collecting, иначе отклонить."""
         from arcana.pending_clients import get_pending_client
 
         pending = await get_pending_client(msg.from_user.id)
@@ -300,9 +323,11 @@ async def main():
             value = f"{phone} (TG: {tg_user_id})" if phone else f"TG: {tg_user_id}"
         formatted = f"{value} ({contact_name})" if contact_name else value
 
-        from core.message_collector import add_message, schedule_processing
+        from core.message_collector import add_message, schedule_processing, save_user_notion_id
+        save_user_notion_id(uid, user_notion_id)
+        _last_message[uid] = msg
         await add_message(uid, "contact", formatted)
-        schedule_processing(uid, _process_client_batch_final)
+        schedule_processing(uid, _process_batch)
 
     @dp.callback_query(lambda c: c.data and c.data.startswith("opt_"))
     async def on_opt_callback(query: CallbackQuery, user_notion_id: str = "") -> None:
@@ -311,7 +336,7 @@ async def main():
 
     @dp.callback_query(lambda c: c.data and c.data.startswith("photo_"))
     async def on_photo_choice(query: CallbackQuery, user_notion_id: str = "") -> None:
-        import time as _t, base64
+        import time as _t
         uid = query.from_user.id
         pending = _photo_pending.pop(uid, None)
 
@@ -320,7 +345,7 @@ async def main():
             await query.message.edit_text("⏰ Время истекло — отправь фото ещё раз.")
             return
 
-        msg_id, notion_id, _ = pending
+        image_b64, notion_id, _ = pending  # b64 хранится напрямую
         action = query.data.split(":")[0]  # photo_tarot / photo_client / photo_cancel
 
         if action == "photo_cancel":
@@ -328,26 +353,10 @@ async def main():
             await query.message.edit_text("❌ Фото проигнорировано.")
             return
 
-        # Скачиваем оригинальное фото по reply / forward нет — ищем в chat history
-        # В aiogram нет прямого доступа к сообщению по id без хранения,
-        # поэтому используем фото из сообщения с кнопками (предыдущее)
-        # reply_to_message если бот ответил на фото
-        photo_msg = query.message.reply_to_message
-        if not photo_msg or not photo_msg.photo:
-            await query.answer("❌ Не могу найти фото")
-            await query.message.edit_text("⚠️ Не нашла фото. Отправь ещё раз.")
-            return
-
-        f = await bot.get_file(photo_msg.photo[-1].file_id)
-        bio = await bot.download_file(f.file_path)
-        image_b64 = base64.standard_b64encode(bio.read()).decode()
-
         if action == "photo_tarot":
             await query.answer("🃏 Распознаю расклад")
-            await query.message.edit_text("🔍 Распознаю карты...")
             from arcana.handlers.sessions import handle_tarot_photo
-            # Передаём управление в tarot через photo_msg (там есть photo)
-            await handle_tarot_photo(photo_msg, notion_id or user_notion_id)
+            await handle_tarot_photo(query.message, notion_id or user_notion_id, image_b64=image_b64)
 
         elif action == "photo_client":
             await query.answer("👤 Извлекаю контакт")
@@ -360,7 +369,7 @@ async def main():
                 return
             from arcana.handlers.clients import handle_client_photo_input
             await query.message.edit_text("📸 Извлекаю контакты...")
-            await handle_client_photo_input(photo_msg, image_b64, pending_client)
+            await handle_client_photo_input(query.message, image_b64, pending_client)
 
     await dp.start_polling(bot)
 
