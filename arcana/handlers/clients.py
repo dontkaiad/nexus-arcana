@@ -246,7 +246,7 @@ async def handle_client_info_input(message: Message, text: str, pending: dict) -
         request = data.get("request") or ""
         notes = data.get("notes") or ""
 
-        # Накопленные контакты из фото
+        # Накопленные контакты из фото (любой шаг — создаём)
         accumulated: list = pending.get("contacts", [])
         all_contacts = accumulated + [c for c in new_contacts if c.get("value")]
 
@@ -284,12 +284,16 @@ async def handle_client_photo_input(message: Message, image_b64: str, pending: d
         if not name:
             name = data.get("name") or pending.get("name") or "Клиент"
 
-        # Добавляем к накопленным
+        # Добавляем к накопленным, переводим в awaiting_info если ещё в confirm
         accumulated: list = pending.get("contacts", [])
         accumulated.extend(new_contacts)
 
         from arcana.pending_clients import update_pending_client
-        await update_pending_client(uid, {"contacts": accumulated, "name": name})
+        await update_pending_client(uid, {
+            "contacts": accumulated,
+            "name": name,
+            "step": "awaiting_info",
+        })
 
         added_str = _format_contacts(new_contacts)
         total = len(accumulated)
