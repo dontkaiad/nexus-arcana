@@ -696,7 +696,7 @@ async def client_add(
         "Имя":      _title(name),
         "Контакт":  _text(contact),
         "Запрос":   _text(request),
-        "Статус":   _status("🟢 Активный"),
+        "Статус":   _select("🟢 Активный"),
     }
     if user_notion_id:
         props["🪪 Пользователи"] = _relation(user_notion_id)
