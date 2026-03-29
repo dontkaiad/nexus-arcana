@@ -120,6 +120,28 @@ _user_tz_offset: dict = {}
 _scheduler = None
 _bot: Optional[Bot] = None
 
+# ── Multi-select state for task_done ──────────────────────────────────────────
+_done_multi_tasks: dict[int, list] = {}     # uid → [(score, title, task_id, props), ...]
+_done_multi_selected: dict[int, set] = {}   # uid → set of selected task_ids
+
+
+def _done_multi_kb(uid: int) -> InlineKeyboardMarkup:
+    tasks = _done_multi_tasks.get(uid, [])
+    selected = _done_multi_selected.get(uid, set())
+    buttons = []
+    for _, title, task_id, _ in tasks:
+        short = title[:30] + ("…" if len(title) > 30 else "")
+        icon = "☑" if task_id in selected else "☐"
+        buttons.append([InlineKeyboardButton(
+            text=f"{icon} {short}",
+            callback_data=f"done_multi_toggle:{task_id}",
+        )])
+    buttons.append([
+        InlineKeyboardButton(text="✅ Готово", callback_data="done_multi_confirm"),
+        InlineKeyboardButton(text="❌ Отмена", callback_data="done_multi_cancel"),
+    ])
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
 class _HasPending(BaseFilter):
     async def __call__(self, message: Message) -> bool:
         return message.from_user is not None and _pending_has(message.from_user.id)
@@ -1871,19 +1893,13 @@ async def handle_task_done(message: Message, task_hint: str, user_notion_id: str
             await message.answer("⚠️ Ошибка обновления в Notion.")
         return
 
-    # Несколько одинаковых матчей — показать кнопки выбора (до 5)
+    # Несколько одинаковых матчей — мультиселект (до 5)
     top = scored[:5]
-    buttons = []
-    for _, title, task_id, _ in top:
-        short_title = title[:32] + ("…" if len(title) > 32 else "")
-        buttons.append([InlineKeyboardButton(
-            text=f"✅ {short_title}",
-            callback_data=f"task_done_select_{task_id}"
-        )])
-    buttons.append([InlineKeyboardButton(text="❌ Отмена", callback_data="task_cancel")])
+    _done_multi_tasks[uid] = top
+    _done_multi_selected[uid] = set()
     await message.answer(
-        "🔍 Нашёл несколько подходящих задач. Какую отметить выполненной?",
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons)
+        "🔍 Нашёл несколько подходящих задач. Выбери нужные и нажми ✅ Готово:",
+        reply_markup=_done_multi_kb(uid),
     )
 
 
@@ -1924,6 +1940,58 @@ async def task_done_select(call: CallbackQuery) -> None:
         await call.message.reply(phrase + "\n✅ Выполнено")
     else:
         await call.answer("⚠️ Ошибка обновления", show_alert=True)
+
+
+@router.callback_query(F.data.startswith("done_multi_toggle:"))
+async def cb_done_multi_toggle(call: CallbackQuery) -> None:
+    await call.answer()
+    uid = call.from_user.id
+    task_id = call.data.split(":", 1)[1]
+    selected = _done_multi_selected.setdefault(uid, set())
+    selected.discard(task_id) if task_id in selected else selected.add(task_id)
+    if not _done_multi_tasks.get(uid):
+        await call.message.edit_text("⏱ Сессия истекла.")
+        return
+    await call.message.edit_reply_markup(reply_markup=_done_multi_kb(uid))
+
+
+@router.callback_query(F.data == "done_multi_confirm")
+async def cb_done_multi_confirm(call: CallbackQuery) -> None:
+    import random as _random
+    await call.answer()
+    uid = call.from_user.id
+    selected = _done_multi_selected.pop(uid, set())
+    tasks = _done_multi_tasks.pop(uid, [])
+    if not selected:
+        await call.message.edit_text("☐ Ничего не выбрано.")
+        return
+    from core.notion_client import update_task_status
+    done_titles = []
+    for _, title, task_id, task_props in tasks:
+        if task_id not in selected:
+            continue
+        repeat = (task_props.get("Повтор", {}).get("select") or {}).get("name", "Нет")
+        if repeat and repeat != "Нет":
+            await _handle_recurring_deadline_done(call.message, task_id, task_props, repeat, title, uid)
+        else:
+            result = await update_task_status(task_id, "Done")
+            if result:
+                done_titles.append(title)
+    if done_titles:
+        phrase = _random.choice(_DONE_PHRASES)
+        lines = "\n".join(f"✅ {t}" for t in done_titles)
+        await call.message.edit_text(f"{phrase}\n{lines}")
+    else:
+        await call.message.edit_text("⚠️ Ошибка обновления в Notion.")
+
+
+@router.callback_query(F.data == "done_multi_cancel")
+async def cb_done_multi_cancel(call: CallbackQuery) -> None:
+    await call.answer("Отменено")
+    uid = call.from_user.id
+    _done_multi_tasks.pop(uid, None)
+    _done_multi_selected.pop(uid, None)
+    await call.message.edit_reply_markup()
 
 
 # ── Edit record (fuzzy) ────────────────────────────────────────────────────────
