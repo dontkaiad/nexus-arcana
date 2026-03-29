@@ -1303,15 +1303,6 @@ async def main() -> None:
             id="notes_reminder_biweekly",
             replace_existing=True,
         )
-        # СДВГ-дайджест: каждое воскресенье в 08:00 UTC (11:00 UTC+3 СПб)
-        from nexus.handlers.memory import send_adhd_digest
-        nexus_scheduler.add_job(
-            send_adhd_digest,
-            args=[bot],
-            trigger=CronTrigger(day_of_week="sun", hour=8, minute=0),
-            id="adhd_digest_weekly",
-            replace_existing=True,
-        )
         # 🗒️ Списки: клон повторяющихся покупок — ежедневно 00:00 UTC (03:00 СПб)
         from core.list_manager import clone_recurring, check_expiry
         nexus_scheduler.add_job(
