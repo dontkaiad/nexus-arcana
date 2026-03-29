@@ -147,14 +147,12 @@ async def main():
         pending = await get_pending(msg.from_user.id)
         if pending and pending.get("awaiting_edit"):
             from arcana.handlers.base import _handle_tarot_correction
-            msg.text = text
             await _handle_tarot_correction(msg, text, pending, user_notion_id)
             return
 
-        # Полный pipeline — подменяем text и роутим
-        msg.text = text
+        # Полный pipeline — передаём текст явно (msg заморожен)
         from arcana.handlers.base import route_message
-        await route_message(msg, user_notion_id=user_notion_id)
+        await route_message(msg, user_notion_id=user_notion_id, _text=text)
 
     @dp.message(F.photo)
     async def handle_photo(msg: Message, user_notion_id: str = "") -> None:
@@ -172,9 +170,8 @@ async def main():
             return
 
         if msg.caption:
-            msg.text = msg.caption
             from arcana.handlers.base import route_message
-            await route_message(msg, user_notion_id=user_notion_id)
+            await route_message(msg, user_notion_id=user_notion_id, _text=msg.caption)
             return
         # Без подписи → таро
         from arcana.handlers.sessions import handle_tarot_photo
