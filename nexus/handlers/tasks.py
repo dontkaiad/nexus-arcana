@@ -706,7 +706,7 @@ async def _handle_recurring_deadline_done(
 
 # ── Handlers ───────────────────────────────────────────────────────────────────
 
-_REMIND_WORDS = {"напомни", "напоминай", "remind", "напомнить", "напомни мне"}
+_REMIND_WORDS = {"напомни", "напоминай", "remind", "напомнить", "напомни мне", "напоминалку", "напоминание"}
 
 
 def _has_remind_word(text: str) -> bool:
@@ -784,6 +784,13 @@ async def handle_task_parsed(message: Message, data: dict) -> None:
 
     # Определяем оригинальный текст из message
     original_text = message.text or ""
+
+    # Если Haiku вернул отдельный reminder (отличается от deadline) — используем его напрямую
+    if data.get("reminder") and data["reminder"] != data.get("deadline"):
+        data["reminder_time"] = data.pop("reminder")
+        logger.info("handle_task_parsed: explicit reminder from Haiku: %s", data["reminder_time"])
+        await _do_save_task(message, data, chat_id=message.chat.id, uid=uid)
+        return
 
     has_remind = _has_remind_word(original_text)
 
@@ -2016,6 +2023,8 @@ async def handle_edit_record(
         "name": "title", "имя": "title", "название": "title",
         "категория": "category", "категорию": "category",
         "приоритет": "priority", "дедлайн": "deadline",
+        "напоминание": "reminder", "напоминалку": "reminder",
+        "напомни": "reminder", "напомнить": "reminder",
         "источник": "source",
         "статус": "status", "status": "status",
     }
@@ -2449,30 +2458,11 @@ async def handle_task_stats(message: Message, user_notion_id: str = "") -> None:
         elif status in ("Not started", "In progress"):
             active += 1
 
-    # Стрик
-    unique_done_dates = sorted(set(done_dates), reverse=True)
-    streak = 0
-    best_streak = 0
-    current_streak = 0
-    check_date = today
-    for d_str in unique_done_dates:
-        try:
-            d = datetime.strptime(d_str, "%Y-%m-%d").date()
-        except ValueError:
-            continue
-        if d == check_date:
-            current_streak += 1
-            check_date -= timedelta(days=1)
-        elif d < check_date:
-            if streak == 0:
-                streak = current_streak
-            best_streak = max(best_streak, current_streak)
-            # Попробуем продолжить с этой даты
-            current_streak = 1
-            check_date = d - timedelta(days=1)
-    if streak == 0:
-        streak = current_streak
-    best_streak = max(best_streak, current_streak)
+    # Стрик — единственный источник правды: SQLite streaks
+    from nexus.handlers.streaks import get_streak
+    _streak_data = get_streak(uid)
+    streak = _streak_data.get("streak", 0)
+    best_streak = _streak_data.get("best", 0)
 
     # Топ-3 категории
     top_cats = cat_done.most_common(3)
