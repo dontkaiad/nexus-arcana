@@ -151,15 +151,15 @@ async def _handle_tarot_correction(
 
 
 @router.message()
-async def route_message(message: Message, user_notion_id: str = "") -> None:
+async def route_message(message: Message, user_notion_id: str = "", _text: str = "") -> None:
     try:
-        if message.photo:
+        if message.photo and not _text:
             from arcana.handlers.sessions import handle_tarot_photo
             await handle_tarot_photo(message, user_notion_id)
             return
 
         from core.layout import maybe_convert
-        text = maybe_convert((message.text or "").strip())
+        text = _text or maybe_convert((message.text or message.caption or "").strip())
         if not text:
             await message.answer("Отправь текст или фото расклада.")
             return
