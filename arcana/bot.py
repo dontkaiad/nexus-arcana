@@ -10,6 +10,7 @@ from arcana.handlers.memory import router as memory_router
 from arcana.handlers.lists import router as lists_router
 from arcana.handlers.sessions import router as sessions_router
 from arcana.handlers.grimoire import router as grimoire_router
+from arcana.handlers.delete import router as delete_router
 
 logger = logging.getLogger("arcana.bot")
 
@@ -22,6 +23,7 @@ async def main():
     dp.callback_query.middleware(WhitelistMiddleware(require_feature="arcana"))
     dp.include_router(sessions_router)   # callbacks tarot_save/edit/cancel — ПЕРВЫМ
     dp.include_router(grimoire_router)   # callbacks grim_* — до base router
+    dp.include_router(delete_router)     # callbacks del_confirm/del_cancel
     dp.include_router(router)
     dp.include_router(memory_router)
     dp.include_router(lists_router)
