@@ -256,6 +256,67 @@ def get_streak_stats(user_id: int) -> str:
     return "\n".join(lines)
 
 
+def rebuild_streak_from_dates(user_id: int, done_dates: list[str], tz_offset: int = 3) -> dict:
+    """Пересчитать стрик из списка дат выполненных задач и записать в SQLite.
+
+    done_dates — список строк YYYY-MM-DD (могут повторяться, порядок неважен).
+    Возвращает {"streak": int, "best": int}.
+    """
+    import sqlite3
+
+    today = _local_today(tz_offset)
+    unique_dates = sorted({d[:10] for d in done_dates if d}, reverse=True)
+
+    # Считаем текущий стрик (от сегодня назад)
+    streak = 0
+    check = datetime.strptime(today, "%Y-%m-%d").date()
+    from datetime import date as _date
+    date_set = {datetime.strptime(d, "%Y-%m-%d").date() for d in unique_dates}
+
+    for _ in range(len(unique_dates) + 1):
+        if check in date_set:
+            streak += 1
+            check -= timedelta(days=1)
+        else:
+            break
+
+    # Лучший стрик — полный проход по всем датам
+    best = 0
+    cur = 0
+    prev = None
+    for d_str in reversed(unique_dates):
+        d = datetime.strptime(d_str, "%Y-%m-%d").date()
+        if prev is None or (d - prev).days == 1:
+            cur += 1
+        else:
+            best = max(best, cur)
+            cur = 1
+        prev = d
+    best = max(best, cur, streak)
+
+    streak_start = None
+    if streak > 0:
+        streak_start_date = datetime.strptime(today, "%Y-%m-%d").date() - timedelta(days=streak - 1)
+        streak_start = streak_start_date.strftime("%Y-%m-%d")
+
+    last_activity = unique_dates[0] if unique_dates else None
+
+    con = sqlite3.connect(_DB_PATH)
+    try:
+        con.execute(
+            "INSERT OR REPLACE INTO streaks "
+            "(user_id, current_streak, best_streak, last_activity_date, "
+            "rest_days_used, streak_start_date) "
+            "VALUES (?, ?, ?, ?, COALESCE((SELECT rest_days_used FROM streaks WHERE user_id=?), 0), ?)",
+            (user_id, streak, best, last_activity, user_id, streak_start),
+        )
+        con.commit()
+    finally:
+        con.close()
+
+    return {"streak": streak, "best": best}
+
+
 def _rest_days_in_window(user_id: int) -> int:
     """Return how many rest days were used in the last 5 days (0 or 1)."""
     data = get_streak(user_id)
