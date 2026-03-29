@@ -26,6 +26,18 @@ DB_PATH = os.path.join(os.path.dirname(__file__), "..", "message_buffer.db")
 DEBOUNCE_SEC = 5  # секунд тишины перед обработкой
 
 _timers: Dict[int, asyncio.Task] = {}  # uid → debounce task
+_batch_callback: Optional[Callable[[int], Awaitable[None]]] = None
+
+
+def register_batch_callback(cb: Callable[[int], Awaitable[None]]) -> None:
+    """Зарегистрировать callback для обработки батча (вызывать из bot.main())."""
+    global _batch_callback
+    _batch_callback = cb
+
+
+def get_registered_callback() -> Optional[Callable[[int], Awaitable[None]]]:
+    """Получить зарегистрированный callback."""
+    return _batch_callback
 
 
 async def _ensure_table() -> None:

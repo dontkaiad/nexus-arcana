@@ -189,6 +189,10 @@ async def main():
         except Exception as e:
             logger.error("batch send_message uid=%s: %s", user_id, e)
 
+    # Регистрируем callback чтобы base.py мог его использовать без circular import
+    from core.message_collector import register_batch_callback
+    register_batch_callback(_process_client_batch_final)
+
     @dp.message(F.voice | F.audio)
     async def handle_voice(msg: Message, user_notion_id: str = "") -> None:
         """Голосовое → Whisper → текст → base router."""
