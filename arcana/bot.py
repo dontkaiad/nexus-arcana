@@ -137,7 +137,7 @@ async def main():
         # Pending: создание клиента (приоритет выше таро)
         from arcana.pending_clients import get_pending_client
         pending_client = await get_pending_client(msg.from_user.id)
-        if pending_client and pending_client.get("step") == "awaiting_info":
+        if pending_client:
             from arcana.handlers.clients import handle_client_info_input
             await handle_client_info_input(msg, text, pending_client)
             return
@@ -162,7 +162,7 @@ async def main():
         # Pending клиент — скрин контакта
         from arcana.pending_clients import get_pending_client
         pending_client = await get_pending_client(msg.from_user.id)
-        if pending_client and pending_client.get("step") == "awaiting_info":
+        if pending_client:
             import base64
             f = await bot.get_file(msg.photo[-1].file_id)
             bio = await bot.download_file(f.file_path)
