@@ -53,7 +53,15 @@ def _parse_json_safe(raw: str) -> dict:
         return {}
 
 
+def _confirm_kb(uid: int) -> InlineKeyboardMarkup:
+    """Кнопки подтверждения создания клиента."""
+    return InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text="➕ Создать", callback_data=f"client_start_create:{uid}"),
+        InlineKeyboardButton(text="❌ Нет", callback_data=f"client_cancel:{uid}"),
+    ]])
+
 def _awaiting_kb(uid: int) -> InlineKeyboardMarkup:
+    """Кнопки пока ждём инфу о клиенте."""
     return InlineKeyboardMarkup(inline_keyboard=[[
         InlineKeyboardButton(text="➕ Создать без деталей", callback_data=f"client_create_empty:{uid}"),
         InlineKeyboardButton(text="❌ Отмена", callback_data=f"client_cancel:{uid}"),
@@ -107,42 +115,36 @@ async def handle_add_client(message: Message, text: str, user_notion_id: str = "
             await message.answer("⚠️ Не нашла имя клиента.")
             return
 
+        # 1. Проверить дубли
         existing = await client_find(name, user_notion_id=user_notion_id)
         if existing:
             existing_name = _extract_text(existing["properties"].get("Имя", {}))
             await message.answer(f"👤 Клиент «{existing_name}» уже есть.")
             return
 
+        # 2. Если в тексте уже есть контакт/запрос — создать сразу без вопросов
         contact = data.get("contact") or ""
         request = data.get("request") or ""
-
         if contact or request:
-            # Достаточно данных — создаём сразу
             await _create_and_confirm(message, name, contact, request, "", user_notion_id)
             return
 
-        # Мало данных — запрашиваем дополнительно
+        # 3. Клиент не найден, данных нет — спросить "создать?"
         from arcana.pending_clients import save_pending_client
         await save_pending_client(message.from_user.id, {
             "name": name,
             "user_notion_id": user_notion_id,
-            "step": "awaiting_info",
+            "step": "confirm_create",
         })
         await message.answer(
-            f"👤 Создаю клиента <b>{name}</b>\n\n"
-            "Скинь инфу — любым способом:\n"
-            "• Текстом: контакт, запрос, заметки\n"
-            "• Скрин контакта из TG\n"
-            "• Поделиться контактом\n"
-            "• Голосовое\n\n"
-            "Или нажми «Создать без деталей»",
-            reply_markup=_awaiting_kb(message.from_user.id),
+            f"❌ Клиента <b>{name}</b> нет в базе. Создать?",
+            reply_markup=_confirm_kb(message.from_user.id),
             parse_mode="HTML",
         )
     except Exception as e:
         logger.exception("handle_add_client: %s", e)
         await log_error(str(e), context="handle_add_client", bot_label="🌒 Arcana")
-        await message.answer("⚠️ Ошибка при создании клиента.")
+        await message.answer("⚠️ Ошибка при поиске клиента.")
 
 
 async def handle_client_info(message: Message, text: str, user_notion_id: str = "") -> None:
@@ -159,13 +161,13 @@ async def handle_client_info(message: Message, text: str, user_notion_id: str = 
             await save_pending_client(message.from_user.id, {
                 "name": name,
                 "user_notion_id": user_notion_id,
-                "step": "awaiting_info",
+                "step": "confirm_create",
             })
-            kb = InlineKeyboardMarkup(inline_keyboard=[[
-                InlineKeyboardButton(text=f"➕ Создать {name}", callback_data=f"client_create_empty:{message.from_user.id}"),
-                InlineKeyboardButton(text="❌ Нет", callback_data=f"client_cancel:{message.from_user.id}"),
-            ]])
-            await message.answer(f"❌ Клиент «{name}» не найден. Создать?", reply_markup=kb)
+            await message.answer(
+                f"❌ Клиента <b>{name}</b> нет в базе. Создать?",
+                reply_markup=_confirm_kb(message.from_user.id),
+                parse_mode="HTML",
+            )
             return
 
         cid = client["id"]
@@ -280,6 +282,39 @@ async def handle_client_photo_input(message: Message, image_b64: str, pending: d
 
 
 # ── Callbacks ─────────────────────────────────────────────────────────────────
+
+@router.callback_query(F.data.startswith("client_start_create:"))
+async def cb_start_create(callback: CallbackQuery, user_notion_id: str = "") -> None:
+    """Юзер подтвердил создание → перейти к шагу сбора инфы."""
+    uid = int(callback.data.split(":", 1)[1])
+    if uid != callback.from_user.id:
+        return
+    await callback.answer()
+    try:
+        from arcana.pending_clients import get_pending_client, save_pending_client
+        pending = await get_pending_client(uid)
+        if not pending:
+            await callback.message.edit_text("⏱ Сессия истекла.")
+            return
+        name = pending.get("name", "")
+        # Переводим в следующий шаг
+        pending["step"] = "awaiting_info"
+        await save_pending_client(uid, pending)
+        await callback.message.edit_text(
+            f"👤 Создаю клиента <b>{name}</b>\n\n"
+            "Скинь инфу — любым способом:\n"
+            "• Текстом: контакт, запрос, заметки\n"
+            "• Скрин контакта из TG\n"
+            "• Поделиться контактом\n"
+            "• Голосовое\n\n"
+            "Или нажми «Создать без деталей»",
+            reply_markup=_awaiting_kb(uid),
+            parse_mode="HTML",
+        )
+    except Exception as e:
+        logger.exception("cb_start_create: %s", e)
+        await callback.message.edit_text("⚠️ Ошибка.")
+
 
 @router.callback_query(F.data.startswith("client_create_empty:"))
 async def cb_create_empty(callback: CallbackQuery, user_notion_id: str = "") -> None:
