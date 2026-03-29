@@ -110,9 +110,13 @@ async def handle_add_session(message: Message, text: str, user_notion_id: str = 
         cards_text = data.get("cards") or ""
         interpretation = ""
         if cards_text:
+            from core.memory import get_memories_for_context, extract_context_keywords
+            keywords = extract_context_keywords(data, client_name)
+            memory_context = await get_memories_for_context(user_notion_id, keywords) if keywords else ""
+            tarot_system = f"{TAROT_SYSTEM}\n\n{memory_context}" if memory_context else TAROT_SYSTEM
             interpretation = await ask_claude(
                 f"Расклад: {data.get('spread_type', '')}\nВопрос: {data.get('question', '')}\nКарты: {cards_text}",
-                system=TAROT_SYSTEM,
+                system=tarot_system,
                 max_tokens=2000,
             )
 

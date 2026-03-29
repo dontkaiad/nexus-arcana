@@ -102,6 +102,10 @@ async def handle_client_info(message: Message, text: str, user_notion_id: str = 
     debt_str = f"⚠️ {debt:,.0f}₽" if debt > 0 else "✅ 0₽"
     hist_str = "\n".join(history[:5]) or "  (нет записей)"
 
+    from core.memory import get_memories_for_context
+    memory_context = await get_memories_for_context(user_notion_id, [client_name])
+    mem_block = f"\n\n🧠 <b>Из памяти:</b>\n{memory_context}" if memory_context else ""
+
     await message.answer(
         f"👤 <b>{client_name}</b>\n"
         f"📱 {contact or '—'} · с {props.get('Первое обращение', {}).get('date', {}).get('start', '—')[:10]}\n"
@@ -110,6 +114,7 @@ async def handle_client_info(message: Message, text: str, user_notion_id: str = 
         f"💰 Всего: {total:,.0f}₽ | Долг: {debt_str}\n"
         f"🃏 Сеансов: {len(sessions)} | 🕯 Ритуалов: {len(rituals)}\n\n"
         f"<b>История:</b>\n{hist_str}"
+        f"{mem_block}"
     )
 
 
