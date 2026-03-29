@@ -1401,6 +1401,20 @@ async def task_subtask_cb(call: CallbackQuery) -> None:
     await call.answer()
 
 
+async def _update_streak_line(uid: int) -> str:
+    """Update SQLite streak and return a formatted line (or empty string on error)."""
+    try:
+        from nexus.handlers.streaks import update_streak, format_streak_msg
+        tz = await _get_user_tz(uid) or 3
+        streak_data = await update_streak(uid, tz)
+        if streak_data:
+            return "\n" + format_streak_msg(
+                streak_data["streak"], streak_data["best"], streak_data.get("is_new_best", False))
+    except Exception as e:
+        logger.debug("streak update error: %s", e)
+    return ""
+
+
 _DONE_PHRASES = [
     "🎉 Кай, ты просто огонь!",
     "✨ Ты просто магия!",
@@ -1477,17 +1491,7 @@ async def task_complete(call: CallbackQuery) -> None:
             title_line = f"\n✅ {task_title} — выполнено" if task_title else "\n✅ Выполнено"
             await call.answer("✅ Записано!")
             await react(call, "🔥")
-            # Стрик
-            streak_line = ""
-            try:
-                from nexus.handlers.streaks import update_streak, format_streak_msg
-                tz = await _get_user_tz(uid) or 3
-                streak_data = await update_streak(uid, tz)
-                if streak_data:
-                    streak_line = "\n" + format_streak_msg(
-                        streak_data["streak"], streak_data["best"], streak_data.get("is_new_best", False))
-            except Exception as e:
-                logger.debug("streak update error: %s", e)
+            streak_line = await _update_streak_line(uid)
             await call.message.reply(f"{phrase}{title_line}{streak_line}")
         else:
             await call.answer("⚠️ Ошибка обновления", show_alert=True)
@@ -1895,7 +1899,8 @@ async def handle_task_done(message: Message, task_hint: str, user_notion_id: str
         result = await update_task_status(task_id, "Done")
         if result:
             phrase = random.choice(_DONE_PHRASES)
-            await message.answer(f"{phrase}\n✅ {title} — выполнено")
+            streak_line = await _update_streak_line(uid)
+            await message.answer(f"{phrase}\n✅ {title} — выполнено{streak_line}")
         else:
             await message.answer("⚠️ Ошибка обновления в Notion.")
         return
@@ -1943,8 +1948,9 @@ async def task_done_select(call: CallbackQuery) -> None:
     result = await update_task_status(task_id, "Done")
     if result:
         phrase = random.choice(_DONE_PHRASES)
+        streak_line = await _update_streak_line(uid)
         await call.answer("✅ Записано!")
-        await call.message.reply(phrase + "\n✅ Выполнено")
+        await call.message.reply(phrase + "\n✅ Выполнено" + streak_line)
     else:
         await call.answer("⚠️ Ошибка обновления", show_alert=True)
 
@@ -1986,8 +1992,9 @@ async def cb_done_multi_confirm(call: CallbackQuery) -> None:
                 done_titles.append(title)
     if done_titles:
         phrase = _random.choice(_DONE_PHRASES)
+        streak_line = await _update_streak_line(uid)
         lines = "\n".join(f"✅ {t}" for t in done_titles)
-        await call.message.edit_text(f"{phrase}\n{lines}")
+        await call.message.edit_text(f"{phrase}\n{lines}{streak_line}")
     else:
         await call.message.edit_text("⚠️ Ошибка обновления в Notion.")
 
