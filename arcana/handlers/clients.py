@@ -5,12 +5,15 @@ import json
 import logging
 from datetime import datetime, timezone, timedelta
 
-from aiogram.types import Message
+from aiogram import Router, F
+from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from core.claude_client import ask_claude
 from core.notion_client import (
     client_add, client_find, sessions_by_client, rituals_by_client,
     arcana_all_debts, get_page, _extract_text, _extract_number, log_error,
 )
+
+router = Router()
 
 logger = logging.getLogger("arcana.clients")
 MOSCOW_TZ = timezone(timedelta(hours=3))
@@ -71,7 +74,10 @@ async def handle_client_info(message: Message, text: str, user_notion_id: str = 
 
     client = await client_find(name, user_notion_id=user_notion_id)
     if not client:
-        await message.answer(f"❌ Клиент «{name}» не найден.")
+        kb = InlineKeyboardMarkup(inline_keyboard=[[
+            InlineKeyboardButton(text=f"➕ Создать {name}", callback_data=f"create_client:{name}"),
+        ]])
+        await message.answer(f"❌ Клиент «{name}» не найден.", reply_markup=kb)
         return
 
     cid = client["id"]
@@ -116,6 +122,23 @@ async def handle_client_info(message: Message, text: str, user_notion_id: str = 
         f"<b>История:</b>\n{hist_str}"
         f"{mem_block}"
     )
+
+
+@router.callback_query(F.data.startswith("create_client:"))
+async def cb_create_client(callback: CallbackQuery, user_notion_id: str = "") -> None:
+    name = callback.data.split(":", 1)[1]
+    await callback.answer()
+    try:
+        from datetime import datetime, timezone, timedelta
+        today = datetime.now(timezone(timedelta(hours=3))).strftime("%Y-%m-%d")
+        result = await client_add(name=name, date=today, user_notion_id=user_notion_id)
+        if result:
+            await callback.message.edit_text(f"✅ Клиент <b>{name}</b> создан.")
+        else:
+            await callback.message.edit_text("⚠️ Ошибка при создании клиента.")
+    except Exception as e:
+        logger.exception("cb_create_client: %s", e)
+        await callback.message.edit_text("⚠️ Ошибка при создании клиента.")
 
 
 async def handle_debts(message: Message, user_notion_id: str = "") -> None:
