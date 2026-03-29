@@ -33,6 +33,9 @@ work_done    — работа сделана, выполнил работу
 work_list    — список работ, что делать
 nexus        — финансы, расходы, доходы, заметки, покупки
 finance      — финансы практики, сколько заработала, расходы, прибыль
+grimoire_add    — записать в гримуар (заговор, рецепт, комбинация, заметка)
+grimoire        — открыть гримуар, посмотреть записи
+grimoire_search — поиск в гримуаре
 verify       — отметить что расклад/ритуал сбылся/не сбылся
 stats        — статистика, процент сбывшихся
 unknown      — остальное"""
@@ -168,6 +171,11 @@ async def route_message(message: Message, user_notion_id: str = "") -> None:
 
         uid = message.from_user.id
 
+        # ── Pending: поиск в гримуаре ────────────────────────────────────
+        from arcana.handlers.grimoire import check_pending_search
+        if await check_pending_search(message, text):
+            return
+
         # ── Pending: правка трактовки ─────────────────────────────────────
         from arcana.pending_tarot import get_pending
         pending = await get_pending(uid)
@@ -201,6 +209,7 @@ async def route_message(message: Message, user_notion_id: str = "") -> None:
         from arcana.handlers.works import handle_add_work, handle_work_done, handle_works_list
         from arcana.handlers.stats import handle_verify, handle_stats
         from arcana.handlers.finance import handle_arcana_finance
+        from arcana.handlers.grimoire import handle_grimoire_add, handle_grimoire_menu, handle_grimoire_search, check_pending_search
 
         dispatch = {
             "new_client":   lambda: handle_add_client(message, text, user_notion_id),
@@ -213,8 +222,11 @@ async def route_message(message: Message, user_notion_id: str = "") -> None:
             "work":         lambda: handle_add_work(message, text, user_notion_id),
             "work_done":    lambda: handle_work_done(message, text, user_notion_id),
             "work_list":    lambda: handle_works_list(message, user_notion_id),
-            "finance":      lambda: handle_arcana_finance(message, user_notion_id, text),
-            "verify":       lambda: handle_verify(message, text, user_notion_id),
+            "finance":         lambda: handle_arcana_finance(message, user_notion_id, text),
+            "grimoire_add":    lambda: handle_grimoire_add(message, text, user_notion_id),
+            "grimoire":        lambda: handle_grimoire_menu(message, user_notion_id),
+            "grimoire_search": lambda: handle_grimoire_search(message, text, user_notion_id),
+            "verify":          lambda: handle_verify(message, text, user_notion_id),
             "stats":        lambda: handle_stats(message, user_notion_id),
         }
 
