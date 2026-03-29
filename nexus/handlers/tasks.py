@@ -270,11 +270,19 @@ async def restore_reminders_on_startup() -> None:
                             InlineKeyboardButton(text="✅ Сделано!", callback_data=f"task_complete_{task_id}"),
                             InlineKeyboardButton(text="❌ Не сделал", callback_data=f"task_failed_{task_id}"),
                         ]])
+                        # Read interval for display
+                        repeat_time_raw_pre = "".join(
+                            t.get("plain_text", "") for t in
+                            (props.get("Время повтора", {}).get("rich_text") or [])
+                        )
+                        _, ivl_days_pre = _parse_repeat_time(repeat_time_raw_pre)
+                        repeat_display = _interval_label(ivl_days_pre) if ivl_days_pre > 1 else repeat
+
                         try:
                             await _bot.send_message(
                                 tg_id,
                                 f"⏰ <b>Пропущено ({missed_time}):</b> {title}\n"
-                                f"🔄 Повтор: {repeat} — переношу.\n\nСделано?",
+                                f"🔄 Повтор: {repeat_display} — переношу.\n\nСделано?",
                                 parse_mode="HTML",
                                 reply_markup=kb,
                             )
@@ -282,9 +290,14 @@ async def restore_reminders_on_startup() -> None:
                             logger.error("restore pass2: failed to send missed repeat '%s': %s", title, e)
 
                         # Сдвигаем до ближайшей будущей даты
+                        repeat_time_raw = "".join(
+                            t.get("plain_text", "") for t in
+                            (props.get("Время повтора", {}).get("rich_text") or [])
+                        )
+                        _, ivl_days = _parse_repeat_time(repeat_time_raw)
                         new_reminder = reminder_start[:16]
                         for _ in range(400):
-                            new_reminder = _next_cycle_date(new_reminder, repeat, tz_offset)
+                            new_reminder = _next_cycle_date(new_reminder, repeat, tz_offset, ivl_days)
                             try:
                                 nrem_dt = datetime.strptime(new_reminder[:16], "%Y-%m-%dT%H:%M").replace(
                                     tzinfo=timezone(timedelta(hours=tz_offset))
@@ -299,7 +312,7 @@ async def restore_reminders_on_startup() -> None:
                         if deadline_start:
                             new_deadline = deadline_start[:16]
                             for _ in range(400):
-                                new_deadline = _next_cycle_date(new_deadline, repeat, tz_offset)
+                                new_deadline = _next_cycle_date(new_deadline, repeat, tz_offset, ivl_days)
                                 try:
                                     dl_dt = datetime.strptime(new_deadline[:10], "%Y-%m-%d").replace(
                                         tzinfo=timezone(timedelta(hours=tz_offset))
@@ -570,9 +583,37 @@ def _parse_relative_time(text: str, tz_offset: int) -> Optional[str]:
 
 
 import calendar as _calendar
+import re as _re
 
 
-def _next_cycle_date(current_date_str: str, repeat: str, tz_offset: int = 3) -> str:
+def _parse_repeat_time(raw: str) -> tuple:
+    """Parse 'HH:MM|every_Nd' → ('HH:MM', N).  Returns ('HH:MM', 0) if no interval."""
+    if not raw:
+        return ("09:00", 0)
+    if "|every_" in raw:
+        parts = raw.split("|every_", 1)
+        time_str = parts[0] or "09:00"
+        m = _re.match(r"(\d+)d", parts[1])
+        return (time_str, int(m.group(1)) if m else 0)
+    return (raw, 0)
+
+
+def _interval_label(interval_days: int) -> str:
+    """Human-readable label: 'каждые 2 дня' / 'каждые 5 дней'."""
+    if interval_days <= 0:
+        return ""
+    last = interval_days % 10
+    last100 = interval_days % 100
+    if last == 1 and last100 != 11:
+        word = "день"
+    elif 2 <= last <= 4 and not (12 <= last100 <= 14):
+        word = "дня"
+    else:
+        word = "дней"
+    return f"каждые {interval_days} {word}"
+
+
+def _next_cycle_date(current_date_str: str, repeat: str, tz_offset: int = 3, interval_days: int = 0) -> str:
     """Вычислить дату следующего цикла для повторяющейся задачи.
 
     base = max(old_date, today) — чтобы не прыгать в прошлое если задача просрочена.
@@ -595,7 +636,8 @@ def _next_cycle_date(current_date_str: str, repeat: str, tz_offset: int = 3) -> 
     base = max(old_date, today)
 
     if repeat == "Ежедневно":
-        next_date = base + timedelta(days=1)
+        step = interval_days if interval_days > 1 else 1
+        next_date = base + timedelta(days=step)
     elif repeat == "Еженедельно":
         next_date = base + timedelta(weeks=1)
     elif repeat == "Ежемесячно":
@@ -630,19 +672,26 @@ async def _handle_recurring_task_reset(
     """Сбросить повторяющуюся задачу: сдвинуть дедлайн/напоминание, статус → Not started."""
     tz_offset = await _get_user_tz(uid)
 
+    # Parse interval from Время повтора
+    repeat_time_raw = "".join(
+        t.get("plain_text", "") for t in
+        (task_props.get("Время повтора", {}).get("rich_text") or [])
+    )
+    _, ivl_days = _parse_repeat_time(repeat_time_raw)
+
     deadline_prop = task_props.get("Дедлайн", {}).get("date") or {}
     current_deadline = deadline_prop.get("start", "")
 
     reminder_prop = task_props.get("Напоминание", {}).get("date") or {}
     current_reminder = reminder_prop.get("start", "")
 
-    new_deadline = _next_cycle_date(current_deadline, repeat, tz_offset)
+    new_deadline = _next_cycle_date(current_deadline, repeat, tz_offset, ivl_days)
 
     update_props = {"Статус": _status("Not started")}
     if current_deadline:
         update_props["Дедлайн"] = _date(new_deadline[:10])
     if current_reminder:
-        new_reminder = _next_cycle_date(current_reminder, repeat, tz_offset)
+        new_reminder = _next_cycle_date(current_reminder, repeat, tz_offset, ivl_days)
         update_props["Напоминание"] = _date(new_reminder)
 
     try:
@@ -654,7 +703,7 @@ async def _handle_recurring_task_reset(
         if _scheduler:
             # Напоминание
             if current_reminder:
-                new_reminder = _next_cycle_date(current_reminder, repeat, tz_offset)
+                new_reminder = _next_cycle_date(current_reminder, repeat, tz_offset, ivl_days)
                 try:
                     _scheduler.remove_job(f"reminder_{task_id}")
                 except Exception:
@@ -762,9 +811,10 @@ async def handle_task_parsed(message: Message, data: dict) -> None:
 
     repeat = data.get("repeat") or "Нет"
     if repeat and repeat != "Нет":
-        repeat_time_str = data.get("repeat_time") or "09:00"
+        repeat_time_raw = data.get("repeat_time") or "09:00"
+        time_str, _ivl = _parse_repeat_time(repeat_time_raw)
         try:
-            h, m = map(int, repeat_time_str.split(":"))
+            h, m = map(int, time_str.split(":"))
         except Exception:
             h, m = 9, 0
         tz_offset = await _get_user_tz(uid)
@@ -1689,13 +1739,19 @@ async def _do_save_task(message: Message, data: dict, chat_id: int = None, uid: 
     repeat_line = ""
     _repeat = data.get("repeat") or "Нет"
     if _repeat and _repeat != "Нет":
-        repeat_parts = [_repeat]
+        _rtime_raw = data.get("repeat_time") or ""
+        _rtime_clean, _ivl = _parse_repeat_time(_rtime_raw)
+        if _ivl > 1:
+            repeat_parts = [_interval_label(_ivl)]
+        else:
+            repeat_parts = [_repeat]
         _dow = data.get("day_of_week") or ""
-        _rtime = data.get("repeat_time") or ""
         if _dow:
             repeat_parts.append(_dow)
-        if _rtime:
-            repeat_parts.append(f"в {_rtime}")
+        if _rtime_clean and _rtime_clean != "09:00":
+            repeat_parts.append(f"в {_rtime_clean}")
+        elif _rtime_raw and "|" not in _rtime_raw:
+            repeat_parts.append(f"в {_rtime_raw}")
         repeat_line = f"\n🔄 Повтор: {' '.join(repeat_parts)}"
 
     msg_id = data.get("msg_id")
@@ -2209,6 +2265,12 @@ async def handle_tasks_today(message: Message, user_notion_id: str = "") -> None
     _status_icons = {"In progress": "⏳", "Not started": "❌"}
     _repeat_labels = {"Ежедневно": "ежедневно", "Еженедельно": "еженедельно", "Ежемесячно": "ежемесячно"}
 
+    def _get_interval_days(props: dict) -> int:
+        """Extract interval_days from Время повтора field."""
+        rt = "".join(t.get("plain_text", "") for t in (props.get("Время повтора", {}).get("rich_text") or []))
+        _, ivl = _parse_repeat_time(rt)
+        return ivl
+
     overdue = []
     today_tasks = []
     daily = []
@@ -2242,6 +2304,8 @@ async def handle_tasks_today(message: Message, user_notion_id: str = "") -> None
         elif "T" in deadline_raw:
             time_str = deadline_raw.split("T")[1][:5]
 
+        ivl = _get_interval_days(props) if is_repeat else 0
+
         item = {
             "cat_icon": cat_icon,
             "title": title,
@@ -2251,9 +2315,10 @@ async def handle_tasks_today(message: Message, user_notion_id: str = "") -> None
             "time_str": time_str,
             "is_repeat": is_repeat,
             "repeat": repeat,
+            "interval_days": ivl,
         }
 
-        # Ежедневные задачи
+        # Ежедневные / каждые-N-дней задачи
         if is_repeat and repeat == "Ежедневно":
             daily.append(item)
         # Просроченные
@@ -2370,7 +2435,8 @@ async def handle_tasks_today(message: Message, user_notion_id: str = "") -> None
             lines.append(f"\n<b>🔄 ЕЖЕДНЕВНЫЕ</b>")
             for it in daily:
                 time_part = f" · {it['time_str']}" if it.get("time_str") else ""
-                lines.append(f"  {it['pri_icon']} {it['title']} · {it['cat_icon']}{time_part}")
+                ivl_part = f" · {_interval_label(it['interval_days'])}" if it.get("interval_days", 0) > 1 else ""
+                lines.append(f"  {it['pri_icon']} {it['title']} · {it['cat_icon']}{time_part}{ivl_part}")
 
     if streak_line:
         lines.append(f"\n{streak_line}")
