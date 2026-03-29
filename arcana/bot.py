@@ -4,7 +4,7 @@ from aiogram.types import Message, CallbackQuery
 from aiogram.client.default import DefaultBotProperties
 from core.config import config
 from core.middleware import WhitelistMiddleware
-from core.claude_client import analyze_image
+from core.claude_client import analyze_image, ask_claude
 from arcana.handlers.base import router
 from arcana.handlers.memory import router as memory_router
 from arcana.handlers.lists import router as lists_router
@@ -104,6 +104,91 @@ async def main():
     except ImportError:
         logger.warning("apscheduler not installed — monthly reminder disabled")
 
+    async def _process_client_batch_final(user_id: int) -> None:
+        """После debounce — обработать весь батч сообщений для collecting клиента."""
+        from core.message_collector import get_buffer, clear_buffer
+        from arcana.pending_clients import get_pending_client, update_pending_client
+        from arcana.handlers.clients import (
+            _update_notion, _card, _collecting_kb,
+            _parse_json_safe, PARSE_CLIENT_INFO, VISION_CONTACT,
+        )
+
+        buffer = await get_buffer(user_id)
+        if not buffer:
+            return
+        await clear_buffer(user_id)
+
+        pending = await get_pending_client(user_id)
+        if not pending:
+            return
+
+        texts = []
+        updates: dict = {}
+
+        # 1. Фото → Vision извлекает контакты; текст/голос/контакт → в texts
+        for item in buffer:
+            if item["type"] == "photo":
+                try:
+                    raw = await analyze_image(
+                        item["content"],
+                        prompt="Извлеки все контакты из скриншота.",
+                        system=VISION_CONTACT,
+                    )
+                    data = _parse_json_safe(raw) if raw else {}
+                    new_contacts = data.get("contacts") or []
+                    if new_contacts:
+                        updates.setdefault("contacts", []).extend(new_contacts)
+                except Exception as e:
+                    logger.error("batch photo vision uid=%s: %s", user_id, e)
+                if item["caption"]:
+                    texts.append(item["caption"])
+            elif item["type"] in ("text", "voice"):
+                texts.append(item["content"])
+            elif item["type"] == "contact":
+                updates.setdefault("contacts", []).append(
+                    {"value": item["content"], "label": ""}
+                )
+
+        # 2. Тексты → Claude парсит всё вместе
+        if texts:
+            combined = "\n".join(texts)
+            try:
+                raw = await ask_claude(combined, system=PARSE_CLIENT_INFO, max_tokens=300)
+                data = _parse_json_safe(raw)
+                if data.get("contacts"):
+                    updates.setdefault("contacts", []).extend(data["contacts"])
+                if data.get("request"):
+                    updates["request"] = data["request"]
+                if data.get("notes"):
+                    existing = pending.get("notes") or ""
+                    updates["notes"] = (existing + " " + data["notes"]).strip()
+            except Exception as e:
+                logger.error("batch text parse uid=%s: %s", user_id, e)
+
+        # 3. Обновить pending + Notion
+        if updates:
+            await update_pending_client(user_id, updates)
+
+        fresh = await get_pending_client(user_id) or pending
+        page_id = fresh.get("page_id")
+        if page_id:
+            try:
+                await _update_notion(page_id, fresh)
+            except Exception as e:
+                logger.error("batch _update_notion uid=%s: %s", user_id, e)
+
+        # 4. Отправить итог
+        try:
+            await bot.send_message(
+                user_id,
+                f"✅ <b>{fresh.get('name')}</b> обновлён\n\n{_card(fresh)}\n\n"
+                f"Можешь прислать ещё или нажать Готово.",
+                reply_markup=_collecting_kb(user_id),
+                parse_mode="HTML",
+            )
+        except Exception as e:
+            logger.error("batch send_message uid=%s: %s", user_id, e)
+
     @dp.message(F.voice | F.audio)
     async def handle_voice(msg: Message, user_notion_id: str = "") -> None:
         """Голосовое → Whisper → текст → base router."""
@@ -137,12 +222,13 @@ async def main():
         if await handle_list_pending(msg, user_notion_id):
             return
 
-        # Pending: режим сбора инфы о клиенте
+        # Pending: режим сбора инфы о клиенте → в буфер
         from arcana.pending_clients import get_pending_client
         pending_client = await get_pending_client(msg.from_user.id)
         if pending_client and pending_client.get("step") == "collecting":
-            from arcana.handlers.clients import _handle_collecting
-            await _handle_collecting(msg, text, pending_client, user_notion_id)
+            from core.message_collector import add_message, schedule_processing
+            await add_message(msg.from_user.id, "voice", text)
+            schedule_processing(msg.from_user.id, _process_client_batch_final)
             return
 
         # Pending: правка трактовки таро
@@ -159,16 +245,17 @@ async def main():
 
     @dp.message(F.photo)
     async def handle_photo(msg: Message, user_notion_id: str = "") -> None:
-        """Фото: collecting → скрин контакта. С подписью → route_message. Без → спросить."""
+        """Фото: collecting → в буфер. С подписью → route_message. Без → спросить."""
         from arcana.pending_clients import get_pending_client
         pending_client = await get_pending_client(msg.from_user.id)
         if pending_client and pending_client.get("step") == "collecting":
             import base64
+            from core.message_collector import add_message, schedule_processing
             f = await bot.get_file(msg.photo[-1].file_id)
             bio = await bot.download_file(f.file_path)
             image_b64 = base64.standard_b64encode(bio.read()).decode()
-            from arcana.handlers.clients import handle_client_photo_input
-            await handle_client_photo_input(msg, image_b64, pending_client)
+            await add_message(msg.from_user.id, "photo", image_b64, caption=msg.caption or "")
+            schedule_processing(msg.from_user.id, _process_client_batch_final)
             return
 
         if msg.caption:
@@ -191,8 +278,8 @@ async def main():
 
     @dp.message(F.contact)
     async def handle_contact(msg: Message, user_notion_id: str = "") -> None:
-        """TG контакт (share contact) → дополнить карточку если есть collecting."""
-        from arcana.pending_clients import get_pending_client, update_pending_client
+        """TG контакт (share contact) → в буфер если collecting, иначе отклонить."""
+        from arcana.pending_clients import get_pending_client
 
         pending = await get_pending_client(msg.from_user.id)
         if not pending or pending.get("step") != "collecting":
@@ -207,24 +294,11 @@ async def main():
         value = phone
         if tg_user_id:
             value = f"{phone} (TG: {tg_user_id})" if phone else f"TG: {tg_user_id}"
-        label = contact_name or ""
+        formatted = f"{value} ({contact_name})" if contact_name else value
 
-        await update_pending_client(uid, {"contacts": [{"value": value, "label": label}]})
-
-        from arcana.pending_clients import get_pending_client as _get
-        fresh = await _get(uid) or pending
-
-        page_id = fresh.get("page_id")
-        if page_id:
-            from arcana.handlers.clients import _update_notion
-            await _update_notion(page_id, fresh)
-
-        from arcana.handlers.clients import _collecting_kb, _card
-        await msg.answer(
-            f"📱 Контакт добавлен\n\n{_card(fresh)}\n\nДобавь ещё или нажми Готово.",
-            reply_markup=_collecting_kb(uid),
-            parse_mode="HTML",
-        )
+        from core.message_collector import add_message, schedule_processing
+        await add_message(uid, "contact", formatted)
+        schedule_processing(uid, _process_client_batch_final)
 
     @dp.callback_query(lambda c: c.data and c.data.startswith("opt_"))
     async def on_opt_callback(query: CallbackQuery, user_notion_id: str = "") -> None:
