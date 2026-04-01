@@ -46,6 +46,12 @@ dp.include_router(lists_router)
 MOSCOW_TZ = timezone(timedelta(hours=3))
 _clarify: dict = {}
 _pending_finance: dict = {}  # user_id → (kind, amount, category, source, title)
+
+import re as _re_nexus
+_TYPE_CORRECTION_RE = _re_nexus.compile(
+    r"^\s*(нет[,\s]+)?(это|был[аи]?|на самом деле)?\s*(это\s+)?(доход|расход)\s*$",
+    _re_nexus.IGNORECASE,
+)
 _pending_arcana: dict = {}  # user_id → text (оригинальный для arcana_clarify)
 _pending_unknown: dict = {}  # user_id → (text, user_notion_id, ts)
 
@@ -577,6 +583,27 @@ async def handle_text(msg: Message, user_notion_id: str = "") -> None:
         if _handled:
             await react(msg, "⚡")
             return
+
+    # Перехват "это доход" / "это расход" — исправляем тип последней записи в Notion
+    _type_m = _TYPE_CORRECTION_RE.match((msg.text or "").strip())
+    if _type_m:
+        type_word = _type_m.group(4).lower()
+        new_type = "💰 Доход" if type_word == "доход" else "💸 Расход"
+        # Ищем последнюю запись противоположного типа (чтобы исправить на нужный)
+        from core.notion_client import finance_update
+        ok = await finance_update(
+            target_type="expense" if type_word == "доход" else "income",
+            field="type_",
+            new_value=new_type,
+        )
+        if not ok:
+            # Попробовать и тот же тип (вдруг уже правильный, но нужна другая правка)
+            ok = await finance_update(target_type=type_word, field="type_", new_value=new_type)
+        if ok:
+            await msg.answer(f"✏️ Тип исправлен → <b>{new_type}</b>", parse_mode="HTML")
+        else:
+            await msg.answer("⚠️ Нет записи для обновления.")
+        return
 
     text = maybe_convert(msg.text.strip())
     await process_text(msg, text, user_notion_id)
