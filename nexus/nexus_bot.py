@@ -1370,6 +1370,15 @@ async def main() -> None:
             id="list_expiry",
             replace_existing=True,
         )
+        # 💰 Бюджет: ревью в день зарплаты — ежедневно 07:30 UTC (10:30 МСК), внутри проверяет payday
+        from nexus.handlers.finance import proactive_budget_review
+        nexus_scheduler.add_job(
+            proactive_budget_review,
+            args=[bot],
+            trigger=CronTrigger(hour=7, minute=30),
+            id="budget_payday_review",
+            replace_existing=True,
+        )
     # restore_reminders планируем ПОСЛЕ старта polling,
     # иначе бот не может отправлять сообщения (missed reminders)
     import asyncio as _asyncio
