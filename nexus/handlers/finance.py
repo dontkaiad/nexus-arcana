@@ -283,6 +283,18 @@ async def _load_budget_data(user_notion_id: str = "") -> Dict[str, list]:
                 связь = связь_parts[0]["plain_text"].strip() if связь_parts else ""
                 result["лимиты"].append({"name": связь or key, "amount": _parse_amount(amount_m.group(1))})
 
+    # Дедупликация лимитов по display-имени (лимит_импульсивный + лимит_импульсивные → один)
+    seen_limit_names: dict = {}
+    for lim in result["лимиты"]:
+        display = _display_limit_name(lim["name"])
+        if display not in seen_limit_names:
+            seen_limit_names[display] = lim
+        else:
+            # Оставляем с большей суммой (актуальнее)
+            if lim["amount"] > seen_limit_names[display]["amount"]:
+                seen_limit_names[display] = lim
+    result["лимиты"] = list(seen_limit_names.values())
+
     return result
 
 
