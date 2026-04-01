@@ -894,15 +894,21 @@ async def process_item(data: Dict[str, Any], original_text: str, msg, clarify: d
         logger.info("process_item: finance %s - amount=%.0f category=%r source=%r confidence=%r",
                    kind, amount, category, source, confidence)
 
+        # Ambiguous слова без явного дохода-контекста → принудительно low confidence
+        _ambiguous_m = re.compile(r'\b(аренд[аы]|арендую|сдаю|сдала|займ)\b', re.IGNORECASE)
+        _income_ctx_m = re.compile(
+            r'\b(получила|получил|заработала|заработал|зарплата|доход'
+            r'|пришло|пришла|вернули|вернул|поступил[аио]?|аванс)\b',
+            re.IGNORECASE,
+        )
+        if confidence == "high" and _ambiguous_m.search(original_text) and not _income_ctx_m.search(original_text):
+            logger.info("process_item: ambiguous word without income context → force low confidence")
+            confidence = "low"
+
         # Low confidence → проверяем маркеры дохода/бартера
         if confidence == "low":
-            _income_m = re.compile(
-                r'\b(получила|получил|заработала|заработал|зарплата|доход'
-                r'|пришло|пришла|вернули|вернул|поступил[аио]?|аванс)\b',
-                re.IGNORECASE,
-            )
             _barter_m = re.compile(r'\b(бартер|обмен)\b', re.IGNORECASE)
-            if not _income_m.search(original_text) and not _barter_m.search(original_text):
+            if not _income_ctx_m.search(original_text) and not _barter_m.search(original_text) and not _ambiguous_m.search(original_text):
                 logger.info("process_item: low confidence, no income/barter markers → auto-expense")
                 confidence = "high"
                 kind = "expense"
