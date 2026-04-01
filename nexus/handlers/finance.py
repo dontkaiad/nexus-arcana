@@ -3580,7 +3580,30 @@ async def _save_budget_plan(message: Message, uid: int) -> None:
         text = "доход: {} — {}₽/мес".format(name, amt)
         await _save_memory_entry(key, text, notion_uid)
 
-    # Фиксы
+    # Фиксы — сначала деактивируем удалённые, потом сохраняем актуальные
+    mem_db = os.environ.get("NOTION_DB_MEMORY", "")
+    new_fixed_keys = set()
+    for f in plan.get("fixed", []):
+        cat = f.get("category", "📌 Прочее")
+        name = f.get("name", "?")
+        new_fixed_keys.add("обязательно_{}".format(_cat_link(cat) + "_" + name.lower().replace(" ", "_")))
+
+    if mem_db:
+        try:
+            from core.notion_client import db_query as _dbq
+            old_fixed = await _dbq(mem_db, filter_obj={"and": [
+                {"property": "Ключ", "rich_text": {"starts_with": "обязательно_"}},
+                {"property": "Бот", "select": {"equals": "☀️ Nexus"}},
+                {"property": "Актуально", "checkbox": {"equals": True}},
+            ]}, page_size=100)
+            for page in old_fixed:
+                key = (page["properties"].get("Ключ", {}).get("rich_text") or [{}])[0].get("plain_text", "")
+                if key and key not in new_fixed_keys:
+                    await update_page(page["id"], {"Актуально": {"checkbox": False}})
+                    logger.info("_save_budget_plan: deactivated removed fixed=%s", key)
+        except Exception as e:
+            logger.error("_save_budget_plan: failed to deactivate old fixed: %s", e)
+
     for f in plan.get("fixed", []):
         cat = f.get("category", "📌 Прочее")
         name = f.get("name", "?")
