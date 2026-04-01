@@ -2411,7 +2411,8 @@ _BUDGET_VARIABLE_CATS = [
 ]
 
 _BUDGET_DB = os.path.join(os.path.dirname(os.path.abspath(__file__)), "../../pending_budget.db")
-_BUDGET_TTL = 3600  # 60 min
+_BUDGET_TTL = 3600  # 60 min — для состояния setup
+_PAYDAY_TTL = 90000  # 25 часов — для маркера "ревью уже отправлено сегодня"
 
 
 def _bdb() -> _sqlite3.Connection:
@@ -2420,8 +2421,34 @@ def _bdb() -> _sqlite3.Connection:
         "CREATE TABLE IF NOT EXISTS budget_pending "
         "(uid INTEGER PRIMARY KEY, data TEXT, ts REAL)"
     )
+    con.execute(
+        "CREATE TABLE IF NOT EXISTS payday_sent "
+        "(uid INTEGER PRIMARY KEY, date TEXT, ts REAL)"
+    )
     con.commit()
     return con
+
+
+def _payday_mark(uid: int, date_str: str) -> None:
+    """Записать что ревью за date_str уже отправлено uid."""
+    with _bdb() as con:
+        con.execute(
+            "INSERT OR REPLACE INTO payday_sent (uid, date, ts) VALUES (?,?,?)",
+            (uid, date_str, _time.time()),
+        )
+
+
+def _payday_already_sent(uid: int, date_str: str) -> bool:
+    """Проверить, отправляли ли ревью uid за date_str."""
+    with _bdb() as con:
+        row = con.execute(
+            "SELECT ts FROM payday_sent WHERE uid=? AND date=?", (uid, date_str)
+        ).fetchone()
+    if not row:
+        return False
+    if _time.time() - row[0] > _PAYDAY_TTL:
+        return False
+    return True
 
 
 def _budget_set(uid: int, data: dict) -> None:
@@ -2913,12 +2940,7 @@ async def start_budget_analysis(message: Message, user_notion_id: str = "") -> N
 async def start_budget_setup(message: Message, user_notion_id: str = "") -> None:
     """Начать сбор данных для бюджета (one-shot)."""
     uid = message.from_user.id
-    prev = _budget_get(uid) or {}
-    state = {
-        "buf": [], "notion_uid": user_notion_id, "state": "collecting",
-        # Сохраняем маркер чтобы ревью не повторялось после сброса состояния
-        "last_payday_reminder": prev.get("last_payday_reminder", ""),
-    }
+    state = {"buf": [], "notion_uid": user_notion_id, "state": "collecting"}
     _budget_set(uid, state)
 
     sent = await message.answer(
@@ -3951,11 +3973,13 @@ async def maybe_payday_reminder(message: Message, user_notion_id: str = "") -> N
 
 async def _send_payday_review(uid: int, user_notion_id: str = "", bot=None) -> None:
     """Core payday review logic — works both reactively and from cron."""
-    state = _budget_get(uid) or {}
     today_str = datetime.now(MOSCOW_TZ).strftime("%Y-%m-%d")
-    if state.get("last_payday_reminder") == today_str:
+    if _payday_already_sent(uid, today_str):
         return
-    state["last_payday_reminder"] = today_str
+    # Сразу помечаем — чтобы параллельные вызовы (cron + message) не задвоили
+    _payday_mark(uid, today_str)
+
+    state = _budget_get(uid) or {}
     state["notion_uid"] = state.get("notion_uid", user_notion_id)
 
     if bot is None:
