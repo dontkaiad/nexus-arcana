@@ -48,6 +48,12 @@ _INCOME_MARKERS_RE = re.compile(
 )
 _BARTER_MARKERS_RE = re.compile(r'\b(бартер|обмен|в\s+обмен)\b', re.IGNORECASE)
 
+# Слова-амбиваленты: без контекста "получила/пришло" непонятно — расход или доход
+_AMBIGUOUS_RE = re.compile(
+    r'\b(аренд[аы]|арендую|сдаю|сдала|займ|долг)\b',
+    re.IGNORECASE,
+)
+
 # ── Бюджет: предупреждения по привычкам ──────────────────────────────────────
 HABIT_WARNINGS = [
     "💡 17 500₽/мес на привычки = 210 000₽/год. Это Samsung Flip за полгода.",
@@ -1215,9 +1221,16 @@ async def handle_finance_text(message: Message, text: str, bot_label: str = "☀
         await message.answer("⚠️ Не нашёл сумму.")
         return
 
-    # Низкая уверенность — уточняем только если есть маркеры дохода/бартера
+    # Ambiguous слова (аренда, займ и т.п.) без явного контекста → всегда уточнять
+    if data.get("confidence") == "high" and bool(_AMBIGUOUS_RE.search(text)):
+        has_income_ctx = bool(_INCOME_MARKERS_RE.search(text))
+        if not has_income_ctx:
+            data["confidence"] = "low"
+            data["question"] = "Это доход или расход?"
+
+    # Низкая уверенность — уточняем только если есть маркеры дохода/бартера или ambiguous
     if data.get("confidence") == "low" and data.get("question"):
-        has_income = bool(_INCOME_MARKERS_RE.search(text))
+        has_income = bool(_INCOME_MARKERS_RE.search(text)) or bool(_AMBIGUOUS_RE.search(text))
         has_barter = bool(_BARTER_MARKERS_RE.search(text))
         if not has_income and not has_barter:
             # Нет маркеров дохода/бартера → автоматически расход
@@ -1311,6 +1324,18 @@ async def handle_finance_clarification(message: Message, user_notion_id: str = "
     from core.config import config
 
     uid = message.from_user.id
+
+    # Перехват "это доход" / "это расход" — исправляем тип последней записи
+    m = _TYPE_CORRECTION_RE.match((message.text or "").strip())
+    if m:
+        type_word = m.group(4).lower()
+        new_type = "💰 Доход" if type_word == "доход" else "💸 Расход"
+        ok = await _update_last_finance(uid, "type_", new_type)
+        if ok:
+            await message.answer(f"✏️ Тип исправлен → <b>{new_type}</b>", parse_mode="HTML")
+        else:
+            await message.answer("⚠️ Нет последней записи для обновления.")
+        return
 
     # Обработка ввода кастомного лимита
     cat_link = _pending_limit.get(uid)
