@@ -1149,9 +1149,27 @@ async def _update_last_finance(uid: int, field: str, value: str) -> bool:
         return False
 
 
+_TYPE_CORRECTION_RE = re.compile(
+    r"^\s*(нет[,\s]+)?(это|был[аи]?|на самом деле)?\s*(это\s+)?(доход|расход)\s*$",
+    re.IGNORECASE,
+)
+
 async def handle_finance_text(message: Message, text: str, bot_label: str = "☀️ Nexus",
                               user_notion_id: str = "") -> None:
     from core.config import config
+    uid = message.from_user.id
+
+    # Перехват "это доход" / "это расход" до Claude — исправляем тип последней записи
+    m = _TYPE_CORRECTION_RE.match(text.strip())
+    if m:
+        type_word = m.group(4).lower()
+        new_type = "💰 Доход" if type_word == "доход" else "💸 Расход"
+        ok = await _update_last_finance(uid, "type_", new_type)
+        if ok:
+            await message.answer(f"✏️ Обновлено: Тип → <b>{new_type}</b>", parse_mode="HTML")
+        else:
+            await message.answer("⚠️ Нет последней записи для обновления.")
+        return
 
     raw = await ask_claude(text, system=PARSE_SYSTEM, max_tokens=400)
     try:
@@ -1161,8 +1179,6 @@ async def handle_finance_text(message: Message, text: str, bot_label: str = "☀
         await log_error(text, "parse_error", raw)
         await message.answer("⚠️ Не смог разобрать. Попробуй: «450р такси»")
         return
-
-    uid = message.from_user.id
 
     # ── Post-processing: форсируем Расход если явные признаки ───────────────
     _EXPENSE_VERBS = re.compile(
