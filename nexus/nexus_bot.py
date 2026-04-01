@@ -46,6 +46,7 @@ dp.include_router(lists_router)
 MOSCOW_TZ = timezone(timedelta(hours=3))
 _clarify: dict = {}
 _pending_finance: dict = {}  # user_id → (kind, amount, category, source, title)
+_last_finance_ts: dict = {}  # user_id → timestamp последней записанной финансовой записи
 
 import re as _re_nexus
 _TYPE_CORRECTION_RE = _re_nexus.compile(
@@ -605,6 +606,28 @@ async def handle_text(msg: Message, user_notion_id: str = "") -> None:
             await msg.answer("⚠️ Нет записи для обновления.")
         return
 
+    # Если последняя запись была финансовой (< 2 мин) и юзер говорит "измени категорию" —
+    # обновить финансовую запись, а не задачу
+    import time as _time_now
+    _fin_edit_re = _re_nexus.compile(
+        r"\b(поменяй|измени|обнови|смени|замени|исправь)\s+(категорию|категория)\s+(?:на\s+)?(.+)",
+        _re_nexus.IGNORECASE,
+    )
+    _fin_edit_m = _fin_edit_re.search((msg.text or "").strip())
+    if _fin_edit_m:
+        last_fin = _last_finance_ts.get(msg.from_user.id, 0)
+        if _time_now.time() - last_fin < 120:  # 2 минуты
+            new_cat = _fin_edit_m.group(3).strip()
+            from core.notion_client import finance_update
+            ok = await finance_update(target_type="expense", field="category", new_value=new_cat)
+            if not ok:
+                ok = await finance_update(target_type="income", field="category", new_value=new_cat)
+            if ok:
+                await msg.answer(f"✏️ Категория → <b>{new_cat}</b>", parse_mode="HTML")
+            else:
+                await msg.answer("⚠️ Нет записи для обновления.")
+            return
+
     text = maybe_convert(msg.text.strip())
     await process_text(msg, text, user_notion_id)
 
@@ -727,6 +750,10 @@ async def process_text(msg: Message, text: str, user_notion_id: str = "") -> Non
                 _pending_unknown[msg.from_user.id] = (unknown_clarify_text, user_notion_id, _time.time())
             elif line:
                 lines.append(line)
+                # Запомнить время последней финансовой записи для контекста редактирования
+                if data.get("type") in ("expense", "income") and "₽" in line:
+                    import time as _time2
+                    _last_finance_ts[msg.from_user.id] = _time2.time()
 
         # Show UI if unknown — offer action buttons
         if unknown_clarify_text:
