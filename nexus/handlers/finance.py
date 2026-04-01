@@ -3066,6 +3066,17 @@ async def on_budget_adjust(call: CallbackQuery) -> None:
     await call.answer()
 
 
+@router.callback_query(F.data == "budget_payday_setup")
+async def on_budget_payday_setup(call: CallbackQuery) -> None:
+    """Payday: open free-text budget setup flow."""
+    await call.message.edit_reply_markup()
+    await call.answer()
+    uid = call.from_user.id
+    state = _budget_get(uid) or {}
+    notion_uid = state.get("notion_uid", "")
+    await start_budget_setup(call.message, notion_uid)
+
+
 @router.callback_query(F.data == "budget_recalc_full")
 async def on_budget_recalc_full(call: CallbackQuery) -> None:
     """Full budget recalculation via Sonnet."""
@@ -3864,7 +3875,8 @@ async def _send_payday_review(uid: int, user_notion_id: str = "", bot=None) -> N
         uid,
         "📊 <b>Пора обновить бюджет на следующий период!</b>",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
-            InlineKeyboardButton(text="📊 Обновить", callback_data="budget_recalc_full"),
+            InlineKeyboardButton(text="📊 Обновить данные", callback_data="budget_payday_setup"),
+            InlineKeyboardButton(text="🔄 Пересчитать", callback_data="budget_recalc_full"),
             InlineKeyboardButton(text="✅ Без изменений", callback_data="msg_hide"),
         ]]),
         parse_mode="HTML",
