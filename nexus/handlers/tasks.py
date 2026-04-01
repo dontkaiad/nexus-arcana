@@ -361,7 +361,9 @@ async def restore_reminders_on_startup() -> None:
                                 break
 
                         deadline_start = (props.get("Дедлайн", {}).get("date") or {}).get("start", "")
-                        update_props: dict = {"Напоминание": _date(new_reminder), "Статус": _status("In progress")}
+                        # Если у задачи нет дедлайна — ставим Not started (не "In progress")
+                        status = "In progress" if deadline_start else "Not started"
+                        update_props: dict = {"Напоминание": _date(new_reminder), "Статус": _status(status)}
                         if deadline_start:
                             new_deadline = deadline_start[:16]
                             for _ in range(400):
@@ -873,32 +875,31 @@ async def _handle_recurring_task_reset(
     reminder_prop = task_props.get("Напоминание", {}).get("date") or {}
     current_reminder = reminder_prop.get("start", "")
 
-    new_deadline = _next_cycle_date(current_deadline, repeat, tz_offset, ivl_days)
+    new_deadline = _next_cycle_date(current_deadline, repeat, tz_offset, ivl_days) if current_deadline else ""
+    new_reminder = _next_cycle_date(current_reminder, repeat, tz_offset, ivl_days) if current_reminder else ""
 
     update_props = {"Статус": _status("Not started")}
-    if current_deadline:
+    if current_deadline and new_deadline:
         update_props["Дедлайн"] = _date(new_deadline[:10])
-    if current_reminder:
-        new_reminder = _next_cycle_date(current_reminder, repeat, tz_offset, ivl_days)
+    if current_reminder and new_reminder:
         update_props["Напоминание"] = _date(new_reminder)
 
     try:
         await update_page(task_id, update_props)
-        next_display = new_deadline[:10]
+        next_display = (new_deadline[:10] if new_deadline else new_reminder[:10] if new_reminder else "?")
 
         # Пересоздать scheduler jobs с новыми датами
         chat_id = message.chat.id
         if _scheduler:
             # Напоминание
-            if current_reminder:
-                new_reminder = _next_cycle_date(current_reminder, repeat, tz_offset, ivl_days)
+            if current_reminder and new_reminder:
                 try:
                     _scheduler.remove_job(f"reminder_{task_id}")
                 except Exception:
                     pass
                 await _schedule_reminder(chat_id, title, new_reminder, task_id, tz_offset)
             # Дедлайн
-            if current_deadline:
+            if current_deadline and new_deadline:
                 try:
                     _scheduler.remove_job(f"deadline_{task_id}")
                 except Exception:
@@ -1716,7 +1717,9 @@ async def task_complete(call: CallbackQuery) -> None:
         # Повторяющаяся задача: различаем напоминание и дедлайн
         msg_text = call.message.text or ""
         is_deadline = "Дедлайн:" in msg_text
-        if is_deadline:
+        has_deadline = bool((task_props.get("Дедлайн", {}).get("date") or {}).get("start"))
+        if is_deadline or not has_deadline:
+            # Дедлайн-сообщение ИЛИ задача без дедлайна (напр. interval every_Nd) → Done + reschedule
             await _handle_recurring_deadline_done(call.message, task_id, task_props, repeat, task_title, uid)
             await call.answer("✅ Выполнено!")
         else:

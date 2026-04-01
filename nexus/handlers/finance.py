@@ -3828,31 +3828,40 @@ async def _budget_period_review(user_notion_id: str = "") -> Tuple[str, float]:
 async def maybe_payday_reminder(message: Message, user_notion_id: str = "") -> None:
     """Send period review + payday reminder once per period start."""
     payday = await _get_payday()
-    if payday <= 1:
-        return  # No custom payday set
     now = datetime.now(MOSCOW_TZ)
     if now.day != payday:
         return
     uid = message.from_user.id
+    await _send_payday_review(uid, user_notion_id)
+
+
+async def _send_payday_review(uid: int, user_notion_id: str = "", bot=None) -> None:
+    """Core payday review logic — works both reactively and from cron."""
     state = _budget_get(uid) or {}
-    today_str = now.strftime("%Y-%m-%d")
+    today_str = datetime.now(MOSCOW_TZ).strftime("%Y-%m-%d")
     if state.get("last_payday_reminder") == today_str:
         return
     state["last_payday_reminder"] = today_str
     state["notion_uid"] = state.get("notion_uid", user_notion_id)
+
+    if bot is None:
+        from aiogram import Bot
+        from core.config import config
+        bot = Bot(token=config.nexus.tg_token)
 
     # Generate period review first
     try:
         review_text, savings_total = await _budget_period_review(user_notion_id)
         state["savings_from_last_period"] = savings_total
         _budget_set(uid, state)
-        await message.answer(review_text, parse_mode="HTML")
+        await bot.send_message(uid, review_text, parse_mode="HTML")
     except Exception as e:
         logger.error("payday review error: %s", e, exc_info=True)
         _budget_set(uid, state)
 
     # Then the reminder
-    await message.answer(
+    await bot.send_message(
+        uid,
         "📊 <b>Пора обновить бюджет на следующий период!</b>",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
             InlineKeyboardButton(text="📊 Обновить", callback_data="budget_recalc_full"),
@@ -3860,3 +3869,20 @@ async def maybe_payday_reminder(message: Message, user_notion_id: str = "") -> N
         ]]),
         parse_mode="HTML",
     )
+
+
+async def proactive_budget_review(bot) -> None:
+    """Cron job: check if today is payday and send budget review to all users."""
+    payday = await _get_payday()
+    now = datetime.now(MOSCOW_TZ)
+    if now.day != payday:
+        return
+    from core.config import config
+    from core.user_manager import get_user
+    for tg_id in config.allowed_ids:
+        try:
+            user_data = await get_user(tg_id)
+            user_notion_id = user_data.get("notion_page_id", "") if user_data else ""
+            await _send_payday_review(tg_id, user_notion_id, bot)
+        except Exception as e:
+            logger.error("proactive_budget_review: uid=%s error: %s", tg_id, e)
