@@ -443,6 +443,9 @@ async def finance_update(target_type: str, field: str, new_value: str) -> bool:
             props = {"Сумма": _number(amount)}
         except ValueError:
             return False
+    elif field == "type_":
+        real_type = await match_select(db_id, "Тип", new_value)
+        props = {"Тип": _select(real_type)}
     else:
         return False
     
