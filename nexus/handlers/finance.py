@@ -2853,7 +2853,12 @@ async def start_budget_analysis(message: Message, user_notion_id: str = "") -> N
 async def start_budget_setup(message: Message, user_notion_id: str = "") -> None:
     """Начать сбор данных для бюджета (one-shot)."""
     uid = message.from_user.id
-    state = {"buf": [], "notion_uid": user_notion_id, "state": "collecting"}
+    prev = _budget_get(uid) or {}
+    state = {
+        "buf": [], "notion_uid": user_notion_id, "state": "collecting",
+        # Сохраняем маркер чтобы ревью не повторялось после сброса состояния
+        "last_payday_reminder": prev.get("last_payday_reminder", ""),
+    }
     _budget_set(uid, state)
 
     sent = await message.answer(
