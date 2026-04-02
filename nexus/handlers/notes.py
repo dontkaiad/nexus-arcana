@@ -67,7 +67,8 @@ async def handle_note(
                     confirmed.append(value)
 
             if pending_new:
-                uid = message.from_user.id
+                uid = message.chat.id
+                logger.info("handle_note: storing pending for uid=%s (chat.id), new_tags=%s", uid, pending_new)
                 _pending[uid] = {
                     "text": text,
                     "selected": confirmed,
@@ -110,7 +111,8 @@ async def handle_note(
         return
 
     # Нужно подтверждение новых тегов
-    uid = message.from_user.id
+    uid = message.chat.id
+    logger.info("handle_note: storing pending for uid=%s (chat.id), new_tags=%s", uid, new_tags)
     _pending[uid] = {
         "text": text,
         "selected": selected,
@@ -135,6 +137,7 @@ async def handle_note_callback(query: CallbackQuery) -> None:
     await query.answer()
     data = query.data or ""
     uid = query.from_user.id
+    logger.info("handle_note_callback: uid=%s data=%s pending_keys=%s", uid, data, list(_pending.keys()))
 
     # ── note_replace:{uid}:{old_tag}:{new_value} ─────────────────────────────
     if data.startswith("note_replace:"):
