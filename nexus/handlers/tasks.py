@@ -790,6 +790,10 @@ def _parse_repeat_time(raw: str) -> tuple:
         time_str = parts[0] or "09:00"
         m = _re.match(r"(\d+)d", parts[1])
         return (time_str, int(m.group(1)) if m else 0)
+    # Haiku иногда возвращает "every_Nd" без времени — извлекаем интервал, ставим дефолт 09:00
+    m = _re.match(r"every_(\d+)d$", raw)
+    if m:
+        return ("09:00", int(m.group(1)))
     return (raw, 0)
 
 
@@ -880,8 +884,26 @@ async def _handle_recurring_task_reset(
     reminder_prop = task_props.get("Напоминание", {}).get("date") or {}
     current_reminder = reminder_prop.get("start", "")
 
-    new_deadline = _next_cycle_date(current_deadline, repeat, tz_offset, ivl_days) if current_deadline else ""
-    new_reminder = _next_cycle_date(current_reminder, repeat, tz_offset, ivl_days) if current_reminder else ""
+    # Если напоминание уже в будущем (сдвинуто restore_reminders_on_startup) — не двигать повторно
+    now = datetime.now(timezone(timedelta(hours=tz_offset)))
+    _already_future = False
+    if current_reminder and "T" in current_reminder:
+        try:
+            rem_dt = datetime.strptime(current_reminder[:16], "%Y-%m-%dT%H:%M").replace(
+                tzinfo=timezone(timedelta(hours=tz_offset))
+            )
+            if rem_dt > now:
+                _already_future = True
+                logger.info("_handle_recurring_task_reset: reminder %s already in future, skipping advance", current_reminder)
+        except ValueError:
+            pass
+
+    if _already_future:
+        new_reminder = current_reminder[:16]
+        new_deadline = current_deadline[:10] if current_deadline else ""
+    else:
+        new_deadline = _next_cycle_date(current_deadline, repeat, tz_offset, ivl_days) if current_deadline else ""
+        new_reminder = _next_cycle_date(current_reminder, repeat, tz_offset, ivl_days) if current_reminder else ""
 
     update_props = {"Статус": _status("Not started")}
     if current_deadline and new_deadline:
