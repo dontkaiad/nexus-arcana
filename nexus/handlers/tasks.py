@@ -30,6 +30,11 @@ PRACTICE_CATEGORIES = {"🕯️ Расходники", "🔮 Практика"}
 
 _PRIORITY_ICONS = {"Срочно": "🔴", "Важно": "🟡", "Можно потом": "⚪"}
 
+# Auto-suggest memory: count title occurrences per user (uid → {normalized_title → count})
+from collections import defaultdict as _defaultdict
+_autosuggest_counts: dict[int, dict[str, int]] = _defaultdict(lambda: _defaultdict(int))
+_AUTOSUGGEST_MIN_REPEATS = 3
+
 
 def _priority_display(priority: str) -> str:
     """'Важно' → '🟡 Важно', '🟡 Важно' → '🟡 Важно'."""
@@ -2002,12 +2007,18 @@ async def _do_save_task(message: Message, data: dict, chat_id: int = None, uid: 
                 await message.answer(f"💡 <i>{_fact} — как обычно?</i>")
                 _recall_shown = True
 
-        # Auto-suggest: пропускаем рутинные покупки, мелочи и низкий приоритет
+        # Auto-suggest: только после 3+ повторений И только для Срочно/Важно
+        _is_high_priority = ("Срочно" in priority or "Важно" in priority)
         _is_routine = bool(_re.match(r"^\s*(купить|купи|заказать|закажи|выкинуть|убрать|погладить|помыть|постирать|протереть|вынести|выбросить|поесть|съесть|приготовить|сварить|разогреть|покормить)\s+", title, _re.IGNORECASE))
         _routine_cats = ("🍜 Продукты",)
         _is_routine = _is_routine or data.get("category", "") in _routine_cats
-        _is_low_priority = "Можно потом" in priority
-        if title and title.strip() and not _is_routine and not _is_low_priority and not _recall_shown:
+        _uid = message.from_user.id
+        _norm_title = title.strip().lower()
+        if _norm_title:
+            _autosuggest_counts[_uid][_norm_title] += 1
+        _repeat_count = _autosuggest_counts[_uid].get(_norm_title, 0)
+        if (title and title.strip() and _is_high_priority and not _is_routine
+                and not _recall_shown and _repeat_count >= _AUTOSUGGEST_MIN_REPEATS):
             await suggest_memory(message, title.strip(), data.get("user_notion_id", ""))
         nudge = await _check_procrastination_nudge(data.get("title", ""))
         if nudge:
