@@ -324,7 +324,7 @@ async def send_notes_digest(bot, user_tg_id: int, user_notion_id: str) -> None:
 
     n = len(pages)
     tip = random.choice(_ADHD_TIPS)
-    text = f"📝 У тебя {n} не разобранных заметок\n\n{tip}\n\nЕсли хочешь разобрать сейчас — /notes"
+    text = f"📝 Дайджест заметок за неделю\n\nУ тебя {n} не разобранных заметок\n\n{tip}\n\nЕсли хочешь разобрать сейчас — /notes"
 
     try:
         await bot.send_message(user_tg_id, text)
