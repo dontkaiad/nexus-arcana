@@ -1539,6 +1539,7 @@ async def on_list_remind(query: CallbackQuery, user_notion_id: str = "") -> None
     from datetime import date, timedelta
     from core.notion_client import page_create, _title, _select, _status, _date
     from core.config import config as app_config
+    from nexus.handlers.tasks import _date_with_tz
     deadline = (date.today() + timedelta(days=days)).isoformat()
     reminder = (date.today() + timedelta(days=max(days - 1, 1))).isoformat()
     try:
@@ -1547,7 +1548,7 @@ async def on_list_remind(query: CallbackQuery, user_notion_id: str = "") -> None
             "Задача": _title(f"Купить {item_name}"),
             "Статус": _status("Not started"),
             "Дедлайн": _date(deadline),
-            "Напоминание": _date(reminder + "T10:00"),
+            "Напоминание": _date_with_tz(reminder + "T10:00", 3),
             "Приоритет": _select("Важно"),
         }
         if category:
