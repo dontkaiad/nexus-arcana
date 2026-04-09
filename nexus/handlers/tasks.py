@@ -366,9 +366,7 @@ async def restore_reminders_on_startup() -> None:
                                 break
 
                         deadline_start = (props.get("Дедлайн", {}).get("date") or {}).get("start", "")
-                        # Если у задачи нет дедлайна — ставим Not started (не "In progress")
-                        status = "In progress" if deadline_start else "Not started"
-                        update_props: dict = {"Напоминание": _date(new_reminder), "Статус": _status(status)}
+                        update_props: dict = {"Напоминание": _date(new_reminder), "Статус": _status("Not started")}
                         if deadline_start:
                             new_deadline = deadline_start[:16]
                             for _ in range(400):
@@ -385,7 +383,8 @@ async def restore_reminders_on_startup() -> None:
 
                         await update_page(task_id, update_props)
                         await _schedule_reminder(tg_id, title, new_reminder, task_id, tz_offset)
-                        logger.info("restore pass2: rescheduled '%s' repeat=%s next=%s", title, repeat, new_reminder)
+                        logger.info("restore pass2: rescheduled '%s' repeat=%s ivl=%d next=%s deadline=%s",
+                                     title, repeat, ivl_days, new_reminder, deadline_start or "none")
                         restored += 1
                 except Exception as e:
                     logger.error("restore pass2: task %s error: %s", page.get("id"), e)
@@ -1044,7 +1043,8 @@ async def handle_task_parsed(message: Message, data: dict) -> None:
         if not data.get("deadline"):
             data["deadline"] = None
         data["reminder_time"] = first_run.strftime("%Y-%m-%dT%H:%M")
-        logger.info("handle_task_parsed: repeat=%s → first_run=%s deadline=%s", repeat, first_run, data["deadline"])
+        logger.info("handle_task_parsed: repeat=%s ivl=%d → first_run=%s deadline=%s repeat_time_raw=%s",
+                     repeat, _ivl, first_run, data["deadline"], repeat_time_raw)
         await _do_save_task(message, data, chat_id=message.chat.id, uid=uid)
         return
 
@@ -1926,12 +1926,15 @@ async def _do_save_task(message: Message, data: dict, chat_id: int = None, uid: 
     tz_offset = await _get_user_tz(uid)
     
     if data.get("reminder_time"):
+        logger.info("_do_save_task: scheduling reminder task_id=%s repeat=%s reminder=%s",
+                     result[:8], data.get("repeat", "Нет"), data["reminder_time"])
         await _schedule_reminder(cid, data["title"], data["reminder_time"], result, tz_offset)
-    
+
     if data.get("deadline"):
         deadline = data["deadline"]
         if "T" not in deadline:
             deadline = deadline + "T09:00"
+        logger.info("_do_save_task: scheduling deadline task_id=%s deadline=%s", result[:8], deadline)
         await _schedule_deadline_check(cid, data["title"], deadline, result, tz_offset)
 
     extra = ""
@@ -2593,8 +2596,8 @@ async def handle_tasks_today(message: Message, user_notion_id: str = "") -> None
         result = await _calc_free_remaining(user_notion_id)
         if result:
             free_left, days_rem = result
-            daily = free_left / max(days_rem, 1)
-            budget_line = f"💰 Бюджет: <b>{daily:,.0f}₽/день</b>"
+            daily_budget = free_left / max(days_rem, 1)
+            budget_line = f"💰 Бюджет: <b>{daily_budget:,.0f}₽/день</b>"
 
             # Лимиты на грани (>50%)
             mem_db = _os.environ.get("NOTION_DB_MEMORY")
@@ -2636,8 +2639,8 @@ async def handle_tasks_today(message: Message, user_notion_id: str = "") -> None
                             warns.append(f"{short} {pct}% {color}")
                     if warns:
                         budget_line += "\n📊 " + " · ".join(warns[:4])
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning("handle_tasks_today: budget calc error: %s", e)
 
     def _fmt(it: dict) -> str:
         line = f"  {it['pri_icon']} {it['title']} · {it['cat_icon']}"
@@ -2690,10 +2693,20 @@ async def handle_tasks_today(message: Message, user_notion_id: str = "") -> None
         advice = await ask_claude(prompt, max_tokens=100, model="claude-haiku-4-5-20251001")
         if advice:
             lines.append(f"\n💡 {advice.strip()}")
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning("handle_tasks_today: ADHD tip error: %s", e)
 
-    await message.answer("\n".join(lines), parse_mode="HTML")
+    try:
+        await message.answer("\n".join(lines), parse_mode="HTML")
+    except Exception as e:
+        logger.error("handle_tasks_today: send message error: %s", e)
+        # Fallback без HTML если парсинг сломался
+        try:
+            from aiogram.enums import ParseMode
+            plain = "\n".join(lines).replace("<b>", "").replace("</b>", "").replace("<i>", "").replace("</i>", "")
+            await message.answer(plain)
+        except Exception:
+            await message.answer("⚠️ Ошибка формирования дайджеста. Попробуй /tasks.")
 
 
 # ── /stats — статистика задач ─────────────────────────────────────────────────
