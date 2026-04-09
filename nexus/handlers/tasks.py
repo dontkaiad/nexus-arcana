@@ -308,7 +308,8 @@ async def restore_reminders_on_startup() -> None:
                     if repeat == "Нет":
                         # ── Одноразовая задача — отправить "пропущено" СРАЗУ ──
                         try:
-                            rem_dt = datetime.strptime(reminder_start[:16], "%Y-%m-%dT%H:%M").replace(
+                            _rs = _ensure_datetime(reminder_start[:16])
+                            rem_dt = datetime.strptime(_rs, "%Y-%m-%dT%H:%M").replace(
                                 tzinfo=timezone(timedelta(hours=tz_offset))
                             )
                             missed_time = rem_dt.strftime("%d.%m в %H:%M")
@@ -337,7 +338,8 @@ async def restore_reminders_on_startup() -> None:
                     else:
                         # ── Повторяющаяся задача — уведомить + сдвинуть ──
                         try:
-                            rem_dt = datetime.strptime(reminder_start[:16], "%Y-%m-%dT%H:%M").replace(
+                            _rs = _ensure_datetime(reminder_start[:16])
+                            rem_dt = datetime.strptime(_rs, "%Y-%m-%dT%H:%M").replace(
                                 tzinfo=timezone(timedelta(hours=tz_offset))
                             )
                             missed_time = rem_dt.strftime("%d.%m в %H:%M")
@@ -373,11 +375,12 @@ async def restore_reminders_on_startup() -> None:
                             (props.get("Время повтора", {}).get("rich_text") or [])
                         )
                         _, ivl_days = _parse_repeat_time(repeat_time_raw)
-                        new_reminder = reminder_start[:16]
+                        new_reminder = _ensure_datetime(reminder_start[:16])
                         for _ in range(400):
                             new_reminder = _next_cycle_date(new_reminder, repeat, tz_offset, ivl_days)
                             try:
-                                nrem_dt = datetime.strptime(new_reminder[:16], "%Y-%m-%dT%H:%M").replace(
+                                _nr = _ensure_datetime(new_reminder[:16])
+                                nrem_dt = datetime.strptime(_nr, "%Y-%m-%dT%H:%M").replace(
                                     tzinfo=timezone(timedelta(hours=tz_offset))
                                 )
                             except ValueError:
@@ -419,10 +422,21 @@ def _now(uid: int = 0) -> datetime:
     offset = _user_tz_offset.get(uid, 3)
     return datetime.now(timezone(timedelta(hours=offset)))
 
+
+def _ensure_datetime(iso: str, default_time: str = "09:00") -> str:
+    """Normalize date-only string to datetime: '2026-04-11' → '2026-04-11T09:00'."""
+    if not iso:
+        return iso
+    if "T" not in iso:
+        return iso[:10] + "T" + default_time
+    return iso
+
+
 async def _schedule_reminder(chat_id: int, title: str, reminder_dt: str, task_id: str, tz_offset: int = 3) -> None:
     if not _scheduler or not _bot:
         return
     try:
+        reminder_dt = _ensure_datetime(reminder_dt)
         dt = datetime.strptime(reminder_dt, "%Y-%m-%dT%H:%M").replace(
             tzinfo=timezone(timedelta(hours=tz_offset))
         )
@@ -465,7 +479,8 @@ async def _schedule_deadline_check(chat_id: int, title: str, deadline_dt: str, t
     if not _scheduler or not _bot:
         return
     try:
-        dt = datetime.strptime(deadline_dt, "%Y-%m-%dT%H:%M" if "T" in deadline_dt else "%Y-%m-%d").replace(
+        deadline_dt = _ensure_datetime(deadline_dt)
+        dt = datetime.strptime(deadline_dt, "%Y-%m-%dT%H:%M").replace(
             tzinfo=timezone(timedelta(hours=tz_offset))
         )
         if dt <= _now():
@@ -906,9 +921,10 @@ async def _handle_recurring_task_reset(
     # Если напоминание уже в будущем (сдвинуто restore_reminders_on_startup) — не двигать повторно
     now = datetime.now(timezone(timedelta(hours=tz_offset)))
     _already_future = False
-    if current_reminder and "T" in current_reminder:
+    if current_reminder:
         try:
-            rem_dt = datetime.strptime(current_reminder[:16], "%Y-%m-%dT%H:%M").replace(
+            _cr = _ensure_datetime(current_reminder[:16])
+            rem_dt = datetime.strptime(_cr, "%Y-%m-%dT%H:%M").replace(
                 tzinfo=timezone(timedelta(hours=tz_offset))
             )
             if rem_dt > now:
