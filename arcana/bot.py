@@ -21,6 +21,8 @@ _PHOTO_TTL = 120  # 2 минуты
 async def main():
     if not config.arcana.tg_token: return
     logging.basicConfig(level=logging.INFO)
+    from core.logging_notion import install as _install_notion_logging
+    _install_notion_logging(bot_label="🌒 Arcana")
     bot = Bot(token=config.arcana.tg_token, default=DefaultBotProperties(parse_mode="HTML"))
     dp = Dispatcher()
     dp.message.middleware(WhitelistMiddleware(require_feature="arcana"))
