@@ -26,6 +26,9 @@ logging.basicConfig(
 )
 logger = logging.getLogger("nexus")
 
+from core.logging_notion import install as _install_notion_logging
+_install_notion_logging(bot_label="☀️ Nexus")
+
 bot = Bot(
     token=config.nexus.tg_token,
     default=DefaultBotProperties(parse_mode=ParseMode.HTML),
