@@ -1831,6 +1831,41 @@ async def task_reschedule(call: CallbackQuery) -> None:
         "Примеры: <code>завтра в 10:00</code>, <code>через 2 часа</code>, <code>в понедельник</code>"
     )
 
+async def _update_notion_on_reschedule(task_id: str, new_reminder: str, tz_offset: int) -> None:
+    """Update Notion reminder (and deadline if needed) when user reschedules.
+
+    If the new reminder date is after the current deadline, push
+    the deadline forward to match (otherwise Notion shows overdue).
+    """
+    from core.notion_client import get_page
+    try:
+        page = await get_page(task_id)
+        if not page:
+            logger.warning("_update_notion_on_reschedule: page not found %s", task_id[:8])
+            return
+
+        props = page.get("properties", {})
+        update: dict = {"Напоминание": _date_with_tz(new_reminder, tz_offset)}
+
+        # Если новое напоминание позже текущего дедлайна — сдвигаем дедлайн
+        deadline_start = (props.get("Дедлайн", {}).get("date") or {}).get("start", "")
+        if deadline_start:
+            new_rem_date = new_reminder[:10]
+            old_dl_date = deadline_start[:10]
+            if new_rem_date > old_dl_date:
+                # Сдвигаем дедлайн на дату нового напоминания
+                new_dl = new_rem_date
+                if "T" in new_reminder:
+                    new_dl = new_reminder  # сохраняем время если есть
+                update["Дедлайн"] = _date_with_tz(new_dl, tz_offset)
+                logger.info("_update_notion_on_reschedule: deadline moved %s → %s", old_dl_date, new_dl)
+
+        await update_page(task_id, update)
+        logger.info("_update_notion_on_reschedule: updated task %s reminder=%s", task_id[:8], new_reminder)
+    except Exception as e:
+        logger.error("_update_notion_on_reschedule error: %s", e)
+
+
 async def handle_reschedule_reminder(message: Message) -> None:
     """Обработка переноса напоминания."""
     from core.notion_client import db_query
@@ -1869,6 +1904,7 @@ async def handle_reschedule_reminder(message: Message) -> None:
         if relative:
             logger.info("handle_reschedule_reminder: relative time parsed locally: %s", relative)
             await _schedule_reminder(message.chat.id, task_title, relative, task_id, tz_offset)
+            await _update_notion_on_reschedule(task_id, relative, tz_offset)
             _pending_del(uid)
             await react(message, "⚡")
             await message.answer(f"✅ Напоминание перенесено на {relative.replace('T', ' ')}")
@@ -1888,10 +1924,11 @@ async def handle_reschedule_reminder(message: Message) -> None:
         raw = await ask_claude(text, system=system, max_tokens=100, model="claude-haiku-4-5-20251001")
         raw = raw.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
         parsed = json.loads(raw)
-        
+
         if parsed.get("reminder_time"):
             reminder_time = parsed["reminder_time"]
             await _schedule_reminder(message.chat.id, task_title, reminder_time, task_id, tz_offset)
+            await _update_notion_on_reschedule(task_id, reminder_time, tz_offset)
             _pending_del(uid)
             await react(message, "⚡")
             await message.answer(f"✅ Напоминание перенесено на {reminder_time.replace('T', ' ')}")
