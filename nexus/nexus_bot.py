@@ -169,7 +169,9 @@ async def cmd_tasks(msg: Message, user_notion_id: str = "") -> None:
     _pri_icons = {"Срочно": "🔴", "Важно": "🟡", "Можно потом": "⚪"}
     _rep_labels = {"Ежедневно": "ежедневно", "Еженедельно": "еженедельно", "Ежемесячно": "ежемесячно"}
 
+    overdue_items = []
     today_items = []
+    daily_items = []
     other_items = []
 
     for t in all_tasks:
@@ -213,23 +215,40 @@ async def cmd_tasks(msg: Message, user_notion_id: str = "") -> None:
         item = {"pri_icon": pri_icon, "cat_icon": cat_icon, "title": title, "dl": dl,
                 "priority": priority, "is_repeat": is_repeat}
 
-        # Сегодня: просроченные + сегодняшние + ежедневные
-        is_today = (
-            (is_repeat and repeat == "Ежедневно")
-            or (deadline_date and deadline_date <= today_str and not is_repeat)
-            or reminder_date == today_str
-        )
-        if is_today:
+        # Разделяем: просроченные / сегодня / ежедневные / остальные
+        if is_repeat and repeat == "Ежедневно":
+            daily_items.append(item)
+        elif deadline_date and deadline_date < today_str and not is_repeat:
+            overdue_items.append(item)
+        elif (deadline_date == today_str or reminder_date == today_str) and not is_repeat:
             today_items.append(item)
         else:
             other_items.append(item)
 
+    _all_top = overdue_items + today_items + daily_items
     lines: list[str] = ["📋 <b>Задачи · ☀️ Nexus</b>\n"]
+
+    # ПРОСРОЧЕНО
+    if overdue_items:
+        lines.append("<b>🔥 ПРОСРОЧЕНО</b>")
+        for it in overdue_items:
+            line = f"  <i>{it['pri_icon']} {it['title']} · {it['cat_icon']}"
+            if it["dl"]:
+                line += f" · {it['dl']} ⚠️"
+            line += "</i>"
+            lines.append(line)
+        lines.append("")
 
     # СЕГОДНЯ
     lines.append("<b>📅 СЕГОДНЯ</b>")
-    if today_items:
+    if today_items or daily_items:
         for it in today_items:
+            line = f"  <i>{it['pri_icon']} {it['title']} · {it['cat_icon']}"
+            if it["dl"]:
+                line += f" · {it['dl']}"
+            line += "</i>"
+            lines.append(line)
+        for it in daily_items:
             line = f"  <i>{it['pri_icon']} {it['title']} · {it['cat_icon']}"
             if it["dl"]:
                 line += f" · {it['dl']}"
@@ -261,7 +280,7 @@ async def cmd_tasks(msg: Message, user_notion_id: str = "") -> None:
 
     # ВСЕ ОСТАЛЬНЫЕ
     if other_items:
-        if today_items:
+        if _all_top:
             lines.append(f"<b>📋 ВСЕ ЗАДАЧИ</b> (ещё {len(other_items)})")
         else:
             lines.append(f"<b>📋 ВСЕ ЗАДАЧИ ({len(other_items)})</b>")
@@ -713,8 +732,28 @@ async def process_text(msg: Message, text: str, user_notion_id: str = "") -> Non
         await react(msg, "🤔")
         return
 
+    # ── URL + note keywords → быстрый путь в заметки ─────────────────────
+    import re as _re_url
+    _URL_PAT = _re_url.compile(r'https?://\S+')
+    _NOTE_KW = _re_url.compile(r'\b(в заметк[иу]|запиши|сохрани|заметка)\b', _re_url.IGNORECASE)
+    _found_urls = _URL_PAT.findall(original_text)
+    _url_shortcut = False
+    if _found_urls and _NOTE_KW.search(original_text):
+        # Текст содержит URL + явное указание "в заметки" → сразу note
+        url_str = " ".join(_found_urls)
+        clean = _URL_PAT.sub("", original_text).strip()
+        # Убираем ключевое слово
+        clean = _re_url.sub(r'\b(в заметк[иу]|запиши|сохрани|заметка)\b', '', clean, flags=_re_url.IGNORECASE).strip()
+        note_title = f"{clean} — {url_str}" if clean else url_str
+        _url_items = [{"type": "note", "text": note_title, "tags": "", "url": url_str}]
+        _url_shortcut = True
+        logger.info("handle_text: URL+note shortcut → title=%s url=%s", note_title[:50], url_str[:80])
+
     try:
-        items = await classify(original_text, tz_offset=tz_offset)
+        if _url_shortcut:
+            items = _url_items
+        else:
+            items = await classify(original_text, tz_offset=tz_offset)
         logger.info("handle_text: classify returned %d items: %s", len(items), [i.get("type") for i in items])
 
         lines = []
