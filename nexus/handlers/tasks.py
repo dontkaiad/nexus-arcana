@@ -2540,13 +2540,11 @@ async def _apply_edit(
         await message.answer("⚠️ Ошибка при обновлении.")
 
 
-async def handle_tasks_today(message: Message, user_notion_id: str = "") -> None:
-    """Задачи на сегодня: дедлайн сегодня/просрочен, напоминание сегодня, ежедневные."""
+async def _build_today_digest(uid: int, user_notion_id: str = "", greeting: str = "") -> str:
+    """Build the daily digest text (HTML). Used by /today and the morning cron job."""
     from core.notion_client import query_pages, _with_user_filter
     from core.config import config
-    from datetime import date as _date, timedelta
 
-    uid = message.from_user.id if message.from_user else 0
     tz_offset = await _get_user_tz(uid)
     user_tz = timezone(timedelta(hours=tz_offset))
     today_str = datetime.now(user_tz).strftime("%Y-%m-%d")
@@ -2567,11 +2565,9 @@ async def handle_tasks_today(message: Message, user_notion_id: str = "") -> None
     )
 
     _priority_icons = {"Срочно": "🔴", "Важно": "🟡", "Можно потом": "⚪"}
-    _status_icons = {"In progress": "⏳", "Not started": "❌"}
     _repeat_labels = {"Ежедневно": "ежедневно", "Еженедельно": "еженедельно", "Ежемесячно": "ежемесячно"}
 
     def _get_interval_days(props: dict) -> int:
-        """Extract interval_days from Время повтора field."""
         rt = "".join(t.get("plain_text", "") for t in (props.get("Время повтора", {}).get("rich_text") or []))
         _, ivl = _parse_repeat_time(rt)
         return ivl
@@ -2590,7 +2586,6 @@ async def handle_tasks_today(message: Message, user_notion_id: str = "") -> None
             if _pk in priority_raw:
                 priority = _pk
                 break
-        status = (props.get("Статус", {}).get("status") or {}).get("name", "Not started")
         category = (props.get("Категория", {}).get("select") or {}).get("name", "")
         deadline_raw = (props.get("Дедлайн", {}).get("date") or {}).get("start", "")
         reminder_raw = (props.get("Напоминание", {}).get("date") or {}).get("start", "")
@@ -2600,9 +2595,7 @@ async def handle_tasks_today(message: Message, user_notion_id: str = "") -> None
         deadline_date = deadline_raw[:10] if deadline_raw else ""
         reminder_date = reminder_raw[:10] if reminder_raw else ""
         cat_icon = category[0] if category else "📌"
-        status_icon = _status_icons.get(status, "❔")
 
-        # Время из дедлайна или напоминания
         time_str = ""
         if "T" in reminder_raw:
             time_str = reminder_raw.split("T")[1][:5]
@@ -2612,35 +2605,24 @@ async def handle_tasks_today(message: Message, user_notion_id: str = "") -> None
         ivl = _get_interval_days(props) if is_repeat else 0
 
         item = {
-            "cat_icon": cat_icon,
-            "title": title,
-            "priority": priority,
+            "cat_icon": cat_icon, "title": title, "priority": priority,
             "pri_icon": _priority_icons.get(priority, "⚪"),
-            "status_icon": status_icon,
-            "time_str": time_str,
-            "is_repeat": is_repeat,
-            "repeat": repeat,
-            "interval_days": ivl,
+            "time_str": time_str, "is_repeat": is_repeat,
+            "repeat": repeat, "interval_days": ivl,
         }
 
-        # Ежедневные / каждые-N-дней задачи
         if is_repeat and repeat == "Ежедневно":
             daily.append(item)
-        # Просроченные
         elif deadline_date and deadline_date < today_str:
             overdue.append(item)
-        # Дедлайн сегодня или напоминание сегодня
         elif deadline_date == today_str or reminder_date == today_str:
             today_tasks.append(item)
 
     total = len(overdue) + len(today_tasks) + len(daily)
     all_today = overdue + today_tasks + daily
     n_urgent = sum(1 for it in all_today if it["priority"] == "Срочно")
-    n_important = sum(1 for it in all_today if it["priority"] == "Важно")
-    n_low = sum(1 for it in all_today if it["priority"] == "Можно потом")
     n_overdue = len(overdue)
 
-    # Время суток для совета
     hour = datetime.now(user_tz).hour
     if hour < 12:
         time_of_day = "утро"
@@ -2653,18 +2635,18 @@ async def handle_tasks_today(message: Message, user_notion_id: str = "") -> None
     streak_line = "🔥 Стрик: 0 — начни сегодня!"
     try:
         from nexus.handlers.streaks import get_streak
-        streak_data = get_streak(uid)  # sync, one arg
+        streak_data = get_streak(uid)
         s = streak_data.get("streak", 0) if streak_data else 0
         if s > 0:
             fire = "🔥" * min(s, 5)
             streak_line = f"{fire} {s} дней подряд"
     except Exception as e:
-        logger.warning("today streak error: %s", e)
+        logger.warning("_build_today_digest streak error: %s", e)
 
-    # Бюджет на день + лимиты на грани
+    # Бюджет
     budget_line = ""
     try:
-        from nexus.handlers.finance import _calc_free_remaining, _get_limits, _cat_link, build_budget_message
+        from nexus.handlers.finance import _calc_free_remaining, _get_limits, _cat_link
         import os as _os
         result = await _calc_free_remaining(user_notion_id)
         if result:
@@ -2672,11 +2654,9 @@ async def handle_tasks_today(message: Message, user_notion_id: str = "") -> None
             daily_budget = free_left / max(days_rem, 1)
             budget_line = f"💰 Бюджет: <b>{daily_budget:,.0f}₽/день</b>"
 
-            # Лимиты на грани (>50%)
             mem_db = _os.environ.get("NOTION_DB_MEMORY")
             if mem_db:
                 from core.notion_client import db_query
-                from core.config import config
                 from core.classifier import today_moscow
                 limits = await _get_limits(mem_db)
                 if limits:
@@ -2713,7 +2693,7 @@ async def handle_tasks_today(message: Message, user_notion_id: str = "") -> None
                     if warns:
                         budget_line += "\n📊 " + " · ".join(warns[:4])
     except Exception as e:
-        logger.warning("handle_tasks_today: budget calc error: %s", e)
+        logger.warning("_build_today_digest budget error: %s", e)
 
     def _fmt(it: dict) -> str:
         line = f"  {it['pri_icon']} {it['title']} · {it['cat_icon']}"
@@ -2721,10 +2701,11 @@ async def handle_tasks_today(message: Message, user_notion_id: str = "") -> None
             line += f" · {it['time_str']}"
         return line
 
-    lines: list[str] = [f"📅 <b>Сегодня · ☀️ Nexus</b>\n"]
+    header = greeting or f"📅 <b>Сегодня · ☀️ Nexus</b>"
+    lines: list[str] = [header + "\n"]
 
     if total == 0:
-        lines.append("🌟 На сегодня задач нет — свободный день!")
+        lines.append("🌟 На сегодня задач нет — свободный день!\nОтдыхай или разбери что-нибудь из бэклога.")
     else:
         if overdue:
             lines.append(f"<b>🔥 ПРОСРОЧЕНО</b>")
@@ -2748,9 +2729,8 @@ async def handle_tasks_today(message: Message, user_notion_id: str = "") -> None
     if budget_line:
         lines.append(budget_line)
 
-    # СДВГ-совет от Haiku (учитывает контекст)
+    # СДВГ-совет
     try:
-        # Передаём реальные названия задач с временем — до 5 штук
         _tip_items = (overdue + today_tasks + daily)[:5]
         _tip_parts = []
         for it in _tip_items:
@@ -2776,19 +2756,45 @@ async def handle_tasks_today(message: Message, user_notion_id: str = "") -> None
         if advice:
             lines.append(f"\n💡 {advice.strip()}")
     except Exception as e:
-        logger.warning("handle_tasks_today: ADHD tip error: %s", e)
+        logger.warning("_build_today_digest ADHD tip error: %s", e)
 
+    return "\n".join(lines)
+
+
+async def handle_tasks_today(message: Message, user_notion_id: str = "") -> None:
+    """Задачи на сегодня: дедлайн сегодня/просрочен, напоминание сегодня, ежедневные."""
+    uid = message.from_user.id if message.from_user else 0
+    text = await _build_today_digest(uid, user_notion_id)
     try:
-        await message.answer("\n".join(lines), parse_mode="HTML")
+        await message.answer(text, parse_mode="HTML")
     except Exception as e:
-        logger.error("handle_tasks_today: send message error: %s", e)
-        # Fallback без HTML если парсинг сломался
+        logger.error("handle_tasks_today: send error: %s", e)
         try:
-            from aiogram.enums import ParseMode
-            plain = "\n".join(lines).replace("<b>", "").replace("</b>", "").replace("<i>", "").replace("</i>", "")
+            plain = text.replace("<b>", "").replace("</b>", "").replace("<i>", "").replace("</i>", "")
             await message.answer(plain)
         except Exception:
             await message.answer("⚠️ Ошибка формирования дайджеста. Попробуй /tasks.")
+
+
+async def send_morning_digest(bot) -> None:
+    """Cron job: утренний дайджест задач для всех пользователей."""
+    from core.config import config
+    from core.user_manager import get_user
+
+    for tg_id in config.allowed_ids:
+        try:
+            user_data = await get_user(tg_id)
+            if not user_data:
+                continue
+            user_notion_id = user_data.get("notion_page_id", "")
+            text = await _build_today_digest(
+                tg_id, user_notion_id,
+                greeting="☀️ <b>Доброе утро!</b>",
+            )
+            await bot.send_message(tg_id, text, parse_mode="HTML")
+            logger.info("send_morning_digest: sent to %s", tg_id)
+        except Exception as e:
+            logger.error("send_morning_digest: tg_id=%s error: %s", tg_id, e)
 
 
 # ── /stats — статистика задач ─────────────────────────────────────────────────
