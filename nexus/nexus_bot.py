@@ -1399,13 +1399,13 @@ async def main() -> None:
     from nexus.handlers.notes import send_notes_digest_all
     from apscheduler.triggers.cron import CronTrigger
     from nexus.handlers.tasks import _scheduler as nexus_scheduler
-    # Напоминание о заметках: 1-го и 15-го числа в 09:00 UTC (12:00 МСК)
+    # Дайджест заметок за неделю: каждое воскресенье в 09:00 UTC (12:00 МСК)
     if nexus_scheduler:
         nexus_scheduler.add_job(
             send_notes_digest_all,
             args=[bot],
-            trigger=CronTrigger(day="1,15", hour=9, minute=0),
-            id="notes_reminder_biweekly",
+            trigger=CronTrigger(day_of_week="sun", hour=9, minute=0),
+            id="notes_reminder_weekly",
             replace_existing=True,
         )
         # 🗒️ Списки: клон повторяющихся покупок — ежедневно 00:00 UTC (03:00 СПб)
