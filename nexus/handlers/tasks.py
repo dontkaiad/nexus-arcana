@@ -18,6 +18,26 @@ from core.layout import maybe_convert
 
 logger = logging.getLogger("nexus.tasks")
 MOSCOW_TZ = timezone(timedelta(hours=3))
+
+
+def _tz_suffix(tz_offset: int) -> str:
+    """Format tz offset as '+03:00' / '-05:00' for ISO 8601."""
+    sign = "+" if tz_offset >= 0 else "-"
+    h = abs(tz_offset)
+    return f"{sign}{h:02d}:00"
+
+
+def _date_with_tz(iso: str, tz_offset: int) -> dict:
+    """Wrap _date() but append timezone suffix for datetime strings (with 'T').
+
+    Date-only strings ('2026-04-09') pass through unchanged.
+    Datetime strings ('2026-04-09T17:00') get '+03:00' appended so Notion
+    stores the correct local time instead of interpreting it as UTC.
+    """
+    if "T" in iso and "+" not in iso and "Z" not in iso:
+        iso = iso + _tz_suffix(tz_offset)
+    return _date(iso)
+
 router = Router()
 
 CATEGORIES = [
@@ -366,7 +386,7 @@ async def restore_reminders_on_startup() -> None:
                                 break
 
                         deadline_start = (props.get("Дедлайн", {}).get("date") or {}).get("start", "")
-                        update_props: dict = {"Напоминание": _date(new_reminder), "Статус": _status("Not started")}
+                        update_props: dict = {"Напоминание": _date_with_tz(new_reminder, tz_offset), "Статус": _status("Not started")}
                         if deadline_start:
                             new_deadline = deadline_start[:16]
                             for _ in range(400):
@@ -379,7 +399,7 @@ async def restore_reminders_on_startup() -> None:
                                     break
                                 if dl_dt > now_utc:
                                     break
-                            update_props["Дедлайн"] = _date(new_deadline[:10])
+                            update_props["Дедлайн"] = _date_with_tz(new_deadline[:10], tz_offset)
 
                         await update_page(task_id, update_props)
                         await _schedule_reminder(tg_id, title, new_reminder, task_id, tz_offset)
@@ -707,7 +727,7 @@ async def handle_last_task_clarify(
         if run_dt <= now:
             run_dt += timedelta(days=1)
         dt_str = run_dt.strftime("%Y-%m-%dT%H:%M")
-        update_props["Напоминание"] = _date(dt_str)
+        update_props["Напоминание"] = _date_with_tz(dt_str, tz_offset)
         reschedule_reminder = (dt_str, page_id)
         response_text = f"🔔 Напоминание: {run_dt.strftime('%d.%m в %H:%M')}"
 
@@ -717,7 +737,7 @@ async def handle_last_task_clarify(
         dl_raw = m_dl.group(1).strip()
         iso_date = await _human_date_to_iso(dl_raw, uid)
         if iso_date:
-            update_props["Дедлайн"] = _date(iso_date)
+            update_props["Дедлайн"] = _date_with_tz(iso_date, tz_offset)
             response_text = f"📅 Дедлайн: {iso_date}"
 
     # ── Категория ─────────────────────────────────────────────────────────────────
@@ -906,9 +926,9 @@ async def _handle_recurring_task_reset(
 
     update_props = {"Статус": _status("Not started")}
     if current_deadline and new_deadline:
-        update_props["Дедлайн"] = _date(new_deadline[:10])
+        update_props["Дедлайн"] = _date_with_tz(new_deadline[:10], tz_offset)
     if current_reminder and new_reminder:
-        update_props["Напоминание"] = _date(new_reminder)
+        update_props["Напоминание"] = _date_with_tz(new_reminder, tz_offset)
 
     try:
         await update_page(task_id, update_props)
@@ -1889,6 +1909,7 @@ async def _do_save_task(message: Message, data: dict, chat_id: int = None, uid: 
 
     from core.option_helper import format_option
     db_id = config.nexus.db_tasks
+    tz_offset = await _get_user_tz(uid)
     real_priority = await match_select(db_id, "Приоритет", data.get("priority") or "Важно")
     real_category = await match_select(db_id, "Категория", format_option(data.get("category", "💳 Прочее")))
     user_notion_id = data.get("user_notion_id", "")
@@ -1900,9 +1921,9 @@ async def _do_save_task(message: Message, data: dict, chat_id: int = None, uid: 
         "Категория": _select(real_category),
     }
     if data.get("deadline"):
-        props["Дедлайн"] = _date(data["deadline"])
+        props["Дедлайн"] = _date_with_tz(data["deadline"], tz_offset)
     if data.get("reminder_time"):
-        props["Напоминание"] = _date(data["reminder_time"])
+        props["Напоминание"] = _date_with_tz(data["reminder_time"], tz_offset)
     if user_notion_id:
         props["🪪 Пользователи"] = _relation(user_notion_id)
 
@@ -1923,8 +1944,7 @@ async def _do_save_task(message: Message, data: dict, chat_id: int = None, uid: 
 
     # Планируем напоминание и дедлайн
     cid = chat_id or message.chat.id
-    tz_offset = await _get_user_tz(uid)
-    
+
     if data.get("reminder_time"):
         logger.info("_do_save_task: scheduling reminder task_id=%s repeat=%s reminder=%s",
                      result[:8], data.get("repeat", "Нет"), data["reminder_time"])
@@ -1950,7 +1970,7 @@ async def _do_save_task(message: Message, data: dict, chat_id: int = None, uid: 
             "Категория": _select(real_category),
         }
         if data.get("deadline"):
-            arcana_props["Дедлайн"] = _date(data["deadline"])
+            arcana_props["Дедлайн"] = _date_with_tz(data["deadline"], tz_offset)
         
         arcana_result = await page_create(config.arcana.db_tasks, arcana_props)
         if arcana_result:
