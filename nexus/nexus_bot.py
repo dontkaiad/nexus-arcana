@@ -368,11 +368,11 @@ async def cmd_budget(msg: Message, user_notion_id: str = "") -> None:
 
 @dp.message(Command("finance"))
 async def cmd_finance(msg: Message, user_notion_id: str = "") -> None:
-    """Финансы: сверху расходы за сегодня, снизу сводка за месяц, СДВГ-совет."""
-    import random
+    """Финансы: свободных/день + лимиты на грани + по категориям."""
+    import random, calendar as _cal
     from core.notion_client import finance_month
     from core.classifier import today_moscow
-    from nexus.handlers.finance import get_finance_stats
+    from nexus.handlers.finance import _calc_free_remaining, _get_limits, _cat_link
 
     _FINANCE_ADHD_TIPS = [
         "💡 Записал — значит контролируешь. Мозг с СДВГ не считает в фоне.",
@@ -383,53 +383,110 @@ async def cmd_finance(msg: Message, user_notion_id: str = "") -> None:
         "✨ Каждая записанная трата — шаг к финансовой осознанности.",
     ]
 
+    _RU_MONTHS_CMD = {1: "Январь", 2: "Февраль", 3: "Март", 4: "Апрель",
+                      5: "Май", 6: "Июнь", 7: "Июль", 8: "Август",
+                      9: "Сентябрь", 10: "Октябрь", 11: "Ноябрь", 12: "Декабрь"}
+
     today = today_moscow()
     month = today[:7]
+    now = datetime.now(MOSCOW_TZ)
+    month_label = f"{_RU_MONTHS_CMD.get(now.month, '')} {now.year}"
+
     records = await finance_month(month, user_notion_id=user_notion_id)
 
-    # ── Сегодня ──
-    today_lines = []
+    # Считаем расходы по категориям + сегодня
+    total_expense = 0.0
+    by_cat: dict[str, float] = {}
+    today_lines: list[str] = []
     today_total = 0.0
-    today_income = 0.0
     for r in records:
         props = r["properties"]
-        date = (props.get("Дата", {}).get("date") or {}).get("start", "")[:10]
-        if date != today:
-            continue
         amount = props.get("Сумма", {}).get("number") or 0
         type_name = (props.get("Тип", {}).get("select") or {}).get("name", "")
-        if "Доход" in type_name:
-            today_income += amount
-            continue
         if "Расход" not in type_name:
             continue
-        desc_parts = props.get("Описание", {}).get("title", [])
-        desc = desc_parts[0]["plain_text"] if desc_parts else "—"
         cat = (props.get("Категория", {}).get("select") or {}).get("name", "")
-        today_lines.append(f"  <i>💸 {desc} · {cat} · {amount:,.0f}₽</i>")
-        today_total += amount
+        total_expense += amount
+        by_cat[cat] = by_cat.get(cat, 0) + amount
+        date = (props.get("Дата", {}).get("date") or {}).get("start", "")[:10]
+        if date == today:
+            desc_parts = props.get("Описание", {}).get("title", [])
+            desc = desc_parts[0]["plain_text"] if desc_parts else "—"
+            today_lines.append(f"  💸 {desc} · {cat} · {amount:,.0f}₽")
+            today_total += amount
 
-    parts = []
-
-    # Блок «Сегодня»
-    if today_lines:
-        header = f"<b>💸 Сегодня · {today[5:7]}.{today[8:10]}:</b>"
-        block = header + "\n" + "\n".join(today_lines)
-        block += f"\n<b>💰 Итого: {today_total:,.0f}₽</b>"
-        if today_income > 0:
-            block += f"\n<b>📥 Доход: {today_income:,.0f}₽</b>"
-        parts.append(block)
+    # Свободных/день
+    free_result = await _calc_free_remaining(user_notion_id)
+    if free_result:
+        free_left, days_rem = free_result
+        daily_budget = free_left / max(days_rem, 1)
     else:
-        parts.append(f"💸 Сегодня расходов нет.")
+        free_left, days_rem, daily_budget = 0, 0, 0
 
-    # ── Месяц ──
-    month_stats = await get_finance_stats(month, user_notion_id)
-    parts.append(month_stats)
+    # Лимиты
+    import os as _os
+    mem_db = _os.environ.get("NOTION_DB_MEMORY")
+    limits: dict[str, float] = {}
+    if mem_db:
+        limits = await _get_limits(mem_db)
+
+    lines: list[str] = [f"💰 <b>{month_label}</b>\n"]
+
+    # Главная строка
+    if free_result:
+        lines.append(f"💳 Свободных: <b>{free_left:,.0f}₽</b> · {daily_budget:,.0f}₽/день")
+    # Потрачено из планового бюджета (income)
+    from nexus.handlers.finance import _load_budget_data
+    budget = await _load_budget_data(user_notion_id)
+    plan_income = sum(d["amount"] for d in budget.get("доходы", []))
+    if plan_income > 0:
+        lines.append(f"📊 Потрачено: {total_expense:,.0f}₽ из {plan_income:,.0f}₽")
+    else:
+        lines.append(f"📊 Потрачено: {total_expense:,.0f}₽")
+
+    # Сегодня
+    if today_lines:
+        lines.append(f"\n<b>💸 Сегодня ({today_total:,.0f}₽):</b>")
+        lines.extend(today_lines)
+
+    # На грани (>50% лимита)
+    warns: list[str] = []
+    for lim_key, lim_val in limits.items():
+        if lim_val <= 0:
+            continue
+        spent = 0.0
+        for cat_k, cat_s in by_cat.items():
+            cl = _cat_link(cat_k)
+            if lim_key in cl or cl in lim_key:
+                spent += cat_s
+        pct = int(spent / lim_val * 100)
+        if pct >= 50:
+            remaining = lim_val - spent
+            color = "🔴" if pct >= 90 else "🟡"
+            warns.append(f"  {lim_key.capitalize()}: {pct}% {color} (~{remaining:,.0f}₽ осталось)")
+    if warns:
+        lines.append(f"\n<b>🚨 На грани:</b>")
+        lines.extend(warns)
+
+    # По категориям (отсортированные по сумме)
+    if by_cat:
+        lines.append(f"\n<b>📋 По категориям:</b>")
+        for cat, amt in sorted(by_cat.items(), key=lambda x: x[1], reverse=True):
+            cl = _cat_link(cat)
+            lim = None
+            for lk, lv in limits.items():
+                if lk in cl or cl in lk:
+                    lim = lv
+                    break
+            if lim:
+                lines.append(f"  {cat}: {amt:,.0f} / {lim:,.0f}₽")
+            else:
+                lines.append(f"  {cat}: {amt:,.0f}₽")
 
     # СДВГ-совет
-    parts.append(f"\n{random.choice(_FINANCE_ADHD_TIPS)}")
+    lines.append(f"\n{random.choice(_FINANCE_ADHD_TIPS)}")
 
-    await msg.answer("\n".join(parts))
+    await msg.answer("\n".join(lines), parse_mode="HTML")
 
 
 @dp.message(Command("finance_stats"))
