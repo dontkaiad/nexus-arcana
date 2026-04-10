@@ -2652,7 +2652,7 @@ async def _build_today_digest(uid: int, user_notion_id: str = "", greeting: str 
         if result:
             free_left, days_rem = result
             daily_budget = free_left / max(days_rem, 1)
-            budget_line = f"💰 Бюджет: <b>{daily_budget:,.0f}₽/день</b>"
+            budget_line = f"💰 Свободных: <b>{free_left:,.0f}₽</b> · {daily_budget:,.0f}₽/день"
 
             mem_db = _os.environ.get("NOTION_DB_MEMORY")
             if mem_db:
@@ -2776,8 +2776,25 @@ async def handle_tasks_today(message: Message, user_notion_id: str = "") -> None
             await message.answer("⚠️ Ошибка формирования дайджеста. Попробуй /tasks.")
 
 
+async def _check_yesterday_expenses(user_notion_id: str, tz_offset: int) -> bool:
+    """Return True if there were any expenses recorded yesterday."""
+    from core.notion_client import db_query
+    from core.config import config
+    user_tz = timezone(timedelta(hours=tz_offset))
+    yesterday = (datetime.now(user_tz) - timedelta(days=1)).strftime("%Y-%m-%d")
+    try:
+        recs = await db_query(config.nexus.db_finance, filter_obj={"and": [
+            {"property": "Тип", "select": {"equals": "💸 Расход"}},
+            {"property": "Дата", "date": {"equals": yesterday}},
+        ]}, page_size=1)
+        return len(recs) > 0
+    except Exception as e:
+        logger.warning("_check_yesterday_expenses error: %s", e)
+        return True  # assume yes on error — don't nag
+
+
 async def send_morning_digest(bot) -> None:
-    """Cron job: утренний дайджест задач для всех пользователей."""
+    """Cron job: утренний дайджест задач + напоминание о тратах."""
     from core.config import config
     from core.user_manager import get_user
 
@@ -2787,14 +2804,43 @@ async def send_morning_digest(bot) -> None:
             if not user_data:
                 continue
             user_notion_id = user_data.get("notion_page_id", "")
+            tz_offset = await _get_user_tz(tg_id)
+
+            # Проверка трат за вчера
+            had_expenses = await _check_yesterday_expenses(user_notion_id, tz_offset)
+            expense_block = ""
+            if not had_expenses:
+                expense_block = (
+                    "\n💸 Вчера не записано трат — были расходы?\n"
+                    "Напиши что потратила, например: <code>500 продукты, 200 кафе</code>\n"
+                )
+
             text = await _build_today_digest(
                 tg_id, user_notion_id,
                 greeting="☀️ <b>Доброе утро!</b>",
             )
-            await bot.send_message(tg_id, text, parse_mode="HTML")
-            logger.info("send_morning_digest: sent to %s", tg_id)
+
+            # Вставить expense_block после приветствия
+            if expense_block:
+                text = text.replace("☀️ <b>Доброе утро!</b>\n", "☀️ <b>Доброе утро!</b>\n" + expense_block, 1)
+
+            kb = None
+            if not had_expenses:
+                kb = InlineKeyboardMarkup(inline_keyboard=[[
+                    InlineKeyboardButton(text="🚫 Вчера без трат", callback_data="morning_no_expense"),
+                ]])
+
+            await bot.send_message(tg_id, text, parse_mode="HTML", reply_markup=kb)
+            logger.info("send_morning_digest: sent to %s (yesterday_expenses=%s)", tg_id, had_expenses)
         except Exception as e:
             logger.error("send_morning_digest: tg_id=%s error: %s", tg_id, e)
+
+
+@router.callback_query(F.data == "morning_no_expense")
+async def on_morning_no_expense(call: CallbackQuery) -> None:
+    """Кнопка '🚫 Вчера без трат' — просто подтверждение."""
+    await call.answer("👍")
+    await call.message.edit_reply_markup()
 
 
 # ── /stats — статистика задач ─────────────────────────────────────────────────
