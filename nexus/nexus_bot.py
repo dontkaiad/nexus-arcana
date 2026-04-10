@@ -1441,13 +1441,13 @@ async def main() -> None:
     from nexus.handlers.notes import send_notes_digest_all
     from apscheduler.triggers.cron import CronTrigger
     from nexus.handlers.tasks import _scheduler as nexus_scheduler
-    # ☀️ Утренний дайджест задач — ежедневно 07:05 UTC (10:05 МСК)
+    # ☀️ Утренний дайджест задач — ежедневно 07:00 UTC (10:00 МСК)
     from nexus.handlers.tasks import send_morning_digest
     if nexus_scheduler:
         nexus_scheduler.add_job(
             send_morning_digest,
             args=[bot],
-            trigger=CronTrigger(hour=7, minute=5),
+            trigger=CronTrigger(hour=7, minute=0),
             id="daily_morning_digest",
             replace_existing=True,
         )
@@ -1468,11 +1468,11 @@ async def main() -> None:
             id="list_recurring",
             replace_existing=True,
         )
-        # 🗒️ Списки: проверка сроков годности — ежедневно 07:00 UTC (10:00 СПб)
+        # 🗒️ Списки: проверка сроков годности — ежедневно 07:05 UTC (10:05 СПб)
         nexus_scheduler.add_job(
             check_expiry,
             args=[bot, 3],
-            trigger=CronTrigger(hour=7, minute=0),
+            trigger=CronTrigger(hour=7, minute=5),
             id="list_expiry",
             replace_existing=True,
         )
@@ -1485,6 +1485,11 @@ async def main() -> None:
             id="budget_payday_review",
             replace_existing=True,
         )
+    # Логируем все запланированные cron jobs
+    if nexus_scheduler:
+        cron_jobs = [(j.id, str(j.trigger), str(j.next_run_time)) for j in nexus_scheduler.get_jobs()]
+        logger.info("Scheduled cron jobs (%d): %s", len(cron_jobs), cron_jobs)
+
     # restore_reminders планируем ПОСЛЕ старта polling,
     # иначе бот не может отправлять сообщения (missed reminders)
     import asyncio as _asyncio
