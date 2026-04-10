@@ -9,11 +9,13 @@ echo "Starting ☀️ Nexus + 🌒 Arcana with auto-reload..."
 auto_pull() {
     while true; do
         sleep 30
-        RESULT=$(git pull origin main --quiet 2>&1)
-        if echo "$RESULT" | grep -q "Already up to date"; then
-            :
-        else
-            echo "[auto-pull] Изменения подтянуты: $RESULT"
+        OLD_HEAD=$(git rev-parse HEAD)
+        git pull origin main --ff-only 2>&1 | while read -r line; do
+            echo "[auto-pull] $line"
+        done
+        NEW_HEAD=$(git rev-parse HEAD)
+        if [ "$OLD_HEAD" != "$NEW_HEAD" ]; then
+            echo "[auto-pull] ✅ Обновлено: $(git log --oneline ${OLD_HEAD}..${NEW_HEAD} | head -5)"
         fi
     done
 }
