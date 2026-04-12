@@ -191,3 +191,5 @@ UPDATED_ROADMAP.md
 LISTS_SPEC.md
 fix_users.py
 pending_budget.db
+tests/e2e_session.session
+tests/.env.test
