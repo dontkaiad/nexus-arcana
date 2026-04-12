@@ -18,11 +18,9 @@ logger = logging.getLogger("arcana.bot")
 _photo_pending: dict = {}  # uid → (message_id, user_notion_id, ts)
 _PHOTO_TTL = 120  # 2 минуты
 
-async def main():
-    if not config.arcana.tg_token: return
-    logging.basicConfig(level=logging.INFO)
-    from core.logging_notion import install as _install_notion_logging
-    _install_notion_logging(bot_label="🌒 Arcana")
+
+def create_dp_and_bot():
+    """Создать dp + bot без запуска polling. Для тестов и main()."""
     bot = Bot(token=config.arcana.tg_token, default=DefaultBotProperties(parse_mode="HTML"))
     dp = Dispatcher()
     dp.message.middleware(WhitelistMiddleware(require_feature="arcana"))
@@ -61,50 +59,6 @@ async def main():
     async def cmd_grimoire(msg: Message, user_notion_id: str = "") -> None:
         from arcana.handlers.grimoire import handle_grimoire_menu
         await handle_grimoire_menu(msg, user_notion_id)
-
-    # ── Ежемесячный cron-напоминалка ─────────────────────────────────────────
-    try:
-        from apscheduler.schedulers.asyncio import AsyncIOScheduler
-        from apscheduler.triggers.cron import CronTrigger
-
-        scheduler = AsyncIOScheduler()
-
-        async def monthly_unverified_reminder() -> None:
-            """1-го числа каждого месяца в 12:00 — напомнить про непроверенные расклады."""
-            from core.config import config as cfg
-            from core.user_manager import get_user
-
-            for tg_id in cfg.allowed_ids:
-                try:
-                    user_data = await get_user(tg_id)
-                    if not user_data:
-                        continue
-                    if not user_data.get("permissions", {}).get("arcana", False):
-                        continue
-                    notion_id = user_data.get("notion_page_id", "")
-                    count = await get_unverified_count(notion_id, older_than_days=30)
-                    if count > 0:
-                        await bot.send_message(
-                            tg_id,
-                            f"🌒 <b>Напоминание</b>\n\n"
-                            f"У тебя {count} непроверенных раскладов старше 30 дней.\n"
-                            f"Напиши «Анна 5 марта — сбылось» чтобы отметить результат.\n"
-                            f"Или /stats для общей статистики.",
-                            parse_mode="HTML",
-                        )
-                except Exception as e:
-                    logger.warning("monthly_reminder error for %s: %s", tg_id, e)
-
-        scheduler.add_job(
-            monthly_unverified_reminder,
-            CronTrigger(day=1, hour=12, minute=0),
-            id="arcana_monthly_reminder",
-            replace_existing=True,
-        )
-        scheduler.start()
-        logger.info("APScheduler started — arcana monthly reminder active")
-    except ImportError:
-        logger.warning("apscheduler not installed — monthly reminder disabled")
 
     @dp.message(F.voice | F.audio)
     async def handle_voice(msg: Message, user_notion_id: str = "") -> None:
@@ -285,6 +239,62 @@ async def main():
             from arcana.handlers.clients import handle_client_photo_input
             await query.message.edit_text("📸 Извлекаю контакты...")
             await handle_client_photo_input(photo_msg, image_b64, pending_client)
+
+    return dp, bot
+
+
+async def main():
+    if not config.arcana.tg_token: return
+    logging.basicConfig(level=logging.INFO)
+    from core.logging_notion import install as _install_notion_logging
+    _install_notion_logging(bot_label="🌒 Arcana")
+
+    dp, bot = create_dp_and_bot()
+
+    # ── Ежемесячный cron-напоминалка ─────────────────────────────────────────
+    try:
+        from apscheduler.schedulers.asyncio import AsyncIOScheduler
+        from apscheduler.triggers.cron import CronTrigger
+        from arcana.handlers.stats import get_unverified_count
+
+        scheduler = AsyncIOScheduler()
+
+        async def monthly_unverified_reminder() -> None:
+            """1-го числа каждого месяца в 12:00 — напомнить про непроверенные расклады."""
+            from core.config import config as cfg
+            from core.user_manager import get_user
+
+            for tg_id in cfg.allowed_ids:
+                try:
+                    user_data = await get_user(tg_id)
+                    if not user_data:
+                        continue
+                    if not user_data.get("permissions", {}).get("arcana", False):
+                        continue
+                    notion_id = user_data.get("notion_page_id", "")
+                    count = await get_unverified_count(notion_id, older_than_days=30)
+                    if count > 0:
+                        await bot.send_message(
+                            tg_id,
+                            f"🌒 <b>Напоминание</b>\n\n"
+                            f"У тебя {count} непроверенных раскладов старше 30 дней.\n"
+                            f"Напиши «Анна 5 марта — сбылось» чтобы отметить результат.\n"
+                            f"Или /stats для общей статистики.",
+                            parse_mode="HTML",
+                        )
+                except Exception as e:
+                    logger.warning("monthly_reminder error for %s: %s", tg_id, e)
+
+        scheduler.add_job(
+            monthly_unverified_reminder,
+            CronTrigger(day=1, hour=12, minute=0),
+            id="arcana_monthly_reminder",
+            replace_existing=True,
+        )
+        scheduler.start()
+        logger.info("APScheduler started — arcana monthly reminder active")
+    except ImportError:
+        logger.warning("apscheduler not installed — monthly reminder disabled")
 
     await dp.start_polling(bot)
 
