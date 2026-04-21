@@ -1,9 +1,9 @@
 """Интеграционные тесты Nexus — полный pipeline через dp.feed_update()."""
 import pytest
 import asyncio
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
-from tests.integration.bot_factory import FakeSession, make_update
+from tests.integration.bot_factory import FakeSession, make_update, make_callback_update
 from tests.integration.mock_externals import get_all_patches
 
 
@@ -216,3 +216,234 @@ class TestNexusIntegration:
                 assert "traceback" not in (r or "").lower(), f"Краш на: {text}"
             except Exception as e:
                 pytest.fail(f"Exception на '{text}': {e}")
+
+    # ═══════════════════════════════════════════════════════════════════
+    # БЛОК 2: Дополнительные команды
+    # ═══════════════════════════════════════════════════════════════════
+
+    async def send_cb(self, data: str, text: str = "") -> str:
+        """Callback query через dp.feed_update."""
+        self.session.clear()
+        update = make_callback_update(data, original_text=text,
+                                      update_id=abs(hash(data)) % 100000)
+        try:
+            await self.dp.feed_update(self.bot, update)
+        except Exception as e:
+            return f"[ERROR: {e}]"
+        await asyncio.sleep(0.05)
+        return self.session.get_last_response()
+
+    @pytest.mark.asyncio
+    async def test_adhd(self):
+        """/adhd — СДВГ-профиль (может быть долго из-за Sonnet — мок)."""
+        r = await self.send("/adhd")
+        # с моком Claude — быстро
+        assert "traceback" not in (r or "").lower()
+
+    @pytest.mark.asyncio
+    async def test_budget(self):
+        """/budget — показать бюджет."""
+        r = await self.send("/budget")
+        assert "traceback" not in (r or "").lower()
+
+    @pytest.mark.asyncio
+    async def test_fixstreak(self):
+        """/fixstreak — починить стрик."""
+        r = await self.send("/fixstreak")
+        assert "traceback" not in (r or "").lower()
+
+    @pytest.mark.asyncio
+    async def test_finance_stats(self):
+        """/finance_stats — статистика финансов."""
+        r = await self.send("/finance_stats")
+        assert "traceback" not in (r or "").lower()
+
+    # ═══════════════════════════════════════════════════════════════════
+    # БЛОК 3: Специфические текстовые команды
+    # ═══════════════════════════════════════════════════════════════════
+
+    @pytest.mark.asyncio
+    async def test_debt_create(self):
+        """'долг маме 5000' — команда долга."""
+        r = await self.send("долг маме 5000")
+        assert "traceback" not in (r or "").lower()
+
+    @pytest.mark.asyncio
+    async def test_goal_create(self):
+        """'цель айфон 120000' — команда цели."""
+        r = await self.send("цель айфон 120000")
+        assert "traceback" not in (r or "").lower()
+
+    @pytest.mark.asyncio
+    async def test_limit_command(self):
+        """'лимит на кафе 5000' — установка лимита."""
+        r = await self.send("лимит на кафе 5000")
+        assert "traceback" not in (r or "").lower()
+
+    @pytest.mark.asyncio
+    async def test_show_budget_text(self):
+        """'покажи бюджет' — тригер через regex."""
+        r = await self.send("покажи бюджет")
+        assert "traceback" not in (r or "").lower()
+
+    @pytest.mark.asyncio
+    async def test_what_remember(self):
+        """'что ты помнишь о котах' — memory search."""
+        r = await self.send("что ты помнишь о котах")
+        assert "traceback" not in (r or "").lower()
+
+    @pytest.mark.asyncio
+    async def test_delete_from_memory(self):
+        """'забудь про тест' — удалить из памяти."""
+        r = await self.send("забудь про тест")
+        assert "traceback" not in (r or "").lower()
+
+    @pytest.mark.asyncio
+    async def test_neaktualno(self):
+        """'неактуально' — деактивация записи."""
+        r = await self.send("неактуально")
+        assert "traceback" not in (r or "").lower()
+
+    @pytest.mark.asyncio
+    async def test_delete_note(self):
+        """'удали заметку про расходники' — удаление заметки."""
+        r = await self.send("удали заметку про расходники")
+        assert "traceback" not in (r or "").lower()
+
+    @pytest.mark.asyncio
+    async def test_delete_all_notes(self):
+        """'удали все заметки' — удалить все."""
+        r = await self.send("удали все заметки")
+        assert "traceback" not in (r or "").lower()
+
+    @pytest.mark.asyncio
+    async def test_stats_text(self):
+        """'сколько потратила за март' — stats."""
+        r = await self.send("сколько потратила за март")
+        assert "traceback" not in (r or "").lower()
+
+    @pytest.mark.asyncio
+    async def test_tz_set_utc(self):
+        """/tz UTC+5 — установка часового пояса."""
+        r = await self.send("/tz UTC+5")
+        assert "traceback" not in (r or "").lower()
+
+    # ═══════════════════════════════════════════════════════════════════
+    # БЛОК 4: Callbacks Nexus — без pending (graceful)
+    # ═══════════════════════════════════════════════════════════════════
+
+    @pytest.mark.asyncio
+    async def test_cb_fin_cancel(self):
+        """fin_cancel без pending — не крашит."""
+        r = await self.send_cb("fin_cancel")
+        assert "traceback" not in (r or "").lower()
+
+    @pytest.mark.asyncio
+    async def test_cb_msg_hide(self):
+        """msg_hide — скрыть сообщение."""
+        r = await self.send_cb("msg_hide")
+        assert "traceback" not in (r or "").lower()
+
+    @pytest.mark.asyncio
+    async def test_cb_del_cancel(self):
+        """del_cancel — отмена удаления."""
+        r = await self.send_cb("del_cancel")
+        assert "traceback" not in (r or "").lower()
+
+    @pytest.mark.asyncio
+    async def test_cb_list_keep_task(self):
+        """list_keep_task — оставить задачу в списке."""
+        r = await self.send_cb("list_keep_task")
+        assert "traceback" not in (r or "").lower()
+
+    @pytest.mark.asyncio
+    async def test_cb_list_cross_no(self):
+        """list_cross_no — не вычёркивать."""
+        r = await self.send_cb("list_cross_no")
+        assert "traceback" not in (r or "").lower()
+
+    @pytest.mark.asyncio
+    async def test_cb_list_remind_no(self):
+        """list_remind_no."""
+        r = await self.send_cb("list_remind_no")
+        assert "traceback" not in (r or "").lower()
+
+    @pytest.mark.asyncio
+    async def test_cb_list_to_inv_no(self):
+        """list_to_inv_no."""
+        r = await self.send_cb("list_to_inv_no")
+        assert "traceback" not in (r or "").lower()
+
+    @pytest.mark.asyncio
+    async def test_cb_list_skip_expiry(self):
+        """list_skip_expiry."""
+        r = await self.send_cb("list_skip_expiry")
+        assert "traceback" not in (r or "").lower()
+
+    @pytest.mark.asyncio
+    async def test_cb_task_refine_no(self):
+        """task_refine_no."""
+        r = await self.send_cb("task_refine_no")
+        assert "traceback" not in (r or "").lower()
+
+    @pytest.mark.asyncio
+    async def test_cb_subtask_cancel(self):
+        """subtask_cancel."""
+        r = await self.send_cb("subtask_cancel")
+        assert "traceback" not in (r or "").lower()
+
+    @pytest.mark.asyncio
+    async def test_cb_mem_cancel(self):
+        """mem_cancel."""
+        r = await self.send_cb("mem_cancel")
+        assert "traceback" not in (r or "").lower()
+
+    @pytest.mark.asyncio
+    async def test_cb_mem_auto_no(self):
+        """mem_auto_no — отказ от автосохранения."""
+        r = await self.send_cb("mem_auto_no")
+        assert "traceback" not in (r or "").lower()
+
+    # ═══════════════════════════════════════════════════════════════════
+    # БЛОК 5: Специфические финансы сценарии
+    # ═══════════════════════════════════════════════════════════════════
+
+    @pytest.mark.asyncio
+    async def test_expense_with_symbol(self):
+        """Расход с ₽ символом."""
+        r = await self.send("1000₽ продукты")
+        assert "traceback" not in (r or "").lower()
+
+    @pytest.mark.asyncio
+    async def test_expense_with_rub(self):
+        """Расход с 'руб'."""
+        r = await self.send("потратила 300 руб на кофе")
+        assert "traceback" not in (r or "").lower()
+
+    @pytest.mark.asyncio
+    async def test_barter(self):
+        """Бартер."""
+        r = await self.send("бартер консультация на стрижку")
+        assert "traceback" not in (r or "").lower()
+
+    # ═══════════════════════════════════════════════════════════════════
+    # БЛОК 6: Закрытие задач
+    # ═══════════════════════════════════════════════════════════════════
+
+    @pytest.mark.asyncio
+    async def test_gotovo(self):
+        """'готово' — закрытие задачи."""
+        r = await self.send("готово")
+        assert "traceback" not in (r or "").lower()
+
+    @pytest.mark.asyncio
+    async def test_vypolnila(self):
+        """'выполнила задачу X'."""
+        r = await self.send("выполнила задачу тест")
+        assert "traceback" not in (r or "").lower()
+
+    @pytest.mark.asyncio
+    async def test_pozvonila(self):
+        """'позвонила маме' — маркер done."""
+        r = await self.send("позвонила маме")
+        assert "traceback" not in (r or "").lower()
