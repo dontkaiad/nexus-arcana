@@ -25,6 +25,7 @@ from core.notion_client import (
     log_error,
     session_add,
     sessions_by_client,
+    sessions_search,
 )
 from core.shared_handlers import get_user_tz
 
@@ -117,16 +118,22 @@ def _now_iso(tz: timezone) -> str:
 PARSE_SESSION_SYSTEM = (
     "Извлеки данные о сеансе таро. Ответь ТОЛЬКО JSON без markdown:\n"
     '{"client_name": "имя или null", "spread_type": "тип расклада", '
-    '"question": "тема/вопрос", "cards": "карты через запятую или null", '
+    '"question": "конкретный вопрос", "cards": "карты через запятую или null", '
     '"bottom_card": "карта или null", '
     '"area": "Отношения|Финансы|Работа|Здоровье|Род|Общая ситуация", '
     '"deck": "Уэйт|Dark Wood|Ленорман|Игральные|Deviant Moon или null", '
     '"amount": число, "paid": число, '
     '"payment_source": "карта|наличные|бартер или null"}\n\n'
-    "ОБЯЗАТЕЛЬНО: поле area — одно из: "
-    "Отношения, Финансы, Работа, Здоровье, Род, Общая ситуация. "
-    "Если из текста не понятно — ставь 'Общая ситуация'. НЕ оставляй null.\n"
-    "Колода (deck): используй канонические названия БЕЗ склонений — "
+    "ОБЯЗАТЕЛЬНО: question — конкретный вопрос клиента, короткий (3-7 слов), "
+    "с именами если есть. Примеры:\n"
+    "- 'что думает Вадим обо мне' → 'Что думает Вадим'\n"
+    "- 'будем ли вместе с Машей' → 'Будут ли отношения с Машей'\n"
+    "- 'триплет уэйт отношения' (без вопроса) → 'Отношения — общий расклад'\n"
+    "- 'что на работе ждёт' → 'Перспективы на работе'\n"
+    "- 'расклад по здоровью мамы' → 'Здоровье мамы'\n\n"
+    "ОБЯЗАТЕЛЬНО: area — одно из: Отношения, Финансы, Работа, Здоровье, Род, "
+    "Общая ситуация. Если непонятно — 'Общая ситуация'. НЕ оставляй null.\n"
+    "Колода (deck): канонические названия БЕЗ склонений — "
     "'Уэйт' (не 'Уэйта'/'Уэйту'), 'Dark Wood', 'Ленорман', 'Игральные', 'Deviant Moon'.\n"
     "Если в тексте есть упоминание 'дно', 'дно колоды', 'bottom' — "
     "выдели эту карту отдельно в поле bottom_card. Это НЕ позиция расклада, "
@@ -140,6 +147,18 @@ CORRECTION_PARSE_SYSTEM = (
     '"question": "новый вопрос или null", '
     '"area": "Отношения|Финансы|Работа|Здоровье|Род|Общая ситуация или null"}\n'
     "Если поле не упоминается в правке — ставь null. Только изменения."
+)
+
+SESSION_SEARCH_PARSE_SYSTEM = (
+    "Пользователь ищет свои прошлые расклады. Извлеки ключевые слова для поиска "
+    "в теме расклада. Ответь ТОЛЬКО JSON без markdown:\n"
+    '{"keywords": ["слово1", "слово2"]}\n\n'
+    "Примеры:\n"
+    "- 'что падало на Вадима' → {\"keywords\": [\"Вадим\"]}\n"
+    "- 'расклады про работу' → {\"keywords\": [\"работа\"]}\n"
+    "- 'расклады на Машу про отношения' → {\"keywords\": [\"Маша\", \"отношения\"]}\n"
+    "- 'покажи расклад про здоровье мамы' → {\"keywords\": [\"здоровье\", \"мамы\"]}\n"
+    "Имена — в именительном падеже если возможно. Максимум 3 ключевых слова."
 )
 
 TAROT_SYSTEM = (
@@ -168,9 +187,14 @@ VISION_SYSTEM = (
     '{"spread_type": "тип или Другой", "deck": "Уэйт|Dark Wood|Ленорман|Игральные|Deviant Moon", '
     '"cards": [{"position": "позиция", "card": "название"}], '
     '"bottom_card": "название карты дна колоды или null"}\n\n'
-    "Колода — каноническое название без склонений.\n"
-    "Если на фото видна карта снизу колоды (дно) отдельно от расклада — "
-    "выдели её в bottom_card, а не в cards."
+    "Порядок карт на фото: СЛЕВА НАПРАВО, СВЕРХУ ВНИЗ. "
+    "Верни карты в этом порядке.\n"
+    "Если карт БОЛЬШЕ чем нужно для расклада (например 4 карты для триплета) — "
+    "ПОСЛЕДНЯЯ карта = дно колоды, положи её в bottom_card, "
+    "а в cards оставь только карты самого расклада.\n"
+    "Если на фото дно лежит отдельно от расклада (ниже, сбоку, рядом с колодой) — "
+    "тоже в bottom_card.\n"
+    "Колода — каноническое название без склонений."
 )
 
 
@@ -428,19 +452,25 @@ async def cb_tarot_save(call: CallbackQuery) -> None:
         is_personal = not client_name
 
         bottom_card = state.get("bottom_card") or None
-        notes = f"Дно: {bottom_card}" if bottom_card else None
-
         area = _normalize_area(state.get("area") or "")
         deck = _match_deck(state.get("deck") or "") or None
-        title = f"{client_name or 'Личный'} • {area}"
+        question = state.get("question") or ""
+        interpretation = state.get("interpretation") or ""
+
+        # Дно — в конец трактовки (если Claude не добавил блок 🂠)
+        if bottom_card and "🂠" not in interpretation:
+            interpretation = (
+                interpretation.rstrip()
+                + f"\n\n🂠 Дно: {bottom_card}"
+            )
 
         await session_add(
             date=_now_iso(tz),
             spread_type=spread,
-            title=title,
-            question=state.get("question") or "",
+            title=question,
+            question=question,
             cards=state.get("cards") or "",
-            interpretation=state.get("interpretation") or "",
+            interpretation=interpretation,
             amount=amount,
             paid=paid,
             session_type="Личный" if is_personal else "Клиентский",
@@ -449,7 +479,6 @@ async def cb_tarot_save(call: CallbackQuery) -> None:
             area=area,
             deck=deck,
             payment_source=payment_source,
-            notes=notes,
         )
 
         if amount > 0:
@@ -602,6 +631,75 @@ async def handle_tarot_photo(message: Message, user_notion_id: str = "") -> None
         trace = tb.format_exc()
         logger.error("handle_tarot_photo error: %s", trace)
         await message.answer("❌ Ошибка при анализе фото.")
+
+
+# ────────────────────────── Поиск раскладов ────────────────────────────────
+
+async def handle_session_search(
+    message: Message, text: str, user_notion_id: str = ""
+) -> None:
+    """Поиск прошлых раскладов по ключевым словам в Теме."""
+    try:
+        raw = await ask_claude(
+            text, system=SESSION_SEARCH_PARSE_SYSTEM, max_tokens=150
+        )
+        data = _parse_json_safe(raw) or {}
+        keywords = [
+            k.strip() for k in (data.get("keywords") or []) if isinstance(k, str) and k.strip()
+        ]
+        if not keywords:
+            await message.answer("🔍 Не поняла что искать. Напиши имя или тему яснее.")
+            return
+
+        results = await sessions_search(
+            keywords, user_notion_id=user_notion_id, limit=10
+        )
+        kw_display = html.escape(", ".join(keywords))
+        if not results:
+            await message.answer(f"🔍 По «{kw_display}» раскладов не нашла.")
+            return
+
+        lines: List[str] = [f"🔍 <b>Расклады по «{kw_display}»</b>:"]
+        shown = results[:5]
+        for s in shown:
+            p = s.get("properties", {})
+            date_prop = p.get("Дата") or p.get("Дата и время") or {}
+            date_val = date_prop.get("date") or {}
+            d = (date_val.get("start") or "")[:10]
+            theme = _extract_text(p.get("Тема") or {}) or "—"
+
+            spread_prop = p.get("Тип расклада") or {}
+            spread_items = spread_prop.get("multi_select") or []
+            spread_name = spread_items[0].get("name", "") if spread_items else ""
+
+            area_prop = p.get("Область") or {}
+            area_items = area_prop.get("multi_select") or []
+            if area_items:
+                area_name = area_items[0].get("name", "")
+            else:
+                area_name = (area_prop.get("select") or {}).get("name", "")
+
+            cards_text = _extract_text(p.get("Карты") or {})
+            cards_short = (cards_text[:80] + "…") if len(cards_text) > 80 else cards_text
+
+            meta_parts = [x for x in (spread_name, area_name) if x]
+            meta = " · ".join(html.escape(x) for x in meta_parts)
+            block = f"\n📅 <b>{d}</b> · {html.escape(theme)}"
+            if meta:
+                block += f"\n   {meta}"
+            if cards_short:
+                block += f"\n   🃏 {html.escape(cards_short)}"
+            lines.append(block)
+
+        if len(results) > len(shown):
+            lines.append(f"\n… и ещё {len(results) - len(shown)}")
+
+        await message.answer("\n".join(lines), parse_mode="HTML")
+
+    except Exception as e:
+        trace = tb.format_exc()
+        logger.error("handle_session_search error: %s", trace)
+        await message.answer("❌ Не удалось найти расклады.")
 
 
 # ────────────────────────── Быстрая трактовка ──────────────────────────────
