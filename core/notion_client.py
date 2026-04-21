@@ -1000,37 +1000,46 @@ async def ritual_add(
 ) -> Optional[str]:
     from core.config import config
     db_id = config.arcana.db_rituals
+
+    type_value = "🌟 Личный" if ritual_type == "Личный" else "🤝 Клиентский"
+    real_type = await match_select(db_id, "Тип", type_value)
+    real_result = await match_select(db_id, "Результат", "⏳ Не проверено")
+
+    offerings_sum = (
+        offerings_cost if offerings_cost and offerings_cost > 0 else consumables_cost
+    )
+
     props = {
-        "Название":         _title(name),
-        "Дата":             _date(date),
-        "Тип":              _select("🌟 Личный" if ritual_type == "Личный" else "🤝 Клиентский"),
-        "Расходники":       _text(consumables),
-        "Сумма подношений": _number(consumables_cost),
-        "Время (мин)":      _number(duration_min),
-        "Подношения":       _text(offerings),
-        "Силы":             _text(forces),
-        "Структура":        _text(structure),
-        "Цена за ритуал":   _number(amount),
-        "Оплачено":         _number(paid),
-        "Результат":        _select("⏳ Не проверено"),
+        "Название":          _title(name),
+        "Дата":              _date(date),
+        "Тип":               _select(real_type),
+        "Расходники":        _text(consumables),
+        "Сумма подношений":  _number(offerings_sum),
+        "Время (мин)":       _number(duration_min),
+        "Подношения/Откуп":  _text(offerings),
+        "Силы":              _text(forces),
+        "Структура":         _text(structure),
+        "Цена за ритуал":    _number(amount),
+        "Оплачено":          _number(paid),
+        "Результат":         _select(real_result),
     }
     if client_id:
-        props["Клиенты"] = _relation(client_id)
+        props["👥 Клиенты"] = _relation(client_id)
     if user_notion_id:
         props["🪪 Пользователи"] = _relation(user_notion_id)
     if goal:
         mapped_goal = _RITUAL_GOAL_MAP.get(goal.lower(), goal)
-        props["Цель"] = _multi_select([mapped_goal])
+        real_goal = await match_select(db_id, "Цель", mapped_goal)
+        props["Цель"] = _select(real_goal)
     if place:
         mapped_place = _RITUAL_PLACE_MAP.get(place.lower(), place)
-        props["Место"] = _select(mapped_place)
+        real_place = await match_select(db_id, "Место", mapped_place)
+        props["Место"] = _select(real_place)
     if notes:
         props["Заметки"] = _text(notes)
     if payment_source:
         real_src = await match_select(db_id, "Источник оплаты", payment_source)
         props["Источник оплаты"] = _select(real_src)
-    if offerings_cost and offerings_cost > 0:
-        props["Сумма подношений"] = _number(offerings_cost)
     return await page_create(db_id, props)
 
 # ─── Arcana: Works ───────────────────────────────────────────────────────────
