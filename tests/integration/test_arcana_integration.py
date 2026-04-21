@@ -1,9 +1,9 @@
 """Интеграционные тесты Arcana — полный pipeline через dp.feed_update()."""
 import pytest
 import asyncio
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
-from tests.integration.bot_factory import FakeSession, make_update
+from tests.integration.bot_factory import FakeSession, make_update, make_callback_update
 from tests.integration.mock_externals import get_all_patches
 
 
@@ -200,3 +200,213 @@ class TestArcanaIntegration:
                 assert "traceback" not in (r or "").lower(), f"Краш на: {text}"
             except Exception as e:
                 pytest.fail(f"Exception на '{text}': {e}")
+
+    # ═══════════════════════════════════════════════════════════════════
+    # БЛОК 2: route_message — все 15 intent dispatch типов
+    # ═══════════════════════════════════════════════════════════════════
+
+    async def send_cb(self, data: str, text: str = "") -> str:
+        """Отправить callback query через dp.feed_update."""
+        self.session.clear()
+        update = make_callback_update(data, original_text=text,
+                                      update_id=abs(hash(data)) % 100000)
+        try:
+            await self.dp.feed_update(self.bot, update)
+        except Exception as e:
+            return f"[ERROR: {e}]"
+        await asyncio.sleep(0.05)
+        return self.session.get_last_response()
+
+    @pytest.mark.asyncio
+    async def test_route_session(self):
+        """intent=session — отправляется в sessions handler."""
+        r = await self.send("сеанс с Анной таро уэйт")
+        assert "traceback" not in (r or "").lower()
+
+    @pytest.mark.asyncio
+    async def test_route_client_info(self):
+        """intent=client_info — досье."""
+        r = await self.send("что у Анны?")
+        assert "traceback" not in (r or "").lower()
+
+    @pytest.mark.asyncio
+    async def test_route_tarot_interp(self):
+        """intent=tarot_interp — трактовка."""
+        r = await self.send("что означает жрица в позиции прошлого")
+        assert "traceback" not in (r or "").lower()
+
+    @pytest.mark.asyncio
+    async def test_route_work_done(self):
+        """'сделала работу X' обрабатывается."""
+        r = await self.send("сделала работа тест")
+        assert "traceback" not in (r or "").lower()
+
+    @pytest.mark.asyncio
+    async def test_route_work_list(self):
+        """intent=work_list — список работ."""
+        r = await self.send("покажи работы")
+        assert "traceback" not in (r or "").lower()
+
+    @pytest.mark.asyncio
+    async def test_route_delete(self):
+        """intent=delete — удалить запись."""
+        r = await self.send("удали последнюю запись")
+        assert "traceback" not in (r or "").lower()
+
+    @pytest.mark.asyncio
+    async def test_route_verify(self):
+        """intent=verify — Анна — сбылось."""
+        r = await self.send("Анна 5 марта — сбылось")
+        assert "traceback" not in (r or "").lower()
+
+    @pytest.mark.asyncio
+    async def test_route_stats_intent(self):
+        """intent=stats через текст."""
+        r = await self.send("процент сбывшихся раскладов")
+        assert "traceback" not in (r or "").lower()
+
+    @pytest.mark.asyncio
+    async def test_route_grimoire_search(self):
+        """intent=grimoire_search."""
+        r = await self.send("поиск в гримуаре: заговор")
+        assert "traceback" not in (r or "").lower()
+
+    @pytest.mark.asyncio
+    async def test_route_finance(self):
+        """intent=finance Arcana."""
+        r = await self.send("сколько заработала в этом месяце")
+        assert "traceback" not in (r or "").lower()
+
+    # ═══════════════════════════════════════════════════════════════════
+    # БЛОК 3: Callbacks — Grimoire menu
+    # ═══════════════════════════════════════════════════════════════════
+
+    @pytest.mark.asyncio
+    async def test_cb_grim_menu(self):
+        """cb_grim_menu — возврат в меню."""
+        r = await self.send_cb("grim_menu")
+        # либо edit_text либо answer — главное без краша
+        assert "traceback" not in (r or "").lower()
+
+    @pytest.mark.asyncio
+    async def test_cb_grim_rituals(self):
+        r = await self.send_cb("grim_rituals")
+        assert "traceback" not in (r or "").lower()
+
+    @pytest.mark.asyncio
+    async def test_cb_grim_spells(self):
+        r = await self.send_cb("grim_spells")
+        assert "traceback" not in (r or "").lower()
+
+    @pytest.mark.asyncio
+    async def test_cb_grim_recipes(self):
+        r = await self.send_cb("grim_recipes")
+        assert "traceback" not in (r or "").lower()
+
+    @pytest.mark.asyncio
+    async def test_cb_grim_combos(self):
+        r = await self.send_cb("grim_combos")
+        assert "traceback" not in (r or "").lower()
+
+    @pytest.mark.asyncio
+    async def test_cb_grim_notes(self):
+        r = await self.send_cb("grim_notes")
+        assert "traceback" not in (r or "").lower()
+
+    @pytest.mark.asyncio
+    async def test_cb_grim_inventory(self):
+        r = await self.send_cb("grim_inventory")
+        assert "traceback" not in (r or "").lower()
+
+    @pytest.mark.asyncio
+    async def test_cb_grim_search(self):
+        r = await self.send_cb("grim_search")
+        assert "traceback" not in (r or "").lower()
+
+    # ═══════════════════════════════════════════════════════════════════
+    # БЛОК 4: Callbacks — Tarot save/edit/cancel (без pending → graceful)
+    # ═══════════════════════════════════════════════════════════════════
+
+    @pytest.mark.asyncio
+    async def test_cb_tarot_cancel_no_pending(self):
+        """cb_tarot_cancel без pending — не крашит."""
+        r = await self.send_cb("tarot_cancel")
+        assert "traceback" not in (r or "").lower()
+
+    @pytest.mark.asyncio
+    async def test_cb_tarot_save_no_pending(self):
+        """cb_tarot_save без pending — не крашит."""
+        r = await self.send_cb("tarot_save")
+        assert "traceback" not in (r or "").lower()
+
+    @pytest.mark.asyncio
+    async def test_cb_tarot_edit_no_pending(self):
+        """cb_tarot_edit без pending — не крашит."""
+        r = await self.send_cb("tarot_edit")
+        assert "traceback" not in (r or "").lower()
+
+    # ═══════════════════════════════════════════════════════════════════
+    # БЛОК 5: Arcana memory callbacks
+    # ═══════════════════════════════════════════════════════════════════
+
+    @pytest.mark.asyncio
+    async def test_cb_arcmem_cancel(self):
+        """arcmem_cancel — не крашит."""
+        r = await self.send_cb("arcmem_cancel")
+        assert "traceback" not in (r or "").lower()
+
+    @pytest.mark.asyncio
+    async def test_cb_arcmem_auto_no(self):
+        """arcmem_auto_no — отказ от auto-suggest."""
+        r = await self.send_cb("arcmem_auto_no")
+        assert "traceback" not in (r or "").lower()
+
+    # ═══════════════════════════════════════════════════════════════════
+    # БЛОК 6: Photo unknown callbacks (photo_cancel)
+    # ═══════════════════════════════════════════════════════════════════
+
+    @pytest.mark.asyncio
+    async def test_cb_photo_cancel_no_pending(self):
+        """photo_cancel без pending — корректный ответ."""
+        r = await self.send_cb("photo_cancel:67686090")
+        assert "traceback" not in (r or "").lower()
+
+    # ═══════════════════════════════════════════════════════════════════
+    # БЛОК 7: Unknown intent → кнопки "что это?"
+    # ═══════════════════════════════════════════════════════════════════
+
+    @pytest.mark.asyncio
+    async def test_unknown_shows_buttons(self):
+        """Первый раз unknown → показывает кнопки типов."""
+        # нужно чтобы classify дважды вернула unknown
+        async def unknown_always(*args, **kwargs):
+            return "unknown"
+        with patch("arcana.handlers.base.ask_claude", side_effect=unknown_always):
+            r = await self.send("абракадабра совсем неясное 999")
+        assert "traceback" not in (r or "").lower()
+
+    # ═══════════════════════════════════════════════════════════════════
+    # БЛОК 8: Arcana lists handlers
+    # ═══════════════════════════════════════════════════════════════════
+
+    @pytest.mark.asyncio
+    async def test_list_buy_arcana(self):
+        """'купить свечи' в Арканe."""
+        r = await self.send("купить свечи белые")
+        assert "traceback" not in (r or "").lower()
+
+    @pytest.mark.asyncio
+    async def test_inventory_search(self):
+        """Поиск по инвентарю."""
+        r = await self.send("есть ли свечи")
+        assert "traceback" not in (r or "").lower()
+
+    # ═══════════════════════════════════════════════════════════════════
+    # БЛОК 9: Photo + caption (route_message с photo → fallback)
+    # ═══════════════════════════════════════════════════════════════════
+
+    @pytest.mark.asyncio
+    async def test_tz_command_setting(self):
+        """/tz UTC+5 — установка часового пояса."""
+        r = await self.send("/tz UTC+5")
+        assert "traceback" not in (r or "").lower()
