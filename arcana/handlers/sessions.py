@@ -231,10 +231,11 @@ def _format_prev_sessions(sessions: List[dict]) -> str:
 
 
 def _pending_keyboard(uid: int) -> InlineKeyboardMarkup:
+    from core.utils import cancel_button, secondary_button
     return InlineKeyboardMarkup(inline_keyboard=[[
-        InlineKeyboardButton(text="✅ Сохранить",   callback_data=f"tarot_save:{uid}"),
-        InlineKeyboardButton(text="✏️ Поправить",   callback_data=f"tarot_edit:{uid}"),
-        InlineKeyboardButton(text="❌ Отмена",       callback_data=f"tarot_cancel:{uid}"),
+        InlineKeyboardButton(text="✅ Сохранить", callback_data=f"tarot_save:{uid}"),
+        secondary_button("✏️ Поправить", f"tarot_edit:{uid}"),
+        cancel_button("❌ Отмена", f"tarot_cancel:{uid}"),
     ]])
 
 

@@ -46,9 +46,10 @@ VISION_CONTACT = (
 
 def _confirm_kb(uid: int) -> InlineKeyboardMarkup:
     """«Не найден. Создать?» — из client_info."""
+    from core.utils import cancel_button
     return InlineKeyboardMarkup(inline_keyboard=[[
         InlineKeyboardButton(text="➕ Создать", callback_data=f"client_create_from_search:{uid}"),
-        InlineKeyboardButton(text="❌ Нет",     callback_data=f"client_cancel:{uid}"),
+        cancel_button("❌ Нет", f"client_cancel:{uid}"),
     ]])
 
 

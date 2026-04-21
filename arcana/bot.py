@@ -138,10 +138,11 @@ def create_dp_and_bot():
         import time as _t
         # Сохраняем message_id фото для последующей обработки
         _photo_pending[uid] = (msg.message_id, user_notion_id, _t.time())
+        from core.utils import cancel_button
         kb = InlineKeyboardMarkup(inline_keyboard=[[
             InlineKeyboardButton(text="🃏 Расклад",          callback_data=f"photo_tarot:{uid}"),
             InlineKeyboardButton(text="👤 Контакт клиента",  callback_data=f"photo_client:{uid}"),
-            InlineKeyboardButton(text="❌ Отмена",            callback_data=f"photo_cancel:{uid}"),
+            cancel_button("❌ Отмена", f"photo_cancel:{uid}"),
         ]])
         await msg.reply("Что это за фото?", reply_markup=kb)
 
@@ -250,6 +251,22 @@ async def main():
     _install_notion_logging(bot_label="🌒 Arcana")
 
     dp, bot = create_dp_and_bot()
+
+    # ── Команды в меню Telegram ──────────────────────────────────────────────
+    from aiogram.types import BotCommand, MenuButtonCommands
+    try:
+        await bot.set_my_commands([
+            BotCommand(command="start",    description="🌒 Начало работы"),
+            BotCommand(command="help",     description="📖 Справка по командам"),
+            BotCommand(command="list",     description="🗒️ Списки расходников"),
+            BotCommand(command="finance",  description="💰 Финансы практики"),
+            BotCommand(command="stats",    description="📊 Статистика раскладов"),
+            BotCommand(command="grimoire", description="📖 Гримуар"),
+            BotCommand(command="tz",       description="🕐 Часовой пояс"),
+        ])
+        await bot.set_chat_menu_button(menu_button=MenuButtonCommands())
+    except Exception as e:
+        logger.warning("set_my_commands/menu failed: %s", e)
 
     # ── Ежемесячный cron-напоминалка ─────────────────────────────────────────
     try:
