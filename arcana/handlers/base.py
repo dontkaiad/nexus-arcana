@@ -108,12 +108,15 @@ async def _handle_tarot_correction(
 
     deck = pending.get("deck") or "Уэйта"
     card_names = [c.strip() for c in (pending.get("cards") or "").split(",") if c.strip()]
-    cards_context = get_cards_context(deck, card_names)
+    bottom_card = pending.get("bottom_card") or ""
+    ctx_cards = card_names + ([bottom_card] if bottom_card else [])
+    cards_context = get_cards_context(deck, ctx_cards)
 
     system = (
         "Ты — ассистент-таролог. Пользователь правит трактовку.\n"
         "Скорректируй трактовку согласно замечанию. Остальное оставь как было.\n"
         "Ответь ПОЛНОЙ исправленной трактовкой.\n"
+        "ФОРМАТИРОВАНИЕ: HTML-теги Telegram (<b>, <i>), НЕ markdown (никаких ** или *).\n"
     )
     if cards_context:
         system += f"\n--- СПРАВОЧНИК КАРТ ---\n{cards_context}"
@@ -123,7 +126,8 @@ async def _handle_tarot_correction(
         f"Предыдущая трактовка:\n{old_interp}\n\n"
         f"Замечание: {correction_text}\n\n"
         f"Карты: {pending.get('cards')}\n"
-        f"Вопрос: {pending.get('question')}\n"
+        + (f"Дно колоды: {bottom_card}\n" if bottom_card else "")
+        + f"Вопрос: {pending.get('question')}\n"
         f"Дай исправленную трактовку целиком."
     )
 
@@ -145,9 +149,10 @@ async def _handle_tarot_correction(
     await message.answer(
         f"✏️ <b>Исправленная трактовка:</b>\n\n{new_interp[:3500]}",
         reply_markup=kb,
+        parse_mode="HTML",
     )
     if len(new_interp) > 3500:
-        await message.answer(new_interp[3500:7000])
+        await message.answer(new_interp[3500:7000], parse_mode="HTML")
 
 
 @router.message()
