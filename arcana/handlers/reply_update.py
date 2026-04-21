@@ -18,7 +18,7 @@ from core.utils import react
 logger = logging.getLogger("arcana.reply_update")
 
 
-async def handle_reply_update(message: Message) -> bool:
+async def handle_reply_update(message: Message, user_notion_id: str = "") -> bool:
     """Если reply на сообщение бота — попытаться обновить Notion-запись.
 
     Возвращает True если reply был обработан (отвечаем пользователю),
@@ -46,7 +46,9 @@ async def handle_reply_update(message: Message) -> bool:
             return True
 
         db_id = get_db_id_for_type(page_type)
-        applied = await apply_updates(page_id, page_type, db_id, updates)
+        applied = await apply_updates(
+            page_id, page_type, db_id, updates, user_notion_id=user_notion_id
+        )
         summary = await format_applied(applied)
 
         await message.answer(f"✏️ Дополнено:\n{summary}")
