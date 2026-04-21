@@ -211,8 +211,8 @@ async def apply_updates(
                 logger.warning("client_find in reply failed: %s", e)
                 client = None
             if client:
-                props["Клиенты"] = _relation(client["id"])
-                applied["Клиенты"] = client_name
+                props["👥 Клиенты"] = _relation(client["id"])
+                applied["👥 Клиенты"] = client_name
                 if db_id:
                     real_type = await match_select(db_id, "Тип сеанса", "🤝 Клиентский")
                     props["Тип сеанса"] = _select(real_type)
