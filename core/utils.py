@@ -2,11 +2,46 @@
 from __future__ import annotations
 
 import logging
-from typing import Union
+from typing import Optional, Union
 
-from aiogram.types import CallbackQuery, Message, ReactionTypeEmoji
+from aiogram.types import (
+    CallbackQuery,
+    InlineKeyboardButton,
+    Message,
+    ReactionTypeEmoji,
+)
 
 logger = logging.getLogger("core.utils")
+
+
+# ── Styled inline buttons (Telegram Bot API 9.4) ─────────────────────────────
+
+def styled_button(
+    text: str, callback_data: str, style: Optional[str] = None
+) -> InlineKeyboardButton:
+    """Создать inline-кнопку с опциональным стилем.
+
+    style: "destructive" (красный), "secondary" (серый), None (дефолт).
+    Передаётся в pydantic модель через extra='allow' — уходит в запрос
+    как поле style. Если клиент Telegram/библиотека не поддерживают —
+    игнорируется (кнопка просто синяя).
+    """
+    kwargs: dict = {}
+    if style:
+        kwargs["style"] = style
+    return InlineKeyboardButton(text=text, callback_data=callback_data, **kwargs)
+
+
+def cancel_button(
+    text: str = "❌ Отмена", callback_data: str = "cancel"
+) -> InlineKeyboardButton:
+    """Красная кнопка отмены/удаления/отказа."""
+    return styled_button(text, callback_data, "destructive")
+
+
+def secondary_button(text: str, callback_data: str) -> InlineKeyboardButton:
+    """Серая кнопка второстепенного действия (правка, продолжить)."""
+    return styled_button(text, callback_data, "secondary")
 
 
 async def react(msg: Union[Message, CallbackQuery], emoji: str = "✅") -> None:

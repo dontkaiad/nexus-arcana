@@ -15,6 +15,7 @@ from core.claude_client import ask_claude
 from core.notion_client import tasks_active, log_error, page_create, _title, _select, _date, _status, update_page, db_query, get_notion
 from nexus.handlers.utils import react
 from core.layout import maybe_convert
+from core.utils import cancel_button, secondary_button
 
 logger = logging.getLogger("nexus.tasks")
 MOSCOW_TZ = timezone(timedelta(hours=3))
@@ -204,7 +205,7 @@ def _done_multi_kb(uid: int) -> InlineKeyboardMarkup:
         )])
     buttons.append([
         InlineKeyboardButton(text="✅ Готово", callback_data="done_multi_confirm"),
-        InlineKeyboardButton(text="❌ Отмена", callback_data="done_multi_cancel"),
+        cancel_button("❌ Отмена", "done_multi_cancel"),
     ])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
@@ -322,7 +323,7 @@ async def restore_reminders_on_startup() -> None:
                             logger.warning("restore pass2: failed to set In progress for '%s': %s", title, e)
                         kb = InlineKeyboardMarkup(inline_keyboard=[[
                             InlineKeyboardButton(text="✅ Сделано!", callback_data=f"task_complete_{task_id}"),
-                            InlineKeyboardButton(text="❌ Не сделал", callback_data=f"task_failed_{task_id}"),
+                            cancel_button("❌ Не сделал", f"task_failed_{task_id}"),
                         ]])
                         try:
                             await _bot.send_message(
@@ -348,7 +349,7 @@ async def restore_reminders_on_startup() -> None:
 
                         kb = InlineKeyboardMarkup(inline_keyboard=[[
                             InlineKeyboardButton(text="✅ Сделано!", callback_data=f"task_complete_{task_id}"),
-                            InlineKeyboardButton(text="❌ Не сделал", callback_data=f"task_failed_{task_id}"),
+                            cancel_button("❌ Не сделал", f"task_failed_{task_id}"),
                         ]])
                         # Read interval for display
                         repeat_time_raw_pre = "".join(
@@ -448,7 +449,7 @@ async def _schedule_reminder(chat_id: int, title: str, reminder_dt: str, task_id
                 logger.warning("send_reminder: failed to set In progress: %s", e)
             kb = InlineKeyboardMarkup(inline_keyboard=[[
                 InlineKeyboardButton(text="✅ Сделано!", callback_data=f"task_complete_{task_id}"),
-                InlineKeyboardButton(text="❌ Не сделал", callback_data=f"task_failed_{task_id}"),
+                cancel_button("❌ Не сделал", f"task_failed_{task_id}"),
             ]])
             await _bot.send_message(
                 chat_id,
@@ -1123,7 +1124,7 @@ async def handle_task_parsed(message: Message, data: dict) -> None:
                         InlineKeyboardButton(text="📅 +3 дня", callback_data="task_deadline_plus3"),
                         InlineKeyboardButton(text="🚫 Без дедлайна", callback_data="task_save"),
                     ], [
-                        InlineKeyboardButton(text="❌ Отмена", callback_data="task_cancel"),
+                        cancel_button("❌ Отмена", "task_cancel"),
                     ]])
                 )
                 data["msg_id"] = msg.message_id
@@ -1160,7 +1161,7 @@ async def handle_task_parsed(message: Message, data: dict) -> None:
                 f"<b>⏰ В какое время напомнить?</b>\n"
                 f"Примеры: <code>в 10:00</code>, <code>в 18:30</code>, <code>через 2 часа</code>",
                 reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
-                    InlineKeyboardButton(text="❌ Отмена", callback_data="task_cancel"),
+                    cancel_button("❌ Отмена", "task_cancel"),
                 ]])
             )
             data["msg_id"] = msg_obj.message_id
@@ -1185,7 +1186,7 @@ async def handle_task_parsed(message: Message, data: dict) -> None:
                 InlineKeyboardButton(text="📅 +3 дня", callback_data="task_deadline_plus3"),
                 InlineKeyboardButton(text="🚫 Без дедлайна", callback_data="task_save"),
             ], [
-                InlineKeyboardButton(text="❌ Отмена", callback_data="task_cancel"),
+                cancel_button("❌ Отмена", "task_cancel"),
             ]])
         )
         data["msg_id"] = msg.message_id
@@ -1203,7 +1204,7 @@ async def handle_task_parsed(message: Message, data: dict) -> None:
                 f"<b>⏰ В какое время напомнить?</b>\n"
                 f"Примеры: <code>в 10:00</code>, <code>в 18:30</code>, <code>через 2 часа</code>",
                 reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
-                    InlineKeyboardButton(text="❌ Отмена", callback_data="task_cancel"),
+                    cancel_button("❌ Отмена", "task_cancel"),
                 ]])
             )
             data["msg_id"] = msg_obj.message_id
@@ -1222,7 +1223,7 @@ async def handle_task_parsed(message: Message, data: dict) -> None:
                 InlineKeyboardButton(text="📅 +3 дня", callback_data="task_deadline_plus3"),
                 InlineKeyboardButton(text="🚫 Без дедлайна", callback_data="task_save"),
             ], [
-                InlineKeyboardButton(text="❌ Отмена", callback_data="task_cancel"),
+                cancel_button("❌ Отмена", "task_cancel"),
             ]])
         )
         data["msg_id"] = msg.message_id
@@ -1245,7 +1246,7 @@ async def handle_task_parsed(message: Message, data: dict) -> None:
         f"<i>Или нажми «Сохранить» как есть</i>",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
             InlineKeyboardButton(text="✅ Сохранить", callback_data="task_save"),
-            InlineKeyboardButton(text="❌ Отмена", callback_data="task_cancel"),
+            cancel_button("❌ Отмена", "task_cancel"),
         ]])
     )
 
@@ -1272,13 +1273,13 @@ async def _show_task_confirm(message: Message, pending: dict, uid: int) -> None:
             InlineKeyboardButton(text="🏠 Нет, для себя", callback_data="task_personal"),
         ], [
             InlineKeyboardButton(text="✅ Сохранить", callback_data="task_save"),
-            InlineKeyboardButton(text="❌ Отмена", callback_data="task_cancel"),
+            cancel_button("❌ Отмена", "task_cancel"),
         ]])
     else:
         text_content += "<i>Всё верно?</i>"
         kb = InlineKeyboardMarkup(inline_keyboard=[[
             InlineKeyboardButton(text="✅ Сохранить", callback_data="task_save"),
-            InlineKeyboardButton(text="❌ Отмена", callback_data="task_cancel"),
+            cancel_button("❌ Отмена", "task_cancel"),
         ]])
 
     msg_id = pending.get("msg_id")
@@ -1417,7 +1418,7 @@ async def _handle_task_refinement(message: Message, text: str, pending: dict, ui
         if parsed.get("not_refinement") and not force:
             # Не уточнение — спросить пользователя
             kb = InlineKeyboardMarkup(inline_keyboard=[[
-                InlineKeyboardButton(text="✏️ Уточнение", callback_data="task_refine_yes"),
+                secondary_button("✏️ Уточнение", "task_refine_yes"),
                 InlineKeyboardButton(text="💬 Новое сообщение", callback_data="task_refine_no"),
             ]])
             await message.answer(
@@ -1567,7 +1568,7 @@ async def task_deadline_choice(call: CallbackQuery) -> None:
             f"Примеры: <code>завтра в 10:00</code>, <code>в 15:00</code>, <code>через 2 часа</code>",
             reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
                 InlineKeyboardButton(text="🚫 Без напоминания", callback_data="task_save"),
-                InlineKeyboardButton(text="❌ Отмена", callback_data="task_cancel"),
+                cancel_button("❌ Отмена", "task_cancel"),
             ]])
         )
         d["msg_id"] = msg.message_id

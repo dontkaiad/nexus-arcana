@@ -68,32 +68,38 @@ async def cmd_start(message: Message) -> None:
 @router.message(Command("help"))
 async def cmd_help(message: Message, user_notion_id: str = "") -> None:
     await message.answer(
-        "<b>🌒 Arcana — Команды</b>\n\n"
+        "🌒 <b>Arcana</b> — цифровой гримуар\n\n"
 
-        "👥 <b>КЛИЕНТЫ</b>\n"
-        "«клиент Анна, кельтский крест, 3000р» — новый клиент + сеанс\n"
-        "«что у Анны?» — история клиента\n"
-        "«сколько должны?» — долги клиентов\n\n"
+        "<b>Клиенты:</b>\n"
+        "• «клиент Анна» — создать/найти\n"
+        "• «что у Анны?» — досье\n"
+        "• «сколько мне должны?» — долги\n\n"
 
-        "🃏 <b>РАСКЛАДЫ</b>\n"
-        "Фото расклада → распознаю карты + трактовка\n"
-        "«расклад кельтский крест для Анны» — текстом\n\n"
+        "<b>Расклады:</b>\n"
+        "• «триплет, уэйт — шут, маг, жрица»\n"
+        "• Фото расклада → трактовка\n"
+        "• ✏️ Поправить → дополнить текстом\n\n"
 
-        "🕯️ <b>РИТУАЛЫ</b>\n"
-        "«ритуал защиты, свечи, ладан, 40 мин» — записать\n\n"
+        "<b>Ритуалы:</b>\n"
+        "• «ритуал: очищение, дома, свечи»\n\n"
 
-        "🗒️ <b>СПИСКИ</b>\n"
-        "<code>/list</code> — расходники + чеклисты\n"
-        "<code>/list buy</code> — покупки\n"
-        "<code>/list inv</code> — инвентарь\n"
-        "«купить ладан, свечи» — добавить в покупки\n"
-        "«есть красные свечи?» — поиск в инвентаре\n\n"
+        "<b>Работы:</b>\n"
+        "• «работа: расклад для Анны»\n\n"
 
-        "⚙️ <b>ПРОЧЕЕ</b>\n"
-        "<code>/tz UTC+3</code> — часовой пояс\n"
-        "«удали последний сеанс» — удаление\n\n"
+        "<b>Поиск:</b>\n"
+        "• «что падало на Вадима»\n"
+        "• «расклады про отношения»\n\n"
 
-        "Для задач, финансов и бюджета → ☀️ @nexus_kailark_bot",
+        "<b>Ещё:</b>\n"
+        "/list — расходники\n"
+        "/finance — аналитика\n"
+        "/stats — точность\n"
+        "/grimoire — гримуар\n"
+        "/tz UTC+3 — часовой пояс\n\n"
+
+        "↩️ Реплай на любой ответ = дополнить\n\n"
+
+        "Задачи/финансы/заметки → ☀️ @nexus_kailark_bot",
         parse_mode="HTML",
     )
 
@@ -176,10 +182,11 @@ async def _handle_tarot_correction(
     pending["awaiting_edit"] = False
     await save_pending(uid, pending)
 
+    from core.utils import cancel_button, secondary_button
     kb = InlineKeyboardMarkup(inline_keyboard=[[
-        InlineKeyboardButton(text="✅ Сохранить",      callback_data=f"tarot_save:{uid}"),
-        InlineKeyboardButton(text="✏️ Поправить ещё",  callback_data=f"tarot_edit:{uid}"),
-        InlineKeyboardButton(text="❌ Отмена",          callback_data=f"tarot_cancel:{uid}"),
+        InlineKeyboardButton(text="✅ Сохранить", callback_data=f"tarot_save:{uid}"),
+        secondary_button("✏️ Поправить ещё", f"tarot_edit:{uid}"),
+        cancel_button("❌ Отмена", f"tarot_cancel:{uid}"),
     ]])
     await message.answer(
         f"✏️ <b>Исправленная трактовка:</b>\n\n{new_interp[:3500]}",
