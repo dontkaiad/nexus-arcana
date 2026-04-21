@@ -238,7 +238,7 @@ async def handle_works_list(message: Message, user_notion_id: str = "") -> None:
             cat_val = (props.get("Категория") or {}).get("select", {})
             cat_str = f" · {cat_val.get('name')}" if cat_val and cat_val.get("name") else ""
 
-            rel = (props.get("Клиенты") or {}).get("relation", [])
+            rel = (props.get("👥 Клиенты") or {}).get("relation", [])
             client_str = ""
             if rel:
                 client_str = " · 👤 …"
