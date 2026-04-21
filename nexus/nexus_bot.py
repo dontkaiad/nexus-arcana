@@ -88,51 +88,47 @@ async def cmd_start(msg: Message, user_notion_id: str = "") -> None:
 @dp.message(Command("help"))
 async def cmd_help(msg: Message, user_notion_id: str = "") -> None:
     await msg.answer(
-        "ГАЙД ☀️ <b>NEXUS</b>\n"
-        "Понимаю текст, голосовые 🎤 и фото 📸 — команды учить не нужно.\n\n"
+        "☀️ <b>Nexus</b> — помощник на каждый день\n"
+        "Пойму текст, голосовое 🎤 или скрин из банка 📸.\n\n"
 
-        "📋 <b>ЗАДАЧИ</b>\n"
-        "/tasks — задачи на сегодня + все остальные\n"
-        "/today — экспресс: сегодня + бюджет + совет\n"
+        "<b>Задачи:</b>\n"
+        "• «купить корм коту»\n"
+        "• «напомни завтра в 10 созвон»\n"
+        "• «напоминай пить воду каждый день в 9:00»\n"
+        "• /tasks — все задачи, /today — день в одном экране\n\n"
+
+        "<b>Финансы:</b>\n"
+        "• «450р такси», «доход 50000»\n"
+        "• 📸 скрин из банка → автопарсинг\n"
+        "• /finance — сводка за месяц\n\n"
+
+        "<b>Бюджет:</b>\n"
+        "• «лимит привычки 15к», «закрыла долг Вике»\n"
+        "• /budget — бюджет + кнопка «Изменить»\n\n"
+
+        "<b>Списки:</b>\n"
+        "• «купить молоко, яйца» → покупки\n"
+        "• «дома есть парацетамол 2 пачки» → инвентарь\n"
+        "• «разбей задачу X на подзадачи» → чеклист\n"
+        "• /list — покупки + чеклисты + инвентарь\n\n"
+
+        "<b>Заметки и память:</b>\n"
+        "• «запиши: идея для проекта»\n"
+        "• «запомни: монстры = привычки»\n"
+        "• /notes · /memory · /adhd\n\n"
+
+        "<b>Ещё:</b>\n"
+        "/today — мой день\n"
         "/stats — статистика + стрики 🔥\n"
-        "Текстом: «купить корм коту», «напомни завтра в 10»\n"
-        "Повторы: «напоминай пить воду каждый день в 9:00»\n\n"
+        "/tz UTC+3 — часовой пояс\n"
+        "/fixstreak — восстановить стрик\n\n"
 
-        "💸 <b>ФИНАНСЫ</b>\n"
-        "/finance — расходы за сегодня + сводка за месяц\n"
-        "Текстом: «450р такси», «доход 50000»\n"
-        "📸 Фото: скрин из банка → автопарсинг\n\n"
+        "↩️ Реплай на любой ответ = дополнить\n\n"
 
-        "💰 <b>БЮДЖЕТ</b>\n"
-        "/budget — бюджет + кнопка «Изменить данные»\n"
-        "Текстом: «лимит привычки 15к», «закрыла долг Вике»\n\n"
+        "Таро/ритуалы/клиенты → <a href=\"https://t.me/arcana_kailark_bot\">🌒 Arcana</a>\n\n"
 
-        "🗒️ <b>СПИСКИ</b>\n"
-        "/list — покупки + чеклисты + инвентарь\n"
-        "Текстом: «купить молоко, яйца» → добавить\n"
-        "«дома есть: парацетамол 2 пачки» → инвентарь\n"
-        "«есть ибупрофен?» → поиск\n"
-        "«разбей задачу X на подзадачи» → чеклист\n\n"
-
-        "✍️ <b>ЗАМЕТКИ</b>\n"
-        "/notes — все заметки с тегами\n"
-        "Текстом: «запиши: идея для проекта»\n\n"
-
-        "🧠 <b>ПАМЯТЬ</b> И 🦋 <b>СДВГ</b>\n"
-        "/memory — что я помню о тебе\n"
-        "/adhd — СДВГ-профиль\n"
-        "Текстом: «запомни: монстры = привычки»\n\n"
-
-        "🔮 <b>ЭЗОТЕРИКА И ПРАКТИКА</b>\n"
-        'Всё про таро, ритуалы, клиентов, расходники → <a href="https://t.me/arcana_kailark_bot">🌒 Аркана</a>\n\n'
-
-        "⚙️ <b>ПРОЧЕЕ</b>\n"
-        "/start — приветствие\n"
-        "/help — этот гайд\n"
-        "/fixstreak — восстановить стрик из истории задач\n\n"
-
-        '👩‍💻 Создатель: <a href="https://github.com/dontkaiad">Кай Ларк</a>\n'
-        '❓ Ошибки/вопросы? <a href="https://t.me/hey_lark">@hey_lark</a>',
+        '👩‍💻 <a href="https://github.com/dontkaiad">Кай Ларк</a> · '
+        '<a href="https://t.me/hey_lark">@hey_lark</a>',
         parse_mode="HTML",
         disable_web_page_preview=True,
     )
@@ -1166,15 +1162,16 @@ async def _handle_receipt_clarify(msg: Message, user_notion_id: str = "") -> boo
 
 def _receipt_confirm_kb(is_bank: bool) -> InlineKeyboardMarkup:
     """Кнопки подтверждения. Банк → сразу Да/Нет, бумажный → Карта/Наличные/Нет."""
+    from core.utils import cancel_button
     if is_bank:
         return InlineKeyboardMarkup(inline_keyboard=[[
             InlineKeyboardButton(text="✅ Записать", callback_data="receipt_card"),
-            InlineKeyboardButton(text="Нет", callback_data="receipt_cancel"),
+            cancel_button("Нет", "receipt_cancel"),
         ]])
     return InlineKeyboardMarkup(inline_keyboard=[[
         InlineKeyboardButton(text="💳 Карта", callback_data="receipt_card"),
         InlineKeyboardButton(text="💵 Наличные", callback_data="receipt_cash"),
-        InlineKeyboardButton(text="Нет", callback_data="receipt_cancel"),
+        cancel_button("Нет", "receipt_cancel"),
     ]])
 
 
@@ -1510,21 +1507,26 @@ async def handle_unauthorized(msg: Message) -> None:
 async def main() -> None:
     logger.info("Nexus bot starting...")
     from nexus.handlers.tasks import init_scheduler
-    from aiogram.types import BotCommand
+    from aiogram.types import BotCommand, MenuButtonCommands
 
     await bot.set_my_commands([
-        BotCommand(command="start", description="Приветствие"),
-        BotCommand(command="help", description="Справка"),
-        BotCommand(command="tasks", description="Задачи"),
-        BotCommand(command="today", description="Задачи на сегодня"),
-        BotCommand(command="stats", description="Статистика + стрики"),
-        BotCommand(command="finance", description="Финансы (сегодня + месяц)"),
-        BotCommand(command="budget", description="Бюджетный план"),
-        BotCommand(command="list", description="Списки (покупки, чеклисты, инвентарь)"),
-        BotCommand(command="notes", description="Заметки"),
-        BotCommand(command="memory", description="Память"),
-        BotCommand(command="adhd", description="СДВГ-профиль"),
+        BotCommand(command="start",   description="☀️ Начало работы"),
+        BotCommand(command="help",    description="📖 Справка"),
+        BotCommand(command="today",   description="🌅 Мой день"),
+        BotCommand(command="tasks",   description="✅ Задачи"),
+        BotCommand(command="finance", description="💰 Финансы"),
+        BotCommand(command="budget",  description="📊 Бюджет"),
+        BotCommand(command="list",    description="🗒️ Списки"),
+        BotCommand(command="stats",   description="🏆 Статистика"),
+        BotCommand(command="memory",  description="🧠 Память"),
+        BotCommand(command="notes",   description="💡 Заметки"),
+        BotCommand(command="adhd",    description="🦋 СДВГ-профиль"),
+        BotCommand(command="tz",      description="🕐 Часовой пояс"),
     ])
+    try:
+        await bot.set_chat_menu_button(menu_button=MenuButtonCommands())
+    except Exception as e:
+        logger.warning("set_chat_menu_button failed: %s", e)
 
     init_scheduler(bot)
     from nexus.handlers.tasks import restore_reminders_on_startup

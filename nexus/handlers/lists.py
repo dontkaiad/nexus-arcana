@@ -923,7 +923,8 @@ async def handle_list_subtask(msg: Message, data: dict, user_notion_id: str = ""
             text=f"📋 {short}",
             callback_data=f"subtask_pick_{t['id'][:28]}",
         )])
-    buttons.append([InlineKeyboardButton(text="❌ Отмена", callback_data="subtask_cancel")])
+    from core.utils import cancel_button
+    buttons.append([cancel_button("❌ Отмена", "subtask_cancel")])
     kb = InlineKeyboardMarkup(inline_keyboard=buttons)
     # Сохраняем все задачи для lookup по id-prefix
     pending_set(uid, {
