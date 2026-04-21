@@ -330,7 +330,7 @@ async def main():
     # deck_styles.json
     try:
         import json
-        styles_path = os.path.join(_ROOT, "arcana", "deck_styles.json")
+        styles_path = os.path.join(_ROOT, "arcana", "tarot_refs", "deck_styles.json")
         with open(styles_path) as f:
             styles = json.load(f)
         log_pass("deck_styles.json", f"{len(styles)} колод")
