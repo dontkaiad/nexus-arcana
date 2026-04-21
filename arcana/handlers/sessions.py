@@ -59,6 +59,20 @@ PAYMENT_SOURCE_MAP = {
     "бартер":    "🔄 Бартер",
 }
 
+DECK_MAP = {
+    "уэйт":         "Уэйт",
+    "dark wood":    "Dark Wood",
+    "дарк вуд":     "Dark Wood",
+    "дарквуд":      "Dark Wood",
+    "ленорман":     "Ленорман",
+    "игральн":      "Игральные",
+    "deviant moon": "Deviant Moon",
+    "девиант мун":  "Deviant Moon",
+}
+
+AREA_VALUES = {"Отношения", "Финансы", "Работа", "Здоровье", "Род", "Общая ситуация"}
+AREA_DEFAULT = "Общая ситуация"
+
 
 def _match_spread(text: str) -> str:
     if not text:
@@ -72,6 +86,28 @@ def _match_spread(text: str) -> str:
     return text.strip()
 
 
+def _match_deck(text: str) -> str:
+    """Нормализует название колоды: 'Уэйта'/'уэйту' → 'Уэйт' и т.п."""
+    if not text:
+        return ""
+    low = text.strip().lower()
+    for key, value in DECK_MAP.items():
+        if low.startswith(key) or key in low:
+            return value
+    return text.strip()
+
+
+def _normalize_area(text: str) -> str:
+    """Нормализует область к одному из AREA_VALUES. Дефолт — 'Общая ситуация'."""
+    if not text:
+        return AREA_DEFAULT
+    low = text.strip().lower()
+    for value in AREA_VALUES:
+        if low == value.lower() or value.lower() in low or low in value.lower():
+            return value
+    return AREA_DEFAULT
+
+
 def _now_iso(tz: timezone) -> str:
     return datetime.now(tz).isoformat()
 
@@ -83,13 +119,27 @@ PARSE_SESSION_SYSTEM = (
     '{"client_name": "имя или null", "spread_type": "тип расклада", '
     '"question": "тема/вопрос", "cards": "карты через запятую или null", '
     '"bottom_card": "карта или null", '
-    '"area": "Отношения|Финансы|Работа|Здоровье|Род|Общая ситуация или null", '
-    '"deck": "Уэйта|Dark Wood Tarot|Ленорман|Игральные|Deviant Moon или null", '
+    '"area": "Отношения|Финансы|Работа|Здоровье|Род|Общая ситуация", '
+    '"deck": "Уэйт|Dark Wood|Ленорман|Игральные|Deviant Moon или null", '
     '"amount": число, "paid": число, '
     '"payment_source": "карта|наличные|бартер или null"}\n\n'
+    "ОБЯЗАТЕЛЬНО: поле area — одно из: "
+    "Отношения, Финансы, Работа, Здоровье, Род, Общая ситуация. "
+    "Если из текста не понятно — ставь 'Общая ситуация'. НЕ оставляй null.\n"
+    "Колода (deck): используй канонические названия БЕЗ склонений — "
+    "'Уэйт' (не 'Уэйта'/'Уэйту'), 'Dark Wood', 'Ленорман', 'Игральные', 'Deviant Moon'.\n"
     "Если в тексте есть упоминание 'дно', 'дно колоды', 'bottom' — "
     "выдели эту карту отдельно в поле bottom_card. Это НЕ позиция расклада, "
     "а фоновая карта, её нельзя включать в cards."
+)
+
+CORRECTION_PARSE_SYSTEM = (
+    "Пользователь правит данные сеанса таро. Извлеки ТОЛЬКО то, что явно меняется. "
+    "Ответь ТОЛЬКО JSON без markdown:\n"
+    '{"client_name": "новое имя или null", '
+    '"question": "новый вопрос или null", '
+    '"area": "Отношения|Финансы|Работа|Здоровье|Род|Общая ситуация или null"}\n'
+    "Если поле не упоминается в правке — ставь null. Только изменения."
 )
 
 TAROT_SYSTEM = (
@@ -115,9 +165,10 @@ TAROT_SYSTEM = (
 VISION_SYSTEM = (
     "Ты анализируешь фото расклада карт таро. "
     "Определи все карты, тип расклада и колоду. Ответь ТОЛЬКО JSON без markdown:\n"
-    '{"spread_type": "тип или Другой", "deck": "Уэйта|Dark Wood Tarot|Ленорман|Игральные|Deviant Moon", '
+    '{"spread_type": "тип или Другой", "deck": "Уэйт|Dark Wood|Ленорман|Игральные|Deviant Moon", '
     '"cards": [{"position": "позиция", "card": "название"}], '
     '"bottom_card": "название карты дна колоды или null"}\n\n'
+    "Колода — каноническое название без склонений.\n"
     "Если на фото видна карта снизу колоды (дно) отдельно от расклада — "
     "выдели её в bottom_card, а не в cards."
 )
@@ -187,9 +238,14 @@ async def _send_reading(message: Message, state: dict) -> None:
     bottom_line = (
         f"\n🂠 <b>Дно:</b> {html.escape(bottom_card)}\n" if bottom_card else ""
     )
+    hint_line = (
+        "\n💡 Заведи себя как клиента чтобы группировать личные расклады\n"
+        if is_personal and state.get("self_client_missing")
+        else ""
+    )
     body = (
         f"{header}\n📍 <b>Карты:</b>\n{card_lines}"
-        f"{bottom_line}"
+        f"{bottom_line}{hint_line}"
         f"\n📝 <b>Трактовка:</b>\n{interpretation[:3500]}"
     )
     await message.answer(
@@ -219,16 +275,31 @@ async def handle_add_session(
 
         client_name = data.get("client_name") or None
         client_id: Optional[str] = None
+        self_client_missing = False
         if client_name:
             client = await client_find(client_name, user_notion_id=user_notion_id)
             if client:
                 client_id = client["id"]
+        else:
+            # Личный расклад — привязать к клиенту-владельцу (если он заведён)
+            from core.user_manager import get_user
+            owner = await get_user(tg_id)
+            owner_name = (owner or {}).get("name") or ""
+            if owner_name:
+                self_client = await client_find(owner_name, user_notion_id=user_notion_id)
+                if self_client:
+                    client_id = self_client["id"]
+                else:
+                    self_client_missing = True
+            else:
+                self_client_missing = True
 
-        deck = data.get("deck") or "Уэйта"
+        deck = _match_deck(data.get("deck") or "") or "Уэйт"
         cards_text = data.get("cards") or ""
         card_names: List[str] = [c.strip() for c in cards_text.split(",") if c.strip()]
         bottom_card = (data.get("bottom_card") or "").strip()
-        question = data.get("question") or data.get("area") or "общий вопрос"
+        area = _normalize_area(data.get("area") or "")
+        question = data.get("question") or area
 
         # 2. Справочник — нужные карты + дно (если есть)
         from arcana.tarot_loader import get_cards_context
@@ -290,7 +361,7 @@ async def handle_add_session(
             "cards":          cards_text,
             "bottom_card":    bottom_card or None,
             "deck":           deck,
-            "area":           data.get("area") or None,
+            "area":           area,
             "interpretation": interpretation,
             "amount":         float(data.get("amount") or 0),
             "paid":           float(data.get("paid") or 0),
@@ -298,6 +369,7 @@ async def handle_add_session(
             "user_notion_id": user_notion_id,
             "tz_offset":      tz_offset,
             "awaiting_edit":  False,
+            "self_client_missing": self_client_missing,
         }
         await save_pending(tg_id, pending_state)
         await _send_reading(message, pending_state)
@@ -358,9 +430,14 @@ async def cb_tarot_save(call: CallbackQuery) -> None:
         bottom_card = state.get("bottom_card") or None
         notes = f"Дно: {bottom_card}" if bottom_card else None
 
+        area = _normalize_area(state.get("area") or "")
+        deck = _match_deck(state.get("deck") or "") or None
+        title = f"{client_name or 'Личный'} • {area}"
+
         await session_add(
             date=_now_iso(tz),
             spread_type=spread,
+            title=title,
             question=state.get("question") or "",
             cards=state.get("cards") or "",
             interpretation=state.get("interpretation") or "",
@@ -369,8 +446,8 @@ async def cb_tarot_save(call: CallbackQuery) -> None:
             session_type="Личный" if is_personal else "Клиентский",
             client_id=state.get("client_id") or None,
             user_notion_id=user_notion_id,
-            area=state.get("area") or None,
-            deck=state.get("deck") or None,
+            area=area,
+            deck=deck,
             payment_source=payment_source,
             notes=notes,
         )
@@ -448,7 +525,7 @@ async def handle_tarot_photo(message: Message, user_notion_id: str = "") -> None
 
         cards = vision_data.get("cards") or []
         spread_type = vision_data.get("spread_type") or "Другой"
-        deck = vision_data.get("deck") or "Уэйта"
+        deck = _match_deck(vision_data.get("deck") or "") or "Уэйт"
         bottom_card = (vision_data.get("bottom_card") or "").strip()
 
         if not cards:
@@ -483,16 +560,31 @@ async def handle_tarot_photo(message: Message, user_notion_id: str = "") -> None
         tg_id = message.from_user.id
         tz_offset = await get_user_tz(tg_id)
 
+        # Личный расклад с фото — привязать к клиенту-владельцу (если он заведён)
+        self_client_id: Optional[str] = None
+        self_client_missing = False
+        from core.user_manager import get_user
+        owner = await get_user(tg_id)
+        owner_name = (owner or {}).get("name") or ""
+        if owner_name:
+            self_client = await client_find(owner_name, user_notion_id=user_notion_id)
+            if self_client:
+                self_client_id = self_client["id"]
+            else:
+                self_client_missing = True
+        else:
+            self_client_missing = True
+
         from arcana.pending_tarot import save_pending
         pending_state = {
             "client_name":    None,
-            "client_id":      None,
+            "client_id":      self_client_id,
             "spread_type":    spread_type,
             "question":       question,
             "cards":          cards_text,
             "bottom_card":    bottom_card or None,
             "deck":           deck,
-            "area":           None,
+            "area":           AREA_DEFAULT,
             "interpretation": interpretation,
             "amount":         0.0,
             "paid":           0.0,
@@ -501,6 +593,7 @@ async def handle_tarot_photo(message: Message, user_notion_id: str = "") -> None
             "tz_offset":      tz_offset,
             "awaiting_edit":  False,
             "from_photo":     True,
+            "self_client_missing": self_client_missing,
         }
         await save_pending(tg_id, pending_state)
         await _send_reading(message, pending_state)

@@ -902,11 +902,12 @@ async def session_add(
     deck: Optional[str] = None,
     payment_source: Optional[str] = None,
     notes: Optional[str] = None,
+    title: Optional[str] = None,
 ) -> Optional[str]:
     from core.config import config
     db_id = config.arcana.db_sessions
     props = {
-        "Тема":       _title(question or spread_type or "Сеанс"),
+        "Тема":       _title(title or question or spread_type or "Сеанс"),
         "Дата":       _date(date[:10]),
         "Тип сеанса": _select("🌟 Личный" if session_type == "Личный" else "🤝 Клиентский"),
         "Сумма":      _number(amount),
@@ -923,9 +924,11 @@ async def session_add(
     if user_notion_id:
         props["🪪 Пользователи"] = _relation(user_notion_id)
     if area:
-        props["Область"] = _select(area)
+        real_area = await match_select(db_id, "Область", area)
+        props["Область"] = _select(real_area)
     if deck:
-        props["Колоды"] = _multi_select([deck])
+        real_deck = await match_select(db_id, "Колоды", deck)
+        props["Колоды"] = _multi_select([real_deck])
     if payment_source:
         real_src = await match_select(db_id, "Источник", payment_source)
         props["Источник"] = _select(real_src)
