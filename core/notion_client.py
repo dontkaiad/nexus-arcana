@@ -718,7 +718,7 @@ async def client_find(name: str, user_notion_id: str = "") -> Optional[dict]:
 
 async def sessions_by_client(client_id: str, user_notion_id: str = "") -> List[dict]:
     from core.config import config
-    base_filter = {"property": "Клиенты", "relation": {"contains": client_id}}
+    base_filter = {"property": "👥 Клиенты", "relation": {"contains": client_id}}
     filters = _with_user_filter(base_filter, user_notion_id)
     return await query_pages(
         config.arcana.db_sessions,
@@ -746,7 +746,7 @@ async def sessions_search(
 
 async def rituals_by_client(client_id: str, user_notion_id: str = "") -> List[dict]:
     from core.config import config
-    base_filter = {"property": "Клиенты", "relation": {"contains": client_id}}
+    base_filter = {"property": "👥 Клиенты", "relation": {"contains": client_id}}
     filters = _with_user_filter(base_filter, user_notion_id)
     return await query_pages(
         config.arcana.db_rituals,
@@ -939,7 +939,7 @@ async def session_add(
     if interpretation:
         props["Трактовка"] = _text(interpretation[:2000])
     if client_id:
-        props["Клиенты"] = _relation(client_id)
+        props["👥 Клиенты"] = _relation(client_id)
     if user_notion_id:
         props["🪪 Пользователи"] = _relation(user_notion_id)
     if area:
@@ -1076,7 +1076,7 @@ async def work_add(
     if date:
         props["Дедлайн"] = _date(date)
     if client_id:
-        props["Клиенты"] = _relation(client_id)
+        props["👥 Клиенты"] = _relation(client_id)
     if user_notion_id:
         props["🪪 Пользователи"] = _relation(user_notion_id)
     return await page_create(db_id, props)
