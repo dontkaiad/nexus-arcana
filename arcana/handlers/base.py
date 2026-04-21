@@ -197,6 +197,18 @@ async def route_message(message: Message, user_notion_id: str = "", _text: str =
         # Начальная реакция «вижу сообщение»
         await react(message, "👀")
 
+        # ── Reply на сообщение бота = дополнение записи ──────────────────
+        if (
+            message.reply_to_message
+            and message.reply_to_message.from_user
+            and message.reply_to_message.from_user.is_bot
+            and (message.text or message.caption)
+        ):
+            from arcana.handlers.reply_update import handle_reply_update
+            handled = await handle_reply_update(message)
+            if handled:
+                return
+
         if message.photo and not _text:
             from arcana.handlers.sessions import handle_tarot_photo
             await handle_tarot_photo(message, user_notion_id)
