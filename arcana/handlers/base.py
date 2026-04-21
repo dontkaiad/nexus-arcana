@@ -7,8 +7,10 @@ import traceback as tb
 from aiogram import Router
 from aiogram.filters import CommandStart, Command
 from aiogram.types import Message, CallbackQuery
+from arcana.handlers.reactions import reaction_for
 from core.claude_client import ask_claude
 from core.notion_client import log_error
+from core.utils import react
 
 router = Router()
 logger = logging.getLogger("arcana.base")
@@ -190,16 +192,23 @@ async def _handle_tarot_correction(
 
 @router.message()
 async def route_message(message: Message, user_notion_id: str = "", _text: str = "") -> None:
+    _final_emoji = "⚡"
     try:
+        # Начальная реакция «вижу сообщение»
+        await react(message, "👀")
+
         if message.photo and not _text:
             from arcana.handlers.sessions import handle_tarot_photo
             await handle_tarot_photo(message, user_notion_id)
+            _final_emoji = "🔮"
+            await react(message, _final_emoji)
             return
 
         from core.layout import maybe_convert
         text = _text or maybe_convert((message.text or message.caption or "").strip())
         if not text:
             await message.answer("Отправь текст или фото расклада.")
+            await react(message, "🤔")
             return
 
         # reply-контекст
@@ -215,11 +224,13 @@ async def route_message(message: Message, user_notion_id: str = "", _text: str =
         if pending_client and pending_client.get("step") == "collecting":
             from arcana.handlers.clients import _handle_collecting
             await _handle_collecting(message, text, pending_client, user_notion_id)
+            await react(message, reaction_for("new_client"))
             return
 
         # ── Pending: поиск в гримуаре ────────────────────────────────────
         from arcana.handlers.grimoire import check_pending_search
         if await check_pending_search(message, text):
+            await react(message, reaction_for("grimoire_search"))
             return
 
         # ── Pending: правка трактовки ─────────────────────────────────────
@@ -227,6 +238,7 @@ async def route_message(message: Message, user_notion_id: str = "", _text: str =
         pending = await get_pending(uid)
         if pending and pending.get("awaiting_edit"):
             await _handle_tarot_correction(message, text, pending, user_notion_id)
+            await react(message, reaction_for("session"))
             return
 
         # ── Флоу переспроса ──────────────────────────────────────────────────
@@ -280,8 +292,10 @@ async def route_message(message: Message, user_notion_id: str = "", _text: str =
         handler = dispatch.get(intent)
         if handler:
             await handler()
+            _final_emoji = reaction_for(intent)
         elif intent == "nexus":
             await message.answer("☀️ Это для бота Nexus — перешли туда: @nexus_kailark_bot")
+            _final_emoji = reaction_for("nexus")
         elif intent in ("unknown", "") or not intent:
             # Первый раз не поняла — показать кнопки
             import time as _time
@@ -302,10 +316,14 @@ async def route_message(message: Message, user_notion_id: str = "", _text: str =
                 f"🤔 Не поняла «<b>{short}</b>»\nЧто сделать?",
                 reply_markup=kb,
             )
+            _final_emoji = reaction_for("unknown")
         else:
             logged = await log_error(text, "parse_error", bot_label="🌒 Arcana", error_code="–")
             notion_status = "записано в ⚠️Ошибки" if logged else "лог недоступен"
             await message.answer(f"❌ Не так ответил Claude · пусть Кай правит промпт · {notion_status}")
+            _final_emoji = reaction_for("parse_error")
+
+        await react(message, _final_emoji)
 
     except Exception as e:
         trace = tb.format_exc()
@@ -327,6 +345,7 @@ async def route_message(message: Message, user_notion_id: str = "", _text: str =
         )
         notion_status = "записано в ⚠️Ошибки" if logged else "лог недоступен"
         await message.answer(f"❌ {suffix} · {notion_status}")
+        await react(message, reaction_for("error"))
 
 
 _UNKNOWN_TTL = 300  # 5 min
