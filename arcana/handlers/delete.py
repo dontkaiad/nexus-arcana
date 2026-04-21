@@ -60,8 +60,9 @@ async def handle_delete(message: Message, text: str) -> None:
     uid = message.from_user.id
     _pending[uid] = [p["id"] for p in pages]
 
+    from core.utils import cancel_button
     kb = InlineKeyboardMarkup(inline_keyboard=[[
-        InlineKeyboardButton(text=f"🗑 Да, удалить ({len(pages)})", callback_data="del_confirm_arcana"),
+        cancel_button(f"🗑 Да, удалить ({len(pages)})", "del_confirm_arcana"),
         InlineKeyboardButton(text="❌ Отмена", callback_data="del_cancel_arcana"),
     ]])
 
