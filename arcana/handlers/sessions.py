@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import base64
+import html
 import json
 import logging
 import traceback as tb
@@ -81,10 +82,14 @@ PARSE_SESSION_SYSTEM = (
     "Извлеки данные о сеансе таро. Ответь ТОЛЬКО JSON без markdown:\n"
     '{"client_name": "имя или null", "spread_type": "тип расклада", '
     '"question": "тема/вопрос", "cards": "карты через запятую или null", '
+    '"bottom_card": "карта или null", '
     '"area": "Отношения|Финансы|Работа|Здоровье|Род|Общая ситуация или null", '
     '"deck": "Уэйта|Dark Wood Tarot|Ленорман|Игральные|Deviant Moon или null", '
     '"amount": число, "paid": число, '
-    '"payment_source": "карта|наличные|бартер или null"}'
+    '"payment_source": "карта|наличные|бартер или null"}\n\n'
+    "Если в тексте есть упоминание 'дно', 'дно колоды', 'bottom' — "
+    "выдели эту карту отдельно в поле bottom_card. Это НЕ позиция расклада, "
+    "а фоновая карта, её нельзя включать в cards."
 )
 
 TAROT_SYSTEM = (
@@ -93,16 +98,28 @@ TAROT_SYSTEM = (
     "1. Значения карт — СТРОГО из справочника (ниже). Не придумывай своё.\n"
     "2. Каждая карта: Позиция → Название → значение В ЭТОЙ ПОЗИЦИИ применительно к вопросу (1-2 предложения).\n"
     "3. Если есть предыдущие расклады клиента — свяжи с ними: что изменилось, что подтвердилось, куда движется ситуация.\n"
-    "4. Краткий вывод: 2-3 предложения, практическая суть.\n"
+    "4. Краткий вывод: 2-3 предложения, практическая суть. Учитывай дно колоды при формулировке общего вывода.\n"
     "5. БЕЗ поэзии, метафор, воды. Факты и структура.\n"
     "6. Привязывай значения к вопросу клиента.\n"
+    "7. Если есть дно колоды (bottom_card) — после трактовки всех позиций добавь отдельный блок:\n"
+    "   <b>🂠 Дно колоды → {карта} ({положение}):</b>\n"
+    "   Скрытый фон расклада. Эта карта показывает неочевидный подтекст ситуации, "
+    "то что влияет на всё но не на поверхности.\n"
+    "   [трактовка в контексте всего расклада]\n\n"
+    "ФОРМАТИРОВАНИЕ: используй HTML-теги Telegram, НЕ markdown:\n"
+    "- жирный: <b>текст</b> (НЕ **текст**)\n"
+    "- курсив: <i>текст</i> (НЕ *текст*)\n"
+    "- разрешены только <b>, <i>, <u>, <s>, <code>, <pre>. Никаких других тегов.\n"
 )
 
 VISION_SYSTEM = (
     "Ты анализируешь фото расклада карт таро. "
     "Определи все карты, тип расклада и колоду. Ответь ТОЛЬКО JSON без markdown:\n"
     '{"spread_type": "тип или Другой", "deck": "Уэйта|Dark Wood Tarot|Ленорман|Игральные|Deviant Moon", '
-    '"cards": [{"position": "позиция", "card": "название"}]}'
+    '"cards": [{"position": "позиция", "card": "название"}], '
+    '"bottom_card": "название карты дна колоды или null"}\n\n'
+    "Если на фото видна карта снизу колоды (дно) отдельно от расклада — "
+    "выдели её в bottom_card, а не в cards."
 )
 
 
@@ -151,24 +168,35 @@ async def _send_reading(message: Message, state: dict) -> None:
     uid = message.from_user.id
     client_name = state.get("client_name") or ""
     is_personal = not client_name
-    deck = state.get("deck") or "Уэйта"
-    spread = state.get("spread_type") or "Расклад"
-    question = state.get("question") or ""
+    deck = html.escape(state.get("deck") or "Уэйта")
+    spread = html.escape(state.get("spread_type") or "Расклад")
+    question = html.escape(state.get("question") or "")
     cards_text = state.get("cards") or ""
+    bottom_card = state.get("bottom_card") or ""
     interpretation = state.get("interpretation") or ""
+    client_name_safe = html.escape(client_name)
 
     card_lines = "".join(
-        f"  • {c.strip()}\n" for c in cards_text.split(",") if c.strip()
+        f"  • {html.escape(c.strip())}\n" for c in cards_text.split(",") if c.strip()
     )
     header = (
         f"🃏 <b>{spread}</b> · {deck}\n"
-        f"{'🔮 Личный' if is_personal else '👤 ' + client_name}"
+        f"{'🔮 Личный' if is_personal else '👤 ' + client_name_safe}"
         + (f" · {question}" if question else "") + "\n"
     )
-    body = f"{header}\n📍 <b>Карты:</b>\n{card_lines}\n📝 <b>Трактовка:</b>\n{interpretation[:3500]}"
-    await message.answer(body, reply_markup=_pending_keyboard(uid))
+    bottom_line = (
+        f"\n🂠 <b>Дно:</b> {html.escape(bottom_card)}\n" if bottom_card else ""
+    )
+    body = (
+        f"{header}\n📍 <b>Карты:</b>\n{card_lines}"
+        f"{bottom_line}"
+        f"\n📝 <b>Трактовка:</b>\n{interpretation[:3500]}"
+    )
+    await message.answer(
+        body, reply_markup=_pending_keyboard(uid), parse_mode="HTML"
+    )
     if len(interpretation) > 3500:
-        await message.answer(interpretation[3500:7000])
+        await message.answer(interpretation[3500:7000], parse_mode="HTML")
 
 
 # ────────────────────────── Основной обработчик ────────────────────────────
@@ -199,11 +227,13 @@ async def handle_add_session(
         deck = data.get("deck") or "Уэйта"
         cards_text = data.get("cards") or ""
         card_names: List[str] = [c.strip() for c in cards_text.split(",") if c.strip()]
+        bottom_card = (data.get("bottom_card") or "").strip()
         question = data.get("question") or data.get("area") or "общий вопрос"
 
-        # 2. Справочник — только нужные карты
+        # 2. Справочник — нужные карты + дно (если есть)
         from arcana.tarot_loader import get_cards_context
-        cards_context = get_cards_context(deck, card_names)
+        ctx_cards = card_names + ([bottom_card] if bottom_card else [])
+        cards_context = get_cards_context(deck, ctx_cards)
 
         # 3. Память
         memory_context = ""
@@ -236,8 +266,15 @@ async def handle_add_session(
             if prev_context:
                 system += f"\n\n--- ПРЕДЫДУЩИЕ РАСКЛАДЫ КЛИЕНТА ---\n{prev_context}"
 
+            user_prompt = (
+                f"Расклад: {data.get('spread_type') or ''}\n"
+                f"Вопрос: {question}\n"
+                f"Карты: {cards_text}"
+            )
+            if bottom_card:
+                user_prompt += f"\nДно колоды: {bottom_card}"
             interpretation = await ask_claude(
-                f"Расклад: {data.get('spread_type') or ''}\nВопрос: {question}\nКарты: {cards_text}",
+                user_prompt,
                 system=system,
                 model="claude-sonnet-4-20250514",
                 max_tokens=2000,
@@ -251,6 +288,7 @@ async def handle_add_session(
             "spread_type":    data.get("spread_type") or "",
             "question":       question,
             "cards":          cards_text,
+            "bottom_card":    bottom_card or None,
             "deck":           deck,
             "area":           data.get("area") or None,
             "interpretation": interpretation,
@@ -317,6 +355,9 @@ async def cb_tarot_save(call: CallbackQuery) -> None:
         client_name = state.get("client_name") or None
         is_personal = not client_name
 
+        bottom_card = state.get("bottom_card") or None
+        notes = f"Дно: {bottom_card}" if bottom_card else None
+
         await session_add(
             date=_now_iso(tz),
             spread_type=spread,
@@ -331,6 +372,7 @@ async def cb_tarot_save(call: CallbackQuery) -> None:
             area=state.get("area") or None,
             deck=state.get("deck") or None,
             payment_source=payment_source,
+            notes=notes,
         )
 
         if amount > 0:
@@ -407,6 +449,7 @@ async def handle_tarot_photo(message: Message, user_notion_id: str = "") -> None
         cards = vision_data.get("cards") or []
         spread_type = vision_data.get("spread_type") or "Другой"
         deck = vision_data.get("deck") or "Уэйта"
+        bottom_card = (vision_data.get("bottom_card") or "").strip()
 
         if not cards:
             await message.answer("⚠️ Карты не определены. Опиши текстом.")
@@ -420,14 +463,18 @@ async def handle_tarot_photo(message: Message, user_notion_id: str = "") -> None
 
         # Загрузить справочник
         from arcana.tarot_loader import get_cards_context
-        cards_context = get_cards_context(deck, card_names)
+        ctx_cards = card_names + ([bottom_card] if bottom_card else [])
+        cards_context = get_cards_context(deck, ctx_cards)
 
         system = TAROT_SYSTEM
         if cards_context:
             system += f"\n\n--- СПРАВОЧНИК КАРТ ---\n{cards_context}"
 
+        user_prompt = f"Расклад: {spread_type}\nВопрос: {question}\nКарты: {cards_text}"
+        if bottom_card:
+            user_prompt += f"\nДно колоды: {bottom_card}"
         interpretation = await ask_claude(
-            f"Расклад: {spread_type}\nВопрос: {question}\nКарты: {cards_text}",
+            user_prompt,
             system=system,
             model="claude-sonnet-4-20250514",
             max_tokens=2000,
@@ -443,6 +490,7 @@ async def handle_tarot_photo(message: Message, user_notion_id: str = "") -> None
             "spread_type":    spread_type,
             "question":       question,
             "cards":          cards_text,
+            "bottom_card":    bottom_card or None,
             "deck":           deck,
             "area":           None,
             "interpretation": interpretation,
@@ -472,6 +520,8 @@ async def handle_tarot_interpret(message: Message, text: str) -> None:
         model="claude-sonnet-4-20250514",
         max_tokens=2000,
     )
-    await message.answer(f"🔮 <b>Трактовка:</b>\n\n{interpretation[:4000]}")
+    await message.answer(
+        f"🔮 <b>Трактовка:</b>\n\n{interpretation[:4000]}", parse_mode="HTML"
+    )
     if len(interpretation) > 4000:
-        await message.answer(interpretation[4000:8000])
+        await message.answer(interpretation[4000:8000], parse_mode="HTML")
