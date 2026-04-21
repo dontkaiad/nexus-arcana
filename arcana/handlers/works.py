@@ -104,18 +104,19 @@ async def handle_add_work(message: Message, text: str, user_notion_id: str = "")
             await message.answer("⚠️ Ошибка записи в Notion.")
             return
 
-        deadline_display = ""
+        priority_emoji = _PRIORITY_EMOJI.get(priority, "⚪")
+        meta_bits = [x for x in (category, f"{priority_emoji} {priority}") if x]
+        meta = " · ".join(meta_bits)
+        lines = [
+            "⚡ Работа создана!",
+            f"📌 {title}",
+        ]
+        if meta:
+            lines.append(meta)
         if deadline_raw:
-            deadline_display = f"\n📅 {deadline_raw}"
-
-        cat_display = f" · {category}" if category else ""
-        await message.answer(
-            f"✅ Работа записана\n"
-            f"🔮 {title}"
-            f"{deadline_display}\n"
-            f"🏷️ {work_type}{cat_display}"
-            f"{chr(10) + '👤 ' + client_name if client_name else ''}"
-        )
+            lines.append(f"📅 Дедлайн: {deadline_raw}")
+        lines.append(f"👥 {work_type}" + (f" · {client_name}" if client_name else ""))
+        await message.answer("\n".join(lines))
 
     except Exception as e:
         trace = tb.format_exc()
@@ -173,7 +174,7 @@ async def handle_work_done(message: Message, text: str, user_notion_id: str = ""
         title = _extract_text(best["properties"].get("Работа", {}))
         ok = await work_done(page_id)
         if ok:
-            await message.answer(f"✅ Работа выполнена: {title}")
+            await message.answer(f"🔥 Работа выполнена!\n📌 {title}")
         else:
             await message.answer("⚠️ Ошибка обновления в Notion.")
 
