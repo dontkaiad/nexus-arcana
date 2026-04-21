@@ -901,6 +901,7 @@ async def session_add(
     area: Optional[str] = None,
     deck: Optional[str] = None,
     payment_source: Optional[str] = None,
+    notes: Optional[str] = None,
 ) -> Optional[str]:
     from core.config import config
     db_id = config.arcana.db_sessions
@@ -928,6 +929,8 @@ async def session_add(
     if payment_source:
         real_src = await match_select(db_id, "Источник", payment_source)
         props["Источник"] = _select(real_src)
+    if notes:
+        props["Заметки"] = _text(notes)
     return await page_create(db_id, props)
 
 
