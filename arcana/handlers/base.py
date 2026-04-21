@@ -23,7 +23,8 @@ ROUTER_SYSTEM = """Сначала исправь опечатки, потом о
 Типы:
 new_client   — явное создание клиента: «создай», «добавь клиента», «новый клиент»
 client_info  — поиск/просмотр клиента: просто «клиент Имя», «что у Ани», «покажи клиента»
-session      — сеанс, расклад, таро
+session_search — поиск прошлых раскладов: «что падало на X», «расклады на X», «расклады про X», «покажи расклад про»
+session      — новый сеанс/расклад/таро (с картами или описанием вопроса)
 ritual       — ритуал
 debt         — долги клиентов
 tarot_interp — трактовка таро
@@ -248,7 +249,7 @@ async def route_message(message: Message, user_notion_id: str = "", _text: str =
         logger.info("intent=%s | %s", intent, text[:60])
 
         from arcana.handlers.clients import handle_add_client, handle_client_info, handle_debts
-        from arcana.handlers.sessions import handle_add_session, handle_tarot_interpret
+        from arcana.handlers.sessions import handle_add_session, handle_session_search, handle_tarot_interpret
         from arcana.handlers.rituals import handle_add_ritual
         from arcana.handlers.delete import handle_delete
         from arcana.handlers.works import handle_add_work, handle_work_done, handle_works_list
@@ -258,7 +259,8 @@ async def route_message(message: Message, user_notion_id: str = "", _text: str =
 
         dispatch = {
             "new_client":   lambda: handle_add_client(message, text, user_notion_id),
-            "session":      lambda: handle_add_session(message, text, user_notion_id),
+            "session":        lambda: handle_add_session(message, text, user_notion_id),
+            "session_search": lambda: handle_session_search(message, text, user_notion_id),
             "ritual":       lambda: handle_add_ritual(message, text, user_notion_id),
             "client_info":  lambda: handle_client_info(message, text, user_notion_id),
             "debt":         lambda: handle_debts(message, user_notion_id),

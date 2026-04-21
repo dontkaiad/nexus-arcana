@@ -726,6 +726,24 @@ async def sessions_by_client(client_id: str, user_notion_id: str = "") -> List[d
         page_size=50,
     )
 
+
+async def sessions_search(
+    keywords: List[str], user_notion_id: str = "", limit: int = 10
+) -> List[dict]:
+    """Поиск раскладов по ключевым словам в Теме."""
+    from core.config import config
+    words = [k.strip() for k in (keywords or []) if k and k.strip()]
+    if not words:
+        return []
+    sub_filters = [{"property": "Тема", "title": {"contains": w}} for w in words]
+    base_filter = sub_filters[0] if len(sub_filters) == 1 else {"or": sub_filters}
+    filters = _with_user_filter(base_filter, user_notion_id)
+    return await query_pages(
+        config.arcana.db_sessions,
+        filters=filters,
+        page_size=max(1, min(limit, 100)),
+    )
+
 async def rituals_by_client(client_id: str, user_notion_id: str = "") -> List[dict]:
     from core.config import config
     base_filter = {"property": "Клиенты", "relation": {"contains": client_id}}
@@ -901,7 +919,6 @@ async def session_add(
     area: Optional[str] = None,
     deck: Optional[str] = None,
     payment_source: Optional[str] = None,
-    notes: Optional[str] = None,
     title: Optional[str] = None,
 ) -> Optional[str]:
     from core.config import config
@@ -925,15 +942,13 @@ async def session_add(
         props["🪪 Пользователи"] = _relation(user_notion_id)
     if area:
         real_area = await match_select(db_id, "Область", area)
-        props["Область"] = _select(real_area)
+        props["Область"] = _multi_select([real_area])
     if deck:
         real_deck = await match_select(db_id, "Колоды", deck)
         props["Колоды"] = _multi_select([real_deck])
     if payment_source:
         real_src = await match_select(db_id, "Источник", payment_source)
         props["Источник"] = _select(real_src)
-    if notes:
-        props["Заметки"] = _text(notes)
     return await page_create(db_id, props)
 
 
