@@ -100,13 +100,45 @@ async def _handle_tarot_correction(
 ) -> None:
     """Юзер правит трактовку — Claude корректирует по справочнику."""
     uid = message.from_user.id
-    from arcana.handlers.sessions import TAROT_SYSTEM
+    from arcana.handlers.sessions import (
+        CORRECTION_PARSE_SYSTEM,
+        TAROT_SYSTEM,
+        _normalize_area,
+        _parse_json_safe,
+    )
     from arcana.pending_tarot import save_pending
     from arcana.tarot_loader import get_cards_context
     from core.claude_client import ask_claude
+    from core.notion_client import client_find
     from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
-    deck = pending.get("deck") or "Уэйта"
+    # ── Извлечь обновления полей (имя/вопрос/область) из правки ───────
+    try:
+        upd_raw = await ask_claude(
+            correction_text, system=CORRECTION_PARSE_SYSTEM, max_tokens=200
+        )
+        upd = _parse_json_safe(upd_raw) or {}
+    except Exception:
+        upd = {}
+
+    new_client_name = (upd.get("client_name") or "").strip() or None
+    new_question = (upd.get("question") or "").strip() or None
+    new_area = (upd.get("area") or "").strip() or None
+
+    if new_client_name:
+        pending["client_name"] = new_client_name
+        pending["self_client_missing"] = False
+        try:
+            c = await client_find(new_client_name, user_notion_id=user_notion_id)
+            pending["client_id"] = c["id"] if c else None
+        except Exception:
+            pending["client_id"] = None
+    if new_question:
+        pending["question"] = new_question
+    if new_area:
+        pending["area"] = _normalize_area(new_area)
+
+    deck = pending.get("deck") or "Уэйт"
     card_names = [c.strip() for c in (pending.get("cards") or "").split(",") if c.strip()]
     bottom_card = pending.get("bottom_card") or ""
     ctx_cards = card_names + ([bottom_card] if bottom_card else [])
