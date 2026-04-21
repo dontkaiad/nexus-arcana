@@ -102,14 +102,26 @@ async def handle_add_ritual(message: Message, text: str, user_notion_id: str = "
             )
 
         debt = max(0, amount - paid)
-        await message.answer(
-            f"✅ Ритуал записан\n"
-            f"🕯️ <b>{data.get('name', 'Ритуал')}</b>\n"
-            f"{'👤 ' + client_name if client_name else '🔮 Личный'}\n"
-            f"⏱ {data.get('duration_min') or '?'} мин · 🌿 расходники {data.get('consumables_cost') or 0}₽\n"
-            f"{'💰 ' + str(int(amount)) + '₽' if amount else ''}"
-            f"{'  ⚠️ долг ' + str(int(debt)) + '₽' if debt > 0 else ''}"
-        )
+        from core.notion_client import _RITUAL_GOAL_MAP, _RITUAL_PLACE_MAP
+        goal_display = _RITUAL_GOAL_MAP.get((goal or "").lower(), goal or "")
+        place_display = _RITUAL_PLACE_MAP.get((place or "").lower(), place or "")
+        goal_place_parts = [x for x in (goal_display, place_display) if x]
+        goal_place = " · ".join(goal_place_parts)
+
+        lines = [
+            "🕯️ Ритуал записан!",
+            f"📌 {data.get('name', 'Ритуал')}",
+        ]
+        if goal_place:
+            lines.append(goal_place)
+        lines.append(f"📅 {today}")
+        lines.append(f"👥 {'Клиентский · ' + client_name if client_name else 'Личный'}")
+        if amount:
+            money = f"💰 {int(amount)}₽"
+            if debt > 0:
+                money += f" · ⚠️ долг {int(debt)}₽"
+            lines.append(money)
+        await message.answer("\n".join(lines), parse_mode="HTML")
 
     except Exception as e:
         trace = tb.format_exc()
