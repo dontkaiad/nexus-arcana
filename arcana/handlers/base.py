@@ -205,14 +205,14 @@ async def route_message(message: Message, user_notion_id: str = "", _text: str =
             and (message.text or message.caption)
         ):
             from arcana.handlers.reply_update import handle_reply_update
-            handled = await handle_reply_update(message)
+            handled = await handle_reply_update(message, user_notion_id=user_notion_id)
             if handled:
                 return
 
         if message.photo and not _text:
             from arcana.handlers.sessions import handle_tarot_photo
             await handle_tarot_photo(message, user_notion_id)
-            _final_emoji = "🔮"
+            _final_emoji = reaction_for("session")
             await react(message, _final_emoji)
             return
 
