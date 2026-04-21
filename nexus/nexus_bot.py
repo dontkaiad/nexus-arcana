@@ -751,6 +751,15 @@ async def process_text(msg: Message, text: str, user_notion_id: str = "") -> Non
         logger.error("spell correction error: %s", e)
 
     if msg.reply_to_message and msg.reply_to_message.text:
+        # Если это reply на сообщение бота — попробуем обновить Notion-запись
+        if (
+            msg.reply_to_message.from_user
+            and msg.reply_to_message.from_user.is_bot
+        ):
+            from nexus.handlers.reply_update import handle_reply_update
+            if await handle_reply_update(msg):
+                return
+
         prev = maybe_convert(msg.reply_to_message.text.strip())
         text = f"[контекст: {prev[:100]}]\n{text}"
 
@@ -1347,12 +1356,24 @@ async def on_arcana_choice(query: CallbackQuery, user_notion_id: str = "") -> No
         result = await task_add(title=text, category="💳 Прочее", priority="Важно",
                                 user_notion_id=user_notion_id)
         if result:
-            msg_text = f"✓ <b>{text}</b>\n🟡 Важно · 💳 Прочее"
+            msg_text = f"✓ <b>{text}</b>\n🟡 Важно · 💳 Прочее\n\n<i>↩️ Реплай чтобы дополнить</i>"
         else:
             msg_text = "❌ Ошибка при создании задачи"
+            result = None
 
-    await query.message.edit_text(msg_text)
+    edited = await query.message.edit_text(msg_text, parse_mode="HTML")
     await query.answer("✅ Выбор принят")
+
+    if choice != "yes" and result:
+        from core.message_pages import save_message_page
+        target = edited if hasattr(edited, "message_id") else query.message
+        await save_message_page(
+            chat_id=target.chat.id,
+            message_id=target.message_id,
+            page_id=result,
+            page_type="task",
+            bot="nexus",
+        )
 
 
 @dp.callback_query(lambda c: c.data and c.data.startswith("fin_type_"))
@@ -1448,7 +1469,19 @@ async def on_unknown_clarify(query: CallbackQuery, user_notion_id: str = "") -> 
         result = await task_add(title=original_text, category="💳 Прочее", priority="Важно",
                                 user_notion_id=notion_id)
         if result:
-            await query.message.edit_text(f"📋 <b>{original_text}</b>\n🟡 Важно · 💳 Прочее")
+            edited = await query.message.edit_text(
+                f"📋 <b>{original_text}</b>\n🟡 Важно · 💳 Прочее\n\n<i>↩️ Реплай чтобы дополнить</i>",
+                parse_mode="HTML",
+            )
+            from core.message_pages import save_message_page
+            target = edited if hasattr(edited, "message_id") else query.message
+            await save_message_page(
+                chat_id=target.chat.id,
+                message_id=target.message_id,
+                page_id=result,
+                page_type="task",
+                bot="nexus",
+            )
         else:
             await query.message.edit_text("❌ Ошибка при создании задачи")
         await query.answer("📋 Задача создана" if result else "❌ Ошибка")
