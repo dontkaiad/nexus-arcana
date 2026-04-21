@@ -757,7 +757,7 @@ async def process_text(msg: Message, text: str, user_notion_id: str = "") -> Non
             and msg.reply_to_message.from_user.is_bot
         ):
             from nexus.handlers.reply_update import handle_reply_update
-            if await handle_reply_update(msg):
+            if await handle_reply_update(msg, user_notion_id=user_notion_id):
                 return
 
         prev = maybe_convert(msg.reply_to_message.text.strip())
