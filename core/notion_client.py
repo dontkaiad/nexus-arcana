@@ -923,10 +923,12 @@ async def session_add(
 ) -> Optional[str]:
     from core.config import config
     db_id = config.arcana.db_sessions
+    real_sbylos = await match_select(db_id, "Сбылось", "⏳ Не проверено")
     props = {
         "Тема":       _title(title or question or spread_type or "Сеанс"),
         "Дата":       _date(date[:10]),
         "Тип сеанса": _select("🌟 Личный" if session_type == "Личный" else "🤝 Клиентский"),
+        "Сбылось":    _select(real_sbylos),
         "Сумма":      _number(amount),
         "Оплачено":   _number(paid),
     }
