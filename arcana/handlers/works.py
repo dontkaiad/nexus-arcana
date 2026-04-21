@@ -116,7 +116,17 @@ async def handle_add_work(message: Message, text: str, user_notion_id: str = "")
         if deadline_raw:
             lines.append(f"📅 Дедлайн: {deadline_raw}")
         lines.append(f"👥 {work_type}" + (f" · {client_name}" if client_name else ""))
-        await message.answer("\n".join(lines))
+        lines.append("\n<i>↩️ Реплай чтобы дополнить</i>")
+        bot_msg = await message.answer("\n".join(lines), parse_mode="HTML")
+
+        from core.message_pages import save_message_page
+        await save_message_page(
+            chat_id=bot_msg.chat.id,
+            message_id=bot_msg.message_id,
+            page_id=result,
+            page_type="work",
+            bot="arcana",
+        )
 
     except Exception as e:
         trace = tb.format_exc()
