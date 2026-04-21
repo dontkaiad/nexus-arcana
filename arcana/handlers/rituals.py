@@ -121,7 +121,17 @@ async def handle_add_ritual(message: Message, text: str, user_notion_id: str = "
             if debt > 0:
                 money += f" · ⚠️ долг {int(debt)}₽"
             lines.append(money)
-        await message.answer("\n".join(lines), parse_mode="HTML")
+        lines.append("\n<i>↩️ Реплай чтобы дополнить</i>")
+        bot_msg = await message.answer("\n".join(lines), parse_mode="HTML")
+
+        from core.message_pages import save_message_page
+        await save_message_page(
+            chat_id=bot_msg.chat.id,
+            message_id=bot_msg.message_id,
+            page_id=result,
+            page_type="ritual",
+            bot="arcana",
+        )
 
     except Exception as e:
         trace = tb.format_exc()

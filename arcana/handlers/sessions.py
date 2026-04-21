@@ -464,7 +464,7 @@ async def cb_tarot_save(call: CallbackQuery) -> None:
                 + f"\n\n🂠 Дно: {bottom_card}"
             )
 
-        await session_add(
+        session_page_id = await session_add(
             date=_now_iso(tz),
             spread_type=spread,
             title=question,
@@ -500,8 +500,19 @@ async def cb_tarot_save(call: CallbackQuery) -> None:
         debt = max(0, amount - paid)
         ok_text = "✅ Расклад сохранён в Notion" + (
             f"\n⚠️ Долг: {int(debt)}₽" if debt > 0 else ""
-        )
-        await call.message.edit_text(ok_text)
+        ) + "\n\n<i>↩️ Реплай чтобы дополнить</i>"
+        saved_msg = await call.message.edit_text(ok_text, parse_mode="HTML")
+
+        if session_page_id:
+            from core.message_pages import save_message_page
+            target = saved_msg if hasattr(saved_msg, "message_id") else call.message
+            await save_message_page(
+                chat_id=target.chat.id,
+                message_id=target.message_id,
+                page_id=session_page_id,
+                page_type="session",
+                bot="arcana",
+            )
 
     except Exception as e:
         trace = tb.format_exc()
