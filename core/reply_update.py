@@ -14,6 +14,7 @@ from core.claude_client import ask_claude
 from core.notion_client import (
     _multi_select,
     _number,
+    _relation,
     _select,
     _text,
     match_select,
@@ -40,9 +41,15 @@ _RITUAL_REPLY_SYSTEM = (
 _SESSION_REPLY_SYSTEM = (
     "Ты парсишь дополнение к уже записанному раскладу таро. Извлеки ТОЛЬКО то, "
     "что явно упомянуто. Ответь JSON без markdown:\n"
-    '{"question": "новый/уточнённый вопрос или null", '
+    '{"client_name": "имя клиента если расклад привязывают к нему или null", '
+    '"question": "новый/уточнённый вопрос или null", '
     '"area": "Отношения|Финансы|Работа|Здоровье|Род|Общая ситуация или null", '
-    '"notes": "заметки или null"}\n'
+    '"notes": "заметки или null"}\n\n'
+    "Примеры client_name:\n"
+    "- 'это для Маши' → client_name: 'Маша'\n"
+    "- 'расклад Вадиму' → client_name: 'Вадим'\n"
+    "- 'привязать к Ане' → client_name: 'Аня'\n"
+    "- 'сделал личный' → client_name: null (это не имя)\n\n"
     "Если поле не упоминается — null."
 )
 
@@ -178,6 +185,7 @@ async def apply_updates(
     page_type: str,
     db_id: Optional[str],
     updates: Dict[str, Any],
+    user_notion_id: str = "",
 ) -> Dict[str, Any]:
     """Сформировать Notion props и отправить update_page.
 
@@ -191,6 +199,29 @@ async def apply_updates(
     props: Dict[str, Any] = {}
     applied: Dict[str, Any] = {}
     append_tasks: list = []  # [(notion_field, new_text)]
+
+    # Особый случай: session + client_name → relation + Тип сеанса=Клиентский
+    if page_type == "session" and updates.get("client_name"):
+        client_name = str(updates.pop("client_name")).strip()
+        if client_name:
+            from core.notion_client import client_find
+            try:
+                client = await client_find(client_name, user_notion_id=user_notion_id)
+            except Exception as e:
+                logger.warning("client_find in reply failed: %s", e)
+                client = None
+            if client:
+                props["Клиенты"] = _relation(client["id"])
+                applied["Клиенты"] = client_name
+                if db_id:
+                    real_type = await match_select(db_id, "Тип сеанса", "🤝 Клиентский")
+                    props["Тип сеанса"] = _select(real_type)
+                    applied["Тип сеанса"] = real_type
+                else:
+                    props["Тип сеанса"] = _select("🤝 Клиентский")
+                    applied["Тип сеанса"] = "🤝 Клиентский"
+            else:
+                applied["Клиент не найден"] = client_name
 
     for key, value in updates.items():
         mapping = fields_map.get(key)

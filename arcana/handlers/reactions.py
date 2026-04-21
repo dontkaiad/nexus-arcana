@@ -1,5 +1,10 @@
 """arcana/handlers/reactions.py — карта реакций Arcana по intent."""
 
+"""Разрешённые Telegram-эмодзи реакций (тот же набор что в Nexus):
+⚡ 🔥 👌 🏆 ✍️ 💅 🫡 🌚 🤓 😈 🤔 🤡 👀 ❤️‍🔥
+Использовать ТОЛЬКО их — иначе set_message_reaction падает молча.
+"""
+
 ARCANA_REACTION_MAP = {
     # Processing / meta
     "processing":     "👀",
@@ -12,12 +17,12 @@ ARCANA_REACTION_MAP = {
     "client_info":    "👀",
 
     # Sessions / Tarot
-    "session":        "🔮",
+    "session":        "✍️",
     "session_search": "👀",
-    "tarot_interp":   "🔮",
+    "tarot_interp":   "✍️",
 
     # Rituals
-    "ritual":         "🕯️",
+    "ritual":         "💅",
 
     # Works
     "work":           "⚡",
@@ -31,8 +36,8 @@ ARCANA_REACTION_MAP = {
     "debt":           "🏆",
 
     # Grimoire
-    "grimoire":       "📖",
-    "grimoire_add":   "📖",
+    "grimoire":       "✍️",
+    "grimoire_add":   "✍️",
     "grimoire_search":"👀",
 
     # Stats / verify
