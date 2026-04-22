@@ -287,7 +287,7 @@ const Metric = ({ s, v, sub, unit, accent, icon }) => (
         <span style={{ color: s.tM, fontSize: 14, fontWeight: 500, marginLeft: 2 }}>{unit}</span>
       )}
     </div>
-    <div style={{ fontSize: 12, color: s.tS, marginTop: 2 }}>{sub}</div>
+    <div style={{ fontSize: 12, color: s.text, opacity: 0.8, fontWeight: 500, marginTop: 2 }}>{sub}</div>
   </div>
 );
 
