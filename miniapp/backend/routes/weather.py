@@ -7,9 +7,9 @@ import time
 from typing import Any, Optional
 
 import httpx
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Body, Depends
 
-from core.notion_client import memory_get
+from core.notion_client import memory_get, memory_set
 
 from miniapp.backend import cache as _cache
 from miniapp.backend.auth import current_user_id
@@ -182,3 +182,23 @@ async def get_weather(tg_id: int = Depends(current_user_id)) -> dict[str, Any]:
 
     _store(tg_id, data)
     return data
+
+
+@router.post("/weather/city")
+async def set_weather_city(
+    tg_id: int = Depends(current_user_id),
+    payload: dict = Body(...),
+) -> dict[str, Any]:
+    """wave8.9: пользователь задаёт свой город. Сохраняем в Память + чистим кэш."""
+    city = (payload.get("city") or "").strip()
+    if not city:
+        return {"ok": False, "error": "city_empty"}
+    await memory_set(f"city_{tg_id}", city, category="⭐ Предпочтения")
+    # чистим кэш погоды, чтобы следующий /api/weather сходил заново
+    con = sqlite3.connect(_cache._DB_PATH)
+    try:
+        con.execute("DELETE FROM weather_cache WHERE tg_id = ?", (tg_id,))
+        con.commit()
+    finally:
+        con.close()
+    return {"ok": True, "city": city}
