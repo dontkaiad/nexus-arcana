@@ -1671,79 +1671,146 @@ function NxCal({ s }) {
         </div>
       </div>
       {error && <ErrorBox s={s} error={error} refetch={refetch} />}
-      <Glass s={s} style={{ padding: "10px 10px" }}>
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(7, 1fr)",
-            gap: 3,
-            marginBottom: 4,
-          }}
-        >
-          {daysShort.map((d) => (
-            <div
-              key={d}
-              style={{ textAlign: "center", fontSize: 10, color: s.tS, padding: 3 }}
-            >
-              {d}
-            </div>
-          ))}
-        </div>
-        {weeks.map((w, wi) => (
+      {view === "month" && (
+        <Glass s={s} style={{ padding: "10px 10px" }}>
           <div
-            key={wi}
-            style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 3, marginBottom: 3 }}
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(7, 1fr)",
+              gap: 3,
+              marginBottom: 4,
+            }}
           >
-            {w.map((d, di) => {
-              if (!d) return <div key={di} />;
-              const isToday = todayMonthMatch && d === todayKey;
-              const isPicked = d === picked;
-              const has = tasksByDay[d];
-              return (
-                <div
-                  key={di}
-                  onClick={() => setPicked(d)}
-                  style={{
-                    textAlign: "center",
-                    padding: "6px 2px",
-                    borderRadius: 8,
-                    background: isPicked
-                      ? `${s.acc}30`
-                      : isToday
-                      ? `${s.acc}14`
-                      : "transparent",
-                    border: isToday ? `1px solid ${s.acc}55` : "1px solid transparent",
-                    cursor: "pointer",
-                    minHeight: 34,
-                  }}
-                >
+            {daysShort.map((d) => (
+              <div
+                key={d}
+                style={{ textAlign: "center", fontSize: 10, color: s.tS, padding: 3 }}
+              >
+                {d}
+              </div>
+            ))}
+          </div>
+          {weeks.map((w, wi) => (
+            <div
+              key={wi}
+              style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 3, marginBottom: 3 }}
+            >
+              {w.map((d, di) => {
+                if (!d) return <div key={di} />;
+                const isToday = todayMonthMatch && d === todayKey;
+                const isPicked = d === picked;
+                const has = tasksByDay[d];
+                const count = Array.isArray(has) ? has.length : 0;
+                return (
                   <div
+                    key={di}
+                    onClick={() => setPicked(d)}
                     style={{
-                      fontSize: 13,
-                      fontWeight: isToday || isPicked ? 500 : 400,
-                      color: isToday || isPicked ? s.acc : s.text,
-                      fontFamily: H,
+                      textAlign: "center",
+                      padding: "6px 2px",
+                      borderRadius: 8,
+                      background: isPicked
+                        ? `${s.acc}30`
+                        : isToday
+                        ? `${s.acc}14`
+                        : "transparent",
+                      border: isToday ? `1px solid ${s.acc}55` : "1px solid transparent",
+                      cursor: "pointer",
+                      minHeight: 36,
+                      position: "relative",
                     }}
                   >
-                    {d}
-                  </div>
-                  {has && (
                     <div
                       style={{
-                        width: 4,
-                        height: 4,
-                        borderRadius: 2,
-                        background: s.acc,
-                        margin: "3px auto 0",
+                        fontSize: 13,
+                        fontWeight: isToday || isPicked ? 500 : 400,
+                        color: isToday || isPicked ? s.acc : s.text,
+                        fontFamily: H,
                       }}
-                    />
+                    >
+                      {d}
+                    </div>
+                    {count > 0 && (
+                      <>
+                        <div
+                          style={{
+                            width: 4, height: 4, borderRadius: 2,
+                            background: s.acc,
+                            margin: "3px auto 0",
+                          }}
+                        />
+                        {count > 1 && (
+                          <span style={{
+                            position: "absolute", top: 2, right: 3,
+                            fontSize: 8, color: s.tM,
+                          }}>{count}</span>
+                        )}
+                      </>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          ))}
+        </Glass>
+      )}
+
+      {view === "week" && (() => {
+        // Wave6.6.2: простой Week-вид — 7 дней подряд с задачами списком
+        const today = new Date();
+        const startWeekDate = new Date(today);
+        const dow = (today.getDay() + 6) % 7;  // Пн=0
+        startWeekDate.setDate(today.getDate() - dow);
+        const weekDays = [];
+        for (let i = 0; i < 7; i++) {
+          const d = new Date(startWeekDate);
+          d.setDate(startWeekDate.getDate() + i);
+          const dayNum = d.getDate();
+          const isSameMonth =
+            d.getFullYear() === year && d.getMonth() === month0;
+          weekDays.push({
+            dayNum, isSameMonth, date: d,
+            label: `${daysShort[i]}, ${dayNum}`,
+            tasks: isSameMonth ? (tasksByDay[dayNum] || []) : [],
+            isToday: d.toDateString() === today.toDateString(),
+          });
+        }
+        return (
+          <Glass s={s} style={{ padding: "10px 12px" }}>
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              {weekDays.map((wd, i) => (
+                <div key={i} style={{
+                  padding: "8px 10px", borderRadius: 8,
+                  background: wd.isToday ? `${s.acc}18` : "transparent",
+                  border: `1px solid ${wd.isToday ? s.acc + "55" : s.brd}`,
+                }}>
+                  <div style={{
+                    display: "flex", justifyContent: "space-between",
+                    fontSize: 12, color: wd.isToday ? s.acc : s.text, fontWeight: 500,
+                  }}>
+                    <span>{wd.label}</span>
+                    <span style={{ color: s.tM }}>{wd.tasks.length > 0 ? `${wd.tasks.length} шт.` : ""}</span>
+                  </div>
+                  {wd.tasks.length > 0 && (
+                    <div style={{ marginTop: 4 }}>
+                      {wd.tasks.slice(0, 3).map((t, j) => (
+                        <div key={j} style={{ fontSize: 11, color: s.tM, marginTop: 2 }}>
+                          • {t}
+                        </div>
+                      ))}
+                      {wd.tasks.length > 3 && (
+                        <div style={{ fontSize: 10, color: s.tS, marginTop: 2 }}>
+                          и ещё {wd.tasks.length - 3}…
+                        </div>
+                      )}
+                    </div>
                   )}
                 </div>
-              );
-            })}
-          </div>
-        ))}
-      </Glass>
+              ))}
+            </div>
+          </Glass>
+        );
+      })()}
       <SectionLabel s={s}>
         {picked} {RU_MONTHS_FULL[month0].toLowerCase()}
       </SectionLabel>
@@ -2258,6 +2325,11 @@ function ArGrimoire({ s, openGrimoire }) {
 
 function ArStats({ s }) {
   const { data, loading, error, refetch } = useApi("/api/arcana/stats");
+  // wave6.6.1: quick-verify секция
+  const uncheckedApi = useApi("/api/arcana/sessions?filter=status:unchecked", []);
+  const [verifyBusy, setVerifyBusy] = useState({});
+  const [localDone, setLocalDone] = useState({});
+
   if (loading) return <Empty s={s} text="Загружаю..." />;
   if (error) return <ErrorBox s={s} error={error} refetch={refetch} />;
   const view = adaptArcanaStats(data);
@@ -2267,9 +2339,63 @@ function ArStats({ s }) {
   const p = view.practice;
   const profit = p.profit;
 
+  const unchecked = ((uncheckedApi.data?.sessions) || []).filter(
+    (sess) => !localDone[sess.id]
+  );
+
+  const doVerify = async (id, status) => {
+    if (verifyBusy[id]) return;
+    setVerifyBusy((b) => ({ ...b, [id]: true }));
+    setLocalDone((d) => ({ ...d, [id]: true }));
+    try {
+      await apiPost(`/api/arcana/sessions/${id}/verify`, { status });
+      setTimeout(() => { uncheckedApi.refetch && uncheckedApi.refetch(); refetch(); }, 400);
+    } catch (e) {
+      setLocalDone((d) => { const n = { ...d }; delete n[id]; return n; });
+      alert("Не удалось отметить");
+    } finally {
+      setVerifyBusy((b) => { const n = { ...b }; delete n[id]; return n; });
+    }
+  };
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
       <div style={{ fontFamily: H, fontSize: 20, color: s.text }}>Точность</div>
+
+      {unchecked.length > 0 && (
+        <Glass s={s} accent={s.amber} style={{ padding: "12px 14px" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8, alignItems: "baseline" }}>
+            <span style={{ fontSize: 13, color: s.text, fontWeight: 500 }}>❗ Ждут проверки</span>
+            <span style={{ fontSize: 11, color: s.tS }}>{unchecked.length}</span>
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {unchecked.slice(0, 8).map((sess) => (
+              <div key={sess.id} style={{ background: s.card, borderRadius: 8, padding: "8px 10px" }}>
+                <div style={{ fontSize: 12, color: s.text, fontWeight: 500 }}>
+                  {sess.question || sess.title || "Без темы"}
+                </div>
+                <div style={{ fontSize: 10, color: s.tM, marginBottom: 6 }}>
+                  {sess.client || ""}{sess.date ? ` · ${formatDate(sess.date)}` : ""}
+                </div>
+                <div style={{ display: "flex", gap: 4 }}>
+                  <div onClick={() => doVerify(sess.id, "✅ Да")}
+                       style={{ flex: 1, textAlign: "center", padding: "4px", borderRadius: 6, background: s.good + "33", color: s.good, fontSize: 11, cursor: "pointer" }}>
+                    ✅ Сбылось
+                  </div>
+                  <div onClick={() => doVerify(sess.id, "〰️ Частично")}
+                       style={{ flex: 1, textAlign: "center", padding: "4px", borderRadius: 6, background: s.amber + "33", color: s.amber, fontSize: 11, cursor: "pointer" }}>
+                    〰️ Частично
+                  </div>
+                  <div onClick={() => doVerify(sess.id, "❌ Нет")}
+                       style={{ flex: 1, textAlign: "center", padding: "4px", borderRadius: 6, background: s.red + "33", color: s.red, fontSize: 11, cursor: "pointer" }}>
+                    ❌ Нет
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </Glass>
+      )}
 
       {/* Большой процент */}
       <Glass s={s} glow style={{ textAlign: "center", padding: "22px 14px" }}>
