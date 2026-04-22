@@ -2613,7 +2613,7 @@ function ClientDetail({ s, id }) {
 // ═══════════════════════════════════════════════════════════════
 
 const NEXUS_ADD = [
-  { key: "expense", icon: Wallet, label: "Расход" },
+  { key: "expense", icon: Wallet, label: "Финансы" },
   { key: "task", icon: Check, label: "Задача" },
   { key: "note", icon: StickyNote, label: "Заметка" },
   { key: "list", icon: ListIcon, label: "В список" },
@@ -2747,7 +2747,7 @@ function TaskSheet({ s, task, onClose }) {
 // ═══════════════════════════════════════════════════════════════
 
 const FAB_TITLE = {
-  expense: "Новый расход",
+  expense: "Финансы",
   task: "Новая задача",
   note: "Новая заметка",
   list: "В список",
@@ -2856,27 +2856,90 @@ function QuickForm({ s, kind, onDone }) {
   );
 }
 
+const INCOME_CATS = [
+  "💼 Зарплата", "💰 Фриланс", "🎁 Подарок", "🏦 Прочее",
+];
+
+const FINANCE_TYPES = [
+  { k: "expense", label: "💸 Расход" },
+  { k: "income", label: "💰 Доход" },
+  { k: "practice_income", label: "🔮 От практики" },
+];
+
 function ExpenseForm({ s, onSubmit, busy }) {
+  const [type, setType] = useState("expense");
   const [amount, setAmount] = useState("");
   const [cat, setCat] = useState(EXPENSE_CATS[0]);
   const [desc, setDesc] = useState("");
-  const valid = parseFloat(amount) > 0 && !!cat;
+
+  const catsForType = type === "income" ? INCOME_CATS : EXPENSE_CATS;
+
+  // сбрасываем категорию при смене типа
+  const changeType = (t) => {
+    setType(t);
+    if (t === "practice_income") {
+      setCat(""); // для практики категория не нужна
+    } else if (t === "income") {
+      setCat(INCOME_CATS[0]);
+    } else {
+      setCat(EXPENSE_CATS[0]);
+    }
+  };
+
+  const needsCat = type === "expense";
+  const valid = parseFloat(amount) > 0 && (!needsCat || !!cat);
+
+  const submitLabel = busy
+    ? "Сохраняю..."
+    : type === "expense"
+      ? "Сохранить расход"
+      : "Сохранить доход";
+
+  const comingSoon = () => alert("Coming soon 🌱");
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-      <Input s={s} value={amount} onChange={setAmount} placeholder="Сумма, ₽" type="number" step="1" />
-      <div style={{ fontSize: 11, color: s.tS }}>Категория</div>
-      <Select s={s} value={cat} onChange={setCat} options={EXPENSE_CATS} />
-      <Input s={s} value={desc} onChange={setDesc} placeholder="Описание (например, Красное&Белое)" />
+      <div style={{ fontSize: 11, color: s.tS }}>Тип</div>
+      <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+        {FINANCE_TYPES.map((t) => (
+          <Pill key={t.k} s={s} active={type === t.k} onClick={() => changeType(t.k)}>
+            {t.label}
+          </Pill>
+        ))}
+      </div>
+      <div style={{ position: "relative" }}>
+        <Input s={s} value={amount} onChange={setAmount} placeholder="Сумма, ₽" type="number" step="1" />
+        <div onClick={comingSoon} style={{
+          position: "absolute", right: 10, top: "50%", transform: "translateY(-50%)",
+          cursor: "pointer", opacity: 0.5, fontSize: 16,
+        }}>🎤</div>
+      </div>
+      {type !== "practice_income" && (
+        <>
+          <div style={{ fontSize: 11, color: s.tS }}>Категория</div>
+          <Select s={s} value={cat} onChange={setCat} options={catsForType} />
+        </>
+      )}
+      <div style={{ position: "relative" }}>
+        <Input s={s} value={desc} onChange={setDesc} placeholder={
+          type === "practice_income" ? "Клиент / расклад" : "Описание"
+        } />
+        <div onClick={comingSoon} style={{
+          position: "absolute", right: 10, top: "50%", transform: "translateY(-50%)",
+          cursor: "pointer", opacity: 0.5, fontSize: 16,
+        }}>📸</div>
+      </div>
       <SubmitBtn
         s={s}
         disabled={!valid || busy}
-        label={busy ? "Сохраняю..." : "Сохранить расход"}
+        label={submitLabel}
         onClick={onSubmit(async () => {
-          await apiPost("/api/expenses", {
+          await apiPost("/api/finance", {
+            type,
             amount: parseFloat(amount),
-            cat,
+            cat: needsCat ? cat : (cat || null),
             desc,
-            bot: "nexus",
+            bot: type === "practice_income" ? "arcana" : "nexus",
           });
         })}
       />
@@ -2884,29 +2947,96 @@ function ExpenseForm({ s, onSubmit, busy }) {
   );
 }
 
+const REMINDER_OPTIONS = [
+  { k: "60", label: "За 1 час" },
+  { k: "30", label: "За 30 мин" },
+  { k: "0", label: "В момент" },
+  { k: "custom", label: "Кастом" },
+];
+
 function TaskForm({ s, onSubmit, busy }) {
   const [title, setTitle] = useState("");
   const [cat, setCat] = useState("");
   const [prio, setPrio] = useState("⚪");
   const [date, setDate] = useState("");
+  const [time, setTime] = useState("");
+  const [wantsReminder, setWantsReminder] = useState(false);
+  const [reminderKey, setReminderKey] = useState("30");
+  const [reminderCustom, setReminderCustom] = useState("");
+  const [cats, setCats] = useState([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const r = await apiGet("/api/categories?type=task");
+        if (!cancelled && r?.categories) setCats(r.categories);
+      } catch (_) { /* ignore */ }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
   const valid = title.trim().length > 0;
+  const comingSoon = () => alert("Coming soon 🌱");
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-      <Input s={s} value={title} onChange={setTitle} placeholder="Название задачи" />
-      <Input s={s} value={cat} onChange={setCat} placeholder="Категория (например, 🏠 Дом)" />
+      <div style={{ position: "relative" }}>
+        <Input s={s} value={title} onChange={setTitle} placeholder="Название задачи" />
+        <div onClick={comingSoon} style={{
+          position: "absolute", right: 10, top: "50%", transform: "translateY(-50%)",
+          cursor: "pointer", opacity: 0.5, fontSize: 16,
+        }}>🎤</div>
+      </div>
+      <div style={{ fontSize: 11, color: s.tS }}>Категория</div>
+      {cats.length > 0 ? (
+        <Select s={s} value={cat} onChange={setCat} options={cats} />
+      ) : (
+        <Input s={s} value={cat} onChange={setCat} placeholder="🏠 Дом" />
+      )}
       <div style={{ fontSize: 11, color: s.tS }}>Приоритет</div>
       <Select s={s} value={prio} onChange={setPrio} options={PRIOS} />
-      <Input s={s} value={date} onChange={setDate} placeholder="Дата YYYY-MM-DD" type="date" />
+      <div style={{ display: "flex", gap: 8 }}>
+        <div style={{ flex: 1 }}>
+          <Input s={s} value={date} onChange={setDate} placeholder="Дата" type="date" />
+        </div>
+        <div style={{ flex: 1 }}>
+          <Input s={s} value={time} onChange={setTime} placeholder="чч:мм" type="time" />
+        </div>
+      </div>
+      <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: s.text, cursor: "pointer" }}>
+        <input type="checkbox" checked={wantsReminder} onChange={(e) => setWantsReminder(e.target.checked)} />
+        🔔 Напоминание
+      </label>
+      {wantsReminder && (
+        <>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+            {REMINDER_OPTIONS.map((r) => (
+              <Pill key={r.k} s={s} active={reminderKey === r.k} onClick={() => setReminderKey(r.k)}>
+                {r.label}
+              </Pill>
+            ))}
+          </div>
+          {reminderKey === "custom" && (
+            <Input s={s} value={reminderCustom} onChange={setReminderCustom} placeholder="Минут до задачи, например 15" type="number" />
+          )}
+        </>
+      )}
       <SubmitBtn
         s={s}
         disabled={!valid || busy}
         label={busy ? "Сохраняю..." : "Добавить задачу"}
         onClick={onSubmit(async () => {
+          // Собираем дату+время в ISO, если есть
+          let dateValue = date || null;
+          if (date && time) {
+            dateValue = `${date}T${time}:00`;
+          }
           await apiPost("/api/tasks", {
             title: title.trim(),
             cat: cat || null,
             prio,
-            date: date || null,
+            date: dateValue,
           });
         })}
       />
@@ -2918,26 +3048,33 @@ function NoteForm({ s, onSubmit, busy }) {
   const [text, setText] = useState("");
   const [cat, setCat] = useState("");
   const valid = text.trim().length > 0;
+  const comingSoon = () => alert("Coming soon 🌱");
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-      <textarea
-        value={text}
-        onChange={(e) => setText(e.target.value)}
-        placeholder="Текст заметки / записи в память"
-        rows={4}
-        style={{
-          background: s.card,
-          border: `1px solid ${s.brd}`,
-          borderRadius: 10,
-          padding: "10px 12px",
-          color: s.text,
-          fontFamily: B,
-          fontSize: 13,
-          outline: "none",
-          width: "100%",
-          resize: "vertical",
-        }}
-      />
+      <div style={{ position: "relative" }}>
+        <textarea
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          placeholder="Текст заметки / записи в память"
+          rows={4}
+          style={{
+            background: s.card,
+            border: `1px solid ${s.brd}`,
+            borderRadius: 10,
+            padding: "10px 12px",
+            color: s.text,
+            fontFamily: B,
+            fontSize: 13,
+            outline: "none",
+            width: "100%",
+            resize: "vertical",
+          }}
+        />
+        <div onClick={comingSoon} style={{
+          position: "absolute", right: 10, top: 10,
+          cursor: "pointer", opacity: 0.5, fontSize: 16,
+        }}>🎤</div>
+      </div>
       <Input s={s} value={cat} onChange={setCat} placeholder="Категория (например, 🛒 Предпочтения)" />
       <SubmitBtn
         s={s}
@@ -2956,36 +3093,86 @@ function NoteForm({ s, onSubmit, busy }) {
 
 function ListAddForm({ s, onSubmit, busy }) {
   const [type, setType] = useState("buy");
-  const [name, setName] = useState("");
+  const [names, setNames] = useState([""]);
   const [cat, setCat] = useState("");
   const [qty, setQty] = useState("");
-  const valid = name.trim().length > 0;
+  const [expires, setExpires] = useState("");
+  const [location, setLocation] = useState("");
+  const [note, setNote] = useState("");
+
+  const validNames = names.map((n) => n.trim()).filter((n) => n.length > 0);
+  const valid = validNames.length > 0;
+
+  const setNameAt = (i, v) => {
+    const next = [...names];
+    next[i] = v;
+    setNames(next);
+  };
+  const addRow = () => { if (names.length < 20) setNames([...names, ""]); };
+  const removeRow = (i) => { if (names.length > 1) setNames(names.filter((_, idx) => idx !== i)); };
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
       <div style={{ fontSize: 11, color: s.tS }}>Тип</div>
-      <div style={{ display: "flex", gap: 6 }}>
+      <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
         <Pill s={s} active={type === "buy"} onClick={() => setType("buy")}>🛒 Покупки</Pill>
         <Pill s={s} active={type === "check"} onClick={() => setType("check")}>📋 Чеклист</Pill>
         <Pill s={s} active={type === "inv"} onClick={() => setType("inv")}>📦 Инвентарь</Pill>
       </div>
-      <Input s={s} value={name} onChange={setName} placeholder="Название" />
+
+      {names.map((nm, i) => (
+        <div key={i} style={{ display: "flex", gap: 6, alignItems: "center" }}>
+          <div style={{ flex: 1 }}>
+            <Input s={s} value={nm} onChange={(v) => setNameAt(i, v)}
+                   placeholder={names.length > 1 ? `Название #${i + 1}` : "Название"} />
+          </div>
+          {names.length > 1 && (
+            <div onClick={() => removeRow(i)} style={{
+              cursor: "pointer", color: s.tS, fontSize: 18, padding: "0 6px",
+            }}>×</div>
+          )}
+        </div>
+      ))}
+      {names.length < 20 && (
+        <div onClick={addRow} style={{
+          fontSize: 12, color: s.acc, cursor: "pointer", textAlign: "center", padding: "4px 0",
+        }}>+ добавить ещё</div>
+      )}
+
       {type !== "check" && (
         <Input s={s} value={cat} onChange={setCat} placeholder="Категория (например, 🍜 Продукты)" />
       )}
       {type === "inv" && (
-        <Input s={s} value={qty} onChange={setQty} placeholder="Количество" type="number" />
+        <>
+          <div style={{ display: "flex", gap: 6 }}>
+            <div style={{ flex: 1 }}>
+              <Input s={s} value={qty} onChange={setQty} placeholder="Количество" type="number" />
+            </div>
+            <div style={{ flex: 1 }}>
+              <Input s={s} value={expires} onChange={setExpires} placeholder="Срок годности" type="date" />
+            </div>
+          </div>
+          <Input s={s} value={location} onChange={setLocation} placeholder="Где хранится" />
+        </>
       )}
+      <Input s={s} value={note} onChange={setNote} placeholder="Примечание (опционально)" />
+
       <SubmitBtn
         s={s}
         disabled={!valid || busy}
-        label={busy ? "Сохраняю..." : "Добавить"}
+        label={busy ? "Сохраняю..." : (validNames.length > 1 ? `Добавить ${validNames.length} шт.` : "Добавить")}
         onClick={onSubmit(async () => {
-          await apiPost("/api/lists", {
-            type,
-            name: name.trim(),
-            cat: cat || null,
-            qty: qty ? parseFloat(qty) : null,
-          });
+          const noteCombined = [location && `место: ${location}`, note].filter(Boolean).join(" · ") || null;
+          for (const nm of validNames) {
+            await apiPost("/api/lists", {
+              type,
+              name: nm,
+              cat: cat || null,
+              qty: qty ? parseFloat(qty) : null,
+              expires: expires || null,
+              note: noteCombined,
+            });
+          }
         })}
       />
     </div>

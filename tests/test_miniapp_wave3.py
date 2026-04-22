@@ -158,7 +158,9 @@ def test_expense_create_uses_finance_add(client):
             "bot": "nexus",
         })
     assert r.status_code == 200
-    assert r.json() == {"ok": True, "id": "fin-id"}
+    data = r.json()
+    assert data["ok"] is True
+    assert data["id"] == "fin-id"
     kwargs = fa.await_args.kwargs
     assert kwargs["amount"] == 1500
     assert kwargs["category"] == "🚬 Привычки"
