@@ -398,7 +398,7 @@ const NexusLogo = () => (
       <circle cx="30" cy="21" r="0.8" fill="#8a5a28" opacity="0.45" />
     </svg>
     <svg width="130" height="56" viewBox="0 0 130 56" xmlns="http://www.w3.org/2000/svg">
-      <text x="0" y="40" fontFamily="Satisfy, cursive" fontSize="44" fill="#1e3328">Nexus</text>
+      <text x="0" y="40" fontFamily="Satisfy, cursive" fontSize="44" fill="#3d6b56">Nexus</text>
     </svg>
   </div>
 );
