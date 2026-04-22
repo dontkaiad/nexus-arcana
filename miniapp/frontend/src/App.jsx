@@ -419,7 +419,7 @@ const NexusLogo = () => (
       <circle cx="30" cy="21" r="0.8" fill="#8a5a28" opacity="0.45" />
     </svg>
     <svg width="130" height="56" viewBox="0 0 130 56" xmlns="http://www.w3.org/2000/svg">
-      <text x="0" y="40" fontFamily="Satisfy, cursive" fontSize="44" fill="#2d5a45" filter="drop-shadow(0px 1px 2px rgba(0,0,0,0.15))">Nexus</text>
+      <text x="0" y="40" fontFamily="Satisfy, cursive" fontSize="44" fill="#1a4f3a" filter="drop-shadow(0px 2px 3px rgba(0,0,0,0.25))">Nexus</text>
     </svg>
   </div>
 );
@@ -1041,7 +1041,7 @@ function NxDay({ s, openTask, navigate, openStreaks }) {
         </div>
       </Glass>
 
-      {/* wave7.3: СДВГ-совет поднят наверх */}
+      {/* wave7.3: СДВГ-совет поднят наверх. wave8.6: refresh по клику. */}
       {t.adhdTip && (
         <Glass s={s} accent={s.acc}>
           <div
@@ -1064,7 +1064,17 @@ function NxDay({ s, openTask, navigate, openStreaks }) {
             >
               🦋 СДВГ-совет
             </span>
-            <RefreshCw size={13} color={s.tS} style={{ cursor: "pointer" }} />
+            <RefreshCw
+              size={13}
+              color={s.tS}
+              style={{ cursor: "pointer" }}
+              onClick={async () => {
+                try {
+                  await apiPost("/api/today/refresh-tip");
+                  refetch();
+                } catch (_) { /* ignore */ }
+              }}
+            />
           </div>
           <div style={{ fontSize: 13, color: s.text, lineHeight: 1.5 }}>{renderBoldMd(t.adhdTip)}</div>
         </Glass>
