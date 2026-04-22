@@ -109,13 +109,29 @@ async def get_lists(
     keywords = _TYPE_KEYWORDS[type]
 
     def _matches_type(page: dict) -> bool:
-        raw = select_name(page.get("properties", {}).get("Тип", {}))
-        if not raw:
+        # wave7.6: поддерживаем и select, и multi_select, и status — Notion в
+        # разных базах может вернуть разный shape свойства «Тип».
+        prop = page.get("properties", {}).get("Тип", {}) or {}
+        candidates: list[str] = []
+        raw_sel = select_name(prop)
+        if raw_sel:
+            candidates.append(raw_sel)
+        for it in (prop.get("multi_select") or []):
+            nm = it.get("name") or ""
+            if nm:
+                candidates.append(nm)
+        st = (prop.get("status") or {}).get("name") or ""
+        if st:
+            candidates.append(st)
+        if not candidates:
             return False
-        if raw == type_target:
-            return True
-        raw_lower = raw.lower()
-        return any(k in raw_lower for k in keywords)
+        for raw in candidates:
+            if raw == type_target:
+                return True
+            raw_lower = raw.lower()
+            if any(k in raw_lower for k in keywords):
+                return True
+        return False
 
     pages = [p for p in pages if _matches_type(p)]
     items = [_serialize(p) for p in pages]
