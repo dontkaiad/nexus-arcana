@@ -955,10 +955,6 @@ function NxDay({ s, openTask, navigate, openStreaks }) {
   const { data, loading, error, refetch } = useApi('/api/today');
   // wave6.5: погода (календарь стриков теперь только в StreaksSheet)
   const weatherApi = useApi('/api/weather');
-  // wave8.13: модалка выбора города (window.prompt не работает в Telegram)
-  const [cityModal, setCityModal] = useState(false);
-  const [cityInput, setCityInput] = useState("");
-  const [cityBusy, setCityBusy] = useState(false);
 
   if (loading) return <Empty s={s} text="Загружаю..." />;
   if (error) {
@@ -998,23 +994,13 @@ function NxDay({ s, openTask, navigate, openStreaks }) {
           <span style={{ fontFamily: H, fontSize: 22, color: s.text }}>Мой день</span>
           <div style={{ textAlign: "right" }}>
             <div style={{ fontSize: 11, color: s.tS }}>{t.date}</div>
-            <div
-              style={{ fontSize: 11, color: s.text, opacity: 0.8, marginTop: 2, cursor: "pointer" }}
-              onClick={() => {
-                setCityInput(weatherApi.data?.city || "");
-                setCityModal(true);
-              }}
-            >
-              {weatherApi.data && !weatherApi.data.error ? (
-                <>
-                  {WEATHER_ICON[weatherApi.data.kind] || "🌤️"}
-                  {" "}
-                  {weatherApi.data.temp > 0 ? "+" : ""}{weatherApi.data.temp}° · {weatherApi.data.city}
-                </>
-              ) : (
-                <>🌤️ указать город</>
-              )}
-            </div>
+            {weatherApi.data && !weatherApi.data.error && (
+              <div style={{ fontSize: 11, color: s.text, opacity: 0.8, marginTop: 2 }}>
+                {WEATHER_ICON[weatherApi.data.kind] || "🌤️"}
+                {" "}
+                {weatherApi.data.temp > 0 ? "+" : ""}{weatherApi.data.temp}° · {weatherApi.data.city}
+              </div>
+            )}
           </div>
         </div>
         <div style={{ display: "flex", gap: 6, marginTop: 10 }}>
@@ -1183,48 +1169,6 @@ function NxDay({ s, openTask, navigate, openStreaks }) {
       )}
 
       {total === 0 && <Empty s={s} text="На сегодня пусто — отдыхай 🌿" />}
-
-      <Sheet s={s} open={cityModal} onClose={() => setCityModal(false)} title="Твой город">
-        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-          <div style={{ fontSize: 13, color: s.tM, fontFamily: B }}>
-            Погода подтянется для указанного города
-          </div>
-          <input
-            autoFocus
-            value={cityInput}
-            onChange={(e) => setCityInput(e.target.value)}
-            onKeyDown={async (e) => {
-              if (e.key === "Enter" && cityInput.trim() && !cityBusy) {
-                setCityBusy(true);
-                try {
-                  await apiPost("/api/weather/city", { city: cityInput.trim() });
-                  setCityModal(false);
-                  weatherApi.refetch();
-                } finally { setCityBusy(false); }
-              }
-            }}
-            placeholder="Санкт-Петербург"
-            style={{
-              background: s.card, border: `1px solid ${s.brd}`,
-              borderRadius: 10, padding: "10px 12px",
-              color: s.text, fontFamily: B, fontSize: 14, outline: "none",
-            }}
-          />
-          <SubmitBtn
-            s={s}
-            disabled={!cityInput.trim() || cityBusy}
-            label={cityBusy ? "Сохраняю..." : "Сохранить"}
-            onClick={async () => {
-              setCityBusy(true);
-              try {
-                await apiPost("/api/weather/city", { city: cityInput.trim() });
-                setCityModal(false);
-                weatherApi.refetch();
-              } finally { setCityBusy(false); }
-            }}
-          />
-        </div>
-      </Sheet>
     </div>
   );
 }
