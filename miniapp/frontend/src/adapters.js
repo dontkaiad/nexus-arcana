@@ -68,17 +68,32 @@ export function formatDate(iso, mode = 'full', now = new Date()) {
 }
 
 // "every_2d" → "каждые 2 дня", "every_1d" → "каждый день", "every_7d" → "каждую неделю"
+// Также маппит русские значения Notion "Ежедневно"/"Еженедельно"/... в короткую форму.
+const _RU_REPEAT_MAP = {
+  'ежедневно': 'каждый день',
+  'ежедневный': 'каждый день',
+  'еженедельно': 'каждую неделю',
+  'еженедельный': 'каждую неделю',
+  'ежемесячно': 'каждый месяц',
+  'ежемесячный': 'каждый месяц',
+  'ежегодно': 'каждый год',
+}
 export function formatRepeat(raw) {
   if (!raw) return ''
-  const m = String(raw).match(/^every_(\d+)d$/)
-  if (!m) return String(raw)
-  const n = parseInt(m[1], 10)
-  if (n === 1) return 'каждый день'
-  if (n === 7) return 'каждую неделю'
-  if (n === 14) return 'каждые 2 недели'
-  const mod = n % 10
-  const tail = mod === 1 && n !== 11 ? 'день' : 'дня'
-  return `каждые ${n} ${tail}`
+  const s = String(raw).trim()
+  const m = s.match(/^every_(\d+)d$/)
+  if (m) {
+    const n = parseInt(m[1], 10)
+    if (n === 1) return 'каждый день'
+    if (n === 7) return 'каждую неделю'
+    if (n === 14) return 'каждые 2 недели'
+    const mod = n % 10
+    const tail = mod === 1 && n !== 11 ? 'день' : 'дня'
+    return `каждые ${n} ${tail}`
+  }
+  const ruKey = s.toLowerCase().replace(/^[^\p{L}]+/u, '')
+  if (_RU_REPEAT_MAP[ruKey]) return _RU_REPEAT_MAP[ruKey]
+  return s
 }
 
 // 60 → "за 1 ч", 30 → "за 30 мин", 90 → "за 1 ч 30 мин", 120 → "за 2 ч"
