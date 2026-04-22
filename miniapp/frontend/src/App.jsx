@@ -3840,6 +3840,9 @@ export default function App() {
   };
 
   const sky = useMemo(() => getSky(prog), [prog]);
+  // wave7.4: погодный тинт фона для Nexus
+  const weatherApi = useApi('/api/weather');
+  const weatherKind = weatherApi.data?.kind || 'clear';
   const sun = getOrb(prog, true);
   const moon = getOrb(prog, false);
   const stOp = prog > 0.5 ? (prog - 0.5) * 2 : 0;
@@ -3900,6 +3903,30 @@ export default function App() {
         body { overflow-x: hidden }
         input::placeholder { color: ${sky.tM}; opacity: 0.75 }
       `}</style>
+
+      {/* wave7.4: погодный overlay для Nexus */}
+      {isDay && (
+        <div
+          style={{
+            position: "absolute",
+            inset: 0,
+            pointerEvents: "none",
+            zIndex: 1,
+            opacity: 0.35,
+            transition: "background 1s ease",
+            background:
+              weatherKind === "rain"
+                ? "linear-gradient(180deg, rgba(74,107,124,0.6) 0%, rgba(107,138,148,0.3) 100%)"
+                : weatherKind === "snow"
+                ? "linear-gradient(180deg, rgba(192,204,216,0.5) 0%, rgba(255,255,255,0.2) 100%)"
+                : weatherKind === "fog"
+                ? "linear-gradient(180deg, rgba(160,170,170,0.5) 0%, rgba(190,190,190,0.25) 100%)"
+                : weatherKind === "cloudy"
+                ? "linear-gradient(180deg, rgba(143,168,154,0.35) 0%, rgba(140,150,160,0.2) 100%)"
+                : "transparent",
+          }}
+        />
+      )}
 
       <Stars op={stOp} />
 
