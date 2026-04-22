@@ -40,6 +40,18 @@ SUPPLIES_CATEGORIES = {"🕯️ Расходники", "🌿 Травы/Масл
 _BOTTOM_RE = re.compile(r"🂠\s*Дно:\s*([^\n]+?)(?:\n|$)")
 
 
+def _resolve_card_en(raw: str) -> str:
+    """RU → EN (The Fool, ...). Если не нашли — возвращаем сырое имя."""
+    try:
+        from miniapp.backend.tarot import find_card
+        c = find_card("rider-waite", raw)
+        if c and c.get("en"):
+            return c["en"]
+    except Exception:
+        pass
+    return raw
+
+
 # ── Client name map ─────────────────────────────────────────────────────────
 
 async def load_clients_map(user_notion_id: str) -> dict[str, dict]:
@@ -128,7 +140,8 @@ def serialize_session_brief(page: dict, clients_map: dict, tz_offset: int) -> di
         "session_type": session_type or None,
         "date": date_local.isoformat() if date_local else None,
         "date_time": extract_time(deadline_raw, tz_offset),
-        "cards_brief": [c["name"] for c in cards[:3]],
+        # wave7.8.5: в списке раскладов карты — EN (The Fool, The Magician, ...)
+        "cards_brief": [_resolve_card_en(c["name"]) for c in cards[:3]],
         "done": select_of(page, "Сбылось") or "⏳ Не проверено",
         "price": int(round(number_of(page, "Сумма"))),
         "paid": int(round(number_of(page, "Оплачено"))),
