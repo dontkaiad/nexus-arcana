@@ -54,7 +54,10 @@ const lerpC = (c1, c2, t) => {
 const getOrb = (progress, isSun) => {
   const t = isSun ? progress : 1 - progress;
   const a = Math.PI * 0.15 + t * Math.PI * 0.7;
-  return { x: (0.5 + 0.58 * Math.cos(a)) * 100, y: (0.92 - 0.82 * Math.sin(a)) * 100 };
+  // wave5.6: коэффициент сужен c 0.58 до 0.42, чтобы луна/солнце не уезжали за край
+  const x = (0.5 + 0.42 * Math.cos(a)) * 100;
+  const y = (0.92 - 0.82 * Math.sin(a)) * 100;
+  return { x: Math.max(8, Math.min(92, x)), y };
 };
 
 function getSky(p) {
@@ -132,7 +135,7 @@ function moonPhase(dt = new Date()) {
   return { idx, glyph: MOON_GLYPHS[idx], name: MOON_NAMES[idx], days, illum, frac };
 }
 
-const H = "'Playfair Display', Georgia, serif";
+const H = "'Lora', Georgia, serif";
 const B = "-apple-system, 'SF Pro Text', system-ui, sans-serif";
 
 // ═══════════════════════════════════════════════════════════════
@@ -352,8 +355,9 @@ const FAB = ({ s, onClick }) => (
   <div
     onClick={onClick}
     style={{
-      position: "absolute",
-      bottom: 84,
+      // wave5.4: fixed + safe-area-inset чтобы кнопка не съезжала на узких экранах
+      position: "fixed",
+      bottom: "calc(env(safe-area-inset-bottom, 0px) + 80px)",
       right: 16,
       width: 52,
       height: 52,
@@ -364,7 +368,7 @@ const FAB = ({ s, onClick }) => (
       alignItems: "center",
       justifyContent: "center",
       cursor: "pointer",
-      zIndex: 9,
+      zIndex: 50,
       boxShadow: `0 4px 16px ${s.acc}66`,
     }}
   >
@@ -3430,18 +3434,22 @@ export default function App() {
           <img
             src={isDay ? "/nexus.png" : "/arcana.png"}
             alt={isDay ? "Nexus" : "Arcana"}
+            onError={(e) => { e.target.style.display = "none"; }}
             style={{
               width: 28,
               height: 28,
               borderRadius: "50%",
               objectFit: "cover",
+              mixBlendMode: isDay ? "multiply" : "screen",
             }}
           />
           <div
             style={{
               fontFamily: H,
               fontSize: 18,
-              color: sky.text,
+              // wave5.2: тёплый цвет вместо чёрного
+              color: isDay ? "#2d4a3e" : "#d4ccc0",
+              fontWeight: 500,
             }}
           >
             {isDay ? "Nexus" : "Arcana"}
