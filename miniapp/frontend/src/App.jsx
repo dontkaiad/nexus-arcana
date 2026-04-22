@@ -452,14 +452,14 @@ const FAB = ({ s, onClick }) => (
   <div
     onClick={onClick}
     style={{
-      // wave5.4: fixed + safe-area-inset чтобы кнопка не съезжала на узких экранах
+      // wave5.4: fixed + safe-area-inset; wave8.7: glass-стиль с акцентной рамкой
       position: "fixed",
       bottom: "calc(env(safe-area-inset-bottom, 0px) + 80px)",
       right: 16,
       width: 52,
       height: 52,
       borderRadius: 26,
-      background: s.acc,
+      background: `${s.acc}dd`,
       color: "#fff",
       display: "flex",
       alignItems: "center",
@@ -467,6 +467,8 @@ const FAB = ({ s, onClick }) => (
       cursor: "pointer",
       zIndex: 50,
       boxShadow: `0 4px 16px ${s.acc}66`,
+      backdropFilter: "blur(12px)",
+      border: `1px solid ${s.acc}88`,
     }}
   >
     <Plus size={24} strokeWidth={2.2} />
@@ -4298,17 +4300,17 @@ function MoonPhasesSheet({ s, open }) {
             {current.glyph}
           </div>
           <div style={{ flex: 1 }}>
-            <div style={{ fontFamily: H, fontSize: 20, color: s.text, fontWeight: 500 }}>
+            <div style={{ fontFamily: H, fontSize: 22, color: s.text, fontWeight: 600 }}>
               {current.name}
             </div>
-            <div style={{ fontSize: 12, color: s.tM, marginTop: 4 }}>
+            <div style={{ fontSize: 14, color: s.text, opacity: 0.85, marginTop: 4 }}>
               освещённость {current.illum}% · {isRising ? "растущая" : "убывающая"}
             </div>
           </div>
         </div>
       </Glass>
 
-      <div style={{ fontSize: 11, color: s.tS, marginBottom: 4 }}>Ближайшие фазы</div>
+      <div style={{ fontSize: 14, color: s.text, fontWeight: 600, marginBottom: 6 }}>Ближайшие фазы</div>
       {upcoming.map((p, i) => {
         const dt = p.date ? new Date(p.date) : null;
         const today = new Date();
@@ -4316,10 +4318,10 @@ function MoonPhasesSheet({ s, open }) {
         return (
           <Glass key={i} s={s} style={{ padding: "10px 14px", marginBottom: 4 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-              <div style={{ fontSize: 28 }}>{p.glyph}</div>
+              <div style={{ fontSize: 32 }}>{p.glyph}</div>
               <div style={{ flex: 1 }}>
-                <div style={{ fontSize: 13, color: s.text, fontWeight: 500 }}>{p.name}</div>
-                <div style={{ fontSize: 11, color: s.tM }}>
+                <div style={{ fontSize: 15, color: s.text, fontWeight: 500 }}>{p.name}</div>
+                <div style={{ fontSize: 12, color: s.text, opacity: 0.75 }}>
                   {formatDate(p.date)}{daysAway !== null && daysAway > 0 ? ` · через ${daysAway} ${daysAway === 1 ? "день" : "дн."}` : ""}
                 </div>
               </div>
