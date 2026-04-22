@@ -191,6 +191,10 @@ UPDATED_ROADMAP.md
 LISTS_SPEC.md
 fix_users.py
 pending_budget.db
+pending_clients.db
+pending_lists.db
+pending_tarot.db
+data/nexus_streaks.db
 tests/e2e_session.session
 tests/.env.test
 miniapp/data/
