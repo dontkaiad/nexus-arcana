@@ -8,6 +8,12 @@ export function useApi(path, deps = []) {
   const [tick, setTick] = useState(0)
 
   useEffect(() => {
+    if (!path) {
+      setLoading(false)
+      setData(null)
+      setError(null)
+      return
+    }
     let cancelled = false
     setLoading(true)
     apiGet(path)
