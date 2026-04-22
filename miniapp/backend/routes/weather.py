@@ -9,7 +9,9 @@ from typing import Any, Optional
 import httpx
 from fastapi import APIRouter, Body, Depends
 
-from core.notion_client import memory_get, memory_set
+from core.config import config
+from core.notion_client import memory_get, memory_set, query_pages
+from core.user_manager import get_user_notion_id
 
 from miniapp.backend import cache as _cache
 from miniapp.backend.auth import current_user_id
@@ -159,18 +161,78 @@ async def _fetch_openmeteo(city: str) -> Optional[dict]:
         return None
 
 
+async def _resolve_city_from_memory(tg_id: int) -> Optional[str]:
+    """wave8.10: ищем город в Памяти Nexus по нескольким стратегиям.
+
+    1) Явный ключ city_{tg_id} (из POST /weather/city).
+    2) Общие ключи: 'город', 'city', 'Город'.
+    3) Фьюзи-поиск: для user_notion_id берём записи где Ключ/Текст
+       содержат 'город' или 'city' (case-insensitive) и берём первое
+       непустое значение из Текста.
+    """
+    # 1) Явный ключ
+    v = await memory_get(f"city_{tg_id}")
+    if v and v.strip():
+        return v.strip()
+
+    # 2) Распространённые ключи
+    for key in ("город", "Город", "city", "City"):
+        v = await memory_get(key)
+        if v and v.strip():
+            return v.strip()
+
+    # 3) Фьюзи-поиск среди записей пользователя
+    user_notion_id = (await get_user_notion_id(tg_id)) or ""
+    if not user_notion_id:
+        return None
+    db_id = config.nexus.db_memory
+    if not db_id:
+        return None
+    try:
+        # rich_text contains — Notion ищет подстроку нерегистрозависимо
+        pages = await query_pages(
+            db_id,
+            filters={"and": [
+                {"property": "Пользователь", "relation": {"contains": user_notion_id}},
+                {"property": "Актуально", "checkbox": {"equals": True}},
+                {"or": [
+                    {"property": "Ключ", "rich_text": {"contains": "город"}},
+                    {"property": "Ключ", "rich_text": {"contains": "city"}},
+                    {"property": "Текст", "title": {"contains": "город"}},
+                ]},
+            ]},
+            page_size=5,
+        )
+    except Exception as e:
+        logger.warning("resolve_city fuzzy search failed: %s", e)
+        return None
+    for p in pages:
+        props = p.get("properties", {}) or {}
+        title_items = (props.get("Текст", {}) or {}).get("title") or []
+        text = "".join(it.get("plain_text", "") for it in title_items).strip()
+        if text:
+            # если «город: Санкт-Петербург» — отделяем после двоеточия
+            if ":" in text:
+                tail = text.split(":", 1)[1].strip()
+                if tail:
+                    return tail
+            # если «живу в СПб», пытаемся достать последнее слово
+            words = text.split()
+            if len(words) >= 2 and words[-2].lower() in {"в", "во", "из", "на"}:
+                return words[-1]
+            return text
+    return None
+
+
 @router.get("/weather")
 async def get_weather(tg_id: int = Depends(current_user_id)) -> dict[str, Any]:
     cached = _cached(tg_id)
     if cached:
         return cached
 
-    # wave7.4: сначала ищем город в Памяти (ключ city_{tg_id}),
-    # только потом падаем на TZ → город.
-    city_from_memory = await memory_get(f"city_{tg_id}")
-    if city_from_memory and city_from_memory.strip():
-        city = city_from_memory.strip()
-    else:
+    # wave8.10: мульти-стратегия поиска города в Памяти Nexus
+    city = await _resolve_city_from_memory(tg_id)
+    if not city:
         tz_raw = await memory_get(f"tz_{tg_id}")
         tz = (tz_raw or "Europe/Moscow").strip()
         city = TZ_TO_CITY.get(tz, "Moscow")
