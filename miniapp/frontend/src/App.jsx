@@ -998,19 +998,23 @@ function NxDay({ s, openTask, navigate, openStreaks }) {
           <span style={{ fontFamily: H, fontSize: 22, color: s.text }}>Мой день</span>
           <div style={{ textAlign: "right" }}>
             <div style={{ fontSize: 11, color: s.tS }}>{t.date}</div>
-            {weatherApi.data && !weatherApi.data.error && (
-              <div
-                style={{ fontSize: 11, color: s.text, opacity: 0.8, marginTop: 2, cursor: "pointer" }}
-                onClick={() => {
-                  setCityInput(weatherApi.data.city || "");
-                  setCityModal(true);
-                }}
-              >
-                {WEATHER_ICON[weatherApi.data.kind] || "🌤️"}
-                {" "}
-                {weatherApi.data.temp > 0 ? "+" : ""}{weatherApi.data.temp}° · {weatherApi.data.city}
-              </div>
-            )}
+            <div
+              style={{ fontSize: 11, color: s.text, opacity: 0.8, marginTop: 2, cursor: "pointer" }}
+              onClick={() => {
+                setCityInput(weatherApi.data?.city || "");
+                setCityModal(true);
+              }}
+            >
+              {weatherApi.data && !weatherApi.data.error ? (
+                <>
+                  {WEATHER_ICON[weatherApi.data.kind] || "🌤️"}
+                  {" "}
+                  {weatherApi.data.temp > 0 ? "+" : ""}{weatherApi.data.temp}° · {weatherApi.data.city}
+                </>
+              ) : (
+                <>🌤️ указать город</>
+              )}
+            </div>
           </div>
         </div>
         <div style={{ display: "flex", gap: 6, marginTop: 10 }}>
