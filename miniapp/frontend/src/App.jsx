@@ -2308,6 +2308,43 @@ function ArStats({ s }) {
 // SESSION DETAIL SHEET
 // ═══════════════════════════════════════════════════════════════
 
+function TarotCardTile({ s, card, deckId }) {
+  const [imgOk, setImgOk] = useState(true);
+  const hasFile = card.file && imgOk;
+  return (
+    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 6 }}>
+      {hasFile ? (
+        <img
+          src={`/decks/${deckId}/${card.file}`}
+          alt={card.en}
+          onError={() => setImgOk(false)}
+          style={{
+            width: "100%", aspectRatio: "2/3", objectFit: "cover",
+            borderRadius: 8, boxShadow: `0 2px 8px ${s.brd}`,
+          }}
+        />
+      ) : (
+        <div style={{
+          width: "100%", aspectRatio: "2/3", borderRadius: 8,
+          background: s.card, border: `1px solid ${s.brd}`,
+          display: "flex", alignItems: "center", justifyContent: "center",
+          fontSize: 32,
+        }}>🃏</div>
+      )}
+      <div style={{ textAlign: "center", width: "100%" }}>
+        <div style={{ fontSize: 11, color: s.text, fontWeight: 500, lineHeight: 1.2 }}>
+          {card.en || card.raw || "—"}
+        </div>
+        {card.ru && (
+          <div style={{ fontSize: 10, color: s.tM, lineHeight: 1.2 }}>
+            {card.ru}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function SessionDetail({ s, id }) {
   const { data, loading, error, refetch } = useApi(id ? `/api/arcana/sessions/${id}` : null, [id]);
   if (loading) return <Empty s={s} text="Загружаю..." />;
@@ -2344,6 +2381,12 @@ function SessionDetail({ s, id }) {
           <span style={{ color: s.text }}>{x.date}</span>
           <span style={{ color: s.tS }}>🂠 Тип</span>
           <span style={{ color: s.text }}>{x.type}</span>
+          {x.deck && (
+            <>
+              <span style={{ color: s.tS }}>🎴 Колода</span>
+              <span style={{ color: s.text }}>{x.deck}</span>
+            </>
+          )}
           <span style={{ color: s.tS }}>❓ Вопрос</span>
           <span style={{ color: s.text, fontSize: 11 }}>
             {x.q.length > 18 ? x.q.slice(0, 18) + "…" : x.q}
@@ -2378,45 +2421,36 @@ function SessionDetail({ s, id }) {
         <div style={{ fontSize: 11, color: s.tS }}>Фото расклада — бот загрузит через Cloudinary</div>
       </Glass>
 
-      {/* Карты по позициям (grid 2-col) */}
+      {/* wave6.4: Карты в раскладе — grid с картинками */}
       <SectionLabel s={s}>Карты в раскладе</SectionLabel>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
         {x.cards.map((c, i) => (
-          <Glass key={i} s={s} style={{ padding: "10px 12px" }}>
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 8,
-              }}
-            >
-              <span style={{ fontSize: 18, flexShrink: 0 }}>{c.icon}</span>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: 10, color: s.tS }}>{c.pos}</div>
-                <div
-                  style={{
-                    fontSize: 12,
-                    color: s.text,
-                    fontWeight: 500,
-                    whiteSpace: "nowrap",
-                    overflow: "hidden",
-                    textOverflow: "ellipsis",
-                  }}
-                >
-                  {c.name}
-                </div>
-              </div>
-            </div>
-          </Glass>
+          <TarotCardTile key={i} s={s} card={c} deckId={x.deckId} />
         ))}
       </div>
 
       {/* Дно колоды */}
-      {x.bottom && (
-        <Glass s={s} accent={s.acc} style={{ marginTop: 8, padding: "10px 12px" }}>
-          <div style={{ fontSize: 10, color: s.tS, marginBottom: 2 }}>🂠 Дно колоды</div>
-          <div style={{ fontSize: 13, color: s.text, fontWeight: 500 }}>
-            {x.bottom.icon} {x.bottom.name}
+      {x.bottomCard && (
+        <Glass s={s} accent={s.acc} style={{ marginTop: 10, padding: "10px 12px" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <span style={{ fontSize: 24, flexShrink: 0 }}>🂠</span>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 10, color: s.tS }}>Дно</div>
+              <div style={{ fontSize: 14, color: s.text, fontWeight: 500 }}>
+                {x.bottomCard.en || x.bottomCard.raw || "—"}
+              </div>
+              {x.bottomCard.ru && (
+                <div style={{ fontSize: 11, color: s.tM }}>{x.bottomCard.ru}</div>
+              )}
+            </div>
+            {x.bottomCard.file && (
+              <img
+                src={`/decks/${x.deckId}/${x.bottomCard.file}`}
+                alt={x.bottomCard.en}
+                onError={(e) => { e.target.style.display = "none"; }}
+                style={{ width: 40, borderRadius: 4 }}
+              />
+            )}
           </div>
         </Glass>
       )}

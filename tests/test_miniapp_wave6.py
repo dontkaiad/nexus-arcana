@@ -163,6 +163,77 @@ def test_finance_today_returns_budget_block(client):
     assert data["budget"]["pct"] == 0
 
 
+# ═════════════════════════════════════════════════════════════════════════════
+# Stage 4: tarot.py — deck registry, card matcher, canonical_card
+# ═════════════════════════════════════════════════════════════════════════════
+
+def test_tarot_find_card_exact_en():
+    from miniapp.backend.tarot import find_card
+    c = find_card("rider-waite", "The Fool")
+    assert c is not None
+    assert c["en"] == "The Fool"
+    assert c["ru"] == "Шут"
+    assert c["file"] == "00_fool.jpg"
+
+
+def test_tarot_find_card_exact_ru():
+    from miniapp.backend.tarot import find_card
+    c = find_card("rider-waite", "Жрица")
+    assert c is not None
+    assert c["en"] == "The High Priestess"
+
+
+def test_tarot_find_card_alias():
+    from miniapp.backend.tarot import find_card
+    c = find_card("rider-waite", "волшебник")
+    assert c is not None
+    assert c["en"] == "The Magician"
+
+
+def test_tarot_find_card_case_insensitive():
+    from miniapp.backend.tarot import find_card
+    c = find_card("rider-waite", "ИЕРОФАНТ")
+    assert c is not None
+    assert c["en"] == "The Hierophant"
+
+
+def test_tarot_canonical_card_matched():
+    from miniapp.backend.tarot import canonical_card
+    c = canonical_card("rider-waite", "Шут")
+    assert c["matched"] is True
+    assert c["en"] == "The Fool"
+    assert c["file"] == "00_fool.jpg"
+    assert c["deck_id"] == "rider-waite"
+
+
+def test_tarot_canonical_card_not_matched():
+    from miniapp.backend.tarot import canonical_card
+    c = canonical_card("rider-waite", "несуществующая карта")
+    assert c["matched"] is False
+    assert c["raw"] == "несуществующая карта"
+    assert c["deck_id"] == "rider-waite"
+
+
+def test_tarot_parse_cards_raw_comma():
+    from miniapp.backend.tarot import parse_cards_raw
+    cards = parse_cards_raw("Шут, Маг, Жрица", "rider-waite")
+    assert len(cards) == 3
+    assert cards[0]["en"] == "The Fool"
+    assert cards[1]["en"] == "The Magician"
+    assert cards[2]["en"] == "The High Priestess"
+
+
+def test_tarot_resolve_deck_id():
+    from miniapp.backend.tarot import resolve_deck_id
+    assert resolve_deck_id("Таро Уэйта") == "rider-waite"
+    assert resolve_deck_id("Rider-Waite") == "rider-waite"
+    assert resolve_deck_id("Ленорман") == "lenormand"
+    assert resolve_deck_id(None) == "rider-waite"
+    assert resolve_deck_id("") == "rider-waite"
+    # fallback
+    assert resolve_deck_id("какая-то неизвестная колода") == "rider-waite"
+
+
 def test_finance_today_budget_reflects_spending(client):
     pages = [
         {
