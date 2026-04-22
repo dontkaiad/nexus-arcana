@@ -296,19 +296,33 @@ const SectionLabel = ({ s, children, action }) => (
   </div>
 );
 
-const Empty = ({ s, text }) => (
-  <div
-    style={{
-      textAlign: "center",
-      padding: "18px 12px",
-      color: s.tS,
-      fontSize: 12,
-      fontStyle: "italic",
-    }}
-  >
-    {text}
-  </div>
-);
+const Empty = ({ s, text, chill, emoji, title }) => {
+  if (chill || emoji || title) {
+    // Wave 5 «чилл»-оформление: plaque/card вместо серого текста
+    return (
+      <Glass s={s} style={{ padding: "24px 14px", textAlign: "center" }}>
+        {emoji && <div style={{ fontSize: 36, marginBottom: 6 }}>{emoji}</div>}
+        {title && (
+          <div style={{ fontFamily: H, fontSize: 18, color: s.text }}>{title}</div>
+        )}
+        <div style={{ fontSize: 13, color: s.tM, marginTop: title ? 4 : 0 }}>{text}</div>
+      </Glass>
+    );
+  }
+  return (
+    <div
+      style={{
+        textAlign: "center",
+        padding: "18px 12px",
+        color: s.tS,
+        fontSize: 12,
+        fontStyle: "italic",
+      }}
+    >
+      {text}
+    </div>
+  );
+};
 
 const ErrorBox = ({ s, error, refetch }) => (
   <Glass s={s} accent={s.red} style={{ padding: "14px 16px" }}>
@@ -985,7 +999,9 @@ function NxTasks({ s, openTask }) {
       </div>
       {loading && <Empty s={s} text="Загружаю..." />}
       {error && <ErrorBox s={s} error={error} refetch={refetch} />}
-      {!loading && !error && list.length === 0 && <Empty s={s} text="Нет задач в этой категории" />}
+      {!loading && !error && list.length === 0 && (
+        <Empty s={s} emoji="🌿" title="Чилл" text="На сегодня задач нет. Можно отдохнуть." />
+      )}
       {!loading && !error && list.map((t) => (
         <Glass
           key={t.id}
@@ -1085,7 +1101,7 @@ function NxFinance({ s }) {
                 </span>
               </div>
             </Glass>
-            {items.length === 0 && <Empty s={s} text="Сегодня трат нет ✨" />}
+            {items.length === 0 && <Empty s={s} emoji="💚" title="Пока не тратила" text="Сегодня без трат — приятно." />}
             {items.map((x) => (
               <Glass key={x.id} s={s} style={{ padding: "8px 14px", marginBottom: 4 }}>
                 <div style={{ display: "flex", justifyContent: "space-between" }}>
@@ -1425,7 +1441,9 @@ function NxMemory({ s, openAdhd }) {
       </div>
       {loading && <Empty s={s} text="Загружаю..." />}
       {error && <ErrorBox s={s} error={error} refetch={refetch} />}
-      {!loading && !error && view.items.length === 0 && <Empty s={s} text="Ничего не найдено" />}
+      {!loading && !error && view.items.length === 0 && (
+        <Empty s={s} emoji="🧠" title="Память пуста" text="Тут будут твои заметки и паттерны." />
+      )}
       {!loading && !error && view.items.map((m) => (
         <Glass key={m.id} s={s} style={{ padding: "8px 14px", marginBottom: 4 }}>
           <div style={{ fontSize: 13, color: s.text }}>{m.text}</div>
@@ -1853,7 +1871,9 @@ function ArSessions({ s, openSession }) {
       </div>
       {loading && <Empty s={s} text="Загружаю..." />}
       {error && <ErrorBox s={s} error={error} refetch={refetch} />}
-      {!loading && !error && list.length === 0 && <Empty s={s} text="Раскладов нет" />}
+      {!loading && !error && list.length === 0 && (
+        <Empty s={s} emoji="🔮" title="Раскладов нет" text="Пока тишина — карты ждут." />
+      )}
       {!loading && !error && list.map((x) => {
         const cardsBrief = (x.cards || []).map((c) => c.name).slice(0, 3).join(", ") +
           (x.cards.length > 3 ? `, +${x.cards.length - 3}` : "");
@@ -1926,7 +1946,9 @@ function ArClients({ s, openClient }) {
       </Glass>
       {loading && <Empty s={s} text="Загружаю..." />}
       {error && <ErrorBox s={s} error={error} refetch={refetch} />}
-      {!loading && !error && view.clients.length === 0 && <Empty s={s} text="Клиентов пока нет" />}
+      {!loading && !error && view.clients.length === 0 && (
+        <Empty s={s} emoji="👥" title="Пока без клиентов" text="Когда придёт первый — появится здесь." />
+      )}
       {!loading && !error && view.clients.map((c) => (
         <Glass
           key={c.id}
@@ -2008,7 +2030,9 @@ function ArRituals({ s, openRitual }) {
       </div>
       {loading && <Empty s={s} text="Загружаю..." />}
       {error && <ErrorBox s={s} error={error} refetch={refetch} />}
-      {!loading && !error && list.length === 0 && <Empty s={s} text="Ритуалов нет" />}
+      {!loading && !error && list.length === 0 && (
+        <Empty s={s} emoji="🕯️" title="Ритуалов нет" text="Ничего не запланировано." />
+      )}
       {!loading && !error && list.map((r) => (
         <Glass
           key={r.id}
@@ -2061,7 +2085,9 @@ function ArGrimoire({ s, openGrimoire }) {
       </div>
       {loading && <Empty s={s} text="Загружаю..." />}
       {error && <ErrorBox s={s} error={error} refetch={refetch} />}
-      {!loading && !error && view.items.length === 0 && <Empty s={s} text="В гримуаре пока пусто" />}
+      {!loading && !error && view.items.length === 0 && (
+        <Empty s={s} emoji="📖" title="Гримуар пуст" text="Записи о колодах и картах появятся тут." />
+      )}
       {!loading && !error && view.items.map((g) => (
         <Glass
           key={g.id}
