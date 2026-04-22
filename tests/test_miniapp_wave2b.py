@@ -246,7 +246,8 @@ def test_arcana_sessions_list_and_filter(client):
     assert r_all.status_code == 200
     assert r_all.json()["total"] == 2
     first = r_all.json()["sessions"][0]
-    assert first["cards_brief"] == ["Шут", "Маг", "Жрица"]
+    # wave7.8.5: в списке раскладов карты — EN
+    assert first["cards_brief"] == ["The Fool", "The Magician", "The High Priestess"]
     assert first["client"] == "Анна"
 
     assert r_area.json()["total"] == 1
