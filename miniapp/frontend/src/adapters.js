@@ -153,6 +153,9 @@ export function adaptToday(data) {
       cat: x.cat || '',
       prio: x.prio || '⚪',
       date: formatDate(x.date, 'full'),
+      // wave8.9: показываем И дедлайн, И напоминалку, если они есть
+      deadlineTime: x.deadline_time || null,
+      reminderTime: x.reminder_time || null,
     })),
     noDate: (data.no_date || []).map((x) => ({
       id: x.id,

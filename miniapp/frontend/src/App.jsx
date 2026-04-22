@@ -98,9 +98,10 @@ function getSky(p) {
     w = lerpC("#8ab4a0", "#c4a060", t);
     g = lerpC("#c4c898", "#d4884a", t);
     b = lerpC("#dce8dc", "#e8dcc8", t);
-    text = "#2e2b24";
-    tS = "#4a463e"; // контраст поднят (было #5a564e)
-    tM = "#6e6a5e"; // контраст поднят (было #8a8578)
+    // wave8.9: чуть теплее/мягче вместо почти чёрного — заголовки теряли в гармонии
+    text = "#3a3a2e";
+    tS = "#5a564a";
+    tM = "#7a756a";
     acc = lerpC("#6b8f71", "#7a9068", t);
     brd = "rgba(160,154,142,0.35)";
     // wave8.0.1: glass — баланс между стеклом и читаемостью (0.28–0.34)
@@ -113,9 +114,9 @@ function getSky(p) {
     w = lerpC("#c4a060", "#c46040", t);
     g = lerpC("#d4884a", "#a04048", t);
     b = lerpC("#e8dcc8", "#2a2838", t);
-    text = lerpC("#2e2b24", "#d4ccc0", t);
-    tS = lerpC("#4a463e", "#b0a898", t);
-    tM = lerpC("#6e6a5e", "#807868", t);
+    text = lerpC("#3a3a2e", "#d4ccc0", t);
+    tS = lerpC("#5a564a", "#b0a898", t);
+    tM = lerpC("#7a756a", "#807868", t);
     acc = lerpC("#7a9068", "#5a8a80", t);
     brd = `rgba(${Math.round(lerp(255, 60, t))},${Math.round(lerp(255, 65, t))},${Math.round(
       lerp(255, 80, t)
@@ -165,7 +166,7 @@ function moonPhase(dt = new Date()) {
 }
 
 const H = "'Lora', Georgia, serif";
-const B = "-apple-system, 'SF Pro Text', system-ui, sans-serif";
+const B = "'Nunito', -apple-system, 'SF Pro Text', system-ui, sans-serif";
 
 // ═══════════════════════════════════════════════════════════════
 // CORE COMPONENTS
@@ -900,13 +901,23 @@ const TaskRow = ({ s, t, done, onToggle, onOpen, withTime }) => (
           alignItems: "center",
         }}
       >
-        {t.rem && (
+        {t.deadlineTime && (
+          <span style={{ display: "inline-flex", alignItems: "center", gap: 2 }}>
+            📅 {t.deadlineTime}
+          </span>
+        )}
+        {t.reminderTime && (
+          <span style={{ display: "inline-flex", alignItems: "center", gap: 2 }}>
+            <Bell size={9} /> {t.reminderTime}
+          </span>
+        )}
+        {t.rem && !t.reminderTime && (
           <span style={{ display: "inline-flex", alignItems: "center", gap: 2 }}>
             <Bell size={9} /> {t.rem}
           </span>
         )}
         {t.rpt && <span>{t.rpt}</span>}
-        {t.date && <span>{t.date}</span>}
+        {t.date && !t.deadlineTime && <span>{t.date}</span>}
         {t.streak > 0 && <span>🔥 {t.streak}</span>}
       </div>
     </div>
@@ -984,7 +995,19 @@ function NxDay({ s, openTask, navigate, openStreaks }) {
           <div style={{ textAlign: "right" }}>
             <div style={{ fontSize: 11, color: s.tS }}>{t.date}</div>
             {weatherApi.data && !weatherApi.data.error && (
-              <div style={{ fontSize: 10, color: s.tM, marginTop: 2 }}>
+              <div
+                style={{ fontSize: 11, color: s.text, opacity: 0.8, marginTop: 2, cursor: "pointer" }}
+                onClick={async () => {
+                  const current = weatherApi.data.city || "";
+                  const next = window.prompt("Твой город?", current);
+                  if (next && next.trim() && next !== current) {
+                    try {
+                      await apiPost("/api/weather/city", { city: next.trim() });
+                      weatherApi.refetch();
+                    } catch (_) { /* ignore */ }
+                  }
+                }}
+              >
                 {WEATHER_ICON[weatherApi.data.kind] || "🌤️"}
                 {" "}
                 {weatherApi.data.temp > 0 ? "+" : ""}{weatherApi.data.temp}° · {weatherApi.data.city}
@@ -3967,7 +3990,7 @@ export default function App() {
         input::placeholder { color: ${sky.tM}; opacity: 0.75 }
       `}</style>
 
-      {/* wave7.4: погодный overlay для Nexus */}
+      {/* wave7.4 + wave8.9: погодный overlay — видно разницу clear/cloudy/rain/snow/fog */}
       {isDay && (
         <div
           style={{
@@ -3975,18 +3998,18 @@ export default function App() {
             inset: 0,
             pointerEvents: "none",
             zIndex: 1,
-            opacity: 0.35,
+            opacity: 0.65,
             transition: "background 1s ease",
             background:
               weatherKind === "rain"
-                ? "linear-gradient(180deg, rgba(74,107,124,0.6) 0%, rgba(107,138,148,0.3) 100%)"
+                ? "linear-gradient(180deg, rgba(60,85,105,0.75) 0%, rgba(100,125,145,0.45) 100%)"
                 : weatherKind === "snow"
-                ? "linear-gradient(180deg, rgba(192,204,216,0.5) 0%, rgba(255,255,255,0.2) 100%)"
+                ? "linear-gradient(180deg, rgba(220,228,240,0.65) 0%, rgba(255,255,255,0.35) 100%)"
                 : weatherKind === "fog"
-                ? "linear-gradient(180deg, rgba(160,170,170,0.5) 0%, rgba(190,190,190,0.25) 100%)"
+                ? "linear-gradient(180deg, rgba(170,175,175,0.7) 0%, rgba(200,200,200,0.4) 100%)"
                 : weatherKind === "cloudy"
-                ? "linear-gradient(180deg, rgba(143,168,154,0.35) 0%, rgba(140,150,160,0.2) 100%)"
-                : "transparent",
+                ? "linear-gradient(180deg, rgba(140,160,170,0.55) 0%, rgba(160,170,180,0.3) 100%)"
+                : "linear-gradient(180deg, rgba(255,230,150,0.25) 0%, rgba(255,210,120,0.1) 100%)",
           }}
         />
       )}
