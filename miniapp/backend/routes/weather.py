@@ -288,27 +288,32 @@ async def weather_debug(tg_id: int = Depends(current_user_id)) -> dict[str, Any]
 
 @router.get("/weather")
 async def get_weather(tg_id: int = Depends(current_user_id)) -> dict[str, Any]:
-    cached = _cached(tg_id)
-    if cached:
-        return cached
+    try:
+        cached = _cached(tg_id)
+        if cached:
+            return cached
 
-    # wave8.10: мульти-стратегия поиска города в Памяти Nexus
-    city = await _resolve_city_from_memory(tg_id)
-    source = "memory"
-    if not city:
-        tz_raw = await memory_get(f"tz_{tg_id}")
-        tz = (tz_raw or "Europe/Moscow").strip()
-        city = TZ_TO_CITY.get(tz, "Moscow")
-        source = f"tz_fallback({tz})"
-    logger.info("weather[%s]: city=%s source=%s", tg_id, city, source)
+        # wave8.10: мульти-стратегия поиска города в Памяти Nexus
+        city = await _resolve_city_from_memory(tg_id)
+        source = "memory"
+        if not city:
+            tz_raw = await memory_get(f"tz_{tg_id}")
+            tz = (tz_raw or "Europe/Moscow").strip()
+            city = TZ_TO_CITY.get(tz, "Moscow")
+            source = f"tz_fallback({tz})"
+        logger.info("weather[%s]: city=%s source=%s", tg_id, city, source)
 
-    data = await _fetch_openmeteo(city)
-    if not data:
-        return {"city": city, "temp": 0, "code": 0, "kind": "clear",
-                "description": "—", "error": "fetch_failed"}
+        data = await _fetch_openmeteo(city)
+        if not data:
+            return {"city": city, "temp": 0, "code": 0, "kind": "clear",
+                    "description": "—", "error": "fetch_failed"}
 
-    _store(tg_id, data)
-    return data
+        _store(tg_id, data)
+        return data
+    except Exception:
+        logger.exception("weather[%s] failed", tg_id)
+        return {"city": "—", "temp": 0, "code": 0, "kind": "clear",
+                "description": "—", "error": "internal"}
 
 
 @router.post("/weather/refresh")
