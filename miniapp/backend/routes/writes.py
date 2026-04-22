@@ -139,10 +139,10 @@ async def task_create(
 ) -> dict[str, Any]:
     user_notion_id = (await get_user_notion_id(tg_id)) or ""
     db_id = config.nexus.db_tasks
+    # База задач — Nexus-only, поле "Бот" отсутствует в её схеме.
     props: dict = {
         "Задача": _title(body.title),
         "Статус": _status("Not started"),
-        "Бот": _select(BOT_NEXUS),
     }
     if body.prio:
         props["Приоритет"] = _select(body.prio)
