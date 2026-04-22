@@ -238,6 +238,7 @@ export function adaptFinanceLimits(data) {
   if (!data) return []
   return (data.categories || []).map((c) => ({
     name: catFull(c.cat),
+    raw: c.cat,  // wave7.5.2: для drill-down
     spent: c.spent ?? 0,
     limit: c.limit ?? 0,
     pct: c.pct ?? 0,
