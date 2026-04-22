@@ -168,6 +168,8 @@ function moonPhase(dt = new Date()) {
 const H = "'Lora', Georgia, serif";
 const B = "'Nunito', -apple-system, 'SF Pro Text', system-ui, sans-serif";
 
+const PRIO_WEIGHT = (p) => ({ "🔴": 0, "🟡": 1, "⚪": 2 }[p] ?? 3);
+
 // ═══════════════════════════════════════════════════════════════
 // CORE COMPONENTS
 // ═══════════════════════════════════════════════════════════════
@@ -330,13 +332,13 @@ const SectionLabel = ({ s, children, action }) => (
       justifyContent: "space-between",
       alignItems: "baseline",
       padding: "0 4px",
-      margin: "10px 0 6px",
+      margin: "14px 0 8px",
     }}
   >
     <span
       style={{
         fontFamily: H,
-        fontSize: 16,
+        fontSize: 19,
         fontWeight: 600,
         color: s.text,
         letterSpacing: 0.3,
@@ -854,10 +856,10 @@ const TaskRow = ({ s, t, done, onToggle, onOpen, withTime }) => (
       <span
         style={{
           fontFamily: "'SF Mono', Menlo, monospace",
-          fontSize: 12,
+          fontSize: 14,
           color: s.acc,
-          fontWeight: 500,
-          minWidth: 38,
+          fontWeight: 600,
+          minWidth: 44,
         }}
       >
         {t.time}
@@ -874,16 +876,17 @@ const TaskRow = ({ s, t, done, onToggle, onOpen, withTime }) => (
         {t.cat && (
           <span style={{
             display: "inline-flex", alignItems: "center",
-            padding: "1px 7px", borderRadius: 9,
-            fontSize: 10, background: `${s.acc}22`, color: s.text,
+            padding: "2px 8px", borderRadius: 10,
+            fontSize: 12, background: `${s.acc}33`, color: s.text, fontWeight: 500,
             flexShrink: 0, whiteSpace: "nowrap",
           }}>
             {t.cat}
           </span>
         )}
         <span style={{
-          fontSize: 15,
+          fontSize: 16,
           color: s.text,
+          fontWeight: 500,
           whiteSpace: "nowrap",
           overflow: "hidden",
           textOverflow: "ellipsis",
@@ -893,27 +896,28 @@ const TaskRow = ({ s, t, done, onToggle, onOpen, withTime }) => (
       </div>
       <div
         style={{
-          fontSize: 11,
-          color: s.tM,
-          marginTop: 2,
+          fontSize: 13,
+          color: s.text,
+          opacity: 0.72,
+          marginTop: 3,
           display: "flex",
-          gap: 6,
+          gap: 8,
           alignItems: "center",
         }}
       >
         {t.deadlineTime && (
-          <span style={{ display: "inline-flex", alignItems: "center", gap: 2 }}>
+          <span style={{ display: "inline-flex", alignItems: "center", gap: 3 }}>
             📅 {t.deadlineTime}
           </span>
         )}
         {t.reminderTime && (
-          <span style={{ display: "inline-flex", alignItems: "center", gap: 2 }}>
-            <Bell size={9} /> {t.reminderTime}
+          <span style={{ display: "inline-flex", alignItems: "center", gap: 3 }}>
+            <Bell size={12} /> {t.reminderTime}
           </span>
         )}
         {t.rem && !t.reminderTime && (
-          <span style={{ display: "inline-flex", alignItems: "center", gap: 2 }}>
-            <Bell size={9} /> {t.rem}
+          <span style={{ display: "inline-flex", alignItems: "center", gap: 3 }}>
+            <Bell size={12} /> {t.rem}
           </span>
         )}
         {t.rpt && <span>{t.rpt}</span>}
@@ -1093,30 +1097,53 @@ function NxDay({ s, openTask, navigate, openStreaks }) {
         </Glass>
       )}
 
-      {t.overdue.length > 0 && (
-        <Glass s={s} accent={s.red} style={{ padding: "10px 14px" }}>
-          <div style={{ fontSize: 11, color: s.red, fontWeight: 500, marginBottom: 5 }}>
-            Просрочено · {t.overdue.length}
-          </div>
+      {/* wave8.18: просроченные + сегодня — единый блок «Задачи» до Расписания */}
+      {(t.overdue.length > 0 || t.tasks.length > 0) && (
+        <>
+          <SectionLabel s={s}>Задачи</SectionLabel>
           {t.overdue.map((o) => (
-            <div
+            <Glass
               key={o.id}
+              s={s}
+              accent={s.red}
               onClick={() => openTask(o)}
               style={{
-                display: "flex",
-                justifyContent: "space-between",
-                alignItems: "center",
-                padding: "2px 0",
-                cursor: "pointer",
+                padding: "10px 14px", marginBottom: 6,
+                display: "flex", alignItems: "center", gap: 10, cursor: "pointer",
               }}
             >
-              <span style={{ fontSize: 13, color: s.text }}>
-                {o.cat} {o.title}
+              {o.cat && (
+                <span style={{
+                  display: "inline-flex", alignItems: "center",
+                  padding: "2px 8px", borderRadius: 10,
+                  fontSize: 12, background: `${s.red}33`, color: s.text, fontWeight: 500,
+                  flexShrink: 0, whiteSpace: "nowrap",
+                }}>
+                  {o.cat}
+                </span>
+              )}
+              <span style={{
+                flex: 1, fontSize: 16, color: s.text, fontWeight: 500,
+                whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+              }}>
+                {o.title}
               </span>
-              <span style={{ fontSize: 11, color: s.red }}>{o.days} д назад</span>
-            </div>
+              <span style={{ fontSize: 13, color: s.red, fontWeight: 500, flexShrink: 0 }}>
+                {o.days} д назад
+              </span>
+            </Glass>
           ))}
-        </Glass>
+          {t.tasks.map((x) => (
+            <TaskRow
+              key={x.id}
+              s={s}
+              t={x}
+              done={done[x.id]}
+              onToggle={() => toggle(x.id)}
+              onOpen={() => openTask(x)}
+            />
+          ))}
+        </>
       )}
 
       {t.scheduled.length > 0 && (
@@ -1136,26 +1163,10 @@ function NxDay({ s, openTask, navigate, openStreaks }) {
         </>
       )}
 
-      {t.tasks.length > 0 && (
-        <>
-          <SectionLabel s={s}>Сегодня</SectionLabel>
-          {t.tasks.map((x) => (
-            <TaskRow
-              key={x.id}
-              s={s}
-              t={x}
-              done={done[x.id]}
-              onToggle={() => toggle(x.id)}
-              onOpen={() => openTask(x)}
-            />
-          ))}
-        </>
-      )}
-
       {t.noDate && t.noDate.length > 0 && (
         <>
           <SectionLabel s={s}>📌 Без срока</SectionLabel>
-          {t.noDate.map((x) => (
+          {[...t.noDate].sort((a, b) => PRIO_WEIGHT(a.prio) - PRIO_WEIGHT(b.prio)).map((x) => (
             <TaskRow
               key={x.id}
               s={s}
