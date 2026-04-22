@@ -40,6 +40,7 @@ Python 3.9 · aiogram 3.x · Notion API · Claude API (Haiku + Sonnet) · OpenAI
 ├── core/               # Shared: classifier, Notion, Claude, memory, lists, voice, vision
 ├── nexus/              # ☀️ Nexus bot + handlers
 ├── arcana/             # 🌒 Arcana bot + handlers
+├── miniapp/            # Telegram Mini App (FastAPI backend + React frontend)
 ├── run.sh              # Auto-pull + watchfiles launcher
 └── requirements.txt
 ```
@@ -57,3 +58,28 @@ pip install -r requirements.txt
 ```
 
 Required: Telegram Bot, Anthropic API, Notion API, OpenAI API (for voice).
+
+## Mini App
+
+Backend встроен в Nexus (FastAPI на `:8000`, см. `miniapp/backend/`).
+Фронтенд — React + Vite в `miniapp/frontend/` (11 экранов, glass-стиль).
+
+### Dev локально
+
+```bash
+./run.sh                                 # бэкенд
+cd miniapp/frontend && npm install
+cd miniapp/frontend && npm run dev       # → http://localhost:5173
+```
+
+### Через Telegram-туннель
+
+Обычный `npm run dev` виснет через Cloudflare tunnel из-за стриминга большого
+`App.jsx`. Для туннеля используем prod-build в watch-режиме:
+
+```bash
+cd miniapp/frontend && npm run dev:tunnel    # build --watch + preview
+cloudflared tunnel --url http://localhost:5173 --protocol http2
+```
+
+URL туннеля настраивается в BotFather как menu button.
