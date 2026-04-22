@@ -28,6 +28,7 @@ from miniapp.backend.routes._arcana_common import (
     split_cards_raw,
     client_name_from,
 )
+from miniapp.backend.tarot import canonical_card, parse_cards_raw, resolve_deck_id
 
 logger = logging.getLogger("miniapp.arcana.sessions")
 
@@ -110,7 +111,13 @@ async def session_detail(
     interp_raw = rich_text_plain(page, "Трактовка")
     bottom_name, interp_cleaned = extract_bottom_from_interp(interp_raw)
     cards_raw = rich_text_plain(page, "Карты")
-    cards = split_cards_raw(cards_raw)
+
+    deck_raw = ", ".join(multi_select_names(page, "Колоды")) or None
+    deck_id = resolve_deck_id(deck_raw)
+
+    # wave6.4: cards теперь canonical-объекты (en/ru/file/matched) + deck_id
+    cards = parse_cards_raw(cards_raw, deck_id) if cards_raw else []
+    bottom_card = canonical_card(deck_id, bottom_name) if bottom_name else None
 
     client_name, client_id = client_name_from(page, clients_map)
     session_type = select_of(page, "Тип сеанса")
@@ -128,11 +135,13 @@ async def session_detail(
         "client_id": client_id,
         "self_client": self_client,
         "area": multi_select_names(page, "Область"),
-        "deck": ", ".join(multi_select_names(page, "Колоды")) or None,
+        "deck": deck_raw,
+        "deck_id": deck_id,
         "type": (multi_select_names(page, "Тип расклада") or [None])[0],
         "date": date_local.isoformat() if date_local else None,
         "cards_raw": cards_raw or None,
         "cards": cards,
+        "bottom_card": bottom_card,
         "bottom": (
             {"name": bottom_name, "icon": first_emoji(bottom_name) or None}
             if bottom_name else None
