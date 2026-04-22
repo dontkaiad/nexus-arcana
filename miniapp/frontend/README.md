@@ -59,3 +59,21 @@ public/
 npm run build      # в dist/
 npm run preview    # локальный статический сервер
 ```
+
+## Dev через Telegram туннель
+
+Для тестирования в Telegram Mini App через Cloudflare tunnel:
+
+```bash
+npm run dev:tunnel
+```
+
+Это запустит `vite build --watch` + `vite preview` одновременно — собирается prod-бандл и отдаётся как статика. Через туннель работает быстро (обычный `vite dev` виснет на стриминге большого `App.jsx`).
+
+Туннель поднимается отдельно:
+
+```bash
+cloudflared tunnel --url http://localhost:5173 --protocol http2
+```
+
+URL туннеля настраивается в BotFather как menu button.
