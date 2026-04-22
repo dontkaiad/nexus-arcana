@@ -165,9 +165,15 @@ async def get_weather(tg_id: int = Depends(current_user_id)) -> dict[str, Any]:
     if cached:
         return cached
 
-    tz_raw = await memory_get(f"tz_{tg_id}")
-    tz = (tz_raw or "Europe/Moscow").strip()
-    city = TZ_TO_CITY.get(tz, "Moscow")
+    # wave7.4: сначала ищем город в Памяти (ключ city_{tg_id}),
+    # только потом падаем на TZ → город.
+    city_from_memory = await memory_get(f"city_{tg_id}")
+    if city_from_memory and city_from_memory.strip():
+        city = city_from_memory.strip()
+    else:
+        tz_raw = await memory_get(f"tz_{tg_id}")
+        tz = (tz_raw or "Europe/Moscow").strip()
+        city = TZ_TO_CITY.get(tz, "Moscow")
 
     data = await _fetch_openmeteo(city)
     if not data:
