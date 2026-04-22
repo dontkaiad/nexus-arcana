@@ -67,6 +67,20 @@ export function formatDate(iso, mode = 'full', now = new Date()) {
   return sameYear ? `${day} ${mo}` : `${day} ${mo} ${year}`
 }
 
+// "every_2d" → "каждые 2 дня", "every_1d" → "каждый день", "every_7d" → "каждую неделю"
+export function formatRepeat(raw) {
+  if (!raw) return ''
+  const m = String(raw).match(/^every_(\d+)d$/)
+  if (!m) return String(raw)
+  const n = parseInt(m[1], 10)
+  if (n === 1) return 'каждый день'
+  if (n === 7) return 'каждую неделю'
+  if (n === 14) return 'каждые 2 недели'
+  const mod = n % 10
+  const tail = mod === 1 && n !== 11 ? 'день' : 'дня'
+  return `каждые ${n} ${tail}`
+}
+
 // 60 → "за 1 ч", 30 → "за 30 мин", 90 → "за 1 ч 30 мин", 120 → "за 2 ч"
 export function formatReminder(minutes) {
   if (!minutes || minutes <= 0) return null
@@ -100,7 +114,7 @@ export function adaptToday(data) {
       prio: x.prio || '⚪',
       time: x.time || '',
       rem: formatReminder(x.reminder_min),
-      rpt: x.repeat ? `🔄 ${x.repeat}` : undefined,
+      rpt: x.repeat ? `🔄 ${formatRepeat(x.repeat)}` : undefined,
       streak: x.streak || 0,
     })),
     tasks: (data.tasks || []).map((x) => ({
@@ -109,6 +123,12 @@ export function adaptToday(data) {
       cat: x.cat || '',
       prio: x.prio || '⚪',
       date: formatDate(x.date, 'full'),
+    })),
+    noDate: (data.no_date || []).map((x) => ({
+      id: x.id,
+      title: x.title,
+      cat: x.cat || '',
+      prio: x.prio || '⚪',
     })),
     adhdTip: data.adhd_tip || '',
   }

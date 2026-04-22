@@ -318,8 +318,9 @@ const SectionLabel = ({ s, children, action }) => (
     <span
       style={{
         fontFamily: H,
-        fontSize: 12,
-        color: s.tS,
+        fontSize: 16,
+        fontWeight: 600,
+        color: s.text,
         letterSpacing: 0.3,
       }}
     >
@@ -907,9 +908,8 @@ const WEATHER_ICON = {
 function NxDay({ s, openTask, navigate, openStreaks }) {
   const [done, setDone] = useState({});
   const { data, loading, error, refetch } = useApi('/api/today');
-  // wave6.5: погода + стрик-календарь
+  // wave6.5: погода (календарь стриков теперь только в StreaksSheet)
   const weatherApi = useApi('/api/weather');
-  const weekApi = useApi('/api/streaks/week');
 
   if (loading) return <Empty s={s} text="Загружаю..." />;
   if (error) {
@@ -938,7 +938,7 @@ function NxDay({ s, openTask, navigate, openStreaks }) {
 
   const t = adaptToday(data);
   const doneCount = Object.values(done).filter(Boolean).length;
-  const total = t.scheduled.length + t.tasks.length;
+  const total = t.scheduled.length + t.tasks.length + (t.noDate?.length || 0);
   const leftPct = Math.round((t.spentDay / t.budgetDay) * 100);
   const toggle = (id) => setDone((p) => ({ ...p, [id]: !p[id] }));
 
@@ -1009,29 +1009,32 @@ function NxDay({ s, openTask, navigate, openStreaks }) {
         </div>
       </Glass>
 
-      {/* wave6.5.4: стрик-календарь 7 дней */}
-      {weekApi.data?.days && (
-        <Glass s={s} style={{ padding: "8px 10px" }}>
-          <div style={{ fontSize: 10, color: s.tS, marginBottom: 6 }}>
-            Последние 7 дней
+      {/* wave7.3: СДВГ-совет поднят наверх */}
+      {t.adhdTip && (
+        <Glass s={s} accent={s.acc}>
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              marginBottom: 4,
+            }}
+          >
+            <span
+              style={{
+                fontSize: 11,
+                color: s.acc,
+                fontWeight: 500,
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 5,
+              }}
+            >
+              🦋 СДВГ-совет
+            </span>
+            <RefreshCw size={13} color={s.tS} style={{ cursor: "pointer" }} />
           </div>
-          <div style={{ display: "flex", gap: 4, justifyContent: "space-between" }}>
-            {weekApi.data.days.map((d, i) => (
-              <div key={i} style={{ flex: 1, textAlign: "center" }}>
-                <div style={{
-                  aspectRatio: "1/1",
-                  borderRadius: 6,
-                  border: d.is_today ? `2px solid ${s.amber}` : `1px solid ${s.brd}`,
-                  background: d.has_activity ? `${s.amber}44` : "transparent",
-                  display: "flex", alignItems: "center", justifyContent: "center",
-                  fontSize: 13,
-                }}>
-                  {d.has_activity ? "🔥" : ""}
-                </div>
-                <div style={{ fontSize: 9, color: s.tS, marginTop: 2 }}>{d.weekday}</div>
-              </div>
-            ))}
-          </div>
+          <div style={{ fontSize: 12, color: s.text, lineHeight: 1.5 }}>{t.adhdTip}</div>
         </Glass>
       )}
 
@@ -1080,7 +1083,7 @@ function NxDay({ s, openTask, navigate, openStreaks }) {
 
       {t.tasks.length > 0 && (
         <>
-          <SectionLabel s={s}>Задачи</SectionLabel>
+          <SectionLabel s={s}>Сегодня</SectionLabel>
           {t.tasks.map((x) => (
             <TaskRow
               key={x.id}
@@ -1094,33 +1097,23 @@ function NxDay({ s, openTask, navigate, openStreaks }) {
         </>
       )}
 
-      {total === 0 && <Empty s={s} text="На сегодня пусто — отдыхай 🌿" />}
+      {t.noDate && t.noDate.length > 0 && (
+        <>
+          <SectionLabel s={s}>📌 Без срока</SectionLabel>
+          {t.noDate.map((x) => (
+            <TaskRow
+              key={x.id}
+              s={s}
+              t={x}
+              done={done[x.id]}
+              onToggle={() => toggle(x.id)}
+              onOpen={() => openTask(x)}
+            />
+          ))}
+        </>
+      )}
 
-      <Glass s={s} accent={s.acc} style={{ marginTop: 4 }}>
-        <div
-          style={{
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-            marginBottom: 4,
-          }}
-        >
-          <span
-            style={{
-              fontSize: 11,
-              color: s.acc,
-              fontWeight: 500,
-              display: "inline-flex",
-              alignItems: "center",
-              gap: 5,
-            }}
-          >
-            🦋 СДВГ-совет
-          </span>
-          <RefreshCw size={13} color={s.tS} style={{ cursor: "pointer" }} />
-        </div>
-        <div style={{ fontSize: 12, color: s.text, lineHeight: 1.5 }}>{t.adhdTip}</div>
-      </Glass>
+      {total === 0 && <Empty s={s} text="На сегодня пусто — отдыхай 🌿" />}
     </div>
   );
 }
