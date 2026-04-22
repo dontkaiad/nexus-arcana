@@ -175,7 +175,7 @@ export function adaptTasks(data) {
     cat: catFull(t.cat),
     prio: t.prio || '⚪',
     status: t.status || 'active',
-    date: t.deadline ? formatShortDate(t.deadline) : null,
+    date: t.deadline ? formatDate(t.deadline, 'full') : null,
     time: t.deadline_time || null,
     rpt: t.repeat ? `🔄 ${t.repeat}` : undefined,
     streak: t.streak || 0,
