@@ -161,67 +161,119 @@ async def _fetch_openmeteo(city: str) -> Optional[dict]:
         return None
 
 
+_CITY_ALIASES: dict[str, str] = {
+    "спб": "Saint Petersburg",
+    "питер": "Saint Petersburg",
+    "петербург": "Saint Petersburg",
+    "санкт-петербург": "Saint Petersburg",
+    "санкт петербург": "Saint Petersburg",
+    "мск": "Moscow",
+    "москва": "Moscow",
+}
+
+
+def _normalize_city(raw: str) -> str:
+    """СПб/Питер → Saint Petersburg для geocoding API."""
+    if not raw:
+        return raw
+    key = raw.strip().lower().strip(".,!?;:")
+    return _CITY_ALIASES.get(key, raw.strip())
+
+
 async def _resolve_city_from_memory(tg_id: int) -> Optional[str]:
-    """wave8.10: ищем город в Памяти Nexus по нескольким стратегиям.
+    """wave8.10/8.11: ищем город в Памяти Nexus по нескольким стратегиям.
 
     1) Явный ключ city_{tg_id} (из POST /weather/city).
     2) Общие ключи: 'город', 'city', 'Город'.
     3) Фьюзи-поиск: для user_notion_id берём записи где Ключ/Текст
-       содержат 'город' или 'city' (case-insensitive) и берём первое
-       непустое значение из Текста.
+       содержат 'город'/'city'/'живу' и вытаскиваем значение.
     """
     # 1) Явный ключ
     v = await memory_get(f"city_{tg_id}")
     if v and v.strip():
-        return v.strip()
+        logger.info("resolve_city[%s]: hit explicit key city_%s = %s", tg_id, tg_id, v)
+        return _normalize_city(v)
 
     # 2) Распространённые ключи
     for key in ("город", "Город", "city", "City"):
         v = await memory_get(key)
         if v and v.strip():
-            return v.strip()
+            logger.info("resolve_city[%s]: hit common key %s = %s", tg_id, key, v)
+            return _normalize_city(v)
 
     # 3) Фьюзи-поиск среди записей пользователя
     user_notion_id = (await get_user_notion_id(tg_id)) or ""
-    if not user_notion_id:
-        return None
     db_id = config.nexus.db_memory
     if not db_id:
+        logger.warning("resolve_city[%s]: no db_memory configured", tg_id)
         return None
+
+    # Без фильтра по Актуально — старые записи тоже подходят.
+    # Если user_notion_id есть — сузим; нет — обойдёмся без relation-фильтра.
+    base_filters: list = []
+    if user_notion_id:
+        base_filters.append({
+            "property": "Пользователь",
+            "relation": {"contains": user_notion_id},
+        })
+
+    or_clause = [
+        {"property": "Ключ", "rich_text": {"contains": "город"}},
+        {"property": "Ключ", "rich_text": {"contains": "city"}},
+        {"property": "Текст", "title": {"contains": "город"}},
+        {"property": "Текст", "title": {"contains": "живу"}},
+        {"property": "Текст", "title": {"contains": "Питер"}},
+        {"property": "Текст", "title": {"contains": "СПб"}},
+    ]
+
+    filters: dict
+    if base_filters:
+        filters = {"and": base_filters + [{"or": or_clause}]}
+    else:
+        filters = {"or": or_clause}
+
     try:
-        # rich_text contains — Notion ищет подстроку нерегистрозависимо
-        pages = await query_pages(
-            db_id,
-            filters={"and": [
-                {"property": "Пользователь", "relation": {"contains": user_notion_id}},
-                {"property": "Актуально", "checkbox": {"equals": True}},
-                {"or": [
-                    {"property": "Ключ", "rich_text": {"contains": "город"}},
-                    {"property": "Ключ", "rich_text": {"contains": "city"}},
-                    {"property": "Текст", "title": {"contains": "город"}},
-                ]},
-            ]},
-            page_size=5,
-        )
+        pages = await query_pages(db_id, filters=filters, page_size=10)
     except Exception as e:
-        logger.warning("resolve_city fuzzy search failed: %s", e)
+        logger.warning("resolve_city[%s] fuzzy search failed: %s", tg_id, e)
         return None
+
+    logger.info("resolve_city[%s]: fuzzy found %d pages", tg_id, len(pages))
     for p in pages:
         props = p.get("properties", {}) or {}
         title_items = (props.get("Текст", {}) or {}).get("title") or []
         text = "".join(it.get("plain_text", "") for it in title_items).strip()
-        if text:
-            # если «город: Санкт-Петербург» — отделяем после двоеточия
-            if ":" in text:
-                tail = text.split(":", 1)[1].strip()
-                if tail:
-                    return tail
-            # если «живу в СПб», пытаемся достать последнее слово
-            words = text.split()
-            if len(words) >= 2 and words[-2].lower() in {"в", "во", "из", "на"}:
-                return words[-1]
-            return text
+        key_items = (props.get("Ключ", {}) or {}).get("rich_text") or []
+        key_text = "".join(it.get("plain_text", "") for it in key_items).strip()
+        logger.info("resolve_city[%s]: candidate key=%r text=%r", tg_id, key_text, text)
+        if not text:
+            continue
+        # «город: Санкт-Петербург» → «Санкт-Петербург»
+        if ":" in text:
+            tail = text.split(":", 1)[1].strip()
+            if tail:
+                return _normalize_city(tail)
+        # «живу в СПб» → «СПб»
+        words = text.split()
+        if len(words) >= 2 and words[-2].lower() in {"в", "во", "из", "на"}:
+            return _normalize_city(words[-1])
+        return _normalize_city(text)
     return None
+
+
+@router.get("/weather/debug")
+async def weather_debug(tg_id: int = Depends(current_user_id)) -> dict[str, Any]:
+    """wave8.11: диагностика — показывает откуда резолвится город."""
+    resolved = await _resolve_city_from_memory(tg_id)
+    tz_raw = await memory_get(f"tz_{tg_id}")
+    user_notion_id = (await get_user_notion_id(tg_id)) or ""
+    return {
+        "tg_id": tg_id,
+        "user_notion_id": user_notion_id,
+        "resolved_city": resolved,
+        "tz_memory": tz_raw,
+        "fallback_city": TZ_TO_CITY.get((tz_raw or "Europe/Moscow").strip(), "Moscow"),
+    }
 
 
 @router.get("/weather")
@@ -232,10 +284,13 @@ async def get_weather(tg_id: int = Depends(current_user_id)) -> dict[str, Any]:
 
     # wave8.10: мульти-стратегия поиска города в Памяти Nexus
     city = await _resolve_city_from_memory(tg_id)
+    source = "memory"
     if not city:
         tz_raw = await memory_get(f"tz_{tg_id}")
         tz = (tz_raw or "Europe/Moscow").strip()
         city = TZ_TO_CITY.get(tz, "Moscow")
+        source = f"tz_fallback({tz})"
+    logger.info("weather[%s]: city=%s source=%s", tg_id, city, source)
 
     data = await _fetch_openmeteo(city)
     if not data:
