@@ -33,6 +33,15 @@ _TYPE_MAP = {
     "inv": "📦 Инвентарь",
 }
 
+# wave6.1: для сопоставления real-Notion опций (с возможным другим emoji-variant
+# или пробелом) используем набор ключевых слов. Если точный select match не сработал,
+# фильтруем client-side по этим подстрокам.
+_TYPE_KEYWORDS = {
+    "buy": ("покупк",),
+    "check": ("чеклист", "чек-лист", "чеклисты"),
+    "inv": ("инвентар",),
+}
+
 
 def _serialize(page: dict) -> dict:
     props = page.get("properties", {})
@@ -66,10 +75,10 @@ async def get_lists(
         return {"type": type, "items": []}
 
     user_notion_id = (await get_user_notion_id(tg_id)) or ""
-    # wave5.4: старые записи (созданные вручную в Notion или до появления поля "Бот")
-    # могли остаться без заполненного "Бот". Разрешаем и Nexus, и пустое.
+    # wave6.1: фильтруем ТОЛЬКО по user + Бот (Nexus or empty).
+    # По "Тип" фильтруем client-side — Notion иногда возвращает 0 из-за
+    # emoji-variant'ов и пробелов, а select-equals жёстко сравнивает.
     conditions: list[dict] = [
-        {"property": "Тип", "select": {"equals": _TYPE_MAP[type]}},
         {"or": [
             {"property": "Бот", "select": {"equals": BOT_NEXUS}},
             {"property": "Бот", "select": {"is_empty": True}},
@@ -81,7 +90,6 @@ async def get_lists(
             "relation": {"contains": user_notion_id},
         })
 
-    # Сортировка: для инвентаря — по Сроку годности, иначе — по дате создания DESC
     sorts = (
         [{"property": "Срок годности", "direction": "ascending"}]
         if type == "inv"
@@ -90,13 +98,29 @@ async def get_lists(
 
     try:
         pages = await query_pages(
-            db_id, filters={"and": conditions}, sorts=sorts, page_size=200,
+            db_id, filters={"and": conditions}, sorts=sorts, page_size=500,
         )
     except Exception as e:
         logger.warning("lists query failed, retry without sort: %s", e)
-        pages = await query_pages(db_id, filters={"and": conditions}, page_size=200)
+        pages = await query_pages(db_id, filters={"and": conditions}, page_size=500)
 
+    # Client-side type matching: point-match (exact TYPE_MAP value) ИЛИ keyword substring.
+    type_target = _TYPE_MAP[type]
+    keywords = _TYPE_KEYWORDS[type]
+
+    def _matches_type(page: dict) -> bool:
+        raw = select_name(page.get("properties", {}).get("Тип", {}))
+        if not raw:
+            return False
+        if raw == type_target:
+            return True
+        raw_lower = raw.lower()
+        return any(k in raw_lower for k in keywords)
+
+    pages = [p for p in pages if _matches_type(p)]
     items = [_serialize(p) for p in pages]
+    # Archived не показываем
+    items = [i for i in items if i["status"] != "Archived"]
 
     if q:
         needle = q.lower().strip()
