@@ -4,7 +4,8 @@ from __future__ import annotations
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from miniapp.backend.routes import today
+from miniapp.backend.routes import today, tasks, finance, lists, memory
+from miniapp.backend.routes import calendar as cal
 
 app = FastAPI(title="Nexus × Arcana API")
 
@@ -16,6 +17,11 @@ app.add_middleware(
 )
 
 app.include_router(today.router, prefix="/api")
+app.include_router(tasks.router, prefix="/api")
+app.include_router(finance.router, prefix="/api")
+app.include_router(lists.router, prefix="/api")
+app.include_router(memory.router, prefix="/api")
+app.include_router(cal.router, prefix="/api")
 
 
 @app.get("/health")
