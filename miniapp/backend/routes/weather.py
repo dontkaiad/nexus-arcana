@@ -213,7 +213,7 @@ async def _resolve_city_from_memory(tg_id: int) -> Optional[str]:
     base_filters: list = []
     if user_notion_id:
         base_filters.append({
-            "property": "Пользователь",
+            "property": "🪪 Пользователи",
             "relation": {"contains": user_notion_id},
         })
 
