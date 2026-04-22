@@ -1357,8 +1357,14 @@ function NxFinance({ s }) {
             {cats.length === 0 && <Empty s={s} text="Нет активных лимитов" />}
             {cats.map((c, i) => {
               const clr = c.zone === "red" ? s.red : c.zone === "yellow" ? s.amber : s.acc;
+              const catFull = c.raw?.full || (c.raw?.emoji ? `${c.raw.emoji} ${c.raw?.name || ""}`.trim() : c.name);
+              const monthIso = data?.month || new Date().toISOString().slice(0, 7);
               return (
-                <Glass key={i} s={s} style={{ padding: "8px 14px", marginBottom: 4 }}>
+                <Glass
+                  key={i} s={s}
+                  style={{ padding: "8px 14px", marginBottom: 4, cursor: "pointer" }}
+                  onClick={() => setDrillCat({ full: catFull, display: c.name, month: monthIso })}
+                >
                   <div
                     style={{
                       display: "flex", justifyContent: "space-between",
@@ -3190,8 +3196,6 @@ const NEXUS_ADD = [
   { key: "note", icon: StickyNote, label: "Заметка" },
   { key: "list", icon: ListIcon, label: "В список" },
   { key: "memory", icon: Brain, label: "В память" },
-  { key: "photo", icon: Camera, label: "Фото чека" },
-  { key: "voice", icon: Mic, label: "Голосом" },
 ];
 
 const ARCANA_ADD = [
@@ -3201,7 +3205,6 @@ const ARCANA_ADD = [
   { key: "expense", icon: Wallet, label: "Финансы" },
   { key: "grimoire", icon: BookOpen, label: "В гримуар" },
   { key: "photo", icon: Camera, label: "Фото расклада" },
-  { key: "voice", icon: Mic, label: "Голосом" },
 ];
 
 function QuickAdd({ s, actions, onPick }) {
@@ -4015,8 +4018,10 @@ export default function App() {
         {Scr && <Scr {...shared} />}
       </div>
 
-      {/* FAB */}
-      <FAB s={sky} onClick={() => setFabOpen(true)} />
+      {/* FAB — wave7.5.5: скрываем когда открыт любой модал */}
+      {!fabOpen && !fabForm && !modal && (
+        <FAB s={sky} onClick={() => setFabOpen(true)} />
+      )}
 
       {/* BOTTOM NAV */}
       <div
