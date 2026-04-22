@@ -169,95 +169,105 @@ _CITY_ALIASES: dict[str, str] = {
     "санкт петербург": "Saint Petersburg",
     "мск": "Moscow",
     "москва": "Moscow",
+    "мск.": "Moscow",
 }
 
+# стоп-слова, которые иногда остаются после парсинга — не города
+_STOPWORDS = {"в", "во", "из", "на", "и", "я", "мы", "живу", "живём", "сейчас", "сегодня"}
 
-def _normalize_city(raw: str) -> str:
-    """СПб/Питер → Saint Petersburg для geocoding API."""
+
+def _normalize_city(raw: str) -> Optional[str]:
     if not raw:
-        return raw
-    key = raw.strip().lower().strip(".,!?;:")
-    return _CITY_ALIASES.get(key, raw.strip())
+        return None
+    cleaned = raw.strip().strip(".,!?;:\"'()[]").strip()
+    if not cleaned:
+        return None
+    key = cleaned.lower()
+    if key in _STOPWORDS:
+        return None
+    return _CITY_ALIASES.get(key, cleaned)
+
+
+def _extract_city_from_text(text: str) -> Optional[str]:
+    """Достаём название города из произвольного текста."""
+    if not text:
+        return None
+    t = text.strip()
+    # «город: СПб» / «локация: Питер» — берём хвост после двоеточия
+    if ":" in t:
+        tail = t.split(":", 1)[1].strip()
+        if tail:
+            return _normalize_city(tail)
+    # «живу в СПб» / «сейчас в Питере»
+    words = t.split()
+    for i, w in enumerate(words[:-1]):
+        if w.lower() in {"в", "во", "из", "на"}:
+            candidate = words[i + 1]
+            norm = _normalize_city(candidate)
+            if norm:
+                return norm
+    # сам текст — короткое название («СПб», «Moscow»)
+    if len(words) <= 3:
+        return _normalize_city(t)
+    return None
 
 
 async def _resolve_city_from_memory(tg_id: int) -> Optional[str]:
-    """wave8.10/8.11: ищем город в Памяти Nexus по нескольким стратегиям.
-
-    1) Явный ключ city_{tg_id} (из POST /weather/city).
-    2) Общие ключи: 'город', 'city', 'Город'.
-    3) Фьюзи-поиск: для user_notion_id берём записи где Ключ/Текст
-       содержат 'город'/'city'/'живу' и вытаскиваем значение.
-    """
-    # 1) Явный ключ
-    v = await memory_get(f"city_{tg_id}")
-    if v and v.strip():
-        logger.info("resolve_city[%s]: hit explicit key city_%s = %s", tg_id, tg_id, v)
-        return _normalize_city(v)
-
-    # 2) Распространённые ключи
-    for key in ("город", "Город", "city", "City"):
-        v = await memory_get(key)
-        if v and v.strip():
-            logger.info("resolve_city[%s]: hit common key %s = %s", tg_id, key, v)
-            return _normalize_city(v)
-
-    # 3) Фьюзи-поиск среди записей пользователя
-    user_notion_id = (await get_user_notion_id(tg_id)) or ""
+    """Ищем город в Памяти Nexus: грузим записи юзера и сканируем в Python."""
     db_id = config.nexus.db_memory
     if not db_id:
         logger.warning("resolve_city[%s]: no db_memory configured", tg_id)
         return None
 
-    # Без фильтра по Актуально — старые записи тоже подходят.
-    # Если user_notion_id есть — сузим; нет — обойдёмся без relation-фильтра.
-    base_filters: list = []
-    if user_notion_id:
-        base_filters.append({
-            "property": "🪪 Пользователи",
-            "relation": {"contains": user_notion_id},
-        })
-
-    or_clause = [
-        {"property": "Ключ", "rich_text": {"contains": "город"}},
-        {"property": "Ключ", "rich_text": {"contains": "city"}},
-        {"property": "Текст", "title": {"contains": "город"}},
-        {"property": "Текст", "title": {"contains": "живу"}},
-        {"property": "Текст", "title": {"contains": "Питер"}},
-        {"property": "Текст", "title": {"contains": "СПб"}},
-    ]
+    user_notion_id = (await get_user_notion_id(tg_id)) or ""
 
     filters: dict
-    if base_filters:
-        filters = {"and": base_filters + [{"or": or_clause}]}
+    if user_notion_id:
+        filters = {"and": [
+            {"property": "🪪 Пользователи", "relation": {"contains": user_notion_id}},
+            {"property": "Актуально", "checkbox": {"equals": True}},
+        ]}
     else:
-        filters = {"or": or_clause}
+        filters = {"property": "Актуально", "checkbox": {"equals": True}}
 
     try:
-        pages = await query_pages(db_id, filters=filters, page_size=10)
+        pages = await query_pages(db_id, filters=filters, page_size=200)
     except Exception as e:
-        logger.warning("resolve_city[%s] fuzzy search failed: %s", tg_id, e)
+        logger.warning("resolve_city[%s] fetch failed: %s", tg_id, e)
         return None
 
-    logger.info("resolve_city[%s]: fuzzy found %d pages", tg_id, len(pages))
+    logger.info("resolve_city[%s]: scanning %d memory records", tg_id, len(pages))
+
+    # Приоритет: записи где Ключ/Текст намекают на локацию
+    city_keys = ("город", "city", "локация", "location", "живу")
+    city_text_markers = ("город", "живу", "Питер", "СПб", "Москва", "Мск")
+
+    candidates: list[tuple[int, str, str]] = []  # (priority, key, text)
     for p in pages:
         props = p.get("properties", {}) or {}
         title_items = (props.get("Текст", {}) or {}).get("title") or []
         text = "".join(it.get("plain_text", "") for it in title_items).strip()
         key_items = (props.get("Ключ", {}) or {}).get("rich_text") or []
         key_text = "".join(it.get("plain_text", "") for it in key_items).strip()
-        logger.info("resolve_city[%s]: candidate key=%r text=%r", tg_id, key_text, text)
         if not text:
             continue
-        # «город: Санкт-Петербург» → «Санкт-Петербург»
-        if ":" in text:
-            tail = text.split(":", 1)[1].strip()
-            if tail:
-                return _normalize_city(tail)
-        # «живу в СПб» → «СПб»
-        words = text.split()
-        if len(words) >= 2 and words[-2].lower() in {"в", "во", "из", "на"}:
-            return _normalize_city(words[-1])
-        return _normalize_city(text)
+        key_lower = key_text.lower()
+        text_lower = text.lower()
+        if any(m in key_lower for m in city_keys):
+            candidates.append((0, key_text, text))
+        elif any(m.lower() in text_lower for m in city_text_markers):
+            candidates.append((1, key_text, text))
+
+    candidates.sort(key=lambda x: x[0])
+    for prio, key_text, text in candidates[:10]:
+        logger.info("resolve_city[%s]: candidate prio=%d key=%r text=%r",
+                    tg_id, prio, key_text, text)
+        city = _extract_city_from_text(text)
+        if city:
+            logger.info("resolve_city[%s]: resolved → %s", tg_id, city)
+            return city
+
+    logger.info("resolve_city[%s]: no city found in %d records", tg_id, len(pages))
     return None
 
 
