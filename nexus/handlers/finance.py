@@ -20,27 +20,29 @@ from core.claude_client import ask_claude, ask_claude_vision
 from nexus.handlers.utils import react
 from core.notion_client import finance_month, log_error, page_create, update_page, create_report_page, _title, _number, _select, _date, _text
 
+# Парсинг бюджета вынесен в core.budget — здесь re-export под старыми именами
+# для backward compat с существующими call-sites в модуле.
+from core.budget import (
+    BUDGET_KEY_TO_CATEGORY as _BUDGET_KEY_TO_CATEGORY,
+    BUDGET_ALL_CATEGORIES as _BUDGET_ALL_CATEGORIES,
+    LIMIT_AMOUNT_RE as _LIMIT_AMOUNT_RE,
+    LIMIT_FACT_RE as _LIMIT_FACT_RE,
+    INCOME_RE as _INCOME_RE,
+    OBLIGATORY_RE as _OBLIGATORY_RE,
+    GOAL_RE as _GOAL_RE,
+    DEBT_RE as _DEBT_RE,
+    LIMIT_DISPLAY as _LIMIT_DISPLAY,
+    parse_amount as _parse_amount,
+    cat_link as _cat_link,
+    display_limit_name as _display_limit_name,
+    get_limits as _get_limits,
+    load_budget_data as _load_budget_data,
+)
+
 logger = logging.getLogger("nexus.finance")
 MOSCOW_TZ = timezone(timedelta(hours=3))
 
 router = Router()
-
-# Маппинг ключ → категория Notion для бюджетных записей
-_BUDGET_KEY_TO_CATEGORY = {
-    "income_": "📥 Доход",
-    "обязательно_": "🔒 Обязательные",
-    "лимит_": "💰 Лимит",
-    "цель_": "🎯 Цели",
-    "долг_": "📋 Долги",
-}
-_BUDGET_ALL_CATEGORIES = list(_BUDGET_KEY_TO_CATEGORY.values())
-
-_LIMIT_AMOUNT_RE = re.compile(r'(\d[\d\s]*(?:[.,]\d+)?)\s*[₽р]')
-# Парсит "лимит: 🍱 Кафе/Доставка — 9000₽/мес" → group(1)=категория, group(2)=сумма
-_LIMIT_FACT_RE = re.compile(
-    r'лимит[:\s]+([^—\-\d]+?)\s*[—\-]\s*(\d[\d\s]*(?:[.,]\d+)?)\s*[₽р]',
-    re.IGNORECASE | re.UNICODE,
-)
 _INCOME_MARKERS_RE = re.compile(
     r'\b(получила|получил|заработала|заработал|зарплата|доход|перевели|перевёл|перевел'
     r'|вернули|вернул|пришло|пришла|поступил[аио]?|аванс)\b',
@@ -65,29 +67,6 @@ HABIT_WARNINGS = [
     "💡 Одна пачка в два дня вместо одной = 4 250₽ экономии/мес.",
 ]
 
-# ── Бюджет: regex для парсинга записей из памяти ─────────────────────────────
-_INCOME_RE = re.compile(
-    r'доход:\s*(.+?)\s*[—\-]\s*(\d[\d\s]*(?:[.,]\d+)?)\s*[₽р]',
-    re.IGNORECASE,
-)
-_OBLIGATORY_RE = re.compile(
-    r'обязательно:\s*(.+?)\s*[—\-]\s*(\d[\d\s]*(?:[.,]\d+)?)\s*[₽р]',
-    re.IGNORECASE,
-)
-_GOAL_RE = re.compile(
-    r'цель:\s*(.+?)\s*[—\-]\s*(\d[\d\s]*(?:[.,]\d+)?)\s*[₽р]'
-    r'(?:.*?откладываю\s*(\d[\d\s]*(?:[.,]\d+)?)\s*[₽р])?',
-    re.IGNORECASE,
-)
-_DEBT_RE = re.compile(
-    r'долг:\s*(.+?)\s*[—\-]\s*(\d[\d\s]*(?:[.,]\d+)?)\s*[₽р]'
-    r'(?:.*?дедлайн:\s*([^·]+))?'
-    r'(?:.*?стратегия:\s*([^·]+))?'
-    r'(?:.*?платёж:\s*(\d[\d\s]*(?:[.,]\d+)?))?'
-    r'\s*$',
-    re.IGNORECASE,
-)
-
 # Трекинг: не предлагать лимит повторно в одной сессии
 _limit_suggested: Set[Tuple[int, str]] = set()
 
@@ -96,77 +75,6 @@ _RU_MONTHS = {
     5: "май", 6: "июнь", 7: "июль", 8: "август",
     9: "сентябрь", 10: "октябрь", 11: "ноябрь", 12: "декабрь",
 }
-
-
-def _cat_link(cat: str) -> str:
-    """'🚬 Привычки' → 'привычки', '🍱 Кафе/Доставка' → 'кафе'"""
-    name = re.sub(r'^[^\w\u0400-\u04FF]+', '', cat, flags=re.UNICODE).strip()
-    return name.split('/')[0].strip().lower()
-
-
-async def _get_limits(mem_db: str) -> Dict[str, float]:
-    """Загрузить все лимиты из памяти. Возвращает {cat_link: amount}.
-
-    Стратегия: сначала фильтр по Категория="💰 Лимит", если упал —
-    забираем все записи и ищем те, у которых текст начинается с "лимит:".
-    Ключ берётся из поля Связь или парсится из факт-текста через _LIMIT_FACT_RE.
-    """
-    from core.notion_client import db_query
-    from core.config import config
-    db = mem_db or config.nexus.db_memory
-    if not db:
-        logger.warning("_get_limits: no memory db configured")
-        return {}
-    limits: Dict[str, float] = {}
-    pages: list = []
-    try:
-        pages = await db_query(db, filter_obj={
-            "property": "Категория", "select": {"equals": "💰 Лимит"}
-        }, page_size=100)
-        logger.info("_get_limits: category filter → %d pages", len(pages))
-    except Exception as e:
-        logger.warning("_get_limits: category filter failed (%s), trying text search", e)
-
-    # Если фильтр вернул 0 или упал — берём все страницы и фильтруем сами
-    if not pages:
-        try:
-            all_pages = await db_query(db, page_size=200)
-            pages = [
-                p for p in all_pages
-                if (p["properties"].get("Текст", {}).get("title") or [{}])[0]
-                   .get("plain_text", "").lower().startswith("лимит")
-            ]
-            logger.info("_get_limits: text fallback → %d limit pages from %d total", len(pages), len(all_pages))
-        except Exception as e2:
-            logger.error("_get_limits: fallback failed: %s", e2, exc_info=True)
-            return {}
-
-    for p in pages:
-        props = p["properties"]
-        fact_parts = props.get("Текст", {}).get("title", [])
-        fact = fact_parts[0]["plain_text"] if fact_parts else ""
-
-        # Стратегия 1: поле Связь
-        связь_parts = props.get("Связь", {}).get("rich_text", [])
-        связь = связь_parts[0]["plain_text"].strip().lower() if связь_parts else ""
-
-        # Стратегия 2: парсим категорию из текста "лимит: 🍱 Кафе/Доставка — 9000₽/мес"
-        fact_match = _LIMIT_FACT_RE.search(fact)
-        if fact_match and not связь:
-            связь = _cat_link(fact_match.group(1).strip())
-
-        # Сумма из текста
-        amount_match = _LIMIT_AMOUNT_RE.search(fact)
-        logger.info("_get_limits: fact=%r связь=%r amount=%r",
-                    fact, связь, amount_match.group(0) if amount_match else None)
-
-        if связь and amount_match:
-            limits[связь] = float(amount_match.group(1).replace(' ', '').replace(',', '.'))
-        else:
-            logger.warning("_get_limits: skip — связь=%r fact=%r", связь, fact)
-
-    logger.info("_get_limits: result=%s", limits)
-    return limits
 
 
 def _parse_user_amount(text: str) -> Optional[int]:
@@ -198,104 +106,6 @@ def _parse_user_amount(text: str) -> Optional[int]:
         except ValueError:
             return None
     return None
-
-
-def _parse_amount(s: str) -> float:
-    """Парсит строку суммы: убирает пробелы, заменяет запятую."""
-    return float(s.replace(' ', '').replace(',', '.'))
-
-
-async def _load_budget_data(user_notion_id: str = "") -> Dict[str, list]:
-    """Загрузить все бюджетные записи из Памяти (💰 Лимит).
-
-    Возвращает {"обязательные": [...], "цели": [...], "долги": [...], "лимиты": [...]}.
-    Каждый элемент — dict с name, amount, (saving, deadline и т.д.).
-    """
-    from core.notion_client import db_query
-    mem_db = os.environ.get("NOTION_DB_MEMORY")
-    if not mem_db:
-        return {"обязательные": [], "цели": [], "долги": [], "лимиты": []}
-
-    # Ищем по ключу (prefix-based) — не зависит от существования категорий в Notion
-    key_filter = {"or": [
-        {"property": "Ключ", "rich_text": {"starts_with": "income_"}},
-        {"property": "Ключ", "rich_text": {"starts_with": "обязательно_"}},
-        {"property": "Ключ", "rich_text": {"starts_with": "лимит_"}},
-        {"property": "Ключ", "rich_text": {"starts_with": "цель_"}},
-        {"property": "Ключ", "rich_text": {"starts_with": "долг_"}},
-    ]}
-    conditions = [key_filter, {"property": "Актуально", "checkbox": {"equals": True}}]
-    if user_notion_id:
-        conditions.append({"property": "🪪 Пользователи", "relation": {"contains": user_notion_id}})
-    filt = {"and": conditions}
-    try:
-        pages = await db_query(mem_db, filter_obj=filt, page_size=200)
-    except Exception as e:
-        logger.error("_load_budget_data: %s", e)
-        return {"обязательные": [], "цели": [], "долги": [], "лимиты": []}
-
-    result: Dict[str, list] = {"доходы": [], "обязательные": [], "цели": [], "долги": [], "лимиты": []}
-    for p in pages:
-        props = p["properties"]
-        fact_parts = props.get("Текст", {}).get("title", [])
-        fact = fact_parts[0]["plain_text"] if fact_parts else ""
-        key_parts = props.get("Ключ", {}).get("rich_text", [])
-        key = key_parts[0]["plain_text"].strip().lower() if key_parts else ""
-        active = props.get("Актуально", {}).get("checkbox", True)
-        if not active:
-            continue
-
-        if key.startswith("income_"):
-            m = _INCOME_RE.search(fact)
-            if m:
-                amt = _parse_amount(m.group(2))
-                if amt > 0:
-                    result["доходы"].append({"name": m.group(1).strip(), "amount": amt})
-        elif key.startswith("обязательно_"):
-            m = _OBLIGATORY_RE.search(fact)
-            if m:
-                amt = _parse_amount(m.group(2))
-                if amt > 0:  # 0₽ = деактивировано
-                    result["обязательные"].append({"name": m.group(1).strip(), "amount": amt})
-        elif key.startswith("цель_"):
-            m = _GOAL_RE.search(fact)
-            if m:
-                saving = _parse_amount(m.group(3)) if m.group(3) else 0
-                result["цели"].append({"name": m.group(1).strip(), "target": _parse_amount(m.group(2)), "saving": saving})
-        elif key.startswith("долг_"):
-            m = _DEBT_RE.search(fact)
-            if m:
-                strategy = (m.group(4) or "").strip()
-                mp_raw = (m.group(5) or "").strip()
-                monthly_payment = _parse_amount(mp_raw) if mp_raw else 0
-                result["долги"].append({
-                    "name": m.group(1).strip(),
-                    "amount": _parse_amount(m.group(2)),
-                    "deadline": (m.group(3) or "").strip(),
-                    "strategy": strategy,
-                    "monthly_payment": monthly_payment,
-                    "fact": fact,
-                })
-        elif key.startswith("лимит_"):
-            amount_m = _LIMIT_AMOUNT_RE.search(fact)
-            if amount_m:
-                связь_parts = props.get("Связь", {}).get("rich_text", [])
-                связь = связь_parts[0]["plain_text"].strip() if связь_parts else ""
-                result["лимиты"].append({"name": связь or key, "amount": _parse_amount(amount_m.group(1))})
-
-    # Дедупликация лимитов по display-имени (лимит_импульсивный + лимит_импульсивные → один)
-    seen_limit_names: dict = {}
-    for lim in result["лимиты"]:
-        display = _display_limit_name(lim["name"])
-        if display not in seen_limit_names:
-            seen_limit_names[display] = lim
-        else:
-            # Оставляем с большей суммой (актуальнее)
-            if lim["amount"] > seen_limit_names[display]["amount"]:
-                seen_limit_names[display] = lim
-    result["лимиты"] = list(seen_limit_names.values())
-
-    return result
 
 
 async def _calc_free_remaining(user_notion_id: str = "") -> Optional[Tuple[float, int]]:
@@ -348,28 +158,6 @@ async def _calc_free_remaining(user_notion_id: str = "") -> Optional[Tuple[float
     # уже записаны в расходы когда оплачены
     free_left = total_income - total_expenses - savings_total
     return (free_left, days_remaining)
-
-
-_LIMIT_DISPLAY = {
-    "привычки": "🚬 Привычки",
-    "продукты": "🍜 Продукты",
-    "кафе": "🍱 Кафе/Доставка",
-    "транспорт": "🚕 Транспорт",
-    "бьюти": "💅 Бьюти",
-    "гардероб": "👗 Гардероб",
-    "здоровье": "🏥 Здоровье",
-    "хобби": "📚 Хобби/Учеба",
-    "импульсивные": "🎲 Импульсивные",
-    "импульсивный": "🎲 Импульсивные",
-    "подушка": "🛡️ Подушка",
-    "расходники": "🕯️ Расходники",
-}
-
-
-def _display_limit_name(raw_name: str) -> str:
-    """'привычки' -> '🚬 Привычки', 'лимит_привычки' -> '🚬 Привычки'."""
-    key = raw_name.lower().replace("лимит_", "").strip()
-    return _LIMIT_DISPLAY.get(key, raw_name)
 
 
 async def build_budget_message(user_notion_id: str = "") -> Optional[str]:
