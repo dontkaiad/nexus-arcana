@@ -41,6 +41,10 @@ def _today_local_iso(tz_offset: int = 3) -> str:
     return (datetime.now(timezone.utc) + timedelta(hours=tz_offset)).strftime("%Y-%m-%d")
 
 
+def _today_local_date(tz_offset: int = 3):
+    return (datetime.now(timezone.utc) + timedelta(hours=tz_offset)).date()
+
+
 def _make_task(task_id, title, *, status="Not started", prio="🔴 Срочно",
                cat="🏥 Здоровье", deadline=None, reminder=None,
                repeat_time="", repeat=None):
@@ -132,7 +136,7 @@ def test_today_returns_all_keys_and_classifies_tasks(client):
     with patch("miniapp.backend.routes.today.query_pages", side_effect=qp_mock), \
          patch("miniapp.backend.routes.today.memory_get", AsyncMock(return_value=None)), \
          patch("miniapp.backend.routes.today.ask_claude", claude_mock), \
-         patch("miniapp.backend.routes.today.get_user_tz", AsyncMock(return_value=tz)), \
+         patch("miniapp.backend.routes.today.today_user_tz", AsyncMock(return_value=(_today_local_date(tz), tz))), \
          patch("miniapp.backend.routes.today.get_user_notion_id",
                AsyncMock(return_value=FAKE_NOTION_USER)), \
          patch("nexus.handlers.streaks.get_streak",
@@ -196,7 +200,7 @@ def test_today_caches_adhd_tip_across_calls(client):
     with patch("miniapp.backend.routes.today.query_pages", side_effect=qp_mock), \
          patch("miniapp.backend.routes.today.memory_get", AsyncMock(return_value=None)), \
          patch("miniapp.backend.routes.today.ask_claude", claude_mock), \
-         patch("miniapp.backend.routes.today.get_user_tz", AsyncMock(return_value=tz)), \
+         patch("miniapp.backend.routes.today.today_user_tz", AsyncMock(return_value=(_today_local_date(tz), tz))), \
          patch("miniapp.backend.routes.today.get_user_notion_id",
                AsyncMock(return_value=FAKE_NOTION_USER)), \
          patch("nexus.handlers.streaks.get_streak",
@@ -224,7 +228,7 @@ def test_today_uses_custom_budget_from_memory(client):
                AsyncMock(return_value="5000")), \
          patch("miniapp.backend.routes.today.ask_claude",
                AsyncMock(return_value="tip")), \
-         patch("miniapp.backend.routes.today.get_user_tz", AsyncMock(return_value=tz)), \
+         patch("miniapp.backend.routes.today.today_user_tz", AsyncMock(return_value=(_today_local_date(tz), tz))), \
          patch("miniapp.backend.routes.today.get_user_notion_id",
                AsyncMock(return_value="")), \
          patch("nexus.handlers.streaks.get_streak",
