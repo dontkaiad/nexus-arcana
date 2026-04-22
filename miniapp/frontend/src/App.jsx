@@ -103,9 +103,9 @@ function getSky(p) {
     tM = "#6e6a5e"; // контраст поднят (было #8a8578)
     acc = lerpC("#6b8f71", "#7a9068", t);
     brd = "rgba(160,154,142,0.35)";
-    // wave7.2: glass — прозрачные белые карточки + более видимый border
-    card = `rgba(255,255,255,${(0.16 + t * 0.04).toFixed(2)})`;
-    brd = "rgba(255,255,255,0.28)";
+    // wave8.0.1: glass — баланс между стеклом и читаемостью (0.28–0.34)
+    card = `rgba(255,255,255,${(0.28 + t * 0.06).toFixed(2)})`;
+    brd = "rgba(255,255,255,0.32)";
   } else if (p < 0.6) {
     const t = (p - 0.3) / 0.3;
     d = lerpC("#3a6a72", "#2a3a5a", t);
@@ -120,10 +120,10 @@ function getSky(p) {
     brd = `rgba(${Math.round(lerp(255, 60, t))},${Math.round(lerp(255, 65, t))},${Math.round(
       lerp(255, 80, t)
     )},${lerp(0.28, 0.42, t).toFixed(2)})`;
-    // wave7.2: плавный переход от стеклянного (Nexus) к сумеречному (Arcana)
+    // wave8.0.1: плавный переход от стеклянного (Nexus) к сумеречному (Arcana)
     card = `rgba(${Math.round(lerp(255, 22, t))},${Math.round(lerp(255, 27, t))},${Math.round(
       lerp(255, 40, t)
-    )},${lerp(0.2, 0.62, t).toFixed(2)})`;
+    )},${lerp(0.34, 0.62, t).toFixed(2)})`;
   } else {
     const t = (p - 0.6) / 0.4;
     d = lerpC("#2a3a5a", "#0a0e18", t);
@@ -256,8 +256,8 @@ const Metric = ({ s, v, sub, unit, accent, icon }) => (
     <div
       style={{
         fontFamily: H,
-        fontSize: 18,
-        fontWeight: 500,
+        fontSize: 22,
+        fontWeight: 700,
         color: accent || s.text,
         display: "inline-flex",
         alignItems: "center",
@@ -268,10 +268,10 @@ const Metric = ({ s, v, sub, unit, accent, icon }) => (
       {icon}
       {v}
       {unit && (
-        <span style={{ color: s.tM, fontSize: 13, fontWeight: 400, marginLeft: 2 }}>{unit}</span>
+        <span style={{ color: s.tM, fontSize: 14, fontWeight: 500, marginLeft: 2 }}>{unit}</span>
       )}
     </div>
-    <div style={{ fontSize: 10, color: s.tS, marginTop: 1 }}>{sub}</div>
+    <div style={{ fontSize: 12, color: s.tS, marginTop: 2 }}>{sub}</div>
   </div>
 );
 
@@ -863,7 +863,7 @@ const TaskRow = ({ s, t, done, onToggle, onOpen, withTime }) => (
           </span>
         )}
         <span style={{
-          fontSize: 13,
+          fontSize: 15,
           color: s.text,
           whiteSpace: "nowrap",
           overflow: "hidden",
@@ -874,7 +874,7 @@ const TaskRow = ({ s, t, done, onToggle, onOpen, withTime }) => (
       </div>
       <div
         style={{
-          fontSize: 10,
+          fontSize: 11,
           color: s.tM,
           marginTop: 2,
           display: "flex",
@@ -986,16 +986,16 @@ function NxDay({ s, openTask, navigate, openStreaks }) {
             style={{
               display: "flex",
               justifyContent: "space-between",
-              fontSize: 11,
-              color: s.tS,
-              marginBottom: 4,
+              fontSize: 14,
+              color: s.text,
+              marginBottom: 5,
             }}
           >
-            <span>Бюджет дня</span>
+            <span style={{ fontWeight: 500 }}>Бюджет дня</span>
             <span
               style={{
-                color: leftPct > 85 ? s.red : leftPct > 60 ? s.amber : s.acc,
-                fontWeight: 500,
+                color: leftPct > 85 ? s.red : leftPct > 60 ? s.amber : s.text,
+                fontWeight: 600,
               }}
             >
               {(t.budgetDay - t.spentDay).toLocaleString()} ₽ · {100 - leftPct}%
@@ -1006,7 +1006,7 @@ function NxDay({ s, openTask, navigate, openStreaks }) {
             pct={leftPct}
             color={leftPct > 85 ? s.red : leftPct > 60 ? s.amber : s.acc}
           />
-          <div style={{ fontSize: 10, color: s.tM, marginTop: 3 }}>
+          <div style={{ fontSize: 12, color: s.text, opacity: 0.75, marginTop: 4 }}>
             потрачено {t.spentDay.toLocaleString()} ₽ из {t.budgetDay.toLocaleString()} ₽
           </div>
         </div>
