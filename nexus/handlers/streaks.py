@@ -329,3 +329,8 @@ def _rest_days_in_window(user_id: int) -> int:
     if (today_dt - last_rest_dt).days < 5:
         return 1
     return 0
+
+
+def is_rest_day_available(user_id: int) -> bool:
+    """True если пользователь может взять день отдыха (лимит: 1 раз в 5 дней)."""
+    return _rest_days_in_window(user_id) == 0
