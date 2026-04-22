@@ -156,9 +156,9 @@ async def _generate_adhd_tip(tg_id: int, today_str: str,
         f"Что знаю про её СДВГ:\n{mem_ctx}"
     )
     system = (
-        "Ты — внешний мозг Кай. Сгенерируй ОДНО предложение (максимум 15 слов) — "
+        "Ты — внешний мозг Кай. Напиши ОДНО предложение, максимум 15 слов — "
         "СДВГ-friendly совет на сегодня. Женский род. Конкретный, практичный, без воды. "
-        "Можешь выделить **ключевое действие** в markdown-жирный (двойные звёздочки)."
+        "Без markdown, без звёздочек, без двоеточий в начале."
     )
     try:
         text = await ask_claude(prompt=prompt, system=system, max_tokens=200)
@@ -212,6 +212,12 @@ async def get_today(tg_id: int = Depends(current_user_id)) -> dict[str, Any]:
 
         if repeat_time or has_time_today:
             t = repeat_time if repeat_time else deadline_time
+            interval_raw: Optional[str] = None
+            # wave8.4: Notion хранит "HH:MM|every_Nd" — разбираем server-side.
+            if t and "|" in t:
+                parts = t.split("|", 1)
+                t = parts[0].strip() or None
+                interval_raw = parts[1].strip() or None
             reminder_min: Optional[int] = None
             if has_time_today and s["reminder_raw"]:
                 dl_dt = _parse_iso(s["deadline_raw"])
@@ -228,7 +234,7 @@ async def get_today(tg_id: int = Depends(current_user_id)) -> dict[str, Any]:
                 "time": t,
                 "reminder_min": reminder_min,
                 "streak": 0,
-                "repeat": s["repeat"],
+                "repeat": interval_raw or s["repeat"],
             })
             continue
 
