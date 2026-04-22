@@ -28,7 +28,7 @@ logger = logging.getLogger("miniapp.tasks")
 
 router = APIRouter()
 
-ALLOWED_FILTERS = {"all", "active", "overdue", "done"}
+ALLOWED_FILTERS = {"all", "active", "overdue", "done", "today"}
 
 _PRIO_WEIGHT = {"🔴": 0, "🟡": 1, "⚪": 2}
 
@@ -95,8 +95,12 @@ def _serialize_task(page: dict, today_date, tz_offset: int) -> dict:
 
 
 def _build_filter(filter_name: str, user_notion_id: str, today_iso: str) -> dict:
-    """Notion-фильтр для разных filter_name значений."""
-    base: list[dict] = [{"property": "Бот", "select": {"equals": BOT_NEXUS}}]
+    """Notion-фильтр для разных filter_name значений.
+
+    База задач — эксклюзивно Nexus-шняя (работы Arcana в отдельной базе 🔮),
+    поэтому фильтр по полю "Бот" НЕ применяется.
+    """
+    base: list[dict] = []
     if user_notion_id:
         base.append({
             "property": "🪪 Пользователи",
@@ -112,14 +116,19 @@ def _build_filter(filter_name: str, user_notion_id: str, today_iso: str) -> dict
             {"property": "Дедлайн", "date": {"before": today_iso}},
         ])
     elif filter_name == "active":
-        # Active = не-Done и (deadline >= today OR deadline is null) — часть условий
-        # придётся проверять в Python (Notion не умеет "deadline >= today OR null"
-        # одним фильтром без `or`). Берём "не Done" + client-side фильтр по дате.
         base.extend([
             {"property": "Статус", "status": {"does_not_equal": "Done"}},
             {"property": "Статус", "status": {"does_not_equal": "Complete"}},
         ])
-    # "all" — только Бот + user; ничего не исключаем (кроме ниже Archived, если оно есть как статус)
+    elif filter_name == "today":
+        base.extend([
+            {"property": "Статус", "status": {"does_not_equal": "Done"}},
+            {"property": "Статус", "status": {"does_not_equal": "Complete"}},
+        ])
+    if not base:
+        return {}
+    if len(base) == 1:
+        return base[0]
     return {"and": base}
 
 
@@ -160,7 +169,15 @@ async def get_tasks(
     if filter == "active":
         items = [t for t in items if t["status"] == "active"]
 
-    if filter in ("active", "overdue"):
+    # 'today' = задачи с дедлайном сегодня/раньше (активные + просроченные).
+    if filter == "today":
+        items = [
+            t for t in items
+            if t["status"] in ("active", "overdue")
+            and t["deadline"] and t["deadline"] <= today_iso
+        ]
+
+    if filter in ("active", "overdue", "today"):
         def _prio_key(t):
             w = _PRIO_WEIGHT.get(t["prio"], 99)
             d = t["deadline"] or "9999-99-99"
