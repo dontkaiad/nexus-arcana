@@ -3729,7 +3729,7 @@ function NoteForm({ s, onSubmit, busy }) {
         s={s}
         value={cat}
         onChange={setCat}
-        options={["🏡 Быт", "🐈 Коты", "👥 Люди", "⭐ Предпочтения", "🧠 СДВГ"]}
+        options={["🏡 Быт", "🐈 Коты", "👥 Люди", "⭐ Предпочтения", "🦋 СДВГ"]}
       />
       <SubmitBtn
         s={s}

@@ -125,7 +125,7 @@ async def _adhd_context_memories(user_notion_id: str) -> list[str]:
     db_id = config.nexus.db_memory
     if not db_id:
         return []
-    filters = {"property": "Категория", "select": {"equals": "🧠 СДВГ"}}
+    filters = {"property": "Категория", "select": {"equals": "🦋 СДВГ"}}
     try:
         pages = await query_pages(db_id, filters=filters, page_size=3)
     except Exception as e:

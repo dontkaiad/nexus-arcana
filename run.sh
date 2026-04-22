@@ -22,7 +22,7 @@ auto_pull() {
 auto_pull &
 PULL_PID=$!
 
-$PYTHON -m watchfiles "$PYTHON -m nexus.nexus_bot" nexus/ core/ &
+$PYTHON -m watchfiles "$PYTHON -m nexus.nexus_bot" nexus/ core/ miniapp/ &
 NEXUS_PID=$!
 
 $PYTHON -m watchfiles "$PYTHON -m arcana.bot" arcana/ core/ &
