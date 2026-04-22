@@ -19,12 +19,23 @@ CREATE TABLE IF NOT EXISTS adhd_tips (
 );
 """
 
+_CREATE_PROFILE_SQL = """\
+CREATE TABLE IF NOT EXISTS adhd_profile (
+    tg_id INTEGER PRIMARY KEY,
+    text TEXT NOT NULL,
+    created_at INTEGER NOT NULL
+);
+"""
+
+_PROFILE_TTL_SECONDS = 7 * 24 * 3600
+
 
 def _init_db() -> None:
     os.makedirs(_DB_DIR, exist_ok=True)
     con = sqlite3.connect(_DB_PATH)
     try:
         con.execute(_CREATE_SQL)
+        con.execute(_CREATE_PROFILE_SQL)
         con.commit()
     finally:
         con.close()
@@ -52,6 +63,38 @@ def set_tip(tg_id: int, date: str, text: str) -> None:
             "INSERT OR REPLACE INTO adhd_tips (tg_id, date, text, created_at) "
             "VALUES (?, ?, ?, ?)",
             (tg_id, date, text, int(time.time())),
+        )
+        con.commit()
+    finally:
+        con.close()
+
+
+def get_profile(tg_id: int) -> Optional[dict]:
+    """Вернуть {"text": str, "age_days": int} если кэш свежий (TTL 7 дней), иначе None."""
+    con = sqlite3.connect(_DB_PATH)
+    try:
+        row = con.execute(
+            "SELECT text, created_at FROM adhd_profile WHERE tg_id = ?",
+            (tg_id,),
+        ).fetchone()
+    finally:
+        con.close()
+    if not row:
+        return None
+    text, created_at = row
+    age = int(time.time()) - int(created_at)
+    if age > _PROFILE_TTL_SECONDS:
+        return None
+    return {"text": text, "age_days": age // 86400}
+
+
+def set_profile(tg_id: int, text: str) -> None:
+    con = sqlite3.connect(_DB_PATH)
+    try:
+        con.execute(
+            "INSERT OR REPLACE INTO adhd_profile (tg_id, text, created_at) "
+            "VALUES (?, ?, ?)",
+            (tg_id, text, int(time.time())),
         )
         con.commit()
     finally:

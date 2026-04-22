@@ -2,8 +2,7 @@
 from __future__ import annotations
 
 import logging
-import unicodedata
-from datetime import datetime, timedelta, timezone
+from datetime import timedelta
 from typing import Any, Optional
 
 from fastapi import APIRouter, Depends
@@ -11,11 +10,22 @@ from fastapi import APIRouter, Depends
 from core.config import config
 from core.notion_client import memory_get, query_pages
 from core.claude_client import ask_claude
-from core.shared_handlers import get_user_tz
 from core.user_manager import get_user_notion_id
 
 from miniapp.backend import cache
 from miniapp.backend.auth import current_user_id
+from miniapp.backend._helpers import (
+    BOT_NEXUS,
+    cat_from_notion,
+    extract_time,
+    first_emoji,  # re-exported для back-compat тестов
+    prio_from_notion,
+    rich_text,
+    select_name,
+    title_text,
+    to_local_date,
+    today_user_tz,
+)
 
 logger = logging.getLogger("miniapp.today")
 
@@ -25,98 +35,42 @@ _WEEKDAYS_RU = ["пн", "вт", "ср", "чт", "пт", "сб", "вс"]
 _DEFAULT_BUDGET_DAY = 4166
 
 
-def first_emoji(value: str) -> str:
-    """Return first emoji character from a Notion select value, or '' if none."""
-    if not value:
-        return ""
-    ch = value[0]
-    if unicodedata.category(ch).startswith("S"):
-        return ch
-    return ""
-
-
-def _title_text(prop: dict) -> str:
-    items = prop.get("title") or []
-    if not items:
-        return ""
-    return "".join(i.get("plain_text") or i.get("text", {}).get("content", "") for i in items)
-
-
-def _rich_text(prop: dict) -> str:
-    items = prop.get("rich_text") or []
-    if not items:
-        return ""
-    return "".join(i.get("plain_text") or i.get("text", {}).get("content", "") for i in items)
-
-
-def _select_name(prop: dict) -> str:
-    sel = prop.get("select") or {}
-    return sel.get("name") or ""
-
-
 def _date_start(prop: dict) -> str:
     d = prop.get("date") or {}
     return d.get("start") or ""
 
 
-def _parse_iso(s: str) -> Optional[datetime]:
+def _parse_iso(s: str):
+    from datetime import datetime, timezone
     if not s:
         return None
     try:
-        return datetime.fromisoformat(s.replace("Z", "+00:00"))
+        dt = datetime.fromisoformat(s.replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt
     except ValueError:
         return None
-
-
-def _to_local_date(iso: str, tz_offset: int):
-    """Convert Notion date/datetime ISO string to local date (in tz_offset)."""
-    if not iso:
-        return None
-    if len(iso) == 10:
-        try:
-            return datetime.strptime(iso, "%Y-%m-%d").date()
-        except ValueError:
-            return None
-    dt = _parse_iso(iso)
-    if not dt:
-        return None
-    if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=timezone.utc)
-    local = dt.astimezone(timezone(timedelta(hours=tz_offset)))
-    return local.date()
-
-
-def _extract_time(iso: str, tz_offset: int) -> Optional[str]:
-    """Return 'HH:MM' if iso contains time, else None."""
-    if not iso or len(iso) <= 10:
-        return None
-    dt = _parse_iso(iso)
-    if not dt:
-        return None
-    if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=timezone.utc)
-    local = dt.astimezone(timezone(timedelta(hours=tz_offset)))
-    return local.strftime("%H:%M")
 
 
 def _task_summary(page: dict, tz_offset: int) -> dict:
     props = page.get("properties", {})
     return {
         "id": page.get("id", ""),
-        "title": _title_text(props.get("Задача", {})),
-        "cat": first_emoji(_select_name(props.get("Категория", {}))),
-        "prio": first_emoji(_select_name(props.get("Приоритет", {}))),
+        "title": title_text(props.get("Задача", {})),
+        "cat": first_emoji(select_name(props.get("Категория", {}))),
+        "prio": first_emoji(select_name(props.get("Приоритет", {}))),
         "deadline_raw": _date_start(props.get("Дедлайн", {})),
         "reminder_raw": _date_start(props.get("Напоминание", {})),
-        "repeat_time": _rich_text(props.get("Время повтора", {})).strip(),
-        "repeat": _select_name(props.get("Повтор", {})) or None,
+        "repeat_time": rich_text(props.get("Время повтора", {})).strip(),
+        "repeat": select_name(props.get("Повтор", {})) or None,
     }
 
 
 async def _fetch_nexus_tasks(user_notion_id: str) -> list[dict]:
     filters = {
         "and": [
-            {"property": "Бот", "select": {"equals": "☀️ Nexus"}},
+            {"property": "Бот", "select": {"equals": BOT_NEXUS}},
             {"property": "Статус", "status": {"does_not_equal": "Done"}},
             {"property": "Статус", "status": {"does_not_equal": "Complete"}},
         ]
@@ -137,7 +91,7 @@ async def _fetch_nexus_tasks(user_notion_id: str) -> list[dict]:
 async def _spent_today(user_notion_id: str, today_iso: str, tomorrow_iso: str) -> int:
     filters = {
         "and": [
-            {"property": "Бот", "select": {"equals": "☀️ Nexus"}},
+            {"property": "Бот", "select": {"equals": BOT_NEXUS}},
             {"property": "Тип", "select": {"equals": "💸 Расход"}},
             {"property": "Дата", "date": {"on_or_after": today_iso}},
             {"property": "Дата", "date": {"before": tomorrow_iso}},
@@ -179,13 +133,14 @@ async def _adhd_context_memories(user_notion_id: str) -> list[str]:
     out = []
     for p in pages:
         props = p.get("properties", {})
-        text = _title_text(props.get("Текст", {}))
+        text = title_text(props.get("Текст", {}))
         if text:
             out.append(text)
     return out
 
 
-async def _generate_adhd_tip(tg_id: int, today_str: str, active_titles: list[str], user_notion_id: str) -> str:
+async def _generate_adhd_tip(tg_id: int, today_str: str,
+                             active_titles: list[str], user_notion_id: str) -> str:
     cached = cache.get_tip(tg_id, today_str)
     if cached:
         return cached
@@ -218,10 +173,7 @@ async def _generate_adhd_tip(tg_id: int, today_str: str, active_titles: list[str
 async def get_today(tg_id: int = Depends(current_user_id)) -> dict[str, Any]:
     from nexus.handlers.streaks import get_streak, is_rest_day_available
 
-    tz_offset = await get_user_tz(tg_id)
-    now_utc = datetime.now(timezone.utc)
-    local = now_utc.astimezone(timezone(timedelta(hours=tz_offset)))
-    today_date = local.date()
+    today_date, tz_offset = await today_user_tz(tg_id)
     today_str = today_date.isoformat()
     tomorrow_str = (today_date + timedelta(days=1)).isoformat()
     weekday = _WEEKDAYS_RU[today_date.weekday()]
@@ -237,8 +189,8 @@ async def get_today(tg_id: int = Depends(current_user_id)) -> dict[str, Any]:
     future: list[dict] = []
 
     for s in summaries:
-        deadline_date = _to_local_date(s["deadline_raw"], tz_offset)
-        deadline_time = _extract_time(s["deadline_raw"], tz_offset)
+        deadline_date = to_local_date(s["deadline_raw"], tz_offset)
+        deadline_time = extract_time(s["deadline_raw"], tz_offset)
         repeat_time = s["repeat_time"] or None
 
         if deadline_date and deadline_date < today_date:
