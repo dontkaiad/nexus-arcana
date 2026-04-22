@@ -8,6 +8,7 @@ from miniapp.backend.routes import today, tasks, finance, lists, memory, writes
 from miniapp.backend.routes import calendar as cal
 from miniapp.backend.routes import categories
 from miniapp.backend.routes import streaks
+from miniapp.backend.routes import weather
 from miniapp.backend.routes import (
     arcana_today,
     arcana_sessions,
@@ -27,7 +28,7 @@ app.add_middleware(
 )
 
 for _r in (
-    today, tasks, finance, lists, memory, cal, categories, streaks,
+    today, tasks, finance, lists, memory, cal, categories, streaks, weather,
     arcana_today, arcana_sessions, arcana_clients,
     arcana_rituals, arcana_grimoire, arcana_stats,
     writes,
