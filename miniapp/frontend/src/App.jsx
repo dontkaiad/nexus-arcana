@@ -51,6 +51,31 @@ const lerpC = (c1, c2, t) => {
     .map((i) => Math.round(lerp(p(c1, i), p(c2, i), t)).toString(16).padStart(2, "0"))
     .join("")}`;
 };
+// wave5.7: минимальная санитизация HTML для трактовок раскладов.
+// Разрешаем только безопасные теги форматирования, всё остальное эскейпим.
+const SAFE_HTML_TAGS = new Set([
+  "b", "strong", "i", "em", "br", "p", "ul", "ol", "li", "h3", "h4", "h5",
+]);
+function sanitizeHtml(raw) {
+  if (!raw) return "";
+  // Сначала эскейпим всё
+  const escaped = String(raw)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+  // Потом разрешаем только whitelisted теги (без атрибутов)
+  return escaped.replace(
+    /&lt;(\/?)([a-zA-Z][a-zA-Z0-9]*)\s*\/?&gt;/g,
+    (m, slash, tag) => {
+      if (SAFE_HTML_TAGS.has(tag.toLowerCase())) {
+        return `<${slash}${tag}>`;
+      }
+      return m;
+    }
+  );
+}
+
 const getOrb = (progress, isSun) => {
   const t = isSun ? progress : 1 - progress;
   const a = Math.PI * 0.15 + t * Math.PI * 0.7;
@@ -2342,7 +2367,10 @@ function SessionDetail({ s, id }) {
       {/* Трактовка */}
       <SectionLabel s={s}>Трактовка</SectionLabel>
       <Glass s={s} accent={s.acc} style={{ padding: "12px 14px" }}>
-        <div style={{ fontSize: 13, color: s.text, lineHeight: 1.6 }}>{x.interp}</div>
+        <div
+          style={{ fontSize: 13, color: s.text, lineHeight: 1.6 }}
+          dangerouslySetInnerHTML={{ __html: sanitizeHtml(x.interp) }}
+        />
       </Glass>
 
       <VerifyButtons

@@ -255,3 +255,65 @@ async def get_finance(
     if view == "limits":
         return await _view_limits(tg_id, month)
     return await _view_goals(tg_id)
+
+
+@router.get("/finance/category")
+async def get_finance_category(
+    tg_id: int = Depends(current_user_id),
+    cat: str = Query(..., description="Полное имя категории (с emoji), например '🏠 Жилье'"),
+    month: Optional[str] = Query(None, description="YYYY-MM"),
+) -> dict[str, Any]:
+    """Wave5.9: drill-down — все траты по категории за месяц."""
+    if not month:
+        today_date, _ = await today_user_tz(tg_id)
+        month = today_date.strftime("%Y-%m")
+
+    user_notion_id = (await get_user_notion_id(tg_id)) or ""
+    start_iso, end_iso = _month_bounds(month)
+
+    conditions: list[dict] = [
+        {"property": "Бот", "select": {"equals": BOT_NEXUS}},
+        {"property": "Тип", "select": {"equals": "💸 Расход"}},
+        {"property": "Категория", "select": {"equals": cat}},
+        {"property": "Дата", "date": {"on_or_after": start_iso}},
+        {"property": "Дата", "date": {"before": end_iso}},
+    ]
+    if user_notion_id:
+        conditions.append({
+            "property": "🪪 Пользователи",
+            "relation": {"contains": user_notion_id},
+        })
+
+    try:
+        pages = await query_pages(
+            config.nexus.db_finance,
+            filters={"and": conditions},
+            sorts=[{"property": "Дата", "direction": "descending"}],
+            page_size=200,
+        )
+    except Exception as e:
+        logger.warning("finance/category query failed: %s", e)
+        pages = []
+
+    items: list[dict] = []
+    total = 0.0
+    for p in pages:
+        props = p.get("properties", {})
+        amount = (props.get("Сумма", {}).get("number")) or 0
+        desc = title_text(props.get("Описание", {}))
+        date_raw = (props.get("Дата", {}).get("date") or {}).get("start") or ""
+        items.append({
+            "id": p.get("id", ""),
+            "amount": amount,
+            "desc": desc,
+            "date": date_raw[:10],
+        })
+        total += amount
+
+    return {
+        "cat": cat,
+        "month": month,
+        "total": int(round(total)),
+        "count": len(items),
+        "items": items,
+    }
