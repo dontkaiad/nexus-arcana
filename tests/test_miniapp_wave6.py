@@ -253,6 +253,13 @@ def test_streaks_endpoint_returns_current_and_best(client):
     assert "per_task" in data
 
 
+def test_weather_route_is_registered():
+    """hotfix: /api/weather должен быть в списке роутов FastAPI app."""
+    from miniapp.backend.app import app
+    paths = {getattr(r, "path", "") for r in app.routes}
+    assert "/api/weather" in paths
+
+
 def test_weather_returns_cached_or_fetches(client, tmp_path, monkeypatch):
     """Cache ключ — tg_id; при первом запросе — вызов Open-Meteo; при повторном — из кэша."""
     import miniapp.backend.routes.weather as w
