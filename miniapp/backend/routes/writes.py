@@ -169,27 +169,74 @@ class ExpenseBody(BaseModel):
     bot: str = "nexus"
 
 
-@router.post("/expenses")
-async def expense_create(
-    body: ExpenseBody,
+class FinanceBody(BaseModel):
+    """Унифицированная форма финансов (wave5 §2.1).
+
+    - type: expense | income | practice_income
+    - amount: обязательное
+    - cat: обязательно для expense; для income опционально ("Прочее" по умолчанию)
+    - desc: опционально
+    - bot: "nexus" | "arcana" (для practice_income всегда arcana)
+    """
+    type: str = Field(..., pattern="^(expense|income|practice_income)$")
+    amount: float = Field(gt=0)
+    cat: Optional[str] = None
+    desc: str = ""
+    bot: str = "nexus"
+
+
+@router.post("/finance")
+async def finance_create(
+    body: FinanceBody,
     tg_id: int = Depends(current_user_id),
 ) -> dict[str, Any]:
     user_notion_id = (await get_user_notion_id(tg_id)) or ""
     today_date, _tz = await today_user_tz(tg_id)
-    bot_label = "🌒 Arcana" if body.bot == "arcana" else BOT_NEXUS
+
+    if body.type == "expense":
+        if not body.cat:
+            raise HTTPException(status_code=400, detail="cat is required for expense")
+        type_label = "💸 Расход"
+        category = body.cat
+        bot_label = "🌒 Arcana" if body.bot == "arcana" else BOT_NEXUS
+    elif body.type == "income":
+        type_label = "💰 Доход"
+        category = body.cat or "🏦 Прочее"
+        bot_label = "🌒 Arcana" if body.bot == "arcana" else BOT_NEXUS
+    else:  # practice_income
+        type_label = "💰 Доход"
+        category = body.cat or "🔮 Практика"
+        bot_label = "🌒 Arcana"
+
     page_id = await finance_add(
         date=today_date.isoformat(),
         amount=body.amount,
-        category=body.cat,
-        type_="💸 Расход",
+        category=category,
+        type_=type_label,
         source="💳 Карта",
         bot_label=bot_label,
         description=body.desc,
         user_notion_id=user_notion_id,
     )
     if not page_id:
-        raise HTTPException(status_code=500, detail="failed to create expense")
-    return {"ok": True, "id": page_id}
+        raise HTTPException(status_code=500, detail="failed to create finance entry")
+    return {"ok": True, "id": page_id, "type": body.type}
+
+
+# DEPRECATED: use /api/finance instead (alias сохранён для обратной совместимости)
+@router.post("/expenses")
+async def expense_create(
+    body: ExpenseBody,
+    tg_id: int = Depends(current_user_id),
+) -> dict[str, Any]:
+    finance_body = FinanceBody(
+        type="expense",
+        amount=body.amount,
+        cat=body.cat,
+        desc=body.desc,
+        bot=body.bot,
+    )
+    return await finance_create(finance_body, tg_id)
 
 
 # ═══════════════════════════════════════════════════════════════
