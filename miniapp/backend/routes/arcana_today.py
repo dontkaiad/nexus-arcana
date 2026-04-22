@@ -11,7 +11,7 @@ from core.config import config
 from core.notion_client import query_pages, sessions_all
 from core.user_manager import get_user_notion_id
 
-from miniapp.backend._moon import moon_phase
+from miniapp.backend._moon import moon_phase, next_phases
 from miniapp.backend.auth import current_user_id
 from miniapp.backend._helpers import (
     cat_from_notion,
@@ -108,6 +108,18 @@ def _accuracy(sessions: list[dict], date_prefix: str = "") -> tuple[int, int, in
     verified = yes + partial + no
     pct = _pct(yes + partial, verified)
     return pct, verified, yes + partial + no
+
+
+@router.get("/arcana/moon-phases")
+async def get_moon_phases(
+    tg_id: int = Depends(current_user_id),
+    count: int = 4,
+) -> dict[str, Any]:
+    """Следующие N крупных фаз (новолуние, четверти, полнолуние)."""
+    count = max(1, min(count, 12))
+    current = moon_phase(datetime.now(timezone.utc))
+    upcoming = next_phases(count=count)
+    return {"current": current, "upcoming": upcoming}
 
 
 @router.get("/arcana/today")

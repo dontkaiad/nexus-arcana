@@ -421,3 +421,33 @@ def test_lists_done_endpoint_marks_status(client):
     assert r.status_code == 200
     assert captured["id"] == "list-item-1"
     assert captured["props"]["Статус"] == _status("Done")
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# Stage 3: moon-phases endpoint
+# ═════════════════════════════════════════════════════════════════════════════
+
+def test_moon_phases_endpoint_returns_upcoming(client):
+    r = client.get("/api/arcana/moon-phases?count=4")
+    assert r.status_code == 200
+    data = r.json()
+    assert "current" in data and "upcoming" in data
+    assert len(data["upcoming"]) == 4
+    # Каждая фаза имеет idx из крупных, дату и глиф
+    for p in data["upcoming"]:
+        assert p["idx"] in (0, 2, 4, 6)
+        assert p["glyph"] in {"🌑", "🌓", "🌕", "🌗"}
+        assert len(p["date"]) == 10  # YYYY-MM-DD
+
+
+def test_moon_next_phases_chronological():
+    """Фазы возвращаются в хронологическом порядке."""
+    from miniapp.backend._moon import next_phases
+    from datetime import datetime, timezone
+    start = datetime(2026, 4, 22, 0, 0, tzinfo=timezone.utc)
+    phases = next_phases(count=6, start=start)
+    dates = [p["date"] for p in phases]
+    assert dates == sorted(dates)
+    # Все в будущем относительно start
+    for p in phases:
+        assert p["date"] >= "2026-04-22"
