@@ -95,6 +95,10 @@ export function formatReminder(minutes) {
 
 export function adaptToday(data) {
   if (!data) return null
+  const todayIso = data.date || ''
+  const todayTasksRaw = (data.tasks || []).filter(
+    (x) => !x.date || !todayIso || x.date <= todayIso,
+  )
   return {
     date: formatFullDate(data.date, data.weekday),
     streak: data.streak?.current ?? 0,
@@ -117,7 +121,7 @@ export function adaptToday(data) {
       rpt: x.repeat ? `🔄 ${formatRepeat(x.repeat)}` : undefined,
       streak: x.streak || 0,
     })),
-    tasks: (data.tasks || []).map((x) => ({
+    tasks: todayTasksRaw.map((x) => ({
       id: x.id,
       title: x.title,
       cat: x.cat || '',
