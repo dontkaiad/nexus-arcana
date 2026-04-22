@@ -214,8 +214,9 @@ const Pill = ({ s, active, children, onClick }) => (
       fontSize: 12,
       cursor: "pointer",
       // wave6.2.5: неактивный таб — прозрачный фон + тонкая граница + полный текст
+      // wave7.8.1: активный таб — тёмный текст на светлой заливке для контраста
       background: active ? `${s.acc}30` : "transparent",
-      color: active ? s.acc : s.text,
+      color: active ? s.text : s.tM,
       border: `1px solid ${active ? s.acc + "66" : s.brd}`,
       fontFamily: B,
       fontWeight: active ? 600 : 500,
@@ -461,7 +462,9 @@ const Sheet = ({ s, open, onClose, title, children }) => {
   return (
     <div
       style={{
-        position: "absolute",
+        // wave7.8.4: fixed — иначе при прокрутке overlay затемняет экран,
+        // а содержимое sheet уходит за пределы viewport
+        position: "fixed",
         inset: 0,
         background: "rgba(0,0,0,0.4)",
         zIndex: 20,
@@ -1883,7 +1886,9 @@ function NxCal({ s }) {
         {picked} {RU_MONTHS_FULL[month0].toLowerCase()}
       </SectionLabel>
       {loading && <Empty s={s} text="Загружаю..." />}
-      {!loading && !tasksByDay[picked] && <Empty s={s} text="Нет задач в этот день" />}
+      {!loading && !tasksByDay[picked] && (
+        <Empty s={s} chill emoji="📅" text="В этот день всё свободно" />
+      )}
       {!loading && (tasksByDay[picked] || []).map((t, i) => (
         <Glass key={i} s={s} style={{ padding: "8px 14px", marginBottom: 4 }}>
           <div style={{ fontSize: 13, color: s.text }}>{t}</div>
@@ -4068,14 +4073,14 @@ export default function App() {
                 borderRadius: 12,
                 cursor: "pointer",
                 background: active ? `${sky.acc}25` : "transparent",
-                color: active ? sky.acc : sky.tS,
+                color: active ? sky.text : sky.tS,
                 transition: "all 0.2s",
               }}
             >
               <div style={{ display: "flex", justifyContent: "center" }}>
                 <Ic
                   size={19}
-                  color={active ? sky.acc : sky.tS}
+                  color={active ? sky.text : sky.tS}
                   strokeWidth={active ? 2 : 1.6}
                 />
               </div>
