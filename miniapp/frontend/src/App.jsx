@@ -882,9 +882,20 @@ const TaskRow = ({ s, t, done, onToggle, onOpen, withTime }) => (
 // NEXUS — MY DAY
 // ═══════════════════════════════════════════════════════════════
 
+const WEATHER_ICON = {
+  clear: "☀️",
+  cloudy: "⛅",
+  rain: "🌧️",
+  snow: "❄️",
+  fog: "🌫️",
+};
+
 function NxDay({ s, openTask, navigate, openStreaks }) {
   const [done, setDone] = useState({});
   const { data, loading, error, refetch } = useApi('/api/today');
+  // wave6.5: погода + стрик-календарь
+  const weatherApi = useApi('/api/weather');
+  const weekApi = useApi('/api/streaks/week');
 
   if (loading) return <Empty s={s} text="Загружаю..." />;
   if (error) {
@@ -922,7 +933,16 @@ function NxDay({ s, openTask, navigate, openStreaks }) {
       <Glass s={s} glow>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
           <span style={{ fontFamily: H, fontSize: 22, color: s.text }}>Мой день</span>
-          <span style={{ fontSize: 11, color: s.tS }}>{t.date}</span>
+          <div style={{ textAlign: "right" }}>
+            <div style={{ fontSize: 11, color: s.tS }}>{t.date}</div>
+            {weatherApi.data && !weatherApi.data.error && (
+              <div style={{ fontSize: 10, color: s.tM, marginTop: 2 }}>
+                {WEATHER_ICON[weatherApi.data.kind] || "🌤️"}
+                {" "}
+                {weatherApi.data.temp > 0 ? "+" : ""}{weatherApi.data.temp}° · {weatherApi.data.city}
+              </div>
+            )}
+          </div>
         </div>
         <div style={{ display: "flex", gap: 6, marginTop: 10 }}>
           <div style={{ flex: 1, cursor: "pointer" }} onClick={() => navigate && navigate("tasks")}>
@@ -974,6 +994,32 @@ function NxDay({ s, openTask, navigate, openStreaks }) {
           </div>
         </div>
       </Glass>
+
+      {/* wave6.5.4: стрик-календарь 7 дней */}
+      {weekApi.data?.days && (
+        <Glass s={s} style={{ padding: "8px 10px" }}>
+          <div style={{ fontSize: 10, color: s.tS, marginBottom: 6 }}>
+            Последние 7 дней
+          </div>
+          <div style={{ display: "flex", gap: 4, justifyContent: "space-between" }}>
+            {weekApi.data.days.map((d, i) => (
+              <div key={i} style={{ flex: 1, textAlign: "center" }}>
+                <div style={{
+                  aspectRatio: "1/1",
+                  borderRadius: 6,
+                  border: d.is_today ? `2px solid ${s.amber}` : `1px solid ${s.brd}`,
+                  background: d.has_activity ? `${s.amber}44` : "transparent",
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  fontSize: 13,
+                }}>
+                  {d.has_activity ? "🔥" : ""}
+                </div>
+                <div style={{ fontSize: 9, color: s.tS, marginTop: 2 }}>{d.weekday}</div>
+              </div>
+            ))}
+          </div>
+        </Glass>
+      )}
 
       {t.overdue.length > 0 && (
         <Glass s={s} accent={s.red} style={{ padding: "10px 14px" }}>
@@ -1872,8 +1918,26 @@ function ArDay({ s, openClient, navigate, openMoonPhases }) {
   const total = a.sessionsToday.length + a.worksToday.length;
   const doneCount = Object.values(done).filter(Boolean).length;
 
+  // wave6.5.5: лунный градиент по illum
+  const illum = a.moon?.illum ?? 0;
+  const moonGradient =
+    illum < 10 ? "linear-gradient(180deg, #0a0e1e 0%, #1c2340 100%)" :
+    illum < 40 ? "linear-gradient(180deg, #1a2340 0%, #2a3550 100%)" :
+    illum < 60 ? "linear-gradient(180deg, #2a3550 0%, #3d4a6b 100%)" :
+    illum < 90 ? "linear-gradient(180deg, #3d4a6b 0%, #5a6b8a 100%)" :
+                 "linear-gradient(180deg, #5a6b8a 0%, #8a9cb8 100%)";
+
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+    <div style={{
+      display: "flex", flexDirection: "column", gap: 8,
+      // Добавляем оверлей фон на основе фазы луны — транспарент поверх основного
+      position: "relative",
+    }}>
+      <div style={{
+        position: "absolute", inset: -14, zIndex: -1,
+        background: moonGradient, opacity: 0.22,
+        pointerEvents: "none", transition: "background 2s ease",
+      }} />
       {/* Hero с метриками */}
       <Glass s={s} glow>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>

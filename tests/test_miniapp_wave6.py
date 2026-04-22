@@ -253,6 +253,33 @@ def test_streaks_endpoint_returns_current_and_best(client):
     assert "per_task" in data
 
 
+def test_weather_returns_cached_or_fetches(client, tmp_path, monkeypatch):
+    """Cache ключ — tg_id; при первом запросе — вызов Open-Meteo; при повторном — из кэша."""
+    import miniapp.backend.routes.weather as w
+
+    # direct in-test call: fake tz + fake openmeteo
+    async def fake_memory_get(key):
+        return "Europe/Moscow" if key.startswith("tz_") else None
+
+    fetch_call_count = {"n": 0}
+
+    async def fake_fetch(city):
+        fetch_call_count["n"] += 1
+        return {"city": city, "temp": 12, "code": 0, "kind": "clear", "description": "Ясно"}
+
+    with patch("miniapp.backend.routes.weather.memory_get", side_effect=fake_memory_get), \
+         patch("miniapp.backend.routes.weather._fetch_openmeteo", side_effect=fake_fetch):
+        r1 = client.get("/api/weather")
+        r2 = client.get("/api/weather")
+
+    assert r1.status_code == 200
+    assert r1.json()["city"] == "Moscow"
+    assert r1.json()["temp"] == 12
+    assert r1.json()["kind"] == "clear"
+    # второй запрос — из кэша (не второй fetch)
+    assert fetch_call_count["n"] == 1
+
+
 def test_streaks_week_returns_7_days(client):
     with patch("miniapp.backend.routes.streaks.today_user_tz",
                AsyncMock(return_value=(_today_date(), 3))), \
