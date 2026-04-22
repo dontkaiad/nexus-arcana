@@ -103,7 +103,9 @@ function getSky(p) {
     tM = "#6e6a5e"; // контраст поднят (было #8a8578)
     acc = lerpC("#6b8f71", "#7a9068", t);
     brd = "rgba(160,154,142,0.35)";
-    card = `rgba(255,253,248,${(0.68 + t * 0.08).toFixed(2)})`;
+    // wave7.2: glass — прозрачные белые карточки + более видимый border
+    card = `rgba(255,255,255,${(0.16 + t * 0.04).toFixed(2)})`;
+    brd = "rgba(255,255,255,0.28)";
   } else if (p < 0.6) {
     const t = (p - 0.3) / 0.3;
     d = lerpC("#3a6a72", "#2a3a5a", t);
@@ -115,12 +117,13 @@ function getSky(p) {
     tS = lerpC("#4a463e", "#b0a898", t);
     tM = lerpC("#6e6a5e", "#807868", t);
     acc = lerpC("#7a9068", "#5a8a80", t);
-    brd = `rgba(${Math.round(lerp(160, 60, t))},${Math.round(lerp(154, 65, t))},${Math.round(
-      lerp(142, 80, t)
-    )},${lerp(0.35, 0.42, t).toFixed(2)})`;
-    card = `rgba(${Math.round(lerp(255, 22, t))},${Math.round(lerp(253, 27, t))},${Math.round(
-      lerp(248, 40, t)
-    )},${lerp(0.7, 0.62, t).toFixed(2)})`;
+    brd = `rgba(${Math.round(lerp(255, 60, t))},${Math.round(lerp(255, 65, t))},${Math.round(
+      lerp(255, 80, t)
+    )},${lerp(0.28, 0.42, t).toFixed(2)})`;
+    // wave7.2: плавный переход от стеклянного (Nexus) к сумеречному (Arcana)
+    card = `rgba(${Math.round(lerp(255, 22, t))},${Math.round(lerp(255, 27, t))},${Math.round(
+      lerp(255, 40, t)
+    )},${lerp(0.2, 0.62, t).toFixed(2)})`;
   } else {
     const t = (p - 0.6) / 0.4;
     d = lerpC("#2a3a5a", "#0a0e18", t);
