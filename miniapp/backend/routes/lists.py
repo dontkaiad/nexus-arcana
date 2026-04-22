@@ -78,11 +78,15 @@ async def get_lists(
     # wave6.1: фильтруем ТОЛЬКО по user + Бот (Nexus or empty).
     # По "Тип" фильтруем client-side — Notion иногда возвращает 0 из-за
     # emoji-variant'ов и пробелов, а select-equals жёстко сравнивает.
+    # wave8.6: пробуем server-side equals по Тип (точное соответствие TYPE_MAP);
+    # если вернёт 0 — падаем на client-side matching ниже.
+    type_target = _TYPE_MAP[type]
     conditions: list[dict] = [
         {"or": [
             {"property": "Бот", "select": {"equals": BOT_NEXUS}},
             {"property": "Бот", "select": {"is_empty": True}},
         ]},
+        {"property": "Тип", "select": {"equals": type_target}},
     ]
     if user_notion_id:
         conditions.append({
@@ -104,8 +108,18 @@ async def get_lists(
         logger.warning("lists query failed, retry without sort: %s", e)
         pages = await query_pages(db_id, filters={"and": conditions}, page_size=500)
 
-    # Client-side type matching: point-match (exact TYPE_MAP value) ИЛИ keyword substring.
-    type_target = _TYPE_MAP[type]
+    # wave8.6: если server-side equals вернул 0 — фолбэк на broad query + client-side match
+    if not pages:
+        broad = [c for c in conditions if not (
+            isinstance(c, dict) and c.get("property") == "Тип"
+        )]
+        try:
+            pages = await query_pages(
+                db_id, filters={"and": broad}, sorts=sorts, page_size=500,
+            )
+        except Exception:
+            pages = await query_pages(db_id, filters={"and": broad}, page_size=500)
+
     keywords = _TYPE_KEYWORDS[type]
 
     def _matches_type(page: dict) -> bool:

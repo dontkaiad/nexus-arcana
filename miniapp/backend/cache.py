@@ -69,6 +69,19 @@ def set_tip(tg_id: int, date: str, text: str) -> None:
         con.close()
 
 
+def delete_tip(tg_id: int, date: str) -> None:
+    """Сбросить кэш совета (wave8.6: ручной rerun по клику на RefreshCw)."""
+    con = sqlite3.connect(_DB_PATH)
+    try:
+        con.execute(
+            "DELETE FROM adhd_tips WHERE tg_id = ? AND date = ?",
+            (tg_id, date),
+        )
+        con.commit()
+    finally:
+        con.close()
+
+
 def get_profile(tg_id: int) -> Optional[dict]:
     """Вернуть {"text": str, "age_days": int} если кэш свежий (TTL 7 дней), иначе None."""
     con = sqlite3.connect(_DB_PATH)

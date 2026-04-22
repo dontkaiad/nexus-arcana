@@ -143,7 +143,9 @@ async def _adhd_context_memories(user_notion_id: str) -> list[str]:
 async def _generate_adhd_tip(tg_id: int, today_str: str,
                              active_titles: list[str], user_notion_id: str) -> str:
     cached = cache.get_tip(tg_id, today_str)
-    if cached:
+    # wave8.6: старые кэшированные советы с markdown (звёздочки, длинные) —
+    # игнорируем, чтобы новый промпт «без markdown, ≤15 слов» сразу подхватился.
+    if cached and "**" not in cached and len(cached.split()) <= 20:
         return cached
 
     memories = await _adhd_context_memories(user_notion_id)
@@ -169,6 +171,20 @@ async def _generate_adhd_tip(tg_id: int, today_str: str,
     if text:
         cache.set_tip(tg_id, today_str, text)
     return text
+
+
+@router.post("/today/refresh-tip")
+async def refresh_tip(tg_id: int = Depends(current_user_id)) -> dict[str, Any]:
+    """wave8.6: сбрасываем кэш СДВГ-совета и генерим заново."""
+    today_date, _ = await today_user_tz(tg_id)
+    today_str = today_date.isoformat()
+    cache.delete_tip(tg_id, today_str)
+    user_notion_id = (await get_user_notion_id(tg_id)) or ""
+    tasks_raw = await _fetch_nexus_tasks(user_notion_id)
+    summaries = [_task_summary(p, 3) for p in tasks_raw]
+    active_titles = [s["title"] for s in summaries if s["title"]]
+    tip = await _generate_adhd_tip(tg_id, today_str, active_titles, user_notion_id)
+    return {"tip": tip}
 
 
 @router.get("/today")
