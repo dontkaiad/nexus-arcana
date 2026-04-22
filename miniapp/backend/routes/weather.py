@@ -301,6 +301,19 @@ async def get_weather(tg_id: int = Depends(current_user_id)) -> dict[str, Any]:
     return data
 
 
+@router.post("/weather/refresh")
+async def refresh_weather(tg_id: int = Depends(current_user_id)) -> dict[str, Any]:
+    """wave8.11: сброс кэша погоды без указания города."""
+    _init_weather_cache()
+    con = sqlite3.connect(_cache._DB_PATH)
+    try:
+        con.execute("DELETE FROM weather_cache WHERE tg_id = ?", (tg_id,))
+        con.commit()
+    finally:
+        con.close()
+    return {"ok": True}
+
+
 @router.post("/weather/city")
 async def set_weather_city(
     tg_id: int = Depends(current_user_id),

@@ -22,7 +22,7 @@ router = APIRouter()
 # Категории, которые принадлежат бюджету и ADHD — исключаем из общего /api/memory,
 # для них есть /api/finance и /api/memory/adhd.
 EXCLUDED_CATEGORIES = {
-    "🧠 СДВГ",
+    "🦋 СДВГ",
     "📥 Доход",
     "🔒 Обязательные",
     "💰 Лимит",
@@ -98,7 +98,7 @@ async def _adhd_records(user_notion_id: str) -> list[dict]:
     if not db_id:
         return []
     conditions: list[dict] = [
-        {"property": "Категория", "select": {"equals": "🧠 СДВГ"}},
+        {"property": "Категория", "select": {"equals": "🦋 СДВГ"}},
         {"property": "Актуально", "checkbox": {"equals": True}},
     ]
     if user_notion_id:
