@@ -66,9 +66,14 @@ async def get_lists(
         return {"type": type, "items": []}
 
     user_notion_id = (await get_user_notion_id(tg_id)) or ""
+    # wave5.4: старые записи (созданные вручную в Notion или до появления поля "Бот")
+    # могли остаться без заполненного "Бот". Разрешаем и Nexus, и пустое.
     conditions: list[dict] = [
-        {"property": "Бот", "select": {"equals": BOT_NEXUS}},
         {"property": "Тип", "select": {"equals": _TYPE_MAP[type]}},
+        {"or": [
+            {"property": "Бот", "select": {"equals": BOT_NEXUS}},
+            {"property": "Бот", "select": {"is_empty": True}},
+        ]},
     ]
     if user_notion_id:
         conditions.append({
