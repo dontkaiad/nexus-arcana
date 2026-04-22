@@ -3655,7 +3655,13 @@ function NoteForm({ s, onSubmit, busy }) {
           cursor: "pointer", opacity: 0.5, fontSize: 16,
         }}>🎤</div>
       </div>
-      <Input s={s} value={cat} onChange={setCat} placeholder="Категория (например, 🛒 Предпочтения)" />
+      <div style={{ fontSize: 11, color: s.tS }}>Категория</div>
+      <Select
+        s={s}
+        value={cat}
+        onChange={setCat}
+        options={["🏡 Быт", "🐈 Коты", "👥 Люди", "⭐ Предпочтения", "🧠 СДВГ"]}
+      />
       <SubmitBtn
         s={s}
         disabled={!valid || busy}
@@ -3720,7 +3726,15 @@ function ListAddForm({ s, onSubmit, busy }) {
       )}
 
       {type !== "check" && (
-        <Input s={s} value={cat} onChange={setCat} placeholder="Категория (например, 🍜 Продукты)" />
+        <>
+          <div style={{ fontSize: 11, color: s.tS }}>Категория</div>
+          <Select
+            s={s}
+            value={cat}
+            onChange={setCat}
+            options={["🍜 Продукты", "🧴 Бытовая химия", "🐈 Коты", "💧 Уход", "📦 Прочее"]}
+          />
+        </>
       )}
       {type === "inv" && (
         <>
