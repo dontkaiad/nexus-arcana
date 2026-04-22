@@ -6,6 +6,14 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from miniapp.backend.routes import today, tasks, finance, lists, memory
 from miniapp.backend.routes import calendar as cal
+from miniapp.backend.routes import (
+    arcana_today,
+    arcana_sessions,
+    arcana_clients,
+    arcana_rituals,
+    arcana_grimoire,
+    arcana_stats,
+)
 
 app = FastAPI(title="Nexus × Arcana API")
 
@@ -16,12 +24,12 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-app.include_router(today.router, prefix="/api")
-app.include_router(tasks.router, prefix="/api")
-app.include_router(finance.router, prefix="/api")
-app.include_router(lists.router, prefix="/api")
-app.include_router(memory.router, prefix="/api")
-app.include_router(cal.router, prefix="/api")
+for _r in (
+    today, tasks, finance, lists, memory, cal,
+    arcana_today, arcana_sessions, arcana_clients,
+    arcana_rituals, arcana_grimoire, arcana_stats,
+):
+    app.include_router(_r.router, prefix="/api")
 
 
 @app.get("/health")
