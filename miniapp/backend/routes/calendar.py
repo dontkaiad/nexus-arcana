@@ -36,8 +36,8 @@ def _month_bounds(month: str) -> tuple[str, str]:
 
 
 async def _fetch_tasks_in_month(user_notion_id: str, start: str, end: str) -> list[dict]:
+    # База задач — Nexus-only; фильтр по "Бот" вызывает 400 от Notion.
     conditions: list[dict] = [
-        {"property": "Бот", "select": {"equals": BOT_NEXUS}},
         {"property": "Дедлайн", "date": {"on_or_after": start}},
         {"property": "Дедлайн", "date": {"on_or_before": end}},
     ]

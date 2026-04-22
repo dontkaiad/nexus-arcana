@@ -68,9 +68,10 @@ def _task_summary(page: dict, tz_offset: int) -> dict:
 
 
 async def _fetch_nexus_tasks(user_notion_id: str) -> list[dict]:
+    # База задач — только для Nexus (Arcana-работы в отдельной базе 🔮),
+    # поэтому фильтр по "Бот" не нужен и вызывает 400 от Notion.
     filters = {
         "and": [
-            {"property": "Бот", "select": {"equals": BOT_NEXUS}},
             {"property": "Статус", "status": {"does_not_equal": "Done"}},
             {"property": "Статус", "status": {"does_not_equal": "Complete"}},
         ]

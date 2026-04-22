@@ -2751,9 +2751,9 @@ async def _build_today_digest(uid: int, user_notion_id: str = "", greeting: str 
             f"НЕ выдумывай время задач — используй ТОЛЬКО время из списка выше.\n"
             f"Дай ОДИН тёплый короткий совет — помочь НАЧАТЬ делать, а не объяснять КАК. "
             f"Примеры хорошего совета: «Просто открой шкаф — руки сами сделают остальное» / «2 минуты и готово, ты справишься». "
-            f"Макс 1-2 предложения. Без пафоса."
+            f"Макс 1-2 предложения, заверши мысль целиком, НЕ заканчивай на многоточии. Без пафоса."
         )
-        advice = await ask_claude(prompt, max_tokens=100, model="claude-haiku-4-5-20251001")
+        advice = await ask_claude(prompt, max_tokens=1000, model="claude-haiku-4-5-20251001")
         if advice:
             lines.append(f"\n💡 {advice.strip()}")
     except Exception as e:
