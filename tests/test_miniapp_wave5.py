@@ -388,10 +388,10 @@ def test_lists_filter_allows_empty_bot(client):
 
     assert r.status_code == 200
     filter_str = _json.dumps(captured["filters"] or {}, ensure_ascii=False)
-    # or-ветвь с is_empty присутствует
+    # or-ветвь с is_empty присутствует (Бот Nexus OR пустой)
     assert "is_empty" in filter_str
-    # тип задан
-    assert "Чеклист" in filter_str
+    # wave6.1: "Тип" теперь фильтруется client-side — в Notion-запросе его нет
+    assert "Чеклист" not in filter_str
 
 
 def test_lists_done_endpoint_marks_status(client):

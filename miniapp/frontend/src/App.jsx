@@ -9,6 +9,7 @@ import {
   adaptRituals, adaptRitualDetail,
   adaptGrimoire, adaptGrimoireDetail,
   adaptArcanaStats,
+  formatMonth, formatDate, formatShortDate,
 } from "./adapters";
 import { apiGet, apiPost } from "./api";
 import {
@@ -1077,6 +1078,7 @@ function NxTasks({ s, openTask }) {
 
 function NxFinance({ s }) {
   const [tab, setTab] = useState("today");
+  const [drillCat, setDrillCat] = useState(null);  // wave6.1.2
   const { data, loading, error, refetch } = useApi(`/api/finance?view=${tab}`, [tab]);
 
   const tabsUi = (
@@ -1119,7 +1121,7 @@ function NxFinance({ s }) {
       {tabsUi}
 
       {tab === "today" && (() => {
-        const { total, items } = adaptFinanceToday(data);
+        const { total, items, budget } = adaptFinanceToday(data);
         return (
           <>
             <Glass s={s}>
@@ -1130,6 +1132,18 @@ function NxFinance({ s }) {
                 </span>
               </div>
             </Glass>
+            {budget && (
+              <Glass s={s} accent={s.acc} style={{ padding: "10px 14px" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: s.tS, marginBottom: 4 }}>
+                  <span>Бюджет дня</span>
+                  <span>{budget.day.toLocaleString()} ₽ · {budget.pct}%</span>
+                </div>
+                <Bar s={s} pct={budget.pct} color={budget.pct > 85 ? s.red : budget.pct > 60 ? s.amber : s.acc} />
+                <div style={{ fontSize: 10, color: s.tM, marginTop: 4 }}>
+                  Потрачено {budget.spent.toLocaleString()} ₽ · осталось {budget.left.toLocaleString()} ₽
+                </div>
+              </Glass>
+            )}
             {items.length === 0 && <Empty s={s} emoji="💚" title="Пока не тратила" text="Сегодня без трат — приятно." />}
             {items.map((x) => (
               <Glass key={x.id} s={s} style={{ padding: "8px 14px", marginBottom: 4 }}>
@@ -1150,7 +1164,8 @@ function NxFinance({ s }) {
 
       {tab === "month" && (() => {
         const { inc, exp, balance, cats } = adaptFinanceMonth(data);
-        const monthLabel = data?.month || "";
+        const monthIso = data?.month || "";
+        const monthLabel = formatMonth(monthIso) || monthIso;
         return (
           <>
             <Glass s={s} glow>
@@ -1187,8 +1202,13 @@ function NxFinance({ s }) {
             {cats.map((c, i) => {
               const pct = c.pct ?? (c.limit ? Math.round((c.spent / c.limit) * 100) : 0);
               const clr = pct > 85 ? s.red : pct > 60 ? s.amber : s.acc;
+              const catFull = c.raw?.full || c.raw?.emoji + " " + c.raw?.name || c.name;
               return (
-                <Glass key={i} s={s} style={{ padding: "8px 14px", marginBottom: 4 }}>
+                <Glass
+                  key={i} s={s}
+                  style={{ padding: "8px 14px", marginBottom: 4, cursor: "pointer" }}
+                  onClick={() => setDrillCat({ full: catFull, display: c.name, month: monthIso })}
+                >
                   <div
                     style={{
                       display: "flex", justifyContent: "space-between",
@@ -1286,6 +1306,43 @@ function NxFinance({ s }) {
           </>
         );
       })()}
+
+      {/* wave6.1.2: drill-down sheet для категорий */}
+      <Sheet
+        s={s}
+        open={!!drillCat}
+        onClose={() => setDrillCat(null)}
+        title={drillCat ? `${drillCat.display} · ${formatMonth(drillCat.month)}` : ""}
+      >
+        {drillCat && <CategoryDrillSheet s={s} cat={drillCat.full} month={drillCat.month} />}
+      </Sheet>
+    </div>
+  );
+}
+
+function CategoryDrillSheet({ s, cat, month }) {
+  const path = `/api/finance/category?cat=${encodeURIComponent(cat)}&month=${month}`;
+  const { data, loading, error, refetch } = useApi(path, [cat, month]);
+  if (loading) return <Empty s={s} text="Загружаю..." />;
+  if (error) return <ErrorBox s={s} error={error} refetch={refetch} />;
+  const items = data?.items || [];
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+      <div style={{ fontSize: 13, color: s.tS, marginBottom: 4 }}>
+        Всего: <span style={{ color: s.text, fontWeight: 500 }}>{(data?.total || 0).toLocaleString()} ₽</span> · {data?.count || 0} шт.
+      </div>
+      {items.length === 0 && <Empty s={s} emoji="🌿" title="Пусто" text="Тут трат нет." />}
+      {items.map((it) => (
+        <Glass key={it.id} s={s} style={{ padding: "8px 12px" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+            <span style={{ fontSize: 13, color: s.text }}>{it.desc || "—"}</span>
+            <span style={{ fontSize: 13, color: s.text, fontWeight: 500, fontFamily: H }}>
+              {it.amount.toLocaleString()} ₽
+            </span>
+          </div>
+          <div style={{ fontSize: 11, color: s.tM, marginTop: 2 }}>{formatDate(it.date)}</div>
+        </Glass>
+      ))}
     </div>
   );
 }
@@ -2718,7 +2775,7 @@ const ARCANA_ADD = [
   { key: "client", icon: Users, label: "Клиент" },
   { key: "session", icon: Sparkles, label: "Расклад" },
   { key: "ritual", icon: Flame, label: "Ритуал" },
-  { key: "work", icon: Check, label: "Работа" },
+  { key: "expense", icon: Wallet, label: "Финансы" },
   { key: "grimoire", icon: BookOpen, label: "В гримуар" },
   { key: "photo", icon: Camera, label: "Фото расклада" },
   { key: "voice", icon: Mic, label: "Голосом" },
@@ -2918,7 +2975,7 @@ function SubmitBtn({ s, onClick, disabled, label = "Сохранить" }) {
   );
 }
 
-function QuickForm({ s, kind, onDone }) {
+function QuickForm({ s, kind, onDone, botType = "nexus" }) {
   const [busy, setBusy] = useState(false);
   const wrap = (fn) => async () => {
     setBusy(true);
@@ -2932,7 +2989,7 @@ function QuickForm({ s, kind, onDone }) {
     }
   };
 
-  if (kind === "expense") return <ExpenseForm s={s} onSubmit={wrap} busy={busy} />;
+  if (kind === "expense") return <ExpenseForm s={s} onSubmit={wrap} busy={busy} botType={botType} />;
   if (kind === "task") return <TaskForm s={s} onSubmit={wrap} busy={busy} />;
   if (kind === "note" || kind === "memory") return <NoteForm s={s} onSubmit={wrap} busy={busy} />;
   if (kind === "list") return <ListAddForm s={s} onSubmit={wrap} busy={busy} />;
@@ -2952,13 +3009,18 @@ const INCOME_CATS = [
   "💼 Зарплата", "💰 Фриланс", "🎁 Подарок", "🏦 Прочее",
 ];
 
-const FINANCE_TYPES = [
+const NEXUS_FINANCE_TYPES = [
   { k: "expense", label: "💸 Расход" },
   { k: "income", label: "💰 Доход" },
-  { k: "practice_income", label: "🔮 От практики" },
 ];
 
-function ExpenseForm({ s, onSubmit, busy }) {
+const ARCANA_FINANCE_TYPES = [
+  { k: "expense", label: "💸 Расход" },
+  { k: "practice_income", label: "🔮 Доход от практики" },
+];
+
+function ExpenseForm({ s, onSubmit, busy, botType = "nexus" }) {
+  const financeTypes = botType === "arcana" ? ARCANA_FINANCE_TYPES : NEXUS_FINANCE_TYPES;
   const [type, setType] = useState("expense");
   const [amount, setAmount] = useState("");
   const [cat, setCat] = useState(EXPENSE_CATS[0]);
@@ -2993,7 +3055,7 @@ function ExpenseForm({ s, onSubmit, busy }) {
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
       <div style={{ fontSize: 11, color: s.tS }}>Тип</div>
       <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-        {FINANCE_TYPES.map((t) => (
+        {financeTypes.map((t) => (
           <Pill key={t.k} s={s} active={type === t.k} onClick={() => changeType(t.k)}>
             {t.label}
           </Pill>
@@ -3031,7 +3093,7 @@ function ExpenseForm({ s, onSubmit, busy }) {
             amount: parseFloat(amount),
             cat: needsCat ? cat : (cat || null),
             desc,
-            bot: type === "practice_income" ? "arcana" : "nexus",
+            bot: (botType === "arcana" || type === "practice_income") ? "arcana" : "nexus",
           });
         })}
       />
@@ -3645,6 +3707,7 @@ export default function App() {
           <QuickForm
             s={sky}
             kind={fabForm}
+            botType={isDay ? "nexus" : "arcana"}
             onDone={() => { setFabForm(null); setFabOpen(false); }}
           />
         )}

@@ -94,6 +94,20 @@ def _extract_finance_item(page: dict) -> dict:
 
 # ── View: today ──────────────────────────────────────────────────────────────
 
+_DEFAULT_BUDGET_DAY = 4166
+
+
+async def _budget_day_limit() -> int:
+    from core.notion_client import memory_get
+    raw = await memory_get("budget_day_limit")
+    if raw:
+        try:
+            return int(float(raw))
+        except (ValueError, TypeError):
+            pass
+    return _DEFAULT_BUDGET_DAY
+
+
 async def _view_today(tg_id: int) -> dict:
     today_date, _ = await today_user_tz(tg_id)
     today_iso = today_date.isoformat()
@@ -104,11 +118,22 @@ async def _view_today(tg_id: int) -> dict:
                                            type_filter="💸 Расход")
     items = [_extract_finance_item(p) for p in records]
     total = sum(i["amt"] for i in items)
+
+    # wave6.1.3: блок бюджета дня (как в /api/today) — пропал в волне 5
+    budget_day = await _budget_day_limit()
+    left = max(0, budget_day - total)
+    pct = _pct(total, budget_day)
     return {
         "view": "today",
         "date": today_iso,
         "total": total,
         "items": items,
+        "budget": {
+            "day": budget_day,
+            "spent": total,
+            "left": left,
+            "pct": pct,
+        },
     }
 
 
