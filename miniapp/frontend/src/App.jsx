@@ -10,7 +10,7 @@ import {
   adaptGrimoire, adaptGrimoireDetail,
   adaptArcanaStats,
 } from "./adapters";
-import { apiGet } from "./api";
+import { apiGet, apiPost } from "./api";
 import {
   Sun, Moon as LucideMoon, Check, Coins, List as ListIcon, Brain, Calendar,
   Sparkles as LucideSparkles, Users, Flame as LucideFlame, BookOpen as LucideBookOpen,
@@ -2281,16 +2281,44 @@ function SessionDetail({ s, id }) {
         <div style={{ fontSize: 13, color: s.text, lineHeight: 1.6 }}>{x.interp}</div>
       </Glass>
 
-      {/* Кнопки статуса */}
-      <SectionLabel s={s}>Статус сбылось</SectionLabel>
+      <VerifyButtons
+        s={s}
+        id={x.id}
+        path="/api/arcana/sessions"
+        action="verify"
+        onDone={refetch}
+        options={[
+          { label: "✓ Сбылось", status: "✅ Да", c: "#22c55e" },
+          { label: "~ Частично", status: "〰️ Частично", c: "#f59e0b" },
+          { label: "✗ Нет", status: "❌ Нет", c: "#ef4444" },
+        ]}
+      />
+    </div>
+  );
+}
+
+function VerifyButtons({ s, id, path, action, options, onDone }) {
+  const [busy, setBusy] = useState(false);
+  const click = async (status) => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      await apiPost(`${path}/${id}/${action}`, { status });
+      if (onDone) onDone();
+    } catch (e) {
+      alert(`Не получилось: ${e.message}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <>
+      <SectionLabel s={s}>{action === "verify" ? "Статус сбылось" : "Результат"}</SectionLabel>
       <div style={{ display: "flex", gap: 6 }}>
-        {[
-          { label: "✓ Сбылось", c: "#22c55e" },
-          { label: "~ Частично", c: "#f59e0b" },
-          { label: "✗ Нет", c: "#ef4444" },
-        ].map((b, i) => (
+        {options.map((b, i) => (
           <div
             key={i}
+            onClick={() => click(b.status)}
             style={{
               flex: 1,
               textAlign: "center",
@@ -2301,7 +2329,8 @@ function SessionDetail({ s, id }) {
               color: b.c,
               fontSize: 12,
               fontWeight: 500,
-              cursor: "pointer",
+              cursor: busy ? "progress" : "pointer",
+              opacity: busy ? 0.6 : 1,
               backdropFilter: "blur(10px)",
             }}
           >
@@ -2309,7 +2338,7 @@ function SessionDetail({ s, id }) {
           </div>
         ))}
       </div>
-    </div>
+    </>
   );
 }
 
@@ -2468,34 +2497,18 @@ function RitualDetail({ s, id }) {
         ))}
       </Glass>
 
-      {/* Кнопки результата */}
-      <SectionLabel s={s}>Результат</SectionLabel>
-      <div style={{ display: "flex", gap: 6 }}>
-        {[
-          { label: "✓ Сработал", c: "#22c55e" },
-          { label: "~ Частично", c: "#f59e0b" },
-          { label: "✗ Нет", c: "#ef4444" },
-        ].map((b, i) => (
-          <div
-            key={i}
-            style={{
-              flex: 1,
-              textAlign: "center",
-              padding: "10px 4px",
-              borderRadius: 10,
-              background: s.card,
-              border: `1px solid ${b.c}44`,
-              color: b.c,
-              fontSize: 12,
-              fontWeight: 500,
-              cursor: "pointer",
-              backdropFilter: "blur(10px)",
-            }}
-          >
-            {b.label}
-          </div>
-        ))}
-      </div>
+      <VerifyButtons
+        s={s}
+        id={r.id}
+        path="/api/arcana/rituals"
+        action="result"
+        onDone={refetch}
+        options={[
+          { label: "✓ Сработал", status: "✅ Сработало", c: "#22c55e" },
+          { label: "~ Частично", status: "〰️ Частично", c: "#f59e0b" },
+          { label: "✗ Нет", status: "❌ Не сработало", c: "#ef4444" },
+        ]}
+      />
     </div>
   );
 }
@@ -2672,6 +2685,349 @@ function QuickAdd({ s, actions, onPick }) {
 }
 
 // ═══════════════════════════════════════════════════════════════
+// TASK SHEET (с working write actions)
+// ═══════════════════════════════════════════════════════════════
+
+function TaskSheet({ s, task, onClose }) {
+  const [busy, setBusy] = useState(null);
+  const run = async (label, fn) => {
+    setBusy(label);
+    try {
+      await fn();
+      onClose();
+    } catch (e) {
+      alert(`Не получилось: ${e.message}`);
+    } finally {
+      setBusy(null);
+    }
+  };
+  return (
+    <div>
+      <div style={{ fontFamily: H, fontSize: 18, color: s.text, marginBottom: 6 }}>
+        {task.cat} {task.title}
+      </div>
+      <div style={{ fontSize: 12, color: s.tS, marginBottom: 14 }}>
+        {task.date || task.time || task.rpt || "без даты"}
+        {task.prio && ` · ${task.prio}`}
+        {task.streak > 0 && ` · 🔥 ${task.streak}`}
+      </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+        <ActionRow
+          s={s}
+          icon={<Check size={16} />}
+          label={busy === "done" ? "Сохраняю..." : "Сделано"}
+          onClick={() => !busy && task.id && run("done", () => apiPost(`/api/tasks/${task.id}/done`))}
+        />
+        <ActionRow
+          s={s}
+          icon={<Calendar size={16} />}
+          label={busy === "post" ? "Сохраняю..." : "Перенести на день"}
+          onClick={() => !busy && task.id && run("post", () => apiPost(`/api/tasks/${task.id}/postpone`, { days: 1 }))}
+        />
+        <ActionRow
+          s={s}
+          icon={<Calendar size={16} />}
+          label={busy === "post7" ? "Сохраняю..." : "Перенести на неделю"}
+          onClick={() => !busy && task.id && run("post7", () => apiPost(`/api/tasks/${task.id}/postpone`, { days: 7 }))}
+        />
+        <ActionRow
+          s={s}
+          icon={<Trash2 size={16} />}
+          label={busy === "cancel" ? "Сохраняю..." : "Отменить"}
+          onClick={() => !busy && task.id && run("cancel", () => apiPost(`/api/tasks/${task.id}/cancel`))}
+          destructive
+        />
+      </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════
+// QUICK FORMS (FAB → выбранная категория → форма)
+// ═══════════════════════════════════════════════════════════════
+
+const FAB_TITLE = {
+  expense: "Новый расход",
+  task: "Новая задача",
+  note: "Новая заметка",
+  list: "В список",
+  memory: "В память",
+  photo: "Фото чека",
+  voice: "Голосом",
+  client: "Новый клиент",
+  session: "Новый расклад",
+  ritual: "Новый ритуал",
+  work: "Работа",
+  grimoire: "В гримуар",
+};
+
+const EXPENSE_CATS = [
+  "🍜 Продукты", "🍱 Кафе", "🚕 Транспорт", "🚬 Привычки",
+  "💅 Бьюти", "🏠 Жилье", "💻 Подписки", "🐾 Коты",
+  "🎲 Импульсивные", "💳 Прочее",
+];
+
+const PRIOS = ["🔴", "🟡", "⚪"];
+
+function Input({ s, value, onChange, placeholder, type = "text", step }) {
+  return (
+    <input
+      type={type}
+      step={step}
+      value={value ?? ""}
+      onChange={(e) => onChange(e.target.value)}
+      placeholder={placeholder}
+      style={{
+        background: s.card,
+        border: `1px solid ${s.brd}`,
+        borderRadius: 10,
+        padding: "10px 12px",
+        color: s.text,
+        fontFamily: B,
+        fontSize: 13,
+        outline: "none",
+        width: "100%",
+      }}
+    />
+  );
+}
+
+function Select({ s, value, onChange, options }) {
+  return (
+    <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+      {options.map((o) => (
+        <Pill key={o} s={s} active={value === o} onClick={() => onChange(o)}>
+          {o}
+        </Pill>
+      ))}
+    </div>
+  );
+}
+
+function SubmitBtn({ s, onClick, disabled, label = "Сохранить" }) {
+  return (
+    <div
+      onClick={disabled ? undefined : onClick}
+      style={{
+        textAlign: "center",
+        padding: "12px",
+        borderRadius: 12,
+        background: s.acc,
+        color: "#fff",
+        fontSize: 14,
+        fontWeight: 500,
+        cursor: disabled ? "not-allowed" : "pointer",
+        opacity: disabled ? 0.6 : 1,
+        marginTop: 12,
+      }}
+    >
+      {label}
+    </div>
+  );
+}
+
+function QuickForm({ s, kind, onDone }) {
+  const [busy, setBusy] = useState(false);
+  const wrap = (fn) => async () => {
+    setBusy(true);
+    try {
+      await fn();
+      onDone();
+    } catch (e) {
+      alert(`Не получилось: ${e.message}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (kind === "expense") return <ExpenseForm s={s} onSubmit={wrap} busy={busy} />;
+  if (kind === "task") return <TaskForm s={s} onSubmit={wrap} busy={busy} />;
+  if (kind === "note" || kind === "memory") return <NoteForm s={s} onSubmit={wrap} busy={busy} />;
+  if (kind === "list") return <ListAddForm s={s} onSubmit={wrap} busy={busy} />;
+  if (kind === "client") return <ClientForm s={s} onSubmit={wrap} busy={busy} />;
+
+  return (
+    <div style={{ padding: "12px 4px" }}>
+      <div style={{ fontSize: 13, color: s.text, marginBottom: 8 }}>
+        Coming soon 🌱 — добавление через бота.
+      </div>
+      <SubmitBtn s={s} onClick={onDone} label="Закрыть" />
+    </div>
+  );
+}
+
+function ExpenseForm({ s, onSubmit, busy }) {
+  const [amount, setAmount] = useState("");
+  const [cat, setCat] = useState(EXPENSE_CATS[0]);
+  const [desc, setDesc] = useState("");
+  const valid = parseFloat(amount) > 0 && !!cat;
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+      <Input s={s} value={amount} onChange={setAmount} placeholder="Сумма, ₽" type="number" step="1" />
+      <div style={{ fontSize: 11, color: s.tS }}>Категория</div>
+      <Select s={s} value={cat} onChange={setCat} options={EXPENSE_CATS} />
+      <Input s={s} value={desc} onChange={setDesc} placeholder="Описание (например, Красное&Белое)" />
+      <SubmitBtn
+        s={s}
+        disabled={!valid || busy}
+        label={busy ? "Сохраняю..." : "Сохранить расход"}
+        onClick={onSubmit(async () => {
+          await apiPost("/api/expenses", {
+            amount: parseFloat(amount),
+            cat,
+            desc,
+            bot: "nexus",
+          });
+        })}
+      />
+    </div>
+  );
+}
+
+function TaskForm({ s, onSubmit, busy }) {
+  const [title, setTitle] = useState("");
+  const [cat, setCat] = useState("");
+  const [prio, setPrio] = useState("⚪");
+  const [date, setDate] = useState("");
+  const valid = title.trim().length > 0;
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+      <Input s={s} value={title} onChange={setTitle} placeholder="Название задачи" />
+      <Input s={s} value={cat} onChange={setCat} placeholder="Категория (например, 🏠 Дом)" />
+      <div style={{ fontSize: 11, color: s.tS }}>Приоритет</div>
+      <Select s={s} value={prio} onChange={setPrio} options={PRIOS} />
+      <Input s={s} value={date} onChange={setDate} placeholder="Дата YYYY-MM-DD" type="date" />
+      <SubmitBtn
+        s={s}
+        disabled={!valid || busy}
+        label={busy ? "Сохраняю..." : "Добавить задачу"}
+        onClick={onSubmit(async () => {
+          await apiPost("/api/tasks", {
+            title: title.trim(),
+            cat: cat || null,
+            prio,
+            date: date || null,
+          });
+        })}
+      />
+    </div>
+  );
+}
+
+function NoteForm({ s, onSubmit, busy }) {
+  const [text, setText] = useState("");
+  const [cat, setCat] = useState("");
+  const valid = text.trim().length > 0;
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+      <textarea
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        placeholder="Текст заметки / записи в память"
+        rows={4}
+        style={{
+          background: s.card,
+          border: `1px solid ${s.brd}`,
+          borderRadius: 10,
+          padding: "10px 12px",
+          color: s.text,
+          fontFamily: B,
+          fontSize: 13,
+          outline: "none",
+          width: "100%",
+          resize: "vertical",
+        }}
+      />
+      <Input s={s} value={cat} onChange={setCat} placeholder="Категория (например, 🛒 Предпочтения)" />
+      <SubmitBtn
+        s={s}
+        disabled={!valid || busy}
+        label={busy ? "Сохраняю..." : "Сохранить"}
+        onClick={onSubmit(async () => {
+          await apiPost("/api/memory", {
+            text: text.trim(),
+            cat: cat || null,
+          });
+        })}
+      />
+    </div>
+  );
+}
+
+function ListAddForm({ s, onSubmit, busy }) {
+  const [type, setType] = useState("buy");
+  const [name, setName] = useState("");
+  const [cat, setCat] = useState("");
+  const [qty, setQty] = useState("");
+  const valid = name.trim().length > 0;
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+      <div style={{ fontSize: 11, color: s.tS }}>Тип</div>
+      <div style={{ display: "flex", gap: 6 }}>
+        <Pill s={s} active={type === "buy"} onClick={() => setType("buy")}>🛒 Покупки</Pill>
+        <Pill s={s} active={type === "check"} onClick={() => setType("check")}>📋 Чеклист</Pill>
+        <Pill s={s} active={type === "inv"} onClick={() => setType("inv")}>📦 Инвентарь</Pill>
+      </div>
+      <Input s={s} value={name} onChange={setName} placeholder="Название" />
+      {type !== "check" && (
+        <Input s={s} value={cat} onChange={setCat} placeholder="Категория (например, 🍜 Продукты)" />
+      )}
+      {type === "inv" && (
+        <Input s={s} value={qty} onChange={setQty} placeholder="Количество" type="number" />
+      )}
+      <SubmitBtn
+        s={s}
+        disabled={!valid || busy}
+        label={busy ? "Сохраняю..." : "Добавить"}
+        onClick={onSubmit(async () => {
+          await apiPost("/api/lists", {
+            type,
+            name: name.trim(),
+            cat: cat || null,
+            qty: qty ? parseFloat(qty) : null,
+          });
+        })}
+      />
+    </div>
+  );
+}
+
+function ClientForm({ s, onSubmit, busy }) {
+  const [name, setName] = useState("");
+  const [contact, setContact] = useState("");
+  const [request, setRequest] = useState("");
+  const [status, setStatus] = useState("🟢 Активный");
+  const valid = name.trim().length > 0;
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+      <Input s={s} value={name} onChange={setName} placeholder="Имя" />
+      <Input s={s} value={contact} onChange={setContact} placeholder="Контакт (@telegram или телефон)" />
+      <Input s={s} value={request} onChange={setRequest} placeholder="Запрос / тема" />
+      <div style={{ fontSize: 11, color: s.tS }}>Статус</div>
+      <Select
+        s={s}
+        value={status}
+        onChange={setStatus}
+        options={["🟢 Активный", "⏸ Пауза", "⛔️ Архив"]}
+      />
+      <SubmitBtn
+        s={s}
+        disabled={!valid || busy}
+        label={busy ? "Сохраняю..." : "Добавить клиента"}
+        onClick={onSubmit(async () => {
+          await apiPost("/api/arcana/clients", {
+            name: name.trim(),
+            contact,
+            request,
+            status,
+          });
+        })}
+      />
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════
 // APP
 // ═══════════════════════════════════════════════════════════════
 
@@ -2699,6 +3055,7 @@ export default function App() {
   const [arP, setArP] = useState("day");
   const [modal, setModal] = useState(null);
   const [fabOpen, setFabOpen] = useState(false);
+  const [fabForm, setFabForm] = useState(null);
   const aRef = useRef(null);
   const tX = useRef(null);
 
@@ -2939,29 +3296,11 @@ export default function App() {
       {/* МОДАЛКИ */}
       <Sheet s={sky} open={modal?.type === "task"} onClose={() => setModal(null)} title="Задача">
         {modal?.payload && (
-          <div>
-            <div style={{ fontFamily: H, fontSize: 18, color: sky.text, marginBottom: 6 }}>
-              {modal.payload.cat} {modal.payload.title}
-            </div>
-            <div style={{ fontSize: 12, color: sky.tS, marginBottom: 14 }}>
-              {modal.payload.date || modal.payload.time || modal.payload.rpt || "без даты"}
-              {modal.payload.prio && ` · ${modal.payload.prio}`}
-              {modal.payload.streak > 0 && ` · 🔥 ${modal.payload.streak}`}
-            </div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-              <ActionRow s={sky} icon={<Check size={16} />} label="Сделано" onClick={() => setModal(null)} />
-              <ActionRow s={sky} icon={<Pencil size={16} />} label="Редактировать" onClick={() => setModal(null)} />
-              <ActionRow s={sky} icon={<Calendar size={16} />} label="Перенести" onClick={() => setModal(null)} />
-              <ActionRow s={sky} icon={<ListIcon size={16} />} label="Разбить на подзадачи" onClick={() => setModal(null)} />
-              <ActionRow
-                s={sky}
-                icon={<Trash2 size={16} />}
-                label="Отменить"
-                onClick={() => setModal(null)}
-                destructive
-              />
-            </div>
-          </div>
+          <TaskSheet
+            s={sky}
+            task={modal.payload}
+            onClose={() => setModal(null)}
+          />
         )}
       </Sheet>
 
@@ -3005,12 +3344,27 @@ export default function App() {
         {modal?.payload?.id && <GrimoireDetail s={sky} id={modal.payload.id} />}
       </Sheet>
 
-      <Sheet s={sky} open={fabOpen} onClose={() => setFabOpen(false)} title="Добавить">
+      <Sheet s={sky} open={fabOpen && !fabForm} onClose={() => setFabOpen(false)} title="Добавить">
         <QuickAdd
           s={sky}
           actions={isDay ? NEXUS_ADD : ARCANA_ADD}
-          onPick={() => setFabOpen(false)}
+          onPick={(k) => setFabForm(k)}
         />
+      </Sheet>
+
+      <Sheet
+        s={sky}
+        open={!!fabForm}
+        onClose={() => { setFabForm(null); setFabOpen(false); }}
+        title={FAB_TITLE[fabForm] || ""}
+      >
+        {fabForm && (
+          <QuickForm
+            s={sky}
+            kind={fabForm}
+            onDone={() => { setFabForm(null); setFabOpen(false); }}
+          />
+        )}
       </Sheet>
     </div>
   );

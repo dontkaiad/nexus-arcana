@@ -4,7 +4,7 @@ from __future__ import annotations
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from miniapp.backend.routes import today, tasks, finance, lists, memory
+from miniapp.backend.routes import today, tasks, finance, lists, memory, writes
 from miniapp.backend.routes import calendar as cal
 from miniapp.backend.routes import (
     arcana_today,
@@ -28,6 +28,7 @@ for _r in (
     today, tasks, finance, lists, memory, cal,
     arcana_today, arcana_sessions, arcana_clients,
     arcana_rituals, arcana_grimoire, arcana_stats,
+    writes,
 ):
     app.include_router(_r.router, prefix="/api")
 
