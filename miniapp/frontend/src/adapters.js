@@ -86,6 +86,22 @@ export function adaptToday(data) {
   }
 }
 
+// Полное имя категории из объекта cat_from_notion {emoji, name, full} / строки
+export function catFull(cat) {
+  if (!cat) return ''
+  if (typeof cat === 'string') return cat
+  return cat.full || cat.name || cat.emoji || ''
+}
+
+export function catEmoji(cat) {
+  if (!cat) return ''
+  if (typeof cat === 'string') {
+    const m = cat.match(/^\S+/)
+    return m ? m[0] : ''
+  }
+  return cat.emoji || ''
+}
+
 // ── /api/arcana/today → shape для ArDay ────────────────────────────────────
 
 export function adaptArcanaToday(data) {
@@ -117,6 +133,341 @@ export function adaptArcanaToday(data) {
       supplies: data.month_stats?.supplies ?? 0,
       accuracy: data.month_stats?.accuracy ?? 0,
       sessions: data.month_stats?.sessions ?? 0,
+    },
+  }
+}
+
+// ── /api/tasks → MOCK.tasks shape ─────────────────────────────────────────
+
+export function adaptTasks(data) {
+  if (!data) return []
+  return (data.tasks || []).map((t) => ({
+    id: t.id,
+    title: t.title || '',
+    cat: catFull(t.cat),
+    prio: t.prio || '⚪',
+    status: t.status || 'active',
+    date: t.deadline ? formatShortDate(t.deadline) : null,
+    time: t.deadline_time || null,
+    rpt: t.repeat ? `🔄 ${t.repeat}` : undefined,
+    streak: t.streak || 0,
+  }))
+}
+
+// ── /api/finance — 4 view-adapt ───────────────────────────────────────────
+
+export function adaptFinanceToday(data) {
+  if (!data) return { total: 0, items: [] }
+  return {
+    total: data.total ?? 0,
+    items: (data.items || []).map((x) => ({
+      id: x.id,
+      desc: x.desc || '',
+      cat: catFull(x.cat),
+      amt: x.amt ?? 0,
+    })),
+  }
+}
+
+export function adaptFinanceMonth(data) {
+  if (!data) return { inc: 0, exp: 0, balance: 0, cats: [] }
+  return {
+    inc: data.income ?? 0,
+    exp: data.expense ?? 0,
+    balance: data.balance ?? 0,
+    cats: (data.by_category || []).map((c) => ({
+      name: catFull(c.cat),
+      spent: c.spent ?? 0,
+      limit: c.limit ?? null,
+      pct: c.pct ?? null,
+    })),
+  }
+}
+
+export function adaptFinanceLimits(data) {
+  if (!data) return []
+  return (data.categories || []).map((c) => ({
+    name: catFull(c.cat),
+    spent: c.spent ?? 0,
+    limit: c.limit ?? 0,
+    pct: c.pct ?? 0,
+    zone: c.zone || 'green',
+  }))
+}
+
+export function adaptFinanceGoals(data) {
+  if (!data) return { debts: [], goals: [] }
+  return {
+    debts: (data.debts || []).map((d) => ({
+      n: d.name,
+      total: d.total ?? 0,
+      left: d.left ?? d.total ?? 0,
+      by: d.by || '—',
+      note: d.note || '',
+    })),
+    goals: (data.goals || []).map((g) => ({
+      n: g.name,
+      t: g.target ?? 0,
+      s: g.saved ?? 0,
+      after: g.after || '—',
+      monthly: g.monthly ?? 0,
+    })),
+  }
+}
+
+// ── /api/lists → MOCK.lists.{buy,check,inv} shape ─────────────────────────
+
+export function adaptLists(data) {
+  if (!data) return []
+  const type = data.type
+  return (data.items || []).map((x) => {
+    const base = {
+      id: x.id,
+      name: x.name || '',
+      cat: catEmoji(x.cat),
+      done: !!x.done,
+    }
+    if (type === 'inv') {
+      return {
+        ...base,
+        qty: x.qty ?? 1,
+        exp: x.expires ? formatShortDate(x.expires) : undefined,
+      }
+    }
+    return base
+  })
+}
+
+// ── /api/memory → {items, categories} ─────────────────────────────────────
+
+export function adaptMemory(data) {
+  if (!data) return { items: [], categories: [] }
+  return {
+    items: (data.items || []).map((m) => ({
+      id: m.id,
+      text: m.text || '',
+      cat: m.cat || '—',
+    })),
+    categories: data.categories || [],
+  }
+}
+
+// ── /api/memory/adhd → {profile, records} ─────────────────────────────────
+
+export function adaptAdhd(data) {
+  if (!data) return { profile: '', records: [] }
+  return {
+    profile: data.profile || '',
+    records: (data.records || []).map((r) => ({ id: r.id, text: r.text || '' })),
+  }
+}
+
+// ── /api/calendar → {[day]: ["emoji title", ...]} ─────────────────────────
+
+export function adaptCalendar(data) {
+  if (!data) return { tasksByDay: {}, month: null }
+  const days = data.days || {}
+  const tasksByDay = {}
+  for (const [day, bucket] of Object.entries(days)) {
+    const tasks = bucket.tasks || []
+    if (tasks.length === 0) continue
+    tasksByDay[Number(day)] = tasks.map((t) => (t.title || '').slice(0, 30))
+  }
+  return { tasksByDay, month: data.month || null, days }
+}
+
+// ── /api/arcana/sessions → MOCK.sessions brief list ───────────────────────
+
+export function adaptSessionBrief(x) {
+  return {
+    id: x.id,
+    q: x.question || '',
+    client: x.client || 'Личный',
+    client_id: x.client_id,
+    area: Array.isArray(x.area) ? x.area.join(', ') : (x.area || ''),
+    deck: x.deck || '',
+    type: x.type || '',
+    date: x.date ? formatShortDate(x.date) : '',
+    time: x.date_time || '',
+    cards: (x.cards_brief || []).map((name) => ({ name, pos: null, icon: null })),
+    done: x.done || '⏳ Не проверено',
+    price: x.price ?? 0,
+    paid: x.paid ?? 0,
+  }
+}
+
+export function adaptSessions(data) {
+  if (!data) return []
+  return (data.sessions || []).map(adaptSessionBrief)
+}
+
+// Полная детализация для SessionDetail
+export function adaptSessionDetail(data) {
+  if (!data) return null
+  return {
+    id: data.id,
+    q: data.question || '',
+    client: data.client || 'Личный',
+    client_id: data.client_id,
+    area: Array.isArray(data.area) ? data.area.join(', ') : (data.area || ''),
+    deck: data.deck || '',
+    type: data.type || '',
+    date: data.date ? formatShortDate(data.date) : '',
+    cards: (data.cards || []).map((c) => ({
+      pos: c.pos || '',
+      name: c.name || '',
+      icon: c.icon || '',
+    })),
+    bottom: data.bottom || null,
+    interp: data.interpretation || '',
+    done: data.done || '⏳ Не проверено',
+    price: data.price ?? 0,
+    paid: data.paid ?? 0,
+    photo_url: data.photo_url || null,
+  }
+}
+
+// ── /api/arcana/clients → MOCK.clients brief list ─────────────────────────
+
+export function adaptClients(data) {
+  if (!data) return { clients: [], total_debt: 0 }
+  return {
+    total_debt: data.total_debt ?? 0,
+    total: data.total ?? 0,
+    clients: (data.clients || []).map((c) => ({
+      id: c.id,
+      name: c.name || '',
+      initial: c.initial || (c.name || '?')[0],
+      status: c.status || '🟢',
+      sessions: c.sessions_count ?? 0,
+      rituals: c.rituals_count ?? 0,
+      debt: c.debt ?? 0,
+      total: c.total_paid ?? 0,
+      self: (c.status || '').includes('Я') || (c.name || '').toLowerCase() === 'кай',
+    })),
+  }
+}
+
+export function adaptClientDossier(data) {
+  if (!data) return null
+  return {
+    id: data.id,
+    name: data.name || '',
+    initial: data.initial || (data.name || '?')[0],
+    status: data.status || '🟢',
+    contact: data.contact || '—',
+    since: data.since ? formatShortDate(data.since) : '—',
+    request: data.request || '—',
+    notes: data.notes || '',
+    photo_url: data.photo_url || null,
+    sessions: data.stats?.sessions ?? 0,
+    rituals: data.stats?.rituals ?? 0,
+    debt: data.stats?.debt ?? 0,
+    total: data.stats?.total_paid ?? 0,
+    self: (data.name || '').toLowerCase() === 'кай',
+    history: (data.history || []).map((h) => ({
+      id: h.id,
+      date: h.date ? formatShortDate(h.date) : '—',
+      type: h.kind === 'session' ? '🃏' : '🕯️',
+      desc: h.desc || '',
+      amount: h.amount ?? 0,
+      paid: !!h.paid,
+    })),
+  }
+}
+
+// ── /api/arcana/rituals → MOCK.rituals brief list ─────────────────────────
+
+export function adaptRituals(data) {
+  if (!data) return []
+  return (data.rituals || []).map((r) => ({
+    id: r.id,
+    name: r.name || '',
+    goal: r.goal || '—',
+    place: r.place || '—',
+    type: r.type || '🌟',
+    date: r.date ? formatShortDate(r.date) : '',
+    result: (r.result || '⏳').split(' ')[0],
+    client: r.client || null,
+    price: r.price ?? 0,
+    paid: r.paid ?? 0,
+  }))
+}
+
+export function adaptRitualDetail(data) {
+  if (!data) return null
+  return {
+    id: data.id,
+    name: data.name || '',
+    goal: data.goal || '—',
+    place: data.place || '—',
+    type: data.type || '🌟',
+    date: data.date ? formatShortDate(data.date) : '',
+    result: (data.result || '⏳').split(' ')[0],
+    client: data.client || null,
+    question: data.question || '',
+    price: data.price ?? 0,
+    paid: data.paid ?? 0,
+    supplies: (data.supplies || []).map((x) => ({
+      name: x.name || '',
+      qty: x.qty || '',
+      price: x.price ?? 0,
+    })),
+    time: data.time_min ?? 0,
+    offerings: data.offerings || '',
+    powers: data.powers || '',
+    structure: data.structure || [],
+  }
+}
+
+// ── /api/arcana/grimoire → MOCK.grimoire brief list ───────────────────────
+
+export function adaptGrimoire(data) {
+  if (!data) return { items: [], categories: [] }
+  return {
+    items: (data.items || []).map((g) => ({
+      id: g.id,
+      name: g.name || '',
+      cat: g.cat || '—',
+      theme: g.theme || '📖',
+    })),
+    categories: data.categories || [],
+  }
+}
+
+export function adaptGrimoireDetail(data) {
+  if (!data) return null
+  return {
+    id: data.id,
+    name: data.name || '',
+    cat: data.cat || '—',
+    themes: data.themes || [],
+    content: data.content || '',
+    source: data.source || '',
+  }
+}
+
+// ── /api/arcana/stats → {pct, allVer, months, practice} ───────────────────
+
+export function adaptArcanaStats(data) {
+  if (!data) return null
+  const pf = data.practice_finance?.current_month || {}
+  return {
+    pct: data.accuracy_overall ?? 0,
+    allVer: data.verified_total ?? 0,
+    months: (data.months || []).map((m) => ({
+      name: m.name || '',
+      total: m.total ?? 0,
+      yes: m.yes ?? 0,
+      partial: m.partial ?? 0,
+      no: m.no ?? 0,
+      pending: m.pending ?? 0,
+      pct: m.pct ?? 0,
+    })),
+    practice: {
+      inc: pf.income ?? 0,
+      exp: pf.expense ?? 0,
+      profit: pf.profit ?? 0,
     },
   }
 }
