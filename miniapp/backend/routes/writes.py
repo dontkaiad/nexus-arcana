@@ -251,6 +251,146 @@ class VerifyBody(BaseModel):
     status: str
 
 
+# ═══════════════════════════════════════════════════════════════
+# Wave 6.7: фото расклада (Cloudinary) + AI-саммари трактовки
+# ═══════════════════════════════════════════════════════════════
+
+
+async def _cloudinary_upload(file_bytes: bytes, filename: str) -> Optional[str]:
+    """Загрузка в Cloudinary через signed upload API.
+
+    Требует CLOUDINARY_URL в формате cloudinary://<api_key>:<api_secret>@<cloud>.
+    Возвращает secure_url или None.
+    """
+    import os
+    import hashlib
+    import time
+    import urllib.parse
+    import httpx
+
+    cu = os.environ.get("CLOUDINARY_URL", "")
+    if not cu.startswith("cloudinary://"):
+        return None
+    try:
+        rest = cu[len("cloudinary://"):]
+        creds, cloud_name = rest.split("@", 1)
+        api_key, api_secret = creds.split(":", 1)
+    except ValueError:
+        logger.warning("CLOUDINARY_URL parse failed")
+        return None
+
+    timestamp = str(int(time.time()))
+    folder = "arcana-sessions"
+    # Signature: sha1(params_to_sign + api_secret), params sorted & joined by &
+    params = {"folder": folder, "timestamp": timestamp}
+    to_sign = "&".join(f"{k}={v}" for k, v in sorted(params.items()))
+    signature = hashlib.sha1((to_sign + api_secret).encode()).hexdigest()
+
+    url = f"https://api.cloudinary.com/v1_1/{cloud_name}/image/upload"
+    data = {
+        "api_key": api_key,
+        "timestamp": timestamp,
+        "folder": folder,
+        "signature": signature,
+    }
+    files = {"file": (filename, file_bytes)}
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            r = await client.post(url, data=data, files=files)
+            if r.status_code >= 300:
+                logger.warning("cloudinary upload %s: %s", r.status_code, r.text[:200])
+                return None
+            return r.json().get("secure_url")
+    except Exception as e:
+        logger.warning("cloudinary upload exception: %s", e)
+        return None
+
+
+from fastapi import UploadFile, File as FastAPIFile
+
+
+@router.post("/arcana/sessions/{session_id}/photo")
+async def upload_session_photo(
+    session_id: str,
+    file: UploadFile = FastAPIFile(...),
+    tg_id: int = Depends(current_user_id),
+) -> dict[str, Any]:
+    user_notion_id = (await get_user_notion_id(tg_id)) or ""
+    await _load_owned_page(session_id, user_notion_id)
+
+    # 5 MB limit
+    content = await file.read()
+    if len(content) > 5 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="file too large (max 5 MB)")
+    if not (file.content_type or "").startswith("image/"):
+        raise HTTPException(status_code=415, detail="only image/* allowed")
+
+    url = await _cloudinary_upload(content, file.filename or "upload.jpg")
+    if not url:
+        raise HTTPException(status_code=501, detail="cloudinary not configured")
+
+    try:
+        await update_page(session_id, {"Фото": {"url": url}})
+    except Exception as e:
+        logger.warning("Failed to set Фото URL in Notion: %s", e)
+
+    return {"ok": True, "url": url}
+
+
+class SummarizeBody(BaseModel):
+    pass
+
+
+@router.post("/arcana/sessions/{session_id}/summarize")
+async def summarize_session(
+    session_id: str,
+    tg_id: int = Depends(current_user_id),
+) -> dict[str, Any]:
+    from core.claude_client import ask_claude
+    from miniapp.backend._helpers import rich_text_plain
+
+    user_notion_id = (await get_user_notion_id(tg_id)) or ""
+    page = await _load_owned_page(session_id, user_notion_id)
+
+    # existing summary
+    existing = rich_text_plain(page, "AI_Summary")
+    if existing:
+        return {"summary": existing, "cached": True}
+
+    interp = rich_text_plain(page, "Трактовка")
+    if not interp:
+        raise HTTPException(status_code=400, detail="no interpretation to summarize")
+
+    # Strip HTML tags
+    import re
+    clean = re.sub(r"<[^>]+>", "", interp).strip()
+    if len(clean) < 20:
+        raise HTTPException(status_code=400, detail="interpretation too short")
+
+    prompt = (
+        f"Сделай короткое саммари этой трактовки в 2-3 предложения на русском. "
+        f"Обращайся к Кай на ты, женский род. Только суть, без HTML, без эмодзи в начале.\n\n"
+        f"Трактовка:\n{clean}"
+    )
+    try:
+        summary = await ask_claude(prompt, max_tokens=300,
+                                    model="claude-haiku-4-5-20251001")
+    except Exception as e:
+        logger.error("Haiku summarize failed: %s", e)
+        raise HTTPException(status_code=500, detail="summarize failed")
+
+    summary = (summary or "").strip()
+    if not summary:
+        raise HTTPException(status_code=500, detail="empty summary")
+
+    try:
+        await update_page(session_id, {"AI_Summary": _text(summary)})
+    except Exception as e:
+        logger.warning("Failed to save AI_Summary to Notion: %s", e)
+
+    return {"summary": summary, "cached": False}
+
+
 @router.post("/arcana/sessions/{session_id}/verify")
 async def session_verify(
     session_id: str,

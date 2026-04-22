@@ -2578,6 +2578,126 @@ function ArStats({ s }) {
 // SESSION DETAIL SHEET
 // ═══════════════════════════════════════════════════════════════
 
+function SessionPhoto({ s, id, url, onUploaded }) {
+  const fileRef = useRef(null);
+  const [busy, setBusy] = useState(false);
+  const [localUrl, setLocalUrl] = useState(url || null);
+
+  const onPick = () => {
+    if (fileRef.current && !busy) fileRef.current.click();
+  };
+  const onFile = async (e) => {
+    const f = e.target.files?.[0];
+    if (!f) return;
+    if (f.size > 5 * 1024 * 1024) {
+      alert("Файл > 5 МБ");
+      return;
+    }
+    setBusy(true);
+    try {
+      const fd = new FormData();
+      fd.append("file", f);
+      const r = await fetch(`/api/arcana/sessions/${id}/photo`, {
+        method: "POST",
+        headers: { "X-Telegram-Init-Data": (window.Telegram?.WebApp?.initData || import.meta.env.VITE_DEV_INIT_DATA || "") },
+        body: fd,
+      });
+      if (!r.ok) {
+        const err = await r.json().catch(() => ({ detail: "error" }));
+        alert("Не получилось: " + (err.detail || r.status));
+        return;
+      }
+      const d = await r.json();
+      setLocalUrl(d.url);
+      onUploaded && onUploaded();
+    } catch (err) {
+      alert("Ошибка: " + err.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (localUrl) {
+    return (
+      <Glass s={s} style={{ padding: 4, marginBottom: 12 }}>
+        <img src={localUrl} alt="Фото расклада" style={{
+          width: "100%", borderRadius: 8, display: "block",
+        }} />
+      </Glass>
+    );
+  }
+
+  return (
+    <>
+      <Glass
+        s={s}
+        onClick={onPick}
+        style={{
+          padding: "22px 14px", marginBottom: 12, textAlign: "center",
+          border: `1.5px dashed ${s.brd}`, cursor: busy ? "wait" : "pointer",
+        }}
+      >
+        <Camera size={26} color={s.tM} style={{ margin: "0 auto 6px", display: "block" }} />
+        <div style={{ fontSize: 11, color: s.tS }}>
+          {busy ? "Загружаю..." : "Нажми чтобы загрузить фото расклада"}
+        </div>
+      </Glass>
+      <input ref={fileRef} type="file" accept="image/*" style={{ display: "none" }} onChange={onFile} />
+    </>
+  );
+}
+
+function SessionSummary({ s, id, interp }) {
+  const [summary, setSummary] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [expanded, setExpanded] = useState(true);
+
+  const load = async () => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      const r = await apiPost(`/api/arcana/sessions/${id}/summarize`);
+      setSummary(r.summary || "");
+    } catch (e) {
+      alert("Не получилось: " + e.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (!interp) return null;
+
+  return (
+    <Glass s={s} style={{ padding: "10px 14px", marginBottom: 8 }}>
+      <div
+        onClick={() => setExpanded(!expanded)}
+        style={{ display: "flex", justifyContent: "space-between", cursor: "pointer", fontSize: 12, color: s.acc, fontWeight: 500 }}
+      >
+        <span>⚡ Короткая суть</span>
+        <span>{expanded ? "▾" : "▸"}</span>
+      </div>
+      {expanded && (
+        <div style={{ marginTop: 6, fontSize: 13, color: s.text, lineHeight: 1.5 }}>
+          {summary ? (
+            summary
+          ) : (
+            <div
+              onClick={load}
+              style={{
+                display: "inline-block", padding: "4px 10px", borderRadius: 6,
+                background: `${s.acc}22`, color: s.acc, cursor: busy ? "wait" : "pointer",
+                fontSize: 12,
+              }}
+            >
+              {busy ? "Генерирую..." : "Сгенерировать саммари"}
+            </div>
+          )}
+        </div>
+      )}
+    </Glass>
+  );
+}
+
 function TarotCardTile({ s, card, deckId }) {
   const [imgOk, setImgOk] = useState(true);
   const hasFile = card.file && imgOk;
@@ -2677,19 +2797,11 @@ function SessionDetail({ s, id }) {
         </div>
       </Glass>
 
-      {/* Заглушка фото */}
-      <Glass
-        s={s}
-        style={{
-          padding: "22px 14px",
-          marginBottom: 12,
-          textAlign: "center",
-          border: `1.5px dashed ${s.brd}`,
-        }}
-      >
-        <Camera size={26} color={s.tM} style={{ margin: "0 auto 6px", display: "block" }} />
-        <div style={{ fontSize: 11, color: s.tS }}>Фото расклада — бот загрузит через Cloudinary</div>
-      </Glass>
+      {/* wave6.7: Фото расклада — кликабельный загрузчик */}
+      <SessionPhoto s={s} id={x.id} url={x.photo_url} onUploaded={() => { /* refetch */ }} />
+
+      {/* wave6.7: AI-саммари */}
+      <SessionSummary s={s} id={x.id} interp={x.interp} />
 
       {/* wave6.4: Карты в раскладе — grid с картинками */}
       <SectionLabel s={s}>Карты в раскладе</SectionLabel>
