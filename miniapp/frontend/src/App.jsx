@@ -275,7 +275,7 @@ const Metric = ({ s, v, sub, unit, accent, icon }) => (
     <div
       style={{
         fontFamily: H,
-        fontSize: 22,
+        fontSize: 24,
         fontWeight: 700,
         color: accent || s.text,
         display: "inline-flex",
@@ -287,10 +287,10 @@ const Metric = ({ s, v, sub, unit, accent, icon }) => (
       {icon}
       {v}
       {unit && (
-        <span style={{ color: s.tM, fontSize: 14, fontWeight: 500, marginLeft: 2 }}>{unit}</span>
+        <span style={{ color: s.text, opacity: 0.7, fontSize: 16, fontWeight: 500, marginLeft: 2 }}>{unit}</span>
       )}
     </div>
-    <div style={{ fontSize: 12, color: s.text, opacity: 0.8, fontWeight: 500, marginTop: 2 }}>{sub}</div>
+    <div style={{ fontSize: 14, color: s.text, opacity: 0.85, fontWeight: 500, marginTop: 3 }}>{sub}</div>
   </div>
 );
 
@@ -995,11 +995,11 @@ function NxDay({ s, openTask, navigate, openStreaks }) {
     <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
       <Glass s={s} glow>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
-          <span style={{ fontFamily: H, fontSize: 22, color: s.text }}>Мой день</span>
+          <span style={{ fontFamily: H, fontSize: 24, color: s.text }}>Мой день</span>
           <div style={{ textAlign: "right" }}>
-            <div style={{ fontSize: 11, color: s.tS }}>{t.date}</div>
+            <div style={{ fontSize: 14, color: s.text, opacity: 0.75 }}>{t.date}</div>
             {weatherApi.data && !weatherApi.data.error && (
-              <div style={{ fontSize: 11, color: s.text, opacity: 0.8, marginTop: 2 }}>
+              <div style={{ fontSize: 14, color: s.text, opacity: 0.9, marginTop: 3, fontWeight: 500 }}>
                 {WEATHER_ICON[weatherApi.data.kind] || "🌤️"}
                 {" "}
                 {weatherApi.data.temp > 0 ? "+" : ""}{weatherApi.data.temp}° · {weatherApi.data.city}
@@ -1020,7 +1020,7 @@ function NxDay({ s, openTask, navigate, openStreaks }) {
               v={t.streak}
               sub="стрик"
               accent={s.amber}
-              icon={<LucideFlame size={14} color={s.amber} fill={s.amber} style={{ opacity: 0.9 }} />}
+              icon={<LucideFlame size={18} color={s.amber} fill={s.amber} style={{ opacity: 0.9 }} />}
             />
           </div>
         </div>
@@ -1052,7 +1052,7 @@ function NxDay({ s, openTask, navigate, openStreaks }) {
             pct={leftPct}
             color={leftPct > 85 ? s.red : leftPct > 60 ? s.amber : s.acc}
           />
-          <div style={{ fontSize: 12, color: s.text, opacity: 0.75, marginTop: 4 }}>
+          <div style={{ fontSize: 13, color: s.text, opacity: 0.8, marginTop: 5 }}>
             потрачено {t.spentDay.toLocaleString()} ₽ из {t.budgetDay.toLocaleString()} ₽
           </div>
         </div>
@@ -1097,7 +1097,24 @@ function NxDay({ s, openTask, navigate, openStreaks }) {
         </Glass>
       )}
 
-      {/* wave8.18: просроченные + сегодня — единый блок «Задачи» до Расписания */}
+      {/* wave8.19: порядок секций — Расписание → Задачи (просрочка+сегодня) → Без срока */}
+      {t.scheduled.length > 0 && (
+        <>
+          <SectionLabel s={s}>Расписание</SectionLabel>
+          {t.scheduled.map((x) => (
+            <TaskRow
+              key={x.id}
+              s={s}
+              t={x}
+              done={done[x.id]}
+              onToggle={() => toggle(x.id)}
+              onOpen={() => openTask(x)}
+              withTime
+            />
+          ))}
+        </>
+      )}
+
       {(t.overdue.length > 0 || t.tasks.length > 0) && (
         <>
           <SectionLabel s={s}>Задачи</SectionLabel>
@@ -1141,23 +1158,6 @@ function NxDay({ s, openTask, navigate, openStreaks }) {
               done={done[x.id]}
               onToggle={() => toggle(x.id)}
               onOpen={() => openTask(x)}
-            />
-          ))}
-        </>
-      )}
-
-      {t.scheduled.length > 0 && (
-        <>
-          <SectionLabel s={s}>Расписание</SectionLabel>
-          {t.scheduled.map((x) => (
-            <TaskRow
-              key={x.id}
-              s={s}
-              t={x}
-              done={done[x.id]}
-              onToggle={() => toggle(x.id)}
-              onOpen={() => openTask(x)}
-              withTime
             />
           ))}
         </>
