@@ -201,3 +201,169 @@ async def test_nexus_today_digest_complete_ending():
         f"digest ends on unexpected char {last_char!r}; tail: {text[-50:]!r}"
     )
     assert not text.rstrip().endswith("..."), "digest обрывается на многоточии"
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# Stage 2: POST /api/finance (income/expense/practice_income) + /api/categories
+# ═════════════════════════════════════════════════════════════════════════════
+
+def test_finance_post_expense_routes_to_finance_add(client):
+    captured = {}
+
+    async def fake_finance_add(**kwargs):
+        captured.update(kwargs)
+        return "new-page-id"
+
+    with patch("miniapp.backend.routes.writes.finance_add", side_effect=fake_finance_add), \
+         patch("miniapp.backend.routes.writes.today_user_tz",
+               AsyncMock(return_value=(_today_date(), 3))), \
+         patch("miniapp.backend.routes.writes.get_user_notion_id",
+               AsyncMock(return_value=FAKE_NOTION_USER)):
+        r = client.post("/api/finance", json={
+            "type": "expense",
+            "amount": 500,
+            "cat": "🍜 Продукты",
+            "desc": "Магнит",
+        })
+
+    assert r.status_code == 200, r.text
+    data = r.json()
+    assert data["ok"] is True
+    assert data["type"] == "expense"
+    assert captured["type_"] == "💸 Расход"
+    assert captured["category"] == "🍜 Продукты"
+    assert captured["amount"] == 500
+    assert captured["bot_label"] == "☀️ Nexus"
+
+
+def test_finance_post_income_default_category(client):
+    captured = {}
+
+    async def fake_finance_add(**kwargs):
+        captured.update(kwargs)
+        return "inc-id"
+
+    with patch("miniapp.backend.routes.writes.finance_add", side_effect=fake_finance_add), \
+         patch("miniapp.backend.routes.writes.today_user_tz",
+               AsyncMock(return_value=(_today_date(), 3))), \
+         patch("miniapp.backend.routes.writes.get_user_notion_id",
+               AsyncMock(return_value=FAKE_NOTION_USER)):
+        r = client.post("/api/finance", json={
+            "type": "income",
+            "amount": 80000,
+            "desc": "зарплата",
+        })
+
+    assert r.status_code == 200, r.text
+    assert captured["type_"] == "💰 Доход"
+    assert captured["category"] == "🏦 Прочее"  # дефолт когда cat не указан
+    assert captured["amount"] == 80000
+
+
+def test_finance_post_practice_income_forces_arcana(client):
+    captured = {}
+
+    async def fake_finance_add(**kwargs):
+        captured.update(kwargs)
+        return "practice-id"
+
+    with patch("miniapp.backend.routes.writes.finance_add", side_effect=fake_finance_add), \
+         patch("miniapp.backend.routes.writes.today_user_tz",
+               AsyncMock(return_value=(_today_date(), 3))), \
+         patch("miniapp.backend.routes.writes.get_user_notion_id",
+               AsyncMock(return_value=FAKE_NOTION_USER)):
+        r = client.post("/api/finance", json={
+            "type": "practice_income",
+            "amount": 3500,
+            "desc": "клиент Анна",
+            "bot": "nexus",  # игнорируется, практика всегда Arcana
+        })
+
+    assert r.status_code == 200, r.text
+    assert captured["bot_label"] == "🌒 Arcana"
+    assert captured["type_"] == "💰 Доход"
+
+
+def test_finance_expense_requires_category(client):
+    with patch("miniapp.backend.routes.writes.today_user_tz",
+               AsyncMock(return_value=(_today_date(), 3))), \
+         patch("miniapp.backend.routes.writes.get_user_notion_id",
+               AsyncMock(return_value=FAKE_NOTION_USER)):
+        r = client.post("/api/finance", json={
+            "type": "expense",
+            "amount": 100,
+        })
+    assert r.status_code == 400
+    assert "cat is required" in r.json()["detail"]
+
+
+def test_expenses_alias_still_works(client):
+    """Deprecated /api/expenses всё ещё работает через finance_create."""
+    captured = {}
+
+    async def fake_finance_add(**kwargs):
+        captured.update(kwargs)
+        return "legacy-id"
+
+    with patch("miniapp.backend.routes.writes.finance_add", side_effect=fake_finance_add), \
+         patch("miniapp.backend.routes.writes.today_user_tz",
+               AsyncMock(return_value=(_today_date(), 3))), \
+         patch("miniapp.backend.routes.writes.get_user_notion_id",
+               AsyncMock(return_value=FAKE_NOTION_USER)):
+        r = client.post("/api/expenses", json={
+            "amount": 200, "cat": "🍜 Продукты", "desc": "test",
+        })
+
+    assert r.status_code == 200
+    assert r.json()["type"] == "expense"
+    assert captured["type_"] == "💸 Расход"
+
+
+def test_categories_task_returns_merged_list(client):
+    """GET /api/categories?type=task возвращает существующие + дефолты."""
+    pages = [
+        {"id": "t1", "properties": {"Категория": {"select": {"name": "🐾 Коты"}}}},
+        {"id": "t2", "properties": {"Категория": {"select": {"name": "🐾 Коты"}}}},
+        {"id": "t3", "properties": {"Категория": {"select": {"name": "💜 Люди"}}}},
+        # запись без категории
+        {"id": "t4", "properties": {"Категория": {"select": None}}},
+    ]
+
+    async def qp(*_, **__):
+        return pages
+
+    with patch("miniapp.backend.routes.categories.query_pages", side_effect=qp), \
+         patch("miniapp.backend.routes.categories.get_user_notion_id",
+               AsyncMock(return_value=FAKE_NOTION_USER)):
+        r = client.get("/api/categories?type=task")
+
+    assert r.status_code == 200
+    data = r.json()
+    assert data["type"] == "task"
+    assert "🐾 Коты" in data["categories"]
+    assert "💜 Люди" in data["categories"]
+    # дефолты тоже добавились
+    assert "🏠 Дом" in data["categories"]
+    assert "💼 Работа" in data["categories"]
+    # без дублирования
+    assert data["categories"].count("🐾 Коты") == 1
+
+
+def test_categories_invalid_type(client):
+    r = client.get("/api/categories?type=bogus")
+    assert r.status_code == 400
+
+
+def test_categories_income_returns_defaults_when_empty(client):
+    async def qp(*_, **__):
+        return []
+
+    with patch("miniapp.backend.routes.categories.query_pages", side_effect=qp), \
+         patch("miniapp.backend.routes.categories.get_user_notion_id",
+               AsyncMock(return_value="")):
+        r = client.get("/api/categories?type=income")
+
+    assert r.status_code == 200
+    cats = r.json()["categories"]
+    assert "💼 Зарплата" in cats
+    assert "🏦 Прочее" in cats
