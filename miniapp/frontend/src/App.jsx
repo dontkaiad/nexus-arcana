@@ -229,6 +229,22 @@ const Pill = ({ s, active, children, onClick }) => (
   </div>
 );
 
+// wave8.5: пилл-селект для форм вместо <Select> — крупный тапабельный UI.
+// options: массив строк, либо {value,label}, либо {k,label}
+const PillSelect = ({ s, value, onChange, options }) => (
+  <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+    {(options || []).map((opt, i) => {
+      const v = typeof opt === "string" ? opt : (opt.value ?? opt.k ?? opt.label);
+      const label = typeof opt === "string" ? opt : (opt.label ?? opt.value ?? opt.k);
+      return (
+        <Pill key={i} s={s} active={value === v} onClick={() => onChange(v)}>
+          {label}
+        </Pill>
+      );
+    })}
+  </div>
+);
+
 const Bar = ({ s, pct, color }) => (
   <div style={{ height: 4, background: s.brd, borderRadius: 2, overflow: "hidden" }}>
     <div
@@ -3515,7 +3531,7 @@ function ExpenseForm({ s, onSubmit, busy, botType = "nexus" }) {
       {type !== "practice_income" && (
         <>
           <div style={{ fontSize: 11, color: s.tS }}>Категория</div>
-          <Select s={s} value={cat} onChange={setCat} options={catsForType} />
+          <PillSelect s={s} value={cat} onChange={setCat} options={catsForType} />
         </>
       )}
       <div style={{ position: "relative" }}>
@@ -3588,12 +3604,12 @@ function TaskForm({ s, onSubmit, busy }) {
       </div>
       <div style={{ fontSize: 11, color: s.tS }}>Категория</div>
       {cats.length > 0 ? (
-        <Select s={s} value={cat} onChange={setCat} options={cats} />
+        <PillSelect s={s} value={cat} onChange={setCat} options={cats} />
       ) : (
         <Input s={s} value={cat} onChange={setCat} placeholder="🏠 Дом" />
       )}
       <div style={{ fontSize: 11, color: s.tS }}>Приоритет</div>
-      <Select s={s} value={prio} onChange={setPrio} options={PRIOS} />
+      <PillSelect s={s} value={prio} onChange={setPrio} options={PRIOS} />
       <div style={{ display: "flex", gap: 8 }}>
         <div style={{ flex: 1 }}>
           <Input s={s} value={date} onChange={setDate} placeholder="Дата" type="date" />
@@ -3674,7 +3690,7 @@ function NoteForm({ s, onSubmit, busy }) {
         }}>🎤</div>
       </div>
       <div style={{ fontSize: 11, color: s.tS }}>Категория</div>
-      <Select
+      <PillSelect
         s={s}
         value={cat}
         onChange={setCat}
@@ -3746,7 +3762,7 @@ function ListAddForm({ s, onSubmit, busy }) {
       {type !== "check" && (
         <>
           <div style={{ fontSize: 11, color: s.tS }}>Категория</div>
-          <Select
+          <PillSelect
             s={s}
             value={cat}
             onChange={setCat}
