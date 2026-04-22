@@ -440,6 +440,46 @@ def test_moon_phases_endpoint_returns_upcoming(client):
         assert len(p["date"]) == 10  # YYYY-MM-DD
 
 
+def test_finance_category_drill_down(client):
+    """Wave5.9: /api/finance/category возвращает список трат по категории."""
+    pages = [
+        {
+            "id": "e1",
+            "properties": {
+                "Сумма": {"number": 4500},
+                "Описание": {"title": [{"plain_text": "коммуналка"}]},
+                "Дата": {"date": {"start": "2026-04-02"}},
+            },
+        },
+        {
+            "id": "e2",
+            "properties": {
+                "Сумма": {"number": 800},
+                "Описание": {"title": [{"plain_text": "интернет"}]},
+                "Дата": {"date": {"start": "2026-04-18"}},
+            },
+        },
+    ]
+
+    async def qp(*_, **__):
+        return pages
+
+    with patch("miniapp.backend.routes.finance.query_pages", side_effect=qp), \
+         patch("miniapp.backend.routes.finance.today_user_tz",
+               AsyncMock(return_value=(_today_date(), 3))), \
+         patch("miniapp.backend.routes.finance.get_user_notion_id",
+               AsyncMock(return_value=FAKE_NOTION_USER)):
+        r = client.get("/api/finance/category?cat=🏠%20Жилье&month=2026-04")
+
+    assert r.status_code == 200
+    data = r.json()
+    assert data["cat"] == "🏠 Жилье"
+    assert data["month"] == "2026-04"
+    assert data["total"] == 5300
+    assert data["count"] == 2
+    assert data["items"][0]["desc"] == "коммуналка"
+
+
 def test_moon_next_phases_chronological():
     """Фазы возвращаются в хронологическом порядке."""
     from miniapp.backend._moon import next_phases
