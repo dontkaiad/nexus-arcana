@@ -378,39 +378,39 @@ const ErrorBox = ({ s, error, refetch }) => (
   </Glass>
 );
 
-// wave6.2: SVG-баннеры Nexus / Arcana в шапке (единый блок вместо png + text)
+// wave6.2 + hotfix: SVG-баннеры Nexus / Arcana с Pacifico (cursive)
 const NexusLogo = () => (
-  <svg width="150" height="36" viewBox="0 0 150 36" style={{ userSelect: "none" }}>
-    <circle cx="18" cy="18" r="9" fill="#f4c66e" opacity="0.9" />
-    <circle cx="18" cy="18" r="5" fill="#e8a948" />
+  <svg width="180" height="44" viewBox="0 0 180 44" style={{ userSelect: "none" }}>
+    <circle cx="20" cy="22" r="10" fill="#f4c66e" opacity="0.9" />
+    <circle cx="20" cy="22" r="6" fill="#e8a948" />
     {[0, 45, 90, 135, 180, 225, 270, 315].map((a) => {
       const rad = (a * Math.PI) / 180;
       return (
         <line
           key={a}
-          x1={18 + 12 * Math.cos(rad)}
-          y1={18 + 12 * Math.sin(rad)}
-          x2={18 + 16 * Math.cos(rad)}
-          y2={18 + 16 * Math.sin(rad)}
+          x1={20 + 13 * Math.cos(rad)}
+          y1={22 + 13 * Math.sin(rad)}
+          x2={20 + 17 * Math.cos(rad)}
+          y2={22 + 17 * Math.sin(rad)}
           stroke="#e8a948"
           strokeWidth="1.5"
           strokeLinecap="round"
         />
       );
     })}
-    <text x="40" y="25" fontFamily="Lora, serif" fontSize="20" fontWeight="500" fill="#2d4a3e">
+    <text x="44" y="33" fontFamily="Pacifico, cursive" fontSize="32" fill="#2d4a3e">
       Nexus
     </text>
   </svg>
 );
 
 const ArcanaLogo = () => (
-  <svg width="150" height="36" viewBox="0 0 150 36" style={{ userSelect: "none" }}>
-    <path d="M 14,9 a 9,9 0 1,0 0,18 a 6.5,9 0 1,1 0,-18" fill="#c9d4e8" opacity="0.95" />
-    <circle cx="28" cy="10" r="1" fill="#fff" />
-    <circle cx="32" cy="24" r="0.8" fill="#fff" />
-    <circle cx="24" cy="7" r="0.6" fill="#fff" opacity="0.7" />
-    <text x="40" y="25" fontFamily="Lora, serif" fontStyle="italic" fontSize="20" fontWeight="500" fill="#e8eaf1">
+  <svg width="180" height="44" viewBox="0 0 180 44" style={{ userSelect: "none" }}>
+    <path d="M 16,11 a 11,11 0 1,0 0,22 a 8,11 0 1,1 0,-22" fill="#c9d4e8" opacity="0.95" />
+    <circle cx="30" cy="12" r="1" fill="#fff" />
+    <circle cx="34" cy="28" r="0.8" fill="#fff" />
+    <circle cx="26" cy="8" r="0.6" fill="#fff" opacity="0.7" />
+    <text x="44" y="33" fontFamily="Pacifico, cursive" fontSize="32" fill="#e8eaf1">
       Arcana
     </text>
   </svg>
