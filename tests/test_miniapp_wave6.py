@@ -280,6 +280,64 @@ def test_weather_returns_cached_or_fetches(client, tmp_path, monkeypatch):
     assert fetch_call_count["n"] == 1
 
 
+def test_summarize_returns_cached_when_ai_summary_exists(client):
+    """Если у сеанса уже есть AI_Summary — возвращаем его без вызова Claude."""
+    page = {
+        "id": "s1",
+        "properties": {
+            "🪪 Пользователи": {"relation": [{"id": FAKE_NOTION_USER}]},
+            "AI_Summary": {"rich_text": [{"plain_text": "Короткая суть уже была."}]},
+            "Трактовка": {"rich_text": [{"plain_text": "<b>Долгая трактовка...</b>"}]},
+        },
+    }
+
+    from unittest.mock import AsyncMock as AM, MagicMock
+    claude_mock = AM(return_value="НЕ должен вызываться")
+
+    with patch("miniapp.backend.routes.writes.get_page",
+               AsyncMock(return_value=page)), \
+         patch("miniapp.backend.routes.writes.update_page",
+               AsyncMock(return_value={"ok": True})), \
+         patch("miniapp.backend.routes.writes.get_user_notion_id",
+               AsyncMock(return_value=FAKE_NOTION_USER)), \
+         patch("core.claude_client.ask_claude", claude_mock):
+        r = client.post("/api/arcana/sessions/s1/summarize")
+
+    assert r.status_code == 200
+    data = r.json()
+    assert data["cached"] is True
+    assert data["summary"] == "Короткая суть уже была."
+    assert claude_mock.await_count == 0
+
+
+def test_summarize_generates_when_empty(client):
+    page = {
+        "id": "s2",
+        "properties": {
+            "🪪 Пользователи": {"relation": [{"id": FAKE_NOTION_USER}]},
+            "AI_Summary": {"rich_text": []},
+            "Трактовка": {"rich_text": [{"plain_text": "Очень длинная трактовка про шута и дорогу"}]},
+        },
+    }
+    from unittest.mock import AsyncMock as AM
+    claude_mock = AM(return_value="Вывод: путь начинается сегодня.")
+
+    with patch("miniapp.backend.routes.writes.get_page",
+               AsyncMock(return_value=page)), \
+         patch("miniapp.backend.routes.writes.update_page",
+               AsyncMock(return_value={"ok": True})), \
+         patch("miniapp.backend.routes.writes.get_user_notion_id",
+               AsyncMock(return_value=FAKE_NOTION_USER)), \
+         patch("core.claude_client.ask_claude", claude_mock):
+        r = client.post("/api/arcana/sessions/s2/summarize")
+
+    assert r.status_code == 200
+    data = r.json()
+    assert data["cached"] is False
+    assert data["summary"] == "Вывод: путь начинается сегодня."
+    assert claude_mock.await_count == 1
+
+
 def test_streaks_week_returns_7_days(client):
     with patch("miniapp.backend.routes.streaks.today_user_tz",
                AsyncMock(return_value=(_today_date(), 3))), \
