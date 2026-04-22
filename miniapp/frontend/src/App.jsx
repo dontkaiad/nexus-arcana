@@ -908,6 +908,19 @@ const WEATHER_ICON = {
   fog: "🌫️",
 };
 
+// wave8.2: поддержка **жирного** в коротких текстах (СДВГ-совет и т.п.)
+function renderBoldMd(text) {
+  if (!text) return null;
+  const parts = String(text).split(/(\*\*[^*]+\*\*)/g);
+  return parts.map((p, i) =>
+    p.startsWith("**") && p.endsWith("**") ? (
+      <strong key={i} style={{ fontWeight: 700 }}>{p.slice(2, -2)}</strong>
+    ) : (
+      <span key={i}>{p}</span>
+    )
+  );
+}
+
 function NxDay({ s, openTask, navigate, openStreaks }) {
   const [done, setDone] = useState({});
   const { data, loading, error, refetch } = useApi('/api/today');
@@ -1037,7 +1050,7 @@ function NxDay({ s, openTask, navigate, openStreaks }) {
             </span>
             <RefreshCw size={13} color={s.tS} style={{ cursor: "pointer" }} />
           </div>
-          <div style={{ fontSize: 12, color: s.text, lineHeight: 1.5 }}>{t.adhdTip}</div>
+          <div style={{ fontSize: 13, color: s.text, lineHeight: 1.5 }}>{renderBoldMd(t.adhdTip)}</div>
         </Glass>
       )}
 
