@@ -126,16 +126,27 @@ export function adaptToday(data) {
       prio: o.prio || '⚪',
       days: o.days_ago,
     })),
-    scheduled: (data.scheduled || []).map((x) => ({
-      id: x.id,
-      title: x.title,
-      cat: x.cat || '',
-      prio: x.prio || '⚪',
-      time: x.time || '',
-      rem: formatReminder(x.reminder_min),
-      rpt: x.repeat ? `🔄 ${formatRepeat(x.repeat)}` : undefined,
-      streak: x.streak || 0,
-    })),
+    scheduled: (data.scheduled || []).map((x) => {
+      // wave8.8: client-side safety — если бэкенд прислал "HH:MM|every_Nd"
+      // (старый непарсенный формат), разбираем здесь.
+      let rawTime = x.time || ''
+      let repeat = x.repeat || ''
+      if (rawTime && rawTime.includes('|')) {
+        const [t, r] = rawTime.split('|', 2)
+        rawTime = (t || '').trim()
+        if (!repeat && r) repeat = r.trim()
+      }
+      return {
+        id: x.id,
+        title: x.title,
+        cat: x.cat || '',
+        prio: x.prio || '⚪',
+        time: rawTime,
+        rem: formatReminder(x.reminder_min),
+        rpt: repeat ? `🔄 ${formatRepeat(repeat)}` : undefined,
+        streak: x.streak || 0,
+      }
+    }),
     tasks: todayTasksRaw.map((x) => ({
       id: x.id,
       title: x.title,
