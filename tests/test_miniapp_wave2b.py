@@ -296,7 +296,8 @@ def test_arcana_session_detail_parses_cards_and_bottom(client):
     assert "Дно" not in (data["interpretation"] or "")
     assert "Расклад указывает" in data["interpretation"]
     assert len(data["cards"]) >= 3
-    assert data["cards"][0]["pos"] is None
+    # wave6.4: cards теперь canonical с en/ru/file/matched
+    assert "en" in data["cards"][0] or "raw" in data["cards"][0]
     assert data["cards_raw"] is not None
 
 
