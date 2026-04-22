@@ -1,6 +1,16 @@
-import { useState, useRef, useMemo } from "react";
+import { useState, useRef, useMemo, useEffect } from "react";
 import { useApi } from "./hooks/useApi";
-import { adaptToday, adaptArcanaToday } from "./adapters";
+import {
+  adaptToday, adaptArcanaToday,
+  adaptTasks, adaptFinanceToday, adaptFinanceMonth, adaptFinanceLimits, adaptFinanceGoals,
+  adaptLists, adaptMemory, adaptAdhd, adaptCalendar,
+  adaptSessions, adaptSessionDetail,
+  adaptClients, adaptClientDossier,
+  adaptRituals, adaptRitualDetail,
+  adaptGrimoire, adaptGrimoireDetail,
+  adaptArcanaStats,
+} from "./adapters";
+import { apiGet } from "./api";
 import {
   Sun, Moon as LucideMoon, Check, Coins, List as ListIcon, Brain, Calendar,
   Sparkles as LucideSparkles, Users, Flame as LucideFlame, BookOpen as LucideBookOpen,
@@ -298,6 +308,30 @@ const Empty = ({ s, text }) => (
   >
     {text}
   </div>
+);
+
+const ErrorBox = ({ s, error, refetch }) => (
+  <Glass s={s} accent={s.red} style={{ padding: "14px 16px" }}>
+    <div style={{ fontSize: 13, color: s.red, fontWeight: 500, marginBottom: 6 }}>
+      Ошибка загрузки
+    </div>
+    <div style={{ fontSize: 12, color: s.tM, marginBottom: 10, wordBreak: "break-word" }}>
+      {error?.message || "неизвестная ошибка"}
+    </div>
+    {refetch && (
+      <div
+        onClick={refetch}
+        style={{
+          display: "inline-flex", alignItems: "center", gap: 6,
+          padding: "6px 12px", borderRadius: 8,
+          background: `${s.acc}22`, color: s.acc,
+          fontSize: 12, cursor: "pointer",
+        }}
+      >
+        <RefreshCw size={12} /> Повторить
+      </div>
+    )}
+  </Glass>
 );
 
 const FAB = ({ s, onClick }) => (
@@ -931,7 +965,8 @@ function NxDay({ s, openTask }) {
 
 function NxTasks({ s, openTask }) {
   const [f, setF] = useState("active");
-  const list = f === "all" ? MOCK.tasks : MOCK.tasks.filter((t) => t.status === f);
+  const { data, loading, error, refetch } = useApi(`/api/tasks?filter=${f}`, [f]);
+  const list = loading || error ? [] : adaptTasks(data);
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
@@ -948,8 +983,10 @@ function NxTasks({ s, openTask }) {
           </Pill>
         ))}
       </div>
-      {list.length === 0 && <Empty s={s} text="Нет задач в этой категории" />}
-      {list.map((t) => (
+      {loading && <Empty s={s} text="Загружаю..." />}
+      {error && <ErrorBox s={s} error={error} refetch={refetch} />}
+      {!loading && !error && list.length === 0 && <Empty s={s} text="Нет задач в этой категории" />}
+      {!loading && !error && list.map((t) => (
         <Glass
           key={t.id}
           s={s}
@@ -995,180 +1032,215 @@ function NxTasks({ s, openTask }) {
 
 function NxFinance({ s }) {
   const [tab, setTab] = useState("today");
-  const f = MOCK.finance;
-  const balance = f.month.inc - f.month.exp;
-  const sortedCats = [...f.cats].sort((a, b) => b.spent / b.limit - a.spent / a.limit);
-  const todayTotal = f.today.reduce((a, x) => a + x.amt, 0);
+  const { data, loading, error, refetch } = useApi(`/api/finance?view=${tab}`, [tab]);
+
+  const tabsUi = (
+    <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+      {[
+        ["today", "Сегодня"],
+        ["month", "Месяц"],
+        ["limits", "Лимиты"],
+        ["goals", "Цели"],
+      ].map(([k, l]) => (
+        <Pill key={k} s={s} active={tab === k} onClick={() => setTab(k)}>
+          {l}
+        </Pill>
+      ))}
+    </div>
+  );
+
+  if (loading) {
+    return (
+      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+        <div style={{ fontFamily: H, fontSize: 20, color: s.text }}>Финансы</div>
+        {tabsUi}
+        <Empty s={s} text="Загружаю..." />
+      </div>
+    );
+  }
+  if (error) {
+    return (
+      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+        <div style={{ fontFamily: H, fontSize: 20, color: s.text }}>Финансы</div>
+        {tabsUi}
+        <ErrorBox s={s} error={error} refetch={refetch} />
+      </div>
+    );
+  }
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
       <div style={{ fontFamily: H, fontSize: 20, color: s.text }}>Финансы</div>
-      <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-        {[
-          ["today", "Сегодня"],
-          ["month", "Месяц"],
-          ["limits", "Лимиты"],
-          ["goals", "Цели"],
-        ].map(([k, l]) => (
-          <Pill key={k} s={s} active={tab === k} onClick={() => setTab(k)}>
-            {l}
-          </Pill>
-        ))}
-      </div>
+      {tabsUi}
 
-      {tab === "today" && (
-        <>
-          <Glass s={s}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
-              <span style={{ fontSize: 12, color: s.tS }}>Потрачено сегодня</span>
-              <span style={{ fontFamily: H, fontSize: 22, color: s.text }}>
-                {todayTotal.toLocaleString()} ₽
-              </span>
-            </div>
-          </Glass>
-          {f.today.map((x, i) => (
-            <Glass key={i} s={s} style={{ padding: "8px 14px", marginBottom: 4 }}>
-              <div style={{ display: "flex", justifyContent: "space-between" }}>
-                <div>
-                  <div style={{ fontSize: 13, color: s.text }}>{x.desc}</div>
-                  <div style={{ fontSize: 10, color: s.tM, marginTop: 2 }}>{x.cat}</div>
-                </div>
-                <span style={{ fontSize: 14, color: s.text, fontWeight: 500, fontFamily: H }}>
-                  {x.amt.toLocaleString()} ₽
+      {tab === "today" && (() => {
+        const { total, items } = adaptFinanceToday(data);
+        return (
+          <>
+            <Glass s={s}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+                <span style={{ fontSize: 12, color: s.tS }}>Потрачено сегодня</span>
+                <span style={{ fontFamily: H, fontSize: 22, color: s.text }}>
+                  {total.toLocaleString()} ₽
                 </span>
               </div>
             </Glass>
-          ))}
-        </>
-      )}
-
-      {tab === "month" && (
-        <>
-          <Glass s={s} glow>
-            <div style={{ fontSize: 11, color: s.tS, marginBottom: 4 }}>Апрель 2026</div>
-            <div style={{ display: "flex", gap: 10, alignItems: "baseline" }}>
-              <div style={{ flex: 1 }}>
-                <div style={{ fontSize: 10, color: s.tM }}>Доход</div>
-                <div style={{ fontFamily: H, fontSize: 18, color: s.acc, fontWeight: 500 }}>
-                  {f.month.inc.toLocaleString()} ₽
-                </div>
-              </div>
-              <div style={{ flex: 1 }}>
-                <div style={{ fontSize: 10, color: s.tM }}>Расход</div>
-                <div style={{ fontFamily: H, fontSize: 18, color: s.text, fontWeight: 500 }}>
-                  {f.month.exp.toLocaleString()} ₽
-                </div>
-              </div>
-              <div style={{ flex: 1 }}>
-                <div style={{ fontSize: 10, color: s.tM }}>Баланс</div>
-                <div
-                  style={{
-                    fontFamily: H,
-                    fontSize: 18,
-                    color: balance >= 0 ? s.acc : s.red,
-                    fontWeight: 500,
-                  }}
-                >
-                  {balance >= 0 ? "+" : ""}
-                  {balance.toLocaleString()} ₽
-                </div>
-              </div>
-            </div>
-          </Glass>
-          <SectionLabel s={s}>По категориям</SectionLabel>
-          {sortedCats.map((c, i) => {
-            const pct = Math.round((c.spent / c.limit) * 100);
-            const clr = pct > 85 ? s.red : pct > 60 ? s.amber : s.acc;
-            return (
-              <Glass key={i} s={s} style={{ padding: "8px 14px", marginBottom: 4 }}>
-                <div
-                  style={{
-                    display: "flex",
-                    justifyContent: "space-between",
-                    fontSize: 12,
-                    color: s.text,
-                    marginBottom: 4,
-                  }}
-                >
-                  <span>{c.name}</span>
-                  <span style={{ color: clr, fontWeight: 500 }}>
-                    {c.spent.toLocaleString()} ₽
+            {items.length === 0 && <Empty s={s} text="Сегодня трат нет ✨" />}
+            {items.map((x) => (
+              <Glass key={x.id} s={s} style={{ padding: "8px 14px", marginBottom: 4 }}>
+                <div style={{ display: "flex", justifyContent: "space-between" }}>
+                  <div>
+                    <div style={{ fontSize: 13, color: s.text }}>{x.desc || "без описания"}</div>
+                    <div style={{ fontSize: 10, color: s.tM, marginTop: 2 }}>{x.cat}</div>
+                  </div>
+                  <span style={{ fontSize: 14, color: s.text, fontWeight: 500, fontFamily: H }}>
+                    {x.amt.toLocaleString()} ₽
                   </span>
                 </div>
-                <Bar s={s} pct={pct} color={clr} />
               </Glass>
-            );
-          })}
-        </>
-      )}
+            ))}
+          </>
+        );
+      })()}
 
-      {tab === "limits" && (
-        <>
-          {sortedCats.map((c, i) => {
-            const pct = Math.round((c.spent / c.limit) * 100);
-            const clr = pct > 85 ? s.red : pct > 60 ? s.amber : s.acc;
-            return (
-              <Glass key={i} s={s} style={{ padding: "8px 14px", marginBottom: 4 }}>
-                <div
-                  style={{
-                    display: "flex",
-                    justifyContent: "space-between",
-                    fontSize: 12,
-                    color: s.text,
-                    marginBottom: 4,
-                  }}
-                >
-                  <span>{c.name}</span>
-                  <span style={{ color: clr, fontWeight: 500 }}>{pct}%</span>
+      {tab === "month" && (() => {
+        const { inc, exp, balance, cats } = adaptFinanceMonth(data);
+        const monthLabel = data?.month || "";
+        return (
+          <>
+            <Glass s={s} glow>
+              <div style={{ fontSize: 11, color: s.tS, marginBottom: 4 }}>{monthLabel}</div>
+              <div style={{ display: "flex", gap: 10, alignItems: "baseline" }}>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: 10, color: s.tM }}>Доход</div>
+                  <div style={{ fontFamily: H, fontSize: 18, color: s.acc, fontWeight: 500 }}>
+                    {inc.toLocaleString()} ₽
+                  </div>
                 </div>
-                <Bar s={s} pct={pct} color={clr} />
-                <div style={{ fontSize: 10, color: s.tM, marginTop: 3 }}>
-                  {c.spent.toLocaleString()} ₽ / {c.limit.toLocaleString()} ₽
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: 10, color: s.tM }}>Расход</div>
+                  <div style={{ fontFamily: H, fontSize: 18, color: s.text, fontWeight: 500 }}>
+                    {exp.toLocaleString()} ₽
+                  </div>
                 </div>
-              </Glass>
-            );
-          })}
-        </>
-      )}
-
-      {tab === "goals" && (
-        <>
-          <SectionLabel s={s}>Долги</SectionLabel>
-          {f.debts.map((d, i) => (
-            <Glass key={i} s={s} accent={s.amber} style={{ padding: "10px 14px", marginBottom: 4 }}>
-              <div style={{ display: "flex", justifyContent: "space-between" }}>
-                <span style={{ fontSize: 14, color: s.text, fontWeight: 500, fontFamily: H }}>
-                  {d.n}
-                </span>
-                <span style={{ fontSize: 14, color: s.red, fontWeight: 500, fontFamily: H }}>
-                  {d.left.toLocaleString()} ₽
-                </span>
-              </div>
-              <div style={{ fontSize: 11, color: s.tM, marginTop: 2 }}>
-                до {d.by} · {d.note}
-              </div>
-              <div style={{ marginTop: 6 }}>
-                <Bar s={s} pct={(1 - d.left / d.total) * 100} color={s.amber} />
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: 10, color: s.tM }}>Баланс</div>
+                  <div
+                    style={{
+                      fontFamily: H, fontSize: 18,
+                      color: balance >= 0 ? s.acc : s.red, fontWeight: 500,
+                    }}
+                  >
+                    {balance >= 0 ? "+" : ""}
+                    {balance.toLocaleString()} ₽
+                  </div>
+                </div>
               </div>
             </Glass>
-          ))}
-          <SectionLabel s={s}>Цели</SectionLabel>
-          {f.goals.map((g, i) => (
-            <Glass key={i} s={s} style={{ padding: "10px 14px", marginBottom: 4 }}>
-              <div style={{ display: "flex", justifyContent: "space-between" }}>
-                <span style={{ fontSize: 14, color: s.text, fontFamily: H }}>{g.n}</span>
-                <span style={{ fontSize: 13, color: s.acc, fontWeight: 500 }}>
-                  {g.t.toLocaleString()} ₽
-                </span>
-              </div>
-              <div style={{ fontSize: 11, color: s.tM, marginTop: 2 }}>после {g.after}</div>
-              <div style={{ marginTop: 6 }}>
-                <Bar s={s} pct={(g.s / g.t) * 100} color={s.acc} />
-              </div>
-            </Glass>
-          ))}
-        </>
-      )}
+            <SectionLabel s={s}>По категориям</SectionLabel>
+            {cats.length === 0 && <Empty s={s} text="За этот месяц расходов нет" />}
+            {cats.map((c, i) => {
+              const pct = c.pct ?? (c.limit ? Math.round((c.spent / c.limit) * 100) : 0);
+              const clr = pct > 85 ? s.red : pct > 60 ? s.amber : s.acc;
+              return (
+                <Glass key={i} s={s} style={{ padding: "8px 14px", marginBottom: 4 }}>
+                  <div
+                    style={{
+                      display: "flex", justifyContent: "space-between",
+                      fontSize: 12, color: s.text, marginBottom: 4,
+                    }}
+                  >
+                    <span>{c.name}</span>
+                    <span style={{ color: clr, fontWeight: 500 }}>
+                      {c.spent.toLocaleString()} ₽
+                    </span>
+                  </div>
+                  {c.limit != null && <Bar s={s} pct={pct} color={clr} />}
+                </Glass>
+              );
+            })}
+          </>
+        );
+      })()}
+
+      {tab === "limits" && (() => {
+        const cats = adaptFinanceLimits(data);
+        return (
+          <>
+            {cats.length === 0 && <Empty s={s} text="Нет активных лимитов" />}
+            {cats.map((c, i) => {
+              const clr = c.zone === "red" ? s.red : c.zone === "yellow" ? s.amber : s.acc;
+              return (
+                <Glass key={i} s={s} style={{ padding: "8px 14px", marginBottom: 4 }}>
+                  <div
+                    style={{
+                      display: "flex", justifyContent: "space-between",
+                      fontSize: 12, color: s.text, marginBottom: 4,
+                    }}
+                  >
+                    <span>{c.name}</span>
+                    <span style={{ color: clr, fontWeight: 500 }}>{c.pct}%</span>
+                  </div>
+                  <Bar s={s} pct={c.pct} color={clr} />
+                  <div style={{ fontSize: 10, color: s.tM, marginTop: 3 }}>
+                    {c.spent.toLocaleString()} ₽ / {c.limit.toLocaleString()} ₽
+                  </div>
+                </Glass>
+              );
+            })}
+          </>
+        );
+      })()}
+
+      {tab === "goals" && (() => {
+        const { debts, goals } = adaptFinanceGoals(data);
+        return (
+          <>
+            <SectionLabel s={s}>Долги</SectionLabel>
+            {debts.length === 0 && <Empty s={s} text="Долгов нет 🌿" />}
+            {debts.map((d, i) => (
+              <Glass key={i} s={s} accent={s.amber} style={{ padding: "10px 14px", marginBottom: 4 }}>
+                <div style={{ display: "flex", justifyContent: "space-between" }}>
+                  <span style={{ fontSize: 14, color: s.text, fontWeight: 500, fontFamily: H }}>
+                    {d.n}
+                  </span>
+                  <span style={{ fontSize: 14, color: s.red, fontWeight: 500, fontFamily: H }}>
+                    {d.left.toLocaleString()} ₽
+                  </span>
+                </div>
+                <div style={{ fontSize: 11, color: s.tM, marginTop: 2 }}>
+                  {d.by ? `до ${d.by}` : ""}{d.note ? ` · ${d.note}` : ""}
+                </div>
+                {d.total > 0 && (
+                  <div style={{ marginTop: 6 }}>
+                    <Bar s={s} pct={(1 - d.left / d.total) * 100} color={s.amber} />
+                  </div>
+                )}
+              </Glass>
+            ))}
+            <SectionLabel s={s}>Цели</SectionLabel>
+            {goals.length === 0 && <Empty s={s} text="Целей пока нет" />}
+            {goals.map((g, i) => (
+              <Glass key={i} s={s} style={{ padding: "10px 14px", marginBottom: 4 }}>
+                <div style={{ display: "flex", justifyContent: "space-between" }}>
+                  <span style={{ fontSize: 14, color: s.text, fontFamily: H }}>{g.n}</span>
+                  <span style={{ fontSize: 13, color: s.acc, fontWeight: 500 }}>
+                    {g.t.toLocaleString()} ₽
+                  </span>
+                </div>
+                <div style={{ fontSize: 11, color: s.tM, marginTop: 2 }}>
+                  {g.monthly > 0 ? `откладываю ${g.monthly.toLocaleString()} ₽/мес` : `после ${g.after}`}
+                </div>
+                {g.t > 0 && (
+                  <div style={{ marginTop: 6 }}>
+                    <Bar s={s} pct={(g.s / g.t) * 100} color={s.acc} />
+                  </div>
+                )}
+              </Glass>
+            ))}
+          </>
+        );
+      })()}
     </div>
   );
 }
@@ -1180,9 +1252,10 @@ function NxFinance({ s }) {
 function NxLists({ s }) {
   const [tab, setTab] = useState("buy");
   const [q, setQ] = useState("");
-  const data =
-    tab === "buy" ? MOCK.lists.buy : tab === "inv" ? MOCK.lists.inv : MOCK.lists.check;
-  const filtered = data.filter((x) => x.name.toLowerCase().includes(q.toLowerCase()));
+  const qEnc = encodeURIComponent(q || "");
+  const path = q ? `/api/lists?type=${tab}&q=${qEnc}` : `/api/lists?type=${tab}`;
+  const { data, loading, error, refetch } = useApi(path, [tab, q]);
+  const items = loading || error ? [] : adaptLists(data);
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
@@ -1199,13 +1272,15 @@ function NxLists({ s }) {
         ))}
       </div>
       <SearchInput s={s} value={q} onChange={setQ} placeholder="Поиск" />
-      {filtered.length === 0 && (
+      {loading && <Empty s={s} text="Загружаю..." />}
+      {error && <ErrorBox s={s} error={error} refetch={refetch} />}
+      {!loading && !error && items.length === 0 && (
         <Empty s={s} text={tab === "check" ? "Нет активных чеклистов" : "Пусто"} />
       )}
-      {tab === "buy" &&
-        filtered.map((x, i) => (
+      {!loading && !error && tab !== "inv" &&
+        items.map((x) => (
           <Glass
-            key={i}
+            key={x.id}
             s={s}
             style={{ padding: "8px 14px", marginBottom: 4, opacity: x.done ? 0.5 : 1 }}
           >
@@ -1217,9 +1292,9 @@ function NxLists({ s }) {
             </div>
           </Glass>
         ))}
-      {tab === "inv" &&
-        filtered.map((x, i) => (
-          <Glass key={i} s={s} style={{ padding: "8px 14px", marginBottom: 4 }}>
+      {!loading && !error && tab === "inv" &&
+        items.map((x) => (
+          <Glass key={x.id} s={s} style={{ padding: "8px 14px", marginBottom: 4 }}>
             <div style={{ display: "flex", justifyContent: "space-between" }}>
               <span style={{ fontSize: 13, color: s.text }}>{x.name}</span>
               <span style={{ fontSize: 13, color: s.acc, fontWeight: 500 }}>{x.qty} шт</span>
@@ -1273,10 +1348,13 @@ function SearchInput({ s, value, onChange, placeholder }) {
 function NxMemory({ s, openAdhd }) {
   const [cat, setCat] = useState("all");
   const [q, setQ] = useState("");
-  const cats = ["all", ...new Set(MOCK.memory.map((m) => m.cat))];
-  const filtered = MOCK.memory.filter(
-    (m) => (cat === "all" || m.cat === cat) && m.text.toLowerCase().includes(q.toLowerCase())
-  );
+  const params = [];
+  if (cat !== "all") params.push(`cat=${encodeURIComponent(cat)}`);
+  if (q) params.push(`q=${encodeURIComponent(q)}`);
+  const path = "/api/memory" + (params.length ? "?" + params.join("&") : "");
+  const { data, loading, error, refetch } = useApi(path, [cat, q]);
+  const view = loading || error ? { items: [], categories: [] } : adaptMemory(data);
+  const cats = ["all", ...view.categories];
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
@@ -1311,9 +1389,11 @@ function NxMemory({ s, openAdhd }) {
           </Pill>
         ))}
       </div>
-      {filtered.length === 0 && <Empty s={s} text="Ничего не найдено" />}
-      {filtered.map((m, i) => (
-        <Glass key={i} s={s} style={{ padding: "8px 14px", marginBottom: 4 }}>
+      {loading && <Empty s={s} text="Загружаю..." />}
+      {error && <ErrorBox s={s} error={error} refetch={refetch} />}
+      {!loading && !error && view.items.length === 0 && <Empty s={s} text="Ничего не найдено" />}
+      {!loading && !error && view.items.map((m) => (
+        <Glass key={m.id} s={s} style={{ padding: "8px 14px", marginBottom: 4 }}>
           <div style={{ fontSize: 13, color: s.text }}>{m.text}</div>
           <div style={{ fontSize: 10, color: s.tM, marginTop: 2 }}>{m.cat}</div>
         </Glass>
@@ -1326,17 +1406,41 @@ function NxMemory({ s, openAdhd }) {
 // NEXUS — CALENDAR (default=month)
 // ═══════════════════════════════════════════════════════════════
 
+const RU_MONTHS_FULL = [
+  "Январь", "Февраль", "Март", "Апрель", "Май", "Июнь",
+  "Июль", "Август", "Сентябрь", "Октябрь", "Ноябрь", "Декабрь",
+];
+
 function NxCal({ s }) {
+  const now = new Date();
   const [view, setView] = useState("month");
-  const [picked, setPicked] = useState(22);
+  const [monthStr, setMonthStr] = useState(
+    `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`
+  );
+  const [picked, setPicked] = useState(now.getDate());
   const daysShort = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"];
 
-  // апрель 2026 начинается со среды
-  const monthStart = 3; // Пн=0 ... Ср=2
-  const daysInMonth = 30;
+  const { data, loading, error, refetch } = useApi(`/api/calendar?month=${monthStr}`, [monthStr]);
+  const { tasksByDay } = loading || error
+    ? { tasksByDay: {} }
+    : adaptCalendar(data);
+
+  const year = parseInt(monthStr.slice(0, 4), 10);
+  const month0 = parseInt(monthStr.slice(5, 7), 10) - 1;
+  const title = `${RU_MONTHS_FULL[month0]} ${year}`;
+
+  const firstDate = new Date(year, month0, 1);
+  // Пн=1 ... Вс=7 (в JS Вс=0). Позиция первого числа (0..6 для Пн..Вс)
+  const jsDow = firstDate.getDay();
+  const monthStart = (jsDow + 6) % 7; // 0=Пн
+  const daysInMonth = new Date(year, month0 + 1, 0).getDate();
+  const todayKey = now.getDate();
+  const todayMonthMatch =
+    now.getFullYear() === year && now.getMonth() === month0;
+
   const weeks = [];
   let cur = [];
-  for (let i = 0; i < monthStart - 1; i++) cur.push(null);
+  for (let i = 0; i < monthStart; i++) cur.push(null);
   for (let d = 1; d <= daysInMonth; d++) {
     cur.push(d);
     if (cur.length === 7) {
@@ -1348,7 +1452,6 @@ function NxCal({ s }) {
     while (cur.length < 7) cur.push(null);
     weeks.push(cur);
   }
-  const tasksByDay = { 22: ["🐾 Лоток", "💻 Интернет"], 21: ["🐾 Лоток"], 23: ["🐾 Лоток"], 27: ["🏠 Уборка"], 15: ["👥 Нотариус"] };
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
@@ -1359,7 +1462,7 @@ function NxCal({ s }) {
           alignItems: "baseline",
         }}
       >
-        <span style={{ fontFamily: H, fontSize: 20, color: s.text }}>Апрель 2026</span>
+        <span style={{ fontFamily: H, fontSize: 20, color: s.text }}>{title}</span>
         <div style={{ display: "flex", gap: 6 }}>
           <Pill s={s} active={view === "week"} onClick={() => setView("week")}>
             Неделя
@@ -1369,6 +1472,7 @@ function NxCal({ s }) {
           </Pill>
         </div>
       </div>
+      {error && <ErrorBox s={s} error={error} refetch={refetch} />}
       <Glass s={s} style={{ padding: "10px 10px" }}>
         <div
           style={{
@@ -1394,7 +1498,7 @@ function NxCal({ s }) {
           >
             {w.map((d, di) => {
               if (!d) return <div key={di} />;
-              const isToday = d === 22;
+              const isToday = todayMonthMatch && d === todayKey;
               const isPicked = d === picked;
               const has = tasksByDay[d];
               return (
@@ -1442,9 +1546,12 @@ function NxCal({ s }) {
           </div>
         ))}
       </Glass>
-      <SectionLabel s={s}>{picked} апреля</SectionLabel>
-      {!tasksByDay[picked] && <Empty s={s} text="Нет задач в этот день" />}
-      {(tasksByDay[picked] || []).map((t, i) => (
+      <SectionLabel s={s}>
+        {picked} {RU_MONTHS_FULL[month0].toLowerCase()}
+      </SectionLabel>
+      {loading && <Empty s={s} text="Загружаю..." />}
+      {!loading && !tasksByDay[picked] && <Empty s={s} text="Нет задач в этот день" />}
+      {!loading && (tasksByDay[picked] || []).map((t, i) => (
         <Glass key={i} s={s} style={{ padding: "8px 14px", marginBottom: 4 }}>
           <div style={{ fontSize: 13, color: s.text }}>{t}</div>
         </Glass>
@@ -1582,13 +1689,13 @@ function ArDay({ s, openClient }) {
         <>
           <SectionLabel s={s}>Сеансы сегодня</SectionLabel>
           {a.sessionsToday.map((x) => {
-            const client = MOCK.clients.find((c) => c.name === x.client);
+            const cid = x.client_id;
             return (
               <Glass
                 key={x.id}
                 s={s}
                 style={{ padding: "10px 14px", marginBottom: 6, display: "flex", gap: 10, alignItems: "center" }}
-                onClick={() => client && openClient(client)}
+                onClick={() => cid && openClient({ id: cid })}
               >
                 <span
                   style={{
@@ -1683,9 +1790,11 @@ function ArDay({ s, openClient }) {
 
 function ArSessions({ s, openSession }) {
   const [f, setF] = useState("all");
-  const areas = ["all", ...new Set(MOCK.sessions.map((x) => x.area))];
-  const list = f === "all" ? MOCK.sessions : MOCK.sessions.filter((x) => x.area === f);
-  const unchecked = MOCK.sessions.filter((x) => x.done.startsWith("⏳")).length;
+  const path = f === "all" ? "/api/arcana/sessions" : `/api/arcana/sessions?filter=area:${encodeURIComponent(f)}`;
+  const { data, loading, error, refetch } = useApi(path, [f]);
+  const list = loading || error ? [] : adaptSessions(data);
+  const areas = ["all", ...new Set(list.map((x) => x.area).filter(Boolean))];
+  const unchecked = list.filter((x) => (x.done || "").startsWith("⏳")).length;
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
@@ -1708,38 +1817,43 @@ function ArSessions({ s, openSession }) {
           </Pill>
         ))}
       </div>
-      {list.map((x) => {
-        const cardsBrief = x.cards.map((c) => c.name).slice(0, 3).join(", ") +
+      {loading && <Empty s={s} text="Загружаю..." />}
+      {error && <ErrorBox s={s} error={error} refetch={refetch} />}
+      {!loading && !error && list.length === 0 && <Empty s={s} text="Раскладов нет" />}
+      {!loading && !error && list.map((x) => {
+        const cardsBrief = (x.cards || []).map((c) => c.name).slice(0, 3).join(", ") +
           (x.cards.length > 3 ? `, +${x.cards.length - 3}` : "");
-        const doneGlyph = x.done.split(" ")[0];
+        const doneGlyph = (x.done || "⏳").split(" ")[0];
         return (
           <Glass
             key={x.id}
             s={s}
             style={{ padding: "10px 14px", marginBottom: 4 }}
-            onClick={() => openSession(x)}
+            onClick={() => openSession({ id: x.id })}
           >
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "start", gap: 8 }}>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontSize: 14, color: s.text, fontWeight: 500, fontFamily: H }}>
-                  {x.q}
+                  {x.q || "без темы"}
                 </div>
                 <div style={{ fontSize: 10, color: s.tM, marginTop: 3 }}>
-                  {x.type} · {x.deck} · {x.client} · {x.date}
+                  {[x.type, x.deck, x.client, x.date].filter(Boolean).join(" · ")}
                 </div>
-                <div
-                  style={{
-                    fontSize: 11,
-                    color: s.tS,
-                    marginTop: 3,
-                    fontStyle: "italic",
-                    whiteSpace: "nowrap",
-                    overflow: "hidden",
-                    textOverflow: "ellipsis",
-                  }}
-                >
-                  🃏 {cardsBrief}
-                </div>
+                {cardsBrief && (
+                  <div
+                    style={{
+                      fontSize: 11,
+                      color: s.tS,
+                      marginTop: 3,
+                      fontStyle: "italic",
+                      whiteSpace: "nowrap",
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                    }}
+                  >
+                    🃏 {cardsBrief}
+                  </div>
+                )}
               </div>
               <span style={{ fontSize: 14, flexShrink: 0 }}>{doneGlyph}</span>
             </div>
@@ -1755,8 +1869,12 @@ function ArSessions({ s, openSession }) {
 // ═══════════════════════════════════════════════════════════════
 
 function ArClients({ s, openClient }) {
-  const total = MOCK.clients.length;
-  const debt = MOCK.clients.reduce((a, c) => a + c.debt, 0);
+  const { data, loading, error, refetch } = useApi("/api/arcana/clients");
+  const view = loading || error
+    ? { clients: [], total: 0, total_debt: 0 }
+    : adaptClients(data);
+  const total = view.total || view.clients.length;
+  const debt = view.total_debt;
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
@@ -1772,12 +1890,15 @@ function ArClients({ s, openClient }) {
           />
         </div>
       </Glass>
-      {MOCK.clients.map((c) => (
+      {loading && <Empty s={s} text="Загружаю..." />}
+      {error && <ErrorBox s={s} error={error} refetch={refetch} />}
+      {!loading && !error && view.clients.length === 0 && <Empty s={s} text="Клиентов пока нет" />}
+      {!loading && !error && view.clients.map((c) => (
         <Glass
           key={c.id}
           s={s}
           style={{ padding: "10px 14px", marginBottom: 4 }}
-          onClick={() => openClient(c)}
+          onClick={() => openClient({ id: c.id })}
         >
           <div
             style={{
@@ -1834,8 +1955,12 @@ function ArClients({ s, openClient }) {
 
 function ArRituals({ s, openRitual }) {
   const [goal, setGoal] = useState("all");
-  const goals = ["all", ...new Set(MOCK.rituals.map((r) => r.goal))];
-  const list = goal === "all" ? MOCK.rituals : MOCK.rituals.filter((r) => r.goal === goal);
+  const path = goal === "all"
+    ? "/api/arcana/rituals"
+    : `/api/arcana/rituals?goal=${encodeURIComponent(goal)}`;
+  const { data, loading, error, refetch } = useApi(path, [goal]);
+  const list = loading || error ? [] : adaptRituals(data);
+  const goals = ["all", ...new Set(list.map((r) => r.goal).filter(Boolean))];
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
@@ -1847,12 +1972,15 @@ function ArRituals({ s, openRitual }) {
           </Pill>
         ))}
       </div>
-      {list.map((r) => (
+      {loading && <Empty s={s} text="Загружаю..." />}
+      {error && <ErrorBox s={s} error={error} refetch={refetch} />}
+      {!loading && !error && list.length === 0 && <Empty s={s} text="Ритуалов нет" />}
+      {!loading && !error && list.map((r) => (
         <Glass
           key={r.id}
           s={s}
           style={{ padding: "10px 14px", marginBottom: 4 }}
-          onClick={() => openRitual(r)}
+          onClick={() => openRitual({ id: r.id })}
         >
           <div style={{ display: "flex", justifyContent: "space-between" }}>
             <div>
@@ -1860,7 +1988,7 @@ function ArRituals({ s, openRitual }) {
                 {r.name}
               </div>
               <div style={{ fontSize: 10, color: s.tM, marginTop: 3 }}>
-                {r.goal} · {r.place} · {r.type} · {r.date}
+                {[r.goal, r.place, r.type, r.date].filter(Boolean).join(" · ")}
               </div>
             </div>
             <span style={{ fontSize: 16 }}>{r.result}</span>
@@ -1875,13 +2003,16 @@ function ArRituals({ s, openRitual }) {
 // ARCANA — GRIMOIRE
 // ═══════════════════════════════════════════════════════════════
 
-function ArGrimoire({ s }) {
+function ArGrimoire({ s, openGrimoire }) {
   const [cat, setCat] = useState("all");
   const [q, setQ] = useState("");
-  const cats = ["all", ...new Set(MOCK.grimoire.map((g) => g.cat))];
-  const filtered = MOCK.grimoire.filter(
-    (g) => (cat === "all" || g.cat === cat) && g.name.toLowerCase().includes(q.toLowerCase())
-  );
+  const params = [];
+  if (cat !== "all") params.push(`cat=${encodeURIComponent(cat)}`);
+  if (q) params.push(`q=${encodeURIComponent(q)}`);
+  const path = "/api/arcana/grimoire" + (params.length ? "?" + params.join("&") : "");
+  const { data, loading, error, refetch } = useApi(path, [cat, q]);
+  const view = loading || error ? { items: [], categories: [] } : adaptGrimoire(data);
+  const cats = ["all", ...view.categories];
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
@@ -1894,8 +2025,16 @@ function ArGrimoire({ s }) {
           </Pill>
         ))}
       </div>
-      {filtered.map((g, i) => (
-        <Glass key={i} s={s} style={{ padding: "10px 14px", marginBottom: 4 }}>
+      {loading && <Empty s={s} text="Загружаю..." />}
+      {error && <ErrorBox s={s} error={error} refetch={refetch} />}
+      {!loading && !error && view.items.length === 0 && <Empty s={s} text="В гримуаре пока пусто" />}
+      {!loading && !error && view.items.map((g) => (
+        <Glass
+          key={g.id}
+          s={s}
+          style={{ padding: "10px 14px", marginBottom: 4 }}
+          onClick={openGrimoire ? () => openGrimoire({ id: g.id }) : undefined}
+        >
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
             <span style={{ fontSize: 13, color: s.text }}>{g.name}</span>
             <span style={{ fontSize: 13 }}>{g.theme}</span>
@@ -1912,12 +2051,15 @@ function ArGrimoire({ s }) {
 // ═══════════════════════════════════════════════════════════════
 
 function ArStats({ s }) {
-  const months = MOCK.stats.months;
-  const allVer = months.reduce((a, m) => a + m.yes + m.partial + m.no, 0);
-  const allYes = months.reduce((a, m) => a + m.yes, 0);
-  const pct = allVer > 0 ? Math.round((allYes / allVer) * 100) : 0;
-  const p = MOCK.stats.practice;
-  const profit = p.inc - p.exp;
+  const { data, loading, error, refetch } = useApi("/api/arcana/stats");
+  if (loading) return <Empty s={s} text="Загружаю..." />;
+  if (error) return <ErrorBox s={s} error={error} refetch={refetch} />;
+  const view = adaptArcanaStats(data);
+  const months = view.months;
+  const allVer = view.allVer;
+  const pct = view.pct;
+  const p = view.practice;
+  const profit = p.profit;
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
@@ -2020,9 +2162,13 @@ function ArStats({ s }) {
 // SESSION DETAIL SHEET
 // ═══════════════════════════════════════════════════════════════
 
-function SessionDetail({ s, x }) {
+function SessionDetail({ s, id }) {
+  const { data, loading, error, refetch } = useApi(id ? `/api/arcana/sessions/${id}` : null, [id]);
+  if (loading) return <Empty s={s} text="Загружаю..." />;
+  if (error) return <ErrorBox s={s} error={error} refetch={refetch} />;
+  const x = adaptSessionDetail(data);
   if (!x) return null;
-  const doneGlyph = x.done.split(" ")[0];
+  const doneGlyph = (x.done || "⏳").split(" ")[0];
   return (
     <div>
       {/* Шапка */}
@@ -2171,9 +2317,13 @@ function SessionDetail({ s, x }) {
 // RITUAL DETAIL SHEET
 // ═══════════════════════════════════════════════════════════════
 
-function RitualDetail({ s, r }) {
+function RitualDetail({ s, id }) {
+  const { data, loading, error, refetch } = useApi(id ? `/api/arcana/rituals/${id}` : null, [id]);
+  if (loading) return <Empty s={s} text="Загружаю..." />;
+  if (error) return <ErrorBox s={s} error={error} refetch={refetch} />;
+  const r = adaptRitualDetail(data);
   if (!r) return null;
-  const suppliesTotal = r.supplies.reduce((a, x) => a + x.price, 0);
+  const suppliesTotal = (r.supplies || []).reduce((a, x) => a + (x.price || 0), 0);
   return (
     <div>
       <Glass s={s} style={{ padding: "12px 14px", marginBottom: 12 }}>
@@ -2354,7 +2504,12 @@ function RitualDetail({ s, r }) {
 // CLIENT DETAIL SHEET (из v2)
 // ═══════════════════════════════════════════════════════════════
 
-function ClientDetail({ s, c }) {
+function ClientDetail({ s, id }) {
+  const { data, loading, error, refetch } = useApi(id ? `/api/arcana/clients/${id}` : null, [id]);
+  if (loading) return <Empty s={s} text="Загружаю..." />;
+  if (error) return <ErrorBox s={s} error={error} refetch={refetch} />;
+  const c = adaptClientDossier(data);
+  if (!c) return null;
   return (
     <div>
       <div style={{ display: "flex", gap: 14, marginBottom: 16 }}>
@@ -2579,8 +2734,9 @@ export default function App() {
   const openClient = (c) => setModal({ type: "client", payload: c });
   const openSession = (x) => setModal({ type: "session", payload: x });
   const openRitual = (r) => setModal({ type: "ritual", payload: r });
+  const openGrimoire = (g) => setModal({ type: "grimoire", payload: g });
 
-  const shared = { s: sky, openTask, openAdhd, openClient, openSession, openRitual };
+  const shared = { s: sky, openTask, openAdhd, openClient, openSession, openRitual, openGrimoire };
   const nxS = { day: NxDay, tasks: NxTasks, fin: NxFinance, lists: NxLists, mem: NxMemory, cal: NxCal };
   const arS = { day: ArDay, sess: ArSessions, cli: ArClients, rit: ArRituals, grim: ArGrimoire, stats: ArStats };
   const Scr = (isDay ? nxS : arS)[page];
@@ -2810,24 +2966,16 @@ export default function App() {
       </Sheet>
 
       <Sheet s={sky} open={modal?.type === "adhd"} onClose={() => setModal(null)} title="🦋 СДВГ-профиль">
-        <div style={{ fontSize: 13, color: sky.text, lineHeight: 1.6, marginBottom: 10 }}>
-          {MOCK.adhdProfile}
-        </div>
-        <SectionLabel s={sky}>Записи</SectionLabel>
-        {["Работает техника 2 минут", "Гиперфокус вечером", "Утром трудный старт"].map((t, i) => (
-          <Glass key={i} s={sky} style={{ padding: "8px 14px", marginBottom: 4 }}>
-            <div style={{ fontSize: 13, color: sky.text }}>{t}</div>
-          </Glass>
-        ))}
+        <AdhdSheet s={sky} open={modal?.type === "adhd"} />
       </Sheet>
 
       <Sheet
         s={sky}
         open={modal?.type === "client"}
         onClose={() => setModal(null)}
-        title={`Клиент: ${modal?.payload?.name || ""}`}
+        title="Клиент"
       >
-        {modal?.payload && <ClientDetail s={sky} c={modal.payload} />}
+        {modal?.payload?.id && <ClientDetail s={sky} id={modal.payload.id} />}
       </Sheet>
 
       <Sheet
@@ -2836,7 +2984,7 @@ export default function App() {
         onClose={() => setModal(null)}
         title="Расклад"
       >
-        {modal?.payload && <SessionDetail s={sky} x={modal.payload} />}
+        {modal?.payload?.id && <SessionDetail s={sky} id={modal.payload.id} />}
       </Sheet>
 
       <Sheet
@@ -2845,7 +2993,16 @@ export default function App() {
         onClose={() => setModal(null)}
         title="Ритуал"
       >
-        {modal?.payload && <RitualDetail s={sky} r={modal.payload} />}
+        {modal?.payload?.id && <RitualDetail s={sky} id={modal.payload.id} />}
+      </Sheet>
+
+      <Sheet
+        s={sky}
+        open={modal?.type === "grimoire"}
+        onClose={() => setModal(null)}
+        title="Гримуар"
+      >
+        {modal?.payload?.id && <GrimoireDetail s={sky} id={modal.payload.id} />}
       </Sheet>
 
       <Sheet s={sky} open={fabOpen} onClose={() => setFabOpen(false)} title="Добавить">
@@ -2855,6 +3012,57 @@ export default function App() {
           onPick={() => setFabOpen(false)}
         />
       </Sheet>
+    </div>
+  );
+}
+
+function AdhdSheet({ s, open }) {
+  const { data, loading, error, refetch } = useApi(open ? "/api/memory/adhd" : null, [open]);
+  if (!open) return null;
+  if (loading) return <Empty s={s} text="Загружаю..." />;
+  if (error) return <ErrorBox s={s} error={error} refetch={refetch} />;
+  const view = adaptAdhd(data);
+  return (
+    <>
+      <div style={{ fontSize: 13, color: s.text, lineHeight: 1.6, marginBottom: 10 }}>
+        {view.profile || "Профиль пока не сгенерирован."}
+      </div>
+      {view.records.length > 0 && (
+        <>
+          <SectionLabel s={s}>Записи</SectionLabel>
+          {view.records.map((r) => (
+            <Glass key={r.id} s={s} style={{ padding: "8px 14px", marginBottom: 4 }}>
+              <div style={{ fontSize: 13, color: s.text }}>{r.text}</div>
+            </Glass>
+          ))}
+        </>
+      )}
+    </>
+  );
+}
+
+function GrimoireDetail({ s, id }) {
+  const { data, loading, error, refetch } = useApi(id ? `/api/arcana/grimoire/${id}` : null, [id]);
+  if (loading) return <Empty s={s} text="Загружаю..." />;
+  if (error) return <ErrorBox s={s} error={error} refetch={refetch} />;
+  const g = adaptGrimoireDetail(data);
+  if (!g) return null;
+  return (
+    <div>
+      <div style={{ fontFamily: H, fontSize: 20, color: s.text, marginBottom: 6 }}>{g.name}</div>
+      <div style={{ fontSize: 11, color: s.tS, marginBottom: 12 }}>
+        {g.cat}{g.themes.length > 0 ? ` · ${g.themes.join(", ")}` : ""}
+      </div>
+      <Glass s={s} accent={s.acc} style={{ padding: "12px 14px", marginBottom: 10 }}>
+        <div style={{ fontSize: 13, color: s.text, lineHeight: 1.6, whiteSpace: "pre-wrap" }}>
+          {g.content || "Текст пока не заполнен."}
+        </div>
+      </Glass>
+      {g.source && (
+        <div style={{ fontSize: 11, color: s.tS, fontStyle: "italic" }}>
+          Источник: {g.source}
+        </div>
+      )}
     </div>
   );
 }
