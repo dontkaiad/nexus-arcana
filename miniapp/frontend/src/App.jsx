@@ -210,14 +210,15 @@ const Pill = ({ s, active, children, onClick }) => (
       borderRadius: 20,
       fontSize: 12,
       cursor: "pointer",
-      background: active ? `${s.acc}30` : s.card,
+      // wave6.2.5: неактивный таб — прозрачный фон + тонкая граница + полный текст
+      background: active ? `${s.acc}30` : "transparent",
       color: active ? s.acc : s.text,
       border: `1px solid ${active ? s.acc + "66" : s.brd}`,
       fontFamily: B,
-      fontWeight: active ? 500 : 400,
+      fontWeight: active ? 600 : 500,
       whiteSpace: "nowrap",
       transition: "all 0.2s",
-      backdropFilter: "blur(10px)",
+      backdropFilter: active ? "blur(10px)" : undefined,
     }}
   >
     {children}
@@ -375,6 +376,44 @@ const ErrorBox = ({ s, error, refetch }) => (
       </div>
     )}
   </Glass>
+);
+
+// wave6.2: SVG-баннеры Nexus / Arcana в шапке (единый блок вместо png + text)
+const NexusLogo = () => (
+  <svg width="150" height="36" viewBox="0 0 150 36" style={{ userSelect: "none" }}>
+    <circle cx="18" cy="18" r="9" fill="#f4c66e" opacity="0.9" />
+    <circle cx="18" cy="18" r="5" fill="#e8a948" />
+    {[0, 45, 90, 135, 180, 225, 270, 315].map((a) => {
+      const rad = (a * Math.PI) / 180;
+      return (
+        <line
+          key={a}
+          x1={18 + 12 * Math.cos(rad)}
+          y1={18 + 12 * Math.sin(rad)}
+          x2={18 + 16 * Math.cos(rad)}
+          y2={18 + 16 * Math.sin(rad)}
+          stroke="#e8a948"
+          strokeWidth="1.5"
+          strokeLinecap="round"
+        />
+      );
+    })}
+    <text x="40" y="25" fontFamily="Lora, serif" fontSize="20" fontWeight="500" fill="#2d4a3e">
+      Nexus
+    </text>
+  </svg>
+);
+
+const ArcanaLogo = () => (
+  <svg width="150" height="36" viewBox="0 0 150 36" style={{ userSelect: "none" }}>
+    <path d="M 14,9 a 9,9 0 1,0 0,18 a 6.5,9 0 1,1 0,-18" fill="#c9d4e8" opacity="0.95" />
+    <circle cx="28" cy="10" r="1" fill="#fff" />
+    <circle cx="32" cy="24" r="0.8" fill="#fff" />
+    <circle cx="24" cy="7" r="0.6" fill="#fff" opacity="0.7" />
+    <text x="40" y="25" fontFamily="Lora, serif" fontStyle="italic" fontSize="20" fontWeight="500" fill="#e8eaf1">
+      Arcana
+    </text>
+  </svg>
 );
 
 const FAB = ({ s, onClick }) => (
@@ -791,15 +830,29 @@ const TaskRow = ({ s, t, done, onToggle, onOpen, withTime }) => (
     <div style={{ flex: 1, minWidth: 0 }} onClick={onOpen}>
       <div
         style={{
+          display: "flex", alignItems: "center", gap: 6,
+          textDecoration: done ? "line-through" : "none",
+        }}
+      >
+        {t.cat && (
+          <span style={{
+            display: "inline-flex", alignItems: "center",
+            padding: "1px 7px", borderRadius: 9,
+            fontSize: 10, background: `${s.acc}22`, color: s.text,
+            flexShrink: 0, whiteSpace: "nowrap",
+          }}>
+            {t.cat}
+          </span>
+        )}
+        <span style={{
           fontSize: 13,
           color: s.text,
-          textDecoration: done ? "line-through" : "none",
           whiteSpace: "nowrap",
           overflow: "hidden",
           textOverflow: "ellipsis",
-        }}
-      >
-        {t.cat} {t.title}
+        }}>
+          {t.title}
+        </span>
       </div>
       <div
         style={{
@@ -1040,18 +1093,25 @@ function NxTasks({ s, openTask }) {
           style={{ padding: "10px 14px", marginBottom: 4 }}
           onClick={() => openTask(t)}
         >
-          <div style={{ display: "flex", justifyContent: "space-between" }}>
-            <span
-              style={{
-                fontSize: 13,
-                color: s.text,
-                textDecoration: t.status === "done" ? "line-through" : "none",
-                opacity: t.status === "done" ? 0.55 : 1,
-              }}
-            >
-              {t.cat} {t.title}
-            </span>
-            <span style={{ fontSize: 12 }}>{t.prio}</span>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+            <div style={{
+              display: "flex", alignItems: "center", gap: 6, flex: 1, minWidth: 0,
+              textDecoration: t.status === "done" ? "line-through" : "none",
+              opacity: t.status === "done" ? 0.55 : 1,
+            }}>
+              {t.cat && (
+                <span style={{
+                  display: "inline-flex", alignItems: "center",
+                  padding: "1px 8px", borderRadius: 10,
+                  fontSize: 10, background: `${s.acc}22`, color: s.text,
+                  flexShrink: 0, whiteSpace: "nowrap",
+                }}>
+                  {t.cat}
+                </span>
+              )}
+              <span style={{ fontSize: 14, color: s.text }}>{t.title}</span>
+            </div>
+            <span style={{ fontSize: 12, flexShrink: 0 }}>{t.prio}</span>
           </div>
           <div
             style={{
@@ -3555,29 +3615,7 @@ export default function App() {
             gap: 10,
           }}
         >
-          <img
-            src={isDay ? "/nexus.png" : "/arcana.png"}
-            alt={isDay ? "Nexus" : "Arcana"}
-            onError={(e) => { e.target.style.display = "none"; }}
-            style={{
-              width: 28,
-              height: 28,
-              borderRadius: "50%",
-              objectFit: "cover",
-              mixBlendMode: isDay ? "multiply" : "screen",
-            }}
-          />
-          <div
-            style={{
-              fontFamily: H,
-              fontSize: 18,
-              // wave5.2: тёплый цвет вместо чёрного
-              color: isDay ? "#2d4a3e" : "#d4ccc0",
-              fontWeight: 500,
-            }}
-          >
-            {isDay ? "Nexus" : "Arcana"}
-          </div>
+          {isDay ? <NexusLogo /> : <ArcanaLogo />}
         </div>
         <div
           onClick={() => go(!isN)}
