@@ -181,11 +181,11 @@ def test_today_returns_all_keys_and_classifies_tasks(client):
     assert vit["reminder_min"] is None
     assert vit["repeat"] == "Ежедневно"
 
+    # wave7.3: в tasks теперь только сегодняшние задачи без времени.
+    # Будущие не показываются на главном экране.
     task_ids = [t["id"] for t in data["tasks"]]
     assert "t-today" in task_ids
-    assert "t-future" in task_ids
-    # today-without-time перед future
-    assert task_ids.index("t-today") < task_ids.index("t-future")
+    assert "t-future" not in task_ids
 
     assert data["adhd_tip"] == "Начни с лотка — 2 минуты."
     assert claude_mock.await_count == 1
