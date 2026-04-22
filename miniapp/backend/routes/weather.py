@@ -161,22 +161,39 @@ async def _fetch_openmeteo(city: str) -> Optional[dict]:
         return None
 
 
-_CITY_ALIASES: dict[str, str] = {
-    "спб": "Saint Petersburg",
-    "питер": "Saint Petersburg",
-    "петербург": "Saint Petersburg",
-    "санкт-петербург": "Saint Petersburg",
-    "санкт петербург": "Saint Petersburg",
-    "мск": "Moscow",
-    "москва": "Moscow",
-    "мск.": "Moscow",
-}
+# Префиксы для матча русских падежей: "питер", "питере", "питера"...
+_CITY_PREFIXES: list[tuple[str, str]] = [
+    ("санкт-петербург", "Saint Petersburg"),
+    ("санкт петербург", "Saint Petersburg"),
+    ("петербург",       "Saint Petersburg"),
+    ("питер",           "Saint Petersburg"),
+    ("спб",             "Saint Petersburg"),
+    ("москв",           "Moscow"),
+    ("мск",             "Moscow"),
+    ("тбилис",          "Tbilisi"),
+    ("ереван",          "Yerevan"),
+    ("стамбул",         "Istanbul"),
+    ("бангкок",         "Bangkok"),
+    ("дубай",           "Dubai"),
+    ("берлин",          "Berlin"),
+    ("париж",           "Paris"),
+    ("амстердам",       "Amsterdam"),
+    ("рим",             "Rome"),
+    ("мадрид",          "Madrid"),
+    ("нью-йорк",        "New York"),
+    ("нью йорк",        "New York"),
+    ("лос-анджелес",    "Los Angeles"),
+    ("токио",           "Tokyo"),
+    ("шанхай",          "Shanghai"),
+    ("лондон",          "London"),
+]
 
 # стоп-слова, которые иногда остаются после парсинга — не города
 _STOPWORDS = {"в", "во", "из", "на", "и", "я", "мы", "живу", "живём", "сейчас", "сегодня"}
 
 
 def _normalize_city(raw: str) -> Optional[str]:
+    """Нормализация города: падежи РФ-городов → канон для Open-Meteo."""
     if not raw:
         return None
     cleaned = raw.strip().strip(".,!?;:\"'()[]").strip()
@@ -185,7 +202,10 @@ def _normalize_city(raw: str) -> Optional[str]:
     key = cleaned.lower()
     if key in _STOPWORDS:
         return None
-    return _CITY_ALIASES.get(key, cleaned)
+    for prefix, canonical in _CITY_PREFIXES:
+        if key.startswith(prefix):
+            return canonical
+    return cleaned
 
 
 def _extract_city_from_text(text: str) -> Optional[str]:
