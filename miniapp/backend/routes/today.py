@@ -255,12 +255,16 @@ async def get_today(tg_id: int = Depends(current_user_id)) -> dict[str, Any]:
             continue
 
         if is_today:
+            # wave8.9: показываем и дедлайн, и время напоминалки, если есть
+            reminder_time = extract_time(s["reminder_raw"], tz_offset)
             today_no_time.append({
                 "id": s["id"],
                 "title": s["title"],
                 "cat": s["cat"],
                 "prio": s["prio"],
                 "date": today_str,
+                "deadline_time": deadline_time,
+                "reminder_time": reminder_time,
                 "repeat": s["repeat"],
             })
         elif deadline_date and deadline_date > today_date:
