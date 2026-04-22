@@ -882,7 +882,7 @@ const TaskRow = ({ s, t, done, onToggle, onOpen, withTime }) => (
 // NEXUS — MY DAY
 // ═══════════════════════════════════════════════════════════════
 
-function NxDay({ s, openTask }) {
+function NxDay({ s, openTask, navigate, openStreaks }) {
   const [done, setDone] = useState({});
   const { data, loading, error, refetch } = useApi('/api/today');
 
@@ -925,17 +925,26 @@ function NxDay({ s, openTask }) {
           <span style={{ fontSize: 11, color: s.tS }}>{t.date}</span>
         </div>
         <div style={{ display: "flex", gap: 6, marginTop: 10 }}>
-          <Metric s={s} v={`${doneCount}`} unit={`/${total}`} sub="задачи" />
-          <Metric s={s} v={`${Math.round((t.budgetDay - t.spentDay) / 1000)}к`} unit="₽" sub="свободно" />
-          <Metric
-            s={s}
-            v={t.streak}
-            sub="стрик"
-            accent={s.amber}
-            icon={<LucideFlame size={14} color={s.amber} fill={s.amber} style={{ opacity: 0.9 }} />}
-          />
+          <div style={{ flex: 1, cursor: "pointer" }} onClick={() => navigate && navigate("tasks")}>
+            <Metric s={s} v={`${doneCount}`} unit={`/${total}`} sub="задачи" />
+          </div>
+          <div style={{ flex: 1, cursor: "pointer" }} onClick={() => navigate && navigate("fin")}>
+            <Metric s={s} v={`${Math.round((t.budgetDay - t.spentDay) / 1000)}к`} unit="₽" sub="свободно" />
+          </div>
+          <div style={{ flex: 1, cursor: "pointer" }} onClick={() => openStreaks && openStreaks()}>
+            <Metric
+              s={s}
+              v={t.streak}
+              sub="стрик"
+              accent={s.amber}
+              icon={<LucideFlame size={14} color={s.amber} fill={s.amber} style={{ opacity: 0.9 }} />}
+            />
+          </div>
         </div>
-        <div style={{ marginTop: 11, paddingTop: 10, borderTop: `1px solid ${s.brd}` }}>
+        <div
+          onClick={() => navigate && navigate("fin")}
+          style={{ marginTop: 11, paddingTop: 10, borderTop: `1px solid ${s.brd}`, cursor: "pointer" }}
+        >
           <div
             style={{
               display: "flex",
@@ -1829,7 +1838,7 @@ function NxCal({ s }) {
 // ARCANA — MY DAY (с фазой луны)
 // ═══════════════════════════════════════════════════════════════
 
-function ArDay({ s, openClient }) {
+function ArDay({ s, openClient, navigate, openMoonPhases }) {
   const [done, setDone] = useState({});
   const { data, loading, error, refetch } = useApi('/api/arcana/today');
 
@@ -1872,19 +1881,30 @@ function ArDay({ s, openClient }) {
           <span style={{ fontSize: 11, color: s.tS }}>{a.date}</span>
         </div>
         <div style={{ display: "flex", gap: 6, marginTop: 10 }}>
-          <Metric s={s} v={a.sessionsToday.length} sub="сеансов" />
-          <Metric
-            s={s}
-            v={a.unchecked30d}
-            sub="не провер."
-            accent={a.unchecked30d > 0 ? s.amber : undefined}
-          />
-          <Metric s={s} v={`${a.accuracy}%`} sub="точность" accent={s.acc} />
+          <div style={{ flex: 1, cursor: "pointer" }} onClick={() => navigate && navigate("sess")}>
+            <Metric s={s} v={a.sessionsToday.length} sub="сеансов" />
+          </div>
+          <div style={{ flex: 1, cursor: "pointer" }} onClick={() => navigate && navigate("stats")}>
+            <Metric
+              s={s}
+              v={a.unchecked30d}
+              sub="не провер."
+              accent={a.unchecked30d > 0 ? s.amber : undefined}
+            />
+          </div>
+          <div style={{ flex: 1, cursor: "pointer" }} onClick={() => navigate && navigate("stats")}>
+            <Metric s={s} v={`${a.accuracy}%`} sub="точность" accent={s.acc} />
+          </div>
         </div>
       </Glass>
 
       {/* Фаза луны — большой блок */}
-      <Glass s={s} accent={s.acc} glow>
+      <Glass
+        s={s}
+        accent={s.acc}
+        glow
+        onClick={() => openMoonPhases && openMoonPhases()}
+        style={{ cursor: "pointer" }}>
         <div style={{ display: "flex", gap: 14, alignItems: "center" }}>
           <div
             style={{
@@ -3653,8 +3673,16 @@ export default function App() {
   const openSession = (x) => setModal({ type: "session", payload: x });
   const openRitual = (r) => setModal({ type: "ritual", payload: r });
   const openGrimoire = (g) => setModal({ type: "grimoire", payload: g });
+  // wave6.3: модалки для streaks + moon phases
+  const openStreaks = () => setModal({ type: "streaks" });
+  const openMoonPhases = () => setModal({ type: "moon-phases" });
 
-  const shared = { s: sky, openTask, openAdhd, openClient, openSession, openRitual, openGrimoire };
+  const shared = {
+    s: sky, openTask, openAdhd, openClient, openSession, openRitual, openGrimoire,
+    openStreaks, openMoonPhases,
+    // wave6.3: навигация по табам из виджетов
+    navigate: (tab) => setPage(tab),
+  };
   const nxS = { day: NxDay, tasks: NxTasks, fin: NxFinance, lists: NxLists, mem: NxMemory, cal: NxCal };
   const arS = { day: ArDay, sess: ArSessions, cli: ArClients, rit: ArRituals, grim: ArGrimoire, stats: ArStats };
   const Scr = (isDay ? nxS : arS)[page];
@@ -3851,6 +3879,14 @@ export default function App() {
         <AdhdSheet s={sky} open={modal?.type === "adhd"} />
       </Sheet>
 
+      <Sheet s={sky} open={modal?.type === "streaks"} onClose={() => setModal(null)} title="🔥 Стрики">
+        <StreaksSheet s={sky} open={modal?.type === "streaks"} />
+      </Sheet>
+
+      <Sheet s={sky} open={modal?.type === "moon-phases"} onClose={() => setModal(null)} title="Фазы луны">
+        <MoonPhasesSheet s={sky} open={modal?.type === "moon-phases"} />
+      </Sheet>
+
       <Sheet
         s={sky}
         open={modal?.type === "client"}
@@ -3910,6 +3946,114 @@ export default function App() {
           />
         )}
       </Sheet>
+    </div>
+  );
+}
+
+function StreaksSheet({ s, open }) {
+  const { data, loading, error } = useApi(open ? "/api/streaks" : null, [open]);
+  const week = useApi(open ? "/api/streaks/week" : null, [open]);
+  if (!open) return null;
+  if (loading) return <Empty s={s} text="Загружаю..." />;
+  if (error) return <ErrorBox s={s} error={error} />;
+
+  const weekDays = week?.data?.days || [];
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+      <Glass s={s} accent={s.amber} glow>
+        <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+          <div style={{ fontSize: 42 }}>🔥</div>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontFamily: H, fontSize: 22, color: s.text, fontWeight: 500 }}>
+              {data?.current || 0} дней
+            </div>
+            <div style={{ fontSize: 12, color: s.tM }}>
+              Лучший: {data?.best || 0}
+              {data?.last_activity_date ? ` · последний раз ${formatDate(data.last_activity_date)}` : ""}
+            </div>
+          </div>
+        </div>
+      </Glass>
+
+      {weekDays.length > 0 && (
+        <Glass s={s}>
+          <div style={{ fontSize: 11, color: s.tS, marginBottom: 8 }}>Последние 7 дней</div>
+          <div style={{ display: "flex", gap: 6, justifyContent: "space-between" }}>
+            {weekDays.map((d, i) => (
+              <div key={i} style={{ flex: 1, textAlign: "center" }}>
+                <div style={{
+                  aspectRatio: "1/1",
+                  borderRadius: 8,
+                  border: d.is_today ? `2px solid ${s.amber}` : `1px solid ${s.brd}`,
+                  background: d.has_activity ? `${s.amber}44` : "transparent",
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  fontSize: 18,
+                }}>
+                  {d.has_activity ? "🔥" : ""}
+                </div>
+                <div style={{ fontSize: 10, color: s.tS, marginTop: 3 }}>{d.weekday}</div>
+              </div>
+            ))}
+          </div>
+        </Glass>
+      )}
+
+      <div style={{ fontSize: 11, color: s.tM, textAlign: "center" }}>
+        {/* TODO(кай): per-task streaks — нужна доп. схема */}
+        Стрики по отдельным повторяющимся задачам — в разработке.
+      </div>
+    </div>
+  );
+}
+
+function MoonPhasesSheet({ s, open }) {
+  const { data, loading, error } = useApi(open ? "/api/arcana/moon-phases?count=4" : null, [open]);
+  if (!open) return null;
+  if (loading) return <Empty s={s} text="Загружаю..." />;
+  if (error) return <ErrorBox s={s} error={error} />;
+
+  const current = data?.current || {};
+  const upcoming = data?.upcoming || [];
+  const isRising = current.idx <= 3;  // 0..3 — растущая, 4..7 — убывающая
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+      <Glass s={s} accent={s.acc} glow>
+        <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+          <div style={{ fontSize: 64, filter: "drop-shadow(0 0 10px rgba(255,255,255,0.3))" }}>
+            {current.glyph}
+          </div>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontFamily: H, fontSize: 20, color: s.text, fontWeight: 500 }}>
+              {current.name}
+            </div>
+            <div style={{ fontSize: 12, color: s.tM, marginTop: 4 }}>
+              освещённость {current.illum}% · {isRising ? "растущая" : "убывающая"}
+            </div>
+          </div>
+        </div>
+      </Glass>
+
+      <div style={{ fontSize: 11, color: s.tS, marginBottom: 4 }}>Ближайшие фазы</div>
+      {upcoming.map((p, i) => {
+        const dt = p.date ? new Date(p.date) : null;
+        const today = new Date();
+        const daysAway = dt ? Math.round((dt - today) / (1000 * 60 * 60 * 24)) : null;
+        return (
+          <Glass key={i} s={s} style={{ padding: "10px 14px", marginBottom: 4 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+              <div style={{ fontSize: 28 }}>{p.glyph}</div>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 13, color: s.text, fontWeight: 500 }}>{p.name}</div>
+                <div style={{ fontSize: 11, color: s.tM }}>
+                  {formatDate(p.date)}{daysAway !== null && daysAway > 0 ? ` · через ${daysAway} ${daysAway === 1 ? "день" : "дн."}` : ""}
+                </div>
+              </div>
+            </div>
+          </Glass>
+        );
+      })}
     </div>
   );
 }

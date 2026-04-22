@@ -234,6 +234,40 @@ def test_tarot_resolve_deck_id():
     assert resolve_deck_id("какая-то неизвестная колода") == "rider-waite"
 
 
+# ═════════════════════════════════════════════════════════════════════════════
+# Stage 3: /api/streaks + /api/streaks/week
+# ═════════════════════════════════════════════════════════════════════════════
+
+def test_streaks_endpoint_returns_current_and_best(client):
+    with patch("nexus.handlers.streaks.get_streak",
+               return_value={"streak": 12, "best": 30, "last_activity_date": "2026-04-21",
+                             "rest_day_date": None, "rest_days_used": 0,
+                             "streak_start_date": "2026-04-10"}), \
+         patch("nexus.handlers.streaks.is_rest_day_available", return_value=True):
+        r = client.get("/api/streaks")
+    assert r.status_code == 200
+    data = r.json()
+    assert data["current"] == 12
+    assert data["best"] == 30
+    assert data["rest_day_available"] is True
+    assert "per_task" in data
+
+
+def test_streaks_week_returns_7_days(client):
+    with patch("miniapp.backend.routes.streaks.today_user_tz",
+               AsyncMock(return_value=(_today_date(), 3))), \
+         patch("miniapp.backend.routes.streaks._has_activity_on", return_value=False):
+        r = client.get("/api/streaks/week")
+    assert r.status_code == 200
+    days = r.json()["days"]
+    assert len(days) == 7
+    # последний день — сегодня
+    assert days[-1]["is_today"] is True
+    # все имеют weekday
+    for d in days:
+        assert d["weekday"] in ("пн", "вт", "ср", "чт", "пт", "сб", "вс")
+
+
 def test_finance_today_budget_reflects_spending(client):
     pages = [
         {
