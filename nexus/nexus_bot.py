@@ -1529,6 +1529,16 @@ async def main() -> None:
         logger.warning("set_chat_menu_button failed: %s", e)
 
     init_scheduler(bot)
+
+    # FastAPI для Mini App — живёт в том же процессе, порт 8000
+    try:
+        from miniapp.backend.server import run_api_in_background
+        import asyncio as _asyncio_api
+        _asyncio_api.create_task(run_api_in_background())
+        logger.info("FastAPI (miniapp) scheduled for startup on :8000")
+    except Exception as e:
+        logger.error("Failed to start miniapp FastAPI: %s", e)
+
     from nexus.handlers.tasks import restore_reminders_on_startup
     from nexus.handlers.notes import send_notes_digest_all
     from apscheduler.triggers.cron import CronTrigger
