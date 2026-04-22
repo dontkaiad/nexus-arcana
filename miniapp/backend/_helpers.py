@@ -13,6 +13,7 @@ from typing import Optional, Tuple
 from core.shared_handlers import get_user_tz
 
 BOT_NEXUS = "☀️ Nexus"
+BOT_ARCANA = "🌒 Arcana"
 
 PRIO_FALLBACK = "⚪"
 
@@ -54,6 +55,40 @@ def date_start(prop: dict) -> str:
 
 def relation_ids(prop: dict) -> list[str]:
     return [r.get("id", "") for r in (prop.get("relation") or []) if r.get("id")]
+
+
+def multi_select_list(prop: dict) -> list[str]:
+    return [x.get("name", "") for x in (prop.get("multi_select") or []) if x.get("name")]
+
+
+# ── Page-level конверторы (удобно вне today.py) ─────────────────────────────
+
+def relation_ids_of(page: dict, prop_name: str) -> list[str]:
+    return relation_ids((page.get("properties", {}) or {}).get(prop_name, {}))
+
+
+def multi_select_names(page: dict, prop_name: str) -> list[str]:
+    return multi_select_list((page.get("properties", {}) or {}).get(prop_name, {}))
+
+
+def rich_text_plain(page: dict, prop_name: str) -> str:
+    return rich_text((page.get("properties", {}) or {}).get(prop_name, {}))
+
+
+def title_plain(page: dict, prop_name: str) -> str:
+    return title_text((page.get("properties", {}) or {}).get(prop_name, {}))
+
+
+def select_of(page: dict, prop_name: str) -> str:
+    return select_name((page.get("properties", {}) or {}).get(prop_name, {}))
+
+
+def number_of(page: dict, prop_name: str) -> float:
+    return float(number_value((page.get("properties", {}) or {}).get(prop_name, {})) or 0)
+
+
+def date_of(page: dict, prop_name: str) -> str:
+    return date_start((page.get("properties", {}) or {}).get(prop_name, {}))
 
 
 # ── Emoji / category / priority ──────────────────────────────────────────────
@@ -168,3 +203,9 @@ def is_bot_nexus(page: dict) -> bool:
     """Проверка: поле 'Бот' страницы равно '☀️ Nexus'."""
     props = page.get("properties", {})
     return select_name(props.get("Бот", {})) == BOT_NEXUS
+
+
+def is_bot_arcana(page: dict) -> bool:
+    """Проверка: поле 'Бот' страницы равно '🌒 Arcana'."""
+    props = page.get("properties", {})
+    return select_name(props.get("Бот", {})) == BOT_ARCANA
