@@ -187,11 +187,13 @@ async def get_today(tg_id: int = Depends(current_user_id)) -> dict[str, Any]:
     overdue: list[dict] = []
     scheduled: list[dict] = []
     today_no_time: list[dict] = []
+    no_date: list[dict] = []  # wave7.3: без дедлайна и без напоминалки
     future: list[dict] = []
 
     for s in summaries:
         deadline_date = to_local_date(s["deadline_raw"], tz_offset)
         deadline_time = extract_time(s["deadline_raw"], tz_offset)
+        reminder_date = to_local_date(s["reminder_raw"], tz_offset)
         repeat_time = s["repeat_time"] or None
 
         if deadline_date and deadline_date < today_date:
@@ -204,8 +206,8 @@ async def get_today(tg_id: int = Depends(current_user_id)) -> dict[str, Any]:
             })
             continue
 
-        is_today = deadline_date == today_date
-        has_time_today = is_today and deadline_time is not None
+        is_today = deadline_date == today_date or reminder_date == today_date
+        has_time_today = (deadline_date == today_date) and deadline_time is not None
 
         if repeat_time or has_time_today:
             t = repeat_time if repeat_time else deadline_time
@@ -247,9 +249,18 @@ async def get_today(tg_id: int = Depends(current_user_id)) -> dict[str, Any]:
                 "date": deadline_date.isoformat(),
                 "repeat": s["repeat"],
             })
+        elif not deadline_date and not reminder_date:
+            no_date.append({
+                "id": s["id"],
+                "title": s["title"],
+                "cat": s["cat"],
+                "prio": s["prio"],
+                "repeat": s["repeat"],
+            })
 
     future.sort(key=lambda x: x["date"])
-    tasks_out = today_no_time + future[:5]
+    # wave7.3: на главном экране — только «Сегодня», без будущих
+    tasks_out = today_no_time
 
     scheduled.sort(key=lambda x: x["time"] or "")
     overdue.sort(key=lambda x: -x["days_ago"])
@@ -282,5 +293,6 @@ async def get_today(tg_id: int = Depends(current_user_id)) -> dict[str, Any]:
         "overdue": overdue,
         "scheduled": scheduled,
         "tasks": tasks_out,
+        "no_date": no_date,
         "adhd_tip": tip,
     }
