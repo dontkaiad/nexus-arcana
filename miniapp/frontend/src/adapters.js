@@ -39,6 +39,34 @@ export function formatFullDate(iso, weekday) {
   return weekday ? `${day} ${mo}, ${weekday}` : `${day} ${mo}`
 }
 
+const RU_MONTH_NAME_NOM = [
+  'Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь',
+  'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь',
+]
+
+// "2026-04" → "Апрель 2026"
+export function formatMonth(iso) {
+  if (!iso || typeof iso !== 'string') return ''
+  const [y, m] = iso.split('-').map(Number)
+  if (!y || !m) return iso
+  return `${RU_MONTH_NAME_NOM[m - 1]} ${y}`
+}
+
+// Универсальный formatDate — mode: "short" | "full" | "auto" (default full)
+export function formatDate(iso, mode = 'full', now = new Date()) {
+  const dt = parseIsoDate(iso)
+  if (!dt) return iso || ''
+  const day = dt.getDate()
+  const year = dt.getFullYear()
+  const sameYear = year === now.getFullYear()
+  if (mode === 'short') {
+    const mo = RU_MONTH_SHORT[dt.getMonth()]
+    return sameYear ? `${day} ${mo}` : `${day} ${mo} ${year}`
+  }
+  const mo = RU_MONTH_FULL[dt.getMonth()]
+  return sameYear ? `${day} ${mo}` : `${day} ${mo} ${year}`
+}
+
 // 60 → "за 1 ч", 30 → "за 30 мин", 90 → "за 1 ч 30 мин", 120 → "за 2 ч"
 export function formatReminder(minutes) {
   if (!minutes || minutes <= 0) return null
@@ -157,7 +185,7 @@ export function adaptTasks(data) {
 // ── /api/finance — 4 view-adapt ───────────────────────────────────────────
 
 export function adaptFinanceToday(data) {
-  if (!data) return { total: 0, items: [] }
+  if (!data) return { total: 0, items: [], budget: null }
   return {
     total: data.total ?? 0,
     items: (data.items || []).map((x) => ({
@@ -166,6 +194,7 @@ export function adaptFinanceToday(data) {
       cat: catFull(x.cat),
       amt: x.amt ?? 0,
     })),
+    budget: data.budget || null,
   }
 }
 
@@ -177,6 +206,7 @@ export function adaptFinanceMonth(data) {
     balance: data.balance ?? 0,
     cats: (data.by_category || []).map((c) => ({
       name: catFull(c.cat),
+      raw: c.cat,  // wave6: исходная структура категории для drill-down
       spent: c.spent ?? 0,
       limit: c.limit ?? null,
       pct: c.pct ?? null,
