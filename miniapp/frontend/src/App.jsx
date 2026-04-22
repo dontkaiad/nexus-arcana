@@ -89,7 +89,7 @@ const getOrb = (progress, isSun) => {
 function getSky(p) {
   let d, m, w, g, b, card, text, tS, tM, acc, brd, red, amber, good;
   red = lerpC("#bf5a4a", "#c45a5a", p);
-  amber = lerpC("#c49a3c", "#c4a03c", p);
+  amber = lerpC("#b8822a", "#d9a441", p);
   good = lerpC("#6b8f71", "#5a9a78", p);
   if (p < 0.3) {
     const t = p / 0.3;
