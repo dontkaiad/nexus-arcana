@@ -367,3 +367,57 @@ def test_categories_income_returns_defaults_when_empty(client):
     cats = r.json()["categories"]
     assert "💼 Зарплата" in cats
     assert "🏦 Прочее" in cats
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# Stage 4: Lists фильтр включает записи без "Бот" + checkbox API-flow
+# ═════════════════════════════════════════════════════════════════════════════
+
+def test_lists_filter_allows_empty_bot(client):
+    """wave5.4: чеклисты без заполненного Бот тоже должны попадать в выборку."""
+    captured = {}
+
+    async def qp(db_id, *, filters=None, **kwargs):
+        captured["filters"] = filters
+        return []
+
+    with patch("miniapp.backend.routes.lists.query_pages", side_effect=qp), \
+         patch("miniapp.backend.routes.lists.get_user_notion_id",
+               AsyncMock(return_value=FAKE_NOTION_USER)):
+        r = client.get("/api/lists?type=check")
+
+    assert r.status_code == 200
+    filter_str = _json.dumps(captured["filters"] or {}, ensure_ascii=False)
+    # or-ветвь с is_empty присутствует
+    assert "is_empty" in filter_str
+    # тип задан
+    assert "Чеклист" in filter_str
+
+
+def test_lists_done_endpoint_marks_status(client):
+    from core.notion_client import _status
+
+    captured = {}
+
+    async def fake_get_page(pid):
+        return {
+            "id": pid,
+            "properties": {
+                "🪪 Пользователи": {"relation": [{"id": FAKE_NOTION_USER}]},
+            },
+        }
+
+    async def fake_update_page(pid, props):
+        captured["id"] = pid
+        captured["props"] = props
+        return {"ok": True}
+
+    with patch("miniapp.backend.routes.writes.get_page", side_effect=fake_get_page), \
+         patch("miniapp.backend.routes.writes.update_page", side_effect=fake_update_page), \
+         patch("miniapp.backend.routes.writes.get_user_notion_id",
+               AsyncMock(return_value=FAKE_NOTION_USER)):
+        r = client.post("/api/lists/list-item-1/done")
+
+    assert r.status_code == 200
+    assert captured["id"] == "list-item-1"
+    assert captured["props"]["Статус"] == _status("Done")

@@ -1255,7 +1255,35 @@ function NxLists({ s }) {
   const qEnc = encodeURIComponent(q || "");
   const path = q ? `/api/lists?type=${tab}&q=${qEnc}` : `/api/lists?type=${tab}`;
   const { data, loading, error, refetch } = useApi(path, [tab, q]);
-  const items = loading || error ? [] : adaptLists(data);
+  const apiItems = loading || error ? [] : adaptLists(data);
+
+  // локальные оптимистик-апдейты, сбрасываем при смене tab/q
+  const [overrides, setOverrides] = useState({});
+  useEffect(() => { setOverrides({}); }, [tab, q]);
+
+  const items = apiItems.map((x) => (x.id in overrides ? { ...x, done: overrides[x.id] } : x));
+
+  const toggleDone = async (item) => {
+    if (item.done) return; // повторного снятия нет в API — просто игнор
+    setOverrides((prev) => ({ ...prev, [item.id]: true }));
+    try {
+      await apiPost(`/api/lists/${item.id}/done`);
+      setTimeout(refetch, 500);
+    } catch (e) {
+      setOverrides((prev) => {
+        const next = { ...prev };
+        delete next[item.id];
+        return next;
+      });
+      alert("Не удалось отметить");
+    }
+  };
+
+  const emptyText = (
+    tab === "buy" ? "Списков пока нет 📝" :
+    tab === "check" ? "Нет активных чеклистов 📋" :
+    "Инвентарь пуст 📦"
+  );
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
@@ -1275,18 +1303,24 @@ function NxLists({ s }) {
       {loading && <Empty s={s} text="Загружаю..." />}
       {error && <ErrorBox s={s} error={error} refetch={refetch} />}
       {!loading && !error && items.length === 0 && (
-        <Empty s={s} text={tab === "check" ? "Нет активных чеклистов" : "Пусто"} />
+        <Glass s={s} style={{ padding: "24px 14px", textAlign: "center" }}>
+          <div style={{ fontSize: 14, color: s.text }}>{emptyText}</div>
+        </Glass>
       )}
       {!loading && !error && tab !== "inv" &&
         items.map((x) => (
           <Glass
             key={x.id}
             s={s}
-            style={{ padding: "8px 14px", marginBottom: 4, opacity: x.done ? 0.5 : 1 }}
+            style={{
+              padding: "8px 14px", marginBottom: 4, opacity: x.done ? 0.5 : 1,
+              cursor: "pointer",
+            }}
+            onClick={() => toggleDone(x)}
           >
             <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
               <Chk s={s} done={x.done} />
-              <span style={{ fontSize: 13, color: s.text }}>
+              <span style={{ fontSize: 13, color: s.text, textDecoration: x.done ? "line-through" : "none" }}>
                 {x.cat} {x.name}
               </span>
             </div>
@@ -1297,7 +1331,7 @@ function NxLists({ s }) {
           <Glass key={x.id} s={s} style={{ padding: "8px 14px", marginBottom: 4 }}>
             <div style={{ display: "flex", justifyContent: "space-between" }}>
               <span style={{ fontSize: 13, color: s.text }}>{x.name}</span>
-              <span style={{ fontSize: 13, color: s.acc, fontWeight: 500 }}>{x.qty} шт</span>
+              <span style={{ fontSize: 13, color: s.acc, fontWeight: 500 }}>{x.qty ? `${x.qty} шт` : ""}</span>
             </div>
             {x.exp && (
               <div style={{ fontSize: 11, color: s.tM, marginTop: 2 }}>до {x.exp}</div>
