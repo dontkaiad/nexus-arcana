@@ -1172,38 +1172,37 @@ function NxDay({ s, openTask, navigate, openStreaks }) {
               <div
                 onClick={() => openTask(o)}
                 style={{
-                  flex: 1, display: "flex", alignItems: "center", gap: 6,
-                  minWidth: 0, cursor: "pointer",
+                  flex: 1, minWidth: 0, cursor: "pointer",
                   textDecoration: done[o.id] ? "line-through" : "none",
                 }}
               >
-                <span style={{
-                  flex: 1, fontSize: fs(16), color: s.text, fontWeight: 500,
-                  wordBreak: "break-word",
-                }}>
-                  {o.title}
-                </span>
-                {o.cat && (
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                   <span style={{
-                    display: "inline-flex", alignItems: "center",
-                    padding: "3px 9px", borderRadius: 10,
-                    fontSize: fs(13), background: `${s.acc}33`, color: s.text, fontWeight: 500,
-                    flexShrink: 0, whiteSpace: "nowrap",
+                    flex: 1, fontSize: fs(16), color: s.text, fontWeight: 500,
+                    wordBreak: "break-word",
                   }}>
-                    {String(o.cat).split(" ")[0]}
+                    {o.title}
                   </span>
-                )}
+                  {o.cat && (
+                    <span style={{
+                      display: "inline-flex", alignItems: "center",
+                      padding: "3px 9px", borderRadius: 10,
+                      fontSize: fs(13), background: `${s.acc}33`, color: s.text, fontWeight: 500,
+                      flexShrink: 0, whiteSpace: "nowrap",
+                    }}>
+                      {String(o.cat).split(" ")[0]}
+                    </span>
+                  )}
+                  <PrioDot s={s} prio={o.prio} />
+                </div>
+                <div style={{
+                  fontSize: fs(13), color: s.red, fontWeight: 500,
+                  marginTop: 3, display: "flex", gap: 8,
+                }}>
+                  <span>{o.days} д назад</span>
+                  {o.rpt && <span style={{ color: s.tM, fontWeight: 400 }}>{o.rpt}</span>}
+                </div>
               </div>
-              {o.rpt && (
-                <span style={{ fontSize: fs(13), color: s.tM, flexShrink: 0 }}>{o.rpt}</span>
-              )}
-              <span style={{
-                fontSize: fs(13), color: s.red, fontWeight: 500,
-                flexShrink: 0, minWidth: 86, textAlign: "right",
-              }}>
-                {o.days} д назад
-              </span>
-              <PrioDot s={s} prio={o.prio} />
             </Glass>
           ))}
           {t.tasks.map((x) => (
@@ -1234,40 +1233,41 @@ function NxDay({ s, openTask, navigate, openStreaks }) {
                 <div
                   onClick={() => openTask(x)}
                   style={{
-                    flex: 1, display: "flex", alignItems: "center", gap: 6,
-                    minWidth: 0, cursor: "pointer",
+                    flex: 1, minWidth: 0, cursor: "pointer",
                     textDecoration: done[x.id] ? "line-through" : "none",
                   }}
                 >
-                  <span style={{
-                    flex: 1, fontSize: fs(16), color: s.text, fontWeight: 500,
-                    wordBreak: "break-word",
-                  }}>
-                    {x.title}
-                  </span>
-                  {x.cat && (
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                     <span style={{
-                      display: "inline-flex", alignItems: "center",
-                      padding: "3px 9px", borderRadius: 10,
-                      fontSize: fs(13), background: `${s.acc}33`, color: s.text, fontWeight: 500,
-                      flexShrink: 0, whiteSpace: "nowrap",
+                      flex: 1, fontSize: fs(16), color: s.text, fontWeight: 500,
+                      wordBreak: "break-word",
                     }}>
-                      {String(x.cat).split(" ")[0]}
+                      {x.title}
                     </span>
+                    {x.cat && (
+                      <span style={{
+                        display: "inline-flex", alignItems: "center",
+                        padding: "3px 9px", borderRadius: 10,
+                        fontSize: fs(13), background: `${s.acc}33`, color: s.text, fontWeight: 500,
+                        flexShrink: 0, whiteSpace: "nowrap",
+                      }}>
+                        {String(x.cat).split(" ")[0]}
+                      </span>
+                    )}
+                    <PrioDot s={s} prio={x.prio} />
+                  </div>
+                  {(x.daysSinceCreated != null || x.rpt) && (
+                    <div style={{
+                      fontSize: fs(13), color: s.tM,
+                      marginTop: 3, display: "flex", gap: 8,
+                    }}>
+                      {x.daysSinceCreated != null && (
+                        <span>{x.daysSinceCreated === 0 ? "сегодня" : `${x.daysSinceCreated} д назад`}</span>
+                      )}
+                      {x.rpt && <span>{x.rpt}</span>}
+                    </div>
                   )}
                 </div>
-                {x.rpt && (
-                  <span style={{ fontSize: fs(13), color: s.tM, flexShrink: 0 }}>{x.rpt}</span>
-                )}
-                {x.daysSinceCreated != null && (
-                  <span style={{
-                    fontSize: fs(13), color: s.tM, fontWeight: 500,
-                    flexShrink: 0, minWidth: 86, textAlign: "right",
-                  }}>
-                    {x.daysSinceCreated === 0 ? "сегодня" : `${x.daysSinceCreated} д назад`}
-                  </span>
-                )}
-                <PrioDot s={s} prio={x.prio} />
               </Glass>
             ))}
         </>
