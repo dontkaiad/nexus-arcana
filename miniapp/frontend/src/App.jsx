@@ -1120,7 +1120,7 @@ function NxDay({ s, openTask, navigate, openStreaks }) {
         </>
       )}
 
-      {(t.overdue.length > 0 || t.tasks.length > 0) && (
+      {(t.overdue.length > 0 || t.tasks.length > 0 || (t.noDate && t.noDate.length > 0)) && (
         <>
           <SectionLabel s={s}>Задачи</SectionLabel>
           {t.overdue.map((o) => (
@@ -1128,31 +1128,42 @@ function NxDay({ s, openTask, navigate, openStreaks }) {
               key={o.id}
               s={s}
               accent={s.red}
-              onClick={() => openTask(o)}
               style={{
                 padding: "10px 14px", marginBottom: 6,
-                display: "flex", alignItems: "center", gap: 10, cursor: "pointer",
+                display: "flex", alignItems: "center", gap: 10,
+                opacity: done[o.id] ? 0.45 : 1,
               }}
             >
-              {o.cat && (
+              <Chk s={s} done={done[o.id]} onClick={() => toggle(o.id)} />
+              <div
+                onClick={() => openTask(o)}
+                style={{
+                  flex: 1, display: "flex", alignItems: "center", gap: 6,
+                  minWidth: 0, cursor: "pointer",
+                  textDecoration: done[o.id] ? "line-through" : "none",
+                }}
+              >
+                {o.cat && (
+                  <span style={{
+                    display: "inline-flex", alignItems: "center",
+                    padding: "2px 8px", borderRadius: 10,
+                    fontSize: fs(12), background: `${s.red}33`, color: s.text, fontWeight: 500,
+                    flexShrink: 0, whiteSpace: "nowrap",
+                  }}>
+                    {o.cat}
+                  </span>
+                )}
                 <span style={{
-                  display: "inline-flex", alignItems: "center",
-                  padding: "2px 8px", borderRadius: 10,
-                  fontSize: fs(12), background: `${s.red}33`, color: s.text, fontWeight: 500,
-                  flexShrink: 0, whiteSpace: "nowrap",
+                  flex: 1, fontSize: fs(16), color: s.text, fontWeight: 500,
+                  whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
                 }}>
-                  {o.cat}
+                  {o.title}
                 </span>
-              )}
-              <span style={{
-                flex: 1, fontSize: fs(16), color: s.text, fontWeight: 500,
-                whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
-              }}>
-                {o.title}
-              </span>
+              </div>
               <span style={{ fontSize: fs(13), color: s.red, fontWeight: 500, flexShrink: 0 }}>
                 {o.days} д назад
               </span>
+              <PrioDot s={s} prio={o.prio} />
             </Glass>
           ))}
           {t.tasks.map((x) => (
@@ -1165,22 +1176,54 @@ function NxDay({ s, openTask, navigate, openStreaks }) {
               onOpen={() => openTask(x)}
             />
           ))}
-        </>
-      )}
-
-      {t.noDate && t.noDate.length > 0 && (
-        <>
-          <SectionLabel s={s}>📌 Без срока</SectionLabel>
-          {[...t.noDate].sort((a, b) => PRIO_WEIGHT(a.prio) - PRIO_WEIGHT(b.prio)).map((x) => (
-            <TaskRow
-              key={x.id}
-              s={s}
-              t={x}
-              done={done[x.id]}
-              onToggle={() => toggle(x.id)}
-              onOpen={() => openTask(x)}
-            />
-          ))}
+          {/* wave8.22: «без срока» — без отдельной шапки, тем же списком,
+              справа дата создания нейтральным цветом (не красным). */}
+          {t.noDate && [...t.noDate]
+            .sort((a, b) => PRIO_WEIGHT(a.prio) - PRIO_WEIGHT(b.prio))
+            .map((x) => (
+              <Glass
+                key={x.id}
+                s={s}
+                style={{
+                  padding: "10px 14px", marginBottom: 6,
+                  display: "flex", alignItems: "center", gap: 10,
+                  opacity: done[x.id] ? 0.45 : 1,
+                }}
+              >
+                <Chk s={s} done={done[x.id]} onClick={() => toggle(x.id)} />
+                <div
+                  onClick={() => openTask(x)}
+                  style={{
+                    flex: 1, display: "flex", alignItems: "center", gap: 6,
+                    minWidth: 0, cursor: "pointer",
+                    textDecoration: done[x.id] ? "line-through" : "none",
+                  }}
+                >
+                  {x.cat && (
+                    <span style={{
+                      display: "inline-flex", alignItems: "center",
+                      padding: "2px 8px", borderRadius: 10,
+                      fontSize: fs(12), background: `${s.acc}33`, color: s.text, fontWeight: 500,
+                      flexShrink: 0, whiteSpace: "nowrap",
+                    }}>
+                      {x.cat}
+                    </span>
+                  )}
+                  <span style={{
+                    flex: 1, fontSize: fs(16), color: s.text, fontWeight: 500,
+                    whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+                  }}>
+                    {x.title}
+                  </span>
+                </div>
+                {x.daysSinceCreated != null && (
+                  <span style={{ fontSize: fs(13), color: s.tM, fontWeight: 500, flexShrink: 0 }}>
+                    {x.daysSinceCreated === 0 ? "сегодня" : `${x.daysSinceCreated} д назад`}
+                  </span>
+                )}
+                <PrioDot s={s} prio={x.prio} />
+              </Glass>
+            ))}
         </>
       )}
 
