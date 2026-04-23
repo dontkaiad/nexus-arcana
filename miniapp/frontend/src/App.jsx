@@ -170,7 +170,9 @@ const B = "'Nunito', -apple-system, 'SF Pro Text', system-ui, sans-serif";
 
 // wave8.20: глобальный масштаб шрифтов и иконок для читаемости на мобильном.
 // Применяется ко всем inline fontSize и size={...} через `fs()`.
-const FS = 1.5;
+// wave8.23: 1.5 оказался слишком крупным (текст съезжал, нав-таб
+// обрезался). Понизил до 1.2 — лёгкий но заметный bump.
+const FS = 1.2;
 const fs = (n) => Math.round(n * FS);
 
 const PRIO_WEIGHT = (p) => ({ "🔴": 0, "🟡": 1, "⚪": 2 }[p] ?? 3);
@@ -217,8 +219,8 @@ const Pill = ({ s, active, children, onClick }) => (
   <div
     onClick={onClick}
     style={{
-      padding: "8px 16px",
-      borderRadius: 22,
+      padding: "6px 14px",
+      borderRadius: 20,
       fontSize: fs(12),
       cursor: "pointer",
       // wave6.2.5: неактивный таб — прозрачный фон + тонкая граница + полный текст
@@ -303,9 +305,9 @@ const Chk = ({ s, done, onClick }) => (
   <div
     onClick={onClick}
     style={{
-      width: 30,
-      height: 30,
-      borderRadius: 8,
+      width: 24,
+      height: 24,
+      borderRadius: 7,
       border: `2px solid ${done ? s.acc : s.brd}`,
       background: done ? s.acc : "transparent",
       cursor: "pointer",
@@ -462,11 +464,11 @@ const FAB = ({ s, onClick }) => (
     style={{
       // wave5.4: fixed + safe-area-inset; wave8.7: glass-стиль с акцентной рамкой
       position: "fixed",
-      bottom: "calc(env(safe-area-inset-bottom, 0px) + 96px)",
+      bottom: "calc(env(safe-area-inset-bottom, 0px) + 84px)",
       right: 16,
-      width: 72,
-      height: 72,
-      borderRadius: 36,
+      width: 56,
+      height: 56,
+      borderRadius: 28,
       background: `${s.acc}dd`,
       color: "#fff",
       display: "flex",
@@ -4144,7 +4146,7 @@ export default function App() {
       </div>
 
       {/* BODY */}
-      <div style={{ padding: "6px 14px 140px", position: "relative", zIndex: 2 }}>
+      <div style={{ padding: "6px 14px 120px", position: "relative", zIndex: 2 }}>
         {Scr && <Scr {...shared} />}
       </div>
 
@@ -4178,10 +4180,10 @@ export default function App() {
               onClick={() => setPage(t.k)}
               style={{
                 flex: 1,
-                maxWidth: 110,
+                maxWidth: 84,
                 textAlign: "center",
-                padding: "10px 2px",
-                borderRadius: 14,
+                padding: "8px 2px",
+                borderRadius: 12,
                 cursor: "pointer",
                 background: active ? `${sky.acc}25` : "transparent",
                 color: active ? sky.text : sky.tS,
@@ -4197,8 +4199,8 @@ export default function App() {
               </div>
               <div
                 style={{
-                  fontSize: fs(11),
-                  marginTop: 4,
+                  fontSize: fs(10),
+                  marginTop: 3,
                   fontWeight: active ? 500 : 400,
                 }}
               >
