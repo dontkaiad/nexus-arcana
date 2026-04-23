@@ -1187,7 +1187,7 @@ function NxDay({ s, openTask, navigate, openStreaks }) {
                   <span style={{
                     display: "inline-flex", alignItems: "center",
                     padding: "3px 9px", borderRadius: 10,
-                    fontSize: fs(13), background: `${s.red}33`, color: s.text, fontWeight: 500,
+                    fontSize: fs(13), background: `${s.acc}33`, color: s.text, fontWeight: 500,
                     flexShrink: 0, whiteSpace: "nowrap",
                   }}>
                     {String(o.cat).split(" ")[0]}
@@ -1333,7 +1333,7 @@ function NxTasks({ s, openTask }) {
                 {String(t.cat).split(" ")[0]}
               </span>
             )}
-            <span style={{ fontSize: fs(13), flexShrink: 0 }}>{t.prio}</span>
+            <PrioDot s={s} prio={t.prio} />
           </div>
           <div
             style={{
