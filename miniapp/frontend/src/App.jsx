@@ -3647,6 +3647,13 @@ function QuickAdd({ s, actions, onPick }) {
 
 function TaskSheet({ s, task, onClose }) {
   const [busy, setBusy] = useState(null);
+  const tomorrowIso = (() => {
+    const d = new Date();
+    d.setDate(d.getDate() + 1);
+    return d.toISOString().slice(0, 10);
+  })();
+  const [pDate, setPDate] = useState(tomorrowIso);
+  const [pTime, setPTime] = useState("09:00");
   const run = async (label, fn) => {
     setBusy(label);
     try {
@@ -3657,6 +3664,15 @@ function TaskSheet({ s, task, onClose }) {
     } finally {
       setBusy(null);
     }
+  };
+  const doPostpone = () => {
+    if (!pDate || busy || !task.id) return;
+    const [y, m, d] = pDate.split("-").map(Number);
+    const target = new Date(y, m - 1, d);
+    const now = new Date();
+    const start = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const days = Math.max(1, Math.round((target - start) / 86400000));
+    run("post", () => apiPost(`/api/tasks/${task.id}/postpone`, { days }));
   };
   // wave8.46: чеклист задачи — items из /api/lists?type=check&group=<title>
   const checklistPath = task.title
@@ -3679,15 +3695,33 @@ function TaskSheet({ s, task, onClose }) {
       alert("Не удалось отметить");
     }
   };
+  const metaCard = (label, value) => (
+    <div
+      style={{
+        flex: 1,
+        minWidth: 0,
+        padding: "8px 10px",
+        background: s.card,
+        border: `1px solid ${s.brd}`,
+        borderRadius: 10,
+        backdropFilter: "blur(10px)",
+        textAlign: "center",
+      }}
+    >
+      <div style={{ fontSize: fs(10), color: s.tM, marginBottom: 2, textTransform: "uppercase", letterSpacing: 0.4 }}>
+        {label}
+      </div>
+      <div style={{ fontSize: fs(13), color: s.text, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+        {value}
+      </div>
+    </div>
+  );
   return (
     <div>
-      <div style={{ fontFamily: H, fontSize: fs(18), color: s.text, marginBottom: 6 }}>
-        {task.cat} {task.title}
-      </div>
-      <div style={{ fontSize: fs(12), color: s.tS, marginBottom: 14 }}>
-        {task.date || task.time || task.rpt || "без даты"}
-        {task.prio && ` · ${task.prio}`}
-        {task.streak > 0 && ` · 🔥 ${task.streak}`}
+      <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
+        {metaCard("Категория", task.cat || "—")}
+        {metaCard("Дедлайн", task.date || task.time || task.rpt || "—")}
+        {metaCard("Приоритет", task.prio || "—")}
       </div>
       <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
         <ActionRow
@@ -3699,15 +3733,48 @@ function TaskSheet({ s, task, onClose }) {
         <ActionRow
           s={s}
           icon={<Calendar size={fs(16)} />}
-          label={busy === "post" ? "Сохраняю..." : "Перенести на день"}
-          onClick={() => !busy && task.id && run("post", () => apiPost(`/api/tasks/${task.id}/postpone`, { days: 1 }))}
+          label={busy === "post" ? "Сохраняю..." : "Перенести"}
+          onClick={doPostpone}
         />
-        <ActionRow
-          s={s}
-          icon={<Calendar size={fs(16)} />}
-          label={busy === "post7" ? "Сохраняю..." : "Перенести на неделю"}
-          onClick={() => !busy && task.id && run("post7", () => apiPost(`/api/tasks/${task.id}/postpone`, { days: 7 }))}
-        />
+        <div
+          style={{
+            display: "flex",
+            gap: 8,
+            padding: "10px 12px",
+            background: s.card,
+            border: `1px solid ${s.brd}`,
+            borderRadius: 12,
+            backdropFilter: "blur(10px)",
+            marginTop: -2,
+          }}
+        >
+          <label style={{ flex: 1, display: "flex", alignItems: "center", gap: 8 }}>
+            <Calendar size={fs(14)} color={s.tM} />
+            <input
+              type="date"
+              value={pDate}
+              onChange={(e) => setPDate(e.target.value)}
+              style={{
+                flex: 1, minWidth: 0, border: "none", outline: "none",
+                background: "transparent", color: s.text, fontSize: fs(13),
+                fontFamily: B,
+              }}
+            />
+          </label>
+          <label style={{ flex: 1, display: "flex", alignItems: "center", gap: 8 }}>
+            <Clock size={fs(14)} color={s.tM} />
+            <input
+              type="time"
+              value={pTime}
+              onChange={(e) => setPTime(e.target.value)}
+              style={{
+                flex: 1, minWidth: 0, border: "none", outline: "none",
+                background: "transparent", color: s.text, fontSize: fs(13),
+                fontFamily: B,
+              }}
+            />
+          </label>
+        </div>
         <ActionRow
           s={s}
           icon={<Trash2 size={fs(16)} />}
@@ -4532,7 +4599,7 @@ export default function App() {
       </div>
 
       {/* МОДАЛКИ */}
-      <Sheet s={sky} open={modal?.type === "task"} onClose={() => setModal(null)} title="Задача">
+      <Sheet s={sky} open={modal?.type === "task"} onClose={() => setModal(null)} title={modal?.payload?.title || "Задача"}>
         {modal?.payload && (
           <TaskSheet
             s={sky}
