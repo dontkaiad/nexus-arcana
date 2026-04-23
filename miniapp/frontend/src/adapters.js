@@ -334,6 +334,24 @@ export function adaptLists(data) {
         exp: x.expires ? formatShortDate(x.expires) : undefined,
       }
     }
+    if (type === 'check' && x.parent) {
+      // wave8.47: метаданные родительской задачи для шапки группы
+      let time = x.parent.deadline_time || null
+      let repeat = x.parent.repeat || ''
+      if (time && time.includes('|')) {
+        const [tm, r] = time.split('|', 2)
+        time = (tm || '').trim() || null
+        if (r) repeat = r.trim()
+      }
+      base.parent = {
+        cat: catFull(x.parent.cat),
+        prio: x.parent.prio || '⚪',
+        date: x.parent.deadline ? formatDate(x.parent.deadline, 'full') : null,
+        time,
+        rpt: repeat ? `🔄 ${formatRepeat(repeat)}` : undefined,
+        reminderMin: x.parent.reminder_min ?? null,
+      }
+    }
     return base
   })
 }
