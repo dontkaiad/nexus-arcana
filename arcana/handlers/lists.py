@@ -895,11 +895,13 @@ async def handle_list_pending(msg: Message, user_notion_id: str = "") -> bool:
     if action == "checklist_items":
         pending_del(uid)
         raw_items = []
-        for line in text.split("\n"):
-            for part in line.split(","):
-                part = part.strip().lstrip("•·-–— ").strip()
-                if part:
-                    raw_items.append(part)
+        lines = text.split("\n")
+        # wave8.49: многострочный ввод — режем по строкам, чтобы запятая внутри пункта не дробила его.
+        parts_iter = lines if len(lines) > 1 else lines[0].split(",")
+        for part in parts_iter:
+            part = part.strip().lstrip("•·-–— ").strip()
+            if part:
+                raw_items.append(part)
         group = pending.get("group", "Чеклист")
         items = [{"name": it, "group": group} for it in raw_items]
         created = await add_items(items, "📋 Чеклист", BOT_NAME, pending.get("user_notion_id", user_notion_id))
@@ -912,11 +914,12 @@ async def handle_list_pending(msg: Message, user_notion_id: str = "") -> bool:
     if action == "subtask_items":
         pending_del(uid)
         raw_items = []
-        for line in text.split("\n"):
-            for part in line.split(","):
-                part = part.strip().lstrip("•·-–— ").strip()
-                if part:
-                    raw_items.append(part)
+        lines = text.split("\n")
+        parts_iter = lines if len(lines) > 1 else lines[0].split(",")
+        for part in parts_iter:
+            part = part.strip().lstrip("•·-–— ").strip()
+            if part:
+                raw_items.append(part)
         task_id = pending.get("task_id", "")
         task_name = pending.get("task_name", "Подзадачи")
         rel_type = pending.get("rel_type", "task")
