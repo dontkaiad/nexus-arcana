@@ -228,7 +228,7 @@ const Pill = ({ s, active, children, onClick }) => (
       background: active ? `${s.acc}66` : s.card,
       color: s.text,
       opacity: active ? 1 : 0.85,
-      border: `1px solid ${active ? s.acc + "aa" : s.brd}`,
+      border: `1.5px solid ${active ? "rgba(255,255,255,0.95)" : s.brd}`,
       fontFamily: B,
       fontWeight: active ? 700 : 500,
       whiteSpace: "nowrap",
