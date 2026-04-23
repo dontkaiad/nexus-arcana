@@ -16,11 +16,15 @@ from miniapp.backend._helpers import (
     cat_from_notion,
     checkbox_value,
     date_start,
+    extract_time,
     number_value,
+    prio_from_notion,
     rich_text,
     select_name,
     status_name,
     title_text,
+    to_local_date,
+    today_user_tz,
 )
 
 logger = logging.getLogger("miniapp.lists")
@@ -99,10 +103,11 @@ async def get_lists(
             ]
         })
 
+    # wave8.47: старые сверху → новые снизу для всех типов; inv по сроку годности.
     sorts = (
         [{"property": "Срок годности", "direction": "ascending"}]
         if type == "inv"
-        else [{"timestamp": "created_time", "direction": "descending"}]
+        else [{"timestamp": "created_time", "direction": "ascending"}]
     )
 
     try:
@@ -173,4 +178,68 @@ async def get_lists(
     if type == "inv":
         items.sort(key=lambda i: (i["expires"] is None, i["expires"] or ""))
 
+    # wave8.47: для чеклистов прикрепляем данные родительской задачи (cat/prio/deadline/repeat/reminder).
+    if type == "check" and items:
+        await _attach_parent_tasks(items, tg_id, user_notion_id)
+
     return {"type": type, "items": items}
+
+
+async def _attach_parent_tasks(items: list[dict], tg_id: int, user_notion_id: str) -> None:
+    groups = {(i.get("group") or "").strip() for i in items if (i.get("group") or "").strip()}
+    if not groups:
+        return
+    db_tasks = getattr(config.nexus, "db_tasks", None) or getattr(config, "db_tasks", None)
+    if not db_tasks:
+        return
+    today_date, tz_offset = await today_user_tz(tg_id)
+    filters: dict = {}
+    if user_notion_id:
+        filters = {
+            "property": "🪪 Пользователи",
+            "relation": {"contains": user_notion_id},
+        }
+    try:
+        pages = await query_pages(db_tasks, filters=filters or None, page_size=500)
+    except Exception as e:
+        logger.warning("attach_parent_tasks query failed: %s", e)
+        return
+    by_title: dict[str, dict] = {}
+    for p in pages:
+        props = p.get("properties", {})
+        title = title_text(props.get("Задача", {})).strip()
+        if not title or title not in groups or title in by_title:
+            continue
+        deadline_raw = date_start(props.get("Дедлайн", {}))
+        reminder_raw = date_start(props.get("Напоминание", {}))
+        deadline_local = to_local_date(deadline_raw, tz_offset)
+        deadline_time = extract_time(deadline_raw, tz_offset)
+        repeat_time = rich_text(props.get("Время повтора", {})).strip() or None
+        repeat = select_name(props.get("Повтор", {})) or None
+        reminder_min = None
+        if deadline_raw and reminder_raw:
+            from datetime import datetime, timezone
+            try:
+                dl = datetime.fromisoformat(deadline_raw.replace("Z", "+00:00"))
+                rm = datetime.fromisoformat(reminder_raw.replace("Z", "+00:00"))
+                if dl.tzinfo is None:
+                    dl = dl.replace(tzinfo=timezone.utc)
+                if rm.tzinfo is None:
+                    rm = rm.replace(tzinfo=timezone.utc)
+                delta = (dl - rm).total_seconds() / 60
+                reminder_min = int(round(delta)) if delta > 0 else None
+            except ValueError:
+                pass
+        by_title[title] = {
+            "cat": cat_from_notion(select_name(props.get("Категория", {}))),
+            "prio": prio_from_notion(select_name(props.get("Приоритет", {}))),
+            "deadline": deadline_local.isoformat() if deadline_local else None,
+            "deadline_time": deadline_time,
+            "repeat": repeat,
+            "repeat_time": repeat_time,
+            "reminder_min": reminder_min,
+        }
+    for it in items:
+        g = (it.get("group") or "").strip()
+        if g and g in by_title:
+            it["parent"] = by_title[g]
