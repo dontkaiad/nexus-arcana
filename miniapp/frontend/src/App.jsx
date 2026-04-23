@@ -426,10 +426,10 @@ const Empty = ({ s, text, chill, emoji, title }) => {
 
 const ErrorBox = ({ s, error, refetch }) => (
   <Glass s={s} accent={s.red} style={{ padding: "14px 16px" }}>
-    <div style={{ fontSize: fs(13), color: s.red, fontWeight: 500, marginBottom: 6 }}>
+    <div style={{ fontSize: fs(15), color: s.red, fontWeight: 700, marginBottom: 6 }}>
       Ошибка загрузки
     </div>
-    <div style={{ fontSize: fs(12), color: s.tM, marginBottom: 10, wordBreak: "break-word" }}>
+    <div style={{ fontSize: fs(13), color: s.tM, marginBottom: 12, wordBreak: "break-word" }}>
       {error?.message || "неизвестная ошибка"}
     </div>
     {refetch && (
@@ -437,12 +437,12 @@ const ErrorBox = ({ s, error, refetch }) => (
         onClick={refetch}
         style={{
           display: "inline-flex", alignItems: "center", gap: 6,
-          padding: "6px 12px", borderRadius: 8,
-          background: `${s.acc}22`, color: s.acc,
-          fontSize: fs(12), cursor: "pointer",
+          padding: "9px 16px", borderRadius: 10,
+          background: s.acc, color: "#0a1a15",
+          fontSize: fs(14), fontWeight: 700, cursor: "pointer",
         }}
       >
-        <RefreshCw size={fs(12)} /> Повторить
+        <RefreshCw size={fs(14)} /> Повторить
       </div>
     )}
   </Glass>
@@ -1034,22 +1034,22 @@ function NxDay({ s, openTask, navigate, openStreaks }) {
   if (error) {
     return (
       <Glass s={s} accent={s.red} style={{ padding: "14px 16px" }}>
-        <div style={{ fontSize: fs(13), color: s.red, fontWeight: 500, marginBottom: 6 }}>
+        <div style={{ fontSize: fs(15), color: s.red, fontWeight: 700, marginBottom: 6 }}>
           Ошибка загрузки
         </div>
-        <div style={{ fontSize: fs(12), color: s.tM, marginBottom: 10, wordBreak: "break-word" }}>
+        <div style={{ fontSize: fs(13), color: s.tM, marginBottom: 12, wordBreak: "break-word" }}>
           {error.message}
         </div>
         <div
           onClick={refetch}
           style={{
             display: "inline-flex", alignItems: "center", gap: 6,
-            padding: "6px 12px", borderRadius: 8,
-            background: `${s.acc}22`, color: s.acc,
-            fontSize: fs(12), cursor: "pointer",
+            padding: "9px 16px", borderRadius: 10,
+            background: s.acc, color: "#0a1a15",
+            fontSize: fs(14), fontWeight: 700, cursor: "pointer",
           }}
         >
-          <RefreshCw size={fs(12)} /> Повторить
+          <RefreshCw size={fs(14)} /> Повторить
         </div>
       </Glass>
     );
@@ -2206,22 +2206,22 @@ function ArDay({ s, openClient, navigate, openMoonPhases }) {
   if (error) {
     return (
       <Glass s={s} accent={s.red} style={{ padding: "14px 16px" }}>
-        <div style={{ fontSize: fs(13), color: s.red, fontWeight: 500, marginBottom: 6 }}>
+        <div style={{ fontSize: fs(15), color: s.red, fontWeight: 700, marginBottom: 6 }}>
           Ошибка загрузки
         </div>
-        <div style={{ fontSize: fs(12), color: s.tM, marginBottom: 10, wordBreak: "break-word" }}>
+        <div style={{ fontSize: fs(13), color: s.tM, marginBottom: 12, wordBreak: "break-word" }}>
           {error.message}
         </div>
         <div
           onClick={refetch}
           style={{
             display: "inline-flex", alignItems: "center", gap: 6,
-            padding: "6px 12px", borderRadius: 8,
-            background: `${s.acc}22`, color: s.acc,
-            fontSize: fs(12), cursor: "pointer",
+            padding: "9px 16px", borderRadius: 10,
+            background: s.acc, color: "#0a1a15",
+            fontSize: fs(14), fontWeight: 700, cursor: "pointer",
           }}
         >
-          <RefreshCw size={fs(12)} /> Повторить
+          <RefreshCw size={fs(14)} /> Повторить
         </div>
       </Glass>
     );
