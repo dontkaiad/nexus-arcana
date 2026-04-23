@@ -1197,7 +1197,10 @@ function NxDay({ s, openTask, navigate, openStreaks }) {
               {o.rpt && (
                 <span style={{ fontSize: fs(13), color: s.tM, flexShrink: 0 }}>{o.rpt}</span>
               )}
-              <span style={{ fontSize: fs(13), color: s.red, fontWeight: 500, flexShrink: 0 }}>
+              <span style={{
+                fontSize: fs(13), color: s.red, fontWeight: 500,
+                flexShrink: 0, minWidth: 86, textAlign: "right",
+              }}>
                 {o.days} д назад
               </span>
               <PrioDot s={s} prio={o.prio} />
@@ -1257,7 +1260,10 @@ function NxDay({ s, openTask, navigate, openStreaks }) {
                   <span style={{ fontSize: fs(13), color: s.tM, flexShrink: 0 }}>{x.rpt}</span>
                 )}
                 {x.daysSinceCreated != null && (
-                  <span style={{ fontSize: fs(13), color: s.tM, fontWeight: 500, flexShrink: 0 }}>
+                  <span style={{
+                    fontSize: fs(13), color: s.tM, fontWeight: 500,
+                    flexShrink: 0, minWidth: 86, textAlign: "right",
+                  }}>
                     {x.daysSinceCreated === 0 ? "сегодня" : `${x.daysSinceCreated} д назад`}
                   </span>
                 )}
