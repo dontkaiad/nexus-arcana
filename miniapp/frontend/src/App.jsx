@@ -948,6 +948,29 @@ const WEATHER_ICON = {
   fog: "🌫️",
 };
 
+// wave8.24: длинные англ. имена города ломают шапку «Мой день»; рисуем
+// короткие RU-формы, неизвестные просто обрезаем по первому слову.
+const CITY_SHORT = {
+  "Saint Petersburg": "СПб",
+  "Moscow": "Москва",
+  "New York": "NYC",
+  "Los Angeles": "LA",
+  "Istanbul": "Стамбул",
+  "Tbilisi": "Тбилиси",
+  "Yerevan": "Ереван",
+  "Bangkok": "Бангкок",
+  "Dubai": "Дубай",
+  "Berlin": "Берлин",
+  "Paris": "Париж",
+  "Amsterdam": "Амстердам",
+  "Rome": "Рим",
+  "Madrid": "Мадрид",
+  "London": "Лондон",
+  "Tokyo": "Токио",
+  "Shanghai": "Шанхай",
+};
+const shortCity = (c) => CITY_SHORT[c] || (c ? c.split(/[ ,]/)[0] : "");
+
 // wave8.2: поддержка **жирного** в коротких текстах (СДВГ-совет и т.п.)
 function renderBoldMd(text) {
   if (!text) return null;
@@ -1003,13 +1026,13 @@ function NxDay({ s, openTask, navigate, openStreaks }) {
       <Glass s={s} glow>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
           <span style={{ fontFamily: H, fontSize: fs(24), color: s.text }}>Мой день</span>
-          <div style={{ textAlign: "right" }}>
-            <div style={{ fontSize: fs(14), color: s.text, opacity: 0.75 }}>{t.date}</div>
+          <div style={{ textAlign: "right", whiteSpace: "nowrap" }}>
+            <div style={{ fontSize: fs(13), color: s.text, opacity: 0.75 }}>{t.date}</div>
             {weatherApi.data && !weatherApi.data.error && (
-              <div style={{ fontSize: fs(14), color: s.text, opacity: 0.9, marginTop: 3, fontWeight: 500 }}>
+              <div style={{ fontSize: fs(13), color: s.text, opacity: 0.9, marginTop: 3, fontWeight: 500 }}>
                 {WEATHER_ICON[weatherApi.data.kind] || "🌤️"}
                 {" "}
-                {weatherApi.data.temp > 0 ? "+" : ""}{weatherApi.data.temp}° · {weatherApi.data.city}
+                {weatherApi.data.temp > 0 ? "+" : ""}{weatherApi.data.temp}° · {shortCity(weatherApi.data.city)}
               </div>
             )}
           </div>
