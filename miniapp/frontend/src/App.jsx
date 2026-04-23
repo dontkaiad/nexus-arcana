@@ -1179,7 +1179,7 @@ function NxDay({ s, openTask, navigate, openStreaks }) {
               >
                 <span style={{
                   flex: 1, fontSize: fs(16), color: s.text, fontWeight: 500,
-                  whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+                  wordBreak: "break-word",
                 }}>
                   {o.title}
                 </span>
@@ -1190,10 +1190,13 @@ function NxDay({ s, openTask, navigate, openStreaks }) {
                     fontSize: fs(13), background: `${s.red}33`, color: s.text, fontWeight: 500,
                     flexShrink: 0, whiteSpace: "nowrap",
                   }}>
-                    {o.cat}
+                    {String(o.cat).split(" ")[0]}
                   </span>
                 )}
               </div>
+              {o.rpt && (
+                <span style={{ fontSize: fs(13), color: s.tM, flexShrink: 0 }}>{o.rpt}</span>
+              )}
               <span style={{ fontSize: fs(13), color: s.red, fontWeight: 500, flexShrink: 0 }}>
                 {o.days} д назад
               </span>
@@ -1235,7 +1238,7 @@ function NxDay({ s, openTask, navigate, openStreaks }) {
                 >
                   <span style={{
                     flex: 1, fontSize: fs(16), color: s.text, fontWeight: 500,
-                    whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+                    wordBreak: "break-word",
                   }}>
                     {x.title}
                   </span>
@@ -1246,10 +1249,13 @@ function NxDay({ s, openTask, navigate, openStreaks }) {
                       fontSize: fs(13), background: `${s.acc}33`, color: s.text, fontWeight: 500,
                       flexShrink: 0, whiteSpace: "nowrap",
                     }}>
-                      {x.cat}
+                      {String(x.cat).split(" ")[0]}
                     </span>
                   )}
                 </div>
+                {x.rpt && (
+                  <span style={{ fontSize: fs(13), color: s.tM, flexShrink: 0 }}>{x.rpt}</span>
+                )}
                 {x.daysSinceCreated != null && (
                   <span style={{ fontSize: fs(13), color: s.tM, fontWeight: 500, flexShrink: 0 }}>
                     {x.daysSinceCreated === 0 ? "сегодня" : `${x.daysSinceCreated} д назад`}
@@ -4155,7 +4161,7 @@ export default function App() {
             gap: 10,
           }}
         >
-          {isDay ? <NexusLogo color={sky.acc} /> : <ArcanaLogo />}
+          {isDay ? <NexusLogo /> : <ArcanaLogo />}
         </div>
         <div
           onClick={() => go(!isN)}
@@ -4227,15 +4233,15 @@ export default function App() {
                 borderRadius: 12,
                 cursor: "pointer",
                 background: active ? `${sky.acc}25` : "transparent",
-                color: active ? sky.text : sky.tS,
+                color: active ? sky.acc : sky.tS,
                 transition: "all 0.2s",
               }}
             >
               <div style={{ display: "flex", justifyContent: "center" }}>
                 <Ic
                   size={fs(19)}
-                  color={active ? sky.text : sky.tS}
-                  strokeWidth={active ? 2 : 1.6}
+                  color={active ? sky.acc : sky.tS}
+                  strokeWidth={active ? 2.2 : 1.6}
                 />
               </div>
               <div
