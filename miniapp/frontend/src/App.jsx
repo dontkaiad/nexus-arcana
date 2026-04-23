@@ -185,6 +185,19 @@ const _catWeight = (name) => {
   const i = _CAT_PRIORITY.indexOf(name.toLowerCase());
   return i >= 0 ? i : 100;
 };
+function groupByField(items, field) {
+  const m = new Map();
+  for (const x of items) {
+    const k = String(x[field] || "").trim();
+    if (!m.has(k)) m.set(k, []);
+    m.get(k).push(x);
+  }
+  return [...m.entries()].sort(([a], [b]) => {
+    if (!a && b) return 1;
+    if (a && !b) return -1;
+    return a.localeCompare(b, "ru");
+  });
+}
 function groupByCat(items) {
   const m = new Map();
   for (const x of items) {
@@ -1727,7 +1740,7 @@ function NxLists({ s }) {
           <div style={{ fontSize: fs(14), color: s.text }}>{emptyText}</div>
         </Glass>
       )}
-      {!loading && !error && groupByCat(items).map(([catName, group]) => (
+      {!loading && !error && (tab === "check" ? groupByField(items, "group") : groupByCat(items)).map(([catName, group]) => (
         <React.Fragment key={catName || "—"}>
           {catName && <SectionLabel s={s}>{catName}</SectionLabel>}
           {group.map((x) => (
@@ -3507,6 +3520,27 @@ function TaskSheet({ s, task, onClose }) {
       setBusy(null);
     }
   };
+  // wave8.46: чеклист задачи — items из /api/lists?type=check&group=<title>
+  const checklistPath = task.title
+    ? `/api/lists?type=check&group=${encodeURIComponent(task.title)}`
+    : null;
+  const { data: clData, refetch: clRefetch } = useApi(checklistPath, [task.title]);
+  const checklist = clData ? adaptLists(clData) : [];
+  const [clOverrides, setClOverrides] = useState({});
+  const clItems = checklist.map((x) =>
+    x.id in clOverrides ? { ...x, done: clOverrides[x.id] } : x,
+  );
+  const toggleCl = async (item) => {
+    if (item.done) return;
+    setClOverrides((p) => ({ ...p, [item.id]: true }));
+    try {
+      await apiPost(`/api/lists/${item.id}/done`);
+      setTimeout(clRefetch, 500);
+    } catch (e) {
+      setClOverrides((p) => { const n = { ...p }; delete n[item.id]; return n; });
+      alert("Не удалось отметить");
+    }
+  };
   return (
     <div>
       <div style={{ fontFamily: H, fontSize: fs(18), color: s.text, marginBottom: 6 }}>
@@ -3544,6 +3578,36 @@ function TaskSheet({ s, task, onClose }) {
           destructive
         />
       </div>
+      {clItems.length > 0 && (
+        <>
+          <div style={{ fontFamily: H, fontSize: fs(15), color: s.text, margin: "16px 0 8px" }}>
+            Чеклист
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+            {clItems.map((it) => (
+              <Glass
+                key={it.id}
+                s={s}
+                style={{
+                  padding: "10px 14px",
+                  display: "flex", alignItems: "center", gap: 10,
+                  opacity: it.done ? 0.5 : 1, cursor: "pointer",
+                }}
+                onClick={() => toggleCl(it)}
+              >
+                <Chk s={s} done={it.done} />
+                <span style={{
+                  flex: 1, fontSize: fs(15), color: s.text,
+                  textDecoration: it.done ? "line-through" : "none",
+                  wordBreak: "break-word",
+                }}>
+                  {it.name}
+                </span>
+              </Glass>
+            ))}
+          </div>
+        </>
+      )}
     </div>
   );
 }
