@@ -412,7 +412,7 @@ const ErrorBox = ({ s, error, refetch }) => (
 );
 
 // Финальные логотипы: Satisfy + градиентный диск с кратерами и ореолом
-const NexusLogo = () => (
+const NexusLogo = ({ color = "#0a2e22" }) => (
   <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
     <svg width="54" height="54" viewBox="0 0 54 54" xmlns="http://www.w3.org/2000/svg">
       <defs>
@@ -431,7 +431,7 @@ const NexusLogo = () => (
       <circle cx="30" cy="21" r="0.8" fill="#8a5a28" opacity="0.45" />
     </svg>
     <svg width="130" height="56" viewBox="0 0 130 56" xmlns="http://www.w3.org/2000/svg">
-      <text x="0" y="40" fontFamily="Satisfy, cursive" fontSize="44" fill="#0a2e22">Nexus</text>
+      <text x="0" y="40" fontFamily="Satisfy, cursive" fontSize="44" fill={color}>Nexus</text>
     </svg>
   </div>
 );
@@ -1110,9 +1110,8 @@ function NxDay({ s, openTask, navigate, openStreaks }) {
             <span
               style={{
                 fontSize: fs(15),
-                // wave8.29: s.acc слишком приглушённый — лейбл сливался;
-                // фиксированный насыщенный зелёный читается на обеих темах.
-                color: "#3a8260",
+                // wave8.35: единый цвет с временем задач в расписании.
+                color: s.acc,
                 fontWeight: 700,
                 display: "inline-flex",
                 alignItems: "center",
@@ -4156,7 +4155,7 @@ export default function App() {
             gap: 10,
           }}
         >
-          {isDay ? <NexusLogo /> : <ArcanaLogo />}
+          {isDay ? <NexusLogo color={sky.acc} /> : <ArcanaLogo />}
         </div>
         <div
           onClick={() => go(!isN)}
