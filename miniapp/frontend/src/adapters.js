@@ -323,6 +323,7 @@ export function adaptLists(data) {
       id: x.id,
       name: x.name || '',
       cat: catEmoji(x.cat),
+      catFull: catFull(x.cat),
       done: !!x.done,
     }
     if (type === 'inv') {
