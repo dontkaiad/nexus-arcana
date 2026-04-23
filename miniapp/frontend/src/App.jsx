@@ -3667,12 +3667,9 @@ function TaskSheet({ s, task, onClose }) {
   };
   const doPostpone = () => {
     if (!pDate || busy || !task.id) return;
-    const [y, m, d] = pDate.split("-").map(Number);
-    const target = new Date(y, m - 1, d);
-    const now = new Date();
-    const start = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    const days = Math.max(1, Math.round((target - start) / 86400000));
-    run("post", () => apiPost(`/api/tasks/${task.id}/postpone`, { days }));
+    const payload = { date: pDate };
+    if (pTime) payload.time = pTime;
+    run("post", () => apiPost(`/api/tasks/${task.id}/postpone`, payload));
   };
   // wave8.46: чеклист задачи — items из /api/lists?type=check&group=<title>
   const checklistPath = task.title
