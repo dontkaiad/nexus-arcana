@@ -64,6 +64,9 @@ def _task_summary(page: dict, tz_offset: int) -> dict:
         "reminder_raw": _date_start(props.get("Напоминание", {})),
         "repeat_time": rich_text(props.get("Время повтора", {})).strip(),
         "repeat": select_name(props.get("Повтор", {})) or None,
+        # wave8.22: для задач без срока — отдаём дату создания страницы Notion,
+        # чтобы фронт мог показать «N дней назад» в списке.
+        "created_at": page.get("created_time"),
     }
 
 
@@ -277,12 +280,15 @@ async def get_today(tg_id: int = Depends(current_user_id)) -> dict[str, Any]:
                 "repeat": s["repeat"],
             })
         elif not deadline_date and not reminder_date:
+            created_date = to_local_date(s.get("created_at"), tz_offset)
             no_date.append({
                 "id": s["id"],
                 "title": s["title"],
                 "cat": s["cat"],
                 "prio": s["prio"],
                 "repeat": s["repeat"],
+                "days_since_created": (today_date - created_date).days
+                if created_date else None,
             })
 
     future.sort(key=lambda x: x["date"])
