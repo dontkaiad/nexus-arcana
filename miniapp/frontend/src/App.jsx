@@ -4074,7 +4074,7 @@ export default function App() {
         width: "100%",
         minHeight: "100vh",
         overflow: "hidden",
-        background: sky.base,
+        background: `linear-gradient(180deg, ${sky.deep} 0%, ${sky.mid} 25%, ${sky.warm} 55%, ${sky.glow} 75%, ${sky.base} 100%)`,
         fontFamily: B,
       }}
     >
