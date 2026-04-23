@@ -446,6 +446,8 @@ def test_finance_category_drill_down(client):
         {
             "id": "e1",
             "properties": {
+                "Тип": {"select": {"name": "💸 Расход"}},
+                "Категория": {"select": {"name": "🏠 Жилье"}},
                 "Сумма": {"number": 4500},
                 "Описание": {"title": [{"plain_text": "коммуналка"}]},
                 "Дата": {"date": {"start": "2026-04-02"}},
@@ -454,6 +456,8 @@ def test_finance_category_drill_down(client):
         {
             "id": "e2",
             "properties": {
+                "Тип": {"select": {"name": "💸 Расход"}},
+                "Категория": {"select": {"name": "🏠 Жилье"}},
                 "Сумма": {"number": 800},
                 "Описание": {"title": [{"plain_text": "интернет"}]},
                 "Дата": {"date": {"start": "2026-04-18"}},
@@ -477,7 +481,9 @@ def test_finance_category_drill_down(client):
     assert data["month"] == "2026-04"
     assert data["total"] == 5300
     assert data["count"] == 2
-    assert data["items"][0]["desc"] == "коммуналка"
+    # Сортировка по дате desc — самая свежая трата сверху.
+    assert data["items"][0]["desc"] == "интернет"
+    assert data["items"][1]["desc"] == "коммуналка"
 
 
 def test_moon_next_phases_chronological():
