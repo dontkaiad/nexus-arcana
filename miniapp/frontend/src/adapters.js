@@ -231,7 +231,7 @@ export function adaptTasks(data) {
     status: t.status || 'active',
     date: t.deadline ? formatDate(t.deadline, 'full') : null,
     time: t.deadline_time || null,
-    rpt: t.repeat ? `🔄 ${t.repeat}` : undefined,
+    rpt: t.repeat ? `🔄 ${formatRepeat(t.repeat)}` : undefined,
     streak: t.streak || 0,
   }))
 }
