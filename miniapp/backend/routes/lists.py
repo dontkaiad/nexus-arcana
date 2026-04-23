@@ -66,6 +66,7 @@ async def get_lists(
     tg_id: int = Depends(current_user_id),
     type: str = Query("buy", description="buy|check|inv"),
     q: Optional[str] = Query(None, description="case-insensitive contains по Название/Заметка"),
+    group: Optional[str] = Query(None, description="точное совпадение по полю Группа"),
 ) -> dict[str, Any]:
     if type not in _TYPE_MAP:
         raise HTTPException(status_code=400, detail=f"type must be one of {sorted(_TYPE_MAP)}")
@@ -89,9 +90,13 @@ async def get_lists(
         {"property": "Тип", "select": {"equals": type_target}},
     ]
     if user_notion_id:
+        # wave8.46: чеклисты создаются через Notion-UI без relation на пользователя.
+        # Включаем и items без 🪪 Пользователи (как с фильтром «Бот»).
         conditions.append({
-            "property": "🪪 Пользователи",
-            "relation": {"contains": user_notion_id},
+            "or": [
+                {"property": "🪪 Пользователи", "relation": {"contains": user_notion_id}},
+                {"property": "🪪 Пользователи", "relation": {"is_empty": True}},
+            ]
         })
 
     sorts = (
@@ -159,6 +164,10 @@ async def get_lists(
             if needle in (i["name"] or "").lower()
             or needle in (i["note"] or "").lower()
         ]
+
+    if group:
+        g_target = group.strip().lower()
+        items = [i for i in items if (i.get("group") or "").strip().lower() == g_target]
 
     # Для 'inv' — записи без expires в конец
     if type == "inv":
