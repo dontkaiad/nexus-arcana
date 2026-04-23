@@ -340,7 +340,9 @@ const SectionLabel = ({ s, children, action }) => (
       display: "flex",
       justifyContent: "space-between",
       alignItems: "baseline",
-      padding: "0 4px",
+      // wave8.29: было "0 4px" — заголовки секций уезжали левее, чем
+      // содержимое Glass-карточек (внутр. падд. 14). Выровнял по 14.
+      padding: "0 14px",
       margin: "14px 0 8px",
     }}
   >
@@ -1024,7 +1026,10 @@ function NxDay({ s, openTask, navigate, openStreaks }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
       <Glass s={s} glow>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+        {/* wave8.29: было baseline — «Мой день» прижимался к верху, а
+            правая колонка (дата + погода) занимала 2 строки → блок
+            растягивался. center выравнивает заголовок по центру колонки. */}
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <span style={{ fontFamily: H, fontSize: fs(20), color: s.text }}>Мой день</span>
           <div style={{ textAlign: "right", whiteSpace: "nowrap" }}>
             <div style={{ fontSize: fs(13), color: s.text, opacity: 0.75 }}>{t.date}</div>
@@ -1102,8 +1107,10 @@ function NxDay({ s, openTask, navigate, openStreaks }) {
             <span
               style={{
                 fontSize: fs(15),
-                color: s.acc,
-                fontWeight: 600,
+                // wave8.29: s.acc слишком приглушённый — лейбл сливался;
+                // фиксированный насыщенный зелёный читается на обеих темах.
+                color: "#3a8260",
+                fontWeight: 700,
                 display: "inline-flex",
                 alignItems: "center",
                 gap: 5,
@@ -2094,7 +2101,10 @@ function ArDay({ s, openClient, navigate, openMoonPhases }) {
       }} />
       {/* Hero с метриками */}
       <Glass s={s} glow>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+        {/* wave8.29: было baseline — «Мой день» прижимался к верху, а
+            правая колонка (дата + погода) занимала 2 строки → блок
+            растягивался. center выравнивает заголовок по центру колонки. */}
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <span style={{ fontFamily: H, fontSize: fs(20), color: s.text }}>Мой день</span>
           <span style={{ fontSize: fs(11), color: s.tS }}>{a.date}</span>
         </div>
