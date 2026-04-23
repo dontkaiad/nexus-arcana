@@ -884,10 +884,12 @@ const TaskRow = ({ s, t, done, onToggle, onOpen, withTime }) => (
       >
         {t.cat && (
           <span style={{
-            display: "inline-flex", alignItems: "center",
-            padding: "2px 8px", borderRadius: 10,
-            fontSize: fs(12), background: `${s.acc}33`, color: s.text, fontWeight: 500,
-            flexShrink: 0, whiteSpace: "nowrap",
+            display: "inline-flex", alignItems: "center", justifyContent: "flex-start",
+            padding: "3px 8px", borderRadius: 10,
+            // wave8.32: чуть крупнее категория + ниже прозрачность стекла,
+            // фикс. minWidth — чтобы названия задач выстраивались по линии.
+            fontSize: fs(13), background: `${s.acc}1a`, color: s.text, fontWeight: 500,
+            flexShrink: 0, whiteSpace: "nowrap", minWidth: 92,
           }}>
             {t.cat}
           </span>
@@ -1079,7 +1081,9 @@ function NxDay({ s, openTask, navigate, openStreaks }) {
                 fontWeight: 600,
               }}
             >
-              {(t.budgetDay - t.spentDay).toLocaleString()} ₽ · {100 - leftPct}%
+              {/* wave8.32: было «свободно», теперь — потрачено: 0 ₽ · 0%
+                  при пустом дне, как и просили. */}
+              {t.spentDay.toLocaleString()} ₽ · {leftPct}%
             </span>
           </div>
           <Bar
@@ -1177,10 +1181,10 @@ function NxDay({ s, openTask, navigate, openStreaks }) {
               >
                 {o.cat && (
                   <span style={{
-                    display: "inline-flex", alignItems: "center",
-                    padding: "2px 8px", borderRadius: 10,
-                    fontSize: fs(12), background: `${s.red}33`, color: s.text, fontWeight: 500,
-                    flexShrink: 0, whiteSpace: "nowrap",
+                    display: "inline-flex", alignItems: "center", justifyContent: "flex-start",
+                    padding: "3px 8px", borderRadius: 10,
+                    fontSize: fs(13), background: `${s.red}1f`, color: s.text, fontWeight: 500,
+                    flexShrink: 0, whiteSpace: "nowrap", minWidth: 92,
                   }}>
                     {o.cat}
                   </span>
@@ -1233,10 +1237,10 @@ function NxDay({ s, openTask, navigate, openStreaks }) {
                 >
                   {x.cat && (
                     <span style={{
-                      display: "inline-flex", alignItems: "center",
-                      padding: "2px 8px", borderRadius: 10,
-                      fontSize: fs(12), background: `${s.acc}33`, color: s.text, fontWeight: 500,
-                      flexShrink: 0, whiteSpace: "nowrap",
+                      display: "inline-flex", alignItems: "center", justifyContent: "flex-start",
+                      padding: "3px 8px", borderRadius: 10,
+                      fontSize: fs(13), background: `${s.acc}1a`, color: s.text, fontWeight: 500,
+                      flexShrink: 0, whiteSpace: "nowrap", minWidth: 92,
                     }}>
                       {x.cat}
                     </span>
