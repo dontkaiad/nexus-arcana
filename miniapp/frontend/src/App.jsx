@@ -882,19 +882,10 @@ const TaskRow = ({ s, t, done, onToggle, onOpen, withTime }) => (
           textDecoration: done ? "line-through" : "none",
         }}
       >
-        {t.cat && (
-          <span style={{
-            display: "inline-flex", alignItems: "center", justifyContent: "flex-start",
-            padding: "3px 8px", borderRadius: 10,
-            // wave8.32: чуть крупнее категория + ниже прозрачность стекла,
-            // фикс. minWidth — чтобы названия задач выстраивались по линии.
-            fontSize: fs(13), background: `${s.acc}1a`, color: s.text, fontWeight: 500,
-            flexShrink: 0, whiteSpace: "nowrap", minWidth: 92,
-          }}>
-            {t.cat}
-          </span>
-        )}
+        {/* wave8.33: категория — после заголовка, как отдельная сущность
+            справа. Один стиль бейджа на обеих вкладках (день + задачи). */}
         <span style={{
+          flex: 1, minWidth: 0,
           fontSize: fs(16),
           color: s.text,
           fontWeight: 500,
@@ -904,6 +895,16 @@ const TaskRow = ({ s, t, done, onToggle, onOpen, withTime }) => (
         }}>
           {t.title}
         </span>
+        {t.cat && (
+          <span style={{
+            display: "inline-flex", alignItems: "center",
+            padding: "3px 9px", borderRadius: 10,
+            fontSize: fs(13), background: `${s.acc}33`, color: s.text, fontWeight: 500,
+            flexShrink: 0, whiteSpace: "nowrap",
+          }}>
+            {t.cat}
+          </span>
+        )}
       </div>
       <div
         style={{
@@ -1081,9 +1082,9 @@ function NxDay({ s, openTask, navigate, openStreaks }) {
                 fontWeight: 600,
               }}
             >
-              {/* wave8.32: было «свободно», теперь — потрачено: 0 ₽ · 0%
-                  при пустом дне, как и просили. */}
-              {t.spentDay.toLocaleString()} ₽ · {leftPct}%
+              {/* wave8.33: показываем полный бюджет дня + % потраченного
+                  (например, «4,166 ₽ · 0%» при пустом дне). */}
+              {t.budgetDay.toLocaleString()} ₽ · {leftPct}%
             </span>
           </div>
           <Bar
@@ -1179,22 +1180,22 @@ function NxDay({ s, openTask, navigate, openStreaks }) {
                   textDecoration: done[o.id] ? "line-through" : "none",
                 }}
               >
-                {o.cat && (
-                  <span style={{
-                    display: "inline-flex", alignItems: "center", justifyContent: "flex-start",
-                    padding: "3px 8px", borderRadius: 10,
-                    fontSize: fs(13), background: `${s.red}1f`, color: s.text, fontWeight: 500,
-                    flexShrink: 0, whiteSpace: "nowrap", minWidth: 92,
-                  }}>
-                    {o.cat}
-                  </span>
-                )}
                 <span style={{
                   flex: 1, fontSize: fs(16), color: s.text, fontWeight: 500,
                   whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
                 }}>
                   {o.title}
                 </span>
+                {o.cat && (
+                  <span style={{
+                    display: "inline-flex", alignItems: "center",
+                    padding: "3px 9px", borderRadius: 10,
+                    fontSize: fs(13), background: `${s.red}33`, color: s.text, fontWeight: 500,
+                    flexShrink: 0, whiteSpace: "nowrap",
+                  }}>
+                    {o.cat}
+                  </span>
+                )}
               </div>
               <span style={{ fontSize: fs(13), color: s.red, fontWeight: 500, flexShrink: 0 }}>
                 {o.days} д назад
@@ -1235,22 +1236,22 @@ function NxDay({ s, openTask, navigate, openStreaks }) {
                     textDecoration: done[x.id] ? "line-through" : "none",
                   }}
                 >
-                  {x.cat && (
-                    <span style={{
-                      display: "inline-flex", alignItems: "center", justifyContent: "flex-start",
-                      padding: "3px 8px", borderRadius: 10,
-                      fontSize: fs(13), background: `${s.acc}1a`, color: s.text, fontWeight: 500,
-                      flexShrink: 0, whiteSpace: "nowrap", minWidth: 92,
-                    }}>
-                      {x.cat}
-                    </span>
-                  )}
                   <span style={{
                     flex: 1, fontSize: fs(16), color: s.text, fontWeight: 500,
                     whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
                   }}>
                     {x.title}
                   </span>
+                  {x.cat && (
+                    <span style={{
+                      display: "inline-flex", alignItems: "center",
+                      padding: "3px 9px", borderRadius: 10,
+                      fontSize: fs(13), background: `${s.acc}33`, color: s.text, fontWeight: 500,
+                      flexShrink: 0, whiteSpace: "nowrap",
+                    }}>
+                      {x.cat}
+                    </span>
+                  )}
                 </div>
                 {x.daysSinceCreated != null && (
                   <span style={{ fontSize: fs(13), color: s.tM, fontWeight: 500, flexShrink: 0 }}>
@@ -1305,25 +1306,31 @@ function NxTasks({ s, openTask }) {
           style={{ padding: "10px 14px", marginBottom: 4 }}
           onClick={() => openTask(t)}
         >
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
-            <div style={{
-              display: "flex", alignItems: "center", gap: 6, flex: 1, minWidth: 0,
-              textDecoration: t.status === "done" ? "line-through" : "none",
-              opacity: t.status === "done" ? 0.55 : 1,
+          {/* wave8.33: единый стиль с TaskRow в Мой день — заголовок,
+              справа бейдж категории отдельной сущностью, потом приоритет. */}
+          <div style={{
+            display: "flex", alignItems: "center", gap: 8,
+            textDecoration: t.status === "done" ? "line-through" : "none",
+            opacity: t.status === "done" ? 0.55 : 1,
+          }}>
+            <span style={{
+              flex: 1, minWidth: 0,
+              fontSize: fs(16), color: s.text, fontWeight: 500,
+              whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
             }}>
-              {t.cat && (
-                <span style={{
-                  display: "inline-flex", alignItems: "center",
-                  padding: "1px 8px", borderRadius: 10,
-                  fontSize: fs(10), background: `${s.acc}22`, color: s.text,
-                  flexShrink: 0, whiteSpace: "nowrap",
-                }}>
-                  {t.cat}
-                </span>
-              )}
-              <span style={{ fontSize: fs(14), color: s.text }}>{t.title}</span>
-            </div>
-            <span style={{ fontSize: fs(12), flexShrink: 0 }}>{t.prio}</span>
+              {t.title}
+            </span>
+            {t.cat && (
+              <span style={{
+                display: "inline-flex", alignItems: "center",
+                padding: "3px 9px", borderRadius: 10,
+                fontSize: fs(13), background: `${s.acc}33`, color: s.text, fontWeight: 500,
+                flexShrink: 0, whiteSpace: "nowrap",
+              }}>
+                {t.cat}
+              </span>
+            )}
+            <span style={{ fontSize: fs(13), flexShrink: 0 }}>{t.prio}</span>
           </div>
           <div
             style={{
