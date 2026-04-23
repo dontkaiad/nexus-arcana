@@ -83,7 +83,9 @@ async def task_done(
 
 
 class PostponeBody(BaseModel):
-    days: int = Field(default=1, ge=1, le=365)
+    days: Optional[int] = Field(default=None, ge=1, le=365)
+    date: Optional[str] = None  # YYYY-MM-DD, абсолютная новая дата дедлайна
+    time: Optional[str] = None  # HH:MM, время напоминания (локальное)
 
 
 @router.post("/tasks/{task_id}/postpone")
@@ -94,22 +96,45 @@ async def task_postpone(
 ) -> dict[str, Any]:
     user_notion_id = (await get_user_notion_id(tg_id)) or ""
     page = await _load_owned_page(task_id, user_notion_id)
-    today_date, _tz = await today_user_tz(tg_id)
+    today_date, tz_offset = await today_user_tz(tg_id)
 
-    deadline_raw = (page.get("properties", {}).get("Дедлайн", {}).get("date") or {}).get("start", "")
-    base = None
-    if deadline_raw:
+    if body.date:
         try:
-            base = datetime.fromisoformat(deadline_raw.replace("Z", "+00:00")).date()
+            new_date = datetime.strptime(body.date, "%Y-%m-%d").date()
         except ValueError:
-            base = None
-    if not base:
-        base = today_date
-    new_date = base + timedelta(days=body.days)
+            raise HTTPException(status_code=400, detail="invalid date, expected YYYY-MM-DD")
+    else:
+        deadline_raw = (page.get("properties", {}).get("Дедлайн", {}).get("date") or {}).get("start", "")
+        base = None
+        if deadline_raw:
+            try:
+                base = datetime.fromisoformat(deadline_raw.replace("Z", "+00:00")).date()
+            except ValueError:
+                base = None
+        if not base:
+            base = today_date
+        shift_days = body.days if body.days is not None else 1
+        new_date = base + timedelta(days=shift_days)
+
     ok = await update_task_deadline(task_id, new_date.isoformat())
     if not ok:
         raise HTTPException(status_code=500, detail="failed to update deadline")
-    return {"ok": True, "new_date": new_date.isoformat()}
+
+    remind_iso: Optional[str] = None
+    if body.time:
+        try:
+            hh, mm = body.time.split(":")
+            tz = timezone(timedelta(hours=tz_offset))
+            remind_dt = datetime(new_date.year, new_date.month, new_date.day, int(hh), int(mm), tzinfo=tz)
+            remind_iso = remind_dt.isoformat()
+        except (ValueError, TypeError):
+            raise HTTPException(status_code=400, detail="invalid time, expected HH:MM")
+        try:
+            await update_page(task_id, {"Напоминание": _date(remind_iso)})
+        except Exception as e:
+            logger.warning("could not set reminder: %s", e)
+
+    return {"ok": True, "new_date": new_date.isoformat(), "reminder": remind_iso}
 
 
 @router.post("/tasks/{task_id}/cancel")
