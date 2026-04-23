@@ -162,6 +162,7 @@ export function adaptToday(data) {
       title: x.title,
       cat: x.cat || '',
       prio: x.prio || '⚪',
+      daysSinceCreated: x.days_since_created ?? null,
     })),
     adhdTip: data.adhd_tip || '',
   }
