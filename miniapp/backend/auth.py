@@ -5,6 +5,7 @@ import hashlib
 import hmac
 import json
 import logging
+import os
 import time
 from typing import Optional
 from urllib.parse import parse_qsl
@@ -15,7 +16,12 @@ from core.config import config
 
 logger = logging.getLogger("miniapp.auth")
 
-INIT_DATA_TTL = 24 * 3600  # 24 hours
+# TTL initData в секундах. Переопределяется env-переменной MINIAPP_INIT_DATA_TTL
+# (удобно в dev поставить большое значение, чтобы не обновлять токен каждые 24ч).
+try:
+    INIT_DATA_TTL = int(os.getenv("MINIAPP_INIT_DATA_TTL") or 24 * 3600)
+except ValueError:
+    INIT_DATA_TTL = 24 * 3600
 
 
 def verify_init_data(init_data: str) -> int:
