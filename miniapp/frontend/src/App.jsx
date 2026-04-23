@@ -1682,6 +1682,49 @@ function CategoryDrillSheet({ s, cat, month }) {
 // NEXUS — LISTS
 // ═══════════════════════════════════════════════════════════════
 
+// wave8.47: шапка секции Чеклиста — карточка родительской задачи без стекла.
+function ParentTaskHeader({ s, title, task }) {
+  const cat = task?.cat || "";
+  const prio = task?.prio || null;
+  const overdue = task?.status === "overdue";
+  const metaParts = [];
+  if (task?.date) metaParts.push(task.date);
+  if (task?.time) metaParts.push(task.time);
+  if (task?.rpt) metaParts.push(task.rpt);
+  return (
+    <div style={{ padding: "10px 4px 6px", marginTop: 6 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <span style={{
+          flex: 1, minWidth: 0,
+          fontFamily: H, fontSize: fs(16), color: s.text, fontWeight: 600,
+          wordBreak: "break-word",
+        }}>
+          {title}
+        </span>
+        {cat && (
+          <span style={{
+            display: "inline-flex", alignItems: "center",
+            padding: "3px 9px", borderRadius: 10,
+            fontSize: fs(13), background: `${s.acc}33`, color: s.text, fontWeight: 500,
+            flexShrink: 0, whiteSpace: "nowrap",
+          }}>
+            {String(cat).split(" ")[0]}
+          </span>
+        )}
+        {prio && <PrioDot s={s} prio={prio} />}
+      </div>
+      {metaParts.length > 0 && (
+        <div style={{
+          fontSize: fs(13), color: overdue ? s.red : s.tM,
+          marginTop: 3, display: "flex", gap: 8, flexWrap: "wrap",
+        }}>
+          {metaParts.map((p, i) => <span key={i}>{p}</span>)}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function NxLists({ s }) {
   const [tab, setTab] = useState("buy");
   const [q, setQ] = useState("");
@@ -1689,6 +1732,19 @@ function NxLists({ s }) {
   const path = q ? `/api/lists?type=${tab}&q=${qEnc}` : `/api/lists?type=${tab}`;
   const { data, loading, error, refetch } = useApi(path, [tab, q]);
   const apiItems = loading || error ? [] : adaptLists(data);
+
+  // wave8.47: для Чеклиста подтягиваем задачи, чтобы отрисовать шапку секции
+  // как карточку родительской задачи (cat справа + prio + дата снизу).
+  const tasksPath = tab === "check" ? "/api/tasks?filter=all" : null;
+  const { data: tasksData } = useApi(tasksPath, [tab]);
+  const parentByTitle = useMemo(() => {
+    if (!tasksData) return {};
+    const map = {};
+    for (const t of adaptTasks(tasksData)) {
+      if (t.title) map[t.title] = t;
+    }
+    return map;
+  }, [tasksData]);
 
   // локальные оптимистик-апдейты, сбрасываем при смене tab/q
   const [overrides, setOverrides] = useState({});
@@ -1742,7 +1798,11 @@ function NxLists({ s }) {
       )}
       {!loading && !error && (tab === "check" ? groupByField(items, "group") : groupByCat(items)).map(([catName, group]) => (
         <React.Fragment key={catName || "—"}>
-          {catName && <SectionLabel s={s}>{catName}</SectionLabel>}
+          {catName && tab === "check" ? (
+            <ParentTaskHeader s={s} title={catName} task={parentByTitle[catName]} />
+          ) : (
+            catName && <SectionLabel s={s}>{catName}</SectionLabel>
+          )}
           {group.map((x) => (
             tab === "inv" ? (
               <Glass key={x.id} s={s} style={{ padding: "10px 14px", marginBottom: 4 }}>
