@@ -1408,33 +1408,33 @@ function NxFinance({ s }) {
           <>
             <Glass s={s}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
-                <span style={{ fontSize: fs(12), color: s.tS }}>Потрачено сегодня</span>
-                <span style={{ fontFamily: H, fontSize: fs(22), color: s.text }}>
+                <span style={{ fontSize: fs(15), color: s.text, fontWeight: 500 }}>Потрачено сегодня</span>
+                <span style={{ fontFamily: H, fontSize: fs(26), color: s.text }}>
                   {total.toLocaleString()} ₽
                 </span>
               </div>
             </Glass>
             {budget && (
-              <Glass s={s} accent={s.acc} style={{ padding: "10px 14px" }}>
-                <div style={{ display: "flex", justifyContent: "space-between", fontSize: fs(11), color: s.tS, marginBottom: 4 }}>
+              <Glass s={s} accent={s.acc} style={{ padding: "12px 14px" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", fontSize: fs(15), color: s.text, fontWeight: 500, marginBottom: 6 }}>
                   <span>Бюджет дня</span>
                   <span>{budget.day.toLocaleString()} ₽ · {budget.pct}%</span>
                 </div>
                 <Bar s={s} pct={budget.pct} color={budget.pct > 85 ? s.red : budget.pct > 60 ? s.amber : s.acc} />
-                <div style={{ fontSize: fs(10), color: s.tM, marginTop: 4 }}>
+                <div style={{ fontSize: fs(13), color: s.tM, marginTop: 6 }}>
                   Потрачено {budget.spent.toLocaleString()} ₽ · осталось {budget.left.toLocaleString()} ₽
                 </div>
               </Glass>
             )}
             {items.length === 0 && <Empty s={s} emoji="💚" title="Пока не тратила" text="Сегодня без трат — приятно." />}
             {items.map((x) => (
-              <Glass key={x.id} s={s} style={{ padding: "8px 14px", marginBottom: 4 }}>
-                <div style={{ display: "flex", justifyContent: "space-between" }}>
+              <Glass key={x.id} s={s} style={{ padding: "10px 14px", marginBottom: 4 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                   <div>
-                    <div style={{ fontSize: fs(13), color: s.text }}>{x.desc || "без описания"}</div>
-                    <div style={{ fontSize: fs(10), color: s.tM, marginTop: 2 }}>{x.cat}</div>
+                    <div style={{ fontSize: fs(16), color: s.text, fontWeight: 500 }}>{x.desc || "без описания"}</div>
+                    <div style={{ fontSize: fs(13), color: s.tM, marginTop: 2 }}>{x.cat}</div>
                   </div>
-                  <span style={{ fontSize: fs(14), color: s.text, fontWeight: 500, fontFamily: H }}>
+                  <span style={{ fontSize: fs(17), color: s.text, fontWeight: 500, fontFamily: H }}>
                     {x.amt.toLocaleString()} ₽
                   </span>
                 </div>
