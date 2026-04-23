@@ -129,12 +129,14 @@ export function adaptToday(data) {
     scheduled: (data.scheduled || []).map((x) => {
       // wave8.8: client-side safety — если бэкенд прислал "HH:MM|every_Nd"
       // (старый непарсенный формат), разбираем здесь.
+      // wave8.44: парсенный из time интервал — источник истины (там реальный
+      // every_Nd), колонка «Повтор» в Notion может быть stale ("Ежедневно").
       let rawTime = x.time || ''
       let repeat = x.repeat || ''
       if (rawTime && rawTime.includes('|')) {
         const [t, r] = rawTime.split('|', 2)
         rawTime = (t || '').trim()
-        if (!repeat && r) repeat = r.trim()
+        if (r) repeat = r.trim()
       }
       return {
         id: x.id,
@@ -223,17 +225,28 @@ export function adaptArcanaToday(data) {
 
 export function adaptTasks(data) {
   if (!data) return []
-  return (data.tasks || []).map((t) => ({
-    id: t.id,
-    title: t.title || '',
-    cat: catFull(t.cat),
-    prio: t.prio || '⚪',
-    status: t.status || 'active',
-    date: t.deadline ? formatDate(t.deadline, 'full') : null,
-    time: t.deadline_time || null,
-    rpt: t.repeat ? `🔄 ${formatRepeat(t.repeat)}` : undefined,
-    streak: t.streak || 0,
-  }))
+  return (data.tasks || []).map((t) => {
+    // wave8.44: deadline_time может приходить как "HH:MM|every_Nd" — парсим,
+    // и предпочитаем машинный every_Nd колоночному «Повтор» (часто stale).
+    let time = t.deadline_time || null
+    let repeat = t.repeat || ''
+    if (time && time.includes('|')) {
+      const [tm, r] = time.split('|', 2)
+      time = (tm || '').trim() || null
+      if (r) repeat = r.trim()
+    }
+    return {
+      id: t.id,
+      title: t.title || '',
+      cat: catFull(t.cat),
+      prio: t.prio || '⚪',
+      status: t.status || 'active',
+      date: t.deadline ? formatDate(t.deadline, 'full') : null,
+      time,
+      rpt: repeat ? `🔄 ${formatRepeat(repeat)}` : undefined,
+      streak: t.streak || 0,
+    }
+  })
 }
 
 // ── /api/finance — 4 view-adapt ───────────────────────────────────────────
