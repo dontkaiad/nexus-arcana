@@ -409,17 +409,95 @@ const Empty = ({ s, text, chill, emoji, title }) => {
       </Glass>
     );
   }
+  const isLoading = !text || /загруж/i.test(text);
+  if (!isLoading) {
+    return (
+      <div
+        style={{
+          textAlign: "center",
+          padding: "18px 12px",
+          color: s.tS,
+          fontSize: fs(12),
+          fontStyle: "italic",
+        }}
+      >
+        {text}
+      </div>
+    );
+  }
+  const label = text || "Загружаю";
+  const cleanLabel = label.replace(/\.+$/, "");
+  const size = 56;
+  const orbitR = 22;
   return (
     <div
       style={{
-        textAlign: "center",
-        padding: "18px 12px",
-        color: s.tS,
-        fontSize: fs(12),
-        fontStyle: "italic",
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        justifyContent: "center",
+        gap: 14,
+        padding: "32px 12px",
       }}
     >
-      {text}
+      <div style={{ position: "relative", width: size, height: size }}>
+        {/* halo */}
+        <div
+          style={{
+            position: "absolute", inset: -10, borderRadius: "50%",
+            background: `radial-gradient(circle, ${s.acc}55 0%, ${s.acc}00 65%)`,
+            animation: "nx-pulse 2.4s ease-in-out infinite",
+          }}
+        />
+        {/* core orb */}
+        <div
+          style={{
+            position: "absolute", inset: 14, borderRadius: "50%",
+            background: `radial-gradient(circle at 35% 30%, #fff2c8 0%, ${s.acc} 55%, ${s.acc}88 100%)`,
+            boxShadow: `0 0 18px ${s.acc}aa`,
+            animation: "nx-glow 2.4s ease-in-out infinite",
+          }}
+        />
+        {/* orbit ring */}
+        <div
+          style={{
+            position: "absolute", inset: 0, borderRadius: "50%",
+            border: `1px dashed ${s.acc}55`,
+          }}
+        />
+        {/* orbiting dots */}
+        <div
+          style={{
+            position: "absolute", inset: 0,
+            animation: "nx-orbit 1.6s linear infinite",
+          }}
+        >
+          {[0, 120, 240].map((deg, i) => (
+            <div
+              key={i}
+              style={{
+                position: "absolute",
+                top: "50%", left: "50%",
+                width: 6, height: 6, borderRadius: "50%",
+                background: s.acc,
+                boxShadow: `0 0 6px ${s.acc}`,
+                transform: `rotate(${deg}deg) translate(${orbitR}px) rotate(-${deg}deg) translate(-50%, -50%)`,
+              }}
+            />
+          ))}
+        </div>
+      </div>
+      <div
+        style={{
+          display: "inline-flex", alignItems: "baseline", gap: 2,
+          color: s.tS, fontSize: fs(13), fontStyle: "italic", letterSpacing: 0.3,
+        }}
+      >
+        <span>{cleanLabel}</span>
+        <span style={{ display: "inline-block", animation: "nx-dot 1.2s ease-in-out infinite", animationDelay: "0s" }}>.</span>
+        <span style={{ display: "inline-block", animation: "nx-dot 1.2s ease-in-out infinite", animationDelay: "0.15s" }}>.</span>
+        <span style={{ display: "inline-block", animation: "nx-dot 1.2s ease-in-out infinite", animationDelay: "0.3s" }}>.</span>
+      </div>
     </div>
   );
 };
@@ -4271,6 +4349,11 @@ export default function App() {
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;500;600&display=swap');
         @keyframes tw { 0% { opacity: 0.15 } 100% { opacity: 0.7 } }
+        @keyframes nx-orbit { to { transform: rotate(360deg) } }
+        @keyframes nx-pulse { 0%,100% { transform: scale(1); opacity: 0.55 } 50% { transform: scale(1.22); opacity: 0.95 } }
+        @keyframes nx-glow { 0%,100% { opacity: 0.5; transform: scale(1) } 50% { opacity: 1; transform: scale(1.08) } }
+        @keyframes nx-dot { 0%,80%,100% { opacity: 0.25; transform: translateY(0) } 40% { opacity: 1; transform: translateY(-2px) } }
+        @keyframes nx-shimmer { 0% { background-position: -200% 0 } 100% { background-position: 200% 0 } }
         * { box-sizing: border-box; margin: 0; padding: 0 }
         body { overflow-x: hidden }
         input::placeholder { color: ${sky.tM}; opacity: 0.75 }
