@@ -1027,7 +1027,7 @@ function NxDay({ s, openTask, navigate, openStreaks }) {
     <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
       <Glass s={s} glow>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
-          <span style={{ fontFamily: H, fontSize: fs(24), color: s.text }}>Мой день</span>
+          <span style={{ fontFamily: H, fontSize: fs(20), color: s.text }}>Мой день</span>
           <div style={{ textAlign: "right", whiteSpace: "nowrap" }}>
             <div style={{ fontSize: fs(13), color: s.text, opacity: 0.75 }}>{t.date}</div>
             {weatherApi.data && !weatherApi.data.error && (
@@ -2097,7 +2097,7 @@ function ArDay({ s, openClient, navigate, openMoonPhases }) {
       {/* Hero с метриками */}
       <Glass s={s} glow>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
-          <span style={{ fontFamily: H, fontSize: fs(22), color: s.text }}>Мой день</span>
+          <span style={{ fontFamily: H, fontSize: fs(20), color: s.text }}>Мой день</span>
           <span style={{ fontSize: fs(11), color: s.tS }}>{a.date}</span>
         </div>
         <div style={{ display: "flex", gap: 6, marginTop: 10 }}>
