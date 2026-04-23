@@ -1,4 +1,4 @@
-import { useState, useRef, useMemo, useEffect } from "react";
+import React, { useState, useRef, useMemo, useEffect } from "react";
 import { useApi } from "./hooks/useApi";
 import {
   adaptToday, adaptArcanaToday,
@@ -176,6 +176,30 @@ const FS = 1.2;
 const fs = (n) => Math.round(n * FS);
 
 const PRIO_WEIGHT = (p) => ({ "🔴": 0, "🟡": 1, "⚪": 2 }[p] ?? 3);
+
+// wave8.45: группировка списков по категории. Продукты и Привычки всегда
+// сверху, остальные — по алфавиту. Без категории — в самый конец.
+const _CAT_PRIORITY = ["продукты", "привычки"];
+const _catName = (full) => String(full || "").replace(/^\S+\s*/u, "").trim();
+const _catWeight = (name) => {
+  const i = _CAT_PRIORITY.indexOf(name.toLowerCase());
+  return i >= 0 ? i : 100;
+};
+function groupByCat(items) {
+  const m = new Map();
+  for (const x of items) {
+    const k = _catName(x.catFull) || "";
+    if (!m.has(k)) m.set(k, []);
+    m.get(k).push(x);
+  }
+  return [...m.entries()].sort(([a], [b]) => {
+    if (!a && b) return 1;
+    if (a && !b) return -1;
+    const wa = _catWeight(a), wb = _catWeight(b);
+    if (wa !== wb) return wa - wb;
+    return a.localeCompare(b, "ru");
+  });
+}
 
 // ═══════════════════════════════════════════════════════════════
 // CORE COMPONENTS
@@ -1703,37 +1727,73 @@ function NxLists({ s }) {
           <div style={{ fontSize: fs(14), color: s.text }}>{emptyText}</div>
         </Glass>
       )}
-      {!loading && !error && tab !== "inv" &&
-        items.map((x) => (
-          <Glass
-            key={x.id}
-            s={s}
-            style={{
-              padding: "8px 14px", marginBottom: 4, opacity: x.done ? 0.5 : 1,
-              cursor: "pointer",
-            }}
-            onClick={() => toggleDone(x)}
-          >
-            <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
-              <Chk s={s} done={x.done} />
-              <span style={{ fontSize: fs(13), color: s.text, textDecoration: x.done ? "line-through" : "none" }}>
-                {x.cat} {x.name}
-              </span>
-            </div>
-          </Glass>
-        ))}
-      {!loading && !error && tab === "inv" &&
-        items.map((x) => (
-          <Glass key={x.id} s={s} style={{ padding: "8px 14px", marginBottom: 4 }}>
-            <div style={{ display: "flex", justifyContent: "space-between" }}>
-              <span style={{ fontSize: fs(13), color: s.text }}>{x.name}</span>
-              <span style={{ fontSize: fs(13), color: s.acc, fontWeight: 500 }}>{x.qty ? `${x.qty} шт` : ""}</span>
-            </div>
-            {x.exp && (
-              <div style={{ fontSize: fs(11), color: s.tM, marginTop: 2 }}>до {x.exp}</div>
-            )}
-          </Glass>
-        ))}
+      {!loading && !error && groupByCat(items).map(([catName, group]) => (
+        <React.Fragment key={catName || "—"}>
+          {catName && <SectionLabel s={s}>{catName}</SectionLabel>}
+          {group.map((x) => (
+            tab === "inv" ? (
+              <Glass key={x.id} s={s} style={{ padding: "10px 14px", marginBottom: 4 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <span style={{
+                    flex: 1, fontSize: fs(16), color: s.text, fontWeight: 500,
+                    wordBreak: "break-word",
+                  }}>
+                    {x.name}
+                  </span>
+                  {x.qty != null && (
+                    <span style={{ fontSize: fs(13), color: s.acc, fontWeight: 500, flexShrink: 0 }}>
+                      {x.qty} шт
+                    </span>
+                  )}
+                  {x.cat && (
+                    <span style={{
+                      display: "inline-flex", alignItems: "center",
+                      padding: "3px 9px", borderRadius: 10,
+                      fontSize: fs(13), background: `${s.acc}33`, color: s.text, fontWeight: 500,
+                      flexShrink: 0, whiteSpace: "nowrap",
+                    }}>
+                      {x.cat}
+                    </span>
+                  )}
+                </div>
+                {x.exp && (
+                  <div style={{ fontSize: fs(13), color: s.tM, marginTop: 3 }}>до {x.exp}</div>
+                )}
+              </Glass>
+            ) : (
+              <Glass
+                key={x.id}
+                s={s}
+                style={{
+                  padding: "10px 14px", marginBottom: 4, opacity: x.done ? 0.5 : 1,
+                  cursor: "pointer", display: "flex", alignItems: "center", gap: 10,
+                }}
+                onClick={() => toggleDone(x)}
+              >
+                <Chk s={s} done={x.done} />
+                <span style={{
+                  flex: 1, minWidth: 0,
+                  fontSize: fs(16), color: s.text, fontWeight: 500,
+                  wordBreak: "break-word",
+                  textDecoration: x.done ? "line-through" : "none",
+                }}>
+                  {x.name}
+                </span>
+                {x.cat && (
+                  <span style={{
+                    display: "inline-flex", alignItems: "center",
+                    padding: "3px 9px", borderRadius: 10,
+                    fontSize: fs(13), background: `${s.acc}33`, color: s.text, fontWeight: 500,
+                    flexShrink: 0, whiteSpace: "nowrap",
+                  }}>
+                    {x.cat}
+                  </span>
+                )}
+              </Glass>
+            )
+          ))}
+        </React.Fragment>
+      ))}
     </div>
   );
 }
