@@ -1735,11 +1735,46 @@ function CategoryDrillSheet({ s, cat, month }) {
   if (loading) return <Empty s={s} text="Загружаю..." />;
   if (error) return <ErrorBox s={s} error={error} refetch={refetch} />;
   const items = data?.items || [];
+  const byDesc = data?.by_desc || [];
+  const showSummary = byDesc.length >= 2;
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-      <div style={{ fontSize: fs(13), color: s.tS, marginBottom: 4 }}>
-        Всего: <span style={{ color: s.text, fontWeight: 500 }}>{(data?.total || 0).toLocaleString()} ₽</span> · {data?.count || 0} шт.
-      </div>
+      {/* wave8.50: краткая сводка перед списком трат — группировка по описанию */}
+      {showSummary && (
+        <Glass s={s} style={{ padding: "10px 14px", marginBottom: 4 }}>
+          <div
+            style={{
+              display: "flex", justifyContent: "space-between",
+              fontSize: fs(13), color: s.text, fontWeight: 600,
+              borderBottom: `1px solid ${s.brd}`, paddingBottom: 6, marginBottom: 6,
+            }}
+          >
+            <span>Всего</span>
+            <span>{(data?.total || 0).toLocaleString()} ₽ · {data?.count || 0} шт.</span>
+          </div>
+          {byDesc.map((b, i) => (
+            <div
+              key={i}
+              style={{
+                display: "flex", justifyContent: "space-between",
+                fontSize: fs(13), color: s.tS, padding: "2px 0",
+              }}
+            >
+              <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", marginRight: 8 }}>
+                {b.name}
+              </span>
+              <span style={{ color: s.text, fontFamily: H, flexShrink: 0 }}>
+                {b.amount.toLocaleString()} ₽
+              </span>
+            </div>
+          ))}
+        </Glass>
+      )}
+      {!showSummary && (
+        <div style={{ fontSize: fs(13), color: s.tS, marginBottom: 4 }}>
+          Всего: <span style={{ color: s.text, fontWeight: 500 }}>{(data?.total || 0).toLocaleString()} ₽</span> · {data?.count || 0} шт.
+        </div>
+      )}
       {items.length === 0 && <Empty s={s} emoji="🌿" title="Пусто" text="Тут трат нет." />}
       {items.map((it) => (
         <Glass key={it.id} s={s} style={{ padding: "10px 14px" }}>

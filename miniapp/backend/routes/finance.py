@@ -296,34 +296,27 @@ async def get_finance_category(
     user_notion_id = (await get_user_notion_id(tg_id)) or ""
     start_iso, end_iso = _month_bounds(month)
 
-    conditions: list[dict] = [
-        {"property": "Бот", "select": {"equals": BOT_NEXUS}},
-        {"property": "Тип", "select": {"equals": "💸 Расход"}},
-        {"property": "Категория", "select": {"equals": cat}},
-        {"property": "Дата", "date": {"on_or_after": start_iso}},
-        {"property": "Дата", "date": {"before": end_iso}},
-    ]
-    if user_notion_id:
-        conditions.append({
-            "property": "🪪 Пользователи",
-            "relation": {"contains": user_notion_id},
-        })
-
+    # wave8.50: используем общий загрузчик и фильтруем тип/категорию в Python —
+    # в Notion-select встречаются варианты "💸 Расход"/"Расход"/"💸 Покупка",
+    # из-за жёсткого equals-фильтра drill-down ловил пустоту, хотя сводка месяца
+    # такие траты считала (там match по подстроке "Расход").
     try:
-        pages = await query_pages(
-            config.nexus.db_finance,
-            filters={"and": conditions},
-            sorts=[{"property": "Дата", "direction": "descending"}],
-            page_size=200,
-        )
+        pages = await _nexus_finance_records(user_notion_id, start_iso, end_iso)
     except Exception as e:
         logger.warning("finance/category query failed: %s", e)
         pages = []
 
     items: list[dict] = []
     total = 0.0
+    by_desc: dict[str, float] = {}
     for p in pages:
         props = p.get("properties", {})
+        type_name = select_name(props.get("Тип", {}))
+        if "Расход" not in type_name:
+            continue
+        cat_full = select_name(props.get("Категория", {}))
+        if cat_full != cat:
+            continue
         amount = (props.get("Сумма", {}).get("number")) or 0
         desc = title_text(props.get("Описание", {}))
         date_raw = (props.get("Дата", {}).get("date") or {}).get("start") or ""
@@ -334,6 +327,15 @@ async def get_finance_category(
             "date": date_raw[:10],
         })
         total += amount
+        key = (desc or "—").strip().lower()
+        by_desc[key] = by_desc.get(key, 0) + amount
+
+    items.sort(key=lambda x: x["date"], reverse=True)
+
+    by_desc_list = [
+        {"name": name, "amount": int(round(amt))}
+        for name, amt in sorted(by_desc.items(), key=lambda kv: -kv[1])
+    ]
 
     return {
         "cat": cat,
@@ -341,4 +343,5 @@ async def get_finance_category(
         "total": int(round(total)),
         "count": len(items),
         "items": items,
+        "by_desc": by_desc_list,
     }
