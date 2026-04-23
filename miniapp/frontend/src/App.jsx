@@ -1451,25 +1451,25 @@ function NxFinance({ s }) {
         return (
           <>
             <Glass s={s} glow>
-              <div style={{ fontSize: fs(11), color: s.tS, marginBottom: 4 }}>{monthLabel}</div>
+              <div style={{ fontSize: fs(13), color: s.tS, marginBottom: 6 }}>{monthLabel}</div>
               <div style={{ display: "flex", gap: 10, alignItems: "baseline" }}>
                 <div style={{ flex: 1 }}>
-                  <div style={{ fontSize: fs(10), color: s.tM }}>Доход</div>
-                  <div style={{ fontFamily: H, fontSize: fs(18), color: s.acc, fontWeight: 500 }}>
+                  <div style={{ fontSize: fs(13), color: s.tM }}>Доход</div>
+                  <div style={{ fontFamily: H, fontSize: fs(20), color: s.acc, fontWeight: 500 }}>
                     {inc.toLocaleString()} ₽
                   </div>
                 </div>
                 <div style={{ flex: 1 }}>
-                  <div style={{ fontSize: fs(10), color: s.tM }}>Расход</div>
-                  <div style={{ fontFamily: H, fontSize: fs(18), color: s.text, fontWeight: 500 }}>
+                  <div style={{ fontSize: fs(13), color: s.tM }}>Расход</div>
+                  <div style={{ fontFamily: H, fontSize: fs(20), color: s.text, fontWeight: 500 }}>
                     {exp.toLocaleString()} ₽
                   </div>
                 </div>
                 <div style={{ flex: 1 }}>
-                  <div style={{ fontSize: fs(10), color: s.tM }}>Баланс</div>
+                  <div style={{ fontSize: fs(13), color: s.tM }}>Баланс</div>
                   <div
                     style={{
-                      fontFamily: H, fontSize: fs(18),
+                      fontFamily: H, fontSize: fs(20),
                       color: balance >= 0 ? s.acc : s.red, fontWeight: 500,
                     }}
                   >
@@ -1488,13 +1488,13 @@ function NxFinance({ s }) {
               return (
                 <Glass
                   key={i} s={s}
-                  style={{ padding: "8px 14px", marginBottom: 4, cursor: "pointer" }}
+                  style={{ padding: "10px 14px", marginBottom: 4, cursor: "pointer" }}
                   onClick={() => setDrillCat({ full: catFull, display: c.name, month: monthIso })}
                 >
                   <div
                     style={{
                       display: "flex", justifyContent: "space-between",
-                      fontSize: fs(12), color: s.text, marginBottom: 4,
+                      fontSize: fs(16), color: s.text, fontWeight: 500, marginBottom: 6,
                     }}
                   >
                     <span>{c.name}</span>
@@ -1522,20 +1522,20 @@ function NxFinance({ s }) {
               return (
                 <Glass
                   key={i} s={s}
-                  style={{ padding: "8px 14px", marginBottom: 4, cursor: "pointer" }}
+                  style={{ padding: "10px 14px", marginBottom: 4, cursor: "pointer" }}
                   onClick={() => setDrillCat({ full: catFull, display: c.name, month: monthIso })}
                 >
                   <div
                     style={{
                       display: "flex", justifyContent: "space-between",
-                      fontSize: fs(12), color: s.text, marginBottom: 4,
+                      fontSize: fs(16), color: s.text, fontWeight: 500, marginBottom: 6,
                     }}
                   >
                     <span>{c.name}</span>
                     <span style={{ color: clr, fontWeight: 500 }}>{c.pct}%</span>
                   </div>
                   <Bar s={s} pct={c.pct} color={clr} />
-                  <div style={{ fontSize: fs(10), color: s.tM, marginTop: 3 }}>
+                  <div style={{ fontSize: fs(13), color: s.tM, marginTop: 5 }}>
                     {c.spent.toLocaleString()} ₽ / {c.limit.toLocaleString()} ₽
                   </div>
                 </Glass>
@@ -1554,14 +1554,14 @@ function NxFinance({ s }) {
             {debts.map((d, i) => (
               <Glass key={i} s={s} accent={s.amber} style={{ padding: "10px 14px", marginBottom: 4 }}>
                 <div style={{ display: "flex", justifyContent: "space-between" }}>
-                  <span style={{ fontSize: fs(14), color: s.text, fontWeight: 500, fontFamily: H }}>
+                  <span style={{ fontSize: fs(16), color: s.text, fontWeight: 500 }}>
                     {d.n}
                   </span>
-                  <span style={{ fontSize: fs(14), color: s.red, fontWeight: 500, fontFamily: H }}>
+                  <span style={{ fontSize: fs(16), color: s.red, fontWeight: 500, fontFamily: H }}>
                     {d.left.toLocaleString()} ₽
                   </span>
                 </div>
-                <div style={{ fontSize: fs(11), color: s.tM, marginTop: 2 }}>
+                <div style={{ fontSize: fs(13), color: s.tM, marginTop: 3 }}>
                   {d.by ? `до ${d.by}` : ""}{d.note ? ` · ${d.note}` : ""}
                 </div>
                 {d.total > 0 && (
@@ -1576,12 +1576,12 @@ function NxFinance({ s }) {
             {goals.map((g, i) => (
               <Glass key={i} s={s} style={{ padding: "10px 14px", marginBottom: 4 }}>
                 <div style={{ display: "flex", justifyContent: "space-between" }}>
-                  <span style={{ fontSize: fs(14), color: s.text, fontFamily: H }}>{g.n}</span>
-                  <span style={{ fontSize: fs(13), color: s.acc, fontWeight: 500 }}>
+                  <span style={{ fontSize: fs(16), color: s.text, fontWeight: 500 }}>{g.n}</span>
+                  <span style={{ fontSize: fs(16), color: s.acc, fontWeight: 500 }}>
                     {g.t.toLocaleString()} ₽
                   </span>
                 </div>
-                <div style={{ fontSize: fs(11), color: s.tM, marginTop: 2 }}>
+                <div style={{ fontSize: fs(13), color: s.tM, marginTop: 3 }}>
                   {g.monthly > 0 ? `откладываю ${g.monthly.toLocaleString()} ₽/мес` : `после ${g.after}`}
                 </div>
                 {g.t > 0 && (
@@ -1621,14 +1621,14 @@ function CategoryDrillSheet({ s, cat, month }) {
       </div>
       {items.length === 0 && <Empty s={s} emoji="🌿" title="Пусто" text="Тут трат нет." />}
       {items.map((it) => (
-        <Glass key={it.id} s={s} style={{ padding: "8px 12px" }}>
+        <Glass key={it.id} s={s} style={{ padding: "10px 14px" }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
-            <span style={{ fontSize: fs(13), color: s.text }}>{it.desc || "—"}</span>
-            <span style={{ fontSize: fs(13), color: s.text, fontWeight: 500, fontFamily: H }}>
+            <span style={{ fontSize: fs(16), color: s.text, fontWeight: 500 }}>{it.desc || "—"}</span>
+            <span style={{ fontSize: fs(16), color: s.text, fontWeight: 500, fontFamily: H }}>
               {it.amount.toLocaleString()} ₽
             </span>
           </div>
-          <div style={{ fontSize: fs(11), color: s.tM, marginTop: 2 }}>{formatDate(it.date)}</div>
+          <div style={{ fontSize: fs(13), color: s.tM, marginTop: 3 }}>{formatDate(it.date)}</div>
         </Glass>
       ))}
     </div>
@@ -4074,7 +4074,7 @@ export default function App() {
         width: "100%",
         minHeight: "100vh",
         overflow: "hidden",
-        background: `linear-gradient(180deg, ${sky.deep} 0%, ${sky.mid} 25%, ${sky.warm} 55%, ${sky.glow} 75%, ${sky.base} 100%)`,
+        background: sky.base,
         fontFamily: B,
       }}
     >
