@@ -223,17 +223,18 @@ const Pill = ({ s, active, children, onClick }) => (
       borderRadius: 20,
       fontSize: fs(13),
       cursor: "pointer",
-      // wave8.25: неактивные пиллы становились почти невидимыми на стекле —
-      // даём лёгкую заливку и текст в s.text@0.9 вместо приглушённого s.tM.
-      background: active ? `${s.acc}55` : `${s.acc}14`,
-      color: active ? s.text : s.text,
-      opacity: active ? 1 : 0.78,
-      border: `1px solid ${active ? s.acc + "99" : s.acc + "33"}`,
+      // wave8.26: стекло на всех таблетках — единый язык интерфейса.
+      // Активная — тот же blur, но акцентная заливка вместо нейтральной.
+      background: active ? `${s.acc}66` : s.card,
+      color: s.text,
+      opacity: active ? 1 : 0.85,
+      border: `1px solid ${active ? s.acc + "aa" : s.brd}`,
       fontFamily: B,
       fontWeight: active ? 700 : 500,
       whiteSpace: "nowrap",
       transition: "all 0.2s",
-      backdropFilter: active ? "blur(10px)" : undefined,
+      backdropFilter: "blur(20px)",
+      WebkitBackdropFilter: "blur(20px)",
     }}
   >
     {children}
