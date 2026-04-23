@@ -1076,9 +1076,9 @@ function NxDay({ s, openTask, navigate, openStreaks }) {
           >
             <span
               style={{
-                fontSize: fs(11),
+                fontSize: fs(15),
                 color: s.acc,
-                fontWeight: 500,
+                fontWeight: 600,
                 display: "inline-flex",
                 alignItems: "center",
                 gap: 5,
@@ -1087,7 +1087,7 @@ function NxDay({ s, openTask, navigate, openStreaks }) {
               🦋 СДВГ-совет
             </span>
             <RefreshCw
-              size={fs(13)}
+              size={fs(16)}
               color={s.tS}
               style={{ cursor: "pointer" }}
               onClick={async () => {
@@ -1098,7 +1098,7 @@ function NxDay({ s, openTask, navigate, openStreaks }) {
               }}
             />
           </div>
-          <div style={{ fontSize: fs(13), color: s.text, lineHeight: 1.5 }}>{renderBoldMd(t.adhdTip)}</div>
+          <div style={{ fontSize: fs(16), color: s.text, lineHeight: 1.5 }}>{renderBoldMd(t.adhdTip)}</div>
         </Glass>
       )}
 
