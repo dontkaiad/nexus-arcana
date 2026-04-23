@@ -347,10 +347,8 @@ const SectionLabel = ({ s, children, action }) => (
     <span
       style={{
         fontFamily: H,
-        fontSize: fs(19),
-        fontWeight: 600,
+        fontSize: fs(20),
         color: s.text,
-        letterSpacing: 0.3,
       }}
     >
       {children}
