@@ -889,9 +889,7 @@ const TaskRow = ({ s, t, done, onToggle, onOpen, withTime }) => (
           fontSize: fs(16),
           color: s.text,
           fontWeight: 500,
-          whiteSpace: "nowrap",
-          overflow: "hidden",
-          textOverflow: "ellipsis",
+          wordBreak: "break-word",
         }}>
           {t.title}
         </span>
@@ -902,7 +900,7 @@ const TaskRow = ({ s, t, done, onToggle, onOpen, withTime }) => (
             fontSize: fs(13), background: `${s.acc}33`, color: s.text, fontWeight: 500,
             flexShrink: 0, whiteSpace: "nowrap",
           }}>
-            {t.cat}
+            {String(t.cat).split(" ")[0]}
           </span>
         )}
       </div>
@@ -1316,7 +1314,7 @@ function NxTasks({ s, openTask }) {
             <span style={{
               flex: 1, minWidth: 0,
               fontSize: fs(16), color: s.text, fontWeight: 500,
-              whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+              wordBreak: "break-word",
             }}>
               {t.title}
             </span>
@@ -1327,7 +1325,7 @@ function NxTasks({ s, openTask }) {
                 fontSize: fs(13), background: `${s.acc}33`, color: s.text, fontWeight: 500,
                 flexShrink: 0, whiteSpace: "nowrap",
               }}>
-                {t.cat}
+                {String(t.cat).split(" ")[0]}
               </span>
             )}
             <span style={{ fontSize: fs(13), flexShrink: 0 }}>{t.prio}</span>
