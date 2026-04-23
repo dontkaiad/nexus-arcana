@@ -219,17 +219,18 @@ const Pill = ({ s, active, children, onClick }) => (
   <div
     onClick={onClick}
     style={{
-      padding: "6px 14px",
+      padding: "7px 14px",
       borderRadius: 20,
-      fontSize: fs(12),
+      fontSize: fs(13),
       cursor: "pointer",
-      // wave6.2.5: неактивный таб — прозрачный фон + тонкая граница + полный текст
-      // wave7.8.1: активный таб — тёмный текст на светлой заливке для контраста
-      background: active ? `${s.acc}30` : "transparent",
-      color: active ? s.text : s.tM,
-      border: `1px solid ${active ? s.acc + "66" : s.brd}`,
+      // wave8.25: неактивные пиллы становились почти невидимыми на стекле —
+      // даём лёгкую заливку и текст в s.text@0.9 вместо приглушённого s.tM.
+      background: active ? `${s.acc}55` : `${s.acc}14`,
+      color: active ? s.text : s.text,
+      opacity: active ? 1 : 0.78,
+      border: `1px solid ${active ? s.acc + "99" : s.acc + "33"}`,
       fontFamily: B,
-      fontWeight: active ? 600 : 500,
+      fontWeight: active ? 700 : 500,
       whiteSpace: "nowrap",
       transition: "all 0.2s",
       backdropFilter: active ? "blur(10px)" : undefined,
