@@ -168,6 +168,11 @@ function moonPhase(dt = new Date()) {
 const H = "'Lora', Georgia, serif";
 const B = "'Nunito', -apple-system, 'SF Pro Text', system-ui, sans-serif";
 
+// wave8.20: глобальный масштаб шрифтов и иконок для читаемости на мобильном.
+// Применяется ко всем inline fontSize и size={...} через `fs()`.
+const FS = 1.5;
+const fs = (n) => Math.round(n * FS);
+
 const PRIO_WEIGHT = (p) => ({ "🔴": 0, "🟡": 1, "⚪": 2 }[p] ?? 3);
 
 // ═══════════════════════════════════════════════════════════════
@@ -212,9 +217,9 @@ const Pill = ({ s, active, children, onClick }) => (
   <div
     onClick={onClick}
     style={{
-      padding: "5px 12px",
-      borderRadius: 20,
-      fontSize: 12,
+      padding: "8px 16px",
+      borderRadius: 22,
+      fontSize: fs(12),
       cursor: "pointer",
       // wave6.2.5: неактивный таб — прозрачный фон + тонкая граница + полный текст
       // wave7.8.1: активный таб — тёмный текст на светлой заливке для контраста
@@ -275,7 +280,7 @@ const Metric = ({ s, v, sub, unit, accent, icon }) => (
     <div
       style={{
         fontFamily: H,
-        fontSize: 24,
+        fontSize: fs(24),
         fontWeight: 700,
         color: accent || s.text,
         display: "inline-flex",
@@ -287,10 +292,10 @@ const Metric = ({ s, v, sub, unit, accent, icon }) => (
       {icon}
       {v}
       {unit && (
-        <span style={{ color: s.text, opacity: 0.7, fontSize: 16, fontWeight: 500, marginLeft: 2 }}>{unit}</span>
+        <span style={{ color: s.text, opacity: 0.7, fontSize: fs(16), fontWeight: 500, marginLeft: 2 }}>{unit}</span>
       )}
     </div>
-    <div style={{ fontSize: 14, color: s.text, opacity: 0.85, fontWeight: 500, marginTop: 3 }}>{sub}</div>
+    <div style={{ fontSize: fs(14), color: s.text, opacity: 0.85, fontWeight: 500, marginTop: 3 }}>{sub}</div>
   </div>
 );
 
@@ -298,9 +303,9 @@ const Chk = ({ s, done, onClick }) => (
   <div
     onClick={onClick}
     style={{
-      width: 22,
-      height: 22,
-      borderRadius: 6,
+      width: 30,
+      height: 30,
+      borderRadius: 8,
       border: `2px solid ${done ? s.acc : s.brd}`,
       background: done ? s.acc : "transparent",
       cursor: "pointer",
@@ -311,7 +316,7 @@ const Chk = ({ s, done, onClick }) => (
       transition: "all 0.2s",
     }}
   >
-    {done && <Check size={12} color="#fff" strokeWidth={3} />}
+    {done && <Check size={fs(12)} color="#fff" strokeWidth={3} />}
   </div>
 );
 
@@ -338,7 +343,7 @@ const SectionLabel = ({ s, children, action }) => (
     <span
       style={{
         fontFamily: H,
-        fontSize: 19,
+        fontSize: fs(19),
         fontWeight: 600,
         color: s.text,
         letterSpacing: 0.3,
@@ -355,11 +360,11 @@ const Empty = ({ s, text, chill, emoji, title }) => {
     // Wave 5 «чилл»-оформление: plaque/card вместо серого текста
     return (
       <Glass s={s} style={{ padding: "24px 14px", textAlign: "center" }}>
-        {emoji && <div style={{ fontSize: 36, marginBottom: 6 }}>{emoji}</div>}
+        {emoji && <div style={{ fontSize: fs(36), marginBottom: 6 }}>{emoji}</div>}
         {title && (
-          <div style={{ fontFamily: H, fontSize: 18, color: s.text }}>{title}</div>
+          <div style={{ fontFamily: H, fontSize: fs(18), color: s.text }}>{title}</div>
         )}
-        <div style={{ fontSize: 13, color: s.tM, marginTop: title ? 4 : 0 }}>{text}</div>
+        <div style={{ fontSize: fs(13), color: s.tM, marginTop: title ? 4 : 0 }}>{text}</div>
       </Glass>
     );
   }
@@ -369,7 +374,7 @@ const Empty = ({ s, text, chill, emoji, title }) => {
         textAlign: "center",
         padding: "18px 12px",
         color: s.tS,
-        fontSize: 12,
+        fontSize: fs(12),
         fontStyle: "italic",
       }}
     >
@@ -380,10 +385,10 @@ const Empty = ({ s, text, chill, emoji, title }) => {
 
 const ErrorBox = ({ s, error, refetch }) => (
   <Glass s={s} accent={s.red} style={{ padding: "14px 16px" }}>
-    <div style={{ fontSize: 13, color: s.red, fontWeight: 500, marginBottom: 6 }}>
+    <div style={{ fontSize: fs(13), color: s.red, fontWeight: 500, marginBottom: 6 }}>
       Ошибка загрузки
     </div>
-    <div style={{ fontSize: 12, color: s.tM, marginBottom: 10, wordBreak: "break-word" }}>
+    <div style={{ fontSize: fs(12), color: s.tM, marginBottom: 10, wordBreak: "break-word" }}>
       {error?.message || "неизвестная ошибка"}
     </div>
     {refetch && (
@@ -393,10 +398,10 @@ const ErrorBox = ({ s, error, refetch }) => (
           display: "inline-flex", alignItems: "center", gap: 6,
           padding: "6px 12px", borderRadius: 8,
           background: `${s.acc}22`, color: s.acc,
-          fontSize: 12, cursor: "pointer",
+          fontSize: fs(12), cursor: "pointer",
         }}
       >
-        <RefreshCw size={12} /> Повторить
+        <RefreshCw size={fs(12)} /> Повторить
       </div>
     )}
   </Glass>
@@ -457,11 +462,11 @@ const FAB = ({ s, onClick }) => (
     style={{
       // wave5.4: fixed + safe-area-inset; wave8.7: glass-стиль с акцентной рамкой
       position: "fixed",
-      bottom: "calc(env(safe-area-inset-bottom, 0px) + 80px)",
+      bottom: "calc(env(safe-area-inset-bottom, 0px) + 96px)",
       right: 16,
-      width: 52,
-      height: 52,
-      borderRadius: 26,
+      width: 72,
+      height: 72,
+      borderRadius: 36,
       background: `${s.acc}dd`,
       color: "#fff",
       display: "flex",
@@ -474,7 +479,7 @@ const FAB = ({ s, onClick }) => (
       border: `1px solid ${s.acc}88`,
     }}
   >
-    <Plus size={24} strokeWidth={2.2} />
+    <Plus size={fs(24)} strokeWidth={2.2} />
   </div>
 );
 
@@ -524,12 +529,12 @@ const Sheet = ({ s, open, onClose, title, children }) => {
               marginBottom: 14,
             }}
           >
-            <span style={{ fontFamily: H, fontSize: 20, color: s.text }}>{title}</span>
+            <span style={{ fontFamily: H, fontSize: fs(20), color: s.text }}>{title}</span>
             <span
               onClick={onClose}
               style={{ color: s.tS, cursor: "pointer", display: "flex" }}
             >
-              <X size={20} />
+              <X size={fs(20)} />
             </span>
           </div>
         )}
@@ -856,7 +861,7 @@ const TaskRow = ({ s, t, done, onToggle, onOpen, withTime }) => (
       <span
         style={{
           fontFamily: "'SF Mono', Menlo, monospace",
-          fontSize: 14,
+          fontSize: fs(14),
           color: s.acc,
           fontWeight: 600,
           minWidth: 44,
@@ -877,14 +882,14 @@ const TaskRow = ({ s, t, done, onToggle, onOpen, withTime }) => (
           <span style={{
             display: "inline-flex", alignItems: "center",
             padding: "2px 8px", borderRadius: 10,
-            fontSize: 12, background: `${s.acc}33`, color: s.text, fontWeight: 500,
+            fontSize: fs(12), background: `${s.acc}33`, color: s.text, fontWeight: 500,
             flexShrink: 0, whiteSpace: "nowrap",
           }}>
             {t.cat}
           </span>
         )}
         <span style={{
-          fontSize: 16,
+          fontSize: fs(16),
           color: s.text,
           fontWeight: 500,
           whiteSpace: "nowrap",
@@ -896,7 +901,7 @@ const TaskRow = ({ s, t, done, onToggle, onOpen, withTime }) => (
       </div>
       <div
         style={{
-          fontSize: 13,
+          fontSize: fs(13),
           color: s.text,
           opacity: 0.72,
           marginTop: 3,
@@ -912,12 +917,12 @@ const TaskRow = ({ s, t, done, onToggle, onOpen, withTime }) => (
         )}
         {t.reminderTime && (
           <span style={{ display: "inline-flex", alignItems: "center", gap: 3 }}>
-            <Bell size={12} /> {t.reminderTime}
+            <Bell size={fs(12)} /> {t.reminderTime}
           </span>
         )}
         {t.rem && !t.reminderTime && (
           <span style={{ display: "inline-flex", alignItems: "center", gap: 3 }}>
-            <Bell size={12} /> {t.rem}
+            <Bell size={fs(12)} /> {t.rem}
           </span>
         )}
         {t.rpt && <span>{t.rpt}</span>}
@@ -964,10 +969,10 @@ function NxDay({ s, openTask, navigate, openStreaks }) {
   if (error) {
     return (
       <Glass s={s} accent={s.red} style={{ padding: "14px 16px" }}>
-        <div style={{ fontSize: 13, color: s.red, fontWeight: 500, marginBottom: 6 }}>
+        <div style={{ fontSize: fs(13), color: s.red, fontWeight: 500, marginBottom: 6 }}>
           Ошибка загрузки
         </div>
-        <div style={{ fontSize: 12, color: s.tM, marginBottom: 10, wordBreak: "break-word" }}>
+        <div style={{ fontSize: fs(12), color: s.tM, marginBottom: 10, wordBreak: "break-word" }}>
           {error.message}
         </div>
         <div
@@ -976,10 +981,10 @@ function NxDay({ s, openTask, navigate, openStreaks }) {
             display: "inline-flex", alignItems: "center", gap: 6,
             padding: "6px 12px", borderRadius: 8,
             background: `${s.acc}22`, color: s.acc,
-            fontSize: 12, cursor: "pointer",
+            fontSize: fs(12), cursor: "pointer",
           }}
         >
-          <RefreshCw size={12} /> Повторить
+          <RefreshCw size={fs(12)} /> Повторить
         </div>
       </Glass>
     );
@@ -995,11 +1000,11 @@ function NxDay({ s, openTask, navigate, openStreaks }) {
     <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
       <Glass s={s} glow>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
-          <span style={{ fontFamily: H, fontSize: 24, color: s.text }}>Мой день</span>
+          <span style={{ fontFamily: H, fontSize: fs(24), color: s.text }}>Мой день</span>
           <div style={{ textAlign: "right" }}>
-            <div style={{ fontSize: 14, color: s.text, opacity: 0.75 }}>{t.date}</div>
+            <div style={{ fontSize: fs(14), color: s.text, opacity: 0.75 }}>{t.date}</div>
             {weatherApi.data && !weatherApi.data.error && (
-              <div style={{ fontSize: 14, color: s.text, opacity: 0.9, marginTop: 3, fontWeight: 500 }}>
+              <div style={{ fontSize: fs(14), color: s.text, opacity: 0.9, marginTop: 3, fontWeight: 500 }}>
                 {WEATHER_ICON[weatherApi.data.kind] || "🌤️"}
                 {" "}
                 {weatherApi.data.temp > 0 ? "+" : ""}{weatherApi.data.temp}° · {weatherApi.data.city}
@@ -1020,7 +1025,7 @@ function NxDay({ s, openTask, navigate, openStreaks }) {
               v={t.streak}
               sub="стрик"
               accent={s.amber}
-              icon={<LucideFlame size={18} color={s.amber} fill={s.amber} style={{ opacity: 0.9 }} />}
+              icon={<LucideFlame size={fs(18)} color={s.amber} fill={s.amber} style={{ opacity: 0.9 }} />}
             />
           </div>
         </div>
@@ -1032,7 +1037,7 @@ function NxDay({ s, openTask, navigate, openStreaks }) {
             style={{
               display: "flex",
               justifyContent: "space-between",
-              fontSize: 14,
+              fontSize: fs(14),
               color: s.text,
               marginBottom: 5,
             }}
@@ -1052,7 +1057,7 @@ function NxDay({ s, openTask, navigate, openStreaks }) {
             pct={leftPct}
             color={leftPct > 85 ? s.red : leftPct > 60 ? s.amber : s.acc}
           />
-          <div style={{ fontSize: 13, color: s.text, opacity: 0.8, marginTop: 5 }}>
+          <div style={{ fontSize: fs(13), color: s.text, opacity: 0.8, marginTop: 5 }}>
             потрачено {t.spentDay.toLocaleString()} ₽ из {t.budgetDay.toLocaleString()} ₽
           </div>
         </div>
@@ -1071,7 +1076,7 @@ function NxDay({ s, openTask, navigate, openStreaks }) {
           >
             <span
               style={{
-                fontSize: 11,
+                fontSize: fs(11),
                 color: s.acc,
                 fontWeight: 500,
                 display: "inline-flex",
@@ -1082,7 +1087,7 @@ function NxDay({ s, openTask, navigate, openStreaks }) {
               🦋 СДВГ-совет
             </span>
             <RefreshCw
-              size={13}
+              size={fs(13)}
               color={s.tS}
               style={{ cursor: "pointer" }}
               onClick={async () => {
@@ -1093,7 +1098,7 @@ function NxDay({ s, openTask, navigate, openStreaks }) {
               }}
             />
           </div>
-          <div style={{ fontSize: 13, color: s.text, lineHeight: 1.5 }}>{renderBoldMd(t.adhdTip)}</div>
+          <div style={{ fontSize: fs(13), color: s.text, lineHeight: 1.5 }}>{renderBoldMd(t.adhdTip)}</div>
         </Glass>
       )}
 
@@ -1133,19 +1138,19 @@ function NxDay({ s, openTask, navigate, openStreaks }) {
                 <span style={{
                   display: "inline-flex", alignItems: "center",
                   padding: "2px 8px", borderRadius: 10,
-                  fontSize: 12, background: `${s.red}33`, color: s.text, fontWeight: 500,
+                  fontSize: fs(12), background: `${s.red}33`, color: s.text, fontWeight: 500,
                   flexShrink: 0, whiteSpace: "nowrap",
                 }}>
                   {o.cat}
                 </span>
               )}
               <span style={{
-                flex: 1, fontSize: 16, color: s.text, fontWeight: 500,
+                flex: 1, fontSize: fs(16), color: s.text, fontWeight: 500,
                 whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
               }}>
                 {o.title}
               </span>
-              <span style={{ fontSize: 13, color: s.red, fontWeight: 500, flexShrink: 0 }}>
+              <span style={{ fontSize: fs(13), color: s.red, fontWeight: 500, flexShrink: 0 }}>
                 {o.days} д назад
               </span>
             </Glass>
@@ -1195,7 +1200,7 @@ function NxTasks({ s, openTask }) {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-      <div style={{ fontFamily: H, fontSize: 20, color: s.text }}>Задачи</div>
+      <div style={{ fontFamily: H, fontSize: fs(20), color: s.text }}>Задачи</div>
       <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
         {[
           ["all", "Все"],
@@ -1231,19 +1236,19 @@ function NxTasks({ s, openTask }) {
                 <span style={{
                   display: "inline-flex", alignItems: "center",
                   padding: "1px 8px", borderRadius: 10,
-                  fontSize: 10, background: `${s.acc}22`, color: s.text,
+                  fontSize: fs(10), background: `${s.acc}22`, color: s.text,
                   flexShrink: 0, whiteSpace: "nowrap",
                 }}>
                   {t.cat}
                 </span>
               )}
-              <span style={{ fontSize: 14, color: s.text }}>{t.title}</span>
+              <span style={{ fontSize: fs(14), color: s.text }}>{t.title}</span>
             </div>
-            <span style={{ fontSize: 12, flexShrink: 0 }}>{t.prio}</span>
+            <span style={{ fontSize: fs(12), flexShrink: 0 }}>{t.prio}</span>
           </div>
           <div
             style={{
-              fontSize: 10,
+              fontSize: fs(10),
               color: t.status === "overdue" ? s.red : s.tM,
               marginTop: 3,
               display: "flex",
@@ -1287,7 +1292,7 @@ function NxFinance({ s }) {
   if (loading) {
     return (
       <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-        <div style={{ fontFamily: H, fontSize: 20, color: s.text }}>Финансы</div>
+        <div style={{ fontFamily: H, fontSize: fs(20), color: s.text }}>Финансы</div>
         {tabsUi}
         <Empty s={s} text="Загружаю..." />
       </div>
@@ -1296,7 +1301,7 @@ function NxFinance({ s }) {
   if (error) {
     return (
       <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-        <div style={{ fontFamily: H, fontSize: 20, color: s.text }}>Финансы</div>
+        <div style={{ fontFamily: H, fontSize: fs(20), color: s.text }}>Финансы</div>
         {tabsUi}
         <ErrorBox s={s} error={error} refetch={refetch} />
       </div>
@@ -1305,7 +1310,7 @@ function NxFinance({ s }) {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-      <div style={{ fontFamily: H, fontSize: 20, color: s.text }}>Финансы</div>
+      <div style={{ fontFamily: H, fontSize: fs(20), color: s.text }}>Финансы</div>
       {tabsUi}
 
       {tab === "today" && (() => {
@@ -1314,20 +1319,20 @@ function NxFinance({ s }) {
           <>
             <Glass s={s}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
-                <span style={{ fontSize: 12, color: s.tS }}>Потрачено сегодня</span>
-                <span style={{ fontFamily: H, fontSize: 22, color: s.text }}>
+                <span style={{ fontSize: fs(12), color: s.tS }}>Потрачено сегодня</span>
+                <span style={{ fontFamily: H, fontSize: fs(22), color: s.text }}>
                   {total.toLocaleString()} ₽
                 </span>
               </div>
             </Glass>
             {budget && (
               <Glass s={s} accent={s.acc} style={{ padding: "10px 14px" }}>
-                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: s.tS, marginBottom: 4 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", fontSize: fs(11), color: s.tS, marginBottom: 4 }}>
                   <span>Бюджет дня</span>
                   <span>{budget.day.toLocaleString()} ₽ · {budget.pct}%</span>
                 </div>
                 <Bar s={s} pct={budget.pct} color={budget.pct > 85 ? s.red : budget.pct > 60 ? s.amber : s.acc} />
-                <div style={{ fontSize: 10, color: s.tM, marginTop: 4 }}>
+                <div style={{ fontSize: fs(10), color: s.tM, marginTop: 4 }}>
                   Потрачено {budget.spent.toLocaleString()} ₽ · осталось {budget.left.toLocaleString()} ₽
                 </div>
               </Glass>
@@ -1337,10 +1342,10 @@ function NxFinance({ s }) {
               <Glass key={x.id} s={s} style={{ padding: "8px 14px", marginBottom: 4 }}>
                 <div style={{ display: "flex", justifyContent: "space-between" }}>
                   <div>
-                    <div style={{ fontSize: 13, color: s.text }}>{x.desc || "без описания"}</div>
-                    <div style={{ fontSize: 10, color: s.tM, marginTop: 2 }}>{x.cat}</div>
+                    <div style={{ fontSize: fs(13), color: s.text }}>{x.desc || "без описания"}</div>
+                    <div style={{ fontSize: fs(10), color: s.tM, marginTop: 2 }}>{x.cat}</div>
                   </div>
-                  <span style={{ fontSize: 14, color: s.text, fontWeight: 500, fontFamily: H }}>
+                  <span style={{ fontSize: fs(14), color: s.text, fontWeight: 500, fontFamily: H }}>
                     {x.amt.toLocaleString()} ₽
                   </span>
                 </div>
@@ -1357,25 +1362,25 @@ function NxFinance({ s }) {
         return (
           <>
             <Glass s={s} glow>
-              <div style={{ fontSize: 11, color: s.tS, marginBottom: 4 }}>{monthLabel}</div>
+              <div style={{ fontSize: fs(11), color: s.tS, marginBottom: 4 }}>{monthLabel}</div>
               <div style={{ display: "flex", gap: 10, alignItems: "baseline" }}>
                 <div style={{ flex: 1 }}>
-                  <div style={{ fontSize: 10, color: s.tM }}>Доход</div>
-                  <div style={{ fontFamily: H, fontSize: 18, color: s.acc, fontWeight: 500 }}>
+                  <div style={{ fontSize: fs(10), color: s.tM }}>Доход</div>
+                  <div style={{ fontFamily: H, fontSize: fs(18), color: s.acc, fontWeight: 500 }}>
                     {inc.toLocaleString()} ₽
                   </div>
                 </div>
                 <div style={{ flex: 1 }}>
-                  <div style={{ fontSize: 10, color: s.tM }}>Расход</div>
-                  <div style={{ fontFamily: H, fontSize: 18, color: s.text, fontWeight: 500 }}>
+                  <div style={{ fontSize: fs(10), color: s.tM }}>Расход</div>
+                  <div style={{ fontFamily: H, fontSize: fs(18), color: s.text, fontWeight: 500 }}>
                     {exp.toLocaleString()} ₽
                   </div>
                 </div>
                 <div style={{ flex: 1 }}>
-                  <div style={{ fontSize: 10, color: s.tM }}>Баланс</div>
+                  <div style={{ fontSize: fs(10), color: s.tM }}>Баланс</div>
                   <div
                     style={{
-                      fontFamily: H, fontSize: 18,
+                      fontFamily: H, fontSize: fs(18),
                       color: balance >= 0 ? s.acc : s.red, fontWeight: 500,
                     }}
                   >
@@ -1400,7 +1405,7 @@ function NxFinance({ s }) {
                   <div
                     style={{
                       display: "flex", justifyContent: "space-between",
-                      fontSize: 12, color: s.text, marginBottom: 4,
+                      fontSize: fs(12), color: s.text, marginBottom: 4,
                     }}
                   >
                     <span>{c.name}</span>
@@ -1434,14 +1439,14 @@ function NxFinance({ s }) {
                   <div
                     style={{
                       display: "flex", justifyContent: "space-between",
-                      fontSize: 12, color: s.text, marginBottom: 4,
+                      fontSize: fs(12), color: s.text, marginBottom: 4,
                     }}
                   >
                     <span>{c.name}</span>
                     <span style={{ color: clr, fontWeight: 500 }}>{c.pct}%</span>
                   </div>
                   <Bar s={s} pct={c.pct} color={clr} />
-                  <div style={{ fontSize: 10, color: s.tM, marginTop: 3 }}>
+                  <div style={{ fontSize: fs(10), color: s.tM, marginTop: 3 }}>
                     {c.spent.toLocaleString()} ₽ / {c.limit.toLocaleString()} ₽
                   </div>
                 </Glass>
@@ -1460,14 +1465,14 @@ function NxFinance({ s }) {
             {debts.map((d, i) => (
               <Glass key={i} s={s} accent={s.amber} style={{ padding: "10px 14px", marginBottom: 4 }}>
                 <div style={{ display: "flex", justifyContent: "space-between" }}>
-                  <span style={{ fontSize: 14, color: s.text, fontWeight: 500, fontFamily: H }}>
+                  <span style={{ fontSize: fs(14), color: s.text, fontWeight: 500, fontFamily: H }}>
                     {d.n}
                   </span>
-                  <span style={{ fontSize: 14, color: s.red, fontWeight: 500, fontFamily: H }}>
+                  <span style={{ fontSize: fs(14), color: s.red, fontWeight: 500, fontFamily: H }}>
                     {d.left.toLocaleString()} ₽
                   </span>
                 </div>
-                <div style={{ fontSize: 11, color: s.tM, marginTop: 2 }}>
+                <div style={{ fontSize: fs(11), color: s.tM, marginTop: 2 }}>
                   {d.by ? `до ${d.by}` : ""}{d.note ? ` · ${d.note}` : ""}
                 </div>
                 {d.total > 0 && (
@@ -1482,12 +1487,12 @@ function NxFinance({ s }) {
             {goals.map((g, i) => (
               <Glass key={i} s={s} style={{ padding: "10px 14px", marginBottom: 4 }}>
                 <div style={{ display: "flex", justifyContent: "space-between" }}>
-                  <span style={{ fontSize: 14, color: s.text, fontFamily: H }}>{g.n}</span>
-                  <span style={{ fontSize: 13, color: s.acc, fontWeight: 500 }}>
+                  <span style={{ fontSize: fs(14), color: s.text, fontFamily: H }}>{g.n}</span>
+                  <span style={{ fontSize: fs(13), color: s.acc, fontWeight: 500 }}>
                     {g.t.toLocaleString()} ₽
                   </span>
                 </div>
-                <div style={{ fontSize: 11, color: s.tM, marginTop: 2 }}>
+                <div style={{ fontSize: fs(11), color: s.tM, marginTop: 2 }}>
                   {g.monthly > 0 ? `откладываю ${g.monthly.toLocaleString()} ₽/мес` : `после ${g.after}`}
                 </div>
                 {g.t > 0 && (
@@ -1522,19 +1527,19 @@ function CategoryDrillSheet({ s, cat, month }) {
   const items = data?.items || [];
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-      <div style={{ fontSize: 13, color: s.tS, marginBottom: 4 }}>
+      <div style={{ fontSize: fs(13), color: s.tS, marginBottom: 4 }}>
         Всего: <span style={{ color: s.text, fontWeight: 500 }}>{(data?.total || 0).toLocaleString()} ₽</span> · {data?.count || 0} шт.
       </div>
       {items.length === 0 && <Empty s={s} emoji="🌿" title="Пусто" text="Тут трат нет." />}
       {items.map((it) => (
         <Glass key={it.id} s={s} style={{ padding: "8px 12px" }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
-            <span style={{ fontSize: 13, color: s.text }}>{it.desc || "—"}</span>
-            <span style={{ fontSize: 13, color: s.text, fontWeight: 500, fontFamily: H }}>
+            <span style={{ fontSize: fs(13), color: s.text }}>{it.desc || "—"}</span>
+            <span style={{ fontSize: fs(13), color: s.text, fontWeight: 500, fontFamily: H }}>
               {it.amount.toLocaleString()} ₽
             </span>
           </div>
-          <div style={{ fontSize: 11, color: s.tM, marginTop: 2 }}>{formatDate(it.date)}</div>
+          <div style={{ fontSize: fs(11), color: s.tM, marginTop: 2 }}>{formatDate(it.date)}</div>
         </Glass>
       ))}
     </div>
@@ -1583,7 +1588,7 @@ function NxLists({ s }) {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-      <div style={{ fontFamily: H, fontSize: 20, color: s.text }}>Списки</div>
+      <div style={{ fontFamily: H, fontSize: fs(20), color: s.text }}>Списки</div>
       <div style={{ display: "flex", gap: 6 }}>
         {[
           ["buy", "🛒 Покупки"],
@@ -1600,7 +1605,7 @@ function NxLists({ s }) {
       {error && <ErrorBox s={s} error={error} refetch={refetch} />}
       {!loading && !error && items.length === 0 && (
         <Glass s={s} style={{ padding: "24px 14px", textAlign: "center" }}>
-          <div style={{ fontSize: 14, color: s.text }}>{emptyText}</div>
+          <div style={{ fontSize: fs(14), color: s.text }}>{emptyText}</div>
         </Glass>
       )}
       {!loading && !error && tab !== "inv" &&
@@ -1616,7 +1621,7 @@ function NxLists({ s }) {
           >
             <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
               <Chk s={s} done={x.done} />
-              <span style={{ fontSize: 13, color: s.text, textDecoration: x.done ? "line-through" : "none" }}>
+              <span style={{ fontSize: fs(13), color: s.text, textDecoration: x.done ? "line-through" : "none" }}>
                 {x.cat} {x.name}
               </span>
             </div>
@@ -1626,11 +1631,11 @@ function NxLists({ s }) {
         items.map((x) => (
           <Glass key={x.id} s={s} style={{ padding: "8px 14px", marginBottom: 4 }}>
             <div style={{ display: "flex", justifyContent: "space-between" }}>
-              <span style={{ fontSize: 13, color: s.text }}>{x.name}</span>
-              <span style={{ fontSize: 13, color: s.acc, fontWeight: 500 }}>{x.qty ? `${x.qty} шт` : ""}</span>
+              <span style={{ fontSize: fs(13), color: s.text }}>{x.name}</span>
+              <span style={{ fontSize: fs(13), color: s.acc, fontWeight: 500 }}>{x.qty ? `${x.qty} шт` : ""}</span>
             </div>
             {x.exp && (
-              <div style={{ fontSize: 11, color: s.tM, marginTop: 2 }}>до {x.exp}</div>
+              <div style={{ fontSize: fs(11), color: s.tM, marginTop: 2 }}>до {x.exp}</div>
             )}
           </Glass>
         ))}
@@ -1652,7 +1657,7 @@ function SearchInput({ s, value, onChange, placeholder }) {
         backdropFilter: "blur(10px)",
       }}
     >
-      <Search size={14} color={s.tS} />
+      <Search size={fs(14)} color={s.tS} />
       <input
         value={value}
         onChange={(e) => onChange(e.target.value)}
@@ -1664,7 +1669,7 @@ function SearchInput({ s, value, onChange, placeholder }) {
           outline: "none",
           color: s.text,
           fontFamily: B,
-          fontSize: 13,
+          fontSize: fs(13),
         }}
       />
     </div>
@@ -1688,7 +1693,7 @@ function NxMemory({ s, openAdhd }) {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-      <div style={{ fontFamily: H, fontSize: 20, color: s.text }}>Память</div>
+      <div style={{ fontFamily: H, fontSize: fs(20), color: s.text }}>Память</div>
       <Glass
         s={s}
         accent={s.acc}
@@ -1703,12 +1708,12 @@ function NxMemory({ s, openAdhd }) {
           }}
         >
           <div>
-            <div style={{ fontSize: 11, color: s.acc, fontWeight: 500 }}>🦋 СДВГ-профиль</div>
-            <div style={{ fontSize: 12, color: s.text, marginTop: 2 }}>
+            <div style={{ fontSize: fs(11), color: s.acc, fontWeight: 500 }}>🦋 СДВГ-профиль</div>
+            <div style={{ fontSize: fs(12), color: s.text, marginTop: 2 }}>
               Персональные паттерны и стратегии
             </div>
           </div>
-          <ChevronRight size={16} color={s.tS} />
+          <ChevronRight size={fs(16)} color={s.tS} />
         </div>
       </Glass>
       <SearchInput s={s} value={q} onChange={setQ} placeholder="Поиск по памяти" />
@@ -1726,8 +1731,8 @@ function NxMemory({ s, openAdhd }) {
       )}
       {!loading && !error && view.items.map((m) => (
         <Glass key={m.id} s={s} style={{ padding: "8px 14px", marginBottom: 4 }}>
-          <div style={{ fontSize: 13, color: s.text }}>{m.text}</div>
-          <div style={{ fontSize: 10, color: s.tM, marginTop: 2 }}>{m.cat}</div>
+          <div style={{ fontSize: fs(13), color: s.text }}>{m.text}</div>
+          <div style={{ fontSize: fs(10), color: s.tM, marginTop: 2 }}>{m.cat}</div>
         </Glass>
       ))}
     </div>
@@ -1794,7 +1799,7 @@ function NxCal({ s }) {
           alignItems: "baseline",
         }}
       >
-        <span style={{ fontFamily: H, fontSize: 20, color: s.text }}>{title}</span>
+        <span style={{ fontFamily: H, fontSize: fs(20), color: s.text }}>{title}</span>
         <div style={{ display: "flex", gap: 6 }}>
           <Pill s={s} active={view === "week"} onClick={() => setView("week")}>
             Неделя
@@ -1818,7 +1823,7 @@ function NxCal({ s }) {
             {daysShort.map((d) => (
               <div
                 key={d}
-                style={{ textAlign: "center", fontSize: 10, color: s.tS, padding: 3 }}
+                style={{ textAlign: "center", fontSize: fs(10), color: s.tS, padding: 3 }}
               >
                 {d}
               </div>
@@ -1856,7 +1861,7 @@ function NxCal({ s }) {
                   >
                     <div
                       style={{
-                        fontSize: 13,
+                        fontSize: fs(13),
                         fontWeight: isToday || isPicked ? 500 : 400,
                         color: isToday || isPicked ? s.acc : s.text,
                         fontFamily: H,
@@ -1876,7 +1881,7 @@ function NxCal({ s }) {
                         {count > 1 && (
                           <span style={{
                             position: "absolute", top: 2, right: 3,
-                            fontSize: 8, color: s.tM,
+                            fontSize: fs(8), color: s.tM,
                           }}>{count}</span>
                         )}
                       </>
@@ -1920,7 +1925,7 @@ function NxCal({ s }) {
                 }}>
                   <div style={{
                     display: "flex", justifyContent: "space-between",
-                    fontSize: 12, color: wd.isToday ? s.acc : s.text, fontWeight: 500,
+                    fontSize: fs(12), color: wd.isToday ? s.acc : s.text, fontWeight: 500,
                   }}>
                     <span>{wd.label}</span>
                     <span style={{ color: s.tM }}>{wd.tasks.length > 0 ? `${wd.tasks.length} шт.` : ""}</span>
@@ -1928,12 +1933,12 @@ function NxCal({ s }) {
                   {wd.tasks.length > 0 && (
                     <div style={{ marginTop: 4 }}>
                       {wd.tasks.slice(0, 3).map((t, j) => (
-                        <div key={j} style={{ fontSize: 11, color: s.tM, marginTop: 2 }}>
+                        <div key={j} style={{ fontSize: fs(11), color: s.tM, marginTop: 2 }}>
                           • {t}
                         </div>
                       ))}
                       {wd.tasks.length > 3 && (
-                        <div style={{ fontSize: 10, color: s.tS, marginTop: 2 }}>
+                        <div style={{ fontSize: fs(10), color: s.tS, marginTop: 2 }}>
                           и ещё {wd.tasks.length - 3}…
                         </div>
                       )}
@@ -1954,7 +1959,7 @@ function NxCal({ s }) {
       )}
       {!loading && (tasksByDay[picked] || []).map((t, i) => (
         <Glass key={i} s={s} style={{ padding: "8px 14px", marginBottom: 4 }}>
-          <div style={{ fontSize: 13, color: s.text }}>{t}</div>
+          <div style={{ fontSize: fs(13), color: s.text }}>{t}</div>
         </Glass>
       ))}
     </div>
@@ -1973,10 +1978,10 @@ function ArDay({ s, openClient, navigate, openMoonPhases }) {
   if (error) {
     return (
       <Glass s={s} accent={s.red} style={{ padding: "14px 16px" }}>
-        <div style={{ fontSize: 13, color: s.red, fontWeight: 500, marginBottom: 6 }}>
+        <div style={{ fontSize: fs(13), color: s.red, fontWeight: 500, marginBottom: 6 }}>
           Ошибка загрузки
         </div>
-        <div style={{ fontSize: 12, color: s.tM, marginBottom: 10, wordBreak: "break-word" }}>
+        <div style={{ fontSize: fs(12), color: s.tM, marginBottom: 10, wordBreak: "break-word" }}>
           {error.message}
         </div>
         <div
@@ -1985,10 +1990,10 @@ function ArDay({ s, openClient, navigate, openMoonPhases }) {
             display: "inline-flex", alignItems: "center", gap: 6,
             padding: "6px 12px", borderRadius: 8,
             background: `${s.acc}22`, color: s.acc,
-            fontSize: 12, cursor: "pointer",
+            fontSize: fs(12), cursor: "pointer",
           }}
         >
-          <RefreshCw size={12} /> Повторить
+          <RefreshCw size={fs(12)} /> Повторить
         </div>
       </Glass>
     );
@@ -2022,8 +2027,8 @@ function ArDay({ s, openClient, navigate, openMoonPhases }) {
       {/* Hero с метриками */}
       <Glass s={s} glow>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
-          <span style={{ fontFamily: H, fontSize: 22, color: s.text }}>Мой день</span>
-          <span style={{ fontSize: 11, color: s.tS }}>{a.date}</span>
+          <span style={{ fontFamily: H, fontSize: fs(22), color: s.text }}>Мой день</span>
+          <span style={{ fontSize: fs(11), color: s.tS }}>{a.date}</span>
         </div>
         <div style={{ display: "flex", gap: 6, marginTop: 10 }}>
           <div style={{ flex: 1, cursor: "pointer" }} onClick={() => navigate && navigate("sess")}>
@@ -2053,7 +2058,7 @@ function ArDay({ s, openClient, navigate, openMoonPhases }) {
         <div style={{ display: "flex", gap: 14, alignItems: "center" }}>
           <div
             style={{
-              fontSize: 54,
+              fontSize: fs(54),
               lineHeight: 1,
               filter: "drop-shadow(0 0 10px rgba(255,255,255,0.3))",
             }}
@@ -2064,14 +2069,14 @@ function ArDay({ s, openClient, navigate, openMoonPhases }) {
             <div
               style={{
                 fontFamily: H,
-                fontSize: 17,
+                fontSize: fs(17),
                 color: s.text,
                 fontWeight: 500,
               }}
             >
               {moon.name}
             </div>
-            <div style={{ fontSize: 11, color: s.tS, marginTop: 3 }}>
+            <div style={{ fontSize: fs(11), color: s.tS, marginTop: 3 }}>
               {moon.days} день цикла · освещение {moon.illum}%
             </div>
             <div style={{ marginTop: 6 }}>
@@ -2085,32 +2090,32 @@ function ArDay({ s, openClient, navigate, openMoonPhases }) {
       <SectionLabel s={s}>Статистика за {a.monthBlock.label}</SectionLabel>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
         <Glass s={s} style={{ padding: "12px 10px", textAlign: "center" }}>
-          <div style={{ fontSize: 18, marginBottom: 4 }}>💰</div>
-          <div style={{ fontFamily: H, fontSize: 18, color: s.acc, fontWeight: 500 }}>
-            {a.monthBlock.inc.toLocaleString()}<span style={{ fontSize: 13, marginLeft: 1 }}>₽</span>
+          <div style={{ fontSize: fs(18), marginBottom: 4 }}>💰</div>
+          <div style={{ fontFamily: H, fontSize: fs(18), color: s.acc, fontWeight: 500 }}>
+            {a.monthBlock.inc.toLocaleString()}<span style={{ fontSize: fs(13), marginLeft: 1 }}>₽</span>
           </div>
-          <div style={{ fontSize: 10, color: s.tS, marginTop: 2 }}>Доход</div>
+          <div style={{ fontSize: fs(10), color: s.tS, marginTop: 2 }}>Доход</div>
         </Glass>
         <Glass s={s} style={{ padding: "12px 10px", textAlign: "center" }}>
-          <div style={{ fontSize: 18, marginBottom: 4 }}>🕯️</div>
-          <div style={{ fontFamily: H, fontSize: 18, color: s.text, fontWeight: 500 }}>
-            {a.monthBlock.supplies.toLocaleString()}<span style={{ fontSize: 13, marginLeft: 1 }}>₽</span>
+          <div style={{ fontSize: fs(18), marginBottom: 4 }}>🕯️</div>
+          <div style={{ fontFamily: H, fontSize: fs(18), color: s.text, fontWeight: 500 }}>
+            {a.monthBlock.supplies.toLocaleString()}<span style={{ fontSize: fs(13), marginLeft: 1 }}>₽</span>
           </div>
-          <div style={{ fontSize: 10, color: s.tS, marginTop: 2 }}>Расходники</div>
+          <div style={{ fontSize: fs(10), color: s.tS, marginTop: 2 }}>Расходники</div>
         </Glass>
         <Glass s={s} style={{ padding: "12px 10px", textAlign: "center" }}>
-          <div style={{ fontSize: 18, marginBottom: 4 }}>✨</div>
-          <div style={{ fontFamily: H, fontSize: 18, color: s.acc, fontWeight: 500 }}>
+          <div style={{ fontSize: fs(18), marginBottom: 4 }}>✨</div>
+          <div style={{ fontFamily: H, fontSize: fs(18), color: s.acc, fontWeight: 500 }}>
             {a.monthBlock.accuracy}%
           </div>
-          <div style={{ fontSize: 10, color: s.tS, marginTop: 2 }}>Сбылось</div>
+          <div style={{ fontSize: fs(10), color: s.tS, marginTop: 2 }}>Сбылось</div>
         </Glass>
         <Glass s={s} style={{ padding: "12px 10px", textAlign: "center" }}>
-          <div style={{ fontSize: 18, marginBottom: 4 }}>🃏</div>
-          <div style={{ fontFamily: H, fontSize: 18, color: s.text, fontWeight: 500 }}>
+          <div style={{ fontSize: fs(18), marginBottom: 4 }}>🃏</div>
+          <div style={{ fontFamily: H, fontSize: fs(18), color: s.text, fontWeight: 500 }}>
             {a.monthBlock.sessions}
           </div>
-          <div style={{ fontSize: 10, color: s.tS, marginTop: 2 }}>Сеансов</div>
+          <div style={{ fontSize: fs(10), color: s.tS, marginTop: 2 }}>Сеансов</div>
         </Glass>
       </div>
 
@@ -2130,7 +2135,7 @@ function ArDay({ s, openClient, navigate, openMoonPhases }) {
                 <span
                   style={{
                     fontFamily: "'SF Mono', Menlo, monospace",
-                    fontSize: 12,
+                    fontSize: fs(12),
                     color: s.acc,
                     fontWeight: 500,
                     minWidth: 38,
@@ -2149,7 +2154,7 @@ function ArDay({ s, openClient, navigate, openMoonPhases }) {
                     alignItems: "center",
                     justifyContent: "center",
                     fontFamily: H,
-                    fontSize: 13,
+                    fontSize: fs(13),
                     fontWeight: 500,
                     flexShrink: 0,
                   }}
@@ -2157,12 +2162,12 @@ function ArDay({ s, openClient, navigate, openMoonPhases }) {
                   {x.client[0]}
                 </div>
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: 13, color: s.text, fontWeight: 500 }}>{x.client}</div>
-                  <div style={{ fontSize: 10, color: s.tM, marginTop: 2 }}>
+                  <div style={{ fontSize: fs(13), color: s.text, fontWeight: 500 }}>{x.client}</div>
+                  <div style={{ fontSize: fs(10), color: s.tM, marginTop: 2 }}>
                     {x.type} · {x.area}
                   </div>
                 </div>
-                <ChevronRight size={16} color={s.tS} />
+                <ChevronRight size={fs(16)} color={s.tS} />
               </Glass>
             );
           })}
@@ -2194,14 +2199,14 @@ function ArDay({ s, openClient, navigate, openMoonPhases }) {
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div
                   style={{
-                    fontSize: 13,
+                    fontSize: fs(13),
                     color: s.text,
                     textDecoration: done[w.id] ? "line-through" : "none",
                   }}
                 >
                   {w.title}
                 </div>
-                <div style={{ fontSize: 10, color: s.tM, marginTop: 2 }}>{w.cat}</div>
+                <div style={{ fontSize: fs(10), color: s.tM, marginTop: 2 }}>{w.cat}</div>
               </div>
               <PrioDot s={s} prio={w.prio} />
             </Glass>
@@ -2235,9 +2240,9 @@ function ArSessions({ s, openSession }) {
           alignItems: "baseline",
         }}
       >
-        <span style={{ fontFamily: H, fontSize: 20, color: s.text }}>Расклады</span>
+        <span style={{ fontFamily: H, fontSize: fs(20), color: s.text }}>Расклады</span>
         {unchecked > 0 && (
-          <span style={{ fontSize: 11, color: s.amber }}>⏳ {unchecked} непроверено</span>
+          <span style={{ fontSize: fs(11), color: s.amber }}>⏳ {unchecked} непроверено</span>
         )}
       </div>
       <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
@@ -2265,16 +2270,16 @@ function ArSessions({ s, openSession }) {
           >
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "start", gap: 8 }}>
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: 14, color: s.text, fontWeight: 500, fontFamily: H }}>
+                <div style={{ fontSize: fs(14), color: s.text, fontWeight: 500, fontFamily: H }}>
                   {x.q || "без темы"}
                 </div>
-                <div style={{ fontSize: 10, color: s.tM, marginTop: 3 }}>
+                <div style={{ fontSize: fs(10), color: s.tM, marginTop: 3 }}>
                   {[x.type, x.deck, x.client, x.date].filter(Boolean).join(" · ")}
                 </div>
                 {cardsBrief && (
                   <div
                     style={{
-                      fontSize: 11,
+                      fontSize: fs(11),
                       color: s.tS,
                       marginTop: 3,
                       fontStyle: "italic",
@@ -2287,7 +2292,7 @@ function ArSessions({ s, openSession }) {
                   </div>
                 )}
               </div>
-              <span style={{ fontSize: 14, flexShrink: 0 }}>{doneGlyph}</span>
+              <span style={{ fontSize: fs(14), flexShrink: 0 }}>{doneGlyph}</span>
             </div>
           </Glass>
         );
@@ -2311,7 +2316,7 @@ function ArClients({ s, openClient }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
       <Glass s={s} glow>
-        <span style={{ fontFamily: H, fontSize: 20, color: s.text }}>Клиенты</span>
+        <span style={{ fontFamily: H, fontSize: fs(20), color: s.text }}>Клиенты</span>
         <div style={{ display: "flex", gap: 6, marginTop: 10 }}>
           <Metric s={s} v={total} sub="всего" />
           <Metric
@@ -2351,7 +2356,7 @@ function ArClients({ s, openClient }) {
                   display: "flex",
                   alignItems: "center",
                   justifyContent: "center",
-                  fontSize: 14,
+                  fontSize: fs(14),
                   color: s.acc,
                   fontWeight: 500,
                   fontFamily: H,
@@ -2360,19 +2365,19 @@ function ArClients({ s, openClient }) {
                 {c.initial}
               </div>
               <div>
-                <div style={{ fontSize: 13, color: s.text, fontWeight: 500 }}>
+                <div style={{ fontSize: fs(13), color: s.text, fontWeight: 500 }}>
                   {c.status} {c.name}
                   {c.self && (
-                    <span style={{ color: s.tS, fontWeight: 400, fontSize: 11 }}> · я</span>
+                    <span style={{ color: s.tS, fontWeight: 400, fontSize: fs(11) }}> · я</span>
                   )}
                 </div>
-                <div style={{ fontSize: 10, color: s.tM }}>
+                <div style={{ fontSize: fs(10), color: s.tM }}>
                   {c.sessions} сеансов · {c.rituals} ритуалов
                 </div>
               </div>
             </div>
             {c.debt > 0 && (
-              <span style={{ fontSize: 13, color: s.red, fontWeight: 500 }}>
+              <span style={{ fontSize: fs(13), color: s.red, fontWeight: 500 }}>
                 {c.debt.toLocaleString()} ₽
               </span>
             )}
@@ -2398,7 +2403,7 @@ function ArRituals({ s, openRitual }) {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-      <div style={{ fontFamily: H, fontSize: 20, color: s.text }}>Ритуалы</div>
+      <div style={{ fontFamily: H, fontSize: fs(20), color: s.text }}>Ритуалы</div>
       <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
         {goals.map((g) => (
           <Pill key={g} s={s} active={goal === g} onClick={() => setGoal(g)}>
@@ -2420,14 +2425,14 @@ function ArRituals({ s, openRitual }) {
         >
           <div style={{ display: "flex", justifyContent: "space-between" }}>
             <div>
-              <div style={{ fontSize: 14, color: s.text, fontWeight: 500, fontFamily: H }}>
+              <div style={{ fontSize: fs(14), color: s.text, fontWeight: 500, fontFamily: H }}>
                 {r.name}
               </div>
-              <div style={{ fontSize: 10, color: s.tM, marginTop: 3 }}>
+              <div style={{ fontSize: fs(10), color: s.tM, marginTop: 3 }}>
                 {[r.goal, r.place, r.type, r.date].filter(Boolean).join(" · ")}
               </div>
             </div>
-            <span style={{ fontSize: 16 }}>{r.result}</span>
+            <span style={{ fontSize: fs(16) }}>{r.result}</span>
           </div>
         </Glass>
       ))}
@@ -2452,7 +2457,7 @@ function ArGrimoire({ s, openGrimoire }) {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-      <div style={{ fontFamily: H, fontSize: 20, color: s.text }}>Гримуар</div>
+      <div style={{ fontFamily: H, fontSize: fs(20), color: s.text }}>Гримуар</div>
       <SearchInput s={s} value={q} onChange={setQ} placeholder="Поиск в гримуаре" />
       <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
         {cats.map((c) => (
@@ -2474,10 +2479,10 @@ function ArGrimoire({ s, openGrimoire }) {
           onClick={openGrimoire ? () => openGrimoire({ id: g.id }) : undefined}
         >
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-            <span style={{ fontSize: 13, color: s.text }}>{g.name}</span>
-            <span style={{ fontSize: 13 }}>{g.theme}</span>
+            <span style={{ fontSize: fs(13), color: s.text }}>{g.name}</span>
+            <span style={{ fontSize: fs(13) }}>{g.theme}</span>
           </div>
-          <div style={{ fontSize: 10, color: s.tM, marginTop: 2 }}>{g.cat}</div>
+          <div style={{ fontSize: fs(10), color: s.tM, marginTop: 2 }}>{g.cat}</div>
         </Glass>
       ))}
     </div>
@@ -2525,34 +2530,34 @@ function ArStats({ s }) {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-      <div style={{ fontFamily: H, fontSize: 20, color: s.text }}>Точность</div>
+      <div style={{ fontFamily: H, fontSize: fs(20), color: s.text }}>Точность</div>
 
       {unchecked.length > 0 && (
         <Glass s={s} accent={s.amber} style={{ padding: "12px 14px" }}>
           <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8, alignItems: "baseline" }}>
-            <span style={{ fontSize: 13, color: s.text, fontWeight: 500 }}>❗ Ждут проверки</span>
-            <span style={{ fontSize: 11, color: s.tS }}>{unchecked.length}</span>
+            <span style={{ fontSize: fs(13), color: s.text, fontWeight: 500 }}>❗ Ждут проверки</span>
+            <span style={{ fontSize: fs(11), color: s.tS }}>{unchecked.length}</span>
           </div>
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
             {unchecked.slice(0, 8).map((sess) => (
               <div key={sess.id} style={{ background: s.card, borderRadius: 8, padding: "8px 10px" }}>
-                <div style={{ fontSize: 12, color: s.text, fontWeight: 500 }}>
+                <div style={{ fontSize: fs(12), color: s.text, fontWeight: 500 }}>
                   {sess.question || sess.title || "Без темы"}
                 </div>
-                <div style={{ fontSize: 10, color: s.tM, marginBottom: 6 }}>
+                <div style={{ fontSize: fs(10), color: s.tM, marginBottom: 6 }}>
                   {sess.client || ""}{sess.date ? ` · ${formatDate(sess.date)}` : ""}
                 </div>
                 <div style={{ display: "flex", gap: 4 }}>
                   <div onClick={() => doVerify(sess.id, "✅ Да")}
-                       style={{ flex: 1, textAlign: "center", padding: "4px", borderRadius: 6, background: s.good + "33", color: s.good, fontSize: 11, cursor: "pointer" }}>
+                       style={{ flex: 1, textAlign: "center", padding: "4px", borderRadius: 6, background: s.good + "33", color: s.good, fontSize: fs(11), cursor: "pointer" }}>
                     ✅ Сбылось
                   </div>
                   <div onClick={() => doVerify(sess.id, "〰️ Частично")}
-                       style={{ flex: 1, textAlign: "center", padding: "4px", borderRadius: 6, background: s.amber + "33", color: s.amber, fontSize: 11, cursor: "pointer" }}>
+                       style={{ flex: 1, textAlign: "center", padding: "4px", borderRadius: 6, background: s.amber + "33", color: s.amber, fontSize: fs(11), cursor: "pointer" }}>
                     〰️ Частично
                   </div>
                   <div onClick={() => doVerify(sess.id, "❌ Нет")}
-                       style={{ flex: 1, textAlign: "center", padding: "4px", borderRadius: 6, background: s.red + "33", color: s.red, fontSize: 11, cursor: "pointer" }}>
+                       style={{ flex: 1, textAlign: "center", padding: "4px", borderRadius: 6, background: s.red + "33", color: s.red, fontSize: fs(11), cursor: "pointer" }}>
                     ❌ Нет
                   </div>
                 </div>
@@ -2564,13 +2569,13 @@ function ArStats({ s }) {
 
       {/* Большой процент */}
       <Glass s={s} glow style={{ textAlign: "center", padding: "22px 14px" }}>
-        <div style={{ fontSize: 11, color: s.tS, marginBottom: 6 }}>
+        <div style={{ fontSize: fs(11), color: s.tS, marginBottom: 6 }}>
           Общий процент сбывшихся раскладов
         </div>
         <div
           style={{
             fontFamily: H,
-            fontSize: 52,
+            fontSize: fs(52),
             fontWeight: 600,
             color: s.acc,
             lineHeight: 1,
@@ -2579,14 +2584,14 @@ function ArStats({ s }) {
         >
           {pct}%
         </div>
-        <div style={{ fontSize: 11, color: s.tM, marginTop: 6 }}>
+        <div style={{ fontSize: fs(11), color: s.tM, marginTop: 6 }}>
           за всё время · {allVer} проверенных
         </div>
       </Glass>
 
       {/* Финансы практики */}
       <Glass s={s}>
-        <div style={{ fontFamily: H, fontSize: 13, color: s.tS, marginBottom: 8 }}>
+        <div style={{ fontFamily: H, fontSize: fs(13), color: s.tS, marginBottom: 8 }}>
           Финансы практики · апрель
         </div>
         <div style={{ display: "flex", gap: 6 }}>
@@ -2612,11 +2617,11 @@ function ArStats({ s }) {
               }}
             >
               <span
-                style={{ fontSize: 14, color: s.text, fontWeight: 500, fontFamily: H }}
+                style={{ fontSize: fs(14), color: s.text, fontWeight: 500, fontFamily: H }}
               >
                 {m.name}
               </span>
-              <span style={{ fontSize: 16, color: s.acc, fontWeight: 600, fontFamily: H }}>
+              <span style={{ fontSize: fs(16), color: s.acc, fontWeight: 600, fontFamily: H }}>
                 {mp}%
               </span>
             </div>
@@ -2640,7 +2645,7 @@ function ArStats({ s }) {
                 <div style={{ flex: m.no, background: "#ef4444", borderRadius: 4 }} />
               )}
             </div>
-            <div style={{ display: "flex", gap: 12, marginTop: 6, fontSize: 11 }}>
+            <div style={{ display: "flex", gap: 12, marginTop: 6, fontSize: fs(11) }}>
               <span style={{ color: "#22c55e" }}>✓ {m.yes}</span>
               <span style={{ color: "#f59e0b" }}>~ {m.partial}</span>
               <span style={{ color: "#ef4444" }}>✗ {m.no}</span>
@@ -2718,8 +2723,8 @@ function SessionPhoto({ s, id, url, onUploaded }) {
           border: `1.5px dashed ${s.brd}`, cursor: busy ? "wait" : "pointer",
         }}
       >
-        <Camera size={26} color={s.tM} style={{ margin: "0 auto 6px", display: "block" }} />
-        <div style={{ fontSize: 11, color: s.tS }}>
+        <Camera size={fs(26)} color={s.tM} style={{ margin: "0 auto 6px", display: "block" }} />
+        <div style={{ fontSize: fs(11), color: s.tS }}>
           {busy ? "Загружаю..." : "Нажми чтобы загрузить фото расклада"}
         </div>
       </Glass>
@@ -2752,13 +2757,13 @@ function SessionSummary({ s, id, interp }) {
     <Glass s={s} style={{ padding: "10px 14px", marginBottom: 8 }}>
       <div
         onClick={() => setExpanded(!expanded)}
-        style={{ display: "flex", justifyContent: "space-between", cursor: "pointer", fontSize: 12, color: s.acc, fontWeight: 500 }}
+        style={{ display: "flex", justifyContent: "space-between", cursor: "pointer", fontSize: fs(12), color: s.acc, fontWeight: 500 }}
       >
         <span>⚡ Короткая суть</span>
         <span>{expanded ? "▾" : "▸"}</span>
       </div>
       {expanded && (
-        <div style={{ marginTop: 6, fontSize: 13, color: s.text, lineHeight: 1.5 }}>
+        <div style={{ marginTop: 6, fontSize: fs(13), color: s.text, lineHeight: 1.5 }}>
           {summary ? (
             summary
           ) : (
@@ -2767,7 +2772,7 @@ function SessionSummary({ s, id, interp }) {
               style={{
                 display: "inline-block", padding: "4px 10px", borderRadius: 6,
                 background: `${s.acc}22`, color: s.acc, cursor: busy ? "wait" : "pointer",
-                fontSize: 12,
+                fontSize: fs(12),
               }}
             >
               {busy ? "Генерирую..." : "Сгенерировать саммари"}
@@ -2799,15 +2804,15 @@ function TarotCardTile({ s, card, deckId }) {
           width: "100%", aspectRatio: "2/3", borderRadius: 8,
           background: s.card, border: `1px solid ${s.brd}`,
           display: "flex", alignItems: "center", justifyContent: "center",
-          fontSize: 32,
+          fontSize: fs(32),
         }}>🃏</div>
       )}
       <div style={{ textAlign: "center", width: "100%" }}>
-        <div style={{ fontSize: 11, color: s.text, fontWeight: 500, lineHeight: 1.2 }}>
+        <div style={{ fontSize: fs(11), color: s.text, fontWeight: 500, lineHeight: 1.2 }}>
           {card.en || card.raw || "—"}
         </div>
         {card.ru && (
-          <div style={{ fontSize: 10, color: s.tM, lineHeight: 1.2 }}>
+          <div style={{ fontSize: fs(10), color: s.tM, lineHeight: 1.2 }}>
             {card.ru}
           </div>
         )}
@@ -2830,7 +2835,7 @@ function SessionDetail({ s, id }) {
         <div
           style={{
             fontFamily: H,
-            fontSize: 20,
+            fontSize: fs(20),
             color: s.text,
             fontWeight: 500,
             marginBottom: 8,
@@ -2843,7 +2848,7 @@ function SessionDetail({ s, id }) {
             display: "grid",
             gridTemplateColumns: "auto 1fr auto 1fr",
             gap: "4px 10px",
-            fontSize: 12,
+            fontSize: fs(12),
           }}
         >
           <span style={{ color: s.tS }}>👤 Клиент</span>
@@ -2859,7 +2864,7 @@ function SessionDetail({ s, id }) {
             </>
           )}
           <span style={{ color: s.tS }}>❓ Вопрос</span>
-          <span style={{ color: s.text, fontSize: 11 }}>
+          <span style={{ color: s.text, fontSize: fs(11) }}>
             {x.q.length > 18 ? x.q.slice(0, 18) + "…" : x.q}
           </span>
           <span style={{ color: s.tS }}>💳 Оплата</span>
@@ -2896,14 +2901,14 @@ function SessionDetail({ s, id }) {
       {x.bottomCard && (
         <Glass s={s} accent={s.acc} style={{ marginTop: 10, padding: "10px 12px" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <span style={{ fontSize: 24, flexShrink: 0 }}>🂠</span>
+            <span style={{ fontSize: fs(24), flexShrink: 0 }}>🂠</span>
             <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontSize: 10, color: s.tS }}>Дно</div>
-              <div style={{ fontSize: 14, color: s.text, fontWeight: 500 }}>
+              <div style={{ fontSize: fs(10), color: s.tS }}>Дно</div>
+              <div style={{ fontSize: fs(14), color: s.text, fontWeight: 500 }}>
                 {x.bottomCard.en || x.bottomCard.raw || "—"}
               </div>
               {x.bottomCard.ru && (
-                <div style={{ fontSize: 11, color: s.tM }}>{x.bottomCard.ru}</div>
+                <div style={{ fontSize: fs(11), color: s.tM }}>{x.bottomCard.ru}</div>
               )}
             </div>
             {x.bottomCard.file && (
@@ -2922,7 +2927,7 @@ function SessionDetail({ s, id }) {
       <SectionLabel s={s}>Трактовка</SectionLabel>
       <Glass s={s} accent={s.acc} style={{ padding: "12px 14px" }}>
         <div
-          style={{ fontSize: 13, color: s.text, lineHeight: 1.6 }}
+          style={{ fontSize: fs(13), color: s.text, lineHeight: 1.6 }}
           dangerouslySetInnerHTML={{ __html: sanitizeHtml(x.interp) }}
         />
       </Glass>
@@ -2973,7 +2978,7 @@ function VerifyButtons({ s, id, path, action, options, onDone }) {
               background: s.card,
               border: `1px solid ${b.c}44`,
               color: b.c,
-              fontSize: 12,
+              fontSize: fs(12),
               fontWeight: 500,
               cursor: busy ? "progress" : "pointer",
               opacity: busy ? 0.6 : 1,
@@ -3005,7 +3010,7 @@ function RitualDetail({ s, id }) {
         <div
           style={{
             fontFamily: H,
-            fontSize: 20,
+            fontSize: fs(20),
             color: s.text,
             fontWeight: 500,
             marginBottom: 8,
@@ -3018,7 +3023,7 @@ function RitualDetail({ s, id }) {
             display: "grid",
             gridTemplateColumns: "auto 1fr auto 1fr",
             gap: "4px 10px",
-            fontSize: 12,
+            fontSize: fs(12),
           }}
         >
           <span style={{ color: s.tS }}>👤 Клиент</span>
@@ -3032,7 +3037,7 @@ function RitualDetail({ s, id }) {
           {r.question && (
             <>
               <span style={{ color: s.tS }}>❓ Вопрос</span>
-              <span style={{ color: s.text, gridColumn: "2 / span 3", fontSize: 11 }}>
+              <span style={{ color: s.text, gridColumn: "2 / span 3", fontSize: fs(11) }}>
                 {r.question}
               </span>
             </>
@@ -3057,7 +3062,7 @@ function RitualDetail({ s, id }) {
 
       {/* Расходники */}
       <Glass s={s} style={{ padding: "12px 14px", marginBottom: 10 }}>
-        <div style={{ fontSize: 13, color: s.text, fontWeight: 500, marginBottom: 8 }}>
+        <div style={{ fontSize: fs(13), color: s.text, fontWeight: 500, marginBottom: 8 }}>
           🕯️ Расходники
         </div>
         {r.supplies.map((x, i) => (
@@ -3067,7 +3072,7 @@ function RitualDetail({ s, id }) {
               display: "flex",
               justifyContent: "space-between",
               padding: "4px 0",
-              fontSize: 12,
+              fontSize: fs(12),
               color: s.text,
             }}
           >
@@ -3082,7 +3087,7 @@ function RitualDetail({ s, id }) {
             paddingTop: 6,
             display: "flex",
             justifyContent: "space-between",
-            fontSize: 13,
+            fontSize: fs(13),
             fontWeight: 500,
             color: s.acc,
           }}
@@ -3095,35 +3100,35 @@ function RitualDetail({ s, id }) {
       {/* Время */}
       <Glass s={s} style={{ padding: "10px 14px", marginBottom: 10 }}>
         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-          <Clock size={14} color={s.acc} />
-          <span style={{ fontSize: 13, color: s.text, fontWeight: 500 }}>Время</span>
-          <span style={{ fontSize: 13, color: s.tS, marginLeft: "auto" }}>{r.time} мин</span>
+          <Clock size={fs(14)} color={s.acc} />
+          <span style={{ fontSize: fs(13), color: s.text, fontWeight: 500 }}>Время</span>
+          <span style={{ fontSize: fs(13), color: s.tS, marginLeft: "auto" }}>{r.time} мин</span>
         </div>
       </Glass>
 
       {/* Подношения */}
       {r.offerings && (
         <Glass s={s} style={{ padding: "10px 14px", marginBottom: 10 }}>
-          <div style={{ fontSize: 13, color: s.text, fontWeight: 500, marginBottom: 4 }}>
+          <div style={{ fontSize: fs(13), color: s.text, fontWeight: 500, marginBottom: 4 }}>
             🙏 Подношения / откуп
           </div>
-          <div style={{ fontSize: 12, color: s.tS }}>{r.offerings}</div>
+          <div style={{ fontSize: fs(12), color: s.tS }}>{r.offerings}</div>
         </Glass>
       )}
 
       {/* Силы */}
       {r.powers && (
         <Glass s={s} style={{ padding: "10px 14px", marginBottom: 10 }}>
-          <div style={{ fontSize: 13, color: s.text, fontWeight: 500, marginBottom: 4 }}>
+          <div style={{ fontSize: fs(13), color: s.text, fontWeight: 500, marginBottom: 4 }}>
             ⚡ Силы
           </div>
-          <div style={{ fontSize: 12, color: s.tS }}>{r.powers}</div>
+          <div style={{ fontSize: fs(12), color: s.tS }}>{r.powers}</div>
         </Glass>
       )}
 
       {/* Структура */}
       <Glass s={s} accent={s.acc} style={{ padding: "10px 14px" }}>
-        <div style={{ fontSize: 13, color: s.text, fontWeight: 500, marginBottom: 8 }}>
+        <div style={{ fontSize: fs(13), color: s.text, fontWeight: 500, marginBottom: 8 }}>
           📕 Структура ритуала
         </div>
         {r.structure.map((step, i) => (
@@ -3133,7 +3138,7 @@ function RitualDetail({ s, id }) {
               display: "flex",
               gap: 8,
               padding: "4px 0",
-              fontSize: 12,
+              fontSize: fs(12),
               color: s.text,
             }}
           >
@@ -3181,7 +3186,7 @@ function ClientDetail({ s, id }) {
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
-            fontSize: 28,
+            fontSize: fs(28),
             color: "#fff",
             fontFamily: H,
             fontWeight: 500,
@@ -3191,16 +3196,16 @@ function ClientDetail({ s, id }) {
           {c.initial}
         </div>
         <div style={{ flex: 1 }}>
-          <div style={{ fontFamily: H, fontSize: 22, color: s.text, fontWeight: 500 }}>
+          <div style={{ fontFamily: H, fontSize: fs(22), color: s.text, fontWeight: 500 }}>
             {c.status} {c.name}
             {c.self && (
-              <span style={{ fontSize: 13, color: s.tS, fontWeight: 400 }}> · я</span>
+              <span style={{ fontSize: fs(13), color: s.tS, fontWeight: 400 }}> · я</span>
             )}
           </div>
-          <div style={{ fontSize: 12, color: s.tS, marginTop: 3 }}>
+          <div style={{ fontSize: fs(12), color: s.tS, marginTop: 3 }}>
             {c.contact} · с {c.since}
           </div>
-          <div style={{ fontSize: 12, color: s.text, marginTop: 5 }}>
+          <div style={{ fontSize: fs(12), color: s.text, marginTop: 5 }}>
             <span style={{ color: s.tS }}>Запрос:</span> {c.request}
           </div>
         </div>
@@ -3219,10 +3224,10 @@ function ClientDetail({ s, id }) {
       </div>
 
       <Glass s={s} accent={s.acc} style={{ marginBottom: 14 }}>
-        <div style={{ fontSize: 10, color: s.tS, marginBottom: 4, display: "inline-flex", alignItems: "center", gap: 4 }}>
-          <StickyNote size={11} /> Заметки
+        <div style={{ fontSize: fs(10), color: s.tS, marginBottom: 4, display: "inline-flex", alignItems: "center", gap: 4 }}>
+          <StickyNote size={fs(11)} /> Заметки
         </div>
-        <div style={{ fontSize: 13, color: s.text, lineHeight: 1.55 }}>{c.notes}</div>
+        <div style={{ fontSize: fs(13), color: s.text, lineHeight: 1.55 }}>{c.notes}</div>
       </Glass>
 
       <SectionLabel s={s}>История</SectionLabel>
@@ -3235,11 +3240,11 @@ function ClientDetail({ s, id }) {
             padding: "8px 2px",
             alignItems: "center",
             borderBottom: `1px solid ${s.brd}`,
-            fontSize: 12,
+            fontSize: fs(12),
           }}
         >
           <span style={{ color: s.tM, minWidth: 50 }}>{h.date}</span>
-          <span style={{ fontSize: 14 }}>{h.type}</span>
+          <span style={{ fontSize: fs(14) }}>{h.type}</span>
           <span style={{ color: s.text, flex: 1 }}>{h.desc}</span>
           {h.amount > 0 && (
             <span style={{ color: s.acc, fontWeight: 500 }}>
@@ -3317,9 +3322,9 @@ function QuickAdd({ s, actions, onPick }) {
                 justifyContent: "center",
               }}
             >
-              <Ic size={20} color={s.acc} />
+              <Ic size={fs(20)} color={s.acc} />
             </div>
-            <span style={{ fontSize: 12, color: s.text, fontFamily: B }}>{a.label}</span>
+            <span style={{ fontSize: fs(12), color: s.text, fontFamily: B }}>{a.label}</span>
           </div>
         );
       })}
@@ -3346,10 +3351,10 @@ function TaskSheet({ s, task, onClose }) {
   };
   return (
     <div>
-      <div style={{ fontFamily: H, fontSize: 18, color: s.text, marginBottom: 6 }}>
+      <div style={{ fontFamily: H, fontSize: fs(18), color: s.text, marginBottom: 6 }}>
         {task.cat} {task.title}
       </div>
-      <div style={{ fontSize: 12, color: s.tS, marginBottom: 14 }}>
+      <div style={{ fontSize: fs(12), color: s.tS, marginBottom: 14 }}>
         {task.date || task.time || task.rpt || "без даты"}
         {task.prio && ` · ${task.prio}`}
         {task.streak > 0 && ` · 🔥 ${task.streak}`}
@@ -3357,25 +3362,25 @@ function TaskSheet({ s, task, onClose }) {
       <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
         <ActionRow
           s={s}
-          icon={<Check size={16} />}
+          icon={<Check size={fs(16)} />}
           label={busy === "done" ? "Сохраняю..." : "Сделано"}
           onClick={() => !busy && task.id && run("done", () => apiPost(`/api/tasks/${task.id}/done`))}
         />
         <ActionRow
           s={s}
-          icon={<Calendar size={16} />}
+          icon={<Calendar size={fs(16)} />}
           label={busy === "post" ? "Сохраняю..." : "Перенести на день"}
           onClick={() => !busy && task.id && run("post", () => apiPost(`/api/tasks/${task.id}/postpone`, { days: 1 }))}
         />
         <ActionRow
           s={s}
-          icon={<Calendar size={16} />}
+          icon={<Calendar size={fs(16)} />}
           label={busy === "post7" ? "Сохраняю..." : "Перенести на неделю"}
           onClick={() => !busy && task.id && run("post7", () => apiPost(`/api/tasks/${task.id}/postpone`, { days: 7 }))}
         />
         <ActionRow
           s={s}
-          icon={<Trash2 size={16} />}
+          icon={<Trash2 size={fs(16)} />}
           label={busy === "cancel" ? "Сохраняю..." : "Отменить"}
           onClick={() => !busy && task.id && run("cancel", () => apiPost(`/api/tasks/${task.id}/cancel`))}
           destructive
@@ -3427,7 +3432,7 @@ function Input({ s, value, onChange, placeholder, type = "text", step }) {
         padding: "10px 12px",
         color: s.text,
         fontFamily: B,
-        fontSize: 13,
+        fontSize: fs(13),
         outline: "none",
         width: "100%",
       }}
@@ -3457,7 +3462,7 @@ function SubmitBtn({ s, onClick, disabled, label = "Сохранить" }) {
         borderRadius: 12,
         background: s.acc,
         color: "#fff",
-        fontSize: 14,
+        fontSize: fs(14),
         fontWeight: 500,
         cursor: disabled ? "not-allowed" : "pointer",
         opacity: disabled ? 0.6 : 1,
@@ -3491,7 +3496,7 @@ function QuickForm({ s, kind, onDone, botType = "nexus" }) {
 
   return (
     <div style={{ padding: "12px 4px" }}>
-      <div style={{ fontSize: 13, color: s.text, marginBottom: 8 }}>
+      <div style={{ fontSize: fs(13), color: s.text, marginBottom: 8 }}>
         Coming soon 🌱 — добавление через бота.
       </div>
       <SubmitBtn s={s} onClick={onDone} label="Закрыть" />
@@ -3547,7 +3552,7 @@ function ExpenseForm({ s, onSubmit, busy, botType = "nexus" }) {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-      <div style={{ fontSize: 11, color: s.tS }}>Тип</div>
+      <div style={{ fontSize: fs(11), color: s.tS }}>Тип</div>
       <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
         {financeTypes.map((t) => (
           <Pill key={t.k} s={s} active={type === t.k} onClick={() => changeType(t.k)}>
@@ -3559,12 +3564,12 @@ function ExpenseForm({ s, onSubmit, busy, botType = "nexus" }) {
         <Input s={s} value={amount} onChange={setAmount} placeholder="Сумма, ₽" type="number" step="1" />
         <div onClick={comingSoon} style={{
           position: "absolute", right: 10, top: "50%", transform: "translateY(-50%)",
-          cursor: "pointer", opacity: 0.5, fontSize: 16,
+          cursor: "pointer", opacity: 0.5, fontSize: fs(16),
         }}>🎤</div>
       </div>
       {type !== "practice_income" && (
         <>
-          <div style={{ fontSize: 11, color: s.tS }}>Категория</div>
+          <div style={{ fontSize: fs(11), color: s.tS }}>Категория</div>
           <PillSelect s={s} value={cat} onChange={setCat} options={catsForType} />
         </>
       )}
@@ -3574,7 +3579,7 @@ function ExpenseForm({ s, onSubmit, busy, botType = "nexus" }) {
         } />
         <div onClick={comingSoon} style={{
           position: "absolute", right: 10, top: "50%", transform: "translateY(-50%)",
-          cursor: "pointer", opacity: 0.5, fontSize: 16,
+          cursor: "pointer", opacity: 0.5, fontSize: fs(16),
         }}>📸</div>
       </div>
       <SubmitBtn
@@ -3633,16 +3638,16 @@ function TaskForm({ s, onSubmit, busy }) {
         <Input s={s} value={title} onChange={setTitle} placeholder="Название задачи" />
         <div onClick={comingSoon} style={{
           position: "absolute", right: 10, top: "50%", transform: "translateY(-50%)",
-          cursor: "pointer", opacity: 0.5, fontSize: 16,
+          cursor: "pointer", opacity: 0.5, fontSize: fs(16),
         }}>🎤</div>
       </div>
-      <div style={{ fontSize: 11, color: s.tS }}>Категория</div>
+      <div style={{ fontSize: fs(11), color: s.tS }}>Категория</div>
       {cats.length > 0 ? (
         <PillSelect s={s} value={cat} onChange={setCat} options={cats} />
       ) : (
         <Input s={s} value={cat} onChange={setCat} placeholder="🏠 Дом" />
       )}
-      <div style={{ fontSize: 11, color: s.tS }}>Приоритет</div>
+      <div style={{ fontSize: fs(11), color: s.tS }}>Приоритет</div>
       <PillSelect s={s} value={prio} onChange={setPrio} options={PRIOS} />
       <div style={{ display: "flex", gap: 8 }}>
         <div style={{ flex: 1 }}>
@@ -3652,7 +3657,7 @@ function TaskForm({ s, onSubmit, busy }) {
           <Input s={s} value={time} onChange={setTime} placeholder="чч:мм" type="time" />
         </div>
       </div>
-      <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: s.text, cursor: "pointer" }}>
+      <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: fs(12), color: s.text, cursor: "pointer" }}>
         <input type="checkbox" checked={wantsReminder} onChange={(e) => setWantsReminder(e.target.checked)} />
         🔔 Напоминание
       </label>
@@ -3712,7 +3717,7 @@ function NoteForm({ s, onSubmit, busy }) {
             padding: "10px 12px",
             color: s.text,
             fontFamily: B,
-            fontSize: 13,
+            fontSize: fs(13),
             outline: "none",
             width: "100%",
             resize: "vertical",
@@ -3720,10 +3725,10 @@ function NoteForm({ s, onSubmit, busy }) {
         />
         <div onClick={comingSoon} style={{
           position: "absolute", right: 10, top: 10,
-          cursor: "pointer", opacity: 0.5, fontSize: 16,
+          cursor: "pointer", opacity: 0.5, fontSize: fs(16),
         }}>🎤</div>
       </div>
-      <div style={{ fontSize: 11, color: s.tS }}>Категория</div>
+      <div style={{ fontSize: fs(11), color: s.tS }}>Категория</div>
       <PillSelect
         s={s}
         value={cat}
@@ -3767,7 +3772,7 @@ function ListAddForm({ s, onSubmit, busy }) {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-      <div style={{ fontSize: 11, color: s.tS }}>Тип</div>
+      <div style={{ fontSize: fs(11), color: s.tS }}>Тип</div>
       <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
         <Pill s={s} active={type === "buy"} onClick={() => setType("buy")}>🛒 Покупки</Pill>
         <Pill s={s} active={type === "check"} onClick={() => setType("check")}>📋 Чеклист</Pill>
@@ -3782,20 +3787,20 @@ function ListAddForm({ s, onSubmit, busy }) {
           </div>
           {names.length > 1 && (
             <div onClick={() => removeRow(i)} style={{
-              cursor: "pointer", color: s.tS, fontSize: 18, padding: "0 6px",
+              cursor: "pointer", color: s.tS, fontSize: fs(18), padding: "0 6px",
             }}>×</div>
           )}
         </div>
       ))}
       {names.length < 20 && (
         <div onClick={addRow} style={{
-          fontSize: 12, color: s.acc, cursor: "pointer", textAlign: "center", padding: "4px 0",
+          fontSize: fs(12), color: s.acc, cursor: "pointer", textAlign: "center", padding: "4px 0",
         }}>+ добавить ещё</div>
       )}
 
       {type !== "check" && (
         <>
-          <div style={{ fontSize: 11, color: s.tS }}>Категория</div>
+          <div style={{ fontSize: fs(11), color: s.tS }}>Категория</div>
           <PillSelect
             s={s}
             value={cat}
@@ -3852,7 +3857,7 @@ function ClientForm({ s, onSubmit, busy }) {
       <Input s={s} value={name} onChange={setName} placeholder="Имя" />
       <Input s={s} value={contact} onChange={setContact} placeholder="Контакт (@telegram или телефон)" />
       <Input s={s} value={request} onChange={setRequest} placeholder="Запрос / тема" />
-      <div style={{ fontSize: 11, color: s.tS }}>Статус</div>
+      <div style={{ fontSize: fs(11), color: s.tS }}>Статус</div>
       <Select
         s={s}
         value={status}
@@ -4075,7 +4080,7 @@ export default function App() {
             border: `1px solid ${sky.brd}`,
             backdropFilter: "blur(10px)",
             cursor: "pointer",
-            fontSize: 11,
+            fontSize: fs(11),
             color: sky.tS,
             userSelect: "none",
             display: "flex",
@@ -4085,18 +4090,18 @@ export default function App() {
         >
           {isDay ? (
             <>
-              <Moon size={13} color={sky.tS} /> →
+              <Moon size={fs(13)} color={sky.tS} /> →
             </>
           ) : (
             <>
-              ← <Sun size={13} color={sky.tS} />
+              ← <Sun size={fs(13)} color={sky.tS} />
             </>
           )}
         </div>
       </div>
 
       {/* BODY */}
-      <div style={{ padding: "6px 14px 110px", position: "relative", zIndex: 2 }}>
+      <div style={{ padding: "6px 14px 140px", position: "relative", zIndex: 2 }}>
         {Scr && <Scr {...shared} />}
       </div>
 
@@ -4130,10 +4135,10 @@ export default function App() {
               onClick={() => setPage(t.k)}
               style={{
                 flex: 1,
-                maxWidth: 74,
+                maxWidth: 110,
                 textAlign: "center",
-                padding: "7px 2px",
-                borderRadius: 12,
+                padding: "10px 2px",
+                borderRadius: 14,
                 cursor: "pointer",
                 background: active ? `${sky.acc}25` : "transparent",
                 color: active ? sky.text : sky.tS,
@@ -4142,15 +4147,15 @@ export default function App() {
             >
               <div style={{ display: "flex", justifyContent: "center" }}>
                 <Ic
-                  size={19}
+                  size={fs(19)}
                   color={active ? sky.text : sky.tS}
                   strokeWidth={active ? 2 : 1.6}
                 />
               </div>
               <div
                 style={{
-                  fontSize: 9,
-                  marginTop: 3,
+                  fontSize: fs(11),
+                  marginTop: 4,
                   fontWeight: active ? 500 : 400,
                 }}
               >
@@ -4260,12 +4265,12 @@ function StreaksSheet({ s, open }) {
     <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
       <Glass s={s} accent={s.amber} glow>
         <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
-          <div style={{ fontSize: 42 }}>🔥</div>
+          <div style={{ fontSize: fs(42) }}>🔥</div>
           <div style={{ flex: 1 }}>
-            <div style={{ fontFamily: H, fontSize: 22, color: s.text, fontWeight: 500 }}>
+            <div style={{ fontFamily: H, fontSize: fs(22), color: s.text, fontWeight: 500 }}>
               {data?.current || 0} дней
             </div>
-            <div style={{ fontSize: 12, color: s.tM }}>
+            <div style={{ fontSize: fs(12), color: s.tM }}>
               Лучший: {data?.best || 0}
               {data?.last_activity_date ? ` · последний раз ${formatDate(data.last_activity_date)}` : ""}
             </div>
@@ -4275,7 +4280,7 @@ function StreaksSheet({ s, open }) {
 
       {weekDays.length > 0 && (
         <Glass s={s}>
-          <div style={{ fontSize: 11, color: s.tS, marginBottom: 8 }}>Последние 7 дней</div>
+          <div style={{ fontSize: fs(11), color: s.tS, marginBottom: 8 }}>Последние 7 дней</div>
           <div style={{ display: "flex", gap: 6, justifyContent: "space-between" }}>
             {weekDays.map((d, i) => (
               <div key={i} style={{ flex: 1, textAlign: "center" }}>
@@ -4285,18 +4290,18 @@ function StreaksSheet({ s, open }) {
                   border: d.is_today ? `2px solid ${s.amber}` : `1px solid ${s.brd}`,
                   background: d.has_activity ? `${s.amber}44` : "transparent",
                   display: "flex", alignItems: "center", justifyContent: "center",
-                  fontSize: 18,
+                  fontSize: fs(18),
                 }}>
                   {d.has_activity ? "🔥" : ""}
                 </div>
-                <div style={{ fontSize: 10, color: s.tS, marginTop: 3 }}>{d.weekday}</div>
+                <div style={{ fontSize: fs(10), color: s.tS, marginTop: 3 }}>{d.weekday}</div>
               </div>
             ))}
           </div>
         </Glass>
       )}
 
-      <div style={{ fontSize: 11, color: s.tM, textAlign: "center" }}>
+      <div style={{ fontSize: fs(11), color: s.tM, textAlign: "center" }}>
         {/* TODO(кай): per-task streaks — нужна доп. схема */}
         Стрики по отдельным повторяющимся задачам — в разработке.
       </div>
@@ -4318,21 +4323,21 @@ function MoonPhasesSheet({ s, open }) {
     <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
       <Glass s={s} accent={s.acc} glow>
         <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
-          <div style={{ fontSize: 64, filter: "drop-shadow(0 0 10px rgba(255,255,255,0.3))" }}>
+          <div style={{ fontSize: fs(64), filter: "drop-shadow(0 0 10px rgba(255,255,255,0.3))" }}>
             {current.glyph}
           </div>
           <div style={{ flex: 1 }}>
-            <div style={{ fontFamily: H, fontSize: 22, color: s.text, fontWeight: 600 }}>
+            <div style={{ fontFamily: H, fontSize: fs(22), color: s.text, fontWeight: 600 }}>
               {current.name}
             </div>
-            <div style={{ fontSize: 14, color: s.text, opacity: 0.85, marginTop: 4 }}>
+            <div style={{ fontSize: fs(14), color: s.text, opacity: 0.85, marginTop: 4 }}>
               освещённость {current.illum}% · {isRising ? "растущая" : "убывающая"}
             </div>
           </div>
         </div>
       </Glass>
 
-      <div style={{ fontSize: 14, color: s.text, fontWeight: 600, marginBottom: 6 }}>Ближайшие фазы</div>
+      <div style={{ fontSize: fs(14), color: s.text, fontWeight: 600, marginBottom: 6 }}>Ближайшие фазы</div>
       {upcoming.map((p, i) => {
         const dt = p.date ? new Date(p.date) : null;
         const today = new Date();
@@ -4340,10 +4345,10 @@ function MoonPhasesSheet({ s, open }) {
         return (
           <Glass key={i} s={s} style={{ padding: "10px 14px", marginBottom: 4 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-              <div style={{ fontSize: 32 }}>{p.glyph}</div>
+              <div style={{ fontSize: fs(32) }}>{p.glyph}</div>
               <div style={{ flex: 1 }}>
-                <div style={{ fontSize: 15, color: s.text, fontWeight: 500 }}>{p.name}</div>
-                <div style={{ fontSize: 12, color: s.text, opacity: 0.75 }}>
+                <div style={{ fontSize: fs(15), color: s.text, fontWeight: 500 }}>{p.name}</div>
+                <div style={{ fontSize: fs(12), color: s.text, opacity: 0.75 }}>
                   {formatDate(p.date)}{daysAway !== null && daysAway > 0 ? ` · через ${daysAway} ${daysAway === 1 ? "день" : "дн."}` : ""}
                 </div>
               </div>
@@ -4363,7 +4368,7 @@ function AdhdSheet({ s, open }) {
   const view = adaptAdhd(data);
   return (
     <>
-      <div style={{ fontSize: 13, color: s.text, lineHeight: 1.6, marginBottom: 10 }}>
+      <div style={{ fontSize: fs(13), color: s.text, lineHeight: 1.6, marginBottom: 10 }}>
         {view.profile || "Профиль пока не сгенерирован."}
       </div>
       {view.records.length > 0 && (
@@ -4371,7 +4376,7 @@ function AdhdSheet({ s, open }) {
           <SectionLabel s={s}>Записи</SectionLabel>
           {view.records.map((r) => (
             <Glass key={r.id} s={s} style={{ padding: "8px 14px", marginBottom: 4 }}>
-              <div style={{ fontSize: 13, color: s.text }}>{r.text}</div>
+              <div style={{ fontSize: fs(13), color: s.text }}>{r.text}</div>
             </Glass>
           ))}
         </>
@@ -4388,17 +4393,17 @@ function GrimoireDetail({ s, id }) {
   if (!g) return null;
   return (
     <div>
-      <div style={{ fontFamily: H, fontSize: 20, color: s.text, marginBottom: 6 }}>{g.name}</div>
-      <div style={{ fontSize: 11, color: s.tS, marginBottom: 12 }}>
+      <div style={{ fontFamily: H, fontSize: fs(20), color: s.text, marginBottom: 6 }}>{g.name}</div>
+      <div style={{ fontSize: fs(11), color: s.tS, marginBottom: 12 }}>
         {g.cat}{g.themes.length > 0 ? ` · ${g.themes.join(", ")}` : ""}
       </div>
       <Glass s={s} accent={s.acc} style={{ padding: "12px 14px", marginBottom: 10 }}>
-        <div style={{ fontSize: 13, color: s.text, lineHeight: 1.6, whiteSpace: "pre-wrap" }}>
+        <div style={{ fontSize: fs(13), color: s.text, lineHeight: 1.6, whiteSpace: "pre-wrap" }}>
           {g.content || "Текст пока не заполнен."}
         </div>
       </Glass>
       {g.source && (
-        <div style={{ fontSize: 11, color: s.tS, fontStyle: "italic" }}>
+        <div style={{ fontSize: fs(11), color: s.tS, fontStyle: "italic" }}>
           Источник: {g.source}
         </div>
       )}
@@ -4424,7 +4429,7 @@ function ActionRow({ s, icon, label, onClick, destructive }) {
       }}
     >
       <span style={{ display: "flex" }}>{icon}</span>
-      <span style={{ fontSize: 14 }}>{label}</span>
+      <span style={{ fontSize: fs(14) }}>{label}</span>
     </div>
   );
 }
