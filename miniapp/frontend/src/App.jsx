@@ -1482,6 +1482,7 @@ function NxTasks({ s, openTask }) {
 function NxFinance({ s }) {
   const [tab, setTab] = useState("today");
   const [drillCat, setDrillCat] = useState(null);  // wave6.1.2
+  const [drillDebt, setDrillDebt] = useState(null);  // wave8.51
   const { data, loading, error, refetch } = useApi(`/api/finance?view=${tab}`, [tab]);
 
   const tabsUi = (
@@ -1673,7 +1674,11 @@ function NxFinance({ s }) {
             <SectionLabel s={s}>Долги</SectionLabel>
             {debts.length === 0 && <Empty s={s} text="Долгов нет 🌿" />}
             {debts.map((d, i) => (
-              <Glass key={i} s={s} accent={s.amber} style={{ padding: "10px 14px", marginBottom: 4 }}>
+              <Glass
+                key={i} s={s} accent={s.amber}
+                style={{ padding: "10px 14px", marginBottom: 4, cursor: "pointer" }}
+                onClick={() => setDrillDebt(d)}
+              >
                 <div style={{ display: "flex", justifyContent: "space-between" }}>
                   <span style={{ fontSize: fs(16), color: s.text, fontWeight: 500 }}>
                     {d.n}
@@ -1683,7 +1688,8 @@ function NxFinance({ s }) {
                   </span>
                 </div>
                 <div style={{ fontSize: fs(13), color: s.tM, marginTop: 3 }}>
-                  {d.by ? `до ${d.by}` : ""}{d.note ? ` · ${d.note}` : ""}
+                  {d.by && d.by !== "—" ? `до ${d.by}` : "без срока"}
+                  {d.monthly > 0 ? ` · ${d.monthly.toLocaleString()} ₽/мес` : ""}
                 </div>
                 {d.total > 0 && (
                   <div style={{ marginTop: 6 }}>
@@ -1725,6 +1731,72 @@ function NxFinance({ s }) {
       >
         {drillCat && <CategoryDrillSheet s={s} cat={drillCat.full} month={drillCat.month} />}
       </Sheet>
+
+      {/* wave8.51: drill-down sheet для долгов — график выплат + заметка */}
+      <Sheet
+        s={s}
+        open={!!drillDebt}
+        onClose={() => setDrillDebt(null)}
+        title={drillDebt ? drillDebt.n : ""}
+      >
+        {drillDebt && <DebtDrillSheet s={s} debt={drillDebt} />}
+      </Sheet>
+    </div>
+  );
+}
+
+function DebtDrillSheet({ s, debt }) {
+  const sched = debt.schedule || [];
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+      <Glass s={s} accent={s.amber} style={{ padding: "12px 14px" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+          <span style={{ fontSize: fs(13), color: s.tM }}>Сумма долга</span>
+          <span style={{ fontSize: fs(18), color: s.red, fontWeight: 600, fontFamily: H }}>
+            {debt.total.toLocaleString()} ₽
+          </span>
+        </div>
+        <div style={{ display: "flex", justifyContent: "space-between", marginTop: 6, fontSize: fs(13), color: s.tS }}>
+          <span>Срок</span><span style={{ color: s.text }}>{debt.by && debt.by !== "—" ? debt.by : "—"}</span>
+        </div>
+        {debt.monthly > 0 && (
+          <div style={{ display: "flex", justifyContent: "space-between", marginTop: 4, fontSize: fs(13), color: s.tS }}>
+            <span>Платёж</span><span style={{ color: s.text }}>{debt.monthly.toLocaleString()} ₽/мес</span>
+          </div>
+        )}
+      </Glass>
+
+      {sched.length > 0 ? (
+        <>
+          <SectionLabel s={s}>График выплат</SectionLabel>
+          <Glass s={s} style={{ padding: "10px 14px" }}>
+            {sched.map((row, i) => (
+              <div
+                key={i}
+                style={{
+                  display: "flex", justifyContent: "space-between",
+                  fontSize: fs(13), color: s.text, padding: "4px 0",
+                  borderTop: i === 0 ? "none" : `1px solid ${s.brd}`,
+                }}
+              >
+                <span style={{ color: s.tS }}>{row.month}</span>
+                <span style={{ fontFamily: H }}>{row.amount.toLocaleString()} ₽</span>
+              </div>
+            ))}
+          </Glass>
+        </>
+      ) : (
+        <Empty s={s} chill text="График не задан — нет ежемесячного платежа" />
+      )}
+
+      {debt.note && (
+        <>
+          <SectionLabel s={s}>Заметка</SectionLabel>
+          <Glass s={s} style={{ padding: "10px 14px", fontSize: fs(13), color: s.text }}>
+            {debt.note}
+          </Glass>
+        </>
+      )}
     </div>
   );
 }
