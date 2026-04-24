@@ -305,6 +305,7 @@ export function adaptFinanceGoals(data) {
       monthly: d.monthly_payment ?? 0,
       schedule: d.schedule || [],
       ends: d.ends || null,
+      takenAt: d.taken_at || null,
     })),
     goals: (data.goals || []).map((g) => ({
       n: g.name,

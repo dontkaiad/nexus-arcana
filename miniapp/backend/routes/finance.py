@@ -321,11 +321,58 @@ def _serialize_goal(g: dict, today_d: date, all_debts_close: Optional[str]) -> d
     }
 
 
+async def _find_debt_taken_dates(user_notion_id: str, today_d: date) -> dict[str, str]:
+    """Ищет в финансах доходы со словом «долг» в описании за последние 5 лет.
+    Возвращает {имя_контрагента_lowercase: ISO-дата самой ранней такой записи}.
+    """
+    start = date(today_d.year - 5, 1, 1).isoformat()
+    end = date(today_d.year + 1, 1, 1).isoformat()
+    try:
+        records = await _nexus_finance_records(user_notion_id, start, end)
+    except Exception as e:
+        logger.warning("debt taken-dates query failed: %s", e)
+        return {}
+    found: dict[str, str] = {}
+    for p in records:
+        props = p.get("properties", {})
+        type_name = select_name(props.get("Тип", {}))
+        if "Доход" not in type_name:
+            continue
+        desc = (title_text(props.get("Описание", {})) or "").lower()
+        if "долг" not in desc:
+            continue
+        date_raw = (props.get("Дата", {}).get("date") or {}).get("start") or ""
+        if not date_raw:
+            continue
+        # выбираем самую раннюю — это и есть дата взятия
+        prev = found.get(desc)
+        if prev is None or date_raw < prev:
+            found[desc] = date_raw[:10]
+    return found
+
+
+def _match_taken_date(debt_name: str, taken_map: dict[str, str]) -> Optional[str]:
+    """Подбирает дату взятия по вхождению имени контрагента в описание."""
+    needle = (debt_name or "").strip().lower()
+    if not needle:
+        return None
+    best: Optional[str] = None
+    for desc, iso in taken_map.items():
+        if needle in desc and (best is None or iso < best):
+            best = iso
+    return best
+
+
 async def _view_goals(tg_id: int) -> dict:
     user_notion_id = (await get_user_notion_id(tg_id)) or ""
     data = await load_budget_data(user_notion_id)
     today_d, _ = await today_user_tz(tg_id)
-    debts_ser = [_serialize_debt(d, today_d) for d in data.get("долги", [])]
+    taken_map = await _find_debt_taken_dates(user_notion_id, today_d)
+    debts_ser = []
+    for d in data.get("долги", []):
+        ser = _serialize_debt(d, today_d)
+        ser["taken_at"] = _match_taken_date(ser["name"], taken_map)
+        debts_ser.append(ser)
     all_close = _all_debts_close_label(debts_ser)
     goals_ser = [_serialize_goal(g, today_d, all_close) for g in data.get("цели", [])]
     return {
