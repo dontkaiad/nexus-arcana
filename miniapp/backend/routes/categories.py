@@ -7,7 +7,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from core.config import config
-from core.notion_client import query_pages
+from core.notion_client import query_pages, get_db_options
 from core.user_manager import get_user_notion_id
 
 from miniapp.backend.auth import current_user_id
@@ -99,8 +99,18 @@ async def get_categories(
     if not db_id:
         return {"type": type, "categories": defaults}
 
+    # wave8.66: для списков/памяти тянем полный набор опций select из схемы Notion —
+    # чтобы подхватывались все опции, даже если по ним пока нет записей.
+    schema_opts: list[str] = []
+    if type in ("list", "memory"):
+        try:
+            schema_opts = await get_db_options(db_id, "Категория")
+        except Exception as e:
+            logger.warning("get_db_options failed: %s", e)
+        if schema_opts:
+            return {"type": type, "categories": schema_opts}
+
     existing = await _distinct_categories(db_id, user_notion_id)
-    # объединяем: существующие + дефолты которых нет в существующих
     merged = list(existing)
     for d in defaults:
         if d not in merged:
