@@ -1261,142 +1261,78 @@ function NxDay({ s, openTask, navigate, openStreaks }) {
         </Glass>
       )}
 
-      {/* wave8.19: порядок секций — Расписание → Задачи (просрочка+сегодня) → Без срока */}
-      {t.scheduled.length > 0 && (
-        <>
-          <SectionLabel s={s}>Расписание</SectionLabel>
-          {t.scheduled.map((x) => (
-            <TaskRow
-              key={x.id}
-              s={s}
-              t={x}
-              done={done[x.id]}
-              onToggle={() => toggle(x.id)}
-              onOpen={() => openTask(x)}
-              withTime
-            />
-          ))}
-        </>
+      {/* wave8.68: «Мой день» — только Расписание (просрочка + сегодня со временем).
+          Если пусто — дружелюбная заглушка. Блок «Задачи» внизу убран. */}
+      <SectionLabel s={s}>Расписание</SectionLabel>
+      {t.overdue.length === 0 && t.scheduled.length === 0 && (
+        <Glass s={s} style={{ padding: "14px 16px", marginBottom: 6 }}>
+          <div style={{ fontSize: fs(16), color: s.text, fontWeight: 500, marginBottom: 4 }}>
+            На сегодня пусто — отдыхай ✨
+          </div>
+          <div style={{ fontSize: fs(13), color: s.tM, lineHeight: 1.5 }}>
+            Если хочется чем-то заняться — загляни во вкладку «Задачи».
+          </div>
+        </Glass>
       )}
-
-      {(t.overdue.length > 0 || t.tasks.length > 0 || (t.noDate && t.noDate.length > 0)) && (
-        <>
-          <SectionLabel s={s}>Задачи</SectionLabel>
-          {t.overdue.map((o) => (
-            <Glass
-              key={o.id}
-              s={s}
-              accent={s.red}
-              style={{
-                padding: "10px 14px", marginBottom: 6,
-                display: "flex", alignItems: "center", gap: 10,
-                opacity: done[o.id] ? 0.45 : 1,
-              }}
-            >
-              <Chk s={s} done={done[o.id]} onClick={() => toggle(o.id)} />
-              <div
-                onClick={() => openTask(o)}
-                style={{
-                  flex: 1, minWidth: 0, cursor: "pointer",
-                  textDecoration: done[o.id] ? "line-through" : "none",
-                }}
-              >
-                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                  <span style={{
-                    flex: 1, fontSize: fs(16), color: s.text, fontWeight: 500,
-                    wordBreak: "break-word",
-                  }}>
-                    {o.title}
-                  </span>
-                  {o.cat && (
-                    <span style={{
-                      display: "inline-flex", alignItems: "center",
-                      padding: "3px 9px", borderRadius: 10,
-                      fontSize: fs(13), background: `${s.acc}33`, color: s.text, fontWeight: 500,
-                      flexShrink: 0, whiteSpace: "nowrap",
-                    }}>
-                      {String(o.cat).split(" ")[0]}
-                    </span>
-                  )}
-                  <PrioDot s={s} prio={o.prio} />
-                </div>
-                <div style={{
-                  fontSize: fs(13), color: s.red, fontWeight: 500,
-                  marginTop: 3, display: "flex", gap: 8,
+      {t.overdue.map((o) => (
+        <Glass
+          key={o.id}
+          s={s}
+          accent={s.red}
+          style={{
+            padding: "10px 14px", marginBottom: 6,
+            display: "flex", alignItems: "center", gap: 10,
+            opacity: done[o.id] ? 0.45 : 1,
+          }}
+        >
+          <Chk s={s} done={done[o.id]} onClick={() => toggle(o.id)} />
+          <div
+            onClick={() => openTask(o)}
+            style={{
+              flex: 1, minWidth: 0, cursor: "pointer",
+              textDecoration: done[o.id] ? "line-through" : "none",
+            }}
+          >
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <span style={{
+                flex: 1, fontSize: fs(16), color: s.text, fontWeight: 500,
+                wordBreak: "break-word",
+              }}>
+                {o.title}
+              </span>
+              {o.cat && (
+                <span style={{
+                  display: "inline-flex", alignItems: "center",
+                  padding: "3px 9px", borderRadius: 10,
+                  fontSize: fs(13), background: `${s.acc}33`, color: s.text, fontWeight: 500,
+                  flexShrink: 0, whiteSpace: "nowrap",
                 }}>
-                  <span>{o.days} д назад</span>
-                  {o.rpt && <span style={{ color: s.tM, fontWeight: 400 }}>{o.rpt}</span>}
-                </div>
-              </div>
-            </Glass>
-          ))}
-          {t.tasks.map((x) => (
-            <TaskRow
-              key={x.id}
-              s={s}
-              t={x}
-              done={done[x.id]}
-              onToggle={() => toggle(x.id)}
-              onOpen={() => openTask(x)}
-            />
-          ))}
-          {/* wave8.22: «без срока» — без отдельной шапки, тем же списком,
-              справа дата создания нейтральным цветом (не красным). */}
-          {t.noDate && [...t.noDate]
-            .sort((a, b) => PRIO_WEIGHT(a.prio) - PRIO_WEIGHT(b.prio))
-            .map((x) => (
-              <Glass
-                key={x.id}
-                s={s}
-                style={{
-                  padding: "10px 14px", marginBottom: 6,
-                  display: "flex", alignItems: "center", gap: 10,
-                  opacity: done[x.id] ? 0.45 : 1,
-                }}
-              >
-                <Chk s={s} done={done[x.id]} onClick={() => toggle(x.id)} />
-                <div
-                  onClick={() => openTask(x)}
-                  style={{
-                    flex: 1, minWidth: 0, cursor: "pointer",
-                    textDecoration: done[x.id] ? "line-through" : "none",
-                  }}
-                >
-                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                    <span style={{
-                      flex: 1, fontSize: fs(16), color: s.text, fontWeight: 500,
-                      wordBreak: "break-word",
-                    }}>
-                      {x.title}
-                    </span>
-                    {x.cat && (
-                      <span style={{
-                        display: "inline-flex", alignItems: "center",
-                        padding: "3px 9px", borderRadius: 10,
-                        fontSize: fs(13), background: `${s.acc}33`, color: s.text, fontWeight: 500,
-                        flexShrink: 0, whiteSpace: "nowrap",
-                      }}>
-                        {String(x.cat).split(" ")[0]}
-                      </span>
-                    )}
-                    <PrioDot s={s} prio={x.prio} />
-                  </div>
-                  {(x.daysSinceCreated != null || x.rpt) && (
-                    <div style={{
-                      fontSize: fs(13), color: s.tM,
-                      marginTop: 3, display: "flex", gap: 8,
-                    }}>
-                      {x.daysSinceCreated != null && (
-                        <span>{x.daysSinceCreated === 0 ? "сегодня" : `${x.daysSinceCreated} д назад`}</span>
-                      )}
-                      {x.rpt && <span>{x.rpt}</span>}
-                    </div>
-                  )}
-                </div>
-              </Glass>
-            ))}
-        </>
-      )}
+                  {String(o.cat).split(" ")[0]}
+                </span>
+              )}
+              <PrioDot s={s} prio={o.prio} />
+            </div>
+            <div style={{
+              fontSize: fs(13), color: s.red, fontWeight: 500,
+              marginTop: 3, display: "flex", gap: 8,
+            }}>
+              <span>{o.days} д назад</span>
+              {o.rpt && <span style={{ color: s.tM, fontWeight: 400 }}>{o.rpt}</span>}
+            </div>
+          </div>
+        </Glass>
+      ))}
+      {t.scheduled.map((x) => (
+        <TaskRow
+          key={x.id}
+          s={s}
+          t={x}
+          done={done[x.id]}
+          onToggle={() => toggle(x.id)}
+          onOpen={() => openTask(x)}
+          withTime
+        />
+      ))}
 
       {total === 0 && <Empty s={s} text="На сегодня пусто — отдыхай 🌿" />}
     </div>
