@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import logging
+import os
+import re
 from datetime import date, timedelta
 from typing import Any, Optional
 
@@ -11,10 +13,13 @@ from core.config import config
 from core.notion_client import query_pages
 from core.user_manager import get_user_notion_id
 from core.budget import (
+    DEBT_RE,
+    GOAL_RE,
     cat_link,
     display_limit_name,
     get_limits,
     load_budget_data,
+    parse_amount,
 )
 
 from miniapp.backend.auth import current_user_id
@@ -263,10 +268,32 @@ def _debt_schedule(amount: float, monthly_payment: float, today_d: date) -> list
     return schedule
 
 
+_MONTHLY_FALLBACK_RE = re.compile(
+    r'(\d[\d\s]*(?:[.,]\d+)?)\s*[₽р]\s*/\s*мес', re.IGNORECASE
+)
+
+
+def _extract_monthly_fallback(*texts: str) -> float:
+    """Из «20 000₽/мес — с мая 2026» вытаскивает 20000."""
+    for t in texts:
+        if not t:
+            continue
+        m = _MONTHLY_FALLBACK_RE.search(t)
+        if m:
+            try:
+                return parse_amount(m.group(1))
+            except ValueError:
+                continue
+    return 0
+
+
 def _serialize_debt(d: dict, today_d: date) -> dict:
     note = (d.get("strategy") or "").strip() or (d.get("fact") or "").strip()
     total = int(round(d.get("amount", 0)))
     monthly = int(round(d.get("monthly_payment", 0)))
+    if monthly <= 0:
+        monthly = int(round(_extract_monthly_fallback(
+            d.get("strategy") or "", d.get("fact") or "")))
     schedule = _debt_schedule(total, monthly, today_d)
     return {
         "key": d.get("key") or "",
@@ -363,6 +390,70 @@ def _match_taken_date(debt_name: str, taken_map: dict[str, str]) -> Optional[str
     return best
 
 
+async def _load_closed_budget(user_notion_id: str) -> dict[str, list[dict]]:
+    """Закрытые долги/цели (Актуально == false). closed_at = last_edited_time[:10]."""
+    from core.notion_client import db_query
+    from core.config import config
+    mem_db = os.environ.get("NOTION_DB_MEMORY") or config.nexus.db_memory
+    out: dict[str, list[dict]] = {"долги": [], "цели": []}
+    if not mem_db:
+        return out
+    key_filter = {"or": [
+        {"property": "Ключ", "rich_text": {"starts_with": "цель_"}},
+        {"property": "Ключ", "rich_text": {"starts_with": "долг_"}},
+    ]}
+    conditions: list[dict] = [
+        key_filter,
+        {"property": "Актуально", "checkbox": {"equals": False}},
+    ]
+    if user_notion_id:
+        conditions.append({"property": "🪪 Пользователи",
+                           "relation": {"contains": user_notion_id}})
+    try:
+        pages = await db_query(mem_db, filter_obj={"and": conditions}, page_size=200)
+    except Exception as e:
+        logger.warning("closed budget query failed: %s", e)
+        return out
+    for p in pages:
+        props = p.get("properties", {})
+        fact_parts = props.get("Текст", {}).get("title", [])
+        fact = fact_parts[0]["plain_text"] if fact_parts else ""
+        key_parts = props.get("Ключ", {}).get("rich_text", [])
+        key = key_parts[0]["plain_text"].strip().lower() if key_parts else ""
+        closed_at = (p.get("last_edited_time") or "")[:10] or None
+        if key.startswith("цель_"):
+            m = GOAL_RE.search(fact)
+            if not m:
+                continue
+            saving = parse_amount(m.group(3)) if m.group(3) else 0
+            out["цели"].append({
+                "key": key,
+                "name": m.group(1).strip(),
+                "target": int(round(parse_amount(m.group(2)))),
+                "saved": int(round(parse_amount(m.group(2)))),
+                "monthly": int(round(saving)),
+                "closed_at": closed_at,
+            })
+        elif key.startswith("долг_"):
+            m = DEBT_RE.search(fact)
+            if not m:
+                continue
+            mp_raw = (m.group(5) or "").strip()
+            monthly = parse_amount(mp_raw) if mp_raw else 0
+            if monthly <= 0:
+                monthly = _extract_monthly_fallback(m.group(4) or "", fact)
+            out["долги"].append({
+                "key": key,
+                "name": m.group(1).strip(),
+                "total": int(round(parse_amount(m.group(2)))),
+                "left": 0,
+                "monthly_payment": int(round(monthly)),
+                "note": (m.group(4) or "").strip() or fact,
+                "closed_at": closed_at,
+            })
+    return out
+
+
 async def _view_goals(tg_id: int) -> dict:
     user_notion_id = (await get_user_notion_id(tg_id)) or ""
     data = await load_budget_data(user_notion_id)
@@ -375,11 +466,16 @@ async def _view_goals(tg_id: int) -> dict:
         debts_ser.append(ser)
     all_close = _all_debts_close_label(debts_ser)
     goals_ser = [_serialize_goal(g, today_d, all_close) for g in data.get("цели", [])]
+    closed = await _load_closed_budget(user_notion_id)
+    closed["долги"].sort(key=lambda x: x.get("closed_at") or "", reverse=True)
+    closed["цели"].sort(key=lambda x: x.get("closed_at") or "", reverse=True)
     return {
         "view": "goals",
         "debts": debts_ser,
         "goals": goals_ser,
         "debts_close_at": all_close,
+        "closed_debts": closed["долги"],
+        "closed_goals": closed["цели"],
     }
 
 
