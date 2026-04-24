@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import timedelta
+from datetime import date, timedelta
 from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -224,37 +224,115 @@ async def _view_limits(tg_id: int, month: str) -> dict:
 
 # ── View: goals ──────────────────────────────────────────────────────────────
 
-def _serialize_debt(d: dict) -> dict:
+_RU_MONTHS = {
+    1: "января", 2: "февраля", 3: "марта", 4: "апреля", 5: "мая", 6: "июня",
+    7: "июля", 8: "августа", 9: "сентября", 10: "октября", 11: "ноября", 12: "декабря",
+}
+_RU_MONTHS_NOM = {
+    1: "январь", 2: "февраль", 3: "март", 4: "апрель", 5: "май", 6: "июнь",
+    7: "июль", 8: "август", 9: "сентябрь", 10: "октябрь", 11: "ноябрь", 12: "декабрь",
+}
+
+
+def _add_months(d: date, n: int) -> date:
+    m = d.month - 1 + n
+    y = d.year + m // 12
+    m = m % 12 + 1
+    return date(y, m, 1)
+
+
+def _debt_schedule(amount: float, monthly_payment: float, today_d: date) -> list[dict]:
+    """[{'month': 'май 2026', 'amount': 20000}, ...] — план выплат от текущего месяца.
+
+    Если monthly_payment == 0 → [] (долг отложен).
+    Кап: 60 платежей (5 лет), чтобы случайные кривые данные не разнесли ответ.
+    """
+    if monthly_payment <= 0 or amount <= 0:
+        return []
+    schedule: list[dict] = []
+    remaining = amount
+    cur = date(today_d.year, today_d.month, 1)
+    while remaining > 0 and len(schedule) < 60:
+        pay = min(remaining, monthly_payment)
+        schedule.append({
+            "month": f"{_RU_MONTHS_NOM[cur.month]} {cur.year}",
+            "amount": int(round(pay)),
+        })
+        remaining -= pay
+        cur = _add_months(cur, 1)
+    return schedule
+
+
+def _serialize_debt(d: dict, today_d: date) -> dict:
     note = (d.get("strategy") or "").strip() or (d.get("fact") or "").strip()
     total = int(round(d.get("amount", 0)))
+    monthly = int(round(d.get("monthly_payment", 0)))
+    schedule = _debt_schedule(total, monthly, today_d)
     return {
         "key": d.get("key") or "",
         "name": d.get("name", ""),
         "total": total,
-        "left": total,  # пока отдельного поля нет — см. спеку
+        "left": total,  # отдельного "left" пока нет — см. спеку
         "by": d.get("deadline") or None,
         "note": note or None,
+        "monthly_payment": monthly,
+        "schedule": schedule,
+        "ends": schedule[-1]["month"] if schedule else None,
     }
 
 
-def _serialize_goal(g: dict) -> dict:
+def _all_debts_close_label(debts_serialized: list[dict]) -> Optional[str]:
+    """Самая поздняя дата окончания платежей среди всех долгов с графиком."""
+    months_order: list[tuple[int, int, str]] = []  # (year, month_idx, label)
+    name_to_idx = {v: k for k, v in _RU_MONTHS_NOM.items()}
+    for d in debts_serialized:
+        if not d.get("ends"):
+            continue
+        try:
+            mname, year_str = d["ends"].rsplit(" ", 1)
+            months_order.append((int(year_str), name_to_idx[mname], d["ends"]))
+        except (ValueError, KeyError):
+            continue
+    if not months_order:
+        return None
+    months_order.sort()
+    return months_order[-1][2]
+
+
+def _serialize_goal(g: dict, today_d: date, all_debts_close: Optional[str]) -> dict:
+    target = int(round(g.get("target", 0)))
+    monthly = int(round(g.get("saving", 0)))
+    after: Optional[str] = None
+    if monthly > 0 and target > 0:
+        months_to = max(1, -(-target // monthly))  # ceil
+        eta = _add_months(date(today_d.year, today_d.month, 1), months_to - 1)
+        after = f"~{_RU_MONTHS[eta.month]} {eta.year}"
+    elif all_debts_close:
+        after = f"закрытия долгов (~{all_debts_close})"
+    else:
+        after = "закрытия долгов"
     return {
         "key": g.get("key") or "",
         "name": g.get("name", ""),
-        "target": int(round(g.get("target", 0))),
+        "target": target,
         "saved": 0,
-        "monthly": int(round(g.get("saving", 0))),
-        "after": None,
+        "monthly": monthly,
+        "after": after,
     }
 
 
 async def _view_goals(tg_id: int) -> dict:
     user_notion_id = (await get_user_notion_id(tg_id)) or ""
     data = await load_budget_data(user_notion_id)
+    today_d, _ = await today_user_tz(tg_id)
+    debts_ser = [_serialize_debt(d, today_d) for d in data.get("долги", [])]
+    all_close = _all_debts_close_label(debts_ser)
+    goals_ser = [_serialize_goal(g, today_d, all_close) for g in data.get("цели", [])]
     return {
         "view": "goals",
-        "debts": [_serialize_debt(d) for d in data.get("долги", [])],
-        "goals": [_serialize_goal(g) for g in data.get("цели", [])],
+        "debts": debts_ser,
+        "goals": goals_ser,
+        "debts_close_at": all_close,
     }
 
 

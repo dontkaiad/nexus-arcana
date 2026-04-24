@@ -302,6 +302,9 @@ export function adaptFinanceGoals(data) {
       left: d.left ?? d.total ?? 0,
       by: d.by || '—',
       note: d.note || '',
+      monthly: d.monthly_payment ?? 0,
+      schedule: d.schedule || [],
+      ends: d.ends || null,
     })),
     goals: (data.goals || []).map((g) => ({
       n: g.name,
