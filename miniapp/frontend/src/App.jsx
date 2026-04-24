@@ -4958,7 +4958,7 @@ function AdhdSheet({ s, open }) {
     <>
       <Glass s={s} accent={s.acc} style={{ padding: "12px 14px", marginBottom: 12 }}>
         <div style={{ fontSize: fs(13), color: s.text, lineHeight: 1.6, whiteSpace: "pre-wrap" }}>
-          {view.profile || "Профиль пока не сгенерирован."}
+          {view.profile ? renderBoldMd(view.profile) : "Профиль пока не сгенерирован."}
         </div>
       </Glass>
       {sections.map((sec) => (
