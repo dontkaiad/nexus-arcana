@@ -390,6 +390,43 @@ def _match_taken_date(debt_name: str, taken_map: dict[str, str]) -> Optional[str
     return best
 
 
+async def _load_desc_synonyms(user_notion_id: str) -> dict[str, str]:
+    """wave8.64: из записей памяти «🛒 Предпочтения» строит карту синоним→канон.
+    Формат факта: «A/B/C = canonical[, ...]» — всё слева от «=» нормализуется к тому, что справа.
+    """
+    from core.notion_client import db_query
+    mem_db = os.environ.get("NOTION_DB_MEMORY") or config.nexus.db_memory
+    if not mem_db:
+        return {}
+    conditions: list[dict] = [
+        {"property": "Категория", "select": {"equals": "🛒 Предпочтения"}},
+        {"property": "Актуально", "checkbox": {"equals": True}},
+    ]
+    if user_notion_id:
+        conditions.append({"property": "🪪 Пользователи",
+                           "relation": {"contains": user_notion_id}})
+    try:
+        pages = await db_query(mem_db, filter_obj={"and": conditions}, page_size=200)
+    except Exception as e:
+        logger.warning("desc synonyms query failed: %s", e)
+        return {}
+    syn: dict[str, str] = {}
+    for p in pages:
+        parts = p.get("properties", {}).get("Текст", {}).get("title", [])
+        fact = parts[0]["plain_text"] if parts else ""
+        if "=" not in fact:
+            continue
+        left, right = fact.split("=", 1)
+        canonical = re.split(r"[,.;]", right, maxsplit=1)[0].strip().lower()
+        if not canonical:
+            continue
+        aliases = [a.strip().lower() for a in re.split(r"[\/,]", left) if a.strip()]
+        for a in aliases:
+            syn[a] = canonical
+        syn.setdefault(canonical, canonical)
+    return syn
+
+
 async def _load_closed_budget(user_notion_id: str) -> dict[str, list[dict]]:
     """Закрытые долги/цели (Актуально == false). closed_at = last_edited_time[:10]."""
     from core.notion_client import db_query
@@ -527,6 +564,8 @@ async def get_finance_category(
         logger.warning("finance/category query failed: %s", e)
         pages = []
 
+    synonyms = await _load_desc_synonyms(user_notion_id)
+
     items: list[dict] = []
     total = 0.0
     by_desc: dict[str, float] = {}
@@ -548,7 +587,8 @@ async def get_finance_category(
             "date": date_raw[:10],
         })
         total += amount
-        key = (desc or "—").strip().lower()
+        raw_key = (desc or "—").strip().lower()
+        key = synonyms.get(raw_key, raw_key)
         by_desc[key] = by_desc.get(key, 0) + amount
 
     items.sort(key=lambda x: x["date"], reverse=True)
