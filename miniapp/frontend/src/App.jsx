@@ -1756,6 +1756,11 @@ function DebtDrillSheet({ s, debt }) {
             {debt.total.toLocaleString()} ₽
           </span>
         </div>
+        {debt.takenAt && (
+          <div style={{ display: "flex", justifyContent: "space-between", marginTop: 6, fontSize: fs(13), color: s.tS }}>
+            <span>Взят</span><span style={{ color: s.text }}>{formatDate(debt.takenAt, "full")}</span>
+          </div>
+        )}
         <div style={{ display: "flex", justifyContent: "space-between", marginTop: 6, fontSize: fs(13), color: s.tS }}>
           <span>Срок</span><span style={{ color: s.text }}>{debt.by && debt.by !== "—" ? debt.by : "—"}</span>
         </div>
