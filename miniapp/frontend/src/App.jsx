@@ -3828,6 +3828,7 @@ function QuickAdd({ s, actions, onPick }) {
 
 function TaskSheet({ s, task, onClose }) {
   const [busy, setBusy] = useState(null);
+  const [editOpen, setEditOpen] = useState(false);
   const run = async (label, fn) => {
     setBusy(label);
     try {
@@ -3904,15 +3905,30 @@ function TaskSheet({ s, task, onClose }) {
         />
       </div>
       <div style={{ marginTop: 14 }}>
-        <div style={{ fontFamily: H, fontSize: fs(15), color: s.text, marginBottom: 8 }}>
-          Перенести
+        {/* wave8.61: форма «Перенести» скрыта под дизклоужером, чтобы не
+            было дубля категории/приоритета под шапкой. */}
+        <div
+          onClick={() => setEditOpen((v) => !v)}
+          style={{
+            display: "flex", alignItems: "center", justifyContent: "space-between",
+            cursor: "pointer", padding: "6px 0",
+          }}
+        >
+          <span style={{ fontFamily: H, fontSize: fs(15), color: s.text }}>
+            Перенести
+          </span>
+          <span style={{ fontSize: fs(14), color: s.tM }}>
+            {editOpen ? "▾" : "▸"}
+          </span>
         </div>
-        <TaskEditForm
-          s={s}
-          task={task}
-          busy={busy === "edit"}
-          onSave={(payload) => run("edit", () => apiPost(`/api/tasks/${task.id}/edit`, payload))}
-        />
+        {editOpen && (
+          <TaskEditForm
+            s={s}
+            task={task}
+            busy={busy === "edit"}
+            onSave={(payload) => run("edit", () => apiPost(`/api/tasks/${task.id}/edit`, payload))}
+          />
+        )}
       </div>
       {clItems.length > 0 && (
         <>
