@@ -1668,7 +1668,13 @@ function NxFinance({ s }) {
       })()}
 
       {tab === "goals" && (() => {
-        const { debts, goals } = adaptFinanceGoals(data);
+        const { debts, goals, closedDebts, closedGoals } = adaptFinanceGoals(data);
+        const fmtClosed = (iso) => {
+          if (!iso) return "";
+          const [y, m, d] = iso.split("-");
+          const months = ["янв","фев","мар","апр","мая","июня","июля","авг","сен","окт","ноя","дек"];
+          return `${parseInt(d,10)} ${months[parseInt(m,10)-1] || m} ${y}`;
+        };
         return (
           <>
             <SectionLabel s={s}>Долги</SectionLabel>
@@ -1718,6 +1724,37 @@ function NxFinance({ s }) {
                 )}
               </Glass>
             ))}
+            {(closedDebts.length > 0 || closedGoals.length > 0) && (
+              <>
+                <SectionLabel s={s}>Закрытые</SectionLabel>
+                {closedDebts.map((d, i) => (
+                  <Glass key={`cd${i}`} s={s} style={{ padding: "10px 14px", marginBottom: 4, opacity: 0.75 }}>
+                    <div style={{ display: "flex", justifyContent: "space-between" }}>
+                      <span style={{ fontSize: fs(15), color: s.text, fontWeight: 500 }}>📋 {d.n}</span>
+                      <span style={{ fontSize: fs(14), color: s.tM, fontFamily: H }}>
+                        {d.total.toLocaleString()} ₽
+                      </span>
+                    </div>
+                    <div style={{ fontSize: fs(12), color: s.tM, marginTop: 3 }}>
+                      закрыт{d.closedAt ? ` · ${fmtClosed(d.closedAt)}` : ""}
+                    </div>
+                  </Glass>
+                ))}
+                {closedGoals.map((g, i) => (
+                  <Glass key={`cg${i}`} s={s} style={{ padding: "10px 14px", marginBottom: 4, opacity: 0.75 }}>
+                    <div style={{ display: "flex", justifyContent: "space-between" }}>
+                      <span style={{ fontSize: fs(15), color: s.text, fontWeight: 500 }}>🎯 {g.n}</span>
+                      <span style={{ fontSize: fs(14), color: s.tM, fontFamily: H }}>
+                        {g.t.toLocaleString()} ₽
+                      </span>
+                    </div>
+                    <div style={{ fontSize: fs(12), color: s.tM, marginTop: 3 }}>
+                      достигнута{g.closedAt ? ` · ${fmtClosed(g.closedAt)}` : ""}
+                    </div>
+                  </Glass>
+                ))}
+              </>
+            )}
           </>
         );
       })()}
