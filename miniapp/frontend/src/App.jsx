@@ -625,7 +625,7 @@ const Sheet = ({ s, open, onClose, title, children }) => {
           background: s.base,
           borderTopLeftRadius: 22,
           borderTopRightRadius: 22,
-          padding: "14px 16px 28px",
+          padding: "14px 16px 96px",
           maxHeight: "86%",
           overflowY: "auto",
         }}
