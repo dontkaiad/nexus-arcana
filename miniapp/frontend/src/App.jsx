@@ -4409,6 +4409,17 @@ function TaskEditForm({ s, task, busy, onSave }) {
 function NoteForm({ s, onSubmit, busy }) {
   const [text, setText] = useState("");
   const [cat, setCat] = useState("");
+  const [cats, setCats] = useState([]);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const r = await apiGet("/api/categories?type=memory");
+        if (!cancelled && r?.categories) setCats(r.categories);
+      } catch (_) { /* ignore */ }
+    })();
+    return () => { cancelled = true; };
+  }, []);
   const valid = text.trim().length > 0;
   const comingSoon = () => alert("Coming soon 🌱");
   return (
@@ -4438,12 +4449,7 @@ function NoteForm({ s, onSubmit, busy }) {
         }}>🎤</div>
       </div>
       <div style={{ fontSize: fs(11), color: s.tS }}>Категория</div>
-      <PillSelect
-        s={s}
-        value={cat}
-        onChange={setCat}
-        options={["🏡 Быт", "🐈 Коты", "👥 Люди", "⭐ Предпочтения", "🦋 СДВГ"]}
-      />
+      <PillSelect s={s} value={cat} onChange={setCat} options={cats} />
       <SubmitBtn
         s={s}
         disabled={!valid || busy}
@@ -4467,6 +4473,18 @@ function ListAddForm({ s, onSubmit, busy }) {
   const [expires, setExpires] = useState("");
   const [location, setLocation] = useState("");
   const [note, setNote] = useState("");
+  const [cats, setCats] = useState([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const r = await apiGet("/api/categories?type=list");
+        if (!cancelled && r?.categories) setCats(r.categories);
+      } catch (_) { /* ignore */ }
+    })();
+    return () => { cancelled = true; };
+  }, []);
 
   const validNames = names.map((n) => n.trim()).filter((n) => n.length > 0);
   const valid = validNames.length > 0;
@@ -4484,7 +4502,6 @@ function ListAddForm({ s, onSubmit, busy }) {
       <div style={{ fontSize: fs(11), color: s.tS }}>Тип</div>
       <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
         <Pill s={s} active={type === "buy"} onClick={() => setType("buy")}>🛒 Покупки</Pill>
-        <Pill s={s} active={type === "check"} onClick={() => setType("check")}>📋 Чеклист</Pill>
         <Pill s={s} active={type === "inv"} onClick={() => setType("inv")}>📦 Инвентарь</Pill>
       </div>
 
@@ -4507,17 +4524,8 @@ function ListAddForm({ s, onSubmit, busy }) {
         }}>+ добавить ещё</div>
       )}
 
-      {type !== "check" && (
-        <>
-          <div style={{ fontSize: fs(11), color: s.tS }}>Категория</div>
-          <PillSelect
-            s={s}
-            value={cat}
-            onChange={setCat}
-            options={["🍜 Продукты", "🧴 Бытовая химия", "🐈 Коты", "💧 Уход", "📦 Прочее"]}
-          />
-        </>
-      )}
+      <div style={{ fontSize: fs(11), color: s.tS }}>Категория</div>
+      <PillSelect s={s} value={cat} onChange={setCat} options={cats} />
       {type === "inv" && (
         <>
           <div style={{ display: "flex", gap: 6 }}>
