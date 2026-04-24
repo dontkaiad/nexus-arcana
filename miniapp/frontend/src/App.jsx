@@ -3800,13 +3800,6 @@ function QuickAdd({ s, actions, onPick }) {
 
 function TaskSheet({ s, task, onClose }) {
   const [busy, setBusy] = useState(null);
-  const tomorrowIso = (() => {
-    const d = new Date();
-    d.setDate(d.getDate() + 1);
-    return d.toISOString().slice(0, 10);
-  })();
-  const [pDate, setPDate] = useState(tomorrowIso);
-  const [pTime, setPTime] = useState("09:00");
   const run = async (label, fn) => {
     setBusy(label);
     try {
@@ -3817,12 +3810,6 @@ function TaskSheet({ s, task, onClose }) {
     } finally {
       setBusy(null);
     }
-  };
-  const doPostpone = () => {
-    if (!pDate || busy || !task.id) return;
-    const payload = { date: pDate };
-    if (pTime) payload.time = pTime;
-    run("post", () => apiPost(`/api/tasks/${task.id}/postpone`, payload));
   };
   // wave8.46: чеклист задачи — items из /api/lists?type=check&group=<title>
   const checklistPath = task.title
@@ -3882,55 +3869,21 @@ function TaskSheet({ s, task, onClose }) {
         />
         <ActionRow
           s={s}
-          icon={<Calendar size={fs(16)} />}
-          label={busy === "post" ? "Сохраняю..." : "Перенести"}
-          onClick={doPostpone}
-        />
-        <div
-          style={{
-            display: "flex",
-            gap: 8,
-            padding: "10px 12px",
-            background: s.card,
-            border: `1px solid ${s.brd}`,
-            borderRadius: 12,
-            backdropFilter: "blur(10px)",
-            marginTop: -2,
-          }}
-        >
-          <label style={{ flex: 1, display: "flex", alignItems: "center", gap: 8 }}>
-            <Calendar size={fs(14)} color={s.tM} />
-            <input
-              type="date"
-              value={pDate}
-              onChange={(e) => setPDate(e.target.value)}
-              style={{
-                flex: 1, minWidth: 0, border: "none", outline: "none",
-                background: "transparent", color: s.text, fontSize: fs(13),
-                fontFamily: B,
-              }}
-            />
-          </label>
-          <label style={{ flex: 1, display: "flex", alignItems: "center", gap: 8 }}>
-            <Clock size={fs(14)} color={s.tM} />
-            <input
-              type="time"
-              value={pTime}
-              onChange={(e) => setPTime(e.target.value)}
-              style={{
-                flex: 1, minWidth: 0, border: "none", outline: "none",
-                background: "transparent", color: s.text, fontSize: fs(13),
-                fontFamily: B,
-              }}
-            />
-          </label>
-        </div>
-        <ActionRow
-          s={s}
           icon={<Trash2 size={fs(16)} />}
           label={busy === "cancel" ? "Сохраняю..." : "Отменить"}
           onClick={() => !busy && task.id && run("cancel", () => apiPost(`/api/tasks/${task.id}/cancel`))}
           destructive
+        />
+      </div>
+      <div style={{ marginTop: 14 }}>
+        <div style={{ fontFamily: H, fontSize: fs(15), color: s.text, marginBottom: 8 }}>
+          Перенести
+        </div>
+        <TaskEditForm
+          s={s}
+          task={task}
+          busy={busy === "edit"}
+          onSave={(payload) => run("edit", () => apiPost(`/api/tasks/${task.id}/edit`, payload))}
         />
       </div>
       {clItems.length > 0 && (
@@ -4088,6 +4041,7 @@ const INCOME_CATS = [
 const NEXUS_FINANCE_TYPES = [
   { k: "expense", label: "💸 Расход" },
   { k: "income", label: "💰 Доход" },
+  { k: "debt", label: "📋 Долг" },
 ];
 
 const ARCANA_FINANCE_TYPES = [
@@ -4101,29 +4055,54 @@ function ExpenseForm({ s, onSubmit, busy, botType = "nexus" }) {
   const [amount, setAmount] = useState("");
   const [cat, setCat] = useState(EXPENSE_CATS[0]);
   const [desc, setDesc] = useState("");
+  const [splits, setSplits] = useState([]); // [{cat, amount, desc}]
+  // debt-only
+  const [debtName, setDebtName] = useState("");
+  const [debtDeadline, setDebtDeadline] = useState("");
 
   const catsForType = type === "income" ? INCOME_CATS : EXPENSE_CATS;
 
-  // сбрасываем категорию при смене типа
   const changeType = (t) => {
     setType(t);
+    setSplits([]);
     if (t === "practice_income") {
-      setCat(""); // для практики категория не нужна
+      setCat("");
     } else if (t === "income") {
       setCat(INCOME_CATS[0]);
+    } else if (t === "debt") {
+      setCat("");
     } else {
       setCat(EXPENSE_CATS[0]);
     }
   };
 
+  const addSplit = () => setSplits((x) => [...x, { cat: EXPENSE_CATS[0], amount: "", desc: "" }]);
+  const updSplit = (i, patch) => setSplits((x) => x.map((s0, idx) => idx === i ? { ...s0, ...patch } : s0));
+  const rmSplit = (i) => setSplits((x) => x.filter((_, idx) => idx !== i));
+
+  const total = parseFloat(amount) || 0;
+  const splitSum = splits.reduce((a, r) => a + (parseFloat(r.amount) || 0), 0);
+  const remainder = total - splitSum;
+
   const needsCat = type === "expense";
-  const valid = parseFloat(amount) > 0 && (!needsCat || !!cat);
+  let valid = false;
+  if (type === "debt") {
+    valid = debtName.trim().length > 0 && total > 0;
+  } else {
+    valid = total > 0 && (!needsCat || !!cat);
+    if (type === "expense" && splits.length > 0) {
+      const allRowsOk = splits.every((r) => parseFloat(r.amount) > 0 && !!r.cat);
+      valid = valid && allRowsOk && remainder > 0;
+    }
+  }
 
   const submitLabel = busy
     ? "Сохраняю..."
     : type === "expense"
       ? "Сохранить расход"
-      : "Сохранить доход";
+      : type === "debt"
+        ? "Записать долг"
+        : "Сохранить доход";
 
   const comingSoon = () => alert("Coming soon 🌱");
 
@@ -4137,42 +4116,126 @@ function ExpenseForm({ s, onSubmit, busy, botType = "nexus" }) {
           </Pill>
         ))}
       </div>
-      <div style={{ position: "relative" }}>
-        <Input s={s} value={amount} onChange={setAmount} placeholder="Сумма, ₽" type="number" step="1" />
-        <div onClick={comingSoon} style={{
-          position: "absolute", right: 10, top: "50%", transform: "translateY(-50%)",
-          cursor: "pointer", opacity: 0.5, fontSize: fs(16),
-        }}>🎤</div>
-      </div>
-      {type !== "practice_income" && (
+
+      {type === "debt" ? (
         <>
-          <div style={{ fontSize: fs(11), color: s.tS }}>Категория</div>
-          <PillSelect s={s} value={cat} onChange={setCat} options={catsForType} />
+          <Input s={s} value={debtName} onChange={setDebtName} placeholder="Кому должна (имя)" />
+          <Input s={s} value={amount} onChange={setAmount} placeholder="Сумма долга, ₽" type="number" step="1" />
+          <Input s={s} value={debtDeadline} onChange={setDebtDeadline} placeholder="Дедлайн (например «до июня»)" />
+          <SubmitBtn
+            s={s}
+            disabled={!valid || busy}
+            label={submitLabel}
+            onClick={onSubmit(async () => {
+              await apiPost("/api/finance/debt", {
+                name: debtName.trim(),
+                amount: total,
+                deadline: debtDeadline.trim(),
+              });
+            })}
+          />
+        </>
+      ) : (
+        <>
+          <div style={{ position: "relative" }}>
+            <Input s={s} value={amount} onChange={setAmount} placeholder={
+              type === "expense" && splits.length > 0 ? "Общая сумма, ₽" : "Сумма, ₽"
+            } type="number" step="1" />
+            <div onClick={comingSoon} style={{
+              position: "absolute", right: 10, top: "50%", transform: "translateY(-50%)",
+              cursor: "pointer", opacity: 0.5, fontSize: fs(16),
+            }}>🎤</div>
+          </div>
+          {type !== "practice_income" && (
+            <>
+              <div style={{ fontSize: fs(11), color: s.tS }}>
+                {type === "expense" && splits.length > 0 ? "Остаток → категория" : "Категория"}
+              </div>
+              <PillSelect s={s} value={cat} onChange={setCat} options={catsForType} />
+            </>
+          )}
+          <div style={{ position: "relative" }}>
+            <Input s={s} value={desc} onChange={setDesc} placeholder={
+              type === "practice_income" ? "Клиент / расклад" : "Описание"
+            } />
+            <div style={{
+              position: "absolute", right: 10, top: "50%", transform: "translateY(-50%)",
+              display: "flex", gap: 6, alignItems: "center",
+            }}>
+              {type === "expense" && (
+                <div onClick={addSplit} title="Добавить подкатегорию" style={{
+                  cursor: "pointer", color: s.acc, fontSize: fs(20), fontWeight: 600, lineHeight: 1,
+                  padding: "0 4px",
+                }}>+</div>
+              )}
+              <div onClick={comingSoon} style={{ cursor: "pointer", opacity: 0.5, fontSize: fs(16) }}>📸</div>
+            </div>
+          </div>
+
+          {type === "expense" && splits.map((row, i) => (
+            <div key={i} style={{
+              display: "flex", flexDirection: "column", gap: 6,
+              padding: "8px 10px", background: s.card, border: `1px solid ${s.brd}`,
+              borderRadius: 10,
+            }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <div style={{ fontSize: fs(10), color: s.tS }}>Подкатегория #{i + 1}</div>
+                <div onClick={() => rmSplit(i)} style={{
+                  cursor: "pointer", color: s.tS, fontSize: fs(18), lineHeight: 1,
+                }}>×</div>
+              </div>
+              <Input s={s} value={row.amount} onChange={(v) => updSplit(i, { amount: v })}
+                     placeholder="Сумма, ₽" type="number" step="1" />
+              <PillSelect s={s} value={row.cat} onChange={(v) => updSplit(i, { cat: v })}
+                          options={EXPENSE_CATS} />
+              <Input s={s} value={row.desc} onChange={(v) => updSplit(i, { desc: v })}
+                     placeholder="Описание" />
+            </div>
+          ))}
+
+          {type === "expense" && splits.length > 0 && (
+            <div style={{ fontSize: fs(11), color: remainder > 0 ? s.tS : s.red }}>
+              Остаток «{cat || "—"}»: {remainder.toLocaleString("ru-RU")} ₽
+              {remainder <= 0 && " (сумма подкатегорий больше общей)"}
+            </div>
+          )}
+
+          <SubmitBtn
+            s={s}
+            disabled={!valid || busy}
+            label={submitLabel}
+            onClick={onSubmit(async () => {
+              const bot = (botType === "arcana" || type === "practice_income") ? "arcana" : "nexus";
+              if (type === "expense" && splits.length > 0) {
+                for (const row of splits) {
+                  await apiPost("/api/finance", {
+                    type: "expense",
+                    amount: parseFloat(row.amount),
+                    cat: row.cat,
+                    desc: row.desc || "",
+                    bot,
+                  });
+                }
+                await apiPost("/api/finance", {
+                  type: "expense",
+                  amount: remainder,
+                  cat,
+                  desc,
+                  bot,
+                });
+              } else {
+                await apiPost("/api/finance", {
+                  type,
+                  amount: total,
+                  cat: needsCat ? cat : (cat || null),
+                  desc,
+                  bot,
+                });
+              }
+            })}
+          />
         </>
       )}
-      <div style={{ position: "relative" }}>
-        <Input s={s} value={desc} onChange={setDesc} placeholder={
-          type === "practice_income" ? "Клиент / расклад" : "Описание"
-        } />
-        <div onClick={comingSoon} style={{
-          position: "absolute", right: 10, top: "50%", transform: "translateY(-50%)",
-          cursor: "pointer", opacity: 0.5, fontSize: fs(16),
-        }}>📸</div>
-      </div>
-      <SubmitBtn
-        s={s}
-        disabled={!valid || busy}
-        label={submitLabel}
-        onClick={onSubmit(async () => {
-          await apiPost("/api/finance", {
-            type,
-            amount: parseFloat(amount),
-            cat: needsCat ? cat : (cat || null),
-            desc,
-            bot: (botType === "arcana" || type === "practice_income") ? "arcana" : "nexus",
-          });
-        })}
-      />
     </div>
   );
 }
@@ -4268,6 +4331,75 @@ function TaskForm({ s, onSubmit, busy }) {
             prio,
             date: dateValue,
           });
+        })}
+      />
+    </div>
+  );
+}
+
+function TaskEditForm({ s, task, busy, onSave }) {
+  // Разобрать исходный дедлайн в YYYY-MM-DD + HH:MM
+  const parseInitial = () => {
+    const raw = task?.date || task?.time || "";
+    if (!raw) return { d: "", t: "" };
+    const m = String(raw).match(/^(\d{4}-\d{2}-\d{2})(?:[ T](\d{2}):(\d{2}))?/);
+    if (m) return { d: m[1], t: m[2] && m[3] ? `${m[2]}:${m[3]}` : "" };
+    return { d: "", t: "" };
+  };
+  const initial = parseInitial();
+
+  const [title, setTitle] = useState(task?.title || "");
+  const [cat, setCat] = useState(task?.cat || "");
+  const [prio, setPrio] = useState(task?.prio || "⚪");
+  const [date, setDate] = useState(initial.d);
+  const [time, setTime] = useState(initial.t);
+  const [cats, setCats] = useState([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const r = await apiGet("/api/categories?type=task");
+        if (!cancelled && r?.categories) {
+          const list = r.categories.slice();
+          if (task?.cat && !list.includes(task.cat)) list.unshift(task.cat);
+          setCats(list);
+        }
+      } catch (_) { /* ignore */ }
+    })();
+    return () => { cancelled = true; };
+  }, [task?.cat]);
+
+  const valid = !!date && title.trim().length > 0;
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+      <Input s={s} value={title} onChange={setTitle} placeholder="Название задачи" />
+      <div style={{ fontSize: fs(11), color: s.tS }}>Категория</div>
+      {cats.length > 0 ? (
+        <PillSelect s={s} value={cat} onChange={setCat} options={cats} />
+      ) : (
+        <Input s={s} value={cat} onChange={setCat} placeholder="🏠 Дом" />
+      )}
+      <div style={{ fontSize: fs(11), color: s.tS }}>Приоритет</div>
+      <PillSelect s={s} value={prio} onChange={setPrio} options={PRIOS} />
+      <div style={{ display: "flex", gap: 8 }}>
+        <div style={{ flex: 1 }}>
+          <Input s={s} value={date} onChange={setDate} placeholder="Дата" type="date" />
+        </div>
+        <div style={{ flex: 1 }}>
+          <Input s={s} value={time} onChange={setTime} placeholder="чч:мм" type="time" />
+        </div>
+      </div>
+      <SubmitBtn
+        s={s}
+        disabled={!valid || busy}
+        label={busy ? "Сохраняю..." : "Перенести"}
+        onClick={() => onSave({
+          title: title.trim(),
+          cat: cat || null,
+          prio,
+          date,
+          time: time || null,
         })}
       />
     </div>

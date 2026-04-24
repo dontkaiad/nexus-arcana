@@ -157,6 +157,58 @@ class TaskCreateBody(BaseModel):
     date: Optional[str] = None
 
 
+class TaskEditBody(BaseModel):
+    title: Optional[str] = None
+    cat: Optional[str] = None
+    prio: Optional[str] = None
+    date: Optional[str] = None           # YYYY-MM-DD
+    time: Optional[str] = None           # HH:MM (reminder)
+
+
+@router.post("/tasks/{task_id}/edit")
+async def task_edit(
+    task_id: str,
+    body: TaskEditBody,
+    tg_id: int = Depends(current_user_id),
+) -> dict[str, Any]:
+    user_notion_id = (await get_user_notion_id(tg_id)) or ""
+    await _load_owned_page(task_id, user_notion_id)
+    _today_date, tz_offset = await today_user_tz(tg_id)
+
+    props: dict = {}
+    if body.title is not None and body.title.strip():
+        props["Задача"] = _title(body.title.strip())
+    if body.cat:
+        props["Категория"] = _select(body.cat)
+    if body.prio:
+        props["Приоритет"] = _select(body.prio)
+    if body.date:
+        try:
+            new_date = datetime.strptime(body.date, "%Y-%m-%d").date()
+        except ValueError:
+            raise HTTPException(status_code=400, detail="invalid date, expected YYYY-MM-DD")
+        props["Дедлайн"] = _date(new_date.isoformat())
+        if body.time:
+            try:
+                hh, mm = body.time.split(":")
+                tz = timezone(timedelta(hours=tz_offset))
+                remind_dt = datetime(new_date.year, new_date.month, new_date.day,
+                                     int(hh), int(mm), tzinfo=tz)
+                props["Напоминание"] = _date(remind_dt.isoformat())
+            except (ValueError, TypeError):
+                raise HTTPException(status_code=400, detail="invalid time, expected HH:MM")
+
+    if not props:
+        return {"ok": True, "noop": True}
+
+    try:
+        await update_page(task_id, props)
+    except Exception as e:
+        logger.error("task_edit update_page failed: %s", e)
+        raise HTTPException(status_code=500, detail="failed to update task")
+    return {"ok": True}
+
+
 @router.post("/tasks")
 async def task_create(
     body: TaskCreateBody,
@@ -246,6 +298,29 @@ async def finance_create(
     if not page_id:
         raise HTTPException(status_code=500, detail="failed to create finance entry")
     return {"ok": True, "id": page_id, "type": body.type}
+
+
+class DebtBody(BaseModel):
+    name: str = Field(min_length=1)
+    amount: float = Field(gt=0)
+    deadline: str = ""
+
+
+@router.post("/finance/debt")
+async def finance_debt_create(
+    body: DebtBody,
+    tg_id: int = Depends(current_user_id),
+) -> dict[str, Any]:
+    """Новый долг → запись в Памяти с категорией 📋 Долги (как в боте)."""
+    from nexus.handlers.finance import _save_debt
+    user_notion_id = (await get_user_notion_id(tg_id)) or ""
+    name = body.name.strip()
+    try:
+        await _save_debt(name, int(body.amount), body.deadline.strip(), user_notion_id)
+    except Exception as e:
+        logger.error("finance_debt_create failed: %s", e)
+        raise HTTPException(status_code=500, detail="failed to save debt")
+    return {"ok": True, "name": name, "amount": int(body.amount)}
 
 
 # DEPRECATED: use /api/finance instead (alias сохранён для обратной совместимости)
