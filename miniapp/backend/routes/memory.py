@@ -148,19 +148,46 @@ async def _generate_adhd_profile(tg_id: int, records: list[dict]) -> str:
     return text
 
 
+_PATTERN_KW = (
+    "забыва", "теря", "откладыва", "прокрастин", "кладёт",
+    "громко", "быстро говор", "утро начинается", "сова",
+    "не существует", "неосознанно", "гиперфокус",
+)
+_STRATEGY_KW = (
+    "помогают", "помогает", "стратеги", "витамин", "кольц",
+    "будильник", "список", "порядок", "структур", "Monster", "Chapman",
+)
+_TRIGGER_KW = (
+    "мешает", "триггер", "хуже", "шум", "раздраж",
+    "плохой сон", "не может найти", "не на виду", "не могу",
+)
+
+
+def _classify_adhd(fact: str) -> str:
+    low = fact.lower()
+    if any(k in low for k in _PATTERN_KW):
+        return "patterns"
+    if any(k in low for k in _STRATEGY_KW):
+        return "strategies"
+    if any(k in low for k in _TRIGGER_KW):
+        return "triggers"
+    return "specifics"
+
+
 @router.get("/memory/adhd")
 async def get_memory_adhd(tg_id: int = Depends(current_user_id)) -> dict[str, Any]:
     user_notion_id = (await get_user_notion_id(tg_id)) or ""
     raw = await _adhd_records(user_notion_id)
-    records = [
-        {
-            "id": p.get("id", ""),
-            "text": title_text(p.get("properties", {}).get("Текст", {})),
-        }
-        for p in raw
-    ]
+    groups: dict[str, list[str]] = {
+        "patterns": [], "strategies": [], "triggers": [], "specifics": [],
+    }
+    for p in raw:
+        t = title_text(p.get("properties", {}).get("Текст", {}))
+        if not t:
+            continue
+        groups[_classify_adhd(t)].append(t)
     profile = await _generate_adhd_profile(tg_id, raw)
     return {
         "profile": profile,
-        "records": [r for r in records if r["text"]],
+        "groups": groups,
     }
