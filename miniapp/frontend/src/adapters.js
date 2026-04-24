@@ -294,7 +294,7 @@ export function adaptFinanceLimits(data) {
 }
 
 export function adaptFinanceGoals(data) {
-  if (!data) return { debts: [], goals: [] }
+  if (!data) return { debts: [], goals: [], closedDebts: [], closedGoals: [] }
   return {
     debts: (data.debts || []).map((d) => ({
       n: d.name,
@@ -313,6 +313,19 @@ export function adaptFinanceGoals(data) {
       s: g.saved ?? 0,
       after: g.after || '—',
       monthly: g.monthly ?? 0,
+    })),
+    closedDebts: (data.closed_debts || []).map((d) => ({
+      n: d.name,
+      total: d.total ?? 0,
+      monthly: d.monthly_payment ?? 0,
+      note: d.note || '',
+      closedAt: d.closed_at || null,
+    })),
+    closedGoals: (data.closed_goals || []).map((g) => ({
+      n: g.name,
+      t: g.target ?? 0,
+      monthly: g.monthly ?? 0,
+      closedAt: g.closed_at || null,
     })),
   }
 }
