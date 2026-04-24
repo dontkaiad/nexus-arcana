@@ -2334,35 +2334,46 @@ function NxCal({ s }) {
         return (
           <Glass s={s} style={{ padding: "10px 12px" }}>
             <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              {weekDays.map((wd, i) => (
-                <div key={i} style={{
-                  padding: "8px 10px", borderRadius: 8,
-                  background: wd.isToday ? `${s.acc}18` : "transparent",
-                  border: `1px solid ${wd.isToday ? s.acc + "55" : s.brd}`,
-                }}>
-                  <div style={{
-                    display: "flex", justifyContent: "space-between",
-                    fontSize: fs(12), color: wd.isToday ? s.acc : s.text, fontWeight: 500,
-                  }}>
-                    <span>{wd.label}</span>
-                    <span style={{ color: s.tM }}>{wd.tasks.length > 0 ? `${wd.tasks.length} шт.` : ""}</span>
-                  </div>
-                  {wd.tasks.length > 0 && (
-                    <div style={{ marginTop: 4 }}>
-                      {wd.tasks.slice(0, 3).map((t, j) => (
-                        <div key={j} style={{ fontSize: fs(11), color: s.tM, marginTop: 2 }}>
-                          • {t.time ? `${t.time} ` : ''}{t.title}
-                        </div>
-                      ))}
-                      {wd.tasks.length > 3 && (
-                        <div style={{ fontSize: fs(10), color: s.tS, marginTop: 2 }}>
-                          и ещё {wd.tasks.length - 3}…
-                        </div>
-                      )}
+              {weekDays.map((wd, i) => {
+                const isPicked = wd.isSameMonth && wd.dayNum === picked;
+                return (
+                  <div
+                    key={i}
+                    onClick={() => { if (wd.isSameMonth) setPicked(wd.dayNum); }}
+                    style={{
+                      padding: "8px 10px", borderRadius: 8,
+                      cursor: wd.isSameMonth ? "pointer" : "default",
+                      opacity: wd.isSameMonth ? 1 : 0.4,
+                      background: isPicked
+                        ? `${s.acc}30`
+                        : wd.isToday ? `${s.acc}18` : "transparent",
+                      border: `1px solid ${isPicked ? s.acc + "99" : wd.isToday ? s.acc + "55" : s.brd}`,
+                    }}>
+                    <div style={{
+                      display: "flex", justifyContent: "space-between",
+                      fontSize: fs(12),
+                      color: isPicked || wd.isToday ? s.acc : s.text, fontWeight: 500,
+                    }}>
+                      <span>{wd.label}</span>
+                      <span style={{ color: s.tM }}>{wd.tasks.length > 0 ? `${wd.tasks.length} шт.` : ""}</span>
                     </div>
-                  )}
-                </div>
-              ))}
+                    {wd.tasks.length > 0 && (
+                      <div style={{ marginTop: 4 }}>
+                        {wd.tasks.slice(0, 3).map((t, j) => (
+                          <div key={j} style={{ fontSize: fs(11), color: s.tM, marginTop: 2 }}>
+                            • {t.time ? `${t.time} ` : ''}{t.title}
+                          </div>
+                        ))}
+                        {wd.tasks.length > 3 && (
+                          <div style={{ fontSize: fs(10), color: s.tS, marginTop: 2 }}>
+                            и ещё {wd.tasks.length - 3}…
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           </Glass>
         );
