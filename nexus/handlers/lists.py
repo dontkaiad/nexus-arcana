@@ -20,7 +20,7 @@ from core.list_manager import (
     pending_get, pending_set, pending_del,
     CATEGORY_TO_FINANCE, LIST_CATEGORIES,
 )
-from core.notion_client import finance_add, update_page, _status
+from core.notion_client import finance_add, update_page, _status, task_add
 from nexus.handlers.utils import react
 
 logger = logging.getLogger("nexus.lists")
@@ -841,7 +841,14 @@ async def handle_list_check(msg: Message, data: dict, user_notion_id: str = "") 
         await msg.answer(f"📋 <b>{name}</b>\n\nОтправь пункты чеклиста — каждый на новой строке или через запятую.", parse_mode="HTML")
         return
 
+    parent_task_id = await task_add(
+        title=name, category="💳 Прочее", priority="Важно",
+        user_notion_id=user_notion_id,
+    )
     items = [{"name": it, "group": name} for it in items_raw if it]
+    if parent_task_id:
+        for it in items:
+            it["task_rel"] = parent_task_id
     created = await add_items(items, "📋 Чеклист", BOT_NAME, user_notion_id)
     lines = [f"📋 <b>{name}</b> ({len(created)} пунктов)"]
     for c in created:
@@ -1146,8 +1153,15 @@ async def handle_list_pending(msg: Message, user_notion_id: str = "") -> bool:
             if part:
                 raw_items.append(part)
         group = pending.get("group", "Чеклист")
-        items = [{"name": it, "group": group} for it in raw_items]
         p_user_id = pending.get("user_notion_id", user_notion_id)
+        parent_task_id = await task_add(
+            title=group, category="💳 Прочее", priority="Важно",
+            user_notion_id=p_user_id,
+        )
+        items = [{"name": it, "group": group} for it in raw_items]
+        if parent_task_id:
+            for it in items:
+                it["task_rel"] = parent_task_id
         created = await add_items(items, "📋 Чеклист", BOT_NAME, p_user_id)
         lines = [f"📋 <b>{group}</b> ({len(created)} пунктов)"]
         for c in created:
