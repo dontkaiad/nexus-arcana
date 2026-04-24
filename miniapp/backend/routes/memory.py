@@ -109,10 +109,33 @@ async def _adhd_records(user_notion_id: str) -> list[dict]:
     return await query_pages(db_id, filters={"and": conditions}, page_size=100)
 
 
+def _clean_profile_text(text: str) -> str:
+    """Убирает markdown-заголовки и ведущую подпись «СДВГ-профиль …»."""
+    import re
+    lines = (text or "").strip().splitlines()
+    while lines:
+        first = lines[0].strip()
+        if not first:
+            lines.pop(0)
+            continue
+        stripped = re.sub(r"^#+\s*", "", first).strip().strip("*_").strip()
+        if stripped.lower().startswith(("сдвг-профиль", "сдвг профиль", "профиль")):
+            lines.pop(0)
+            continue
+        if first.startswith("#"):
+            lines.pop(0)
+            continue
+        break
+    return "\n".join(lines).strip()
+
+
 async def _generate_adhd_profile(tg_id: int, records: list[dict]) -> str:
     cached = cache.get_profile(tg_id)
     if cached:
-        return cached["text"]
+        cleaned = _clean_profile_text(cached["text"])
+        if cleaned != cached["text"]:
+            cache.set_profile(tg_id, cleaned)
+        return cleaned
 
     if not records:
         return ""
@@ -130,7 +153,8 @@ async def _generate_adhd_profile(tg_id: int, records: list[dict]) -> str:
     system = (
         "Ты — внешний мозг Кай. Сгенерируй персональный СДВГ-профиль Кай "
         "на основе этих записей: паттерны, триггеры, стратегии. "
-        "Женский род. 2-3 абзаца живого текста без буллетов."
+        "Женский род. 2-3 абзаца живого текста без буллетов. "
+        "Не пиши заголовки, не пиши «СДВГ-профиль» в начале — только сам текст."
     )
     try:
         text = await ask_claude(
@@ -142,7 +166,7 @@ async def _generate_adhd_profile(tg_id: int, records: list[dict]) -> str:
     except Exception as e:
         logger.error("Sonnet profile generation failed: %s", e)
         return ""
-    text = (text or "").strip()
+    text = _clean_profile_text(text or "")
     if text:
         cache.set_profile(tg_id, text)
     return text
