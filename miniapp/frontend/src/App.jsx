@@ -2202,6 +2202,10 @@ const RU_MONTHS_FULL = [
   "Январь", "Февраль", "Март", "Апрель", "Май", "Июнь",
   "Июль", "Август", "Сентябрь", "Октябрь", "Ноябрь", "Декабрь",
 ];
+const RU_MONTHS_GEN = [
+  "января", "февраля", "марта", "апреля", "мая", "июня",
+  "июля", "августа", "сентября", "октября", "ноября", "декабря",
+];
 
 function NxCal({ s }) {
   const now = new Date();
@@ -2406,7 +2410,7 @@ function NxCal({ s }) {
         );
       })()}
       <SectionLabel s={s}>
-        {picked} {RU_MONTHS_FULL[month0].toLowerCase()}
+        {picked} {RU_MONTHS_GEN[month0]}
       </SectionLabel>
       {loading && <Empty s={s} text="Загружаю..." />}
       {!loading && !tasksByDay[picked] && (
@@ -4944,21 +4948,41 @@ function AdhdSheet({ s, open }) {
   if (loading) return <Empty s={s} text="Загружаю..." />;
   if (error) return <ErrorBox s={s} error={error} refetch={refetch} />;
   const view = adaptAdhd(data);
+  const sections = [
+    { key: "patterns",   title: "Паттерны",    glyph: "🔄", items: view.groups.patterns },
+    { key: "strategies", title: "Стратегии",   glyph: "💡", items: view.groups.strategies },
+    { key: "triggers",   title: "Триггеры",    glyph: "⚡", items: view.groups.triggers },
+    { key: "specifics",  title: "Особенности", glyph: "📌", items: view.groups.specifics },
+  ].filter((sec) => sec.items.length > 0);
   return (
     <>
-      <div style={{ fontSize: fs(13), color: s.text, lineHeight: 1.6, marginBottom: 10 }}>
-        {view.profile || "Профиль пока не сгенерирован."}
-      </div>
-      {view.records.length > 0 && (
-        <>
-          <SectionLabel s={s}>Записи</SectionLabel>
-          {view.records.map((r) => (
-            <Glass key={r.id} s={s} style={{ padding: "8px 14px", marginBottom: 4 }}>
-              <div style={{ fontSize: fs(13), color: s.text }}>{r.text}</div>
-            </Glass>
+      <Glass s={s} accent={s.acc} style={{ padding: "12px 14px", marginBottom: 12 }}>
+        <div style={{ fontSize: fs(13), color: s.text, lineHeight: 1.6, whiteSpace: "pre-wrap" }}>
+          {view.profile || "Профиль пока не сгенерирован."}
+        </div>
+      </Glass>
+      {sections.map((sec) => (
+        <div key={sec.key} style={{ marginBottom: 14 }}>
+          <div style={{ fontFamily: H, fontSize: fs(14), color: s.text, marginBottom: 6 }}>
+            {sec.glyph} {sec.title} ({sec.items.length})
+          </div>
+          {sec.items.map((it, i) => (
+            <div
+              key={i}
+              style={{
+                fontSize: fs(13),
+                color: s.text,
+                opacity: 0.85,
+                fontStyle: "italic",
+                padding: "3px 4px",
+                lineHeight: 1.5,
+              }}
+            >
+              • {it}
+            </div>
           ))}
-        </>
-      )}
+        </div>
+      ))}
     </>
   );
 }
