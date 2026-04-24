@@ -210,11 +210,29 @@ async def get_today(tg_id: int = Depends(current_user_id)) -> dict[str, Any]:
     no_date: list[dict] = []  # wave7.3: без дедлайна и без напоминалки
     future: list[dict] = []
 
+    import re as _re
+    _every_re = _re.compile(r"every_(\d+)d")
+
     for s in summaries:
         deadline_date = to_local_date(s["deadline_raw"], tz_offset)
         deadline_time = extract_time(s["deadline_raw"], tz_offset)
         reminder_date = to_local_date(s["reminder_raw"], tz_offset)
         repeat_time = s["repeat_time"] or None
+
+        # wave8.58: повторяющаяся задача показывается в «Мой день» только
+        # когда сегодня — её реальное вхождение (anchor ± k × интервал).
+        interval_days: Optional[int] = None
+        if repeat_time:
+            _m = _every_re.search(repeat_time)
+            if _m:
+                interval_days = int(_m.group(1))
+        is_occurrence_today = True
+        if interval_days and interval_days > 0:
+            anchor = reminder_date or deadline_date
+            if anchor:
+                is_occurrence_today = (today_date - anchor).days % interval_days == 0
+            else:
+                is_occurrence_today = False
 
         if deadline_date and deadline_date < today_date:
             overdue.append({
@@ -229,7 +247,7 @@ async def get_today(tg_id: int = Depends(current_user_id)) -> dict[str, Any]:
         is_today = deadline_date == today_date or reminder_date == today_date
         has_time_today = (deadline_date == today_date) and deadline_time is not None
 
-        if repeat_time or has_time_today:
+        if (repeat_time and is_occurrence_today) or has_time_today:
             t = repeat_time if repeat_time else deadline_time
             interval_raw: Optional[str] = None
             # wave8.4: Notion хранит "HH:MM|every_Nd" — разбираем server-side.

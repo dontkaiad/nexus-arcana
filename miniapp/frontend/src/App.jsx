@@ -2393,7 +2393,7 @@ function NxCal({ s }) {
                     <div style={{ marginTop: 4 }}>
                       {wd.tasks.slice(0, 3).map((t, j) => (
                         <div key={j} style={{ fontSize: fs(11), color: s.tM, marginTop: 2 }}>
-                          • {t}
+                          • {t.time ? `${t.time} ` : ''}{t.title}
                         </div>
                       ))}
                       {wd.tasks.length > 3 && (
@@ -2417,9 +2417,15 @@ function NxCal({ s }) {
         <Empty s={s} chill emoji="📅" text="В этот день всё свободно" />
       )}
       {!loading && (tasksByDay[picked] || []).map((t, i) => (
-        <Glass key={i} s={s} style={{ padding: "8px 14px", marginBottom: 4 }}>
-          <div style={{ fontSize: fs(13), color: s.text }}>{t}</div>
-        </Glass>
+        <TaskRow
+          key={t.id || i}
+          s={s}
+          t={t}
+          done={false}
+          onToggle={() => {}}
+          onOpen={() => {}}
+          withTime={!!t.time}
+        />
       ))}
     </div>
   );

@@ -413,7 +413,14 @@ export function adaptCalendar(data) {
   for (const [day, bucket] of Object.entries(days)) {
     const tasks = bucket.tasks || []
     if (tasks.length === 0) continue
-    tasksByDay[Number(day)] = tasks.map((t) => (t.title || '').slice(0, 30))
+    tasksByDay[Number(day)] = tasks.map((t) => ({
+      id: t.id,
+      title: t.title || '',
+      cat: t.cat || '',
+      prio: t.prio || '⚪',
+      time: t.time || null,
+      rpt: t.repeat ? `🔄 ${formatRepeat(t.repeat)}` : undefined,
+    }))
   }
   return { tasksByDay, month: data.month || null, days }
 }
