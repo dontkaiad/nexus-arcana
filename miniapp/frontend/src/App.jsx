@@ -1137,7 +1137,17 @@ function NxDay({ s, openTask, navigate, openStreaks }) {
   const doneCount = Object.values(done).filter(Boolean).length;
   const total = t.scheduled.length + t.tasks.length + (t.noDate?.length || 0);
   const leftPct = Math.round((t.spentDay / t.budgetDay) * 100);
-  const toggle = (id) => setDone((p) => ({ ...p, [id]: !p[id] }));
+  // wave8.59: отметка задачи чекбоксом пишет Status=Done в Notion.
+  const toggle = async (id) => {
+    if (!id || done[id]) return;
+    setDone((p) => ({ ...p, [id]: true }));
+    try {
+      await apiPost(`/api/tasks/${id}/done`);
+      refetch();
+    } catch (_) {
+      setDone((p) => ({ ...p, [id]: false }));
+    }
+  };
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
@@ -2214,12 +2224,24 @@ function NxCal({ s }) {
     `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`
   );
   const [picked, setPicked] = useState(now.getDate());
+  const [doneIds, setDoneIds] = useState({});
   const daysShort = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"];
 
   const { data, loading, error, refetch } = useApi(`/api/calendar?month=${monthStr}`, [monthStr]);
   const { tasksByDay } = loading || error
     ? { tasksByDay: {} }
     : adaptCalendar(data);
+
+  const toggleCalTask = async (id) => {
+    if (!id || doneIds[id]) return;
+    setDoneIds((p) => ({ ...p, [id]: true }));
+    try {
+      await apiPost(`/api/tasks/${id}/done`);
+      refetch();
+    } catch (_) {
+      setDoneIds((p) => ({ ...p, [id]: false }));
+    }
+  };
 
   const year = parseInt(monthStr.slice(0, 4), 10);
   const month0 = parseInt(monthStr.slice(5, 7), 10) - 1;
@@ -2421,8 +2443,8 @@ function NxCal({ s }) {
           key={t.id || i}
           s={s}
           t={t}
-          done={false}
-          onToggle={() => {}}
+          done={!!doneIds[t.id]}
+          onToggle={() => toggleCalTask(t.id)}
           onOpen={() => {}}
           withTime={!!t.time}
         />
