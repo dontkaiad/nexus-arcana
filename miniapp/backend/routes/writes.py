@@ -44,8 +44,12 @@ router = APIRouter()
 
 # ── Ownership check ─────────────────────────────────────────────────────────
 
-async def _load_owned_page(page_id: str, user_notion_id: str) -> dict:
-    """Читает страницу и проверяет владение. 404 если нет доступа."""
+async def _load_owned_page(page_id: str, user_notion_id: str, allow_empty_owner: bool = False) -> dict:
+    """Читает страницу и проверяет владение. 404 если нет доступа.
+
+    wave8.60: allow_empty_owner — для чеклистов/списков, которые создаются
+    из Notion-UI без relation на пользователя (read side уже разрешает).
+    """
     try:
         page = await get_page(page_id)
     except Exception as e:
@@ -55,7 +59,7 @@ async def _load_owned_page(page_id: str, user_notion_id: str) -> dict:
         raise HTTPException(status_code=404, detail="not found")
     if user_notion_id:
         owners = relation_ids_of(page, "🪪 Пользователи")
-        if user_notion_id not in owners:
+        if user_notion_id not in owners and not (allow_empty_owner and not owners):
             raise HTTPException(status_code=404, detail="not found")
     return page
 
@@ -613,7 +617,7 @@ async def list_done(
     tg_id: int = Depends(current_user_id),
 ) -> dict[str, Any]:
     user_notion_id = (await get_user_notion_id(tg_id)) or ""
-    await _load_owned_page(item_id, user_notion_id)
+    await _load_owned_page(item_id, user_notion_id, allow_empty_owner=True)
     try:
         await update_page(item_id, {"Статус": _status("Done")})
     except Exception as e:
@@ -629,7 +633,7 @@ async def list_delete(
 ) -> dict[str, Any]:
     """Soft delete — переводим в Archived, не удаляем физически."""
     user_notion_id = (await get_user_notion_id(tg_id)) or ""
-    await _load_owned_page(item_id, user_notion_id)
+    await _load_owned_page(item_id, user_notion_id, allow_empty_owner=True)
     try:
         await update_page(item_id, {"Статус": _status("Archived")})
     except Exception as e:
