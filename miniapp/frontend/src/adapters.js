@@ -390,10 +390,17 @@ export function adaptMemory(data) {
 // ── /api/memory/adhd → {profile, records} ─────────────────────────────────
 
 export function adaptAdhd(data) {
-  if (!data) return { profile: '', records: [] }
+  const empty = { profile: '', groups: { patterns: [], strategies: [], triggers: [], specifics: [] } }
+  if (!data) return empty
+  const g = data.groups || {}
   return {
     profile: data.profile || '',
-    records: (data.records || []).map((r) => ({ id: r.id, text: r.text || '' })),
+    groups: {
+      patterns: g.patterns || [],
+      strategies: g.strategies || [],
+      triggers: g.triggers || [],
+      specifics: g.specifics || [],
+    },
   }
 }
 
