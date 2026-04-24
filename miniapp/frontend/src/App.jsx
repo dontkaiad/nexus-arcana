@@ -16,7 +16,7 @@ import {
   Sun, Moon as LucideMoon, Check, Coins, List as ListIcon, Brain, Calendar,
   Sparkles as LucideSparkles, Users, Flame as LucideFlame, BookOpen as LucideBookOpen,
   BarChart3, Plus, Search,
-  Bell, RefreshCw, X, Camera, Mic, Pencil, ChevronRight,
+  Bell, RefreshCw, X, Camera, Mic, Pencil, ChevronRight, ChevronDown,
   Wallet, HeartPulse, StickyNote, Candy, Trash2, Clock,
 } from "lucide-react";
 import {
@@ -3904,30 +3904,41 @@ function TaskSheet({ s, task, onClose }) {
           destructive
         />
       </div>
-      <div style={{ marginTop: 14 }}>
-        {/* wave8.61: форма «Перенести» скрыта под дизклоужером, чтобы не
-            было дубля категории/приоритета под шапкой. */}
+      {/* wave8.61: форма «Перенести» скрыта под дизклоужером в стиле
+          ActionRow (как «Сделано»/«Отменить»), чтобы не было дубля
+          категории/приоритета под мета-шапкой. */}
+      <div style={{ marginTop: 6 }}>
         <div
           onClick={() => setEditOpen((v) => !v)}
           style={{
-            display: "flex", alignItems: "center", justifyContent: "space-between",
-            cursor: "pointer", padding: "6px 0",
+            display: "flex",
+            alignItems: "center",
+            gap: 12,
+            padding: "12px 14px",
+            background: s.card,
+            border: `1px solid ${s.brd}`,
+            borderRadius: 12,
+            backdropFilter: "blur(10px)",
+            cursor: "pointer",
+            color: s.text,
           }}
         >
-          <span style={{ fontFamily: H, fontSize: fs(15), color: s.text }}>
-            Перенести
+          <span style={{ display: "flex" }}>
+            {editOpen
+              ? <ChevronDown size={fs(16)} />
+              : <ChevronRight size={fs(16)} />}
           </span>
-          <span style={{ fontSize: fs(14), color: s.tM }}>
-            {editOpen ? "▾" : "▸"}
-          </span>
+          <span style={{ fontSize: fs(14) }}>Перенести</span>
         </div>
         {editOpen && (
-          <TaskEditForm
-            s={s}
-            task={task}
-            busy={busy === "edit"}
-            onSave={(payload) => run("edit", () => apiPost(`/api/tasks/${task.id}/edit`, payload))}
-          />
+          <div style={{ marginTop: 8 }}>
+            <TaskEditForm
+              s={s}
+              task={task}
+              busy={busy === "edit"}
+              onSave={(payload) => run("edit", () => apiPost(`/api/tasks/${task.id}/edit`, payload))}
+            />
+          </div>
         )}
       </div>
       {clItems.length > 0 && (
