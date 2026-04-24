@@ -60,13 +60,23 @@ async def _distinct_categories(db_id: str, user_notion_id: str,
     return out
 
 
+_DEFAULT_LIST_CATS = [
+    "🍜 Продукты", "🧴 Бытовая химия", "🐈 Коты", "💧 Уход", "📦 Прочее",
+]
+
+_DEFAULT_MEMORY_CATS = [
+    "🏡 Быт", "🐈 Коты", "👥 Люди", "⭐ Предпочтения", "🦋 СДВГ",
+]
+
+
 @router.get("/categories")
 async def get_categories(
     tg_id: int = Depends(current_user_id),
-    type: str = Query("task", description="task|expense|income"),
+    type: str = Query("task", description="task|expense|income|list|memory"),
 ) -> dict[str, Any]:
-    if type not in {"task", "expense", "income"}:
-        raise HTTPException(status_code=400, detail="type must be task|expense|income")
+    allowed = {"task", "expense", "income", "list", "memory"}
+    if type not in allowed:
+        raise HTTPException(status_code=400, detail=f"type must be one of {sorted(allowed)}")
 
     user_notion_id = (await get_user_notion_id(tg_id)) or ""
 
@@ -76,9 +86,18 @@ async def get_categories(
     elif type == "expense":
         db_id = config.nexus.db_finance
         defaults = _DEFAULT_EXPENSE_CATS
-    else:  # income
+    elif type == "income":
         db_id = config.nexus.db_finance
         defaults = _DEFAULT_INCOME_CATS
+    elif type == "list":
+        db_id = getattr(config.nexus, "db_lists", "") or ""
+        defaults = _DEFAULT_LIST_CATS
+    else:  # memory
+        db_id = config.nexus.db_memory
+        defaults = _DEFAULT_MEMORY_CATS
+
+    if not db_id:
+        return {"type": type, "categories": defaults}
 
     existing = await _distinct_categories(db_id, user_notion_id)
     # объединяем: существующие + дефолты которых нет в существующих
