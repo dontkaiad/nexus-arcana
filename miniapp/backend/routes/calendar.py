@@ -157,9 +157,12 @@ async def get_calendar(
                         occurrence_days.append(d.day)
                     d += timedelta(days=interval_days)
         else:
+            # wave8.69: показываем задачу и на Дедлайн, и на Напоминание —
+            # раньше elif прятал дату напоминания, если дедлайн тоже был в этом месяце.
             if deadline_date and deadline_date.year == y and deadline_date.month == m:
                 occurrence_days.append(deadline_date.day)
-            elif reminder_date and reminder_date.year == y and reminder_date.month == m:
+            if (reminder_date and reminder_date.year == y and reminder_date.month == m
+                    and reminder_date.day not in occurrence_days):
                 occurrence_days.append(reminder_date.day)
 
         if not occurrence_days:
