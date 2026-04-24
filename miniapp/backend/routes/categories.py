@@ -90,7 +90,7 @@ async def get_categories(
         db_id = config.nexus.db_finance
         defaults = _DEFAULT_INCOME_CATS
     elif type == "list":
-        db_id = getattr(config.nexus, "db_lists", "") or ""
+        db_id = getattr(config, "db_lists", "") or ""
         defaults = _DEFAULT_LIST_CATS
     else:  # memory
         db_id = config.nexus.db_memory
