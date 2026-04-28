@@ -697,6 +697,116 @@ const Stars = ({ op }) => (
   </>
 );
 
+// wave8.72: анимированные погодные эффекты поверх overlay
+const WeatherFx = ({ kind, isDay }) => {
+  if (kind === "rain") {
+    const drops = Array.from({ length: 45 }, (_, i) => ({
+      x: (i * 53 + 7) % 100,
+      d: 0.6 + ((i * 13) % 7) * 0.08,
+      delay: ((i * 17) % 30) / 10,
+      h: 10 + (i % 5) * 3,
+    }));
+    return (
+      <div style={{ position: "absolute", inset: 0, pointerEvents: "none", zIndex: 1, overflow: "hidden" }}>
+        {drops.map((dr, i) => (
+          <div key={i} style={{
+            position: "absolute",
+            left: `${dr.x}%`,
+            top: -20,
+            width: 1,
+            height: dr.h,
+            background: "linear-gradient(180deg, rgba(180,200,220,0) 0%, rgba(180,200,220,0.55) 100%)",
+            animation: `nx-rain ${dr.d}s linear infinite`,
+            animationDelay: `${dr.delay}s`,
+          }} />
+        ))}
+      </div>
+    );
+  }
+  if (kind === "snow") {
+    const flakes = Array.from({ length: 35 }, (_, i) => ({
+      x: (i * 41 + 11) % 100,
+      d: 6 + ((i * 7) % 8),
+      delay: ((i * 19) % 60) / 10,
+      sz: 2 + (i % 4),
+      sway: 3 + (i % 4),
+    }));
+    return (
+      <div style={{ position: "absolute", inset: 0, pointerEvents: "none", zIndex: 1, overflow: "hidden" }}>
+        {flakes.map((fl, i) => (
+          <div key={i} style={{
+            position: "absolute",
+            left: `${fl.x}%`,
+            top: -10,
+            width: fl.sz,
+            height: fl.sz,
+            borderRadius: "50%",
+            background: "rgba(255,255,255,0.85)",
+            boxShadow: "0 0 4px rgba(255,255,255,0.5)",
+            animation: `nx-snow ${fl.d}s linear infinite, nx-sway ${fl.sway}s ease-in-out infinite alternate`,
+            animationDelay: `${fl.delay}s, ${fl.delay / 2}s`,
+          }} />
+        ))}
+      </div>
+    );
+  }
+  if (kind === "fog") {
+    return (
+      <div style={{ position: "absolute", inset: 0, pointerEvents: "none", zIndex: 1, overflow: "hidden" }}>
+        {[0, 1, 2].map((i) => (
+          <div key={i} style={{
+            position: "absolute",
+            left: "-30%",
+            top: `${15 + i * 28}%`,
+            width: "160%",
+            height: 90,
+            background: "radial-gradient(ellipse at center, rgba(220,225,230,0.55) 0%, rgba(220,225,230,0) 70%)",
+            filter: "blur(8px)",
+            animation: `nx-fog ${50 + i * 18}s linear infinite`,
+            animationDelay: `${-i * 12}s`,
+          }} />
+        ))}
+      </div>
+    );
+  }
+  if (kind === "cloudy") {
+    const clouds = [
+      { top: 8, scale: 1.0, op: 0.55, dur: 90, delay: 0 },
+      { top: 22, scale: 1.4, op: 0.4, dur: 130, delay: -40 },
+      { top: 38, scale: 0.8, op: 0.5, dur: 75, delay: -25 },
+    ];
+    return (
+      <div style={{ position: "absolute", inset: 0, pointerEvents: "none", zIndex: 1, overflow: "hidden" }}>
+        {clouds.map((c, i) => (
+          <div key={i} style={{
+            position: "absolute",
+            left: "-25%",
+            top: `${c.top}%`,
+            width: 180 * c.scale,
+            height: 60 * c.scale,
+            opacity: c.op,
+            background: "radial-gradient(ellipse at 30% 50%, rgba(255,255,255,0.9) 0%, rgba(255,255,255,0) 60%), radial-gradient(ellipse at 65% 55%, rgba(255,255,255,0.85) 0%, rgba(255,255,255,0) 65%), radial-gradient(ellipse at 50% 40%, rgba(255,255,255,0.8) 0%, rgba(255,255,255,0) 70%)",
+            filter: "blur(2px)",
+            animation: `nx-cloud ${c.dur}s linear infinite`,
+            animationDelay: `${c.delay}s`,
+          }} />
+        ))}
+      </div>
+    );
+  }
+  // clear day — мягкие лучи у солнца уже даёт sun-glow; добавим лёгкое мерцание
+  if (kind === "clear" && isDay) {
+    return (
+      <div style={{
+        position: "absolute", inset: 0, pointerEvents: "none", zIndex: 1, overflow: "hidden",
+        background: "radial-gradient(circle at 75% 18%, rgba(255,235,180,0.18) 0%, transparent 45%)",
+        animation: "nx-shine 8s ease-in-out infinite alternate",
+      }} />
+    );
+  }
+  return null;
+};
+
 // ═══════════════════════════════════════════════════════════════
 // MOCK DATA
 // ═══════════════════════════════════════════════════════════════
@@ -4719,6 +4829,12 @@ export default function App() {
         @keyframes nx-glow { 0%,100% { opacity: 0.5; transform: scale(1) } 50% { opacity: 1; transform: scale(1.08) } }
         @keyframes nx-dot { 0%,80%,100% { opacity: 0.25; transform: translateY(0) } 40% { opacity: 1; transform: translateY(-2px) } }
         @keyframes nx-shimmer { 0% { background-position: -200% 0 } 100% { background-position: 200% 0 } }
+        @keyframes nx-rain { 0% { transform: translateY(0); opacity: 0 } 10% { opacity: 1 } 100% { transform: translateY(105vh); opacity: 0.6 } }
+        @keyframes nx-snow { 0% { transform: translateY(0); opacity: 0 } 10% { opacity: 1 } 100% { transform: translateY(105vh); opacity: 0.85 } }
+        @keyframes nx-sway { 0% { margin-left: -8px } 100% { margin-left: 8px } }
+        @keyframes nx-fog { 0% { transform: translateX(0) } 100% { transform: translateX(40%) } }
+        @keyframes nx-cloud { 0% { transform: translateX(0) } 100% { transform: translateX(160vw) } }
+        @keyframes nx-shine { 0% { opacity: 0.6 } 100% { opacity: 1 } }
         * { box-sizing: border-box; margin: 0; padding: 0 }
         body { overflow-x: hidden }
         input::placeholder { color: ${sky.tM}; opacity: 0.75 }
@@ -4747,6 +4863,8 @@ export default function App() {
           }}
         />
       )}
+
+      {isDay && <WeatherFx kind={weatherKind} isDay={isDay} />}
 
       <Stars op={stOp} />
 
