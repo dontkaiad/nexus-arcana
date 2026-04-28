@@ -313,9 +313,15 @@ const Metric = ({ s, v, sub, unit, accent, icon }) => (
     style={{
       flex: 1,
       textAlign: "center",
-      padding: "9px 2px",
-      background: `${s.acc}14`,
-      borderRadius: 10,
+      padding: "10px 4px",
+      // wave8.71: стеклянная подложка вместо едва заметной заливки —
+      // те же brd+blur, что и у Glass, но более выраженная за счёт
+      // двойного слоя (поверх внешнего Glass).
+      background: s.card,
+      border: `1px solid ${s.brd}`,
+      backdropFilter: "blur(14px)",
+      WebkitBackdropFilter: "blur(14px)",
+      borderRadius: 12,
     }}
   >
     <div
