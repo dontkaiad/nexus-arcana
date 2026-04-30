@@ -1,4 +1,5 @@
 import React, { useState, useRef, useMemo, useEffect } from "react";
+import './newdesign.css'
 import { useApi } from "./hooks/useApi";
 import {
   adaptToday, adaptArcanaToday,
@@ -165,8 +166,8 @@ function moonPhase(dt = new Date()) {
   return { idx, glyph: MOON_GLYPHS[idx], name: MOON_NAMES[idx], days, illum, frac };
 }
 
-const H = "'Lora', Georgia, serif";
-const B = "'Nunito', -apple-system, 'SF Pro Text', system-ui, sans-serif";
+const H = "'Newsreader', 'Lora', Georgia, serif";
+const B = "'Manrope', -apple-system, 'SF Pro Text', system-ui, sans-serif";
 
 // wave8.20: глобальный масштаб шрифтов и иконок для читаемости на мобильном.
 // Применяется ко всем inline fontSize и size={...} через `fs()`.
@@ -220,60 +221,16 @@ function groupByCat(items) {
 
 const Glass = ({ s, children, style, accent, glow, onClick }) => (
   <div
+    className={`glass${glow ? " glow" : ""}${accent ? " accent-l" : ""}${onClick ? " tap" : ""}`}
     onClick={onClick}
-    style={{
-      background: s.card,
-      borderRadius: 16,
-      border: `1px solid ${s.brd}`,
-      borderLeft: accent ? `3px solid ${accent}` : undefined,
-      backdropFilter: "blur(20px)",
-      WebkitBackdropFilter: "blur(20px)",
-      padding: "12px 14px",
-      position: "relative",
-      cursor: onClick ? "pointer" : undefined,
-      ...style,
-    }}
+    style={accent ? { "--accent": accent, ...style } : style}
   >
-    {glow && (
-      <div
-        style={{
-          position: "absolute",
-          top: -30,
-          left: "50%",
-          width: 100,
-          height: 60,
-          background: `radial-gradient(ellipse, ${s.acc}28 0%, transparent 70%)`,
-          transform: "translateX(-50%)",
-          pointerEvents: "none",
-        }}
-      />
-    )}
     {children}
   </div>
 );
 
 const Pill = ({ s, active, children, onClick }) => (
-  <div
-    onClick={onClick}
-    style={{
-      padding: "7px 14px",
-      borderRadius: 20,
-      fontSize: fs(13),
-      cursor: "pointer",
-      // wave8.26: стекло на всех таблетках — единый язык интерфейса.
-      // Активная — тот же blur, но акцентная заливка вместо нейтральной.
-      background: active ? `${s.acc}66` : s.card,
-      color: s.text,
-      opacity: active ? 1 : 0.85,
-      border: `1px solid ${active ? "rgba(255,255,255,0.55)" : s.brd}`,
-      fontFamily: B,
-      fontWeight: active ? 700 : 500,
-      whiteSpace: "nowrap",
-      transition: "all 0.2s",
-      backdropFilter: "blur(20px)",
-      WebkitBackdropFilter: "blur(20px)",
-    }}
-  >
+  <div className={`pill${active ? " active" : ""}`} onClick={onClick}>
     {children}
   </div>
 );
@@ -295,110 +252,37 @@ const PillSelect = ({ s, value, onChange, options }) => (
 );
 
 const Bar = ({ s, pct, color }) => (
-  <div style={{ height: 4, background: s.brd, borderRadius: 2, overflow: "hidden" }}>
-    <div
-      style={{
-        height: "100%",
-        width: `${Math.min(Math.max(pct, 0), 100)}%`,
-        background: color || s.acc,
-        borderRadius: 2,
-        transition: "width 0.6s ease",
-      }}
-    />
+  <div className="bar">
+    <div style={{ width: `${Math.min(Math.max(pct || 0, 0), 100)}%`, background: color }} />
   </div>
 );
 
 const Metric = ({ s, v, sub, unit, accent, icon }) => (
-  <div
-    style={{
-      flex: 1,
-      textAlign: "center",
-      padding: "10px 4px",
-      // wave8.71: стеклянная подложка вместо едва заметной заливки —
-      // те же brd+blur, что и у Glass, но более выраженная за счёт
-      // двойного слоя (поверх внешнего Glass).
-      background: s.card,
-      border: `1px solid ${s.brd}`,
-      backdropFilter: "blur(14px)",
-      WebkitBackdropFilter: "blur(14px)",
-      borderRadius: 12,
-    }}
-  >
-    <div
-      style={{
-        fontFamily: H,
-        fontSize: fs(24),
-        fontWeight: 700,
-        color: accent || s.text,
-        display: "inline-flex",
-        alignItems: "center",
-        gap: 3,
-        justifyContent: "center",
-      }}
-    >
-      {icon}
-      {v}
-      {unit && (
-        <span style={{ color: s.text, opacity: 0.7, fontSize: fs(16), fontWeight: 500, marginLeft: 2 }}>{unit}</span>
-      )}
+  <div className="metric">
+    <div className="v" style={accent ? { color: accent } : undefined}>
+      {icon && <span style={{ marginRight: 4, display: "inline-flex", alignItems: "center", verticalAlign: "middle" }}>{icon}</span>}
+      {v}{unit && <span className="u">{unit}</span>}
     </div>
-    <div style={{ fontSize: fs(14), color: s.text, opacity: 0.85, fontWeight: 500, marginTop: 3 }}>{sub}</div>
+    <div className="l">{sub}</div>
   </div>
 );
 
 const Chk = ({ s, done, onClick }) => (
-  <div
-    onClick={onClick}
-    style={{
-      width: 24,
-      height: 24,
-      borderRadius: 7,
-      border: `2px solid ${done ? s.acc : s.brd}`,
-      background: done ? s.acc : "transparent",
-      cursor: "pointer",
-      display: "flex",
-      alignItems: "center",
-      justifyContent: "center",
-      flexShrink: 0,
-      transition: "all 0.2s",
-    }}
-  >
-    {done && <Check size={fs(12)} color="#fff" strokeWidth={3} />}
+  <div className={`chk${done ? " done" : ""}`} onClick={onClick}>
+    {done && <Check size={13} strokeWidth={3} />}
   </div>
 );
 
 const PrioDot = ({ s, prio }) => {
-  const c =
-    prio === "🔴" || prio === "high"
-      ? s.red
-      : prio === "🟡" || prio === "medium"
-      ? s.amber
-      : s.tM;
-  return <span style={{ width: 7, height: 7, borderRadius: "50%", background: c, flexShrink: 0 }} />;
+  const colors = { "🔴": "var(--nx-red)", "🟡": "var(--nx-amber)", "⚪": "var(--nx-text-mute)", "high": "var(--nx-red)", "medium": "var(--nx-amber)", "low": "var(--nx-text-mute)" };
+  return <span className="prio-dot" style={{ background: colors[prio] || "var(--nx-text-mute)" }} />;
 };
 
-const SectionLabel = ({ s, children, action }) => (
-  <div
-    style={{
-      display: "flex",
-      justifyContent: "space-between",
-      alignItems: "baseline",
-      // wave8.29: было "0 4px" — заголовки секций уезжали левее, чем
-      // содержимое Glass-карточек (внутр. падд. 14). Выровнял по 14.
-      padding: "0 14px",
-      margin: "14px 0 8px",
-    }}
-  >
-    <span
-      style={{
-        fontFamily: H,
-        fontSize: fs(20),
-        color: s.text,
-      }}
-    >
-      {children}
-    </span>
-    {action}
+const SectionLabel = ({ s, children, meta, action }) => (
+  <div className="section-h">
+    <span>{children}</span>
+    {meta && <span className="meta">{meta}</span>}
+    {action && <span>{action}</span>}
   </div>
 );
 
@@ -1266,192 +1150,91 @@ function NxDay({ s, openTask, navigate, openStreaks }) {
   };
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-      <Glass s={s} glow>
-        {/* wave8.29: было baseline — «Мой день» прижимался к верху, а
-            правая колонка (дата + погода) занимала 2 строки → блок
-            растягивался. center выравнивает заголовок по центру колонки. */}
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <span style={{ fontFamily: H, fontSize: fs(20), color: s.text }}>Мой день</span>
-          <div style={{ textAlign: "right", whiteSpace: "nowrap" }}>
-            <div style={{ fontSize: fs(13), color: s.text, opacity: 0.75 }}>{t.date}</div>
-            {weatherApi.data && !weatherApi.data.error && (
-              <div style={{ fontSize: fs(13), color: s.text, opacity: 0.9, marginTop: 3, fontWeight: 500 }}>
-                {WEATHER_ICON[weatherApi.data.kind] || "🌤️"}
-                {" "}
-                {weatherApi.data.temp > 0 ? "+" : ""}{weatherApi.data.temp}° · {shortCity(weatherApi.data.city)}
-              </div>
-            )}
+    <>
+      <div className="hero glass glow">
+        <div className="hero-h">
+          <div>
+            <div className="hero-title">Мой день</div>
+            <div style={{ fontSize: 13, opacity: 0.7, marginTop: 4, fontWeight: 500 }}>
+              {weatherApi.data?.condition ? weatherApi.data.condition.toLowerCase() + ", чашка чая не помешает" : "хорошего дня"}
+            </div>
+          </div>
+          <div className="hero-meta">
+            <div>{t.date}</div>
+            {weatherApi.data && <div style={{ marginTop: 3 }}>
+              {WEATHER_ICON[weatherApi.data.kind] || "🌤"} {weatherApi.data.temp > 0 ? "+" : ""}{weatherApi.data.temp}° · {shortCity(weatherApi.data.city)}
+            </div>}
           </div>
         </div>
-        <div style={{ display: "flex", gap: 6, marginTop: 10 }}>
-          <div style={{ flex: 1, cursor: "pointer" }} onClick={() => navigate && navigate("tasks")}>
-            <Metric s={s} v={`${doneCount}`} unit={`/${total}`} sub="задачи" />
+        <div className="hero-metrics">
+          <div style={{ flex: 1, cursor: "pointer" }} onClick={() => navigate?.("tasks")}>
+            <Metric s={s} v={doneCount} unit={`/${total}`} sub="задачи" />
           </div>
-          <div style={{ flex: 1, cursor: "pointer" }} onClick={() => navigate && navigate("fin")}>
+          <div style={{ flex: 1, cursor: "pointer" }} onClick={() => navigate?.("fin")}>
             <Metric s={s} v={`${Math.round((t.budgetDay - t.spentDay) / 1000)}к`} unit="₽" sub="свободно" />
           </div>
-          <div style={{ flex: 1, cursor: "pointer" }} onClick={() => openStreaks && openStreaks()}>
-            <Metric
-              s={s}
-              v={t.streak}
-              sub="стрик"
-              accent={s.amber}
-              icon={<LucideFlame size={fs(18)} color={s.amber} fill={s.amber} style={{ opacity: 0.9 }} />}
-            />
+          <div style={{ flex: 1, cursor: "pointer" }} onClick={() => openStreaks?.()}>
+            <Metric s={s} v={<span className="streak-v"><LucideFlame size={16} fill="currentColor" style={{ flexShrink: 0, color: s.amber }} className="flame" />{t.streak}</span>} sub="стрик" accent={s.amber} />
           </div>
         </div>
-        <div
-          onClick={() => navigate && navigate("fin")}
-          style={{ marginTop: 11, paddingTop: 10, borderTop: `1px solid ${s.brd}`, cursor: "pointer" }}
-        >
-          <div
-            style={{
-              display: "flex",
-              justifyContent: "space-between",
-              fontSize: fs(14),
-              color: s.text,
-              marginBottom: 5,
-            }}
-          >
-            <span style={{ fontWeight: 500 }}>Бюджет дня</span>
-            <span
-              style={{
-                color: leftPct > 85 ? s.red : leftPct > 60 ? s.amber : s.text,
-                fontWeight: 600,
-              }}
-            >
-              {/* wave8.33: показываем полный бюджет дня + % потраченного
-                  (например, «4,166 ₽ · 0%» при пустом дне). */}
-              {t.budgetDay.toLocaleString()} ₽ · {leftPct}%
-            </span>
+        <div className="hero-budget">
+          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6, fontSize: 13, fontWeight: 500, cursor: "pointer" }} onClick={() => navigate?.("fin")}>
+            <span style={{ opacity: 0.75 }}>Бюджет дня</span>
+            <span style={{ color: leftPct > 85 ? s.red : leftPct > 60 ? s.amber : s.acc, fontWeight: 700 }}>{t.budgetDay.toLocaleString()} ₽ · {leftPct}%</span>
           </div>
-          <Bar
-            s={s}
-            pct={leftPct}
-            color={leftPct > 85 ? s.red : leftPct > 60 ? s.amber : s.acc}
-          />
-          <div style={{ fontSize: fs(13), color: s.text, opacity: 0.8, marginTop: 5 }}>
-            потрачено {t.spentDay.toLocaleString()} ₽ из {t.budgetDay.toLocaleString()} ₽
-          </div>
+          <Bar s={s} pct={leftPct} color={leftPct > 85 ? s.red : leftPct > 60 ? s.amber : s.acc} />
+          <div style={{ fontSize: 12, opacity: 0.6, marginTop: 6 }}>потрачено {t.spentDay.toLocaleString()} ₽ из {t.budgetDay.toLocaleString()} ₽</div>
         </div>
-      </Glass>
+      </div>
 
-      {/* wave7.3: СДВГ-совет поднят наверх. wave8.6: refresh по клику. */}
       {t.adhdTip && (
-        <Glass s={s} accent={s.acc}>
-          <div
-            style={{
-              display: "flex",
-              justifyContent: "space-between",
-              alignItems: "center",
-              marginBottom: 4,
-            }}
-          >
-            <span
-              style={{
-                fontSize: fs(15),
-                // wave8.35: единый цвет с временем задач в расписании.
-                color: s.acc,
-                fontWeight: 700,
-                display: "inline-flex",
-                alignItems: "center",
-                gap: 5,
-              }}
-            >
-              🦋 СДВГ-совет
-            </span>
-            <RefreshCw
-              size={fs(16)}
-              color={s.tS}
-              style={{ cursor: "pointer" }}
-              onClick={async () => {
-                try {
-                  await apiPost("/api/today/refresh-tip");
-                  refetch();
-                } catch (_) { /* ignore */ }
-              }}
-            />
+        <div className="tip" style={{ marginTop: 8 }}>
+          <div className="tip-h">
+            <span>🦋 СДВГ-совет</span>
+            <RefreshCw size={15} style={{ cursor: "pointer", opacity: 0.6 }} onClick={async () => { try { await apiPost("/api/today/refresh-tip"); refetch(); } catch (_) {} }} />
           </div>
-          <div style={{ fontSize: fs(16), color: s.text, lineHeight: 1.5 }}>{renderBoldMd(t.adhdTip)}</div>
-        </Glass>
+          <div className="tip-body">{renderBoldMd(t.adhdTip)}</div>
+        </div>
       )}
 
-      {/* wave8.68: «Мой день» — только Расписание (просрочка + сегодня со временем).
-          Если пусто — дружелюбная заглушка. Блок «Задачи» внизу убран. */}
-      <SectionLabel s={s}>Расписание</SectionLabel>
+      <SectionLabel s={s} meta={`${t.overdue.length + t.scheduled.length} пунктов`}>Расписание</SectionLabel>
       {t.overdue.length === 0 && t.scheduled.length === 0 && (
-        <Glass s={s} style={{ padding: "14px 16px", marginBottom: 6 }}>
-          <div style={{ fontSize: fs(16), color: s.text, fontWeight: 500, marginBottom: 4 }}>
-            На сегодня пусто — отдыхай ✨
-          </div>
-          <div style={{ fontSize: fs(13), color: s.tM, lineHeight: 1.5 }}>
-            Если хочется чем-то заняться — загляни во вкладку «Задачи».
-          </div>
-        </Glass>
+        <div className="glass" style={{ padding: "16px", textAlign: "center" }}>
+          <div style={{ fontSize: 16, fontWeight: 500, marginBottom: 4 }}>На сегодня пусто — отдыхай ✨</div>
+          <div style={{ fontSize: 13, opacity: 0.6, lineHeight: 1.5 }}>Если хочется чем-то заняться — загляни во вкладку «Задачи».</div>
+        </div>
       )}
       {t.overdue.map((o) => (
-        <Glass
-          key={o.id}
-          s={s}
-          accent={s.red}
-          style={{
-            padding: "10px 14px", marginBottom: 6,
-            display: "flex", alignItems: "center", gap: 10,
-            opacity: done[o.id] ? 0.45 : 1,
-          }}
-        >
+        <div key={o.id} className="task glass" style={{ opacity: done[o.id] ? 0.45 : 1 }}>
           <Chk s={s} done={done[o.id]} onClick={() => toggle(o.id)} />
-          <div
-            onClick={() => openTask(o)}
-            style={{
-              flex: 1, minWidth: 0, cursor: "pointer",
-              textDecoration: done[o.id] ? "line-through" : "none",
-            }}
-          >
-            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              <span style={{
-                flex: 1, fontSize: fs(16), color: s.text, fontWeight: 500,
-                wordBreak: "break-word",
-              }}>
-                {o.title}
-              </span>
-              {o.cat && (
-                <span style={{
-                  display: "inline-flex", alignItems: "center",
-                  padding: "3px 9px", borderRadius: 10,
-                  fontSize: fs(13), background: `${s.acc}33`, color: s.text, fontWeight: 500,
-                  flexShrink: 0, whiteSpace: "nowrap",
-                }}>
-                  {String(o.cat).split(" ")[0]}
-                </span>
-              )}
-              <PrioDot s={s} prio={o.prio} />
-            </div>
-            <div style={{
-              fontSize: fs(13), color: s.red, fontWeight: 500,
-              marginTop: 3, display: "flex", gap: 8,
-            }}>
-              <span>{o.days} д назад</span>
-              {o.rpt && <span style={{ color: s.tM, fontWeight: 400 }}>{o.rpt}</span>}
+          <div className="body" onClick={() => openTask(o)} style={{ cursor: "pointer" }}>
+            <div className="title">{o.title}</div>
+            <div className="meta">
+              <span style={{ color: s.red, fontWeight: 600 }}>{o.days} д назад</span>
+              {o.rpt && <span>{o.rpt}</span>}
             </div>
           </div>
-        </Glass>
+          {o.cat && <div className="cat-badge">{String(o.cat).split(" ")[0]}</div>}
+          <PrioDot s={s} prio={o.prio} />
+        </div>
       ))}
       {t.scheduled.map((x) => (
-        <TaskRow
-          key={x.id}
-          s={s}
-          t={x}
-          done={done[x.id]}
-          onToggle={() => toggle(x.id)}
-          onOpen={() => openTask(x)}
-          withTime
-        />
+        <div key={x.id} className="task glass" style={{ opacity: done[x.id] ? 0.45 : 1 }}>
+          {x.time && <span className="time">{x.time}</span>}
+          <Chk s={s} done={done[x.id]} onClick={() => toggle(x.id)} />
+          <div className="body" onClick={() => openTask(x)} style={{ cursor: "pointer" }}>
+            <div className="title">{x.title}</div>
+            <div className="meta">
+              {x.date && <span>{x.date}</span>}
+              {x.rpt && <span>🔄 {x.rpt}</span>}
+              {x.streak > 0 && <span>🔥 {x.streak}</span>}
+            </div>
+          </div>
+          {x.cat && <div className="cat-badge">{String(x.cat).split(" ")[0]}</div>}
+          <PrioDot s={s} prio={x.prio} />
+        </div>
       ))}
-
-      {total === 0 && <Empty s={s} text="На сегодня пусто — отдыхай 🌿" />}
-    </div>
+    </>
   );
 }
 
@@ -1465,73 +1248,29 @@ function NxTasks({ s, openTask }) {
   const list = loading || error ? [] : adaptTasks(data);
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-      <div style={{ fontFamily: H, fontSize: fs(20), color: s.text }}>Задачи</div>
-      <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-        {[
-          ["all", "Все"],
-          ["active", "Активные"],
-          ["overdue", "Просрочено"],
-          ["done", "Выполнено"],
-        ].map(([k, l]) => (
-          <Pill key={k} s={s} active={f === k} onClick={() => setF(k)}>
-            {l}
-          </Pill>
+    <div style={{ display: "flex", flexDirection: "column", gap: 0 }}>
+      <SectionLabel s={s}>Задачи</SectionLabel>
+      <div className="pills" style={{ marginBottom: 10 }}>
+        {[["all","Все"],["active","Активные"],["overdue","Просрочено"],["done","Выполнено"]].map(([k,l]) => (
+          <Pill key={k} s={s} active={f === k} onClick={() => setF(k)}>{l}</Pill>
         ))}
       </div>
       {loading && <Empty s={s} text="Загружаю..." />}
       {error && <ErrorBox s={s} error={error} refetch={refetch} />}
-      {!loading && !error && list.length === 0 && (
-        <Empty s={s} emoji="🌿" title="Чилл" text="На сегодня задач нет. Можно отдохнуть." />
-      )}
+      {!loading && !error && list.length === 0 && <Empty s={s} emoji="🌿" title="Чилл" text="На сегодня задач нет." />}
       {!loading && !error && list.map((t) => (
-        <Glass
-          key={t.id}
-          s={s}
-          accent={t.status === "overdue" ? s.red : undefined}
-          style={{ padding: "10px 14px", marginBottom: 4 }}
-          onClick={() => openTask(t)}
-        >
-          {/* wave8.33: единый стиль с TaskRow в Мой день — заголовок,
-              справа бейдж категории отдельной сущностью, потом приоритет. */}
-          <div style={{
-            display: "flex", alignItems: "center", gap: 8,
-            textDecoration: t.status === "done" ? "line-through" : "none",
-            opacity: t.status === "done" ? 0.55 : 1,
-          }}>
-            <span style={{
-              flex: 1, minWidth: 0,
-              fontSize: fs(16), color: s.text, fontWeight: 500,
-              wordBreak: "break-word",
-            }}>
-              {t.title}
-            </span>
-            {t.cat && (
-              <span style={{
-                display: "inline-flex", alignItems: "center",
-                padding: "3px 9px", borderRadius: 10,
-                fontSize: fs(13), background: `${s.acc}33`, color: s.text, fontWeight: 500,
-                flexShrink: 0, whiteSpace: "nowrap",
-              }}>
-                {String(t.cat).split(" ")[0]}
-              </span>
-            )}
-            <PrioDot s={s} prio={t.prio} />
+        <div key={t.id} className={`task glass${t.status === "done" ? " done" : ""}`} onClick={() => openTask(t)} style={{ cursor: "pointer" }}>
+          <div className="body">
+            <div className="title">{t.title}</div>
+            <div className="meta">
+              {t.date && <span style={{ color: t.status === "overdue" ? s.red : undefined }}>{t.date}</span>}
+              {t.rpt && <span>{t.rpt}</span>}
+              {t.status === "done" && <span>✓ сделано</span>}
+            </div>
           </div>
-          <div
-            style={{
-              fontSize: fs(10),
-              color: t.status === "overdue" ? s.red : s.tM,
-              marginTop: 3,
-              display: "flex",
-              gap: 6,
-            }}
-          >
-            {t.date && <span>{t.date}</span>}
-            {t.rpt && <span>{t.rpt}</span>}
-            {t.status === "done" && <span>✓ сделано</span>}
-          </div>
-        </Glass>
+          {t.cat && <div className="cat-badge">{String(t.cat).split(" ")[0]}</div>}
+          <PrioDot s={s} prio={t.prio} />
+        </div>
       ))}
     </div>
   );
@@ -2564,210 +2303,92 @@ function ArDay({ s, openClient, navigate, openMoonPhases }) {
                  "linear-gradient(180deg, #5a6b8a 0%, #8a9cb8 100%)";
 
   return (
-    <div style={{
-      display: "flex", flexDirection: "column", gap: 8,
-      // Добавляем оверлей фон на основе фазы луны — транспарент поверх основного
-      position: "relative",
-    }}>
-      <div style={{
-        position: "absolute", inset: -14, zIndex: -1,
-        background: moonGradient, opacity: 0.22,
-        pointerEvents: "none", transition: "background 2s ease",
-      }} />
-      {/* Hero с метриками */}
-      <Glass s={s} glow>
-        {/* wave8.29: было baseline — «Мой день» прижимался к верху, а
-            правая колонка (дата + погода) занимала 2 строки → блок
-            растягивался. center выравнивает заголовок по центру колонки. */}
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <span style={{ fontFamily: H, fontSize: fs(20), color: s.text }}>Мой день</span>
-          <span style={{ fontSize: fs(11), color: s.tS }}>{a.date}</span>
+    <div style={{ display: "flex", flexDirection: "column", gap: 8, position: "relative" }}>
+      <div style={{ position: "absolute", inset: -14, zIndex: -1, background: moonGradient, opacity: 0.22, pointerEvents: "none", transition: "background 2s ease" }} />
+      <div className="hero glass glow">
+        <div className="hero-h">
+          <div>
+            <div className="hero-title">Мой день</div>
+            <div style={{ fontSize: 13, opacity: 0.65, marginTop: 4, fontWeight: 500 }}>тишина практики</div>
+          </div>
+          <div className="hero-meta">{a.date}</div>
         </div>
-        <div style={{ display: "flex", gap: 6, marginTop: 10 }}>
-          <div style={{ flex: 1, cursor: "pointer" }} onClick={() => navigate && navigate("sess")}>
+        <div className="hero-metrics">
+          <div style={{ flex: 1, cursor: "pointer" }} onClick={() => navigate?.("sess")}>
             <Metric s={s} v={a.sessionsToday.length} sub="сеансов" />
           </div>
-          <div style={{ flex: 1, cursor: "pointer" }} onClick={() => navigate && navigate("stats")}>
-            <Metric
-              s={s}
-              v={a.unchecked30d}
-              sub="не провер."
-              accent={a.unchecked30d > 0 ? s.amber : undefined}
-            />
+          <div style={{ flex: 1, cursor: "pointer" }} onClick={() => navigate?.("stats")}>
+            <Metric s={s} v={a.unchecked30d} sub="не провер." accent={a.unchecked30d > 0 ? s.amber : undefined} />
           </div>
-          <div style={{ flex: 1, cursor: "pointer" }} onClick={() => navigate && navigate("stats")}>
+          <div style={{ flex: 1, cursor: "pointer" }} onClick={() => navigate?.("stats")}>
             <Metric s={s} v={`${a.accuracy}%`} sub="точность" accent={s.acc} />
           </div>
         </div>
-      </Glass>
-
-      {/* Фаза луны — большой блок */}
-      <Glass
-        s={s}
-        accent={s.acc}
-        glow
-        onClick={() => openMoonPhases && openMoonPhases()}
-        style={{ cursor: "pointer" }}>
-        <div style={{ display: "flex", gap: 14, alignItems: "center" }}>
-          <div
-            style={{
-              fontSize: fs(54),
-              lineHeight: 1,
-              filter: "drop-shadow(0 0 10px rgba(255,255,255,0.3))",
-            }}
-          >
-            {moon.glyph}
-          </div>
-          <div style={{ flex: 1 }}>
-            <div
-              style={{
-                fontFamily: H,
-                fontSize: fs(17),
-                color: s.text,
-                fontWeight: 500,
-              }}
-            >
-              {moon.name}
-            </div>
-            <div style={{ fontSize: fs(11), color: s.tS, marginTop: 3 }}>
-              {moon.days} день цикла · освещение {moon.illum}%
-            </div>
-            <div style={{ marginTop: 6 }}>
-              <Bar s={s} pct={moon.illum} color={s.acc} />
-            </div>
-          </div>
-        </div>
-      </Glass>
-
-      {/* Статистика за месяц (4 карточки) */}
-      <SectionLabel s={s}>Статистика за {a.monthBlock.label}</SectionLabel>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
-        <Glass s={s} style={{ padding: "12px 10px", textAlign: "center" }}>
-          <div style={{ fontSize: fs(18), marginBottom: 4 }}>💰</div>
-          <div style={{ fontFamily: H, fontSize: fs(18), color: s.acc, fontWeight: 500 }}>
-            {a.monthBlock.inc.toLocaleString()}<span style={{ fontSize: fs(13), marginLeft: 1 }}>₽</span>
-          </div>
-          <div style={{ fontSize: fs(10), color: s.tS, marginTop: 2 }}>Доход</div>
-        </Glass>
-        <Glass s={s} style={{ padding: "12px 10px", textAlign: "center" }}>
-          <div style={{ fontSize: fs(18), marginBottom: 4 }}>🕯️</div>
-          <div style={{ fontFamily: H, fontSize: fs(18), color: s.text, fontWeight: 500 }}>
-            {a.monthBlock.supplies.toLocaleString()}<span style={{ fontSize: fs(13), marginLeft: 1 }}>₽</span>
-          </div>
-          <div style={{ fontSize: fs(10), color: s.tS, marginTop: 2 }}>Расходники</div>
-        </Glass>
-        <Glass s={s} style={{ padding: "12px 10px", textAlign: "center" }}>
-          <div style={{ fontSize: fs(18), marginBottom: 4 }}>✨</div>
-          <div style={{ fontFamily: H, fontSize: fs(18), color: s.acc, fontWeight: 500 }}>
-            {a.monthBlock.accuracy}%
-          </div>
-          <div style={{ fontSize: fs(10), color: s.tS, marginTop: 2 }}>Сбылось</div>
-        </Glass>
-        <Glass s={s} style={{ padding: "12px 10px", textAlign: "center" }}>
-          <div style={{ fontSize: fs(18), marginBottom: 4 }}>🃏</div>
-          <div style={{ fontFamily: H, fontSize: fs(18), color: s.text, fontWeight: 500 }}>
-            {a.monthBlock.sessions}
-          </div>
-          <div style={{ fontSize: fs(10), color: s.tS, marginTop: 2 }}>Сеансов</div>
-        </Glass>
       </div>
 
-      {/* Сеансы */}
+      <div className="moon-hero glass glow" onClick={() => openMoonPhases?.()}>
+        <div className="glyph">{moon.glyph}</div>
+        <div className="info">
+          <div className="name">{moon.name}</div>
+          <div className="sub">{moon.days} день цикла · освещение {moon.illum}%</div>
+          <Bar s={s} pct={moon.illum} color={s.acc} />
+        </div>
+      </div>
+
+      <SectionLabel s={s}>Статистика за {a.monthBlock.label}</SectionLabel>
+      <div className="grid-2">
+        {[
+          { ico: "💰", v: `${a.monthBlock.inc.toLocaleString()}₽`, l: "Доход", accent: s.acc },
+          { ico: "🕯️", v: `${a.monthBlock.supplies.toLocaleString()}₽`, l: "Расходники" },
+          { ico: "✨", v: `${a.monthBlock.accuracy}%`, l: "Сбылось", accent: s.acc },
+          { ico: "🃏", v: a.monthBlock.sessions, l: "Сеансов" },
+        ].map((item, i) => (
+          <div key={i} className="glass" style={{ padding: "16px 12px", textAlign: "center" }}>
+            <div style={{ fontSize: 22, marginBottom: 6 }}>{item.ico}</div>
+            <div style={{ fontFamily: H, fontSize: 24, fontWeight: 500, color: item.accent }}>{item.v}</div>
+            <div style={{ fontSize: 12, opacity: 0.6, marginTop: 4, fontWeight: 500 }}>{item.l}</div>
+          </div>
+        ))}
+      </div>
+
       {a.sessionsToday.length > 0 && (
         <>
           <SectionLabel s={s}>Сеансы сегодня</SectionLabel>
-          {a.sessionsToday.map((x) => {
-            const cid = x.client_id;
-            return (
-              <Glass
-                key={x.id}
-                s={s}
-                style={{ padding: "10px 14px", marginBottom: 6, display: "flex", gap: 10, alignItems: "center" }}
-                onClick={() => cid && openClient({ id: cid })}
-              >
-                <span
-                  style={{
-                    fontFamily: "'SF Mono', Menlo, monospace",
-                    fontSize: fs(12),
-                    color: s.acc,
-                    fontWeight: 500,
-                    minWidth: 38,
-                  }}
-                >
-                  {x.time}
-                </span>
-                <div
-                  style={{
-                    width: 30,
-                    height: 30,
-                    borderRadius: "50%",
-                    background: `${s.acc}22`,
-                    color: s.acc,
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    fontFamily: H,
-                    fontSize: fs(13),
-                    fontWeight: 500,
-                    flexShrink: 0,
-                  }}
-                >
-                  {x.client[0]}
-                </div>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: fs(13), color: s.text, fontWeight: 500 }}>{x.client}</div>
-                  <div style={{ fontSize: fs(10), color: s.tM, marginTop: 2 }}>
-                    {x.type} · {x.area}
-                  </div>
-                </div>
-                <ChevronRight size={fs(16)} color={s.tS} />
-              </Glass>
-            );
-          })}
-        </>
-      )}
-
-      {/* Работы практики */}
-      {a.worksToday.length > 0 && (
-        <>
-          <SectionLabel s={s}>Работы</SectionLabel>
-          {a.worksToday.map((w) => (
-            <Glass
-              key={w.id}
-              s={s}
-              style={{
-                padding: "10px 14px",
-                marginBottom: 6,
-                display: "flex",
-                gap: 10,
-                alignItems: "center",
-                opacity: done[w.id] ? 0.45 : 1,
-              }}
-            >
-              <Chk
-                s={s}
-                done={done[w.id]}
-                onClick={() => setDone((p) => ({ ...p, [w.id]: !p[w.id] }))}
-              />
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div
-                  style={{
-                    fontSize: fs(13),
-                    color: s.text,
-                    textDecoration: done[w.id] ? "line-through" : "none",
-                  }}
-                >
-                  {w.title}
-                </div>
-                <div style={{ fontSize: fs(10), color: s.tM, marginTop: 2 }}>{w.cat}</div>
+          {a.sessionsToday.map((x) => (
+            <div key={x.id} className="task glass" style={{ cursor: "pointer" }} onClick={() => x.client_id && openClient({ id: x.client_id })}>
+              <span className="time">{x.time}</span>
+              <div style={{ width: 30, height: 30, borderRadius: "50%", background: `${s.acc}22`, color: s.acc, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: H, fontSize: 13, fontWeight: 500, flexShrink: 0 }}>{x.client[0]}</div>
+              <div className="body">
+                <div className="title">{x.client}</div>
+                <div className="meta"><span>{x.type} · {x.area}</span></div>
               </div>
-              <PrioDot s={s} prio={w.prio} />
-            </Glass>
+              <ChevronRight size={16} color={s.tS} />
+            </div>
           ))}
         </>
       )}
 
-      {total === 0 && a.unchecked30d === 0 && <Empty s={s} text="Сегодня в практике спокойно 🌙" />}
+      {a.worksToday.length > 0 && (
+        <>
+          <SectionLabel s={s}>Работы</SectionLabel>
+          {a.worksToday.map((w) => (
+            <div key={w.id} className="task glass" style={{ opacity: done[w.id] ? 0.45 : 1 }}>
+              <Chk s={s} done={done[w.id]} onClick={() => setDone((p) => ({ ...p, [w.id]: !p[w.id] }))} />
+              <div className="body">
+                <div className="title" style={{ textDecoration: done[w.id] ? "line-through" : "none" }}>{w.title}</div>
+                <div className="meta"><span>{w.cat}</span></div>
+              </div>
+              <PrioDot s={s} prio={w.prio} />
+            </div>
+          ))}
+        </>
+      )}
+
+      {total === 0 && a.unchecked30d === 0 && (
+        <div style={{ textAlign: "center", padding: "20px 0 4px", fontStyle: "italic", fontSize: 14, opacity: 0.55, fontFamily: H }}>
+          Сегодня в практике спокойно 🌙
+        </div>
+      )}
     </div>
   );
 }
@@ -2811,43 +2432,20 @@ function ArSessions({ s, openSession }) {
         <Empty s={s} emoji="🔮" title="Раскладов нет" text="Пока тишина — карты ждут." />
       )}
       {!loading && !error && list.map((x) => {
-        const cardsBrief = (x.cards || []).map((c) => c.name).slice(0, 3).join(", ") +
-          (x.cards.length > 3 ? `, +${x.cards.length - 3}` : "");
-        const doneGlyph = (x.done || "⏳").split(" ")[0];
+        const cardsBrief = (x.cards || []).map((c) => c.name).slice(0, 3).join(", ") + (x.cards.length > 3 ? `, +${x.cards.length - 3}` : "");
         return (
-          <Glass
-            key={x.id}
-            s={s}
-            style={{ padding: "10px 14px", marginBottom: 4 }}
-            onClick={() => openSession({ id: x.id })}
-          >
+          <div key={x.id} className="glass tap" style={{ padding: "14px 16px", marginBottom: 6 }} onClick={() => openSession({ id: x.id })}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "start", gap: 8 }}>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: fs(14), color: s.text, fontWeight: 500, fontFamily: H }}>
-                  {x.q || "без темы"}
+              <div className="flex-grow">
+                <div style={{ fontFamily: H, fontSize: 18, fontWeight: 500, lineHeight: 1.2 }}>{x.q || "без темы"}</div>
+                <div style={{ fontSize: 12, opacity: 0.65, marginTop: 6, display: "flex", gap: 6, flexWrap: "wrap" }}>
+                  {[x.type, x.deck, x.client, x.date].filter(Boolean).map((item, i) => <span key={i}>{item}</span>)}
                 </div>
-                <div style={{ fontSize: fs(10), color: s.tM, marginTop: 3 }}>
-                  {[x.type, x.deck, x.client, x.date].filter(Boolean).join(" · ")}
-                </div>
-                {cardsBrief && (
-                  <div
-                    style={{
-                      fontSize: fs(11),
-                      color: s.tS,
-                      marginTop: 3,
-                      fontStyle: "italic",
-                      whiteSpace: "nowrap",
-                      overflow: "hidden",
-                      textOverflow: "ellipsis",
-                    }}
-                  >
-                    🃏 {cardsBrief}
-                  </div>
-                )}
+                {cardsBrief && <div style={{ fontSize: 13, fontStyle: "italic", marginTop: 6, opacity: 0.75, fontFamily: H }}>{cardsBrief}</div>}
               </div>
-              <span style={{ fontSize: fs(14), flexShrink: 0 }}>{doneGlyph}</span>
+              <span style={{ fontSize: 18 }}>{(x.done || "⏳").split(" ")[0]}</span>
             </div>
-          </Glass>
+          </div>
         );
       })}
     </div>
@@ -4800,6 +4398,7 @@ export default function App() {
 
   return (
     <div
+      className={isDay ? "day" : "night"}
       onTouchStart={(e) => {
         tX.current = e.touches[0].clientX;
       }}
@@ -4822,7 +4421,7 @@ export default function App() {
       }}
     >
       <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;500;600&display=swap');
+        @import url('https://fonts.googleapis.com/css2?family=Newsreader:ital,wght@0,400;0,500;0,600;1,400;1,500&family=Manrope:wght@400;500;600;700&family=JetBrains+Mono:wght@500;600&family=Caveat:wght@400;500&display=swap');
         @keyframes tw { 0% { opacity: 0.15 } 100% { opacity: 0.7 } }
         @keyframes nx-orbit { to { transform: rotate(360deg) } }
         @keyframes nx-pulse { 0%,100% { transform: scale(1); opacity: 0.55 } 50% { transform: scale(1.22); opacity: 0.95 } }
