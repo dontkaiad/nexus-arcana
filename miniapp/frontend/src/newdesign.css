@@ -1,8 +1,8 @@
 :root {
-  --f-display: "Newsreader", "Lora", Georgia, serif;
+  --f-display: "Lora", Georgia, serif;
   --f-body: "Manrope", -apple-system, "SF Pro Text", system-ui, sans-serif;
-  --f-mono: "JetBrains Mono", "SF Mono", Menlo, monospace;
-  --f-script: "Caveat", "Satisfy", cursive;
+  --f-mono: "SF Mono", Menlo, monospace;
+  --f-script: "Satisfy", cursive;
 
   --nx-deep: #4a7a78;
   --nx-mid:  #5a8a7a;
@@ -31,7 +31,7 @@
   --ar-sky-2: #121734;
   --ar-sky-3: #1d1742;
   --ar-sky-glow: #2a1f4a;
-  --ar-text: #ede4d8;
+  --ar-text: #f2eee8;
   --ar-text-soft: #aea99e;
   --ar-text-mute: #6e6a62;
   --ar-acc: #5a9a8a;
@@ -45,9 +45,13 @@
   --ar-good: #6fb88e;
 }
 
+.day { color: var(--nx-text); }
+.night { color: var(--ar-text); }
+
 .glass {
   position: relative;
   border-radius: 18px;
+  overflow: hidden;
   backdrop-filter: blur(24px) saturate(140%);
   -webkit-backdrop-filter: blur(24px) saturate(140%);
   padding: 14px 16px;
@@ -82,16 +86,16 @@
 .glass.glow::after {
   content: "";
   position: absolute;
-  top: -28px;
+  top: 0;
   left: 50%;
-  width: 120px;
-  height: 60px;
+  width: 160px;
+  height: 80px;
   transform: translateX(-50%);
-  background: radial-gradient(ellipse, rgba(74, 122, 94, 0.18) 0%, transparent 70%);
+  background: radial-gradient(ellipse, rgba(74, 122, 94, 0.14) 0%, transparent 70%);
   pointer-events: none;
 }
 .night .glass.glow::after {
-  background: radial-gradient(ellipse, rgba(138, 168, 200, 0.22) 0%, transparent 70%);
+  background: radial-gradient(ellipse, rgba(138, 168, 200, 0.16) 0%, transparent 70%);
 }
 
 .hero {
