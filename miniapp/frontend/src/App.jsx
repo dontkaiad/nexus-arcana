@@ -99,7 +99,6 @@ function getSky(p) {
     w = lerpC("#8ab4a0", "#c4a060", t);
     g = lerpC("#c4c898", "#d4884a", t);
     b = lerpC("#dce8dc", "#e8dcc8", t);
-    // wave8.9: чуть теплее/мягче вместо почти чёрного — заголовки теряли в гармонии
     text = "#3a3a2e";
     tS = "#5a564a";
     tM = "#7a756a";
@@ -128,11 +127,11 @@ function getSky(p) {
     )},${lerp(0.34, 0.62, t).toFixed(2)})`;
   } else {
     const t = (p - 0.6) / 0.4;
-    d = lerpC("#2a3a5a", "#0a0e18", t);
-    m = lerpC("#3a4a6a", "#101828", t);
-    w = lerpC("#c46040", "#1a2240", t);
-    g = lerpC("#a04048", "#2a1a3a", t);
-    b = lerpC("#2a2838", "#0e1119", t);
+    d = lerpC("#2a3a5a", "#0d1228", t);
+    m = lerpC("#3a4a6a", "#0d1228", t);
+    w = lerpC("#c46040", "#0f1530", t);
+    g = lerpC("#a04048", "#101a36", t);
+    b = lerpC("#2a2838", "#0d1228", t);
     text = "#e0d8cc";
     tS = "#b0a898";
     tM = "#807868";
@@ -166,7 +165,7 @@ function moonPhase(dt = new Date()) {
   return { idx, glyph: MOON_GLYPHS[idx], name: MOON_NAMES[idx], days, illum, frac };
 }
 
-const H = "'Newsreader', 'Lora', Georgia, serif";
+const H = "'Lora', Georgia, serif";
 const B = "'Manrope', -apple-system, 'SF Pro Text', system-ui, sans-serif";
 
 // wave8.20: глобальный масштаб шрифтов и иконок для читаемости на мобильном.
@@ -460,7 +459,7 @@ const ArcanaLogo = () => (
       <circle cx="30" cy="21" r="0.8" fill="#4a5470" opacity="0.45" />
     </svg>
     <svg width="150" height="56" viewBox="0 0 150 56" xmlns="http://www.w3.org/2000/svg">
-      <text x="0" y="40" fontFamily="Satisfy, cursive" fontSize="44" fill="#f0f2f8">Arcana</text>
+      <text x="0" y="40" fontFamily="Satisfy, cursive" fontSize="44" fill="#f0f2f8">arcana</text>
     </svg>
   </div>
 );
@@ -4523,9 +4522,8 @@ export default function App() {
           style={{
             padding: "5px 12px",
             borderRadius: 20,
-            background: sky.card,
+            background: "transparent",
             border: `1px solid ${sky.brd}`,
-            backdropFilter: "blur(10px)",
             cursor: "pointer",
             fontSize: fs(11),
             color: sky.tS,
@@ -4569,8 +4567,6 @@ export default function App() {
           display: "flex",
           justifyContent: "center",
           gap: 2,
-          background: `linear-gradient(transparent, ${sky.base}ee 30%)`,
-          backdropFilter: "blur(10px)",
         }}
       >
         {tabs.map((t) => {
