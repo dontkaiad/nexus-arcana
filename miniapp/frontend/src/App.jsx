@@ -516,8 +516,6 @@ const Sheet = ({ s, open, onClose, title, children }) => {
         style={{
           width: "100%",
           background: "transparent",
-          backdropFilter: "blur(28px) saturate(180%)",
-          WebkitBackdropFilter: "blur(28px) saturate(180%)",
           borderTop: `1px solid ${sheetBorder}`,
           borderTopLeftRadius: 22,
           borderTopRightRadius: 22,
