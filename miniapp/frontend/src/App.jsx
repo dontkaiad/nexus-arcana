@@ -659,7 +659,7 @@ const WeatherFx = ({ kind, isDay }) => {
       { top: 38, scale: 0.8, op: 0.5, dur: 75, delay: -25 },
     ];
     return (
-      <div style={{ position: "absolute", inset: 0, pointerEvents: "none", zIndex: 1, overflow: "hidden" }}>
+      <div style={{ position: "absolute", inset: 0, pointerEvents: "none", zIndex: 1 }}>
         {clouds.map((c, i) => (
           <div key={i} style={{
             position: "absolute",
@@ -2261,6 +2261,7 @@ function NxCal({ s }) {
 function ArDay({ s, openClient, navigate, openMoonPhases }) {
   const [done, setDone] = useState({});
   const { data, loading, error, refetch } = useApi('/api/arcana/today');
+  const weatherApi = useApi('/api/weather');
 
   if (loading) return <Empty s={s} text="Загружаю..." />;
   if (error) {
@@ -2300,7 +2301,12 @@ function ArDay({ s, openClient, navigate, openMoonPhases }) {
             <div className="hero-title">Мой день</div>
             <div style={{ fontSize: 13, opacity: 0.65, marginTop: 4, fontWeight: 500 }}>тишина практики</div>
           </div>
-          <div className="hero-meta">{a.date}</div>
+          <div className="hero-meta">
+            <div>{a.date}</div>
+            {weatherApi.data && <div style={{ marginTop: 3 }}>
+              {WEATHER_ICON[weatherApi.data.kind] || "🌤"} {weatherApi.data.temp > 0 ? "+" : ""}{weatherApi.data.temp}° · {shortCity(weatherApi.data.city)}
+            </div>}
+          </div>
         </div>
         <div className="hero-metrics">
           <div style={{ flex: 1, cursor: "pointer" }} onClick={() => navigate?.("sess")}>
@@ -4508,12 +4514,9 @@ export default function App() {
           {isDay ? <NexusLogo /> : <ArcanaLogo />}
         </div>
         <div
+          className="mode-toggle"
           onClick={() => go(!isN)}
           style={{
-            padding: "5px 12px",
-            borderRadius: 20,
-            background: "transparent",
-            border: `1px solid ${sky.brd}`,
             cursor: "pointer",
             fontSize: fs(11),
             color: sky.tS,
