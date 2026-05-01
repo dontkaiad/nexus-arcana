@@ -1316,7 +1316,7 @@ function NxFinance({ s }) {
             <Glass s={s}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
                 <div>
-                  <div style={{ fontSize: fs(13), color: s.tS, marginBottom: 4 }}>Потрачено сегодня</div>
+                  <div style={{ fontSize: fs(13), color: s.acc, marginBottom: 4 }}>Потрачено сегодня</div>
                   <div style={{ fontFamily: H, fontSize: fs(32), color: s.text, fontWeight: 500, lineHeight: 1 }}>
                     {total.toLocaleString()} <span style={{ fontSize: fs(18), fontWeight: 400 }}>₽</span>
                   </div>
@@ -1331,7 +1331,7 @@ function NxFinance({ s }) {
                   <span>{budget.day.toLocaleString()} ₽ · {budget.pct}%</span>
                 </div>
                 <Bar s={s} pct={budget.pct} color={budget.pct > 85 ? s.red : budget.pct > 60 ? s.amber : s.acc} />
-                <div style={{ fontSize: fs(13), color: s.tM, marginTop: 6 }}>
+                <div style={{ fontSize: fs(13), color: s.tS, marginTop: 6 }}>
                   Потрачено {budget.spent.toLocaleString()} ₽ · осталось {budget.left.toLocaleString()} ₽
                 </div>
               </Glass>
@@ -1343,7 +1343,7 @@ function NxFinance({ s }) {
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                   <div>
                     <div style={{ fontSize: fs(16), color: s.text, fontWeight: 500 }}>{x.desc || "без описания"}</div>
-                    <div style={{ fontSize: fs(13), color: s.tM, marginTop: 2 }}>{x.cat}</div>
+                    <div style={{ fontSize: fs(13), color: s.tS, marginTop: 2 }}>{x.cat}</div>
                   </div>
                   <span style={{ fontSize: fs(17), color: s.text, fontWeight: 500, fontFamily: H }}>
                     {x.amt.toLocaleString()} ₽
@@ -1365,19 +1365,19 @@ function NxFinance({ s }) {
               <div style={{ fontSize: fs(13), color: s.tS, marginBottom: 6 }}>{monthLabel}</div>
               <div style={{ display: "flex", gap: 10, alignItems: "baseline" }}>
                 <div style={{ flex: 1 }}>
-                  <div style={{ fontSize: fs(13), color: s.tM }}>Доход</div>
+                  <div style={{ fontSize: fs(13), color: s.acc }}>Доход</div>
                   <div style={{ fontFamily: H, fontSize: fs(20), color: s.acc, fontWeight: 500 }}>
                     {inc.toLocaleString()} ₽
                   </div>
                 </div>
                 <div style={{ flex: 1 }}>
-                  <div style={{ fontSize: fs(13), color: s.tM }}>Расход</div>
+                  <div style={{ fontSize: fs(13), color: s.acc }}>Расход</div>
                   <div style={{ fontFamily: H, fontSize: fs(20), fontWeight: 500 }}>
                     {exp.toLocaleString()} ₽
                   </div>
                 </div>
                 <div style={{ flex: 1 }}>
-                  <div style={{ fontSize: fs(13), color: s.tM }}>Баланс</div>
+                  <div style={{ fontSize: fs(13), color: s.acc }}>Баланс</div>
                   <div
                     style={{
                       fontFamily: H, fontSize: fs(20),
@@ -1446,7 +1446,7 @@ function NxFinance({ s }) {
                     <span style={{ color: clr, fontWeight: 500 }}>{c.pct}%</span>
                   </div>
                   <Bar s={s} pct={c.pct} color={clr} />
-                  <div style={{ fontSize: fs(13), color: s.tM, marginTop: 5 }}>
+                  <div style={{ fontSize: fs(13), color: s.tS, marginTop: 5 }}>
                     {c.spent.toLocaleString()} ₽ / {c.limit.toLocaleString()} ₽
                   </div>
                 </Glass>
@@ -1482,7 +1482,7 @@ function NxFinance({ s }) {
                     {d.left.toLocaleString()} ₽
                   </span>
                 </div>
-                <div style={{ fontSize: fs(13), color: s.tM, marginTop: 3 }}>
+                <div style={{ fontSize: fs(13), color: s.tS, marginTop: 3 }}>
                   {d.by && d.by !== "—" ? `до ${d.by}` : "без срока"}
                   {d.monthly > 0 ? ` · ${d.monthly.toLocaleString()} ₽/мес` : ""}
                 </div>
@@ -1503,7 +1503,7 @@ function NxFinance({ s }) {
                     {g.t.toLocaleString()} ₽
                   </span>
                 </div>
-                <div style={{ fontSize: fs(13), color: s.tM, marginTop: 3 }}>
+                <div style={{ fontSize: fs(13), color: s.tS, marginTop: 3 }}>
                   {g.monthly > 0 ? `откладываю ${g.monthly.toLocaleString()} ₽/мес` : `после ${g.after}`}
                 </div>
                 {g.t > 0 && (
@@ -1520,11 +1520,11 @@ function NxFinance({ s }) {
                   <Glass key={`cd${i}`} s={s} style={{ padding: "10px 14px", marginBottom: 4, opacity: 0.75 }}>
                     <div style={{ display: "flex", justifyContent: "space-between" }}>
                       <span style={{ fontSize: fs(15), color: s.text, fontWeight: 500 }}>📋 {d.n}</span>
-                      <span style={{ fontSize: fs(14), color: s.tM, fontFamily: H }}>
+                      <span style={{ fontSize: fs(14), color: s.tS, fontFamily: H }}>
                         {d.total.toLocaleString()} ₽
                       </span>
                     </div>
-                    <div style={{ fontSize: fs(12), color: s.tM, marginTop: 3 }}>
+                    <div style={{ fontSize: fs(12), color: s.tS, marginTop: 3 }}>
                       закрыт{d.closedAt ? ` · ${fmtClosed(d.closedAt)}` : ""}
                     </div>
                   </Glass>
@@ -1533,11 +1533,11 @@ function NxFinance({ s }) {
                   <Glass key={`cg${i}`} s={s} style={{ padding: "10px 14px", marginBottom: 4, opacity: 0.75 }}>
                     <div style={{ display: "flex", justifyContent: "space-between" }}>
                       <span style={{ fontSize: fs(15), color: s.text, fontWeight: 500 }}>🎯 {g.n}</span>
-                      <span style={{ fontSize: fs(14), color: s.tM, fontFamily: H }}>
+                      <span style={{ fontSize: fs(14), color: s.tS, fontFamily: H }}>
                         {g.t.toLocaleString()} ₽
                       </span>
                     </div>
-                    <div style={{ fontSize: fs(12), color: s.tM, marginTop: 3 }}>
+                    <div style={{ fontSize: fs(12), color: s.tS, marginTop: 3 }}>
                       достигнута{g.closedAt ? ` · ${fmtClosed(g.closedAt)}` : ""}
                     </div>
                   </Glass>
@@ -1577,7 +1577,7 @@ function DebtDrillSheet({ s, debt }) {
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
       <Glass s={s} accent={s.amber} style={{ padding: "12px 14px" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
-          <span style={{ fontSize: fs(13), color: s.tM }}>Сумма долга</span>
+          <span style={{ fontSize: fs(13), color: s.acc }}>Сумма долга</span>
           <span style={{ fontSize: fs(18), color: s.red, fontWeight: 600, fontFamily: H }}>
             {debt.total.toLocaleString()} ₽
           </span>
@@ -1687,7 +1687,7 @@ function CategoryDrillSheet({ s, cat, month }) {
               {it.amount.toLocaleString()} ₽
             </span>
           </div>
-          <div style={{ fontSize: fs(13), color: s.tM, marginTop: 3 }}>{formatDate(it.date)}</div>
+          <div style={{ fontSize: fs(13), color: s.tS, marginTop: 3 }}>{formatDate(it.date)}</div>
         </Glass>
       ))}
     </div>
@@ -1731,7 +1731,7 @@ function ParentTaskHeader({ s, title, task }) {
       </div>
       {metaParts.length > 0 && (
         <div style={{
-          fontSize: fs(13), color: overdue ? s.red : s.tM,
+          fontSize: fs(13), color: overdue ? s.red : s.tS,
           marginTop: 3, display: "flex", gap: 8, flexWrap: "wrap",
         }}>
           {metaParts.map((p, i) => <span key={i}>{p}</span>)}
@@ -1846,7 +1846,7 @@ function NxLists({ s }) {
                   )}
                 </div>
                 {x.exp && (
-                  <div style={{ fontSize: fs(13), color: s.tM, marginTop: 3 }}>до {x.exp}</div>
+                  <div style={{ fontSize: fs(13), color: s.tS, marginTop: 3 }}>до {x.exp}</div>
                 )}
               </Glass>
             ) : (
@@ -1976,7 +1976,7 @@ function NxMemory({ s, openAdhd }) {
       {!loading && !error && view.items.map((m) => (
         <Glass key={m.id} s={s} style={{ padding: "8px 14px", marginBottom: 4 }}>
           <div style={{ fontSize: fs(13), color: s.text }}>{m.text}</div>
-          <div style={{ fontSize: fs(10), color: s.tM, marginTop: 2 }}>{m.cat}</div>
+          <div style={{ fontSize: fs(10), color: s.tS, marginTop: 2 }}>{m.cat}</div>
         </Glass>
       ))}
     </div>
@@ -2141,7 +2141,7 @@ function NxCal({ s }) {
                         {count > 1 && (
                           <span style={{
                             position: "absolute", top: 2, right: 3,
-                            fontSize: fs(8), color: s.tM,
+                            fontSize: fs(8), color: s.tS,
                           }}>{count}</span>
                         )}
                       </>
@@ -2198,12 +2198,12 @@ function NxCal({ s }) {
                       color: isPicked || wd.isToday ? s.acc : s.text, fontWeight: 500,
                     }}>
                       <span>{wd.label}</span>
-                      <span style={{ color: s.tM }}>{wd.tasks.length > 0 ? `${wd.tasks.length} шт.` : ""}</span>
+                      <span style={{ color: s.tS }}>{wd.tasks.length > 0 ? `${wd.tasks.length} шт.` : ""}</span>
                     </div>
                     {wd.tasks.length > 0 && (
                       <div style={{ marginTop: 4 }}>
                         {wd.tasks.slice(0, 3).map((t, j) => (
-                          <div key={j} style={{ fontSize: fs(11), color: s.tM, marginTop: 2 }}>
+                          <div key={j} style={{ fontSize: fs(11), color: s.tS, marginTop: 2 }}>
                             • {t.time ? `${t.time} ` : ''}{t.title}
                           </div>
                         ))}
