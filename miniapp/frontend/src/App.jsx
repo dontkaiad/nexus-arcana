@@ -2292,18 +2292,8 @@ function ArDay({ s, openClient, navigate, openMoonPhases }) {
   const total = a.sessionsToday.length + a.worksToday.length;
   const doneCount = Object.values(done).filter(Boolean).length;
 
-  // wave6.5.5: лунный градиент по illum
-  const illum = a.moon?.illum ?? 0;
-  const moonGradient =
-    illum < 10 ? "linear-gradient(180deg, #0a0e1e 0%, #1c2340 100%)" :
-    illum < 40 ? "linear-gradient(180deg, #1a2340 0%, #2a3550 100%)" :
-    illum < 60 ? "linear-gradient(180deg, #2a3550 0%, #3d4a6b 100%)" :
-    illum < 90 ? "linear-gradient(180deg, #3d4a6b 0%, #5a6b8a 100%)" :
-                 "linear-gradient(180deg, #5a6b8a 0%, #8a9cb8 100%)";
-
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 8, position: "relative" }}>
-      <div style={{ position: "absolute", inset: -14, zIndex: -1, background: moonGradient, opacity: 0.22, pointerEvents: "none", transition: "background 2s ease" }} />
       <div className="hero glass glow">
         <div className="hero-h">
           <div>
