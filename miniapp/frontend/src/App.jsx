@@ -127,11 +127,11 @@ function getSky(p) {
     )},${lerp(0.34, 0.62, t).toFixed(2)})`;
   } else {
     const t = (p - 0.6) / 0.4;
-    d = lerpC("#2a3a5a", "#0d1228", t);
-    m = lerpC("#3a4a6a", "#0d1228", t);
-    w = lerpC("#c46040", "#0f1530", t);
-    g = lerpC("#a04048", "#101a36", t);
-    b = lerpC("#2a2838", "#0d1228", t);
+    d = lerpC("#2a3a5a", "#0a0e18", t);
+    m = lerpC("#3a4a6a", "#101828", t);
+    w = lerpC("#c46040", "#1a2240", t);
+    g = lerpC("#a04048", "#2a1a3a", t);
+    b = lerpC("#2a2838", "#0e1119", t);
     text = "#e0d8cc";
     tS = "#b0a898";
     tM = "#807868";
