@@ -2,10 +2,12 @@
 from __future__ import annotations
 
 import logging
+import sqlite3
+import time
 from datetime import date, datetime, timedelta, timezone
-from typing import Any
+from typing import Any, Optional
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 
 from core.config import config
 from core.notion_client import query_pages, sessions_all
@@ -23,6 +25,8 @@ from miniapp.backend._helpers import (
     to_local_date,
     today_user_tz,
 )
+from core.claude_client import ask_claude
+from miniapp.backend import cache as _cache
 from miniapp.backend.routes._arcana_common import (
     SESSION_UNVERIFIED,
     SESSION_YES,
@@ -38,6 +42,79 @@ from miniapp.backend.routes._arcana_common import (
 logger = logging.getLogger("miniapp.arcana.today")
 
 router = APIRouter()
+
+_TIP_TTL = 20 * 60 * 60  # 20 часов — обновляется раз в сутки
+
+
+def _init_tip_cache() -> None:
+    con = sqlite3.connect(_cache._DB_PATH)
+    try:
+        con.execute(
+            "CREATE TABLE IF NOT EXISTS arcana_tip_cache ("
+            "tg_id INTEGER PRIMARY KEY, tip TEXT, updated_at INTEGER)"
+        )
+        con.commit()
+    finally:
+        con.close()
+
+
+def _cached_tip(tg_id: int) -> Optional[str]:
+    _init_tip_cache()
+    con = sqlite3.connect(_cache._DB_PATH)
+    try:
+        row = con.execute(
+            "SELECT tip, updated_at FROM arcana_tip_cache WHERE tg_id = ?", (tg_id,)
+        ).fetchone()
+    finally:
+        con.close()
+    if not row:
+        return None
+    if time.time() - (row[1] or 0) > _TIP_TTL:
+        return None
+    return row[0]
+
+
+def _store_tip(tg_id: int, tip: str) -> None:
+    _init_tip_cache()
+    con = sqlite3.connect(_cache._DB_PATH)
+    try:
+        con.execute(
+            "INSERT OR REPLACE INTO arcana_tip_cache (tg_id, tip, updated_at) VALUES (?, ?, ?)",
+            (tg_id, tip, int(time.time())),
+        )
+        con.commit()
+    finally:
+        con.close()
+
+
+@router.get("/arcana/tip")
+async def get_arcana_tip(
+    tg_id: int = Depends(current_user_id),
+    sessions: int = Query(0),
+    works: int = Query(0),
+) -> dict[str, Any]:
+    cached = _cached_tip(tg_id)
+    if cached:
+        return {"tip": cached}
+    if sessions == 0 and works == 0:
+        desc = "сегодня нет сеансов и работ"
+    elif sessions > 0 and works > 0:
+        desc = f"сегодня {sessions} сеанс(а/ов) и {works} работ(а)"
+    elif sessions > 0:
+        desc = f"сегодня {sessions} сеанс(а/ов), работ нет"
+    else:
+        desc = f"сегодня {works} работ(а), сеансов нет"
+    prompt = (
+        f"Ты — ассистент практика эзотерики. Загрузка на сегодня: {desc}.\n"
+        "Напиши одну короткую фразу-подпись (5–8 слов, строчными, без точки в конце, без смайлов). "
+        "Тон — спокойный, поэтичный, немного мистический. Только сама фраза."
+    )
+    tip = await ask_claude(prompt, model=config.model_sonnet, max_tokens=60)
+    tip = tip.strip().rstrip(".!").lower() if tip else ""
+    if tip:
+        _store_tip(tg_id, tip)
+    return {"tip": tip}
+
 
 _WEEKDAYS_RU = ["пн", "вт", "ср", "чт", "пт", "сб", "вс"]
 

@@ -2246,6 +2246,9 @@ function ArDay({ s, openClient, navigate, openMoonPhases }) {
   const [done, setDone] = useState({});
   const { data, loading, error, refetch } = useApi('/api/arcana/today');
   const weatherApi = useApi('/api/weather');
+  const rawSessions = data?.sessions_today?.length || 0;
+  const rawWorks = data?.works_today?.length || 0;
+  const tipApi = useApi(data ? `/api/arcana/tip?sessions=${rawSessions}&works=${rawWorks}` : null, [rawSessions, rawWorks]);
 
   if (loading) return <Empty s={s} text="Загружаю..." />;
   if (error) return <ErrorBox s={s} error={error} refetch={refetch} />;
@@ -2254,6 +2257,7 @@ function ArDay({ s, openClient, navigate, openMoonPhases }) {
   const moon = a.moon;
   const worksTotal = a.worksToday.length;
   const worksDone = Object.values(done).filter(Boolean).length;
+  const sessionsTotal = a.sessionsToday.length;
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 8, position: "relative" }}>
@@ -2261,7 +2265,7 @@ function ArDay({ s, openClient, navigate, openMoonPhases }) {
         <div className="hero-h">
           <div>
             <div className="hero-title">Мой день</div>
-            <div style={{ fontSize: 13, opacity: 0.65, marginTop: 4, fontWeight: 500 }}>тишина практики</div>
+            <div style={{ fontSize: 13, opacity: 0.65, marginTop: 4, fontWeight: 500 }}>{tipApi.data?.tip || "сегодня в практике спокойно"}</div>
           </div>
           <div className="hero-meta">
             <div>{a.date}</div>
