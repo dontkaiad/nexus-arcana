@@ -2650,14 +2650,12 @@ function ArStats({ s, navigate }) {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-      <div className="page-title">Статистика</div>
-
       {/* Блок статистики за текущий месяц */}
       <div>
-        <div style={{ fontFamily: H, fontSize: fs(26), color: s.text, fontStyle: "italic", marginBottom: 14, paddingLeft: 2 }}>
+        <div style={{ fontFamily: H, fontSize: fs(22), color: s.text, fontStyle: "italic", marginBottom: 10, paddingLeft: 2 }}>
           Статистика за {curMonthName}
         </div>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
           {[
             { icon: "💰", value: fmtRub(p.inc), label: "Доход", onClick: null },
             { icon: "🕯️", value: fmtRub(p.exp), label: "Расходники", onClick: null },
@@ -2669,21 +2667,21 @@ function ArStats({ s, navigate }) {
               className="glass"
               onClick={onClick || undefined}
               style={{
-                borderRadius: 16,
-                padding: "28px 12px 22px",
+                borderRadius: 14,
+                padding: "16px 10px 14px",
                 textAlign: "center",
                 cursor: onClick ? "pointer" : "default",
                 display: "flex",
                 flexDirection: "column",
                 alignItems: "center",
-                gap: 10,
+                gap: 6,
               }}
             >
-              <div style={{ fontSize: fs(36) }}>{icon}</div>
-              <div style={{ fontFamily: H, fontSize: fs(30), color: s.acc, fontWeight: 500, lineHeight: 1 }}>
+              <div style={{ fontSize: fs(26) }}>{icon}</div>
+              <div style={{ fontFamily: H, fontSize: fs(22), color: s.acc, fontWeight: 500, lineHeight: 1 }}>
                 {value}
               </div>
-              <div style={{ fontSize: fs(13), color: s.tM }}>{label}</div>
+              <div style={{ fontSize: fs(12), color: s.tM }}>{label}</div>
             </div>
           ))}
         </div>
