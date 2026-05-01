@@ -287,6 +287,7 @@ async def get_today(tg_id: int = Depends(current_user_id)) -> dict[str, Any]:
                 "deadline_time": deadline_time,
                 "reminder_time": reminder_time,
                 "repeat": s["repeat"],
+                "repeat_time": s["repeat_time"] or None,
             })
         elif deadline_date and deadline_date > today_date:
             future.append({
@@ -305,6 +306,7 @@ async def get_today(tg_id: int = Depends(current_user_id)) -> dict[str, Any]:
                 "cat": s["cat"],
                 "prio": s["prio"],
                 "repeat": s["repeat"],
+                "repeat_time": s["repeat_time"] or None,
                 "days_since_created": (today_date - created_date).days
                 if created_date else None,
             })

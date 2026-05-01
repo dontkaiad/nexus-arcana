@@ -96,6 +96,14 @@ export function formatRepeat(raw) {
   return s
 }
 
+// "08:00|every_1d" → "08:00", "08:00" → "08:00", null → null
+function _repeatDisplayTime(repeatTime) {
+  if (!repeatTime) return null
+  const s = String(repeatTime).trim()
+  const t = s.includes('|') ? s.split('|')[0].trim() : s
+  return t || null
+}
+
 // 60 → "за 1 ч", 30 → "за 30 мин", 90 → "за 1 ч 30 мин", 120 → "за 2 ч"
 export function formatReminder(minutes) {
   if (!minutes || minutes <= 0) return null
@@ -149,23 +157,30 @@ export function adaptToday(data) {
         streak: x.streak || 0,
       }
     }),
-    tasks: todayTasksRaw.map((x) => ({
-      id: x.id,
-      title: x.title,
-      cat: x.cat || '',
-      prio: x.prio || '⚪',
-      date: formatDate(x.date, 'full'),
-      // wave8.9: показываем И дедлайн, И напоминалку, если они есть
-      deadlineTime: x.deadline_time || null,
-      reminderTime: x.reminder_time || null,
-    })),
-    noDate: (data.no_date || []).map((x) => ({
-      id: x.id,
-      title: x.title,
-      cat: x.cat || '',
-      prio: x.prio || '⚪',
-      daysSinceCreated: x.days_since_created ?? null,
-    })),
+    tasks: todayTasksRaw.map((x) => {
+      const rptTime = _repeatDisplayTime(x.repeat_time)
+      return {
+        id: x.id,
+        title: x.title,
+        cat: x.cat || '',
+        prio: x.prio || '⚪',
+        date: formatDate(x.date, 'full'),
+        deadlineTime: x.deadline_time || null,
+        reminderTime: x.reminder_time || null,
+        rpt: rptTime ? `🔄 ${rptTime}` : x.repeat ? `🔄 ${formatRepeat(x.repeat)}` : undefined,
+      }
+    }),
+    noDate: (data.no_date || []).map((x) => {
+      const rptTime = _repeatDisplayTime(x.repeat_time)
+      return {
+        id: x.id,
+        title: x.title,
+        cat: x.cat || '',
+        prio: x.prio || '⚪',
+        daysSinceCreated: x.days_since_created ?? null,
+        rpt: rptTime ? `🔄 ${rptTime}` : x.repeat ? `🔄 ${formatRepeat(x.repeat)}` : undefined,
+      }
+    }),
     adhdTip: data.adhd_tip || '',
   }
 }
@@ -234,8 +249,6 @@ export function adaptArcanaToday(data) {
 export function adaptTasks(data) {
   if (!data) return []
   return (data.tasks || []).map((t) => {
-    // wave8.44: deadline_time может приходить как "HH:MM|every_Nd" — парсим,
-    // и предпочитаем машинный every_Nd колоночному «Повтор» (часто stale).
     let time = t.deadline_time || null
     let repeat = t.repeat || ''
     if (time && time.includes('|')) {
@@ -243,6 +256,8 @@ export function adaptTasks(data) {
       time = (tm || '').trim() || null
       if (r) repeat = r.trim()
     }
+    // Время повтора: показываем HH:MM из "Время повтора", а не название колонки "Повтор"
+    const rptTime = _repeatDisplayTime(t.repeat_time)
     return {
       id: t.id,
       title: t.title || '',
@@ -251,7 +266,7 @@ export function adaptTasks(data) {
       status: t.status || 'active',
       date: t.deadline ? formatDate(t.deadline, 'full') : null,
       time,
-      rpt: repeat ? `🔄 ${formatRepeat(repeat)}` : undefined,
+      rpt: rptTime ? `🔄 ${rptTime}` : repeat ? `🔄 ${formatRepeat(repeat)}` : undefined,
       streak: t.streak || 0,
     }
   })
