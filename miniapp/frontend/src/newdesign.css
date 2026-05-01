@@ -334,15 +334,15 @@
   color: var(--ar-text-soft);
 }
 .day .pill.active {
-  background: var(--nx-text);
+  background: rgba(31, 74, 58, 0.72);
   color: #f4ebd8;
-  border-color: var(--nx-text);
+  border-color: rgba(31, 74, 58, 0.6);
   font-weight: 600;
 }
 .night .pill.active {
-  background: var(--ar-text);
+  background: rgba(242, 238, 232, 0.72);
   color: #1a1f30;
-  border-color: var(--ar-text);
+  border-color: rgba(242, 238, 232, 0.6);
   font-weight: 600;
 }
 
