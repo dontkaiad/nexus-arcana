@@ -2271,11 +2271,11 @@ function ArDay({ s, openClient, navigate, openMoonPhases }) {
           </div>
         </div>
         <div className="hero-metrics">
-          <div style={{ flex: 1, cursor: "pointer" }} onClick={() => navigate?.("sess")}>
-            <Metric s={s} v={a.sessionsToday.length} sub="сеансов" />
+          <div style={{ flex: 1, cursor: "pointer" }} onClick={() => navigate?.("clients")}>
+            <Metric s={s} v={a.worksToday.length} sub="работ" />
           </div>
           <div style={{ flex: 1, cursor: "pointer" }} onClick={() => navigate?.("stats")}>
-            <Metric s={s} v={a.unchecked30d} sub="не провер." accent={a.unchecked30d > 0 ? s.amber : undefined} />
+            <Metric s={s} v={a.monthBlock.inc >= 1000 ? `${Math.round(a.monthBlock.inc / 1000)}к` : a.monthBlock.inc} unit="₽" sub="доход/мес" accent={s.acc} />
           </div>
           <div style={{ flex: 1, cursor: "pointer" }} onClick={() => navigate?.("stats")}>
             <Metric s={s} v={`${a.accuracy}%`} sub="точность" accent={s.acc} />
