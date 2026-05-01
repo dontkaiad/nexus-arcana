@@ -116,7 +116,8 @@ def _now_iso(tz: timezone) -> str:
 # ────────────────────────── Промпты ────────────────────────────────────────
 
 PARSE_SESSION_SYSTEM = (
-    "Извлеки данные о сеансе таро. Ответь ТОЛЬКО JSON без markdown:\n"
+    "Извлеки данные о сеансе таро. Ответь ТОЛЬКО JSON без markdown.\n\n"
+    "Если в сообщении ОДИН расклад (один вопрос) — формат:\n"
     '{"client_name": "имя или null", "spread_type": "тип расклада", '
     '"question": "конкретный вопрос", "cards": "карты через запятую или null", '
     '"bottom_card": "карта или null", '
@@ -124,6 +125,25 @@ PARSE_SESSION_SYSTEM = (
     '"deck": "Уэйт|Dark Wood|Ленорман|Игральные|Deviant Moon или null", '
     '"amount": число, "paid": число, '
     '"payment_source": "карта|наличные|бартер или null"}\n\n'
+    "Если в сообщении НЕСКОЛЬКО раскладов под одной темой "
+    "(структура «Тема: ... 1) вопрос ... 2) вопрос ...» или явный список) — формат:\n"
+    '{"session_name": "название темы (например \\"Вадим\\", \\"Работа\\")", '
+    '"session_category": "Сфера жизни|Отношения|Работа|Финансы|Здоровье|Род|'
+    'Магические воздействия|Диагностика|Кельтский крест|Триплет или null", '
+    '"client_name": "имя или null", '
+    '"deck": "Уэйт|...", "amount": число, "paid": число, "payment_source": "...", '
+    '"items": [{"question": "вопрос1", "cards": "...", "bottom_card": "...", '
+    '"area": "...", "spread_type": "..."}, ...]}\n\n'
+    "ОПРЕДЕЛЕНИЕ session_category — по НАЗВАНИЮ темы, не по числу пунктов:\n"
+    "- имя человека ('Вадим', 'Маша') → 'Сфера жизни' (или 'Отношения' если контекст явный)\n"
+    "- 'Работа' / 'Карьера' → 'Работа'\n"
+    "- 'Финансы' / 'Деньги' → 'Финансы'\n"
+    "- 'Здоровье' → 'Здоровье'\n"
+    "- 'Род' / 'Родовое' → 'Род'\n"
+    "- 'Магические воздействия' / 'порча' / 'сглаз' → 'Магические воздействия'\n"
+    "- 'Диагностика' → 'Диагностика'\n"
+    "- 'Кельтский крест' / '10 карт' → 'Кельтский крест'\n"
+    "- если непонятно — null (код подставит дефолт).\n\n"
     "ОБЯЗАТЕЛЬНО: question — конкретный вопрос клиента, короткий (3-7 слов), "
     "с именами если есть. Примеры:\n"
     "- 'что думает Вадим обо мне' → 'Что думает Вадим'\n"
@@ -138,6 +158,12 @@ PARSE_SESSION_SYSTEM = (
     "Если в тексте есть упоминание 'дно', 'дно колоды', 'bottom' — "
     "выдели эту карту отдельно в поле bottom_card. Это НЕ позиция расклада, "
     "а фоновая карта, её нельзя включать в cards."
+)
+
+TRIPLET_SUMMARY_SYSTEM = (
+    "Сделай очень короткое (1-2 предложения, ~140 знаков) саммари триплета таро. "
+    "Без воды, по делу: суть ответа на вопрос с учётом карт и дна. "
+    "Формат — обычный текст, без HTML, без эмодзи, без 'итог:'."
 )
 
 CORRECTION_PARSE_SYSTEM = (
@@ -199,6 +225,91 @@ VISION_SYSTEM = (
 
 
 # ────────────────────────── Вспомогательные ────────────────────────────────
+
+# Маппинг session_category из парсера → значение поля «Тип расклада» в Notion
+SESSION_CATEGORY_MAP = {
+    "сфера жизни":             "🌐 Сфера жизни",
+    "отношения":               "🌐 Сфера жизни",
+    "работа":                  "🌐 Сфера жизни",
+    "финансы":                 "🌐 Сфера жизни",
+    "здоровье":                "🌐 Сфера жизни",
+    "род":                     "🌳 Родовой узел",
+    "родовое":                 "🌳 Родовой узел",
+    "магические воздействия":  "⚡ Магические воздействия",
+    "диагностика":             "🔍 Диагностика перед ритуалом",
+    "кельтский крест":         "✝️ Кельтский крест",
+    "триплет":                 "🔺 Триплет",
+}
+
+
+def _resolve_session_category(name: Optional[str], items_count: int) -> str:
+    """Категория расклада по названию темы. Дефолт — 🔺 Триплет (одиночный) или
+    🌐 Сфера жизни (мультивопросная сессия)."""
+    if name:
+        low = name.strip().lower()
+        if low in SESSION_CATEGORY_MAP:
+            return SESSION_CATEGORY_MAP[low]
+        for k, v in SESSION_CATEGORY_MAP.items():
+            if k in low or low in k:
+                return v
+    return "🔺 Триплет" if items_count <= 1 else "🌐 Сфера жизни"
+
+
+def _canon_cards_str(cards_str: str, deck: str) -> str:
+    """RU-ввод карт → каноническая EN-строка через реестр deck_cards.json.
+    Невнятные имена остаются как есть."""
+    if not cards_str:
+        return ""
+    try:
+        from miniapp.backend.tarot import resolve_deck_id, find_card
+        deck_id = resolve_deck_id(deck or "Уэйт")
+        out: List[str] = []
+        for raw in cards_str.split(","):
+            raw = raw.strip()
+            if not raw:
+                continue
+            c = find_card(deck_id, raw)
+            out.append(c["en"] if c and c.get("en") else raw)
+        return ", ".join(out)
+    except Exception:
+        return cards_str
+
+
+def _canon_card(card: str, deck: str) -> str:
+    if not card:
+        return ""
+    try:
+        from miniapp.backend.tarot import resolve_deck_id, find_card
+        c = find_card(resolve_deck_id(deck or "Уэйт"), card.strip())
+        return (c and c.get("en")) or card.strip()
+    except Exception:
+        return card.strip()
+
+
+async def _make_triplet_summary(
+    question: str, cards: str, bottom: str, interpretation: str
+) -> str:
+    """Haiku: 1-2 предложения по триплету. На пустом вводе → ''."""
+    if not (cards or interpretation):
+        return ""
+    src = (
+        f"Вопрос: {question}\n"
+        f"Карты: {cards}\n"
+        + (f"Дно: {bottom}\n" if bottom else "")
+        + (f"Трактовка: {interpretation[:1500]}" if interpretation else "")
+    )
+    try:
+        out = await ask_claude(
+            src,
+            system=TRIPLET_SUMMARY_SYSTEM,
+            model="claude-haiku-4-5-20251001",
+            max_tokens=160,
+        )
+        return (out or "").strip()
+    except Exception as e:
+        logger.warning("triplet_summary failed: %s", e)
+        return ""
+
 
 def _parse_json_safe(raw: str) -> Optional[dict]:
     try:
@@ -291,11 +402,19 @@ async def handle_add_session(
         tz = timezone(timedelta(hours=tz_offset))
 
         # 1. Haiku парсит данные
-        raw = await ask_claude(text, system=PARSE_SESSION_SYSTEM, max_tokens=300)
+        raw = await ask_claude(text, system=PARSE_SESSION_SYSTEM, max_tokens=600)
         data = _parse_json_safe(raw)
         if data is None:
             await log_error(text, "parse_error", bot_label="🌒 Arcana", error_code="–")
             await message.answer("⚠️ Не смог разобрать данные сеанса.")
+            return
+
+        # 1b. Multi-question session → отдельная ветка: сразу сохраняем N триплетов.
+        items = data.get("items") or []
+        if isinstance(items, list) and len(items) >= 2:
+            await _handle_multi_session(
+                message, data, items, tz, tz_offset, user_notion_id
+            )
             return
 
         client_name = data.get("client_name") or None
@@ -421,6 +540,147 @@ async def handle_add_session(
         await message.answer(f"❌ {suffix} · {notion_status}")
 
 
+# ────────────────────────── Multi-question (сессия) ───────────────────────
+
+async def _handle_multi_session(
+    message: Message,
+    data: dict,
+    items: List[dict],
+    tz: timezone,
+    tz_offset: float,
+    user_notion_id: str,
+) -> None:
+    """Парсер увидел структуру «Тема: 1) … 2) …» — сохраняем N триплетов
+    в одной сессии без preview-флоу: каждый получает свою трактовку и саммари."""
+    tg_id = message.from_user.id
+    session_name: str = (data.get("session_name") or "").strip()
+    session_category = _resolve_session_category(
+        data.get("session_category") or session_name, len(items)
+    )
+    deck_raw = data.get("deck") or "Уэйт"
+    deck = _match_deck(deck_raw) or "Уэйт"
+    client_name = (data.get("client_name") or "").strip() or None
+
+    # Клиент / личный — резолвим один раз на сессию
+    client_id: Optional[str] = None
+    if client_name:
+        c = await client_find(client_name, user_notion_id=user_notion_id)
+        client_id = c["id"] if c else None
+    else:
+        from core.user_manager import get_user
+        owner = await get_user(tg_id)
+        owner_name = (owner or {}).get("name") or ""
+        if owner_name:
+            sc = await client_find(owner_name, user_notion_id=user_notion_id)
+            if sc:
+                client_id = sc["id"]
+    is_personal = not client_name
+
+    # Контекст предыдущих раскладов клиента — общий для всех триплетов
+    prev_context = ""
+    if client_id:
+        try:
+            prev = await sessions_by_client(client_id, user_notion_id=user_notion_id)
+            if prev:
+                prev_context = _format_prev_sessions(prev)
+        except Exception:
+            pass
+
+    from arcana.tarot_loader import get_cards_context
+    saved_n = 0
+    first_page_id: Optional[str] = None
+    saved_titles: List[str] = []
+
+    await message.answer(
+        f"🃏 Сессия «{html.escape(session_name or '—')}» · {len(items)} триплетов — обрабатываю…"
+    )
+
+    for idx, it in enumerate(items, 1):
+        try:
+            question = (it.get("question") or "").strip() or f"{session_name} · вопрос {idx}"
+            cards_text = (it.get("cards") or "").strip()
+            bottom_card = (it.get("bottom_card") or "").strip()
+            area = _normalize_area(it.get("area") or "")
+            spread_type = (it.get("spread_type") or data.get("spread_type") or "Триплет")
+
+            card_names = [c.strip() for c in cards_text.split(",") if c.strip()]
+            ctx_cards = card_names + ([bottom_card] if bottom_card else [])
+            cards_context = get_cards_context(deck, ctx_cards)
+
+            # Sonnet — трактовка
+            interpretation = ""
+            if card_names:
+                system = TAROT_SYSTEM
+                if cards_context:
+                    system += f"\n\n--- СПРАВОЧНИК КАРТ ---\n{cards_context}"
+                if prev_context:
+                    system += f"\n\n--- ПРЕДЫДУЩИЕ РАСКЛАДЫ КЛИЕНТА ---\n{prev_context}"
+                user_prompt = (
+                    f"Сессия: {session_name}\n"
+                    f"Расклад: {spread_type}\n"
+                    f"Вопрос: {question}\n"
+                    f"Карты: {cards_text}"
+                )
+                if bottom_card:
+                    user_prompt += f"\nДно колоды: {bottom_card}"
+                interpretation = await ask_claude(
+                    user_prompt, system=system,
+                    model="claude-sonnet-4-20250514", max_tokens=2000,
+                )
+
+            # Haiku — саммари триплета
+            t_summary = await _make_triplet_summary(
+                question, cards_text, bottom_card, interpretation
+            )
+
+            # Канон → EN для Notion
+            cards_en = _canon_cards_str(cards_text, deck)
+            bottom_en = _canon_card(bottom_card, deck) if bottom_card else ""
+            if bottom_en and "🂠" not in interpretation:
+                interpretation = (
+                    interpretation.rstrip() + f"\n\n🂠 Дно: {bottom_en}"
+                )
+
+            page_id = await session_add(
+                date=_now_iso(tz),
+                spread_type=session_category if idx == 1 else session_category,
+                title=question,
+                question=question,
+                cards=cards_en or cards_text,
+                interpretation=interpretation,
+                amount=0, paid=0,
+                session_type="Личный" if is_personal else "Клиентский",
+                client_id=client_id,
+                user_notion_id=user_notion_id,
+                area=area,
+                deck=deck,
+                payment_source=None,
+                session=session_name or None,
+                triplet_summary=t_summary or None,
+            )
+            if page_id:
+                saved_n += 1
+                saved_titles.append(question)
+                if not first_page_id:
+                    first_page_id = page_id
+        except Exception as e:
+            logger.error("multi-session item %d failed: %s", idx, e)
+
+    # Инвалидация кеша саммари сессии (если что-то лежало раньше).
+    try:
+        from core.session_cache import session_summary_key, cache_delete
+        if session_name:
+            cache_delete(session_summary_key(session_name, client_id))
+    except Exception:
+        pass
+
+    head = f"✅ Сессия «{html.escape(session_name or '—')}» · сохранено {saved_n} триплетов"
+    body_lines = [f"  • {html.escape(t)}" for t in saved_titles[:8]]
+    if len(saved_titles) > 8:
+        body_lines.append(f"  … и ещё {len(saved_titles) - 8}")
+    await message.answer(head + ("\n" + "\n".join(body_lines) if body_lines else ""))
+
+
 # ────────────────────────── Callbacks ──────────────────────────────────────
 
 @router.callback_query(F.data.startswith("tarot_save:"))
@@ -458,19 +718,29 @@ async def cb_tarot_save(call: CallbackQuery) -> None:
         question = state.get("question") or ""
         interpretation = state.get("interpretation") or ""
 
+        # Канонизация карт в EN перед записью в Notion.
+        cards_raw = state.get("cards") or ""
+        cards_en = _canon_cards_str(cards_raw, deck or "Уэйт") or cards_raw
+        bottom_en = _canon_card(bottom_card, deck or "Уэйт") if bottom_card else None
+
         # Дно — в конец трактовки (если Claude не добавил блок 🂠)
-        if bottom_card and "🂠" not in interpretation:
+        if bottom_en and "🂠" not in interpretation:
             interpretation = (
                 interpretation.rstrip()
-                + f"\n\n🂠 Дно: {bottom_card}"
+                + f"\n\n🂠 Дно: {bottom_en}"
             )
+
+        # Haiku — саммари триплета
+        triplet_summary = await _make_triplet_summary(
+            question, cards_raw, bottom_card or "", interpretation
+        )
 
         session_page_id = await session_add(
             date=_now_iso(tz),
             spread_type=spread,
             title=question,
             question=question,
-            cards=state.get("cards") or "",
+            cards=cards_en,
             interpretation=interpretation,
             amount=amount,
             paid=paid,
@@ -480,6 +750,8 @@ async def cb_tarot_save(call: CallbackQuery) -> None:
             area=area,
             deck=deck,
             payment_source=payment_source,
+            session=None,  # одиночный расклад — без сессии
+            triplet_summary=triplet_summary or None,
         )
 
         if amount > 0:
