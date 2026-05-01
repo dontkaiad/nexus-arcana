@@ -366,13 +366,14 @@ const Empty = ({ s, text, chill, emoji, title }) => {
           </>
         )}
         {/* orbit ring + dots */}
-        <div style={{ position: "absolute", inset: 0, borderRadius: "50%", border: `1px dashed ${halo}66` }} />
+        <div style={{ position: "absolute", inset: 0, borderRadius: "50%", border: `1px dashed #8a5a28bb` }} />
         <div style={{ position: "absolute", inset: 0, animation: "nx-orbit 1.6s linear infinite" }}>
           {[0, 120, 240].map((deg, i) => (
             <div key={i} style={{
               position: "absolute", top: "50%", left: "50%",
               width: 5, height: 5, borderRadius: "50%",
-              background: accent, boxShadow: `0 0 5px ${accent}`,
+              background: "#8a5a28",
+              boxShadow: `0 0 6px #b07a2e`,
               transform: `rotate(${deg}deg) translate(${orbitR}px) rotate(-${deg}deg) translate(-50%, -50%)`,
             }} />
           ))}
