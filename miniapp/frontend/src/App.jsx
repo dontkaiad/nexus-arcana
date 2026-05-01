@@ -1186,43 +1186,48 @@ function NxDay({ s, openTask, navigate, openStreaks }) {
         </div>
       )}
 
-      <SectionLabel s={s}>Расписание</SectionLabel>
-      {t.overdue.length === 0 && t.scheduled.length === 0 && (
-        <div className="glass" style={{ padding: "16px", textAlign: "center" }}>
-          <div style={{ fontSize: 16, fontWeight: 500, marginBottom: 4 }}>На сегодня пусто — отдыхай ✨</div>
-          <div style={{ fontSize: 13, opacity: 0.6, lineHeight: 1.5 }}>Если хочется чем-то заняться — загляни во вкладку «Задачи».</div>
+      <div className="glass" style={{ padding: "14px 16px" }}>
+        <div className="card-h">
+          <span className="card-title">Расписание</span>
+          <span className="card-meta">{(t.overdue.length + t.scheduled.length) === 0 ? "пусто" : `${t.overdue.length + t.scheduled.length} на сегодня`}</span>
         </div>
-      )}
-      {t.overdue.map((o) => (
-        <div key={o.id} className="task glass" style={{ opacity: done[o.id] ? 0.45 : 1 }}>
-          <Chk s={s} done={done[o.id]} onClick={() => toggle(o.id)} />
-          <div className="body" onClick={() => openTask(o)} style={{ cursor: "pointer" }}>
-            <div className="title">{o.title}</div>
-            <div className="meta">
-              <span style={{ color: s.red, fontWeight: 600 }}>{o.days} д назад</span>
-              {o.rpt && <span>{o.rpt}</span>}
-            </div>
+        {t.overdue.length === 0 && t.scheduled.length === 0 && (
+          <div style={{ padding: "16px 0", textAlign: "center" }}>
+            <div style={{ fontSize: 14, fontWeight: 500, marginBottom: 4 }}>На сегодня пусто — отдыхай ✨</div>
+            <div style={{ fontSize: 12, opacity: 0.6 }}>Загляни во вкладку «Задачи».</div>
           </div>
-          {o.cat && <div className="cat-badge">{String(o.cat).split(" ")[0]}</div>}
-          <PrioDot s={s} prio={o.prio} />
-        </div>
-      ))}
-      {t.scheduled.map((x) => (
-        <div key={x.id} className="task glass" style={{ opacity: done[x.id] ? 0.45 : 1 }}>
-          {x.time && <span className="time">{x.time}</span>}
-          <Chk s={s} done={done[x.id]} onClick={() => toggle(x.id)} />
-          <div className="body" onClick={() => openTask(x)} style={{ cursor: "pointer" }}>
-            <div className="title">{x.title}</div>
-            <div className="meta">
-              {x.date && <span>{x.date}</span>}
-              {x.rpt && <span>🔄 {x.rpt}</span>}
-              {x.streak > 0 && <span>🔥 {x.streak}</span>}
+        )}
+        {t.overdue.map((o) => (
+          <div key={o.id} className="sched-row" style={{ opacity: done[o.id] ? 0.45 : 1, cursor: "pointer" }} onClick={() => openTask(o)}>
+            <Chk s={s} done={done[o.id]} onClick={(e) => { e.stopPropagation(); toggle(o.id); }} />
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div className={`s-title${done[o.id] ? " done" : ""}`}>{o.title}</div>
+              <div className="s-meta">
+                <span style={{ color: s.red, fontWeight: 600 }}>{o.days} д назад</span>
+                {o.rpt && <span>🔄 {o.rpt}</span>}
+              </div>
             </div>
+            {o.cat && <div className="s-cat">{String(o.cat).split(" ")[0]}</div>}
+            <PrioDot s={s} prio={o.prio} />
           </div>
-          {x.cat && <div className="cat-badge">{String(x.cat).split(" ")[0]}</div>}
-          <PrioDot s={s} prio={x.prio} />
-        </div>
-      ))}
+        ))}
+        {t.scheduled.map((x) => (
+          <div key={x.id} className="sched-row" style={{ opacity: done[x.id] ? 0.45 : 1, cursor: "pointer" }} onClick={() => openTask(x)}>
+            <span className="s-time" style={x.time ? {} : { opacity: 0.4 }}>{x.time || "—"}</span>
+            <Chk s={s} done={done[x.id]} onClick={(e) => { e.stopPropagation(); toggle(x.id); }} />
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div className={`s-title${done[x.id] ? " done" : ""}`}>{x.title}</div>
+              <div className="s-meta">
+                {x.date && <span>{x.date}</span>}
+                {x.rpt && <span>🔄 {x.rpt}</span>}
+                {x.streak > 0 && <span>🔥 {x.streak}</span>}
+              </div>
+            </div>
+            {x.cat && <div className="s-cat">{String(x.cat).split(" ")[0]}</div>}
+            <PrioDot s={s} prio={x.prio} />
+          </div>
+        ))}
+      </div>
     </>
   );
 }
@@ -2249,11 +2254,86 @@ function NxCal({ s }) {
 }
 
 // ═══════════════════════════════════════════════════════════════
+// ARCANA — Accuracy bottom sheet
+// ═══════════════════════════════════════════════════════════════
+
+function AccuracySheet({ s, onClose, onVerified }) {
+  const [scope, setScope] = useState("all");
+  const { data, loading, refetch } = useApi(`/api/arcana/accuracy?scope=${scope}`, [scope]);
+  const [busy, setBusy] = useState(null);
+
+  const verify = async (id, type, verdict) => {
+    setBusy(id);
+    try {
+      await apiPost("/api/arcana/accuracy/verify", { id, type, verdict });
+      await refetch();
+      onVerified?.();
+    } catch (_) {}
+    setBusy(null);
+  };
+
+  const pct = data?.pct ?? 0;
+  const total = data?.total ?? 0;
+  const checked = data?.checked || { yes: 0, half: 0, no: 0 };
+  const pending = data?.pending || [];
+
+  return (
+    <>
+      <div className="acc-sheet-overlay" onClick={onClose} />
+      <div className="acc-sheet" onClick={(e) => e.stopPropagation()}>
+        <div className="acc-grip" />
+        <div className="card-h">
+          <span className="card-title" style={{ fontSize: 22 }}>Точность</span>
+          <span className="card-meta">за всё время</span>
+        </div>
+        <div className="acc-tabs">
+          {[["all", "Всё"], ["sessions", "🃏 Расклады"], ["rituals", "🕯 Ритуалы"]].map(([k, l]) => (
+            <div key={k} className={`acc-tab${scope === k ? " active" : ""}`} onClick={() => setScope(k)}>{l}</div>
+          ))}
+        </div>
+        {loading ? (
+          <Empty s={s} text="Загружаю..." />
+        ) : (
+          <>
+            <div className="acc-big">{pct}%</div>
+            <div className="acc-big-sub">{total} проверено</div>
+            <div className="acc-break">
+              <div className="acc-break-cell yes"><div className="v">{checked.yes}</div><div className="l">✅ да</div></div>
+              <div className="acc-break-cell half"><div className="v">{checked.half}</div><div className="l">〰️ част.</div></div>
+              <div className="acc-break-cell no"><div className="v">{checked.no}</div><div className="l">❌ нет</div></div>
+            </div>
+            <div className="p-list-h">⏳ Ждут проверки · {pending.length}</div>
+            {pending.length === 0 && (
+              <div style={{ fontSize: 12, opacity: 0.55, padding: "10px 0" }}>Всё проверено ✨</div>
+            )}
+            {pending.map((p) => (
+              <div key={`${p.type}-${p.id}`} className="p-row">
+                <span className="ico">{p.type === "session" ? "🃏" : "🕯"}</span>
+                <div className="body">
+                  <div className="title">{p.title || "—"}</div>
+                  <div className="meta">{[p.client, p.date].filter(Boolean).join(" · ")}</div>
+                </div>
+                <div className="btns">
+                  <div className="pb yes" onClick={() => busy !== p.id && verify(p.id, p.type, "yes")}>✅</div>
+                  <div className="pb half" onClick={() => busy !== p.id && verify(p.id, p.type, "half")}>〰️</div>
+                  <div className="pb no" onClick={() => busy !== p.id && verify(p.id, p.type, "no")}>❌</div>
+                </div>
+              </div>
+            ))}
+          </>
+        )}
+      </div>
+    </>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════
 // ARCANA — MY DAY (с фазой луны)
 // ═══════════════════════════════════════════════════════════════
 
 function ArDay({ s, openClient, navigate, openMoonPhases }) {
   const [done, setDone] = useState({});
+  const [accSheet, setAccSheet] = useState(false);
   const { data, loading, error, refetch } = useApi('/api/arcana/today');
   const weatherApi = useApi('/api/weather');
   const rawSessions = data?.sessions_today?.length || 0;
@@ -2266,8 +2346,20 @@ function ArDay({ s, openClient, navigate, openMoonPhases }) {
   const a = adaptArcanaToday(data);
   const moon = a.moon;
   const worksTotal = a.worksToday.length + a.worksOverdue.length;
-  const worksDone = Object.values(done).filter(Boolean).length;
-  const sessionsTotal = a.sessionsToday.length;
+  const worksDoneToday = (data?.works_done_today ?? Object.values(done).filter(Boolean).length);
+  const worksTotalToday = data?.works_total_today ?? worksTotal;
+  const incomeMonth = data?.income_month ?? a.monthBlock.inc;
+  const accPct = data?.accuracy_pct ?? a.accuracy;
+  const accChecked = data?.accuracy_checked ?? 0;
+  const accTotal = data?.accuracy_total ?? 0;
+  const pendingSessions = data?.pending_sessions ?? 0;
+  const pendingRituals = data?.pending_rituals ?? 0;
+  const pendingTotal = pendingSessions + pendingRituals;
+
+  const allRows = [
+    ...a.worksOverdue.map((o) => ({ ...o, _over: true })),
+    ...a.worksToday.map((w) => ({ ...w, _over: false })),
+  ];
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 8, position: "relative" }}>
@@ -2285,75 +2377,98 @@ function ArDay({ s, openClient, navigate, openMoonPhases }) {
           </div>
         </div>
         <div className="hero-metrics">
-          <div style={{ flex: 1, cursor: "pointer" }} onClick={() => navigate?.("clients")}>
-            <Metric s={s} v={worksDone} unit={`/${worksTotal}`} sub="работы" />
+          <div style={{ flex: 1, cursor: "pointer" }} onClick={() => navigate?.("work")}>
+            <Metric s={s} v={worksDoneToday} unit={`/${worksTotalToday}`} sub="работы" />
           </div>
-          <div style={{ flex: 1, cursor: "pointer" }} onClick={() => navigate?.("stats")}>
-            <Metric s={s} v={a.monthBlock.inc >= 1000 ? `${Math.round(a.monthBlock.inc / 1000)}к` : a.monthBlock.inc} unit="₽" sub="доход" accent={s.acc} />
+          <div style={{ flex: 1, cursor: "pointer" }} onClick={() => navigate?.("cli")}>
+            <Metric s={s} v={incomeMonth >= 1000 ? `${Math.round(incomeMonth / 1000)}к` : incomeMonth} unit="₽" sub="доход" accent={s.acc} />
           </div>
-          <div style={{ flex: 1, cursor: "pointer" }} onClick={() => navigate?.("stats")}>
-            <Metric s={s} v={`${a.accuracy}%`} sub="точность" accent={s.amber} />
+          <div style={{ flex: 1, cursor: "pointer" }} onClick={() => setAccSheet(true)}>
+            <Metric s={s} v={`${accPct}%`} sub="точность" accent={s.amber} />
+          </div>
+        </div>
+        <div className="hero-budget">
+          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6, fontSize: 13, fontWeight: 500, cursor: "pointer" }} onClick={() => setAccSheet(true)}>
+            <span style={{ opacity: 0.75 }}>Сбылось в практике</span>
+            <span style={{ fontWeight: 500 }}>{accChecked} из {accTotal} проверено</span>
+          </div>
+          <Bar s={s} pct={accPct} color={s.amber} />
+          <div style={{ fontSize: 12, opacity: 0.6, marginTop: 6 }}>
+            ⏳ {pendingSessions} расклад · {pendingRituals} ритуал ждут проверки
           </div>
         </div>
       </div>
 
-      <div className="moon-hero glass glow" onClick={() => openMoonPhases?.()}>
-        <div className="glyph">{moon.glyph}</div>
-        <div className="info">
-          <div className="name">{moon.name}</div>
-          <div className="sub">{moon.days} день цикла · освещение {moon.illum}%</div>
-          <Bar s={s} pct={moon.illum} color={s.acc} />
+      <div className="glass" onClick={() => openMoonPhases?.()} style={{ cursor: "pointer" }}>
+        <div className="card-h">
+          <span className="card-title">Луна сегодня</span>
+          <span className="card-meta">{moon.days} день · {moon.illum}%</span>
+        </div>
+        <div style={{ display: "flex", gap: 14, alignItems: "center" }}>
+          <div style={{ fontSize: 46, lineHeight: 1, filter: "drop-shadow(0 0 12px rgba(255,240,220,0.45))" }}>{moon.glyph}</div>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontFamily: "var(--f-display)", fontStyle: "italic", fontSize: 18, lineHeight: 1.1 }}>{moon.name}</div>
+            <div style={{ fontSize: 11, opacity: 0.7, margin: "3px 0 7px" }}>{moon.note || `${moon.days} день цикла · освещение ${moon.illum}%`}</div>
+            <Bar s={s} pct={moon.illum} color={s.acc} />
+          </div>
         </div>
       </div>
 
       {a.sessionsToday.length > 0 && (
-        <>
-          <SectionLabel s={s}>Сеансы сегодня</SectionLabel>
+        <div className="glass" style={{ padding: "14px 16px" }}>
+          <div className="card-h">
+            <span className="card-title">Сеансы сегодня</span>
+            <span className="card-meta">{a.sessionsToday.length}</span>
+          </div>
           {a.sessionsToday.map((x) => (
-            <div key={x.id} className="task glass" style={{ cursor: "pointer" }} onClick={() => x.client_id && openClient({ id: x.client_id })}>
-              <span className="time">{x.time}</span>
-              <div style={{ width: 30, height: 30, borderRadius: "50%", background: `${s.acc}22`, color: s.acc, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: H, fontSize: 13, fontWeight: 500, flexShrink: 0 }}>{x.client[0]}</div>
-              <div className="body">
-                <div className="title">{x.client}</div>
-                <div className="meta"><span>{x.type} · {x.area}</span></div>
+            <div key={x.id} className="sched-row" style={{ cursor: "pointer" }} onClick={() => x.client_id && openClient({ id: x.client_id })}>
+              <span className="s-time">{x.time}</span>
+              <div style={{ width: 24, height: 24, borderRadius: "50%", background: `${s.acc}22`, color: s.acc, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 600, flexShrink: 0 }}>{x.client[0]}</div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div className="s-title">{x.client}</div>
+                <div className="s-meta"><span>{x.type} · {x.area}</span></div>
               </div>
-              <ChevronRight size={16} color={s.tS} />
+              <ChevronRight size={14} color={s.tS} />
             </div>
           ))}
-        </>
+        </div>
       )}
 
-      <SectionLabel s={s}>Расписание</SectionLabel>
-      {a.worksOverdue.length === 0 && a.worksToday.length === 0 && (
-        <div className="glass" style={{ padding: "16px", textAlign: "center" }}>
-          <div style={{ fontSize: 16, fontWeight: 500, marginBottom: 4, fontFamily: H }}>Сегодня в практике спокойно 🌙</div>
-          <div style={{ fontSize: 13, opacity: 0.6, lineHeight: 1.5 }}>Если хочется — загляни во вкладку «Клиенты».</div>
+      <div className="glass" style={{ padding: "14px 16px" }}>
+        <div className="card-h">
+          <span className="card-title">Расписание</span>
+          <span className="card-meta">{allRows.length === 0 ? "пусто" : `${allRows.length} на сегодня`}</span>
         </div>
-      )}
-      {a.worksOverdue.map((o) => (
-        <div key={o.id} className="task glass" style={{ opacity: done[o.id] ? 0.45 : 1 }}>
-          <Chk s={s} done={done[o.id]} onClick={() => setDone((p) => ({ ...p, [o.id]: !p[o.id] }))} />
-          <div className="body">
-            <div className="title" style={{ textDecoration: done[o.id] ? "line-through" : "none" }}>{o.title}</div>
-            <div className="meta">
-              <span style={{ color: s.red, fontWeight: 600 }}>{o.days_ago} д назад</span>
+        {allRows.length === 0 && (
+          <div style={{ padding: "16px 0", textAlign: "center" }}>
+            <div style={{ fontSize: 14, fontWeight: 500, marginBottom: 4, fontFamily: H }}>Сегодня в практике спокойно 🌙</div>
+            <div style={{ fontSize: 12, opacity: 0.6 }}>Загляни во вкладку «Клиенты».</div>
+          </div>
+        )}
+        {allRows.map((r) => (
+          <div key={r.id} className="sched-row" style={{ cursor: "pointer" }} onClick={() => navigate?.("work")}>
+            {!r._over && <span className="s-time" style={r.time ? {} : { opacity: 0.4 }}>{r.time || "—"}</span>}
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div className="s-title">{r.title}</div>
+              {r._over && (
+                <div className="s-meta">
+                  <span style={{ color: s.red, fontWeight: 600 }}>{r.days_ago} д назад</span>
+                </div>
+              )}
             </div>
+            {r.cat && <div className="s-cat">{String(r.cat).split(" ")[0]}</div>}
+            <PrioDot s={s} prio={r.prio} />
           </div>
-          {o.cat && <div className="cat-badge">{String(o.cat).split(" ")[0]}</div>}
-          <PrioDot s={s} prio={o.prio} />
-        </div>
-      ))}
-      {a.worksToday.map((w) => (
-        <div key={w.id} className="task glass" style={{ opacity: done[w.id] ? 0.45 : 1 }}>
-          {w.time && <span className="time">{w.time}</span>}
-          <Chk s={s} done={done[w.id]} onClick={() => setDone((p) => ({ ...p, [w.id]: !p[w.id] }))} />
-          <div className="body">
-            <div className="title" style={{ textDecoration: done[w.id] ? "line-through" : "none" }}>{w.title}</div>
-          </div>
-          {w.cat && <div className="cat-badge">{String(w.cat).split(" ")[0]}</div>}
-          <PrioDot s={s} prio={w.prio} />
-        </div>
-      ))}
+        ))}
+      </div>
+
+      {accSheet && (
+        <AccuracySheet
+          s={s}
+          onClose={() => setAccSheet(false)}
+          onVerified={() => refetch()}
+        />
+      )}
     </div>
   );
 }
