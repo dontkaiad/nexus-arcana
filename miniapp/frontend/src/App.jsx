@@ -4508,10 +4508,15 @@ export default function App() {
           left: 0,
           right: 0,
           zIndex: 10,
-          padding: "6px 10px 18px",
+          padding: "10px 10px 18px",
           display: "flex",
           justifyContent: "center",
           gap: 2,
+          background: isDay
+            ? "linear-gradient(to top, rgba(240,231,216,0.85) 0%, rgba(240,231,216,0.55) 60%, rgba(240,231,216,0) 100%)"
+            : "linear-gradient(to top, rgba(14,18,34,0.85) 0%, rgba(14,18,34,0.55) 60%, rgba(14,18,34,0) 100%)",
+          backdropFilter: "blur(12px)",
+          WebkitBackdropFilter: "blur(12px)",
         }}
       >
         {tabs.map((t) => {
