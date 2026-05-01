@@ -2275,7 +2275,7 @@ function ArDay({ s, openClient, navigate, openMoonPhases }) {
             <Metric s={s} v={a.worksToday.length} sub="работ" />
           </div>
           <div style={{ flex: 1, cursor: "pointer" }} onClick={() => navigate?.("stats")}>
-            <Metric s={s} v={a.monthBlock.inc >= 1000 ? `${Math.round(a.monthBlock.inc / 1000)}к` : a.monthBlock.inc} unit="₽" sub="доход/мес" accent={s.acc} />
+            <Metric s={s} v={a.monthBlock.inc >= 1000 ? `${Math.round(a.monthBlock.inc / 1000)}к` : a.monthBlock.inc} unit="₽" sub="/мес" accent={s.acc} />
           </div>
           <div style={{ flex: 1, cursor: "pointer" }} onClick={() => navigate?.("stats")}>
             <Metric s={s} v={`${a.accuracy}%`} sub="точность" accent={s.acc} />
@@ -4730,7 +4730,7 @@ function MoonPhasesSheet({ s, open }) {
             {current.glyph}
           </div>
           <div style={{ flex: 1 }}>
-            <div style={{ fontFamily: H, fontSize: fs(22), fontWeight: 600 }}>
+            <div style={{ fontFamily: H, fontStyle: "italic", fontSize: fs(24), fontWeight: 500 }}>
               {current.name}
             </div>
             <div style={{ fontSize: fs(14), color: s.text, opacity: 0.85, marginTop: 4 }}>
@@ -4740,7 +4740,7 @@ function MoonPhasesSheet({ s, open }) {
         </div>
       </Glass>
 
-      <div style={{ fontSize: fs(14), color: s.text, fontWeight: 600, marginBottom: 6 }}>Ближайшие фазы</div>
+      <div style={{ fontFamily: H, fontStyle: "italic", fontSize: fs(20), fontWeight: 500, marginBottom: 6 }}>Ближайшие фазы</div>
       {upcoming.map((p, i) => {
         const dt = p.date ? new Date(p.date) : null;
         const today = new Date();
@@ -4750,7 +4750,7 @@ function MoonPhasesSheet({ s, open }) {
             <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
               <div style={{ fontSize: fs(32) }}>{p.glyph}</div>
               <div style={{ flex: 1 }}>
-                <div style={{ fontSize: fs(15), color: s.text, fontWeight: 500 }}>{p.name}</div>
+                <div style={{ fontFamily: H, fontStyle: "italic", fontSize: fs(16), fontWeight: 500, color: s.text }}>{p.name}</div>
                 <div style={{ fontSize: fs(12), color: s.text, opacity: 0.75 }}>
                   {formatDate(p.date)}{daysAway !== null && daysAway > 0 ? ` · через ${daysAway} ${daysAway === 1 ? "день" : "дн."}` : ""}
                 </div>
