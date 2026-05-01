@@ -90,7 +90,7 @@ const getOrb = (progress, isSun) => {
 function getSky(p) {
   let d, m, w, g, b, card, text, tS, tM, acc, brd, red, amber, good;
   red = lerpC("#bf5a4a", "#c45a5a", p);
-  amber = lerpC("#b8822a", "#d9a441", p);
+  amber = lerpC("#b8822a", "#d4a458", p);
   good = lerpC("#6b8f71", "#5a9a78", p);
   if (p < 0.3) {
     const t = p / 0.3;
@@ -2265,7 +2265,7 @@ function ArDay({ s, openClient, navigate, openMoonPhases }) {
         <div className="hero-h">
           <div>
             <div className="hero-title">Мой день</div>
-            <div style={{ fontSize: 13, opacity: 0.65, marginTop: 4, fontWeight: 500 }}>{tipApi.data?.tip ? `🌙 ${tipApi.data.tip}` : "сегодня в практике спокойно 🌙"}</div>
+            <div style={{ fontSize: 13, opacity: 0.65, marginTop: 4, fontWeight: 500 }}>{tipApi.data?.tip ? `${tipApi.data.tip} 🌙` : "сегодня в практике спокойно 🌙"}</div>
           </div>
           <div className="hero-meta">
             <div>{a.date}</div>
