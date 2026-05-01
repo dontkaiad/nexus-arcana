@@ -392,27 +392,23 @@ const Empty = ({ s, text, chill, emoji, title }) => {
 };
 
 const ErrorBox = ({ s, error, refetch }) => (
-  <Glass s={s} accent={s.red} style={{ padding: "14px 16px" }}>
-    <div style={{ fontSize: fs(15), color: s.red, fontWeight: 700, marginBottom: 6 }}>
+  <div className="glass accent-l" style={{ "--accent": "var(--nx-red)", padding: "14px 16px" }}>
+    <div style={{ fontFamily: "var(--f-display)", fontStyle: "italic", fontSize: 18, fontWeight: 500, color: "var(--nx-red)", marginBottom: 6 }}>
       Ошибка загрузки
     </div>
-    <div style={{ fontSize: fs(13), color: s.tM, marginBottom: 12, wordBreak: "break-word" }}>
+    <div style={{ fontSize: 13, opacity: 0.7, marginBottom: 12, wordBreak: "break-word" }}>
       {error?.message || "неизвестная ошибка"}
     </div>
     {refetch && (
       <div
         onClick={refetch}
-        style={{
-          display: "inline-flex", alignItems: "center", gap: 6,
-          padding: "9px 16px", borderRadius: 10,
-          background: s.acc, color: "#0a1a15",
-          fontSize: fs(14), fontWeight: 700, cursor: "pointer",
-        }}
+        className="pill"
+        style={{ display: "inline-flex", cursor: "pointer", fontWeight: 600 }}
       >
-        <RefreshCw size={fs(14)} /> Повторить
+        <RefreshCw size={14} /> Повторить
       </div>
     )}
-  </Glass>
+  </div>
 );
 
 // Финальные логотипы: Satisfy + градиентный диск с кратерами и ореолом
@@ -1108,29 +1104,7 @@ function NxDay({ s, openTask, navigate, openStreaks }) {
   const weatherApi = useApi('/api/weather');
 
   if (loading) return <Empty s={s} text="Загружаю..." />;
-  if (error) {
-    return (
-      <Glass s={s} accent={s.red} style={{ padding: "14px 16px" }}>
-        <div style={{ fontSize: fs(15), color: s.red, fontWeight: 700, marginBottom: 6 }}>
-          Ошибка загрузки
-        </div>
-        <div style={{ fontSize: fs(13), color: s.tM, marginBottom: 12, wordBreak: "break-word" }}>
-          {error.message}
-        </div>
-        <div
-          onClick={refetch}
-          style={{
-            display: "inline-flex", alignItems: "center", gap: 6,
-            padding: "9px 16px", borderRadius: 10,
-            background: s.acc, color: "#0a1a15",
-            fontSize: fs(14), fontWeight: 700, cursor: "pointer",
-          }}
-        >
-          <RefreshCw size={fs(14)} /> Повторить
-        </div>
-      </Glass>
-    );
-  }
+  if (error) return <ErrorBox s={s} error={error} refetch={refetch} />;
 
   const t = adaptToday(data);
   const doneCount = Object.values(done).filter(Boolean).length;
@@ -2264,29 +2238,7 @@ function ArDay({ s, openClient, navigate, openMoonPhases }) {
   const weatherApi = useApi('/api/weather');
 
   if (loading) return <Empty s={s} text="Загружаю..." />;
-  if (error) {
-    return (
-      <Glass s={s} accent={s.red} style={{ padding: "14px 16px" }}>
-        <div style={{ fontSize: fs(15), color: s.red, fontWeight: 700, marginBottom: 6 }}>
-          Ошибка загрузки
-        </div>
-        <div style={{ fontSize: fs(13), color: s.tM, marginBottom: 12, wordBreak: "break-word" }}>
-          {error.message}
-        </div>
-        <div
-          onClick={refetch}
-          style={{
-            display: "inline-flex", alignItems: "center", gap: 6,
-            padding: "9px 16px", borderRadius: 10,
-            background: s.acc, color: "#0a1a15",
-            fontSize: fs(14), fontWeight: 700, cursor: "pointer",
-          }}
-        >
-          <RefreshCw size={fs(14)} /> Повторить
-        </div>
-      </Glass>
-    );
-  }
+  if (error) return <ErrorBox s={s} error={error} refetch={refetch} />;
 
   const a = adaptArcanaToday(data);
   const moon = a.moon;
