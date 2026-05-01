@@ -2653,48 +2653,41 @@ function ArStats({ s, navigate }) {
       <div className="page-title">Статистика</div>
 
       {/* Блок статистики за текущий месяц */}
-      <Glass s={s} style={{ padding: "14px 14px 10px" }}>
-        <div style={{ fontFamily: H, fontSize: fs(15), color: s.acc, marginBottom: 12 }}>
+      <div>
+        <div style={{ fontFamily: H, fontSize: fs(26), color: s.text, fontStyle: "italic", marginBottom: 14, paddingLeft: 2 }}>
           Статистика за {curMonthName}
         </div>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-          {/* Доход */}
-          <div style={{ background: s.card, borderRadius: 12, padding: "12px 10px", textAlign: "center" }}>
-            <div style={{ fontSize: fs(22) }}>💰</div>
-            <div style={{ fontFamily: H, fontSize: fs(18), color: s.acc, fontWeight: 600, margin: "4px 0 2px" }}>
-              {fmtRub(p.inc)}
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+          {[
+            { icon: "💰", value: fmtRub(p.inc), label: "Доход", onClick: null },
+            { icon: "🕯️", value: fmtRub(p.exp), label: "Расходники", onClick: null },
+            { icon: "✨", value: `${pct}%`, label: "Сбылось", onClick: null },
+            { icon: "🃏", value: curMonthSessions, label: "Сеансов", onClick: () => navigate?.("sess") },
+          ].map(({ icon, value, label, onClick }) => (
+            <div
+              key={label}
+              className="glass"
+              onClick={onClick || undefined}
+              style={{
+                borderRadius: 16,
+                padding: "28px 12px 22px",
+                textAlign: "center",
+                cursor: onClick ? "pointer" : "default",
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                gap: 10,
+              }}
+            >
+              <div style={{ fontSize: fs(36) }}>{icon}</div>
+              <div style={{ fontFamily: H, fontSize: fs(30), color: s.acc, fontWeight: 500, lineHeight: 1 }}>
+                {value}
+              </div>
+              <div style={{ fontSize: fs(13), color: s.tM }}>{label}</div>
             </div>
-            <div style={{ fontSize: fs(11), color: s.tM }}>Доход</div>
-          </div>
-          {/* Расходники */}
-          <div style={{ background: s.card, borderRadius: 12, padding: "12px 10px", textAlign: "center" }}>
-            <div style={{ fontSize: fs(22) }}>🕯️</div>
-            <div style={{ fontFamily: H, fontSize: fs(18), color: s.acc, fontWeight: 600, margin: "4px 0 2px" }}>
-              {fmtRub(p.exp)}
-            </div>
-            <div style={{ fontSize: fs(11), color: s.tM }}>Расходники</div>
-          </div>
-          {/* Сбылось */}
-          <div style={{ background: s.card, borderRadius: 12, padding: "12px 10px", textAlign: "center" }}>
-            <div style={{ fontSize: fs(22) }}>✨</div>
-            <div style={{ fontFamily: H, fontSize: fs(18), color: s.acc, fontWeight: 600, margin: "4px 0 2px" }}>
-              {pct}%
-            </div>
-            <div style={{ fontSize: fs(11), color: s.tM }}>Сбылось</div>
-          </div>
-          {/* Сеансов */}
-          <div
-            style={{ background: s.card, borderRadius: 12, padding: "12px 10px", textAlign: "center", cursor: "pointer" }}
-            onClick={() => navigate?.("sess")}
-          >
-            <div style={{ fontSize: fs(22) }}>🃏</div>
-            <div style={{ fontFamily: H, fontSize: fs(18), color: s.acc, fontWeight: 600, margin: "4px 0 2px" }}>
-              {curMonthSessions}
-            </div>
-            <div style={{ fontSize: fs(11), color: s.tM }}>Сеансов</div>
-          </div>
+          ))}
         </div>
-      </Glass>
+      </div>
 
       {unchecked.length > 0 && (
         <Glass s={s} accent={s.amber} style={{ padding: "12px 14px" }}>
