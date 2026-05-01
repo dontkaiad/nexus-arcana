@@ -165,7 +165,7 @@ function moonPhase(dt = new Date()) {
   return { idx, glyph: MOON_GLYPHS[idx], name: MOON_NAMES[idx], days, illum, frac };
 }
 
-const H = "'Lora', Georgia, serif";
+const H = "'Newsreader', 'Lora', Georgia, serif";
 const B = "'Manrope', -apple-system, 'SF Pro Text', system-ui, sans-serif";
 
 // wave8.20: глобальный масштаб шрифтов и иконок для читаемости на мобильном.
@@ -416,7 +416,7 @@ const ErrorBox = ({ s, error, refetch }) => (
 );
 
 // Финальные логотипы: Satisfy + градиентный диск с кратерами и ореолом
-const NexusLogo = ({ color = "#0a2e22" }) => (
+const NexusLogo = ({ color = "#1a3528" }) => (
   <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
     <svg width="54" height="54" viewBox="0 0 54 54" xmlns="http://www.w3.org/2000/svg">
       <defs>
@@ -434,8 +434,8 @@ const NexusLogo = ({ color = "#0a2e22" }) => (
       <circle cx="24" cy="32" r="1.1" fill="#8a5a28" opacity="0.4" />
       <circle cx="30" cy="21" r="0.8" fill="#8a5a28" opacity="0.45" />
     </svg>
-    <svg width="110" height="48" viewBox="0 0 110 48" xmlns="http://www.w3.org/2000/svg">
-      <text x="0" y="34" fontFamily="Lora, Georgia, serif" fontStyle="italic" fontWeight="500" fontSize="32" fill={color}>nexus</text>
+    <svg width="110" height="40" viewBox="0 0 110 40" xmlns="http://www.w3.org/2000/svg">
+      <text x="0" y="30" fontFamily="Caveat, cursive" fontWeight="500" fontSize="28" fill={color}>nexus</text>
     </svg>
   </div>
 );
@@ -458,8 +458,8 @@ const ArcanaLogo = () => (
       <circle cx="24" cy="32" r="1.1" fill="#4a5470" opacity="0.4" />
       <circle cx="30" cy="21" r="0.8" fill="#4a5470" opacity="0.45" />
     </svg>
-    <svg width="120" height="48" viewBox="0 0 120 48" xmlns="http://www.w3.org/2000/svg">
-      <text x="0" y="34" fontFamily="Lora, Georgia, serif" fontStyle="italic" fontWeight="500" fontSize="32" fill="#f0f2f8">arcana</text>
+    <svg width="120" height="40" viewBox="0 0 120 40" xmlns="http://www.w3.org/2000/svg">
+      <text x="0" y="30" fontFamily="Caveat, cursive" fontWeight="500" fontSize="28" fill="#f0ebe0">arcana</text>
     </svg>
   </div>
 );
