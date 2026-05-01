@@ -161,9 +161,9 @@ PARSE_SESSION_SYSTEM = (
 )
 
 TRIPLET_SUMMARY_SYSTEM = (
-    "Сделай очень короткое (1-2 предложения, ~140 знаков) саммари триплета таро. "
-    "Без воды, по делу: суть ответа на вопрос с учётом карт и дна. "
-    "Формат — обычный текст, без HTML, без эмодзи, без 'итог:'."
+    "Output as plain Russian text, 1-2 sentences (~140 знаков), no formatting, "
+    "no markdown, no HTML tags, no emojis, no 'итог:' / 'вывод:'. "
+    "Суть ответа на вопрос с учётом карт и дна — по делу, без воды."
 )
 
 CORRECTION_PARSE_SYSTEM = (
@@ -195,16 +195,23 @@ TAROT_SYSTEM = (
     "3. Если есть предыдущие расклады клиента — свяжи с ними: что изменилось, что подтвердилось, куда движется ситуация.\n"
     "4. Краткий вывод: 2-3 предложения, практическая суть. Учитывай дно колоды при формулировке общего вывода.\n"
     "5. БЕЗ поэзии, метафор, воды. Факты и структура.\n"
-    "6. Привязывай значения к вопросу клиента.\n"
-    "7. Если есть дно колоды (bottom_card) — после трактовки всех позиций добавь отдельный блок:\n"
-    "   <b>🂠 Дно колоды → {карта} ({положение}):</b>\n"
-    "   Скрытый фон расклада. Эта карта показывает неочевидный подтекст ситуации, "
-    "то что влияет на всё но не на поверхности.\n"
-    "   [трактовка в контексте всего расклада]\n\n"
-    "ФОРМАТИРОВАНИЕ: используй HTML-теги Telegram, НЕ markdown:\n"
-    "- жирный: <b>текст</b> (НЕ **текст**)\n"
-    "- курсив: <i>текст</i> (НЕ *текст*)\n"
-    "- разрешены только <b>, <i>, <u>, <s>, <code>, <pre>. Никаких других тегов.\n"
+    "6. Привязывай значения к вопросу клиента.\n\n"
+    "ВЫВОДИ ТОЛЬКО HTML с тегами <h3>, <b>, <i>, <p>. Никакого markdown "
+    "(никаких **, __, ##, *, _ — никогда). Никаких других тегов "
+    "(<div>, <span>, <strong>, <em>, классы, инлайн-стили — запрещены).\n\n"
+    "Структура трактовки триплета (3 карты + опциональное дно):\n"
+    "<h3>Общий смысл</h3>\n"
+    "<p>2-3 предложения о раскладе в целом</p>\n"
+    "<h3>🃏 [Карта 1] · Прошлое</h3>\n"
+    "<p>Что говорит эта карта в этой позиции применительно к вопросу.</p>\n"
+    "<h3>🎩 [Карта 2] · Настоящее</h3>\n"
+    "<p>...</p>\n"
+    "<h3>🌙 [Карта 3] · Будущее</h3>\n"
+    "<p>...</p>\n"
+    "<h3>🂠 [Дно] · фон</h3>\n"
+    "<p>Скрытый подтекст: что влияет на всё, но не на поверхности.</p>\n\n"
+    "Имена карт и ключевые сущности выделяй <b>...</b>. Цитаты/акценты — <i>...</i>. "
+    "Не используй <br>, разделяй блоки тегами <h3>/<p>."
 )
 
 VISION_SYSTEM = (
@@ -305,7 +312,8 @@ async def _make_triplet_summary(
             model="claude-haiku-4-5-20251001",
             max_tokens=160,
         )
-        return (out or "").strip()
+        from core.html_sanitize import sanitize_summary
+        return sanitize_summary(out or "")
     except Exception as e:
         logger.warning("triplet_summary failed: %s", e)
         return ""
@@ -638,8 +646,13 @@ async def _handle_multi_session(
             bottom_en = _canon_card(bottom_card, deck) if bottom_card else ""
             if bottom_en and "🂠" not in interpretation:
                 interpretation = (
-                    interpretation.rstrip() + f"\n\n🂠 Дно: {bottom_en}"
+                    interpretation.rstrip()
+                    + f"\n\n<h3>🂠 {bottom_en} · фон</h3>"
+                    + "<p>Скрытый фон расклада.</p>"
                 )
+
+            from core.html_sanitize import sanitize_interpretation
+            interpretation = sanitize_interpretation(interpretation)
 
             page_id = await session_add(
                 date=_now_iso(tz),
@@ -727,13 +740,17 @@ async def cb_tarot_save(call: CallbackQuery) -> None:
         if bottom_en and "🂠" not in interpretation:
             interpretation = (
                 interpretation.rstrip()
-                + f"\n\n🂠 Дно: {bottom_en}"
+                + f"\n\n<h3>🂠 {bottom_en} · фон</h3><p>Скрытый фон расклада.</p>"
             )
 
         # Haiku — саммари триплета
         triplet_summary = await _make_triplet_summary(
             question, cards_raw, bottom_card or "", interpretation
         )
+
+        # Нормализация трактовки в чистый HTML (allowlist h3/b/i/p/br)
+        from core.html_sanitize import sanitize_interpretation
+        interpretation = sanitize_interpretation(interpretation)
 
         session_page_id = await session_add(
             date=_now_iso(tz),

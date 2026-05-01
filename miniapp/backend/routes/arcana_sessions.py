@@ -438,8 +438,9 @@ async def session_summarize(
     prompt = (
         f"Ты — ассистент-таролог. Сделай ОБЩЕЕ саммари сессии «{sname}» "
         f"({len(matching)} триплетов): что в целом показывают карты, "
-        f"какой вектор, на что обратить внимание. 3-5 предложений, без HTML, "
-        f"обращайся на 'ты'.\n\n"
+        f"какой вектор, на что обратить внимание. 3-5 предложений. "
+        f"Output as plain Russian text, no formatting, no markdown, "
+        f"no HTML tags, no emojis. Обращайся на 'ты'.\n\n"
         f"--- ТРИПЛЕТЫ ---\n{aggregated}"
     )
     try:
@@ -450,7 +451,8 @@ async def session_summarize(
         logger.error("session summarize failed: %s", e)
         raise HTTPException(status_code=500, detail="summarize failed")
 
-    summary = (summary or "").strip()
+    from core.html_sanitize import sanitize_summary
+    summary = sanitize_summary(summary or "")
     if not summary:
         raise HTTPException(status_code=500, detail="empty summary")
     cache_set(cache_key, summary)

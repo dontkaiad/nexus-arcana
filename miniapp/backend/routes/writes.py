@@ -491,7 +491,9 @@ async def summarize_session(
 
     prompt = (
         f"Сделай короткое саммари этой трактовки в 2-3 предложения на русском. "
-        f"Обращайся к Кай на ты, женский род. Только суть, без HTML, без эмодзи в начале.\n\n"
+        f"Обращайся к Кай на ты, женский род. Только суть. "
+        f"Output as plain Russian text, no formatting, no markdown, "
+        f"no HTML tags, no emojis.\n\n"
         f"Трактовка:\n{clean}"
     )
     try:
@@ -501,7 +503,8 @@ async def summarize_session(
         logger.error("Haiku summarize failed: %s", e)
         raise HTTPException(status_code=500, detail="summarize failed")
 
-    summary = (summary or "").strip()
+    from core.html_sanitize import sanitize_summary
+    summary = sanitize_summary(summary or "")
     if not summary:
         raise HTTPException(status_code=500, detail="empty summary")
 
