@@ -783,3 +783,29 @@
 .pb.yes:hover { background: rgba(111, 184, 142, 0.18); border-color: var(--ar-good); }
 .pb.half:hover { background: rgba(212, 164, 88, 0.18); border-color: var(--ar-amber); }
 .pb.no:hover { background: rgba(196, 101, 74, 0.18); border-color: var(--ar-red); }
+
+/* wave8: трактовка триплета — типографика для нормализованного HTML */
+.trip-interp h3 {
+  font-family: var(--f-display);
+  font-style: italic;
+  font-size: 13px;
+  font-weight: 400;
+  margin: 14px 0 6px;
+  color: rgba(244, 212, 164, 0.9);
+  letter-spacing: 0.2px;
+}
+.trip-interp h3:first-child { margin-top: 0; }
+.trip-interp p {
+  font-size: 13px;
+  line-height: 1.6;
+  margin: 0 0 8px;
+  font-weight: 400;
+}
+.trip-interp b {
+  color: #f4d4a4;
+  font-weight: 600;
+}
+.trip-interp i {
+  font-style: italic;
+  opacity: 0.92;
+}
