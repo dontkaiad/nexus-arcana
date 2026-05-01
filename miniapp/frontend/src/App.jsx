@@ -9,14 +9,13 @@ import {
   adaptClients, adaptClientDossier,
   adaptRituals, adaptRitualDetail,
   adaptGrimoire, adaptGrimoireDetail,
-  adaptArcanaStats,
   formatMonth, formatDate, formatShortDate,
 } from "./adapters";
 import { apiGet, apiPost } from "./api";
 import {
   Sun, Moon as LucideMoon, Check, Coins, List as ListIcon, Brain, Calendar,
   Sparkles as LucideSparkles, Users, Flame as LucideFlame, BookOpen as LucideBookOpen,
-  BarChart3, Plus, Search,
+  Plus, Search,
   Bell, RefreshCw, X, Camera, Mic, Pencil, ChevronRight, ChevronDown,
   Wallet, HeartPulse, StickyNote, Candy, Trash2, Clock,
 } from "lucide-react";
@@ -175,6 +174,13 @@ const B = "'Manrope', -apple-system, 'SF Pro Text', system-ui, sans-serif";
 // обрезался). Понизил до 1.2 — лёгкий но заметный bump.
 const FS = 1.2;
 const fs = (n) => Math.round(n * FS);
+
+const plural = (n, one, few, many) => {
+  const mod10 = n % 10, mod100 = n % 100;
+  if (mod10 === 1 && mod100 !== 11) return one;
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 10 || mod100 >= 20)) return few;
+  return many;
+};
 
 const PRIO_WEIGHT = (p) => ({ "🔴": 0, "🟡": 1, "⚪": 2 }[p] ?? 3);
 
@@ -2393,17 +2399,18 @@ function ArDay({ s, openClient, navigate, openMoonPhases }) {
             <span style={{ fontWeight: 500 }}>{accChecked} из {accTotal} проверено</span>
           </div>
           <Bar s={s} pct={accPct} color={s.amber} />
-          <div style={{ fontSize: 12, opacity: 0.6, marginTop: 6 }}>
-            ⏳ {pendingSessions} расклад · {pendingRituals} ритуал ждут проверки
-          </div>
+          {(pendingSessions > 0 || pendingRituals > 0) && (
+            <div style={{ fontSize: 12, opacity: 0.6, marginTop: 6 }}>
+              ⏳ {[
+                pendingSessions > 0 && `${pendingSessions} ${plural(pendingSessions, "расклад", "расклада", "раскладов")}`,
+                pendingRituals > 0 && `${pendingRituals} ${plural(pendingRituals, "ритуал", "ритуала", "ритуалов")}`,
+              ].filter(Boolean).join(" · ")} {plural(pendingSessions + pendingRituals, "ждёт", "ждут", "ждут")} проверки
+            </div>
+          )}
         </div>
       </div>
 
       <div className="glass" onClick={() => openMoonPhases?.()} style={{ cursor: "pointer" }}>
-        <div className="card-h">
-          <span className="card-title">Луна сегодня</span>
-          <span className="card-meta">{moon.days} день · {moon.illum}%</span>
-        </div>
         <div style={{ display: "flex", gap: 14, alignItems: "center" }}>
           <div style={{ fontSize: 46, lineHeight: 1, filter: "drop-shadow(0 0 12px rgba(255,240,220,0.45))" }}>{moon.glyph}</div>
           <div style={{ flex: 1, minWidth: 0 }}>
@@ -2442,7 +2449,7 @@ function ArDay({ s, openClient, navigate, openMoonPhases }) {
         {allRows.length === 0 && (
           <div style={{ padding: "16px 0", textAlign: "center" }}>
             <div style={{ fontSize: 14, fontWeight: 500, marginBottom: 4, fontFamily: H }}>Сегодня в практике спокойно 🌙</div>
-            <div style={{ fontSize: 12, opacity: 0.6 }}>Загляни во вкладку «Клиенты».</div>
+            <div style={{ fontSize: 12, opacity: 0.6 }}>Загляни во вкладку «Работы».</div>
           </div>
         )}
         {allRows.map((r) => (
@@ -2720,200 +2727,50 @@ function ArGrimoire({ s, openGrimoire }) {
   );
 }
 
+
 // ═══════════════════════════════════════════════════════════════
-// ARCANA — STATS (точность раскладов)
+// ARCANA — WORK (работы)
 // ═══════════════════════════════════════════════════════════════
 
-function ArStats({ s, navigate }) {
-  const { data, loading, error, refetch } = useApi("/api/arcana/stats");
-  // wave6.6.1: quick-verify секция
-  const uncheckedApi = useApi("/api/arcana/sessions?filter=status:unchecked", []);
-  const [verifyBusy, setVerifyBusy] = useState({});
-  const [localDone, setLocalDone] = useState({});
-
+function ArWork({ s }) {
+  const { data, loading, error, refetch } = useApi('/api/arcana/today');
   if (loading) return <Empty s={s} text="Загружаю..." />;
   if (error) return <ErrorBox s={s} error={error} refetch={refetch} />;
-  const view = adaptArcanaStats(data);
-  const months = view.months;
-  const allVer = view.allVer;
-  const pct = view.pct;
-  const p = view.practice;
-  const profit = p.profit;
-  const curMonthName = months[0]?.name || "";
-
-  const unchecked = ((uncheckedApi.data?.sessions) || []).filter(
-    (sess) => !localDone[sess.id]
-  );
-
-  const doVerify = async (id, status) => {
-    if (verifyBusy[id]) return;
-    setVerifyBusy((b) => ({ ...b, [id]: true }));
-    setLocalDone((d) => ({ ...d, [id]: true }));
-    try {
-      await apiPost(`/api/arcana/sessions/${id}/verify`, { status });
-      setTimeout(() => { uncheckedApi.refetch && uncheckedApi.refetch(); refetch(); }, 400);
-    } catch (e) {
-      setLocalDone((d) => { const n = { ...d }; delete n[id]; return n; });
-      alert("Не удалось отметить");
-    } finally {
-      setVerifyBusy((b) => { const n = { ...b }; delete n[id]; return n; });
-    }
-  };
-
-  const fmtRub = (v) => `${Math.round(v).toLocaleString("ru-RU")}₽`;
-  const curMonthSessions = months[0]?.total ?? 0;
-
+  const a = adaptArcanaToday(data);
+  const all = [
+    ...a.worksOverdue.map((o) => ({ ...o, _over: true })),
+    ...a.worksToday.map((w) => ({ ...w, _over: false })),
+  ];
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-      {/* Блок статистики за текущий месяц */}
-      <div>
-        <div style={{ fontFamily: H, fontSize: fs(22), color: s.text, fontStyle: "italic", marginBottom: 10, paddingLeft: 2 }}>
-          Статистика за {curMonthName}
+    <div style={{ display: "flex", flexDirection: "column", gap: 0 }}>
+      <div className="page-title" style={{ marginBottom: 10 }}>Работы</div>
+      <div className="glass" style={{ padding: "14px 16px" }}>
+        <div className="card-h">
+          <span className="card-title">Расписание</span>
+          <span className="card-meta">{all.length === 0 ? "пусто" : `${all.length} ${plural(all.length, "работа", "работы", "работ")}`}</span>
         </div>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-          {[
-            { icon: "💰", value: fmtRub(p.inc), label: "Доход", onClick: null },
-            { icon: "🕯️", value: fmtRub(p.exp), label: "Расходники", onClick: null },
-            { icon: "✨", value: `${pct}%`, label: "Сбылось", onClick: null },
-            { icon: "🃏", value: curMonthSessions, label: "Сеансов", onClick: () => navigate?.("sess") },
-          ].map(({ icon, value, label, onClick }) => (
-            <div
-              key={label}
-              className="glass"
-              onClick={onClick || undefined}
-              style={{
-                borderRadius: 14,
-                padding: "16px 10px 14px",
-                textAlign: "center",
-                cursor: onClick ? "pointer" : "default",
-                display: "flex",
-                flexDirection: "column",
-                alignItems: "center",
-                gap: 6,
-              }}
-            >
-              <div style={{ fontSize: fs(26) }}>{icon}</div>
-              <div style={{ fontFamily: H, fontSize: fs(22), color: s.acc, fontWeight: 500, lineHeight: 1 }}>
-                {value}
-              </div>
-              <div style={{ fontSize: fs(12), color: s.tM }}>{label}</div>
+        {all.length === 0 && (
+          <div style={{ padding: "16px 0", textAlign: "center" }}>
+            <div style={{ fontSize: 14, fontWeight: 500, marginBottom: 4, fontFamily: H }}>Работ нет 🌙</div>
+            <div style={{ fontSize: 12, opacity: 0.6 }}>Передохни.</div>
+          </div>
+        )}
+        {all.map((r) => (
+          <div key={r.id} className="sched-row">
+            {!r._over && <span className="s-time" style={r.time ? {} : { opacity: 0.4 }}>{r.time || "—"}</span>}
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div className="s-title">{r.title}</div>
+              {r._over && (
+                <div className="s-meta">
+                  <span style={{ color: s.red, fontWeight: 600 }}>{r.days_ago} д назад</span>
+                </div>
+              )}
             </div>
-          ))}
-        </div>
+            {r.cat && <div className="s-cat">{String(r.cat).split(" ")[0]}</div>}
+            <PrioDot s={s} prio={r.prio} />
+          </div>
+        ))}
       </div>
-
-      {unchecked.length > 0 && (
-        <Glass s={s} accent={s.amber} style={{ padding: "12px 14px" }}>
-          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8, alignItems: "baseline" }}>
-            <span style={{ fontSize: fs(13), color: s.text, fontWeight: 500 }}>❗ Ждут проверки</span>
-            <span style={{ fontSize: fs(11), color: s.tS }}>{unchecked.length}</span>
-          </div>
-          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-            {unchecked.slice(0, 8).map((sess) => (
-              <div key={sess.id} style={{ background: s.card, borderRadius: 8, padding: "8px 10px" }}>
-                <div style={{ fontSize: fs(12), color: s.text, fontWeight: 500 }}>
-                  {sess.question || sess.title || "Без темы"}
-                </div>
-                <div style={{ fontSize: fs(10), color: s.tM, marginBottom: 6 }}>
-                  {sess.client || ""}{sess.date ? ` · ${formatDate(sess.date)}` : ""}
-                </div>
-                <div style={{ display: "flex", gap: 4 }}>
-                  <div onClick={() => doVerify(sess.id, "✅ Да")}
-                       style={{ flex: 1, textAlign: "center", padding: "4px", borderRadius: 6, background: s.good + "33", color: s.good, fontSize: fs(11), cursor: "pointer" }}>
-                    ✅ Сбылось
-                  </div>
-                  <div onClick={() => doVerify(sess.id, "〰️ Частично")}
-                       style={{ flex: 1, textAlign: "center", padding: "4px", borderRadius: 6, background: s.amber + "33", color: s.amber, fontSize: fs(11), cursor: "pointer" }}>
-                    〰️ Частично
-                  </div>
-                  <div onClick={() => doVerify(sess.id, "❌ Нет")}
-                       style={{ flex: 1, textAlign: "center", padding: "4px", borderRadius: 6, background: s.red + "33", color: s.red, fontSize: fs(11), cursor: "pointer" }}>
-                    ❌ Нет
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        </Glass>
-      )}
-
-      {/* Большой процент */}
-      <Glass s={s} glow style={{ textAlign: "center", padding: "22px 14px" }}>
-        <div style={{ fontSize: fs(11), color: s.tS, marginBottom: 6 }}>
-          Общий процент сбывшихся раскладов
-        </div>
-        <div
-          style={{
-            fontFamily: H,
-            fontSize: fs(52),
-            fontWeight: 600,
-            color: s.acc,
-            lineHeight: 1,
-            letterSpacing: -1,
-          }}
-        >
-          {pct}%
-        </div>
-        <div style={{ fontSize: fs(11), color: s.tM, marginTop: 6 }}>
-          за всё время · {allVer} проверенных
-        </div>
-      </Glass>
-
-      {/* По месяцам с трёхцветной полосой */}
-      <SectionLabel s={s}>По месяцам</SectionLabel>
-      {months.map((m, i) => {
-        const ver = m.yes + m.partial + m.no;
-        const mp = ver > 0 ? Math.round((m.yes / ver) * 100) : 0;
-        return (
-          <Glass key={i} s={s} style={{ padding: "10px 14px", marginBottom: 4 }}>
-            <div
-              style={{
-                display: "flex",
-                justifyContent: "space-between",
-                alignItems: "center",
-                marginBottom: 8,
-              }}
-            >
-              <span
-                style={{ fontSize: fs(14), color: s.text, fontWeight: 500, fontFamily: H }}
-              >
-                {m.name}
-              </span>
-              <span style={{ fontSize: fs(16), color: s.acc, fontWeight: 600, fontFamily: H }}>
-                {mp}%
-              </span>
-            </div>
-            {/* Трёхцветная полоса */}
-            <div
-              style={{
-                display: "flex",
-                gap: 3,
-                height: 8,
-                borderRadius: 4,
-                overflow: "hidden",
-              }}
-            >
-              {m.yes > 0 && (
-                <div style={{ flex: m.yes, background: "#22c55e", borderRadius: 4 }} />
-              )}
-              {m.partial > 0 && (
-                <div style={{ flex: m.partial, background: "#f59e0b", borderRadius: 4 }} />
-              )}
-              {m.no > 0 && (
-                <div style={{ flex: m.no, background: "#ef4444", borderRadius: 4 }} />
-              )}
-            </div>
-            <div style={{ display: "flex", gap: 12, marginTop: 6, fontSize: fs(11) }}>
-              <span style={{ color: "#22c55e" }}>✓ {m.yes}</span>
-              <span style={{ color: "#f59e0b" }}>~ {m.partial}</span>
-              <span style={{ color: "#ef4444" }}>✗ {m.no}</span>
-              <span style={{ color: s.tM, marginLeft: "auto" }}>
-                всего: {m.total}
-              </span>
-            </div>
-          </Glass>
-        );
-      })}
     </div>
   );
 }
@@ -4435,11 +4292,11 @@ const nxTabs = [
 ];
 const arTabs = [
   { k: "day", I: Moon, l: "День" },
-  { k: "sess", I: Sparkles, l: "Расклады" },
+  { k: "work", I: Sparkles, l: "Работы" },
+  { k: "sess", I: LucideSparkles, l: "Расклады" },
   { k: "cli", I: Users, l: "Клиенты" },
   { k: "rit", I: Flame, l: "Ритуалы" },
   { k: "grim", I: BookOpen, l: "Гримуар" },
-  { k: "stats", I: BarChart3, l: "Статистика" },
 ];
 
 export default function App() {
@@ -4500,7 +4357,7 @@ export default function App() {
     navigate: (tab) => setPage(tab),
   };
   const nxS = { day: NxDay, tasks: NxTasks, fin: NxFinance, lists: NxLists, mem: NxMemory, cal: NxCal };
-  const arS = { day: ArDay, sess: ArSessions, cli: ArClients, rit: ArRituals, grim: ArGrimoire, stats: ArStats };
+  const arS = { day: ArDay, work: ArWork, sess: ArSessions, cli: ArClients, rit: ArRituals, grim: ArGrimoire };
   const Scr = (isDay ? nxS : arS)[page];
 
   return (

@@ -72,7 +72,7 @@
   backdrop-filter: blur(24px) saturate(140%);
   -webkit-backdrop-filter: blur(24px) saturate(140%);
   padding: 14px 16px;
-  margin-bottom: 8px;
+  margin-bottom: 12px;
   transition: transform 0.15s ease, background 0.3s;
 }
 .day .glass {
@@ -189,14 +189,14 @@
   line-height: 1;
   display: inline-flex;
   align-items: baseline;
-  gap: 2px;
+  gap: 0;
 }
 .metric .u {
   font-family: var(--f-body);
   font-size: 14px;
   font-weight: 500;
   opacity: 0.55;
-  margin-left: 2px;
+  margin-left: 1px;
 }
 .metric .l {
   font-size: 12px;
@@ -665,15 +665,15 @@
 
 /* ── Accuracy bottom sheet ─────────────────────────────────────────── */
 .acc-sheet-overlay {
-  position: absolute;
+  position: fixed;
   inset: 0;
   background: rgba(0, 0, 0, 0.4);
   backdrop-filter: blur(2px);
   -webkit-backdrop-filter: blur(2px);
-  z-index: 9;
+  z-index: 1000;
 }
 .acc-sheet {
-  position: absolute;
+  position: fixed;
   left: 0;
   right: 0;
   bottom: 0;
@@ -683,8 +683,8 @@
   padding: 18px 18px 22px;
   border: 1px solid rgba(180, 188, 215, 0.22);
   border-bottom: none;
-  z-index: 10;
-  max-height: 85%;
+  z-index: 1001;
+  max-height: 85vh;
   overflow: auto;
   color: var(--ar-text);
   animation: acc-rise 0.22s ease-out;
