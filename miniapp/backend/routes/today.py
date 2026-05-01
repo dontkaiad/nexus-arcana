@@ -58,7 +58,7 @@ def _task_summary(page: dict, tz_offset: int) -> dict:
     return {
         "id": page.get("id", ""),
         "title": title_text(props.get("Задача", {})),
-        "cat": first_emoji(select_name(props.get("Категория", {}))),
+        "cat": select_name(props.get("Категория", {})) or "",
         "prio": first_emoji(select_name(props.get("Приоритет", {}))),
         "deadline_raw": _date_start(props.get("Дедлайн", {})),
         "reminder_raw": _date_start(props.get("Напоминание", {})),
