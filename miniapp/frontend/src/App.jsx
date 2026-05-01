@@ -1135,7 +1135,7 @@ function NxDay({ s, openTask, navigate, openStreaks }) {
           <div>
             <div className="hero-title">Мой день</div>
             <div style={{ fontSize: 13, opacity: 0.7, marginTop: 4, fontWeight: 500 }}>
-              {weatherApi.data?.condition ? weatherApi.data.condition.toLowerCase() + ", чашка чая не помешает" : "хорошего дня"}
+              {weatherApi.data?.tip || "хорошего дня"}
             </div>
           </div>
           <div className="hero-meta">
