@@ -1282,7 +1282,7 @@ function NxFinance({ s }) {
   if (loading) {
     return (
       <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-        <div style={{ fontFamily: H, fontSize: fs(20), color: s.text }}>Финансы</div>
+        <div style={{ fontFamily: H, fontSize: fs(22), color: s.text, fontStyle: "italic", fontWeight: 500 }}>Финансы</div>
         {tabsUi}
         <Empty s={s} text="Загружаю..." />
       </div>
@@ -1291,7 +1291,7 @@ function NxFinance({ s }) {
   if (error) {
     return (
       <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-        <div style={{ fontFamily: H, fontSize: fs(20), color: s.text }}>Финансы</div>
+        <div style={{ fontFamily: H, fontSize: fs(22), color: s.text, fontStyle: "italic", fontWeight: 500 }}>Финансы</div>
         {tabsUi}
         <ErrorBox s={s} error={error} refetch={refetch} />
       </div>
@@ -1300,7 +1300,7 @@ function NxFinance({ s }) {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-      <div style={{ fontFamily: H, fontSize: fs(20), color: s.text }}>Финансы</div>
+      <div style={{ fontFamily: H, fontSize: fs(22), color: s.text, fontStyle: "italic", fontWeight: 500 }}>Финансы</div>
       {tabsUi}
 
       {tab === "today" && (() => {
@@ -1782,7 +1782,7 @@ function NxLists({ s }) {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-      <div style={{ fontFamily: H, fontSize: fs(20), color: s.text }}>Списки</div>
+      <div style={{ fontFamily: H, fontSize: fs(22), color: s.text, fontStyle: "italic", fontWeight: 500 }}>Списки</div>
       <div style={{ display: "flex", gap: 6 }}>
         {[
           ["buy", "🛒 Покупки"],
@@ -1927,7 +1927,7 @@ function NxMemory({ s, openAdhd }) {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-      <div style={{ fontFamily: H, fontSize: fs(20), color: s.text }}>Память</div>
+      <div style={{ fontFamily: H, fontSize: fs(22), color: s.text, fontStyle: "italic", fontWeight: 500 }}>Память</div>
       <Glass
         s={s}
         accent={s.acc}
@@ -2366,7 +2366,7 @@ function ArSessions({ s, openSession }) {
           alignItems: "baseline",
         }}
       >
-        <span style={{ fontFamily: H, fontSize: fs(20), color: s.text }}>Расклады</span>
+        <span style={{ fontFamily: H, fontSize: fs(22), color: s.text, fontStyle: "italic", fontWeight: 500 }}>Расклады</span>
         {unchecked > 0 && (
           <span style={{ fontSize: fs(11), color: s.amber }}>⏳ {unchecked} непроверено</span>
         )}
@@ -2419,7 +2419,7 @@ function ArClients({ s, openClient }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
       <Glass s={s} glow>
-        <span style={{ fontFamily: H, fontSize: fs(20), color: s.text }}>Клиенты</span>
+        <span style={{ fontFamily: H, fontSize: fs(22), color: s.text, fontStyle: "italic", fontWeight: 500 }}>Клиенты</span>
         <div style={{ display: "flex", gap: 6, marginTop: 10 }}>
           <Metric s={s} v={total} sub="всего" />
           <Metric
@@ -2506,7 +2506,7 @@ function ArRituals({ s, openRitual }) {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-      <div style={{ fontFamily: H, fontSize: fs(20), color: s.text }}>Ритуалы</div>
+      <div style={{ fontFamily: H, fontSize: fs(22), color: s.text, fontStyle: "italic", fontWeight: 500 }}>Ритуалы</div>
       <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
         {goals.map((g) => (
           <Pill key={g} s={s} active={goal === g} onClick={() => setGoal(g)}>
@@ -2560,7 +2560,7 @@ function ArGrimoire({ s, openGrimoire }) {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-      <div style={{ fontFamily: H, fontSize: fs(20), color: s.text }}>Гримуар</div>
+      <div style={{ fontFamily: H, fontSize: fs(22), color: s.text, fontStyle: "italic", fontWeight: 500 }}>Гримуар</div>
       <SearchInput s={s} value={q} onChange={setQ} placeholder="Поиск в гримуаре" />
       <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
         {cats.map((c) => (
@@ -2633,7 +2633,7 @@ function ArStats({ s }) {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-      <div style={{ fontFamily: H, fontSize: fs(20), color: s.text }}>Точность</div>
+      <div style={{ fontFamily: H, fontSize: fs(22), color: s.text, fontStyle: "italic", fontWeight: 500 }}>Точность</div>
 
       {unchecked.length > 0 && (
         <Glass s={s} accent={s.amber} style={{ padding: "12px 14px" }}>
