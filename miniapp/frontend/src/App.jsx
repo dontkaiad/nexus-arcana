@@ -337,7 +337,6 @@ const Empty = ({ s, text, chill, emoji, title }) => {
     >
       <div style={{ position: "relative", width: size, height: size, animation: "nx-glow 2.4s ease-in-out infinite" }}>
         {isDayMode ? (
-          /* SVG орб — детализированный как логотип Nexus */
           <svg width={size} height={size} viewBox="0 0 56 56" xmlns="http://www.w3.org/2000/svg">
             <defs>
               <radialGradient id="spinGrad" cx="35%" cy="30%" r="70%">
@@ -346,34 +345,41 @@ const Empty = ({ s, text, chill, emoji, title }) => {
                 <stop offset="100%" stopColor="#b07a2e" />
               </radialGradient>
             </defs>
-            {/* внешний ореол */}
             <circle cx="28" cy="28" r="26" fill="#f4c66e" opacity="0.15" />
-            {/* кольцо */}
             <circle cx="28" cy="28" r="20" fill="none" stroke="#f4c66e" strokeWidth="0.8" opacity="0.6" />
-            {/* орб */}
             <circle cx="28" cy="28" r="14" fill="url(#spinGrad)" />
-            {/* кратеры */}
             <circle cx="23" cy="24" r="2.2" fill="#8a5a28" opacity="0.5" />
             <circle cx="33" cy="28" r="1.6" fill="#8a5a28" opacity="0.45" />
             <circle cx="25" cy="33" r="1.2" fill="#8a5a28" opacity="0.4" />
             <circle cx="31" cy="21" r="0.9" fill="#8a5a28" opacity="0.45" />
           </svg>
         ) : (
-          /* ночной орб — простой */
-          <>
-            <div style={{ position: "absolute", inset: -10, borderRadius: "50%", background: `radial-gradient(circle, ${halo}88 0%, ${halo}00 65%)`, animation: "nx-pulse 2.4s ease-in-out infinite" }} />
-            <div style={{ position: "absolute", inset: 14, borderRadius: "50%", background: `radial-gradient(circle at 35% 30%, ${coreInner} 0%, ${accent} 55%, ${accent}cc 100%)`, boxShadow: `0 0 10px ${accent}88` }} />
-          </>
+          <svg width={size} height={size} viewBox="0 0 56 56" xmlns="http://www.w3.org/2000/svg">
+            <defs>
+              <radialGradient id="spinGradN" cx="35%" cy="30%" r="70%">
+                <stop offset="0%" stopColor="#ffffff" />
+                <stop offset="40%" stopColor="#d4dce8" />
+                <stop offset="100%" stopColor="#6b7590" />
+              </radialGradient>
+            </defs>
+            <circle cx="28" cy="28" r="26" fill="#d4dce8" opacity="0.12" />
+            <circle cx="28" cy="28" r="20" fill="none" stroke="#d4dce8" strokeWidth="0.8" opacity="0.5" />
+            <circle cx="28" cy="28" r="14" fill="url(#spinGradN)" />
+            <circle cx="23" cy="24" r="2.2" fill="#4a5470" opacity="0.5" />
+            <circle cx="33" cy="28" r="1.6" fill="#4a5470" opacity="0.45" />
+            <circle cx="25" cy="33" r="1.2" fill="#4a5470" opacity="0.4" />
+            <circle cx="31" cy="21" r="0.9" fill="#4a5470" opacity="0.45" />
+          </svg>
         )}
         {/* orbit ring + dots */}
-        <div style={{ position: "absolute", inset: 0, borderRadius: "50%", border: `1px dashed #8a5a28bb` }} />
+        <div style={{ position: "absolute", inset: 0, borderRadius: "50%", border: `1px dashed ${isDayMode ? "#8a5a28bb" : "#4a5470bb"}` }} />
         <div style={{ position: "absolute", inset: 0, animation: "nx-orbit 1.6s linear infinite" }}>
           {[0, 120, 240].map((deg, i) => (
             <div key={i} style={{
               position: "absolute", top: "50%", left: "50%",
               width: 5, height: 5, borderRadius: "50%",
-              background: "#8a5a28",
-              boxShadow: `0 0 6px #b07a2e`,
+              background: isDayMode ? "#8a5a28" : "#4a5470",
+              boxShadow: `0 0 6px ${isDayMode ? "#b07a2e" : "#6b7590"}`,
               transform: `rotate(${deg}deg) translate(${orbitR}px) rotate(-${deg}deg) translate(-50%, -50%)`,
             }} />
           ))}
