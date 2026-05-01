@@ -208,6 +208,7 @@ export function adaptArcanaToday(data) {
       title: w.title,
       cat: (w.cat && (w.cat.full || w.cat.name)) || '',
       prio: w.prio || '⚪',
+      time: w.time || null,
     })),
     unchecked30d: data.unchecked_30d ?? 0,
     accuracy: data.accuracy ?? 0,
