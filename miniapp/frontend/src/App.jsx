@@ -2265,7 +2265,7 @@ function ArDay({ s, openClient, navigate, openMoonPhases }) {
         <div className="hero-h">
           <div>
             <div className="hero-title">Мой день</div>
-            <div style={{ fontSize: 13, opacity: 0.65, marginTop: 4, fontWeight: 500 }}>{tipApi.data?.tip || "сегодня в практике спокойно"}</div>
+            <div style={{ fontSize: 13, opacity: 0.65, marginTop: 4, fontWeight: 500 }}>{tipApi.data?.tip ? `🌙 ${tipApi.data.tip}` : "сегодня в практике спокойно 🌙"}</div>
           </div>
           <div className="hero-meta">
             <div>{a.date}</div>
