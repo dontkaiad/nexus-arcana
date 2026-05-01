@@ -1153,7 +1153,7 @@ function NxDay({ s, openTask, navigate, openStreaks }) {
             <Metric s={s} v={`${Math.round((t.budgetDay - t.spentDay) / 1000)}к`} unit="₽" sub="свободно" />
           </div>
           <div style={{ flex: 1, cursor: "pointer" }} onClick={() => openStreaks?.()}>
-            <Metric s={s} v={<span className="streak-v"><LucideFlame size={16} fill="currentColor" style={{ flexShrink: 0, color: s.amber }} className="flame" />{t.streak}</span>} sub="стрик" accent={s.amber} />
+            <Metric s={s} v={<span className="streak-v"><LucideFlame size={20} fill="currentColor" style={{ flexShrink: 0, color: s.amber }} className="flame" />{t.streak}</span>} sub="стрик" accent={s.amber} />
           </div>
         </div>
         <div className="hero-budget">
