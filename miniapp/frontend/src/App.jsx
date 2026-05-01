@@ -1352,6 +1352,7 @@ function NxFinance({ s }) {
                 </div>
               </Glass>
             )}
+            <SectionLabel s={s}>Транзакции</SectionLabel>
             {items.length === 0 && <Empty s={s} emoji="💚" title="Пока не тратила" text="Сегодня без трат — приятно." />}
             {items.map((x) => (
               <Glass key={x.id} s={s} style={{ padding: "10px 14px", marginBottom: 4 }}>
@@ -1405,6 +1406,7 @@ function NxFinance({ s }) {
                 </div>
               </div>
             </Glass>
+            <SectionLabel s={s}>По категориям</SectionLabel>
             {cats.length === 0 && <Empty s={s} text="За этот месяц расходов нет" />}
             {cats.map((c, i) => {
               const pct = c.pct ?? (c.limit ? Math.round((c.spent / c.limit) * 100) : 0);
@@ -1480,6 +1482,7 @@ function NxFinance({ s }) {
         };
         return (
           <>
+            <SectionLabel s={s}>Долги</SectionLabel>
             {debts.length === 0 && <Empty s={s} text="Долгов нет 🌿" />}
             {debts.map((d, i) => (
               <Glass
@@ -1504,6 +1507,7 @@ function NxFinance({ s }) {
                 )}
               </Glass>
             ))}
+            <SectionLabel s={s}>Цели</SectionLabel>
             {goals.length === 0 && <Empty s={s} text="Целей пока нет" />}
             {goals.map((g, i) => (
               <Glass key={i} s={s} style={{ padding: "10px 14px", marginBottom: 4 }}>
@@ -1525,6 +1529,7 @@ function NxFinance({ s }) {
             ))}
             {(closedDebts.length > 0 || closedGoals.length > 0) && (
               <>
+                <SectionLabel s={s}>Закрытые</SectionLabel>
                 {closedDebts.map((d, i) => (
                   <Glass key={`cd${i}`} s={s} style={{ padding: "10px 14px", marginBottom: 4, opacity: 0.75 }}>
                     <div style={{ display: "flex", justifyContent: "space-between" }}>
@@ -1603,29 +1608,35 @@ function DebtDrillSheet({ s, debt }) {
       </Glass>
 
       {sched.length > 0 ? (
-        <div className="glass" style={{ padding: "14px 16px" }}>
-          <div className="card-h">
-            <span className="card-title">График выплат</span>
-            <span className="card-meta">{sched.length} {plural(sched.length, "платёж", "платежа", "платежей")}</span>
-          </div>
-          {sched.map((row, i) => (
-            <div key={i} className="sched-row">
-              <span style={{ flex: 1, color: s.tS, fontSize: 13 }}>{row.month}</span>
-              <span style={{ fontFamily: H, fontSize: 13 }}>{row.amount.toLocaleString()} ₽</span>
-            </div>
-          ))}
-        </div>
+        <>
+          <SectionLabel s={s}>График выплат</SectionLabel>
+          <Glass s={s} style={{ padding: "10px 14px" }}>
+            {sched.map((row, i) => (
+              <div
+                key={i}
+                style={{
+                  display: "flex", justifyContent: "space-between",
+                  fontSize: fs(13), color: s.text, padding: "4px 0",
+                  borderTop: i === 0 ? "none" : `1px solid ${s.brd}`,
+                }}
+              >
+                <span style={{ color: s.tS }}>{row.month}</span>
+                <span style={{ fontFamily: H }}>{row.amount.toLocaleString()} ₽</span>
+              </div>
+            ))}
+          </Glass>
+        </>
       ) : (
         <Empty s={s} chill text="График не задан — нет ежемесячного платежа" />
       )}
 
       {debt.note && (
-        <div className="glass" style={{ padding: "14px 16px" }}>
-          <div className="card-h">
-            <span className="card-title">Заметка</span>
-          </div>
-          <div style={{ fontSize: 13, color: s.text }}>{debt.note}</div>
-        </div>
+        <>
+          <SectionLabel s={s}>Заметка</SectionLabel>
+          <Glass s={s} style={{ padding: "10px 14px", fontSize: fs(13), color: s.text }}>
+            {debt.note}
+          </Glass>
+        </>
       )}
     </div>
   );
@@ -2372,10 +2383,7 @@ function ArDay({ s, openClient, navigate, openMoonPhases }) {
           <div style={{ flex: 1, cursor: "pointer" }} onClick={() => navigate?.("cli")}>
             <Metric s={s} v={incomeMonth >= 1000 ? `${Math.round(incomeMonth / 1000)}к` : incomeMonth} unit="₽" sub="доход" accent={s.acc} />
           </div>
-          <div
-            style={{ flex: 1, cursor: "pointer", border: "1px solid rgba(212,164,88,0.5)", borderRadius: 14, padding: "4px 6px", boxShadow: "0 0 14px rgba(212,164,88,0.2)" }}
-            onClick={() => setAccSheet(true)}
-          >
+          <div style={{ flex: 1, cursor: "pointer" }} onClick={() => setAccSheet(true)}>
             <Metric s={s} v={`${accPct}%`} sub="точность" accent={s.amber} />
           </div>
         </div>
@@ -2985,16 +2993,11 @@ function SessionDetail({ s, id }) {
       <SessionSummary s={s} id={x.id} interp={x.interp} />
 
       {/* wave6.4: Карты в раскладе — grid с картинками */}
-      <div className="glass" style={{ padding: "14px 16px" }}>
-        <div className="card-h">
-          <span className="card-title">Карты в раскладе</span>
-          <span className="card-meta">{x.cards.length}</span>
-        </div>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
-          {x.cards.map((c, i) => (
-            <TarotCardTile key={i} s={s} card={c} deckId={x.deckId} />
-          ))}
-        </div>
+      <SectionLabel s={s}>Карты в раскладе</SectionLabel>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
+        {x.cards.map((c, i) => (
+          <TarotCardTile key={i} s={s} card={c} deckId={x.deckId} />
+        ))}
       </div>
 
       {/* Дно колоды */}
@@ -3024,15 +3027,13 @@ function SessionDetail({ s, id }) {
       )}
 
       {/* Трактовка */}
-      <div className="glass" style={{ padding: "14px 16px" }}>
-        <div className="card-h">
-          <span className="card-title">Трактовка</span>
-        </div>
+      <SectionLabel s={s}>Трактовка</SectionLabel>
+      <Glass s={s} accent={s.acc} style={{ padding: "12px 14px" }}>
         <div
-          style={{ fontSize: 13, lineHeight: 1.6 }}
+          style={{ fontSize: fs(13), color: s.text, lineHeight: 1.6 }}
           dangerouslySetInnerHTML={{ __html: sanitizeHtml(x.interp) }}
         />
-      </div>
+      </Glass>
 
       <VerifyButtons
         s={s}
@@ -3065,10 +3066,8 @@ function VerifyButtons({ s, id, path, action, options, onDone }) {
     }
   };
   return (
-    <div className="glass" style={{ padding: "14px 16px" }}>
-      <div className="card-h">
-        <span className="card-title">{action === "verify" ? "Статус сбылось" : "Результат"}</span>
-      </div>
+    <>
+      <SectionLabel s={s}>{action === "verify" ? "Статус сбылось" : "Результат"}</SectionLabel>
       <div style={{ display: "flex", gap: 6 }}>
         {options.map((b, i) => (
           <div
@@ -3093,7 +3092,7 @@ function VerifyButtons({ s, id, path, action, options, onDone }) {
           </div>
         ))}
       </div>
-    </div>
+    </>
   );
 }
 
@@ -3334,25 +3333,30 @@ function ClientDetail({ s, id }) {
         <div style={{ fontSize: fs(13), color: s.text, lineHeight: 1.55 }}>{c.notes}</div>
       </Glass>
 
-      {c.history.length > 0 && (
-        <div className="glass" style={{ padding: "14px 16px" }}>
-          <div className="card-h">
-            <span className="card-title">История</span>
-            <span className="card-meta">{c.history.length}</span>
-          </div>
-          {c.history.map((h, i) => (
-            <div key={i} className="sched-row" style={{ fontSize: 12, gap: 8 }}>
-              <span style={{ color: s.tM, minWidth: 50, fontFamily: "var(--f-mono)" }}>{h.date}</span>
-              <span>{h.type}</span>
-              <span style={{ flex: 1, minWidth: 0 }}>{h.desc}</span>
-              {h.amount > 0 && (
-                <span style={{ color: s.acc, fontWeight: 500 }}>{h.amount.toLocaleString()} ₽</span>
-              )}
-              <span>{h.paid ? "✅" : "⚠️"}</span>
-            </div>
-          ))}
+      <SectionLabel s={s}>История</SectionLabel>
+      {c.history.map((h, i) => (
+        <div
+          key={i}
+          style={{
+            display: "flex",
+            gap: 10,
+            padding: "8px 2px",
+            alignItems: "center",
+            borderBottom: `1px solid ${s.brd}`,
+            fontSize: fs(12),
+          }}
+        >
+          <span style={{ color: s.tM, minWidth: 50 }}>{h.date}</span>
+          <span style={{ fontSize: fs(14) }}>{h.type}</span>
+          <span style={{ color: s.text, flex: 1 }}>{h.desc}</span>
+          {h.amount > 0 && (
+            <span style={{ color: s.acc, fontWeight: 500 }}>
+              {h.amount.toLocaleString()} ₽
+            </span>
+          )}
+          <span>{h.paid ? "✅" : "⚠️"}</span>
         </div>
-      )}
+      ))}
     </div>
   );
 }
