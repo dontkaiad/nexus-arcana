@@ -470,7 +470,50 @@ export function adaptSessionBrief(x) {
 
 export function adaptSessions(data) {
   if (!data) return []
-  return (data.sessions || []).map(adaptSessionBrief)
+  return (data.sessions || []).map(adaptSessionGroupBrief)
+}
+
+// wave8: новая лента — сессии (группа триплетов или одиночный триплет)
+export function adaptSessionGroupBrief(x) {
+  return {
+    slug: x.slug || x.id || '',
+    id: x.id || null,                // только для is_solo
+    sessionName: x.session_name || null,
+    title: x.ru_title || x.first_question || '—',
+    firstQ: x.first_question || '',
+    category: x.category || '',
+    client: x.client || 'Личный',
+    clientId: x.client_id || null,
+    type: x.type || '',
+    decks: x.decks || [],
+    firstDate: x.first_date ? formatDate(x.first_date, 'full') : '',
+    rawDate: x.first_date || null,
+    tripletCount: x.triplet_count || 1,
+    status: x.status || 'wait',
+    breakdown: x.breakdown || { yes: 0, half: 0, no: 0, wait: 0 },
+    isSolo: !!x.is_solo,
+    done: x.done || '⏳ Не проверено',
+  }
+}
+
+// wave8: детальный ответ /by-slug/{slug}
+export function adaptSessionGroup(data) {
+  if (!data) return null
+  return {
+    slug: data.slug || '',
+    sessionName: data.session_name || null,
+    title: data.ru_title || '—',
+    firstQ: data.first_question || '',
+    category: data.category || '',
+    client: data.client || 'Личный',
+    clientId: data.client_id || null,
+    type: data.type || '',
+    decks: data.decks || [],
+    firstDate: data.first_date ? formatDate(data.first_date, 'full') : '',
+    summary: data.summary || null,
+    isSolo: !!data.is_solo,
+    triplets: (data.triplets || []).map(adaptSessionDetail),
+  }
 }
 
 // Полная детализация для SessionDetail
@@ -498,6 +541,8 @@ export function adaptSessionDetail(data) {
     bottomCard: data.bottom_card || null,
     bottom: data.bottom || null,
     interp: data.interpretation || '',
+    summary: data.summary || null,
+    verdict: data.verdict || 'wait',
     done: data.done || '⏳ Не проверено',
     price: data.price ?? 0,
     paid: data.paid ?? 0,

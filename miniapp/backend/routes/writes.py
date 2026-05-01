@@ -522,10 +522,22 @@ async def session_verify(
     if body.status not in _SESSION_STATUSES:
         raise HTTPException(status_code=400, detail=f"status must be one of {sorted(_SESSION_STATUSES)}")
     user_notion_id = (await get_user_notion_id(tg_id)) or ""
-    await _load_owned_page(session_id, user_notion_id)
+    page = await _load_owned_page(session_id, user_notion_id)
     ok = await update_page_select(session_id, "Сбылось", body.status)
     if not ok:
         raise HTTPException(status_code=500, detail="failed to update Сбылось")
+
+    # Инвалидация кеша саммари сессии (если триплет в группе).
+    try:
+        from core.session_cache import cache_delete, session_summary_key
+        from miniapp.backend._helpers import rich_text_plain, relation_ids_of
+        sname = (rich_text_plain(page, "Сессия") or "").strip()
+        if sname:
+            cids = relation_ids_of(page, "👥 Клиенты")
+            cid = cids[0] if cids else None
+            cache_delete(session_summary_key(sname, cid))
+    except Exception:
+        pass
     return {"ok": True, "status": body.status}
 
 

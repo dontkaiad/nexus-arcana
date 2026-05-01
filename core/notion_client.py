@@ -920,6 +920,8 @@ async def session_add(
     deck: Optional[str] = None,
     payment_source: Optional[str] = None,
     title: Optional[str] = None,
+    session: Optional[str] = None,
+    triplet_summary: Optional[str] = None,
 ) -> Optional[str]:
     from core.config import config
     db_id = config.arcana.db_sessions
@@ -951,7 +953,23 @@ async def session_add(
     if payment_source:
         real_src = await match_select(db_id, "Источник", payment_source)
         props["Источник"] = _select(real_src)
-    return await page_create(db_id, props)
+    # Новые поля (если их нет в схеме — Notion проигнорирует на стадии валидации;
+    # ловим ошибку и пробуем без них). Кай добавит поля в UI вручную.
+    if session:
+        props["Сессия"] = _text(session)
+    if triplet_summary:
+        props["Саммари триплета"] = _text(triplet_summary[:1800])
+    try:
+        return await page_create(db_id, props)
+    except Exception as e:
+        msg = str(e).lower()
+        # Откат: если упали из-за неизвестного поля — пробуем без новых.
+        if ("сессия" in msg or "саммари" in msg or "property" in msg or "validation" in msg) \
+                and (session or triplet_summary):
+            props.pop("Сессия", None)
+            props.pop("Саммари триплета", None)
+            return await page_create(db_id, props)
+        raise
 
 
 # ─── Arcana: Rituals ──────────────────────────────────────────────────────────
