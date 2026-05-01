@@ -1316,8 +1316,8 @@ function NxFinance({ s }) {
             <Glass s={s}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
                 <div>
-                  <div style={{ fontSize: 13, fontWeight: 500, opacity: 0.75, marginBottom: 4 }}>Потрачено сегодня</div>
-                  <div style={{ fontFamily: H, fontSize: fs(32), fontWeight: 500, lineHeight: 1, opacity: 0.6 }}>
+                  <div style={{ fontSize: fs(15), fontWeight: 500, color: s.text, marginBottom: 4 }}>Потрачено сегодня</div>
+                  <div style={{ fontFamily: H, fontSize: fs(32), fontWeight: 500, lineHeight: 1, color: s.text }}>
                     {total.toLocaleString()} <span style={{ fontSize: fs(18), fontWeight: 400 }}>₽</span>
                   </div>
                 </div>
