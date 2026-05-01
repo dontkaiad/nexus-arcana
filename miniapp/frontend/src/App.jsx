@@ -1316,8 +1316,8 @@ function NxFinance({ s }) {
             <Glass s={s}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
                 <div>
-                  <div style={{ fontSize: fs(15), fontWeight: 500, color: s.text, marginBottom: 4 }}>Потрачено сегодня</div>
-                  <div style={{ fontFamily: H, fontSize: fs(32), fontWeight: 500, lineHeight: 1, color: s.text }}>
+                  <div style={{ fontSize: 13, fontWeight: 500, opacity: 0.75, marginBottom: 4 }}>Потрачено сегодня</div>
+                  <div style={{ fontFamily: H, fontSize: fs(32), fontWeight: 700, lineHeight: 1, color: s.acc }}>
                     {total.toLocaleString()} <span style={{ fontSize: fs(18), fontWeight: 400 }}>₽</span>
                   </div>
                 </div>
@@ -1326,12 +1326,12 @@ function NxFinance({ s }) {
             </Glass>
             {budget && (
               <Glass s={s} accent={s.acc} style={{ padding: "12px 14px" }}>
-                <div style={{ display: "flex", justifyContent: "space-between", fontSize: fs(15), color: s.text, fontWeight: 500, marginBottom: 6 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, fontWeight: 500, opacity: 0.75, marginBottom: 6 }}>
                   <span>Бюджет дня</span>
-                  <span>{budget.day.toLocaleString()} ₽ · {budget.pct}%</span>
+                  <span style={{ color: budget.pct > 85 ? s.red : budget.pct > 60 ? s.amber : s.acc, fontWeight: 700 }}>{budget.day.toLocaleString()} ₽ · {budget.pct}%</span>
                 </div>
                 <Bar s={s} pct={budget.pct} color={budget.pct > 85 ? s.red : budget.pct > 60 ? s.amber : s.acc} />
-                <div style={{ fontSize: fs(13), color: s.tS, marginTop: 6 }}>
+                <div style={{ fontSize: 12, opacity: 0.6, marginTop: 6 }}>
                   Потрачено {budget.spent.toLocaleString()} ₽ · осталось {budget.left.toLocaleString()} ₽
                 </div>
               </Glass>
