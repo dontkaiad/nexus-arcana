@@ -496,8 +496,8 @@ const FAB = ({ s, onClick }) => (
 const Sheet = ({ s, open, onClose, title, children }) => {
   if (!open) return null;
   const isDayMode = s.text && parseInt(s.text.slice(1, 3), 16) < 0x80;
-  const sheetBg = isDayMode ? "rgba(255, 255, 254, 0.62)" : "rgba(20, 24, 40, 0.62)";
-  const sheetBorder = isDayMode ? "rgba(255, 255, 254, 0.4)" : "rgba(180, 188, 215, 0.14)";
+  const sheetBg = isDayMode ? "rgba(255, 255, 254, 0.18)" : "rgba(20, 24, 40, 0.28)";
+  const sheetBorder = isDayMode ? "rgba(255, 255, 254, 0.55)" : "rgba(180, 188, 215, 0.18)";
   return (
     <div
       style={{
@@ -505,9 +505,7 @@ const Sheet = ({ s, open, onClose, title, children }) => {
         // а содержимое sheet уходит за пределы viewport
         position: "fixed",
         inset: 0,
-        background: isDayMode ? "rgba(20, 30, 25, 0.28)" : "rgba(0, 0, 0, 0.5)",
-        backdropFilter: "blur(8px)",
-        WebkitBackdropFilter: "blur(8px)",
+        background: isDayMode ? "rgba(20, 30, 25, 0.18)" : "rgba(0, 0, 0, 0.35)",
         zIndex: 20,
         display: "flex",
         alignItems: "flex-end",
@@ -519,8 +517,8 @@ const Sheet = ({ s, open, onClose, title, children }) => {
         style={{
           width: "100%",
           background: sheetBg,
-          backdropFilter: "blur(40px) saturate(180%)",
-          WebkitBackdropFilter: "blur(40px) saturate(180%)",
+          backdropFilter: "blur(60px) saturate(200%)",
+          WebkitBackdropFilter: "blur(60px) saturate(200%)",
           borderTop: `1px solid ${sheetBorder}`,
           borderTopLeftRadius: 22,
           borderTopRightRadius: 22,
