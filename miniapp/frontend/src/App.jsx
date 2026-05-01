@@ -496,7 +496,7 @@ const FAB = ({ s, onClick }) => (
 const Sheet = ({ s, open, onClose, title, children }) => {
   if (!open) return null;
   const isDayMode = s.text && parseInt(s.text.slice(1, 3), 16) < 0x80;
-  const sheetBg = isDayMode ? "rgba(255, 255, 254, 0.18)" : "rgba(20, 24, 40, 0.28)";
+  const sheetBg = isDayMode ? "rgba(255, 255, 254, 0.05)" : "rgba(20, 24, 40, 0.12)";
   const sheetBorder = isDayMode ? "rgba(255, 255, 254, 0.55)" : "rgba(180, 188, 215, 0.18)";
   return (
     <div
@@ -505,7 +505,7 @@ const Sheet = ({ s, open, onClose, title, children }) => {
         // а содержимое sheet уходит за пределы viewport
         position: "fixed",
         inset: 0,
-        background: isDayMode ? "rgba(20, 30, 25, 0.18)" : "rgba(0, 0, 0, 0.35)",
+        background: "transparent",
         zIndex: 20,
         display: "flex",
         alignItems: "flex-end",
@@ -517,8 +517,8 @@ const Sheet = ({ s, open, onClose, title, children }) => {
         style={{
           width: "100%",
           background: sheetBg,
-          backdropFilter: "blur(60px) saturate(200%)",
-          WebkitBackdropFilter: "blur(60px) saturate(200%)",
+          backdropFilter: "blur(24px) saturate(180%)",
+          WebkitBackdropFilter: "blur(24px) saturate(180%)",
           borderTop: `1px solid ${sheetBorder}`,
           borderTopLeftRadius: 22,
           borderTopRightRadius: 22,
