@@ -123,10 +123,11 @@ def _pct(count: int, total: int) -> int:
     return int(round(count / total * 100)) if total else 0
 
 
-async def _works_today(user_notion_id: str, today_date: date, tz_offset: int) -> list[dict]:
+async def _works_schedule(user_notion_id: str, today_date: date, tz_offset: int) -> tuple[list[dict], list[dict]]:
+    """Возвращает (overdue, scheduled): просроченные + сегодняшние работы."""
     db_id = config.arcana.db_works
     if not db_id:
-        return []
+        return [], []
     today_iso = today_date.isoformat()
     not_done: list[dict] = [
         {"property": "Status", "status": {"does_not_equal": "Done"}},
@@ -134,38 +135,50 @@ async def _works_today(user_notion_id: str, today_date: date, tz_offset: int) ->
     ]
     user_cond = [{"property": "🪪 Пользователи", "relation": {"contains": user_notion_id}}] if user_notion_id else []
     date_or = {"or": [
+        {"property": "Дедлайн", "date": {"before": today_iso}},
         {"property": "Дедлайн", "date": {"equals": today_iso}},
         {"property": "Напоминание", "date": {"equals": today_iso}},
     ]}
     filters = {"and": not_done + user_cond + [date_or]}
     try:
-        pages = await query_pages(db_id, filters=filters, page_size=50)
+        pages = await query_pages(db_id, filters=filters, page_size=100)
     except Exception as e:
-        logger.warning("works_today query failed: %s", e)
-        return []
+        logger.warning("works_schedule query failed: %s", e)
+        return [], []
+    overdue: list[dict] = []
+    scheduled: list[dict] = []
     seen: set[str] = set()
-    out: list[dict] = []
     for p in pages:
         pid = p.get("id", "")
         if pid in seen:
             continue
         seen.add(pid)
         props = p.get("properties", {})
+        deadline_raw = date_start(props.get("Дедлайн", {}))
         reminder_raw = date_start(props.get("Напоминание", {}))
+        deadline_date = to_local_date(deadline_raw, tz_offset)
         reminder_date = to_local_date(reminder_raw, tz_offset)
-        time_str = extract_time(reminder_raw, tz_offset) if reminder_date == today_date else None
-        if not time_str:
-            deadline_raw = date_start(props.get("Дедлайн", {}))
-            time_str = extract_time(deadline_raw, tz_offset)
-        out.append({
-            "id": pid,
-            "title": title_plain(p, "Работа"),
-            "cat": cat_from_notion(select_of(p, "Категория")),
-            "prio": prio_from_notion(select_of(p, "Приоритет")),
-            "time": time_str,
-        })
-    out.sort(key=lambda x: x["time"] or "")
-    return out
+        title = title_plain(p, "Работа")
+        cat = cat_from_notion(select_of(p, "Категория"))
+        prio = prio_from_notion(select_of(p, "Приоритет"))
+        if deadline_date and deadline_date < today_date:
+            overdue.append({
+                "id": pid, "title": title, "cat": cat, "prio": prio,
+                "days_ago": (today_date - deadline_date).days,
+            })
+            continue
+        # сегодняшние: дедлайн = сегодня или напоминание = сегодня
+        if deadline_date == today_date or reminder_date == today_date:
+            time_str = extract_time(reminder_raw, tz_offset) if reminder_date == today_date else None
+            if not time_str:
+                time_str = extract_time(deadline_raw, tz_offset)
+            scheduled.append({
+                "id": pid, "title": title, "cat": cat, "prio": prio,
+                "time": time_str,
+            })
+    overdue.sort(key=lambda x: -x["days_ago"])
+    scheduled.sort(key=lambda x: x["time"] or "")
+    return overdue, scheduled
 
 
 async def _unchecked_30d(sessions: list[dict], today_date: date) -> int:
@@ -267,7 +280,7 @@ async def get_arcana_today(tg_id: int = Depends(current_user_id)) -> dict[str, A
             "status": status,
         })
 
-    works = await _works_today(user_notion_id, today_date, tz_offset)
+    works_overdue, works = await _works_schedule(user_notion_id, today_date, tz_offset)
     unchecked = await _unchecked_30d(all_sessions, today_date)
     accuracy_overall, _, _ = _accuracy(all_sessions)
 
@@ -304,6 +317,7 @@ async def get_arcana_today(tg_id: int = Depends(current_user_id)) -> dict[str, A
         "moon": moon,
         "sessions_today": sessions_today,
         "works_today": works,
+        "works_overdue": works_overdue,
         "unchecked_30d": unchecked,
         "accuracy": accuracy_overall,
         "month_stats": {

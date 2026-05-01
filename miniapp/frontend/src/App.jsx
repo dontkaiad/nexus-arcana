@@ -2255,7 +2255,7 @@ function ArDay({ s, openClient, navigate, openMoonPhases }) {
 
   const a = adaptArcanaToday(data);
   const moon = a.moon;
-  const worksTotal = a.worksToday.length;
+  const worksTotal = a.worksToday.length + a.worksOverdue.length;
   const worksDone = Object.values(done).filter(Boolean).length;
   const sessionsTotal = a.sessionsToday.length;
 
@@ -2296,22 +2296,6 @@ function ArDay({ s, openClient, navigate, openMoonPhases }) {
         </div>
       </div>
 
-      <SectionLabel s={s}>Статистика за {a.monthBlock.label}</SectionLabel>
-      <div className="grid-2">
-        {[
-          { ico: "💰", v: `${a.monthBlock.inc.toLocaleString()}₽`, l: "Доход", accent: s.acc },
-          { ico: "🕯️", v: `${a.monthBlock.supplies.toLocaleString()}₽`, l: "Расходники" },
-          { ico: "✨", v: `${a.monthBlock.accuracy}%`, l: "Сбылось", accent: s.acc },
-          { ico: "🃏", v: a.monthBlock.sessions, l: "Сеансов" },
-        ].map((item, i) => (
-          <div key={i} className="glass" style={{ padding: "16px 12px", textAlign: "center" }}>
-            <div style={{ fontSize: 22, marginBottom: 6 }}>{item.ico}</div>
-            <div style={{ fontFamily: H, fontSize: 24, fontWeight: 500, color: item.accent }}>{item.v}</div>
-            <div style={{ fontSize: 12, opacity: 0.6, marginTop: 4, fontWeight: 500 }}>{item.l}</div>
-          </div>
-        ))}
-      </div>
-
       {a.sessionsToday.length > 0 && (
         <>
           <SectionLabel s={s}>Сеансы сегодня</SectionLabel>
@@ -2329,27 +2313,37 @@ function ArDay({ s, openClient, navigate, openMoonPhases }) {
         </>
       )}
 
-      {a.worksToday.length > 0 && (
-        <>
-          <SectionLabel s={s}>Работы</SectionLabel>
-          {a.worksToday.map((w) => (
-            <div key={w.id} className="task glass" style={{ opacity: done[w.id] ? 0.45 : 1 }}>
-              <Chk s={s} done={done[w.id]} onClick={() => setDone((p) => ({ ...p, [w.id]: !p[w.id] }))} />
-              <div className="body">
-                <div className="title" style={{ textDecoration: done[w.id] ? "line-through" : "none" }}>{w.title}</div>
-                <div className="meta"><span>{w.cat}</span></div>
-              </div>
-              <PrioDot s={s} prio={w.prio} />
-            </div>
-          ))}
-        </>
-      )}
-
-      {worksTotal === 0 && a.unchecked30d === 0 && (
-        <div style={{ textAlign: "center", padding: "20px 0 4px", fontStyle: "italic", fontSize: 14, opacity: 0.55, fontFamily: H }}>
-          Сегодня в практике спокойно 🌙
+      <SectionLabel s={s}>Расписание</SectionLabel>
+      {a.worksOverdue.length === 0 && a.worksToday.length === 0 && (
+        <div className="glass" style={{ padding: "16px", textAlign: "center" }}>
+          <div style={{ fontSize: 16, fontWeight: 500, marginBottom: 4, fontFamily: H }}>Сегодня в практике спокойно 🌙</div>
+          <div style={{ fontSize: 13, opacity: 0.6, lineHeight: 1.5 }}>Если хочется — загляни во вкладку «Клиенты».</div>
         </div>
       )}
+      {a.worksOverdue.map((o) => (
+        <div key={o.id} className="task glass" style={{ opacity: done[o.id] ? 0.45 : 1 }}>
+          <Chk s={s} done={done[o.id]} onClick={() => setDone((p) => ({ ...p, [o.id]: !p[o.id] }))} />
+          <div className="body">
+            <div className="title" style={{ textDecoration: done[o.id] ? "line-through" : "none" }}>{o.title}</div>
+            <div className="meta">
+              <span style={{ color: s.red, fontWeight: 600 }}>{o.days_ago} д назад</span>
+            </div>
+          </div>
+          {o.cat && <div className="cat-badge">{String(o.cat).split(" ")[0]}</div>}
+          <PrioDot s={s} prio={o.prio} />
+        </div>
+      ))}
+      {a.worksToday.map((w) => (
+        <div key={w.id} className="task glass" style={{ opacity: done[w.id] ? 0.45 : 1 }}>
+          {w.time && <span className="time">{w.time}</span>}
+          <Chk s={s} done={done[w.id]} onClick={() => setDone((p) => ({ ...p, [w.id]: !p[w.id] }))} />
+          <div className="body">
+            <div className="title" style={{ textDecoration: done[w.id] ? "line-through" : "none" }}>{w.title}</div>
+          </div>
+          {w.cat && <div className="cat-badge">{String(w.cat).split(" ")[0]}</div>}
+          <PrioDot s={s} prio={w.prio} />
+        </div>
+      ))}
     </div>
   );
 }
