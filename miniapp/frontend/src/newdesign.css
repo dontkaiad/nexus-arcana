@@ -1,8 +1,8 @@
 :root {
-  --f-display: "Lora", Georgia, serif;
+  --f-display: "Newsreader", "Lora", Georgia, serif;
   --f-body: "Manrope", -apple-system, "SF Pro Text", system-ui, sans-serif;
-  --f-mono: "SF Mono", Menlo, monospace;
-  --f-script: "Satisfy", cursive;
+  --f-mono: "JetBrains Mono", "SF Mono", Menlo, monospace;
+  --f-script: "Caveat", cursive;
 
   --nx-deep: #4a7a78;
   --nx-mid:  #5a8a7a;
