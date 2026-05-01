@@ -73,9 +73,14 @@ async def task_done(
     task_id: str,
     tg_id: int = Depends(current_user_id),
 ) -> dict[str, Any]:
+    from miniapp.backend._helpers import rich_text_plain
     user_notion_id = (await get_user_notion_id(tg_id)) or ""
-    await _load_owned_page(task_id, user_notion_id)
-    ok = await update_task_status(task_id, "Done")
+    page = await _load_owned_page(task_id, user_notion_id)
+    # Повторяющаяся задача (есть «Время повтора») → In progress, не Done.
+    # Так она остаётся в списке до дедлайна и не улетает в архив.
+    repeat_time = rich_text_plain(page, "Время повтора").strip()
+    new_status = "In progress" if repeat_time else "Done"
+    ok = await update_task_status(task_id, new_status)
     if not ok:
         raise HTTPException(status_code=500, detail="failed to update status")
     now_utc = datetime.now(timezone.utc)
@@ -83,7 +88,7 @@ async def task_done(
         await update_page(task_id, {"Время завершения": _date(now_utc.isoformat())})
     except Exception as e:
         logger.warning("could not set completion time: %s", e)
-    return {"ok": True}
+    return {"ok": True, "status": new_status}
 
 
 @router.post("/tasks/{task_id}/reopen")
