@@ -210,6 +210,13 @@ export function adaptArcanaToday(data) {
       prio: w.prio || '⚪',
       time: w.time || null,
     })),
+    worksOverdue: (data.works_overdue || []).map((w) => ({
+      id: w.id,
+      title: w.title,
+      cat: (w.cat && (w.cat.full || w.cat.name)) || '',
+      prio: w.prio || '⚪',
+      days_ago: w.days_ago || 0,
+    })),
     unchecked30d: data.unchecked_30d ?? 0,
     accuracy: data.accuracy ?? 0,
     monthBlock: {
