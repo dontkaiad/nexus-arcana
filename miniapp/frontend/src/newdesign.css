@@ -302,6 +302,15 @@
 .night .chk.done { color: var(--ar-acc); background: var(--ar-acc); border-color: var(--ar-acc); }
 .chk.done svg { color: #fff; }
 .night .chk.done svg { color: #0a0e1c; }
+.chk.pending {
+  opacity: 0.75;
+  border-style: dashed;
+  animation: chk-pulse 1s ease-in-out infinite;
+}
+@keyframes chk-pulse {
+  0%, 100% { opacity: 0.75; }
+  50% { opacity: 0.4; }
+}
 
 .pills {
   display: flex;
