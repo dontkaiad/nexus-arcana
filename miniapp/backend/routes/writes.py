@@ -86,6 +86,19 @@ async def task_done(
     return {"ok": True}
 
 
+@router.post("/tasks/{task_id}/reopen")
+async def task_reopen(
+    task_id: str,
+    tg_id: int = Depends(current_user_id),
+) -> dict[str, Any]:
+    user_notion_id = (await get_user_notion_id(tg_id)) or ""
+    await _load_owned_page(task_id, user_notion_id)
+    ok = await update_task_status(task_id, "Not started")
+    if not ok:
+        raise HTTPException(status_code=500, detail="failed to update status")
+    return {"ok": True}
+
+
 class PostponeBody(BaseModel):
     days: Optional[int] = Field(default=None, ge=1, le=365)
     date: Optional[str] = None  # YYYY-MM-DD, абсолютная новая дата дедлайна
