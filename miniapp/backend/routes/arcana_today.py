@@ -15,6 +15,8 @@ from miniapp.backend._moon import moon_phase, next_phases
 from miniapp.backend.auth import current_user_id
 from miniapp.backend._helpers import (
     cat_from_notion,
+    date_start,
+    extract_time,
     prio_from_notion,
     select_of,
     title_plain,
@@ -44,31 +46,48 @@ def _pct(count: int, total: int) -> int:
     return int(round(count / total * 100)) if total else 0
 
 
-async def _works_today(user_notion_id: str, today_date: date) -> list[dict]:
+async def _works_today(user_notion_id: str, today_date: date, tz_offset: int) -> list[dict]:
     db_id = config.arcana.db_works
     if not db_id:
         return []
-    conds: list[dict] = [
+    today_iso = today_date.isoformat()
+    not_done: list[dict] = [
         {"property": "Status", "status": {"does_not_equal": "Done"}},
         {"property": "Status", "status": {"does_not_equal": "Complete"}},
-        {"property": "Дедлайн", "date": {"equals": today_date.isoformat()}},
     ]
-    if user_notion_id:
-        conds.append({"property": "🪪 Пользователи",
-                      "relation": {"contains": user_notion_id}})
+    user_cond = [{"property": "🪪 Пользователи", "relation": {"contains": user_notion_id}}] if user_notion_id else []
+    date_or = {"or": [
+        {"property": "Дедлайн", "date": {"equals": today_iso}},
+        {"property": "Напоминание", "date": {"equals": today_iso}},
+    ]}
+    filters = {"and": not_done + user_cond + [date_or]}
     try:
-        pages = await query_pages(db_id, filters={"and": conds}, page_size=50)
+        pages = await query_pages(db_id, filters=filters, page_size=50)
     except Exception as e:
         logger.warning("works_today query failed: %s", e)
         return []
+    seen: set[str] = set()
     out: list[dict] = []
     for p in pages:
+        pid = p.get("id", "")
+        if pid in seen:
+            continue
+        seen.add(pid)
+        props = p.get("properties", {})
+        reminder_raw = date_start(props.get("Напоминание", {}))
+        reminder_date = to_local_date(reminder_raw, tz_offset)
+        time_str = extract_time(reminder_raw, tz_offset) if reminder_date == today_date else None
+        if not time_str:
+            deadline_raw = date_start(props.get("Дедлайн", {}))
+            time_str = extract_time(deadline_raw, tz_offset)
         out.append({
-            "id": p.get("id", ""),
+            "id": pid,
             "title": title_plain(p, "Работа"),
             "cat": cat_from_notion(select_of(p, "Категория")),
             "prio": prio_from_notion(select_of(p, "Приоритет")),
+            "time": time_str,
         })
+    out.sort(key=lambda x: x["time"] or "")
     return out
 
 
@@ -171,7 +190,7 @@ async def get_arcana_today(tg_id: int = Depends(current_user_id)) -> dict[str, A
             "status": status,
         })
 
-    works = await _works_today(user_notion_id, today_date)
+    works = await _works_today(user_notion_id, today_date, tz_offset)
     unchecked = await _unchecked_30d(all_sessions, today_date)
     accuracy_overall, _, _ = _accuracy(all_sessions)
 
