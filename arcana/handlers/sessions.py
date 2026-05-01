@@ -369,6 +369,8 @@ async def _send_reading(message: Message, state: dict) -> None:
     cards_text = state.get("cards") or ""
     bottom_card = state.get("bottom_card") or ""
     interpretation = state.get("interpretation") or ""
+    from core.html_for_telegram import html_to_telegram
+    interpretation_tg = html_to_telegram(interpretation)
     client_name_safe = html.escape(client_name)
 
     card_lines = "".join(
@@ -390,13 +392,13 @@ async def _send_reading(message: Message, state: dict) -> None:
     body = (
         f"{header}\n📍 <b>Карты:</b>\n{card_lines}"
         f"{bottom_line}{hint_line}"
-        f"\n📝 <b>Трактовка:</b>\n{interpretation[:3500]}"
+        f"\n📝 <b>Трактовка:</b>\n{interpretation_tg[:3500]}"
     )
     await message.answer(
         body, reply_markup=_pending_keyboard(uid), parse_mode="HTML"
     )
-    if len(interpretation) > 3500:
-        await message.answer(interpretation[3500:7000], parse_mode="HTML")
+    if len(interpretation_tg) > 3500:
+        await message.answer(interpretation_tg[3500:7000], parse_mode="HTML")
 
 
 # ────────────────────────── Основной обработчик ────────────────────────────
@@ -595,9 +597,11 @@ async def _handle_multi_session(
             pass
 
     from arcana.tarot_loader import get_cards_context
+    from core.html_for_telegram import html_to_telegram
     saved_n = 0
     first_page_id: Optional[str] = None
     saved_titles: List[str] = []
+    saved_triplets: List[dict] = []  # для финального саммари сессии
 
     await message.answer(
         f"🃏 Сессия «{html.escape(session_name or '—')}» · {len(items)} триплетов — обрабатываю…"
@@ -676,22 +680,97 @@ async def _handle_multi_session(
                 saved_titles.append(question)
                 if not first_page_id:
                     first_page_id = page_id
+
+                # Триплет в чат: вопрос + карты + дно + трактовка (telegram-safe).
+                interp_tg = html_to_telegram(interpretation)
+                cards_line = (
+                    ", ".join(c.strip() for c in cards_text.split(",") if c.strip())
+                    if cards_text else ""
+                )
+                head = (
+                    f"<b>{html.escape(question)}</b>\n"
+                    f"🔺 Триплет · {html.escape(deck)}\n"
+                )
+                if cards_line:
+                    head += f"🃏 {html.escape(cards_line)}\n"
+                if bottom_card:
+                    head += f"🂠 {html.escape(bottom_card)}\n"
+                body_full = f"{head}\n{interp_tg}"
+                # Telegram лимит ~4096; режем по 3500 для безопасности.
+                if len(body_full) <= 3500:
+                    await message.answer(body_full, parse_mode="HTML")
+                else:
+                    await message.answer(head, parse_mode="HTML")
+                    chunk = interp_tg[:3500]
+                    await message.answer(chunk, parse_mode="HTML")
+                    if len(interp_tg) > 3500:
+                        await message.answer(interp_tg[3500:7000], parse_mode="HTML")
+
+                saved_triplets.append({
+                    "question": question,
+                    "cards": cards_text,
+                    "bottom": bottom_card,
+                    "summary": t_summary or "",
+                })
         except Exception as e:
             logger.error("multi-session item %d failed: %s", idx, e)
 
-    # Инвалидация кеша саммари сессии (если что-то лежало раньше).
+    # Финальный общий вывод: Sonnet → plain text, кеш в session_cache.
+    session_summary_text = ""
+    if saved_triplets and session_name:
+        try:
+            triplet_block = "\n\n".join(
+                f"Вопрос: {t['question']}\n"
+                f"Карты: {t['cards']}\n"
+                + (f"Дно: {t['bottom']}\n" if t['bottom'] else "")
+                + (f"Краткое: {t['summary']}" if t['summary'] else "")
+                for t in saved_triplets
+            )
+            sess_prompt = (
+                f"Ты — таролог Кай. На основе {len(saved_triplets)} триплетов одной "
+                f"сессии «{session_name}» напиши общий вывод 2-3 предложениями простым "
+                f"русским языком. Опирайся на дно колоды каждого триплета как на фон, "
+                f"и на связь между вопросами.\n\n"
+                f"Output as plain Russian text, 2-3 sentences, no formatting, no markdown, "
+                f"no HTML tags. Только текст вывода, ничего больше.\n\n"
+                f"--- ТРИПЛЕТЫ ---\n{triplet_block}"
+            )
+            raw_summary = await ask_claude(
+                sess_prompt, max_tokens=400,
+                model="claude-sonnet-4-20250514",
+            )
+            from core.html_sanitize import sanitize_summary
+            session_summary_text = sanitize_summary(raw_summary or "")
+        except Exception as e:
+            logger.warning("session_summary generation failed: %s", e)
+
+    # Кеш саммари сессии (для миниапа). Инвалидируем старое и пишем новое.
     try:
-        from core.session_cache import session_summary_key, cache_delete
+        from core.session_cache import session_summary_key, cache_delete, cache_set
         if session_name:
-            cache_delete(session_summary_key(session_name, client_id))
+            key = session_summary_key(session_name, client_id)
+            cache_delete(key)
+            if session_summary_text:
+                cache_set(key, session_summary_text)
     except Exception:
         pass
 
-    head = f"✅ Сессия «{html.escape(session_name or '—')}» · сохранено {saved_n} триплетов"
-    body_lines = [f"  • {html.escape(t)}" for t in saved_titles[:8]]
-    if len(saved_titles) > 8:
-        body_lines.append(f"  … и ещё {len(saved_titles) - 8}")
-    await message.answer(head + ("\n" + "\n".join(body_lines) if body_lines else ""))
+    bullet_list = "\n".join(f"• {html.escape(t)}" for t in saved_titles[:12])
+    if len(saved_titles) > 12:
+        bullet_list += f"\n• … и ещё {len(saved_titles) - 12}"
+
+    final_msg = (
+        f"✅ Сессия «{html.escape(session_name or '—')}» · "
+        f"{saved_n} триплетов сохранены\n"
+    )
+    if bullet_list:
+        final_msg += bullet_list + "\n"
+    if session_summary_text:
+        final_msg += (
+            f"\n<b>Общий вывод</b>\n"
+            f"<i>{html.escape(session_summary_text)}</i>"
+        )
+    await message.answer(final_msg, parse_mode="HTML")
 
 
 # ────────────────────────── Callbacks ──────────────────────────────────────
