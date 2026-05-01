@@ -157,7 +157,9 @@ async def _handle_tarot_correction(
         "Ты — ассистент-таролог. Пользователь правит трактовку.\n"
         "Скорректируй трактовку согласно замечанию. Остальное оставь как было.\n"
         "Ответь ПОЛНОЙ исправленной трактовкой.\n"
-        "ФОРМАТИРОВАНИЕ: HTML-теги Telegram (<b>, <i>), НЕ markdown (никаких ** или *).\n"
+        "ВЫВОДИ ТОЛЬКО HTML с тегами <h3>, <b>, <i>, <p>. Никакого markdown "
+        "(никаких **, __, ##, *, _). Структура: <h3>заголовок блока</h3>"
+        "<p>текст с <b>выделениями</b></p>.\n"
     )
     if cards_context:
         system += f"\n--- СПРАВОЧНИК КАРТ ---\n{cards_context}"
@@ -178,6 +180,11 @@ async def _handle_tarot_correction(
         max_tokens=2000,
     )
 
+    from core.html_sanitize import sanitize_interpretation
+    from core.html_for_telegram import html_to_telegram
+    new_interp = sanitize_interpretation(new_interp)
+    new_interp_tg = html_to_telegram(new_interp)
+
     pending["interpretation"] = new_interp
     pending["awaiting_edit"] = False
     await save_pending(uid, pending)
@@ -189,12 +196,12 @@ async def _handle_tarot_correction(
         cancel_button("❌ Отмена", f"tarot_cancel:{uid}"),
     ]])
     await message.answer(
-        f"✏️ <b>Исправленная трактовка:</b>\n\n{new_interp[:3500]}",
+        f"✏️ <b>Исправленная трактовка:</b>\n\n{new_interp_tg[:3500]}",
         reply_markup=kb,
         parse_mode="HTML",
     )
-    if len(new_interp) > 3500:
-        await message.answer(new_interp[3500:7000], parse_mode="HTML")
+    if len(new_interp_tg) > 3500:
+        await message.answer(new_interp_tg[3500:7000], parse_mode="HTML")
 
 
 @router.message()
