@@ -123,7 +123,16 @@
 }
 .day .hero { background: rgba(255, 255, 254, 0.45); }
 .night .hero { background: rgba(14, 18, 34, 0.55); }
-.day .hero-title, .day .section-h { color: #2d5a45; }
+.day .hero-title, .day .section-h, .day .page-title { color: #2d5a45; }
+.night .hero-title, .night .section-h, .night .page-title { color: var(--ar-text); }
+
+.page-title {
+  font-family: var(--f-display);
+  font-style: italic;
+  font-weight: 500;
+  font-size: 22px;
+  letter-spacing: -0.2px;
+}
 .hero-h {
   display: flex;
   justify-content: space-between;
