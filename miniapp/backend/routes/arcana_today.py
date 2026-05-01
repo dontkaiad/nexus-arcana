@@ -7,10 +7,11 @@ import time
 from datetime import date, datetime, timedelta, timezone
 from typing import Any, Optional
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel
 
 from core.config import config
-from core.notion_client import query_pages, sessions_all
+from core.notion_client import query_pages, rituals_all, sessions_all, update_page_select
 from core.user_manager import get_user_notion_id
 
 from miniapp.backend._moon import moon_phase, next_phases
@@ -28,10 +29,14 @@ from miniapp.backend._helpers import (
 from core.claude_client import ask_claude
 from miniapp.backend import cache as _cache
 from miniapp.backend.routes._arcana_common import (
-    SESSION_UNVERIFIED,
-    SESSION_YES,
+    RITUAL_NO,
+    RITUAL_PARTIAL,
+    RITUAL_UNVERIFIED,
+    RITUAL_YES,
     SESSION_NO,
     SESSION_PARTIAL,
+    SESSION_UNVERIFIED,
+    SESSION_YES,
     SUPPLIES_CATEGORIES,
     load_clients_map,
     month_bounds,
@@ -310,6 +315,15 @@ async def get_arcana_today(tg_id: int = Depends(current_user_id)) -> dict[str, A
             supplies += amt
     month_accuracy, _, sessions_in_month = _accuracy(all_sessions, month)
 
+    # Аккуратность по сеансам + ритуалам (взвешенно за всё время)
+    rituals = await rituals_all(user_notion_id=user_notion_id)
+    acc = _compute_accuracy(all_sessions, rituals, scope="all")
+    pending_sessions, pending_rituals = _count_pending(all_sessions, rituals)
+
+    # works_today счётчики (без обвязки с локальным done state)
+    works_total_today = len(works) + len(works_overdue)
+    works_done_today = 0  # done логика на фронте локальная
+
     return {
         "date": today_iso,
         "weekday": weekday,
@@ -320,6 +334,14 @@ async def get_arcana_today(tg_id: int = Depends(current_user_id)) -> dict[str, A
         "works_overdue": works_overdue,
         "unchecked_30d": unchecked,
         "accuracy": accuracy_overall,
+        "works_total_today": works_total_today,
+        "works_done_today": works_done_today,
+        "income_month": int(round(income)),
+        "accuracy_pct": acc["pct"],
+        "accuracy_checked": acc["total"],
+        "accuracy_total": acc["total"] + pending_sessions + pending_rituals,
+        "pending_sessions": pending_sessions,
+        "pending_rituals": pending_rituals,
         "month_stats": {
             "label": month_label,
             "income": int(round(income)),
@@ -327,4 +349,161 @@ async def get_arcana_today(tg_id: int = Depends(current_user_id)) -> dict[str, A
             "accuracy": month_accuracy,
             "sessions": sessions_in_month,
         },
+    }
+
+
+# ── Accuracy: общий компьют + endpoints ─────────────────────────────────────
+
+def _session_verdict(p: dict) -> Optional[str]:
+    """→ 'yes' | 'half' | 'no' | None (не проверено)."""
+    val = select_of(p, "Сбылось")
+    if val == SESSION_YES:
+        return "yes"
+    if val == SESSION_PARTIAL:
+        return "half"
+    if val == SESSION_NO:
+        return "no"
+    return None
+
+
+def _ritual_verdict(p: dict) -> Optional[str]:
+    val = select_of(p, "Результат")
+    if val == RITUAL_YES:
+        return "yes"
+    if val == RITUAL_PARTIAL:
+        return "half"
+    if val == RITUAL_NO:
+        return "no"
+    return None
+
+
+def _compute_accuracy(sessions: list[dict], rituals: list[dict], scope: str) -> dict:
+    yes = half = no = 0
+    if scope in ("all", "sessions"):
+        for p in sessions:
+            v = _session_verdict(p)
+            if v == "yes":
+                yes += 1
+            elif v == "half":
+                half += 1
+            elif v == "no":
+                no += 1
+    if scope in ("all", "rituals"):
+        for p in rituals:
+            v = _ritual_verdict(p)
+            if v == "yes":
+                yes += 1
+            elif v == "half":
+                half += 1
+            elif v == "no":
+                no += 1
+    total = yes + half + no
+    weighted = yes + 0.5 * half
+    pct = int(round(weighted / total * 100)) if total else 0
+    return {"pct": pct, "yes": yes, "half": half, "no": no, "total": total}
+
+
+def _count_pending(sessions: list[dict], rituals: list[dict]) -> tuple[int, int]:
+    ps = sum(1 for p in sessions if _session_verdict(p) is None)
+    pr = sum(1 for p in rituals if _ritual_verdict(p) is None)
+    return ps, pr
+
+
+def _pending_list(sessions: list[dict], rituals: list[dict], scope: str, clients_map: dict) -> list[dict]:
+    out: list[dict] = []
+    if scope in ("all", "sessions"):
+        for p in sessions:
+            if _session_verdict(p) is not None:
+                continue
+            props = p.get("properties", {})
+            raw_date = (props.get("Дата", {}).get("date") or {}).get("start", "") or ""
+            from miniapp.backend.routes._arcana_common import client_name_from
+            client_name, _ = client_name_from(p, clients_map)
+            out.append({
+                "id": p.get("id", ""),
+                "type": "session",
+                "title": title_plain(p, "Тема") or "—",
+                "client": client_name,
+                "date": raw_date[:10] if raw_date else "",
+            })
+    if scope in ("all", "rituals"):
+        for p in rituals:
+            if _ritual_verdict(p) is not None:
+                continue
+            props = p.get("properties", {})
+            raw_date = (props.get("Дата", {}).get("date") or {}).get("start", "") or ""
+            from miniapp.backend.routes._arcana_common import client_name_from
+            client_name, _ = client_name_from(p, clients_map)
+            out.append({
+                "id": p.get("id", ""),
+                "type": "ritual",
+                "title": title_plain(p, "Название") or "—",
+                "client": client_name,
+                "date": raw_date[:10] if raw_date else "",
+            })
+    out.sort(key=lambda x: x["date"], reverse=True)
+    return out
+
+
+@router.get("/arcana/accuracy")
+async def get_arcana_accuracy(
+    tg_id: int = Depends(current_user_id),
+    scope: str = Query("all"),
+) -> dict[str, Any]:
+    if scope not in ("all", "sessions", "rituals"):
+        scope = "all"
+    user_notion_id = (await get_user_notion_id(tg_id)) or ""
+    sessions = await sessions_all(user_notion_id=user_notion_id)
+    rituals = await rituals_all(user_notion_id=user_notion_id)
+    clients_map = await load_clients_map(user_notion_id)
+    acc = _compute_accuracy(sessions, rituals, scope)
+    pending_sessions, pending_rituals = _count_pending(sessions, rituals)
+    pending = _pending_list(sessions, rituals, scope, clients_map)
+    return {
+        "pct": acc["pct"],
+        "total": acc["total"],
+        "checked": {"yes": acc["yes"], "half": acc["half"], "no": acc["no"]},
+        "pending": pending,
+        "pending_sessions_count": pending_sessions,
+        "pending_rituals_count": pending_rituals,
+    }
+
+
+_VERDICT_TO_SESSION = {"yes": SESSION_YES, "half": SESSION_PARTIAL, "no": SESSION_NO}
+_VERDICT_TO_RITUAL = {"yes": RITUAL_YES, "half": RITUAL_PARTIAL, "no": RITUAL_NO}
+
+
+class VerifyAccuracyBody(BaseModel):
+    id: str
+    type: str  # "session" | "ritual"
+    verdict: str  # "yes" | "half" | "no"
+
+
+@router.post("/arcana/accuracy/verify")
+async def post_arcana_accuracy_verify(
+    body: VerifyAccuracyBody,
+    tg_id: int = Depends(current_user_id),
+) -> dict[str, Any]:
+    if body.verdict not in _VERDICT_TO_SESSION:
+        raise HTTPException(status_code=400, detail="verdict must be yes|half|no")
+    if body.type == "session":
+        ok = await update_page_select(body.id, "Сбылось", _VERDICT_TO_SESSION[body.verdict])
+    elif body.type == "ritual":
+        ok = await update_page_select(body.id, "Результат", _VERDICT_TO_RITUAL[body.verdict])
+    else:
+        raise HTTPException(status_code=400, detail="type must be session|ritual")
+    if not ok:
+        raise HTTPException(status_code=500, detail="failed to update")
+    user_notion_id = (await get_user_notion_id(tg_id)) or ""
+    sessions = await sessions_all(user_notion_id=user_notion_id)
+    rituals = await rituals_all(user_notion_id=user_notion_id)
+    acc = _compute_accuracy(sessions, rituals, "all")
+    pending_sessions, pending_rituals = _count_pending(sessions, rituals)
+    return {
+        "ok": True,
+        "pct": acc["pct"],
+        "total": acc["total"],
+        "checked": {"yes": acc["yes"], "half": acc["half"], "no": acc["no"]},
+        "pending_sessions_count": pending_sessions,
+        "pending_rituals_count": pending_rituals,
     }
