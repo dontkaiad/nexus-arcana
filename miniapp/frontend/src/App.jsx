@@ -538,7 +538,7 @@ const Sheet = ({ s, open, onClose, title, children }) => {
               marginBottom: 14,
             }}
           >
-            <span style={{ fontFamily: H, fontSize: fs(20), color: s.text }}>{title}</span>
+            <span className="page-title">{title}</span>
             <span
               onClick={onClose}
               style={{ color: s.tS, cursor: "pointer", display: "flex" }}
@@ -1282,7 +1282,7 @@ function NxFinance({ s }) {
   if (loading) {
     return (
       <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-        <div style={{ fontFamily: H, fontSize: fs(22), color: s.text, fontStyle: "italic", fontWeight: 500 }}>Финансы</div>
+        <div className="page-title">Финансы</div>
         {tabsUi}
         <Empty s={s} text="Загружаю..." />
       </div>
@@ -1291,7 +1291,7 @@ function NxFinance({ s }) {
   if (error) {
     return (
       <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-        <div style={{ fontFamily: H, fontSize: fs(22), color: s.text, fontStyle: "italic", fontWeight: 500 }}>Финансы</div>
+        <div className="page-title">Финансы</div>
         {tabsUi}
         <ErrorBox s={s} error={error} refetch={refetch} />
       </div>
@@ -1300,7 +1300,7 @@ function NxFinance({ s }) {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-      <div style={{ fontFamily: H, fontSize: fs(22), color: s.text, fontStyle: "italic", fontWeight: 500 }}>Финансы</div>
+      <div className="page-title">Финансы</div>
       {tabsUi}
 
       {tab === "today" && (() => {
@@ -1310,7 +1310,7 @@ function NxFinance({ s }) {
             <Glass s={s}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
                 <span style={{ fontSize: fs(15), color: s.text, fontWeight: 500 }}>Потрачено сегодня</span>
-                <span style={{ fontFamily: H, fontSize: fs(26), color: s.text }}>
+                <span style={{ fontFamily: H, fontSize: fs(26) }}>
                   {total.toLocaleString()} ₽
                 </span>
               </div>
@@ -1362,7 +1362,7 @@ function NxFinance({ s }) {
                 </div>
                 <div style={{ flex: 1 }}>
                   <div style={{ fontSize: fs(13), color: s.tM }}>Расход</div>
-                  <div style={{ fontFamily: H, fontSize: fs(20), color: s.text, fontWeight: 500 }}>
+                  <div style={{ fontFamily: H, fontSize: fs(20), fontWeight: 500 }}>
                     {exp.toLocaleString()} ₽
                   </div>
                 </div>
@@ -1782,7 +1782,7 @@ function NxLists({ s }) {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-      <div style={{ fontFamily: H, fontSize: fs(22), color: s.text, fontStyle: "italic", fontWeight: 500 }}>Списки</div>
+      <div className="page-title">Списки</div>
       <div style={{ display: "flex", gap: 6 }}>
         {[
           ["buy", "🛒 Покупки"],
@@ -1927,7 +1927,7 @@ function NxMemory({ s, openAdhd }) {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-      <div style={{ fontFamily: H, fontSize: fs(22), color: s.text, fontStyle: "italic", fontWeight: 500 }}>Память</div>
+      <div className="page-title">Память</div>
       <Glass
         s={s}
         accent={s.acc}
@@ -2049,7 +2049,7 @@ function NxCal({ s }) {
           alignItems: "baseline",
         }}
       >
-        <span style={{ fontFamily: H, fontSize: fs(20), color: s.text }}>{title}</span>
+        <span className="page-title">{title}</span>
         <div style={{ display: "flex", gap: 6 }}>
           <Pill s={s} active={view === "week"} onClick={() => setView("week")}>
             Неделя
@@ -2366,7 +2366,7 @@ function ArSessions({ s, openSession }) {
           alignItems: "baseline",
         }}
       >
-        <span style={{ fontFamily: H, fontSize: fs(22), color: s.text, fontStyle: "italic", fontWeight: 500 }}>Расклады</span>
+        <span className="page-title">Расклады</span>
         {unchecked > 0 && (
           <span style={{ fontSize: fs(11), color: s.amber }}>⏳ {unchecked} непроверено</span>
         )}
@@ -2419,7 +2419,7 @@ function ArClients({ s, openClient }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
       <Glass s={s} glow>
-        <span style={{ fontFamily: H, fontSize: fs(22), color: s.text, fontStyle: "italic", fontWeight: 500 }}>Клиенты</span>
+        <span className="page-title">Клиенты</span>
         <div style={{ display: "flex", gap: 6, marginTop: 10 }}>
           <Metric s={s} v={total} sub="всего" />
           <Metric
@@ -2506,7 +2506,7 @@ function ArRituals({ s, openRitual }) {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-      <div style={{ fontFamily: H, fontSize: fs(22), color: s.text, fontStyle: "italic", fontWeight: 500 }}>Ритуалы</div>
+      <div className="page-title">Ритуалы</div>
       <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
         {goals.map((g) => (
           <Pill key={g} s={s} active={goal === g} onClick={() => setGoal(g)}>
@@ -2560,7 +2560,7 @@ function ArGrimoire({ s, openGrimoire }) {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-      <div style={{ fontFamily: H, fontSize: fs(22), color: s.text, fontStyle: "italic", fontWeight: 500 }}>Гримуар</div>
+      <div className="page-title">Гримуар</div>
       <SearchInput s={s} value={q} onChange={setQ} placeholder="Поиск в гримуаре" />
       <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
         {cats.map((c) => (
@@ -2633,7 +2633,7 @@ function ArStats({ s }) {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-      <div style={{ fontFamily: H, fontSize: fs(22), color: s.text, fontStyle: "italic", fontWeight: 500 }}>Точность</div>
+      <div className="page-title">Точность</div>
 
       {unchecked.length > 0 && (
         <Glass s={s} accent={s.amber} style={{ padding: "12px 14px" }}>
@@ -3299,7 +3299,7 @@ function ClientDetail({ s, id }) {
           {c.initial}
         </div>
         <div style={{ flex: 1 }}>
-          <div style={{ fontFamily: H, fontSize: fs(22), color: s.text, fontWeight: 500 }}>
+          <div style={{ fontFamily: H, fontSize: fs(22), fontWeight: 500 }}>
             {c.status} {c.name}
             {c.self && (
               <span style={{ fontSize: fs(13), color: s.tS, fontWeight: 400 }}> · я</span>
@@ -4665,7 +4665,7 @@ function StreaksSheet({ s, open }) {
         <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
           <div style={{ fontSize: fs(42) }}>🔥</div>
           <div style={{ flex: 1 }}>
-            <div style={{ fontFamily: H, fontSize: fs(22), color: s.text, fontWeight: 500 }}>
+            <div style={{ fontFamily: H, fontSize: fs(22), fontWeight: 500 }}>
               {data?.current || 0} дней
             </div>
             <div style={{ fontSize: fs(12), color: s.tM }}>
@@ -4725,7 +4725,7 @@ function MoonPhasesSheet({ s, open }) {
             {current.glyph}
           </div>
           <div style={{ flex: 1 }}>
-            <div style={{ fontFamily: H, fontSize: fs(22), color: s.text, fontWeight: 600 }}>
+            <div style={{ fontFamily: H, fontSize: fs(22), fontWeight: 600 }}>
               {current.name}
             </div>
             <div style={{ fontSize: fs(14), color: s.text, opacity: 0.85, marginTop: 4 }}>
@@ -4811,7 +4811,7 @@ function GrimoireDetail({ s, id }) {
   if (!g) return null;
   return (
     <div>
-      <div style={{ fontFamily: H, fontSize: fs(20), color: s.text, marginBottom: 6 }}>{g.name}</div>
+      <div style={{ fontFamily: H, fontSize: fs(20), marginBottom: 6 }}>{g.name}</div>
       <div style={{ fontSize: fs(11), color: s.tS, marginBottom: 12 }}>
         {g.cat}{g.themes.length > 0 ? ` · ${g.themes.join(", ")}` : ""}
       </div>
