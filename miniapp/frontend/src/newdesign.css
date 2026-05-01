@@ -9,7 +9,7 @@
   --nx-warm: #8ab4a0;
   --nx-glow: #c4c898;
   --nx-base: #dce8dc;
-  --nx-text: #1f2a25;
+  --nx-text: #1f4a3a;
   --nx-acc: #4a7a5e;
   --nx-text-soft: #485650;
   --nx-text-mute: #7a8580;
@@ -47,6 +47,22 @@
 
 .day { color: var(--nx-text); }
 .night { color: var(--ar-text); }
+
+.mode-toggle {
+  padding: 6px 14px;
+  border-radius: 100px;
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  isolation: isolate;
+}
+.day .mode-toggle {
+  background: var(--nx-card);
+  border: 1px solid var(--nx-brd);
+}
+.night .mode-toggle {
+  background: var(--ar-card);
+  border: 1px solid var(--ar-brd);
+}
 
 .glass {
   position: relative;
@@ -101,10 +117,12 @@
 
 .hero {
   border-radius: 22px;
-  padding: 18px 18px 16px;
+  padding: 14px 18px 12px;
   position: relative;
   overflow: hidden;
 }
+.day .hero { background: rgba(255, 255, 254, 0.45); }
+.day .hero-title, .day .section-h { color: #2d5a45; }
 .hero-h {
   display: flex;
   justify-content: space-between;
