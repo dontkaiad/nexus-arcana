@@ -2252,8 +2252,8 @@ function ArDay({ s, openClient, navigate, openMoonPhases }) {
 
   const a = adaptArcanaToday(data);
   const moon = a.moon;
-  const total = a.sessionsToday.length + a.worksToday.length;
-  const doneCount = Object.values(done).filter(Boolean).length;
+  const worksTotal = a.worksToday.length;
+  const worksDone = Object.values(done).filter(Boolean).length;
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 8, position: "relative" }}>
@@ -2272,13 +2272,13 @@ function ArDay({ s, openClient, navigate, openMoonPhases }) {
         </div>
         <div className="hero-metrics">
           <div style={{ flex: 1, cursor: "pointer" }} onClick={() => navigate?.("clients")}>
-            <Metric s={s} v={a.worksToday.length} sub="работ" />
+            <Metric s={s} v={worksDone} unit={`/${worksTotal}`} sub="работы" />
           </div>
           <div style={{ flex: 1, cursor: "pointer" }} onClick={() => navigate?.("stats")}>
-            <Metric s={s} v={a.monthBlock.inc >= 1000 ? `${Math.round(a.monthBlock.inc / 1000)}к` : a.monthBlock.inc} unit="₽" sub="/мес" accent={s.acc} />
+            <Metric s={s} v={a.monthBlock.inc >= 1000 ? `${Math.round(a.monthBlock.inc / 1000)}к` : a.monthBlock.inc} unit="₽" sub="доход" accent={s.acc} />
           </div>
           <div style={{ flex: 1, cursor: "pointer" }} onClick={() => navigate?.("stats")}>
-            <Metric s={s} v={`${a.accuracy}%`} sub="точность" accent={s.acc} />
+            <Metric s={s} v={`${a.accuracy}%`} sub="точность" accent={s.amber} />
           </div>
         </div>
       </div>
