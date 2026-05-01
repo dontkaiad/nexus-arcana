@@ -1176,7 +1176,7 @@ function NxDay({ s, openTask, navigate, openStreaks }) {
         </div>
       )}
 
-      <SectionLabel s={s} meta={`${t.overdue.length + t.scheduled.length} пунктов`}>Расписание</SectionLabel>
+      <SectionLabel s={s}>Расписание</SectionLabel>
       {t.overdue.length === 0 && t.scheduled.length === 0 && (
         <div className="glass" style={{ padding: "16px", textAlign: "center" }}>
           <div style={{ fontSize: 16, fontWeight: 500, marginBottom: 4 }}>На сегодня пусто — отдыхай ✨</div>
