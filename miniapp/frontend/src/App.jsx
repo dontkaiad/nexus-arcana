@@ -435,7 +435,7 @@ const NexusLogo = ({ color = "#0a2e22" }) => (
       <circle cx="30" cy="21" r="0.8" fill="#8a5a28" opacity="0.45" />
     </svg>
     <svg width="110" height="48" viewBox="0 0 110 48" xmlns="http://www.w3.org/2000/svg">
-      <text x="0" y="34" fontFamily="Satisfy, cursive" fontSize="34" fill={color}>nexus</text>
+      <text x="0" y="34" fontFamily="Lora, Georgia, serif" fontStyle="italic" fontWeight="500" fontSize="32" fill={color}>nexus</text>
     </svg>
   </div>
 );
@@ -459,7 +459,7 @@ const ArcanaLogo = () => (
       <circle cx="30" cy="21" r="0.8" fill="#4a5470" opacity="0.45" />
     </svg>
     <svg width="120" height="48" viewBox="0 0 120 48" xmlns="http://www.w3.org/2000/svg">
-      <text x="0" y="34" fontFamily="Satisfy, cursive" fontSize="34" fill="#f0f2f8">arcana</text>
+      <text x="0" y="34" fontFamily="Lora, Georgia, serif" fontStyle="italic" fontWeight="500" fontSize="32" fill="#f0f2f8">arcana</text>
     </svg>
   </div>
 );
