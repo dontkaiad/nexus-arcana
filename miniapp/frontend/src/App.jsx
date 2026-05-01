@@ -321,7 +321,7 @@ const Empty = ({ s, text, chill, emoji, title }) => {
   // wave8.78: для дневного фона (зелёное небо) спиннер должен быть тёплым/контрастным,
   // иначе сейдж-акцент сливается с фоном. Определяем день по яркости текста.
   const isDayMode = s.text && parseInt(s.text.slice(1, 3), 16) < 0x80;
-  const accent = isDayMode ? "#c8884a" : s.acc;       // солнце днём, луна-бирюза ночью
+  const accent = isDayMode ? "#c85a1a" : s.acc;       // солнце днём, луна-бирюза ночью
   const coreInner = isDayMode ? "#fff2c8" : "#eef4ff"; // тёплый блик днём, холодный ночью
   return (
     <div
@@ -339,7 +339,7 @@ const Empty = ({ s, text, chill, emoji, title }) => {
         <div
           style={{
             position: "absolute", inset: -10, borderRadius: "50%",
-            background: `radial-gradient(circle, ${accent}aa 0%, ${accent}00 65%)`,
+            background: `radial-gradient(circle, ${accent}66 0%, ${accent}00 65%)`,
             animation: "nx-pulse 2.4s ease-in-out infinite",
           }}
         />
@@ -348,7 +348,7 @@ const Empty = ({ s, text, chill, emoji, title }) => {
           style={{
             position: "absolute", inset: 14, borderRadius: "50%",
             background: `radial-gradient(circle at 35% 30%, ${coreInner} 0%, ${accent} 55%, ${accent}cc 100%)`,
-            boxShadow: `0 0 28px ${accent}, 0 0 8px ${accent}ee`,
+            boxShadow: `0 0 18px ${accent}cc`,
             animation: "nx-glow 2.4s ease-in-out infinite",
           }}
         />
@@ -356,7 +356,7 @@ const Empty = ({ s, text, chill, emoji, title }) => {
         <div
           style={{
             position: "absolute", inset: 0, borderRadius: "50%",
-            border: `1px dashed ${accent}aa`,
+            border: `1px dashed ${accent}66`,
           }}
         />
         {/* orbiting dots */}
@@ -372,9 +372,9 @@ const Empty = ({ s, text, chill, emoji, title }) => {
               style={{
                 position: "absolute",
                 top: "50%", left: "50%",
-                width: 8, height: 8, borderRadius: "50%",
+                width: 6, height: 6, borderRadius: "50%",
                 background: accent,
-                boxShadow: `0 0 10px ${accent}, 0 0 4px ${accent}`,
+                boxShadow: `0 0 6px ${accent}`,
                 transform: `rotate(${deg}deg) translate(${orbitR}px) rotate(-${deg}deg) translate(-50%, -50%)`,
               }}
             />
