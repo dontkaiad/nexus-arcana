@@ -496,9 +496,9 @@ const FAB = ({ s, onClick }) => (
 const Sheet = ({ s, open, onClose, title, children }) => {
   if (!open) return null;
   const isDayMode = s.text && parseInt(s.text.slice(1, 3), 16) < 0x80;
-  const sheetBg = isDayMode ? "rgba(255,253,248,0.46)" : "rgba(18,22,40,0.52)";
-  const sheetBorder = isDayMode ? "rgba(255,255,255,0.9)" : "rgba(180,188,215,0.25)";
-  const sheetShadow = isDayMode ? "0 -8px 48px rgba(60,80,70,0.18)" : "0 -8px 48px rgba(0,0,0,0.6)";
+  const sheetBg = isDayMode ? "rgba(255,255,255,0.25)" : "rgba(10,14,28,0.35)";
+  const sheetBorder = isDayMode ? "rgba(255,255,255,0.8)" : "rgba(180,188,215,0.3)";
+  const sheetShadow = isDayMode ? "0 -8px 48px rgba(60,80,70,0.15)" : "0 -8px 48px rgba(0,0,0,0.6)";
   return (
     <div
       style={{
@@ -516,8 +516,8 @@ const Sheet = ({ s, open, onClose, title, children }) => {
         style={{
           width: "100%",
           background: sheetBg,
-          backdropFilter: "blur(40px) saturate(180%)",
-          WebkitBackdropFilter: "blur(40px) saturate(180%)",
+          backdropFilter: "blur(32px)",
+          WebkitBackdropFilter: "blur(32px)",
           boxShadow: sheetShadow,
           borderTop: `1px solid ${sheetBorder}`,
           borderTopLeftRadius: 22,
