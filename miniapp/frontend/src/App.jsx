@@ -266,9 +266,10 @@ const Metric = ({ s, v, sub, unit, accent, icon }) => (
   </div>
 );
 
-const Chk = ({ s, done, onClick }) => (
-  <div className={`chk${done ? " done" : ""}`} onClick={onClick}>
+const Chk = ({ s, done, pending, onClick }) => (
+  <div className={`chk${done ? " done" : pending ? " pending" : ""}`} onClick={onClick}>
     {done && <Check size={13} strokeWidth={3} />}
+    {!done && pending && <Check size={13} strokeWidth={3} style={{ opacity: 0.4 }} />}
   </div>
 );
 
@@ -1113,6 +1114,8 @@ function renderBoldMd(text) {
 
 function NxDay({ s, openTask, navigate, openStreaks }) {
   const [done, setDone] = useState({});
+  const [pending, setPending] = useState({});
+  const pendingTimers = useRef({});
   const { data, loading, error, refetch } = useApi('/api/today');
   // wave6.5: погода (календарь стриков теперь только в StreaksSheet)
   const weatherApi = useApi('/api/weather');
@@ -1125,15 +1128,26 @@ function NxDay({ s, openTask, navigate, openStreaks }) {
   const total = t.scheduled.length + t.tasks.length + (t.noDate?.length || 0);
   const leftPct = Math.round((t.spentDay / t.budgetDay) * 100);
   // wave8.59: отметка задачи чекбоксом пишет Status=Done в Notion.
+  // Защита от миссклика: первый тап → pending (3 сек), второй тап → отмена.
   const toggle = async (id) => {
     if (!id || done[id]) return;
-    setDone((p) => ({ ...p, [id]: true }));
-    try {
-      await apiPost(`/api/tasks/${id}/done`);
-      refetch();
-    } catch (_) {
-      setDone((p) => ({ ...p, [id]: false }));
+    if (pending[id]) {
+      clearTimeout(pendingTimers.current[id]);
+      delete pendingTimers.current[id];
+      setPending((p) => { const n = { ...p }; delete n[id]; return n; });
+      return;
     }
+    setPending((p) => ({ ...p, [id]: true }));
+    pendingTimers.current[id] = setTimeout(async () => {
+      setPending((p) => { const n = { ...p }; delete n[id]; return n; });
+      setDone((p) => ({ ...p, [id]: true }));
+      try {
+        await apiPost(`/api/tasks/${id}/done`);
+        refetch();
+      } catch (_) {
+        setDone((p) => ({ ...p, [id]: false }));
+      }
+    }, 3000);
   };
 
   return (
@@ -1192,8 +1206,8 @@ function NxDay({ s, openTask, navigate, openStreaks }) {
         </div>
       )}
       {t.overdue.map((o) => (
-        <div key={o.id} className="task glass" style={{ opacity: done[o.id] ? 0.45 : 1 }}>
-          <Chk s={s} done={done[o.id]} onClick={() => toggle(o.id)} />
+        <div key={o.id} className="task glass" style={{ opacity: done[o.id] ? 0.45 : pending[o.id] ? 0.65 : 1 }}>
+          <Chk s={s} done={done[o.id]} pending={pending[o.id]} onClick={() => toggle(o.id)} />
           <div className="body" onClick={() => openTask(o)} style={{ cursor: "pointer" }}>
             <div className="title">{o.title}</div>
             <div className="meta">
@@ -1206,9 +1220,9 @@ function NxDay({ s, openTask, navigate, openStreaks }) {
         </div>
       ))}
       {t.scheduled.map((x) => (
-        <div key={x.id} className="task glass" style={{ opacity: done[x.id] ? 0.45 : 1 }}>
+        <div key={x.id} className="task glass" style={{ opacity: done[x.id] ? 0.45 : pending[x.id] ? 0.65 : 1 }}>
           {x.time && <span className="time">{x.time}</span>}
-          <Chk s={s} done={done[x.id]} onClick={() => toggle(x.id)} />
+          <Chk s={s} done={done[x.id]} pending={pending[x.id]} onClick={() => toggle(x.id)} />
           <div className="body" onClick={() => openTask(x)} style={{ cursor: "pointer" }}>
             <div className="title">{x.title}</div>
             <div className="meta">
