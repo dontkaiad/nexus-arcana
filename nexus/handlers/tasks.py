@@ -997,11 +997,12 @@ async def _handle_recurring_deadline_done(
     title: str,
     uid: int = 0,
 ) -> None:
-    """Повторяющаяся задача: дедлайн выполнен → Done, затем сброс на следующий цикл."""
+    """Повторяющаяся задача: отмечена выполненной → In progress (остаётся видимой),
+    затем сброс дедлайна на следующий цикл."""
     try:
-        await update_page(task_id, {"Статус": _status("Done")})
+        await update_page(task_id, {"Статус": _status("In progress")})
     except Exception as e:
-        logger.warning("_handle_recurring_deadline_done: failed to set Done: %s", e)
+        logger.warning("_handle_recurring_deadline_done: failed to set In progress: %s", e)
     await _handle_recurring_task_reset(message, task_id, task_props, repeat, title, uid)
 
 
@@ -2252,7 +2253,9 @@ async def handle_task_done(message: Message, task_hint: str, user_notion_id: str
     if len(scored) == 1 or scored[0][0] > scored[1][0]:
         _, title, task_id, task_props = scored[0]
         repeat = (task_props.get("Повтор", {}).get("select") or {}).get("name", "Нет")
-        if repeat and repeat != "Нет":
+        repeat_time_parts = task_props.get("Время повтора", {}).get("rich_text", [])
+        repeat_time = repeat_time_parts[0]["plain_text"].strip() if repeat_time_parts else ""
+        if (repeat and repeat != "Нет") or repeat_time:
             await _handle_recurring_deadline_done(message, task_id, task_props, repeat, title, uid)
             return
         result = await update_task_status(task_id, "Done")
@@ -2286,6 +2289,7 @@ async def task_done_select(call: CallbackQuery) -> None:
 
     # Получить props задачи чтобы проверить повтор
     repeat = "Нет"
+    repeat_time = ""
     task_props = {}
     title_text = ""
     try:
@@ -2293,14 +2297,17 @@ async def task_done_select(call: CallbackQuery) -> None:
         page = await client.pages.retrieve(page_id=task_id)
         task_props = page.get("properties", {})
         repeat = (task_props.get("Повтор", {}).get("select") or {}).get("name", "Нет")
+        repeat_time_parts = task_props.get("Время повтора", {}).get("rich_text", [])
+        repeat_time = repeat_time_parts[0]["plain_text"].strip() if repeat_time_parts else ""
         title_parts = task_props.get("Задача", {}).get("title", [])
         title_text = title_parts[0]["plain_text"] if title_parts else ""
     except Exception as e:
         logger.warning("task_done_select: не удалось получить props: %s", e)
+        repeat_time = ""
 
     await call.message.edit_reply_markup()
 
-    if repeat and repeat != "Нет":
+    if (repeat and repeat != "Нет") or repeat_time:
         await call.answer("✅ Выполнено!")
         await _handle_recurring_deadline_done(call.message, task_id, task_props, repeat, title_text, uid)
         return
