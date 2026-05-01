@@ -36,9 +36,9 @@
   --ar-text-mute: #6e6a62;
   --ar-acc: #5a9a8a;
   --ar-acc-warm: #d4a458;
-  --ar-card: rgba(28, 32, 50, 0.55);
+  --ar-card: rgba(20, 25, 42, 0.78);
   --ar-card-strong: rgba(34, 38, 58, 0.72);
-  --ar-brd: rgba(180, 188, 215, 0.16);
+  --ar-brd: rgba(180, 188, 215, 0.22);
   --ar-brd-soft: rgba(180, 188, 215, 0.08);
   --ar-red: #c4654a;
   --ar-amber: #d4a458;
@@ -52,6 +52,7 @@
   position: relative;
   border-radius: 18px;
   overflow: hidden;
+  isolation: isolate;
   backdrop-filter: blur(24px) saturate(140%);
   -webkit-backdrop-filter: blur(24px) saturate(140%);
   padding: 14px 16px;
