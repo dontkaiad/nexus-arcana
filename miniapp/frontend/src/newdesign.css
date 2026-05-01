@@ -72,7 +72,7 @@
   backdrop-filter: blur(24px) saturate(140%);
   -webkit-backdrop-filter: blur(24px) saturate(140%);
   padding: 14px 16px;
-  margin-bottom: 12px;
+  margin-bottom: 18px;
   transition: transform 0.15s ease, background 0.3s;
 }
 .day .glass {
@@ -120,7 +120,7 @@
   padding: 12px 16px 10px;
   position: relative;
   overflow: hidden;
-  margin-bottom: 14px;
+  margin-bottom: 18px;
 }
 .day .hero { background: rgba(255, 255, 254, 0.45); }
 .night .hero { background: rgba(14, 18, 34, 0.55); }
@@ -232,11 +232,12 @@
   gap: 12px;
   align-items: center;
   padding: 14px 16px;
-  margin-bottom: 6px;
+  margin-bottom: 8px;
   border-radius: 14px;
   position: relative;
   transition: opacity 0.2s;
 }
+.task.glass { margin-bottom: 8px; }
 .task.done { opacity: 0.5; }
 .task.done .title { text-decoration: line-through; }
 .task .time {
@@ -411,6 +412,7 @@
   border-radius: 16px;
   position: relative;
   overflow: hidden;
+  margin-bottom: 18px;
 }
 .day .tip {
   background: linear-gradient(135deg, rgba(255, 246, 220, 0.6), rgba(232, 220, 180, 0.45));
