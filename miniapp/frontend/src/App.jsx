@@ -1258,28 +1258,20 @@ function NxTasks({ s, openTask }) {
       {loading && <Empty s={s} text="Загружаю..." />}
       {error && <ErrorBox s={s} error={error} refetch={refetch} />}
       {!loading && !error && list.length === 0 && <Empty s={s} emoji="🌿" title="Чилл" text="На сегодня задач нет." />}
-      {!loading && !error && list.length > 0 && (
-        <div className="glass" style={{ padding: "14px 16px" }}>
-          <div className="card-h">
-            <span className="card-title">Задачи</span>
-            <span className="card-meta">{list.length}</span>
-          </div>
-          {list.map((t) => (
-            <div key={t.id} className={`sched-row${t.status === "done" ? " done" : ""}`} onClick={() => openTask(t)} style={{ cursor: "pointer" }}>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div className={`s-title${t.status === "done" ? " done" : ""}`}>{t.title}</div>
-                <div className="s-meta">
-                  {t.date && <span style={{ color: t.status === "overdue" ? s.red : undefined }}>{t.date}</span>}
-                  {t.rpt && <span>{t.rpt}</span>}
-                  {t.status === "done" && <span>✓ сделано</span>}
-                </div>
-              </div>
-              {t.cat && <div className="s-cat">{String(t.cat).split(" ")[0]}</div>}
-              <PrioDot s={s} prio={t.prio} />
+      {!loading && !error && list.map((t) => (
+        <div key={t.id} className={`task glass${t.status === "done" ? " done" : ""}`} onClick={() => openTask(t)} style={{ cursor: "pointer" }}>
+          <div className="body">
+            <div className="title">{t.title}</div>
+            <div className="meta">
+              {t.date && <span style={{ color: t.status === "overdue" ? s.red : undefined }}>{t.date}</span>}
+              {t.rpt && <span>{t.rpt}</span>}
+              {t.status === "done" && <span>✓ сделано</span>}
             </div>
-          ))}
+          </div>
+          {t.cat && <div className="cat-badge">{String(t.cat).split(" ")[0]}</div>}
+          <PrioDot s={s} prio={t.prio} />
         </div>
-      )}
+      ))}
     </div>
   );
 }
@@ -1360,25 +1352,20 @@ function NxFinance({ s }) {
                 </div>
               </Glass>
             )}
-            {items.length === 0 ? (
-              <Empty s={s} emoji="💚" title="Пока не тратила" text="Сегодня без трат — приятно." />
-            ) : (
-              <div className="glass" style={{ padding: "14px 16px" }}>
-                <div className="card-h">
-                  <span className="card-title">Транзакции</span>
-                  <span className="card-meta">{items.length} {plural(items.length, "операция", "операции", "операций")}</span>
-                </div>
-                {items.map((x) => (
-                  <div key={x.id} className="sched-row">
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div className="s-title">{x.desc || "без описания"}</div>
-                      <div className="s-meta"><span>{x.cat}</span></div>
-                    </div>
-                    <span style={{ fontSize: 14, fontWeight: 500, fontFamily: H }}>{x.amt.toLocaleString()} ₽</span>
+            {items.length === 0 && <Empty s={s} emoji="💚" title="Пока не тратила" text="Сегодня без трат — приятно." />}
+            {items.map((x) => (
+              <Glass key={x.id} s={s} style={{ padding: "10px 14px", marginBottom: 4 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <div>
+                    <div style={{ fontSize: fs(16), color: s.text, fontWeight: 500 }}>{x.desc || "без описания"}</div>
+                    <div style={{ fontSize: fs(13), color: s.tS, marginTop: 2 }}>{x.cat}</div>
                   </div>
-                ))}
-              </div>
-            )}
+                  <span style={{ fontSize: fs(17), color: s.text, fontWeight: 500, fontFamily: H }}>
+                    {x.amt.toLocaleString()} ₽
+                  </span>
+                </div>
+              </Glass>
+            ))}
           </>
         );
       })()}
@@ -1418,34 +1405,32 @@ function NxFinance({ s }) {
                 </div>
               </div>
             </Glass>
-            {cats.length === 0 ? (
-              <Empty s={s} text="За этот месяц расходов нет" />
-            ) : (
-              <div className="glass" style={{ padding: "14px 16px" }}>
-                <div className="card-h">
-                  <span className="card-title">По категориям</span>
-                  <span className="card-meta">{cats.length}</span>
-                </div>
-                {cats.map((c, i) => {
-                  const pct = c.pct ?? (c.limit ? Math.round((c.spent / c.limit) * 100) : 0);
-                  const clr = pct > 85 ? s.red : pct > 60 ? s.amber : s.acc;
-                  const catFull = c.raw?.full || c.raw?.emoji + " " + c.raw?.name || c.name;
-                  return (
-                    <div
-                      key={i} className="sched-row"
-                      style={{ cursor: "pointer", flexDirection: "column", alignItems: "stretch", gap: 4 }}
-                      onClick={() => setDrillCat({ full: catFull, display: c.name, month: monthIso })}
-                    >
-                      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 14, fontWeight: 500 }}>
-                        <span>{c.name}</span>
-                        <span style={{ color: clr, fontWeight: 500 }}>{c.spent.toLocaleString()} ₽</span>
-                      </div>
-                      {c.limit != null && <Bar s={s} pct={pct} color={clr} />}
-                    </div>
-                  );
-                })}
-              </div>
-            )}
+            {cats.length === 0 && <Empty s={s} text="За этот месяц расходов нет" />}
+            {cats.map((c, i) => {
+              const pct = c.pct ?? (c.limit ? Math.round((c.spent / c.limit) * 100) : 0);
+              const clr = pct > 85 ? s.red : pct > 60 ? s.amber : s.acc;
+              const catFull = c.raw?.full || c.raw?.emoji + " " + c.raw?.name || c.name;
+              return (
+                <Glass
+                  key={i} s={s}
+                  style={{ padding: "10px 14px", marginBottom: 4, cursor: "pointer" }}
+                  onClick={() => setDrillCat({ full: catFull, display: c.name, month: monthIso })}
+                >
+                  <div
+                    style={{
+                      display: "flex", justifyContent: "space-between",
+                      fontSize: fs(16), color: s.text, fontWeight: 500, marginBottom: 6,
+                    }}
+                  >
+                    <span>{c.name}</span>
+                    <span style={{ color: clr, fontWeight: 500 }}>
+                      {c.spent.toLocaleString()} ₽
+                    </span>
+                  </div>
+                  {c.limit != null && <Bar s={s} pct={pct} color={clr} />}
+                </Glass>
+              );
+            })}
           </>
         );
       })()}
@@ -1495,73 +1480,74 @@ function NxFinance({ s }) {
         };
         return (
           <>
-            {debts.length === 0 ? (
-              <Empty s={s} text="Долгов нет 🌿" />
-            ) : (
-              <div className="glass" style={{ padding: "14px 16px" }}>
-                <div className="card-h">
-                  <span className="card-title">Долги</span>
-                  <span className="card-meta">{debts.length}</span>
+            {debts.length === 0 && <Empty s={s} text="Долгов нет 🌿" />}
+            {debts.map((d, i) => (
+              <Glass
+                key={i} s={s} accent={s.amber}
+                style={{ padding: "10px 14px", marginBottom: 4, cursor: "pointer" }}
+                onClick={() => setDrillDebt(d)}
+              >
+                <div style={{ display: "flex", justifyContent: "space-between" }}>
+                  <span style={{ fontSize: fs(16), color: s.text, fontWeight: 500 }}>{d.n}</span>
+                  <span style={{ fontSize: fs(16), color: s.red, fontWeight: 500, fontFamily: H }}>
+                    {d.left.toLocaleString()} ₽
+                  </span>
                 </div>
-                {debts.map((d, i) => (
-                  <div key={i} className="sched-row" style={{ cursor: "pointer", flexDirection: "column", alignItems: "stretch", gap: 3 }} onClick={() => setDrillDebt(d)}>
-                    <div style={{ display: "flex", justifyContent: "space-between", fontSize: 14, fontWeight: 500 }}>
-                      <span>{d.n}</span>
-                      <span style={{ color: s.red, fontFamily: H }}>{d.left.toLocaleString()} ₽</span>
-                    </div>
-                    <div className="s-meta">
-                      <span>{d.by && d.by !== "—" ? `до ${d.by}` : "без срока"}{d.monthly > 0 ? ` · ${d.monthly.toLocaleString()} ₽/мес` : ""}</span>
-                    </div>
-                    {d.total > 0 && <Bar s={s} pct={(1 - d.left / d.total) * 100} color={s.amber} />}
-                  </div>
-                ))}
-              </div>
-            )}
-            {goals.length === 0 ? (
-              <Empty s={s} text="Целей пока нет" />
-            ) : (
-              <div className="glass" style={{ padding: "14px 16px" }}>
-                <div className="card-h">
-                  <span className="card-title">Цели</span>
-                  <span className="card-meta">{goals.length}</span>
+                <div style={{ fontSize: fs(13), color: s.tS, marginTop: 3 }}>
+                  {d.by && d.by !== "—" ? `до ${d.by}` : "без срока"}
+                  {d.monthly > 0 ? ` · ${d.monthly.toLocaleString()} ₽/мес` : ""}
                 </div>
-                {goals.map((g, i) => (
-                  <div key={i} className="sched-row" style={{ flexDirection: "column", alignItems: "stretch", gap: 3 }}>
-                    <div style={{ display: "flex", justifyContent: "space-between", fontSize: 14, fontWeight: 500 }}>
-                      <span>{g.n}</span>
-                      <span style={{ color: s.acc }}>{g.t.toLocaleString()} ₽</span>
-                    </div>
-                    <div className="s-meta"><span>{g.monthly > 0 ? `откладываю ${g.monthly.toLocaleString()} ₽/мес` : `после ${g.after}`}</span></div>
-                    {g.t > 0 && <Bar s={s} pct={(g.s / g.t) * 100} color={s.acc} />}
+                {d.total > 0 && (
+                  <div style={{ marginTop: 6 }}>
+                    <Bar s={s} pct={(1 - d.left / d.total) * 100} color={s.amber} />
                   </div>
-                ))}
-              </div>
-            )}
+                )}
+              </Glass>
+            ))}
+            {goals.length === 0 && <Empty s={s} text="Целей пока нет" />}
+            {goals.map((g, i) => (
+              <Glass key={i} s={s} style={{ padding: "10px 14px", marginBottom: 4 }}>
+                <div style={{ display: "flex", justifyContent: "space-between" }}>
+                  <span style={{ fontSize: fs(16), color: s.text, fontWeight: 500 }}>{g.n}</span>
+                  <span style={{ fontSize: fs(16), color: s.acc, fontWeight: 500 }}>
+                    {g.t.toLocaleString()} ₽
+                  </span>
+                </div>
+                <div style={{ fontSize: fs(13), color: s.tS, marginTop: 3 }}>
+                  {g.monthly > 0 ? `откладываю ${g.monthly.toLocaleString()} ₽/мес` : `после ${g.after}`}
+                </div>
+                {g.t > 0 && (
+                  <div style={{ marginTop: 6 }}>
+                    <Bar s={s} pct={(g.s / g.t) * 100} color={s.acc} />
+                  </div>
+                )}
+              </Glass>
+            ))}
             {(closedDebts.length > 0 || closedGoals.length > 0) && (
-              <div className="glass" style={{ padding: "14px 16px", opacity: 0.85 }}>
-                <div className="card-h">
-                  <span className="card-title">Закрытые</span>
-                  <span className="card-meta">{closedDebts.length + closedGoals.length}</span>
-                </div>
+              <>
                 {closedDebts.map((d, i) => (
-                  <div key={`cd${i}`} className="sched-row">
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div className="s-title">📋 {d.n}</div>
-                      <div className="s-meta"><span>закрыт{d.closedAt ? ` · ${fmtClosed(d.closedAt)}` : ""}</span></div>
+                  <Glass key={`cd${i}`} s={s} style={{ padding: "10px 14px", marginBottom: 4, opacity: 0.75 }}>
+                    <div style={{ display: "flex", justifyContent: "space-between" }}>
+                      <span style={{ fontSize: fs(15), color: s.text, fontWeight: 500 }}>📋 {d.n}</span>
+                      <span style={{ fontSize: fs(14), color: s.tS, fontFamily: H }}>{d.total.toLocaleString()} ₽</span>
                     </div>
-                    <span style={{ fontSize: 13, fontFamily: H, opacity: 0.7 }}>{d.total.toLocaleString()} ₽</span>
-                  </div>
+                    <div style={{ fontSize: fs(12), color: s.tS, marginTop: 3 }}>
+                      закрыт{d.closedAt ? ` · ${fmtClosed(d.closedAt)}` : ""}
+                    </div>
+                  </Glass>
                 ))}
                 {closedGoals.map((g, i) => (
-                  <div key={`cg${i}`} className="sched-row">
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div className="s-title">🎯 {g.n}</div>
-                      <div className="s-meta"><span>достигнута{g.closedAt ? ` · ${fmtClosed(g.closedAt)}` : ""}</span></div>
+                  <Glass key={`cg${i}`} s={s} style={{ padding: "10px 14px", marginBottom: 4, opacity: 0.75 }}>
+                    <div style={{ display: "flex", justifyContent: "space-between" }}>
+                      <span style={{ fontSize: fs(15), color: s.text, fontWeight: 500 }}>🎯 {g.n}</span>
+                      <span style={{ fontSize: fs(14), color: s.tS, fontFamily: H }}>{g.t.toLocaleString()} ₽</span>
                     </div>
-                    <span style={{ fontSize: 13, fontFamily: H, opacity: 0.7 }}>{g.t.toLocaleString()} ₽</span>
-                  </div>
+                    <div style={{ fontSize: fs(12), color: s.tS, marginTop: 3 }}>
+                      достигнута{g.closedAt ? ` · ${fmtClosed(g.closedAt)}` : ""}
+                    </div>
+                  </Glass>
                 ))}
-              </div>
+              </>
             )}
           </>
         );
@@ -1827,43 +1813,73 @@ function NxLists({ s }) {
       )}
       {!loading && !error && (tab === "check" ? groupByField(items, "group") : groupByCat(items)).map(([catName, group]) => (
         <React.Fragment key={catName || "—"}>
-          {catName && tab === "check" && (
+          {catName && tab === "check" ? (
             <ParentTaskHeader s={s} title={catName} task={parentByTitle[catName]} />
+          ) : (
+            catName && <SectionLabel s={s}>{catName}</SectionLabel>
           )}
-          <div className="glass" style={{ padding: "14px 16px" }}>
-            {catName && tab !== "check" && (
-              <div className="card-h">
-                <span className="card-title">{catName}</span>
-                <span className="card-meta">{group.length}</span>
-              </div>
-            )}
-            {group.map((x) => (
-              tab === "inv" ? (
-                <div key={x.id} className="sched-row" style={{ flexDirection: "column", alignItems: "stretch", gap: 3 }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                    <span style={{ flex: 1, fontSize: 14, fontWeight: 500, wordBreak: "break-word" }}>{x.name}</span>
-                    {x.qty != null && <span style={{ fontSize: 12, color: s.acc, fontWeight: 500 }}>{x.qty} шт</span>}
-                    {x.cat && <span style={{ fontSize: 11, padding: "2px 8px", borderRadius: 10, background: `${s.acc}33`, fontWeight: 500 }}>{x.cat}</span>}
-                  </div>
-                  {x.exp && <div className="s-meta"><span>до {x.exp}</span></div>}
-                </div>
-              ) : (
-                <div
-                  key={x.id} className="sched-row"
-                  style={{ opacity: x.done ? 0.5 : 1, cursor: "pointer" }}
-                  onClick={() => toggleDone(x)}
-                >
-                  <Chk s={s} done={x.done} />
+          {group.map((x) => (
+            tab === "inv" ? (
+              <Glass key={x.id} s={s} style={{ padding: "10px 14px", marginBottom: 4 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                   <span style={{
-                    flex: 1, minWidth: 0, fontSize: 14, fontWeight: 500,
+                    flex: 1, fontSize: fs(16), color: s.text, fontWeight: 500,
                     wordBreak: "break-word",
-                    textDecoration: x.done ? "line-through" : "none",
-                  }}>{x.name}</span>
-                  {x.cat && <span style={{ fontSize: 11, padding: "2px 8px", borderRadius: 10, background: `${s.acc}33`, fontWeight: 500 }}>{x.cat}</span>}
+                  }}>
+                    {x.name}
+                  </span>
+                  {x.qty != null && (
+                    <span style={{ fontSize: fs(13), color: s.acc, fontWeight: 500, flexShrink: 0 }}>
+                      {x.qty} шт
+                    </span>
+                  )}
+                  {x.cat && (
+                    <span style={{
+                      display: "inline-flex", alignItems: "center",
+                      padding: "3px 9px", borderRadius: 10,
+                      fontSize: fs(13), background: `${s.acc}33`, color: s.text, fontWeight: 500,
+                      flexShrink: 0, whiteSpace: "nowrap",
+                    }}>
+                      {x.cat}
+                    </span>
+                  )}
                 </div>
-              )
-            ))}
-          </div>
+                {x.exp && (
+                  <div style={{ fontSize: fs(13), color: s.tS, marginTop: 3 }}>до {x.exp}</div>
+                )}
+              </Glass>
+            ) : (
+              <Glass
+                key={x.id}
+                s={s}
+                style={{
+                  padding: "10px 14px", marginBottom: 4, opacity: x.done ? 0.5 : 1,
+                  cursor: "pointer", display: "flex", alignItems: "center", gap: 10,
+                }}
+                onClick={() => toggleDone(x)}
+              >
+                <Chk s={s} done={x.done} />
+                <span style={{
+                  flex: 1, minWidth: 0,
+                  fontSize: fs(16), color: s.text, fontWeight: 500,
+                  wordBreak: "break-word",
+                  textDecoration: x.done ? "line-through" : "none",
+                }}>
+                  {x.name}
+                </span>
+                {x.cat && (
+                  <span style={{
+                    display: "inline-flex", alignItems: "center",
+                    padding: "3px 9px", borderRadius: 10,
+                    fontSize: fs(13), background: `${s.acc}33`, color: s.text, fontWeight: 500,
+                    flexShrink: 0, whiteSpace: "nowrap",
+                  }}>
+                    {x.cat}
+                  </span>
+                )}
+              </Glass>
+            )
+          ))}
         </React.Fragment>
       ))}
     </div>
@@ -2204,29 +2220,24 @@ function NxCal({ s }) {
           </Glass>
         );
       })()}
+      <SectionLabel s={s}>
+        {picked} {RU_MONTHS_GEN[month0]}
+      </SectionLabel>
       {loading && <Empty s={s} text="Загружаю..." />}
       {!loading && !tasksByDay[picked] && (
         <Empty s={s} chill emoji="📅" text="В этот день всё свободно" />
       )}
-      {!loading && tasksByDay[picked] && (
-        <div className="glass" style={{ padding: "14px 16px" }}>
-          <div className="card-h">
-            <span className="card-title">{picked} {RU_MONTHS_GEN[month0]}</span>
-            <span className="card-meta">{tasksByDay[picked].length}</span>
-          </div>
-          {tasksByDay[picked].map((t, i) => (
-            <TaskRow
-              key={t.id || i}
-              s={s}
-              t={t}
-              done={!!doneIds[t.id]}
-              onToggle={() => toggleCalTask(t.id)}
-              onOpen={() => {}}
-              withTime={!!t.time}
-            />
-          ))}
-        </div>
-      )}
+      {!loading && (tasksByDay[picked] || []).map((t, i) => (
+        <TaskRow
+          key={t.id || i}
+          s={s}
+          t={t}
+          done={!!doneIds[t.id]}
+          onToggle={() => toggleCalTask(t.id)}
+          onOpen={() => {}}
+          withTime={!!t.time}
+        />
+      ))}
     </div>
   );
 }
@@ -2712,40 +2723,34 @@ function ArWork({ s }) {
   if (loading) return <Empty s={s} text="Загружаю..." />;
   if (error) return <ErrorBox s={s} error={error} refetch={refetch} />;
   const a = adaptArcanaToday(data);
-  const all = [
-    ...a.worksOverdue.map((o) => ({ ...o, _over: true })),
-    ...a.worksToday.map((w) => ({ ...w, _over: false })),
-  ];
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 0 }}>
       <div className="page-title" style={{ marginBottom: 10 }}>Работы</div>
-      <div className="glass" style={{ padding: "14px 16px" }}>
-        <div className="card-h">
-          <span className="card-title">Расписание</span>
-          <span className="card-meta">{all.length === 0 ? "пусто" : `${all.length} ${plural(all.length, "работа", "работы", "работ")}`}</span>
-        </div>
-        {all.length === 0 && (
-          <div style={{ padding: "16px 0", textAlign: "center" }}>
-            <div style={{ fontSize: 14, fontWeight: 500, marginBottom: 4, fontFamily: H }}>Работ нет 🌙</div>
-            <div style={{ fontSize: 12, opacity: 0.6 }}>Передохни.</div>
-          </div>
-        )}
-        {all.map((r) => (
-          <div key={r.id} className="sched-row">
-            {!r._over && <span className="s-time" style={r.time ? {} : { opacity: 0.4 }}>{r.time || "—"}</span>}
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div className="s-title">{r.title}</div>
-              {r._over && (
-                <div className="s-meta">
-                  <span style={{ color: s.red, fontWeight: 600 }}>{r.days_ago} д назад</span>
-                </div>
-              )}
+      {a.worksOverdue.length === 0 && a.worksToday.length === 0 && (
+        <Empty s={s} emoji="🌙" title="Работ нет" text="Передохни." />
+      )}
+      {a.worksOverdue.map((o) => (
+        <div key={o.id} className="task glass">
+          <div className="body">
+            <div className="title">{o.title}</div>
+            <div className="meta">
+              <span style={{ color: s.red, fontWeight: 600 }}>{o.days_ago} д назад</span>
             </div>
-            {r.cat && <div className="s-cat">{String(r.cat).split(" ")[0]}</div>}
-            <PrioDot s={s} prio={r.prio} />
           </div>
-        ))}
-      </div>
+          {o.cat && <div className="cat-badge">{String(o.cat).split(" ")[0]}</div>}
+          <PrioDot s={s} prio={o.prio} />
+        </div>
+      ))}
+      {a.worksToday.map((w) => (
+        <div key={w.id} className="task glass">
+          {w.time && <span className="time">{w.time}</span>}
+          <div className="body">
+            <div className="title">{w.title}</div>
+          </div>
+          {w.cat && <div className="cat-badge">{String(w.cat).split(" ")[0]}</div>}
+          <PrioDot s={s} prio={w.prio} />
+        </div>
+      ))}
     </div>
   );
 }
