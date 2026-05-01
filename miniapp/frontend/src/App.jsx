@@ -2341,7 +2341,7 @@ function ArDay({ s, openClient, navigate, openMoonPhases }) {
         </>
       )}
 
-      {total === 0 && a.unchecked30d === 0 && (
+      {worksTotal === 0 && a.unchecked30d === 0 && (
         <div style={{ textAlign: "center", padding: "20px 0 4px", fontStyle: "italic", fontSize: 14, opacity: 0.55, fontFamily: H }}>
           Сегодня в практике спокойно 🌙
         </div>
