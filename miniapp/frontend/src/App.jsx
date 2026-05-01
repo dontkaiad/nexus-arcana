@@ -413,7 +413,7 @@ const ErrorBox = ({ s, error, refetch }) => (
 
 // Финальные логотипы: Satisfy + градиентный диск с кратерами и ореолом
 const NexusLogo = ({ color = "#1a3528" }) => (
-  <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+  <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
     <svg width="54" height="54" viewBox="0 0 54 54" xmlns="http://www.w3.org/2000/svg">
       <defs>
         <radialGradient id="sunGrad" cx="35%" cy="30%" r="70%">
@@ -437,7 +437,7 @@ const NexusLogo = ({ color = "#1a3528" }) => (
 );
 
 const ArcanaLogo = () => (
-  <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+  <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
     <svg width="54" height="54" viewBox="0 0 54 54" xmlns="http://www.w3.org/2000/svg">
       <defs>
         <radialGradient id="moonGrad" cx="35%" cy="30%" r="70%">
@@ -4652,7 +4652,7 @@ function StreaksSheet({ s, open }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
       <Glass s={s} accent={s.amber} glow>
-        <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
           <div style={{ fontSize: fs(42) }}>🔥</div>
           <div style={{ flex: 1 }}>
             <div style={{ fontFamily: H, fontSize: fs(22), color: s.text, fontWeight: 500 }}>
