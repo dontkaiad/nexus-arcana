@@ -321,9 +321,9 @@ const Empty = ({ s, text, chill, emoji, title }) => {
   // wave8.78: для дневного фона (зелёное небо) спиннер должен быть тёплым/контрастным,
   // иначе сейдж-акцент сливается с фоном. Определяем день по яркости текста.
   const isDayMode = s.text && parseInt(s.text.slice(1, 3), 16) < 0x80;
-  const accent = isDayMode ? "#d4844e" : s.acc;       // солнце днём, луна-бирюза ночью
-  const halo   = isDayMode ? "#7a3a10" : s.acc;       // тёмный ореол днём для контраста
-  const coreInner = isDayMode ? "#fff2c8" : "#eef4ff"; // тёплый блик днём, холодный ночью
+  const accent = isDayMode ? "#f4c66e" : s.acc;
+  const halo   = isDayMode ? "#b07a2e" : s.acc;
+  const coreInner = isDayMode ? "#fff2c8" : "#eef4ff";
   return (
     <div
       style={{
