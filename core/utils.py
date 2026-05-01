@@ -19,28 +19,26 @@ logger = logging.getLogger("core.utils")
 def styled_button(
     text: str, callback_data: str, style: Optional[str] = None
 ) -> InlineKeyboardButton:
-    """Создать inline-кнопку с опциональным стилем.
+    """Создать inline-кнопку.
 
-    style: "destructive" (красный), "secondary" (серый), None (дефолт).
-    Передаётся в pydantic модель через extra='allow' — уходит в запрос
-    как поле style. Если клиент Telegram/библиотека не поддерживают —
-    игнорируется (кнопка просто синяя).
+    Bot API 9.4 декларирует поле `style` для InlineKeyboardButton, но
+    реальные клиенты Telegram отвергают любую передачу этого поля
+    ("invalid button style specified"). Параметр style принимаем для
+    совместимости сигнатуры, но в Bot API не отправляем — кнопки
+    рендерятся стандартными. Лучше серые кнопки, чем падающий бот.
     """
-    kwargs: dict = {}
-    if style:
-        kwargs["style"] = style
-    return InlineKeyboardButton(text=text, callback_data=callback_data, **kwargs)
+    return InlineKeyboardButton(text=text, callback_data=callback_data)
 
 
 def cancel_button(
     text: str = "❌ Отмена", callback_data: str = "cancel"
 ) -> InlineKeyboardButton:
-    """Красная кнопка отмены/удаления/отказа."""
+    """Кнопка отмены/удаления/отказа."""
     return styled_button(text, callback_data, "destructive")
 
 
 def secondary_button(text: str, callback_data: str) -> InlineKeyboardButton:
-    """Серая кнопка второстепенного действия (правка, продолжить)."""
+    """Кнопка второстепенного действия (правка, продолжить)."""
     return styled_button(text, callback_data, "secondary")
 
 
