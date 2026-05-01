@@ -1183,7 +1183,7 @@ function NxDay({ s, openTask, navigate, openStreaks }) {
       </div>
 
       {t.adhdTip && (
-        <div className="tip" style={{ marginTop: 8 }}>
+        <div className="tip">
           <div className="tip-h">
             <span>🦋 СДВГ-совет</span>
             <RefreshCw size={15} style={{ cursor: "pointer", opacity: 0.6 }} onClick={async () => { try { await apiPost("/api/today/refresh-tip"); refetch(); } catch (_) {} }} />
@@ -2362,7 +2362,7 @@ function ArDay({ s, openClient, navigate, openMoonPhases }) {
   ];
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 8, position: "relative" }}>
+    <>
       <div className="hero glass glow">
         <div className="hero-h">
           <div>
@@ -2470,7 +2470,7 @@ function ArDay({ s, openClient, navigate, openMoonPhases }) {
           onVerified={() => refetch()}
         />
       )}
-    </div>
+    </>
   );
 }
 
@@ -3002,7 +3002,7 @@ function SessionDetail({ s, id }) {
 
       {/* Дно колоды */}
       {x.bottomCard && (
-        <Glass s={s} accent={s.acc} style={{ marginTop: 10, padding: "10px 12px" }}>
+        <Glass s={s} accent={s.acc} style={{ padding: "10px 12px" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
             <span style={{ fontSize: fs(24), flexShrink: 0 }}>🂠</span>
             <div style={{ flex: 1, minWidth: 0 }}>
