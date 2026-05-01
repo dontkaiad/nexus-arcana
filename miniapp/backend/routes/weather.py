@@ -9,6 +9,7 @@ from typing import Any, Optional
 import httpx
 from fastapi import APIRouter, Body, Depends
 
+from core.claude_client import ask_claude
 from core.config import config
 from core.notion_client import memory_get, memory_set, query_pages
 from core.user_manager import get_user_notion_id
@@ -80,9 +81,14 @@ def _init_weather_cache() -> None:
             "CREATE TABLE IF NOT EXISTS weather_cache ("
             "tg_id INTEGER PRIMARY KEY, "
             "city TEXT, temp INTEGER, code INTEGER, "
-            "kind TEXT, description TEXT, "
+            "kind TEXT, description TEXT, tip TEXT, "
             "updated_at INTEGER)"
         )
+        # миграция: добавить tip если таблица уже существует без него
+        try:
+            con.execute("ALTER TABLE weather_cache ADD COLUMN tip TEXT")
+        except sqlite3.OperationalError:
+            pass
         con.commit()
     finally:
         con.close()
@@ -93,7 +99,7 @@ def _cached(tg_id: int) -> Optional[dict[str, Any]]:
     con = sqlite3.connect(_cache._DB_PATH)
     try:
         row = con.execute(
-            "SELECT city, temp, code, kind, description, updated_at "
+            "SELECT city, temp, code, kind, description, tip, updated_at "
             "FROM weather_cache WHERE tg_id = ?",
             (tg_id,),
         ).fetchone()
@@ -101,12 +107,12 @@ def _cached(tg_id: int) -> Optional[dict[str, Any]]:
         con.close()
     if not row:
         return None
-    updated = row[5] or 0
+    updated = row[6] or 0
     if time.time() - updated > _CACHE_TTL:
         return None
     return {
         "city": row[0], "temp": row[1], "code": row[2],
-        "kind": row[3], "description": row[4],
+        "kind": row[3], "description": row[4], "tip": row[5],
     }
 
 
@@ -116,14 +122,24 @@ def _store(tg_id: int, data: dict) -> None:
     try:
         con.execute(
             "INSERT OR REPLACE INTO weather_cache "
-            "(tg_id, city, temp, code, kind, description, updated_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            "(tg_id, city, temp, code, kind, description, tip, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
             (tg_id, data["city"], data["temp"], data["code"],
-             data["kind"], data["description"], int(time.time())),
+             data["kind"], data["description"], data.get("tip"), int(time.time())),
         )
         con.commit()
     finally:
         con.close()
+
+
+async def _generate_tip(kind: str, temp: int, description: str) -> str:
+    prompt = (
+        f"Погода сейчас: {description}, {temp}°C.\n"
+        "Напиши один короткий совет на день (5–8 слов, строчными буквами, без точки в конце, без смайлов). "
+        "Совет — практический: что надеть, взять с собой или учесть. Только сам совет, без вводных слов."
+    )
+    tip = await ask_claude(prompt, model=config.model_sonnet, max_tokens=60)
+    return tip.strip().rstrip(".!").lower() if tip else ""
 
 
 async def _fetch_openmeteo(city: str) -> Optional[dict]:
@@ -326,8 +342,9 @@ async def get_weather(tg_id: int = Depends(current_user_id)) -> dict[str, Any]:
         data = await _fetch_openmeteo(city)
         if not data:
             return {"city": city, "temp": 0, "code": 0, "kind": "clear",
-                    "description": "—", "error": "fetch_failed"}
+                    "description": "—", "tip": "", "error": "fetch_failed"}
 
+        data["tip"] = await _generate_tip(data["kind"], data["temp"], data["description"])
         _store(tg_id, data)
         return data
     except Exception:
