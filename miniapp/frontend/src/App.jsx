@@ -99,9 +99,10 @@ function getSky(p) {
     w = lerpC("#8ab4a0", "#c4a060", t);
     g = lerpC("#c4c898", "#d4884a", t);
     b = lerpC("#dce8dc", "#e8dcc8", t);
-    text = "#3a3a2e";
-    tS = "#5a564a";
-    tM = "#7a756a";
+    // Nexus day: согласовано с CSS --nx-text (#1f4a3a)
+    text = "#1f4a3a";
+    tS = "#2d6a50";
+    tM = "#4a7a62";
     acc = lerpC("#6b8f71", "#7a9068", t);
     brd = "rgba(160,154,142,0.35)";
     // wave8.0.1: glass — баланс между стеклом и читаемостью (0.28–0.34)
@@ -114,9 +115,9 @@ function getSky(p) {
     w = lerpC("#c4a060", "#c46040", t);
     g = lerpC("#d4884a", "#a04048", t);
     b = lerpC("#e8dcc8", "#2a2838", t);
-    text = lerpC("#3a3a2e", "#d4ccc0", t);
-    tS = lerpC("#5a564a", "#b0a898", t);
-    tM = lerpC("#7a756a", "#807868", t);
+    text = lerpC("#1f4a3a", "#d4ccc0", t);
+    tS = lerpC("#2d6a50", "#b0a898", t);
+    tM = lerpC("#4a7a62", "#807868", t);
     acc = lerpC("#7a9068", "#5a8a80", t);
     brd = `rgba(${Math.round(lerp(255, 60, t))},${Math.round(lerp(255, 65, t))},${Math.round(
       lerp(255, 80, t)
