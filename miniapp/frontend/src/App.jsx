@@ -1309,11 +1309,14 @@ function NxFinance({ s }) {
         return (
           <>
             <Glass s={s}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
-                <span style={{ fontSize: fs(15), color: s.text, fontWeight: 500 }}>Потрачено сегодня</span>
-                <span style={{ fontFamily: H, fontSize: fs(26) }}>
-                  {total.toLocaleString()} ₽
-                </span>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+                <div>
+                  <div style={{ fontSize: fs(13), color: s.tM, marginBottom: 4 }}>Потрачено сегодня</div>
+                  <div style={{ fontFamily: H, fontSize: fs(32), color: s.text, fontWeight: 500, lineHeight: 1 }}>
+                    {total.toLocaleString()} <span style={{ fontSize: fs(18), fontWeight: 400 }}>₽</span>
+                  </div>
+                </div>
+                <span style={{ fontSize: 28 }}>💰</span>
               </div>
             </Glass>
             {budget && (
@@ -1328,6 +1331,7 @@ function NxFinance({ s }) {
                 </div>
               </Glass>
             )}
+            <div className="section-h">Транзакции</div>
             {items.length === 0 && <Empty s={s} emoji="💚" title="Пока не тратила" text="Сегодня без трат — приятно." />}
             {items.map((x) => (
               <Glass key={x.id} s={s} style={{ padding: "10px 14px", marginBottom: 4 }}>
