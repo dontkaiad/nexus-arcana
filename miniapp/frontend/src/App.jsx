@@ -2609,7 +2609,7 @@ function ArGrimoire({ s, openGrimoire }) {
 // ARCANA — STATS (точность раскладов)
 // ═══════════════════════════════════════════════════════════════
 
-function ArStats({ s }) {
+function ArStats({ s, navigate }) {
   const { data, loading, error, refetch } = useApi("/api/arcana/stats");
   // wave6.6.1: quick-verify секция
   const uncheckedApi = useApi("/api/arcana/sessions?filter=status:unchecked", []);
@@ -2624,6 +2624,7 @@ function ArStats({ s }) {
   const pct = view.pct;
   const p = view.practice;
   const profit = p.profit;
+  const curMonthName = months[0]?.name || "";
 
   const unchecked = ((uncheckedApi.data?.sessions) || []).filter(
     (sess) => !localDone[sess.id]
@@ -2644,9 +2645,56 @@ function ArStats({ s }) {
     }
   };
 
+  const fmtRub = (v) => `${Math.round(v).toLocaleString("ru-RU")}₽`;
+  const curMonthSessions = months[0]?.total ?? 0;
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-      <div className="page-title">Точность</div>
+      <div className="page-title">Статистика</div>
+
+      {/* Блок статистики за текущий месяц */}
+      <Glass s={s} style={{ padding: "14px 14px 10px" }}>
+        <div style={{ fontFamily: H, fontSize: fs(15), color: s.acc, marginBottom: 12 }}>
+          Статистика за {curMonthName}
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+          {/* Доход */}
+          <div style={{ background: s.card, borderRadius: 12, padding: "12px 10px", textAlign: "center" }}>
+            <div style={{ fontSize: fs(22) }}>💰</div>
+            <div style={{ fontFamily: H, fontSize: fs(18), color: s.acc, fontWeight: 600, margin: "4px 0 2px" }}>
+              {fmtRub(p.inc)}
+            </div>
+            <div style={{ fontSize: fs(11), color: s.tM }}>Доход</div>
+          </div>
+          {/* Расходники */}
+          <div style={{ background: s.card, borderRadius: 12, padding: "12px 10px", textAlign: "center" }}>
+            <div style={{ fontSize: fs(22) }}>🕯️</div>
+            <div style={{ fontFamily: H, fontSize: fs(18), color: s.acc, fontWeight: 600, margin: "4px 0 2px" }}>
+              {fmtRub(p.exp)}
+            </div>
+            <div style={{ fontSize: fs(11), color: s.tM }}>Расходники</div>
+          </div>
+          {/* Сбылось */}
+          <div style={{ background: s.card, borderRadius: 12, padding: "12px 10px", textAlign: "center" }}>
+            <div style={{ fontSize: fs(22) }}>✨</div>
+            <div style={{ fontFamily: H, fontSize: fs(18), color: s.acc, fontWeight: 600, margin: "4px 0 2px" }}>
+              {pct}%
+            </div>
+            <div style={{ fontSize: fs(11), color: s.tM }}>Сбылось</div>
+          </div>
+          {/* Сеансов */}
+          <div
+            style={{ background: s.card, borderRadius: 12, padding: "12px 10px", textAlign: "center", cursor: "pointer" }}
+            onClick={() => navigate?.("sess")}
+          >
+            <div style={{ fontSize: fs(22) }}>🃏</div>
+            <div style={{ fontFamily: H, fontSize: fs(18), color: s.acc, fontWeight: 600, margin: "4px 0 2px" }}>
+              {curMonthSessions}
+            </div>
+            <div style={{ fontSize: fs(11), color: s.tM }}>Сеансов</div>
+          </div>
+        </div>
+      </Glass>
 
       {unchecked.length > 0 && (
         <Glass s={s} accent={s.amber} style={{ padding: "12px 14px" }}>
@@ -2702,18 +2750,6 @@ function ArStats({ s }) {
         </div>
         <div style={{ fontSize: fs(11), color: s.tM, marginTop: 6 }}>
           за всё время · {allVer} проверенных
-        </div>
-      </Glass>
-
-      {/* Финансы практики */}
-      <Glass s={s}>
-        <div style={{ fontFamily: H, fontSize: fs(13), color: s.tS, marginBottom: 8 }}>
-          Финансы практики · апрель
-        </div>
-        <div style={{ display: "flex", gap: 6 }}>
-          <Metric s={s} v={`${(p.inc / 1000).toFixed(0)}к`} sub="доход" accent={s.acc} />
-          <Metric s={s} v={`${(p.exp / 1000).toFixed(0)}к`} sub="расход" />
-          <Metric s={s} v={`${(profit / 1000).toFixed(0)}к`} sub="прибыль" accent={s.acc} />
         </div>
       </Glass>
 
@@ -4297,7 +4333,7 @@ const arTabs = [
   { k: "cli", I: Users, l: "Клиенты" },
   { k: "rit", I: Flame, l: "Ритуалы" },
   { k: "grim", I: BookOpen, l: "Гримуар" },
-  { k: "stats", I: BarChart3, l: "Точность" },
+  { k: "stats", I: BarChart3, l: "Статистика" },
 ];
 
 export default function App() {
