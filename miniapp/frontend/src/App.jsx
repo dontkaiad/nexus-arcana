@@ -384,7 +384,7 @@ const Empty = ({ s, text, chill, emoji, title }) => {
       <div
         style={{
           display: "inline-flex", alignItems: "baseline", gap: 2,
-          color: s.tS, fontSize: fs(13), fontStyle: "italic", letterSpacing: 0.3,
+          color: s.text, fontSize: fs(13), fontStyle: "italic", letterSpacing: 0.3,
         }}
       >
         <span>{cleanLabel}</span>
