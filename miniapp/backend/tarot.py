@@ -39,35 +39,70 @@ def _clear_cache_for_tests() -> None:
     _decks_cache = None
 
 
-# Маппинг русского имени колоды (как хранится в Notion) → id папки
-DECK_NAME_TO_ID = {
-    "Уэйт": "rider-waite",
-    "Таро Уэйта": "rider-waite",
-    "Таро Райдера-Уэйта": "rider-waite",
-    "Rider-Waite": "rider-waite",
-    "Тёмный лес": "dark-wood",
-    "Темный лес": "dark-wood",
-    "Dark Wood": "dark-wood",
-    "Луна отшельника": "deviant-moon",
-    "Deviant Moon": "deviant-moon",
-    "Ленорман": "lenormand",
-    "Lenormand": "lenormand",
-    "Атласные": "atlasnye",
+# Алиасы названий колод → id папки. Все ключи в lowercase.
+DECK_ALIASES: dict[str, str] = {
+    "уэйт": "rider-waite", "уэйта": "rider-waite", "уэйту": "rider-waite",
+    "таро уэйта": "rider-waite", "таро райдера-уэйта": "rider-waite",
+    "rider": "rider-waite", "rider-waite": "rider-waite", "rider waite": "rider-waite",
+    "тёмный лес": "dark-wood", "темный лес": "dark-wood", "dark wood": "dark-wood",
+    "darkwood": "dark-wood", "dark-wood": "dark-wood", "дарквуд": "dark-wood",
+    "дарк вуд": "dark-wood",
+    "луна отшельника": "deviant-moon", "deviant": "deviant-moon",
+    "deviant moon": "deviant-moon", "deviant-moon": "deviant-moon",
+    "девиант мун": "deviant-moon",
+    "ленорман": "lenormand", "lenormand": "lenormand",
+    "игральные": "atlasnye", "атласные": "atlasnye", "playing": "atlasnye",
+    "playing cards": "atlasnye", "atlasnye": "atlasnye",
 }
+
+# Backwards-compat: старое имя экспорта.
+DECK_NAME_TO_ID = DECK_ALIASES
 
 
 def resolve_deck_id(deck_name: str | None) -> str:
-    """Русское имя колоды из Notion → id папки. Дефолт — rider-waite."""
+    """Свободный ввод имени колоды → id папки. Дефолт — rider-waite.
+
+    Сверяет с реестром deck_cards.json (по ключу, name_ru, name_en) +
+    DECK_ALIASES (lowercase). Подстрочное совпадение тоже работает.
+    """
     if not deck_name:
         return "rider-waite"
-    # точное совпадение
-    if deck_name in DECK_NAME_TO_ID:
-        return DECK_NAME_TO_ID[deck_name]
-    # частичное (для 'Таро Уэйта, Ленорман')
-    low = deck_name.lower()
-    for k, v in DECK_NAME_TO_ID.items():
-        if k.lower() in low:
-            return v
+    low = deck_name.strip().lower()
+    if not low:
+        return "rider-waite"
+
+    # 1. exact alias match
+    if low in DECK_ALIASES:
+        return DECK_ALIASES[low]
+
+    # 2. реестр: по key / name_ru / name_en
+    decks = load_decks()
+    for key, info in decks.items():
+        if key.startswith("_"):
+            continue
+        if not isinstance(info, dict):
+            continue
+        if low == key.lower():
+            return key
+        if low == (info.get("name_ru") or "").lower():
+            return key
+        if low == (info.get("name_en") or "").lower():
+            return key
+
+    # 3. подстрочный поиск по алиасам (для строк вида 'Таро Уэйта, Ленорман')
+    for alias, key in DECK_ALIASES.items():
+        if alias in low or low in alias:
+            return key
+
+    # 4. подстрочный поиск по реестру
+    for key, info in decks.items():
+        if key.startswith("_") or not isinstance(info, dict):
+            continue
+        for field in ("name_ru", "name_en"):
+            v = (info.get(field) or "").lower()
+            if v and (v in low or low in v):
+                return key
+
     return "rider-waite"
 
 

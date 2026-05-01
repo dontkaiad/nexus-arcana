@@ -5,7 +5,7 @@ import {
   adaptToday, adaptArcanaToday,
   adaptTasks, adaptFinanceToday, adaptFinanceMonth, adaptFinanceLimits, adaptFinanceGoals,
   adaptLists, adaptMemory, adaptAdhd, adaptCalendar,
-  adaptSessions, adaptSessionDetail,
+  adaptSessions, adaptSessionDetail, adaptSessionGroup,
   adaptClients, adaptClientDossier,
   adaptRituals, adaptRitualDetail,
   adaptGrimoire, adaptGrimoireDetail,
@@ -2478,57 +2478,120 @@ function ArDay({ s, openClient, navigate, openMoonPhases }) {
 // ARCANA — SESSIONS
 // ═══════════════════════════════════════════════════════════════
 
+// wave8: статус сессии → glyph
+const SESS_STATUS_GLYPH = { wait: "⏳", proc: "🔄", part: "〰️", done: "✅" };
+const SESS_STATUS_LABEL = { wait: "ждёт", proc: "в работе", part: "частично", done: "сбылось" };
+
+function StatusTag({ s, status }) {
+  const g = SESS_STATUS_GLYPH[status] || "⏳";
+  const lbl = SESS_STATUS_LABEL[status] || "ждёт";
+  const c = status === "done" ? "#22c55e" : status === "part" ? "#f59e0b" : status === "proc" ? s.acc : s.tM;
+  return (
+    <span style={{
+      fontSize: fs(11), color: c, padding: "2px 8px", borderRadius: 999,
+      background: `${c}1a`, border: `1px solid ${c}33`, whiteSpace: "nowrap",
+    }}>{g} {lbl}</span>
+  );
+}
+
+function BreakdownChips({ s, breakdown }) {
+  const items = [
+    { k: "yes",  ic: "✅", c: "#22c55e" },
+    { k: "half", ic: "〰️", c: "#f59e0b" },
+    { k: "no",   ic: "❌", c: "#ef4444" },
+    { k: "wait", ic: "⏳", c: s.tM },
+  ];
+  return (
+    <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 6 }}>
+      {items.filter((it) => (breakdown?.[it.k] ?? 0) > 0).map((it) => (
+        <span key={it.k} style={{
+          fontSize: fs(11), color: it.c, padding: "1px 6px", borderRadius: 8,
+          background: `${it.c}14`, border: `1px solid ${it.c}33`,
+        }}>{it.ic} {breakdown[it.k]}</span>
+      ))}
+    </div>
+  );
+}
+
 function ArSessions({ s, openSession }) {
   const [f, setF] = useState("all");
-  const path = f === "all" ? "/api/arcana/sessions" : `/api/arcana/sessions?filter=area:${encodeURIComponent(f)}`;
+  let path = "/api/arcana/sessions";
+  if (f === "wait") path += "?filter=status:wait";
+  else if (f === "done") path += "?filter=status:done";
   const { data, loading, error, refetch } = useApi(path, [f]);
   const list = loading || error ? [] : adaptSessions(data);
-  const areas = ["all", ...new Set(list.map((x) => x.area).filter(Boolean))];
-  const unchecked = list.filter((x) => (x.done || "").startsWith("⏳")).length;
+
+  const pinned = list.find((x) => x.status === "wait" || x.status === "proc");
+  const filters = [
+    { k: "all",  l: "Все" },
+    { k: "wait", l: "Ждут проверки" },
+    { k: "done", l: "Сбылось" },
+  ];
+  const total = list.length;
+  const waitCount = list.filter((x) => x.status === "wait" || x.status === "proc").length;
+
+  const handleOpen = (x) => openSession({ slug: x.slug, isSolo: x.isSolo });
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-      <div
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "baseline",
-        }}
-      >
-        <span className="page-title">Расклады</span>
-        {unchecked > 0 && (
-          <span style={{ fontSize: fs(11), color: s.amber }}>⏳ {unchecked} непроверено</span>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+        <span className="page-title">Сессии</span>
+        {waitCount > 0 && (
+          <span style={{ fontSize: fs(11), color: s.amber }}>
+            ⏳ {waitCount} в работе · {total} всего
+          </span>
         )}
       </div>
       <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-        {areas.map((a) => (
-          <Pill key={a} s={s} active={f === a} onClick={() => setF(a)}>
-            {a === "all" ? "Все" : a}
+        {filters.map((it) => (
+          <Pill key={it.k} s={s} active={f === it.k} onClick={() => setF(it.k)}>
+            {it.l}
           </Pill>
         ))}
       </div>
       {loading && <Empty s={s} text="Загружаю..." />}
       {error && <ErrorBox s={s} error={error} refetch={refetch} />}
       {!loading && !error && list.length === 0 && (
-        <Empty s={s} emoji="🔮" title="Раскладов нет" text="Пока тишина — карты ждут." />
+        <Empty s={s} emoji="🔮" title="Сессий нет" text="Пока тишина — карты ждут." />
       )}
-      {!loading && !error && list.map((x) => {
-        const cardsBrief = (x.cards || []).map((c) => c.name).slice(0, 3).join(", ") + (x.cards.length > 3 ? `, +${x.cards.length - 3}` : "");
-        return (
-          <div key={x.id} className="glass tap" style={{ padding: "14px 16px", marginBottom: 6 }} onClick={() => openSession({ id: x.id })}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "start", gap: 8 }}>
-              <div className="flex-grow">
-                <div style={{ fontFamily: H, fontSize: 18, fontWeight: 500, lineHeight: 1.2 }}>{x.q || "без темы"}</div>
-                <div style={{ fontSize: 12, opacity: 0.65, marginTop: 6, display: "flex", gap: 6, flexWrap: "wrap" }}>
-                  {[x.type, x.deck, x.client, x.date].filter(Boolean).map((item, i) => <span key={i}>{item}</span>)}
-                </div>
-                {cardsBrief && <div style={{ fontSize: 13, fontStyle: "italic", marginTop: 6, opacity: 0.75, fontFamily: H }}>{cardsBrief}</div>}
+      {!loading && !error && pinned && f === "all" && (
+        <div className="glass tap" style={{
+          padding: "14px 16px", marginBottom: 6, border: `1px solid ${s.acc}55`,
+          background: `linear-gradient(180deg, ${s.acc}10, transparent)`,
+        }} onClick={() => handleOpen(pinned)}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "start", gap: 8 }}>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: fs(10), color: s.acc, marginBottom: 4 }}>📌 в работе</div>
+              <div style={{ fontFamily: H, fontSize: fs(17), fontWeight: 500, lineHeight: 1.2 }}>
+                {pinned.title}
               </div>
-              <span style={{ fontSize: 18 }}>{(x.done || "⏳").split(" ")[0]}</span>
+              <div style={{ fontSize: fs(11), opacity: 0.65, marginTop: 4, display: "flex", gap: 6, flexWrap: "wrap" }}>
+                {[pinned.category, pinned.client, pinned.firstDate, `${pinned.tripletCount} трип.`]
+                  .filter(Boolean).map((it, i) => <span key={i}>{it}</span>)}
+              </div>
+              <BreakdownChips s={s} breakdown={pinned.breakdown} />
             </div>
+            <StatusTag s={s} status={pinned.status} />
           </div>
-        );
-      })}
+        </div>
+      )}
+      {!loading && !error && list.filter((x) => f !== "all" || x.slug !== pinned?.slug).map((x) => (
+        <div key={x.slug} className="glass tap" style={{ padding: "12px 14px", marginBottom: 6 }} onClick={() => handleOpen(x)}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "start", gap: 8 }}>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontFamily: H, fontSize: fs(15), fontWeight: 500, lineHeight: 1.25 }}>
+                {x.title || "—"}
+              </div>
+              <div style={{ fontSize: fs(11), opacity: 0.65, marginTop: 4, display: "flex", gap: 6, flexWrap: "wrap" }}>
+                {[x.category, x.client, x.firstDate, x.tripletCount > 1 ? `${x.tripletCount} трип.` : null]
+                  .filter(Boolean).map((it, i) => <span key={i}>{it}</span>)}
+              </div>
+              {x.tripletCount > 1 && <BreakdownChips s={s} breakdown={x.breakdown} />}
+            </div>
+            <StatusTag s={s} status={x.status} />
+          </div>
+        </div>
+      ))}
     </div>
   );
 }
@@ -2924,7 +2987,295 @@ function TarotCardTile({ s, card, deckId }) {
   );
 }
 
-function SessionDetail({ s, id }) {
+// wave8: вердикт триплета → стиль кнопок
+const VERDICT_BTN = [
+  { v: "yes",  ic: "✅", lbl: "Сбылось",   c: "#22c55e", status: "✅ Да" },
+  { v: "half", ic: "〰️", lbl: "Частично", c: "#f59e0b", status: "〰️ Частично" },
+  { v: "no",   ic: "❌", lbl: "Нет",       c: "#ef4444", status: "❌ Нет" },
+];
+
+function VerdictRow({ s, current, busy, onPick }) {
+  return (
+    <div style={{ display: "flex", gap: 6 }}>
+      {VERDICT_BTN.map((b) => {
+        const active = current === b.v;
+        return (
+          <div key={b.v} onClick={() => !busy && onPick(b)} style={{
+            flex: 1, textAlign: "center", padding: "10px 4px", borderRadius: 10,
+            background: active ? `${b.c}28` : s.card,
+            border: `1px solid ${active ? b.c : b.c + "44"}`,
+            color: b.c, fontSize: fs(12), fontWeight: 500,
+            cursor: busy ? "progress" : "pointer", opacity: busy ? 0.6 : 1,
+            backdropFilter: "blur(10px)",
+          }}>{b.ic} {b.lbl}</div>
+        );
+      })}
+    </div>
+  );
+}
+
+function TripletSlide({ s, t, deckId, onVerdict }) {
+  const [accordion, setAccordion] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [current, setCurrent] = useState(t.verdict || "wait");
+  const cards = (t.cards || []).slice(0, 3);
+  const hasBottom = !!t.bottomCard;
+
+  const submit = async (b) => {
+    setBusy(true);
+    try {
+      await apiPost(`/api/arcana/sessions/${t.id}/verify`, { status: b.status });
+      setCurrent(b.v);
+      onVerdict && onVerdict(t.id, b.v);
+    } catch (e) {
+      alert("Не получилось: " + e.message);
+    } finally { setBusy(false); }
+  };
+
+  return (
+    <div>
+      <Glass s={s} style={{ padding: "12px 14px", marginBottom: 12 }}>
+        <div style={{ fontFamily: H, fontSize: fs(17), fontWeight: 500, lineHeight: 1.25 }}>
+          {t.q || "—"}
+        </div>
+        <div style={{ fontSize: fs(11), opacity: 0.65, marginTop: 4, display: "flex", gap: 6, flexWrap: "wrap" }}>
+          {[t.client, t.deck, t.date].filter(Boolean).map((it, i) => <span key={i}>{it}</span>)}
+        </div>
+      </Glass>
+
+      <SectionLabel s={s}>Карты</SectionLabel>
+      <div style={{
+        display: "grid",
+        gridTemplateColumns: hasBottom ? "1fr 1fr 1fr 1fr" : "1fr 1fr 1fr",
+        gap: 8, marginBottom: 8,
+      }}>
+        {cards.map((c, i) => (
+          <div key={i} style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+            <TarotCardTile s={s} card={c} deckId={deckId} />
+            <div style={{ fontSize: fs(10), color: s.tS, textAlign: "center" }}>
+              {["Прошлое", "Настоящее", "Будущее"][i] || ""}
+            </div>
+          </div>
+        ))}
+        {hasBottom && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+            <div style={{ position: "relative" }}>
+              <TarotCardTile s={s} card={t.bottomCard} deckId={deckId} />
+              <div style={{
+                position: "absolute", top: 4, right: 4, fontSize: fs(14),
+                background: `${s.acc}cc`, padding: "1px 6px", borderRadius: 8,
+                color: "#fff",
+              }}>🂠</div>
+            </div>
+            <div style={{ fontSize: fs(10), color: s.acc, textAlign: "center", fontWeight: 500 }}>
+              🂠 Дно
+            </div>
+          </div>
+        )}
+      </div>
+
+      {t.summary && (
+        <Glass s={s} style={{ padding: "10px 14px", marginBottom: 10 }}>
+          <div style={{ fontSize: fs(10), color: s.acc, marginBottom: 4 }}>⚡ Саммари</div>
+          <div style={{ fontSize: fs(13), color: s.text, lineHeight: 1.5 }}>{t.summary}</div>
+        </Glass>
+      )}
+
+      {t.interp && (
+        <>
+          <div onClick={() => setAccordion(!accordion)} style={{
+            cursor: "pointer", padding: "10px 14px", borderRadius: 10,
+            background: s.card, border: `1px solid ${s.brd}`, marginBottom: 10,
+            display: "flex", justifyContent: "space-between", alignItems: "center",
+            fontSize: fs(12), color: s.acc, fontWeight: 500,
+          }}>
+            <span>📝 Полная трактовка</span>
+            <span>{accordion ? "▾" : "▸"}</span>
+          </div>
+          {accordion && (
+            <Glass s={s} accent={s.acc} style={{ padding: "12px 14px", marginBottom: 10 }}>
+              <div style={{ fontSize: fs(13), color: s.text, lineHeight: 1.6 }}
+                   dangerouslySetInnerHTML={{ __html: sanitizeHtml(t.interp) }} />
+            </Glass>
+          )}
+        </>
+      )}
+
+      <SectionLabel s={s}>Сбылось?</SectionLabel>
+      <VerdictRow s={s} current={current} busy={busy} onPick={submit} />
+    </div>
+  );
+}
+
+function SessionPagerOverview({ s, group, onJump, onSummarize, summarizing }) {
+  return (
+    <div>
+      <Glass s={s} style={{ padding: "14px 16px", marginBottom: 12 }}>
+        <div style={{ fontSize: fs(11), color: s.acc, marginBottom: 4 }}>
+          🃏 {group.category || "Сессия"}
+        </div>
+        <div style={{ fontFamily: H, fontSize: fs(20), fontWeight: 500, lineHeight: 1.2 }}>
+          {group.title}
+        </div>
+        <div style={{ fontSize: fs(11), opacity: 0.65, marginTop: 6, display: "flex", gap: 6, flexWrap: "wrap" }}>
+          {[group.client, group.firstDate, `${group.triplets.length} триплетов`]
+            .filter(Boolean).map((it, i) => <span key={i}>{it}</span>)}
+        </div>
+      </Glass>
+
+      <Glass s={s} style={{ padding: "10px 14px", marginBottom: 10 }}>
+        <div style={{ fontSize: fs(10), color: s.acc, marginBottom: 6 }}>⚡ Общее саммари</div>
+        {group.summary ? (
+          <div style={{ fontSize: fs(13), color: s.text, lineHeight: 1.5 }}>{group.summary}</div>
+        ) : (
+          <div onClick={onSummarize} style={{
+            display: "inline-block", padding: "4px 10px", borderRadius: 6,
+            background: `${s.acc}22`, color: s.acc,
+            cursor: summarizing ? "wait" : "pointer", fontSize: fs(12),
+          }}>{summarizing ? "Генерирую..." : "Сгенерировать саммари"}</div>
+        )}
+      </Glass>
+
+      <SectionLabel s={s}>Вопросы сессии</SectionLabel>
+      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+        {group.triplets.map((t, idx) => {
+          const v = t.verdict || "wait";
+          const ic = SESS_STATUS_GLYPH[v] || (v === "yes" ? "✅" : v === "half" ? "〰️" : v === "no" ? "❌" : "⏳");
+          return (
+            <div key={t.id || idx} className="glass tap"
+                 style={{ padding: "10px 14px" }}
+                 onClick={() => onJump(idx + 1)}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: fs(13), color: s.text, fontWeight: 500 }}>
+                    {idx + 1}) {t.q || "—"}
+                  </div>
+                  {t.summary && (
+                    <div style={{ fontSize: fs(11), color: s.tM, marginTop: 2, lineHeight: 1.4 }}>
+                      {t.summary.length > 90 ? t.summary.slice(0, 90) + "…" : t.summary}
+                    </div>
+                  )}
+                </div>
+                <span style={{ fontSize: fs(16) }}>{ic}</span>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      <div style={{
+        display: "flex", gap: 12, marginTop: 14, padding: "10px 14px",
+        borderRadius: 10, background: s.card, border: `1px solid ${s.brd}`,
+        fontSize: fs(11), color: s.tM, justifyContent: "space-between",
+      }}>
+        <span>Всего: <b style={{ color: s.text }}>{group.triplets.length}</b></span>
+        {Object.entries({ yes: "✅", half: "〰️", no: "❌", wait: "⏳" }).map(([k, ic]) => {
+          const n = group.triplets.filter((t) => (t.verdict || "wait") === k).length;
+          return n > 0 ? <span key={k}>{ic} {n}</span> : null;
+        })}
+      </div>
+    </div>
+  );
+}
+
+function SessionDetail({ s, id, slug }) {
+  const useSlug = slug || id;
+  const { data, loading, error, refetch } = useApi(
+    useSlug ? `/api/arcana/sessions/by-slug/${useSlug}` : null, [useSlug]
+  );
+  const [page, setPage] = useState(0);
+  const [summarizing, setSummarizing] = useState(false);
+  const [localSummary, setLocalSummary] = useState(null);
+  const touchRef = useRef({ x: 0 });
+
+  if (loading) return <Empty s={s} text="Загружаю..." />;
+  if (error) return <ErrorBox s={s} error={error} refetch={refetch} />;
+  const group = adaptSessionGroup(data);
+  if (!group) return null;
+
+  const triplets = group.triplets || [];
+  const isSolo = group.isSolo || triplets.length <= 1;
+  const totalSlides = isSolo ? triplets.length : triplets.length + 1;
+  const showOverview = !isSolo && page === 0;
+  const tripletIdx = isSolo ? page : page - 1;
+  const t = triplets[tripletIdx];
+  const deckId = t?.deckId || "rider-waite";
+
+  const summarize = async () => {
+    if (summarizing || isSolo) return;
+    setSummarizing(true);
+    try {
+      const r = await apiPost(`/api/arcana/sessions/by-slug/${group.slug}/summarize`);
+      setLocalSummary(r.summary || "");
+    } catch (e) {
+      alert("Не получилось: " + e.message);
+    } finally { setSummarizing(false); }
+  };
+
+  const groupForRender = { ...group, summary: localSummary || group.summary };
+
+  const onTouchStart = (e) => { touchRef.current.x = e.touches[0].clientX; };
+  const onTouchEnd = (e) => {
+    const dx = e.changedTouches[0].clientX - touchRef.current.x;
+    if (Math.abs(dx) < 40) return;
+    if (dx < 0 && page < totalSlides - 1) setPage(page + 1);
+    else if (dx > 0 && page > 0) setPage(page - 1);
+  };
+
+  const handleVerdict = (tid, newV) => {
+    triplets.forEach((tt) => { if (tt.id === tid) tt.verdict = newV; });
+  };
+
+  return (
+    <div onTouchStart={onTouchStart} onTouchEnd={onTouchEnd}>
+      {!isSolo && (
+        <div style={{
+          display: "flex", justifyContent: "center", gap: 6, marginBottom: 10,
+        }}>
+          {Array.from({ length: totalSlides }).map((_, i) => (
+            <div key={i} onClick={() => setPage(i)} style={{
+              width: i === page ? 22 : 6, height: 6, borderRadius: 3,
+              background: i === page ? s.acc : s.brd, cursor: "pointer",
+              transition: "width 0.2s",
+            }} />
+          ))}
+        </div>
+      )}
+
+      {showOverview ? (
+        <SessionPagerOverview
+          s={s} group={groupForRender}
+          onJump={(slideIdx) => setPage(slideIdx)}
+          onSummarize={summarize} summarizing={summarizing}
+        />
+      ) : t ? (
+        <TripletSlide s={s} t={t} deckId={deckId} onVerdict={handleVerdict} />
+      ) : null}
+
+      {!isSolo && (
+        <div style={{
+          display: "flex", justifyContent: "space-between",
+          marginTop: 14, gap: 8,
+        }}>
+          <div onClick={() => page > 0 && setPage(page - 1)} style={{
+            flex: 1, textAlign: "center", padding: "10px",
+            borderRadius: 10, background: s.card,
+            border: `1px solid ${s.brd}`, opacity: page > 0 ? 1 : 0.3,
+            cursor: page > 0 ? "pointer" : "default", fontSize: fs(12),
+          }}>‹ {page === 1 ? "Все вопросы" : "Назад"}</div>
+          <div onClick={() => page < totalSlides - 1 && setPage(page + 1)} style={{
+            flex: 1, textAlign: "center", padding: "10px",
+            borderRadius: 10, background: s.card,
+            border: `1px solid ${s.brd}`, opacity: page < totalSlides - 1 ? 1 : 0.3,
+            cursor: page < totalSlides - 1 ? "pointer" : "default", fontSize: fs(12),
+          }}>{page < totalSlides - 1 ? "Дальше ›" : "—"}</div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function _SessionDetailLegacy({ s, id }) {
   const { data, loading, error, refetch } = useApi(id ? `/api/arcana/sessions/${id}` : null, [id]);
   if (loading) return <Empty s={s} text="Загружаю..." />;
   if (error) return <ErrorBox s={s} error={error} refetch={refetch} />;
@@ -4602,7 +4953,13 @@ export default function App() {
         onClose={() => setModal(null)}
         title="Расклад"
       >
-        {modal?.payload?.id && <SessionDetail s={sky} id={modal.payload.id} />}
+        {(modal?.payload?.slug || modal?.payload?.id) && (
+          <SessionDetail
+            s={sky}
+            id={modal.payload.id}
+            slug={modal.payload.slug || modal.payload.id}
+          />
+        )}
       </Sheet>
 
       <Sheet
