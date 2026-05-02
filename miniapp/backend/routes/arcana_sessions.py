@@ -265,11 +265,15 @@ async def list_sessions(
 
 async def _serialize_triplet(page: dict, clients_map: dict, tz_offset: int) -> dict:
     interp_raw = rich_text_plain(page, "Трактовка")
-    bottom_name, interp_cleaned = extract_bottom_from_interp(interp_raw)
+    bottom_name_legacy, interp_cleaned = extract_bottom_from_interp(interp_raw)
     cards_raw = rich_text_plain(page, "Карты")
 
     deck_raw = ", ".join(multi_select_names(page, "Колоды")) or None
     deck_id = resolve_deck_id(deck_raw)
+
+    # Дно колоды: новое поле «Дно колоды» (rich_text) > legacy парсинг из interp
+    bottom_field = rich_text_plain(page, "Дно колоды").strip()
+    bottom_name = bottom_field or bottom_name_legacy or ""
 
     cards = parse_cards_raw(cards_raw, deck_id) if cards_raw else []
     bottom_card = canonical_card(deck_id, bottom_name) if bottom_name else None

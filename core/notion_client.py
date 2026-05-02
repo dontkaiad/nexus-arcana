@@ -705,6 +705,41 @@ async def client_add(
         props["🪪 Пользователи"] = _relation(user_notion_id)
     return await page_create(config.arcana.db_clients, props)
 
+# Кеш {user_notion_id: client_page_id} для self-клиента «Кай (личный)».
+_SELF_CLIENT_CACHE: dict[str, str] = {}
+
+
+async def resolve_self_client(user_notion_id: str = "") -> Optional[str]:
+    """Найти запись self-client в 👥 Клиенты для текущего пользователя.
+
+    Ищет по подстроке «личный» в Имени (case-insensitive). Кеширует ID
+    в process-локальном dict, чтобы не дёргать Notion на каждый расклад.
+    Возвращает page_id клиента или None.
+    """
+    cached = _SELF_CLIENT_CACHE.get(user_notion_id or "_default_")
+    if cached:
+        return cached
+    from core.config import config
+    base_filter = {"property": "Имя", "title": {"contains": "личный"}}
+    filters = _with_user_filter(base_filter, user_notion_id)
+    try:
+        results = await query_pages(
+            config.arcana.db_clients, filters=filters, page_size=5
+        )
+    except Exception as e:
+        logger.warning("resolve_self_client query failed: %s", e)
+        return None
+    if not results:
+        logger.warning(
+            "resolve_self_client: запись 'Кай (личный)' не найдена — "
+            "заведи её в 👥 Клиенты"
+        )
+        return None
+    cid = results[0]["id"]
+    _SELF_CLIENT_CACHE[user_notion_id or "_default_"] = cid
+    return cid
+
+
 async def client_find(name: str, user_notion_id: str = "") -> Optional[dict]:
     from core.config import config
     base_filter = {"property": "Имя", "title": {"contains": name}}
@@ -976,6 +1011,7 @@ async def session_add(
     title: Optional[str] = None,
     session: Optional[str] = None,
     triplet_summary: Optional[str] = None,
+    bottom_card: Optional[str] = None,
 ) -> Optional[str]:
     if session:
         session = await _resolve_canonical_session_name(
@@ -1017,15 +1053,21 @@ async def session_add(
         props["Сессия"] = _text(session)
     if triplet_summary:
         props["Саммари триплета"] = _text(triplet_summary[:1800])
+    if bottom_card:
+        # bottom_card должен прийти уже в EN-каноне (резолвит хендлер).
+        props["Дно колоды"] = _text(bottom_card[:200])
     try:
         return await page_create(db_id, props)
     except Exception as e:
         msg = str(e).lower()
         # Откат: если упали из-за неизвестного поля — пробуем без новых.
-        if ("сессия" in msg or "саммари" in msg or "property" in msg or "validation" in msg) \
-                and (session or triplet_summary):
+        if (
+            "сессия" in msg or "саммари" in msg or "дно" in msg
+            or "property" in msg or "validation" in msg
+        ) and (session or triplet_summary or bottom_card):
             props.pop("Сессия", None)
             props.pop("Саммари триплета", None)
+            props.pop("Дно колоды", None)
             return await page_create(db_id, props)
         raise
 
