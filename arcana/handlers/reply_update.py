@@ -51,17 +51,33 @@ async def handle_reply_update(message: Message, user_notion_id: str = "") -> boo
         )
         summary = await format_applied(applied)
 
-        # Спец-кейс: reply на работу выставил дедлайн → предложить напоминание.
-        reply_kb = None
+        # Спец-кейс: reply на работу выставил дедлайн → авто-напоминание
+        # (deadline - 1 день), как в новом preview-flow.
         if page_type == "work" and "Дедлайн" in applied:
             try:
-                from arcana.handlers.work_kb import reminder_keyboard
-                reply_kb = reminder_keyboard(page_id)
-                summary += "\n\n⏰ Напомнить?"
-            except Exception:
-                pass
+                from datetime import datetime, timedelta
+                from core.notion_client import update_page
+                from core.shared_handlers import get_user_tz
+                from arcana.bot import arcana_reminder_flow
 
-        await message.answer(f"✏️ Дополнено:\n{summary}", reply_markup=reply_kb)
+                deadline = applied.get("Дедлайн") or ""
+                iso = deadline if "T" in deadline else f"{deadline[:10]}T09:00"
+                dt = datetime.strptime(iso[:16], "%Y-%m-%dT%H:%M")
+                reminder = (dt - timedelta(days=1)).strftime("%Y-%m-%dT%H:%M")
+                tz_offset = await get_user_tz(message.from_user.id)
+                await arcana_reminder_flow.schedule_reminder(
+                    chat_id=message.chat.id,
+                    title=applied.get("Работа") or "Работа",
+                    reminder_dt=reminder,
+                    page_id=page_id,
+                    tz_offset=int(tz_offset),
+                )
+                await update_page(page_id, {"Напоминание": {"date": {"start": reminder}}})
+                summary += f"\n🔔 Напомню: {reminder.replace('T', ' ')}"
+            except Exception as e:
+                logger.warning("auto-reminder on reply failed: %s", e)
+
+        await message.answer(f"✏️ Дополнено:\n{summary}")
         await react(message, "✍️")
         return True
 

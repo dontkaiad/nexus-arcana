@@ -291,6 +291,15 @@ async def route_message(message: Message, user_notion_id: str = "", _text: str =
             await react(message, reaction_for("session"))
             return
 
+        # ── Pending: превью работы (preview-flow, паритет с Nexus) ────────
+        from arcana.handlers.work_preview import (
+            has_pending as has_work_pending, handle_work_clarification,
+        )
+        if has_work_pending(uid):
+            handled = await handle_work_clarification(message)
+            if handled:
+                return
+
         # ── Флоу переспроса ──────────────────────────────────────────────────
         if uid in _clarify:
             original = _clarify.pop(uid)
