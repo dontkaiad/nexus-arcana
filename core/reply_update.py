@@ -71,10 +71,18 @@ _TASK_REPLY_SYSTEM = (
 )
 
 _CLIENT_REPLY_SYSTEM = (
-    "Ты парсишь дополнение к карточке клиента. Ответь JSON без markdown:\n"
+    "Ты парсишь reply Кай на сообщение бота про клиента. Ответь JSON без markdown:\n"
     '{"contact": "контакт или null", '
     '"request": "запрос/тема или null", '
-    '"notes": "заметки или null"}\n'
+    '"notes": "заметки или null", '
+    '"new_type": "Платный" | "Бесплатный" | null, '
+    '"new_name": "новое имя или null"}\n\n'
+    "Правила:\n"
+    "- 'сделай платным/платной/в платный' → new_type='Платный'\n"
+    "- 'бесплатно', 'бесплатной/бесплатным', 'в подарок', 'без оплаты' → new_type='Бесплатный'\n"
+    "- 'self', 'себе', 'личный' → НЕ устанавливай (verboten — Self только вручную). new_type=null\n"
+    "- 'переименуй в X', 'имя X', 'назови X' → new_name='X'\n"
+    "- 'добавь заметку Y', 'заметка: Y' → notes='Y'\n"
     "Если поле не упомянуто — null."
 )
 
@@ -120,6 +128,9 @@ _TASK_FIELDS = {
 _CLIENT_FIELDS = {
     "contact": ("Контакт_append", "append_text"),
     "request": ("Запрос_append",  "append_text"),
+    "notes":   ("Заметки_append", "append_text"),
+    "new_type": ("Тип клиента",   "client_type"),
+    "new_name": ("Имя",           "title"),
 }
 
 _TYPE_TO_FIELDS = {
@@ -270,6 +281,21 @@ async def apply_updates(
                 real = await match_select(db_id, notion_field, str(value))
             props[notion_field] = _multi_select([real])
             applied[notion_field] = real
+
+        elif field_type == "client_type":
+            # Safety: «Self» не задаётся через reply, только вручную в Notion.
+            t = str(value).strip().lower()
+            if "self" in t or "лични" in t or "себе" in t:
+                applied["⚠️"] = "Self нельзя установить через reply"
+                continue
+            from core.notion_client import (
+                CLIENT_TYPE_PAID, CLIENT_TYPE_FREE, _SELF_CLIENT_CACHE,
+            )
+            canonical = CLIENT_TYPE_FREE if "беспл" in t else CLIENT_TYPE_PAID
+            props[notion_field] = _select(canonical)
+            applied[notion_field] = canonical
+            # Self-кеш мог содержать этот id — сбросить на всякий случай.
+            _SELF_CLIENT_CACHE.clear()
 
         elif field_type == "append_text":
             # Разбираем псевдо-имя 'Foo_append'
