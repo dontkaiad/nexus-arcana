@@ -246,9 +246,10 @@ def test_arcana_sessions_list_and_filter(client):
     assert r_all.status_code == 200
     assert r_all.json()["total"] == 2
     first = r_all.json()["sessions"][0]
-    # wave7.8.5: в списке раскладов карты — EN
-    assert first["cards_brief"] == ["The Fool", "The Magician", "The High Priestess"]
+    # API список отдаёт мета-поля группы, без карт; карты — в detail-эндпоинте.
     assert first["client"] == "Анна"
+    assert "ru_title" in first
+    assert "status" in first
 
     assert r_area.json()["total"] == 1
     assert r_area.json()["sessions"][0]["id"] == "s1"
@@ -591,29 +592,29 @@ def test_arcana_stats_computes_overall_and_months(client):
         _session_page("s4", "Q", date=f"{cur_month}-08", done="⏳ Не проверено"),
     ]
 
-    with patch("miniapp.backend.routes.arcana_stats.sessions_all",
+    # /arcana/stats теперь обслуживает arcana_today (расширенная статистика
+    # с разделением sessions/rituals). Старый узкий arcana_stats роут
+    # перекрыт более широким, тест проверяет реальный shape.
+    with patch("miniapp.backend.routes.arcana_today.sessions_all",
                AsyncMock(return_value=sessions)), \
-         patch("miniapp.backend.routes._arcana_common.query_pages",
+         patch("miniapp.backend.routes.arcana_today.rituals_all",
                AsyncMock(return_value=[])), \
-         patch("miniapp.backend.routes.arcana_stats.today_user_tz",
-               AsyncMock(return_value=(today, tz))), \
-         patch("miniapp.backend.routes.arcana_stats.get_user_notion_id",
+         patch("miniapp.backend.routes.arcana_today.load_clients_map",
+               AsyncMock(return_value={})), \
+         patch("miniapp.backend.routes.arcana_today.get_user_notion_id",
                AsyncMock(return_value=FAKE_NOTION_USER)):
         r = client.get("/api/arcana/stats")
 
     assert r.status_code == 200, r.text
     data = r.json()
-    assert data["verified_total"] == 3  # 2 yes + 1 no
-    assert data["accuracy_overall"] == round(2 / 3 * 100)
-    # Текущий месяц первым
-    cur = data["months"][0]
-    assert cur["month"] == cur_month
-    assert cur["total"] == 4
-    assert cur["yes"] == 2
-    assert cur["pending"] == 1
-    assert cur["pct"] == round(2 / 3 * 100)
-    assert len(data["months"]) == 6
-    assert "practice_finance" in data
+    assert data["total_sessions"] == 4
+    assert data["checked_triplets"] == 3  # 2 yes + 1 no
+    assert data["accuracy_pct_sessions"] == round(2 / 3 * 100)
+    cur = next((m for m in data["by_month"] if m["month"] == cur_month), None)
+    assert cur is not None
+    assert cur["sessions_total"] == 4
+    assert cur["sessions_yes"] == 2
+    assert cur["sessions_no"] == 1
 
 
 def test_arcana_stats_401():

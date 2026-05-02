@@ -338,7 +338,8 @@ def test_finance_view_goals(client):
     assert goal["target"] == 100000
     assert goal["saved"] == 0
     assert goal["monthly"] == 8000
-    assert goal["after"] is None
+    # При monthly>0 и target>0 API возвращает ETA-строку «~месяц YYYY»
+    assert isinstance(goal["after"], str) and goal["after"].startswith("~")
 
 
 def test_finance_invalid_view(client):
@@ -447,7 +448,7 @@ def test_lists_401_without_init_data():
 def test_memory_excludes_budget_and_adhd_categories(client):
     pages = [
         _mem("m1", "Chapman = сигареты", cat="🛒 Предпочтения", key="chapman"),
-        _mem("m2", "Работает техника 2 минут", cat="🧠 СДВГ", key="2min"),
+        _mem("m2", "Работает техника 2 минут", cat="🦋 СДВГ", key="2min"),
         _mem("m3", "доход: ЗП — 115000₽", cat="📥 Доход", key="income_zp"),
         _mem("m4", "подруга Аня", cat="👥 Люди", key="anya"),
     ]
@@ -487,7 +488,7 @@ def test_memory_cat_filter(client):
 
 
 def test_memory_adhd_returns_records_and_uses_cache(client):
-    pages = [_mem("a1", "Работает техника 2 минут", cat="🧠 СДВГ")]
+    pages = [_mem("a1", "Работает техника 2 минут", cat="🦋 СДВГ")]
     sonnet = AsyncMock(return_value="Персональный профиль...")
 
     async def qp(*_, **__):
@@ -502,7 +503,9 @@ def test_memory_adhd_returns_records_and_uses_cache(client):
 
     assert r1.status_code == 200
     assert r1.json()["profile"] == "Персональный профиль..."
-    assert len(r1.json()["records"]) == 1
+    # API группирует записи по типам (patterns/strategies/triggers/specifics).
+    groups = r1.json()["groups"]
+    assert sum(len(v) for v in groups.values()) == 1
     assert r2.json()["profile"] == "Персональный профиль..."
     # Sonnet должен быть вызван ровно один раз — второй ответ из кэша
     assert sonnet.await_count == 1
