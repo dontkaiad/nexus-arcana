@@ -194,6 +194,7 @@ pending_budget.db
 pending_clients.db
 pending_lists.db
 pending_tarot.db
+pending_works.db
 data/nexus_streaks.db
 tests/e2e_session.session
 tests/.env.test

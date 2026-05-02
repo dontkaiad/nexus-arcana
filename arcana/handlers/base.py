@@ -35,10 +35,10 @@ ritual       — алиас на ritual_done (для legacy роутинга).
 debt         — долги клиентов
 tarot_interp — трактовка таро
 delete       — удалить записи («удали», «удалить», «убери»)
-work         — работа ПО ПРАКТИКЕ общего вида: «закупить свечи», «подготовить колоду», «соцсети», дедлайн без клиента. НЕ бытовые.
+work         — работа ПО ПРАКТИКЕ. ОБЯЗАТЕЛЬНО есть эзотерический маркер: «свечи», «колоду», «соцсети практики», «гримуар», «таро», имя клиента + действие («подготовить раскладку для Маши»). БЕЗ маркера — НЕ work.
 work_done    — работа (по практике) сделана, выполнил работу
 work_list    — список работ, что делать по практике
-nexus        — финансы, расходы, доходы, заметки, покупки, а также БЫТОВЫЕ ЗАДАЧИ: «задача …», «таск …», «напомни купить», «сделать по дому», «позвонить маме». Если слово «задача» — всегда nexus, НЕ work.
+nexus        — БЫТОВЫЕ задачи и финансы. Любое «сделать X», «купить Y», «позвонить Z», «написать», «починить», «созвон», «миниапп», «код», «запись врача» БЕЗ слов про практику (ритуал/расклад/таро/клиент/свечи/колода) → nexus. Слово «задача» — всегда nexus, НЕ work. Бытовые покупки → nexus.
 finance      — финансы практики, сколько заработала, расходы, прибыль
 grimoire_add    — записать в гримуар (заговор, рецепт, комбинация, заметка)
 grimoire        — открыть гримуар, посмотреть записи
@@ -364,6 +364,18 @@ async def route_message(message: Message, user_notion_id: str = "", _text: str =
             _final_emoji = reaction_for("ritual")
             await react(message, _final_emoji)
             return
+
+        # Guard CLAUDE.md: «работа» без эзотерических маркеров — это бытовуха,
+        # её место в Nexus. Если интент попал в work/ritual_planned/session_planned
+        # но в тексте НЕТ практических ключей — переспросим.
+        from arcana.handlers.intent_resolve import (
+            ask_practice_or_nexus, looks_like_practice,
+        )
+        if intent in ("work", "ritual_planned", "session_planned"):
+            if not looks_like_practice(text):
+                await ask_practice_or_nexus(message, text, user_notion_id)
+                await react(message, "🤔")
+                return
 
         handler = dispatch.get(intent)
         if handler:
