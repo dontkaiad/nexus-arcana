@@ -685,12 +685,23 @@ async def log_error(
 
 # ─── Arcana: Clients ──────────────────────────────────────────────────────────
 
+CLIENT_TYPE_SELF = "🌟 Self"
+CLIENT_TYPE_PAID = "🤝 Платный"
+CLIENT_TYPE_FREE = "🎁 Бесплатный"
+
+
+def should_skip_payment(client_type: Optional[str]) -> bool:
+    """Self или Бесплатный → не показываем кнопки оплаты после расклада/ритуала."""
+    return (client_type or "") in (CLIENT_TYPE_SELF, CLIENT_TYPE_FREE)
+
+
 async def client_add(
     name: str,
     contact: str = "",
     request: str = "",
     date: Optional[str] = None,
     user_notion_id: str = "",
+    client_type: Optional[str] = None,
 ) -> Optional[str]:
     from core.config import config
     if not date:
@@ -700,10 +711,29 @@ async def client_add(
         "Контакт":  _text(contact),
         "Запрос":   _text(request),
         "Статус":   _select("🟢 Активный"),
+        "Тип клиента": _select(client_type or CLIENT_TYPE_PAID),
     }
     if user_notion_id:
         props["🪪 Пользователи"] = _relation(user_notion_id)
-    return await page_create(config.arcana.db_clients, props)
+    try:
+        return await page_create(config.arcana.db_clients, props)
+    except Exception as e:
+        msg = str(e).lower()
+        if "тип клиента" in msg or "property" in msg or "validation" in msg:
+            props.pop("Тип клиента", None)
+            return await page_create(config.arcana.db_clients, props)
+        raise
+
+
+async def client_get_type(client_page_id: str) -> Optional[str]:
+    """Читает «Тип клиента» select из 👥 Клиенты. None если поле пустое или
+    нет доступа."""
+    try:
+        page = await get_page(client_page_id)
+    except Exception:
+        return None
+    sel = (page.get("properties", {}).get("Тип клиента", {}) or {}).get("select")
+    return sel["name"] if sel else None
 
 # Кеш {user_notion_id: client_page_id} для self-клиента «Кай (личный)».
 _SELF_CLIENT_CACHE: dict[str, str] = {}
@@ -720,19 +750,31 @@ async def resolve_self_client(user_notion_id: str = "") -> Optional[str]:
     if cached:
         return cached
     from core.config import config
-    base_filter = {"property": "Имя", "title": {"contains": "личный"}}
+    # Сначала пробуем по «Тип клиента» = 🌟 Self (новая схема).
+    base_filter = {"property": "Тип клиента", "select": {"equals": CLIENT_TYPE_SELF}}
     filters = _with_user_filter(base_filter, user_notion_id)
     try:
         results = await query_pages(
             config.arcana.db_clients, filters=filters, page_size=5
         )
     except Exception as e:
-        logger.warning("resolve_self_client query failed: %s", e)
-        return None
+        logger.warning("resolve_self_client by type failed: %s", e)
+        results = []
+    if not results:
+        # Fallback: по подстроке «личный» в имени (legacy / до миграции).
+        base_filter = {"property": "Имя", "title": {"contains": "личный"}}
+        filters = _with_user_filter(base_filter, user_notion_id)
+        try:
+            results = await query_pages(
+                config.arcana.db_clients, filters=filters, page_size=5
+            )
+        except Exception as e:
+            logger.warning("resolve_self_client by name failed: %s", e)
+            return None
     if not results:
         logger.warning(
-            "resolve_self_client: запись 'Кай (личный)' не найдена — "
-            "заведи её в 👥 Клиенты"
+            "resolve_self_client: запись Self-клиента не найдена — "
+            "проверь Тип клиента = 🌟 Self в 👥 Клиенты"
         )
         return None
     cid = results[0]["id"]
