@@ -29,7 +29,31 @@ PARSE_RITUAL_SYSTEM = (
     '"forces": "силы", "structure": "последовательность", '
     '"notes": "заметки или null", '
     '"amount": число, "paid": число, '
-    '"payment_source": "карта|наличные|бартер или null"}'
+    '"payment_source": "карта|наличные|бартер или null", '
+    '"needs_clarification": true|false}\n\n'
+    "Толерантно к опечаткам в типах ритуалов:\n"
+    "- 'финансковый', 'финансовое' → 'финансы'\n"
+    "- 'люберый', 'любовное' → 'любовь'\n"
+    "- 'очистка', 'чистка', 'почистить' → 'очищение'\n"
+    "- 'развязать', 'разрыв' → 'развязка'\n"
+    "- 'приворот', 'приворожить' → 'приворот'\n"
+    "- 'защитить', 'оберег' → 'защита'\n"
+    "- 'привлечь' → 'привлечение'\n"
+    "- 'порча', 'наведение' → 'деструктив'\n\n"
+    "Если ввод слишком короткий или неясный (нет описания структуры/сил/"
+    "подробностей, только тема) — установи needs_clarification=true. "
+    "name и goal попробуй извлечь даже из короткого ввода. "
+    "Иначе needs_clarification=false."
+)
+
+
+CLARIFICATION_TEXT = (
+    "🤔 Расскажи подробнее, что в ритуале:\n"
+    "- какие силы используешь\n"
+    "- структура (свечи, заговоры, время)\n"
+    "- расходники, подношения\n"
+    "- где делаешь\n\n"
+    "Опиши одним сообщением — добавлю к уже понятому."
 )
 
 
@@ -39,7 +63,16 @@ async def handle_add_ritual(message: Message, text: str, user_notion_id: str = "
         tz_offset = await get_user_tz(tg_id)
         tz = timezone(timedelta(hours=tz_offset))
 
-        raw = await ask_claude(text, system=PARSE_RITUAL_SYSTEM, max_tokens=600)
+        # Если есть pending clarification — мерджим старый ввод с новым.
+        from arcana.pending_tarot import get_pending, save_pending, delete_pending
+        pending = await get_pending(tg_id)
+        accumulated_text = text
+        if pending and pending.get("type") == "awaiting_ritual_clarification":
+            accumulated_text = (pending.get("text") or "") + "\n" + text
+
+        raw = await ask_claude(
+            accumulated_text, system=PARSE_RITUAL_SYSTEM, max_tokens=600,
+        )
         try:
             raw = raw.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
             data = json.loads(raw)
@@ -47,6 +80,19 @@ async def handle_add_ritual(message: Message, text: str, user_notion_id: str = "
             await log_error(text, "parse_error", bot_label="🌒 Arcana", error_code="–")
             await message.answer("⚠️ Не смог разобрать ритуал. Опиши подробнее.")
             return
+
+        # Если Sonnet говорит «слишком короткий ввод» — спрашиваем уточнение
+        # и сохраняем накопленный текст в pending.
+        if data.get("needs_clarification") is True and not pending:
+            await save_pending(tg_id, {
+                "type": "awaiting_ritual_clarification",
+                "text": accumulated_text,
+            })
+            await message.answer(CLARIFICATION_TEXT)
+            return
+        # После уточнения чистим pending независимо от исхода.
+        if pending and pending.get("type") == "awaiting_ritual_clarification":
+            await delete_pending(tg_id)
 
         client_name = data.get("client_name")
         client_id = None

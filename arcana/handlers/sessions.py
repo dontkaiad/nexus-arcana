@@ -733,6 +733,37 @@ async def handle_add_session(
 
 # ────────────────────────── Multi-question (сессия) ───────────────────────
 
+def _resolve_dialog_kb(slug: str) -> InlineKeyboardMarkup:
+    """4 кнопки: новый платный / новый бесплатный / self / отмена."""
+    from core.utils import cancel_button, secondary_button
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(
+                text="🤝 Новый клиент (Платный)",
+                callback_data=f"client_resolve_new_paid:{slug}",
+            ),
+        ],
+        [
+            InlineKeyboardButton(
+                text="🎁 Новый клиент (Бесплатный)",
+                callback_data=f"client_resolve_new_free:{slug}",
+            ),
+        ],
+        [
+            InlineKeyboardButton(
+                text="🌟 Это мне (self)",
+                callback_data=f"client_resolve_self:{slug}",
+            ),
+            cancel_button("❌ Отмена", f"client_resolve_cancel:{slug}"),
+        ],
+    ])
+
+
+def _short_resolve_slug() -> str:
+    import secrets
+    return secrets.token_hex(8)
+
+
 async def _handle_multi_session(
     message: Message,
     data: dict,
@@ -740,9 +771,17 @@ async def _handle_multi_session(
     tz: timezone,
     tz_offset: float,
     user_notion_id: str,
+    *,
+    forced_client_id: Optional[str] = None,
+    forced_client_name: Optional[str] = None,
+    forced_is_personal: bool = False,
 ) -> None:
     """Парсер увидел структуру «Тема: 1) … 2) …» — сохраняем N триплетов
-    в одной сессии без preview-флоу: каждый получает свою трактовку и саммари."""
+    в одной сессии без preview-флоу: каждый получает свою трактовку и саммари.
+
+    forced_client_id/name/is_personal — выставляются после resolve-диалога,
+    чтобы пропустить find/ask логику.
+    """
     tg_id = message.from_user.id
     session_name: str = (data.get("session_name") or "").strip()
     session_category = _resolve_session_category(
@@ -750,25 +789,55 @@ async def _handle_multi_session(
     )
     deck_raw = data.get("deck") or "Уэйт"
     deck = _match_deck(deck_raw) or "Уэйт"
-    client_name = (data.get("client_name") or "").strip() or None
+    parsed_client_name = (data.get("client_name") or "").strip() or None
+    client_name = forced_client_name or parsed_client_name
 
-    # Клиент / личный — резолвим один раз на сессию
-    client_id: Optional[str] = None
-    if client_name:
-        c = await client_find(client_name, user_notion_id=user_notion_id)
-        client_id = c["id"] if c else None
-    else:
-        from core.notion_client import resolve_self_client
-        client_id = await resolve_self_client(user_notion_id=user_notion_id)
-        if not client_id:
-            from core.user_manager import get_user
-            owner = await get_user(tg_id)
-            owner_name = (owner or {}).get("name") or ""
-            if owner_name:
-                sc = await client_find(owner_name, user_notion_id=user_notion_id)
-                if sc:
-                    client_id = sc["id"]
-    is_personal = not client_name
+    # Клиент / личный — если уже резолвлен через dialog, используем как есть.
+    client_id: Optional[str] = forced_client_id
+    if not client_id and not forced_is_personal:
+        # Сначала пробуем по client_name (если задан) или session_name (для format A/B)
+        lookup_name = client_name or session_name
+        if lookup_name:
+            c = await client_find(lookup_name, user_notion_id=user_notion_id)
+            if c:
+                client_id = c["id"]
+                # Подтянем canonical имя из найденной записи
+                title_parts = (c.get("properties", {})
+                               .get("Имя", {}).get("title") or [])
+                if title_parts:
+                    client_name = title_parts[0].get("plain_text", "") or client_name
+            else:
+                # Не нашли — спрашиваем Кай через resolve-диалог.
+                from arcana.pending_tarot import save_pending
+                slug = _short_resolve_slug()
+                await save_pending(tg_id, {
+                    "type": "client_resolve_pending",
+                    "slug": slug,
+                    "data": data,
+                    "tz_offset": tz_offset,
+                    "user_notion_id": user_notion_id,
+                })
+                await message.answer(
+                    f"«{html.escape(lookup_name)}» — это:",
+                    parse_mode="HTML",
+                    reply_markup=_resolve_dialog_kb(slug),
+                )
+                return
+        else:
+            # session_name пустой → self-сессия по умолчанию.
+            from core.notion_client import resolve_self_client
+            client_id = await resolve_self_client(user_notion_id=user_notion_id)
+
+    if not client_id and not forced_is_personal:
+        # fallback на user_manager.owner
+        from core.user_manager import get_user
+        owner = await get_user(tg_id)
+        owner_name = (owner or {}).get("name") or ""
+        if owner_name:
+            sc = await client_find(owner_name, user_notion_id=user_notion_id)
+            if sc:
+                client_id = sc["id"]
+    is_personal = forced_is_personal or not client_name
 
     # Контекст предыдущих раскладов клиента — общий для всех триплетов
     prev_context = ""
@@ -961,6 +1030,23 @@ async def _handle_multi_session(
         )
     await message.answer(final_msg, parse_mode="HTML")
 
+    # Кнопки оплаты ЗА СЕССИЮ ЦЕЛИКОМ — anchor = first saved triplet.
+    # Skip для self/бесплатных и для сессий, где ни одного триплета не сохранили.
+    if first_page_id and client_id:
+        try:
+            from core.notion_client import client_get_type, should_skip_payment
+            from arcana.handlers.payment import payment_keyboard
+            ctype = await client_get_type(client_id)
+            if not should_skip_payment(ctype):
+                await message.answer(
+                    f"💰 Как оплатил(а) {html.escape(client_name or 'клиент(а)')} "
+                    f"за всю сессию?",
+                    parse_mode="HTML",
+                    reply_markup=payment_keyboard(first_page_id, "sessions"),
+                )
+        except Exception as e:
+            logger.warning("multi-flow payment kb skipped: %s", e)
+
 
 # ────────────────────────── Callbacks ──────────────────────────────────────
 
@@ -1055,6 +1141,136 @@ async def cb_triplet_remove(call: CallbackQuery) -> None:
         parse_mode="HTML",
         reply_markup=_triplet_remove_confirm_keyboard(short_id),
     )
+
+
+# ───────── Client resolve dialog (multi-flow с неизвестным именем) ─────────
+
+async def _resume_multi_after_resolve(
+    call: CallbackQuery,
+    pending: dict,
+    *,
+    forced_client_id: Optional[str],
+    forced_client_name: Optional[str],
+    forced_is_personal: bool,
+) -> None:
+    """Достаём parsed data из pending и продолжаем _handle_multi_session
+    с уже резолвленым клиентом."""
+    from arcana.pending_tarot import delete_pending
+    data = pending.get("data") or {}
+    tz_offset = float(pending.get("tz_offset") or 3)
+    user_notion_id = pending.get("user_notion_id") or ""
+    tz = timezone(timedelta(hours=tz_offset))
+    items = data.get("triplets") or data.get("items") or []
+    await delete_pending(call.from_user.id)
+    try:
+        await call.message.edit_reply_markup(reply_markup=None)
+    except Exception:
+        pass
+    await _handle_multi_session(
+        call.message, data, items, tz, tz_offset, user_notion_id,
+        forced_client_id=forced_client_id,
+        forced_client_name=forced_client_name,
+        forced_is_personal=forced_is_personal,
+    )
+
+
+async def _create_resolved_client(
+    user_notion_id: str, name: str, client_type: str
+) -> Optional[tuple[str, str]]:
+    from core.notion_client import client_add
+    from datetime import datetime as _dt, timezone as _tz
+    today = _dt.now(_tz.utc).strftime("%Y-%m-%d")
+    pid = await client_add(
+        name=name, date=today, user_notion_id=user_notion_id,
+        client_type=client_type,
+    )
+    return (pid, name) if pid else None
+
+
+@router.callback_query(F.data.startswith("client_resolve_new_paid:"))
+async def cb_client_resolve_new_paid(call: CallbackQuery) -> None:
+    await call.answer()
+    slug = call.data.split(":", 1)[1]
+    from arcana.pending_tarot import get_pending
+    pending = await get_pending(call.from_user.id) or {}
+    if pending.get("slug") != slug or pending.get("type") != "client_resolve_pending":
+        return
+    user_notion_id = pending.get("user_notion_id") or ""
+    name = (pending.get("data", {}).get("session_name") or "").strip()
+    if not name:
+        return
+    from core.notion_client import CLIENT_TYPE_PAID
+    res = await _create_resolved_client(user_notion_id, name, CLIENT_TYPE_PAID)
+    if not res:
+        await call.message.answer("⚠️ Не удалось создать клиента.")
+        return
+    cid, cname = res
+    await call.message.answer(
+        f"✅ Клиент «{html.escape(cname)}» создан · 🤝 Платный · обрабатываю сессию…",
+        parse_mode="HTML",
+    )
+    await _resume_multi_after_resolve(
+        call, pending,
+        forced_client_id=cid, forced_client_name=cname, forced_is_personal=False,
+    )
+
+
+@router.callback_query(F.data.startswith("client_resolve_new_free:"))
+async def cb_client_resolve_new_free(call: CallbackQuery) -> None:
+    await call.answer()
+    slug = call.data.split(":", 1)[1]
+    from arcana.pending_tarot import get_pending
+    pending = await get_pending(call.from_user.id) or {}
+    if pending.get("slug") != slug or pending.get("type") != "client_resolve_pending":
+        return
+    user_notion_id = pending.get("user_notion_id") or ""
+    name = (pending.get("data", {}).get("session_name") or "").strip()
+    if not name:
+        return
+    from core.notion_client import CLIENT_TYPE_FREE
+    res = await _create_resolved_client(user_notion_id, name, CLIENT_TYPE_FREE)
+    if not res:
+        await call.message.answer("⚠️ Не удалось создать клиента.")
+        return
+    cid, cname = res
+    await call.message.answer(
+        f"✅ Клиент «{html.escape(cname)}» создан · 🎁 Бесплатный · обрабатываю сессию…",
+        parse_mode="HTML",
+    )
+    await _resume_multi_after_resolve(
+        call, pending,
+        forced_client_id=cid, forced_client_name=cname, forced_is_personal=False,
+    )
+
+
+@router.callback_query(F.data.startswith("client_resolve_self:"))
+async def cb_client_resolve_self(call: CallbackQuery) -> None:
+    await call.answer()
+    slug = call.data.split(":", 1)[1]
+    from arcana.pending_tarot import get_pending
+    pending = await get_pending(call.from_user.id) or {}
+    if pending.get("slug") != slug or pending.get("type") != "client_resolve_pending":
+        return
+    user_notion_id = pending.get("user_notion_id") or ""
+    from core.notion_client import resolve_self_client
+    cid = await resolve_self_client(user_notion_id=user_notion_id)
+    await call.message.answer("🌟 Личная сессия · обрабатываю…")
+    await _resume_multi_after_resolve(
+        call, pending,
+        forced_client_id=cid, forced_client_name=None, forced_is_personal=True,
+    )
+
+
+@router.callback_query(F.data.startswith("client_resolve_cancel:"))
+async def cb_client_resolve_cancel(call: CallbackQuery) -> None:
+    await call.answer()
+    from arcana.pending_tarot import delete_pending
+    await delete_pending(call.from_user.id)
+    try:
+        await call.message.edit_reply_markup(reply_markup=None)
+    except Exception:
+        pass
+    await call.message.answer("❌ Сессия отменена.")
 
 
 async def handle_triplet_correction(

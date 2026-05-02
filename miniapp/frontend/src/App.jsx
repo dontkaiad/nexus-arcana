@@ -2260,6 +2260,8 @@ function StatsSheet({ s, onClose }) {
   const cats = data?.by_category || [];
   const avgS = data?.avg_check_delay_sessions_days;
   const avgR = data?.avg_check_delay_rituals_days;
+  const byClientType = data?.by_client_type || {};
+  const byPaymentSource = data?.by_payment_source || {};
 
   return createPortal((
     <>
@@ -2288,17 +2290,23 @@ function StatsSheet({ s, onClose }) {
             </div>
 
             {pendingTotal > 0 && (
-              <div className="glass" style={{ padding: "12px 14px", marginTop: 10 }}>
-                <div className="card-h">
-                  <span className="card-title">⏳ Ждут вердикта</span>
-                  <span className="card-meta">{pendingTotal}</span>
+              <div className="glass" style={{ padding: "12px 14px", marginTop: 14 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+                  <span style={{ fontSize: 14 }}>⏳</span>
+                  <span style={{ fontFamily: "var(--f-display)", fontStyle: "italic", fontSize: 16 }}>
+                    Ждут вердикта
+                  </span>
                 </div>
-                <div style={{ fontSize: 13, color: s.text, lineHeight: 1.5 }}>
-                  {pendingS > 0 && <div>🃏 {pendingS} раскладов</div>}
-                  {pendingR > 0 && <div>🕯 {pendingR} ритуалов</div>}
+                <div style={{ fontSize: 13, opacity: 0.8, lineHeight: 1.5 }}>
+                  {pendingS > 0 && (
+                    <div>🃏 {pendingS} {plural(pendingS, "расклад", "расклада", "раскладов")}</div>
+                  )}
+                  {pendingR > 0 && (
+                    <div>🕯 {pendingR} {plural(pendingR, "ритуал", "ритуала", "ритуалов")}</div>
+                  )}
                 </div>
-                <div style={{ fontSize: 11, color: s.tM, marginTop: 6 }}>
-                  Открой в раскладах/ритуалах чтобы поставить вердикт →
+                <div style={{ fontSize: 11, opacity: 0.55, marginTop: 8, fontStyle: "italic" }}>
+                  Открой в Раскладах или Ритуалах чтобы поставить вердикт →
                 </div>
               </div>
             )}
@@ -2366,6 +2374,71 @@ function StatsSheet({ s, onClose }) {
                 ))}
               </div>
             )}
+
+            {scope !== "rituals" && Object.keys(byClientType).length > 0 && (
+              <div className="glass" style={{ padding: "12px 14px", marginTop: 10 }}>
+                <div className="card-h">
+                  <span className="card-title">По типу клиента</span>
+                </div>
+                {["🌟 Self", "🤝 Платный", "🎁 Бесплатный"].map((t) => {
+                  const b = byClientType[t];
+                  if (!b || b.sessions === 0) return null;
+                  return (
+                    <div key={t} style={{ padding: "6px 0" }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13 }}>
+                        <span>{t}</span>
+                        <span style={{ color: s.tM }}>
+                          {b.sessions} {plural(b.sessions, "сессия", "сессии", "сессий")}
+                          {b.checked > 0 && ` · ${b.pct}%`}
+                        </span>
+                      </div>
+                      {b.checked > 0 && <Bar s={s} pct={b.pct} color={s.acc} />}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            {Object.keys(byPaymentSource).length > 0 && (() => {
+              const rows = [
+                ["💵 Наличные", byPaymentSource["💵 Наличные"]],
+                ["💳 Карта",    byPaymentSource["💳 Карта"]],
+                ["🔄 Бартер",   byPaymentSource["🔄 Бартер"]],
+                ["🎁 Подарок",  byPaymentSource["🎁 Подарок"]],
+              ].filter(([, b]) => b && ((b.sessions || 0) + (b.rituals || 0) > 0));
+              if (rows.length === 0) return null;
+              return (
+                <div className="glass" style={{ padding: "12px 14px", marginTop: 10 }}>
+                  <div className="card-h">
+                    <span className="card-title">Способы оплаты</span>
+                  </div>
+                  {rows.map(([label, b]) => {
+                    const ns = b.sessions || 0;
+                    const nr = b.rituals || 0;
+                    const isBarter = label === "🔄 Бартер";
+                    const isGift = label === "🎁 Подарок";
+                    return (
+                      <div key={label} style={{ padding: "6px 0", fontSize: 13 }}>
+                        <div style={{ display: "flex", justifyContent: "space-between" }}>
+                          <span>{label}</span>
+                          <span style={{ color: s.tM }}>
+                            {ns > 0 && `${ns} с.`}{ns > 0 && nr > 0 && " · "}{nr > 0 && `${nr} р.`}
+                            {!isBarter && !isGift && b.total_rub > 0 &&
+                              ` · ${b.total_rub.toLocaleString("ru-RU")}₽`}
+                          </span>
+                        </div>
+                        {isBarter && b.items && b.items.length > 0 && (
+                          <div style={{ fontSize: 11, color: s.tM, marginTop: 2, fontStyle: "italic" }}>
+                            {b.items.slice(0, 5).join(", ")}
+                            {b.items.length > 5 && ` … +${b.items.length - 5}`}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            })()}
 
             {(avgS != null || avgR != null) && (
               <div className="glass" style={{ padding: "12px 14px", marginTop: 10 }}>
