@@ -26,12 +26,16 @@ ROUTER_SYSTEM = """Сначала исправь опечатки, потом о
 new_client   — явное создание клиента: «создай», «добавь клиента», «новый клиент»
 client_info  — поиск/просмотр клиента: просто «клиент Имя», «что у Ани», «покажи клиента»
 session_search — поиск прошлых раскладов: «что падало на X», «расклады на X», «расклады про X», «покажи расклад про»
-session      — новый сеанс/расклад/таро (с картами или описанием вопроса)
-ritual       — ритуал
+session_done — РАСКЛАД УЖЕ СДЕЛАН: ввод с картами триплета («шут маг жрица», «1) что думает — карты»), глаголы прошедшего времени («разложила», «выпало», «делала расклад»). Алиас: session.
+session_planned — РАСКЛАД ЗАПЛАНИРОВАН: «разложить X», «сделать расклад X», «надо разложить», без карт.
+ritual_done  — РИТУАЛ УЖЕ ПРОВЕДЁН: «провела», «сделала», «отработала», «закончила», «вчера делала», «сегодня делала», + детали структуры/сил.
+ritual_planned — РИТУАЛ ЗАПЛАНИРОВАН: «надо сделать», «нужно провести», «запланировать», «хочу сделать», обычно без структуры.
+ritual_ambiguous — НЕОДНОЗНАЧНО: «ритуал на маше» / «приворот для Маши» БЕЗ глагола времени и БЕЗ структуры — нужно переспросить planned vs done.
+ritual       — алиас на ritual_done (для legacy роутинга).
 debt         — долги клиентов
 tarot_interp — трактовка таро
 delete       — удалить записи («удали», «удалить», «убери»)
-work         — работа ПО ПРАКТИКЕ: «работа:», «расклад для X», «ритуал для X», «подготовить колоду», «закупить свечи», дедлайн по клиенту/ритуалу. НЕ бытовые дела.
+work         — работа ПО ПРАКТИКЕ общего вида: «закупить свечи», «подготовить колоду», «соцсети», дедлайн без клиента. НЕ бытовые.
 work_done    — работа (по практике) сделана, выполнил работу
 work_list    — список работ, что делать по практике
 nexus        — финансы, расходы, доходы, заметки, покупки, а также БЫТОВЫЕ ЗАДАЧИ: «задача …», «таск …», «напомни купить», «сделать по дому», «позвонить маме». Если слово «задача» — всегда nexus, НЕ work.
@@ -317,9 +321,17 @@ async def route_message(message: Message, user_notion_id: str = "", _text: str =
 
         dispatch = {
             "new_client":   lambda: handle_add_client(message, text, user_notion_id),
+            # session_done и session — расклад со всеми деталями (multi/single)
             "session":        lambda: handle_add_session(message, text, user_notion_id),
+            "session_done":   lambda: handle_add_session(message, text, user_notion_id),
             "session_search": lambda: handle_session_search(message, text, user_notion_id),
+            # session_planned — это работа с категорией 🃏 Расклад
+            "session_planned": lambda: handle_add_work(message, text, user_notion_id),
+            # ritual_done — фактический ритуал; ritual — алиас
             "ritual":       lambda: handle_add_ritual(message, text, user_notion_id),
+            "ritual_done":  lambda: handle_add_ritual(message, text, user_notion_id),
+            # ritual_planned — это работа с категорией ✨ Ритуал
+            "ritual_planned": lambda: handle_add_work(message, text, user_notion_id),
             "client_info":  lambda: handle_client_info(message, text, user_notion_id),
             "debt":         lambda: handle_debts(message, user_notion_id),
             "tarot_interp": lambda: handle_tarot_interpret(message, text),
@@ -334,6 +346,15 @@ async def route_message(message: Message, user_notion_id: str = "", _text: str =
             "verify":          lambda: handle_verify(message, text, user_notion_id),
             "stats":        lambda: handle_stats(message, user_notion_id),
         }
+
+        # Ambiguous: «ритуал на маше» без глагола времени и без структуры —
+        # переспрашиваем planned vs done.
+        if intent == "ritual_ambiguous":
+            from arcana.handlers.intent_resolve import ask_ritual_disambiguation
+            await ask_ritual_disambiguation(message, text, user_notion_id)
+            _final_emoji = reaction_for("ritual")
+            await react(message, _final_emoji)
+            return
 
         handler = dispatch.get(intent)
         if handler:

@@ -135,6 +135,30 @@ async def handle_add_ritual(message: Message, text: str, user_notion_id: str = "
             await message.answer("⚠️ Ошибка записи в Notion.")
             return
 
+        # Авто-привязка к открытой Работе (категория ✨ Ритуал) + закрыть её.
+        work_closed = False
+        try:
+            from core.config import config as _cfg
+            from core.work_relation import (
+                attach_event_to_work, close_work_as_done,
+                find_active_work_for_client,
+            )
+            if client_id:
+                w_id = await find_active_work_for_client(
+                    client_id, "✨ Ритуал", user_notion_id,
+                )
+                if w_id:
+                    ok = await attach_event_to_work(
+                        event_db_id=_cfg.arcana.db_rituals,
+                        event_page_id=result,
+                        work_page_id=w_id,
+                    )
+                    if ok:
+                        await close_work_as_done(w_id)
+                        work_closed = True
+        except Exception as e:
+            logger.warning("ritual→work relation failed: %s", e)
+
         if amount > 0:
             await finance_add(
                 date=today,
@@ -167,6 +191,8 @@ async def handle_add_ritual(message: Message, text: str, user_notion_id: str = "
             if debt > 0:
                 money += f" · ⚠️ долг {int(debt)}₽"
             lines.append(money)
+        if work_closed:
+            lines.append("✅ Связанная Работа закрыта")
         lines.append("\n<i>↩️ Реплай чтобы дополнить</i>")
 
         # Если ритуал на 🤝 Платного клиента — сразу прикрепляем inline-оплату.

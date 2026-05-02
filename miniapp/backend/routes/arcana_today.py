@@ -637,7 +637,7 @@ async def get_arcana_stats(
         cats_list.append(c)
     cats_list.sort(key=lambda x: -x["total"])
 
-    return {
+    out: dict[str, Any] = {
         "total_sessions": len(sessions),
         "total_rituals": len(rituals),
         "total_triplets": len(sessions),
@@ -657,11 +657,12 @@ async def get_arcana_stats(
         "by_category": cats_list,
         "avg_check_delay_sessions_days": _avg_check_delay(sessions, _session_verdict),
         "avg_check_delay_rituals_days": _avg_check_delay(rituals, _ritual_verdict),
-        # Новые срезы (требуют поля «Тип клиента», «Источник», «Бартер · что»).
-        "by_client_type": _by_client_type(sessions, await _client_types_map(user_notion_id)),
-        "by_payment_source": _by_payment_source(sessions, rituals),
-        "barters_pending": _pending_barters(sessions, rituals, clients_map),
     }
+    type_map = await _client_types_map(user_notion_id)
+    out["by_client_type"] = _by_client_type(sessions, type_map)
+    out["by_payment_source"] = _by_payment_source(sessions, rituals, type_map)
+    out["barters_pending"] = _pending_barters(sessions, rituals, clients_map)
+    return out
 
 
 def _by_client_type(sessions: list[dict], type_map: dict[str, str]) -> dict:
@@ -688,14 +689,30 @@ def _by_client_type(sessions: list[dict], type_map: dict[str, str]) -> dict:
     return out
 
 
-def _by_payment_source(sessions: list[dict], rituals: list[dict]) -> dict:
+def _by_payment_source(
+    sessions: list[dict], rituals: list[dict],
+    type_map: Optional[dict[str, str]] = None,
+) -> dict:
+    """Способы оплаты — учитывает ТОЛЬКО клиентские записи (🤝 Платный).
+    Self и Бесплатных пропускаем — у них нет понятия источника оплаты."""
     out = {
         "💵 Наличные": {"sessions": 0, "rituals": 0, "total_rub": 0},
         "💳 Карта":    {"sessions": 0, "rituals": 0, "total_rub": 0},
         "🔄 Бартер":   {"sessions": 0, "rituals": 0, "items": []},
         "🎁 Подарок":  {"sessions": 0, "rituals": 0},
     }
+    type_map = type_map or {}
+
+    def _is_relevant_client(page: dict) -> bool:
+        cid = _client_id_of(page)
+        if not cid:
+            return False  # без клиента (legacy) — не учитываем
+        ctype = type_map.get(cid, "🤝 Платный")
+        return ctype == "🤝 Платный"
+
     for p in sessions:
+        if not _is_relevant_client(p):
+            continue
         src = select_of(p, "Источник") or ""
         amt, paid = _amount_paid(p, "Сумма", "Оплачено")
         if src in ("💵 Наличные", "💳 Карта"):
@@ -709,6 +726,8 @@ def _by_payment_source(sessions: list[dict], rituals: list[dict]) -> dict:
         elif amt == 0 and paid == 0:
             out["🎁 Подарок"]["sessions"] += 1
     for p in rituals:
+        if not _is_relevant_client(p):
+            continue
         src = select_of(p, "Источник оплаты") or ""
         amt, paid = _amount_paid(p, "Цена за ритуал", "Оплачено")
         if src in ("💵 Наличные", "💳 Карта"):
@@ -757,6 +776,69 @@ def _pending_barters(sessions: list[dict], rituals: list[dict], clients_map: dic
             "client": cname, "what": what, "since": date,
         })
     return out
+
+
+@router.get("/arcana/works")
+async def get_arcana_works(
+    tg_id: int = Depends(current_user_id),
+) -> dict[str, Any]:
+    """Активные Работы юзера: Status != Done, сорт по Дедлайн ASC nulls last."""
+    from datetime import date as _date
+    user_notion_id = (await get_user_notion_id(tg_id)) or ""
+    today_date, tz_offset = await today_user_tz(tg_id)
+    overdue, today_works = await _works_schedule(user_notion_id, today_date, tz_offset)
+    # _works_schedule возвращает только overdue + сегодня; для полной ленты —
+    # ещё все open works (Status != Done) — берём через query.
+    db_id = config.arcana.db_works
+    items: list[dict] = []
+    if db_id:
+        not_done = [
+            {"property": "Status", "status": {"does_not_equal": "Done"}},
+            {"property": "Status", "status": {"does_not_equal": "Complete"}},
+        ]
+        from core.notion_client import _with_user_filter, query_pages
+        filters = _with_user_filter({"and": not_done}, user_notion_id)
+        try:
+            pages = await query_pages(
+                db_id, filters=filters,
+                sorts=[{"property": "Дедлайн", "direction": "ascending"}],
+                page_size=200,
+            )
+        except Exception as e:
+            logger.warning("works list fetch failed: %s", e)
+            pages = []
+
+        clients_map = await load_clients_map(user_notion_id)
+        type_map = await _client_types_map(user_notion_id)
+        from miniapp.backend.routes._arcana_common import client_name_from
+        for p in pages:
+            props = p.get("properties", {})
+            title = title_plain(p, "Работа")
+            status_obj = (props.get("Status", {}) or {}).get("status") or {}
+            status = status_obj.get("name", "")
+            cat = (props.get("Категория", {}) or {}).get("select") or {}
+            prio = (props.get("Приоритет", {}) or {}).get("select") or {}
+            dl_raw = (props.get("Дедлайн", {}) or {}).get("date") or {}
+            dl_iso = dl_raw.get("start", "") if dl_raw else ""
+            dl_local = to_local_date(dl_iso, tz_offset)
+            is_overdue = bool(dl_local and dl_local < today_date)
+            cli_name, cli_id = client_name_from(p, clients_map)
+            ctype = type_map.get(cli_id or "", "") if cli_id else ""
+            items.append({
+                "id": p.get("id", ""),
+                "title": title or "—",
+                "status": status,
+                "priority": prio.get("name", ""),
+                "category": cat.get("name", ""),
+                "deadline": dl_iso,
+                "deadline_label": dl_iso[:16].replace("T", " ") if dl_iso else "",
+                "is_overdue": is_overdue,
+                "client": (
+                    {"id": cli_id, "name": cli_name, "type": ctype} if cli_id
+                    else None
+                ),
+            })
+    return {"works": items, "total": len(items)}
 
 
 @router.get("/arcana/accuracy")

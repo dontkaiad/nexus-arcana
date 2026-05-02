@@ -117,7 +117,16 @@ async def handle_add_work(message: Message, text: str, user_notion_id: str = "")
             lines.append(f"📅 Дедлайн: {deadline_raw}")
         lines.append(f"👥 {work_type}" + (f" · {client_name}" if client_name else ""))
         lines.append("\n<i>↩️ Реплай чтобы дополнить</i>")
-        bot_msg = await message.answer("\n".join(lines), parse_mode="HTML")
+
+        # Если дедлайна нет — спросим через inline-кнопки.
+        deadline_kb = None
+        if not deadline_raw:
+            from arcana.handlers.work_kb import deadline_keyboard
+            deadline_kb = deadline_keyboard(result)
+            lines.append("\n📅 Когда сделать?")
+        bot_msg = await message.answer(
+            "\n".join(lines), parse_mode="HTML", reply_markup=deadline_kb,
+        )
 
         from core.message_pages import save_message_page
         await save_message_page(
