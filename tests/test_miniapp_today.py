@@ -167,7 +167,7 @@ def test_today_returns_all_keys_and_classifies_tasks(client):
     # classification
     assert len(data["overdue"]) == 1
     assert data["overdue"][0]["id"] == "t-overdue"
-    assert data["overdue"][0]["cat"] == "💳"
+    assert data["overdue"][0]["cat"] == "💳 Прочее"
     assert data["overdue"][0]["prio"] == "🟡"
     assert data["overdue"][0]["days_ago"] == 2
 

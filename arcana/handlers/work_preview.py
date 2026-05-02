@@ -156,7 +156,11 @@ def _kb(slug: str) -> InlineKeyboardMarkup:
 # ── Парсеры ───────────────────────────────────────────────────────────────────
 
 async def _parse_work_text(text: str, tz_offset: int) -> dict:
-    """Первичный парсинг (Sonnet). Дублирует логику handle_add_work."""
+    """Первичный парсинг через Haiku — короткая структура, Sonnet излишне.
+
+    Промпт усилен few-shot примерами, чтобы Haiku стабильно отдавал JSON
+    с правильными deadline-форматами и client_name.
+    """
     from arcana.handlers.works import (
         PARSE_WORK_SYSTEM,
         WORK_CATEGORY_MAP,
@@ -166,7 +170,10 @@ async def _parse_work_text(text: str, tz_offset: int) -> dict:
     tz = timezone(timedelta(hours=tz_offset))
     now_str = datetime.now(tz).strftime("%Y-%m-%d %H:%M")
     system = PARSE_WORK_SYSTEM + f"\n\nСейчас: {now_str} (UTC+{tz_offset})"
-    raw = await ask_claude(text, system=system, max_tokens=300)
+    raw = await ask_claude(
+        text, system=system, max_tokens=300,
+        model="claude-haiku-4-5-20251001",
+    )
     raw = raw.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
     data = json.loads(raw)
 
