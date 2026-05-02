@@ -521,18 +521,22 @@ async def handle_add_session(
             if client:
                 client_id = client["id"]
         else:
-            # Личный расклад — привязать к клиенту-владельцу (если он заведён)
-            from core.user_manager import get_user
-            owner = await get_user(tg_id)
-            owner_name = (owner or {}).get("name") or ""
-            if owner_name:
-                self_client = await client_find(owner_name, user_notion_id=user_notion_id)
-                if self_client:
-                    client_id = self_client["id"]
+            # Личный расклад → автоматически на self-клиента «Кай (личный)».
+            from core.notion_client import resolve_self_client
+            client_id = await resolve_self_client(user_notion_id=user_notion_id)
+            if not client_id:
+                # Fallback: ищем по имени из user_manager (legacy путь).
+                from core.user_manager import get_user
+                owner = await get_user(tg_id)
+                owner_name = (owner or {}).get("name") or ""
+                if owner_name:
+                    sc = await client_find(owner_name, user_notion_id=user_notion_id)
+                    if sc:
+                        client_id = sc["id"]
+                    else:
+                        self_client_missing = True
                 else:
                     self_client_missing = True
-            else:
-                self_client_missing = True
 
         deck = _match_deck(data.get("deck") or "") or "Уэйт"
         cards_text = _coerce_cards_str(data.get("cards"))
@@ -674,13 +678,16 @@ async def _handle_multi_session(
         c = await client_find(client_name, user_notion_id=user_notion_id)
         client_id = c["id"] if c else None
     else:
-        from core.user_manager import get_user
-        owner = await get_user(tg_id)
-        owner_name = (owner or {}).get("name") or ""
-        if owner_name:
-            sc = await client_find(owner_name, user_notion_id=user_notion_id)
-            if sc:
-                client_id = sc["id"]
+        from core.notion_client import resolve_self_client
+        client_id = await resolve_self_client(user_notion_id=user_notion_id)
+        if not client_id:
+            from core.user_manager import get_user
+            owner = await get_user(tg_id)
+            owner_name = (owner or {}).get("name") or ""
+            if owner_name:
+                sc = await client_find(owner_name, user_notion_id=user_notion_id)
+                if sc:
+                    client_id = sc["id"]
     is_personal = not client_name
 
     # Контекст предыдущих раскладов клиента — общий для всех триплетов
@@ -771,6 +778,7 @@ async def _handle_multi_session(
                 payment_source=None,
                 session=session_name or None,
                 triplet_summary=t_summary or None,
+                bottom_card=bottom_en or None,
             )
             if page_id:
                 saved_n += 1
@@ -949,6 +957,7 @@ async def cb_tarot_save(call: CallbackQuery) -> None:
             payment_source=payment_source,
             session=None,  # одиночный расклад — без сессии
             triplet_summary=triplet_summary or None,
+            bottom_card=bottom_en or None,
         )
 
         if amount > 0:
