@@ -401,15 +401,6 @@ def _format_prev_sessions(sessions: List[dict]) -> str:
     return "\n\n".join(lines)
 
 
-def _pending_keyboard(uid: int) -> InlineKeyboardMarkup:
-    from core.utils import cancel_button, secondary_button
-    return InlineKeyboardMarkup(inline_keyboard=[[
-        InlineKeyboardButton(text="✅ Сохранить", callback_data=f"tarot_save:{uid}"),
-        secondary_button("✏️ Поправить", f"tarot_edit:{uid}"),
-        cancel_button("❌ Отмена", f"tarot_cancel:{uid}"),
-    ]])
-
-
 def _triplet_keyboard(page_id: str) -> InlineKeyboardMarkup:
     """Кнопки [✏️ Поправить] [🗑 Удалить] под сохранённым триплетом."""
     from core.utils import cancel_button, secondary_button
@@ -443,47 +434,130 @@ async def _resolve_triplet_page(short_id: str, user_notion_id: str) -> Optional[
     return None
 
 
-async def _send_reading(message: Message, state: dict) -> None:
-    """Отправить трактовку с кнопками управления."""
-    uid = message.from_user.id
-    client_name = state.get("client_name") or ""
-    is_personal = not client_name
-    deck = html.escape(state.get("deck") or "Уэйта")
-    spread = html.escape(state.get("spread_type") or "Расклад")
-    question = html.escape(state.get("question") or "")
-    cards_text = state.get("cards") or ""
-    bottom_card = state.get("bottom_card") or ""
-    interpretation = state.get("interpretation") or ""
+async def _save_and_post_triplet(
+    message: Message,
+    *,
+    tz: timezone,
+    user_notion_id: str,
+    client_id: Optional[str],
+    client_name: Optional[str],
+    deck: str,
+    spread_type: str,
+    question: str,
+    cards_text: str,
+    bottom_card: str,
+    area: str,
+    interpretation: str,
+    session_name: Optional[str] = None,
+    payment_source: Optional[str] = None,
+    amount: float = 0,
+    paid: float = 0,
+    self_client_missing: bool = False,
+) -> Optional[str]:
+    """Унифицированный путь: канон → Sonnet-трактовка уже готова → Haiku-саммари
+    → запись в Notion → пост в чат с кнопками [Поправить/Удалить] (+оплата
+    для платного клиента). Возвращает page_id."""
+    from core.html_sanitize import sanitize_interpretation
     from core.html_for_telegram import html_to_telegram
-    interpretation_tg = html_to_telegram(interpretation)
-    client_name_safe = html.escape(client_name)
+    from core.notion_client import client_get_type, should_skip_payment
+    from core.message_pages import save_message_page
 
-    card_lines = "".join(
-        f"  • {html.escape(c.strip())}\n" for c in cards_text.split(",") if c.strip()
+    cards_en = _canon_cards_str(cards_text, deck or "Уэйт") or cards_text
+    bottom_en = _canon_card(bottom_card, deck or "Уэйт") if bottom_card else ""
+    if bottom_en and "🂠" not in interpretation:
+        interpretation = (
+            interpretation.rstrip()
+            + f"\n\n<h3>🂠 {bottom_en} · фон</h3><p>Скрытый фон расклада.</p>"
+        )
+
+    triplet_summary = await _make_triplet_summary(
+        question, cards_text, bottom_card or "", interpretation,
     )
-    header = (
-        f"🃏 <b>{spread}</b> · {deck}\n"
-        f"{'🔮 Личный' if is_personal else '👤 ' + client_name_safe}"
-        + (f" · {question}" if question else "") + "\n"
+    interpretation = sanitize_interpretation(interpretation)
+    is_personal = not client_name
+
+    page_id = await session_add(
+        date=_now_iso(tz),
+        spread_type=spread_type,
+        title=question,
+        question=question,
+        cards=cards_en,
+        interpretation=interpretation,
+        amount=amount,
+        paid=paid,
+        session_type="Личный" if is_personal else "Клиентский",
+        client_id=client_id,
+        user_notion_id=user_notion_id,
+        area=area,
+        deck=deck,
+        payment_source=payment_source,
+        session=session_name,
+        triplet_summary=triplet_summary or None,
+        bottom_card=bottom_en or None,
     )
-    bottom_line = (
-        f"\n🂠 <b>Дно:</b> {html.escape(bottom_card)}\n" if bottom_card else ""
+    if not page_id:
+        await message.answer("⚠️ Не получилось сохранить расклад.")
+        return None
+
+    # Сообщение в чат: вопрос + карты + дно + трактовка (telegram-safe).
+    interp_tg = html_to_telegram(interpretation)
+    cards_line = ", ".join(c.strip() for c in cards_text.split(",") if c.strip())
+    head_lines = [f"<b>{html.escape(question or 'Расклад')}</b>"]
+    head_lines.append(
+        f"🃏 {html.escape(spread_type or 'Триплет')} · {html.escape(deck or 'Уэйт')}"
     )
-    hint_line = (
-        "\n💡 Заведи себя как клиента чтобы группировать личные расклады\n"
-        if is_personal and state.get("self_client_missing")
-        else ""
+    head_lines.append(
+        f"👤 {html.escape(client_name)}" if client_name else "🔮 Личный"
     )
-    body = (
-        f"{header}\n📍 <b>Карты:</b>\n{card_lines}"
-        f"{bottom_line}{hint_line}"
-        f"\n📝 <b>Трактовка:</b>\n{interpretation_tg[:3500]}"
-    )
-    await message.answer(
-        body, reply_markup=_pending_keyboard(uid), parse_mode="HTML"
-    )
-    if len(interpretation_tg) > 3500:
-        await message.answer(interpretation_tg[3500:7000], parse_mode="HTML")
+    if cards_line:
+        head_lines.append(f"📍 {html.escape(cards_line)}")
+    if bottom_card:
+        head_lines.append(f"🂠 {html.escape(bottom_card)}")
+    if is_personal and self_client_missing:
+        head_lines.append(
+            "\n💡 Заведи себя как клиента чтобы группировать личные расклады"
+        )
+    head = "\n".join(head_lines)
+
+    body = f"{head}\n\n{interp_tg}"
+    triplet_kb = _triplet_keyboard(page_id)
+
+    # Тип клиента → решаем нужны ли кнопки оплаты.
+    ctype = await client_get_type(client_id) if client_id else None
+    show_payment = bool(client_id) and not should_skip_payment(ctype)
+
+    if len(body) <= 3500:
+        bot_msg = await message.answer(
+            body, parse_mode="HTML", reply_markup=triplet_kb,
+        )
+    else:
+        bot_msg = await message.answer(head, parse_mode="HTML")
+        await message.answer(interp_tg[:3500], parse_mode="HTML")
+        if len(interp_tg) > 3500:
+            await message.answer(interp_tg[3500:7000], parse_mode="HTML")
+        await message.answer("—", reply_markup=triplet_kb)
+
+    # Привязка msg→page для reply-flow.
+    try:
+        await save_message_page(
+            chat_id=bot_msg.chat.id,
+            message_id=bot_msg.message_id,
+            page_id=page_id,
+            page_type="session",
+            bot="arcana",
+        )
+    except Exception:
+        pass
+
+    # Кнопки оплаты для платного клиента — отдельным сообщением.
+    if show_payment:
+        from arcana.handlers.payment import payment_keyboard
+        await message.answer(
+            f"💰 Как оплатил(а) {html.escape(client_name or 'клиент(а)')}?",
+            parse_mode="HTML",
+            reply_markup=payment_keyboard(page_id, "sessions"),
+        )
+    return page_id
 
 
 # ────────────────────────── Основной обработчик ────────────────────────────
@@ -598,28 +672,34 @@ async def handle_add_session(
                 max_tokens=2000,
             )
 
-        # 6. Сохранить в pending и показать с кнопками
-        from arcana.pending_tarot import save_pending
-        pending_state = {
-            "client_name":    client_name,
-            "client_id":      client_id,
-            "spread_type":    data.get("spread_type") or "",
-            "question":       question,
-            "cards":          cards_text,
-            "bottom_card":    bottom_card or None,
-            "deck":           deck,
-            "area":           area,
-            "interpretation": interpretation,
-            "amount":         float(data.get("amount") or 0),
-            "paid":           float(data.get("paid") or 0),
-            "payment_source": data.get("payment_source") or None,
-            "user_notion_id": user_notion_id,
-            "tz_offset":      tz_offset,
-            "awaiting_edit":  False,
-            "self_client_missing": self_client_missing,
-        }
-        await save_pending(tg_id, pending_state)
-        await _send_reading(message, pending_state)
+        # 6. Сохраняем сразу в Notion + постим в чат с кнопками управления.
+        spread = _match_spread(data.get("spread_type") or "")
+        payment_source_raw = data.get("payment_source") or None
+        payment_source = (
+            PAYMENT_SOURCE_MAP.get((payment_source_raw or "").lower(), payment_source_raw)
+            if payment_source_raw else None
+        )
+        amount = float(data.get("amount") or 0)
+        paid = float(data.get("paid") or 0)
+        await _save_and_post_triplet(
+            message,
+            tz=tz,
+            user_notion_id=user_notion_id,
+            client_id=client_id,
+            client_name=client_name,
+            deck=deck,
+            spread_type=spread or "🔺 Триплет",
+            question=question,
+            cards_text=cards_text,
+            bottom_card=bottom_card,
+            area=area,
+            interpretation=interpretation,
+            session_name=None,  # одиночный — без сессии
+            payment_source=payment_source,
+            amount=amount,
+            paid=paid,
+            self_client_missing=self_client_missing,
+        )
 
     except SessionParseError as e:
         logger.warning("session parse error: %s", e)
@@ -884,169 +964,6 @@ async def _handle_multi_session(
 
 # ────────────────────────── Callbacks ──────────────────────────────────────
 
-@router.callback_query(F.data.startswith("tarot_save:"))
-async def cb_tarot_save(call: CallbackQuery) -> None:
-    await call.answer()
-    uid = int(call.data.split(":", 1)[1])
-    if uid != call.from_user.id:
-        return
-
-    from arcana.pending_tarot import delete_pending, get_pending
-    state = await get_pending(uid)
-    if not state:
-        await call.message.edit_text("⏱ Сессия истекла. Отправь расклад заново.")
-        return
-
-    try:
-        tz_offset = float(state.get("tz_offset") or 3)
-        tz = timezone(timedelta(hours=tz_offset))
-        user_notion_id = state.get("user_notion_id") or ""
-
-        spread = _match_spread(state.get("spread_type") or "")
-        payment_source_raw = state.get("payment_source") or None
-        payment_source = (
-            PAYMENT_SOURCE_MAP.get((payment_source_raw or "").lower(), payment_source_raw)
-            if payment_source_raw else None
-        )
-        amount = float(state.get("amount") or 0)
-        paid = float(state.get("paid") or 0)
-        client_name = state.get("client_name") or None
-        is_personal = not client_name
-
-        bottom_card = state.get("bottom_card") or None
-        area = _normalize_area(state.get("area") or "")
-        deck = _match_deck(state.get("deck") or "") or None
-        question = state.get("question") or ""
-        interpretation = state.get("interpretation") or ""
-
-        # Канонизация карт в EN перед записью в Notion.
-        cards_raw = state.get("cards") or ""
-        cards_en = _canon_cards_str(cards_raw, deck or "Уэйт") or cards_raw
-        bottom_en = _canon_card(bottom_card, deck or "Уэйт") if bottom_card else None
-
-        # Дно — в конец трактовки (если Claude не добавил блок 🂠)
-        if bottom_en and "🂠" not in interpretation:
-            interpretation = (
-                interpretation.rstrip()
-                + f"\n\n<h3>🂠 {bottom_en} · фон</h3><p>Скрытый фон расклада.</p>"
-            )
-
-        # Haiku — саммари триплета
-        triplet_summary = await _make_triplet_summary(
-            question, cards_raw, bottom_card or "", interpretation
-        )
-
-        # Нормализация трактовки в чистый HTML (allowlist h3/b/i/p/br)
-        from core.html_sanitize import sanitize_interpretation
-        interpretation = sanitize_interpretation(interpretation)
-
-        session_page_id = await session_add(
-            date=_now_iso(tz),
-            spread_type=spread,
-            title=question,
-            question=question,
-            cards=cards_en,
-            interpretation=interpretation,
-            amount=amount,
-            paid=paid,
-            session_type="Личный" if is_personal else "Клиентский",
-            client_id=state.get("client_id") or None,
-            user_notion_id=user_notion_id,
-            area=area,
-            deck=deck,
-            payment_source=payment_source,
-            session=None,  # одиночный расклад — без сессии
-            triplet_summary=triplet_summary or None,
-            bottom_card=bottom_en or None,
-        )
-
-        if amount > 0:
-            await finance_add(
-                date=datetime.now(tz).strftime("%Y-%m-%d"),
-                amount=amount,
-                category="🔮 Практика",
-                type_="💰 Доход",
-                source=payment_source or "💳 Карта",
-                bot_label="🌒 Arcana",
-                description=(
-                    f"🃏 {state.get('spread_type') or 'Расклад'}"
-                    + (f" — {client_name}" if client_name else "")
-                ),
-                user_notion_id=user_notion_id,
-            )
-
-        await delete_pending(uid)
-        ok_text = (
-            "✅ Расклад сохранён в Notion"
-            "\n\n<i>↩️ Реплай чтобы дополнить</i>"
-        )
-        # Если клиент 🤝 Платный — после сохранения шлём кнопки оплаты,
-        # триплет-кнопки [Поправить / Удалить] кладём отдельным сообщением.
-        client_id_for_pay = state.get("client_id") or None
-        client_type: Optional[str] = None
-        if client_id_for_pay:
-            try:
-                from core.notion_client import client_get_type
-                client_type = await client_get_type(client_id_for_pay)
-            except Exception:
-                client_type = None
-
-        from core.notion_client import should_skip_payment
-        triplet_kb = _triplet_keyboard(session_page_id) if session_page_id else None
-        if session_page_id and not should_skip_payment(client_type):
-            from arcana.handlers.payment import payment_keyboard
-            pay_kb = payment_keyboard(session_page_id, "sessions")
-            client_label = client_name or "клиент(а)"
-            saved_msg = await call.message.edit_text(
-                ok_text + f"\n\n💰 Как оплатил(а) {html.escape(client_label)}?",
-                parse_mode="HTML",
-                reply_markup=pay_kb,
-            )
-            # Триплет-кнопки — отдельным сообщением, чтобы pay_kb остался активным.
-            if triplet_kb is not None:
-                await call.message.answer("—", reply_markup=triplet_kb)
-        else:
-            saved_msg = await call.message.edit_text(
-                ok_text, parse_mode="HTML", reply_markup=triplet_kb,
-            )
-
-        if session_page_id:
-            from core.message_pages import save_message_page
-            target = saved_msg if hasattr(saved_msg, "message_id") else call.message
-            await save_message_page(
-                chat_id=target.chat.id,
-                message_id=target.message_id,
-                page_id=session_page_id,
-                page_type="session",
-                bot="arcana",
-            )
-
-    except Exception as e:
-        trace = tb.format_exc()
-        logger.error("cb_tarot_save error: %s", trace)
-        await call.message.edit_text("❌ Ошибка при сохранении · пусть Кай правит код")
-
-
-@router.callback_query(F.data.startswith("tarot_edit:"))
-async def cb_tarot_edit(call: CallbackQuery) -> None:
-    await call.answer()
-    uid = int(call.data.split(":", 1)[1])
-    if uid != call.from_user.id:
-        return
-
-    from arcana.pending_tarot import update_pending
-    await update_pending(uid, {"awaiting_edit": True})
-    await call.message.edit_reply_markup(reply_markup=None)
-    await call.message.answer("✏️ Напиши что поправить — скорректирую трактовку.")
-
-
-@router.callback_query(F.data.startswith("tarot_cancel:"))
-async def cb_tarot_cancel(call: CallbackQuery) -> None:
-    await call.answer()
-    uid = int(call.data.split(":", 1)[1])
-    from arcana.pending_tarot import delete_pending
-    await delete_pending(uid)
-    await call.message.edit_text("❌ Расклад не сохранён.")
 
 
 # ────────────────────── Триплет: правка / удаление ────────────────────────
@@ -1308,43 +1225,33 @@ async def handle_tarot_photo(message: Message, user_notion_id: str = "") -> None
         tg_id = message.from_user.id
         tz_offset = await get_user_tz(tg_id)
 
-        # Личный расклад с фото — привязать к клиенту-владельцу (если он заведён)
-        self_client_id: Optional[str] = None
-        self_client_missing = False
-        from core.user_manager import get_user
-        owner = await get_user(tg_id)
-        owner_name = (owner or {}).get("name") or ""
-        if owner_name:
-            self_client = await client_find(owner_name, user_notion_id=user_notion_id)
-            if self_client:
-                self_client_id = self_client["id"]
-            else:
-                self_client_missing = True
-        else:
-            self_client_missing = True
+        # Личный расклад с фото — резолвим self-клиента (новый путь).
+        from core.notion_client import resolve_self_client
+        self_client_id: Optional[str] = await resolve_self_client(
+            user_notion_id=user_notion_id
+        )
+        self_client_missing = not bool(self_client_id)
 
-        from arcana.pending_tarot import save_pending
-        pending_state = {
-            "client_name":    None,
-            "client_id":      self_client_id,
-            "spread_type":    spread_type,
-            "question":       question,
-            "cards":          cards_text,
-            "bottom_card":    bottom_card or None,
-            "deck":           deck,
-            "area":           AREA_DEFAULT,
-            "interpretation": interpretation,
-            "amount":         0.0,
-            "paid":           0.0,
-            "payment_source": None,
-            "user_notion_id": user_notion_id,
-            "tz_offset":      tz_offset,
-            "awaiting_edit":  False,
-            "from_photo":     True,
-            "self_client_missing": self_client_missing,
-        }
-        await save_pending(tg_id, pending_state)
-        await _send_reading(message, pending_state)
+        tz = timezone(timedelta(hours=tz_offset))
+        await _save_and_post_triplet(
+            message,
+            tz=tz,
+            user_notion_id=user_notion_id,
+            client_id=self_client_id,
+            client_name=None,
+            deck=deck,
+            spread_type=spread_type or "🔺 Триплет",
+            question=question,
+            cards_text=cards_text,
+            bottom_card=bottom_card,
+            area=AREA_DEFAULT,
+            interpretation=interpretation,
+            session_name=None,
+            payment_source=None,
+            amount=0.0,
+            paid=0.0,
+            self_client_missing=self_client_missing,
+        )
 
     except Exception as e:
         trace = tb.format_exc()
