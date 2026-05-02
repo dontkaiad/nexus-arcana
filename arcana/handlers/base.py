@@ -259,9 +259,21 @@ async def route_message(message: Message, user_notion_id: str = "", _text: str =
             await react(message, reaction_for("grimoire_search"))
             return
 
-        # ── Pending: правка трактовки ─────────────────────────────────────
+        # ── Pending: ввод суммы оплаты / бартера ──────────────────────────
         from arcana.pending_tarot import get_pending
         pending = await get_pending(uid)
+        _PAYMENT_PENDING_TYPES = {
+            "awaiting_payment_amount", "awaiting_debt_amount",
+            "awaiting_barter_what", "awaiting_barter_money",
+        }
+        if pending and (pending.get("type") or "") in _PAYMENT_PENDING_TYPES:
+            from arcana.handlers.payment import handle_payment_text
+            handled = await handle_payment_text(message, text, pending, user_notion_id)
+            if handled:
+                await react(message, "💰")
+                return
+
+        # ── Pending: правка трактовки ─────────────────────────────────────
         if pending and pending.get("awaiting_triplet_edit"):
             from arcana.handlers.sessions import handle_triplet_correction
             await handle_triplet_correction(message, text, pending, user_notion_id)

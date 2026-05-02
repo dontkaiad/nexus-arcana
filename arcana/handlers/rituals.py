@@ -122,7 +122,21 @@ async def handle_add_ritual(message: Message, text: str, user_notion_id: str = "
                 money += f" · ⚠️ долг {int(debt)}₽"
             lines.append(money)
         lines.append("\n<i>↩️ Реплай чтобы дополнить</i>")
-        bot_msg = await message.answer("\n".join(lines), parse_mode="HTML")
+
+        # Если ритуал на 🤝 Платного клиента — сразу прикрепляем inline-оплату.
+        pay_kb = None
+        try:
+            from core.notion_client import client_get_type, should_skip_payment
+            client_type = await client_get_type(client_id) if client_id else None
+            if client_id and not should_skip_payment(client_type):
+                from arcana.handlers.payment import payment_keyboard
+                pay_kb = payment_keyboard(result, "rituals")
+                lines.append(f"\n💰 Как оплатил(а) {client_name or 'клиент(а)'}?")
+        except Exception:
+            pay_kb = None
+        bot_msg = await message.answer(
+            "\n".join(lines), parse_mode="HTML", reply_markup=pay_kb,
+        )
 
         from core.message_pages import save_message_page
         await save_message_page(

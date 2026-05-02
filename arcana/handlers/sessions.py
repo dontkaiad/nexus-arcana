@@ -976,14 +976,39 @@ async def cb_tarot_save(call: CallbackQuery) -> None:
             )
 
         await delete_pending(uid)
-        debt = max(0, amount - paid)
-        ok_text = "✅ Расклад сохранён в Notion" + (
-            f"\n⚠️ Долг: {int(debt)}₽" if debt > 0 else ""
-        ) + "\n\n<i>↩️ Реплай чтобы дополнить</i>"
-        triplet_kb = _triplet_keyboard(session_page_id) if session_page_id else None
-        saved_msg = await call.message.edit_text(
-            ok_text, parse_mode="HTML", reply_markup=triplet_kb,
+        ok_text = (
+            "✅ Расклад сохранён в Notion"
+            "\n\n<i>↩️ Реплай чтобы дополнить</i>"
         )
+        # Если клиент 🤝 Платный — после сохранения шлём кнопки оплаты,
+        # триплет-кнопки [Поправить / Удалить] кладём отдельным сообщением.
+        client_id_for_pay = state.get("client_id") or None
+        client_type: Optional[str] = None
+        if client_id_for_pay:
+            try:
+                from core.notion_client import client_get_type
+                client_type = await client_get_type(client_id_for_pay)
+            except Exception:
+                client_type = None
+
+        from core.notion_client import should_skip_payment
+        triplet_kb = _triplet_keyboard(session_page_id) if session_page_id else None
+        if session_page_id and not should_skip_payment(client_type):
+            from arcana.handlers.payment import payment_keyboard
+            pay_kb = payment_keyboard(session_page_id, "sessions")
+            client_label = client_name or "клиент(а)"
+            saved_msg = await call.message.edit_text(
+                ok_text + f"\n\n💰 Как оплатил(а) {html.escape(client_label)}?",
+                parse_mode="HTML",
+                reply_markup=pay_kb,
+            )
+            # Триплет-кнопки — отдельным сообщением, чтобы pay_kb остался активным.
+            if triplet_kb is not None:
+                await call.message.answer("—", reply_markup=triplet_kb)
+        else:
+            saved_msg = await call.message.edit_text(
+                ok_text, parse_mode="HTML", reply_markup=triplet_kb,
+            )
 
         if session_page_id:
             from core.message_pages import save_message_page

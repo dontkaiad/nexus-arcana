@@ -25,7 +25,12 @@ router = Router()
 
 PARSE_CLIENT_SYSTEM = (
     "Извлеки данные нового клиента. Ответь ТОЛЬКО JSON без markdown:\n"
-    '{"name": "имя", "contact": "@ник или телефон или null", "request": "запрос или null"}'
+    '{"name": "имя", "contact": "@ник или телефон или null", '
+    '"request": "запрос или null", "client_type": "Платный" | "Бесплатный" | null}'
+    "\n\nclient_type:\n"
+    "- 'бесплатно', 'без оплаты', 'по дружбе', 'просто так', 'в подарок' → 'Бесплатный'\n"
+    "- иначе → null (код подставит дефолт «Платный»).\n"
+    "Никогда не возвращай 'Self' — Self ставится только вручную в Notion."
 )
 
 PARSE_CLIENT_INFO = (
@@ -239,12 +244,19 @@ async def handle_add_client(message: Message, text: str, user_notion_id: str = "
     request = data.get("request") or ""
     today = datetime.now(MOSCOW_TZ).strftime("%Y-%m-%d")
 
+    from core.notion_client import CLIENT_TYPE_PAID, CLIENT_TYPE_FREE
+    parsed_type = (data.get("client_type") or "").strip().lower()
+    client_type = (
+        CLIENT_TYPE_FREE if parsed_type == "бесплатный"
+        else CLIENT_TYPE_PAID
+    )
     page_id = await client_add(
         name=name,
         contact=contact,
         request=request,
         date=today,
         user_notion_id=user_notion_id,
+        client_type=client_type,
     )
     if not page_id:
         await message.answer("⚠️ Ошибка записи в Notion.")
@@ -252,6 +264,7 @@ async def handle_add_client(message: Message, text: str, user_notion_id: str = "
 
     contacts_list = [{"value": contact, "label": ""}] if contact else []
 
+    type_glyph = "🎁" if client_type == CLIENT_TYPE_FREE else "🤝"
     if not contact or not request:
         # Нет всей инфы — режим сбора
         await save_pending_client(uid, {
@@ -264,18 +277,31 @@ async def handle_add_client(message: Message, text: str, user_notion_id: str = "
             "user_notion_id": user_notion_id,
         })
         pending_stub = {"name": name, "contacts": contacts_list, "request": request, "notes": ""}
-        await message.answer(
-            f"👥 Клиент создан!\n📌 <b>{name}</b>\n🟢 Активный\n\n{_card(pending_stub)}\n\n"
+        bot_msg = await message.answer(
+            f"👥 Клиент создан · {type_glyph}\n📌 <b>{name}</b>\n🟢 Активный\n\n{_card(pending_stub)}\n\n"
             f"Скинь инфу: контакт, запрос, заметки.",
             reply_markup=_collecting_kb(uid),
             parse_mode="HTML",
         )
     else:
         pending_stub = {"name": name, "contacts": contacts_list, "request": request, "notes": ""}
-        await message.answer(
-            f"👥 Клиент создан!\n📌 <b>{name}</b>\n🟢 Активный\n\n{_card(pending_stub)}",
+        bot_msg = await message.answer(
+            f"👥 Клиент создан · {type_glyph}\n📌 <b>{name}</b>\n🟢 Активный\n\n{_card(pending_stub)}",
             parse_mode="HTML",
         )
+
+    # Сохраняем msg → page_id, чтобы reply на это сообщение мог менять тип/имя.
+    try:
+        from core.message_pages import save_message_page
+        await save_message_page(
+            chat_id=bot_msg.chat.id,
+            message_id=bot_msg.message_id,
+            page_id=page_id,
+            page_type="client",
+            bot="arcana",
+        )
+    except Exception:
+        pass
 
 
 async def _handle_collecting(

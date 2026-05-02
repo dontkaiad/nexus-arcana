@@ -20,7 +20,9 @@ from miniapp.backend._helpers import (
     cat_from_notion,
     date_start,
     extract_time,
+    multi_select_names,
     prio_from_notion,
+    rich_text_plain,
     select_of,
     title_plain,
     to_local_date,
@@ -506,6 +508,43 @@ def _avg_check_delay(items: list[dict], verdict_fn) -> Optional[float]:
     return round(sum(deltas) / len(deltas), 1)
 
 
+async def _client_types_map(user_notion_id: str) -> dict[str, str]:
+    """Возвращает {client_page_id: тип_клиента}. Лишний лукап в БД, но
+    приемлемо в рамках статистики."""
+    out: dict[str, str] = {}
+    pages = await load_clients_map(user_notion_id)  # уже {id: {name,...}}
+    if not pages:
+        return out
+    # Дочитываем «Тип клиента» отдельным запросом — load_clients_map не
+    # возвращает это поле. Чтобы не делать N+1, читаем всё одним query.
+    from core.config import config
+    from core.notion_client import query_pages, _with_user_filter
+    try:
+        all_clients = await query_pages(
+            config.arcana.db_clients,
+            filters=_with_user_filter(None, user_notion_id),
+            page_size=200,
+        )
+    except Exception:
+        return out
+    for p in all_clients:
+        sel = (p.get("properties", {}).get("Тип клиента", {}) or {}).get("select")
+        if sel:
+            out[p["id"]] = sel["name"]
+    return out
+
+
+def _client_id_of(p: dict) -> Optional[str]:
+    rel = p.get("properties", {}).get("👥 Клиенты", {}).get("relation") or []
+    return rel[0].get("id") if rel else None
+
+
+def _amount_paid(p: dict, sum_field: str, paid_field: str) -> tuple[float, float]:
+    s = (p.get("properties", {}).get(sum_field, {}) or {}).get("number") or 0
+    pd = (p.get("properties", {}).get(paid_field, {}) or {}).get("number") or 0
+    return float(s or 0), float(pd or 0)
+
+
 @router.get("/arcana/stats")
 async def get_arcana_stats(
     tg_id: int = Depends(current_user_id),
@@ -618,7 +657,106 @@ async def get_arcana_stats(
         "by_category": cats_list,
         "avg_check_delay_sessions_days": _avg_check_delay(sessions, _session_verdict),
         "avg_check_delay_rituals_days": _avg_check_delay(rituals, _ritual_verdict),
+        # Новые срезы (требуют поля «Тип клиента», «Источник», «Бартер · что»).
+        "by_client_type": _by_client_type(sessions, await _client_types_map(user_notion_id)),
+        "by_payment_source": _by_payment_source(sessions, rituals),
+        "barters_pending": _pending_barters(sessions, rituals, clients_map),
     }
+
+
+def _by_client_type(sessions: list[dict], type_map: dict[str, str]) -> dict:
+    """Разрез сессий-триплетов по типу клиента."""
+    out: dict[str, dict] = {
+        "🌟 Self":       {"sessions": 0, "checked": 0, "yes": 0, "half": 0, "no": 0, "pct": 0},
+        "🤝 Платный":    {"sessions": 0, "checked": 0, "yes": 0, "half": 0, "no": 0, "pct": 0},
+        "🎁 Бесплатный": {"sessions": 0, "checked": 0, "yes": 0, "half": 0, "no": 0, "pct": 0},
+    }
+    for p in sessions:
+        cid = _client_id_of(p)
+        ctype = type_map.get(cid or "", "🤝 Платный")
+        bucket = out.setdefault(ctype, {
+            "sessions": 0, "checked": 0, "yes": 0, "half": 0, "no": 0, "pct": 0,
+        })
+        bucket["sessions"] += 1
+        v = _session_verdict(p)
+        if v is not None:
+            bucket["checked"] += 1
+            bucket[v] += 1
+    for b in out.values():
+        if b["checked"]:
+            b["pct"] = round((b["yes"] + 0.5 * b["half"]) / b["checked"] * 100, 1)
+    return out
+
+
+def _by_payment_source(sessions: list[dict], rituals: list[dict]) -> dict:
+    out = {
+        "💵 Наличные": {"sessions": 0, "rituals": 0, "total_rub": 0},
+        "💳 Карта":    {"sessions": 0, "rituals": 0, "total_rub": 0},
+        "🔄 Бартер":   {"sessions": 0, "rituals": 0, "items": []},
+        "🎁 Подарок":  {"sessions": 0, "rituals": 0},
+    }
+    for p in sessions:
+        src = select_of(p, "Источник") or ""
+        amt, paid = _amount_paid(p, "Сумма", "Оплачено")
+        if src in ("💵 Наличные", "💳 Карта"):
+            out[src]["sessions"] += 1
+            out[src]["total_rub"] += int(paid)
+        elif src == "🔄 Бартер":
+            out["🔄 Бартер"]["sessions"] += 1
+            what = rich_text_plain(p, "Бартер · что")
+            if what:
+                out["🔄 Бартер"]["items"].append(what)
+        elif amt == 0 and paid == 0:
+            out["🎁 Подарок"]["sessions"] += 1
+    for p in rituals:
+        src = select_of(p, "Источник оплаты") or ""
+        amt, paid = _amount_paid(p, "Цена за ритуал", "Оплачено")
+        if src in ("💵 Наличные", "💳 Карта"):
+            out[src]["rituals"] += 1
+            out[src]["total_rub"] += int(paid)
+        elif src == "🔄 Бартер":
+            out["🔄 Бартер"]["rituals"] += 1
+            what = rich_text_plain(p, "Бартер · что")
+            if what:
+                out["🔄 Бартер"]["items"].append(what)
+        elif amt == 0 and paid == 0:
+            out["🎁 Подарок"]["rituals"] += 1
+    return out
+
+
+def _pending_barters(sessions: list[dict], rituals: list[dict], clients_map: dict) -> list:
+    """Записи с Источник=🔄 Бартер AND Оплачено=0."""
+    out: list[dict] = []
+    from miniapp.backend.routes._arcana_common import client_name_from
+    for p in sessions:
+        if (select_of(p, "Источник") or "") != "🔄 Бартер":
+            continue
+        _, paid = _amount_paid(p, "Сумма", "Оплачено")
+        if paid > 0:
+            continue
+        what = rich_text_plain(p, "Бартер · что")
+        cname, _cid = client_name_from(p, clients_map)
+        date = ((p.get("properties", {}).get("Дата", {}).get("date") or {})
+                .get("start", "") or "")[:10]
+        out.append({
+            "page_id": p.get("id", ""), "target": "sessions",
+            "client": cname, "what": what, "since": date,
+        })
+    for p in rituals:
+        if (select_of(p, "Источник оплаты") or "") != "🔄 Бартер":
+            continue
+        _, paid = _amount_paid(p, "Цена за ритуал", "Оплачено")
+        if paid > 0:
+            continue
+        what = rich_text_plain(p, "Бартер · что")
+        cname, _cid = client_name_from(p, clients_map)
+        date = ((p.get("properties", {}).get("Дата", {}).get("date") or {})
+                .get("start", "") or "")[:10]
+        out.append({
+            "page_id": p.get("id", ""), "target": "rituals",
+            "client": cname, "what": what, "since": date,
+        })
+    return out
 
 
 @router.get("/arcana/accuracy")
