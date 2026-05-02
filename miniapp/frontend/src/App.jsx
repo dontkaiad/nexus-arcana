@@ -3038,9 +3038,6 @@ function TripletSlide({ s, t, deckId, onVerdict }) {
         {cards.map((c, i) => (
           <div key={i} style={{ display: "flex", flexDirection: "column", gap: 4 }}>
             <TarotCardTile s={s} card={c} deckId={deckId} />
-            <div style={{ fontSize: fs(10), color: s.tS, textAlign: "center" }}>
-              {["Прошлое", "Настоящее", "Будущее"][i] || ""}
-            </div>
           </div>
         ))}
         {hasBottom && (
