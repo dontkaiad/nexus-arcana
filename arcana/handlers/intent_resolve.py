@@ -183,6 +183,83 @@ async def cb_intent_nexus(call: CallbackQuery) -> None:
     await send_nexus_redirect(call.message, text)
 
 
+# ── Pending: уточнение к старой работе vs новое сообщение ───────────────────
+
+def _clarify_kb(slug: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(
+            text="✏️ Уточнение",
+            callback_data=f"clarify_keep:{slug}",
+        ),
+        InlineKeyboardButton(
+            text="🆕 Новое",
+            callback_data=f"clarify_new:{slug}",
+        ),
+    ]])
+
+
+async def ask_clarify_or_new(message: Message, text: str, title: str) -> None:
+    """У пользователя висит pending-работа, новый текст не похож ни на
+    дедлайн-уточнение, ни на явный новый intent — переспросить."""
+    from arcana.pending_tarot import save_pending
+    slug = _slug(text)
+    await save_pending(message.from_user.id, {
+        "type": "clarify_or_new_pending",
+        "slug": slug,
+        "text": text,
+    })
+    await message.answer(
+        f"❓ У тебя есть незавершённая работа «{title}».\n"
+        f"Это уточнение к ней или новое сообщение?",
+        reply_markup=_clarify_kb(slug),
+    )
+
+
+@router.callback_query(F.data.startswith("clarify_keep:"))
+async def cb_clarify_keep(call: CallbackQuery) -> None:
+    """«✏️ Уточнение» — отдаём текст в work_preview clarification."""
+    await call.answer()
+    slug = call.data.split(":", 1)[1]
+    from arcana.pending_tarot import get_pending, delete_pending
+    pending = await get_pending(call.from_user.id) or {}
+    if pending.get("slug") != slug or pending.get("type") != "clarify_or_new_pending":
+        return
+    text = pending.get("text") or ""
+    await delete_pending(call.from_user.id)
+    try:
+        await call.message.edit_reply_markup(reply_markup=None)
+    except Exception:
+        pass
+    # Эмулируем «уточнение» — подменяем text сообщения и зовём handler
+    call.message.text = text
+    call.message.from_user = call.from_user
+    from arcana.handlers.work_preview import handle_work_clarification
+    await handle_work_clarification(call.message)
+
+
+@router.callback_query(F.data.startswith("clarify_new:"))
+async def cb_clarify_new(call: CallbackQuery) -> None:
+    """«🆕 Новое» — дропаем work-pending, шлём текст в обычный route."""
+    await call.answer()
+    slug = call.data.split(":", 1)[1]
+    from arcana.pending_tarot import get_pending, delete_pending
+    pending = await get_pending(call.from_user.id) or {}
+    if pending.get("slug") != slug or pending.get("type") != "clarify_or_new_pending":
+        return
+    text = pending.get("text") or ""
+    await delete_pending(call.from_user.id)
+    try:
+        await call.message.edit_reply_markup(reply_markup=None)
+    except Exception:
+        pass
+    from arcana.handlers.work_preview import drop_pending
+    drop_pending(call.from_user.id)
+    call.message.text = text
+    call.message.from_user = call.from_user
+    from arcana.handlers.base import route_message
+    await route_message(call.message, user_notion_id="")
+
+
 @router.callback_query(F.data.startswith("intent_planned:"))
 async def cb_intent_planned(call: CallbackQuery) -> None:
     await call.answer()
