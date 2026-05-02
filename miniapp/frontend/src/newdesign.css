@@ -683,12 +683,14 @@
   background: linear-gradient(180deg, #1a1f30, #0e1119);
   border-top-left-radius: 24px;
   border-top-right-radius: 24px;
-  padding: 18px 18px 22px;
+  /* нижний padding учитывает bottom-nav (~84px) + safe-area */
+  padding: 18px 18px calc(env(safe-area-inset-bottom, 0px) + 100px);
   border: 1px solid rgba(180, 188, 215, 0.22);
   border-bottom: none;
   z-index: 1001;
-  max-height: 85vh;
-  overflow: auto;
+  max-height: 90vh;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
   color: var(--ar-text);
   animation: acc-rise 0.22s ease-out;
 }

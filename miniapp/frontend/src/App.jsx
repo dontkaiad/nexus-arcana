@@ -1,4 +1,5 @@
 import React, { useState, useRef, useMemo, useEffect } from "react";
+import { createPortal } from "react-dom";
 import DOMPurify from "dompurify";
 import './newdesign.css'
 import { useApi } from "./hooks/useApi";
@@ -2260,7 +2261,7 @@ function StatsSheet({ s, onClose }) {
   const avgS = data?.avg_check_delay_sessions_days;
   const avgR = data?.avg_check_delay_rituals_days;
 
-  return (
+  return createPortal((
     <>
       <div className="acc-sheet-overlay" onClick={onClose} />
       <div className="acc-sheet" onClick={(e) => e.stopPropagation()}>
@@ -2387,7 +2388,7 @@ function StatsSheet({ s, onClose }) {
         )}
       </div>
     </>
-  );
+  ), document.body);
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -3009,13 +3010,13 @@ function TarotCardTile({ s, card, deckId }) {
           alt={card.en}
           onError={() => setImgOk(false)}
           style={{
-            width: "100%", aspectRatio: "2/3", objectFit: "cover",
-            borderRadius: 8, boxShadow: `0 2px 8px ${s.brd}`,
+            width: "100%", height: "auto", display: "block",
+            borderRadius: 6, boxShadow: `0 2px 8px ${s.brd}`,
           }}
         />
       ) : (
         <div style={{
-          width: "100%", aspectRatio: "2/3", borderRadius: 8,
+          width: "100%", aspectRatio: "2/3", borderRadius: 6,
           background: s.card, border: `1px solid ${s.brd}`,
           display: "flex", alignItems: "center", justifyContent: "center",
           fontSize: fs(32),
