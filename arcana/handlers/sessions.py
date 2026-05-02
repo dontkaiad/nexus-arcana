@@ -117,25 +117,44 @@ def _now_iso(tz: timezone) -> str:
 
 PARSE_SESSION_SYSTEM = (
     "Извлеки данные о сеансе таро. Ответь ТОЛЬКО JSON без markdown.\n\n"
-    "Если в сообщении ОДИН расклад (один вопрос) — формат:\n"
+    "Распознавай ТРИ формата ввода:\n\n"
+    "═══ ФОРМАТ C — ОДИНОЧНЫЙ ТРИПЛЕТ (single) ═══\n"
+    "Одна строка/абзац, один вопрос:\n"
+    "  «устроюсь ли на работу — жрица суд шут дно король кубков»\n"
+    "Возврат:\n"
     '{"client_name": "имя или null", "spread_type": "тип расклада", '
-    '"question": "конкретный вопрос", "cards": "карты через запятую или null", '
+    '"question": "конкретный вопрос", "cards": ["карта1","карта2","карта3"] или null, '
     '"bottom_card": "карта или null", '
     '"area": "Отношения|Финансы|Работа|Здоровье|Род|Общая ситуация", '
     '"deck": "Уэйт|Dark Wood|Ленорман|Игральные|Deviant Moon или null", '
     '"amount": число, "paid": число, '
     '"payment_source": "карта|наличные|бартер или null"}\n\n'
-    "Если в сообщении НЕСКОЛЬКО раскладов под одной темой "
-    "(структура «Тема: ... 1) вопрос ... 2) вопрос ...» или явный список) — формат:\n"
+    "═══ ФОРМАТ A — нумерованная сессия ═══\n"
+    "  Вадим:\n"
+    "  1) что думает — шут маг жрица дно король кубков\n"
+    "  2) что чувствует — туз кубков двойка кубков влюблённые дно императрица\n\n"
+    "═══ ФОРМАТ B — свободный, блоками ═══\n"
+    "Первая строка — короткое название темы/имя (1-3 слова, без карт). "
+    "Далее чередуются строки 'вопрос' / 'карты'. Пример:\n"
+    "  вадим\n"
+    "  что ко мне чувствует\n"
+    "  король кубков туз мечей 9 пентаклей дно 2 мечей\n"
+    "  что думает обо мне\n"
+    "  7 мечей 8 жезлов колесо фортуны дно 2 жезлов\n\n"
+    "Эвристика B: если первая строка короткая без карт, далее чётное число строк, "
+    "и каждая «нечётная» строка явно похожа на вопрос (без множества карт), "
+    "а «чётная» содержит ≥3 карт или слово «дно» — это формат B.\n\n"
+    "Возврат для форматов A и B (одинаковый):\n"
     '{"session_name": "название темы (например \\"Вадим\\", \\"Работа\\")", '
     '"session_category": "Сфера жизни|Отношения|Работа|Финансы|Здоровье|Род|'
-    'Магические воздействия|Диагностика|Кельтский крест|Триплет или null", '
+    'Магические воздействия|Диагностика|Кельтский крест или null", '
     '"client_name": "имя или null", '
     '"deck": "Уэйт|...", "amount": число, "paid": число, "payment_source": "...", '
-    '"items": [{"question": "вопрос1", "cards": "...", "bottom_card": "...", '
-    '"area": "...", "spread_type": "..."}, ...]}\n\n'
+    '"triplets": [{"question": "вопрос1", "cards": ["карта1","карта2","карта3"], '
+    '"bottom_card": "карта или null", "area": "...", "spread_type": "Триплет"}, ...]}\n\n'
     "ОПРЕДЕЛЕНИЕ session_category — по НАЗВАНИЮ темы, не по числу пунктов:\n"
-    "- имя человека ('Вадим', 'Маша') → 'Сфера жизни' (или 'Отношения' если контекст явный)\n"
+    "- имя человека ('Вадим', 'Маша') → 'Отношения' если контекст любовный/личный, "
+    "иначе 'Сфера жизни'\n"
     "- 'Работа' / 'Карьера' → 'Работа'\n"
     "- 'Финансы' / 'Деньги' → 'Финансы'\n"
     "- 'Здоровье' → 'Здоровье'\n"
@@ -152,12 +171,30 @@ PARSE_SESSION_SYSTEM = (
     "- 'что на работе ждёт' → 'Перспективы на работе'\n"
     "- 'расклад по здоровью мамы' → 'Здоровье мамы'\n\n"
     "ОБЯЗАТЕЛЬНО: area — одно из: Отношения, Финансы, Работа, Здоровье, Род, "
-    "Общая ситуация. Если непонятно — 'Общая ситуация'. НЕ оставляй null.\n"
+    "Общая ситуация. Если непонятно — 'Общая ситуация'.\n"
+    "Карты в cards — массив строк (можно с числовыми именами '9 пентаклей', "
+    "'2 мечей' — код их сам нормализует).\n"
     "Колода (deck): канонические названия БЕЗ склонений — "
     "'Уэйт' (не 'Уэйта'/'Уэйту'), 'Dark Wood', 'Ленорман', 'Игральные', 'Deviant Moon'.\n"
     "Если в тексте есть упоминание 'дно', 'дно колоды', 'bottom' — "
     "выдели эту карту отдельно в поле bottom_card. Это НЕ позиция расклада, "
     "а фоновая карта, её нельзя включать в cards."
+)
+
+
+class SessionParseError(Exception):
+    """Бросается когда ни один формат расклада не распознался."""
+    pass
+
+
+PARSE_HELP_TEXT = (
+    "🔮 Не поняла формат расклада. Попробуй так:\n\n"
+    "<b>Сессия (несколько вопросов):</b>\n"
+    "Вадим:\n"
+    "1) что думает — шут маг жрица дно король кубков\n"
+    "2) что чувствует — туз кубков двойка кубков влюблённые дно императрица\n\n"
+    "<b>Или одной строкой для одиночного триплета:</b>\n"
+    "устроюсь ли на работу — жрица суд шут дно король кубков"
 )
 
 TRIPLET_SUMMARY_SYSTEM = (
@@ -266,6 +303,15 @@ def _resolve_session_category(name: Optional[str], items_count: int) -> str:
             if k in low or low in k:
                 return v
     return "🔺 Триплет" if items_count <= 1 else "🌐 Сфера жизни"
+
+
+def _coerce_cards_str(value) -> str:
+    """Sonnet может вернуть cards как list или str — приводим к comma-string."""
+    if value is None:
+        return ""
+    if isinstance(value, list):
+        return ", ".join(str(x).strip() for x in value if str(x).strip())
+    return str(value).strip()
 
 
 def _canon_cards_str(cards_str: str, deck: str) -> str:
@@ -422,11 +468,12 @@ async def handle_add_session(
         data = _parse_json_safe(raw)
         if data is None:
             await log_error(text, "parse_error", bot_label="🌒 Arcana", error_code="–")
-            await message.answer("⚠️ Не смог разобрать данные сеанса.")
+            await message.answer(PARSE_HELP_TEXT, parse_mode="HTML")
             return
 
         # 1b. Multi-question session → отдельная ветка: сразу сохраняем N триплетов.
-        items = data.get("items") or []
+        # Принимаем оба ключа: новый "triplets" и legacy "items".
+        items = data.get("triplets") or data.get("items") or []
         if isinstance(items, list) and len(items) >= 2:
             await _handle_multi_session(
                 message, data, items, tz, tz_offset, user_notion_id
@@ -455,9 +502,12 @@ async def handle_add_session(
                 self_client_missing = True
 
         deck = _match_deck(data.get("deck") or "") or "Уэйт"
-        cards_text = data.get("cards") or ""
+        cards_text = _coerce_cards_str(data.get("cards"))
         card_names: List[str] = [c.strip() for c in cards_text.split(",") if c.strip()]
         bottom_card = (data.get("bottom_card") or "").strip()
+        # Если single-flow без карт — это знак, что Sonnet не смог распарсить.
+        if not card_names and not bottom_card and not data.get("triplets"):
+            raise SessionParseError("no cards parsed in single flow")
         area = _normalize_area(data.get("area") or "")
         question = data.get("question") or area
 
@@ -534,6 +584,14 @@ async def handle_add_session(
         await save_pending(tg_id, pending_state)
         await _send_reading(message, pending_state)
 
+    except SessionParseError as e:
+        logger.warning("session parse error: %s", e)
+        await log_error(
+            (message.text or "")[:200], "parse_error",
+            bot_label="🌒 Arcana", error_code="parse",
+        )
+        await message.answer(PARSE_HELP_TEXT, parse_mode="HTML")
+        return
     except Exception as e:
         trace = tb.format_exc()
         logger.error("handle_add_session error: %s", trace)
@@ -616,7 +674,7 @@ async def _handle_multi_session(
     for idx, it in enumerate(items, 1):
         try:
             question = (it.get("question") or "").strip() or f"{session_name} · вопрос {idx}"
-            cards_text = (it.get("cards") or "").strip()
+            cards_text = _coerce_cards_str(it.get("cards"))
             bottom_card = (it.get("bottom_card") or "").strip()
             area = _normalize_area(it.get("area") or "")
             spread_type = (it.get("spread_type") or data.get("spread_type") or "Триплет")

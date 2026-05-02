@@ -2401,26 +2401,6 @@ function ArDay({ s, openClient, navigate, openMoonPhases }) {
         </div>
       </div>
 
-      {a.sessionsToday.length > 0 && (
-        <div className="glass" style={{ padding: "14px 16px" }}>
-          <div className="card-h">
-            <span className="card-title">Сеансы сегодня</span>
-            <span className="card-meta">{a.sessionsToday.length}</span>
-          </div>
-          {a.sessionsToday.map((x) => (
-            <div key={x.id} className="sched-row" style={{ cursor: "pointer" }} onClick={() => x.client_id && openClient({ id: x.client_id })}>
-              <span className="s-time">{x.time}</span>
-              <div style={{ width: 24, height: 24, borderRadius: "50%", background: `${s.acc}22`, color: s.acc, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 600, flexShrink: 0 }}>{x.client[0]}</div>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div className="s-title">{x.client}</div>
-                <div className="s-meta"><span>{x.type} · {x.area}</span></div>
-              </div>
-              <ChevronRight size={14} color={s.tS} />
-            </div>
-          ))}
-        </div>
-      )}
-
       <div className="glass" style={{ padding: "14px 16px" }}>
         <div className="card-h">
           <span className="card-title">Расписание</span>
