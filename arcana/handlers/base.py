@@ -55,6 +55,32 @@ async def cmd_tz(message: Message, user_notion_id: str = "") -> None:
     await handle_tz_command(message, user_notion_id)
 
 
+@router.message(Command("clear_pending"))
+async def cmd_clear_pending(message: Message, user_notion_id: str = "") -> None:
+    """Дебаг: дропнуть все pending состояния пользователя
+    (work_preview, tarot). Доступ ограничен whitelist'ом Арканы."""
+    from arcana.handlers.work_preview import drop_pending as drop_work
+    from arcana.pending_tarot import delete_pending as drop_tarot
+
+    uid = message.from_user.id
+    cleared = 0
+    try:
+        from arcana.handlers.work_preview import _pending_get
+        if _pending_get(uid):
+            cleared += 1
+        drop_work(uid)
+    except Exception:
+        pass
+    try:
+        from arcana.pending_tarot import get_pending
+        if await get_pending(uid):
+            cleared += 1
+        await drop_tarot(uid)
+    except Exception:
+        pass
+    await message.answer(f"✅ Очищено pending: {cleared}")
+
+
 @router.message(CommandStart())
 async def cmd_start(message: Message) -> None:
     await message.answer(
