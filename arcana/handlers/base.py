@@ -273,14 +273,10 @@ async def route_message(message: Message, user_notion_id: str = "", _text: str =
                 await react(message, "💰")
                 return
 
-        # ── Pending: правка трактовки ─────────────────────────────────────
+        # ── Pending: правка трактовки уже сохранённого триплета ───────────
         if pending and pending.get("awaiting_triplet_edit"):
             from arcana.handlers.sessions import handle_triplet_correction
             await handle_triplet_correction(message, text, pending, user_notion_id)
-            await react(message, reaction_for("session"))
-            return
-        if pending and pending.get("awaiting_edit"):
-            await _handle_tarot_correction(message, text, pending, user_notion_id)
             await react(message, reaction_for("session"))
             return
 
