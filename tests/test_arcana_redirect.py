@@ -54,8 +54,8 @@ async def test_send_nexus_redirect_format():
 
 @pytest.mark.asyncio
 async def test_guard_redirects_non_practice_work_intent():
-    """intent=work без практических маркеров → ask_practice_or_nexus,
-    handle_add_work НЕ вызван."""
+    """intent=work без практических маркеров теперь нормализуется в
+    nexus_redirect и сразу шлёт сообщение редиректа (без переспроса)."""
     from arcana.handlers import base
 
     msg = MagicMock()
@@ -69,8 +69,8 @@ async def test_guard_redirects_non_practice_work_intent():
 
     with patch("arcana.handlers.base.ask_claude",
                AsyncMock(return_value="work")), \
-         patch("arcana.handlers.intent_resolve.ask_practice_or_nexus",
-               AsyncMock()) as ask_mock, \
+         patch("arcana.handlers.intent_resolve.send_nexus_redirect",
+               AsyncMock()) as redirect_mock, \
          patch("arcana.handlers.works.handle_add_work",
                AsyncMock()) as add_mock, \
          patch("arcana.handlers.base.react", AsyncMock()), \
@@ -83,7 +83,7 @@ async def test_guard_redirects_non_practice_work_intent():
          patch("arcana.handlers.work_preview.has_pending", return_value=False):
         await base.route_message(msg, user_notion_id="u")
 
-    ask_mock.assert_awaited_once()
+    redirect_mock.assert_awaited_once()
     add_mock.assert_not_called()
 
 
