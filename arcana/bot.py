@@ -21,6 +21,11 @@ logger = logging.getLogger("arcana.bot")
 _photo_pending: dict = {}  # uid → (message_id, user_notion_id, ts)
 _PHOTO_TTL = 120  # 2 минуты
 
+# Глобальная инстанция планировщика напоминаний для Arcana (см. core/reminder_scheduler.py).
+# Инициализируется в main() после старта APScheduler.
+from core.reminder_scheduler import ReminderScheduler
+arcana_reminder_flow = ReminderScheduler(callback_prefix="work")
+
 
 def create_dp_and_bot():
     """Создать dp + bot без запуска polling. Для тестов и main()."""
@@ -316,6 +321,10 @@ async def main():
         )
         scheduler.start()
         logger.info("APScheduler started — arcana monthly reminder active")
+        # Инициализируем shared ReminderScheduler — теперь cb_work_remind
+        # сможет ставить APScheduler-job на дедлайн напоминания работы.
+        arcana_reminder_flow.init(bot, scheduler)
+        logger.info("arcana_reminder_flow ready (callback_prefix=work)")
     except ImportError:
         logger.warning("apscheduler not installed — monthly reminder disabled")
 
