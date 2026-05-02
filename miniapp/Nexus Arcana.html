@@ -1,0 +1,233 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+<title>Nexus × Arcana</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Newsreader:ital,wght@0,400;0,500;0,600;1,400;1,500&family=Manrope:wght@400;500;600;700&family=JetBrains+Mono:wght@500;600&family=Caveat:wght@400;500&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="styles.css?v=22" />
+
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+
+<script src="data.js?v=2"></script>
+</head>
+<body>
+<div id="root"></div>
+
+<script type="text/babel" src="atmosphere.jsx?v=22"></script>
+<script type="text/babel" src="screens.jsx?v=22"></script>
+<script type="text/babel" src="tweaks-panel.jsx?v=22"></script>
+<script type="text/babel">
+const { useState, useEffect, useMemo } = React;
+
+const TWEAKS = /*EDITMODE-BEGIN*/{
+  "weather": "clear",
+  "density": "cozy",
+  "displayFont": "Lora",
+  "bodyFont": "Manrope",
+  "showFAB": true,
+  "showADHDTip": true,
+  "showWeatherFx": true,
+  "mode": "day"
+}/*EDITMODE-END*/;
+
+// Nexus tabs
+const NX_TABS = [
+  { id: "day", label: "Сегодня", ico: "sunrise" },
+  { id: "tasks", label: "Задачи", ico: "list" },
+  { id: "fin", label: "Финансы", ico: "coins" },
+  { id: "lists", label: "Списки", ico: "checks" },
+  { id: "memory", label: "Память", ico: "brain" },
+  { id: "cal", label: "Календарь", ico: "calendar" },
+];
+
+// Arcana tabs
+const AR_TABS = [
+  { id: "day", label: "Сегодня", ico: "moon" },
+  { id: "sessions", label: "Расклады", ico: "sparkles" },
+  { id: "clients", label: "Клиенты", ico: "users" },
+  { id: "rituals", label: "Ритуалы", ico: "flame" },
+  { id: "grimoire", label: "Гримуар", ico: "book" },
+  { id: "stats", label: "Статистика", ico: "bars" },
+];
+
+function App() {
+  const [tweaks, setTweak] = useTweaks(TWEAKS);
+  const [tab, setTab] = useState("day");
+  const mode = tweaks.mode; // 'day' | 'night'
+  const data = window.NX_DATA;
+  const tabs = mode === "day" ? NX_TABS : AR_TABS;
+
+  // reset tab when switching mode if not present
+  useEffect(() => {
+    const ids = tabs.map((t) => t.id);
+    if (!ids.includes(tab)) setTab("day");
+  }, [mode]);
+
+  // apply font vars
+  useEffect(() => {
+    document.documentElement.style.setProperty("--f-display", `"${tweaks.displayFont}", Georgia, serif`);
+    document.documentElement.style.setProperty("--f-body", `"${tweaks.bodyFont}", system-ui, sans-serif`);
+  }, [tweaks.displayFont, tweaks.bodyFont]);
+
+  const renderNexus = () => {
+    switch (tab) {
+      case "day": return <NxDay mode={mode} data={data} navigate={setTab} />;
+      case "tasks": return <NxTasks mode={mode} data={data} />;
+      case "fin": return <NxFin mode={mode} data={data} />;
+      case "lists": return <NxLists mode={mode} data={data} />;
+      case "memory": return <NxMemory mode={mode} data={data} />;
+      case "cal": return <NxCal mode={mode} data={data} />;
+      default: return null;
+    }
+  };
+  const renderArcana = () => {
+    switch (tab) {
+      case "day": return <ArDay mode={mode} data={data} />;
+      case "sessions": return <ArSessions mode={mode} data={data} />;
+      case "clients": return <ArClients mode={mode} data={data} />;
+      case "rituals": return <ArRituals mode={mode} data={data} />;
+      case "grimoire": return <ArGrimoire mode={mode} data={data} />;
+      case "stats": return <ArStats mode={mode} data={data} />;
+      default: return null;
+    }
+  };
+
+  const ctxLabel = mode === "day" ? "🌿 Дом · Будни" : "🌙 Практика · Ночь";
+
+  return (
+    <div className={`app ${mode}`}>
+      <SkyLayer mode={mode} weather={tweaks.showWeatherFx ? tweaks.weather : "clear"} />
+
+      <div className="frame">
+        {/* Top bar */}
+        <div className="topbar">
+          <div className={`brand-orb ${mode}`}>
+            {mode === "day" ? (
+              <svg width="48" height="48" viewBox="0 0 54 54" xmlns="http://www.w3.org/2000/svg">
+                <defs>
+                  <radialGradient id="sunGradMini" cx="35%" cy="30%" r="70%">
+                    <stop offset="0%" stopColor="#fff2c8" />
+                    <stop offset="40%" stopColor="#f4c66e" />
+                    <stop offset="100%" stopColor="#b07a2e" />
+                  </radialGradient>
+                </defs>
+                <circle cx="27" cy="27" r="22" fill="#f4c66e" opacity="0.2" />
+                <circle cx="27" cy="27" r="17" fill="none" stroke="#f4c66e" strokeWidth="0.8" opacity="0.6" />
+                <circle cx="27" cy="27" r="13" fill="url(#sunGradMini)" />
+                <circle cx="22" cy="23" r="2" fill="#8a5a28" opacity="0.5" />
+                <circle cx="31" cy="27" r="1.5" fill="#8a5a28" opacity="0.45" />
+                <circle cx="24" cy="32" r="1.1" fill="#8a5a28" opacity="0.4" />
+                <circle cx="30" cy="21" r="0.8" fill="#8a5a28" opacity="0.45" />
+              </svg>
+            ) : (
+              <svg width="48" height="48" viewBox="0 0 54 54" xmlns="http://www.w3.org/2000/svg">
+                <defs>
+                  <radialGradient id="moonGradMini" cx="35%" cy="30%" r="70%">
+                    <stop offset="0%" stopColor="#ffffff" />
+                    <stop offset="40%" stopColor="#d4dce8" />
+                    <stop offset="100%" stopColor="#6b7590" />
+                  </radialGradient>
+                </defs>
+                <circle cx="27" cy="27" r="22" fill="#d4dce8" opacity="0.15" />
+                <circle cx="27" cy="27" r="17" fill="none" stroke="#d4dce8" strokeWidth="0.8" opacity="0.5" />
+                <circle cx="27" cy="27" r="13" fill="url(#moonGradMini)" />
+                <circle cx="22" cy="23" r="2" fill="#4a5470" opacity="0.5" />
+                <circle cx="31" cy="27" r="1.5" fill="#4a5470" opacity="0.45" />
+                <circle cx="24" cy="32" r="1.1" fill="#4a5470" opacity="0.4" />
+                <circle cx="30" cy="21" r="0.8" fill="#4a5470" opacity="0.45" />
+              </svg>
+            )}
+          </div>
+          <div className={`brand-name ${mode}`}>
+            {mode === "day" ? "nexus" : "arcana"}
+          </div>
+          <div style={{ marginLeft: "auto" }} />
+          <div className="mode-toggle" onClick={() => setTweak("mode", mode === "day" ? "night" : "day")}>
+            {mode === "day" ? (
+              <>
+                <Icon name="moon" size={15} />
+                <Icon name="arrow-r" size={14} style={{ opacity: 0.7 }} />
+              </>
+            ) : (
+              <>
+                <Icon name="arrow-l" size={14} style={{ opacity: 0.7 }} />
+                <Icon name="sun" size={15} />
+              </>
+            )}
+          </div>
+        </div>
+
+        {/* Scrollable content */}
+        <div className="scroll" data-screen-label={`${mode === "day" ? "Nexus" : "Arcana"} · ${tab}`}>
+          {mode === "day" ? renderNexus() : renderArcana()}
+        </div>
+
+        {/* FAB */}
+        {tweaks.showFAB && (
+          <div className="fab" title="Добавить">
+            <Icon name="plus" size={22} />
+          </div>
+        )}
+
+        {/* Bottom nav */}
+        <div className="nav">
+          {tabs.map((t) => (
+            <div key={t.id} className={`nav-item ${tab === t.id ? "active" : ""}`} onClick={() => setTab(t.id)}>
+              <div className="ico"><Icon name={t.ico} size={20} /></div>
+              <span>{t.label}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Tweaks */}
+      <TweaksPanel title="Tweaks">
+        <TweakSection title="Режим">
+          <TweakRadio label="Mode" value={tweaks.mode}
+            options={[["day","Nexus · день"],["night","Arcana · ночь"]]}
+            onChange={(v) => setTweak("mode", v)} />
+        </TweakSection>
+        <TweakSection title="Атмосфера">
+          <TweakToggle label="Эффекты погоды" value={tweaks.showWeatherFx}
+            onChange={(v) => setTweak("showWeatherFx", v)} />
+          <TweakSelect label="Погода" value={tweaks.weather}
+            options={[
+              ["clear","☀ Ясно"],["cloudy","⛅ Облачно"],
+              ["rain","🌧 Дождь"],["snow","❄ Снег"],["fog","🌫 Туман"],
+            ]}
+            onChange={(v) => setTweak("weather", v)} />
+        </TweakSection>
+        <TweakSection title="Типографика">
+          <TweakSelect label="Display font" value={tweaks.displayFont}
+            options={[
+              ["Newsreader","Newsreader"],["Lora","Lora"],
+              ["Cormorant Garamond","Cormorant"],["Playfair Display","Playfair"],
+            ]}
+            onChange={(v) => setTweak("displayFont", v)} />
+          <TweakSelect label="Body font" value={tweaks.bodyFont}
+            options={[
+              ["Manrope","Manrope"],["Inter","Inter"],
+              ["DM Sans","DM Sans"],["Geist","Geist"],
+            ]}
+            onChange={(v) => setTweak("bodyFont", v)} />
+        </TweakSection>
+        <TweakSection title="Интерфейс">
+          <TweakToggle label="Кнопка добавления" value={tweaks.showFAB}
+            onChange={(v) => setTweak("showFAB", v)} />
+          <TweakToggle label="СДВГ-совет" value={tweaks.showADHDTip}
+            onChange={(v) => setTweak("showADHDTip", v)} />
+        </TweakSection>
+      </TweaksPanel>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+</script>
+</body>
+</html>
