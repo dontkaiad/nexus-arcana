@@ -19,11 +19,20 @@ logger = logging.getLogger("arcana.works")
 
 PARSE_WORK_SYSTEM = (
     "Извлеки данные работы/задачи практики. Ответь ТОЛЬКО JSON без markdown:\n"
-    '{"title": "что сделать", "deadline": "YYYY-MM-DD HH:MM или null", '
+    '{"title": "что сделать", "deadline": "YYYY-MM-DD или YYYY-MM-DDTHH:MM или null", '
     '"priority": "срочно/важно/можно потом", '
     '"category": "расклад/ритуал/соцсети/расходники/обучение/прочее или null", '
     '"client_name": "имя клиента или null", '
-    '"type": "личная/клиентская"}'
+    '"type": "личная/клиентская"}\n\n'
+    "Правила парсинга deadline (как в Nexus):\n"
+    "- 'завтра' → дата=завтра без времени (YYYY-MM-DD)\n"
+    "- 'послезавтра' → +2 дня\n"
+    "- 'через N дней' → now + N дней\n"
+    "- 'в пятницу/субботу/...' → ближайший этот день недели\n"
+    "- 'завтра в 18' / 'в субботу в 19:30' → YYYY-MM-DDTHH:MM\n"
+    "- 'к 10 мая' → 2026-05-10 (год — текущий или следующий по контексту)\n"
+    "- если дедлайн НЕ упомянут — null. Не выдумывай.\n\n"
+    "title — короткий, по-делу: «Финансовый ритуал для Маши», «Расклад на работу Игоря»."
 )
 
 WORK_CATEGORY_MAP = {
@@ -55,12 +64,10 @@ async def handle_add_work(message: Message, text: str, user_notion_id: str = "")
         tz = timezone(timedelta(hours=tz_offset))
         now_str = datetime.now(tz).strftime("%Y-%m-%d %H:%M")
 
-        system = (
-            PARSE_WORK_SYSTEM.rstrip("}") +
-            f', "now": "{now_str} (UTC+{tz_offset})"' + "}"
-        )
-
-        raw = await ask_claude(text, system=PARSE_WORK_SYSTEM, max_tokens=300)
+        # Передаём now в системный промпт, чтобы Sonnet корректно
+        # резолвил «завтра», «в субботу» и т.п.
+        system = PARSE_WORK_SYSTEM + f"\n\nСейчас: {now_str} (UTC+{tz_offset})"
+        raw = await ask_claude(text, system=system, max_tokens=300)
         try:
             raw = raw.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
             data = json.loads(raw)
@@ -116,16 +123,17 @@ async def handle_add_work(message: Message, text: str, user_notion_id: str = "")
         if deadline_raw:
             lines.append(f"📅 Дедлайн: {deadline_raw}")
         lines.append(f"👥 {work_type}" + (f" · {client_name}" if client_name else ""))
-        lines.append("\n<i>↩️ Реплай чтобы дополнить</i>")
+        lines.append("\n<i>↩️ Реплай чтобы дополнить (например: «завтра в 19»)</i>")
 
-        # Если дедлайна нет — спросим через inline-кнопки.
-        deadline_kb = None
-        if not deadline_raw:
-            from arcana.handlers.work_kb import deadline_keyboard
-            deadline_kb = deadline_keyboard(result)
-            lines.append("\n📅 Когда сделать?")
+        # Если дедлайн распарсен — сразу спрашиваем напоминание.
+        # Если нет — никаких приставаний; Кай добавит дедлайн через reply.
+        reply_kb = None
+        if deadline_raw:
+            lines.append("\n⏰ Напомнить?")
+            from arcana.handlers.work_kb import reminder_keyboard
+            reply_kb = reminder_keyboard(result)
         bot_msg = await message.answer(
-            "\n".join(lines), parse_mode="HTML", reply_markup=deadline_kb,
+            "\n".join(lines), parse_mode="HTML", reply_markup=reply_kb,
         )
 
         from core.message_pages import save_message_page
