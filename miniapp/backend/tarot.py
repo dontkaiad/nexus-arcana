@@ -118,6 +118,61 @@ def _cards_of(deck_id: str) -> list[dict]:
     return deck.get("cards", [])
 
 
+# ── Числовые/мастевые алиасы для коротких пользовательских форматов ────────
+
+NUM_TO_WORD: dict[str, str] = {
+    "1":  "туз",       "ace":   "туз",
+    "2":  "двойка",    "two":   "двойка",
+    "3":  "тройка",    "three": "тройка",
+    "4":  "четвёрка",  "four":  "четвёрка",
+    "5":  "пятёрка",   "five":  "пятёрка",
+    "6":  "шестёрка",  "six":   "шестёрка",
+    "7":  "семёрка",   "seven": "семёрка",
+    "8":  "восьмёрка", "eight": "восьмёрка",
+    "9":  "девятка",   "nine":  "девятка",
+    "10": "десятка",   "ten":   "десятка",
+    "11": "паж",       "page":  "паж",
+    "12": "рыцарь",    "knight": "рыцарь",
+    "13": "королева",  "queen": "королева",
+    "14": "король",    "king":  "король",
+}
+
+SUIT_FULL: dict[str, str] = {
+    "пентаклей": "пентаклей", "пент": "пентаклей", "монет": "пентаклей",
+    "кубков":    "кубков",    "куб":  "кубков",    "чаш":   "кубков",
+    "мечей":     "мечей",     "меч":  "мечей",
+    "жезлов":    "жезлов",    "жез":  "жезлов",    "посохов": "жезлов",
+    "pentacles": "пентаклей", "coins": "пентаклей",
+    "cups":      "кубков",
+    "swords":    "мечей",
+    "wands":     "жезлов",
+}
+
+_RANK_WORDS = "ace|page|knight|queen|king|two|three|four|five|six|seven|eight|nine|ten"
+_NUM_RE = re.compile(
+    rf"^(\d+|{_RANK_WORDS})\s+(?:of\s+)?([а-яёa-z]+)$",
+    re.IGNORECASE,
+)
+
+
+def normalize_card_input(text: str) -> str:
+    """'9 пентаклей' → 'девятка пентаклей', 'Nine of Pentacles' → 'девятка пентаклей'.
+
+    Если паттерн не подошёл (например 'шут', 'The Fool', 'королева кубков') —
+    возвращает текст как есть, чтобы не ломать уже нормальные имена.
+    """
+    if not text:
+        return ""
+    s = text.strip().lower()
+    m = _NUM_RE.match(s)
+    if not m:
+        return s
+    rank, suit = m.group(1).lower(), m.group(2).lower()
+    rank_word = NUM_TO_WORD.get(rank, rank)
+    suit_full = SUIT_FULL.get(suit, suit)
+    return f"{rank_word} {suit_full}"
+
+
 def find_card(deck_id: str, query: str) -> Optional[dict]:
     """Ищет карту по свободному тексту. Возвращает {file, en, ru, aliases} или None."""
     if not query:
@@ -126,7 +181,7 @@ def find_card(deck_id: str, query: str) -> Optional[dict]:
     if not cards:
         return None
 
-    q = query.strip()
+    q = normalize_card_input(query)
     q_low = q.lower()
 
     # 1. exact match по en / ru / aliases

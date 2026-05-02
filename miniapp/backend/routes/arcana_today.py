@@ -320,9 +320,23 @@ async def get_arcana_today(tg_id: int = Depends(current_user_id)) -> dict[str, A
     acc = _compute_accuracy(all_sessions, rituals, scope="all")
     pending_sessions, pending_rituals = _count_pending(all_sessions, rituals)
 
-    # works_today счётчики (без обвязки с локальным done state)
-    works_total_today = len(works) + len(works_overdue)
-    works_done_today = 0  # done логика на фронте локальная
+    # «Работы N/M» — счётчик практики за сегодня:
+    #   done = сегодняшние сессии (свершившиеся события) +
+    #          ритуалы сегодня с Результатом != ⏳ +
+    #          работы из 🔮 Работы со статусом выполнено сегодня (db уже фильтрует)
+    #   total = done + pending works (из _works_schedule, они != Done)
+    rituals_done_today = 0
+    for p in rituals:
+        raw = (p.get("properties", {}).get("Дата", {}).get("date") or {}).get("start", "")
+        d_local = to_local_date(raw, tz_offset)
+        if d_local != today_date:
+            continue
+        result = select_of(p, "Результат") or ""
+        if result and not result.startswith("⏳"):
+            rituals_done_today += 1
+
+    works_done_today = len(sessions_today) + rituals_done_today
+    works_total_today = works_done_today + len(works) + len(works_overdue)
 
     return {
         "date": today_iso,
