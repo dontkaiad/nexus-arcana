@@ -188,9 +188,34 @@ async def cb_work_remind(call: CallbackQuery) -> None:
         # Поле «Напоминание» (date) уже использовано в _works_schedule.
         await update_page(page_id, {"Напоминание": {"date": {"start": iso}}})
     except Exception as e:
-        logger.warning("set reminder failed: %s", e)
+        logger.warning("set reminder field failed: %s", e)
         await call.message.answer("⚠️ Не получилось выставить напоминание.")
         return
 
+    # Ставим APScheduler-job через shared ReminderScheduler.
+    title_parts = ((page or {}).get("properties", {})
+                   .get("Работа", {}).get("title") or [])
+    title = title_parts[0].get("plain_text", "Работа") if title_parts else "Работа"
+    from core.shared_handlers import get_user_tz
+    tz_offset = await get_user_tz(call.from_user.id)
+    try:
+        from arcana.bot import arcana_reminder_flow
+        scheduled = await arcana_reminder_flow.schedule_reminder(
+            chat_id=call.message.chat.id,
+            title=title,
+            reminder_dt=iso,
+            page_id=page_id,
+            tz_offset=int(tz_offset),
+        )
+    except Exception as e:
+        logger.warning("schedule_reminder call failed: %s", e)
+        scheduled = False
+
     label = "за день" if choice == "24h" else "за 3 часа"
-    await call.message.answer(f"⏰ Напомню {label} до дедлайна")
+    if scheduled:
+        await call.message.answer(f"⏰ Напомню {label} до дедлайна")
+    else:
+        # Поле в Notion записано — на restart restore_reminders подхватит.
+        await call.message.answer(
+            f"⏰ Напоминание {label} записано в Notion (планировщик догонит при перезапуске)"
+        )
