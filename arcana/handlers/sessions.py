@@ -410,6 +410,39 @@ def _pending_keyboard(uid: int) -> InlineKeyboardMarkup:
     ]])
 
 
+def _triplet_keyboard(page_id: str) -> InlineKeyboardMarkup:
+    """Кнопки [✏️ Поправить] [🗑 Удалить] под сохранённым триплетом."""
+    from core.utils import cancel_button, secondary_button
+    short = page_id.replace("-", "")[:32]  # Telegram callback_data ≤ 64 bytes
+    return InlineKeyboardMarkup(inline_keyboard=[[
+        secondary_button("✏️ Поправить", f"triplet_correct:{short}"),
+        cancel_button("🗑 Удалить", f"triplet_remove:{short}"),
+    ]])
+
+
+def _triplet_remove_confirm_keyboard(short_id: str) -> InlineKeyboardMarkup:
+    from core.utils import cancel_button, secondary_button
+    return InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(
+            text="✅ Да, удалить",
+            callback_data=f"triplet_remove_yes:{short_id}",
+        ),
+        secondary_button("↩️ Отмена", f"triplet_remove_no:{short_id}"),
+    ]])
+
+
+async def _resolve_triplet_page(short_id: str, user_notion_id: str) -> Optional[dict]:
+    """short_id (32 hex без дефисов) → Notion page. Возвращает None если не нашли
+    или принадлежит чужому пользователю."""
+    from core.notion_client import sessions_all
+    pages = await sessions_all(user_notion_id=user_notion_id)
+    for p in pages:
+        pid = p.get("id", "").replace("-", "")
+        if pid.startswith(short_id) or short_id.startswith(pid[:32]):
+            return p
+    return None
+
+
 async def _send_reading(message: Message, state: dict) -> None:
     """Отправить трактовку с кнопками управления."""
     uid = message.from_user.id
@@ -760,15 +793,19 @@ async def _handle_multi_session(
                 if bottom_card:
                     head += f"🂠 {html.escape(bottom_card)}\n"
                 body_full = f"{head}\n{interp_tg}"
+                tkb = _triplet_keyboard(page_id)
                 # Telegram лимит ~4096; режем по 3500 для безопасности.
                 if len(body_full) <= 3500:
-                    await message.answer(body_full, parse_mode="HTML")
+                    await message.answer(body_full, parse_mode="HTML", reply_markup=tkb)
                 else:
                     await message.answer(head, parse_mode="HTML")
                     chunk = interp_tg[:3500]
                     await message.answer(chunk, parse_mode="HTML")
                     if len(interp_tg) > 3500:
                         await message.answer(interp_tg[3500:7000], parse_mode="HTML")
+                    await message.answer(
+                        "—", parse_mode="HTML", reply_markup=tkb
+                    )
 
                 saved_triplets.append({
                     "question": question,
@@ -934,7 +971,10 @@ async def cb_tarot_save(call: CallbackQuery) -> None:
         ok_text = "✅ Расклад сохранён в Notion" + (
             f"\n⚠️ Долг: {int(debt)}₽" if debt > 0 else ""
         ) + "\n\n<i>↩️ Реплай чтобы дополнить</i>"
-        saved_msg = await call.message.edit_text(ok_text, parse_mode="HTML")
+        triplet_kb = _triplet_keyboard(session_page_id) if session_page_id else None
+        saved_msg = await call.message.edit_text(
+            ok_text, parse_mode="HTML", reply_markup=triplet_kb,
+        )
 
         if session_page_id:
             from core.message_pages import save_message_page
@@ -973,6 +1013,207 @@ async def cb_tarot_cancel(call: CallbackQuery) -> None:
     from arcana.pending_tarot import delete_pending
     await delete_pending(uid)
     await call.message.edit_text("❌ Расклад не сохранён.")
+
+
+# ────────────────────── Триплет: правка / удаление ────────────────────────
+
+@router.callback_query(F.data.startswith("triplet_correct:"))
+async def cb_triplet_correct(call: CallbackQuery) -> None:
+    """[✏️ Поправить] под сохранённым триплетом — переводим в режим правки."""
+    await call.answer()
+    short_id = call.data.split(":", 1)[1]
+    uid = call.from_user.id
+    from arcana.pending_tarot import save_pending
+    await save_pending(uid, {
+        "awaiting_triplet_edit": True,
+        "triplet_short_id": short_id,
+    })
+    try:
+        await call.message.edit_reply_markup(reply_markup=None)
+    except Exception:
+        pass
+    await call.message.answer(
+        "✏️ Что поправить в этом триплете? Напиши коммент."
+    )
+
+
+@router.callback_query(F.data.startswith("triplet_remove_yes:"))
+async def cb_triplet_remove_yes(call: CallbackQuery) -> None:
+    """[✅ Да, удалить] — архивируем страницу в Notion."""
+    await call.answer()
+    short_id = call.data.split(":", 1)[1]
+    from core.user_manager import get_user_notion_id
+    user_notion_id = (await get_user_notion_id(call.from_user.id)) or ""
+    page = await _resolve_triplet_page(short_id, user_notion_id)
+    if not page:
+        await call.message.edit_text("⚠️ Триплет не найден.")
+        return
+    page_id = page.get("id", "")
+    sname = (
+        "".join(
+            x.get("plain_text", "") for x in
+            page.get("properties", {}).get("Сессия", {}).get("rich_text") or []
+        )
+    ).strip()
+    cids = [
+        r.get("id", "") for r in
+        page.get("properties", {}).get("👥 Клиенты", {}).get("relation", [])
+    ]
+    cid = cids[0] if cids else None
+    try:
+        from core.notion_client import get_notion
+        await get_notion().pages.update(page_id=page_id, archived=True)
+    except Exception as e:
+        logger.error("archive triplet failed: %s", e)
+        await call.message.edit_text("⚠️ Не удалось удалить триплет.")
+        return
+    # Инвалидация кеша саммари сессии.
+    try:
+        from core.session_cache import cache_delete, session_summary_key
+        if sname:
+            cache_delete(session_summary_key(sname, cid))
+    except Exception:
+        pass
+    await call.message.edit_text("🗑 Триплет удалён.")
+
+
+@router.callback_query(F.data.startswith("triplet_remove_no:"))
+async def cb_triplet_remove_no(call: CallbackQuery) -> None:
+    await call.answer()
+    try:
+        await call.message.edit_text("Отменено.")
+    except Exception:
+        pass
+
+
+@router.callback_query(F.data.startswith("triplet_remove:"))
+async def cb_triplet_remove(call: CallbackQuery) -> None:
+    """[🗑 Удалить] — показать confirm-кнопки."""
+    await call.answer()
+    short_id = call.data.split(":", 1)[1]
+    from core.user_manager import get_user_notion_id
+    user_notion_id = (await get_user_notion_id(call.from_user.id)) or ""
+    page = await _resolve_triplet_page(short_id, user_notion_id)
+    title = "—"
+    if page:
+        title_parts = page.get("properties", {}).get("Тема", {}).get("title", [])
+        if title_parts:
+            title = title_parts[0].get("plain_text", "—")
+    await call.message.answer(
+        f"🗑 Удалить триплет «{html.escape(title)}»?\nДействие необратимо.",
+        parse_mode="HTML",
+        reply_markup=_triplet_remove_confirm_keyboard(short_id),
+    )
+
+
+async def handle_triplet_correction(
+    message: Message, correction_text: str, pending: dict, user_notion_id: str
+) -> None:
+    """Вход — pending {awaiting_triplet_edit, triplet_short_id} + текст правки.
+    Загружаем триплет из Notion, гоним Sonnet, обновляем поле «Трактовка»,
+    регенерим Haiku-саммари, инвалидируем кеш сессии."""
+    short_id = pending.get("triplet_short_id") or ""
+    page = await _resolve_triplet_page(short_id, user_notion_id)
+    from arcana.pending_tarot import delete_pending
+    if not page:
+        await delete_pending(message.from_user.id)
+        await message.answer("⚠️ Триплет не найден.")
+        return
+    page_id = page.get("id", "")
+    props = page.get("properties", {})
+    title_parts = props.get("Тема", {}).get("title", [])
+    question = title_parts[0]["plain_text"] if title_parts else ""
+    cards_raw = "".join(
+        x.get("plain_text", "") for x in props.get("Карты", {}).get("rich_text") or []
+    ).strip()
+    interp_raw = "".join(
+        x.get("plain_text", "") for x in props.get("Трактовка", {}).get("rich_text") or []
+    ).strip()
+    deck_list = [it.get("name", "") for it in props.get("Колоды", {}).get("multi_select") or []]
+    deck = ", ".join(deck_list) or "Уэйт"
+    sname = "".join(
+        x.get("plain_text", "") for x in props.get("Сессия", {}).get("rich_text") or []
+    ).strip()
+    cids = [r.get("id", "") for r in props.get("👥 Клиенты", {}).get("relation", [])]
+    cid = cids[0] if cids else None
+
+    from arcana.tarot_loader import get_cards_context
+    card_names = [c.strip() for c in cards_raw.split(",") if c.strip()]
+    cards_context = get_cards_context(deck, card_names)
+
+    system = (
+        "Ты таролог Кай. Поправь трактовку триплета на основе её комментария.\n"
+        "Сохрани HTML-структуру (h3 для блоков карт, p для текста, b для "
+        "акцентов, i для эмоциональных моментов). НЕ добавляй временные "
+        "позиции (Прошлое/Настоящее/Будущее). Триплет — это раскрытие сути "
+        "ситуации тремя ракурсами.\n"
+        "ВЫВОДИ ТОЛЬКО HTML с тегами <h3>, <b>, <i>, <p>. Никакого markdown.\n"
+    )
+    if cards_context:
+        system += f"\n--- СПРАВОЧНИК КАРТ ---\n{cards_context}"
+    prompt = (
+        f"Вопрос триплета: {question}\n"
+        f"Карты: {cards_raw}\n"
+        f"Текущая трактовка:\n{interp_raw}\n\n"
+        f"Замечание Кай: {correction_text}\n\n"
+        f"Дай ПОЛНУЮ исправленную трактовку триплета."
+    )
+    try:
+        new_interp = await ask_claude(
+            prompt, system=system,
+            model="claude-sonnet-4-20250514", max_tokens=2000,
+        )
+    except Exception as e:
+        logger.error("triplet correction sonnet failed: %s", e)
+        await delete_pending(message.from_user.id)
+        await message.answer("❌ Не получилось скорректировать трактовку.")
+        return
+
+    from core.html_sanitize import sanitize_interpretation
+    from core.html_for_telegram import html_to_telegram
+    from core.notion_client import _text, update_page
+    new_interp = sanitize_interpretation(new_interp)
+
+    # Обновляем поле «Трактовка»
+    try:
+        await update_page(page_id, {"Трактовка": _text(new_interp[:2000])})
+    except Exception as e:
+        logger.error("update триптех trakt failed: %s", e)
+
+    # Регенерим Haiku-саммари
+    new_summary = await _make_triplet_summary(
+        question, cards_raw, "", new_interp,
+    )
+    if new_summary:
+        try:
+            await update_page(
+                page_id, {"Саммари триплета": _text(new_summary[:1800])}
+            )
+        except Exception as e:
+            logger.warning("update triplet summary failed: %s", e)
+
+    # Инвалидация кеша сессии
+    try:
+        from core.session_cache import cache_delete, session_summary_key
+        if sname:
+            cache_delete(session_summary_key(sname, cid))
+    except Exception:
+        pass
+
+    await delete_pending(message.from_user.id)
+
+    interp_tg = html_to_telegram(new_interp)
+    head = f"✏️ <b>{html.escape(question)}</b>\n"
+    body = f"{head}\n{interp_tg}"
+    tkb = _triplet_keyboard(page_id)
+    if len(body) <= 3500:
+        await message.answer(body, parse_mode="HTML", reply_markup=tkb)
+    else:
+        await message.answer(head, parse_mode="HTML")
+        await message.answer(interp_tg[:3500], parse_mode="HTML")
+        if len(interp_tg) > 3500:
+            await message.answer(interp_tg[3500:7000], parse_mode="HTML")
+        await message.answer("—", parse_mode="HTML", reply_markup=tkb)
 
 
 # ────────────────────────── Фото расклада ──────────────────────────────────
