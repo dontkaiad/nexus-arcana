@@ -51,7 +51,17 @@ async def handle_reply_update(message: Message, user_notion_id: str = "") -> boo
         )
         summary = await format_applied(applied)
 
-        await message.answer(f"✏️ Дополнено:\n{summary}")
+        # Спец-кейс: reply на работу выставил дедлайн → предложить напоминание.
+        reply_kb = None
+        if page_type == "work" and "Дедлайн" in applied:
+            try:
+                from arcana.handlers.work_kb import reminder_keyboard
+                reply_kb = reminder_keyboard(page_id)
+                summary += "\n\n⏰ Напомнить?"
+            except Exception:
+                pass
+
+        await message.answer(f"✏️ Дополнено:\n{summary}", reply_markup=reply_kb)
         await react(message, "✍️")
         return True
 
