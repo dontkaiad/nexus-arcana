@@ -52,7 +52,7 @@ def test_task_done_updates_status(client):
                AsyncMock(return_value=FAKE_NOTION_USER)):
         r = client.post("/api/tasks/task-1/done")
     assert r.status_code == 200
-    assert r.json() == {"ok": True}
+    assert r.json() == {"ok": True, "status": "Done"}
     upd.assert_awaited_once_with("task-1", "Done")
 
 
