@@ -16,6 +16,7 @@ import hashlib
 import json
 import logging
 import os as _os
+import re as _re
 import sqlite3 as _sqlite3
 import time as _time
 import traceback as tb
@@ -108,6 +109,52 @@ def _pending_del(uid: int) -> None:
 
 def has_pending(uid: int) -> bool:
     return _pending_get(uid) is not None
+
+
+def drop_pending(uid: int) -> None:
+    _pending_del(uid)
+
+
+# ── Эвристики «уточнение vs новое сообщение» ─────────────────────────────────
+
+_DEADLINE_PATTERNS = _re.compile(
+    r"\b("
+    r"завтра|послезавтра|сегодня|вчера|на\s+неделе|без\s+срока|"
+    r"через\s+\d+\s*(мин\w*|час\w*|ден\w*|дн\w*|недел\w*|месяц\w*)|"
+    r"через\s+(полчаса|час)|за\s+(час|день|неделю)|"
+    r"в\s+(понедельник|вторник|сред\w*|четверг|пятниц\w*|суббот\w*|"
+    r"воскресень\w*|пн|вт|ср|чт|пт|сб|вс)\b|"
+    r"\d{1,2}[:.]\d{2}|\bв\s+\d{1,2}\b|"
+    r"\b\d{1,2}\s+(январ|феврал|март|апрел|ма[йя]|июн|июл|август|"
+    r"сентябр|октябр|ноябр|декабр)\w*|"
+    r"\d{4}-\d{2}-\d{2}|"
+    r"утром|вечером|днём|ночью|после\s+обеда|до\s+обеда|"
+    r"дедлайн|напомни|напомнить|без\s+напомин\w*|без\s+срока|без\s+дедлайн\w*"
+    r")\b",
+    _re.IGNORECASE,
+)
+
+_NEW_INTENT_PATTERNS = _re.compile(
+    r"^\s*(сделать|сделай|сделала|сделай-ка|"
+    r"создать|создай|добавь|добавить|"
+    r"купить|купи|закупить|закажи|заказать|"
+    r"позвонить|позвони|написать|напиши|отправить|отправь|"
+    r"забрать|забери|починить|почини|"
+    r"провести|провела|разложить|разложила|"
+    r"клиент\w*|расклад\w*|ритуал\w*|сеанс\w*|"
+    r"запис\w+|удали|удалить)\b",
+    _re.IGNORECASE,
+)
+
+
+def looks_like_deadline_clarification(text: str) -> bool:
+    """Текст похож на уточнение даты/времени для существующего pending."""
+    return bool(_DEADLINE_PATTERNS.search(text or ""))
+
+
+def looks_like_new_intent(text: str) -> bool:
+    """Текст начинается как новое сообщение (новая задача/команда)."""
+    return bool(_NEW_INTENT_PATTERNS.match(text or ""))
 
 
 # ── Превью ────────────────────────────────────────────────────────────────────
@@ -309,6 +356,23 @@ async def handle_work_clarification(message: Message) -> bool:
     text = (message.text or "").strip()
     if not text:
         return False
+
+    is_deadline = looks_like_deadline_clarification(text)
+    is_new = looks_like_new_intent(text)
+
+    # Однозначно новое сообщение → дропаем pending, отдаём классификатору
+    if is_new and not is_deadline:
+        logger.info("work_pending dropped: new intent text=%r", text[:60])
+        drop_pending(uid)
+        return False
+
+    # Ни то, ни другое → переспросить
+    if not is_deadline and not is_new:
+        from arcana.handlers.intent_resolve import ask_clarify_or_new
+        await ask_clarify_or_new(
+            message, text, pending.get("title") or "Работа",
+        )
+        return True
 
     tz_offset = await get_user_tz(uid)
     try:
