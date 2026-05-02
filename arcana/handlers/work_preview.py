@@ -297,6 +297,40 @@ def _auto_reminder(deadline: str) -> str:
     return (dt - timedelta(days=1)).strftime("%Y-%m-%dT%H:%M")
 
 
+# ── Partial pending (нет деталей — ждём дополнения) ─────────────────────────
+
+async def _save_partial_pending(
+    message: Message, text: str, user_notion_id: str = "", parsed: dict = None
+) -> None:
+    """Сохраняем фрагмент как pending типа 'partial', шлём вопрос-уточнение.
+    Следующее сообщение от Кай сольётся с фрагментом и пойдёт в обычный
+    parse_work_text. В ⚠️ Ошибки НЕ пишем."""
+    uid = message.from_user.id
+    slug = _make_slug(uid)
+    data = {
+        "_partial": True,
+        "fragment": text,
+        "title": (parsed or {}).get("title") or "",
+        "category": (parsed or {}).get("category"),
+        "priority": (parsed or {}).get("priority") or "Можно потом",
+        "work_type": (parsed or {}).get("work_type") or "🌟 Личная",
+        "client_name": (parsed or {}).get("client_name"),
+        "client_id": None,
+        "deadline": (parsed or {}).get("deadline"),
+        "reminder": None,
+        "user_notion_id": user_notion_id,
+        "msg_id": None,
+        "chat_id": message.chat.id,
+    }
+    _pending_set(uid, slug, data)
+    await message.answer(
+        "❓ Что за работа? Опиши коротко:\n"
+        "• категория (расклад / ритуал / соцсети / расходники)\n"
+        "• для кого (если клиент)\n\n"
+        "<i>Или /cancel чтобы отменить</i>"
+    )
+
+
 # ── Главные хендлеры ──────────────────────────────────────────────────────────
 
 async def handle_add_work_preview(
@@ -309,9 +343,22 @@ async def handle_add_work_preview(
 
         try:
             data = await _parse_work_text(text, tz_offset)
-        except Exception:
-            await log_error(text, "parse_error", bot_label="🌒 Arcana", error_code="–")
-            await message.answer("⚠️ Не смогла разобрать работу. Опиши подробнее.")
+        except json.JSONDecodeError:
+            # Короткий/неоднозначный ввод без структуры — сохраняем фрагмент
+            # как pending и просим Кай дописать детали. В ⚠️ Ошибки НЕ пишем,
+            # это нормальный пользовательский кейс, не сбой.
+            await _save_partial_pending(message, text, user_notion_id)
+            return
+        # Парсер вернул JSON, но без сути (дефолтный title + нет категории/клиента/дедлайна)
+        # — фрагментарный ввод, просим уточнить.
+        is_partial = (
+            (data.get("title") or "").strip() in ("", "Работа")
+            and not data.get("category")
+            and not data.get("client_name")
+            and not data.get("deadline")
+        )
+        if is_partial:
+            await _save_partial_pending(message, text, user_notion_id, parsed=data)
             return
 
         # Резолвим клиента сразу (чтобы при save не делать ещё запрос)
@@ -356,6 +403,15 @@ async def handle_work_clarification(message: Message) -> bool:
     text = (message.text or "").strip()
     if not text:
         return False
+
+    # Partial pending: склеиваем фрагмент с новым текстом и парсим заново.
+    if pending.get("_partial"):
+        combined = f"{pending.get('fragment', '')} {text}".strip()
+        drop_pending(uid)
+        await handle_add_work_preview(
+            message, combined, pending.get("user_notion_id") or "",
+        )
+        return True
 
     is_deadline = looks_like_deadline_clarification(text)
     is_new = looks_like_new_intent(text)
