@@ -273,6 +273,13 @@ async def route_message(message: Message, user_notion_id: str = "", _text: str =
                 await react(message, "💰")
                 return
 
+        # ── Pending: уточнение ритуала (after needs_clarification) ────────
+        if pending and pending.get("type") == "awaiting_ritual_clarification":
+            from arcana.handlers.rituals import handle_add_ritual
+            await handle_add_ritual(message, text, user_notion_id)
+            await react(message, reaction_for("ritual"))
+            return
+
         # ── Pending: правка трактовки уже сохранённого триплета ───────────
         if pending and pending.get("awaiting_triplet_edit"):
             from arcana.handlers.sessions import handle_triplet_correction
