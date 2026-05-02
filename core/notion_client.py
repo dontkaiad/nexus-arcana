@@ -905,6 +905,60 @@ async def arcana_all_debts(user_notion_id: str = "") -> List[dict]:
 
 # ─── Arcana: Sessions ─────────────────────────────────────────────────────────
 
+async def _resolve_canonical_session_name(
+    name: str, client_id: Optional[str], user_notion_id: str
+) -> str:
+    """Сессии мерджатся по lowercase имени + client_id. Если уже есть запись
+    с похожим session_name у того же клиента — возвращаем CANONICAL имя
+    (то, что было записано первым), чтобы все следующие триплеты писались
+    одинаково независимо от регистра ввода."""
+    if not name:
+        return name
+    target = name.strip().lower()
+    if not target:
+        return name
+    from core.config import config
+    base_filter = {"property": "Сессия", "rich_text": {"contains": name.strip()[:1] or ""}}
+    filters = _with_user_filter(base_filter, user_notion_id)
+    try:
+        pages = await query_pages(
+            config.arcana.db_sessions, filters=filters, page_size=100
+        )
+    except Exception as e:
+        logger.warning("session merge lookup failed: %s", e)
+        return name
+    candidates: list[tuple[str, str]] = []  # (existing_name, page_first_date)
+    for p in pages:
+        existing = (
+            p.get("properties", {}).get("Сессия", {}).get("rich_text") or []
+        )
+        if not existing:
+            continue
+        ename = "".join(x.get("plain_text", "") for x in existing).strip()
+        if not ename or ename.lower() != target:
+            continue
+        if client_id:
+            cids = [
+                r.get("id", "") for r in
+                p.get("properties", {}).get("👥 Клиенты", {}).get("relation", [])
+            ]
+            if client_id not in cids:
+                continue
+        else:
+            # Self-сессия: исключаем записи с привязкой к клиенту.
+            if p.get("properties", {}).get("👥 Клиенты", {}).get("relation"):
+                continue
+        date_start = (
+            p.get("properties", {}).get("Дата", {}).get("date") or {}
+        ).get("start", "")
+        candidates.append((ename, date_start))
+    if not candidates:
+        return name
+    # Берём имя с самой ранней датой = canonical.
+    candidates.sort(key=lambda x: x[1] or "")
+    return candidates[0][0] or name
+
+
 async def session_add(
     date: str,
     spread_type: str = "",
@@ -923,6 +977,10 @@ async def session_add(
     session: Optional[str] = None,
     triplet_summary: Optional[str] = None,
 ) -> Optional[str]:
+    if session:
+        session = await _resolve_canonical_session_name(
+            session, client_id, user_notion_id
+        )
     from core.config import config
     db_id = config.arcana.db_sessions
     real_sbylos = await match_select(db_id, "Сбылось", "⏳ Не проверено")

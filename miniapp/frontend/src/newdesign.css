@@ -809,3 +809,33 @@
   font-style: italic;
   opacity: 0.92;
 }
+
+/* wave9: 4-tile pager grid (3 карты + дно) */
+.cards-grid-4 {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 6px;
+  margin: 8px 0 12px;
+}
+.cards-grid-4.no-bottom {
+  grid-template-columns: repeat(3, 1fr);
+}
+.card-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.card-bottom-wrap > div:first-child img {
+  border: 2px solid #d4a458;
+  box-shadow: 0 0 12px rgba(212, 164, 88, 0.4);
+  border-radius: 8px;
+}
+.bottom-label {
+  font-size: 9px;
+  color: #d4a458;
+  text-align: center;
+  margin-top: 2px;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  font-weight: 600;
+}

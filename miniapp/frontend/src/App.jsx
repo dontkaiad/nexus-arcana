@@ -2243,25 +2243,22 @@ function NxCal({ s }) {
 // ARCANA — Accuracy bottom sheet
 // ═══════════════════════════════════════════════════════════════
 
-function AccuracySheet({ s, onClose, onVerified }) {
+function StatsSheet({ s, onClose }) {
   const [scope, setScope] = useState("all");
-  const { data, loading, refetch } = useApi(`/api/arcana/accuracy?scope=${scope}`, [scope]);
-  const [busy, setBusy] = useState(null);
+  const [openMonth, setOpenMonth] = useState(null);
+  const { data, loading } = useApi("/api/arcana/stats");
 
-  const verify = async (id, type, verdict) => {
-    setBusy(id);
-    try {
-      await apiPost("/api/arcana/accuracy/verify", { id, type, verdict });
-      await refetch();
-      onVerified?.();
-    } catch (_) {}
-    setBusy(null);
-  };
-
-  const pct = data?.pct ?? 0;
-  const total = data?.total ?? 0;
-  const checked = data?.checked || { yes: 0, half: 0, no: 0 };
-  const pending = data?.pending || [];
+  const pct = data?.[`accuracy_pct_${scope === "all" ? "overall" : scope}`] ?? 0;
+  const breakdown = data?.[`breakdown_${scope === "all" ? "overall" : scope}`]
+    || { yes: 0, half: 0, no: 0 };
+  const total = breakdown.yes + breakdown.half + breakdown.no;
+  const pendingS = data?.pending_sessions_count ?? 0;
+  const pendingR = data?.pending_rituals_count ?? 0;
+  const pendingTotal = pendingS + pendingR;
+  const months = data?.by_month || [];
+  const cats = data?.by_category || [];
+  const avgS = data?.avg_check_delay_sessions_days;
+  const avgR = data?.avg_check_delay_rituals_days;
 
   return (
     <>
@@ -2269,7 +2266,7 @@ function AccuracySheet({ s, onClose, onVerified }) {
       <div className="acc-sheet" onClick={(e) => e.stopPropagation()}>
         <div className="acc-grip" />
         <div className="card-h">
-          <span className="card-title" style={{ fontSize: 22 }}>Точность</span>
+          <span className="card-title" style={{ fontSize: 22 }}>Статистика практики</span>
           <span className="card-meta">за всё время</span>
         </div>
         <div className="acc-tabs">
@@ -2284,28 +2281,108 @@ function AccuracySheet({ s, onClose, onVerified }) {
             <div className="acc-big">{pct}%</div>
             <div className="acc-big-sub">{total} проверено</div>
             <div className="acc-break">
-              <div className="acc-break-cell yes"><div className="v">{checked.yes}</div><div className="l">✅ да</div></div>
-              <div className="acc-break-cell half"><div className="v">{checked.half}</div><div className="l">〰️ част.</div></div>
-              <div className="acc-break-cell no"><div className="v">{checked.no}</div><div className="l">❌ нет</div></div>
+              <div className="acc-break-cell yes"><div className="v">{breakdown.yes}</div><div className="l">✅ да</div></div>
+              <div className="acc-break-cell half"><div className="v">{breakdown.half}</div><div className="l">〰️ част.</div></div>
+              <div className="acc-break-cell no"><div className="v">{breakdown.no}</div><div className="l">❌ нет</div></div>
             </div>
-            <div className="p-list-h">⏳ Ждут проверки · {pending.length}</div>
-            {pending.length === 0 && (
-              <div style={{ fontSize: 12, opacity: 0.55, padding: "10px 0" }}>Всё проверено ✨</div>
-            )}
-            {pending.map((p) => (
-              <div key={`${p.type}-${p.id}`} className="p-row">
-                <span className="ico">{p.type === "session" ? "🃏" : "🕯"}</span>
-                <div className="body">
-                  <div className="title">{p.title || "—"}</div>
-                  <div className="meta">{[p.client, p.date].filter(Boolean).join(" · ")}</div>
+
+            {pendingTotal > 0 && (
+              <div className="glass" style={{ padding: "12px 14px", marginTop: 10 }}>
+                <div className="card-h">
+                  <span className="card-title">⏳ Ждут вердикта</span>
+                  <span className="card-meta">{pendingTotal}</span>
                 </div>
-                <div className="btns">
-                  <div className="pb yes" onClick={() => busy !== p.id && verify(p.id, p.type, "yes")}>✅</div>
-                  <div className="pb half" onClick={() => busy !== p.id && verify(p.id, p.type, "half")}>〰️</div>
-                  <div className="pb no" onClick={() => busy !== p.id && verify(p.id, p.type, "no")}>❌</div>
+                <div style={{ fontSize: 13, color: s.text, lineHeight: 1.5 }}>
+                  {pendingS > 0 && <div>🃏 {pendingS} раскладов</div>}
+                  {pendingR > 0 && <div>🕯 {pendingR} ритуалов</div>}
+                </div>
+                <div style={{ fontSize: 11, color: s.tM, marginTop: 6 }}>
+                  Открой в раскладах/ритуалах чтобы поставить вердикт →
                 </div>
               </div>
-            ))}
+            )}
+
+            {months.length > 0 && (
+              <div className="glass" style={{ padding: "12px 14px", marginTop: 10 }}>
+                <div className="card-h">
+                  <span className="card-title">По месяцам</span>
+                </div>
+                {months.map((m) => {
+                  const isOpen = openMonth === m.month;
+                  const showSess = scope !== "rituals";
+                  const showRit = scope !== "sessions";
+                  const total = (showSess ? m.sessions_total : 0) + (showRit ? m.rituals_total : 0);
+                  if (total === 0) return null;
+                  const checked = (showSess ? m.sessions_checked : 0) + (showRit ? m.rituals_checked : 0);
+                  const pctVal = checked
+                    ? Math.round(((showSess ? m.sessions_pct * m.sessions_checked : 0)
+                                 + (showRit ? m.rituals_pct * m.rituals_checked : 0)) / checked)
+                    : 0;
+                  return (
+                    <div key={m.month}
+                         onClick={() => setOpenMonth(isOpen ? null : m.month)}
+                         style={{ cursor: "pointer", padding: "8px 0", borderBottom: `1px solid ${s.brd}` }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13 }}>
+                        <span style={{ fontWeight: 500 }}>{m.label}</span>
+                        <span style={{ color: s.acc }}>
+                          {pctVal}%
+                          {showSess && m.sessions_total > 0 && ` · ${m.sessions_total} трип.`}
+                          {showRit && m.rituals_total > 0 && ` · ${m.rituals_total} рит.`}
+                        </span>
+                      </div>
+                      <Bar s={s} pct={pctVal} color={s.acc} />
+                      {isOpen && (
+                        <div style={{ marginTop: 6, fontSize: 11, color: s.tM, display: "flex", gap: 12 }}>
+                          {showSess && (
+                            <span>🃏 ✅{m.sessions_yes} 〰️{m.sessions_half} ❌{m.sessions_no}</span>
+                          )}
+                          {showRit && (
+                            <span>🕯 ✅{m.rituals_yes} 〰️{m.rituals_half} ❌{m.rituals_no}</span>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            {cats.length > 0 && scope !== "rituals" && (
+              <div className="glass" style={{ padding: "12px 14px", marginTop: 10 }}>
+                <div className="card-h">
+                  <span className="card-title">По темам сессий</span>
+                </div>
+                {cats.map((c) => (
+                  <div key={c.category} style={{ padding: "6px 0" }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13 }}>
+                      <span>{c.category}</span>
+                      <span style={{ color: s.tM }}>
+                        {c.total} трип. · {c.checked} проверено · {c.pct}%
+                      </span>
+                    </div>
+                    <Bar s={s} pct={c.pct} color={s.acc} />
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {(avgS != null || avgR != null) && (
+              <div className="glass" style={{ padding: "12px 14px", marginTop: 10 }}>
+                <div className="card-h">
+                  <span className="card-title">⏱ Скорость проверки</span>
+                </div>
+                {avgS != null && (
+                  <div style={{ fontSize: 12, color: s.text, marginTop: 4 }}>
+                    Расклады: проверяешь в среднем через {avgS} {avgS === 1 ? "день" : "дн."}
+                  </div>
+                )}
+                {avgR != null && (
+                  <div style={{ fontSize: 12, color: s.text, marginTop: 4 }}>
+                    Ритуалы: проверяешь в среднем через {avgR} {avgR === 1 ? "день" : "дн."}
+                  </div>
+                )}
+              </div>
+            )}
           </>
         )}
       </div>
@@ -2430,10 +2507,9 @@ function ArDay({ s, openClient, navigate, openMoonPhases }) {
       </div>
 
       {accSheet && (
-        <AccuracySheet
+        <StatsSheet
           s={s}
           onClose={() => setAccSheet(false)}
-          onVerified={() => refetch()}
         />
       )}
     </>
@@ -2534,6 +2610,9 @@ function ArSessions({ s, openSession }) {
               <div style={{ fontSize: fs(11), opacity: 0.65, marginTop: 4, display: "flex", gap: 6, flexWrap: "wrap" }}>
                 {[pinned.category, pinned.client, pinned.firstDate, `${pinned.tripletCount} трип.`]
                   .filter(Boolean).map((it, i) => <span key={i}>{it}</span>)}
+                {pinned.lastDate && pinned.rawLastDate !== pinned.rawDate && (
+                  <span style={{ opacity: 0.5, fontSize: fs(10) }}>· обновлено {pinned.lastDate}</span>
+                )}
               </div>
               <BreakdownChips s={s} breakdown={pinned.breakdown} />
             </div>
@@ -2551,6 +2630,9 @@ function ArSessions({ s, openSession }) {
               <div style={{ fontSize: fs(11), opacity: 0.65, marginTop: 4, display: "flex", gap: 6, flexWrap: "wrap" }}>
                 {[x.category, x.client, x.firstDate, x.tripletCount > 1 ? `${x.tripletCount} трип.` : null]
                   .filter(Boolean).map((it, i) => <span key={i}>{it}</span>)}
+                {x.lastDate && x.rawLastDate !== x.rawDate && (
+                  <span style={{ opacity: 0.5, fontSize: fs(10) }}>· обновлено {x.lastDate}</span>
+                )}
               </div>
               {x.tripletCount > 1 && <BreakdownChips s={s} breakdown={x.breakdown} />}
             </div>
@@ -3010,29 +3092,16 @@ function TripletSlide({ s, t, deckId, onVerdict }) {
       </Glass>
 
       <SectionLabel s={s}>Карты</SectionLabel>
-      <div style={{
-        display: "grid",
-        gridTemplateColumns: hasBottom ? "1fr 1fr 1fr 1fr" : "1fr 1fr 1fr",
-        gap: 8, marginBottom: 8,
-      }}>
+      <div className={hasBottom ? "cards-grid-4" : "cards-grid-4 no-bottom"}>
         {cards.map((c, i) => (
-          <div key={i} style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+          <div key={i} className="card-wrap">
             <TarotCardTile s={s} card={c} deckId={deckId} />
           </div>
         ))}
         {hasBottom && (
-          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-            <div style={{ position: "relative" }}>
-              <TarotCardTile s={s} card={t.bottomCard} deckId={deckId} />
-              <div style={{
-                position: "absolute", top: 4, right: 4, fontSize: fs(14),
-                background: `${s.acc}cc`, padding: "1px 6px", borderRadius: 8,
-                color: "#fff",
-              }}>🂠</div>
-            </div>
-            <div style={{ fontSize: fs(10), color: s.acc, textAlign: "center", fontWeight: 500 }}>
-              🂠 Дно
-            </div>
+          <div className="card-wrap card-bottom-wrap">
+            <TarotCardTile s={s} card={t.bottomCard} deckId={deckId} />
+            <div className="bottom-label">🂠 Дно колоды</div>
           </div>
         )}
       </div>

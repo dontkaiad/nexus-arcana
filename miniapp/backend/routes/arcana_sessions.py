@@ -199,7 +199,20 @@ async def list_sessions(
 
         first_date_raw = (first.get("properties", {})
                           .get("Дата", {}).get("date") or {}).get("start", "")
+        last = pages[-1]
+        last_date_raw = (last.get("properties", {})
+                         .get("Дата", {}).get("date") or {}).get("start", "")
+        # Для last_date берём максимум по дате среди всех страниц группы
+        # (sort внутри pages по индексу заголовка, не по дате).
+        all_dates = [
+            ((p.get("properties", {}).get("Дата", {}).get("date") or {})
+             .get("start", "")) for p in pages
+        ]
+        all_dates = [d for d in all_dates if d]
+        if all_dates:
+            last_date_raw = max(all_dates)
         date_local = to_local_date(first_date_raw, tz_offset)
+        last_date_local = to_local_date(last_date_raw, tz_offset)
 
         ru_title = sname or title_plain(first, "Тема") or "—"
         first_q = title_plain(first, "Тема") or ""
@@ -221,6 +234,7 @@ async def list_sessions(
             "type": session_type,
             "decks": decks,
             "first_date": date_local.isoformat() if date_local else None,
+            "last_date": last_date_local.isoformat() if last_date_local else None,
             "triplet_count": len(pages),
             "status": status,
             "breakdown": _breakdown(verdicts),

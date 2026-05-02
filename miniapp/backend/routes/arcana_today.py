@@ -459,6 +459,168 @@ def _pending_list(sessions: list[dict], rituals: list[dict], scope: str, clients
     return out
 
 
+_MONTH_RU = {
+    "01": "Январь", "02": "Февраль", "03": "Март",     "04": "Апрель",
+    "05": "Май",    "06": "Июнь",    "07": "Июль",    "08": "Август",
+    "09": "Сентябрь","10": "Октябрь","11": "Ноябрь",  "12": "Декабрь",
+}
+
+
+def _month_key(p: dict) -> Optional[str]:
+    raw = (p.get("properties", {}).get("Дата", {}).get("date") or {}).get("start", "")
+    if not raw or len(raw) < 7:
+        return None
+    return raw[:7]
+
+
+def _date_iso(p: dict) -> str:
+    return ((p.get("properties", {}).get("Дата", {}).get("date") or {})
+            .get("start", "") or "")[:10]
+
+
+def _last_edited_iso(p: dict) -> str:
+    return (p.get("last_edited_time") or "")[:10]
+
+
+def _avg_check_delay(items: list[dict], verdict_fn) -> Optional[float]:
+    """Среднее число дней между Дата (создание расклада) и last_edited (проверка)."""
+    from datetime import date as _date
+    deltas: list[int] = []
+    for p in items:
+        if verdict_fn(p) is None:
+            continue
+        d_iso = _date_iso(p)
+        e_iso = _last_edited_iso(p)
+        if not d_iso or not e_iso:
+            continue
+        try:
+            d = _date.fromisoformat(d_iso)
+            e = _date.fromisoformat(e_iso)
+        except ValueError:
+            continue
+        delta = (e - d).days
+        if delta >= 0:
+            deltas.append(delta)
+    if not deltas:
+        return None
+    return round(sum(deltas) / len(deltas), 1)
+
+
+@router.get("/arcana/stats")
+async def get_arcana_stats(
+    tg_id: int = Depends(current_user_id),
+) -> dict[str, Any]:
+    """Развёрнутая статистика практики для StatsSheet."""
+    user_notion_id = (await get_user_notion_id(tg_id)) or ""
+    sessions = await sessions_all(user_notion_id=user_notion_id)
+    rituals = await rituals_all(user_notion_id=user_notion_id)
+    clients_map = await load_clients_map(user_notion_id)
+
+    acc_overall = _compute_accuracy(sessions, rituals, "all")
+    acc_sessions = _compute_accuracy(sessions, [], "sessions")
+    acc_rituals = _compute_accuracy([], rituals, "rituals")
+
+    pending_sessions, pending_rituals = _count_pending(sessions, rituals)
+    pending = _pending_list(sessions, rituals, "all", clients_map)
+    pending_sess = [x for x in pending if x["type"] == "session"][:10]
+    pending_rit = [x for x in pending if x["type"] == "ritual"][:10]
+
+    # Разрез по месяцам — последние 6
+    by_month: dict[str, dict] = {}
+    for p in sessions:
+        m = _month_key(p)
+        if not m:
+            continue
+        v = _session_verdict(p)
+        bucket = by_month.setdefault(m, {
+            "month": m, "label": _MONTH_RU.get(m[5:7], m),
+            "sessions_total": 0, "sessions_yes": 0, "sessions_half": 0, "sessions_no": 0,
+            "rituals_total": 0, "rituals_yes": 0, "rituals_half": 0, "rituals_no": 0,
+        })
+        bucket["sessions_total"] += 1
+        if v == "yes":
+            bucket["sessions_yes"] += 1
+        elif v == "half":
+            bucket["sessions_half"] += 1
+        elif v == "no":
+            bucket["sessions_no"] += 1
+    for p in rituals:
+        m = _month_key(p)
+        if not m:
+            continue
+        v = _ritual_verdict(p)
+        bucket = by_month.setdefault(m, {
+            "month": m, "label": _MONTH_RU.get(m[5:7], m),
+            "sessions_total": 0, "sessions_yes": 0, "sessions_half": 0, "sessions_no": 0,
+            "rituals_total": 0, "rituals_yes": 0, "rituals_half": 0, "rituals_no": 0,
+        })
+        bucket["rituals_total"] += 1
+        if v == "yes":
+            bucket["rituals_yes"] += 1
+        elif v == "half":
+            bucket["rituals_half"] += 1
+        elif v == "no":
+            bucket["rituals_no"] += 1
+
+    months_sorted = sorted(by_month.values(), key=lambda x: x["month"], reverse=True)[:6]
+    for m in months_sorted:
+        s_checked = m["sessions_yes"] + m["sessions_half"] + m["sessions_no"]
+        m["sessions_checked"] = s_checked
+        m["sessions_pct"] = (
+            round((m["sessions_yes"] + 0.5 * m["sessions_half"]) / s_checked * 100, 1)
+            if s_checked else 0
+        )
+        r_checked = m["rituals_yes"] + m["rituals_half"] + m["rituals_no"]
+        m["rituals_checked"] = r_checked
+        m["rituals_pct"] = (
+            round((m["rituals_yes"] + 0.5 * m["rituals_half"]) / r_checked * 100, 1)
+            if r_checked else 0
+        )
+
+    # Разрез по категориям (Тип расклада)
+    by_cat: dict[str, dict] = {}
+    for p in sessions:
+        cats = multi_select_names(p, "Тип расклада")
+        cat = cats[0] if cats else "—"
+        bucket = by_cat.setdefault(cat, {"category": cat, "total": 0, "checked": 0,
+                                          "yes": 0, "half": 0, "no": 0})
+        bucket["total"] += 1
+        v = _session_verdict(p)
+        if v is not None:
+            bucket["checked"] += 1
+            bucket[v] += 1
+    cats_list = []
+    for c in by_cat.values():
+        c["pct"] = (
+            round((c["yes"] + 0.5 * c["half"]) / c["checked"] * 100, 1)
+            if c["checked"] else 0
+        )
+        cats_list.append(c)
+    cats_list.sort(key=lambda x: -x["total"])
+
+    return {
+        "total_sessions": len(sessions),
+        "total_rituals": len(rituals),
+        "total_triplets": len(sessions),
+        "checked_triplets": acc_sessions["total"],
+        "checked_rituals": acc_rituals["total"],
+        "accuracy_pct_overall": acc_overall["pct"],
+        "accuracy_pct_sessions": acc_sessions["pct"],
+        "accuracy_pct_rituals": acc_rituals["pct"],
+        "breakdown_overall": {"yes": acc_overall["yes"], "half": acc_overall["half"], "no": acc_overall["no"]},
+        "breakdown_sessions": {"yes": acc_sessions["yes"], "half": acc_sessions["half"], "no": acc_sessions["no"]},
+        "breakdown_rituals": {"yes": acc_rituals["yes"], "half": acc_rituals["half"], "no": acc_rituals["no"]},
+        "pending_sessions_count": pending_sessions,
+        "pending_rituals_count": pending_rituals,
+        "pending_sessions": pending_sess,
+        "pending_rituals": pending_rit,
+        "by_month": months_sorted,
+        "by_category": cats_list,
+        "avg_check_delay_sessions_days": _avg_check_delay(sessions, _session_verdict),
+        "avg_check_delay_rituals_days": _avg_check_delay(rituals, _ritual_verdict),
+    }
+
+
 @router.get("/arcana/accuracy")
 async def get_arcana_accuracy(
     tg_id: int = Depends(current_user_id),
