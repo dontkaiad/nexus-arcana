@@ -289,6 +289,41 @@ def test_arcana_client_edit_self_blocks_type(client):
     assert "Заметки" in props
 
 
+# ─── /api/arcana/sessions/{id}/photo ────────────────────────────────────────
+
+def test_session_photo_upload_writes_url(client):
+    page = _page("sess-1")
+    fake_url = "https://res.cloudinary.com/x/y.jpg"
+    with patch("miniapp.backend.routes.writes.get_page", AsyncMock(return_value=page)), \
+         patch("miniapp.backend.routes.writes._cloudinary_upload",
+               AsyncMock(return_value=fake_url)) as cu, \
+         patch("miniapp.backend.routes.writes.update_page",
+               AsyncMock(return_value=None)) as up, \
+         patch("miniapp.backend.routes.writes.get_user_notion_id",
+               AsyncMock(return_value=FAKE_NOTION_USER)):
+        r = client.post(
+            "/api/arcana/sessions/sess-1/photo",
+            files={"file": ("card.jpg", b"FAKEJPG", "image/jpeg")},
+        )
+    assert r.status_code == 200
+    assert r.json() == {"ok": True, "url": fake_url}
+    cu.assert_awaited_once()
+    props = up.await_args.args[1]
+    assert props == {"Фото": {"url": fake_url}}
+
+
+def test_session_photo_upload_rejects_non_image(client):
+    page = _page("sess-2")
+    with patch("miniapp.backend.routes.writes.get_page", AsyncMock(return_value=page)), \
+         patch("miniapp.backend.routes.writes.get_user_notion_id",
+               AsyncMock(return_value=FAKE_NOTION_USER)):
+        r = client.post(
+            "/api/arcana/sessions/sess-2/photo",
+            files={"file": ("note.txt", b"hello", "text/plain")},
+        )
+    assert r.status_code == 415
+
+
 # ─── /api/lists create/done/delete ──────────────────────────────────────────
 
 def test_list_create_buy(client):

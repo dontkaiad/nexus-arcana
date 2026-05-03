@@ -478,6 +478,7 @@ export function adaptSessionGroupBrief(x) {
   return {
     slug: x.slug || x.id || '',
     id: x.id || null,                // только для is_solo
+    firstTripletId: x.first_triplet_id || x.id || null,
     sessionName: x.session_name || null,
     title: x.ru_title || x.first_question || '—',
     firstQ: x.first_question || '',
@@ -668,6 +669,8 @@ export function adaptGrimoire(data) {
       name: g.name || '',
       cat: g.cat || '—',
       theme: g.theme || '📖',
+      preview: g.preview || '',
+      themesCount: g.themes_count || 0,
     })),
     categories: data.categories || [],
   }

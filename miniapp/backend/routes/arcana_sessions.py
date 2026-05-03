@@ -253,6 +253,8 @@ async def list_sessions(
             "is_solo": is_solo,
             # для совместимости старого фронта — отдаём минимум полей одиночного триплета
             "id": first.get("id", "") if is_solo else None,
+            # всегда — id первого триплета (для аплоада фото из FAB и пр.)
+            "first_triplet_id": first.get("id", ""),
             "done": select_of(first, "Сбылось") or "⏳ Не проверено",
         })
 
