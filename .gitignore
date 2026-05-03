@@ -207,3 +207,9 @@ miniapp/frontend/.env.local
 miniapp/frontend/.vite/
 
 session_cache.db
+
+# SQLite runtime DBs (создаются автоматически при первом запуске)
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
