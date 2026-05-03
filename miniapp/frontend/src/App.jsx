@@ -1562,21 +1562,37 @@ function NxFinance({ s }) {
                 </div>
               </Glass>
             )}
-            <SectionLabel s={s}>Транзакции</SectionLabel>
-            {items.length === 0 && <Empty s={s} emoji="💚" title="Пока не тратила" text="Сегодня без трат — приятно." />}
-            {items.map((x) => (
-              <Glass key={x.id} s={s} style={{ padding: "10px 14px", marginBottom: 4 }}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                  <div>
-                    <div style={{ fontSize: fs(16), color: s.text, fontWeight: 500 }}>{x.desc || "без описания"}</div>
-                    <div style={{ fontSize: fs(13), color: s.tS, marginTop: 2 }}>{x.cat}</div>
-                  </div>
-                  <span style={{ fontSize: fs(17), color: s.text, fontWeight: 500, fontFamily: H }}>
-                    {x.amt.toLocaleString()} ₽
-                  </span>
+            <Glass s={s} style={{ padding: "14px 16px" }}>
+              <div className="card-h">
+                <span className="card-title">Транзакции</span>
+                {items.length > 0 && <span className="card-meta">{items.length}</span>}
+              </div>
+              {items.length === 0 ? (
+                <div style={{ textAlign: "center", padding: "12px 4px 4px" }}>
+                  <div style={{ fontSize: fs(36), marginBottom: 6 }}>💚</div>
+                  <div style={{ fontFamily: H, fontSize: fs(18), color: s.text }}>Пока не тратила</div>
+                  <div style={{ fontSize: fs(13), color: s.tM, marginTop: 4 }}>Сегодня без трат — приятно.</div>
                 </div>
-              </Glass>
-            ))}
+              ) : (
+                <div style={{ display: "flex", flexDirection: "column" }}>
+                  {items.map((x, i) => (
+                    <div key={x.id} style={{
+                      display: "flex", justifyContent: "space-between", alignItems: "center",
+                      padding: "10px 0",
+                      borderTop: i === 0 ? "none" : `1px solid ${s.brd}`,
+                    }}>
+                      <div>
+                        <div style={{ fontSize: fs(16), color: s.text, fontWeight: 500 }}>{x.desc || "без описания"}</div>
+                        <div style={{ fontSize: fs(13), color: s.tS, marginTop: 2 }}>{x.cat}</div>
+                      </div>
+                      <span style={{ fontSize: fs(17), color: s.text, fontWeight: 500, fontFamily: H }}>
+                        {x.amt.toLocaleString()} ₽
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </Glass>
           </>
         );
       })()}
