@@ -20,6 +20,7 @@ from core.notion_client import (
     finance_add,
     get_page,
     page_create,
+    sessions_all,
     update_page,
     update_page_select,
     update_task_deadline,
@@ -419,6 +420,67 @@ async def upload_session_photo(
         logger.warning("Failed to set Фото URL in Notion: %s", e)
 
     return {"ok": True, "url": url}
+
+
+@router.post("/arcana/sessions/by-slug/{slug}/photo")
+async def upload_session_photo_by_slug(
+    slug: str,
+    file: UploadFile = FastAPIFile(...),
+    tg_id: int = Depends(current_user_id),
+) -> dict[str, Any]:
+    """Фото на уровне сессии — пишет URL в поле «Фото» каждого триплета сессии."""
+    from miniapp.backend.routes.arcana_sessions import (
+        _session_name_of,
+        _slug_for,
+    )
+
+    user_notion_id = (await get_user_notion_id(tg_id)) or ""
+
+    content = await file.read()
+    if len(content) > 5 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="file too large (max 5 MB)")
+    if not (file.content_type or "").startswith("image/"):
+        raise HTTPException(status_code=415, detail="only image/* allowed")
+
+    # Резолвим slug → все триплеты сессии.
+    matching: list[dict] = []
+    if "__" not in slug and len(slug) >= 16:
+        # Legacy: slug == page id одного триплета.
+        try:
+            page = await get_page(slug)
+        except Exception:
+            page = None
+        if page:
+            owners = relation_ids_of(page, "🪪 Пользователи")
+            if user_notion_id and user_notion_id not in owners:
+                raise HTTPException(status_code=404, detail="session not found")
+            matching = [page]
+
+    if not matching:
+        all_pages = await sessions_all(user_notion_id=user_notion_id)
+        for p in all_pages:
+            sname = _session_name_of(p)
+            cids = relation_ids_of(p, "👥 Клиенты")
+            cid = cids[0] if cids else None
+            if sname and _slug_for(sname, cid) == slug:
+                matching.append(p)
+
+    if not matching:
+        raise HTTPException(status_code=404, detail="session not found")
+
+    url = await _cloudinary_upload(content, file.filename or "upload.jpg")
+    if not url:
+        raise HTTPException(status_code=501, detail="cloudinary not configured")
+
+    updated = 0
+    for p in matching:
+        try:
+            await update_page(p["id"], {"Фото": {"url": url}})
+            updated += 1
+        except Exception as e:
+            logger.warning("Failed to set Фото URL on %s: %s", p.get("id", "?")[:8], e)
+
+    return {"ok": True, "url": url, "updated_count": updated}
 
 
 class SummarizeBody(BaseModel):

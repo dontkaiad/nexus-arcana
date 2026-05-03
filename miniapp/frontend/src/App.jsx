@@ -3942,10 +3942,11 @@ function ArWork({ s, openWork }) {
 // SESSION DETAIL SHEET
 // ═══════════════════════════════════════════════════════════════
 
-function SessionPhoto({ s, id, url, onUploaded }) {
+function SessionPhoto({ s, id, url, onUploaded, uploadPath }) {
   const fileRef = useRef(null);
   const [busy, setBusy] = useState(false);
   const [localUrl, setLocalUrl] = useState(url || null);
+  const path = uploadPath || `/api/arcana/sessions/${id}/photo`;
 
   const onPick = () => {
     if (fileRef.current && !busy) fileRef.current.click();
@@ -3961,7 +3962,7 @@ function SessionPhoto({ s, id, url, onUploaded }) {
     try {
       const fd = new FormData();
       fd.append("file", f);
-      const r = await fetch(`/api/arcana/sessions/${id}/photo`, {
+      const r = await fetch(path, {
         method: "POST",
         headers: { "X-Telegram-Init-Data": (window.Telegram?.WebApp?.initData || import.meta.env.VITE_DEV_INIT_DATA || "") },
         body: fd,
@@ -4213,6 +4214,12 @@ function SessionPagerOverview({ s, group, onJump, onSummarize, summarizing }) {
             .filter(Boolean).map((it, i) => <span key={i}>{it}</span>)}
         </div>
       </Glass>
+
+      <SessionPhoto
+        s={s}
+        url={group.photoUrl}
+        uploadPath={`/api/arcana/sessions/by-slug/${group.slug}/photo`}
+      />
 
       <Glass s={s} style={{ padding: "10px 14px", marginBottom: 10 }}>
         <div style={{ fontSize: fs(10), color: s.acc, marginBottom: 6 }}>⚡ Общее саммари</div>
@@ -5912,7 +5919,7 @@ function SessionPhotoUpload({ s, onDone, mode = "session" }) {
   const listPath = isRitual ? '/api/arcana/rituals' : '/api/arcana/sessions';
   const uploadPath = (id) => isRitual
     ? `/api/arcana/rituals/${id}/photo`
-    : `/api/arcana/sessions/${id}/photo`;
+    : `/api/arcana/sessions/by-slug/${id}/photo`;
   const { data, loading, error } = useApi(listPath);
   const items = useMemo(() => {
     if (loading || error) return [];
@@ -6052,7 +6059,9 @@ function SessionPhotoUpload({ s, onDone, mode = "session" }) {
         <Empty s={s} emoji={isRitual ? "🕯️" : "🔮"} title={isRitual ? "Нет ритуалов" : "Нет раскладов"} text={isRitual ? "Сначала создай ритуал через бота." : "Сначала создай расклад через бота."} />
       )}
       {filtered.map((x) => {
-        const id = x.firstTripletId || x.id;
+        // Для сессий используем slug (бэк примет любой триплет сессии),
+        // для ритуалов — id страницы.
+        const id = isRitual ? (x.firstTripletId || x.id) : (x.slug || x.firstTripletId || x.id);
         if (!id) return null;
         return (
           <Glass
