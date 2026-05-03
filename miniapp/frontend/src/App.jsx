@@ -1118,6 +1118,202 @@ function renderBoldMd(text) {
   );
 }
 
+// ═══════════════════════════════════════════════════════════════
+// STREAK ACHIEVED CARD — holo foil for current_streak >= 3
+// ═══════════════════════════════════════════════════════════════
+
+const NX_HOLO = {
+  cyan: "#a8e0d2", magenta: "#e1a8c8", gold: "#e8c887",
+  violet: "#bfa2dc", amber: "#d4a35a", ember: "#b07a2e",
+};
+
+function streakRank(current) {
+  if (current >= 100) return "INVICTUS";
+  if (current >= 30) return "PHOENIX";
+  if (current >= 7) return "HELIOS";
+  return "SOLARIS";
+}
+
+function CardSunSigil({ size = 60 }) {
+  const rays = [];
+  for (let i = 0; i < 24; i++) {
+    const a = (i * Math.PI * 2) / 24;
+    const long = i % 3 === 0;
+    const r1 = 22, r2 = long ? 36 : 30;
+    rays.push(
+      <line key={i}
+        x1={50 + Math.cos(a) * r1} y1={50 + Math.sin(a) * r1}
+        x2={50 + Math.cos(a) * r2} y2={50 + Math.sin(a) * r2}
+        stroke="#5a3c10" strokeWidth="0.9" strokeLinecap="round" strokeOpacity="0.85" />
+    );
+  }
+  const ticks = [];
+  for (let i = 0; i < 36; i++) {
+    const a = (i * Math.PI * 2) / 36;
+    const r1 = 19, r2 = i % 3 === 0 ? 21 : 20.2;
+    ticks.push(
+      <line key={`t${i}`}
+        x1={50 + Math.cos(a) * r1} y1={50 + Math.sin(a) * r1}
+        x2={50 + Math.cos(a) * r2} y2={50 + Math.sin(a) * r2}
+        stroke="#5a3c10" strokeWidth="0.5" strokeOpacity="0.55" />
+    );
+  }
+  return (
+    <svg width={size} height={size} viewBox="0 0 100 100" fill="none"
+         style={{ filter: "drop-shadow(0 1px 0 rgba(255,250,235,0.5))" }}>
+      <circle cx="50" cy="50" r="46" stroke="#5a3c10" strokeWidth="0.5" strokeOpacity="0.45" fill="none" strokeDasharray="1 4" />
+      <path d="M50 16 L74 56 L26 56 Z" stroke="#5a3c10" strokeWidth="0.7" strokeOpacity="0.55" fill="none" strokeLinejoin="round" />
+      <path d="M50 84 L26 44 L74 44 Z" stroke="#5a3c10" strokeWidth="0.7" strokeOpacity="0.4" fill="none" strokeLinejoin="round" />
+      <circle cx="50" cy="50" r="22" stroke="#5a3c10" strokeWidth="0.9" strokeOpacity="0.7" fill="none" />
+      {ticks}
+      {rays}
+      <circle cx="50" cy="50" r="14" fill="#f4e3c1" />
+      <circle cx="50" cy="50" r="14" stroke="#5a3c10" strokeWidth="1" fill="none" />
+      <path d="M40 50 Q50 42 60 50 Q50 58 40 50 Z" stroke="#5a3c10" strokeWidth="0.9" fill="rgba(255,250,235,0.6)" />
+      <circle cx="50" cy="50" r="3.2" fill="#5a3c10" />
+      <circle cx="51" cy="49" r="0.9" fill="#f4e3c1" />
+      <line x1="50" y1="44" x2="50" y2="40" stroke="#5a3c10" strokeWidth="0.6" strokeLinecap="round" />
+      <line x1="50" y1="56" x2="50" y2="60" stroke="#5a3c10" strokeWidth="0.6" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function StreakAchievedCard({ width = 110, height = 112, current, best, lastDateIso, todayIso, onClick }) {
+  const scale = width / 110;
+  const sigilSize = Math.min(height - 50, 58) * Math.max(1, scale * 0.95);
+  const fsRank = Math.round(13 * Math.max(1, scale));
+  const fsBadge = Math.max(7, Math.round(7 * Math.max(1, scale)));
+  const fsSerial = Math.max(6.5, Math.round(7 * Math.max(1, scale)));
+  const fsSubline = Math.max(6.5, Math.round(7 * Math.max(1, scale)));
+  const fsCaption = Math.max(7, Math.round(7.5 * Math.max(1, scale)));
+  const pad = Math.max(7, Math.round(8 * Math.max(1, scale)));
+
+  const cur = Math.max(0, current | 0);
+  const bst = Math.max(cur, best | 0);
+  const pad3 = (n) => String(n).padStart(3, "0");
+  const serial = `${pad3(cur)}/${pad3(bst)}`;
+  const rank = streakRank(cur);
+  const badge = (lastDateIso && todayIso && lastDateIso === todayIso) ? "+1" : "🔥";
+  const caption = `${cur} ДН`;
+
+  return (
+    <div onClick={onClick} style={{ width, height, position: "relative", perspective: 1000, cursor: onClick ? "pointer" : "default" }}>
+      <div style={{
+        position: "relative", width: "100%", height: "100%",
+        borderRadius: 14, overflow: "hidden",
+        animation: "nx-mcard-in 900ms cubic-bezier(.2,.8,.2,1) both",
+        boxShadow: "0 1px 0 rgba(255,255,255,0.6) inset, 0 12px 28px -14px rgba(80,55,20,0.55), 0 4px 14px -6px rgba(176,122,46,0.45)",
+      }}>
+        <div style={{
+          position: "absolute", inset: 0, borderRadius: 14,
+          background: "linear-gradient(135deg, rgba(255,253,248,0.92) 0%, rgba(244,227,193,0.85) 45%, rgba(212,163,90,0.55) 100%)",
+        }} />
+        <div aria-hidden style={{ position: "absolute", inset: 0, overflow: "hidden", borderRadius: 14 }}>
+          <div style={{
+            position: "absolute", inset: 0,
+            backgroundImage: "linear-gradient(rgba(90,60,16,0.10) 1px, transparent 1px), linear-gradient(90deg, rgba(90,60,16,0.10) 1px, transparent 1px)",
+            backgroundSize: "18px 18px",
+            maskImage: "radial-gradient(circle at 50% 48%, black 25%, transparent 75%)",
+            WebkitMaskImage: "radial-gradient(circle at 50% 48%, black 25%, transparent 75%)",
+          }} />
+          <svg style={{
+            position: "absolute", left: "50%", top: "50%",
+            transform: "translate(-50%, -50%)",
+            width: Math.min(height * 1.7, 220), height: Math.min(height * 1.7, 220),
+            opacity: 0.35,
+          }} viewBox="0 0 320 320">
+            <g stroke="#5a3c10" fill="none" strokeWidth="0.9" strokeOpacity="0.5">
+              <circle cx="160" cy="160" r="150" />
+              <circle cx="160" cy="160" r="118" strokeDasharray="3 5" />
+              <polygon points="160,30 272,224 48,224" />
+              <polygon points="160,290 48,96 272,96" strokeOpacity="0.32" />
+            </g>
+          </svg>
+        </div>
+        <div aria-hidden style={{
+          position: "absolute", inset: 0, borderRadius: 14,
+          background: `conic-gradient(from var(--nx-mcard-angle, 0deg) at 50% 50%, ${NX_HOLO.cyan}66 0deg, ${NX_HOLO.gold}88 60deg, ${NX_HOLO.amber}aa 120deg, ${NX_HOLO.magenta}66 180deg, ${NX_HOLO.violet}55 240deg, ${NX_HOLO.gold}88 300deg, ${NX_HOLO.cyan}66 360deg)`,
+          mixBlendMode: "soft-light",
+          animation: "nx-mcard-holo 7s linear infinite",
+          opacity: 0.95,
+        }} />
+        <div aria-hidden style={{
+          position: "absolute", inset: 0, borderRadius: 14, padding: 1.4,
+          background: `linear-gradient(120deg, ${NX_HOLO.cyan}, ${NX_HOLO.magenta}, ${NX_HOLO.gold}, ${NX_HOLO.amber}, ${NX_HOLO.violet}, ${NX_HOLO.cyan})`,
+          backgroundSize: "300% 100%",
+          WebkitMask: "linear-gradient(#fff,#fff) content-box, linear-gradient(#fff,#fff)",
+          WebkitMaskComposite: "xor", maskComposite: "exclude",
+          animation: "nx-holo-border 4s linear infinite",
+          opacity: 0.95,
+        }} />
+        <div aria-hidden style={{ position: "absolute", inset: 0, borderRadius: 14, overflow: "hidden", pointerEvents: "none" }}>
+          <div style={{
+            position: "absolute", top: 0, bottom: 0, width: "40%",
+            background: "linear-gradient(115deg, transparent 0%, rgba(255,250,235,0.55) 50%, transparent 100%)",
+            mixBlendMode: "overlay",
+            animation: "nx-holo-shine 5s ease-in-out infinite",
+          }} />
+        </div>
+        <div style={{ position: "absolute", inset: 0, padding: `${pad}px ${pad + 1}px`, color: "#3d2a10" }}>
+          <div style={{
+            position: "absolute", top: pad, left: pad + 2,
+            fontFamily: 'ui-monospace, "JetBrains Mono", monospace',
+            fontSize: fsSerial, letterSpacing: "0.18em",
+            textTransform: "uppercase", opacity: 0.78, lineHeight: 1,
+          }}>{serial}</div>
+          <div style={{
+            position: "absolute", top: pad - 2, right: pad - 2,
+            display: "inline-flex", alignItems: "center", gap: 3,
+            padding: `${Math.max(2, scale * 2)}px ${Math.max(5, scale * 5)}px`,
+            border: "0.8px solid rgba(80,55,20,0.55)",
+            borderRadius: 999,
+            background: `linear-gradient(135deg, rgba(255,250,235,0.9), ${NX_HOLO.gold}55, rgba(255,250,235,0.85))`,
+            boxShadow: "0 1px 2px rgba(80,55,20,0.22), inset 0 1px 0 rgba(255,250,235,0.7)",
+            fontFamily: "ui-monospace, monospace",
+            fontSize: fsBadge, fontWeight: 700,
+            letterSpacing: "0.16em", textTransform: "uppercase",
+            color: "#5a3c10", lineHeight: 1,
+          }}>
+            <span style={{
+              width: Math.max(3, scale * 4), height: Math.max(3, scale * 4),
+              borderRadius: "50%", background: "#5a3c10",
+              boxShadow: `0 0 4px ${NX_HOLO.ember}cc`,
+              animation: "nx-mcard-pulse 2s ease-in-out infinite",
+            }} />
+            <span>{badge}</span>
+          </div>
+          <div style={{
+            position: "absolute", inset: 0,
+            display: "flex", flexDirection: "column",
+            alignItems: "center", justifyContent: "center",
+            paddingTop: pad,
+          }}>
+            <CardSunSigil size={sigilSize} />
+            <div style={{
+              fontFamily: '"Lora", Georgia, serif',
+              fontSize: fsRank, fontStyle: "italic",
+              lineHeight: 1, marginTop: Math.max(2, scale * 3),
+              textShadow: "0 1px 0 rgba(255,250,235,0.5)",
+            }}>{rank}</div>
+            <div style={{
+              fontFamily: "ui-monospace, monospace",
+              fontSize: fsSubline, letterSpacing: "0.22em",
+              textTransform: "uppercase", opacity: 0.65,
+              marginTop: Math.max(2, scale * 2), lineHeight: 1,
+            }}>СТРИК</div>
+          </div>
+          <div style={{
+            position: "absolute", bottom: pad, left: pad + 2,
+            fontFamily: "ui-monospace, monospace",
+            fontSize: fsCaption, letterSpacing: "0.14em",
+            opacity: 0.7, lineHeight: 1,
+          }}>{caption}</div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function NxDay({ s, openTask, navigate, openStreaks }) {
   const [done, setDone] = useState({});
   const { data, loading, error, refetch } = useApi('/api/today');
@@ -1168,9 +1364,23 @@ function NxDay({ s, openTask, navigate, openStreaks }) {
           <div style={{ flex: 1, cursor: "pointer" }} onClick={() => navigate?.("fin")}>
             <Metric s={s} v={`${Math.round((t.budgetDay - t.spentDay) / 1000)}к`} unit="₽" sub="свободно" />
           </div>
-          <div style={{ flex: 1, cursor: "pointer" }} onClick={() => openStreaks?.()}>
-            <Metric s={s} v={<span className="streak-v"><LucideFlame size={20} fill="currentColor" style={{ flexShrink: 0, color: s.amber }} className="flame" />{t.streak}</span>} sub="стрик" accent={s.amber} />
-          </div>
+          {t.streak >= 3 ? (
+            <div style={{ flex: 1, display: "flex", justifyContent: "center" }}>
+              <StreakAchievedCard
+                width={110}
+                height={112}
+                current={t.streak}
+                best={t.streakBest || t.streak}
+                lastDateIso={t.streakLastDate}
+                todayIso={t.todayIso}
+                onClick={() => openStreaks?.()}
+              />
+            </div>
+          ) : (
+            <div style={{ flex: 1, cursor: "pointer" }} onClick={() => openStreaks?.()}>
+              <Metric s={s} v={<span className="streak-v"><LucideFlame size={20} fill="currentColor" style={{ flexShrink: 0, color: s.amber }} className="flame" />{t.streak}</span>} sub="стрик" accent={s.amber} />
+            </div>
+          )}
         </div>
         <div className="hero-budget">
           <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6, fontSize: 13, fontWeight: 500, cursor: "pointer" }} onClick={() => navigate?.("fin")}>
@@ -6359,6 +6569,21 @@ export default function App() {
         @keyframes nx-fog { 0% { transform: translateX(0) } 100% { transform: translateX(40%) } }
         @keyframes nx-cloud { 0% { transform: translateX(0) } 100% { transform: translateX(160vw) } }
         @keyframes nx-shine { 0% { opacity: 0.6 } 100% { opacity: 1 } }
+        @property --nx-mcard-angle { syntax: '<angle>'; inherits: false; initial-value: 0deg; }
+        @keyframes nx-mcard-holo { from { --nx-mcard-angle: 0deg } to { --nx-mcard-angle: 360deg } }
+        @keyframes nx-mcard-in {
+          0%   { transform: scale(0.96) rotateX(8deg); opacity: 0; filter: blur(4px) }
+          60%  { transform: scale(1.01) rotateX(-2deg); opacity: 1; filter: blur(0) }
+          100% { transform: scale(1) rotateX(0); opacity: 1 }
+        }
+        @keyframes nx-mcard-pulse { 0%,100% { opacity: 0.6; transform: scale(1) } 50% { opacity: 1; transform: scale(1.4) } }
+        @keyframes nx-holo-border { 0% { background-position: 0% 50% } 100% { background-position: 300% 50% } }
+        @keyframes nx-holo-shine {
+          0%   { transform: translateX(-120%) skewX(-14deg); opacity: 0 }
+          20%  { opacity: 0.9 }
+          60%  { opacity: 0.9 }
+          100% { transform: translateX(220%) skewX(-14deg); opacity: 0 }
+        }
         * { box-sizing: border-box; margin: 0; padding: 0 }
         body { overflow-x: hidden }
         input::placeholder { color: ${sky.tM}; opacity: 0.75 }
