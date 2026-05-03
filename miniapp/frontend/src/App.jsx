@@ -2923,7 +2923,12 @@ function ArGrimoire({ s, openGrimoire }) {
       {loading && <Empty s={s} text="Загружаю..." />}
       {error && <ErrorBox s={s} error={error} refetch={refetch} />}
       {!loading && !error && view.items.length === 0 && (
-        <Empty s={s} emoji="📖" title="Гримуар пуст" text="Записи о колодах и картах появятся тут." />
+        <Empty
+          s={s}
+          emoji="📖"
+          title="Гримуар пуст"
+          text={'Добавляй через бота: «запиши в гримуар: …»'}
+        />
       )}
       {!loading && !error && view.items.map((g) => (
         <Glass
@@ -2932,11 +2937,18 @@ function ArGrimoire({ s, openGrimoire }) {
           style={{ padding: "10px 14px", marginBottom: 4 }}
           onClick={openGrimoire ? () => openGrimoire({ id: g.id }) : undefined}
         >
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-            <span style={{ fontSize: fs(13), color: s.text }}>{g.name}</span>
-            <span style={{ fontSize: fs(13) }}>{g.theme}</span>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+            <span style={{ fontSize: fs(14), color: s.text, fontWeight: 500, flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              {g.name}
+            </span>
+            <span style={{ fontSize: fs(13), flexShrink: 0 }}>{g.theme}</span>
           </div>
           <div style={{ fontSize: fs(10), color: s.tM, marginTop: 2 }}>{g.cat}</div>
+          {g.preview && (
+            <div style={{ fontSize: fs(11), color: s.tS, marginTop: 4, lineHeight: 1.4 }}>
+              {g.preview}
+            </div>
+          )}
         </Glass>
       ))}
     </div>
@@ -4343,7 +4355,7 @@ const FAB_TITLE = {
   note: "Новая заметка",
   list: "В список",
   memory: "В память",
-  photo: "Фото чека",
+  photo: "Фото расклада",
   voice: "Голосом",
   client: "Новый клиент",
   session: "Новый расклад",
@@ -4436,6 +4448,7 @@ function QuickForm({ s, kind, onDone, botType = "nexus" }) {
   if (kind === "note" || kind === "memory") return <NoteForm s={s} onSubmit={wrap} busy={busy} />;
   if (kind === "list") return <ListAddForm s={s} onSubmit={wrap} busy={busy} />;
   if (kind === "client") return <ClientForm s={s} onSubmit={wrap} busy={busy} />;
+  if (kind === "photo") return <SessionPhotoUpload s={s} onDone={onDone} />;
 
   return (
     <div style={{ padding: "12px 4px" }}>
@@ -4972,6 +4985,156 @@ function ListAddForm({ s, onSubmit, busy }) {
           }
         })}
       />
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════
+// SessionPhotoUpload — FAB → выбор сеанса → загрузка фото в Cloudinary
+// ═══════════════════════════════════════════════════════════════
+
+function SessionPhotoUpload({ s, onDone }) {
+  const { data, loading, error } = useApi('/api/arcana/sessions');
+  const sessions = loading || error ? [] : adaptSessions(data);
+  const [pickedId, setPickedId] = useState(null);
+  const [pickedTitle, setPickedTitle] = useState("");
+  const [q, setQ] = useState("");
+  const [file, setFile] = useState(null);
+  const [previewUrl, setPreviewUrl] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const fileRef = useRef(null);
+
+  const filtered = useMemo(() => {
+    const needle = q.trim().toLowerCase();
+    const top = sessions.slice(0, 30);
+    if (!needle) return top.slice(0, 10);
+    return top.filter((x) =>
+      (x.title || "").toLowerCase().includes(needle) ||
+      (x.client || "").toLowerCase().includes(needle)
+    ).slice(0, 10);
+  }, [sessions, q]);
+
+  const pickFile = (e) => {
+    const f = e.target.files?.[0];
+    if (!f) return;
+    if (f.size > 5 * 1024 * 1024) {
+      alert("Файл > 5 МБ");
+      return;
+    }
+    setFile(f);
+    setPreviewUrl(URL.createObjectURL(f));
+  };
+
+  const upload = async () => {
+    if (!pickedId || !file || busy) return;
+    setBusy(true);
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      const initData = window.Telegram?.WebApp?.initData || import.meta.env.VITE_DEV_INIT_DATA || "";
+      const r = await fetch(`/api/arcana/sessions/${pickedId}/photo`, {
+        method: "POST",
+        headers: { "X-Telegram-Init-Data": initData },
+        body: fd,
+      });
+      if (!r.ok) {
+        const err = await r.json().catch(() => ({ detail: "error" }));
+        alert("Не получилось: " + (err.detail || r.status));
+        return;
+      }
+      try { window.Telegram?.WebApp?.HapticFeedback?.notificationOccurred?.("success"); } catch (_) {}
+      onDone?.();
+    } catch (err) {
+      alert("Ошибка: " + err.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (pickedId) {
+    return (
+      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+        <div style={{ fontSize: fs(11), color: s.tS }}>Расклад</div>
+        <Glass s={s} style={{ padding: "10px 14px" }}>
+          <div style={{ fontSize: fs(13), color: s.text, fontWeight: 500 }}>{pickedTitle}</div>
+          <div
+            onClick={() => { setPickedId(null); setPickedTitle(""); setFile(null); setPreviewUrl(null); }}
+            style={{ fontSize: fs(11), color: s.tS, marginTop: 4, cursor: "pointer" }}
+          >
+            ← выбрать другой
+          </div>
+        </Glass>
+        <input
+          ref={fileRef}
+          type="file"
+          accept="image/*"
+          onChange={pickFile}
+          style={{ display: "none" }}
+        />
+        {previewUrl ? (
+          <Glass s={s} style={{ padding: 4 }}>
+            <img
+              src={previewUrl}
+              alt="Превью"
+              style={{ width: "100%", borderRadius: 8, display: "block" }}
+            />
+            <div
+              onClick={() => fileRef.current?.click()}
+              style={{ fontSize: fs(11), color: s.tS, padding: "6px 8px", cursor: "pointer", textAlign: "center" }}
+            >
+              сменить фото
+            </div>
+          </Glass>
+        ) : (
+          <Glass
+            s={s}
+            onClick={() => fileRef.current?.click()}
+            style={{
+              padding: "22px 14px", textAlign: "center",
+              border: `1.5px dashed ${s.brd}`, cursor: "pointer",
+            }}
+          >
+            <div style={{ fontSize: fs(28), marginBottom: 4 }}>📷</div>
+            <div style={{ fontSize: fs(13), color: s.text }}>Выбрать фото</div>
+            <div style={{ fontSize: fs(11), color: s.tS, marginTop: 2 }}>JPG/PNG, до 5 МБ</div>
+          </Glass>
+        )}
+        <SubmitBtn
+          s={s}
+          disabled={!file || busy}
+          label={busy ? "Загружаю..." : "Привязать к раскладу"}
+          onClick={upload}
+        />
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+      <div style={{ fontSize: fs(11), color: s.tS }}>Выбери расклад</div>
+      <SearchInput s={s} value={q} onChange={setQ} placeholder="Поиск по вопросу или клиенту" />
+      {loading && <Empty s={s} text="Загружаю..." />}
+      {error && <div style={{ fontSize: fs(12), color: s.red }}>Не удалось загрузить</div>}
+      {!loading && !error && filtered.length === 0 && (
+        <Empty s={s} emoji="🔮" title="Нет раскладов" text="Сначала создай расклад через бота." />
+      )}
+      {filtered.map((x) => {
+        const id = x.firstTripletId || x.id;
+        if (!id) return null;
+        return (
+          <Glass
+            key={x.slug || id}
+            s={s}
+            style={{ padding: "10px 14px" }}
+            onClick={() => { setPickedId(id); setPickedTitle(x.title || "—"); }}
+          >
+            <div style={{ fontSize: fs(13), color: s.text, fontWeight: 500 }}>{x.title}</div>
+            <div style={{ fontSize: fs(10), color: s.tM, marginTop: 2 }}>
+              {x.client}{x.firstDate ? ` · ${x.firstDate}` : ""}
+            </div>
+          </Glass>
+        );
+      })}
     </div>
   );
 }
