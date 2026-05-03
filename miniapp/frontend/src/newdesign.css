@@ -837,6 +837,9 @@
     inset 0 0 0 1px rgba(255, 220, 140, 0.35);
   border-radius: 8px;
 }
+.card-bottom-wrap > div:first-child > div:last-child > div {
+  color: #d4a843 !important;
+}
 .card-bottom-wrap::after {
   content: "🂠";
   position: absolute;
