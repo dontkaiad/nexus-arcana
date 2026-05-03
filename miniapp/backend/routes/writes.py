@@ -506,6 +506,67 @@ async def session_verify(
     return {"ok": True, "status": body.status}
 
 
+async def _cloudinary_upload_folder(file_bytes: bytes, filename: str, folder: str) -> Optional[str]:
+    """Тонкая обёртка для аплоада в произвольную папку Cloudinary."""
+    return await _cloudinary_upload_impl(file_bytes, filename, folder=folder)
+
+
+@router.post("/arcana/rituals/{ritual_id}/photo")
+async def upload_ritual_photo(
+    ritual_id: str,
+    file: UploadFile = FastAPIFile(...),
+    tg_id: int = Depends(current_user_id),
+) -> dict[str, Any]:
+    user_notion_id = (await get_user_notion_id(tg_id)) or ""
+    await _load_owned_page(ritual_id, user_notion_id)
+
+    content = await file.read()
+    if len(content) > 5 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="file too large (max 5 MB)")
+    if not (file.content_type or "").startswith("image/"):
+        raise HTTPException(status_code=415, detail="only image/* allowed")
+
+    url = await _cloudinary_upload_folder(content, file.filename or "ritual.jpg", "arcana-rituals")
+    if not url:
+        raise HTTPException(status_code=501, detail="cloudinary not configured")
+    try:
+        await update_page(ritual_id, {"Фото": {"url": url}})
+    except Exception as e:
+        logger.warning("Failed to set Фото URL on ritual: %s", e)
+    return {"ok": True, "url": url}
+
+
+@router.post("/arcana/clients/{client_id}/object_photo")
+async def upload_client_object_photo(
+    client_id: str,
+    file: UploadFile = FastAPIFile(...),
+    tg_id: int = Depends(current_user_id),
+) -> dict[str, Any]:
+    """Append URL фото-объекта в rich_text поле «Фото объектов» клиента."""
+    user_notion_id = (await get_user_notion_id(tg_id)) or ""
+    page = await _load_owned_page(client_id, user_notion_id)
+
+    content = await file.read()
+    if len(content) > 5 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="file too large (max 5 MB)")
+    if not (file.content_type or "").startswith("image/"):
+        raise HTTPException(status_code=415, detail="only image/* allowed")
+
+    url = await _cloudinary_upload_folder(content, file.filename or "object.jpg", "arcana-client-objects")
+    if not url:
+        raise HTTPException(status_code=501, detail="cloudinary not configured")
+
+    # Append к существующему rich_text «Фото объектов»
+    from miniapp.backend._helpers import rich_text_plain
+    existing = rich_text_plain(page, "Фото объектов") or ""
+    new_value = (existing + ("\n" if existing else "") + url).strip()
+    try:
+        await update_page(client_id, {"Фото объектов": _text(new_value)})
+    except Exception as e:
+        logger.warning("Failed to append object photo: %s", e)
+    return {"ok": True, "url": url, "all": new_value.split("\n")}
+
+
 @router.post("/arcana/works/{work_id}/done")
 async def arcana_work_done(
     work_id: str,
@@ -595,6 +656,7 @@ class ClientBody(BaseModel):
     status: Optional[str] = None
     type: Optional[str] = None  # "🤝 Платный" | "🎁 Бесплатный"
     notes: Optional[str] = None
+    birthday: Optional[str] = None  # YYYY-MM-DD
 
 
 _CLIENT_TYPES_ALLOWED_CREATE = {"🤝 Платный", "🎁 Бесплатный"}
@@ -619,11 +681,16 @@ async def arcana_client_create(
         raise HTTPException(status_code=500, detail="failed to create client")
     if body.status:
         await update_page_select(page_id, "Статус", body.status)
+    extra: dict = {}
     if body.notes:
+        extra["Заметки"] = _text(body.notes)
+    if body.birthday:
+        extra["День рождения"] = _date(body.birthday)
+    if extra:
         try:
-            await update_page(page_id, {"Заметки": _text(body.notes)})
+            await update_page(page_id, extra)
         except Exception as e:
-            logger.warning("client_create notes write failed: %s", e)
+            logger.warning("client_create extra fields write failed: %s", e)
     return {"ok": True, "id": page_id}
 
 
@@ -632,6 +699,7 @@ class ClientUpdateBody(BaseModel):
     request: Optional[str] = None
     contact: Optional[str] = None
     type: Optional[str] = None  # "🤝 Платный" | "🎁 Бесплатный"
+    birthday: Optional[str] = None  # YYYY-MM-DD; пустая строка = очистить
 
 
 @router.post("/arcana/clients/{client_id}/edit")
@@ -658,6 +726,8 @@ async def arcana_client_edit(
         if body.type not in _CLIENT_TYPES_ALLOWED_EDIT:
             raise HTTPException(status_code=400, detail="invalid type")
         props["Тип клиента"] = _select(body.type)
+    if body.birthday is not None:
+        props["День рождения"] = _date(body.birthday) if body.birthday else {"date": None}
 
     if not props:
         return {"ok": True, "noop": True}

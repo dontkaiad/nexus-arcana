@@ -123,4 +123,5 @@ async def ritual_detail(
         "structure": structure,
         "notes": rich_text_plain(page, "Заметки") or None,
         "result": select_of(page, "Результат") or "⏳ Не проверено",
+        "photo_url": (page.get("properties", {}).get("Фото", {}) or {}).get("url") or None,
     }

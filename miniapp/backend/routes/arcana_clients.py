@@ -212,6 +212,10 @@ async def client_dossier(
     history.sort(key=lambda e: e["date"] or "", reverse=True)
     history = history[:20]
 
+    bday_raw = (page.get("properties", {}).get("День рождения", {}) or {}).get("date") or {}
+    birthday = bday_raw.get("start") or None
+    objects_raw = rich_text_plain(page, "Фото объектов") or ""
+    photos = [u.strip() for u in objects_raw.replace(",", "\n").split("\n") if u.strip().startswith("http")]
     return {
         "id": client_id,
         "name": name,
@@ -221,9 +225,11 @@ async def client_dossier(
         "type_full": ctype_full,
         "contact": rich_text_plain(page, "Контакт") or None,
         "since": since,
+        "birthday": birthday,
         "request": rich_text_plain(page, "Запрос") or None,
         "notes": rich_text_plain(page, "Заметки") or None,
         "photo_url": (page.get("properties", {}).get("Фото", {}).get("url")) or None,
+        "photos": photos,
         "stats": {
             "sessions": len(my_sessions),
             "rituals": len(my_rituals),

@@ -105,29 +105,38 @@ async def handle_pending_photo(message: Message, user_notion_id: str = "") -> bo
     """
     uid = message.from_user.id
     pending = await get_pending(uid)
-    # Reply-on-photo: если pending'а нет, но это reply на сообщение бота с page_type='client'
+    # Reply-on-photo: если pending'а нет, но это reply на сообщение бота
     if not pending and message.reply_to_message and message.reply_to_message.from_user and message.reply_to_message.from_user.is_bot:
         mp = await get_message_page(message.chat.id, message.reply_to_message.message_id)
-        if mp and mp.get("page_type") == "client" and message.photo:
+        if mp and message.photo:
             import time as _time
             age = _time.time() - float(mp.get("created_at") or 0)
-            # 60-сек окно после создания клиента — без подтверждения
-            if age < 60:
-                await attach_photo_to_client(message, mp["page_id"], silent=True)
+            page_type = mp.get("page_type")
+
+            if page_type == "ritual":
+                # Reply фото на ритуал → сразу прикрепляем (без подтверждения,
+                # контекст очевиден).
+                await attach_photo_to_ritual(message, mp["page_id"], silent=True)
                 return True
-            photo = message.photo[-1]
-            await save_pending(uid, {
-                "step": "await_confirm",
-                "client_id": mp["page_id"],
-                "client_name": "клиент",
-                "file_id": photo.file_id,
-            })
-            kb = InlineKeyboardMarkup(inline_keyboard=[[
-                InlineKeyboardButton(text="✅ Да", callback_data=f"client_photo_confirm:{uid}"),
-                InlineKeyboardButton(text="❌ Отмена", callback_data=f"client_photo_cancel:{uid}"),
-            ]])
-            await message.answer("Привязать это фото к клиенту?", reply_markup=kb)
-            return True
+
+            if page_type == "client":
+                # 60-сек окно после создания клиента — без подтверждения
+                if age < 60:
+                    await attach_photo_to_client(message, mp["page_id"], silent=True)
+                    return True
+                photo = message.photo[-1]
+                await save_pending(uid, {
+                    "step": "await_confirm",
+                    "client_id": mp["page_id"],
+                    "client_name": "клиент",
+                    "file_id": photo.file_id,
+                })
+                kb = InlineKeyboardMarkup(inline_keyboard=[[
+                    InlineKeyboardButton(text="✅ Да", callback_data=f"client_photo_confirm:{uid}"),
+                    InlineKeyboardButton(text="❌ Отмена", callback_data=f"client_photo_cancel:{uid}"),
+                ]])
+                await message.answer("Привязать это фото к клиенту?", reply_markup=kb)
+                return True
         return False
     if not pending or pending.get("step") != "await_photo" or not message.photo:
         return False
@@ -168,6 +177,38 @@ async def _attach_photo(
         logger.exception("client photo upload failed: %s", e)
         await drop_pending(uid)
         await message.answer(f"Ошибка при сохранении фото: {e}")
+
+
+async def attach_photo_to_ritual(
+    message: Message,
+    ritual_id: str,
+    *,
+    silent: bool = False,
+) -> bool:
+    """Аналог attach_photo_to_client для ритуалов (folder=arcana-rituals)."""
+    if not message.photo or not ritual_id:
+        return False
+    try:
+        file_id = message.photo[-1].file_id
+        file = await message.bot.get_file(file_id)
+        bio = await message.bot.download_file(file.file_path)
+        url = await cloudinary_upload(
+            bio.read(),
+            filename=f"ritual-{ritual_id[:8]}.jpg",
+            folder="arcana-rituals",
+        )
+        if not url:
+            if not silent:
+                await message.answer("Cloudinary не настроен — фото не прикреплено.")
+            return False
+        await update_page(ritual_id, {"Фото": {"url": url}})
+        await _react(message, REACTION_DONE)
+        return True
+    except Exception as e:
+        logger.exception("attach_photo_to_ritual failed: %s", e)
+        if not silent:
+            await message.answer(f"Ошибка при сохранении фото: {e}")
+        return False
 
 
 async def attach_photo_to_client(
