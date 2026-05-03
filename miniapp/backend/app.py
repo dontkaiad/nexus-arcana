@@ -20,6 +20,7 @@ from miniapp.backend.routes import (
     arcana_inventory,
     arcana_finance,
     arcana_barter,
+    arcana_debts,
 )
 
 app = FastAPI(title="Nexus × Arcana API")
@@ -55,7 +56,7 @@ for _r in (
     today, tasks, finance, lists, memory, cal, categories, streaks, weather,
     arcana_today, arcana_sessions, arcana_clients,
     arcana_rituals, arcana_grimoire,
-    arcana_inventory, arcana_finance, arcana_barter,
+    arcana_inventory, arcana_finance, arcana_barter, arcana_debts,
     writes,
 ):
     app.include_router(_r.router, prefix="/api")
