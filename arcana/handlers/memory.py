@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import logging
 import os
+import re
+from collections import defaultdict
 from typing import Dict
 
 from aiogram import Router, F
@@ -18,6 +20,42 @@ BOT_LABEL = "🌒 Arcana"
 
 # Pending auto-suggest: uid → {"text": ..., "user_notion_id": ...}
 _pending_auto: Dict[int, dict] = {}
+
+# Auto-suggest счётчик повторений (in-memory как в Nexus tasks).
+# Ключ: (uid, intent, нормализованный признак темы) → счётчик.
+_autosuggest_counts: dict = defaultdict(lambda: defaultdict(int))
+_AUTOSUGGEST_MIN_REPEATS = 3
+
+
+def _norm_topic(text: str) -> str:
+    """Грубый нормализатор «темы»: lowercase, токены ≥3 букв через пробел."""
+    return " ".join(re.findall(r"\w{3,}", (text or "").lower()))
+
+
+async def maybe_auto_suggest(
+    message: Message,
+    intent: str,
+    text: str,
+    user_notion_id: str = "",
+) -> None:
+    """Бамп счётчика повторений по (intent, тема). На 3-м повторении предлагает
+    запомнить через handle_memory_auto_suggest. Триггерится только для
+    session_done / client_info / ritual_done."""
+    if intent not in ("session_done", "session", "client_info",
+                       "ritual", "ritual_done"):
+        return
+    topic = _norm_topic(text)
+    if len(topic) < 4:
+        return
+    uid = message.from_user.id
+    bucket = _autosuggest_counts[uid]
+    key = f"{intent}::{topic}"
+    bucket[key] += 1
+    if bucket[key] == _AUTOSUGGEST_MIN_REPEATS:
+        try:
+            await handle_memory_auto_suggest(message, text, user_notion_id)
+        except Exception as e:
+            logger.warning("maybe_auto_suggest failed: %s", e)
 
 
 # ── Handlers (вызываются из arcana/handlers/base.py) ──────────────────────────
