@@ -37,10 +37,38 @@ from typing import Optional
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from core.html_sanitize import sanitize_interpretation  # noqa: E402
+from core.preprocess import _tarot_card_names_ru  # noqa: E402
 
 logger = logging.getLogger("migrate_arcana_legacy")
 
 _RATE_LIMIT_SEC = 0.3
+
+
+def _normalize_card_name(raw: str, canonical_names: list[str]) -> str:
+    """Нормализует имя карты к каноническому регистру.
+
+    'король кубков' → 'Король Кубков'
+    'КОРОЛЬ КУБКОВ' → 'Король Кубков'
+    'корль кубков'  → 'Король Кубков' (fuzzy через difflib)
+    'Несуществующая Карта' → 'Несуществующая Карта' (+ WARN log)
+    """
+    import difflib
+    raw_clean = (raw or "").strip()
+    if not raw_clean:
+        return raw_clean
+    # точное совпадение в любом регистре
+    for c in canonical_names:
+        if c.lower() == raw_clean.lower():
+            return c
+    # fuzzy
+    lower_pool = [c.lower() for c in canonical_names]
+    matches = difflib.get_close_matches(
+        raw_clean.lower(), lower_pool, n=1, cutoff=0.85,
+    )
+    if matches:
+        return canonical_names[lower_pool.index(matches[0])]
+    print(f"  WARN: не смог нормализовать '{raw_clean}' — оставляю как есть")
+    return raw_clean
 
 
 # ── Pure helpers (тестируемы без Notion) ────────────────────────────────────
@@ -122,9 +150,10 @@ def _migrate_record(page: dict) -> dict:
     if not bottom and interp:
         guessed = _extract_bottom_from_legacy_interp(interp)
         if guessed:
+            normalized = _normalize_card_name(guessed, _tarot_card_names_ru())
             changes["Дно колоды"] = {
                 "rich_text": [
-                    {"type": "text", "text": {"content": guessed[:200]}}
+                    {"type": "text", "text": {"content": normalized[:200]}}
                 ]
             }
 
