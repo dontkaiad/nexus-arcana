@@ -2852,6 +2852,22 @@ function ArClients({ s, openClient }) {
 // ═══════════════════════════════════════════════════════════════
 
 function ArRituals({ s, openRitual }) {
+  const [seg, setSeg] = useState("rituals"); // rituals | inv
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+      <div className="page-title">Ритуалы</div>
+      <div style={{ display: "flex", gap: 6 }}>
+        <Pill s={s} active={seg === "rituals"} onClick={() => setSeg("rituals")}>🕯️ Ритуалы</Pill>
+        <Pill s={s} active={seg === "inv"} onClick={() => setSeg("inv")}>📦 Инвентарь</Pill>
+      </div>
+      {seg === "rituals"
+        ? <ArRitualsList s={s} openRitual={openRitual} />
+        : <ArInventory s={s} />}
+    </div>
+  );
+}
+
+function ArRitualsList({ s, openRitual }) {
   const [goal, setGoal] = useState("all");
   const path = goal === "all"
     ? "/api/arcana/rituals"
@@ -2861,8 +2877,7 @@ function ArRituals({ s, openRitual }) {
   const goals = ["all", ...new Set(list.map((r) => r.goal).filter(Boolean))];
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-      <div className="page-title">Ритуалы</div>
+    <>
       <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
         {goals.map((g) => (
           <Pill key={g} s={s} active={goal === g} onClick={() => setGoal(g)}>
@@ -2895,8 +2910,234 @@ function ArRituals({ s, openRitual }) {
           </div>
         </Glass>
       ))}
-    </div>
+    </>
   );
+}
+
+function ArInventory({ s }) {
+  const [cat, setCat] = useState("all");
+  const [q, setQ] = useState("");
+  const [openItem, setOpenItem] = useState(null);
+  const params = [];
+  if (cat !== "all") params.push(`cat=${encodeURIComponent(cat)}`);
+  if (q) params.push(`q=${encodeURIComponent(q)}`);
+  const path = "/api/arcana/inventory" + (params.length ? "?" + params.join("&") : "");
+  const { data, loading, error, refetch } = useApi(path, [cat, q]);
+  const items = data?.items || [];
+  const cats = data?.categories || [];
+  const total = cats.reduce((a, c) => a + (c.count || 0), 0);
+  const allCats = [{ name: "all", count: total }, ...cats];
+  const today = new Date().toISOString().slice(0, 10);
+
+  return (
+    <>
+      <SearchInput s={s} value={q} onChange={setQ} placeholder="Поиск в инвентаре" />
+      <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+        {allCats.map((c) => (
+          <Pill key={c.name} s={s} active={cat === c.name} onClick={() => setCat(c.name)}>
+            {c.name === "all" ? "Все" : c.name} · {c.count}
+          </Pill>
+        ))}
+      </div>
+      {loading && <Empty s={s} text="Загружаю..." />}
+      {error && <ErrorBox s={s} error={error} refetch={refetch} />}
+      {!loading && !error && items.length === 0 && (
+        <Empty
+          s={s}
+          emoji="📦"
+          title="Инвентарь пуст"
+          text='Добавляй через бота: «инвентарь: соль 200г»'
+        />
+      )}
+      {items.map((it) => {
+        const expSoon = it.expires && it.expires <= today;
+        return (
+          <Glass
+            key={it.id}
+            s={s}
+            style={{ padding: "10px 14px", marginBottom: 4 }}
+            onClick={() => setOpenItem(it)}
+          >
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <span style={{ fontSize: fs(15), flexShrink: 0 }}>
+                {(it.cat || "📦").split(" ")[0]}
+              </span>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: fs(14), color: s.text, fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {it.name}
+                </div>
+                <div style={{ fontSize: fs(10), color: s.tM, marginTop: 2 }}>
+                  {it.qty != null && <span>{it.qty} </span>}
+                  {it.expires && (
+                    <span style={{ color: expSoon ? s.red : s.tM }}>
+                      · до {it.expires}
+                    </span>
+                  )}
+                </div>
+              </div>
+            </div>
+          </Glass>
+        );
+      })}
+      {openItem && (
+        <InventoryItemSheet
+          s={s}
+          item={openItem}
+          onClose={() => setOpenItem(null)}
+          onChanged={() => { setOpenItem(null); refetch(); }}
+        />
+      )}
+    </>
+  );
+}
+
+function InventoryItemSheet({ s, item, onClose, onChanged }) {
+  const [mode, setMode] = useState("view"); // view | edit | purchase
+  const [name] = useState(item.name);
+  const [qty, setQty] = useState(item.qty ?? "");
+  const [note, setNote] = useState(item.note || "");
+  const [expires, setExpires] = useState(item.expires || "");
+  const [price, setPrice] = useState("");
+  const [qtyAdded, setQtyAdded] = useState("");
+  const [busy, setBusy] = useState(null);
+  const initData = window.Telegram?.WebApp?.initData || import.meta.env.VITE_DEV_INIT_DATA || "";
+
+  const call = async (path, method, body) => {
+    const r = await fetch(path, {
+      method,
+      headers: {
+        "Content-Type": "application/json",
+        "X-Telegram-Init-Data": initData,
+      },
+      body: body ? JSON.stringify(body) : undefined,
+    });
+    if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || r.status);
+    return r.json();
+  };
+
+  const save = async () => {
+    setBusy("save");
+    try {
+      await call(`/api/arcana/inventory/${item.id}`, "PATCH", {
+        qty: qty === "" ? null : parseFloat(qty),
+        note,
+        expires: expires || "",
+      });
+      onChanged?.();
+    } catch (e) { alert("Не получилось: " + e.message); }
+    finally { setBusy(null); }
+  };
+
+  const purchase = async () => {
+    setBusy("purchase");
+    try {
+      await call(`/api/arcana/inventory/${item.id}/purchase`, "POST", {
+        price: parseFloat(price),
+        qty_added: qtyAdded ? parseFloat(qtyAdded) : null,
+      });
+      onChanged?.();
+    } catch (e) { alert("Не получилось: " + e.message); }
+    finally { setBusy(null); }
+  };
+
+  const depleted = async () => {
+    if (!confirm("Закончился? Архивировать.")) return;
+    setBusy("depleted");
+    try {
+      const add = confirm("Добавить в Покупки?");
+      await call(`/api/arcana/inventory/${item.id}/depleted`, "POST", { add_to_buy: add });
+      onChanged?.();
+    } catch (e) { alert("Не получилось: " + e.message); }
+    finally { setBusy(null); }
+  };
+
+  return createPortal((
+    <>
+      <div className="acc-sheet-overlay" onClick={onClose} />
+      <div className="acc-sheet" onClick={(e) => e.stopPropagation()}>
+        <div className="acc-grip" />
+        <div style={{ fontFamily: H, fontSize: fs(20), color: s.text, marginBottom: 4 }}>
+          {(item.cat || "📦").split(" ")[0]} {name}
+        </div>
+        {item.cat && (
+          <div style={{ fontSize: fs(11), color: s.tS, marginBottom: 12 }}>{item.cat}</div>
+        )}
+
+        {mode === "purchase" ? (
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            <div style={{ fontSize: fs(11), color: s.tS }}>Цена ₽</div>
+            <Input s={s} value={price} onChange={setPrice} placeholder="200" type="number" />
+            <div style={{ fontSize: fs(11), color: s.tS }}>Количество (приплюсовать к {item.qty ?? 0})</div>
+            <Input s={s} value={qtyAdded} onChange={setQtyAdded} placeholder="100" type="number" />
+            <SubmitBtn
+              s={s}
+              disabled={!price || busy}
+              label={busy === "purchase" ? "Сохраняю..." : "💰 Записать покупку"}
+              onClick={purchase}
+            />
+            <div onClick={() => setMode("view")} style={{ textAlign: "center", color: s.tS, fontSize: fs(12), padding: "6px", cursor: "pointer" }}>
+              ← назад
+            </div>
+          </div>
+        ) : mode === "edit" ? (
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            <div style={{ fontSize: fs(11), color: s.tS }}>Количество</div>
+            <Input s={s} value={qty} onChange={setQty} placeholder="200" type="number" />
+            <div style={{ fontSize: fs(11), color: s.tS }}>Заметка</div>
+            <Input s={s} value={note} onChange={setNote} placeholder="—" />
+            <div style={{ fontSize: fs(11), color: s.tS }}>Срок годности</div>
+            <input
+              type="date"
+              value={expires}
+              onChange={(e) => setExpires(e.target.value)}
+              style={{
+                width: "100%", padding: "10px 12px", borderRadius: 10,
+                border: `1px solid ${s.brd}`, background: s.card, color: s.text,
+                fontSize: fs(13), outline: "none",
+              }}
+            />
+            <SubmitBtn
+              s={s}
+              disabled={!!busy}
+              label={busy === "save" ? "Сохраняю..." : "Сохранить"}
+              onClick={save}
+            />
+            <div onClick={() => setMode("view")} style={{ textAlign: "center", color: s.tS, fontSize: fs(12), padding: "6px", cursor: "pointer" }}>
+              ← назад
+            </div>
+          </div>
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            <div style={{ fontSize: fs(13), color: s.text, lineHeight: 1.5 }}>
+              {item.qty != null && <div>Количество: <b>{item.qty}</b></div>}
+              {item.note && <div>Заметка: {item.note}</div>}
+              {item.expires && <div>Срок до: {item.expires}</div>}
+            </div>
+            <div style={{ height: 8 }} />
+            <ActionRow
+              s={s}
+              icon={<span>💰</span>}
+              label="Купила"
+              onClick={() => setMode("purchase")}
+            />
+            <ActionRow
+              s={s}
+              icon={<span>🗑️</span>}
+              label="Закончился"
+              onClick={depleted}
+              destructive
+            />
+            <ActionRow
+              s={s}
+              icon={<span>✏️</span>}
+              label="Редактировать"
+              onClick={() => setMode("edit")}
+            />
+          </div>
+        )}
+      </div>
+    </>
+  ), document.body);
 }
 
 // ═══════════════════════════════════════════════════════════════
