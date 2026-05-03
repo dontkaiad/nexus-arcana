@@ -97,9 +97,10 @@ async def handle_add_ritual(message: Message, text: str, user_notion_id: str = "
         client_name = data.get("client_name")
         client_id = None
         if client_name:
-            client = await client_find(client_name, user_notion_id=user_notion_id)
-            if client:
-                client_id = client["id"]
+            from core.client_resolve import resolve_or_create
+            client_id = await resolve_or_create(
+                message, client_name, user_notion_id=user_notion_id,
+            )
 
         goal = data.get("goal") or None
         place = data.get("place") or None

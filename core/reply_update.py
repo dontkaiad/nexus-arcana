@@ -75,12 +75,12 @@ _CLIENT_REPLY_SYSTEM = (
     '{"contact": "контакт или null", '
     '"request": "запрос/тема или null", '
     '"notes": "заметки или null", '
-    '"new_type": "Платный" | "Бесплатный" | null, '
+    '"new_type": "Платный" | "Бесплатный" | "Self" | null, '
     '"new_name": "новое имя или null"}\n\n'
     "Правила:\n"
-    "- 'сделай платным/платной/в платный' → new_type='Платный'\n"
-    "- 'бесплатно', 'бесплатной/бесплатным', 'в подарок', 'без оплаты' → new_type='Бесплатный'\n"
-    "- 'self', 'себе', 'личный' → НЕ устанавливай (verboten — Self только вручную). new_type=null\n"
+    "- '🤝', 'платный', 'платной', 'в платный', 'paid' → new_type='Платный'\n"
+    "- '🎁', 'бесплатно', 'бесплатной/бесплатным', 'в подарок', 'без оплаты', 'free' → new_type='Бесплатный'\n"
+    "- '🌟', 'self', 'это я', 'себе/себя/моё', 'личный', \"she's a self\" → new_type='Self'\n"
     "- 'переименуй в X', 'имя X', 'назови X' → new_name='X'\n"
     "- 'добавь заметку Y', 'заметка: Y' → notes='Y'\n"
     "Если поле не упомянуто — null."
@@ -283,18 +283,20 @@ async def apply_updates(
             applied[notion_field] = real
 
         elif field_type == "client_type":
-            # Safety: «Self» не задаётся через reply, только вручную в Notion.
-            t = str(value).strip().lower()
-            if "self" in t or "лични" in t or "себе" in t:
-                applied["⚠️"] = "Self нельзя установить через reply"
-                continue
             from core.notion_client import (
-                CLIENT_TYPE_PAID, CLIENT_TYPE_FREE, _SELF_CLIENT_CACHE,
+                CLIENT_TYPE_PAID, CLIENT_TYPE_FREE, CLIENT_TYPE_SELF,
+                _SELF_CLIENT_CACHE,
             )
-            canonical = CLIENT_TYPE_FREE if "беспл" in t else CLIENT_TYPE_PAID
+            t = str(value).strip().lower()
+            if "self" in t or "🌟" in t:
+                canonical = CLIENT_TYPE_SELF
+            elif "беспл" in t or "🎁" in t or "free" in t:
+                canonical = CLIENT_TYPE_FREE
+            else:
+                canonical = CLIENT_TYPE_PAID
             props[notion_field] = _select(canonical)
             applied[notion_field] = canonical
-            # Self-кеш мог содержать этот id — сбросить на всякий случай.
+            # Self-кеш мог измениться — сбросить.
             _SELF_CLIENT_CACHE.clear()
 
         elif field_type == "append_text":
