@@ -80,6 +80,8 @@ async def task_done(
     # Повторяющаяся задача (есть «Время повтора») → In progress, не Done.
     # Так она остаётся в списке до дедлайна и не улетает в архив.
     repeat_time = rich_text_plain(page, "Время повтора").strip()
+    repeat_kind = select_of(page, "Повтор") or ""
+    is_repeating = bool(repeat_time or repeat_kind)
     new_status = "In progress" if repeat_time else "Done"
     ok = await update_task_status(task_id, new_status)
     if not ok:
@@ -89,6 +91,19 @@ async def task_done(
         await update_page(task_id, {"Время завершения": _date(now_utc.isoformat())})
     except Exception as e:
         logger.warning("could not set completion time: %s", e)
+    if is_repeating:
+        try:
+            from core.task_streaks import update_task_streak
+            today_local, _tz = await today_user_tz(tg_id)
+            update_task_streak(
+                user_id=tg_id,
+                task_id=task_id,
+                task_title=title_plain(page, "Задача"),
+                repeat_kind=repeat_kind or "Каждый день",
+                today_local=today_local.isoformat(),
+            )
+        except Exception as e:
+            logger.warning("update_task_streak failed: %s", e)
     return {"ok": True, "status": new_status}
 
 
