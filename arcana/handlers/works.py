@@ -111,7 +111,7 @@ async def handle_work_done(message: Message, text: str, user_notion_id: str = ""
         title = _extract_text(best["properties"].get("Работа", {}))
         ok = await work_done(page_id)
         if ok:
-            await message.answer(f"🔥 Работа выполнена!\n📌 {title}")
+            await message.answer(f"🔥 Работа выполнена!\n🔮 {title}")
         else:
             await message.answer("⚠️ Ошибка обновления в Notion.")
 

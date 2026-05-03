@@ -27,6 +27,47 @@ def _fresh_db():
         os.remove(_TMP_DB)
 
 
+# ── _format_preview UX (коммит «cleaner preview hints + 📌→🔮») ─────────────
+
+def _base_preview_data(**overrides) -> dict:
+    base = {
+        "title": "Подготовить колоду", "category": "✨ Ритуал",
+        "priority": "Важно", "work_type": "🌟 Личная",
+        "client_name": None, "deadline": None, "reminder": None,
+    }
+    base.update(overrides)
+    return base
+
+
+def test_preview_uses_crystal_ball_icon_not_pin():
+    out = wp._format_preview(_base_preview_data())
+    assert "🔮 <b>" in out, "Должен использоваться 🔮 (хрустальный шар) для Арканы"
+    assert "📌" not in out, "📌 — это Nexus-стиль, не должен попадать в Аркану"
+
+
+def test_preview_hides_uchni_block_when_deadline_present():
+    """Если дедлайн распарсен — auto-reminder сам подставится, не дёргаем юзера."""
+    out = wp._format_preview(_base_preview_data(deadline="2026-05-04"))
+    assert "❓ Уточни" not in out
+    assert "Когда сделать" not in out
+
+
+def test_preview_shows_uchni_block_when_deadline_missing():
+    out = wp._format_preview(_base_preview_data(deadline=None))
+    assert "❓ Уточни" in out
+    assert "Когда сделать" in out
+    assert "Сохранить» как есть" in out
+
+
+def test_preview_no_separate_napomint_question_when_deadline_set():
+    """Раньше блок показывался если ИЛИ deadline=None ИЛИ reminder=None.
+    Теперь только при deadline=None — для напоминания auto-reminder."""
+    out = wp._format_preview(
+        _base_preview_data(deadline="2026-05-04", reminder=None)
+    )
+    assert "Напомнить?" not in out
+
+
 def _make_message(uid: int = 42, text: str = "сделать ритуал для маши") -> MagicMock:
     msg = MagicMock()
     msg.from_user.id = uid

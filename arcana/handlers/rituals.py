@@ -182,7 +182,7 @@ async def handle_add_ritual(message: Message, text: str, user_notion_id: str = "
 
         lines = [
             "🕯️ Ритуал записан!",
-            f"📌 {data.get('name', 'Ритуал')}",
+            f"🔮 {data.get('name', 'Ритуал')}",
         ]
         if goal_place:
             lines.append(goal_place)
