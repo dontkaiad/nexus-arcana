@@ -378,54 +378,16 @@ class VerifyBody(BaseModel):
 # ═══════════════════════════════════════════════════════════════
 
 
+from core.cloudinary_client import cloudinary_upload as _cloudinary_upload_impl
+
+
 async def _cloudinary_upload(file_bytes: bytes, filename: str) -> Optional[str]:
-    """Загрузка в Cloudinary через signed upload API.
+    """Тонкая обёртка над core.cloudinary_client (folder=arcana-sessions).
 
-    Требует CLOUDINARY_URL в формате cloudinary://<api_key>:<api_secret>@<cloud>.
-    Возвращает secure_url или None.
+    Сохраняем имя для обратной совместимости с тестами в test_miniapp_wave3.py
+    (моки делают patch на miniapp.backend.routes.writes._cloudinary_upload).
     """
-    import os
-    import hashlib
-    import time
-    import urllib.parse
-    import httpx
-
-    cu = os.environ.get("CLOUDINARY_URL", "")
-    if not cu.startswith("cloudinary://"):
-        return None
-    try:
-        rest = cu[len("cloudinary://"):]
-        creds, cloud_name = rest.split("@", 1)
-        api_key, api_secret = creds.split(":", 1)
-    except ValueError:
-        logger.warning("CLOUDINARY_URL parse failed")
-        return None
-
-    timestamp = str(int(time.time()))
-    folder = "arcana-sessions"
-    # Signature: sha1(params_to_sign + api_secret), params sorted & joined by &
-    params = {"folder": folder, "timestamp": timestamp}
-    to_sign = "&".join(f"{k}={v}" for k, v in sorted(params.items()))
-    signature = hashlib.sha1((to_sign + api_secret).encode()).hexdigest()
-
-    url = f"https://api.cloudinary.com/v1_1/{cloud_name}/image/upload"
-    data = {
-        "api_key": api_key,
-        "timestamp": timestamp,
-        "folder": folder,
-        "signature": signature,
-    }
-    files = {"file": (filename, file_bytes)}
-    try:
-        async with httpx.AsyncClient(timeout=30) as client:
-            r = await client.post(url, data=data, files=files)
-            if r.status_code >= 300:
-                logger.warning("cloudinary upload %s: %s", r.status_code, r.text[:200])
-                return None
-            return r.json().get("secure_url")
-    except Exception as e:
-        logger.warning("cloudinary upload exception: %s", e)
-        return None
+    return await _cloudinary_upload_impl(file_bytes, filename, folder="arcana-sessions")
 
 
 from fastapi import UploadFile, File as FastAPIFile

@@ -12,6 +12,7 @@ from arcana.handlers.sessions import router as sessions_router
 from arcana.handlers.grimoire import router as grimoire_router
 from arcana.handlers.delete import router as delete_router
 from arcana.handlers.clients import router as clients_router
+from arcana.handlers.client_photo import router as client_photo_router
 from arcana.handlers.payment import router as payment_router
 from arcana.handlers.intent_resolve import router as intent_resolve_router
 from arcana.handlers.work_kb import router as work_kb_router
@@ -44,6 +45,7 @@ def create_dp_and_bot():
     dp.include_router(grimoire_router)   # callbacks grim_* — до base router
     dp.include_router(delete_router)     # callbacks del_confirm/del_cancel
     dp.include_router(clients_router)    # callbacks create_client
+    dp.include_router(client_photo_router)   # /client_photo + client_photo_* callbacks
     dp.include_router(router)
     dp.include_router(memory_router)
     dp.include_router(lists_router)
