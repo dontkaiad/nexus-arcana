@@ -45,7 +45,25 @@ grimoire        — открыть гримуар, посмотреть запи
 grimoire_search — поиск в гримуаре
 verify       — отметить что расклад/ритуал сбылся/не сбылся
 stats        — статистика, процент сбывшихся
-unknown      — остальное"""
+unknown      — остальное
+
+ПРИМЕРЫ (Haiku — следуй паттерну строго):
+Вход: «сделать ритуал маше»
+Выход: ritual_planned
+Вход: «провела маше ритуал на защиту»
+Выход: ritual_done
+Вход: «разложу маше на работу завтра»
+Выход: session_planned
+Вход: «разложила маше три карты: шут маг жрица»
+Выход: session_done
+Вход: «провести очищение в субботу»
+Выход: ritual_planned
+Вход: «себе на месяц»
+Выход: session_planned
+Вход: «сделать миниапп»
+Выход: nexus_redirect
+Вход: «починить погоду на сайте»
+Выход: nexus_redirect"""
 
 # Прошедшее время русских глаголов (для guard ritual_done vs ritual_planned).
 import re as _re_mod
@@ -368,7 +386,10 @@ async def route_message(message: Message, user_notion_id: str = "", _text: str =
         if uid in _clarify:
             original = _clarify.pop(uid)
             combined = f"{original}\nУточнение: {text}"
-            intent2 = (await ask_claude(combined, system=ROUTER_SYSTEM, max_tokens=10)).strip().lower()
+            intent2 = (await ask_claude(
+                combined, system=ROUTER_SYSTEM, max_tokens=10,
+                model="claude-haiku-4-5-20251001",
+            )).strip().lower()
 
             if intent2 not in ("unknown", ""):
                 text = combined
@@ -379,7 +400,10 @@ async def route_message(message: Message, user_notion_id: str = "", _text: str =
                 await message.answer(f"🌒 Так и не поняла · {notion_status}")
                 return
         else:
-            intent = (await ask_claude(text, system=ROUTER_SYSTEM, max_tokens=10)).strip().lower()
+            intent = (await ask_claude(
+                text, system=ROUTER_SYSTEM, max_tokens=10,
+                model="claude-haiku-4-5-20251001",
+            )).strip().lower()
 
         logger.info("intent=%s | %s", intent, text[:60])
 
