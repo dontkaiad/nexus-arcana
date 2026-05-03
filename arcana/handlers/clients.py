@@ -280,7 +280,7 @@ async def handle_add_client(message: Message, text: str, user_notion_id: str = "
         })
         pending_stub = {"name": name, "contacts": contacts_list, "request": request, "notes": ""}
         bot_msg = await message.answer(
-            f"👥 Клиент создан · {type_glyph}\n📌 <b>{name}</b>\n🟢 Активный\n\n{_card(pending_stub)}\n\n"
+            f"👥 Клиент создан · {type_glyph}\n🔮 <b>{name}</b>\n🟢 Активный\n\n{_card(pending_stub)}\n\n"
             f"Скинь инфу: контакт, запрос, заметки.",
             reply_markup=_collecting_kb(uid),
             parse_mode="HTML",
@@ -288,7 +288,7 @@ async def handle_add_client(message: Message, text: str, user_notion_id: str = "
     else:
         pending_stub = {"name": name, "contacts": contacts_list, "request": request, "notes": ""}
         bot_msg = await message.answer(
-            f"👥 Клиент создан · {type_glyph}\n📌 <b>{name}</b>\n🟢 Активный\n\n{_card(pending_stub)}",
+            f"👥 Клиент создан · {type_glyph}\n🔮 <b>{name}</b>\n🟢 Активный\n\n{_card(pending_stub)}",
             parse_mode="HTML",
         )
 
@@ -338,7 +338,7 @@ async def _handle_collecting(
         await _update_notion(page_id, fresh)
 
     await message.answer(
-        f"👥 Клиент обновлён!\n📌 <b>{fresh.get('name')}</b>\n\n{_card(fresh)}\n\n"
+        f"👥 Клиент обновлён!\n🔮 <b>{fresh.get('name')}</b>\n\n{_card(fresh)}\n\n"
         f"Можешь прислать ещё или нажать Готово.",
         reply_markup=_collecting_kb(uid),
         parse_mode="HTML",
@@ -452,7 +452,7 @@ async def cb_create_from_search(callback: CallbackQuery, user_notion_id: str = "
     pending_stub = {"name": name, "contacts": [], "request": "", "notes": ""}
 
     await callback.message.edit_text(
-        f"👥 Клиент создан!\n📌 <b>{name}</b>\n🟢 Активный\n\n{_card(pending_stub)}\n\n"
+        f"👥 Клиент создан!\n🔮 <b>{name}</b>\n🟢 Активный\n\n{_card(pending_stub)}\n\n"
         f"Скинь инфу: контакт, запрос, заметки.",
         reply_markup=_collecting_kb(uid),
         parse_mode="HTML",
@@ -472,7 +472,7 @@ async def cb_update_existing(callback: CallbackQuery, user_notion_id: str = "") 
     pending = await get_pending_client(uid) or {}
 
     await callback.message.edit_text(
-        f"👥 Дополняем карточку\n📌 <b>{pending.get('name')}</b>\n\n{_card(pending)}\n\n"
+        f"👥 Дополняем карточку\n🔮 <b>{pending.get('name')}</b>\n\n{_card(pending)}\n\n"
         f"Скинь новые контакты, запрос или заметки.",
         reply_markup=_collecting_kb(uid),
         parse_mode="HTML",
@@ -513,7 +513,7 @@ async def cb_create_new(callback: CallbackQuery, user_notion_id: str = "") -> No
     pending_stub = {"name": name, "contacts": [], "request": "", "notes": ""}
 
     await callback.message.edit_text(
-        f"👥 Новый клиент создан!\n📌 <b>{name}</b>\n🟢 Активный\n\n{_card(pending_stub)}\n\n"
+        f"👥 Новый клиент создан!\n🔮 <b>{name}</b>\n🟢 Активный\n\n{_card(pending_stub)}\n\n"
         f"Скинь инфу: контакт, запрос, заметки.",
         reply_markup=_collecting_kb(uid),
         parse_mode="HTML",

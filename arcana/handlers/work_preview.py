@@ -173,20 +173,20 @@ def _format_preview(data: dict) -> str:
     reminder_disp = (reminder or "нет").replace("T", " ")
 
     lines = [
-        f"📌 <b>{title}</b>",
+        f"🔮 <b>{title}</b>",
         f"🏷 {category} · {pemoji} {priority}",
         f"📅 Дедлайн: {deadline_disp}",
         f"🔔 Напоминание: {reminder_disp}",
         f"👥 {work_type}" + (f" · {client_name}" if client_name else ""),
     ]
 
-    if not deadline or not reminder:
+    # Спрашиваем уточнение ТОЛЬКО если нет дедлайна. Если он есть —
+    # auto-reminder = deadline - 1 день подставится в cb_work_save сам,
+    # юзера про напоминание не дёргаем.
+    if not deadline:
         lines.append("")
         lines.append("❓ Уточни:")
-        if not deadline:
-            lines.append("— Когда сделать? («завтра», «1 июня», «через 2 дня»)")
-        if not reminder:
-            lines.append("— Напомнить? («в 10:00», «за час», «завтра в 15»)")
+        lines.append("— Когда сделать? («завтра», «1 июня», «через 2 дня»)")
         lines.append("")
         lines.append("<i>Или нажми «Сохранить» как есть</i>")
 
@@ -443,8 +443,7 @@ async def handle_work_clarification(message: Message) -> bool:
     if not upd.get("deadline") and not upd.get("reminder"):
         await react(message, "🤔")
         await message.answer(
-            "🤔 Не поняла уточнение. Примеры: <code>завтра</code>, "
-            "<code>через 2 дня</code>, <code>в 10:00</code>"
+            "🤔 Не поняла уточнение. Примеры: завтра, через 2 дня, в 10:00"
         )
         return True
 
@@ -549,7 +548,7 @@ async def cb_work_save(call: CallbackQuery) -> None:
 
     text_content = (
         f"⚡ <b>Работа создана!</b>\n"
-        f"📌 {title}\n"
+        f"🔮 {title}\n"
         f"🏷 {category} · {pemoji} {priority}\n"
         f"📅 Дедлайн: {deadline_disp}\n"
         f"🔔 Напоминание: {reminder_disp}\n"
