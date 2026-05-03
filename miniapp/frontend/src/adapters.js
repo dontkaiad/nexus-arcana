@@ -484,6 +484,9 @@ export function adaptSessionGroupBrief(x) {
     category: x.category || '',
     client: x.client || 'Личный',
     clientId: x.client_id || null,
+    clientType: x.client_type || '',
+    clientTypeFull: x.client_type_full || '',
+    hasBarter: !!x.has_barter,
     type: x.type || '',
     decks: x.decks || [],
     firstDate: x.first_date ? formatDate(x.first_date, 'full') : '',
@@ -564,11 +567,16 @@ export function adaptClients(data) {
       name: c.name || '',
       initial: c.initial || (c.name || '?')[0],
       status: c.status || '🟢',
+      type: c.type || '',
+      type_full: c.type_full || '',
       sessions: c.sessions_count ?? 0,
       rituals: c.rituals_count ?? 0,
       debt: c.debt ?? 0,
+      barter_count: c.barter_count ?? 0,
       total: c.total_paid ?? 0,
-      self: (c.status || '').includes('Я') || (c.name || '').toLowerCase() === 'кай',
+      self: (c.type_full || c.status || '').includes('Self')
+        || (c.status || '').includes('Я')
+        || (c.name || '').toLowerCase() === 'кай',
     })),
   }
 }

@@ -2682,7 +2682,13 @@ function ArSessions({ s, openSession }) {
                 {pinned.title}
               </div>
               <div style={{ fontSize: fs(11), opacity: 0.65, marginTop: 4, display: "flex", gap: 6, flexWrap: "wrap" }}>
-                {[pinned.category, pinned.client, pinned.firstDate, `${pinned.tripletCount} трип.`]
+                {[
+                  pinned.category,
+                  pinned.client && `${pinned.clientType ? pinned.clientType + " " : ""}${pinned.client}`,
+                  pinned.firstDate,
+                  `${pinned.tripletCount} трип.`,
+                  pinned.hasBarter && "🔄 бартер",
+                ]
                   .filter(Boolean).map((it, i) => <span key={i}>{it}</span>)}
                 {pinned.lastDate && pinned.rawLastDate !== pinned.rawDate && (
                   <span style={{ opacity: 0.5, fontSize: fs(10) }}>· обновлено {pinned.lastDate}</span>
@@ -2702,7 +2708,13 @@ function ArSessions({ s, openSession }) {
                 {x.title || "—"}
               </div>
               <div style={{ fontSize: fs(11), opacity: 0.65, marginTop: 4, display: "flex", gap: 6, flexWrap: "wrap" }}>
-                {[x.category, x.client, x.firstDate, x.tripletCount > 1 ? `${x.tripletCount} трип.` : null]
+                {[
+                  x.category,
+                  x.client && `${x.clientType ? x.clientType + " " : ""}${x.client}`,
+                  x.firstDate,
+                  x.tripletCount > 1 ? `${x.tripletCount} трип.` : null,
+                  x.hasBarter && "🔄 бартер",
+                ]
                   .filter(Boolean).map((it, i) => <span key={i}>{it}</span>)}
                 {x.lastDate && x.rawLastDate !== x.rawDate && (
                   <span style={{ opacity: 0.5, fontSize: fs(10) }}>· обновлено {x.lastDate}</span>
@@ -2783,13 +2795,17 @@ function ArClients({ s, openClient }) {
               </div>
               <div>
                 <div style={{ fontSize: fs(13), color: s.text, fontWeight: 500 }}>
-                  {c.status} {c.name}
+                  {c.type && <span title={c.type_full}>{c.type} </span>}
+                  {c.name}
                   {c.self && (
                     <span style={{ color: s.tS, fontWeight: 400, fontSize: fs(11) }}> · я</span>
                   )}
                 </div>
                 <div style={{ fontSize: fs(10), color: s.tM }}>
                   {c.sessions} сеансов · {c.rituals} ритуалов
+                  {c.barter_count > 0 && (
+                    <> · <span style={{ color: s.acc }}>🔄 {c.barter_count} {c.barter_count === 1 ? "бартер" : "бартера"}</span></>
+                  )}
                 </div>
               </div>
             </div>

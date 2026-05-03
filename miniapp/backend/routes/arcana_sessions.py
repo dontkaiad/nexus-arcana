@@ -157,6 +157,11 @@ async def list_sessions(
         user_notion_id=user_notion_id, sbylos_filter=sbylos_filter
     )
     clients_map = await load_clients_map(user_notion_id)
+    from miniapp.backend.routes.arcana_today import _client_types_map
+    type_map = await _client_types_map(user_notion_id)
+
+    def _has_barter(p: dict) -> bool:
+        return bool(rich_text_plain(p, "Бартер · что").strip())
 
     area_f = filters.get("area")
     client_f = filters.get("client_id")
@@ -223,6 +228,10 @@ async def list_sessions(
             "🌐 Сфера жизни" if not is_solo else "🔺 Триплет"
         )
 
+        ctype_full = type_map.get(client_id or "", "") if client_id else ""
+        client_type_icon = ctype_full.split()[0] if ctype_full else ""
+        # has_barter — хотя бы у одной страницы группы непустое «Бартер · что»
+        group_has_barter = any(_has_barter(p) for p in pages)
         items.append({
             "slug": _slug_for(sname, client_id) if sname else first.get("id", ""),
             "session_name": sname or None,
@@ -231,6 +240,9 @@ async def list_sessions(
             "category": category,
             "client": client_name,
             "client_id": client_id,
+            "client_type": client_type_icon,
+            "client_type_full": ctype_full,
+            "has_barter": group_has_barter,
             "type": session_type,
             "decks": decks,
             "first_date": date_local.isoformat() if date_local else None,

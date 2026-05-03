@@ -46,34 +46,51 @@ def _extract_ts(page: dict) -> str:
     return raw[:10] if raw else (page.get("created_time") or "")[:10]
 
 
+def _has_barter(page: dict) -> bool:
+    """«Бартер · что» — rich_text. Считаем заполненным если есть текст."""
+    return bool(rich_text_plain(page, "Бартер · что").strip())
+
+
 def _aggregate_by_client(sessions: list[dict], rituals: list[dict]) -> dict:
-    """→ {client_id: {sessions: [pages], rituals: [pages], debt, total_paid}}.
-    Записи без клиента попадают в ключ ''.
+    """→ {client_id: {sessions, rituals, debt, total_paid, barter_count}}.
+    Записи без клиента — в ключе ''.
     """
     agg: dict[str, dict] = {}
     for p in sessions:
         ids = relation_ids_of(p, "👥 Клиенты")
         cid = ids[0] if ids else ""
         bucket = agg.setdefault(cid, {"sessions": [], "rituals": [],
-                                       "debt": 0.0, "total_paid": 0.0})
+                                       "debt": 0.0, "total_paid": 0.0,
+                                       "barter_count": 0})
         price = number_of(p, "Сумма")
         paid = number_of(p, "Оплачено")
         bucket["sessions"].append(p)
         bucket["total_paid"] += paid
         if price - paid > 0:
             bucket["debt"] += (price - paid)
+        if _has_barter(p):
+            bucket["barter_count"] += 1
     for p in rituals:
         ids = relation_ids_of(p, "👥 Клиенты")
         cid = ids[0] if ids else ""
         bucket = agg.setdefault(cid, {"sessions": [], "rituals": [],
-                                       "debt": 0.0, "total_paid": 0.0})
+                                       "debt": 0.0, "total_paid": 0.0,
+                                       "barter_count": 0})
         price = number_of(p, "Цена за ритуал")
         paid = number_of(p, "Оплачено")
         bucket["rituals"].append(p)
         bucket["total_paid"] += paid
         if price - paid > 0:
             bucket["debt"] += (price - paid)
+        if _has_barter(p):
+            bucket["barter_count"] += 1
     return agg
+
+
+def _type_icon(client_type: str) -> str:
+    """«🌟 Self» / «🤝 Платный» / «🎁 Бесплатный» → первый emoji."""
+    s = (client_type or "").strip()
+    return s.split()[0] if s else ""
 
 
 @router.get("/arcana/clients")
@@ -89,17 +106,24 @@ async def list_clients(tg_id: int = Depends(current_user_id)) -> dict[str, Any]:
     for c in clients:
         cid = c["id"]
         name = title_plain(c, "Имя")
-        bucket = agg.get(cid, {"sessions": [], "rituals": [], "debt": 0, "total_paid": 0})
+        bucket = agg.get(cid, {"sessions": [], "rituals": [], "debt": 0,
+                               "total_paid": 0, "barter_count": 0})
         debt = int(round(bucket["debt"]))
         total_debt += debt
+        # Тип клиента из 👥 Клиенты.«Тип клиента» (select).
+        ctype_full = (c.get("properties", {}).get("Тип клиента", {}) or {}).get("select")
+        ctype_full = ctype_full.get("name", "") if ctype_full else ""
         out.append({
             "id": cid,
             "name": name,
             "initial": _initial(name),
             "status": _client_status(c),
+            "type": _type_icon(ctype_full),
+            "type_full": ctype_full,
             "sessions_count": len(bucket["sessions"]),
             "rituals_count": len(bucket["rituals"]),
             "debt": debt,
+            "barter_count": bucket["barter_count"],
             "total_paid": int(round(bucket["total_paid"])),
         })
     out.sort(key=lambda x: x["name"])
