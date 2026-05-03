@@ -201,7 +201,7 @@ tests/.env.test
 miniapp/data/
 
 # Frontend (Vite)
-miniapp/frontend/node_modules/
+miniapp/frontend/node_modules
 miniapp/frontend/dist/
 miniapp/frontend/.env.local
 miniapp/frontend/.vite/
