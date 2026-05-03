@@ -324,6 +324,80 @@ def test_session_photo_upload_rejects_non_image(client):
     assert r.status_code == 415
 
 
+# ─── /api/arcana/rituals/{id}/photo ────────────────────────────────────────
+
+def test_ritual_photo_upload_writes_url(client):
+    page = _page("rit-1")
+    fake_url = "https://res.cloudinary.com/x/r.jpg"
+    with patch("miniapp.backend.routes.writes.get_page", AsyncMock(return_value=page)), \
+         patch("miniapp.backend.routes.writes._cloudinary_upload_folder",
+               AsyncMock(return_value=fake_url)) as cu, \
+         patch("miniapp.backend.routes.writes.update_page",
+               AsyncMock(return_value=None)) as up, \
+         patch("miniapp.backend.routes.writes.get_user_notion_id",
+               AsyncMock(return_value=FAKE_NOTION_USER)):
+        r = client.post(
+            "/api/arcana/rituals/rit-1/photo",
+            files={"file": ("ritual.jpg", b"FAKE", "image/jpeg")},
+        )
+    assert r.status_code == 200
+    cu.assert_awaited_once()
+    assert cu.await_args.args[2] == "arcana-rituals"
+    up.assert_awaited_once()
+    assert up.await_args.args[1] == {"Фото": {"url": fake_url}}
+
+
+# ─── /api/arcana/clients/{id}/object_photo (append) ─────────────────────────
+
+def test_client_object_photo_appends_url(client):
+    page = _page("cli-7", extra={
+        "Фото объектов": {"rich_text": [{"plain_text": "https://old.example/a.jpg"}]},
+    })
+    fake_url = "https://res.cloudinary.com/x/o.jpg"
+    with patch("miniapp.backend.routes.writes.get_page", AsyncMock(return_value=page)), \
+         patch("miniapp.backend.routes.writes._cloudinary_upload_folder",
+               AsyncMock(return_value=fake_url)) as cu, \
+         patch("miniapp.backend.routes.writes.update_page",
+               AsyncMock(return_value=None)) as up, \
+         patch("miniapp.backend.routes.writes.get_user_notion_id",
+               AsyncMock(return_value=FAKE_NOTION_USER)):
+        r = client.post(
+            "/api/arcana/clients/cli-7/object_photo",
+            files={"file": ("obj.jpg", b"FAKE", "image/jpeg")},
+        )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["url"] == fake_url
+    assert "https://old.example/a.jpg" in body["all"]
+    assert fake_url in body["all"]
+    cu.assert_awaited_once()
+    assert cu.await_args.args[2] == "arcana-client-objects"
+    # update_page получил append-стрингу с обоими URL
+    written = up.await_args.args[1]["Фото объектов"]
+    assert any(fake_url in (rt.get("text", {}).get("content") or "") for rt in written["rich_text"])
+
+
+# ─── /api/arcana/clients create with birthday ──────────────────────────────
+
+def test_client_create_with_birthday(client):
+    with patch("miniapp.backend.routes.writes.client_add",
+               AsyncMock(return_value="cli-bday")) as ca, \
+         patch("miniapp.backend.routes.writes.update_page_select",
+               AsyncMock(return_value=True)), \
+         patch("miniapp.backend.routes.writes.update_page",
+               AsyncMock(return_value=None)) as up, \
+         patch("miniapp.backend.routes.writes.get_user_notion_id",
+               AsyncMock(return_value=FAKE_NOTION_USER)):
+        r = client.post("/api/arcana/clients", json={
+            "name": "Аня",
+            "birthday": "2000-10-02",
+        })
+    assert r.status_code == 200
+    ca.assert_awaited_once()
+    bday_call = [c for c in up.await_args_list if "День рождения" in c.args[1]]
+    assert bday_call
+
+
 # ─── /api/lists create/done/delete ──────────────────────────────────────────
 
 def test_list_create_buy(client):

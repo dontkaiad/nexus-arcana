@@ -237,6 +237,79 @@ async def test_reply_with_photo_after_60s_still_asks_confirmation():
 
 
 @pytest.mark.asyncio
+async def test_reply_with_photo_on_ritual_attaches_immediately():
+    """Reply фото на сообщение бота с page_type='ritual' → сразу attach."""
+    import time as _time
+    from arcana.handlers.client_photo import handle_pending_photo
+
+    photo = MagicMock()
+    photo.file_id = "tg-rit-photo"
+
+    file_obj = MagicMock()
+    file_obj.file_path = "p/r.jpg"
+    bot = MagicMock()
+    bot.get_file = AsyncMock(return_value=file_obj)
+    bot.download_file = AsyncMock(return_value=BytesIO(b"r"))
+
+    reply_msg = MagicMock()
+    reply_msg.message_id = 333
+    reply_msg.from_user.is_bot = True
+
+    msg = MagicMock()
+    msg.from_user.id = 33
+    msg.chat.id = 111
+    msg.bot = bot
+    msg.reply_to_message = reply_msg
+    msg.photo = [photo]
+    msg.answer = AsyncMock()
+
+    with patch("arcana.handlers.client_photo.get_message_page",
+               AsyncMock(return_value={
+                   "page_id": "rit-X", "page_type": "ritual",
+                   "bot": "arcana", "created_at": _time.time() - 5,
+               })), \
+         patch("arcana.handlers.client_photo.cloudinary_upload",
+               AsyncMock(return_value="https://cdn/r.jpg")) as cu, \
+         patch("arcana.handlers.client_photo.update_page",
+               AsyncMock(return_value=None)) as up:
+        handled = await handle_pending_photo(msg)
+    assert handled is True
+    assert cu.await_args.kwargs["folder"] == "arcana-rituals"
+    args = up.await_args.args
+    assert args[0] == "rit-X"
+    assert args[1] == {"Фото": {"url": "https://cdn/r.jpg"}}
+
+
+@pytest.mark.asyncio
+async def test_analyze_image_call_signature_correct():
+    """Регрессия для bug TypeError: analyze_image() got multiple values for 'prompt'.
+    Теперь вызов идёт через ask_claude_vision(prompt, image_b64, system=…)."""
+    from arcana.handlers.clients import handle_client_photo_input
+    from arcana.pending_clients import save_pending_client, get_pending_client
+
+    msg = MagicMock()
+    msg.from_user.id = 71
+    msg.answer = AsyncMock()
+    await save_pending_client(71, {"step": "collecting", "page_id": "cli-71",
+                                    "name": "Маша", "contacts": [], "request": "", "notes": ""})
+    captured: dict = {}
+
+    async def fake_vision(prompt, image_b64, system=""):
+        captured["prompt"] = prompt
+        captured["image_b64"] = image_b64
+        captured["system"] = system
+        return '{"contacts":[],"name":"Маша"}'
+
+    with patch("arcana.handlers.clients.ask_claude_vision", AsyncMock(side_effect=fake_vision)), \
+         patch("arcana.handlers.clients._update_notion", AsyncMock(return_value=None)):
+        await handle_client_photo_input(msg, "BASE64DATA",
+                                         await get_pending_client(71))
+    assert captured["image_b64"] == "BASE64DATA"
+    assert "контакт" in captured["prompt"].lower() or "извлеки" in captured["prompt"].lower()
+    assert captured["system"]  # передан VISION_CONTACT
+
+
+@pytest.mark.asyncio
 async def test_reply_with_photo_starts_confirm_flow():
     from arcana.handlers.client_photo import handle_pending_photo
     from arcana.pending_client_photo import get as get_pending

@@ -9,7 +9,7 @@ from typing import Any, Dict, List, Optional
 from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 
-from core.claude_client import ask_claude, analyze_image
+from core.claude_client import ask_claude, ask_claude_vision
 from core.notion_client import (
     client_add, client_find, sessions_by_client, rituals_by_client,
     arcana_all_debts, get_page, update_page, _extract_text, _extract_number,
@@ -41,10 +41,13 @@ PARSE_CLIENT_INFO = (
 )
 
 VISION_CONTACT = (
-    "Это скриншот контакта из Telegram или телефона. "
-    "Извлеки ВСЕ контактные данные. Ответь ТОЛЬКО JSON без markdown:\n"
-    '{"contacts": [{"value": "@username или номер", "label": "описание если есть или null"}], '
-    '"name": "имя если видно или null"}'
+    "Это скриншот профиля из Telegram, соцсети или контакта телефона. "
+    "Извлеки имя/username, день рождения если виден, контакты, заметки. "
+    "Ответь ТОЛЬКО JSON без markdown:\n"
+    '{"name": "имя если видно или null", '
+    '"birthday": "YYYY-MM-DD если видна дата, иначе null", '
+    '"contacts": [{"value": "@username или номер", "label": "описание если есть или null"}], '
+    '"notes": "любые заметки или null"}'
 )
 
 # ── Keyboards ─────────────────────────────────────────────────────────────────
@@ -114,6 +117,9 @@ async def _update_notion(page_id: str, pending: dict) -> None:
         props["Запрос"] = _ntext(pending["request"])
     if pending.get("notes"):
         props["Заметки"] = _ntext(pending["notes"])
+    if pending.get("birthday"):
+        # YYYY-MM-DD → Notion date prop
+        props["День рождения"] = {"date": {"start": pending["birthday"]}}
     if props:
         try:
             await update_page(page_id, props)
@@ -362,9 +368,9 @@ async def handle_client_photo_input(message: Message, image_b64: str, pending: d
     uid = message.from_user.id
     page_id = pending.get("page_id")
 
-    raw = await analyze_image(
+    raw = await ask_claude_vision(
+        "Извлеки контакты, имя и день рождения если видны.",
         image_b64,
-        prompt="Извлеки все контакты из скриншота.",
         system=VISION_CONTACT,
     )
     data = _parse_json_safe(raw) if raw else {}
@@ -375,6 +381,9 @@ async def handle_client_photo_input(message: Message, image_b64: str, pending: d
         updates["contacts"] = new_contacts  # накапливается
     if data.get("name") and not pending.get("name"):
         updates["name"] = data["name"]
+    bday = (data.get("birthday") or "").strip()
+    if bday and not pending.get("birthday"):
+        updates["birthday"] = bday
 
     if updates:
         await update_pending_client(uid, updates)

@@ -2907,6 +2907,21 @@ const GRIM_GOLD = "#d4a843";
 const GRIM_GOLD_BG = "rgba(212,168,67,0.10)";
 const GRIM_SAGE = "#5a9a8a";
 
+// «2 окт · 25 лет» из ISO YYYY-MM-DD
+const RU_MONTH_SHORT_LOCAL = ["янв", "фев", "мар", "апр", "мая", "июн", "июл", "авг", "сен", "окт", "ноя", "дек"];
+function formatBirthday(iso) {
+  if (!iso) return "";
+  const m = String(iso).match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!m) return iso;
+  const y = +m[1], mo = +m[2], d = +m[3];
+  const today = new Date();
+  let age = today.getFullYear() - y;
+  const beforeBday = today.getMonth() + 1 < mo || (today.getMonth() + 1 === mo && today.getDate() < d);
+  if (beforeBday) age -= 1;
+  const ageWord = age === 1 ? "год" : (age >= 2 && age <= 4) ? "года" : "лет";
+  return `${d} ${RU_MONTH_SHORT_LOCAL[mo - 1]}${age > 0 ? ` · ${age} ${ageWord}` : ""}`;
+}
+
 // Avatar клиента — фото из Cloudinary, fallback на инициал.
 function ClientAvatar({ s, photoUrl, initial, size = 36, radius = "50%", textColor }) {
   const [broken, setBroken] = useState(false);
@@ -3781,6 +3796,16 @@ function RitualDetail({ s, id }) {
         )}
       </Glass>
 
+      {r.photo_url && (
+        <Glass s={s} style={{ padding: 4, marginBottom: 10 }}>
+          <img
+            src={r.photo_url}
+            alt="Фото ритуала"
+            style={{ width: "100%", borderRadius: 8, display: "block" }}
+          />
+        </Glass>
+      )}
+
       {/* Расходники */}
       <Glass s={s} style={{ padding: "12px 14px", marginBottom: 10 }}>
         <div style={{ fontSize: fs(13), color: s.text, fontWeight: 500, marginBottom: 8 }}>
@@ -3974,6 +3999,11 @@ function ClientDetail({ s, id }) {
           <div style={{ fontSize: fs(12), color: s.text, marginTop: 5 }}>
             <span style={{ color: s.tS }}>Запрос:</span> {c.request || "—"}
           </div>
+          {c.birthday && (
+            <div style={{ fontSize: fs(12), color: s.text, marginTop: 5 }}>
+              🎂 {formatBirthday(c.birthday)}
+            </div>
+          )}
         </div>
       </div>
       )}
@@ -4011,6 +4041,28 @@ function ClientDetail({ s, id }) {
         </div>
         <div style={{ fontSize: fs(13), color: s.text, lineHeight: 1.55 }}>{c.notes || "—"}</div>
       </Glass>
+
+      {c.photos.length > 0 && (
+        <>
+          <SectionLabel s={s}>📷 Фото для гадания</SectionLabel>
+          <div style={{ display: "flex", gap: 8, overflowX: "auto", paddingBottom: 6, marginBottom: 12 }}>
+            {c.photos.map((u, i) => (
+              <a key={i} href={u} target="_blank" rel="noopener noreferrer" style={{ flexShrink: 0 }}>
+                <img
+                  src={u}
+                  alt={`object-${i}`}
+                  style={{
+                    width: 60, height: 60, borderRadius: 8,
+                    objectFit: "cover",
+                    border: `1px solid ${s.brd}`,
+                    display: "block",
+                  }}
+                />
+              </a>
+            ))}
+          </div>
+        </>
+      )}
 
       <SectionLabel s={s}>История</SectionLabel>
       {c.history.map((h, i) => (
@@ -4057,6 +4109,7 @@ const ARCANA_ADD = [
   { key: "client", icon: Users, label: "Клиент" },
   { key: "expense", icon: Wallet, label: "Финансы" },
   { key: "photo", icon: Camera, label: "Фото расклада" },
+  { key: "ritual_photo", icon: Camera, label: "Фото ритуала" },
 ];
 
 function QuickAdd({ s, actions, onPick }) {
@@ -4442,6 +4495,7 @@ const FAB_TITLE = {
   list: "В список",
   memory: "В память",
   photo: "Фото расклада",
+  ritual_photo: "Фото ритуала",
   voice: "Голосом",
   client: "Новый клиент",
   session: "Новый расклад",
@@ -4535,6 +4589,7 @@ function QuickForm({ s, kind, onDone, botType = "nexus" }) {
   if (kind === "list") return <ListAddForm s={s} onSubmit={wrap} busy={busy} />;
   if (kind === "client") return <ClientForm s={s} onSubmit={wrap} busy={busy} />;
   if (kind === "photo") return <SessionPhotoUpload s={s} onDone={onDone} />;
+  if (kind === "ritual_photo") return <SessionPhotoUpload s={s} onDone={onDone} mode="ritual" />;
 
   return (
     <div style={{ padding: "12px 4px" }}>
@@ -5079,9 +5134,28 @@ function ListAddForm({ s, onSubmit, busy }) {
 // SessionPhotoUpload — FAB → выбор сеанса → загрузка фото в Cloudinary
 // ═══════════════════════════════════════════════════════════════
 
-function SessionPhotoUpload({ s, onDone }) {
-  const { data, loading, error } = useApi('/api/arcana/sessions');
-  const sessions = loading || error ? [] : adaptSessions(data);
+function SessionPhotoUpload({ s, onDone, mode = "session" }) {
+  const isRitual = mode === "ritual";
+  const listPath = isRitual ? '/api/arcana/rituals' : '/api/arcana/sessions';
+  const uploadPath = (id) => isRitual
+    ? `/api/arcana/rituals/${id}/photo`
+    : `/api/arcana/sessions/${id}/photo`;
+  const { data, loading, error } = useApi(listPath);
+  const items = useMemo(() => {
+    if (loading || error) return [];
+    if (isRitual) {
+      return adaptRituals(data).map((r) => ({
+        id: r.id,
+        slug: r.id,
+        title: r.name || "—",
+        client: r.client || "Личный",
+        firstDate: r.date || "",
+        firstTripletId: r.id,
+      }));
+    }
+    return adaptSessions(data);
+  }, [data, loading, error, isRitual]);
+  const sessions = items;
   const [pickedId, setPickedId] = useState(null);
   const [pickedTitle, setPickedTitle] = useState("");
   const [q, setQ] = useState("");
@@ -5118,7 +5192,7 @@ function SessionPhotoUpload({ s, onDone }) {
       const fd = new FormData();
       fd.append("file", file);
       const initData = window.Telegram?.WebApp?.initData || import.meta.env.VITE_DEV_INIT_DATA || "";
-      const r = await fetch(`/api/arcana/sessions/${pickedId}/photo`, {
+      const r = await fetch(uploadPath(pickedId), {
         method: "POST",
         headers: { "X-Telegram-Init-Data": initData },
         body: fd,
@@ -5140,7 +5214,7 @@ function SessionPhotoUpload({ s, onDone }) {
   if (pickedId) {
     return (
       <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-        <div style={{ fontSize: fs(11), color: s.tS }}>Расклад</div>
+        <div style={{ fontSize: fs(11), color: s.tS }}>{isRitual ? "Ритуал" : "Расклад"}</div>
         <Glass s={s} style={{ padding: "10px 14px" }}>
           <div style={{ fontSize: fs(13), color: s.text, fontWeight: 500 }}>{pickedTitle}</div>
           <div
@@ -5188,7 +5262,7 @@ function SessionPhotoUpload({ s, onDone }) {
         <SubmitBtn
           s={s}
           disabled={!file || busy}
-          label={busy ? "Загружаю..." : "Привязать к раскладу"}
+          label={busy ? "Загружаю..." : (isRitual ? "Привязать к ритуалу" : "Привязать к раскладу")}
           onClick={upload}
         />
       </div>
@@ -5197,12 +5271,12 @@ function SessionPhotoUpload({ s, onDone }) {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-      <div style={{ fontSize: fs(11), color: s.tS }}>Выбери расклад</div>
-      <SearchInput s={s} value={q} onChange={setQ} placeholder="Поиск по вопросу или клиенту" />
+      <div style={{ fontSize: fs(11), color: s.tS }}>{isRitual ? "Выбери ритуал" : "Выбери расклад"}</div>
+      <SearchInput s={s} value={q} onChange={setQ} placeholder={isRitual ? "Поиск по названию или клиенту" : "Поиск по вопросу или клиенту"} />
       {loading && <Empty s={s} text="Загружаю..." />}
       {error && <div style={{ fontSize: fs(12), color: s.red }}>Не удалось загрузить</div>}
       {!loading && !error && filtered.length === 0 && (
-        <Empty s={s} emoji="🔮" title="Нет раскладов" text="Сначала создай расклад через бота." />
+        <Empty s={s} emoji={isRitual ? "🕯️" : "🔮"} title={isRitual ? "Нет ритуалов" : "Нет раскладов"} text={isRitual ? "Сначала создай ритуал через бота." : "Сначала создай расклад через бота."} />
       )}
       {filtered.map((x) => {
         const id = x.firstTripletId || x.id;
@@ -5234,12 +5308,24 @@ function ClientForm({ s, onSubmit, busy }) {
   const [status, setStatus] = useState("🟢 Активный");
   const [ctype, setCtype] = useState("🤝 Платный");
   const [notes, setNotes] = useState("");
+  const [birthday, setBirthday] = useState("");
   const valid = name.trim().length > 0;
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
       <Input s={s} value={name} onChange={setName} placeholder="Имя" />
       <Input s={s} value={contact} onChange={setContact} placeholder="Контакт (@telegram или телефон)" />
       <Input s={s} value={request} onChange={setRequest} placeholder="Запрос / тема" />
+      <div style={{ fontSize: fs(11), color: s.tS }}>День рождения</div>
+      <input
+        type="date"
+        value={birthday}
+        onChange={(e) => setBirthday(e.target.value)}
+        style={{
+          width: "100%", padding: "10px 12px", borderRadius: 10,
+          border: `1px solid ${s.brd}`, background: s.card, color: s.text,
+          fontSize: fs(13), outline: "none",
+        }}
+      />
       <div style={{ fontSize: fs(11), color: s.tS }}>Тип</div>
       <div style={{ display: "flex", gap: 6 }}>
         {CLIENT_TYPES_NEW.map((t) => (
@@ -5274,6 +5360,7 @@ function ClientForm({ s, onSubmit, busy }) {
             name: name.trim(),
             contact,
             request,
+            birthday: birthday || null,
             status,
             type: ctype,
             notes,
@@ -5289,12 +5376,13 @@ function ClientEditForm({ s, client, isSelf, onSaved }) {
   const [request, setRequest] = useState(client.request || "");
   const [contact, setContact] = useState(client.contact || "");
   const [ctype, setCtype] = useState(client.type_full || "🤝 Платный");
+  const [birthday, setBirthday] = useState(client.birthday || "");
   const [busy, setBusy] = useState(false);
 
   const save = async () => {
     setBusy(true);
     try {
-      const payload = { notes, request, contact };
+      const payload = { notes, request, contact, birthday: birthday || null };
       if (!isSelf) payload.type = ctype;
       await apiPost(`/api/arcana/clients/${client.id}/edit`, payload);
       onSaved?.();
@@ -5309,6 +5397,17 @@ function ClientEditForm({ s, client, isSelf, onSaved }) {
       <Input s={s} value={contact} onChange={setContact} placeholder="@telegram или телефон" />
       <div style={{ fontSize: fs(11), color: s.tS }}>Запрос</div>
       <Input s={s} value={request} onChange={setRequest} placeholder="—" />
+      <div style={{ fontSize: fs(11), color: s.tS }}>День рождения</div>
+      <input
+        type="date"
+        value={birthday}
+        onChange={(e) => setBirthday(e.target.value)}
+        style={{
+          width: "100%", padding: "10px 12px", borderRadius: 10,
+          border: `1px solid ${s.brd}`, background: s.card, color: s.text,
+          fontSize: fs(13), outline: "none",
+        }}
+      />
       {!isSelf && (
         <>
           <div style={{ fontSize: fs(11), color: s.tS }}>Тип</div>
