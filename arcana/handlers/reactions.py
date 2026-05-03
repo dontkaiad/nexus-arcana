@@ -47,6 +47,12 @@ ARCANA_REACTION_MAP = {
     # Delete
     "delete":         "😈",
 
+    # Memory
+    "memory_save":       "💅",
+    "memory_search":     "💅",
+    "memory_deactivate": "💅",
+    "memory_delete":     "😈",
+
     # Cross-bot
     "nexus":          "🌚",
 }
