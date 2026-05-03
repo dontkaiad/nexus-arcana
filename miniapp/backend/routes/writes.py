@@ -631,6 +631,12 @@ class ClientBody(BaseModel):
     contact: str = ""
     request: str = ""
     status: Optional[str] = None
+    type: Optional[str] = None  # "🤝 Платный" | "🎁 Бесплатный"
+    notes: Optional[str] = None
+
+
+_CLIENT_TYPES_ALLOWED_CREATE = {"🤝 Платный", "🎁 Бесплатный"}
+_CLIENT_TYPES_ALLOWED_EDIT = {"🤝 Платный", "🎁 Бесплатный"}  # 🌟 Self нельзя выставлять из UI
 
 
 @router.post("/arcana/clients")
@@ -639,17 +645,67 @@ async def arcana_client_create(
     tg_id: int = Depends(current_user_id),
 ) -> dict[str, Any]:
     user_notion_id = (await get_user_notion_id(tg_id)) or ""
+    ctype = body.type if body.type in _CLIENT_TYPES_ALLOWED_CREATE else None
     page_id = await client_add(
         name=body.name,
         contact=body.contact,
         request=body.request,
         user_notion_id=user_notion_id,
+        client_type=ctype,
     )
     if not page_id:
         raise HTTPException(status_code=500, detail="failed to create client")
     if body.status:
         await update_page_select(page_id, "Статус", body.status)
+    if body.notes:
+        try:
+            await update_page(page_id, {"Заметки": _text(body.notes)})
+        except Exception as e:
+            logger.warning("client_create notes write failed: %s", e)
     return {"ok": True, "id": page_id}
+
+
+class ClientUpdateBody(BaseModel):
+    notes: Optional[str] = None
+    request: Optional[str] = None
+    contact: Optional[str] = None
+    type: Optional[str] = None  # "🤝 Платный" | "🎁 Бесплатный"
+
+
+@router.post("/arcana/clients/{client_id}/edit")
+async def arcana_client_edit(
+    client_id: str,
+    body: ClientUpdateBody,
+    tg_id: int = Depends(current_user_id),
+) -> dict[str, Any]:
+    user_notion_id = (await get_user_notion_id(tg_id)) or ""
+    page = await _load_owned_page(client_id, user_notion_id)
+    # self-client (🌟 Self) — тип менять нельзя
+    cur_type = (page.get("properties", {}).get("Тип клиента", {}) or {}).get("select") or {}
+    cur_type_name = cur_type.get("name", "")
+    is_self = cur_type_name == "🌟 Self"
+
+    props: dict = {}
+    if body.notes is not None:
+        props["Заметки"] = _text(body.notes)
+    if body.request is not None:
+        props["Запрос"] = _text(body.request)
+    if body.contact is not None:
+        props["Контакт"] = _text(body.contact)
+    if body.type is not None and not is_self:
+        if body.type not in _CLIENT_TYPES_ALLOWED_EDIT:
+            raise HTTPException(status_code=400, detail="invalid type")
+        props["Тип клиента"] = _select(body.type)
+
+    if not props:
+        return {"ok": True, "noop": True}
+
+    try:
+        await update_page(client_id, props)
+    except Exception as e:
+        logger.error("arcana_client_edit failed: %s", e)
+        raise HTTPException(status_code=500, detail="failed to update client")
+    return {"ok": True}
 
 
 # ═══════════════════════════════════════════════════════════════

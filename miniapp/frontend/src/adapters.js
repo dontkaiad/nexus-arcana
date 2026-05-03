@@ -562,6 +562,7 @@ export function adaptClients(data) {
   return {
     total_debt: data.total_debt ?? 0,
     total: data.total ?? 0,
+    total_paid_all: data.total_paid_all ?? 0,
     clients: (data.clients || []).map((c) => ({
       id: c.id,
       name: c.name || '',
@@ -583,21 +584,25 @@ export function adaptClients(data) {
 
 export function adaptClientDossier(data) {
   if (!data) return null
+  const typeFull = data.type_full || ''
   return {
     id: data.id,
     name: data.name || '',
     initial: data.initial || (data.name || '?')[0],
     status: data.status || '🟢',
-    contact: data.contact || '—',
+    type: data.type || '',
+    type_full: typeFull,
+    contact: data.contact || '',
     since: data.since ? formatShortDate(data.since) : '—',
-    request: data.request || '—',
+    request: data.request || '',
     notes: data.notes || '',
     photo_url: data.photo_url || null,
     sessions: data.stats?.sessions ?? 0,
     rituals: data.stats?.rituals ?? 0,
     debt: data.stats?.debt ?? 0,
     total: data.stats?.total_paid ?? 0,
-    self: (data.name || '').toLowerCase() === 'кай',
+    self: typeFull.includes('Self')
+      || (data.name || '').toLowerCase() === 'кай',
     history: (data.history || []).map((h) => ({
       id: h.id,
       date: h.date ? formatShortDate(h.date) : '—',

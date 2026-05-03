@@ -103,6 +103,7 @@ async def list_clients(tg_id: int = Depends(current_user_id)) -> dict[str, Any]:
 
     out: list[dict] = []
     total_debt = 0.0
+    total_paid_all = 0.0
     for c in clients:
         cid = c["id"]
         name = title_plain(c, "Имя")
@@ -110,6 +111,7 @@ async def list_clients(tg_id: int = Depends(current_user_id)) -> dict[str, Any]:
                                "total_paid": 0, "barter_count": 0})
         debt = int(round(bucket["debt"]))
         total_debt += debt
+        total_paid_all += bucket["total_paid"]
         # Тип клиента из 👥 Клиенты.«Тип клиента» (select).
         ctype_full = (c.get("properties", {}).get("Тип клиента", {}) or {}).get("select")
         ctype_full = ctype_full.get("name", "") if ctype_full else ""
@@ -130,6 +132,7 @@ async def list_clients(tg_id: int = Depends(current_user_id)) -> dict[str, Any]:
     return {
         "total": len(out),
         "total_debt": int(round(total_debt)),
+        "total_paid_all": int(round(total_paid_all)),
         "clients": out,
     }
 
@@ -180,6 +183,8 @@ async def client_dossier(
         raise HTTPException(status_code=404, detail="client not found")
 
     name = title_plain(page, "Имя")
+    ctype_full = (page.get("properties", {}).get("Тип клиента", {}) or {}).get("select")
+    ctype_full = ctype_full.get("name", "") if ctype_full else ""
     sessions = await sessions_all(user_notion_id=user_notion_id)
     rituals = await rituals_all(user_notion_id=user_notion_id)
     my_sessions = [p for p in sessions if client_id in relation_ids_of(p, "👥 Клиенты")]
@@ -210,6 +215,8 @@ async def client_dossier(
         "name": name,
         "initial": _initial(name),
         "status": _client_status(page),
+        "type": _type_icon(ctype_full),
+        "type_full": ctype_full,
         "contact": rich_text_plain(page, "Контакт") or None,
         "since": since,
         "request": rich_text_plain(page, "Запрос") or None,
