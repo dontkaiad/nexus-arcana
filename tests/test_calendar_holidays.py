@@ -37,3 +37,26 @@ def test_january_2026_holiday_days_contains_new_year_caникулы(client):
     # Новогодние каникулы 1-8 января (включая Рождество 7-го) — все официальные.
     for d in [1, 2, 3, 4, 5, 6, 7, 8]:
         assert d in holiday_days, f"Day {d} missing from {holiday_days}"
+
+
+def test_holidays_info_returns_day_and_name(client):
+    with patch("miniapp.backend.routes.calendar.query_pages",
+               AsyncMock(return_value=[])), \
+         patch("miniapp.backend.routes.calendar.get_user_notion_id",
+               AsyncMock(return_value=FAKE_NOTION)), \
+         patch("miniapp.backend._helpers.get_user_tz",
+               AsyncMock(return_value=3)):
+        r = client.get("/api/calendar?month=2026-05")
+    assert r.status_code == 200, r.text
+    body = r.json()
+    info = body["holidays_info"]
+    # Май: 1 — Праздник Весны и Труда, 9 — День Победы (плюс возможные переносы).
+    assert len(info) >= 2
+    by_day = {h["day"]: h["name"] for h in info}
+    assert 1 in by_day
+    assert 9 in by_day
+    assert "Труда" in by_day[1] or "Майские" in by_day[1] or by_day[1]
+    assert "Победы" in by_day[9]
+    # Сортировка по day
+    days_seq = [h["day"] for h in info]
+    assert days_seq == sorted(days_seq)
