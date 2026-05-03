@@ -3883,7 +3883,7 @@ function ClientDetail({ s, id }) {
               {h.amount.toLocaleString()} ₽
             </span>
           )}
-          <span>{h.paid ? "✅" : "⚠️"}</span>
+          <span>{h.paid ? "✅" : "⏳"}</span>
         </div>
       ))}
     </div>
@@ -3905,10 +3905,7 @@ const NEXUS_ADD = [
 
 const ARCANA_ADD = [
   { key: "client", icon: Users, label: "Клиент" },
-  { key: "session", icon: Sparkles, label: "Расклад" },
-  { key: "ritual", icon: Flame, label: "Ритуал" },
   { key: "expense", icon: Wallet, label: "Финансы" },
-  { key: "grimoire", icon: BookOpen, label: "В гримуар" },
   { key: "photo", icon: Camera, label: "Фото расклада" },
 ];
 
@@ -4810,8 +4807,8 @@ const nxTabs = [
 const arTabs = [
   { k: "day", I: Moon, l: "День" },
   { k: "work", I: Sparkles, l: "Работы" },
-  { k: "sess", I: LucideSparkles, l: "Расклады" },
   { k: "cli", I: Users, l: "Клиенты" },
+  { k: "sess", I: LucideSparkles, l: "Расклады" },
   { k: "rit", I: Flame, l: "Ритуалы" },
   { k: "grim", I: BookOpen, l: "Гримуар" },
 ];
@@ -5030,7 +5027,7 @@ export default function App() {
       </div>
 
       {/* FAB — wave7.5.5: скрываем когда открыт любой модал */}
-      {!fabOpen && !fabForm && !modal && (
+      {!fabOpen && !fabForm && !modal && !(!isDay && (page === "sess" || page === "rit" || page === "grim")) && (
         <FAB s={sky} onClick={() => setFabOpen(true)} />
       )}
 
