@@ -899,3 +899,16 @@
   80%  { opacity: 0.6; }
   100% { transform: translate(10px, var(--dy, -30px)); opacity: 0; }
 }
+
+/* Unified group heading for Lists (Покупки + Чеклист уровень 1) */
+.list-group-h {
+  font-family: var(--f-display);
+  font-style: normal;
+  font-weight: 500;
+  font-size: clamp(17px, 4.8vw, 20px);
+  letter-spacing: -0.1px;
+  margin: 14px 4px 8px;
+}
+.list-group-h.lg { font-size: clamp(20px, 5.5vw, 24px); }
+.day .list-group-h  { color: #1a3528; }
+.night .list-group-h { color: var(--ar-text); }

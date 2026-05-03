@@ -1980,6 +1980,7 @@ function ParentTaskHeader({ s, title, task }) {
 function NxLists({ s }) {
   const [tab, setTab] = useState("buy");
   const [q, setQ] = useState("");
+  const [selectedChecklist, setSelectedChecklist] = useState(null);
   const qEnc = encodeURIComponent(q || "");
   const path = q ? `/api/lists?type=${tab}&q=${qEnc}` : `/api/lists?type=${tab}`;
   const { data, loading, error, refetch } = useApi(path, [tab, q]);
@@ -2000,7 +2001,8 @@ function NxLists({ s }) {
 
   // локальные оптимистик-апдейты, сбрасываем при смене tab/q
   const [overrides, setOverrides] = useState({});
-  useEffect(() => { setOverrides({}); }, [tab, q]);
+  useEffect(() => { setOverrides({}); setSelectedChecklist(null); }, [tab]);
+  useEffect(() => { setOverrides({}); }, [q]);
 
   const items = apiItems.map((x) => (x.id in overrides ? { ...x, done: overrides[x.id] } : x));
 
@@ -2026,20 +2028,28 @@ function NxLists({ s }) {
     "Инвентарь пуст 📦"
   );
 
+  // ── Чеклист, уровень 2: один выбранный список
+  const checklistGroups = tab === "check" ? groupByField(items, "group") : [];
+  const selectedGroup = selectedChecklist
+    ? checklistGroups.find(([title]) => title === selectedChecklist)
+    : null;
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
       <div className="page-title">Списки</div>
-      <div style={{ display: "flex", gap: 6 }}>
-        {[
-          ["buy", "🛒 Покупки"],
-          ["check", "📋 Чеклист"],
-          ["inv", "📦 Инвентарь"],
-        ].map(([k, l]) => (
-          <Pill key={k} s={s} active={tab === k} onClick={() => setTab(k)}>
-            {l}
-          </Pill>
-        ))}
-      </div>
+      {!selectedGroup && (
+        <div style={{ display: "flex", gap: 6 }}>
+          {[
+            ["buy", "🛒 Покупки"],
+            ["check", "📋 Чеклист"],
+            ["inv", "📦 Инвентарь"],
+          ].map(([k, l]) => (
+            <Pill key={k} s={s} active={tab === k} onClick={() => setTab(k)}>
+              {l}
+            </Pill>
+          ))}
+        </div>
+      )}
       <SearchInput s={s} value={q} onChange={setQ} placeholder="Поиск" />
       {loading && <Empty s={s} text="Загружаю..." />}
       {error && <ErrorBox s={s} error={error} refetch={refetch} />}
@@ -2048,62 +2058,155 @@ function NxLists({ s }) {
           <div style={{ fontSize: fs(14), color: s.text }}>{emptyText}</div>
         </Glass>
       )}
-      {!loading && !error && (tab === "check" ? groupByField(items, "group") : groupByCat(items)).map(([catName, group]) => (
+
+      {/* ─── Чеклист, уровень 2: выбранный чеклист ─────────────────── */}
+      {!loading && !error && tab === "check" && selectedGroup && (() => {
+        const [title, group] = selectedGroup;
+        const task = parentByTitle[title];
+        const total = group.length;
+        const doneCount = group.filter((x) => x.done).length;
+        const allDone = total > 0 && doneCount === total;
+        return (
+          <>
+            <ChecklistHeader s={s} title={title} task={task} large
+              onBack={() => setSelectedChecklist(null)} />
+            {allDone ? (
+              <Glass s={s} style={{ padding: "24px 14px", textAlign: "center" }}>
+                <div style={{ fontSize: fs(14), color: s.text }}>всё закрыто ✨</div>
+              </Glass>
+            ) : group.map((x) => (
+              <ChecklistItemRow key={x.id} s={s} item={x} onToggle={toggleDone} />
+            ))}
+          </>
+        );
+      })()}
+
+      {/* ─── Чеклист, уровень 1: список чеклистов ─────────────────── */}
+      {!loading && !error && tab === "check" && !selectedGroup && checklistGroups.map(([title, group]) => {
+        if (!title) {
+          // items без группы — рендерим как обычные строки без заголовка
+          return (
+            <React.Fragment key="_no_group">
+              {group.map((x) => (
+                <ChecklistItemRow key={x.id} s={s} item={x} onToggle={toggleDone} />
+              ))}
+            </React.Fragment>
+          );
+        }
+        const total = group.length;
+        const doneCount = group.filter((x) => x.done).length;
+        const pct = total > 0 ? Math.round((doneCount / total) * 100) : 0;
+        const task = parentByTitle[title];
+        return (
+          <Glass
+            key={title} s={s}
+            style={{ padding: "12px 14px", cursor: "pointer" }}
+            onClick={() => setSelectedChecklist(title)}
+          >
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <span className="list-group-h" style={{
+                flex: 1, minWidth: 0, margin: 0,
+                wordBreak: "break-word",
+              }}>
+                {title}
+              </span>
+              {task?.cat && (
+                <span style={{
+                  display: "inline-flex", alignItems: "center",
+                  padding: "3px 9px", borderRadius: 10,
+                  fontSize: fs(13), background: `${s.acc}33`, color: s.text, fontWeight: 500,
+                  flexShrink: 0, whiteSpace: "nowrap",
+                }}>
+                  {String(task.cat).split(" ")[0]}
+                </span>
+              )}
+              {task?.prio && <PrioDot s={s} prio={task.prio} />}
+            </div>
+            {(task?.date || task?.time || task?.rpt) && (
+              <div style={{
+                fontSize: fs(13), color: task?.status === "overdue" ? s.red : s.tS,
+                marginTop: 4, display: "flex", gap: 8, flexWrap: "wrap",
+              }}>
+                {[task?.date, task?.time, task?.rpt].filter(Boolean).map((p, i) => <span key={i}>{p}</span>)}
+              </div>
+            )}
+            <div style={{
+              display: "flex", justifyContent: "space-between", alignItems: "center",
+              marginTop: 8, fontSize: fs(11), color: s.tS,
+            }}>
+              <span>{doneCount}/{total} пунктов</span>
+              <span style={{ opacity: 0.6 }}>›</span>
+            </div>
+            <div style={{
+              marginTop: 4, height: 2, borderRadius: 1, background: `${s.brd}`,
+              overflow: "hidden",
+            }}>
+              <div style={{
+                width: `${pct}%`, height: "100%",
+                background: s.acc, transition: "width 0.3s",
+              }} />
+            </div>
+          </Glass>
+        );
+      })}
+
+      {/* ─── Покупки ──────────────────────────────────────────────── */}
+      {!loading && !error && tab === "buy" && groupByCat(items).map(([catName, group]) => (
         <React.Fragment key={catName || "—"}>
-          {catName && tab === "check" ? (
-            <ParentTaskHeader s={s} title={catName} task={parentByTitle[catName]} />
-          ) : (
-            catName && <SectionLabel s={s}>{catName}</SectionLabel>
+          {catName && (
+            <div className="list-group-h">{catName}</div>
           )}
           {group.map((x) => (
-            tab === "inv" ? (
-              <Glass key={x.id} s={s} style={{ padding: "10px 14px", marginBottom: 4 }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                  <span style={{
-                    flex: 1, fontSize: fs(16), color: s.text, fontWeight: 500,
-                    wordBreak: "break-word",
-                  }}>
-                    {x.name}
-                  </span>
-                  {x.qty != null && (
-                    <span style={{ fontSize: fs(13), color: s.acc, fontWeight: 500, flexShrink: 0 }}>
-                      {x.qty} шт
-                    </span>
-                  )}
-                  {x.cat && (
-                    <span style={{
-                      display: "inline-flex", alignItems: "center",
-                      padding: "3px 9px", borderRadius: 10,
-                      fontSize: fs(13), background: `${s.acc}33`, color: s.text, fontWeight: 500,
-                      flexShrink: 0, whiteSpace: "nowrap",
-                    }}>
-                      {x.cat}
-                    </span>
-                  )}
-                </div>
-                {x.exp && (
-                  <div style={{ fontSize: fs(13), color: s.tS, marginTop: 3 }}>до {x.exp}</div>
-                )}
-              </Glass>
-            ) : (
-              <Glass
-                key={x.id}
-                s={s}
-                style={{
-                  padding: "10px 14px", marginBottom: 4, opacity: x.done ? 0.5 : 1,
-                  cursor: "pointer", display: "flex", alignItems: "center", gap: 10,
-                }}
-                onClick={() => toggleDone(x)}
-              >
-                <Chk s={s} done={x.done} />
+            <Glass
+              key={x.id} s={s}
+              style={{
+                padding: "10px 14px", marginBottom: 4, opacity: x.done ? 0.5 : 1,
+                cursor: "pointer", display: "flex", alignItems: "center", gap: 10,
+              }}
+              onClick={() => toggleDone(x)}
+            >
+              <Chk s={s} done={x.done} />
+              <span style={{
+                flex: 1, minWidth: 0,
+                fontSize: fs(16), color: s.text, fontWeight: 500,
+                wordBreak: "break-word",
+                textDecoration: x.done ? "line-through" : "none",
+              }}>
+                {x.name}
+              </span>
+              {x.cat && (
                 <span style={{
-                  flex: 1, minWidth: 0,
-                  fontSize: fs(16), color: s.text, fontWeight: 500,
+                  display: "inline-flex", alignItems: "center",
+                  padding: "3px 9px", borderRadius: 10,
+                  fontSize: fs(13), background: `${s.acc}33`, color: s.text, fontWeight: 500,
+                  flexShrink: 0, whiteSpace: "nowrap",
+                }}>
+                  {x.cat}
+                </span>
+              )}
+            </Glass>
+          ))}
+        </React.Fragment>
+      ))}
+
+      {/* ─── Инвентарь ────────────────────────────────────────────── */}
+      {!loading && !error && tab === "inv" && groupByCat(items).map(([catName, group]) => (
+        <React.Fragment key={catName || "—"}>
+          {catName && <SectionLabel s={s}>{catName}</SectionLabel>}
+          {group.map((x) => (
+            <Glass key={x.id} s={s} style={{ padding: "10px 14px", marginBottom: 4 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <span style={{
+                  flex: 1, fontSize: fs(16), color: s.text, fontWeight: 500,
                   wordBreak: "break-word",
-                  textDecoration: x.done ? "line-through" : "none",
                 }}>
                   {x.name}
                 </span>
+                {x.qty != null && (
+                  <span style={{ fontSize: fs(13), color: s.acc, fontWeight: 500, flexShrink: 0 }}>
+                    {x.qty} шт
+                  </span>
+                )}
                 {x.cat && (
                   <span style={{
                     display: "inline-flex", alignItems: "center",
@@ -2114,12 +2217,100 @@ function NxLists({ s }) {
                     {x.cat}
                   </span>
                 )}
-              </Glass>
-            )
+              </div>
+              {x.exp && (
+                <div style={{ fontSize: fs(13), color: s.tS, marginTop: 3 }}>до {x.exp}</div>
+              )}
+            </Glass>
           ))}
         </React.Fragment>
       ))}
     </div>
+  );
+}
+
+function ChecklistHeader({ s, title, task, large, onBack }) {
+  const cat = task?.cat || "";
+  const prio = task?.prio || null;
+  const overdue = task?.status === "overdue";
+  const metaParts = [];
+  if (task?.date) metaParts.push(task.date);
+  if (task?.time) metaParts.push(task.time);
+  if (task?.rpt) metaParts.push(task.rpt);
+  return (
+    <div style={{ padding: "4px 0 6px" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        {onBack && (
+          <span
+            onClick={onBack}
+            style={{
+              cursor: "pointer", display: "inline-flex", alignItems: "center",
+              padding: 4, marginLeft: -4, color: s.tS,
+            }}
+            aria-label="Назад"
+          >‹</span>
+        )}
+        <span className={`list-group-h${large ? " lg" : ""}`} style={{
+          flex: 1, minWidth: 0, margin: 0,
+          wordBreak: "break-word",
+        }}>
+          {title}
+        </span>
+        {cat && (
+          <span style={{
+            display: "inline-flex", alignItems: "center",
+            padding: "3px 9px", borderRadius: 10,
+            fontSize: fs(13), background: `${s.acc}33`, color: s.text, fontWeight: 500,
+            flexShrink: 0, whiteSpace: "nowrap",
+          }}>
+            {String(cat).split(" ")[0]}
+          </span>
+        )}
+        {prio && <PrioDot s={s} prio={prio} />}
+      </div>
+      {metaParts.length > 0 && (
+        <div style={{
+          fontSize: fs(13), color: overdue ? s.red : s.tS,
+          marginTop: 4, marginLeft: onBack ? 16 : 0,
+          display: "flex", gap: 8, flexWrap: "wrap",
+        }}>
+          {metaParts.map((p, i) => <span key={i}>{p}</span>)}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ChecklistItemRow({ s, item, onToggle }) {
+  return (
+    <Glass
+      s={s}
+      style={{
+        padding: "10px 14px", marginBottom: 4, opacity: item.done ? 0.5 : 1,
+        cursor: "pointer", display: "flex", alignItems: "center", gap: 10,
+      }}
+      onClick={() => onToggle(item)}
+    >
+      <Chk s={s} done={item.done} />
+      <span style={{
+        flex: 1, minWidth: 0,
+        fontSize: fs(16), color: s.text, fontWeight: 500,
+        wordBreak: "break-word",
+        textDecoration: item.done ? "line-through" : "none",
+      }}>
+        {item.name}
+      </span>
+      {item.cat && (
+        <span style={{
+          display: "inline-flex", alignItems: "center",
+          padding: "3px 9px", borderRadius: 10,
+          fontSize: fs(13), background: `${s.acc}33`, color: s.text, fontWeight: 500,
+          flexShrink: 0, whiteSpace: "nowrap",
+        }}>
+          {item.cat}
+        </span>
+      )}
+    </Glass>
   );
 }
 
