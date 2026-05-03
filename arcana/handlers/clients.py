@@ -305,6 +305,16 @@ async def handle_add_client(message: Message, text: str, user_notion_id: str = "
     except Exception:
         pass
 
+    # Auto-attach фото если оно пришло в этом же сообщении (caption + photo).
+    if getattr(message, "photo", None):
+        try:
+            from arcana.handlers.client_photo import attach_photo_to_client
+            ok = await attach_photo_to_client(message, page_id, silent=True)
+            if ok:
+                await message.answer(f"✨ Создана: <b>{name}</b>. Фото добавлено.", parse_mode="HTML")
+        except Exception:
+            logger.exception("auto-attach photo on create failed")
+
 
 async def _handle_collecting(
     message: Message, text: str, pending: dict, user_notion_id: str = ""
