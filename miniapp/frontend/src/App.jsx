@@ -2743,10 +2743,12 @@ function ArSessions({ s, openSession }) {
 function ArClients({ s, openClient }) {
   const { data, loading, error, refetch } = useApi("/api/arcana/clients");
   const view = loading || error
-    ? { clients: [], total: 0, total_debt: 0 }
+    ? { clients: [], total: 0, total_debt: 0, total_paid_all: 0 }
     : adaptClients(data);
   const total = view.total || view.clients.length;
   const debt = view.total_debt;
+  const earned = view.total_paid_all || 0;
+  const fmtK = (v) => v >= 1000 ? `${(v / 1000).toFixed(v >= 10000 ? 0 : 1)}к` : `${v}`;
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
@@ -2756,7 +2758,15 @@ function ArClients({ s, openClient }) {
           <Metric s={s} v={total} sub="всего" />
           <Metric
             s={s}
-            v={debt > 0 ? `${(debt / 1000).toFixed(1)}к` : "0"}
+            v={earned > 0 ? fmtK(earned) : "0"}
+            unit="₽"
+            sub="заработано"
+            accent={earned > 0 ? s.acc : undefined}
+          />
+          <Metric
+            s={s}
+            v={debt > 0 ? fmtK(debt) : "0"}
+            unit="₽"
             sub="долги"
             accent={debt > 0 ? s.red : undefined}
           />
@@ -3782,64 +3792,100 @@ function RitualDetail({ s, id }) {
 
 function ClientDetail({ s, id }) {
   const { data, loading, error, refetch } = useApi(id ? `/api/arcana/clients/${id}` : null, [id]);
+  const [editOpen, setEditOpen] = useState(false);
   if (loading) return <Empty s={s} text="Загружаю..." />;
   if (error) return <ErrorBox s={s} error={error} refetch={refetch} />;
   const c = adaptClientDossier(data);
   if (!c) return null;
+  const isSelf = c.self;
+  const gold = "#d4a843";
   return (
     <div>
-      <div style={{ display: "flex", gap: 14, marginBottom: 16 }}>
+      <div
+        style={{
+          display: "flex", gap: 14, marginBottom: 16,
+          padding: isSelf ? "12px" : "0",
+          borderRadius: isSelf ? 16 : 0,
+          border: isSelf ? `1.5px solid ${gold}` : "none",
+          background: isSelf ? `linear-gradient(135deg, ${gold}10, transparent)` : "transparent",
+          boxShadow: isSelf ? `0 0 18px ${gold}30` : "none",
+        }}
+      >
         <div
           style={{
             width: 64,
             height: 64,
             borderRadius: 16,
-            background: `linear-gradient(135deg, ${s.acc}, ${s.acc}aa)`,
+            background: isSelf
+              ? `linear-gradient(135deg, ${gold}, ${gold}aa)`
+              : `linear-gradient(135deg, ${s.acc}, ${s.acc}aa)`,
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
-            fontSize: fs(28),
+            fontSize: fs(isSelf ? 32 : 28),
             color: "#fff",
             fontFamily: H,
             fontWeight: 500,
             flexShrink: 0,
           }}
         >
-          {c.initial}
+          {isSelf ? "🌟" : c.initial}
         </div>
-        <div style={{ flex: 1 }}>
-          <div style={{ fontFamily: H, fontSize: fs(22), fontWeight: 500 }}>
-            {(c.status || "").split(" ")[0]} {c.name}
-            {c.self && (
-              <span style={{ fontSize: fs(13), color: s.tS, fontWeight: 400 }}> · я</span>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontFamily: H, fontSize: fs(22), fontWeight: 500, display: "flex", alignItems: "center", gap: 6 }}>
+            <span>{(c.status || "").split(" ")[0]} {c.name}</span>
+            {isSelf && (
+              <span style={{ fontSize: fs(13), color: gold, fontWeight: 500 }}>· я</span>
             )}
+            <span
+              onClick={() => setEditOpen((v) => !v)}
+              style={{ marginLeft: "auto", cursor: "pointer", color: s.tS, display: "flex" }}
+              title="Редактировать"
+            >
+              <StickyNote size={fs(15)} />
+            </span>
           </div>
           <div style={{ fontSize: fs(12), color: s.tS, marginTop: 3 }}>
-            {c.contact} · с {c.since}
+            {c.contact || "—"} · с {c.since}
           </div>
           <div style={{ fontSize: fs(12), color: s.text, marginTop: 5 }}>
-            <span style={{ color: s.tS }}>Запрос:</span> {c.request}
+            <span style={{ color: s.tS }}>Запрос:</span> {c.request || "—"}
           </div>
         </div>
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 6, marginBottom: 12 }}>
-        <Metric s={s} v={`${(c.total / 1000).toFixed(1)}к`} unit="₽" sub="всего" accent={s.acc} />
-        <Metric
+      {editOpen && (
+        <ClientEditForm
           s={s}
-          v={`${(c.debt / 1000).toFixed(1)}к`}
-          unit="₽"
-          sub="долг"
-          accent={c.debt > 0 ? s.red : s.acc}
+          client={c}
+          isSelf={isSelf}
+          onSaved={() => { setEditOpen(false); refetch(); }}
         />
-        <Metric s={s} v={c.sessions} sub="сеансов" />
-      </div>
+      )}
+
+      {isSelf ? (
+        <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 6, marginBottom: 12 }}>
+          <Metric s={s} v={c.sessions} sub="сеансов" />
+        </div>
+      ) : (
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 6, marginBottom: 12 }}>
+          <Metric s={s} v={`${(c.total / 1000).toFixed(1)}к`} unit="₽" sub="всего" accent={s.acc} />
+          <Metric
+            s={s}
+            v={`${(c.debt / 1000).toFixed(1)}к`}
+            unit="₽"
+            sub="долг"
+            accent={c.debt > 0 ? s.red : s.acc}
+          />
+          <Metric s={s} v={c.sessions} sub="сеансов" />
+        </div>
+      )}
 
       <Glass s={s} accent={s.acc} style={{ marginBottom: 14 }}>
         <div style={{ fontSize: fs(10), color: s.tS, marginBottom: 4, display: "inline-flex", alignItems: "center", gap: 4 }}>
           <StickyNote size={fs(11)} /> Заметки
         </div>
-        <div style={{ fontSize: fs(13), color: s.text, lineHeight: 1.55 }}>{c.notes}</div>
+        <div style={{ fontSize: fs(13), color: s.text, lineHeight: 1.55 }}>{c.notes || "—"}</div>
       </Glass>
 
       <SectionLabel s={s}>История</SectionLabel>
@@ -4904,23 +4950,45 @@ function ListAddForm({ s, onSubmit, busy }) {
   );
 }
 
+const CLIENT_TYPES_NEW = ["🤝 Платный", "🎁 Бесплатный"];
+
 function ClientForm({ s, onSubmit, busy }) {
   const [name, setName] = useState("");
   const [contact, setContact] = useState("");
   const [request, setRequest] = useState("");
   const [status, setStatus] = useState("🟢 Активный");
+  const [ctype, setCtype] = useState("🤝 Платный");
+  const [notes, setNotes] = useState("");
   const valid = name.trim().length > 0;
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
       <Input s={s} value={name} onChange={setName} placeholder="Имя" />
       <Input s={s} value={contact} onChange={setContact} placeholder="Контакт (@telegram или телефон)" />
       <Input s={s} value={request} onChange={setRequest} placeholder="Запрос / тема" />
+      <div style={{ fontSize: fs(11), color: s.tS }}>Тип</div>
+      <div style={{ display: "flex", gap: 6 }}>
+        {CLIENT_TYPES_NEW.map((t) => (
+          <Pill key={t} s={s} active={ctype === t} onClick={() => setCtype(t)}>{t}</Pill>
+        ))}
+      </div>
       <div style={{ fontSize: fs(11), color: s.tS }}>Статус</div>
       <Select
         s={s}
         value={status}
         onChange={setStatus}
         options={["🟢 Активный", "⏸ Пауза", "⛔️ Архив"]}
+      />
+      <div style={{ fontSize: fs(11), color: s.tS }}>Заметки</div>
+      <textarea
+        value={notes}
+        onChange={(e) => setNotes(e.target.value)}
+        placeholder="—"
+        rows={3}
+        style={{
+          width: "100%", padding: "10px 12px", borderRadius: 10,
+          border: `1px solid ${s.brd}`, background: s.card, color: s.text,
+          fontSize: fs(13), fontFamily: "inherit", resize: "vertical",
+        }}
       />
       <SubmitBtn
         s={s}
@@ -4932,10 +5000,68 @@ function ClientForm({ s, onSubmit, busy }) {
             contact,
             request,
             status,
+            type: ctype,
+            notes,
           });
         })}
       />
     </div>
+  );
+}
+
+function ClientEditForm({ s, client, isSelf, onSaved }) {
+  const [notes, setNotes] = useState(client.notes || "");
+  const [request, setRequest] = useState(client.request || "");
+  const [contact, setContact] = useState(client.contact || "");
+  const [ctype, setCtype] = useState(client.type_full || "🤝 Платный");
+  const [busy, setBusy] = useState(false);
+
+  const save = async () => {
+    setBusy(true);
+    try {
+      const payload = { notes, request, contact };
+      if (!isSelf) payload.type = ctype;
+      await apiPost(`/api/arcana/clients/${client.id}/edit`, payload);
+      onSaved?.();
+    } catch (e) {
+      alert(`Не получилось: ${e.message}`);
+    } finally { setBusy(false); }
+  };
+
+  return (
+    <Glass s={s} style={{ padding: "12px 14px", marginBottom: 14, display: "flex", flexDirection: "column", gap: 10 }}>
+      <div style={{ fontSize: fs(11), color: s.tS }}>Контакт</div>
+      <Input s={s} value={contact} onChange={setContact} placeholder="@telegram или телефон" />
+      <div style={{ fontSize: fs(11), color: s.tS }}>Запрос</div>
+      <Input s={s} value={request} onChange={setRequest} placeholder="—" />
+      {!isSelf && (
+        <>
+          <div style={{ fontSize: fs(11), color: s.tS }}>Тип</div>
+          <div style={{ display: "flex", gap: 6 }}>
+            {CLIENT_TYPES_NEW.map((t) => (
+              <Pill key={t} s={s} active={ctype === t} onClick={() => setCtype(t)}>{t}</Pill>
+            ))}
+          </div>
+        </>
+      )}
+      <div style={{ fontSize: fs(11), color: s.tS }}>Заметки</div>
+      <textarea
+        value={notes}
+        onChange={(e) => setNotes(e.target.value)}
+        rows={3}
+        style={{
+          width: "100%", padding: "10px 12px", borderRadius: 10,
+          border: `1px solid ${s.brd}`, background: s.card, color: s.text,
+          fontSize: fs(13), fontFamily: "inherit", resize: "vertical",
+        }}
+      />
+      <SubmitBtn
+        s={s}
+        disabled={busy}
+        label={busy ? "Сохраняю..." : "Сохранить"}
+        onClick={save}
+      />
+    </Glass>
   );
 }
 

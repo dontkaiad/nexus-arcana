@@ -217,6 +217,8 @@ def test_arcana_client_create(client):
                AsyncMock(return_value="cli-id")) as ca, \
          patch("miniapp.backend.routes.writes.update_page_select",
                AsyncMock(return_value=True)), \
+         patch("miniapp.backend.routes.writes.update_page",
+               AsyncMock(return_value=None)), \
          patch("miniapp.backend.routes.writes.get_user_notion_id",
                AsyncMock(return_value=FAKE_NOTION_USER)):
         r = client.post("/api/arcana/clients", json={
@@ -230,6 +232,61 @@ def test_arcana_client_create(client):
     kwargs = ca.await_args.kwargs
     assert kwargs["name"] == "Анна"
     assert kwargs["contact"] == "@anna_tarot"
+
+
+def test_arcana_client_create_with_type_and_notes(client):
+    with patch("miniapp.backend.routes.writes.client_add",
+               AsyncMock(return_value="cli-2")) as ca, \
+         patch("miniapp.backend.routes.writes.update_page_select",
+               AsyncMock(return_value=True)), \
+         patch("miniapp.backend.routes.writes.update_page",
+               AsyncMock(return_value=None)) as up, \
+         patch("miniapp.backend.routes.writes.get_user_notion_id",
+               AsyncMock(return_value=FAKE_NOTION_USER)):
+        r = client.post("/api/arcana/clients", json={
+            "name": "Лиза",
+            "type": "🎁 Бесплатный",
+            "notes": "первый бесплатный сеанс",
+        })
+    assert r.status_code == 200
+    assert ca.await_args.kwargs["client_type"] == "🎁 Бесплатный"
+    # update_page called with notes
+    notes_call = [c for c in up.await_args_list if "Заметки" in c.args[1]]
+    assert notes_call, "ожидался update_page для Заметки"
+
+
+def test_arcana_client_edit_updates_fields(client):
+    page = _page("cli-3", extra={"Тип клиента": {"select": {"name": "🤝 Платный"}}})
+    with patch("miniapp.backend.routes.writes.get_page", AsyncMock(return_value=page)), \
+         patch("miniapp.backend.routes.writes.update_page",
+               AsyncMock(return_value=None)) as up, \
+         patch("miniapp.backend.routes.writes.get_user_notion_id",
+               AsyncMock(return_value=FAKE_NOTION_USER)):
+        r = client.post("/api/arcana/clients/cli-3/edit", json={
+            "notes": "новая заметка",
+            "request": "карьера",
+            "type": "🎁 Бесплатный",
+        })
+    assert r.status_code == 200
+    props = up.await_args.args[1]
+    assert "Заметки" in props and "Запрос" in props and "Тип клиента" in props
+
+
+def test_arcana_client_edit_self_blocks_type(client):
+    page = _page("cli-self", extra={"Тип клиента": {"select": {"name": "🌟 Self"}}})
+    with patch("miniapp.backend.routes.writes.get_page", AsyncMock(return_value=page)), \
+         patch("miniapp.backend.routes.writes.update_page",
+               AsyncMock(return_value=None)) as up, \
+         patch("miniapp.backend.routes.writes.get_user_notion_id",
+               AsyncMock(return_value=FAKE_NOTION_USER)):
+        r = client.post("/api/arcana/clients/cli-self/edit", json={
+            "notes": "ok",
+            "type": "🤝 Платный",
+        })
+    assert r.status_code == 200
+    props = up.await_args.args[1]
+    assert "Тип клиента" not in props
+    assert "Заметки" in props
 
 
 # ─── /api/lists create/done/delete ──────────────────────────────────────────
