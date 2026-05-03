@@ -15,7 +15,10 @@ from fastapi.testclient import TestClient
 
 from miniapp.backend.app import app
 from miniapp.backend.auth import current_user_id
-from miniapp.backend.routes.calendar import _resolve_interval
+from miniapp.backend.routes.calendar import (
+    _fetch_tasks_in_month,
+    _resolve_interval,
+)
 
 
 FAKE_TG = 67686090
@@ -96,6 +99,23 @@ def test_resolve_interval_none():
     assert _resolve_interval("", "Что-то незнакомое") is None
 
 
+@pytest.mark.parametrize("raw,expected", [
+    ("Ежедневно", 1),
+    ("ЕЖЕДНЕВНО", 1),
+    ("  Ежедневно  ", 1),
+    ("ежедневно", 1),
+    ("Через день", 2),
+    ("Еженедельно", 7),
+    ("Раз в две недели", 14),
+    ("Ежемесячно", {"kind": "monthly"}),
+    ("Daily", 1),
+    ("WEEKLY", 7),
+    ("Monthly", {"kind": "monthly"}),
+])
+def test_resolve_interval_case_insensitive_synonyms(raw, expected):
+    assert _resolve_interval("", raw) == expected
+
+
 # ── /api/calendar (интеграция) ────────────────────────────────────────────
 
 def test_daily_repeat_expanded_from_created_time(client):
@@ -141,3 +161,76 @@ def test_every_nd_priority_over_select(client):
     days = r.json()["days"]
     days_with = sorted(int(k) for k, v in days.items() if v["count"] > 0)
     assert days_with == [1, 3, 5, 7, 9, 11, 13, 15, 17, 19, 21, 23, 25, 27, 29, 31]
+
+
+def test_real_case_kotlitter(client):
+    """Реальные данные «менять лоток котам»:
+    Повтор=Ежедневно, Время повтора=16:00|every_2d, Напоминание=2026-05-04, без Дедлайна.
+    Ожидаем шаг 2 от 4 мая, occurrences = [2, 4, ..., 30]."""
+    t = _task(
+        title="менять лоток котам",
+        repeat_select="Ежедневно",
+        repeat_time="16:00|every_2d",
+        reminder="2026-05-04T20:00:00.000Z",  # 23:00 MSK = May 4
+    )
+    r = _run(client, [t], month="2026-05")
+    assert r.status_code == 200, r.text
+    days = r.json()["days"]
+    days_with = sorted(int(k) for k, v in days.items() if v["count"] > 0)
+    assert days_with == [2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24, 26, 28, 30]
+    # Title тоже на месте
+    assert any("лоток" in (t["title"] or "").lower()
+               for d in days.values() for t in d["tasks"])
+
+
+def test_anchor_fallback_to_created_time(client):
+    """Recurring без Напоминания и без Дедлайна → anchor=created_time."""
+    t = _task(
+        repeat_select="Ежедневно",
+        repeat_time="",       # без every_Nd → fallback в select-маппинг
+        reminder=None,
+        deadline=None,
+        created="2026-04-15T10:00:00.000Z",  # apr 15 → may занимает все 31 день
+    )
+    r = _run(client, [t], month="2026-05")
+    assert r.status_code == 200, r.text
+    days = r.json()["days"]
+    counts = {int(k): v["count"] for k, v in days.items()}
+    assert all(counts[d] == 1 for d in range(1, 32))
+
+
+# ── _fetch_tasks_in_month: 3-query merge + dedup ──────────────────────────
+
+def test_fetch_tasks_in_month_merges_three_queries_and_dedups():
+    """Регрессия бага 3-level nesting: фильтр разбит на 3 параллельных query
+    с merge по page id (без дублей)."""
+    page_a = {"id": "page-a", "properties": {}}
+    page_b = {"id": "page-b", "properties": {}}
+    page_c = {"id": "page-c", "properties": {}}
+    # page_a в двух query (Дедлайн + Напоминание) — должна остаться один раз.
+    deadline_pages = [page_a]
+    reminder_pages = [page_a, page_b]
+    recurring_pages = [page_c]
+
+    call_log = []
+    async def _fake(db_id, filters=None, **kwargs):
+        call_log.append(filters)
+        # порядок вызовов: deadline → reminder → recurring
+        idx = len(call_log) - 1
+        return [deadline_pages, reminder_pages, recurring_pages][idx]
+
+    with patch("miniapp.backend.routes.calendar.query_pages",
+               new=AsyncMock(side_effect=_fake)):
+        import asyncio
+        out = asyncio.get_event_loop().run_until_complete(
+            _fetch_tasks_in_month("user-x", "2026-05-01", "2026-05-31")
+        )
+    ids = sorted(p["id"] for p in out)
+    assert ids == ["page-a", "page-b", "page-c"]
+    # Каждый из 3 фильтров — простой `and` БЕЗ вложенного `or`.
+    for f in call_log:
+        assert "and" in f
+        for item in f["and"]:
+            assert "or" not in item, f"nested or found: {item}"
+            # Не должно быть второго `and` (3-level nesting).
+            assert "and" not in item, f"nested and found: {item}"

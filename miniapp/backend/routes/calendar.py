@@ -46,33 +46,51 @@ def _month_bounds(month: str) -> tuple[str, str]:
 
 
 async def _fetch_tasks_in_month(user_notion_id: str, start: str, end: str) -> list[dict]:
-    # Ищем задачи, которые могут попасть в календарь месяца:
-    #   - Дедлайн ∈ [start, end]
-    #   - Напоминание ∈ [start, end]
-    #   - Есть «Время повтора» — повторяющаяся, раскрываем на бэке.
-    or_branches: list[dict] = [
-        {"and": [
-            {"property": "Дедлайн", "date": {"on_or_after": start}},
-            {"property": "Дедлайн", "date": {"on_or_before": end}},
-        ]},
-        {"and": [
-            {"property": "Напоминание", "date": {"on_or_after": start}},
-            {"property": "Напоминание", "date": {"on_or_before": end}},
-        ]},
-        {"property": "Время повтора", "rich_text": {"is_not_empty": True}},
-    ]
-    filters: dict = {"and": [{"or": or_branches}]}
+    """3 параллельных запроса + dedup по page["id"].
+
+    Notion API лимит — 2 уровня вложенности фильтров. Раньше было
+    `and → or → and` = 3 уровня → Notion отвергал, и query_pages молча
+    возвращал []. Теперь — три отдельных запроса (каждый с одним `and`):
+      1) Дедлайн ∈ [start, end]
+      2) Напоминание ∈ [start, end]
+      3) «Время повтора» непустое
+    Результаты сливаются по `page["id"]`.
+    """
+    import asyncio
+
+    user_filter: list[dict] = []
     if user_notion_id:
-        filters["and"].append({
+        user_filter.append({
             "property": "🪪 Пользователи",
             "relation": {"contains": user_notion_id},
         })
-    return await query_pages(
-        config.nexus.db_tasks,
-        filters=filters,
-        sorts=[{"property": "Дедлайн", "direction": "ascending"}],
-        page_size=500,
+
+    deadline_filter = {"and": user_filter + [
+        {"property": "Дедлайн", "date": {"on_or_after": start}},
+        {"property": "Дедлайн", "date": {"on_or_before": end}},
+    ]}
+    reminder_filter = {"and": user_filter + [
+        {"property": "Напоминание", "date": {"on_or_after": start}},
+        {"property": "Напоминание", "date": {"on_or_before": end}},
+    ]}
+    recurring_filter = {"and": user_filter + [
+        {"property": "Время повтора", "rich_text": {"is_not_empty": True}},
+    ]}
+
+    db_id = config.nexus.db_tasks
+    deadline_pages, reminder_pages, recurring_pages = await asyncio.gather(
+        query_pages(db_id, filters=deadline_filter, page_size=500),
+        query_pages(db_id, filters=reminder_filter, page_size=500),
+        query_pages(db_id, filters=recurring_filter, page_size=500),
     )
+
+    seen: dict[str, dict] = {}
+    for bucket in (deadline_pages, reminder_pages, recurring_pages):
+        for p in bucket:
+            pid = p.get("id")
+            if pid and pid not in seen:
+                seen[pid] = p
+    return list(seen.values())
 
 
 _EVERY_RE = re.compile(r"every_(\d+)d")
@@ -97,12 +115,29 @@ def _parse_repeat(raw: str) -> tuple[Optional[str], Optional[int], Optional[str]
     return time_val, interval, interval_str
 
 
-_REPEAT_SELECT_MAP = {
-    "Каждый день": 1,
-    "Каждые 2 дня": 2,
-    "Каждые 3 дня": 3,
-    "Каждую неделю": 7,
-    "Каждые 2 недели": 14,
+# Ключи в lower-case без trim — нормализация в _resolve_interval.
+_REPEAT_SELECT_MAP: dict[str, Union[int, dict]] = {
+    # daily
+    "ежедневно": 1,
+    "каждый день": 1,
+    "every day": 1,
+    "daily": 1,
+    # 2 days
+    "каждые 2 дня": 2,
+    "через день": 2,
+    # 3 days
+    "каждые 3 дня": 3,
+    # weekly
+    "еженедельно": 7,
+    "каждую неделю": 7,
+    "weekly": 7,
+    # 2 weeks
+    "каждые 2 недели": 14,
+    "раз в две недели": 14,
+    # monthly
+    "ежемесячно": {"kind": "monthly"},
+    "каждый месяц": {"kind": "monthly"},
+    "monthly": {"kind": "monthly"},
 }
 
 
@@ -122,12 +157,8 @@ def _resolve_interval(
         return days_from_time
     if not repeat_select:
         return None
-    sel = repeat_select.strip()
-    if sel in _REPEAT_SELECT_MAP:
-        return _REPEAT_SELECT_MAP[sel]
-    if sel == "Каждый месяц":
-        return {"kind": "monthly"}
-    return None
+    key = repeat_select.strip().lower()
+    return _REPEAT_SELECT_MAP.get(key)
 
 
 def _page_created_date(page: dict, tz_offset: int) -> Optional[date]:
