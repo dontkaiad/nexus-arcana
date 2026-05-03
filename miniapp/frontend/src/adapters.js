@@ -433,7 +433,11 @@ export function adaptAdhd(data) {
 // ── /api/calendar → {[day]: ["emoji title", ...]} ─────────────────────────
 
 export function adaptCalendar(data) {
-  if (!data) return { tasksByDay: {}, overdueByDay: {}, holidayDays: [], holidaysInfo: [], month: null }
+  if (!data) return {
+    tasksByDay: {}, overdueByDay: {},
+    holidayDays: [], shortDays: [], workingWeekends: [], holidaysInfo: [],
+    month: null,
+  }
   const days = data.days || {}
   const tasksByDay = {}
   const overdueByDay = {}
@@ -451,8 +455,14 @@ export function adaptCalendar(data) {
     }))
   }
   const holidayDays = Array.isArray(data.holiday_days) ? data.holiday_days : []
+  const shortDays = Array.isArray(data.short_days) ? data.short_days : []
+  const workingWeekends = Array.isArray(data.working_weekends) ? data.working_weekends : []
   const holidaysInfo = Array.isArray(data.holidays_info) ? data.holidays_info : []
-  return { tasksByDay, overdueByDay, holidayDays, holidaysInfo, month: data.month || null, days }
+  return {
+    tasksByDay, overdueByDay,
+    holidayDays, shortDays, workingWeekends, holidaysInfo,
+    month: data.month || null, days,
+  }
 }
 
 // ── /api/arcana/sessions → MOCK.sessions brief list ───────────────────────
