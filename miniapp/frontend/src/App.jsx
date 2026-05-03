@@ -338,6 +338,11 @@ const Empty = ({ s, text, chill, emoji, title }) => {
       }}
     >
       <div style={{ position: "relative", width: size, height: size, animation: "nx-glow 2.4s ease-in-out infinite" }}>
+        <div style={{
+          position: "absolute", inset: -8, borderRadius: "50%",
+          background: `radial-gradient(circle, ${isDayMode ? "#b07a2e30" : "#5a9a8a30"} 0%, transparent 65%)`,
+          animation: "nx-pulse 2.4s ease-in-out infinite",
+        }} />
         {isDayMode ? (
           <svg width={size} height={size} viewBox="0 0 56 56" xmlns="http://www.w3.org/2000/svg">
             <defs>
@@ -374,14 +379,14 @@ const Empty = ({ s, text, chill, emoji, title }) => {
           </svg>
         )}
         {/* orbit ring + dots */}
-        <div style={{ position: "absolute", inset: 0, borderRadius: "50%", border: `1px dashed ${isDayMode ? "#8a5a28bb" : "#4a5470bb"}` }} />
+        <div style={{ position: "absolute", inset: 0, borderRadius: "50%", border: `1px dashed ${isDayMode ? "#8a5a28bb" : "#7ac0b0bb"}` }} />
         <div style={{ position: "absolute", inset: 0, animation: "nx-orbit 1.6s linear infinite" }}>
           {[0, 120, 240].map((deg, i) => (
             <div key={i} style={{
               position: "absolute", top: "50%", left: "50%",
               width: 5, height: 5, borderRadius: "50%",
-              background: isDayMode ? "#8a5a28" : "#4a5470",
-              boxShadow: `0 0 6px ${isDayMode ? "#b07a2e" : "#6b7590"}`,
+              background: isDayMode ? "#8a5a28" : "#7ac0b0",
+              boxShadow: `0 0 6px ${isDayMode ? "#b07a2e" : "#5a9a8a"}`,
               transform: `rotate(${deg}deg) translate(${orbitR}px) rotate(-${deg}deg) translate(-50%, -50%)`,
             }} />
           ))}
