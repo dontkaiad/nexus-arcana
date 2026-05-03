@@ -204,7 +204,13 @@ async def query_pages(
     try:
         return await _notion().query_database(db_id, filters, sorts, page_size)
     except Exception as e:
-        logger.error("query_pages error: %s", e)
+        logger.error("query_pages error: %s · db=%s", e, db_id[:8])
+        if logger.isEnabledFor(logging.DEBUG):
+            try:
+                import json as _json
+                logger.debug("query_pages failing filter: %s", _json.dumps(filters, ensure_ascii=False))
+            except Exception:
+                pass
         return []
 
 async def db_query(
