@@ -296,6 +296,17 @@ async def route_message(message: Message, user_notion_id: str = "", _text: str =
             and message.reply_to_message.from_user.is_bot
             and (message.text or message.caption)
         ):
+            # Сначала барtер-парсинг (отдала / вместо / закинула 1500₽).
+            from arcana.handlers.barter_prompt import handle_reply_text as _bp_reply
+            try:
+                if await _bp_reply(
+                    message, message.text or message.caption or "",
+                    user_notion_id,
+                ):
+                    return
+            except Exception as e:
+                logger.warning("barter reply failed: %s", e)
+
             from arcana.handlers.reply_update import handle_reply_update
             handled = await handle_reply_update(message, user_notion_id=user_notion_id)
             if handled:
@@ -352,6 +363,11 @@ async def route_message(message: Message, user_notion_id: str = "", _text: str =
         # ── Pending: правка списка списания после ритуала ────────────────
         from arcana.handlers.ritual_writeoff import handle_pending_edit as _wo_edit
         if await _wo_edit(message, text, user_notion_id):
+            return
+
+        # ── Pending: ответ на «Что в бартере?» ───────────────────────────
+        from arcana.handlers.barter_prompt import handle_pending_text as _bp_text
+        if await _bp_text(message, text, user_notion_id):
             return
 
         # ── Pending: режим сбора инфы о клиенте ─────────────────────────
