@@ -536,13 +536,17 @@ async def upload_ritual_photo(
     return {"ok": True, "url": url}
 
 
+from fastapi import Form
+
+
 @router.post("/arcana/clients/{client_id}/object_photo")
 async def upload_client_object_photo(
     client_id: str,
     file: UploadFile = FastAPIFile(...),
+    note: str = Form(""),
     tg_id: int = Depends(current_user_id),
 ) -> dict[str, Any]:
-    """Append URL фото-объекта в rich_text поле «Фото объектов» клиента."""
+    """Append «URL | note» в rich_text поле «Фото объектов» клиента."""
     user_notion_id = (await get_user_notion_id(tg_id)) or ""
     page = await _load_owned_page(client_id, user_notion_id)
 
@@ -556,15 +560,58 @@ async def upload_client_object_photo(
     if not url:
         raise HTTPException(status_code=501, detail="cloudinary not configured")
 
-    # Append к существующему rich_text «Фото объектов»
     from miniapp.backend._helpers import rich_text_plain
+    from core.client_object_photos import append as _append
     existing = rich_text_plain(page, "Фото объектов") or ""
-    new_value = (existing + ("\n" if existing else "") + url).strip()
+    new_raw, items = _append(existing, url, note or "")
     try:
-        await update_page(client_id, {"Фото объектов": _text(new_value)})
+        await update_page(client_id, {"Фото объектов": _text(new_raw)})
     except Exception as e:
         logger.warning("Failed to append object photo: %s", e)
-    return {"ok": True, "url": url, "all": new_value.split("\n")}
+    return {"ok": True, "url": url, "note": (note or "").strip(), "photos": items}
+
+
+class ObjectPhotoNoteBody(BaseModel):
+    note: Optional[str] = ""
+
+
+@router.patch("/arcana/clients/{client_id}/object_photo/{index}")
+async def edit_client_object_photo_note(
+    client_id: str,
+    index: int,
+    body: ObjectPhotoNoteBody,
+    tg_id: int = Depends(current_user_id),
+) -> dict[str, Any]:
+    user_notion_id = (await get_user_notion_id(tg_id)) or ""
+    page = await _load_owned_page(client_id, user_notion_id)
+    from miniapp.backend._helpers import rich_text_plain
+    from core.client_object_photos import edit_note as _edit
+    existing = rich_text_plain(page, "Фото объектов") or ""
+    try:
+        new_raw, items = _edit(existing, index, body.note or "")
+    except IndexError:
+        raise HTTPException(status_code=404, detail="object photo index out of range")
+    await update_page(client_id, {"Фото объектов": _text(new_raw)})
+    return {"ok": True, "photos": items}
+
+
+@router.delete("/arcana/clients/{client_id}/object_photo/{index}")
+async def delete_client_object_photo(
+    client_id: str,
+    index: int,
+    tg_id: int = Depends(current_user_id),
+) -> dict[str, Any]:
+    user_notion_id = (await get_user_notion_id(tg_id)) or ""
+    page = await _load_owned_page(client_id, user_notion_id)
+    from miniapp.backend._helpers import rich_text_plain
+    from core.client_object_photos import delete as _delete
+    existing = rich_text_plain(page, "Фото объектов") or ""
+    try:
+        new_raw, items = _delete(existing, index)
+    except IndexError:
+        raise HTTPException(status_code=404, detail="object photo index out of range")
+    await update_page(client_id, {"Фото объектов": _text(new_raw)})
+    return {"ok": True, "photos": items}
 
 
 @router.post("/arcana/works/{work_id}/done")

@@ -2955,6 +2955,147 @@ function ClientAvatar({ s, photoUrl, initial, size = 36, radius = "50%", textCol
   );
 }
 
+// Галерея фото-объектов с inline-просмотром, edit заметки и delete.
+function ObjectPhotosGallery({ s, clientId, photos, onChanged }) {
+  const [openIdx, setOpenIdx] = useState(null);
+  return (
+    <>
+      <SectionLabel s={s}>📷 Фото для гадания</SectionLabel>
+      <div style={{ display: "flex", gap: 8, overflowX: "auto", paddingBottom: 6, marginBottom: 12 }}>
+        {photos.map((p, i) => (
+          <div
+            key={i}
+            onClick={() => setOpenIdx(i)}
+            style={{
+              flexShrink: 0, position: "relative",
+              width: 60, height: 60, cursor: "pointer",
+            }}
+          >
+            <img
+              src={p.url}
+              alt={`object-${i}`}
+              style={{
+                width: 60, height: 60, borderRadius: 8,
+                objectFit: "cover",
+                border: `1px solid ${s.brd}`,
+                display: "block",
+              }}
+            />
+            {p.note && (
+              <span style={{
+                position: "absolute", bottom: 2, right: 2,
+                fontSize: 10, lineHeight: 1, padding: "2px 3px",
+                background: "rgba(0,0,0,0.55)", borderRadius: 6,
+                color: "#fff",
+              }}>📝</span>
+            )}
+          </div>
+        ))}
+      </div>
+      {openIdx !== null && photos[openIdx] && (
+        <ObjectPhotoSheet
+          s={s}
+          clientId={clientId}
+          index={openIdx}
+          photo={photos[openIdx]}
+          onClose={() => setOpenIdx(null)}
+          onChanged={() => { setOpenIdx(null); onChanged?.(); }}
+        />
+      )}
+    </>
+  );
+}
+
+function ObjectPhotoSheet({ s, clientId, index, photo, onClose, onChanged }) {
+  const [note, setNote] = useState(photo.note || "");
+  const [busy, setBusy] = useState(null);
+  const initData = window.Telegram?.WebApp?.initData || import.meta.env.VITE_DEV_INIT_DATA || "";
+
+  const save = async () => {
+    setBusy("save");
+    try {
+      const r = await fetch(`/api/arcana/clients/${clientId}/object_photo/${index}`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Telegram-Init-Data": initData,
+        },
+        body: JSON.stringify({ note }),
+      });
+      if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || r.status);
+      onChanged?.();
+    } catch (e) {
+      alert("Не получилось: " + e.message);
+    } finally { setBusy(null); }
+  };
+
+  const remove = async () => {
+    if (!confirm("Удалить фото?")) return;
+    setBusy("delete");
+    try {
+      const r = await fetch(`/api/arcana/clients/${clientId}/object_photo/${index}`, {
+        method: "DELETE",
+        headers: { "X-Telegram-Init-Data": initData },
+      });
+      if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || r.status);
+      onChanged?.();
+    } catch (e) {
+      alert("Не получилось: " + e.message);
+    } finally { setBusy(null); }
+  };
+
+  return createPortal((
+    <>
+      <div className="acc-sheet-overlay" onClick={onClose} />
+      <div className="acc-sheet" onClick={(e) => e.stopPropagation()}>
+        <div className="acc-grip" />
+        <Glass s={s} style={{ padding: 4, marginBottom: 12 }}>
+          <img
+            src={photo.url}
+            alt="object"
+            style={{ width: "100%", borderRadius: 8, display: "block" }}
+          />
+        </Glass>
+        <div style={{ fontSize: fs(11), color: s.tS, marginBottom: 6 }}>Заметка</div>
+        <textarea
+          value={note}
+          onChange={(e) => setNote(e.target.value)}
+          placeholder="Добавить заметку…"
+          rows={3}
+          style={{
+            width: "100%", padding: "10px 12px", borderRadius: 10,
+            border: `1px solid ${s.brd}`, background: s.card, color: s.text,
+            fontSize: fs(13), fontFamily: "inherit", resize: "vertical",
+            marginBottom: 10,
+          }}
+        />
+        <div style={{ display: "flex", gap: 8 }}>
+          <div style={{ flex: 1 }}>
+            <SubmitBtn
+              s={s}
+              disabled={!!busy}
+              label={busy === "save" ? "Сохраняю..." : "Сохранить"}
+              onClick={save}
+            />
+          </div>
+          <div
+            onClick={busy ? undefined : remove}
+            style={{
+              padding: "12px 14px", borderRadius: 12,
+              background: `${s.red}1f`, border: `1px solid ${s.red}55`,
+              color: s.red, cursor: busy ? "not-allowed" : "pointer",
+              fontSize: fs(14), fontWeight: 500, display: "flex", alignItems: "center",
+              marginTop: 12, opacity: busy ? 0.6 : 1,
+            }}
+          >
+            <Trash2 size={fs(15)} />
+          </div>
+        </div>
+      </div>
+    </>
+  ), document.body);
+}
+
 function GrimoireThemeChip({ theme }) {
   return (
     <span style={{
@@ -4043,25 +4184,12 @@ function ClientDetail({ s, id }) {
       </Glass>
 
       {c.photos.length > 0 && (
-        <>
-          <SectionLabel s={s}>📷 Фото для гадания</SectionLabel>
-          <div style={{ display: "flex", gap: 8, overflowX: "auto", paddingBottom: 6, marginBottom: 12 }}>
-            {c.photos.map((u, i) => (
-              <a key={i} href={u} target="_blank" rel="noopener noreferrer" style={{ flexShrink: 0 }}>
-                <img
-                  src={u}
-                  alt={`object-${i}`}
-                  style={{
-                    width: 60, height: 60, borderRadius: 8,
-                    objectFit: "cover",
-                    border: `1px solid ${s.brd}`,
-                    display: "block",
-                  }}
-                />
-              </a>
-            ))}
-          </div>
-        </>
+        <ObjectPhotosGallery
+          s={s}
+          clientId={c.id}
+          photos={c.photos}
+          onChanged={refetch}
+        />
       )}
 
       <SectionLabel s={s}>История</SectionLabel>

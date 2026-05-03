@@ -120,6 +120,12 @@ async def handle_pending_photo(message: Message, user_notion_id: str = "") -> bo
                 return True
 
             if page_type == "client":
+                # Caption на фото = заметка → это фото-объект, не аватар.
+                cap = (message.caption or "").strip()
+                if cap:
+                    await attach_photo_to_client_objects(message, mp["page_id"], cap, silent=True)
+                    return True
+                # Без caption — старая логика аватара.
                 # 60-сек окно после создания клиента — без подтверждения
                 if age < 60:
                     await attach_photo_to_client(message, mp["page_id"], silent=True)
@@ -177,6 +183,48 @@ async def _attach_photo(
         logger.exception("client photo upload failed: %s", e)
         await drop_pending(uid)
         await message.answer(f"Ошибка при сохранении фото: {e}")
+
+
+async def attach_photo_to_client_objects(
+    message: Message,
+    client_id: str,
+    note: str = "",
+    *,
+    silent: bool = False,
+) -> bool:
+    """Cloudinary upload + append `URL | note` в Notion поле «Фото объектов»."""
+    if not message.photo or not client_id:
+        return False
+    try:
+        from core.client_object_photos import append as _append
+        from core.notion_client import get_page
+        from miniapp.backend._helpers import rich_text_plain
+        from core.notion_client import _text as _ntext
+
+        file_id = message.photo[-1].file_id
+        file = await message.bot.get_file(file_id)
+        bio = await message.bot.download_file(file.file_path)
+        url = await cloudinary_upload(
+            bio.read(),
+            filename=f"obj-{client_id[:8]}.jpg",
+            folder="arcana-client-objects",
+        )
+        if not url:
+            if not silent:
+                await message.answer("Cloudinary не настроен — фото не прикреплено.")
+            return False
+
+        page = await get_page(client_id)
+        existing = rich_text_plain(page or {}, "Фото объектов") or ""
+        new_raw, _items = _append(existing, url, note)
+        await update_page(client_id, {"Фото объектов": _ntext(new_raw)})
+        await _react(message, REACTION_DONE)
+        return True
+    except Exception as e:
+        logger.exception("attach_photo_to_client_objects failed: %s", e)
+        if not silent:
+            await message.answer(f"Ошибка при сохранении фото: {e}")
+        return False
 
 
 async def attach_photo_to_ritual(

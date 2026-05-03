@@ -181,6 +181,7 @@ async def test_reply_with_photo_in_60s_skips_confirmation(tmp_path, monkeypatch)
     msg.bot = bot
     msg.reply_to_message = reply_msg
     msg.photo = [photo]
+    msg.caption = None
     msg.answer = AsyncMock()
 
     with patch("arcana.handlers.client_photo.get_message_page",
@@ -221,6 +222,7 @@ async def test_reply_with_photo_after_60s_still_asks_confirmation():
     msg.chat.id = 111
     msg.reply_to_message = reply_msg
     msg.photo = [photo]
+    msg.caption = None
     msg.answer = AsyncMock()
 
     with patch("arcana.handlers.client_photo.get_message_page",
@@ -234,6 +236,62 @@ async def test_reply_with_photo_after_60s_still_asks_confirmation():
     assert handled is True
     # Подтверждение запрошено
     msg.answer.assert_awaited()
+
+
+@pytest.mark.asyncio
+async def test_reply_photo_with_caption_goes_to_client_objects():
+    """Reply фото с caption на сообщение клиента — caption становится note,
+    фото пишется в «Фото объектов», а НЕ в аватар."""
+    import time as _time
+    from arcana.handlers.client_photo import handle_pending_photo
+
+    photo = MagicMock()
+    photo.file_id = "tg-cap-obj"
+
+    file_obj = MagicMock()
+    file_obj.file_path = "p/o.jpg"
+    bot = MagicMock()
+    bot.get_file = AsyncMock(return_value=file_obj)
+    bot.download_file = AsyncMock(return_value=BytesIO(b"o"))
+
+    reply_msg = MagicMock()
+    reply_msg.message_id = 999
+    reply_msg.from_user.is_bot = True
+
+    msg = MagicMock()
+    msg.from_user.id = 51
+    msg.chat.id = 111
+    msg.bot = bot
+    msg.reply_to_message = reply_msg
+    msg.photo = [photo]
+    msg.caption = "Игорь, начальник, ДР 5 марта"
+    msg.answer = AsyncMock()
+
+    page = {
+        "id": "cli-OBJ",
+        "properties": {"Фото объектов": {"rich_text": [{"plain_text": "https://old/x.jpg"}]}},
+    }
+
+    with patch("arcana.handlers.client_photo.get_message_page",
+               AsyncMock(return_value={
+                   "page_id": "cli-OBJ", "page_type": "client",
+                   "bot": "arcana", "created_at": _time.time() - 5,
+               })), \
+         patch("arcana.handlers.client_photo.cloudinary_upload",
+               AsyncMock(return_value="https://cdn/obj.jpg")) as cu, \
+         patch("arcana.handlers.client_photo.update_page",
+               AsyncMock(return_value=None)) as up, \
+         patch("core.notion_client.get_page",
+               AsyncMock(return_value=page)):
+        handled = await handle_pending_photo(msg)
+    assert handled is True
+    assert cu.await_args.kwargs["folder"] == "arcana-client-objects"
+    args = up.await_args.args
+    assert args[0] == "cli-OBJ"
+    written = args[1]["Фото объектов"]
+    serialized = "".join(rt.get("text", {}).get("content") or "" for rt in written["rich_text"])
+    assert "https://cdn/obj.jpg | Игорь" in serialized
+    assert "https://old/x.jpg" in serialized  # старое фото сохранено
 
 
 @pytest.mark.asyncio
@@ -261,6 +319,7 @@ async def test_reply_with_photo_on_ritual_attaches_immediately():
     msg.bot = bot
     msg.reply_to_message = reply_msg
     msg.photo = [photo]
+    msg.caption = None
     msg.answer = AsyncMock()
 
     with patch("arcana.handlers.client_photo.get_message_page",
@@ -326,6 +385,7 @@ async def test_reply_with_photo_starts_confirm_flow():
     msg.chat.id = 100
     msg.reply_to_message = reply_msg
     msg.photo = [photo]
+    msg.caption = None
     msg.answer = AsyncMock()
 
     with patch("arcana.handlers.client_photo.get_message_page",
