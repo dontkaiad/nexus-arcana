@@ -2434,8 +2434,8 @@ function NxCal({ s }) {
   const daysShort = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"];
 
   const { data, loading, error, refetch } = useApi(`/api/calendar?month=${monthStr}`, [monthStr]);
-  const { tasksByDay } = loading || error
-    ? { tasksByDay: {} }
+  const { tasksByDay, overdueByDay } = loading || error
+    ? { tasksByDay: {}, overdueByDay: {} }
     : adaptCalendar(data);
 
   const toggleCalTask = async (id) => {
@@ -2477,16 +2477,138 @@ function NxCal({ s }) {
     weeks.push(cur);
   }
 
+  // Дни предыдущего месяца — для filler в первой неделе.
+  const prevMonthDaysCount = new Date(year, month0, 0).getDate();
+  // Заменяем null'ы в weeks на «out-of-month» дни (с прошлого/следующего месяца).
+  const filledWeeks = weeks.map((w, wi) => w.map((d, di) => {
+    if (d) return { d, inMonth: true };
+    if (wi === 0) {
+      // первая неделя — числа предыдущего месяца
+      const offset = monthStart - di; // monthStart - di = сколько дней назад от 1-го
+      return { d: prevMonthDaysCount - offset + 1, inMonth: false };
+    }
+    // последняя неделя — следующего месяца, нумерация продолжается
+    const flat = wi * 7 + di;
+    const dayInNext = flat - (monthStart + daysInMonth) + 1;
+    return { d: dayInNext, inMonth: false };
+  }));
+
+  const goPrev = () => {
+    const d = new Date(year, month0 - 1, 1);
+    setMonthStr(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`);
+    setPicked(1);
+  };
+  const goNext = () => {
+    const d = new Date(year, month0 + 1, 1);
+    setMonthStr(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`);
+    setPicked(1);
+  };
+  const goToday = () => {
+    const t = new Date();
+    setMonthStr(`${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, "0")}`);
+    setPicked(t.getDate());
+  };
+
+  const calHeader = (
+    <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+      <span
+        onClick={goPrev}
+        style={{ cursor: "pointer", padding: "2px 8px", color: s.tS, fontSize: fs(20), lineHeight: 1 }}
+        aria-label="Предыдущий месяц"
+      >‹</span>
+      <span
+        className="list-group-h"
+        style={{ flex: 1, margin: 0, fontStyle: "italic", textAlign: "center", fontSize: "clamp(18px, 5vw, 22px)" }}
+      >
+        {title}
+      </span>
+      {!todayMonthMatch && (
+        <Pill s={s} onClick={goToday}>Сегодня</Pill>
+      )}
+      <span
+        onClick={goNext}
+        style={{ cursor: "pointer", padding: "2px 8px", color: s.tS, fontSize: fs(20), lineHeight: 1 }}
+        aria-label="Следующий месяц"
+      >›</span>
+    </div>
+  );
+
+  const renderDayCell = ({ d, inMonth }, di) => {
+    const isToday = inMonth && todayMonthMatch && d === todayKey;
+    const isPicked = inMonth && d === picked;
+    const has = inMonth ? tasksByDay[d] : null;
+    const count = Array.isArray(has) ? has.length : 0;
+    const hasOverdue = inMonth && !!overdueByDay[d];
+    const isWeekend = di === 5 || di === 6;
+    const dotColor = "#6b8f71";        // sage
+    const overdueColor = "#9c5440";    // red
+    const todayBorder = "#b07a2e";     // gold
+    return (
+      <div
+        key={di}
+        onClick={() => inMonth && setPicked(d)}
+        style={{
+          textAlign: "center",
+          padding: "6px 2px",
+          borderRadius: 8,
+          background: isPicked
+            ? `${s.acc}30`
+            : isToday
+            ? `${todayBorder}20`
+            : "transparent",
+          border: isToday
+            ? `1.5px solid ${todayBorder}`
+            : isPicked
+            ? `1px solid ${s.acc}99`
+            : "1px solid transparent",
+          cursor: inMonth ? "pointer" : "default",
+          minHeight: 38,
+          position: "relative",
+          opacity: !inMonth ? 0.35 : isWeekend ? 0.75 : 1,
+        }}
+      >
+        <div
+          style={{
+            fontSize: fs(13),
+            fontWeight: isToday || isPicked ? 500 : 400,
+            color: isToday ? todayBorder : isPicked ? s.acc : s.text,
+            fontFamily: H,
+          }}
+        >
+          {d}
+        </div>
+        {count > 0 && (
+          <div style={{
+            display: "flex", justifyContent: "center", gap: 2,
+            marginTop: 3, alignItems: "center",
+          }}>
+            {Array.from({ length: Math.min(count, 3) }).map((_, i) => (
+              <span key={i} style={{
+                width: 4, height: 4, borderRadius: 2, background: dotColor,
+              }} />
+            ))}
+            {hasOverdue && (
+              <span style={{
+                width: 4, height: 4, borderRadius: 2, background: overdueColor,
+                marginLeft: 1,
+              }} />
+            )}
+          </div>
+        )}
+        {!hasOverdue && count === 0 && inMonth && /* placeholder spacing */ <div style={{ height: 7 }} />}
+      </div>
+    );
+  };
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
       <div
         style={{
           display: "flex",
-          justifyContent: "space-between",
+          justifyContent: "flex-end",
           alignItems: "baseline",
         }}
       >
-        <span className="page-title">{title}</span>
         <div style={{ display: "flex", gap: 6 }}>
           <Pill s={s} active={view === "week"} onClick={() => setView("week")}>
             Неделя
@@ -2498,7 +2620,8 @@ function NxCal({ s }) {
       </div>
       {error && <ErrorBox s={s} error={error} refetch={refetch} />}
       {view === "month" && (
-        <Glass s={s} style={{ padding: "10px 10px" }}>
+        <Glass s={s} style={{ padding: "12px 10px" }}>
+          {calHeader}
           <div
             style={{
               display: "grid",
@@ -2507,75 +2630,24 @@ function NxCal({ s }) {
               marginBottom: 4,
             }}
           >
-            {daysShort.map((d) => (
+            {daysShort.map((d, i) => (
               <div
                 key={d}
-                style={{ textAlign: "center", fontSize: fs(10), color: s.tS, padding: 3 }}
+                style={{
+                  textAlign: "center", fontSize: fs(10), color: s.tS, padding: 3,
+                  opacity: i >= 5 ? 0.7 : 1,
+                }}
               >
                 {d}
               </div>
             ))}
           </div>
-          {weeks.map((w, wi) => (
+          {filledWeeks.map((w, wi) => (
             <div
               key={wi}
               style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 3, marginBottom: 3 }}
             >
-              {w.map((d, di) => {
-                if (!d) return <div key={di} />;
-                const isToday = todayMonthMatch && d === todayKey;
-                const isPicked = d === picked;
-                const has = tasksByDay[d];
-                const count = Array.isArray(has) ? has.length : 0;
-                return (
-                  <div
-                    key={di}
-                    onClick={() => setPicked(d)}
-                    style={{
-                      textAlign: "center",
-                      padding: "6px 2px",
-                      borderRadius: 8,
-                      background: isPicked
-                        ? `${s.acc}30`
-                        : isToday
-                        ? `${s.acc}14`
-                        : "transparent",
-                      border: isToday ? `1px solid ${s.acc}55` : "1px solid transparent",
-                      cursor: "pointer",
-                      minHeight: 36,
-                      position: "relative",
-                    }}
-                  >
-                    <div
-                      style={{
-                        fontSize: fs(13),
-                        fontWeight: isToday || isPicked ? 500 : 400,
-                        color: isToday || isPicked ? s.acc : s.text,
-                        fontFamily: H,
-                      }}
-                    >
-                      {d}
-                    </div>
-                    {count > 0 && (
-                      <>
-                        <div
-                          style={{
-                            width: 4, height: 4, borderRadius: 2,
-                            background: s.acc,
-                            margin: "3px auto 0",
-                          }}
-                        />
-                        {count > 1 && (
-                          <span style={{
-                            position: "absolute", top: 2, right: 3,
-                            fontSize: fs(8), color: s.tS,
-                          }}>{count}</span>
-                        )}
-                      </>
-                    )}
-                  </div>
-                );
-              })}
+              {w.map(renderDayCell)}
             </div>
           ))}
         </Glass>
