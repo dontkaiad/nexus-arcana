@@ -2441,8 +2441,8 @@ function NxCal({ s }) {
   const daysShort = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"];
 
   const { data, loading, error, refetch } = useApi(`/api/calendar?month=${monthStr}`, [monthStr]);
-  const { tasksByDay, overdueByDay, holidayDays } = loading || error
-    ? { tasksByDay: {}, overdueByDay: {}, holidayDays: [] }
+  const { tasksByDay, overdueByDay, holidayDays, holidaysInfo } = loading || error
+    ? { tasksByDay: {}, overdueByDay: {}, holidayDays: [], holidaysInfo: [] }
     : adaptCalendar(data);
   const holidaySet = useMemo(() => new Set(holidayDays || []), [holidayDays]);
 
@@ -2809,6 +2809,20 @@ function NxCal({ s }) {
           </Glass>
         );
       })()}
+
+      {/* Сводка нерабочих дней месяца — только в Месяце */}
+      {view === "month" && holidaysInfo && holidaysInfo.length > 0 && (
+        <Glass s={s} style={{ padding: "10px 14px" }}>
+          <div style={{ fontSize: fs(12), color: s.tS, lineHeight: 1.5 }}>
+            🏖 В этом месяце {holidaysInfo.length}{" "}
+            {plural(holidaysInfo.length, "нерабочий день", "нерабочих дня", "нерабочих дней")}:{" "}
+            <span style={{ color: "#b07a2e", fontWeight: 500 }}>
+              {holidaysInfo.map((h) => h.day).join(", ")} {RU_MONTHS_GEN[month0]}
+            </span>
+            <span style={{ opacity: 0.85 }}> · {[...new Set(holidaysInfo.map((h) => h.name))].join(" / ")}</span>
+          </div>
+        </Glass>
+      )}
 
       {/* Подробности выбранного дня — заголовок + список ВНУТРИ одной карточки */}
       <Glass s={s} style={{ padding: "12px 14px" }}>
