@@ -221,6 +221,15 @@ async def handle_add_ritual(message: Message, text: str, user_notion_id: str = "
             bot="arcana",
         )
 
+        # Если в ритуале указаны расходники — предложим списать из инвентаря.
+        consumables = (data.get("consumables") or "").strip()
+        if consumables:
+            try:
+                from arcana.handlers.ritual_writeoff import propose_writeoff
+                await propose_writeoff(message, consumables, user_notion_id)
+            except Exception as e:
+                logger.warning("ritual writeoff propose failed: %s", e)
+
     except Exception as e:
         trace = tb.format_exc()
         logger.error("handle_add_ritual error: %s", trace)
