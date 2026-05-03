@@ -214,8 +214,8 @@ async def client_dossier(
 
     bday_raw = (page.get("properties", {}).get("День рождения", {}) or {}).get("date") or {}
     birthday = bday_raw.get("start") or None
-    objects_raw = rich_text_plain(page, "Фото объектов") or ""
-    photos = [u.strip() for u in objects_raw.replace(",", "\n").split("\n") if u.strip().startswith("http")]
+    from core.client_object_photos import parse as _parse_objects
+    photos = _parse_objects(rich_text_plain(page, "Фото объектов") or "")
     return {
         "id": client_id,
         "name": name,
