@@ -806,6 +806,7 @@ class ListCreateBody(BaseModel):
     note: Optional[str] = None
     price: Optional[float] = None
     expires: Optional[str] = None
+    bot: Optional[str] = None  # nexus | arcana (default nexus)
 
 
 @router.post("/lists")
@@ -820,11 +821,12 @@ async def list_create(
         raise HTTPException(status_code=500, detail="lists DB not configured")
     user_notion_id = (await get_user_notion_id(tg_id)) or ""
 
+    bot_label = "🌒 Arcana" if (body.bot or "").lower() == "arcana" else BOT_NEXUS
     props: dict = {
         "Название": _title(body.name),
         "Тип": _select(_LIST_TYPES[body.type]),
         "Статус": _status("Not started"),
-        "Бот": _select(BOT_NEXUS),
+        "Бот": _select(bot_label),
     }
     if body.cat:
         props["Категория"] = _select(body.cat)

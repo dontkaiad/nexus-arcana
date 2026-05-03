@@ -449,6 +449,27 @@ def test_client_create_with_birthday(client):
 
 # ─── /api/lists create/done/delete ──────────────────────────────────────────
 
+def test_list_create_inv_arcana_uses_arcana_bot_label(client):
+    """POST /api/lists с bot=arcana пишет Бот=🌒 Arcana."""
+    with patch("miniapp.backend.routes.writes.page_create",
+               AsyncMock(return_value="list-arc")) as pc, \
+         patch("miniapp.backend.routes.writes.get_user_notion_id",
+               AsyncMock(return_value=FAKE_NOTION_USER)):
+        r = client.post("/api/lists", json={
+            "type": "inv",
+            "name": "соль",
+            "cat": "🕯️ Расходники",
+            "qty": 200,
+            "bot": "arcana",
+        })
+    assert r.status_code == 200
+    assert r.json()["id"] == "list-arc"
+    props = pc.await_args.args[1]
+    assert props["Бот"]["select"]["name"] == "🌒 Arcana"
+    assert props["Тип"]["select"]["name"] == "📦 Инвентарь"
+    assert props["Категория"]["select"]["name"] == "🕯️ Расходники"
+
+
 def test_list_create_buy(client):
     with patch("miniapp.backend.routes.writes.page_create",
                AsyncMock(return_value="list-id")) as pc, \

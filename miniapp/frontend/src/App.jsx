@@ -2252,6 +2252,102 @@ function NxCal({ s }) {
 // ARCANA — Accuracy bottom sheet
 // ═══════════════════════════════════════════════════════════════
 
+function CashSheet({ s, pnl, onClose, onPaid }) {
+  const [amount, setAmount] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [warn, setWarn] = useState(null);
+  const initData = window.Telegram?.WebApp?.initData || import.meta.env.VITE_DEV_INIT_DATA || "";
+
+  if (!pnl) return null;
+
+  const submit = async (force = false) => {
+    const a = parseFloat(amount);
+    if (!a || a <= 0) return;
+    setBusy(true); setWarn(null);
+    try {
+      const r = await fetch("/api/arcana/finance/pay_salary", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Telegram-Init-Data": initData,
+        },
+        body: JSON.stringify({ amount: a, force }),
+      });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) { alert("Не получилось: " + (data.detail || r.status)); return; }
+      if (data.ok === false && data.warning === "low_cash") {
+        setWarn(data.message || "В кассе меньше суммы. Всё равно?");
+        return;
+      }
+      try { window.Telegram?.WebApp?.HapticFeedback?.notificationOccurred?.("success"); } catch (_) {}
+      onPaid?.();
+    } catch (e) { alert("Ошибка: " + e.message); }
+    finally { setBusy(false); }
+  };
+
+  const inc = pnl.income_breakdown || {};
+  return createPortal((
+    <>
+      <div className="acc-sheet-overlay" onClick={onClose} />
+      <div className="acc-sheet" onClick={(e) => e.stopPropagation()}>
+        <div className="acc-grip" />
+        <div className="card-h">
+          <span className="card-title" style={{ fontSize: 22 }}>🏦 Касса · {pnl.period?.month}/{pnl.period?.year}</span>
+        </div>
+        <div style={{ fontSize: fs(28), fontFamily: H, fontWeight: 500, marginTop: 4 }}>
+          {(pnl.cash_balance ?? 0).toLocaleString()}₽
+        </div>
+        <div style={{ fontSize: fs(11), color: s.tS, marginBottom: 14 }}>остаток</div>
+
+        <div style={{ fontFamily: H, fontSize: fs(15), marginBottom: 4 }}>📥 Доход: {(pnl.income_month ?? 0).toLocaleString()}₽</div>
+        <div style={{ fontSize: fs(12), color: s.tS, marginBottom: 8, lineHeight: 1.5 }}>
+          {inc.sessions?.amount > 0 && <div>Сеансы: {inc.sessions.amount.toLocaleString()}₽ ({inc.sessions.count} шт)</div>}
+          {inc.rituals?.amount > 0 && <div>Ритуалы: {inc.rituals.amount.toLocaleString()}₽ ({inc.rituals.count} шт)</div>}
+        </div>
+        <div style={{ fontFamily: H, fontSize: fs(15), marginBottom: 4 }}>📤 Расход: {(pnl.expenses_month ?? 0).toLocaleString()}₽</div>
+        <div style={{ fontSize: fs(12), color: s.tS, marginBottom: 8, lineHeight: 1.5 }}>
+          {(pnl.expenses_by_category || []).map((c, i) => (
+            <div key={i}>{c.name}: {c.amount.toLocaleString()}₽</div>
+          ))}
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6, marginTop: 8 }}>
+          <Glass s={s} style={{ padding: "10px 12px" }}>
+            <div style={{ fontSize: fs(10), color: s.tS }}>Прибыль месяца</div>
+            <div style={{ fontSize: fs(16), fontFamily: H, color: pnl.profit_month >= 0 ? s.acc : s.red }}>
+              {pnl.profit_month.toLocaleString()}₽
+            </div>
+          </Glass>
+          <Glass s={s} style={{ padding: "10px 12px" }}>
+            <div style={{ fontSize: fs(10), color: s.tS }}>Выплачено себе (мес)</div>
+            <div style={{ fontSize: fs(16), fontFamily: H }}>
+              {(pnl.salary_month ?? 0).toLocaleString()}₽
+            </div>
+          </Glass>
+        </div>
+        {(pnl.debt_money > 0 || pnl.barter_open_count > 0) && (
+          <div style={{ fontSize: fs(12), color: s.tS, marginTop: 10 }}>
+            📋 Должны: {[
+              pnl.debt_money > 0 && `${pnl.debt_money.toLocaleString()}₽`,
+              pnl.barter_open_count > 0 && `${pnl.barter_open_count} бартер`,
+            ].filter(Boolean).join(" + ")}
+          </div>
+        )}
+
+        <div style={{ marginTop: 14, fontSize: fs(11), color: s.tS }}>💸 Выплатить себе</div>
+        <Input s={s} value={amount} onChange={setAmount} placeholder="20000" type="number" />
+        {warn && <div style={{ fontSize: fs(12), color: s.amber, marginTop: 8 }}>{warn}</div>}
+        <SubmitBtn
+          s={s}
+          disabled={!amount || busy}
+          label={busy ? "Выплачиваю..." : (warn ? "Всё равно выплатить" : "💸 Выплатить")}
+          onClick={() => submit(!!warn)}
+        />
+      </div>
+    </>
+  ), document.body);
+}
+
+
 function StatsSheet({ s, onClose }) {
   const [scope, setScope] = useState("all");
   const [openMonth, setOpenMonth] = useState(null);
@@ -2479,6 +2575,8 @@ function StatsSheet({ s, onClose }) {
 function ArDay({ s, openClient, navigate, openMoonPhases }) {
   const [done, setDone] = useState({});
   const [accSheet, setAccSheet] = useState(false);
+  const [cashSheet, setCashSheet] = useState(false);
+  const pnlApi = useApi('/api/arcana/finance/pnl');
   const { data, loading, error, refetch } = useApi('/api/arcana/today');
   const weatherApi = useApi('/api/weather');
   const rawSessions = data?.sessions_today?.length || 0;
@@ -2562,6 +2660,24 @@ function ArDay({ s, openClient, navigate, openMoonPhases }) {
         </div>
       </div>
 
+      {/* Касса Арканы — карточка под метриками */}
+      {pnlApi.data && (
+        <Glass s={s} style={{ padding: "12px 14px", cursor: "pointer", marginBottom: 10 }} onClick={() => setCashSheet(true)}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <div>
+              <div style={{ fontSize: fs(11), color: s.tS, letterSpacing: 0.4, textTransform: "uppercase" }}>🏦 Касса</div>
+              <div style={{ fontFamily: H, fontSize: fs(22), fontWeight: 500 }}>
+                {(pnlApi.data.cash_balance ?? 0).toLocaleString()}₽
+              </div>
+            </div>
+            <div style={{ textAlign: "right", fontSize: fs(11), color: s.tS }}>
+              <div>прибыль · {(pnlApi.data.profit_month ?? 0).toLocaleString()}₽</div>
+              {pnlApi.data.barter_open_count > 0 && <div>🔄 {pnlApi.data.barter_open_count} бартер</div>}
+            </div>
+          </div>
+        </Glass>
+      )}
+
       <div className="glass" onClick={() => openMoonPhases?.()} style={{ cursor: "pointer" }}>
         <div style={{ display: "flex", gap: 14, alignItems: "center" }}>
           <div style={{ fontSize: 46, lineHeight: 1, filter: "drop-shadow(0 0 12px rgba(255,240,220,0.45))" }}>{moon.glyph}</div>
@@ -2605,6 +2721,14 @@ function ArDay({ s, openClient, navigate, openMoonPhases }) {
         <StatsSheet
           s={s}
           onClose={() => setAccSheet(false)}
+        />
+      )}
+      {cashSheet && (
+        <CashSheet
+          s={s}
+          pnl={pnlApi.data}
+          onClose={() => setCashSheet(false)}
+          onPaid={() => { setCashSheet(false); pnlApi.refetch?.(); refetch?.(); }}
         />
       )}
     </>
@@ -2764,12 +2888,14 @@ function ArSessions({ s, openSession, sessFilterRequest, consumeSessFilter }) {
 
 function ArClients({ s, openClient }) {
   const { data, loading, error, refetch } = useApi("/api/arcana/clients");
+  const barterApi = useApi("/api/arcana/barter?only_open=true");
   const view = loading || error
     ? { clients: [], total: 0, total_debt: 0, total_paid_all: 0 }
     : adaptClients(data);
   const total = view.total || view.clients.length;
   const debt = view.total_debt;
   const earned = view.total_paid_all || 0;
+  const barterOpen = barterApi.data?.open_count || 0;
   const fmtK = (v) => v >= 1000 ? `${(v / 1000).toFixed(v >= 10000 ? 0 : 1)}к` : `${v}`;
 
   return (
@@ -2793,6 +2919,11 @@ function ArClients({ s, openClient }) {
             accent={debt > 0 ? s.red : undefined}
           />
         </div>
+        {barterOpen > 0 && (
+          <div style={{ fontSize: fs(11), color: s.tS, marginTop: 6 }}>
+            🔄 Бартер: {barterOpen} {plural(barterOpen, "открытый", "открытых", "открытых")}
+          </div>
+        )}
       </Glass>
       {loading && <Empty s={s} text="Загружаю..." />}
       {error && <ErrorBox s={s} error={error} refetch={refetch} />}
@@ -2914,10 +3045,13 @@ function ArRitualsList({ s, openRitual }) {
   );
 }
 
+const ARCANA_INV_CATS = ["🕯️ Расходники", "🌿 Травы/Масла", "🃏 Карты/Колоды", "💳 Прочее"];
+
 function ArInventory({ s }) {
   const [cat, setCat] = useState("all");
   const [q, setQ] = useState("");
   const [openItem, setOpenItem] = useState(null);
+  const [addOpen, setAddOpen] = useState(false);
   const params = [];
   if (cat !== "all") params.push(`cat=${encodeURIComponent(cat)}`);
   if (q) params.push(`q=${encodeURIComponent(q)}`);
@@ -2987,8 +3121,110 @@ function ArInventory({ s }) {
           onChanged={() => { setOpenItem(null); refetch(); }}
         />
       )}
+      {addOpen && (
+        <InventoryAddSheet
+          s={s}
+          onClose={() => setAddOpen(false)}
+          onAdded={() => { setAddOpen(false); refetch(); }}
+        />
+      )}
+      {/* Локальный FAB «+» внутри сегмента инвентаря */}
+      <div
+        onClick={() => setAddOpen(true)}
+        style={{
+          position: "fixed", right: 18, bottom: 86, zIndex: 9,
+          width: 44, height: 44, borderRadius: 22,
+          background: s.acc, color: "#fff",
+          display: "flex", alignItems: "center", justifyContent: "center",
+          fontSize: 22, cursor: "pointer",
+          boxShadow: "0 4px 16px rgba(0,0,0,0.35)",
+        }}
+      >+</div>
     </>
   );
+}
+
+function InventoryAddSheet({ s, onClose, onAdded }) {
+  const [name, setName] = useState("");
+  const [cat, setCat] = useState(ARCANA_INV_CATS[0]);
+  const [qty, setQty] = useState("");
+  const [note, setNote] = useState("");
+  const [expires, setExpires] = useState("");
+  const [busy, setBusy] = useState(false);
+  const initData = window.Telegram?.WebApp?.initData || import.meta.env.VITE_DEV_INIT_DATA || "";
+
+  const submit = async () => {
+    if (!name.trim() || busy) return;
+    setBusy(true);
+    try {
+      // Используем общий /api/lists POST-эндпоинт (тип=inv, бот=arcana)
+      const r = await fetch("/api/lists", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Telegram-Init-Data": initData,
+        },
+        body: JSON.stringify({
+          type: "inv",
+          name: name.trim(),
+          cat,
+          bot: "arcana",
+          qty: qty ? parseFloat(qty) : null,
+          note,
+          expires: expires || null,
+        }),
+      });
+      if (!r.ok) {
+        const err = await r.json().catch(() => ({}));
+        alert("Не получилось: " + (err.detail || r.status));
+        return;
+      }
+      onAdded?.();
+    } catch (e) { alert("Ошибка: " + e.message); }
+    finally { setBusy(false); }
+  };
+
+  return createPortal((
+    <>
+      <div className="acc-sheet-overlay" onClick={onClose} />
+      <div className="acc-sheet" onClick={(e) => e.stopPropagation()}>
+        <div className="acc-grip" />
+        <div className="card-h">
+          <span className="card-title" style={{ fontSize: 20 }}>📦 Новый айтем</span>
+        </div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          <Input s={s} value={name} onChange={setName} placeholder="Название (например: соль)" />
+          <div style={{ fontSize: fs(11), color: s.tS }}>Категория</div>
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+            {ARCANA_INV_CATS.map((c) => (
+              <Pill key={c} s={s} active={cat === c} onClick={() => setCat(c)}>{c}</Pill>
+            ))}
+          </div>
+          <div style={{ fontSize: fs(11), color: s.tS }}>Количество</div>
+          <Input s={s} value={qty} onChange={setQty} placeholder="200" type="number" />
+          <div style={{ fontSize: fs(11), color: s.tS }}>Заметка</div>
+          <Input s={s} value={note} onChange={setNote} placeholder="—" />
+          <div style={{ fontSize: fs(11), color: s.tS }}>Срок годности</div>
+          <input
+            type="date"
+            value={expires}
+            onChange={(e) => setExpires(e.target.value)}
+            style={{
+              width: "100%", padding: "10px 12px", borderRadius: 10,
+              border: `1px solid ${s.brd}`, background: s.card, color: s.text,
+              fontSize: fs(13), outline: "none",
+            }}
+          />
+          <SubmitBtn
+            s={s}
+            disabled={!name.trim() || busy}
+            label={busy ? "Сохраняю..." : "Добавить в инвентарь"}
+            onClick={submit}
+          />
+        </div>
+      </div>
+    </>
+  ), document.body);
 }
 
 function InventoryItemSheet({ s, item, onClose, onChanged }) {
@@ -3197,6 +3433,56 @@ function ClientAvatar({ s, photoUrl, initial, size = 36, radius = "50%", textCol
 }
 
 // Галерея фото-объектов с inline-просмотром, edit заметки и delete.
+function ClientBarter({ s, clientName }) {
+  const { data, refetch } = useApi('/api/arcana/barter?only_open=true');
+  const groups = data?.by_group || [];
+  // Эвристика: показываем группы, где имя клиента встречается в Группа (например
+  // «Расклад на работу — Маша», «Ритуал очищения · Маша»).
+  const matched = groups.filter((g) =>
+    clientName && (g.group || "").toLowerCase().includes((clientName || "").toLowerCase())
+  );
+  if (matched.length === 0) return null;
+
+  const initData = window.Telegram?.WebApp?.initData || import.meta.env.VITE_DEV_INIT_DATA || "";
+  const toggle = async (id) => {
+    try {
+      await fetch(`/api/lists/${id}/done`, {
+        method: "POST",
+        headers: { "X-Telegram-Init-Data": initData },
+      });
+      refetch?.();
+    } catch (_) {}
+  };
+
+  return (
+    <>
+      <SectionLabel s={s}>🔄 Бартер</SectionLabel>
+      {matched.map((g, i) => (
+        <Glass key={i} s={s} style={{ padding: "10px 14px", marginBottom: 6 }}>
+          <div style={{ fontSize: fs(11), color: s.tS, marginBottom: 4 }}>{g.group}</div>
+          {g.items.map((it) => (
+            <div
+              key={it.id}
+              onClick={() => !it.done && toggle(it.id)}
+              style={{
+                display: "flex", alignItems: "center", gap: 10,
+                padding: "4px 0",
+                opacity: it.done ? 0.5 : 1, cursor: it.done ? "default" : "pointer",
+                fontSize: fs(13),
+              }}
+            >
+              <span>{it.done ? "☑️" : "◻️"}</span>
+              <span style={{ textDecoration: it.done ? "line-through" : "none", color: s.text }}>
+                {it.name}
+              </span>
+            </div>
+          ))}
+        </Glass>
+      ))}
+    </>
+  );
+}
+
 function ObjectPhotosGallery({ s, clientId, photos, onChanged }) {
   const [openIdx, setOpenIdx] = useState(null);
   return (
@@ -4432,6 +4718,8 @@ function ClientDetail({ s, id }) {
           onChanged={refetch}
         />
       )}
+
+      <ClientBarter s={s} clientName={c.name} />
 
       <SectionLabel s={s}>История</SectionLabel>
       {c.history.map((h, i) => (
