@@ -1654,55 +1654,8 @@ async def task_ok_cb(call: CallbackQuery) -> None:
     await call.answer()
 
 
-@router.callback_query(F.data.startswith("task_subtask_"))
-async def task_subtask_cb(call: CallbackQuery) -> None:
-    """Кнопка «📋 Разбить на подзадачи» после создания задачи."""
-    from core.list_manager import pending_set as list_pending_set
-    uid = call.from_user.id
-
-    # callback_data = "task_subtask_{rel_type}_{id_prefix}"
-    parts = call.data.split("_", 3)  # ['task', 'subtask', 'work|task', id_prefix]
-    rel_type = parts[2] if len(parts) > 2 else "task"
-    id_prefix = parts[3] if len(parts) > 3 else ""
-
-    # Получаем название задачи из текста сообщения (строка с 📌)
-    task_name = "Подзадачи"
-    if call.message and call.message.text:
-        for line in call.message.text.split("\n"):
-            if line.startswith("📌"):
-                task_name = line.replace("📌", "").strip()
-                break
-
-    # Ищем полный task_id по префиксу через Notion
-    task_id = id_prefix
-    try:
-        from core.config import config
-        from core.notion_client import db_query
-        db_id = config.arcana.db_works if rel_type == "work" else config.nexus.db_tasks
-        if db_id and id_prefix:
-            pages = await db_query(db_id, page_size=20)
-            for page in pages:
-                if page.get("id", "").replace("-", "").startswith(id_prefix.replace("-", "")):
-                    task_id = page["id"]
-                    break
-    except Exception as e:
-        logger.warning("task_subtask: lookup error: %s", e)
-
-    list_pending_set(uid, {
-        "action": "subtask_items",
-        "task_id": task_id,
-        "task_name": task_name,
-        "rel_type": rel_type,
-        "user_notion_id": "",
-    })
-
-    await call.message.edit_reply_markup()
-    await call.message.answer(
-        f"📋 Разбиваю «{task_name}» на подзадачи\n"
-        f"Напиши пункты (каждый с новой строки или через запятую):",
-        parse_mode="HTML",
-    )
-    await call.answer()
+# task_subtask callback вынесен в core/subtasks_handler.py — общий для Nexus
+# и Arcana. Регистрируется через include_router в обоих ботах.
 
 
 async def _update_streak_line(uid: int) -> str:

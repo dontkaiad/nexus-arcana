@@ -41,6 +41,8 @@ from nexus.handlers.tasks import router as tasks_router
 from nexus.handlers.finance import router as finance_router
 from nexus.handlers.memory import router as memory_router
 from nexus.handlers.lists import router as lists_router
+from core.subtasks_handler import make_subtasks_router
+dp.include_router(make_subtasks_router())  # task_subtask_* (общий с Arcana)
 dp.include_router(tasks_router)
 dp.include_router(finance_router)
 dp.include_router(memory_router)

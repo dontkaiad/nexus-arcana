@@ -778,6 +778,55 @@ def _pending_barters(sessions: list[dict], rituals: list[dict], clients_map: dic
     return out
 
 
+async def _fetch_subtasks_by_work(
+    user_notion_id: str, work_ids: set[str]
+) -> dict[str, list[dict]]:
+    """Один запрос к 🗒️ Списки → группировка по работе.
+
+    Возвращает {work_id: [{id, name, done}, ...]}.
+    Перформанс: один запрос на все работы (не N+1).
+    """
+    if not work_ids:
+        return {}
+    db_lists = config.db_lists
+    if not db_lists:
+        return {}
+    from core.notion_client import _with_user_filter, query_pages
+    base_filter: dict = {
+        "and": [
+            {"property": "Тип", "select": {"equals": "📋 Чеклист"}},
+            {"property": "🔮 Работы", "relation": {"is_not_empty": True}},
+        ]
+    }
+    filters = _with_user_filter(base_filter, user_notion_id)
+    try:
+        pages = await query_pages(db_lists, filters=filters, page_size=500)
+    except Exception as e:
+        logger.warning("subtasks fetch failed: %s", e)
+        return {}
+
+    out: dict[str, list[dict]] = {}
+    for p in pages:
+        props = p.get("properties", {})
+        rels = (props.get("🔮 Работы", {}).get("relation") or [])
+        if not rels:
+            continue
+        title = title_plain(p, "Название")
+        if not title:
+            continue
+        status = (props.get("Статус", {}).get("status") or {}).get("name", "")
+        done = status in ("Done", "Complete", "Archived")
+        for r in rels:
+            wid = r.get("id", "")
+            if wid in work_ids:
+                out.setdefault(wid, []).append({
+                    "id": p.get("id", ""),
+                    "name": title,
+                    "done": done,
+                })
+    return out
+
+
 @router.get("/arcana/works")
 async def get_arcana_works(
     tg_id: int = Depends(current_user_id),
@@ -810,6 +859,8 @@ async def get_arcana_works(
 
         clients_map = await load_clients_map(user_notion_id)
         type_map = await _client_types_map(user_notion_id)
+        work_ids = {p.get("id", "") for p in pages if p.get("id")}
+        subtasks_map = await _fetch_subtasks_by_work(user_notion_id, work_ids)
         from miniapp.backend.routes._arcana_common import client_name_from
         for p in pages:
             props = p.get("properties", {})
@@ -824,8 +875,9 @@ async def get_arcana_works(
             is_overdue = bool(dl_local and dl_local < today_date)
             cli_name, cli_id = client_name_from(p, clients_map)
             ctype = type_map.get(cli_id or "", "") if cli_id else ""
+            wid = p.get("id", "")
             items.append({
-                "id": p.get("id", ""),
+                "id": wid,
                 "title": title or "—",
                 "status": status,
                 "priority": prio.get("name", ""),
@@ -837,6 +889,7 @@ async def get_arcana_works(
                     {"id": cli_id, "name": cli_name, "type": ctype} if cli_id
                     else None
                 ),
+                "subtasks": subtasks_map.get(wid, []),
             })
     return {"works": items, "total": len(items)}
 

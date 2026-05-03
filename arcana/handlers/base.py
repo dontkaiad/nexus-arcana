@@ -341,6 +341,11 @@ async def route_message(message: Message, user_notion_id: str = "", _text: str =
             await react(message, reaction_for("session"))
             return
 
+        # ── Pending: ввод подзадач после кнопки «📋 Подзадачи» ────────────
+        from arcana.handlers.lists import handle_list_pending
+        if await handle_list_pending(message, user_notion_id):
+            return
+
         # ── Pending: превью работы (preview-flow, паритет с Nexus) ────────
         from arcana.handlers.work_preview import (
             has_pending as has_work_pending, handle_work_clarification,

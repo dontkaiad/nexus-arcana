@@ -563,12 +563,22 @@ async def cb_work_save(call: CallbackQuery) -> None:
             "\n\n<i>Когда разложишь — напиши «расклад: карты …».</i>"
         )
 
+    # Inline-кнопки: предложить разбить на подзадачи (паритет с Nexus)
+    _id_prefix = result.replace("-", "")[:24]
+    save_kb = InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(
+            text="📋 Подзадачи",
+            callback_data=f"task_subtask_work_{_id_prefix}",
+        ),
+        InlineKeyboardButton(text="👌 Ок", callback_data="work_ok"),
+    ]])
+
     try:
         await call.message.edit_text(
-            text_content, parse_mode="HTML", reply_markup=None,
+            text_content, parse_mode="HTML", reply_markup=save_kb,
         )
     except Exception:
-        await call.message.answer(text_content, parse_mode="HTML")
+        await call.message.answer(text_content, parse_mode="HTML", reply_markup=save_kb)
 
     # message_pages mapping для reply-обновлений
     try:
@@ -584,6 +594,16 @@ async def cb_work_save(call: CallbackQuery) -> None:
         pass
 
     await call.answer("⚡ Работа создана")
+
+
+@router.callback_query(F.data == "work_ok")
+async def cb_work_ok(call: CallbackQuery) -> None:
+    """«👌 Ок» — убрать клавиатуру под «Работа создана»."""
+    try:
+        await call.message.edit_reply_markup()
+    except Exception:
+        pass
+    await call.answer()
 
 
 @router.callback_query(F.data.startswith("work_cancel:"))

@@ -2912,38 +2912,93 @@ function ArGrimoire({ s, openGrimoire }) {
 // ═══════════════════════════════════════════════════════════════
 
 function ArWork({ s }) {
-  const { data, loading, error, refetch } = useApi('/api/arcana/today');
+  const { data, loading, error, refetch } = useApi('/api/arcana/works');
+  const [expanded, setExpanded] = useState({});
+  const [subOverrides, setSubOverrides] = useState({});
+
   if (loading) return <Empty s={s} text="Загружаю..." />;
   if (error) return <ErrorBox s={s} error={error} refetch={refetch} />;
-  const a = adaptArcanaToday(data);
+  const works = data?.works || [];
+
+  const toggleExpand = (id) => setExpanded((e) => ({ ...e, [id]: !e[id] }));
+  const toggleSub = async (subId) => {
+    setSubOverrides((o) => ({ ...o, [subId]: !o[subId] }));
+    try {
+      const initData =
+        window.Telegram?.WebApp?.initData || import.meta.env.VITE_DEV_INIT_DATA || "";
+      await fetch(`/api/lists/${subId}/done`, {
+        method: "POST",
+        headers: { "X-Telegram-Init-Data": initData },
+      });
+    } catch (_) { /* оптимистично */ }
+  };
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 0 }}>
       <div className="page-title" style={{ marginBottom: 10 }}>Работы</div>
-      {a.worksOverdue.length === 0 && a.worksToday.length === 0 && (
+      {works.length === 0 && (
         <Empty s={s} emoji="🌙" title="Работ нет" text="Передохни." />
       )}
-      {a.worksOverdue.map((o) => (
-        <div key={o.id} className="task glass">
-          <div className="body">
-            <div className="title">{o.title}</div>
-            <div className="meta">
-              <span style={{ color: s.red, fontWeight: 600 }}>{o.days_ago} д назад</span>
+      {works.map((w) => {
+        const subs = w.subtasks || [];
+        const open = expanded[w.id];
+        const total = subs.length;
+        const done = subs.filter((x) => (subOverrides[x.id] ?? x.done)).length;
+        return (
+          <div key={w.id} className="task glass" style={{ flexDirection: "column", alignItems: "stretch" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <div className="body" style={{ flex: 1 }}>
+                <div className="title">{w.title}</div>
+                <div className="meta">
+                  {w.is_overdue && (
+                    <span style={{ color: s.red, fontWeight: 600 }}>просрочена</span>
+                  )}
+                  {w.deadline_label && !w.is_overdue && (
+                    <span>{w.deadline_label}</span>
+                  )}
+                  {w.client?.name && <span> · 👤 {w.client.name}</span>}
+                  {total > 0 && (
+                    <span
+                      onClick={() => toggleExpand(w.id)}
+                      style={{ cursor: "pointer", marginLeft: 8 }}
+                    >
+                      📋 {done}/{total} {open ? "▾" : "▸"}
+                    </span>
+                  )}
+                </div>
+              </div>
+              {w.category && <div className="cat-badge">{String(w.category).split(" ")[0]}</div>}
+              <PrioDot s={s} prio={w.priority} />
             </div>
+            {open && total > 0 && (
+              <div style={{ marginTop: 8, paddingLeft: 6, display: "flex", flexDirection: "column", gap: 4 }}>
+                {subs.map((sub) => {
+                  const isDone = subOverrides[sub.id] ?? sub.done;
+                  return (
+                    <div
+                      key={sub.id}
+                      onClick={() => !isDone && toggleSub(sub.id)}
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 8,
+                        cursor: isDone ? "default" : "pointer",
+                        opacity: isDone ? 0.55 : 1,
+                        fontSize: fs(12),
+                      }}
+                    >
+                      <span>{isDone ? "✅" : "◻️"}</span>
+                      <span style={{ textDecoration: isDone ? "line-through" : "none" }}>
+                        {sub.name}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
-          {o.cat && <div className="cat-badge">{String(o.cat).split(" ")[0]}</div>}
-          <PrioDot s={s} prio={o.prio} />
-        </div>
-      ))}
-      {a.worksToday.map((w) => (
-        <div key={w.id} className="task glass">
-          {w.time && <span className="time">{w.time}</span>}
-          <div className="body">
-            <div className="title">{w.title}</div>
-          </div>
-          {w.cat && <div className="cat-badge">{String(w.cat).split(" ")[0]}</div>}
-          <PrioDot s={s} prio={w.prio} />
-        </div>
-      ))}
+        );
+      })}
     </div>
   );
 }
