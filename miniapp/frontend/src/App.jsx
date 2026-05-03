@@ -2872,7 +2872,9 @@ function ArClients({ s, openClient }) {
   const { data, loading, error, refetch } = useApi("/api/arcana/clients");
   const barterApi = useApi("/api/arcana/barter?only_open=true");
   const pnlApi = useApi("/api/arcana/finance/pnl");
+  const debtsApi = useApi("/api/arcana/debts");
   const [cashSheet, setCashSheet] = useState(false);
+  const [debtsSheet, setDebtsSheet] = useState(false);
   const view = loading || error
     ? { clients: [], total: 0, total_debt: 0, total_paid_all: 0 }
     : adaptClients(data);
@@ -2897,13 +2899,15 @@ function ArClients({ s, openClient }) {
               accent={earned > 0 ? s.acc : undefined}
             />
           </div>
-          <Metric
-            s={s}
-            v={debt > 0 ? fmtK(debt) : "0"}
-            unit="₽"
-            sub="долги"
-            accent={debt > 0 ? s.red : undefined}
-          />
+          <div style={{ flex: 1, cursor: "pointer" }} onClick={() => setDebtsSheet(true)}>
+            <Metric
+              s={s}
+              v={debt > 0 ? fmtK(debt) : "0"}
+              unit="₽"
+              sub="долги"
+              accent={debt > 0 ? s.red : undefined}
+            />
+          </div>
         </div>
         {barterOpen > 0 && (
           <div style={{ fontSize: fs(11), color: s.tS, marginTop: 6 }}>
@@ -2968,8 +2972,126 @@ function ArClients({ s, openClient }) {
           onPaid={() => { setCashSheet(false); pnlApi.refetch?.(); refetch?.(); }}
         />
       )}
+      {debtsSheet && (
+        <DebtsSheet
+          s={s}
+          data={debtsApi.data}
+          onClose={() => setDebtsSheet(false)}
+        />
+      )}
     </div>
   );
+}
+
+// ═══════════════════════════════════════════════════════════════
+// ARCANA — DEBTS SHEET
+// ═══════════════════════════════════════════════════════════════
+
+function DebtsSheet({ s, data, onClose }) {
+  const [openMoney, setOpenMoney] = useState({});
+  const [openBarter, setOpenBarter] = useState({});
+  const money = data?.money || [];
+  const barter = data?.barter || [];
+  const totals = data?.totals || { money: 0, barter_items: 0 };
+  const allEmpty = money.length === 0 && barter.length === 0;
+
+  return createPortal((
+    <>
+      <div className="acc-sheet-overlay" onClick={onClose} />
+      <div className="acc-sheet" onClick={(e) => e.stopPropagation()}>
+        <div className="acc-grip" />
+        <div className="card-h">
+          <span className="card-title" style={{ fontSize: 22 }}>
+            Долги · {totals.money.toLocaleString()}₽ · {totals.barter_items} бартер
+          </span>
+        </div>
+
+        {allEmpty && (
+          <div style={{ textAlign: "center", padding: "40px 0", fontSize: fs(15), color: s.tS }}>
+            Все чисты ✨
+          </div>
+        )}
+
+        {!allEmpty && (
+          <>
+            <div style={{ fontFamily: H, fontSize: fs(15), marginTop: 12, marginBottom: 6 }}>💸 Деньги</div>
+            {money.length === 0 && (
+              <div style={{ fontSize: fs(12), color: s.tS, marginBottom: 10 }}>Никто не должен ✨</div>
+            )}
+            {money.map((b) => {
+              const opened = !!openMoney[b.client_id];
+              return (
+                <Glass
+                  key={b.client_id || "_orphan"}
+                  s={s}
+                  style={{ padding: "10px 12px", marginBottom: 6, cursor: "pointer" }}
+                  onClick={() => setOpenMoney((o) => ({ ...o, [b.client_id]: !opened }))}
+                >
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <div style={{ fontSize: fs(13), fontWeight: 500 }}>
+                      {b.client_type && <span>{b.client_type} </span>}{b.client_name}
+                    </div>
+                    <div style={{ fontSize: fs(14), fontFamily: H, color: s.amber, fontWeight: 500 }}>
+                      {b.amount.toLocaleString()}₽
+                    </div>
+                  </div>
+                  {opened && (
+                    <div style={{ marginTop: 8, fontSize: fs(12), color: s.tS, lineHeight: 1.6 }}>
+                      {b.items.map((it) => (
+                        <div key={it.id}>
+                          {it.kind === "ritual" ? "🕯" : "🃏"} {it.desc} ·{" "}
+                          <span style={{ color: s.text }}>{it.paid.toLocaleString()}/{it.amount.toLocaleString()}₽</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </Glass>
+              );
+            })}
+
+            <div style={{ fontFamily: H, fontSize: fs(15), marginTop: 16, marginBottom: 6 }}>🔄 Бартер</div>
+            {barter.length === 0 && (
+              <div style={{ fontSize: fs(12), color: s.tS, marginBottom: 10 }}>Все бартеры закрыты ✨</div>
+            )}
+            {barter.map((b) => {
+              const key = b.client_id || "_orphan";
+              const opened = !!openBarter[key];
+              const isOrphan = !b.client_id;
+              return (
+                <Glass
+                  key={key}
+                  s={s}
+                  style={{ padding: "10px 12px", marginBottom: 6, cursor: "pointer" }}
+                  onClick={() => setOpenBarter((o) => ({ ...o, [key]: !opened }))}
+                >
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <div style={{ fontSize: fs(13), fontWeight: 500 }}>
+                      {b.client_type && <span>{b.client_type} </span>}{b.client_name}
+                      {isOrphan && (
+                        <span style={{ color: s.tS, fontWeight: 400, fontSize: fs(11) }}> · без привязки</span>
+                      )}
+                    </div>
+                    <div style={{ fontSize: fs(13), color: s.acc, fontWeight: 500 }}>
+                      {b.items.length}
+                    </div>
+                  </div>
+                  {opened && (
+                    <div style={{ marginTop: 8, fontSize: fs(12), color: s.tS, lineHeight: 1.6 }}>
+                      {b.items.map((it) => (
+                        <div key={it.id}>
+                          • {it.name}{it.group && <span style={{ opacity: 0.7 }}> · {it.group}</span>}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </Glass>
+              );
+            })}
+          </>
+        )}
+      </div>
+    </>
+  ), document.body);
 }
 
 // ═══════════════════════════════════════════════════════════════
