@@ -6370,6 +6370,7 @@ export default function App() {
         {tabs.map((t) => {
           const active = page === t.k;
           const Ic = t.I;
+          const iconInactiveColor = isDay ? sky.text : sky.tS;
           return (
             <div
               key={t.k}
@@ -6389,7 +6390,7 @@ export default function App() {
               <div style={{ display: "flex", justifyContent: "center" }}>
                 <Ic
                   size={fs(19)}
-                  color={active ? sky.acc : sky.tS}
+                  color={active ? sky.acc : iconInactiveColor}
                   strokeWidth={active ? 2.2 : 1.6}
                 />
               </div>
