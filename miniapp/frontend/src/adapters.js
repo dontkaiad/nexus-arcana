@@ -596,9 +596,11 @@ export function adaptClientDossier(data) {
     type_full: typeFull,
     contact: data.contact || '',
     since: data.since ? formatShortDate(data.since) : '—',
+    birthday: data.birthday || '',
     request: data.request || '',
     notes: data.notes || '',
     photo_url: data.photo_url || null,
+    photos: Array.isArray(data.photos) ? data.photos : [],
     sessions: data.stats?.sessions ?? 0,
     rituals: data.stats?.rituals ?? 0,
     debt: data.stats?.debt ?? 0,
@@ -657,6 +659,7 @@ export function adaptRitualDetail(data) {
     offerings: data.offerings || '',
     powers: data.powers || '',
     structure: data.structure || [],
+    photo_url: data.photo_url || null,
   }
 }
 
