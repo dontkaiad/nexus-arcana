@@ -11,13 +11,13 @@ async def analyze_message(text: str, uid: int) -> dict:
 Магия (расклады, свечи, клиенты) -> target_system: arcana. Быт (еда, зп, молоко) -> target_system: nexus.
 Если не уверен, пиши вопрос в clarification_question."""
     
-    raw = await ask_claude(text, system=sys)
+    raw = await ask_claude(text, system=sys, model="claude-haiku-4-5-20251001")
     return _parse_json(raw)
 
 async def parse_time_only(text: str, uid: int) -> str:
     user_time = get_str_now(uid)
     sys = f"Ты помощник по времени. Сейчас у юзера: {user_time}. Вычисли дату из фразы юзера. Верни ТОЛЬКО ISO формат (YYYY-MM-DDTHH:MM:00) или 'NONE'."
-    raw = await ask_claude(text, system=sys)
+    raw = await ask_claude(text, system=sys, max_tokens=50, model="claude-haiku-4-5-20251001")
     match = re.search(r'(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})', raw)
     return match.group(1) if match else None
 
