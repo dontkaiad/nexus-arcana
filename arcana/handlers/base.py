@@ -302,6 +302,10 @@ async def route_message(message: Message, user_notion_id: str = "", _text: str =
                 return
 
         if message.photo and not _text:
+            # Сначала проверяем флоу /client_photo (или reply на сообщение клиента).
+            from arcana.handlers.client_photo import handle_pending_photo
+            if await handle_pending_photo(message, user_notion_id):
+                return
             from arcana.handlers.sessions import handle_tarot_photo
             await handle_tarot_photo(message, user_notion_id)
             _final_emoji = reaction_for("session")
@@ -330,6 +334,11 @@ async def route_message(message: Message, user_notion_id: str = "", _text: str =
             text = f"[контекст: {prev[:100]}]\n{text}"
 
         uid = message.from_user.id
+
+        # ── Pending: ждём имя клиента после /client_photo ───────────────
+        from arcana.handlers.client_photo import handle_pending_text as _hp_text
+        if await _hp_text(message, text, user_notion_id):
+            return
 
         # ── Pending: режим сбора инфы о клиенте ─────────────────────────
         from arcana.pending_clients import get_pending_client

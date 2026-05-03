@@ -115,6 +115,7 @@ async def list_clients(tg_id: int = Depends(current_user_id)) -> dict[str, Any]:
         # Тип клиента из 👥 Клиенты.«Тип клиента» (select).
         ctype_full = (c.get("properties", {}).get("Тип клиента", {}) or {}).get("select")
         ctype_full = ctype_full.get("name", "") if ctype_full else ""
+        photo_url = (c.get("properties", {}).get("Фото", {}) or {}).get("url") or None
         out.append({
             "id": cid,
             "name": name,
@@ -127,6 +128,7 @@ async def list_clients(tg_id: int = Depends(current_user_id)) -> dict[str, Any]:
             "debt": debt,
             "barter_count": bucket["barter_count"],
             "total_paid": int(round(bucket["total_paid"])),
+            "photo_url": photo_url,
         })
     out.sort(key=lambda x: x["name"])
     return {

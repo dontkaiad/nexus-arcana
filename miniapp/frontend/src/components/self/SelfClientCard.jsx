@@ -246,6 +246,26 @@ export function SelfListCard({ client, onClick }) {
 // Compact size (90px eye) so it fits inside the sheet without overwhelming.
 // ────────────────────────────────────────────────────────────────────────
 
+function SelfPhoto({ url }) {
+  const [broken, setBroken] = React.useState(false);
+  if (!url || broken) return null;
+  return (
+    <div style={{ display: "flex", justifyContent: "center", marginBottom: 8 }}>
+      <img
+        src={url}
+        alt="Кай"
+        onError={() => setBroken(true)}
+        style={{
+          width: 50, height: 50, borderRadius: "50%",
+          objectFit: "cover",
+          border: `2px solid ${ARCANA_HOLO.gold}`,
+          boxShadow: `0 0 14px ${ARCANA_HOLO.gold}55`,
+        }}
+      />
+    </div>
+  );
+}
+
 export function SelfDetailHeader({ client }) {
   const contactItems = (client.contact || "")
     .split(/[,;\n]+/)
@@ -288,6 +308,7 @@ export function SelfDetailHeader({ client }) {
         }} />
       </div>
       <div style={{ position: "relative", textAlign: "center" }}>
+        <SelfPhoto url={client.photo_url} />
         <div style={{
           display: "flex", justifyContent: "space-between", alignItems: "center",
           marginBottom: 6,

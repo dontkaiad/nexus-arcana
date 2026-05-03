@@ -2817,23 +2817,7 @@ function ArClients({ s, openClient }) {
             }}
           >
             <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
-              <div
-                style={{
-                  width: 36,
-                  height: 36,
-                  borderRadius: "50%",
-                  background: `${s.acc}22`,
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  fontSize: fs(14),
-                  color: s.acc,
-                  fontWeight: 500,
-                  fontFamily: H,
-                }}
-              >
-                {c.initial}
-              </div>
+              <ClientAvatar s={s} photoUrl={c.photoUrl} initial={c.initial} size={36} />
               <div>
                 <div style={{ fontSize: fs(13), color: s.text, fontWeight: 500 }}>
                   {c.type && <span title={c.type_full}>{c.type} </span>}
@@ -2922,6 +2906,39 @@ function ArRituals({ s, openRitual }) {
 const GRIM_GOLD = "#d4a843";
 const GRIM_GOLD_BG = "rgba(212,168,67,0.10)";
 const GRIM_SAGE = "#5a9a8a";
+
+// Avatar клиента — фото из Cloudinary, fallback на инициал.
+function ClientAvatar({ s, photoUrl, initial, size = 36, radius = "50%", textColor }) {
+  const [broken, setBroken] = useState(false);
+  if (photoUrl && !broken) {
+    return (
+      <img
+        src={photoUrl}
+        alt={initial || "?"}
+        onError={() => setBroken(true)}
+        style={{
+          width: size, height: size, borderRadius: radius,
+          objectFit: "cover", flexShrink: 0,
+          background: `${s.acc}22`,
+        }}
+      />
+    );
+  }
+  return (
+    <div
+      style={{
+        width: size, height: size, borderRadius: radius,
+        background: `${s.acc}22`,
+        display: "flex", alignItems: "center", justifyContent: "center",
+        fontSize: fs(size >= 60 ? 28 : 14),
+        color: textColor || s.acc, fontWeight: 500, fontFamily: H,
+        flexShrink: 0,
+      }}
+    >
+      {initial || "?"}
+    </div>
+  );
+}
 
 function GrimoireThemeChip({ theme }) {
   return (
@@ -3911,24 +3928,28 @@ function ClientDetail({ s, id }) {
           display: "flex", gap: 14, marginBottom: 16,
         }}
       >
-        <div
-          style={{
-            width: 64,
-            height: 64,
-            borderRadius: 16,
-            background: `linear-gradient(135deg, ${s.acc}, ${s.acc}aa)`,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            fontSize: fs(28),
-            color: "#fff",
-            fontFamily: H,
-            fontWeight: 500,
-            flexShrink: 0,
-          }}
-        >
-          {c.initial}
-        </div>
+        {c.photo_url ? (
+          <ClientAvatar s={s} photoUrl={c.photo_url} initial={c.initial} size={64} radius={16} />
+        ) : (
+          <div
+            style={{
+              width: 64,
+              height: 64,
+              borderRadius: 16,
+              background: `linear-gradient(135deg, ${s.acc}, ${s.acc}aa)`,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              fontSize: fs(28),
+              color: "#fff",
+              fontFamily: H,
+              fontWeight: 500,
+              flexShrink: 0,
+            }}
+          >
+            {c.initial}
+          </div>
+        )}
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontFamily: H, fontSize: fs(22), fontWeight: 500, display: "flex", alignItems: "center", gap: 6 }}>
             <span>{(c.status || "").split(" ")[0]} {c.name}</span>

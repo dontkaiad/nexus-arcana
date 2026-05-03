@@ -576,6 +576,7 @@ export function adaptClients(data) {
       debt: c.debt ?? 0,
       barter_count: c.barter_count ?? 0,
       total: c.total_paid ?? 0,
+      photoUrl: c.photo_url || null,
       self: (c.type_full || c.status || '').includes('Self')
         || (c.status || '').includes('Я')
         || (c.name || '').toLowerCase() === 'кай',
