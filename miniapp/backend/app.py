@@ -1,6 +1,8 @@
 """miniapp/backend/app.py — FastAPI app for Nexus × Arcana mini app."""
 from __future__ import annotations
 
+import os
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -19,10 +21,30 @@ from miniapp.backend.routes import (
 
 app = FastAPI(title="Nexus × Arcana API")
 
+# CORS: дефолт = telegram WebApp + локальный vite dev. Доп. домены — через
+# env MINIAPP_CORS_ORIGINS (CSV, перекрывает дефолт). Эфемерные tunnel-URL
+# Cloudflare разработки разрешены через regex.
+_DEFAULT_ORIGINS = [
+    "https://web.telegram.org",
+    "https://webk.telegram.org",
+    "https://webz.telegram.org",
+    "https://t.me",
+    "http://localhost:5173",
+    "http://localhost:5174",
+]
+_origins_env = os.getenv("MINIAPP_CORS_ORIGINS", "").strip()
+allowed_origins = (
+    [o.strip() for o in _origins_env.split(",") if o.strip()]
+    if _origins_env
+    else _DEFAULT_ORIGINS
+)
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # TODO: сузить до домена mini app
-    allow_methods=["GET", "POST", "PATCH", "DELETE"],
+    allow_origins=allowed_origins,
+    allow_origin_regex=r"^https://.*\.trycloudflare\.com$",
+    allow_credentials=True,
+    allow_methods=["*"],
     allow_headers=["*"],
 )
 
