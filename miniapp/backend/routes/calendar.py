@@ -4,8 +4,13 @@ from __future__ import annotations
 import calendar as _calendar
 import logging
 import re
-from datetime import date, timedelta
-from typing import Any, Optional
+from datetime import date, datetime, timedelta, timezone
+from typing import Any, Optional, Union
+
+try:
+    import holidays as _holidays_pkg
+except ImportError:
+    _holidays_pkg = None
 
 from fastapi import APIRouter, Depends, Query
 
@@ -92,6 +97,72 @@ def _parse_repeat(raw: str) -> tuple[Optional[str], Optional[int], Optional[str]
     return time_val, interval, interval_str
 
 
+_REPEAT_SELECT_MAP = {
+    "Каждый день": 1,
+    "Каждые 2 дня": 2,
+    "Каждые 3 дня": 3,
+    "Каждую неделю": 7,
+    "Каждые 2 недели": 14,
+}
+
+
+def _resolve_interval(
+    repeat_time_raw: str,
+    repeat_select: str,
+) -> Union[int, dict, None]:
+    """Источник повторяемости: «Время повтора» (every_Nd) → fallback «Повтор» select.
+
+    Возвращает:
+    - int — количество дней между occurrences (1, 7, 14, ...).
+    - {"kind": "monthly"} — ежемесячно по anchor.day.
+    - None — не повтор.
+    """
+    _t, days_from_time, _r = _parse_repeat(repeat_time_raw)
+    if days_from_time and days_from_time > 0:
+        return days_from_time
+    if not repeat_select:
+        return None
+    sel = repeat_select.strip()
+    if sel in _REPEAT_SELECT_MAP:
+        return _REPEAT_SELECT_MAP[sel]
+    if sel == "Каждый месяц":
+        return {"kind": "monthly"}
+    return None
+
+
+def _page_created_date(page: dict, tz_offset: int) -> Optional[date]:
+    raw = page.get("created_time") or ""
+    if not raw:
+        return None
+    try:
+        dt = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone(timedelta(hours=tz_offset))).date()
+
+
+def _ru_holiday_days(year: int, month_num: int) -> list[int]:
+    """Дни месяца (числа), которые являются официальными праздниками РФ.
+
+    holidays-пакет уже учитывает переносы выходных. Если пакет не установлен —
+    возвращаем пустой список (бэкенд работает, фронт не подсветит).
+    """
+    if _holidays_pkg is None:
+        return []
+    try:
+        h = _holidays_pkg.RU(years=year)
+    except Exception as e:
+        logger.warning("holidays.RU init failed: %s", e)
+        return []
+    out: list[int] = []
+    for d in h.keys():
+        if d.year == year and d.month == month_num:
+            out.append(d.day)
+    return sorted(set(out))
+
+
 @router.get("/calendar")
 async def get_calendar(
     tg_id: int = Depends(current_user_id),
@@ -128,7 +199,8 @@ async def get_calendar(
         cat = cat_from_notion(select_name(props.get("Категория", {}))).get("full") or ""
         repeat_sel = select_name(props.get("Повтор", {})) or None
         repeat_time_raw = rich_text(props.get("Время повтора", {})).strip()
-        time_val, interval_days, interval_raw = _parse_repeat(repeat_time_raw)
+        time_val, _from_time, interval_raw = _parse_repeat(repeat_time_raw)
+        repeat_kind = _resolve_interval(repeat_time_raw, repeat_sel or "")
         repeat_label = interval_raw or repeat_sel
 
         deadline_raw = (props.get("Дедлайн", {}).get("date") or {}).get("start") or ""
@@ -138,24 +210,38 @@ async def get_calendar(
         if time_val is None:
             time_val = extract_time(deadline_raw, tz_offset) or extract_time(reminder_raw, tz_offset)
 
+        # Anchor: Напоминание → Дедлайн → created_time (последний — для select-only повторов).
+        anchor = reminder_date or deadline_date
+        if repeat_kind is not None and anchor is None:
+            anchor = _page_created_date(p, tz_offset)
+
         occurrence_days: list[int] = []
-        if interval_days and interval_days > 0:
-            anchor = reminder_date or deadline_date
-            if anchor:
-                # Найти первое вхождение ≥ month_start.
-                delta = (month_start - anchor).days
-                if delta <= 0:
-                    first = anchor
-                    while first - timedelta(days=interval_days) >= month_start:
-                        first -= timedelta(days=interval_days)
-                else:
-                    k = (delta + interval_days - 1) // interval_days
-                    first = anchor + timedelta(days=k * interval_days)
-                d = first
-                while d <= month_end:
-                    if d >= month_start:
-                        occurrence_days.append(d.day)
-                    d += timedelta(days=interval_days)
+        is_recurring = repeat_kind is not None
+        interval_days_for_overdue: Optional[int] = (
+            repeat_kind if isinstance(repeat_kind, int) else None
+        )
+
+        if isinstance(repeat_kind, int) and repeat_kind > 0 and anchor:
+            interval_days = repeat_kind
+            delta = (month_start - anchor).days
+            if delta <= 0:
+                first = anchor
+                while first - timedelta(days=interval_days) >= month_start:
+                    first -= timedelta(days=interval_days)
+            else:
+                k = (delta + interval_days - 1) // interval_days
+                first = anchor + timedelta(days=k * interval_days)
+            d = first
+            while d <= month_end:
+                if d >= month_start:
+                    occurrence_days.append(d.day)
+                d += timedelta(days=interval_days)
+        elif isinstance(repeat_kind, dict) and repeat_kind.get("kind") == "monthly" and anchor:
+            # Ежемесячно по anchor.day. Если anchor.day > days_in_month — берём последний день месяца.
+            target_day = min(anchor.day, days_in_month)
+            occ = date(y, m, target_day)
+            if month_start <= occ <= month_end and occ >= anchor:
+                occurrence_days.append(target_day)
         else:
             # wave8.69: показываем задачу и на Дедлайн, и на Напоминание —
             # раньше elif прятал дату напоминания, если дедлайн тоже был в этом месяце.
@@ -180,7 +266,7 @@ async def get_calendar(
                 "repeat": repeat_label,
             })
             bucket["count"] += 1
-            if day_date < today_date and not interval_days:
+            if day_date < today_date and not is_recurring:
                 bucket["has_overdue"] = True
             if prio == "🔴":
                 bucket["has_high_prio"] = True
@@ -189,4 +275,6 @@ async def get_calendar(
     for bucket in days.values():
         bucket["tasks"].sort(key=lambda t: (t.get("time") is None, t.get("time") or ""))
 
-    return {"month": month, "days": days}
+    holiday_days = _ru_holiday_days(y, m)
+
+    return {"month": month, "days": days, "holiday_days": holiday_days}

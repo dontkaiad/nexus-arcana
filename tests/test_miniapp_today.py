@@ -156,7 +156,12 @@ def test_today_returns_all_keys_and_classifies_tasks(client):
 
     assert data["date"] == today
     assert data["tz_offset"] == tz
-    assert data["streak"] == {"current": 8, "rest_day_available": True}
+    assert data["streak"] == {
+        "current": 8,
+        "best": 12,
+        "last_activity_date": today,
+        "rest_day_available": True,
+    }
 
     # budget: default 4166, spent 1500+1104=2604
     assert data["budget"]["day"] == 4166
