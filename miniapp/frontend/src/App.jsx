@@ -6474,7 +6474,7 @@ export default function App() {
       </div>
 
       {/* FAB — wave7.5.5: скрываем когда открыт любой модал */}
-      {!fabOpen && !fabForm && !modal && !(!isDay && (page === "sess" || page === "rit" || page === "grim")) && (
+      {!fabOpen && !fabForm && !modal && (
         <FAB s={sky} onClick={() => setFabOpen(true)} />
       )}
 
