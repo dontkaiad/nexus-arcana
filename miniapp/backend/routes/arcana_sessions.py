@@ -364,6 +364,7 @@ async def session_by_slug(
                 "decks": [t["deck"]] if t["deck"] else [],
                 "first_date": t["date"],
                 "summary": None,
+                "photo_url": t.get("photo_url"),
                 "is_solo": True,
                 "triplets": [t],
             }
@@ -406,6 +407,7 @@ async def session_by_slug(
     date_local = to_local_date(first_date_raw, tz_offset)
 
     summary_cached = cache_get(session_summary_key(sname, cid)) if sname else None
+    session_photo = next((t["photo_url"] for t in triplets if t.get("photo_url")), None)
 
     return {
         "slug": slug,
@@ -419,6 +421,7 @@ async def session_by_slug(
         "decks": decks,
         "first_date": date_local.isoformat() if date_local else None,
         "summary": summary_cached,
+        "photo_url": session_photo,
         "is_solo": False,
         "triplets": triplets,
     }

@@ -517,6 +517,7 @@ export function adaptSessionGroup(data) {
     decks: data.decks || [],
     firstDate: data.first_date ? formatDate(data.first_date, 'full') : '',
     summary: data.summary || null,
+    photoUrl: data.photo_url || null,
     isSolo: !!data.is_solo,
     triplets: (data.triplets || []).map(adaptSessionDetail),
   }
