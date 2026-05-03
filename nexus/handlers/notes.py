@@ -94,7 +94,8 @@ async def handle_note(
 
     # Иначе — спросить Claude
     prompt = f"Заметка: {text}\nСуществующие теги: {existing}"
-    raw = await ask_claude(prompt, system=TAGS_SYSTEM, max_tokens=100)
+    raw = await ask_claude(prompt, system=TAGS_SYSTEM, max_tokens=100,
+                           model="claude-haiku-4-5-20251001")
 
     try:
         data = json.loads(raw.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip())

@@ -1087,6 +1087,7 @@ async def _handle_receipt_clarify(msg: Message, user_notion_id: str = "") -> boo
                 prompt=f"Уточнение категорий: {text}",
                 system=system,
                 max_tokens=256,
+                model="claude-haiku-4-5-20251001",
             )
             raw = raw.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
             parsed = _json.loads(raw)

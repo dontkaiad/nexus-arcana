@@ -31,7 +31,8 @@ PARSE_DELETE_SYSTEM = """Определи параметры удаления и
 
 async def parse_delete_intent(text: str) -> dict:
     import json
-    raw = await ask_claude(text, system=PARSE_DELETE_SYSTEM, max_tokens=150)
+    raw = await ask_claude(text, system=PARSE_DELETE_SYSTEM, max_tokens=150,
+                           model="claude-haiku-4-5-20251001")
     try:
         raw = raw.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
         return json.loads(raw)

@@ -115,7 +115,8 @@ async def handle_verify(
     """Отметить расклад или ритуал как сбывшийся/не сбывшийся."""
     try:
         # 1. Парсинг через Haiku
-        raw = await ask_claude(text, system=PARSE_VERIFY_SYSTEM, max_tokens=200)
+        raw = await ask_claude(text, system=PARSE_VERIFY_SYSTEM, max_tokens=200,
+                               model="claude-haiku-4-5-20251001")
         data = _parse_json_safe(raw)
         if not data:
             await message.answer("⚠️ Не смог распознать данные. Напиши: «Анна 5 марта — сбылось»")

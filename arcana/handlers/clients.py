@@ -131,6 +131,7 @@ async def handle_client_info(message: Message, text: str, user_notion_id: str = 
         text,
         system="Извлеки только имя клиента. Ответь ТОЛЬКО именем.",
         max_tokens=30,
+        model="claude-haiku-4-5-20251001",
     )).strip()
 
     client = await client_find(name, user_notion_id=user_notion_id)
@@ -201,7 +202,8 @@ async def handle_add_client(message: Message, text: str, user_notion_id: str = "
     """«создай клиента Оля» → проверка дублей → создать / дополнить / сбор инфы."""
     from arcana.pending_clients import save_pending_client
 
-    raw = await ask_claude(text, system=PARSE_CLIENT_SYSTEM, max_tokens=256)
+    raw = await ask_claude(text, system=PARSE_CLIENT_SYSTEM, max_tokens=256,
+                           model="claude-haiku-4-5-20251001")
     data = _parse_json_safe(raw)
     name = data.get("name") or ""
     if not name:
@@ -313,7 +315,8 @@ async def _handle_collecting(
     uid = message.from_user.id
     page_id = pending.get("page_id")
 
-    raw = await ask_claude(text, system=PARSE_CLIENT_INFO, max_tokens=300)
+    raw = await ask_claude(text, system=PARSE_CLIENT_INFO, max_tokens=300,
+                           model="claude-haiku-4-5-20251001")
     data = _parse_json_safe(raw)
 
     updates: Dict[str, Any] = {}

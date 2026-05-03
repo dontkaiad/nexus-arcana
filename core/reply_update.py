@@ -185,7 +185,8 @@ async def parse_reply(page_type: str, reply_text: str) -> Dict[str, Any]:
     system = _TYPE_TO_SYSTEM.get(page_type)
     if not system:
         return {}
-    raw = await ask_claude(reply_text, system=system, max_tokens=300)
+    raw = await ask_claude(reply_text, system=system, max_tokens=300,
+                           model="claude-haiku-4-5-20251001")
     data = _parse_json_safe(raw) or {}
     # Убрать null/пустые
     return {k: v for k, v in data.items() if v not in (None, "", [])}
