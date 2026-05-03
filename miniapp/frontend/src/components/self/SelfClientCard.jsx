@@ -220,15 +220,14 @@ export function SelfListCard({ client, onClick }) {
       <div style={{ position: "relative", display: "flex", alignItems: "center", gap: 12 }}>
         <SelfAvatar size={44} />
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{
-            fontFamily: FONT_DISPLAY, fontSize: 19, fontStyle: "italic",
-            color: "#e9efe8", lineHeight: 1.1,
-          }}>
-            {client.name || "Кай"}
+          <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
             <span style={{
-              fontFamily: FONT_DISPLAY, fontSize: 13, fontStyle: "italic",
-              color: ARCANA_HOLO.gold, opacity: 0.85, marginLeft: 6,
-            }}>· я</span>
+              fontFamily: FONT_DISPLAY, fontSize: 19, fontStyle: "italic",
+              color: "#e9efe8", lineHeight: 1.1,
+            }}>
+              {client.name || "Кай"}
+            </span>
+            <ArchitectBadge accent={ARCANA_HOLO.gold} compact />
           </div>
           <div style={{
             fontFamily: FONT_MONO, fontSize: 10.5, color: "rgba(220,230,220,0.55)",
