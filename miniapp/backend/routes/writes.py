@@ -544,6 +544,72 @@ async def session_verify(
     return {"ok": True, "status": body.status}
 
 
+@router.post("/arcana/works/{work_id}/done")
+async def arcana_work_done(
+    work_id: str,
+    tg_id: int = Depends(current_user_id),
+) -> dict[str, Any]:
+    user_notion_id = (await get_user_notion_id(tg_id)) or ""
+    await _load_owned_page(work_id, user_notion_id)
+    try:
+        await update_page(work_id, {"Status": _status("Done")})
+    except Exception as e:
+        logger.error("arcana_work_done failed: %s", e)
+        raise HTTPException(status_code=500, detail="failed to update status")
+    return {"ok": True, "status": "Done"}
+
+
+@router.post("/arcana/works/{work_id}/cancel")
+async def arcana_work_cancel(
+    work_id: str,
+    tg_id: int = Depends(current_user_id),
+) -> dict[str, Any]:
+    user_notion_id = (await get_user_notion_id(tg_id)) or ""
+    await _load_owned_page(work_id, user_notion_id)
+    try:
+        await update_page(work_id, {"Status": _status("Archived")})
+    except Exception as e:
+        logger.error("arcana_work_cancel failed: %s", e)
+        raise HTTPException(status_code=500, detail="failed to cancel")
+    return {"ok": True, "status": "Archived"}
+
+
+@router.post("/arcana/works/{work_id}/postpone")
+async def arcana_work_postpone(
+    work_id: str,
+    body: PostponeBody,
+    tg_id: int = Depends(current_user_id),
+) -> dict[str, Any]:
+    user_notion_id = (await get_user_notion_id(tg_id)) or ""
+    page = await _load_owned_page(work_id, user_notion_id)
+    today_date, _tz_offset = await today_user_tz(tg_id)
+
+    if body.date:
+        try:
+            new_date = datetime.strptime(body.date, "%Y-%m-%d").date()
+        except ValueError:
+            raise HTTPException(status_code=400, detail="invalid date, expected YYYY-MM-DD")
+    else:
+        deadline_raw = (page.get("properties", {}).get("Дедлайн", {}).get("date") or {}).get("start", "")
+        base = None
+        if deadline_raw:
+            try:
+                base = datetime.fromisoformat(deadline_raw.replace("Z", "+00:00")).date()
+            except ValueError:
+                base = None
+        if not base:
+            base = today_date
+        shift_days = body.days if body.days is not None else 1
+        new_date = base + timedelta(days=shift_days)
+
+    try:
+        await update_page(work_id, {"Дедлайн": _date(new_date.isoformat())})
+    except Exception as e:
+        logger.error("arcana_work_postpone failed: %s", e)
+        raise HTTPException(status_code=500, detail="failed to update deadline")
+    return {"ok": True, "new_date": new_date.isoformat()}
+
+
 @router.post("/arcana/rituals/{ritual_id}/result")
 async def ritual_result(
     ritual_id: str,
