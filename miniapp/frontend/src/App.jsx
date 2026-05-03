@@ -14,6 +14,7 @@ import {
   formatMonth, formatDate, formatShortDate,
 } from "./adapters";
 import { apiGet, apiPost } from "./api";
+import { SelfListCard, SelfDetailHeader } from "./components/self/SelfClientCard.jsx";
 import {
   Sun, Moon as LucideMoon, Check, Coins, List as ListIcon, Brain, Calendar,
   Sparkles as LucideSparkles, Users, Flame as LucideFlame, BookOpen as LucideBookOpen,
@@ -2778,14 +2779,13 @@ function ArClients({ s, openClient }) {
         <Empty s={s} emoji="👥" title="Пока без клиентов" text="Когда придёт первый — появится здесь." />
       )}
       {!loading && !error && view.clients.map((c) => (
+        c.self ? (
+          <SelfListCard key={c.id} client={c} onClick={() => openClient({ id: c.id })} />
+        ) : (
         <Glass
           key={c.id}
           s={s}
-          style={{
-            padding: "10px 14px", marginBottom: 4,
-            background: c.self ? `${s.acc}26` : undefined,
-            borderColor: c.self ? `${s.acc}55` : undefined,
-          }}
+          style={{ padding: "10px 14px", marginBottom: 4 }}
           onClick={() => openClient({ id: c.id })}
         >
           <div
@@ -2801,17 +2801,17 @@ function ArClients({ s, openClient }) {
                   width: 36,
                   height: 36,
                   borderRadius: "50%",
-                  background: c.self ? `${s.acc}55` : `${s.acc}22`,
+                  background: `${s.acc}22`,
                   display: "flex",
                   alignItems: "center",
                   justifyContent: "center",
-                  fontSize: fs(c.self ? 18 : 14),
+                  fontSize: fs(14),
                   color: s.acc,
                   fontWeight: 500,
                   fontFamily: H,
                 }}
               >
-                {c.self ? "🌟" : c.initial}
+                {c.initial}
               </div>
               <div>
                 <div style={{ fontSize: fs(13), color: s.text, fontWeight: 500 }}>
@@ -2836,6 +2836,7 @@ function ArClients({ s, openClient }) {
             )}
           </div>
         </Glass>
+        )
       ))}
     </div>
   );
@@ -3812,13 +3813,25 @@ function ClientDetail({ s, id }) {
     });
   return (
     <div>
+      {isSelf ? (
+        <div style={{ position: "relative" }}>
+          <SelfDetailHeader client={c} />
+          <span
+            onClick={() => setEditOpen((v) => !v)}
+            style={{
+              position: "absolute", top: 14, right: 14,
+              cursor: "pointer", color: "rgba(220,230,220,0.55)",
+              display: "flex", zIndex: 5,
+            }}
+            title="Редактировать"
+          >
+            <StickyNote size={fs(15)} />
+          </span>
+        </div>
+      ) : (
       <div
         style={{
           display: "flex", gap: 14, marginBottom: 16,
-          padding: isSelf ? "12px" : "0",
-          borderRadius: isSelf ? 16 : 0,
-          background: isSelf ? `${s.acc}26` : "transparent",
-          border: isSelf ? `1px solid ${s.acc}55` : "none",
         }}
       >
         <div
@@ -3826,27 +3839,22 @@ function ClientDetail({ s, id }) {
             width: 64,
             height: 64,
             borderRadius: 16,
-            background: isSelf
-              ? `${s.acc}55`
-              : `linear-gradient(135deg, ${s.acc}, ${s.acc}aa)`,
+            background: `linear-gradient(135deg, ${s.acc}, ${s.acc}aa)`,
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
-            fontSize: fs(isSelf ? 32 : 28),
-            color: isSelf ? s.acc : "#fff",
+            fontSize: fs(28),
+            color: "#fff",
             fontFamily: H,
             fontWeight: 500,
             flexShrink: 0,
           }}
         >
-          {isSelf ? "🌟" : c.initial}
+          {c.initial}
         </div>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontFamily: H, fontSize: fs(22), fontWeight: 500, display: "flex", alignItems: "center", gap: 6 }}>
             <span>{(c.status || "").split(" ")[0]} {c.name}</span>
-            {isSelf && (
-              <span style={{ fontSize: fs(13), color: s.acc, fontWeight: 500 }}>· я</span>
-            )}
             <span
               onClick={() => setEditOpen((v) => !v)}
               style={{ marginLeft: "auto", cursor: "pointer", color: s.tS, display: "flex" }}
@@ -3870,6 +3878,7 @@ function ClientDetail({ s, id }) {
           </div>
         </div>
       </div>
+      )}
 
       {editOpen && (
         <ClientEditForm
