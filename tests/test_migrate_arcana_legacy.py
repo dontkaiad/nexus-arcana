@@ -49,6 +49,30 @@ def test_extract_bottom_from_legacy_interp(text, expected):
         assert got == expected
 
 
+# ── _normalize_card_name ────────────────────────────────────────────────────
+
+@pytest.mark.parametrize("raw,expected", [
+    ("король кубков",  "Король Кубков"),
+    ("КОРОЛЬ КУБКОВ",  "Король Кубков"),
+    ("Король Кубков",  "Король Кубков"),
+    ("корль кубков",   "Король Кубков"),  # fuzzy
+])
+def test_normalize_card_name_canonicalizes(raw, expected):
+    from core.preprocess import _tarot_card_names_ru
+    canonical = _tarot_card_names_ru()
+    assert m._normalize_card_name(raw, canonical) == expected
+
+
+def test_normalize_card_name_unknown_returns_as_is(capsys):
+    from core.preprocess import _tarot_card_names_ru
+    canonical = _tarot_card_names_ru()
+    out = m._normalize_card_name("Несуществующая Карта", canonical)
+    assert out == "Несуществующая Карта"
+    captured = capsys.readouterr()
+    assert "WARN" in captured.out
+    assert "Несуществующая Карта" in captured.out
+
+
 # ── _migrate_record ─────────────────────────────────────────────────────────
 
 def _page(interp: str, bottom: str = "") -> dict:
