@@ -40,6 +40,9 @@ def test_detect_html_in_interp(text, expected):
     (None, None),
     # «🂠 [Дно колоды]» — структурный header, не имя карты
     ("Текст\n🂠 [Дно колоды]\nТуз", None),
+    # legacy edge cases с колоды → / (прямо) — видели в проде
+    ("🂠 Дно колоды → Король Кубков (прямо):", "Король Кубков"),
+    ("🂠 Дно колоды → Король Кубков (прямое положение):", "Король Кубков"),
 ])
 def test_extract_bottom_from_legacy_interp(text, expected):
     got = m._extract_bottom_from_legacy_interp(text)

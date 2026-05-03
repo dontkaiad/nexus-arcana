@@ -102,24 +102,37 @@ def _extract_bottom_from_legacy_interp(text: str) -> Optional[str]:
     if not text:
         return None
     s = str(text)
-    # Вариант 1: «🂠 Дно: КартаX»
-    m = re.search(r"🂠\s*Дно[:\s]+([^\n<·]+)", s)
+    # Вариант 1: «🂠 Дно[\s+колоды][\s:→\s]+ Карта (доп. инфо)»
+    m = re.search(
+        r"🂠\s*Дно(?:\s+колоды?)?\s*[:→\s]+([^\n<·(]+)",
+        s, flags=re.IGNORECASE,
+    )
     if m:
-        name = m.group(1).strip(" .,;<>")
+        name = _clean_card_fragment(m.group(1))
         if name:
             return name
-    # Вариант 2: «🂠 КартаX · фон» (новый формат)
+    # Вариант 2: «🂠 Карта · фон» (новый формат)
     m = re.search(r"🂠\s+([^\n<·]+?)\s*·\s*фон", s)
     if m:
-        return m.group(1).strip(" .,;<>")
-    # Вариант 3: «🂠 КартаX» (просто символ + имя на той же строке)
-    m = re.search(r"🂠\s+([^\n<·]+?)(?:\s*</?[a-zA-Z]|$)", s, flags=re.MULTILINE)
+        return _clean_card_fragment(m.group(1))
+    # Вариант 3: «🂠 Карта» (просто символ + имя на той же строке)
+    m = re.search(r"🂠\s+([^\n<·(]+?)(?:\s*</?[a-zA-Z]|$)",
+                  s, flags=re.MULTILINE)
     if m:
-        cand = m.group(1).strip(" .,;<>")
-        # Отбрасываем явный мусор / структурные подписи
-        if cand and cand.lower() not in {"дно колоды", "дно"}:
+        cand = _clean_card_fragment(m.group(1))
+        if cand and cand.lower() not in {"дно колоды", "дно", "колоды"}:
             return cand
     return None
+
+
+def _clean_card_fragment(raw: str) -> str:
+    """Чистит legacy-фрагмент: убирает «колоды →», «(прямо)», знаки препинания."""
+    s = (raw or "").strip(" .,;:<>→—-")
+    # Срезаем стрелочный префикс типа «колоды → »
+    s = re.sub(r"^(колоды?\s*[→:>-]+\s*)", "", s, flags=re.IGNORECASE)
+    # Срезаем хвостовой «(прямо)/(перевёрнутая)/(перевернутая)/(прямое положение)»
+    s = re.sub(r"\s*\([^)]*\)\s*$", "", s)
+    return s.strip(" .,;:<>→—-")
 
 
 def _migrate_record(page: dict) -> dict:
