@@ -155,6 +155,7 @@ function moonPhase(dt = new Date()) {
 
 const H = "'Newsreader', 'Lora', Georgia, serif";
 const B = "'Manrope', -apple-system, 'SF Pro Text', system-ui, sans-serif";
+const FONT_MONO = "'JetBrains Mono', 'SF Mono', ui-monospace, Menlo, Monaco, monospace";
 
 // wave8.20: глобальный масштаб шрифтов и иконок для читаемости на мобильном.
 // Применяется ко всем inline fontSize и size={...} через `fs()`.
@@ -2898,6 +2899,20 @@ function ArRituals({ s, openRitual }) {
 // ARCANA — GRIMOIRE
 // ═══════════════════════════════════════════════════════════════
 
+const GRIM_GOLD = "#d4a843";
+const GRIM_GOLD_BG = "rgba(212,168,67,0.10)";
+const GRIM_SAGE = "#5a9a8a";
+
+function GrimoireThemeChip({ theme }) {
+  return (
+    <span style={{
+      fontSize: 10, padding: "2px 7px", borderRadius: 8,
+      color: GRIM_GOLD, background: GRIM_GOLD_BG,
+      whiteSpace: "nowrap",
+    }}>{theme}</span>
+  );
+}
+
 function ArGrimoire({ s, openGrimoire }) {
   const [cat, setCat] = useState("all");
   const [q, setQ] = useState("");
@@ -2907,7 +2922,15 @@ function ArGrimoire({ s, openGrimoire }) {
   const path = "/api/arcana/grimoire" + (params.length ? "?" + params.join("&") : "");
   const { data, loading, error, refetch } = useApi(path, [cat, q]);
   const view = loading || error ? { items: [], categories: [] } : adaptGrimoire(data);
-  const cats = ["all", ...view.categories];
+  const totalAll = view.categories.reduce((a, c) => a + (c.count || 0), 0);
+  const cats = [{ name: "all", count: totalAll }, ...view.categories];
+
+  // Префикс: иконка категории — первое emoji-слово (📿 / 🧴 / ✨ / 📝)
+  const catIcon = (name) => {
+    if (!name || name === "all") return null;
+    const first = name.split(" ")[0];
+    return first;
+  };
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
@@ -2915,8 +2938,8 @@ function ArGrimoire({ s, openGrimoire }) {
       <SearchInput s={s} value={q} onChange={setQ} placeholder="Поиск в гримуаре" />
       <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
         {cats.map((c) => (
-          <Pill key={c} s={s} active={cat === c} onClick={() => setCat(c)}>
-            {c === "all" ? "Все" : c}
+          <Pill key={c.name} s={s} active={cat === c.name} onClick={() => setCat(c.name)}>
+            {c.name === "all" ? "Все" : c.name} · {c.count}
           </Pill>
         ))}
       </div>
@@ -2926,27 +2949,49 @@ function ArGrimoire({ s, openGrimoire }) {
         <Empty
           s={s}
           emoji="📖"
-          title="Гримуар пуст"
-          text={'Добавляй через бота: «запиши в гримуар: …»'}
+          title={cat === "all" ? "Гримуар пуст" : "В этой категории пусто"}
+          text={
+            cat === "all"
+              ? 'Добавляй через бота: «запиши в гримуар: …»'
+              : 'В этой категории пока ничего. Добавь через бота: «запиши в гримуар: …»'
+          }
         />
       )}
       {!loading && !error && view.items.map((g) => (
         <Glass
           key={g.id}
           s={s}
-          style={{ padding: "10px 14px", marginBottom: 4 }}
+          style={{ padding: "12px 14px", marginBottom: 6 }}
           onClick={openGrimoire ? () => openGrimoire({ id: g.id }) : undefined}
         >
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
-            <span style={{ fontSize: fs(14), color: s.text, fontWeight: 500, flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-              {g.name}
+          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            {catIcon(g.cat) && (
+              <span style={{ fontSize: fs(15), flexShrink: 0 }}>{catIcon(g.cat)}</span>
+            )}
+            <span style={{
+              fontFamily: H, fontSize: fs(16), fontWeight: 500,
+              color: s.text, flex: 1, minWidth: 0,
+              overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+            }}>
+              {g.name || "—"}
             </span>
-            <span style={{ fontSize: fs(13), flexShrink: 0 }}>{g.theme}</span>
+            {g.verified && (
+              <span style={{ color: GRIM_SAGE, fontSize: fs(13), flexShrink: 0 }}>✓</span>
+            )}
           </div>
-          <div style={{ fontSize: fs(10), color: s.tM, marginTop: 2 }}>{g.cat}</div>
+          {g.themes.length > 0 && (
+            <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginTop: 6 }}>
+              {g.themes.map((t, i) => <GrimoireThemeChip key={i} theme={t} />)}
+            </div>
+          )}
           {g.preview && (
-            <div style={{ fontSize: fs(11), color: s.tS, marginTop: 4, lineHeight: 1.4 }}>
+            <div style={{ fontSize: fs(12), color: s.tS, marginTop: 6, lineHeight: 1.5 }}>
               {g.preview}
+            </div>
+          )}
+          {g.source && (
+            <div style={{ fontSize: fs(10), color: s.tM, marginTop: 6 }}>
+              📚 {g.source}
             </div>
           )}
         </Glass>
@@ -5815,20 +5860,80 @@ function GrimoireDetail({ s, id }) {
   if (error) return <ErrorBox s={s} error={error} refetch={refetch} />;
   const g = adaptGrimoireDetail(data);
   if (!g) return null;
+  const catIcon = g.cat ? g.cat.split(" ")[0] : "📖";
+  const catLabel = g.cat ? g.cat.split(" ").slice(1).join(" ") || g.cat : "";
   return (
     <div>
-      <div style={{ fontFamily: H, fontSize: fs(20), marginBottom: 6 }}>{g.name}</div>
-      <div style={{ fontSize: fs(11), color: s.tS, marginBottom: 12 }}>
-        {g.cat}{g.themes.length > 0 ? ` · ${g.themes.join(", ")}` : ""}
+      {/* Шапка: иконка + caption uppercase золотым + название Lora */}
+      <div style={{ display: "flex", gap: 12, alignItems: "flex-start", marginBottom: 10 }}>
+        <div style={{ fontSize: fs(28), lineHeight: 1, marginTop: 2 }}>{catIcon}</div>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{
+            fontFamily: FONT_MONO, fontSize: fs(10), color: GRIM_GOLD,
+            letterSpacing: "0.3em", textTransform: "uppercase", marginBottom: 4,
+          }}>
+            {catLabel || "запись"}
+          </div>
+          <div style={{
+            fontFamily: H, fontSize: fs(22), fontWeight: 500,
+            color: s.text, lineHeight: 1.2,
+          }}>
+            {g.name}
+          </div>
+          {g.themes.length > 0 && (
+            <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginTop: 8 }}>
+              {g.themes.map((t, i) => <GrimoireThemeChip key={i} theme={t} />)}
+            </div>
+          )}
+        </div>
       </div>
-      <Glass s={s} accent={s.acc} style={{ padding: "12px 14px", marginBottom: 10 }}>
-        <div style={{ fontSize: fs(13), color: s.text, lineHeight: 1.6, whiteSpace: "pre-wrap" }}>
+
+      {/* Текст — Lora 14, накладной border-left золотом */}
+      <div style={{
+        padding: "14px 16px", marginBottom: 12,
+        background: s.card, borderRadius: 12,
+        borderLeft: `2px solid ${GRIM_GOLD}`,
+        backdropFilter: "blur(10px)",
+      }}>
+        <div style={{
+          fontFamily: FONT_MONO, fontSize: fs(9), color: s.tM,
+          letterSpacing: "0.25em", textTransform: "uppercase", marginBottom: 6,
+        }}>Текст</div>
+        <div style={{
+          fontFamily: H, fontSize: fs(14), color: s.text,
+          lineHeight: 1.7, whiteSpace: "pre-wrap",
+        }}>
           {g.content || "Текст пока не заполнен."}
         </div>
-      </Glass>
-      {g.source && (
-        <div style={{ fontSize: fs(11), color: s.tS, fontStyle: "italic" }}>
-          Источник: {g.source}
+      </div>
+
+      {/* Источник + бэйдж «Проверено» */}
+      {(g.source || g.verified) && (
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          {g.source && (
+            <div style={{
+              flex: 1, minWidth: 120,
+              padding: "10px 12px", borderRadius: 10,
+              background: s.card, border: `1px solid ${s.brd}`,
+              fontSize: fs(11), color: s.tS,
+            }}>
+              <div style={{
+                fontFamily: FONT_MONO, fontSize: fs(9), color: s.tM,
+                letterSpacing: "0.25em", textTransform: "uppercase", marginBottom: 4,
+              }}>Источник</div>
+              <div style={{ color: s.text }}>📚 {g.source}</div>
+            </div>
+          )}
+          {g.verified && (
+            <div style={{
+              padding: "10px 12px", borderRadius: 10,
+              background: `${GRIM_SAGE}1f`, border: `1px solid ${GRIM_SAGE}55`,
+              fontSize: fs(12), color: GRIM_SAGE, fontWeight: 500,
+              display: "flex", alignItems: "center", gap: 6,
+            }}>
+              ✓ Проверено
+            </div>
+          )}
         </div>
       )}
     </div>
