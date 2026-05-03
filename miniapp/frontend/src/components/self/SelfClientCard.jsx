@@ -252,6 +252,8 @@ export function SelfDetailHeader({ client }) {
     .split(/[,;\n]+/)
     .map((x) => x.trim())
     .filter(Boolean);
+  const handles = contactItems.filter((x) => x.startsWith("@"));
+  const phones = contactItems.filter((x) => !x.startsWith("@"));
   return (
     <div style={{
       position: "relative", padding: 18, borderRadius: 18,
@@ -275,14 +277,17 @@ export function SelfDetailHeader({ client }) {
         animation: "holo-shine 6s ease-in-out infinite",
         pointerEvents: "none",
       }} />
-      <div style={{
-        position: "absolute", left: "50%", top: "32%",
-        width: 220, height: 220, borderRadius: "50%",
-        transform: "translate(-50%, -50%)",
-        background: `radial-gradient(circle, ${ARCANA_HOLO.cyan}33, ${ARCANA_HOLO.magenta}22 40%, transparent 70%)`,
-        filter: "blur(20px)",
-        pointerEvents: "none",
-      }} />
+      {/* sigil background — geometric grid + concentric shapes (ported from V6OneDetailCard) */}
+      <div style={{ position: "absolute", inset: 0, overflow: "hidden", pointerEvents: "none" }}>
+        <div style={{
+          position: "absolute", inset: 0,
+          backgroundImage: `linear-gradient(${ARCANA_HOLO.cyan}10 1px, transparent 1px),
+                            linear-gradient(90deg, ${ARCANA_HOLO.cyan}10 1px, transparent 1px)`,
+          backgroundSize: "24px 24px",
+          maskImage: "radial-gradient(circle at 50% 32%, black 30%, transparent 75%)",
+          WebkitMaskImage: "radial-gradient(circle at 50% 32%, black 30%, transparent 75%)",
+        }} />
+      </div>
       <div style={{ position: "relative", textAlign: "center" }}>
         <div style={{
           display: "flex", justifyContent: "space-between", alignItems: "center",
@@ -294,46 +299,57 @@ export function SelfDetailHeader({ client }) {
           }}>FOIL · 001/001</span>
           <ArchitectBadge accent={ARCANA_HOLO.gold} compact />
         </div>
-        <div style={{ display: "flex", justifyContent: "center", padding: "10px 0 4px" }}>
-          <SelfAvatarBig size={90} />
+        <div style={{ display: "flex", justifyContent: "center", padding: "14px 0 6px", position: "relative" }}>
+          <svg style={{
+            position: "absolute", left: "50%", top: "50%",
+            transform: "translate(-50%, -50%)",
+            width: 210, height: 210, pointerEvents: "none",
+          }} viewBox="0 0 320 320">
+            <g stroke={`${ARCANA_HOLO.gold}55`} fill="none" strokeWidth="0.8">
+              <circle cx="160" cy="160" r="150" />
+              <circle cx="160" cy="160" r="120" strokeDasharray="3 5" />
+              <polygon points="160,30 272,224 48,224" />
+              <polygon points="160,290 48,96 272,96" opacity="0.5" />
+            </g>
+          </svg>
+          <ClampedLivingEye size={150} accent={ARCANA_HOLO.cyan} bgFill="#0a0e18" />
         </div>
         <div style={{
-          fontFamily: FONT_DISPLAY, fontSize: 32, fontStyle: "italic",
-          color: "#f2eee8", lineHeight: 1, marginTop: 4,
+          fontFamily: FONT_DISPLAY, fontSize: 38, fontStyle: "italic",
+          color: "#f2eee8", lineHeight: 1, marginTop: 6,
         }}>
           {client.name || "Кай"}
         </div>
         <div style={{
-          fontFamily: FONT_MONO, fontSize: 9, color: ARCANA_HOLO.cyan,
+          fontFamily: FONT_MONO, fontSize: 9.5, color: ARCANA_HOLO.cyan,
           marginTop: 7, letterSpacing: "0.32em", textTransform: "uppercase", opacity: 0.9,
         }}>
           архитектор · видящий
         </div>
-        {contactItems.length > 0 && (
+        {(handles.length > 0 || phones.length > 0) && (
           <>
             <div style={{
-              margin: "14px auto 0", maxWidth: 240, height: 1,
+              margin: "16px auto 0", maxWidth: 240, height: 1,
               background: `linear-gradient(90deg, transparent, ${ARCANA_HOLO.magenta}66, transparent)`,
             }} />
             <div style={{
-              marginTop: 12, padding: "10px 14px", borderRadius: 12,
+              marginTop: 14, padding: "12px 14px", borderRadius: 12,
               background: "rgba(0,0,0,0.28)",
               border: `0.5px solid rgba(140,200,180,0.18)`,
               textAlign: "left",
             }}>
               <div style={{
-                fontFamily: FONT_UI, fontSize: 12, color: "rgba(220,230,220,0.7)",
-                lineHeight: 1.7,
+                fontFamily: FONT_UI, fontSize: 12,
+                color: "rgba(220,230,220,0.7)", lineHeight: 1.7,
               }}>
-                {contactItems.map((raw, i) => {
-                  const isHandle = raw.startsWith("@");
-                  const fontFamily = isHandle ? FONT_UI : FONT_MONO;
-                  return (
-                    <div key={i} style={{ fontFamily }}>
-                      {isHandle ? "✈️" : "📱"} {raw}
-                    </div>
-                  );
-                })}
+                {handles.length > 0 && (
+                  <div>
+                    𝕏 {handles.join(" · ")}
+                  </div>
+                )}
+                {phones.map((p, i) => (
+                  <div key={i} style={{ fontFamily: FONT_MONO, fontSize: 11 }}>{p}</div>
+                ))}
               </div>
             </div>
           </>
