@@ -7,10 +7,7 @@ import re
 from datetime import date, datetime, timedelta, timezone
 from typing import Any, Optional, Union
 
-try:
-    import holidays as _holidays_pkg
-except ImportError:
-    _holidays_pkg = None
+from core.ru_calendar import get_month_info as _get_ru_month_info
 
 from fastapi import APIRouter, Depends, Query
 
@@ -174,30 +171,7 @@ def _page_created_date(page: dict, tz_offset: int) -> Optional[date]:
     return dt.astimezone(timezone(timedelta(hours=tz_offset))).date()
 
 
-def _ru_holidays_info(year: int, month_num: int) -> list[dict]:
-    """Праздники РФ в указанном месяце как list[{day, name}], сортировка по day.
-
-    holidays-пакет уже учитывает переносы выходных. Если пакет не установлен —
-    возвращаем пустой список.
-    """
-    if _holidays_pkg is None:
-        return []
-    try:
-        h = _holidays_pkg.RU(years=year)
-    except Exception as e:
-        logger.warning("holidays.RU init failed: %s", e)
-        return []
-    out: list[dict] = []
-    for d, name in h.items():
-        if d.year == year and d.month == month_num:
-            out.append({"day": d.day, "name": name})
-    out.sort(key=lambda x: x["day"])
-    return out
-
-
-def _ru_holiday_days(year: int, month_num: int) -> list[int]:
-    """Только дни месяца — для подсветки цифр в сетке."""
-    return sorted({h["day"] for h in _ru_holidays_info(year, month_num)})
+# ru_calendar используется напрямую через _get_ru_month_info в handler'е.
 
 
 @router.get("/calendar")
@@ -312,12 +286,13 @@ async def get_calendar(
     for bucket in days.values():
         bucket["tasks"].sort(key=lambda t: (t.get("time") is None, t.get("time") or ""))
 
-    holidays_info = _ru_holidays_info(y, m)
-    holiday_days = sorted({h["day"] for h in holidays_info})
+    ru_info = await _get_ru_month_info(y, m)
 
     return {
         "month": month,
         "days": days,
-        "holiday_days": holiday_days,
-        "holidays_info": holidays_info,
+        "holiday_days": ru_info["holiday_days"],
+        "short_days": ru_info["short_days"],
+        "working_weekends": ru_info["working_weekends"],
+        "holidays_info": ru_info["holidays_info"],
     }
