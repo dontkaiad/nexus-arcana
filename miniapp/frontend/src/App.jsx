@@ -2430,13 +2430,21 @@ function NxCal({ s }) {
     `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`
   );
   const [picked, setPicked] = useState(now.getDate());
+  const [weekStart, setWeekStart] = useState(() => {
+    const d = new Date();
+    const dow = (d.getDay() + 6) % 7;  // Пн=0
+    d.setDate(d.getDate() - dow);
+    d.setHours(0, 0, 0, 0);
+    return d;
+  });
   const [doneIds, setDoneIds] = useState({});
   const daysShort = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"];
 
   const { data, loading, error, refetch } = useApi(`/api/calendar?month=${monthStr}`, [monthStr]);
-  const { tasksByDay, overdueByDay } = loading || error
-    ? { tasksByDay: {}, overdueByDay: {} }
+  const { tasksByDay, overdueByDay, holidayDays } = loading || error
+    ? { tasksByDay: {}, overdueByDay: {}, holidayDays: [] }
     : adaptCalendar(data);
+  const holidaySet = useMemo(() => new Set(holidayDays || []), [holidayDays]);
 
   const toggleCalTask = async (id) => {
     if (!id || doneIds[id]) return;
@@ -2540,9 +2548,17 @@ function NxCal({ s }) {
     const count = Array.isArray(has) ? has.length : 0;
     const hasOverdue = inMonth && !!overdueByDay[d];
     const isWeekend = di === 5 || di === 6;
-    const dotColor = "#6b8f71";        // sage
+    const isHoliday = inMonth && holidaySet.has(d);
+    const dotColor = "#6b8f71";        // sage — задачи
     const overdueColor = "#9c5440";    // red
     const todayBorder = "#b07a2e";     // gold
+    const weekendColor = "#6b8f71";    // sage tint для цифры выходного
+    const holidayColor = "#b07a2e";    // gold для цифры праздника
+    let numColor = s.text;
+    if (isPicked) numColor = s.acc;
+    else if (isToday) numColor = todayBorder;
+    else if (isHoliday) numColor = holidayColor;
+    else if (isWeekend) numColor = weekendColor;
     return (
       <div
         key={di}
@@ -2562,17 +2578,24 @@ function NxCal({ s }) {
             ? `1px solid ${s.acc}99`
             : "1px solid transparent",
           cursor: inMonth ? "pointer" : "default",
-          minHeight: 38,
+          minHeight: 42,
           position: "relative",
-          opacity: !inMonth ? 0.35 : isWeekend ? 0.75 : 1,
+          opacity: !inMonth ? 0.35 : 1,
         }}
       >
+        {isHoliday && !isToday && (
+          <span style={{
+            position: "absolute", top: 2, left: "50%", transform: "translateX(-50%)",
+            width: 4, height: 4, borderRadius: 2, background: holidayColor,
+          }} />
+        )}
         <div
           style={{
             fontSize: fs(13),
-            fontWeight: isToday || isPicked ? 500 : 400,
-            color: isToday ? todayBorder : isPicked ? s.acc : s.text,
+            fontWeight: isToday || isPicked || isHoliday ? 500 : 400,
+            color: numColor,
             fontFamily: H,
+            marginTop: isHoliday && !isToday ? 4 : 0,
           }}
         >
           {d}
@@ -2595,7 +2618,7 @@ function NxCal({ s }) {
             )}
           </div>
         )}
-        {!hasOverdue && count === 0 && inMonth && /* placeholder spacing */ <div style={{ height: 7 }} />}
+        {!hasOverdue && count === 0 && inMonth && <div style={{ height: 7 }} />}
       </div>
     );
   };
@@ -2654,53 +2677,119 @@ function NxCal({ s }) {
       )}
 
       {view === "week" && (() => {
-        // Wave6.6.2: простой Week-вид — 7 дней подряд с задачами списком
         const today = new Date();
-        const startWeekDate = new Date(today);
-        const dow = (today.getDay() + 6) % 7;  // Пн=0
-        startWeekDate.setDate(today.getDate() - dow);
+        const todayKeyIso = today.toDateString();
         const weekDays = [];
         for (let i = 0; i < 7; i++) {
-          const d = new Date(startWeekDate);
-          d.setDate(startWeekDate.getDate() + i);
+          const d = new Date(weekStart);
+          d.setDate(weekStart.getDate() + i);
           const dayNum = d.getDate();
-          const isSameMonth =
-            d.getFullYear() === year && d.getMonth() === month0;
+          const isSameMonth = d.getFullYear() === year && d.getMonth() === month0;
           weekDays.push({
             dayNum, isSameMonth, date: d,
-            label: `${daysShort[i]}, ${dayNum}`,
+            weekday: daysShort[i],
             tasks: isSameMonth ? (tasksByDay[dayNum] || []) : [],
-            isToday: d.toDateString() === today.toDateString(),
+            isToday: d.toDateString() === todayKeyIso,
+            isHoliday: isSameMonth && holidaySet.has(dayNum),
+            isWeekend: i === 5 || i === 6,
           });
         }
+        const lastDay = weekDays[6].date;
+        const fmt = (d) => `${d.getDate()} ${RU_MONTHS_GEN[d.getMonth()]}`;
+        const headerTitle = weekStart.getMonth() === lastDay.getMonth()
+          ? `${weekStart.getDate()}–${lastDay.getDate()} ${RU_MONTHS_GEN[lastDay.getMonth()]}`
+          : `${fmt(weekStart)} – ${fmt(lastDay)}`;
+        const goPrevWeek = () => {
+          const d = new Date(weekStart);
+          d.setDate(d.getDate() - 7);
+          setWeekStart(d);
+          // если новый weekStart в другом месяце — синкаем monthStr
+          if (d.getMonth() !== month0 || d.getFullYear() !== year) {
+            setMonthStr(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`);
+          }
+        };
+        const goNextWeek = () => {
+          const d = new Date(weekStart);
+          d.setDate(d.getDate() + 7);
+          setWeekStart(d);
+          if (d.getMonth() !== month0 || d.getFullYear() !== year) {
+            setMonthStr(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`);
+          }
+        };
+        const goThisWeek = () => {
+          const d = new Date();
+          const dow = (d.getDay() + 6) % 7;
+          d.setDate(d.getDate() - dow);
+          d.setHours(0, 0, 0, 0);
+          setWeekStart(d);
+          setMonthStr(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`);
+          setPicked(new Date().getDate());
+        };
+        const isThisWeek = (() => {
+          const d = new Date();
+          const dow = (d.getDay() + 6) % 7;
+          d.setDate(d.getDate() - dow);
+          d.setHours(0, 0, 0, 0);
+          return d.getTime() === weekStart.getTime();
+        })();
         return (
-          <Glass s={s} style={{ padding: "10px 12px" }}>
-            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          <Glass s={s} style={{ padding: "12px 12px" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
+              <span onClick={goPrevWeek}
+                style={{ cursor: "pointer", padding: "2px 8px", color: s.tS, fontSize: fs(20), lineHeight: 1 }}
+                aria-label="Предыдущая неделя">‹</span>
+              <span className="list-group-h" style={{
+                flex: 1, margin: 0, fontStyle: "italic", textAlign: "center",
+                fontSize: "clamp(18px, 5vw, 22px)",
+              }}>{headerTitle}</span>
+              {!isThisWeek && (<Pill s={s} onClick={goThisWeek}>Сегодня</Pill>)}
+              <span onClick={goNextWeek}
+                style={{ cursor: "pointer", padding: "2px 8px", color: s.tS, fontSize: fs(20), lineHeight: 1 }}
+                aria-label="Следующая неделя">›</span>
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
               {weekDays.map((wd, i) => {
                 const isPicked = wd.isSameMonth && wd.dayNum === picked;
+                const todayBorder = "#b07a2e";
+                const holidayColor = "#b07a2e";
+                const weekendColor = "#6b8f71";
+                let labelColor = s.text;
+                if (isPicked) labelColor = s.acc;
+                else if (wd.isToday) labelColor = todayBorder;
+                else if (wd.isHoliday) labelColor = holidayColor;
+                else if (wd.isWeekend) labelColor = weekendColor;
                 return (
-                  <div
-                    key={i}
-                    onClick={() => { if (wd.isSameMonth) setPicked(wd.dayNum); }}
+                  <Glass
+                    key={i} s={s}
                     style={{
-                      padding: "8px 10px", borderRadius: 8,
+                      padding: "10px 12px",
                       cursor: wd.isSameMonth ? "pointer" : "default",
                       opacity: wd.isSameMonth ? 1 : 0.4,
                       background: isPicked
-                        ? `${s.acc}30`
-                        : wd.isToday ? `${s.acc}18` : "transparent",
-                      border: `1px solid ${isPicked ? s.acc + "99" : wd.isToday ? s.acc + "55" : s.brd}`,
-                    }}>
+                        ? `${s.acc}22`
+                        : wd.isToday ? `${todayBorder}18` : undefined,
+                      border: wd.isToday
+                        ? `1.5px solid ${todayBorder}`
+                        : isPicked
+                        ? `1px solid ${s.acc}99`
+                        : undefined,
+                    }}
+                    onClick={() => { if (wd.isSameMonth) setPicked(wd.dayNum); }}
+                  >
                     <div style={{
-                      display: "flex", justifyContent: "space-between",
-                      fontSize: fs(12),
-                      color: isPicked || wd.isToday ? s.acc : s.text, fontWeight: 500,
+                      display: "flex", justifyContent: "space-between", alignItems: "baseline",
+                      fontSize: fs(12), color: labelColor, fontWeight: 500,
                     }}>
-                      <span>{wd.label}</span>
-                      <span style={{ color: s.tS }}>{wd.tasks.length > 0 ? `${wd.tasks.length} шт.` : ""}</span>
+                      <span>
+                        {wd.weekday}, {wd.dayNum}
+                        {wd.isHoliday && <span style={{ marginLeft: 6, fontSize: fs(10) }}>✦</span>}
+                      </span>
+                      <span style={{ color: s.tS, fontSize: fs(11) }}>
+                        {wd.tasks.length > 0 ? `${wd.tasks.length} шт.` : "свободно"}
+                      </span>
                     </div>
                     {wd.tasks.length > 0 && (
-                      <div style={{ marginTop: 4 }}>
+                      <div style={{ marginTop: 6 }}>
                         {wd.tasks.slice(0, 3).map((t, j) => (
                           <div key={j} style={{ fontSize: fs(11), color: s.tS, marginTop: 2 }}>
                             • {t.time ? `${t.time} ` : ''}{t.title}
@@ -2713,31 +2802,69 @@ function NxCal({ s }) {
                         )}
                       </div>
                     )}
-                  </div>
+                  </Glass>
                 );
               })}
             </div>
           </Glass>
         );
       })()}
-      <SectionLabel s={s}>
-        {picked} {RU_MONTHS_GEN[month0]}
-      </SectionLabel>
-      {loading && <Empty s={s} text="Загружаю..." />}
-      {!loading && !tasksByDay[picked] && (
-        <Empty s={s} chill emoji="📅" text="В этот день всё свободно" />
-      )}
-      {!loading && (tasksByDay[picked] || []).map((t, i) => (
-        <TaskRow
-          key={t.id || i}
-          s={s}
-          t={t}
-          done={!!doneIds[t.id]}
-          onToggle={() => toggleCalTask(t.id)}
-          onOpen={() => {}}
-          withTime={!!t.time}
-        />
-      ))}
+
+      {/* Подробности выбранного дня — заголовок + список ВНУТРИ одной карточки */}
+      <Glass s={s} style={{ padding: "12px 14px" }}>
+        <div className="list-group-h lg" style={{ margin: "0 0 8px" }}>
+          {picked} {RU_MONTHS_GEN[month0]}
+        </div>
+        {loading && <div style={{ fontSize: fs(13), color: s.tS, padding: "6px 0" }}>Загружаю…</div>}
+        {!loading && !tasksByDay[picked] && (
+          <div style={{ textAlign: "center", padding: "12px 4px 4px" }}>
+            <div style={{ fontSize: fs(36), marginBottom: 6 }}>📅</div>
+            <div style={{ fontSize: fs(13), color: s.tM }}>В этот день всё свободно</div>
+          </div>
+        )}
+        {!loading && (tasksByDay[picked] || []).length > 0 && (
+          <div style={{ display: "flex", flexDirection: "column" }}>
+            {(tasksByDay[picked] || []).map((t, i) => {
+              const done = !!doneIds[t.id];
+              return (
+                <div key={t.id || i} style={{
+                  display: "flex", alignItems: "center", gap: 10,
+                  padding: "10px 0",
+                  borderTop: i === 0 ? "none" : `1px solid ${s.brd}`,
+                  opacity: done ? 0.45 : 1,
+                }}>
+                  {t.time && (
+                    <span style={{
+                      fontFamily: "'SF Mono', Menlo, monospace",
+                      fontSize: fs(14), color: s.acc, fontWeight: 600, minWidth: 44,
+                    }}>{t.time}</span>
+                  )}
+                  <Chk s={s} done={done} onClick={() => toggleCalTask(t.id)} />
+                  <div style={{
+                    flex: 1, minWidth: 0,
+                    fontSize: fs(14), color: s.text, fontWeight: 500,
+                    textDecoration: done ? "line-through" : "none",
+                    wordBreak: "break-word",
+                  }}>
+                    {t.title}
+                    {t.rpt && <span style={{ marginLeft: 6, fontSize: fs(11), color: s.tS, fontWeight: 400 }}>{t.rpt}</span>}
+                  </div>
+                  {t.cat && (
+                    <span style={{
+                      display: "inline-flex", alignItems: "center",
+                      padding: "3px 9px", borderRadius: 10,
+                      fontSize: fs(13), background: `${s.acc}33`, color: s.text, fontWeight: 500,
+                      flexShrink: 0, whiteSpace: "nowrap",
+                    }}>
+                      {String(t.cat).split(" ")[0]}
+                    </span>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </Glass>
     </div>
   );
 }

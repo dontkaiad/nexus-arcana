@@ -433,7 +433,7 @@ export function adaptAdhd(data) {
 // ── /api/calendar → {[day]: ["emoji title", ...]} ─────────────────────────
 
 export function adaptCalendar(data) {
-  if (!data) return { tasksByDay: {}, overdueByDay: {}, month: null }
+  if (!data) return { tasksByDay: {}, overdueByDay: {}, holidayDays: [], month: null }
   const days = data.days || {}
   const tasksByDay = {}
   const overdueByDay = {}
@@ -450,7 +450,8 @@ export function adaptCalendar(data) {
       rpt: t.repeat ? `🔄 ${formatRepeat(t.repeat)}` : undefined,
     }))
   }
-  return { tasksByDay, overdueByDay, month: data.month || null, days }
+  const holidayDays = Array.isArray(data.holiday_days) ? data.holiday_days : []
+  return { tasksByDay, overdueByDay, holidayDays, month: data.month || null, days }
 }
 
 // ── /api/arcana/sessions → MOCK.sessions brief list ───────────────────────
