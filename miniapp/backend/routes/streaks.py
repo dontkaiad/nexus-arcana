@@ -20,19 +20,26 @@ router = APIRouter()
 
 @router.get("/streaks")
 async def get_streaks(tg_id: int = Depends(current_user_id)) -> dict[str, Any]:
-    """Сейчас возвращаем общий стрик пользователя.
-
-    TODO(кай): per-task streaks не хранятся в текущей схеме — для полного
-    списка повторяющихся задач со своими стриками нужно расширять schema.
-    """
+    """Общий стрик пользователя + список per-task стриков повторяющихся задач."""
     from nexus.handlers.streaks import get_streak, is_rest_day_available
+    from core.task_streaks import get_user_task_streaks, reset_broken_streaks
+
+    today_date, _tz = await today_user_tz(tg_id)
+    try:
+        reset_broken_streaks(tg_id, today_date.isoformat())
+    except Exception as e:
+        logger.warning("reset_broken_streaks failed: %s", e)
+
     data = get_streak(tg_id)
+    rows = get_user_task_streaks(tg_id)
+    per_task = [r for r in rows if (r["current"] or 0) > 0 or (r["best"] or 0) > 0]
+
     return {
         "current": data.get("streak", 0),
         "best": data.get("best", 0),
         "last_activity_date": data.get("last_activity_date"),
         "rest_day_available": is_rest_day_available(tg_id),
-        "per_task": [],  # placeholder
+        "per_task": per_task,
     }
 
 

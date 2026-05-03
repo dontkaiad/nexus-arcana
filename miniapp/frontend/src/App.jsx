@@ -6690,11 +6690,73 @@ function StreaksSheet({ s, open }) {
         </Glass>
       )}
 
-      <div style={{ fontSize: fs(11), color: s.tM, textAlign: "center" }}>
-        {/* TODO(кай): per-task streaks — нужна доп. схема */}
-        Стрики по отдельным повторяющимся задачам — в разработке.
-      </div>
+      <PerTaskStreaks s={s} list={data?.per_task || []} />
     </div>
+  );
+}
+
+function PerTaskStreaks({ s, list }) {
+  const active = list.filter((x) => (x.current || 0) > 0);
+  const broken = list.filter((x) => (x.current || 0) === 0 && (x.best || 0) > 0);
+
+  if (list.length === 0) {
+    return (
+      <div style={{ fontSize: fs(12), color: s.tM, textAlign: "center", padding: "12px 0" }}>
+        Закрой повторяющуюся задачу, чтобы запустить счётчик ✨
+      </div>
+    );
+  }
+
+  return (
+    <>
+      {active.length > 0 && (
+        <Glass s={s}>
+          <div style={{ fontSize: fs(11), color: s.tS, marginBottom: 8 }}>По задачам</div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {active.map((t) => (
+              <div key={t.task_id} style={{
+                display: "flex", alignItems: "center", gap: 12,
+                padding: "6px 4px",
+              }}>
+                <div style={{
+                  fontSize: fs(22), fontFamily: H, color: s.amber,
+                  fontWeight: 500, minWidth: 44, textAlign: "right",
+                }}>
+                  🔥{t.current}
+                </div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: fs(13), color: s.text, fontWeight: 500,
+                                whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                    {t.title || "—"}
+                  </div>
+                  <div style={{ fontSize: fs(10), color: s.tS, marginTop: 1 }}>
+                    {t.repeat || ""}{t.best > t.current ? ` · лучший ${t.best}` : ""}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </Glass>
+      )}
+      {broken.length > 0 && (
+        <Glass s={s} style={{ opacity: 0.7 }}>
+          <div style={{ fontSize: fs(11), color: s.tS, marginBottom: 8 }}>💔 Прерванные</div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            {broken.map((t) => (
+              <div key={t.task_id} style={{
+                display: "flex", justifyContent: "space-between", alignItems: "center",
+                fontSize: fs(12), color: s.tM,
+              }}>
+                <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {t.title || "—"}
+                </span>
+                <span style={{ fontSize: fs(11), color: s.tS }}>лучший {t.best}</span>
+              </div>
+            ))}
+          </div>
+        </Glass>
+      )}
+    </>
   );
 }
 
