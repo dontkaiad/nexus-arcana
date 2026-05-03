@@ -364,17 +364,66 @@ def test_client_object_photo_appends_url(client):
         r = client.post(
             "/api/arcana/clients/cli-7/object_photo",
             files={"file": ("obj.jpg", b"FAKE", "image/jpeg")},
+            data={"note": "Игорь, начальник, ДР 5 марта"},
         )
     assert r.status_code == 200
     body = r.json()
     assert body["url"] == fake_url
-    assert "https://old.example/a.jpg" in body["all"]
-    assert fake_url in body["all"]
+    assert body["note"] == "Игорь, начальник, ДР 5 марта"
+    urls = [p["url"] for p in body["photos"]]
+    assert "https://old.example/a.jpg" in urls
+    assert fake_url in urls
     cu.assert_awaited_once()
     assert cu.await_args.args[2] == "arcana-client-objects"
-    # update_page получил append-стрингу с обоими URL
     written = up.await_args.args[1]["Фото объектов"]
-    assert any(fake_url in (rt.get("text", {}).get("content") or "") for rt in written["rich_text"])
+    serialized = "".join(rt.get("text", {}).get("content") or "" for rt in written["rich_text"])
+    assert f"{fake_url} | Игорь" in serialized
+
+
+def test_client_object_photo_edit_note(client):
+    page = _page("cli-9", extra={
+        "Фото объектов": {"rich_text": [{"plain_text": "https://e/1.jpg | старая\nhttps://e/2.jpg"}]},
+    })
+    with patch("miniapp.backend.routes.writes.get_page", AsyncMock(return_value=page)), \
+         patch("miniapp.backend.routes.writes.update_page",
+               AsyncMock(return_value=None)) as up, \
+         patch("miniapp.backend.routes.writes.get_user_notion_id",
+               AsyncMock(return_value=FAKE_NOTION_USER)):
+        r = client.patch(
+            "/api/arcana/clients/cli-9/object_photo/1",
+            json={"note": "мама"},
+        )
+    assert r.status_code == 200
+    photos = r.json()["photos"]
+    assert photos[0]["note"] == "старая"
+    assert photos[1]["note"] == "мама"
+
+
+def test_client_object_photo_delete(client):
+    page = _page("cli-d", extra={
+        "Фото объектов": {"rich_text": [{"plain_text": "https://e/1.jpg | a\nhttps://e/2.jpg | b\nhttps://e/3.jpg | c"}]},
+    })
+    with patch("miniapp.backend.routes.writes.get_page", AsyncMock(return_value=page)), \
+         patch("miniapp.backend.routes.writes.update_page",
+               AsyncMock(return_value=None)) as up, \
+         patch("miniapp.backend.routes.writes.get_user_notion_id",
+               AsyncMock(return_value=FAKE_NOTION_USER)):
+        r = client.delete("/api/arcana/clients/cli-d/object_photo/1")
+    assert r.status_code == 200
+    photos = r.json()["photos"]
+    assert len(photos) == 2
+    assert [p["note"] for p in photos] == ["a", "c"]
+
+
+def test_client_object_photo_index_404(client):
+    page = _page("cli-z", extra={
+        "Фото объектов": {"rich_text": [{"plain_text": "https://e/1.jpg"}]},
+    })
+    with patch("miniapp.backend.routes.writes.get_page", AsyncMock(return_value=page)), \
+         patch("miniapp.backend.routes.writes.get_user_notion_id",
+               AsyncMock(return_value=FAKE_NOTION_USER)):
+        r = client.delete("/api/arcana/clients/cli-z/object_photo/99")
+    assert r.status_code == 404
 
 
 # ─── /api/arcana/clients create with birthday ──────────────────────────────
