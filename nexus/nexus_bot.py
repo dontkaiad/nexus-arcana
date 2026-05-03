@@ -720,33 +720,14 @@ async def process_text(msg: Message, text: str, user_notion_id: str = "") -> Non
 
     original_text = text  # ВАЖНО: сохранить до spell correction
 
-    # ── Исправляем опечатки через Claude Haiku ───────────────────────────
-    # ВАЖНО: проверяем что ответ — исправленный текст, а не разговорный ответ Claude.
-    # Если ответ намного длиннее оригинала или начинается как разговорная фраза → используем оригинал.
-    _CONVERSATIONAL_STARTS = (
-        "я не", "извините", "к сожалению", "я имею", "я могу", "я не могу",
-        "не имею", "у меня нет", "мне не", "как ии", "как ai",
-    )
-    from core.claude_client import ask_claude
+    # Spell-correction через core/preprocess.py (общий с Аркана). Включает
+    # whitelist (имена клиентов из 👥 Клиенты + 78 карт + эзо-термины),
+    # anti-conversational + length guard.
     try:
-        corrected = await ask_claude(
-            text,
-            system="Исправь опечатки и описки. Если нет ошибок — верни текст как есть. Только текст, без объяснений.",
-            max_tokens=100,
-            model="claude-haiku-4-5-20251001"
-        )
-        if corrected:
-            c = corrected.strip()
-            c_low = c.lower()
-            # Отклоняем если: ответ в 2+ раза длиннее оригинала ИЛИ начинается разговорно
-            too_long = len(c) > len(text) * 2 + 30
-            conversational = any(c_low.startswith(s) for s in _CONVERSATIONAL_STARTS)
-            if too_long or conversational:
-                logger.warning("spell correction rejected (too_long=%s conversational=%s): %r", too_long, conversational, c[:80])
-            else:
-                text = c
+        from core.preprocess import normalize_text
+        text = await normalize_text(text, user_notion_id=user_notion_id)
     except Exception as e:
-        logger.error("spell correction error: %s", e)
+        logger.error("normalize_text failed: %s", e)
 
     if msg.reply_to_message and msg.reply_to_message.text:
         # Если это reply на сообщение бота — попробуем обновить Notion-запись

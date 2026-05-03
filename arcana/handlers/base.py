@@ -291,6 +291,15 @@ async def route_message(message: Message, user_notion_id: str = "", _text: str =
             await react(message, "🤔")
             return
 
+        # Spell-correction через Haiku с whitelist (карты, термины, клиенты).
+        # Только для свежевведённого текста, не для уже обработанного _text.
+        if not _text:
+            try:
+                from core.preprocess import normalize_text
+                text = await normalize_text(text, user_notion_id=user_notion_id)
+            except Exception as e:
+                logger.warning("normalize_text failed (use raw): %s", e)
+
         # reply-контекст
         if message.reply_to_message and message.reply_to_message.text:
             prev = maybe_convert(message.reply_to_message.text.strip())
