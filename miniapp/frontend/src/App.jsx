@@ -4161,6 +4161,12 @@ function WorkSheet({ s, work, onClose }) {
       )}
       <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
         {metaCard("Категория", work.category || "—")}
+        {metaCard(
+          "Дедлайн",
+          deadlineFmt
+            ? <span style={{ color: work.is_overdue ? s.red : s.text }}>{deadlineFmt}</span>
+            : "—"
+        )}
         {metaCard("Приоритет", normPrio(work.priority) || "—")}
       </div>
       {work.client?.name && (
