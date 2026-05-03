@@ -292,8 +292,9 @@ async def add_items(
         category = item.get("category", "💳 Прочее")
         note = item.get("note", "")
 
-        # Для чеклистов — категория не нужна
-        if list_type == "📋 Чеклист":
+        # Для чеклистов — категория не нужна по умолчанию, но если caller
+        # явно передал её (например, "🔄 Бартер") — сохраняем.
+        if list_type == "📋 Чеклист" and not item.get("category"):
             category = ""
 
         # Для покупок — поиск предпочтений в Памяти
