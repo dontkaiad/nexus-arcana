@@ -575,6 +575,17 @@ async def _save_and_post_triplet(
     except Exception:
         pass
 
+    # Источник=🔄 Бартер → спрашиваем «Что в бартере?» (создаст чеклист).
+    if payment_source == "🔄 Бартер":
+        try:
+            from arcana.handlers.barter_prompt import propose_barter_prompt
+            await propose_barter_prompt(
+                message, kind="session", page_id=page_id,
+                group_name=session_name or question or "Расклад",
+            )
+        except Exception as e:
+            logger.warning("session barter prompt failed: %s", e)
+
     # Кнопки оплаты для платного клиента — отдельным сообщением.
     if show_payment:
         from arcana.handlers.payment import payment_keyboard

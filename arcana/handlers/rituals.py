@@ -230,6 +230,17 @@ async def handle_add_ritual(message: Message, text: str, user_notion_id: str = "
             except Exception as e:
                 logger.warning("ritual writeoff propose failed: %s", e)
 
+        # Источник=🔄 Бартер → спрашиваем «Что в бартере?» (создаст чеклист).
+        if payment_source == "🔄 Бартер":
+            try:
+                from arcana.handlers.barter_prompt import propose_barter_prompt
+                await propose_barter_prompt(
+                    message, kind="ritual", page_id=result,
+                    group_name=data.get("name") or "Ритуал",
+                )
+            except Exception as e:
+                logger.warning("barter prompt failed: %s", e)
+
     except Exception as e:
         trace = tb.format_exc()
         logger.error("handle_add_ritual error: %s", trace)
