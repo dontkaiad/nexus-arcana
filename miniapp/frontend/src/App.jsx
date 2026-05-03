@@ -266,9 +266,15 @@ const Chk = ({ s, done, onClick }) => (
   </div>
 );
 
+const PRIO_NORM = {
+  "Срочно": "🔴", "Важно": "🟡", "Можно потом": "⚪",
+  "high": "🔴", "medium": "🟡", "low": "⚪",
+};
+const normPrio = (p) => PRIO_NORM[p] || (p && p.startsWith("🔴") ? "🔴" : p && p.startsWith("🟡") ? "🟡" : p && p.startsWith("⚪") ? "⚪" : p);
 const PrioDot = ({ s, prio }) => {
-  const colors = { "🔴": "var(--nx-red)", "🟡": "var(--nx-amber)", "⚪": "var(--nx-text-mute)", "high": "var(--nx-red)", "medium": "var(--nx-amber)", "low": "var(--nx-text-mute)" };
-  return <span className="prio-dot" style={{ background: colors[prio] || "var(--nx-text-mute)" }} />;
+  const p = normPrio(prio);
+  const colors = { "🔴": "var(--nx-red)", "🟡": "var(--nx-amber)", "⚪": "var(--nx-text-mute)" };
+  return <span className="prio-dot" style={{ background: colors[p] || "var(--nx-text-mute)" }} />;
 };
 
 const SectionLabel = ({ s, children, meta, action }) => (
@@ -2927,7 +2933,7 @@ function ArGrimoire({ s, openGrimoire }) {
 // ARCANA — WORK (работы)
 // ═══════════════════════════════════════════════════════════════
 
-function ArWork({ s }) {
+function ArWork({ s, openWork }) {
   const { data, loading, error, refetch } = useApi('/api/arcana/works');
   const [expanded, setExpanded] = useState({});
   const [subOverrides, setSubOverrides] = useState({});
@@ -2961,7 +2967,12 @@ function ArWork({ s }) {
         const total = subs.length;
         const done = subs.filter((x) => (subOverrides[x.id] ?? x.done)).length;
         return (
-          <div key={w.id} className="task glass" style={{ flexDirection: "column", alignItems: "stretch" }}>
+          <div
+            key={w.id}
+            className="task glass"
+            style={{ flexDirection: "column", alignItems: "stretch", cursor: openWork ? "pointer" : "default" }}
+            onClick={openWork ? () => openWork({ id: w.id, payload: w }) : undefined}
+          >
             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
               <div className="body" style={{ flex: 1 }}>
                 <div className="title">{w.title}</div>
@@ -2975,7 +2986,7 @@ function ArWork({ s }) {
                   {w.client?.name && <span> · 👤 {w.client.name}</span>}
                   {total > 0 && (
                     <span
-                      onClick={() => toggleExpand(w.id)}
+                      onClick={(e) => { e.stopPropagation(); toggleExpand(w.id); }}
                       style={{ cursor: "pointer", marginLeft: 8 }}
                     >
                       📋 {done}/{total} {open ? "▾" : "▸"}
@@ -2993,7 +3004,7 @@ function ArWork({ s }) {
                   return (
                     <div
                       key={sub.id}
-                      onClick={() => !isDone && toggleSub(sub.id)}
+                      onClick={(e) => { e.stopPropagation(); if (!isDone) toggleSub(sub.id); }}
                       style={{
                         display: "flex",
                         alignItems: "center",
@@ -3170,11 +3181,6 @@ function TarotCardTile({ s, card, deckId }) {
         <div style={{ fontSize: fs(11), color: s.text, fontWeight: 500, lineHeight: 1.2 }}>
           {card.en || card.raw || "—"}
         </div>
-        {card.ru && (
-          <div style={{ fontSize: fs(10), color: s.tM, lineHeight: 1.2 }}>
-            {card.ru}
-          </div>
-        )}
       </div>
     </div>
   );
@@ -3246,7 +3252,6 @@ function TripletSlide({ s, t, deckId, onVerdict }) {
         {hasBottom && (
           <div className="card-wrap card-bottom-wrap">
             <TarotCardTile s={s} card={t.bottomCard} deckId={deckId} />
-            <div className="bottom-label">🂠 Дно колоды</div>
           </div>
         )}
       </div>
@@ -3639,57 +3644,32 @@ function RitualDetail({ s, id }) {
   return (
     <div>
       <Glass s={s} style={{ padding: "12px 14px", marginBottom: 12 }}>
-        <div
-          style={{
-            fontFamily: H,
-            fontSize: fs(20),
-            color: s.text,
-            fontWeight: 500,
-            marginBottom: 8,
-          }}
-        >
+        <div style={{ fontFamily: H, fontSize: fs(20), color: s.text, fontWeight: 500, lineHeight: 1.25 }}>
           {r.name}
         </div>
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "auto 1fr auto 1fr",
-            gap: "4px 10px",
-            fontSize: fs(12),
-          }}
-        >
-          <span style={{ color: s.tS }}>👤 Клиент</span>
-          <span style={{ color: s.text }}>{r.client || "— (личный)"}</span>
-          <span style={{ color: s.tS }}>📅 Дата</span>
-          <span style={{ color: s.text }}>{r.date}</span>
-          <span style={{ color: s.tS }}>🎯 Цель</span>
-          <span style={{ color: s.text }}>{r.goal}</span>
-          <span style={{ color: s.tS }}>📍 Место</span>
-          <span style={{ color: s.text }}>{r.place}</span>
-          {r.question && (
-            <>
-              <span style={{ color: s.tS }}>❓ Вопрос</span>
-              <span style={{ color: s.text, gridColumn: "2 / span 3", fontSize: fs(11) }}>
-                {r.question}
-              </span>
-            </>
-          )}
-          {r.price > 0 && (
-            <>
-              <span style={{ color: s.tS }}>💳 Оплата</span>
-              <span
-                style={{
-                  color: r.paid >= r.price ? s.acc : s.red,
-                  fontWeight: 500,
-                  gridColumn: "2 / span 3",
-                }}
-              >
-                {r.price.toLocaleString()} ₽ ·{" "}
-                {r.paid >= r.price ? "оплачено" : `долг ${(r.price - r.paid).toLocaleString()} ₽`}
-              </span>
-            </>
-          )}
+        <div style={{ fontSize: fs(11), opacity: 0.7, marginTop: 6, display: "flex", gap: 6, flexWrap: "wrap" }}>
+          {[
+            r.client ? `👤 ${r.client}` : "👤 личный",
+            r.date && `📅 ${r.date}`,
+            r.goal && `🎯 ${r.goal}`,
+            r.place && `📍 ${r.place}`,
+          ].filter(Boolean).map((it, i) => (
+            <span key={i}>{it}</span>
+          ))}
         </div>
+        {r.question && (
+          <div style={{ fontSize: fs(12), color: s.tS, marginTop: 6 }}>
+            <span style={{ opacity: 0.7 }}>❓ </span>{r.question}
+          </div>
+        )}
+        {r.price > 0 && (
+          <div style={{
+            fontSize: fs(12), marginTop: 6, fontWeight: 500,
+            color: r.paid >= r.price ? s.acc : s.red,
+          }}>
+            💳 {r.price.toLocaleString()} ₽ · {r.paid >= r.price ? "оплачено" : `долг ${(r.price - r.paid).toLocaleString()} ₽`}
+          </div>
+        )}
       </Glass>
 
       {/* Расходники */}
@@ -3829,7 +3809,7 @@ function ClientDetail({ s, id }) {
         </div>
         <div style={{ flex: 1 }}>
           <div style={{ fontFamily: H, fontSize: fs(22), fontWeight: 500 }}>
-            {c.status} {c.name}
+            {(c.status || "").split(" ")[0]} {c.name}
             {c.self && (
               <span style={{ fontSize: fs(13), color: s.tS, fontWeight: 400 }}> · я</span>
             )}
@@ -4107,6 +4087,149 @@ function TaskSheet({ s, task, onClose }) {
                 </span>
               </Glass>
             ))}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════
+// WORK SHEET — детали + действия (Done / Postpone / Cancel)
+// ═══════════════════════════════════════════════════════════════
+
+function WorkSheet({ s, work, onClose }) {
+  const [busy, setBusy] = useState(null);
+  const [editOpen, setEditOpen] = useState(false);
+  const [newDate, setNewDate] = useState("");
+  const [subOverrides, setSubOverrides] = useState({});
+
+  const run = async (label, fn) => {
+    setBusy(label);
+    try { await fn(); onClose(); }
+    catch (e) { alert(`Не получилось: ${e.message}`); }
+    finally { setBusy(null); }
+  };
+
+  const toggleSub = async (subId, isDone) => {
+    if (isDone) return;
+    setSubOverrides((o) => ({ ...o, [subId]: true }));
+    try {
+      const initData = window.Telegram?.WebApp?.initData || import.meta.env.VITE_DEV_INIT_DATA || "";
+      await fetch(`/api/lists/${subId}/done`, {
+        method: "POST",
+        headers: { "X-Telegram-Init-Data": initData },
+      });
+    } catch (_) { /* оптимистично */ }
+  };
+
+  const subs = work.subtasks || [];
+  const metaCard = (label, value) => (
+    <div style={{
+      flex: 1, minWidth: 0, padding: "8px 10px",
+      background: s.card, border: `1px solid ${s.brd}`,
+      borderRadius: 10, backdropFilter: "blur(10px)", textAlign: "center",
+    }}>
+      <div style={{ fontSize: fs(10), color: s.tM, marginBottom: 2, textTransform: "uppercase", letterSpacing: 0.4 }}>{label}</div>
+      <div style={{ fontSize: fs(13), color: s.text, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{value}</div>
+    </div>
+  );
+
+  return (
+    <div>
+      <div style={{ fontFamily: H, fontSize: fs(18), fontWeight: 500, marginBottom: 10 }}>
+        {work.title}
+      </div>
+      <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
+        {metaCard("Категория", work.category || "—")}
+        {metaCard("Дедлайн", work.deadline_label || "—")}
+        {metaCard("Приоритет", normPrio(work.priority) || "—")}
+      </div>
+      {work.client?.name && (
+        <div style={{ fontSize: fs(12), color: s.tS, marginBottom: 10 }}>👤 {work.client.name}</div>
+      )}
+      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+        <ActionRow
+          s={s}
+          icon={<Check size={fs(16)} />}
+          label={busy === "done" ? "Сохраняю..." : "Сделано"}
+          onClick={() => !busy && run("done", () => apiPost(`/api/arcana/works/${work.id}/done`))}
+        />
+        <ActionRow
+          s={s}
+          icon={<Trash2 size={fs(16)} />}
+          label={busy === "cancel" ? "Сохраняю..." : "Отменить"}
+          onClick={() => !busy && run("cancel", () => apiPost(`/api/arcana/works/${work.id}/cancel`))}
+          destructive
+        />
+      </div>
+      <div style={{ marginTop: 6 }}>
+        <div
+          onClick={() => setEditOpen((v) => !v)}
+          style={{
+            display: "flex", alignItems: "center", gap: 12, padding: "12px 14px",
+            background: s.card, border: `1px solid ${s.brd}`, borderRadius: 12,
+            backdropFilter: "blur(10px)", cursor: "pointer", color: s.text,
+          }}
+        >
+          <span style={{ display: "flex" }}>
+            {editOpen ? <ChevronDown size={fs(16)} /> : <ChevronRight size={fs(16)} />}
+          </span>
+          <span style={{ fontSize: fs(14) }}>Перенести</span>
+        </div>
+        {editOpen && (
+          <div style={{ marginTop: 8, padding: "10px 12px", background: s.card, border: `1px solid ${s.brd}`, borderRadius: 12 }}>
+            <input
+              type="date"
+              value={newDate}
+              onChange={(e) => setNewDate(e.target.value)}
+              style={{
+                width: "100%", padding: "10px 12px", borderRadius: 8,
+                border: `1px solid ${s.brd}`, background: s.card, color: s.text,
+                fontSize: fs(14), marginBottom: 8,
+              }}
+            />
+            <div
+              onClick={() => newDate && !busy && run("postpone", () => apiPost(`/api/arcana/works/${work.id}/postpone`, { date: newDate }))}
+              style={{
+                padding: "10px", textAlign: "center", borderRadius: 10,
+                background: newDate ? `${s.acc}28` : s.card,
+                border: `1px solid ${newDate ? s.acc : s.brd}`,
+                color: newDate ? s.acc : s.tM, fontSize: fs(13), fontWeight: 500,
+                cursor: newDate && !busy ? "pointer" : "default",
+              }}
+            >
+              {busy === "postpone" ? "Сохраняю..." : "Сохранить дату"}
+            </div>
+          </div>
+        )}
+      </div>
+      {subs.length > 0 && (
+        <>
+          <div style={{ fontFamily: H, fontSize: fs(15), color: s.text, margin: "16px 0 8px" }}>
+            Подзадачи
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+            {subs.map((sub) => {
+              const isDone = subOverrides[sub.id] ?? sub.done;
+              return (
+                <Glass
+                  key={sub.id}
+                  s={s}
+                  style={{
+                    padding: "10px 14px", display: "flex", alignItems: "center", gap: 10,
+                    opacity: isDone ? 0.5 : 1, cursor: isDone ? "default" : "pointer",
+                  }}
+                  onClick={() => toggleSub(sub.id, isDone)}
+                >
+                  <Chk s={s} done={isDone} />
+                  <span style={{
+                    flex: 1, fontSize: fs(14), color: s.text,
+                    textDecoration: isDone ? "line-through" : "none",
+                  }}>{sub.name}</span>
+                </Glass>
+              );
+            })}
           </div>
         </>
       )}
@@ -4860,12 +4983,13 @@ export default function App() {
   const openSession = (x) => setModal({ type: "session", payload: x });
   const openRitual = (r) => setModal({ type: "ritual", payload: r });
   const openGrimoire = (g) => setModal({ type: "grimoire", payload: g });
+  const openWork = (w) => setModal({ type: "work", payload: w });
   // wave6.3: модалки для streaks + moon phases
   const openStreaks = () => setModal({ type: "streaks" });
   const openMoonPhases = () => setModal({ type: "moon-phases" });
 
   const shared = {
-    s: sky, openTask, openAdhd, openClient, openSession, openRitual, openGrimoire,
+    s: sky, openTask, openAdhd, openClient, openSession, openRitual, openGrimoire, openWork,
     openStreaks, openMoonPhases,
     // wave6.3: навигация по табам из виджетов
     navigate: (tab) => setPage(tab),
@@ -5153,6 +5277,17 @@ export default function App() {
         title="Гримуар"
       >
         {modal?.payload?.id && <GrimoireDetail s={sky} id={modal.payload.id} />}
+      </Sheet>
+
+      <Sheet
+        s={sky}
+        open={modal?.type === "work"}
+        onClose={() => setModal(null)}
+        title="Работа"
+      >
+        {modal?.payload?.payload && (
+          <WorkSheet s={sky} work={modal.payload.payload} onClose={() => setModal(null)} />
+        )}
       </Sheet>
 
       <Sheet s={sky} open={fabOpen && !fabForm} onClose={() => setFabOpen(false)} title="Добавить">
