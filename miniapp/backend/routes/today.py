@@ -166,9 +166,10 @@ async def _generate_adhd_tip(tg_id: int, today_str: str,
         "Без markdown, без звёздочек, без двоеточий в начале."
     )
     try:
-        text = await ask_claude(prompt=prompt, system=system, max_tokens=200)
+        text = await ask_claude(prompt=prompt, system=system, max_tokens=200,
+                                model="claude-haiku-4-5-20251001")
     except Exception as e:
-        logger.error("Sonnet ADHD tip generation failed: %s", e)
+        logger.error("ADHD tip generation failed: %s", e)
         text = ""
     text = (text or "").strip()
     if text:
