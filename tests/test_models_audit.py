@@ -25,6 +25,7 @@ HAIKU_REQUIRED = [
     "nexus/handlers/notes.py",
     "nexus/handlers/notes_smart_select.py",
     "nexus/nexus_bot.py",
+    "miniapp/backend/routes/today.py",  # ADHD tip — короткая фраза, Haiku
 ]
 
 
@@ -52,8 +53,6 @@ SONNET_LEGIT = [
      "трактовки таро (глубина + эмпатия)"),
     ("miniapp/backend/routes/arcana_sessions.py",
      "саммари сессии — narrative reasoning"),
-    ("miniapp/backend/routes/today.py",
-     "СДВГ-tip на главном экране (один совет в день)"),
 ]
 
 
