@@ -1,0 +1,256 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Arcana · Карточка архитектора</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;1,400;1,500&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<style>
+  html, body { margin: 0; padding: 0; background: #0a1410; color: #e9efe8; font-family: -apple-system, "SF Pro Text", system-ui, sans-serif; min-height: 100vh; }
+  * { box-sizing: border-box; }
+
+  @keyframes twinkle {
+    0%, 100% { opacity: 0.2; transform: scale(0.8); }
+    50%      { opacity: 1; transform: scale(1.2); }
+  }
+  @keyframes holo-spin {
+    from { transform: rotate(0deg); }
+    to   { transform: rotate(360deg); }
+  }
+  @keyframes holo-shine {
+    0%, 100% { transform: translateX(-100%); opacity: 0; }
+    35%      { opacity: 1; }
+    65%      { opacity: 1; }
+    100%     { transform: translateX(120%); opacity: 0; }
+  }
+  @keyframes holo-border {
+    0%   { background-position: 0% 50%; }
+    100% { background-position: 300% 50%; }
+  }
+  @keyframes star-pulse {
+    0%, 100% { opacity: 0.6; transform: scale(0.9); }
+    50%      { opacity: 1; transform: scale(1.3); }
+  }
+  @keyframes aurora-breathe {
+    0%, 100% { transform: scale(1); opacity: 0.7; }
+    50%      { transform: scale(1.15); opacity: 1; }
+  }
+  @keyframes aurora-drift {
+    0%, 100% { transform: translate(0, 0) scale(1); }
+    33%      { transform: translate(20px, -10px) scale(1.1); }
+    66%      { transform: translate(-15px, 15px) scale(0.95); }
+  }
+  @keyframes dust-drift {
+    0%   { transform: translate(0, 0); opacity: 0; }
+    20%  { opacity: 0.6; }
+    80%  { opacity: 0.6; }
+    100% { transform: translate(10px, var(--dy, -30px)); opacity: 0; }
+  }
+
+  /* canvas chrome */
+  .canvas-host { padding: 40px 0; }
+</style>
+</head>
+<body>
+
+<div id="root"></div>
+
+<!-- React -->
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+
+<!-- modules -->
+<script type="text/babel" src="tokens.jsx"></script>
+<script type="text/babel" src="variants.jsx"></script>
+<script type="text/babel" src="screens.jsx"></script>
+<script type="text/babel" src="design-canvas.jsx"></script>
+<script type="text/babel" src="tweaks-panel.jsx"></script>
+
+<script type="text/babel" data-presets="env,react">
+const { useState, useEffect } = React;
+
+const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
+  "variantFilter": "one",
+  "animated": true,
+  "eye": "auto",
+  "cardBg": "sigil",
+  "accentTint": "default"
+}/*EDITMODE-END*/;
+
+function App() {
+  const [tweaks, setTweak] = useTweaks(TWEAK_DEFAULTS);
+
+  // Filter which variants to show
+  const variantOrder = ['one', 'holo', 'const', 'aurora', 'sigil', 'living'];
+  const shown = tweaks.variantFilter === 'all'
+    ? variantOrder
+    : [tweaks.variantFilter];
+
+  // Eye glyph forced override (or each variant's default)
+  const eyeFor = (vid) => tweaks.eye === 'auto' ? VARIANTS[vid].defaultEye : tweaks.eye;
+
+  return (
+    <>
+      <div className="canvas-host">
+        <DesignCanvas>
+          <DCSection
+            id="intro"
+            title="Карточка архитектора"
+            subtitle="5 направлений · элитная клиентская карточка для тебя в Arcana · палитра night-режима"
+          >
+            <DCArtboard id="brief" label="бриф" width={420} height={620}>
+              <BriefBoard tweaks={tweaks} />
+            </DCArtboard>
+          </DCSection>
+
+          {shown.map(vid => (
+            <DCSection
+              key={vid}
+              id={`v-${vid}`}
+              title={`${variantOrder.indexOf(vid) + 1}. ${VARIANTS[vid].label}`}
+              subtitle={DESCRIPTIONS[vid]}
+            >
+              <DCArtboard id={`${vid}-list`} label="в списке клиентов" width={360} height={720}>
+                <ListScreen variant={vid} animated={tweaks.animated} eye={eyeFor(vid)} />
+              </DCArtboard>
+              <DCArtboard id={`${vid}-detail`} label="детальный экран" width={360} height={720}>
+                <DetailScreen variant={vid} animated={tweaks.animated} eye={eyeFor(vid)} bg={tweaks.cardBg} />
+              </DCArtboard>
+              <DCArtboard id={`${vid}-card`} label="только карточка" width={360} height={360}>
+                <CardSpotlight variant={vid} animated={tweaks.animated} eye={eyeFor(vid)} bg={tweaks.cardBg} />
+              </DCArtboard>
+            </DCSection>
+          ))}
+        </DesignCanvas>
+      </div>
+
+      <TweaksPanel title="Tweaks">
+        <TweakSection title="Вариант">
+          <TweakSelect
+            label="показать"
+            value={tweaks.variantFilter}
+            onChange={v => setTweak('variantFilter', v)}
+            options={[
+              { value: 'one',     label: '★ THE ONE (комбо)' },
+              { value: 'all',     label: 'все варианты' },
+              { value: 'holo',    label: '1 · Holo Foil' },
+              { value: 'const',   label: '2 · Constellation' },
+              { value: 'aurora',  label: '3 · Aurora Glow' },
+              { value: 'sigil',   label: '4 · Architect Sigil' },
+              { value: 'living',  label: '5 · Living Eye' },
+            ]}
+          />
+        </TweakSection>
+        <TweakSection title="Анимация">
+          <TweakToggle label="включить" value={tweaks.animated} onChange={v => setTweak('animated', v)} />
+        </TweakSection>
+        <TweakSection title="Фон карточки (только THE ONE)">
+          <TweakSelect
+            label="вариант"
+            value={tweaks.cardBg}
+            onChange={v => setTweak('cardBg', v)}
+            options={[
+              { value: 'glow',  label: '1 · мягкое свечение (default)' },
+              { value: 'dust',  label: '2 · холо-пыль' },
+              { value: 'stars', label: '3 · звёздная пыль' },
+              { value: 'sigil', label: '4 · сетка-сигил' },
+              { value: 'mist',  label: '5 · туман' },
+              { value: 'tarot', label: '6 · карта «Звезда»' },
+              { value: 'none',  label: '— без фона' },
+            ]}
+          />
+        </TweakSection>
+        <TweakSection title="Глаз-символ">
+          <TweakRadio
+            value={tweaks.eye}
+            onChange={v => setTweak('eye', v)}
+            options={[
+              { value: 'auto',    label: 'auto' },
+              { value: 'open',    label: 'открытый' },
+              { value: 'minimal', label: 'минимал' },
+              { value: 'rune',    label: 'руна' },
+            ]}
+          />
+        </TweakSection>
+      </TweaksPanel>
+    </>
+  );
+}
+
+const DESCRIPTIONS = {
+  one:    'комбо: холо-рамка карточки (V1) + круглая аура вокруг глаза (V3) + огромный живой глаз с подписью «архитектор» (V5). Зрачок зафиксирован внутри границ.',
+  holo:   'переливающаяся холо-фольга — как редкая карта; рамка-радуга, бегущий блик',
+  const:  'карточка-созвездие, глаз нарисован звёздами, мягкое мерцание',
+  aurora: 'дышащая аура · мягкое свечение и плывущие цветовые пятна',
+  sigil:  'тёмный люкс · гравированные углы, сигил-руна, золотая пыль',
+  living: 'живой глаз — зрачок следит за курсором; cyan свечение и звёздная пыль',
+};
+
+function BriefBoard({ tweaks }) {
+  return (
+    <div style={{
+      width: '100%', height: '100%', padding: 28,
+      background: 'linear-gradient(160deg, #0d1f1a, #1a0d2e)',
+      borderRadius: 16,
+      border: `0.5px solid ${ARCANA.border}`,
+      color: ARCANA.text,
+      fontFamily: FONT_UI, fontSize: 13, lineHeight: 1.7,
+      position: 'relative', overflow: 'hidden',
+    }}>
+      <StarField count={40} seed={42} animated={tweaks.animated} />
+      <div style={{ position: 'relative' }}>
+        <div style={{ fontFamily: FONT_MONO, fontSize: 9.5, letterSpacing: '0.3em', color: ARCANA.holoGold, opacity: 0.7 }}>BRIEF · 03.05.26</div>
+        <h1 style={{ fontFamily: FONT_DISPLAY, fontStyle: 'italic', fontWeight: 500, fontSize: 36, lineHeight: 1.1, margin: '8px 0 18px' }}>
+          элитная карточка<br/>для тебя
+        </h1>
+        <div style={{ color: ARCANA.textDim, marginBottom: 14 }}>
+          Карточка <em style={{ color: ARCANA.text }}>«я»</em> в списке клиентов — позиционирование над всеми, символ-глаз, бэйдж <em style={{ color: ARCANA.holoGold, fontStyle: 'normal' }}>архитектор</em>.
+        </div>
+        <div style={{ height: 1, background: `linear-gradient(90deg, ${ARCANA.holoGold}, transparent)`, margin: '14px 0' }} />
+        <div style={{ display: 'grid', gap: 10, fontFamily: FONT_MONO, fontSize: 11.5 }}>
+          <div><span style={{ color: ARCANA.holoCyan }}>палитра ·</span> <span style={{ color: ARCANA.textDim }}>night-режим Arcana + холо-акценты</span></div>
+          <div><span style={{ color: ARCANA.holoCyan }}>символ ·</span> <span style={{ color: ARCANA.textDim }}>глаз (открытый / минимал / руна)</span></div>
+          <div><span style={{ color: ARCANA.holoCyan }}>отличия ·</span> <span style={{ color: ARCANA.textDim }}>рамка, бэйдж, фон, типографика</span></div>
+          <div><span style={{ color: ARCANA.holoCyan }}>контекст ·</span> <span style={{ color: ARCANA.textDim }}>в списке + детальный экран</span></div>
+        </div>
+        <div style={{ marginTop: 22, padding: '10px 12px', borderRadius: 10, background: 'rgba(255,255,255,0.04)', border: `0.5px solid ${ARCANA.border}` }}>
+          <div style={{ fontFamily: FONT_MONO, fontSize: 10, color: ARCANA.holoMagenta, letterSpacing: '0.2em' }}>NB</div>
+          <div style={{ fontSize: 12, color: ARCANA.textDim, marginTop: 4 }}>
+            Луна — иконка Arcana. Солнце — иконка Nexus (брат). В символах для тебя их не использую.
+          </div>
+        </div>
+        <div style={{ marginTop: 22, fontFamily: FONT_MONO, fontSize: 10.5, color: ARCANA.textMute, letterSpacing: '0.1em' }}>
+          → крути канвас, нажми Tweaks справа
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function CardSpotlight({ variant, animated, eye, bg }) {
+  const V = VARIANTS[variant];
+  const Detail = V.detailEl;
+  return (
+    <div style={{
+      width: '100%', height: '100%', padding: 24,
+      background: 'radial-gradient(ellipse at 50% 30%, #1a1530, #0a0e18)',
+      borderRadius: 16,
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      position: 'relative', overflow: 'hidden',
+    }}>
+      <StarField count={30} seed={variant.charCodeAt(0)} animated={animated} />
+      <div style={{ position: 'relative', width: '100%' }}>
+        <Detail animated={animated} eye={eye} bg={bg} />
+      </div>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+</script>
+
+</body>
+</html>

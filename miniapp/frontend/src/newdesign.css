@@ -862,3 +862,40 @@
   text-transform: uppercase;
   font-weight: 600;
 }
+
+/* ──────────────────────────────────────────────────────────────────
+   Self-client (THE ONE) animations — used by SelfClientCard
+   ────────────────────────────────────────────────────────────────── */
+@keyframes twinkle {
+  0%, 100% { opacity: 0.2; transform: scale(0.8); }
+  50%      { opacity: 1; transform: scale(1.2); }
+}
+@keyframes holo-spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+@keyframes holo-shine {
+  0%, 100% { transform: translateX(-100%); opacity: 0; }
+  35%      { opacity: 1; }
+  65%      { opacity: 1; }
+  100%     { transform: translateX(120%); opacity: 0; }
+}
+@keyframes holo-border {
+  0%   { background-position: 0% 50%; }
+  100% { background-position: 300% 50%; }
+}
+@keyframes aurora-breathe {
+  0%, 100% { transform: scale(1); opacity: 0.7; }
+  50%      { transform: scale(1.15); opacity: 1; }
+}
+@keyframes aurora-drift {
+  0%, 100% { transform: translate(0, 0) scale(1); }
+  33%      { transform: translate(20px, -10px) scale(1.1); }
+  66%      { transform: translate(-15px, 15px) scale(0.95); }
+}
+@keyframes dust-drift {
+  0%   { transform: translate(0, 0); opacity: 0; }
+  20%  { opacity: 0.6; }
+  80%  { opacity: 0.6; }
+  100% { transform: translate(10px, var(--dy, -30px)); opacity: 0; }
+}
