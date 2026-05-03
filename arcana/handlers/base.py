@@ -349,6 +349,11 @@ async def route_message(message: Message, user_notion_id: str = "", _text: str =
         if await _hp_text(message, text, user_notion_id):
             return
 
+        # ── Pending: правка списка списания после ритуала ────────────────
+        from arcana.handlers.ritual_writeoff import handle_pending_edit as _wo_edit
+        if await _wo_edit(message, text, user_notion_id):
+            return
+
         # ── Pending: режим сбора инфы о клиенте ─────────────────────────
         from arcana.pending_clients import get_pending_client
         pending_client = await get_pending_client(uid)
