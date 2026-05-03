@@ -361,15 +361,18 @@ async def handle_add_work_preview(
             await _save_partial_pending(message, text, user_notion_id, parsed=data)
             return
 
-        # Резолвим клиента сразу (чтобы при save не делать ещё запрос)
+        # Резолвим клиента: find_or_create. Если клиента нет в БД — создаём
+        # как 🤝 Платный + анонсируем «🆕 Создала клиента ...».
         client_id = None
         if data.get("client_name"):
             try:
-                c = await client_find(data["client_name"], user_notion_id=user_notion_id)
-                if c:
-                    client_id = c["id"]
-            except Exception:
-                pass
+                from core.client_resolve import resolve_or_create
+                client_id = await resolve_or_create(
+                    message, data["client_name"],
+                    user_notion_id=user_notion_id,
+                )
+            except Exception as e:
+                logger.warning("resolve_or_create failed: %s", e)
         data["client_id"] = client_id
         data["user_notion_id"] = user_notion_id
 

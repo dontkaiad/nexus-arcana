@@ -55,8 +55,10 @@ async def test_handle_add_work_does_not_write_to_notion():
         "reminder": None,
     }
 
+    import core.client_resolve as cr
     with patch.object(wp, "_parse_work_text", AsyncMock(return_value=parsed)), \
-         patch.object(wp, "client_find", AsyncMock(return_value={"id": "client-1"})), \
+         patch.object(cr, "resolve_or_create",
+                      AsyncMock(return_value="client-1")), \
          patch.object(wp, "get_user_tz", AsyncMock(return_value=3)), \
          patch("arcana.handlers.work_preview.work_add", AsyncMock()) as add_mock:
         await wp.handle_add_work_preview(msg, "ритуал для Маши", "user-notion")

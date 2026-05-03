@@ -617,9 +617,10 @@ async def handle_add_session(
         client_id: Optional[str] = None
         self_client_missing = False
         if client_name:
-            client = await client_find(client_name, user_notion_id=user_notion_id)
-            if client:
-                client_id = client["id"]
+            from core.client_resolve import resolve_or_create
+            client_id = await resolve_or_create(
+                message, client_name, user_notion_id=user_notion_id,
+            )
         else:
             # Личный расклад → автоматически на self-клиента «Кай (личный)».
             from core.notion_client import resolve_self_client

@@ -782,6 +782,33 @@ async def resolve_self_client(user_notion_id: str = "") -> Optional[str]:
     return cid
 
 
+async def find_or_create_client(
+    name: str,
+    *,
+    user_notion_id: str = "",
+    default_type: Optional[str] = None,
+) -> tuple[Optional[str], bool]:
+    """Находит клиента по имени; если нет — создаёт с дефолтным типом.
+
+    Возвращает (page_id, created). page_id=None означает что Notion-запрос
+    упал и сразу создание тоже не удалось — caller должен gracefully fallback.
+    Лечит дыру: раньше client_find=None оставлял запись «Клиентский без
+    привязки» сиротой.
+    """
+    found = await client_find(name, user_notion_id=user_notion_id)
+    if found:
+        return found["id"], False
+    ctype = default_type or CLIENT_TYPE_PAID
+    try:
+        new_id = await client_add(
+            name=name, user_notion_id=user_notion_id, client_type=ctype,
+        )
+        return new_id, bool(new_id)
+    except Exception as e:
+        logger.warning("find_or_create_client: create failed for %r: %s", name, e)
+        return None, False
+
+
 async def client_find(name: str, user_notion_id: str = "") -> Optional[dict]:
     from core.config import config
     base_filter = {"property": "Имя", "title": {"contains": name}}
