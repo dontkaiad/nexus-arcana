@@ -803,6 +803,14 @@ async def find_or_create_client(
         new_id = await client_add(
             name=name, user_notion_id=user_notion_id, client_type=ctype,
         )
+        if new_id:
+            # Сбрасываем кеш whitelist spell-correction, чтобы Haiku
+            # не «исправил» свежедобавленное имя.
+            try:
+                from core.preprocess import invalidate_whitelist
+                invalidate_whitelist(user_notion_id)
+            except Exception:
+                pass
         return new_id, bool(new_id)
     except Exception as e:
         logger.warning("find_or_create_client: create failed for %r: %s", name, e)
