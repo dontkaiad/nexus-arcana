@@ -1420,7 +1420,7 @@ function NxDay({ s, openTask, navigate, openStreaks }) {
               <div className={`s-title${done[o.id] ? " done" : ""}`}>{o.title}</div>
               <div className="s-meta">
                 <span style={{ color: s.red, fontWeight: 600 }}>{o.days} д назад</span>
-                {o.rpt && <span>🔄 {o.rpt}</span>}
+                {o.rpt && <span>{o.rpt}</span>}
               </div>
             </div>
             {o.cat && <div className="s-cat">{String(o.cat).split(" ")[0]}</div>}
@@ -1435,7 +1435,7 @@ function NxDay({ s, openTask, navigate, openStreaks }) {
               <div className={`s-title${done[x.id] ? " done" : ""}`}>{x.title}</div>
               <div className="s-meta">
                 {x.date && <span>{x.date}</span>}
-                {x.rpt && <span>🔄 {x.rpt}</span>}
+                {x.rpt && <span>{x.rpt}</span>}
                 {x.streak > 0 && <span>🔥 {x.streak}</span>}
               </div>
             </div>
