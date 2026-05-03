@@ -336,6 +336,8 @@ async def get_today(tg_id: int = Depends(current_user_id)) -> dict[str, Any]:
         "tz_offset": tz_offset,
         "streak": {
             "current": streak_data.get("streak", 0),
+            "best": streak_data.get("best", 0),
+            "last_activity_date": streak_data.get("last_activity_date"),
             "rest_day_available": rest_available,
         },
         "budget": {

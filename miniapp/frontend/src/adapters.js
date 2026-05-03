@@ -125,6 +125,9 @@ export function adaptToday(data) {
   return {
     date: formatFullDate(data.date, data.weekday),
     streak: data.streak?.current ?? 0,
+    streakBest: data.streak?.best ?? 0,
+    streakLastDate: data.streak?.last_activity_date ?? null,
+    todayIso,
     budgetDay: data.budget?.day ?? 0,
     spentDay: data.budget?.spent_today ?? 0,
     overdue: (data.overdue || []).map((o) => ({
