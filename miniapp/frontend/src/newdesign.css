@@ -827,10 +827,28 @@
   flex-direction: column;
   gap: 4px;
 }
+.card-bottom-wrap {
+  position: relative;
+}
 .card-bottom-wrap > div:first-child img {
-  border: 2px solid #d4a458;
-  box-shadow: 0 0 12px rgba(212, 164, 88, 0.4);
+  border: 3px solid #d4a843;
+  box-shadow:
+    0 0 14px rgba(212, 168, 67, 0.55),
+    inset 0 0 0 1px rgba(255, 220, 140, 0.35);
   border-radius: 8px;
+}
+.card-bottom-wrap::after {
+  content: "🂠";
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  font-size: 12px;
+  line-height: 1;
+  padding: 2px 4px;
+  border-radius: 6px;
+  background: rgba(20, 14, 4, 0.55);
+  color: #f0d27a;
+  pointer-events: none;
 }
 .bottom-label {
   font-size: 9px;
