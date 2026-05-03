@@ -2781,7 +2781,11 @@ function ArClients({ s, openClient }) {
         <Glass
           key={c.id}
           s={s}
-          style={{ padding: "10px 14px", marginBottom: 4 }}
+          style={{
+            padding: "10px 14px", marginBottom: 4,
+            background: c.self ? `${s.acc}26` : undefined,
+            borderColor: c.self ? `${s.acc}55` : undefined,
+          }}
           onClick={() => openClient({ id: c.id })}
         >
           <div
@@ -2797,17 +2801,17 @@ function ArClients({ s, openClient }) {
                   width: 36,
                   height: 36,
                   borderRadius: "50%",
-                  background: `${s.acc}22`,
+                  background: c.self ? `${s.acc}55` : `${s.acc}22`,
                   display: "flex",
                   alignItems: "center",
                   justifyContent: "center",
-                  fontSize: fs(14),
+                  fontSize: fs(c.self ? 18 : 14),
                   color: s.acc,
                   fontWeight: 500,
                   fontFamily: H,
                 }}
               >
-                {c.initial}
+                {c.self ? "🌟" : c.initial}
               </div>
               <div>
                 <div style={{ fontSize: fs(13), color: s.text, fontWeight: 500 }}>
@@ -3798,7 +3802,14 @@ function ClientDetail({ s, id }) {
   const c = adaptClientDossier(data);
   if (!c) return null;
   const isSelf = c.self;
-  const gold = "#d4a843";
+  const contactItems = (c.contact || "")
+    .split(/[,;\n]+/)
+    .map((x) => x.trim())
+    .filter(Boolean)
+    .map((raw) => {
+      const isHandle = raw.startsWith("@");
+      return { raw, icon: isHandle ? "✈️" : "📱" };
+    });
   return (
     <div>
       <div
@@ -3806,9 +3817,8 @@ function ClientDetail({ s, id }) {
           display: "flex", gap: 14, marginBottom: 16,
           padding: isSelf ? "12px" : "0",
           borderRadius: isSelf ? 16 : 0,
-          border: isSelf ? `1.5px solid ${gold}` : "none",
-          background: isSelf ? `linear-gradient(135deg, ${gold}10, transparent)` : "transparent",
-          boxShadow: isSelf ? `0 0 18px ${gold}30` : "none",
+          background: isSelf ? `${s.acc}26` : "transparent",
+          border: isSelf ? `1px solid ${s.acc}55` : "none",
         }}
       >
         <div
@@ -3817,13 +3827,13 @@ function ClientDetail({ s, id }) {
             height: 64,
             borderRadius: 16,
             background: isSelf
-              ? `linear-gradient(135deg, ${gold}, ${gold}aa)`
+              ? `${s.acc}55`
               : `linear-gradient(135deg, ${s.acc}, ${s.acc}aa)`,
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
             fontSize: fs(isSelf ? 32 : 28),
-            color: "#fff",
+            color: isSelf ? s.acc : "#fff",
             fontFamily: H,
             fontWeight: 500,
             flexShrink: 0,
@@ -3835,7 +3845,7 @@ function ClientDetail({ s, id }) {
           <div style={{ fontFamily: H, fontSize: fs(22), fontWeight: 500, display: "flex", alignItems: "center", gap: 6 }}>
             <span>{(c.status || "").split(" ")[0]} {c.name}</span>
             {isSelf && (
-              <span style={{ fontSize: fs(13), color: gold, fontWeight: 500 }}>· я</span>
+              <span style={{ fontSize: fs(13), color: s.acc, fontWeight: 500 }}>· я</span>
             )}
             <span
               onClick={() => setEditOpen((v) => !v)}
@@ -3845,9 +3855,16 @@ function ClientDetail({ s, id }) {
               <StickyNote size={fs(15)} />
             </span>
           </div>
-          <div style={{ fontSize: fs(12), color: s.tS, marginTop: 3 }}>
-            {c.contact || "—"} · с {c.since}
-          </div>
+          {contactItems.length > 0 ? (
+            <div style={{ fontSize: fs(12), color: s.tS, marginTop: 3, display: "flex", flexDirection: "column", gap: 2 }}>
+              {contactItems.map((it, i) => (
+                <span key={i}>{it.icon} {it.raw}</span>
+              ))}
+              <span style={{ opacity: 0.7 }}>с {c.since}</span>
+            </div>
+          ) : (
+            <div style={{ fontSize: fs(12), color: s.tS, marginTop: 3 }}>с {c.since}</div>
+          )}
           <div style={{ fontSize: fs(12), color: s.text, marginTop: 5 }}>
             <span style={{ color: s.tS }}>Запрос:</span> {c.request || "—"}
           </div>
