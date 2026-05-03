@@ -306,11 +306,20 @@ async def route_message(message: Message, user_notion_id: str = "", _text: str =
             from arcana.handlers.client_photo import handle_pending_photo
             if await handle_pending_photo(message, user_notion_id):
                 return
-            from arcana.handlers.sessions import handle_tarot_photo
-            await handle_tarot_photo(message, user_notion_id)
-            _final_emoji = reaction_for("session")
-            await react(message, _final_emoji)
-            return
+            # Если caption на фото — «новый клиент …» → создаём клиента и
+            # автоматически прикрепим фото внутри handle_add_client.
+            cap = (message.caption or "").strip()
+            if cap and _re_mod.search(
+                r"^(нов(ый|ая)|созда(й|ть)|добав(ь|те|ить))\b.*клиент",
+                cap, _re_mod.IGNORECASE,
+            ):
+                pass  # fall through к текстовому роуту, photo поедет дальше как контекст
+            else:
+                from arcana.handlers.sessions import handle_tarot_photo
+                await handle_tarot_photo(message, user_notion_id)
+                _final_emoji = reaction_for("session")
+                await react(message, _final_emoji)
+                return
 
         from core.layout import maybe_convert
         text = _text or maybe_convert((message.text or message.caption or "").strip())
