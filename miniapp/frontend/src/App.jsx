@@ -4135,14 +4135,32 @@ function WorkSheet({ s, work, onClose }) {
     </div>
   );
 
+  const fmtDeadline = (iso) => {
+    if (!iso) return "";
+    const datePart = formatShortDate(iso);
+    const m = String(iso).match(/T(\d{2}):(\d{2})/);
+    if (!m) return datePart;
+    const hhmm = `${m[1]}:${m[2]}`;
+    if (hhmm === "23:59" || hhmm === "00:00") return datePart;
+    return `${datePart} ${hhmm}`;
+  };
+  const deadlineFmt = fmtDeadline(work.deadline);
+
   return (
     <div>
-      <div style={{ fontFamily: H, fontSize: fs(18), fontWeight: 500, marginBottom: 10 }}>
+      <div style={{ fontFamily: H, fontSize: fs(18), fontWeight: 500, marginBottom: 4 }}>
         {work.title}
       </div>
+      {deadlineFmt && (
+        <div style={{
+          fontSize: fs(12), color: work.is_overdue ? s.red : s.tS,
+          fontWeight: work.is_overdue ? 600 : 400, marginBottom: 10,
+        }}>
+          📅 {deadlineFmt}{work.is_overdue ? " · просрочена" : ""}
+        </div>
+      )}
       <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
         {metaCard("Категория", work.category || "—")}
-        {metaCard("Дедлайн", work.deadline_label || "—")}
         {metaCard("Приоритет", normPrio(work.priority) || "—")}
       </div>
       {work.client?.name && (
