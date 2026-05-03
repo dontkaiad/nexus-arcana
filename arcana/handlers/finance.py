@@ -111,9 +111,11 @@ async def handle_pay_self(message: Message, text: str, user_notion_id: str = "")
     except ValueError:
         await message.answer("Не понял сумму.")
         return
-    # «20к» / «20 тыс» → 20000
-    suffix = (text or "")[m.end():m.end() + 5].lower()
-    if "к" in (text or "")[m.end():m.end() + 2].lower() or "тыс" in suffix:
+    # «20к» / «20 тыс» → 20000. Проверяем как сам матч (если « к/тыс » сразу
+    # после числа), так и хвост строки.
+    matched = (m.group(0) or "").lower()
+    tail = (text or "")[m.end():m.end() + 6].lower()
+    if re.search(r"(?:^|\d)\s*(?:к|т|тыс)\b|тысяч", matched) or "к" in tail[:2] or "тыс" in tail:
         amount *= 1000
 
     today = datetime.now(timezone(timedelta(hours=3))).date()
