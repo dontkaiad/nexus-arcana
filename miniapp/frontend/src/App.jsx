@@ -2623,7 +2623,7 @@ function ArDay({ s, openClient, navigate, openMoonPhases }) {
           <div style={{ flex: 1, cursor: "pointer" }} onClick={() => navigate?.("work")}>
             <Metric s={s} v={worksDoneToday} unit={`/${worksTotalToday}`} sub="работы" />
           </div>
-          <div style={{ flex: 1, cursor: "pointer" }} onClick={() => navigate?.("cli")}>
+          <div style={{ flex: 1, cursor: "pointer" }} onClick={() => setCashSheet(true)}>
             <Metric s={s} v={incomeMonth >= 1000 ? `${Math.round(incomeMonth / 1000)}к` : incomeMonth} unit="₽" sub="доход" accent={s.acc} />
           </div>
           <div style={{ flex: 1, cursor: "pointer" }} onClick={() => setAccSheet(true)}>
@@ -2659,24 +2659,6 @@ function ArDay({ s, openClient, navigate, openMoonPhases }) {
           )}
         </div>
       </div>
-
-      {/* Касса Арканы — карточка под метриками */}
-      {pnlApi.data && (
-        <Glass s={s} style={{ padding: "12px 14px", cursor: "pointer", marginBottom: 10 }} onClick={() => setCashSheet(true)}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-            <div>
-              <div style={{ fontSize: fs(11), color: s.tS, letterSpacing: 0.4, textTransform: "uppercase" }}>🏦 Касса</div>
-              <div style={{ fontFamily: H, fontSize: fs(22), fontWeight: 500 }}>
-                {(pnlApi.data.cash_balance ?? 0).toLocaleString()}₽
-              </div>
-            </div>
-            <div style={{ textAlign: "right", fontSize: fs(11), color: s.tS }}>
-              <div>прибыль · {(pnlApi.data.profit_month ?? 0).toLocaleString()}₽</div>
-              {pnlApi.data.barter_open_count > 0 && <div>🔄 {pnlApi.data.barter_open_count} бартер</div>}
-            </div>
-          </div>
-        </Glass>
-      )}
 
       <div className="glass" onClick={() => openMoonPhases?.()} style={{ cursor: "pointer" }}>
         <div style={{ display: "flex", gap: 14, alignItems: "center" }}>
@@ -2889,6 +2871,8 @@ function ArSessions({ s, openSession, sessFilterRequest, consumeSessFilter }) {
 function ArClients({ s, openClient }) {
   const { data, loading, error, refetch } = useApi("/api/arcana/clients");
   const barterApi = useApi("/api/arcana/barter?only_open=true");
+  const pnlApi = useApi("/api/arcana/finance/pnl");
+  const [cashSheet, setCashSheet] = useState(false);
   const view = loading || error
     ? { clients: [], total: 0, total_debt: 0, total_paid_all: 0 }
     : adaptClients(data);
@@ -2904,13 +2888,15 @@ function ArClients({ s, openClient }) {
         <span className="page-title">Клиенты</span>
         <div style={{ display: "flex", gap: 6, marginTop: 10 }}>
           <Metric s={s} v={total} sub="всего" />
-          <Metric
-            s={s}
-            v={earned > 0 ? fmtK(earned) : "0"}
-            unit="₽"
-            sub="заработано"
-            accent={earned > 0 ? s.acc : undefined}
-          />
+          <div style={{ flex: 1, cursor: "pointer" }} onClick={() => setCashSheet(true)}>
+            <Metric
+              s={s}
+              v={earned > 0 ? fmtK(earned) : "0"}
+              unit="₽"
+              sub="заработано"
+              accent={earned > 0 ? s.acc : undefined}
+            />
+          </div>
           <Metric
             s={s}
             v={debt > 0 ? fmtK(debt) : "0"}
@@ -2974,6 +2960,14 @@ function ArClients({ s, openClient }) {
         </Glass>
         )
       ))}
+      {cashSheet && pnlApi.data && (
+        <CashSheet
+          s={s}
+          pnl={pnlApi.data}
+          onClose={() => setCashSheet(false)}
+          onPaid={() => { setCashSheet(false); pnlApi.refetch?.(); refetch?.(); }}
+        />
+      )}
     </div>
   );
 }
