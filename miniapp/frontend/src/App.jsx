@@ -2423,6 +2423,66 @@ const RU_MONTHS_GEN = [
   "июля", "августа", "сентября", "октября", "ноября", "декабря",
 ];
 
+function CalendarHolidaysSummary({ s, holidayDays, shortDays, workingWeekends, holidaysInfo, monthGen }) {
+  const [open, setOpen] = useState(false);
+  const namedHolidays = (holidaysInfo || []).filter((h) => h.kind !== "short");
+  const shortInfo = (holidaysInfo || []).filter((h) => h.kind === "short");
+  return (
+    <Glass s={s} style={{ padding: "10px 14px", cursor: namedHolidays.length > 0 ? "pointer" : "default" }}
+           onClick={() => namedHolidays.length > 0 && setOpen((v) => !v)}>
+      <div style={{ fontSize: fs(12), color: s.tS, lineHeight: 1.5 }}>
+        {holidayDays.length > 0 && (
+          <div>
+            🏖 В этом месяце {holidayDays.length}{" "}
+            {plural(holidayDays.length, "нерабочий день", "нерабочих дня", "нерабочих дней")}:{" "}
+            <span style={{ color: "#b07a2e", fontWeight: 500 }}>
+              {holidayDays.join(", ")} {monthGen}
+            </span>
+          </div>
+        )}
+        {shortDays.length > 0 && (
+          <div>
+            ⏰ {plural(shortDays.length, "Сокращённый", "Сокращённых", "Сокращённых")}{" "}
+            {shortDays.length > 1 ? plural(shortDays.length, "день", "дня", "дней") : "день"}:{" "}
+            <span style={{ color: "#c08438", fontWeight: 500 }}>
+              {shortDays.join(", ")} {monthGen}
+            </span>
+          </div>
+        )}
+        {workingWeekends.length > 0 && (
+          <div>
+            ⚙ {plural(workingWeekends.length, "Рабочий выходной", "Рабочих выходных", "Рабочих выходных")}:{" "}
+            <span style={{ fontWeight: 500 }}>
+              {workingWeekends.join(", ")} {monthGen}
+            </span>
+          </div>
+        )}
+      </div>
+      {open && namedHolidays.length > 0 && (
+        <div style={{ marginTop: 8, paddingTop: 8, borderTop: `1px solid ${s.brd}`,
+                      fontSize: fs(11), color: s.text, lineHeight: 1.6 }}>
+          {namedHolidays.map((h) => (
+            <div key={`${h.day}-${h.kind}`}>
+              <span style={{ color: "#b07a2e", fontWeight: 500, minWidth: 28, display: "inline-block" }}>
+                {h.day}
+              </span>{" "}
+              {h.name}
+            </div>
+          ))}
+          {shortInfo.length > 0 && shortInfo.map((h) => (
+            <div key={`${h.day}-short`}>
+              <span style={{ color: "#c08438", fontWeight: 500, minWidth: 28, display: "inline-block" }}>
+                {h.day}
+              </span>{" "}
+              {h.name}
+            </div>
+          ))}
+        </div>
+      )}
+    </Glass>
+  );
+}
+
 function NxCal({ s }) {
   const now = new Date();
   const [view, setView] = useState("month");
@@ -2441,10 +2501,20 @@ function NxCal({ s }) {
   const daysShort = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"];
 
   const { data, loading, error, refetch } = useApi(`/api/calendar?month=${monthStr}`, [monthStr]);
-  const { tasksByDay, overdueByDay, holidayDays, holidaysInfo } = loading || error
-    ? { tasksByDay: {}, overdueByDay: {}, holidayDays: [], holidaysInfo: [] }
+  const cal = loading || error
+    ? { tasksByDay: {}, overdueByDay: {}, holidayDays: [], shortDays: [], workingWeekends: [], holidaysInfo: [] }
     : adaptCalendar(data);
+  const { tasksByDay, overdueByDay, holidayDays, shortDays, workingWeekends, holidaysInfo } = cal;
   const holidaySet = useMemo(() => new Set(holidayDays || []), [holidayDays]);
+  const shortSet = useMemo(() => new Set(shortDays || []), [shortDays]);
+  const workingWeekendSet = useMemo(() => new Set(workingWeekends || []), [workingWeekends]);
+  const holidayNameByDay = useMemo(() => {
+    const m = {};
+    for (const h of holidaysInfo || []) {
+      if (h.kind !== "short" && !m[h.day]) m[h.day] = h.name;
+    }
+    return m;
+  }, [holidaysInfo]);
 
   const toggleCalTask = async (id) => {
     if (!id || doneIds[id]) return;
@@ -2549,15 +2619,20 @@ function NxCal({ s }) {
     const hasOverdue = inMonth && !!overdueByDay[d];
     const isWeekend = di === 5 || di === 6;
     const isHoliday = inMonth && holidaySet.has(d);
+    const isShort = inMonth && shortSet.has(d);
+    const isWorkingWeekend = inMonth && workingWeekendSet.has(d);
     const dotColor = "#6b8f71";        // sage — задачи
     const overdueColor = "#9c5440";    // red
     const todayBorder = "#b07a2e";     // gold
-    const weekendColor = "#6b8f71";    // sage tint для цифры выходного
-    const holidayColor = "#b07a2e";    // gold для цифры праздника
+    const weekendColor = "#6b8f71";    // sage tint для обычного выходного
+    const holidayColor = "#b07a2e";    // gold для праздника/переноса
+    const shortColor = "#c08438";      // оранжевый для сокращённого
     let numColor = s.text;
     if (isPicked) numColor = s.acc;
     else if (isToday) numColor = todayBorder;
     else if (isHoliday) numColor = holidayColor;
+    else if (isShort) numColor = shortColor;
+    else if (isWorkingWeekend) numColor = s.text;  // рабочая суббота — обычный
     else if (isWeekend) numColor = weekendColor;
     return (
       <div
@@ -2588,6 +2663,11 @@ function NxCal({ s }) {
             position: "absolute", top: 2, left: "50%", transform: "translateX(-50%)",
             width: 4, height: 4, borderRadius: 2, background: holidayColor,
           }} />
+        )}
+        {isWorkingWeekend && !isToday && !isHoliday && (
+          <span style={{
+            position: "absolute", top: 1, right: 3, fontSize: fs(8), color: s.tS,
+          }}>раб.</span>
         )}
         <div
           style={{
@@ -2810,24 +2890,27 @@ function NxCal({ s }) {
         );
       })()}
 
-      {/* Сводка нерабочих дней месяца — только в Месяце */}
-      {view === "month" && holidaysInfo && holidaysInfo.length > 0 && (
-        <Glass s={s} style={{ padding: "10px 14px" }}>
-          <div style={{ fontSize: fs(12), color: s.tS, lineHeight: 1.5 }}>
-            🏖 В этом месяце {holidaysInfo.length}{" "}
-            {plural(holidaysInfo.length, "нерабочий день", "нерабочих дня", "нерабочих дней")}:{" "}
-            <span style={{ color: "#b07a2e", fontWeight: 500 }}>
-              {holidaysInfo.map((h) => h.day).join(", ")} {RU_MONTHS_GEN[month0]}
-            </span>
-            <span style={{ opacity: 0.85 }}> · {[...new Set(holidaysInfo.map((h) => h.name))].join(" / ")}</span>
-          </div>
-        </Glass>
+      {/* Сводка нерабочих дней + сокращённых + рабочих выходных — только в Месяце */}
+      {view === "month" && (holidayDays.length > 0 || shortDays.length > 0 || workingWeekends.length > 0) && (
+        <CalendarHolidaysSummary
+          s={s}
+          holidayDays={holidayDays}
+          shortDays={shortDays}
+          workingWeekends={workingWeekends}
+          holidaysInfo={holidaysInfo}
+          monthGen={RU_MONTHS_GEN[month0]}
+        />
       )}
 
       {/* Подробности выбранного дня — заголовок + список ВНУТРИ одной карточки */}
       <Glass s={s} style={{ padding: "12px 14px" }}>
         <div className="list-group-h lg" style={{ margin: "0 0 8px" }}>
           {picked} {RU_MONTHS_GEN[month0]}
+          {holidayNameByDay[picked] && (
+            <span style={{ fontStyle: "normal", fontSize: fs(13), fontWeight: 400, color: "#b07a2e", marginLeft: 8 }}>
+              · {holidayNameByDay[picked]}
+            </span>
+          )}
         </div>
         {loading && <div style={{ fontSize: fs(13), color: s.tS, padding: "6px 0" }}>Загружаю…</div>}
         {!loading && !tasksByDay[picked] && (
