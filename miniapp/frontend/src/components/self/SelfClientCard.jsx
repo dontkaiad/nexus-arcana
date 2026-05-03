@@ -324,12 +324,13 @@ export function SelfDetailHeader({ client }) {
             position: "absolute", left: "50%", top: "50%",
             transform: "translate(-50%, -50%)",
             width: 210, height: 210, pointerEvents: "none",
+            filter: `drop-shadow(0 0 4px ${ARCANA_HOLO.gold}66)`,
           }} viewBox="0 0 320 320">
-            <g stroke={`${ARCANA_HOLO.gold}55`} fill="none" strokeWidth="0.8">
+            <g stroke={`${ARCANA_HOLO.gold}b0`} fill="none" strokeWidth="1.2">
               <circle cx="160" cy="160" r="150" />
               <circle cx="160" cy="160" r="120" strokeDasharray="3 5" />
               <polygon points="160,30 272,224 48,224" />
-              <polygon points="160,290 48,96 272,96" opacity="0.5" />
+              <polygon points="160,290 48,96 272,96" opacity="0.7" />
             </g>
           </svg>
           <ClampedLivingEye size={150} accent={ARCANA_HOLO.cyan} bgFill="#0a0e18" />
@@ -344,7 +345,7 @@ export function SelfDetailHeader({ client }) {
           fontFamily: FONT_MONO, fontSize: 9.5, color: ARCANA_HOLO.cyan,
           marginTop: 7, letterSpacing: "0.32em", textTransform: "uppercase", opacity: 0.9,
         }}>
-          архитектор · видящий
+          архитектор · ведающая
         </div>
         {(handles.length > 0 || phones.length > 0) && (
           <>
