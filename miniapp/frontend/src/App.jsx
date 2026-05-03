@@ -2533,13 +2533,26 @@ function ArDay({ s, openClient, navigate, openMoonPhases }) {
           </div>
         </div>
         <div className="hero-budget">
-          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6, fontSize: 13, fontWeight: 500, cursor: "pointer" }} onClick={() => setAccSheet(true)}>
+          <div
+            style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6, fontSize: 13, fontWeight: 500, cursor: "pointer" }}
+            onClick={() => navigate?.("sess", { filter: "wait" })}
+          >
             <span style={{ opacity: 0.75 }}>Сбылось в практике</span>
-            <span style={{ fontWeight: 500 }}>{accChecked} из {accTotal} проверено</span>
+            <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+              <span style={{ fontWeight: 500 }}>{accChecked} из {accTotal} проверено</span>
+              <span
+                title="Статистика"
+                onClick={(e) => { e.stopPropagation(); setAccSheet(true); }}
+                style={{ cursor: "pointer", opacity: 0.7, fontSize: 14, padding: "2px 4px" }}
+              >📊</span>
+            </span>
           </div>
           <Bar s={s} pct={accPct} color={s.amber} />
           {(pendingSessions > 0 || pendingRituals > 0) && (
-            <div style={{ fontSize: 12, opacity: 0.6, marginTop: 6 }}>
+            <div
+              style={{ fontSize: 12, opacity: 0.6, marginTop: 6, cursor: "pointer" }}
+              onClick={() => navigate?.("sess", { filter: "wait" })}
+            >
               ⏳ {[
                 pendingSessions > 0 && `${pendingSessions} ${plural(pendingSessions, "расклад", "расклада", "раскладов")}`,
                 pendingRituals > 0 && `${pendingRituals} ${plural(pendingRituals, "ритуал", "ритуала", "ритуалов")}`,
@@ -2637,8 +2650,15 @@ function BreakdownChips({ s, breakdown }) {
   );
 }
 
-function ArSessions({ s, openSession }) {
+function ArSessions({ s, openSession, sessFilterRequest, consumeSessFilter }) {
   const [f, setF] = useState("all");
+  // Внешний триггер из ArDay → выставить wait и сбросить запрос.
+  useEffect(() => {
+    if (sessFilterRequest && consumeSessFilter) {
+      setF(sessFilterRequest);
+      consumeSessFilter();
+    }
+  }, [sessFilterRequest, consumeSessFilter]);
   let path = "/api/arcana/sessions";
   if (f === "wait") path += "?filter=status:wait";
   else if (f === "done") path += "?filter=status:done";
@@ -2648,7 +2668,7 @@ function ArSessions({ s, openSession }) {
   const pinned = list.find((x) => x.status === "wait" || x.status === "proc");
   const filters = [
     { k: "all",  l: "Все" },
-    { k: "wait", l: "Ждут проверки" },
+    { k: "wait", l: "⏳ Непроверенные" },
     { k: "done", l: "Сбылось" },
   ];
   const total = list.length;
@@ -5372,11 +5392,23 @@ export default function App() {
   const openStreaks = () => setModal({ type: "streaks" });
   const openMoonPhases = () => setModal({ type: "moon-phases" });
 
+  // wave9: внешний триггер фильтра для Расклады (тап «Сбылось в практике» → wait)
+  const [sessFilterRequest, setSessFilterRequest] = useState(null);
+  const consumeSessFilter = () => {
+    const v = sessFilterRequest;
+    if (v) setSessFilterRequest(null);
+    return v;
+  };
+
   const shared = {
     s: sky, openTask, openAdhd, openClient, openSession, openRitual, openGrimoire, openWork,
     openStreaks, openMoonPhases,
+    sessFilterRequest, consumeSessFilter,
     // wave6.3: навигация по табам из виджетов
-    navigate: (tab) => setPage(tab),
+    navigate: (tab, opts) => {
+      if (tab === "sess" && opts?.filter) setSessFilterRequest(opts.filter);
+      setPage(tab);
+    },
   };
   const nxS = { day: NxDay, tasks: NxTasks, fin: NxFinance, lists: NxLists, mem: NxMemory, cal: NxCal };
   const arS = { day: ArDay, work: ArWork, sess: ArSessions, cli: ArClients, rit: ArRituals, grim: ArGrimoire };
