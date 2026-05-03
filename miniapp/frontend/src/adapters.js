@@ -669,10 +669,17 @@ export function adaptGrimoire(data) {
       name: g.name || '',
       cat: g.cat || '—',
       theme: g.theme || '📖',
-      preview: g.preview || '',
+      themes: g.themes || [],
       themesCount: g.themes_count || 0,
+      preview: g.preview || '',
+      source: g.source || '',
+      verified: !!g.verified,
     })),
-    categories: data.categories || [],
+    // categories: [{name,count}, ...] — backend отдаёт всегда полный набор опций.
+    // Старая форма ['name', ...] поддерживается для обратной совместимости.
+    categories: (data.categories || []).map((c) =>
+      typeof c === 'string' ? { name: c, count: 0 } : { name: c.name, count: c.count ?? 0 }
+    ),
   }
 }
 
@@ -685,6 +692,7 @@ export function adaptGrimoireDetail(data) {
     themes: data.themes || [],
     content: data.content || '',
     source: data.source || '',
+    verified: !!data.verified,
   }
 }
 

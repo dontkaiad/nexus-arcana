@@ -28,12 +28,25 @@ logger = logging.getLogger("miniapp.arcana.grimoire")
 
 router = APIRouter()
 
+# Полный список опций select-поля «Категория» в Notion-схеме 📖 Гримуар.
+# Источник: NOTION_DATABASES_v2.md. При смене опций в Notion — обнови здесь.
+GRIMOIRE_CATEGORY_OPTIONS = [
+    "📿 Заговор",
+    "🧴 Рецепт",
+    "✨ Комбинация",
+    "📝 Заметка",
+]
+
 
 def _preview(text: str, n: int = 120) -> str:
     text = (text or "").strip()
     if len(text) <= n:
         return text
     return text[:n].rstrip() + "…"
+
+
+def _checkbox_of(page: dict, name: str) -> bool:
+    return bool((page.get("properties", {}).get(name, {}) or {}).get("checkbox", False))
 
 
 def _serialize_brief(page: dict) -> dict:
@@ -43,8 +56,11 @@ def _serialize_brief(page: dict) -> dict:
         "name": title_plain(page, "Название"),
         "cat": select_of(page, "Категория") or None,
         "theme": first_emoji(themes[0]) if themes else None,
+        "themes": themes,
         "themes_count": len(themes),
         "preview": _preview(rich_text_plain(page, "Текст")),
+        "source": rich_text_plain(page, "Источник") or None,
+        "verified": _checkbox_of(page, "Проверено"),
     }
 
 
@@ -54,20 +70,20 @@ async def list_grimoire(
     cat: Optional[str] = Query(None, description="фильтр по Категории"),
     q: Optional[str] = Query(None, description="contains по Название/Текст"),
 ) -> dict[str, Any]:
+    def _empty_categories() -> list[dict]:
+        return [{"name": name, "count": 0} for name in GRIMOIRE_CATEGORY_OPTIONS]
+
     db_id = _grimoire_db_id()
     if not db_id:
-        return {"items": [], "categories": []}
+        return {"items": [], "categories": _empty_categories()}
     user_notion_id = (await get_user_notion_id(tg_id)) or ""
 
-    conditions: list[dict] = []
-    if cat:
-        conditions.append({"property": "Категория", "select": {"equals": cat}})
+    # Фильтр по пользователю на уровне Notion-запроса; категорию и q
+    # фильтруем в Python чтобы корректно посчитать category counts ever.
+    filters: Optional[dict] = None
     if user_notion_id:
-        conditions.append({"property": "🪪 Пользователи",
-                           "relation": {"contains": user_notion_id}})
-    filters = None
-    if conditions:
-        filters = {"and": conditions} if len(conditions) > 1 else conditions[0]
+        filters = {"property": "🪪 Пользователи",
+                   "relation": {"contains": user_notion_id}}
 
     try:
         pages = await query_pages(
@@ -77,22 +93,31 @@ async def list_grimoire(
         )
     except Exception as e:
         logger.warning("grimoire query failed: %s", e)
-        return {"items": [], "categories": []}
+        return {"items": [], "categories": _empty_categories()}
 
-    items: list[dict] = []
-    cats: set[str] = set()
+    counts: dict[str, int] = {name: 0 for name in GRIMOIRE_CATEGORY_OPTIONS}
     needle = q.lower().strip() if q else None
+    items: list[dict] = []
     for p in pages:
         brief = _serialize_brief(p)
-        if brief["cat"]:
-            cats.add(brief["cat"])
+        if brief["cat"] and brief["cat"] in counts:
+            counts[brief["cat"]] += 1
+        elif brief["cat"]:
+            counts[brief["cat"]] = counts.get(brief["cat"], 0) + 1
+        if cat and brief["cat"] != cat:
+            continue
         if needle:
             hay = (brief["name"] or "").lower() + " " + (rich_text_plain(p, "Текст") or "").lower()
             if needle not in hay:
                 continue
         items.append(brief)
 
-    return {"items": items, "categories": sorted(cats)}
+    # сначала канонический порядок, затем «новые» категории (если в Notion завели опцию)
+    ordered = [{"name": n, "count": counts[n]} for n in GRIMOIRE_CATEGORY_OPTIONS]
+    extras = sorted(k for k in counts.keys() if k not in GRIMOIRE_CATEGORY_OPTIONS)
+    ordered.extend({"name": k, "count": counts[k]} for k in extras)
+
+    return {"items": items, "categories": ordered}
 
 
 @router.get("/arcana/grimoire/{entry_id}")
@@ -120,4 +145,5 @@ async def grimoire_detail(
         "themes": themes,
         "content": rich_text_plain(page, "Текст") or "",
         "source": rich_text_plain(page, "Источник") or None,
+        "verified": _checkbox_of(page, "Проверено"),
     }

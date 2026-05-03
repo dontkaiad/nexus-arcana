@@ -547,6 +547,44 @@ def test_arcana_grimoire_list_and_cat_filter(client):
     assert r_q.json()["items"][0]["id"] == "g2"
 
 
+def test_arcana_grimoire_categories_always_returned(client):
+    """Backend всегда отдаёт полный набор опций категорий (с count=0)."""
+    with patch("miniapp.backend.routes.arcana_grimoire.query_pages",
+               AsyncMock(return_value=[])), \
+         patch("miniapp.backend.routes.arcana_grimoire.get_user_notion_id",
+               AsyncMock(return_value=FAKE_NOTION_USER)):
+        r = client.get("/api/arcana/grimoire")
+    assert r.status_code == 200
+    cats = r.json()["categories"]
+    names = [c["name"] for c in cats]
+    assert "📿 Заговор" in names
+    assert "🧴 Рецепт" in names
+    assert "✨ Комбинация" in names
+    assert "📝 Заметка" in names
+    assert all(c["count"] == 0 for c in cats)
+
+
+def test_arcana_grimoire_categories_counts(client):
+    pages = [
+        _grim_page("g1", "A", "📿 Заговор"),
+        _grim_page("g2", "B", "📿 Заговор"),
+        _grim_page("g3", "C", "🧴 Рецепт"),
+    ]
+    with patch("miniapp.backend.routes.arcana_grimoire.query_pages",
+               AsyncMock(return_value=pages)), \
+         patch("miniapp.backend.routes.arcana_grimoire.get_user_notion_id",
+               AsyncMock(return_value=FAKE_NOTION_USER)):
+        r = client.get("/api/arcana/grimoire?cat=%F0%9F%93%BF%20%D0%97%D0%B0%D0%B3%D0%BE%D0%B2%D0%BE%D1%80")
+    assert r.status_code == 200
+    body = r.json()
+    cats = {c["name"]: c["count"] for c in body["categories"]}
+    assert cats["📿 Заговор"] == 2
+    assert cats["🧴 Рецепт"] == 1
+    assert cats["📝 Заметка"] == 0
+    # фильтр cat применяется к items, но counts остаются глобальными
+    assert len(body["items"]) == 2
+
+
 def test_arcana_grimoire_detail(client):
     page = _grim_page("gX", "Комплексная комбинация",
                      "✨ Комбинация", themes=["💰 Финансы", "🛡️ Защита"],

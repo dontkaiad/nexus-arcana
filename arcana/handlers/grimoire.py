@@ -41,11 +41,69 @@ GRIMOIRE_THEMES = {
 }
 
 PARSE_GRIMOIRE_SYSTEM = (
-    "Извлеки данные для записи в гримуар. Ответь ТОЛЬКО JSON без markdown:\n"
-    '{"title": "название", "category": "заговор/рецепт/комбинация/заметка", '
-    '"themes": ["финансы", "защита"], "text": "полный текст записи", '
-    '"source": "откуда узнала или null"}'
+    "Извлеки данные для записи в гримуар. Ответь ТОЛЬКО JSON без markdown-заборов:\n"
+    '{"title": "короткое название (1-5 слов)", '
+    '"category": "заговор|рецепт|комбинация|заметка", '
+    '"themes": ["финансы","любовь","защита","деструктив","привлечение","очищение","другое"], '
+    '"text": "полный текст записи", '
+    '"source": "откуда узнала или null"}\n\n'
+    "Правила:\n"
+    "— title никогда не пустой; если явного нет — возьми первое короткое слово/фразу.\n"
+    "— text — всё остальное содержимое (что записать).\n"
+    "— category выбери одну из 4 опций по смыслу.\n"
+    "— themes — массив подходящих тем (можно пустой).\n\n"
+    "Пример:\n"
+    'Текст: «тест — заговор на деньги, читать на убывающую луну»\n'
+    '{"title":"тест","category":"заговор","themes":["финансы"],'
+    '"text":"заговор на деньги, читать на убывающую луну","source":null}'
 )
+
+
+def _heuristic_grimoire_parse(text: str) -> dict:
+    """Fallback на случай если Haiku вернул пустой/битый JSON.
+
+    Снимает префикс «запиши в гримуар:» и делит первое предложение по « — »
+    или « : » на title/text. Категорию и темы определяет по ключевым словам.
+    """
+    import re as _re
+    src = (text or "").strip()
+    src = _re.sub(r"^\s*запиши\s+в\s+гримуар\s*[:\-—]?\s*", "", src, flags=_re.IGNORECASE)
+    if not src:
+        return {}
+    sep = _re.search(r"\s+[—–\-:]\s+", src)
+    if sep:
+        title = src[:sep.start()].strip(" —-:.,")
+        body = src[sep.end():].strip()
+    else:
+        # коротко → всё title, длинно → первые 4 слова → title
+        words = src.split()
+        if len(words) <= 4:
+            title, body = src, ""
+        else:
+            title, body = " ".join(words[:4]), src
+    low = (title + " " + body).lower()
+    cat = "заметка"
+    if "заговор" in low: cat = "заговор"
+    elif "рецепт" in low or "масло" in low or "настой" in low: cat = "рецепт"
+    elif "комбинация" in low: cat = "комбинация"
+    themes: list[str] = []
+    for kw, theme in [
+        (("деньги", "финансы", "долг", "доход"), "финансы"),
+        (("любовь", "любви", "приворот", "отношения"), "любовь"),
+        (("защита", "защит"), "защита"),
+        (("деструктив", "порча", "сглаз"), "деструктив"),
+        (("привлеч",), "привлечение"),
+        (("очищ", "чист"), "очищение"),
+    ]:
+        if any(k in low for k in kw):
+            themes.append(theme)
+    return {
+        "title": title or src[:40],
+        "category": cat,
+        "themes": themes,
+        "text": body or title,
+        "source": None,
+    }
 
 _AWAIT_SEARCH_KEY = "grim_await_search"
 _pending_search: dict = {}  # uid → True
@@ -78,10 +136,26 @@ def _back_keyboard() -> InlineKeyboardMarkup:
 
 
 def _parse_json_safe(raw: str) -> dict:
-    try:
-        return json.loads(raw.strip())
-    except Exception:
+    """Принимает ответ Haiku (часто завёрнутый в ```json … ``` или с
+    префиксом-комментарием). Возвращает {} если разобрать не удалось."""
+    if not raw:
         return {}
+    s = raw.strip()
+    # 1) попытка как есть
+    try:
+        return json.loads(s)
+    except Exception:
+        pass
+    # 2) вырезать первый JSON-объект из произвольного текста
+    import re as _re
+    fenced = _re.sub(r"```(?:json)?\s*|\s*```", "", s, flags=_re.IGNORECASE)
+    m = _re.search(r"\{.*\}", fenced, flags=_re.DOTALL)
+    if m:
+        try:
+            return json.loads(m.group(0))
+        except Exception:
+            pass
+    return {}
 
 
 def _extract_multi_select(prop: dict) -> List[str]:
@@ -247,6 +321,9 @@ async def handle_grimoire_add(message: Message, text: str, user_notion_id: str =
             model="claude-haiku-4-5-20251001",
         )
         data = _parse_json_safe(raw)
+        if not data.get("title"):
+            # Fallback — простой эвристический парсер, чтобы не «терять» запись.
+            data = _heuristic_grimoire_parse(text)
         if not data.get("title"):
             await message.answer("Не смогла распознать запись. Попробуй написать подробнее.")
             return
