@@ -20,7 +20,7 @@ import {
   Sparkles as LucideSparkles, Users, Flame as LucideFlame, BookOpen as LucideBookOpen,
   Plus, Search,
   Bell, RefreshCw, X, Camera, Mic, Pencil, ChevronRight, ChevronDown,
-  Wallet, HeartPulse, StickyNote, Candy, Trash2, Clock,
+  Wallet, HeartPulse, StickyNote, Candy, Trash2, Clock, RotateCcw,
 } from "lucide-react";
 import {
   Moon as PhMoon,
@@ -1461,7 +1461,7 @@ function NxTasks({ s, openTask }) {
     <div style={{ display: "flex", flexDirection: "column", gap: 0 }}>
       <div className="page-title" style={{ marginBottom: 10 }}>Задачи</div>
       <div className="pills" style={{ marginBottom: 10 }}>
-        {[["all","Все"],["active","Активные"],["overdue","Просрочено"],["done","Выполнено"]].map(([k,l]) => (
+        {[["all","Все"],["active","Активные"],["overdue","Просрочено"],["done","Закрытые"]].map(([k,l]) => (
           <Pill key={k} s={s} active={f === k} onClick={() => setF(k)}>{l}</Pill>
         ))}
       </div>
@@ -1469,13 +1469,14 @@ function NxTasks({ s, openTask }) {
       {error && <ErrorBox s={s} error={error} refetch={refetch} />}
       {!loading && !error && list.length === 0 && <Empty s={s} emoji="🌿" title="Чилл" text="На сегодня задач нет." />}
       {!loading && !error && list.map((t) => (
-        <div key={t.id} className={`task glass${t.status === "done" ? " done" : ""}`} onClick={() => openTask(t)} style={{ cursor: "pointer" }}>
+        <div key={t.id} className={`task glass${(t.status === "done" || t.status === "cancelled") ? " done" : ""}`} onClick={() => openTask(t)} style={{ cursor: "pointer" }}>
           <div className="body">
             <div className="title">{t.title}</div>
             <div className="meta">
               {t.date && <span style={{ color: t.status === "overdue" ? s.red : undefined }}>{t.date}</span>}
               {t.rpt && <span>{t.rpt}</span>}
               {t.status === "done" && <span>✓ сделано</span>}
+              {t.status === "cancelled" && <span>✕ отменено</span>}
             </div>
           </div>
           {t.cat && <div className="cat-badge">{String(t.cat).split(" ")[0]}</div>}
@@ -5680,6 +5681,48 @@ function TaskSheet({ s, task, onClose }) {
       setBusy(null);
     }
   };
+  // wave8.62: закрытые задачи (done/cancelled) — read-only вид + кнопка «Восстановить».
+  const isClosed = task.status === "done" || task.status === "cancelled";
+  if (isClosed) {
+    const metaCard = (label, value) => (
+      <div
+        style={{
+          flex: 1, minWidth: 0, padding: "8px 10px",
+          background: s.card, border: `1px solid ${s.brd}`,
+          borderRadius: 10, backdropFilter: "blur(10px)", textAlign: "center",
+        }}
+      >
+        <div style={{ fontSize: fs(10), color: s.tM, marginBottom: 2, textTransform: "uppercase", letterSpacing: 0.4 }}>
+          {label}
+        </div>
+        <div style={{ fontSize: fs(13), color: s.text, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+          {value}
+        </div>
+      </div>
+    );
+    const closedLabel = task.status === "done" ? "закрыто" : "отменено";
+    const closedDate = task.closedAt ? formatShortDate(task.closedAt) : null;
+    return (
+      <div>
+        <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
+          {metaCard("Категория", task.cat || "—")}
+          {metaCard("Дедлайн", task.date || task.time || task.rpt || "—")}
+          {metaCard("Приоритет", task.prio || "—")}
+        </div>
+        {closedDate && (
+          <div style={{ fontSize: fs(12), color: s.tM, marginBottom: 12, textAlign: "center" }}>
+            {closedLabel} {closedDate}
+          </div>
+        )}
+        <ActionRow
+          s={s}
+          icon={<RotateCcw size={fs(16)} />}
+          label={busy === "reopen" ? "Сохраняю..." : "↩️ Восстановить"}
+          onClick={() => !busy && task.id && run("reopen", () => apiPost(`/api/tasks/${task.id}/reopen`))}
+        />
+      </div>
+    );
+  }
   // wave8.46: чеклист задачи — items из /api/lists?type=check&group=<title>
   const checklistPath = task.title
     ? `/api/lists?type=check&group=${encodeURIComponent(task.title)}`
