@@ -72,10 +72,16 @@ def _serialize_task(page: dict, today_date, tz_offset: int) -> dict:
 
     if status in ("Done", "Complete"):
         computed_status = "done"
+    elif status == "Archived":
+        computed_status = "cancelled"
     elif deadline_local and deadline_local < today_date:
         computed_status = "overdue"
     else:
         computed_status = "active"
+
+    closed_at = None
+    if computed_status in ("done", "cancelled"):
+        closed_at = _date_start(props.get("Время завершения", {})) or page.get("last_edited_time") or None
 
     return {
         "id": page.get("id", ""),
@@ -90,6 +96,7 @@ def _serialize_task(page: dict, today_date, tz_offset: int) -> dict:
         "reminder_min": _compute_reminder_min(
             deadline_raw, _date_start(props.get("Напоминание", {}))
         ),
+        "closed_at": closed_at,
         "streak": None,  # per-task streak не хранится — см. wave 2a спеку
     }
 
@@ -108,22 +115,30 @@ def _build_filter(filter_name: str, user_notion_id: str, today_iso: str) -> dict
         })
 
     if filter_name == "done":
-        base.append({"property": "Статус", "status": {"equals": "Done"}})
+        # «Закрытые» = Done OR Complete OR Archived (одна вкладка для выполненных и отменённых)
+        base.append({"or": [
+            {"property": "Статус", "status": {"equals": "Done"}},
+            {"property": "Статус", "status": {"equals": "Complete"}},
+            {"property": "Статус", "status": {"equals": "Archived"}},
+        ]})
     elif filter_name == "overdue":
         base.extend([
             {"property": "Статус", "status": {"does_not_equal": "Done"}},
             {"property": "Статус", "status": {"does_not_equal": "Complete"}},
+            {"property": "Статус", "status": {"does_not_equal": "Archived"}},
             {"property": "Дедлайн", "date": {"before": today_iso}},
         ])
     elif filter_name == "active":
         base.extend([
             {"property": "Статус", "status": {"does_not_equal": "Done"}},
             {"property": "Статус", "status": {"does_not_equal": "Complete"}},
+            {"property": "Статус", "status": {"does_not_equal": "Archived"}},
         ])
     elif filter_name == "today":
         base.extend([
             {"property": "Статус", "status": {"does_not_equal": "Done"}},
             {"property": "Статус", "status": {"does_not_equal": "Complete"}},
+            {"property": "Статус", "status": {"does_not_equal": "Archived"}},
         ])
     if not base:
         return {}
@@ -183,6 +198,9 @@ async def get_tasks(
             d = t["deadline"] or "9999-99-99"
             return (w, d)
         items.sort(key=_prio_key)
+    elif filter == "done":
+        # closed_at desc, пустые в конец (страховка поверх Notion-сорта)
+        items.sort(key=lambda t: (t.get("closed_at") or ""), reverse=True)
 
     return {
         "filter": filter,

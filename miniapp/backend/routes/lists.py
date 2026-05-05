@@ -181,6 +181,13 @@ async def get_lists(
     # wave8.47: для чеклистов прикрепляем данные родительской задачи (cat/prio/deadline/repeat/reminder).
     if type == "check" and items:
         await _attach_parent_tasks(items, tg_id, user_notion_id)
+        # wave8.62: items с родителем-Done/Complete/Archived прячем — чеклист закрытой
+        # задачи не должен висеть в активном списке Mini App. Сами items в Notion
+        # остаются нетронутыми (бот-логика clone_recurring их не касается).
+        items = [
+            i for i in items
+            if (i.get("parent") or {}).get("status") not in ("Done", "Complete", "Archived")
+        ]
 
     return {"type": type, "items": items}
 
@@ -238,6 +245,7 @@ async def _attach_parent_tasks(items: list[dict], tg_id: int, user_notion_id: st
             "repeat": repeat,
             "repeat_time": repeat_time,
             "reminder_min": reminder_min,
+            "status": status_name(props.get("Статус", {})),
         }
     for it in items:
         g = (it.get("group") or "").strip()

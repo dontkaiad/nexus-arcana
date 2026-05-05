@@ -271,6 +271,7 @@ export function adaptTasks(data) {
       time,
       rpt: rptTime ? `🔄 ${rptTime}` : repeat ? `🔄 ${formatRepeat(repeat)}` : undefined,
       streak: t.streak || 0,
+      closedAt: t.closed_at || null,
     }
   })
 }
