@@ -648,8 +648,11 @@ async def classify(text: str, tz_offset: int = 3) -> list[dict]:
         logger.info("classify: list_done pattern matched")
         return [{"type": "list_done", "text": text}]
 
-    # "купить молоко, яйца" → list_buy (только если НЕТ цены — иначе это list_done)
-    if _LIST_BUY_RE.search(text) and not _CURRENCY_RE.search(text):
+    # "купить молоко, яйца" → list_buy. Currency-guard убран в v1.2.1:
+    # форма «добавь в [группа]: X цена, Y цена» ШТАТНО содержит ₽/руб.
+    # Защита от «купила X 89р» уже обеспечена _LIST_DONE_RE ВЫШЕ — он
+    # ловит прошедшее время с ценой и возвращает list_done до этой строки.
+    if _LIST_BUY_RE.search(text):
         logger.info("classify: list_buy pattern matched")
         return [{"type": "list_buy", "text": text}]
 
