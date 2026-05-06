@@ -5681,7 +5681,15 @@ function TaskSheet({ s, task, onClose }) {
       setBusy(null);
     }
   };
-  // wave8.62: закрытые задачи (done/cancelled) — read-only вид + кнопка «Восстановить».
+  // wave8.46: чеклист задачи — items из /api/lists?type=check&group=<title>
+  const checklistPath = task.title
+    ? `/api/lists?type=check&group=${encodeURIComponent(task.title)}`
+    : null;
+  const { data: clData, refetch: clRefetch } = useApi(checklistPath, [task.title]);
+  const checklist = clData ? adaptLists(clData) : [];
+  // hook order должен быть стабильным — clOverrides объявляем ДО early return для closed-ветки.
+  const [clOverrides, setClOverrides] = useState({});
+  // wave8.62: закрытые задачи (done/cancelled) — read-only вид + кнопка «Восстановить» + read-only чеклист.
   const isClosed = task.status === "done" || task.status === "cancelled";
   if (isClosed) {
     const metaCard = (label, value) => (
@@ -5720,16 +5728,38 @@ function TaskSheet({ s, task, onClose }) {
           label={busy === "reopen" ? "Сохраняю..." : "↩️ Восстановить"}
           onClick={() => !busy && task.id && run("reopen", () => apiPost(`/api/tasks/${task.id}/reopen`))}
         />
+        {checklist.length > 0 && (
+          <>
+            <div style={{ fontFamily: H, fontSize: fs(15), color: s.text, margin: "16px 0 8px" }}>
+              Чеклист
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+              {checklist.map((it) => (
+                <Glass
+                  key={it.id}
+                  s={s}
+                  style={{
+                    padding: "10px 14px",
+                    display: "flex", alignItems: "center", gap: 10,
+                    opacity: it.done ? 0.5 : 0.7, cursor: "default",
+                  }}
+                >
+                  <Chk s={s} done={it.done} />
+                  <span style={{
+                    flex: 1, fontSize: fs(15), color: s.text,
+                    textDecoration: it.done ? "line-through" : "none",
+                    wordBreak: "break-word",
+                  }}>
+                    {it.name}
+                  </span>
+                </Glass>
+              ))}
+            </div>
+          </>
+        )}
       </div>
     );
   }
-  // wave8.46: чеклист задачи — items из /api/lists?type=check&group=<title>
-  const checklistPath = task.title
-    ? `/api/lists?type=check&group=${encodeURIComponent(task.title)}`
-    : null;
-  const { data: clData, refetch: clRefetch } = useApi(checklistPath, [task.title]);
-  const checklist = clData ? adaptLists(clData) : [];
-  const [clOverrides, setClOverrides] = useState({});
   const clItems = checklist.map((x) =>
     x.id in clOverrides ? { ...x, done: clOverrides[x.id] } : x,
   );

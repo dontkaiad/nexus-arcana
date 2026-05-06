@@ -261,3 +261,83 @@ def test_check_items_with_done_parent_are_hidden(client):
     ids = [i["id"] for i in items]
     # c1 (parent Done) и c3 (parent Archived) спрятаны, c2 (parent Not started) виден
     assert ids == ["c2"]
+
+
+def test_check_items_match_parent_case_insensitive(client):
+    """wave8.62.1: title задачи и Группа айтема могут отличаться регистром/пробелами —
+    parent должен всё равно приклеиться, а Done-родитель — спрятать item."""
+    DB_LISTS = "db-lists-id"
+    DB_TASKS = "db-tasks-id"
+
+    list_pages = [
+        # Группа = lowercase + лишние пробелы
+        _check_item("c-mismatch", "помыть холодильник",
+                    group="  сделать генеральную уборку кухни  "),
+    ]
+    task_pages = [
+        # Title = capitalize, без лишних пробелов
+        _parent_task("Сделать Генеральную Уборку Кухни", status="Done"),
+    ]
+
+    async def qp(db_id, *, filters=None, **__):
+        if db_id == DB_LISTS:
+            return list_pages
+        if db_id == DB_TASKS:
+            return task_pages
+        return []
+
+    with patch("miniapp.backend.routes.lists.query_pages", side_effect=qp), \
+         patch("miniapp.backend.routes.lists.get_user_notion_id",
+               AsyncMock(return_value=FAKE_NOTION_USER)), \
+         patch("miniapp.backend.routes.lists.today_user_tz",
+               AsyncMock(return_value=(_today_date(), 3))), \
+         patch("miniapp.backend.routes.lists.config") as cfg:
+        cfg.db_lists = DB_LISTS
+        cfg.nexus.db_tasks = DB_TASKS
+        r = client.get("/api/lists?type=check")
+
+    assert r.status_code == 200
+    items = r.json()["items"]
+    # parent Done должен быть найден несмотря на mismatch регистра/пробелов → item скрыт
+    assert items == []
+
+
+def test_check_items_match_parent_without_user_relation(client):
+    """wave8.62.1: родитель без relation 🪪 Пользователи (создан в Notion-UI) —
+    запрос должен включать OR is_empty, иначе parent=None и Done-родитель не прячется."""
+    DB_LISTS = "db-lists-id"
+    DB_TASKS = "db-tasks-id"
+
+    list_pages = [
+        _check_item("c-orphan-parent", "пункт", group="Уборка"),
+    ]
+    parent_no_user = _parent_task("Уборка", status="Done")
+    parent_no_user["properties"]["🪪 Пользователи"] = {"relation": []}
+    task_pages = [parent_no_user]
+
+    captured = {}
+
+    async def qp(db_id, *, filters=None, **__):
+        if db_id == DB_LISTS:
+            return list_pages
+        if db_id == DB_TASKS:
+            captured["tasks_filters"] = filters
+            return task_pages
+        return []
+
+    with patch("miniapp.backend.routes.lists.query_pages", side_effect=qp), \
+         patch("miniapp.backend.routes.lists.get_user_notion_id",
+               AsyncMock(return_value=FAKE_NOTION_USER)), \
+         patch("miniapp.backend.routes.lists.today_user_tz",
+               AsyncMock(return_value=(_today_date(), 3))), \
+         patch("miniapp.backend.routes.lists.config") as cfg:
+        cfg.db_lists = DB_LISTS
+        cfg.nexus.db_tasks = DB_TASKS
+        r = client.get("/api/lists?type=check")
+
+    assert r.status_code == 200
+    # Запрос к db_tasks должен иметь is_empty в OR-ветке user-relation
+    f_str = _json.dumps(captured.get("tasks_filters") or {}, ensure_ascii=False)
+    assert "is_empty" in f_str
+    # И item с parent Done спрятан
+    assert r.json()["items"] == []
