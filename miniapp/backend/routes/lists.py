@@ -58,10 +58,36 @@ def _serialize(page: dict) -> dict:
         "status": status,
         "qty": number_value(props.get("Количество", {})),
         "price": number_value(props.get("Цена", {})),
+        # v1.2 — план / магазин / этап
+        "price_plan": number_value(props.get("Цена план", {})),
+        "source": rich_text(props.get("Магазин", {})) or None,
+        "stage": number_value(props.get("Этап", {})),
         "note": rich_text(props.get("Заметка", {})) or None,
+        "priority": select_name(props.get("Приоритет", {})) or None,
         "expires": date_start(props.get("Срок годности", {})) or None,
         "group": rich_text(props.get("Группа", {})) or None,
         "recurring": checkbox_value(props.get("Повторяющийся", {})),
+    }
+
+
+def _summary(items: list[dict]) -> dict:
+    """v1.2: агрегации план/факт по списку items (после фильтров)."""
+    plan = 0.0
+    actual = 0.0
+    done = 0
+    for it in items:
+        if it.get("price_plan"):
+            plan += float(it["price_plan"] or 0)
+        if it.get("done"):
+            done += 1
+            if it.get("price"):
+                actual += float(it["price"] or 0)
+    return {
+        "plan_total": plan,
+        "actual_total": actual,
+        "count_total": len(items),
+        "count_open": len(items) - done,
+        "count_done": done,
     }
 
 
@@ -193,7 +219,7 @@ async def get_lists(
                 if (i.get("parent") or {}).get("status") not in ("Done", "Complete", "Archived")
             ]
 
-    return {"type": type, "items": items}
+    return {"type": type, "items": items, "summary": _summary(items)}
 
 
 def _norm_title(s: str) -> str:

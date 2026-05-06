@@ -370,6 +370,13 @@ export function adaptLists(data) {
       catFull: catFull(x.cat),
       group: x.group || '',
       done: !!x.done,
+      // v1.2: полный набор полей (раньше игнорировались)
+      price: x.price ?? null,
+      pricePlan: x.price_plan ?? null,
+      source: x.source ?? null,
+      stage: x.stage ?? null,
+      note: x.note ?? null,
+      priority: x.priority ?? null,
     }
     if (type === 'inv') {
       return {
@@ -398,6 +405,25 @@ export function adaptLists(data) {
     }
     return base
   })
+}
+
+// v1.2: достать summary из ответа /api/lists (план/факт/счётчики).
+export function adaptListsSummary(data) {
+  if (!data || !data.summary) return null
+  const s = data.summary
+  return {
+    planTotal: s.plan_total ?? 0,
+    actualTotal: s.actual_total ?? 0,
+    countTotal: s.count_total ?? 0,
+    countOpen: s.count_open ?? 0,
+    countDone: s.count_done ?? 0,
+  }
+}
+
+export function formatRub(n) {
+  if (n === null || n === undefined) return ''
+  const i = Math.round(Number(n) || 0)
+  return i.toLocaleString('ru-RU').replace(/ /g, ' ')
 }
 
 // ── /api/memory → {items, categories} ─────────────────────────────────────

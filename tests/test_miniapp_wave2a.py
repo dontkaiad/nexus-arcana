@@ -434,7 +434,11 @@ def test_lists_empty(client):
                AsyncMock(return_value="")):
         r = client.get("/api/lists?type=check")
     assert r.status_code == 200
-    assert r.json() == {"type": "check", "items": []}
+    body = r.json()
+    assert body["type"] == "check"
+    assert body["items"] == []
+    # v1.2: пустой summary — все нули
+    assert body.get("summary", {}).get("count_total") == 0
 
 
 def test_lists_401_without_init_data():

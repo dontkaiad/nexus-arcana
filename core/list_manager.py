@@ -243,6 +243,8 @@ async def find_task_by_name(
 def _extract_page_data(page: dict) -> dict:
     """Извлечь данные из Notion page для ответа."""
     props = page.get("properties", {})
+    # v1.2: 🔮 Работы — name с trailing space в Notion схеме, поддерживаем оба варианта.
+    work_rel_prop = props.get("🔮 Работы ", {}) or props.get("🔮 Работы", {})
     return {
         "id": page["id"],
         "name": _extract_text(props.get("Название", {})),
@@ -252,13 +254,17 @@ def _extract_page_data(page: dict) -> dict:
         "quantity": _extract_number(props.get("Количество", {})),
         "note": _extract_text(props.get("Заметка", {})),
         "price": _extract_number(props.get("Цена", {})),
+        # v1.2 — новые поля
+        "price_plan": _extract_number(props.get("Цена план", {})),
+        "source": _extract_text(props.get("Магазин", {})),
+        "stage": _extract_number(props.get("Этап", {})),
         "expiry": (props.get("Срок годности", {}).get("date") or {}).get("start", ""),
         "remind_days": _extract_number(props.get("Напомнить за", {})),
         "priority": _extract_select(props.get("Приоритет", {})),
         "recurring": (props.get("Повторяющийся", {}).get("checkbox") or False),
         "group": _extract_text(props.get("Группа", {})),
         "task_rel": (props.get("✅ Задачи", {}).get("relation") or [{}])[0].get("id", ""),
-        "work_rel": (props.get("🔮 Работы", {}).get("relation") or [{}])[0].get("id", ""),
+        "work_rel": (work_rel_prop.get("relation") or [{}])[0].get("id", ""),
     }
 
 
@@ -317,8 +323,10 @@ async def add_items(
         if category:
             props["Категория"] = _select(category)
 
-        if item.get("quantity"):
-            props["Количество"] = _number(float(item["quantity"]))
+        # qty принимается под двумя ключами для совместимости (qty/quantity)
+        qty_val = item.get("qty") if item.get("qty") is not None else item.get("quantity")
+        if qty_val:
+            props["Количество"] = _number(float(qty_val))
         if note:
             props["Заметка"] = _text(note)
         if item.get("priority"):
@@ -327,10 +335,19 @@ async def add_items(
             props["Группа"] = _text(item["group"])
         if item.get("recurring"):
             props["Повторяющийся"] = _checkbox(True)
-        if item.get("expiry"):
-            props["Срок годности"] = _date(item["expiry"])
+        # expires/expiry — оба ключа поддерживаются (Haiku возвращает expires)
+        expiry_val = item.get("expiry") or item.get("expires")
+        if expiry_val:
+            props["Срок годности"] = _date(expiry_val)
         if remind_days:
             props["Напомнить за"] = _number(float(remind_days))
+        # v1.2 — Цена план / Магазин / Этап
+        if item.get("price_plan") is not None and item.get("price_plan") != 0:
+            props["Цена план"] = _number(float(item["price_plan"]))
+        if item.get("source"):
+            props["Магазин"] = _text(item["source"])
+        if item.get("stage") is not None and item.get("stage") != 0:
+            props["Этап"] = _number(int(item["stage"]))
         if user_page_id:
             props["🪪 Пользователи"] = _relation(user_page_id)
         if item.get("task_rel"):
@@ -805,6 +822,84 @@ async def clone_recurring() -> int:
             logger.info("clone_recurring: cloned '%s' → %s", data["name"], page_id)
 
     return cloned
+
+
+async def get_list_summary(
+    user_notion_id: str,
+    bot_name: str,
+    type_: Optional[str] = None,
+    group: Optional[str] = None,
+    category: Optional[str] = None,
+) -> dict:
+    """v1.2: агрегации по 🗒️ Списки.
+
+    Возвращает:
+        {
+            "plan_total":    сумма Цена план у всех (включая Done),
+            "actual_total":  сумма Цена у Done,
+            "count_total":   всего пунктов (без Archived),
+            "count_open":    Not started + In progress,
+            "count_done":    Done,
+            "items":         [_extract_page_data(...)] для рендера.
+        }
+
+    type_  — None=все, иначе значение «Тип» (🛒 Покупки / 📋 Чеклист / 📦 Инвентарь).
+    group  — фильтр по полю «Группа» (точное совпадение, регистронезависимое).
+    category — фильтр по полю «Категория» (точное совпадение).
+    """
+    db = _db_id()
+    empty = {
+        "plan_total": 0.0, "actual_total": 0.0,
+        "count_total": 0, "count_open": 0, "count_done": 0,
+        "items": [],
+    }
+    if not db:
+        return empty
+
+    conditions: list[dict] = [
+        {"property": "Бот", "select": {"equals": bot_name}},
+        {"property": "Статус", "status": {"does_not_equal": "Archived"}},
+    ]
+    if type_:
+        conditions.append({"property": "Тип", "select": {"equals": type_}})
+    if category:
+        conditions.append({"property": "Категория", "select": {"equals": category}})
+    if user_notion_id:
+        conditions.append(
+            {"property": "🪪 Пользователи", "relation": {"contains": user_notion_id}}
+        )
+
+    pages = await db_query(db, filter_obj={"and": conditions}, page_size=200)
+    items = [_extract_page_data(p) for p in pages]
+
+    if group:
+        g_target = group.strip().lower()
+        items = [
+            it for it in items
+            if (it.get("group") or "").strip().lower() == g_target
+        ]
+
+    plan_total = 0.0
+    actual_total = 0.0
+    count_total = len(items)
+    count_open = 0
+    count_done = 0
+    for it in items:
+        plan_total += float(it.get("price_plan") or 0)
+        if it.get("status") == "Done":
+            actual_total += float(it.get("price") or 0)
+            count_done += 1
+        else:
+            count_open += 1
+
+    return {
+        "plan_total": plan_total,
+        "actual_total": actual_total,
+        "count_total": count_total,
+        "count_open": count_open,
+        "count_done": count_done,
+        "items": items,
+    }
 
 
 async def check_expiry(bot, user_tz_offset: int = 3) -> int:

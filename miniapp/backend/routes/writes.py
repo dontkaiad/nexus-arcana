@@ -881,7 +881,13 @@ class ListCreateBody(BaseModel):
     cat: Optional[str] = None
     qty: Optional[float] = None
     note: Optional[str] = None
-    price: Optional[float] = None
+    price: Optional[float] = None         # факт-цена при покупке
+    # v1.2 — планируемые покупки
+    price_plan: Optional[float] = None
+    source: Optional[str] = None
+    stage: Optional[int] = None
+    group: Optional[str] = None
+    priority: Optional[str] = None
     expires: Optional[str] = None
     bot: Optional[str] = None  # nexus | arcana (default nexus)
 
@@ -913,6 +919,17 @@ async def list_create(
         props["Заметка"] = _text(body.note)
     if body.price is not None:
         props["Цена"] = _number(float(body.price))
+    # v1.2: новые поля
+    if body.price_plan is not None:
+        props["Цена план"] = _number(float(body.price_plan))
+    if body.source:
+        props["Магазин"] = _text(body.source)
+    if body.stage is not None:
+        props["Этап"] = _number(int(body.stage))
+    if body.group:
+        props["Группа"] = _text(body.group)
+    if body.priority:
+        props["Приоритет"] = _select(body.priority)
     if body.expires:
         props["Срок годности"] = _date(body.expires)
     if user_notion_id:
@@ -929,6 +946,11 @@ async def list_done(
     item_id: str,
     tg_id: int = Depends(current_user_id),
 ) -> dict[str, Any]:
+    """v1.1 (legacy): просто помечает Done. Не пишет в Финансы.
+
+    v1.2 предпочитает /checkout который создаёт расход. Endpoint оставлен
+    для обратной совместимости (используется существующим UI чеклистов).
+    """
     user_notion_id = (await get_user_notion_id(tg_id)) or ""
     await _load_owned_page(item_id, user_notion_id, allow_empty_owner=True)
     try:
@@ -937,6 +959,76 @@ async def list_done(
         logger.error("list_done failed: %s", e)
         raise HTTPException(status_code=500, detail="failed to mark done")
     return {"ok": True}
+
+
+# ── v1.2: /checkout — Done + автозапись в Финансы ────────────────────────────
+
+class ListCheckoutBody(BaseModel):
+    price: Optional[float] = None    # фактическая цена; если None — берём Цена план
+    note: Optional[str] = None        # описание расхода
+
+
+@router.post("/lists/{item_id}/checkout")
+async def list_checkout(
+    item_id: str,
+    body: ListCheckoutBody,
+    tg_id: int = Depends(current_user_id),
+) -> dict[str, Any]:
+    """Помечает пункт Done и при наличии цены создаёт запись в 💰 Финансы.
+
+    Логика факт-цены:
+    1. body.price если передан;
+    2. Цена план из самой записи;
+    3. ничего → finance_created=False, расход не создаётся.
+    """
+    from core.list_manager import CATEGORY_TO_FINANCE
+    from core.notion_client import _extract_number, _extract_select, _extract_text
+
+    user_notion_id = (await get_user_notion_id(tg_id)) or ""
+    page = await _load_owned_page(item_id, user_notion_id, allow_empty_owner=True)
+    props = page.get("properties", {})
+
+    name = title_plain(props.get("Название", {}))
+    category = _extract_select(props.get("Категория", {})) or "💳 Прочее"
+    price_plan = _extract_number(props.get("Цена план", {})) or 0.0
+    bot_label = _extract_select(props.get("Бот", {})) or BOT_NEXUS
+
+    actual = body.price if body.price is not None else price_plan
+    actual = float(actual or 0)
+
+    update_props: dict = {"Статус": _status("Done")}
+    if actual > 0:
+        update_props["Цена"] = _number(actual)
+    try:
+        await update_page(item_id, update_props)
+    except Exception as e:
+        logger.error("list_checkout: update_page failed: %s", e)
+        raise HTTPException(status_code=500, detail="failed to mark done")
+
+    finance_id = None
+    if actual > 0:
+        finance_cat = CATEGORY_TO_FINANCE.get(category, "💳 Прочее")
+        today_iso, _tz = await today_user_tz(tg_id)
+        try:
+            finance_id = await finance_add(
+                date=today_iso.isoformat() if hasattr(today_iso, "isoformat") else str(today_iso),
+                amount=actual,
+                category=finance_cat,
+                type_="💸 Расход",
+                source="💳 Карта",
+                description=body.note or name or "покупка",
+                bot_label=bot_label,
+                user_notion_id=user_notion_id,
+            )
+        except Exception as e:
+            logger.error("list_checkout: finance_add failed: %s", e)
+
+    return {
+        "ok": True,
+        "amount": actual,
+        "finance_created": bool(finance_id),
+        "finance_id": finance_id,
+    }
 
 
 @router.post("/lists/{item_id}/delete")

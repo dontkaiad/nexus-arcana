@@ -13,7 +13,7 @@ from core.notion_client import finance_add, log_error
 from core.config import ARCANA_KEYWORDS
 from core.list_classifier import (
     _LIST_BUY_RE, _LIST_CHECK_RE, _SUBTASK_RE, _LIST_INV_ADD_RE,
-    _LIST_INV_SEARCH_RE, _LIST_DONE_RE, _LIST_INV_UPDATE_RE,
+    _LIST_INV_SEARCH_RE, _LIST_DONE_RE, _LIST_INV_UPDATE_RE, _LIST_SUM_RE,
     LIST_HAIKU_TYPES,
 )
 from nexus.handlers.utils import react
@@ -638,6 +638,11 @@ async def classify(text: str, tz_offset: int = 3) -> list[dict]:
         return [{"type": "stats", "query": text}]
 
     # ── Списки pre-filters (ПОРЯДОК ВАЖЕН: list_done ПЕРЕД list_buy!) ────────
+    # v1.2: "сумма Apple-стек" / "сколько по продуктам" → list_sum
+    if _LIST_SUM_RE.match(text):
+        logger.info("classify: list_sum pattern matched")
+        return [{"type": "list_sum", "text": text}]
+
     # "купила молоко 89р" → list_done (НЕ list_buy!)
     if _LIST_DONE_RE.search(text):
         logger.info("classify: list_done pattern matched")
@@ -860,6 +865,11 @@ async def process_item(data: Dict[str, Any], original_text: str, msg, clarify: d
         await react(msg, "🫡")
         from nexus.handlers.lists import handle_list_inv_update
         await handle_list_inv_update(msg, data, user_notion_id=user_notion_id)
+        return ""
+
+    if kind == "list_sum":
+        from nexus.handlers.lists import handle_list_sum
+        await handle_list_sum(msg, data, user_notion_id=user_notion_id)
         return ""
 
     if kind == "unknown":

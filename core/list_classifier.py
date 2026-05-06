@@ -45,6 +45,12 @@ _LIST_INV_UPDATE_RE = re.compile(
     re.IGNORECASE,
 )
 
+# ── v1.2: Команда суммы ("сумма Apple-стек", "сколько по продуктам") ──────────
+_LIST_SUM_RE = re.compile(
+    r"^\s*(?:сумма|сколько|итого|подсч[её]т)\s+(?:по\s+)?(.+?)\s*\??$",
+    re.IGNORECASE,
+)
+
 # ── Haiku fallback types (описания для classifier.py build_system) ────────────
 LIST_HAIKU_TYPES = [
     'list_buy — добавить в список покупок:',

@@ -6,7 +6,7 @@ import { useApi } from "./hooks/useApi";
 import {
   adaptToday, adaptArcanaToday,
   adaptTasks, adaptFinanceToday, adaptFinanceMonth, adaptFinanceLimits, adaptFinanceGoals,
-  adaptLists, adaptMemory, adaptAdhd, adaptCalendar,
+  adaptLists, adaptListsSummary, formatRub, adaptMemory, adaptAdhd, adaptCalendar,
   adaptSessions, adaptSessionDetail, adaptSessionGroup,
   adaptClients, adaptClientDossier,
   adaptRituals, adaptRitualDetail,
@@ -1986,6 +1986,7 @@ function NxLists({ s }) {
   const path = q ? `/api/lists?type=${tab}&q=${qEnc}` : `/api/lists?type=${tab}`;
   const { data, loading, error, refetch } = useApi(path, [tab, q]);
   const apiItems = loading || error ? [] : adaptLists(data);
+  const summary = loading || error ? null : adaptListsSummary(data);
 
   // wave8.47: для Чеклиста подтягиваем задачи, чтобы отрисовать шапку секции
   // как карточку родительской задачи (cat справа + prio + дата снизу).
@@ -2011,7 +2012,15 @@ function NxLists({ s }) {
     if (item.done) return; // повторного снятия нет в API — просто игнор
     setOverrides((prev) => ({ ...prev, [item.id]: true }));
     try {
-      await apiPost(`/api/lists/${item.id}/done`);
+      // v1.2: для покупок зовём /checkout — он создаёт расход в Финансах
+      // если есть pricePlan. Для чеклиста и инвентаря — старый /done без денег.
+      if (tab === "buy") {
+        const body = {};
+        if (item.pricePlan) body.price = item.pricePlan;
+        await apiPost(`/api/lists/${item.id}/checkout`, body);
+      } else {
+        await apiPost(`/api/lists/${item.id}/done`);
+      }
       setTimeout(refetch, 500);
     } catch (e) {
       setOverrides((prev) => {
@@ -2152,6 +2161,22 @@ function NxLists({ s }) {
       })}
 
       {/* ─── Покупки ──────────────────────────────────────────────── */}
+      {!loading && !error && tab === "buy" && summary && (summary.planTotal > 0 || summary.actualTotal > 0) && (
+        <Glass s={s} style={{ padding: "10px 14px", marginBottom: 6 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
+            {summary.planTotal > 0 && (
+              <span style={{ fontSize: fs(13), color: s.text }}>
+                💰 План: <b>{formatRub(summary.planTotal)}₽</b>
+              </span>
+            )}
+            {summary.actualTotal > 0 && (
+              <span style={{ fontSize: fs(13), color: s.tS }}>
+                ✅ Куплено: {formatRub(summary.actualTotal)}₽ ({summary.countDone}/{summary.countTotal})
+              </span>
+            )}
+          </div>
+        </Glass>
+      )}
       {!loading && !error && tab === "buy" && groupByCat(items).map(([catName, group]) => (
         <React.Fragment key={catName || "—"}>
           {catName && (
@@ -2162,28 +2187,60 @@ function NxLists({ s }) {
               key={x.id} s={s}
               style={{
                 padding: "10px 14px", marginBottom: 4, opacity: x.done ? 0.5 : 1,
-                cursor: "pointer", display: "flex", alignItems: "center", gap: 10,
+                cursor: "pointer",
               }}
               onClick={() => toggleDone(x)}
             >
-              <Chk s={s} done={x.done} />
-              <span style={{
-                flex: 1, minWidth: 0,
-                fontSize: fs(16), color: s.text, fontWeight: 500,
-                wordBreak: "break-word",
-                textDecoration: x.done ? "line-through" : "none",
-              }}>
-                {x.name}
-              </span>
-              {x.cat && (
+              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <Chk s={s} done={x.done} />
                 <span style={{
-                  display: "inline-flex", alignItems: "center",
-                  padding: "3px 9px", borderRadius: 10,
-                  fontSize: fs(13), background: `${s.acc}33`, color: s.text, fontWeight: 500,
-                  flexShrink: 0, whiteSpace: "nowrap",
+                  flex: 1, minWidth: 0,
+                  fontSize: fs(16), color: s.text, fontWeight: 500,
+                  wordBreak: "break-word",
+                  textDecoration: x.done ? "line-through" : "none",
                 }}>
-                  {x.cat}
+                  {x.name}
                 </span>
+                {x.priority && (
+                  <span title={x.priority} style={{
+                    width: 8, height: 8, borderRadius: 4, flexShrink: 0,
+                    background: x.priority.startsWith("🔴") ? "#ef4444"
+                      : x.priority.startsWith("🟡") ? "#eab308"
+                      : "#94a3b8",
+                  }} />
+                )}
+                {x.cat && (
+                  <span style={{
+                    display: "inline-flex", alignItems: "center",
+                    padding: "3px 9px", borderRadius: 10,
+                    fontSize: fs(13), background: `${s.acc}33`, color: s.text, fontWeight: 500,
+                    flexShrink: 0, whiteSpace: "nowrap",
+                  }}>
+                    {x.cat}
+                  </span>
+                )}
+              </div>
+              {(x.pricePlan || x.source || x.note || (x.done && x.price)) && (
+                <div style={{
+                  marginTop: 4, marginLeft: 26,
+                  fontSize: fs(12), color: s.tS,
+                  display: "flex", flexWrap: "wrap", gap: 6,
+                }}>
+                  {x.pricePlan && (
+                    <span style={{ color: s.acc, fontWeight: 500 }}>
+                      {formatRub(x.pricePlan)}₽
+                    </span>
+                  )}
+                  {x.source && <span>· {x.source}</span>}
+                  {x.done && x.price && x.price !== x.pricePlan && (
+                    <span style={{ color: s.tM }}>· факт {formatRub(x.price)}₽</span>
+                  )}
+                  {x.note && (
+                    <span style={{ fontStyle: "italic", opacity: 0.75, flexBasis: "100%" }}>
+                      {x.note}
+                    </span>
+                  )}
+                </div>
               )}
             </Glass>
           ))}
