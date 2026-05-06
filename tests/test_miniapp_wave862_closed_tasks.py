@@ -341,3 +341,41 @@ def test_check_items_match_parent_without_user_relation(client):
     assert "is_empty" in f_str
     # И item с parent Done спрятан
     assert r.json()["items"] == []
+
+
+def test_check_items_with_group_param_show_even_if_parent_closed(client):
+    """wave8.62.2: TaskSheet закрытой задачи запрашивает /api/lists?type=check&group=<title>
+    чтобы показать subtasks read-only. Фильтр closed-parent НЕ должен прятать items
+    в этом случае — иначе секция Чеклист в закрытом TaskSheet всегда пустая."""
+    DB_LISTS = "db-lists-id"
+    DB_TASKS = "db-tasks-id"
+
+    list_pages = [
+        _check_item("c-done-parent-1", "помыть холодильник", group="Уборка кухни"),
+        _check_item("c-done-parent-2", "выкинуть просрочку", group="Уборка кухни"),
+    ]
+    task_pages = [
+        _parent_task("Уборка кухни", status="Done"),
+    ]
+
+    async def qp(db_id, *, filters=None, **__):
+        if db_id == DB_LISTS:
+            return list_pages
+        if db_id == DB_TASKS:
+            return task_pages
+        return []
+
+    with patch("miniapp.backend.routes.lists.query_pages", side_effect=qp), \
+         patch("miniapp.backend.routes.lists.get_user_notion_id",
+               AsyncMock(return_value=FAKE_NOTION_USER)), \
+         patch("miniapp.backend.routes.lists.today_user_tz",
+               AsyncMock(return_value=(_today_date(), 3))), \
+         patch("miniapp.backend.routes.lists.config") as cfg:
+        cfg.db_lists = DB_LISTS
+        cfg.nexus.db_tasks = DB_TASKS
+        # С group= — items должны быть видны (read-only subtasks в закрытом TaskSheet)
+        r = client.get("/api/lists?type=check&group=Уборка%20кухни")
+
+    assert r.status_code == 200
+    ids = [i["id"] for i in r.json()["items"]]
+    assert ids == ["c-done-parent-1", "c-done-parent-2"]
