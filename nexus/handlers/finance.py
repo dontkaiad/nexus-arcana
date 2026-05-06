@@ -2199,8 +2199,9 @@ _BUDGET_VARIABLE_CATS = [
 ]
 
 _BUDGET_DB = os.path.join(os.path.dirname(os.path.abspath(__file__)), "../../pending_budget.db")
-_BUDGET_TTL = 3600  # 60 min — для состояния setup
-_PAYDAY_TTL = 90000  # 25 часов — для маркера "ревью уже отправлено сегодня"
+_BUDGET_TTL = 3600           # 60 min — для setup-стадии (collecting/adjusting)
+_BUDGET_HAS_PLAN_TTL = 900   # 15 min — для has_plan (Кай должна явно закрыть кнопкой)
+_PAYDAY_TTL = 90000          # 25 часов — для маркера "ревью уже отправлено сегодня"
 
 
 def _bdb() -> _sqlite3.Connection:
@@ -2254,15 +2255,68 @@ def _budget_get(uid: int) -> Optional[dict]:
         ).fetchone()
     if not row:
         return None
-    if _time.time() - row[1] > _BUDGET_TTL:
+    try:
+        data = json.loads(row[0])
+    except Exception:
         _budget_del(uid)
         return None
-    return json.loads(row[0])
+    age = _time.time() - row[1]
+    # v1.2.2: has_plan живёт всего 15 мин. Дольше — Кай уже забыла что есть
+    # «висящий план», и любое следующее сообщение (купи молоко / задача /
+    # заметка) перехватывается как «корректировка». Sticky state ломает UX.
+    ttl = _BUDGET_HAS_PLAN_TTL if data.get("plan") else _BUDGET_TTL
+    if age > ttl:
+        _budget_del(uid)
+        return None
+    return data
 
 
 def _budget_del(uid: int) -> None:
     with _bdb() as con:
         con.execute("DELETE FROM budget_pending WHERE uid=?", (uid,))
+
+
+# ── v1.2.2: bypass guard для перехватчика бюджета ────────────────────────────
+
+def _is_other_domain_command(text: str) -> bool:
+    """True если текст — явная команда списков/задач/заметок/памяти.
+
+    Используется в handle_budget_setup_text перед тем как считать сообщение
+    «корректировкой плана». Без этого guard любая команда вида «добавь в X:»
+    или «купи Y» во время has_plan переписывала Sonnet-план вместо того
+    чтобы дойти до classify().
+    """
+    if not text:
+        return False
+    # Локальный импорт чтобы избежать циклов с core.classifier.
+    from core.list_classifier import _LIST_BUY_RE, _LIST_DONE_RE, _LIST_SUM_RE
+
+    raw = text.strip()
+    if not raw:
+        return False
+
+    # Списки — pre-filter regex'ы уже учитывают форму «добавь в [группа]:»
+    # и «купила X 89р», и «сумма Apple-стек».
+    if _LIST_BUY_RE.search(raw):
+        return True
+    if _LIST_DONE_RE.search(raw):
+        return True
+    if _LIST_SUM_RE.match(raw):
+        return True
+
+    low = raw.lower()
+    # Задачи — явные триггеры (классификатор всё равно проверит, нам тут
+    # нужно лишь не перехватить).
+    if low.startswith(("добавь задач", "поставь задач", "напомни ", "создай задач")):
+        return True
+    # Заметки
+    if low.startswith(("заметка", "запиши", "добавь заметк")):
+        return True
+    # Память
+    if low.startswith(("запомни", "помни ", "забудь")):
+        return True
+
+    return False
 
 BUDGET_SONNET_SYSTEM = (
     "Ты финансовый аналитик. Пользователь — Кай, женщина с СДВГ.\n"
@@ -2721,6 +2775,8 @@ async def start_budget_analysis(message: Message, user_notion_id: str = "") -> N
         InlineKeyboardButton(text="📋 Стратегия долгов", callback_data="bsetup_change_strategy"),
     ], [
         InlineKeyboardButton(text="✏️ Изменить данные", callback_data="bsetup_adjust"),
+    ], [
+        InlineKeyboardButton(text="❌ Закрыть план", callback_data="bsetup_close"),
     ]]
     await message.answer(
         budget_text,
@@ -2759,6 +2815,16 @@ async def handle_budget_setup_text(message: Message, user_notion_id: str = "") -
     uid = message.from_user.id
     state = _budget_get(uid)
     if not state:
+        return False
+
+    # v1.2.2: bypass — если в state.plan, но сообщение является явной командой
+    # другого домена (купи / добавь в [группа]: / запомни / заметка), не
+    # перехватываем. Отдадим в classify, пусть пойдёт нормальным маршрутом.
+    if state.get("plan") and _is_other_domain_command(message.text or ""):
+        logger.info(
+            "budget intercept bypass: other-domain command uid=%s text=%r",
+            uid, (message.text or "")[:60],
+        )
         return False
 
     # Если есть план и пользователь пишет текст — считать как корректировку
@@ -2907,6 +2973,23 @@ async def on_budget_change_strategy(call: CallbackQuery) -> None:
     )
 
 
+@router.callback_query(F.data == "bsetup_close")
+async def on_budget_close(call: CallbackQuery) -> None:
+    """v1.2.2: явно закрыть финплан → удалить state, освободить перехватчик.
+
+    Без этой кнопки has_plan мог жить до TTL (15 мин), и любое сообщение
+    Кай по другому домену уезжало в Sonnet как «корректировка».
+    """
+    uid = call.from_user.id
+    _budget_del(uid)
+    try:
+        await call.message.edit_reply_markup(reply_markup=None)
+    except Exception:
+        pass
+    await call.message.answer("✅ План закрыт. Возвращаюсь к обычному режиму ✨")
+    await call.answer()
+
+
 @router.callback_query(F.data == "bsetup_accept")
 async def on_budget_accept(call: CallbackQuery) -> None:
     """Принять план -> сохранить."""
@@ -3027,6 +3110,8 @@ async def on_budget_variant_choice(call: CallbackQuery) -> None:
         InlineKeyboardButton(text="✅ Принять", callback_data="bsetup_accept"),
         InlineKeyboardButton(text="📋 Изменить стратегию", callback_data="bsetup_change_strategy"),
         InlineKeyboardButton(text="🔄 Пересчитать", callback_data="bsetup_recalc"),
+    ], [
+        InlineKeyboardButton(text="❌ Закрыть план", callback_data="bsetup_close"),
     ]]
     try:
         await call.message.edit_text(
@@ -3185,6 +3270,8 @@ async def _run_budget_analysis(message: Message, uid: int) -> None:
         ], [
             InlineKeyboardButton(text="📋 Изменить стратегию", callback_data="bsetup_change_strategy"),
             InlineKeyboardButton(text="🔄 Пересчитать", callback_data="bsetup_recalc"),
+        ], [
+            InlineKeyboardButton(text="❌ Закрыть план", callback_data="bsetup_close"),
         ]]
     else:
         # Нормальный месяц → стандартные кнопки
@@ -3192,6 +3279,8 @@ async def _run_budget_analysis(message: Message, uid: int) -> None:
             InlineKeyboardButton(text="✅ Принять", callback_data="bsetup_accept"),
             InlineKeyboardButton(text="✏️ Изменить", callback_data="bsetup_adjust"),
             InlineKeyboardButton(text="🔄 Пересчитать", callback_data="bsetup_recalc"),
+        ], [
+            InlineKeyboardButton(text="❌ Закрыть план", callback_data="bsetup_close"),
         ]]
 
     try:
