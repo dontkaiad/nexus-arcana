@@ -184,10 +184,14 @@ async def get_lists(
         # wave8.62: items с родителем-Done/Complete/Archived прячем — чеклист закрытой
         # задачи не должен висеть в активном списке Mini App. Сами items в Notion
         # остаются нетронутыми (бот-логика clone_recurring их не касается).
-        items = [
-            i for i in items
-            if (i.get("parent") or {}).get("status") not in ("Done", "Complete", "Archived")
-        ]
+        # wave8.62.2: фильтр применяется ТОЛЬКО к общему списку. Когда фронт явно
+        # просит items конкретной задачи (?group=<title>) — отдаём как есть, иначе
+        # subtasks read-only в TaskSheet закрытой задачи окажутся пустыми.
+        if not group:
+            items = [
+                i for i in items
+                if (i.get("parent") or {}).get("status") not in ("Done", "Complete", "Archived")
+            ]
 
     return {"type": type, "items": items}
 
