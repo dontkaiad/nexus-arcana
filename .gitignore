@@ -181,6 +181,7 @@ cython_debug/
 .cursorignore
 .cursorindexingignore
 .DS_Store
+CLAUDE.local.md
 jobs.sqlite
 pending_tasks.db
 NOTION_DATABASES.md
