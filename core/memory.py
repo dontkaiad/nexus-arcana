@@ -337,6 +337,117 @@ async def _find_pages_by_hint(hint: str, page_size: int = 10) -> List[dict]:
         return []
 
 
+# ── v1.2.4: alias resolver ───────────────────────────────────────────────────
+# Контекст: Haiku в _parse_fact не получает existing memories и не умеет
+# резолвить алиасы — записывает связь дословно из текста. В результате
+# «луне нужны X» создаёт новую связь `луна` вместо канонической `алуна`,
+# даже если в Памяти уже лежит запись «у алуны кличка луна».
+#
+# Резолвер ищет в Памяти по нормализованному hint существующие записи и
+# пытается распознать в их тексте маркеры алиаса вида «у X кличка Y».
+# Если текущая связь = Y, канонизирует в X (рекурсивно, лимит 3 шага).
+
+_ALIAS_PATTERNS = [
+    # «у X (краткая|короткая|сокращ.) кличка/прозвище/погоняло/никнейм Y»
+    re.compile(
+        r"у\s+([\w\-]+)\s+(?:краткая\s+|короткая\s+|сокращ\w+\s+)?"
+        r"(?:кличк\w*|прозвищ\w*|погоняло|никнейм)\s+([\w\-]+)",
+        re.IGNORECASE,
+    ),
+    # «у X также (называется|известна как) Y»
+    re.compile(
+        r"у\s+([\w\-]+)\s+также\s+"
+        r"(?:называется\s+|известн\w+\s+как\s+)?([\w\-]+)",
+        re.IGNORECASE,
+    ),
+    # «X (он же Y)» / «X (она же Y)» / «X (оно же Y)»
+    re.compile(
+        r"([\w\-]+)\s*\(\s*(?:он|она|оно)\s+же\s+([\w\-]+)\s*\)",
+        re.IGNORECASE,
+    ),
+    # «X (коротко|сокращённо) Y»
+    re.compile(
+        r"([\w\-]+)\s+(?:коротко|сокращ\w+)\s+([\w\-]+)",
+        re.IGNORECASE,
+    ),
+    # «X = Y» / «X — Y» — широкий паттерн, но мы матчим только когда
+    # alias == текущая связь, поэтому ложных срабатываний минимум.
+    re.compile(r"([\w\-]+)\s*[=—]\s*([\w\-]+)\b", re.IGNORECASE),
+]
+
+
+_ALIAS_DEPTH_LIMIT = 3
+
+
+async def _resolve_alias(
+    связь: str,
+    user_notion_id: str = "",
+    _depth: int = 0,
+    _seen: Optional[Set[str]] = None,
+) -> str:
+    """Канонизировать связь через existing memories.
+
+    Args:
+        связь: текущая связь (то что вернул Haiku из _parse_fact).
+        user_notion_id: для совместимости с будущей фильтрацией. Сейчас
+            не используется потому что _find_pages_by_hint ищет глобально.
+        _depth: глубина рекурсии (защита от циклов).
+        _seen: множество уже обработанных связей (защита от A→B→A).
+
+    Returns:
+        каноническая связь (X из «у X кличка Y»), либо исходная если
+        алиас не найден.
+    """
+    if not связь or not связь.strip():
+        return связь
+    if _depth >= _ALIAS_DEPTH_LIMIT:
+        logger.info("memory: alias resolver depth limit (%d) reached at %r",
+                    _ALIAS_DEPTH_LIMIT, связь)
+        return связь
+
+    seen = _seen if _seen is not None else set()
+    link_lower = связь.lower().strip()
+    if link_lower in seen:
+        logger.info("memory: alias cycle detected at %r, stopping", связь)
+        return связь
+    seen = seen | {link_lower}
+
+    try:
+        pages = await _find_pages_by_hint(связь)
+    except Exception as e:
+        logger.warning("memory _resolve_alias: _find_pages_by_hint failed for %r: %s",
+                       связь, e)
+        return связь
+
+    if not pages:
+        return связь
+
+    for page in pages:
+        fact_text = (_page_fact(page) or "").lower()
+        if not fact_text or fact_text == "—":
+            continue
+
+        for pattern in _ALIAS_PATTERNS:
+            for match in pattern.finditer(fact_text):
+                primary = match.group(1).strip().lower()
+                alias = match.group(2).strip().lower()
+                if not primary or not alias:
+                    continue
+                # Канонизируем когда текущая связь — алиас (правая часть)
+                if alias == link_lower and primary != link_lower:
+                    logger.info(
+                        "memory: alias resolved %r → %r (matched: %r)",
+                        связь, primary, match.group(0),
+                    )
+                    # Рекурсия: вдруг primary тоже алиас (A→B→C)
+                    return await _resolve_alias(
+                        primary, user_notion_id,
+                        _depth=_depth + 1, _seen=seen,
+                    )
+
+    return связь
+
+
 async def _archive_page(page_id: str) -> None:
     notion = get_notion()
     await notion.pages.update(page_id=page_id, archived=True)
@@ -391,6 +502,27 @@ async def save_memory(
         return
 
     fact, category, связь, ключ = await _parse_fact(text)
+
+    # v1.2.4: alias-резолвер. Бюджетные категории (Лимит/Цели/Долги) имеют
+    # свою канонизацию через ключи `обязательно_*` / `цель_*` / `долг_*` —
+    # их не трогаем, только связи людей/котов/объектов.
+    if category != "💰 Лимит" and связь:
+        original_link = связь
+        canonical_link = await _resolve_alias(связь, user_notion_id)
+        if canonical_link and canonical_link != original_link:
+            связь = canonical_link
+            old_key = ключ
+            # Перегенерируем ключ если он начинается с старой связи
+            orig_lower = original_link.lower()
+            if old_key.lower().startswith(orig_lower + "_"):
+                ключ = canonical_link.lower() + old_key[len(original_link):]
+            elif old_key.lower() == orig_lower:
+                ключ = canonical_link.lower()
+            logger.info(
+                "memory: canonicalized link %r→%r, key %r→%r",
+                original_link, canonical_link, old_key, ключ,
+            )
+
     props = _build_props(fact, category, связь, ключ, bot_label, user_notion_id)
 
     logger.info("memory save: writing to Notion %s (key=%s cat=%s)", fact, ключ, category)
