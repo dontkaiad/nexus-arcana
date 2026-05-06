@@ -20,6 +20,7 @@ from core.list_manager import (
     pending_get, pending_set, pending_del,
     CATEGORY_TO_FINANCE, LIST_CATEGORIES,
 )
+from core.lists_parser import parse_buy_text, format_rub
 from core.notion_client import finance_add
 
 logger = logging.getLogger("arcana.lists")
@@ -30,17 +31,7 @@ HEADER = "🗒️ Списки · 🌒 Arcana"
 
 _ARCANA_CATS = ["🕯️ Расходники", "🌿 Травы/Масла", "🃏 Карты/Колоды", "💳 Прочее"]
 
-_PARSE_BUY_SYSTEM = (
-    "Пользователь хочет добавить товары в список покупок (магические расходники). "
-    "Извлеки список айтемов. Исправляй опечатки. Ответь ТОЛЬКО JSON без markdown:\n"
-    '[{"name":"ладан","category":"🕯️ Расходники"},{"name":"масло розы","category":"🌿 Травы/Масла"}]\n'
-    "\nКатегории: " + ", ".join(LIST_CATEGORIES) + "\n"
-    "Для Арканы типичные: 🕯️ Расходники (свечи, ладан, благовония), 🌿 Травы/Масла, 🃏 Карты/Колоды\n"
-    "- СВЕЧИ/ЛАДАН/БЛАГОВОНИЯ → 🕯️ Расходники\n"
-    "- МАСЛА/ТРАВЫ → 🌿 Травы/Масла\n"
-    "- КАРТЫ/КОЛОДЫ → 🃏 Карты/Колоды\n"
-    "- Если не магическое → подбирай из полного списка категорий\n"
-)
+# NB: _PARSE_BUY_SYSTEM вынесен в core/lists_parser.py (общий с Nexus).
 
 _PARSE_DONE_SYSTEM = (
     "Пользователь сообщает о совершённой покупке. Извлеки айтемы с ценами. "
@@ -557,12 +548,35 @@ async def on_checkout(query: CallbackQuery, user_notion_id: str = "") -> None:
 
 # ── Text handlers (buy/done/check/inv — same as before) ──────────────────────
 
+_ARCANA_CATS_SET = {"🕯️ Расходники", "🌿 Травы/Масла", "🃏 Карты/Колоды", "💳 Прочее"}
+
+
+def _format_buy_line(item: dict) -> str:
+    name = item.get("name", "")
+    cat_emoji = (item.get("category") or "").split(" ")[0] if item.get("category") else ""
+    bits = [f"⬜ {name}"]
+    price = item.get("price_plan")
+    src = item.get("source")
+    if price:
+        s = f"{format_rub(price)}₽"
+        if src:
+            s += f" ({src})"
+        bits.append("— " + s)
+    elif src:
+        bits.append(f"({src})")
+    if cat_emoji:
+        bits.append(f"· {cat_emoji}")
+    return "  " + " ".join(bits)
+
+
 async def handle_list_buy(msg: Message, data: dict, user_notion_id: str = "") -> None:
     text = data.get("text", msg.text or "")
 
-    clean = re.sub(r"^\s*(купить|купи|добавь в (?:покупки|список)|надо купить|нужно купить)\s*", "", text, flags=re.IGNORECASE).strip()
+    clean = re.sub(
+        r"^\s*(купить|купи|добавь в (?:покупки|список)|надо купить|нужно купить)\s*",
+        "", text, flags=re.IGNORECASE,
+    ).strip()
     potential_items = [w.strip() for w in re.split(r"[,\s]+и\s+|,\s*", clean) if w.strip()]
-
     memory_cats: dict[str, str] = {}
     if potential_items:
         try:
@@ -570,28 +584,17 @@ async def handle_list_buy(msg: Message, data: dict, user_notion_id: str = "") ->
         except Exception:
             pass
 
-    system = _PARSE_BUY_SYSTEM
-    if memory_cats:
-        mem_lines = "\n".join(f"- {name} → {cat}" for name, cat in memory_cats.items())
-        system = system + f"\nИзвестные предпочтения из памяти (ПРИОРИТЕТ):\n{mem_lines}\n"
-
-    try:
-        parsed = await _haiku_parse(text, system)
-        if not isinstance(parsed, list):
-            parsed = [parsed]
-    except Exception as e:
-        logger.error("handle_list_buy parse error: %s", e)
+    parsed = await parse_buy_text(text, bot_hint="🌒 Arcana", memory_cats=memory_cats)
+    if not parsed:
         await msg.answer("⚠️ Не смог разобрать список.")
         return
-    _ARCANA_CATS = {"🕯️ Расходники", "🌿 Травы/Масла", "🃏 Карты/Колоды", "💳 Прочее"}
-    all_parsed = [{"name": p.get("name", ""), "category": p.get("category", "🕯️ Расходники")} for p in parsed if p.get("name")]
-    if not all_parsed:
-        await msg.answer("⚠️ Не нашёл айтемов.")
-        return
 
-    # Разделить: Arcana vs Nexus
-    arcana_items = [it for it in all_parsed if it["category"] in _ARCANA_CATS]
-    nexus_items = [it for it in all_parsed if it["category"] not in _ARCANA_CATS]
+    for it in parsed:
+        if not it.get("category"):
+            it["category"] = "🕯️ Расходники"
+
+    arcana_items = [it for it in parsed if it["category"] in _ARCANA_CATS_SET]
+    nexus_items = [it for it in parsed if it["category"] not in _ARCANA_CATS_SET]
 
     lines: list[str] = []
     if arcana_items:
@@ -603,10 +606,22 @@ async def handle_list_buy(msg: Message, data: dict, user_notion_id: str = "") ->
 
         if new_items:
             created = await add_items(new_items, "🛒 Покупки", BOT_NAME, user_notion_id)
-            lines.append("🛒 <b>Добавлено (Arcana):</b>")
+            by_name = {it["name"].lower(): it for it in new_items}
+            heading = "🛒 <b>Добавлено (Arcana)</b>"
+            grp = next((it.get("group") for it in new_items if it.get("group")), None)
+            if grp:
+                heading = f"🛒 <b>Добавлено в «{grp}»</b>"
+            lines.append(heading + ":")
+            plan_sum = 0.0
             for c in created:
-                cat_emoji = c.get("category", "").split(" ")[0] if c.get("category") else ""
-                lines.append(f"  ⬜ {c['name']} · {cat_emoji}")
+                src = by_name.get(c["name"].lower(), {})
+                merged = {**c, **{k: src.get(k) for k in (
+                    "price_plan", "source", "stage", "note", "priority", "qty",
+                )}}
+                lines.append(_format_buy_line(merged))
+                plan_sum += float(merged.get("price_plan") or 0)
+            if plan_sum:
+                lines.append(f"\n💰 План: {format_rub(plan_sum)}₽")
         if dupes:
             dupe_names = ", ".join(it["name"] for it in dupes)
             lines.append(f"ℹ️ Уже в списке: {dupe_names}")
@@ -614,7 +629,7 @@ async def handle_list_buy(msg: Message, data: dict, user_notion_id: str = "") ->
         names = ", ".join(it["name"] for it in nexus_items)
         lines.append(f"\n☀️ {names} — это к Nexus! Напиши @nexus_kailark_bot")
     if not arcana_items and nexus_items:
-        lines = [f"☀️ Это к Nexus! Напиши @nexus_kailark_bot"]
+        lines = ["☀️ Это к Nexus! Напиши @nexus_kailark_bot"]
     await msg.answer("\n".join(lines), parse_mode="HTML")
 
 

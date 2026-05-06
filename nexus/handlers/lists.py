@@ -8,6 +8,8 @@ import json
 import logging
 import re
 
+from typing import Optional
+
 from aiogram import Router
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 
@@ -18,8 +20,10 @@ from core.list_manager import (
     inventory_search, inventory_update, archive_items, mark_items_done,
     search_memory_categories, find_task_by_name,
     pending_get, pending_set, pending_del,
+    get_list_summary,
     CATEGORY_TO_FINANCE, LIST_CATEGORIES,
 )
+from core.lists_parser import parse_buy_text, format_rub, match_sum_command
 from core.notion_client import finance_add, update_page, _status, task_add
 from nexus.handlers.utils import react
 
@@ -31,24 +35,7 @@ HEADER = "🗒️ Списки · ☀️ Nexus"
 
 # ── Haiku system prompts ─────────────────────────────────────────────────────
 
-_PARSE_BUY_SYSTEM = (
-    "Пользователь хочет добавить товары в список покупок. "
-    "Извлеки список айтемов. Исправляй опечатки. Ответь ТОЛЬКО JSON без markdown:\n"
-    '[{"name":"молоко","category":"🍜 Продукты"},{"name":"корм коту","category":"🐾 Коты"}]\n'
-    "\nКатегории: " + ", ".join(LIST_CATEGORIES) + "\n"
-    "Правила:\n"
-    "- Каждый айтем — отдельный объект\n"
-    "- 'молоко, яйца, корм' → 3 объекта\n"
-    '- category: подбирай из списка, с эмодзи\n'
-    '- name: чистое название товара без категории\n'
-    "- ЭНЕРГЕТИКИ → 🚬 Привычки: монстр/monster/ред булл/редбулл/burn/энергос/энерги\n"
-    "- СИГАРЕТЫ → 🚬 Привычки: сигареты/сиги/табак/снюс/вейп/одноразки\n"
-    "- КОТЫ/ЖИВОТНЫЕ → 🐾 Коты: корм/наполнитель/лоток/когтеточка/ветеринар\n"
-    "- БЫТОВАЯ ХИМИЯ И ДОМ → 🏠 Ж***: туалетная бумага/салфетки/мыло/порошок/средство для мытья/губки/мусорные пакеты/лампочки/батарейки\n"
-    "- ЕДА И НАПИТКИ → 🍜 Продукты: молоко/хлеб/яйца/мясо/кола/вода/сок/кофе/чай/лапша/булдак/доширак/рамён\n"
-    "- ЗДОРОВЬЕ → 🏥 Здоровье: лекарства/таблетки/пластырь/витамины\n"
-    "- КРАСОТА → 💅 Бьюти: шампунь/крем/маска/зубная паста\n"
-)
+# NB: _PARSE_BUY_SYSTEM вынесен в core/lists_parser.py (общий с Arcana).
 
 _PARSE_DONE_SYSTEM = (
     "Пользователь сообщает о совершённой покупке. Извлеки айтемы с ценами. "
@@ -697,15 +684,39 @@ async def on_remain_action(query: CallbackQuery, user_notion_id: str = "") -> No
 
 # ── list_buy handler (text "купить X") ────────────────────────────────────────
 
+_ARCANA_CATS_SET = {"🕯️ Расходники", "🌿 Травы/Масла", "🃏 Карты/Колоды"}
+
+
+def _format_buy_line(item: dict) -> str:
+    """Строка пункта в ответе бота: ⬜ name — 108 600₽ (iPiter) · 🍜"""
+    name = item.get("name", "")
+    cat_emoji = (item.get("category") or "").split(" ")[0] if item.get("category") else ""
+    bits = [f"⬜ {name}"]
+    price = item.get("price_plan")
+    src = item.get("source")
+    if price:
+        s = f"{format_rub(price)}₽"
+        if src:
+            s += f" ({src})"
+        bits.append("— " + s)
+    elif src:
+        bits.append(f"({src})")
+    if cat_emoji:
+        bits.append(f"· {cat_emoji}")
+    return "  " + " ".join(bits)
+
+
 async def handle_list_buy(msg: Message, data: dict, user_notion_id: str = "") -> None:
     await react(msg, "🫡")
     text = data.get("text", msg.text or "")
 
-    # Ищем предпочтения в Памяти для определения категорий
-    # Извлекаем потенциальные названия из текста (убираем "купить/купи/добавь")
-    clean = re.sub(r"^\s*(купить|купи|добавь в (?:покупки|список)|надо купить|нужно купить)\s*", "", text, flags=re.IGNORECASE).strip()
+    # Hint Памяти: извлечём потенциальные имена из текста чтобы Haiku
+    # учёл известные маппинги категорий (бренды/предпочтения Кай).
+    clean = re.sub(
+        r"^\s*(купить|купи|добавь в (?:покупки|список)|надо купить|нужно купить)\s*",
+        "", text, flags=re.IGNORECASE,
+    ).strip()
     potential_items = [w.strip() for w in re.split(r"[,\s]+и\s+|,\s*", clean) if w.strip()]
-
     memory_cats: dict[str, str] = {}
     if potential_items:
         try:
@@ -713,34 +724,22 @@ async def handle_list_buy(msg: Message, data: dict, user_notion_id: str = "") ->
         except Exception as e:
             logger.debug("memory category search: %s", e)
 
-    # Дополняем промпт маппингами из Памяти
-    system = _PARSE_BUY_SYSTEM
-    if memory_cats:
-        mem_lines = "\n".join(f"- {name} → {cat}" for name, cat in memory_cats.items())
-        system = system + f"\nИзвестные предпочтения из памяти (ПРИОРИТЕТ):\n{mem_lines}\n"
-
-    try:
-        parsed = await _haiku_parse(text, system)
-        if not isinstance(parsed, list):
-            parsed = [parsed]
-    except Exception as e:
-        logger.error("handle_list_buy parse error: %s", e)
+    parsed = await parse_buy_text(text, bot_hint="☀️ Nexus", memory_cats=memory_cats)
+    if not parsed:
         await msg.answer("⚠️ Не смог разобрать список. Попробуй: «купить молоко, яйца»")
         return
 
-    _ARCANA_CATS = {"🕯️ Расходники", "🌿 Травы/Масла", "🃏 Карты/Колоды"}
-    all_parsed = [{"name": p.get("name", ""), "category": p.get("category", "💳 Прочее")} for p in parsed if p.get("name")]
-    if not all_parsed:
-        await msg.answer("⚠️ Не нашёл айтемов.")
-        return
+    # Дефолт категории если Haiku пропустил
+    for it in parsed:
+        if not it.get("category"):
+            it["category"] = "💳 Прочее"
 
-    # Разделить: Nexus vs Arcana
-    nexus_items = [it for it in all_parsed if it["category"] not in _ARCANA_CATS]
-    arcana_items = [it for it in all_parsed if it["category"] in _ARCANA_CATS]
+    nexus_items = [it for it in parsed if it["category"] not in _ARCANA_CATS_SET]
+    arcana_items = [it for it in parsed if it["category"] in _ARCANA_CATS_SET]
 
     lines: list[str] = []
+    created: list[dict] = []
     if nexus_items:
-        # Проверить дубли: уже есть в покупках (Not started)?
         existing = await get_list(list_type="🛒 Покупки", bot_name=BOT_NAME,
                                   user_page_id=user_notion_id, status="Not started")
         existing_names = {it["name"].lower() for it in existing}
@@ -749,10 +748,24 @@ async def handle_list_buy(msg: Message, data: dict, user_notion_id: str = "") ->
 
         if new_items:
             created = await add_items(new_items, "🛒 Покупки", BOT_NAME, user_notion_id)
-            lines.append("🛒 <b>Добавлено в покупки:</b>")
+            # group в логах созданных может отсутствовать (add_items возвращает
+            # только {id,name,type,category}); подмешаем поля из исходного парсинга
+            by_name = {it["name"].lower(): it for it in new_items}
+            heading = "🛒 <b>Добавлено в покупки</b>"
+            grp = next((it.get("group") for it in new_items if it.get("group")), None)
+            if grp:
+                heading = f"🛒 <b>Добавлено в «{grp}»</b>"
+            lines.append(heading + ":")
+            plan_sum = 0.0
             for c in created:
-                cat_emoji = c.get("category", "").split(" ")[0] if c.get("category") else ""
-                lines.append(f"  ⬜ {c['name']} · {cat_emoji}")
+                src = by_name.get(c["name"].lower(), {})
+                merged = {**c, **{k: src.get(k) for k in (
+                    "price_plan", "source", "stage", "note", "priority", "qty",
+                )}}
+                lines.append(_format_buy_line(merged))
+                plan_sum += float(merged.get("price_plan") or 0)
+            if plan_sum:
+                lines.append(f"\n💰 План: {format_rub(plan_sum)}₽")
         if dupes:
             dupe_names = ", ".join(it["name"] for it in dupes)
             lines.append(f"ℹ️ Уже в списке: {dupe_names}")
@@ -762,7 +775,77 @@ async def handle_list_buy(msg: Message, data: dict, user_notion_id: str = "") ->
         names = ", ".join(it["name"] for it in arcana_items)
         lines.append(f"\n🌒 {names} — это к Аркане! Напиши @arcana_kailark_bot")
     if not nexus_items and arcana_items:
-        lines = [f"🌒 Это к Аркане! Напиши @arcana_kailark_bot"]
+        lines = ["🌒 Это к Аркане! Напиши @arcana_kailark_bot"]
+    await msg.answer("\n".join(lines), parse_mode="HTML")
+
+
+# ── v1.2: команда «сумма X» / «сколько по X» ─────────────────────────────────
+
+async def handle_list_sum(msg: Message, data: dict, user_notion_id: str = "") -> None:
+    """Сумма по группе/категории. data['text'] = весь текст команды."""
+    await react(msg, "🤓")
+    text = data.get("text", msg.text or "")
+    arg = match_sum_command(text)
+    if not arg:
+        await msg.answer("⚠️ Использование: «сумма Apple-стек» или «сколько по продуктам»")
+        return
+
+    arg_clean = arg.strip()
+    arg_lower = arg_clean.lower()
+
+    # Эвристика: если аргумент совпадает с категорией (по «чистому» имени без
+    # эмодзи) → ищем по category, иначе по group.
+    matched_cat: Optional[str] = None
+    for cat in LIST_CATEGORIES:
+        bare = cat.split(" ", 1)[-1].lower() if " " in cat else cat.lower()
+        if bare == arg_lower or arg_lower in bare or bare in arg_lower:
+            matched_cat = cat
+            break
+
+    summary = await get_list_summary(
+        user_notion_id=user_notion_id,
+        bot_name=BOT_NAME,
+        type_="🛒 Покупки",
+        group=arg_clean if not matched_cat else None,
+        category=matched_cat,
+    )
+
+    title = matched_cat or arg_clean
+    if summary["count_total"] == 0:
+        await msg.answer(
+            f"📊 <b>{title}</b>\n\nПусто — ни одного пункта не нашлось.",
+            parse_mode="HTML",
+        )
+        return
+
+    lines = [f"📊 <b>{title}</b>", ""]
+    lines.append(f"🛒 К покупке: {summary['count_open']} из {summary['count_total']}")
+    if summary["plan_total"]:
+        lines.append(f"💰 План: {format_rub(summary['plan_total'])}₽")
+    if summary["count_done"]:
+        lines.append(
+            f"✅ Куплено: {summary['count_done']} ({format_rub(summary['actual_total'])}₽)"
+        )
+    remaining = float(summary["plan_total"]) - float(summary["actual_total"])
+    if summary["plan_total"] and remaining > 0:
+        lines.append(f"📈 Осталось: {format_rub(remaining)}₽")
+
+    if summary["items"]:
+        lines.append("")
+        for it in summary["items"][:30]:
+            done = it.get("status") == "Done"
+            mark = "✅" if done else "☐"
+            price = it.get("price") if done else it.get("price_plan")
+            row = f"  {mark} {it.get('name', '')}"
+            if price:
+                row += f" — {format_rub(price)}₽"
+            src = it.get("source")
+            if src:
+                row += f" ({src})"
+            if done and not it.get("price"):
+                row += " · факт"
+            lines.append(row)
+
     await msg.answer("\n".join(lines), parse_mode="HTML")
 
 

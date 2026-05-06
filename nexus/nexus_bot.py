@@ -939,7 +939,7 @@ async def process_text(msg: Message, text: str, user_notion_id: str = "") -> Non
         "list_buy": "🫡", "list_done": "🏆", "list_done_bulk": "🏆",
         "list_check": "🫡", "list_subtask": "🫡",
         "list_inventory_add": "🌚", "list_inventory_search": "👀",
-        "list_inventory_update": "🌚",
+        "list_inventory_update": "🌚", "list_sum": "🤓",
         "edit_record": "⚡", "stats": "🤓",
         "budget": "🏆", "debt_command": "🏆",
         "goal_command": "🏆", "limit_override": "🏆",
