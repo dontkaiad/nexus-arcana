@@ -192,20 +192,31 @@ async def get_lists(
     return {"type": type, "items": items}
 
 
+def _norm_title(s: str) -> str:
+    """wave8.62.1: нормализация title для матча Группа↔Задача — lowercase + схлопнутые пробелы.
+    Чинит регрессию когда title и Группа отличаются регистром/whitespace."""
+    if not s:
+        return ""
+    return " ".join(s.lower().split())
+
+
 async def _attach_parent_tasks(items: list[dict], tg_id: int, user_notion_id: str) -> None:
-    groups = {(i.get("group") or "").strip() for i in items if (i.get("group") or "").strip()}
+    groups = {_norm_title(i.get("group") or "") for i in items if (i.get("group") or "").strip()}
     if not groups:
         return
     db_tasks = getattr(config.nexus, "db_tasks", None) or getattr(config, "db_tasks", None)
     if not db_tasks:
         return
     today_date, tz_offset = await today_user_tz(tg_id)
+    # wave8.62.1: user-relation = contains OR is_empty (как для самих items в lists.py:99).
+    # Иначе родитель без relation 🪪 Пользователи (создан в Notion-UI) не находится,
+    # parent=None, фильтр closed-родителя пропускает item.
     filters: dict = {}
     if user_notion_id:
-        filters = {
-            "property": "🪪 Пользователи",
-            "relation": {"contains": user_notion_id},
-        }
+        filters = {"or": [
+            {"property": "🪪 Пользователи", "relation": {"contains": user_notion_id}},
+            {"property": "🪪 Пользователи", "relation": {"is_empty": True}},
+        ]}
     try:
         pages = await query_pages(db_tasks, filters=filters or None, page_size=500)
     except Exception as e:
@@ -214,7 +225,8 @@ async def _attach_parent_tasks(items: list[dict], tg_id: int, user_notion_id: st
     by_title: dict[str, dict] = {}
     for p in pages:
         props = p.get("properties", {})
-        title = title_text(props.get("Задача", {})).strip()
+        title_raw = title_text(props.get("Задача", {})).strip()
+        title = _norm_title(title_raw)
         if not title or title not in groups or title in by_title:
             continue
         deadline_raw = date_start(props.get("Дедлайн", {}))
@@ -248,6 +260,6 @@ async def _attach_parent_tasks(items: list[dict], tg_id: int, user_notion_id: st
             "status": status_name(props.get("Статус", {})),
         }
     for it in items:
-        g = (it.get("group") or "").strip()
+        g = _norm_title(it.get("group") or "")
         if g and g in by_title:
             it["parent"] = by_title[g]
