@@ -1,4 +1,25 @@
-# BACKLOG
+# ARCHIVED — миграция в GitHub Issues 8 мая 2026
+
+Этот файл больше не актуален. Все открытые пункты перенесены в
+[GitHub Issues](https://github.com/dontkaiad/nexus-arcana/issues).
+
+Использовать `gh issue list` или `gh issue list --label priority:high`
+для актуального бэклога.
+
+Миграция выполнена commit'ом, который переименовал этот файл в архив.
+Содержание ниже — историческая запись (Bug #1 и Bug #2 уже DONE,
+остальные пункты переосмыслены и разбиты на ~16 Issues).
+
+Issues созданные при миграции: #5 (Volna v1.3 select_resolver),
+#6-#10 (Mini App обследование 5 вкладок), #11 (SSS holo trigger),
+#12 (FAB prefill), #13 (VPS Hetzner), #14 (kailark.com),
+#15 (Google Calendar sync MVP-1), #16 (Лендинг-букинг MVP-2),
+#17 (ARCHITECTURE.md docs), #18 (Whisper credits), #19 (банк-парсинг),
+#20 (🤖 Боты sync).
+
+---
+
+# BACKLOG (archived)
 
 > Список багов и работ для следующих сессий. Описания обобщены без
 > конкретных имён/данных Кай (приватность, см. CLAUDE.md / memory).
