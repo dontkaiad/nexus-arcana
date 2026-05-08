@@ -182,6 +182,12 @@ cython_debug/
 .cursorindexingignore
 .DS_Store
 CLAUDE.local.md
+miniapp/CLAUDE.md
+# Design prototypes / standalone concept artifacts (not source code)
+Nexus Arcana.html
+tokens.jsx
+variants.jsx
+design/
 jobs.sqlite
 pending_tasks.db
 NOTION_DATABASES.md
