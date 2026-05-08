@@ -2,8 +2,9 @@
 живой Notion-схемой (NOTION_DATABASES_v4.md).
 
 Контекст: автогенерация v4 нашла 3 расхождения между константами в коде
-и опциями select-полей в Notion. Этот файл закрепляет фикс расхождений
-1 и 2 (расхождение 3 «🤖 Боты» оформлено отдельным Issue).
+и опциями select-полей в Notion. Этот файл закрепляет фикс всех трёх:
+1) 🔄 Бартер в LIST_CATEGORIES, 2) три финансовые категории в classifier
+prompt, 3) 🤖 Боты убрана из finance-cats (есть только в ✅ Задачах).
 """
 from __future__ import annotations
 
@@ -83,6 +84,26 @@ def test_classifier_prompt_has_few_shot_for_impulsive():
     from core.classifier import build_system
     sys_p = build_system(tz_offset=3).lower()
     assert any(m in sys_p for m in ("импульсивно", "спонтанно", "сорвал"))
+
+
+# ── Расхождение 3: 🤖 Боты убрана из finance-cats ─────────────────────────────
+
+
+def test_classifier_finance_cats_excludes_bots():
+    """🤖 Боты — task-категория, не finance. В expense/income JSON-примерах
+    её быть не должно (иначе Notion silent-create добавит опцию)."""
+    from core.classifier import build_system
+    sys_p = build_system(tz_offset=3)
+    # Проверяем именно expense-блок, чтобы не зацепить task-промпт ниже,
+    # где 🤖 Боты валидна как категория ✅ Задач.
+    expense_idx = sys_p.find('"type":"expense"')
+    income_idx = sys_p.find('"type":"income"')
+    update_idx = sys_p.find('"type":"update"')
+    assert expense_idx > 0 and income_idx > 0 and update_idx > 0
+    finance_block = sys_p[expense_idx:update_idx]
+    assert "🤖 Боты" not in finance_block, (
+        "🤖 Боты в finance-prompt: в БД 💰 Финансы.Категория такой опции нет"
+    )
 
 
 # ── Регресс: существующие категории не сломаны ───────────────────────────────
