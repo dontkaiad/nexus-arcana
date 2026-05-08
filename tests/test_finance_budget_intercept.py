@@ -91,7 +91,7 @@ def test_not_other_domain_real_correction():
     # «добавь N на X» без «в покупки/в [группа]:» — это про деньги
     assert not _is_other_domain_command("добавь 5к на еду")
     assert not _is_other_domain_command("обновить лимит привычки")
-    assert not _is_other_domain_command("зп ***, аренда ***")
+    assert not _is_other_domain_command("зп 60к, аренда 20к")
     assert not _is_other_domain_command("")
 
 

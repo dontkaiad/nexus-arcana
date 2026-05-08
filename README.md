@@ -33,7 +33,7 @@ run.sh      Auto-pull (30s) + watchfiles launcher
 ## Ключевые фичи
 
 - ☀️ **Tasks** — natural language, deadlines, reminders, recurring c интервалами `every_Nd`, стрики, подзадачи через 🗒️ Списки.
-- 💰 **Finance** — expense/income tracking, лимиты, бюджетная аналитика (Sonnet), VPS-плановый импорт позже.
+- 💰 **Finance** — expense/income tracking, лимиты, бюджетная аналитика (Sonnet), VPS-плановый импорт банковских выписок (long-term).
 - 🗒️ **Lists v1.2** — покупки / чеклисты / инвентарь с ценами план/факт, магазинами, группами, этапами; checkout создаёт расход в Финансах автоматом.
 - 🧠 **Memory** — категории, связи, alias-резолвер (канонизирует имя по existing записям), auto-suggest на 3+ повторений.
 - 📸 **Vision** — фото чеков (Sonnet) + screenshots TG-профилей клиентов.
