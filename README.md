@@ -1,81 +1,84 @@
-# Nexus Arcana
+# nexus-arcana
 
-Dual Telegram bot system — two AI assistants sharing a Notion backend.
+Двойная система Telegram-ботов:
+- ☀️ **Nexus** — [@nexus_kailark_bot](https://t.me/nexus_kailark_bot) — личный ассистент с СДВГ-поддержкой.
+- 🌒 **Arcana** — [@arcana_kailark_bot](https://t.me/arcana_kailark_bot) — CRM эзотерической практики.
 
-Created by [Kai Lark](https://github.com/dontkaiad) · [@hey_lark](https://t.me/hey_lark)
+Создатель: Кай Lark · [@hey_lark](https://t.me/hey_lark) · [github.com/dontkaiad](https://github.com/dontkaiad)
 
-## ☀️ Nexus — Personal AI Assistant
+## Стек
 
-Smart life management hub with ADHD-friendly features.
+Python 3.9 · aiogram 3.x · Notion API · Claude API (Haiku + Sonnet) · OpenAI Whisper · APScheduler · SQLite · FastAPI · React + Vite
 
-- 📋 **Tasks** — natural language, deadlines, reminders, recurring, streaks
-- 💰 **Finance** — expense/income tracking, budget limits, photo receipt parsing
-- 💰 **Budget** — AI-powered financial advisor with impulse reserves
-- 🗒️ **Lists** — shopping lists, checklists, inventory with multi-select checkout
-- 📝 **Notes** — auto-tagged, biweekly digest reminders
-- 🧠 **Memory** — preferences, patterns, people
-- 🦋 **ADHD** — personal profile, nudges, support
-- 🎤 **Voice** — Whisper transcription → full pipeline
-- 📸 **Photo** — bank screenshots & receipts → auto finance entries
-
-## 🌒 Arcana — Esoteric Practice CRM
-
-Digital grimoire for esoteric practitioners.
-
-- 👥 **Client CRM** — sessions, debts, notes
-- 🃏 **Tarot journal** — readings, accuracy stats
-- 🕯️ **Ritual log** — structured documentation
-- 🗒️ **Lists** — ritual supplies, checklists
-- 💰 **Practice finances** — income tracking
-
-## Stack
+## Структура
 
 ```
-Python 3.9 · aiogram 3.x · Notion API · Claude API (Haiku + Sonnet) · OpenAI Whisper · APScheduler · SQLite
+nexus/      Telegram-бот Nexus (personal assistant)
+arcana/     Telegram-бот Arcana (esoteric CRM)
+core/       Общая логика: classifier, Notion API, memory, lists, layout, vision
+miniapp/    Mini App: FastAPI backend + React frontend
+tests/      pytest (779 passed, 4 skipped)
+docs/       Спецификации и схемы
+run.sh      Auto-pull (30s) + watchfiles launcher
 ```
 
-## Architecture
+## Статус
 
-```
-├── core/               # Shared: classifier, Notion, Claude, memory, lists, voice, vision
-├── nexus/              # ☀️ Nexus bot + handlers
-├── arcana/             # 🌒 Arcana bot + handlers
-├── miniapp/            # Telegram Mini App (FastAPI backend + React frontend)
-├── run.sh              # Auto-pull + watchfiles launcher
-└── requirements.txt
-```
+- **Nexus v9.x** — DONE.
+- **Arcana v8.0** — DONE (касса P&L, бартер, фото клиентов, инвентарь, ritual_writeoff, память паритет с Nexus).
+- **Lists v1.2.5** — планируемые цены / магазины / группы / этапы / agg. суммы / Mini App checkout / 💻 Техника / повтор-задачи с Время завершения.
+- **Memory v1.2.4** — alias resolver (канонизация связей через existing memories).
+- **Mini App** — production. 6 табов Nexus + 6 табов Arcana, glass-cards дизайн. Обследование 5 вкладок незавершено ([issues #6-#10](https://github.com/dontkaiad/nexus-arcana/issues?q=is%3Aissue+label%3Amini-app)).
 
-**Data:** Notion as primary database. SQLite for pending state and scheduler jobs.
+## Ключевые фичи
 
-**AI routing:** Layout converter → spell correction → regex pre-filters → Claude classification → handler.
+- ☀️ **Tasks** — natural language, deadlines, reminders, recurring c интервалами `every_Nd`, стрики, подзадачи через 🗒️ Списки.
+- 💰 **Finance** — expense/income tracking, лимиты, бюджетная аналитика (Sonnet), VPS-плановый импорт позже.
+- 🗒️ **Lists v1.2** — покупки / чеклисты / инвентарь с ценами план/факт, магазинами, группами, этапами; checkout создаёт расход в Финансах автоматом.
+- 🧠 **Memory** — категории, связи, alias-резолвер (канонизирует имя по existing записям), auto-suggest на 3+ повторений.
+- 📸 **Vision** — фото чеков (Sonnet) + screenshots TG-профилей клиентов.
+- 🌒 **Arcana** — клиенты, расклады, ритуалы, гримуар; касса P&L; бартер reply-парсинг; фото клиентов / ритуалов / объектов.
+- 📱 **Mini App** — Telegram WebApp с glass-cards; календарь, задачи, финансы drill-down, чеклисты, инвентарь, расклады, ритуалы.
+
+## Workflow
+
+1. **Стратегия** — Claude.ai (отдельный проект `nexus-arcana`).
+2. **Код** — Claude Code (Mac).
+3. **Коммиты** — GitHub Desktop или auto-pull через `run.sh`.
+4. **Локально** — `./run.sh` (auto-pull `main` каждые 30с + watchfiles горячий reload).
+
+## Issues
+
+Баги, фичи, волны разработки — в [GitHub Issues](https://github.com/dontkaiad/nexus-arcana/issues).
+
+Полезные фильтры:
+- `gh issue list --label priority:high` — что горит.
+- `gh issue list --label mini-app` — Mini App работа.
+- `gh issue list --label wave` — большие многофазные волны.
+
+## Документация
+
+- [`docs/LISTS_SPEC_v1.2.md`](docs/LISTS_SPEC_v1.2.md) — спека списков.
+- [`docs/NOTION_DATABASES_v4.md`](docs/NOTION_DATABASES_v4.md) — реальные схемы 12 баз Notion (автогенерация из API).
+- `BACKLOG.md` — архив до миграции в Issues (8 мая 2026).
 
 ## Setup
 
 ```bash
-cp _env .env          # Fill in your tokens
+cp _env .env          # заполнить токены: Telegram, Anthropic, Notion, OpenAI
 pip install -r requirements.txt
-./run.sh
+./run.sh              # запускает обоих ботов + auto-pull + watchfiles
 ```
 
-Required: Telegram Bot, Anthropic API, Notion API, OpenAI API (for voice).
-
-## Mini App
-
-Backend встроен в Nexus (FastAPI на `:8000`, см. `miniapp/backend/`).
-Фронтенд — React + Vite в `miniapp/frontend/` (11 экранов, glass-стиль).
-
-### Dev локально
+## Mini App локально
 
 ```bash
-./run.sh                                 # бэкенд
+./run.sh                                 # backend (FastAPI на :8000)
 cd miniapp/frontend && npm install
 cd miniapp/frontend && npm run dev       # → http://localhost:5173
 ```
 
-### Через Telegram-туннель
-
-Обычный `npm run dev` виснет через Cloudflare tunnel из-за стриминга большого
-`App.jsx`. Для туннеля используем prod-build в watch-режиме:
+Через Telegram-туннель:
 
 ```bash
 cd miniapp/frontend && npm run dev:tunnel    # build --watch + preview
@@ -83,3 +86,11 @@ cloudflared tunnel --url http://localhost:5173 --protocol http2
 ```
 
 URL туннеля настраивается в BotFather как menu button.
+
+## Тесты
+
+```bash
+python3 -m pytest tests/ -v
+```
+
+779 passed · 4 skipped · 0 failed (8 мая 2026).
