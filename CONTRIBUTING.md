@@ -4,9 +4,11 @@
 
 ## Workflow
 
-1. **Идея / баг** → [GitHub Issues](https://github.com/dontkaiad/nexus-arcana/issues) с подходящим label (`bug`, `feature`, `mini-app`, `tech-debt`, `priority:*`, `wave`).
-2. **Реализация** → Claude Code (вкладка Code) или Dispatch worktree.
-3. **Коммит / PR** → коммит сразу в `main` (default) либо ветка + PR с `fixes #N`.
+Проект ведётся в AI-augmented режиме: Кай (архитектор / PM) проектирует систему и пишет спеки, Claude Code исполняет правки под её ревью.
+
+1. **Идея / баг** → [GitHub Issues](https://github.com/dontkaiad/nexus-arcana/issues) с подходящим label (`bug`, `feature`, `mini-app`, `tech-debt`, `priority:*`, `wave`). Acceptance criteria формулирует Кай.
+2. **Реализация** → Claude Code (вкладка Code) или Dispatch worktree исполняет правки по описанию issue. Архитектурные развилки — обратно к Кай через Claude.ai до правки кода.
+3. **Коммит / PR** → коммит сразу в `main` (default) либо ветка + PR с `fixes #N`. Ревью на стороне Кай.
 4. **CI / локальная проверка** → перед коммитом прогнать тесты и build (см. ниже).
 
 ## Стиль коммитов

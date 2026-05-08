@@ -4,7 +4,9 @@
 - ☀️ **Nexus** — [@nexus_kailark_bot](https://t.me/nexus_kailark_bot) — личный ассистент с СДВГ-поддержкой.
 - 🌒 **Arcana** — [@arcana_kailark_bot](https://t.me/arcana_kailark_bot) — CRM эзотерической практики.
 
-Создатель: Кай Lark · [@hey_lark](https://t.me/hey_lark) · [github.com/dontkaiad](https://github.com/dontkaiad)
+Designed and architected by Kai Lark · [@hey_lark](https://t.me/hey_lark) · [github.com/dontkaiad](https://github.com/dontkaiad)
+
+AI-augmented engineering workflow: архитектура, спеки, UX, приоритизация и ревью — на стороне Kai (IT PM, 6 лет в AI-продуктах). Реализация — направляемое исполнение через Claude.ai (стратегия / разбор архитектурных развилок) и Claude Code (правки в репо по конкретным спекам).
 
 ## Стек
 
@@ -42,10 +44,13 @@ run.sh      Auto-pull (30s) + watchfiles launcher
 
 ## Workflow
 
-1. **Стратегия** — Claude.ai (отдельный проект `nexus-arcana`).
-2. **Код** — Claude Code (Mac).
-3. **Коммиты** — GitHub Desktop или auto-pull через `run.sh`.
-4. **Локально** — `./run.sh` (auto-pull `main` каждые 30с + watchfiles горячий reload).
+Кай ведёт архитектуру, спеки и ревью; AI-инструменты — исполнители на конкретных уровнях:
+
+1. **Архитектура и стратегия** — Кай в Claude.ai (проект `nexus-arcana`): декомпозиция волн, разбор развилок, sanity-check решений до того как они попадут в репо.
+2. **Реализация по спекам** — Claude Code (Mac) под наблюдением Кай: правки кода, тесты, миграции. Каждое изменение проходит ревью перед merge.
+3. **Бэклог** — [GitHub Issues](https://github.com/dontkaiad/nexus-arcana/issues) (issues-first workflow, см. [CLAUDE.md](CLAUDE.md)).
+4. **Деплой / merge** — GitHub Desktop или auto-pull через `run.sh`.
+5. **Локально** — `./run.sh` (auto-pull `main` каждые 30с + watchfiles горячий reload).
 
 ## Issues
 
