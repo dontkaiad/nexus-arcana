@@ -941,7 +941,16 @@ async def _handle_recurring_task_reset(
         new_deadline = _next_cycle_date(current_deadline, repeat, tz_offset, ivl_days) if current_deadline else ""
         new_reminder = _next_cycle_date(current_reminder, repeat, tz_offset, ivl_days) if current_reminder else ""
 
-    update_props = {"Статус": _status("Not started")}
+    # v1.2.5 (bug #1): повторяющаяся задача после клика «Сделано» должна
+    # оставаться в «In progress» (а не сваливаться в Not started, как было),
+    # потому что повтор никогда полностью не Done. Дополнительно фиксируем
+    # «Время завершения = now» — это маркер для Mini App «выполнено сегодня»,
+    # чтобы расписание скрыло задачу до следующей итерации.
+    completed_now = datetime.now(MOSCOW_TZ).strftime("%Y-%m-%dT%H:%M:%S+03:00")
+    update_props = {
+        "Статус": _status("In progress"),
+        "Время завершения": _date(completed_now),
+    }
     if current_deadline and new_deadline:
         update_props["Дедлайн"] = _date_with_tz(new_deadline[:10], tz_offset)
     if current_reminder and new_reminder:

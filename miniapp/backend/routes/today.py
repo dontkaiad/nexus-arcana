@@ -64,6 +64,11 @@ def _task_summary(page: dict, tz_offset: int) -> dict:
         "reminder_raw": _date_start(props.get("Напоминание", {})),
         "repeat_time": rich_text(props.get("Время повтора", {})).strip(),
         "repeat": select_name(props.get("Повтор", {})) or None,
+        # v1.2.5 (bug #1B): «Время завершения» — маркер «выполнено сегодня».
+        # Заполняется в nexus/handlers/tasks.py:_handle_recurring_task_reset
+        # при клике «Сделано» по повторяющейся задаче. Используется ниже,
+        # чтобы скрыть задачу из расписания на сегодня.
+        "completed_raw": _date_start(props.get("Время завершения", {})),
         # wave8.22: для задач без срока — отдаём дату создания страницы Notion,
         # чтобы фронт мог показать «N дней назад» в списке.
         "created_at": page.get("created_time"),
@@ -219,6 +224,19 @@ async def get_today(tg_id: int = Depends(current_user_id)) -> dict[str, Any]:
         deadline_time = extract_time(s["deadline_raw"], tz_offset)
         reminder_date = to_local_date(s["reminder_raw"], tz_offset)
         repeat_time = s["repeat_time"] or None
+
+        # v1.2.5 (bug #1B): повторяющаяся задача, у которой «Время завершения»
+        # уже сегодня — выполнена в этой итерации, не показываем в расписании.
+        # Появится снова на следующее вхождение (через interval_days).
+        # Non-recurring задачи через этот guard НЕ проходят (там нет repeat_time
+        # и фильтр Done в _fetch_nexus_tasks их и так отрезает).
+        completed_today = False
+        if repeat_time and s.get("completed_raw"):
+            completed_local = to_local_date(s["completed_raw"], tz_offset)
+            if completed_local and completed_local >= today_date:
+                completed_today = True
+        if completed_today:
+            continue
 
         # wave8.58: повторяющаяся задача показывается в «Мой день» только
         # когда сегодня — её реальное вхождение (anchor ± k × интервал).
