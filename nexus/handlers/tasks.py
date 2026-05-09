@@ -1097,6 +1097,23 @@ async def handle_task_parsed(message: Message, data: dict) -> None:
 
     # Определяем оригинальный текст из message
     original_text = message.text or ""
+    has_remind = _has_remind_word(original_text)
+
+    # Гвард: если Haiku додумал reminder, но в тексте нет слова «напомни» —
+    # отбрасываем галлюцинированное напоминание (issue #33).
+    if not has_remind:
+        if data.get("reminder"):
+            logger.info(
+                "handle_task_parsed: drop hallucinated reminder=%s (no remind word in text)",
+                data.get("reminder"),
+            )
+            data.pop("reminder", None)
+        if data.get("reminder_time"):
+            logger.info(
+                "handle_task_parsed: drop hallucinated reminder_time=%s (no remind word in text)",
+                data.get("reminder_time"),
+            )
+            data.pop("reminder_time", None)
 
     # Если Haiku вернул отдельный reminder (отличается от deadline) — используем его напрямую
     if data.get("reminder") and data["reminder"] != data.get("deadline"):
@@ -1104,8 +1121,6 @@ async def handle_task_parsed(message: Message, data: dict) -> None:
         logger.info("handle_task_parsed: explicit reminder from Haiku: %s", data["reminder_time"])
         await _do_save_task(message, data, chat_id=message.chat.id, uid=uid)
         return
-
-    has_remind = _has_remind_word(original_text)
 
     # Pre-filter: "через N мин/часов/дней" → вычислить до Claude
     # Баг Claude: "через 2 мин" → "00:02" вместо now+2min
