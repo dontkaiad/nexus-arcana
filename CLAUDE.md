@@ -87,7 +87,7 @@
   на вкладке Ритуалы + локальный FAB), `ritual_writeoff` (списание расходников
   после ритуала), память — полный паритет с Nexus (router intents +
   auto-suggest на 3+ повторений + `get_memories_for_context` в rituals).
-- **Mini App**: Nexus 6 табов / Arcana 5 табов.
+- **Mini App**: Nexus 6 табов / Arcana 6 табов.
 - **Тесты**: 887 passed, 4 skipped, 0 failed. Полный sweep ~3:11.
 
 ## Стиль Кай (КРИТИЧНО)

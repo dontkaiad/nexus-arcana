@@ -30,7 +30,7 @@ Client database with relationship types and barter tracking, tarot session log a
 Bot: [@arcana_kailark_bot](https://t.me/arcana_kailark_bot)
 
 ### 📱 Mini App
-A single React + Vite + FastAPI app served as a Telegram WebApp. Six tabs for Nexus (Today, Tasks, Finance, Lists, Notes, Memory) and five for Arcana (Today, Sessions, Clients, Works, Grimoire). Glass-card design, sage-green / deep-blue palette, Lora serif, designed for thumb-reach on mobile.
+A single React + Vite + FastAPI app served as a Telegram WebApp. Six tabs for Nexus (Today, Tasks, Finance, Lists, Notes, Memory) and six for Arcana (Today, Works, Clients, Sessions, Rituals, Grimoire). Glass-card design, sage-green / deep-blue palette, Lora serif, designed for thumb-reach on mobile.
 
 ---
 
