@@ -216,7 +216,7 @@
 .streak-v {
   display: inline-flex;
   align-items: flex-end;
-  gap: 4px;
+  gap: 1px;
   line-height: 1;
 }
 .streak-v .flame {
