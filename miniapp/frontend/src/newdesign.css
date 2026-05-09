@@ -216,11 +216,12 @@
 .streak-v {
   display: inline-flex;
   align-items: flex-end;
-  gap: 1px;
+  gap: 0;
   line-height: 1;
 }
 .streak-v .flame {
   flex-shrink: 0;
+  margin-right: -3px;
   transform: translateY(-6px);
 }
 
