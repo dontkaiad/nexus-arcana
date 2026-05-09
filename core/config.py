@@ -23,7 +23,18 @@ def _optional(key: str, default: str = "") -> str:
 
 def _id_list(key: str) -> List[int]:
     raw = _require(key)
-    return [int(x.strip()) for x in raw.split(",") if x.strip()]
+    seen: set[int] = set()
+    out: List[int] = []
+    for x in raw.split(","):
+        s = x.strip()
+        if not s:
+            continue
+        v = int(s)
+        if v in seen:
+            continue
+        seen.add(v)
+        out.append(v)
+    return out
 
 
 # ── Arcana redirect keywords ───────────────────────────────────────────────────────

@@ -3884,17 +3884,26 @@ async def _send_payday_review(uid: int, user_notion_id: str = "", bot=None) -> N
 
 
 async def proactive_budget_review(bot) -> None:
-    """Cron job: check if today is payday and send budget review to all users."""
+    """Cron job: check if today is payday and send budget review to users with finance permission."""
     payday = await _get_payday()
     now = datetime.now(MOSCOW_TZ)
     if now.day != payday:
         return
     from core.config import config
     from core.user_manager import get_user
+    seen: set[int] = set()
     for tg_id in config.allowed_ids:
+        if tg_id in seen:
+            continue
+        seen.add(tg_id)
         try:
             user_data = await get_user(tg_id)
-            user_notion_id = user_data.get("notion_page_id", "") if user_data else ""
+            if not user_data:
+                continue
+            if not user_data.get("permissions", {}).get("finance", False):
+                logger.info("proactive_budget_review: skip uid=%s (no finance permission)", tg_id)
+                continue
+            user_notion_id = user_data.get("notion_page_id", "")
             await _send_payday_review(tg_id, user_notion_id, bot)
         except Exception as e:
             logger.error("proactive_budget_review: uid=%s error: %s", tg_id, e)
