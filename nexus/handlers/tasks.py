@@ -2708,17 +2708,21 @@ async def _build_today_digest(uid: int, user_notion_id: str = "", greeting: str 
             _tip_parts.append(part)
         _tip_tasks_str = ", ".join(_tip_parts) if _tip_parts else "нет"
         prompt = (
-            f"Ты — СДВГ-ассистент Кай (женский род). Обращайся на «ты». "
-            f"Задачи — это ДЕЛА, которые нужно СДЕЛАТЬ. НЕ объясняй их смысл и НЕ переинтерпретируй. "
+            f"Ты — Nexus, СДВГ-ассистент пользовательницы по имени Кай. "
+            f"Кай — это ОНА (твоя пользовательница, женский род), а НЕ ты. "
+            f"Никогда не представляйся именем «Кай» и не пиши «Я Кай». "
+            f"Обращайся к Кай на «ты», в женском роде. "
+            f"Задачи — это ДЕЛА, которые Кай нужно СДЕЛАТЬ. НЕ объясняй их смысл и НЕ переинтерпретируй. "
             f"'Менять лоток' = убирать наполнитель. 'Помыть обувь' = помыть обувь. Понимай буквально.\n"
             f"Сейчас {time_of_day}. Задач: {total} (срочных: {n_urgent}, просроченных: {n_overdue}). "
             f"Ближайшие задачи: {_tip_tasks_str}.\n"
             f"ЗАПРЕЩЕНО: Nexus УЖЕ является напоминалкой. НИКОГДА не советуй ставить будильник, "
             f"таймер, напоминание, записать в календарь, поставить alarm — это буквально твоя работа. "
             f"НЕ выдумывай время задач — используй ТОЛЬКО время из списка выше.\n"
-            f"Дай ОДИН тёплый короткий совет — помочь НАЧАТЬ делать, а не объяснять КАК. "
+            f"Дай ОДИН тёплый короткий совет — помочь Кай НАЧАТЬ делать, а не объяснять КАК. "
             f"Примеры хорошего совета: «Просто открой шкаф — руки сами сделают остальное» / «2 минуты и готово, ты справишься». "
-            f"Макс 1-2 предложения, заверши мысль целиком, НЕ заканчивай на многоточии. Без пафоса."
+            f"Макс 1-2 предложения, заверши мысль целиком, НЕ заканчивай на многоточии. Без пафоса. "
+            f"Без приветствий вида «Привет, я …» — просто совет."
         )
         advice = await ask_claude(prompt, max_tokens=1000, model="claude-haiku-4-5-20251001")
         if advice:
@@ -2761,18 +2765,67 @@ async def _check_yesterday_expenses(user_notion_id: str, tz_offset: int) -> bool
         return True  # assume yes on error — don't nag
 
 
+# ── Morning digest per-day dedup (защита от двойной отправки при рестарте в 07:00)
+_MORNING_DB = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "../../pending_tasks.db")
+
+
+def _morning_digest_already_sent(uid: int, date_str: str) -> bool:
+    """True если утренний дайджест уже отправлен uid за date_str (локальный день)."""
+    with _sqlite3.connect(_MORNING_DB) as con:
+        con.execute(
+            "CREATE TABLE IF NOT EXISTS morning_digest_sent "
+            "(uid INTEGER, date TEXT, ts REAL, PRIMARY KEY (uid, date))"
+        )
+        row = con.execute(
+            "SELECT ts FROM morning_digest_sent WHERE uid=? AND date=?",
+            (uid, date_str),
+        ).fetchone()
+    return row is not None
+
+
+def _morning_digest_mark(uid: int, date_str: str) -> None:
+    with _sqlite3.connect(_MORNING_DB) as con:
+        con.execute(
+            "CREATE TABLE IF NOT EXISTS morning_digest_sent "
+            "(uid INTEGER, date TEXT, ts REAL, PRIMARY KEY (uid, date))"
+        )
+        con.execute(
+            "INSERT OR REPLACE INTO morning_digest_sent (uid, date, ts) VALUES (?,?,?)",
+            (uid, date_str, _time.time()),
+        )
+
+
 async def send_morning_digest(bot) -> None:
-    """Cron job: утренний дайджест задач + напоминание о тратах."""
+    """Cron job: утренний дайджест задач + напоминание о тратах.
+
+    Multi-user safe:
+    - dedup `allowed_ids` (на случай дубликата в .env)
+    - skip пользователей без permissions.nexus
+    - per-day SQLite guard (`morning_digest_sent`) — защита от рестарта в 07:00
+    """
     from core.config import config
     from core.user_manager import get_user
 
+    seen: set[int] = set()
     for tg_id in config.allowed_ids:
+        if tg_id in seen:
+            continue
+        seen.add(tg_id)
         try:
             user_data = await get_user(tg_id)
             if not user_data:
                 continue
+            if not user_data.get("permissions", {}).get("nexus", False):
+                logger.info("send_morning_digest: skip tg_id=%s (no nexus permission)", tg_id)
+                continue
             user_notion_id = user_data.get("notion_page_id", "")
             tz_offset = await _get_user_tz(tg_id)
+
+            user_tz = timezone(timedelta(hours=tz_offset))
+            today_local = datetime.now(user_tz).strftime("%Y-%m-%d")
+            if _morning_digest_already_sent(tg_id, today_local):
+                logger.info("send_morning_digest: skip tg_id=%s (already sent on %s)", tg_id, today_local)
+                continue
 
             # Проверка трат за вчера
             had_expenses = await _check_yesterday_expenses(user_notion_id, tz_offset)
@@ -2799,6 +2852,7 @@ async def send_morning_digest(bot) -> None:
                 ]])
 
             await bot.send_message(tg_id, text, parse_mode="HTML", reply_markup=kb)
+            _morning_digest_mark(tg_id, today_local)
             logger.info("send_morning_digest: sent to %s (yesterday_expenses=%s)", tg_id, had_expenses)
         except Exception as e:
             logger.error("send_morning_digest: tg_id=%s error: %s", tg_id, e)
