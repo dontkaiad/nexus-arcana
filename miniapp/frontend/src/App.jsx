@@ -1354,7 +1354,7 @@ function NxDay({ s, openTask, navigate, openStreaks }) {
           </div>
           <div className="hero-meta">
             <div>{t.date}</div>
-            {weatherApi.data && <div style={{ marginTop: 3 }}>
+            {weatherApi.data && <div style={{ marginTop: 3, whiteSpace: "nowrap" }}>
               {WEATHER_ICON[weatherApi.data.kind] || "🌤"} {weatherApi.data.temp > 0 ? "+" : ""}{weatherApi.data.temp}° · {shortCity(weatherApi.data.city)}
             </div>}
           </div>
@@ -3490,7 +3490,7 @@ function ArDay({ s, openClient, navigate, openMoonPhases }) {
           </div>
           <div className="hero-meta">
             <div>{a.date}</div>
-            {weatherApi.data && <div style={{ marginTop: 3 }}>
+            {weatherApi.data && <div style={{ marginTop: 3, whiteSpace: "nowrap" }}>
               {WEATHER_ICON[weatherApi.data.kind] || "🌤"} {weatherApi.data.temp > 0 ? "+" : ""}{weatherApi.data.temp}° · {shortCity(weatherApi.data.city)}
             </div>}
           </div>
