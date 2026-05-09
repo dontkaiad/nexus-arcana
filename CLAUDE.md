@@ -25,6 +25,31 @@
 - Cleanup промежуточных файлов
 - Когда Кай явно говорит «без issue, просто фикс»
 
+## ✍️ Commit Authorship Rules
+
+ВСЕ коммиты делаются от имени Кай как единственного автора.
+
+ЗАПРЕЩЕНО в коммит-сообщениях:
+- `Co-Authored-By: Claude` / `Co-Authored-By: Claude Code`
+- `🤖 Generated with Claude Code` / `Generated with Claude`
+- Любое упоминание Claude / AI / LLM как соавтора
+- Эмодзи робота в качестве подписи
+
+ОБЯЗАТЕЛЬНО:
+- Author: Кай Lark (через `git config`)
+- Сообщение в формате: `type(scope): subject (fixes #N)`
+- Тело коммита если нужно — без упоминания инструментов
+
+Это правило применяется ВСЕГДА:
+- Локальный Claude Code на Mac
+- Claude Code on the web
+- Claude Code в Code tab mobile app
+- Dispatch
+- Любые Cloud sessions
+
+Если инструмент пытается добавить подпись автоматически — переписать
+сообщение перед push.
+
 ## 🔒 Privacy: репо публичный
 
 НИКОГДА не писать в публичные файлы (README, CLAUDE.md, docs/, любые tracked .md, GitHub Issues, коммит-сообщения):
