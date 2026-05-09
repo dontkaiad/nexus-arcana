@@ -66,6 +66,8 @@ def _serialize_task(page: dict, today_date, tz_offset: int) -> dict:
     deadline_raw = _date_start(props.get("Дедлайн", {}))
     deadline_local = to_local_date(deadline_raw, tz_offset)
     deadline_time = extract_time(deadline_raw, tz_offset)
+    reminder_raw = _date_start(props.get("Напоминание", {}))
+    reminder_time = extract_time(reminder_raw, tz_offset)
     status = status_name(props.get("Статус", {}))
     repeat_time = rich_text(props.get("Время повтора", {})).strip() or None
 
@@ -90,11 +92,12 @@ def _serialize_task(page: dict, today_date, tz_offset: int) -> dict:
         "status": computed_status,
         "deadline": deadline_local.isoformat() if deadline_local else None,
         "deadline_time": deadline_time,
+        "reminder_time": reminder_time,
+        "reminder_iso": reminder_raw or None,
+        "deadline_iso": deadline_raw or None,
         "repeat": select_name(props.get("Повтор", {})) or None,
         "repeat_time": repeat_time,
-        "reminder_min": _compute_reminder_min(
-            deadline_raw, _date_start(props.get("Напоминание", {}))
-        ),
+        "reminder_min": _compute_reminder_min(deadline_raw, reminder_raw),
         "closed_at": closed_at,
         "streak": None,  # per-task streak не хранится — см. wave 2a спеку
     }
@@ -191,12 +194,19 @@ async def get_tasks(
             and t["deadline"] and t["deadline"] <= today_iso
         ]
 
-    if filter in ("active", "overdue", "today"):
-        def _prio_key(t):
+    if filter in ("all", "active", "overdue", "today"):
+        # Унифицированный порядок: ближайший срок (дедлайн или напоминание) →
+        # затем приоритет (high=🔴 первым). Закрытые задачи в табе «Все»
+        # уезжают в конец (sort key: status==done/cancelled).
+        def _sort_key(t):
+            closed = t.get("status") in ("done", "cancelled")
+            soonest = min(
+                x for x in (t.get("deadline_iso"), t.get("reminder_iso"))
+                if x
+            ) if (t.get("deadline_iso") or t.get("reminder_iso")) else "9999-99-99"
             w = _PRIO_WEIGHT.get(t["prio"], 99)
-            d = t["deadline"] or "9999-99-99"
-            return (w, d)
-        items.sort(key=_prio_key)
+            return (closed, soonest, w)
+        items.sort(key=_sort_key)
     elif filter == "done":
         # closed_at desc, пустые в конец (страховка поверх Notion-сорта)
         items.sort(key=lambda t: (t.get("closed_at") or ""), reverse=True)

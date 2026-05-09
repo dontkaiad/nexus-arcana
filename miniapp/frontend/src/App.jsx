@@ -1467,13 +1467,30 @@ function NxTasks({ s, openTask }) {
       </div>
       {loading && <Empty s={s} text="Загружаю..." />}
       {error && <ErrorBox s={s} error={error} refetch={refetch} />}
-      {!loading && !error && list.length === 0 && <Empty s={s} emoji="🌿" title="Чилл" text="На сегодня задач нет." />}
+      {!loading && !error && list.length === 0 && (
+        f === "overdue"
+          ? <Empty s={s} emoji="🌿" title="Чисто" text="Просроченных задач нет." />
+          : f === "done"
+          ? <Empty s={s} emoji="📭" title="Пусто" text="Закрытых задач нет." />
+          : f === "all"
+          ? <Empty s={s} emoji="✨" title="Пусто" text="Задач нет." />
+          : <Empty s={s} emoji="🌿" title="Чилл" text="Активных задач нет." />
+      )}
       {!loading && !error && list.map((t) => (
         <div key={t.id} className={`task glass${(t.status === "done" || t.status === "cancelled") ? " done" : ""}`} onClick={() => openTask(t)} style={{ cursor: "pointer" }}>
           <div className="body">
             <div className="title">{t.title}</div>
             <div className="meta">
-              {t.date && <span style={{ color: t.status === "overdue" ? s.red : undefined }}>{t.date}</span>}
+              {t.date && (
+                <span style={{ color: t.status === "overdue" ? s.red : undefined, display: "inline-flex", alignItems: "center", gap: 3 }}>
+                  📅 {t.date}{t.deadlineTime ? ` ${t.deadlineTime}` : ""}
+                </span>
+              )}
+              {t.reminderTime && (
+                <span style={{ display: "inline-flex", alignItems: "center", gap: 3 }}>
+                  <Bell size={fs(12)} /> {t.reminderTime}
+                </span>
+              )}
               {t.rpt && <span>{t.rpt}</span>}
               {t.status === "done" && <span>✓ сделано</span>}
               {t.status === "cancelled" && <span>✕ отменено</span>}
@@ -1604,35 +1621,31 @@ function NxFinance({ s }) {
         const monthLabel = formatMonth(monthIso) || monthIso;
         return (
           <>
-            <Glass s={s} glow>
-              <div style={{ fontSize: fs(13), color: s.tS, marginBottom: 6 }}>{monthLabel}</div>
-              <div style={{ display: "flex", gap: 10, alignItems: "baseline" }}>
-                <div style={{ flex: 1 }}>
-                  <div style={{ fontSize: fs(13), color: s.acc }}>Доход</div>
-                  <div style={{ fontFamily: H, fontSize: fs(20), color: s.acc, fontWeight: 500 }}>
-                    {inc.toLocaleString()} ₽
-                  </div>
+            {/* #43: 3 стеклянных блока (как «Мой день»), а не плоская строка. */}
+            <div style={{ fontSize: fs(13), color: s.tS, marginBottom: 6, paddingLeft: 4 }}>{monthLabel}</div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, marginBottom: 10 }}>
+              <Glass s={s} glow style={{ padding: "12px 10px", textAlign: "center" }}>
+                <div style={{ fontSize: fs(11), color: s.tS, marginBottom: 4 }}>Доход</div>
+                <div style={{ fontFamily: H, fontSize: fs(18), color: s.acc, fontWeight: 500 }}>
+                  {inc.toLocaleString()} ₽
                 </div>
-                <div style={{ flex: 1 }}>
-                  <div style={{ fontSize: fs(13), color: s.acc }}>Расход</div>
-                  <div style={{ fontFamily: H, fontSize: fs(20), fontWeight: 500 }}>
-                    {exp.toLocaleString()} ₽
-                  </div>
+              </Glass>
+              <Glass s={s} style={{ padding: "12px 10px", textAlign: "center" }}>
+                <div style={{ fontSize: fs(11), color: s.tS, marginBottom: 4 }}>Расход</div>
+                <div style={{ fontFamily: H, fontSize: fs(18), color: s.text, fontWeight: 500 }}>
+                  {exp.toLocaleString()} ₽
                 </div>
-                <div style={{ flex: 1 }}>
-                  <div style={{ fontSize: fs(13), color: s.acc }}>Баланс</div>
-                  <div
-                    style={{
-                      fontFamily: H, fontSize: fs(20),
-                      color: balance >= 0 ? s.acc : s.red, fontWeight: 500,
-                    }}
-                  >
-                    {balance >= 0 ? "+" : ""}
-                    {balance.toLocaleString()} ₽
-                  </div>
+              </Glass>
+              <Glass s={s} glow style={{ padding: "12px 10px", textAlign: "center" }}>
+                <div style={{ fontSize: fs(11), color: s.tS, marginBottom: 4 }}>Баланс</div>
+                <div style={{
+                  fontFamily: H, fontSize: fs(18),
+                  color: balance >= 0 ? s.acc : s.red, fontWeight: 500,
+                }}>
+                  {balance >= 0 ? "+" : ""}{balance.toLocaleString()} ₽
                 </div>
-              </div>
-            </Glass>
+              </Glass>
+            </div>
             <SectionLabel s={s}>По категориям</SectionLabel>
             {cats.length === 0 && <Empty s={s} text="За этот месяц расходов нет" />}
             {cats.map((c, i) => {
@@ -2029,7 +2042,8 @@ function NxLists({ s }) {
         delete next[item.id];
         return next;
       });
-      alert("Не удалось отметить");
+      const detail = e?.detail || e?.message || "";
+      alert(detail ? `Не удалось отметить: ${detail}` : "Не удалось отметить");
     }
   };
 
@@ -2362,33 +2376,60 @@ function ChecklistHeader({ s, title, task, large, onBack }) {
 }
 
 function ChecklistItemRow({ s, item, onToggle }) {
+  // #47: показываем pricePlan / source / note для checklist/inventory items,
+  // если они есть. Раньше эти поля рендерились только в Покупках.
+  const hasMeta = item.pricePlan || item.source || item.note || (item.done && item.price);
   return (
     <Glass
       s={s}
       style={{
         padding: "10px 14px", marginBottom: 4, opacity: item.done ? 0.5 : 1,
-        cursor: "pointer", display: "flex", alignItems: "center", gap: 10,
+        cursor: "pointer",
       }}
       onClick={() => onToggle(item)}
     >
-      <Chk s={s} done={item.done} />
-      <span style={{
-        flex: 1, minWidth: 0,
-        fontSize: fs(16), color: s.text, fontWeight: 500,
-        wordBreak: "break-word",
-        textDecoration: item.done ? "line-through" : "none",
-      }}>
-        {item.name}
-      </span>
-      {item.cat && (
+      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        <Chk s={s} done={item.done} />
         <span style={{
-          display: "inline-flex", alignItems: "center",
-          padding: "3px 9px", borderRadius: 10,
-          fontSize: fs(13), background: `${s.acc}33`, color: s.text, fontWeight: 500,
-          flexShrink: 0, whiteSpace: "nowrap",
+          flex: 1, minWidth: 0,
+          fontSize: fs(16), color: s.text, fontWeight: 500,
+          wordBreak: "break-word",
+          textDecoration: item.done ? "line-through" : "none",
         }}>
-          {item.cat}
+          {item.name}
         </span>
+        {item.cat && (
+          <span style={{
+            display: "inline-flex", alignItems: "center",
+            padding: "3px 9px", borderRadius: 10,
+            fontSize: fs(13), background: `${s.acc}33`, color: s.text, fontWeight: 500,
+            flexShrink: 0, whiteSpace: "nowrap",
+          }}>
+            {item.cat}
+          </span>
+        )}
+      </div>
+      {hasMeta && (
+        <div style={{
+          marginTop: 4, marginLeft: 26,
+          fontSize: fs(12), color: s.tS,
+          display: "flex", flexWrap: "wrap", gap: 6,
+        }}>
+          {item.pricePlan && (
+            <span style={{ color: s.acc, fontWeight: 500 }}>
+              {formatRub(item.pricePlan)}₽
+            </span>
+          )}
+          {item.source && <span>· {item.source}</span>}
+          {item.done && item.price && item.price !== item.pricePlan && (
+            <span style={{ color: s.tM }}>· факт {formatRub(item.price)}₽</span>
+          )}
+          {item.note && (
+            <span style={{ fontStyle: "italic", opacity: 0.75, flexBasis: "100%" }}>
+              {item.note}
+            </span>
+          )}
+        </div>
       )}
     </Glass>
   );
@@ -2478,14 +2519,34 @@ function NxMemory({ s, openAdhd }) {
       {loading && <Empty s={s} text="Загружаю..." />}
       {error && <ErrorBox s={s} error={error} refetch={refetch} />}
       {!loading && !error && view.items.length === 0 && (
-        <Empty s={s} emoji="🧠" title="Память пуста" text="Тут будут твои заметки и паттерны." />
+        cat === "all"
+          ? <Empty s={s} emoji="🧠" title="Память пуста" text="Тут будут твои заметки и паттерны." />
+          : <Empty s={s} emoji="🌿" text="Нет записей в этой категории." />
       )}
-      {!loading && !error && view.items.map((m) => (
-        <Glass key={m.id} s={s} style={{ padding: "8px 14px", marginBottom: 4 }}>
-          <div style={{ fontSize: fs(13), color: s.text }}>{m.text}</div>
-          <div style={{ fontSize: fs(10), color: s.tS, marginTop: 2 }}>{m.cat}</div>
-        </Glass>
-      ))}
+      {!loading && !error && view.items.map((m) => {
+        // #49(a): иконка категории справа (как в задачах/списках), без текстовой
+        // подписи внизу карточки.
+        const catEmojiOnly = m.cat ? String(m.cat).split(" ")[0] : "";
+        return (
+          <Glass key={m.id} s={s} style={{ padding: "10px 14px", marginBottom: 4 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <span style={{ flex: 1, minWidth: 0, fontSize: fs(13), color: s.text, wordBreak: "break-word" }}>
+                {m.text}
+              </span>
+              {catEmojiOnly && (
+                <span title={m.cat} style={{
+                  display: "inline-flex", alignItems: "center",
+                  padding: "3px 9px", borderRadius: 10,
+                  fontSize: fs(13), background: `${s.acc}33`, color: s.text, fontWeight: 500,
+                  flexShrink: 0, whiteSpace: "nowrap",
+                }}>
+                  {catEmojiOnly}
+                </span>
+              )}
+            </div>
+          </Glass>
+        );
+      })}
     </div>
   );
 }
@@ -2893,7 +2954,9 @@ function NxCal({ s }) {
           return d.getTime() === weekStart.getTime();
         })();
         return (
-          <Glass s={s} style={{ padding: "12px 12px" }}>
+          // #51: убрали внешний <Glass> — карточки дней сами в стекле,
+          // не нужен ещё один контейнер с фоном (стекло-в-стекле).
+          <div style={{ padding: "0 2px" }}>
             <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
               <span onClick={goPrevWeek}
                 style={{ cursor: "pointer", padding: "2px 8px", color: s.tS, fontSize: fs(20), lineHeight: 1 }}
@@ -2966,7 +3029,7 @@ function NxCal({ s }) {
                 );
               })}
             </div>
-          </Glass>
+          </div>
         );
       })()}
 
@@ -2982,7 +3045,9 @@ function NxCal({ s }) {
         />
       )}
 
-      {/* Подробности выбранного дня — заголовок + список ВНУТРИ одной карточки */}
+      {/* Подробности выбранного дня — только в Месяце.
+          #52: в табе Неделя блок задач произвольного дня под списком 7 дней не нужен. */}
+      {view === "month" && (
       <Glass s={s} style={{ padding: "12px 14px" }}>
         <div className="list-group-h lg" style={{ margin: "0 0 8px" }}>
           {picked} {RU_MONTHS_GEN[month0]}
@@ -3042,6 +3107,7 @@ function NxCal({ s }) {
           </div>
         )}
       </Glass>
+      )}
     </div>
   );
 }
@@ -7182,6 +7248,10 @@ export default function App() {
 
   const go = (toN) => {
     if (aRef.current) cancelAnimationFrame(aRef.current);
+    // #37: при переключении ботов всегда сбрасываем оба бота на первый таб
+    // («День» — Мой день / Сегодня), а не показываем последнее открытое.
+    setNxP("day");
+    setArP("day");
     const from = prog,
       to = toN ? 1 : 0,
       st = performance.now();

@@ -269,6 +269,8 @@ export function adaptTasks(data) {
       status: t.status || 'active',
       date: t.deadline ? formatDate(t.deadline, 'full') : null,
       time,
+      deadlineTime: t.deadline_time || null,
+      reminderTime: t.reminder_time || null,
       rpt: rptTime ? `🔄 ${rptTime}` : repeat ? `🔄 ${formatRepeat(repeat)}` : undefined,
       streak: t.streak || 0,
       closedAt: t.closed_at || null,
