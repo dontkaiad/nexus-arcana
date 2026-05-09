@@ -2513,11 +2513,19 @@ function NxMemory({ s, openAdhd }) {
         </div>
       </Glass>
       <SearchInput s={s} value={q} onChange={setQ} placeholder="Поиск по памяти" />
-      <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+      {/* #62: 10+ канонических чипов категорий рвались на 4 строки — горизонтальный
+          скролл в одну строку без wrap, как тут с табами повсюду в боте. */}
+      <div style={{
+        display: "flex", gap: 6, overflowX: "auto", flexWrap: "nowrap",
+        margin: "0 -16px", padding: "0 16px",
+        scrollbarWidth: "none", WebkitOverflowScrolling: "touch",
+      }}>
         {cats.map((c) => (
-          <Pill key={c} s={s} active={cat === c} onClick={() => setCat(c)}>
-            {c === "all" ? "Все" : c}
-          </Pill>
+          <div key={c} style={{ flexShrink: 0 }}>
+            <Pill s={s} active={cat === c} onClick={() => setCat(c)}>
+              {c === "all" ? "Все" : c}
+            </Pill>
+          </div>
         ))}
       </div>
       {loading && <Empty s={s} text="Загружаю..." />}
