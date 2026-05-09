@@ -3099,12 +3099,15 @@ function NxCal({ s }) {
                   borderTop: i === 0 ? "none" : `1px solid ${s.brd}`,
                   opacity: done ? 0.45 : 1,
                 }}>
-                  {t.time && (
-                    <span style={{
-                      fontFamily: "'SF Mono', Menlo, monospace",
-                      fontSize: fs(14), color: s.acc, fontWeight: 600, minWidth: 44,
-                    }}>{t.time}</span>
-                  )}
+                  {/* #63: задачи без времени теперь занимают тот же слот
+                      что и время — пишем «весь день», высота строки одинакова. */}
+                  <span style={{
+                    fontFamily: "'SF Mono', Menlo, monospace",
+                    fontSize: t.time ? fs(14) : fs(11),
+                    color: t.time ? s.acc : s.tS,
+                    fontWeight: t.time ? 600 : 500,
+                    minWidth: 44, textAlign: t.time ? "left" : "center",
+                  }}>{t.time || "весь день"}</span>
                   <Chk s={s} done={done} onClick={() => toggleCalTask(t.id)} />
                   <div style={{
                     flex: 1, minWidth: 0,
