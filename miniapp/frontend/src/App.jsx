@@ -1046,19 +1046,21 @@ const TaskRow = ({ s, t, done, onToggle, onOpen, withTime }) => (
           alignItems: "center",
         }}
       >
+        {/* #58: gap: 6 + раздельные children — между эмодзи и текстом
+            видимый отступ, иначе 📅 слипается с цифрой даты. */}
         {t.deadlineTime && (
-          <span style={{ display: "inline-flex", alignItems: "center", gap: 3 }}>
-            📅 {t.deadlineTime}
+          <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+            <span>📅</span><span>{t.deadlineTime}</span>
           </span>
         )}
         {t.reminderTime && (
-          <span style={{ display: "inline-flex", alignItems: "center", gap: 3 }}>
-            <Bell size={fs(12)} /> {t.reminderTime}
+          <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+            <Bell size={fs(12)} /><span>{t.reminderTime}</span>
           </span>
         )}
         {t.rem && !t.reminderTime && (
-          <span style={{ display: "inline-flex", alignItems: "center", gap: 3 }}>
-            <Bell size={fs(12)} /> {t.rem}
+          <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+            <Bell size={fs(12)} /><span>{t.rem}</span>
           </span>
         )}
         {t.rpt && <span>{t.rpt}</span>}
@@ -1482,13 +1484,13 @@ function NxTasks({ s, openTask }) {
             <div className="title">{t.title}</div>
             <div className="meta">
               {t.date && (
-                <span style={{ color: t.status === "overdue" ? s.red : undefined, display: "inline-flex", alignItems: "center", gap: 3 }}>
-                  📅 {t.date}{t.deadlineTime ? ` ${t.deadlineTime}` : ""}
+                <span style={{ color: t.status === "overdue" ? s.red : undefined, display: "inline-flex", alignItems: "center", gap: 6 }}>
+                  <span>📅</span><span>{t.date}{t.deadlineTime ? ` ${t.deadlineTime}` : ""}</span>
                 </span>
               )}
               {t.reminderTime && (
-                <span style={{ display: "inline-flex", alignItems: "center", gap: 3 }}>
-                  <Bell size={fs(12)} /> {t.reminderTime}
+                <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                  <Bell size={fs(12)} /><span>{t.reminderTime}</span>
                 </span>
               )}
               {t.rpt && <span>{t.rpt}</span>}
