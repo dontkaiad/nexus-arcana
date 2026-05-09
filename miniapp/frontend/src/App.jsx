@@ -17,7 +17,7 @@ import { apiGet, apiPost } from "./api";
 import { SelfListCard, SelfDetailHeader } from "./components/self/SelfClientCard.jsx";
 import {
   Sun, Moon as LucideMoon, Check, Coins, List as ListIcon, Brain, Calendar,
-  Sparkles as LucideSparkles, Users, Flame as LucideFlame, BookOpen as LucideBookOpen,
+  Sparkles as LucideSparkles, Users, BookOpen as LucideBookOpen,
   Plus, Search,
   Bell, RefreshCw, X, Camera, Mic, Pencil, ChevronRight, ChevronDown,
   Wallet, HeartPulse, StickyNote, Candy, Trash2, Clock, RotateCcw,
@@ -1378,7 +1378,11 @@ function NxDay({ s, openTask, navigate, openStreaks }) {
             </div>
           ) : (
             <div style={{ flex: 1, cursor: "pointer" }} onClick={() => openStreaks?.()}>
-              <Metric s={s} v={<span className="streak-v"><LucideFlame size={20} fill="currentColor" style={{ flexShrink: 0, color: s.amber }} className="flame" />{t.streak}</span>} sub="стрик" accent={s.amber} />
+              {/* #36 v2: вместо LucideFlame SVG (виз-масса смещена вверх в viewBox)
+                  используем emoji 🔥 — рендерится как текст и наследует baseline
+                  цифры, никакого ручного translateY не нужно. Sister-pattern из
+                  inline-варианта `🔥 {streak}` на TaskRow (App.jsx:1066). */}
+              <Metric s={s} v={<span className="streak-v"><span className="flame-emoji">🔥</span>{t.streak}</span>} sub="стрик" accent={s.amber} />
             </div>
           )}
         </div>

@@ -207,17 +207,20 @@
   opacity: 0.7;
   text-transform: uppercase;
 }
-/* #36: огонёк ровно по центру цифры стрика. translateY компенсирует
-   визуальный подъём пламени над цифрой при font-size: 28px / line-height: 1. */
+/* #36 v2: emoji 🔥 как текст рядом с цифрой стрика. Размер чуть меньше
+   цифры (28px → 22px) — эмодзи визуально шире глифа. line-height: 1 +
+   align-items: baseline согласует базовую линию emoji и цифры так же,
+   как inline-вариант `🔥 {streak}` в TaskRow. */
 .streak-v {
   display: inline-flex;
-  align-items: center;
+  align-items: baseline;
   gap: 4px;
   line-height: 1;
 }
-.streak-v .flame {
+.streak-v .flame-emoji {
+  font-size: 22px;
+  line-height: 1;
   flex-shrink: 0;
-  transform: translateY(1px);
 }
 
 .bar {
