@@ -1982,6 +1982,7 @@ function NxLists({ s }) {
   const [tab, setTab] = useState("buy");
   const [q, setQ] = useState("");
   const [selectedChecklist, setSelectedChecklist] = useState(null);
+  const [checklistAddOpen, setChecklistAddOpen] = useState(false);
   const qEnc = encodeURIComponent(q || "");
   const path = q ? `/api/lists?type=${tab}&q=${qEnc}` : `/api/lists?type=${tab}`;
   const { data, loading, error, refetch } = useApi(path, [tab, q]);
@@ -2087,6 +2088,27 @@ function NxLists({ s }) {
             ) : group.map((x) => (
               <ChecklistItemRow key={x.id} s={s} item={x} onToggle={toggleDone} />
             ))}
+            {/* Локальный FAB «+» для чеклиста уровня 2:
+                prefill type=check + group=title (issue #12). */}
+            <div
+              onClick={() => setChecklistAddOpen(true)}
+              style={{
+                position: "fixed", right: 18, bottom: 86, zIndex: 9,
+                width: 44, height: 44, borderRadius: 22,
+                background: s.acc, color: "#fff",
+                display: "flex", alignItems: "center", justifyContent: "center",
+                fontSize: 22, cursor: "pointer",
+                boxShadow: "0 4px 16px rgba(0,0,0,0.35)",
+              }}
+            >+</div>
+            {checklistAddOpen && (
+              <ChecklistAddSheet
+                s={s}
+                group={title}
+                onClose={() => setChecklistAddOpen(false)}
+                onAdded={() => { setChecklistAddOpen(false); refetch(); }}
+              />
+            )}
           </>
         );
       })()}
@@ -4111,6 +4133,63 @@ function InventoryAddSheet({ s, onClose, onAdded }) {
             s={s}
             disabled={!name.trim() || busy}
             label={busy ? "Сохраняю..." : "Добавить в инвентарь"}
+            onClick={submit}
+          />
+        </div>
+      </div>
+    </>
+  ), document.body);
+}
+
+function ChecklistAddSheet({ s, group, onClose, onAdded }) {
+  const [name, setName] = useState("");
+  const [busy, setBusy] = useState(false);
+  const initData = window.Telegram?.WebApp?.initData || import.meta.env.VITE_DEV_INIT_DATA || "";
+
+  const submit = async () => {
+    if (!name.trim() || busy) return;
+    setBusy(true);
+    try {
+      const r = await fetch("/api/lists", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Telegram-Init-Data": initData,
+        },
+        body: JSON.stringify({
+          type: "check",
+          name: name.trim(),
+          group,
+        }),
+      });
+      if (!r.ok) {
+        const err = await r.json().catch(() => ({}));
+        alert("Не получилось: " + (err.detail || r.status));
+        return;
+      }
+      onAdded?.();
+    } catch (e) { alert("Ошибка: " + e.message); }
+    finally { setBusy(false); }
+  };
+
+  return createPortal((
+    <>
+      <div className="acc-sheet-overlay" onClick={onClose} />
+      <div className="acc-sheet" onClick={(e) => e.stopPropagation()}>
+        <div className="acc-grip" />
+        <div className="card-h">
+          <span className="card-title" style={{ fontSize: 20 }}>📋 Новый пункт</span>
+        </div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          <div style={{ fontSize: fs(11), color: s.tS }}>Чеклист</div>
+          <Glass s={s} style={{ padding: "8px 12px" }}>
+            <div style={{ fontSize: fs(13), color: s.text, fontWeight: 500 }}>{group}</div>
+          </Glass>
+          <Input s={s} value={name} onChange={setName} placeholder="Что добавить" />
+          <SubmitBtn
+            s={s}
+            disabled={!name.trim() || busy}
+            label={busy ? "Сохраняю..." : "Добавить"}
             onClick={submit}
           />
         </div>
