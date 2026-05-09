@@ -1953,10 +1953,6 @@ function ParentTaskHeader({ s, title, task }) {
   const cat = task?.cat || "";
   const prio = task?.prio || null;
   const overdue = task?.status === "overdue";
-  const metaParts = [];
-  if (task?.date) metaParts.push(task.date);
-  if (task?.time) metaParts.push(task.time);
-  if (task?.rpt) metaParts.push(task.rpt);
   return (
     <div style={{ padding: "10px 4px 6px", marginTop: 6 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -1979,12 +1975,18 @@ function ParentTaskHeader({ s, title, task }) {
         )}
         {prio && <PrioDot s={s} prio={prio} />}
       </div>
-      {metaParts.length > 0 && (
+      {/* #61: формат даты как в Задачах — 📅 + дата, 🔔 + время повтора. */}
+      {(task?.date || task?.time || task?.rpt) && (
         <div style={{
           fontSize: fs(13), color: overdue ? s.red : s.tS,
           marginTop: 3, display: "flex", gap: 8, flexWrap: "wrap",
         }}>
-          {metaParts.map((p, i) => <span key={i}>{p}</span>)}
+          {task?.date && (
+            <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+              <span>📅</span><span>{task.date}{task?.time ? ` ${task.time}` : ""}</span>
+            </span>
+          )}
+          {task?.rpt && <span>{task.rpt}</span>}
         </div>
       )}
     </div>
@@ -2327,10 +2329,6 @@ function ChecklistHeader({ s, title, task, large, onBack }) {
   const cat = task?.cat || "";
   const prio = task?.prio || null;
   const overdue = task?.status === "overdue";
-  const metaParts = [];
-  if (task?.date) metaParts.push(task.date);
-  if (task?.time) metaParts.push(task.time);
-  if (task?.rpt) metaParts.push(task.rpt);
   return (
     <div style={{ padding: "4px 0 6px" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
@@ -2362,13 +2360,19 @@ function ChecklistHeader({ s, title, task, large, onBack }) {
         )}
         {prio && <PrioDot s={s} prio={prio} />}
       </div>
-      {metaParts.length > 0 && (
+      {/* #61: формат даты как в Задачах. */}
+      {(task?.date || task?.time || task?.rpt) && (
         <div style={{
           fontSize: fs(13), color: overdue ? s.red : s.tS,
           marginTop: 4, marginLeft: onBack ? 16 : 0,
           display: "flex", gap: 8, flexWrap: "wrap",
         }}>
-          {metaParts.map((p, i) => <span key={i}>{p}</span>)}
+          {task?.date && (
+            <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+              <span>📅</span><span>{task.date}{task?.time ? ` ${task.time}` : ""}</span>
+            </span>
+          )}
+          {task?.rpt && <span>{task.rpt}</span>}
         </div>
       )}
     </div>
