@@ -26,9 +26,34 @@ CREATE TABLE IF NOT EXISTS streaks (
     last_activity_date TEXT,
     rest_day_date TEXT,
     rest_days_used INTEGER DEFAULT 0,
-    streak_start_date TEXT
+    streak_start_date TEXT,
+    last_task_id TEXT,
+    last_task_at TEXT
 );
 """
+
+# #56 streak_log: каждый вызов update_streak с source/task_id для последующей
+# отладки ложных срабатываний. Хранится отдельно от streaks (которая хранит
+# агрегат), чтобы не разбухать.
+_CREATE_LOG_SQL = """\
+CREATE TABLE IF NOT EXISTS streak_calls (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    source TEXT NOT NULL,
+    task_id TEXT,
+    ts TEXT NOT NULL,
+    result_change INTEGER NOT NULL DEFAULT 0
+);
+"""
+
+
+def _ensure_columns(con) -> None:
+    """Idempotent ALTER TABLE: добавить last_task_id/last_task_at если их нет."""
+    cols = {row[1] for row in con.execute("PRAGMA table_info(streaks)").fetchall()}
+    if "last_task_id" not in cols:
+        con.execute("ALTER TABLE streaks ADD COLUMN last_task_id TEXT")
+    if "last_task_at" not in cols:
+        con.execute("ALTER TABLE streaks ADD COLUMN last_task_at TEXT")
 
 
 def _init_db() -> None:
@@ -38,6 +63,8 @@ def _init_db() -> None:
     con = sqlite3.connect(_DB_PATH)
     try:
         con.execute(_CREATE_SQL)
+        con.execute(_CREATE_LOG_SQL)
+        _ensure_columns(con)
         con.commit()
     finally:
         con.close()
@@ -62,15 +89,30 @@ def _date_minus(date_str: str, days: int) -> str:
 # Public API
 # ---------------------------------------------------------------------------
 
-async def update_streak(user_id: int, tz_offset: int = 3) -> Optional[dict]:
+async def update_streak(
+    user_id: int,
+    tz_offset: int = 3,
+    *,
+    source: str = "unknown",
+    task_id: Optional[str] = None,
+) -> Optional[dict]:
     """Call after task completion.
 
     Returns ``{"streak": int, "best": int, "is_new_best": bool}`` when the
     streak counter changed, or ``None`` if the user already checked in today.
+
+    #55: ``task_id`` пишется в `streaks.last_task_id` + `streaks.last_task_at`,
+    Mini App показывает «✓ <название> · <время>» в стрик-шите.
+    #56: каждый вызов логируется в таблицу `streak_calls` с source/task_id,
+    чтобы отлаживать ложные срабатывания (см. issue #54).
     """
     today = _local_today(tz_offset)
     yesterday = _date_minus(today, 1)
     day_before = _date_minus(today, 2)
+    now_iso = datetime.now(timezone(timedelta(hours=tz_offset))).isoformat(timespec="seconds")
+
+    result_change = 0
+    result: Optional[dict] = None
 
     async with aiosqlite.connect(_DB_PATH) as db:
         row = await db.execute(
@@ -86,43 +128,64 @@ async def update_streak(user_id: int, tz_offset: int = 3) -> Optional[dict]:
             await db.execute(
                 "INSERT INTO streaks "
                 "(user_id, current_streak, best_streak, last_activity_date, "
-                "rest_days_used, streak_start_date) "
-                "VALUES (?, 1, 1, ?, 0, ?)",
-                (user_id, today, today),
+                "rest_days_used, streak_start_date, last_task_id, last_task_at) "
+                "VALUES (?, 1, 1, ?, 0, ?, ?, ?)",
+                (user_id, today, today, task_id, now_iso),
             )
-            await db.commit()
-            return {"streak": 1, "best": 1, "is_new_best": True}
-
-        current, best, last_date, rest_date, rest_used, start_date = row
-
-        if last_date == today:
-            return None  # already counted today
-
-        if last_date == yesterday:
-            # consecutive day
-            new_streak = current + 1
-            new_start = start_date or today
-        elif last_date == day_before and rest_date == yesterday:
-            # rest day bridged the gap
-            new_streak = current + 1
-            new_start = start_date or today
+            result_change = 1
+            result = {"streak": 1, "best": 1, "is_new_best": True}
         else:
-            # streak broken
-            new_streak = 1
-            new_start = today
+            current, best, last_date, rest_date, rest_used, start_date = row
 
-        new_best = max(best, new_streak)
-        is_new_best = new_best > best
+            if last_date == today:
+                # already counted today — но last_task всё равно перезапишем,
+                # если пришёл новый task_id (последняя засчитанная сегодня задача).
+                if task_id:
+                    await db.execute(
+                        "UPDATE streaks SET last_task_id = ?, last_task_at = ? "
+                        "WHERE user_id = ?",
+                        (task_id, now_iso, user_id),
+                    )
+                result_change = 0
+                result = None
+            else:
+                if last_date == yesterday:
+                    new_streak = current + 1
+                    new_start = start_date or today
+                elif last_date == day_before and rest_date == yesterday:
+                    new_streak = current + 1
+                    new_start = start_date or today
+                else:
+                    new_streak = 1
+                    new_start = today
 
+                new_best = max(best, new_streak)
+                is_new_best = new_best > best
+
+                await db.execute(
+                    "UPDATE streaks SET current_streak = ?, best_streak = ?, "
+                    "last_activity_date = ?, streak_start_date = ?, "
+                    "last_task_id = ?, last_task_at = ? "
+                    "WHERE user_id = ?",
+                    (new_streak, new_best, today, new_start, task_id, now_iso, user_id),
+                )
+                result_change = 1
+                result = {"streak": new_streak, "best": new_best, "is_new_best": is_new_best}
+
+        # #56: лог-таблица всегда пишется (даже если result_change=0 —
+        # нужна для расследования ложных вызовов).
         await db.execute(
-            "UPDATE streaks SET current_streak = ?, best_streak = ?, "
-            "last_activity_date = ?, streak_start_date = ? "
-            "WHERE user_id = ?",
-            (new_streak, new_best, today, new_start, user_id),
+            "INSERT INTO streak_calls (user_id, source, task_id, ts, result_change) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (user_id, source, task_id, now_iso, result_change),
         )
         await db.commit()
 
-    return {"streak": new_streak, "best": new_best, "is_new_best": is_new_best}
+    logger.info(
+        "update_streak: user=%s source=%s task=%s change=%s",
+        user_id, source, (task_id or "")[:8], result_change,
+    )
+    return result
 
 
 def get_streak(user_id: int) -> dict:
@@ -132,7 +195,8 @@ def get_streak(user_id: int) -> dict:
     try:
         row = con.execute(
             "SELECT current_streak, best_streak, last_activity_date, "
-            "rest_day_date, rest_days_used, streak_start_date "
+            "rest_day_date, rest_days_used, streak_start_date, "
+            "last_task_id, last_task_at "
             "FROM streaks WHERE user_id = ?",
             (user_id,),
         ).fetchone()
@@ -147,6 +211,8 @@ def get_streak(user_id: int) -> dict:
             "rest_day_date": None,
             "rest_days_used": 0,
             "streak_start_date": None,
+            "last_task_id": None,
+            "last_task_at": None,
         }
 
     return {
@@ -156,6 +222,8 @@ def get_streak(user_id: int) -> dict:
         "rest_day_date": row[3],
         "rest_days_used": row[4],
         "streak_start_date": row[5],
+        "last_task_id": row[6],
+        "last_task_at": row[7],
     }
 
 

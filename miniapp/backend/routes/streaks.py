@@ -18,6 +18,23 @@ router = APIRouter()
 
 # ── /api/streaks ────────────────────────────────────────────────────────────
 
+async def _resolve_last_task_title(task_id: str) -> str:
+    """#55: получить заголовок Notion-страницы по task_id.
+    Возвращает пустую строку при ошибке — UI просто не показывает строку."""
+    if not task_id:
+        return ""
+    try:
+        from core.notion_client import get_page
+        from miniapp.backend._helpers import title_text
+        page = await get_page(task_id)
+        if not page:
+            return ""
+        return title_text(page.get("properties", {}).get("Задача", {})) or ""
+    except Exception as e:
+        logger.warning("resolve_last_task_title failed for %s: %s", task_id[:8], e)
+        return ""
+
+
 @router.get("/streaks")
 async def get_streaks(tg_id: int = Depends(current_user_id)) -> dict[str, Any]:
     """Общий стрик пользователя + список per-task стриков повторяющихся задач."""
@@ -34,12 +51,27 @@ async def get_streaks(tg_id: int = Depends(current_user_id)) -> dict[str, Any]:
     rows = get_user_task_streaks(tg_id)
     per_task = [r for r in rows if (r["current"] or 0) > 0 or (r["best"] or 0) > 0]
 
+    # #55: «✓ <название> · <время>» в стрик-шите. Резолвим title по task_id
+    # только если последняя засчитанная активность — сегодня (иначе нечего
+    # показывать вчерашнее в today-bottom-sheet).
+    last_task_id = data.get("last_task_id")
+    last_task_at = data.get("last_task_at")
+    last_activity = data.get("last_activity_date")
+    last_task_title = ""
+    if last_task_id and last_activity == today_date.isoformat():
+        last_task_title = await _resolve_last_task_title(last_task_id)
+
     return {
         "current": data.get("streak", 0),
         "best": data.get("best", 0),
-        "last_activity_date": data.get("last_activity_date"),
+        "last_activity_date": last_activity,
         "rest_day_available": is_rest_day_available(tg_id),
         "per_task": per_task,
+        "last_task": {
+            "id": last_task_id,
+            "title": last_task_title,
+            "at": last_task_at,
+        } if last_task_title else None,
     }
 
 

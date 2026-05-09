@@ -109,7 +109,11 @@ async def task_done(
     # не дёргал update_streak вообще — счётчик не двигался.
     try:
         from nexus.handlers.streaks import update_streak
-        await update_streak(tg_id, tz_offset)
+        await update_streak(
+            tg_id, tz_offset,
+            source="miniapp_task_done",
+            task_id=task_id,
+        )
     except Exception as e:
         logger.warning("update_streak failed: %s", e)
     return {"ok": True, "status": new_status}

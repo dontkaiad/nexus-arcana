@@ -1019,7 +1019,7 @@ async def _handle_recurring_deadline_done(
         try:
             from nexus.handlers.streaks import update_streak
             tz = await _get_user_tz(uid) or 3
-            await update_streak(uid, tz)
+            await update_streak(uid, tz, source="bot_recurring_done", task_id=task_id)
         except Exception as e:
             logger.debug("recurring streak update error: %s", e)
     await _handle_recurring_task_reset(message, task_id, task_props, repeat, title, uid)
@@ -1692,12 +1692,12 @@ async def task_ok_cb(call: CallbackQuery) -> None:
 # и Arcana. Регистрируется через include_router в обоих ботах.
 
 
-async def _update_streak_line(uid: int) -> str:
+async def _update_streak_line(uid: int, task_id: Optional[str] = None) -> str:
     """Update SQLite streak and return a formatted line (or empty string on error)."""
     try:
         from nexus.handlers.streaks import update_streak, format_streak_msg
         tz = await _get_user_tz(uid) or 3
-        streak_data = await update_streak(uid, tz)
+        streak_data = await update_streak(uid, tz, source="bot_task_done", task_id=task_id)
         if streak_data:
             return "\n" + format_streak_msg(
                 streak_data["streak"], streak_data["best"], streak_data.get("is_new_best", False))
@@ -1785,7 +1785,7 @@ async def task_complete(call: CallbackQuery) -> None:
             title_line = f"\n✅ {task_title} — выполнено" if task_title else "\n✅ Выполнено"
             await call.answer("✅ Записано!")
             await react(call, "🔥")
-            streak_line = await _update_streak_line(uid)
+            streak_line = await _update_streak_line(uid, task_id)
             await call.message.reply(f"{phrase}{title_line}{streak_line}")
         else:
             await call.answer("⚠️ Ошибка обновления", show_alert=True)
@@ -2249,7 +2249,7 @@ async def handle_task_done(message: Message, task_hint: str, user_notion_id: str
         if result:
             _remove_task_jobs(task_id)
             phrase = random.choice(_DONE_PHRASES)
-            streak_line = await _update_streak_line(uid)
+            streak_line = await _update_streak_line(uid, task_id)
             await message.answer(f"{phrase}\n✅ {title} — выполнено{streak_line}")
         else:
             await message.answer("⚠️ Ошибка обновления в Notion.")
@@ -2303,7 +2303,7 @@ async def task_done_select(call: CallbackQuery) -> None:
     if result:
         _remove_task_jobs(task_id)
         phrase = random.choice(_DONE_PHRASES)
-        streak_line = await _update_streak_line(uid)
+        streak_line = await _update_streak_line(uid, task_id)
         await call.answer("✅ Записано!")
         await call.message.reply(phrase + "\n✅ Выполнено" + streak_line)
     else:
@@ -2348,7 +2348,7 @@ async def cb_done_multi_confirm(call: CallbackQuery) -> None:
                 done_titles.append(title)
     if done_titles:
         phrase = _random.choice(_DONE_PHRASES)
-        streak_line = await _update_streak_line(uid)
+        streak_line = await _update_streak_line(uid, task_id)
         lines = "\n".join(f"✅ {t}" for t in done_titles)
         await call.message.edit_text(f"{phrase}\n{lines}{streak_line}")
     else:

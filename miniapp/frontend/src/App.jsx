@@ -7686,6 +7686,27 @@ function StreaksSheet({ s, open }) {
             </div>
           </div>
         </div>
+        {/* #55: какая задача засчитана сегодня — даёт контроль и помогает
+            вспомнить что закрыла. Показываем только если бэкенд вернул
+            last_task (есть title и активность сегодня). */}
+        {data?.last_task?.title && (
+          <div style={{
+            marginTop: 10, paddingTop: 8,
+            borderTop: `1px solid ${s.brd}`,
+            fontSize: fs(13), color: s.text,
+            display: "flex", gap: 6, alignItems: "baseline",
+          }}>
+            <span style={{ color: s.acc, fontWeight: 500 }}>✓</span>
+            <span style={{ flex: 1, minWidth: 0, wordBreak: "break-word" }}>
+              {data.last_task.title}
+            </span>
+            {data.last_task.at && (
+              <span style={{ color: s.tS, fontSize: fs(11), flexShrink: 0 }}>
+                {data.last_task.at.slice(11, 16)}
+              </span>
+            )}
+          </div>
+        )}
       </Glass>
 
       {weekDays.length > 0 && (
