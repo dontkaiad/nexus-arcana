@@ -207,20 +207,20 @@
   opacity: 0.7;
   text-transform: uppercase;
 }
-/* #36 v2: emoji 🔥 как текст рядом с цифрой стрика. Размер чуть меньше
-   цифры (28px → 22px) — эмодзи визуально шире глифа. line-height: 1 +
-   align-items: baseline согласует базовую линию emoji и цифры так же,
-   как inline-вариант `🔥 {streak}` в TaskRow. */
+/* #36 v3: Lucide Flame SVG — визуальная масса пламени смещена ВВЕРХ внутри
+   квадратного viewBox (острый верх, плотное основание). При align-items:
+   center геометрический центр SVG-бокса совпадает с серединой цифры, но
+   видимое пламя оказывается выше. Опускаем translateY на ~3px — визуальный
+   центр огня встаёт на середину цифры. */
 .streak-v {
   display: inline-flex;
-  align-items: baseline;
+  align-items: center;
   gap: 4px;
   line-height: 1;
 }
-.streak-v .flame-emoji {
-  font-size: 22px;
-  line-height: 1;
+.streak-v .flame {
   flex-shrink: 0;
+  transform: translateY(3px);
 }
 
 .bar {
