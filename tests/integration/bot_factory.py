@@ -3,13 +3,11 @@ from __future__ import annotations
 
 import os
 import sys
-from unittest.mock import AsyncMock, MagicMock, patch
 
 # Убедиться что проект в path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(
     os.path.abspath(__file__)))))
 
-from aiogram import Bot, Dispatcher
 from aiogram.types import Update, Message, Chat, User, CallbackQuery
 from aiogram.client.session.base import BaseSession
 from datetime import datetime, timezone

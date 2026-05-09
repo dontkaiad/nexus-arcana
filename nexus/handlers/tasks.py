@@ -12,7 +12,7 @@ from aiogram import Router, F, Bot
 from aiogram.filters import BaseFilter
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from core.claude_client import ask_claude
-from core.notion_client import tasks_active, log_error, page_create, _title, _select, _date, _status, update_page, db_query, get_notion
+from core.notion_client import tasks_active, page_create, _title, _select, _date, _status, update_page, get_notion
 from nexus.handlers.utils import react
 from core.layout import maybe_convert
 from core.utils import cancel_button, secondary_button
@@ -2351,8 +2351,6 @@ async def handle_edit_record(
     user_notion_id: str = "",
 ) -> None:
     """Найти запись по ключевым словам (или последнюю) и обновить поле(я)."""
-    from core.notion_client import match_select, update_page
-    from core.config import config
 
     uid = message.from_user.id
 
@@ -2819,7 +2817,6 @@ async def handle_task_stats(message: Message, user_notion_id: str = "") -> None:
     """Статистика задач: за неделю, месяц, стрики, топ категорий."""
     from core.notion_client import query_pages, _with_user_filter
     from core.config import config
-    import random
     from collections import Counter
 
     uid = message.from_user.id if message.from_user else 0

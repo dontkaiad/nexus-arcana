@@ -361,7 +361,7 @@ async def main():
     # требует aiogram.Message (это handler, не чистая функция).
     # Проверяем только импорт и наличие сигнатур.
     try:
-        from core.memory import save_memory, search_memory, deactivate_memory
+        from core.memory import save_memory, search_memory
         import inspect
         sig_search = inspect.signature(search_memory)
         sig_save = inspect.signature(save_memory)

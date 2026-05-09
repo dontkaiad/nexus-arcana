@@ -33,7 +33,6 @@ from miniapp.backend import cache as _cache
 from miniapp.backend.routes._arcana_common import (
     RITUAL_NO,
     RITUAL_PARTIAL,
-    RITUAL_UNVERIFIED,
     RITUAL_YES,
     SESSION_NO,
     SESSION_PARTIAL,
@@ -832,7 +831,6 @@ async def get_arcana_works(
     tg_id: int = Depends(current_user_id),
 ) -> dict[str, Any]:
     """Активные Работы юзера: Status != Done, сорт по Дедлайн ASC nulls last."""
-    from datetime import date as _date
     user_notion_id = (await get_user_notion_id(tg_id)) or ""
     today_date, tz_offset = await today_user_tz(tg_id)
     overdue, today_works = await _works_schedule(user_notion_id, today_date, tz_offset)

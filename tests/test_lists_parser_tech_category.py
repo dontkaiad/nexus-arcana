@@ -9,7 +9,6 @@ from __future__ import annotations
 import asyncio
 from unittest.mock import AsyncMock, patch
 
-import pytest
 
 from core.list_manager import LIST_CATEGORIES
 from core.lists_parser import build_buy_system, parse_buy_text

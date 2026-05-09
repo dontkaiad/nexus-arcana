@@ -270,7 +270,6 @@ def rebuild_streak_from_dates(user_id: int, done_dates: list[str], tz_offset: in
     # Считаем текущий стрик (от сегодня назад)
     streak = 0
     check = datetime.strptime(today, "%Y-%m-%d").date()
-    from datetime import date as _date
     date_set = {datetime.strptime(d, "%Y-%m-%d").date() for d in unique_dates}
 
     for _ in range(len(unique_dates) + 1):

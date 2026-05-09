@@ -11,7 +11,6 @@ from core.config import config
 from core.notion_client import arcana_clients_summary, query_pages
 
 from miniapp.backend._helpers import (
-    cat_from_notion,
     date_of,
     extract_time,
     multi_select_names,

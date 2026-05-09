@@ -1,10 +1,9 @@
 """tests/test_ru_calendar.py — производственный календарь РФ через xmlcalendar.ru."""
 from __future__ import annotations
 
-import json
 import sys
 from datetime import datetime, timedelta, timezone
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 

@@ -1,7 +1,7 @@
 """core/pagination.py — универсальный хелпер пагинации для Nexus и Arcana."""
 from __future__ import annotations
 
-from typing import Any, Callable, List, Optional
+from typing import Any, Callable, List
 
 PAGE_SIZE = 10
 

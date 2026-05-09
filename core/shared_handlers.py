@@ -1,5 +1,4 @@
 """Общие хендлеры для Nexus и Arcana."""
-import os
 from aiogram.types import Message
 
 

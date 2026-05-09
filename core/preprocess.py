@@ -22,7 +22,7 @@ import logging
 import os
 import sqlite3
 import time
-from typing import Iterable, Optional
+from typing import Optional
 
 from core.claude_client import ask_claude
 from core.layout import maybe_convert

@@ -20,7 +20,6 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 
 from core.notion_client import get_page, sessions_all
 from core.session_cache import (
-    cache_delete,
     cache_get,
     cache_set,
     session_summary_key,
@@ -43,7 +42,6 @@ from miniapp.backend._helpers import (
 from miniapp.backend.routes._arcana_common import (
     extract_bottom_from_interp,
     load_clients_map,
-    serialize_session_brief,
     client_name_from,
 )
 from miniapp.backend.tarot import canonical_card, parse_cards_raw, resolve_deck_id

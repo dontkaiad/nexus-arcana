@@ -1,7 +1,6 @@
 """Tests for GET /api/today — Mini App backend wave 1."""
 from __future__ import annotations
 
-import os
 from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, patch
 

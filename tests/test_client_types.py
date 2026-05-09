@@ -1,5 +1,5 @@
 """tests/test_client_types.py — типы клиентов и should_skip_payment."""
-from unittest.mock import AsyncMock, patch
+from unittest.mock import patch
 
 import pytest
 

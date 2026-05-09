@@ -1,5 +1,5 @@
 """tests/test_client_resolve.py — resolve-dialog для multi-flow."""
-from unittest.mock import AsyncMock, patch
+from unittest.mock import patch
 
 import pytest
 

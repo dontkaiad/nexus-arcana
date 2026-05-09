@@ -1,19 +1,14 @@
 """arcana/handlers/works.py — Работы (= Задачи Nexus для практики)."""
 from __future__ import annotations
 
-import json
 import logging
 import traceback as tb
-from datetime import datetime, timezone, timedelta
-from typing import Optional
 
 from aiogram.types import Message
 from core.claude_client import ask_claude
 from core.notion_client import (
-    work_add, works_list, work_done, client_find, log_error,
-    _extract_text, _extract_number,
+    works_list, work_done, log_error, _extract_text,
 )
-from core.shared_handlers import get_user_tz
 
 logger = logging.getLogger("arcana.works")
 

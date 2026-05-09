@@ -1,7 +1,6 @@
 """Интеграционные тесты Nexus — полный pipeline через dp.feed_update()."""
 import pytest
 import asyncio
-from unittest.mock import AsyncMock, patch
 
 from tests.integration.bot_factory import FakeSession, make_update, make_callback_update
 from tests.integration.mock_externals import get_all_patches

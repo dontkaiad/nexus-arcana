@@ -1,6 +1,6 @@
 """Тесты core модулей: memory, list_manager, pending_clients, utilities."""
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 
 class TestMemoryModule:

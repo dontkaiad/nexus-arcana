@@ -15,7 +15,6 @@ from core.notion_client import (
     _extract_text,
     client_find,
     log_error,
-    match_select,
     rituals_all,
     sessions_all,
     sessions_by_client,
