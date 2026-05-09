@@ -42,6 +42,10 @@ def _today_date(tz: int = 3):
 # ─── /api/tasks/{id}/done ───────────────────────────────────────────────────
 
 def test_task_done_updates_status(client):
+    # CRITICAL: мокать update_streak. Иначе тест дёргает реальный
+    # nexus.handlers.streaks.update_streak, который пишет в prod-файл
+    # data/nexus_streaks.db под FAKE_TG_ID=67686090 (= реальный tg Кай).
+    # См. issue #65 — это и есть «стрик без Done» из обследования.
     target = _page("task-1")
     with patch("miniapp.backend.routes.writes.get_page", AsyncMock(return_value=target)), \
          patch("miniapp.backend.routes.writes.update_task_status",
@@ -49,7 +53,8 @@ def test_task_done_updates_status(client):
          patch("miniapp.backend.routes.writes.update_page",
                AsyncMock(return_value=None)), \
          patch("miniapp.backend.routes.writes.get_user_notion_id",
-               AsyncMock(return_value=FAKE_NOTION_USER)):
+               AsyncMock(return_value=FAKE_NOTION_USER)), \
+         patch("nexus.handlers.streaks.update_streak", AsyncMock(return_value=None)):
         r = client.post("/api/tasks/task-1/done")
     assert r.status_code == 200
     assert r.json() == {"ok": True, "status": "Done"}
