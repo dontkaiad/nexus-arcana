@@ -220,9 +220,7 @@
 }
 .streak-v .flame {
   flex-shrink: 0;
-  /* На Кай translateY(1px) — огонёк ещё выше цифры, translateY(3px) —
-     ушёл под неё. 2px — золотая середина между этими двумя крайностями. */
-  transform: translateY(2px);
+  transform: translateY(1px);
 }
 
 .bar {
