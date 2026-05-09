@@ -212,15 +212,15 @@
    center геометрический центр SVG-бокса совпадает с серединой цифры, но
    видимое пламя оказывается выше. Опускаем translateY на ~3px — визуальный
    центр огня встаёт на середину цифры. */
+/* #36 v4: низ пламени на одной линии с низом цифры — align-items: flex-end. */
 .streak-v {
   display: inline-flex;
-  align-items: center;
+  align-items: flex-end;
   gap: 4px;
   line-height: 1;
 }
 .streak-v .flame {
   flex-shrink: 0;
-  transform: translateY(1px);
 }
 
 .bar {
