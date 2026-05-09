@@ -7709,7 +7709,7 @@ function PerTaskStreaks({ s, list }) {
   if (list.length === 0) {
     return (
       <div style={{ fontSize: fs(12), color: s.tM, textAlign: "center", padding: "12px 0" }}>
-        Закрой повторяющуюся задачу, чтобы запустить счётчик ✨
+        Закрой задачу сегодня, чтобы запустить счётчик ✨
       </div>
     );
   }

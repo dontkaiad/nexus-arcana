@@ -1012,6 +1012,16 @@ async def _handle_recurring_deadline_done(
         await update_page(task_id, {"Статус": _status("In progress")})
     except Exception as e:
         logger.warning("_handle_recurring_deadline_done: failed to set In progress: %s", e)
+    # #38 fix per TASKS_SPEC: дневной стрик считается от ЛЮБОЙ Done-задачи,
+    # включая повторяющиеся. Раньше recurring-путь возвращался не дёрнув
+    # update_streak — счётчик пропускал день.
+    if uid:
+        try:
+            from nexus.handlers.streaks import update_streak
+            tz = await _get_user_tz(uid) or 3
+            await update_streak(uid, tz)
+        except Exception as e:
+            logger.debug("recurring streak update error: %s", e)
     await _handle_recurring_task_reset(message, task_id, task_props, repeat, title, uid)
 
 

@@ -91,10 +91,10 @@ async def task_done(
         await update_page(task_id, {"Время завершения": _date(now_utc.isoformat())})
     except Exception as e:
         logger.warning("could not set completion time: %s", e)
+    today_local, tz_offset = await today_user_tz(tg_id)
     if is_repeating:
         try:
             from core.task_streaks import update_task_streak
-            today_local, _tz = await today_user_tz(tg_id)
             update_task_streak(
                 user_id=tg_id,
                 task_id=task_id,
@@ -104,6 +104,14 @@ async def task_done(
             )
         except Exception as e:
             logger.warning("update_task_streak failed: %s", e)
+    # #38 fix per TASKS_SPEC: глобальный дневной стрик инкрементируется
+    # от ЛЮБОЙ Done-задачи (повторяющейся или нет). Раньше Mini App-toggle
+    # не дёргал update_streak вообще — счётчик не двигался.
+    try:
+        from nexus.handlers.streaks import update_streak
+        await update_streak(tg_id, tz_offset)
+    except Exception as e:
+        logger.warning("update_streak failed: %s", e)
     return {"ok": True, "status": new_status}
 
 
