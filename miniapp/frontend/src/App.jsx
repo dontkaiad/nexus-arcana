@@ -7866,9 +7866,12 @@ function AdhdSheet({ s, open }) {
           {view.profile ? renderBoldMd(view.profile) : "Профиль пока не сгенерирован."}
         </div>
       </Glass>
+      {/* #48 minimum: каждая секция Паттерны/Стратегии/Триггеры/Особенности
+          в стеклянный блок (как «Мой день»). Полный design-pass с
+          типографикой/чипами вынесен отдельным issue. */}
       {sections.map((sec) => (
-        <div key={sec.key} style={{ marginBottom: 14 }}>
-          <div style={{ fontFamily: H, fontSize: fs(14), color: s.text, marginBottom: 6 }}>
+        <Glass key={sec.key} s={s} style={{ padding: "12px 14px", marginBottom: 10 }}>
+          <div style={{ fontFamily: H, fontSize: fs(14), color: s.text, marginBottom: 8 }}>
             {sec.glyph} {sec.title} ({sec.items.length})
           </div>
           {sec.items.map((it, i) => (
@@ -7879,14 +7882,14 @@ function AdhdSheet({ s, open }) {
                 color: s.text,
                 opacity: 0.85,
                 fontStyle: "italic",
-                padding: "3px 4px",
+                padding: "3px 0",
                 lineHeight: 1.5,
               }}
             >
               • {it}
             </div>
           ))}
-        </div>
+        </Glass>
       ))}
     </>
   );
