@@ -221,10 +221,7 @@
 }
 .streak-v .flame {
   flex-shrink: 0;
-  /* В Lucide flame низ пламени ≈ y=22 из viewBox 24 → padding снизу ≈ 2px
-     при size=20. Опускаем SVG-box на эти 2px чтобы видимый низ огня попал
-     на baseline цифры. */
-  transform: translateY(2px);
+  transform: translateY(4px);
 }
 
 .bar {
