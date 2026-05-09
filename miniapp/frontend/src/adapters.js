@@ -104,6 +104,20 @@ function _repeatDisplayTime(repeatTime) {
   return t || null
 }
 
+// #57: интервал повтора из «17:00|every_2d» → «every_2d» → «каждые 2 дня».
+// Если интервала нет (только время) — fallback на Notion-select поле «Повтор».
+// Иконка 🔄 в карточке должна показывать интервал, не дублировать время.
+function _repeatDisplayInterval(repeatTime, repeatSelect) {
+  const s = repeatTime ? String(repeatTime).trim() : ''
+  if (s.includes('|')) {
+    const parts = s.split('|')
+    const ivl = (parts[1] || '').trim()
+    if (ivl) return formatRepeat(ivl)
+  }
+  if (repeatSelect) return formatRepeat(repeatSelect)
+  return ''
+}
+
 // 60 → "за 1 ч", 30 → "за 30 мин", 90 → "за 1 ч 30 мин", 120 → "за 2 ч"
 export function formatReminder(minutes) {
   if (!minutes || minutes <= 0) return null
@@ -161,7 +175,7 @@ export function adaptToday(data) {
       }
     }),
     tasks: todayTasksRaw.map((x) => {
-      const rptTime = _repeatDisplayTime(x.repeat_time)
+      const ivl = _repeatDisplayInterval(x.repeat_time, x.repeat)
       return {
         id: x.id,
         title: x.title,
@@ -170,18 +184,18 @@ export function adaptToday(data) {
         date: formatDate(x.date, 'full'),
         deadlineTime: x.deadline_time || null,
         reminderTime: x.reminder_time || null,
-        rpt: rptTime ? `🔄 ${rptTime}` : x.repeat ? `🔄 ${formatRepeat(x.repeat)}` : undefined,
+        rpt: ivl ? `🔄 ${ivl}` : undefined,
       }
     }),
     noDate: (data.no_date || []).map((x) => {
-      const rptTime = _repeatDisplayTime(x.repeat_time)
+      const ivl = _repeatDisplayInterval(x.repeat_time, x.repeat)
       return {
         id: x.id,
         title: x.title,
         cat: x.cat || '',
         prio: x.prio || '⚪',
         daysSinceCreated: x.days_since_created ?? null,
-        rpt: rptTime ? `🔄 ${rptTime}` : x.repeat ? `🔄 ${formatRepeat(x.repeat)}` : undefined,
+        rpt: ivl ? `🔄 ${ivl}` : undefined,
       }
     }),
     adhdTip: data.adhd_tip || '',
@@ -259,8 +273,9 @@ export function adaptTasks(data) {
       time = (tm || '').trim() || null
       if (r) repeat = r.trim()
     }
-    // Время повтора: показываем HH:MM из "Время повтора", а не название колонки "Повтор"
-    const rptTime = _repeatDisplayTime(t.repeat_time)
+    // #57: 🔄 показывает интервал повтора (every_2d → «каждые 2 дня»),
+    // а не время — оно уже отрисовано иконкой Bell как reminderTime.
+    const ivl = _repeatDisplayInterval(t.repeat_time, repeat)
     return {
       id: t.id,
       title: t.title || '',
@@ -271,7 +286,7 @@ export function adaptTasks(data) {
       time,
       deadlineTime: t.deadline_time || null,
       reminderTime: t.reminder_time || null,
-      rpt: rptTime ? `🔄 ${rptTime}` : repeat ? `🔄 ${formatRepeat(repeat)}` : undefined,
+      rpt: ivl ? `🔄 ${ivl}` : undefined,
       streak: t.streak || 0,
       closedAt: t.closed_at || null,
     }
