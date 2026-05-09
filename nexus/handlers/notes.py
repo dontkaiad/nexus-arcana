@@ -334,14 +334,21 @@ async def send_notes_digest(bot, user_tg_id: int, user_notion_id: str) -> None:
 
 
 async def send_notes_digest_all(bot) -> None:
-    """Отправить дайджест заметок всем разрешённым пользователям."""
+    """Отправить дайджест заметок пользователям с permissions.nexus."""
     from core.config import config
     from core.user_manager import get_user
 
+    seen: set[int] = set()
     for tg_id in config.allowed_ids:
+        if tg_id in seen:
+            continue
+        seen.add(tg_id)
         try:
             user_data = await get_user(tg_id)
             if not user_data:
+                continue
+            if not user_data.get("permissions", {}).get("nexus", False):
+                logger.info("send_notes_digest_all: skip tg_id=%s (no nexus permission)", tg_id)
                 continue
             user_notion_id = user_data.get("notion_page_id", "")
             await send_notes_digest(bot, tg_id, user_notion_id)
