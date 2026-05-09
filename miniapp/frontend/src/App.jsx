@@ -1378,7 +1378,7 @@ function NxDay({ s, openTask, navigate, openStreaks }) {
             </div>
           ) : (
             <div style={{ flex: 1, cursor: "pointer" }} onClick={() => openStreaks?.()}>
-              <Metric s={s} v={<span className="streak-v"><LucideFlame size={22} fill="currentColor" style={{ flexShrink: 0, color: s.amber }} className="flame" />{t.streak}</span>} sub="стрик" accent={s.amber} />
+              <Metric s={s} v={<span className="streak-v"><LucideFlame size={20} fill="currentColor" style={{ flexShrink: 0, color: s.amber }} className="flame" />{t.streak}</span>} sub="стрик" accent={s.amber} />
             </div>
           )}
         </div>
