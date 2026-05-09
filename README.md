@@ -4,9 +4,9 @@
 - ☀️ **Nexus** — [@nexus_kailark_bot](https://t.me/nexus_kailark_bot) — личный ассистент с СДВГ-поддержкой.
 - 🌒 **Arcana** — [@arcana_kailark_bot](https://t.me/arcana_kailark_bot) — CRM эзотерической практики.
 
-Designed and architected by Кай Lark · [@hey_lark](https://t.me/hey_lark) · [github.com/dontkaiad](https://github.com/dontkaiad)
+Designed and architected by Kai Lark · [@hey_lark](https://t.me/hey_lark) · [github.com/dontkaiad](https://github.com/dontkaiad)
 
-AI-augmented engineering workflow: архитектура, спеки, UX, приоритизация и ревью — на стороне Кай (IT PM, 6 лет в AI-продуктах). Реализация — направляемое исполнение через Claude.ai (стратегия / разбор архитектурных развилок) и Claude Code (правки в репо по конкретным спекам).
+AI-augmented engineering workflow: архитектура, спеки, UX, приоритизация и ревью — на стороне Kai (IT PM, 6 лет в AI-продуктах). Реализация — направляемое исполнение через Claude.ai (стратегия / разбор архитектурных развилок) и Claude Code (правки в репо по конкретным спекам).
 
 ## Стек
 
