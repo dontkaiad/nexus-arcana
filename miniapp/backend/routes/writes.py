@@ -996,14 +996,25 @@ async def list_checkout(
     actual = body.price if body.price is not None else price_plan
     actual = float(actual or 0)
 
+    # wave9 (#46): если запись с Цена-полем недоступна или Notion ругается на
+    # пэйлоад с «Цена» (legacy items без этой колонки) — повторяем без цены,
+    # чтобы хотя бы Done проставился. Так чек на «иглах для машинки» не
+    # ломает UX, а реальная причина пишется в лог.
     update_props: dict = {"Статус": _status("Done")}
     if actual > 0:
         update_props["Цена"] = _number(actual)
     try:
         await update_page(item_id, update_props)
     except Exception as e:
-        logger.error("list_checkout: update_page failed: %s", e)
-        raise HTTPException(status_code=500, detail="failed to mark done")
+        logger.error("list_checkout: update_page (with price) failed for %s: %s", item_id[:8], e)
+        if "Цена" in update_props:
+            try:
+                await update_page(item_id, {"Статус": _status("Done")})
+            except Exception as e2:
+                logger.error("list_checkout: status-only update also failed for %s: %s", item_id[:8], e2)
+                raise HTTPException(status_code=500, detail=f"failed to mark done: {e2}")
+        else:
+            raise HTTPException(status_code=500, detail=f"failed to mark done: {e}")
 
     finance_id = None
     if actual > 0:
