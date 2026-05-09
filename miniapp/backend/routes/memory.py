@@ -30,6 +30,21 @@ EXCLUDED_CATEGORIES = {
     "🎯 Цели",
 }
 
+# #49: канонический список категорий (из core/memory.py CATEGORIES,
+# без бюджетных/ADHD). Возвращаем всегда, чтобы фронт показывал все табы,
+# даже если в какой-то категории пусто.
+CANONICAL_CATEGORIES = [
+    "👥 Люди",
+    "🏥 Здоровье",
+    "🛒 Предпочтения",
+    "💼 Работа",
+    "🏠 Быт",
+    "🔄 Паттерн",
+    "💡 Инсайт",
+    "🔮 Практика",
+    "🐾 Коты",
+]
+
 
 def _serialize(page: dict) -> dict:
     props = page.get("properties", {})
@@ -85,9 +100,15 @@ async def get_memory(
         needle = q.lower().strip()
         items = [i for i in items if needle in (i["text"] or "").lower()]
 
+    # #49(b): объединяем канонический список с теми, что реально есть в данных.
+    # Так фронт показывает все табы (даже пустые) + неожиданные кастомные категории.
+    seen = set(CANONICAL_CATEGORIES)
+    extra = sorted(c for c in categories if c not in seen)
+    all_cats = list(CANONICAL_CATEGORIES) + extra
+
     return {
         "items": items,
-        "categories": sorted(categories),
+        "categories": all_cats,
     }
 
 

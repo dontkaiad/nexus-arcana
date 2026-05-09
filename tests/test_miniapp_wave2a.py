@@ -468,7 +468,13 @@ def test_memory_excludes_budget_and_adhd_categories(client):
     data = r.json()
     names = {i["id"] for i in data["items"]}
     assert names == {"m1", "m4"}
-    assert set(data["categories"]) == {"🛒 Предпочтения", "👥 Люди"}
+    # #49: API теперь всегда возвращает канонический список категорий
+    # (минус бюджетные/ADHD), даже если в данных пусто — фронт показывает
+    # все табы и ставит empty state в пустые. Проверяем что обе категории
+    # с реальными данными присутствуют + бюджетные/ADHD исключены.
+    cats = set(data["categories"])
+    assert {"🛒 Предпочтения", "👥 Люди"}.issubset(cats)
+    assert cats.isdisjoint({"🦋 СДВГ", "📥 Доход", "🔒 Обязательные", "💰 Лимит", "📋 Долги", "🎯 Цели"})
 
 
 def test_memory_cat_filter(client):
