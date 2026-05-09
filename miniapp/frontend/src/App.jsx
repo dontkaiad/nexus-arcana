@@ -1621,30 +1621,28 @@ function NxFinance({ s }) {
         const monthLabel = formatMonth(monthIso) || monthIso;
         return (
           <>
-            {/* #43: 3 стеклянных блока (как «Мой день»), а не плоская строка. */}
+            {/* #43 v2: реальный реюз <Metric> + .hero-metrics — тот же
+                компонент что блоки 0/4 ЗАДАЧИ / Nк СВОБОДНО / 🔥 N СТРИК
+                на Мой день (App.jsx:1362-1381). Те же шрифты, padding,
+                border-radius, glass-фон, флекс-распределение. */}
             <div style={{ fontSize: fs(13), color: s.tS, marginBottom: 6, paddingLeft: 4 }}>{monthLabel}</div>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, marginBottom: 10 }}>
-              <Glass s={s} glow style={{ padding: "12px 10px", textAlign: "center" }}>
-                <div style={{ fontSize: fs(11), color: s.tS, marginBottom: 4 }}>Доход</div>
-                <div style={{ fontFamily: H, fontSize: fs(18), color: s.acc, fontWeight: 500 }}>
-                  {inc.toLocaleString()} ₽
-                </div>
-              </Glass>
-              <Glass s={s} style={{ padding: "12px 10px", textAlign: "center" }}>
-                <div style={{ fontSize: fs(11), color: s.tS, marginBottom: 4 }}>Расход</div>
-                <div style={{ fontFamily: H, fontSize: fs(18), color: s.text, fontWeight: 500 }}>
-                  {exp.toLocaleString()} ₽
-                </div>
-              </Glass>
-              <Glass s={s} glow style={{ padding: "12px 10px", textAlign: "center" }}>
-                <div style={{ fontSize: fs(11), color: s.tS, marginBottom: 4 }}>Баланс</div>
-                <div style={{
-                  fontFamily: H, fontSize: fs(18),
-                  color: balance >= 0 ? s.acc : s.red, fontWeight: 500,
-                }}>
-                  {balance >= 0 ? "+" : ""}{balance.toLocaleString()} ₽
-                </div>
-              </Glass>
+            <div className="hero-metrics" style={{ marginBottom: 10 }}>
+              <Metric
+                s={s}
+                v={inc >= 1000 ? `${Math.round(inc / 1000)}к` : inc}
+                unit="₽" sub="доход" accent={s.acc}
+              />
+              <Metric
+                s={s}
+                v={exp >= 1000 ? `${Math.round(exp / 1000)}к` : exp}
+                unit="₽" sub="расход"
+              />
+              <Metric
+                s={s}
+                v={`${balance >= 0 ? "+" : ""}${Math.abs(balance) >= 1000 ? Math.round(balance / 1000) + "к" : balance}`}
+                unit="₽" sub="баланс"
+                accent={balance >= 0 ? s.acc : s.red}
+              />
             </div>
             <SectionLabel s={s}>По категориям</SectionLabel>
             {cats.length === 0 && <Empty s={s} text="За этот месяц расходов нет" />}
