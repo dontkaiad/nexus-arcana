@@ -201,7 +201,6 @@ async def _handle_tarot_correction(
     uid = message.from_user.id
     from arcana.handlers.sessions import (
         CORRECTION_PARSE_SYSTEM,
-        TAROT_SYSTEM,
         _normalize_area,
         _parse_json_safe,
     )
@@ -636,7 +635,7 @@ async def on_arcana_unknown(query: CallbackQuery, user_notion_id: str = "") -> N
     # Parse action: aunk_session_123, aunk_ritual_123, etc.
     action = query.data.split("_")[1]  # session, ritual, client, tarot
 
-    from arcana.handlers.clients import handle_add_client, handle_client_info
+    from arcana.handlers.clients import handle_add_client
     from arcana.handlers.sessions import handle_add_session, handle_tarot_interpret
     from arcana.handlers.rituals import handle_add_ritual
 

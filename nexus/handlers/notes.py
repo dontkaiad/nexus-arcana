@@ -6,13 +6,13 @@ import logging
 import os
 import random
 from datetime import datetime, timezone, timedelta
-from typing import Dict, List, Optional
+from typing import Dict, List
 
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from nexus.handlers.utils import react
 
 from core.claude_client import ask_claude
-from core.notion_client import note_add, get_db_options, log_error, update_page, query_pages
+from core.notion_client import note_add, get_db_options
 from core.option_helper import find_or_prepare, confirm_keyboard, pick_keyboard, format_option
 
 logger = logging.getLogger("nexus.notes")

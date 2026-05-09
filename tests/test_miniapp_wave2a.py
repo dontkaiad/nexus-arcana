@@ -247,7 +247,6 @@ def test_finance_view_month_calculates_income_expense_and_limits(client):
     )]
 
     async def qp(db_id, **__):
-        from core.config import config as _cfg
         filters = __.get("filters", {})
         f_str = _json.dumps(filters, ensure_ascii=False)
         if "Категория" in f_str and "Лимит" in f_str:

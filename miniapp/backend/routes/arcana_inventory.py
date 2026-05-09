@@ -18,7 +18,6 @@ from core.list_manager import (
 from core.notion_client import (
     _date,
     _number,
-    _select,
     _status,
     _text,
     finance_add,

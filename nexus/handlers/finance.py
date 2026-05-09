@@ -10,7 +10,6 @@ import random
 import re
 import sqlite3 as _sqlite3
 import time as _time
-from dataclasses import dataclass, field
 from datetime import datetime, timezone, timedelta
 from typing import Dict, List, Optional, Set, Tuple
 
@@ -24,15 +23,8 @@ from core.notion_client import finance_month, log_error, page_create, update_pag
 # для backward compat с существующими call-sites в модуле.
 from core.budget import (
     BUDGET_KEY_TO_CATEGORY as _BUDGET_KEY_TO_CATEGORY,
-    BUDGET_ALL_CATEGORIES as _BUDGET_ALL_CATEGORIES,
-    LIMIT_AMOUNT_RE as _LIMIT_AMOUNT_RE,
     LIMIT_FACT_RE as _LIMIT_FACT_RE,
-    INCOME_RE as _INCOME_RE,
-    OBLIGATORY_RE as _OBLIGATORY_RE,
-    GOAL_RE as _GOAL_RE,
     DEBT_RE as _DEBT_RE,
-    LIMIT_DISPLAY as _LIMIT_DISPLAY,
-    parse_amount as _parse_amount,
     cat_link as _cat_link,
     display_limit_name as _display_limit_name,
     get_limits as _get_limits,

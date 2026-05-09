@@ -4,7 +4,6 @@ from aiogram.types import Message, CallbackQuery
 from aiogram.client.default import DefaultBotProperties
 from core.config import config
 from core.middleware import WhitelistMiddleware
-from core.claude_client import analyze_image
 from arcana.handlers.base import router
 from arcana.handlers.memory import router as memory_router
 from arcana.handlers.lists import router as lists_router
@@ -59,7 +58,7 @@ def create_dp_and_bot():
     from aiogram.filters import Command as ArcanaCommand
     from arcana.handlers.lists import handle_list_command as arcana_list_cmd
     from arcana.handlers.works import handle_works_list as arcana_works_list
-    from arcana.handlers.stats import handle_stats, get_unverified_count
+    from arcana.handlers.stats import handle_stats
 
     @dp.message(ArcanaCommand("list"))
     async def cmd_list(msg: Message, user_notion_id: str = "") -> None:

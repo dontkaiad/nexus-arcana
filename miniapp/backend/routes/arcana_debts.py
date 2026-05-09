@@ -10,7 +10,7 @@ Self-client (Тип=🌟 Self) исключается.
 from __future__ import annotations
 
 import logging
-from typing import Any, Optional
+from typing import Any
 
 from fastapi import APIRouter, Depends
 
@@ -29,8 +29,6 @@ from miniapp.backend._helpers import (
     number_of,
     relation_ids_of,
     rich_text_plain,
-    select_of,
-    status_name,
     title_plain,
     title_text,
 )

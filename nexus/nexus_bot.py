@@ -367,7 +367,7 @@ async def cmd_budget(msg: Message, user_notion_id: str = "") -> None:
 @dp.message(Command("finance"))
 async def cmd_finance(msg: Message, user_notion_id: str = "") -> None:
     """Финансы: свободных/день + лимиты на грани + по категориям."""
-    import random, calendar as _cal
+    import random
     from core.notion_client import finance_month
     from core.classifier import today_moscow
     from nexus.handlers.finance import _calc_free_remaining, _get_limits, _cat_link
@@ -555,7 +555,7 @@ async def cmd_list(msg: Message, user_notion_id: str = "") -> None:
 @dp.message(F.text)
 async def handle_text(msg: Message, user_notion_id: str = "") -> None:
     from core.layout import maybe_convert
-    from nexus.handlers.tasks import _pending_has, _pending_get, handle_task_clarification, handle_reschedule_reminder, _update_user_tz
+    from nexus.handlers.tasks import _pending_has, _pending_get, handle_task_clarification, handle_reschedule_reminder
 
     # Budget v2: payday reminder (once per period start)
     try:
@@ -1578,7 +1578,6 @@ async def main() -> None:
 
     # restore_reminders планируем ПОСЛЕ старта polling,
     # иначе бот не может отправлять сообщения (missed reminders)
-    import asyncio as _asyncio
 
     async def _on_startup(**kwargs) -> None:
         await restore_reminders_on_startup()

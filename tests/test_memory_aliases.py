@@ -13,7 +13,6 @@ from __future__ import annotations
 import asyncio
 from unittest.mock import AsyncMock, patch
 
-import pytest
 
 from core.memory import _ALIAS_DEPTH_LIMIT, _resolve_alias
 

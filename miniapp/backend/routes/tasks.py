@@ -12,7 +12,6 @@ from core.user_manager import get_user_notion_id
 
 from miniapp.backend.auth import current_user_id
 from miniapp.backend._helpers import (
-    BOT_NEXUS,
     cat_from_notion,
     extract_time,
     prio_from_notion,

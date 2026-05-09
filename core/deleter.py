@@ -3,9 +3,8 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timezone, timedelta
-from typing import List, Tuple, Optional
+from typing import List, Optional
 
-from notion_client import AsyncClient
 from notion_client.errors import APIResponseError
 
 from core.notion_client import get_notion, db_query, _extract_text, _extract_number

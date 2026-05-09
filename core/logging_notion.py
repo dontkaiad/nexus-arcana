@@ -5,7 +5,6 @@ import asyncio
 import logging
 import time
 import traceback as _tb
-from typing import Optional
 
 
 logger = logging.getLogger(__name__)

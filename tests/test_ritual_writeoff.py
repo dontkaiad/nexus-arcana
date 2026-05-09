@@ -56,7 +56,7 @@ async def test_propose_writeoff_shows_preview_with_inventory_match():
 
 @pytest.mark.asyncio
 async def test_apply_callback_writes_inventory():
-    from arcana.handlers.ritual_writeoff import _apply, _save
+    from arcana.handlers.ritual_writeoff import _apply
     rows = [
         {"name": "соль", "needed": 50, "unit": "г",
          "current": 200, "after": 150, "found": True, "inventory_name": "соль"},

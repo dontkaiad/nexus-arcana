@@ -1,5 +1,5 @@
 """tests/test_bottom_card.py — запись и чтение поля «Дно колоды»."""
-from unittest.mock import AsyncMock, patch
+from unittest.mock import patch
 
 import pytest
 

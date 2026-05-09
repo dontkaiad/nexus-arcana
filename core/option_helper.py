@@ -1,7 +1,7 @@
 """Универсальный хелпер для Select/Multi-select полей Notion.
 Используется одинаково в Nexus и Arcana."""
 import re
-from typing import List, Tuple, Optional
+from typing import List, Tuple
 
 OPTION_EMOJI = {
     # Заметки

@@ -9,7 +9,7 @@ import logging
 from datetime import date as _date
 from typing import Any, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, Field
 
 from core.cash_register import (

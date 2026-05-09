@@ -8,7 +8,7 @@ import re
 import sqlite3
 import time
 from datetime import datetime, timezone, timedelta
-from typing import List, Optional
+from typing import Optional
 
 from core.config import config
 from core.notion_client import (

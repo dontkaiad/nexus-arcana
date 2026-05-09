@@ -8,7 +8,7 @@ from datetime import datetime, timezone, timedelta
 
 from aiogram.types import Message
 from core.claude_client import ask_claude
-from core.notion_client import ritual_add, client_find, log_error, finance_add
+from core.notion_client import ritual_add, log_error, finance_add
 from core.shared_handlers import get_user_tz
 
 logger = logging.getLogger("arcana.rituals")

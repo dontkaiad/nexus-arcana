@@ -2,7 +2,6 @@
 
 Unit тесты — без моков, только regex matching.
 """
-import pytest
 from core.classifier import (
     _WEEKDAY_DEADLINE_RE,
     _EDIT_RE,

@@ -1,8 +1,7 @@
 """Общие фикстуры для тестов."""
 import pytest
-import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 import os
 import sys
 

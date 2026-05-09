@@ -8,10 +8,6 @@
 """
 from __future__ import annotations
 
-import asyncio
-import os
-import sys
-import tempfile
 from io import BytesIO
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -21,7 +17,6 @@ import pytest
 @pytest.fixture(autouse=True)
 def _isolate_pending_dbs(monkeypatch, tmp_path):
     """Прокидываем pending sqlite в tmp_path, чтобы тесты не лапали реальную БД."""
-    import importlib
 
     from arcana import pending_client_photo as pcp
 

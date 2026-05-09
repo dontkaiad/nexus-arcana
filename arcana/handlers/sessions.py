@@ -21,7 +21,6 @@ from core.claude_client import ask_claude, ask_claude_vision
 from core.notion_client import (
     _extract_text,
     client_find,
-    finance_add,
     log_error,
     session_add,
     sessions_by_client,
@@ -184,7 +183,6 @@ PARSE_SESSION_SYSTEM = (
 
 class SessionParseError(Exception):
     """Бросается когда ни один формат расклада не распознался."""
-    pass
 
 
 PARSE_HELP_TEXT = (
@@ -412,7 +410,7 @@ def _triplet_keyboard(page_id: str) -> InlineKeyboardMarkup:
 
 
 def _triplet_remove_confirm_keyboard(short_id: str) -> InlineKeyboardMarkup:
-    from core.utils import cancel_button, secondary_button
+    from core.utils import secondary_button
     return InlineKeyboardMarkup(inline_keyboard=[[
         InlineKeyboardButton(
             text="✅ Да, удалить",
@@ -773,7 +771,7 @@ async def handle_add_session(
 
 def _resolve_dialog_kb(slug: str) -> InlineKeyboardMarkup:
     """4 кнопки: новый платный / новый бесплатный / self / отмена."""
-    from core.utils import cancel_button, secondary_button
+    from core.utils import cancel_button
     return InlineKeyboardMarkup(inline_keyboard=[
         [
             InlineKeyboardButton(

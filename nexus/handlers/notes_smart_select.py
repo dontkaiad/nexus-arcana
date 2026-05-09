@@ -4,12 +4,12 @@ from __future__ import annotations
 import json
 import logging
 from datetime import datetime, timezone, timedelta
-from typing import Dict, List, Optional
+from typing import Dict, List
 
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 
 from core.claude_client import ask_claude
-from core.notion_client import note_add, get_db_options, log_error
+from core.notion_client import note_add, get_db_options
 
 logger = logging.getLogger("nexus.notes")
 MOSCOW_TZ = timezone(timedelta(hours=3))

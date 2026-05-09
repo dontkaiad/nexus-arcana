@@ -32,7 +32,7 @@ from aiogram.types import (
 )
 
 from core.claude_client import ask_claude
-from core.notion_client import client_find, log_error, work_add
+from core.notion_client import client_find, log_error, work_add  # noqa: F401  # client_find via mock.patch
 from core.shared_handlers import get_user_tz
 from core.utils import cancel_button, react
 

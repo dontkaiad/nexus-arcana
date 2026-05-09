@@ -1,8 +1,7 @@
 """Моки для Notion, Claude, OpenAI — все внешние зависимости."""
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock, patch
-from contextlib import contextmanager
+from unittest.mock import AsyncMock, patch
 import json
 
 
@@ -136,7 +135,6 @@ async def _fake_memory_set(key, value, category="", user_notion_id=""):
 
 async def _fake_log_error(*args, **kwargs):
     """Мок log_error — ничего не делать."""
-    pass
 
 
 async def _fake_match_select(db_id, prop_name, value):

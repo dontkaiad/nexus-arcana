@@ -14,11 +14,10 @@ from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKe
 from core.claude_client import ask_claude
 from core.list_manager import (
     add_items, get_list, check_items, check_items_bulk,
-    checklist_toggle, checklist_toggle_by_id, buy_mark_done_by_id,
-    inventory_search, inventory_update, archive_items, mark_items_done,
-    search_memory_categories, find_task_by_name,
-    pending_get, pending_set, pending_del,
-    CATEGORY_TO_FINANCE, LIST_CATEGORIES,
+    inventory_search, inventory_update, archive_items,
+    mark_items_done, search_memory_categories, find_task_by_name, pending_get,
+    pending_set, pending_del,
+    CATEGORY_TO_FINANCE,
 )
 from core.lists_parser import parse_buy_text, format_rub
 from core.notion_client import finance_add

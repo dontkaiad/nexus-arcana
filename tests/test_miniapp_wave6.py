@@ -1,7 +1,6 @@
 """Wave 6 tests."""
 from __future__ import annotations
 
-import json as _json
 from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, patch
 
@@ -262,7 +261,6 @@ def test_weather_route_is_registered():
 
 def test_weather_returns_cached_or_fetches(client, tmp_path, monkeypatch):
     """Cache ключ — tg_id; при первом запросе — вызов Open-Meteo; при повторном — из кэша."""
-    import miniapp.backend.routes.weather as w
 
     # direct in-test call: fake tz + fake openmeteo
     async def fake_memory_get(key):
@@ -298,7 +296,7 @@ def test_summarize_returns_cached_when_ai_summary_exists(client):
         },
     }
 
-    from unittest.mock import AsyncMock as AM, MagicMock
+    from unittest.mock import AsyncMock as AM
     claude_mock = AM(return_value="НЕ должен вызываться")
 
     with patch("miniapp.backend.routes.writes.get_page",

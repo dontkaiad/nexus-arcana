@@ -17,7 +17,7 @@ import os
 import re
 import sqlite3
 import time
-from typing import Any, List, Optional
+from typing import List, Optional
 
 from aiogram import Router, F
 from aiogram.types import (
@@ -28,7 +28,6 @@ from aiogram.types import (
 )
 
 from core.claude_client import ask_claude
-from core.config import config
 from core.list_manager import inventory_search, inventory_update
 
 logger = logging.getLogger("arcana.ritual_writeoff")

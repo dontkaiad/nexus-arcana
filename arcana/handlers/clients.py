@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 import logging
 from datetime import datetime, timezone, timedelta
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
@@ -13,7 +13,7 @@ from core.claude_client import ask_claude, ask_claude_vision
 from core.notion_client import (
     client_add, client_find, sessions_by_client, rituals_by_client,
     arcana_all_debts, get_page, update_page, _extract_text, _extract_number,
-    log_error, _text as _ntext,
+    _text as _ntext,
 )
 
 logger = logging.getLogger("arcana.clients")

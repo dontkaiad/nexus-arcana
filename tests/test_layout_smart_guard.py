@@ -14,13 +14,11 @@ from __future__ import annotations
 
 import logging
 
-import pytest
 
 from core.layout import (
     _english_word_count,
     _has_brand,
     _has_mixed_script_token,
-    _looks_english,
     maybe_convert,
 )
 

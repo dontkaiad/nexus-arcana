@@ -18,9 +18,7 @@ from core.user_manager import get_user_notion_id
 
 from miniapp.backend.auth import current_user_id
 from miniapp.backend._helpers import (
-    BOT_ARCANA,
     rich_text_plain,
-    select_name,
     status_name,
     title_text,
 )

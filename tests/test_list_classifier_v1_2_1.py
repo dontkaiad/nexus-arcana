@@ -10,7 +10,6 @@ from __future__ import annotations
 import asyncio
 from unittest.mock import AsyncMock, patch
 
-import pytest
 
 
 # ── _LIST_BUY_RE: позитивные кейсы ────────────────────────────────────────────

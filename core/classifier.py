@@ -5,9 +5,8 @@ import json
 import logging
 import re
 from datetime import datetime, timezone, timedelta
-from typing import Any, Dict, List
+from typing import Any, Dict
 
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from core.claude_client import ask_claude
 from core.notion_client import finance_add, log_error
 from core.config import ARCANA_KEYWORDS

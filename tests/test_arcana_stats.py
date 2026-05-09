@@ -4,7 +4,6 @@ from miniapp.backend.routes.arcana_today import (
     _count_pending,
     _avg_check_delay,
     _session_verdict,
-    _ritual_verdict,
     _month_key,
 )
 

@@ -125,7 +125,6 @@ class TestSchedulerIntegration:
     def test_apscheduler_available(self):
         """apscheduler установлен."""
         from apscheduler.schedulers.asyncio import AsyncIOScheduler
-        from apscheduler.triggers.cron import CronTrigger
         scheduler = AsyncIOScheduler()
         assert scheduler is not None
 

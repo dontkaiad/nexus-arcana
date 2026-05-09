@@ -982,7 +982,7 @@ async def list_checkout(
     3. ничего → finance_created=False, расход не создаётся.
     """
     from core.list_manager import CATEGORY_TO_FINANCE
-    from core.notion_client import _extract_number, _extract_select, _extract_text
+    from core.notion_client import _extract_number, _extract_select
 
     user_notion_id = (await get_user_notion_id(tg_id)) or ""
     page = await _load_owned_page(item_id, user_notion_id, allow_empty_owner=True)
