@@ -1,101 +1,101 @@
-# nexus-arcana
+# 🌗 Nexus & Arcana
 
-Двойная система Telegram-ботов:
-- ☀️ **Nexus** — [@nexus_kailark_bot](https://t.me/nexus_kailark_bot) — личный ассистент с СДВГ-поддержкой.
-- 🌒 **Arcana** — [@arcana_kailark_bot](https://t.me/arcana_kailark_bot) — CRM эзотерической практики.
+Two Telegram bots and a Mini App for managing both halves of life — a personal assistant for tasks, finances, and notes (Nexus), and a CRM for an esoteric practice (Arcana).
 
-Designed and architected by Kai Lark · [@hey_lark](https://t.me/hey_lark) · [github.com/dontkaiad](https://github.com/dontkaiad)
+Public source. Built and maintained as a single-developer system.
 
-AI-augmented engineering workflow: архитектура, спеки, UX, приоритизация и ревью — на стороне Kai (IT PM, 6 лет в AI-продуктах). Реализация — направляемое исполнение через Claude.ai (стратегия / разбор архитектурных развилок) и Claude Code (правки в репо по конкретным спекам).
+---
 
-## Стек
+## About
 
-Python 3.9 · aiogram 3.x · Notion API · Claude API (Haiku + Sonnet) · OpenAI Whisper · APScheduler · SQLite · FastAPI · React + Vite
+Designed and architected by **Kai Lark** ([@hey_lark](https://t.me/hey_lark)) — IT product manager with 6 years of experience.
 
-## Структура
+**Development model: AI-augmented engineering.**
+Architecture, specs, UX, prioritization, code review, and testing are on the developer side. Code execution is delegated to Claude Code under detailed specs. Strategic decisions and architecture branches are worked through Claude.ai before any code is touched. Every change passes review and the test suite before reaching `main`.
+
+This isn't vibe coding. The system has a defined architecture, ~880 tests, an ADHD-first UX layer, and a documented routing layer across Claude Sonnet, Haiku, and Whisper. AI is the executor; design and direction are human.
+
+---
+
+## What it does
+
+### ☀️ Nexus — personal assistant
+Telegram-first daily companion: tasks with streaks and recurring patterns, expense and income tracking with budget limits and overflow logic, shopping/checklist/inventory lists with a shared schema, free-form notes, persistent memory, ADHD-tuned reactions and confirmations, photo receipts (Vision), voice notes (Whisper). Multi-user.
+
+Bot: [@nexus_kailark_bot](https://t.me/nexus_kailark_bot)
+
+### 🌒 Arcana — esoteric-practice CRM
+Client database with relationship types and barter tracking, tarot session log across multiple decks (Rider-Waite, Dark Wood, Deviant Moon, Lenormand, atlas cards), ritual planning with sub-tasks, a personal grimoire database, and a router that smart-redirects everyday requests back to Nexus.
+
+Bot: [@arcana_kailark_bot](https://t.me/arcana_kailark_bot)
+
+### 📱 Mini App
+A single React + Vite + FastAPI app served as a Telegram WebApp. Six tabs for Nexus (Today, Tasks, Finance, Lists, Notes, Memory) and five for Arcana (Today, Sessions, Clients, Works, Grimoire). Glass-card design, sage-green / deep-blue palette, Lora serif, designed for thumb-reach on mobile.
+
+---
+
+## Architecture highlights
+
+- **Dual-bot intent routing** — every user message passes through a Haiku-based classifier with few-shot examples, then a deterministic intent splitter, before dispatching to a per-domain handler.
+- **Model routing for cost** — Haiku for routine classification and parsing, Sonnet only for high-value tasks (budget analyst, ADHD coaching, Vision on receipts, tarot interpretation, session summaries). Regression-protected with `tests/test_models_audit.py`.
+- **State strictly in SQLite** — every pending dialog state is persisted, never in-memory dicts. Survives restarts.
+- **Notion as source of truth** — 12 databases across three workspaces. All schema operations go through `match_select` to handle emoji-prefixed options.
+- **ADHD-first UX** — color-coded button states, soft confirmations, reaction-based feedback, reply-as-augmentation pattern, no nested menus deeper than two levels.
+- **Photo and voice** — Vision-based receipt parsing, Whisper-based voice notes via OpenAI.
+
+`ARCHITECTURE.md` with diagrams is in the backlog.
+
+---
+
+## Tech stack
+
+**Backend** — Python 3.9, aiogram 3.x, APScheduler, SQLite, Notion API.
+**AI** — Anthropic Claude (Haiku + Sonnet, model-routed), OpenAI Whisper, Anthropic Vision.
+**Mini App** — React + Vite + FastAPI + Cloudinary.
+**Infra (current)** — local Mac development, planned VPS migration (Hetzner).
+**Tooling** — Claude Code, GitHub Issues for backlog and bug-tracking, manual review.
+
+---
+
+## Status
+
+- **Nexus** — production. Feature-complete on the v9 roadmap.
+- **Arcana** — production. Feature-complete on the v8 roadmap (CRM, sessions, rituals, works with sub-tasks, grimoire).
+- **Mini App** — active development.
+- **Tests** — ~880 passing across unit, integration, and regression suites.
+- **Backlog and bug-tracking** — [GitHub Issues](https://github.com/dontkaiad/nexus-arcana/issues).
+
+---
+
+## Repository layout
 
 ```
-nexus/      Telegram-бот Nexus (personal assistant)
-arcana/     Telegram-бот Arcana (esoteric CRM)
-core/       Общая логика: classifier, Notion API, memory, lists, layout, vision
-miniapp/    Mini App: FastAPI backend + React frontend
-tests/      pytest (779 passed, 4 skipped)
-docs/       Спецификации и схемы
-run.sh      Auto-pull (30s) + watchfiles launcher
+core/      shared infrastructure: Notion client, Claude client, classifier, memory, vision
+nexus/     Nexus bot handlers, scheduler, ADHD layer
+arcana/    Arcana bot handlers, sessions, grimoire
+miniapp/   React frontend + FastAPI backend
+tests/     pytest suite — unit + integration + regression + models-audit
+docs/      technical specs (Notion schema, Lists, etc.)
 ```
 
-## Статус
-
-- **Nexus v9.x** — DONE.
-- **Arcana v8.0** — DONE (касса P&L, бартер, фото клиентов, инвентарь, ritual_writeoff, память паритет с Nexus).
-- **Lists v1.2.5** — планируемые цены / магазины / группы / этапы / agg. суммы / Mini App checkout / 💻 Техника / повтор-задачи с Время завершения.
-- **Memory v1.2.4** — alias resolver (канонизация связей через existing memories).
-- **Mini App** — production. 6 табов Nexus + 6 табов Arcana, glass-cards дизайн. Обследование 5 вкладок незавершено ([issues #6-#10](https://github.com/dontkaiad/nexus-arcana/issues?q=is%3Aissue+label%3Amini-app)).
-
-## Ключевые фичи
-
-- ☀️ **Tasks** — natural language, deadlines, reminders, recurring c интервалами `every_Nd`, стрики, подзадачи через 🗒️ Списки.
-- 💰 **Finance** — expense/income tracking, лимиты, бюджетная аналитика (Sonnet), VPS-плановый импорт банковских выписок (long-term).
-- 🗒️ **Lists v1.2** — покупки / чеклисты / инвентарь с ценами план/факт, магазинами, группами, этапами; checkout создаёт расход в Финансах автоматом.
-- 🧠 **Memory** — категории, связи, alias-резолвер (канонизирует имя по existing записям), auto-suggest на 3+ повторений.
-- 📸 **Vision** — фото чеков (Sonnet) + screenshots TG-профилей клиентов.
-- 🌒 **Arcana** — клиенты, расклады, ритуалы, гримуар; касса P&L; бартер reply-парсинг; фото клиентов / ритуалов / объектов.
-- 📱 **Mini App** — Telegram WebApp с glass-cards; календарь, задачи, финансы drill-down, чеклисты, инвентарь, расклады, ритуалы.
+---
 
 ## Workflow
 
-Кай ведёт архитектуру, спеки и ревью; AI-инструменты — исполнители на конкретных уровнях:
+1. Work begins as a **GitHub Issue** — bug or feature, with acceptance criteria.
+2. Architectural tradeoffs are discussed in **Claude.ai** before code changes.
+3. Implementation is delegated to **Claude Code** under a prompt referencing the issue.
+4. Each change is reviewed against the spec, tests are run, and the issue is closed via `fixes #N` in the commit.
+5. `main` is the working branch.
 
-1. **Архитектура и стратегия** — Кай в Claude.ai (проект `nexus-arcana`): декомпозиция волн, разбор развилок, sanity-check решений до того как они попадут в репо.
-2. **Реализация по спекам** — Claude Code (Mac) под наблюдением Кай: правки кода, тесты, миграции. Каждое изменение проходит ревью перед merge.
-3. **Бэклог** — [GitHub Issues](https://github.com/dontkaiad/nexus-arcana/issues) (issues-first workflow, см. [CLAUDE.md](CLAUDE.md)).
-4. **Деплой / merge** — GitHub Desktop или auto-pull через `run.sh`.
-5. **Локально** — `./run.sh` (auto-pull `main` каждые 30с + watchfiles горячий reload).
+See [`CONTRIBUTING.md`](CONTRIBUTING.md) for the full cycle.
 
-## Issues
+---
 
-Баги, фичи, волны разработки — в [GitHub Issues](https://github.com/dontkaiad/nexus-arcana/issues).
+## Contact
 
-Полезные фильтры:
-- `gh issue list --label priority:high` — что горит.
-- `gh issue list --label mini-app` — Mini App работа.
-- `gh issue list --label wave` — большие многофазные волны.
+- Telegram: [@hey_lark](https://t.me/hey_lark)
+- GitHub: [@dontkaiad](https://github.com/dontkaiad)
+- Bots: [@nexus_kailark_bot](https://t.me/nexus_kailark_bot) · [@arcana_kailark_bot](https://t.me/arcana_kailark_bot)
 
-## Документация
-
-- [`docs/LISTS_SPEC_v1.2.md`](docs/LISTS_SPEC_v1.2.md) — спека списков.
-- [`docs/NOTION_DATABASES_v4.md`](docs/NOTION_DATABASES_v4.md) — реальные схемы 12 баз Notion (автогенерация из API).
-- `BACKLOG.md` — архив до миграции в Issues (8 мая 2026).
-
-## Setup
-
-```bash
-cp _env .env          # заполнить токены: Telegram, Anthropic, Notion, OpenAI
-pip install -r requirements.txt
-./run.sh              # запускает обоих ботов + auto-pull + watchfiles
-```
-
-## Mini App локально
-
-```bash
-./run.sh                                 # backend (FastAPI на :8000)
-cd miniapp/frontend && npm install
-cd miniapp/frontend && npm run dev       # → http://localhost:5173
-```
-
-Через Telegram-туннель:
-
-```bash
-cd miniapp/frontend && npm run dev:tunnel    # build --watch + preview
-cloudflared tunnel --url http://localhost:5173 --protocol http2
-```
-
-URL туннеля настраивается в BotFather как menu button.
-
-## Тесты
-
-```bash
-python3 -m pytest tests/ -v
-```
-
-779 passed · 4 skipped · 0 failed (8 мая 2026).
+License: [MIT](LICENSE).
