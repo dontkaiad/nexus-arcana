@@ -221,7 +221,7 @@
 }
 .streak-v .flame {
   flex-shrink: 0;
-  transform: translateY(-2px);
+  transform: translateY(-4px);
 }
 
 .bar {
