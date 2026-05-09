@@ -2900,17 +2900,20 @@ function NxCal({ s }) {
       {view === "week" && (() => {
         const today = new Date();
         const todayKeyIso = today.toDateString();
+        const todayMidnight = new Date(today.getFullYear(), today.getMonth(), today.getDate());
         const weekDays = [];
         for (let i = 0; i < 7; i++) {
           const d = new Date(weekStart);
           d.setDate(weekStart.getDate() + i);
           const dayNum = d.getDate();
           const isSameMonth = d.getFullYear() === year && d.getMonth() === month0;
+          const isToday = d.toDateString() === todayKeyIso;
           weekDays.push({
             dayNum, isSameMonth, date: d,
             weekday: daysShort[i],
             tasks: isSameMonth ? (tasksByDay[dayNum] || []) : [],
-            isToday: d.toDateString() === todayKeyIso,
+            isToday,
+            isPast: !isToday && d < todayMidnight,
             isHoliday: isSameMonth && holidaySet.has(dayNum),
             isWeekend: i === 5 || i === 6,
           });
@@ -2970,7 +2973,7 @@ function NxCal({ s }) {
                 style={{ cursor: "pointer", padding: "2px 8px", color: s.tS, fontSize: fs(20), lineHeight: 1 }}
                 aria-label="Следующая неделя">›</span>
             </div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            <div>
               {weekDays.map((wd, i) => {
                 const isPicked = wd.isSameMonth && wd.dayNum === picked;
                 const todayBorder = "#b07a2e";
@@ -2981,13 +2984,20 @@ function NxCal({ s }) {
                 else if (wd.isToday) labelColor = todayBorder;
                 else if (wd.isHoliday) labelColor = holidayColor;
                 else if (wd.isWeekend) labelColor = weekendColor;
+                // #51 sister-pattern reuse: padding/margin/border-radius/opacity
+                // как у `.task.glass` + `.task.done` (newdesign.css:236-247).
+                // Прошлые дни — opacity 0.5 (как закрытая задача), будущие — 1,
+                // дни вне месяца — 0.4 (нерелевантны для текущего месяца).
+                const cardOpacity = !wd.isSameMonth ? 0.4 : wd.isPast ? 0.5 : 1;
                 return (
                   <Glass
                     key={i} s={s}
                     style={{
-                      padding: "10px 12px",
+                      padding: "14px 16px",
+                      marginBottom: 8,
+                      borderRadius: 14,
                       cursor: wd.isSameMonth ? "pointer" : "default",
-                      opacity: wd.isSameMonth ? 1 : 0.4,
+                      opacity: cardOpacity,
                       background: isPicked
                         ? `${s.acc}22`
                         : wd.isToday ? `${todayBorder}18` : undefined,
