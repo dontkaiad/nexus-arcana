@@ -2976,12 +2976,14 @@ function NxCal({ s }) {
                 const isPicked = wd.isSameMonth && wd.dayNum === picked;
                 const todayBorder = "#b07a2e";
                 const holidayColor = "#b07a2e";
-                const weekendColor = "#6b8f71";
+                // #64: picked сливался с фоном (acc-текст на acc-полупрозрачном
+                // фоне) → используем s.text, выделение остаётся через border.
+                // Weekend сливался → используем приглушённый s.tM (оттенок text,
+                // явно отличается от основного, но с достаточным контрастом).
                 let labelColor = s.text;
-                if (isPicked) labelColor = s.acc;
-                else if (wd.isToday) labelColor = todayBorder;
+                if (wd.isToday) labelColor = todayBorder;
                 else if (wd.isHoliday) labelColor = holidayColor;
-                else if (wd.isWeekend) labelColor = weekendColor;
+                else if (wd.isWeekend) labelColor = s.tM;
                 // #51 sister-pattern reuse: padding/margin/border-radius/opacity
                 // как у `.task.glass` + `.task.done` (newdesign.css:236-247).
                 // Прошлые дни — opacity 0.5 (как закрытая задача), будущие — 1,
