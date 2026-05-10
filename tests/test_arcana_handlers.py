@@ -92,74 +92,54 @@ class TestArcanaFindOrCreate:
 
 
 class TestArcanaTarotPending:
-    """Тесты pending state для таро."""
+    """Тесты pending state для таро (SQLite)."""
 
     @pytest.mark.asyncio
     async def test_pending_save_get_delete(self):
-        """SQLite pending: save → get → delete."""
-        try:
-            from arcana.pending_tarot import save, get, delete
+        from arcana.pending_tarot import (
+            save_pending, get_pending, delete_pending,
+        )
 
-            test_data = {
-                "cards": ["Шут", "Маг"],
-                "deck": "Уэйт",
-                "interpretation": "тест"
-            }
+        state = {
+            "cards": ["Шут", "Маг"],
+            "deck": "Уэйт",
+            "interpretation": "тест",
+        }
+        await save_pending(99999, state)
+        result = await get_pending(99999)
+        assert result is not None, "Pending get вернул None"
+        assert result["cards"] == ["Шут", "Маг"]
+        assert result["deck"] == "Уэйт"
 
-            await save(user_id=99999, data=test_data)
-            result = await get(user_id=99999)
-            assert result is not None, "Pending get вернул None"
-            assert result["cards"] == ["Шут", "Маг"]
-
-            await delete(user_id=99999)
-            result = await get(user_id=99999)
-            assert result is None, "Pending не удалился"
-        except ImportError:
-            pytest.skip("pending_tarot не найден")
+        await delete_pending(99999)
+        assert await get_pending(99999) is None, "Pending не удалился"
 
 
 class TestArcanaTarotLoader:
     """Тесты загрузки колод."""
 
-    @pytest.mark.asyncio
-    async def test_card_search(self):
-        """Нечёткий поиск карты."""
-        try:
-            from arcana.tarot_loader import find_card
+    def test_get_cards_context_waite(self):
+        """get_cards_context для Уэйта возвращает заголовок + найденные карты."""
+        from arcana.tarot_loader import get_cards_context
 
-            result = find_card("туз мечей")
-            assert result is not None, "Карта 'туз мечей' не найдена"
-        except ImportError:
-            pytest.skip("tarot_loader не найден")
+        ctx = get_cards_context("Уэйт", ["Туз Мечей"])
+        assert ctx, "пустой контекст для Уэйта"
+        assert "Уэйт" in ctx or "уэйт" in ctx.lower()
+        # хотя бы одна карта найдена → в контексте есть упоминание
+        assert "меч" in ctx.lower()
 
-    @pytest.mark.asyncio
-    async def test_deck_styles(self):
-        """deck_styles.json существует и читается."""
+    def test_deck_styles_loads(self):
+        """arcana/tarot_refs/deck_styles.json существует и читается."""
         import json
         import os
 
         path = os.path.join(
             os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-            "arcana", "deck_styles.json"
+            "arcana", "tarot_refs", "deck_styles.json",
         )
-        if not os.path.exists(path):
-            pytest.skip("deck_styles.json не найден")
+        assert os.path.exists(path), f"{path} не найден"
 
         with open(path) as f:
             data = json.load(f)
 
-        assert isinstance(data, dict), "deck_styles.json не словарь"
-        assert len(data) > 0, "deck_styles.json пустой"
-
-
-class TestArcanaMessageCollector:
-    """Тесты message collector."""
-
-    @pytest.mark.asyncio
-    async def test_collector_exists(self):
-        """message_collector модуль существует."""
-        try:
-            from core.message_collector import MessageCollector
-            assert MessageCollector is not None
-        except ImportError:
-            pytest.skip("MessageCollector не найден")
+        assert isinstance(data, dict) and data, "deck_styles.json пустой/не словарь"
