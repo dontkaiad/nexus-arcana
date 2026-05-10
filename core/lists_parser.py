@@ -306,8 +306,11 @@ async def parse_buy_text(
         bot_hint=bot_hint, memory_cats=memory_cats, price_hint=price_hint,
     )
     try:
+        # max_tokens=2000: 800 не хватало на многострочный список (9+ items
+        # × 10 полей JSON), ответ Haiku обрезался → невалидный JSON → []
+        # → «Не смог разобрать список». См. issue #66.
         raw = await ask_claude(
-            text, system=system, max_tokens=800,
+            text, system=system, max_tokens=2000,
             model="claude-haiku-4-5-20251001",
         )
     except Exception as e:

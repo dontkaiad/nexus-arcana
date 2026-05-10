@@ -143,6 +143,39 @@ async def test_parse_buy_text_full_pipeline():
 
 
 @pytest.mark.asyncio
+async def test_parse_buy_text_long_multiline_list():
+    """9+ items в одном сообщении — Haiku ответ не должен обрезаться.
+
+    Регрессия issue #66: max_tokens=800 обрезал JSON на середине →
+    parse_buy_response возвращал [] → «Не смог разобрать список».
+    Тест фиксирует max_tokens≥2000.
+    """
+    from core import lists_parser
+    items = [
+        {"name": "Яйца", "category": "🍜 Продукты", "price_plan": 130, "qty": 10},
+        {"name": "Молоко", "category": "🍜 Продукты", "price_plan": 100, "qty": 1},
+        {"name": "Картошка", "category": "🍜 Продукты", "price_plan": 60, "qty": 1},
+        {"name": "Лук", "category": "🍜 Продукты", "price_plan": 40, "qty": 1},
+        {"name": "Морковь", "category": "🍜 Продукты", "price_plan": 50, "qty": 1},
+        {"name": "Томатная паста", "category": "🍜 Продукты", "price_plan": 60},
+        {"name": "Плавленый сыр", "category": "🍜 Продукты", "price_plan": 50, "qty": 1},
+        {"name": "Хлеб", "category": "🍜 Продукты", "price_plan": 40},
+        {"name": "Чапман", "category": "🍜 Продукты", "price_plan": 285},
+    ]
+    haiku_resp = json.dumps({"items": items})
+    with patch.object(lists_parser, "ask_claude",
+                       AsyncMock(return_value=haiku_resp)) as mock:
+        out = await lists_parser.parse_buy_text(
+            "запиши в покупки\nЯйца 10 шт — ~130₽\nМолоко 1 л — ~100₽\n..."
+        )
+    assert len(out) == 9
+    assert [it["name"] for it in out] == [it["name"] for it in items]
+    # max_tokens должен быть достаточен для длинного списка
+    kwargs = mock.await_args.kwargs
+    assert kwargs.get("max_tokens", 0) >= 2000
+
+
+@pytest.mark.asyncio
 async def test_parse_buy_text_legacy_message():
     """«молоко в покупки» → один item, extra поля = None. Без падений."""
     from core import lists_parser
