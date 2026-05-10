@@ -375,10 +375,13 @@ async def restore_reminders_on_startup() -> None:
                             t.get("plain_text", "") for t in
                             (props.get("Время повтора", {}).get("rich_text") or [])
                         )
-                        _, ivl_days = _parse_repeat_time(repeat_time_raw)
+                        canon_time, ivl_days = _parse_repeat_time(repeat_time_raw)
                         new_reminder = _ensure_datetime(reminder_start[:16])
                         for _ in range(400):
-                            new_reminder = _next_cycle_date(new_reminder, repeat, tz_offset, ivl_days)
+                            new_reminder = _next_cycle_date(
+                                new_reminder, repeat, tz_offset, ivl_days,
+                                override_time=canon_time,
+                            )
                             try:
                                 _nr = _ensure_datetime(new_reminder[:16])
                                 nrem_dt = datetime.strptime(_nr, "%Y-%m-%dT%H:%M").replace(
@@ -847,12 +850,18 @@ def _interval_label(interval_days: int) -> str:
     return f"каждые {interval_days} {word}"
 
 
-def _next_cycle_date(current_date_str: str, repeat: str, tz_offset: int = 3, interval_days: int = 0) -> str:
+def _next_cycle_date(current_date_str: str, repeat: str, tz_offset: int = 3,
+                     interval_days: int = 0,
+                     override_time: Optional[str] = None) -> str:
     """Вычислить дату следующего цикла для повторяющейся задачи.
 
     base = max(old_date, today) — чтобы не прыгать в прошлое если задача просрочена.
     Если входная строка содержит время (YYYY-MM-DDTHH:MM) — время сохраняется.
     Возвращает YYYY-MM-DD или YYYY-MM-DDTHH:MM.
+
+    `override_time` (HH:MM) — каноническое время из «Время повтора»; если задано,
+    заменяет HH:MM из current_date_str. Это нужно после снуза напоминания: иначе
+    снузенное время навсегда «портит» каноническое (issue #67).
     """
     has_time = "T" in (current_date_str or "")
     now = datetime.now(timezone(timedelta(hours=tz_offset)))
@@ -890,7 +899,10 @@ def _next_cycle_date(current_date_str: str, repeat: str, tz_offset: int = 3, int
 
     result = next_date.strftime("%Y-%m-%d")
     if has_time:
-        time_part = current_date_str.split("T")[1][:5]
+        if override_time and _re.match(r"^\d{2}:\d{2}$", override_time):
+            time_part = override_time
+        else:
+            time_part = current_date_str.split("T")[1][:5]
         result = result + "T" + time_part
     return result
 
@@ -911,7 +923,7 @@ async def _handle_recurring_task_reset(
         t.get("plain_text", "") for t in
         (task_props.get("Время повтора", {}).get("rich_text") or [])
     )
-    _, ivl_days = _parse_repeat_time(repeat_time_raw)
+    canon_time, ivl_days = _parse_repeat_time(repeat_time_raw)
 
     deadline_prop = task_props.get("Дедлайн", {}).get("date") or {}
     current_deadline = deadline_prop.get("start", "")
@@ -939,7 +951,10 @@ async def _handle_recurring_task_reset(
         new_deadline = current_deadline[:10] if current_deadline else ""
     else:
         new_deadline = _next_cycle_date(current_deadline, repeat, tz_offset, ivl_days) if current_deadline else ""
-        new_reminder = _next_cycle_date(current_reminder, repeat, tz_offset, ivl_days) if current_reminder else ""
+        new_reminder = _next_cycle_date(
+            current_reminder, repeat, tz_offset, ivl_days,
+            override_time=canon_time,
+        ) if current_reminder else ""
 
     # v1.2.5 (bug #1): повторяющаяся задача после клика «Сделано» должна
     # оставаться в «In progress» (а не сваливаться в Not started, как было),

@@ -106,6 +106,38 @@ async def test_reset_recurring_with_deadline_keeps_in_progress():
 
 
 @pytest.mark.asyncio
+async def test_reset_recurring_uses_canonical_time_after_snooze():
+    """issue #67: после снуза напоминания reset должен вернуть HH:MM из
+    «Время повтора» (16:00), а не использовать снузенное время (20:29)."""
+    from nexus.handlers import tasks
+
+    msg = _make_message()
+    # repeat_time = «16:00|every_2d», но текущее напоминание снузено на 20:29
+    props = _make_task_props(
+        repeat_time="16:00|every_2d",
+        deadline=None,
+        reminder="2026-05-10T20:29:00+03:00",
+    )
+
+    captured: dict = {}
+
+    async def capture_update(task_id, props_dict):
+        captured["props"] = props_dict
+
+    with patch.object(tasks, "update_page", AsyncMock(side_effect=capture_update)), \
+         patch.object(tasks, "_scheduler", None), \
+         patch.object(tasks, "_get_user_tz", AsyncMock(return_value=3)):
+        await tasks._handle_recurring_task_reset(
+            msg, "task-id-snooze", props, "Ежедневно", "менять лоток", uid=999_001,
+        )
+
+    new_reminder = captured["props"]["Напоминание"]["date"]["start"]
+    # Каноническое время 16:00 восстановлено, снузенное 20:29 не утечёт в цикл
+    assert "T16:00" in new_reminder, f"Ожидался HH:MM=16:00, got {new_reminder}"
+    assert "T20:29" not in new_reminder
+
+
+@pytest.mark.asyncio
 async def test_recurring_reminder_done_already_in_progress():
     """_handle_recurring_reminder_done должен ставить In progress (legacy путь)."""
     from nexus.handlers import tasks
