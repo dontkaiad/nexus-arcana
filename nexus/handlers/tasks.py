@@ -985,13 +985,14 @@ async def _handle_recurring_task_reset(
                 except Exception:
                     pass
                 await _schedule_reminder(chat_id, title, new_reminder, task_id, tz_offset)
-            # Дедлайн
+            # Дедлайн: если есть напоминалка — пинг по дедлайну не нужен (issue #69)
             if current_deadline and new_deadline:
                 try:
                     _scheduler.remove_job(f"deadline_{task_id}")
                 except Exception:
                     pass
-                await _schedule_deadline_check(chat_id, title, new_deadline, task_id, tz_offset)
+                if not (current_reminder and new_reminder):
+                    await _schedule_deadline_check(chat_id, title, new_deadline, task_id, tz_offset)
 
         await message.answer(f"🔄 Повторяющаяся задача сброшена. Следующий раз: {next_display}")
     except Exception as e:
@@ -2002,12 +2003,13 @@ async def _do_save_task(message: Message, data: dict, chat_id: int = None, uid: 
     # Планируем напоминание и дедлайн
     cid = chat_id or message.chat.id
 
-    if data.get("reminder_time"):
+    has_reminder = bool(data.get("reminder_time"))
+    if has_reminder:
         logger.info("_do_save_task: scheduling reminder task_id=%s repeat=%s reminder=%s",
                      result[:8], data.get("repeat", "Нет"), data["reminder_time"])
         await _schedule_reminder(cid, data["title"], data["reminder_time"], result, tz_offset)
 
-    if data.get("deadline"):
+    if data.get("deadline") and not has_reminder:
         deadline = data["deadline"]
         if "T" not in deadline:
             deadline = deadline + "T09:00"
