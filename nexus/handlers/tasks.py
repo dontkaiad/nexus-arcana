@@ -2582,7 +2582,7 @@ async def _build_today_digest(uid: int, user_notion_id: str = "", greeting: str 
 
     overdue = []
     today_tasks = []
-    daily = []
+    _priority_rank = {"Срочно": 0, "Важно": 1, "Можно потом": 2}
 
     for t in all_tasks:
         props = t["properties"]
@@ -2620,14 +2620,20 @@ async def _build_today_digest(uid: int, user_notion_id: str = "", greeting: str 
         }
 
         if is_repeat and repeat == "Ежедневно":
-            daily.append(item)
+            today_tasks.append(item)
         elif deadline_date and deadline_date < today_str:
             overdue.append(item)
         elif deadline_date == today_str or reminder_date == today_str:
             today_tasks.append(item)
 
-    total = len(overdue) + len(today_tasks) + len(daily)
-    all_today = overdue + today_tasks + daily
+    today_tasks.sort(key=lambda it: (
+        0 if it.get("time_str") else 1,
+        it.get("time_str") or "",
+        _priority_rank.get(it["priority"], 9),
+    ))
+
+    total = len(overdue) + len(today_tasks)
+    all_today = overdue + today_tasks
     n_urgent = sum(1 for it in all_today if it["priority"] == "Срочно")
     n_overdue = len(overdue)
 
@@ -2704,7 +2710,8 @@ async def _build_today_digest(uid: int, user_notion_id: str = "", greeting: str 
         logger.warning("_build_today_digest budget error: %s", e)
 
     def _fmt(it: dict) -> str:
-        line = f"  {it['pri_icon']} {it['title']} · {it['cat_icon']}"
+        repeat_mark = " 🔄" if it.get("is_repeat") else ""
+        line = f"  {it['pri_icon']} {it['title']} · {it['cat_icon']}{repeat_mark}"
         if it.get("time_str"):
             line += f" · {it['time_str']}"
         return line
@@ -2725,13 +2732,6 @@ async def _build_today_digest(uid: int, user_notion_id: str = "", greeting: str 
             for it in today_tasks:
                 lines.append(_fmt(it))
 
-        if daily:
-            lines.append(f"\n<b>🔄 ЕЖЕДНЕВНЫЕ</b>")
-            for it in daily:
-                time_part = f" · {it['time_str']}" if it.get("time_str") else ""
-                ivl_part = f" · {_interval_label(it['interval_days'])}" if it.get("interval_days", 0) > 1 else ""
-                lines.append(f"  {it['pri_icon']} {it['title']} · {it['cat_icon']}{time_part}{ivl_part}")
-
     if streak_line:
         lines.append(f"\n{streak_line}")
     if budget_line:
@@ -2739,34 +2739,23 @@ async def _build_today_digest(uid: int, user_notion_id: str = "", greeting: str 
 
     # СДВГ-совет
     try:
-        _tip_items = (overdue + today_tasks + daily)[:5]
-        _tip_parts = []
-        for it in _tip_items:
-            part = f"«{it['title']}»"
-            if it.get("time_str"):
-                part += f" в {it['time_str']}"
-            _tip_parts.append(part)
-        _tip_tasks_str = ", ".join(_tip_parts) if _tip_parts else "нет"
+        _first_item = next(iter(overdue + today_tasks), None)
+        _first_title = f"«{_first_item['title']}»" if _first_item else "—"
         prompt = (
-            f"Ты — Nexus, СДВГ-ассистент пользовательницы по имени Кай. "
-            f"Кай — это ОНА (твоя пользовательница, женский род), а НЕ ты. "
-            f"Никогда не представляйся именем «Кай» и не пиши «Я Кай». "
-            f"Обращайся к Кай на «ты», в женском роде. "
-            f"Задачи — это ДЕЛА, которые Кай нужно СДЕЛАТЬ. НЕ объясняй их смысл и НЕ переинтерпретируй. "
-            f"'Менять лоток' = убирать наполнитель. 'Помыть обувь' = помыть обувь. Понимай буквально.\n"
-            f"Сейчас {time_of_day}. Задач: {total} (срочных: {n_urgent}, просроченных: {n_overdue}). "
-            f"Ближайшие задачи: {_tip_tasks_str}.\n"
-            f"ЗАПРЕЩЕНО: Nexus УЖЕ является напоминалкой. НИКОГДА не советуй ставить будильник, "
-            f"таймер, напоминание, записать в календарь, поставить alarm — это буквально твоя работа. "
-            f"НЕ выдумывай время задач — используй ТОЛЬКО время из списка выше.\n"
-            f"Дай ОДИН тёплый короткий совет — помочь Кай НАЧАТЬ делать, а не объяснять КАК. "
-            f"Примеры хорошего совета: «Просто открой шкаф — руки сами сделают остальное» / «2 минуты и готово, ты справишься». "
-            f"Макс 1-2 предложения, заверши мысль целиком, НЕ заканчивай на многоточии. Без пафоса. "
-            f"Без приветствий вида «Привет, я …» — просто совет."
+            f"Ты — Nexus, СДВГ-ассистент Кай (она). Обращайся на «ты» в женском роде. "
+            f"Сейчас {time_of_day}. Задач сегодня: {total} (срочных: {n_urgent}, просроченных: {n_overdue}). "
+            f"Первая по списку: {_first_title}.\n"
+            f"Дай ОДНО короткое мотивирующее предложение — помочь Кай НАЧАТЬ. "
+            f"Не пересказывай список дел, не группируй их по категориям, не используй заголовки. "
+            f"ЗАПРЕЩЕНО: markdown (никаких **bold**, ##, -, *, списков), эмодзи в начале, "
+            f"перечисление задач, советы поставить таймер/будильник/напоминание (Nexus и есть напоминалка). "
+            f"Формат ответа: ровно одно предложение plain text, до 15 слов, заверши мысль целиком."
         )
-        advice = await ask_claude(prompt, max_tokens=1000, model="claude-haiku-4-5-20251001")
+        advice = await ask_claude(prompt, max_tokens=200, model="claude-haiku-4-5-20251001")
         if advice:
-            lines.append(f"\n💡 {advice.strip()}")
+            clean = advice.strip().replace("**", "").replace("__", "")
+            clean = clean.split("\n", 1)[0].strip()
+            lines.append(f"\n💡 {clean}")
     except Exception as e:
         logger.warning("_build_today_digest ADHD tip error: %s", e)
 
