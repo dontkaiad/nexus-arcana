@@ -220,3 +220,8 @@ session_cache.db
 *.db-wal
 *.db-shm
 *.pyc
+
+# случайно подтянутое — не коммитить
+KarinaLark-*.pdf
+*.dmg
+*.pdf

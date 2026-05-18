@@ -70,3 +70,15 @@ def test_cache_ttl_is_short_enough():
     """TTL ≤ 10 минут — чтобы смена локации подхватывалась быстро."""
     from miniapp.backend.routes import weather
     assert weather._CACHE_TTL <= 10 * 60
+
+
+def test_turkey_cities_normalize_to_english():
+    """issue #70 follow-up: «в Алании» / «в Турции» / падежи турецких городов
+    канонизируются в English-имена для Open-Meteo, не «Турции»/«Алании»."""
+    from miniapp.backend.routes.weather import _extract_city_from_text
+    assert _extract_city_from_text("я в Алании") == "Alanya"
+    assert _extract_city_from_text("в Аланье") == "Alanya"
+    assert _extract_city_from_text("я в Турции") == "Istanbul"
+    assert _extract_city_from_text("сейчас в Анталье") == "Antalya"
+    assert _extract_city_from_text("в Стамбуле") == "Istanbul"
+    assert _extract_city_from_text("в Батуми") == "Batumi"
