@@ -71,7 +71,7 @@ WMO_CODES: dict[int, tuple[str, str]] = {
 }
 
 
-_CACHE_TTL = 30 * 60  # 30 минут
+_CACHE_TTL = 10 * 60  # 10 минут (issue #70: чтобы смена локации подхватывалась быстро)
 
 
 def _init_weather_cache() -> None:
@@ -249,7 +249,21 @@ def _extract_city_from_text(text: str) -> Optional[str]:
 
 
 async def _resolve_city_from_memory(tg_id: int) -> Optional[str]:
-    """Ищем город в Памяти Nexus: грузим записи юзера и сканируем в Python."""
+    """Ищем город в Памяти Nexus: грузим записи юзера и сканируем в Python.
+
+    issue #70: сначала проверяем явные ключи `city_{tg_id}` / `location_{tg_id}`
+    (override от POST /api/weather/city и пр.), потом — fuzzy-скан, отсортированный
+    по last_edited_time desc, чтобы свежая запись побеждала старую.
+    """
+    # 1) Явный override
+    for key in (f"city_{tg_id}", f"location_{tg_id}"):
+        raw = await memory_get(key)
+        if raw:
+            city = _extract_city_from_text(raw) or _normalize_city(raw)
+            if city:
+                logger.info("resolve_city[%s]: override key=%s → %s", tg_id, key, city)
+                return city
+
     db_id = config.nexus.db_memory
     if not db_id:
         logger.warning("resolve_city[%s]: no db_memory configured", tg_id)
@@ -266,8 +280,10 @@ async def _resolve_city_from_memory(tg_id: int) -> Optional[str]:
     else:
         filters = {"property": "Актуально", "checkbox": {"equals": True}}
 
+    sorts = [{"timestamp": "last_edited_time", "direction": "descending"}]
+
     try:
-        pages = await query_pages(db_id, filters=filters, page_size=200)
+        pages = await query_pages(db_id, filters=filters, sorts=sorts, page_size=200)
     except Exception as e:
         logger.warning("resolve_city[%s] fetch failed: %s", tg_id, e)
         return None
