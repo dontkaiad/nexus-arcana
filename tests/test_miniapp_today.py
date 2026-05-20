@@ -199,7 +199,7 @@ def test_today_caches_adhd_tip_across_calls(client):
     tz = 3
     today = _today_local_iso(tz)
     qp_mock = _build_query_pages_mock([], [], [])
-    claude_mock = AsyncMock(return_value="Дыши, ты справишься.")
+    claude_mock = AsyncMock(return_value="Дыши спокойно, ты сегодня точно справишься.")
 
     with patch("miniapp.backend.routes.today.query_pages", side_effect=qp_mock), \
          patch("miniapp.backend.routes.today.memory_get", AsyncMock(return_value=None)), \
@@ -217,8 +217,8 @@ def test_today_caches_adhd_tip_across_calls(client):
 
     assert r1.status_code == 200
     assert r2.status_code == 200
-    assert r1.json()["adhd_tip"] == "Дыши, ты справишься."
-    assert r2.json()["adhd_tip"] == "Дыши, ты справишься."
+    assert r1.json()["adhd_tip"] == "Дыши спокойно, ты сегодня точно справишься."
+    assert r2.json()["adhd_tip"] == "Дыши спокойно, ты сегодня точно справишься."
     # второй вызов обслужен из кэша — Claude не вызвался повторно
     assert claude_mock.await_count == 1
 

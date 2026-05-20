@@ -25,6 +25,7 @@ async def ask_claude(
     system: str = "",
     model: str = "",
     max_tokens: int = 1024,
+    temperature: Optional[float] = None,
 ) -> str:
     """Простой текстовый запрос. Возвращает строку."""
     client = get_anthropic()
@@ -37,6 +38,8 @@ async def ask_claude(
     }
     if system:
         kwargs["system"] = system
+    if temperature is not None:
+        kwargs["temperature"] = temperature
 
     try:
         resp = await client.messages.create(**kwargs)

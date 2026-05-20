@@ -148,12 +148,65 @@ async def _adhd_context_memories(user_notion_id: str) -> list[str]:
     return out
 
 
+# wave8.62 (issue #71): слова-плейсхолдеры — маркер галлюцинации Haiku
+# («положи штуку в одно место»). Совет с любым из них считаем браком.
+PLACEHOLDER_WORDS = {
+    "штука", "штуку", "штукой", "штуки", "вещь", "вещи", "вещью",
+    "что-то", "чего-то", "нечто", "что-нибудь",
+}
+
+# Статичный fallback — отдаём когда Haiku дважды выдал брак.
+# НЕ кешируется, чтобы следующий заход попробовал сгенерить заново.
+_FALLBACK_TIP = "Главное на сегодня — закрой одну задачу, не пытайся все."
+
+
+def _validate_tip(text: str) -> "tuple[bool, str]":
+    """Возвращает (valid, reason)."""
+    words = set(text.lower().split())
+    bad = words & PLACEHOLDER_WORDS
+    if bad:
+        return False, f"placeholder words: {bad}"
+    word_count = len(text.split())
+    if word_count > 20:
+        return False, f"too long: {word_count} words"
+    if word_count < 5:
+        return False, f"too short: {word_count} words"
+    return True, ""
+
+
+_TIP_SYSTEM = (
+    "Ты — внешний мозг Кай. Напиши ОДНО предложение, максимум 15 слов — "
+    "СДВГ-friendly совет на сегодня. Женский род. Конкретный, практичный.\n"
+    "ЗАПРЕЩЕНО: плейсхолдеры ('штука', 'вещь', 'что-то', 'нечто'), "
+    "общие фразы ('что-то делать'), markdown, эмодзи, двоеточия в начале.\n"
+    "Примеры качества:\n"
+    "ХОРОШО: «Поставь телефон на видное место у кровати — иначе утром "
+    "забудешь дома.»\n"
+    "ХОРОШО: «Перед выходом проверь: ключи, кошелёк, наушники — раз, два, "
+    "три, готово.»\n"
+    "ПЛОХО: «Положи штуку в одно место рядом с вещами — будет удобно.» "
+    "(плейсхолдеры)\n"
+    "ПЛОХО: «Не забывай про важные дела.» (общая фраза без конкретики)"
+)
+
+
+async def _ask_tip(prompt: str) -> str:
+    try:
+        text = await ask_claude(prompt=prompt, system=_TIP_SYSTEM,
+                                max_tokens=80, temperature=0.4,
+                                model="claude-haiku-4-5-20251001")
+    except Exception as e:
+        logger.error("ADHD tip generation failed: %s", e)
+        return ""
+    return (text or "").strip()
+
+
 async def _generate_adhd_tip(tg_id: int, today_str: str,
                              active_titles: list[str], user_notion_id: str) -> str:
     cached = cache.get_tip(tg_id, today_str)
     # wave8.6: старые кэшированные советы с markdown (звёздочки, длинные) —
-    # игнорируем, чтобы новый промпт «без markdown, ≤15 слов» сразу подхватился.
-    if cached and "**" not in cached and len(cached.split()) <= 20:
+    # игнорируем. wave8.62: не отдаём кэш, не прошедший валидацию (issue #71).
+    if cached and "**" not in cached and _validate_tip(cached)[0]:
         return cached
 
     memories = await _adhd_context_memories(user_notion_id)
@@ -165,20 +218,19 @@ async def _generate_adhd_tip(tg_id: int, today_str: str,
         f"Активные задачи:\n{tasks_ctx}\n\n"
         f"Что знаю про её СДВГ:\n{mem_ctx}"
     )
-    system = (
-        "Ты — внешний мозг Кай. Напиши ОДНО предложение, максимум 15 слов — "
-        "СДВГ-friendly совет на сегодня. Женский род. Конкретный, практичный, без воды. "
-        "Без markdown, без звёздочек, без двоеточий в начале."
-    )
-    try:
-        text = await ask_claude(prompt=prompt, system=system, max_tokens=200,
-                                model="claude-haiku-4-5-20251001")
-    except Exception as e:
-        logger.error("ADHD tip generation failed: %s", e)
-        text = ""
-    text = (text or "").strip()
-    if text:
-        cache.set_tip(tg_id, today_str, text)
+
+    text = await _ask_tip(prompt)
+    valid, reason = _validate_tip(text)
+    if not valid:
+        # Haiku недетерминирован — один retry с тем же промптом.
+        logger.warning("tip_quality_fail (retry) %r — %s", text, reason)
+        text = await _ask_tip(prompt)
+        valid, reason = _validate_tip(text)
+    if not valid:
+        logger.warning("tip_quality_fail (fallback) %r — %s", text, reason)
+        return _FALLBACK_TIP
+
+    cache.set_tip(tg_id, today_str, text)
     return text
 
 
