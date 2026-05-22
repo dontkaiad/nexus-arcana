@@ -547,6 +547,27 @@ def test_arcana_grimoire_list_and_cat_filter(client):
     assert r_q.json()["items"][0]["id"] == "g2"
 
 
+def test_arcana_grimoire_search_matches_theme(client):
+    # #9: поиск гримуара должен матчить и Тему, не только Название+Текст.
+    pages = [
+        _grim_page("g1", "Заговор на деньги", "📿 Заговор",
+                   themes=["💰 Финансы"], text="строки без нужного слова"),
+        _grim_page("g2", "Рецепт масла", "🧴 Рецепт",
+                   themes=["🛡️ Защита"], text="короткий"),
+    ]
+    with patch("miniapp.backend.routes.arcana_grimoire.query_pages",
+               AsyncMock(return_value=pages)), \
+         patch("miniapp.backend.routes.arcana_grimoire.get_user_notion_id",
+               AsyncMock(return_value=FAKE_NOTION_USER)):
+        # «финансы» есть только в Теме g1
+        r_theme = client.get("/api/arcana/grimoire?q=финансы")
+        # «защита» — только в Теме g2
+        r_theme2 = client.get("/api/arcana/grimoire?q=защита")
+
+    assert {i["id"] for i in r_theme.json()["items"]} == {"g1"}
+    assert {i["id"] for i in r_theme2.json()["items"]} == {"g2"}
+
+
 def test_arcana_grimoire_categories_always_returned(client):
     """Backend всегда отдаёт полный набор опций категорий (с count=0)."""
     with patch("miniapp.backend.routes.arcana_grimoire.query_pages",

@@ -107,7 +107,13 @@ async def list_grimoire(
         if cat and brief["cat"] != cat:
             continue
         if needle:
-            hay = (brief["name"] or "").lower() + " " + (rich_text_plain(p, "Текст") or "").lower()
+            # Ищем по Название + Текст + Тема (раньше Тема не матчилась —
+            # запрос «защита» не находил заговор с темой 🛡️ Защита).
+            hay = " ".join([
+                (brief["name"] or "").lower(),
+                (rich_text_plain(p, "Текст") or "").lower(),
+                " ".join(brief.get("themes") or []).lower(),
+            ])
             if needle not in hay:
                 continue
         items.append(brief)
