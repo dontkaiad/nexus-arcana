@@ -29,7 +29,7 @@ from core.notion_client import (
 )
 from core.notion_client import _title, _text, _select, _status, _number, _date, _relation
 from core.user_manager import get_user_notion_id
-from core.bot_notify import notify_user
+from core.bot_notify import notify_user, clear_task_reminder
 
 from miniapp.backend.auth import current_user_id
 from miniapp.backend._helpers import (
@@ -121,6 +121,8 @@ async def task_done(
     task_title = title_plain(page, "Задача")
     verb = "🔄 Отметила" if is_repeating else "✅ Готово"
     await notify_user(tg_id, f"{verb}: <b>{_esc(task_title)}</b>", bot="nexus")
+    # #73: погасить живую плашку-напоминание этой задачи в чате (если висит).
+    await clear_task_reminder(task_id, bot="nexus")
     return {"ok": True, "status": new_status}
 
 

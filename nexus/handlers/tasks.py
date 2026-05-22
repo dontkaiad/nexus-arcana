@@ -16,6 +16,7 @@ from core.notion_client import tasks_active, page_create, _title, _select, _date
 from nexus.handlers.utils import react
 from core.layout import maybe_convert
 from core.utils import cancel_button, secondary_button
+from core.task_reminder_msg import save_task_reminder, delete_task_reminder
 
 logger = logging.getLogger("nexus.tasks")
 MOSCOW_TZ = timezone(timedelta(hours=3))
@@ -326,12 +327,13 @@ async def restore_reminders_on_startup() -> None:
                             cancel_button("❌ Не сделал", f"task_failed_{task_id}"),
                         ]])
                         try:
-                            await _bot.send_message(
+                            _m = await _bot.send_message(
                                 tg_id,
                                 f"⏰ <b>Пропущено ({missed_time}):</b> {title}\n\nСделано?",
                                 parse_mode="HTML",
                                 reply_markup=kb,
                             )
+                            await save_task_reminder(task_id, _m.chat.id, _m.message_id, title)
                             logger.info("restore pass2: sent missed reminder '%s' (was at %s)", title, missed_time)
                             restored += 1
                         except Exception as e:
@@ -360,13 +362,14 @@ async def restore_reminders_on_startup() -> None:
                         repeat_display = _interval_label(ivl_days_pre) if ivl_days_pre > 1 else repeat
 
                         try:
-                            await _bot.send_message(
+                            _m = await _bot.send_message(
                                 tg_id,
                                 f"⏰ <b>Пропущено ({missed_time}):</b> {title}\n"
                                 f"🔄 Повтор: {repeat_display} — переношу.\n\nСделано?",
                                 parse_mode="HTML",
                                 reply_markup=kb,
                             )
+                            await save_task_reminder(task_id, _m.chat.id, _m.message_id, title)
                         except Exception as e:
                             logger.error("restore pass2: failed to send missed repeat '%s': %s", title, e)
 
@@ -454,12 +457,13 @@ async def _schedule_reminder(chat_id: int, title: str, reminder_dt: str, task_id
                 InlineKeyboardButton(text="✅ Сделано!", callback_data=f"task_complete_{task_id}"),
                 cancel_button("❌ Не сделал", f"task_failed_{task_id}"),
             ]])
-            await _bot.send_message(
+            _m = await _bot.send_message(
                 chat_id,
                 f"🔔 <b>Напоминание:</b> {title}\n\nСделано?",
                 parse_mode="HTML",
                 reply_markup=kb
             )
+            await save_task_reminder(task_id, _m.chat.id, _m.message_id, title)
 
         now = _now()
         if dt <= now:
@@ -496,12 +500,13 @@ async def _schedule_deadline_check(chat_id: int, title: str, deadline_dt: str, t
                 InlineKeyboardButton(text="✅ Выполнено!", callback_data=f"task_complete_{task_id}"),
                 InlineKeyboardButton(text="⏳ Отложить", callback_data=f"task_reschedule_{task_id}"),
             ]])
-            await _bot.send_message(
+            _m = await _bot.send_message(
                 chat_id,
                 f"⏰ <b>Дедлайн:</b> {title}\n\nСделал?",
                 parse_mode="HTML",
                 reply_markup=kb
             )
+            await save_task_reminder(task_id, _m.chat.id, _m.message_id, title)
 
         job_id = f"deadline_{task_id}" if task_id else f"deadline_{chat_id}_{title[:15]}_{deadline_dt}"
         logger.info("scheduling deadline: task_id=%s chat_id=%s job_id=%s callback_data=task_complete_%s", task_id, chat_id, job_id, task_id)
@@ -1789,6 +1794,7 @@ async def task_complete(call: CallbackQuery) -> None:
             task_title = msg_text.split("Дедлайн:")[1].strip().split(".")[0].strip()
 
     await call.message.edit_reply_markup()
+    await delete_task_reminder(task_id)
 
     if repeat and repeat != "Нет":
         # Повторяющаяся задача: различаем напоминание и дедлайн
@@ -1831,6 +1837,7 @@ async def task_failed(call: CallbackQuery) -> None:
 
     _pending_set(uid, {"task_id": task_id, "action": "reschedule", "title": task_title})
     await call.message.edit_reply_markup()
+    await delete_task_reminder(task_id)
     support = random.choice(_SUPPORT_NOT_DONE)
     await call.message.answer(
         f"{support}\n\n"

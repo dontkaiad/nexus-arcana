@@ -53,6 +53,7 @@ def _mute_bot_notify():
     """
     targets = [
         "miniapp.backend.routes.writes.notify_user",
+        "miniapp.backend.routes.writes.clear_task_reminder",
         "miniapp.backend.routes.arcana_inventory.notify_user",
         "miniapp.backend.routes.arcana_finance.notify_user",
         "miniapp.backend.routes.arcana_today.notify_user",
