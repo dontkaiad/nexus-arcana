@@ -496,6 +496,35 @@ def test_memory_cat_filter(client):
     assert len(items) == 1 and items[0]["id"] == "m2"
 
 
+def test_memory_search_matches_key_and_related(client):
+    # #6: поиск Mini App должен матчить Текст+Ключ+Связь, как бот.
+    pages = [
+        _mem("m1", "ходить раз в полгода", cat="🏥 Здоровье", key="невролог"),
+        _mem("m2", "любит тёмный шоколад", cat="🛒 Предпочтения", related="Аня"),
+        _mem("m3", "не относится", cat="🏠 Быт"),
+    ]
+
+    async def qp(*_, **__):
+        return pages
+
+    with patch("miniapp.backend.routes.memory.query_pages", side_effect=qp), \
+         patch("miniapp.backend.routes.memory.get_user_notion_id",
+               AsyncMock(return_value=FAKE_NOTION_USER)):
+        # совпадение по Ключу (в тексте слова «невролог» нет)
+        r_key = client.get("/api/memory?q=невролог")
+        # совпадение по Связи
+        r_rel = client.get("/api/memory?q=аня")
+        # совпадение по тексту (как раньше)
+        r_txt = client.get("/api/memory?q=шоколад")
+        # ничего не нашли
+        r_none = client.get("/api/memory?q=zzzz")
+
+    assert {i["id"] for i in r_key.json()["items"]} == {"m1"}
+    assert {i["id"] for i in r_rel.json()["items"]} == {"m2"}
+    assert {i["id"] for i in r_txt.json()["items"]} == {"m2"}
+    assert r_none.json()["items"] == []
+
+
 def test_memory_adhd_returns_records_and_uses_cache(client):
     pages = [_mem("a1", "Работает техника 2 минут", cat="🦋 СДВГ")]
     sonnet = AsyncMock(return_value="Персональный профиль...")

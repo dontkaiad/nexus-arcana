@@ -97,8 +97,16 @@ async def get_memory(
     if cat:
         items = [i for i in items if i["cat"] == cat]
     if q:
+        # Выравнивание с ботом: core.memory._find_pages ищет по Текст+Ключ+Связь.
+        # Раньше Mini App матчил только текст — запись с ключом «невролог» и
+        # другим текстом не находилась.
         needle = q.lower().strip()
-        items = [i for i in items if needle in (i["text"] or "").lower()]
+        items = [
+            i for i in items
+            if needle in (i["text"] or "").lower()
+            or needle in (i["key"] or "").lower()
+            or needle in (i["related"] or "").lower()
+        ]
 
     # #49(b): объединяем канонический список с теми, что реально есть в данных.
     # Так фронт показывает все табы (даже пустые) + неожиданные кастомные категории.
