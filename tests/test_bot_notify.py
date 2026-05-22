@@ -144,6 +144,29 @@ def test_task_cancel_notifies(client):
     assert notify.call_args.kwargs.get("bot") == "nexus"
 
 
+def test_session_verify_notifies(client):
+    # #7: вердикт расклада из детали тоже шлёт уведу (как accuracy/verify).
+    page = {
+        "id": "s-1",
+        "properties": {
+            "🪪 Пользователи": {"relation": [{"id": FAKE_NOTION_USER}]},
+            "Тема": {"title": [{"plain_text": "деньги в марте"}]},
+        },
+    }
+    notify = AsyncMock(return_value=True)
+    with patch("miniapp.backend.routes.writes.notify_user", notify), \
+         patch("miniapp.backend.routes.writes.get_page", AsyncMock(return_value=page)), \
+         patch("miniapp.backend.routes.writes.update_page_select", AsyncMock(return_value=True)), \
+         patch("miniapp.backend.routes.writes.get_user_notion_id",
+               AsyncMock(return_value=FAKE_NOTION_USER)):
+        r = client.post("/api/arcana/sessions/s-1/verify", json={"status": "✅ Да"})
+    assert r.status_code == 200
+    notify.assert_awaited_once()
+    assert notify.call_args.kwargs.get("bot") == "arcana"
+    assert "деньги в марте" in notify.call_args[0][1]
+    assert "сбылось" in notify.call_args[0][1]
+
+
 def test_arcana_accuracy_verify_notifies(client):
     notify = AsyncMock(return_value=True)
     with patch("miniapp.backend.routes.arcana_today.notify_user", notify), \

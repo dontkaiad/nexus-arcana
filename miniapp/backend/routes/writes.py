@@ -607,6 +607,13 @@ async def session_verify(
             cache_delete(session_summary_key(sname, cid))
     except Exception:
         pass
+    # Уведа в Arcana-бот (как accuracy/verify в arcana_today после #72).
+    _verdict_word = {
+        "✅ Да": "сбылось ✅", "〰️ Частично": "частично 🌗",
+        "❌ Нет": "не сбылось ❌", "⏳ Не проверено": "не проверено ⏳",
+    }.get(body.status, body.status)
+    q = title_plain(page, "Тема") or "расклад"
+    await notify_user(tg_id, f"🔮 {_esc(q)}: {_verdict_word}", bot="arcana")
     return {"ok": True, "status": body.status}
 
 
