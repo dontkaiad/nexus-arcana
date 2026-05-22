@@ -43,6 +43,35 @@ collect_ignore = ["test_nexus.py", "test_arcana.py", "test_all.py",
                   "e2e_runner.py", "e2e_config.py"]
 
 
+@pytest.fixture(autouse=True)
+def _mute_bot_notify():
+    """Заглушить notify_user во всех роут-модулях Mini App.
+
+    Иначе любой тест write-роута дёрнул бы реальный Telegram sendMessage
+    на FAKE_TG_ID (= реальный tg Кай). notify_user импортирован по имени
+    в каждый модуль, поэтому патчим каждую ссылку.
+    """
+    targets = [
+        "miniapp.backend.routes.writes.notify_user",
+        "miniapp.backend.routes.arcana_inventory.notify_user",
+        "miniapp.backend.routes.arcana_finance.notify_user",
+        "miniapp.backend.routes.arcana_today.notify_user",
+    ]
+    patchers = []
+    for t in targets:
+        try:
+            p = patch(t, AsyncMock(return_value=True))
+            p.start()
+            patchers.append(p)
+        except (ImportError, AttributeError, ModuleNotFoundError):
+            pass
+    try:
+        yield
+    finally:
+        for p in patchers:
+            p.stop()
+
+
 @pytest.fixture
 def mock_message():
     """Создать мок aiogram Message."""

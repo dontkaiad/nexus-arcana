@@ -13,6 +13,7 @@ from pydantic import BaseModel
 from core.config import config
 from core.notion_client import query_pages, rituals_all, sessions_all, update_page_select
 from core.user_manager import get_user_notion_id
+from core.bot_notify import notify_user
 
 from miniapp.backend._moon import moon_phase, next_phases
 from miniapp.backend.auth import current_user_id
@@ -941,6 +942,9 @@ async def post_arcana_accuracy_verify(
         raise HTTPException(status_code=400, detail="type must be session|ritual")
     if not ok:
         raise HTTPException(status_code=500, detail="failed to update")
+    _kind = "Расклад" if body.type == "session" else "Ритуал"
+    _verdict_word = {"yes": "сбылось ✅", "half": "частично 🌗", "no": "не сбылось ❌"}[body.verdict]
+    await notify_user(tg_id, f"🔮 {_kind}: {_verdict_word}", bot="arcana")
     user_notion_id = (await get_user_notion_id(tg_id)) or ""
     sessions = await sessions_all(user_notion_id=user_notion_id)
     rituals = await rituals_all(user_notion_id=user_notion_id)

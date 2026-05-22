@@ -26,6 +26,7 @@ from core.notion_client import (
     update_page,
 )
 from core.user_manager import get_user_notion_id
+from core.bot_notify import notify_user
 
 from miniapp.backend.auth import current_user_id
 from miniapp.backend._helpers import (
@@ -222,6 +223,12 @@ async def purchase_inventory(
     if body.qty_added is not None and body.qty_added > 0:
         cur = (props.get("Количество", {}) or {}).get("number") or 0
         await update_page(item_id, {"Количество": _number(float(cur) + float(body.qty_added))})
+    from html import escape as _esc
+    await notify_user(
+        tg_id,
+        f"🛒 Купила: <b>{_esc(title)}</b> — {int(round(body.price))}₽",
+        bot="arcana",
+    )
     return {
         "ok": True,
         "finance_id": fin_id,
@@ -244,13 +251,13 @@ async def depleted_inventory(
     user_notion_id = (await get_user_notion_id(tg_id)) or ""
     page = await _ensure_owned(item_id, user_notion_id)
     await update_page(item_id, {"Статус": _status("Archived")})
+    title = "".join(
+        t.get("plain_text", "")
+        for t in (page.get("properties", {}).get("Название", {}) or {}).get("title") or []
+    ).strip()
     buy_id = None
     if body.add_to_buy:
         from core.list_manager import add_items
-        title = "".join(
-            t.get("plain_text", "")
-            for t in (page.get("properties", {}).get("Название", {}) or {}).get("title") or []
-        ).strip()
         cat = select_name(page.get("properties", {}).get("Категория", {})) or None
         if title:
             created = await add_items(
@@ -261,4 +268,11 @@ async def depleted_inventory(
             )
             if created:
                 buy_id = created[0].get("id")
+    from html import escape as _esc
+    suffix = " → в 🛒 Покупки" if buy_id else ""
+    await notify_user(
+        tg_id,
+        f"🌚 Закончилось: <b>{_esc(title or 'расходник')}</b>{suffix}",
+        bot="arcana",
+    )
     return {"ok": True, "archived": True, "buy_id": buy_id}

@@ -19,6 +19,7 @@ from core.cash_register import (
 )
 from core.notion_client import finance_add
 from core.user_manager import get_user_notion_id
+from core.bot_notify import notify_user
 
 from miniapp.backend.auth import current_user_id
 
@@ -79,6 +80,11 @@ async def pay_salary(
         user_notion_id=user_notion_id,
     )
     new_cash = cash - body.amount
+    await notify_user(
+        tg_id,
+        f"💰 Выплата себе: <b>{int(round(body.amount))}₽</b> (в кассе осталось {int(round(new_cash))}₽)",
+        bot="arcana",
+    )
     return {
         "ok": True,
         "finance_id": fin_id,
