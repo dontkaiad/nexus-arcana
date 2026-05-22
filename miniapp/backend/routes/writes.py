@@ -802,10 +802,17 @@ async def ritual_result(
     if body.status not in _RITUAL_STATUSES:
         raise HTTPException(status_code=400, detail=f"status must be one of {sorted(_RITUAL_STATUSES)}")
     user_notion_id = (await get_user_notion_id(tg_id)) or ""
-    await _load_owned_page(ritual_id, user_notion_id)
+    page = await _load_owned_page(ritual_id, user_notion_id)
     ok = await update_page_select(ritual_id, "Результат", body.status)
     if not ok:
         raise HTTPException(status_code=500, detail="failed to update Результат")
+    # Уведа в Arcana-бот (как session_verify после #7).
+    _result_word = {
+        "✅ Сработало": "сработало ✅", "〰️ Частично": "частично 🌗",
+        "❌ Не сработало": "не сработало ❌", "⏳ Не проверено": "не проверено ⏳",
+    }.get(body.status, body.status)
+    name = title_plain(page, "Название") or "ритуал"
+    await notify_user(tg_id, f"🕯 {_esc(name)}: {_result_word}", bot="arcana")
     return {"ok": True, "status": body.status}
 
 
