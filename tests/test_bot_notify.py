@@ -190,6 +190,28 @@ def test_ritual_result_notifies(client):
     assert "сработало" in notify.call_args[0][1]
 
 
+def test_arcana_work_done_notifies(client):
+    # #10: отметка Работы done из Mini App шлёт уведу в Arcana-бот.
+    page = {
+        "id": "w-1",
+        "properties": {
+            "🪪 Пользователи": {"relation": [{"id": FAKE_NOTION_USER}]},
+            "Работа": {"title": [{"plain_text": "расклад на неделю"}]},
+        },
+    }
+    notify = AsyncMock(return_value=True)
+    with patch("miniapp.backend.routes.writes.notify_user", notify), \
+         patch("miniapp.backend.routes.writes.get_page", AsyncMock(return_value=page)), \
+         patch("miniapp.backend.routes.writes.update_page", AsyncMock(return_value=None)), \
+         patch("miniapp.backend.routes.writes.get_user_notion_id",
+               AsyncMock(return_value=FAKE_NOTION_USER)):
+        r = client.post("/api/arcana/works/w-1/done")
+    assert r.status_code == 200
+    notify.assert_awaited_once()
+    assert notify.call_args.kwargs.get("bot") == "arcana"
+    assert "расклад на неделю" in notify.call_args[0][1]
+
+
 def test_arcana_accuracy_verify_notifies(client):
     notify = AsyncMock(return_value=True)
     with patch("miniapp.backend.routes.arcana_today.notify_user", notify), \

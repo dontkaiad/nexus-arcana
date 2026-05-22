@@ -733,12 +733,13 @@ async def arcana_work_done(
     tg_id: int = Depends(current_user_id),
 ) -> dict[str, Any]:
     user_notion_id = (await get_user_notion_id(tg_id)) or ""
-    await _load_owned_page(work_id, user_notion_id)
+    page = await _load_owned_page(work_id, user_notion_id)
     try:
         await update_page(work_id, {"Status": _status("Done")})
     except Exception as e:
         logger.error("arcana_work_done failed: %s", e)
         raise HTTPException(status_code=500, detail="failed to update status")
+    await notify_user(tg_id, f"✅ Готово: <b>{_esc(title_plain(page, 'Работа'))}</b>", bot="arcana")
     return {"ok": True, "status": "Done"}
 
 
@@ -748,12 +749,13 @@ async def arcana_work_cancel(
     tg_id: int = Depends(current_user_id),
 ) -> dict[str, Any]:
     user_notion_id = (await get_user_notion_id(tg_id)) or ""
-    await _load_owned_page(work_id, user_notion_id)
+    page = await _load_owned_page(work_id, user_notion_id)
     try:
         await update_page(work_id, {"Status": _status("Archived")})
     except Exception as e:
         logger.error("arcana_work_cancel failed: %s", e)
         raise HTTPException(status_code=500, detail="failed to cancel")
+    await notify_user(tg_id, f"❌ Отменила: <b>{_esc(title_plain(page, 'Работа'))}</b>", bot="arcana")
     return {"ok": True, "status": "Archived"}
 
 
@@ -790,6 +792,11 @@ async def arcana_work_postpone(
     except Exception as e:
         logger.error("arcana_work_postpone failed: %s", e)
         raise HTTPException(status_code=500, detail="failed to update deadline")
+    await notify_user(
+        tg_id,
+        f"📅 Перенесла на {new_date.isoformat()}: <b>{_esc(title_plain(page, 'Работа'))}</b>",
+        bot="arcana",
+    )
     return {"ok": True, "new_date": new_date.isoformat()}
 
 
