@@ -112,7 +112,13 @@ def _fallback_split_inv_text(text: str) -> list[dict]:
     Первая строка вида «занеси в инвентарь [категория]» отбрасывается,
     но из неё вытаскиваем категорию-хинт. Каждая последующая непустая
     строка — отдельный item.
+
+    Если префикса нет, но >=2 строк содержат фарм-маркер — дефолт-категория
+    становится 🏥 Здоровье (а не 💳 Прочее).
     """
+    # Импорт здесь, чтобы избежать циклов на верхнем уровне.
+    from core.list_classifier import _PHARM_MARKER_RE
+
     lines = [l.strip() for l in (text or "").splitlines() if l.strip()]
     if not lines:
         return []
@@ -126,6 +132,12 @@ def _fallback_split_inv_text(text: str) -> list[dict]:
         body_lines = lines[1:]
     if not body_lines:
         return []
+    # Auto-detect: если префикса не было ИЛИ был но без явной категории,
+    # и большинство строк = медицина — ставим 🏥 Здоровье.
+    if category == "💳 Прочее":
+        pharm_hits = sum(1 for ln in body_lines if _PHARM_MARKER_RE.search(ln))
+        if pharm_hits >= 2:
+            category = "🏥 Здоровье"
     items: list[dict] = []
     for ln in body_lines:
         cleaned = ln.lstrip("•·-–— ").strip()

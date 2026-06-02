@@ -240,6 +240,101 @@ async def test_handle_list_inv_add_uses_fallback_when_haiku_returns_empty():
     assert "3 позиций" in msg.answer.call_args.args[0]
 
 
+# ── #77: эвристика «медицинский список без префикса» ─────────────────────────
+
+def test_looks_like_med_inventory_typical_input():
+    """Реальный кейс из бага #77: список лекарств без префикса."""
+    from core.list_classifier import _looks_like_med_inventory
+    text = (
+        "велаксин таблетки 75мг 9.5шт\n"
+        "венлафаксин-алси таблетки 37.5мг 10шт\n"
+        "мендилекс бипериден 2мг8 шт\n"
+        "пластырь 58шт\n"
+        "измеритель артериального давления\n"
+        "сироп солодки (немного)\n"
+        "рициниол базовый без эмульсии 30мл\n"
+        "зубные нити"
+    )
+    assert _looks_like_med_inventory(text) is True
+
+
+def test_looks_like_med_inventory_too_few_lines():
+    from core.list_classifier import _looks_like_med_inventory
+    assert _looks_like_med_inventory("парацетамол 500мг") is False
+    assert _looks_like_med_inventory("парацетамол 500мг\nибупрофен 200мг") is False
+
+
+def test_looks_like_med_inventory_no_pharm_markers():
+    from core.list_classifier import _looks_like_med_inventory
+    text = "купить молоко\nкупить хлеб\nкупить сыр\nкупить масло"
+    assert _looks_like_med_inventory(text) is False
+
+
+def test_looks_like_med_inventory_does_not_match_finance():
+    """«чек 4к продукты 2500» и подобное не должно ловиться."""
+    from core.list_classifier import _looks_like_med_inventory
+    assert _looks_like_med_inventory("чек 4к привычки 1500 продукты 2500") is False
+
+
+def test_looks_like_med_inventory_single_pharm_line_not_enough():
+    from core.list_classifier import _looks_like_med_inventory
+    text = "парацетамол 500мг\nкупить кота\nпозвонить маме"
+    assert _looks_like_med_inventory(text) is False
+
+
+@pytest.mark.asyncio
+async def test_classifier_routes_med_list_to_inventory_not_budget():
+    """Главный регресс #77: медицинский список → list_inventory_add, НЕ budget.
+
+    Это предотвращает дорогостоящий Sonnet-вызов budget-анализа.
+    """
+    from core import classifier
+    text = (
+        "велаксин таблетки 75мг 9.5шт\n"
+        "венлафаксин-алси таблетки 37.5мг 10шт\n"
+        "пластырь 58шт\n"
+        "сироп солодки\n"
+        "рициниол базовый 30мл"
+    )
+    # Haiku Router НЕ должен вызываться — pre-filter ловит раньше.
+    with patch.object(classifier, "ask_claude", AsyncMock(side_effect=AssertionError(
+        "ask_claude must NOT be called — pre-filter should match first"
+    ))):
+        result = await classifier.classify(text, tz_offset=3)
+    assert isinstance(result, list) and len(result) == 1
+    assert result[0]["type"] == "list_inventory_add"
+
+
+def test_fallback_auto_detects_health_from_pharm_markers():
+    """Без префикса, но много фарм-маркеров → дефолт = 🏥 Здоровье."""
+    text = (
+        "велаксин 75мг 10шт\n"
+        "венлафаксин 37.5мг\n"
+        "зубные нити"
+    )
+    items = lists_mod._fallback_split_inv_text(text)
+    assert len(items) == 3
+    assert all(it["category"] == "🏥 Здоровье" for it in items)
+
+
+def test_fallback_without_pharm_markers_keeps_default():
+    text = "фонарик\nверёвка\nспички"
+    items = lists_mod._fallback_split_inv_text(text)
+    assert all(it["category"] == "💳 Прочее" for it in items)
+
+
+def test_lextended_inv_add_re_catches_zanesi():
+    """`занеси в инвентарь` теперь ловится pre-filter'ом, не уходит в Haiku."""
+    from core.list_classifier import _LIST_INV_ADD_RE
+    assert _LIST_INV_ADD_RE.search("занеси в инвентарь лекарства")
+    assert _LIST_INV_ADD_RE.search("положи в инвентарь")
+    assert _LIST_INV_ADD_RE.search("закинь в инвентарь молоко")
+    assert _LIST_INV_ADD_RE.search("запиши в инвентарь")
+    # Старые варианты тоже работают:
+    assert _LIST_INV_ADD_RE.search("добавь в инвентарь")
+    assert _LIST_INV_ADD_RE.search("дома есть: парацетамол")
+
+
 @pytest.mark.asyncio
 async def test_handle_list_inv_add_uses_fallback_when_haiku_raises():
     """Haiku упал — regex-fallback всё равно спасает ввод."""

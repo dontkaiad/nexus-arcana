@@ -13,6 +13,7 @@ from core.config import ARCANA_KEYWORDS
 from core.list_classifier import (
     _LIST_BUY_RE, _LIST_CHECK_RE, _SUBTASK_RE, _LIST_INV_ADD_RE,
     _LIST_INV_SEARCH_RE, _LIST_DONE_RE, _LIST_INV_UPDATE_RE, _LIST_SUM_RE,
+    _looks_like_med_inventory,
     LIST_HAIKU_TYPES,
 )
 from nexus.handlers.utils import react
@@ -600,6 +601,13 @@ async def classify(text: str, tz_offset: int = 3) -> list[dict]:
     if m:
         logger.info("classify: limit_override matched cat=%s amt=%s", m.group(1), m.group(2))
         return [{"type": "limit_override", "text": text, "category": m.group(1), "amount": m.group(2)}]
+
+    # Эвристика: многострочный список лекарств без явного префикса.
+    # Должна стоять ПЕРЕД budget — иначе Sonnet впустую считает бюджет
+    # на «велаксин 75мг / венлафаксин 37.5мг / пластырь 58шт / ...».
+    if _looks_like_med_inventory(text):
+        logger.info("classify: med_inventory heuristic matched → list_inventory_add")
+        return [{"type": "list_inventory_add", "text": text}]
 
     # Быстрый pre-фильтр: показать бюджет
     if _BUDGET_RE.match(text):
