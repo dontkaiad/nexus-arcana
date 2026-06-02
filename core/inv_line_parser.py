@@ -10,8 +10,9 @@
 """
 from __future__ import annotations
 
+import calendar
 import re
-from typing import Optional
+from typing import Optional, Tuple
 
 # Quantity-маркер: «2 шт», «10 таблеток», «5 капсул», «3 пачки», «50 табл.»
 _INV_QTY_RE = re.compile(
@@ -21,17 +22,82 @@ _INV_QTY_RE = re.compile(
     re.IGNORECASE,
 )
 
+# Срок годности. Дата: «DD.MM.YYYY» / «DD.MM.YY» / «MM.YYYY» / «MM.YY».
+_DATE_TOKEN = r"\d{1,2}(?:[.\/]\d{1,2})?[.\/]\d{2,4}"
+# «срок годности [до] <дата>»
+_EXPIRY_SROK_RE = re.compile(
+    r"срок\w*\s*годн\w*\s*(?:до\s+)?(" + _DATE_TOKEN + r")",
+    re.IGNORECASE,
+)
+# «[годен/годна/годно/годны] до <дата>»
+_EXPIRY_DO_RE = re.compile(
+    r"(?:год(?:ен|на|но|ны)\s+)?до\s+(" + _DATE_TOKEN + r")",
+    re.IGNORECASE,
+)
+
+
+def _date_str_to_iso(s: str) -> Optional[str]:
+    """«15.06.2026» → 2026-06-15; «03.2027» → 2027-03-31 (конец месяца)."""
+    parts = [p for p in re.split(r"[.\/]", s or "") if p]
+    try:
+        nums = [int(p) for p in parts]
+    except ValueError:
+        return None
+    if len(nums) == 3:
+        day, month, year = nums
+    elif len(nums) == 2:
+        day, month, year = None, nums[0], nums[1]
+    else:
+        return None
+    if year < 100:
+        year += 2000
+    if not (1 <= month <= 12) or not (1900 <= year <= 2100):
+        return None
+    if day is None:
+        # Только месяц+год → последний день месяца (годен до конца месяца).
+        day = calendar.monthrange(year, month)[1]
+    if not (1 <= day <= 31):
+        return None
+    return f"{year:04d}-{month:02d}-{day:02d}"
+
+
+def extract_expiry(text: str) -> Tuple[Optional[str], str]:
+    """Вытащить срок годности из свободного текста.
+
+    Возвращает (iso_date | None, cleaned_text). Маркер «годен до» /
+    «срок годности» вместе с датой убирается из текста.
+    """
+    if not text:
+        return None, text
+    # Сначала «срок годности …» (более специфичный), затем «… до …».
+    for rx in (_EXPIRY_SROK_RE, _EXPIRY_DO_RE):
+        m = rx.search(text)
+        if not m:
+            continue
+        iso = _date_str_to_iso(m.group(1))
+        if not iso:
+            continue
+        cleaned = (text[:m.start()] + " " + text[m.end():])
+        cleaned = re.sub(r"\s{2,}", " ", cleaned).strip(" ,;:-").strip()
+        return iso, cleaned
+    return None, text
+
 
 def parse_inv_line(line: str) -> Optional[dict]:
-    """Парсит одну строку инвентаря: name + quantity + note (дозировка).
+    """Парсит одну строку инвентаря: name + quantity + note + expiry.
 
     Примеры:
         «меновазин 2 шт» → name=«меновазин», qty=2, note=«»
         «глюкофаж 1000мг 10 шт» → name=«глюкофаж», qty=10, note=«1000мг»
         «активированный уголь 250мг 1 пачка 30шт» → qty=30, note=«250мг»
+        «гексаспрей 30гр годен до 03.2027» → note=«30гр», expiry=«2027-03-31»
         «бинт обычный» (без цифр) → qty=1
     """
     line = (line or "").strip().lstrip("•·-–— ").strip()
+    if not line:
+        return None
+    # 0) срок годности — извлекаем ПЕРВЫМ, чтобы дата не путалась с qty/note.
+    expiry, line = extract_expiry(line)
     if not line:
         return None
     # 1) quantity — последнее вхождение «\d+ шт/таблеток/капсул/пачк»
@@ -59,4 +125,4 @@ def parse_inv_line(line: str) -> Optional[dict]:
     if qty_matches and note:
         note = _INV_QTY_RE.sub("", note)
         note = re.sub(r"\s{2,}", " ", note).strip(" ,;:-").strip()
-    return {"name": name, "quantity": qty, "note": note}
+    return {"name": name, "quantity": qty, "note": note, "expiry": expiry or ""}

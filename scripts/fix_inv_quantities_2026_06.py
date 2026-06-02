@@ -53,7 +53,7 @@ try:
 except ImportError:
     pass
 
-from core.notion_client import query_pages, update_page, _title, _number, _text  # noqa: E402
+from core.notion_client import query_pages, update_page, _title, _number, _text, _date  # noqa: E402
 from core.inv_line_parser import parse_inv_line as _parse_inv_line  # noqa: E402
 
 logger = logging.getLogger("fix_inv_quantities_2026_06")
@@ -94,6 +94,11 @@ def _get_status(page: dict) -> str:
     return (st or {}).get("name", "")
 
 
+def _get_expiry(page: dict) -> str:
+    d = page.get("properties", {}).get("Срок годности", {}).get("date")
+    return (d or {}).get("start", "") or ""
+
+
 def _planned_changes(page: dict) -> dict | None:
     """Возвращает props для update_page или None если менять нечего."""
     name = _get_name(page)
@@ -112,8 +117,10 @@ def _planned_changes(page: dict) -> dict | None:
     new_name = parsed["name"]
     new_qty = parsed["quantity"]
     new_note = parsed["note"]
+    new_expiry = parsed.get("expiry", "")
+    cur_expiry = _get_expiry(page)
     # Если парсер ничего полезного не извлёк — skip
-    if new_qty == 1 and not new_note and new_name == name:
+    if new_qty == 1 and not new_note and new_name == name and not new_expiry:
         return None
     props: dict = {}
     if new_name and new_name != name:
@@ -122,6 +129,8 @@ def _planned_changes(page: dict) -> dict | None:
         props["Количество"] = _number(float(new_qty))
     if new_note:
         props["Заметка"] = _text(new_note)
+    if new_expiry and not cur_expiry:
+        props["Срок годности"] = _date(new_expiry)
     return props if props else None
 
 
@@ -130,9 +139,11 @@ def _diff_preview(page: dict, props: dict) -> str:
     old_name = _get_name(page)
     old_qty = _get_qty(page)
     old_note = _get_note(page)
+    old_expiry = _get_expiry(page)
     new_name = props.get("Название", {}).get("title", [{}])[0].get("text", {}).get("content", old_name)
     new_qty = props.get("Количество", {}).get("number", old_qty)
     new_note = props.get("Заметка", {}).get("rich_text", [{}])[0].get("text", {}).get("content", old_note)
+    new_expiry = props.get("Срок годности", {}).get("date", {}).get("start", old_expiry)
     lines = [f"  id={pid}…"]
     if new_name != old_name:
         lines.append(f"    Название: {old_name!r}\n            → {new_name!r}")
@@ -140,6 +151,8 @@ def _diff_preview(page: dict, props: dict) -> str:
         lines.append(f"    Количество: {old_qty} → {new_qty}")
     if new_note != old_note:
         lines.append(f"    Заметка: {old_note!r} → {new_note!r}")
+    if new_expiry != old_expiry:
+        lines.append(f"    Срок годности: {old_expiry!r} → {new_expiry!r}")
     return "\n".join(lines)
 
 

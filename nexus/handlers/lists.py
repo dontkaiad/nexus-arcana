@@ -59,6 +59,9 @@ _PARSE_INV_SYSTEM = (
     "- items: массив, всегда. Один предмет = массив из 1 элемента.\n"
     "- quantity: число, по умолчанию 1.\n"
     "- note: место хранения, бренд, детали, дозировка/форма (если есть).\n"
+    '- expires: срок годности в ISO (YYYY-MM-DD), если в тексте «годен до …» / '
+    '«срок годности …». «годен до 03.2027» → "2027-03-31" (конец месяца). '
+    "Если срока нет — не добавляй поле.\n"
     "- Каждая строка многострочного ввода = ОТДЕЛЬНЫЙ item.\n"
     "- Первая строка вида «занеси в инвентарь <слово>», «добавь в инвентарь <слово>», "
     '«в инвентарь <слово>» — это МАРКЕР КАТЕГОРИИ, НЕ item. Применяй категорию ко ВСЕМ items.\n'
@@ -109,7 +112,10 @@ def _category_from_hint(word: str) -> str:
 # Парсер одной строки инвентаря вынесен в core/inv_line_parser.py,
 # чтобы scripts/fix_inv_quantities_*.py могли импортировать без подтягивания
 # цепочки core.claude_client → ANTHROPIC_API_KEY на импорте.
-from core.inv_line_parser import parse_inv_line as _parse_inv_line  # noqa: E402
+from core.inv_line_parser import (  # noqa: E402
+    parse_inv_line as _parse_inv_line,
+    extract_expiry,
+)
 
 
 def _fallback_split_inv_text(text: str) -> list[dict]:
@@ -154,6 +160,7 @@ def _fallback_split_inv_text(text: str) -> list[dict]:
             "quantity": parsed["quantity"],
             "note": parsed["note"],
             "category": category,
+            "expiry": parsed.get("expiry", ""),
         })
     return items
 
@@ -1235,11 +1242,23 @@ def _normalize_inv_items(parsed) -> list[dict]:
         name = it.get("name") or it.get("item") or ""
         if not name:
             continue
+        note = it.get("note", "") or ""
+        expiry = it.get("expiry") or it.get("expires") or ""
+        # Haiku мог не выделить срок годности — дочищаем из note и name.
+        if not expiry:
+            exp2, note = extract_expiry(note)
+            if exp2:
+                expiry = exp2
+        if not expiry:
+            exp3, name = extract_expiry(name)
+            if exp3:
+                expiry = exp3
         out.append({
             "name": name,
             "quantity": it.get("quantity") or 1,
-            "note": it.get("note", ""),
+            "note": note,
             "category": it.get("category", "💳 Прочее"),
+            "expiry": expiry,
         })
     return out
 
@@ -1273,6 +1292,15 @@ async def handle_list_inv_add(msg: Message, data: dict, user_notion_id: str = ""
         return
     if len(created) == 1:
         c = created[0]
+        item0 = items[0]
+        item_expiry = item0.get("expiry") or item0.get("expires") or ""
+        if item_expiry:
+            # Срок годности уже извлечён из текста и записан add_items — не спрашиваем.
+            await msg.answer(
+                f"📦 <b>Инвентарь:</b> {c['name']} добавлен · {c.get('category', '')} · до {item_expiry}",
+                parse_mode="HTML",
+            )
+            return
         await msg.answer(f"📦 <b>Инвентарь:</b> {c['name']} добавлен · {c.get('category', '')}", parse_mode="HTML")
         uid = msg.from_user.id
         pending_set(uid, {

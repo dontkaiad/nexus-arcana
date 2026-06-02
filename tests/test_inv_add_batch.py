@@ -326,7 +326,8 @@ async def test_classifier_routes_med_list_to_inventory_not_budget():
     ("сульфат магния 6 пакетов по 25г", "сульфат магния", 6, "по 25г"),
     ("найз 100мг 6шт", "найз", 6, "100мг"),
     ("супрастин 20 шт", "супрастин", 20, ""),
-    ("гексаспрей аэрозоль 2,5% 30гр годен до 03.2027", "гексаспрей аэрозоль", 1, "2,5% 30гр годен до 03.2027"),
+    # после #79 «годен до …» извлекается в expiry, в note остаётся только дозировка
+    ("гексаспрей аэрозоль 2,5% 30гр годен до 03.2027", "гексаспрей аэрозоль", 1, "2,5% 30гр"),
 ])
 def test_parse_inv_line_extracts_qty_and_note(line, name, qty, note):
     out = lists_mod._parse_inv_line(line)
@@ -334,6 +335,99 @@ def test_parse_inv_line_extracts_qty_and_note(line, name, qty, note):
     assert out["name"] == name, f"name mismatch for {line!r}: got {out['name']!r}"
     assert out["quantity"] == qty, f"qty mismatch for {line!r}: got {out['quantity']!r}"
     assert out["note"] == note, f"note mismatch for {line!r}: got {out['note']!r}"
+
+
+# ── #79: извлечение срока годности ───────────────────────────────────────────
+
+@pytest.mark.parametrize("text,iso,cleaned", [
+    ("гексаспрей 30гр годен до 03.2027", "2027-03-31", "гексаспрей 30гр"),
+    ("парацетамол годен до 15.06.2026", "2026-06-15", "парацетамол"),
+    ("мазь до 01.2027", "2027-01-31", "мазь"),
+    ("сыворотка срок годности 12.2025", "2025-12-31", "сыворотка"),
+    ("крем срок годности до 28.02.2026", "2026-02-28", "крем"),
+    ("таблетки до 30.04.27", "2027-04-30", "таблетки"),
+    ("просто крем без даты", None, "просто крем без даты"),
+])
+def test_extract_expiry(text, iso, cleaned):
+    from core.inv_line_parser import extract_expiry
+    got_iso, got_clean = extract_expiry(text)
+    assert got_iso == iso, f"iso mismatch for {text!r}: got {got_iso!r}"
+    assert got_clean == cleaned, f"cleaned mismatch for {text!r}: got {got_clean!r}"
+
+
+def test_extract_expiry_month_only_uses_last_day():
+    from core.inv_line_parser import extract_expiry
+    # февраль невисокосного 2027 → 28 число
+    iso, _ = extract_expiry("до 02.2027")
+    assert iso == "2027-02-28"
+    # февраль високосного 2028 → 29 число
+    iso2, _ = extract_expiry("до 02.2028")
+    assert iso2 == "2028-02-29"
+
+
+def test_extract_expiry_invalid_month_ignored():
+    from core.inv_line_parser import extract_expiry
+    iso, clean = extract_expiry("крем до 99.2027")
+    assert iso is None
+    assert clean == "крем до 99.2027"
+
+
+def test_parse_inv_line_extracts_expiry():
+    out = lists_mod._parse_inv_line("гексаспрей аэрозоль 2,5% 30гр годен до 03.2027")
+    assert out["name"] == "гексаспрей аэрозоль"
+    assert out["note"] == "2,5% 30гр"
+    assert out["expiry"] == "2027-03-31"
+
+
+def test_parse_inv_line_expiry_with_qty():
+    out = lists_mod._parse_inv_line("парацетамол 500мг 10шт годен до 15.06.2026")
+    assert out["name"] == "парацетамол"
+    assert out["quantity"] == 10
+    assert out["note"] == "500мг"
+    assert out["expiry"] == "2026-06-15"
+
+
+def test_normalize_inv_items_extracts_expiry_from_haiku_expires():
+    out = lists_mod._normalize_inv_items({"items": [
+        {"name": "крем", "quantity": 1, "expires": "2027-03-31"},
+    ]})
+    assert out[0]["expiry"] == "2027-03-31"
+
+
+def test_normalize_inv_items_recovers_expiry_from_note():
+    """Haiku не выделил срок — дочищаем из note."""
+    out = lists_mod._normalize_inv_items({"items": [
+        {"name": "гексаспрей", "quantity": 1, "note": "30гр годен до 03.2027"},
+    ]})
+    assert out[0]["expiry"] == "2027-03-31"
+    assert out[0]["note"] == "30гр"
+
+
+@pytest.mark.asyncio
+async def test_handle_inv_add_single_with_expiry_does_not_ask():
+    """Если срок извлечён — не спрашиваем повторно."""
+    parsed = {"items": [{"name": "гексаспрей", "quantity": 1, "note": "30гр", "expires": "2027-03-31", "category": "🏥 Здоровье"}]}
+    created = [{"id": "p1", "name": "гексаспрей", "type": "📦 Инвентарь", "category": "🏥 Здоровье"}]
+
+    msg = AsyncMock()
+    msg.from_user.id = 67686090
+    msg.text = "гексаспрей 30гр годен до 03.2027"
+
+    with patch.object(lists_mod, "_haiku_parse", AsyncMock(return_value=parsed)), \
+         patch.object(lists_mod, "add_items", AsyncMock(return_value=created)) as p_add, \
+         patch.object(lists_mod, "react", AsyncMock()), \
+         patch.object(lists_mod, "pending_set") as p_set:
+        await lists_mod.handle_list_inv_add(
+            msg, {"text": msg.text}, user_notion_id="user-page-id",
+        )
+
+    # add_items получил expiry
+    sent = p_add.call_args.args[0]
+    assert sent[0]["expiry"] == "2027-03-31"
+    # срок не переспрашиваем
+    p_set.assert_not_called()
+    assert msg.answer.call_count == 1
+    assert "до 2027-03-31" in msg.answer.call_args.args[0]
 
 
 def test_parse_inv_line_strips_bullets():
