@@ -106,6 +106,49 @@ def _category_from_hint(word: str) -> str:
     return ""
 
 
+# Quantity-маркер: «2 шт», «10 таблеток», «5 капсул», «3 пачки», «50 табл.»
+_INV_QTY_RE = re.compile(
+    r"(\d+(?:[.,]\d+)?)\s*"
+    r"(?:шт(?:\.|ук[аи]?)?|таблет(?:ка|ки|ок|ой)?|табл\.?|"
+    r"капсул[аыоу]?|пачк[аеиу]?|пакет(?:ов|а|ы)?|штук[аи]?)",
+    re.IGNORECASE,
+)
+
+
+def _parse_inv_line(line: str) -> Optional[dict]:
+    """Парсит одну строку инвентаря: name + quantity + note (дозировка)."""
+    line = (line or "").strip().lstrip("•·-–— ").strip()
+    if not line:
+        return None
+    # 1) quantity — последнее вхождение «\d+ шт/таблеток/капсул/пачк»
+    qty = 1
+    qty_matches = list(_INV_QTY_RE.finditer(line))
+    if qty_matches:
+        last = qty_matches[-1]
+        try:
+            qty = max(1, int(float(last.group(1).replace(",", "."))))
+        except (ValueError, TypeError):
+            qty = 1
+    # 2) name = текст до первой цифры (если цифра не в начале)
+    first_digit = re.search(r"\d", line)
+    if first_digit and first_digit.start() > 0:
+        name = line[:first_digit.start()].rstrip(",;:- ").strip()
+        rest = line[first_digit.start():].strip()
+    else:
+        # строка без цифр (или начинается с цифры — название продукта типа «5 минут»)
+        name = line
+        rest = ""
+    if not name:
+        name = line
+        rest = ""
+    # 3) note = rest минус извлечённые qty-токены, очищенный
+    note = rest
+    if qty_matches and note:
+        note = _INV_QTY_RE.sub("", note)
+        note = re.sub(r"\s{2,}", " ", note).strip(" ,;:-").strip()
+    return {"name": name, "quantity": qty, "note": note}
+
+
 def _fallback_split_inv_text(text: str) -> list[dict]:
     """Если Haiku не справился — разбиваем построчно.
 
@@ -140,13 +183,13 @@ def _fallback_split_inv_text(text: str) -> list[dict]:
             category = "🏥 Здоровье"
     items: list[dict] = []
     for ln in body_lines:
-        cleaned = ln.lstrip("•·-–— ").strip()
-        if not cleaned:
+        parsed = _parse_inv_line(ln)
+        if not parsed or not parsed["name"]:
             continue
         items.append({
-            "name": cleaned,
-            "quantity": 1,
-            "note": "",
+            "name": parsed["name"],
+            "quantity": parsed["quantity"],
+            "note": parsed["note"],
             "category": category,
         })
     return items
@@ -187,8 +230,8 @@ def _checkout_parse_system(categories: dict[str, list[str]]) -> str:
     )
 
 
-async def _haiku_parse(text: str, system: str) -> dict | list:
-    raw = await ask_claude(text, system=system, max_tokens=500, model="claude-haiku-4-5-20251001")
+async def _haiku_parse(text: str, system: str, max_tokens: int = 500) -> dict | list:
+    raw = await ask_claude(text, system=system, max_tokens=max_tokens, model="claude-haiku-4-5-20251001")
     raw = raw.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
     return json.loads(raw)
 
@@ -1243,7 +1286,8 @@ async def handle_list_inv_add(msg: Message, data: dict, user_notion_id: str = ""
     text = data.get("text", msg.text or "")
     parsed = None
     try:
-        parsed = await _haiku_parse(text, _PARSE_INV_SYSTEM)
+        # max_tokens=4000: batch ввод 60+ позиций не помещается в дефолтные 500.
+        parsed = await _haiku_parse(text, _PARSE_INV_SYSTEM, max_tokens=4000)
     except Exception as e:
         logger.warning("handle_list_inv_add: Haiku parse failed (%s) — trying regex fallback", e)
     items = _normalize_inv_items(parsed) if parsed is not None else []

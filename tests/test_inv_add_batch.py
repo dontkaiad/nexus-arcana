@@ -177,9 +177,11 @@ def test_fallback_split_with_category_prefix():
         "зубные нити"
     )
     items = lists_mod._fallback_split_inv_text(text)
-    assert [it["name"] for it in items] == [
-        "сироп солодки (немного)", "рициниол базовый 30мл", "зубные нити",
-    ]
+    # После #78 fallback извлекает qty/note → дозировка уходит в note.
+    by_name = {it["name"]: it for it in items}
+    assert "сироп солодки (немного)" in by_name  # без цифр — всё в name
+    assert "рициниол базовый" in by_name and by_name["рициниол базовый"]["note"] == "30мл"
+    assert "зубные нити" in by_name
     assert all(it["category"] == "🏥 Здоровье" for it in items)
     assert all(it["quantity"] == 1 for it in items)
 
@@ -232,9 +234,11 @@ async def test_handle_list_inv_add_uses_fallback_when_haiku_returns_empty():
 
     p_add.assert_called_once()
     sent_items = p_add.call_args.args[0]
-    assert [it["name"] for it in sent_items] == [
-        "сироп солодки (немного)", "рициниол базовый 30мл", "зубные нити",
-    ]
+    # После #78: «рициниол базовый 30мл» → name=«рициниол базовый», note=«30мл».
+    names = [it["name"] for it in sent_items]
+    assert "сироп солодки (немного)" in names
+    assert "рициниол базовый" in names
+    assert "зубные нити" in names
     assert all(it["category"] == "🏥 Здоровье" for it in sent_items)
     p_set.assert_not_called()
     assert "3 позиций" in msg.answer.call_args.args[0]
@@ -303,6 +307,62 @@ async def test_classifier_routes_med_list_to_inventory_not_budget():
         result = await classifier.classify(text, tz_offset=3)
     assert isinstance(result, list) and len(result) == 1
     assert result[0]["type"] == "list_inventory_add"
+
+
+# ── #78: _parse_inv_line — qty + note из одной строки ────────────────────────
+
+@pytest.mark.parametrize("line,name,qty,note", [
+    ("меновазин 2 шт", "меновазин", 2, ""),
+    ("глюкофаж 1000мг 10 шт", "глюкофаж", 10, "1000мг"),
+    ("активированный уголь 250мг 1 пачка 30шт", "активированный уголь", 30, "250мг"),
+    ("пластырь 58шт", "пластырь", 58, ""),
+    ("бинт обычный", "бинт обычный", 1, ""),
+    ("хлорид натрия 0,9% 400мл", "хлорид натрия", 1, "0,9% 400мл"),
+    ("вата", "вата", 1, ""),
+    ("ибупрофен 400мг 16 шт", "ибупрофен", 16, "400мг"),
+    ("шприцы 5кубов 3 шт", "шприцы", 3, "5кубов"),
+    ("лизобакт 20 таблеток", "лизобакт", 20, ""),
+    ("активированный уголь 500мг 50 таблеток", "активированный уголь", 50, "500мг"),
+    ("сульфат магния 6 пакетов по 25г", "сульфат магния", 6, "по 25г"),
+    ("найз 100мг 6шт", "найз", 6, "100мг"),
+    ("супрастин 20 шт", "супрастин", 20, ""),
+    ("гексаспрей аэрозоль 2,5% 30гр годен до 03.2027", "гексаспрей аэрозоль", 1, "2,5% 30гр годен до 03.2027"),
+])
+def test_parse_inv_line_extracts_qty_and_note(line, name, qty, note):
+    out = lists_mod._parse_inv_line(line)
+    assert out is not None
+    assert out["name"] == name, f"name mismatch for {line!r}: got {out['name']!r}"
+    assert out["quantity"] == qty, f"qty mismatch for {line!r}: got {out['quantity']!r}"
+    assert out["note"] == note, f"note mismatch for {line!r}: got {out['note']!r}"
+
+
+def test_parse_inv_line_strips_bullets():
+    assert lists_mod._parse_inv_line("• молоко")["name"] == "молоко"
+    assert lists_mod._parse_inv_line("— парацетамол 2 шт")["quantity"] == 2
+
+
+def test_parse_inv_line_empty_returns_none():
+    assert lists_mod._parse_inv_line("") is None
+    assert lists_mod._parse_inv_line("   ") is None
+
+
+def test_fallback_now_extracts_qty_for_each_line():
+    """Регресс #78: реальный batch Кай должен сохранить количества."""
+    text = (
+        "занеси в инвентарь лекарства\n"
+        "меновазин 2 шт\n"
+        "глюкофаж 1000мг 10 шт\n"
+        "пластырь 58шт\n"
+        "бинт обычный"
+    )
+    items = lists_mod._fallback_split_inv_text(text)
+    by_name = {it["name"]: it for it in items}
+    assert by_name["меновазин"]["quantity"] == 2
+    assert by_name["глюкофаж"]["quantity"] == 10
+    assert by_name["глюкофаж"]["note"] == "1000мг"
+    assert by_name["пластырь"]["quantity"] == 58
+    assert by_name["бинт обычный"]["quantity"] == 1
+    assert all(it["category"] == "🏥 Здоровье" for it in items)
 
 
 def test_fallback_auto_detects_health_from_pharm_markers():
