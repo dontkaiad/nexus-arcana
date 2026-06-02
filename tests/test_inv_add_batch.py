@@ -127,10 +127,14 @@ async def test_handle_list_inv_add_single_asks_expiry():
 
 @pytest.mark.asyncio
 async def test_handle_list_inv_add_empty_parse_responds_gracefully():
-    """Если Haiku вернул мусор — отвечаем подсказкой, не падаем."""
+    """Если Haiku вернул мусор И fallback ничего не извлёк — отвечаем подсказкой.
+
+    Используем ввод состоящий только из префикса без позиций — тогда fallback
+    тоже вернёт [], потому что body_lines пуст.
+    """
     msg = AsyncMock()
     msg.from_user.id = 67686090
-    msg.text = "🤷"
+    msg.text = "занеси в инвентарь"
 
     with patch.object(lists_mod, "_haiku_parse", AsyncMock(return_value={"items": []})), \
          patch.object(lists_mod, "add_items", AsyncMock(return_value=[])) as p_add, \
@@ -142,3 +146,118 @@ async def test_handle_list_inv_add_empty_parse_responds_gracefully():
     p_add.assert_not_called()
     assert msg.answer.call_count == 1
     assert "Не смог разобрать" in msg.answer.call_args.args[0]
+
+
+# ── #76: regex-fallback и category-хинты ─────────────────────────────────────
+
+def test_category_from_hint_health():
+    assert lists_mod._category_from_hint("лекарства") == "🏥 Здоровье"
+    assert lists_mod._category_from_hint("ТАБЛЕТКИ") == "🏥 Здоровье"
+    assert lists_mod._category_from_hint("аптечка") == "🏥 Здоровье"
+
+
+def test_category_from_hint_other_categories():
+    assert lists_mod._category_from_hint("продукты") == "🍜 Продукты"
+    assert lists_mod._category_from_hint("еду") == "🍜 Продукты"
+    assert lists_mod._category_from_hint("бытовая химия") == "🧹 Дом"
+    assert lists_mod._category_from_hint("косметика") == "💄 Красота"
+    assert lists_mod._category_from_hint("инструменты") == "🔧 Инструменты"
+
+
+def test_category_from_hint_unknown():
+    assert lists_mod._category_from_hint("xyz") == ""
+    assert lists_mod._category_from_hint("") == ""
+
+
+def test_fallback_split_with_category_prefix():
+    text = (
+        "занеси в инвентарь лекарства\n"
+        "сироп солодки (немного)\n"
+        "рициниол базовый 30мл\n"
+        "зубные нити"
+    )
+    items = lists_mod._fallback_split_inv_text(text)
+    assert [it["name"] for it in items] == [
+        "сироп солодки (немного)", "рициниол базовый 30мл", "зубные нити",
+    ]
+    assert all(it["category"] == "🏥 Здоровье" for it in items)
+    assert all(it["quantity"] == 1 for it in items)
+
+
+def test_fallback_split_without_category_uses_default():
+    text = "занеси в инвентарь\nфонарик\nверёвка"
+    items = lists_mod._fallback_split_inv_text(text)
+    assert [it["name"] for it in items] == ["фонарик", "верёвка"]
+    assert all(it["category"] == "💳 Прочее" for it in items)
+
+
+def test_fallback_split_strips_bullet_chars():
+    text = "добавь в инвентарь продукты\n• молоко\n- хлеб\n— сыр"
+    items = lists_mod._fallback_split_inv_text(text)
+    assert [it["name"] for it in items] == ["молоко", "хлеб", "сыр"]
+    assert all(it["category"] == "🍜 Продукты" for it in items)
+
+
+def test_fallback_split_empty_returns_empty():
+    assert lists_mod._fallback_split_inv_text("") == []
+    assert lists_mod._fallback_split_inv_text("занеси в инвентарь лекарства") == []
+
+
+@pytest.mark.asyncio
+async def test_handle_list_inv_add_uses_fallback_when_haiku_returns_empty():
+    """Haiku вернул items=[] — переходим на regex-fallback, создаём айтемы."""
+    text = (
+        "занеси в инвентарь лекарства\n"
+        "сироп солодки (немного)\n"
+        "рициниол базовый 30мл\n"
+        "зубные нити"
+    )
+    fallback_items = lists_mod._fallback_split_inv_text(text)
+    created = [
+        {"id": f"p{i}", "name": it["name"], "type": "📦 Инвентарь", "category": it["category"]}
+        for i, it in enumerate(fallback_items)
+    ]
+
+    msg = AsyncMock()
+    msg.from_user.id = 67686090
+    msg.text = text
+
+    with patch.object(lists_mod, "_haiku_parse", AsyncMock(return_value={"items": []})), \
+         patch.object(lists_mod, "add_items", AsyncMock(return_value=created)) as p_add, \
+         patch.object(lists_mod, "react", AsyncMock()), \
+         patch.object(lists_mod, "pending_set") as p_set:
+        await lists_mod.handle_list_inv_add(
+            msg, {"text": text}, user_notion_id="user-page-id",
+        )
+
+    p_add.assert_called_once()
+    sent_items = p_add.call_args.args[0]
+    assert [it["name"] for it in sent_items] == [
+        "сироп солодки (немного)", "рициниол базовый 30мл", "зубные нити",
+    ]
+    assert all(it["category"] == "🏥 Здоровье" for it in sent_items)
+    p_set.assert_not_called()
+    assert "3 позиций" in msg.answer.call_args.args[0]
+
+
+@pytest.mark.asyncio
+async def test_handle_list_inv_add_uses_fallback_when_haiku_raises():
+    """Haiku упал — regex-fallback всё равно спасает ввод."""
+    text = "занеси в инвентарь лекарства\nпарацетамол"
+
+    msg = AsyncMock()
+    msg.from_user.id = 67686090
+    msg.text = text
+
+    with patch.object(lists_mod, "_haiku_parse", AsyncMock(side_effect=ValueError("bad json"))), \
+         patch.object(lists_mod, "add_items", AsyncMock(return_value=[
+             {"id": "p1", "name": "парацетамол", "type": "📦 Инвентарь", "category": "🏥 Здоровье"},
+         ])), \
+         patch.object(lists_mod, "react", AsyncMock()), \
+         patch.object(lists_mod, "pending_set") as p_set:
+        await lists_mod.handle_list_inv_add(
+            msg, {"text": text}, user_notion_id="user-page-id",
+        )
+
+    # 1 элемент → должен спросить срок годности
+    p_set.assert_called_once()

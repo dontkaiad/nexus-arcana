@@ -55,12 +55,89 @@ _PARSE_INV_SYSTEM = (
     "Извлеки ВСЕ позиции. Ответь ТОЛЬКО JSON без markdown:\n"
     '{"items":[{"name":"парацетамол","quantity":2,"note":"верхний ящик ванной","category":"🏥 Здоровье"}]}\n'
     "\nКатегории: " + ", ".join(LIST_CATEGORIES) + "\n"
+    "Правила:\n"
     "- items: массив, всегда. Один предмет = массив из 1 элемента.\n"
-    "- quantity: число, по умолчанию 1\n"
-    "- note: место хранения, бренд, детали, дозировка/форма (если есть)\n"
-    "- Каждая строка многострочного ввода = отдельный item.\n"
-    '- Пример многострочного: "меновазин 2 шт\\nуголь 250мг 1 пачка 30шт" → items=[{name:"меновазин",quantity:2},{name:"уголь",quantity:1,note:"250мг, 30шт"}]\n'
+    "- quantity: число, по умолчанию 1.\n"
+    "- note: место хранения, бренд, детали, дозировка/форма (если есть).\n"
+    "- Каждая строка многострочного ввода = ОТДЕЛЬНЫЙ item.\n"
+    "- Первая строка вида «занеси в инвентарь <слово>», «добавь в инвентарь <слово>», "
+    '«в инвентарь <слово>» — это МАРКЕР КАТЕГОРИИ, НЕ item. Применяй категорию ко ВСЕМ items.\n'
+    "  Маппинг слов: лекарства/таблетки/аптечка → 🏥 Здоровье; еда/продукты/перекус → 🍜 Продукты;\n"
+    "  химия/уборка/бытовая химия → 🧹 Дом; косметика/уход → 💄 Красота; одежда → 👗 Одежда;\n"
+    "  инструменты/гаджеты → 🔧 Инструменты; канцелярия/книги → 📚 Канцелярия; прочее → 💳 Прочее.\n"
+    "- Если первая строка просто «занеси в инвентарь» без категории — определяй категорию по содержимому каждой позиции отдельно.\n"
+    "\nПримеры:\n"
+    '1) "меновазин 2 шт\\nуголь 250мг 1 пачка 30шт" → '
+    '{"items":[{"name":"меновазин","quantity":2,"category":"🏥 Здоровье"},'
+    '{"name":"уголь","quantity":1,"note":"250мг, 30шт","category":"🏥 Здоровье"}]}\n'
+    '2) "занеси в инвентарь лекарства\\nсироп солодки (немного)\\nрициниол базовый 30мл\\nзубные нити" → '
+    '{"items":[{"name":"сироп солодки","quantity":1,"note":"немного","category":"🏥 Здоровье"},'
+    '{"name":"рициниол базовый","quantity":1,"note":"30мл","category":"🏥 Здоровье"},'
+    '{"name":"зубные нити","quantity":1,"category":"🏥 Здоровье"}]}\n'
+    '3) "добавь в инвентарь продукты\\nгречка 1кг\\nмолоко 1л" → '
+    '{"items":[{"name":"гречка","quantity":1,"note":"1кг","category":"🍜 Продукты"},'
+    '{"name":"молоко","quantity":1,"note":"1л","category":"🍜 Продукты"}]}\n'
 )
+
+
+# Категория-хинты для regex-fallback'а (когда Haiku не справился).
+_CATEGORY_HINTS: dict[str, str] = {
+    "лекарств": "🏥 Здоровье", "таблетк": "🏥 Здоровье", "аптечк": "🏥 Здоровье",
+    "еда": "🍜 Продукты", "еду": "🍜 Продукты", "продукт": "🍜 Продукты", "перекус": "🍜 Продукты",
+    "химия": "🧹 Дом", "химию": "🧹 Дом", "уборк": "🧹 Дом", "быт": "🧹 Дом",
+    "косметик": "💄 Красота", "уход": "💄 Красота",
+    "одежд": "👗 Одежда",
+    "инструмент": "🔧 Инструменты", "гаджет": "🔧 Инструменты",
+    "канцеляри": "📚 Канцелярия", "книг": "📚 Канцелярия",
+}
+
+_INV_PREFIX_RE = re.compile(
+    r"^\s*(?:занеси|занести|добавь|добавить|закинь|закинуть|положи|положить|"
+    r"запиши|записать|внеси|внести)\s+(?:в\s+)?инвентар[ьея]?(?:\s+(?P<cat>[\w\s]+?))?\s*$",
+    re.IGNORECASE,
+)
+
+
+def _category_from_hint(word: str) -> str:
+    w = (word or "").lower()
+    for stem, cat in _CATEGORY_HINTS.items():
+        if stem in w:
+            return cat
+    return ""
+
+
+def _fallback_split_inv_text(text: str) -> list[dict]:
+    """Если Haiku не справился — разбиваем построчно.
+
+    Первая строка вида «занеси в инвентарь [категория]» отбрасывается,
+    но из неё вытаскиваем категорию-хинт. Каждая последующая непустая
+    строка — отдельный item.
+    """
+    lines = [l.strip() for l in (text or "").splitlines() if l.strip()]
+    if not lines:
+        return []
+    category = "💳 Прочее"
+    body_lines = lines
+    m = _INV_PREFIX_RE.match(lines[0])
+    if m:
+        hint = (m.group("cat") or "").strip()
+        if hint:
+            category = _category_from_hint(hint) or "💳 Прочее"
+        body_lines = lines[1:]
+    if not body_lines:
+        return []
+    items: list[dict] = []
+    for ln in body_lines:
+        cleaned = ln.lstrip("•·-–— ").strip()
+        if not cleaned:
+            continue
+        items.append({
+            "name": cleaned,
+            "quantity": 1,
+            "note": "",
+            "category": category,
+        })
+    return items
 
 _PARSE_INV_UPDATE_SYSTEM = (
     "Пользователь сообщает об изменении количества предмета. "
@@ -1152,19 +1229,28 @@ def _normalize_inv_items(parsed) -> list[dict]:
 async def handle_list_inv_add(msg: Message, data: dict, user_notion_id: str = "") -> None:
     await react(msg, "🫡")
     text = data.get("text", msg.text or "")
+    parsed = None
     try:
         parsed = await _haiku_parse(text, _PARSE_INV_SYSTEM)
     except Exception as e:
-        logger.error("handle_list_inv_add parse error: %s", e)
-        await msg.answer("⚠️ Не смог разобрать. Попробуй: «дома есть: парацетамол»")
-        return
-    items = _normalize_inv_items(parsed)
+        logger.warning("handle_list_inv_add: Haiku parse failed (%s) — trying regex fallback", e)
+    items = _normalize_inv_items(parsed) if parsed is not None else []
     if not items:
-        await msg.answer("⚠️ Не смог разобрать. Попробуй: «дома есть: парацетамол»")
+        logger.warning(
+            "handle_list_inv_add: empty/garbage Haiku result, raw=%r — trying regex fallback",
+            parsed,
+        )
+        items = _fallback_split_inv_text(text)
+    if not items:
+        await msg.answer(
+            "⚠️ Не смог разобрать. Попробуй так:\n"
+            "• «дома есть парацетамол 2 пачки»\n"
+            "• «занеси в инвентарь лекарства\n  меновазин 2шт\n  уголь 30шт»"
+        )
         return
     created = await add_items(items, "📦 Инвентарь", BOT_NAME, user_notion_id)
     if not created:
-        await msg.answer("⚠️ Не удалось добавить.")
+        await msg.answer("⚠️ Не удалось добавить в Notion.")
         return
     if len(created) == 1:
         c = created[0]
