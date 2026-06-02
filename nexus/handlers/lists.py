@@ -51,12 +51,15 @@ _PARSE_DONE_SYSTEM = (
 )
 
 _PARSE_INV_SYSTEM = (
-    "Пользователь добавляет предмет в инвентарь (что есть дома). "
-    "Извлеки данные. Ответь ТОЛЬКО JSON без markdown:\n"
-    '{"item":"парацетамол","quantity":2,"note":"верхний ящик ванной","category":"🏥 Здоровье"}\n'
+    "Пользователь добавляет один или несколько предметов в инвентарь (что есть дома). "
+    "Извлеки ВСЕ позиции. Ответь ТОЛЬКО JSON без markdown:\n"
+    '{"items":[{"name":"парацетамол","quantity":2,"note":"верхний ящик ванной","category":"🏥 Здоровье"}]}\n'
     "\nКатегории: " + ", ".join(LIST_CATEGORIES) + "\n"
+    "- items: массив, всегда. Один предмет = массив из 1 элемента.\n"
     "- quantity: число, по умолчанию 1\n"
-    "- note: место хранения, бренд, детали (если есть)\n"
+    "- note: место хранения, бренд, детали, дозировка/форма (если есть)\n"
+    "- Каждая строка многострочного ввода = отдельный item.\n"
+    '- Пример многострочного: "меновазин 2 шт\\nуголь 250мг 1 пачка 30шт" → items=[{name:"меновазин",quantity:2},{name:"уголь",quantity:1,note:"250мг, 30шт"}]\n'
 )
 
 _PARSE_INV_UPDATE_SYSTEM = (
@@ -1120,6 +1123,32 @@ async def handle_list_checklist_toggle(msg: Message, data: dict, user_notion_id:
     await msg.answer("\n".join(lines), parse_mode="HTML")
 
 
+def _normalize_inv_items(parsed) -> list[dict]:
+    """Haiku может вернуть {items:[...]}, одиночный {item:...} или сразу [...]."""
+    if isinstance(parsed, list):
+        raw_items = parsed
+    elif isinstance(parsed, dict) and isinstance(parsed.get("items"), list):
+        raw_items = parsed["items"]
+    elif isinstance(parsed, dict):
+        raw_items = [parsed]
+    else:
+        return []
+    out: list[dict] = []
+    for it in raw_items:
+        if not isinstance(it, dict):
+            continue
+        name = it.get("name") or it.get("item") or ""
+        if not name:
+            continue
+        out.append({
+            "name": name,
+            "quantity": it.get("quantity") or 1,
+            "note": it.get("note", ""),
+            "category": it.get("category", "💳 Прочее"),
+        })
+    return out
+
+
 async def handle_list_inv_add(msg: Message, data: dict, user_notion_id: str = "") -> None:
     await react(msg, "🫡")
     text = data.get("text", msg.text or "")
@@ -1129,17 +1158,17 @@ async def handle_list_inv_add(msg: Message, data: dict, user_notion_id: str = ""
         logger.error("handle_list_inv_add parse error: %s", e)
         await msg.answer("⚠️ Не смог разобрать. Попробуй: «дома есть: парацетамол»")
         return
-    items = [{
-        "name": parsed.get("item", ""),
-        "quantity": parsed.get("quantity") or 1,
-        "note": parsed.get("note", ""),
-        "category": parsed.get("category", "💳 Прочее"),
-    }]
+    items = _normalize_inv_items(parsed)
+    if not items:
+        await msg.answer("⚠️ Не смог разобрать. Попробуй: «дома есть: парацетамол»")
+        return
     created = await add_items(items, "📦 Инвентарь", BOT_NAME, user_notion_id)
-    if created:
+    if not created:
+        await msg.answer("⚠️ Не удалось добавить.")
+        return
+    if len(created) == 1:
         c = created[0]
         await msg.answer(f"📦 <b>Инвентарь:</b> {c['name']} добавлен · {c.get('category', '')}", parse_mode="HTML")
-        # Спросить срок годности
         uid = msg.from_user.id
         pending_set(uid, {
             "action": "inv_expiry",
@@ -1154,8 +1183,15 @@ async def handle_list_inv_add(msg: Message, data: dict, user_notion_id: str = ""
             "📅 Срок годности? (напиши дату, например <code>2026-06-15</code>)",
             parse_mode="HTML", reply_markup=kb,
         )
-    else:
-        await msg.answer("⚠️ Не удалось добавить.")
+        return
+    qty_by_name = {it["name"]: it.get("quantity") or 1 for it in items}
+    lines = [f"📦 <b>Инвентарь:</b> добавлено {len(created)} позиций"]
+    for c in created:
+        qty = qty_by_name.get(c["name"], 1)
+        qty_s = f" × {int(qty)}" if qty and qty != 1 else ""
+        cat = c.get("category", "")
+        lines.append(f"  ✓ {c['name']}{qty_s} · {cat}")
+    await msg.answer("\n".join(lines), parse_mode="HTML")
 
 
 async def handle_list_inv_search(msg: Message, data: dict, user_notion_id: str = "") -> None:
