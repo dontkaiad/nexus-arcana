@@ -814,6 +814,11 @@ async def handle_list_buy(msg: Message, data: dict, user_notion_id: str = "") ->
     await react(msg, "🫡")
     text = data.get("text", msg.text or "")
 
+    # Маркер продолжения «ещё» («монстры ещё» / «ещё кофе») — не часть названия,
+    # убираем чтобы не попал в name. См. issue #80.
+    text = re.sub(r"^\s*(?:и\s+)?ещ[её]\b\s*", "", text, flags=re.IGNORECASE)
+    text = re.sub(r"\s*\bещ[её]\s*$", "", text, flags=re.IGNORECASE).strip()
+
     # Hint Памяти: извлечём потенциальные имена из текста чтобы Haiku
     # учёл известные маппинги категорий (бренды/предпочтения Кай).
     clean = re.sub(

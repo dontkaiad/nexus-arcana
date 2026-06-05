@@ -13,7 +13,7 @@ from core.config import ARCANA_KEYWORDS
 from core.list_classifier import (
     _LIST_BUY_RE, _LIST_CHECK_RE, _SUBTASK_RE, _LIST_INV_ADD_RE,
     _LIST_INV_SEARCH_RE, _LIST_DONE_RE, _LIST_INV_UPDATE_RE, _LIST_SUM_RE,
-    _looks_like_med_inventory,
+    _looks_like_med_inventory, looks_like_buy_continuation,
     LIST_HAIKU_TYPES,
 )
 from nexus.handlers.utils import react
@@ -680,6 +680,12 @@ async def classify(text: str, tz_offset: int = 3) -> list[dict]:
     # ловит прошедшее время с ценой и возвращает list_done до этой строки.
     if _LIST_BUY_RE.search(text):
         logger.info("classify: list_buy pattern matched")
+        return [{"type": "list_buy", "text": text}]
+
+    # "монстры ещё" / "ещё кофе" → list_buy (продолжение списка без глагола).
+    # Guards внутри looks_like_buy_continuation: вопросы, суммы, глаголы задач.
+    if looks_like_buy_continuation(text):
+        logger.info("classify: list_buy continuation («ещё») matched")
         return [{"type": "list_buy", "text": text}]
 
     # "разбей задачу X на подзадачи" → list_subtask (ПЕРЕД list_check!)

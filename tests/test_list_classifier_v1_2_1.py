@@ -175,3 +175,61 @@ def test_classify_simple_kupi_still_works():
 
     assert out and out[0]["type"] == "list_buy"
     mock_haiku.assert_not_awaited()
+
+
+# ── issue #80: продолжение списка «<товары> ещё» / «ещё <товары>» ─────────────
+
+
+def test_buy_continuation_positive():
+    """Маркер «ещё» в начале/конце короткого сообщения → продолжение покупок."""
+    from core.list_classifier import looks_like_buy_continuation
+    assert looks_like_buy_continuation("монстры ещё")
+    assert looks_like_buy_continuation("монстры еще")  # без ё
+    assert looks_like_buy_continuation("ещё кофе")
+    assert looks_like_buy_continuation("ещё кофе и чай")
+    assert looks_like_buy_continuation("и ещё молоко")
+
+
+def test_buy_continuation_negative_guards():
+    """Guard'ы: вопросы, суммы, глаголы задач, системные группы → НЕ покупки."""
+    from core.list_classifier import looks_like_buy_continuation
+    assert not looks_like_buy_continuation("ещё раз")
+    assert not looks_like_buy_continuation("напомни ещё раз")
+    assert not looks_like_buy_continuation("что ещё")
+    assert not looks_like_buy_continuation("ещё 300 на кофе")     # сумма
+    assert not looks_like_buy_continuation("ещё 2 монстра")       # цифра
+    assert not looks_like_buy_continuation("добавь в задачи ещё позвонить")
+    assert not looks_like_buy_continuation("сделай ещё одну заметку")
+    assert not looks_like_buy_continuation("кофе")               # нет маркера «ещё»
+    # Слишком длинное — не короткое продолжение
+    assert not looks_like_buy_continuation(
+        "ещё купи молоко яйца хлеб масло сыр колбасу"
+    )
+
+
+def test_classify_buy_continuation_routes_to_list_buy():
+    """«монстры ещё» → list_buy через pre-filter, без Haiku."""
+    from core import classifier as clf
+
+    text = "монстры ещё"
+    with patch.object(clf, "ask_claude",
+                       AsyncMock(return_value="{}")) as mock_haiku:
+        out = asyncio.run(clf.classify(text, tz_offset=3))
+
+    assert out and out[0]["type"] == "list_buy"
+    assert out[0]["text"] == text
+    mock_haiku.assert_not_awaited()
+
+
+def test_classify_esche_raz_not_list_buy():
+    """«ещё раз» не должно уходить в list_buy (улетает в Haiku)."""
+    from core import classifier as clf
+
+    text = "ещё раз"
+    fake = '{"type":"unknown"}'
+    with patch.object(clf, "ask_claude",
+                       AsyncMock(return_value=fake)) as mock_haiku:
+        out = asyncio.run(clf.classify(text, tz_offset=3))
+
+    assert out and out[0]["type"] != "list_buy"
+    mock_haiku.assert_awaited_once()
