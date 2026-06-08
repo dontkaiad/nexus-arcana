@@ -188,6 +188,16 @@ def _too_long(corrected: str, original: str) -> bool:
     return len(corrected) > len(original) * 2 + 30
 
 
+def _truncated(corrected: str, original: str) -> bool:
+    """Haiku обрезала вывод (max_tokens). Защита от потери хвоста длинной
+    сессии: если корректированный текст меньше 70% оригинала и оригинал
+    длиннее 100 символов — отвергаем и возвращаем оригинал (см. issue #82).
+    """
+    if len(original) < 100:
+        return False
+    return len(corrected) < len(original) * 0.7
+
+
 # ── Public API ───────────────────────────────────────────────────────────────
 
 async def normalize_text(text: str, *, user_notion_id: str = "") -> str:
@@ -225,9 +235,14 @@ async def normalize_text(text: str, *, user_notion_id: str = "") -> str:
         )
     system = "\n".join(system_lines)
 
+    # Адаптивный max_tokens: длинные сессии (9+ триплетов, ~900 символов)
+    # требуют ~600+ токенов на выход; статический лимит 200 резал текст
+    # пополам (см. issue #82). Русский ≈ 1 токен на 2 символа.
+    spell_max_tokens = max(300, len(converted) // 2 + 200)
+
     try:
         corrected = await ask_claude(
-            converted, system=system, max_tokens=200,
+            converted, system=system, max_tokens=spell_max_tokens,
             model="claude-haiku-4-5-20251001",
         )
     except Exception as e:
@@ -244,5 +259,10 @@ async def normalize_text(text: str, *, user_notion_id: str = "") -> str:
         return converted
     if _too_long(c, converted):
         logger.warning("spell rejected (too long): %r", c[:80])
+        return converted
+    if _truncated(c, converted):
+        logger.warning(
+            "spell rejected (truncated %d→%d chars)", len(converted), len(c),
+        )
         return converted
     return c
