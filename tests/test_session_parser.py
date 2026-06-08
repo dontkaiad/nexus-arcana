@@ -48,6 +48,20 @@ def test_resolve_category_multi_default():
     assert _resolve_session_category(None, 3) == "🌐 Сфера жизни"
 
 
+def test_resolve_category_all_triplets_default():
+    # Multi-session, но все записи — триплеты (3 карты). Без явной категории
+    # дефолт «🔺 Триплет», не «🌐 Сфера жизни». См. #83.
+    assert _resolve_session_category(None, 9, all_triplets=True) == "🔺 Триплет"
+
+
+def test_resolve_category_explicit_overrides_all_triplets():
+    # Если Haiku явно вернула «Магические воздействия» — она важнее
+    # all_triplets=True.
+    assert "Магические" in _resolve_session_category(
+        "Магические воздействия", 9, all_triplets=True
+    )
+
+
 def test_session_parse_error_class():
     err = SessionParseError("test")
     assert isinstance(err, Exception)
