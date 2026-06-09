@@ -9,6 +9,7 @@ from aiogram.filters import CommandStart, Command
 from aiogram.types import Message, CallbackQuery
 from arcana.handlers.reactions import reaction_for
 from core.claude_client import ask_claude
+from core.config import config as _cfg
 from core.notion_client import log_error
 from core.utils import react
 
@@ -265,7 +266,7 @@ async def _handle_tarot_correction(
 
     new_interp = await ask_claude(
         prompt, system=system,
-        model="claude-sonnet-4-20250514",
+        model=_cfg.model_sonnet,
         max_tokens=2000,
     )
 

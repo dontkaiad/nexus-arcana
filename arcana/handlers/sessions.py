@@ -18,6 +18,7 @@ from aiogram.types import (
 )
 
 from core.claude_client import ask_claude, ask_claude_vision
+from core.config import config as _cfg
 from core.notion_client import (
     _extract_text,
     client_find,
@@ -744,7 +745,7 @@ async def handle_add_session(
             interpretation = await ask_claude(
                 user_prompt,
                 system=system,
-                model="claude-sonnet-4-20250514",
+                model=_cfg.model_sonnet,
                 max_tokens=2000,
             )
 
@@ -973,7 +974,7 @@ async def _handle_multi_session(
                     user_prompt += f"\nДно колоды: {bottom_card}"
                 interpretation = await ask_claude(
                     user_prompt, system=system,
-                    model="claude-sonnet-4-20250514", max_tokens=2000,
+                    model=_cfg.model_sonnet, max_tokens=2000,
                 )
 
             # Haiku — саммари триплета
@@ -1078,7 +1079,7 @@ async def _handle_multi_session(
             )
             raw_summary = await ask_claude(
                 sess_prompt, max_tokens=400,
-                model="claude-sonnet-4-20250514",
+                model=_cfg.model_sonnet,
             )
             from core.html_sanitize import sanitize_summary
             session_summary_text = sanitize_summary(raw_summary or "")
@@ -1411,7 +1412,7 @@ async def handle_triplet_correction(
     try:
         new_interp = await ask_claude(
             prompt, system=system,
-            model="claude-sonnet-4-20250514", max_tokens=2000,
+            model=_cfg.model_sonnet, max_tokens=2000,
         )
     except Exception as e:
         logger.error("triplet correction sonnet failed: %s", e)
@@ -1517,7 +1518,7 @@ async def handle_tarot_photo(message: Message, user_notion_id: str = "") -> None
         interpretation = await ask_claude(
             user_prompt,
             system=system,
-            model="claude-sonnet-4-20250514",
+            model=_cfg.model_sonnet,
             max_tokens=2000,
         )
 
@@ -1633,7 +1634,7 @@ async def handle_tarot_interpret(message: Message, text: str) -> None:
     interpretation = await ask_claude(
         f"Карты/расклад: {text}",
         system=TAROT_SYSTEM,
-        model="claude-sonnet-4-20250514",
+        model=_cfg.model_sonnet,
         max_tokens=2000,
     )
     await message.answer(

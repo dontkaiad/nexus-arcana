@@ -431,6 +431,7 @@ async def session_summarize(
     tg_id: int = Depends(current_user_id),
 ) -> dict[str, Any]:
     from core.claude_client import ask_claude
+    from core.config import config as _cfg
 
     user_notion_id = (await get_user_notion_id(tg_id)) or ""
     _, tz_offset = await today_user_tz(tg_id)
@@ -478,7 +479,7 @@ async def session_summarize(
     )
     try:
         summary = await ask_claude(
-            prompt, max_tokens=500, model="claude-sonnet-4-20250514"
+            prompt, max_tokens=500, model=_cfg.model_sonnet
         )
     except Exception as e:
         logger.error("session summarize failed: %s", e)

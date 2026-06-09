@@ -11,6 +11,7 @@ from typing import Dict, List, Optional, Set, Tuple
 from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
 
 from core.claude_client import ask_claude
+from core.config import config as _cfg
 from core.layout import maybe_convert
 from core.notion_client import (
     db_query, page_create, update_page, get_notion,
@@ -481,7 +482,7 @@ async def _get_adhd_tip(fact: str) -> str:
         fact,
         system=_ADHD_TIP_SYSTEM,
         max_tokens=150,
-        model="claude-sonnet-4-6",
+        model=_cfg.model_sonnet,
     )
     return tip.strip()
 

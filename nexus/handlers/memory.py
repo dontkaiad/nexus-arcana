@@ -11,6 +11,7 @@ from nexus.handlers.utils import react
 
 import core.memory as mem
 from core.claude_client import ask_claude
+from core.config import config as _cfg
 from core.notion_client import page_create
 
 logger = logging.getLogger("nexus.memory")
@@ -194,7 +195,7 @@ async def handle_adhd_command(message: Message, user_notion_id: str = "") -> Non
             facts_text,
             system=_ADHD_SUMMARY_SYSTEM,
             max_tokens=200,
-            model="claude-sonnet-4-6",
+            model=_cfg.model_sonnet,
         )
     except Exception:
         summary = ""
