@@ -1,5 +1,7 @@
 """tests/test_models_audit.py — гарантия что все «дешёвые» вызовы
-ask_claude используют Haiku, а не падают обратно на Sonnet.
+ask_claude ЯВНО используют Haiku, а не молча полагаются на дефолт
+core/claude_client.py (который сейчас Haiku, но не должен определять
+стоимость неявно).
 
 Проверка статическая (грепаем исходник) — никаких живых API.
 """
@@ -31,14 +33,17 @@ HAIKU_REQUIRED = [
 
 @pytest.mark.parametrize("rel_path", HAIKU_REQUIRED)
 def test_file_uses_haiku_for_ask_claude(rel_path: str):
-    """Каждый файл из списка должен явно указывать Haiku хотя бы в одном
-    ask_claude. Без этого вызовы fallback'ом идут на Sonnet (default
-    в core/claude_client.py) и жгут деньги Кай."""
+    """Каждый файл из списка должен ЯВНО указывать Haiku хотя бы в одном
+    ask_claude. Дефолт в core/claude_client.py — Haiku (`model or
+    config.model_haiku`), но мы на дефолт не полагаемся: явный
+    model="claude-haiku-..." фиксирует осознанный выбор дешёвой модели и
+    защищает от случайной смены дефолта или передачи Sonnet."""
     src = (REPO / rel_path).read_text(encoding="utf-8")
     assert "ask_claude" in src, f"{rel_path}: нет ask_claude — список устарел?"
     assert 'model="claude-haiku' in src, (
         f"{rel_path}: ask_claude найден, но model=\"claude-haiku-...\" не "
-        "указан — значит идёт fallback на Sonnet (дорого)."
+        "указан явно. Дефолт сейчас Haiku, но выбор дешёвой модели должен "
+        "быть осознанным и не зависеть от дефолта claude_client."
     )
 
 
