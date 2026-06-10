@@ -1,4 +1,6 @@
 """Issue #33: гвард против галлюцинированного reminder.
+Issue #89: «напоминание на 3 июля 13 часов» — формат «N часов» должен
+распознаваться как явное время, а не срезаться гвардом.
 
 Если в исходном тексте задачи нет слова «напомни/напоминалку/...» —
 reminder/reminder_time от Haiku должны быть отброшены.
@@ -87,3 +89,68 @@ class TestReminderGuardBehavior:
 
         assert has_remind is True
         assert data["reminder"] == "2026-05-10T15:00"
+
+
+class TestExtractExplicitClock:
+    """`_extract_explicit_clock` — достаёт явное время HH:MM из текста."""
+
+    def _f(self):
+        from nexus.handlers.tasks import _extract_explicit_clock
+        return _extract_explicit_clock
+
+    def test_hours_word(self):
+        """issue #89: формат «N часов»."""
+        f = self._f()
+        assert f("напоминание на 3 июля 13 часов") == "13:00"
+        assert f("напомни 3 июля в 13 часов") == "13:00"
+        assert f("в 9 часов") == "09:00"
+        assert f("в 2 часа") == "02:00"
+
+    @pytest.mark.parametrize("text,expected", [
+        ("в 18:30", "18:30"),
+        ("позвонить маме в 18:00", "18:00"),
+        ("напомни в 13", "13:00"),
+    ])
+    def test_colon_and_bare_hour(self, text, expected):
+        assert self._f()(text) == expected
+
+    @pytest.mark.parametrize("text", [
+        "на 3 июля",          # дата без времени
+        "в 3 июля",           # «в <число> <месяц>» — дата, не время
+        "напоминание 13.07",  # точка — неоднозначно, доверяем Haiku
+        "через 2 часа",       # relative — считается в _parse_relative_time
+        "в 99",               # невалидный час
+        "купить корм завтра",
+    ])
+    def test_no_clock(self, text):
+        assert self._f()(text) is None
+
+
+class TestApplyUserTime:
+    """`_apply_user_time` — сверка времени напоминания с текстом пользователя."""
+
+    def _f(self):
+        from nexus.handlers.tasks import _apply_user_time
+        return _apply_user_time
+
+    def test_issue_89_haiku_parsed_time(self):
+        """Haiku вернул T13:00 и юзер писал «13 часов» — время остаётся."""
+        text = "задача вернуть деньги напоминание на 3 июля 13 часов"
+        assert self._f()("2026-07-03T13:00", text) == "2026-07-03T13:00"
+
+    def test_issue_89_haiku_returned_date_only(self):
+        """Haiku вернул дату без времени, но «13 часов» есть в тексте — достаём."""
+        text = "задача вернуть деньги напоминание на 3 июля 13 часов"
+        assert self._f()("2026-07-03", text) == "2026-07-03T13:00"
+
+    def test_issue_33_hallucinated_time_stripped(self):
+        """Claude добавил T09:00, юзер время не писал → срезаем до даты."""
+        assert self._f()("2026-07-03T09:00", "напомни 3 июля вернуть деньги") == "2026-07-03"
+
+    def test_daypart_keeps_haiku_time(self):
+        """«утром» — час знает только Haiku, его время не трогаем."""
+        assert self._f()("2026-07-03T09:00", "напомни 3 июля утром") == "2026-07-03T09:00"
+
+    def test_date_only_no_time_in_text(self):
+        """Времени нет ни у Haiku, ни в тексте — дата остаётся, время переспросим."""
+        assert self._f()("2026-07-03", "напомни 3 июля") == "2026-07-03"

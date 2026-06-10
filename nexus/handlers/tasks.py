@@ -694,6 +694,56 @@ def _parse_relative_time(text: str, tz_offset: int) -> Optional[str]:
     return result.strftime("%Y-%m-%dT%H:%M")
 
 
+# ── Явное время в тексте задачи (issues #33, #89) ──────────────────────────────
+
+# Извлекаемое время: «18:30», «13 часов», «в 13». «через N часов» исключено
+# (это relative, считается в _parse_relative_time), «в 3 июля» — дата, не время.
+_EXPLICIT_CLOCK_RE = _re.compile(
+    r"\b(\d{1,2}):(\d{2})\b"
+    r"|(?<!через )\b(\d{1,2})\s*час(?:а|ов)?\b"
+    r"|\bв\s+(\d{1,2})\b(?!\s*(?:[:.\d]|янв|фев|мар|апр|ма[яе]|июн|июл|авг|сен|окт|ноя|дек))",
+    _re.IGNORECASE,
+)
+
+# Неизвлекаемые маркеры времени: «утром/вечером» (час знает только Haiku)
+# и «13.07» (точка — неоднозначно дата/время, доверяем парсингу Haiku).
+_DAYPART_RE = _re.compile(
+    r"\b\d{1,2}[:.]\d{2}\b|\bутр\w*\b|\bвечер\w*\b|\bднём\b|\bночь\w*\b",
+    _re.IGNORECASE,
+)
+
+
+def _extract_explicit_clock(text: str) -> Optional[str]:
+    """Достать явное время «HH:MM» из текста: «18:30», «13 часов», «в 13»."""
+    for m in _EXPLICIT_CLOCK_RE.finditer(text):
+        if m.group(1) is not None:
+            h, mi = int(m.group(1)), int(m.group(2))
+        elif m.group(3) is not None:
+            h, mi = int(m.group(3)), 0
+        else:
+            h, mi = int(m.group(4)), 0
+        if 0 <= h <= 23 and 0 <= mi <= 59:
+            return "%02d:%02d" % (h, mi)
+    return None
+
+
+def _apply_user_time(reminder_time: str, original_text: str) -> str:
+    """Сверить время напоминания с тем, что реально написал пользователь.
+
+    - Claude добавил время (T09:00), а в тексте его нет → срезать до даты,
+      время переспросим (issue #33).
+    - Claude вернул дату без времени, а в тексте время есть («13 часов»)
+      → подставить из текста (issue #89).
+    """
+    user_clock = _extract_explicit_clock(original_text)
+    user_specified = bool(user_clock) or bool(_DAYPART_RE.search(original_text))
+    if "T" in reminder_time and not user_specified:
+        return reminder_time[:10]
+    if "T" not in reminder_time and user_clock:
+        return "%sT%s" % (reminder_time[:10], user_clock)
+    return reminder_time
+
+
 # ── Follow-up clarification after task creation ────────────────────────────────
 
 _CLARIFY_REMINDER_RE = _re.compile(
@@ -1209,14 +1259,9 @@ async def handle_task_parsed(message: Message, data: dict) -> None:
         if not _has_explicit_deadline:
             data["deadline"] = None
 
-        # Проверяем: пользователь РЕАЛЬНО указал время? (не Claude додумал)
-        _user_specified_time = bool(_re.search(
-            r"\b\d{1,2}[:.]\d{2}\b|\bв\s+\d{1,2}\b|\bутр\w*\b|\bвечер\w*\b|\bднём\b|\bночь\w*\b",
-            original_text, _re.IGNORECASE
-        ))
-        # Если Claude добавил T09:00 но юзер не писал время → убрать время, спросить
-        if "T" in data["reminder_time"] and not _user_specified_time:
-            data["reminder_time"] = data["reminder_time"][:10]
+        # Сверяем время с текстом пользователя: галлюцинацию срезаем (issue #33),
+        # «13 часов» при дате без времени — подставляем регексом (issue #89)
+        data["reminder_time"] = _apply_user_time(data["reminder_time"], original_text)
 
         # Если только дата без времени → спрашиваем время
         if "T" not in data["reminder_time"]:
