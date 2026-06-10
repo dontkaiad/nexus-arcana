@@ -9,6 +9,7 @@ core/voice.py: тот же паттерн для OpenAI Whisper (aiohttp).
 """
 from __future__ import annotations
 
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
@@ -40,6 +41,12 @@ def _err_500():
 def _err_400():
     return anthropic.BadRequestError(
         "bad request", response=httpx.Response(400, request=_REQ), body=None
+    )
+
+
+def _err_401():
+    return anthropic.AuthenticationError(
+        "unauthorized", response=httpx.Response(401, request=_REQ), body=None
     )
 
 
@@ -81,14 +88,15 @@ async def test_transient_error_then_success(err_factory):
 
 
 @pytest.mark.asyncio
-async def test_429_respects_retry_after():
-    """429 с Retry-After → пауза берётся из заголовка, не из backoff."""
-    patcher, create = _patch_client([_err_429(retry_after=7), _ok_response()])
+@pytest.mark.parametrize("retry_after", [2, 7])
+async def test_429_respects_retry_after(retry_after):
+    """429 с Retry-After: N → пауза именно N секунд, не backoff."""
+    patcher, create = _patch_client([_err_429(retry_after=retry_after), _ok_response()])
     sleep = AsyncMock()
     with patcher, patch.object(cc.asyncio, "sleep", new=sleep):
         result = await cc.ask_claude("привет")
     assert result == "ответ"
-    sleep.assert_awaited_once_with(7.0)
+    sleep.assert_awaited_once_with(float(retry_after))
 
 
 @pytest.mark.asyncio
@@ -102,14 +110,34 @@ async def test_exhaustion_returns_empty_string():
 
 
 @pytest.mark.asyncio
-async def test_4xx_not_retried():
-    """400 — не транзиентная, без ретрая, сразу fallback."""
-    patcher, create = _patch_client([_err_400()])
+@pytest.mark.parametrize("err_factory", [_err_400, _err_401])
+async def test_4xx_not_retried(err_factory):
+    """400/401 — не транзиентные, без ретрая, сразу fallback."""
+    patcher, create = _patch_client([err_factory()])
     sleep = AsyncMock()
     with patcher, patch.object(cc.asyncio, "sleep", new=sleep):
         result = await cc.ask_claude("привет")
     assert result == ""
     assert create.call_count == 1
+    sleep.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("err_factory", [_err_400, _err_401])
+async def test_non_transient_raises_immediately(err_factory):
+    """На уровне декоратора 400/401 поднимается сразу, ноль ретраев."""
+    calls = []
+
+    @cc.retry_transient
+    async def boom():
+        calls.append(1)
+        raise err_factory()
+
+    sleep = AsyncMock()
+    with patch.object(cc.asyncio, "sleep", new=sleep):
+        with pytest.raises(anthropic.APIStatusError):
+            await boom()
+    assert len(calls) == 1
     sleep.assert_not_awaited()
 
 
@@ -147,6 +175,34 @@ def test_sdk_builtin_retries_disabled():
     kwargs = ctor.call_args.kwargs
     assert kwargs["max_retries"] == 0
     assert kwargs["timeout"] == cc.REQUEST_TIMEOUT
+
+
+# ── страж: все LLM-вызовы идут ТОЛЬКО через обёрнутый путь ────────────────────
+
+_REPO = Path(__file__).resolve().parent.parent
+_SCAN_DIRS = ("arcana", "nexus", "core", "miniapp/backend", "scripts")
+_WRAPPED_PATH = Path("core/claude_client.py")
+# Прямые вызовы Anthropic вне claude_client = обход retry_transient = БАГ
+_FORBIDDEN = (".messages.create", "AsyncAnthropic(", "anthropic.Anthropic(")
+
+
+def test_no_direct_anthropic_calls_outside_claude_client():
+    """Прямой client.messages.create / свой Anthropic-клиент вне
+    core/claude_client.py обходит resilience-обёртку (CLAUDE.md)."""
+    offenders = []
+    for scan_dir in _SCAN_DIRS:
+        for path in sorted((_REPO / scan_dir).rglob("*.py")):
+            rel = path.relative_to(_REPO)
+            if rel == _WRAPPED_PATH:
+                continue
+            src = path.read_text(encoding="utf-8")
+            for marker in _FORBIDDEN:
+                if marker in src:
+                    offenders.append(f"{rel}: {marker}")
+    assert not offenders, (
+        "LLM-вызовы в обход core/claude_client.py (нет retry/backoff): "
+        + "; ".join(offenders)
+    )
 
 
 # ── voice.py: Whisper с тем же паттерном ──────────────────────────────────────
