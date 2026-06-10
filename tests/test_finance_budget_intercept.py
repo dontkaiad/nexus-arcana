@@ -85,6 +85,23 @@ def test_other_domain_list_sum():
     assert _is_other_domain_command("сумма косметичка")
 
 
+def test_other_domain_task_word_prefix():
+    """issue #90: «задача …» — явная команда задач, не корректировка бюджета."""
+    from nexus.handlers.finance import _is_other_domain_command
+    assert _is_other_domain_command("задача проверить интернет напоминание на 3 июля 13 часов")
+    assert _is_other_domain_command("задачу поставь на завтра")
+    assert _is_other_domain_command("задачи на сегодня")
+
+
+def test_other_domain_remind_forms():
+    """issue #90: формы «напомни/напоминалку/напоминание» в начале текста."""
+    from nexus.handlers.finance import _is_other_domain_command
+    assert _is_other_domain_command("напомни в 15 позвонить")
+    assert _is_other_domain_command("напомнить завтра про коммуналку")
+    assert _is_other_domain_command("напоминалку на пятницу")
+    assert _is_other_domain_command("напоминание на 3 июля 13 часов")
+
+
 def test_not_other_domain_real_correction():
     """«добавь 5к на еду» — это корректировка плана, не команда другого домена."""
     from nexus.handlers.finance import _is_other_domain_command
@@ -153,6 +170,29 @@ async def test_intercept_bypass_on_memory(tmp_budget_db):
         "buf": [],
     })
     msg = _make_message(uid, "запомни что Маша любит чай")
+
+    with patch(
+        "nexus.handlers.finance._run_budget_analysis", AsyncMock(),
+    ) as mock_analysis:
+        result = await handle_budget_setup_text(msg, "")
+
+    assert result is False
+    mock_analysis.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_intercept_bypass_on_task_with_reminder(tmp_budget_db):
+    """issue #90: has_plan + «задача … напоминание …» → НЕ корректировка,
+    Sonnet не пересчитывает план."""
+    from nexus.handlers.finance import handle_budget_setup_text
+
+    uid = 999_004
+    _seed_state(uid, {
+        "plan": {"income": 100000},
+        "state": "has_plan",
+        "buf": [],
+    })
+    msg = _make_message(uid, "задача проверить интернет напоминание на 3 июля 13 часов")
 
     with patch(
         "nexus.handlers.finance._run_budget_analysis", AsyncMock(),
