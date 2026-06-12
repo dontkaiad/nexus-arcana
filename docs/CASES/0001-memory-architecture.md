@@ -1,38 +1,33 @@
-ADR-0001 — Архитектура памяти: структурный слой + слой векторного извлечения
+# ADR-0001: Memory architecture — structural layer + vector retrieval layer
 
-* Статус: Accepted (планирование; реализация — в рамках миграции Notion → Postgres)
-* Дата: 2026-06-12
+## Status
+Accepted (planning phase; implementation during Notion → PostgreSQL migration)
 
-Контекст
+## Context
+The bots store two fundamentally different types of "memory":
 
-Боты хранят два принципиально разных вида «памяти»:
+1. **Exact key-based facts** — user timezone, category limits, income, goals, preferences, personalization profile (fed to system prompts). Retrieved deterministically: by key/category, with filters and aggregates.
+2. **Unstructured corpora** — grimoire (spells/recipes), past tarot interpretations, client request/note history. Retrieved by meaning ("find similar"), not by exact key.
 
-1. Точные факты по ключу — таймзона пользователя, лимиты по категориям, доход, цели, предпочтения, профиль персонализации (кормит системный промпт). Извлекаются детерминированно: по ключу/категории, с фильтрами и агрегатами.
-2. Неструктурированные корпуса — гримуар (заговоры/рецепты), прошлые трактовки раскладов, история запросов/заметок клиентов. Извлекаются по смыслу («найди похожее»), а не по точному ключу.
+Today everything lives in Notion as key-value/rows. Migration to PostgreSQL raised a question: should we introduce RAG (vector search via embeddings), and if so, should it replace the current memory entirely?
 
-Сейчас всё лежит в Notion как key-value/строки. При миграции на Postgres встал вопрос: вводить ли RAG (векторный поиск по эмбеддингам) и — если да — заменять ли им текущую «память» целиком.
+## Decision
+Memory is not replaced by RAG. Two-layer architecture:
 
-Решение
+- **Structural layer** (PostgreSQL, relational tables) — for exact-by-key facts. Deterministic, with filters and aggregates. Source of record.
+- **Vector layer** (RAG) — on top of unstructured corpora, for similar-by-meaning. This is an index/supplemental retrieval, not source of truth.
 
-Память не заменяется на RAG. Двухслойная архитектура:
+Both layers feed the prompt together: structural facts as hard context, RAG snippets as soft context.
 
-* Структурный слой (Postgres, реляционные таблицы) — для exact-by-key фактов. Детерминированно, с фильтрами и агрегатами. Source of record.
-* Векторный слой (RAG) — поверх неструктурированных корпусов, для similar-by-meaning. Это индекс/дополнительное извлечение, не хранилище истины.
+## Alternatives considered
+1. **Everything in vectors (RAG as universal memory).** Rejected: exact values (limits, tz, sums) are unreliably retrieved via similarity search; aggregates and filters ("all active limits", "sum by category") are lost; hallucination surface grows. Vector search answers "similar", but config facts require "exact".
+2. **Everything in SQL, no vectors.** Rejected: semantic search over grimoire/history via `LIKE`/full-text operates on words, not meaning — doesn't scale to paraphrases and synonymous queries.
 
-В промпт оба слоя подаются вместе: структурные факты — как жёсткий контекст, RAG-сниппеты — как мягкий.
+## Consequences
+- (+) Each query routes to the tool matching its retrieval type → exact-fact reliability preserved; semantics added only where needed.
+- (+) Embedding boundary is explicit: need exact-by-key → SQL; need similar-by-meaning → vector.
+- (−) Two retrieval paths = more code and infrastructure than one.
+- Boundary categories (freeform observations: insights, patterns) can live in both layers: source of record in SQL, embedding as index on top. Duplication is intentional.
 
-Рассмотренные альтернативы
-
-1. Всё в вектор (RAG как универсальная память). Отвергнуто: точные значения (лимиты, tz, суммы) в similarity-поиске извлекаются ненадёжно; теряются агрегаты и фильтры («все активные лимиты», «сумма по категории»); растёт поверхность галлюцинаций. Векторный поиск отвечает «похоже», а для конфиг-фактов нужно «точно».
-2. Всё в SQL, без векторов. Отвергнуто: семантический поиск по гримуару/истории через `LIKE`/full-text работает по словам, а не по смыслу — не масштабируется на парафразы и синонимичные запросы.
-
-Trade-offs / следствия
-
-* (+) Каждый запрос идёт в инструмент под свой тип извлечения → надёжность exact-фактов сохраняется, семантика добавляется только там, где нужна.
-* (+) Граница «что эмбеддить» явная: нужен exact-by-key → SQL; нужен similar-by-meaning → vector.
-* (−) Два пути извлечения = больше кода и инфраструктуры, чем один.
-* Пограничные категории (фримформ-наблюдения: инсайты, паттерны) могут жить в обоих слоях: source of record в SQL, эмбеддинг как индекс сверху. Дублирование осознанное.
-
-Открытый вопрос (отдельный ADR)
-
-Vector backend: выделенный Qdrant vs `pgvector` внутри Postgres. На малом корпусе и 2 ГБ RAM `pgvector` проще (один сервис, транзакции с реляционными данными, общий бэкап); Qdrant выигрывает на масштабе и фильтруемых payload'ах. Решается отдельным ADR-0002 с замером под реальный размер корпуса.
+## Open question (future ADR)
+Vector backend: dedicated Qdrant vs `pgvector` inside PostgreSQL. On small corpus and 2 GB RAM, `pgvector` is simpler (one service, transactions with relational data, single backup); Qdrant scales better and supports filterable payloads. Decided in a future ADR with real corpus measurements.
