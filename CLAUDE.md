@@ -507,6 +507,10 @@ http://localhost:5173, http://localhost:5174
 
 Настройки CORS защищены `tests/test_cors_config.py` — `*` запрещён.
 
+### Sub-agents
+
+Sub-agents живут в `.claude/agents/*.md`. Папка `.claude/` в `.gitignore` (локальные settings.local.json + worktrees приватны), поэтому НОВЫЙ файл агента добавляй через `git add -f .claude/agents/<имя>.md`; уже затреканные агенты коммитятся обычным `git add`.
+
 ## Реакции Telegram
 
 Поддерживаются только: ⚡🔥👌🏆✍️💅🫡🌚❤️‍🔥🤓😈🤔🤡👀👂📸
