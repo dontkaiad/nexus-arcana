@@ -3,6 +3,10 @@
 `handle_list_inv_add` падал на batch-вводе: Haiku возвращал list, а код звал
 `.get(...)` на нём. Покрываем нормализацию + smoke на batch-флоу без
 обращения к Notion (через моки).
+
+Также: #76 (regex-fallback + category-хинты), #77 (эвристика «медицинский
+список без префикса»), #78 (_parse_inv_line: qty + note из одной строки),
+#79 (извлечение срока годности).
 """
 from __future__ import annotations
 
@@ -13,56 +17,308 @@ import pytest
 from nexus.handlers import lists as lists_mod
 
 
-def test_normalize_inv_items_dict_with_items():
-    parsed = {"items": [
-        {"name": "меновазин", "quantity": 2, "category": "🏥 Здоровье"},
-        {"name": "уголь", "quantity": 1, "note": "250мг 30шт"},
-    ]}
-    out = lists_mod._normalize_inv_items(parsed)
-    assert len(out) == 2
-    assert out[0]["name"] == "меновазин" and out[0]["quantity"] == 2
-    assert out[1]["note"] == "250мг 30шт"
+# ── #75: _normalize_inv_items — нормализация ответа Haiku ───────────────────
+
+@pytest.mark.parametrize("parsed,expected", [
+    # {items:[...]} — основной batch-формат
+    pytest.param(
+        {"items": [
+            {"name": "меновазин", "quantity": 2, "category": "🏥 Здоровье"},
+            {"name": "уголь", "quantity": 1, "note": "250мг 30шт"},
+        ]},
+        [
+            {"name": "меновазин", "quantity": 2, "note": "", "category": "🏥 Здоровье", "expiry": ""},
+            {"name": "уголь", "quantity": 1, "note": "250мг 30шт", "category": "💳 Прочее", "expiry": ""},
+        ],
+        id="dict-with-items"),
+    # legacy одиночный {item:...}
+    pytest.param(
+        {"item": "парацетамол", "quantity": 1, "category": "🏥 Здоровье"},
+        [{"name": "парацетамол", "quantity": 1, "note": "", "category": "🏥 Здоровье", "expiry": ""}],
+        id="legacy-single-dict"),
+    # голый list
+    pytest.param(
+        [{"name": "ромашка", "quantity": 1}, {"name": "шалфей", "quantity": 1}],
+        [
+            {"name": "ромашка", "quantity": 1, "note": "", "category": "💳 Прочее", "expiry": ""},
+            {"name": "шалфей", "quantity": 1, "note": "", "category": "💳 Прочее", "expiry": ""},
+        ],
+        id="bare-list"),
+    # дефолты для отсутствующих полей
+    pytest.param(
+        {"items": [{"name": "x"}]},
+        [{"name": "x", "quantity": 1, "note": "", "category": "💳 Прочее", "expiry": ""}],
+        id="defaults-for-missing-fields"),
+    # пустые имена и мусор-элементы пропускаются
+    pytest.param(
+        {"items": [{"name": ""}, {"item": None}, {"name": "valid"}, "junk-string"]},
+        [{"name": "valid", "quantity": 1, "note": "", "category": "💳 Прочее", "expiry": ""}],
+        id="skips-empty-names"),
+    # мусор на входе → []
+    pytest.param(None, [], id="garbage-none"),
+    pytest.param("not json", [], id="garbage-string"),
+    pytest.param(42, [], id="garbage-int"),
+    # #79: expiry из ключа expires (Haiku-формат)
+    pytest.param(
+        {"items": [{"name": "крем", "quantity": 1, "expires": "2027-03-31"}]},
+        [{"name": "крем", "quantity": 1, "note": "", "category": "💳 Прочее", "expiry": "2027-03-31"}],
+        id="expiry-from-haiku-expires"),
+    # #79: Haiku не выделил срок — дочищаем из note
+    pytest.param(
+        {"items": [{"name": "гексаспрей", "quantity": 1, "note": "30гр годен до 03.2027"}]},
+        [{"name": "гексаспрей", "quantity": 1, "note": "30гр", "category": "💳 Прочее", "expiry": "2027-03-31"}],
+        id="expiry-recovered-from-note"),
+])
+def test_normalize_inv_items(parsed, expected):
+    """_normalize_inv_items: {items:[...]} / одиночный {item:...} / голый list →
+    список dict'ов с дефолтами; мусор → []."""
+    assert lists_mod._normalize_inv_items(parsed) == expected
 
 
-def test_normalize_inv_items_legacy_single_dict():
-    parsed = {"item": "парацетамол", "quantity": 1, "category": "🏥 Здоровье"}
-    out = lists_mod._normalize_inv_items(parsed)
-    assert len(out) == 1
-    assert out[0]["name"] == "парацетамол"
-    assert out[0]["category"] == "🏥 Здоровье"
+# ── #76: category-хинты ──────────────────────────────────────────────────────
+
+@pytest.mark.parametrize("hint,category", [
+    pytest.param("лекарства", "🏥 Здоровье", id="health-lekarstva"),
+    pytest.param("ТАБЛЕТКИ", "🏥 Здоровье", id="health-tabletki-upper"),
+    pytest.param("аптечка", "🏥 Здоровье", id="health-aptechka"),
+    pytest.param("продукты", "🍜 Продукты", id="food-produkty"),
+    pytest.param("еду", "🍜 Продукты", id="food-edu"),
+    pytest.param("бытовая химия", "🧹 Дом", id="home-chemistry"),
+    pytest.param("косметика", "💄 Красота", id="beauty-kosmetika"),
+    pytest.param("инструменты", "🔧 Инструменты", id="tools-instrumenty"),
+    pytest.param("xyz", "", id="unknown-word"),
+    pytest.param("", "", id="empty-string"),
+])
+def test_category_from_hint(hint, category):
+    """_category_from_hint: слово-хинт из префикса → категория инвентаря (или '')."""
+    assert lists_mod._category_from_hint(hint) == category
 
 
-def test_normalize_inv_items_bare_list():
-    parsed = [
-        {"name": "ромашка", "quantity": 1},
-        {"name": "шалфей", "quantity": 1},
-    ]
-    out = lists_mod._normalize_inv_items(parsed)
-    assert [it["name"] for it in out] == ["ромашка", "шалфей"]
+# ── #76/#78: regex-fallback построчного разбора ──────────────────────────────
+
+@pytest.mark.parametrize("text,expected", [
+    # Префикс с категорией; после #78 fallback извлекает qty/note —
+    # дозировка уходит в note, строки без цифр — целиком в name.
+    pytest.param(
+        "занеси в инвентарь лекарства\n"
+        "сироп солодки (немного)\n"
+        "рициниол базовый 30мл\n"
+        "зубные нити",
+        [
+            {"name": "сироп солодки (немного)", "quantity": 1, "note": "", "category": "🏥 Здоровье", "expiry": ""},
+            {"name": "рициниол базовый", "quantity": 1, "note": "30мл", "category": "🏥 Здоровье", "expiry": ""},
+            {"name": "зубные нити", "quantity": 1, "note": "", "category": "🏥 Здоровье", "expiry": ""},
+        ],
+        id="category-prefix-health"),
+    # Префикс без категории → дефолт 💳 Прочее
+    pytest.param(
+        "занеси в инвентарь\nфонарик\nверёвка",
+        [
+            {"name": "фонарик", "quantity": 1, "note": "", "category": "💳 Прочее", "expiry": ""},
+            {"name": "верёвка", "quantity": 1, "note": "", "category": "💳 Прочее", "expiry": ""},
+        ],
+        id="no-category-uses-default"),
+    # Bullet-символы (•, -, —) срезаются
+    pytest.param(
+        "добавь в инвентарь продукты\n• молоко\n- хлеб\n— сыр",
+        [
+            {"name": "молоко", "quantity": 1, "note": "", "category": "🍜 Продукты", "expiry": ""},
+            {"name": "хлеб", "quantity": 1, "note": "", "category": "🍜 Продукты", "expiry": ""},
+            {"name": "сыр", "quantity": 1, "note": "", "category": "🍜 Продукты", "expiry": ""},
+        ],
+        id="strips-bullet-chars"),
+    # Пусто / только префикс → []
+    pytest.param("", [], id="empty-text"),
+    pytest.param("занеси в инвентарь лекарства", [], id="prefix-only"),
+    # Регресс #78: реальный batch Кай должен сохранить количества
+    pytest.param(
+        "занеси в инвентарь лекарства\n"
+        "меновазин 2 шт\n"
+        "глюкофаж 1000мг 10 шт\n"
+        "пластырь 58шт\n"
+        "бинт обычный",
+        [
+            {"name": "меновазин", "quantity": 2, "note": "", "category": "🏥 Здоровье", "expiry": ""},
+            {"name": "глюкофаж", "quantity": 10, "note": "1000мг", "category": "🏥 Здоровье", "expiry": ""},
+            {"name": "пластырь", "quantity": 58, "note": "", "category": "🏥 Здоровье", "expiry": ""},
+            {"name": "бинт обычный", "quantity": 1, "note": "", "category": "🏥 Здоровье", "expiry": ""},
+        ],
+        id="extracts-qty-for-each-line"),
+    # Без префикса, но много фарм-маркеров → дефолт = 🏥 Здоровье
+    pytest.param(
+        "велаксин 75мг 10шт\nвенлафаксин 37.5мг\nзубные нити",
+        [
+            {"name": "велаксин", "quantity": 10, "note": "75мг", "category": "🏥 Здоровье", "expiry": ""},
+            {"name": "венлафаксин", "quantity": 1, "note": "37.5мг", "category": "🏥 Здоровье", "expiry": ""},
+            {"name": "зубные нити", "quantity": 1, "note": "", "category": "🏥 Здоровье", "expiry": ""},
+        ],
+        id="auto-detects-health-from-pharm-markers"),
+    # Без фарм-маркеров — дефолт остаётся 💳 Прочее
+    pytest.param(
+        "фонарик\nверёвка\nспички",
+        [
+            {"name": "фонарик", "quantity": 1, "note": "", "category": "💳 Прочее", "expiry": ""},
+            {"name": "верёвка", "quantity": 1, "note": "", "category": "💳 Прочее", "expiry": ""},
+            {"name": "спички", "quantity": 1, "note": "", "category": "💳 Прочее", "expiry": ""},
+        ],
+        id="no-pharm-markers-keeps-default"),
+])
+def test_fallback_split_inv_text(text, expected):
+    """_fallback_split_inv_text: построчный regex-fallback — категория из
+    префикса/фарм-маркеров, qty/note из каждой строки, bullets срезаются."""
+    assert lists_mod._fallback_split_inv_text(text) == expected
 
 
-def test_normalize_inv_items_defaults_for_missing_fields():
-    out = lists_mod._normalize_inv_items({"items": [{"name": "x"}]})
-    assert out[0]["quantity"] == 1
-    assert out[0]["category"] == "💳 Прочее"
-    assert out[0]["note"] == ""
+# ── #77: эвристика «медицинский список без префикса» ─────────────────────────
+
+@pytest.mark.parametrize("text,expected", [
+    # Реальный кейс из бага #77: список лекарств без префикса
+    pytest.param(
+        "велаксин таблетки 75мг 9.5шт\n"
+        "венлафаксин-алси таблетки 37.5мг 10шт\n"
+        "мендилекс бипериден 2мг8 шт\n"
+        "пластырь 58шт\n"
+        "измеритель артериального давления\n"
+        "сироп солодки (немного)\n"
+        "рициниол базовый без эмульсии 30мл\n"
+        "зубные нити",
+        True, id="typical-med-batch"),
+    # Слишком мало строк
+    pytest.param("парацетамол 500мг", False, id="one-line-not-enough"),
+    pytest.param("парацетамол 500мг\nибупрофен 200мг", False, id="two-lines-not-enough"),
+    # Нет фарм-маркеров
+    pytest.param("купить молоко\nкупить хлеб\nкупить сыр\nкупить масло",
+                 False, id="no-pharm-markers"),
+    # «чек 4к продукты 2500» и подобное не должно ловиться (финансы)
+    pytest.param("чек 4к привычки 1500 продукты 2500", False, id="finance-not-matched"),
+    # Одной фарм-строки недостаточно
+    pytest.param("парацетамол 500мг\nкупить кота\nпозвонить маме",
+                 False, id="single-pharm-line-not-enough"),
+])
+def test_looks_like_med_inventory(text, expected):
+    """_looks_like_med_inventory: >=3 строк + >=2 фарм-маркера → True;
+    финансы/задачи/короткие списки → False."""
+    from core.list_classifier import _looks_like_med_inventory
+    assert _looks_like_med_inventory(text) is expected
 
 
-def test_normalize_inv_items_skips_empty_names():
-    out = lists_mod._normalize_inv_items({"items": [
-        {"name": ""},
-        {"item": None},
-        {"name": "valid"},
-        "junk-string",
-    ]})
-    assert [it["name"] for it in out] == ["valid"]
+@pytest.mark.asyncio
+async def test_classifier_routes_med_list_to_inventory_not_budget():
+    """Главный регресс #77: медицинский список → list_inventory_add, НЕ budget.
+
+    Это предотвращает дорогостоящий Sonnet-вызов budget-анализа.
+    """
+    from core import classifier
+    text = (
+        "велаксин таблетки 75мг 9.5шт\n"
+        "венлафаксин-алси таблетки 37.5мг 10шт\n"
+        "пластырь 58шт\n"
+        "сироп солодки\n"
+        "рициниол базовый 30мл"
+    )
+    # Haiku Router НЕ должен вызываться — pre-filter ловит раньше.
+    with patch.object(classifier, "ask_claude", AsyncMock(side_effect=AssertionError(
+        "ask_claude must NOT be called — pre-filter should match first"
+    ))):
+        result = await classifier.classify(text, tz_offset=3)
+    assert isinstance(result, list) and len(result) == 1
+    assert result[0]["type"] == "list_inventory_add"
 
 
-def test_normalize_inv_items_garbage_returns_empty():
-    assert lists_mod._normalize_inv_items(None) == []
-    assert lists_mod._normalize_inv_items("not json") == []
-    assert lists_mod._normalize_inv_items(42) == []
+@pytest.mark.parametrize("text", [
+    # `занеси/положи/закинь/запиши в инвентарь` ловятся pre-filter'ом,
+    # не уходят в Haiku
+    pytest.param("занеси в инвентарь лекарства", id="zanesi"),
+    pytest.param("положи в инвентарь", id="polozhi"),
+    pytest.param("закинь в инвентарь молоко", id="zakin"),
+    pytest.param("запиши в инвентарь", id="zapishi"),
+    # Старые варианты тоже работают
+    pytest.param("добавь в инвентарь", id="dobav-legacy"),
+    pytest.param("дома есть: парацетамол", id="doma-est-legacy"),
+])
+def test_list_inv_add_re_catches_variants(text):
+    """_LIST_INV_ADD_RE: все глаголы-варианты «… в инвентарь» ловятся pre-filter'ом."""
+    from core.list_classifier import _LIST_INV_ADD_RE
+    assert _LIST_INV_ADD_RE.search(text)
 
+
+# ── #78/#79: _parse_inv_line — name + qty + note + expiry из одной строки ────
+
+@pytest.mark.parametrize("line,name,qty,note,expiry", [
+    pytest.param("меновазин 2 шт", "меновазин", 2, "", "", id="qty-sht"),
+    pytest.param("глюкофаж 1000мг 10 шт", "глюкофаж", 10, "1000мг", "", id="dose-then-qty"),
+    pytest.param("активированный уголь 250мг 1 пачка 30шт", "активированный уголь", 30, "250мг", "", id="last-qty-wins"),
+    pytest.param("пластырь 58шт", "пластырь", 58, "", "", id="qty-no-space"),
+    pytest.param("бинт обычный", "бинт обычный", 1, "", "", id="no-digits"),
+    pytest.param("хлорид натрия 0,9% 400мл", "хлорид натрия", 1, "0,9% 400мл", "", id="percent-and-ml-to-note"),
+    pytest.param("вата", "вата", 1, "", "", id="single-word"),
+    pytest.param("ибупрофен 400мг 16 шт", "ибупрофен", 16, "400мг", "", id="ibuprofen"),
+    pytest.param("шприцы 5кубов 3 шт", "шприцы", 3, "5кубов", "", id="kuby-note"),
+    pytest.param("лизобакт 20 таблеток", "лизобакт", 20, "", "", id="tabletok-qty"),
+    pytest.param("активированный уголь 500мг 50 таблеток", "активированный уголь", 50, "500мг", "", id="dose-and-tabletok"),
+    pytest.param("сульфат магния 6 пакетов по 25г", "сульфат магния", 6, "по 25г", "", id="pakety-qty"),
+    pytest.param("найз 100мг 6шт", "найз", 6, "100мг", "", id="dose-qty-no-space"),
+    pytest.param("супрастин 20 шт", "супрастин", 20, "", "", id="plain-qty"),
+    # #79: «годен до …» извлекается в expiry, в note остаётся только дозировка
+    pytest.param("гексаспрей аэрозоль 2,5% 30гр годен до 03.2027",
+                 "гексаспрей аэрозоль", 1, "2,5% 30гр", "2027-03-31", id="expiry-month-year"),
+    pytest.param("парацетамол 500мг 10шт годен до 15.06.2026",
+                 "парацетамол", 10, "500мг", "2026-06-15", id="expiry-with-qty"),
+    # bullet-символы срезаются
+    pytest.param("• молоко", "молоко", 1, "", "", id="strips-bullet-dot"),
+    pytest.param("— парацетамол 2 шт", "парацетамол", 2, "", "", id="strips-bullet-dash"),
+])
+def test_parse_inv_line(line, name, qty, note, expiry):
+    """_parse_inv_line: одна строка → name + quantity + note + expiry."""
+    out = lists_mod._parse_inv_line(line)
+    assert out is not None
+    assert out["name"] == name, f"name mismatch for {line!r}: got {out['name']!r}"
+    assert out["quantity"] == qty, f"qty mismatch for {line!r}: got {out['quantity']!r}"
+    assert out["note"] == note, f"note mismatch for {line!r}: got {out['note']!r}"
+    assert out["expiry"] == expiry, f"expiry mismatch for {line!r}: got {out['expiry']!r}"
+
+
+@pytest.mark.parametrize("line", [
+    pytest.param("", id="empty"),
+    pytest.param("   ", id="whitespace-only"),
+])
+def test_parse_inv_line_empty_returns_none(line):
+    """_parse_inv_line: пустой ввод → None."""
+    assert lists_mod._parse_inv_line(line) is None
+
+
+# ── #79: извлечение срока годности ───────────────────────────────────────────
+
+@pytest.mark.parametrize("text,iso,cleaned", [
+    pytest.param("гексаспрей 30гр годен до 03.2027", "2027-03-31", "гексаспрей 30гр", id="goden-do-month-year"),
+    pytest.param("парацетамол годен до 15.06.2026", "2026-06-15", "парацетамол", id="goden-do-full-date"),
+    pytest.param("мазь до 01.2027", "2027-01-31", "мазь", id="do-month-year"),
+    pytest.param("сыворотка срок годности 12.2025", "2025-12-31", "сыворотка", id="srok-godnosti-month-year"),
+    pytest.param("крем срок годности до 28.02.2026", "2026-02-28", "крем", id="srok-godnosti-do-full-date"),
+    pytest.param("таблетки до 30.04.27", "2027-04-30", "таблетки", id="two-digit-year"),
+    pytest.param("просто крем без даты", None, "просто крем без даты", id="no-date"),
+    pytest.param("крем до 99.2027", None, "крем до 99.2027", id="invalid-month-ignored"),
+])
+def test_extract_expiry(text, iso, cleaned):
+    """extract_expiry: «годен до» / «срок годности» + дата → ISO + очищенный
+    текст; невалидный месяц / отсутствие даты — текст не трогаем."""
+    from core.inv_line_parser import extract_expiry
+    got_iso, got_clean = extract_expiry(text)
+    assert got_iso == iso, f"iso mismatch for {text!r}: got {got_iso!r}"
+    assert got_clean == cleaned, f"cleaned mismatch for {text!r}: got {got_clean!r}"
+
+
+def test_extract_expiry_month_only_uses_last_day():
+    from core.inv_line_parser import extract_expiry
+    # февраль невисокосного 2027 → 28 число
+    iso, _ = extract_expiry("до 02.2027")
+    assert iso == "2027-02-28"
+    # февраль високосного 2028 → 29 число
+    iso2, _ = extract_expiry("до 02.2028")
+    assert iso2 == "2028-02-29"
+
+
+# ── handle_list_inv_add: smoke-флоу с моками (уникальная логика) ─────────────
 
 @pytest.mark.asyncio
 async def test_handle_list_inv_add_batch_does_not_ask_expiry():
@@ -148,63 +404,6 @@ async def test_handle_list_inv_add_empty_parse_responds_gracefully():
     assert "Не смог разобрать" in msg.answer.call_args.args[0]
 
 
-# ── #76: regex-fallback и category-хинты ─────────────────────────────────────
-
-def test_category_from_hint_health():
-    assert lists_mod._category_from_hint("лекарства") == "🏥 Здоровье"
-    assert lists_mod._category_from_hint("ТАБЛЕТКИ") == "🏥 Здоровье"
-    assert lists_mod._category_from_hint("аптечка") == "🏥 Здоровье"
-
-
-def test_category_from_hint_other_categories():
-    assert lists_mod._category_from_hint("продукты") == "🍜 Продукты"
-    assert lists_mod._category_from_hint("еду") == "🍜 Продукты"
-    assert lists_mod._category_from_hint("бытовая химия") == "🧹 Дом"
-    assert lists_mod._category_from_hint("косметика") == "💄 Красота"
-    assert lists_mod._category_from_hint("инструменты") == "🔧 Инструменты"
-
-
-def test_category_from_hint_unknown():
-    assert lists_mod._category_from_hint("xyz") == ""
-    assert lists_mod._category_from_hint("") == ""
-
-
-def test_fallback_split_with_category_prefix():
-    text = (
-        "занеси в инвентарь лекарства\n"
-        "сироп солодки (немного)\n"
-        "рициниол базовый 30мл\n"
-        "зубные нити"
-    )
-    items = lists_mod._fallback_split_inv_text(text)
-    # После #78 fallback извлекает qty/note → дозировка уходит в note.
-    by_name = {it["name"]: it for it in items}
-    assert "сироп солодки (немного)" in by_name  # без цифр — всё в name
-    assert "рициниол базовый" in by_name and by_name["рициниол базовый"]["note"] == "30мл"
-    assert "зубные нити" in by_name
-    assert all(it["category"] == "🏥 Здоровье" for it in items)
-    assert all(it["quantity"] == 1 for it in items)
-
-
-def test_fallback_split_without_category_uses_default():
-    text = "занеси в инвентарь\nфонарик\nверёвка"
-    items = lists_mod._fallback_split_inv_text(text)
-    assert [it["name"] for it in items] == ["фонарик", "верёвка"]
-    assert all(it["category"] == "💳 Прочее" for it in items)
-
-
-def test_fallback_split_strips_bullet_chars():
-    text = "добавь в инвентарь продукты\n• молоко\n- хлеб\n— сыр"
-    items = lists_mod._fallback_split_inv_text(text)
-    assert [it["name"] for it in items] == ["молоко", "хлеб", "сыр"]
-    assert all(it["category"] == "🍜 Продукты" for it in items)
-
-
-def test_fallback_split_empty_returns_empty():
-    assert lists_mod._fallback_split_inv_text("") == []
-    assert lists_mod._fallback_split_inv_text("занеси в инвентарь лекарства") == []
-
-
 @pytest.mark.asyncio
 async def test_handle_list_inv_add_uses_fallback_when_haiku_returns_empty():
     """Haiku вернул items=[] — переходим на regex-fallback, создаём айтемы."""
@@ -244,165 +443,6 @@ async def test_handle_list_inv_add_uses_fallback_when_haiku_returns_empty():
     assert "3 позиций" in msg.answer.call_args.args[0]
 
 
-# ── #77: эвристика «медицинский список без префикса» ─────────────────────────
-
-def test_looks_like_med_inventory_typical_input():
-    """Реальный кейс из бага #77: список лекарств без префикса."""
-    from core.list_classifier import _looks_like_med_inventory
-    text = (
-        "велаксин таблетки 75мг 9.5шт\n"
-        "венлафаксин-алси таблетки 37.5мг 10шт\n"
-        "мендилекс бипериден 2мг8 шт\n"
-        "пластырь 58шт\n"
-        "измеритель артериального давления\n"
-        "сироп солодки (немного)\n"
-        "рициниол базовый без эмульсии 30мл\n"
-        "зубные нити"
-    )
-    assert _looks_like_med_inventory(text) is True
-
-
-def test_looks_like_med_inventory_too_few_lines():
-    from core.list_classifier import _looks_like_med_inventory
-    assert _looks_like_med_inventory("парацетамол 500мг") is False
-    assert _looks_like_med_inventory("парацетамол 500мг\nибупрофен 200мг") is False
-
-
-def test_looks_like_med_inventory_no_pharm_markers():
-    from core.list_classifier import _looks_like_med_inventory
-    text = "купить молоко\nкупить хлеб\nкупить сыр\nкупить масло"
-    assert _looks_like_med_inventory(text) is False
-
-
-def test_looks_like_med_inventory_does_not_match_finance():
-    """«чек 4к продукты 2500» и подобное не должно ловиться."""
-    from core.list_classifier import _looks_like_med_inventory
-    assert _looks_like_med_inventory("чек 4к привычки 1500 продукты 2500") is False
-
-
-def test_looks_like_med_inventory_single_pharm_line_not_enough():
-    from core.list_classifier import _looks_like_med_inventory
-    text = "парацетамол 500мг\nкупить кота\nпозвонить маме"
-    assert _looks_like_med_inventory(text) is False
-
-
-@pytest.mark.asyncio
-async def test_classifier_routes_med_list_to_inventory_not_budget():
-    """Главный регресс #77: медицинский список → list_inventory_add, НЕ budget.
-
-    Это предотвращает дорогостоящий Sonnet-вызов budget-анализа.
-    """
-    from core import classifier
-    text = (
-        "велаксин таблетки 75мг 9.5шт\n"
-        "венлафаксин-алси таблетки 37.5мг 10шт\n"
-        "пластырь 58шт\n"
-        "сироп солодки\n"
-        "рициниол базовый 30мл"
-    )
-    # Haiku Router НЕ должен вызываться — pre-filter ловит раньше.
-    with patch.object(classifier, "ask_claude", AsyncMock(side_effect=AssertionError(
-        "ask_claude must NOT be called — pre-filter should match first"
-    ))):
-        result = await classifier.classify(text, tz_offset=3)
-    assert isinstance(result, list) and len(result) == 1
-    assert result[0]["type"] == "list_inventory_add"
-
-
-# ── #78: _parse_inv_line — qty + note из одной строки ────────────────────────
-
-@pytest.mark.parametrize("line,name,qty,note", [
-    ("меновазин 2 шт", "меновазин", 2, ""),
-    ("глюкофаж 1000мг 10 шт", "глюкофаж", 10, "1000мг"),
-    ("активированный уголь 250мг 1 пачка 30шт", "активированный уголь", 30, "250мг"),
-    ("пластырь 58шт", "пластырь", 58, ""),
-    ("бинт обычный", "бинт обычный", 1, ""),
-    ("хлорид натрия 0,9% 400мл", "хлорид натрия", 1, "0,9% 400мл"),
-    ("вата", "вата", 1, ""),
-    ("ибупрофен 400мг 16 шт", "ибупрофен", 16, "400мг"),
-    ("шприцы 5кубов 3 шт", "шприцы", 3, "5кубов"),
-    ("лизобакт 20 таблеток", "лизобакт", 20, ""),
-    ("активированный уголь 500мг 50 таблеток", "активированный уголь", 50, "500мг"),
-    ("сульфат магния 6 пакетов по 25г", "сульфат магния", 6, "по 25г"),
-    ("найз 100мг 6шт", "найз", 6, "100мг"),
-    ("супрастин 20 шт", "супрастин", 20, ""),
-    # после #79 «годен до …» извлекается в expiry, в note остаётся только дозировка
-    ("гексаспрей аэрозоль 2,5% 30гр годен до 03.2027", "гексаспрей аэрозоль", 1, "2,5% 30гр"),
-])
-def test_parse_inv_line_extracts_qty_and_note(line, name, qty, note):
-    out = lists_mod._parse_inv_line(line)
-    assert out is not None
-    assert out["name"] == name, f"name mismatch for {line!r}: got {out['name']!r}"
-    assert out["quantity"] == qty, f"qty mismatch for {line!r}: got {out['quantity']!r}"
-    assert out["note"] == note, f"note mismatch for {line!r}: got {out['note']!r}"
-
-
-# ── #79: извлечение срока годности ───────────────────────────────────────────
-
-@pytest.mark.parametrize("text,iso,cleaned", [
-    ("гексаспрей 30гр годен до 03.2027", "2027-03-31", "гексаспрей 30гр"),
-    ("парацетамол годен до 15.06.2026", "2026-06-15", "парацетамол"),
-    ("мазь до 01.2027", "2027-01-31", "мазь"),
-    ("сыворотка срок годности 12.2025", "2025-12-31", "сыворотка"),
-    ("крем срок годности до 28.02.2026", "2026-02-28", "крем"),
-    ("таблетки до 30.04.27", "2027-04-30", "таблетки"),
-    ("просто крем без даты", None, "просто крем без даты"),
-])
-def test_extract_expiry(text, iso, cleaned):
-    from core.inv_line_parser import extract_expiry
-    got_iso, got_clean = extract_expiry(text)
-    assert got_iso == iso, f"iso mismatch for {text!r}: got {got_iso!r}"
-    assert got_clean == cleaned, f"cleaned mismatch for {text!r}: got {got_clean!r}"
-
-
-def test_extract_expiry_month_only_uses_last_day():
-    from core.inv_line_parser import extract_expiry
-    # февраль невисокосного 2027 → 28 число
-    iso, _ = extract_expiry("до 02.2027")
-    assert iso == "2027-02-28"
-    # февраль високосного 2028 → 29 число
-    iso2, _ = extract_expiry("до 02.2028")
-    assert iso2 == "2028-02-29"
-
-
-def test_extract_expiry_invalid_month_ignored():
-    from core.inv_line_parser import extract_expiry
-    iso, clean = extract_expiry("крем до 99.2027")
-    assert iso is None
-    assert clean == "крем до 99.2027"
-
-
-def test_parse_inv_line_extracts_expiry():
-    out = lists_mod._parse_inv_line("гексаспрей аэрозоль 2,5% 30гр годен до 03.2027")
-    assert out["name"] == "гексаспрей аэрозоль"
-    assert out["note"] == "2,5% 30гр"
-    assert out["expiry"] == "2027-03-31"
-
-
-def test_parse_inv_line_expiry_with_qty():
-    out = lists_mod._parse_inv_line("парацетамол 500мг 10шт годен до 15.06.2026")
-    assert out["name"] == "парацетамол"
-    assert out["quantity"] == 10
-    assert out["note"] == "500мг"
-    assert out["expiry"] == "2026-06-15"
-
-
-def test_normalize_inv_items_extracts_expiry_from_haiku_expires():
-    out = lists_mod._normalize_inv_items({"items": [
-        {"name": "крем", "quantity": 1, "expires": "2027-03-31"},
-    ]})
-    assert out[0]["expiry"] == "2027-03-31"
-
-
-def test_normalize_inv_items_recovers_expiry_from_note():
-    """Haiku не выделил срок — дочищаем из note."""
-    out = lists_mod._normalize_inv_items({"items": [
-        {"name": "гексаспрей", "quantity": 1, "note": "30гр годен до 03.2027"},
-    ]})
-    assert out[0]["expiry"] == "2027-03-31"
-    assert out[0]["note"] == "30гр"
-
-
 @pytest.mark.asyncio
 async def test_handle_inv_add_single_with_expiry_does_not_ask():
     """Если срок извлечён — не спрашиваем повторно."""
@@ -428,65 +468,6 @@ async def test_handle_inv_add_single_with_expiry_does_not_ask():
     p_set.assert_not_called()
     assert msg.answer.call_count == 1
     assert "до 2027-03-31" in msg.answer.call_args.args[0]
-
-
-def test_parse_inv_line_strips_bullets():
-    assert lists_mod._parse_inv_line("• молоко")["name"] == "молоко"
-    assert lists_mod._parse_inv_line("— парацетамол 2 шт")["quantity"] == 2
-
-
-def test_parse_inv_line_empty_returns_none():
-    assert lists_mod._parse_inv_line("") is None
-    assert lists_mod._parse_inv_line("   ") is None
-
-
-def test_fallback_now_extracts_qty_for_each_line():
-    """Регресс #78: реальный batch Кай должен сохранить количества."""
-    text = (
-        "занеси в инвентарь лекарства\n"
-        "меновазин 2 шт\n"
-        "глюкофаж 1000мг 10 шт\n"
-        "пластырь 58шт\n"
-        "бинт обычный"
-    )
-    items = lists_mod._fallback_split_inv_text(text)
-    by_name = {it["name"]: it for it in items}
-    assert by_name["меновазин"]["quantity"] == 2
-    assert by_name["глюкофаж"]["quantity"] == 10
-    assert by_name["глюкофаж"]["note"] == "1000мг"
-    assert by_name["пластырь"]["quantity"] == 58
-    assert by_name["бинт обычный"]["quantity"] == 1
-    assert all(it["category"] == "🏥 Здоровье" for it in items)
-
-
-def test_fallback_auto_detects_health_from_pharm_markers():
-    """Без префикса, но много фарм-маркеров → дефолт = 🏥 Здоровье."""
-    text = (
-        "велаксин 75мг 10шт\n"
-        "венлафаксин 37.5мг\n"
-        "зубные нити"
-    )
-    items = lists_mod._fallback_split_inv_text(text)
-    assert len(items) == 3
-    assert all(it["category"] == "🏥 Здоровье" for it in items)
-
-
-def test_fallback_without_pharm_markers_keeps_default():
-    text = "фонарик\nверёвка\nспички"
-    items = lists_mod._fallback_split_inv_text(text)
-    assert all(it["category"] == "💳 Прочее" for it in items)
-
-
-def test_lextended_inv_add_re_catches_zanesi():
-    """`занеси в инвентарь` теперь ловится pre-filter'ом, не уходит в Haiku."""
-    from core.list_classifier import _LIST_INV_ADD_RE
-    assert _LIST_INV_ADD_RE.search("занеси в инвентарь лекарства")
-    assert _LIST_INV_ADD_RE.search("положи в инвентарь")
-    assert _LIST_INV_ADD_RE.search("закинь в инвентарь молоко")
-    assert _LIST_INV_ADD_RE.search("запиши в инвентарь")
-    # Старые варианты тоже работают:
-    assert _LIST_INV_ADD_RE.search("добавь в инвентарь")
-    assert _LIST_INV_ADD_RE.search("дома есть: парацетамол")
 
 
 @pytest.mark.asyncio

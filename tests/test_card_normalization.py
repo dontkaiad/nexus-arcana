@@ -1,53 +1,45 @@
 """tests/test_card_normalization.py — нормализация коротких форматов карт."""
+import pytest
+
 from miniapp.backend.tarot import find_card, normalize_card_input
 
 
-def test_num_rus_suit():
-    assert normalize_card_input("9 пентаклей") == "девятка пентаклей"
-    assert normalize_card_input("2 мечей") == "двойка мечей"
-    assert normalize_card_input("10 пентаклей") == "десятка пентаклей"
+@pytest.mark.parametrize("raw,expected", [
+    # «N <масть>» → числительное прописью
+    pytest.param("9 пентаклей", "девятка пентаклей", id="num-9-pentacles"),
+    pytest.param("2 мечей", "двойка мечей", id="num-2-swords"),
+    pytest.param("10 пентаклей", "десятка пентаклей", id="num-10-pentacles"),
+    # английская форма → русская
+    pytest.param("Nine of Pentacles", "девятка пентаклей", id="en-nine-of-pentacles"),
+    pytest.param("ace of swords", "туз мечей", id="en-ace-of-swords"),
+    # уже нормальные имена — лоуэркейс ожидаем, смысл не меняется
+    pytest.param("шут", "шут", id="normal-shut-unchanged"),
+    pytest.param("The Fool", "the fool", id="normal-the-fool-lowercased"),
+    pytest.param("королева кубков", "королева кубков", id="normal-queen-of-cups-unchanged"),
+    # короткие алиасы мастей: «пент» → пентаклей, «куб» → кубков
+    pytest.param("9 пент", "девятка пентаклей", id="short-suit-pent"),
+    pytest.param("3 куб", "тройка кубков", id="short-suit-kub"),
+    # пустой ввод
+    pytest.param("", "", id="empty-string"),
+    pytest.param(None, "", id="none-input"),
+])
+def test_normalize_card_input(raw, expected):
+    """normalize_card_input: цифры/EN/алиасы → каноничное RU-имя (лоуэркейс)."""
+    assert normalize_card_input(raw) == expected
 
 
-def test_en_form():
-    assert normalize_card_input("Nine of Pentacles") == "девятка пентаклей"
-    assert normalize_card_input("ace of swords") == "туз мечей"
-
-
-def test_already_normal_unchanged():
-    # Лоуэркейс ожидаем — функция не должна изменять смысл уже нормальных имён.
-    assert normalize_card_input("шут") == "шут"
-    assert normalize_card_input("The Fool") == "the fool"
-    assert normalize_card_input("королева кубков") == "королева кубков"
-
-
-def test_short_suit_alias():
-    # «Пент» как короткий алиас → пентаклей.
-    assert normalize_card_input("9 пент") == "девятка пентаклей"
-    assert normalize_card_input("3 куб") == "тройка кубков"
-
-
-def test_resolve_card_with_short_form():
-    c = find_card("rider-waite", "9 пентаклей")
+@pytest.mark.parametrize("query,en,ru", [
+    # короткие формы (включая дно из юзерского ввода) — резолвятся в карту
+    pytest.param("9 пентаклей", "Nine of Pentacles", "Девятка Пентаклей", id="resolve-9-pentacles"),
+    pytest.param("2 мечей", "Two of Swords", None, id="resolve-2-swords"),
+    pytest.param("10 пентаклей", "Ten of Pentacles", None, id="resolve-10-pentacles"),
+    # лоуэркейс-RU тоже резолвится
+    pytest.param("шут", "The Fool", None, id="resolve-lowercase-ru-shut"),
+])
+def test_find_card_resolves_short_forms(query, en, ru):
+    """find_card: короткие/лоуэркейс формы находят карту в колоде."""
+    c = find_card("rider-waite", query)
     assert c is not None
-    assert c["en"] == "Nine of Pentacles"
-    assert c["ru"] == "Девятка Пентаклей"
-
-    c2 = find_card("rider-waite", "2 мечей")
-    assert c2 is not None
-    assert c2["en"] == "Two of Swords"
-
-    # дно из юзерского ввода — тоже резолвится
-    c3 = find_card("rider-waite", "10 пентаклей")
-    assert c3 is not None
-    assert c3["en"] == "Ten of Pentacles"
-
-
-def test_resolve_card_lowercase_ru():
-    c = find_card("rider-waite", "шут")
-    assert c is not None
-    assert c["en"] == "The Fool"
-
-
-def test_empty_input():
-    assert normalize_card_input("") == ""
-    assert normalize_card_input(None) == ""
+    assert c["en"] == en
+    if ru is not None:
+        assert c["ru"] == ru

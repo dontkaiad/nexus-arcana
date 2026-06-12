@@ -38,9 +38,8 @@ for k, v in _TEST_ENV.items():
         os.environ[k] = v
 
 
-# ── Исключить E2E тесты из pytest collection ──────────────────────────────────
-collect_ignore = ["test_nexus.py", "test_arcana.py", "test_all.py",
-                  "e2e_runner.py", "e2e_config.py"]
+# ── Исключить E2E-раннеры (Telethon, живые боты) из pytest collection ────────
+collect_ignore = ["e2e"]
 
 
 @pytest.fixture(autouse=True)

@@ -1,7 +1,7 @@
 """E2E тесты 🌒 Arcana."""
 import asyncio
-from e2e_runner import BotTester
-from e2e_config import ARCANA_BOT, DELAY_BETWEEN, LONG_TIMEOUT
+from runner import BotTester
+from config import ARCANA_BOT, DELAY_BETWEEN, LONG_TIMEOUT
 
 async def test_arcana():
     t = BotTester()

@@ -23,3 +23,27 @@ def test_parse_prompt_lists_relative_date_rules():
     assert "завтра" in s
     assert "в пятницу" in s or "пятниц" in s
     assert "через N" in s or "через" in s
+
+
+# ── reply_update для уже сохранённых работ (бывший test_work_inline_deadline.py)
+# После перехода на preview-flow на сохранённых работах reply, выставляющий
+# Дедлайн, автоматически планирует напоминание (deadline - 1 день) без кнопок.
+
+
+def test_prompt_returns_null_when_no_deadline_in_text():
+    s = PARSE_WORK_SYSTEM
+    assert "не упомянут" in s.lower() or "не выдумывай" in s.lower()
+
+
+def test_prompt_supports_iso_with_time():
+    s = PARSE_WORK_SYSTEM
+    assert "YYYY-MM-DDTHH:MM" in s
+
+
+def test_reply_auto_schedules_reminder_on_deadline():
+    """Reply, выставляющий Дедлайн на работе, должен планировать reminder автоматом."""
+    import inspect
+    from arcana.handlers import reply_update
+    src = inspect.getsource(reply_update)
+    assert "schedule_reminder" in src
+    assert '"Дедлайн" in applied' in src or '"Дедлайн"' in src

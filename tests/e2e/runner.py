@@ -1,7 +1,7 @@
 """E2E тест-раннер для Telegram ботов."""
 import asyncio
 from telethon import TelegramClient, events
-from e2e_config import API_ID, API_HASH, RESPONSE_TIMEOUT
+from config import API_ID, API_HASH, RESPONSE_TIMEOUT
 
 class BotTester:
     def __init__(self):

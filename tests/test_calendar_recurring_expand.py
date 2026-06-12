@@ -78,125 +78,93 @@ def _run(client, tasks, month="2026-05"):
 
 # ── _resolve_interval (юнит) ──────────────────────────────────────────────
 
-def test_resolve_interval_every_nd_priority():
-    assert _resolve_interval("21:00|every_2d", "Каждый день") == 2
-
-
-def test_resolve_interval_select_daily():
-    assert _resolve_interval("", "Каждый день") == 1
-
-
-def test_resolve_interval_select_weekly():
-    assert _resolve_interval("", "Каждую неделю") == 7
-
-
-def test_resolve_interval_select_monthly():
-    assert _resolve_interval("", "Каждый месяц") == {"kind": "monthly"}
-
-
-def test_resolve_interval_none():
-    assert _resolve_interval("", "") is None
-    assert _resolve_interval("", "Что-то незнакомое") is None
-
-
-@pytest.mark.parametrize("raw,expected", [
-    ("Ежедневно", 1),
-    ("ЕЖЕДНЕВНО", 1),
-    ("  Ежедневно  ", 1),
-    ("ежедневно", 1),
-    ("Через день", 2),
-    ("Еженедельно", 7),
-    ("Раз в две недели", 14),
-    ("Ежемесячно", {"kind": "monthly"}),
-    ("Daily", 1),
-    ("WEEKLY", 7),
-    ("Monthly", {"kind": "monthly"}),
+@pytest.mark.parametrize("repeat_time,select,expected", [
+    # «Время повтора» every_Nd — приоритет над select
+    pytest.param("21:00|every_2d", "Каждый день", 2, id="every-nd-priority-over-select"),
+    # канонические select-значения
+    pytest.param("", "Каждый день", 1, id="select-daily"),
+    pytest.param("", "Каждую неделю", 7, id="select-weekly"),
+    pytest.param("", "Каждый месяц", {"kind": "monthly"}, id="select-monthly"),
+    # пусто / незнакомое → None
+    pytest.param("", "", None, id="empty-select-none"),
+    pytest.param("", "Что-то незнакомое", None, id="unknown-select-none"),
+    # case-insensitive синонимы (RU + EN, пробелы)
+    pytest.param("", "Ежедневно", 1, id="syn-ezhednevno"),
+    pytest.param("", "ЕЖЕДНЕВНО", 1, id="syn-ezhednevno-upper"),
+    pytest.param("", "  Ежедневно  ", 1, id="syn-ezhednevno-spaces"),
+    pytest.param("", "ежедневно", 1, id="syn-ezhednevno-lower"),
+    pytest.param("", "Через день", 2, id="syn-cherez-den"),
+    pytest.param("", "Еженедельно", 7, id="syn-ezhenedelno"),
+    pytest.param("", "Раз в две недели", 14, id="syn-raz-v-dve-nedeli"),
+    pytest.param("", "Ежемесячно", {"kind": "monthly"}, id="syn-ezhemesyachno"),
+    pytest.param("", "Daily", 1, id="syn-daily-en"),
+    pytest.param("", "WEEKLY", 7, id="syn-weekly-en-upper"),
+    pytest.param("", "Monthly", {"kind": "monthly"}, id="syn-monthly-en"),
 ])
-def test_resolve_interval_case_insensitive_synonyms(raw, expected):
-    assert _resolve_interval("", raw) == expected
+def test_resolve_interval(repeat_time, select, expected):
+    """_resolve_interval: every_Nd приоритет → select-маппинг → синонимы → None."""
+    assert _resolve_interval(repeat_time, select) == expected
 
 
 # ── /api/calendar (интеграция) ────────────────────────────────────────────
 
-def test_daily_repeat_expanded_from_created_time(client):
-    """Повтор=Каждый день, нет ни Дедлайна ни Напоминания → anchor=created_time."""
-    t = _task(repeat_select="Каждый день", created="2026-04-15T08:00:00.000Z")
+@pytest.mark.parametrize("task_kwargs,expected_days,title_substr", [
+    # Повтор=Каждый день, нет ни Дедлайна ни Напоминания → anchor=created_time,
+    # май 2026 — 31 день, все заполнены.
+    pytest.param(
+        dict(repeat_select="Каждый день", created="2026-04-15T08:00:00.000Z"),
+        list(range(1, 32)), None,
+        id="daily-expanded-from-created-time"),
+    # Повтор=Каждую неделю, Напоминание = Пн 4 мая 2026 → 4, 11, 18, 25.
+    pytest.param(
+        dict(repeat_select="Каждую неделю", reminder="2026-05-04T10:00:00.000Z"),
+        [4, 11, 18, 25], None,
+        id="weekly-anchored-to-reminder"),
+    # Повтор=Каждый месяц, anchor.day = 15 → одна occurrence в мае: 15.
+    pytest.param(
+        dict(repeat_select="Каждый месяц", reminder="2026-04-15T10:00:00.000Z"),
+        [15], None,
+        id="monthly-one-occurrence"),
+    # Время повтора=21:00|every_2d — приоритет над select (Каждый день
+    # игнорируется), шаг 2 от Напоминания 1 мая (12:00 UTC = 15:00 MSK).
+    pytest.param(
+        dict(repeat_select="Каждый день", repeat_time="21:00|every_2d",
+             reminder="2026-05-01T12:00:00.000Z"),
+        [1, 3, 5, 7, 9, 11, 13, 15, 17, 19, 21, 23, 25, 27, 29, 31], None,
+        id="every-nd-priority-over-select"),
+    # Реальные данные «менять лоток котам»: Повтор=Ежедневно,
+    # Время повтора=16:00|every_2d, Напоминание=2026-05-04 (20:00 UTC =
+    # 23:00 MSK = May 4), без Дедлайна. Шаг 2 от 4 мая → [2, 4, ..., 30].
+    pytest.param(
+        dict(title="менять лоток котам", repeat_select="Ежедневно",
+             repeat_time="16:00|every_2d", reminder="2026-05-04T20:00:00.000Z"),
+        [2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24, 26, 28, 30], "лоток",
+        id="real-case-kotlitter"),
+    # Recurring без Напоминания и без Дедлайна, без every_Nd → fallback в
+    # select-маппинг, anchor=created_time (apr 15 → май занимает все 31 день).
+    pytest.param(
+        dict(repeat_select="Ежедневно", repeat_time="",
+             reminder=None, deadline=None, created="2026-04-15T10:00:00.000Z"),
+        list(range(1, 32)), None,
+        id="anchor-fallback-to-created-time"),
+])
+def test_recurring_expand(client, task_kwargs, expected_days, title_substr):
+    """/api/calendar: recurring задача разворачивается ровно в ожидаемые дни месяца.
+
+    Одна задача → каждый занятый день имеет count == 1. Если задан
+    title_substr — title задачи присутствует в occurrences.
+    """
+    t = _task(**task_kwargs)
     r = _run(client, [t], month="2026-05")
     assert r.status_code == 200, r.text
     days = r.json()["days"]
+    days_with = sorted(int(k) for k, v in days.items() if v["count"] > 0)
+    assert days_with == expected_days
     counts = {int(k): v["count"] for k, v in days.items()}
-    # май 2026 — 31 день, все заполнены
-    assert all(counts[d] == 1 for d in range(1, 32))
-
-
-def test_weekly_repeat_anchored_to_reminder(client):
-    """Повтор=Каждую неделю, Напоминание = Пн 4 мая 2026 → 4, 11, 18, 25."""
-    t = _task(repeat_select="Каждую неделю", reminder="2026-05-04T10:00:00.000Z")
-    r = _run(client, [t], month="2026-05")
-    assert r.status_code == 200, r.text
-    days = r.json()["days"]
-    days_with = sorted(int(k) for k, v in days.items() if v["count"] > 0)
-    assert days_with == [4, 11, 18, 25]
-
-
-def test_monthly_repeat_one_occurrence(client):
-    """Повтор=Каждый месяц, anchor.day = 15 → одна occurrence в мае: 15."""
-    t = _task(repeat_select="Каждый месяц", reminder="2026-04-15T10:00:00.000Z")
-    r = _run(client, [t], month="2026-05")
-    assert r.status_code == 200, r.text
-    days = r.json()["days"]
-    days_with = [int(k) for k, v in days.items() if v["count"] > 0]
-    assert days_with == [15]
-
-
-def test_every_nd_priority_over_select(client):
-    """Время повтора=21:00|every_2d — приоритет, шаг 2 от Напоминания 1 мая."""
-    t = _task(
-        repeat_select="Каждый день",                # должен быть проигнорирован
-        repeat_time="21:00|every_2d",
-        reminder="2026-05-01T12:00:00.000Z",  # 15:00 MSK = May 1
-    )
-    r = _run(client, [t], month="2026-05")
-    assert r.status_code == 200, r.text
-    days = r.json()["days"]
-    days_with = sorted(int(k) for k, v in days.items() if v["count"] > 0)
-    assert days_with == [1, 3, 5, 7, 9, 11, 13, 15, 17, 19, 21, 23, 25, 27, 29, 31]
-
-
-def test_real_case_kotlitter(client):
-    """Реальные данные «менять лоток котам»:
-    Повтор=Ежедневно, Время повтора=16:00|every_2d, Напоминание=2026-05-04, без Дедлайна.
-    Ожидаем шаг 2 от 4 мая, occurrences = [2, 4, ..., 30]."""
-    t = _task(
-        title="менять лоток котам",
-        repeat_select="Ежедневно",
-        repeat_time="16:00|every_2d",
-        reminder="2026-05-04T20:00:00.000Z",  # 23:00 MSK = May 4
-    )
-    r = _run(client, [t], month="2026-05")
-    assert r.status_code == 200, r.text
-    days = r.json()["days"]
-    days_with = sorted(int(k) for k, v in days.items() if v["count"] > 0)
-    assert days_with == [2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24, 26, 28, 30]
-    # Title тоже на месте
-    assert any("лоток" in (t["title"] or "").lower()
-               for d in days.values() for t in d["tasks"])
-
-
-def test_anchor_fallback_to_created_time(client):
-    """Recurring без Напоминания и без Дедлайна → anchor=created_time."""
-    t = _task(
-        repeat_select="Ежедневно",
-        repeat_time="",       # без every_Nd → fallback в select-маппинг
-        reminder=None,
-        deadline=None,
-        created="2026-04-15T10:00:00.000Z",  # apr 15 → may занимает все 31 день
-    )
-    r = _run(client, [t], month="2026-05")
-    assert r.status_code == 200, r.text
-    days = r.json()["days"]
-    counts = {int(k): v["count"] for k, v in days.items()}
-    assert all(counts[d] == 1 for d in range(1, 32))
+    assert all(counts[d] == 1 for d in expected_days)
+    if title_substr:
+        assert any(title_substr in (task["title"] or "").lower()
+                   for d in days.values() for task in d["tasks"])
 
 
 # ── _fetch_tasks_in_month: 3-query merge + dedup ──────────────────────────

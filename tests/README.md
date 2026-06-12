@@ -1,4 +1,8 @@
-# E2E тесты
+# E2E тесты (tests/e2e/, Telethon, живые боты)
+
+Не запускаются pytest'ом — это отдельные раннеры против реальных ботов.
+Юнит/интеграционные тесты живут в `tests/` и `tests/integration/` (pytest).
+Smoke-тесты с реальными API: `python tests/e2e/smoke.py`.
 
 ## Первый запуск (одноразовая настройка):
 
@@ -11,9 +15,9 @@
 ## Запуск:
 
 ```bash
-cd tests
-export $(cat .env.test | xargs)
-python test_all.py
+cd tests/e2e
+export $(cat ../.env.test | xargs)
+python run_all.py
 ```
 
 При первом запуске Telethon попросит номер телефона и код — это одноразово,

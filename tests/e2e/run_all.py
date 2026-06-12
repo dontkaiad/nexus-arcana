@@ -1,7 +1,7 @@
 """Запуск всех E2E тестов."""
 import asyncio
-from test_nexus import test_nexus
-from test_arcana import test_arcana
+from nexus_flows import test_nexus
+from arcana_flows import test_arcana
 
 async def main():
     print("🚀 E2E ТЕСТЫ NEXUS + ARCANA")
