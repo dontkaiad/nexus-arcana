@@ -3,6 +3,7 @@ name: "privacy-guard"
 description: "Read-only privacy scanner for this PUBLIC repo. Use before commit/push or on request to flag content that must not be public per CLAUDE.md privacy rules."
 tools: Read, Grep, Glob, Bash
 model: haiku
+effort: medium
 color: orange
 ---
 
