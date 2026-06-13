@@ -19,19 +19,18 @@ from aiogram.types import (
 
 from core.claude_client import ask_claude, ask_claude_vision
 from core.config import config as _cfg
-from core.notion_client import (
-    _extract_text,
-    client_find,
-    log_error,
-    session_add,
-    sessions_by_client,
-    sessions_search,
-)
+from core.notion_client import log_error
 from core.shared_handlers import get_user_tz
+from arcana.repos.sessions_repo import (
+    SessionsRepo, TripletEntry, PrevSessionSnippet, SessionSearchResult,
+)
+from arcana.repos.clients_repo import ClientsRepo, CLIENT_TYPE_PAID, CLIENT_TYPE_FREE
 
 logger = logging.getLogger("arcana.sessions")
 
 router = Router()
+_repo = SessionsRepo()
+_client_repo = ClientsRepo()
 
 # ────────────────────────── Справочники ────────────────────────────────────
 
@@ -417,24 +416,15 @@ def _parse_json_safe(raw: str) -> Optional[dict]:
         return None
 
 
-def _format_prev_sessions(sessions: List[dict]) -> str:
+def _format_prev_sessions(snippets: List[PrevSessionSnippet]) -> str:
     """Форматирует предыдущие расклады клиента для вставки в промпт."""
     lines: List[str] = []
-    for s in sessions[:5]:
-        p = s.get("properties", {})
-        date_prop = p.get("Дата и время") or p.get("Дата") or {}
-        date_val = date_prop.get("date") or {}
-        d = (date_val.get("start") or "")[:10]
-        question = _extract_text(p.get("Тема") or {})
-        cards = _extract_text(p.get("Карты") or {})
-        interp = _extract_text(p.get("Трактовка") or {})
-        if interp and len(interp) > 300:
-            interp = interp[:300] + "..."
-        parts: List[str] = [f"📅 {d}: {question}" if question else f"📅 {d}"]
-        if cards:
-            parts.append(f"  Карты: {cards[:150]}")
-        if interp:
-            parts.append(f"  Итог: {interp}")
+    for s in snippets[:5]:
+        parts: List[str] = [f"📅 {s.date}: {s.question}" if s.question else f"📅 {s.date}"]
+        if s.cards:
+            parts.append(f"  Карты: {s.cards[:150]}")
+        if s.interpretation_excerpt:
+            parts.append(f"  Итог: {s.interpretation_excerpt}")
         lines.append("\n".join(parts))
     return "\n\n".join(lines)
 
@@ -460,16 +450,9 @@ def _triplet_remove_confirm_keyboard(short_id: str) -> InlineKeyboardMarkup:
     ]])
 
 
-async def _resolve_triplet_page(short_id: str, user_notion_id: str) -> Optional[dict]:
-    """short_id (32 hex без дефисов) → Notion page. Возвращает None если не нашли
-    или принадлежит чужому пользователю."""
-    from core.notion_client import sessions_all
-    pages = await sessions_all(user_notion_id=user_notion_id)
-    for p in pages:
-        pid = p.get("id", "").replace("-", "")
-        if pid.startswith(short_id) or short_id.startswith(pid[:32]):
-            return p
-    return None
+async def _resolve_triplet_page(short_id: str, user_notion_id: str) -> Optional[TripletEntry]:
+    """short_id (32 hex без дефисов) → TripletEntry. None если не найден."""
+    return await _repo.find_by_short_id(short_id, user_notion_id)
 
 
 async def _save_and_post_triplet(
@@ -514,7 +497,7 @@ async def _save_and_post_triplet(
     interpretation = sanitize_interpretation(interpretation)
     is_personal = not client_name
 
-    page_id = await session_add(
+    page_id = await _repo.add(
         date=_now_iso(tz),
         spread_type=spread_type,
         title=question,
@@ -681,9 +664,9 @@ async def handle_add_session(
                 owner = await get_user(tg_id)
                 owner_name = (owner or {}).get("name") or ""
                 if owner_name:
-                    sc = await client_find(owner_name, user_notion_id=user_notion_id)
+                    sc = await _client_repo.find(owner_name, user_notion_id=user_notion_id)
                     if sc:
-                        client_id = sc["id"]
+                        client_id = sc.id
                     else:
                         self_client_missing = True
                 else:
@@ -718,9 +701,9 @@ async def handle_add_session(
         prev_context = ""
         if client_id:
             try:
-                prev = await sessions_by_client(client_id, user_notion_id=user_notion_id)
-                if prev:
-                    prev_context = _format_prev_sessions(prev)
+                prev_snippets = await _repo.prev_for_client(client_id, user_notion_id=user_notion_id)
+                if prev_snippets:
+                    prev_context = _format_prev_sessions(prev_snippets)
             except Exception:
                 pass
 
@@ -882,14 +865,10 @@ async def _handle_multi_session(
         # Сначала пробуем по client_name (если задан) или session_name (для format A/B)
         lookup_name = client_name or session_name
         if lookup_name:
-            c = await client_find(lookup_name, user_notion_id=user_notion_id)
+            c = await _client_repo.find(lookup_name, user_notion_id=user_notion_id)
             if c:
-                client_id = c["id"]
-                # Подтянем canonical имя из найденной записи
-                title_parts = (c.get("properties", {})
-                               .get("Имя", {}).get("title") or [])
-                if title_parts:
-                    client_name = title_parts[0].get("plain_text", "") or client_name
+                client_id = c.id
+                client_name = c.name or client_name
             else:
                 # Не нашли — спрашиваем Кай через resolve-диалог.
                 from arcana.pending_tarot import save_pending
@@ -918,18 +897,18 @@ async def _handle_multi_session(
         owner = await get_user(tg_id)
         owner_name = (owner or {}).get("name") or ""
         if owner_name:
-            sc = await client_find(owner_name, user_notion_id=user_notion_id)
+            sc = await _client_repo.find(owner_name, user_notion_id=user_notion_id)
             if sc:
-                client_id = sc["id"]
+                client_id = sc.id
     is_personal = forced_is_personal or not client_name
 
     # Контекст предыдущих раскладов клиента — общий для всех триплетов
     prev_context = ""
     if client_id:
         try:
-            prev = await sessions_by_client(client_id, user_notion_id=user_notion_id)
-            if prev:
-                prev_context = _format_prev_sessions(prev)
+            prev_snippets = await _repo.prev_for_client(client_id, user_notion_id=user_notion_id)
+            if prev_snippets:
+                prev_context = _format_prev_sessions(prev_snippets)
         except Exception:
             pass
 
@@ -995,9 +974,9 @@ async def _handle_multi_session(
             from core.html_sanitize import sanitize_interpretation
             interpretation = sanitize_interpretation(interpretation)
 
-            page_id = await session_add(
+            page_id = await _repo.add(
                 date=_now_iso(tz),
-                spread_type=session_category if idx == 1 else session_category,
+                spread_type=session_category,
                 title=question,
                 question=question,
                 cards=cards_en or cards_text,
@@ -1165,34 +1144,19 @@ async def cb_triplet_remove_yes(call: CallbackQuery) -> None:
     short_id = call.data.split(":", 1)[1]
     from core.user_manager import get_user_notion_id
     user_notion_id = (await get_user_notion_id(call.from_user.id)) or ""
-    page = await _resolve_triplet_page(short_id, user_notion_id)
-    if not page:
+    entry = await _resolve_triplet_page(short_id, user_notion_id)
+    if not entry:
         await call.message.edit_text("⚠️ Триплет не найден.")
         return
-    page_id = page.get("id", "")
-    sname = (
-        "".join(
-            x.get("plain_text", "") for x in
-            page.get("properties", {}).get("Сессия", {}).get("rich_text") or []
-        )
-    ).strip()
-    cids = [
-        r.get("id", "") for r in
-        page.get("properties", {}).get("👥 Клиенты", {}).get("relation", [])
-    ]
-    cid = cids[0] if cids else None
-    try:
-        from core.notion_client import get_notion
-        await get_notion().pages.update(page_id=page_id, archived=True)
-    except Exception as e:
-        logger.error("archive triplet failed: %s", e)
+    ok = await _repo.archive(entry.id)
+    if not ok:
         await call.message.edit_text("⚠️ Не удалось удалить триплет.")
         return
     # Инвалидация кеша саммари сессии.
     try:
         from core.session_cache import cache_delete, session_summary_key
-        if sname:
-            cache_delete(session_summary_key(sname, cid))
+        if entry.session_name:
+            cache_delete(session_summary_key(entry.session_name, entry.client_id))
     except Exception:
         pass
     await call.message.edit_text("🗑 Триплет удалён.")
@@ -1214,12 +1178,8 @@ async def cb_triplet_remove(call: CallbackQuery) -> None:
     short_id = call.data.split(":", 1)[1]
     from core.user_manager import get_user_notion_id
     user_notion_id = (await get_user_notion_id(call.from_user.id)) or ""
-    page = await _resolve_triplet_page(short_id, user_notion_id)
-    title = "—"
-    if page:
-        title_parts = page.get("properties", {}).get("Тема", {}).get("title", [])
-        if title_parts:
-            title = title_parts[0].get("plain_text", "—")
+    entry = await _resolve_triplet_page(short_id, user_notion_id)
+    title = entry.question if entry else "—"
     await call.message.answer(
         f"🗑 Удалить триплет «{html.escape(title)}»?\nДействие необратимо.",
         parse_mode="HTML",
@@ -1260,11 +1220,10 @@ async def _resume_multi_after_resolve(
 
 async def _create_resolved_client(
     user_notion_id: str, name: str, client_type: str
-) -> Optional[tuple[str, str]]:
-    from core.notion_client import client_add
+) -> Optional[tuple]:
     from datetime import datetime as _dt, timezone as _tz
     today = _dt.now(_tz.utc).strftime("%Y-%m-%d")
-    pid = await client_add(
+    pid = await _client_repo.add(
         name=name, date=today, user_notion_id=user_notion_id,
         client_type=client_type,
     )
@@ -1283,7 +1242,6 @@ async def cb_client_resolve_new_paid(call: CallbackQuery) -> None:
     name = (pending.get("data", {}).get("session_name") or "").strip()
     if not name:
         return
-    from core.notion_client import CLIENT_TYPE_PAID
     res = await _create_resolved_client(user_notion_id, name, CLIENT_TYPE_PAID)
     if not res:
         await call.message.answer("⚠️ Не удалось создать клиента.")
@@ -1311,7 +1269,6 @@ async def cb_client_resolve_new_free(call: CallbackQuery) -> None:
     name = (pending.get("data", {}).get("session_name") or "").strip()
     if not name:
         return
-    from core.notion_client import CLIENT_TYPE_FREE
     res = await _create_resolved_client(user_notion_id, name, CLIENT_TYPE_FREE)
     if not res:
         await call.message.answer("⚠️ Не удалось создать клиента.")
@@ -1364,29 +1321,19 @@ async def handle_triplet_correction(
     Загружаем триплет из Notion, гоним Sonnet, обновляем поле «Трактовка»,
     регенерим Haiku-саммари, инвалидируем кеш сессии."""
     short_id = pending.get("triplet_short_id") or ""
-    page = await _resolve_triplet_page(short_id, user_notion_id)
+    entry = await _resolve_triplet_page(short_id, user_notion_id)
     from arcana.pending_tarot import delete_pending
-    if not page:
+    if not entry:
         await delete_pending(message.from_user.id)
         await message.answer("⚠️ Триплет не найден.")
         return
-    page_id = page.get("id", "")
-    props = page.get("properties", {})
-    title_parts = props.get("Тема", {}).get("title", [])
-    question = title_parts[0]["plain_text"] if title_parts else ""
-    cards_raw = "".join(
-        x.get("plain_text", "") for x in props.get("Карты", {}).get("rich_text") or []
-    ).strip()
-    interp_raw = "".join(
-        x.get("plain_text", "") for x in props.get("Трактовка", {}).get("rich_text") or []
-    ).strip()
-    deck_list = [it.get("name", "") for it in props.get("Колоды", {}).get("multi_select") or []]
-    deck = ", ".join(deck_list) or "Уэйт"
-    sname = "".join(
-        x.get("plain_text", "") for x in props.get("Сессия", {}).get("rich_text") or []
-    ).strip()
-    cids = [r.get("id", "") for r in props.get("👥 Клиенты", {}).get("relation", [])]
-    cid = cids[0] if cids else None
+    page_id = entry.id
+    question = entry.question
+    cards_raw = entry.cards
+    interp_raw = entry.interpretation
+    deck = entry.deck
+    sname = entry.session_name
+    cid = entry.client_id
 
     from arcana.tarot_loader import get_cards_context
     card_names = [c.strip() for c in cards_raw.split(",") if c.strip()]
@@ -1422,26 +1369,11 @@ async def handle_triplet_correction(
 
     from core.html_sanitize import sanitize_interpretation
     from core.html_for_telegram import html_to_telegram
-    from core.notion_client import _text, update_page
     new_interp = sanitize_interpretation(new_interp)
 
-    # Обновляем поле «Трактовка»
-    try:
-        await update_page(page_id, {"Трактовка": _text(new_interp[:2000])})
-    except Exception as e:
-        logger.error("update триптех trakt failed: %s", e)
-
-    # Регенерим Haiku-саммари
-    new_summary = await _make_triplet_summary(
-        question, cards_raw, "", new_interp,
-    )
-    if new_summary:
-        try:
-            await update_page(
-                page_id, {"Саммари триплета": _text(new_summary[:1800])}
-            )
-        except Exception as e:
-            logger.warning("update triplet summary failed: %s", e)
+    # Регенерим Haiku-саммари, затем обновляем Notion одним вызовом репо.
+    new_summary = await _make_triplet_summary(question, cards_raw, "", new_interp)
+    await _repo.update_interpretation(page_id, new_interp, new_summary)
 
     # Инвалидация кеша сессии
     try:
@@ -1577,9 +1509,7 @@ async def handle_session_search(
             await message.answer("🔍 Не поняла что искать. Напиши имя или тему яснее.")
             return
 
-        results = await sessions_search(
-            keywords, user_notion_id=user_notion_id, limit=10
-        )
+        results = await _repo.search(keywords, user_notion_id=user_notion_id, limit=10)
         kw_display = html.escape(", ".join(keywords))
         if not results:
             await message.answer(f"🔍 По «{kw_display}» раскладов не нашла.")
@@ -1588,33 +1518,13 @@ async def handle_session_search(
         lines: List[str] = [f"🔍 <b>Расклады по «{kw_display}»</b>:"]
         shown = results[:5]
         for s in shown:
-            p = s.get("properties", {})
-            date_prop = p.get("Дата") or p.get("Дата и время") or {}
-            date_val = date_prop.get("date") or {}
-            d = (date_val.get("start") or "")[:10]
-            theme = _extract_text(p.get("Тема") or {}) or "—"
-
-            spread_prop = p.get("Тип расклада") or {}
-            spread_items = spread_prop.get("multi_select") or []
-            spread_name = spread_items[0].get("name", "") if spread_items else ""
-
-            area_prop = p.get("Область") or {}
-            area_items = area_prop.get("multi_select") or []
-            if area_items:
-                area_name = area_items[0].get("name", "")
-            else:
-                area_name = (area_prop.get("select") or {}).get("name", "")
-
-            cards_text = _extract_text(p.get("Карты") or {})
-            cards_short = (cards_text[:80] + "…") if len(cards_text) > 80 else cards_text
-
-            meta_parts = [x for x in (spread_name, area_name) if x]
+            meta_parts = [x for x in (s.spread_name, s.area_name) if x]
             meta = " · ".join(html.escape(x) for x in meta_parts)
-            block = f"\n📅 <b>{d}</b> · {html.escape(theme)}"
+            block = f"\n📅 <b>{s.date}</b> · {html.escape(s.theme)}"
             if meta:
                 block += f"\n   {meta}"
-            if cards_short:
-                block += f"\n   🃏 {html.escape(cards_short)}"
+            if s.cards_short:
+                block += f"\n   🃏 {html.escape(s.cards_short)}"
             lines.append(block)
 
         if len(results) > len(shown):

@@ -171,9 +171,7 @@ async def test_session_with_unknown_client_now_creates_relation():
     parsed = {"client_name": "Лена", "cards": "", "bottom_card": ""}
 
     import core.client_resolve as cr
-    with patch.object(sess, "client_find",
-                      AsyncMock(return_value=None)), \
-         patch.object(cr, "find_or_create_client",
+    with patch.object(cr, "find_or_create_client",
                       AsyncMock(return_value=("c-lena", True))), \
          patch.object(cr, "save_message_page", AsyncMock()):
         cid = await cr.resolve_or_create(msg, "Лена", user_notion_id="u")
