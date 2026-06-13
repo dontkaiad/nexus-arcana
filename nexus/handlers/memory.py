@@ -12,7 +12,7 @@ from nexus.handlers.utils import react
 import core.memory as mem
 from core.claude_client import ask_claude
 from core.config import config as _cfg
-from core.notion_client import page_create
+from core.repos.memory_repo import _repo as _mem_repo
 
 logger = logging.getLogger("nexus.memory")
 router = Router()
@@ -359,14 +359,7 @@ async def cb_mem_deactivate_selected(call: CallbackQuery) -> None:
     if not selected:
         await call.message.edit_text("☐ Ничего не выбрано.")
         return
-    from core.notion_client import update_page
-    done = 0
-    for pid in selected:
-        try:
-            await update_page(pid, {"Актуально": {"checkbox": False}})
-            done += 1
-        except Exception as e:
-            logger.error("cb_mem_deactivate_selected: %s", e)
+    done = await _mem_repo.set_active(list(selected), False)
     noun = "запись" if done == 1 else "записи" if done < 5 else "записей"
     await call.message.edit_text(f"☑️ Помечено неактуальными: {done} {noun}.")
 
@@ -381,14 +374,7 @@ async def cb_mem_deactivate_all(call: CallbackQuery) -> None:
     if not pages:
         await call.message.edit_text("⏱ Сессия истекла.")
         return
-    from core.notion_client import update_page
-    done = 0
-    for page in pages:
-        try:
-            await update_page(page["id"], {"Актуально": {"checkbox": False}})
-            done += 1
-        except Exception as e:
-            logger.error("cb_mem_deactivate_all: %s", e)
+    done = await _mem_repo.set_active([p["id"] for p in pages], False)
     noun = "запись" if done == 1 else "записи" if done < 5 else "записей"
     await call.message.edit_text(f"☑️ Помечено неактуальными: {done} {noun}.")
 
@@ -403,15 +389,11 @@ async def cb_mem_reactivate_all(call: CallbackQuery) -> None:
     if not pages:
         await call.message.edit_text("⏱ Сессия истекла.")
         return
-    from core.notion_client import update_page
-    done = 0
-    for page in pages:
-        if page["properties"].get("Актуально", {}).get("checkbox") is False:
-            try:
-                await update_page(page["id"], {"Актуально": {"checkbox": True}})
-                done += 1
-            except Exception as e:
-                logger.error("cb_mem_reactivate_all: %s", e)
+    inactive_ids = [
+        p["id"] for p in pages
+        if p["properties"].get("Актуально", {}).get("checkbox") is False
+    ]
+    done = await _mem_repo.set_active(inactive_ids, True)
     noun = "запись" if done == 1 else "записи" if done < 5 else "записей"
     await call.message.edit_text(f"↩️ Восстановлено: {done} {noun}.")
 
@@ -426,18 +408,11 @@ async def cb_mem_reactivate_selected(call: CallbackQuery) -> None:
     if not selected:
         await call.message.edit_text("☐ Ничего не выбрано.")
         return
-    from core.notion_client import update_page
-    done = 0
-    for pid in selected:
-        try:
-            await update_page(pid, {"Актуально": {"checkbox": True}})
-            done += 1
-            # обновить флаг в кэше
-            for p in pages:
-                if p["id"] == pid:
-                    p.setdefault("properties", {}).setdefault("Актуально", {})["checkbox"] = True
-        except Exception as e:
-            logger.error("cb_mem_reactivate_selected: %s", e)
+    done = await _mem_repo.set_active(list(selected), True)
+    # обновить флаг в кэше страниц чтобы keyboard перерендерилась корректно
+    for p in pages:
+        if p["id"] in selected:
+            p.setdefault("properties", {}).setdefault("Актуально", {})["checkbox"] = True
     noun = "запись" if done == 1 else "записи" if done < 5 else "записей"
     await call.message.edit_text(f"↩️ Восстановлено: {done} {noun}.")
 
@@ -504,13 +479,14 @@ async def cb_mem_auto_yes(call: CallbackQuery) -> None:
     if not pending:
         await call.message.edit_text("⏱ Сессия истекла.")
         return
-    fact, category, связь, ключ = await mem._parse_fact(pending["text"])
-    db_id = os.environ.get("NOTION_DB_MEMORY")
-    if not db_id:
+    if not os.environ.get("NOTION_DB_MEMORY"):
         await call.message.edit_text("⚠️ NOTION_DB_MEMORY не задан")
         return
-    props = mem._build_props(fact, category, связь, ключ, BOT_LABEL, pending.get("user_notion_id", ""))
-    result = await page_create(db_id, props)
+    fact, category, связь, ключ = await mem._parse_fact(pending["text"])
+    result = await _mem_repo.save_parsed(
+        fact, category, связь, ключ, BOT_LABEL,
+        user_notion_id=pending.get("user_notion_id", ""),
+    )
     if result:
         cat_label = f" [{category}]" if category else ""
         await react(call, "💅")

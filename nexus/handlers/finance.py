@@ -1284,32 +1284,21 @@ async def on_set_limit(call: CallbackQuery, user_notion_id: str = "") -> None:
 
 async def _save_limit_to_memory(cat_link: str, amount: int, user_notion_id: str = "") -> None:
     """Сохранить лимит в Память."""
-    from core.notion_client import db_query, _relation
-    mem_db = os.environ.get("NOTION_DB_MEMORY")
-    if not mem_db:
+    from core.repos.memory_repo import _repo as _mem_repo
+    if not os.environ.get("NOTION_DB_MEMORY"):
         return
     key = f"лимит_{cat_link}"
     fact = f"лимит: {cat_link} — {amount}₽/мес"
-    props = {
-        "Текст": _title(fact),
-        "Ключ": _text(key),
-        "Категория": _select("💰 Лимит"),
-        "Связь": _text(cat_link),
-        "Бот": _select("☀️ Nexus"),
-        "Актуально": {"checkbox": True},
-    }
-    if user_notion_id:
-        props["🪪 Пользователи"] = _relation(user_notion_id)
-    # Обновить если существует
     try:
-        existing = await db_query(mem_db, filter_obj={"and": [
-            {"property": "Ключ", "rich_text": {"contains": key}},
-            {"property": "Категория", "select": {"equals": "💰 Лимит"}},
-        ]}, page_size=1)
-        if existing:
-            await update_page(existing[0]["id"], props)
-        else:
-            await page_create(mem_db, props)
+        await _mem_repo.save_parsed(
+            fact=fact,
+            category="💰 Лимит",
+            связь=cat_link,
+            ключ=key,
+            bot_label="☀️ Nexus",
+            user_notion_id=user_notion_id,
+            upsert=True,
+        )
     except Exception as e:
         logger.error("_save_limit_to_memory: %s", e)
 
