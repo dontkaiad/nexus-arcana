@@ -12,15 +12,12 @@ from aiogram import Router
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 
 from core.claude_client import ask_claude
-from core.list_manager import (
-    add_items, get_list, check_items, check_items_bulk,
-    inventory_search, inventory_update, archive_items,
-    mark_items_done, search_memory_categories, find_task_by_name, pending_get,
-    pending_set, pending_del,
+from core.repos.lists_repo import (
+    _repo,
     CATEGORY_TO_FINANCE,
+    pending_get, pending_set, pending_del,
 )
 from core.lists_parser import parse_buy_text, format_rub
-from core.notion_client import finance_add
 
 logger = logging.getLogger("arcana.lists")
 router = Router()
@@ -147,10 +144,10 @@ def _build_list_text_and_buttons(
 
 
 async def _fetch_all_display_items(list_type, bot_name, user_page_id):
-    active = await get_list(list_type=list_type, bot_name=bot_name, user_page_id=user_page_id, status="Not started")
+    active = await _repo.get(list_type=list_type, bot_name=bot_name, user_page_id=user_page_id, status="Not started")
     done_checks: list[dict] = []
     if list_type is None or list_type == "📋 Чеклист":
-        done_checks = await get_list(list_type="📋 Чеклист", bot_name=bot_name, user_page_id=user_page_id, status="Done")
+        done_checks = await _repo.get(list_type="📋 Чеклист", bot_name=bot_name, user_page_id=user_page_id, status="Done")
     return active + done_checks
 
 
@@ -451,11 +448,11 @@ async def _handle_remain(query: CallbackQuery, user_notion_id: str) -> None:
 
     if action == "lt_remain_archive_all":
         pending_del(uid)
-        remaining = await get_list("🛒 Покупки", BOT_NAME, p_user_id, status="Not started")
+        remaining = await _repo.get("🛒 Покупки", BOT_NAME, p_user_id, status="Not started")
         ids = [it["id"] for it in remaining]
         names = [it["name"] for it in remaining]
         if ids:
-            await archive_items(ids)
+            await _repo.archive(ids)
             await query.message.edit_text(f"🗑️ Архивировано: {', '.join(names)}\n🗒️ Список чист!", parse_mode="HTML")
         return
 
@@ -471,8 +468,8 @@ async def _handle_remain(query: CallbackQuery, user_notion_id: str) -> None:
         all_items = await _fetch_all_display_items(None, BOT_NAME, p_user_id)
         items_map = {it["id"]: it for it in all_items}
         names = [items_map[p]["name"] for p in selected if p in items_map]
-        await archive_items(selected)
-        remaining = await get_list("🛒 Покупки", BOT_NAME, p_user_id, status="Not started")
+        await _repo.archive(selected)
+        remaining = await _repo.get("🛒 Покупки", BOT_NAME, p_user_id, status="Not started")
         if remaining:
             text = f"🗑️ Архивировано: {', '.join(names)}\n🗒️ В списке: {', '.join(it['name'] for it in remaining)}"
         else:
@@ -511,7 +508,7 @@ async def on_checkout(query: CallbackQuery, user_notion_id: str = "") -> None:
             buy_items[pid] = it
 
     if check_ids:
-        await mark_items_done(check_ids)
+        await _repo.mark_done(check_ids)
         names = [items_map[p]["name"] for p in check_ids if p in items_map]
         await query.message.answer(f"✅ Чеклист: {', '.join(names)}", parse_mode="HTML")
 
@@ -579,7 +576,7 @@ async def handle_list_buy(msg: Message, data: dict, user_notion_id: str = "") ->
     memory_cats: dict[str, str] = {}
     if potential_items:
         try:
-            memory_cats = await search_memory_categories(potential_items)
+            memory_cats = await _repo.search_memory_categories(potential_items)
         except Exception:
             pass
 
@@ -597,14 +594,14 @@ async def handle_list_buy(msg: Message, data: dict, user_notion_id: str = "") ->
 
     lines: list[str] = []
     if arcana_items:
-        existing = await get_list(list_type="🛒 Покупки", bot_name=BOT_NAME,
+        existing = await _repo.get(list_type="🛒 Покупки", bot_name=BOT_NAME,
                                   user_page_id=user_notion_id, status="Not started")
         existing_names = {it["name"].lower() for it in existing}
         new_items = [it for it in arcana_items if it["name"].lower() not in existing_names]
         dupes = [it for it in arcana_items if it["name"].lower() in existing_names]
 
         if new_items:
-            created = await add_items(new_items, "🛒 Покупки", BOT_NAME, user_notion_id)
+            created = await _repo.add(new_items, "🛒 Покупки", BOT_NAME, user_notion_id)
             by_name = {it["name"].lower(): it for it in new_items}
             heading = "🛒 <b>Добавлено (Arcana)</b>"
             grp = next((it.get("group") for it in new_items if it.get("group")), None)
@@ -642,7 +639,7 @@ async def handle_list_done(msg: Message, data: dict, user_notion_id: str = "") -
         return
     done_type = parsed.get("type", "list_done") if isinstance(parsed, dict) else "list_done"
     if done_type == "list_done_bulk":
-        result = await check_items_bulk(parsed.get("total") or 0, parsed.get("breakdown", []), BOT_NAME, user_notion_id)
+        result = await _repo.check_bulk(parsed.get("total") or 0, parsed.get("breakdown", []), BOT_NAME, user_notion_id)
         lines = [f"🧾 <b>Чек: {parsed.get('total', 0)}₽</b>"]
         for fr in result.get("finance_results", []):
             lines.append(f"  💸 {fr['category']}: {int(fr['amount'])}₽")
@@ -654,7 +651,7 @@ async def handle_list_done(msg: Message, data: dict, user_notion_id: str = "") -
             for it in items_data:
                 if not it.get("category"):
                     it["category"] = category
-        result = await check_items(items_data, BOT_NAME, user_notion_id)
+        result = await _repo.check(items_data, BOT_NAME, user_notion_id)
         lines = ["✅ <b>Чек записан:</b>"]
         total = 0
         for ch in result.get("checked", []):
@@ -681,7 +678,7 @@ async def handle_list_check(msg: Message, data: dict, user_notion_id: str = "") 
         await msg.answer(f"📋 <b>{name}</b>\n\nОтправь пункты чеклиста.", parse_mode="HTML")
         return
     items = [{"name": it, "group": name} for it in items_raw if it]
-    created = await add_items(items, "📋 Чеклист", BOT_NAME, user_notion_id)
+    created = await _repo.add(items, "📋 Чеклист", BOT_NAME, user_notion_id)
     lines = [f"📋 <b>{name}</b> ({len(created)} пунктов)"]
     for c in created:
         lines.append(f"  ◻️ {c['name']}")
@@ -720,7 +717,7 @@ async def handle_list_subtask(msg: Message, data: dict, user_notion_id: str = ""
 
     from core.config import config as app_config
     db_works = app_config.arcana.db_works
-    tasks = await find_task_by_name(
+    tasks = await _repo.find_task(
         task_query, user_notion_id,
         db_id=db_works or app_config.arcana.db_tasks,
         title_prop="Работа" if db_works else "Задача",
@@ -833,7 +830,7 @@ async def handle_list_inv_add(msg: Message, data: dict, user_notion_id: str = ""
         await msg.answer("⚠️ Не смог разобрать.")
         return
     items = [{"name": parsed.get("item", ""), "quantity": parsed.get("quantity") or 1, "note": parsed.get("note", ""), "category": parsed.get("category", "🕯️ Расходники")}]
-    created = await add_items(items, "📦 Инвентарь", BOT_NAME, user_notion_id)
+    created = await _repo.add(items, "📦 Инвентарь", BOT_NAME, user_notion_id)
     if created:
         c = created[0]
         await msg.answer(f"📦 <b>Инвентарь:</b> {c['name']} добавлен · {c.get('category', '')}", parse_mode="HTML")
@@ -857,9 +854,9 @@ async def handle_list_inv_add(msg: Message, data: dict, user_notion_id: str = ""
 async def handle_list_inv_search(msg: Message, data: dict, user_notion_id: str = "") -> None:
     text = data.get("text", msg.text or "")
     query = re.sub(r"(?:дома\s+)?есть\s*(?:ли)?\s*(?:у меня)?\s*(?:дома)?\s*", "", text, flags=re.IGNORECASE).strip().rstrip("?")
-    results = await inventory_search(query, BOT_NAME, user_notion_id)
+    results = await _repo.inventory_search(query, BOT_NAME, user_notion_id)
     if not results:
-        existing_buy = await get_list(list_type="🛒 Покупки", bot_name=BOT_NAME,
+        existing_buy = await _repo.get(list_type="🛒 Покупки", bot_name=BOT_NAME,
                                       user_page_id=user_notion_id, status="Not started")
         already = any(query.lower() in it["name"].lower() for it in existing_buy)
         if already:
@@ -882,7 +879,7 @@ async def handle_list_inv_update(msg: Message, data: dict, user_notion_id: str =
     except Exception:
         await msg.answer("⚠️ Не смог разобрать.")
         return
-    result = await inventory_update(parsed.get("item", ""), parsed.get("quantity") or 0, BOT_NAME, user_notion_id)
+    result = await _repo.inventory_update(parsed.get("item", ""), parsed.get("quantity") or 0, BOT_NAME, user_notion_id)
     if result.get("error") == "not_found":
         await msg.answer(f"❓ «{parsed.get('item', '')}» не найден в инвентаре.")
         return
@@ -918,7 +915,7 @@ async def handle_list_pending(msg: Message, user_notion_id: str = "") -> bool:
                 raw_items.append(part)
         group = pending.get("group", "Чеклист")
         items = [{"name": it, "group": group} for it in raw_items]
-        created = await add_items(items, "📋 Чеклист", BOT_NAME, pending.get("user_notion_id", user_notion_id))
+        created = await _repo.add(items, "📋 Чеклист", BOT_NAME, pending.get("user_notion_id", user_notion_id))
         lines = [f"📋 <b>{group}</b> ({len(created)} пунктов)"]
         for c in created:
             lines.append(f"  ◻️ {c['name']}")
@@ -943,7 +940,7 @@ async def handle_list_pending(msg: Message, user_notion_id: str = "") -> bool:
             items = [{"name": it, "group": task_name, rel_key: task_id} for it in raw_items]
         else:
             items = [{"name": it, "group": task_name} for it in raw_items]
-        created = await add_items(items, "📋 Чеклист", BOT_NAME, p_user_id)
+        created = await _repo.add(items, "📋 Чеклист", BOT_NAME, p_user_id)
         lines = [f"📋 <b>{task_name}</b> — {len(created)} подзадач:"]
         for c in created:
             lines.append(f"  ⬜ {c['name']}")
@@ -1065,10 +1062,9 @@ async def handle_list_pending(msg: Message, user_notion_id: str = "") -> bool:
         date_match = re.search(r"\d{4}-\d{2}-\d{2}", text)
         if date_match:
             pending_del(uid)
-            from core.notion_client import update_page as up, _date
             item_id = pending.get("item_id", "")
             if item_id:
-                await up(item_id, {"Срок годности": _date(date_match.group())})
+                await _repo.set_expiry(item_id, date_match.group())
                 item_name = pending.get("item_name", "")
                 await msg.answer(f"📦 {item_name} — срок годности: {date_match.group()}")
             return True
@@ -1080,23 +1076,18 @@ async def handle_list_pending(msg: Message, user_notion_id: str = "") -> bool:
 
 
 async def _finalize_checkout(msg, named_cats, source, selected_data, categories, user_page_id):
-    from core.list_manager import _today_iso
-
     lines = ["✅ <b>Чек записан:</b>"]
     for cat, amount in named_cats.items():
         if amount <= 0:
             continue
         item_names = categories.get(cat, [])
         title = ", ".join(item_names) if item_names else cat
-        finance_cat = CATEGORY_TO_FINANCE.get(cat, "💳 Прочее")
-        await finance_add(date=_today_iso(), amount=float(amount), category=finance_cat,
-                          type_="💸 Расход", source=source, description=title,
-                          bot_label=BOT_NAME, user_notion_id=user_page_id)
+        await _repo.record_purchase(float(amount), cat, source, title, BOT_NAME, user_page_id)
         lines.append(f"  {cat}: {int(amount)}₽ ({title})")
 
     page_ids = list(selected_data.keys())
     if page_ids:
-        await mark_items_done(page_ids)
+        await _repo.mark_done(page_ids)
 
     total = sum(named_cats.values())
     lines.append(f"\n💰 Итого: {int(total)}₽ · {source}")
@@ -1121,7 +1112,7 @@ async def on_skip_expiry(query: CallbackQuery, user_notion_id: str = "") -> None
 @router.callback_query(lambda c: c.data and c.data.startswith("list_cross_") and c.data != "list_cross_no")
 async def on_list_cross(query: CallbackQuery, user_notion_id: str = "") -> None:
     page_id_short = query.data.replace("list_cross_", "")
-    items = await get_list("🛒 Покупки", BOT_NAME, user_notion_id, status="Not started")
+    items = await _repo.get("🛒 Покупки", BOT_NAME, user_notion_id, status="Not started")
     full_id = None
     item_name = ""
     for it in items:
@@ -1136,8 +1127,7 @@ async def on_list_cross(query: CallbackQuery, user_notion_id: str = "") -> None:
         except Exception:
             pass
         return
-    from core.notion_client import update_page, _status
-    await update_page(full_id, {"Статус": _status("Done")})
+    await _repo.mark_item_done(full_id)
     await query.answer(f"✅ {item_name} вычеркнуто")
     try:
         await query.message.edit_text(f"🛒 ✅ {item_name} — вычеркнуто из списка", parse_mode="HTML")

@@ -412,10 +412,10 @@ async def test_handle_list_buy_with_full_fields():
 
     with (
         patch.object(nx, "react", AsyncMock()),
-        patch.object(nx, "search_memory_categories", AsyncMock(return_value={})),
+        patch.object(nx._repo, "search_memory_categories", AsyncMock(return_value={})),
         patch.object(nx, "parse_buy_text", AsyncMock(return_value=parsed_items)),
-        patch.object(nx, "get_list", AsyncMock(return_value=[])),
-        patch.object(nx, "add_items", AsyncMock(return_value=[
+        patch.object(nx._repo, "get", AsyncMock(return_value=[])),
+        patch.object(nx._repo, "add", AsyncMock(return_value=[
             {"id": "p1", "name": "iPhone Pro", "category": "💳 Прочее"},
         ])) as mock_add,
     ):
@@ -448,7 +448,7 @@ async def test_handle_list_sum_by_group():
     msg.answer = AsyncMock()
     with (
         patch.object(nx, "react", AsyncMock()),
-        patch.object(nx, "get_list_summary", AsyncMock(return_value=summary)) as mock_sum,
+        patch.object(nx._repo, "get_summary", AsyncMock(return_value=summary)) as mock_sum,
     ):
         await nx.handle_list_sum(msg, {"text": msg.text}, user_notion_id="u1")
 
@@ -473,7 +473,7 @@ async def test_handle_list_sum_empty():
     }
     with (
         patch.object(nx, "react", AsyncMock()),
-        patch.object(nx, "get_list_summary", AsyncMock(return_value=empty_summary)),
+        patch.object(nx._repo, "get_summary", AsyncMock(return_value=empty_summary)),
     ):
         await nx.handle_list_sum(msg, {"text": msg.text}, user_notion_id="u1")
     sent = msg.answer.await_args.args[0]

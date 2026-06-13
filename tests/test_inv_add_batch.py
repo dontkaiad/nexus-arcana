@@ -340,7 +340,7 @@ async def test_handle_list_inv_add_batch_does_not_ask_expiry():
     msg.text = "занеси в инвентарь\nменовазин 2 шт\n..."
 
     with patch.object(lists_mod, "_haiku_parse", AsyncMock(return_value=parsed)), \
-         patch.object(lists_mod, "add_items", AsyncMock(return_value=created)), \
+         patch.object(lists_mod._repo, "add", AsyncMock(return_value=created)), \
          patch.object(lists_mod, "react", AsyncMock()), \
          patch.object(lists_mod, "pending_set") as p_set:
         await lists_mod.handle_list_inv_add(
@@ -366,7 +366,7 @@ async def test_handle_list_inv_add_single_asks_expiry():
     msg.text = "дома есть парацетамол"
 
     with patch.object(lists_mod, "_haiku_parse", AsyncMock(return_value=parsed)), \
-         patch.object(lists_mod, "add_items", AsyncMock(return_value=created)), \
+         patch.object(lists_mod._repo, "add", AsyncMock(return_value=created)), \
          patch.object(lists_mod, "react", AsyncMock()), \
          patch.object(lists_mod, "pending_set") as p_set:
         await lists_mod.handle_list_inv_add(
@@ -393,7 +393,7 @@ async def test_handle_list_inv_add_empty_parse_responds_gracefully():
     msg.text = "занеси в инвентарь"
 
     with patch.object(lists_mod, "_haiku_parse", AsyncMock(return_value={"items": []})), \
-         patch.object(lists_mod, "add_items", AsyncMock(return_value=[])) as p_add, \
+         patch.object(lists_mod._repo, "add", AsyncMock(return_value=[])) as p_add, \
          patch.object(lists_mod, "react", AsyncMock()):
         await lists_mod.handle_list_inv_add(
             msg, {"text": msg.text}, user_notion_id="user-page-id",
@@ -424,7 +424,7 @@ async def test_handle_list_inv_add_uses_fallback_when_haiku_returns_empty():
     msg.text = text
 
     with patch.object(lists_mod, "_haiku_parse", AsyncMock(return_value={"items": []})), \
-         patch.object(lists_mod, "add_items", AsyncMock(return_value=created)) as p_add, \
+         patch.object(lists_mod._repo, "add", AsyncMock(return_value=created)) as p_add, \
          patch.object(lists_mod, "react", AsyncMock()), \
          patch.object(lists_mod, "pending_set") as p_set:
         await lists_mod.handle_list_inv_add(
@@ -454,7 +454,7 @@ async def test_handle_inv_add_single_with_expiry_does_not_ask():
     msg.text = "гексаспрей 30гр годен до 03.2027"
 
     with patch.object(lists_mod, "_haiku_parse", AsyncMock(return_value=parsed)), \
-         patch.object(lists_mod, "add_items", AsyncMock(return_value=created)) as p_add, \
+         patch.object(lists_mod._repo, "add", AsyncMock(return_value=created)) as p_add, \
          patch.object(lists_mod, "react", AsyncMock()), \
          patch.object(lists_mod, "pending_set") as p_set:
         await lists_mod.handle_list_inv_add(
@@ -480,7 +480,7 @@ async def test_handle_list_inv_add_uses_fallback_when_haiku_raises():
     msg.text = text
 
     with patch.object(lists_mod, "_haiku_parse", AsyncMock(side_effect=ValueError("bad json"))), \
-         patch.object(lists_mod, "add_items", AsyncMock(return_value=[
+         patch.object(lists_mod._repo, "add", AsyncMock(return_value=[
              {"id": "p1", "name": "парацетамол", "type": "📦 Инвентарь", "category": "🏥 Здоровье"},
          ])), \
          patch.object(lists_mod, "react", AsyncMock()), \
