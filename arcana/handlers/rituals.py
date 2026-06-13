@@ -8,10 +8,12 @@ from datetime import datetime, timezone, timedelta
 
 from aiogram.types import Message
 from core.claude_client import ask_claude
-from core.notion_client import ritual_add, log_error, finance_add
+from core.notion_client import log_error, finance_add
 from core.shared_handlers import get_user_tz
+from arcana.repos.rituals_repo import RitualsRepo, goal_label, place_label
 
 logger = logging.getLogger("arcana.rituals")
+_repo = RitualsRepo()
 
 PAYMENT_SOURCE_MAP = {
     "карта": "💳 Карта",
@@ -124,7 +126,7 @@ async def handle_add_ritual(message: Message, text: str, user_notion_id: str = "
             pass
 
         today = datetime.now(tz).strftime("%Y-%m-%d")
-        result = await ritual_add(
+        result = await _repo.create(
             name=data.get("name", "Ритуал"),
             date=today,
             ritual_type="Личный" if not client_name else "Клиентский",
@@ -163,7 +165,7 @@ async def handle_add_ritual(message: Message, text: str, user_notion_id: str = "
                 if w_id:
                     ok = await attach_event_to_work(
                         event_db_id=_cfg.arcana.db_rituals,
-                        event_page_id=result,
+                        event_page_id=result.id,
                         work_page_id=w_id,
                     )
                     if ok:
@@ -185,9 +187,8 @@ async def handle_add_ritual(message: Message, text: str, user_notion_id: str = "
             )
 
         debt = max(0, amount - paid)
-        from core.notion_client import _RITUAL_GOAL_MAP, _RITUAL_PLACE_MAP
-        goal_display = _RITUAL_GOAL_MAP.get((goal or "").lower(), goal or "")
-        place_display = _RITUAL_PLACE_MAP.get((place or "").lower(), place or "")
+        goal_display = goal_label(goal or "") if goal else ""
+        place_display = place_label(place or "") if place else ""
         goal_place_parts = [x for x in (goal_display, place_display) if x]
         goal_place = " · ".join(goal_place_parts)
 
@@ -215,7 +216,7 @@ async def handle_add_ritual(message: Message, text: str, user_notion_id: str = "
             client_type = await client_get_type(client_id) if client_id else None
             if client_id and not should_skip_payment(client_type):
                 from arcana.handlers.payment import payment_keyboard
-                pay_kb = payment_keyboard(result, "rituals")
+                pay_kb = payment_keyboard(result.id, "rituals")
                 lines.append(f"\n💰 Как оплатил(а) {client_name or 'клиент(а)'}?")
         except Exception:
             pay_kb = None
@@ -227,7 +228,7 @@ async def handle_add_ritual(message: Message, text: str, user_notion_id: str = "
         await save_message_page(
             chat_id=bot_msg.chat.id,
             message_id=bot_msg.message_id,
-            page_id=result,
+            page_id=result.id,
             page_type="ritual",
             bot="arcana",
         )
@@ -246,7 +247,7 @@ async def handle_add_ritual(message: Message, text: str, user_notion_id: str = "
             try:
                 from arcana.handlers.barter_prompt import propose_barter_prompt
                 await propose_barter_prompt(
-                    message, kind="ritual", page_id=result,
+                    message, kind="ritual", page_id=result.id,
                     group_name=data.get("name") or "Ритуал",
                 )
             except Exception as e:
