@@ -56,14 +56,14 @@ async def test_reset_recurring_no_deadline_sets_in_progress_and_completion():
     async def capture_update(task_id, props_dict):
         update_calls.append((task_id, props_dict))
 
-    with patch.object(tasks, "update_page", AsyncMock(side_effect=capture_update)), \
+    with patch.object(tasks._repo, "set_props", AsyncMock(side_effect=capture_update)), \
          patch.object(tasks, "_scheduler", None), \
          patch.object(tasks, "_get_user_tz", AsyncMock(return_value=3)):
         await tasks._handle_recurring_task_reset(
             msg, "task-id-1", props, "Ежедневно", "тестовая задача", uid=999_001,
         )
 
-    assert update_calls, "update_page должен быть вызван"
+    assert update_calls, "set_props должен быть вызван"
     _, update_props = update_calls[-1]
 
     # Status → In progress
@@ -92,7 +92,7 @@ async def test_reset_recurring_with_deadline_keeps_in_progress():
     async def capture_update(task_id, props_dict):
         captured["props"] = props_dict
 
-    with patch.object(tasks, "update_page", AsyncMock(side_effect=capture_update)), \
+    with patch.object(tasks._repo, "set_props", AsyncMock(side_effect=capture_update)), \
          patch.object(tasks, "_scheduler", None), \
          patch.object(tasks, "_get_user_tz", AsyncMock(return_value=3)):
         await tasks._handle_recurring_task_reset(
@@ -124,7 +124,7 @@ async def test_reset_recurring_uses_canonical_time_after_snooze():
     async def capture_update(task_id, props_dict):
         captured["props"] = props_dict
 
-    with patch.object(tasks, "update_page", AsyncMock(side_effect=capture_update)), \
+    with patch.object(tasks._repo, "set_props", AsyncMock(side_effect=capture_update)), \
          patch.object(tasks, "_scheduler", None), \
          patch.object(tasks, "_get_user_tz", AsyncMock(return_value=3)):
         await tasks._handle_recurring_task_reset(
@@ -144,15 +144,10 @@ async def test_recurring_reminder_done_already_in_progress():
 
     msg = _make_message()
 
-    captured: dict = {}
-
-    async def capture_update(task_id, props_dict):
-        captured["props"] = props_dict
-
-    with patch.object(tasks, "update_page", AsyncMock(side_effect=capture_update)):
+    with patch.object(tasks._repo, "set_in_progress", AsyncMock()) as mock_ip:
         await tasks._handle_recurring_reminder_done(msg, "task-id-3", "test task")
 
-    assert captured["props"]["Статус"]["status"]["name"] == "In progress"
+    mock_ip.assert_called_once_with("task-id-3")
 
 
 @pytest.mark.asyncio
@@ -168,7 +163,7 @@ async def test_completion_timestamp_format_moscow_tz():
     async def capture_update(task_id, props_dict):
         captured["props"] = props_dict
 
-    with patch.object(tasks, "update_page", AsyncMock(side_effect=capture_update)), \
+    with patch.object(tasks._repo, "set_props", AsyncMock(side_effect=capture_update)), \
          patch.object(tasks, "_scheduler", None), \
          patch.object(tasks, "_get_user_tz", AsyncMock(return_value=3)):
         await tasks._handle_recurring_task_reset(
