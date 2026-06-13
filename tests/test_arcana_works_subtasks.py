@@ -137,13 +137,15 @@ def test_arcana_works_subtasks_batched_in_one_query(client):
 
 
 @pytest.mark.asyncio
-async def test_subtasks_handler_callback_works_for_arcana_rel():
-    """Общий core/subtasks_handler принимает rel_type=work и резолвит db_works."""
-    from core.subtasks_handler import task_subtask_cb  # noqa
+async def test_subtasks_handler_full_uuid_no_scan():
+    """Кнопка с полным UUID → pending ставится с точным task_id, db_query не вызывается."""
+    from core.subtasks_handler import task_subtask_cb
+
+    FULL_UUID = "deadbeef-1234-5678-9abc-def012345678"
 
     call = MagicMock()
     call.from_user.id = 7
-    call.data = "task_subtask_work_abc123"
+    call.data = f"task_subtask_work_{FULL_UUID}"
     call.message = MagicMock()
     call.message.text = "⚡ Работа создана!\n📌 Подготовить колоду\nfoo"
     call.message.edit_reply_markup = AsyncMock()
@@ -156,16 +158,61 @@ async def test_subtasks_handler_callback_works_for_arcana_rel():
         captured["uid"] = uid
         captured["data"] = data
 
+    db_mock = AsyncMock()
+    with patch("core.list_manager.pending_set", fake_set), \
+         patch("core.notion_client.db_query", db_mock):
+        await task_subtask_cb(call)
+
+    assert captured.get("uid") == 7
+    assert captured["data"]["action"] == "subtask_items"
+    assert captured["data"]["rel_type"] == "work"
+    assert captured["data"]["task_id"] == FULL_UUID, (
+        "task_id должен быть полным UUID, а не усечённым"
+    )
+    assert captured["data"]["task_name"] == "Подготовить колоду"
+    assert captured["data"]["bot"] == "arcana"
+    # Полный UUID → скан не нужен
+    db_mock.assert_not_awaited()
+    call.message.answer.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_subtasks_handler_truncated_id_not_found_fails_gracefully():
+    """Регрессия #109: усечённый id_prefix не найден в db → ошибка юзеру, сирота НЕ создаётся.
+
+    Старый код: task_id = id_prefix (усечённый) → pending_set вызывался с невалидным UUID.
+    Новый код: task_id = None → сообщение об ошибке → return (pending_set НЕ вызывается).
+    """
+    from core.subtasks_handler import task_subtask_cb
+
+    call = MagicMock()
+    call.from_user.id = 7
+    call.data = "task_subtask_work_abc123def456"  # усечённый, не full UUID
+    call.message = MagicMock()
+    call.message.text = "⚡ Работа создана!\n📌 Колода\nfoo"
+    call.message.edit_reply_markup = AsyncMock()
+    call.message.answer = AsyncMock()
+    call.answer = AsyncMock()
+
+    captured = {}
+
+    def fake_set(uid, data):
+        captured["uid"] = uid
+        captured["data"] = data
+
+    # db_query возвращает пустой список — задача не найдена
     with patch("core.list_manager.pending_set", fake_set), \
          patch("core.notion_client.db_query", AsyncMock(return_value=[])):
         await task_subtask_cb(call)
 
-    assert captured["uid"] == 7
-    assert captured["data"]["action"] == "subtask_items"
-    assert captured["data"]["rel_type"] == "work"
-    assert captured["data"]["task_name"] == "Подготовить колоду"
-    assert captured["data"]["bot"] == "arcana"
+    # pending_set НЕ должен был вызваться — сирота не создаётся
+    assert "data" not in captured, (
+        "pending_set не должен вызываться при неразрешённом task_id"
+    )
+    # Пользователь получает сообщение об ошибке
     call.message.answer.assert_awaited_once()
+    error_text = call.message.answer.call_args.args[0]
+    assert "не удалось" in error_text.lower() or "⚠️" in error_text
 
 
 @pytest.mark.asyncio
@@ -211,5 +258,11 @@ async def test_work_save_attaches_subtasks_button():
     assert kb is not None
     flat = [b for row in kb.inline_keyboard for b in row]
     cbs = [b.callback_data for b in flat]
-    assert any(c.startswith("task_subtask_work_") for c in cbs)
+    subtask_cb = next((c for c in cbs if c.startswith("task_subtask_work_")), None)
+    assert subtask_cb is not None
+    # После фикса #109: callback_data содержит полный page_id, а не усечённый prefix
+    page_id_part = subtask_cb.removeprefix("task_subtask_work_")
+    assert page_id_part == "page-id-deadbeef-1234-5678-9abc-def012", (
+        f"Ожидали полный page_id в callback_data, получили: {page_id_part!r}"
+    )
     assert "work_ok" in cbs

@@ -566,11 +566,10 @@ async def cb_work_save(call: CallbackQuery) -> None:
         )
 
     # Inline-кнопки: предложить разбить на подзадачи (паритет с Nexus)
-    _id_prefix = result.replace("-", "")[:24]
     save_kb = InlineKeyboardMarkup(inline_keyboard=[[
         InlineKeyboardButton(
             text="📋 Подзадачи",
-            callback_data=f"task_subtask_work_{_id_prefix}",
+            callback_data=f"task_subtask_work_{result}",
         ),
         InlineKeyboardButton(text="👌 Ок", callback_data="work_ok"),
     ]])

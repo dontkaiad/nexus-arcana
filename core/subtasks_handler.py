@@ -5,18 +5,27 @@
 в nexus/handlers/tasks.py и в Arcana не работал. Теперь — общий handler,
 оба бота создают свой router через ``make_subtasks_router()``.
 
-Callback data: ``task_subtask_{rel_type}_{id_prefix}``
-- rel_type ∈ {"task", "work"} — где искать full id и какое relation писать
-- id_prefix — первые ~24 hex-символа page_id (без дефисов)
+Callback data: ``task_subtask_{rel_type}_{page_id}``
+- rel_type ∈ {"task", "work"} — какое relation писать
+- page_id — полный Notion page_id с дефисами (xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx).
+  Старый формат (усечённый id_prefix без дефисов) поддерживается для compat,
+  но если не удаётся разрешить — выдаём ошибку и NOT создаём сироту (fixes #109).
 """
 from __future__ import annotations
 
 import logging
+import re
 
 from aiogram import F, Router
 from aiogram.types import CallbackQuery
 
 logger = logging.getLogger("core.subtasks_handler")
+
+# Полный Notion UUID: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+_FULL_UUID_RE = re.compile(
+    r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+    re.IGNORECASE,
+)
 
 
 async def task_subtask_cb(call: CallbackQuery) -> None:
@@ -26,7 +35,7 @@ async def task_subtask_cb(call: CallbackQuery) -> None:
 
     parts = call.data.split("_", 3)
     rel_type = parts[2] if len(parts) > 2 else "task"
-    id_prefix = parts[3] if len(parts) > 3 else ""
+    raw_id = parts[3] if len(parts) > 3 else ""
 
     task_name = "Подзадачи"
     if call.message and call.message.text:
@@ -35,20 +44,41 @@ async def task_subtask_cb(call: CallbackQuery) -> None:
                 task_name = line.replace("📌", "").strip()
                 break
 
-    task_id = id_prefix
+    # Resolve full page_id for the relation.
+    # New buttons store the full UUID directly — no DB scan needed.
+    # Old (truncated) callbacks: try a scan for backwards compat, but NEVER
+    # fall through to using a partial id (that would create orphan subtasks).
+    task_id = None
     try:
-        db_id = (
-            config.arcana.db_works if rel_type == "work" else config.nexus.db_tasks
-        )
-        if db_id and id_prefix:
-            pages = await db_query(db_id, page_size=20)
-            for page in pages:
-                pid = page.get("id", "").replace("-", "")
-                if pid.startswith(id_prefix.replace("-", "")):
-                    task_id = page["id"]
-                    break
+        if _FULL_UUID_RE.match(raw_id):
+            task_id = raw_id
+        else:
+            # Legacy truncated id_prefix — scan with larger window
+            db_id = (
+                config.arcana.db_works if rel_type == "work" else config.nexus.db_tasks
+            )
+            if db_id and raw_id:
+                pages = await db_query(db_id, page_size=100)
+                prefix_hex = raw_id.replace("-", "")
+                for page in pages:
+                    pid = page.get("id", "").replace("-", "")
+                    if pid.startswith(prefix_hex):
+                        task_id = page["id"]
+                        break
+            if task_id is None:
+                logger.error(
+                    "task_subtask: could not resolve id for raw_id=%r rel=%s",
+                    raw_id, rel_type,
+                )
     except Exception as e:
         logger.warning("task_subtask: lookup error: %s", e)
+
+    if not task_id:
+        await call.message.answer(
+            "⚠️ Не удалось найти задачу для привязки подзадач. Попробуй ещё раз."
+        )
+        await call.answer()
+        return
 
     bot_name = "arcana" if rel_type == "work" else "nexus"
     list_pending_set(call.from_user.id, {
