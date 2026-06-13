@@ -6,11 +6,11 @@ import traceback as tb
 
 from aiogram.types import Message
 from core.claude_client import ask_claude
-from core.notion_client import (
-    works_list, work_done, log_error, _extract_text,
-)
+from core.notion_client import log_error
+from arcana.repos.works_repo import WorksRepo
 
 logger = logging.getLogger("arcana.works")
+_repo = WorksRepo()
 
 PARSE_WORK_SYSTEM = (
     "Извлеки данные работы/задачи практики. Ответь ТОЛЬКО JSON без markdown:\n"
@@ -80,7 +80,7 @@ async def handle_work_done(message: Message, text: str, user_notion_id: str = ""
             model="claude-haiku-4-5-20251001",
         )).strip()
 
-        items = await works_list(user_notion_id=user_notion_id)
+        items = await _repo.list_open(user_notion_id)
         if not items:
             await message.answer("📋 Нет открытых работ.")
             return
@@ -90,7 +90,7 @@ async def handle_work_done(message: Message, text: str, user_notion_id: str = ""
         best = None
         best_score = 0
         for item in items:
-            name = _extract_text(item["properties"].get("Работа", {})).lower()
+            name = item.title.lower()
             # считаем сколько слов из hint есть в названии
             words = [w for w in hint_lower.split() if len(w) > 2]
             score = sum(1 for w in words if w in name)
@@ -102,11 +102,9 @@ async def handle_work_done(message: Message, text: str, user_notion_id: str = ""
             await message.answer(f"❌ Не нашла работу по «{hint}».")
             return
 
-        page_id = best["id"]
-        title = _extract_text(best["properties"].get("Работа", {}))
-        ok = await work_done(page_id)
+        ok = await _repo.mark_done(best.id)
         if ok:
-            await message.answer(f"🔥 Работа выполнена!\n🔮 {title}")
+            await message.answer(f"🔥 Работа выполнена!\n🔮 {best.title}")
         else:
             await message.answer("⚠️ Ошибка обновления в Notion.")
 
@@ -134,38 +132,17 @@ async def handle_work_done(message: Message, text: str, user_notion_id: str = ""
 
 async def handle_works_list(message: Message, user_notion_id: str = "") -> None:
     try:
-        items = await works_list(user_notion_id=user_notion_id)
+        items = await _repo.list_open(user_notion_id)
         if not items:
             await message.answer("📋 Работ нет.")
             return
 
         groups: dict = {"Срочно": [], "Важно": [], "Можно потом": []}
         for item in items:
-            props = item["properties"]
-            title = _extract_text(props.get("Работа", {}))
-            priority_val = (props.get("Приоритет") or {}).get("select", {})
-            priority = (priority_val.get("name") or "Можно потом") if priority_val else "Можно потом"
-            if priority not in groups:
-                priority = "Можно потом"
-
-            deadline_val = (props.get("Дедлайн") or {}).get("date", {})
-            deadline_str = ""
-            if deadline_val:
-                start = (deadline_val.get("start") or "")[:16]
-                if start:
-                    deadline_str = f" · 📅 {start[8:10]}.{start[5:7]}"
-                    if len(start) > 10:
-                        deadline_str += f" {start[11:16]}"
-
-            cat_val = (props.get("Категория") or {}).get("select", {})
-            cat_str = f" · {cat_val.get('name')}" if cat_val and cat_val.get("name") else ""
-
-            rel = (props.get("👥 Клиенты") or {}).get("relation", [])
-            client_str = ""
-            if rel:
-                client_str = " · 👤 …"
-
-            groups[priority].append(f"  • {title}{deadline_str}{cat_str}{client_str}")
+            client_str = " · 👤 …" if item.has_client else ""
+            groups[item.priority].append(
+                f"  • {item.title}{item.deadline_str}{item.category_str}{client_str}"
+            )
 
         lines = ["📋 <b>Работы:</b>\n"]
         for priority, emoji in _PRIORITY_EMOJI.items():
