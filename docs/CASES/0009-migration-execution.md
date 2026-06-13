@@ -1,3 +1,5 @@
+> Superseded by ADR-0010 (direct cutover)
+
 # ADR-0009 — Migration execution: repository seam, seal-then-swap, dual-write
 
 - **Status:** Accepted
