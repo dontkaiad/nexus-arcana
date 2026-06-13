@@ -9,18 +9,14 @@ from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 
 from core.claude_client import ask_claude
-from core.notion_client import (
-    grimoire_add,
-    grimoire_list_by_category,
-    grimoire_search,
-    rituals_all,
-    log_error,
-    _extract_text,
-    _extract_select,
+from core.notion_client import log_error
+from arcana.repos.grimoire_repo import (
+    GrimoireRepo, GrimoireEntry, RitualSummary,
 )
 
 logger = logging.getLogger("arcana.grimoire")
 router = Router()
+_repo = GrimoireRepo()
 
 GRIMOIRE_CATEGORIES = {
     "заговор":    "📿 Заговор",
@@ -86,7 +82,7 @@ def _heuristic_grimoire_parse(text: str) -> dict:
     if "заговор" in low: cat = "заговор"
     elif "рецепт" in low or "масло" in low or "настой" in low: cat = "рецепт"
     elif "комбинация" in low: cat = "комбинация"
-    themes: list[str] = []
+    themes: list = []
     for kw, theme in [
         (("деньги", "финансы", "долг", "доход"), "финансы"),
         (("любовь", "любви", "приворот", "отношения"), "любовь"),
@@ -105,8 +101,7 @@ def _heuristic_grimoire_parse(text: str) -> dict:
         "source": None,
     }
 
-_AWAIT_SEARCH_KEY = "grim_await_search"
-_pending_search: dict = {}  # uid → True
+_pending_search: dict = {}  # uid → user_notion_id
 
 
 def _menu_keyboard() -> InlineKeyboardMarkup:
@@ -158,43 +153,25 @@ def _parse_json_safe(raw: str) -> dict:
     return {}
 
 
-def _extract_multi_select(prop: dict) -> List[str]:
-    return [opt["name"] for opt in prop.get("multi_select", [])]
-
-
-def _extract_checkbox(prop: dict) -> bool:
-    return bool(prop.get("checkbox", False))
-
-
-def _format_grimoire_list(items: List[dict], title: str) -> str:
+def _format_grimoire_list(items: List[GrimoireEntry], title: str) -> str:
     if not items:
         return f"{title}\n\nПусто."
     lines = [f"<b>{title} ({len(items)})</b>\n"]
-    for i, item in enumerate(items[:10], 1):
-        p = item.get("properties", {})
-        name = _extract_text(p.get("Название", {}))
-        themes = _extract_multi_select(p.get("Тема", {}))
-        verified = _extract_checkbox(p.get("Проверено", {}))
-        theme_str = " · ".join(t.split(" ")[0] for t in themes) if themes else ""
-        check = " · ✅" if verified else ""
-        lines.append(f"{i}. {name}" + (f" · {theme_str}" if theme_str else "") + check)
+    for i, entry in enumerate(items[:10], 1):
+        theme_str = " · ".join(t.split(" ")[0] for t in entry.themes) if entry.themes else ""
+        check = " · ✅" if entry.verified else ""
+        lines.append(f"{i}. {entry.title}" + (f" · {theme_str}" if theme_str else "") + check)
     if len(items) > 10:
         lines.append(f"\n… ещё {len(items) - 10}")
     return "\n".join(lines)
 
 
-def _format_ritual_list(items: List[dict]) -> str:
+def _format_ritual_list(items: List[RitualSummary]) -> str:
     if not items:
         return "<b>🕯️ Ритуалы</b>\n\nПусто."
     lines = [f"<b>🕯️ Ритуалы ({len(items)})</b>\n"]
-    for i, item in enumerate(items[:10], 1):
-        p = item.get("properties", {})
-        name = _extract_text(p.get("Тема", {})) or _extract_text(p.get("Название", {})) or "—"
-        result = _extract_select(p.get("Результат", {}))
-        result_icon = {"✅ Сработало": "✅", "❌ Не сработало": "❌", "〰️ Частично": "〰️"}.get(result, "⏳")
-        date_raw = item.get("properties", {}).get("Дата", {}).get("date") or {}
-        date_str = (date_raw.get("start") or "")[:10]
-        lines.append(f"{i}. {name}" + (f" · {date_str}" if date_str else "") + f" {result_icon}")
+    for i, r in enumerate(items[:10], 1):
+        lines.append(f"{i}. {r.name}" + (f" · {r.date}" if r.date else "") + f" {r.result_icon}")
     if len(items) > 10:
         lines.append(f"\n… ещё {len(items) - 10}")
     return "\n".join(lines)
@@ -225,7 +202,7 @@ async def cb_grim_menu(callback: CallbackQuery, user_notion_id: str = "") -> Non
 async def cb_grim_rituals(callback: CallbackQuery, user_notion_id: str = "") -> None:
     await callback.answer()
     try:
-        items = await rituals_all(user_notion_id)
+        items = await _repo.rituals_list(user_notion_id)
         text = _format_ritual_list(items)
         await callback.message.edit_text(text, reply_markup=_back_keyboard(), parse_mode="HTML")
     except Exception as e:
@@ -237,7 +214,7 @@ async def cb_grim_rituals(callback: CallbackQuery, user_notion_id: str = "") -> 
 async def cb_grim_spells(callback: CallbackQuery, user_notion_id: str = "") -> None:
     await callback.answer()
     try:
-        items = await grimoire_list_by_category("📿 Заговор", user_notion_id)
+        items = await _repo.list_by_category("📿 Заговор", user_notion_id)
         text = _format_grimoire_list(items, "📿 Заговоры")
         await callback.message.edit_text(text, reply_markup=_back_keyboard(), parse_mode="HTML")
     except Exception as e:
@@ -249,7 +226,7 @@ async def cb_grim_spells(callback: CallbackQuery, user_notion_id: str = "") -> N
 async def cb_grim_recipes(callback: CallbackQuery, user_notion_id: str = "") -> None:
     await callback.answer()
     try:
-        items = await grimoire_list_by_category("🧴 Рецепт", user_notion_id)
+        items = await _repo.list_by_category("🧴 Рецепт", user_notion_id)
         text = _format_grimoire_list(items, "🧴 Рецепты")
         await callback.message.edit_text(text, reply_markup=_back_keyboard(), parse_mode="HTML")
     except Exception as e:
@@ -261,7 +238,7 @@ async def cb_grim_recipes(callback: CallbackQuery, user_notion_id: str = "") -> 
 async def cb_grim_combos(callback: CallbackQuery, user_notion_id: str = "") -> None:
     await callback.answer()
     try:
-        items = await grimoire_list_by_category("✨ Комбинация", user_notion_id)
+        items = await _repo.list_by_category("✨ Комбинация", user_notion_id)
         text = _format_grimoire_list(items, "✨ Комбинации")
         await callback.message.edit_text(text, reply_markup=_back_keyboard(), parse_mode="HTML")
     except Exception as e:
@@ -273,7 +250,7 @@ async def cb_grim_combos(callback: CallbackQuery, user_notion_id: str = "") -> N
 async def cb_grim_notes(callback: CallbackQuery, user_notion_id: str = "") -> None:
     await callback.answer()
     try:
-        items = await grimoire_list_by_category("📝 Заметка", user_notion_id)
+        items = await _repo.list_by_category("📝 Заметка", user_notion_id)
         text = _format_grimoire_list(items, "📝 Заметки")
         await callback.message.edit_text(text, reply_markup=_back_keyboard(), parse_mode="HTML")
     except Exception as e:
@@ -334,7 +311,7 @@ async def handle_grimoire_add(message: Message, text: str, user_notion_id: str =
         raw_themes = data.get("themes") or []
         themes = [GRIMOIRE_THEMES.get(t.lower(), t) for t in raw_themes if t]
 
-        page_id = await grimoire_add(
+        page_id = await _repo.add(
             title=data["title"],
             category=category,
             themes=themes if themes else None,
@@ -368,7 +345,7 @@ async def handle_grimoire_search(message: Message, text: str, user_notion_id: st
                 query = query.lower().replace(key, "").strip()
                 break
 
-        items = await grimoire_search(
+        items = await _repo.search(
             query=query if len(query) >= 2 else "",
             theme=theme,
             user_notion_id=user_notion_id,
@@ -379,24 +356,16 @@ async def handle_grimoire_search(message: Message, text: str, user_notion_id: st
             return
 
         if len(items) == 1:
-            # Показать полную запись
-            p = items[0].get("properties", {})
-            name = _extract_text(p.get("Название", {}))
-            cat = _extract_select(p.get("Категория", {}))
-            themes_list = _extract_multi_select(p.get("Тема", {}))
-            verified = _extract_checkbox(p.get("Проверено", {}))
-            body = _extract_text(p.get("Текст", {}))
-            source = _extract_text(p.get("Источник", {}))
-
-            reply = f"{cat} <b>{name}</b>\n"
-            if themes_list:
-                reply += " · ".join(themes_list) + "\n"
-            if verified:
+            entry = items[0]
+            reply = f"{entry.category} <b>{entry.title}</b>\n"
+            if entry.themes:
+                reply += " · ".join(entry.themes) + "\n"
+            if entry.verified:
                 reply += "✅ Проверено\n"
-            if body:
-                reply += f"\n📜 Текст:\n{body}\n"
-            if source:
-                reply += f"\n📚 Источник: {source}"
+            if entry.text:
+                reply += f"\n📜 Текст:\n{entry.text}\n"
+            if entry.source:
+                reply += f"\n📚 Источник: {entry.source}"
             await message.answer(reply.strip(), parse_mode="HTML")
         else:
             text_out = _format_grimoire_list(items, "🔍 Результаты поиска")

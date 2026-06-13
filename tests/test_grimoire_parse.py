@@ -11,6 +11,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+import arcana.handlers.grimoire as gmod
 from arcana.handlers.grimoire import (
     _heuristic_grimoire_parse,
     _parse_json_safe,
@@ -61,7 +62,7 @@ async def test_handle_grimoire_add_falls_back_to_heuristic():
     text = "тест — заговор на деньги, читать на убывающую луну"
     with patch("arcana.handlers.grimoire.ask_claude",
                AsyncMock(return_value="не json вообще")), \
-         patch("arcana.handlers.grimoire.grimoire_add",
+         patch.object(gmod._repo, "add",
                AsyncMock(return_value="page-1")) as ga:
         await handle_grimoire_add(msg, text, user_notion_id="u1")
     ga.assert_awaited_once()
