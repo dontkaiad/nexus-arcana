@@ -22,6 +22,10 @@ logger = logging.getLogger("nexus.list_manager")
 
 # ── Константы ─────────────────────────────────────────────────────────────────
 
+# Точное имя relation-проперти в Notion-схеме (trailing space — так создано в Notion).
+# Использовать ТОЛЬКО эту константу в read и write — разъехаться не могут (refs #100).
+WORK_REL_PROP = "🔮 Работы "
+
 CATEGORY_TO_FINANCE = {
     "🐾 Коты": "🐾 Коты",
     "🍜 Продукты": "🍜 Продукты",
@@ -244,8 +248,8 @@ async def find_task_by_name(
 def _extract_page_data(page: dict) -> dict:
     """Извлечь данные из Notion page для ответа."""
     props = page.get("properties", {})
-    # v1.2: 🔮 Работы — name с trailing space в Notion схеме, поддерживаем оба варианта.
-    work_rel_prop = props.get("🔮 Работы ", {}) or props.get("🔮 Работы", {})
+    # v1.2: trailing space — exact Notion schema name (refs #100); fallback tolerates old data.
+    work_rel_prop = props.get(WORK_REL_PROP, {}) or props.get("🔮 Работы", {})
     return {
         "id": page["id"],
         "name": _extract_text(props.get("Название", {})),
@@ -354,7 +358,7 @@ async def add_items(
         if item.get("task_rel"):
             props["✅ Задачи"] = _relation(item["task_rel"])
         if item.get("work_rel"):
-            props["🔮 Работы"] = _relation(item["work_rel"])
+            props[WORK_REL_PROP] = _relation(item["work_rel"])
 
         page_id = await page_create(db, props)
         if page_id:

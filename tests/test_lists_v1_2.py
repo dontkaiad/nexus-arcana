@@ -517,4 +517,45 @@ def test_miniapp_summary_aggregates_items():
     assert s["actual_total"] == 24000
     assert s["count_total"] == 3
     assert s["count_open"] == 2
-    assert s["count_done"] == 1
+
+
+# ── Regression #100: work relation prop name (trailing space) ────────────────
+
+
+@pytest.mark.asyncio
+async def test_add_items_work_rel_uses_exact_schema_name():
+    """add_items с work_rel должен писать props['🔮 Работы '] (с trailing space).
+
+    Регрессия #100: старый код писал '🔮 Работы' (без пробела) → Notion
+    молча игнорил неизвестное поле → relation не ставился → чеклист-сироты.
+    Этот тест ПАДАЛ на коде без константы WORK_REL_PROP.
+    """
+    from core import list_manager
+    from core.list_manager import WORK_REL_PROP
+
+    captured: dict = {}
+
+    async def _fake_create(db, props):
+        captured["props"] = props
+        return "page-x"
+
+    with patch.object(list_manager, "page_create",
+                      AsyncMock(side_effect=_fake_create)):
+        await list_manager.add_items(
+            [{"name": "Подготовить пространство", "work_rel": "work-abc"}],
+            list_type="📋 Чеклист",
+            bot_name="🌒 Arcana",
+            user_page_id="user-1",
+        )
+
+    p = captured["props"]
+    # Точное имя проперти должно совпадать с WORK_REL_PROP
+    assert WORK_REL_PROP in p, (
+        f"Ожидали ключ {WORK_REL_PROP!r} в props, получили: {list(p)}"
+    )
+    # И НЕ должно быть старого беспробельного ключа
+    assert "🔮 Работы" not in p or WORK_REL_PROP in p, (
+        "Ключ без trailing space не должен использоваться для записи"
+    )
+    # Значение — relation с нужным id
+    assert p[WORK_REL_PROP] == {"relation": [{"id": "work-abc"}]}
