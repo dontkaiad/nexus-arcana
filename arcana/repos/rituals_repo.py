@@ -5,7 +5,9 @@ are fully contained here. Callers receive plain Ritual dataclass instances.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from datetime import datetime
+from decimal import Decimal
 from typing import Optional
 
 from core import notion_client as _notion
@@ -13,8 +15,15 @@ from core import notion_client as _notion
 
 @dataclass
 class Ritual:
-    id: str    # stable identifier (Notion page_id now; Postgres pk later)
+    id: str                          # stable identifier (Notion page_id now; Postgres pk later)
     name: str
+    date: Optional[datetime] = None
+    client_id: Optional[str] = None
+    result: Optional[str] = None     # outcome code: 'unverified'|'partial'|'negative'|'positive'
+    price: Optional[Decimal] = None
+    paid: Decimal = field(default_factory=lambda: Decimal("0"))
+    goal: Optional[str] = None       # magical purpose code (e.g. 'finance', 'love')
+    place: Optional[str] = None      # ritual_place code (e.g. 'home', 'forest')
 
 
 def goal_label(goal: str) -> str:
@@ -71,4 +80,12 @@ class RitualsRepo:
         )
         if page_id is None:
             return None
-        return Ritual(id=page_id, name=name)
+        return Ritual(
+            id=page_id,
+            name=name,
+            paid=Decimal(str(paid)),
+            price=Decimal(str(amount)) if amount else None,
+            client_id=client_id,
+            goal=goal,
+            place=place,
+        )
