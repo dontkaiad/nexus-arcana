@@ -1,0 +1,15 @@
+services:
+  db:
+    image: postgres:16
+    container_name: nexus-arcana-db
+    environment:
+      POSTGRES_USER: kai
+      POSTGRES_PASSWORD: localdevpass
+      POSTGRES_DB: nexus_arcana
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+volumes:
+  pgdata:
