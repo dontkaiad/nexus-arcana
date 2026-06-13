@@ -32,6 +32,7 @@ async def task_subtask_cb(call: CallbackQuery) -> None:
     from core.list_manager import pending_set as list_pending_set
     from core.config import config
     from core.notion_client import db_query
+    from core.user_manager import get_user_notion_id
 
     parts = call.data.split("_", 3)
     rel_type = parts[2] if len(parts) > 2 else "task"
@@ -80,13 +81,14 @@ async def task_subtask_cb(call: CallbackQuery) -> None:
         await call.answer()
         return
 
+    user_notion_id = await get_user_notion_id(call.from_user.id) or ""
     bot_name = "arcana" if rel_type == "work" else "nexus"
     list_pending_set(call.from_user.id, {
         "action": "subtask_items",
         "task_id": task_id,
         "task_name": task_name,
         "rel_type": rel_type,
-        "user_notion_id": "",
+        "user_notion_id": user_notion_id,
         "bot": bot_name,
     })
 

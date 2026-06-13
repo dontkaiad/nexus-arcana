@@ -1433,7 +1433,7 @@ async def handle_list_pending(msg: Message, user_notion_id: str = "") -> bool:
         task_id = pending.get("task_id", "")
         task_name = pending.get("task_name", "Подзадачи")
         rel_type = pending.get("rel_type", "task")
-        p_user_id = pending.get("user_notion_id", user_notion_id)
+        p_user_id = pending.get("user_notion_id") or user_notion_id
         if task_id:
             rel_key = "work_rel" if rel_type == "work" else "task_rel"
             items = [{"name": it, "group": task_name, rel_key: task_id} for it in raw_items]

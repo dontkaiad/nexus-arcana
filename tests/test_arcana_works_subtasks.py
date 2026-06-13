@@ -160,7 +160,8 @@ async def test_subtasks_handler_full_uuid_no_scan():
 
     db_mock = AsyncMock()
     with patch("core.list_manager.pending_set", fake_set), \
-         patch("core.notion_client.db_query", db_mock):
+         patch("core.notion_client.db_query", db_mock), \
+         patch("core.user_manager.get_user_notion_id", AsyncMock(return_value="notion-u-42")):
         await task_subtask_cb(call)
 
     assert captured.get("uid") == 7
@@ -171,6 +172,9 @@ async def test_subtasks_handler_full_uuid_no_scan():
     )
     assert captured["data"]["task_name"] == "Подготовить колоду"
     assert captured["data"]["bot"] == "arcana"
+    assert captured["data"]["user_notion_id"] == "notion-u-42", (
+        "user_notion_id должен быть реальным, не пустой строкой"
+    )
     # Полный UUID → скан не нужен
     db_mock.assert_not_awaited()
     call.message.answer.assert_awaited_once()
@@ -202,7 +206,8 @@ async def test_subtasks_handler_truncated_id_not_found_fails_gracefully():
 
     # db_query возвращает пустой список — задача не найдена
     with patch("core.list_manager.pending_set", fake_set), \
-         patch("core.notion_client.db_query", AsyncMock(return_value=[])):
+         patch("core.notion_client.db_query", AsyncMock(return_value=[])), \
+         patch("core.user_manager.get_user_notion_id", AsyncMock(return_value="u")):
         await task_subtask_cb(call)
 
     # pending_set НЕ должен был вызваться — сирота не создаётся
@@ -266,3 +271,46 @@ async def test_work_save_attaches_subtasks_button():
         f"Ожидали полный page_id в callback_data, получили: {page_id_part!r}"
     )
     assert "work_ok" in cbs
+
+
+# ── Regression #110: user_notion_id stored in pending ────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_subtasks_handler_stores_real_user_notion_id():
+    """Регрессия #110: pending должен содержать реальный user_notion_id, а не ''.
+
+    Старый код: 'user_notion_id': '' → pending.get('user_notion_id', fallback) = ''
+    (ключ существует со значением '') → 🪪 Пользователи не ставилась на чеклист-пункты.
+    Новый код: get_user_notion_id(tg_id) → реальный id → pending.get(...) or fallback = реальный id.
+    """
+    from core.subtasks_handler import task_subtask_cb
+
+    FULL_UUID = "cafebabe-1234-5678-9abc-def012345678"
+
+    call = MagicMock()
+    call.from_user.id = 42
+    call.data = f"task_subtask_task_{FULL_UUID}"
+    call.message = MagicMock()
+    call.message.text = "⚡ Задача создана!\n📌 Отладить код\nfoo"
+    call.message.edit_reply_markup = AsyncMock()
+    call.message.answer = AsyncMock()
+    call.answer = AsyncMock()
+
+    captured = {}
+
+    def fake_set(uid, data):
+        captured["data"] = data
+
+    with patch("core.list_manager.pending_set", fake_set), \
+         patch("core.notion_client.db_query", AsyncMock()), \
+         patch("core.user_manager.get_user_notion_id",
+               AsyncMock(return_value="real-notion-page-id")):
+        await task_subtask_cb(call)
+
+    assert "data" in captured, "pending_set должен был вызваться"
+    stored_uid = captured["data"]["user_notion_id"]
+    assert stored_uid == "real-notion-page-id", (
+        f"Ожидали реальный user_notion_id, получили: {stored_uid!r} "
+        "(пустая строка = баг #110)"
+    )
