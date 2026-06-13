@@ -134,8 +134,8 @@ async def test_create_client_with_photo_in_one_message():
 
     with patch.object(cmod, "ask_claude",
                       AsyncMock(return_value='{"name":"Маша","contact":"@m","request":"финансы"}')), \
-         patch.object(cmod, "client_find", AsyncMock(return_value=None)), \
-         patch.object(cmod, "client_add", AsyncMock(return_value="cli-new-1")), \
+         patch.object(cmod._repo, "find", AsyncMock(return_value=None)), \
+         patch.object(cmod._repo, "add", AsyncMock(return_value="cli-new-1")), \
          patch("arcana.handlers.client_photo.cloudinary_upload",
                AsyncMock(return_value="https://cdn/x.jpg")) as cu, \
          patch("arcana.handlers.client_photo.update_page",
