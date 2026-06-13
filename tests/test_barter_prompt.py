@@ -168,6 +168,7 @@ async def test_reply_vmesto_renames_and_marks_done():
 
 @pytest.mark.asyncio
 async def test_reply_money_creates_finance_and_closes_money_item():
+    from arcana.handlers import barter_prompt
     from arcana.handlers.barter_prompt import handle_reply_text
 
     reply = MagicMock()
@@ -199,7 +200,7 @@ async def test_reply_money_creates_finance_and_closes_money_item():
                AsyncMock(return_value=items)), \
          patch("arcana.handlers.barter_prompt.update_page",
                AsyncMock(return_value=None)) as up, \
-         patch("arcana.handlers.barter_prompt.finance_add", fa):
+         patch.object(barter_prompt._repo, "add", fa):
         ok = await handle_reply_text(msg, "закинула 1500₽ за приворот",
                                        user_notion_id="u1")
     assert ok is True

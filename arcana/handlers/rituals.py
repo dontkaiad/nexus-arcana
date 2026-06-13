@@ -8,7 +8,8 @@ from datetime import datetime, timezone, timedelta
 
 from aiogram.types import Message
 from core.claude_client import ask_claude
-from core.notion_client import log_error, finance_add
+from core.notion_client import log_error
+from core.repos.finance_repo import _repo
 from core.shared_handlers import get_user_tz
 from arcana.repos.rituals_repo import RitualsRepo, goal_label, place_label
 
@@ -175,7 +176,7 @@ async def handle_add_ritual(message: Message, text: str, user_notion_id: str = "
             logger.warning("ritual→work relation failed: %s", e)
 
         if amount > 0:
-            await finance_add(
+            await _repo.add(
                 date=today,
                 amount=amount,
                 category="🔮 Практика",

@@ -17,7 +17,8 @@ from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKe
 from aiogram import Router, F
 from core.claude_client import ask_claude, ask_claude_vision
 from nexus.handlers.utils import react
-from core.notion_client import finance_month, log_error, page_create, update_page, create_report_page, _title, _number, _select, _date, _text
+from core.notion_client import log_error, create_report_page, _title, _number, _select, _date, _text
+from core.repos.finance_repo import _repo
 
 # Парсинг бюджета вынесен в core.budget — здесь re-export под старыми именами
 # для backward compat с существующими call-sites в модуле.
@@ -102,9 +103,6 @@ def _parse_user_amount(text: str) -> Optional[int]:
 
 async def _calc_free_remaining(user_notion_id: str = "") -> Optional[Tuple[float, int]]:
     """Возвращает (остаток_свободных, дней_до_конца_месяца) или None."""
-    from core.config import config
-    from core.notion_client import db_query
-
     mem_db = os.environ.get("NOTION_DB_MEMORY")
     if not mem_db:
         return None
@@ -122,11 +120,9 @@ async def _calc_free_remaining(user_notion_id: str = "") -> Optional[Tuple[float
 
     # Доходы за месяц
     try:
-        income_records = await db_query(config.nexus.db_finance, filter_obj={"and": [
-            {"property": "Тип", "select": {"equals": "💰 Доход"}},
-            {"property": "Дата", "date": {"on_or_after": month_start}},
-            {"property": "Дата", "date": {"on_or_before": today_str}},
-        ]}, page_size=200)
+        income_records = await _repo.query_records(
+            type_="💰 Доход", date_from=month_start, date_to=today_str, page_size=200,
+        )
         total_income = sum((p["properties"].get("Сумма", {}).get("number") or 0) for p in income_records)
     except Exception:
         total_income = 0
@@ -136,11 +132,9 @@ async def _calc_free_remaining(user_notion_id: str = "") -> Optional[Tuple[float
 
     # Расходы за месяц
     try:
-        expense_records = await db_query(config.nexus.db_finance, filter_obj={"and": [
-            {"property": "Тип", "select": {"equals": "💸 Расход"}},
-            {"property": "Дата", "date": {"on_or_after": month_start}},
-            {"property": "Дата", "date": {"on_or_before": today_str}},
-        ]}, page_size=500)
+        expense_records = await _repo.query_records(
+            type_="💸 Расход", date_from=month_start, date_to=today_str, page_size=500,
+        )
         total_expenses = sum((p["properties"].get("Сумма", {}).get("number") or 0) for p in expense_records)
     except Exception:
         total_expenses = 0
@@ -154,9 +148,6 @@ async def _calc_free_remaining(user_notion_id: str = "") -> Optional[Tuple[float
 
 async def build_budget_message(user_notion_id: str = "") -> Optional[str]:
     """Формирует полное сообщение /budget из сохранённых данных. НЕ вызывает Sonnet."""
-    from core.config import config
-    from core.notion_client import db_query
-
     budget = await _load_budget_data(user_notion_id)
     has_data = budget.get("обязательные") or budget.get("лимиты")
     if not has_data:
@@ -182,11 +173,9 @@ async def build_budget_message(user_notion_id: str = "") -> Optional[str]:
     by_expense_cat: Dict[str, float] = {}
     total_expenses = 0
     try:
-        expense_records = await db_query(config.nexus.db_finance, filter_obj={"and": [
-            {"property": "Тип", "select": {"equals": "💸 Расход"}},
-            {"property": "Дата", "date": {"on_or_after": period_start}},
-            {"property": "Дата", "date": {"on_or_before": today_str}},
-        ]}, page_size=500)
+        expense_records = await _repo.query_records(
+            type_="💸 Расход", date_from=period_start, date_to=today_str, page_size=500,
+        )
         for r in expense_records:
             cat = (r["properties"].get("Категория", {}).get("select") or {}).get("name", "💳 Прочее")
             amt = r["properties"].get("Сумма", {}).get("number") or 0
@@ -385,19 +374,15 @@ async def _check_budget_limit(category: str, message: Message, user_notion_id: s
                 logger.debug("limit suggest error: %s", e)
         return
 
-    from core.config import config
-    from core.notion_client import db_query
     now = datetime.now(MOSCOW_TZ)
     payday = await _get_payday()
     period_start, period_end = _period_bounds(payday)
     today_str = now.strftime("%Y-%m-%d")
     try:
-        records = await db_query(config.nexus.db_finance, filter_obj={"and": [
-            {"property": "Тип",       "select": {"equals": "💸 Расход"}},
-            {"property": "Категория", "select": {"equals": category}},
-            {"property": "Дата",      "date":   {"on_or_after": period_start}},
-            {"property": "Дата",      "date":   {"on_or_before": today_str}},
-        ]}, page_size=200)
+        records = await _repo.query_records(
+            type_="💸 Расход", category=category,
+            date_from=period_start, date_to=today_str, page_size=200,
+        )
         period_total = sum((p["properties"].get("Сумма", {}).get("number") or 0) for p in records)
         logger.info("_check_budget_limit: period_total=%.0f limit=%.0f category=%s",
                     period_total, limit_amount, category)
@@ -491,15 +476,12 @@ async def _show_free_remaining(message: Message, user_notion_id: str = "") -> No
 async def get_finance_period(start_date: str, end_date: str, label: str,
                              user_notion_id: str = "", show_daily_avg: bool = False) -> str:
     """Сводка за произвольный период. start_date/end_date = 'YYYY-MM-DD'."""
-    from core.notion_client import query_pages
     from core.config import config
 
     db_id = os.environ.get("NOTION_DB_FINANCE") or config.nexus.db_finance
-    conditions = [
-        {"property": "Дата", "date": {"on_or_after": start_date}},
-        {"property": "Дата", "date": {"on_or_before": end_date}},
-    ]
-    records = await query_pages(db_id, filters={"and": conditions}, page_size=200)
+    records = await _repo.query_records(
+        date_from=start_date, date_to=end_date, page_size=200, db_id=db_id,
+    )
 
     total_expense = 0.0
     total_income = 0.0
@@ -546,7 +528,7 @@ async def get_finance_stats(month: str, user_notion_id: str = "", compare_prev: 
     from core.praise import get_praise
     mem_db = os.environ.get("NOTION_DB_MEMORY")
     try:
-        records = await finance_month(month, user_notion_id=user_notion_id)
+        records = await _repo.month(month, user_notion_id=user_notion_id)
     except Exception as e:
         logger.error("get_finance_stats: %s", e)
         return "⚠️ Ошибка получения данных"
@@ -571,7 +553,7 @@ async def get_finance_stats(month: str, user_notion_id: str = "", compare_prev: 
     if compare_prev:
         try:
             prev_month = _month_offset(1)
-            prev_records = await finance_month(prev_month, user_notion_id=user_notion_id)
+            prev_records = await _repo.month(prev_month, user_notion_id=user_notion_id)
             prev_by_cat: Dict[str, float] = {}
             prev_expense_total = 0.0
             for r in prev_records:
@@ -903,19 +885,17 @@ def _format_record(data: dict) -> str:
 async def _save_finance(data: dict, db_id: str, bot_label: str = "☀️ Nexus",
                         user_notion_id: str = "", uid: int = 0) -> str:
     """Создаёт запись в Notion. Возвращает page_id или None."""
-    from core.notion_client import _relation
-    props = {
-        "Описание": _title(data.get("description") or ""),
-        "Дата":     _date(_today()),
-        "Сумма":    _number(float(data["amount"])),
-        "Категория": _select(data.get("category", "💳 Прочее")),
-        "Тип":      _select(data.get("type_", "💸 Расход")),
-        "Источник": _select(data.get("source", "💳 Карта")),
-        "Бот":      _select(bot_label),
-    }
-    if user_notion_id:
-        props["🪪 Пользователи"] = _relation(user_notion_id)
-    page_id = await page_create(db_id, props)
+    page_id = await _repo.create_entry(
+        db_id,
+        description=data.get("description") or "",
+        date=_today(),
+        amount=float(data["amount"]),
+        category=data.get("category", "💳 Прочее"),
+        type_=data.get("type_", "💸 Расход"),
+        source=data.get("source", "💳 Карта"),
+        bot_label=bot_label,
+        user_notion_id=user_notion_id,
+    )
     if page_id and uid:
         from nexus.handlers.tasks import last_record_set
         last_record_set(uid, "finance", page_id)
@@ -927,24 +907,7 @@ async def _update_last_finance(uid: int, field: str, value: str) -> bool:
     page_id = _last_page_id.get(uid)
     if not page_id:
         return False
-
-    field_map = {
-        "source":      ("Источник", _select(value)),
-        "category":    ("Категория", _select(value)),
-        "description": ("Описание", _title(value)),
-        "amount":      ("Сумма", _number(float(value))),
-        "type_":       ("Тип", _select(value)),
-    }
-    if field not in field_map:
-        return False
-
-    notion_key, notion_val = field_map[field]
-    try:
-        await update_page(page_id, {notion_key: notion_val})
-        return True
-    except Exception as e:
-        logger.error("_update_last_finance error: %s", e)
-        return False
+    return await _repo.update_field(page_id, field, value)
 
 
 _TYPE_CORRECTION_RE = re.compile(
@@ -1346,20 +1309,18 @@ async def handle_finance_clarify(call: CallbackQuery, user_notion_id: str = "") 
     real_source = await match_select(db_id, "Источник", source)
     real_type = await match_select(db_id, "Тип", type_label)
 
-    props = {
-        "Описание": _title(description),
-        "Дата": _date(datetime.now(MOSCOW_TZ).strftime("%Y-%m-%d")),
-        "Сумма": _number(amount),
-        "Категория": _select(real_category),
-        "Тип": _select(real_type),
-        "Источник": _select(real_source),
-        "Бот": _select("☀️ Nexus"),
-    }
     eff_uid = stored_uid or user_notion_id
-    if eff_uid:
-        props["🪪 Пользователи"] = _relation(eff_uid)
-
-    result = await page_create(db_id, props)
+    result = await _repo.create_entry(
+        db_id,
+        description=description,
+        date=datetime.now(MOSCOW_TZ).strftime("%Y-%m-%d"),
+        amount=amount,
+        category=real_category,
+        type_=real_type,
+        source=real_source,
+        bot_label="☀️ Nexus",
+        user_notion_id=eff_uid,
+    )
 
     if result:
         from nexus.handlers.tasks import last_record_set
@@ -1503,7 +1464,7 @@ async def _handle_multimonth_stats(
     month_totals: List[tuple] = []  # (month_str, total)
 
     for ms in month_strings:
-        records = await finance_month(
+        records = await _repo.month(
             ms,
             user_notion_id=user_notion_id,
             description_filter=notion_desc_kw,
@@ -1628,7 +1589,7 @@ async def handle_finance_summary(query: str = "", user_notion_id: str = "", uid:
     notion_desc_kw = (description_search or "")[:5].strip() if description_search else ""
 
     # Notion делает фильтрацию по описанию и типу на стороне API
-    records = await finance_month(
+    records = await _repo.month(
         month_str,
         user_notion_id=user_notion_id,
         description_filter=notion_desc_kw,
@@ -2133,8 +2094,7 @@ async def handle_limit_override(message: Message, category: str, amount_str: str
 async def _handle_impulse_overflow(category: str, overflow: float, message: Message,
                                     user_notion_id: str, period_start: str) -> None:
     """Auto-create impulse expense for overspend."""
-    from core.notion_client import finance_add
-    await finance_add(
+    await _repo.add(
         date=datetime.now(MOSCOW_TZ).strftime("%Y-%m-%d"),
         amount=overflow,
         category="🎲 Импульсивные",
@@ -2157,15 +2117,11 @@ async def _calc_impulse_status(period_start: str, user_notion_id: str = "") -> T
                 break
     if impulse_limit == 0:
         return 0.0, 0.0
-    from core.config import config
-    from core.notion_client import db_query
     now = datetime.now(MOSCOW_TZ)
-    records = await db_query(config.nexus.db_finance, filter_obj={"and": [
-        {"property": "Тип", "select": {"equals": "💸 Расход"}},
-        {"property": "Категория", "select": {"equals": "🎲 Импульсивные"}},
-        {"property": "Дата", "date": {"on_or_after": period_start}},
-        {"property": "Дата", "date": {"on_or_before": now.strftime("%Y-%m-%d")}},
-    ]}, page_size=200)
+    records = await _repo.query_records(
+        type_="💸 Расход", category="🎲 Импульсивные",
+        date_from=period_start, date_to=now.strftime("%Y-%m-%d"), page_size=200,
+    )
     impulse_used = sum((p.get("properties", {}).get("Сумма", {}).get("number") or 0) for p in records)
     return impulse_limit, impulse_used
 
@@ -2435,12 +2391,9 @@ async def _build_sonnet_input(uid: int, user_notion_id: str) -> str:
     period_start, period_end = _period_bounds(payday)
     now = datetime.now(MOSCOW_TZ)
 
-    from core.config import config
-    from core.notion_client import db_query
-    records = await db_query(config.nexus.db_finance, filter_obj={"and": [
-        {"property": "Дата", "date": {"on_or_after": period_start}},
-        {"property": "Дата", "date": {"on_or_before": now.strftime("%Y-%m-%d")}},
-    ]}, page_size=500)
+    records = await _repo.query_records(
+        date_from=period_start, date_to=now.strftime("%Y-%m-%d"), page_size=500,
+    )
 
     spending_by_cat = {}
     income_total = 0
@@ -3530,7 +3483,7 @@ async def _save_budget_plan(message: Message, uid: int) -> None:
 
     if mem_db:
         try:
-            from core.notion_client import db_query as _dbq
+            from core.notion_client import db_query as _dbq, update_page
             old_fixed = await _dbq(mem_db, filter_obj={"and": [
                 {"property": "Ключ", "rich_text": {"starts_with": "обязательно_"}},
                 {"property": "Бот", "select": {"equals": "☀️ Nexus"}},
@@ -3723,7 +3676,7 @@ async def _save_memory_entry(key: str, fact: str, user_notion_id: str = "") -> N
         from core.notion_client import _relation
         props["🪪 Пользователи"] = _relation(user_notion_id)
     try:
-        from core.notion_client import db_query
+        from core.notion_client import db_query, update_page, page_create
         # Ищем существующую запись по ключу (в ЛЮБОЙ бюджетной категории — на случай миграции)
         existing = await db_query(mem_db, filter_obj={"and": [
             {"property": "Ключ", "rich_text": {"equals": key}},
@@ -3749,13 +3702,9 @@ async def _budget_period_review(user_notion_id: str = "") -> Tuple[str, float]:
     period_start_str, period_end_str = _period_bounds(payday, previous=True)
 
     # Get spending for that period
-    from core.config import config
-    from core.notion_client import db_query
-    records = await db_query(config.nexus.db_finance, filter_obj={"and": [
-        {"property": "Тип", "select": {"equals": "💸 Расход"}},
-        {"property": "Дата", "date": {"on_or_after": period_start_str}},
-        {"property": "Дата", "date": {"on_or_before": period_end_str}},
-    ]}, page_size=500)
+    records = await _repo.query_records(
+        type_="💸 Расход", date_from=period_start_str, date_to=period_end_str, page_size=500,
+    )
 
     spending_by_cat: Dict[str, float] = {}
     for r in records:

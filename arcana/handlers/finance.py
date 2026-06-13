@@ -20,13 +20,13 @@ from core.claude_client import ask_claude
 from core.notion_client import (
     arcana_finance_summary,
     arcana_clients_summary,
-    finance_add,
     log_error,
     _extract_number,
     _extract_select,
     _extract_text,
     _extract_rollup_number,
 )
+from core.repos.finance_repo import _repo
 
 router = Router()
 
@@ -121,7 +121,7 @@ async def handle_pay_self(message: Message, text: str, user_notion_id: str = "")
     today = datetime.now(timezone(timedelta(hours=3))).date()
     pnl = await compute_pnl(user_notion_id, today.year, today.month)
     cash_before = pnl["cash_balance"]
-    fin_id = await finance_add(
+    fin_id = await _repo.add(
         date=today.strftime("%Y-%m-%d"),
         amount=amount,
         category=SALARY_CATEGORY,

@@ -335,6 +335,7 @@ def test_inventory_add_writes_arcana_label_and_inv_type(client):
 ])
 @pytest.mark.asyncio
 async def test_bot_pay_self_parses_amount(phrase):
+    from arcana.handlers import finance as arcana_finance
     from arcana.handlers.finance import handle_pay_self
 
     msg = MagicMock()
@@ -350,7 +351,7 @@ async def test_bot_pay_self_parses_amount(phrase):
     fa = AsyncMock(return_value="fin-PHRASE")
     with patch("arcana.handlers.finance.compute_pnl",
                AsyncMock(return_value=fake_pnl)), \
-         patch("arcana.handlers.finance.finance_add", fa):
+         patch.object(arcana_finance._repo, "add", fa):
         await handle_pay_self(msg, phrase, user_notion_id=FAKE_NOTION_USER)
 
     fa.assert_awaited_once()

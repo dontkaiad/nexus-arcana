@@ -32,12 +32,12 @@ from core.notion_client import (
     _text,
     _title,
     _with_user_filter,
-    finance_add,
     get_page,
     page_create,
     query_pages,
     update_page,
 )
+from core.repos.finance_repo import _repo
 
 logger = logging.getLogger("arcana.barter_prompt")
 
@@ -273,7 +273,7 @@ async def handle_reply_text(message: Message, text: str, user_notion_id: str = "
         if amount > 0:
             try:
                 from datetime import date as _date
-                await finance_add(
+                await _repo.add(
                     date=_date.today().strftime("%Y-%m-%d"),
                     amount=amount,
                     category="🔮 Практика",
