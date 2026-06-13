@@ -12,8 +12,11 @@ from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKe
 from nexus.handlers.utils import react
 
 from core.claude_client import ask_claude
-from core.notion_client import note_add, get_db_options
+from core.notion_client import get_db_options
 from core.option_helper import find_or_prepare, confirm_keyboard, pick_keyboard, format_option
+from nexus.repos.notes_repo import NotesRepo
+
+_repo = NotesRepo()
 
 logger = logging.getLogger("nexus.notes")
 MOSCOW_TZ = timezone(timedelta(hours=3))
@@ -155,12 +158,7 @@ async def handle_note_callback(query: CallbackQuery) -> None:
             return
         # Заменить old_tag на new_tag, остальные оставить
         updated = [new_tag if t == old_tag else t for t in current_tags]
-        from core.notion_client import get_notion
-        notion = get_notion()
-        await notion.pages.update(
-            page_id=page_id,
-            properties={"Теги": {"multi_select": [{"name": t} for t in updated]}},
-        )
+        await _repo.update_tags(page_id, updated)
         await query.message.edit_text(f"✏️ Тег <b>{old_tag}</b> → <b>{new_tag}</b>")
         return
 
@@ -216,7 +214,7 @@ async def _save_note(
     edit: bool = False,
     user_notion_id: str = "",
 ) -> None:
-    result = await note_add(text=text, tags=tags, date=date, user_notion_id=user_notion_id)
+    result = await _repo.add(text=text, tags=tags, date=date, user_notion_id=user_notion_id)
     tags_str = ", ".join(tags) if tags else "нет"
     reply = f"💡 Заметка сохранена! Теги: {tags_str}" if result else "⚠️ Ошибка записи в Notion."
     if result:
@@ -228,7 +226,6 @@ async def _save_note(
 
 
 async def handle_edit_note(message: Message, data: dict, user_notion_id: str) -> None:
-    from core.notion_client import db_query, get_notion
     hint = (data.get("hint") or "последняя").strip()
     new_value = (data.get("new_value") or "").strip()
     if not new_value:
@@ -238,31 +235,22 @@ async def handle_edit_note(message: Message, data: dict, user_notion_id: str) ->
     if not db_id:
         await message.answer("❌ NOTION_DB_NOTES не задан")
         return
-    if hint == "последняя":
-        results = await db_query(db_id, sorts=[{"property": "Дата", "direction": "descending"}], page_size=1)
-    else:
-        results = await db_query(db_id, filter_obj={"property": "Заголовок", "title": {"contains": hint}}, page_size=1)
-    if not results:
+    note = await _repo.find_for_edit(db_id, hint)
+    if not note:
         await message.answer("❌ Заметка не найдена")
         return
-    page = results[0]
-    page_id = page["id"]
-    current_tags = [
-        t["name"]
-        for t in (page["properties"].get("Теги") or {}).get("multi_select", [])
-    ]
     tag_name = format_option(new_value)
     uid = message.from_user.id
 
-    if len(current_tags) > 1:
+    if len(note.tags) > 1:
         # Спросить, какой тег заменить
-        _pending[uid] = {"page_id": page_id, "current_tags": current_tags, "new_value": tag_name}
+        _pending[uid] = {"page_id": note.id, "current_tags": note.tags, "new_value": tag_name}
         buttons = [
             [InlineKeyboardButton(
                 text=t,
                 callback_data=f"note_replace:{uid}:{t}:{tag_name}"
             )]
-            for t in current_tags
+            for t in note.tags
         ]
         kb = InlineKeyboardMarkup(inline_keyboard=buttons)
         await message.answer(
@@ -272,11 +260,7 @@ async def handle_edit_note(message: Message, data: dict, user_notion_id: str) ->
         return
 
     # 0 или 1 тег — заменяем сразу (или просто выставляем новый)
-    notion = get_notion()
-    await notion.pages.update(
-        page_id=page_id,
-        properties={"Теги": {"multi_select": [{"name": tag_name}]}},
-    )
+    await _repo.update_tags(note.id, [tag_name])
     await message.answer(f"✏️ Тег обновлён: {tag_name}")
 
 
@@ -452,8 +436,6 @@ async def handle_note_search(
 
 async def handle_note_delete(message: Message, data: dict, user_notion_id: str = "") -> None:
     """Удалить заметки из последнего дайджеста по ключевому слову."""
-    from core.notion_client import get_notion
-
     uid = message.from_user.id
     hint = (data.get("hint") or "").strip().lower()
     delete_all = data.get("delete_all", False)
@@ -479,14 +461,12 @@ async def handle_note_delete(message: Message, data: dict, user_notion_id: str =
         await message.answer(f"❌ Не нашёл заметок{hint_display} в последнем дайджесте")
         return
 
-    notion = get_notion()
     deleted = 0
     for p in targets:
-        try:
-            await notion.pages.update(page_id=p["page_id"], archived=True)
+        if await _repo.archive(p["page_id"]):
             deleted += 1
-        except Exception as e:
-            logger.error("handle_note_delete: page_id=%s error=%s", p["page_id"], e)
+        else:
+            logger.error("handle_note_delete: archive failed page_id=%s", p["page_id"])
 
     # Убрать удалённые из кэша
     deleted_ids = {p["page_id"] for p in targets}
