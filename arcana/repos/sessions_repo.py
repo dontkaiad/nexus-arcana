@@ -1,43 +1,37 @@
 """arcana/repos/sessions_repo.py — domain repository for 🃏 Расклады (Sessions).
 
-All Notion-specific structures (page dicts, prop helpers, raw props building,
-direct Notion client calls) are confined here. Callers receive plain dataclasses.
+Pure PG — no Notion calls. Callers receive plain dataclasses.
 """
 from __future__ import annotations
 
-import logging
 from dataclasses import dataclass
+from datetime import date as _date
 from typing import List, Optional
-
-from core import notion_client as _notion
-
-logger = logging.getLogger("arcana.sessions_repo")
 
 
 @dataclass
 class TripletEntry:
-    """Full representation of one saved triplet/spread page."""
     id: str
-    question: str           # from "Тема" title
-    cards: str              # from "Карты" rich_text
-    interpretation: str     # from "Трактовка" rich_text
-    deck: str               # from "Колоды" multi_select (joined)
-    session_name: str       # from "Сессия" rich_text
-    client_id: Optional[str]  # first entry in "👥 Клиенты" relation, or None
+    question: str
+    cards: str
+    interpretation: str
+    deck: str
+    session_name: str
+    client_id: Optional[str]
+    date: str = ""       # "YYYY-MM-DD" or ""
+    outcome: str = ""    # PG code: yes/no/partial/unverified
 
 
 @dataclass
 class PrevSessionSnippet:
-    """Lightweight view of a past session — used to build context for Sonnet prompts."""
     date: str
     question: str
     cards: str
-    interpretation_excerpt: str  # first 300 chars of "Трактовка"
+    interpretation_excerpt: str
 
 
 @dataclass
 class SessionSearchResult:
-    """One hit from keyword search — used in handle_session_search display."""
     date: str
     theme: str
     spread_name: str
@@ -45,77 +39,10 @@ class SessionSearchResult:
     cards_short: str
 
 
-# ── Parsers ───────────────────────────────────────────────────────────────────
+def _pg_repo():
+    from arcana.repos.pg_sessions_repo import PgSessionsRepo
+    return PgSessionsRepo()
 
-def _parse_triplet_entry(page: dict) -> TripletEntry:
-    props = page.get("properties", {})
-    title_parts = props.get("Тема", {}).get("title", [])
-    question = title_parts[0].get("plain_text", "") if title_parts else ""
-    cards = "".join(
-        x.get("plain_text", "") for x in props.get("Карты", {}).get("rich_text") or []
-    ).strip()
-    interpretation = "".join(
-        x.get("plain_text", "") for x in props.get("Трактовка", {}).get("rich_text") or []
-    ).strip()
-    deck_list = [it.get("name", "") for it in props.get("Колоды", {}).get("multi_select") or []]
-    deck = ", ".join(deck_list) or "Уэйт"
-    session_name = "".join(
-        x.get("plain_text", "") for x in props.get("Сессия", {}).get("rich_text") or []
-    ).strip()
-    cids = [r.get("id", "") for r in props.get("👥 Клиенты", {}).get("relation", [])]
-    return TripletEntry(
-        id=page.get("id", ""),
-        question=question,
-        cards=cards,
-        interpretation=interpretation,
-        deck=deck,
-        session_name=session_name,
-        client_id=cids[0] if cids else None,
-    )
-
-
-def _parse_prev_snippet(page: dict) -> PrevSessionSnippet:
-    props = page.get("properties", {})
-    date_prop = props.get("Дата и время") or props.get("Дата") or {}
-    date_val = date_prop.get("date") or {}
-    date = (date_val.get("start") or "")[:10]
-    question = _notion._extract_text(props.get("Тема") or {})
-    cards = _notion._extract_text(props.get("Карты") or {})
-    interp = _notion._extract_text(props.get("Трактовка") or {})
-    return PrevSessionSnippet(
-        date=date,
-        question=question,
-        cards=cards,
-        interpretation_excerpt=interp[:300] + ("..." if len(interp) > 300 else ""),
-    )
-
-
-def _parse_search_result(page: dict) -> SessionSearchResult:
-    props = page.get("properties", {})
-    date_prop = props.get("Дата") or props.get("Дата и время") or {}
-    date_val = date_prop.get("date") or {}
-    date = (date_val.get("start") or "")[:10]
-    theme = _notion._extract_text(props.get("Тема") or {}) or "—"
-    spread_items = (props.get("Тип расклада") or {}).get("multi_select") or []
-    spread_name = spread_items[0].get("name", "") if spread_items else ""
-    area_prop = props.get("Область") or {}
-    area_items = area_prop.get("multi_select") or []
-    if area_items:
-        area_name = area_items[0].get("name", "")
-    else:
-        area_name = (area_prop.get("select") or {}).get("name", "")
-    cards_text = _notion._extract_text(props.get("Карты") or {})
-    cards_short = (cards_text[:80] + "…") if len(cards_text) > 80 else cards_text
-    return SessionSearchResult(
-        date=date,
-        theme=theme,
-        spread_name=spread_name,
-        area_name=area_name,
-        cards_short=cards_short,
-    )
-
-
-# ── Repository ────────────────────────────────────────────────────────────────
 
 class SessionsRepo:
     async def add(
@@ -138,31 +65,45 @@ class SessionsRepo:
         triplet_summary: Optional[str] = None,
         bottom_card: Optional[str] = None,
     ) -> Optional[str]:
-        return await _notion.session_add(
-            date=date,
-            spread_type=spread_type,
+        # Resolve canonical session name for multi-triplet grouping
+        session_name = session or ""
+        if session_name:
+            session_name = await _pg_repo().canonical_session_name(
+                session_name, client_id, user_notion_id
+            )
+
+        occurred_at: Optional[_date] = None
+        if date:
+            try:
+                occurred_at = _date.fromisoformat(date[:10])
+            except ValueError:
+                pass
+
+        return await _pg_repo().create(
+            title=title or question or spread_type or "Сеанс",
+            occurred_at=occurred_at,
             question=question,
             cards=cards,
             interpretation=interpretation,
+            triplet_summary=triplet_summary or "",
+            bottom_card=bottom_card or "",
+            session_name=session_name,
+            spread_type=spread_type,
+            area=area or "",
+            deck=deck or "",
             amount=amount,
             paid=paid,
             session_type=session_type,
+            payment_source=payment_source,
+            outcome_code="unverified",
             client_id=client_id,
             user_notion_id=user_notion_id,
-            area=area,
-            deck=deck,
-            payment_source=payment_source,
-            title=title,
-            session=session,
-            triplet_summary=triplet_summary,
-            bottom_card=bottom_card,
         )
 
     async def prev_for_client(
         self, client_id: str, user_notion_id: str = ""
     ) -> List[PrevSessionSnippet]:
-        pages = await _notion.sessions_by_client(client_id, user_notion_id=user_notion_id)
-        return [_parse_prev_snippet(p) for p in pages]
+        return await _pg_repo().list_by_client(client_id)
 
     async def search(
         self,
@@ -170,46 +111,18 @@ class SessionsRepo:
         user_notion_id: str = "",
         limit: int = 10,
     ) -> List[SessionSearchResult]:
-        pages = await _notion.sessions_search(
-            keywords, user_notion_id=user_notion_id, limit=limit
-        )
-        return [_parse_search_result(p) for p in pages]
+        return await _pg_repo().search(keywords, user_notion_id=user_notion_id, limit=limit)
 
     async def find_by_short_id(
         self, short_id: str, user_notion_id: str = ""
     ) -> Optional[TripletEntry]:
-        """short_id (32 hex без дефисов) → TripletEntry. None если не найден
-        или принадлежит чужому пользователю."""
-        pages = await _notion.sessions_all(user_notion_id=user_notion_id)
-        for p in pages:
-            pid = p.get("id", "").replace("-", "")
-            if pid.startswith(short_id) or short_id.startswith(pid[:32]):
-                return _parse_triplet_entry(p)
-        return None
+        """short_id = str(pg_id) after PG migration."""
+        return await _pg_repo().find_by_id(short_id)
 
     async def update_interpretation(
         self, page_id: str, interpretation: str, summary: str = ""
     ) -> None:
-        """Обновить поля Трактовка + (опц.) Саммари триплета."""
-        try:
-            await _notion.update_page(
-                page_id, {"Трактовка": _notion._text(interpretation[:2000])}
-            )
-        except Exception as e:
-            logger.error("update_interpretation failed: %s", e)
-        if summary:
-            try:
-                await _notion.update_page(
-                    page_id, {"Саммари триплета": _notion._text(summary[:1800])}
-                )
-            except Exception as e:
-                logger.warning("update summary failed: %s", e)
+        await _pg_repo().update_interpretation(page_id, interpretation, summary)
 
     async def archive(self, page_id: str) -> bool:
-        """Архивировать страницу (удаление через Notion API)."""
-        try:
-            await _notion.get_notion().pages.update(page_id=page_id, archived=True)
-            return True
-        except Exception as e:
-            logger.error("archive %s failed: %s", page_id, e)
-            return False
+        return await _pg_repo().archive(page_id)
