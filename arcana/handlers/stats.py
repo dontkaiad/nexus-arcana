@@ -15,10 +15,8 @@ from core.notion_client import (
     _extract_text,
     client_find,
     log_error,
-    rituals_all,
     sessions_all,
     sessions_by_client,
-    rituals_by_client,
     update_page_select,
 )
 from arcana.repos.pg_rituals_repo import PgRitualsRepo
@@ -38,15 +36,22 @@ SESSION_RESULT_MAP = {
     "частично":   "〰️ Частично",
 }
 
-# Ритуалы → поле "Результат"
+# Ритуалы → PG outcome codes
 RITUAL_RESULT_MAP = {
-    "сбылось":          "✅ Сработало",
-    "сработало":        "✅ Сработало",
-    "да":               "✅ Сработало",
-    "не сбылось":       "❌ Не сработало",
-    "не сработало":     "❌ Не сработало",
-    "нет":              "❌ Не сработало",
-    "частично":         "〰️ Частично",
+    "сбылось":      "positive",
+    "сработало":    "positive",
+    "да":           "positive",
+    "не сбылось":   "negative",
+    "не сработало": "negative",
+    "нет":          "negative",
+    "частично":     "partial",
+}
+
+# Display labels for PG codes (used in confirm messages)
+_RESULT_DISPLAY = {
+    "positive": "✅ Сработало",
+    "negative": "❌ Не сработало",
+    "partial":  "〰️ Частично",
 }
 
 SESSION_UNVERIFIED = {"", "⏳ Не проверено"}
@@ -105,6 +110,18 @@ def _pages_near_date(pages: List[dict], target_date: str) -> List[dict]:
     return result
 
 
+def _rituals_near_date(ritual_list: list, target_date: str) -> list:
+    """Отфильтровать Ritual-объекты с датой в пределах ±3 дней от target_date."""
+    result = []
+    for r in ritual_list:
+        if r.date is None:
+            continue
+        d = r.date.strftime("%Y-%m-%d")
+        if _date_matches(d, target_date):
+            result.append(r)
+    return result
+
+
 def _pct(count: int, total: int) -> int:
     return round(count * 100 / total) if total else 0
 
@@ -130,77 +147,107 @@ async def handle_verify(
         entity_type: str = (data.get("type") or "расклад").lower()
         is_ritual = "ритуал" in entity_type
 
-        # 2. Определить Notion-значение результата
+        # ── Ritual path (PG) ─────────────────────────────────────────────
         if is_ritual:
-            result_value = RITUAL_RESULT_MAP.get(result_raw)
-            if not result_value:
-                # fuzzy по ключам
+            # 2. Map result to PG code
+            result_code = RITUAL_RESULT_MAP.get(result_raw)
+            if not result_code:
                 for k, v in RITUAL_RESULT_MAP.items():
                     if k in result_raw or result_raw in k:
-                        result_value = v
+                        result_code = v
                         break
-            result_value = result_value or "〰️ Частично"
-            field_name = "Результат"
-        else:
-            result_value = SESSION_RESULT_MAP.get(result_raw)
-            if not result_value:
-                for k, v in SESSION_RESULT_MAP.items():
-                    if k in result_raw or result_raw in k:
-                        result_value = v
-                        break
-            result_value = result_value or "〰️ Частично"
-            field_name = "Сбылось"
+            result_code = result_code or "partial"
 
-        # 3. Найти нужную запись
+            # 3. Read from PG
+            ritual_list = []
+            if client_name:
+                client = await client_find(client_name, user_notion_id=user_notion_id)
+                if client:
+                    ritual_list = await _rituals_repo.list_by_client(client["id"])
+            if not ritual_list:
+                ritual_list = await _rituals_repo.list_all()
+
+            # 4. Match by date
+            if target_date:
+                candidates_r = _rituals_near_date(ritual_list, target_date)
+            else:
+                candidates_r = ritual_list[:1]
+
+            if not candidates_r:
+                date_hint = f" от {target_date}" if target_date else ""
+                client_hint = f" для {client_name}" if client_name else ""
+                await message.answer(
+                    f"🔍 Не нашла ритуал{client_hint}{date_hint}.\n"
+                    "Проверь дату или имя клиента."
+                )
+                return
+
+            ritual = candidates_r[0]
+
+            # 5. Update via PG
+            ok = await _rituals_repo.set_result(ritual.id, result_code)
+
+            if ok:
+                client_str = f" для {client_name}" if client_name else ""
+                ritual_date = ritual.date.strftime("%Y-%m-%d") if ritual.date else ""
+                date_str = f" ({ritual_date})" if ritual_date else ""
+                display = _RESULT_DISPLAY.get(result_code, result_code)
+                await message.answer(
+                    f"✅ Ритуал{client_str}{date_str} — отмечено: {display}\n"
+                    f"«{ritual.name[:60]}»"
+                )
+            else:
+                await message.answer("❌ Ошибка обновления · пусть Кай правит код")
+            return
+
+        # ── Session path (Notion) ─────────────────────────────────────────
+        # 2. Map result to Notion label
+        result_value = SESSION_RESULT_MAP.get(result_raw)
+        if not result_value:
+            for k, v in SESSION_RESULT_MAP.items():
+                if k in result_raw or result_raw in k:
+                    result_value = v
+                    break
+        result_value = result_value or "〰️ Частично"
+
+        # 3. Read from Notion
         pages: List[dict] = []
         if client_name:
             client = await client_find(client_name, user_notion_id=user_notion_id)
             if client:
-                if is_ritual:
-                    pages = await rituals_by_client(client["id"], user_notion_id=user_notion_id)
-                else:
-                    pages = await sessions_by_client(client["id"], user_notion_id=user_notion_id)
-
+                pages = await sessions_by_client(client["id"], user_notion_id=user_notion_id)
         if not pages:
-            # Личный расклад или клиент не найден — берём все
-            if is_ritual:
-                pages = await rituals_all(user_notion_id=user_notion_id)
-            else:
-                pages = await sessions_all(user_notion_id=user_notion_id)
+            pages = await sessions_all(user_notion_id=user_notion_id)
 
-        # 4. Отфильтровать по дате
+        # 4. Match by date
         if target_date:
             candidates = _pages_near_date(pages, target_date)
         else:
-            candidates = pages[:1]  # берём последний
+            candidates = pages[:1]
 
         if not candidates:
-            entity_label = "ритуал" if is_ritual else "расклад"
             date_hint = f" от {target_date}" if target_date else ""
             client_hint = f" для {client_name}" if client_name else ""
             await message.answer(
-                f"🔍 Не нашла {entity_label}{client_hint}{date_hint}.\n"
+                f"🔍 Не нашла расклад{client_hint}{date_hint}.\n"
                 "Проверь дату или имя клиента."
             )
             return
 
-        # 5. Обновить запись (первый подходящий)
+        # 5. Update in Notion
         page = candidates[0]
         page_id = page["id"]
         props = page.get("properties", {})
-
-        # Определить заголовок записи для подтверждения
         title = _extract_text(props.get("Тема") or props.get("Название") or {})
         page_date = _extract_date(props)
 
-        ok = await update_page_select(page_id, field_name, result_value)
+        ok = await update_page_select(page_id, "Сбылось", result_value)
 
         if ok:
-            label = "Ритуал" if is_ritual else "Расклад"
             client_str = f" для {client_name}" if client_name else ""
             date_str = f" ({page_date})" if page_date else ""
             await message.answer(
-                f"✅ {label}{client_str}{date_str} — отмечено: {result_value}\n"
+                f"✅ Расклад{client_str}{date_str} — отмечено: {result_value}\n"
                 + (f"«{title[:60]}»" if title else "")
             )
         else:
