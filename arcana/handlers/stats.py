@@ -21,8 +21,11 @@ from core.notion_client import (
     rituals_by_client,
     update_page_select,
 )
+from arcana.repos.pg_rituals_repo import PgRitualsRepo
 
 logger = logging.getLogger("arcana.stats")
+
+_rituals_repo = PgRitualsRepo()
 
 # ── Значения полей Notion ────────────────────────────────────────────────────
 
@@ -232,7 +235,7 @@ async def handle_stats(message: Message, user_notion_id: str = "") -> None:
         await message.answer("📊 Считаю статистику...")
 
         sessions = await sessions_all(user_notion_id=user_notion_id)
-        rituals  = await rituals_all(user_notion_id=user_notion_id)
+        rituals  = await _rituals_repo.list_all(user_notion_id=user_notion_id)
 
         # ── Статистика сеансов ────────────────────────────────────────────
         s_total = len(sessions)
@@ -266,18 +269,16 @@ async def handle_stats(message: Message, user_notion_id: str = "") -> None:
 
         s_verified = s_yes + s_no + s_partial
 
-        # ── Статистика ритуалов ───────────────────────────────────────────
+        # ── Статистика ритуалов (PG codes) ───────────────────────────────
         r_total = len(rituals)
         r_yes = r_no = r_partial = r_unverified = 0
 
-        for page in rituals:
-            props = page.get("properties", {})
-            val = _extract_select(props.get("Результат") or {})
-            if val == "✅ Сработало":
+        for ritual in rituals:
+            if ritual.result == "positive":
                 r_yes += 1
-            elif val == "❌ Не сработало":
+            elif ritual.result == "negative":
                 r_no += 1
-            elif val == "〰️ Частично":
+            elif ritual.result == "partial":
                 r_partial += 1
             else:
                 r_unverified += 1
