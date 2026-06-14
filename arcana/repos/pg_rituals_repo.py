@@ -24,6 +24,7 @@ from arcana.repos.rituals_tables import (
     ritual_place,
     rituals,
 )
+from arcana.repos.clients_tables import clients as t_clients
 from core.db import get_engine
 
 logger = logging.getLogger("arcana.pg_rituals")
@@ -133,6 +134,21 @@ def _row_to_ritual(row) -> Ritual:
     )
 
 
+def _resolve_client_id(conn, client_id: Optional[str]) -> Optional[int]:
+    """Resolve caller-supplied client_id (PG int str OR Notion UUID) to PG BIGINT."""
+    if not client_id:
+        return None
+    if client_id.isdigit():
+        return int(client_id)
+    # Notion UUID — look up in clients table by notion_id
+    row = conn.execute(
+        select(t_clients.c.id).where(t_clients.c.notion_id == client_id)
+    ).fetchone()
+    if row is None:
+        logger.warning("client not found in PG for notion_uuid=%r", client_id)
+    return row[0] if row else None
+
+
 # ── Base SELECT with all joins (DRY) ─────────────────────────────────────────
 
 def _select_rituals():
@@ -214,7 +230,7 @@ class PgRitualsRepo:
             pay_id     = _resolve(conn, t_payment_source, pay_code)
             outcome_id = _resolve(conn, outcome_status,   result_code)
 
-            client_id_int = int(client_id) if client_id and client_id.isdigit() else None
+            client_id_int = _resolve_client_id(conn, client_id)
 
             row = conn.execute(
                 rituals.insert().values(
@@ -258,12 +274,13 @@ class PgRitualsRepo:
         client_id: str,
         user_notion_id: str,
     ) -> List[Ritual]:
-        client_id_int = int(client_id) if client_id and client_id.isdigit() else None
+        with get_engine().connect() as conn:
+            client_id_int = _resolve_client_id(conn, client_id)
         if client_id_int is None:
             return []
         stmt = _select_rituals().where(rituals.c.client_id == client_id_int)
-        with get_engine().connect() as conn:
-            rows = conn.execute(stmt).fetchall()
+        with get_engine().connect() as conn2:
+            rows = conn2.execute(stmt).fetchall()
         return [_row_to_ritual(r) for r in rows]
 
     def _list_all_sync(

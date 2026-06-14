@@ -803,6 +803,20 @@ async def find_or_create_client(
     """
     found = await client_find(name, user_notion_id=user_notion_id)
     if found:
+        # Keep PG in sync: sync found client to clients table (no-op if already there)
+        try:
+            from arcana.repos.pg_clients_repo import PgClientsRepo as _PGC
+            _type_label = _extract_select(
+                found.get("properties", {}).get("Тип клиента", {})
+            )
+            _type_code = {
+                "🌟 Self": "self", "🎁 Бесплатный": "free",
+            }.get(_type_label, "paid")
+            await _PGC().sync_notion_client(
+                notion_uuid=found["id"], name=name, type_code=_type_code,
+            )
+        except Exception:
+            pass
         return found["id"], False
     ctype = default_type or CLIENT_TYPE_PAID
     try:
@@ -810,6 +824,17 @@ async def find_or_create_client(
             name=name, user_notion_id=user_notion_id, client_type=ctype,
         )
         if new_id:
+            # Sync newly created client to PG
+            try:
+                from arcana.repos.pg_clients_repo import PgClientsRepo as _PGC
+                _type_code = {
+                    CLIENT_TYPE_FREE: "free", CLIENT_TYPE_PAID: "paid",
+                }.get(ctype, "paid")
+                await _PGC().sync_notion_client(
+                    notion_uuid=new_id, name=name, type_code=_type_code,
+                )
+            except Exception:
+                pass
             # Сбрасываем кеш whitelist spell-correction, чтобы Haiku
             # не «исправил» свежедобавленное имя.
             try:

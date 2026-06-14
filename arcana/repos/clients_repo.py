@@ -15,6 +15,16 @@ CLIENT_TYPE_PAID: str = _notion.CLIENT_TYPE_PAID
 CLIENT_TYPE_FREE: str = _notion.CLIENT_TYPE_FREE
 
 
+def _pg_clients():
+    from arcana.repos.pg_clients_repo import PgClientsRepo
+    return PgClientsRepo()
+
+
+def _pg_rituals():
+    from arcana.repos.pg_rituals_repo import PgRitualsRepo
+    return PgRitualsRepo()
+
+
 @dataclass
 class Client:
     id: str
@@ -70,6 +80,10 @@ class ClientsRepo:
     async def find(
         self, name: str, user_notion_id: str = ""
     ) -> Optional[Client]:
+        # PG primary; Notion fallback for clients not yet synced
+        client = await _pg_clients().find(name)
+        if client:
+            return client
         page = await _notion.client_find(name, user_notion_id=user_notion_id)
         return _parse_client(page) if page else None
 
@@ -82,6 +96,7 @@ class ClientsRepo:
         user_notion_id: str = "",
         client_type: Optional[str] = None,
     ) -> Optional[str]:
+        # Create in Notion (source of truth for profile writes); PG sync via find_or_create hook
         return await _notion.client_add(
             name=name,
             contact=contact,
@@ -94,14 +109,24 @@ class ClientsRepo:
     async def sessions_for(
         self, client_id: str, user_notion_id: str = ""
     ) -> List[HistoryItem]:
+        # Sessions stay in Notion
         pages = await _notion.sessions_by_client(client_id, user_notion_id=user_notion_id)
         return [_parse_history_item(p) for p in pages]
 
     async def rituals_for(
         self, client_id: str, user_notion_id: str = ""
     ) -> List[HistoryItem]:
-        pages = await _notion.rituals_by_client(client_id, user_notion_id=user_notion_id)
-        return [_parse_history_item(p) for p in pages]
+        # PG rituals; client_id may be Notion UUID — PgRitualsRepo resolves internally
+        rituals = await _pg_rituals().list_by_client(client_id)
+        return [
+            HistoryItem(
+                amount=float(r.price or 0),
+                paid=float(r.paid),
+                description=r.name[:40] if r.name else "",
+                date=r.date.strftime("%Y-%m-%d") if r.date else "",
+            )
+            for r in rituals
+        ]
 
     async def update_profile(
         self,
@@ -112,6 +137,7 @@ class ClientsRepo:
         notes: Optional[str] = None,
         birthday: Optional[str] = None,
     ) -> None:
+        # Write to Notion for backward compat (client_id may be Notion UUID)
         props = {}
         if contact and contact != "—":
             props["Контакт"] = _notion._text(contact)
@@ -131,21 +157,47 @@ class ClientsRepo:
     async def all_debts(
         self, user_notion_id: str = ""
     ) -> List[DebtItem]:
-        raw_items = await _notion.arcana_all_debts(user_notion_id=user_notion_id)
         result: List[DebtItem] = []
-        client_name_cache: dict = {}
-        for item in raw_items:
+
+        # ── PG: rituals with debt ─────────────────────────────────────────────
+        pg_client_cache: dict = {}
+        all_rituals = await _pg_rituals().list_all()
+        for ritual in all_rituals:
+            if ritual.price is None:
+                continue
+            debt = float(ritual.price) - float(ritual.paid)
+            if debt <= 0:
+                continue
+            client_label = "Личный"
+            if ritual.client_id:
+                cid_int = int(ritual.client_id)
+                if cid_int in pg_client_cache:
+                    client_label = pg_client_cache[cid_int]
+                else:
+                    c = await _pg_clients().find_by_id(cid_int)
+                    client_label = c.name if c else f"#{cid_int}"
+                    pg_client_cache[cid_int] = client_label
+            result.append(DebtItem(
+                client_label=client_label,
+                description=(ritual.name or "")[:40],
+                debt=debt,
+            ))
+
+        # ── Notion: sessions with debt (bridge) ───────────────────────────────
+        raw_sessions = await _notion.sessions_all(user_notion_id=user_notion_id)
+        notion_client_cache: dict = {}
+        for item in raw_sessions:
             props = item["properties"]
             amount = _notion._extract_number(props.get("Сумма", {})) or 0.0
-            paid = _notion._extract_number(props.get("Оплачено", {})) or 0.0
-            debt = amount - paid
-
+            paid_val = _notion._extract_number(props.get("Оплачено", {})) or 0.0
+            if amount - paid_val <= 0:
+                continue
             rel = (props.get("Клиент") or {}).get("relation", [])
             client_label = "Личный"
             if rel:
                 cid = rel[0]["id"]
-                if cid in client_name_cache:
-                    client_label = client_name_cache[cid]
+                if cid in notion_client_cache:
+                    client_label = notion_client_cache[cid]
                 else:
                     try:
                         page = await _notion.get_page(cid)
@@ -155,13 +207,13 @@ class ClientsRepo:
                         )
                     except Exception:
                         client_label = cid[:8] + "…"
-                    client_name_cache[cid] = client_label
-
-            desc_prop = props.get("Название", props.get("Вопрос", {}))
+                    notion_client_cache[cid] = client_label
+            desc_prop = props.get("Вопрос", props.get("Название", {}))
             desc = _notion._extract_text(desc_prop)[:40]
             result.append(DebtItem(
                 client_label=client_label,
                 description=desc,
-                debt=debt,
+                debt=amount - paid_val,
             ))
+
         return result
