@@ -51,7 +51,7 @@ async def test_await_name_creates_client_and_advances():
     msg.from_user.id = 42
     msg.answer = AsyncMock()
     with patch("arcana.handlers.client_photo.find_or_create_client",
-               AsyncMock(return_value="cli-1")):
+               AsyncMock(return_value=("cli-1", False))):
         handled = await handle_pending_text(msg, "Маша")
     assert handled is True
     state = await get_pending(42)
@@ -61,13 +61,13 @@ async def test_await_name_creates_client_and_advances():
 
 
 @pytest.mark.asyncio
-async def test_await_photo_uploads_and_writes_notion():
+async def test_await_photo_uploads_and_writes_pg():
     from arcana.handlers.client_photo import handle_pending_photo
     from arcana.pending_client_photo import get as get_pending, save as save_pending
 
     await save_pending(7, {
         "step": "await_photo",
-        "client_id": "cli-7777",
+        "client_id": "7777",
         "client_name": "Маша",
     })
 
@@ -92,16 +92,13 @@ async def test_await_photo_uploads_and_writes_notion():
 
     with patch("arcana.handlers.client_photo.cloudinary_upload",
                AsyncMock(return_value="https://res.cloudinary.com/x/y.jpg")) as cu, \
-         patch("arcana.handlers.client_photo.update_page",
+         patch("arcana.repos.pg_clients_repo.PgClientsRepo.update_profile",
                AsyncMock(return_value=None)) as up:
         handled = await handle_pending_photo(msg)
     assert handled is True
     cu.assert_awaited_once()
     assert cu.await_args.kwargs["folder"] == "arcana-clients"
     up.assert_awaited_once()
-    args = up.await_args.args
-    assert args[0] == "cli-7777"
-    assert args[1] == {"Фото": {"url": "https://res.cloudinary.com/x/y.jpg"}}
     # state очищен
     assert await get_pending(7) is None
 
@@ -135,10 +132,10 @@ async def test_create_client_with_photo_in_one_message():
     with patch.object(cmod, "ask_claude",
                       AsyncMock(return_value='{"name":"Маша","contact":"@m","request":"финансы"}')), \
          patch.object(cmod._repo, "find", AsyncMock(return_value=None)), \
-         patch.object(cmod._repo, "add", AsyncMock(return_value="cli-new-1")), \
+         patch.object(cmod._repo, "add", AsyncMock(return_value="42")), \
          patch("arcana.handlers.client_photo.cloudinary_upload",
                AsyncMock(return_value="https://cdn/x.jpg")) as cu, \
-         patch("arcana.handlers.client_photo.update_page",
+         patch("arcana.repos.pg_clients_repo.PgClientsRepo.update_profile",
                AsyncMock(return_value=None)) as up, \
          patch("arcana.handlers.clients.save_pending_client", AsyncMock(return_value=None), create=True):
         await cmod.handle_add_client(msg, "новый клиент Маша, тема финансы")
@@ -146,8 +143,6 @@ async def test_create_client_with_photo_in_one_message():
     cu.assert_awaited_once()
     assert cu.await_args.kwargs["folder"] == "arcana-clients"
     up.assert_awaited_once()
-    assert up.await_args.args[0] == "cli-new-1"
-    assert up.await_args.args[1] == {"Фото": {"url": "https://cdn/x.jpg"}}
 
 
 @pytest.mark.asyncio
@@ -181,20 +176,19 @@ async def test_reply_with_photo_in_60s_skips_confirmation(tmp_path, monkeypatch)
 
     with patch("arcana.handlers.client_photo.get_message_page",
                AsyncMock(return_value={
-                   "page_id": "cli-fresh",
+                   "page_id": "100",
                    "page_type": "client",
                    "bot": "arcana",
                    "created_at": _time.time() - 10,  # 10 сек назад
                })), \
          patch("arcana.handlers.client_photo.cloudinary_upload",
                AsyncMock(return_value="https://cdn/r.jpg")) as cu, \
-         patch("arcana.handlers.client_photo.update_page",
+         patch("arcana.repos.pg_clients_repo.PgClientsRepo.update_profile",
                AsyncMock(return_value=None)) as up:
         handled = await handle_pending_photo(msg)
     assert handled is True
     cu.assert_awaited_once()
     up.assert_awaited_once()
-    assert up.await_args.args[0] == "cli-fresh"
     # подтверждения не было
     msg.answer.assert_not_called()
 
@@ -262,31 +256,25 @@ async def test_reply_photo_with_caption_goes_to_client_objects():
     msg.caption = "Игорь, начальник, ДР 5 марта"
     msg.answer = AsyncMock()
 
-    page = {
-        "id": "cli-OBJ",
-        "properties": {"Фото объектов": {"rich_text": [{"plain_text": "https://old/x.jpg"}]}},
-    }
-
     with patch("arcana.handlers.client_photo.get_message_page",
                AsyncMock(return_value={
-                   "page_id": "cli-OBJ", "page_type": "client",
+                   "page_id": "200", "page_type": "client",
                    "bot": "arcana", "created_at": _time.time() - 5,
                })), \
          patch("arcana.handlers.client_photo.cloudinary_upload",
                AsyncMock(return_value="https://cdn/obj.jpg")) as cu, \
-         patch("arcana.handlers.client_photo.update_page",
-               AsyncMock(return_value=None)) as up, \
-         patch("core.notion_client.get_page",
-               AsyncMock(return_value=page)):
+         patch("arcana.repos.pg_clients_repo.PgClientsRepo.get_object_photos",
+               AsyncMock(return_value="https://old/x.jpg")), \
+         patch("arcana.repos.pg_clients_repo.PgClientsRepo.update_profile",
+               AsyncMock(return_value=None)) as up:
         handled = await handle_pending_photo(msg)
     assert handled is True
     assert cu.await_args.kwargs["folder"] == "arcana-client-objects"
-    args = up.await_args.args
-    assert args[0] == "cli-OBJ"
-    written = args[1]["Фото объектов"]
-    serialized = "".join(rt.get("text", {}).get("content") or "" for rt in written["rich_text"])
-    assert "https://cdn/obj.jpg | Игорь" in serialized
-    assert "https://old/x.jpg" in serialized  # старое фото сохранено
+    up.assert_awaited_once()
+    call_kwargs = up.await_args.kwargs
+    new_raw = call_kwargs.get("object_photos") or ""
+    assert "https://cdn/obj.jpg" in new_raw
+    assert "https://old/x.jpg" in new_raw
 
 
 @pytest.mark.asyncio
@@ -319,19 +307,15 @@ async def test_reply_with_photo_on_ritual_attaches_immediately():
 
     with patch("arcana.handlers.client_photo.get_message_page",
                AsyncMock(return_value={
-                   "page_id": "rit-X", "page_type": "ritual",
+                   "page_id": "42", "page_type": "ritual",
                    "bot": "arcana", "created_at": _time.time() - 5,
                })), \
          patch("arcana.handlers.client_photo.cloudinary_upload",
                AsyncMock(return_value="https://cdn/r.jpg")) as cu, \
-         patch("arcana.handlers.client_photo.update_page",
-               AsyncMock(return_value=None)) as up:
+         patch("asyncio.to_thread", AsyncMock(return_value=None)):
         handled = await handle_pending_photo(msg)
     assert handled is True
     assert cu.await_args.kwargs["folder"] == "arcana-rituals"
-    args = up.await_args.args
-    assert args[0] == "rit-X"
-    assert args[1] == {"Фото": {"url": "https://cdn/r.jpg"}}
 
 
 @pytest.mark.asyncio

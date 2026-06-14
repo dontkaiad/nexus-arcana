@@ -13,39 +13,43 @@ import pytest
 @pytest.mark.asyncio
 async def test_find_existing_returns_id_not_created():
     from core import notion_client as nc
-    with patch.object(nc, "client_find",
-                      AsyncMock(return_value={"id": "c-1"})), \
-         patch.object(nc, "client_add", AsyncMock()) as add_mock:
+    from arcana.repos.clients_repo import Client
+
+    fake = Client(id="c-1", name="Маша", contact="", request="", notes="", since="")
+    with patch("arcana.repos.pg_clients_repo.PgClientsRepo.find",
+               AsyncMock(return_value=fake)):
         cid, created = await nc.find_or_create_client(
             "Маша", user_notion_id="u",
         )
     assert cid == "c-1"
     assert created is False
-    add_mock.assert_not_called()
 
 
 @pytest.mark.asyncio
 async def test_find_missing_creates_with_default_paid():
     from core import notion_client as nc
-    with patch.object(nc, "client_find", AsyncMock(return_value=None)), \
-         patch.object(nc, "client_add",
-                      AsyncMock(return_value="c-new")) as add_mock:
+
+    with patch("arcana.repos.pg_clients_repo.PgClientsRepo.find",
+               AsyncMock(return_value=None)), \
+         patch("arcana.repos.pg_clients_repo.PgClientsRepo.create",
+               AsyncMock(return_value=99)) as create_mock:
         cid, created = await nc.find_or_create_client(
             "Лена", user_notion_id="u",
         )
-    assert cid == "c-new"
+    assert cid == "99"
     assert created is True
-    args = add_mock.await_args
-    assert args.kwargs["name"] == "Лена"
-    assert args.kwargs["client_type"] == "🤝 Платный"
+    assert create_mock.await_args.kwargs["name"] == "Лена"
+    assert create_mock.await_args.kwargs["type_code"] == "paid"
 
 
 @pytest.mark.asyncio
 async def test_create_failure_returns_none_gracefully():
     from core import notion_client as nc
-    with patch.object(nc, "client_find", AsyncMock(return_value=None)), \
-         patch.object(nc, "client_add",
-                      AsyncMock(side_effect=Exception("notion 503"))):
+
+    with patch("arcana.repos.pg_clients_repo.PgClientsRepo.find",
+               AsyncMock(return_value=None)), \
+         patch("arcana.repos.pg_clients_repo.PgClientsRepo.create",
+               AsyncMock(side_effect=Exception("pg error"))):
         cid, created = await nc.find_or_create_client(
             "Аня", user_notion_id="u",
         )

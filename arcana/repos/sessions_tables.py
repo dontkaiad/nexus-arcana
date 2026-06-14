@@ -52,6 +52,7 @@ sessions = Table(
     Column("outcome_id",      SmallInteger, ForeignKey("session_outcome.id")),
     Column("client_id",       BigInteger,   ForeignKey("clients.id")),
 
+    Column("barter_what",      Text),
     Column("user_notion_id",  Text),
     Column("archived",        Boolean,      server_default=text("false")),
 

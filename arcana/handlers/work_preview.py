@@ -523,8 +523,11 @@ async def cb_work_save(call: CallbackQuery) -> None:
     tz_offset = await get_user_tz(uid)
     if reminder:
         try:
+            import asyncio as _asyncio
+            from datetime import datetime as _dt
             from arcana.bot import arcana_reminder_flow
-            from core.notion_client import update_page
+            from arcana.repos.works_tables import works as t_works
+            from core.db import get_engine
 
             await arcana_reminder_flow.schedule_reminder(
                 chat_id=call.message.chat.id,
@@ -533,7 +536,16 @@ async def cb_work_save(call: CallbackQuery) -> None:
                 page_id=result,
                 tz_offset=int(tz_offset),
             )
-            await update_page(result, {"Напоминание": {"date": {"start": reminder}}})
+
+            def _set_reminder():
+                rd = _dt.strptime(reminder[:16], "%Y-%m-%dT%H:%M")
+                with get_engine().begin() as conn:
+                    conn.execute(
+                        t_works.update()
+                        .where(t_works.c.id == int(result))
+                        .values(reminder=rd)
+                    )
+            await _asyncio.to_thread(_set_reminder)
         except Exception as e:
             logger.warning("schedule reminder on save failed: %s", e)
 

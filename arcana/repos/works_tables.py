@@ -43,6 +43,7 @@ works = Table(
     Column("status_id",   SmallInteger, ForeignKey("work_status.id")),
     Column("client_id",   BigInteger,   ForeignKey("clients.id")),
 
+    Column("reminder",     TIMESTAMP(timezone=True)),
     Column("user_notion_id", Text),
 
     Column("created_at", TIMESTAMP(timezone=True), server_default=text("now()")),

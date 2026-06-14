@@ -177,9 +177,10 @@ async def test_find_or_create_client_invalidates_whitelist_cache():
     assert pp._cache_get("u") == ["A", "B"]
 
     from core import notion_client as nc
-    with patch.object(nc, "client_find", AsyncMock(return_value=None)), \
-         patch.object(nc, "client_add",
-                      AsyncMock(return_value="new-id")):
+    with patch("arcana.repos.pg_clients_repo.PgClientsRepo.find",
+               AsyncMock(return_value=None)), \
+         patch("arcana.repos.pg_clients_repo.PgClientsRepo.create",
+               AsyncMock(return_value=99)):
         await nc.find_or_create_client("Новый", user_notion_id="u")
 
     # Кеш сброшен (TTL не истёк, но invalidate_whitelist дёрнут)

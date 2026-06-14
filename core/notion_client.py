@@ -830,15 +830,16 @@ async def find_or_create_client(
 
 
 async def client_find(name: str, user_notion_id: str = "") -> Optional[dict]:
-    from core.config import config
-    base_filter = {"property": "Имя", "title": {"contains": name}}
-    filters = _with_user_filter(base_filter, user_notion_id)
-    results = await query_pages(
-        config.arcana.db_clients,
-        filters=filters,
-        page_size=1,
-    )
-    return results[0] if results else None
+    """PG-backed поиск клиента по имени. Возвращает {'id': str, 'name': str} или None."""
+    try:
+        from arcana.repos.pg_clients_repo import PgClientsRepo
+        client = await PgClientsRepo().find(name)
+        if client is None:
+            return None
+        return {"id": client.id, "name": client.name}
+    except Exception as e:
+        logger.warning("client_find: PG lookup failed for %r: %s", name, e)
+        return None
 
 async def sessions_by_client(client_id: str, user_notion_id: str = "") -> List[dict]:
     from core.config import config

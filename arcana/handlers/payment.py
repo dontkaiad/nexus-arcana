@@ -78,23 +78,12 @@ def _label_for_target(target: str) -> str:
 
 
 async def _resolve_full_id(short_id: str, target: str, user_notion_id: str) -> Optional[str]:
-    """short_id (32 hex) → full Notion page_id для нужной БД."""
-    from core.config import config
-    from core.notion_client import query_pages, _with_user_filter
-    db_id = (config.arcana.db_sessions if target == "sessions"
-             else config.arcana.db_rituals)
+    """short_id = PG bigint string — validate and return."""
     try:
-        pages = await query_pages(
-            db_id, filters=_with_user_filter(None, user_notion_id), page_size=200
-        )
-    except Exception as e:
-        logger.warning("payment: page lookup failed: %s", e)
+        int(short_id)
+        return short_id
+    except (ValueError, TypeError):
         return None
-    for p in pages:
-        pid = p.get("id", "").replace("-", "")
-        if pid.startswith(short_id) or short_id.startswith(pid[:32]):
-            return p.get("id", "")
-    return None
 
 
 # ── Pending state (через pending_tarot.db) ─────────────────────────────────

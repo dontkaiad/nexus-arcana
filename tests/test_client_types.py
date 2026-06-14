@@ -1,5 +1,5 @@
 """tests/test_client_types.py — типы клиентов и should_skip_payment."""
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -80,28 +80,16 @@ async def test_client_add_falls_back_when_field_missing():
 
 @pytest.mark.asyncio
 async def test_resolve_self_uses_type_filter():
-    """resolve_self_client сначала пробует select-filter Тип клиента = 🌟 Self."""
+    """resolve_self_client находит self-клиента через PgClientsRepo.find_self."""
     from core.notion_client import resolve_self_client, _SELF_CLIENT_CACHE
+    from arcana.repos.clients_repo import Client
 
     _SELF_CLIENT_CACHE.clear()
-    captured_filters: list = []
+    fake_client = Client(id="kai-self", name="Кай", contact="", request="", notes="", since="")
 
-    async def fake_query(db_id, filters=None, sorts=None, page_size=20):
-        captured_filters.append(filters)
-        # Первый вызов (select=Self) — есть результат
-        if len(captured_filters) == 1:
-            return [{"id": "kai-self", "properties": {}}]
-        return []
-
-    with patch("core.notion_client.query_pages", new=fake_query):
+    with patch(
+        "arcana.repos.pg_clients_repo.PgClientsRepo.find_self",
+        AsyncMock(return_value=fake_client),
+    ):
         cid = await resolve_self_client(user_notion_id="u1")
     assert cid == "kai-self"
-    # Должен был один раз спросить именно по типу клиента.
-    f = captured_filters[0]
-    if isinstance(f, dict) and "and" in f:
-        # _with_user_filter может обернуть в and
-        sub = f["and"][0]
-    else:
-        sub = f
-    assert sub.get("property") == "Тип клиента"
-    assert sub.get("select", {}).get("equals") == CLIENT_TYPE_SELF

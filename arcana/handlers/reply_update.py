@@ -55,10 +55,12 @@ async def handle_reply_update(message: Message, user_notion_id: str = "") -> boo
         # (deadline - 1 день), как в новом preview-flow.
         if page_type == "work" and "Дедлайн" in applied:
             try:
+                import asyncio as _asyncio
                 from datetime import datetime, timedelta
-                from core.notion_client import update_page
                 from core.shared_handlers import get_user_tz
                 from arcana.bot import arcana_reminder_flow
+                from arcana.repos.works_tables import works as t_works
+                from core.db import get_engine
 
                 deadline = applied.get("Дедлайн") or ""
                 iso = deadline if "T" in deadline else f"{deadline[:10]}T09:00"
@@ -72,7 +74,16 @@ async def handle_reply_update(message: Message, user_notion_id: str = "") -> boo
                     page_id=page_id,
                     tz_offset=int(tz_offset),
                 )
-                await update_page(page_id, {"Напоминание": {"date": {"start": reminder}}})
+
+                def _set_reminder():
+                    rd = datetime.strptime(reminder, "%Y-%m-%dT%H:%M")
+                    with get_engine().begin() as conn:
+                        conn.execute(
+                            t_works.update()
+                            .where(t_works.c.id == int(page_id))
+                            .values(reminder=rd)
+                        )
+                await _asyncio.to_thread(_set_reminder)
                 summary += f"\n🔔 Напомню: {reminder.replace('T', ' ')}"
             except Exception as e:
                 logger.warning("auto-reminder on reply failed: %s", e)

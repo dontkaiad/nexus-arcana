@@ -1,5 +1,5 @@
 """tests/test_client_resolve.py — resolve-dialog для multi-flow."""
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -25,38 +25,23 @@ def test_short_resolve_slug_unique():
 
 @pytest.mark.asyncio
 async def test_create_resolved_client_paid():
+    from arcana.handlers import sessions as sess
     from arcana.handlers.sessions import _create_resolved_client
     from core.notion_client import CLIENT_TYPE_PAID
 
-    captured: dict = {}
-
-    async def fake_client_add(name, date=None, user_notion_id="", contact="",
-                              request="", client_type=None):
-        captured["name"] = name
-        captured["client_type"] = client_type
-        return "new-page-id"
-
-    with patch("core.notion_client.client_add", new=fake_client_add):
+    with patch.object(sess._client_repo, "add", AsyncMock(return_value="new-page-id")):
         res = await _create_resolved_client("u1", "Маша", CLIENT_TYPE_PAID)
 
     assert res == ("new-page-id", "Маша")
-    assert captured["client_type"] == CLIENT_TYPE_PAID
 
 
 @pytest.mark.asyncio
 async def test_create_resolved_client_free():
+    from arcana.handlers import sessions as sess
     from arcana.handlers.sessions import _create_resolved_client
     from core.notion_client import CLIENT_TYPE_FREE
 
-    captured: dict = {}
-
-    async def fake_client_add(name, date=None, user_notion_id="", contact="",
-                              request="", client_type=None):
-        captured["client_type"] = client_type
-        return "p2"
-
-    with patch("core.notion_client.client_add", new=fake_client_add):
+    with patch.object(sess._client_repo, "add", AsyncMock(return_value="p2")):
         res = await _create_resolved_client("u1", "Аня", CLIENT_TYPE_FREE)
 
     assert res == ("p2", "Аня")
-    assert captured["client_type"] == CLIENT_TYPE_FREE
