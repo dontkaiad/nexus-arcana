@@ -1,10 +1,10 @@
-"""tests/test_notes_repo.py — NotesRepo seam + handler integration.
+"""tests/test_notes_repo.py — NotesRepo seam (PG) + handler integration.
 
 Покрытие:
-- NotesRepo.add → core.notion_client.note_add (patch at module ref)
-- NotesRepo.find_for_edit → hint='последняя' и hint=<title>
-- NotesRepo.update_tags → get_notion().pages.update(Теги)
-- NotesRepo.archive → get_notion().pages.update(archived=True)
+- NotesRepo.add → делегирует в _pg.add
+- NotesRepo.find_for_edit (hint='последняя' и hint=<строка>)
+- NotesRepo.update_tags → _pg.update_tags
+- NotesRepo.archive → _pg.archive
 - _save_note через _repo.add (интеграция handler→repo)
 - handle_edit_note: single-tag path и multi-tag path (pending)
 - handle_note_delete через _repo.archive
@@ -18,122 +18,98 @@ import pytest
 
 # ── helpers ───────────────────────────────────────────────────────────────────
 
-def _note_page(page_id: str, title: str, tags=None, date: str = "2026-06-01") -> dict:
-    return {
-        "id": page_id,
-        "properties": {
-            "Заголовок": {"title": [{"plain_text": title}]},
-            "Теги": {"multi_select": [{"name": t} for t in (tags or [])]},
-            "Дата": {"date": {"start": date}},
-            "Категория": {"select": None},
-        },
-    }
+def _make_note(page_id="p-1", title="Тестовая", tags=None, date="2026-06-01"):
+    from nexus.repos.pg_notes_repo import Note
+    return Note(id=page_id, title=title, tags=tags or [], date=date)
 
 
 # ── NotesRepo unit tests ──────────────────────────────────────────────────────
 
 @pytest.mark.asyncio
-async def test_notes_repo_add_delegates_to_note_add():
-    from nexus.repos import notes_repo as mod
+async def test_notes_repo_add_delegates_to_pg():
     from nexus.repos.notes_repo import NotesRepo
 
-    with patch.object(mod._notion, "note_add", AsyncMock(return_value="page-x")) as m:
-        repo = NotesRepo()
+    repo = NotesRepo()
+    with patch.object(repo._pg, "add", AsyncMock(return_value="42")) as m:
         result = await repo.add("мысль", tags=["идея"], date="2026-06-01", user_notion_id="u")
 
-    assert result == "page-x"
+    assert result == "42"
     m.assert_awaited_once_with(text="мысль", tags=["идея"], date="2026-06-01", user_notion_id="u")
 
 
 @pytest.mark.asyncio
 async def test_notes_repo_find_for_edit_latest():
-    """hint='последняя' → db_query с sort по Дата desc."""
-    from nexus.repos import notes_repo as mod
+    """hint='последняя' → find_for_edit передаёт hint PG."""
     from nexus.repos.notes_repo import NotesRepo
 
-    page = _note_page("p-1", "Старая мысль", tags=["идея"])
-    with patch.object(mod._notion, "db_query", AsyncMock(return_value=[page])):
-        repo = NotesRepo()
-        note = await repo.find_for_edit("db-notes", "последняя")
+    note = _make_note("p-1", "Старая мысль", tags=["идея"])
+    repo = NotesRepo()
+    with patch.object(repo._pg, "find_for_edit", AsyncMock(return_value=note)) as m:
+        result = await repo.find_for_edit("последняя", user_notion_id="u")
 
-    assert note is not None
-    assert note.id == "p-1"
-    assert note.title == "Старая мысль"
-    assert note.tags == ["идея"]
+    assert result is not None
+    assert result.id == "p-1"
+    assert result.title == "Старая мысль"
+    assert result.tags == ["идея"]
+    m.assert_awaited_once_with("последняя", "u")
 
 
 @pytest.mark.asyncio
 async def test_notes_repo_find_for_edit_by_hint():
-    """hint=<строка> → db_query с фильтром по Заголовку."""
-    from nexus.repos import notes_repo as mod
+    """hint=<строка> → find_for_edit делегирует в PG."""
     from nexus.repos.notes_repo import NotesRepo
 
-    page = _note_page("p-2", "Про котов", tags=["коты", "мысль"])
-    with patch.object(mod._notion, "db_query", AsyncMock(return_value=[page])) as m:
-        repo = NotesRepo()
-        note = await repo.find_for_edit("db-notes", "котов")
+    note = _make_note("p-2", "Про котов", tags=["коты", "мысль"])
+    repo = NotesRepo()
+    with patch.object(repo._pg, "find_for_edit", AsyncMock(return_value=note)):
+        result = await repo.find_for_edit("котов", user_notion_id="u")
 
-    assert note is not None
-    assert note.id == "p-2"
-    assert note.tags == ["коты", "мысль"]
-    call_kwargs = m.await_args.kwargs
-    assert call_kwargs["filter_obj"]["title"]["contains"] == "котов"
+    assert result is not None
+    assert result.id == "p-2"
+    assert result.tags == ["коты", "мысль"]
 
 
 @pytest.mark.asyncio
 async def test_notes_repo_find_for_edit_not_found():
-    from nexus.repos import notes_repo as mod
     from nexus.repos.notes_repo import NotesRepo
 
-    with patch.object(mod._notion, "db_query", AsyncMock(return_value=[])):
-        repo = NotesRepo()
-        note = await repo.find_for_edit("db-notes", "несуществующее")
+    repo = NotesRepo()
+    with patch.object(repo._pg, "find_for_edit", AsyncMock(return_value=None)):
+        result = await repo.find_for_edit("несуществующее")
 
-    assert note is None
+    assert result is None
 
 
 @pytest.mark.asyncio
 async def test_notes_repo_update_tags():
-    from nexus.repos import notes_repo as mod
     from nexus.repos.notes_repo import NotesRepo
 
-    fake_notion = MagicMock()
-    fake_notion.pages.update = AsyncMock()
-    with patch.object(mod._notion, "get_notion", return_value=fake_notion):
-        repo = NotesRepo()
-        await repo.update_tags("p-1", ["тег1", "тег2"])
+    repo = NotesRepo()
+    with patch.object(repo._pg, "update_tags", AsyncMock()) as m:
+        await repo.update_tags("42", ["тег1", "тег2"])
 
-    fake_notion.pages.update.assert_awaited_once_with(
-        page_id="p-1",
-        properties={"Теги": {"multi_select": [{"name": "тег1"}, {"name": "тег2"}]}},
-    )
+    m.assert_awaited_once_with("42", ["тег1", "тег2"])
 
 
 @pytest.mark.asyncio
 async def test_notes_repo_archive_success():
-    from nexus.repos import notes_repo as mod
     from nexus.repos.notes_repo import NotesRepo
 
-    fake_notion = MagicMock()
-    fake_notion.pages.update = AsyncMock()
-    with patch.object(mod._notion, "get_notion", return_value=fake_notion):
-        repo = NotesRepo()
-        ok = await repo.archive("p-del")
+    repo = NotesRepo()
+    with patch.object(repo._pg, "archive", AsyncMock(return_value=True)) as m:
+        ok = await repo.archive("42")
 
     assert ok is True
-    fake_notion.pages.update.assert_awaited_once_with(page_id="p-del", archived=True)
+    m.assert_awaited_once_with("42")
 
 
 @pytest.mark.asyncio
 async def test_notes_repo_archive_failure_returns_false():
-    from nexus.repos import notes_repo as mod
     from nexus.repos.notes_repo import NotesRepo
 
-    fake_notion = MagicMock()
-    fake_notion.pages.update = AsyncMock(side_effect=Exception("Notion 503"))
-    with patch.object(mod._notion, "get_notion", return_value=fake_notion):
-        repo = NotesRepo()
-        ok = await repo.archive("p-fail")
+    repo = NotesRepo()
+    with patch.object(repo._pg, "archive", AsyncMock(return_value=False)):
+        ok = await repo.archive("fail-id")
 
     assert ok is False
 
@@ -142,17 +118,17 @@ async def test_notes_repo_archive_failure_returns_false():
 
 @pytest.mark.asyncio
 async def test_save_note_uses_repo_add():
-    """_save_note вызывает _repo.add, не note_add напрямую."""
+    """_save_note вызывает _repo.add."""
     import nexus.handlers.notes as nmod
 
     msg = MagicMock()
     msg.answer = AsyncMock()
     msg.edit_text = AsyncMock()
 
-    with patch.object(nmod._repo, "add", AsyncMock(return_value="page-ok")):
+    with patch.object(nmod._repo, "add", AsyncMock(return_value="42")), \
+         patch("nexus.handlers.notes.react", AsyncMock()):
         await nmod._save_note(msg, "мысль", ["идея"], "2026-06-01", user_notion_id="u")
 
-    nmod._repo.add  # already patched — just check the mock was used
     msg.answer.assert_awaited_once()
     assert "сохранена" in msg.answer.call_args.args[0].lower()
 
@@ -161,43 +137,35 @@ async def test_save_note_uses_repo_add():
 async def test_handle_edit_note_single_tag_calls_update_tags():
     """handle_edit_note: одна метка → _repo.update_tags вызывается."""
     import nexus.handlers.notes as nmod
-    import os
 
     msg = MagicMock()
     msg.from_user.id = 7
     msg.answer = AsyncMock()
 
-    note_obj = MagicMock()
-    note_obj.id = "p-1"
-    note_obj.tags = ["старый"]
+    note_obj = _make_note("p-1", "тест", tags=["старый"])
 
-    with patch.dict(os.environ, {"NOTION_DB_NOTES": "db-id"}), \
-         patch.object(nmod._repo, "find_for_edit", AsyncMock(return_value=note_obj)), \
+    with patch.object(nmod._repo, "find_for_edit", AsyncMock(return_value=note_obj)), \
          patch.object(nmod._repo, "update_tags", AsyncMock()) as upd:
         await nmod.handle_edit_note(msg, {"hint": "последняя", "new_value": "новый"}, "u")
 
     upd.assert_awaited_once()
     called_tags = upd.await_args.args[1]
-    assert "Новый" in called_tags[0] or "новый" in called_tags[0].lower()
+    assert any("новый" in t.lower() for t in called_tags)
     msg.answer.assert_awaited_once()
 
 
 @pytest.mark.asyncio
 async def test_handle_edit_note_multi_tag_shows_keyboard():
-    """handle_edit_note: несколько меток → inline-клавиатура, _repo.update_tags НЕ вызывается."""
+    """handle_edit_note: несколько меток → inline-клавиатура, update_tags НЕ вызывается."""
     import nexus.handlers.notes as nmod
-    import os
 
     msg = MagicMock()
     msg.from_user.id = 7
     msg.answer = AsyncMock()
 
-    note_obj = MagicMock()
-    note_obj.id = "p-multi"
-    note_obj.tags = ["тег1", "тег2", "тег3"]
+    note_obj = _make_note("p-multi", "тест", tags=["тег1", "тег2", "тег3"])
 
-    with patch.dict(os.environ, {"NOTION_DB_NOTES": "db-id"}), \
-         patch.object(nmod._repo, "find_for_edit", AsyncMock(return_value=note_obj)), \
+    with patch.object(nmod._repo, "find_for_edit", AsyncMock(return_value=note_obj)), \
          patch.object(nmod._repo, "update_tags", AsyncMock()) as upd:
         await nmod.handle_edit_note(msg, {"hint": "последняя", "new_value": "новый"}, "u")
 
@@ -209,7 +177,7 @@ async def test_handle_edit_note_multi_tag_shows_keyboard():
 
 @pytest.mark.asyncio
 async def test_handle_note_delete_archives_via_repo():
-    """handle_note_delete использует _repo.archive, не get_notion() напрямую."""
+    """handle_note_delete использует _repo.archive."""
     import nexus.handlers.notes as nmod
 
     uid = 42

@@ -1,9 +1,7 @@
 """nexus/handlers/notes.py — заметки со smart-select тегов"""
 from __future__ import annotations
 
-import json
 import logging
-import os
 import random
 from datetime import datetime, timezone, timedelta
 from typing import Dict, List
@@ -12,8 +10,7 @@ from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKe
 from nexus.handlers.utils import react
 
 from core.claude_client import ask_claude
-from core.notion_client import get_db_options
-from core.option_helper import find_or_prepare, confirm_keyboard, pick_keyboard, format_option
+from core.option_helper import confirm_keyboard, pick_keyboard, format_option
 from nexus.repos.notes_repo import NotesRepo
 
 _repo = NotesRepo()
@@ -43,10 +40,11 @@ async def handle_note(
     user_notion_id: str = "",
 ) -> None:
     """Основной обработчик заметки со smart-select тегов."""
+    import json
     date = datetime.now(MOSCOW_TZ).strftime("%Y-%m-%d")
-    existing = await get_db_options(db_notes_id, "Теги")
+    existing = await _repo.get_all_tags()
 
-    # Если теги переданы из classifier — нормализовать через find_or_prepare
+    # Если теги переданы из classifier — нормализовать через find_or_prepare_tag
     if tags:
         tag_list = []
         for item in tags.split(","):
@@ -63,7 +61,7 @@ async def handle_note(
             pending_new = [] # is_new=True, новые
 
             for tag in tag_list:
-                value, is_new = await find_or_prepare(db_notes_id, "Теги", tag)
+                value, is_new = await _repo.find_or_prepare_tag(tag)
                 if is_new:
                     pending_new.append(value)
                 else:
@@ -84,7 +82,7 @@ async def handle_note(
                 existing_str = ", ".join(existing) if existing else "нет"
                 kb = confirm_keyboard(uid, pending_new, existing)
                 await message.answer(
-                    f"💡 Не нашёл в Notion тег(и): <b>{new_str}</b>\n"
+                    f"💡 Не нашёл тег(и): <b>{new_str}</b>\n"
                     f"Существующие: <i>{existing_str}</i>",
                     reply_markup=kb,
                 )
@@ -156,7 +154,6 @@ async def handle_note_callback(query: CallbackQuery) -> None:
         if not page_id:
             await query.message.edit_text("⏱ Сессия истекла, попробуй ещё раз.")
             return
-        # Заменить old_tag на new_tag, остальные оставить
         updated = [new_tag if t == old_tag else t for t in current_tags]
         await _repo.update_tags(page_id, updated)
         await query.message.edit_text(f"✏️ Тег <b>{old_tag}</b> → <b>{new_tag}</b>")
@@ -216,7 +213,7 @@ async def _save_note(
 ) -> None:
     result = await _repo.add(text=text, tags=tags, date=date, user_notion_id=user_notion_id)
     tags_str = ", ".join(tags) if tags else "нет"
-    reply = f"💡 Заметка сохранена! Теги: {tags_str}" if result else "⚠️ Ошибка записи в Notion."
+    reply = f"💡 Заметка сохранена! Теги: {tags_str}" if result else "⚠️ Ошибка записи."
     if result:
         await react(message, "✍️")
     if edit:
@@ -231,11 +228,7 @@ async def handle_edit_note(message: Message, data: dict, user_notion_id: str) ->
     if not new_value:
         await message.answer("❌ Не указан новый тег")
         return
-    db_id = os.environ.get("NOTION_DB_NOTES")
-    if not db_id:
-        await message.answer("❌ NOTION_DB_NOTES не задан")
-        return
-    note = await _repo.find_for_edit(db_id, hint)
+    note = await _repo.find_for_edit(hint, user_notion_id=user_notion_id)
     if not note:
         await message.answer("❌ Заметка не найдена")
         return
@@ -243,7 +236,6 @@ async def handle_edit_note(message: Message, data: dict, user_notion_id: str) ->
     uid = message.from_user.id
 
     if len(note.tags) > 1:
-        # Спросить, какой тег заменить
         _pending[uid] = {"page_id": note.id, "current_tags": note.tags, "new_value": tag_name}
         buttons = [
             [InlineKeyboardButton(
@@ -259,7 +251,6 @@ async def handle_edit_note(message: Message, data: dict, user_notion_id: str) ->
         )
         return
 
-    # 0 или 1 тег — заменяем сразу (или просто выставляем новый)
     await _repo.update_tags(note.id, [tag_name])
     await message.answer(f"✏️ Тег обновлён: {tag_name}")
 
@@ -277,40 +268,17 @@ _ADHD_TIPS = [
 
 async def send_notes_digest(bot, user_tg_id: int, user_notion_id: str) -> None:
     """Напоминание о неразобранных заметках (>7 дней)."""
-    from core.notion_client import db_query
-
-    db_id = os.environ.get("NOTION_DB_NOTES")
-    if not db_id:
+    notes_list = await _repo.find_older_than_days(user_notion_id=user_notion_id, days=7)
+    if not notes_list:
         return
 
-    cutoff = (datetime.now(MOSCOW_TZ) - timedelta(days=7)).strftime("%Y-%m-%dT%H:%M:%S.000Z")
-    filter_obj: dict = {"property": "Дата", "date": {"before": cutoff}}
-    if user_notion_id:
-        filter_obj = {
-            "and": [
-                filter_obj,
-                {"property": "🪪 Пользователи", "relation": {"contains": user_notion_id}},
-            ]
-        }
-
-    try:
-        pages = await db_query(
-            db_id,
-            filter_obj=filter_obj,
-            sorts=[{"property": "Дата", "direction": "ascending"}],
-            page_size=50,
-        )
-    except Exception as e:
-        logger.error("send_notes_digest: query error: %s", e)
-        return
-
-    if not pages:
-        return
-
-    n = len(pages)
+    n = len(notes_list)
     tip = random.choice(_ADHD_TIPS)
-    text = f"📝 Дайджест заметок за неделю\n\nУ тебя {n} не разобранных заметок\n\n{tip}\n\nЕсли хочешь разобрать сейчас — /notes"
-
+    text = (
+        f"📝 Дайджест заметок за неделю\n\n"
+        f"У тебя {n} не разобранных заметок\n\n{tip}\n\n"
+        f"Если хочешь разобрать сейчас — /notes"
+    )
     try:
         await bot.send_message(user_tg_id, text)
     except Exception as e:
@@ -322,7 +290,7 @@ async def send_notes_digest_all(bot) -> None:
     from core.config import config
     from core.user_manager import get_user
 
-    seen: set[int] = set()
+    seen: set = set()
     for tg_id in config.allowed_ids:
         if tg_id in seen:
             continue
@@ -345,42 +313,28 @@ async def handle_note_search(
     data,  # dict с "query" или строка (legacy)
     user_notion_id: str = "",
 ) -> None:
-    """Поиск заметок с пагинацией + дайджест неразобранных (объединение notes + notes_digest)."""
-    import asyncio
-    from core.notion_client import db_query
+    """Поиск заметок с пагинацией + дайджест неразобранных."""
+    import asyncio as _asyncio
     from core.pagination import register_pages, get_page_text, get_page_keyboard
 
-    # Поддержка старого вызова со строкой и нового с dict
     if isinstance(data, dict):
         q = (data.get("query") or "").strip()
     else:
         q = (data or "").strip()
 
-    db_id = os.environ.get("NOTION_DB_NOTES")
-    if not db_id:
-        await message.answer("❌ NOTION_DB_NOTES не задан")
-        return
-
     if not q:
-        combined = await db_query(
-            db_id,
-            sorts=[{"property": "Дата", "direction": "descending"}],
-            page_size=50,
-        )
+        combined = await _repo.list_recent(user_notion_id=user_notion_id, limit=50)
     else:
-        tag_filter   = {"property": "Теги",      "multi_select": {"contains": q}}
-        title_filter = {"property": "Заголовок", "title":        {"contains": q}}
-        tag_results, title_results = await asyncio.gather(
-            db_query(db_id, filter_obj=tag_filter,   page_size=30),
-            db_query(db_id, filter_obj=title_filter, page_size=30),
+        tag_results, title_results = await _asyncio.gather(
+            _repo.search_by_tag(q, user_notion_id),
+            _repo.search_by_title(q, user_notion_id),
         )
-        seen: set = set()
+        seen_ids: set = set()
         combined = []
-        for page in tag_results + title_results:
-            pid = page["id"]
-            if pid not in seen:
-                seen.add(pid)
-                combined.append(page)
+        for note in tag_results + title_results:
+            if note.id not in seen_ids:
+                seen_ids.add(note.id)
+                combined.append(note)
 
     if not combined:
         await message.answer("💡 Заметок не найдено")
@@ -390,25 +344,18 @@ async def handle_note_search(
     digest_header = ""
     if not q:
         cutoff = (datetime.now(MOSCOW_TZ) - timedelta(days=7)).strftime("%Y-%m-%d")
-        old_count = sum(
-            1 for p in combined
-            if ((p["properties"].get("Дата", {}).get("date") or {}).get("start", "")[:10] or "9999") < cutoff
-        )
+        old_count = sum(1 for note in combined if note.date and note.date < cutoff)
         if old_count > 0:
             tip = random.choice(_ADHD_TIPS)
             digest_header = f"📬 Не разобрано: {old_count} шт.\n{tip}\n\n"
 
-    # Преобразовать Notion-страницы в простые dict для formatter
-    def _parse(item: dict) -> dict:
-        props = item["properties"]
-        title_parts = props.get("Заголовок", {}).get("title", [])
-        title = title_parts[0]["plain_text"] if title_parts else "—"
-        tags_items = props.get("Теги", {}).get("multi_select", [])
-        tags_str = " ".join(t["name"] for t in tags_items)
-        # Категория (select property, если есть)
-        cat = (props.get("Категория", {}).get("select") or {}).get("name", "")
-        date = (props.get("Дата", {}).get("date") or {}).get("start", "")[:10]
-        return {"title": title, "tags": tags_str, "cat": cat, "date": date}
+    def _parse(note) -> dict:
+        return {
+            "title": note.title,
+            "tags": " ".join(note.tags),
+            "cat": "",
+            "date": note.date,
+        }
 
     def _fmt(it: dict) -> str:
         meta_parts = []
@@ -426,7 +373,7 @@ async def handle_note_search(
         return line
 
     uid = message.from_user.id
-    items = [_parse(p) for p in combined]
+    items = [_parse(note) for note in combined]
     header = f"🔍 {q}" if q else "📝 Заметки"
     if digest_header:
         header = digest_header + header
@@ -468,7 +415,6 @@ async def handle_note_delete(message: Message, data: dict, user_notion_id: str =
         else:
             logger.error("handle_note_delete: archive failed page_id=%s", p["page_id"])
 
-    # Убрать удалённые из кэша
     deleted_ids = {p["page_id"] for p in targets}
     _last_digest_results[uid] = [p for p in digest_pages if p["page_id"] not in deleted_ids]
 
