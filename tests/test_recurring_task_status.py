@@ -21,18 +21,18 @@ from fastapi.testclient import TestClient
 # ── Fix A: _handle_recurring_task_reset ──────────────────────────────────────
 
 
-def _make_task_props(*, repeat="Ежедневно", repeat_time="16:00|every_2d",
-                     deadline=None, reminder=None):
-    """Минимальный props dict для повторяющейся задачи."""
-    props: dict = {
-        "Повтор": {"select": {"name": repeat}},
-        "Время повтора": {
-            "rich_text": [{"plain_text": repeat_time}] if repeat_time else []
-        },
-        "Дедлайн": {"date": {"start": deadline} if deadline else None},
-        "Напоминание": {"date": {"start": reminder} if reminder else None},
-    }
-    return props
+def _make_task(*, repeat="Ежедневно", repeat_time="16:00|every_2d",
+               deadline="", reminder=""):
+    """Task domain object для повторяющейся задачи."""
+    from nexus.repos.pg_tasks_repo import Task
+    return Task(
+        id="test-task-id",
+        title="тестовая задача",
+        repeat=repeat,
+        repeat_time=repeat_time or "",
+        deadline=deadline or "",
+        reminder=reminder or "",
+    )
 
 
 def _make_message():
@@ -49,7 +49,7 @@ async def test_reset_recurring_no_deadline_sets_in_progress_and_completion():
     from nexus.handlers import tasks
 
     msg = _make_message()
-    props = _make_task_props(deadline=None, reminder="2026-05-08T16:00:00+03:00")
+    task = _make_task(deadline="", reminder="2026-05-08T16:00:00+03:00")
 
     update_calls: list = []
 
@@ -60,7 +60,7 @@ async def test_reset_recurring_no_deadline_sets_in_progress_and_completion():
          patch.object(tasks, "_scheduler", None), \
          patch.object(tasks, "_get_user_tz", AsyncMock(return_value=3)):
         await tasks._handle_recurring_task_reset(
-            msg, "task-id-1", props, "Ежедневно", "тестовая задача", uid=999_001,
+            msg, "task-id-1", task, "Ежедневно", "тестовая задача", uid=999_001,
         )
 
     assert update_calls, "set_props должен быть вызван"
@@ -82,7 +82,7 @@ async def test_reset_recurring_with_deadline_keeps_in_progress():
     from nexus.handlers import tasks
 
     msg = _make_message()
-    props = _make_task_props(
+    task = _make_task(
         deadline="2026-06-01",
         reminder="2026-06-01T09:00:00+03:00",
     )
@@ -96,7 +96,7 @@ async def test_reset_recurring_with_deadline_keeps_in_progress():
          patch.object(tasks, "_scheduler", None), \
          patch.object(tasks, "_get_user_tz", AsyncMock(return_value=3)):
         await tasks._handle_recurring_task_reset(
-            msg, "task-id-2", props, "Ежедневно", "test task", uid=999_001,
+            msg, "task-id-2", task, "Ежедневно", "test task", uid=999_001,
         )
 
     assert captured["props"]["Статус"]["status"]["name"] == "In progress"
@@ -113,9 +113,9 @@ async def test_reset_recurring_uses_canonical_time_after_snooze():
 
     msg = _make_message()
     # repeat_time = «16:00|every_2d», но текущее напоминание снузено на 20:29
-    props = _make_task_props(
+    task = _make_task(
         repeat_time="16:00|every_2d",
-        deadline=None,
+        deadline="",
         reminder="2026-05-10T20:29:00+03:00",
     )
 
@@ -128,7 +128,7 @@ async def test_reset_recurring_uses_canonical_time_after_snooze():
          patch.object(tasks, "_scheduler", None), \
          patch.object(tasks, "_get_user_tz", AsyncMock(return_value=3)):
         await tasks._handle_recurring_task_reset(
-            msg, "task-id-snooze", props, "Ежедневно", "менять лоток", uid=999_001,
+            msg, "task-id-snooze", task, "Ежедневно", "менять лоток", uid=999_001,
         )
 
     new_reminder = captured["props"]["Напоминание"]["date"]["start"]
@@ -156,7 +156,7 @@ async def test_completion_timestamp_format_moscow_tz():
     from nexus.handlers import tasks
 
     msg = _make_message()
-    props = _make_task_props(deadline=None, reminder=None)
+    task = _make_task(deadline="", reminder="")
 
     captured: dict = {}
 
@@ -167,7 +167,7 @@ async def test_completion_timestamp_format_moscow_tz():
          patch.object(tasks, "_scheduler", None), \
          patch.object(tasks, "_get_user_tz", AsyncMock(return_value=3)):
         await tasks._handle_recurring_task_reset(
-            msg, "task-id-4", props, "Ежедневно", "x", uid=999_001,
+            msg, "task-id-4", task, "Ежедневно", "x", uid=999_001,
         )
 
     iso = captured["props"]["Время завершения"]["date"]["start"]

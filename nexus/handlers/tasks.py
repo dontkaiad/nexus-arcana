@@ -191,7 +191,7 @@ _scheduler = None
 _bot: Optional[Bot] = None
 
 # ── Multi-select state for task_done ──────────────────────────────────────────
-_done_multi_tasks: dict[int, list] = {}     # uid → [(score, title, task_id, props), ...]
+_done_multi_tasks: dict[int, list] = {}     # uid → [(score, title, task_id, Task), ...]
 _done_multi_selected: dict[int, set] = {}   # uid → set of selected task_ids
 
 
@@ -266,28 +266,24 @@ async def restore_reminders_on_startup() -> None:
             tz_offset = await _get_user_tz(tg_id)
 
             # ── Проход 1: будущие напоминания ────────────────────────────────────
-            for page in await _pg.active_with_future_reminder(user_notion_id):
+            for task in await _pg.active_with_future_reminder(user_notion_id):
                 try:
-                    props = page["properties"]
-                    task_id = page["id"]
-                    title_parts = props.get("Задача", {}).get("title", [])
-                    title = title_parts[0]["plain_text"] if title_parts else "Задача"
-                    reminder_start = (props.get("Напоминание", {}).get("date") or {}).get("start", "")
+                    task_id = task.id
+                    title = task.title or "Задача"
+                    reminder_start = task.reminder
                     if reminder_start:
                         await _schedule_reminder(tg_id, title, reminder_start[:16], task_id, tz_offset)
                         restored += 1
                 except Exception as e:
-                    logger.error("restore pass1: task %s error: %s", page.get("id"), e)
+                    logger.error("restore pass1: task %s error: %s", task.id, e)
 
             # ── Проход 2: задачи с пропущенным напоминанием ─────────────────────
-            for page in await _pg.active_with_past_reminder(user_notion_id):
+            for task in await _pg.active_with_past_reminder(user_notion_id):
                 try:
-                    props = page["properties"]
-                    task_id = page["id"]
-                    repeat = (props.get("Повтор", {}).get("select") or {}).get("name", "Нет")
-                    title_parts = props.get("Задача", {}).get("title", [])
-                    title = title_parts[0]["plain_text"] if title_parts else "Задача"
-                    reminder_start = (props.get("Напоминание", {}).get("date") or {}).get("start", "")
+                    task_id = task.id
+                    repeat = task.repeat
+                    title = task.title or "Задача"
+                    reminder_start = task.reminder
                     if not reminder_start:
                         continue
 
@@ -338,11 +334,7 @@ async def restore_reminders_on_startup() -> None:
                             cancel_button("❌ Не сделал", f"task_failed_{task_id}"),
                         ]])
                         # Read interval for display
-                        repeat_time_raw_pre = "".join(
-                            t.get("plain_text", "") for t in
-                            (props.get("Время повтора", {}).get("rich_text") or [])
-                        )
-                        _, ivl_days_pre = _parse_repeat_time(repeat_time_raw_pre)
+                        _, ivl_days_pre = _parse_repeat_time(task.repeat_time)
                         repeat_display = _interval_label(ivl_days_pre) if ivl_days_pre > 1 else repeat
 
                         try:
@@ -358,11 +350,7 @@ async def restore_reminders_on_startup() -> None:
                             logger.error("restore pass2: failed to send missed repeat '%s': %s", title, e)
 
                         # Сдвигаем до ближайшей будущей даты
-                        repeat_time_raw = "".join(
-                            t.get("plain_text", "") for t in
-                            (props.get("Время повтора", {}).get("rich_text") or [])
-                        )
-                        canon_time, ivl_days = _parse_repeat_time(repeat_time_raw)
+                        canon_time, ivl_days = _parse_repeat_time(task.repeat_time)
                         new_reminder = _ensure_datetime(reminder_start[:16])
                         for _ in range(400):
                             new_reminder = _next_cycle_date(
@@ -379,7 +367,7 @@ async def restore_reminders_on_startup() -> None:
                             if nrem_dt > now_utc:
                                 break
 
-                        deadline_start = (props.get("Дедлайн", {}).get("date") or {}).get("start", "")
+                        deadline_start = task.deadline
                         update_props: dict = {"Напоминание": _date_with_tz(new_reminder, tz_offset), "Статус": _status("Not started")}
                         if deadline_start:
                             new_deadline = deadline_start[:16]
@@ -847,8 +835,7 @@ async def handle_last_task_clarify(
             title_str = "задача"
             try:
                 pg = await _repo.retrieve_page(tid)
-                tp = pg.get("properties", {}).get("Задача", {}).get("title", [])
-                title_str = tp[0]["plain_text"] if tp else "задача"
+                title_str = pg.title if pg else "задача"
             except Exception:
                 pass
             await _schedule_reminder(message.chat.id, title_str, dt_str, tid, tz_offset)
@@ -955,7 +942,7 @@ def _next_cycle_date(current_date_str: str, repeat: str, tz_offset: int = 3,
 async def _handle_recurring_task_reset(
     message: Message,
     task_id: str,
-    task_props: dict,
+    task,
     repeat: str,
     title: str,
     uid: int = 0,
@@ -963,18 +950,9 @@ async def _handle_recurring_task_reset(
     """Сбросить повторяющуюся задачу: сдвинуть дедлайн/напоминание, статус → Not started."""
     tz_offset = await _get_user_tz(uid)
 
-    # Parse interval from Время повтора
-    repeat_time_raw = "".join(
-        t.get("plain_text", "") for t in
-        (task_props.get("Время повтора", {}).get("rich_text") or [])
-    )
-    canon_time, ivl_days = _parse_repeat_time(repeat_time_raw)
-
-    deadline_prop = task_props.get("Дедлайн", {}).get("date") or {}
-    current_deadline = deadline_prop.get("start", "")
-
-    reminder_prop = task_props.get("Напоминание", {}).get("date") or {}
-    current_reminder = reminder_prop.get("start", "")
+    canon_time, ivl_days = _parse_repeat_time(task.repeat_time if task else "")
+    current_deadline = task.deadline if task else ""
+    current_reminder = task.reminder if task else ""
 
     # Если напоминание уже в будущем (сдвинуто restore_reminders_on_startup) — не двигать повторно
     now = datetime.now(timezone(timedelta(hours=tz_offset)))
@@ -1062,7 +1040,7 @@ async def _handle_recurring_reminder_done(
 async def _handle_recurring_deadline_done(
     message: Message,
     task_id: str,
-    task_props: dict,
+    task,
     repeat: str,
     title: str,
     uid: int = 0,
@@ -1083,7 +1061,7 @@ async def _handle_recurring_deadline_done(
             await update_streak(uid, tz, source="bot_recurring_done", task_id=task_id)
         except Exception as e:
             logger.debug("recurring streak update error: %s", e)
-    await _handle_recurring_task_reset(message, task_id, task_props, repeat, title, uid)
+    await _handle_recurring_task_reset(message, task_id, task, repeat, title, uid)
 
 
 # ── Handlers ───────────────────────────────────────────────────────────────────
@@ -1798,15 +1776,13 @@ async def task_complete(call: CallbackQuery) -> None:
 
     # Проверяем повторяющаяся ли задача
     try:
-        page = await _repo.retrieve_page(task_id)
-        task_props = page.get("properties", {})
-        repeat = (task_props.get("Повтор", {}).get("select") or {}).get("name", "Нет")
-        title_parts = task_props.get("Задача", {}).get("title", [])
-        task_title = title_parts[0]["plain_text"] if title_parts else ""
+        pg_task = await _repo.retrieve_page(task_id)
+        repeat = pg_task.repeat if pg_task else "Нет"
+        task_title = pg_task.title if pg_task else ""
     except Exception as e:
         logger.error("task_complete: failed to fetch task props: %s", e)
         repeat = "Нет"
-        task_props = {}
+        pg_task = None
         task_title = ""
 
     # Fallback: название из текста сообщения
@@ -1824,10 +1800,10 @@ async def task_complete(call: CallbackQuery) -> None:
         # Повторяющаяся задача: различаем напоминание и дедлайн
         msg_text = call.message.text or ""
         is_deadline = "Дедлайн:" in msg_text
-        has_deadline = bool((task_props.get("Дедлайн", {}).get("date") or {}).get("start"))
+        has_deadline = bool(pg_task.deadline) if pg_task else False
         if is_deadline or not has_deadline:
             # Дедлайн-сообщение ИЛИ задача без дедлайна (напр. interval every_Nd) → Done + reschedule
-            await _handle_recurring_deadline_done(call.message, task_id, task_props, repeat, task_title, uid)
+            await _handle_recurring_deadline_done(call.message, task_id, pg_task, repeat, task_title, uid)
             await call.answer("✅ Выполнено!")
         else:
             await _handle_recurring_reminder_done(call.message, task_id, task_title)
@@ -1904,11 +1880,10 @@ async def _update_notion_on_reschedule(task_id: str, new_reminder: str, tz_offse
             logger.warning("_update_notion_on_reschedule: task not found %s", task_id)
             return
 
-        props = page.get("properties", {})
         update: dict = {"Напоминание": _date_with_tz(new_reminder, tz_offset)}
 
         # Если новое напоминание позже текущего дедлайна — сдвигаем дедлайн
-        deadline_start = (props.get("Дедлайн", {}).get("date") or {}).get("start", "")
+        deadline_start = page.deadline
         if deadline_start:
             new_rem_date = new_reminder[:10]
             old_dl_date = deadline_start[:10]
@@ -1946,9 +1921,8 @@ async def handle_reschedule_reminder(message: Message) -> None:
         if not pending.get("title"):
             try:
                 pg_page = await _repo.retrieve_page(task_id)
-                title_parts = pg_page.get("properties", {}).get("Задача", {}).get("title", [])
-                if title_parts:
-                    task_title = title_parts[0]["plain_text"]
+                if pg_page:
+                    task_title = pg_page.title
             except Exception:
                 pass
         
@@ -2219,13 +2193,12 @@ async def handle_task_cancel(message: Message, task_hint: str, user_notion_id: s
 
     scored = []
     for t in tasks:
-        title_parts = t["properties"].get("Задача", {}).get("title", [])
-        title = title_parts[0]["plain_text"] if title_parts else ""
+        title = t.title
         if not title:
             continue
         score = _task_score(title, cancel_words)
         if score > 0:
-            scored.append((score, title, t["id"]))
+            scored.append((score, title, t.id))
 
     if not scored:
         await message.answer(f"🔍 Не нашёл задачу по: «{task_hint[:60]}»\nПроверь активные: /tasks")
@@ -2264,16 +2237,15 @@ async def handle_task_done(message: Message, task_hint: str, user_notion_id: str
         await message.answer("📭 Нет активных задач.")
         return
 
-    # Оценить каждую задачу (сохраняем props для проверки повтора)
+    # Оценить каждую задачу (сохраняем Task для проверки повтора)
     scored = []
     for t in tasks:
-        title_parts = t["properties"].get("Задача", {}).get("title", [])
-        title = title_parts[0]["plain_text"] if title_parts else ""
+        title = t.title
         if not title:
             continue
         score = _task_score(title, hint_words)
         if score > 0:
-            scored.append((score, title, t["id"], t["properties"]))
+            scored.append((score, title, t.id, t))
 
     if not scored:
         await message.answer(
@@ -2286,12 +2258,11 @@ async def handle_task_done(message: Message, task_hint: str, user_notion_id: str
 
     # Единственный хороший матч — отметить сразу
     if len(scored) == 1 or scored[0][0] > scored[1][0]:
-        _, title, task_id, task_props = scored[0]
-        repeat = (task_props.get("Повтор", {}).get("select") or {}).get("name", "Нет")
-        repeat_time_parts = task_props.get("Время повтора", {}).get("rich_text", [])
-        repeat_time = repeat_time_parts[0]["plain_text"].strip() if repeat_time_parts else ""
+        _, title, task_id, task = scored[0]
+        repeat = task.repeat
+        repeat_time = task.repeat_time
         if (repeat and repeat != "Нет") or repeat_time:
-            await _handle_recurring_deadline_done(message, task_id, task_props, repeat, title, uid)
+            await _handle_recurring_deadline_done(message, task_id, task, repeat, title, uid)
             return
         result = await _repo.set_status(task_id, "Done")
         if result:
@@ -2321,28 +2292,25 @@ async def task_done_select(call: CallbackQuery) -> None:
     uid = call.from_user.id
     logger.info("task_done_select: task_id=%s", task_id)
 
-    # Получить props задачи чтобы проверить повтор
+    # Получить Task чтобы проверить повтор
     repeat = "Нет"
     repeat_time = ""
-    task_props = {}
+    sel_task = None
     title_text = ""
     try:
-        page = await _repo.retrieve_page(task_id)
-        task_props = page.get("properties", {})
-        repeat = (task_props.get("Повтор", {}).get("select") or {}).get("name", "Нет")
-        repeat_time_parts = task_props.get("Время повтора", {}).get("rich_text", [])
-        repeat_time = repeat_time_parts[0]["plain_text"].strip() if repeat_time_parts else ""
-        title_parts = task_props.get("Задача", {}).get("title", [])
-        title_text = title_parts[0]["plain_text"] if title_parts else ""
+        sel_task = await _repo.retrieve_page(task_id)
+        if sel_task:
+            repeat = sel_task.repeat
+            repeat_time = sel_task.repeat_time
+            title_text = sel_task.title
     except Exception as e:
-        logger.warning("task_done_select: не удалось получить props: %s", e)
-        repeat_time = ""
+        logger.warning("task_done_select: не удалось получить task: %s", e)
 
     await call.message.edit_reply_markup()
 
     if (repeat and repeat != "Нет") or repeat_time:
         await call.answer("✅ Выполнено!")
-        await _handle_recurring_deadline_done(call.message, task_id, task_props, repeat, title_text, uid)
+        await _handle_recurring_deadline_done(call.message, task_id, sel_task, repeat, title_text, uid)
         return
 
     result = await _repo.set_status(task_id, "Done")
@@ -2380,12 +2348,12 @@ async def cb_done_multi_confirm(call: CallbackQuery) -> None:
         await call.message.edit_text("☐ Ничего не выбрано.")
         return
     done_titles = []
-    for _, title, task_id, task_props in tasks:
+    for _, title, task_id, task in tasks:
         if task_id not in selected:
             continue
-        repeat = (task_props.get("Повтор", {}).get("select") or {}).get("name", "Нет")
+        repeat = task.repeat if task else "Нет"
         if repeat and repeat != "Нет":
-            await _handle_recurring_deadline_done(call.message, task_id, task_props, repeat, title, uid)
+            await _handle_recurring_deadline_done(call.message, task_id, task, repeat, title, uid)
         else:
             result = await _repo.set_status(task_id, "Done")
             if result:
@@ -2467,13 +2435,12 @@ async def handle_edit_record(
     tasks = await _repo.active(user_notion_id=user_notion_id)
     scored = []
     for t in tasks:
-        title_parts = t["properties"].get("Задача", {}).get("title", [])
-        title = title_parts[0]["plain_text"] if title_parts else ""
+        title = t.title
         if not title:
             continue
         score = _task_score(title, hint_words)
         if score > 0:
-            scored.append((score, title, t["id"]))
+            scored.append((score, title, t.id))
 
     if not scored:
         await message.answer(f"🔍 Не нашёл задачу по: «{record_hint[:60]}»")
@@ -2505,7 +2472,7 @@ async def _apply_edit(
         # Проверяем что страница не архивирована
         try:
             page = await _repo.retrieve_page(page_id)
-            if page.get("archived", False):
+            if page and page.archived:
                 await message.answer("⚠️ Эта запись архивирована — редактировать нельзя.")
                 return
         except Exception:
@@ -2591,29 +2558,22 @@ async def _build_today_digest(uid: int, user_notion_id: str = "", greeting: str 
     _priority_icons = {"Срочно": "🔴", "Важно": "🟡", "Можно потом": "⚪"}
     _repeat_labels = {"Ежедневно": "ежедневно", "Еженедельно": "еженедельно", "Ежемесячно": "ежемесячно"}
 
-    def _get_interval_days(props: dict) -> int:
-        rt = "".join(t.get("plain_text", "") for t in (props.get("Время повтора", {}).get("rich_text") or []))
-        _, ivl = _parse_repeat_time(rt)
-        return ivl
-
     overdue = []
     today_tasks = []
     _priority_rank = {"Срочно": 0, "Важно": 1, "Можно потом": 2}
 
     for t in all_tasks:
-        props = t["properties"]
-        title_parts = props.get("Задача", {}).get("title", [])
-        title = title_parts[0]["plain_text"] if title_parts else "—"
-        priority_raw = (props.get("Приоритет", {}).get("select") or {}).get("name", "Важно")
+        title = t.title or "—"
+        priority_raw = t.priority
         priority = priority_raw
         for _pk in _priority_icons:
             if _pk in priority_raw:
                 priority = _pk
                 break
-        category = (props.get("Категория", {}).get("select") or {}).get("name", "")
-        deadline_raw = (props.get("Дедлайн", {}).get("date") or {}).get("start", "")
-        reminder_raw = (props.get("Напоминание", {}).get("date") or {}).get("start", "")
-        repeat = (props.get("Повтор", {}).get("select") or {}).get("name", "")
+        category = t.category
+        deadline_raw = t.deadline
+        reminder_raw = t.reminder
+        repeat = t.repeat
         is_repeat = repeat and repeat != "Нет"
 
         deadline_date = deadline_raw[:10] if deadline_raw else ""
@@ -2626,7 +2586,7 @@ async def _build_today_digest(uid: int, user_notion_id: str = "", greeting: str 
         elif "T" in deadline_raw:
             time_str = deadline_raw.split("T")[1][:5]
 
-        ivl = _get_interval_days(props) if is_repeat else 0
+        _, ivl = _parse_repeat_time(t.repeat_time) if is_repeat else (None, 0)
 
         item = {
             "cat_icon": cat_icon, "title": title, "priority": priority,
@@ -2933,14 +2893,11 @@ async def handle_task_stats(message: Message, user_notion_id: str = "") -> None:
     cat_done: Counter = Counter()
 
     for t in all_tasks:
-        props = t["properties"]
-        status = (props.get("Статус", {}).get("status") or {}).get("name", "Not started")
-        category = (props.get("Категория", {}).get("select") or {}).get("name", "")
+        status = t.status
+        category = t.category
 
-        # Дата завершения: "Время завершения" → last_edited_time → created_time
-        completion_raw = (props.get("Время завершения", {}).get("date") or {}).get("start", "")
-        if not completion_raw:
-            completion_raw = t.get("last_edited_time", "")
+        # Дата завершения: completed_at → last_edited
+        completion_raw = t.completed_at or t.last_edited
         completion_date_str = completion_raw[:10] if completion_raw else ""
 
         if status in ("Done", "Complete"):

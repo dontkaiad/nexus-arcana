@@ -1,13 +1,11 @@
-"""nexus/repos/pg_tasks_repo.py — PG implementation for nexus ✅ Задачи.
-
-Returns fake Notion-format page dicts so the handler stays unchanged.
-"""
+"""nexus/repos/pg_tasks_repo.py — PG implementation for nexus ✅ Задачи."""
 from __future__ import annotations
 
 import asyncio
 import logging
+from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional
 
 from sqlalchemy import select, text
 from sqlalchemy.engine import Engine
@@ -28,6 +26,26 @@ def get_engine() -> Engine:
         from arcana.repos.pg_sessions_repo import get_engine as _arc_engine
         _engine = _arc_engine()
     return _engine
+
+
+# ── Domain object ──────────────────────────────────────────────────────────────
+
+@dataclass
+class Task:
+    """Domain representation of one ✅ Задачи row."""
+    id: str
+    title: str
+    status: str = "Not started"
+    priority: str = "🟡 Важно"
+    category: str = ""
+    repeat: str = "Нет"
+    day_of_week: str = ""
+    repeat_time: str = ""
+    deadline: str = ""       # ISO string or ""
+    reminder: str = ""       # ISO string or ""
+    completed_at: str = ""   # ISO string or ""
+    last_edited: str = ""    # ISO string from updated_at
+    archived: bool = False
 
 
 # ── Lookup caches (loaded once per process) ────────────────────────────────────
@@ -98,7 +116,7 @@ def _match_code(cache: Dict[str, int], raw: Optional[str], default: Optional[str
     return default
 
 
-# ── Notion-format prop extractors ─────────────────────────────────────────────
+# ── Notion-format prop extractors (used by write side: set_props / create) ────
 
 def _extract_title(prop: dict) -> str:
     parts = prop.get("title", [])
@@ -148,48 +166,40 @@ def _parse_iso(s: Optional[str]) -> Optional[datetime]:
     return None
 
 
-# ── Fake Notion-format page builder ───────────────────────────────────────────
+# ── Row → domain object ───────────────────────────────────────────────────────
 
-def _to_notion_page(row) -> dict:
-    """Convert a DB row (joined with lookups) to a fake Notion page dict."""
+def _to_task(row) -> Task:
+    """Convert a DB row to a Task domain object."""
     status_c = _status_code.get(row.status_id, "Not started")
     repeat_c = _repeat_code.get(row.repeat_id, "Нет") if row.repeat_id else "Нет"
-    dow_c = _dow_code.get(row.day_of_week_id) if row.day_of_week_id else None
+    dow_c = _dow_code.get(row.day_of_week_id) if row.day_of_week_id else ""
     priority_c = _priority_code.get(row.priority_id, "🟡 Важно") if row.priority_id else "🟡 Важно"
-    category_c = _category_code.get(row.category_id, "💳 Прочее") if row.category_id else "💳 Прочее"
+    category_c = _category_code.get(row.category_id, "") if row.category_id else ""
 
-    repeat_time_list = [{"plain_text": row.repeat_time}] if row.repeat_time else []
+    def _fmt(dt: Optional[datetime]) -> str:
+        return dt.isoformat() if dt else ""
 
-    def _date_prop(dt: Optional[datetime]) -> Optional[dict]:
-        if dt is None:
-            return None
-        return {"start": dt.isoformat()}
-
-    props = {
-        "Задача": {"title": [{"plain_text": row.title, "text": {"content": row.title}}]},
-        "Статус": {"status": {"name": status_c}},
-        "Повтор": {"select": {"name": repeat_c} if repeat_c else None},
-        "День недели": {"select": {"name": dow_c} if dow_c else None},
-        "Приоритет": {"select": {"name": priority_c}},
-        "Категория": {"select": {"name": category_c}},
-        "Время повтора": {"rich_text": repeat_time_list},
-        "Дедлайн": {"date": _date_prop(row.deadline)},
-        "Напоминание": {"date": _date_prop(row.reminder)},
-        "Время завершения": {"date": _date_prop(row.completed_at)},
-    }
     updated = getattr(row, "updated_at", None)
-    last_edited = updated.isoformat() if updated else ""
-    return {
-        "id": str(row.id),
-        "archived": False,
-        "last_edited_time": last_edited,
-        "properties": props,
-    }
+    return Task(
+        id=str(row.id),
+        title=row.title or "",
+        status=status_c,
+        priority=priority_c,
+        category=category_c,
+        repeat=repeat_c,
+        day_of_week=dow_c or "",
+        repeat_time=row.repeat_time or "",
+        deadline=_fmt(row.deadline),
+        reminder=_fmt(row.reminder),
+        completed_at=_fmt(row.completed_at),
+        last_edited=_fmt(updated),
+        archived=False,
+    )
 
 
 # ── Sync helpers (run in asyncio.to_thread) ───────────────────────────────────
 
-def _list_active_sync(user_notion_id: str, include_in_progress: bool) -> List[dict]:
+def _list_active_sync(user_notion_id: str, include_in_progress: bool) -> List[Task]:
     _ensure_lookups()
     q = select(tasks).where(
         tasks.c.status_id.notin_(
@@ -210,10 +220,10 @@ def _list_active_sync(user_notion_id: str, include_in_progress: bool) -> List[di
 
     with get_engine().connect() as conn:
         rows = conn.execute(q).fetchall()
-    return [_to_notion_page(r) for r in rows]
+    return [_to_task(r) for r in rows]
 
 
-def _get_sync(task_id: str) -> Optional[dict]:
+def _get_sync(task_id: str) -> Optional[Task]:
     _ensure_lookups()
     try:
         pid = int(task_id)
@@ -225,10 +235,10 @@ def _get_sync(task_id: str) -> Optional[dict]:
         ).fetchone()
     if row is None:
         return None
-    return _to_notion_page(row)
+    return _to_task(row)
 
 
-def _list_all_sync(user_notion_id: str) -> List[dict]:
+def _list_all_sync(user_notion_id: str) -> List[Task]:
     """Return ALL tasks (including Done/Archived) for stats."""
     _ensure_lookups()
     q = select(tasks).order_by(tasks.c.updated_at.desc())
@@ -236,7 +246,7 @@ def _list_all_sync(user_notion_id: str) -> List[dict]:
         q = q.where(tasks.c.user_notion_id == user_notion_id)
     with get_engine().connect() as conn:
         rows = conn.execute(q).fetchall()
-    return [_to_notion_page(r) for r in rows]
+    return [_to_task(r) for r in rows]
 
 
 def _create_sync(
@@ -367,7 +377,7 @@ def _set_repeat_fields_sync(
 
 # Active tasks with future reminder (for restore_reminders pass 1) ─────────────
 
-def _active_with_future_reminder_sync(user_notion_id: str) -> List[dict]:
+def _active_with_future_reminder_sync(user_notion_id: str) -> List[Task]:
     _ensure_lookups()
     done_ids = select(task_status.c.id).where(
         task_status.c.code.in_(["Done", "Archived"])
@@ -381,10 +391,10 @@ def _active_with_future_reminder_sync(user_notion_id: str) -> List[dict]:
         q = q.where(tasks.c.user_notion_id == user_notion_id)
     with get_engine().connect() as conn:
         rows = conn.execute(q).fetchall()
-    return [_to_notion_page(r) for r in rows]
+    return [_to_task(r) for r in rows]
 
 
-def _active_with_past_reminder_sync(user_notion_id: str) -> List[dict]:
+def _active_with_past_reminder_sync(user_notion_id: str) -> List[Task]:
     _ensure_lookups()
     done_ids = select(task_status.c.id).where(
         task_status.c.code.in_(["Done", "Archived"])
@@ -399,7 +409,7 @@ def _active_with_past_reminder_sync(user_notion_id: str) -> List[dict]:
         q = q.where(tasks.c.user_notion_id == user_notion_id)
     with get_engine().connect() as conn:
         rows = conn.execute(q).fetchall()
-    return [_to_notion_page(r) for r in rows]
+    return [_to_task(r) for r in rows]
 
 
 # ── Public async API ───────────────────────────────────────────────────────────
@@ -407,14 +417,13 @@ def _active_with_past_reminder_sync(user_notion_id: str) -> List[dict]:
 class PgTasksRepo:
     async def active(
         self, user_notion_id: str = "", include_in_progress: bool = True
-    ) -> List[dict]:
+    ) -> List[Task]:
         return await asyncio.to_thread(
             _list_active_sync, user_notion_id, include_in_progress
         )
 
-    async def retrieve_page(self, page_id: str) -> dict:
-        page = await asyncio.to_thread(_get_sync, page_id)
-        return page or {}
+    async def retrieve_page(self, page_id: str) -> Optional[Task]:
+        return await asyncio.to_thread(_get_sync, page_id)
 
     async def create(
         self,
@@ -463,17 +472,17 @@ class PgTasksRepo:
             _set_repeat_fields_sync, page_id, repeat, day_of_week, repeat_time
         )
 
-    async def list_all(self, user_notion_id: str = "") -> List[dict]:
+    async def list_all(self, user_notion_id: str = "") -> List[Task]:
         """Return all tasks (Done/Archived included) for stats."""
         return await asyncio.to_thread(_list_all_sync, user_notion_id)
 
-    async def active_with_future_reminder(self, user_notion_id: str = "") -> List[dict]:
+    async def active_with_future_reminder(self, user_notion_id: str = "") -> List[Task]:
         return await asyncio.to_thread(_active_with_future_reminder_sync, user_notion_id)
 
-    async def active_with_past_reminder(self, user_notion_id: str = "") -> List[dict]:
+    async def active_with_past_reminder(self, user_notion_id: str = "") -> List[Task]:
         return await asyncio.to_thread(_active_with_past_reminder_sync, user_notion_id)
 
-    async def get_by_notion_id(self, notion_id: str) -> Optional[dict]:
+    async def get_by_notion_id(self, notion_id: str) -> Optional[Task]:
         """Find task by Notion page ID (for backfill cross-reference)."""
         def _sync():
             _ensure_lookups()
@@ -481,5 +490,5 @@ class PgTasksRepo:
                 row = conn.execute(
                     select(tasks).where(tasks.c.notion_id == notion_id)
                 ).fetchone()
-            return _to_notion_page(row) if row else None
+            return _to_task(row) if row else None
         return await asyncio.to_thread(_sync)
