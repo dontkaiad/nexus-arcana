@@ -1,43 +1,33 @@
 """core/repos/memory_repo.py — repository seam for 🧠 Память.
 
-Seals all Notion API calls for the Memory domain so callers deal with
-plain MemoryEntry objects and semantic operations, not Notion page dicts.
+Delegates all storage to PgMemoryRepo. Public API kept stable
+so callers (memory.py, finance.py handlers) need no signature changes.
 """
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
-from core import notion_client as _notion
-from core.memory import _build_props, _get_db_id
+from core.repos.pg_memory_repo import (
+    PgMemoryRepo as _PgMemoryRepo,
+    Memory,  # noqa: F401 — re-export
+    bot_to_scope,
+)
 
 logger = logging.getLogger("core.memory_repo")
 
 
-@dataclass
-class MemoryEntry:
-    """Domain representation of one 🧠 Память page."""
-    id: str
-    fact: str
-    category: str = ""
-    связь: str = ""
-    ключ: str = ""
-    active: bool = True
-    date: str = ""
-
-
 class MemoryRepo:
+    def __init__(self) -> None:
+        self._pg = _PgMemoryRepo()
+
+    # ── Activation/deactivation ───────────────────────────────────────────────
+
     async def set_active(self, page_ids: List[str], active: bool) -> int:
-        """Set Актуально on each page_id. Returns count of successful updates."""
-        done = 0
-        for pid in page_ids:
-            try:
-                await _notion.update_page(pid, {"Актуально": {"checkbox": active}})
-                done += 1
-            except Exception as e:
-                logger.error("MemoryRepo.set_active %s: %s", pid[:8], e)
-        return done
+        """Set is_current on each memory_id. Returns count of updated rows."""
+        return await self._pg.set_current(page_ids, active)
+
+    # ── Write ─────────────────────────────────────────────────────────────────
 
     async def save_parsed(
         self,
@@ -49,31 +39,107 @@ class MemoryRepo:
         user_notion_id: str = "",
         upsert: bool = False,
     ) -> Optional[str]:
-        """Save a pre-parsed memory fact. Returns page_id or None.
+        """Save a pre-parsed memory fact. Returns memory_id or None.
 
-        upsert=True: if a page with the same ключ+category exists, update it
-        instead of creating a duplicate. Used for limit/goal/debt facts.
+        upsert=True: if a row with the same ключ+category exists, update it.
+        Used for limit/goal/debt facts.
         """
-        db_id = _get_db_id()
-        if not db_id:
-            return None
-        props = _build_props(fact, category, связь, ключ, bot_label, user_notion_id)
-        if upsert and ключ and category:
-            try:
-                existing = await _notion.db_query(db_id, filter_obj={"and": [
-                    {"property": "Ключ",      "rich_text": {"contains": ключ}},
-                    {"property": "Категория", "select":    {"equals": category}},
-                ]}, page_size=1)
-                if existing:
-                    await _notion.update_page(existing[0]["id"], props)
-                    return existing[0]["id"]
-            except Exception as e:
-                logger.error("MemoryRepo.save_parsed upsert check: %s", e)
+        scope = bot_to_scope(bot_label)
         try:
-            return await _notion.page_create(db_id, props)
+            if upsert:
+                pid, _ = await self._pg.upsert(
+                    fact, ключ, category, scope, связь, "manual", user_notion_id
+                )
+                return pid
+            return await self._pg.add(
+                fact, ключ, category, scope, связь, "manual", user_notion_id
+            )
         except Exception as e:
-            logger.error("MemoryRepo.save_parsed page_create: %s", e)
+            logger.error("MemoryRepo.save_parsed: %s", e)
             return None
+
+    async def add(
+        self,
+        fact: str,
+        key: str,
+        category: str,
+        scope: str,
+        related_to: str,
+        source: str,
+        user_notion_id: str,
+    ) -> Optional[str]:
+        """Lower-level add (used by save_memory directly)."""
+        try:
+            return await self._pg.add(fact, key, category, scope, related_to, source, user_notion_id)
+        except Exception as e:
+            logger.error("MemoryRepo.add: %s", e)
+            return None
+
+    async def upsert(
+        self,
+        fact: str,
+        key: str,
+        category: str,
+        scope: str,
+        related_to: str,
+        source: str,
+        user_notion_id: str,
+    ) -> Tuple[Optional[str], bool]:
+        """Upsert (find by key+category → update; else create). Returns (id, was_updated)."""
+        try:
+            return await self._pg.upsert(fact, key, category, scope, related_to, source, user_notion_id)
+        except Exception as e:
+            logger.error("MemoryRepo.upsert: %s", e)
+            return None, False
+
+    async def archive(self, memory_id: str) -> bool:
+        return await self._pg.archive(memory_id)
+
+    # ── Read ──────────────────────────────────────────────────────────────────
+
+    async def search(
+        self,
+        terms: List[str],
+        scope: str = "",
+        user_notion_id: str = "",
+        page_size: int = 10,
+    ) -> List[Memory]:
+        return await self._pg.search(terms, scope, user_notion_id, page_size)
+
+    async def find_by_category(
+        self,
+        category: str,
+        is_current: bool = True,
+        scope: str = "",
+        user_notion_id: str = "",
+        page_size: int = 100,
+    ) -> List[Memory]:
+        return await self._pg.find_by_category(category, is_current, scope, user_notion_id, page_size)
+
+    async def find_by_key(
+        self,
+        key: str,
+        category: str = "",
+        user_notion_id: str = "",
+        page_size: int = 5,
+    ) -> List[Memory]:
+        return await self._pg.find_by_key(key, category, user_notion_id, page_size)
+
+    async def find_by_key_prefixes(
+        self,
+        prefixes: List[str],
+        user_notion_id: str = "",
+    ) -> List[Memory]:
+        return await self._pg.find_by_key_prefixes(prefixes, user_notion_id)
+
+    async def find_recent(
+        self,
+        is_current: Optional[bool] = None,
+        scope: str = "",
+        user_notion_id: str = "",
+        page_size: int = 10,
+    ) -> List[Memory]:
+        return await self._pg.find_recent(is_current, scope, user_notion_id, page_size)
 
 
 _repo = MemoryRepo()

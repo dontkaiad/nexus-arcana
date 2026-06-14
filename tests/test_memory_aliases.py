@@ -15,11 +15,12 @@ from unittest.mock import AsyncMock, patch
 
 
 from core.memory import _ALIAS_DEPTH_LIMIT, _resolve_alias
+from core.repos.pg_memory_repo import Memory
 
 
-def _mk_page(text: str) -> dict:
-    """Минимальная страница Notion с полем «Текст»."""
-    return {"properties": {"Текст": {"title": [{"plain_text": text}]}}}
+def _mk_page(text: str) -> Memory:
+    """Минимальный Memory-объект для alias-тестов."""
+    return Memory(id=str(abs(hash(text)) % 100000), fact=text)
 
 
 def _patched_find(return_value):
@@ -235,20 +236,15 @@ def test_dash_token_not_swallowed():
 
 
 def test_save_memory_no_alias_does_not_change_link():
-    """Регресс: save_memory с category!=Лимит, без алиасных записей в Памяти,
+    """Регресс: save_memory с category!=Лимит, без алиасных записей,
     оставляет связь и ключ как вернул Haiku. _find_pages_by_hint вернул [].
     """
+    import core.memory as cmem
     from core.memory import save_memory
 
-    # Минимальный mock message
     msg = AsyncMock()
     msg.answer = AsyncMock()
 
-    # Замокаем всю зависимость:
-    # - _parse_fact возвращает (fact, category, связь, ключ)
-    # - _find_pages_by_hint вернул [] → resolver не меняет связь
-    # - page_create — мок чтобы не писать в Notion
-    # - _get_db_id — мок чтобы пройти guard
     fact = "тестовый факт"
     category = "👥 Люди"
     связь = "vasya"
@@ -258,26 +254,22 @@ def test_save_memory_no_alias_does_not_change_link():
                AsyncMock(return_value=(fact, category, связь, ключ))), \
          patch("core.memory._find_pages_by_hint",
                AsyncMock(return_value=[])), \
-         patch("core.memory.page_create",
-               AsyncMock(return_value="page-id-1")) as mock_create, \
-         patch("core.memory._get_db_id", return_value="fake-db-id"):
+         patch.object(cmem._mem_repo, "add", AsyncMock(return_value="page-id-1")) as mock_add:
         asyncio.run(save_memory(msg, "вася любит чай", "user-notion-uid", "☀️ Nexus"))
 
-    mock_create.assert_called_once()
-    props = mock_create.call_args[0][1]
-    # Связь и ключ не изменились
-    # _build_props пишет «Связь» как rich_text с plain text
-    link_prop = props.get("Связь", {}).get("rich_text", [{}])
-    link_text = link_prop[0].get("text", {}).get("content", "") if link_prop else ""
-    assert link_text == "vasya"
-    key_prop = props.get("Ключ", {}).get("rich_text", [{}])
-    key_text = key_prop[0].get("text", {}).get("content", "") if key_prop else ""
-    assert key_text == "vasya_fact"
+    mock_add.assert_awaited_once()
+    # _mem_repo.add(fact, key, category, scope, related_to, source, user_notion_id)
+    args = mock_add.await_args.args
+    assert args[0] == fact          # fact unchanged
+    assert args[1] == ключ          # key unchanged
+    assert args[4] == связь         # related_to unchanged (связь = vasya)
 
 
 def test_save_memory_alias_canonicalizes_link_and_key():
     """Главный кейс: existing «у X кличка Y», save_memory с Haiku возвратом
-    связь=Y, ключ=Y_fact → канонизировано в связь=X, ключ=X_fact."""
+    связь=Y, ключ=Y_fact → канонизировано в связь=x, ключ=x_vitaminy.
+    """
+    import core.memory as cmem
     from core.memory import save_memory
 
     msg = AsyncMock()
@@ -294,28 +286,26 @@ def test_save_memory_alias_canonicalizes_link_and_key():
                AsyncMock(return_value=(fact, category, связь, ключ))), \
          patch("core.memory._find_pages_by_hint",
                AsyncMock(return_value=pages)), \
-         patch("core.memory.page_create",
-               AsyncMock(return_value="page-id-2")) as mock_create, \
-         patch("core.memory._get_db_id", return_value="fake-db-id"):
+         patch.object(cmem._mem_repo, "add", AsyncMock(return_value="page-id-2")) as mock_add:
         asyncio.run(save_memory(msg, "y нужны витамины", "user-uid", "☀️ Nexus"))
 
-    mock_create.assert_called_once()
-    props = mock_create.call_args[0][1]
-    link_text = props["Связь"]["rich_text"][0]["text"]["content"]
-    key_text = props["Ключ"]["rich_text"][0]["text"]["content"]
-    assert link_text == "x", f"expected 'x', got {link_text!r}"
-    assert key_text == "x_vitaminy", f"expected 'x_vitaminy', got {key_text!r}"
+    mock_add.assert_awaited_once()
+    args = mock_add.await_args.args
+    # related_to (pos 4) and key (pos 1) must be canonicalized
+    related_to = args[4]
+    key_arg = args[1]
+    assert related_to == "x", f"expected 'x', got {related_to!r}"
+    assert key_arg == "x_vitaminy", f"expected 'x_vitaminy', got {key_arg!r}"
 
 
 def test_save_memory_limit_category_skips_resolver():
-    """Регресс: для category=💰 Лимит резолвер НЕ вызывается (там свой path
-    канонизации через ключи `обязательно_*` / `цель_*` / `долг_*`)."""
+    """Регресс: для category=💰 Лимит резолвер НЕ вызывается."""
+    import core.memory as cmem
     from core.memory import save_memory
 
     msg = AsyncMock()
     msg.answer = AsyncMock()
 
-    # Если бы резолвер вызвался, _find_pages_by_hint был бы вызван.
     fact = "обязательно: 🏠 Ж*** — 25000₽/мес"
     category = "💰 Лимит"
     связь = "ж***"
@@ -326,11 +316,7 @@ def test_save_memory_limit_category_skips_resolver():
     with patch("core.memory._parse_fact",
                AsyncMock(return_value=(fact, category, связь, ключ))), \
          patch("core.memory._find_pages_by_hint", find_mock), \
-         patch("core.memory.page_create",
-               AsyncMock(return_value="page-id-3")), \
-         patch("core.memory.update_page", AsyncMock()), \
-         patch("core.memory.db_query", AsyncMock(return_value=[])), \
-         patch("core.memory._get_db_id", return_value="fake-db-id"):
+         patch.object(cmem._mem_repo, "upsert", AsyncMock(return_value=("page-id-3", False))):
         asyncio.run(save_memory(msg, "обязательный расход квартира 25000",
                                  "user-uid", "☀️ Nexus"))
 

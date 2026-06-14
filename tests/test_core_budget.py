@@ -108,34 +108,23 @@ def test_limit_amount_regex_extracts_currency_number():
 # ── load_budget_data: интеграционный тест с мок-Notion ──────────────────────
 
 @pytest.mark.asyncio
-async def test_load_budget_data_routes_keys_into_buckets(monkeypatch):
+async def test_load_budget_data_routes_keys_into_buckets():
     """Проверяем что load_budget_data корректно раскладывает записи по bucket'ам
     по prefix ключа и парсит суммы/поля."""
-    monkeypatch.setenv("NOTION_DB_MEMORY", "fake-mem-db")
+    from unittest.mock import AsyncMock
+    from core.repos.pg_memory_repo import Memory
+    from core.repos import memory_repo as mrmod
 
-    def page(key: str, fact: str, extra: dict | None = None):
-        props = {
-            "Ключ": {"rich_text": [{"plain_text": key}]},
-            "Текст": {"title": [{"plain_text": fact}]},
-            "Актуально": {"checkbox": True},
-        }
-        if extra:
-            props.update(extra)
-        return {"properties": props}
-
-    fake_pages = [
-        page("income_salary", "доход: зарплата — 115 000₽/мес"),
-        page("обязательно_rent", "обязательно: аренда — 40000₽"),
-        page("цель_flip", "цель: Samsung Flip — 100 000₽ · откладываю 8000₽"),
-        page("долг_vika", "долг: *** — 50 000₽ · дедлайн: апрель"),
-        page("лимит_habits", "лимит: 🚬 Привычки — 17685₽/мес",
-             extra={"Связь": {"rich_text": [{"plain_text": "привычки"}]}}),
+    fake_mems = [
+        Memory(id="1", fact="доход: зарплата — 115 000₽/мес", key="income_salary"),
+        Memory(id="2", fact="обязательно: аренда — 40000₽", key="обязательно_rent"),
+        Memory(id="3", fact="цель: Samsung Flip — 100 000₽ · откладываю 8000₽", key="цель_flip"),
+        Memory(id="4", fact="долг: *** — 50 000₽ · дедлайн: апрель", key="долг_vika"),
+        Memory(id="5", fact="лимит: 🚬 Привычки — 17685₽/мес", key="лимит_habits",
+               related_to="привычки"),
     ]
 
-    async def fake_db_query(*_, **__):
-        return fake_pages
-
-    with patch("core.notion_client.db_query", side_effect=fake_db_query):
+    with patch.object(mrmod._repo, "find_by_key_prefixes", AsyncMock(return_value=fake_mems)):
         data = await load_budget_data()
 
     assert len(data["доходы"]) == 1 and data["доходы"][0]["amount"] == 115000
@@ -150,21 +139,16 @@ async def test_load_budget_data_routes_keys_into_buckets(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_load_budget_data_skips_inactive(monkeypatch):
-    monkeypatch.setenv("NOTION_DB_MEMORY", "fake-mem-db")
+async def test_load_budget_data_skips_inactive():
+    from unittest.mock import AsyncMock
+    from core.repos.pg_memory_repo import Memory
+    from core.repos import memory_repo as mrmod
 
-    fake_pages = [{
-        "properties": {
-            "Ключ": {"rich_text": [{"plain_text": "цель_test"}]},
-            "Текст": {"title": [{"plain_text": "цель: X — 1000₽"}]},
-            "Актуально": {"checkbox": False},
-        }
-    }]
+    fake_mems = [
+        Memory(id="99", fact="цель: X — 1000₽", key="цель_test", is_current=False),
+    ]
 
-    async def fake_db_query(*_, **__):
-        return fake_pages
-
-    with patch("core.notion_client.db_query", side_effect=fake_db_query):
+    with patch.object(mrmod._repo, "find_by_key_prefixes", AsyncMock(return_value=fake_mems)):
         data = await load_budget_data()
 
     assert data["цели"] == []

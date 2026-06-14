@@ -34,8 +34,9 @@ class TestMemoryModule:
     @pytest.mark.asyncio
     async def test_recall_from_memory_mocked(self):
         """recall_from_memory — вернуть None если ничего не найдено."""
+        import core.memory as cmem
         from core.memory import recall_from_memory
-        with patch("core.memory._find_pages", new=AsyncMock(return_value=[])):
+        with patch.object(cmem._mem_repo, "search", new=AsyncMock(return_value=[])):
             result = await recall_from_memory("несуществующий_ключ")
             assert result is None
 
@@ -43,14 +44,12 @@ class TestMemoryModule:
     async def test_get_memories_for_context_empty(self):
         """get_memories_for_context с пустыми keywords → пусто."""
         from core.memory import get_memories_for_context
-        with patch("core.memory._find_pages", new=AsyncMock(return_value=[])):
-            result = await get_memories_for_context(
-                user_notion_id="fake-id",
-                keywords=[],
-                bot_label="☀️ Nexus",
-            )
-            # может вернуть "" или None
-            assert result in ("", None) or isinstance(result, str)
+        result = await get_memories_for_context(
+            user_notion_id="fake-id",
+            keywords=[],
+            bot_label="☀️ Nexus",
+        )
+        assert result in ("", None) or isinstance(result, str)
 
 
 class TestListManager:

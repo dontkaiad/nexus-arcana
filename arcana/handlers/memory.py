@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import logging
-import os
 import re
 from collections import defaultdict
 from typing import Dict
@@ -11,7 +10,7 @@ from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery
 
 import core.memory as mem
-from core.notion_client import page_create
+from core.repos.memory_repo import _repo as _mem_repo
 
 logger = logging.getLogger("arcana.memory")
 router = Router()
@@ -117,7 +116,7 @@ async def cb_arcmem_del(call: CallbackQuery) -> None:
     await call.answer()
     page_id = call.data.split(":", 1)[1]
     try:
-        await mem._archive_page(page_id)
+        await _mem_repo.archive(page_id)
         await call.message.edit_text("🗑 Запись удалена из памяти.")
     except Exception as e:
         logger.error("cb_arcmem_del: %s", e)
@@ -139,17 +138,15 @@ async def cb_arcmem_auto_yes(call: CallbackQuery) -> None:
         await call.message.edit_text("⏱ Сессия истекла.")
         return
     fact, category, связь, ключ = await mem._parse_fact(pending["text"])
-    db_id = os.environ.get("NOTION_DB_MEMORY")
-    if not db_id:
-        await call.message.edit_text("⚠️ NOTION_DB_MEMORY не задан")
-        return
-    props = mem._build_props(fact, category, связь, ключ, BOT_LABEL, pending.get("user_notion_id", ""))
-    result = await page_create(db_id, props)
+    result = await _mem_repo.save_parsed(
+        fact, category, связь, ключ, BOT_LABEL,
+        user_notion_id=pending.get("user_notion_id", ""),
+    )
     if result:
         cat_label = f" [{category}]" if category else ""
         await call.message.edit_text(f"🧠 Запомнила{cat_label}: {fact}")
     else:
-        await call.message.edit_text("⚠️ Ошибка записи в Notion")
+        await call.message.edit_text("⚠️ Ошибка записи в базу")
 
 
 @router.callback_query(F.data.startswith("arcmem_auto_no:"))

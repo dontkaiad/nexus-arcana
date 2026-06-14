@@ -6,7 +6,6 @@
 from __future__ import annotations
 
 import logging
-import os
 import re
 from typing import Dict, List
 
@@ -95,48 +94,19 @@ def display_limit_name(raw_name: str) -> str:
 # ── Public API ───────────────────────────────────────────────────────────────
 
 async def get_limits(mem_db: str = "") -> Dict[str, float]:
-    """Все лимиты из Памяти. Возвращает {cat_link: amount}.
-
-    Стратегия: фильтр по Категория="💰 Лимит", если упал или пусто —
-    забираем все записи и ищем те, у которых текст начинается с "лимит:".
-    """
-    from core.notion_client import db_query
-    from core.config import config
-    db = mem_db or config.nexus.db_memory
-    if not db:
-        logger.warning("get_limits: no memory db configured")
-        return {}
+    """Все лимиты из Памяти (PG). Возвращает {cat_link: amount}."""
+    from core.repos.memory_repo import _repo as _mem_repo
     limits: Dict[str, float] = {}
-    pages: list = []
     try:
-        pages = await db_query(db, filter_obj={
-            "property": "Категория", "select": {"equals": "💰 Лимит"}
-        }, page_size=100)
-        logger.info("get_limits: category filter → %d pages", len(pages))
+        mems = await _mem_repo.find_by_category("💰 Лимит", is_current=True, page_size=100)
+        logger.info("get_limits: found %d limit memories", len(mems))
     except Exception as e:
-        logger.warning("get_limits: category filter failed (%s), trying text search", e)
+        logger.error("get_limits: %s", e)
+        return {}
 
-    if not pages:
-        try:
-            all_pages = await db_query(db, page_size=200)
-            pages = [
-                p for p in all_pages
-                if (p["properties"].get("Текст", {}).get("title") or [{}])[0]
-                   .get("plain_text", "").lower().startswith("лимит")
-            ]
-            logger.info("get_limits: text fallback → %d limit pages from %d total",
-                        len(pages), len(all_pages))
-        except Exception as e2:
-            logger.error("get_limits: fallback failed: %s", e2, exc_info=True)
-            return {}
-
-    for p in pages:
-        props = p["properties"]
-        fact_parts = props.get("Текст", {}).get("title", [])
-        fact = fact_parts[0]["plain_text"] if fact_parts else ""
-
-        связь_parts = props.get("Связь", {}).get("rich_text", [])
-        связь = связь_parts[0]["plain_text"].strip().lower() if связь_parts else ""
+    for m in mems:
+        fact = m.fact or ""
+        связь = (m.related_to or "").strip().lower()
 
         fact_match = LIMIT_FACT_RE.search(fact)
         if fact_match and not связь:
@@ -156,49 +126,29 @@ async def get_limits(mem_db: str = "") -> Dict[str, float]:
 
 
 async def load_budget_data(user_notion_id: str = "") -> Dict[str, list]:
-    """Все бюджетные записи Памяти (💰 Лимит / 🎯 Цели / 📋 Долги / 🔒 Обязательные / 📥 Доход).
+    """Все бюджетные записи Памяти (PG).
 
     Возвращает {"доходы": [...], "обязательные": [...], "цели": [...],
                 "долги": [...], "лимиты": [...]}.
-    Ключи фильтруются по prefix (income_, обязательно_, лимит_, цель_, долг_),
-    Актуально == true, опционально — по owner user_notion_id.
     """
-    from core.notion_client import db_query
-    from core.config import config
+    from core.repos.memory_repo import _repo as _mem_repo
 
-    mem_db = os.environ.get("NOTION_DB_MEMORY") or config.nexus.db_memory
     empty = {"доходы": [], "обязательные": [], "цели": [], "долги": [], "лимиты": []}
-    if not mem_db:
-        return empty
-
-    key_filter = {"or": [
-        {"property": "Ключ", "rich_text": {"starts_with": "income_"}},
-        {"property": "Ключ", "rich_text": {"starts_with": "обязательно_"}},
-        {"property": "Ключ", "rich_text": {"starts_with": "лимит_"}},
-        {"property": "Ключ", "rich_text": {"starts_with": "цель_"}},
-        {"property": "Ключ", "rich_text": {"starts_with": "долг_"}},
-    ]}
-    conditions = [key_filter, {"property": "Актуально", "checkbox": {"equals": True}}]
-    if user_notion_id:
-        conditions.append({"property": "🪪 Пользователи",
-                           "relation": {"contains": user_notion_id}})
-    filt = {"and": conditions}
     try:
-        pages = await db_query(mem_db, filter_obj=filt, page_size=200)
+        mems = await _mem_repo.find_by_key_prefixes(
+            ["income_", "обязательно_", "лимит_", "цель_", "долг_"],
+            user_notion_id=user_notion_id,
+        )
     except Exception as e:
         logger.error("load_budget_data: %s", e)
         return empty
 
     result: Dict[str, list] = {"доходы": [], "обязательные": [], "цели": [],
                                "долги": [], "лимиты": []}
-    for p in pages:
-        props = p["properties"]
-        fact_parts = props.get("Текст", {}).get("title", [])
-        fact = fact_parts[0]["plain_text"] if fact_parts else ""
-        key_parts = props.get("Ключ", {}).get("rich_text", [])
-        key = key_parts[0]["plain_text"].strip().lower() if key_parts else ""
-        active = props.get("Актуально", {}).get("checkbox", True)
-        if not active:
+    for m in mems:
+        fact = m.fact or ""
+        key = (m.key or "").strip().lower()
+        if not m.is_current:
             continue
 
         if key.startswith("income_"):
@@ -242,8 +192,7 @@ async def load_budget_data(user_notion_id: str = "") -> Dict[str, list]:
         elif key.startswith("лимит_"):
             amount_m = LIMIT_AMOUNT_RE.search(fact)
             if amount_m:
-                связь_parts = props.get("Связь", {}).get("rich_text", [])
-                связь = связь_parts[0]["plain_text"].strip() if связь_parts else ""
+                связь = (m.related_to or "").strip()
                 result["лимиты"].append({
                     "name": связь or key,
                     "amount": parse_amount(amount_m.group(1)),
