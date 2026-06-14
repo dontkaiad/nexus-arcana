@@ -10,30 +10,26 @@ from typing import List, Optional
 from aiogram.types import Message
 
 from core.claude_client import ask_claude
-from core.notion_client import (
-    _extract_select,
-    _extract_text,
-    client_find,
-    log_error,
-    sessions_all,
-    sessions_by_client,
-    update_page_select,
-)
+from core.notion_client import log_error
 from arcana.repos.pg_rituals_repo import PgRitualsRepo
+from arcana.repos.pg_sessions_repo import PgSessionsRepo
+from arcana.repos.pg_clients_repo import PgClientsRepo
 
 logger = logging.getLogger("arcana.stats")
 
 _rituals_repo = PgRitualsRepo()
+_sessions_repo = PgSessionsRepo()
+_clients_repo = PgClientsRepo()
 
-# ── Значения полей Notion ────────────────────────────────────────────────────
+# ── Result maps ───────────────────────────────────────────────────────────────
 
-# Расклады → поле "Сбылось"
+# Расклады → PG session_outcome codes
 SESSION_RESULT_MAP = {
-    "сбылось":    "✅ Да",
-    "да":         "✅ Да",
-    "не сбылось": "❌ Нет",
-    "нет":        "❌ Нет",
-    "частично":   "〰️ Частично",
+    "сбылось":    "yes",
+    "да":         "yes",
+    "не сбылось": "no",
+    "нет":        "no",
+    "частично":   "partial",
 }
 
 # Ритуалы → PG outcome codes
@@ -54,7 +50,12 @@ _RESULT_DISPLAY = {
     "partial":  "〰️ Частично",
 }
 
-SESSION_UNVERIFIED = {"", "⏳ Не проверено"}
+_SESSION_RESULT_DISPLAY = {
+    "yes":        "✅ Сбылось",
+    "no":         "❌ Не сбылось",
+    "partial":    "〰️ Частично",
+    "unverified": "⏳ Не проверено",
+}
 
 # ── Промпты ───────────────────────────────────────────────────────────────────
 
@@ -149,7 +150,6 @@ async def handle_verify(
 
         # ── Ritual path (PG) ─────────────────────────────────────────────
         if is_ritual:
-            # 2. Map result to PG code
             result_code = RITUAL_RESULT_MAP.get(result_raw)
             if not result_code:
                 for k, v in RITUAL_RESULT_MAP.items():
@@ -158,16 +158,14 @@ async def handle_verify(
                         break
             result_code = result_code or "partial"
 
-            # 3. Read from PG
             ritual_list = []
             if client_name:
-                client = await client_find(client_name, user_notion_id=user_notion_id)
+                client = await _clients_repo.find(client_name)
                 if client:
-                    ritual_list = await _rituals_repo.list_by_client(client["id"])
+                    ritual_list = await _rituals_repo.list_by_client(client.id)
             if not ritual_list:
                 ritual_list = await _rituals_repo.list_all()
 
-            # 4. Match by date
             if target_date:
                 candidates_r = _rituals_near_date(ritual_list, target_date)
             else:
@@ -183,8 +181,6 @@ async def handle_verify(
                 return
 
             ritual = candidates_r[0]
-
-            # 5. Update via PG
             ok = await _rituals_repo.set_result(ritual.id, result_code)
 
             if ok:
@@ -200,30 +196,28 @@ async def handle_verify(
                 await message.answer("❌ Ошибка обновления · пусть Кай правит код")
             return
 
-        # ── Session path (Notion) ─────────────────────────────────────────
-        # 2. Map result to Notion label
-        result_value = SESSION_RESULT_MAP.get(result_raw)
-        if not result_value:
+        # ── Session path (PG) ─────────────────────────────────────────────
+        result_code = SESSION_RESULT_MAP.get(result_raw)
+        if not result_code:
             for k, v in SESSION_RESULT_MAP.items():
                 if k in result_raw or result_raw in k:
-                    result_value = v
+                    result_code = v
                     break
-        result_value = result_value or "〰️ Частично"
+        result_code = result_code or "partial"
 
-        # 3. Read from Notion
-        pages: List[dict] = []
+        session_list = []
         if client_name:
-            client = await client_find(client_name, user_notion_id=user_notion_id)
+            client = await _clients_repo.find(client_name)
             if client:
-                pages = await sessions_by_client(client["id"], user_notion_id=user_notion_id)
-        if not pages:
-            pages = await sessions_all(user_notion_id=user_notion_id)
+                session_list = await _sessions_repo.list_all(user_notion_id=user_notion_id)
+                session_list = [s for s in session_list if s.client_id == client.id]
+        if not session_list:
+            session_list = await _sessions_repo.list_all(user_notion_id=user_notion_id)
 
-        # 4. Match by date
         if target_date:
-            candidates = _pages_near_date(pages, target_date)
+            candidates = [s for s in session_list if _date_matches(s.date, target_date)]
         else:
-            candidates = pages[:1]
+            candidates = session_list[:1]
 
         if not candidates:
             date_hint = f" от {target_date}" if target_date else ""
@@ -234,24 +228,19 @@ async def handle_verify(
             )
             return
 
-        # 5. Update in Notion
-        page = candidates[0]
-        page_id = page["id"]
-        props = page.get("properties", {})
-        title = _extract_text(props.get("Тема") or props.get("Название") or {})
-        page_date = _extract_date(props)
-
-        ok = await update_page_select(page_id, "Сбылось", result_value)
+        session = candidates[0]
+        ok = await _sessions_repo.set_outcome(session.id, result_code)
 
         if ok:
             client_str = f" для {client_name}" if client_name else ""
-            date_str = f" ({page_date})" if page_date else ""
+            date_str = f" ({session.date})" if session.date else ""
+            display = _SESSION_RESULT_DISPLAY.get(result_code, result_code)
             await message.answer(
-                f"✅ Расклад{client_str}{date_str} — отмечено: {result_value}\n"
-                + (f"«{title[:60]}»" if title else "")
+                f"✅ Расклад{client_str}{date_str} — отмечено: {display}\n"
+                + (f"«{session.question[:60]}»" if session.question else "")
             )
         else:
-            await message.answer("❌ Ошибка обновления Notion · пусть Кай правит код")
+            await message.answer("❌ Ошибка обновления · пусть Кай правит код")
 
     except Exception as e:
         trace = tb.format_exc()
@@ -281,37 +270,34 @@ async def handle_stats(message: Message, user_notion_id: str = "") -> None:
     try:
         await message.answer("📊 Считаю статистику...")
 
-        sessions = await sessions_all(user_notion_id=user_notion_id)
+        sessions = await _sessions_repo.list_all(user_notion_id=user_notion_id)
         rituals  = await _rituals_repo.list_all(user_notion_id=user_notion_id)
 
-        # ── Статистика сеансов ────────────────────────────────────────────
+        # ── Статистика сеансов (PG codes) ────────────────────────────────
         s_total = len(sessions)
         s_yes = s_no = s_partial = s_unverified = 0
-        months_sessions: dict = {}  # "YYYY-MM" → {"total": n, "verified": n, "yes": n}
+        months_sessions: dict = {}
 
-        for page in sessions:
-            props = page.get("properties", {})
-            val = _extract_select(props.get("Сбылось") or {})
-            if val == "✅ Да":
+        for s in sessions:
+            val = s.outcome or "unverified"
+            if val == "yes":
                 s_yes += 1
-            elif val == "❌ Нет":
+            elif val == "no":
                 s_no += 1
-            elif val == "〰️ Частично":
+            elif val == "partial":
                 s_partial += 1
             else:
                 s_unverified += 1
 
-            # По месяцам
-            d = _extract_date(props)
-            if d:
-                ym = d[:7]  # "YYYY-MM"
+            if s.date:
+                ym = s.date[:7]
                 m = months_sessions.setdefault(ym, {"total": 0, "verified": 0, "yes": 0, "partial": 0})
                 m["total"] += 1
-                if val not in SESSION_UNVERIFIED:
+                if val not in ("", "unverified"):
                     m["verified"] += 1
-                if val == "✅ Да":
+                if val == "yes":
                     m["yes"] += 1
-                elif val == "〰️ Частично":
+                elif val == "partial":
                     m["partial"] += 1
 
         s_verified = s_yes + s_no + s_partial
@@ -389,18 +375,15 @@ async def handle_stats(message: Message, user_notion_id: str = "") -> None:
 # ── Утилита для cron ──────────────────────────────────────────────────────────
 
 async def get_unverified_count(user_notion_id: str, older_than_days: int = 30) -> int:
-    """Количество непроверенных раскладов старше N дней."""
-    pages = await sessions_all(user_notion_id=user_notion_id)
+    """Количество непроверенных раскладов старше N дней (PG)."""
+    sessions = await _sessions_repo.list_all(user_notion_id=user_notion_id)
     cutoff = date.today() - timedelta(days=older_than_days)
     count = 0
-    for page in pages:
-        props = page.get("properties", {})
-        val = _extract_select(props.get("Сбылось") or {})
-        if val in SESSION_UNVERIFIED:
-            d = _extract_date(props)
-            if d:
+    for s in sessions:
+        if (s.outcome or "unverified") not in ("yes", "no", "partial"):
+            if s.date:
                 try:
-                    if date.fromisoformat(d[:10]) <= cutoff:
+                    if date.fromisoformat(s.date[:10]) <= cutoff:
                         count += 1
                 except ValueError:
                     pass

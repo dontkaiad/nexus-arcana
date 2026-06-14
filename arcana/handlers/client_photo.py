@@ -2,7 +2,7 @@
 
 Два сценария:
   A) /client_photo → бот спрашивает имя → находит/создаёт клиента →
-     просит фото → загружает в Cloudinary → пишет URL в Notion 👥 Клиенты.Фото.
+     просит фото → загружает в Cloudinary → пишет URL в PG 👥 Клиенты.photo_url.
   B) Reply фото на сообщение бота, у которого page_type='client' в
      core.message_pages → подтверждение → загрузка → запись.
 """
@@ -17,7 +17,7 @@ from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKe
 
 from core.cloudinary_client import cloudinary_upload
 from core.message_pages import get_message_page
-from core.notion_client import find_or_create_client, update_page
+from core.notion_client import find_or_create_client
 
 from arcana.pending_client_photo import (
     delete as drop_pending,
@@ -28,9 +28,6 @@ from arcana.pending_client_photo import (
 logger = logging.getLogger("arcana.client_photo")
 
 router = Router()
-
-
-# ── Reactions ────────────────────────────────────────────────────────────────
 
 REACTION_START = "📸"
 REACTION_DONE = "💅"
@@ -44,13 +41,14 @@ async def _react(message: Message, emoji: str) -> None:
         pass
 
 
-# ── Commands ─────────────────────────────────────────────────────────────────
+async def _pg_clients():
+    from arcana.repos.pg_clients_repo import PgClientsRepo
+    return PgClientsRepo()
+
 
 @router.message(Command("client_photo"))
 async def cmd_client_photo(message: Message, user_notion_id: str = "") -> None:
     uid = message.from_user.id
-    # Если /client_photo прислан реплаем на сообщение бота, у которого page_type='client',
-    # сразу прыгаем на await_photo для того клиента.
     if message.reply_to_message and message.reply_to_message.from_user and message.reply_to_message.from_user.is_bot:
         mp = await get_message_page(message.chat.id, message.reply_to_message.message_id)
         if mp and mp.get("page_type") == "client":
@@ -71,8 +69,6 @@ async def cmd_client_photo(message: Message, user_notion_id: str = "") -> None:
     )
 
 
-# ── Text handler — приходит из base.py роутера ────────────────────────────────
-
 async def handle_pending_text(message: Message, text: str, user_notion_id: str = "") -> bool:
     """Возвращает True если перехватили этап «await_name»."""
     uid = message.from_user.id
@@ -83,7 +79,7 @@ async def handle_pending_text(message: Message, text: str, user_notion_id: str =
     if not name:
         await message.answer("Напиши имя клиента или /cancel.")
         return True
-    page_id = await find_or_create_client(name, user_notion_id=user_notion_id)
+    page_id, _ = await find_or_create_client(name, user_notion_id=user_notion_id)
     if not page_id:
         await message.answer(f"Не получилось найти/создать клиента «{name}».")
         await drop_pending(uid)
@@ -97,15 +93,10 @@ async def handle_pending_text(message: Message, text: str, user_notion_id: str =
     return True
 
 
-# ── Photo handler — приходит из base.py роутера до handle_tarot_photo ─────────
-
 async def handle_pending_photo(message: Message, user_notion_id: str = "") -> bool:
-    """Если есть pending await_photo — загружаем и пишем в Notion.
-    Возвращает True, если фото обработано (и tarot-флоу пропустить).
-    """
+    """Если есть pending await_photo — загружаем и пишем в PG."""
     uid = message.from_user.id
     pending = await get_pending(uid)
-    # Reply-on-photo: если pending'а нет, но это reply на сообщение бота
     if not pending and message.reply_to_message and message.reply_to_message.from_user and message.reply_to_message.from_user.is_bot:
         mp = await get_message_page(message.chat.id, message.reply_to_message.message_id)
         if mp and message.photo:
@@ -114,19 +105,14 @@ async def handle_pending_photo(message: Message, user_notion_id: str = "") -> bo
             page_type = mp.get("page_type")
 
             if page_type == "ritual":
-                # Reply фото на ритуал → сразу прикрепляем (без подтверждения,
-                # контекст очевиден).
                 await attach_photo_to_ritual(message, mp["page_id"], silent=True)
                 return True
 
             if page_type == "client":
-                # Caption на фото = заметка → это фото-объект, не аватар.
                 cap = (message.caption or "").strip()
                 if cap:
                     await attach_photo_to_client_objects(message, mp["page_id"], cap, silent=True)
                     return True
-                # Без caption — старая логика аватара.
-                # 60-сек окно после создания клиента — без подтверждения
                 if age < 60:
                     await attach_photo_to_client(message, mp["page_id"], silent=True)
                     return True
@@ -163,16 +149,22 @@ async def _attach_photo(
             file_id = message.photo[-1].file_id
         file = await message.bot.get_file(file_id)
         bio = await message.bot.download_file(file.file_path)
+        client_id = pending["client_id"]
         url = await cloudinary_upload(
             bio.read(),
-            filename=f"client-{pending['client_id'][:8]}.jpg",
+            filename=f"client-{str(client_id)[:8]}.jpg",
             folder="arcana-clients",
         )
         if not url:
             await message.answer("Не удалось загрузить фото (Cloudinary не настроен).")
             await drop_pending(uid)
             return
-        await update_page(pending["client_id"], {"Фото": {"url": url}})
+        # Write to PG
+        try:
+            pg_id = int(client_id)
+            await (await _pg_clients()).update_profile(pg_id, photo_url=url)
+        except Exception as e:
+            logger.warning("client photo PG write failed: %s", e)
         await drop_pending(uid)
         await _react(message, REACTION_DONE)
         await message.answer(
@@ -192,21 +184,18 @@ async def attach_photo_to_client_objects(
     *,
     silent: bool = False,
 ) -> bool:
-    """Cloudinary upload + append `URL | note` в Notion поле «Фото объектов»."""
+    """Cloudinary upload + append `URL | note` в PG поле «object_photos»."""
     if not message.photo or not client_id:
         return False
     try:
         from core.client_object_photos import append as _append
-        from core.notion_client import get_page
-        from miniapp.backend._helpers import rich_text_plain
-        from core.notion_client import _text as _ntext
 
         file_id = message.photo[-1].file_id
         file = await message.bot.get_file(file_id)
         bio = await message.bot.download_file(file.file_path)
         url = await cloudinary_upload(
             bio.read(),
-            filename=f"obj-{client_id[:8]}.jpg",
+            filename=f"obj-{str(client_id)[:8]}.jpg",
             folder="arcana-client-objects",
         )
         if not url:
@@ -214,10 +203,11 @@ async def attach_photo_to_client_objects(
                 await message.answer("Cloudinary не настроен — фото не прикреплено.")
             return False
 
-        page = await get_page(client_id)
-        existing = rich_text_plain(page or {}, "Фото объектов") or ""
+        repo = await _pg_clients()
+        pg_id = int(client_id)
+        existing = await repo.get_object_photos(pg_id)
         new_raw, _items = _append(existing, url, note)
-        await update_page(client_id, {"Фото объектов": _ntext(new_raw)})
+        await repo.update_profile(pg_id, object_photos=new_raw)
         await _react(message, REACTION_DONE)
         return True
     except Exception as e:
@@ -233,23 +223,39 @@ async def attach_photo_to_ritual(
     *,
     silent: bool = False,
 ) -> bool:
-    """Аналог attach_photo_to_client для ритуалов (folder=arcana-rituals)."""
+    """Аналог attach_photo_to_client для ритуалов (PG photo_url)."""
     if not message.photo or not ritual_id:
         return False
     try:
+        from arcana.repos.pg_rituals_repo import PgRitualsRepo
+        from arcana.repos.rituals_tables import rituals as t_rituals
+        from core.db import get_engine
+        from sqlalchemy import select
+
         file_id = message.photo[-1].file_id
         file = await message.bot.get_file(file_id)
         bio = await message.bot.download_file(file.file_path)
         url = await cloudinary_upload(
             bio.read(),
-            filename=f"ritual-{ritual_id[:8]}.jpg",
+            filename=f"ritual-{str(ritual_id)[:8]}.jpg",
             folder="arcana-rituals",
         )
         if not url:
             if not silent:
                 await message.answer("Cloudinary не настроен — фото не прикреплено.")
             return False
-        await update_page(ritual_id, {"Фото": {"url": url}})
+
+        import asyncio
+
+        def _write():
+            with get_engine().begin() as conn:
+                conn.execute(
+                    t_rituals.update()
+                    .where(t_rituals.c.id == int(ritual_id))
+                    .values(photo_url=url)
+                )
+
+        await asyncio.to_thread(_write)
         await _react(message, REACTION_DONE)
         return True
     except Exception as e:
@@ -266,11 +272,7 @@ async def attach_photo_to_client(
     silent: bool = False,
 ) -> bool:
     """Прямая привязка: качаем фото из message.photo[-1], грузим в Cloudinary,
-    пишем URL в Notion 👥 Клиенты.Фото. Никаких подтверждений.
-
-    Используется при создании клиента в одном сообщении (text+photo)
-    и при reply-photo на свежесозданное «Создана: …» в 60-сек окне.
-    """
+    пишем URL в PG 👥 Клиенты.photo_url."""
     if not message.photo or not client_id:
         return False
     try:
@@ -279,14 +281,15 @@ async def attach_photo_to_client(
         bio = await message.bot.download_file(file.file_path)
         url = await cloudinary_upload(
             bio.read(),
-            filename=f"client-{client_id[:8]}.jpg",
+            filename=f"client-{str(client_id)[:8]}.jpg",
             folder="arcana-clients",
         )
         if not url:
             if not silent:
                 await message.answer("Cloudinary не настроен — фото не прикреплено.")
             return False
-        await update_page(client_id, {"Фото": {"url": url}})
+        pg_id = int(client_id)
+        await (await _pg_clients()).update_profile(pg_id, photo_url=url)
         await _react(message, REACTION_DONE)
         return True
     except Exception as e:
@@ -295,8 +298,6 @@ async def attach_photo_to_client(
             await message.answer(f"Ошибка при сохранении фото: {e}")
         return False
 
-
-# ── Callbacks ────────────────────────────────────────────────────────────────
 
 @router.callback_query(F.data.startswith("client_photo_confirm:"))
 async def cb_confirm(cb: CallbackQuery, user_notion_id: str = "") -> None:

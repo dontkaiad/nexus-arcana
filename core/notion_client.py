@@ -731,61 +731,59 @@ async def client_add(
         raise
 
 
-async def client_get_type(client_page_id: str) -> Optional[str]:
-    """Читает «Тип клиента» select из 👥 Клиенты. None если поле пустое или
-    нет доступа."""
+async def client_get_type(client_pg_id: str) -> Optional[str]:
+    """Возвращает display-label типа клиента («🌟 Self» / «🎁 Бесплатный» / «🤝 Платный»)
+    по PG id. Используется в should_skip_payment."""
+    from arcana.repos.pg_clients_repo import PgClientsRepo as _PGC
+    from arcana.repos.clients_tables import clients as _t_clients, client_type as _t_ctype
+    from core.db import get_engine as _engine
+    from sqlalchemy import select as _select
     try:
-        page = await get_page(client_page_id)
-    except Exception:
+        pg_id = int(client_pg_id)
+    except (ValueError, TypeError):
         return None
-    sel = (page.get("properties", {}).get("Тип клиента", {}) or {}).get("select")
-    return sel["name"] if sel else None
+    try:
+        import asyncio
+        def _sync():
+            with _engine().connect() as conn:
+                row = conn.execute(
+                    _select(_t_ctype.c.emoji, _t_ctype.c.label)
+                    .join(_t_clients, _t_clients.c.type_id == _t_ctype.c.id)
+                    .where(_t_clients.c.id == pg_id)
+                ).fetchone()
+            if row is None:
+                return None
+            return f"{row.emoji} {row.label}"
+        return await asyncio.to_thread(_sync)
+    except Exception as e:
+        logger.warning("client_get_type failed for pg_id=%r: %s", client_pg_id, e)
+        return None
 
-# Кеш {user_notion_id: client_page_id} для self-клиента «Кай (личный)».
-_SELF_CLIENT_CACHE: dict[str, str] = {}
+
+# In-memory cache for self-client pg_id per user (process-local, short-lived).
+_SELF_CLIENT_CACHE: dict = {}
 
 
 async def resolve_self_client(user_notion_id: str = "") -> Optional[str]:
-    """Найти запись self-client в 👥 Клиенты для текущего пользователя.
-
-    Ищет по подстроке «личный» в Имени (case-insensitive). Кеширует ID
-    в process-локальном dict, чтобы не дёргать Notion на каждый расклад.
-    Возвращает page_id клиента или None.
-    """
-    cached = _SELF_CLIENT_CACHE.get(user_notion_id or "_default_")
+    """Найти self-клиента в PG. Возвращает str(pg_id) или None."""
+    cache_key = user_notion_id or "_default_"
+    cached = _SELF_CLIENT_CACHE.get(cache_key)
     if cached:
         return cached
-    from core.config import config
-    # Сначала пробуем по «Тип клиента» = 🌟 Self (новая схема).
-    base_filter = {"property": "Тип клиента", "select": {"equals": CLIENT_TYPE_SELF}}
-    filters = _with_user_filter(base_filter, user_notion_id)
+    from arcana.repos.pg_clients_repo import PgClientsRepo as _PGC
     try:
-        results = await query_pages(
-            config.arcana.db_clients, filters=filters, page_size=5
-        )
-    except Exception as e:
-        logger.warning("resolve_self_client by type failed: %s", e)
-        results = []
-    if not results:
-        # Fallback: по подстроке «личный» в имени (legacy / до миграции).
-        base_filter = {"property": "Имя", "title": {"contains": "личный"}}
-        filters = _with_user_filter(base_filter, user_notion_id)
-        try:
-            results = await query_pages(
-                config.arcana.db_clients, filters=filters, page_size=5
-            )
-        except Exception as e:
-            logger.warning("resolve_self_client by name failed: %s", e)
-            return None
-    if not results:
+        c = await _PGC().find_self(user_notion_id=user_notion_id)
+        if c:
+            _SELF_CLIENT_CACHE[cache_key] = c.id
+            return c.id
         logger.warning(
-            "resolve_self_client: запись Self-клиента не найдена — "
-            "проверь Тип клиента = 🌟 Self в 👥 Клиенты"
+            "resolve_self_client: self-клиент не найден в PG — "
+            "создай клиента с type_code=self"
         )
         return None
-    cid = results[0]["id"]
-    _SELF_CLIENT_CACHE[user_notion_id or "_default_"] = cid
-    return cid
+    except Exception as e:
+        logger.warning("resolve_self_client failed: %s", e)
+        return None
 
 
 async def find_or_create_client(
@@ -794,57 +792,40 @@ async def find_or_create_client(
     user_notion_id: str = "",
     default_type: Optional[str] = None,
 ) -> tuple[Optional[str], bool]:
-    """Находит клиента по имени; если нет — создаёт с дефолтным типом.
+    """Находит клиента по имени в PG; если нет — создаёт там же.
 
-    Возвращает (page_id, created). page_id=None означает что Notion-запрос
-    упал и сразу создание тоже не удалось — caller должен gracefully fallback.
-    Лечит дыру: раньше client_find=None оставлял запись «Клиентский без
-    привязки» сиротой.
+    Возвращает (str(pg_id), created). str(pg_id) используется как client_id
+    во всех arcana-доменах. None означает ошибку создания.
     """
-    found = await client_find(name, user_notion_id=user_notion_id)
-    if found:
-        # Keep PG in sync: sync found client to clients table (no-op if already there)
-        try:
-            from arcana.repos.pg_clients_repo import PgClientsRepo as _PGC
-            _type_label = _extract_select(
-                found.get("properties", {}).get("Тип клиента", {})
-            )
-            _type_code = {
-                "🌟 Self": "self", "🎁 Бесплатный": "free",
-            }.get(_type_label, "paid")
-            await _PGC().sync_notion_client(
-                notion_uuid=found["id"], name=name, type_code=_type_code,
-            )
-        except Exception:
-            pass
-        return found["id"], False
-    ctype = default_type or CLIENT_TYPE_PAID
+    from arcana.repos.pg_clients_repo import PgClientsRepo as _PGC
+    _type_map = {
+        CLIENT_TYPE_PAID: "paid",
+        CLIENT_TYPE_FREE: "free",
+        "🌟 Self":         "self",
+        "Платный":         "paid",
+        "Бесплатный":      "free",
+    }
+    type_code = _type_map.get(default_type or CLIENT_TYPE_PAID, "paid")
     try:
-        new_id = await client_add(
-            name=name, user_notion_id=user_notion_id, client_type=ctype,
+        repo = _PGC()
+        existing = await repo.find(name)
+        if existing:
+            return existing.id, False
+        pg_id = await repo.create(
+            name=name,
+            type_code=type_code,
+            user_notion_id=user_notion_id or None,
         )
-        if new_id:
-            # Sync newly created client to PG
-            try:
-                from arcana.repos.pg_clients_repo import PgClientsRepo as _PGC
-                _type_code = {
-                    CLIENT_TYPE_FREE: "free", CLIENT_TYPE_PAID: "paid",
-                }.get(ctype, "paid")
-                await _PGC().sync_notion_client(
-                    notion_uuid=new_id, name=name, type_code=_type_code,
-                )
-            except Exception:
-                pass
-            # Сбрасываем кеш whitelist spell-correction, чтобы Haiku
-            # не «исправил» свежедобавленное имя.
+        if pg_id:
             try:
                 from core.preprocess import invalidate_whitelist
                 invalidate_whitelist(user_notion_id)
             except Exception:
                 pass
-        return new_id, bool(new_id)
+            return str(pg_id), True
+        return None, False
     except Exception as e:
-        logger.warning("find_or_create_client: create failed for %r: %s", name, e)
+        logger.warning("find_or_create_client: failed for %r: %s", name, e)
         return None, False
 
 
@@ -1051,55 +1032,15 @@ async def arcana_all_debts(user_notion_id: str = "") -> List[dict]:
 async def _resolve_canonical_session_name(
     name: str, client_id: Optional[str], user_notion_id: str
 ) -> str:
-    """Сессии мерджатся по lowercase имени + client_id. Если уже есть запись
-    с похожим session_name у того же клиента — возвращаем CANONICAL имя
-    (то, что было записано первым), чтобы все следующие триплеты писались
-    одинаково независимо от регистра ввода."""
+    """Делегирует в PgSessionsRepo для resolve canonical session name."""
     if not name:
         return name
-    target = name.strip().lower()
-    if not target:
-        return name
-    from core.config import config
-    base_filter = {"property": "Сессия", "rich_text": {"contains": name.strip()[:1] or ""}}
-    filters = _with_user_filter(base_filter, user_notion_id)
+    from arcana.repos.pg_sessions_repo import PgSessionsRepo
     try:
-        pages = await query_pages(
-            config.arcana.db_sessions, filters=filters, page_size=100
-        )
+        return await PgSessionsRepo().canonical_session_name(name, client_id, user_notion_id)
     except Exception as e:
         logger.warning("session merge lookup failed: %s", e)
         return name
-    candidates: list[tuple[str, str]] = []  # (existing_name, page_first_date)
-    for p in pages:
-        existing = (
-            p.get("properties", {}).get("Сессия", {}).get("rich_text") or []
-        )
-        if not existing:
-            continue
-        ename = "".join(x.get("plain_text", "") for x in existing).strip()
-        if not ename or ename.lower() != target:
-            continue
-        if client_id:
-            cids = [
-                r.get("id", "") for r in
-                p.get("properties", {}).get("👥 Клиенты", {}).get("relation", [])
-            ]
-            if client_id not in cids:
-                continue
-        else:
-            # Self-сессия: исключаем записи с привязкой к клиенту.
-            if p.get("properties", {}).get("👥 Клиенты", {}).get("relation"):
-                continue
-        date_start = (
-            p.get("properties", {}).get("Дата", {}).get("date") or {}
-        ).get("start", "")
-        candidates.append((ename, date_start))
-    if not candidates:
-        return name
-    # Берём имя с самой ранней датой = canonical.
-    candidates.sort(key=lambda x: x[1] or "")
-    return candidates[0][0] or name
 
 
 async def session_add(
