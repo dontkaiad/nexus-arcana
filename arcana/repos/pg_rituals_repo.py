@@ -18,7 +18,7 @@ from arcana.repos.rituals_tables import (
     engagement_type,
     magical_purpose,
     outcome_status,
-    payment_source,
+    payment_source as t_payment_source,
     ritual_place,
     rituals,
 )
@@ -181,14 +181,14 @@ class PgRitualsRepo:
         goal: Optional[str] = None,
         place: Optional[str] = None,
         notes: Optional[str] = None,
-        payment_source_label: Optional[str] = None,
+        payment_source: Optional[str] = None,
         offerings_cost: Optional[float] = None,
     ) -> Optional[Ritual]:
         """Insert a ritual row; resolve all lookup FK ids from caller labels."""
         type_code    = _code_for(_TYPE_TO_CODE,    ritual_type)
         goal_code    = _code_for(_GOAL_TO_CODE,    goal)
         place_code   = _code_for(_PLACE_TO_CODE,   place)
-        pay_code     = _code_for(_PAYMENT_TO_CODE, payment_source_label)
+        pay_code     = _code_for(_PAYMENT_TO_CODE, payment_source)
         result_code  = "unverified"  # default for new rituals
 
         occurred_at: Optional[datetime] = None
@@ -204,7 +204,7 @@ class PgRitualsRepo:
             type_id   = _resolve(conn, engagement_type, type_code)
             purpose_id = _resolve(conn, magical_purpose, goal_code)
             place_id  = _resolve(conn, ritual_place,    place_code)
-            pay_id    = _resolve(conn, payment_source,  pay_code)
+            pay_id    = _resolve(conn, t_payment_source, pay_code)
             outcome_id = _resolve(conn, outcome_status,  result_code)
 
             client_id_int = int(client_id) if client_id and client_id.isdigit() else None
