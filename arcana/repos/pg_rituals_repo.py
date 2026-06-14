@@ -1,10 +1,12 @@
 """arcana/repos/pg_rituals_repo.py — PostgreSQL adapter for 🕯️ Ритуалы.
 
-Uses SQLAlchemy Core (synchronous, psycopg2).  Callers receive Ritual dataclasses.
-Notion adapter (rituals_repo.py) is unchanged — this is a parallel implementation.
+Uses SQLAlchemy Core (synchronous psycopg2) wrapped in asyncio.to_thread so
+public methods are async and drop-in compatible with the Notion-backed RitualsRepo.
+Callers receive plain Ritual dataclasses.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import datetime, timezone
 from decimal import Decimal
@@ -160,36 +162,38 @@ class PgRitualsRepo:
     """PostgreSQL adapter for the rituals domain.
 
     Drop-in replacement for the Notion-backed RitualsRepo once cutover happens.
-    Uses synchronous SQLAlchemy Core (same psycopg2 driver as Alembic).
+    Public methods are async (via asyncio.to_thread) so callers can await them
+    identically to the Notion adapter. Blocking I/O stays in a thread pool.
     """
 
-    def create(
+    # ── Private sync implementations ─────────────────────────────────────────
+
+    def _create_sync(
         self,
         name: str,
-        date: str,                          # "YYYY-MM-DD" from handler
-        ritual_type: str = "Личный",
-        consumables: str = "",
-        consumables_cost: float = 0,
-        duration_min: float = 0,
-        offerings: str = "",
-        forces: str = "",
-        structure: str = "",
-        amount: float = 0,
-        paid: float = 0,
-        client_id: Optional[str] = None,
-        user_notion_id: str = "",           # ignored (ADR-0007 — single owner)
-        goal: Optional[str] = None,
-        place: Optional[str] = None,
-        notes: Optional[str] = None,
-        payment_source: Optional[str] = None,
-        offerings_cost: Optional[float] = None,
+        date: str,
+        ritual_type: str,
+        consumables: str,
+        consumables_cost: float,
+        duration_min: float,
+        offerings: str,
+        forces: str,
+        structure: str,
+        amount: float,
+        paid: float,
+        client_id: Optional[str],
+        user_notion_id: str,
+        goal: Optional[str],
+        place: Optional[str],
+        notes: Optional[str],
+        payment_source: Optional[str],
+        offerings_cost: Optional[float],
     ) -> Optional[Ritual]:
-        """Insert a ritual row; resolve all lookup FK ids from caller labels."""
-        type_code    = _code_for(_TYPE_TO_CODE,    ritual_type)
-        goal_code    = _code_for(_GOAL_TO_CODE,    goal)
-        place_code   = _code_for(_PLACE_TO_CODE,   place)
-        pay_code     = _code_for(_PAYMENT_TO_CODE, payment_source)
-        result_code  = "unverified"  # default for new rituals
+        type_code   = _code_for(_TYPE_TO_CODE,    ritual_type)
+        goal_code   = _code_for(_GOAL_TO_CODE,    goal)
+        place_code  = _code_for(_PLACE_TO_CODE,   place)
+        pay_code    = _code_for(_PAYMENT_TO_CODE, payment_source)
+        result_code = "unverified"
 
         occurred_at: Optional[datetime] = None
         if date:
@@ -201,11 +205,11 @@ class PgRitualsRepo:
                 logger.warning("create: bad date %r — storing NULL", date)
 
         with get_engine().begin() as conn:
-            type_id   = _resolve(conn, engagement_type, type_code)
-            purpose_id = _resolve(conn, magical_purpose, goal_code)
-            place_id  = _resolve(conn, ritual_place,    place_code)
-            pay_id    = _resolve(conn, t_payment_source, pay_code)
-            outcome_id = _resolve(conn, outcome_status,  result_code)
+            type_id    = _resolve(conn, engagement_type,  type_code)
+            purpose_id = _resolve(conn, magical_purpose,  goal_code)
+            place_id   = _resolve(conn, ritual_place,     place_code)
+            pay_id     = _resolve(conn, t_payment_source, pay_code)
+            outcome_id = _resolve(conn, outcome_status,   result_code)
 
             client_id_int = int(client_id) if client_id and client_id.isdigit() else None
 
@@ -246,12 +250,11 @@ class PgRitualsRepo:
             place=place_code,
         )
 
-    def list_by_client(
+    def _list_by_client_sync(
         self,
         client_id: str,
-        user_notion_id: str = "",
+        user_notion_id: str,
     ) -> List[Ritual]:
-        """All rituals for a client, sorted date DESC."""
         client_id_int = int(client_id) if client_id and client_id.isdigit() else None
         if client_id_int is None:
             return []
@@ -260,12 +263,11 @@ class PgRitualsRepo:
             rows = conn.execute(stmt).fetchall()
         return [_row_to_ritual(r) for r in rows]
 
-    def list_all(
+    def _list_all_sync(
         self,
-        user_notion_id: str = "",
-        result_filter: Optional[str] = None,
+        user_notion_id: str,
+        result_filter: Optional[str],
     ) -> List[Ritual]:
-        """All rituals; optional filter by outcome code, sorted date DESC."""
         stmt = _select_rituals()
         if result_filter:
             code = _code_for(_RESULT_TO_CODE, result_filter) or result_filter
@@ -279,10 +281,61 @@ class PgRitualsRepo:
             rows = conn.execute(stmt).fetchall()
         return [_row_to_ritual(r) for r in rows]
 
-    def delete(self, ritual_id: str) -> bool:
-        """Hard-delete a ritual row (used in tests / sandbox only)."""
+    def _delete_sync(self, ritual_id: str) -> bool:
         with get_engine().begin() as conn:
             result = conn.execute(
                 rituals.delete().where(rituals.c.id == int(ritual_id))
             )
         return result.rowcount > 0
+
+    # ── Public async interface (drop-in for Notion adapter) ───────────────────
+
+    async def create(
+        self,
+        name: str,
+        date: str,
+        ritual_type: str = "Личный",
+        consumables: str = "",
+        consumables_cost: float = 0,
+        duration_min: float = 0,
+        offerings: str = "",
+        forces: str = "",
+        structure: str = "",
+        amount: float = 0,
+        paid: float = 0,
+        client_id: Optional[str] = None,
+        user_notion_id: str = "",
+        goal: Optional[str] = None,
+        place: Optional[str] = None,
+        notes: Optional[str] = None,
+        payment_source: Optional[str] = None,
+        offerings_cost: Optional[float] = None,
+    ) -> Optional[Ritual]:
+        return await asyncio.to_thread(
+            self._create_sync,
+            name, date, ritual_type, consumables, consumables_cost,
+            duration_min, offerings, forces, structure, amount, paid,
+            client_id, user_notion_id, goal, place, notes,
+            payment_source, offerings_cost,
+        )
+
+    async def list_by_client(
+        self,
+        client_id: str,
+        user_notion_id: str = "",
+    ) -> List[Ritual]:
+        return await asyncio.to_thread(
+            self._list_by_client_sync, client_id, user_notion_id
+        )
+
+    async def list_all(
+        self,
+        user_notion_id: str = "",
+        result_filter: Optional[str] = None,
+    ) -> List[Ritual]:
+        return await asyncio.to_thread(
+            self._list_all_sync, user_notion_id, result_filter
+        )
+
+    async def delete(self, ritual_id: str) -> bool:
+        return await asyncio.to_thread(self._delete_sync, ritual_id)
