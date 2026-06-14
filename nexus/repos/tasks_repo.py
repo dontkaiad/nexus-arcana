@@ -1,13 +1,16 @@
-"""nexus/repos/tasks_repo.py — repository seam for ✅ Задачи (Tasks)."""
+"""nexus/repos/tasks_repo.py — repository seam for ✅ Задачи (Tasks).
+
+Delegates to PgTasksRepo. Returns fake Notion-format page dicts for handler compat.
+"""
 from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
 from typing import List, Optional
 
-from core import notion_client as _notion
-
 logger = logging.getLogger("nexus.tasks_repo")
+
+from nexus.repos.pg_tasks_repo import PgTasksRepo as _PgTasksRepo
 
 
 @dataclass
@@ -45,37 +48,33 @@ def _parse_task(page: dict) -> Task:
 
 
 class TasksRepo:
+    def __init__(self) -> None:
+        self._pg = _PgTasksRepo()
+
     async def active(self, user_notion_id: str = "", include_in_progress: bool = True) -> List[dict]:
-        """Return raw Notion pages for all active tasks."""
-        return await _notion.tasks_active(
-            user_notion_id=user_notion_id,
-            include_in_progress=include_in_progress,
-        )
+        return await self._pg.active(user_notion_id=user_notion_id,
+                                     include_in_progress=include_in_progress)
 
     async def retrieve_page(self, page_id: str) -> dict:
-        """Fetch a raw Notion page dict by ID. Seals all get_notion().pages.retrieve() calls."""
-        client = _notion.get_notion()
-        return await client.pages.retrieve(page_id=page_id)
+        return await self._pg.retrieve_page(page_id)
 
     async def create(self, db_id: str, props: dict) -> Optional[str]:
-        """Create a task page and return its page_id, or None on failure."""
-        return await _notion.page_create(db_id, props)
+        return await self._pg.create(db_id, props)
 
     async def set_status(self, page_id: str, status: str) -> bool:
-        """Update task status. Returns True on success."""
-        return await _notion.update_task_status(page_id, status)
+        return await self._pg.set_status(page_id, status)
 
     async def set_in_progress(self, page_id: str) -> None:
-        """Set task status to 'In progress'."""
-        await _notion.update_page(page_id, {"Статус": _notion._status("In progress")})
+        await self._pg.set_in_progress(page_id)
 
     async def set_archived(self, page_id: str) -> None:
-        """Set task status to 'Archived'."""
-        await _notion.update_page(page_id, {"Статус": _notion._status("Archived")})
+        await self._pg.set_archived(page_id)
 
     async def set_props(self, page_id: str, props: dict) -> None:
-        """Apply an arbitrary props dict to a task page (for complex multi-field updates)."""
-        await _notion.update_page(page_id, props)
+        await self._pg.set_props(page_id, props)
+
+    async def list_all(self, user_notion_id: str = "") -> List[dict]:
+        return await self._pg.list_all(user_notion_id=user_notion_id)
 
     async def set_repeat_fields(
         self,
@@ -84,8 +83,7 @@ class TasksRepo:
         day_of_week: Optional[str] = None,
         repeat_time: Optional[str] = None,
     ) -> bool:
-        """Update Повтор / День недели / Время повтора fields."""
-        return await _notion.update_task_repeat_fields(page_id, repeat, day_of_week, repeat_time)
+        return await self._pg.set_repeat_fields(page_id, repeat, day_of_week, repeat_time)
 
 
 _repo = TasksRepo()

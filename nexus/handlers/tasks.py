@@ -1,6 +1,7 @@
 """nexus/handlers/tasks.py — Новый флоу с напоминаниями и дедлайнами"""
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import sqlite3 as _sqlite3
@@ -12,7 +13,7 @@ from aiogram import Router, F, Bot
 from aiogram.filters import BaseFilter
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from core.claude_client import ask_claude
-from core.notion_client import _title, _select, _date, _status, _relation, match_select, db_query, get_page
+from core.notion_client import _title, _select, _date, _status, _relation, match_select
 from nexus.repos.tasks_repo import _repo
 from nexus.handlers.utils import react
 from core.layout import maybe_convert
@@ -242,19 +243,18 @@ async def restore_reminders_on_startup() -> None:
 
     Проход 1: задачи с будущим напоминанием — планируем как есть.
     Проход 2: повторяющиеся задачи с прошедшим напоминанием —
-              сдвигаем до ближайшей будущей даты, обновляем Notion, планируем.
+              сдвигаем до ближайшей будущей даты, обновляем PG, планируем.
     """
     from core.config import config
     from core.user_manager import get_user
-    import os
+    from nexus.repos.pg_tasks_repo import PgTasksRepo as _PgTasksRepo
 
-    db_id = os.environ.get("NOTION_DB_TASKS") or config.nexus.db_tasks
-    if not db_id or not _scheduler or not _bot:
-        logger.warning("restore_reminders_on_startup: scheduler/bot/db not ready")
+    if not _scheduler or not _bot:
+        logger.warning("restore_reminders_on_startup: scheduler/bot not ready")
         return
 
+    _pg = _PgTasksRepo()
     now_utc = datetime.now(timezone.utc)
-    now_utc_str = now_utc.strftime("%Y-%m-%dT%H:%M:%S.000Z")
     restored = 0
 
     for tg_id in config.allowed_ids:
@@ -264,17 +264,9 @@ async def restore_reminders_on_startup() -> None:
                 continue
             user_notion_id = user_data.get("notion_page_id", "")
             tz_offset = await _get_user_tz(tg_id)
-            user_filter = {"property": "🪪 Пользователи", "relation": {"contains": user_notion_id}} if user_notion_id else None
 
             # ── Проход 1: будущие напоминания ────────────────────────────────────
-            filter1: dict = {"and": [
-                {"property": "Напоминание", "date": {"after": now_utc_str}},
-                {"property": "Статус", "status": {"does_not_equal": "Done"}},
-            ]}
-            if user_filter:
-                filter1["and"].append(user_filter)
-
-            for page in await db_query(db_id, filter_obj=filter1, page_size=100):
+            for page in await _pg.active_with_future_reminder(user_notion_id):
                 try:
                     props = page["properties"]
                     task_id = page["id"]
@@ -287,16 +279,8 @@ async def restore_reminders_on_startup() -> None:
                 except Exception as e:
                     logger.error("restore pass1: task %s error: %s", page.get("id"), e)
 
-            # ── Проход 2: одноразовые задачи с пропущенным напоминанием ─────────
-            # (повтор = Нет, напоминание < now, статус не Done)
-            filter2_once: dict = {"and": [
-                {"property": "Статус", "status": {"does_not_equal": "Done"}},
-                {"property": "Напоминание", "date": {"before": now_utc_str}},
-            ]}
-            if user_filter:
-                filter2_once["and"].append(user_filter)
-
-            for page in await db_query(db_id, filter_obj=filter2_once, page_size=100):
+            # ── Проход 2: задачи с пропущенным напоминанием ─────────────────────
+            for page in await _pg.active_with_past_reminder(user_notion_id):
                 try:
                     props = page["properties"]
                     task_id = page["id"]
@@ -1915,9 +1899,9 @@ async def _update_notion_on_reschedule(task_id: str, new_reminder: str, tz_offse
     the deadline forward to match (otherwise Notion shows overdue).
     """
     try:
-        page = await get_page(task_id)
+        page = await _repo.retrieve_page(task_id)
         if not page:
-            logger.warning("_update_notion_on_reschedule: page not found %s", task_id[:8])
+            logger.warning("_update_notion_on_reschedule: task not found %s", task_id)
             return
 
         props = page.get("properties", {})
@@ -1957,18 +1941,15 @@ async def handle_reschedule_reminder(message: Message) -> None:
         return
     
     try:
-        # Получить название из Notion если нет в pending
-        task_title = pending.get("title") or f"Задача #{task_id[:8]}"
+        # Получить название из PG если нет в pending
+        task_title = pending.get("title") or f"Задача #{task_id}"
         if not pending.get("title"):
             try:
-                pages = await db_query(config.nexus.db_tasks, page_size=1)
-                for page in pages:
-                    if task_id in page.get("id", ""):
-                        title_parts = page.get("properties", {}).get("Задача", {}).get("title", [])
-                        if title_parts:
-                            task_title = title_parts[0]["plain_text"]
-                        break
-            except:
+                pg_page = await _repo.retrieve_page(task_id)
+                title_parts = pg_page.get("properties", {}).get("Задача", {}).get("title", [])
+                if title_parts:
+                    task_title = title_parts[0]["plain_text"]
+            except Exception:
                 pass
         
         tz_offset = await _get_user_tz(uid)
@@ -2017,18 +1998,20 @@ async def handle_reschedule_reminder(message: Message) -> None:
 
 async def _do_save_task(message: Message, data: dict, chat_id: int = None, uid: int = 0) -> None:
     from core.config import config
-    from core.option_helper import format_option
-    db_id = config.nexus.db_tasks
+    from nexus.repos.pg_tasks_repo import (
+        _match_code, _priority_id, _category_id, _ensure_lookups,
+    )
     tz_offset = await _get_user_tz(uid)
-    real_priority = await match_select(db_id, "Приоритет", data.get("priority") or "Важно")
-    real_category = await match_select(db_id, "Категория", format_option(data.get("category", "💳 Прочее")))
+    await asyncio.to_thread(_ensure_lookups)
+    real_priority = _match_code(_priority_id, data.get("priority") or "Важно", "🟡 Важно")
+    real_category = _match_code(_category_id, data.get("category") or "💳 Прочее", "💳 Прочее")
     user_notion_id = data.get("user_notion_id", "")
 
     props = {
         "Задача":    _title(data["title"]),
         "Статус":    {"status": {"name": "Not started"}},
-        "Приоритет": _select(real_priority),
-        "Категория": _select(real_category),
+        "Приоритет": _select(real_priority or "🟡 Важно"),
+        "Категория": _select(real_category or "💳 Прочее"),
     }
     if data.get("deadline"):
         props["Дедлайн"] = _date_with_tz(data["deadline"], tz_offset)
@@ -2037,9 +2020,9 @@ async def _do_save_task(message: Message, data: dict, chat_id: int = None, uid: 
     if user_notion_id:
         props["🪪 Пользователи"] = _relation(user_notion_id)
 
-    result = await _repo.create(db_id, props)
+    result = await _repo.create(config.nexus.db_tasks, props)
     if not result:
-        await message.answer("⚠️ Ошибка записи в Notion.")
+        await message.answer("⚠️ Ошибка записи в PG.")
         return
 
     # Запоминаем последнюю созданную запись для контекстного редактирования
@@ -2070,19 +2053,20 @@ async def _do_save_task(message: Message, data: dict, chat_id: int = None, uid: 
     extra = ""
     arcana_result = None
     if data.get("for_practice") and config.arcana.db_tasks:
-        real_priority = await match_select(config.arcana.db_tasks, "Приоритет", data.get("priority") or "Важно")
-        real_category = await match_select(config.arcana.db_tasks, "Категория", data.get("category", "💳 Прочее"))
-        
+        from core.notion_client import page_create as _page_create
+        arc_priority = await match_select(config.arcana.db_tasks, "Приоритет", data.get("priority") or "Важно")
+        arc_category = await match_select(config.arcana.db_tasks, "Категория", data.get("category", "💳 Прочее"))
+
         arcana_props = {
             "Задача":    _title(data["title"]),
             "Статус":    {"status": {"name": "Not started"}},
-            "Приоритет": _select(real_priority),
-            "Категория": _select(real_category),
+            "Приоритет": _select(arc_priority),
+            "Категория": _select(arc_category),
         }
         if data.get("deadline"):
             arcana_props["Дедлайн"] = _date_with_tz(data["deadline"], tz_offset)
-        
-        arcana_result = await _repo.create(config.arcana.db_tasks, arcana_props)
+
+        arcana_result = await _page_create(config.arcana.db_tasks, arcana_props)
         if arcana_result:
             extra = "\n🔮 Также добавлено в задачи Arcana"
 
@@ -2527,30 +2511,34 @@ async def _apply_edit(
         except Exception:
             pass  # Если не смогли проверить — пробуем редактировать
         if record_type == "finance":
+            from core.notion_client import update_page as _update_page
             db_id = config.nexus.db_finance
             if field == "category":
                 real_cat = await match_select(db_id, "Категория", new_value)
-                await _repo.set_props(page_id, {"Категория": _select(real_cat)})
+                await _update_page(page_id, {"Категория": _select(real_cat)})
                 label = title or "последняя запись"
                 await message.answer(f"✏️ Категория{ctx_label}:\n🏷 → {real_cat}")
             elif field == "source":
                 real_src = await match_select(db_id, "Источник", new_value)
-                await _repo.set_props(page_id, {"Источник": _select(real_src)})
+                await _update_page(page_id, {"Источник": _select(real_src)})
                 await message.answer(f"✏️ Источник{ctx_label}:\n💳 → {real_src}")
             else:
                 await message.answer(f"⚠️ Для финансов могу менять: категорию, источник.")
             return
 
-        # Задача
-        db_id = config.nexus.db_tasks
+        # Задача (PG)
+        from nexus.repos.pg_tasks_repo import (
+            _match_code, _priority_id, _category_id, _ensure_lookups,
+        )
+        await asyncio.to_thread(_ensure_lookups)
         label = title or "последняя задача"
         if field == "title":
             await _repo.set_props(page_id, {"Задача": _title(new_value)})
             await message.answer(f"✏️ Переименовано{ctx_label}:\n«{label}» → «{new_value}»")
         elif field == "category":
-            real_cat = await match_select(db_id, "Категория", new_value)
-            # Если match_select не нашёл — попробуем _TASK_CATS
-            if real_cat == new_value:
+            real_cat = _match_code(_category_id, new_value, "💳 Прочее")
+            # Если не нашёл — попробуем _TASK_CATS
+            if real_cat == new_value or real_cat is None:
                 from core.classifier import _TASK_CATS
                 _nv = new_value.lower().strip()
                 for tc in _TASK_CATS:
@@ -2560,7 +2548,7 @@ async def _apply_edit(
             await _repo.set_props(page_id, {"Категория": _select(real_cat)})
             await message.answer(f"✏️ Категория{ctx_label}:\n📌 {label}\n🏷 → {real_cat}")
         elif field == "priority":
-            real_pr = await match_select(db_id, "Приоритет", new_value)
+            real_pr = _match_code(_priority_id, new_value, "🟡 Важно")
             await _repo.set_props(page_id, {"Приоритет": _select(real_pr)})
             await message.answer(f"✏️ Приоритет{ctx_label}:\n📌 {label}\n⚡ → {_priority_display(real_pr)}")
         elif field == "status":
@@ -2594,27 +2582,11 @@ async def _apply_edit(
 
 async def _build_today_digest(uid: int, user_notion_id: str = "", greeting: str = "") -> str:
     """Build the daily digest text (HTML). Used by /today and the morning cron job."""
-    from core.notion_client import query_pages, _with_user_filter
-    from core.config import config
-
     tz_offset = await _get_user_tz(uid)
     user_tz = timezone(timedelta(hours=tz_offset))
     today_str = datetime.now(user_tz).strftime("%Y-%m-%d")
 
-    # Все активные задачи
-    base_filter = {
-        "and": [
-            {"property": "Статус", "status": {"does_not_equal": "Done"}},
-            {"property": "Статус", "status": {"does_not_equal": "Archived"}},
-            {"property": "Статус", "status": {"does_not_equal": "Complete"}},
-        ]
-    }
-    filters = _with_user_filter(base_filter, user_notion_id)
-    all_tasks = await query_pages(
-        config.nexus.db_tasks, filters=filters,
-        sorts=[{"property": "Приоритет", "direction": "descending"}],
-        page_size=100,
-    )
+    all_tasks = await _repo.active(user_notion_id=user_notion_id)
 
     _priority_icons = {"Срочно": "🔴", "Важно": "🟡", "Можно потом": "⚪"}
     _repeat_labels = {"Ежедневно": "ежедневно", "Еженедельно": "еженедельно", "Ежемесячно": "ежемесячно"}
@@ -2940,8 +2912,6 @@ async def on_morning_no_expense(call: CallbackQuery) -> None:
 
 async def handle_task_stats(message: Message, user_notion_id: str = "") -> None:
     """Статистика задач: за неделю, месяц, стрики, топ категорий."""
-    from core.notion_client import query_pages, _with_user_filter
-    from core.config import config
     from collections import Counter
 
     uid = message.from_user.id if message.from_user else 0
@@ -2952,13 +2922,7 @@ async def handle_task_stats(message: Message, user_notion_id: str = "") -> None:
     week_start = today - timedelta(days=today.weekday())  # Понедельник
     month_start = today.replace(day=1)
 
-    # Все задачи пользователя (без фильтра по статусу)
-    filters = _with_user_filter(None, user_notion_id)
-    all_tasks = await query_pages(
-        config.nexus.db_tasks, filters=filters,
-        sorts=[{"timestamp": "last_edited_time", "direction": "descending"}],
-        page_size=200,
-    )
+    all_tasks = await _repo.list_all(user_notion_id=user_notion_id)
 
     done_week = 0
     done_month = 0
