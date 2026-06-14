@@ -75,10 +75,13 @@ _PAYMENT_TO_CODE = {
 
 # result: "⏳ Не проверено" default; also accept codes directly
 _RESULT_TO_CODE = {
-    "⏳ не проверено": "unverified",
-    "〰️ частично":    "partial",
-    "❌ не сработал":  "negative",
-    "✅ сработал":     "positive",
+    "⏳ не проверено":  "unverified",
+    "〰️ частично":     "partial",
+    "❌ не сработал":   "negative",
+    "✅ сработал":      "positive",
+    # Notion label forms (verb agreement variant)
+    "❌ не сработало":  "negative",
+    "✅ сработало":     "positive",
     # pass-through if already a code
     "unverified": "unverified",
     "partial":    "partial",
@@ -288,6 +291,20 @@ class PgRitualsRepo:
             )
         return result.rowcount > 0
 
+    def _set_result_sync(self, ritual_id: str, result_code: str) -> bool:
+        code = _code_for(_RESULT_TO_CODE, result_code) or result_code
+        with get_engine().begin() as conn:
+            outcome_id = _resolve(conn, outcome_status, code)
+            if outcome_id is None:
+                logger.warning("set_result: unknown result_code %r (resolved=%r)", result_code, code)
+                return False
+            res = conn.execute(
+                rituals.update()
+                .where(rituals.c.id == int(ritual_id))
+                .values(outcome_id=outcome_id)
+            )
+        return res.rowcount > 0
+
     # ── Public async interface (drop-in for Notion adapter) ───────────────────
 
     async def create(
@@ -339,3 +356,6 @@ class PgRitualsRepo:
 
     async def delete(self, ritual_id: str) -> bool:
         return await asyncio.to_thread(self._delete_sync, ritual_id)
+
+    async def set_result(self, ritual_id: str, result_code: str) -> bool:
+        return await asyncio.to_thread(self._set_result_sync, ritual_id, result_code)
