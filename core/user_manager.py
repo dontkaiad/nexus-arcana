@@ -1,4 +1,8 @@
-"""core/user_manager.py — Управление пользователями через базу Пользователи в Notion."""
+"""core/user_manager.py — Управление пользователями через core_identity (PG).
+
+get_user() / check_permission() / get_user_notion_id() — публичный API без изменений.
+Бэкенд переключён с Notion 🪪 Пользователи на PG core_identity (ADR-0007).
+"""
 from __future__ import annotations
 
 import logging
@@ -7,92 +11,42 @@ from typing import Dict, Optional
 
 logger = logging.getLogger(__name__)
 
-# Кэш: {tg_id: {"notion_page_id": ..., "name": ..., "role": ..., "permissions": {...}, "_ts": ...}}
+# In-process cache: {tg_id → user_dict} TTL 5 min — same structure as before
 _user_cache: Dict[int, dict] = {}
-_CACHE_TTL = 300  # 5 минут
+_CACHE_TTL = 300
+
+
+def _to_user_dict(user) -> dict:
+    """Convert IdentityUser → legacy dict format (all callers unchanged)."""
+    return {
+        "notion_page_id": user.notion_id,
+        "name": user.name,
+        "role": user.role,
+        "permissions": {
+            "nexus": user.perm_nexus,
+            "arcana": user.perm_arcana,
+            "finance": user.perm_finance,
+        },
+        "_ts": time.time(),
+    }
 
 
 async def get_user(tg_id: int) -> Optional[dict]:
-    """Найти пользователя по TG ID в базе Пользователи. Вернуть None если не найден."""
+    """Найти пользователя по TG ID. Возвращает None если не найден."""
     cached = _user_cache.get(tg_id)
     if cached and time.time() - cached.get("_ts", 0) < _CACHE_TTL:
         return cached
 
-    from core.config import config
-    from core.notion_client import query_pages
-
-    db_id = config.db_users
-    if not db_id:
-        logger.warning("get_user: db_users not configured")
-        return None
-
     try:
-        results = await query_pages(
-            db_id,
-            filters={"property": "TG ID", "number": {"equals": tg_id}},
-            page_size=5,  # берём 5 чтобы увидеть дубли
-        )
-        logger.info(
-            "get_user(%s): Notion вернул %d записей: %s",
-            tg_id,
-            len(results),
-            [
-                {
-                    "id": p["id"],
-                    "name": (
-                        (p.get("properties", {}).get("Имя", {}).get("title") or [{}])[0]
-                        .get("text", {}).get("content", "?")
-                    ),
-                    "tg_id_field": (
-                        p.get("properties", {}).get("TG ID", {}).get("number")
-                    ),
-                }
-                for p in results
-            ],
-        )
-        if not results:
+        from core.repos.identity_repo import _repo
+        user = await _repo.get_by_tg_id(tg_id)
+        if user is None:
+            logger.info("get_user(%s): not found in core_identity", tg_id)
             return None
-
-        page = results[0]
-        props = page.get("properties", {})
-        logger.info("get_user(%s): используем page_id=%s", tg_id, page["id"])
-
-        # Дебаг: показать все ключи и checkbox-значения для диагностики
-        checkbox_fields = {k: v.get("checkbox") for k, v in props.items() if v.get("type") == "checkbox"}
-        logger.info("get_user(%s): checkbox fields в базе: %s", tg_id, checkbox_fields)
-
-        name_items = props.get("Имя", {}).get("title", [])
-        name = name_items[0]["text"]["content"] if name_items else ""
-
-        role_sel = props.get("Роль", {}).get("select") or {}
-        role = role_sel.get("name", "")
-
-        def _checkbox(primary: str, fallback: str = "") -> bool:
-            """Читает checkbox поле, пробуя оба варианта имени (с эмодзи и без)."""
-            val = props.get(primary, {}).get("checkbox", None)
-            if val is not None:
-                return val
-            if fallback:
-                return props.get(fallback, {}).get("checkbox", False)
-            return False
-
-        permissions = {
-            "nexus":     _checkbox("☀️ Nexus",   "Nexus"),
-            "arcana":    _checkbox("🌒 Arcana",  "Arcana"),
-            "finance":   _checkbox("💰 Финансы", "Финансы"),
-        }
-        logger.info("get_user(%s): permissions resolved = %s", tg_id, permissions)
-
-        user_data = {
-            "notion_page_id": page["id"],
-            "name": name,
-            "role": role,
-            "permissions": permissions,
-            "_ts": time.time(),
-        }
+        user_data = _to_user_dict(user)
         _user_cache[tg_id] = user_data
+        logger.info("get_user(%s): notion_id=%s role=%s", tg_id, user.notion_id, user.role)
         return user_data
-
     except Exception as e:
         logger.error("get_user(%s) error: %s", tg_id, e)
         return None

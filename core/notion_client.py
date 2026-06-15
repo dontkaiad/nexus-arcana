@@ -239,20 +239,13 @@ _OWNER_CACHE_TTL = 600  # 10 минут
 
 
 async def get_owner_notion_ids() -> List[str]:
-    """Вернуть page ID всех пользователей с Роль='Владелец'. Кэш 10 мин."""
+    """Вернуть notion_id всех пользователей с Роль='Владелец'. Читает из core_identity PG. Кэш 10 мин."""
     if time.time() - _owner_ids_cache["_ts"] < _OWNER_CACHE_TTL and _owner_ids_cache["ids"]:
         return _owner_ids_cache["ids"]
-    from core.config import config
-    db_id = config.db_users
-    if not db_id:
-        return []
     try:
-        pages = await query_pages(
-            db_id,
-            filters={"property": "Роль", "select": {"equals": "Владелец"}},
-            page_size=50,
-        )
-        ids = [p["id"] for p in pages]
+        from core.repos.identity_repo import _repo as _identity_repo
+        users = await _identity_repo.get_all()
+        ids = [u.notion_id for u in users if u.role == "Владелец"]
         _owner_ids_cache["ids"] = ids
         _owner_ids_cache["_ts"] = time.time()
         logger.info("get_owner_notion_ids: нашли %d владельцев: %s", len(ids), ids)
