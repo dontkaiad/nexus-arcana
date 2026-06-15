@@ -367,23 +367,13 @@ async def finance_add(
     description: str = "",
     user_notion_id: str = "",
 ) -> Optional[str]:
-    from core.config import config
-    db_id = config.nexus.db_finance
-    real_category = await match_select(db_id, "Категория", category)
-    real_source   = await match_select(db_id, "Источник", source)
-    real_type     = await match_select(db_id, "Тип", type_)
-    props = {
-        "Описание":  _title(description),
-        "Дата":      _date(date),
-        "Сумма":     _number(amount),
-        "Категория": _select(real_category),
-        "Тип":       _select(real_type),
-        "Источник":  _select(real_source),
-        "Бот":       _select(bot_label),
-    }
-    if user_notion_id:
-        props["🪪 Пользователи"] = _relation(user_notion_id)
-    return await page_create(db_id, props)
+    """Write to PG (nexus_budget or arcana_pnl by bot_label). Notion write removed."""
+    from core.repos.finance_repo import _repo as _fin_repo
+    return await _fin_repo.add(
+        date=date, amount=amount, category=category, type_=type_,
+        source=source, bot_label=bot_label, description=description,
+        user_notion_id=user_notion_id,
+    )
 
 async def finance_month(month: str, user_notion_id: str = "",
                         description_filter: str = "",
@@ -421,42 +411,9 @@ async def finance_month(month: str, user_notion_id: str = "",
     return await query_pages(config.nexus.db_finance, filters=filters, page_size=100)
 
 async def finance_update(target_type: str, field: str, new_value: str) -> bool:
-    """Обновить последнюю финансовую запись (expense или income)."""
-    from core.config import config
-    db_id = config.nexus.db_finance
-    
-    # Найти последнюю запись нужного типа (Тип = "💸 Расход" или "💰 Доход")
-    type_label = "💸 Расход" if target_type == "expense" else "💰 Доход"
-    filters = {"property": "Тип", "select": {"equals": type_label}}
-    sorts = [{"property": "Дата", "direction": "descending"}]
-    
-    pages = await query_pages(db_id, filters=filters, sorts=sorts, page_size=1)
-    if not pages:
-        return False
-    
-    page_id = pages[0]["id"]
-    
-    # Обновить нужное поле
-    if field == "source":
-        real_source = await match_select(db_id, "Источник", new_value)
-        props = {"Источник": _select(real_source)}
-    elif field == "category":
-        real_category = await match_select(db_id, "Категория", new_value)
-        props = {"Категория": _select(real_category)}
-    elif field == "amount":
-        try:
-            amount = float(new_value)
-            props = {"Сумма": _number(amount)}
-        except ValueError:
-            return False
-    elif field == "type_":
-        real_type = await match_select(db_id, "Тип", new_value)
-        props = {"Тип": _select(real_type)}
-    else:
-        return False
-    
-    await update_page(page_id, props)
-    return True
+    """Update most-recent finance record of a type (expense or income). Routes to PG."""
+    from core.repos.finance_repo import _repo as _fin_repo
+    return await _fin_repo.update_last(target_type, field, new_value)
 
 
 # ─── Tasks ────────────────────────────────────────────────────────────────────

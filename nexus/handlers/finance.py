@@ -123,7 +123,7 @@ async def _calc_free_remaining(user_notion_id: str = "") -> Optional[Tuple[float
         income_records = await _repo.query_records(
             type_="💰 Доход", date_from=month_start, date_to=today_str, page_size=200,
         )
-        total_income = sum((p["properties"].get("Сумма", {}).get("number") or 0) for p in income_records)
+        total_income = sum(float(p.amount or 0) for p in income_records)
     except Exception:
         total_income = 0
 
@@ -135,7 +135,7 @@ async def _calc_free_remaining(user_notion_id: str = "") -> Optional[Tuple[float
         expense_records = await _repo.query_records(
             type_="💸 Расход", date_from=month_start, date_to=today_str, page_size=500,
         )
-        total_expenses = sum((p["properties"].get("Сумма", {}).get("number") or 0) for p in expense_records)
+        total_expenses = sum(float(p.amount or 0) for p in expense_records)
     except Exception:
         total_expenses = 0
 
@@ -177,8 +177,8 @@ async def build_budget_message(user_notion_id: str = "") -> Optional[str]:
             type_="💸 Расход", date_from=period_start, date_to=today_str, page_size=500,
         )
         for r in expense_records:
-            cat = (r["properties"].get("Категория", {}).get("select") or {}).get("name", "💳 Прочее")
-            amt = r["properties"].get("Сумма", {}).get("number") or 0
+            cat = r.category or "💳 Прочее"
+            amt = float(r.amount or 0)
             by_expense_cat[cat] = by_expense_cat.get(cat, 0) + amt
             total_expenses += amt
     except Exception:
@@ -383,7 +383,7 @@ async def _check_budget_limit(category: str, message: Message, user_notion_id: s
             type_="💸 Расход", category=category,
             date_from=period_start, date_to=today_str, page_size=200,
         )
-        period_total = sum((p["properties"].get("Сумма", {}).get("number") or 0) for p in records)
+        period_total = sum(float(p.amount or 0) for p in records)
         logger.info("_check_budget_limit: period_total=%.0f limit=%.0f category=%s",
                     period_total, limit_amount, category)
     except Exception as e:
@@ -488,10 +488,9 @@ async def get_finance_period(start_date: str, end_date: str, label: str,
     by_cat: Dict[str, float] = {}
 
     for r in records:
-        props = r["properties"]
-        amount = props.get("Сумма", {}).get("number") or 0
-        type_name = (props.get("Тип", {}).get("select") or {}).get("name", "")
-        cat = (props.get("Категория", {}).get("select") or {}).get("name", "")
+        amount = float(r.amount or 0)
+        type_name = r.type_
+        cat = r.category
         if "Доход" in type_name:
             total_income += amount
         elif "Расход" in type_name:
@@ -538,10 +537,9 @@ async def get_finance_stats(month: str, user_notion_id: str = "", compare_prev: 
     by_cat: Dict[str, float] = {}
 
     for r in records:
-        props = r["properties"]
-        amount = props.get("Сумма", {}).get("number") or 0
-        type_name = (props.get("Тип", {}).get("select") or {}).get("name", "")
-        cat = (props.get("Категория", {}).get("select") or {}).get("name", "")
+        amount = float(r.amount or 0)
+        type_name = r.type_
+        cat = r.category
         if "Доход" in type_name:
             total_income += amount
         elif "Расход" in type_name:
@@ -557,10 +555,9 @@ async def get_finance_stats(month: str, user_notion_id: str = "", compare_prev: 
             prev_by_cat: Dict[str, float] = {}
             prev_expense_total = 0.0
             for r in prev_records:
-                props = r["properties"]
-                amount = props.get("Сумма", {}).get("number") or 0
-                type_name = (props.get("Тип", {}).get("select") or {}).get("name", "")
-                cat = (props.get("Категория", {}).get("select") or {}).get("name", "")
+                amount = float(r.amount or 0)
+                type_name = r.type_
+                cat = r.category
                 if "Расход" in type_name:
                     prev_expense_total += amount
                     if cat:
@@ -1270,7 +1267,6 @@ async def _save_limit_to_memory(cat_link: str, amount: int, user_notion_id: str 
 async def handle_finance_clarify(call: CallbackQuery, user_notion_id: str = "") -> None:
     """Обработчик уточнения доход/расход/бартер для неясных операций."""
     from core.config import config
-    from core.notion_client import match_select, _relation
 
     action = call.data.split("_")[1]  # expense, income или barter
     uid = call.from_user.id
@@ -1305,19 +1301,15 @@ async def handle_finance_clarify(call: CallbackQuery, user_notion_id: str = "") 
     else:
         type_label = "💸 Расход"
 
-    real_category = await match_select(db_id, "Категория", category)
-    real_source = await match_select(db_id, "Источник", source)
-    real_type = await match_select(db_id, "Тип", type_label)
-
     eff_uid = stored_uid or user_notion_id
     result = await _repo.create_entry(
         db_id,
         description=description,
         date=datetime.now(MOSCOW_TZ).strftime("%Y-%m-%d"),
         amount=amount,
-        category=real_category,
-        type_=real_type,
-        source=real_source,
+        category=category,
+        type_=type_label,
+        source=source,
         bot_label="☀️ Nexus",
         user_notion_id=eff_uid,
     )
@@ -1327,11 +1319,11 @@ async def handle_finance_clarify(call: CallbackQuery, user_notion_id: str = "") 
         last_record_set(uid, "finance", result)
         sign = "−" if action != "income" else "+"
         icon = "💸" if action != "income" else "💰"
-        text = f"{icon} <b>{sign}{amount:,.0f}₽</b> · <b>{description}</b>\n🏷 {real_category} <i>{real_source}</i>"
+        text = f"{icon} <b>{sign}{amount:,.0f}₽</b> · <b>{description}</b>\n🏷 {category} <i>{source}</i>"
         await call.message.edit_text(text, parse_mode="HTML")
         _pending_finance.pop(uid, None)
         if action != "income":
-            await _check_budget_limit(real_category, call.message)
+            await _check_budget_limit(category, call.message)
     else:
         await call.message.edit_text("⚠️ Ошибка записи. Попробуй позже.")
 
@@ -1472,10 +1464,9 @@ async def _handle_multimonth_stats(
         )
         total = 0.0
         for r in records:
-            props = r["properties"]
-            amount = props.get("Сумма", {}).get("number") or 0
-            cat_name = (props.get("Категория", {}).get("select") or {}).get("name", "")
-            type_name = (props.get("Тип", {}).get("select") or {}).get("name", "")
+            amount = float(r.amount or 0)
+            cat_name = r.category
+            type_name = r.type_
             if category_filter and cat_name != category_filter:
                 continue
             if type_filter == "expense" and "Расход" not in type_name:
@@ -1597,22 +1588,15 @@ async def handle_finance_summary(query: str = "", user_notion_id: str = "", uid:
     )
     now = datetime.now(MOSCOW_TZ)
 
-    def _get_desc(props):
-        title_items = (props.get("Описание", {}).get("title") or [])
-        if title_items:
-            return title_items[0].get("text", {}).get("content", "")
-        return ""
-
     # Запрос по категории, описанию ИЛИ конкретному типу дохода/расхода
     if category_filter or description_search or type_filter:
         total = 0.0
         matched = []
         for r in records:
-            props = r["properties"]
-            amount = props.get("Сумма", {}).get("number") or 0
-            cat_name = (props.get("Категория", {}).get("select") or {}).get("name", "")
-            type_name = (props.get("Тип", {}).get("select") or {}).get("name", "")
-            desc = _get_desc(props)
+            amount = float(r.amount or 0)
+            cat_name = r.category
+            type_name = r.type_
+            desc = r.description
 
             # Фильтр по категории (Python-side, Notion не умеет exact match по select)
             if category_filter and cat_name != category_filter:
@@ -1624,7 +1608,7 @@ async def handle_finance_summary(query: str = "", user_notion_id: str = "", uid:
                 continue
 
             total += amount
-            date_str = (props.get("Дата", {}).get("date") or {}).get("start", "")
+            date_str = r.date
             matched.append((date_str, desc, amount))
 
         icon = "💸" if type_filter == "expense" else ("💰" if type_filter == "income" else "📊")
@@ -1735,11 +1719,10 @@ async def handle_finance_summary(query: str = "", user_notion_id: str = "", uid:
     cat_totals: dict = {}
 
     for r in records:
-        props = r["properties"]
-        amount = props.get("Сумма", {}).get("number") or 0
-        type_name = (props.get("Тип", {}).get("select") or {}).get("name", "")
-        cat_name = (props.get("Категория", {}).get("select") or {}).get("name", "")
-        bot_name = (props.get("Бот", {}).get("select") or {}).get("name", "")
+        amount = float(r.amount or 0)
+        type_name = r.type_
+        cat_name = r.category
+        bot_name = r.bot
 
         if "Доход" in type_name:
             if cat_name == "💰 Зарплата":
@@ -2122,7 +2105,7 @@ async def _calc_impulse_status(period_start: str, user_notion_id: str = "") -> T
         type_="💸 Расход", category="🎲 Импульсивные",
         date_from=period_start, date_to=now.strftime("%Y-%m-%d"), page_size=200,
     )
-    impulse_used = sum((p.get("properties", {}).get("Сумма", {}).get("number") or 0) for p in records)
+    impulse_used = sum(float(p.amount or 0) for p in records)
     return impulse_limit, impulse_used
 
 
@@ -2398,12 +2381,9 @@ async def _build_sonnet_input(uid: int, user_notion_id: str) -> str:
     spending_by_cat = {}
     income_total = 0
     for r in records:
-        props = r.get("properties", {})
-        amt = props.get("Сумма", {}).get("number") or 0
-        cat_sel = props.get("Категория", {}).get("select")
-        cat = cat_sel.get("name", "Прочее") if cat_sel else "Прочее"
-        type_sel = props.get("Тип", {}).get("select")
-        type_name = type_sel.get("name", "") if type_sel else ""
+        amt = float(r.amount or 0)
+        cat = r.category or "Прочее"
+        type_name = r.type_
         if "Доход" in type_name:
             income_total += amt
         else:
@@ -3708,10 +3688,8 @@ async def _budget_period_review(user_notion_id: str = "") -> Tuple[str, float]:
 
     spending_by_cat: Dict[str, float] = {}
     for r in records:
-        props = r.get("properties", {})
-        amt = props.get("Сумма", {}).get("number") or 0
-        cat_sel = props.get("Категория", {}).get("select")
-        cat = cat_sel.get("name", "Прочее") if cat_sel else "Прочее"
+        amt = float(r.amount or 0)
+        cat = r.category or "Прочее"
         spending_by_cat[cat] = spending_by_cat.get(cat, 0) + amt
 
     # Get limits from Memory

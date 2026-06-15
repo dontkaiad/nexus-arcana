@@ -2,7 +2,7 @@
 
 Storage: nexus_lists (☀️ Nexus) + arcana_inventory (🌒 Arcana).
 GUARD: 🔄 Бартер category → ONLY arcana_inventory; never nexus_lists.
-finance_add → Notion 💰 Финансы (Finance DB stays on Notion).
+finance_add → routes to PG via finance_repo (nexus_budget or arcana_pnl by bot_label).
 find_task_by_name → Notion ✅ Задачи (Tasks DB stays on Notion).
 """
 from __future__ import annotations
