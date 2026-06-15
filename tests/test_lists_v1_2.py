@@ -235,74 +235,25 @@ def test_classify_stats_wins_over_list_sum():
 
 
 def _fake_page(props_by_name: dict) -> dict:
-    """Сборка минимальной Notion-страницы для тестов."""
+    """Сборка минимальной Notion-страницы для тестов (miniapp routes — Notion)."""
     return {"id": "p-test", "properties": props_by_name}
-
-
-def test_extract_page_data_new_fields():
-    from core.list_manager import _extract_page_data
-    page = _fake_page({
-        "Название": {"title": [{"plain_text": "iPhone", "text": {"content": "iPhone"}}]},
-        "Тип": {"select": {"name": "🛒 Покупки"}},
-        "Статус": {"status": {"name": "Not started"}},
-        "Категория": {"select": {"name": "💳 Прочее"}},
-        "Цена план": {"number": 108600},
-        "Магазин": {"rich_text": [{"plain_text": "iPiter", "text": {"content": "iPiter"}}]},
-        "Этап": {"number": 2},
-    })
-    data = _extract_page_data(page)
-    assert data["price_plan"] == 108600
-    assert data["source"] == "iPiter"
-    assert data["stage"] == 2
-
-
-def test_extract_page_data_existing_fields_now_returned():
-    """v1.1 поля Заметка/Приоритет/Срок годности уже были в коде, но теперь
-    их реально читают (раньше тоже читались — это регресс-страж)."""
-    from core.list_manager import _extract_page_data
-    page = _fake_page({
-        "Название": {"title": [{"plain_text": "молоко", "text": {"content": "молоко"}}]},
-        "Тип": {"select": {"name": "🛒 Покупки"}},
-        "Статус": {"status": {"name": "Not started"}},
-        "Заметка": {"rich_text": [{"plain_text": "органическое", "text": {"content": "органическое"}}]},
-        "Приоритет": {"select": {"name": "🔴 Срочно"}},
-        "Количество": {"number": 5},
-        "Срок годности": {"date": {"start": "2026-05-15"}},
-    })
-    data = _extract_page_data(page)
-    assert data["note"] == "органическое"
-    assert data["priority"] == "🔴 Срочно"
-    assert data["quantity"] == 5
-    assert data["expiry"] == "2026-05-15"
-
-
-def test_extract_page_data_works_relation_with_trailing_space():
-    """В Notion property 🔮 Работы имеет trailing space — поддерживаем оба."""
-    from core.list_manager import _extract_page_data
-    page = _fake_page({
-        "Название": {"title": [{"plain_text": "x", "text": {"content": "x"}}]},
-        "Тип": {"select": {"name": "🛒 Покупки"}},
-        "Статус": {"status": {"name": "Not started"}},
-        "🔮 Работы ": {"relation": [{"id": "work-1"}]},
-    })
-    data = _extract_page_data(page)
-    assert data["work_rel"] == "work-1"
 
 
 @pytest.mark.asyncio
 async def test_add_items_writes_v12_fields():
-    """add_items с полным набором полей пишет Цена план / Магазин / Этап."""
+    """add_items с полным набором полей передаёт price_plan/store/stage/group_name/priority в PG."""
     from core import list_manager
+    from core.repos.pg_nexus_lists_repo import ListItem
 
-    captured: dict = {}
+    fake_item = ListItem(
+        id="1", name="iPhone Pro", list_type="покупки", status="not_started",
+        category="💳 Прочее", price_plan=108600.0, store="iPiter", stage=2,
+        group_name="Apple-стек",
+    )
 
-    async def _fake_create(db, props):
-        captured["db"] = db
-        captured["props"] = props
-        return "page-1"
-
-    with patch.object(list_manager, "page_create",
-                       AsyncMock(side_effect=_fake_create)):
+    mock_add = AsyncMock(return_value=fake_item)
+    with patch.object(list_manager._nexus_repo, "add_item", mock_add), \
+         patch.object(list_manager, "_search_memory_for_prefs", AsyncMock(return_value="")):
         out = await list_manager.add_items(
             [{
                 "name": "iPhone Pro", "category": "💳 Прочее",
@@ -314,63 +265,62 @@ async def test_add_items_writes_v12_fields():
             bot_name="☀️ Nexus",
             user_page_id="user-1",
         )
+        kw = mock_add.await_args.kwargs
 
-    assert out and out[0]["id"] == "page-1"
-    p = captured["props"]
-    assert p["Цена план"] == {"number": 108600.0}
-    assert p["Магазин"]["rich_text"][0]["text"]["content"] == "iPiter"
-    assert p["Этап"] == {"number": 2}
-    assert p["Группа"]["rich_text"][0]["text"]["content"] == "Apple-стек"
-    assert p["Приоритет"] == {"select": {"name": "🟡 Важно"}}
+    assert out and out[0]["id"] == "1"
+    assert kw["price_plan"] == 108600.0
+    assert kw["store"] == "iPiter"
+    assert kw["stage"] == 2
+    assert kw["group_name"] == "Apple-стек"
+    assert kw["priority"] == "🟡 Важно"
 
 
 @pytest.mark.asyncio
 async def test_add_items_legacy_no_extra_fields():
-    """Старый вызов «молоко без всего» не падает и не пишет лишних полей."""
+    """Старый вызов «молоко без всего» не падает, необязательные поля = None/empty."""
     from core import list_manager
-    with patch.object(list_manager, "page_create",
-                       AsyncMock(return_value="page-1")) as mock:
+    from core.repos.pg_nexus_lists_repo import ListItem
+
+    fake_item = ListItem(id="1", name="молоко", list_type="покупки", status="not_started",
+                          category="🍜 Продукты")
+
+    mock_add = AsyncMock(return_value=fake_item)
+    with patch.object(list_manager._nexus_repo, "add_item", mock_add), \
+         patch.object(list_manager, "_search_memory_for_prefs", AsyncMock(return_value="")):
         out = await list_manager.add_items(
             [{"name": "молоко", "category": "🍜 Продукты"}],
             list_type="🛒 Покупки",
             bot_name="☀️ Nexus",
             user_page_id="user-1",
         )
+        kw = mock_add.await_args.kwargs
+
     assert out
-    props = mock.await_args.args[1]
-    assert "Цена план" not in props
-    assert "Магазин" not in props
-    assert "Этап" not in props
+    assert kw.get("price_plan") is None
+    assert kw.get("store") == ""
+    assert kw.get("stage") is None
 
 
 @pytest.mark.asyncio
 async def test_get_list_summary_aggregates():
-    """get_list_summary считает план/факт/счётчики правильно."""
+    """get_list_summary считает план/факт/счётчики правильно (через PG repo)."""
     from core import list_manager
+    from core.repos.pg_nexus_lists_repo import ListItem
 
-    fake_pages = [
-        _fake_page({
-            "Название": {"title": [{"plain_text": "iPhone", "text": {"content": "x"}}]},
-            "Тип": {"select": {"name": "🛒 Покупки"}},
-            "Статус": {"status": {"name": "Not started"}},
-            "Цена план": {"number": 108000},
-            "Группа": {"rich_text": [{"plain_text": "Apple-стек", "text": {"content": "Apple-стек"}}]},
-        }),
-        _fake_page({
-            "Название": {"title": [{"plain_text": "AirPods", "text": {"content": "x"}}]},
-            "Тип": {"select": {"name": "🛒 Покупки"}},
-            "Статус": {"status": {"name": "Done"}},
-            "Цена план": {"number": 25500},
-            "Цена": {"number": 24000},
-            "Группа": {"rich_text": [{"plain_text": "Apple-стек", "text": {"content": "Apple-стек"}}]},
-        }),
+    fake_items = [
+        ListItem(id="1", name="iPhone", list_type="покупки", status="not_started",
+                  price_plan=108000.0, group_name="Apple-стек"),
+        ListItem(id="2", name="AirPods", list_type="покупки", status="done",
+                  price_plan=25500.0, price_actual=24000.0, group_name="Apple-стек"),
     ]
-    with patch.object(list_manager, "db_query",
-                       AsyncMock(return_value=fake_pages)):
+
+    with patch.object(list_manager._nexus_repo, "get_summary_items",
+                       AsyncMock(return_value=fake_items)):
         out = await list_manager.get_list_summary(
             user_notion_id="user-1", bot_name="☀️ Nexus",
             type_="🛒 Покупки", group="Apple-стек",
         )
+
     assert out["plan_total"] == 133500
     assert out["actual_total"] == 24000
     assert out["count_total"] == 2
@@ -381,10 +331,13 @@ async def test_get_list_summary_aggregates():
 @pytest.mark.asyncio
 async def test_get_list_summary_empty():
     from core import list_manager
-    with patch.object(list_manager, "db_query", AsyncMock(return_value=[])):
+
+    with patch.object(list_manager._nexus_repo, "get_summary_items",
+                       AsyncMock(return_value=[])):
         out = await list_manager.get_list_summary(
             user_notion_id="user-1", bot_name="☀️ Nexus",
         )
+
     assert out["count_total"] == 0
     assert out["plan_total"] == 0
 
@@ -519,43 +472,33 @@ def test_miniapp_summary_aggregates_items():
     assert s["count_open"] == 2
 
 
-# ── Regression #100: work relation prop name (trailing space) ────────────────
+# ── Regression #100: work_rel stored in PG column ──────────────────────────
 
 
 @pytest.mark.asyncio
-async def test_add_items_work_rel_uses_exact_schema_name():
-    """add_items с work_rel должен писать props['🔮 Работы '] (с trailing space).
+async def test_add_items_work_rel_stored_in_pg():
+    """add_items с work_rel передаёт works_id в PG repo (не Notion trailing-space prop).
 
-    Регрессия #100: старый код писал '🔮 Работы' (без пробела) → Notion
-    молча игнорил неизвестное поле → relation не ставился → чеклист-сироты.
-    Этот тест ПАДАЛ на коде без константы WORK_REL_PROP.
+    После миграции: works_id хранится как TEXT в nexus_lists/arcana_inventory,
+    trailing space больше не нужен — PG не использует Notion property names.
     """
     from core import list_manager
-    from core.list_manager import WORK_REL_PROP
+    from core.repos.pg_nexus_lists_repo import InventoryItem
 
-    captured: dict = {}
+    fake_item = InventoryItem(
+        id="1", name="Подготовить пространство", list_type="чеклист",
+        status="not_started", works_id="work-abc",
+    )
 
-    async def _fake_create(db, props):
-        captured["props"] = props
-        return "page-x"
-
-    with patch.object(list_manager, "page_create",
-                      AsyncMock(side_effect=_fake_create)):
-        await list_manager.add_items(
+    mock_add = AsyncMock(return_value=fake_item)
+    with patch.object(list_manager._arcana_repo, "add_item", mock_add):
+        out = await list_manager.add_items(
             [{"name": "Подготовить пространство", "work_rel": "work-abc"}],
             list_type="📋 Чеклист",
             bot_name="🌒 Arcana",
             user_page_id="user-1",
         )
+        kw = mock_add.await_args.kwargs
 
-    p = captured["props"]
-    # Точное имя проперти должно совпадать с WORK_REL_PROP
-    assert WORK_REL_PROP in p, (
-        f"Ожидали ключ {WORK_REL_PROP!r} в props, получили: {list(p)}"
-    )
-    # И НЕ должно быть старого беспробельного ключа
-    assert "🔮 Работы" not in p or WORK_REL_PROP in p, (
-        "Ключ без trailing space не должен использоваться для записи"
-    )
-    # Значение — relation с нужным id
-    assert p[WORK_REL_PROP] == {"relation": [{"id": "work-abc"}]}
+    assert out and out[0]["id"] == "1"
+    assert kw["works_id"] == "work-abc"

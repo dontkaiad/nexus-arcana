@@ -36,25 +36,23 @@ def client():
 @pytest.mark.asyncio
 async def test_check_items_arcana_writes_finance_with_arcana_bot():
     from core.list_manager import check_items
-    page = {
-        "id": "list-1",
-        "properties": {
-            "Название": {"title": [{"text": {"content": "соль"}, "plain_text": "соль"}]},
-            "Категория": {"select": {"name": "🕯️ Расходники"}},
-            "Тип": {"select": {"name": "🛒 Покупки"}},
-            "Бот": {"select": {"name": "🌒 Arcana"}},
-            "Статус": {"status": {"name": "Not started"}},
-        },
-    }
-    with patch("core.list_manager.db_query", AsyncMock(return_value=[page])), \
-         patch("core.list_manager.update_page", AsyncMock(return_value=None)), \
-         patch("core.list_manager.finance_add",
-               AsyncMock(return_value="fin-1")) as fa:
+    from core.repos.pg_nexus_lists_repo import InventoryItem
+    import core.list_manager as lm
+
+    fake_item = InventoryItem(
+        id="1", name="соль", list_type="инвентарь", status="not_started",
+        category="🕯️ Расходники", user_notion_id=FAKE_NOTION_USER,
+    )
+
+    with patch.object(lm._arcana_repo, "search", AsyncMock(return_value=[fake_item])), \
+         patch.object(lm._arcana_repo, "update_status", AsyncMock(return_value=True)), \
+         patch.object(lm, "finance_add", AsyncMock(return_value="fin-1")) as fa:
         result = await check_items(
             [{"name": "соль", "price": 200}],
             bot_name="🌒 Arcana",
             user_page_id=FAKE_NOTION_USER,
         )
+
     assert result["finance_results"][0]["category"] == "🕯️ Расходники"
     fa.assert_awaited_once()
     kwargs = fa.await_args.kwargs

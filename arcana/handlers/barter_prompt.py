@@ -26,18 +26,9 @@ from aiogram.types import Message
 
 from core.cash_register import BOT_ARCANA
 from core.config import config
-from core.notion_client import (
-    _select,
-    _status,
-    _text,
-    _title,
-    _with_user_filter,
-    get_page,
-    page_create,
-    query_pages,
-    update_page,
-)
-from core.repos.finance_repo import _repo
+from core.notion_client import get_page
+from core.repos.finance_repo import _repo as _fin_repo
+from core.repos.lists_repo import _repo as _lists_repo
 
 logger = logging.getLogger("arcana.barter_prompt")
 
@@ -130,31 +121,16 @@ async def handle_pending_text(message: Message, text: str, user_notion_id: str =
         await message.answer("Не понял список — попробуй ещё раз через запятую.")
         return True
 
-    db = config.db_lists
-    if not db:
-        await message.answer("⚠️ Lists DB не настроена.")
-        _drop(uid)
-        return True
-
-    created = 0
-    for name in items:
-        props = {
-            "Название": _title(name),
-            "Тип": _select(LIST_TYPE_CHECKLIST),
-            "Статус": _status("Not started"),
-            "Бот": _select(BOT_ARCANA),
-            "Категория": _select(BARTER_CATEGORY),
-            "Группа": _text(pending["group_name"]),
-        }
-        if user_notion_id:
-            from core.notion_client import _relation
-            props["🪪 Пользователи"] = _relation(user_notion_id)
-        try:
-            pid = await page_create(db, props)
-            if pid:
-                created += 1
-        except Exception as e:
-            logger.warning("barter add_item failed for %r: %s", name, e)
+    barter_items = [
+        {"name": name, "category": BARTER_CATEGORY, "group": pending["group_name"]}
+        for name in items
+    ]
+    try:
+        result = await _lists_repo.add(barter_items, LIST_TYPE_CHECKLIST, BOT_ARCANA, user_notion_id)
+        created = len(result)
+    except Exception as e:
+        logger.warning("barter add_item batch failed: %s", e)
+        created = 0
 
     _drop(uid)
     await message.answer(f"✅ Создано {created} {_plural(created, 'пункт', 'пункта', 'пунктов')} бартера.")
@@ -193,27 +169,34 @@ _AMOUNT_RE = re.compile(r"(\d[\d\s.]*)\s*(?:₽|руб|рубл)", re.IGNORECASE
 
 
 async def _list_barter_for_group(group_name: str, user_notion_id: str) -> List[dict]:
-    db = config.db_lists
-    if not db or not group_name:
+    """Search arcana_inventory PG for barter checklist items of a given group."""
+    if not group_name:
         return []
-    base = {
-        "and": [
-            {"property": "Тип", "select": {"equals": LIST_TYPE_CHECKLIST}},
-            {"property": "Категория", "select": {"equals": BARTER_CATEGORY}},
-            {"property": "Группа", "rich_text": {"contains": group_name}},
-            {"property": "Статус", "status": {"does_not_equal": "Done"}},
-            {"property": "Статус", "status": {"does_not_equal": "Archived"}},
-        ]
-    }
-    filters = _with_user_filter(base, user_notion_id)
+    from core.list_manager import _arcana_repo
     try:
-        return await query_pages(db, filters=filters, page_size=100)
+        items = await _arcana_repo.get_list(
+            category=BARTER_CATEGORY,
+            user_notion_id=user_notion_id,
+        )
+        result = []
+        for it in items:
+            if it.status in ("done", "archived"):
+                continue
+            if it.list_type != "чеклист":
+                continue
+            if group_name.lower() not in it.group_name.lower():
+                continue
+            result.append({"_pg": it, "name": it.name, "id": str(it.id)})
+        return result
     except Exception as e:
         logger.warning("_list_barter_for_group failed: %s", e)
         return []
 
 
-def _name(page: dict) -> str:
+def _name(page) -> str:
+    """Extract item name — works with both old Notion pages and PG result dicts."""
+    if isinstance(page, dict) and "name" in page:
+        return page["name"]
     arr = (page.get("properties", {}).get("Название", {}) or {}).get("title") or []
     return "".join(t.get("plain_text", "") for t in arr).strip()
 
@@ -266,6 +249,8 @@ async def handle_reply_text(message: Message, text: str, user_notion_id: str = "
     handled = False
     low = (text or "").lower().strip()
 
+    from core.list_manager import _arcana_repo
+
     # ── 1) Деньги «закинула 1500₽ за приворот» ─────────────────────────────
     money_m = _AMOUNT_RE.search(text or "")
     if money_m and _DONE_VERBS_RE.search(text or ""):
@@ -273,20 +258,20 @@ async def handle_reply_text(message: Message, text: str, user_notion_id: str = "
         if amount > 0:
             try:
                 from datetime import date as _date
-                await _repo.add(
+                await _fin_repo.add(
                     date=_date.today().strftime("%Y-%m-%d"),
                     amount=amount,
                     category="🔮 Практика",
                     type_="💰 Доход",
                     source="💳 Карта",
-                    description=f"Бартер · {group_name}",
+                    description="Бартер · %s" % group_name,
                     bot_label=BOT_ARCANA,
                     user_notion_id=user_notion_id,
                 )
                 # Закрываем money-пункт чеклиста
                 money_item = next((p for p in items if _money_word(_name(p))), None)
                 if money_item:
-                    await update_page(money_item["id"], {"Статус": _status("Done")})
+                    await _arcana_repo.update_status(money_item["id"], "Done")
                 handled = True
             except Exception as e:
                 logger.warning("barter money handler failed: %s", e)
@@ -319,25 +304,21 @@ async def handle_reply_text(message: Message, text: str, user_notion_id: str = "
                     new_words = tail_tokens[best[0]:]
                     new_part = " ".join(new_words).strip(" -—:")
                     if new_part:
-                        await update_page(target["id"], {
-                            "Название": _title(new_part),
-                            "Статус": _status("Done"),
-                        })
+                        await _arcana_repo.update(
+                            target["id"], name=new_part, status="done"
+                        )
                         handled = True
         if not handled and old_part and new_part:
             target = _fuzzy_pick(old_part, items)
             if target:
-                await update_page(target["id"], {
-                    "Название": _title(new_part),
-                    "Статус": _status("Done"),
-                })
+                await _arcana_repo.update(target["id"], name=new_part, status="done")
                 handled = True
 
     # ── 3) «отдала X / закрыла X» — fuzzy match ────────────────────────────
     if not handled and _DONE_VERBS_RE.search(text or ""):
         target = _fuzzy_pick(text, items)
         if target:
-            await update_page(target["id"], {"Статус": _status("Done")})
+            await _arcana_repo.update_status(target["id"], "Done")
             handled = True
 
     if handled:

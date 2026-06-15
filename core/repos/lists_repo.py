@@ -113,15 +113,24 @@ class ListsRepo:
             user_notion_id, bot_name, type_=type_, group=group, category=category
         )
 
-    # ── Notion writes — sealed from handlers ─────────────────────────────────
+    # ── PG writes — sealed from handlers ────────────────────────────────────
 
     async def set_expiry(self, item_id: str, date_iso: str) -> None:
-        """Set Срок годности on a list item page."""
-        await _notion.update_page(item_id, {"Срок годности": _notion._date(date_iso)})
+        """Set expires_at on a list item (PG). Tries nexus_lists first, then arcana_inventory."""
+        from datetime import date as _date_type
+        try:
+            exp_date = _date_type.fromisoformat(date_iso[:10])
+        except ValueError:
+            return
+        ok = await _lm._nexus_repo.update(item_id, expires_at=exp_date)
+        if not ok:
+            await _lm._arcana_repo.update(item_id, expires_at=exp_date)
 
     async def mark_item_done(self, item_id: str) -> None:
-        """Set Статус=Done on a list item page without writing to Финансы."""
-        await _notion.update_page(item_id, {"Статус": _notion._status("Done")})
+        """Set status=Done on a list item (PG) without writing to Финансы."""
+        ok = await _lm._nexus_repo.update_status(item_id, "Done")
+        if not ok:
+            await _lm._arcana_repo.update_status(item_id, "Done")
 
     async def add_checklist_task(
         self, title: str, user_notion_id: str

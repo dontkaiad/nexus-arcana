@@ -507,6 +507,19 @@ def _ai_get_expiry_due_sync(today: date) -> List[InventoryItem]:
     return [_row_to_inventory_item(r) for r in rows]
 
 
+def _ai_get_group_remaining_sync(group_name: str, list_type: str) -> int:
+    q = (
+        select(arcana_inventory.c.id)
+        .where(arcana_inventory.c.group_name == group_name)
+        .where(arcana_inventory.c.list_type == _pg_type(list_type))
+        .where(arcana_inventory.c.status.notin_(["done", "archived"]))
+        .limit(1)
+    )
+    with _get_engine().connect() as conn:
+        row = conn.execute(q).fetchone()
+    return 0 if row is None else 1
+
+
 # ── Public async repos ─────────────────────────────────────────────────────────
 
 class PgNexusListsRepo:
@@ -663,3 +676,6 @@ class PgArcanaInventoryRepo:
 
     async def get_expiry_due(self, today: date) -> List[InventoryItem]:
         return await asyncio.to_thread(_ai_get_expiry_due_sync, today)
+
+    async def get_group_remaining(self, group_name: str, list_type: str) -> int:
+        return await asyncio.to_thread(_ai_get_group_remaining_sync, group_name, list_type)

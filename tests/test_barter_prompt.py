@@ -13,18 +13,17 @@ def _isolate_pending_db(monkeypatch, tmp_path):
     yield
 
 
-def _list_item(pid: str, name: str, status: str = "Not started") -> dict:
-    return {
-        "id": pid,
-        "properties": {
-            "Название": {"title": [{"plain_text": name, "text": {"content": name}}]},
-            "Статус": {"status": {"name": status}},
-            "Категория": {"select": {"name": "🔄 Бартер"}},
-            "Тип": {"select": {"name": "📋 Чеклист"}},
-            "Группа": {"rich_text": [{"plain_text": "приворот — Оля",
-                                       "text": {"content": "приворот — Оля"}}]},
-        },
-    }
+def _pg_item(pid, name, group="приворот — Оля", status="not_started"):
+    from core.repos.pg_nexus_lists_repo import InventoryItem
+    return InventoryItem(
+        id=pid,
+        name=name,
+        list_type="чеклист",
+        status=status,
+        category="🔄 Бартер",
+        group_name=group,
+        user_notion_id="u1",
+    )
 
 
 # ── 1. Pending создаётся после propose_barter_prompt ──────────────────────────
@@ -49,6 +48,7 @@ async def test_propose_barter_prompt_saves_pending_and_asks():
 
 @pytest.mark.asyncio
 async def test_pending_text_creates_n_checklist_items():
+    from arcana.handlers import barter_prompt
     from arcana.handlers.barter_prompt import handle_pending_text, _save, _load
     _save(22, {"kind": "ritual", "page_id": "rit-2", "group_name": "приворот — Оля"})
 
@@ -56,21 +56,29 @@ async def test_pending_text_creates_n_checklist_items():
     msg.from_user.id = 22
     msg.answer = AsyncMock()
 
-    pc = AsyncMock(side_effect=lambda db, props: f"new-{props['Название']['title'][0]['text']['content']}")
-    with patch("arcana.handlers.barter_prompt.page_create", pc):
+    mock_add = AsyncMock(return_value=["r1", "r2", "r3"])
+    with patch.object(barter_prompt._lists_repo, "add", mock_add):
         handled = await handle_pending_text(
             msg, "2 блока сигарет, мерч улицы восток, поездка в беларусь",
             user_notion_id="u1",
         )
     assert handled is True
-    assert pc.await_count == 3
-    # Все три созданы с правильными полями
-    for call in pc.await_args_list:
-        props = call.args[1]
-        assert props["Тип"]["select"]["name"] == "📋 Чеклист"
-        assert props["Категория"]["select"]["name"] == "🔄 Бартер"
-        assert props["Бот"]["select"]["name"] == "🌒 Arcana"
-        assert props["Группа"]["rich_text"][0]["text"]["content"] == "приворот — Оля"
+    mock_add.assert_awaited_once()
+    items_arg, list_type_arg, bot_arg = (
+        mock_add.await_args.args[0],
+        mock_add.await_args.args[1],
+        mock_add.await_args.args[2],
+    )
+    assert list_type_arg == "📋 Чеклист"
+    assert bot_arg == "🌒 Arcana"
+    assert len(items_arg) == 3
+    for it in items_arg:
+        assert it["category"] == "🔄 Бартер"
+        assert it["group"] == "приворот — Оля"
+    names = [it["name"] for it in items_arg]
+    assert "2 блока сигарет" in names
+    assert "мерч улицы восток" in names
+    assert "поездка в беларусь" in names
     # state очищен
     assert _load(22) is None
     # ответ «Создано N»
@@ -83,6 +91,7 @@ async def test_pending_text_creates_n_checklist_items():
 @pytest.mark.asyncio
 async def test_reply_otdala_marks_done():
     from arcana.handlers.barter_prompt import handle_reply_text
+    from core import list_manager as lm
 
     reply = MagicMock()
     reply.message_id = 555
@@ -101,25 +110,24 @@ async def test_reply_otdala_marks_done():
                                      "text": {"content": "приворот — Оля"}}]},
         },
     }
-    items = [
-        _list_item("b1", "блок сигарет"),
-        _list_item("b2", "мерч улицы восток"),
+    pg_items = [
+        _pg_item("b1", "блок сигарет"),
+        _pg_item("b2", "мерч улицы восток"),
     ]
+    mock_up_status = AsyncMock(return_value=True)
     with patch("core.message_pages.get_message_page",
                AsyncMock(return_value={"page_id": "rit-3", "page_type": "ritual",
                                         "bot": "arcana", "created_at": 0})), \
          patch("arcana.handlers.barter_prompt.get_page",
                AsyncMock(return_value=ritual_page)), \
-         patch("arcana.handlers.barter_prompt.query_pages",
-               AsyncMock(return_value=items)), \
-         patch("arcana.handlers.barter_prompt.update_page",
-               AsyncMock(return_value=None)) as up:
+         patch.object(lm._arcana_repo, "get_list", AsyncMock(return_value=pg_items)), \
+         patch.object(lm._arcana_repo, "update_status", mock_up_status):
         ok = await handle_reply_text(msg, "отдала блок сигарет", user_notion_id="u1")
     assert ok is True
-    up.assert_awaited_once()
-    args = up.await_args.args
+    mock_up_status.assert_awaited_once()
+    args = mock_up_status.await_args.args
     assert args[0] == "b1"  # «блок сигарет» победил
-    assert args[1]["Статус"]["status"]["name"] == "Done"
+    assert args[1] == "Done"
 
 
 # ── 4. Reply «вместо блока сигарет — колода таро» → rename + Done ────────────
@@ -127,6 +135,7 @@ async def test_reply_otdala_marks_done():
 @pytest.mark.asyncio
 async def test_reply_vmesto_renames_and_marks_done():
     from arcana.handlers.barter_prompt import handle_reply_text
+    from core import list_manager as lm
 
     reply = MagicMock()
     reply.message_id = 556
@@ -143,25 +152,23 @@ async def test_reply_vmesto_renames_and_marks_done():
         "properties": {"Название": {"title": [{"plain_text": "приворот — Оля",
                                                 "text": {"content": "приворот — Оля"}}]}},
     }
-    items = [_list_item("b9", "блок сигарет")]
+    pg_items = [_pg_item("b9", "блок сигарет")]
+    mock_update = AsyncMock(return_value=True)
     with patch("core.message_pages.get_message_page",
                AsyncMock(return_value={"page_id": "rit-4", "page_type": "ritual",
                                         "bot": "arcana", "created_at": 0})), \
          patch("arcana.handlers.barter_prompt.get_page",
                AsyncMock(return_value=ritual_page)), \
-         patch("arcana.handlers.barter_prompt.query_pages",
-               AsyncMock(return_value=items)), \
-         patch("arcana.handlers.barter_prompt.update_page",
-               AsyncMock(return_value=None)) as up:
+         patch.object(lm._arcana_repo, "get_list", AsyncMock(return_value=pg_items)), \
+         patch.object(lm._arcana_repo, "update", mock_update):
         ok = await handle_reply_text(msg, "вместо блока сигарет колода таро",
                                        user_notion_id="u1")
     assert ok is True
-    args = up.await_args.args
+    mock_update.assert_awaited_once()
+    args, kwargs = mock_update.await_args.args, mock_update.await_args.kwargs
     assert args[0] == "b9"
-    written = args[1]
-    assert written["Статус"]["status"]["name"] == "Done"
-    new_title = written["Название"]["title"][0]["text"]["content"]
-    assert new_title == "колода таро"
+    assert kwargs.get("name") == "колода таро"
+    assert kwargs.get("status") == "done"
 
 
 # ── 5. Reply «закинула 1500₽» → finance_add(Доход) + закрыть деньги-пункт ────
@@ -170,6 +177,7 @@ async def test_reply_vmesto_renames_and_marks_done():
 async def test_reply_money_creates_finance_and_closes_money_item():
     from arcana.handlers import barter_prompt
     from arcana.handlers.barter_prompt import handle_reply_text
+    from core import list_manager as lm
 
     reply = MagicMock()
     reply.message_id = 557
@@ -186,21 +194,20 @@ async def test_reply_money_creates_finance_and_closes_money_item():
         "properties": {"Название": {"title": [{"plain_text": "приворот — Оля",
                                                 "text": {"content": "приворот — Оля"}}]}},
     }
-    items = [
-        _list_item("m1", "откуп деньгами"),
-        _list_item("b2", "блок сигарет"),
+    pg_items = [
+        _pg_item("m1", "откуп деньгами"),
+        _pg_item("b2", "блок сигарет"),
     ]
     fa = AsyncMock(return_value="fin-OK")
+    mock_up_status = AsyncMock(return_value=True)
     with patch("core.message_pages.get_message_page",
                AsyncMock(return_value={"page_id": "rit-5", "page_type": "ritual",
                                         "bot": "arcana", "created_at": 0})), \
          patch("arcana.handlers.barter_prompt.get_page",
                AsyncMock(return_value=ritual_page)), \
-         patch("arcana.handlers.barter_prompt.query_pages",
-               AsyncMock(return_value=items)), \
-         patch("arcana.handlers.barter_prompt.update_page",
-               AsyncMock(return_value=None)) as up, \
-         patch.object(barter_prompt._repo, "add", fa):
+         patch.object(lm._arcana_repo, "get_list", AsyncMock(return_value=pg_items)), \
+         patch.object(lm._arcana_repo, "update_status", mock_up_status), \
+         patch.object(barter_prompt._fin_repo, "add", fa):
         ok = await handle_reply_text(msg, "закинула 1500₽ за приворот",
                                        user_notion_id="u1")
     assert ok is True
@@ -210,6 +217,7 @@ async def test_reply_money_creates_finance_and_closes_money_item():
     assert kw["bot_label"] == "🌒 Arcana"
     assert kw["type_"] == "💰 Доход"
     # Закрыли money-пункт «откуп деньгами»
-    up.assert_awaited()
-    assert up.await_args.args[0] == "m1"
-    assert up.await_args.args[1]["Статус"]["status"]["name"] == "Done"
+    mock_up_status.assert_awaited()
+    args = mock_up_status.await_args.args
+    assert args[0] == "m1"
+    assert args[1] == "Done"

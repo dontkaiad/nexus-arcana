@@ -79,11 +79,6 @@ class TestListManager:
         from core.list_manager import pending_del
         pending_del(88888)  # просто не должен упасть
 
-    def test_checkbox_helper(self):
-        from core.list_manager import _checkbox
-        assert _checkbox(True) == {"checkbox": True}
-        assert _checkbox(False) == {"checkbox": False}
-
     def test_today_iso(self):
         from core.list_manager import _today_iso
         result = _today_iso()
