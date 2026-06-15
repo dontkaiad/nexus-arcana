@@ -2024,26 +2024,6 @@ async def _do_save_task(message: Message, data: dict, chat_id: int = None, uid: 
         logger.info("_do_save_task: scheduling deadline task_id=%s deadline=%s", result[:8], deadline)
         await _schedule_deadline_check(cid, data["title"], deadline, result, tz_offset)
 
-    extra = ""
-    arcana_result = None
-    if data.get("for_practice") and config.arcana.db_tasks:
-        from core.notion_client import page_create as _page_create
-        arc_priority = await match_select(config.arcana.db_tasks, "Приоритет", data.get("priority") or "Важно")
-        arc_category = await match_select(config.arcana.db_tasks, "Категория", data.get("category", "💳 Прочее"))
-
-        arcana_props = {
-            "Задача":    _title(data["title"]),
-            "Статус":    {"status": {"name": "Not started"}},
-            "Приоритет": _select(arc_priority),
-            "Категория": _select(arc_category),
-        }
-        if data.get("deadline"):
-            arcana_props["Дедлайн"] = _date_with_tz(data["deadline"], tz_offset)
-
-        arcana_result = await _page_create(config.arcana.db_tasks, arcana_props)
-        if arcana_result:
-            extra = "\n🔮 Также добавлено в задачи Arcana"
-
     deadline_display = (data.get("deadline") or "без даты").replace("T", " ")
     reminder_display = (data.get("reminder_time") or "").replace("T", " ")
 
@@ -2071,12 +2051,12 @@ async def _do_save_task(message: Message, data: dict, chat_id: int = None, uid: 
         f"📌 {data['title']}\n"
         f"🏷 {real_category} · {_priority_display(real_priority)}\n"
         f"📅 Дедлайн: {deadline_display}\n"
-        f"🔔 Напоминание: {reminder_display}{repeat_line}{extra}"
+        f"🔔 Напоминание: {reminder_display}{repeat_line}"
     )
 
     # Inline-кнопки: предложить разбить на подзадачи
-    _rel = "work" if (data.get("for_practice") and arcana_result) else "task"
-    _tid = arcana_result if _rel == "work" else result
+    _rel = "task"
+    _tid = result
     _suggest_kb = InlineKeyboardMarkup(inline_keyboard=[[
         InlineKeyboardButton(text="📋 Подзадачи", callback_data=f"task_subtask_{_rel}_{_tid}"),
         InlineKeyboardButton(text="👌 Ок", callback_data="task_ok"),
