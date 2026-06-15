@@ -199,7 +199,8 @@ class ListsRepo:
             props["Категория"] = _notion._select(category)
         if user_page_id:
             props["🪪 Пользователи"] = _notion._relation(user_page_id)
-        return await _notion.page_create(db_tasks, props)
+        from nexus.repos.tasks_repo import _repo as _tasks_repo
+        return await _tasks_repo.create(db_tasks, props)
 
 
 _repo = ListsRepo()

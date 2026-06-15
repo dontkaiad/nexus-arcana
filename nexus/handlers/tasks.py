@@ -2478,17 +2478,20 @@ async def _apply_edit(
         except Exception:
             pass  # Если не смогли проверить — пробуем редактировать
         if record_type == "finance":
-            from core.notion_client import update_page as _update_page
-            db_id = config.nexus.db_finance
+            from core.repos.finance_repo import _repo as _fin_repo
             if field == "category":
-                real_cat = await match_select(db_id, "Категория", new_value)
-                await _update_page(page_id, {"Категория": _select(real_cat)})
+                ok = await _fin_repo.update_field(page_id, "category", new_value)
                 label = title or "последняя запись"
-                await message.answer(f"✏️ Категория{ctx_label}:\n🏷 → {real_cat}")
+                if ok:
+                    await message.answer(f"✏️ Категория{ctx_label}:\n🏷 → {new_value}")
+                else:
+                    await message.answer("⚠️ Не удалось обновить категорию.")
             elif field == "source":
-                real_src = await match_select(db_id, "Источник", new_value)
-                await _update_page(page_id, {"Источник": _select(real_src)})
-                await message.answer(f"✏️ Источник{ctx_label}:\n💳 → {real_src}")
+                ok = await _fin_repo.update_field(page_id, "source", new_value)
+                if ok:
+                    await message.answer(f"✏️ Источник{ctx_label}:\n💳 → {new_value}")
+                else:
+                    await message.answer("⚠️ Не удалось обновить источник.")
             else:
                 await message.answer(f"⚠️ Для финансов могу менять: категорию, источник.")
             return
