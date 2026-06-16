@@ -429,33 +429,17 @@ def test_finance_expense_requires_category(client):
 # ── GET /api/categories ──────────────────────────────────────────────────────
 
 def test_categories_task_returns_merged_list(client):
-    """GET /api/categories?type=task возвращает существующие + дефолты."""
-    pages = [
-        {"id": "t1", "properties": {"Категория": {"select": {"name": "🐾 Коты"}}}},
-        {"id": "t2", "properties": {"Категория": {"select": {"name": "🐾 Коты"}}}},
-        {"id": "t3", "properties": {"Категория": {"select": {"name": "💜 Люди"}}}},
-        # запись без категории
-        {"id": "t4", "properties": {"Категория": {"select": None}}},
-    ]
+    """GET /api/categories?type=task возвращает коды из PG task_category."""
+    fake_cats = ["🐾 Коты", "💜 Люди", "🏠 Дом", "💼 Работа"]
 
-    async def qp(*_, **__):
-        return pages
-
-    with patch("miniapp.backend.routes.categories.query_pages", side_effect=qp), \
-         patch("miniapp.backend.routes.categories.get_user_notion_id",
-               AsyncMock(return_value=FAKE_NOTION_USER)):
+    with patch("miniapp.backend.routes.categories._task_categories_sync",
+               return_value=fake_cats):
         r = client.get("/api/categories?type=task")
 
     assert r.status_code == 200
     data = r.json()
     assert data["type"] == "task"
-    assert "🐾 Коты" in data["categories"]
-    assert "💜 Люди" in data["categories"]
-    # дефолты тоже добавились
-    assert "🏠 Дом" in data["categories"]
-    assert "💼 Работа" in data["categories"]
-    # без дублирования
-    assert data["categories"].count("🐾 Коты") == 1
+    assert data["categories"] == fake_cats
 
 
 def test_categories_invalid_type(client):
@@ -464,15 +448,10 @@ def test_categories_invalid_type(client):
 
 
 def test_categories_income_returns_defaults_when_empty(client):
-    async def qp(*_, **__):
-        return []
-
-    with patch("miniapp.backend.routes.categories.query_pages", side_effect=qp), \
-         patch("miniapp.backend.routes.categories.get_user_notion_id",
-               AsyncMock(return_value="")):
-        r = client.get("/api/categories?type=income")
+    """GET /api/categories?type=income возвращает INCOME_CATEGORIES из config."""
+    r = client.get("/api/categories?type=income")
 
     assert r.status_code == 200
     cats = r.json()["categories"]
-    assert "💼 Зарплата" in cats
-    assert "🏦 Прочее" in cats
+    assert "💰 Зарплата" in cats
+    assert "💳 Прочее" in cats
