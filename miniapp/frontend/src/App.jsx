@@ -6304,12 +6304,6 @@ const FAB_TITLE = {
   grimoire: "В гримуар",
 };
 
-const EXPENSE_CATS = [
-  "🍜 Продукты", "🍱 Кафе", "🚕 Транспорт", "🚬 Привычки",
-  "💅 Бьюти", "🏠 Жильё", "💻 Подписки", "🐾 Коты",
-  "🎲 Импульсивные", "💳 Прочее",
-];
-
 const PRIOS = ["🔴", "🟡", "⚪"];
 
 function Input({ s, value, onChange, placeholder, type = "text", step }) {
@@ -6401,10 +6395,6 @@ function QuickForm({ s, kind, onDone, botType = "nexus" }) {
   );
 }
 
-const INCOME_CATS = [
-  "💼 Зарплата", "💰 Фриланс", "🎁 Подарок", "🏦 Прочее",
-];
-
 const NEXUS_FINANCE_TYPES = [
   { k: "expense", label: "💸 Расход" },
   { k: "income", label: "💰 Доход" },
@@ -6420,14 +6410,38 @@ function ExpenseForm({ s, onSubmit, busy, botType = "nexus" }) {
   const financeTypes = botType === "arcana" ? ARCANA_FINANCE_TYPES : NEXUS_FINANCE_TYPES;
   const [type, setType] = useState("expense");
   const [amount, setAmount] = useState("");
-  const [cat, setCat] = useState(EXPENSE_CATS[0]);
+  const [cat, setCat] = useState("");
   const [desc, setDesc] = useState("");
   const [splits, setSplits] = useState([]); // [{cat, amount, desc}]
   // debt-only
   const [debtName, setDebtName] = useState("");
   const [debtDeadline, setDebtDeadline] = useState("");
+  const [expenseCats, setExpenseCats] = useState([]);
+  const [incomeCats, setIncomeCats] = useState([]);
 
-  const catsForType = type === "income" ? INCOME_CATS : EXPENSE_CATS;
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const r = await apiGet("/api/categories?type=expense");
+        if (!cancelled && r?.categories) setExpenseCats(r.categories);
+      } catch (_) { /* ignore */ }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const r = await apiGet("/api/categories?type=income");
+        if (!cancelled && r?.categories) setIncomeCats(r.categories);
+      } catch (_) { /* ignore */ }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  const catsForType = type === "income" ? incomeCats : expenseCats;
 
   const changeType = (t) => {
     setType(t);
@@ -6435,15 +6449,15 @@ function ExpenseForm({ s, onSubmit, busy, botType = "nexus" }) {
     if (t === "practice_income") {
       setCat("");
     } else if (t === "income") {
-      setCat(INCOME_CATS[0]);
+      setCat(incomeCats[0] || "");
     } else if (t === "debt") {
       setCat("");
     } else {
-      setCat(EXPENSE_CATS[0]);
+      setCat(expenseCats[0] || "");
     }
   };
 
-  const addSplit = () => setSplits((x) => [...x, { cat: EXPENSE_CATS[0], amount: "", desc: "" }]);
+  const addSplit = () => setSplits((x) => [...x, { cat: expenseCats[0] || "", amount: "", desc: "" }]);
   const updSplit = (i, patch) => setSplits((x) => x.map((s0, idx) => idx === i ? { ...s0, ...patch } : s0));
   const rmSplit = (i) => setSplits((x) => x.filter((_, idx) => idx !== i));
 
@@ -6554,7 +6568,7 @@ function ExpenseForm({ s, onSubmit, busy, botType = "nexus" }) {
               <Input s={s} value={row.amount} onChange={(v) => updSplit(i, { amount: v })}
                      placeholder="Сумма, ₽" type="number" step="1" />
               <PillSelect s={s} value={row.cat} onChange={(v) => updSplit(i, { cat: v })}
-                          options={EXPENSE_CATS} />
+                          options={expenseCats} />
               <Input s={s} value={row.desc} onChange={(v) => updSplit(i, { desc: v })}
                      placeholder="Описание" />
             </div>
