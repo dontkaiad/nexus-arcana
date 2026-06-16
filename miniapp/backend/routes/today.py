@@ -8,9 +8,11 @@ from typing import Any, Optional
 from fastapi import APIRouter, Depends
 
 from core.config import config
-from core.notion_client import memory_get, query_pages
+from core.notion_client import query_pages
 from core.claude_client import ask_claude
 from core.user_manager import get_user_notion_id
+from core.repos.pg_finance_repo import PgNexusBudgetRepo
+from core.repos.pg_memory_repo import PgMemoryRepo
 
 from miniapp.backend import cache
 from miniapp.backend.auth import current_user_id
@@ -30,6 +32,9 @@ from miniapp.backend._helpers import (
 logger = logging.getLogger("miniapp.today")
 
 router = APIRouter()
+
+_budget_repo = PgNexusBudgetRepo()
+_memory_repo = PgMemoryRepo()
 
 _WEEKDAYS_RU = ["пн", "вт", "ср", "чт", "пт", "сб", "вс"]
 _DEFAULT_BUDGET_DAY = 4166
@@ -98,34 +103,27 @@ async def _fetch_nexus_tasks(user_notion_id: str) -> list[dict]:
 
 
 async def _spent_today(user_notion_id: str, today_iso: str, tomorrow_iso: str) -> int:
-    filters = {
-        "and": [
-            {"property": "Бот", "select": {"equals": BOT_NEXUS}},
-            {"property": "Тип", "select": {"equals": "💸 Расход"}},
-            {"property": "Дата", "date": {"on_or_after": today_iso}},
-            {"property": "Дата", "date": {"before": tomorrow_iso}},
-        ]
-    }
-    if user_notion_id:
-        filters["and"].append({
-            "property": "🪪 Пользователи",
-            "relation": {"contains": user_notion_id},
-        })
-    pages = await query_pages(config.nexus.db_finance, filters=filters, page_size=100)
-    total = 0.0
-    for p in pages:
-        amt = (p.get("properties", {}).get("Сумма", {}).get("number")) or 0
-        total += amt
-    return int(round(total))
+    try:
+        entries = await _budget_repo.query(
+            date_from=today_iso,
+            date_to=tomorrow_iso,
+            type_="💸 Расход",
+            page_size=100,
+            user_notion_id=user_notion_id,
+        )
+        return int(round(sum(e.amount for e in entries)))
+    except Exception as e:
+        logger.warning("_spent_today PG query failed: %s", e)
+        return 0
 
 
 async def _budget_day_limit() -> int:
-    raw = await memory_get("budget_day_limit")
-    if raw:
-        try:
-            return int(float(raw))
-        except (ValueError, TypeError):
-            pass
+    try:
+        mems = await _memory_repo.find_by_key("budget_day_limit", page_size=1)
+        if mems:
+            return int(float(mems[0].fact))
+    except (ValueError, TypeError, Exception):
+        pass
     return _DEFAULT_BUDGET_DAY
 
 

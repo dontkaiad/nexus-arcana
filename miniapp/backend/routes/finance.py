@@ -2,15 +2,12 @@
 from __future__ import annotations
 
 import logging
-import os
 import re
 from datetime import date, timedelta
-from typing import Any, Optional
+from typing import Any, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
-from core.config import config
-from core.notion_client import query_pages
 from core.user_manager import get_user_notion_id
 from core.budget import (
     DEBT_RE,
@@ -21,19 +18,21 @@ from core.budget import (
     load_budget_data,
     parse_amount,
 )
+from core.repos.pg_finance_repo import BudgetEntry, PgNexusBudgetRepo
+from core.repos.pg_memory_repo import PgMemoryRepo, Memory
 
 from miniapp.backend.auth import current_user_id
 from miniapp.backend._helpers import (
-    BOT_NEXUS,
     cat_from_notion,
-    select_name,
-    title_text,
     today_user_tz,
 )
 
 logger = logging.getLogger("miniapp.finance")
 
 router = APIRouter()
+
+_budget_repo = PgNexusBudgetRepo()
+_mem_repo = PgMemoryRepo()
 
 ALLOWED_VIEWS = {"today", "month", "limits", "goals"}
 
@@ -50,7 +49,7 @@ def _zone(pct: int) -> str:
     return "red"
 
 
-def _month_bounds(month: str) -> tuple[str, str]:
+def _month_bounds(month: str) -> tuple:
     """'2026-04' → ('2026-04-01', '2026-05-01')."""
     y, m = int(month[:4]), int(month[5:7])
     start = f"{y}-{m:02d}-01"
@@ -64,36 +63,28 @@ async def _nexus_finance_records(
     date_on_or_after: str,
     date_before: str,
     type_filter: Optional[str] = None,
-) -> list[dict]:
+) -> List[BudgetEntry]:
     """Факт. финансовые записи Nexus в диапазоне [start, end)."""
-    conditions: list[dict] = [
-        {"property": "Бот", "select": {"equals": BOT_NEXUS}},
-        {"property": "Дата", "date": {"on_or_after": date_on_or_after}},
-        {"property": "Дата", "date": {"before": date_before}},
-    ]
-    if type_filter:
-        conditions.append({"property": "Тип", "select": {"equals": type_filter}})
-    if user_notion_id:
-        conditions.append({
-            "property": "🪪 Пользователи",
-            "relation": {"contains": user_notion_id},
-        })
-    return await query_pages(
-        config.nexus.db_finance, filters={"and": conditions}, page_size=500,
-    )
+    try:
+        return await _budget_repo.query(
+            date_from=date_on_or_after,
+            date_to=date_before,
+            type_=type_filter or None,
+            page_size=500,
+            user_notion_id=user_notion_id,
+        )
+    except Exception as e:
+        logger.warning("_nexus_finance_records PG query failed: %s", e)
+        return []
 
 
-def _extract_finance_item(page: dict) -> dict:
-    props = page.get("properties", {})
-    amt = (props.get("Сумма", {}).get("number")) or 0
-    type_name = select_name(props.get("Тип", {}))
-    cat_full = select_name(props.get("Категория", {}))
+def _extract_finance_item(entry: BudgetEntry) -> dict:
     return {
-        "id": page.get("id", ""),
-        "desc": title_text(props.get("Описание", {})),
-        "cat": cat_from_notion(cat_full),
-        "amt": int(round(amt)),
-        "type": "income" if "Доход" in type_name else "expense",
+        "id": entry.id,
+        "desc": entry.description,
+        "cat": cat_from_notion(entry.category),
+        "amt": int(round(entry.amount)),
+        "type": "income" if "Доход" in entry.type_ else "expense",
     }
 
 
@@ -103,13 +94,12 @@ _DEFAULT_BUDGET_DAY = 4166
 
 
 async def _budget_day_limit() -> int:
-    from core.notion_client import memory_get
-    raw = await memory_get("budget_day_limit")
-    if raw:
-        try:
-            return int(float(raw))
-        except (ValueError, TypeError):
-            pass
+    try:
+        mems = await _mem_repo.find_by_key("budget_day_limit", page_size=1)
+        if mems:
+            return int(float(mems[0].fact))
+    except (ValueError, TypeError, Exception):
+        pass
     return _DEFAULT_BUDGET_DAY
 
 
@@ -121,10 +111,9 @@ async def _view_today(tg_id: int) -> dict:
 
     records = await _nexus_finance_records(user_notion_id, today_iso, tomorrow_iso,
                                            type_filter="💸 Расход")
-    items = [_extract_finance_item(p) for p in records]
+    items = [_extract_finance_item(e) for e in records]
     total = sum(i["amt"] for i in items)
 
-    # wave6.1.3: блок бюджета дня (как в /api/today) — пропал в волне 5
     budget_day = await _budget_day_limit()
     left = max(0, budget_day - total)
     pct = _pct(total, budget_day)
@@ -151,22 +140,18 @@ async def _view_month(tg_id: int, month: str) -> dict:
     records = await _nexus_finance_records(user_notion_id, start, end)
     income = 0.0
     expense = 0.0
-    by_cat: dict[str, float] = {}
-    for p in records:
-        props = p.get("properties", {})
-        amt = (props.get("Сумма", {}).get("number")) or 0
-        type_name = select_name(props.get("Тип", {}))
-        cat_full = select_name(props.get("Категория", {}))
-        if "Доход" in type_name:
-            income += amt
-        elif "Расход" in type_name:
-            expense += amt
-            if cat_full:
-                by_cat[cat_full] = by_cat.get(cat_full, 0) + amt
+    by_cat: dict = {}
+    for entry in records:
+        if "Доход" in entry.type_:
+            income += entry.amount
+        elif "Расход" in entry.type_:
+            expense += entry.amount
+            if entry.category:
+                by_cat[entry.category] = by_cat.get(entry.category, 0) + entry.amount
 
     limits_map = await get_limits()  # {cat_link: amount}
 
-    by_category: list[dict] = []
+    by_category: List[dict] = []
     for cat_full, spent in sorted(by_cat.items(), key=lambda kv: -kv[1]):
         limit = limits_map.get(cat_link(cat_full))
         item = {
@@ -195,18 +180,15 @@ async def _view_limits(tg_id: int, month: str) -> dict:
 
     records = await _nexus_finance_records(user_notion_id, start, end,
                                            type_filter="💸 Расход")
-    spent_by_link: dict[str, float] = {}
-    for p in records:
-        props = p.get("properties", {})
-        amt = (props.get("Сумма", {}).get("number")) or 0
-        cat_full = select_name(props.get("Категория", {}))
-        if cat_full:
-            link = cat_link(cat_full)
-            spent_by_link[link] = spent_by_link.get(link, 0) + amt
+    spent_by_link: dict = {}
+    for entry in records:
+        if entry.category:
+            link = cat_link(entry.category)
+            spent_by_link[link] = spent_by_link.get(link, 0) + entry.amount
 
     limits_map = await get_limits()
 
-    categories: list[dict] = []
+    categories: List[dict] = []
     for link, limit in limits_map.items():
         spent = spent_by_link.get(link, 0)
         pct = _pct(spent, limit)
@@ -246,7 +228,7 @@ def _add_months(d: date, n: int) -> date:
     return date(y, m, 1)
 
 
-def _debt_schedule(amount: float, monthly_payment: float, today_d: date) -> list[dict]:
+def _debt_schedule(amount: float, monthly_payment: float, today_d: date) -> List[dict]:
     """[{'month': 'май 2026', 'amount': 20000}, ...] — план выплат от текущего месяца.
 
     Если monthly_payment == 0 → [] (долг отложен).
@@ -254,7 +236,7 @@ def _debt_schedule(amount: float, monthly_payment: float, today_d: date) -> list
     """
     if monthly_payment <= 0 or amount <= 0:
         return []
-    schedule: list[dict] = []
+    schedule: List[dict] = []
     remaining = amount
     cur = date(today_d.year, today_d.month, 1)
     while remaining > 0 and len(schedule) < 60:
@@ -308,9 +290,9 @@ def _serialize_debt(d: dict, today_d: date) -> dict:
     }
 
 
-def _all_debts_close_label(debts_serialized: list[dict]) -> Optional[str]:
+def _all_debts_close_label(debts_serialized: List[dict]) -> Optional[str]:
     """Самая поздняя дата окончания платежей среди всех долгов с графиком."""
-    months_order: list[tuple[int, int, str]] = []  # (year, month_idx, label)
+    months_order: List[tuple] = []  # (year, month_idx, label)
     name_to_idx = {v: k for k, v in _RU_MONTHS_NOM.items()}
     for d in debts_serialized:
         if not d.get("ends"):
@@ -348,10 +330,8 @@ def _serialize_goal(g: dict, today_d: date, all_debts_close: Optional[str]) -> d
     }
 
 
-async def _find_debt_taken_dates(user_notion_id: str, today_d: date) -> dict[str, str]:
-    """Ищет в финансах доходы со словом «долг» в описании за последние 5 лет.
-    Возвращает {имя_контрагента_lowercase: ISO-дата самой ранней такой записи}.
-    """
+async def _find_debt_taken_dates(user_notion_id: str, today_d: date) -> dict:
+    """Ищет в финансах доходы со словом «долг» в описании за последние 5 лет."""
     start = date(today_d.year - 5, 1, 1).isoformat()
     end = date(today_d.year + 1, 1, 1).isoformat()
     try:
@@ -359,26 +339,22 @@ async def _find_debt_taken_dates(user_notion_id: str, today_d: date) -> dict[str
     except Exception as e:
         logger.warning("debt taken-dates query failed: %s", e)
         return {}
-    found: dict[str, str] = {}
-    for p in records:
-        props = p.get("properties", {})
-        type_name = select_name(props.get("Тип", {}))
-        if "Доход" not in type_name:
+    found: dict = {}
+    for entry in records:
+        if "Доход" not in entry.type_:
             continue
-        desc = (title_text(props.get("Описание", {})) or "").lower()
+        desc = (entry.description or "").lower()
         if "долг" not in desc:
             continue
-        date_raw = (props.get("Дата", {}).get("date") or {}).get("start") or ""
-        if not date_raw:
+        if not entry.date:
             continue
-        # выбираем самую раннюю — это и есть дата взятия
         prev = found.get(desc)
-        if prev is None or date_raw < prev:
-            found[desc] = date_raw[:10]
+        if prev is None or entry.date < prev:
+            found[desc] = entry.date[:10]
     return found
 
 
-def _match_taken_date(debt_name: str, taken_map: dict[str, str]) -> Optional[str]:
+def _match_taken_date(debt_name: str, taken_map: dict) -> Optional[str]:
     """Подбирает дату взятия по вхождению имени контрагента в описание."""
     needle = (debt_name or "").strip().lower()
     if not needle:
@@ -390,30 +366,21 @@ def _match_taken_date(debt_name: str, taken_map: dict[str, str]) -> Optional[str
     return best
 
 
-async def _load_desc_synonyms(user_notion_id: str) -> dict[str, str]:
-    """wave8.64: из записей памяти «🛒 Предпочтения» строит карту синоним→канон.
-    Формат факта: «A/B/C = canonical[, ...]» — всё слева от «=» нормализуется к тому, что справа.
-    """
-    from core.notion_client import db_query
-    mem_db = os.environ.get("NOTION_DB_MEMORY") or config.nexus.db_memory
-    if not mem_db:
-        return {}
-    conditions: list[dict] = [
-        {"property": "Категория", "select": {"equals": "🛒 Предпочтения"}},
-        {"property": "Актуально", "checkbox": {"equals": True}},
-    ]
-    if user_notion_id:
-        conditions.append({"property": "🪪 Пользователи",
-                           "relation": {"contains": user_notion_id}})
+async def _load_desc_synonyms(user_notion_id: str) -> dict:
+    """wave8.64: из записей памяти «🛒 Предпочтения» строит карту синоним→канон."""
     try:
-        pages = await db_query(mem_db, filter_obj={"and": conditions}, page_size=200)
+        mems = await _mem_repo.find_by_category(
+            "🛒 Предпочтения",
+            is_current=True,
+            user_notion_id=user_notion_id,
+            page_size=200,
+        )
     except Exception as e:
         logger.warning("desc synonyms query failed: %s", e)
         return {}
-    syn: dict[str, str] = {}
-    for p in pages:
-        parts = p.get("properties", {}).get("Текст", {}).get("title", [])
-        fact = parts[0]["plain_text"] if parts else ""
+    syn: dict = {}
+    for mem in mems:
+        fact = mem.fact or ""
         if "=" not in fact:
             continue
         left, right = fact.split("=", 1)
@@ -427,37 +394,25 @@ async def _load_desc_synonyms(user_notion_id: str) -> dict[str, str]:
     return syn
 
 
-async def _load_closed_budget(user_notion_id: str) -> dict[str, list[dict]]:
-    """Закрытые долги/цели (Актуально == false). closed_at = last_edited_time[:10]."""
-    from core.notion_client import db_query
-    from core.config import config
-    mem_db = os.environ.get("NOTION_DB_MEMORY") or config.nexus.db_memory
-    out: dict[str, list[dict]] = {"долги": [], "цели": []}
-    if not mem_db:
-        return out
-    key_filter = {"or": [
-        {"property": "Ключ", "rich_text": {"starts_with": "цель_"}},
-        {"property": "Ключ", "rich_text": {"starts_with": "долг_"}},
-    ]}
-    conditions: list[dict] = [
-        key_filter,
-        {"property": "Актуально", "checkbox": {"equals": False}},
-    ]
-    if user_notion_id:
-        conditions.append({"property": "🪪 Пользователи",
-                           "relation": {"contains": user_notion_id}})
+async def _load_closed_budget(user_notion_id: str) -> dict:
+    """Закрытые долги/цели (is_current == False). closed_at = mem.date[:10]."""
+    out: dict = {"долги": [], "цели": []}
     try:
-        pages = await db_query(mem_db, filter_obj={"and": conditions}, page_size=200)
+        all_closed = await _mem_repo.find_by_category(
+            "",
+            is_current=False,
+            user_notion_id=user_notion_id,
+            page_size=200,
+        )
     except Exception as e:
         logger.warning("closed budget query failed: %s", e)
         return out
-    for p in pages:
-        props = p.get("properties", {})
-        fact_parts = props.get("Текст", {}).get("title", [])
-        fact = fact_parts[0]["plain_text"] if fact_parts else ""
-        key_parts = props.get("Ключ", {}).get("rich_text", [])
-        key = key_parts[0]["plain_text"].strip().lower() if key_parts else ""
-        closed_at = (p.get("last_edited_time") or "")[:10] or None
+    for mem in all_closed:
+        key = (mem.key or "").strip().lower()
+        if not key.startswith(("цель_", "долг_")):
+            continue
+        fact = mem.fact or ""
+        closed_at = (mem.date or "")[:10] or None
         if key.startswith("цель_"):
             m = GOAL_RE.search(fact)
             if not m:
@@ -523,7 +478,7 @@ async def get_finance(
     tg_id: int = Depends(current_user_id),
     view: str = Query("today", description="today|month|limits|goals"),
     month: Optional[str] = Query(None, description="YYYY-MM"),
-) -> dict[str, Any]:
+) -> dict:
     if view not in ALLOWED_VIEWS:
         raise HTTPException(status_code=400, detail=f"view must be one of {sorted(ALLOWED_VIEWS)}")
 
@@ -545,7 +500,7 @@ async def get_finance_category(
     tg_id: int = Depends(current_user_id),
     cat: str = Query(..., description="Полное имя категории (с emoji), например '🏠 Ж***'"),
     month: Optional[str] = Query(None, description="YYYY-MM"),
-) -> dict[str, Any]:
+) -> dict:
     """Wave5.9: drill-down — все траты по категории за месяц."""
     if not month:
         today_date, _ = await today_user_tz(tg_id)
@@ -554,42 +509,32 @@ async def get_finance_category(
     user_notion_id = (await get_user_notion_id(tg_id)) or ""
     start_iso, end_iso = _month_bounds(month)
 
-    # wave8.50: используем общий загрузчик и фильтруем тип/категорию в Python —
-    # в Notion-select встречаются варианты "💸 Расход"/"Расход"/"💸 Покупка",
-    # из-за жёсткого equals-фильтра drill-down ловил пустоту, хотя сводка месяца
-    # такие траты считала (там match по подстроке "Расход").
     try:
-        pages = await _nexus_finance_records(user_notion_id, start_iso, end_iso)
+        records = await _nexus_finance_records(user_notion_id, start_iso, end_iso)
     except Exception as e:
         logger.warning("finance/category query failed: %s", e)
-        pages = []
+        records = []
 
     synonyms = await _load_desc_synonyms(user_notion_id)
 
-    items: list[dict] = []
+    items: List[dict] = []
     total = 0.0
-    by_desc: dict[str, float] = {}
-    for p in pages:
-        props = p.get("properties", {})
-        type_name = select_name(props.get("Тип", {}))
-        if "Расход" not in type_name:
+    by_desc: dict = {}
+    for entry in records:
+        if "Расход" not in entry.type_:
             continue
-        cat_full = select_name(props.get("Категория", {}))
-        if cat_full != cat:
+        if entry.category != cat:
             continue
-        amount = (props.get("Сумма", {}).get("number")) or 0
-        desc = title_text(props.get("Описание", {}))
-        date_raw = (props.get("Дата", {}).get("date") or {}).get("start") or ""
         items.append({
-            "id": p.get("id", ""),
-            "amount": amount,
-            "desc": desc,
-            "date": date_raw[:10],
+            "id": entry.id,
+            "amount": entry.amount,
+            "desc": entry.description,
+            "date": entry.date[:10] if entry.date else "",
         })
-        total += amount
-        raw_key = (desc or "—").strip().lower()
+        total += entry.amount
+        raw_key = (entry.description or "—").strip().lower()
         key = synonyms.get(raw_key, raw_key)
-        by_desc[key] = by_desc.get(key, 0) + amount
+        by_desc[key] = by_desc.get(key, 0) + entry.amount
 
     items.sort(key=lambda x: x["date"], reverse=True)
 

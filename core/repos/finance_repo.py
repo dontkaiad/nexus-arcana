@@ -175,12 +175,14 @@ class FinanceRepo:
         type_: Optional[str] = None,
         category: Optional[str] = None,
         page_size: int = 200,
+        user_notion_id: str = "",
         db_id: Optional[str] = None,  # backward compat, ignored
     ) -> List[FinanceEntry]:
         """Query records by date range. Unions nexus_budget + arcana_pnl."""
         nexus_rows, arcana_rows = await _query_both(
             date_from=date_from, date_to=date_to,
             type_=type_, category=category, page_size=page_size,
+            user_notion_id=user_notion_id,
         )
         result = (
             [_budget_to_fe(r) for r in nexus_rows]
@@ -197,8 +199,12 @@ class FinanceRepo:
         type_filter: str = "",
     ) -> List[FinanceEntry]:
         """Return all records for a month (YYYY-MM) from both tables."""
-        nexus_rows = await _nexus_repo.query_month(month, description_filter, type_filter)
-        arcana_rows = await _arcana_repo.query_month(month, description_filter, type_filter)
+        nexus_rows = await _nexus_repo.query_month(
+            month, description_filter, type_filter, user_notion_id
+        )
+        arcana_rows = await _arcana_repo.query_month(
+            month, description_filter, type_filter, user_notion_id
+        )
         result = (
             [_budget_to_fe(r) for r in nexus_rows]
             + [_pnl_to_fe(r) for r in arcana_rows]
@@ -210,11 +216,12 @@ class FinanceRepo:
 async def _query_both(
     date_from: str, date_to: str,
     type_: Optional[str], category: Optional[str], page_size: int,
+    user_notion_id: str = "",
 ):
     import asyncio as _asyncio
     return await _asyncio.gather(
-        _nexus_repo.query(date_from, date_to, type_, category, page_size),
-        _arcana_repo.query(date_from, date_to, type_, category, page_size),
+        _nexus_repo.query(date_from, date_to, type_, category, page_size, user_notion_id),
+        _arcana_repo.query(date_from, date_to, type_, category, page_size, user_notion_id),
     )
 
 

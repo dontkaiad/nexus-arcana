@@ -251,8 +251,8 @@ def _today_get_response(client, tasks):
     qp_mock = _build_qp_mock(tasks)
     today_date = _today_local_date(3)
     with patch("miniapp.backend.routes.today.query_pages", side_effect=qp_mock), \
-         patch("miniapp.backend.routes.today.memory_get",
-               AsyncMock(return_value=None)), \
+         patch("miniapp.backend.routes.today._budget_repo.query", AsyncMock(return_value=[])), \
+         patch("miniapp.backend.routes.today._memory_repo.find_by_key", AsyncMock(return_value=[])), \
          patch("miniapp.backend.routes.today.ask_claude",
                AsyncMock(return_value="tip")), \
          patch("miniapp.backend.routes.today.today_user_tz",

@@ -11,6 +11,8 @@ from miniapp.backend import cache
 from miniapp.backend.app import app
 from miniapp.backend.auth import current_user_id
 from miniapp.backend.routes.today import first_emoji
+from core.repos.pg_finance_repo import BudgetEntry
+from core.repos.pg_memory_repo import Memory
 
 
 FAKE_TG_ID = 67686090
@@ -127,13 +129,19 @@ def test_today_returns_all_keys_and_classifies_tasks(client):
         _make_task("t-future", "Отправить счёт",
                    deadline=tomorrow, cat="💻 Подписки", prio="🟡 Важно"),
     ]
-    expenses = [_make_expense(1500), _make_expense(1104)]
+    expenses = [
+        BudgetEntry(id="f1", description="test", amount=1500, category="🚬 Привычки",
+                    type_="💸 Расход", source="💳 Карта", date=today, user_notion_id=""),
+        BudgetEntry(id="f2", description="test", amount=1104, category="🍜 Продукты",
+                    type_="💸 Расход", source="💳 Карта", date=today, user_notion_id=""),
+    ]
 
-    qp_mock = _build_query_pages_mock(tasks, expenses, [])
+    qp_mock = _build_query_pages_mock(tasks, [], [])
     claude_mock = AsyncMock(return_value="Начни с лотка — 2 минуты.")
 
     with patch("miniapp.backend.routes.today.query_pages", side_effect=qp_mock), \
-         patch("miniapp.backend.routes.today.memory_get", AsyncMock(return_value=None)), \
+         patch("miniapp.backend.routes.today._budget_repo.query", AsyncMock(return_value=expenses)), \
+         patch("miniapp.backend.routes.today._memory_repo.find_by_key", AsyncMock(return_value=[])), \
          patch("miniapp.backend.routes.today.ask_claude", claude_mock), \
          patch("miniapp.backend.routes.today.today_user_tz", AsyncMock(return_value=(_today_local_date(tz), tz))), \
          patch("miniapp.backend.routes.today.get_user_notion_id",
@@ -202,7 +210,8 @@ def test_today_caches_adhd_tip_across_calls(client):
     claude_mock = AsyncMock(return_value="Дыши спокойно, ты сегодня точно справишься.")
 
     with patch("miniapp.backend.routes.today.query_pages", side_effect=qp_mock), \
-         patch("miniapp.backend.routes.today.memory_get", AsyncMock(return_value=None)), \
+         patch("miniapp.backend.routes.today._budget_repo.query", AsyncMock(return_value=[])), \
+         patch("miniapp.backend.routes.today._memory_repo.find_by_key", AsyncMock(return_value=[])), \
          patch("miniapp.backend.routes.today.ask_claude", claude_mock), \
          patch("miniapp.backend.routes.today.today_user_tz", AsyncMock(return_value=(_today_local_date(tz), tz))), \
          patch("miniapp.backend.routes.today.get_user_notion_id",
@@ -225,11 +234,18 @@ def test_today_caches_adhd_tip_across_calls(client):
 
 def test_today_uses_custom_budget_from_memory(client):
     tz = 3
-    qp_mock = _build_query_pages_mock([], [_make_expense(600)], [])
+    today_iso = _today_local_iso(tz)
+    budget_mem = Memory(id="1", fact="5000", category="💰 Лимит", related_to="", key="budget_day_limit")
+    expense_entry = BudgetEntry(id="f1", description="test", amount=600,
+                                category="🍜 Продукты", type_="💸 Расход",
+                                source="💳 Карта", date=today_iso, user_notion_id="")
+    qp_mock = _build_query_pages_mock([], [], [])
 
     with patch("miniapp.backend.routes.today.query_pages", side_effect=qp_mock), \
-         patch("miniapp.backend.routes.today.memory_get",
-               AsyncMock(return_value="5000")), \
+         patch("miniapp.backend.routes.today._budget_repo.query",
+               AsyncMock(return_value=[expense_entry])), \
+         patch("miniapp.backend.routes.today._memory_repo.find_by_key",
+               AsyncMock(return_value=[budget_mem])), \
          patch("miniapp.backend.routes.today.ask_claude",
                AsyncMock(return_value="tip")), \
          patch("miniapp.backend.routes.today.today_user_tz", AsyncMock(return_value=(_today_local_date(tz), tz))), \

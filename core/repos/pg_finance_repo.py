@@ -129,7 +129,8 @@ def _nb_add_sync(description: str, amount: float, category: str, type_: str,
 
 
 def _nb_query_sync(date_from: str, date_to: str, type_: Optional[str],
-                    category: Optional[str], page_size: int) -> List[BudgetEntry]:
+                    category: Optional[str], page_size: int,
+                    user_notion_id: str = "") -> List[BudgetEntry]:
     conds = [
         nexus_budget.c.date >= date_from,
         nexus_budget.c.date <= date_to,
@@ -138,6 +139,24 @@ def _nb_query_sync(date_from: str, date_to: str, type_: Optional[str],
         conds.append(nexus_budget.c.type_ == type_)
     if category:
         conds.append(nexus_budget.c.category == category)
+    if user_notion_id:
+        conds.append(nexus_budget.c.user_notion_id == user_notion_id)
+    q = (
+        select(nexus_budget)
+        .where(and_(*conds))
+        .order_by(desc(nexus_budget.c.date))
+        .limit(page_size)
+    )
+    with _get_engine().connect() as conn:
+        rows = conn.execute(q).fetchall()
+    return [_row_to_budget(r) for r in rows]
+
+
+def _nb_search_desc_sync(text: str, page_size: int,
+                          user_notion_id: str = "") -> List[BudgetEntry]:
+    conds = [nexus_budget.c.description.ilike(f"%{text}%")]
+    if user_notion_id:
+        conds.append(nexus_budget.c.user_notion_id == user_notion_id)
     q = (
         select(nexus_budget)
         .where(and_(*conds))
@@ -150,7 +169,8 @@ def _nb_query_sync(date_from: str, date_to: str, type_: Optional[str],
 
 
 def _nb_query_month_sync(month: str, description_filter: str,
-                          type_filter: str) -> List[BudgetEntry]:
+                          type_filter: str,
+                          user_notion_id: str = "") -> List[BudgetEntry]:
     d_from, d_to = _month_range(month)
     conds = [
         nexus_budget.c.date >= d_from,
@@ -161,6 +181,8 @@ def _nb_query_month_sync(month: str, description_filter: str,
         conds.append(tc)
     if description_filter:
         conds.append(nexus_budget.c.description.ilike(f"%{description_filter}%"))
+    if user_notion_id:
+        conds.append(nexus_budget.c.user_notion_id == user_notion_id)
     q = (
         select(nexus_budget)
         .where(and_(*conds))
@@ -212,12 +234,24 @@ class PgNexusBudgetRepo:
         )
 
     async def query(self, date_from: str, date_to: str, type_: Optional[str] = None,
-                     category: Optional[str] = None, page_size: int = 200) -> List[BudgetEntry]:
-        return await asyncio.to_thread(_nb_query_sync, date_from, date_to, type_, category, page_size)
+                     category: Optional[str] = None, page_size: int = 200,
+                     user_notion_id: str = "") -> List[BudgetEntry]:
+        return await asyncio.to_thread(
+            _nb_query_sync, date_from, date_to, type_, category, page_size, user_notion_id
+        )
 
     async def query_month(self, month: str, description_filter: str = "",
-                           type_filter: str = "") -> List[BudgetEntry]:
-        return await asyncio.to_thread(_nb_query_month_sync, month, description_filter, type_filter)
+                           type_filter: str = "",
+                           user_notion_id: str = "") -> List[BudgetEntry]:
+        return await asyncio.to_thread(
+            _nb_query_month_sync, month, description_filter, type_filter, user_notion_id
+        )
+
+    async def search_description(self, text: str, page_size: int = 5,
+                                  user_notion_id: str = "") -> List[BudgetEntry]:
+        if not text:
+            return []
+        return await asyncio.to_thread(_nb_search_desc_sync, text, page_size, user_notion_id)
 
     async def update(self, row_id: str, **fields) -> bool:
         return await asyncio.to_thread(_nb_update_sync, row_id, **fields)
@@ -245,7 +279,8 @@ def _ap_add_sync(description: str, amount: float, category: str, type_: str,
 
 
 def _ap_query_sync(date_from: str, date_to: str, type_: Optional[str],
-                    category: Optional[str], page_size: int) -> List[PnlEntry]:
+                    category: Optional[str], page_size: int,
+                    user_notion_id: str = "") -> List[PnlEntry]:
     conds = [
         arcana_pnl.c.date >= date_from,
         arcana_pnl.c.date <= date_to,
@@ -254,6 +289,8 @@ def _ap_query_sync(date_from: str, date_to: str, type_: Optional[str],
         conds.append(arcana_pnl.c.type_ == type_)
     if category:
         conds.append(arcana_pnl.c.category == category)
+    if user_notion_id:
+        conds.append(arcana_pnl.c.user_notion_id == user_notion_id)
     q = (
         select(arcana_pnl)
         .where(and_(*conds))
@@ -266,7 +303,8 @@ def _ap_query_sync(date_from: str, date_to: str, type_: Optional[str],
 
 
 def _ap_query_month_sync(month: str, description_filter: str,
-                          type_filter: str) -> List[PnlEntry]:
+                          type_filter: str,
+                          user_notion_id: str = "") -> List[PnlEntry]:
     d_from, d_to = _month_range(month)
     conds = [
         arcana_pnl.c.date >= d_from,
@@ -277,6 +315,8 @@ def _ap_query_month_sync(month: str, description_filter: str,
         conds.append(tc)
     if description_filter:
         conds.append(arcana_pnl.c.description.ilike(f"%{description_filter}%"))
+    if user_notion_id:
+        conds.append(arcana_pnl.c.user_notion_id == user_notion_id)
     q = (
         select(arcana_pnl)
         .where(and_(*conds))
@@ -327,12 +367,18 @@ class PgArcanaPnlRepo:
         )
 
     async def query(self, date_from: str, date_to: str, type_: Optional[str] = None,
-                     category: Optional[str] = None, page_size: int = 200) -> List[PnlEntry]:
-        return await asyncio.to_thread(_ap_query_sync, date_from, date_to, type_, category, page_size)
+                     category: Optional[str] = None, page_size: int = 200,
+                     user_notion_id: str = "") -> List[PnlEntry]:
+        return await asyncio.to_thread(
+            _ap_query_sync, date_from, date_to, type_, category, page_size, user_notion_id
+        )
 
     async def query_month(self, month: str, description_filter: str = "",
-                           type_filter: str = "") -> List[PnlEntry]:
-        return await asyncio.to_thread(_ap_query_month_sync, month, description_filter, type_filter)
+                           type_filter: str = "",
+                           user_notion_id: str = "") -> List[PnlEntry]:
+        return await asyncio.to_thread(
+            _ap_query_month_sync, month, description_filter, type_filter, user_notion_id
+        )
 
     async def update(self, row_id: str, **fields) -> bool:
         return await asyncio.to_thread(_ap_update_sync, row_id, **fields)

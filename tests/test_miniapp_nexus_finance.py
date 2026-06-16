@@ -7,7 +7,6 @@ Views today/month/limits/goals, дневной бюджет, drill-down по к�
 """
 from __future__ import annotations
 
-import json as _json
 from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, patch
 
@@ -17,6 +16,8 @@ from fastapi.testclient import TestClient
 from miniapp.backend import cache
 from miniapp.backend.app import app
 from miniapp.backend.auth import current_user_id
+from core.repos.pg_finance_repo import BudgetEntry
+from core.repos.pg_memory_repo import Memory
 
 
 FAKE_TG_ID = 67686090
@@ -50,17 +51,13 @@ def _today_date(tz: int = 3):
 
 # ── helpers: fake Notion pages ───────────────────────────────────────────────
 
-def _expense(amount, *, cat="🚬 Привычки", type_="💸 Расход", desc="test", eid="fin-1"):
-    return {
-        "id": eid,
-        "properties": {
-            "Описание": {"title": [{"plain_text": desc}]},
-            "Сумма": {"number": amount},
-            "Категория": {"select": {"name": cat}},
-            "Тип": {"select": {"name": type_}},
-            "Бот": {"select": {"name": "☀️ Nexus"}},
-        },
-    }
+def _budget_entry(amount, *, cat="🚬 Привычки", type_="💸 Расход", desc="test", eid="fin-1", date="2026-06-01"):
+    return BudgetEntry(id=eid, description=desc, amount=amount, category=cat,
+                       type_=type_, source="💳 Карта", date=date, user_notion_id="")
+
+
+def _mem_pg(mid, text, cat=None, key=None):
+    return Memory(id=mid, fact=text, category=cat or "", related_to="", key=key or "")
 
 
 def _mem(mid, text, cat=None, related=None, key=None, actual=True):
@@ -81,12 +78,12 @@ def _mem(mid, text, cat=None, related=None, key=None, actual=True):
 
 def test_finance_view_today(client):
     tz = 3
-    pages = [_expense(1500, cat="🚬 Привычки"), _expense(1104, cat="🍜 Продукты")]
+    entries = [_budget_entry(1500, cat="🚬 Привычки"), _budget_entry(1104, cat="🍜 Продукты")]
 
-    async def qp(*_, **__):
-        return pages
-
-    with patch("miniapp.backend.routes.finance.query_pages", side_effect=qp), \
+    with patch("miniapp.backend.routes.finance._budget_repo.query",
+               AsyncMock(return_value=entries)), \
+         patch("miniapp.backend.routes.finance._mem_repo.find_by_key",
+               AsyncMock(return_value=[])), \
          patch("miniapp.backend.routes.finance.today_user_tz",
                AsyncMock(return_value=(_today_date(tz), tz))), \
          patch("miniapp.backend.routes.finance.get_user_notion_id",
@@ -106,27 +103,14 @@ def test_finance_view_month_calculates_income_expense_and_limits(client):
     tz = 3
     month = _today_iso(tz)[:7]
 
-    # Finance records: доход 115000, расход 14200 в 🚬, расход 2000 в 🍜
-    finance_pages = [
-        _expense(115000, type_="💰 Доход", cat="", eid="inc"),
-        _expense(14200, cat="🚬 Привычки", eid="exp1"),
-        _expense(2000, cat="🍜 Продукты", eid="exp2"),
+    finance_entries = [
+        _budget_entry(115000, type_="💰 Доход", cat="", eid="inc"),
+        _budget_entry(14200, cat="🚬 Привычки", eid="exp1"),
+        _budget_entry(2000, cat="🍜 Продукты", eid="exp2"),
     ]
-    # Limits page for the 🚬 category
-    limit_pages = [_mem(
-        "lim", "лимит: 🚬 Привычки — 17685₽/мес",
-        cat="💰 Лимит", related="привычки", key="лимит_habits",
-    )]
 
-    async def qp(db_id, **__):
-        filters = __.get("filters", {})
-        f_str = _json.dumps(filters, ensure_ascii=False)
-        if "Категория" in f_str and "Лимит" in f_str:
-            return limit_pages
-        return finance_pages
-
-    with patch("core.budget.db_query", AsyncMock(return_value=limit_pages), create=True), \
-         patch("miniapp.backend.routes.finance.query_pages", side_effect=qp), \
+    with patch("miniapp.backend.routes.finance._budget_repo.query",
+               AsyncMock(return_value=finance_entries)), \
          patch("miniapp.backend.routes.finance.get_limits",
                AsyncMock(return_value={"привычки": 17685})), \
          patch("miniapp.backend.routes.finance.today_user_tz",
@@ -154,15 +138,13 @@ def test_finance_view_limits_only_shows_categories_with_limit(client):
     tz = 3
     month = _today_iso(tz)[:7]
 
-    finance_pages = [
-        _expense(14200, cat="🚬 Привычки"),
-        _expense(5000, cat="🍜 Продукты"),  # без лимита — не должна появиться
+    finance_entries = [
+        _budget_entry(14200, cat="🚬 Привычки"),
+        _budget_entry(5000, cat="🍜 Продукты"),  # без лимита — не должна появиться
     ]
 
-    async def qp(*_, **__):
-        return finance_pages
-
-    with patch("miniapp.backend.routes.finance.query_pages", side_effect=qp), \
+    with patch("miniapp.backend.routes.finance._budget_repo.query",
+               AsyncMock(return_value=finance_entries)), \
          patch("miniapp.backend.routes.finance.get_limits",
                AsyncMock(return_value={"привычки": 17685})), \
          patch("miniapp.backend.routes.finance.today_user_tz",
@@ -227,15 +209,14 @@ def test_finance_401_without_init_data():
 # ── GET /api/finance?view=today — блок budget ───────────────────────────────
 
 def test_finance_today_returns_budget_block(client):
-    async def qp(*_, **__):
-        return []  # нет расходов
-
-    with patch("miniapp.backend.routes.finance.query_pages", side_effect=qp), \
+    with patch("miniapp.backend.routes.finance._budget_repo.query",
+               AsyncMock(return_value=[])), \
+         patch("miniapp.backend.routes.finance._mem_repo.find_by_key",
+               AsyncMock(return_value=[])), \
          patch("miniapp.backend.routes.finance.today_user_tz",
                AsyncMock(return_value=(_today_date(), 3))), \
          patch("miniapp.backend.routes.finance.get_user_notion_id",
-               AsyncMock(return_value=FAKE_NOTION_USER)), \
-         patch("core.notion_client.memory_get", AsyncMock(return_value=None)):
+               AsyncMock(return_value=FAKE_NOTION_USER)):
         r = client.get("/api/finance?view=today")
 
     assert r.status_code == 200
@@ -248,27 +229,16 @@ def test_finance_today_returns_budget_block(client):
 
 
 def test_finance_today_budget_reflects_spending(client):
-    pages = [
-        {
-            "id": "p1",
-            "properties": {
-                "Сумма": {"number": 2000},
-                "Описание": {"title": [{"plain_text": "магнит"}]},
-                "Тип": {"select": {"name": "💸 Расход"}},
-                "Категория": {"select": {"name": "🍜 Продукты"}},
-            },
-        },
-    ]
+    entries = [_budget_entry(2000, cat="🍜 Продукты", desc="магнит", eid="p1")]
 
-    async def qp(*_, **__):
-        return pages
-
-    with patch("miniapp.backend.routes.finance.query_pages", side_effect=qp), \
+    with patch("miniapp.backend.routes.finance._budget_repo.query",
+               AsyncMock(return_value=entries)), \
+         patch("miniapp.backend.routes.finance._mem_repo.find_by_key",
+               AsyncMock(return_value=[])), \
          patch("miniapp.backend.routes.finance.today_user_tz",
                AsyncMock(return_value=(_today_date(), 3))), \
          patch("miniapp.backend.routes.finance.get_user_notion_id",
-               AsyncMock(return_value=FAKE_NOTION_USER)), \
-         patch("core.notion_client.memory_get", AsyncMock(return_value=None)):
+               AsyncMock(return_value=FAKE_NOTION_USER)):
         r = client.get("/api/finance?view=today")
 
     assert r.status_code == 200
@@ -282,33 +252,15 @@ def test_finance_today_budget_reflects_spending(client):
 
 def test_finance_category_drill_down(client):
     """Wave5.9: /api/finance/category возвращает список трат по категории."""
-    pages = [
-        {
-            "id": "e1",
-            "properties": {
-                "Тип": {"select": {"name": "💸 Расход"}},
-                "Категория": {"select": {"name": "🏠 Ж***"}},
-                "Сумма": {"number": 4500},
-                "Описание": {"title": [{"plain_text": "коммуналка"}]},
-                "Дата": {"date": {"start": "2026-04-02"}},
-            },
-        },
-        {
-            "id": "e2",
-            "properties": {
-                "Тип": {"select": {"name": "💸 Расход"}},
-                "Категория": {"select": {"name": "🏠 Ж***"}},
-                "Сумма": {"number": 800},
-                "Описание": {"title": [{"plain_text": "интернет"}]},
-                "Дата": {"date": {"start": "2026-04-18"}},
-            },
-        },
+    entries = [
+        _budget_entry(4500, cat="🏠 Ж***", desc="коммуналка", eid="e1", date="2026-04-02"),
+        _budget_entry(800, cat="🏠 Ж***", desc="интернет", eid="e2", date="2026-04-18"),
     ]
 
-    async def qp(*_, **__):
-        return pages
-
-    with patch("miniapp.backend.routes.finance.query_pages", side_effect=qp), \
+    with patch("miniapp.backend.routes.finance._budget_repo.query",
+               AsyncMock(return_value=entries)), \
+         patch("miniapp.backend.routes.finance._mem_repo.find_by_category",
+               AsyncMock(return_value=[])), \
          patch("miniapp.backend.routes.finance.today_user_tz",
                AsyncMock(return_value=(_today_date(), 3))), \
          patch("miniapp.backend.routes.finance.get_user_notion_id",

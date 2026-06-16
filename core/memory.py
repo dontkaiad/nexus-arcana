@@ -388,15 +388,14 @@ async def save_memory(
         await message.answer(f"⚠️ Ошибка записи: {e}")
 
 
-async def _search_finance(query: str, page_size: int = 5) -> List[dict]:
-    """Поиск по базе финансов Notion (другая БД — остаётся на Notion)."""
-    db_id = os.environ.get("NOTION_DB_FINANCE")
-    if not db_id or not query:
+async def _search_finance(query: str, page_size: int = 5) -> list:
+    """Поиск по базе финансов PG (nexus_budget)."""
+    if not query:
         return []
     try:
-        return await db_query(db_id, filter_obj={
-            "property": "Описание", "title": {"contains": query}
-        }, page_size=page_size)
+        from core.repos.pg_finance_repo import PgNexusBudgetRepo
+        repo = PgNexusBudgetRepo()
+        return await repo.search_description(query, page_size=page_size)
     except Exception as e:
         logger.error("memory search_finance: %s", e)
         return []
@@ -514,14 +513,12 @@ async def search_memory(
     if fin_pages:
         try:
             fin_lines = []
-            for p in fin_pages:
-                props = p.get("properties", {})
-                desc_parts = props.get("Описание", {}).get("title", [])
-                desc = desc_parts[0]["plain_text"] if desc_parts else "—"
-                amount = props.get("Сумма", {}).get("number") or ""
-                date = (props.get("Дата", {}).get("date") or {}).get("start", "")[:10]
+            for entry in fin_pages:
+                desc = entry.description or "—"
+                amount = entry.amount or ""
+                date_str = (entry.date or "")[:10]
                 amount_str = f"{amount:g}₽" if amount else ""
-                fin_lines.append(f"· {desc} {amount_str} · {date}".strip())
+                fin_lines.append(f"· {desc} {amount_str} · {date_str}".strip())
             parts.append("💰 <b>Финансы:</b>\n" + "\n".join(fin_lines))
         except Exception as e:
             logger.error("search_memory finance formatting error: %s", e, exc_info=True)
