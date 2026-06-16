@@ -20,7 +20,6 @@ from core.notion_client import (
     finance_add,
     get_page,
     page_create,
-    sessions_all,
     update_page,
     update_page_select,
     update_task_deadline,
@@ -32,6 +31,9 @@ from core.bot_notify import notify_user, clear_task_reminder
 
 from arcana.repos.pg_rituals_repo import PgRitualsRepo as _PgRitualsRepoClass
 _rituals_pg_repo = _PgRitualsRepoClass()
+
+from arcana.repos.pg_sessions_repo import PgSessionsRepo as _PgSessionsRepoClass
+_sessions_pg_repo = _PgSessionsRepoClass()
 
 from arcana.repos.clients_repo import ClientsRepo as _ClientsRepoClass
 from arcana.repos.pg_clients_repo import PgClientsRepo as _PgClientsRepoClass
@@ -457,10 +459,10 @@ async def upload_session_photo(
     file: UploadFile = FastAPIFile(...),
     tg_id: int = Depends(current_user_id),
 ) -> dict[str, Any]:
-    user_notion_id = (await get_user_notion_id(tg_id)) or ""
-    await _load_owned_page(session_id, user_notion_id)
+    t = await _sessions_pg_repo.find_by_id(session_id)
+    if not t:
+        raise HTTPException(status_code=404, detail="session not found")
 
-    # 5 MB limit
     content = await file.read()
     if len(content) > 5 * 1024 * 1024:
         raise HTTPException(status_code=413, detail="file too large (max 5 MB)")
@@ -472,9 +474,9 @@ async def upload_session_photo(
         raise HTTPException(status_code=501, detail="cloudinary not configured")
 
     try:
-        await update_page(session_id, {"Фото": {"url": url}})
+        await _sessions_pg_repo.set_photo_url(session_id, url)
     except Exception as e:
-        logger.warning("Failed to set Фото URL in Notion: %s", e)
+        logger.warning("Failed to set photo_url on session %s: %s", session_id, e)
 
     return {"ok": True, "url": url}
 
@@ -485,12 +487,7 @@ async def upload_session_photo_by_slug(
     file: UploadFile = FastAPIFile(...),
     tg_id: int = Depends(current_user_id),
 ) -> dict[str, Any]:
-    """Фото на уровне сессии — пишет URL в поле «Фото» каждого триплета сессии."""
-    from miniapp.backend.routes.arcana_sessions import (
-        _session_name_of,
-        _slug_for,
-    )
-
+    """Фото на уровне сессии — пишет URL в photo_url каждого триплета сессии."""
     user_notion_id = (await get_user_notion_id(tg_id)) or ""
 
     content = await file.read()
@@ -499,29 +496,12 @@ async def upload_session_photo_by_slug(
     if not (file.content_type or "").startswith("image/"):
         raise HTTPException(status_code=415, detail="only image/* allowed")
 
-    # Резолвим slug → все триплеты сессии.
-    matching: list[dict] = []
-    if "__" not in slug and len(slug) >= 16:
-        # Legacy: slug == page id одного триплета.
-        try:
-            page = await get_page(slug)
-        except Exception:
-            page = None
-        if page:
-            owners = relation_ids_of(page, "🪪 Пользователи")
-            if user_notion_id and user_notion_id not in owners:
-                raise HTTPException(status_code=404, detail="session not found")
-            matching = [page]
-
+    matching = await _sessions_pg_repo.list_by_slug(slug, user_notion_id)
     if not matching:
-        all_pages = await sessions_all(user_notion_id=user_notion_id)
-        for p in all_pages:
-            sname = _session_name_of(p)
-            cids = relation_ids_of(p, "👥 Клиенты")
-            cid = cids[0] if cids else None
-            if sname and _slug_for(sname, cid) == slug:
-                matching.append(p)
-
+        # Fallback: treat slug as direct PG session id
+        t = await _sessions_pg_repo.find_by_id(slug)
+        if t:
+            matching = [t]
     if not matching:
         raise HTTPException(status_code=404, detail="session not found")
 
@@ -530,12 +510,12 @@ async def upload_session_photo_by_slug(
         raise HTTPException(status_code=501, detail="cloudinary not configured")
 
     updated = 0
-    for p in matching:
+    for t in matching:
         try:
-            await update_page(p["id"], {"Фото": {"url": url}})
+            await _sessions_pg_repo.set_photo_url(t.id, url)
             updated += 1
         except Exception as e:
-            logger.warning("Failed to set Фото URL on %s: %s", p.get("id", "?")[:8], e)
+            logger.warning("Failed to set photo_url on session %s: %s", t.id, e)
 
     return {"ok": True, "url": url, "updated_count": updated}
 
@@ -549,23 +529,20 @@ async def summarize_session(
     session_id: str,
     tg_id: int = Depends(current_user_id),
 ) -> dict[str, Any]:
+    import re
     from core.claude_client import ask_claude
-    from miniapp.backend._helpers import rich_text_plain
 
-    user_notion_id = (await get_user_notion_id(tg_id)) or ""
-    page = await _load_owned_page(session_id, user_notion_id)
+    t = await _sessions_pg_repo.find_by_id(session_id)
+    if not t:
+        raise HTTPException(status_code=404, detail="session not found")
 
-    # existing summary
-    existing = rich_text_plain(page, "AI_Summary")
-    if existing:
-        return {"summary": existing, "cached": True}
+    if t.triplet_summary:
+        return {"summary": t.triplet_summary, "cached": True}
 
-    interp = rich_text_plain(page, "Трактовка")
+    interp = t.interpretation or ""
     if not interp:
         raise HTTPException(status_code=400, detail="no interpretation to summarize")
 
-    # Strip HTML tags
-    import re
     clean = re.sub(r"<[^>]+>", "", interp).strip()
     if len(clean) < 20:
         raise HTTPException(status_code=400, detail="interpretation too short")
@@ -590,11 +567,20 @@ async def summarize_session(
         raise HTTPException(status_code=500, detail="empty summary")
 
     try:
-        await update_page(session_id, {"AI_Summary": _text(summary)})
+        await _sessions_pg_repo.update_summary(session_id, summary)
     except Exception as e:
-        logger.warning("Failed to save AI_Summary to Notion: %s", e)
+        logger.warning("Failed to save summary to PG session %s: %s", session_id, e)
 
     return {"summary": summary, "cached": False}
+
+
+# PG outcome code map for session verify
+_SESSION_STATUS_TO_OUTCOME = {
+    "✅ Да": "yes",
+    "〰️ Частично": "partial",
+    "❌ Нет": "no",
+    "⏳ Не проверено": "unverified",
+}
 
 
 @router.post("/arcana/sessions/{session_id}/verify")
@@ -605,29 +591,30 @@ async def session_verify(
 ) -> dict[str, Any]:
     if body.status not in _SESSION_STATUSES:
         raise HTTPException(status_code=400, detail=f"status must be one of {sorted(_SESSION_STATUSES)}")
-    user_notion_id = (await get_user_notion_id(tg_id)) or ""
-    page = await _load_owned_page(session_id, user_notion_id)
-    ok = await update_page_select(session_id, "Сбылось", body.status)
+
+    t = await _sessions_pg_repo.find_by_id(session_id)
+    if not t:
+        raise HTTPException(status_code=404, detail="session not found")
+
+    outcome_code = _SESSION_STATUS_TO_OUTCOME.get(body.status, "unverified")
+    ok = await _sessions_pg_repo.set_outcome(session_id, outcome_code)
     if not ok:
         raise HTTPException(status_code=500, detail="failed to update Сбылось")
 
     # Инвалидация кеша саммари сессии (если триплет в группе).
     try:
         from core.session_cache import cache_delete, session_summary_key
-        from miniapp.backend._helpers import rich_text_plain, relation_ids_of
-        sname = (rich_text_plain(page, "Сессия") or "").strip()
+        sname = t.session_name
         if sname:
-            cids = relation_ids_of(page, "👥 Клиенты")
-            cid = cids[0] if cids else None
-            cache_delete(session_summary_key(sname, cid))
+            cache_delete(session_summary_key(sname, t.client_id))
     except Exception:
         pass
-    # Уведа в Arcana-бот (как accuracy/verify в arcana_today после #72).
+
     _verdict_word = {
         "✅ Да": "сбылось ✅", "〰️ Частично": "частично 🌗",
         "❌ Нет": "не сбылось ❌", "⏳ Не проверено": "не проверено ⏳",
     }.get(body.status, body.status)
-    q = title_plain(page, "Тема") or "расклад"
+    q = t.question or "расклад"
     await notify_user(tg_id, f"🔮 {_esc(q)}: {_verdict_word}", bot="arcana")
     return {"ok": True, "status": body.status}
 

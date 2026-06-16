@@ -1,24 +1,26 @@
 """miniapp/backend/routes/arcana_sessions.py — sessions as grouping over Расклады.
 
-Главная единица — «Сессия» (поле rich_text «Сессия» в Notion). Все триплеты
+Главная единица — «Сессия» (поле session_name в PG). Все триплеты
 с одинаковым session_name + client = одна сессия. Записи без session_name —
-одиночные сессии (legacy: 1 триплет = 1 сессия).
+одиночные сессии (1 триплет = 1 сессия).
 
 Endpoints:
   GET  /api/arcana/sessions                    — лента сессий (агрегаты)
   GET  /api/arcana/sessions/by-slug/{slug}     — сессия со всеми триплетами
   POST /api/arcana/sessions/by-slug/{slug}/summarize — сгенерировать общее саммари
-  GET  /api/arcana/sessions/{session_id}       — legacy: detail одного триплета
+  GET  /api/arcana/sessions/{session_id}       — detail одного триплета
 """
 from __future__ import annotations
 
 import logging
 import re
-from typing import Any, Optional
+from typing import Any, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
-from core.notion_client import get_page, sessions_all
+from arcana.repos.clients_repo import ClientsRepo
+from arcana.repos.pg_sessions_repo import PgSessionsRepo
+from arcana.repos.sessions_repo import TripletEntry
 from core.session_cache import (
     cache_get,
     cache_set,
@@ -30,19 +32,11 @@ from core.user_manager import get_user_notion_id
 from miniapp.backend.auth import current_user_id
 from miniapp.backend._helpers import (
     first_emoji,
-    multi_select_names,
-    number_of,
-    relation_ids_of,
-    rich_text_plain,
-    select_of,
-    title_plain,
     to_local_date,
     today_user_tz,
 )
 from miniapp.backend.routes._arcana_common import (
     extract_bottom_from_interp,
-    load_clients_map,
-    client_name_from,
 )
 from miniapp.backend.tarot import canonical_card, parse_cards_raw, resolve_deck_id
 
@@ -50,26 +44,26 @@ logger = logging.getLogger("miniapp.arcana.sessions")
 
 router = APIRouter()
 
+_sessions_repo = PgSessionsRepo()
+_clients_repo = ClientsRepo()
+
 
 # ── helpers ─────────────────────────────────────────────────────────────────
 
-_VERDICT_ICON = {
-    "✅ Да": "yes", "〰️ Частично": "half", "❌ Нет": "no",
-    "⏳ Не проверено": "wait", "": "wait",
+_OUTCOME_VERDICT = {
+    "yes": "yes", "partial": "half", "no": "no", "unverified": "wait",
+}
+_OUTCOME_DONE_LABEL = {
+    "yes": "✅ Да", "partial": "〰️ Частично",
+    "no": "❌ Нет", "unverified": "⏳ Не проверено",
 }
 
 
-def _verdict_of(page: dict) -> str:
-    raw = select_of(page, "Сбылось") or "⏳ Не проверено"
-    return _VERDICT_ICON.get(raw, "wait")
+def _verdict_of(t: TripletEntry) -> str:
+    return _OUTCOME_VERDICT.get(t.outcome or "unverified", "wait")
 
 
-def _compute_status(verdicts: list[str]) -> str:
-    """wait | proc | part | done — статус сессии по списку вердиктов триплетов.
-
-    все wait → wait; все yes → done; все no → done; смесь без wait → part;
-    смесь с wait → proc.
-    """
+def _compute_status(verdicts: List[str]) -> str:
     if not verdicts:
         return "wait"
     s = set(verdicts)
@@ -84,7 +78,7 @@ def _compute_status(verdicts: list[str]) -> str:
     return "part"
 
 
-def _breakdown(verdicts: list[str]) -> dict[str, int]:
+def _breakdown(verdicts: List[str]) -> dict:
     out = {"yes": 0, "half": 0, "no": 0, "wait": 0}
     for v in verdicts:
         out[v if v in out else "wait"] += 1
@@ -92,7 +86,6 @@ def _breakdown(verdicts: list[str]) -> dict[str, int]:
 
 
 def _index_in_title(title: str) -> Optional[int]:
-    """Извлекает '1)…', '#2', 'вопрос 3' → 1/2/3 для сортировки."""
     m = re.search(r"(?:^|\s|#)(\d{1,2})\s*[)\.\-:]", title or "")
     if m:
         try:
@@ -108,16 +101,73 @@ def _index_in_title(title: str) -> Optional[int]:
     return None
 
 
-def _session_name_of(page: dict) -> str:
-    return (rich_text_plain(page, "Сессия") or "").strip()
-
-
-def _triplet_summary_of(page: dict) -> str:
-    return (rich_text_plain(page, "Саммари триплета") or "").strip()
-
-
 def _slug_for(session_name: str, client_id: Optional[str]) -> str:
     return f"{slugify(session_name)}__{client_id or 'self'}"
+
+
+def _clients_name_map(clients_list) -> dict:
+    """Build {pg_client_id: name} map from ClientsRepo.list_all() result."""
+    return {c.id: (c.name or "") for c in clients_list}
+
+
+def _clients_type_map(clients_list) -> dict:
+    """Build {pg_client_id: type_full} map."""
+    from arcana.repos.pg_clients_repo import TYPE_CODE_TO_FULL
+    return {c.id: TYPE_CODE_TO_FULL.get(c.type_code or "", "") for c in clients_list}
+
+
+# ── serializers ─────────────────────────────────────────────────────────────
+
+def _serialize_triplet_pg(
+    t: TripletEntry,
+    name_map: dict,
+    tz_offset: int,
+) -> dict:
+    """Serialize a TripletEntry to the detail API format."""
+    interp_raw = t.interpretation or ""
+    bottom_name_legacy, interp_cleaned = extract_bottom_from_interp(interp_raw)
+
+    deck_raw = t.deck or None
+    deck_id = resolve_deck_id(deck_raw)
+
+    bottom_name = t.bottom_card or bottom_name_legacy or ""
+    cards = parse_cards_raw(t.cards, deck_id) if t.cards else []
+    bottom_card = canonical_card(deck_id, bottom_name) if bottom_name else None
+
+    client_id = t.client_id
+    client_name = name_map.get(client_id, "Личный") if client_id else "Личный"
+
+    date_local = to_local_date(t.date or "", tz_offset)
+
+    verdict = _verdict_of(t)
+    done_label = _OUTCOME_DONE_LABEL.get(t.outcome or "unverified", "⏳ Не проверено")
+
+    return {
+        "id": t.id,
+        "question": t.question or "",
+        "client": client_name,
+        "client_id": client_id,
+        "self_client": client_id is None,
+        "area": [t.area] if t.area else [],
+        "deck": deck_raw,
+        "deck_id": deck_id,
+        "type": t.spread_type or None,
+        "date": date_local.isoformat() if date_local else None,
+        "cards_raw": t.cards or None,
+        "cards": cards,
+        "bottom_card": bottom_card,
+        "bottom": (
+            {"name": bottom_name, "icon": first_emoji(bottom_name) or None}
+            if bottom_name else None
+        ),
+        "interpretation": interp_cleaned or None,
+        "summary": t.triplet_summary or None,
+        "verdict": verdict,
+        "done": done_label,
+        "price": int(round(float(t.amount or 0))),
+        "paid": int(round(float(t.paid or 0))),
+        "photo_url": t.photo_url,
+    }
 
 
 # ── list ────────────────────────────────────────────────────────────────────
@@ -144,127 +194,100 @@ async def list_sessions(
     today_date, tz_offset = await today_user_tz(tg_id)
     user_notion_id = (await get_user_notion_id(tg_id)) or ""
 
-    sbylos_filter: Optional[str] = None
+    outcome_filter: Optional[str] = None
     status_f = filters.get("status")
-    if status_f == "unchecked" or status_f == "wait":
-        sbylos_filter = "⏳ Не проверено"
+    if status_f in ("unchecked", "wait"):
+        outcome_filter = "unverified"
     elif status_f == "done":
-        sbylos_filter = "✅ Да"
+        outcome_filter = "yes"
 
-    all_pages = await sessions_all(
-        user_notion_id=user_notion_id, sbylos_filter=sbylos_filter
+    all_triplets = await _sessions_repo.list_all(
+        user_notion_id=user_notion_id, outcome_filter=outcome_filter
     )
-    clients_map = await load_clients_map(user_notion_id)
-    from miniapp.backend.routes.arcana_today import _client_types_map
-    type_map = await _client_types_map(user_notion_id)
-
-    def _has_barter(p: dict) -> bool:
-        return bool(rich_text_plain(p, "Бартер · что").strip())
+    clients_list = await _clients_repo.list_all(user_notion_id)
+    name_map = _clients_name_map(clients_list)
+    type_map = _clients_type_map(clients_list)
 
     area_f = filters.get("area")
     client_f = filters.get("client_id")
 
-    # Группируем по (session_name, client_id). Если session_name == "" — ключ
-    # уникальный per-page (= отдельная сессия из одного триплета).
-    groups: dict[tuple[str, Optional[str]], list[dict]] = {}
-    for p in all_pages:
-        if client_f and client_f not in relation_ids_of(p, "👥 Клиенты"):
+    # Group by (session_name, client_id). Empty session_name → solo triplet.
+    from typing import Dict, Tuple
+    groups: Dict[Tuple[str, Optional[str]], List[TripletEntry]] = {}
+    for t in all_triplets:
+        if client_f and t.client_id != client_f:
             continue
-        if area_f and area_f not in multi_select_names(p, "Область"):
+        if area_f and t.area != area_f:
             continue
-        sname = _session_name_of(p)
-        cids = relation_ids_of(p, "👥 Клиенты")
-        cid = cids[0] if cids else None
-        key = (sname, cid) if sname else (f"__solo__{p.get('id','')}", cid)
-        groups.setdefault(key, []).append(p)
+        key = (t.session_name, t.client_id) if t.session_name else (f"__solo__{t.id}", t.client_id)
+        groups.setdefault(key, []).append(t)
 
-    items: list[dict] = []
-    for (sname_or_solo, cid), pages in groups.items():
-        # сортируем триплеты внутри группы: по индексу в названии, потом по дате
-        pages.sort(key=lambda x: (
-            _index_in_title(title_plain(x, "Тема")) or 9999,
-            (x.get("properties", {}).get("Дата", {}).get("date") or {}).get("start", ""),
+    items: List[dict] = []
+    for (sname_or_solo, cid), triplets in groups.items():
+        triplets.sort(key=lambda x: (
+            _index_in_title(x.question) or 9999,
+            x.date or "",
         ))
-        first = pages[0]
-        verdicts = [_verdict_of(p) for p in pages]
+        first = triplets[0]
+        verdicts = [_verdict_of(t) for t in triplets]
         status = _compute_status(verdicts)
 
         sname = "" if sname_or_solo.startswith("__solo__") else sname_or_solo
         is_solo = not sname
 
-        client_name, client_id = client_name_from(first, clients_map)
-        session_type = select_of(first, "Тип сеанса") or ""
-        decks: list[str] = []
-        for p in pages:
-            for d in multi_select_names(p, "Колоды"):
-                if d not in decks:
-                    decks.append(d)
-
-        first_date_raw = (first.get("properties", {})
-                          .get("Дата", {}).get("date") or {}).get("start", "")
-        last = pages[-1]
-        last_date_raw = (last.get("properties", {})
-                         .get("Дата", {}).get("date") or {}).get("start", "")
-        # Для last_date берём максимум по дате среди всех страниц группы
-        # (sort внутри pages по индексу заголовка, не по дате).
-        all_dates = [
-            ((p.get("properties", {}).get("Дата", {}).get("date") or {})
-             .get("start", "")) for p in pages
-        ]
-        all_dates = [d for d in all_dates if d]
-        if all_dates:
-            last_date_raw = max(all_dates)
-        date_local = to_local_date(first_date_raw, tz_offset)
-        last_date_local = to_local_date(last_date_raw, tz_offset)
-
-        ru_title = sname or title_plain(first, "Тема") or "—"
-        first_q = title_plain(first, "Тема") or ""
-
-        # категория сессии: «Тип расклада» первого триплета
-        cat_list = multi_select_names(first, "Тип расклада")
-        category = cat_list[0] if cat_list else (
-            "🌐 Сфера жизни" if not is_solo else "🔺 Триплет"
-        )
-
-        ctype_full = type_map.get(client_id or "", "") if client_id else ""
+        client_name = name_map.get(cid, "Личный") if cid else "Личный"
+        ctype_full = type_map.get(cid, "") if cid else ""
         client_type_icon = ctype_full.split()[0] if ctype_full else ""
-        # has_barter — хотя бы у одной страницы группы непустое «Бартер · что»
-        group_has_barter = any(_has_barter(p) for p in pages)
+
+        decks: List[str] = []
+        for t in triplets:
+            if t.deck and t.deck not in decks:
+                decks.append(t.deck)
+
+        all_dates = [t.date for t in triplets if t.date]
+        first_date = min(all_dates) if all_dates else None
+        last_date = max(all_dates) if all_dates else None
+        first_date_local = to_local_date(first_date or "", tz_offset)
+        last_date_local = to_local_date(last_date or "", tz_offset)
+
+        ru_title = sname or first.question or "—"
+        first_q = first.question or ""
+        category = first.spread_type or ("🌐 Сфера жизни" if not is_solo else "🔺 Триплет")
+
+        group_has_barter = any(bool(t.barter_what) for t in triplets)
+
+        done_label = _OUTCOME_DONE_LABEL.get(first.outcome or "unverified", "⏳ Не проверено")
+
         items.append({
-            "slug": _slug_for(sname, client_id) if sname else first.get("id", ""),
+            "slug": _slug_for(sname, cid) if sname else first.id,
             "session_name": sname or None,
             "ru_title": ru_title,
             "first_question": first_q,
             "category": category,
             "client": client_name,
-            "client_id": client_id,
+            "client_id": cid,
             "client_type": client_type_icon,
             "client_type_full": ctype_full,
             "has_barter": group_has_barter,
-            "type": session_type,
+            "type": "",
             "decks": decks,
-            "first_date": date_local.isoformat() if date_local else None,
+            "first_date": first_date_local.isoformat() if first_date_local else None,
             "last_date": last_date_local.isoformat() if last_date_local else None,
-            "triplet_count": len(pages),
+            "triplet_count": len(triplets),
             "status": status,
             "breakdown": _breakdown(verdicts),
             "is_solo": is_solo,
-            # для совместимости старого фронта — отдаём минимум полей одиночного триплета
-            "id": first.get("id", "") if is_solo else None,
-            # всегда — id первого триплета (для аплоада фото из FAB и пр.)
-            "first_triplet_id": first.get("id", ""),
-            "done": select_of(first, "Сбылось") or "⏳ Не проверено",
+            "id": first.id if is_solo else None,
+            "first_triplet_id": first.id,
+            "done": done_label,
         })
 
-    # Сортировка: незавершённые впереди, потом по дате DESC
     rank = {"wait": 0, "proc": 0, "part": 1, "done": 2}
-    items.sort(key=lambda x: (rank.get(x["status"], 9), -(x["first_date"] or "")
-                              .replace("-", "").isdigit() and 0,
-                              x["first_date"] or ""), reverse=False)
-    # выше — стабильно отсортируем заново: сначала по rank ASC, потом по дате DESC
-    items.sort(key=lambda x: (rank.get(x["status"], 9),
-                              -(int(x["first_date"].replace("-", ""))
-                                if x["first_date"] else 0)))
+    items.sort(key=lambda x: (
+        rank.get(x["status"], 9),
+        -(int((x["first_date"] or "").replace("-", ""))
+          if x["first_date"] else 0)
+    ))
 
     return {
         "filter": filter,
@@ -273,157 +296,89 @@ async def list_sessions(
     }
 
 
-# ── single triplet detail (legacy / solo) ──────────────────────────────────
-
-async def _serialize_triplet(page: dict, clients_map: dict, tz_offset: int) -> dict:
-    interp_raw = rich_text_plain(page, "Трактовка")
-    bottom_name_legacy, interp_cleaned = extract_bottom_from_interp(interp_raw)
-    cards_raw = rich_text_plain(page, "Карты")
-
-    deck_raw = ", ".join(multi_select_names(page, "Колоды")) or None
-    deck_id = resolve_deck_id(deck_raw)
-
-    # Дно колоды: новое поле «Дно колоды» (rich_text) > legacy парсинг из interp
-    bottom_field = rich_text_plain(page, "Дно колоды").strip()
-    bottom_name = bottom_field or bottom_name_legacy or ""
-
-    cards = parse_cards_raw(cards_raw, deck_id) if cards_raw else []
-    bottom_card = canonical_card(deck_id, bottom_name) if bottom_name else None
-
-    client_name, client_id = client_name_from(page, clients_map)
-    session_type = select_of(page, "Тип сеанса")
-    self_client = (session_type == "🌟 Личный") and not relation_ids_of(page, "👥 Клиенты")
-
-    deadline_raw = (page.get("properties", {}).get("Дата", {}).get("date") or {}).get("start", "")
-    date_local = to_local_date(deadline_raw, tz_offset)
-    photo_url = (page.get("properties", {}).get("Фото", {}).get("url")) or None
-
-    return {
-        "id": page.get("id", ""),
-        "question": title_plain(page, "Тема"),
-        "client": client_name,
-        "client_id": client_id,
-        "self_client": self_client,
-        "area": multi_select_names(page, "Область"),
-        "deck": deck_raw,
-        "deck_id": deck_id,
-        "type": (multi_select_names(page, "Тип расклада") or [None])[0],
-        "date": date_local.isoformat() if date_local else None,
-        "cards_raw": cards_raw or None,
-        "cards": cards,
-        "bottom_card": bottom_card,
-        "bottom": (
-            {"name": bottom_name, "icon": first_emoji(bottom_name) or None}
-            if bottom_name else None
-        ),
-        "interpretation": interp_cleaned or None,
-        "summary": _triplet_summary_of(page) or None,
-        "verdict": _verdict_of(page),
-        "done": select_of(page, "Сбылось") or "⏳ Не проверено",
-        "price": int(round(number_of(page, "Сумма"))),
-        "paid": int(round(number_of(page, "Оплачено"))),
-        "photo_url": photo_url,
-    }
-
+# ── session by slug ──────────────────────────────────────────────────────────
 
 @router.get("/arcana/sessions/by-slug/{slug}")
 async def session_by_slug(
     slug: str,
     tg_id: int = Depends(current_user_id),
 ) -> dict[str, Any]:
-    """Сессия по slug (slugify(session_name) + '__' + client_id|self).
-
-    Legacy fallback: если slug не вида '*__*' — пробуем как notion page id.
-    """
     user_notion_id = (await get_user_notion_id(tg_id)) or ""
     _, tz_offset = await today_user_tz(tg_id)
-    clients_map = await load_clients_map(user_notion_id)
 
-    # Прямой fallback на единичную страницу — если slug это id (нет '__')
-    if "__" not in slug and len(slug) >= 16:
+    clients_list = await _clients_repo.list_all(user_notion_id)
+    name_map = _clients_name_map(clients_list)
+
+    # Try numeric id → single triplet (direct GET /by-slug/<pg_id>)
+    if "__" not in slug:
         try:
-            page = await get_page(slug)
+            t = await _sessions_repo.find_by_id(slug)
         except Exception:
-            page = None
-        if page:
-            owners = relation_ids_of(page, "🪪 Пользователи")
-            if user_notion_id and user_notion_id not in owners:
-                raise HTTPException(status_code=404, detail="session not found")
-            t = await _serialize_triplet(page, clients_map, tz_offset)
+            t = None
+        if t:
+            triplet_data = _serialize_triplet_pg(t, name_map, tz_offset)
             return {
                 "slug": slug,
                 "session_name": None,
-                "ru_title": t["question"],
-                "first_question": t["question"],
-                "category": t["type"],
-                "client": t["client"],
-                "client_id": t["client_id"],
-                "type": select_of(page, "Тип сеанса") or "",
-                "decks": [t["deck"]] if t["deck"] else [],
-                "first_date": t["date"],
+                "ru_title": triplet_data["question"],
+                "first_question": triplet_data["question"],
+                "category": triplet_data["type"],
+                "client": triplet_data["client"],
+                "client_id": triplet_data["client_id"],
+                "type": "",
+                "decks": [triplet_data["deck"]] if triplet_data["deck"] else [],
+                "first_date": triplet_data["date"],
                 "summary": None,
-                "photo_url": t.get("photo_url"),
+                "photo_url": triplet_data.get("photo_url"),
                 "is_solo": True,
-                "triplets": [t],
+                "triplets": [triplet_data],
             }
+        raise HTTPException(status_code=404, detail="session not found")
 
-    # Группа по сессии: ищем pages с совпадающим slug
-    all_pages = await sessions_all(user_notion_id=user_notion_id)
-    matching: list[dict] = []
-    for p in all_pages:
-        sname = _session_name_of(p)
-        cids = relation_ids_of(p, "👥 Клиенты")
-        cid = cids[0] if cids else None
-        if sname and _slug_for(sname, cid) == slug:
-            matching.append(p)
+    matching = await _sessions_repo.list_by_slug(slug, user_notion_id)
     if not matching:
         raise HTTPException(status_code=404, detail="session not found")
 
     matching.sort(key=lambda x: (
-        _index_in_title(title_plain(x, "Тема")) or 9999,
-        (x.get("properties", {}).get("Дата", {}).get("date") or {}).get("start", ""),
+        _index_in_title(x.question) or 9999,
+        x.date or "",
     ))
 
-    triplets = [await _serialize_triplet(p, clients_map, tz_offset) for p in matching]
+    triplets = [_serialize_triplet_pg(t, name_map, tz_offset) for t in matching]
     first = matching[0]
-    sname = _session_name_of(first)
-    cids = relation_ids_of(first, "👥 Клиенты")
-    cid = cids[0] if cids else None
-    client_name, client_id = client_name_from(first, clients_map)
+    sname = first.session_name
+    cid = first.client_id
 
-    cat_list = multi_select_names(first, "Тип расклада")
-    category = cat_list[0] if cat_list else "🌐 Сфера жизни"
+    client_name = name_map.get(cid, "Личный") if cid else "Личный"
+    category = first.spread_type or "🌐 Сфера жизни"
+    decks: List[str] = []
+    for t in matching:
+        if t.deck and t.deck not in decks:
+            decks.append(t.deck)
 
-    decks: list[str] = []
-    for p in matching:
-        for d in multi_select_names(p, "Колоды"):
-            if d not in decks:
-                decks.append(d)
-
-    first_date_raw = (first.get("properties", {})
-                      .get("Дата", {}).get("date") or {}).get("start", "")
-    date_local = to_local_date(first_date_raw, tz_offset)
-
+    first_date_local = to_local_date(first.date or "", tz_offset)
     summary_cached = cache_get(session_summary_key(sname, cid)) if sname else None
     session_photo = next((t["photo_url"] for t in triplets if t.get("photo_url")), None)
 
     return {
         "slug": slug,
         "session_name": sname or None,
-        "ru_title": sname or title_plain(first, "Тема"),
-        "first_question": title_plain(first, "Тема"),
+        "ru_title": sname or first.question,
+        "first_question": first.question,
         "category": category,
         "client": client_name,
-        "client_id": client_id,
-        "type": select_of(first, "Тип сеанса") or "",
+        "client_id": cid,
+        "type": "",
         "decks": decks,
-        "first_date": date_local.isoformat() if date_local else None,
+        "first_date": first_date_local.isoformat() if first_date_local else None,
         "summary": summary_cached,
         "photo_url": session_photo,
         "is_solo": False,
         "triplets": triplets,
     }
 
+
+# ── session summarize ────────────────────────────────────────────────────────
 
 @router.post("/arcana/sessions/by-slug/{slug}/summarize")
 async def session_summarize(
@@ -434,20 +389,11 @@ async def session_summarize(
     from core.config import config as _cfg
 
     user_notion_id = (await get_user_notion_id(tg_id)) or ""
-    _, tz_offset = await today_user_tz(tg_id)
-    clients_map = await load_clients_map(user_notion_id)
 
-    all_pages = await sessions_all(user_notion_id=user_notion_id)
-    matching: list[dict] = []
-    sname = ""
-    cid: Optional[str] = None
-    for p in all_pages:
-        s = _session_name_of(p)
-        cids = relation_ids_of(p, "👥 Клиенты")
-        c = cids[0] if cids else None
-        if s and _slug_for(s, c) == slug:
-            matching.append(p)
-            sname, cid = s, c
+    matching = await _sessions_repo.list_by_slug(slug, user_notion_id)
+    sname = matching[0].session_name if matching else ""
+    cid = matching[0].client_id if matching else None
+
     if not matching or not sname:
         raise HTTPException(status_code=404, detail="session not found")
 
@@ -457,15 +403,15 @@ async def session_summarize(
         return {"summary": cached, "cached": True}
 
     matching.sort(key=lambda x: (
-        _index_in_title(title_plain(x, "Тема")) or 9999,
-        (x.get("properties", {}).get("Дата", {}).get("date") or {}).get("start", ""),
+        _index_in_title(x.question) or 9999,
+        x.date or "",
     ))
 
-    parts: list[str] = []
-    for p in matching:
-        q = title_plain(p, "Тема") or "—"
-        cards = rich_text_plain(p, "Карты") or ""
-        ts = _triplet_summary_of(p)
+    parts: List[str] = []
+    for t in matching:
+        q = t.question or "—"
+        cards = t.cards or ""
+        ts = t.triplet_summary or ""
         parts.append(f"❓ {q}\n   🃏 {cards}\n   ✏️ {ts}")
     aggregated = "\n\n".join(parts)
 
@@ -493,8 +439,7 @@ async def session_summarize(
     return {"summary": summary, "cached": False}
 
 
-# ── single (legacy) ─────────────────────────────────────────────────────────
-
+# ── single (legacy / direct id) ─────────────────────────────────────────────
 
 @router.get("/arcana/sessions/{session_id}")
 async def session_detail(
@@ -502,18 +447,11 @@ async def session_detail(
     tg_id: int = Depends(current_user_id),
 ) -> dict[str, Any]:
     user_notion_id = (await get_user_notion_id(tg_id)) or ""
-    try:
-        page = await get_page(session_id)
-    except Exception as e:
-        logger.warning("session get_page failed: %s", e)
-        raise HTTPException(status_code=404, detail="session not found")
-    if not page:
+    t = await _sessions_repo.find_by_id(session_id)
+    if not t:
         raise HTTPException(status_code=404, detail="session not found")
 
-    owners = relation_ids_of(page, "🪪 Пользователи")
-    if user_notion_id and user_notion_id not in owners:
-        raise HTTPException(status_code=404, detail="session not found")
-
-    clients_map = await load_clients_map(user_notion_id)
+    clients_list = await _clients_repo.list_all(user_notion_id)
+    name_map = _clients_name_map(clients_list)
     _, tz_offset = await today_user_tz(tg_id)
-    return await _serialize_triplet(page, clients_map, tz_offset)
+    return _serialize_triplet_pg(t, name_map, tz_offset)

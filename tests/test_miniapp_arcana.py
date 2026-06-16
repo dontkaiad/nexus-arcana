@@ -162,14 +162,20 @@ def _make_client(cid, name, *, contact="", request="", notes="",
     )
 
 
-def _make_triplet(sid, question, *, client_id=None, date=None, amount=0, paid=0, outcome="unverified"):
+def _make_triplet(sid, question, *, client_id=None, date=None, amount=0, paid=0,
+                  outcome="unverified", area="", spread_type="", cards="",
+                  interpretation="", barter_what="", session_name="",
+                  deck="Уэйт", photo_url=None, bottom_card="", triplet_summary=""):
     from arcana.repos.sessions_repo import TripletEntry
     from decimal import Decimal
     return TripletEntry(
-        id=sid, question=question, cards="", interpretation="",
-        deck="Уэйт", session_name="", client_id=client_id,
+        id=sid, question=question, cards=cards, interpretation=interpretation,
+        deck=deck, session_name=session_name, client_id=client_id,
         date=date or "", outcome=outcome,
         amount=Decimal(str(amount)), paid=Decimal(str(paid)),
+        spread_type=spread_type, area=area, barter_what=barter_what,
+        bottom_card=bottom_card, photo_url=photo_url,
+        triplet_summary=triplet_summary,
     )
 
 
@@ -185,10 +191,15 @@ def _mock_clients_repo(list_all_result=None, find_by_id_result=None,
     return repo
 
 
-def _mock_sessions_repo_all(all_result=None):
+def _mock_sessions_repo_all(all_result=None, find_result=None, slug_result=None):
     repo = MagicMock()
     repo.list_all = AsyncMock(return_value=all_result or [])
     repo.list_by_client = AsyncMock(return_value=[])
+    repo.find_by_id = AsyncMock(return_value=find_result)
+    repo.list_by_slug = AsyncMock(return_value=slug_result or [])
+    repo.set_photo_url = AsyncMock(return_value=True)
+    repo.update_summary = AsyncMock(return_value=None)
+    repo.set_outcome = AsyncMock(return_value=True)
     return repo
 
 
@@ -232,25 +243,21 @@ def test_arcana_today_happy(client):
     today = _today_date(tz)
     today_iso = today.isoformat()
 
-    clients_pages = [_client_page("c1", "Анна")]
-    sessions = [
-        _session_page("s_today", "Что думает Вадим",
-                      date=f"{today_iso}T14:00:00+03:00",
-                      client_ids=["c1"], area=["Отношения"],
-                      spread="🗝️ Кельтский крест"),
-        # Старый непроверенный для unchecked_30d
-        _session_page(
-            "s_old_pending", "Стар Q",
-            date=(today - timedelta(days=60)).isoformat(),
-            client_ids=["c1"], done="⏳ Не проверено",
-        ),
-        # Сбылся для accuracy
-        _session_page("s_yes", "Сбылось",
+    sessions_pg = [
+        _make_triplet("s_today", "Что думает Вадим",
+                      client_id="c1", date=today_iso, area="Отношения",
+                      spread_type="🗝️ Кельтский крест", outcome="unverified"),
+        _make_triplet("s_old_pending", "Стар Q",
+                      client_id="c1",
+                      date=(today - timedelta(days=60)).isoformat(),
+                      outcome="unverified"),
+        _make_triplet("s_yes", "Сбылось",
+                      client_id="c1",
                       date=(today - timedelta(days=5)).isoformat(),
-                      client_ids=["c1"], done="✅ Да"),
+                      outcome="yes"),
     ]
+    clients_list = [_make_client("c1", "Анна")]
     works = [_work_page("w1", "Свечи", cat="🕯️ Расходники", deadline=today_iso)]
-    # Финансы за месяц: доход 10000, supplies 500
     fin = [
         {"id": "f1", "properties": {
             "Сумма": {"number": 10000},
@@ -263,11 +270,11 @@ def test_arcana_today_happy(client):
             "Категория": {"select": {"name": "🕯️ Расходники"}},
         }},
     ]
+    mock_sess = _mock_sessions_repo_all(all_result=sessions_pg)
+    mock_cl = _mock_clients_repo(list_all_result=clients_list)
 
-    with patch("miniapp.backend.routes.arcana_today.sessions_all",
-               AsyncMock(return_value=sessions)), \
-         patch("miniapp.backend.routes._arcana_common.arcana_clients_summary",
-               AsyncMock(return_value=clients_pages)), \
+    with patch("miniapp.backend.routes.arcana_today._pg_sessions_repo", mock_sess), \
+         patch("miniapp.backend.routes._arcana_common._common_clients_repo", mock_cl), \
          patch("miniapp.backend.routes.arcana_today.query_pages",
                AsyncMock(return_value=works)), \
          patch("miniapp.backend.routes._arcana_common.query_pages",
@@ -309,19 +316,18 @@ def test_arcana_today_401():
 def test_arcana_sessions_list_and_filter(client):
     tz = 3
     today = _today_date(tz)
-    sessions = [
-        _session_page("s1", "Вопрос A", date=today.isoformat(),
-                      client_ids=["c1"], area=["Отношения"],
-                      cards="Шут, Маг, Жрица"),
-        _session_page("s2", "Вопрос B", date=today.isoformat(),
-                      client_ids=["c2"], area=["Финансы"]),
+    sessions_pg = [
+        _make_triplet("s1", "Вопрос A", client_id="c1", area="Отношения",
+                      cards="Шут, Маг, Жрица", date=today.isoformat()),
+        _make_triplet("s2", "Вопрос B", client_id="c2", area="Финансы",
+                      date=today.isoformat()),
     ]
-    clients_pages = [_client_page("c1", "Анна"), _client_page("c2", "Борис")]
+    clients_pg = [_make_client("c1", "Анна"), _make_client("c2", "Борис")]
+    mock_sess = _mock_sessions_repo_all(all_result=sessions_pg)
+    mock_cl = _mock_clients_repo(list_all_result=clients_pg)
 
-    with patch("miniapp.backend.routes.arcana_sessions.sessions_all",
-               AsyncMock(return_value=sessions)), \
-         patch("miniapp.backend.routes._arcana_common.arcana_clients_summary",
-               AsyncMock(return_value=clients_pages)), \
+    with patch("miniapp.backend.routes.arcana_sessions._sessions_repo", mock_sess), \
+         patch("miniapp.backend.routes.arcana_sessions._clients_repo", mock_cl), \
          patch("miniapp.backend.routes.arcana_sessions.today_user_tz",
                AsyncMock(return_value=(today, tz))), \
          patch("miniapp.backend.routes.arcana_sessions.get_user_notion_id",
@@ -333,7 +339,6 @@ def test_arcana_sessions_list_and_filter(client):
     assert r_all.status_code == 200
     assert r_all.json()["total"] == 2
     first = r_all.json()["sessions"][0]
-    # API список отдаёт мета-поля группы, без карт; карты — в detail-эндпоинте.
     assert first["client"] == "Анна"
     assert "ru_title" in first
     assert "status" in first
@@ -355,21 +360,21 @@ def test_arcana_sessions_401():
 def test_arcana_session_detail_parses_cards_and_bottom(client):
     tz = 3
     today = _today_date(tz)
-    page = _session_page(
+    triplet = _make_triplet(
         "sX", "Планы Вадима",
-        date=today.isoformat(),
-        client_ids=["c1"],
-        area=["Отношения"], deck="Dark Wood Tarot",
-        spread="🗝️ Кельтский крест",
+        client_id="c1", date=today.isoformat(),
+        area="Отношения", deck="Dark Wood Tarot",
+        spread_type="🗝️ Кельтский крест",
         cards="1. Суть — Туз Мечей\n2. Препятствие — Башня\n3. Совет — Звезда",
-        interp="Расклад указывает на...\n🂠 Дно: Король Кубков",
-        done="⏳ Не проверено", price=3000, paid=0,
+        interpretation="Расклад указывает на...",
+        bottom_card="Король Кубков",
+        outcome="unverified", amount=3000, paid=0,
     )
+    mock_sess = _mock_sessions_repo_all(find_result=triplet)
+    mock_cl = _mock_clients_repo(list_all_result=[_make_client("c1", "Кай")])
 
-    with patch("miniapp.backend.routes.arcana_sessions.get_page",
-               AsyncMock(return_value=page)), \
-         patch("miniapp.backend.routes._arcana_common.arcana_clients_summary",
-               AsyncMock(return_value=[_client_page("c1", "Кай")])), \
+    with patch("miniapp.backend.routes.arcana_sessions._sessions_repo", mock_sess), \
+         patch("miniapp.backend.routes.arcana_sessions._clients_repo", mock_cl), \
          patch("miniapp.backend.routes.arcana_sessions.today_user_tz",
                AsyncMock(return_value=(today, tz))), \
          patch("miniapp.backend.routes.arcana_sessions.get_user_notion_id",
@@ -381,27 +386,18 @@ def test_arcana_session_detail_parses_cards_and_bottom(client):
     assert data["question"] == "Планы Вадима"
     assert data["client"] == "Кай"
     assert data["bottom"] == {"name": "Король Кубков", "icon": None}
-    # interpretation очищен от строки "🂠 Дно"
     assert "Дно" not in (data["interpretation"] or "")
     assert "Расклад указывает" in data["interpretation"]
     assert len(data["cards"]) >= 3
-    # wave6.4: cards теперь canonical с en/ru/file/matched
     assert "en" in data["cards"][0] or "raw" in data["cards"][0]
     assert data["cards_raw"] is not None
 
 
-def test_arcana_session_detail_404_when_wrong_owner(client):
-    page = {
-        "id": "sX",
-        "properties": {
-            "Тема": {"title": []},
-            "🪪 Пользователи": {"relation": [{"id": "somebody-else"}]},
-        },
-    }
-    with patch("miniapp.backend.routes.arcana_sessions.get_page",
-               AsyncMock(return_value=page)), \
-         patch("miniapp.backend.routes._arcana_common.arcana_clients_summary",
-               AsyncMock(return_value=[])), \
+def test_arcana_session_detail_404_not_found(client):
+    mock_sess = _mock_sessions_repo_all(find_result=None)
+    with patch("miniapp.backend.routes.arcana_sessions._sessions_repo", mock_sess), \
+         patch("miniapp.backend.routes.arcana_sessions._clients_repo",
+               _mock_clients_repo(list_all_result=[])), \
          patch("miniapp.backend.routes.arcana_sessions.today_user_tz",
                AsyncMock(return_value=(_today_date(3), 3))), \
          patch("miniapp.backend.routes.arcana_sessions.get_user_notion_id",
@@ -702,11 +698,16 @@ def test_arcana_stats_computes_overall_and_months(client):
         _session_page("s4", "Q", date=f"{cur_month}-08", done="⏳ Не проверено"),
     ]
 
-    # /arcana/stats теперь обслуживает arcana_today (расширенная статистика
-    # с разделением sessions/rituals). Старый узкий arcana_stats роут
-    # перекрыт более широким, тест проверяет реальный shape.
-    with patch("miniapp.backend.routes.arcana_today.sessions_all",
-               AsyncMock(return_value=sessions)), \
+    sessions_pg = [
+        _make_triplet("s1", "Q", date=f"{cur_month}-05", outcome="yes"),
+        _make_triplet("s2", "Q", date=f"{cur_month}-06", outcome="yes"),
+        _make_triplet("s3", "Q", date=f"{cur_month}-07", outcome="no"),
+        _make_triplet("s4", "Q", date=f"{cur_month}-08", outcome="unverified"),
+    ]
+    mock_sess = _mock_sessions_repo_all(all_result=sessions_pg)
+
+    # /arcana/stats обслуживает arcana_today (расширенная статистика).
+    with patch("miniapp.backend.routes.arcana_today._pg_sessions_repo", mock_sess), \
          patch("miniapp.backend.routes.arcana_today.rituals_all",
                AsyncMock(return_value=[])), \
          patch("miniapp.backend.routes.arcana_today.load_clients_map",
@@ -736,15 +737,16 @@ def test_arcana_stats_401():
 # ── POST /api/arcana/sessions/{id}/verify ───────────────────────────────────
 
 def test_session_verify_updates_select(client):
-    page = _page("s-1")
-    with patch("miniapp.backend.routes.writes.get_page", AsyncMock(return_value=page)), \
-         patch("miniapp.backend.routes.writes.update_page_select",
-               AsyncMock(return_value=True)) as ups, \
+    triplet = _make_triplet("s-1", "Q", outcome="unverified")
+    mock_repo = MagicMock()
+    mock_repo.find_by_id = AsyncMock(return_value=triplet)
+    mock_repo.set_outcome = AsyncMock(return_value=True)
+    with patch("miniapp.backend.routes.writes._sessions_pg_repo", mock_repo), \
          patch("miniapp.backend.routes.writes.get_user_notion_id",
                AsyncMock(return_value=FAKE_NOTION_USER)):
         r = client.post("/api/arcana/sessions/s-1/verify", json={"status": "✅ Да"})
     assert r.status_code == 200
-    ups.assert_awaited_once_with("s-1", "Сбылось", "✅ Да")
+    mock_repo.set_outcome.assert_awaited_once_with("s-1", "yes")
 
 
 def test_session_verify_rejects_unknown_status(client):
@@ -856,13 +858,14 @@ def test_client_create_with_birthday(client):
 # ── POST /api/arcana/sessions/{id}/photo ────────────────────────────────────
 
 def test_session_photo_upload_writes_url(client):
-    page = _page("sess-1")
+    triplet = _make_triplet("sess-1", "Q")
+    mock_repo = MagicMock()
+    mock_repo.find_by_id = AsyncMock(return_value=triplet)
+    mock_repo.set_photo_url = AsyncMock(return_value=True)
     fake_url = "https://res.cloudinary.com/x/y.jpg"
-    with patch("miniapp.backend.routes.writes.get_page", AsyncMock(return_value=page)), \
+    with patch("miniapp.backend.routes.writes._sessions_pg_repo", mock_repo), \
          patch("miniapp.backend.routes.writes._cloudinary_upload",
                AsyncMock(return_value=fake_url)) as cu, \
-         patch("miniapp.backend.routes.writes.update_page",
-               AsyncMock(return_value=None)) as up, \
          patch("miniapp.backend.routes.writes.get_user_notion_id",
                AsyncMock(return_value=FAKE_NOTION_USER)):
         r = client.post(
@@ -872,13 +875,14 @@ def test_session_photo_upload_writes_url(client):
     assert r.status_code == 200
     assert r.json() == {"ok": True, "url": fake_url}
     cu.assert_awaited_once()
-    props = up.await_args.args[1]
-    assert props == {"Фото": {"url": fake_url}}
+    mock_repo.set_photo_url.assert_awaited_once_with("sess-1", fake_url)
 
 
 def test_session_photo_upload_rejects_non_image(client):
-    page = _page("sess-2")
-    with patch("miniapp.backend.routes.writes.get_page", AsyncMock(return_value=page)), \
+    triplet = _make_triplet("sess-2", "Q")
+    mock_repo = MagicMock()
+    mock_repo.find_by_id = AsyncMock(return_value=triplet)
+    with patch("miniapp.backend.routes.writes._sessions_pg_repo", mock_repo), \
          patch("miniapp.backend.routes.writes.get_user_notion_id",
                AsyncMock(return_value=FAKE_NOTION_USER)):
         r = client.post(
@@ -985,22 +989,16 @@ def test_client_object_photo_index_404(client):
 # ── POST /api/arcana/sessions/{id}/summarize ────────────────────────────────
 
 def test_summarize_returns_cached_when_ai_summary_exists(client):
-    """Если у сеанса уже есть AI_Summary — возвращаем его без вызова Claude."""
-    page = {
-        "id": "s1",
-        "properties": {
-            "🪪 Пользователи": {"relation": [{"id": FAKE_NOTION_USER}]},
-            "AI_Summary": {"rich_text": [{"plain_text": "Короткая суть уже была."}]},
-            "Трактовка": {"rich_text": [{"plain_text": "<b>Долгая трактовка...</b>"}]},
-        },
-    }
-
+    """Если у сеанса уже есть triplet_summary — возвращаем без вызова Claude."""
+    triplet = _make_triplet("s1", "Q",
+                            triplet_summary="Короткая суть уже была.",
+                            interpretation="<b>Долгая трактовка...</b>")
+    mock_repo = MagicMock()
+    mock_repo.find_by_id = AsyncMock(return_value=triplet)
+    mock_repo.update_summary = AsyncMock(return_value=None)
     claude_mock = AsyncMock(return_value="НЕ должен вызываться")
 
-    with patch("miniapp.backend.routes.writes.get_page",
-               AsyncMock(return_value=page)), \
-         patch("miniapp.backend.routes.writes.update_page",
-               AsyncMock(return_value={"ok": True})), \
+    with patch("miniapp.backend.routes.writes._sessions_pg_repo", mock_repo), \
          patch("miniapp.backend.routes.writes.get_user_notion_id",
                AsyncMock(return_value=FAKE_NOTION_USER)), \
          patch("core.claude_client.ask_claude", claude_mock):
@@ -1014,20 +1012,14 @@ def test_summarize_returns_cached_when_ai_summary_exists(client):
 
 
 def test_summarize_generates_when_empty(client):
-    page = {
-        "id": "s2",
-        "properties": {
-            "🪪 Пользователи": {"relation": [{"id": FAKE_NOTION_USER}]},
-            "AI_Summary": {"rich_text": []},
-            "Трактовка": {"rich_text": [{"plain_text": "Очень длинная трактовка про шута и дорогу"}]},
-        },
-    }
+    triplet = _make_triplet("s2", "Q",
+                            interpretation="Очень длинная трактовка про шута и дорогу")
+    mock_repo = MagicMock()
+    mock_repo.find_by_id = AsyncMock(return_value=triplet)
+    mock_repo.update_summary = AsyncMock(return_value=None)
     claude_mock = AsyncMock(return_value="Вывод: путь начинается сегодня.")
 
-    with patch("miniapp.backend.routes.writes.get_page",
-               AsyncMock(return_value=page)), \
-         patch("miniapp.backend.routes.writes.update_page",
-               AsyncMock(return_value={"ok": True})), \
+    with patch("miniapp.backend.routes.writes._sessions_pg_repo", mock_repo), \
          patch("miniapp.backend.routes.writes.get_user_notion_id",
                AsyncMock(return_value=FAKE_NOTION_USER)), \
          patch("core.claude_client.ask_claude", claude_mock):

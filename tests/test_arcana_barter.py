@@ -101,52 +101,48 @@ def test_clients_payload_has_type_and_barter_count(client):
 
 # ── /api/arcana/sessions (list): client_type + has_barter ────────────────────
 
-def _sess(sid: str, cid: str, dt: str, barter: str = "", question: str = "Q") -> dict:
-    return {
-        "id": sid,
-        "properties": {
-            "Тема": {"title": [{"plain_text": question}]},
-            "Дата": {"date": {"start": dt}},
-            "👥 Клиенты": {"relation": [{"id": cid}]},
-            "Сумма": {"number": 3000}, "Оплачено": {"number": 0},
-            "Бартер · что": {"rich_text": ([{"plain_text": barter}] if barter else [])},
-            "Колоды": {"multi_select": []},
-            "Область": {"multi_select": []},
-            "Тип расклада": {"multi_select": []},
-            "Тип сеанса": {"select": None},
-            "Сбылось": {"select": None},
-            "Карты": {"rich_text": []},
-            "Дно колоды": {"rich_text": []},
-        },
-    }
+def _make_pg_triplet(sid, question, cid, dt, barter_what="", amount=3000):
+    from arcana.repos.sessions_repo import TripletEntry
+    from decimal import Decimal
+    return TripletEntry(
+        id=sid, question=question, cards="", interpretation="",
+        deck="Уэйт", session_name="", client_id=cid,
+        date=dt, outcome="unverified",
+        amount=Decimal(str(amount)), paid=Decimal("0"),
+        spread_type="", area="", barter_what=barter_what,
+        bottom_card="", photo_url=None,
+    )
 
 
-def _client_page(cid: str, name: str) -> dict:
-    return {
-        "id": cid,
-        "properties": {
-            "Имя": {"title": [{"plain_text": name}]},
-            "Тип клиента": {"select": {"name": "🤝 Платный"}},
-        },
-    }
+def _make_pg_client(cid, name, type_code="paid"):
+    from arcana.repos.clients_repo import Client
+    return Client(
+        id=cid, name=name, contact="", request="", notes="", since="",
+        type_code=type_code, status_code="active",
+    )
 
 
 def test_sessions_list_payload_has_client_type_and_has_barter(client):
+    from unittest.mock import MagicMock
+
     today = date(2026, 5, 3)
-    pages = [
-        _sess("s1", "c-paid", today.isoformat(), barter="торт"),
-        _sess("s2", "c-paid", today.isoformat()),  # без бартера
+    sessions_pg = [
+        _make_pg_triplet("s1", "Q1", "c-paid", today.isoformat(), barter_what="торт"),
+        _make_pg_triplet("s2", "Q2", "c-paid", today.isoformat()),
     ]
-    with patch("miniapp.backend.routes.arcana_sessions.sessions_all",
-               AsyncMock(return_value=pages)), \
-         patch("miniapp.backend.routes._arcana_common.arcana_clients_summary",
-               AsyncMock(return_value=[_client_page("c-paid", "Маша")])), \
+    clients_pg = [_make_pg_client("c-paid", "Маша", type_code="paid")]
+
+    mock_sess = MagicMock()
+    mock_sess.list_all = AsyncMock(return_value=sessions_pg)
+    mock_cl = MagicMock()
+    mock_cl.list_all = AsyncMock(return_value=clients_pg)
+
+    with patch("miniapp.backend.routes.arcana_sessions._sessions_repo", mock_sess), \
+         patch("miniapp.backend.routes.arcana_sessions._clients_repo", mock_cl), \
          patch("miniapp.backend.routes.arcana_sessions.today_user_tz",
                AsyncMock(return_value=(today, 3))), \
          patch("miniapp.backend.routes.arcana_sessions.get_user_notion_id",
-               AsyncMock(return_value=FAKE_NOTION)), \
-         patch("miniapp.backend.routes.arcana_today._client_types_map",
-               AsyncMock(return_value={"c-paid": "🤝 Платный"})):
+               AsyncMock(return_value=FAKE_NOTION)):
         r = client.get("/api/arcana/sessions")
 
     assert r.status_code == 200, r.text
@@ -155,8 +151,6 @@ def test_sessions_list_payload_has_client_type_and_has_barter(client):
     for it in items:
         assert "client_type" in it
         assert "has_barter" in it
-    # Хотя бы одна запись с бартером (s1)
     assert any(it["has_barter"] for it in items)
-    # Все: тип клиента — 🤝
     for it in items:
         assert it["client_type"] == "🤝"

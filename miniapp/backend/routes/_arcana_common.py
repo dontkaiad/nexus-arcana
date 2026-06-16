@@ -8,7 +8,11 @@ import re
 from typing import Optional
 
 from core.config import config
-from core.notion_client import arcana_clients_summary, query_pages
+from core.notion_client import query_pages
+from arcana.repos.clients_repo import ClientsRepo
+from arcana.repos.pg_clients_repo import TYPE_CODE_TO_FULL
+
+_common_clients_repo = ClientsRepo()
 
 from miniapp.backend._helpers import (
     date_of,
@@ -53,25 +57,65 @@ def _resolve_card_en(raw: str) -> str:
 
 # ── Client name map ─────────────────────────────────────────────────────────
 
-async def load_clients_map(user_notion_id: str) -> dict[str, dict]:
-    """Загружает всех клиентов юзера, возвращает {client_id: {...details...}}."""
-    pages = await arcana_clients_summary(user_notion_id=user_notion_id)
-    out: dict[str, dict] = {}
-    for p in pages:
-        props = p.get("properties", {})
-        status = (props.get("Статус", {}).get("status") or {}).get("name", "")
-        out[p["id"]] = {
-            "id": p["id"],
-            "name": title_plain(p, "Имя"),
-            "status": status,
-            "contact": rich_text_plain(p, "Контакт"),
-            "request": rich_text_plain(p, "Запрос"),
-            "notes": rich_text_plain(p, "Заметки"),
+async def load_clients_map(user_notion_id: str) -> dict:
+    """Загружает всех клиентов из PG, возвращает {pg_client_id: {...details...}}.
+
+    Keyed by PG integer string. Notion-UUID-keyed callers (Works) will get
+    degraded client names until Works domain is migrated to PG.
+    """
+    clients = await _common_clients_repo.list_all(user_notion_id)
+    out: dict = {}
+    for c in clients:
+        type_full = TYPE_CODE_TO_FULL.get(c.type_code or "", "")
+        out[c.id] = {
+            "id": c.id,
+            "name": c.name or "",
+            "status": c.status_code or "",
+            "contact": c.contact or "",
+            "request": c.request or "",
+            "notes": c.notes or "",
+            "type_full": type_full,
+            "type_code": c.type_code or "",
         }
     return out
 
 
-def client_name_from(page: dict, clients_map: dict[str, dict]) -> tuple[str, Optional[str]]:
+_OUTCOME_CODE_TO_RU: dict = {
+    "yes": "✅ Да",
+    "partial": "〰️ Частично",
+    "no": "❌ Нет",
+    "unverified": "⏳ Не проверено",
+}
+
+
+def triplet_to_stub(t) -> dict:
+    """Convert TripletEntry → minimal Notion-page-like dict for shared analytics fns.
+
+    Allows arcana_today/arcana_debts analytics to consume PG sessions without
+    rewriting every helper function. Keyed by PG client_id so clients_map
+    must also be PG-keyed (load_clients_map returns PG-keyed after PG switch).
+    """
+    outcome_ru = _OUTCOME_CODE_TO_RU.get(t.outcome or "unverified", "⏳ Не проверено")
+    return {
+        "id": t.id,
+        "properties": {
+            "Дата": {"date": {"start": t.date or ""}},
+            "Сбылось": {"select": {"name": outcome_ru}},
+            "Тема": {"title": [{"plain_text": t.question or ""}]},
+            "Тип расклада": {"multi_select": [{"name": t.spread_type}] if t.spread_type else []},
+            "Карты": {"rich_text": [{"plain_text": t.cards or ""}]},
+            "Колоды": {"multi_select": [{"name": t.deck}] if t.deck else []},
+            "Область": {"multi_select": [{"name": t.area}] if t.area else []},
+            "Сумма": {"number": float(t.amount or 0)},
+            "Оплачено": {"number": float(t.paid or 0)},
+            "Бартер · что": {"rich_text": [{"plain_text": t.barter_what or ""}]},
+            "👥 Клиенты": {"relation": [{"id": t.client_id}] if t.client_id else []},
+            "Тип сеанса": {"select": {"name": ""}},
+        },
+    }
+
+
+def client_name_from(page: dict, clients_map: dict) -> tuple[str, Optional[str]]:
     """→ (name, client_id | None). Если relation пуст → ('Личный', None)."""
     ids = relation_ids_of(page, "👥 Клиенты")
     if not ids:

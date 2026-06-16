@@ -8,7 +8,8 @@
 """
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, patch
+from decimal import Decimal
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
@@ -30,46 +31,40 @@ def client():
         app.dependency_overrides.clear()
 
 
-def _client(cid: str, name: str, ctype: str = "🤝 Платный") -> dict:
-    return {
-        "id": cid,
-        "properties": {
-            "Имя": {"title": [{"plain_text": name}]},
-            "Тип клиента": {"select": {"name": ctype}},
-            "🪪 Пользователи": {"relation": [{"id": FAKE_NOTION}]},
-        },
-    }
+# ── PG helpers ───────────────────────────────────────────────────────────────
+
+def _pg_client(cid, name, type_code="paid"):
+    from arcana.repos.clients_repo import Client
+    return Client(id=cid, name=name, contact="", request="", notes="", since="",
+                  type_code=type_code, status_code="active")
 
 
-def _session(sid: str, cid: str, sum_: int = 3000, paid: int = 0,
-             topic: str = "Расклад") -> dict:
-    return {
-        "id": sid,
-        "properties": {
-            "Тема": {"title": [{"plain_text": topic}]},
-            "👥 Клиенты": {"relation": [{"id": cid}]},
-            "Сумма": {"number": sum_},
-            "Оплачено": {"number": paid},
-            "Бартер · что": {"rich_text": []},
-        },
-    }
+def _pg_triplet(sid, question, cid, sum_=3000, paid_=0):
+    from arcana.repos.sessions_repo import TripletEntry
+    return TripletEntry(
+        id=sid, question=question, cards="", interpretation="",
+        deck="Уэйт", session_name="", client_id=cid,
+        date="2026-04-10", outcome="unverified",
+        amount=Decimal(str(sum_)), paid=Decimal(str(paid_)),
+        spread_type="", area="", barter_what="", bottom_card="", photo_url=None,
+    )
 
 
-def _ritual(rid: str, cid: str, price: int = 5000, paid: int = 0,
-            name: str = "Ритуал") -> dict:
-    return {
-        "id": rid,
-        "properties": {
-            "Название": {"title": [{"plain_text": name}]},
-            "👥 Клиенты": {"relation": [{"id": cid}]},
-            "Цена за ритуал": {"number": price},
-            "Оплачено": {"number": paid},
-            "Бартер · что": {"rich_text": []},
-        },
-    }
+def _pg_ritual(rid, name, cid, price=5000, paid_=0):
+    from arcana.repos.rituals_repo import Ritual
+    from datetime import datetime, timezone
+    r = Ritual(
+        id=rid, name=name, goal=None, place=None, result="unverified",
+        price=Decimal(str(price)), paid=Decimal(str(paid_)),
+        date=datetime(2026, 4, 10, tzinfo=timezone.utc),
+        type_code="paid", consumables="", structure="",
+        offerings="", powers="", time_min=None, notes=None, photo_url=None,
+    )
+    r.client_id = cid
+    return r
 
 
-def _barter_item(iid: str, name: str, group: str, status: str = "To do") -> dict:
+def _barter_item(iid, name, group, status="To do"):
     return {
         "id": iid,
         "properties": {
@@ -81,13 +76,16 @@ def _barter_item(iid: str, name: str, group: str, status: str = "To do") -> dict
 
 
 def _patches(clients=None, sessions=None, rituals=None, barter_items=None):
+    mock_cl = MagicMock()
+    mock_cl.list_all = AsyncMock(return_value=clients or [])
+    mock_sess = MagicMock()
+    mock_sess.list_all = AsyncMock(return_value=sessions or [])
+    mock_rit = MagicMock()
+    mock_rit.list_all = AsyncMock(return_value=rituals or [])
     return [
-        patch("miniapp.backend.routes.arcana_debts.arcana_clients_summary",
-              AsyncMock(return_value=clients or [])),
-        patch("miniapp.backend.routes.arcana_debts.sessions_all",
-              AsyncMock(return_value=sessions or [])),
-        patch("miniapp.backend.routes.arcana_debts.rituals_all",
-              AsyncMock(return_value=rituals or [])),
+        patch("miniapp.backend.routes.arcana_debts._clients_repo", mock_cl),
+        patch("miniapp.backend.routes.arcana_debts._sessions_repo", mock_sess),
+        patch("miniapp.backend.routes.arcana_debts._rituals_repo", mock_rit),
         patch("miniapp.backend.routes.arcana_debts.query_pages",
               AsyncMock(return_value=barter_items or [])),
         patch("miniapp.backend.routes.arcana_debts.get_user_notion_id",
@@ -108,7 +106,7 @@ def _run(client, **kwargs):
 
 
 def test_debts_empty(client):
-    r = _run(client, clients=[_client("c1", "Маша")])
+    r = _run(client, clients=[_pg_client("c1", "Маша")])
     assert r.status_code == 200, r.text
     body = r.json()
     assert body["money"] == []
@@ -117,9 +115,9 @@ def test_debts_empty(client):
 
 
 def test_debts_money_only(client):
-    clients = [_client("c1", "Маша"), _client("c2", "Аня")]
-    sessions = [_session("s1", "c1", sum_=3000, paid=1000, topic="Карьера")]
-    rituals = [_ritual("r1", "c2", price=5000, paid=0, name="Чистка")]
+    clients = [_pg_client("c1", "Маша"), _pg_client("c2", "Аня")]
+    sessions = [_pg_triplet("s1", "Карьера", "c1", sum_=3000, paid_=1000)]
+    rituals = [_pg_ritual("r1", "Чистка", "c2", price=5000, paid_=0)]
     r = _run(client, clients=clients, sessions=sessions, rituals=rituals)
     assert r.status_code == 200, r.text
     body = r.json()
@@ -136,8 +134,8 @@ def test_debts_money_only(client):
 
 
 def test_debts_barter_only(client):
-    clients = [_client("c1", "Оля", "🎁 Бесплатный")]
-    rituals = [_ritual("r1", "c1", price=0, paid=0, name="Чистка квартиры")]
+    clients = [_pg_client("c1", "Оля", type_code="free")]
+    rituals = [_pg_ritual("r1", "Чистка квартиры", "c1", price=0, paid_=0)]
     barter = [
         _barter_item("b1", "колода таро", "Чистка квартиры"),
         _barter_item("b2", "благовония", "Чистка квартиры"),
@@ -155,12 +153,12 @@ def test_debts_barter_only(client):
 
 def test_debts_self_client_excluded(client):
     clients = [
-        _client("c-self", "Кай", "🌟 Self"),
-        _client("c-paid", "Маша", "🤝 Платный"),
+        _pg_client("c-self", "Кай", type_code="self"),
+        _pg_client("c-paid", "Маша", type_code="paid"),
     ]
     sessions = [
-        _session("s1", "c-self", sum_=10000, paid=0, topic="Себе"),
-        _session("s2", "c-paid", sum_=2000, paid=0, topic="Клиент"),
+        _pg_triplet("s1", "Себе", "c-self", sum_=10000, paid_=0),
+        _pg_triplet("s2", "Клиент", "c-paid", sum_=2000, paid_=0),
     ]
     barter = [_barter_item("b1", "торт", "Себе")]
     r = _run(client, clients=clients, sessions=sessions, barter_items=barter)
@@ -168,6 +166,5 @@ def test_debts_self_client_excluded(client):
     body = r.json()
     assert body["totals"]["money"] == 2000
     assert [m["client_name"] for m in body["money"]] == ["Маша"]
-    # Бартер группы "Себе" сматчен на self-client → исключён
     assert body["barter"] == []
     assert body["totals"]["barter_items"] == 0

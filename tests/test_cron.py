@@ -112,8 +112,9 @@ class TestArcanaCronCallables:
     async def test_get_unverified_count_empty(self):
         """get_unverified_count с пустыми раскладами → 0."""
         from arcana.handlers.stats import get_unverified_count
-        with patch("core.notion_client.sessions_all",
-                   new=AsyncMock(return_value=[])):
+        mock_repo = MagicMock()
+        mock_repo.list_all = AsyncMock(return_value=[])
+        with patch("arcana.handlers.stats._sessions_repo", mock_repo):
             count = await get_unverified_count("fake-user-id",
                                                 older_than_days=30)
             assert count == 0

@@ -11,7 +11,9 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
 from core.config import config
-from core.notion_client import query_pages, rituals_all, sessions_all, update_page_select
+from core.notion_client import query_pages, rituals_all, update_page_select
+from arcana.repos.pg_sessions_repo import PgSessionsRepo as _PgSessionsRepoClass
+_pg_sessions_repo = _PgSessionsRepoClass()
 from core.user_manager import get_user_notion_id
 from core.bot_notify import notify_user
 
@@ -44,6 +46,7 @@ from miniapp.backend.routes._arcana_common import (
     month_bounds,
     query_arcana_finance,
     serialize_session_brief,
+    triplet_to_stub,
 )
 
 logger = logging.getLogger("miniapp.arcana.today")
@@ -251,8 +254,9 @@ async def get_arcana_today(tg_id: int = Depends(current_user_id)) -> dict[str, A
     # Clients map — нужен для sessions_today
     clients_map = await load_clients_map(user_notion_id)
 
-    # Все сеансы юзера (используем и для today, и для unchecked_30d + accuracy)
-    all_sessions = await sessions_all(user_notion_id=user_notion_id)
+    # Все сеансы юзера из PG → конвертируем в стабы для совместимости аналитических fn
+    _pg_sessions = await _pg_sessions_repo.list_all(user_notion_id=user_notion_id)
+    all_sessions = [triplet_to_stub(t) for t in _pg_sessions]
 
     sessions_today: list[dict] = []
     now_utc = datetime.now(timezone.utc)
@@ -509,29 +513,9 @@ def _avg_check_delay(items: list[dict], verdict_fn) -> Optional[float]:
 
 
 async def _client_types_map(user_notion_id: str) -> dict[str, str]:
-    """Возвращает {client_page_id: тип_клиента}. Лишний лукап в БД, но
-    приемлемо в рамках статистики."""
-    out: dict[str, str] = {}
-    pages = await load_clients_map(user_notion_id)  # уже {id: {name,...}}
-    if not pages:
-        return out
-    # Дочитываем «Тип клиента» отдельным запросом — load_clients_map не
-    # возвращает это поле. Чтобы не делать N+1, читаем всё одним query.
-    from core.config import config
-    from core.notion_client import query_pages, _with_user_filter
-    try:
-        all_clients = await query_pages(
-            config.arcana.db_clients,
-            filters=_with_user_filter(None, user_notion_id),
-            page_size=200,
-        )
-    except Exception:
-        return out
-    for p in all_clients:
-        sel = (p.get("properties", {}).get("Тип клиента", {}) or {}).get("select")
-        if sel:
-            out[p["id"]] = sel["name"]
-    return out
+    """Возвращает {pg_client_id: type_full}. Uses PG clients (post-migration)."""
+    clients_map = await load_clients_map(user_notion_id)
+    return {cid: info.get("type_full", "") for cid, info in clients_map.items()}
 
 
 def _client_id_of(p: dict) -> Optional[str]:
@@ -551,7 +535,8 @@ async def get_arcana_stats(
 ) -> dict[str, Any]:
     """Развёрнутая статистика практики для StatsSheet."""
     user_notion_id = (await get_user_notion_id(tg_id)) or ""
-    sessions = await sessions_all(user_notion_id=user_notion_id)
+    _pg_sess = await _pg_sessions_repo.list_all(user_notion_id=user_notion_id)
+    sessions = [triplet_to_stub(t) for t in _pg_sess]
     rituals = await rituals_all(user_notion_id=user_notion_id)
     clients_map = await load_clients_map(user_notion_id)
 
@@ -901,7 +886,8 @@ async def get_arcana_accuracy(
     if scope not in ("all", "sessions", "rituals"):
         scope = "all"
     user_notion_id = (await get_user_notion_id(tg_id)) or ""
-    sessions = await sessions_all(user_notion_id=user_notion_id)
+    _pg_sess = await _pg_sessions_repo.list_all(user_notion_id=user_notion_id)
+    sessions = [triplet_to_stub(t) for t in _pg_sess]
     rituals = await rituals_all(user_notion_id=user_notion_id)
     clients_map = await load_clients_map(user_notion_id)
     acc = _compute_accuracy(sessions, rituals, scope)
@@ -935,7 +921,9 @@ async def post_arcana_accuracy_verify(
     if body.verdict not in _VERDICT_TO_SESSION:
         raise HTTPException(status_code=400, detail="verdict must be yes|half|no")
     if body.type == "session":
-        ok = await update_page_select(body.id, "Сбылось", _VERDICT_TO_SESSION[body.verdict])
+        # PG-backed session verdict: map "yes"/"half"/"no" → outcome code
+        _outcome_map = {"yes": "yes", "half": "partial", "no": "no"}
+        ok = await _pg_sessions_repo.set_outcome(body.id, _outcome_map[body.verdict])
     elif body.type == "ritual":
         ok = await update_page_select(body.id, "Результат", _VERDICT_TO_RITUAL[body.verdict])
     else:
@@ -946,7 +934,8 @@ async def post_arcana_accuracy_verify(
     _verdict_word = {"yes": "сбылось ✅", "half": "частично 🌗", "no": "не сбылось ❌"}[body.verdict]
     await notify_user(tg_id, f"🔮 {_kind}: {_verdict_word}", bot="arcana")
     user_notion_id = (await get_user_notion_id(tg_id)) or ""
-    sessions = await sessions_all(user_notion_id=user_notion_id)
+    _pg_sess = await _pg_sessions_repo.list_all(user_notion_id=user_notion_id)
+    sessions = [triplet_to_stub(t) for t in _pg_sess]
     rituals = await rituals_all(user_notion_id=user_notion_id)
     acc = _compute_accuracy(sessions, rituals, "all")
     pending_sessions, pending_rituals = _count_pending(sessions, rituals)

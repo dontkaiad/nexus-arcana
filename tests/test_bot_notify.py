@@ -146,17 +146,21 @@ def test_task_cancel_notifies(client):
 
 def test_session_verify_notifies(client):
     # #7: вердикт расклада из детали тоже шлёт уведу (как accuracy/verify).
-    page = {
-        "id": "s-1",
-        "properties": {
-            "🪪 Пользователи": {"relation": [{"id": FAKE_NOTION_USER}]},
-            "Тема": {"title": [{"plain_text": "деньги в марте"}]},
-        },
-    }
+    from decimal import Decimal
+    from arcana.repos.sessions_repo import TripletEntry
+    triplet = TripletEntry(
+        id="s-1", question="деньги в марте", cards="", interpretation="",
+        deck="Уэйт", session_name="", client_id=None,
+        date="2026-05-01", outcome="unverified",
+        amount=Decimal("0"), paid=Decimal("0"),
+        spread_type="", area="", barter_what="", bottom_card="", photo_url=None,
+    )
+    mock_repo = MagicMock()
+    mock_repo.find_by_id = AsyncMock(return_value=triplet)
+    mock_repo.set_outcome = AsyncMock(return_value=True)
     notify = AsyncMock(return_value=True)
     with patch("miniapp.backend.routes.writes.notify_user", notify), \
-         patch("miniapp.backend.routes.writes.get_page", AsyncMock(return_value=page)), \
-         patch("miniapp.backend.routes.writes.update_page_select", AsyncMock(return_value=True)), \
+         patch("miniapp.backend.routes.writes._sessions_pg_repo", mock_repo), \
          patch("miniapp.backend.routes.writes.get_user_notion_id",
                AsyncMock(return_value=FAKE_NOTION_USER)):
         r = client.post("/api/arcana/sessions/s-1/verify", json={"status": "✅ Да"})
@@ -210,12 +214,12 @@ def test_arcana_work_done_notifies(client):
 
 
 def test_arcana_accuracy_verify_notifies(client):
+    mock_sess_repo = MagicMock()
+    mock_sess_repo.set_outcome = AsyncMock(return_value=True)
+    mock_sess_repo.list_all = AsyncMock(return_value=[])
     notify = AsyncMock(return_value=True)
     with patch("miniapp.backend.routes.arcana_today.notify_user", notify), \
-         patch("miniapp.backend.routes.arcana_today.update_page_select",
-               AsyncMock(return_value=True)), \
-         patch("miniapp.backend.routes.arcana_today.sessions_all",
-               AsyncMock(return_value=[])), \
+         patch("miniapp.backend.routes.arcana_today._pg_sessions_repo", mock_sess_repo), \
          patch("miniapp.backend.routes.arcana_today.rituals_all",
                AsyncMock(return_value=[])), \
          patch("miniapp.backend.routes.arcana_today.get_user_notion_id",

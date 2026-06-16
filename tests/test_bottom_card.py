@@ -107,31 +107,23 @@ async def test_session_add_falls_back_when_field_missing():
     assert "Дно колоды" not in captured[1]
 
 
-@pytest.mark.asyncio
-async def test_serialize_triplet_reads_bottom_field():
-    """_serialize_triplet берёт дно из поля «Дно колоды» rich_text,
-    игнорируя legacy-парсинг из interp."""
-    from miniapp.backend.routes.arcana_sessions import _serialize_triplet
+def test_serialize_triplet_reads_bottom_field():
+    """_serialize_triplet_pg берёт дно из поля bottom_card TripletEntry."""
+    from decimal import Decimal
+    from arcana.repos.sessions_repo import TripletEntry
+    from miniapp.backend.routes.arcana_sessions import _serialize_triplet_pg
 
-    page = {
-        "id": "abc",
-        "properties": {
-            "Тема": {"title": [{"plain_text": "тест"}]},
-            "Карты": {"rich_text": [{"plain_text": "The Fool, The Magician, The High Priestess"}]},
-            "Дно колоды": {"rich_text": [{"plain_text": "King of Cups"}]},
-            "Колоды": {"multi_select": [{"name": "Уэйт"}]},
-            "Дата": {"date": {"start": "2026-05-02"}},
-            "Тип сеанса": {"select": {"name": "🌟 Личный"}},
-            "Тип расклада": {"multi_select": [{"name": "🔺 Триплет"}]},
-            "Сбылось": {"select": {"name": "⏳ Не проверено"}},
-            "Сумма": {"number": 0},
-            "Оплачено": {"number": 0},
-            "Трактовка": {"rich_text": [{"plain_text": "<p>x</p>"}]},
-            "Саммари триплета": {"rich_text": []},
-            "👥 Клиенты": {"relation": []},
-        },
-    }
-    out = await _serialize_triplet(page, clients_map={}, tz_offset=3)
+    t = TripletEntry(
+        id="abc", question="тест",
+        cards="The Fool, The Magician, The High Priestess",
+        interpretation="<p>x</p>",
+        deck="Уэйт", session_name="", client_id=None,
+        date="2026-05-02", outcome="unverified",
+        amount=Decimal("0"), paid=Decimal("0"),
+        spread_type="🔺 Триплет", area="",
+        barter_what="", bottom_card="King of Cups", photo_url=None,
+    )
+    out = _serialize_triplet_pg(t, name_map={}, tz_offset=3)
     assert out["bottom_card"] is not None
     assert out["bottom_card"]["en"] == "King of Cups"
     assert out["bottom_card"]["ru"] == "Король Кубков"

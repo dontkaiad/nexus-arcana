@@ -19,10 +19,16 @@ class TripletEntry:
     deck: str
     session_name: str
     client_id: Optional[str]
-    date: str = ""       # "YYYY-MM-DD" or ""
-    outcome: str = ""    # PG code: yes/no/partial/unverified
+    date: str = ""            # "YYYY-MM-DD" or ""
+    outcome: str = ""         # PG code: yes/no/partial/unverified
     amount: Decimal = field(default_factory=lambda: Decimal("0"))
     paid: Decimal = field(default_factory=lambda: Decimal("0"))
+    spread_type: str = ""     # Тип расклада
+    area: str = ""            # Область
+    triplet_summary: str = "" # Саммари / AI_Summary
+    barter_what: str = ""     # Бартер · что
+    bottom_card: str = ""     # Дно колоды
+    photo_url: Optional[str] = None
 
 
 @dataclass

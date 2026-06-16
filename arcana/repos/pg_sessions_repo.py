@@ -103,6 +103,12 @@ def _row_to_triplet(row) -> TripletEntry:
         outcome=row.outcome_code or "unverified",
         amount=row.amount or Decimal("0"),
         paid=row.paid or Decimal("0"),
+        spread_type=row.spread_type or "",
+        area=row.area or "",
+        triplet_summary=row.triplet_summary or "",
+        barter_what=row.barter_what or "",
+        bottom_card=row.bottom_card or "",
+        photo_url=row.photo_url or None,
     )
 
 
@@ -148,6 +154,8 @@ def _select_sessions():
             sessions.c.occurred_at,
             sessions.c.amount,
             sessions.c.paid,
+            sessions.c.barter_what,
+            sessions.c.photo_url,
             sessions.c.client_id,
             sessions.c.user_notion_id,
             session_outcome.c.code.label("outcome_code"),
@@ -306,6 +314,42 @@ class PgSessionsRepo:
             )
         return res.rowcount > 0
 
+    def _set_photo_sync(self, session_id: str, url: str) -> bool:
+        try:
+            sid = int(session_id)
+        except (ValueError, TypeError):
+            return False
+        with get_engine().begin() as conn:
+            res = conn.execute(
+                sessions.update().where(sessions.c.id == sid).values(photo_url=url or None)
+            )
+        return res.rowcount > 0
+
+    def _update_summary_sync(self, session_id: str, summary: str) -> None:
+        try:
+            sid = int(session_id)
+        except (ValueError, TypeError):
+            return
+        with get_engine().begin() as conn:
+            conn.execute(
+                sessions.update().where(sessions.c.id == sid)
+                .values(triplet_summary=summary[:2000] if summary else None)
+            )
+
+    def _list_by_slug_sync(self, slug: str, user_notion_id: str) -> List[TripletEntry]:
+        """Load all sessions and filter by slug (session_name__client_id|self)."""
+        all_entries = self._list_all_sync(user_notion_id, None)
+        from core.session_cache import slugify as _slugify
+        result = []
+        for e in all_entries:
+            if e.session_name:
+                entry_slug = f"{_slugify(e.session_name)}__{e.client_id or 'self'}"
+            else:
+                entry_slug = e.id
+            if entry_slug == slug:
+                result.append(e)
+        return result
+
     def _archive_sync(self, session_id: str) -> bool:
         try:
             sid = int(session_id)
@@ -402,6 +446,17 @@ class PgSessionsRepo:
         await asyncio.to_thread(
             self._update_interp_sync, session_id, interpretation, summary
         )
+
+    async def set_photo_url(self, session_id: str, url: str) -> bool:
+        return await asyncio.to_thread(self._set_photo_sync, session_id, url)
+
+    async def update_summary(self, session_id: str, summary: str) -> None:
+        await asyncio.to_thread(self._update_summary_sync, session_id, summary)
+
+    async def list_by_slug(
+        self, slug: str, user_notion_id: str = ""
+    ) -> List[TripletEntry]:
+        return await asyncio.to_thread(self._list_by_slug_sync, slug, user_notion_id)
 
     async def set_outcome(self, session_id: str, outcome_code: str) -> bool:
         return await asyncio.to_thread(self._set_outcome_sync, session_id, outcome_code)
