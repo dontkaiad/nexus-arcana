@@ -12,11 +12,12 @@
  8. Бот: «выплати 20к», «зарплата 20000», «выплати себе 20к» → все 20000.
  9. /finance в Аркане рендерит P&L формат с inline-кнопкой «💸 Выплатить».
 
-Notion-вызовы мокаются на самом верхнем уровне (query_pages / sessions_all /
-rituals_all / arcana_finance_summary / finance_add) — реальной БД нет в CI.
+PG-репо мокаются через private helpers (_load_clients / _load_sessions / ...).
 """
 from __future__ import annotations
 
+from decimal import Decimal
+from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -24,6 +25,10 @@ from fastapi.testclient import TestClient
 
 from miniapp.backend.app import app
 from miniapp.backend.auth import current_user_id
+from arcana.repos.sessions_repo import TripletEntry
+from arcana.repos.rituals_repo import Ritual
+from arcana.repos.clients_repo import Client
+from core.repos.pg_finance_repo import PnlEntry, BudgetEntry
 
 
 FAKE_TG_ID = 67686090
@@ -39,51 +44,43 @@ def client():
         app.dependency_overrides.clear()
 
 
-# ── Page fabricators ────────────────────────────────────────────────────────
+# ── PG dataclass fabricators ─────────────────────────────────────────────────
 
-def _client_page(cid: str, ctype: str = "🤝 Платный") -> dict:
-    return {"id": cid, "properties": {"Тип клиента": {"select": {"name": ctype}}}}
+def _client_page(cid: str, ctype: str = "paid") -> Client:
+    # ctype: "paid" | "self" | "free"  (or legacy "🤝 Платный" → mapped)
+    _map = {"🤝 Платный": "paid", "🌟 Self": "self", "🎁 Бесплатный": "free"}
+    code = _map.get(ctype, ctype)
+    return Client(id=str(cid), name="", contact="", request="", notes="", since="", type_code=code)
 
 
 def _session(pid: str, paid: float, price: float, client_id: str = "cli-1",
-             date: str = "2026-05-10") -> dict:
-    return {
-        "id": pid,
-        "properties": {
-            "Сумма": {"number": price},
-            "Оплачено": {"number": paid},
-            "Дата": {"date": {"start": date}},
-            "👥 Клиенты": {"relation": [{"id": client_id}]},
-        },
-    }
+             date: str = "2026-05-10") -> TripletEntry:
+    return TripletEntry(
+        id=pid, question="", cards="", interpretation="", deck="", session_name="",
+        client_id=str(client_id), date=date,
+        amount=Decimal(str(price)), paid=Decimal(str(paid)),
+    )
 
 
 def _ritual(pid: str, paid: float, price: float, client_id: str = "cli-1",
-            date: str = "2026-05-10") -> dict:
-    return {
-        "id": pid,
-        "properties": {
-            "Цена за ритуал": {"number": price},
-            "Оплачено": {"number": paid},
-            "Дата": {"date": {"start": date}},
-            "👥 Клиенты": {"relation": [{"id": client_id}]},
-        },
-    }
+            date: str = "2026-05-10") -> Ritual:
+    return Ritual(
+        id=pid, name="Ритуал",
+        client_id=str(client_id),
+        date=datetime.strptime(date, "%Y-%m-%d") if date else None,
+        paid=Decimal(str(paid)),
+        price=Decimal(str(price)),
+    )
 
 
 def _finance(amount: float, *, date: str = "2026-05-10",
              type_: str = "💸 Расход", category: str = "🕯️ Расходники",
-             bot: str = "🌒 Arcana") -> dict:
-    return {
-        "id": f"fin-{amount}-{date}-{category}",
-        "properties": {
-            "Сумма": {"number": amount},
-            "Дата": {"date": {"start": date}},
-            "Тип": {"select": {"name": type_}},
-            "Категория": {"select": {"name": category}},
-            "Бот": {"select": {"name": bot}},
-        },
-    }
+             bot: str = "🌒 Arcana") -> PnlEntry:
+    return PnlEntry(amount=amount, date=date, type_=type_, category=category)
+
+
+def _salary_entry(amount: float, date: str = "2026-05-10") -> BudgetEntry:
+    return BudgetEntry(amount=amount, date=date, type_="💰 Доход", category="💰 Зарплата")
 
 
 def _list_item(pid: str, name: str, *, status: str = "Not started",
@@ -101,29 +98,18 @@ def _list_item(pid: str, name: str, *, status: str = "Not started",
     }
 
 
-# ── Helper to call compute_pnl with explicit Notion mocks ────────────────────
+# ── Helper to call compute_pnl with PG-repo mocks ────────────────────────────
 
 def _patch_pnl_inputs(*, clients, sessions, rituals, arcana_finance, salary,
                        barter_open=0):
-    """Контекст с патчами всех Notion-зависимостей compute_pnl."""
-    async def _qp(db_id, **kwargs):
-        # порядок вызовов внутри compute_pnl:
-        #   _load_clients_map, _load_salary_records
-        if not hasattr(_qp, "i"):
-            _qp.i = 0
-        seq = [clients, salary]
-        page = seq[_qp.i]
-        _qp.i += 1
-        return page
-
+    """Патчи PG-репо хелперов compute_pnl."""
     return [
-        patch("core.cash_register.query_pages", AsyncMock(side_effect=_qp)),
-        patch("core.cash_register.sessions_all", AsyncMock(return_value=sessions)),
-        patch("core.cash_register.rituals_all", AsyncMock(return_value=rituals)),
-        patch("core.cash_register._count_open_barter",
-              AsyncMock(return_value=barter_open)),
-        patch("core.notion_client.arcana_finance_summary",
-              AsyncMock(return_value=arcana_finance)),
+        patch("core.cash_register._load_clients", AsyncMock(return_value=clients)),
+        patch("core.cash_register._load_sessions", AsyncMock(return_value=sessions)),
+        patch("core.cash_register._load_rituals", AsyncMock(return_value=rituals)),
+        patch("core.cash_register._load_arcana_finance", AsyncMock(return_value=arcana_finance)),
+        patch("core.cash_register._load_salary_records", AsyncMock(return_value=salary)),
+        patch("core.cash_register._count_open_barter", AsyncMock(return_value=barter_open)),
     ]
 
 

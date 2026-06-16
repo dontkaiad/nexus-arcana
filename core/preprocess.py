@@ -135,29 +135,15 @@ def invalidate_whitelist(user_notion_id: str = "") -> None:
         )
 
 
-async def _fetch_client_names(user_notion_id: str) -> list[str]:
-    """Тянет имена клиентов из 👥 Клиенты (Notion). Возвращает [] на ошибке."""
+async def _fetch_client_names(user_notion_id: str) -> list:
+    """Тянет имена клиентов из PG. Возвращает [] на ошибке."""
     try:
-        from core.config import config
-        from core.notion_client import _with_user_filter, query_pages
-        db_id = config.arcana.db_clients
-        if not db_id:
-            return []
-        pages = await query_pages(
-            db_id,
-            filters=_with_user_filter(None, user_notion_id),
-            page_size=200,
-        )
+        from arcana.repos.pg_clients_repo import PgClientsRepo
+        clients = await PgClientsRepo().list_all(user_notion_id)
+        return [c.name for c in clients if c.name]
     except Exception as e:
         logger.warning("fetch client names failed: %s", e)
         return []
-    out: list[str] = []
-    for p in pages:
-        title = (p.get("properties", {}).get("Имя", {}) or {}).get("title") or []
-        name = "".join(it.get("plain_text", "") for it in title).strip()
-        if name and name not in out:
-            out.append(name)
-    return out
 
 
 async def get_whitelist(user_notion_id: str = "") -> list[str]:

@@ -1803,20 +1803,13 @@ async def _stats_publish(title: str, lines: List[str]) -> str:
 
 
 async def _get_payday() -> int:
-    """Get payday day from Memory. Default 1."""
-    mem_db = os.environ.get("NOTION_DB_MEMORY")
-    if not mem_db:
-        return 1
+    """Get payday day from Memory (PG). Default 1."""
     try:
-        from core.notion_client import db_query
-        pages = await db_query(mem_db, filter_obj={"and": [
-            {"property": "Ключ", "rich_text": {"equals": "budget_payday"}},
-            {"property": "Актуально", "checkbox": {"equals": True}},
-        ]}, page_size=1)
-        if pages:
-            fact = pages[0].get("properties", {}).get("Текст", {}).get("title", [])
-            text = fact[0]["plain_text"] if fact else ""
-            m = re.search(r"(\d+)", text)
+        from core.repos.pg_memory_repo import PgMemoryRepo
+        mems = await PgMemoryRepo().find_by_key("budget_payday", page_size=1)
+        stored = mems[0].fact if mems else None
+        if stored:
+            m = re.search(r"(\d+)", stored)
             if m:
                 return int(m.group(1))
     except Exception:

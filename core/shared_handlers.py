@@ -6,8 +6,9 @@ async def get_user_tz(tg_id: int) -> int:
     """Получить timezone offset пользователя из Памяти.
     Ключ в базе: tz_{tg_id}. Возвращает offset в часах (default: 3 для МСК).
     """
-    from core.notion_client import memory_get
-    stored = await memory_get(f"tz_{tg_id}")
+    from core.repos.pg_memory_repo import PgMemoryRepo as _MemRepo
+    mems = await _MemRepo().find_by_key(f"tz_{tg_id}", page_size=1)
+    stored = mems[0].fact if mems else None
     if stored:
         try:
             return int(stored)
