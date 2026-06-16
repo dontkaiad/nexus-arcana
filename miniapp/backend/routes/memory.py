@@ -1,23 +1,23 @@
-"""miniapp/backend/routes/memory.py — GET /api/memory, GET /api/memory/adhd."""
+"""miniapp/backend/routes/memory.py — GET /api/memory, GET /api/memory/adhd (PG-native)."""
 from __future__ import annotations
 
 import logging
-from typing import Any, Optional
+from typing import Any, List, Optional
 
 from fastapi import APIRouter, Depends, Query
 
 from core.config import config
-from core.notion_client import query_pages
 from core.claude_client import ask_claude
 from core.user_manager import get_user_notion_id
+from core.repos.pg_memory_repo import PgMemoryRepo, Memory
 
 from miniapp.backend import cache
 from miniapp.backend.auth import current_user_id
-from miniapp.backend._helpers import rich_text, select_name, title_text
 
 logger = logging.getLogger("miniapp.memory")
 
 router = APIRouter()
+_memory_repo = PgMemoryRepo()
 
 # Категории, которые принадлежат бюджету и ADHD — исключаем из общего /api/memory,
 # для них есть /api/finance и /api/memory/adhd.
@@ -46,32 +46,28 @@ CANONICAL_CATEGORIES = [
 ]
 
 
-def _serialize(page: dict) -> dict:
-    props = page.get("properties", {})
+def _serialize_memory(mem: Memory) -> dict:
     return {
-        "id": page.get("id", ""),
-        "text": title_text(props.get("Текст", {})),
-        "cat": select_name(props.get("Категория", {})) or None,
-        "related": rich_text(props.get("Связь", {})) or None,
-        "key": rich_text(props.get("Ключ", {})) or None,
+        "id": mem.id,
+        "text": mem.fact,
+        "cat": mem.category or None,
+        "related": mem.related_to or None,
+        "key": mem.key or None,
     }
 
 
-async def _fetch_actual(user_notion_id: str) -> list[dict]:
-    """Все актуальные записи Памяти юзера (Актуально == true)."""
-    db_id = config.nexus.db_memory
-    if not db_id:
+async def _fetch_actual(user_notion_id: str) -> List[Memory]:
+    """Все актуальные записи Памяти юзера (is_current == True)."""
+    try:
+        return await _memory_repo.find_by_category(
+            "",
+            is_current=True,
+            user_notion_id=user_notion_id,
+            page_size=500,
+        )
+    except Exception as e:
+        logger.warning("_fetch_actual PG query failed: %s", e)
         return []
-    conditions: list[dict] = [
-        {"property": "Актуально", "checkbox": {"equals": True}},
-    ]
-    if user_notion_id:
-        conditions.append({
-            "property": "🪪 Пользователи",
-            "relation": {"contains": user_notion_id},
-        })
-    filt = {"and": conditions} if len(conditions) > 1 else conditions[0]
-    return await query_pages(db_id, filters=filt, page_size=500)
 
 
 @router.get("/memory")
@@ -85,21 +81,18 @@ async def get_memory(
 
     items: list[dict] = []
     categories: set[str] = set()
-    for p in raw:
-        item = _serialize(p)
-        c = item["cat"]
+    for mem in raw:
+        c = mem.category or None
         if c in EXCLUDED_CATEGORIES:
             continue
         if c:
             categories.add(c)
-        items.append(item)
+        items.append(_serialize_memory(mem))
 
     if cat:
         items = [i for i in items if i["cat"] == cat]
     if q:
         # Выравнивание с ботом: core.memory._find_pages ищет по Текст+Ключ+Связь.
-        # Раньше Mini App матчил только текст — запись с ключом «невролог» и
-        # другим текстом не находилась.
         needle = q.lower().strip()
         items = [
             i for i in items
@@ -109,7 +102,6 @@ async def get_memory(
         ]
 
     # #49(b): объединяем канонический список с теми, что реально есть в данных.
-    # Так фронт показывает все табы (даже пустые) + неожиданные кастомные категории.
     seen = set(CANONICAL_CATEGORIES)
     extra = sorted(c for c in categories if c not in seen)
     all_cats = list(CANONICAL_CATEGORIES) + extra
@@ -122,20 +114,17 @@ async def get_memory(
 
 # ── /api/memory/adhd ────────────────────────────────────────────────────────
 
-async def _adhd_records(user_notion_id: str) -> list[dict]:
-    db_id = config.nexus.db_memory
-    if not db_id:
+async def _adhd_records(user_notion_id: str) -> List[Memory]:
+    try:
+        return await _memory_repo.find_by_category(
+            "🦋 СДВГ",
+            is_current=True,
+            user_notion_id=user_notion_id,
+            page_size=100,
+        )
+    except Exception as e:
+        logger.warning("_adhd_records PG query failed: %s", e)
         return []
-    conditions: list[dict] = [
-        {"property": "Категория", "select": {"equals": "🦋 СДВГ"}},
-        {"property": "Актуально", "checkbox": {"equals": True}},
-    ]
-    if user_notion_id:
-        conditions.append({
-            "property": "🪪 Пользователи",
-            "relation": {"contains": user_notion_id},
-        })
-    return await query_pages(db_id, filters={"and": conditions}, page_size=100)
 
 
 def _clean_profile_text(text: str) -> str:
@@ -158,7 +147,7 @@ def _clean_profile_text(text: str) -> str:
     return "\n".join(lines).strip()
 
 
-async def _generate_adhd_profile(tg_id: int, records: list[dict]) -> str:
+async def _generate_adhd_profile(tg_id: int, records: List[Memory]) -> str:
     cached = cache.get_profile(tg_id)
     if cached:
         cleaned = _clean_profile_text(cached["text"])
@@ -171,9 +160,8 @@ async def _generate_adhd_profile(tg_id: int, records: list[dict]) -> str:
 
     lines = []
     for r in records:
-        t = title_text(r.get("properties", {}).get("Текст", {}))
-        if t:
-            lines.append(f"- {t}")
+        if r.fact:
+            lines.append(f"- {r.fact}")
     context = "\n".join(lines)
     prompt = (
         "Вот что я знаю про её СДВГ-паттерны, триггеры и работающие стратегии:\n\n"
@@ -234,11 +222,10 @@ async def get_memory_adhd(tg_id: int = Depends(current_user_id)) -> dict[str, An
     groups: dict[str, list[str]] = {
         "patterns": [], "strategies": [], "triggers": [], "specifics": [],
     }
-    for p in raw:
-        t = title_text(p.get("properties", {}).get("Текст", {}))
-        if not t:
+    for mem in raw:
+        if not mem.fact:
             continue
-        groups[_classify_adhd(t)].append(t)
+        groups[_classify_adhd(mem.fact)].append(mem.fact)
     profile = await _generate_adhd_profile(tg_id, raw)
     return {
         "profile": profile,

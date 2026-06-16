@@ -123,7 +123,7 @@ def test_task_done_notifies(client):
 def test_task_create_notifies(client):
     notify = AsyncMock(return_value=True)
     with patch("miniapp.backend.routes.writes.notify_user", notify), \
-         patch("miniapp.backend.routes.writes.page_create",
+         patch("miniapp.backend.routes.writes._tasks_pg_repo.create",
                AsyncMock(return_value="new-id")), \
          patch("miniapp.backend.routes.writes.get_user_notion_id",
                AsyncMock(return_value=FAKE_NOTION_USER)):

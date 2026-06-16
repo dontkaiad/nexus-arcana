@@ -18,7 +18,6 @@ from pydantic import BaseModel, Field
 from core.config import config
 from core.notion_client import (
     finance_add,
-    page_create,
 )
 from core.notion_client import _title, _text, _select, _status, _number, _date, _relation
 from core.user_manager import get_user_notion_id
@@ -51,6 +50,9 @@ _CLIENT_TYPE_TO_CODE = {
 
 from nexus.repos.pg_tasks_repo import PgTasksRepo as _PgTasksRepoClass, Task as _PgTask
 _tasks_pg_repo = _PgTasksRepoClass()
+
+from core.repos.pg_memory_repo import PgMemoryRepo as _PgMemoryRepoClass
+_memory_repo = _PgMemoryRepoClass()
 
 from miniapp.backend.auth import current_user_id
 from miniapp.backend._helpers import (
@@ -1117,19 +1119,13 @@ async def memory_create(
     body: NoteBody,
     tg_id: int = Depends(current_user_id),
 ) -> dict[str, Any]:
-    db_id = config.nexus.db_memory
-    if not db_id:
-        raise HTTPException(status_code=500, detail="memory DB not configured")
     user_notion_id = (await get_user_notion_id(tg_id)) or ""
-    props: dict = {
-        "Текст": _title(body.text),
-        "Актуально": {"checkbox": True},
-    }
-    if body.cat:
-        props["Категория"] = _select(body.cat)
-    if user_notion_id:
-        props["🪪 Пользователи"] = _relation(user_notion_id)
-    page_id = await page_create(db_id, props)
-    if not page_id:
+    pg_id = await _memory_repo.add(
+        fact=body.text,
+        category=body.cat or "",
+        user_notion_id=user_notion_id,
+        source="miniapp",
+    )
+    if not pg_id:
         raise HTTPException(status_code=500, detail="failed to create memory")
-    return {"ok": True, "id": page_id}
+    return {"ok": True, "id": pg_id}

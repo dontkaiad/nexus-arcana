@@ -19,6 +19,7 @@ from miniapp.backend import cache
 from miniapp.backend.app import app
 from miniapp.backend.auth import current_user_id
 from nexus.repos.pg_tasks_repo import Task as PgTask
+from core.repos.pg_memory_repo import Memory
 
 
 FAKE_TG_ID = 67686090
@@ -68,6 +69,10 @@ def _list_item(iid, name="item", *, type_="🛒 Покупки", status="Not sta
             "Бот": {"select": {"name": bot} if bot else None},
         },
     }
+
+
+def _mem_pg(mid, text, cat=None, related=None, key=None):
+    return Memory(id=mid, fact=text, category=cat or "", related_to=related or "", key=key or "")
 
 
 def _mem(mid, text, cat=None, related=None, key=None, actual=True):
@@ -506,17 +511,15 @@ def test_list_delete_archives(client):
 # ── GET /api/memory ──────────────────────────────────────────────────────────
 
 def test_memory_excludes_budget_and_adhd_categories(client):
-    pages = [
-        _mem("m1", "Chapman = сигареты", cat="🛒 Предпочтения", key="chapman"),
-        _mem("m2", "Работает техника 2 минут", cat="🦋 СДВГ", key="2min"),
-        _mem("m3", "доход: ЗП — 115000₽", cat="📥 Доход", key="income_zp"),
-        _mem("m4", "подруга Аня", cat="👥 Люди", key="anya"),
+    mems = [
+        _mem_pg("m1", "Chapman = сигареты", cat="🛒 Предпочтения", key="chapman"),
+        _mem_pg("m2", "Работает техника 2 минут", cat="🦋 СДВГ", key="2min"),
+        _mem_pg("m3", "доход: ЗП — 115000₽", cat="📥 Доход", key="income_zp"),
+        _mem_pg("m4", "подруга Аня", cat="👥 Люди", key="anya"),
     ]
 
-    async def qp(*_, **__):
-        return pages
-
-    with patch("miniapp.backend.routes.memory.query_pages", side_effect=qp), \
+    with patch("miniapp.backend.routes.memory._memory_repo.find_by_category",
+               AsyncMock(return_value=mems)), \
          patch("miniapp.backend.routes.memory.get_user_notion_id",
                AsyncMock(return_value=FAKE_NOTION_USER)):
         r = client.get("/api/memory")
@@ -535,15 +538,13 @@ def test_memory_excludes_budget_and_adhd_categories(client):
 
 
 def test_memory_cat_filter(client):
-    pages = [
-        _mem("m1", "A", cat="🛒 Предпочтения"),
-        _mem("m2", "B", cat="👥 Люди"),
+    mems = [
+        _mem_pg("m1", "A", cat="🛒 Предпочтения"),
+        _mem_pg("m2", "B", cat="👥 Люди"),
     ]
 
-    async def qp(*_, **__):
-        return pages
-
-    with patch("miniapp.backend.routes.memory.query_pages", side_effect=qp), \
+    with patch("miniapp.backend.routes.memory._memory_repo.find_by_category",
+               AsyncMock(return_value=mems)), \
          patch("miniapp.backend.routes.memory.get_user_notion_id",
                AsyncMock(return_value="")):
         r = client.get("/api/memory?cat=%F0%9F%91%A5%20%D0%9B%D1%8E%D0%B4%D0%B8")  # 👥 Люди
@@ -555,16 +556,14 @@ def test_memory_cat_filter(client):
 
 def test_memory_search_matches_key_and_related(client):
     # #6: поиск Mini App должен матчить Текст+Ключ+Связь, как бот.
-    pages = [
-        _mem("m1", "ходить раз в полгода", cat="🏥 Здоровье", key="невролог"),
-        _mem("m2", "любит тёмный шоколад", cat="🛒 Предпочтения", related="Аня"),
-        _mem("m3", "не относится", cat="🏠 Быт"),
+    mems = [
+        _mem_pg("m1", "ходить раз в полгода", cat="🏥 Здоровье", key="невролог"),
+        _mem_pg("m2", "любит тёмный шоколад", cat="🛒 Предпочтения", related="Аня"),
+        _mem_pg("m3", "не относится", cat="🏠 Быт"),
     ]
 
-    async def qp(*_, **__):
-        return pages
-
-    with patch("miniapp.backend.routes.memory.query_pages", side_effect=qp), \
+    with patch("miniapp.backend.routes.memory._memory_repo.find_by_category",
+               AsyncMock(return_value=mems)), \
          patch("miniapp.backend.routes.memory.get_user_notion_id",
                AsyncMock(return_value=FAKE_NOTION_USER)):
         # совпадение по Ключу (в тексте слова «невролог» нет)
@@ -583,13 +582,11 @@ def test_memory_search_matches_key_and_related(client):
 
 
 def test_memory_adhd_returns_records_and_uses_cache(client):
-    pages = [_mem("a1", "Работает техника 2 минут", cat="🦋 СДВГ")]
+    mems = [_mem_pg("a1", "Работает техника 2 минут", cat="🦋 СДВГ")]
     sonnet = AsyncMock(return_value="Персональный профиль...")
 
-    async def qp(*_, **__):
-        return pages
-
-    with patch("miniapp.backend.routes.memory.query_pages", side_effect=qp), \
+    with patch("miniapp.backend.routes.memory._memory_repo.find_by_category",
+               AsyncMock(return_value=mems)), \
          patch("miniapp.backend.routes.memory.ask_claude", sonnet), \
          patch("miniapp.backend.routes.memory.get_user_notion_id",
                AsyncMock(return_value=FAKE_NOTION_USER)):
@@ -615,8 +612,8 @@ def test_memory_401_without_init_data():
 # ── POST /api/memory ─────────────────────────────────────────────────────────
 
 def test_memory_create(client):
-    with patch("miniapp.backend.routes.writes.page_create",
-               AsyncMock(return_value="mem-id")) as pc, \
+    with patch("miniapp.backend.routes.writes._memory_repo.add",
+               AsyncMock(return_value="mem-id")) as mem_add, \
          patch("miniapp.backend.routes.writes.get_user_notion_id",
                AsyncMock(return_value=FAKE_NOTION_USER)):
         r = client.post("/api/memory", json={
@@ -625,7 +622,5 @@ def test_memory_create(client):
         })
     assert r.status_code == 200
     assert r.json() == {"ok": True, "id": "mem-id"}
-    args, _ = pc.await_args
-    _, props = args
-    assert props["Текст"]["title"][0]["text"]["content"] == "Chapman = сигареты"
-    assert props["Актуально"]["checkbox"] is True
+    assert mem_add.call_args.kwargs["fact"] == "Chapman = сигареты"
+    assert mem_add.call_args.kwargs["category"] == "🛒 Предпочтения"
