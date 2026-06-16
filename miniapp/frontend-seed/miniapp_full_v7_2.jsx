@@ -434,7 +434,7 @@ const MOCK = {
     month: { inc: 115000, exp: 26910, fixed: 52284 },
     today: [
       { desc: "Красное&Белое", cat: "🍜 Продукты", amt: 2000 },
-      { desc: "OZON", cat: "🏠 Ж***", amt: 241 },
+      { desc: "OZON", cat: "🏠 Жильё", amt: 241 },
       { desc: "Яндекс Go", cat: "🚕 Транспорт", amt: 450 },
     ],
     cats: [

@@ -306,7 +306,7 @@ def test_save_memory_limit_category_skips_resolver():
     msg = AsyncMock()
     msg.answer = AsyncMock()
 
-    fact = "обязательно: 🏠 Ж*** — 25000₽/мес"
+    fact = "обязательно: 🏠 Жильё — 25000₽/мес"
     category = "💰 Лимит"
     связь = "ж***"
     ключ = "обязательно_ж***"

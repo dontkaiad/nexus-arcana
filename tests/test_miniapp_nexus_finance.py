@@ -253,8 +253,8 @@ def test_finance_today_budget_reflects_spending(client):
 def test_finance_category_drill_down(client):
     """Wave5.9: /api/finance/category возвращает список трат по категории."""
     entries = [
-        _budget_entry(4500, cat="🏠 Ж***", desc="коммуналка", eid="e1", date="2026-04-02"),
-        _budget_entry(800, cat="🏠 Ж***", desc="интернет", eid="e2", date="2026-04-18"),
+        _budget_entry(4500, cat="🏠 Жильё", desc="коммуналка", eid="e1", date="2026-04-02"),
+        _budget_entry(800, cat="🏠 Жильё", desc="интернет", eid="e2", date="2026-04-18"),
     ]
 
     with patch("miniapp.backend.routes.finance._budget_repo.query",
@@ -265,11 +265,11 @@ def test_finance_category_drill_down(client):
                AsyncMock(return_value=(_today_date(), 3))), \
          patch("miniapp.backend.routes.finance.get_user_notion_id",
                AsyncMock(return_value=FAKE_NOTION_USER)):
-        r = client.get("/api/finance/category?cat=🏠%20Ж***&month=2026-04")
+        r = client.get("/api/finance/category?cat=🏠%20Жильё&month=2026-04")
 
     assert r.status_code == 200
     data = r.json()
-    assert data["cat"] == "🏠 Ж***"
+    assert data["cat"] == "🏠 Жильё"
     assert data["month"] == "2026-04"
     assert data["total"] == 5300
     assert data["count"] == 2

@@ -1,4 +1,4 @@
-"""miniapp/backend/routes/calendar.py — GET /api/calendar."""
+"""miniapp/backend/routes/calendar.py — GET /api/calendar (PG-native, Notion-free)."""
 from __future__ import annotations
 
 import calendar as _calendar
@@ -11,9 +11,8 @@ from core.ru_calendar import get_month_info as _get_ru_month_info
 
 from fastapi import APIRouter, Depends, Query
 
-from core.config import config
-from core.notion_client import query_pages
 from core.user_manager import get_user_notion_id
+from nexus.repos.pg_tasks_repo import PgTasksRepo, Task as PgTask
 
 from miniapp.backend.auth import current_user_id
 from miniapp.backend._helpers import (
@@ -31,6 +30,7 @@ from miniapp.backend._helpers import (
 logger = logging.getLogger("miniapp.calendar")
 
 router = APIRouter()
+_tasks_repo = PgTasksRepo()
 
 
 def _month_bounds(month: str) -> tuple[str, str]:
@@ -41,52 +41,15 @@ def _month_bounds(month: str) -> tuple[str, str]:
     return start, end
 
 
-async def _fetch_tasks_in_month(user_notion_id: str, start: str, end: str) -> list[dict]:
-    """3 параллельных запроса + dedup по page["id"].
+async def _fetch_tasks_in_month(user_notion_id: str) -> list[PgTask]:
+    """PG-native: все активные задачи юзера.
 
-    Notion API лимит — 2 уровня вложенности фильтров. Раньше было
-    `and → or → and` = 3 уровня → Notion отвергал, и query_pages молча
-    возвращал []. Теперь — три отдельных запроса (каждый с одним `and`):
-      1) Дедлайн ∈ [start, end]
-      2) Напоминание ∈ [start, end]
-      3) «Время повтора» непустое
-    Результаты сливаются по `page["id"]`.
+    Проекцию occurrences в нужный месяц делаем в Python ниже (повторяющиеся
+    могут иметь anchor в другом месяце). Прежняя 3-запросная пляска
+    (deadline / reminder / recurring + dedup) была обходом лимита вложенности
+    фильтров Notion — в PG не нужна, `.active()` отдаёт всё разом.
     """
-    import asyncio
-
-    user_filter: list[dict] = []
-    if user_notion_id:
-        user_filter.append({
-            "property": "🪪 Пользователи",
-            "relation": {"contains": user_notion_id},
-        })
-
-    deadline_filter = {"and": user_filter + [
-        {"property": "Дедлайн", "date": {"on_or_after": start}},
-        {"property": "Дедлайн", "date": {"on_or_before": end}},
-    ]}
-    reminder_filter = {"and": user_filter + [
-        {"property": "Напоминание", "date": {"on_or_after": start}},
-        {"property": "Напоминание", "date": {"on_or_before": end}},
-    ]}
-    recurring_filter = {"and": user_filter + [
-        {"property": "Время повтора", "rich_text": {"is_not_empty": True}},
-    ]}
-
-    db_id = config.nexus.db_tasks
-    deadline_pages, reminder_pages, recurring_pages = await asyncio.gather(
-        query_pages(db_id, filters=deadline_filter, page_size=500),
-        query_pages(db_id, filters=reminder_filter, page_size=500),
-        query_pages(db_id, filters=recurring_filter, page_size=500),
-    )
-
-    seen: dict[str, dict] = {}
-    for bucket in (deadline_pages, reminder_pages, recurring_pages):
-        for p in bucket:
-            pid = p.get("id")
-            if pid and pid not in seen:
-                seen[pid] = p
-    return list(seen.values())
+    return await _tasks_repo.active(user_notion_id)
 
 
 _EVERY_RE = re.compile(r"every_(\d+)d")
@@ -157,22 +120,6 @@ def _resolve_interval(
     return _REPEAT_SELECT_MAP.get(key)
 
 
-def _page_created_date(page: dict, tz_offset: int) -> Optional[date]:
-    raw = page.get("created_time") or ""
-    if not raw:
-        return None
-    try:
-        dt = datetime.fromisoformat(raw.replace("Z", "+00:00"))
-    except ValueError:
-        return None
-    if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=timezone.utc)
-    return dt.astimezone(timezone(timedelta(hours=tz_offset))).date()
-
-
-# ru_calendar используется напрямую через _get_ru_month_info в handler'е.
-
-
 @router.get("/calendar")
 async def get_calendar(
     tg_id: int = Depends(current_user_id),
@@ -183,8 +130,7 @@ async def get_calendar(
         month = today_date.strftime("%Y-%m")
 
     user_notion_id = (await get_user_notion_id(tg_id)) or ""
-    start, end = _month_bounds(month)
-    raw = await _fetch_tasks_in_month(user_notion_id, start, end)
+    raw = await _fetch_tasks_in_month(user_notion_id)
 
     y, m = int(month[:4]), int(month[5:7])
     days_in_month = _calendar.monthrange(y, m)[1]
@@ -196,34 +142,33 @@ async def get_calendar(
         for d in range(1, days_in_month + 1)
     }
 
-    for p in raw:
-        props = p.get("properties", {})
-        status = status_name(props.get("Статус", {}))
+    for task in raw:
+        status = task.status
         if status in ("Archived", "Done", "Complete"):
             continue
 
-        title = title_text(props.get("Задача", {}))
+        title = task.title
         if not title:
             continue
-        prio = prio_from_notion(select_name(props.get("Приоритет", {})))
-        cat = cat_from_notion(select_name(props.get("Категория", {}))).get("full") or ""
-        repeat_sel = select_name(props.get("Повтор", {})) or None
-        repeat_time_raw = rich_text(props.get("Время повтора", {})).strip()
+        prio = prio_from_notion(task.priority)
+        cat = cat_from_notion(task.category).get("full") or ""
+        repeat_sel = task.repeat or None
+        repeat_time_raw = (task.repeat_time or "").strip()
         time_val, _from_time, interval_raw = _parse_repeat(repeat_time_raw)
         repeat_kind = _resolve_interval(repeat_time_raw, repeat_sel or "")
         repeat_label = interval_raw or repeat_sel
 
-        deadline_raw = (props.get("Дедлайн", {}).get("date") or {}).get("start") or ""
-        reminder_raw = (props.get("Напоминание", {}).get("date") or {}).get("start") or ""
+        deadline_raw = task.deadline or ""
+        reminder_raw = task.reminder or ""
         deadline_date = to_local_date(deadline_raw, tz_offset)
         reminder_date = to_local_date(reminder_raw, tz_offset)
         if time_val is None:
             time_val = extract_time(deadline_raw, tz_offset) or extract_time(reminder_raw, tz_offset)
 
-        # Anchor: Напоминание → Дедлайн → created_time (последний — для select-only повторов).
+        # Anchor: Напоминание → Дедлайн → дата создания (последнее — для select-only повторов).
         anchor = reminder_date or deadline_date
         if repeat_kind is not None and anchor is None:
-            anchor = _page_created_date(p, tz_offset)
+            anchor = to_local_date(getattr(task, "created_at", None), tz_offset)
 
         occurrence_days: list[int] = []
         is_recurring = repeat_kind is not None
@@ -268,7 +213,7 @@ async def get_calendar(
             day_date = date(y, m, day_num)
             bucket = days[str(day_num)]
             bucket["tasks"].append({
-                "id": p.get("id", ""),
+                "id": task.id,
                 "title": title,
                 "cat": cat,
                 "prio": prio,

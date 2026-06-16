@@ -98,7 +98,7 @@ def build_system(tz_offset: int = 3) -> str:
     # Haiku не знал и сваливал расходы в 💳 Прочее.
     # 🤖 Боты — категория ✅ Задач, в 💰 Финансы.Категория её нет; оставлять
     # в finance-промпте нельзя — Notion silent-create молча создаст опцию.
-    cats = ", ".join(["🐾 Коты", "🏠 Ж***", "🚬 Привычки", "🍜 Продукты",
+    cats = ", ".join(["🐾 Коты", "🏠 Жильё", "🚬 Привычки", "🍜 Продукты",
                       "🍱 Кафе/Доставка", "🚕 Транспорт", "💅 Бьюти", "👗 Гардероб",
                       "💻 Подписки", "🏥 Здоровье", "📚 Хобби/Учеба",
                       "🎲 Импульсивные", "🔮 Практика", "🕯️ Расходники",
@@ -315,7 +315,7 @@ def build_system(tz_offset: int = 3) -> str:
         "",
         "ПРИМЕР ОДНОРАЗОВЫЕ (БЕЗ 'каждый'):",
         "  Ввод: 'напомни в воскресенье в 19 часов зарядить наушники'",
-        '  Ответ: {"type":"task","title":"зарядить наушники","category":"🏠 Ж***","priority":"Можно потом","deadline":"' + _next_weekday_iso("Вс") + 'T19:00","repeat":"Нет","repeat_time":null,"day_of_week":null,"confidence":"high"}',
+        '  Ответ: {"type":"task","title":"зарядить наушники","category":"🏠 Жильё","priority":"Можно потом","deadline":"' + _next_weekday_iso("Вс") + 'T19:00","repeat":"Нет","repeat_time":null,"day_of_week":null,"confidence":"high"}',
         "  Ввод: 'напомни в субботу в 11 утра поискать кольцо'",
         '  Ответ: {"type":"task","title":"поискать кольцо","category":"💳 Прочее","priority":"Можно потом","deadline":"' + _next_weekday_iso("Сб") + 'T11:00","repeat":"Нет","repeat_time":null,"day_of_week":null,"confidence":"high"}',
         "  Ввод: 'напомни в пятницу позвонить врачу'",
@@ -329,7 +329,7 @@ def build_system(tz_offset: int = 3) -> str:
         "  Ввод: 'каждое утро пить воду'",
         '  Ответ: {"type":"task","title":"пить воду","category":"🏥 Здоровье","priority":"Важно","deadline":null,"repeat":"Ежедневно","repeat_time":"09:00","day_of_week":null,"confidence":"low"}',
         "  Ввод: 'платить за аренду раз в месяц'",
-        '  Ответ: {"type":"task","title":"платить за аренду","category":"🏠 Ж***","priority":"Срочно","deadline":null,"repeat":"Ежемесячно","repeat_time":null,"day_of_week":null,"confidence":"low"}',
+        '  Ответ: {"type":"task","title":"платить за аренду","category":"🏠 Жильё","priority":"Срочно","deadline":null,"repeat":"Ежемесячно","repeat_time":null,"day_of_week":null,"confidence":"low"}',
         "",
         "ПРИМЕР КАЖДЫЕ N ДНЕЙ:",
         "  Ввод: 'менять воду коту каждые два дня в 17'",
@@ -337,7 +337,7 @@ def build_system(tz_offset: int = 3) -> str:
         "  Ввод: 'каждые 3 дня чистить лоток'",
         '  Ответ: {"type":"task","title":"чистить лоток","category":"🐾 Коты","priority":"Можно потом","deadline":null,"repeat":"Ежедневно","repeat_time":"09:00|every_3d","day_of_week":null,"confidence":"high"}',
         "  Ввод: 'раз в 5 дней напомни полить цветы в 10'",
-        '  Ответ: {"type":"task","title":"полить цветы","category":"🏠 Ж***","priority":"Можно потом","deadline":null,"repeat":"Ежедневно","repeat_time":"10:00|every_5d","day_of_week":null,"confidence":"high"}',
+        '  Ответ: {"type":"task","title":"полить цветы","category":"🏠 Жильё","priority":"Можно потом","deadline":null,"repeat":"Ежедневно","repeat_time":"10:00|every_5d","day_of_week":null,"confidence":"high"}',
         "",
         "ПРИМЕР ARCANA_REDIRECT:",
         "  Ввод: 'провести ритуал защиты'",
@@ -454,7 +454,7 @@ _MEMORY_SEARCH_RE = re.compile(
     re.IGNORECASE,
 )
 
-_TASK_CATS = ["🐾 Коты", "🏠 Ж***", "🚬 Привычки", "🍜 Продукты",
+_TASK_CATS = ["🐾 Коты", "🏠 Жильё", "🚬 Привычки", "🍜 Продукты",
               "🍱 Кафе/Доставка", "🚕 Транспорт", "💅 Бьюти", "👗 Гардероб",
               "💻 Подписки", "🏥 Здоровье", "📚 Хобби/Учеба", "🤖 Боты", "💳 Прочее"]
 

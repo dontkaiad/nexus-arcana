@@ -109,10 +109,10 @@ def test_classifier_finance_cats_excludes_bots():
 
 
 def test_classifier_prompt_keeps_legacy_categories():
-    """Регресс: старые категории не удалены (Коты/Ж***/Подписки/...)."""
+    """Регресс: старые категории не удалены (Коты/Жильё/Подписки/...)."""
     from core.classifier import build_system
     sys_p = build_system(tz_offset=3)
-    for cat in ("🐾 Коты", "🏠 Ж***", "🚬 Привычки", "🍜 Продукты",
+    for cat in ("🐾 Коты", "🏠 Жильё", "🚬 Привычки", "🍜 Продукты",
                 "💻 Подписки", "💰 Зарплата", "💳 Прочее"):
         assert cat in sys_p, f"missing legacy category: {cat}"
 

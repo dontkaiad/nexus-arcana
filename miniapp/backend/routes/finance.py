@@ -498,7 +498,7 @@ async def get_finance(
 @router.get("/finance/category")
 async def get_finance_category(
     tg_id: int = Depends(current_user_id),
-    cat: str = Query(..., description="Полное имя категории (с emoji), например '🏠 Ж***'"),
+    cat: str = Query(..., description="Полное имя категории (с emoji), например '🏠 Жильё'"),
     month: Optional[str] = Query(None, description="YYYY-MM"),
 ) -> dict:
     """Wave5.9: drill-down — все траты по категории за месяц."""

@@ -124,7 +124,7 @@ def test_today_returns_all_keys_and_classifies_tasks(client):
                    cat="🏥 Здоровье", prio="🟡 Важно"),
         # today without time — goes to tasks
         _make_task("t-today", "Разобрать лоток",
-                   deadline=today, cat="🏠 Ж***", prio="⚪ Можно потом"),
+                   deadline=today, cat="🏠 Жильё", prio="⚪ Можно потом"),
         # future — goes to tasks
         _make_task("t-future", "Отправить счёт",
                    deadline=tomorrow, cat="💻 Подписки", prio="🟡 Важно"),

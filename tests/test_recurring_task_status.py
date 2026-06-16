@@ -209,7 +209,7 @@ def _today_local_date(tz_offset: int = 3):
 
 
 def _make_task_page(task_id, title, *, status="Not started", prio="🔴 Срочно",
-                    cat="🏠 Ж***", deadline=None, reminder=None,
+                    cat="🏠 Жильё", deadline=None, reminder=None,
                     repeat_time="", repeat=None, completed=None):
     return {
         "id": task_id,
