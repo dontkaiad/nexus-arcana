@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass, field
-from typing import List
+from typing import List, Optional
 
 from dotenv import load_dotenv
 
@@ -94,7 +94,7 @@ class ArcanaConfig:
 @dataclass
 class AppConfig:
     allowed_ids: List[int]
-    notion_token: str
+    notion_token: Optional[str]
     anthropic_key: str
     nexus: NexusConfig
     arcana: ArcanaConfig
@@ -111,7 +111,7 @@ class AppConfig:
 def load_config() -> AppConfig:
     return AppConfig(
         allowed_ids   = _id_list("ALLOWED_TELEGRAM_IDS"),
-        notion_token  = _require("NOTION_TOKEN"),
+        notion_token  = os.getenv("NOTION_TOKEN"),
         anthropic_key = _require("ANTHROPIC_API_KEY"),
         db_users      = _optional("NOTION_DB_USERS"),
         db_lists      = _optional("NOTION_DB_LISTS"),
