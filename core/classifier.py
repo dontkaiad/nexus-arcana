@@ -906,7 +906,7 @@ async def process_item(data: Dict[str, Any], original_text: str, msg, clarify: d
     
     if kind == "parse_error":
         logged = await log_error(original_text, "parse_error", _classify_last_raw, error_code="–")
-        notion_status = "записано в ⚠️Ошибки" if logged else "лог недоступен"
+        notion_status = "залогировано"
         raw_preview = _classify_last_raw[:200] if _classify_last_raw else "—"
         return f"❌ Не понял: <code>{raw_preview}</code>\n{notion_status}"
 
@@ -1039,7 +1039,7 @@ async def process_item(data: Dict[str, Any], original_text: str, msg, clarify: d
         
         logged = await log_error(original_text, "processing_error", _classify_last_raw,
                                  "finance_add вернул None", error_code="–")
-        notion_status = "записано в ⚠️Ошибки" if logged else "лог недоступен"
+        notion_status = "залогировано"
         return f"❌ Ошибка записи финансов · {notion_status}"
 
     # UPDATE - исправить последнюю финансовую запись

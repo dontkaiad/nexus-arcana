@@ -610,33 +610,24 @@ async def memory_set(key: str, value: str, category: str = "", user_notion_id: s
 
 # ─── Errors ───────────────────────────────────────────────────────────────────
 
+_err_log = logging.getLogger("bot.errors")
+
+
 async def log_error(
     message: str,
-    error_type: str,
+    error_type: str = "error",
     claude_response: str = "",
     traceback: str = "",
     bot_label: str = "☀️ Nexus",
     error_code: str = "–",
+    context: str = "",
 ) -> bool:
-    from core.config import config
-    db_id = config.nexus.db_errors
-    if not db_id:
-        logger.error("log_error: no db_errors configured. msg=%s type=%s", message[:80], error_type)
-        return False
-    try:
-        await page_create(db_id, {
-            "Сообщение":    _title(message[:200]),
-            "Дата":         _date(datetime.now(MOSCOW_TZ).strftime("%Y-%m-%d")),
-            "Тип ошибки":   _select(error_type),
-            "Код":          _select(error_code),
-            "Ответ Claude": _text(claude_response[:2000]),
-            "Трейсбек":     _text(traceback[:2000]),
-            "Бот":          _select(bot_label),
-        })
-        return True
-    except Exception as e:
-        logger.error("log_error failed: %s", e)
-        return False
+    _err_log.error(
+        'bot=%s type=%s code=%s context=%s message=%s claude=%s trace=%s',
+        bot_label, error_type or "error", error_code or "–", context or "–",
+        message[:500], claude_response[:200] or "–", traceback[:500] or "–",
+    )
+    return True
 
 
 # ─── Arcana: Clients ──────────────────────────────────────────────────────────

@@ -453,7 +453,7 @@ async def route_message(message: Message, user_notion_id: str = "", _text: str =
                 intent = intent2
             else:
                 logged = await log_error(combined, "unknown_type", bot_label="🌒 Arcana", error_code="–")
-                notion_status = "записано в ⚠️Ошибки" if logged else "лог недоступен"
+                notion_status = "залогировано"
                 await message.answer(f"🌒 Так и не поняла · {notion_status}")
                 return
         else:
@@ -587,7 +587,7 @@ async def route_message(message: Message, user_notion_id: str = "", _text: str =
             _final_emoji = reaction_for("unknown")
         else:
             logged = await log_error(text, "parse_error", bot_label="🌒 Arcana", error_code="–")
-            notion_status = "записано в ⚠️Ошибки" if logged else "лог недоступен"
+            notion_status = "залогировано"
             await message.answer(f"❌ Не так ответил Claude · пусть Кай правит промпт · {notion_status}")
             _final_emoji = reaction_for("parse_error")
 
@@ -611,7 +611,7 @@ async def route_message(message: Message, user_notion_id: str = "", _text: str =
             (message.text or "")[:200], "processing_error",
             traceback=trace, bot_label="🌒 Arcana", error_code=code
         )
-        notion_status = "записано в ⚠️Ошибки" if logged else "лог недоступен"
+        notion_status = "залогировано"
         await message.answer(f"❌ {suffix} · {notion_status}")
         await react(message, reaction_for("error"))
 

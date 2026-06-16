@@ -787,7 +787,7 @@ async def handle_add_session(
             (message.text or "")[:200], "processing_error",
             traceback=trace, bot_label="🌒 Arcana", error_code=code,
         )
-        notion_status = "записано в ⚠️Ошибки" if logged else "лог недоступен"
+        notion_status = "залогировано"
         await message.answer(f"❌ {suffix} · {notion_status}")
 
 

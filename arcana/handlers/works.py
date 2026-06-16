@@ -126,7 +126,7 @@ async def handle_work_done(message: Message, text: str, user_notion_id: str = ""
             (message.text or "")[:200], "processing_error",
             traceback=trace, bot_label="🌒 Arcana", error_code=code
         )
-        notion_status = "записано в ⚠️Ошибки" if logged else "лог недоступен"
+        notion_status = "залогировано"
         await message.answer(f"❌ {suffix} · {notion_status}")
 
 
@@ -171,5 +171,5 @@ async def handle_works_list(message: Message, user_notion_id: str = "") -> None:
             (message.text or "")[:200], "processing_error",
             traceback=trace, bot_label="🌒 Arcana", error_code=code
         )
-        notion_status = "записано в ⚠️Ошибки" if logged else "лог недоступен"
+        notion_status = "залогировано"
         await message.answer(f"❌ {suffix} · {notion_status}")

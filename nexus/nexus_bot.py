@@ -772,7 +772,7 @@ async def process_text(msg: Message, text: str, user_notion_id: str = "") -> Non
         except Exception:
             pass
         logged = await log_error(combined, "unknown_type", "", error_code="–")
-        notion_status = "записано в ⚠️Ошибки" if logged else "лог недоступен"
+        notion_status = "залогировано"
         await msg.answer(f"🌒 Так и не понял · {notion_status}")
         await react(msg, "🤔")
         return
@@ -918,7 +918,7 @@ async def process_text(msg: Message, text: str, user_notion_id: str = "") -> Non
         else:
             code, suffix = "–", "что-то сломалось · пусть Кай правит код"
         logged = await log_error(text, "processing_error", "", trace, error_code=code)
-        notion_status = "записано в ⚠️Ошибки" if logged else "лог недоступен"
+        notion_status = "залогировано"
         short_err = err_str[:200] if err_str else "—"
         await msg.answer(
             f"❌ {suffix}\n"
