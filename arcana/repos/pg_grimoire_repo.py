@@ -184,3 +184,31 @@ class PgGrimoireRepo:
         return await asyncio.to_thread(
             self._search_sync, query, theme, user_notion_id
         )
+
+    def _list_all_sync(self, user_notion_id: str) -> List[GrimoireEntry]:
+        stmt = _select_grimoire()
+        if user_notion_id:
+            stmt = stmt.where(grimoire_entries.c.user_notion_id == user_notion_id)
+        with get_engine().connect() as conn:
+            rows = conn.execute(stmt).fetchall()
+        return [_row_to_entry(r) for r in rows]
+
+    def _find_by_id_sync(self, entry_id: str, user_notion_id: str) -> Optional[GrimoireEntry]:
+        try:
+            eid = int(entry_id)
+        except (ValueError, TypeError):
+            return None
+        stmt = _select_grimoire().where(grimoire_entries.c.id == eid)
+        if user_notion_id:
+            stmt = stmt.where(grimoire_entries.c.user_notion_id == user_notion_id)
+        with get_engine().connect() as conn:
+            row = conn.execute(stmt).fetchone()
+        return _row_to_entry(row) if row else None
+
+    async def list_all(self, user_notion_id: str = "") -> List[GrimoireEntry]:
+        return await asyncio.to_thread(self._list_all_sync, user_notion_id)
+
+    async def find_by_id(
+        self, entry_id: str, user_notion_id: str = ""
+    ) -> Optional[GrimoireEntry]:
+        return await asyncio.to_thread(self._find_by_id_sync, entry_id, user_notion_id)

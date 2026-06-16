@@ -8,7 +8,7 @@ POST verify/result/clients/photo/object_photo/summarize, tarot helpers.
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
@@ -113,17 +113,20 @@ def _ritual_page(rid, name, *, date=None, client_ids=None, goal=None,
 
 
 def _grim_page(gid, name, cat, themes=None, text="", source=""):
-    return {
-        "id": gid,
-        "properties": {
-            "Название": {"title": [{"plain_text": name}]},
-            "Категория": {"select": {"name": cat}},
-            "Тема": {"multi_select": [{"name": t} for t in (themes or [])]},
-            "Текст": {"rich_text": [{"plain_text": text}] if text else []},
-            "Источник": {"rich_text": [{"plain_text": source}] if source else []},
-            "🪪 Пользователи": {"relation": [{"id": FAKE_NOTION_USER}]},
-        },
-    }
+    from arcana.repos.grimoire_repo import GrimoireEntry
+    return GrimoireEntry(
+        id=gid, title=name, category=cat,
+        themes=list(themes or []),
+        verified=False, text=text, source=source,
+    )
+
+
+def _mock_grimoire_repo(list_all_result=None, find_by_id_result=None):
+    """Helper: MagicMock с нужными AsyncMock-методами для _grimoire_repo."""
+    repo = MagicMock()
+    repo.list_all = AsyncMock(return_value=list_all_result or [])
+    repo.find_by_id = AsyncMock(return_value=find_by_id_result)
+    return repo
 
 
 def _work_page(wid, title, *, cat=None, prio="🟡 Важно", deadline=None):
@@ -532,15 +535,15 @@ def test_arcana_ritual_404_wrong_owner(client):
 # ── /api/arcana/grimoire ─────────────────────────────────────────────────────
 
 def test_arcana_grimoire_list_and_cat_filter(client):
-    pages = [
+    entries = [
         _grim_page("g1", "Заговор на деньги", "📿 Заговор",
                    themes=["💰 Финансы"], text="Первая строка заговора. " * 20),
         _grim_page("g2", "Рецепт масла", "🧴 Рецепт",
                    themes=["🛡️ Защита"], text="Короткий"),
     ]
 
-    with patch("miniapp.backend.routes.arcana_grimoire.query_pages",
-               AsyncMock(return_value=pages)), \
+    with patch("miniapp.backend.routes.arcana_grimoire._grimoire_repo",
+               _mock_grimoire_repo(list_all_result=entries)), \
          patch("miniapp.backend.routes.arcana_grimoire.get_user_notion_id",
                AsyncMock(return_value=FAKE_NOTION_USER)):
         r_all = client.get("/api/arcana/grimoire")
@@ -562,14 +565,14 @@ def test_arcana_grimoire_list_and_cat_filter(client):
 
 def test_arcana_grimoire_search_matches_theme(client):
     # #9: поиск гримуара должен матчить и Тему, не только Название+Текст.
-    pages = [
+    entries = [
         _grim_page("g1", "Заговор на деньги", "📿 Заговор",
                    themes=["💰 Финансы"], text="строки без нужного слова"),
         _grim_page("g2", "Рецепт масла", "🧴 Рецепт",
                    themes=["🛡️ Защита"], text="короткий"),
     ]
-    with patch("miniapp.backend.routes.arcana_grimoire.query_pages",
-               AsyncMock(return_value=pages)), \
+    with patch("miniapp.backend.routes.arcana_grimoire._grimoire_repo",
+               _mock_grimoire_repo(list_all_result=entries)), \
          patch("miniapp.backend.routes.arcana_grimoire.get_user_notion_id",
                AsyncMock(return_value=FAKE_NOTION_USER)):
         # «финансы» есть только в Теме g1
@@ -583,8 +586,8 @@ def test_arcana_grimoire_search_matches_theme(client):
 
 def test_arcana_grimoire_categories_always_returned(client):
     """Backend всегда отдаёт полный набор опций категорий (с count=0)."""
-    with patch("miniapp.backend.routes.arcana_grimoire.query_pages",
-               AsyncMock(return_value=[])), \
+    with patch("miniapp.backend.routes.arcana_grimoire._grimoire_repo",
+               _mock_grimoire_repo(list_all_result=[])), \
          patch("miniapp.backend.routes.arcana_grimoire.get_user_notion_id",
                AsyncMock(return_value=FAKE_NOTION_USER)):
         r = client.get("/api/arcana/grimoire")
@@ -599,13 +602,13 @@ def test_arcana_grimoire_categories_always_returned(client):
 
 
 def test_arcana_grimoire_categories_counts(client):
-    pages = [
+    entries = [
         _grim_page("g1", "A", "📿 Заговор"),
         _grim_page("g2", "B", "📿 Заговор"),
         _grim_page("g3", "C", "🧴 Рецепт"),
     ]
-    with patch("miniapp.backend.routes.arcana_grimoire.query_pages",
-               AsyncMock(return_value=pages)), \
+    with patch("miniapp.backend.routes.arcana_grimoire._grimoire_repo",
+               _mock_grimoire_repo(list_all_result=entries)), \
          patch("miniapp.backend.routes.arcana_grimoire.get_user_notion_id",
                AsyncMock(return_value=FAKE_NOTION_USER)):
         r = client.get("/api/arcana/grimoire?cat=%F0%9F%93%BF%20%D0%97%D0%B0%D0%B3%D0%BE%D0%B2%D0%BE%D1%80")
@@ -620,12 +623,12 @@ def test_arcana_grimoire_categories_counts(client):
 
 
 def test_arcana_grimoire_detail(client):
-    page = _grim_page("gX", "Комплексная комбинация",
-                     "✨ Комбинация", themes=["💰 Финансы", "🛡️ Защита"],
-                     text="Полный текст записи", source="Книга Ламашту")
+    entry = _grim_page("gX", "Комплексная комбинация",
+                       "✨ Комбинация", themes=["💰 Финансы", "🛡️ Защита"],
+                       text="Полный текст записи", source="Книга Ламашту")
 
-    with patch("miniapp.backend.routes.arcana_grimoire.get_page",
-               AsyncMock(return_value=page)), \
+    with patch("miniapp.backend.routes.arcana_grimoire._grimoire_repo",
+               _mock_grimoire_repo(find_by_id_result=entry)), \
          patch("miniapp.backend.routes.arcana_grimoire.get_user_notion_id",
                AsyncMock(return_value=FAKE_NOTION_USER)):
         r = client.get("/api/arcana/grimoire/gX")
@@ -638,12 +641,9 @@ def test_arcana_grimoire_detail(client):
 
 
 def test_arcana_grimoire_detail_404_wrong_owner(client):
-    page = {"id": "gX", "properties": {
-        "Название": {"title": []},
-        "🪪 Пользователи": {"relation": [{"id": "other"}]},
-    }}
-    with patch("miniapp.backend.routes.arcana_grimoire.get_page",
-               AsyncMock(return_value=page)), \
+    # find_by_id возвращает None когда user_notion_id не совпадает
+    with patch("miniapp.backend.routes.arcana_grimoire._grimoire_repo",
+               _mock_grimoire_repo(find_by_id_result=None)), \
          patch("miniapp.backend.routes.arcana_grimoire.get_user_notion_id",
                AsyncMock(return_value=FAKE_NOTION_USER)):
         r = client.get("/api/arcana/grimoire/gX")

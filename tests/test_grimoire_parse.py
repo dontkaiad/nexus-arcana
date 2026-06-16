@@ -55,6 +55,30 @@ def test_heuristic_short_text_becomes_title():
     assert out["category"] == "заговор"
 
 
+def test_pg_grimoire_repo_find_by_id_invalid_id():
+    """_find_by_id_sync возвращает None для нечисловых ID (нет DB-вызова)."""
+    from arcana.repos.pg_grimoire_repo import PgGrimoireRepo
+    repo = PgGrimoireRepo()
+    assert repo._find_by_id_sync("not-an-int", "") is None
+    assert repo._find_by_id_sync("", "") is None
+    assert repo._find_by_id_sync(None, "") is None
+
+
+@pytest.mark.asyncio
+async def test_grimoire_repo_find_by_id_delegates():
+    """GrimoireRepo.find_by_id делегирует в PgGrimoireRepo.find_by_id."""
+    from arcana.repos.grimoire_repo import GrimoireEntry, GrimoireRepo
+    expected = GrimoireEntry(
+        id="42", title="Тест", category="📿 Заговор",
+        themes=[], verified=False, text="", source="",
+    )
+    with patch("arcana.repos.pg_grimoire_repo.PgGrimoireRepo.find_by_id",
+               AsyncMock(return_value=expected)) as mock_find:
+        result = await GrimoireRepo().find_by_id("42", "user-1")
+    mock_find.assert_awaited_once_with("42", "user-1")
+    assert result is expected
+
+
 @pytest.mark.asyncio
 async def test_handle_grimoire_add_falls_back_to_heuristic():
     msg = MagicMock()

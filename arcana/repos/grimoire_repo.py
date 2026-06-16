@@ -76,6 +76,14 @@ class GrimoireRepo:
     ) -> List[GrimoireEntry]:
         return await _pg_repo().search(query=query, theme=theme, user_notion_id=user_notion_id)
 
+    async def list_all(self, user_notion_id: str = "") -> List[GrimoireEntry]:
+        return await _pg_repo().list_all(user_notion_id)
+
+    async def find_by_id(
+        self, entry_id: str, user_notion_id: str = ""
+    ) -> Optional[GrimoireEntry]:
+        return await _pg_repo().find_by_id(entry_id, user_notion_id)
+
     async def rituals_list(
         self, user_notion_id: str = ""
     ) -> List[RitualSummary]:
