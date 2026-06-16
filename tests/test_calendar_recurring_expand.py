@@ -19,6 +19,7 @@ from miniapp.backend.routes.calendar import (
     _fetch_tasks_in_month,
     _resolve_interval,
 )
+from nexus.repos.pg_tasks_repo import Task as PgTask
 
 
 FAKE_TG = 67686090
@@ -34,29 +35,27 @@ def client():
         app.dependency_overrides.clear()
 
 
-def _task(*, title="Зарядка", repeat_select=None, repeat_time="",
-          deadline=None, reminder=None, created="2026-04-01T08:00:00.000Z",
-          status="Not started"):
-    return {
-        "id": f"task-{title}",
-        "created_time": created,
-        "properties": {
-            "Задача": {"title": [{"plain_text": title}]},
-            "Статус": {"status": {"name": status}},
-            "Приоритет": {"select": None},
-            "Категория": {"select": None},
-            "Повтор": {"select": {"name": repeat_select}} if repeat_select else {"select": None},
-            "Время повтора": {"rich_text": [{"plain_text": repeat_time}] if repeat_time else []},
-            "Дедлайн": {"date": {"start": deadline}} if deadline else {"date": None},
-            "Напоминание": {"date": {"start": reminder}} if reminder else {"date": None},
-            "🪪 Пользователи": {"relation": [{"id": FAKE_NOTION}]},
-        },
-    }
+def _pg_task(*, title="Зарядка", repeat_select=None, repeat_time="",
+             deadline="", reminder="", created="2026-04-01T08:00:00+00:00",
+             status="Not started"):
+    return PgTask(
+        id=f"task-{title}",
+        title=title,
+        status=status,
+        repeat=repeat_select or "Нет",
+        repeat_time=repeat_time or "",
+        deadline=deadline or "",
+        reminder=reminder or "",
+        created_at=created or "",
+        priority="",
+        category="",
+        user_notion_id=FAKE_NOTION,
+    )
 
 
 def _patches(tasks):
     return [
-        patch("miniapp.backend.routes.calendar.query_pages",
+        patch("miniapp.backend.routes.calendar._tasks_repo.active",
               AsyncMock(return_value=tasks)),
         patch("miniapp.backend.routes.calendar.get_user_notion_id",
               AsyncMock(return_value=FAKE_NOTION)),
@@ -154,7 +153,7 @@ def test_recurring_expand(client, task_kwargs, expected_days, title_substr):
     Одна задача → каждый занятый день имеет count == 1. Если задан
     title_substr — title задачи присутствует в occurrences.
     """
-    t = _task(**task_kwargs)
+    t = _pg_task(**task_kwargs)
     r = _run(client, [t], month="2026-05")
     assert r.status_code == 200, r.text
     days = r.json()["days"]
@@ -167,38 +166,48 @@ def test_recurring_expand(client, task_kwargs, expected_days, title_substr):
                    for d in days.values() for task in d["tasks"])
 
 
-# ── _fetch_tasks_in_month: 3-query merge + dedup ──────────────────────────
+# ── _fetch_tasks_in_month: PG-native ─────────────────────────────────────
 
-def test_fetch_tasks_in_month_merges_three_queries_and_dedups():
-    """Регрессия бага 3-level nesting: фильтр разбит на 3 параллельных query
-    с merge по page id (без дублей)."""
-    page_a = {"id": "page-a", "properties": {}}
-    page_b = {"id": "page-b", "properties": {}}
-    page_c = {"id": "page-c", "properties": {}}
-    # page_a в двух query (Дедлайн + Напоминание) — должна остаться один раз.
-    deadline_pages = [page_a]
-    reminder_pages = [page_a, page_b]
-    recurring_pages = [page_c]
+def test_fetch_tasks_in_month_pg_native_single_query():
+    """_fetch_tasks_in_month — PG-native: один вызов .active(), без деdup.
 
-    call_log = []
-    async def _fake(db_id, filters=None, **kwargs):
-        call_log.append(filters)
-        # порядок вызовов: deadline → reminder → recurring
-        idx = len(call_log) - 1
-        return [deadline_pages, reminder_pages, recurring_pages][idx]
+    Бывшая Notion-версия делала 3 параллельных запроса (deadline / reminder /
+    recurring) и дедуплицировала по page id. В PG-версии один вызов .active()
+    возвращает все задачи юзера; дедуп не нужен — PG не возвращает дублей.
+    """
+    import asyncio
+    tasks = [
+        PgTask(id="a", title="A", user_notion_id="u1"),
+        PgTask(id="b", title="B", user_notion_id="u1"),
+        PgTask(id="c", title="C", user_notion_id="u1"),
+    ]
+    with patch("miniapp.backend.routes.calendar._tasks_repo.active",
+               AsyncMock(return_value=tasks)) as mock_active:
+        out = asyncio.get_event_loop().run_until_complete(_fetch_tasks_in_month("u1"))
 
-    with patch("miniapp.backend.routes.calendar.query_pages",
-               new=AsyncMock(side_effect=_fake)):
-        import asyncio
-        out = asyncio.get_event_loop().run_until_complete(
-            _fetch_tasks_in_month("user-x", "2026-05-01", "2026-05-31")
-        )
-    ids = sorted(p["id"] for p in out)
-    assert ids == ["page-a", "page-b", "page-c"]
-    # Каждый из 3 фильтров — простой `and` БЕЗ вложенного `or`.
-    for f in call_log:
-        assert "and" in f
-        for item in f["and"]:
-            assert "or" not in item, f"nested or found: {item}"
-            # Не должно быть второго `and` (3-level nesting).
-            assert "and" not in item, f"nested and found: {item}"
+    mock_active.assert_awaited_once_with("u1")
+    assert [t.id for t in out] == ["a", "b", "c"]
+
+
+def test_recurring_created_at_anchor_fallback(client):
+    """Регресс created_at: повторяющаяся задача БЕЗ дедлайна и напоминания
+    берёт anchor из created_at и появляется в правильные дни месяца.
+
+    Баг: без anchor задача полностью пропадала из календаря.
+    Фикс (calendar.py): anchor = to_local_date(task.created_at, tz_offset).
+
+    Кейс: ежедневная, created=15 апреля → все 31 день мая заняты.
+    """
+    task = _pg_task(
+        title="Утренняя рутина",
+        repeat_select="Каждый день",
+        created="2026-04-15T08:00:00+00:00",
+        deadline="",
+        reminder="",
+    )
+    r = _run(client, [task], month="2026-05")
+    assert r.status_code == 200, r.text
+    days = r.json()["days"]
+    days_with = sorted(int(k) for k, v in days.items() if v["count"] > 0)
+    assert days_with == list(range(1, 32)), \
+        f"ожидались все 31 день мая, got {days_with}"

@@ -13,6 +13,7 @@ from miniapp.backend.auth import current_user_id
 from miniapp.backend.routes.today import first_emoji
 from core.repos.pg_finance_repo import BudgetEntry
 from core.repos.pg_memory_repo import Memory
+from nexus.repos.pg_tasks_repo import Task as PgTask
 
 
 FAKE_TG_ID = 67686090
@@ -47,45 +48,26 @@ def _today_local_date(tz_offset: int = 3):
 
 
 def _make_task(task_id, title, *, status="Not started", prio="🔴 Срочно",
-               cat="🏥 Здоровье", deadline=None, reminder=None,
-               repeat_time="", repeat=None):
-    return {
-        "id": task_id,
-        "properties": {
-            "Задача": {"title": [{"plain_text": title}]},
-            "Статус": {"status": {"name": status}},
-            "Приоритет": {"select": {"name": prio}},
-            "Категория": {"select": {"name": cat}},
-            "Дедлайн": {"date": {"start": deadline} if deadline else None},
-            "Напоминание": {"date": {"start": reminder} if reminder else None},
-            "Время повтора": {"rich_text": [{"plain_text": repeat_time}] if repeat_time else []},
-            "Повтор": {"select": {"name": repeat} if repeat else None},
-        },
-    }
+               cat="🏥 Здоровье", deadline="", reminder="",
+               repeat_time="", repeat=None, completed_at=""):
+    return PgTask(
+        id=task_id,
+        title=title,
+        status=status,
+        priority=prio,
+        category=cat,
+        deadline=deadline or "",
+        reminder=reminder or "",
+        repeat_time=repeat_time or "",
+        repeat=repeat or "Нет",
+        completed_at=completed_at or "",
+        user_notion_id=FAKE_NOTION_USER,
+    )
 
 
 def _make_expense(amount: float):
     return {"id": "fin-1", "properties": {"Сумма": {"number": amount}}}
 
-
-def _build_query_pages_mock(tasks, expenses, memories):
-    """Router: dispatch query_pages call by filter content.
-
-    (В conftest все NOTION_DB_* = "fake-db-id", поэтому по db_id различить
-    нельзя — опираемся на характерные поля фильтра.)
-    """
-    import json as _json
-
-    async def _qp(db_id, *, filters=None, **kwargs):
-        f_str = _json.dumps(filters or {}, ensure_ascii=False)
-        if '"Тип"' in f_str and "Расход" in f_str:
-            return expenses
-        if '"Категория"' in f_str and "СДВГ" in f_str:
-            return memories
-        if '"Статус"' in f_str:
-            return tasks
-        return []
-    return _qp
 
 
 # ─── first_emoji ──────────────────────────────────────────────────────────────
@@ -136,10 +118,9 @@ def test_today_returns_all_keys_and_classifies_tasks(client):
                     type_="💸 Расход", source="💳 Карта", date=today, user_notion_id=""),
     ]
 
-    qp_mock = _build_query_pages_mock(tasks, [], [])
     claude_mock = AsyncMock(return_value="Начни с лотка — 2 минуты.")
 
-    with patch("miniapp.backend.routes.today.query_pages", side_effect=qp_mock), \
+    with patch("miniapp.backend.routes.today._tasks_repo.active", AsyncMock(return_value=tasks)), \
          patch("miniapp.backend.routes.today._budget_repo.query", AsyncMock(return_value=expenses)), \
          patch("miniapp.backend.routes.today._memory_repo.find_by_key", AsyncMock(return_value=[])), \
          patch("miniapp.backend.routes.today.ask_claude", claude_mock), \
@@ -206,10 +187,9 @@ def test_today_returns_all_keys_and_classifies_tasks(client):
 def test_today_caches_adhd_tip_across_calls(client):
     tz = 3
     today = _today_local_iso(tz)
-    qp_mock = _build_query_pages_mock([], [], [])
     claude_mock = AsyncMock(return_value="Дыши спокойно, ты сегодня точно справишься.")
 
-    with patch("miniapp.backend.routes.today.query_pages", side_effect=qp_mock), \
+    with patch("miniapp.backend.routes.today._tasks_repo.active", AsyncMock(return_value=[])), \
          patch("miniapp.backend.routes.today._budget_repo.query", AsyncMock(return_value=[])), \
          patch("miniapp.backend.routes.today._memory_repo.find_by_key", AsyncMock(return_value=[])), \
          patch("miniapp.backend.routes.today.ask_claude", claude_mock), \
@@ -239,9 +219,7 @@ def test_today_uses_custom_budget_from_memory(client):
     expense_entry = BudgetEntry(id="f1", description="test", amount=600,
                                 category="🍜 Продукты", type_="💸 Расход",
                                 source="💳 Карта", date=today_iso, user_notion_id="")
-    qp_mock = _build_query_pages_mock([], [], [])
-
-    with patch("miniapp.backend.routes.today.query_pages", side_effect=qp_mock), \
+    with patch("miniapp.backend.routes.today._tasks_repo.active", AsyncMock(return_value=[])), \
          patch("miniapp.backend.routes.today._budget_repo.query",
                AsyncMock(return_value=[expense_entry])), \
          patch("miniapp.backend.routes.today._memory_repo.find_by_key",

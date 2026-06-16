@@ -24,7 +24,7 @@ def client():
 
 
 def test_january_2026_holiday_days_contains_new_year_caникулы(client):
-    with patch("miniapp.backend.routes.calendar.query_pages",
+    with patch("miniapp.backend.routes.calendar._tasks_repo.active",
                AsyncMock(return_value=[])), \
          patch("miniapp.backend.routes.calendar.get_user_notion_id",
                AsyncMock(return_value=FAKE_NOTION)), \
@@ -40,7 +40,7 @@ def test_january_2026_holiday_days_contains_new_year_caникулы(client):
 
 
 def test_holidays_info_returns_day_and_name(client):
-    with patch("miniapp.backend.routes.calendar.query_pages",
+    with patch("miniapp.backend.routes.calendar._tasks_repo.active",
                AsyncMock(return_value=[])), \
          patch("miniapp.backend.routes.calendar.get_user_notion_id",
                AsyncMock(return_value=FAKE_NOTION)), \

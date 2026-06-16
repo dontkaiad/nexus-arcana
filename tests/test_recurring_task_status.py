@@ -209,48 +209,27 @@ def _today_local_date(tz_offset: int = 3):
 
 
 def _make_task_page(task_id, title, *, status="Not started", prio="🔴 Срочно",
-                    cat="🏠 Жильё", deadline=None, reminder=None,
-                    repeat_time="", repeat=None, completed=None):
-    return {
-        "id": task_id,
-        "properties": {
-            "Задача": {"title": [{"plain_text": title}]},
-            "Статус": {"status": {"name": status}},
-            "Приоритет": {"select": {"name": prio}},
-            "Категория": {"select": {"name": cat}},
-            "Дедлайн": {"date": {"start": deadline} if deadline else None},
-            "Напоминание": {"date": {"start": reminder} if reminder else None},
-            "Время повтора": {
-                "rich_text": [{"plain_text": repeat_time}] if repeat_time else []
-            },
-            "Повтор": {"select": {"name": repeat} if repeat else None},
-            "Время завершения": {
-                "date": {"start": completed} if completed else None
-            },
-        },
-    }
-
-
-def _build_qp_mock(tasks):
-    """Минимальный диспатч query_pages: на любой filter возвращаем tasks."""
-    import json as _json
-
-    async def _qp(db_id, *, filters=None, **kwargs):
-        f_str = _json.dumps(filters or {}, ensure_ascii=False)
-        if '"Тип"' in f_str and "Расход" in f_str:
-            return []
-        if '"Категория"' in f_str and "СДВГ" in f_str:
-            return []
-        if '"Статус"' in f_str:
-            return tasks
-        return []
-    return _qp
+                    cat="🏠 Жильё", deadline="", reminder="",
+                    repeat_time="", repeat=None, completed=""):
+    from nexus.repos.pg_tasks_repo import Task as PgTask
+    return PgTask(
+        id=task_id,
+        title=title,
+        status=status,
+        priority=prio,
+        category=cat,
+        deadline=deadline or "",
+        reminder=reminder or "",
+        repeat_time=repeat_time or "",
+        repeat=repeat or "Нет",
+        completed_at=completed or "",
+        user_notion_id=FAKE_NOTION_USER,
+    )
 
 
 def _today_get_response(client, tasks):
-    qp_mock = _build_qp_mock(tasks)
     today_date = _today_local_date(3)
-    with patch("miniapp.backend.routes.today.query_pages", side_effect=qp_mock), \
+    with patch("miniapp.backend.routes.today._tasks_repo.active", AsyncMock(return_value=tasks)), \
          patch("miniapp.backend.routes.today._budget_repo.query", AsyncMock(return_value=[])), \
          patch("miniapp.backend.routes.today._memory_repo.find_by_key", AsyncMock(return_value=[])), \
          patch("miniapp.backend.routes.today.ask_claude",

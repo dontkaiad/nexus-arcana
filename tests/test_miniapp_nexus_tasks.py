@@ -469,15 +469,13 @@ def test_calendar_groups_tasks_by_day(client):
     d15 = today.replace(day=15).isoformat()
 
     pages = [
-        _task("a", "Лоток", deadline=d22, prio="🟡 Важно"),
-        _task("b", "Счёт", deadline=d22, prio="🔴 Срочно"),
-        _task("c", "Тренажёрка", deadline=d15, prio="⚪ Можно потом"),
+        _pg_task("a", "Лоток", deadline=d22, priority="🟡 Важно"),
+        _pg_task("b", "Счёт", deadline=d22, priority="🔴 Срочно"),
+        _pg_task("c", "Тренажёрка", deadline=d15, priority="⚪ Можно потом"),
     ]
 
-    async def qp(*_, **__):
-        return pages
-
-    with patch("miniapp.backend.routes.calendar.query_pages", side_effect=qp), \
+    with patch("miniapp.backend.routes.calendar._tasks_repo.active",
+               AsyncMock(return_value=pages)), \
          patch("miniapp.backend.routes.calendar.today_user_tz",
                AsyncMock(return_value=(today, tz))), \
          patch("miniapp.backend.routes.calendar.get_user_notion_id",
@@ -500,10 +498,8 @@ def test_calendar_defaults_to_current_month(client):
     tz = 3
     today = _today_date(tz)
 
-    async def qp(*_, **__):
-        return []
-
-    with patch("miniapp.backend.routes.calendar.query_pages", side_effect=qp), \
+    with patch("miniapp.backend.routes.calendar._tasks_repo.active",
+               AsyncMock(return_value=[])), \
          patch("miniapp.backend.routes.calendar.today_user_tz",
                AsyncMock(return_value=(today, tz))), \
          patch("miniapp.backend.routes.calendar.get_user_notion_id",
@@ -521,13 +517,9 @@ def test_calendar_401_without_init_data():
 
 
 def test_calendar_filter_does_not_include_bot(client):
-    captured = {}
-
-    async def qp(db_id, *, filters=None, **kwargs):
-        captured["filters"] = filters
-        return []
-
-    with patch("miniapp.backend.routes.calendar.query_pages", side_effect=qp), \
+    """GET /api/calendar: задачи из PG по user_notion_id, без фильтра «Бот»."""
+    with patch("miniapp.backend.routes.calendar._tasks_repo.active",
+               AsyncMock(return_value=[])) as mock_active, \
          patch("miniapp.backend.routes.calendar.today_user_tz",
                AsyncMock(return_value=(_today_date(), 3))), \
          patch("miniapp.backend.routes.calendar.get_user_notion_id",
@@ -535,21 +527,16 @@ def test_calendar_filter_does_not_include_bot(client):
         r = client.get("/api/calendar?month=2026-04")
 
     assert r.status_code == 200
-    filter_str = _json.dumps(captured["filters"] or {}, ensure_ascii=False)
-    assert '"Бот"' not in filter_str
+    # PG-путь: active вызывается с user_notion_id, без фильтра «Бот»
+    mock_active.assert_awaited_once_with(FAKE_NOTION_USER)
 
 
 # ── /api/today: запрос задач без фильтра «Бот» ───────────────────────────────
 
 def test_today_task_fetch_does_not_include_bot(client):
-    """GET /api/today запрос задач не содержит фильтра по 'Бот'."""
-    captured_filters = []
-
-    async def qp(db_id, *, filters=None, **kwargs):
-        captured_filters.append(_json.dumps(filters or {}, ensure_ascii=False))
-        return []
-
-    with patch("miniapp.backend.routes.today.query_pages", side_effect=qp), \
+    """GET /api/today: задачи из PG по user_notion_id, без фильтра «Бот»."""
+    with patch("miniapp.backend.routes.today._tasks_repo.active",
+               AsyncMock(return_value=[])) as mock_active, \
          patch("miniapp.backend.routes.today._budget_repo.query", AsyncMock(return_value=[])), \
          patch("miniapp.backend.routes.today._memory_repo.find_by_key", AsyncMock(return_value=[])), \
          patch("miniapp.backend.routes.today.ask_claude", AsyncMock(return_value="tip")), \
@@ -565,9 +552,8 @@ def test_today_task_fetch_does_not_include_bot(client):
         r = client.get("/api/today")
 
     assert r.status_code == 200
-    # Task fetch filter shouldn't mention "Бот"
-    task_filter = next(f for f in captured_filters if '"Статус"' in f and '"Расход"' not in f)
-    assert '"Бот"' not in task_filter
+    # PG-путь: active вызывается с user_notion_id, без фильтра «Бот»
+    mock_active.assert_awaited_once_with(FAKE_NOTION_USER)
 
 
 # ── /today (nexus bot) — не обрывается ───────────────────────────────────────
