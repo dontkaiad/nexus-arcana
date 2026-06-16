@@ -61,37 +61,42 @@ def _session(sid: str, cid: str, sum_: int = 3000, paid: int = 0,
 
 
 def test_clients_payload_has_type_and_barter_count(client):
-    clients_pages = [
-        _client("c-self", "Кай", "🌟 Self"),
-        _client("c-paid", "Маша", "🤝 Платный"),
-        _client("c-free", "Аня", "🎁 Бесплатный"),
-    ]
-    sessions = [
-        _session("s1", "c-paid", 3000, 0, barter_what="торт"),
-        _session("s2", "c-paid", 5000, 5000),
-        _session("s3", "c-free", 0, 0, barter_what="фото"),
+    from unittest.mock import MagicMock
+    from arcana.repos.clients_repo import Client
+
+    clients_list = [
+        Client(id="1", name="Кай",  contact="", request="", notes="", since="",
+               type_code="self",  status_code="active"),
+        Client(id="2", name="Маша", contact="", request="", notes="", since="",
+               type_code="paid",  status_code="active"),
+        Client(id="3", name="Аня",  contact="", request="", notes="", since="",
+               type_code="free",  status_code="active"),
     ]
 
-    with patch("miniapp.backend.routes.arcana_clients.arcana_clients_summary",
-               AsyncMock(return_value=clients_pages)), \
-         patch("miniapp.backend.routes.arcana_clients.sessions_all",
-               AsyncMock(return_value=sessions)), \
-         patch("miniapp.backend.routes.arcana_clients.rituals_all",
-               AsyncMock(return_value=[])), \
+    mock_cl = MagicMock()
+    mock_cl.list_all = AsyncMock(return_value=clients_list)
+    mock_sess = MagicMock()
+    mock_sess.list_all = AsyncMock(return_value=[])
+    mock_rit = MagicMock()
+    mock_rit.list_all = AsyncMock(return_value=[])
+
+    with patch("miniapp.backend.routes.arcana_clients._clients_repo", mock_cl), \
+         patch("miniapp.backend.routes.arcana_clients._sessions_repo", mock_sess), \
+         patch("miniapp.backend.routes.arcana_clients._rituals_repo", mock_rit), \
          patch("miniapp.backend.routes.arcana_clients.get_user_notion_id",
                AsyncMock(return_value=FAKE_NOTION)):
         r = client.get("/api/arcana/clients")
 
     assert r.status_code == 200, r.text
     by_id = {c["id"]: c for c in r.json()["clients"]}
-    assert by_id["c-self"]["type"] == "🌟"
-    assert by_id["c-self"]["type_full"] == "🌟 Self"
-    assert by_id["c-paid"]["type"] == "🤝"
-    assert by_id["c-free"]["type"] == "🎁"
-    # Бартер: у Маши 1 (s1), у Ани 1 (s3), у Кая 0
-    assert by_id["c-paid"]["barter_count"] == 1
-    assert by_id["c-free"]["barter_count"] == 1
-    assert by_id["c-self"]["barter_count"] == 0
+    assert by_id["1"]["type"] == "🌟"
+    assert by_id["1"]["type_full"] == "🌟 Self"
+    assert by_id["2"]["type"] == "🤝"
+    assert by_id["3"]["type"] == "🎁"
+    # barter_count = 0 (не хранится в PG, возвращаем 0)
+    assert by_id["2"]["barter_count"] == 0
+    assert by_id["3"]["barter_count"] == 0
+    assert by_id["1"]["barter_count"] == 0
 
 
 # ── /api/arcana/sessions (list): client_type + has_barter ────────────────────

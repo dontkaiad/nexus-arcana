@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Optional
+from typing import List, Optional
 
 from sqlalchemy import select
 
@@ -15,6 +15,18 @@ from arcana.repos.clients_tables import client_type, client_status, clients
 from core.db import get_engine
 
 logger = logging.getLogger("arcana.pg_clients")
+
+# Display label maps (exported for routes)
+TYPE_CODE_TO_FULL = {
+    "paid": "🤝 Платный",
+    "free": "🎁 Бесплатный",
+    "self": "🌟 Self",
+}
+STATUS_CODE_TO_LABEL = {
+    "active":   "🟢 Активный",
+    "one_time": "🌙 Разовый",
+    "closed":   "⛔ Закрытый",
+}
 
 _NOTION_TYPE_TO_CODE = {
     "🎁 бесплатный": "free",
@@ -70,6 +82,39 @@ def _row_to_client(row) -> Client:
     )
 
 
+def _select_clients_full():
+    """Select all client fields joined with type/status lookup tables."""
+    ct = client_type.alias("ct")
+    cs = client_status.alias("cs")
+    return (
+        select(
+            clients,
+            ct.c.code.label("type_code"),
+            cs.c.code.label("status_code"),
+        )
+        .outerjoin(ct, clients.c.type_id == ct.c.id)
+        .outerjoin(cs, clients.c.status_id == cs.c.id)
+        .order_by(clients.c.name)
+    )
+
+
+def _row_to_client_full(row) -> Client:
+    bd = row.birthday
+    return Client(
+        id=str(row.id),
+        name=row.name or "",
+        contact=row.contact or "",
+        request=row.request or "",
+        notes=row.notes or "",
+        since="",
+        type_code=row.type_code or None,
+        status_code=row.status_code or None,
+        birthday=bd.isoformat() if bd else None,
+        photo_url=row.photo_url or None,
+        object_photos=row.object_photos or None,
+    )
+
+
 class PgClientsRepo:
 
     # ── Sync implementations ──────────────────────────────────────────────────
@@ -84,11 +129,18 @@ class PgClientsRepo:
         return _row_to_client(row) if row else None
 
     def _find_by_id_sync(self, pg_id: int) -> Optional[Client]:
+        stmt = _select_clients_full().where(clients.c.id == pg_id)
         with get_engine().connect() as conn:
-            row = conn.execute(
-                select(clients).where(clients.c.id == pg_id)
-            ).fetchone()
-        return _row_to_client(row) if row else None
+            row = conn.execute(stmt).fetchone()
+        return _row_to_client_full(row) if row else None
+
+    def _list_all_sync(self, user_notion_id: str) -> List[Client]:
+        stmt = _select_clients_full()
+        if user_notion_id:
+            stmt = stmt.where(clients.c.user_notion_id == user_notion_id)
+        with get_engine().connect() as conn:
+            rows = conn.execute(stmt).fetchall()
+        return [_row_to_client_full(r) for r in rows]
 
     def _find_self_sync(self, user_notion_id: str) -> Optional[Client]:
         """Find the self-type client (used in resolve_self_client)."""
@@ -145,6 +197,7 @@ class PgClientsRepo:
         birthday: Optional[str],
         photo_url: Optional[str] = None,
         object_photos: Optional[str] = None,
+        type_code: Optional[str] = None,
     ) -> None:
         vals = {}
         if contact is not None:
@@ -163,10 +216,15 @@ class PgClientsRepo:
             vals["photo_url"] = photo_url
         if object_photos is not None:
             vals["object_photos"] = object_photos
-        if not vals:
+        if not vals and type_code is None:
             return
         with get_engine().begin() as conn:
-            conn.execute(clients.update().where(clients.c.id == pg_id).values(**vals))
+            if type_code is not None:
+                type_id = _resolve_lookup(conn, client_type, type_code)
+                if type_id is not None:
+                    vals["type_id"] = type_id
+            if vals:
+                conn.execute(clients.update().where(clients.c.id == pg_id).values(**vals))
 
     def _get_object_photos_sync(self, pg_id: int) -> str:
         with get_engine().connect() as conn:
@@ -182,6 +240,9 @@ class PgClientsRepo:
 
     async def find_by_id(self, pg_id: int) -> Optional[Client]:
         return await asyncio.to_thread(self._find_by_id_sync, pg_id)
+
+    async def list_all(self, user_notion_id: str = "") -> List[Client]:
+        return await asyncio.to_thread(self._list_all_sync, user_notion_id)
 
     async def find_self(self, user_notion_id: str = "") -> Optional[Client]:
         return await asyncio.to_thread(self._find_self_sync, user_notion_id)
@@ -211,11 +272,12 @@ class PgClientsRepo:
         birthday: Optional[str] = None,
         photo_url: Optional[str] = None,
         object_photos: Optional[str] = None,
+        type_code: Optional[str] = None,
     ) -> None:
         await asyncio.to_thread(
             self._update_profile_sync, pg_id,
             contact=contact, request=request, notes=notes, birthday=birthday,
-            photo_url=photo_url, object_photos=object_photos,
+            photo_url=photo_url, object_photos=object_photos, type_code=type_code,
         )
 
     async def get_object_photos(self, pg_id: int) -> str:

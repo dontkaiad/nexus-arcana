@@ -17,7 +17,6 @@ from pydantic import BaseModel, Field
 
 from core.config import config
 from core.notion_client import (
-    client_add,
     finance_add,
     get_page,
     page_create,
@@ -33,6 +32,17 @@ from core.bot_notify import notify_user, clear_task_reminder
 
 from arcana.repos.pg_rituals_repo import PgRitualsRepo as _PgRitualsRepoClass
 _rituals_pg_repo = _PgRitualsRepoClass()
+
+from arcana.repos.clients_repo import ClientsRepo as _ClientsRepoClass
+from arcana.repos.pg_clients_repo import PgClientsRepo as _PgClientsRepoClass
+_clients_repo = _ClientsRepoClass()
+_pg_clients_repo = _PgClientsRepoClass()
+
+# Notion label → PG type code for client create/edit
+_CLIENT_TYPE_TO_CODE = {
+    "🤝 Платный":   "paid",
+    "🎁 Бесплатный": "free",
+}
 
 from miniapp.backend.auth import current_user_id
 from miniapp.backend._helpers import (
@@ -663,9 +673,11 @@ async def upload_client_object_photo(
     note: str = Form(""),
     tg_id: int = Depends(current_user_id),
 ) -> dict[str, Any]:
-    """Append «URL | note» в rich_text поле «Фото объектов» клиента."""
+    """Append «URL | note» в поле object_photos клиента (PG text)."""
     user_notion_id = (await get_user_notion_id(tg_id)) or ""
-    page = await _load_owned_page(client_id, user_notion_id)
+    c = await _clients_repo.find_by_id(client_id)
+    if not c:
+        raise HTTPException(status_code=404, detail="not found")
 
     content = await file.read()
     if len(content) > 5 * 1024 * 1024:
@@ -677,12 +689,11 @@ async def upload_client_object_photo(
     if not url:
         raise HTTPException(status_code=501, detail="cloudinary not configured")
 
-    from miniapp.backend._helpers import rich_text_plain
     from core.client_object_photos import append as _append
-    existing = rich_text_plain(page, "Фото объектов") or ""
+    existing = c.object_photos or ""
     new_raw, items = _append(existing, url, note or "")
     try:
-        await update_page(client_id, {"Фото объектов": _text(new_raw)})
+        await _clients_repo.update_object_photos(client_id, new_raw)
     except Exception as e:
         logger.warning("Failed to append object photo: %s", e)
     return {"ok": True, "url": url, "note": (note or "").strip(), "photos": items}
@@ -700,15 +711,16 @@ async def edit_client_object_photo_note(
     tg_id: int = Depends(current_user_id),
 ) -> dict[str, Any]:
     user_notion_id = (await get_user_notion_id(tg_id)) or ""
-    page = await _load_owned_page(client_id, user_notion_id)
-    from miniapp.backend._helpers import rich_text_plain
+    c = await _clients_repo.find_by_id(client_id)
+    if not c:
+        raise HTTPException(status_code=404, detail="not found")
     from core.client_object_photos import edit_note as _edit
-    existing = rich_text_plain(page, "Фото объектов") or ""
+    existing = c.object_photos or ""
     try:
         new_raw, items = _edit(existing, index, body.note or "")
     except IndexError:
         raise HTTPException(status_code=404, detail="object photo index out of range")
-    await update_page(client_id, {"Фото объектов": _text(new_raw)})
+    await _clients_repo.update_object_photos(client_id, new_raw)
     return {"ok": True, "photos": items}
 
 
@@ -719,15 +731,16 @@ async def delete_client_object_photo(
     tg_id: int = Depends(current_user_id),
 ) -> dict[str, Any]:
     user_notion_id = (await get_user_notion_id(tg_id)) or ""
-    page = await _load_owned_page(client_id, user_notion_id)
-    from miniapp.backend._helpers import rich_text_plain
+    c = await _clients_repo.find_by_id(client_id)
+    if not c:
+        raise HTTPException(status_code=404, detail="not found")
     from core.client_object_photos import delete as _delete
-    existing = rich_text_plain(page, "Фото объектов") or ""
+    existing = c.object_photos or ""
     try:
         new_raw, items = _delete(existing, index)
     except IndexError:
         raise HTTPException(status_code=404, detail="object photo index out of range")
-    await update_page(client_id, {"Фото объектов": _text(new_raw)})
+    await _clients_repo.update_object_photos(client_id, new_raw)
     return {"ok": True, "photos": items}
 
 
@@ -848,28 +861,25 @@ async def arcana_client_create(
 ) -> dict[str, Any]:
     user_notion_id = (await get_user_notion_id(tg_id)) or ""
     ctype = body.type if body.type in _CLIENT_TYPES_ALLOWED_CREATE else None
-    page_id = await client_add(
+    pg_id_str = await _clients_repo.add(
         name=body.name,
         contact=body.contact,
         request=body.request,
         user_notion_id=user_notion_id,
         client_type=ctype,
     )
-    if not page_id:
+    if not pg_id_str:
         raise HTTPException(status_code=500, detail="failed to create client")
-    if body.status:
-        await update_page_select(page_id, "Статус", body.status)
-    extra: dict = {}
-    if body.notes:
-        extra["Заметки"] = _text(body.notes)
-    if body.birthday:
-        extra["День рождения"] = _date(body.birthday)
-    if extra:
+    if body.notes or body.birthday:
         try:
-            await update_page(page_id, extra)
+            await _clients_repo.update_profile(
+                pg_id_str,
+                notes=body.notes,
+                birthday=body.birthday or None,
+            )
         except Exception as e:
             logger.warning("client_create extra fields write failed: %s", e)
-    return {"ok": True, "id": page_id}
+    return {"ok": True, "id": pg_id_str}
 
 
 class ClientUpdateBody(BaseModel):
@@ -887,31 +897,37 @@ async def arcana_client_edit(
     tg_id: int = Depends(current_user_id),
 ) -> dict[str, Any]:
     user_notion_id = (await get_user_notion_id(tg_id)) or ""
-    page = await _load_owned_page(client_id, user_notion_id)
+    c = await _clients_repo.find_by_id(client_id)
+    if not c:
+        raise HTTPException(status_code=404, detail="not found")
     # self-client (🌟 Self) — тип менять нельзя
-    cur_type = (page.get("properties", {}).get("Тип клиента", {}) or {}).get("select") or {}
-    cur_type_name = cur_type.get("name", "")
-    is_self = cur_type_name == "🌟 Self"
+    is_self = c.type_code == "self"
 
-    props: dict = {}
-    if body.notes is not None:
-        props["Заметки"] = _text(body.notes)
-    if body.request is not None:
-        props["Запрос"] = _text(body.request)
-    if body.contact is not None:
-        props["Контакт"] = _text(body.contact)
+    type_code_update = None
     if body.type is not None and not is_self:
         if body.type not in _CLIENT_TYPES_ALLOWED_EDIT:
             raise HTTPException(status_code=400, detail="invalid type")
-        props["Тип клиента"] = _select(body.type)
-    if body.birthday is not None:
-        props["День рождения"] = _date(body.birthday) if body.birthday else {"date": None}
+        type_code_update = _CLIENT_TYPE_TO_CODE.get(body.type)
 
-    if not props:
+    has_update = any([
+        body.notes is not None,
+        body.request is not None,
+        body.contact is not None,
+        body.birthday is not None,
+        type_code_update is not None,
+    ])
+    if not has_update:
         return {"ok": True, "noop": True}
 
     try:
-        await update_page(client_id, props)
+        await _clients_repo.update_profile(
+            client_id,
+            notes=body.notes,
+            request=body.request,
+            contact=body.contact,
+            birthday=body.birthday if body.birthday else None,
+            type_code=type_code_update,
+        )
     except Exception as e:
         logger.error("arcana_client_edit failed: %s", e)
         raise HTTPException(status_code=500, detail="failed to update client")

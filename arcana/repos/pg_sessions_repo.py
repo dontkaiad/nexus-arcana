@@ -101,6 +101,8 @@ def _row_to_triplet(row) -> TripletEntry:
         client_id=cid,
         date=date_str,
         outcome=row.outcome_code or "unverified",
+        amount=row.amount or Decimal("0"),
+        paid=row.paid or Decimal("0"),
     )
 
 

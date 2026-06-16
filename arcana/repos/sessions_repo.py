@@ -4,8 +4,9 @@ Pure PG — no Notion calls. Callers receive plain dataclasses.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date as _date
+from decimal import Decimal
 from typing import List, Optional
 
 
@@ -20,6 +21,8 @@ class TripletEntry:
     client_id: Optional[str]
     date: str = ""       # "YYYY-MM-DD" or ""
     outcome: str = ""    # PG code: yes/no/partial/unverified
+    amount: Decimal = field(default_factory=lambda: Decimal("0"))
+    paid: Decimal = field(default_factory=lambda: Decimal("0"))
 
 
 @dataclass

@@ -5,7 +5,7 @@ Pure PG — no Notion calls. Callers receive plain dataclass instances.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 
 # Keep re-exports so handlers that import these constants keep working.
@@ -36,6 +36,11 @@ class Client:
     request: str
     notes: str
     since: str
+    type_code: Optional[str] = None    # "paid" / "free" / "self"
+    status_code: Optional[str] = None  # "active" / "one_time" / "closed"
+    birthday: Optional[str] = None     # "YYYY-MM-DD"
+    photo_url: Optional[str] = None
+    object_photos: Optional[str] = None  # raw "URL | note\n..." string
 
 
 @dataclass
@@ -116,6 +121,7 @@ class ClientsRepo:
         request: Optional[str] = None,
         notes: Optional[str] = None,
         birthday: Optional[str] = None,
+        type_code: Optional[str] = None,
     ) -> None:
         try:
             pg_id = int(client_id)
@@ -127,7 +133,39 @@ class ClientsRepo:
             request=request,
             notes=notes,
             birthday=birthday,
+            type_code=type_code,
         )
+
+    async def list_all(self, user_notion_id: str = "") -> List[Client]:
+        return await _pg_clients().list_all(user_notion_id)
+
+    async def find_by_id(self, client_id: str) -> Optional[Client]:
+        try:
+            pg_id = int(client_id)
+        except (ValueError, TypeError):
+            return None
+        return await _pg_clients().find_by_id(pg_id)
+
+    async def get_object_photos(self, client_id: str) -> str:
+        try:
+            pg_id = int(client_id)
+        except (ValueError, TypeError):
+            return ""
+        return await _pg_clients().get_object_photos(pg_id)
+
+    async def update_object_photos(self, client_id: str, raw: str) -> None:
+        try:
+            pg_id = int(client_id)
+        except (ValueError, TypeError):
+            return
+        await _pg_clients().update_profile(pg_id, object_photos=raw)
+
+    async def update_photo_url(self, client_id: str, url: str) -> None:
+        try:
+            pg_id = int(client_id)
+        except (ValueError, TypeError):
+            return
+        await _pg_clients().update_profile(pg_id, photo_url=url)
 
     async def all_debts(
         self, user_notion_id: str = ""
