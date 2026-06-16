@@ -28,6 +28,43 @@ from core.db import get_engine
 
 logger = logging.getLogger("arcana.pg_rituals")
 
+# ── Code → display label maps (for miniapp serializers) ──────────────────────
+
+CODE_TO_GOAL = {
+    "attract": "🧲 Привлечение",
+    "protect": "🛡️ Защита",
+    "cleanse": "🌊 Очищение",
+    "love": "💕 Любовь",
+    "finance": "💰 Финансы",
+    "destruct_return": "💀 Деструктив",
+    "cut_off": "⚔️ Развязка",
+    "love_bind": "💘 Приворот",
+    "other": "🔮 Другое",
+}
+
+CODE_TO_PLACE = {
+    "home": "🏠 Дома",
+    "forest": "🌲 Лес",
+    "graveyard": "✝️ Погост",
+    "crossroad": "🛤️ Перекрёсток",
+    "church": "⛪ Церковь",
+    "water": "🌊 Водоём",
+    "field": "🌾 Поле",
+    "other": "📍 Другое",
+}
+
+CODE_TO_RESULT = {
+    "unverified": "⏳ Не проверено",
+    "partial": "〰️ Частично",
+    "negative": "❌ Не сработало",
+    "positive": "✅ Сработало",
+}
+
+CODE_TO_TYPE = {
+    "personal": "👤 Личный",
+    "client": "🤝 Клиентский",
+}
+
 # ── Label → code maps (callers pass Russian labels; PG stores codes) ──────────
 
 # ritual_type: "Личный" / "Клиентский" (from handler)
@@ -130,6 +167,14 @@ def _row_to_ritual(row) -> Ritual:
         paid=row.paid if row.paid is not None else Decimal("0"),
         goal=row.purpose_code,
         place=row.place_code,
+        type_code=getattr(row, "type_code", None),
+        time_min=int(row.duration_min) if getattr(row, "duration_min", None) else None,
+        consumables=getattr(row, "consumables", None) or "",
+        offerings=getattr(row, "offerings", None) or "",
+        powers=getattr(row, "forces", None) or "",
+        structure=getattr(row, "structure", None) or "",
+        notes=getattr(row, "notes", None) or None,
+        photo_url=getattr(row, "photo_url", None) or None,
     )
 
 
@@ -147,10 +192,11 @@ def _client_id_int(client_id: Optional[str]) -> Optional[int]:
 # ── Base SELECT with all joins (DRY) ─────────────────────────────────────────
 
 def _select_rituals():
-    """Base query: rituals + joined lookup codes."""
+    """Base query: rituals + joined lookup codes + all detail columns."""
     oc = outcome_status.alias("oc")
     mp = magical_purpose.alias("mp")
     rp = ritual_place.alias("rp")
+    et = engagement_type.alias("et")
     return (
         select(
             rituals.c.id,
@@ -159,13 +205,22 @@ def _select_rituals():
             rituals.c.client_id,
             rituals.c.price,
             rituals.c.paid,
+            rituals.c.photo_url,
+            rituals.c.forces,
+            rituals.c.structure,
+            rituals.c.consumables,
+            rituals.c.offerings,
+            rituals.c.notes,
+            rituals.c.duration_min,
             oc.c.code.label("outcome_code"),
             mp.c.code.label("purpose_code"),
             rp.c.code.label("place_code"),
+            et.c.code.label("type_code"),
         )
         .outerjoin(oc,  rituals.c.outcome_id  == oc.c.id)
         .outerjoin(mp,  rituals.c.purpose_id  == mp.c.id)
         .outerjoin(rp,  rituals.c.place_id    == rp.c.id)
+        .outerjoin(et,  rituals.c.type_id     == et.c.id)
         .order_by(rituals.c.occurred_at.desc().nullslast())
     )
 
@@ -370,3 +425,30 @@ class PgRitualsRepo:
 
     async def set_result(self, ritual_id: str, result_code: str) -> bool:
         return await asyncio.to_thread(self._set_result_sync, ritual_id, result_code)
+
+    def _find_by_id_sync(self, ritual_id: str) -> Optional[Ritual]:
+        try:
+            rid = int(ritual_id)
+        except (ValueError, TypeError):
+            return None
+        stmt = _select_rituals().where(rituals.c.id == rid)
+        with get_engine().connect() as conn:
+            row = conn.execute(stmt).fetchone()
+        return _row_to_ritual(row) if row else None
+
+    def _update_photo_url_sync(self, ritual_id: str, url: str) -> bool:
+        try:
+            rid = int(ritual_id)
+        except (ValueError, TypeError):
+            return False
+        with get_engine().begin() as conn:
+            res = conn.execute(
+                rituals.update().where(rituals.c.id == rid).values(photo_url=url)
+            )
+        return res.rowcount > 0
+
+    async def find_by_id(self, ritual_id: str) -> Optional[Ritual]:
+        return await asyncio.to_thread(self._find_by_id_sync, ritual_id)
+
+    async def update_photo_url(self, ritual_id: str, url: str) -> bool:
+        return await asyncio.to_thread(self._update_photo_url_sync, ritual_id, url)

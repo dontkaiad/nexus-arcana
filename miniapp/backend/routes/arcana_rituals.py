@@ -1,36 +1,61 @@
-"""miniapp/backend/routes/arcana_rituals.py — GET /api/arcana/rituals, /{id}."""
+"""miniapp/backend/routes/arcana_rituals.py — GET /api/arcana/rituals, /{id}.
+
+Ритуалы — чтение через PG (vertical slice). Клиентская атрибуция недоступна:
+PG-ритуалы имеют client_id=NULL пока клиенты не мигрированы (см. rituals_tables.py).
+"""
 from __future__ import annotations
 
 import logging
+from datetime import timezone, timedelta
 from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
-from core.notion_client import get_page, rituals_all
+from arcana.repos.pg_rituals_repo import (
+    PgRitualsRepo,
+    CODE_TO_GOAL,
+    CODE_TO_PLACE,
+    CODE_TO_RESULT,
+    CODE_TO_TYPE,
+)
 from core.user_manager import get_user_notion_id
 
 from miniapp.backend.auth import current_user_id
-from miniapp.backend._helpers import (
-    multi_select_names,
-    number_of,
-    relation_ids_of,
-    rich_text_plain,
-    select_of,
-    title_plain,
-    to_local_date,
-    today_user_tz,
-)
-from miniapp.backend.routes._arcana_common import (
-    client_name_from,
-    load_clients_map,
-    parse_supplies,
-    serialize_ritual_brief,
-    split_lines,
-)
+from miniapp.backend._helpers import today_user_tz
+from miniapp.backend.routes._arcana_common import parse_supplies, split_lines
 
 logger = logging.getLogger("miniapp.arcana.rituals")
 
 router = APIRouter()
+_rituals_repo = PgRitualsRepo()
+
+# Reverse map для ?goal= фильтра: display label → PG code
+_GOAL_LABEL_TO_CODE = {v: k for k, v in CODE_TO_GOAL.items()}
+
+
+def _date_str(dt, tz_offset: int) -> Optional[str]:
+    if not dt:
+        return None
+    local = dt.astimezone(timezone(timedelta(hours=tz_offset)))
+    return local.date().isoformat()
+
+
+def _ritual_brief(r, tz_offset: int) -> dict:
+    goal_d = CODE_TO_GOAL.get(r.goal or "") or None
+    return {
+        "id": r.id,
+        "name": r.name,
+        "goal": goal_d,
+        "goals": [goal_d] if goal_d else [],
+        "place": CODE_TO_PLACE.get(r.place or "") or None,
+        "date": _date_str(r.date, tz_offset),
+        "type": CODE_TO_TYPE.get(r.type_code or "") or None,
+        "client": "Личный",
+        "client_id": None,
+        "result": CODE_TO_RESULT.get(r.result or "unverified", "⏳ Не проверено"),
+        "price": int(r.price) if r.price else 0,
+        "paid": int(r.paid) if r.paid else 0,
+    }
 
 
 @router.get("/arcana/rituals")
@@ -41,21 +66,23 @@ async def list_rituals(
 ) -> dict[str, Any]:
     user_notion_id = (await get_user_notion_id(tg_id)) or ""
     _, tz_offset = await today_user_tz(tg_id)
-    pages = await rituals_all(user_notion_id=user_notion_id)
-    clients_map = await load_clients_map(user_notion_id)
 
-    items: list[dict] = []
-    for p in pages:
-        if client_id and client_id not in relation_ids_of(p, "👥 Клиенты"):
+    try:
+        entries = await _rituals_repo.list_all(user_notion_id)
+    except Exception as e:
+        logger.warning("rituals list_all failed: %s", e)
+        return {"total": 0, "rituals": []}
+
+    goal_code = _GOAL_LABEL_TO_CODE.get(goal) if goal else None
+
+    items: list = []
+    for r in entries:
+        # client_id filter: PG rituals have NULL client_id until clients migrate
+        if client_id and r.client_id != client_id:
             continue
-        if goal:
-            goals = multi_select_names(p, "Цель")
-            if not goals:
-                single = select_of(p, "Цель")
-                goals = [single] if single else []
-            if goal not in goals:
-                continue
-        items.append(serialize_ritual_brief(p, clients_map, tz_offset))
+        if goal_code and r.goal != goal_code:
+            continue
+        items.append(_ritual_brief(r, tz_offset))
 
     return {"total": len(items), "rituals": items}
 
@@ -65,63 +92,38 @@ async def ritual_detail(
     ritual_id: str,
     tg_id: int = Depends(current_user_id),
 ) -> dict[str, Any]:
-    user_notion_id = (await get_user_notion_id(tg_id)) or ""
+    _, tz_offset = await today_user_tz(tg_id)
     try:
-        page = await get_page(ritual_id)
+        r = await _rituals_repo.find_by_id(ritual_id)
     except Exception:
         raise HTTPException(status_code=404, detail="ritual not found")
-    if not page:
+    if not r:
         raise HTTPException(status_code=404, detail="ritual not found")
 
-    owners = relation_ids_of(page, "🪪 Пользователи")
-    if user_notion_id and user_notion_id not in owners:
-        raise HTTPException(status_code=404, detail="ritual not found")
-
-    clients_map = await load_clients_map(user_notion_id)
-    _, tz_offset = await today_user_tz(tg_id)
-
-    # Цель — multi_select с fallback на select
-    goals = multi_select_names(page, "Цель")
-    if not goals:
-        single = select_of(page, "Цель")
-        goals = [single] if single else []
-
-    consumables_raw = rich_text_plain(page, "Расходники")
-    supplies, supplies_total = parse_supplies(consumables_raw)
-
-    # Структура: сначала попробуем Notion "Структура" как rich_text, разобьём по \n
-    structure = split_lines(rich_text_plain(page, "Структура"))
-
-    # Подношения: schema.py зовёт "Подношения", notion_client писал "Подношения/Откуп"
-    offerings = (
-        rich_text_plain(page, "Подношения/Откуп")
-        or rich_text_plain(page, "Подношения")
-    ) or None
-
-    client_name, cid = client_name_from(page, clients_map)
-    deadline_raw = (page.get("properties", {}).get("Дата", {}).get("date") or {}).get("start", "")
-    date_local = to_local_date(deadline_raw, tz_offset)
+    goal_d = CODE_TO_GOAL.get(r.goal or "") or None
+    supplies, supplies_total = parse_supplies(r.consumables or "")
+    structure = split_lines(r.structure or "")
 
     return {
-        "id": page.get("id", ""),
-        "name": title_plain(page, "Название"),
-        "client": client_name,
-        "client_id": cid,
-        "question": None,  # В схеме Notion поля нет — см. R3
-        "goal": goals[0] if goals else None,
-        "goals": goals,
-        "place": select_of(page, "Место") or None,
-        "date": date_local.isoformat() if date_local else None,
-        "type": select_of(page, "Тип") or None,
-        "price": int(round(number_of(page, "Цена за ритуал"))),
-        "paid": int(round(number_of(page, "Оплачено"))),
-        "time_min": int(round(number_of(page, "Время (мин)"))) or None,
+        "id": r.id,
+        "name": r.name,
+        "client": "Личный",
+        "client_id": None,
+        "question": None,
+        "goal": goal_d,
+        "goals": [goal_d] if goal_d else [],
+        "place": CODE_TO_PLACE.get(r.place or "") or None,
+        "date": _date_str(r.date, tz_offset),
+        "type": CODE_TO_TYPE.get(r.type_code or "") or None,
+        "price": int(r.price) if r.price else 0,
+        "paid": int(r.paid) if r.paid else 0,
+        "time_min": r.time_min,
         "supplies": supplies,
         "supplies_total": supplies_total,
-        "offerings": offerings,
-        "powers": rich_text_plain(page, "Силы") or None,
+        "offerings": r.offerings or None,
+        "powers": r.powers or None,
         "structure": structure,
-        "notes": rich_text_plain(page, "Заметки") or None,
-        "result": select_of(page, "Результат") or "⏳ Не проверено",
-        "photo_url": (page.get("properties", {}).get("Фото", {}) or {}).get("url") or None,
+        "notes": r.notes or None,
+        "result": CODE_TO_RESULT.get(r.result or "unverified", "⏳ Не проверено"),
+        "photo_url": r.photo_url or None,
     }

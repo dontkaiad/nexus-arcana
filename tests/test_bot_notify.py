@@ -169,17 +169,14 @@ def test_session_verify_notifies(client):
 
 def test_ritual_result_notifies(client):
     # #8: результат ритуала из детали тоже шлёт уведу (как session_verify).
-    page = {
-        "id": "r-1",
-        "properties": {
-            "🪪 Пользователи": {"relation": [{"id": FAKE_NOTION_USER}]},
-            "Название": {"title": [{"plain_text": "ритуал на защиту"}]},
-        },
-    }
+    from arcana.repos.rituals_repo import Ritual
+    ritual = Ritual(id="r-1", name="ритуал на защиту")
+    mock_repo = MagicMock()
+    mock_repo.find_by_id = AsyncMock(return_value=ritual)
+    mock_repo.set_result = AsyncMock(return_value=True)
     notify = AsyncMock(return_value=True)
     with patch("miniapp.backend.routes.writes.notify_user", notify), \
-         patch("miniapp.backend.routes.writes.get_page", AsyncMock(return_value=page)), \
-         patch("miniapp.backend.routes.writes.update_page_select", AsyncMock(return_value=True)), \
+         patch("miniapp.backend.routes.writes._rituals_pg_repo", mock_repo), \
          patch("miniapp.backend.routes.writes.get_user_notion_id",
                AsyncMock(return_value=FAKE_NOTION_USER)):
         r = client.post("/api/arcana/rituals/r-1/result", json={"status": "✅ Сработало"})

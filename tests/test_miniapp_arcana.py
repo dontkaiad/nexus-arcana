@@ -121,6 +121,35 @@ def _grim_page(gid, name, cat, themes=None, text="", source=""):
     )
 
 
+def _make_ritual(rid, name, *, goal=None, place=None, result="unverified",
+                 price=0, paid=0, date=None, type_code=None,
+                 consumables="", structure="", offerings="", powers="",
+                 time_min=None, notes=None, photo_url=None):
+    from arcana.repos.rituals_repo import Ritual
+    from decimal import Decimal
+    from datetime import datetime, timezone
+    dt = None
+    if date:
+        dt = datetime.strptime(date, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+    return Ritual(
+        id=rid, name=name, goal=goal, place=place, result=result,
+        price=Decimal(str(price)), paid=Decimal(str(paid)), date=dt,
+        type_code=type_code, consumables=consumables, structure=structure,
+        offerings=offerings, powers=powers, time_min=time_min,
+        notes=notes, photo_url=photo_url,
+    )
+
+
+def _mock_rituals_repo(list_all_result=None, find_by_id_result=None, set_result_ok=True,
+                       update_photo_ok=True):
+    repo = MagicMock()
+    repo.list_all = AsyncMock(return_value=list_all_result or [])
+    repo.find_by_id = AsyncMock(return_value=find_by_id_result)
+    repo.set_result = AsyncMock(return_value=set_result_ok)
+    repo.update_photo_url = AsyncMock(return_value=update_photo_ok)
+    return repo
+
+
 def _mock_grimoire_repo(list_all_result=None, find_by_id_result=None):
     """Helper: MagicMock с нужными AsyncMock-методами для _grimoire_repo."""
     repo = MagicMock()
@@ -444,18 +473,13 @@ def test_arcana_client_dossier_404_wrong_owner(client):
 # ── /api/arcana/rituals ──────────────────────────────────────────────────────
 
 def test_arcana_rituals_list_and_filter_by_goal(client):
-    rituals = [
-        _ritual_page("r1", "Защита", goal="🛡️ Защита", client_ids=["c1"]),
-        _ritual_page("r2", "Очищение", goal="🌊 Очищение"),
-        _ritual_page("r3", "Защита для Бориса", goal_multi=["🛡️ Защита"],
-                     client_ids=["c2"]),
+    entries = [
+        _make_ritual("r1", "Защита", goal="protect"),
+        _make_ritual("r2", "Очищение", goal="cleanse"),
+        _make_ritual("r3", "Защита для Бориса", goal="protect"),
     ]
-    clients_pages = [_client_page("c1", "Анна"), _client_page("c2", "Борис")]
-
-    with patch("miniapp.backend.routes.arcana_rituals.rituals_all",
-               AsyncMock(return_value=rituals)), \
-         patch("miniapp.backend.routes._arcana_common.arcana_clients_summary",
-               AsyncMock(return_value=clients_pages)), \
+    with patch("miniapp.backend.routes.arcana_rituals._rituals_repo",
+               _mock_rituals_repo(list_all_result=entries)), \
          patch("miniapp.backend.routes.arcana_rituals.today_user_tz",
                AsyncMock(return_value=(_today_date(3), 3))), \
          patch("miniapp.backend.routes.arcana_rituals.get_user_notion_id",
@@ -479,21 +503,17 @@ def test_arcana_rituals_401():
 # ── /api/arcana/rituals/{id} ─────────────────────────────────────────────────
 
 def test_arcana_ritual_detail_parses_supplies_and_structure(client):
-    page = _ritual_page(
+    entry = _make_ritual(
         "rX", "Защита для Анны",
-        date="2026-04-19", client_ids=["c1"], goal="🛡️ Защита",
-        place="🏠 Дома", ritual_type="🤝 Клиентский",
+        date="2026-04-19", goal="protect", place="home", type_code="client",
         consumables="Свечи чёрные × 3 — 180\nЛадан — 95\nЧёрная соль — 150",
         structure="Очищение пространства ладаном\nКруг из чёрной соли\nЗажечь свечи",
         offerings="Монеты на перекрёсток — 7 шт",
         powers="Архангел Михаил — щит",
-        duration=45, price=5000, paid=5000, result="✅ Сработало",
+        time_min=45, price=5000, paid=5000, result="positive",
     )
-
-    with patch("miniapp.backend.routes.arcana_rituals.get_page",
-               AsyncMock(return_value=page)), \
-         patch("miniapp.backend.routes._arcana_common.arcana_clients_summary",
-               AsyncMock(return_value=[_client_page("c1", "Анна")])), \
+    with patch("miniapp.backend.routes.arcana_rituals._rituals_repo",
+               _mock_rituals_repo(find_by_id_result=entry)), \
          patch("miniapp.backend.routes.arcana_rituals.today_user_tz",
                AsyncMock(return_value=(_today_date(3), 3))), \
          patch("miniapp.backend.routes.arcana_rituals.get_user_notion_id",
@@ -516,14 +536,9 @@ def test_arcana_ritual_detail_parses_supplies_and_structure(client):
 
 
 def test_arcana_ritual_404_wrong_owner(client):
-    page = {"id": "rX", "properties": {
-        "Название": {"title": []},
-        "🪪 Пользователи": {"relation": [{"id": "other"}]},
-    }}
-    with patch("miniapp.backend.routes.arcana_rituals.get_page",
-               AsyncMock(return_value=page)), \
-         patch("miniapp.backend.routes._arcana_common.arcana_clients_summary",
-               AsyncMock(return_value=[])), \
+    # find_by_id returns None → 404 (single-user system: no result = not found)
+    with patch("miniapp.backend.routes.arcana_rituals._rituals_repo",
+               _mock_rituals_repo(find_by_id_result=None)), \
          patch("miniapp.backend.routes.arcana_rituals.today_user_tz",
                AsyncMock(return_value=(_today_date(3), 3))), \
          patch("miniapp.backend.routes.arcana_rituals.get_user_notion_id",
@@ -719,16 +734,15 @@ def test_session_verify_rejects_unknown_status(client):
 # ── POST /api/arcana/rituals/{id}/result ────────────────────────────────────
 
 def test_ritual_result_updates_select(client):
-    page = _page("r-1")
-    with patch("miniapp.backend.routes.writes.get_page", AsyncMock(return_value=page)), \
-         patch("miniapp.backend.routes.writes.update_page_select",
-               AsyncMock(return_value=True)) as ups, \
+    ritual = _make_ritual("r-1", "Тест ритуал")
+    mock_repo = _mock_rituals_repo(find_by_id_result=ritual)
+    with patch("miniapp.backend.routes.writes._rituals_pg_repo", mock_repo), \
          patch("miniapp.backend.routes.writes.get_user_notion_id",
                AsyncMock(return_value=FAKE_NOTION_USER)):
         r = client.post("/api/arcana/rituals/r-1/result",
                         json={"status": "✅ Сработало"})
     assert r.status_code == 200
-    ups.assert_awaited_once_with("r-1", "Результат", "✅ Сработало")
+    mock_repo.set_result.assert_awaited_once_with("r-1", "✅ Сработало")
 
 
 # ── POST /api/arcana/clients (create/edit) ──────────────────────────────────
@@ -867,13 +881,12 @@ def test_session_photo_upload_rejects_non_image(client):
 # ── POST /api/arcana/rituals/{id}/photo ─────────────────────────────────────
 
 def test_ritual_photo_upload_writes_url(client):
-    page = _page("rit-1")
+    ritual = _make_ritual("rit-1", "Ритуал")
     fake_url = "https://res.cloudinary.com/x/r.jpg"
-    with patch("miniapp.backend.routes.writes.get_page", AsyncMock(return_value=page)), \
+    mock_repo = _mock_rituals_repo(find_by_id_result=ritual)
+    with patch("miniapp.backend.routes.writes._rituals_pg_repo", mock_repo), \
          patch("miniapp.backend.routes.writes._cloudinary_upload_folder",
                AsyncMock(return_value=fake_url)) as cu, \
-         patch("miniapp.backend.routes.writes.update_page",
-               AsyncMock(return_value=None)) as up, \
          patch("miniapp.backend.routes.writes.get_user_notion_id",
                AsyncMock(return_value=FAKE_NOTION_USER)):
         r = client.post(
@@ -883,8 +896,7 @@ def test_ritual_photo_upload_writes_url(client):
     assert r.status_code == 200
     cu.assert_awaited_once()
     assert cu.await_args.args[2] == "arcana-rituals"
-    up.assert_awaited_once()
-    assert up.await_args.args[1] == {"Фото": {"url": fake_url}}
+    mock_repo.update_photo_url.assert_awaited_once_with("rit-1", fake_url)
 
 
 # ── /api/arcana/clients/{id}/object_photo ───────────────────────────────────

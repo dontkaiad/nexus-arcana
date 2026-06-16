@@ -31,6 +31,9 @@ from core.notion_client import _title, _text, _select, _status, _number, _date, 
 from core.user_manager import get_user_notion_id
 from core.bot_notify import notify_user, clear_task_reminder
 
+from arcana.repos.pg_rituals_repo import PgRitualsRepo as _PgRitualsRepoClass
+_rituals_pg_repo = _PgRitualsRepoClass()
+
 from miniapp.backend.auth import current_user_id
 from miniapp.backend._helpers import (
     BOT_NEXUS,
@@ -630,8 +633,9 @@ async def upload_ritual_photo(
     file: UploadFile = FastAPIFile(...),
     tg_id: int = Depends(current_user_id),
 ) -> dict[str, Any]:
-    user_notion_id = (await get_user_notion_id(tg_id)) or ""
-    await _load_owned_page(ritual_id, user_notion_id)
+    ritual = await _rituals_pg_repo.find_by_id(ritual_id)
+    if not ritual:
+        raise HTTPException(status_code=404, detail="not found")
 
     content = await file.read()
     if len(content) > 5 * 1024 * 1024:
@@ -643,9 +647,9 @@ async def upload_ritual_photo(
     if not url:
         raise HTTPException(status_code=501, detail="cloudinary not configured")
     try:
-        await update_page(ritual_id, {"Фото": {"url": url}})
+        await _rituals_pg_repo.update_photo_url(ritual_id, url)
     except Exception as e:
-        logger.warning("Failed to set Фото URL on ritual: %s", e)
+        logger.warning("Failed to set photo URL on ritual %s: %s", ritual_id[:8], e)
     return {"ok": True, "url": url}
 
 
@@ -808,17 +812,17 @@ async def ritual_result(
 ) -> dict[str, Any]:
     if body.status not in _RITUAL_STATUSES:
         raise HTTPException(status_code=400, detail=f"status must be one of {sorted(_RITUAL_STATUSES)}")
-    user_notion_id = (await get_user_notion_id(tg_id)) or ""
-    page = await _load_owned_page(ritual_id, user_notion_id)
-    ok = await update_page_select(ritual_id, "Результат", body.status)
+    ritual = await _rituals_pg_repo.find_by_id(ritual_id)
+    if not ritual:
+        raise HTTPException(status_code=404, detail="not found")
+    ok = await _rituals_pg_repo.set_result(ritual_id, body.status)
     if not ok:
         raise HTTPException(status_code=500, detail="failed to update Результат")
-    # Уведа в Arcana-бот (как session_verify после #7).
     _result_word = {
         "✅ Сработало": "сработало ✅", "〰️ Частично": "частично 🌗",
         "❌ Не сработало": "не сработало ❌", "⏳ Не проверено": "не проверено ⏳",
     }.get(body.status, body.status)
-    name = title_plain(page, "Название") or "ритуал"
+    name = ritual.name or "ритуал"
     await notify_user(tg_id, f"🕯 {_esc(name)}: {_result_word}", bot="arcana")
     return {"ok": True, "status": body.status}
 
