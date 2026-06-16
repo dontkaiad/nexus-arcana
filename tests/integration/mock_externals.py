@@ -182,11 +182,6 @@ async def _fake_work_add(*args, **kwargs):
     return "fake-work-id"
 
 
-async def _fake_ritual_add(*args, **kwargs):
-    """Мок ritual_add."""
-    return "fake-ritual-id"
-
-
 async def _fake_session_add(*args, **kwargs):
     """Мок session_add."""
     return "fake-session-id"
@@ -261,7 +256,6 @@ def get_all_patches() -> list:
         patch("core.notion_client.client_find", side_effect=_fake_client_find),
         patch("core.notion_client.client_add", side_effect=_fake_client_add),
         patch("core.notion_client.session_add", side_effect=_fake_session_add),
-        patch("core.notion_client.ritual_add", side_effect=_fake_ritual_add),
         patch("arcana.handlers.work_preview._works_repo.create", side_effect=_fake_work_add),
         patch("core.notion_client.works_list", side_effect=_fake_works_list),
         patch("core.notion_client.sessions_all", side_effect=_fake_sessions_all),
