@@ -45,6 +45,7 @@ class Task:
     reminder: str = ""       # ISO string or ""
     completed_at: str = ""   # ISO string or ""
     last_edited: str = ""    # ISO string from updated_at
+    created_at: str = ""     # ISO string from created_at
     archived: bool = False
     user_notion_id: str = "" # Notion UUID of owning user
 
@@ -181,6 +182,7 @@ def _to_task(row) -> Task:
         return dt.isoformat() if dt else ""
 
     updated = getattr(row, "updated_at", None)
+    created = getattr(row, "created_at", None)
     return Task(
         id=str(row.id),
         title=row.title or "",
@@ -194,6 +196,7 @@ def _to_task(row) -> Task:
         reminder=_fmt(row.reminder),
         completed_at=_fmt(row.completed_at),
         last_edited=_fmt(updated),
+        created_at=_fmt(created),
         archived=False,
         user_notion_id=getattr(row, "user_notion_id", "") or "",
     )
