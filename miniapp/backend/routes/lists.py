@@ -6,9 +6,9 @@ from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
-from core.config import config
-from core.notion_client import query_pages
 from core.user_manager import get_user_notion_id
+from nexus.repos.pg_tasks_repo import PgTasksRepo as _PgTasksRepoClass
+_tasks_repo = _PgTasksRepoClass()
 from core.repos.pg_nexus_lists_repo import (
     PgNexusListsRepo,
     PG_STATUS_TO_NOTION,
@@ -180,37 +180,22 @@ async def _attach_parent_tasks(items: list[dict], tg_id: int, user_notion_id: st
     groups = {_norm_title(i.get("group") or "") for i in items if (i.get("group") or "").strip()}
     if not groups:
         return
-    db_tasks = getattr(config.nexus, "db_tasks", None) or getattr(config, "db_tasks", None)
-    if not db_tasks:
-        return
     today_date, tz_offset = await today_user_tz(tg_id)
-    # wave8.62.1: user-relation = contains OR is_empty (как для самих items в lists.py:99).
-    # Иначе родитель без relation 🪪 Пользователи (создан в Notion-UI) не находится,
-    # parent=None, фильтр closed-родителя пропускает item.
-    filters: dict = {}
-    if user_notion_id:
-        filters = {"or": [
-            {"property": "🪪 Пользователи", "relation": {"contains": user_notion_id}},
-            {"property": "🪪 Пользователи", "relation": {"is_empty": True}},
-        ]}
     try:
-        pages = await query_pages(db_tasks, filters=filters or None, page_size=500)
+        pg_tasks = await _tasks_repo.list_all(user_notion_id)
     except Exception as e:
         logger.warning("attach_parent_tasks query failed: %s", e)
         return
     by_title: dict[str, dict] = {}
-    for p in pages:
-        props = p.get("properties", {})
-        title_raw = title_text(props.get("Задача", {})).strip()
-        title = _norm_title(title_raw)
+    for task in pg_tasks:
+        title = _norm_title(task.title)
         if not title or title not in groups or title in by_title:
             continue
-        deadline_raw = date_start(props.get("Дедлайн", {}))
-        reminder_raw = date_start(props.get("Напоминание", {}))
+        deadline_raw = task.deadline or ""
+        reminder_raw = task.reminder or ""
         deadline_local = to_local_date(deadline_raw, tz_offset)
         deadline_time = extract_time(deadline_raw, tz_offset)
-        repeat_time = rich_text(props.get("Время повтора", {})).strip() or None
-        repeat = select_name(props.get("Повтор", {})) or None
+        repeat = task.repeat if task.repeat not in ("Нет", None) else None
         reminder_min = None
         if deadline_raw and reminder_raw:
             from datetime import datetime, timezone
@@ -226,14 +211,14 @@ async def _attach_parent_tasks(items: list[dict], tg_id: int, user_notion_id: st
             except ValueError:
                 pass
         by_title[title] = {
-            "cat": cat_from_notion(select_name(props.get("Категория", {}))),
-            "prio": prio_from_notion(select_name(props.get("Приоритет", {}))),
+            "cat": cat_from_notion(task.category),
+            "prio": prio_from_notion(task.priority),
             "deadline": deadline_local.isoformat() if deadline_local else None,
             "deadline_time": deadline_time,
             "repeat": repeat,
-            "repeat_time": repeat_time,
+            "repeat_time": task.repeat_time or None,
             "reminder_min": reminder_min,
-            "status": status_name(props.get("Статус", {})),
+            "status": task.status,
         }
     for it in items:
         g = _norm_title(it.get("group") or "")

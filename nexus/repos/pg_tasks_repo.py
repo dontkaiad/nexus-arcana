@@ -46,6 +46,7 @@ class Task:
     completed_at: str = ""   # ISO string or ""
     last_edited: str = ""    # ISO string from updated_at
     archived: bool = False
+    user_notion_id: str = "" # Notion UUID of owning user
 
 
 # ── Lookup caches (loaded once per process) ────────────────────────────────────
@@ -194,6 +195,7 @@ def _to_task(row) -> Task:
         completed_at=_fmt(row.completed_at),
         last_edited=_fmt(updated),
         archived=False,
+        user_notion_id=getattr(row, "user_notion_id", "") or "",
     )
 
 

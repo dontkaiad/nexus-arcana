@@ -18,12 +18,7 @@ from pydantic import BaseModel, Field
 from core.config import config
 from core.notion_client import (
     finance_add,
-    get_page,
     page_create,
-    update_page,
-    update_page_select,
-    update_task_deadline,
-    update_task_status,
 )
 from core.notion_client import _title, _text, _select, _status, _number, _date, _relation
 from core.user_manager import get_user_notion_id
@@ -54,12 +49,12 @@ _CLIENT_TYPE_TO_CODE = {
     "🎁 Бесплатный": "free",
 }
 
+from nexus.repos.pg_tasks_repo import PgTasksRepo as _PgTasksRepoClass, Task as _PgTask
+_tasks_pg_repo = _PgTasksRepoClass()
+
 from miniapp.backend.auth import current_user_id
 from miniapp.backend._helpers import (
     BOT_NEXUS,
-    relation_ids_of,
-    select_of,
-    title_plain,
     today_user_tz,
 )
 
@@ -68,26 +63,20 @@ logger = logging.getLogger("miniapp.writes")
 router = APIRouter()
 
 
-# ── Ownership check ─────────────────────────────────────────────────────────
+# ── Ownership check (PG tasks) ───────────────────────────────────────────────
 
-async def _load_owned_page(page_id: str, user_notion_id: str, allow_empty_owner: bool = False) -> dict:
-    """Читает страницу и проверяет владение. 404 если нет доступа.
-
-    wave8.60: allow_empty_owner — для чеклистов/списков, которые создаются
-    из Notion-UI без relation на пользователя (read side уже разрешает).
-    """
+async def _load_owned_task(task_id: str, user_notion_id: str) -> _PgTask:
+    """Загружает задачу из PG и проверяет владение. 404 если нет доступа."""
     try:
-        page = await get_page(page_id)
+        task = await _tasks_pg_repo.retrieve_page(task_id)
     except Exception as e:
-        logger.warning("get_page failed for %s: %s", page_id[:8], e)
+        logger.warning("retrieve_page failed for %s: %s", task_id[:8] if task_id else "?", e)
         raise HTTPException(status_code=404, detail="not found")
-    if not page:
+    if not task:
         raise HTTPException(status_code=404, detail="not found")
-    if user_notion_id:
-        owners = relation_ids_of(page, "🪪 Пользователи")
-        if user_notion_id not in owners and not (allow_empty_owner and not owners):
-            raise HTTPException(status_code=404, detail="not found")
-    return page
+    if user_notion_id and task.user_notion_id and task.user_notion_id != user_notion_id:
+        raise HTTPException(status_code=404, detail="not found")
+    return task
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -99,21 +88,19 @@ async def task_done(
     task_id: str,
     tg_id: int = Depends(current_user_id),
 ) -> dict[str, Any]:
-    from miniapp.backend._helpers import rich_text_plain
     user_notion_id = (await get_user_notion_id(tg_id)) or ""
-    page = await _load_owned_page(task_id, user_notion_id)
+    task = await _load_owned_task(task_id, user_notion_id)
     # Повторяющаяся задача (есть «Время повтора») → In progress, не Done.
-    # Так она остаётся в списке до дедлайна и не улетает в архив.
-    repeat_time = rich_text_plain(page, "Время повтора").strip()
-    repeat_kind = select_of(page, "Повтор") or ""
+    repeat_time = (task.repeat_time or "").strip()
+    repeat_kind = task.repeat if task.repeat not in ("Нет", None) else ""
     is_repeating = bool(repeat_time or repeat_kind)
     new_status = "In progress" if repeat_time else "Done"
-    ok = await update_task_status(task_id, new_status)
+    ok = await _tasks_pg_repo.set_status(task_id, new_status)
     if not ok:
         raise HTTPException(status_code=500, detail="failed to update status")
     now_utc = datetime.now(timezone.utc)
     try:
-        await update_page(task_id, {"Время завершения": _date(now_utc.isoformat())})
+        await _tasks_pg_repo.set_props(task_id, {"Время завершения": _date(now_utc.isoformat())})
     except Exception as e:
         logger.warning("could not set completion time: %s", e)
     today_local, tz_offset = await today_user_tz(tg_id)
@@ -123,15 +110,14 @@ async def task_done(
             update_task_streak(
                 user_id=tg_id,
                 task_id=task_id,
-                task_title=title_plain(page, "Задача"),
+                task_title=task.title,
                 repeat_kind=repeat_kind or "Каждый день",
                 today_local=today_local.isoformat(),
             )
         except Exception as e:
             logger.warning("update_task_streak failed: %s", e)
     # #38 fix per TASKS_SPEC: глобальный дневной стрик инкрементируется
-    # от ЛЮБОЙ Done-задачи (повторяющейся или нет). Раньше Mini App-toggle
-    # не дёргал update_streak вообще — счётчик не двигался.
+    # от ЛЮБОЙ Done-задачи (повторяющейся или нет).
     try:
         from nexus.handlers.streaks import update_streak
         await update_streak(
@@ -141,9 +127,8 @@ async def task_done(
         )
     except Exception as e:
         logger.warning("update_streak failed: %s", e)
-    task_title = title_plain(page, "Задача")
     verb = "🔄 Отметила" if is_repeating else "✅ Готово"
-    await notify_user(tg_id, f"{verb}: <b>{_esc(task_title)}</b>", bot="nexus")
+    await notify_user(tg_id, f"{verb}: <b>{_esc(task.title)}</b>", bot="nexus")
     # #73: погасить живую плашку-напоминание этой задачи в чате (если висит).
     await clear_task_reminder(task_id, bot="nexus")
     return {"ok": True, "status": new_status}
@@ -155,11 +140,11 @@ async def task_reopen(
     tg_id: int = Depends(current_user_id),
 ) -> dict[str, Any]:
     user_notion_id = (await get_user_notion_id(tg_id)) or ""
-    page = await _load_owned_page(task_id, user_notion_id)
-    ok = await update_task_status(task_id, "Not started")
+    task = await _load_owned_task(task_id, user_notion_id)
+    ok = await _tasks_pg_repo.set_status(task_id, "Not started")
     if not ok:
         raise HTTPException(status_code=500, detail="failed to update status")
-    await notify_user(tg_id, f"↩️ Снова активна: <b>{_esc(title_plain(page, 'Задача'))}</b>", bot="nexus")
+    await notify_user(tg_id, f"↩️ Снова активна: <b>{_esc(task.title)}</b>", bot="nexus")
     return {"ok": True}
 
 
@@ -176,7 +161,7 @@ async def task_postpone(
     tg_id: int = Depends(current_user_id),
 ) -> dict[str, Any]:
     user_notion_id = (await get_user_notion_id(tg_id)) or ""
-    page = await _load_owned_page(task_id, user_notion_id)
+    task = await _load_owned_task(task_id, user_notion_id)
     today_date, tz_offset = await today_user_tz(tg_id)
 
     if body.date:
@@ -185,11 +170,10 @@ async def task_postpone(
         except ValueError:
             raise HTTPException(status_code=400, detail="invalid date, expected YYYY-MM-DD")
     else:
-        deadline_raw = (page.get("properties", {}).get("Дедлайн", {}).get("date") or {}).get("start", "")
         base = None
-        if deadline_raw:
+        if task.deadline:
             try:
-                base = datetime.fromisoformat(deadline_raw.replace("Z", "+00:00")).date()
+                base = datetime.fromisoformat(task.deadline.replace("Z", "+00:00")).date()
             except ValueError:
                 base = None
         if not base:
@@ -197,8 +181,10 @@ async def task_postpone(
         shift_days = body.days if body.days is not None else 1
         new_date = base + timedelta(days=shift_days)
 
-    ok = await update_task_deadline(task_id, new_date.isoformat())
-    if not ok:
+    try:
+        await _tasks_pg_repo.set_props(task_id, {"Дедлайн": _date(new_date.isoformat())})
+    except Exception as e:
+        logger.warning("could not set deadline: %s", e)
         raise HTTPException(status_code=500, detail="failed to update deadline")
 
     remind_iso: Optional[str] = None
@@ -211,13 +197,13 @@ async def task_postpone(
         except (ValueError, TypeError):
             raise HTTPException(status_code=400, detail="invalid time, expected HH:MM")
         try:
-            await update_page(task_id, {"Напоминание": _date(remind_iso)})
+            await _tasks_pg_repo.set_props(task_id, {"Напоминание": _date(remind_iso)})
         except Exception as e:
             logger.warning("could not set reminder: %s", e)
 
     await notify_user(
         tg_id,
-        f"📅 Перенесла на {new_date.isoformat()}: <b>{_esc(title_plain(page, 'Задача'))}</b>",
+        f"📅 Перенесла на {new_date.isoformat()}: <b>{_esc(task.title)}</b>",
         bot="nexus",
     )
     return {"ok": True, "new_date": new_date.isoformat(), "reminder": remind_iso}
@@ -229,11 +215,11 @@ async def task_cancel(
     tg_id: int = Depends(current_user_id),
 ) -> dict[str, Any]:
     user_notion_id = (await get_user_notion_id(tg_id)) or ""
-    page = await _load_owned_page(task_id, user_notion_id)
-    ok = await update_task_status(task_id, "Archived")
+    task = await _load_owned_task(task_id, user_notion_id)
+    ok = await _tasks_pg_repo.set_status(task_id, "Archived")
     if not ok:
         raise HTTPException(status_code=500, detail="failed to cancel")
-    await notify_user(tg_id, f"❌ Отменила: <b>{_esc(title_plain(page, 'Задача'))}</b>", bot="nexus")
+    await notify_user(tg_id, f"❌ Отменила: <b>{_esc(task.title)}</b>", bot="nexus")
     return {"ok": True}
 
 
@@ -259,7 +245,7 @@ async def task_edit(
     tg_id: int = Depends(current_user_id),
 ) -> dict[str, Any]:
     user_notion_id = (await get_user_notion_id(tg_id)) or ""
-    page = await _load_owned_page(task_id, user_notion_id)
+    task = await _load_owned_task(task_id, user_notion_id)
     _today_date, tz_offset = await today_user_tz(tg_id)
 
     props: dict = {}
@@ -289,11 +275,11 @@ async def task_edit(
         return {"ok": True, "noop": True}
 
     try:
-        await update_page(task_id, props)
+        await _tasks_pg_repo.set_props(task_id, props)
     except Exception as e:
-        logger.error("task_edit update_page failed: %s", e)
+        logger.error("task_edit set_props failed: %s", e)
         raise HTTPException(status_code=500, detail="failed to update task")
-    new_title = (body.title or "").strip() or title_plain(page, "Задача")
+    new_title = (body.title or "").strip() or task.title
     await notify_user(tg_id, f"✏️ Изменила: <b>{_esc(new_title)}</b>", bot="nexus")
     return {"ok": True}
 
@@ -304,7 +290,6 @@ async def task_create(
     tg_id: int = Depends(current_user_id),
 ) -> dict[str, Any]:
     user_notion_id = (await get_user_notion_id(tg_id)) or ""
-    db_id = config.nexus.db_tasks
     # База задач — Nexus-only, поле "Бот" отсутствует в её схеме.
     props: dict = {
         "Задача": _title(body.title),
@@ -318,11 +303,11 @@ async def task_create(
         props["Дедлайн"] = _date(body.date)
     if user_notion_id:
         props["🪪 Пользователи"] = _relation(user_notion_id)
-    page_id = await page_create(db_id, props)
-    if not page_id:
+    pg_id = await _tasks_pg_repo.create(config.nexus.db_tasks, props)
+    if not pg_id:
         raise HTTPException(status_code=500, detail="failed to create task")
     await notify_user(tg_id, f"➕ Создала задачу: <b>{_esc(body.title)}</b>", bot="nexus")
-    return {"ok": True, "id": page_id}
+    return {"ok": True, "id": pg_id}
 
 
 # ═══════════════════════════════════════════════════════════════

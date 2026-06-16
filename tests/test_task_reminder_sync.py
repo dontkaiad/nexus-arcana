@@ -13,6 +13,7 @@ from fastapi.testclient import TestClient
 
 from miniapp.backend.app import app
 from miniapp.backend.auth import current_user_id
+from nexus.repos.pg_tasks_repo import Task as PgTask
 
 FAKE_TG_ID = 67686090
 FAKE_NOTION_USER = "user-notion-id-42"
@@ -128,20 +129,16 @@ async def test_clear_swallows_edit_error_and_still_deletes(_tmp_store):
 
 def test_task_done_calls_clear_task_reminder():
     app.dependency_overrides[current_user_id] = lambda: FAKE_TG_ID
-    page = {
-        "id": "task-1",
-        "properties": {
-            "🪪 Пользователи": {"relation": [{"id": FAKE_NOTION_USER}]},
-            "Статус": {"status": {"name": "Not started"}},
-            "Задача": {"title": [{"plain_text": "разобрать гардероб"}]},
-        },
-    }
+    task = PgTask(id="task-1", title="разобрать гардероб", user_notion_id=FAKE_NOTION_USER)
     clear = AsyncMock(return_value=True)
     try:
         with patch("miniapp.backend.routes.writes.clear_task_reminder", clear), \
-             patch("miniapp.backend.routes.writes.get_page", AsyncMock(return_value=page)), \
-             patch("miniapp.backend.routes.writes.update_task_status", AsyncMock(return_value=True)), \
-             patch("miniapp.backend.routes.writes.update_page", AsyncMock(return_value=None)), \
+             patch("miniapp.backend.routes.writes._tasks_pg_repo.retrieve_page",
+                   AsyncMock(return_value=task)), \
+             patch("miniapp.backend.routes.writes._tasks_pg_repo.set_status",
+                   AsyncMock(return_value=True)), \
+             patch("miniapp.backend.routes.writes._tasks_pg_repo.set_props",
+                   AsyncMock(return_value=None)), \
              patch("miniapp.backend.routes.writes.get_user_notion_id",
                    AsyncMock(return_value=FAKE_NOTION_USER)), \
              patch("nexus.handlers.streaks.update_streak", AsyncMock(return_value=None)):

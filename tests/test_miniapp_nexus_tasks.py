@@ -19,6 +19,7 @@ from fastapi.testclient import TestClient
 from miniapp.backend import cache
 from miniapp.backend.app import app
 from miniapp.backend.auth import current_user_id
+from nexus.repos.pg_tasks_repo import Task as PgTask
 
 
 FAKE_TG_ID = 67686090
@@ -50,7 +51,30 @@ def _today_date(tz: int = 3):
     return (datetime.now(timezone.utc) + timedelta(hours=tz)).date()
 
 
-# ── helpers: fake Notion pages ───────────────────────────────────────────────
+# ── helpers: fake PG Task objects ────────────────────────────────────────────
+
+def _pg_task(task_id, title, *, status="Not started", priority="🔴 Срочно",
+             category="🐾 Коты", deadline="", reminder="",
+             repeat_time="", repeat="Нет",
+             completed_at="", last_edited="",
+             user_notion_id=FAKE_NOTION_USER):
+    return PgTask(
+        id=task_id,
+        title=title,
+        status=status,
+        priority=priority,
+        category=category,
+        deadline=deadline,
+        reminder=reminder,
+        repeat_time=repeat_time,
+        repeat=repeat,
+        completed_at=completed_at,
+        last_edited=last_edited,
+        user_notion_id=user_notion_id,
+    )
+
+
+# ── helpers: fake Notion pages (used by calendar/today which still use Notion) ─
 
 def _task(task_id, title, *, status="Not started", prio="🔴 Срочно",
           cat="🐾 Коты", deadline=None, reminder=None,
@@ -76,17 +100,6 @@ def _task(task_id, title, *, status="Not started", prio="🔴 Срочно",
     return page
 
 
-def _page(pid: str, *, owner: str = FAKE_NOTION_USER, extra: dict | None = None) -> dict:
-    props = {
-        "🪪 Пользователи": {"relation": [{"id": owner}]},
-        "Статус": {"status": {"name": "Not started"}},
-        "Задача": {"title": [{"plain_text": "Test"}]},
-    }
-    if extra:
-        props.update(extra)
-    return {"id": pid, "properties": props}
-
-
 # ── GET /api/tasks ───────────────────────────────────────────────────────────
 
 def test_tasks_active_filters_and_sorts(client):
@@ -95,18 +108,20 @@ def test_tasks_active_filters_and_sorts(client):
     yesterday = (datetime.strptime(today, "%Y-%m-%d") - timedelta(days=2)).strftime("%Y-%m-%d")
     tomorrow = (datetime.strptime(today, "%Y-%m-%d") + timedelta(days=3)).strftime("%Y-%m-%d")
 
-    pages = [
-        _task("a", "Активная 1", prio="🟡 Важно", deadline=tomorrow),
-        _task("b", "Срочная сегодня", prio="🔴 Срочно", deadline=today),
-        _task("c", "Потом", prio="⚪ Можно потом", deadline=tomorrow),
+    tasks = [
+        _pg_task("a", "Активная 1", priority="🟡 Важно",
+                 deadline=f"{tomorrow}T00:00:00+00:00"),
+        _pg_task("b", "Срочная сегодня", priority="🔴 Срочно",
+                 deadline=f"{today}T00:00:00+00:00"),
+        _pg_task("c", "Потом", priority="⚪ Можно потом",
+                 deadline=f"{tomorrow}T00:00:00+00:00"),
         # Просрочка — хоть статус активный, не попадает в active
-        _task("d", "Просрочена", prio="🔴 Срочно", deadline=yesterday),
+        _pg_task("d", "Просрочена", priority="🔴 Срочно",
+                 deadline=f"{yesterday}T00:00:00+00:00"),
     ]
 
-    async def qp(*_, **__):
-        return pages
-
-    with patch("miniapp.backend.routes.tasks.query_pages", side_effect=qp), \
+    with patch("miniapp.backend.routes.tasks._tasks_repo.active",
+               AsyncMock(return_value=tasks)), \
          patch("miniapp.backend.routes.tasks.today_user_tz",
                AsyncMock(return_value=(_today_date(tz), tz))), \
          patch("miniapp.backend.routes.tasks.get_user_notion_id",
@@ -129,12 +144,12 @@ def test_tasks_overdue_filter(client):
     today = _today_iso(tz)
     yesterday = (datetime.strptime(today, "%Y-%m-%d") - timedelta(days=5)).strftime("%Y-%m-%d")
 
-    pages = [_task("x", "Просрочка", deadline=yesterday, prio="🔴 Срочно")]
+    tasks = [_pg_task("x", "Просрочка",
+                      deadline=f"{yesterday}T00:00:00+00:00",
+                      priority="🔴 Срочно")]
 
-    async def qp(*_, **__):
-        return pages
-
-    with patch("miniapp.backend.routes.tasks.query_pages", side_effect=qp), \
+    with patch("miniapp.backend.routes.tasks._tasks_repo.active",
+               AsyncMock(return_value=tasks)), \
          patch("miniapp.backend.routes.tasks.today_user_tz",
                AsyncMock(return_value=(_today_date(tz), tz))), \
          patch("miniapp.backend.routes.tasks.get_user_notion_id",
@@ -153,9 +168,8 @@ def test_tasks_invalid_filter(client):
 
 def test_tasks_empty(client):
     tz = 3
-    async def qp(*_, **__):
-        return []
-    with patch("miniapp.backend.routes.tasks.query_pages", side_effect=qp), \
+    with patch("miniapp.backend.routes.tasks._tasks_repo.active",
+               AsyncMock(return_value=[])), \
          patch("miniapp.backend.routes.tasks.today_user_tz",
                AsyncMock(return_value=(_today_date(tz), tz))), \
          patch("miniapp.backend.routes.tasks.get_user_notion_id",
@@ -172,23 +186,23 @@ def test_tasks_401_without_init_data():
 
 
 def test_tasks_filter_does_not_include_bot_property(client):
-    """База задач — Nexus-only, фильтр 'Бот' у Notion вызывает 400."""
-    captured = {}
+    """PG-путь: нет фильтра 'Бот' — база задач Nexus-only."""
+    tz = 3
+    today = _today_iso(tz)
+    tomorrow = (datetime.strptime(today, "%Y-%m-%d") + timedelta(days=1)).strftime("%Y-%m-%d")
+    tasks = [_pg_task("ok", "Активная", deadline=f"{tomorrow}T00:00:00+00:00")]
 
-    async def qp(db_id, *, filters=None, **kwargs):
-        captured["filters"] = filters
-        return []
-
-    with patch("miniapp.backend.routes.tasks.query_pages", side_effect=qp), \
+    with patch("miniapp.backend.routes.tasks._tasks_repo.active",
+               AsyncMock(return_value=tasks)), \
          patch("miniapp.backend.routes.tasks.today_user_tz",
-               AsyncMock(return_value=(_today_date(), 3))), \
+               AsyncMock(return_value=(_today_date(tz), tz))), \
          patch("miniapp.backend.routes.tasks.get_user_notion_id",
                AsyncMock(return_value=FAKE_NOTION_USER)):
         r = client.get("/api/tasks?filter=active")
 
     assert r.status_code == 200
-    filter_str = _json.dumps(captured["filters"] or {}, ensure_ascii=False)
-    assert '"Бот"' not in filter_str, f"Filter should not include 'Бот': {filter_str}"
+    ids = [t["id"] for t in r.json()["tasks"]]
+    assert "ok" in ids
 
 
 def test_tasks_filter_today_returns_only_today_and_overdue(client):
@@ -197,17 +211,19 @@ def test_tasks_filter_today_returns_only_today_and_overdue(client):
     yesterday = (datetime.strptime(today, "%Y-%m-%d") - timedelta(days=2)).strftime("%Y-%m-%d")
     tomorrow = (datetime.strptime(today, "%Y-%m-%d") + timedelta(days=3)).strftime("%Y-%m-%d")
 
-    pages = [
-        _task("overdue-1", "Просрочена", prio="🔴 Срочно", deadline=yesterday),
-        _task("today-1", "Сегодня", prio="🟡 Важно", deadline=today),
-        _task("future-1", "Потом", prio="🟡 Важно", deadline=tomorrow),
-        _task("done-1", "Готово", prio="🔴 Срочно", deadline=today, status="Done"),
+    tasks = [
+        _pg_task("overdue-1", "Просрочена", priority="🔴 Срочно",
+                 deadline=f"{yesterday}T00:00:00+00:00"),
+        _pg_task("today-1", "Сегодня", priority="🟡 Важно",
+                 deadline=f"{today}T00:00:00+00:00"),
+        _pg_task("future-1", "Потом", priority="🟡 Важно",
+                 deadline=f"{tomorrow}T00:00:00+00:00"),
+        _pg_task("done-1", "Готово", priority="🔴 Срочно",
+                 deadline=f"{today}T00:00:00+00:00", status="Done"),
     ]
 
-    async def qp(*_, **__):
-        return pages
-
-    with patch("miniapp.backend.routes.tasks.query_pages", side_effect=qp), \
+    with patch("miniapp.backend.routes.tasks._tasks_repo.active",
+               AsyncMock(return_value=tasks)), \
          patch("miniapp.backend.routes.tasks.today_user_tz",
                AsyncMock(return_value=(_today_date(tz), tz))), \
          patch("miniapp.backend.routes.tasks.get_user_notion_id",
@@ -224,16 +240,14 @@ def test_tasks_filter_today_returns_only_today_and_overdue(client):
 
 def test_archived_task_serialized_as_cancelled_with_closed_at(client):
     tz = 3
-    pages = [
-        _task("a1", "Отменённая",
-              status="Archived",
-              completion="2026-04-28T10:00:00.000+03:00"),
+    tasks = [
+        _pg_task("a1", "Отменённая",
+                 status="Archived",
+                 completed_at="2026-04-28T10:00:00+03:00"),
     ]
 
-    async def qp(*_, **__):
-        return pages
-
-    with patch("miniapp.backend.routes.tasks.query_pages", side_effect=qp), \
+    with patch("miniapp.backend.routes.tasks._tasks_repo.list_all",
+               AsyncMock(return_value=tasks)), \
          patch("miniapp.backend.routes.tasks.today_user_tz",
                AsyncMock(return_value=(_today_date(tz), tz))), \
          patch("miniapp.backend.routes.tasks.get_user_notion_id",
@@ -241,24 +255,22 @@ def test_archived_task_serialized_as_cancelled_with_closed_at(client):
         r = client.get("/api/tasks?filter=done")
 
     assert r.status_code == 200, r.text
-    tasks = r.json()["tasks"]
-    assert len(tasks) == 1
-    assert tasks[0]["status"] == "cancelled"
-    assert tasks[0]["closed_at"] == "2026-04-28T10:00:00.000+03:00"
+    items = r.json()["tasks"]
+    assert len(items) == 1
+    assert items[0]["status"] == "cancelled"
+    assert items[0]["closed_at"] == "2026-04-28T10:00:00+03:00"
 
 
 def test_closed_at_falls_back_to_last_edited_time(client):
     tz = 3
-    pages = [
-        _task("a2", "Отменённая без completion",
-              status="Archived",
-              last_edited="2026-04-15T08:30:00.000Z"),
+    tasks = [
+        _pg_task("a2", "Отменённая без completion",
+                 status="Archived",
+                 last_edited="2026-04-15T08:30:00+00:00"),
     ]
 
-    async def qp(*_, **__):
-        return pages
-
-    with patch("miniapp.backend.routes.tasks.query_pages", side_effect=qp), \
+    with patch("miniapp.backend.routes.tasks._tasks_repo.list_all",
+               AsyncMock(return_value=tasks)), \
          patch("miniapp.backend.routes.tasks.today_user_tz",
                AsyncMock(return_value=(_today_date(tz), tz))), \
          patch("miniapp.backend.routes.tasks.get_user_notion_id",
@@ -266,30 +278,28 @@ def test_closed_at_falls_back_to_last_edited_time(client):
         r = client.get("/api/tasks?filter=done")
 
     assert r.status_code == 200
-    tasks = r.json()["tasks"]
-    assert len(tasks) == 1
-    assert tasks[0]["status"] == "cancelled"
-    assert tasks[0]["closed_at"] == "2026-04-15T08:30:00.000Z"
+    items = r.json()["tasks"]
+    assert len(items) == 1
+    assert items[0]["status"] == "cancelled"
+    assert items[0]["closed_at"] == "2026-04-15T08:30:00+00:00"
 
 
 def test_active_filter_excludes_archived(client):
     tz = 3
-    captured = {}
     today = _today_date(tz)
     tomorrow = (today + timedelta(days=2)).isoformat()
 
-    pages = [
-        _task("ok", "Активная", deadline=tomorrow, prio="🔴 Срочно"),
-        _task("arc", "Отменённая",
-              status="Archived", deadline=tomorrow, prio="🔴 Срочно",
-              completion="2026-04-20T10:00:00.000+03:00"),
+    tasks = [
+        _pg_task("ok", "Активная", deadline=f"{tomorrow}T00:00:00+00:00",
+                 priority="🔴 Срочно"),
+        _pg_task("arc", "Отменённая",
+                 status="Archived", deadline=f"{tomorrow}T00:00:00+00:00",
+                 priority="🔴 Срочно",
+                 completed_at="2026-04-20T10:00:00+03:00"),
     ]
 
-    async def qp(_db, *, filters=None, **__):
-        captured["filters"] = filters
-        return pages
-
-    with patch("miniapp.backend.routes.tasks.query_pages", side_effect=qp), \
+    with patch("miniapp.backend.routes.tasks._tasks_repo.active",
+               AsyncMock(return_value=tasks)), \
          patch("miniapp.backend.routes.tasks.today_user_tz",
                AsyncMock(return_value=(today, tz))), \
          patch("miniapp.backend.routes.tasks.get_user_notion_id",
@@ -300,32 +310,24 @@ def test_active_filter_excludes_archived(client):
     ids = [t["id"] for t in r.json()["tasks"]]
     # client-side фильтр отрезает cancelled (Archived → status=cancelled)
     assert ids == ["ok"]
-    # И в Notion-фильтре есть does_not_equal Archived
-    f_str = _json.dumps(captured["filters"], ensure_ascii=False)
-    assert "Archived" in f_str
-    assert "does_not_equal" in f_str
 
 
 def test_done_filter_includes_done_and_archived_sorted_by_closed_at_desc(client):
     tz = 3
-    pages = [
-        _task("old-done", "Старая выполненная",
-              status="Done",
-              completion="2026-03-01T10:00:00.000+03:00"),
-        _task("recent-cancel", "Свежая отменённая",
-              status="Archived",
-              completion="2026-04-20T10:00:00.000+03:00"),
-        _task("mid-done", "Средняя выполненная",
-              status="Complete",
-              completion="2026-04-10T10:00:00.000+03:00"),
+    tasks = [
+        _pg_task("old-done", "Старая выполненная",
+                 status="Done",
+                 completed_at="2026-03-01T10:00:00+03:00"),
+        _pg_task("recent-cancel", "Свежая отменённая",
+                 status="Archived",
+                 completed_at="2026-04-20T10:00:00+03:00"),
+        _pg_task("mid-done", "Средняя выполненная",
+                 status="Complete",
+                 completed_at="2026-04-10T10:00:00+03:00"),
     ]
-    captured = {}
 
-    async def qp(_db, *, filters=None, **__):
-        captured["filters"] = filters
-        return pages
-
-    with patch("miniapp.backend.routes.tasks.query_pages", side_effect=qp), \
+    with patch("miniapp.backend.routes.tasks._tasks_repo.list_all",
+               AsyncMock(return_value=tasks)), \
          patch("miniapp.backend.routes.tasks.today_user_tz",
                AsyncMock(return_value=(_today_date(tz), tz))), \
          patch("miniapp.backend.routes.tasks.get_user_notion_id",
@@ -333,16 +335,13 @@ def test_done_filter_includes_done_and_archived_sorted_by_closed_at_desc(client)
         r = client.get("/api/tasks?filter=done")
 
     assert r.status_code == 200
-    tasks = r.json()["tasks"]
-    ids = [t["id"] for t in tasks]
+    result = r.json()["tasks"]
+    ids = [t["id"] for t in result]
     assert ids == ["recent-cancel", "mid-done", "old-done"]
-    statuses = {t["id"]: t["status"] for t in tasks}
+    statuses = {t["id"]: t["status"] for t in result}
     assert statuses["recent-cancel"] == "cancelled"
     assert statuses["mid-done"] == "done"
     assert statuses["old-done"] == "done"
-    # Notion-фильтр включает все три статуса
-    f_str = _json.dumps(captured["filters"], ensure_ascii=False)
-    assert "Done" in f_str and "Complete" in f_str and "Archived" in f_str
 
 
 # ── POST /api/tasks/{id}/done ────────────────────────────────────────────────
@@ -352,11 +351,12 @@ def test_task_done_updates_status(client):
     # nexus.handlers.streaks.update_streak, который пишет в prod-файл
     # data/nexus_streaks.db под FAKE_TG_ID=67686090 (= реальный tg Кай).
     # См. issue #65 — это и есть «стрик без Done» из обследования.
-    target = _page("task-1")
-    with patch("miniapp.backend.routes.writes.get_page", AsyncMock(return_value=target)), \
-         patch("miniapp.backend.routes.writes.update_task_status",
+    task = _pg_task("task-1", "Test", user_notion_id=FAKE_NOTION_USER)
+    with patch("miniapp.backend.routes.writes._tasks_pg_repo.retrieve_page",
+               AsyncMock(return_value=task)), \
+         patch("miniapp.backend.routes.writes._tasks_pg_repo.set_status",
                AsyncMock(return_value=True)) as upd, \
-         patch("miniapp.backend.routes.writes.update_page",
+         patch("miniapp.backend.routes.writes._tasks_pg_repo.set_props",
                AsyncMock(return_value=None)), \
          patch("miniapp.backend.routes.writes.get_user_notion_id",
                AsyncMock(return_value=FAKE_NOTION_USER)), \
@@ -368,8 +368,9 @@ def test_task_done_updates_status(client):
 
 
 def test_task_done_rejects_stranger(client):
-    foreign = _page("task-2", owner="not-my-user")
-    with patch("miniapp.backend.routes.writes.get_page", AsyncMock(return_value=foreign)), \
+    task = _pg_task("task-2", "Test", user_notion_id="not-my-user")
+    with patch("miniapp.backend.routes.writes._tasks_pg_repo.retrieve_page",
+               AsyncMock(return_value=task)), \
          patch("miniapp.backend.routes.writes.get_user_notion_id",
                AsyncMock(return_value=FAKE_NOTION_USER)):
         r = client.post("/api/tasks/task-2/done")
@@ -377,7 +378,8 @@ def test_task_done_rejects_stranger(client):
 
 
 def test_task_done_404_when_page_missing(client):
-    with patch("miniapp.backend.routes.writes.get_page", AsyncMock(return_value=None)), \
+    with patch("miniapp.backend.routes.writes._tasks_pg_repo.retrieve_page",
+               AsyncMock(return_value=None)), \
          patch("miniapp.backend.routes.writes.get_user_notion_id",
                AsyncMock(return_value=FAKE_NOTION_USER)):
         r = client.post("/api/tasks/missing-id/done")
@@ -389,10 +391,12 @@ def test_task_done_404_when_page_missing(client):
 def test_task_postpone_shifts_date(client):
     tz = 3
     today = _today_date(tz)
-    page = _page("t-3", extra={"Дедлайн": {"date": {"start": today.isoformat()}}})
-    with patch("miniapp.backend.routes.writes.get_page", AsyncMock(return_value=page)), \
-         patch("miniapp.backend.routes.writes.update_task_deadline",
-               AsyncMock(return_value=True)) as upd, \
+    task = _pg_task("t-3", "Test", deadline=today.isoformat() + "T00:00:00+00:00",
+                    user_notion_id=FAKE_NOTION_USER)
+    with patch("miniapp.backend.routes.writes._tasks_pg_repo.retrieve_page",
+               AsyncMock(return_value=task)), \
+         patch("miniapp.backend.routes.writes._tasks_pg_repo.set_props",
+               AsyncMock(return_value=None)) as upd, \
          patch("miniapp.backend.routes.writes.today_user_tz",
                AsyncMock(return_value=(today, tz))), \
          patch("miniapp.backend.routes.writes.get_user_notion_id",
@@ -401,16 +405,20 @@ def test_task_postpone_shifts_date(client):
     assert r.status_code == 200
     expected = (today + timedelta(days=2)).isoformat()
     assert r.json()["new_date"] == expected
-    upd.assert_awaited_once_with("t-3", expected)
+    # первый вызов set_props — дедлайн
+    first_call = upd.await_args_list[0]
+    assert first_call.args[0] == "t-3"
+    assert first_call.args[1]["Дедлайн"]["date"]["start"] == expected
 
 
 def test_task_postpone_falls_back_to_today_when_no_deadline(client):
     tz = 3
     today = _today_date(tz)
-    page = _page("t-4", extra={"Дедлайн": {"date": None}})
-    with patch("miniapp.backend.routes.writes.get_page", AsyncMock(return_value=page)), \
-         patch("miniapp.backend.routes.writes.update_task_deadline",
-               AsyncMock(return_value=True)), \
+    task = _pg_task("t-4", "Test", deadline="", user_notion_id="")
+    with patch("miniapp.backend.routes.writes._tasks_pg_repo.retrieve_page",
+               AsyncMock(return_value=task)), \
+         patch("miniapp.backend.routes.writes._tasks_pg_repo.set_props",
+               AsyncMock(return_value=None)), \
          patch("miniapp.backend.routes.writes.today_user_tz",
                AsyncMock(return_value=(today, tz))), \
          patch("miniapp.backend.routes.writes.get_user_notion_id",
@@ -423,9 +431,10 @@ def test_task_postpone_falls_back_to_today_when_no_deadline(client):
 # ── POST /api/tasks/{id}/cancel ──────────────────────────────────────────────
 
 def test_task_cancel_sets_archived(client):
-    page = _page("t-5")
-    with patch("miniapp.backend.routes.writes.get_page", AsyncMock(return_value=page)), \
-         patch("miniapp.backend.routes.writes.update_task_status",
+    task = _pg_task("t-5", "Test", user_notion_id=FAKE_NOTION_USER)
+    with patch("miniapp.backend.routes.writes._tasks_pg_repo.retrieve_page",
+               AsyncMock(return_value=task)), \
+         patch("miniapp.backend.routes.writes._tasks_pg_repo.set_status",
                AsyncMock(return_value=True)) as upd, \
          patch("miniapp.backend.routes.writes.get_user_notion_id",
                AsyncMock(return_value=FAKE_NOTION_USER)):
@@ -437,17 +446,16 @@ def test_task_cancel_sets_archived(client):
 # ── POST /api/tasks (create) ─────────────────────────────────────────────────
 
 def test_task_create_minimal(client):
-    with patch("miniapp.backend.routes.writes.page_create",
-               AsyncMock(return_value="new-id")) as pc, \
+    with patch("miniapp.backend.routes.writes._tasks_pg_repo.create",
+               AsyncMock(return_value="42")) as pc, \
          patch("miniapp.backend.routes.writes.get_user_notion_id",
                AsyncMock(return_value=FAKE_NOTION_USER)):
         r = client.post("/api/tasks", json={"title": "Купить молоко"})
     assert r.status_code == 200
-    assert r.json() == {"ok": True, "id": "new-id"}
+    assert r.json() == {"ok": True, "id": "42"}
     args, _ = pc.await_args
     _, props = args
     assert props["Задача"]["title"][0]["text"]["content"] == "Купить молоко"
-    # Дефолтный статус
     assert props["Статус"]["status"]["name"] == "Not started"
 
 

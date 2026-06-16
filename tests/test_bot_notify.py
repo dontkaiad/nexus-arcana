@@ -13,6 +13,7 @@ from fastapi.testclient import TestClient
 
 from miniapp.backend.app import app
 from miniapp.backend.auth import current_user_id
+from nexus.repos.pg_tasks_repo import Task as PgTask
 
 FAKE_TG_ID = 67686090
 FAKE_NOTION_USER = "user-notion-id-42"
@@ -98,12 +99,15 @@ async def test_notify_user_no_token_for_arcana():
 # ── routes call notify_user ──────────────────────────────────────────────────
 
 def test_task_done_notifies(client):
-    page = _task_page("task-1")
+    task = PgTask(id="task-1", title="разобрать гардероб", user_notion_id=FAKE_NOTION_USER)
     notify = AsyncMock(return_value=True)
     with patch("miniapp.backend.routes.writes.notify_user", notify), \
-         patch("miniapp.backend.routes.writes.get_page", AsyncMock(return_value=page)), \
-         patch("miniapp.backend.routes.writes.update_task_status", AsyncMock(return_value=True)), \
-         patch("miniapp.backend.routes.writes.update_page", AsyncMock(return_value=None)), \
+         patch("miniapp.backend.routes.writes._tasks_pg_repo.retrieve_page",
+               AsyncMock(return_value=task)), \
+         patch("miniapp.backend.routes.writes._tasks_pg_repo.set_status",
+               AsyncMock(return_value=True)), \
+         patch("miniapp.backend.routes.writes._tasks_pg_repo.set_props",
+               AsyncMock(return_value=None)), \
          patch("miniapp.backend.routes.writes.get_user_notion_id",
                AsyncMock(return_value=FAKE_NOTION_USER)), \
          patch("nexus.handlers.streaks.update_streak", AsyncMock(return_value=None)):
@@ -131,11 +135,13 @@ def test_task_create_notifies(client):
 
 
 def test_task_cancel_notifies(client):
-    page = _task_page("task-9", title="старая задача")
+    task = PgTask(id="task-9", title="старая задача", user_notion_id=FAKE_NOTION_USER)
     notify = AsyncMock(return_value=True)
     with patch("miniapp.backend.routes.writes.notify_user", notify), \
-         patch("miniapp.backend.routes.writes.get_page", AsyncMock(return_value=page)), \
-         patch("miniapp.backend.routes.writes.update_task_status", AsyncMock(return_value=True)), \
+         patch("miniapp.backend.routes.writes._tasks_pg_repo.retrieve_page",
+               AsyncMock(return_value=task)), \
+         patch("miniapp.backend.routes.writes._tasks_pg_repo.set_status",
+               AsyncMock(return_value=True)), \
          patch("miniapp.backend.routes.writes.get_user_notion_id",
                AsyncMock(return_value=FAKE_NOTION_USER)):
         r = client.post("/api/tasks/task-9/cancel")

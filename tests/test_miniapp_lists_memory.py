@@ -18,6 +18,7 @@ from fastapi.testclient import TestClient
 from miniapp.backend import cache
 from miniapp.backend.app import app
 from miniapp.backend.auth import current_user_id
+from nexus.repos.pg_tasks_repo import Task as PgTask
 
 
 FAKE_TG_ID = 67686090
@@ -94,21 +95,16 @@ def _page(pid: str, *, owner: str = FAKE_NOTION_USER, extra: dict | None = None)
     return {"id": pid, "properties": props}
 
 
-def _parent_task(title, *, status="Not started"):
-    return {
-        "id": f"parent-{title}",
-        "properties": {
-            "Задача": {"title": [{"plain_text": title}]},
-            "Статус": {"status": {"name": status}},
-            "Приоритет": {"select": {"name": "🔴 Срочно"}},
-            "Категория": {"select": {"name": "🏠 Дом"}},
-            "Дедлайн": {"date": None},
-            "Напоминание": {"date": None},
-            "Время повтора": {"rich_text": []},
-            "Повтор": {"select": None},
-            "🪪 Пользователи": {"relation": [{"id": FAKE_NOTION_USER}]},
-        },
-    }
+def _parent_task_pg(title, *, status="Not started",
+                    user_notion_id=FAKE_NOTION_USER) -> PgTask:
+    return PgTask(
+        id=f"parent-{title}",
+        title=title,
+        status=status,
+        priority="🔴 Срочно",
+        category="🏠 Дом",
+        user_notion_id=user_notion_id,
+    )
 
 
 # ── GET /api/lists ───────────────────────────────────────────────────────────
@@ -293,7 +289,6 @@ def test_lists_archived_filtered_out(client):
 def test_check_items_with_done_parent_are_hidden(client):
     """Чеклист задачи в статусе Done не должен возвращаться endpoint'ом."""
     from core.repos.pg_nexus_lists_repo import ListItem
-    DB_TASKS = "db-tasks-id"
 
     pg_items = [
         ListItem(id="c1", name="помыть холодильник", list_type="чеклист", status="not_started",
@@ -303,26 +298,20 @@ def test_check_items_with_done_parent_are_hidden(client):
         ListItem(id="c3", name="выкинуть просрочку", list_type="чеклист", status="not_started",
                  group_name="Архив прошлый год"),
     ]
-    task_pages = [
-        _parent_task("Генеральная уборка", status="Done"),
-        _parent_task("Покупки на неделю", status="Not started"),
-        _parent_task("Архив прошлый год", status="Archived"),
+    pg_tasks = [
+        _parent_task_pg("Генеральная уборка", status="Done"),
+        _parent_task_pg("Покупки на неделю", status="Not started"),
+        _parent_task_pg("Архив прошлый год", status="Archived"),
     ]
 
-    async def qp(db_id, *, filters=None, **__):
-        if db_id == DB_TASKS:
-            return task_pages
-        return []
-
     with patch("miniapp.backend.routes.lists._nexus_lists_repo") as mock_repo, \
-         patch("miniapp.backend.routes.lists.query_pages", side_effect=qp), \
+         patch("miniapp.backend.routes.lists._tasks_repo.list_all",
+               AsyncMock(return_value=pg_tasks)), \
          patch("miniapp.backend.routes.lists.get_user_notion_id",
                AsyncMock(return_value=FAKE_NOTION_USER)), \
          patch("miniapp.backend.routes.lists.today_user_tz",
-               AsyncMock(return_value=(_today_date(), 3))), \
-         patch("miniapp.backend.routes.lists.config") as cfg:
+               AsyncMock(return_value=(_today_date(), 3))):
         mock_repo.get_summary_items = AsyncMock(return_value=pg_items)
-        cfg.nexus.db_tasks = DB_TASKS
         r = client.get("/api/lists?type=check")
 
     assert r.status_code == 200, r.text
@@ -336,30 +325,23 @@ def test_check_items_match_parent_case_insensitive(client):
     """wave8.62.1: title задачи и Группа айтема могут отличаться регистром/пробелами —
     parent должен всё равно приклеиться, а Done-родитель — спрятать item."""
     from core.repos.pg_nexus_lists_repo import ListItem
-    DB_TASKS = "db-tasks-id"
 
     pg_items = [
         ListItem(id="c-mismatch", name="помыть холодильник", list_type="чеклист",
                  status="not_started", group_name="  сделать генеральную уборку кухни  "),
     ]
-    task_pages = [
-        _parent_task("Сделать Генеральную Уборку Кухни", status="Done"),
+    pg_tasks = [
+        _parent_task_pg("Сделать Генеральную Уборку Кухни", status="Done"),
     ]
 
-    async def qp(db_id, *, filters=None, **__):
-        if db_id == DB_TASKS:
-            return task_pages
-        return []
-
     with patch("miniapp.backend.routes.lists._nexus_lists_repo") as mock_repo, \
-         patch("miniapp.backend.routes.lists.query_pages", side_effect=qp), \
+         patch("miniapp.backend.routes.lists._tasks_repo.list_all",
+               AsyncMock(return_value=pg_tasks)), \
          patch("miniapp.backend.routes.lists.get_user_notion_id",
                AsyncMock(return_value=FAKE_NOTION_USER)), \
          patch("miniapp.backend.routes.lists.today_user_tz",
-               AsyncMock(return_value=(_today_date(), 3))), \
-         patch("miniapp.backend.routes.lists.config") as cfg:
+               AsyncMock(return_value=(_today_date(), 3))):
         mock_repo.get_summary_items = AsyncMock(return_value=pg_items)
-        cfg.nexus.db_tasks = DB_TASKS
         r = client.get("/api/lists?type=check")
 
     assert r.status_code == 200
@@ -369,43 +351,37 @@ def test_check_items_match_parent_case_insensitive(client):
 
 
 def test_check_items_match_parent_without_user_relation(client):
-    """wave8.62.1: родитель без relation 🪪 Пользователи (создан в Notion-UI) —
-    запрос к db_tasks должен включать OR is_empty, иначе parent=None и Done-родитель не прячется."""
+    """PG path: _tasks_repo.list_all дёргается с user_notion_id юзера.
+    Если parent-задача найдена в PG → Done-родитель скрывает item."""
     from core.repos.pg_nexus_lists_repo import ListItem
-    DB_TASKS = "db-tasks-id"
 
     pg_items = [
         ListItem(id="c-orphan-parent", name="пункт", list_type="чеклист",
                  status="not_started", group_name="Уборка"),
     ]
-    parent_no_user = _parent_task("Уборка", status="Done")
-    parent_no_user["properties"]["🪪 Пользователи"] = {"relation": []}
-    task_pages = [parent_no_user]
+    # В PG Done-задача матчится по title — user_notion_id не нужен как OR-условие
+    pg_tasks = [_parent_task_pg("Уборка", status="Done")]
 
-    captured = {}
+    captured_uid = {}
 
-    async def qp(db_id, *, filters=None, **__):
-        if db_id == DB_TASKS:
-            captured["tasks_filters"] = filters
-            return task_pages
-        return []
+    async def fake_list_all(user_notion_id):
+        captured_uid["v"] = user_notion_id
+        return pg_tasks
 
     with patch("miniapp.backend.routes.lists._nexus_lists_repo") as mock_repo, \
-         patch("miniapp.backend.routes.lists.query_pages", side_effect=qp), \
+         patch("miniapp.backend.routes.lists._tasks_repo.list_all",
+               side_effect=fake_list_all), \
          patch("miniapp.backend.routes.lists.get_user_notion_id",
                AsyncMock(return_value=FAKE_NOTION_USER)), \
          patch("miniapp.backend.routes.lists.today_user_tz",
-               AsyncMock(return_value=(_today_date(), 3))), \
-         patch("miniapp.backend.routes.lists.config") as cfg:
+               AsyncMock(return_value=(_today_date(), 3))):
         mock_repo.get_summary_items = AsyncMock(return_value=pg_items)
-        cfg.nexus.db_tasks = DB_TASKS
         r = client.get("/api/lists?type=check")
 
     assert r.status_code == 200
-    # Запрос к db_tasks должен иметь is_empty в OR-ветке user-relation
-    f_str = _json.dumps(captured.get("tasks_filters") or {}, ensure_ascii=False)
-    assert "is_empty" in f_str
-    # И item с parent Done спрятан
+    # list_all вызван с user_notion_id
+    assert captured_uid["v"] == FAKE_NOTION_USER
+    # item с parent Done спрятан
     assert r.json()["items"] == []
 
 
@@ -414,7 +390,6 @@ def test_check_items_with_group_param_show_even_if_parent_closed(client):
     чтобы показать subtasks read-only. Фильтр closed-parent НЕ должен прятать items
     в этом случае — иначе секция Чеклист в закрытом TaskSheet всегда пустая."""
     from core.repos.pg_nexus_lists_repo import ListItem
-    DB_TASKS = "db-tasks-id"
 
     pg_items = [
         ListItem(id="c-done-parent-1", name="помыть холодильник", list_type="чеклист",
@@ -422,24 +397,16 @@ def test_check_items_with_group_param_show_even_if_parent_closed(client):
         ListItem(id="c-done-parent-2", name="выкинуть просрочку", list_type="чеклист",
                  status="not_started", group_name="Уборка кухни"),
     ]
-    task_pages = [
-        _parent_task("Уборка кухни", status="Done"),
-    ]
-
-    async def qp(db_id, *, filters=None, **__):
-        if db_id == DB_TASKS:
-            return task_pages
-        return []
+    pg_tasks = [_parent_task_pg("Уборка кухни", status="Done")]
 
     with patch("miniapp.backend.routes.lists._nexus_lists_repo") as mock_repo, \
-         patch("miniapp.backend.routes.lists.query_pages", side_effect=qp), \
+         patch("miniapp.backend.routes.lists._tasks_repo.list_all",
+               AsyncMock(return_value=pg_tasks)), \
          patch("miniapp.backend.routes.lists.get_user_notion_id",
                AsyncMock(return_value=FAKE_NOTION_USER)), \
          patch("miniapp.backend.routes.lists.today_user_tz",
-               AsyncMock(return_value=(_today_date(), 3))), \
-         patch("miniapp.backend.routes.lists.config") as cfg:
+               AsyncMock(return_value=(_today_date(), 3))):
         mock_repo.get_summary_items = AsyncMock(return_value=pg_items)
-        cfg.nexus.db_tasks = DB_TASKS
         # С group= — items должны быть видны (read-only subtasks в закрытом TaskSheet)
         r = client.get("/api/lists?type=check&group=Уборка%20кухни")
 

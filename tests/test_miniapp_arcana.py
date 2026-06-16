@@ -16,6 +16,7 @@ from fastapi.testclient import TestClient
 from miniapp.backend import cache
 from miniapp.backend.app import app
 from miniapp.backend.auth import current_user_id
+from arcana.repos.clients_repo import Client as _ArcanaClient
 
 
 FAKE_TG_ID = 67686090
@@ -976,10 +977,10 @@ def test_client_object_photo_delete(client):
 
 
 def test_client_object_photo_index_404(client):
-    page = _page("cli-z", extra={
-        "Фото объектов": {"rich_text": [{"plain_text": "https://e/1.jpg"}]},
-    })
-    with patch("miniapp.backend.routes.writes.get_page", AsyncMock(return_value=page)), \
+    c = _ArcanaClient(id="1", name="cli-z", contact="", request="", notes="",
+                      since="", object_photos="https://e/1.jpg")
+    with patch("miniapp.backend.routes.writes._clients_repo.find_by_id",
+               AsyncMock(return_value=c)), \
          patch("miniapp.backend.routes.writes.get_user_notion_id",
                AsyncMock(return_value=FAKE_NOTION_USER)):
         r = client.delete("/api/arcana/clients/cli-z/object_photo/99")
