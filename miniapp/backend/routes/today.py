@@ -1,4 +1,4 @@
-"""miniapp/backend/routes/today.py — GET /api/today."""
+"""miniapp/backend/routes/today.py — GET /api/today (PG-native, Notion-free)."""
 from __future__ import annotations
 
 import logging
@@ -7,12 +7,11 @@ from typing import Any, Optional
 
 from fastapi import APIRouter, Depends
 
-from core.config import config
-from core.notion_client import query_pages
 from core.claude_client import ask_claude
 from core.user_manager import get_user_notion_id
 from core.repos.pg_finance_repo import PgNexusBudgetRepo
 from core.repos.pg_memory_repo import PgMemoryRepo
+from nexus.repos.pg_tasks_repo import PgTasksRepo, Task as PgTask
 
 from miniapp.backend import cache
 from miniapp.backend.auth import current_user_id
@@ -35,6 +34,7 @@ router = APIRouter()
 
 _budget_repo = PgNexusBudgetRepo()
 _memory_repo = PgMemoryRepo()
+_tasks_repo = PgTasksRepo()
 
 _WEEKDAYS_RU = ["пн", "вт", "ср", "чт", "пт", "сб", "вс"]
 _DEFAULT_BUDGET_DAY = 4166
@@ -58,48 +58,33 @@ def _parse_iso(s: str):
         return None
 
 
-def _task_summary(page: dict, tz_offset: int) -> dict:
-    props = page.get("properties", {})
+def _task_summary(task: PgTask, tz_offset: int) -> dict:
+    # PG-native: читаем атрибуты доменного объекта, не Notion-страницу.
+    created = getattr(task, "created_at", None)
+    if created is not None and not isinstance(created, str):
+        # PgTask может хранить datetime — фронту нужен ISO-стринг.
+        created = created.isoformat()
+    repeat = task.repeat if task.repeat not in ("Нет", "", None) else None
     return {
-        "id": page.get("id", ""),
-        "title": title_text(props.get("Задача", {})),
-        "cat": select_name(props.get("Категория", {})) or "",
-        "prio": first_emoji(select_name(props.get("Приоритет", {}))),
-        "deadline_raw": _date_start(props.get("Дедлайн", {})),
-        "reminder_raw": _date_start(props.get("Напоминание", {})),
-        "repeat_time": rich_text(props.get("Время повтора", {})).strip(),
-        "repeat": select_name(props.get("Повтор", {})) or None,
-        # v1.2.5 (bug #1B): «Время завершения» — маркер «выполнено сегодня».
-        # Заполняется в nexus/handlers/tasks.py:_handle_recurring_task_reset
-        # при клике «Сделано» по повторяющейся задаче. Используется ниже,
-        # чтобы скрыть задачу из расписания на сегодня.
-        "completed_raw": _date_start(props.get("Время завершения", {})),
-        # wave8.22: для задач без срока — отдаём дату создания страницы Notion,
-        # чтобы фронт мог показать «N дней назад» в списке.
-        "created_at": page.get("created_time"),
+        "id": task.id,
+        "title": task.title,
+        "cat": task.category or "",
+        "prio": prio_from_notion(task.priority),
+        "deadline_raw": task.deadline or "",
+        "reminder_raw": task.reminder or "",
+        "repeat_time": (task.repeat_time or "").strip(),
+        "repeat": repeat,
+        # v1.2.5 (bug #1B): маркер «выполнено сегодня» для повторяющихся.
+        "completed_raw": task.completed_at or "",
+        # wave8.22: для задач без срока — дата создания, чтобы фронт показал «N дней назад».
+        "created_at": created,
     }
 
 
-async def _fetch_nexus_tasks(user_notion_id: str) -> list[dict]:
-    # База задач — только для Nexus (Arcana-работы в отдельной базе 🔮),
-    # поэтому фильтр по "Бот" не нужен и вызывает 400 от Notion.
-    filters = {
-        "and": [
-            {"property": "Статус", "status": {"does_not_equal": "Done"}},
-            {"property": "Статус", "status": {"does_not_equal": "Complete"}},
-        ]
-    }
-    if user_notion_id:
-        filters["and"].append({
-            "property": "🪪 Пользователи",
-            "relation": {"contains": user_notion_id},
-        })
-    return await query_pages(
-        config.nexus.db_tasks,
-        filters=filters,
-        sorts=[{"property": "Дедлайн", "direction": "ascending"}],
-        page_size=100,
-    )
+async def _fetch_nexus_tasks(user_notion_id: str) -> list[PgTask]:
+    # Активные задачи Nexus из PG (Статус != Done/Complete). Overdue включены
+    # (они не Done), классификация по дедлайну — ниже в get_today.
+    return await _tasks_repo.active(user_notion_id)
 
 
 async def _spent_today(user_notion_id: str, today_iso: str, tomorrow_iso: str) -> int:
@@ -233,7 +218,7 @@ async def refresh_tip(tg_id: int = Depends(current_user_id)) -> dict[str, Any]:
     cache.delete_tip(tg_id, today_str)
     user_notion_id = (await get_user_notion_id(tg_id)) or ""
     tasks_raw = await _fetch_nexus_tasks(user_notion_id)
-    summaries = [_task_summary(p, 3) for p in tasks_raw]
+    summaries = [_task_summary(t, 3) for t in tasks_raw]
     active_titles = [s["title"] for s in summaries if s["title"]]
     tip = await _generate_adhd_tip(tg_id, today_str, active_titles, user_notion_id)
     return {"tip": tip}
@@ -251,7 +236,9 @@ async def get_today(tg_id: int = Depends(current_user_id)) -> dict[str, Any]:
     user_notion_id = (await get_user_notion_id(tg_id)) or ""
 
     tasks_raw = await _fetch_nexus_tasks(user_notion_id)
-    summaries = [_task_summary(p, tz_offset) for p in tasks_raw]
+    summaries = [_task_summary(t, tz_offset) for t in tasks_raw]
+    # Сохраняем прежний порядок (Notion query сортировал по дедлайну ascending).
+    summaries.sort(key=lambda s: s["deadline_raw"] or "9999-99-99")
 
     overdue: list[dict] = []
     scheduled: list[dict] = []
@@ -271,8 +258,6 @@ async def get_today(tg_id: int = Depends(current_user_id)) -> dict[str, Any]:
         # v1.2.5 (bug #1B): повторяющаяся задача, у которой «Время завершения»
         # уже сегодня — выполнена в этой итерации, не показываем в расписании.
         # Появится снова на следующее вхождение (через interval_days).
-        # Non-recurring задачи через этот guard НЕ проходят (там нет repeat_time
-        # и фильтр Done в _fetch_nexus_tasks их и так отрезает).
         completed_today = False
         if repeat_time and s.get("completed_raw"):
             completed_local = to_local_date(s["completed_raw"], tz_offset)
@@ -312,7 +297,7 @@ async def get_today(tg_id: int = Depends(current_user_id)) -> dict[str, Any]:
         if (repeat_time and is_occurrence_today) or has_time_today:
             t = repeat_time if repeat_time else deadline_time
             interval_raw: Optional[str] = None
-            # wave8.4: Notion хранит "HH:MM|every_Nd" — разбираем server-side.
+            # wave8.4: формат "HH:MM|every_Nd" — разбираем server-side.
             if t and "|" in t:
                 parts = t.split("|", 1)
                 t = parts[0].strip() or None
