@@ -12,12 +12,14 @@ from pydantic import BaseModel
 
 from core.config import config
 from core.notion_client import query_pages, rituals_all, update_page_select
+from core.repos.pg_finance_repo import PgArcanaPnlRepo
 from arcana.repos.pg_sessions_repo import PgSessionsRepo as _PgSessionsRepoClass
 _pg_sessions_repo = _PgSessionsRepoClass()
 from arcana.repos.pg_works_repo import PgWorksRepo as _PgWorksRepoClass
 _pg_works_repo = _PgWorksRepoClass()
 from core.repos.pg_nexus_lists_repo import PgArcanaInventoryRepo as _PgArcanaInventoryRepoClass
 _arcana_inv_repo_lists = _PgArcanaInventoryRepoClass()
+_pnl_repo = PgArcanaPnlRepo()
 from core.user_manager import get_user_notion_id
 from core.bot_notify import notify_user
 
@@ -47,8 +49,6 @@ from miniapp.backend.routes._arcana_common import (
     SESSION_YES,
     SUPPLIES_CATEGORIES,
     load_clients_map,
-    month_bounds,
-    query_arcana_finance,
     serialize_session_brief,
     triplet_to_stub,
 )
@@ -309,19 +309,17 @@ async def get_arcana_today(tg_id: int = Depends(current_user_id)) -> dict[str, A
         "05": "Май", "06": "Июнь", "07": "Июль", "08": "Август",
         "09": "Сентябрь", "10": "Октябрь", "11": "Ноябрь", "12": "Декабрь",
     }[month[5:7]]
-    m_start, m_end = month_bounds(month)
     try:
-        fin_records = await query_arcana_finance(user_notion_id, m_start, m_end)
+        fin_records = await _pnl_repo.query_month(month, user_notion_id=user_notion_id)
     except Exception as e:
         logger.warning("arcana finance fetch failed: %s", e)
         fin_records = []
     income = 0.0
     supplies = 0.0
-    for p in fin_records:
-        props = p.get("properties", {})
-        amt = (props.get("Сумма", {}).get("number")) or 0
-        type_name = select_of(p, "Тип")
-        cat = select_of(p, "Категория")
+    for entry in fin_records:
+        amt = entry.amount
+        type_name = entry.type_
+        cat = entry.category
         if "Доход" in type_name:
             income += amt
         elif "Расход" in type_name and cat in SUPPLIES_CATEGORIES:

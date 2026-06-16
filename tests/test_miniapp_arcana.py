@@ -274,12 +274,18 @@ def test_arcana_today_happy(client):
     mock_sess = _mock_sessions_repo_all(all_result=sessions_pg)
     mock_cl = _mock_clients_repo(list_all_result=clients_list)
 
+    from core.repos.pg_finance_repo import PnlEntry
+    fin_entries = [
+        PnlEntry(id="f1", amount=10000.0, type_="💰 Доход",   category="🔮 Практика"),
+        PnlEntry(id="f2", amount=500.0,   type_="💸 Расход",  category="🕯️ Расходники"),
+    ]
+
     with patch("miniapp.backend.routes.arcana_today._pg_sessions_repo", mock_sess), \
          patch("miniapp.backend.routes._arcana_common._common_clients_repo", mock_cl), \
          patch("miniapp.backend.routes.arcana_today.query_pages",
                AsyncMock(return_value=works)), \
-         patch("miniapp.backend.routes._arcana_common.query_pages",
-               AsyncMock(return_value=fin)), \
+         patch("miniapp.backend.routes.arcana_today._pnl_repo.query_month",
+               AsyncMock(return_value=fin_entries)), \
          patch("miniapp.backend.routes.arcana_today.today_user_tz",
                AsyncMock(return_value=(today, tz))), \
          patch("miniapp.backend.routes.arcana_today.get_user_notion_id",
@@ -310,6 +316,44 @@ def test_arcana_today_401():
     app.dependency_overrides.clear()
     c = TestClient(app)
     assert c.get("/api/arcana/today").status_code == 401
+
+
+def test_arcana_today_finance_loop_pg_format(client):
+    """Регресс: finance loop читает PnlEntry (PG), а не Notion-dict.
+
+    Проверяет что:
+    - "Доход" in entry.type_ работает с форматом "💰 Доход" (emoji-prefix)
+    - entry.category in SUPPLIES_CATEGORIES работает с "🕯️ Расходники"
+    - расход с категорией вне SUPPLIES_CATEGORIES не попадает в supplies
+    - тихий ноль невозможен: если формат сломается — income/supplies будут 0 → тест упадёт
+    """
+    from core.repos.pg_finance_repo import PnlEntry
+    tz = 3
+    today = _today_date(tz)
+    mock_sess = _mock_sessions_repo_all(all_result=[])
+    mock_cl = _mock_clients_repo(list_all_result=[])
+    fin_entries = [
+        PnlEntry(id="1", amount=5000.0,  type_="💰 Доход",  category="🔮 Практика"),
+        PnlEntry(id="2", amount=300.0,   type_="💸 Расход", category="🕯️ Расходники"),
+        PnlEntry(id="3", amount=100.0,   type_="💸 Расход", category="🌿 Травы/Масла"),
+        # категория вне SUPPLIES_CATEGORIES — не в supplies
+        PnlEntry(id="4", amount=999.0,   type_="💸 Расход", category="💳 Прочее"),
+    ]
+    with patch("miniapp.backend.routes.arcana_today._pg_sessions_repo", mock_sess), \
+         patch("miniapp.backend.routes._arcana_common._common_clients_repo", mock_cl), \
+         patch("miniapp.backend.routes.arcana_today.query_pages", AsyncMock(return_value=[])), \
+         patch("miniapp.backend.routes.arcana_today._pnl_repo.query_month",
+               AsyncMock(return_value=fin_entries)), \
+         patch("miniapp.backend.routes.arcana_today.today_user_tz",
+               AsyncMock(return_value=(today, tz))), \
+         patch("miniapp.backend.routes.arcana_today.get_user_notion_id",
+               AsyncMock(return_value=FAKE_NOTION_USER)):
+        r = client.get("/api/arcana/today")
+
+    assert r.status_code == 200, r.text
+    ms = r.json()["month_stats"]
+    assert ms["income"] == 5000, f"ожидался income=5000, got {ms['income']}"
+    assert ms["supplies"] == 400, f"ожидался supplies=400 (300+100), got {ms['supplies']}"
 
 
 # ── /api/arcana/sessions ─────────────────────────────────────────────────────

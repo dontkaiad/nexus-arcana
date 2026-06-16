@@ -7,8 +7,6 @@ from __future__ import annotations
 import re
 from typing import Optional
 
-from core.config import config
-from core.notion_client import query_pages
 from arcana.repos.clients_repo import ClientsRepo
 from arcana.repos.pg_clients_repo import TYPE_CODE_TO_FULL
 
@@ -264,24 +262,7 @@ def split_lines(raw: str) -> list[str]:
 
 # ── Finance helpers ─────────────────────────────────────────────────────────
 
-async def query_arcana_finance(user_notion_id: str, start: str, end: str,
-                                type_filter: Optional[str] = None) -> list[dict]:
-    """Финансовые записи Arcana за диапазон [start, end) (date-only boundaries)."""
-    conditions: list[dict] = [
-        {"property": "Бот", "select": {"equals": "🌒 Arcana"}},
-        {"property": "Дата", "date": {"on_or_after": start}},
-        {"property": "Дата", "date": {"before": end}},
-    ]
-    if type_filter:
-        conditions.append({"property": "Тип", "select": {"equals": type_filter}})
-    if user_notion_id:
-        conditions.append({"property": "🪪 Пользователи",
-                           "relation": {"contains": user_notion_id}})
-    return await query_pages(config.nexus.db_finance,
-                             filters={"and": conditions}, page_size=500)
-
-
-def month_bounds(month: str) -> tuple[str, str]:
+def month_bounds(month: str) -> tuple:
     y, m = int(month[:4]), int(month[5:7])
     start = f"{y}-{m:02d}-01"
     ny, nm = (y + 1, 1) if m == 12 else (y, m + 1)
