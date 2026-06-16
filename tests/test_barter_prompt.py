@@ -5,6 +5,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from arcana.repos.rituals_repo import Ritual
+
 
 @pytest.fixture(autouse=True)
 def _isolate_pending_db(monkeypatch, tmp_path):
@@ -103,23 +105,17 @@ async def test_reply_otdala_marks_done():
     msg.reply_to_message = reply
     msg.answer = AsyncMock()
 
-    ritual_page = {
-        "id": "rit-3",
-        "properties": {
-            "Название": {"title": [{"plain_text": "приворот — Оля",
-                                     "text": {"content": "приворот — Оля"}}]},
-        },
-    }
+    mock_ritual = Ritual(id="100", name="приворот — Оля")
     pg_items = [
         _pg_item("b1", "блок сигарет"),
         _pg_item("b2", "мерч улицы восток"),
     ]
     mock_up_status = AsyncMock(return_value=True)
     with patch("core.message_pages.get_message_page",
-               AsyncMock(return_value={"page_id": "rit-3", "page_type": "ritual",
+               AsyncMock(return_value={"page_id": "100", "page_type": "ritual",
                                         "bot": "arcana", "created_at": 0})), \
-         patch("arcana.handlers.barter_prompt.get_page",
-               AsyncMock(return_value=ritual_page)), \
+         patch("arcana.repos.pg_rituals_repo.PgRitualsRepo.find_by_id",
+               AsyncMock(return_value=mock_ritual)), \
          patch.object(lm._arcana_repo, "get_list", AsyncMock(return_value=pg_items)), \
          patch.object(lm._arcana_repo, "update_status", mock_up_status):
         ok = await handle_reply_text(msg, "отдала блок сигарет", user_notion_id="u1")
@@ -147,18 +143,14 @@ async def test_reply_vmesto_renames_and_marks_done():
     msg.reply_to_message = reply
     msg.answer = AsyncMock()
 
-    ritual_page = {
-        "id": "rit-4",
-        "properties": {"Название": {"title": [{"plain_text": "приворот — Оля",
-                                                "text": {"content": "приворот — Оля"}}]}},
-    }
+    mock_ritual = Ritual(id="101", name="приворот — Оля")
     pg_items = [_pg_item("b9", "блок сигарет")]
     mock_update = AsyncMock(return_value=True)
     with patch("core.message_pages.get_message_page",
-               AsyncMock(return_value={"page_id": "rit-4", "page_type": "ritual",
+               AsyncMock(return_value={"page_id": "101", "page_type": "ritual",
                                         "bot": "arcana", "created_at": 0})), \
-         patch("arcana.handlers.barter_prompt.get_page",
-               AsyncMock(return_value=ritual_page)), \
+         patch("arcana.repos.pg_rituals_repo.PgRitualsRepo.find_by_id",
+               AsyncMock(return_value=mock_ritual)), \
          patch.object(lm._arcana_repo, "get_list", AsyncMock(return_value=pg_items)), \
          patch.object(lm._arcana_repo, "update", mock_update):
         ok = await handle_reply_text(msg, "вместо блока сигарет колода таро",
@@ -189,11 +181,7 @@ async def test_reply_money_creates_finance_and_closes_money_item():
     msg.reply_to_message = reply
     msg.answer = AsyncMock()
 
-    ritual_page = {
-        "id": "rit-5",
-        "properties": {"Название": {"title": [{"plain_text": "приворот — Оля",
-                                                "text": {"content": "приворот — Оля"}}]}},
-    }
+    mock_ritual = Ritual(id="102", name="приворот — Оля")
     pg_items = [
         _pg_item("m1", "откуп деньгами"),
         _pg_item("b2", "блок сигарет"),
@@ -201,10 +189,10 @@ async def test_reply_money_creates_finance_and_closes_money_item():
     fa = AsyncMock(return_value="fin-OK")
     mock_up_status = AsyncMock(return_value=True)
     with patch("core.message_pages.get_message_page",
-               AsyncMock(return_value={"page_id": "rit-5", "page_type": "ritual",
+               AsyncMock(return_value={"page_id": "102", "page_type": "ritual",
                                         "bot": "arcana", "created_at": 0})), \
-         patch("arcana.handlers.barter_prompt.get_page",
-               AsyncMock(return_value=ritual_page)), \
+         patch("arcana.repos.pg_rituals_repo.PgRitualsRepo.find_by_id",
+               AsyncMock(return_value=mock_ritual)), \
          patch.object(lm._arcana_repo, "get_list", AsyncMock(return_value=pg_items)), \
          patch.object(lm._arcana_repo, "update_status", mock_up_status), \
          patch.object(barter_prompt._fin_repo, "add", fa):

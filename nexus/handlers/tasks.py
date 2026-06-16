@@ -491,8 +491,9 @@ async def _schedule_deadline_check(chat_id: int, title: str, deadline_dt: str, t
 async def _get_user_tz(uid: int) -> int:
     if uid in _user_tz_offset:
         return _user_tz_offset[uid]
-    from core.notion_client import memory_get
-    stored = await memory_get(f"tz_{uid}")
+    from core.repos.pg_memory_repo import PgMemoryRepo as _MemRepo
+    mems = await _MemRepo().find_by_key(f"tz_{uid}", page_size=1)
+    stored = mems[0].fact if mems else None
     if stored:
         try:
             offset = int(stored)
@@ -533,7 +534,7 @@ _CITY_TZ = {
 
 
 async def _update_user_tz(message: Message, text: str) -> None:
-    from core.notion_client import memory_set
+    from core.repos.pg_memory_repo import PgMemoryRepo as _MemRepo
     uid = message.from_user.id
     text_low = text.lower()
 
@@ -566,7 +567,7 @@ async def _update_user_tz(message: Message, text: str) -> None:
             offset = 3
 
     _user_tz_offset[uid] = offset
-    await memory_set(f"tz_{uid}", str(offset), "Настройки")
+    await _MemRepo().upsert(fact=str(offset), key=f"tz_{uid}", category="Настройки")
     sign = "+" if offset >= 0 else ""
     await message.answer(f"🕐 Часовой пояс обновлён: UTC{sign}{offset}")
 

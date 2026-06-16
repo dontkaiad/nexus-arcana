@@ -32,12 +32,14 @@ from aiogram.types import (
 )
 
 from core.claude_client import ask_claude
-from core.notion_client import client_find, log_error, work_add  # noqa: F401  # client_find via mock.patch
+from core.notion_client import client_find, log_error  # noqa: F401  # client_find via mock.patch
 from core.shared_handlers import get_user_tz
 from core.utils import cancel_button, react
+from arcana.repos.pg_works_repo import PgWorksRepo
 
 logger = logging.getLogger("arcana.work_preview")
 
+_works_repo = PgWorksRepo()
 router = Router()
 
 _PRIORITY_EMOJI = {"Срочно": "🔴", "Важно": "🟡", "Можно потом": "⚪"}
@@ -496,21 +498,29 @@ async def cb_work_save(call: CallbackQuery) -> None:
         return
 
     try:
-        result = await work_add(
+        from datetime import datetime as _dt, timezone as _tz
+        deadline_str = data.get("deadline") or ""
+        deadline_dt = None
+        if deadline_str:
+            try:
+                fmt = "%Y-%m-%dT%H:%M" if "T" in deadline_str else "%Y-%m-%d"
+                deadline_dt = _dt.strptime(deadline_str[:16], fmt).replace(tzinfo=_tz.utc)
+            except ValueError:
+                pass
+        result = await _works_repo.create(
             title=data.get("title") or "Работа",
-            date=data.get("deadline") or "",
             priority=data.get("priority") or "Можно потом",
+            deadline=deadline_dt,
             category=data.get("category"),
-            work_type=data.get("work_type") or "🌟 Личная",
             client_id=data.get("client_id"),
             user_notion_id=data.get("user_notion_id") or "",
         )
     except Exception as e:
-        logger.error("work_add failed: %s", e)
+        logger.error("works_repo.create failed: %s", e)
         result = None
 
     if not result:
-        await call.answer("⚠️ Ошибка записи в Notion", show_alert=True)
+        await call.answer("⚠️ Ошибка сохранения работы", show_alert=True)
         return
 
     _pending_del(uid)

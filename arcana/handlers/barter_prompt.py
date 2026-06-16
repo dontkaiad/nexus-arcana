@@ -26,7 +26,6 @@ from aiogram.types import Message
 
 from core.cash_register import BOT_ARCANA
 from core.config import config
-from core.notion_client import get_page
 from core.repos.finance_repo import _repo as _fin_repo
 from core.repos.lists_repo import _repo as _lists_repo
 
@@ -235,13 +234,15 @@ async def handle_reply_text(message: Message, text: str, user_notion_id: str = "
         return False
 
     page_id = mp["page_id"]
-    # Группу определяем по названию ритуала/расклада из самой Notion-страницы.
-    page = await get_page(page_id)
-    if not page:
-        return False
-    title_field = "Название" if mp["page_type"] == "ritual" else "Тема"
-    arr = (page.get("properties", {}).get(title_field, {}) or {}).get("title") or []
-    group_name = "".join(t.get("plain_text", "") for t in arr).strip()
+    # Группу определяем по названию ритуала/расклада из PG.
+    if mp["page_type"] == "ritual":
+        from arcana.repos.pg_rituals_repo import PgRitualsRepo as _PR
+        obj = await _PR().find_by_id(page_id)
+        group_name = (obj.name or "").strip() if obj else ""
+    else:
+        from arcana.repos.pg_sessions_repo import PgSessionsRepo as _PS
+        obj = await _PS().find_by_id(page_id)
+        group_name = (obj.question or "").strip() if obj else ""
     if not group_name:
         return False
 

@@ -55,6 +55,19 @@ _instance: Optional[NotionClient] = None
 
 def _notion() -> NotionClient:
     global _instance
+    if os.environ.get("NOTION_KILL") == "1":
+        try:
+            import inspect as _inspect
+            frames = _inspect.stack()
+            _this = frames[0].filename
+            caller = next(
+                (f"{fr.function}({fr.filename.split('AI_AGENTS/')[-1]}:{fr.lineno})"
+                 for fr in frames[1:] if fr.filename != _this),
+                frames[1].function,
+            )
+        except Exception:
+            caller = "unknown"
+        raise RuntimeError(f"NOTION_KILLED: {caller}")
     if _instance is None:
         from core.config import config
         _instance = NotionClient(config.notion_token)

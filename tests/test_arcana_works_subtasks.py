@@ -247,11 +247,10 @@ async def test_work_save_attaches_subtasks_button():
     call.message.answer = AsyncMock()
     call.answer = AsyncMock()
 
-    with patch("arcana.handlers.work_preview.work_add",
-               AsyncMock(return_value="page-id-deadbeef-1234-5678-9abc-def012")), \
+    with patch.object(wp._works_repo, "create",
+                      AsyncMock(return_value="123456789")), \
          patch("arcana.handlers.work_preview.get_user_tz",
                AsyncMock(return_value=3)), \
-         patch("core.notion_client.update_page", AsyncMock()), \
          patch("core.message_pages.save_message_page", AsyncMock()):
         await wp.cb_work_save(call)
 
@@ -264,7 +263,7 @@ async def test_work_save_attaches_subtasks_button():
     assert subtask_cb is not None
     # После фикса #109: callback_data содержит полный page_id, а не усечённый prefix
     page_id_part = subtask_cb.removeprefix("task_subtask_work_")
-    assert page_id_part == "page-id-deadbeef-1234-5678-9abc-def012", (
+    assert page_id_part == "123456789", (
         f"Ожидали полный page_id в callback_data, получили: {page_id_part!r}"
     )
     assert "work_ok" in cbs

@@ -100,7 +100,7 @@ async def test_handle_add_work_does_not_write_to_notion():
          patch.object(cr, "resolve_or_create",
                       AsyncMock(return_value="client-1")), \
          patch.object(wp, "get_user_tz", AsyncMock(return_value=3)), \
-         patch("arcana.handlers.work_preview.work_add", AsyncMock()) as add_mock:
+         patch.object(wp._works_repo, "create", AsyncMock()) as add_mock:
         await wp.handle_add_work_preview(msg, "ритуал для Маши", "user-notion")
 
     add_mock.assert_not_called()
@@ -164,12 +164,11 @@ async def test_work_save_creates_notion_and_schedules_reminder():
     flow.schedule_reminder = AsyncMock(return_value=True)
     fake_bot = MagicMock(arcana_reminder_flow=flow)
 
-    with patch("arcana.handlers.work_preview.work_add",
-               AsyncMock(return_value="page-id-xyz")) as add_mock, \
+    with patch.object(wp._works_repo, "create",
+                      AsyncMock(return_value="42")) as add_mock, \
          patch.dict("sys.modules", {"arcana.bot": fake_bot}), \
          patch("arcana.handlers.work_preview.get_user_tz",
                AsyncMock(return_value=3)), \
-         patch("core.notion_client.update_page", AsyncMock()), \
          patch("core.message_pages.save_message_page", AsyncMock()):
         await wp.cb_work_save(call)
 
@@ -198,8 +197,7 @@ async def test_work_cancel_deletes_pending_without_notion_write():
     call.message.edit_text = AsyncMock()
     call.answer = AsyncMock()
 
-    with patch("arcana.handlers.work_preview.work_add",
-               AsyncMock()) as add_mock, \
+    with patch.object(wp._works_repo, "create", AsyncMock()) as add_mock, \
          patch("core.utils.react", AsyncMock()):
         await wp.cb_work_cancel(call)
 
