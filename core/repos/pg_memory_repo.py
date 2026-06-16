@@ -56,13 +56,16 @@ class Memory:
     is_archived: bool = False
     user_notion_id: str = ""
     date: str = ""           # created_at[:10]
+    updated_at: str = ""     # ISO string from updated_at column
 
 
 # ── Row → domain object ───────────────────────────────────────────────────────
 
 def _row_to_memory(row) -> Memory:
     created = getattr(row, "created_at", None)
+    updated = getattr(row, "updated_at", None)
     date_str = created.date().isoformat() if created else ""
+    updated_str = updated.isoformat() if updated else ""
     return Memory(
         id=str(row.id),
         fact=row.fact_text or "",
@@ -76,6 +79,7 @@ def _row_to_memory(row) -> Memory:
         is_archived=bool(row.is_archived),
         user_notion_id=row.user_notion_id or "",
         date=date_str,
+        updated_at=updated_str,
     )
 
 
@@ -288,6 +292,24 @@ def _find_by_key_prefixes_sync(
     return [_row_to_memory(r) for r in rows]
 
 
+def _find_by_exact_key_sync(
+    key: str,
+    user_notion_id: str = "",
+    page_size: int = 1,
+) -> List[Memory]:
+    """Точный матч по key_name (==), не ilike. is_current=True, не архивирована."""
+    q = (
+        _base_active_q()
+        .where(memories.c.key_name == key)
+    )
+    if user_notion_id:
+        q = q.where(memories.c.user_notion_id == user_notion_id)
+    q = q.order_by(memories.c.updated_at.desc()).limit(page_size)
+    with get_engine().connect() as conn:
+        rows = conn.execute(q).fetchall()
+    return [_row_to_memory(r) for r in rows]
+
+
 def _find_recent_sync(
     is_current: Optional[bool] = None,
     scope: str = "",
@@ -381,6 +403,14 @@ class PgMemoryRepo:
         user_notion_id: str = "",
     ) -> List[Memory]:
         return await asyncio.to_thread(_find_by_key_prefixes_sync, prefixes, user_notion_id)
+
+    async def find_by_exact_key(
+        self,
+        key: str,
+        user_notion_id: str = "",
+        page_size: int = 1,
+    ) -> List[Memory]:
+        return await asyncio.to_thread(_find_by_exact_key_sync, key, user_notion_id, page_size)
 
     async def find_recent(
         self,

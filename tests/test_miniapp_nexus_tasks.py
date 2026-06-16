@@ -639,10 +639,16 @@ def test_weather_route_is_registered():
 
 def test_weather_returns_cached_or_fetches(client, tmp_path, monkeypatch):
     """Cache ключ — tg_id; при первом запросе — вызов Open-Meteo; при повторном — из кэша."""
+    from core.repos.pg_memory_repo import Memory
 
-    # direct in-test call: fake tz + fake openmeteo
-    async def fake_memory_get(key):
-        return "Europe/Moscow" if key.startswith("tz_") else None
+    def _mem(fact, key=""):
+        return Memory(id="1", fact=fact, key=key)
+
+    # find_by_exact_key: tz_{tg_id} → "Europe/Moscow"; city_/location_ → []
+    async def fake_find_by_exact_key(key, user_notion_id="", page_size=1):
+        if key.startswith("tz_"):
+            return [_mem("Europe/Moscow", key=key)]
+        return []
 
     fetch_call_count = {"n": 0}
 
@@ -650,8 +656,12 @@ def test_weather_returns_cached_or_fetches(client, tmp_path, monkeypatch):
         fetch_call_count["n"] += 1
         return {"city": city, "temp": 12, "code": 0, "kind": "clear", "description": "Ясно"}
 
-    with patch("miniapp.backend.routes.weather.memory_get", side_effect=fake_memory_get), \
-         patch("miniapp.backend.routes.weather._fetch_openmeteo", side_effect=fake_fetch):
+    from miniapp.backend.routes import weather as _weather_mod
+    with patch.object(_weather_mod._memory_repo, "find_by_exact_key", fake_find_by_exact_key), \
+         patch.object(_weather_mod._memory_repo, "find_recent", AsyncMock(return_value=[])), \
+         patch("miniapp.backend.routes.weather.get_user_notion_id", AsyncMock(return_value="")), \
+         patch("miniapp.backend.routes.weather._fetch_openmeteo", side_effect=fake_fetch), \
+         patch("miniapp.backend.routes.weather._generate_tip", AsyncMock(return_value="")):
         r1 = client.get("/api/weather")
         r2 = client.get("/api/weather")
 

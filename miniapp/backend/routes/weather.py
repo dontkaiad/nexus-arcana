@@ -4,14 +4,14 @@ from __future__ import annotations
 import logging
 import sqlite3
 import time
-from typing import Any, Optional
+from typing import Any, List, Optional
 
 import httpx
 from fastapi import APIRouter, Body, Depends
 
 from core.claude_client import ask_claude
 from core.config import config
-from core.notion_client import memory_get, memory_set, query_pages
+from core.repos.pg_memory_repo import PgMemoryRepo
 from core.user_manager import get_user_notion_id
 
 from miniapp.backend import cache as _cache
@@ -21,8 +21,10 @@ logger = logging.getLogger("miniapp.weather")
 
 router = APIRouter()
 
+_memory_repo = PgMemoryRepo()
 
-TZ_TO_CITY: dict[str, str] = {
+
+TZ_TO_CITY = {
     "Europe/Moscow": "Moscow",
     "Europe/Saint_Petersburg": "Saint Petersburg",
     "Europe/London": "London",
@@ -43,7 +45,7 @@ TZ_TO_CITY: dict[str, str] = {
 }
 
 
-WMO_CODES: dict[int, tuple[str, str]] = {
+WMO_CODES = {
     0: ("clear", "Ясно"),
     1: ("clear", "В основном ясно"),
     2: ("cloudy", "Переменная облачность"),
@@ -94,7 +96,7 @@ def _init_weather_cache() -> None:
         con.close()
 
 
-def _cached(tg_id: int) -> Optional[dict[str, Any]]:
+def _cached(tg_id: int) -> Optional[dict]:
     _init_weather_cache()
     con = sqlite3.connect(_cache._DB_PATH)
     try:
@@ -178,7 +180,7 @@ async def _fetch_openmeteo(city: str) -> Optional[dict]:
 
 
 # Префиксы для матча русских падежей: "питер", "питере", "питера"...
-_CITY_PREFIXES: list[tuple[str, str]] = [
+_CITY_PREFIXES = [
     ("санкт-петербург", "Saint Petersburg"),
     ("санкт петербург", "Saint Petersburg"),
     ("петербург",       "Saint Petersburg"),
@@ -270,70 +272,52 @@ def _extract_city_from_text(text: str) -> Optional[str]:
     return None
 
 
-async def _resolve_city_from_memory(tg_id: int) -> Optional[str]:
-    """Ищем город в Памяти Nexus: грузим записи юзера и сканируем в Python.
+async def _resolve_city_from_memory(tg_id: int, user_notion_id: str) -> Optional[str]:
+    """Ищем город в Памяти (PG): exact-key override → fuzzy-скан find_recent.
 
-    issue #70: сначала проверяем явные ключи `city_{tg_id}` / `location_{tg_id}`
-    (override от POST /api/weather/city и пр.), потом — fuzzy-скан, отсортированный
-    по last_edited_time desc, чтобы свежая запись побеждала старую.
+    issue #70: сначала проверяем явные ключи city_{tg_id} / location_{tg_id}
+    (override от POST /api/weather/city), потом — full scan с сортировкой по
+    updated_at DESC, чтобы свежая запись побеждала старую.
     """
-    # 1) Явный override
+    # 1) Явный override (точный матч, не ilike)
     for key in (f"city_{tg_id}", f"location_{tg_id}"):
-        raw = await memory_get(key)
-        if raw:
+        mems = await _memory_repo.find_by_exact_key(key, user_notion_id)
+        if mems:
+            raw = mems[0].value or mems[0].fact
             city = _extract_city_from_text(raw) or _normalize_city(raw)
             if city:
                 logger.info("resolve_city[%s]: override key=%s → %s", tg_id, key, city)
                 return city
 
-    db_id = config.nexus.db_memory
-    if not db_id:
-        logger.warning("resolve_city[%s]: no db_memory configured", tg_id)
-        return None
+    # 2) Full scan актуальных записей юзера
+    memories_list = await _memory_repo.find_recent(
+        is_current=True, user_notion_id=user_notion_id, page_size=200
+    )
 
-    user_notion_id = (await get_user_notion_id(tg_id)) or ""
+    logger.info("resolve_city[%s]: scanning %d memory records", tg_id, len(memories_list))
 
-    filters: dict
-    if user_notion_id:
-        filters = {"and": [
-            {"property": "🪪 Пользователи", "relation": {"contains": user_notion_id}},
-            {"property": "Актуально", "checkbox": {"equals": True}},
-        ]}
-    else:
-        filters = {"property": "Актуально", "checkbox": {"equals": True}}
-
-    sorts = [{"timestamp": "last_edited_time", "direction": "descending"}]
-
-    try:
-        pages = await query_pages(db_id, filters=filters, sorts=sorts, page_size=200)
-    except Exception as e:
-        logger.warning("resolve_city[%s] fetch failed: %s", tg_id, e)
-        return None
-
-    logger.info("resolve_city[%s]: scanning %d memory records", tg_id, len(pages))
-
-    # Приоритет: записи где Ключ/Текст намекают на локацию
     city_keys = ("город", "city", "локация", "location", "живу")
     city_text_markers = ("город", "живу", "Питер", "СПб", "Москва", "Мск")
 
-    candidates: list[tuple[int, str, str]] = []  # (priority, key, text)
-    for p in pages:
-        props = p.get("properties", {}) or {}
-        title_items = (props.get("Текст", {}) or {}).get("title") or []
-        text = "".join(it.get("plain_text", "") for it in title_items).strip()
-        key_items = (props.get("Ключ", {}) or {}).get("rich_text") or []
-        key_text = "".join(it.get("plain_text", "") for it in key_items).strip()
+    # (priority, updated_at, key_text, fact_text)
+    candidates: List = []
+    for mem in memories_list:
+        text = mem.fact
+        key_text = mem.key
         if not text:
             continue
         key_lower = key_text.lower()
         text_lower = text.lower()
         if any(m in key_lower for m in city_keys):
-            candidates.append((0, key_text, text))
+            candidates.append((0, mem.updated_at or "", key_text, text))
         elif any(m.lower() in text_lower for m in city_text_markers):
-            candidates.append((1, key_text, text))
+            candidates.append((1, mem.updated_at or "", key_text, text))
 
-    candidates.sort(key=lambda x: x[0])
-    for prio, key_text, text in candidates[:10]:
+    # Two-stable-sort: updated_at DESC внутри каждого приоритета
+    candidates.sort(key=lambda x: x[1], reverse=True)  # updated_at DESC
+    candidates.sort(key=lambda x: x[0])                 # priority ASC (stable)
+
+    for prio, _updated, key_text, text in candidates[:10]:
         logger.info("resolve_city[%s]: candidate prio=%d key=%r text=%r",
                     tg_id, prio, key_text, text)
         city = _extract_city_from_text(text)
@@ -341,16 +325,17 @@ async def _resolve_city_from_memory(tg_id: int) -> Optional[str]:
             logger.info("resolve_city[%s]: resolved → %s", tg_id, city)
             return city
 
-    logger.info("resolve_city[%s]: no city found in %d records", tg_id, len(pages))
+    logger.info("resolve_city[%s]: no city found in %d records", tg_id, len(memories_list))
     return None
 
 
 @router.get("/weather/debug")
-async def weather_debug(tg_id: int = Depends(current_user_id)) -> dict[str, Any]:
+async def weather_debug(tg_id: int = Depends(current_user_id)) -> dict:
     """wave8.11: диагностика — показывает откуда резолвится город."""
-    resolved = await _resolve_city_from_memory(tg_id)
-    tz_raw = await memory_get(f"tz_{tg_id}")
     user_notion_id = (await get_user_notion_id(tg_id)) or ""
+    resolved = await _resolve_city_from_memory(tg_id, user_notion_id)
+    tz_mems = await _memory_repo.find_by_exact_key(f"tz_{tg_id}", user_notion_id)
+    tz_raw = (tz_mems[0].value or tz_mems[0].fact) if tz_mems else ""
     return {
         "tg_id": tg_id,
         "user_notion_id": user_notion_id,
@@ -361,17 +346,18 @@ async def weather_debug(tg_id: int = Depends(current_user_id)) -> dict[str, Any]
 
 
 @router.get("/weather")
-async def get_weather(tg_id: int = Depends(current_user_id)) -> dict[str, Any]:
+async def get_weather(tg_id: int = Depends(current_user_id)) -> dict:
     try:
         cached = _cached(tg_id)
         if cached:
             return cached
 
-        # wave8.10: мульти-стратегия поиска города в Памяти Nexus
-        city = await _resolve_city_from_memory(tg_id)
+        user_notion_id = (await get_user_notion_id(tg_id)) or ""
+        city = await _resolve_city_from_memory(tg_id, user_notion_id)
         source = "memory"
         if not city:
-            tz_raw = await memory_get(f"tz_{tg_id}")
+            tz_mems = await _memory_repo.find_by_exact_key(f"tz_{tg_id}", user_notion_id)
+            tz_raw = (tz_mems[0].value or tz_mems[0].fact) if tz_mems else ""
             tz = (tz_raw or "Europe/Moscow").strip()
             city = TZ_TO_CITY.get(tz, "Moscow")
             source = f"tz_fallback({tz})"
@@ -392,7 +378,7 @@ async def get_weather(tg_id: int = Depends(current_user_id)) -> dict[str, Any]:
 
 
 @router.post("/weather/refresh")
-async def refresh_weather(tg_id: int = Depends(current_user_id)) -> dict[str, Any]:
+async def refresh_weather(tg_id: int = Depends(current_user_id)) -> dict:
     """wave8.11: сброс кэша погоды без указания города."""
     _init_weather_cache()
     con = sqlite3.connect(_cache._DB_PATH)
@@ -408,13 +394,20 @@ async def refresh_weather(tg_id: int = Depends(current_user_id)) -> dict[str, An
 async def set_weather_city(
     tg_id: int = Depends(current_user_id),
     payload: dict = Body(...),
-) -> dict[str, Any]:
+) -> dict:
     """wave8.9: пользователь задаёт свой город. Сохраняем в Память + чистим кэш."""
     city = (payload.get("city") or "").strip()
     if not city:
         return {"ok": False, "error": "city_empty"}
-    await memory_set(f"city_{tg_id}", city, category="⭐ Предпочтения")
-    # чистим кэш погоды, чтобы следующий /api/weather сходил заново
+    user_notion_id = (await get_user_notion_id(tg_id)) or ""
+    await _memory_repo.upsert(
+        fact=city,
+        key=f"city_{tg_id}",
+        category="⭐ Предпочтения",
+        scope="nexus",
+        source="auto",
+        user_notion_id=user_notion_id,
+    )
     con = sqlite3.connect(_cache._DB_PATH)
     try:
         con.execute("DELETE FROM weather_cache WHERE tg_id = ?", (tg_id,))
