@@ -19,17 +19,14 @@ router = APIRouter()
 # ── /api/streaks ────────────────────────────────────────────────────────────
 
 async def _resolve_last_task_title(task_id: str) -> str:
-    """#55: получить заголовок Notion-страницы по task_id.
+    """#55: получить заголовок задачи по task_id (PG).
     Возвращает пустую строку при ошибке — UI просто не показывает строку."""
     if not task_id:
         return ""
     try:
-        from core.notion_client import get_page
-        from miniapp.backend._helpers import title_text
-        page = await get_page(task_id)
-        if not page:
-            return ""
-        return title_text(page.get("properties", {}).get("Задача", {})) or ""
+        from nexus.repos.tasks_repo import _repo as _tasks_repo
+        task = await _tasks_repo.retrieve_page(task_id)
+        return task.title if task else ""
     except Exception as e:
         logger.warning("resolve_last_task_title failed for %s: %s", task_id[:8], e)
         return ""

@@ -130,22 +130,15 @@ async def _budget_day_limit() -> int:
 
 
 async def _adhd_context_memories(user_notion_id: str) -> list[str]:
-    db_id = config.nexus.db_memory
-    if not db_id:
-        return []
-    filters = {"property": "Категория", "select": {"equals": "🦋 СДВГ"}}
     try:
-        pages = await query_pages(db_id, filters=filters, page_size=3)
+        from core.repos.memory_repo import _repo as _mem_repo
+        mems = await _mem_repo.find_by_category(
+            "🦋 СДВГ", is_current=True, user_notion_id=user_notion_id, page_size=3,
+        )
+        return [m.fact for m in mems if m.fact]
     except Exception as e:
         logger.warning("adhd memories fetch failed: %s", e)
         return []
-    out = []
-    for p in pages:
-        props = p.get("properties", {})
-        text = title_text(props.get("Текст", {}))
-        if text:
-            out.append(text)
-    return out
 
 
 # wave8.62 (issue #71): слова-плейсхолдеры — маркер галлюцинации Haiku
