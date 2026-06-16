@@ -10,29 +10,22 @@ from typing import Any, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
-from core.config import config
 from core.list_manager import (
     CATEGORY_TO_FINANCE,
     _today_iso,
 )
-from core.notion_client import (
-    _date,
-    _number,
-    _status,
-    _text,
-    finance_add,
-    get_page,
-    query_pages,
-    update_page,
+from core.notion_client import finance_add
+from core.repos.pg_nexus_lists_repo import (
+    PgArcanaInventoryRepo as _PgArcanaInventoryRepoClass,
+    InventoryItem,
 )
 from core.user_manager import get_user_notion_id
 from core.bot_notify import notify_user
 
 from miniapp.backend.auth import current_user_id
-from miniapp.backend._helpers import (
-    BOT_ARCANA,
-    select_name,
-)
+from miniapp.backend._helpers import BOT_ARCANA
+
+_arcana_inv_repo = _PgArcanaInventoryRepoClass()
 
 logger = logging.getLogger("miniapp.arcana.inventory")
 
@@ -47,54 +40,28 @@ ARCANA_INV_CATEGORIES = [
 ]
 
 
-def _serialize(page: dict) -> dict:
-    props = page.get("properties", {})
-    title_arr = (props.get("Название", {}) or {}).get("title") or []
-    name = "".join(t.get("plain_text", "") for t in title_arr).strip()
-    qty = (props.get("Количество", {}) or {}).get("number")
-    price = (props.get("Цена", {}) or {}).get("number")
-    note_arr = (props.get("Заметка", {}) or {}).get("rich_text") or []
-    note = "".join(t.get("plain_text", "") for t in note_arr).strip() or None
-    expires = (props.get("Срок годности", {}) or {}).get("date") or {}
-    cat = select_name(props.get("Категория", {})) or None
+def _serialize_pg(item: InventoryItem) -> dict:
     return {
-        "id": page.get("id", ""),
-        "name": name,
-        "cat": cat,
-        "qty": qty,
-        "price": price,
-        "note": note,
-        "expires": expires.get("start") or None,
+        "id": item.id,
+        "name": item.name,
+        "cat": item.category or None,
+        "qty": item.quantity,
+        "price": None,  # arcana_inventory has no price column
+        "note": item.note or None,
+        "expires": item.expires_at or None,
     }
 
 
-async def _fetch_arcana_inventory(user_notion_id: str) -> list[dict]:
-    db_id = config.db_lists
-    if not db_id:
-        return []
-    conditions: list[dict] = [
-        {"property": "Бот", "select": {"equals": BOT_ARCANA}},
-        {"property": "Тип", "select": {"equals": "📦 Инвентарь"}},
-        {"property": "Статус", "status": {"does_not_equal": "Archived"}},
-    ]
-    if user_notion_id:
-        conditions.append({
-            "or": [
-                {"property": "🪪 Пользователи", "relation": {"contains": user_notion_id}},
-                {"property": "🪪 Пользователи", "relation": {"is_empty": True}},
-            ]
-        })
+async def _fetch_arcana_inventory(user_notion_id: str) -> list:
     try:
-        pages = await query_pages(
-            db_id,
-            filters={"and": conditions},
-            sorts=[{"property": "Срок годности", "direction": "ascending"}],
-            page_size=300,
+        items = await _arcana_inv_repo.get_list(
+            category=None, status=None, user_notion_id=user_notion_id
         )
+        # get_list excludes archived but may include barter; show all non-archived
+        return [i for i in items if i.list_type == "инвентарь"]
     except Exception as e:
-        logger.warning("arcana inventory query failed: %s", e)
+        logger.warning("arcana inventory PG query failed: %s", e)
         return []
-    return pages
 
 
 @router.get("/arcana/inventory")
@@ -104,12 +71,12 @@ async def list_inventory(
     q: Optional[str] = Query(None),
 ) -> dict[str, Any]:
     user_notion_id = (await get_user_notion_id(tg_id)) or ""
-    pages = await _fetch_arcana_inventory(user_notion_id)
+    pg_items = await _fetch_arcana_inventory(user_notion_id)
     items: list[dict] = []
     counts: dict[str, int] = {c: 0 for c in ARCANA_INV_CATEGORIES}
     needle = (q or "").lower().strip()
-    for p in pages:
-        it = _serialize(p)
+    for inv_item in pg_items:
+        it = _serialize_pg(inv_item)
         if it["cat"]:
             counts[it["cat"]] = counts.get(it["cat"], 0) + 1
         if cat and it["cat"] != cat:
@@ -128,10 +95,10 @@ async def inventory_categories(
     tg_id: int = Depends(current_user_id),
 ) -> dict[str, Any]:
     user_notion_id = (await get_user_notion_id(tg_id)) or ""
-    pages = await _fetch_arcana_inventory(user_notion_id)
+    pg_items = await _fetch_arcana_inventory(user_notion_id)
     counts: dict[str, int] = {c: 0 for c in ARCANA_INV_CATEGORIES}
-    for p in pages:
-        it = _serialize(p)
+    for inv_item in pg_items:
+        it = _serialize_pg(inv_item)
         if it["cat"]:
             counts[it["cat"]] = counts.get(it["cat"], 0) + 1
     return {"categories": [
@@ -147,23 +114,17 @@ class InventoryEditBody(BaseModel):
     expires: Optional[str] = None  # YYYY-MM-DD; пусто = очистить
 
 
-async def _ensure_owned(item_id: str, user_notion_id: str) -> dict:
-    """Подгрузить страницу + проверить что это инвентарь Arcana этого юзера."""
-    from miniapp.backend._helpers import relation_ids_of
-    page = await get_page(item_id)
-    if not page:
+async def _ensure_owned(item_id: str, user_notion_id: str) -> InventoryItem:
+    """Подгрузить item из PG + проверить что это инвентарь этого юзера."""
+    item = await _arcana_inv_repo.get_by_id(item_id)
+    if not item:
         raise HTTPException(status_code=404, detail="not found")
-    props = page.get("properties", {})
-    if select_name(props.get("Бот", {})) != BOT_ARCANA:
-        raise HTTPException(status_code=404, detail="not found")
-    if select_name(props.get("Тип", {})) != "📦 Инвентарь":
+    if item.list_type != "инвентарь":
         raise HTTPException(status_code=404, detail="not an inventory item")
-    if user_notion_id and user_notion_id not in relation_ids_of(page, "🪪 Пользователи"):
-        # допускаем айтемы без owner relation (legacy)
-        owners = relation_ids_of(page, "🪪 Пользователи")
-        if owners:
-            raise HTTPException(status_code=404, detail="not found")
-    return page
+    # допускаем legacy items без owner
+    if user_notion_id and item.user_notion_id and item.user_notion_id != user_notion_id:
+        raise HTTPException(status_code=404, detail="not found")
+    return item
 
 
 @router.patch("/arcana/inventory/{item_id}")
@@ -174,16 +135,16 @@ async def edit_inventory(
 ) -> dict[str, Any]:
     user_notion_id = (await get_user_notion_id(tg_id)) or ""
     await _ensure_owned(item_id, user_notion_id)
-    props: dict = {}
+    fields: dict = {}
     if body.qty is not None:
-        props["Количество"] = _number(float(body.qty))
+        fields["quantity"] = float(body.qty)
     if body.note is not None:
-        props["Заметка"] = _text(body.note)
+        fields["note"] = body.note
     if body.expires is not None:
-        props["Срок годности"] = _date(body.expires) if body.expires else {"date": None}
-    if not props:
+        fields["expires_at"] = body.expires or None
+    if not fields:
         return {"ok": True, "noop": True}
-    await update_page(item_id, props)
+    await _arcana_inv_repo.update(item_id, **fields)
     return {"ok": True}
 
 
@@ -202,13 +163,9 @@ async def purchase_inventory(
     """«Купила» — append в Финансы (Бот=Arcana, кат=🕯️ Расходники) +
     приплюсовать qty в инвентарь."""
     user_notion_id = (await get_user_notion_id(tg_id)) or ""
-    page = await _ensure_owned(item_id, user_notion_id)
-    props = page.get("properties", {})
-    title = "".join(
-        t.get("plain_text", "")
-        for t in (props.get("Название", {}) or {}).get("title") or []
-    ).strip() or "покупка"
-    cat = select_name(props.get("Категория", {})) or "💳 Прочее"
+    inv_item = await _ensure_owned(item_id, user_notion_id)
+    title = inv_item.name or "покупка"
+    cat = inv_item.category or "💳 Прочее"
     finance_cat = CATEGORY_TO_FINANCE.get(cat, "🕯️ Расходники")
     fin_id = await finance_add(
         date=_today_iso(),
@@ -221,8 +178,8 @@ async def purchase_inventory(
         user_notion_id=user_notion_id,
     )
     if body.qty_added is not None and body.qty_added > 0:
-        cur = (props.get("Количество", {}) or {}).get("number") or 0
-        await update_page(item_id, {"Количество": _number(float(cur) + float(body.qty_added))})
+        cur = float(inv_item.quantity or 0)
+        await _arcana_inv_repo.update(item_id, quantity=cur + float(body.qty_added))
     from html import escape as _esc
     await notify_user(
         tg_id,
@@ -249,16 +206,13 @@ async def depleted_inventory(
 ) -> dict[str, Any]:
     """Закончился — статус Archived. Опционально создать айтем в 🛒 Покупки."""
     user_notion_id = (await get_user_notion_id(tg_id)) or ""
-    page = await _ensure_owned(item_id, user_notion_id)
-    await update_page(item_id, {"Статус": _status("Archived")})
-    title = "".join(
-        t.get("plain_text", "")
-        for t in (page.get("properties", {}).get("Название", {}) or {}).get("title") or []
-    ).strip()
+    inv_item = await _ensure_owned(item_id, user_notion_id)
+    await _arcana_inv_repo.update_status(item_id, "Archived")
+    title = inv_item.name or ""
     buy_id = None
     if body.add_to_buy:
         from core.list_manager import add_items
-        cat = select_name(page.get("properties", {}).get("Категория", {})) or None
+        cat = inv_item.category or None
         if title:
             created = await add_items(
                 [{"name": title, "category": cat}],

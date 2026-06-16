@@ -20,18 +20,13 @@ from arcana.repos.clients_repo import ClientsRepo
 from arcana.repos.pg_clients_repo import TYPE_CODE_TO_FULL
 from arcana.repos.pg_rituals_repo import PgRitualsRepo
 from arcana.repos.pg_sessions_repo import PgSessionsRepo
-from core.config import config
-from core.notion_client import (
-    _with_user_filter,
-    query_pages,
+from core.repos.pg_nexus_lists_repo import (
+    PgArcanaInventoryRepo as _PgArcanaInventoryRepoClass,
+    InventoryItem,
 )
 from core.user_manager import get_user_notion_id
 
 from miniapp.backend.auth import current_user_id
-from miniapp.backend._helpers import (
-    rich_text_plain,
-    title_text,
-)
 
 logger = logging.getLogger("miniapp.arcana.debts")
 
@@ -40,6 +35,7 @@ router = APIRouter()
 _clients_repo = ClientsRepo()
 _rituals_repo = PgRitualsRepo()
 _sessions_repo = PgSessionsRepo()
+_arcana_inv_repo = _PgArcanaInventoryRepoClass()
 
 
 def _type_icon(type_full: str) -> str:
@@ -52,23 +48,11 @@ def _is_self(type_full: str) -> bool:
 
 
 async def _fetch_open_barter_items(user_notion_id: str) -> list:
-    """Открытые items 🗒️ Списки.Категория=🔄 Бартер. Возвращает сырые pages."""
-    db_id = config.db_lists
-    if not db_id:
-        return []
-    base = {
-        "and": [
-            {"property": "Тип", "select": {"equals": "📋 Чеклист"}},
-            {"property": "Категория", "select": {"equals": "🔄 Бартер"}},
-            {"property": "Статус", "status": {"does_not_equal": "Done"}},
-            {"property": "Статус", "status": {"does_not_equal": "Archived"}},
-        ]
-    }
-    filters = _with_user_filter(base, user_notion_id)
+    """Открытые barter items из PG arcana_inventory (category=🔄 Бартер)."""
     try:
-        return await query_pages(db_id, filters=filters, page_size=300)
+        return await _arcana_inv_repo.get_open_barter(user_notion_id)
     except Exception as e:
-        logger.warning("barter items fetch failed: %s", e)
+        logger.warning("barter items PG fetch failed: %s", e)
         return []
 
 
@@ -144,9 +128,9 @@ def _build_money(sessions, rituals, clients_by_id: dict) -> list:
 def _build_barter(barter_items: list, sessions, rituals, clients_by_id: dict) -> list:
     """Группировка открытых бартер-чеклистов по клиенту через title-match.
 
-    sessions: List[TripletEntry] (PG) — title = question, client = client_id
+    sessions: List[TripletEntry] (PG)
     rituals:  List[RitualEntry] (PG)
-    barter_items: Notion 🗒️ Списки pages (still Notion)
+    barter_items: List[InventoryItem] (PG arcana_inventory)
     """
     title_to_client: dict = {}
     for t in sessions:
@@ -164,9 +148,8 @@ def _build_barter(barter_items: list, sessions, rituals, clients_by_id: dict) ->
 
     by_client: dict = {}
     for it in barter_items:
-        props = it.get("properties", {})
-        name = title_text(props.get("Название", {}))
-        group = rich_text_plain(it, "Группа")
+        name = it.name
+        group = it.group_name or ""
         gkey = group.strip().lower()
         cid = title_to_client.get(gkey, "") if gkey else ""
         c = clients_by_id.get(cid) if cid else None
@@ -186,7 +169,7 @@ def _build_barter(barter_items: list, sessions, rituals, clients_by_id: dict) ->
             "items": [],
         })
         bucket["items"].append({
-            "id": it.get("id", ""),
+            "id": it.id,
             "name": name,
             "group": group or None,
         })

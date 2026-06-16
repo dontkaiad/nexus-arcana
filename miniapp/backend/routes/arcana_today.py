@@ -16,6 +16,8 @@ from arcana.repos.pg_sessions_repo import PgSessionsRepo as _PgSessionsRepoClass
 _pg_sessions_repo = _PgSessionsRepoClass()
 from arcana.repos.pg_works_repo import PgWorksRepo as _PgWorksRepoClass
 _pg_works_repo = _PgWorksRepoClass()
+from core.repos.pg_nexus_lists_repo import PgArcanaInventoryRepo as _PgArcanaInventoryRepoClass
+_arcana_inv_repo_lists = _PgArcanaInventoryRepoClass()
 from core.user_manager import get_user_notion_id
 from core.bot_notify import notify_user
 
@@ -830,10 +832,26 @@ async def get_arcana_works(
         logger.warning("works list fetch failed: %s", e)
         works_list = []
     clients_map = await load_clients_map(user_notion_id)
+    open_works = [w for w in works_list if w.status not in ("done", "archived")]
+
+    # batch-fetch subtasks from arcana_inventory (works_id = PG work id)
+    subtasks_by_work: dict = {}
+    if open_works:
+        try:
+            work_ids = [w.id for w in open_works]
+            sub_items = await _arcana_inv_repo_lists.get_items_for_works(work_ids, user_notion_id)
+            for s in sub_items:
+                if s.works_id:
+                    subtasks_by_work.setdefault(s.works_id, []).append({
+                        "id": s.id,
+                        "name": s.name,
+                        "done": s.status == "done",
+                    })
+        except Exception as e:
+            logger.warning("subtasks fetch failed: %s", e)
+
     items: list[dict] = []
-    for w in works_list:
-        if w.status in ("done", "archived"):
-            continue
+    for w in open_works:
         deadline_date = _work_local_date(w.deadline_dt, tz_offset)
         is_overdue = bool(deadline_date and deadline_date < today_date)
         cli_id = w.client_id
@@ -851,7 +869,7 @@ async def get_arcana_works(
             "deadline_label": w.deadline_iso[:16].replace("T", " ") if w.deadline_iso else "",
             "is_overdue": is_overdue,
             "client": {"id": cli_id, "name": cli_name, "type": ctype} if cli_id else None,
-            "subtasks": [],  # 🗒️ Списки still Notion — blocker until Lists migrated
+            "subtasks": subtasks_by_work.get(w.id, []),
         })
     return {"works": items, "total": len(items)}
 

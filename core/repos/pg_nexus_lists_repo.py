@@ -520,6 +520,78 @@ def _ai_get_group_remaining_sync(group_name: str, list_type: str) -> int:
     return 0 if row is None else 1
 
 
+def _nl_get_items_for_works_sync(works_ids: List[str], user_notion_id: str) -> List[ListItem]:
+    if not works_ids:
+        return []
+    q = (
+        select(nexus_lists)
+        .where(nexus_lists.c.works_id.in_(list(works_ids)))
+        .where(nexus_lists.c.status != "archived")
+    )
+    if user_notion_id:
+        q = q.where(
+            (nexus_lists.c.user_notion_id == user_notion_id)
+            | (nexus_lists.c.user_notion_id == "")
+        )
+    q = q.order_by(nexus_lists.c.created_at.asc())
+    with _get_engine().connect() as conn:
+        rows = conn.execute(q).fetchall()
+    return [_row_to_list_item(r) for r in rows]
+
+
+def _nl_get_items_for_task_sync(task_id: str, user_notion_id: str) -> List[ListItem]:
+    q = (
+        select(nexus_lists)
+        .where(nexus_lists.c.task_id == task_id)
+        .where(nexus_lists.c.status != "archived")
+    )
+    if user_notion_id:
+        q = q.where(
+            (nexus_lists.c.user_notion_id == user_notion_id)
+            | (nexus_lists.c.user_notion_id == "")
+        )
+    q = q.order_by(nexus_lists.c.created_at.asc())
+    with _get_engine().connect() as conn:
+        rows = conn.execute(q).fetchall()
+    return [_row_to_list_item(r) for r in rows]
+
+
+def _ai_get_items_for_works_sync(works_ids: List[str], user_notion_id: str) -> List[InventoryItem]:
+    if not works_ids:
+        return []
+    q = (
+        select(arcana_inventory)
+        .where(arcana_inventory.c.works_id.in_(list(works_ids)))
+        .where(arcana_inventory.c.status != "archived")
+    )
+    if user_notion_id:
+        q = q.where(
+            (arcana_inventory.c.user_notion_id == user_notion_id)
+            | (arcana_inventory.c.user_notion_id == "")
+        )
+    q = q.order_by(arcana_inventory.c.created_at.asc())
+    with _get_engine().connect() as conn:
+        rows = conn.execute(q).fetchall()
+    return [_row_to_inventory_item(r) for r in rows]
+
+
+def _ai_get_open_barter_sync(user_notion_id: str) -> List[InventoryItem]:
+    q = (
+        select(arcana_inventory)
+        .where(arcana_inventory.c.category == BARTER_CATEGORY)
+        .where(arcana_inventory.c.status.notin_(["done", "archived"]))
+    )
+    if user_notion_id:
+        q = q.where(
+            (arcana_inventory.c.user_notion_id == user_notion_id)
+            | (arcana_inventory.c.user_notion_id == "")
+        )
+    q = q.order_by(arcana_inventory.c.created_at.asc())
+    with _get_engine().connect() as conn:
+        rows = conn.execute(q).fetchall()
+    return [_row_to_inventory_item(r) for r in rows]
+
+
 # ── Public async repos ─────────────────────────────────────────────────────────
 
 class PgNexusListsRepo:
@@ -608,6 +680,16 @@ class PgNexusListsRepo:
     async def get_group_remaining(self, group_name: str, list_type: str) -> int:
         return await asyncio.to_thread(_nl_get_group_remaining_sync, group_name, list_type)
 
+    async def get_items_for_works(
+        self, works_ids: List[str], user_notion_id: str = ""
+    ) -> List[ListItem]:
+        return await asyncio.to_thread(_nl_get_items_for_works_sync, works_ids, user_notion_id)
+
+    async def get_items_for_task(
+        self, task_id: str, user_notion_id: str = ""
+    ) -> List[ListItem]:
+        return await asyncio.to_thread(_nl_get_items_for_task_sync, task_id, user_notion_id)
+
 
 class PgArcanaInventoryRepo:
     """Async repo for arcana_inventory table.
@@ -679,3 +761,11 @@ class PgArcanaInventoryRepo:
 
     async def get_group_remaining(self, group_name: str, list_type: str) -> int:
         return await asyncio.to_thread(_ai_get_group_remaining_sync, group_name, list_type)
+
+    async def get_items_for_works(
+        self, works_ids: List[str], user_notion_id: str = ""
+    ) -> List[InventoryItem]:
+        return await asyncio.to_thread(_ai_get_items_for_works_sync, works_ids, user_notion_id)
+
+    async def get_open_barter(self, user_notion_id: str = "") -> List[InventoryItem]:
+        return await asyncio.to_thread(_ai_get_open_barter_sync, user_notion_id)

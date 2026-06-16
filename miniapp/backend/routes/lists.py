@@ -9,6 +9,11 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from core.config import config
 from core.notion_client import query_pages
 from core.user_manager import get_user_notion_id
+from core.repos.pg_nexus_lists_repo import (
+    PgNexusListsRepo,
+    PG_STATUS_TO_NOTION,
+    PG_PRIORITY_TO_NOTION,
+)
 
 from miniapp.backend.auth import current_user_id
 from miniapp.backend._helpers import (
@@ -26,6 +31,8 @@ from miniapp.backend._helpers import (
     to_local_date,
     today_user_tz,
 )
+
+_nexus_lists_repo = PgNexusListsRepo()
 
 logger = logging.getLogger("miniapp.lists")
 
@@ -70,6 +77,27 @@ def _serialize(page: dict) -> dict:
     }
 
 
+def _serialize_pg(item) -> dict:
+    """ListItem → dict совместимый с фронтом (PG путь)."""
+    return {
+        "id": item.id,
+        "name": item.name,
+        "cat": cat_from_notion(item.category) if item.category else "",
+        "done": item.status == "done",
+        "status": PG_STATUS_TO_NOTION.get(item.status, "Not started"),
+        "qty": item.quantity,
+        "price": item.price_actual,
+        "price_plan": item.price_plan,
+        "source": item.store or None,
+        "stage": item.stage,
+        "note": item.note or None,
+        "priority": PG_PRIORITY_TO_NOTION.get(item.priority) or None,
+        "expires": item.expires_at or None,
+        "group": item.group_name or None,
+        "recurring": item.is_recurring,
+    }
+
+
 def _summary(items: list[dict]) -> dict:
     """v1.2: агрегации план/факт по списку items (после фильтров)."""
     plan = 0.0
@@ -101,91 +129,17 @@ async def get_lists(
     if type not in _TYPE_MAP:
         raise HTTPException(status_code=400, detail=f"type must be one of {sorted(_TYPE_MAP)}")
 
-    db_id = config.db_lists
-    if not db_id:
-        return {"type": type, "items": []}
-
     user_notion_id = (await get_user_notion_id(tg_id)) or ""
-    # wave6.1: фильтруем ТОЛЬКО по user + Бот (Nexus or empty).
-    # По "Тип" фильтруем client-side — Notion иногда возвращает 0 из-за
-    # emoji-variant'ов и пробелов, а select-equals жёстко сравнивает.
-    # wave8.6: пробуем server-side equals по Тип (точное соответствие TYPE_MAP);
-    # если вернёт 0 — падаем на client-side matching ниже.
-    type_target = _TYPE_MAP[type]
-    conditions: list[dict] = [
-        {"or": [
-            {"property": "Бот", "select": {"equals": BOT_NEXUS}},
-            {"property": "Бот", "select": {"is_empty": True}},
-        ]},
-        {"property": "Тип", "select": {"equals": type_target}},
-    ]
-    if user_notion_id:
-        # wave8.46: чеклисты создаются через Notion-UI без relation на пользователя.
-        # Включаем и items без 🪪 Пользователи (как с фильтром «Бот»).
-        conditions.append({
-            "or": [
-                {"property": "🪪 Пользователи", "relation": {"contains": user_notion_id}},
-                {"property": "🪪 Пользователи", "relation": {"is_empty": True}},
-            ]
-        })
-
-    # wave8.47: старые сверху → новые снизу для всех типов; inv по сроку годности.
-    sorts = (
-        [{"property": "Срок годности", "direction": "ascending"}]
-        if type == "inv"
-        else [{"timestamp": "created_time", "direction": "ascending"}]
-    )
-
     try:
-        pages = await query_pages(
-            db_id, filters={"and": conditions}, sorts=sorts, page_size=500,
+        pg_items = await _nexus_lists_repo.get_summary_items(
+            user_notion_id, list_type=_TYPE_MAP[type]
         )
     except Exception as e:
-        logger.warning("lists query failed, retry without sort: %s", e)
-        pages = await query_pages(db_id, filters={"and": conditions}, page_size=500)
+        logger.warning("lists PG query failed: %s", e)
+        pg_items = []
 
-    # wave8.6: если server-side equals вернул 0 — фолбэк на broad query + client-side match
-    if not pages:
-        broad = [c for c in conditions if not (
-            isinstance(c, dict) and c.get("property") == "Тип"
-        )]
-        try:
-            pages = await query_pages(
-                db_id, filters={"and": broad}, sorts=sorts, page_size=500,
-            )
-        except Exception:
-            pages = await query_pages(db_id, filters={"and": broad}, page_size=500)
-
-    keywords = _TYPE_KEYWORDS[type]
-
-    def _matches_type(page: dict) -> bool:
-        # wave7.6: поддерживаем и select, и multi_select, и status — Notion в
-        # разных базах может вернуть разный shape свойства «Тип».
-        prop = page.get("properties", {}).get("Тип", {}) or {}
-        candidates: list[str] = []
-        raw_sel = select_name(prop)
-        if raw_sel:
-            candidates.append(raw_sel)
-        for it in (prop.get("multi_select") or []):
-            nm = it.get("name") or ""
-            if nm:
-                candidates.append(nm)
-        st = (prop.get("status") or {}).get("name") or ""
-        if st:
-            candidates.append(st)
-        if not candidates:
-            return False
-        for raw in candidates:
-            if raw == type_target:
-                return True
-            raw_lower = raw.lower()
-            if any(k in raw_lower for k in keywords):
-                return True
-        return False
-
-    pages = [p for p in pages if _matches_type(p)]
-    items = [_serialize(p) for p in pages]
-    # Archived не показываем
+    items = [_serialize_pg(i) for i in pg_items]
+    # get_summary_items excludes archived; double-check
     items = [i for i in items if i["status"] != "Archived"]
 
     if q:
@@ -200,19 +154,11 @@ async def get_lists(
         g_target = group.strip().lower()
         items = [i for i in items if (i.get("group") or "").strip().lower() == g_target]
 
-    # Для 'inv' — записи без expires в конец
     if type == "inv":
         items.sort(key=lambda i: (i["expires"] is None, i["expires"] or ""))
 
-    # wave8.47: для чеклистов прикрепляем данные родительской задачи (cat/prio/deadline/repeat/reminder).
     if type == "check" and items:
         await _attach_parent_tasks(items, tg_id, user_notion_id)
-        # wave8.62: items с родителем-Done/Complete/Archived прячем — чеклист закрытой
-        # задачи не должен висеть в активном списке Mini App. Сами items в Notion
-        # остаются нетронутыми (бот-логика clone_recurring их не касается).
-        # wave8.62.2: фильтр применяется ТОЛЬКО к общему списку. Когда фронт явно
-        # просит items конкретной задачи (?group=<title>) — отдаём как есть, иначе
-        # subtasks read-only в TaskSheet закрытой задачи окажутся пустыми.
         if not group:
             items = [
                 i for i in items

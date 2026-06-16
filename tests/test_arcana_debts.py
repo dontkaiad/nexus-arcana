@@ -64,15 +64,16 @@ def _pg_ritual(rid, name, cid, price=5000, paid_=0):
     return r
 
 
-def _barter_item(iid, name, group, status="To do"):
-    return {
-        "id": iid,
-        "properties": {
-            "Название": {"title": [{"plain_text": name}]},
-            "Группа": {"rich_text": [{"plain_text": group}]},
-            "Статус": {"status": {"name": status}},
-        },
-    }
+def _barter_item(iid, name, group):
+    from core.repos.pg_nexus_lists_repo import InventoryItem
+    return InventoryItem(
+        id=str(iid),
+        name=name,
+        list_type="чеклист",
+        status="not_started",
+        category="🔄 Бартер",
+        group_name=group,
+    )
 
 
 def _patches(clients=None, sessions=None, rituals=None, barter_items=None):
@@ -82,15 +83,15 @@ def _patches(clients=None, sessions=None, rituals=None, barter_items=None):
     mock_sess.list_all = AsyncMock(return_value=sessions or [])
     mock_rit = MagicMock()
     mock_rit.list_all = AsyncMock(return_value=rituals or [])
+    mock_inv = MagicMock()
+    mock_inv.get_open_barter = AsyncMock(return_value=barter_items or [])
     return [
         patch("miniapp.backend.routes.arcana_debts._clients_repo", mock_cl),
         patch("miniapp.backend.routes.arcana_debts._sessions_repo", mock_sess),
         patch("miniapp.backend.routes.arcana_debts._rituals_repo", mock_rit),
-        patch("miniapp.backend.routes.arcana_debts.query_pages",
-              AsyncMock(return_value=barter_items or [])),
+        patch("miniapp.backend.routes.arcana_debts._arcana_inv_repo", mock_inv),
         patch("miniapp.backend.routes.arcana_debts.get_user_notion_id",
               AsyncMock(return_value=FAKE_NOTION)),
-        patch("miniapp.backend.routes.arcana_debts.config.db_lists", "lists-db-id"),
     ]
 
 

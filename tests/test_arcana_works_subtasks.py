@@ -36,14 +36,22 @@ def _pg_work(wid, title):
     )
 
 
+def _mock_inv_repo(items=None):
+    m = MagicMock()
+    m.get_items_for_works = AsyncMock(return_value=items or [])
+    return m
+
+
 def test_arcana_works_payload_contains_subtasks(client):
-    """После миграции на PG works: subtasks всегда [] (🗒️ Списки ещё Notion)."""
+    """После миграции Списки на PG: subtasks берутся из arcana_inventory."""
     pg_works = [_pg_work("w1", "Подготовить колоду"), _pg_work("w2", "Закупить свечи")]
     mock_repo = MagicMock()
     mock_repo.list_all = AsyncMock(return_value=pg_works)
 
     today = date(2026, 5, 3)
     with patch("miniapp.backend.routes.arcana_today._pg_works_repo", mock_repo), \
+         patch("miniapp.backend.routes.arcana_today._arcana_inv_repo_lists",
+               _mock_inv_repo([])), \
          patch("miniapp.backend.routes.arcana_today.load_clients_map",
                AsyncMock(return_value={})), \
          patch("miniapp.backend.routes.arcana_today.today_user_tz",
@@ -57,9 +65,41 @@ def test_arcana_works_payload_contains_subtasks(client):
     assert data["total"] == 2
     by_id = {w["id"]: w for w in data["works"]}
     assert "subtasks" in by_id["w1"]
-    # PG works → subtasks = [] until 🗒️ Списки migrated
     assert by_id["w1"]["subtasks"] == []
     assert by_id["w2"]["subtasks"] == []
+
+
+def test_arcana_works_subtasks_populated(client):
+    """Когда arcana_inventory.get_items_for_works возвращает items — они видны в ответе."""
+    from core.repos.pg_nexus_lists_repo import InventoryItem
+    pg_works = [_pg_work("42", "Расклад")]
+    sub = InventoryItem(
+        id="99", name="Зажечь свечу", list_type="чеклист",
+        status="not_started", works_id="42",
+    )
+    mock_repo = MagicMock()
+    mock_repo.list_all = AsyncMock(return_value=pg_works)
+
+    today = date(2026, 5, 3)
+    with patch("miniapp.backend.routes.arcana_today._pg_works_repo", mock_repo), \
+         patch("miniapp.backend.routes.arcana_today._arcana_inv_repo_lists",
+               _mock_inv_repo([sub])), \
+         patch("miniapp.backend.routes.arcana_today.load_clients_map",
+               AsyncMock(return_value={})), \
+         patch("miniapp.backend.routes.arcana_today.today_user_tz",
+               AsyncMock(return_value=(today, 3))), \
+         patch("miniapp.backend.routes.arcana_today.get_user_notion_id",
+               AsyncMock(return_value=FAKE_NOTION)):
+        r = client.get("/api/arcana/works")
+
+    assert r.status_code == 200, r.text
+    data = r.json()
+    work = data["works"][0]
+    assert work["id"] == "42"
+    assert len(work["subtasks"]) == 1
+    assert work["subtasks"][0]["id"] == "99"
+    assert work["subtasks"][0]["name"] == "Зажечь свечу"
+    assert work["subtasks"][0]["done"] is False
 
 
 def test_arcana_works_returns_open_only(client):
@@ -77,6 +117,8 @@ def test_arcana_works_returns_open_only(client):
 
     today = date(2026, 5, 3)
     with patch("miniapp.backend.routes.arcana_today._pg_works_repo", mock_repo), \
+         patch("miniapp.backend.routes.arcana_today._arcana_inv_repo_lists",
+               _mock_inv_repo([])), \
          patch("miniapp.backend.routes.arcana_today.load_clients_map",
                AsyncMock(return_value={})), \
          patch("miniapp.backend.routes.arcana_today.today_user_tz",

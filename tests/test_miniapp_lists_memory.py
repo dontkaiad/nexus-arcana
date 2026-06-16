@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import json as _json
 from datetime import datetime, timedelta, timezone
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
@@ -114,17 +114,17 @@ def _parent_task(title, *, status="Not started"):
 # ── GET /api/lists ───────────────────────────────────────────────────────────
 
 def test_lists_buy_returns_items(client):
-    pages = [
-        _list_item("l1", "Молоко", cat="🍜 Продукты", qty=1, note="Простоквашино"),
-        _list_item("l2", "Хлеб", status="Done", cat="🍜 Продукты"),
+    from core.repos.pg_nexus_lists_repo import ListItem
+    pg_items = [
+        ListItem(id="l1", name="Молоко", list_type="покупки", status="not_started",
+                 category="🍜 Продукты", quantity=1.0, note="Простоквашино"),
+        ListItem(id="l2", name="Хлеб", list_type="покупки", status="done",
+                 category="🍜 Продукты"),
     ]
-
-    async def qp(*_, **__):
-        return pages
-
-    with patch("miniapp.backend.routes.lists.query_pages", side_effect=qp), \
+    with patch("miniapp.backend.routes.lists._nexus_lists_repo") as mock_repo, \
          patch("miniapp.backend.routes.lists.get_user_notion_id",
                AsyncMock(return_value=FAKE_NOTION_USER)):
+        mock_repo.get_summary_items = AsyncMock(return_value=pg_items)
         r = client.get("/api/lists?type=buy")
 
     assert r.status_code == 200, r.text
@@ -139,20 +139,18 @@ def test_lists_buy_returns_items(client):
 
 
 def test_lists_inv_sorts_by_expiry(client):
+    from core.repos.pg_nexus_lists_repo import ListItem
     soon = (datetime.now().date() + timedelta(days=5)).isoformat()
     later = (datetime.now().date() + timedelta(days=30)).isoformat()
-    pages = [
-        _list_item("a", "Потом", type_="📦 Инвентарь", expires=later),
-        _list_item("b", "Скоро", type_="📦 Инвентарь", expires=soon),
-        _list_item("c", "Без срока", type_="📦 Инвентарь", expires=None),
+    pg_items = [
+        ListItem(id="a", name="Потом", list_type="инвентарь", status="not_started", expires_at=later),
+        ListItem(id="b", name="Скоро", list_type="инвентарь", status="not_started", expires_at=soon),
+        ListItem(id="c", name="Без срока", list_type="инвентарь", status="not_started", expires_at=""),
     ]
-
-    async def qp(*_, **__):
-        return pages
-
-    with patch("miniapp.backend.routes.lists.query_pages", side_effect=qp), \
+    with patch("miniapp.backend.routes.lists._nexus_lists_repo") as mock_repo, \
          patch("miniapp.backend.routes.lists.get_user_notion_id",
                AsyncMock(return_value=FAKE_NOTION_USER)):
+        mock_repo.get_summary_items = AsyncMock(return_value=pg_items)
         r = client.get("/api/lists?type=inv")
 
     assert r.status_code == 200
@@ -161,18 +159,16 @@ def test_lists_inv_sorts_by_expiry(client):
 
 
 def test_lists_q_filter(client):
-    pages = [
-        _list_item("a", "Молоко", note="3,2%"),
-        _list_item("b", "Хлеб", note="бородинский"),
-        _list_item("c", "Сыр", note=None),
+    from core.repos.pg_nexus_lists_repo import ListItem
+    pg_items = [
+        ListItem(id="a", name="Молоко", list_type="покупки", status="not_started", note="3,2%"),
+        ListItem(id="b", name="Хлеб", list_type="покупки", status="not_started", note="бородинский"),
+        ListItem(id="c", name="Сыр", list_type="покупки", status="not_started"),
     ]
-
-    async def qp(*_, **__):
-        return pages
-
-    with patch("miniapp.backend.routes.lists.query_pages", side_effect=qp), \
+    with patch("miniapp.backend.routes.lists._nexus_lists_repo") as mock_repo, \
          patch("miniapp.backend.routes.lists.get_user_notion_id",
                AsyncMock(return_value=FAKE_NOTION_USER)):
+        mock_repo.get_summary_items = AsyncMock(return_value=pg_items)
         r = client.get("/api/lists?type=buy&q=мол")
 
     items = r.json()["items"]
@@ -185,11 +181,10 @@ def test_lists_invalid_type(client):
 
 
 def test_lists_empty(client):
-    async def qp(*_, **__):
-        return []
-    with patch("miniapp.backend.routes.lists.query_pages", side_effect=qp), \
+    with patch("miniapp.backend.routes.lists._nexus_lists_repo") as mock_repo, \
          patch("miniapp.backend.routes.lists.get_user_notion_id",
                AsyncMock(return_value="")):
+        mock_repo.get_summary_items = AsyncMock(return_value=[])
         r = client.get("/api/lists?type=check")
     assert r.status_code == 200
     body = r.json()
@@ -206,61 +201,53 @@ def test_lists_401_without_init_data():
 
 
 def test_lists_filter_allows_empty_bot(client):
-    """wave5.4: чеклисты без заполненного Бот тоже должны попадать в выборку."""
-    captured = {}
-
-    async def qp(db_id, *, filters=None, **kwargs):
-        captured["filters"] = filters
-        return []
-
-    with patch("miniapp.backend.routes.lists.query_pages", side_effect=qp), \
+    """wave5.4→PG: чеклисты без поля Бот видны — PG не фильтрует по Бот."""
+    from core.repos.pg_nexus_lists_repo import ListItem
+    pg_items = [
+        ListItem(id="c1", name="пункт без бота", list_type="чеклист", status="not_started"),
+    ]
+    with patch("miniapp.backend.routes.lists._nexus_lists_repo") as mock_repo, \
          patch("miniapp.backend.routes.lists.get_user_notion_id",
                AsyncMock(return_value=FAKE_NOTION_USER)):
+        mock_repo.get_summary_items = AsyncMock(return_value=pg_items)
         r = client.get("/api/lists?type=check")
 
     assert r.status_code == 200
-    filter_str = _json.dumps(captured["filters"] or {}, ensure_ascii=False)
-    # or-ветвь с is_empty присутствует (Бот Nexus OR пустой)
-    assert "is_empty" in filter_str
-    # wave6.1: "Тип" теперь фильтруется client-side — в Notion-запросе его нет
-    assert "Чеклист" not in filter_str
+    # PG не фильтрует по полю Бот — все items юзера возвращаются
+    assert len(r.json()["items"]) == 1
 
 
 # ── GET /api/lists — client-side type matching (wave6) ──────────────────────
 
 def test_lists_check_loads_with_exact_emoji(client):
-    pages = [
-        _list_item("c1", "купить молоко", type_="📋 Чеклист", bot="☀️ Nexus"),
-        _list_item("c2", "старое покупочное", type_="🛒 Покупки", bot="☀️ Nexus"),
+    """PG path: get_summary_items фильтрует по list_type на стороне БД."""
+    from core.repos.pg_nexus_lists_repo import ListItem
+    # Покупки-тип не возвращаются — PG уже отфильтровал по list_type="📋 Чеклист"
+    pg_items = [
+        ListItem(id="c1", name="купить молоко", list_type="чеклист", status="not_started"),
     ]
-
-    async def qp(*_, **__):
-        return pages
-
-    with patch("miniapp.backend.routes.lists.query_pages", side_effect=qp), \
+    with patch("miniapp.backend.routes.lists._nexus_lists_repo") as mock_repo, \
          patch("miniapp.backend.routes.lists.get_user_notion_id",
                AsyncMock(return_value=FAKE_NOTION_USER)):
+        mock_repo.get_summary_items = AsyncMock(return_value=pg_items)
         r = client.get("/api/lists?type=check")
 
     assert r.status_code == 200
     ids = [i["id"] for i in r.json()["items"]]
     assert "c1" in ids
-    assert "c2" not in ids
 
 
 def test_lists_check_loads_when_type_has_diff_spacing(client):
-    """Если в Notion тип записан как '📋  Чеклист' с 2 пробелами — client-side match ловит."""
-    pages = [
-        _list_item("c1", "план дня", type_="📋  Чеклист", bot="☀️ Nexus"),
-        _list_item("c2", "утро ритуал", type_="📋 Чеклист ", bot="☀️ Nexus"),  # trailing space
+    """PG path: list_type нормализован при записи, оба пункта чеклиста видны."""
+    from core.repos.pg_nexus_lists_repo import ListItem
+    pg_items = [
+        ListItem(id="c1", name="план дня", list_type="чеклист", status="not_started"),
+        ListItem(id="c2", name="утро ритуал", list_type="чеклист", status="not_started"),
     ]
-
-    async def qp(*_, **__):
-        return pages
-
-    with patch("miniapp.backend.routes.lists.query_pages", side_effect=qp), \
+    with patch("miniapp.backend.routes.lists._nexus_lists_repo") as mock_repo, \
          patch("miniapp.backend.routes.lists.get_user_notion_id",
                AsyncMock(return_value=FAKE_NOTION_USER)):
+        mock_repo.get_summary_items = AsyncMock(return_value=pg_items)
         r = client.get("/api/lists?type=check")
 
     assert r.status_code == 200
@@ -269,17 +256,16 @@ def test_lists_check_loads_when_type_has_diff_spacing(client):
 
 
 def test_lists_inv_matches_partial_keyword(client):
-    pages = [
-        _list_item("i1", "гречка", type_="📦 Инвентарь", bot="☀️ Nexus"),
-        _list_item("i2", "перец", type_="📦  Инвентарь", bot="☀️ Nexus"),  # double space
+    """PG path: оба инвентарных пункта возвращаются."""
+    from core.repos.pg_nexus_lists_repo import ListItem
+    pg_items = [
+        ListItem(id="i1", name="гречка", list_type="инвентарь", status="not_started"),
+        ListItem(id="i2", name="перец", list_type="инвентарь", status="not_started"),
     ]
-
-    async def qp(*_, **__):
-        return pages
-
-    with patch("miniapp.backend.routes.lists.query_pages", side_effect=qp), \
+    with patch("miniapp.backend.routes.lists._nexus_lists_repo") as mock_repo, \
          patch("miniapp.backend.routes.lists.get_user_notion_id",
                AsyncMock(return_value=FAKE_NOTION_USER)):
+        mock_repo.get_summary_items = AsyncMock(return_value=pg_items)
         r = client.get("/api/lists?type=inv")
 
     assert r.status_code == 200
@@ -287,17 +273,15 @@ def test_lists_inv_matches_partial_keyword(client):
 
 
 def test_lists_archived_filtered_out(client):
-    pages = [
-        _list_item("a1", "активное", type_="📋 Чеклист", status="Not started", bot="☀️ Nexus"),
-        _list_item("a2", "архив", type_="📋 Чеклист", status="Archived", bot="☀️ Nexus"),
+    from core.repos.pg_nexus_lists_repo import ListItem
+    pg_items = [
+        ListItem(id="a1", name="активное", list_type="чеклист", status="not_started"),
+        ListItem(id="a2", name="архив", list_type="чеклист", status="archived"),
     ]
-
-    async def qp(*_, **__):
-        return pages
-
-    with patch("miniapp.backend.routes.lists.query_pages", side_effect=qp), \
+    with patch("miniapp.backend.routes.lists._nexus_lists_repo") as mock_repo, \
          patch("miniapp.backend.routes.lists.get_user_notion_id",
                AsyncMock(return_value=FAKE_NOTION_USER)):
+        mock_repo.get_summary_items = AsyncMock(return_value=pg_items)
         r = client.get("/api/lists?type=check")
 
     ids = [i["id"] for i in r.json()["items"]]
@@ -308,13 +292,16 @@ def test_lists_archived_filtered_out(client):
 
 def test_check_items_with_done_parent_are_hidden(client):
     """Чеклист задачи в статусе Done не должен возвращаться endpoint'ом."""
-    DB_LISTS = "db-lists-id"
+    from core.repos.pg_nexus_lists_repo import ListItem
     DB_TASKS = "db-tasks-id"
 
-    list_pages = [
-        _list_item("c1", "помыть холодильник", type_="📋 Чеклист", group="Генеральная уборка"),
-        _list_item("c2", "купить молоко", type_="📋 Чеклист", group="Покупки на неделю"),
-        _list_item("c3", "выкинуть просрочку", type_="📋 Чеклист", group="Архив прошлый год"),
+    pg_items = [
+        ListItem(id="c1", name="помыть холодильник", list_type="чеклист", status="not_started",
+                 group_name="Генеральная уборка"),
+        ListItem(id="c2", name="купить молоко", list_type="чеклист", status="not_started",
+                 group_name="Покупки на неделю"),
+        ListItem(id="c3", name="выкинуть просрочку", list_type="чеклист", status="not_started",
+                 group_name="Архив прошлый год"),
     ]
     task_pages = [
         _parent_task("Генеральная уборка", status="Done"),
@@ -323,19 +310,18 @@ def test_check_items_with_done_parent_are_hidden(client):
     ]
 
     async def qp(db_id, *, filters=None, **__):
-        if db_id == DB_LISTS:
-            return list_pages
         if db_id == DB_TASKS:
             return task_pages
         return []
 
-    with patch("miniapp.backend.routes.lists.query_pages", side_effect=qp), \
+    with patch("miniapp.backend.routes.lists._nexus_lists_repo") as mock_repo, \
+         patch("miniapp.backend.routes.lists.query_pages", side_effect=qp), \
          patch("miniapp.backend.routes.lists.get_user_notion_id",
                AsyncMock(return_value=FAKE_NOTION_USER)), \
          patch("miniapp.backend.routes.lists.today_user_tz",
                AsyncMock(return_value=(_today_date(), 3))), \
          patch("miniapp.backend.routes.lists.config") as cfg:
-        cfg.db_lists = DB_LISTS
+        mock_repo.get_summary_items = AsyncMock(return_value=pg_items)
         cfg.nexus.db_tasks = DB_TASKS
         r = client.get("/api/lists?type=check")
 
@@ -349,33 +335,30 @@ def test_check_items_with_done_parent_are_hidden(client):
 def test_check_items_match_parent_case_insensitive(client):
     """wave8.62.1: title задачи и Группа айтема могут отличаться регистром/пробелами —
     parent должен всё равно приклеиться, а Done-родитель — спрятать item."""
-    DB_LISTS = "db-lists-id"
+    from core.repos.pg_nexus_lists_repo import ListItem
     DB_TASKS = "db-tasks-id"
 
-    list_pages = [
-        # Группа = lowercase + лишние пробелы
-        _list_item("c-mismatch", "помыть холодильник", type_="📋 Чеклист",
-                   group="  сделать генеральную уборку кухни  "),
+    pg_items = [
+        ListItem(id="c-mismatch", name="помыть холодильник", list_type="чеклист",
+                 status="not_started", group_name="  сделать генеральную уборку кухни  "),
     ]
     task_pages = [
-        # Title = capitalize, без лишних пробелов
         _parent_task("Сделать Генеральную Уборку Кухни", status="Done"),
     ]
 
     async def qp(db_id, *, filters=None, **__):
-        if db_id == DB_LISTS:
-            return list_pages
         if db_id == DB_TASKS:
             return task_pages
         return []
 
-    with patch("miniapp.backend.routes.lists.query_pages", side_effect=qp), \
+    with patch("miniapp.backend.routes.lists._nexus_lists_repo") as mock_repo, \
+         patch("miniapp.backend.routes.lists.query_pages", side_effect=qp), \
          patch("miniapp.backend.routes.lists.get_user_notion_id",
                AsyncMock(return_value=FAKE_NOTION_USER)), \
          patch("miniapp.backend.routes.lists.today_user_tz",
                AsyncMock(return_value=(_today_date(), 3))), \
          patch("miniapp.backend.routes.lists.config") as cfg:
-        cfg.db_lists = DB_LISTS
+        mock_repo.get_summary_items = AsyncMock(return_value=pg_items)
         cfg.nexus.db_tasks = DB_TASKS
         r = client.get("/api/lists?type=check")
 
@@ -387,12 +370,13 @@ def test_check_items_match_parent_case_insensitive(client):
 
 def test_check_items_match_parent_without_user_relation(client):
     """wave8.62.1: родитель без relation 🪪 Пользователи (создан в Notion-UI) —
-    запрос должен включать OR is_empty, иначе parent=None и Done-родитель не прячется."""
-    DB_LISTS = "db-lists-id"
+    запрос к db_tasks должен включать OR is_empty, иначе parent=None и Done-родитель не прячется."""
+    from core.repos.pg_nexus_lists_repo import ListItem
     DB_TASKS = "db-tasks-id"
 
-    list_pages = [
-        _list_item("c-orphan-parent", "пункт", type_="📋 Чеклист", group="Уборка"),
+    pg_items = [
+        ListItem(id="c-orphan-parent", name="пункт", list_type="чеклист",
+                 status="not_started", group_name="Уборка"),
     ]
     parent_no_user = _parent_task("Уборка", status="Done")
     parent_no_user["properties"]["🪪 Пользователи"] = {"relation": []}
@@ -401,20 +385,19 @@ def test_check_items_match_parent_without_user_relation(client):
     captured = {}
 
     async def qp(db_id, *, filters=None, **__):
-        if db_id == DB_LISTS:
-            return list_pages
         if db_id == DB_TASKS:
             captured["tasks_filters"] = filters
             return task_pages
         return []
 
-    with patch("miniapp.backend.routes.lists.query_pages", side_effect=qp), \
+    with patch("miniapp.backend.routes.lists._nexus_lists_repo") as mock_repo, \
+         patch("miniapp.backend.routes.lists.query_pages", side_effect=qp), \
          patch("miniapp.backend.routes.lists.get_user_notion_id",
                AsyncMock(return_value=FAKE_NOTION_USER)), \
          patch("miniapp.backend.routes.lists.today_user_tz",
                AsyncMock(return_value=(_today_date(), 3))), \
          patch("miniapp.backend.routes.lists.config") as cfg:
-        cfg.db_lists = DB_LISTS
+        mock_repo.get_summary_items = AsyncMock(return_value=pg_items)
         cfg.nexus.db_tasks = DB_TASKS
         r = client.get("/api/lists?type=check")
 
@@ -430,31 +413,32 @@ def test_check_items_with_group_param_show_even_if_parent_closed(client):
     """wave8.62.2: TaskSheet закрытой задачи запрашивает /api/lists?type=check&group=<title>
     чтобы показать subtasks read-only. Фильтр closed-parent НЕ должен прятать items
     в этом случае — иначе секция Чеклист в закрытом TaskSheet всегда пустая."""
-    DB_LISTS = "db-lists-id"
+    from core.repos.pg_nexus_lists_repo import ListItem
     DB_TASKS = "db-tasks-id"
 
-    list_pages = [
-        _list_item("c-done-parent-1", "помыть холодильник", type_="📋 Чеклист", group="Уборка кухни"),
-        _list_item("c-done-parent-2", "выкинуть просрочку", type_="📋 Чеклист", group="Уборка кухни"),
+    pg_items = [
+        ListItem(id="c-done-parent-1", name="помыть холодильник", list_type="чеклист",
+                 status="not_started", group_name="Уборка кухни"),
+        ListItem(id="c-done-parent-2", name="выкинуть просрочку", list_type="чеклист",
+                 status="not_started", group_name="Уборка кухни"),
     ]
     task_pages = [
         _parent_task("Уборка кухни", status="Done"),
     ]
 
     async def qp(db_id, *, filters=None, **__):
-        if db_id == DB_LISTS:
-            return list_pages
         if db_id == DB_TASKS:
             return task_pages
         return []
 
-    with patch("miniapp.backend.routes.lists.query_pages", side_effect=qp), \
+    with patch("miniapp.backend.routes.lists._nexus_lists_repo") as mock_repo, \
+         patch("miniapp.backend.routes.lists.query_pages", side_effect=qp), \
          patch("miniapp.backend.routes.lists.get_user_notion_id",
                AsyncMock(return_value=FAKE_NOTION_USER)), \
          patch("miniapp.backend.routes.lists.today_user_tz",
                AsyncMock(return_value=(_today_date(), 3))), \
          patch("miniapp.backend.routes.lists.config") as cfg:
-        cfg.db_lists = DB_LISTS
+        mock_repo.get_summary_items = AsyncMock(return_value=pg_items)
         cfg.nexus.db_tasks = DB_TASKS
         # С group= — items должны быть видны (read-only subtasks в закрытом TaskSheet)
         r = client.get("/api/lists?type=check&group=Уборка%20кухни")
@@ -467,11 +451,16 @@ def test_check_items_with_group_param_show_even_if_parent_closed(client):
 # ── POST /api/lists create/done/delete ───────────────────────────────────────
 
 def test_list_create_inv_arcana_uses_arcana_bot_label(client):
-    """POST /api/lists с bot=arcana пишет Бот=🌒 Arcana."""
-    with patch("miniapp.backend.routes.writes.page_create",
-               AsyncMock(return_value="list-arc")) as pc, \
+    """POST /api/lists с bot=arcana → _arcana_inv_repo.add_item с правильными аргументами."""
+    from core.repos.pg_nexus_lists_repo import InventoryItem
+    fake_item = InventoryItem(
+        id="list-arc", name="соль", list_type="инвентарь", status="not_started",
+        category="🕯️ Расходники",
+    )
+    with patch("miniapp.backend.routes.writes._arcana_inv_repo") as mock_inv, \
          patch("miniapp.backend.routes.writes.get_user_notion_id",
                AsyncMock(return_value=FAKE_NOTION_USER)):
+        mock_inv.add_item = AsyncMock(return_value=fake_item)
         r = client.post("/api/lists", json={
             "type": "inv",
             "name": "соль",
@@ -481,17 +470,18 @@ def test_list_create_inv_arcana_uses_arcana_bot_label(client):
         })
     assert r.status_code == 200
     assert r.json()["id"] == "list-arc"
-    props = pc.await_args.args[1]
-    assert props["Бот"]["select"]["name"] == "🌒 Arcana"
-    assert props["Тип"]["select"]["name"] == "📦 Инвентарь"
-    assert props["Категория"]["select"]["name"] == "🕯️ Расходники"
+    kwargs = mock_inv.add_item.await_args.kwargs
+    assert kwargs["list_type"] == "📦 Инвентарь"
+    assert kwargs["category"] == "🕯️ Расходники"
 
 
 def test_list_create_buy(client):
-    with patch("miniapp.backend.routes.writes.page_create",
-               AsyncMock(return_value="list-id")) as pc, \
+    from core.repos.pg_nexus_lists_repo import ListItem
+    fake_item = ListItem(id="list-id", name="Молоко", list_type="покупки", status="not_started")
+    with patch("miniapp.backend.routes.writes._nexus_lists_repo") as mock_nx, \
          patch("miniapp.backend.routes.writes.get_user_notion_id",
                AsyncMock(return_value=FAKE_NOTION_USER)):
+        mock_nx.add_item = AsyncMock(return_value=fake_item)
         r = client.post("/api/lists", json={
             "type": "buy",
             "name": "Молоко",
@@ -499,10 +489,9 @@ def test_list_create_buy(client):
         })
     assert r.status_code == 200
     assert r.json() == {"ok": True, "id": "list-id"}
-    args, _ = pc.await_args
-    _, props = args
-    assert props["Тип"]["select"]["name"] == "🛒 Покупки"
-    assert props["Название"]["title"][0]["text"]["content"] == "Молоко"
+    kwargs = mock_nx.add_item.await_args.kwargs
+    assert kwargs["list_type"] == "🛒 Покупки"
+    assert kwargs["name"] == "Молоко"
 
 
 def test_list_create_invalid_type(client):
@@ -511,45 +500,40 @@ def test_list_create_invalid_type(client):
 
 
 def test_lists_done_endpoint_marks_status(client):
-    from core.notion_client import _status
-
-    captured = {}
-
-    async def fake_get_page(pid):
-        return {
-            "id": pid,
-            "properties": {
-                "🪪 Пользователи": {"relation": [{"id": FAKE_NOTION_USER}]},
-            },
-        }
-
-    async def fake_update_page(pid, props):
-        captured["id"] = pid
-        captured["props"] = props
-        return {"ok": True}
-
-    with patch("miniapp.backend.routes.writes.get_page", side_effect=fake_get_page), \
-         patch("miniapp.backend.routes.writes.update_page", side_effect=fake_update_page), \
+    from core.repos.pg_nexus_lists_repo import ListItem
+    fake_item = ListItem(
+        id="list-item-1", name="Молоко", list_type="покупки", status="not_started",
+        user_notion_id=FAKE_NOTION_USER,
+    )
+    with patch("miniapp.backend.routes.writes._nexus_lists_repo") as mock_nx, \
+         patch("miniapp.backend.routes.writes._arcana_inv_repo") as mock_inv, \
          patch("miniapp.backend.routes.writes.get_user_notion_id",
                AsyncMock(return_value=FAKE_NOTION_USER)):
+        mock_nx.get_by_id = AsyncMock(return_value=fake_item)
+        mock_nx.update_status = AsyncMock(return_value=True)
+        mock_inv.get_by_id = AsyncMock(return_value=None)
         r = client.post("/api/lists/list-item-1/done")
 
     assert r.status_code == 200
-    assert captured["id"] == "list-item-1"
-    assert captured["props"]["Статус"] == _status("Done")
+    mock_nx.update_status.assert_awaited_once_with("list-item-1", "Done")
 
 
 def test_list_delete_archives(client):
-    page = _page("l-2")
-    with patch("miniapp.backend.routes.writes.get_page", AsyncMock(return_value=page)), \
-         patch("miniapp.backend.routes.writes.update_page",
-               AsyncMock(return_value=None)) as up, \
+    from core.repos.pg_nexus_lists_repo import ListItem
+    fake_item = ListItem(
+        id="l-2", name="test", list_type="покупки", status="not_started",
+        user_notion_id=FAKE_NOTION_USER,
+    )
+    with patch("miniapp.backend.routes.writes._nexus_lists_repo") as mock_nx, \
+         patch("miniapp.backend.routes.writes._arcana_inv_repo") as mock_inv, \
          patch("miniapp.backend.routes.writes.get_user_notion_id",
                AsyncMock(return_value=FAKE_NOTION_USER)):
+        mock_nx.get_by_id = AsyncMock(return_value=fake_item)
+        mock_nx.update_status = AsyncMock(return_value=True)
+        mock_inv.get_by_id = AsyncMock(return_value=None)
         r = client.post("/api/lists/l-2/delete")
     assert r.status_code == 200
-    args, _ = up.await_args
-    assert args[1]["Статус"]["status"]["name"] == "Archived"
+    mock_nx.update_status.assert_awaited_once_with("l-2", "Archived")
 
 
 # ── GET /api/memory ──────────────────────────────────────────────────────────

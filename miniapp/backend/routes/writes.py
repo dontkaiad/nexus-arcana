@@ -33,6 +33,12 @@ from arcana.repos.pg_rituals_repo import PgRitualsRepo as _PgRitualsRepoClass
 _rituals_pg_repo = _PgRitualsRepoClass()
 from arcana.repos.pg_works_repo import PgWorksRepo as _PgWorksRepoClass
 _works_pg_repo = _PgWorksRepoClass()
+from core.repos.pg_nexus_lists_repo import (
+    PgNexusListsRepo as _PgNexusListsRepoClass,
+    PgArcanaInventoryRepo as _PgArcanaInventoryRepoClass,
+)
+_nexus_lists_repo = _PgNexusListsRepoClass()
+_arcana_inv_repo = _PgArcanaInventoryRepoClass()
 
 from arcana.repos.pg_sessions_repo import PgSessionsRepo as _PgSessionsRepoClass
 _sessions_pg_repo = _PgSessionsRepoClass()
@@ -925,6 +931,25 @@ _LIST_TYPES = {
 }
 
 
+async def _get_list_item_pg(item_id: str, user_notion_id: str):
+    """Найти item в nexus_lists (first) или arcana_inventory. 404 если не найден.
+
+    Returns (item, is_arcana: bool).
+    Ownership: разрешаем legacy items без user_notion_id (allow_empty_owner).
+    """
+    nx_item = await _nexus_lists_repo.get_by_id(item_id)
+    if nx_item:
+        if user_notion_id and nx_item.user_notion_id and nx_item.user_notion_id != user_notion_id:
+            raise HTTPException(status_code=404, detail="not found")
+        return nx_item, False
+    ai_item = await _arcana_inv_repo.get_by_id(item_id)
+    if ai_item:
+        if user_notion_id and ai_item.user_notion_id and ai_item.user_notion_id != user_notion_id:
+            raise HTTPException(status_code=404, detail="not found")
+        return ai_item, True
+    raise HTTPException(status_code=404, detail="not found")
+
+
 class ListCreateBody(BaseModel):
     type: str  # buy|check|inv
     name: str
@@ -949,46 +974,40 @@ async def list_create(
 ) -> dict[str, Any]:
     if body.type not in _LIST_TYPES:
         raise HTTPException(status_code=400, detail=f"type must be one of {sorted(_LIST_TYPES)}")
-    db_id = config.db_lists
-    if not db_id:
-        raise HTTPException(status_code=500, detail="lists DB not configured")
     user_notion_id = (await get_user_notion_id(tg_id)) or ""
-
-    bot_label = "🌒 Arcana" if (body.bot or "").lower() == "arcana" else BOT_NEXUS
-    props: dict = {
-        "Название": _title(body.name),
-        "Тип": _select(_LIST_TYPES[body.type]),
-        "Статус": _status("Not started"),
-        "Бот": _select(bot_label),
-    }
-    if body.cat:
-        props["Категория"] = _select(body.cat)
-    if body.qty is not None:
-        props["Количество"] = _number(float(body.qty))
-    if body.note:
-        props["Заметка"] = _text(body.note)
-    if body.price is not None:
-        props["Цена"] = _number(float(body.price))
-    # v1.2: новые поля
-    if body.price_plan is not None:
-        props["Цена план"] = _number(float(body.price_plan))
-    if body.source:
-        props["Магазин"] = _text(body.source)
-    if body.stage is not None:
-        props["Этап"] = _number(int(body.stage))
-    if body.group:
-        props["Группа"] = _text(body.group)
-    if body.priority:
-        props["Приоритет"] = _select(body.priority)
-    if body.expires:
-        props["Срок годности"] = _date(body.expires)
-    if user_notion_id:
-        props["🪪 Пользователи"] = _relation(user_notion_id)
-
-    page_id = await page_create(db_id, props)
-    if not page_id:
+    notion_type = _LIST_TYPES[body.type]
+    is_arcana = (body.bot or "").lower() == "arcana"
+    try:
+        if is_arcana:
+            item = await _arcana_inv_repo.add_item(
+                name=body.name,
+                list_type=notion_type,
+                category=body.cat or "",
+                quantity=body.qty,
+                note=body.note or "",
+                group_name=body.group or "",
+                user_notion_id=user_notion_id,
+            )
+        else:
+            item = await _nexus_lists_repo.add_item(
+                name=body.name,
+                list_type=notion_type,
+                category=body.cat or "",
+                quantity=body.qty,
+                note=body.note or "",
+                price_actual=body.price,
+                price_plan=body.price_plan,
+                store=body.source or "",
+                stage=body.stage,
+                group_name=body.group or "",
+                priority=body.priority or "",
+                expires_at=body.expires,
+                user_notion_id=user_notion_id,
+            )
+    except Exception as e:
+        logger.error("list_create PG failed: %s", e)
         raise HTTPException(status_code=500, detail="failed to create list item")
-    return {"ok": True, "id": page_id}
+    return {"ok": True, "id": item.id}
 
 
 @router.post("/lists/{item_id}/done")
@@ -996,15 +1015,14 @@ async def list_done(
     item_id: str,
     tg_id: int = Depends(current_user_id),
 ) -> dict[str, Any]:
-    """v1.1 (legacy): просто помечает Done. Не пишет в Финансы.
-
-    v1.2 предпочитает /checkout который создаёт расход. Endpoint оставлен
-    для обратной совместимости (используется существующим UI чеклистов).
-    """
+    """Помечает Done. Не пишет в Финансы (для этого есть /checkout)."""
     user_notion_id = (await get_user_notion_id(tg_id)) or ""
-    await _load_owned_page(item_id, user_notion_id, allow_empty_owner=True)
+    item, is_arcana = await _get_list_item_pg(item_id, user_notion_id)
     try:
-        await update_page(item_id, {"Статус": _status("Done")})
+        if is_arcana:
+            await _arcana_inv_repo.update_status(item_id, "Done")
+        else:
+            await _nexus_lists_repo.update_status(item_id, "Done")
     except Exception as e:
         logger.error("list_done failed: %s", e)
         raise HTTPException(status_code=500, detail="failed to mark done")
@@ -1028,43 +1046,32 @@ async def list_checkout(
 
     Логика факт-цены:
     1. body.price если передан;
-    2. Цена план из самой записи;
+    2. Цена план из самой записи (только для nexus_lists — у arcana_inventory поля нет);
     3. ничего → finance_created=False, расход не создаётся.
     """
     from core.list_manager import CATEGORY_TO_FINANCE
-    from core.notion_client import _extract_number, _extract_select
 
     user_notion_id = (await get_user_notion_id(tg_id)) or ""
-    page = await _load_owned_page(item_id, user_notion_id, allow_empty_owner=True)
-    props = page.get("properties", {})
+    item, is_arcana = await _get_list_item_pg(item_id, user_notion_id)
 
-    name = title_plain(props.get("Название", {}))
-    category = _extract_select(props.get("Категория", {})) or "💳 Прочее"
-    price_plan = _extract_number(props.get("Цена план", {})) or 0.0
-    bot_label = _extract_select(props.get("Бот", {})) or BOT_NEXUS
-
+    name = item.name or ""
+    category = item.category or "💳 Прочее"
+    bot_label = "🌒 Arcana" if is_arcana else BOT_NEXUS
+    price_plan = float(getattr(item, "price_plan", None) or 0)
     actual = body.price if body.price is not None else price_plan
     actual = float(actual or 0)
 
-    # wave9 (#46): если запись с Цена-полем недоступна или Notion ругается на
-    # пэйлоад с «Цена» (legacy items без этой колонки) — повторяем без цены,
-    # чтобы хотя бы Done проставился. Так чек на «иглах для машинки» не
-    # ломает UX, а реальная причина пишется в лог.
-    update_props: dict = {"Статус": _status("Done")}
-    if actual > 0:
-        update_props["Цена"] = _number(actual)
     try:
-        await update_page(item_id, update_props)
-    except Exception as e:
-        logger.error("list_checkout: update_page (with price) failed for %s: %s", item_id[:8], e)
-        if "Цена" in update_props:
-            try:
-                await update_page(item_id, {"Статус": _status("Done")})
-            except Exception as e2:
-                logger.error("list_checkout: status-only update also failed for %s: %s", item_id[:8], e2)
-                raise HTTPException(status_code=500, detail=f"failed to mark done: {e2}")
+        if is_arcana:
+            await _arcana_inv_repo.update_status(item_id, "Done")
         else:
-            raise HTTPException(status_code=500, detail=f"failed to mark done: {e}")
+            update_fields: dict = {"status": "done"}
+            if actual > 0:
+                update_fields["price_actual"] = actual
+            await _nexus_lists_repo.update(item_id, **update_fields)
+    except Exception as e:
+        logger.error("list_checkout: update failed for %s: %s", item_id[:8], e)
+        raise HTTPException(status_code=500, detail="failed to mark done")
 
     finance_id = None
     if actual > 0:
@@ -1099,9 +1106,12 @@ async def list_delete(
 ) -> dict[str, Any]:
     """Soft delete — переводим в Archived, не удаляем физически."""
     user_notion_id = (await get_user_notion_id(tg_id)) or ""
-    await _load_owned_page(item_id, user_notion_id, allow_empty_owner=True)
+    item, is_arcana = await _get_list_item_pg(item_id, user_notion_id)
     try:
-        await update_page(item_id, {"Статус": _status("Archived")})
+        if is_arcana:
+            await _arcana_inv_repo.update_status(item_id, "Archived")
+        else:
+            await _nexus_lists_repo.update_status(item_id, "Archived")
     except Exception as e:
         logger.error("list_delete failed: %s", e)
         raise HTTPException(status_code=500, detail="failed to archive")

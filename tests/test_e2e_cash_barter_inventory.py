@@ -286,20 +286,23 @@ def test_barter_listing_filters_only_open(client):
 # ═══════════════════════════════════════════════════════════════════════════
 
 def test_barter_toggle_done_via_lists_endpoint(client):
-    page = _list_item("b-toggle", "блок сигарет", status="Not started",
-                      group="приворот — Оля")
-    with patch("miniapp.backend.routes.writes.get_page",
-               AsyncMock(return_value=page)), \
-         patch("miniapp.backend.routes.writes.update_page",
-               AsyncMock(return_value=None)) as up, \
+    from core.repos.pg_nexus_lists_repo import ListItem
+    nx_item = ListItem(
+        id="99", name="блок сигарет", list_type="чеклист",
+        status="not_started", user_notion_id=FAKE_NOTION_USER,
+    )
+    mock_nx = MagicMock()
+    mock_nx.get_by_id = AsyncMock(return_value=nx_item)
+    mock_nx.update_status = AsyncMock(return_value=True)
+    mock_ai = MagicMock()
+    mock_ai.get_by_id = AsyncMock(return_value=None)
+    with patch("miniapp.backend.routes.writes._nexus_lists_repo", mock_nx), \
+         patch("miniapp.backend.routes.writes._arcana_inv_repo", mock_ai), \
          patch("miniapp.backend.routes.writes.get_user_notion_id",
                AsyncMock(return_value=FAKE_NOTION_USER)):
-        r = client.post("/api/lists/b-toggle/done")
+        r = client.post("/api/lists/99/done")
     assert r.status_code == 200, r.text
-    up.assert_awaited()
-    written = up.await_args.args[1]
-    assert "Статус" in written
-    assert written["Статус"]["status"]["name"] == "Done"
+    mock_nx.update_status.assert_awaited_once_with("99", "Done")
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -307,8 +310,14 @@ def test_barter_toggle_done_via_lists_endpoint(client):
 # ═══════════════════════════════════════════════════════════════════════════
 
 def test_inventory_add_writes_arcana_label_and_inv_type(client):
-    with patch("miniapp.backend.routes.writes.page_create",
-               AsyncMock(return_value="inv-NEW")) as pc, \
+    from core.repos.pg_nexus_lists_repo import InventoryItem
+    created = InventoryItem(
+        id="55", name="соль", list_type="инвентарь", status="not_started",
+        category="🕯️ Расходники",
+    )
+    mock_ai = MagicMock()
+    mock_ai.add_item = AsyncMock(return_value=created)
+    with patch("miniapp.backend.routes.writes._arcana_inv_repo", mock_ai), \
          patch("miniapp.backend.routes.writes.get_user_notion_id",
                AsyncMock(return_value=FAKE_NOTION_USER)):
         r = client.post("/api/lists", json={
@@ -316,12 +325,11 @@ def test_inventory_add_writes_arcana_label_and_inv_type(client):
             "cat": "🕯️ Расходники", "bot": "arcana",
         })
     assert r.status_code == 200
-    assert r.json()["id"] == "inv-NEW"
-    props = pc.await_args.args[1]
-    assert props["Бот"]["select"]["name"] == "🌒 Arcana"
-    assert props["Тип"]["select"]["name"] == "📦 Инвентарь"
-    assert props["Категория"]["select"]["name"] == "🕯️ Расходники"
-    assert props["Количество"]["number"] == 200.0
+    assert r.json()["id"] == "55"
+    kw = mock_ai.add_item.await_args.kwargs
+    assert kw["list_type"] == "📦 Инвентарь"
+    assert kw["category"] == "🕯️ Расходники"
+    assert kw["quantity"] == 200.0
 
 
 # ═══════════════════════════════════════════════════════════════════════════
