@@ -4,8 +4,8 @@ Pure PG — no Notion calls. Callers receive plain Work dataclass instances.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import List, Optional
+from dataclasses import dataclass, field
+from typing import Any, List, Optional
 
 
 @dataclass
@@ -16,6 +16,13 @@ class Work:
     deadline_str: str
     category_str: str
     has_client: bool
+    # extended fields (all defaulted — backward-compatible)
+    status: str = "open"
+    client_id: Optional[str] = None
+    deadline_dt: Optional[Any] = None   # datetime with tz from PG
+    reminder_dt: Optional[Any] = None   # datetime with tz from PG
+    deadline_iso: str = ""
+    category: str = ""
 
 
 def _pg_repo():

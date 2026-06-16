@@ -14,6 +14,8 @@ from core.config import config
 from core.notion_client import query_pages, rituals_all, update_page_select
 from arcana.repos.pg_sessions_repo import PgSessionsRepo as _PgSessionsRepoClass
 _pg_sessions_repo = _PgSessionsRepoClass()
+from arcana.repos.pg_works_repo import PgWorksRepo as _PgWorksRepoClass
+_pg_works_repo = _PgWorksRepoClass()
 from core.user_manager import get_user_notion_id
 from core.bot_notify import notify_user
 
@@ -133,57 +135,60 @@ def _pct(count: int, total: int) -> int:
     return int(round(count / total * 100)) if total else 0
 
 
+def _work_local_date(dt: Optional[Any], tz_offset: int) -> Optional[date]:
+    if not dt:
+        return None
+    try:
+        utc_dt = dt.astimezone(timezone.utc)
+        local_dt = utc_dt + timedelta(hours=tz_offset)
+        return local_dt.date()
+    except Exception:
+        return None
+
+
+def _work_local_time(dt: Optional[Any], tz_offset: int) -> Optional[str]:
+    if not dt:
+        return None
+    try:
+        utc_dt = dt.astimezone(timezone.utc)
+        local_dt = utc_dt + timedelta(hours=tz_offset)
+        if local_dt.hour == 0 and local_dt.minute == 0:
+            return None
+        return f"{local_dt.hour:02d}:{local_dt.minute:02d}"
+    except Exception:
+        return None
+
+
 async def _works_schedule(user_notion_id: str, today_date: date, tz_offset: int) -> tuple[list[dict], list[dict]]:
     """Возвращает (overdue, scheduled): просроченные + сегодняшние работы."""
-    db_id = config.arcana.db_works
-    if not db_id:
-        return [], []
-    today_iso = today_date.isoformat()
-    not_done: list[dict] = [
-        {"property": "Status", "status": {"does_not_equal": "Done"}},
-        {"property": "Status", "status": {"does_not_equal": "Complete"}},
-    ]
-    user_cond = [{"property": "🪪 Пользователи", "relation": {"contains": user_notion_id}}] if user_notion_id else []
-    date_or = {"or": [
-        {"property": "Дедлайн", "date": {"before": today_iso}},
-        {"property": "Дедлайн", "date": {"equals": today_iso}},
-        {"property": "Напоминание", "date": {"equals": today_iso}},
-    ]}
-    filters = {"and": not_done + user_cond + [date_or]}
     try:
-        pages = await query_pages(db_id, filters=filters, page_size=100)
+        works_list = await _pg_works_repo.list_all(user_notion_id)
     except Exception as e:
-        logger.warning("works_schedule query failed: %s", e)
+        logger.warning("works_schedule pg query failed: %s", e)
         return [], []
     overdue: list[dict] = []
     scheduled: list[dict] = []
     seen: set[str] = set()
-    for p in pages:
-        pid = p.get("id", "")
-        if pid in seen:
+    for w in works_list:
+        if w.id in seen:
             continue
-        seen.add(pid)
-        props = p.get("properties", {})
-        deadline_raw = date_start(props.get("Дедлайн", {}))
-        reminder_raw = date_start(props.get("Напоминание", {}))
-        deadline_date = to_local_date(deadline_raw, tz_offset)
-        reminder_date = to_local_date(reminder_raw, tz_offset)
-        title = title_plain(p, "Работа")
-        cat = cat_from_notion(select_of(p, "Категория"))
-        prio = prio_from_notion(select_of(p, "Приоритет"))
+        if w.status in ("done", "archived"):
+            continue
+        seen.add(w.id)
+        deadline_date = _work_local_date(w.deadline_dt, tz_offset)
+        reminder_date = _work_local_date(w.reminder_dt, tz_offset)
         if deadline_date and deadline_date < today_date:
             overdue.append({
-                "id": pid, "title": title, "cat": cat, "prio": prio,
+                "id": w.id, "title": w.title, "cat": w.category, "prio": w.priority,
                 "days_ago": (today_date - deadline_date).days,
             })
             continue
-        # сегодняшние: дедлайн = сегодня или напоминание = сегодня
         if deadline_date == today_date or reminder_date == today_date:
-            time_str = extract_time(reminder_raw, tz_offset) if reminder_date == today_date else None
+            time_str = _work_local_time(w.reminder_dt, tz_offset) if reminder_date == today_date else None
             if not time_str:
-                time_str = extract_time(deadline_raw, tz_offset)
+                time_str = _work_local_time(w.deadline_dt, tz_offset)
             scheduled.append({
-                "id": pid, "title": title, "cat": cat, "prio": prio,
+                "id": w.id, "title": w.title, "cat": w.category, "prio": w.priority,
                 "time": time_str,
             })
     overdue.sort(key=lambda x: -x["days_ago"])
@@ -816,65 +821,38 @@ async def _fetch_subtasks_by_work(
 async def get_arcana_works(
     tg_id: int = Depends(current_user_id),
 ) -> dict[str, Any]:
-    """Активные Работы юзера: Status != Done, сорт по Дедлайн ASC nulls last."""
+    """Активные Работы юзера из PG: status != done/archived, сорт по deadline ASC nulls last."""
     user_notion_id = (await get_user_notion_id(tg_id)) or ""
     today_date, tz_offset = await today_user_tz(tg_id)
-    overdue, today_works = await _works_schedule(user_notion_id, today_date, tz_offset)
-    # _works_schedule возвращает только overdue + сегодня; для полной ленты —
-    # ещё все open works (Status != Done) — берём через query.
-    db_id = config.arcana.db_works
+    try:
+        works_list = await _pg_works_repo.list_all(user_notion_id)
+    except Exception as e:
+        logger.warning("works list fetch failed: %s", e)
+        works_list = []
+    clients_map = await load_clients_map(user_notion_id)
     items: list[dict] = []
-    if db_id:
-        not_done = [
-            {"property": "Status", "status": {"does_not_equal": "Done"}},
-            {"property": "Status", "status": {"does_not_equal": "Complete"}},
-        ]
-        from core.notion_client import _with_user_filter, query_pages
-        filters = _with_user_filter({"and": not_done}, user_notion_id)
-        try:
-            pages = await query_pages(
-                db_id, filters=filters,
-                sorts=[{"property": "Дедлайн", "direction": "ascending"}],
-                page_size=200,
-            )
-        except Exception as e:
-            logger.warning("works list fetch failed: %s", e)
-            pages = []
-
-        clients_map = await load_clients_map(user_notion_id)
-        type_map = await _client_types_map(user_notion_id)
-        work_ids = {p.get("id", "") for p in pages if p.get("id")}
-        subtasks_map = await _fetch_subtasks_by_work(user_notion_id, work_ids)
-        from miniapp.backend.routes._arcana_common import client_name_from
-        for p in pages:
-            props = p.get("properties", {})
-            title = title_plain(p, "Работа")
-            status_obj = (props.get("Status", {}) or {}).get("status") or {}
-            status = status_obj.get("name", "")
-            cat = (props.get("Категория", {}) or {}).get("select") or {}
-            prio = (props.get("Приоритет", {}) or {}).get("select") or {}
-            dl_raw = (props.get("Дедлайн", {}) or {}).get("date") or {}
-            dl_iso = dl_raw.get("start", "") if dl_raw else ""
-            dl_local = to_local_date(dl_iso, tz_offset)
-            is_overdue = bool(dl_local and dl_local < today_date)
-            cli_name, cli_id = client_name_from(p, clients_map)
-            ctype = type_map.get(cli_id or "", "") if cli_id else ""
-            wid = p.get("id", "")
-            items.append({
-                "id": wid,
-                "title": title or "—",
-                "status": status,
-                "priority": prio.get("name", ""),
-                "category": cat.get("name", ""),
-                "deadline": dl_iso,
-                "deadline_label": dl_iso[:16].replace("T", " ") if dl_iso else "",
-                "is_overdue": is_overdue,
-                "client": (
-                    {"id": cli_id, "name": cli_name, "type": ctype} if cli_id
-                    else None
-                ),
-                "subtasks": subtasks_map.get(wid, []),
-            })
+    for w in works_list:
+        if w.status in ("done", "archived"):
+            continue
+        deadline_date = _work_local_date(w.deadline_dt, tz_offset)
+        is_overdue = bool(deadline_date and deadline_date < today_date)
+        cli_id = w.client_id
+        cli_info = clients_map.get(cli_id or "") or {}
+        cli_name = cli_info.get("name", "")
+        ctype_full = cli_info.get("type_full", "")
+        ctype = ctype_full.split()[0] if ctype_full else ""
+        items.append({
+            "id": w.id,
+            "title": w.title or "—",
+            "status": w.status,
+            "priority": w.priority,
+            "category": w.category,
+            "deadline": w.deadline_iso,
+            "deadline_label": w.deadline_iso[:16].replace("T", " ") if w.deadline_iso else "",
+            "is_overdue": is_overdue,
+            "client": {"id": cli_id, "name": cli_name, "type": ctype} if cli_id else None,
+            "subtasks": [],  # 🗒️ Списки still Notion — blocker until Lists migrated
+        })
     return {"works": items, "total": len(items)}
 
 

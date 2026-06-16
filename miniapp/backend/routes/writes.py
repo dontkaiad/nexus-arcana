@@ -31,6 +31,8 @@ from core.bot_notify import notify_user, clear_task_reminder
 
 from arcana.repos.pg_rituals_repo import PgRitualsRepo as _PgRitualsRepoClass
 _rituals_pg_repo = _PgRitualsRepoClass()
+from arcana.repos.pg_works_repo import PgWorksRepo as _PgWorksRepoClass
+_works_pg_repo = _PgWorksRepoClass()
 
 from arcana.repos.pg_sessions_repo import PgSessionsRepo as _PgSessionsRepoClass
 _sessions_pg_repo = _PgSessionsRepoClass()
@@ -736,14 +738,13 @@ async def arcana_work_done(
     work_id: str,
     tg_id: int = Depends(current_user_id),
 ) -> dict[str, Any]:
-    user_notion_id = (await get_user_notion_id(tg_id)) or ""
-    page = await _load_owned_page(work_id, user_notion_id)
-    try:
-        await update_page(work_id, {"Status": _status("Done")})
-    except Exception as e:
-        logger.error("arcana_work_done failed: %s", e)
+    w = await _works_pg_repo.find_by_id(work_id)
+    if not w:
+        raise HTTPException(status_code=404, detail="work not found")
+    ok = await _works_pg_repo.set_status(work_id, "done")
+    if not ok:
         raise HTTPException(status_code=500, detail="failed to update status")
-    await notify_user(tg_id, f"✅ Готово: <b>{_esc(title_plain(page, 'Работа'))}</b>", bot="arcana")
+    await notify_user(tg_id, f"✅ Готово: <b>{_esc(w.title)}</b>", bot="arcana")
     return {"ok": True, "status": "Done"}
 
 
@@ -752,14 +753,13 @@ async def arcana_work_cancel(
     work_id: str,
     tg_id: int = Depends(current_user_id),
 ) -> dict[str, Any]:
-    user_notion_id = (await get_user_notion_id(tg_id)) or ""
-    page = await _load_owned_page(work_id, user_notion_id)
-    try:
-        await update_page(work_id, {"Status": _status("Archived")})
-    except Exception as e:
-        logger.error("arcana_work_cancel failed: %s", e)
+    w = await _works_pg_repo.find_by_id(work_id)
+    if not w:
+        raise HTTPException(status_code=404, detail="work not found")
+    ok = await _works_pg_repo.set_status(work_id, "archived")
+    if not ok:
         raise HTTPException(status_code=500, detail="failed to cancel")
-    await notify_user(tg_id, f"❌ Отменила: <b>{_esc(title_plain(page, 'Работа'))}</b>", bot="arcana")
+    await notify_user(tg_id, f"❌ Отменила: <b>{_esc(w.title)}</b>", bot="arcana")
     return {"ok": True, "status": "Archived"}
 
 
@@ -769,8 +769,9 @@ async def arcana_work_postpone(
     body: PostponeBody,
     tg_id: int = Depends(current_user_id),
 ) -> dict[str, Any]:
-    user_notion_id = (await get_user_notion_id(tg_id)) or ""
-    page = await _load_owned_page(work_id, user_notion_id)
+    w = await _works_pg_repo.find_by_id(work_id)
+    if not w:
+        raise HTTPException(status_code=404, detail="work not found")
     today_date, _tz_offset = await today_user_tz(tg_id)
 
     if body.date:
@@ -779,26 +780,18 @@ async def arcana_work_postpone(
         except ValueError:
             raise HTTPException(status_code=400, detail="invalid date, expected YYYY-MM-DD")
     else:
-        deadline_raw = (page.get("properties", {}).get("Дедлайн", {}).get("date") or {}).get("start", "")
-        base = None
-        if deadline_raw:
-            try:
-                base = datetime.fromisoformat(deadline_raw.replace("Z", "+00:00")).date()
-            except ValueError:
-                base = None
+        base = w.deadline_dt.date() if w.deadline_dt else None
         if not base:
             base = today_date
         shift_days = body.days if body.days is not None else 1
         new_date = base + timedelta(days=shift_days)
 
-    try:
-        await update_page(work_id, {"Дедлайн": _date(new_date.isoformat())})
-    except Exception as e:
-        logger.error("arcana_work_postpone failed: %s", e)
+    ok = await _works_pg_repo.set_deadline(work_id, new_date)
+    if not ok:
         raise HTTPException(status_code=500, detail="failed to update deadline")
     await notify_user(
         tg_id,
-        f"📅 Перенесла на {new_date.isoformat()}: <b>{_esc(title_plain(page, 'Работа'))}</b>",
+        f"📅 Перенесла на {new_date.isoformat()}: <b>{_esc(w.title)}</b>",
         bot="arcana",
     )
     return {"ok": True, "new_date": new_date.isoformat()}

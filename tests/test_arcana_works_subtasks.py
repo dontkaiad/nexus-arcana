@@ -26,66 +26,30 @@ def client():
         app.dependency_overrides.clear()
 
 
-def _work_page(wid: str, title: str, status: str = "Not started") -> dict:
-    return {
-        "id": wid,
-        "properties": {
-            "Работа": {"title": [{"plain_text": title}]},
-            "Status": {"status": {"name": status}},
-            "Категория": {"select": None},
-            "Приоритет": {"select": None},
-            "Дедлайн": {"date": None},
-            "👥 Клиенты": {"relation": []},
-            "🪪 Пользователи": {"relation": [{"id": FAKE_NOTION}]},
-        },
-    }
-
-
-def _subtask_page(sid: str, name: str, work_id: str, done: bool = False) -> dict:
-    return {
-        "id": sid,
-        "properties": {
-            "Название": {"title": [{"plain_text": name}]},
-            "Тип": {"select": {"name": "📋 Чеклист"}},
-            "Статус": {"status": {"name": "Done" if done else "Not started"}},
-            "🔮 Работы": {"relation": [{"id": work_id}]},
-        },
-    }
+def _pg_work(wid, title):
+    from arcana.repos.works_repo import Work
+    return Work(
+        id=str(wid), title=title, priority="Можно потом",
+        deadline_str="", category_str="", has_client=False,
+        status="open", client_id=None, deadline_dt=None,
+        reminder_dt=None, deadline_iso="", category="",
+    )
 
 
 def test_arcana_works_payload_contains_subtasks(client):
-    works = [_work_page("w1", "Подготовить колоду"),
-             _work_page("w2", "Закупить свечи")]
-    subtasks = [
-        _subtask_page("s1a", "Достать колоду", "w1"),
-        _subtask_page("s1b", "Очистить", "w1", done=True),
-        _subtask_page("s2", "Найти магазин", "w2"),
-    ]
-
-    async def fake_query(db_id, **kwargs):
-        # Первый вызов — works, второй — lists. Различаем по фильтрам.
-        f = (kwargs.get("filters") or {})
-        # works filter имеет Status conditions; lists filter имеет Тип condition
-        cond_str = str(f)
-        if "Тип" in cond_str and "Чеклист" in cond_str:
-            return subtasks
-        return works
+    """После миграции на PG works: subtasks всегда [] (🗒️ Списки ещё Notion)."""
+    pg_works = [_pg_work("w1", "Подготовить колоду"), _pg_work("w2", "Закупить свечи")]
+    mock_repo = MagicMock()
+    mock_repo.list_all = AsyncMock(return_value=pg_works)
 
     today = date(2026, 5, 3)
-    with patch("miniapp.backend.routes.arcana_today.query_pages",
-               AsyncMock(side_effect=fake_query)), \
-         patch("core.notion_client.query_pages",
-               AsyncMock(side_effect=fake_query)), \
-         patch("miniapp.backend.routes.arcana_today._client_types_map",
-               AsyncMock(return_value={})), \
+    with patch("miniapp.backend.routes.arcana_today._pg_works_repo", mock_repo), \
          patch("miniapp.backend.routes.arcana_today.load_clients_map",
                AsyncMock(return_value={})), \
          patch("miniapp.backend.routes.arcana_today.today_user_tz",
                AsyncMock(return_value=(today, 3))), \
          patch("miniapp.backend.routes.arcana_today.get_user_notion_id",
-               AsyncMock(return_value=FAKE_NOTION)), \
-         patch("miniapp.backend.routes.arcana_today._works_schedule",
-               AsyncMock(return_value=([], []))):
+               AsyncMock(return_value=FAKE_NOTION)):
         r = client.get("/api/arcana/works")
 
     assert r.status_code == 200, r.text
@@ -93,47 +57,38 @@ def test_arcana_works_payload_contains_subtasks(client):
     assert data["total"] == 2
     by_id = {w["id"]: w for w in data["works"]}
     assert "subtasks" in by_id["w1"]
-    s1 = by_id["w1"]["subtasks"]
-    assert len(s1) == 2
-    assert {x["name"] for x in s1} == {"Достать колоду", "Очистить"}
-    assert {x["done"] for x in s1} == {True, False}
-    s2 = by_id["w2"]["subtasks"]
-    assert len(s2) == 1 and s2[0]["name"] == "Найти магазин"
+    # PG works → subtasks = [] until 🗒️ Списки migrated
+    assert by_id["w1"]["subtasks"] == []
+    assert by_id["w2"]["subtasks"] == []
 
 
-def test_arcana_works_subtasks_batched_in_one_query(client):
-    """Гарант перформанса: одну работу или сто — query_pages для Списков
-    вызывается ровно один раз."""
-    works = [_work_page(f"w{i}", f"R{i}") for i in range(5)]
-
-    call_count = {"lists": 0}
-
-    async def fake_query(db_id, **kwargs):
-        cond_str = str(kwargs.get("filters") or {})
-        if "Чеклист" in cond_str:
-            call_count["lists"] += 1
-            return []
-        return works
+def test_arcana_works_returns_open_only(client):
+    """done/archived works фильтруются, open — остаются."""
+    from arcana.repos.works_repo import Work
+    all_works = [
+        _pg_work("w1", "Открытая работа"),
+        Work(id="w2", title="Готово", priority="Важно", deadline_str="",
+             category_str="", has_client=False, status="done"),
+        Work(id="w3", title="Отменена", priority="Можно потом", deadline_str="",
+             category_str="", has_client=False, status="archived"),
+    ]
+    mock_repo = MagicMock()
+    mock_repo.list_all = AsyncMock(return_value=all_works)
 
     today = date(2026, 5, 3)
-    with patch("miniapp.backend.routes.arcana_today.query_pages",
-               AsyncMock(side_effect=fake_query)), \
-         patch("core.notion_client.query_pages",
-               AsyncMock(side_effect=fake_query)), \
-         patch("miniapp.backend.routes.arcana_today._client_types_map",
-               AsyncMock(return_value={})), \
+    with patch("miniapp.backend.routes.arcana_today._pg_works_repo", mock_repo), \
          patch("miniapp.backend.routes.arcana_today.load_clients_map",
                AsyncMock(return_value={})), \
          patch("miniapp.backend.routes.arcana_today.today_user_tz",
                AsyncMock(return_value=(today, 3))), \
          patch("miniapp.backend.routes.arcana_today.get_user_notion_id",
-               AsyncMock(return_value=FAKE_NOTION)), \
-         patch("miniapp.backend.routes.arcana_today._works_schedule",
-               AsyncMock(return_value=([], []))):
+               AsyncMock(return_value=FAKE_NOTION)):
         r = client.get("/api/arcana/works")
 
     assert r.status_code == 200
-    assert call_count["lists"] == 1, "subtasks must be fetched in ONE batch query"
+    data = r.json()
+    assert data["total"] == 1
+    assert data["works"][0]["id"] == "w1"
 
 
 @pytest.mark.asyncio

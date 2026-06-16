@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from typing import Optional, List
 
 from sqlalchemy import select
@@ -41,12 +41,20 @@ def _resolve(conn, table, code: Optional[str]) -> Optional[int]:
 
 def _row_to_work(row) -> Work:
     deadline_str = ""
+    deadline_dt = None
+    deadline_iso = ""
     if row.deadline:
         d = row.deadline
         deadline_str = f" · 📅 {d.day:02d}.{d.month:02d}"
         if d.hour or d.minute:
             deadline_str += f" {d.hour:02d}:{d.minute:02d}"
+        deadline_dt = d
+        try:
+            deadline_iso = d.isoformat()
+        except Exception:
+            pass
     cat = row.category or ""
+    reminder_dt = getattr(row, "reminder", None) or None
     return Work(
         id=str(row.id),
         title=row.title or "",
@@ -54,6 +62,12 @@ def _row_to_work(row) -> Work:
         deadline_str=deadline_str,
         category_str=f" · {cat}" if cat else "",
         has_client=bool(row.client_id),
+        status=row.status_code or "open",
+        client_id=str(row.client_id) if row.client_id else None,
+        deadline_dt=deadline_dt,
+        reminder_dt=reminder_dt,
+        deadline_iso=deadline_iso,
+        category=cat,
     )
 
 
@@ -64,6 +78,7 @@ def _select_works():
             works.c.id,
             works.c.title,
             works.c.deadline,
+            works.c.reminder,
             works.c.category,
             works.c.client_id,
             p.c.label.label("priority_label"),
@@ -129,10 +144,71 @@ class PgWorksRepo:
             )
         return res.rowcount > 0
 
+    def _find_by_id_sync(self, work_id: str) -> Optional[Work]:
+        try:
+            wid = int(work_id)
+        except (ValueError, TypeError):
+            return None
+        stmt = _select_works().where(works.c.id == wid)
+        with get_engine().connect() as conn:
+            row = conn.execute(stmt).fetchone()
+        return _row_to_work(row) if row else None
+
+    def _list_all_sync(self, user_notion_id: str) -> List[Work]:
+        stmt = _select_works().order_by(works.c.deadline.asc().nullslast())
+        if user_notion_id:
+            stmt = stmt.where(works.c.user_notion_id == user_notion_id)
+        with get_engine().connect() as conn:
+            rows = conn.execute(stmt).fetchall()
+        return [_row_to_work(r) for r in rows]
+
+    def _set_status_sync(self, work_id: str, status_code: str) -> bool:
+        try:
+            wid = int(work_id)
+        except (ValueError, TypeError):
+            return False
+        with get_engine().begin() as conn:
+            sid = _resolve(conn, work_status, status_code)
+            res = conn.execute(
+                works.update()
+                .where(works.c.id == wid)
+                .values(status_id=sid)
+            )
+        return res.rowcount > 0
+
+    def _set_deadline_sync(self, work_id: str, new_date: date) -> bool:
+        try:
+            wid = int(work_id)
+        except (ValueError, TypeError):
+            return False
+        new_dt = datetime(
+            new_date.year, new_date.month, new_date.day, 0, 0, 0,
+            tzinfo=timezone.utc,
+        )
+        with get_engine().begin() as conn:
+            res = conn.execute(
+                works.update()
+                .where(works.c.id == wid)
+                .values(deadline=new_dt)
+            )
+        return res.rowcount > 0
+
     # ── Public async interface ────────────────────────────────────────────────
 
     async def list_open(self, user_notion_id: str = "") -> List[Work]:
         return await asyncio.to_thread(self._list_open_sync, user_notion_id)
+
+    async def find_by_id(self, work_id: str) -> Optional[Work]:
+        return await asyncio.to_thread(self._find_by_id_sync, work_id)
+
+    async def list_all(self, user_notion_id: str = "") -> List[Work]:
+        return await asyncio.to_thread(self._list_all_sync, user_notion_id)
+
+    async def set_status(self, work_id: str, status_code: str) -> bool:
+        return await asyncio.to_thread(self._set_status_sync, work_id, status_code)
+
+    async def set_deadline(self, work_id: str, new_date: date) -> bool:
+        return await asyncio.to_thread(self._set_deadline_sync, work_id, new_date)
 
     async def create(
         self,

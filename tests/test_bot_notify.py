@@ -193,20 +193,18 @@ def test_ritual_result_notifies(client):
 
 def test_arcana_work_done_notifies(client):
     # #10: отметка Работы done из Mini App шлёт уведу в Arcana-бот.
-    page = {
-        "id": "w-1",
-        "properties": {
-            "🪪 Пользователи": {"relation": [{"id": FAKE_NOTION_USER}]},
-            "Работа": {"title": [{"plain_text": "расклад на неделю"}]},
-        },
-    }
+    from arcana.repos.works_repo import Work
+    pg_work = Work(
+        id="42", title="расклад на неделю", priority="Важно",
+        deadline_str="", category_str="", has_client=False, status="open",
+    )
+    mock_repo = MagicMock()
+    mock_repo.find_by_id = AsyncMock(return_value=pg_work)
+    mock_repo.set_status = AsyncMock(return_value=True)
     notify = AsyncMock(return_value=True)
     with patch("miniapp.backend.routes.writes.notify_user", notify), \
-         patch("miniapp.backend.routes.writes.get_page", AsyncMock(return_value=page)), \
-         patch("miniapp.backend.routes.writes.update_page", AsyncMock(return_value=None)), \
-         patch("miniapp.backend.routes.writes.get_user_notion_id",
-               AsyncMock(return_value=FAKE_NOTION_USER)):
-        r = client.post("/api/arcana/works/w-1/done")
+         patch("miniapp.backend.routes.writes._works_pg_repo", mock_repo):
+        r = client.post("/api/arcana/works/42/done")
     assert r.status_code == 200
     notify.assert_awaited_once()
     assert notify.call_args.kwargs.get("bot") == "arcana"
