@@ -32,6 +32,7 @@ from core.classifier import (
     _TZ_RE,
     _TASK_KEYWORDS_RE,
     _STATS_RE,
+    _TASK_EXPLICIT_RE,
 )
 
 
@@ -104,6 +105,11 @@ from core.classifier import (
     # _STATS_RE — статистика расходов
     pytest.param(_STATS_RE, "search", "сколько потратила за месяц", id="stats-skolko-potratila"),
     pytest.param(_STATS_RE, "search", "расходы за март", id="stats-rashody-za"),
+    # _TASK_EXPLICIT_RE — явное добавление задачи (B2-fix)
+    pytest.param(_TASK_EXPLICIT_RE, "match", "добавь задачу купить молоко", id="task-explicit-dobav"),
+    pytest.param(_TASK_EXPLICIT_RE, "match", "поставь задачу позвонить маме", id="task-explicit-postav"),
+    pytest.param(_TASK_EXPLICIT_RE, "match", "создай задачу разобрать почту", id="task-explicit-sozdaj"),
+    pytest.param(_TASK_EXPLICIT_RE, "match", "задача: оплатить интернет", id="task-explicit-colon"),
 ])
 def test_regex_matches(regex, method, text):
     """Позитивные кейсы: фильтр обязан сработать на этом тексте."""
@@ -116,6 +122,10 @@ def test_regex_matches(regex, method, text):
     pytest.param(_RENAME_RE, "search", "переименуй задачу просто", id="rename-without-v"),
     pytest.param(_CANCEL_RE, "search", "отмени заметку", id="cancel-note-not-task"),
     pytest.param(_ZAPOMNI_RE, "match", "ты запомни что", id="zapomni-not-at-start"),
+    # _TASK_EXPLICIT_RE — не должна матчить поиск/просмотр/удаление (B2-fix)
+    pytest.param(_TASK_EXPLICIT_RE, "match", "покажи задачи на сегодня", id="task-explicit-no-show"),
+    pytest.param(_TASK_EXPLICIT_RE, "match", "задачи на сегодня", id="task-explicit-no-plural"),
+    pytest.param(_TASK_EXPLICIT_RE, "match", "удали задачу X", id="task-explicit-no-delete"),
 ])
 def test_regex_no_match(regex, method, text):
     """Негативные кейсы: фильтр НЕ должен срабатывать на этом тексте."""
@@ -140,3 +150,16 @@ def test_note_delete_vse_captured():
     m = _NOTE_DELETE_RE.match("удали все заметки")
     assert m
     assert m.group(1) is not None  # "все" захвачено
+
+
+@pytest.mark.parametrize("text,expected_title", [
+    ("добавь задачу купить молоко", "купить молоко"),
+    ("поставь задачу позвонить маме", "позвонить маме"),
+    ("создай задачу разобрать почту", "разобрать почту"),
+    ("задача: оплатить интернет", "оплатить интернет"),
+])
+def test_task_explicit_title_captured(text, expected_title):
+    """_TASK_EXPLICIT_RE: group(1) содержит title задачи без глагола-префикса."""
+    m = _TASK_EXPLICIT_RE.match(text)
+    assert m, f"expected match on {text!r}"
+    assert m.group(1).strip() == expected_title

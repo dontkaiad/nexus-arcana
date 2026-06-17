@@ -446,6 +446,14 @@ _MEMORY_DELETE_RE = re.compile(
 _BUY_TASK_RE = re.compile(r"^\s*(купить|купи)\b", re.IGNORECASE)
 _CURRENCY_RE = re.compile(r"\d+\s*(₽|руб\.?|р\b)", re.IGNORECASE)
 
+# явное добавление задачи: «добавь/поставь/создай задачу X» или «задача: X»
+# Матчит только add-команды — не поиск («покажи задачи»), не удаление («удали задачу»).
+_TASK_EXPLICIT_RE = re.compile(
+    r"^\s*(?:(?:добавь|добавить|поставь|поставить|создай|создать)\s+задач[уие]\s*[:：]?\s*"
+    r"|задача\s*[:：]\s*)(.+)",
+    re.IGNORECASE,
+)
+
 # Поиск по долгосрочной памяти (НЕ заметки)
 _MEMORY_SEARCH_RE = re.compile(
     r"(что\s+(ты\s+)?помнишь|что\s+знаешь\s+о|расскажи\s+про"
@@ -727,6 +735,16 @@ async def classify(text: str, tz_offset: int = 3) -> list[dict]:
                  "priority": "Важно", "deadline": None, "repeat": "Нет",
                  "repeat_time": None, "day_of_week": None, "confidence": "low"}]
 
+    # Детерминированный fast-path: «добавь задачу X» / «задача: X» — явный add без LLM
+    m = _TASK_EXPLICIT_RE.match(text)
+    if m:
+        title = m.group(1).strip()
+        logger.info("classify: task_explicit matched, title=%r", title)
+        category = await _haiku_task_category(title)
+        return [{"type": "task", "title": title, "category": category,
+                 "priority": "Важно", "deadline": None, "repeat": "Нет",
+                 "repeat_time": None, "day_of_week": None, "confidence": "high"}]
+
     # Guard: если text выглядит как разговорный ответ Claude (утечка из spell correction) —
     # не отправлять обратно в Claude, вернуть unknown сразу
     _LEAKED_PREFIXES = (
@@ -738,7 +756,7 @@ async def classify(text: str, tz_offset: int = 3) -> list[dict]:
         logger.warning("classify: detected leaked Claude response as input, returning unknown. text=%r", text[:80])
         return [{"type": "unknown"}]
 
-    raw = await ask_claude(text, system=build_system(tz_offset), max_tokens=1024)
+    raw = await ask_claude(text, system=build_system(tz_offset), max_tokens=1024, temperature=0)
     global _classify_last_raw
     _classify_last_raw = raw
     
