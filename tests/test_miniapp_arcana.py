@@ -1104,6 +1104,75 @@ def test_moon_next_phases_chronological():
         assert p["date"] >= "2026-04-22"
 
 
+# ── /api/arcana/barter ───────────────────────────────────────────────────────
+
+def test_arcana_barter_pg_status_conversion(client):
+    """Регресс камень 4.1: PG status "done"/"not_started" → Notion "Done"/"Not started".
+
+    Тихий баг: если сравнивать item.status == "Done" (Notion) вместо "done" (PG),
+    поле done всегда False и open_count врёт.
+    """
+    from core.repos.pg_nexus_lists_repo import InventoryItem
+    from miniapp.backend.routes import arcana_barter
+
+    done_item = InventoryItem(
+        id="i1", name="Свечи чёрные", list_type="чеклист",
+        status="done", category="🔄 Бартер", group_name="Ритуал Марса",
+    )
+    open_item = InventoryItem(
+        id="i2", name="Ладан", list_type="чеклист",
+        status="not_started", category="🔄 Бартер", group_name="Ритуал Марса",
+    )
+
+    with patch.object(arcana_barter._inv_repo, "get_open_barter",
+                      AsyncMock(return_value=[done_item, open_item])), \
+         patch("miniapp.backend.routes.arcana_barter.get_user_notion_id",
+               AsyncMock(return_value=FAKE_NOTION_USER)):
+        r = client.get("/api/arcana/barter")
+
+    assert r.status_code == 200, r.text
+    data = r.json()
+    items = {i["id"]: i for i in data["items"]}
+
+    # done_item: status PG "done" → Notion "Done", done=True
+    assert items["i1"]["done"] is True
+    assert items["i1"]["status"] == "Done"
+    assert items["i1"]["group"] == "Ритуал Марса"
+
+    # open_item: status PG "not_started" → Notion "Not started", done=False
+    assert items["i2"]["done"] is False
+    assert items["i2"]["status"] == "Not started"
+
+    # open_count считает только не-done
+    assert data["open_count"] == 1
+
+
+def test_arcana_barter_only_open_false_calls_get_list(client):
+    """only_open=False → get_list (без статус-фильтра), not get_open_barter."""
+    from core.repos.pg_nexus_lists_repo import InventoryItem, BARTER_CATEGORY
+    from miniapp.backend.routes import arcana_barter
+
+    item = InventoryItem(
+        id="i3", name="Трава мяты", list_type="чеклист",
+        status="done", category=BARTER_CATEGORY, group_name="",
+    )
+    mock_get_open = AsyncMock(side_effect=AssertionError("get_open_barter не должен вызываться"))
+    mock_get_list = AsyncMock(return_value=[item])
+
+    with patch.object(arcana_barter._inv_repo, "get_open_barter", mock_get_open), \
+         patch.object(arcana_barter._inv_repo, "get_list", mock_get_list), \
+         patch("miniapp.backend.routes.arcana_barter.get_user_notion_id",
+               AsyncMock(return_value=FAKE_NOTION_USER)):
+        r = client.get("/api/arcana/barter?only_open=false")
+
+    assert r.status_code == 200, r.text
+    mock_get_open.assert_not_awaited()
+    mock_get_list.assert_awaited_once_with(
+        category=BARTER_CATEGORY, user_notion_id=FAKE_NOTION_USER
+    )
+    assert len(r.json()["items"]) == 1
+
+
 # ── tarot.py — deck registry, card matcher, canonical_card ──────────────────
 
 def test_tarot_find_card_exact_en():

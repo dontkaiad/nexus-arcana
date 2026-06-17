@@ -249,12 +249,18 @@ def test_pay_salary_force_overrides_low_cash(client):
 # ═══════════════════════════════════════════════════════════════════════════
 
 def test_barter_listing_filters_only_open(client):
-    pages_open = [
-        _list_item("b3", "поездка в беларусь", status="Not started",
-                    group="приворот — Оля"),
+    from core.repos.pg_nexus_lists_repo import InventoryItem
+    from miniapp.backend.routes import arcana_barter
+
+    items_pg = [
+        InventoryItem(
+            id="b3", name="поездка в беларусь", list_type="чеклист",
+            status="not_started", category="🔄 Бартер",
+            group_name="приворот — Оля",
+        ),
     ]
-    with patch("miniapp.backend.routes.arcana_barter.query_pages",
-               AsyncMock(return_value=pages_open)), \
+    with patch.object(arcana_barter._inv_repo, "get_open_barter",
+                      AsyncMock(return_value=items_pg)), \
          patch("miniapp.backend.routes.arcana_barter.get_user_notion_id",
                AsyncMock(return_value=FAKE_NOTION_USER)):
         r = client.get("/api/arcana/barter?only_open=true")
