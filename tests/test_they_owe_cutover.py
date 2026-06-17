@@ -167,6 +167,34 @@ def test_pogasila_routes_to_debt_command_not_they_owe():
     assert _DEBT_CMD_RE.search(text)
 
 
+# ── Test 5b: #135 фикс — "отдала [имя] [сумма]" без слова "долг" ─────────────
+
+def test_otdala_without_dolg_matches_debt_cmd_re():
+    """fixes #135: 'отдала Маше 2к' без слова 'долг' теперь матчит _DEBT_CMD_RE."""
+    from core.classifier import _DEBT_CMD_RE, _THEY_OWE_CMD_RE
+
+    text = "отдала Маше 2к"
+    assert _DEBT_CMD_RE.search(text), "отдала [имя] [сумма] должна матчить _DEBT_CMD_RE"
+    assert not _THEY_OWE_CMD_RE.search(text), "\\b не срабатывает внутри 'отдала'"
+
+
+def test_dala_still_routes_to_they_owe_not_debt():
+    """'дала Маше 2к' по-прежнему they_owe; новая ветка i_owe не перехватила."""
+    from core.classifier import _DEBT_CMD_RE, _THEY_OWE_CMD_RE
+
+    text = "дала Маше 2к"
+    assert _THEY_OWE_CMD_RE.search(text), "дала [имя] [сумма] → they_owe"
+    assert not _DEBT_CMD_RE.search(text), "дала без 'долг' НЕ должна матчить i_owe"
+
+
+def test_otdala_without_amount_no_match():
+    """'отдала книгу другу' — без цифры новая ветка не матчит."""
+    from core.classifier import _DEBT_CMD_RE
+
+    assert not _DEBT_CMD_RE.search("отдала книгу другу"), \
+        "без цифры новая ветка не матчит"
+
+
 # ── Test 6: GUARD — "я вернула 2к" и "мне вернули 2к" не пишут they_owe ─────
 
 def test_guard_single_char_pronoun_not_matched_by_classifier():
