@@ -108,6 +108,7 @@ async def _parse_fact(text: str) -> Tuple[str, str, str, str]:
             system=_PARSE_SYSTEM,
             max_tokens=200,
             model="claude-haiku-4-5-20251001",
+            temperature=0,
         )
         raw = raw.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
         parsed = json.loads(raw)
@@ -303,6 +304,7 @@ async def _get_adhd_tip(fact: str) -> str:
         system=_ADHD_TIP_SYSTEM,
         max_tokens=150,
         model=_cfg.model_sonnet,
+        temperature=0.7,
     )
     return tip.strip()
 

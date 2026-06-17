@@ -136,7 +136,7 @@ async def handle_verify(
     try:
         # 1. Парсинг через Haiku
         raw = await ask_claude(text, system=PARSE_VERIFY_SYSTEM, max_tokens=200,
-                               model="claude-haiku-4-5-20251001")
+                               model="claude-haiku-4-5-20251001", temperature=0)
         data = _parse_json_safe(raw)
         if not data:
             await message.answer("⚠️ Не смог распознать данные. Напиши: «Анна 5 марта — сбылось»")

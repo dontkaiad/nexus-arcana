@@ -140,7 +140,7 @@ async def _generate_tip(kind: str, temp: int, description: str) -> str:
         "Напиши один короткий совет на день (5–8 слов, строчными буквами, без точки в конце, без смайлов). "
         "Совет — практический: что надеть, взять с собой или учесть. Только сам совет, без вводных слов."
     )
-    tip = await ask_claude(prompt, model=config.model_sonnet, max_tokens=60)
+    tip = await ask_claude(prompt, model=config.model_sonnet, max_tokens=60, temperature=0.5)
     return tip.strip().rstrip(".!").lower() if tip else ""
 
 

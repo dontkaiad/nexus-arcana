@@ -122,6 +122,7 @@ async def ask_claude_vision(
     image_b64: str,
     media_type: str = "image/jpeg",
     system: str = "",
+    temperature: Optional[float] = None,
 ) -> str:
     """Запрос с изображением (base64). Использует Sonnet."""
     messages: List[Dict] = [
@@ -148,6 +149,8 @@ async def ask_claude_vision(
     }
     if system:
         kwargs["system"] = system
+    if temperature is not None:
+        kwargs["temperature"] = temperature
 
     try:
         resp = await _create_message(**kwargs)

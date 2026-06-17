@@ -171,6 +171,7 @@ async def handle_adhd_command(message: Message, user_notion_id: str = "") -> Non
             system=_ADHD_SUMMARY_SYSTEM,
             max_tokens=200,
             model=_cfg.model_sonnet,
+            temperature=0.7,
         )
     except Exception:
         summary = ""

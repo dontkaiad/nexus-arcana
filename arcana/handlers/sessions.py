@@ -400,6 +400,7 @@ async def _make_triplet_summary(
             system=TRIPLET_SUMMARY_SYSTEM,
             model="claude-haiku-4-5-20251001",
             max_tokens=160,
+            temperature=0.5,
         )
         from core.html_sanitize import sanitize_summary
         return sanitize_summary(out or "")
@@ -733,6 +734,7 @@ async def handle_add_session(
                 system=system,
                 model=_cfg.model_sonnet,
                 max_tokens=2000,
+                temperature=0.7,
             )
 
         # 6. Сохраняем сразу в Notion + постим в чат с кнопками управления.
@@ -962,6 +964,7 @@ async def _handle_multi_session(
                 interpretation = await ask_claude(
                     user_prompt, system=system,
                     model=_cfg.model_sonnet, max_tokens=2000,
+                    temperature=0.7,
                 )
 
             # Haiku — саммари триплета
@@ -1067,6 +1070,7 @@ async def _handle_multi_session(
             raw_summary = await ask_claude(
                 sess_prompt, max_tokens=400,
                 model=_cfg.model_sonnet,
+                temperature=0.5,
             )
             from core.html_sanitize import sanitize_summary
             session_summary_text = sanitize_summary(raw_summary or "")
@@ -1368,6 +1372,7 @@ async def handle_triplet_correction(
         new_interp = await ask_claude(
             prompt, system=system,
             model=_cfg.model_sonnet, max_tokens=2000,
+            temperature=0.7,
         )
     except Exception as e:
         logger.error("triplet correction sonnet failed: %s", e)
@@ -1422,6 +1427,7 @@ async def handle_tarot_photo(message: Message, user_notion_id: str = "") -> None
             "Определи все карты в раскладе, колоду и тип расклада.",
             image_b64,
             system=VISION_SYSTEM,
+            temperature=0,
         )
         vision_data = _parse_json_safe(raw)
         if vision_data is None:
@@ -1460,6 +1466,7 @@ async def handle_tarot_photo(message: Message, user_notion_id: str = "") -> None
             system=system,
             model=_cfg.model_sonnet,
             max_tokens=2000,
+            temperature=0.7,
         )
 
         tg_id = message.from_user.id
@@ -1507,7 +1514,8 @@ async def handle_session_search(
     """Поиск прошлых раскладов по ключевым словам в Теме."""
     try:
         raw = await ask_claude(
-            text, system=SESSION_SEARCH_PARSE_SYSTEM, max_tokens=150
+            text, system=SESSION_SEARCH_PARSE_SYSTEM, max_tokens=150,
+            temperature=0,
         )
         data = _parse_json_safe(raw) or {}
         keywords = [
@@ -1554,6 +1562,7 @@ async def handle_tarot_interpret(message: Message, text: str) -> None:
         system=TAROT_SYSTEM,
         model=_cfg.model_sonnet,
         max_tokens=2000,
+        temperature=0.7,
     )
     await message.answer(
         f"🔮 <b>Трактовка:</b>\n\n{interpretation[:4000]}", parse_mode="HTML"

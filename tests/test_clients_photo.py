@@ -332,7 +332,7 @@ async def test_analyze_image_call_signature_correct():
                                     "name": "Маша", "contacts": [], "request": "", "notes": ""})
     captured: dict = {}
 
-    async def fake_vision(prompt, image_b64, system=""):
+    async def fake_vision(prompt, image_b64, system="", temperature=None):
         captured["prompt"] = prompt
         captured["image_b64"] = image_b64
         captured["system"] = system

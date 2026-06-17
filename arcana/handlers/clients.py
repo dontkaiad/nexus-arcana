@@ -127,6 +127,7 @@ async def handle_client_info(message: Message, text: str, user_notion_id: str = 
         system="Извлеки только имя клиента. Ответь ТОЛЬКО именем.",
         max_tokens=30,
         model="claude-haiku-4-5-20251001",
+        temperature=0,
     )).strip()
 
     client = await _repo.find(name, user_notion_id=user_notion_id)
@@ -185,7 +186,7 @@ async def handle_add_client(message: Message, text: str, user_notion_id: str = "
     from arcana.pending_clients import save_pending_client
 
     raw = await ask_claude(text, system=PARSE_CLIENT_SYSTEM, max_tokens=256,
-                           model="claude-haiku-4-5-20251001")
+                           model="claude-haiku-4-5-20251001", temperature=0)
     data = _parse_json_safe(raw)
     name = data.get("name") or ""
     if not name:
@@ -300,7 +301,7 @@ async def _handle_collecting(
     page_id = pending.get("page_id")
 
     raw = await ask_claude(text, system=PARSE_CLIENT_INFO, max_tokens=300,
-                           model="claude-haiku-4-5-20251001")
+                           model="claude-haiku-4-5-20251001", temperature=0)
     data = _parse_json_safe(raw)
 
     updates: Dict[str, Any] = {}
@@ -340,6 +341,7 @@ async def handle_client_photo_input(message: Message, image_b64: str, pending: d
         "Извлеки контакты, имя и день рождения если видны.",
         image_b64,
         system=VISION_CONTACT,
+        temperature=0,
     )
     data = _parse_json_safe(raw) if raw else {}
 

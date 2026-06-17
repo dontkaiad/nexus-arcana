@@ -160,7 +160,7 @@ async def handle_arcana_finance(message: Message, user_notion_id: str = "", text
         if text:
             prompt = f"Сегодня {now.strftime('%d.%m.%Y')}. Текст: «{text}»"
             raw = await ask_claude(prompt, system=_PARSE_MONTH_SYSTEM, max_tokens=50,
-                                   model="claude-haiku-4-5-20251001")
+                                   model="claude-haiku-4-5-20251001", temperature=0)
             parsed = _parse_json_safe(raw)
             if parsed.get("month"):
                 month = int(parsed["month"])

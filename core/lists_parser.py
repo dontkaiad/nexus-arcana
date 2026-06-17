@@ -312,6 +312,7 @@ async def parse_buy_text(
         raw = await ask_claude(
             text, system=system, max_tokens=2000,
             model="claude-haiku-4-5-20251001",
+            temperature=0,
         )
     except Exception as e:
         logger.error("parse_buy_text: ask_claude failed: %s", e)

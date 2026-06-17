@@ -31,7 +31,7 @@ _pending: dict[int, list[str]] = {}
 async def handle_delete(message: Message, text: str) -> None:
     from core.claude_client import ask_claude
 
-    target = (await ask_claude(text, system=PARSE_TARGET_SYSTEM, max_tokens=10)).strip().lower()
+    target = (await ask_claude(text, system=PARSE_TARGET_SYSTEM, max_tokens=10, temperature=0)).strip().lower()
     if target not in ARCANA_TARGETS:
         await message.answer("⚠️ Уточни что удалить: сеансы, ритуалы или клиенты.")
         return

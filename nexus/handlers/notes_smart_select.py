@@ -32,7 +32,7 @@ async def handle_note(message: Message, text: str, db_notes_id: str) -> None:
 
     prompt = f"Заметка: {text}\nСуществующие теги: {existing}"
     raw = await ask_claude(prompt, system=TAGS_SYSTEM, max_tokens=100,
-                           model="claude-haiku-4-5-20251001")
+                           model="claude-haiku-4-5-20251001", temperature=0)
 
     try:
         data = json.loads(raw.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip())

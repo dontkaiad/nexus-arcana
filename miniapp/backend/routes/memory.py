@@ -179,6 +179,7 @@ async def _generate_adhd_profile(tg_id: int, records: List[Memory]) -> str:
             system=system,
             model=config.model_sonnet,
             max_tokens=800,
+            temperature=0,
         )
     except Exception as e:
         logger.error("Sonnet profile generation failed: %s", e)

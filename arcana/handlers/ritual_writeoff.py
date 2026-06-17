@@ -110,6 +110,7 @@ async def parse_supplies(text: str) -> List[dict]:
             system=PARSE_SUPPLIES_SYSTEM,
             max_tokens=300,
             model="claude-haiku-4-5-20251001",
+            temperature=0,
         )
         # Снимаем ```json ... ``` если есть
         s = (raw or "").strip()

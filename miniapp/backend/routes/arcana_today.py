@@ -123,7 +123,7 @@ async def get_arcana_tip(
         "Напиши одну короткую фразу-подпись (5–8 слов, строчными, без точки в конце, без смайлов). "
         "Тон — спокойный, поэтичный, немного мистический. Только сама фраза."
     )
-    tip = await ask_claude(prompt, model=config.model_sonnet, max_tokens=60)
+    tip = await ask_claude(prompt, model=config.model_sonnet, max_tokens=60, temperature=0.7)
     tip = tip.strip().rstrip(".!").lower() if tip else ""
     if tip:
         _store_tip(tg_id, tip)

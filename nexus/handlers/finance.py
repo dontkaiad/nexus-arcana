@@ -922,7 +922,7 @@ async def handle_finance_text(message: Message, text: str, bot_label: str = "☀
             await message.answer("⚠️ Нет последней записи для обновления.")
         return
 
-    raw = await ask_claude(text, system=PARSE_SYSTEM, max_tokens=400)
+    raw = await ask_claude(text, system=PARSE_SYSTEM, max_tokens=400, temperature=0)
     try:
         raw = raw.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
         data = json.loads(raw)
@@ -1138,7 +1138,7 @@ async def handle_finance_clarification(message: Message, user_notion_id: str = "
         f'"type_":"💰 Доход или 💸 Расход","source":"одна из: {", ".join(SOURCES)}"}}\n'
         f"Текущая запись: {json.dumps(pending, ensure_ascii=False)}"
     )
-    raw = await ask_claude(message.text.strip(), system=UPDATE_SYSTEM, max_tokens=200)
+    raw = await ask_claude(message.text.strip(), system=UPDATE_SYSTEM, max_tokens=200, temperature=0)
     try:
         raw = raw.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
         pending.update(json.loads(raw))
@@ -1338,7 +1338,7 @@ async def handle_bank_screenshot(message: Message, bot_label: str = "☀️ Nexu
         f'{{"transactions": [{{"amount": число, "type_": "💰 Доход|💸 Расход", '
         f'"category": "одна из: {cats}", "source": "одна из: {srcs}", "description": "описание"}}]}}'
     )
-    raw = await ask_claude_vision("Извлеки транзакции.", image_b64, system=system)
+    raw = await ask_claude_vision("Извлеки транзакции.", image_b64, system=system, temperature=0)
     try:
         raw = raw.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
         data = json.loads(raw)
@@ -1412,7 +1412,7 @@ def _parse_month_from_query(text: str) -> str:
 async def _get_finance_advice(data: str) -> str:
     """Один конкретный финансовый инсайт от Claude на основе данных статистики."""
     try:
-        result = await ask_claude(data, system=ADVICE_SYSTEM, max_tokens=220)
+        result = await ask_claude(data, system=ADVICE_SYSTEM, max_tokens=220, temperature=0.5)
         result = result.strip()
         if result:
             return f"\n💡 {result}"
@@ -1535,7 +1535,7 @@ async def handle_finance_summary(query: str = "", user_notion_id: str = "", uid:
     description_search = None
     parsed: dict = {}
     if query:
-        raw = await ask_claude(query, system=STATS_SYSTEM, max_tokens=200)
+        raw = await ask_claude(query, system=STATS_SYSTEM, max_tokens=200, temperature=0)
         try:
             raw = raw.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
             parsed = json.loads(raw)
@@ -2662,7 +2662,7 @@ async def _extract_debts_from_text(user_text: str) -> list:
     from core.config import config as _cfg
     prompt = _DEBT_EXTRACT_HAIKU_PROMPT.format(user_text=user_text)
     try:
-        raw = await ask_claude(prompt, model=_cfg.model_haiku, max_tokens=512)
+        raw = await ask_claude(prompt, model=_cfg.model_haiku, max_tokens=512, temperature=0)
         raw = raw.strip()
         json_match = re.search(r'\[[\s\S]*\]', raw)
         if json_match:
@@ -2683,7 +2683,7 @@ async def _parse_debt_strategy_with_haiku(debts: list, user_text: str) -> list:
         user_text=user_text,
     )
     try:
-        raw = await ask_claude(prompt, model=_cfg.model_haiku, max_tokens=1024)
+        raw = await ask_claude(prompt, model=_cfg.model_haiku, max_tokens=1024, temperature=0)
         raw = raw.strip()
         json_match = re.search(r'\[[\s\S]*\]', raw)
         if json_match:

@@ -214,7 +214,8 @@ async def _handle_tarot_correction(
     # ── Извлечь обновления полей (имя/вопрос/область) из правки ───────
     try:
         upd_raw = await ask_claude(
-            correction_text, system=CORRECTION_PARSE_SYSTEM, max_tokens=200
+            correction_text, system=CORRECTION_PARSE_SYSTEM, max_tokens=200,
+            temperature=0,
         )
         upd = _parse_json_safe(upd_raw) or {}
     except Exception:
@@ -268,6 +269,7 @@ async def _handle_tarot_correction(
         prompt, system=system,
         model=_cfg.model_sonnet,
         max_tokens=2000,
+        temperature=0.7,
     )
 
     from core.html_sanitize import sanitize_interpretation
@@ -446,6 +448,7 @@ async def route_message(message: Message, user_notion_id: str = "", _text: str =
             intent2 = (await ask_claude(
                 combined, system=ROUTER_SYSTEM, max_tokens=10,
                 model="claude-haiku-4-5-20251001",
+                temperature=0,
             )).strip().lower()
 
             if intent2 not in ("unknown", ""):
@@ -460,6 +463,7 @@ async def route_message(message: Message, user_notion_id: str = "", _text: str =
             intent = (await ask_claude(
                 text, system=ROUTER_SYSTEM, max_tokens=10,
                 model="claude-haiku-4-5-20251001",
+                temperature=0,
             )).strip().lower()
 
         logger.info("intent=%s | %s", intent, text[:60])

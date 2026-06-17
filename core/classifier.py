@@ -503,6 +503,7 @@ async def _haiku_task_category(title: str) -> str:
             system=_CATEGORY_SYSTEM,
             max_tokens=20,
             model="claude-haiku-4-5-20251001",
+            temperature=0,
         )
         raw = raw.strip()
         for cat in _TASK_CATS:
@@ -564,7 +565,7 @@ _EDIT_PARSE_SYSTEM = (
 
 async def _parse_edit_record(text: str) -> dict:
     """Распарсить запрос на редактирование записи. Всегда возвращает edits-список."""
-    raw = await ask_claude(text, system=_EDIT_PARSE_SYSTEM, max_tokens=300, model="claude-haiku-4-5-20251001")
+    raw = await ask_claude(text, system=_EDIT_PARSE_SYSTEM, max_tokens=300, model="claude-haiku-4-5-20251001", temperature=0)
     try:
         raw = raw.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
         data = json.loads(raw)

@@ -78,6 +78,7 @@ async def handle_work_done(message: Message, text: str, user_notion_id: str = ""
             system="Извлеки ключевые слова названия выполненной работы/задачи. Ответь ТОЛЬКО ключевыми словами, без объяснений.",
             max_tokens=50,
             model="claude-haiku-4-5-20251001",
+            temperature=0,
         )).strip()
 
         items = await _repo.list_open(user_notion_id)

@@ -70,7 +70,7 @@ def _checkout_parse_system(categories: dict[str, list[str]]) -> str:
 
 
 async def _haiku_parse(text: str, system: str) -> dict | list:
-    raw = await ask_claude(text, system=system, max_tokens=500, model="claude-haiku-4-5-20251001")
+    raw = await ask_claude(text, system=system, max_tokens=500, model="claude-haiku-4-5-20251001", temperature=0)
     raw = raw.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
     return json.loads(raw)
 

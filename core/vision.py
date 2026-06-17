@@ -83,6 +83,7 @@ async def parse_receipt(image_bytes: bytes, media_type: str = "image/jpeg") -> O
             image_b64=image_b64,
             media_type=media_type,
             system=_RECEIPT_SYSTEM,
+            temperature=0,
         )
         if not raw:
             return None

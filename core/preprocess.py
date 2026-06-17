@@ -230,6 +230,7 @@ async def normalize_text(text: str, *, user_notion_id: str = "") -> str:
         corrected = await ask_claude(
             converted, system=system, max_tokens=spell_max_tokens,
             model="claude-haiku-4-5-20251001",
+            temperature=0,
         )
     except Exception as e:
         logger.warning("spell correction error: %s", e)
