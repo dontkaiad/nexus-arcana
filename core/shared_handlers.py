@@ -7,7 +7,7 @@ async def get_user_tz(tg_id: int) -> int:
     Ключ в базе: tz_{tg_id}. Возвращает offset в часах (default: 3 для МСК).
     """
     from core.repos.pg_memory_repo import PgMemoryRepo as _MemRepo
-    mems = await _MemRepo().find_by_key(f"tz_{tg_id}", page_size=1)
+    mems = await _MemRepo().find_by_exact_key(f"tz_{tg_id}")
     stored = mems[0].fact if mems else None
     if stored:
         try:

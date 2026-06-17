@@ -492,7 +492,7 @@ async def _get_user_tz(uid: int) -> int:
     if uid in _user_tz_offset:
         return _user_tz_offset[uid]
     from core.repos.pg_memory_repo import PgMemoryRepo as _MemRepo
-    mems = await _MemRepo().find_by_key(f"tz_{uid}", page_size=1)
+    mems = await _MemRepo().find_by_exact_key(f"tz_{uid}")
     stored = mems[0].fact if mems else None
     if stored:
         try:

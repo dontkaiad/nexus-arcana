@@ -1799,7 +1799,7 @@ async def _get_payday() -> int:
     """Get payday day from Memory (PG). Default 1."""
     try:
         from core.repos.pg_memory_repo import PgMemoryRepo
-        mems = await PgMemoryRepo().find_by_key("budget_payday", page_size=1)
+        mems = await PgMemoryRepo().find_by_exact_key("budget_payday")
         stored = mems[0].fact if mems else None
         if stored:
             m = re.search(r"(\d+)", stored)

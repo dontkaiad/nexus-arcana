@@ -248,30 +248,6 @@ def _find_by_category_sync(
     return [_row_to_memory(r) for r in rows]
 
 
-def _find_by_key_sync(
-    key: str,
-    category: str = "",
-    user_notion_id: str = "",
-    page_size: int = 5,
-) -> List[Memory]:
-    q = _base_active_q()
-    if key:
-        q = q.where(
-            or_(
-                memories.c.key_name.ilike(f"%{key}%"),
-                memories.c.fact_text.ilike(f"%{key}%"),
-            )
-        )
-    if category:
-        q = q.where(memories.c.category == category)
-    if user_notion_id:
-        q = q.where(memories.c.user_notion_id == user_notion_id)
-    q = q.order_by(memories.c.created_at.desc()).limit(page_size)
-    with get_engine().connect() as conn:
-        rows = conn.execute(q).fetchall()
-    return [_row_to_memory(r) for r in rows]
-
-
 def _find_by_key_prefixes_sync(
     prefixes: List[str],
     user_notion_id: str = "",
@@ -387,15 +363,6 @@ class PgMemoryRepo:
         return await asyncio.to_thread(
             _find_by_category_sync, category, is_current, scope, user_notion_id, page_size
         )
-
-    async def find_by_key(
-        self,
-        key: str,
-        category: str = "",
-        user_notion_id: str = "",
-        page_size: int = 5,
-    ) -> List[Memory]:
-        return await asyncio.to_thread(_find_by_key_sync, key, category, user_notion_id, page_size)
 
     async def find_by_key_prefixes(
         self,

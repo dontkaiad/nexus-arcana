@@ -116,15 +116,6 @@ class MemoryRepo:
     ) -> List[Memory]:
         return await self._pg.find_by_category(category, is_current, scope, user_notion_id, page_size)
 
-    async def find_by_key(
-        self,
-        key: str,
-        category: str = "",
-        user_notion_id: str = "",
-        page_size: int = 5,
-    ) -> List[Memory]:
-        return await self._pg.find_by_key(key, category, user_notion_id, page_size)
-
     async def find_by_key_prefixes(
         self,
         prefixes: List[str],

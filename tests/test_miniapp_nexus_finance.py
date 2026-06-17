@@ -82,7 +82,7 @@ def test_finance_view_today(client):
 
     with patch("miniapp.backend.routes.finance._budget_repo.query",
                AsyncMock(return_value=entries)), \
-         patch("miniapp.backend.routes.finance._mem_repo.find_by_key",
+         patch("miniapp.backend.routes.finance._mem_repo.find_by_exact_key",
                AsyncMock(return_value=[])), \
          patch("miniapp.backend.routes.finance.today_user_tz",
                AsyncMock(return_value=(_today_date(tz), tz))), \
@@ -211,7 +211,7 @@ def test_finance_401_without_init_data():
 def test_finance_today_returns_budget_block(client):
     with patch("miniapp.backend.routes.finance._budget_repo.query",
                AsyncMock(return_value=[])), \
-         patch("miniapp.backend.routes.finance._mem_repo.find_by_key",
+         patch("miniapp.backend.routes.finance._mem_repo.find_by_exact_key",
                AsyncMock(return_value=[])), \
          patch("miniapp.backend.routes.finance.today_user_tz",
                AsyncMock(return_value=(_today_date(), 3))), \
@@ -233,7 +233,7 @@ def test_finance_today_budget_reflects_spending(client):
 
     with patch("miniapp.backend.routes.finance._budget_repo.query",
                AsyncMock(return_value=entries)), \
-         patch("miniapp.backend.routes.finance._mem_repo.find_by_key",
+         patch("miniapp.backend.routes.finance._mem_repo.find_by_exact_key",
                AsyncMock(return_value=[])), \
          patch("miniapp.backend.routes.finance.today_user_tz",
                AsyncMock(return_value=(_today_date(), 3))), \

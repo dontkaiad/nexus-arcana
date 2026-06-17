@@ -94,7 +94,7 @@ _DEFAULT_BUDGET_DAY = 4166
 
 async def _budget_day_limit() -> int:
     try:
-        mems = await _mem_repo.find_by_key("budget_day_limit", page_size=1)
+        mems = await _mem_repo.find_by_exact_key("budget_day_limit")
         if mems:
             return int(float(mems[0].fact))
     except (ValueError, TypeError, Exception):

@@ -122,7 +122,7 @@ def test_today_returns_all_keys_and_classifies_tasks(client):
 
     with patch("miniapp.backend.routes.today._tasks_repo.active", AsyncMock(return_value=tasks)), \
          patch("miniapp.backend.routes.today._budget_repo.query", AsyncMock(return_value=expenses)), \
-         patch("miniapp.backend.routes.today._memory_repo.find_by_key", AsyncMock(return_value=[])), \
+         patch("miniapp.backend.routes.today._memory_repo.find_by_exact_key", AsyncMock(return_value=[])), \
          patch("miniapp.backend.routes.today.ask_claude", claude_mock), \
          patch("miniapp.backend.routes.today.today_user_tz", AsyncMock(return_value=(_today_local_date(tz), tz))), \
          patch("miniapp.backend.routes.today.get_user_notion_id",
@@ -191,7 +191,7 @@ def test_today_caches_adhd_tip_across_calls(client):
 
     with patch("miniapp.backend.routes.today._tasks_repo.active", AsyncMock(return_value=[])), \
          patch("miniapp.backend.routes.today._budget_repo.query", AsyncMock(return_value=[])), \
-         patch("miniapp.backend.routes.today._memory_repo.find_by_key", AsyncMock(return_value=[])), \
+         patch("miniapp.backend.routes.today._memory_repo.find_by_exact_key", AsyncMock(return_value=[])), \
          patch("miniapp.backend.routes.today.ask_claude", claude_mock), \
          patch("miniapp.backend.routes.today.today_user_tz", AsyncMock(return_value=(_today_local_date(tz), tz))), \
          patch("miniapp.backend.routes.today.get_user_notion_id",
@@ -222,7 +222,7 @@ def test_today_uses_custom_budget_from_memory(client):
     with patch("miniapp.backend.routes.today._tasks_repo.active", AsyncMock(return_value=[])), \
          patch("miniapp.backend.routes.today._budget_repo.query",
                AsyncMock(return_value=[expense_entry])), \
-         patch("miniapp.backend.routes.today._memory_repo.find_by_key",
+         patch("miniapp.backend.routes.today._memory_repo.find_by_exact_key",
                AsyncMock(return_value=[budget_mem])), \
          patch("miniapp.backend.routes.today.ask_claude",
                AsyncMock(return_value="tip")), \
