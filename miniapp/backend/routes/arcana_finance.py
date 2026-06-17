@@ -9,7 +9,7 @@ import logging
 from datetime import date as _date
 from typing import Any, Optional
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Header, Query
 from pydantic import BaseModel, Field
 
 from core.cash_register import (
@@ -22,6 +22,7 @@ from core.user_manager import get_user_notion_id
 from core.bot_notify import notify_user
 
 from miniapp.backend.auth import current_user_id
+from core.repos.idempotency_repo import idempotent
 
 logger = logging.getLogger("miniapp.arcana.finance")
 
@@ -59,6 +60,7 @@ class PaySalaryBody(BaseModel):
 async def pay_salary(
     body: PaySalaryBody,
     tg_id: int = Depends(current_user_id),
+    idempotency_key: Optional[str] = Header(None, alias="Idempotency-Key"),
 ) -> dict[str, Any]:
     user_notion_id = (await get_user_notion_id(tg_id)) or ""
     today = _date.today()
@@ -71,26 +73,30 @@ async def pay_salary(
             "cash_balance": cash,
             "message": f"В кассе {cash:,}₽ — выплатить всё равно? Передай force=true.",
         }
-    fin_id = await _fin_repo.add(
-        date=today.strftime("%Y-%m-%d"),
-        amount=float(body.amount),
-        category=SALARY_CATEGORY,
-        type_="💰 Доход",
-        source="💳 Карта",
-        description=body.description or "Выплата себе",
-        bot_label=BOT_NEXUS,
-        user_notion_id=user_notion_id,
-    )
-    new_cash = cash - body.amount
-    await notify_user(
-        tg_id,
-        f"💰 Выплата себе: <b>{int(round(body.amount))}₽</b> (в кассе осталось {int(round(new_cash))}₽)",
-        bot="arcana",
-    )
-    return {
-        "ok": True,
-        "finance_id": fin_id,
-        "amount": int(round(body.amount)),
-        "cash_balance_before": cash,
-        "cash_balance_after": int(round(new_cash)),
-    }
+
+    async def _run() -> dict:
+        fin_id = await _fin_repo.add(
+            date=today.strftime("%Y-%m-%d"),
+            amount=float(body.amount),
+            category=SALARY_CATEGORY,
+            type_="💰 Доход",
+            source="💳 Карта",
+            description=body.description or "Выплата себе",
+            bot_label=BOT_NEXUS,
+            user_notion_id=user_notion_id,
+        )
+        new_cash = cash - body.amount
+        await notify_user(
+            tg_id,
+            f"💰 Выплата себе: <b>{int(round(body.amount))}₽</b> (в кассе осталось {int(round(new_cash))}₽)",
+            bot="arcana",
+        )
+        return {
+            "ok": True,
+            "finance_id": fin_id,
+            "amount": int(round(body.amount)),
+            "cash_balance_before": cash,
+            "cash_balance_after": int(round(new_cash)),
+        }
+
+    return await idempotent(tg_id, idempotency_key, _run)

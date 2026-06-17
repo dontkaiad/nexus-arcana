@@ -18,13 +18,17 @@ export async function apiGet(path) {
   return r.json()
 }
 
-export async function apiPost(path, body) {
+export async function apiPost(path, body, opts = {}) {
+  const headers = {
+    'Content-Type': 'application/json',
+    'X-Telegram-Init-Data': getInitData(),
+  }
+  if (opts.idempotencyKey) {
+    headers['Idempotency-Key'] = opts.idempotencyKey
+  }
   const r = await fetch(`${BASE}${path}`, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'X-Telegram-Init-Data': getInitData(),
-    },
+    headers,
     body: JSON.stringify(body || {}),
   })
   if (!r.ok) {

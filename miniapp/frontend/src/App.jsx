@@ -1998,6 +1998,7 @@ function NxLists({ s }) {
   const [q, setQ] = useState("");
   const [selectedChecklist, setSelectedChecklist] = useState(null);
   const [checklistAddOpen, setChecklistAddOpen] = useState(false);
+  const checkoutKeysRef = useRef({});
   const qEnc = encodeURIComponent(q || "");
   const path = q ? `/api/lists?type=${tab}&q=${qEnc}` : `/api/lists?type=${tab}`;
   const { data, loading, error, refetch } = useApi(path, [tab, q]);
@@ -2027,16 +2028,22 @@ function NxLists({ s }) {
   const toggleDone = async (item) => {
     if (item.done) return; // повторного снятия нет в API — просто игнор
     setOverrides((prev) => ({ ...prev, [item.id]: true }));
+    // Stable key per item for the duration of one checkout attempt; reset on success only
+    if (!checkoutKeysRef.current[item.id]) {
+      checkoutKeysRef.current[item.id] = crypto.randomUUID();
+    }
+    const idemKey = checkoutKeysRef.current[item.id];
     try {
       // v1.2: для покупок зовём /checkout — он создаёт расход в Финансах
       // если есть pricePlan. Для чеклиста и инвентаря — старый /done без денег.
       if (tab === "buy") {
         const body = {};
         if (item.pricePlan) body.price = item.pricePlan;
-        await apiPost(`/api/lists/${item.id}/checkout`, body);
+        await apiPost(`/api/lists/${item.id}/checkout`, body, { idempotencyKey: idemKey });
       } else {
         await apiPost(`/api/lists/${item.id}/done`);
       }
+      delete checkoutKeysRef.current[item.id];
       setTimeout(refetch, 500);
     } catch (e) {
       setOverrides((prev) => {
@@ -3147,6 +3154,7 @@ function CashSheet({ s, pnl, onClose, onPaid }) {
   const [amount, setAmount] = useState("");
   const [busy, setBusy] = useState(false);
   const [warn, setWarn] = useState(null);
+  const idemKeyRef = useRef(null);
   const initData = window.Telegram?.WebApp?.initData || import.meta.env.VITE_DEV_INIT_DATA || "";
 
   if (!pnl) return null;
@@ -3154,6 +3162,7 @@ function CashSheet({ s, pnl, onClose, onPaid }) {
   const submit = async (force = false) => {
     const a = parseFloat(amount);
     if (!a || a <= 0) return;
+    if (!idemKeyRef.current) idemKeyRef.current = crypto.randomUUID();
     setBusy(true); setWarn(null);
     try {
       const r = await fetch("/api/arcana/finance/pay_salary", {
@@ -3161,6 +3170,7 @@ function CashSheet({ s, pnl, onClose, onPaid }) {
         headers: {
           "Content-Type": "application/json",
           "X-Telegram-Init-Data": initData,
+          "Idempotency-Key": idemKeyRef.current,
         },
         body: JSON.stringify({ amount: a, force }),
       });
@@ -3170,6 +3180,7 @@ function CashSheet({ s, pnl, onClose, onPaid }) {
         setWarn(data.message || "В кассе меньше суммы. Всё равно?");
         return;
       }
+      idemKeyRef.current = null;
       try { window.Telegram?.WebApp?.HapticFeedback?.notificationOccurred?.("success"); } catch (_) {}
       onPaid?.();
     } catch (e) { alert("Ошибка: " + e.message); }
@@ -4300,14 +4311,16 @@ function InventoryItemSheet({ s, item, onClose, onChanged }) {
   const [price, setPrice] = useState("");
   const [qtyAdded, setQtyAdded] = useState("");
   const [busy, setBusy] = useState(null);
+  const purchaseKeyRef = useRef(null);
   const initData = window.Telegram?.WebApp?.initData || import.meta.env.VITE_DEV_INIT_DATA || "";
 
-  const call = async (path, method, body) => {
+  const call = async (path, method, body, extraHeaders = {}) => {
     const r = await fetch(path, {
       method,
       headers: {
         "Content-Type": "application/json",
         "X-Telegram-Init-Data": initData,
+        ...extraHeaders,
       },
       body: body ? JSON.stringify(body) : undefined,
     });
@@ -4329,12 +4342,15 @@ function InventoryItemSheet({ s, item, onClose, onChanged }) {
   };
 
   const purchase = async () => {
+    if (!purchaseKeyRef.current) purchaseKeyRef.current = crypto.randomUUID();
     setBusy("purchase");
     try {
-      await call(`/api/arcana/inventory/${item.id}/purchase`, "POST", {
-        price: parseFloat(price),
-        qty_added: qtyAdded ? parseFloat(qtyAdded) : null,
-      });
+      await call(
+        `/api/arcana/inventory/${item.id}/purchase`, "POST",
+        { price: parseFloat(price), qty_added: qtyAdded ? parseFloat(qtyAdded) : null },
+        { "Idempotency-Key": purchaseKeyRef.current },
+      );
+      purchaseKeyRef.current = null;
       onChanged?.();
     } catch (e) { alert("Не получилось: " + e.message); }
     finally { setBusy(null); }
@@ -6365,10 +6381,13 @@ function SubmitBtn({ s, onClick, disabled, label = "Сохранить" }) {
 
 function QuickForm({ s, kind, onDone, botType = "nexus" }) {
   const [busy, setBusy] = useState(false);
+  const idemKeyRef = useRef(crypto.randomUUID());
   const wrap = (fn) => async () => {
     setBusy(true);
+    const idemKey = idemKeyRef.current;
     try {
-      await fn();
+      await fn(idemKey);
+      idemKeyRef.current = crypto.randomUUID();
       onDone();
     } catch (e) {
       alert(`Не получилось: ${e.message}`);
@@ -6585,17 +6604,18 @@ function ExpenseForm({ s, onSubmit, busy, botType = "nexus" }) {
             s={s}
             disabled={!valid || busy}
             label={submitLabel}
-            onClick={onSubmit(async () => {
+            onClick={onSubmit(async (idemKey) => {
               const bot = (botType === "arcana" || type === "practice_income") ? "arcana" : "nexus";
               if (type === "expense" && splits.length > 0) {
-                for (const row of splits) {
+                for (let i = 0; i < splits.length; i++) {
+                  const row = splits[i];
                   await apiPost("/api/finance", {
                     type: "expense",
                     amount: parseFloat(row.amount),
                     cat: row.cat,
                     desc: row.desc || "",
                     bot,
-                  });
+                  }, { idempotencyKey: idemKey ? `${idemKey}-split-${i}` : undefined });
                 }
                 await apiPost("/api/finance", {
                   type: "expense",
@@ -6603,7 +6623,7 @@ function ExpenseForm({ s, onSubmit, busy, botType = "nexus" }) {
                   cat,
                   desc,
                   bot,
-                });
+                }, { idempotencyKey: idemKey ? `${idemKey}-remainder` : undefined });
               } else {
                 await apiPost("/api/finance", {
                   type,
@@ -6611,7 +6631,7 @@ function ExpenseForm({ s, onSubmit, busy, botType = "nexus" }) {
                   cat: needsCat ? cat : (cat || null),
                   desc,
                   bot,
-                });
+                }, { idempotencyKey: idemKey });
               }
             })}
           />

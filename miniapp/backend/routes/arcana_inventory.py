@@ -7,7 +7,7 @@ from __future__ import annotations
 import logging
 from typing import Any, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from core.list_manager import (
@@ -24,6 +24,7 @@ from core.bot_notify import notify_user
 
 from miniapp.backend.auth import current_user_id
 from miniapp.backend._helpers import BOT_ARCANA
+from core.repos.idempotency_repo import idempotent
 
 _arcana_inv_repo = _PgArcanaInventoryRepoClass()
 _fin_repo = FinanceRepo()
@@ -160,6 +161,7 @@ async def purchase_inventory(
     item_id: str,
     body: InventoryPurchaseBody,
     tg_id: int = Depends(current_user_id),
+    idempotency_key: Optional[str] = Header(None, alias="Idempotency-Key"),
 ) -> dict[str, Any]:
     """«Купила» — append в Финансы (Бот=Arcana, кат=🕯️ Расходники) +
     приплюсовать qty в инвентарь."""
@@ -168,31 +170,35 @@ async def purchase_inventory(
     title = inv_item.name or "покупка"
     cat = inv_item.category or "💳 Прочее"
     finance_cat = CATEGORY_TO_FINANCE.get(cat, "🕯️ Расходники")
-    fin_id = await _fin_repo.add(
-        date=_today_iso(),
-        amount=float(body.price),
-        category=finance_cat,
-        type_="💸 Расход",
-        source="💳 Карта",
-        description=body.description or title,
-        bot_label=BOT_ARCANA,
-        user_notion_id=user_notion_id,
-    )
-    if body.qty_added is not None and body.qty_added > 0:
-        cur = float(inv_item.quantity or 0)
-        await _arcana_inv_repo.update(item_id, quantity=cur + float(body.qty_added))
-    from html import escape as _esc
-    await notify_user(
-        tg_id,
-        f"🛒 Купила: <b>{_esc(title)}</b> — {int(round(body.price))}₽",
-        bot="arcana",
-    )
-    return {
-        "ok": True,
-        "finance_id": fin_id,
-        "finance_category": finance_cat,
-        "name": title,
-    }
+
+    async def _run() -> dict:
+        fin_id = await _fin_repo.add(
+            date=_today_iso(),
+            amount=float(body.price),
+            category=finance_cat,
+            type_="💸 Расход",
+            source="💳 Карта",
+            description=body.description or title,
+            bot_label=BOT_ARCANA,
+            user_notion_id=user_notion_id,
+        )
+        if body.qty_added is not None and body.qty_added > 0:
+            cur = float(inv_item.quantity or 0)
+            await _arcana_inv_repo.update(item_id, quantity=cur + float(body.qty_added))
+        from html import escape as _esc
+        await notify_user(
+            tg_id,
+            f"🛒 Купила: <b>{_esc(title)}</b> — {int(round(body.price))}₽",
+            bot="arcana",
+        )
+        return {
+            "ok": True,
+            "finance_id": fin_id,
+            "finance_category": finance_cat,
+            "name": title,
+        }
+
+    return await idempotent(tg_id, idempotency_key, _run)
 
 
 class InventoryDepletedBody(BaseModel):

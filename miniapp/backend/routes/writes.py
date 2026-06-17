@@ -12,7 +12,7 @@ from datetime import datetime, timedelta, timezone
 from html import escape as _esc
 from typing import Any, Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, Header, HTTPException
 from pydantic import BaseModel, Field
 
 from core.notion_client import _title, _text, _select, _status, _number, _date, _relation
@@ -53,6 +53,7 @@ _memory_repo = _PgMemoryRepoClass()
 _fin_repo = FinanceRepo()
 
 from miniapp.backend.auth import current_user_id
+from core.repos.idempotency_repo import idempotent
 from miniapp.backend._helpers import (
     BOT_NEXUS,
     today_user_tz,
@@ -341,6 +342,7 @@ class FinanceBody(BaseModel):
 async def finance_create(
     body: FinanceBody,
     tg_id: int = Depends(current_user_id),
+    idempotency_key: Optional[str] = Header(None, alias="Idempotency-Key"),
 ) -> dict[str, Any]:
     user_notion_id = (await get_user_notion_id(tg_id)) or ""
     today_date, _tz = await today_user_tz(tg_id)
@@ -360,19 +362,22 @@ async def finance_create(
         category = body.cat or "🔮 Практика"
         bot_label = "🌒 Arcana"
 
-    page_id = await _fin_repo.add(
-        date=today_date.isoformat(),
-        amount=body.amount,
-        category=category,
-        type_=type_label,
-        source="💳 Карта",
-        bot_label=bot_label,
-        description=body.desc,
-        user_notion_id=user_notion_id,
-    )
-    if not page_id:
-        raise HTTPException(status_code=500, detail="failed to create finance entry")
-    return {"ok": True, "id": page_id, "type": body.type}
+    async def _run() -> dict:
+        page_id = await _fin_repo.add(
+            date=today_date.isoformat(),
+            amount=body.amount,
+            category=category,
+            type_=type_label,
+            source="💳 Карта",
+            bot_label=bot_label,
+            description=body.desc,
+            user_notion_id=user_notion_id,
+        )
+        if not page_id:
+            raise HTTPException(status_code=500, detail="failed to create finance entry")
+        return {"ok": True, "id": page_id, "type": body.type}
+
+    return await idempotent(tg_id, idempotency_key, _run)
 
 
 class DebtBody(BaseModel):
@@ -411,7 +416,7 @@ async def expense_create(
         desc=body.desc,
         bot=body.bot,
     )
-    return await finance_create(finance_body, tg_id)
+    return await finance_create(finance_body, tg_id, idempotency_key=None)
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -1026,6 +1031,7 @@ async def list_checkout(
     item_id: str,
     body: ListCheckoutBody,
     tg_id: int = Depends(current_user_id),
+    idempotency_key: Optional[str] = Header(None, alias="Idempotency-Key"),
 ) -> dict[str, Any]:
     """Помечает пункт Done и при наличии цены создаёт запись в 💰 Финансы.
 
@@ -1033,6 +1039,8 @@ async def list_checkout(
     1. body.price если передан;
     2. Цена план из самой записи (только для nexus_lists — у arcana_inventory поля нет);
     3. ничего → finance_created=False, расход не создаётся.
+
+    Бесплатная идемпотентность: если айтем уже done — финзапись не создаётся повторно.
     """
     from core.list_manager import CATEGORY_TO_FINANCE
 
@@ -1046,6 +1054,9 @@ async def list_checkout(
     actual = body.price if body.price is not None else price_plan
     actual = float(actual or 0)
 
+    # Free idempotency: item already done → skip finance write
+    already_done = (item.status == "done")
+
     try:
         if is_arcana:
             await _arcana_inv_repo.update_status(item_id, "Done")
@@ -1058,30 +1069,36 @@ async def list_checkout(
         logger.error("list_checkout: update failed for %s: %s", item_id[:8], e)
         raise HTTPException(status_code=500, detail="failed to mark done")
 
-    finance_id = None
-    if actual > 0:
-        finance_cat = CATEGORY_TO_FINANCE.get(category, "💳 Прочее")
-        today_iso, _tz = await today_user_tz(tg_id)
-        try:
-            finance_id = await _fin_repo.add(
-                date=today_iso.isoformat() if hasattr(today_iso, "isoformat") else str(today_iso),
-                amount=actual,
-                category=finance_cat,
-                type_="💸 Расход",
-                source="💳 Карта",
-                description=body.note or name or "покупка",
-                bot_label=bot_label,
-                user_notion_id=user_notion_id,
-            )
-        except Exception as e:
-            logger.error("list_checkout: finance_add failed: %s", e)
+    if already_done:
+        logger.info("list_checkout: item %s already done, skipping finance write", item_id[:8])
+        return {"ok": True, "amount": actual, "finance_created": False, "finance_id": None}
 
-    return {
-        "ok": True,
-        "amount": actual,
-        "finance_created": bool(finance_id),
-        "finance_id": finance_id,
-    }
+    async def _write_finance() -> dict:
+        finance_id = None
+        if actual > 0:
+            finance_cat = CATEGORY_TO_FINANCE.get(category, "💳 Прочее")
+            today_iso, _tz = await today_user_tz(tg_id)
+            try:
+                finance_id = await _fin_repo.add(
+                    date=today_iso.isoformat() if hasattr(today_iso, "isoformat") else str(today_iso),
+                    amount=actual,
+                    category=finance_cat,
+                    type_="💸 Расход",
+                    source="💳 Карта",
+                    description=body.note or name or "покупка",
+                    bot_label=bot_label,
+                    user_notion_id=user_notion_id,
+                )
+            except Exception as e:
+                logger.error("list_checkout: finance_add failed: %s", e)
+        return {
+            "ok": True,
+            "amount": actual,
+            "finance_created": bool(finance_id),
+            "finance_id": finance_id,
+        }
+
+    return await idempotent(tg_id, idempotency_key, _write_finance)
 
 
 @router.post("/lists/{item_id}/delete")
