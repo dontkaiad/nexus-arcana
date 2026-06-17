@@ -4,12 +4,40 @@ services:
     container_name: nexus-arcana-db
     environment:
       POSTGRES_USER: kai
-      POSTGRES_PASSWORD: localdevpass
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-localdevpass}
       POSTGRES_DB: nexus_arcana
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U kai -d nexus_arcana"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  nexus:
+    build: .
+    image: nexus-arcana-bots
+    container_name: nexus-bot
+    command: ["python", "-m", "nexus.nexus_bot"]
+    env_file: .env
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+  arcana:
+    build: .
+    image: nexus-arcana-bots
+    container_name: arcana-bot
+    command: ["python", "-m", "arcana.bot"]
+    env_file: .env
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
 
 volumes:
   pgdata:
