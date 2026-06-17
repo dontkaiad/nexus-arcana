@@ -76,7 +76,7 @@ async def handle_add_ritual(message: Message, text: str, user_notion_id: str = "
 
         raw = await ask_claude(
             accumulated_text, system=PARSE_RITUAL_SYSTEM, max_tokens=600,
-            model="claude-haiku-4-5-20251001",
+            model="claude-haiku-4-5-20251001", temperature=0,
         )
         try:
             raw = raw.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()

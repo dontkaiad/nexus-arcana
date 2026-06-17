@@ -554,7 +554,7 @@ async def summarize_session(
     )
     try:
         summary = await ask_claude(prompt, max_tokens=300,
-                                    model="claude-haiku-4-5-20251001")
+                                    model="claude-haiku-4-5-20251001", temperature=0)
     except Exception as e:
         logger.error("Haiku summarize failed: %s", e)
         raise HTTPException(status_code=500, detail="summarize failed")

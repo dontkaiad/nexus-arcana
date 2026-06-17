@@ -425,7 +425,7 @@ async def session_summarize(
     )
     try:
         summary = await ask_claude(
-            prompt, max_tokens=500, model=_cfg.model_sonnet
+            prompt, max_tokens=500, model=_cfg.model_sonnet, temperature=0.5
         )
     except Exception as e:
         logger.error("session summarize failed: %s", e)
