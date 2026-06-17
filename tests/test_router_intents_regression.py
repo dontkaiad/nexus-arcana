@@ -130,3 +130,70 @@ async def test_intent_dispatch_regression(
                 f"{why}: handlers[{k}] не должен был быть вызван "
                 f"(вызвано {mock.await_count} раз)"
             )
+
+
+# ── B6 регресс: ritual_done без прошедшего → ambiguous, не planned ──────────
+
+@pytest.mark.asyncio
+async def test_ritual_done_no_past_tense_routes_to_disambiguation(common_patches):
+    """Регресс B6: ritual_done без прошедшего времени → ritual_ambiguous (переспрос).
+
+    До фикса guard конвертировал в ritual_planned → handle_add_work (Works).
+    После: ritual_ambiguous → ask_ritual_disambiguation.
+    """
+    from arcana.handlers import base
+
+    msg = _msg("ритуал чистка соль свечи")
+    disambig_mock = AsyncMock()
+    work_mock = AsyncMock()
+    ritual_mock = AsyncMock()
+
+    with patch("arcana.handlers.base.ask_claude",
+               AsyncMock(return_value="ritual_done")), \
+         patch("arcana.handlers.intent_resolve.ask_ritual_disambiguation",
+               disambig_mock), \
+         patch("arcana.handlers.works.handle_add_work", work_mock), \
+         patch("arcana.handlers.rituals.handle_add_ritual", ritual_mock):
+        await base.route_message(msg, user_notion_id="u")
+
+    disambig_mock.assert_awaited_once()
+    work_mock.assert_not_awaited()
+    ritual_mock.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_ritual_done_with_past_tense_still_routes_to_ritual(common_patches):
+    """ritual_done + прошедшее время → guard не срабатывает → handle_add_ritual."""
+    from arcana.handlers import base
+
+    msg = _msg("провела ритуал чистка")
+    ritual_mock = AsyncMock()
+    work_mock = AsyncMock()
+
+    with patch("arcana.handlers.base.ask_claude",
+               AsyncMock(return_value="ritual_done")), \
+         patch("arcana.handlers.rituals.handle_add_ritual", ritual_mock), \
+         patch("arcana.handlers.works.handle_add_work", work_mock):
+        await base.route_message(msg, user_notion_id="u")
+
+    ritual_mock.assert_awaited_once()
+    work_mock.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_ritual_planned_still_routes_to_works(common_patches):
+    """Явный ritual_planned от Haiku → guard не трогает → handle_add_work (Works)."""
+    from arcana.handlers import base
+
+    msg = _msg("сделать ритуал X")
+    work_mock = AsyncMock()
+    ritual_mock = AsyncMock()
+
+    with patch("arcana.handlers.base.ask_claude",
+               AsyncMock(return_value="ritual_planned")), \
+         patch("arcana.handlers.works.handle_add_work", work_mock), \
+         patch("arcana.handlers.rituals.handle_add_ritual", ritual_mock):
+        await base.route_message(msg, user_notion_id="u")
+
+    work_mock.assert_awaited_once()
+    ritual_mock.assert_not_awaited()

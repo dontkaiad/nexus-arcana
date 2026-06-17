@@ -493,10 +493,11 @@ async def route_message(message: Message, user_notion_id: str = "", _text: str =
             else:
                 intent = "nexus_redirect"
 
-        # Guard: ritual/ritual_done без прошедшего времени = на самом деле planned.
+        # Guard: ritual_done без прошедшего времени → неоднозначно (planned vs done).
+        # Было: ritual_planned (→ Works). Исправлено: ritual_ambiguous (→ переспрос).
         if intent in ("ritual", "ritual_done") and not _has_past_tense(text):
-            logger.info("ritual_done→ritual_planned (no past tense in text)")
-            intent = "ritual_planned"
+            logger.info("ritual_done→ritual_ambiguous (no past tense in text)")
+            intent = "ritual_ambiguous"
 
         dispatch = {
             "new_client":   lambda: handle_add_client(message, text, user_notion_id),
