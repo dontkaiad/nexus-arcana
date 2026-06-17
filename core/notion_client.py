@@ -120,13 +120,6 @@ def _extract_select(prop: dict) -> str:
     sel = prop.get("select")
     return sel["name"] if sel else ""
 
-def _extract_rollup_number(prop: dict) -> float:
-    """Извлечь число из Rollup поля Notion."""
-    rollup = prop.get("rollup", {})
-    if rollup.get("type") == "number":
-        return float(rollup.get("number") or 0)
-    return 0.0
-
 
 # ─── Generic ──────────────────────────────────────────────────────────────────
 
