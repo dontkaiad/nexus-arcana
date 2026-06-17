@@ -415,6 +415,18 @@ _DEBT_CMD_RE = re.compile(
     re.IGNORECASE,
 )
 
+# Budget v2: мне должны (they_owe).
+# \bдала?\b не матчит "отдала": внутри "отдала" нет \w→\W границы перед 'д'.
+_THEY_OWE_CMD_RE = re.compile(
+    r"(?:"
+    r"\b(?:дала?(?:\s+в\s+долг)?|одолжила?)\s+\S+\s+\d"
+    r"|\S{2,}\s+вернул[аи]?\b"
+    r"|мне\s+вернул"
+    r"|мне\s+должны\b|мои\s+должник"
+    r")",
+    re.IGNORECASE,
+)
+
 # Budget v2: управление целями
 _GOAL_CMD_RE = re.compile(
     r"(?:новая\s+цель|убери\s+цель|достигла?\s+цель|купила?\s.*цель)",
@@ -593,6 +605,11 @@ async def classify(text: str, tz_offset: int = 3) -> list[dict]:
         hint = re.sub(r"^\s*(про|о|об)\s+", "", hint, flags=re.IGNORECASE).strip()
         logger.info("classify: memory_delete matched, hint=%r", hint)
         return [{"type": "memory_delete", "hint": hint, "text": text}]
+
+    # they_owe: «мне должны» / «дала Маше 5к» / «Маша вернула 2к» — ПЕРЕД i_owe
+    if _THEY_OWE_CMD_RE.search(text):
+        logger.info("classify: they_owe_command matched")
+        return [{"type": "they_owe_command", "text": text}]
 
     # Budget v2: команды долгов → budget handler (ПЕРЕД budget и memory_save!)
     if _DEBT_CMD_RE.search(text):
@@ -826,6 +843,12 @@ async def process_item(data: Dict[str, Any], original_text: str, msg, clarify: d
     if kind == "debt_command":
         from nexus.handlers.finance import handle_debt_command
         await handle_debt_command(msg, user_notion_id)
+        return ""
+
+    # МНЕ ДОЛЖНЫ — v2
+    if kind == "they_owe_command":
+        from nexus.handlers.finance import handle_they_owe_command
+        await handle_they_owe_command(msg, user_notion_id)
         return ""
 
     # ЦЕЛИ — v2

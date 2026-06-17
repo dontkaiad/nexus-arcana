@@ -1969,6 +1969,119 @@ async def handle_debt_command(message: Message, user_notion_id: str = "") -> Non
     await message.answer("🤔 Не поняла команду. Примеры:\n<i>новый долг Маша 10к до июня\nзакрыла долг ***\nотдала *** 25к</i>", parse_mode="HTML")
 
 
+# ── they_owe: мне должны ──────────────────────────────────────────────────────
+
+_THEY_OWE_PRONOUNS: frozenset = frozenset({
+    "я", "мне", "меня", "он", "она", "они", "нам", "нас", "его", "её", "их", "вы", "вам",
+})
+
+_THEY_OWE_CREATE_RE = re.compile(
+    r'\b(?:дала?(?:\s+в\s+долг)?|одолжила?)\s+(\S+)\s+(\d+[кk]?\d*)(?:\s+до\s+(.+))?',
+    re.IGNORECASE,
+)
+_THEY_OWE_RETURN_RE = re.compile(
+    r'^(\S+)\s+вернул[аи]?\s+(?:долг\b|(\d+[кk]?\d*))',
+    re.IGNORECASE,
+)
+
+
+async def _save_they_owe(name: str, amount: int, deadline: str, user_notion_id: str = "") -> None:
+    """Create or update a they_owe debt (someone owes Кай)."""
+    from core.repos.pg_debts_repo import _repo as _debt_repo
+    await _debt_repo.upsert(
+        user_notion_id, name, "they_owe",
+        amount=float(amount),
+        deadline=deadline or None,
+    )
+
+
+async def _deactivate_they_owe(name: str, user_notion_id: str = "") -> bool:
+    """Close a they_owe debt. Returns True if found."""
+    from core.repos.pg_debts_repo import _repo as _debt_repo
+    return await _debt_repo.deactivate(user_notion_id, "they_owe", name)
+
+
+async def _partial_they_owe_payment(name: str, payment: int, user_notion_id: str = "") -> Optional[int]:
+    """Record partial return of a they_owe debt. Returns new remaining or None if not found."""
+    from core.repos.pg_debts_repo import _repo as _debt_repo
+    result = await _debt_repo.reduce_amount(user_notion_id, "they_owe", name, float(payment))
+    if result is None:
+        return None
+    new_amount, _closed = result
+    return int(new_amount)
+
+
+async def handle_they_owe_command(message: Message, user_notion_id: str = "") -> None:
+    """Handle they_owe operations: record a loan given, partial/full return, view list."""
+    text = (message.text or "").strip()
+
+    # "мне должны" / "мои должники" → список
+    if re.search(r'мне\s+должны\b|мои\s+должник', text, re.I):
+        from core.repos.pg_debts_repo import _repo as _debt_repo
+        debts = await _debt_repo.list_active(user_notion_id, kind="they_owe")
+        if not debts:
+            await message.answer("👀 Никто тебе ничего не должен.", parse_mode="HTML")
+        else:
+            lines = ["<b>👥 Мне должны:</b>"]
+            total = 0.0
+            for d in debts:
+                dl_part = f" · до {d.deadline}" if d.deadline else ""
+                lines.append(f"  <i>{d.name} — {int(d.amount):,}₽{dl_part}</i>")
+                total += d.amount
+            lines.append(f"<b>Итого: {int(total):,}₽</b>")
+            await message.answer("\n".join(lines), parse_mode="HTML")
+        return
+
+    # "[Имя] вернул[а] [сумму|долг]"
+    ret_m = _THEY_OWE_RETURN_RE.search(text)
+    if ret_m:
+        name = ret_m.group(1)
+        if name.lower() not in _THEY_OWE_PRONOUNS:
+            amount_str = ret_m.group(2)
+            if amount_str:
+                payment = _parse_k_amount(amount_str)
+                remaining = await _partial_they_owe_payment(name, payment, user_notion_id)
+                if remaining is None:
+                    await message.answer(f"🤔 Не нашла долг «{name}».", parse_mode="HTML")
+                elif remaining == 0:
+                    await message.answer(
+                        f"🎉 <b>{name} вернул(а) долг полностью!</b>",
+                        parse_mode="HTML",
+                    )
+                else:
+                    await message.answer(
+                        f"💰 {name} вернул(а) {payment:,.0f}₽\n📋 Остаток: <b>{remaining:,.0f}₽</b>",
+                        parse_mode="HTML",
+                    )
+            else:
+                found = await _deactivate_they_owe(name, user_notion_id)
+                if found:
+                    await message.answer(f"🎉 <b>{name} вернул(а) долг!</b>", parse_mode="HTML")
+                else:
+                    await message.answer(f"🤔 Не нашла долг от «{name}».", parse_mode="HTML")
+            return
+
+    # "дала Маше 5к [до июня]" / "одолжила Пете 10к" / "дала в долг Саше 3к до мая"
+    create_m = _THEY_OWE_CREATE_RE.search(text)
+    if create_m:
+        name = create_m.group(1)
+        amount = _parse_k_amount(create_m.group(2))
+        deadline = (create_m.group(3) or "").strip()
+        await _save_they_owe(name, amount, deadline, user_notion_id)
+        dl_str = f" до {deadline}" if deadline else ""
+        await message.answer(
+            f"👥 Записала: <b>{name} должен(на) тебе {amount:,.0f}₽</b>{dl_str}",
+            parse_mode="HTML",
+        )
+        return
+
+    await message.answer(
+        "🤔 Не поняла команду. Примеры:\n"
+        "<i>дала Маше 5к до июня\nМаша вернула 2к\nмне должны</i>",
+        parse_mode="HTML",
+    )
+
+
 async def handle_goal_command(message: Message, user_notion_id: str = "") -> None:
     """Handle goal operations: new, remove, achieved."""
     text = (message.text or "").strip()
