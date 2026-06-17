@@ -3185,7 +3185,7 @@ async def _run_budget_analysis(message: Message, uid: int) -> None:
         if has_existing_data:
             # Use new Sonnet system with full context from Memory + finance DB
             sonnet_input = await _build_sonnet_input(uid, notion_uid)
-            raw = await ask_claude(sonnet_input, system=BUDGET_SONNET_SYSTEM, model=_cfg.model_sonnet, max_tokens=4096)
+            raw = await ask_claude(sonnet_input, system=BUDGET_SONNET_SYSTEM, model=_cfg.model_sonnet, max_tokens=4096, temperature=0)
         else:
             # Legacy: setup flow with user messages only
             finance_cats_str = ", ".join(CATEGORIES) if CATEGORIES else "неизвестно"
@@ -3193,7 +3193,7 @@ async def _run_budget_analysis(message: Message, uid: int) -> None:
             prompt = _BUDGET_PARSE_PROMPT_LEGACY.format(
                 all_messages=all_text, finance_categories=finance_cats_str, current_date=current_date,
             )
-            raw = await ask_claude(prompt, model=_cfg.model_sonnet, max_tokens=4096)
+            raw = await ask_claude(prompt, model=_cfg.model_sonnet, max_tokens=4096, temperature=0)
 
         if not raw or not raw.strip():
             raise ValueError("Empty response from Sonnet")

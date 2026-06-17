@@ -630,7 +630,7 @@ async def handle_add_session(
 
         # 1. Haiku парсит данные. max_tokens=4000: при 9+ триплетах JSON
         # уходит за 700 токенов; 600 усекало хвост массива (см. issue #81).
-        raw = await ask_claude(text, system=PARSE_SESSION_SYSTEM, max_tokens=4000)
+        raw = await ask_claude(text, system=PARSE_SESSION_SYSTEM, max_tokens=4000, temperature=0)
         data = _parse_json_safe(raw)
         if data is None:
             await log_error(text, "parse_error", bot_label="🌒 Arcana", error_code="–")
