@@ -27,6 +27,43 @@ _CTYPE_LABEL = {
     "🌟 Self": "🌟 Self",
 }
 
+# Подстроки (lower), сигнализирующие о рефузале LLM вместо реального имени.
+REFUSAL_MARKERS = [
+    "не могу", "не имею", "извлеч", "доступ", "предостав",
+    "пожалуйста", "не указан", "не определ", "unknown", "n/a",
+]
+
+
+def is_valid_client_name(name: str) -> bool:
+    """Возвращает True только если name похоже на реальное имя клиента.
+
+    Отсекает рефузал-строки LLM, предложения и мусор:
+    - пусто после strip
+    - длина > 40 символов
+    - больше 3 слов
+    - содержит .!? (признак предложения, не имени)
+    - нет ни одной буквы
+    - содержит любой маркер из REFUSAL_MARKERS (поиск подстроки, lower)
+    """
+    if not name:
+        return False
+    s = name.strip()
+    if not s:
+        return False
+    if len(s) > 40:
+        return False
+    if len(s.split()) > 3:
+        return False
+    if any(c in s for c in ".!?"):
+        return False
+    if not any(c.isalpha() for c in s):
+        return False
+    lower = s.lower()
+    for marker in REFUSAL_MARKERS:
+        if marker in lower:
+            return False
+    return True
+
 
 async def resolve_or_create(
     message: Message,
@@ -46,6 +83,9 @@ async def resolve_or_create(
     реплай чтобы сменить тип» и регистрирует mapping для reply_update.
     """
     if not name:
+        return None
+    if not is_valid_client_name(name):
+        logger.warning("invalid client name rejected: %r", name)
         return None
     cid, created = await find_or_create_client(
         name, user_notion_id=user_notion_id, default_type=default_type,

@@ -181,3 +181,52 @@ async def test_session_with_unknown_client_now_creates_relation():
         cid = await cr.resolve_or_create(msg, "Лена", user_notion_id="u")
 
     assert cid == "c-lena", "клиент должен создаться, не оставаться сиротой"
+
+
+# ── is_valid_client_name + гард от LLM-рефузала ─────────────────────────────
+
+def test_refusal_phrase_rejected():
+    from core.client_resolve import is_valid_client_name
+    assert is_valid_client_name("не могу извлечь имя") is False
+
+
+def test_long_refusal_rejected():
+    from core.client_resolve import is_valid_client_name
+    assert is_valid_client_name(
+        "Я не имею доступа к базе данных клиентов..."
+    ) is False
+
+
+def test_short_name_valid():
+    from core.client_resolve import is_valid_client_name
+    assert is_valid_client_name("оля") is True
+
+
+def test_two_word_name_valid():
+    from core.client_resolve import is_valid_client_name
+    assert is_valid_client_name("Анна Петрова") is True
+
+
+@pytest.mark.asyncio
+async def test_resolve_returns_none_for_refusal_without_db_call():
+    """Рефузал LLM → resolve_or_create возвращает None, find_or_create НЕ вызывается."""
+    from core import client_resolve as cr
+    msg = _msg()
+    foc = AsyncMock(return_value=("c-x", True))
+    with patch.object(cr, "find_or_create_client", foc):
+        result = await cr.resolve_or_create(msg, "не могу извлечь имя", user_notion_id="u")
+    assert result is None
+    foc.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_resolve_proceeds_for_valid_name():
+    """Валидное имя → find_or_create_client вызывается нормально."""
+    from core import client_resolve as cr
+    msg = _msg()
+    foc = AsyncMock(return_value=("c-olia", False))
+    with patch.object(cr, "find_or_create_client", foc), \
+         patch.object(cr, "save_message_page", AsyncMock()):
+        result = await cr.resolve_or_create(msg, "оля", user_notion_id="u")
+    assert result == "c-olia"
+    foc.assert_awaited_once()
