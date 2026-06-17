@@ -34,6 +34,8 @@ async def _route(intent: str, text: str):
                AsyncMock()) as ritual_mock, \
          patch("arcana.handlers.intent_resolve.ask_practice_or_nexus",
                AsyncMock()) as practice_ask_mock, \
+         patch("arcana.handlers.intent_resolve.ask_ritual_disambiguation",
+               AsyncMock()) as disambig_mock, \
          patch("arcana.handlers.base.react", AsyncMock()), \
          patch("arcana.pending_clients.get_pending_client",
                AsyncMock(return_value=None)), \
@@ -48,6 +50,7 @@ async def _route(intent: str, text: str):
         "work": work_mock,
         "ritual": ritual_mock,
         "practice_ask": practice_ask_mock,
+        "disambig": disambig_mock,
     }
 
 
@@ -73,12 +76,15 @@ async def test_intent_task_legacy_alias_redirects():
 
 
 @pytest.mark.asyncio
-async def test_ritual_done_without_past_tense_becomes_planned():
-    """«сделать ритуал» в ritual_done → guard переводит в planned (preview)."""
+async def test_ritual_done_without_past_tense_becomes_ambiguous():
+    """«сделать ритуал» в ritual_done → guard → ritual_ambiguous (переспрос).
+
+    До фикса B6: guard конвертировал в ritual_planned → Works (тихая запись).
+    После B6: ritual_ambiguous → ask_ritual_disambiguation.
+    """
     res = await _route("ritual_done", "сделать маше финансовый ритуал")
-    # ritual_planned → handle_add_work (preview)
-    res["work"].assert_awaited_once()
-    # handle_add_ritual (мгновенная запись) НЕ должен быть вызван
+    res["disambig"].assert_awaited_once()
+    res["work"].assert_not_called()
     res["ritual"].assert_not_called()
 
 
