@@ -281,10 +281,11 @@ def test_finance_category_drill_down(client):
 # ── POST /api/expenses (deprecated alias) ───────────────────────────────────
 
 def test_expense_create_uses_finance_add(client):
+    from miniapp.backend.routes import writes as _writes_mod
     tz = 3
     today = _today_date(tz)
-    with patch("miniapp.backend.routes.writes.finance_add",
-               AsyncMock(return_value="fin-id")) as fa, \
+    fa = AsyncMock(return_value="fin-id")
+    with patch.object(_writes_mod._fin_repo, "add", fa), \
          patch("miniapp.backend.routes.writes.today_user_tz",
                AsyncMock(return_value=(today, tz))), \
          patch("miniapp.backend.routes.writes.get_user_notion_id",
@@ -314,13 +315,15 @@ def test_expense_rejects_zero_amount(client):
 
 def test_expenses_alias_still_works(client):
     """Deprecated /api/expenses всё ещё работает через finance_create."""
+    from miniapp.backend.routes import writes as _writes_mod
     captured = {}
 
-    async def fake_finance_add(**kwargs):
+    async def fake_add(**kwargs):
         captured.update(kwargs)
         return "legacy-id"
 
-    with patch("miniapp.backend.routes.writes.finance_add", side_effect=fake_finance_add), \
+    fa = AsyncMock(side_effect=fake_add)
+    with patch.object(_writes_mod._fin_repo, "add", fa), \
          patch("miniapp.backend.routes.writes.today_user_tz",
                AsyncMock(return_value=(_today_date(), 3))), \
          patch("miniapp.backend.routes.writes.get_user_notion_id",
@@ -337,13 +340,15 @@ def test_expenses_alias_still_works(client):
 # ── POST /api/finance (income/expense/practice_income) ──────────────────────
 
 def test_finance_post_expense_routes_to_finance_add(client):
+    from miniapp.backend.routes import writes as _writes_mod
     captured = {}
 
-    async def fake_finance_add(**kwargs):
+    async def fake_add(**kwargs):
         captured.update(kwargs)
         return "new-page-id"
 
-    with patch("miniapp.backend.routes.writes.finance_add", side_effect=fake_finance_add), \
+    fa = AsyncMock(side_effect=fake_add)
+    with patch.object(_writes_mod._fin_repo, "add", fa), \
          patch("miniapp.backend.routes.writes.today_user_tz",
                AsyncMock(return_value=(_today_date(), 3))), \
          patch("miniapp.backend.routes.writes.get_user_notion_id",
@@ -366,13 +371,15 @@ def test_finance_post_expense_routes_to_finance_add(client):
 
 
 def test_finance_post_income_default_category(client):
+    from miniapp.backend.routes import writes as _writes_mod
     captured = {}
 
-    async def fake_finance_add(**kwargs):
+    async def fake_add(**kwargs):
         captured.update(kwargs)
         return "inc-id"
 
-    with patch("miniapp.backend.routes.writes.finance_add", side_effect=fake_finance_add), \
+    fa = AsyncMock(side_effect=fake_add)
+    with patch.object(_writes_mod._fin_repo, "add", fa), \
          patch("miniapp.backend.routes.writes.today_user_tz",
                AsyncMock(return_value=(_today_date(), 3))), \
          patch("miniapp.backend.routes.writes.get_user_notion_id",
@@ -390,13 +397,15 @@ def test_finance_post_income_default_category(client):
 
 
 def test_finance_post_practice_income_forces_arcana(client):
+    from miniapp.backend.routes import writes as _writes_mod
     captured = {}
 
-    async def fake_finance_add(**kwargs):
+    async def fake_add(**kwargs):
         captured.update(kwargs)
         return "practice-id"
 
-    with patch("miniapp.backend.routes.writes.finance_add", side_effect=fake_finance_add), \
+    fa = AsyncMock(side_effect=fake_add)
+    with patch.object(_writes_mod._fin_repo, "add", fa), \
          patch("miniapp.backend.routes.writes.today_user_tz",
                AsyncMock(return_value=(_today_date(), 3))), \
          patch("miniapp.backend.routes.writes.get_user_notion_id",
@@ -424,6 +433,75 @@ def test_finance_expense_requires_category(client):
         })
     assert r.status_code == 400
     assert "cat is required" in r.json()["detail"]
+
+
+def test_finance_bot_arcana_sets_arcana_label(client):
+    """Регресс: body.bot=arcana → bot_label='🌒 Arcana' (arcana_pnl, не nexus_budget)."""
+    from miniapp.backend.routes import writes as _writes_mod
+    captured = {}
+
+    async def fake_add(**kwargs):
+        captured.update(kwargs)
+        return "arc-id"
+
+    fa = AsyncMock(side_effect=fake_add)
+    with patch.object(_writes_mod._fin_repo, "add", fa), \
+         patch("miniapp.backend.routes.writes.today_user_tz",
+               AsyncMock(return_value=(_today_date(), 3))), \
+         patch("miniapp.backend.routes.writes.get_user_notion_id",
+               AsyncMock(return_value=FAKE_NOTION_USER)):
+        r = client.post("/api/finance", json={
+            "type": "expense",
+            "amount": 300,
+            "cat": "🕯️ Расходники",
+            "bot": "arcana",
+        })
+
+    assert r.status_code == 200, r.text
+    assert captured["bot_label"] == "🌒 Arcana"   # → arcana_pnl
+    assert captured["type_"] == "💸 Расход"
+    assert captured["amount"] == 300
+
+    # Контрольная группа: bot=nexus → BOT_NEXUS
+    fa2 = AsyncMock(side_effect=fake_add)
+    with patch.object(_writes_mod._fin_repo, "add", fa2), \
+         patch("miniapp.backend.routes.writes.today_user_tz",
+               AsyncMock(return_value=(_today_date(), 3))), \
+         patch("miniapp.backend.routes.writes.get_user_notion_id",
+               AsyncMock(return_value=FAKE_NOTION_USER)):
+        r2 = client.post("/api/finance", json={
+            "type": "expense", "amount": 100, "cat": "🍜 Продукты", "bot": "nexus",
+        })
+    assert r2.status_code == 200, r2.text
+    assert captured["bot_label"] == "☀️ Nexus"    # → nexus_budget
+
+
+@pytest.mark.asyncio
+async def test_finance_barter_guard_nexus_sanitizes_source():
+    """FinanceRepo._guard_source: source=🔄 Бартер + BOT_NEXUS → sanitized to '💳 Карта'.
+
+    Гард не даёт бартерному source попасть в nexus_budget.
+    _nexus_repo и _arcana_repo — модульные синглтоны в finance_repo.
+    """
+    import core.repos.finance_repo as _fin_mod
+    captured = {}
+
+    async def fake_add_entry(**kwargs):
+        captured.update(kwargs)
+        return "123"
+
+    with patch.object(_fin_mod._nexus_repo, "add_entry", side_effect=fake_add_entry):
+        from core.repos.finance_repo import FinanceRepo
+        await FinanceRepo().add(
+            date="2026-06-17",
+            amount=100.0,
+            category="🍜 Продукты",
+            type_="💸 Расход",
+            source="🔄 Бартер",    # бартер с nexus → должен санитайзиться
+            bot_label="☀️ Nexus",
+        )
+
+    assert captured["source"] == "💳 Карта"       # sanitized, не 🔄 Бартер
 
 
 # ── GET /api/categories ──────────────────────────────────────────────────────

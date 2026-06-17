@@ -15,11 +15,8 @@ from typing import Any, Optional
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
-from core.config import config
-from core.notion_client import (
-    finance_add,
-)
 from core.notion_client import _title, _text, _select, _status, _number, _date, _relation
+from core.repos.finance_repo import FinanceRepo
 from core.user_manager import get_user_notion_id
 from core.bot_notify import notify_user, clear_task_reminder
 
@@ -53,6 +50,7 @@ _tasks_pg_repo = _PgTasksRepoClass()
 
 from core.repos.pg_memory_repo import PgMemoryRepo as _PgMemoryRepoClass
 _memory_repo = _PgMemoryRepoClass()
+_fin_repo = FinanceRepo()
 
 from miniapp.backend.auth import current_user_id
 from miniapp.backend._helpers import (
@@ -305,7 +303,7 @@ async def task_create(
         props["Дедлайн"] = _date(body.date)
     if user_notion_id:
         props["🪪 Пользователи"] = _relation(user_notion_id)
-    pg_id = await _tasks_pg_repo.create(config.nexus.db_tasks, props)
+    pg_id = await _tasks_pg_repo.create("", props)
     if not pg_id:
         raise HTTPException(status_code=500, detail="failed to create task")
     await notify_user(tg_id, f"➕ Создала задачу: <b>{_esc(body.title)}</b>", bot="nexus")
@@ -362,7 +360,7 @@ async def finance_create(
         category = body.cat or "🔮 Практика"
         bot_label = "🌒 Arcana"
 
-    page_id = await finance_add(
+    page_id = await _fin_repo.add(
         date=today_date.isoformat(),
         amount=body.amount,
         category=category,
@@ -1065,7 +1063,7 @@ async def list_checkout(
         finance_cat = CATEGORY_TO_FINANCE.get(category, "💳 Прочее")
         today_iso, _tz = await today_user_tz(tg_id)
         try:
-            finance_id = await finance_add(
+            finance_id = await _fin_repo.add(
                 date=today_iso.isoformat() if hasattr(today_iso, "isoformat") else str(today_iso),
                 amount=actual,
                 category=finance_cat,
