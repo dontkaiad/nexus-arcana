@@ -25,7 +25,6 @@ from core.repos.finance_repo import _repo
 from core.budget import (
     BUDGET_KEY_TO_CATEGORY as _BUDGET_KEY_TO_CATEGORY,
     LIMIT_FACT_RE as _LIMIT_FACT_RE,
-    DEBT_RE as _DEBT_RE,
     cat_link as _cat_link,
     display_limit_name as _display_limit_name,
     get_limits as _get_limits,
@@ -1863,51 +1862,19 @@ def _recalc_keyboard() -> InlineKeyboardMarkup:
 
 
 async def _deactivate_debt(name: str, user_notion_id: str = "") -> bool:
-    """Deactivate a debt in Memory. Returns True if found."""
-    mem_db = os.environ.get("NOTION_DB_MEMORY")
-    if not mem_db:
-        return False
-    key_hint = name.lower().replace(" ", "_")
-    from core.notion_client import db_query, update_page
-    existing = await db_query(mem_db, filter_obj={"and": [
-        {"property": "Ключ", "rich_text": {"contains": "долг_" + key_hint}},
-        {"property": "Актуально", "checkbox": {"equals": True}},
-    ]}, page_size=5)
-    if existing:
-        for page in existing:
-            await update_page(page["id"], {"Актуально": {"checkbox": False}})
-        return True
-    return False
+    """Deactivate a debt. Returns True if found."""
+    from core.repos.pg_debts_repo import _repo as _debt_repo
+    return await _debt_repo.deactivate(user_notion_id, "i_owe", name)
 
 
 async def _partial_debt_payment(name: str, payment: int, user_notion_id: str = "") -> Optional[int]:
-    """Reduce debt by payment. Returns new remaining or None."""
-    mem_db = os.environ.get("NOTION_DB_MEMORY")
-    if not mem_db:
+    """Reduce debt by payment. Returns new remaining or None if not found."""
+    from core.repos.pg_debts_repo import _repo as _debt_repo
+    result = await _debt_repo.reduce_amount(user_notion_id, "i_owe", name, float(payment))
+    if result is None:
         return None
-    key_hint = name.lower().replace(" ", "_")
-    from core.notion_client import db_query, update_page
-    existing = await db_query(mem_db, filter_obj={"and": [
-        {"property": "Ключ", "rich_text": {"contains": "долг_" + key_hint}},
-        {"property": "Актуально", "checkbox": {"equals": True}},
-    ]}, page_size=1)
-    if not existing:
-        return None
-    page = existing[0]
-    fact_parts = page.get("properties", {}).get("Текст", {}).get("title", [])
-    fact = fact_parts[0]["plain_text"] if fact_parts else ""
-    m = re.search(r'(\d[\d\s]*(?:[.,]\d+)?)\s*[₽р]', fact)
-    if not m:
-        return None
-    current = int(re.sub(r'[\s.,]', '', m.group(1)))
-    new_amount = max(0, current - payment)
-    if new_amount == 0:
-        await update_page(page["id"], {"Актуально": {"checkbox": False}})
-        return 0
-    # Update fact text with new amount
-    new_fact = re.sub(r'(\d[\d\s]*(?:[.,]\d+)?)\s*[₽р]', f'{new_amount}₽', fact, count=1)
-    await update_page(page["id"], {"Текст": _title(new_fact)})
-    return new_amount
+    new_amount, _closed = result
+    return int(new_amount)
 
 
 async def _deactivate_goal(name: str, user_notion_id: str = "") -> bool:
@@ -1929,12 +1896,12 @@ async def _deactivate_goal(name: str, user_notion_id: str = "") -> bool:
 
 
 async def _save_debt(name: str, amount: int, deadline: str, user_notion_id: str = "") -> None:
-    """Create a new debt entry in Memory."""
-    dl_part = f" · дедлайн: {deadline}" if deadline else ""
-    await _save_memory_entry(
-        f"долг_{name.lower().replace(' ', '_')}",
-        f"долг: {name} — {amount}₽{dl_part}",
-        user_notion_id,
+    """Create or update a debt in the debts table."""
+    from core.repos.pg_debts_repo import _repo as _debt_repo
+    await _debt_repo.upsert(
+        user_notion_id, name, "i_owe",
+        amount=float(amount),
+        deadline=deadline or None,
     )
 
 
@@ -3534,6 +3501,7 @@ async def _save_budget_plan(message: Message, uid: int) -> None:
         )
 
     # Долги (поддержка и debts_monthly и queued_debts)
+    from core.repos.pg_debts_repo import _repo as _debt_repo
     all_plan_debts = plan.get("debts_monthly", plan.get("debts", []))
     all_plan_debts += plan.get("queued_debts", [])
     # Also merge strategies from state
@@ -3550,13 +3518,12 @@ async def _save_budget_plan(message: Message, uid: int) -> None:
         if not strategy and name_lower in strategy_map:
             strategy = strategy_map[name_lower].get("strategy", "")
             monthly = strategy_map[name_lower].get("monthly_payment", monthly)
-        dl_part = " · дедлайн: {}".format(dl) if dl else ""
-        strat_part = " · стратегия: {}".format(strategy) if strategy else ""
-        mon_part = " · платёж: {}".format(int(monthly)) if monthly else ""
-        await _save_memory_entry(
-            "долг_{}".format(name_lower.replace(" ", "_")),
-            "долг: {} — {}₽{}{}{}".format(name, int(amt), dl_part, strat_part, mon_part),
-            notion_uid,
+        await _debt_repo.upsert(
+            notion_uid, name, "i_owe",
+            amount=float(int(amt)),
+            deadline=dl or None,
+            strategy=strategy or None,
+            monthly_payment=float(monthly),
         )
 
     # Цели
@@ -3736,11 +3703,9 @@ async def _budget_period_review(user_notion_id: str = "") -> Tuple[str, float]:
 
     # Debt info
     for d in debts:
-        fact = d.get("fact", "")
-        m = _DEBT_RE.search(fact)
-        if m:
-            name = m.group(1).strip()
-            amt = int(re.sub(r'[\s.,]', '', m.group(2)))
+        name = d.get("name", "")
+        amt = d.get("amount", 0)
+        if name and amt:
             lines.append("\n📋 Долг {}: осталось {:,.0f}₽".format(name, amt))
 
     return "\n".join(lines), total_saved

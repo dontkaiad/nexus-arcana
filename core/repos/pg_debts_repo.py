@@ -199,6 +199,21 @@ class PgDebtsRepo:
             q = q.order_by(debts.c.created_at)
             return [_row_to_debt(r) for r in conn.execute(q).fetchall()]
 
+    def _list_closed_sync(
+        self,
+        user_notion_id: str,
+        kind: Optional[str],
+    ) -> List[Debt]:
+        with _get_engine().connect() as conn:
+            q = select(debts).where(
+                (debts.c.user_notion_id == user_notion_id)
+                & (debts.c.is_active == False)
+            )
+            if kind is not None:
+                q = q.where(debts.c.kind == kind)
+            q = q.order_by(debts.c.updated_at.desc())
+            return [_row_to_debt(r) for r in conn.execute(q).fetchall()]
+
     # ── async API ──────────────────────────────────────────────────────────────
 
     async def upsert(
@@ -244,6 +259,16 @@ class PgDebtsRepo:
     ) -> List[Debt]:
         return await asyncio.to_thread(
             self._list_active_sync, user_notion_id, kind,
+        )
+
+    async def list_closed(
+        self,
+        user_notion_id: str,
+        kind: Optional[str] = None,
+    ) -> List[Debt]:
+        """Return inactive debts ordered by updated_at desc. closed_at = updated_at."""
+        return await asyncio.to_thread(
+            self._list_closed_sync, user_notion_id, kind,
         )
 
 

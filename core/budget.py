@@ -62,15 +62,6 @@ GOAL_RE = re.compile(
     r'(?:.*?откладываю\s*(\d[\d\s]*(?:[.,]\d+)?)\s*[₽р])?',
     re.IGNORECASE,
 )
-DEBT_RE = re.compile(
-    r'долг:\s*(.+?)\s*[—\-]\s*(\d[\d\s]*(?:[.,]\d+)?)\s*[₽р]'
-    r'(?:.*?дедлайн:\s*([^·]+))?'
-    r'(?:.*?стратегия:\s*([^·]+))?'
-    r'(?:.*?платёж:\s*(\d[\d\s]*(?:[.,]\d+)?))?'
-    r'\s*$',
-    re.IGNORECASE,
-)
-
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -136,7 +127,7 @@ async def load_budget_data(user_notion_id: str = "") -> Dict[str, list]:
     empty = {"доходы": [], "обязательные": [], "цели": [], "долги": [], "лимиты": []}
     try:
         mems = await _mem_repo.find_by_key_prefixes(
-            ["income_", "обязательно_", "лимит_", "цель_", "долг_"],
+            ["income_", "обязательно_", "лимит_", "цель_"],
             user_notion_id=user_notion_id,
         )
     except Exception as e:
@@ -174,21 +165,6 @@ async def load_budget_data(user_notion_id: str = "") -> Dict[str, list]:
                     "key": key,
                     "fact": fact,
                 })
-        elif key.startswith("долг_"):
-            m = DEBT_RE.search(fact)
-            if m:
-                strategy = (m.group(4) or "").strip()
-                mp_raw = (m.group(5) or "").strip()
-                monthly_payment = parse_amount(mp_raw) if mp_raw else 0
-                result["долги"].append({
-                    "name": m.group(1).strip(),
-                    "amount": parse_amount(m.group(2)),
-                    "deadline": (m.group(3) or "").strip(),
-                    "strategy": strategy,
-                    "monthly_payment": monthly_payment,
-                    "fact": fact,
-                    "key": key,
-                })
         elif key.startswith("лимит_"):
             amount_m = LIMIT_AMOUNT_RE.search(fact)
             if amount_m:
@@ -197,6 +173,23 @@ async def load_budget_data(user_notion_id: str = "") -> Dict[str, list]:
                     "name": связь or key,
                     "amount": parse_amount(amount_m.group(1)),
                 })
+
+    # Долги — читаем из таблицы debts (not Memory)
+    try:
+        from core.repos.pg_debts_repo import _repo as _debt_repo
+        active_debts = await _debt_repo.list_active(user_notion_id, kind="i_owe")
+        for d in active_debts:
+            result["долги"].append({
+                "name": d.name,
+                "amount": d.amount,
+                "deadline": d.deadline,
+                "strategy": d.strategy,
+                "monthly_payment": d.monthly_payment,
+                "fact": "",
+                "key": "",
+            })
+    except Exception as e:
+        logger.error("load_budget_data debts: %s", e)
 
     # Дедупликация лимитов по display-имени
     seen_limit_names: dict = {}

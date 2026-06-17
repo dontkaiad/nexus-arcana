@@ -7,7 +7,6 @@ import pytest
 
 from core.budget import (
     BUDGET_KEY_TO_CATEGORY,
-    DEBT_RE,
     GOAL_RE,
     INCOME_RE,
     LIMIT_AMOUNT_RE,
@@ -76,23 +75,6 @@ def test_goal_regex_without_saving():
     assert m.group(3) is None
 
 
-def test_debt_regex_full():
-    fact = "долг: *** — 50 000₽ · дедлайн: апрель · стратегия: равными частями · платёж: 12500"
-    m = DEBT_RE.search(fact)
-    assert m
-    assert m.group(1).strip() == "***"
-    assert parse_amount(m.group(2)) == 50000.0
-    assert m.group(3).strip() == "апрель"
-    assert m.group(4).strip().startswith("равными")
-    assert parse_amount(m.group(5)) == 12500.0
-
-
-def test_debt_regex_minimal():
-    m = DEBT_RE.search("долг: Аня — 3000₽")
-    assert m
-    assert m.group(3) is None  # нет дедлайна
-
-
 def test_limit_fact_regex():
     m = LIMIT_FACT_RE.search("лимит: 🚬 Привычки — 17685₽/мес")
     assert m
@@ -114,18 +96,25 @@ async def test_load_budget_data_routes_keys_into_buckets():
     from unittest.mock import AsyncMock
     from core.repos.pg_memory_repo import Memory
     from core.repos import memory_repo as mrmod
+    import core.repos.pg_debts_repo as drmod
+    from core.repos.pg_debts_repo import Debt
 
     fake_mems = [
         Memory(id="1", fact="доход: зарплата — 115 000₽/мес", key="income_salary"),
         Memory(id="2", fact="обязательно: аренда — 40000₽", key="обязательно_rent"),
         Memory(id="3", fact="цель: Samsung Flip — 100 000₽ · откладываю 8000₽", key="цель_flip"),
-        Memory(id="4", fact="долг: *** — 50 000₽ · дедлайн: апрель", key="долг_vika"),
         Memory(id="5", fact="лимит: 🚬 Привычки — 17685₽/мес", key="лимит_habits",
                related_to="привычки"),
     ]
+    fake_debts = [
+        Debt(id="4", user_notion_id="", name="Vika", kind="i_owe",
+             amount=50000.0, deadline="апрель", strategy="", monthly_payment=0.0,
+             is_active=True, created_at="", updated_at=""),
+    ]
 
     with patch.object(mrmod._repo, "find_by_key_prefixes", AsyncMock(return_value=fake_mems)):
-        data = await load_budget_data()
+        with patch.object(drmod._repo, "list_active", AsyncMock(return_value=fake_debts)):
+            data = await load_budget_data()
 
     assert len(data["доходы"]) == 1 and data["доходы"][0]["amount"] == 115000
     assert len(data["обязательные"]) == 1

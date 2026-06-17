@@ -10,7 +10,6 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 
 from core.user_manager import get_user_notion_id
 from core.budget import (
-    DEBT_RE,
     GOAL_RE,
     cat_link,
     display_limit_name,
@@ -395,8 +394,10 @@ async def _load_desc_synonyms(user_notion_id: str) -> dict:
 
 
 async def _load_closed_budget(user_notion_id: str) -> dict:
-    """Закрытые долги/цели (is_current == False). closed_at = mem.date[:10]."""
+    """Закрытые цели (Memory is_current=False) + закрытые долги (debts.is_active=False)."""
     out: dict = {"долги": [], "цели": []}
+
+    # Закрытые цели — Memory
     try:
         all_closed = await _mem_repo.find_by_category(
             "",
@@ -404,20 +405,16 @@ async def _load_closed_budget(user_notion_id: str) -> dict:
             user_notion_id=user_notion_id,
             page_size=200,
         )
-    except Exception as e:
-        logger.warning("closed budget query failed: %s", e)
-        return out
-    for mem in all_closed:
-        key = (mem.key or "").strip().lower()
-        if not key.startswith(("цель_", "долг_")):
-            continue
-        fact = mem.fact or ""
-        closed_at = (mem.date or "")[:10] or None
-        if key.startswith("цель_"):
+        for mem in all_closed:
+            key = (mem.key or "").strip().lower()
+            if not key.startswith("цель_"):
+                continue
+            fact = mem.fact or ""
             m = GOAL_RE.search(fact)
             if not m:
                 continue
             saving = parse_amount(m.group(3)) if m.group(3) else 0
+            closed_at = (mem.date or "")[:10] or None
             out["цели"].append({
                 "key": key,
                 "name": m.group(1).strip(),
@@ -426,23 +423,27 @@ async def _load_closed_budget(user_notion_id: str) -> dict:
                 "monthly": int(round(saving)),
                 "closed_at": closed_at,
             })
-        elif key.startswith("долг_"):
-            m = DEBT_RE.search(fact)
-            if not m:
-                continue
-            mp_raw = (m.group(5) or "").strip()
-            monthly = parse_amount(mp_raw) if mp_raw else 0
-            if monthly <= 0:
-                monthly = _extract_monthly_fallback(m.group(4) or "", fact)
+    except Exception as e:
+        logger.warning("closed budget goals query failed: %s", e)
+
+    # Закрытые долги — debts table
+    try:
+        from core.repos.pg_debts_repo import _repo as _debt_repo
+        closed_debts = await _debt_repo.list_closed(user_notion_id, kind="i_owe")
+        for d in closed_debts:
+            closed_at = d.updated_at[:10] if d.updated_at else None
             out["долги"].append({
-                "key": key,
-                "name": m.group(1).strip(),
-                "total": int(round(parse_amount(m.group(2)))),
+                "key": "долг_{}".format(d.name.lower().replace(" ", "_")),
+                "name": d.name,
+                "total": int(round(d.amount)),
                 "left": 0,
-                "monthly_payment": int(round(monthly)),
-                "note": (m.group(4) or "").strip() or fact,
+                "monthly_payment": int(round(d.monthly_payment or 0)),
+                "note": d.strategy or "",
                 "closed_at": closed_at,
             })
+    except Exception as e:
+        logger.warning("closed budget debts query failed: %s", e)
+
     return out
 
 
