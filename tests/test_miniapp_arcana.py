@@ -1173,6 +1173,45 @@ def test_arcana_barter_only_open_false_calls_get_list(client):
     assert len(r.json()["items"]) == 1
 
 
+# ── /api/arcana/finance/pay_salary ──────────────────────────────────────────
+
+def test_arcana_pay_salary_bot_nexus_guard(client):
+    """pay_salary: _fin_repo.add вызван с bot_label=BOT_NEXUS → зарплата идёт
+    в nexus_budget, не в arcana_pnl. Гард бартер-инварианта."""
+    from miniapp.backend.routes import arcana_finance
+
+    fake_pnl = {
+        "cash_balance": 5000, "income_month": 0, "expenses_month": 0,
+        "profit_month": 0, "salary_month": 0, "salary_lifetime": 0,
+        "income_breakdown": {}, "expenses_by_category": [],
+        "debt_money": 0, "barter_open_count": 0,
+        "period": {"year": 2026, "month": 6},
+    }
+    mock_add = AsyncMock(return_value="fin-id-001")
+
+    with patch.object(arcana_finance._fin_repo, "add", mock_add), \
+         patch("miniapp.backend.routes.arcana_finance.compute_pnl",
+               AsyncMock(return_value=fake_pnl)), \
+         patch("miniapp.backend.routes.arcana_finance.get_user_notion_id",
+               AsyncMock(return_value=FAKE_NOTION_USER)):
+        r = client.post("/api/arcana/finance/pay_salary", json={"amount": 2500})
+
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["ok"] is True
+    assert body["finance_id"] == "fin-id-001"
+    assert body["amount"] == 2500
+    assert body["cash_balance_before"] == 5000
+    assert body["cash_balance_after"] == 2500
+
+    mock_add.assert_awaited_once()
+    kw = mock_add.await_args.kwargs
+    assert kw["bot_label"] == "☀️ Nexus"      # GUARD: зарплата → nexus_budget
+    assert kw["category"] == "💰 Зарплата"
+    assert kw["type_"] == "💰 Доход"
+    assert kw["amount"] == 2500.0
+
+
 # ── tarot.py — deck registry, card matcher, canonical_card ──────────────────
 
 def test_tarot_find_card_exact_en():

@@ -181,7 +181,8 @@ async def test_self_client_excluded_from_pnl():
 
 def test_pay_salary_twice_subtracts_from_cash(client):
     """Симулируем: до выплаты cash=10000. После первой 9000, после второй 8000.
-    finance_add вызван дважды с amount=1000 и bot=Nexus, cat=Зарплата."""
+    _fin_repo.add вызван дважды с amount=1000 и bot=Nexus, cat=Зарплата."""
+    from miniapp.backend.routes import arcana_finance
     state = {"cash": 10000, "salary_lifetime": 0}
 
     async def fake_pnl(user, y, m):
@@ -197,7 +198,7 @@ def test_pay_salary_twice_subtracts_from_cash(client):
 
     fa = AsyncMock(return_value="fin-OK")
     with patch("miniapp.backend.routes.arcana_finance.compute_pnl", AsyncMock(side_effect=fake_pnl)), \
-         patch("miniapp.backend.routes.arcana_finance.finance_add", fa), \
+         patch.object(arcana_finance._fin_repo, "add", fa), \
          patch("miniapp.backend.routes.arcana_finance.get_user_notion_id",
                AsyncMock(return_value=FAKE_NOTION_USER)):
         r1 = client.post("/api/arcana/finance/pay_salary", json={"amount": 1000})
@@ -218,6 +219,7 @@ def test_pay_salary_twice_subtracts_from_cash(client):
 # ═══════════════════════════════════════════════════════════════════════════
 
 def test_pay_salary_force_overrides_low_cash(client):
+    from miniapp.backend.routes import arcana_finance
     fake_pnl = {"cash_balance": 500, "income_month": 0, "expenses_month": 0,
                 "profit_month": 0, "salary_month": 0, "salary_lifetime": 0,
                 "income_breakdown": {}, "expenses_by_category": [],
@@ -226,7 +228,7 @@ def test_pay_salary_force_overrides_low_cash(client):
     fa = AsyncMock(return_value="fin-FORCE")
     with patch("miniapp.backend.routes.arcana_finance.compute_pnl",
                AsyncMock(return_value=fake_pnl)), \
-         patch("miniapp.backend.routes.arcana_finance.finance_add", fa), \
+         patch.object(arcana_finance._fin_repo, "add", fa), \
          patch("miniapp.backend.routes.arcana_finance.get_user_notion_id",
                AsyncMock(return_value=FAKE_NOTION_USER)):
         # без force — warning

@@ -99,15 +99,16 @@ async def test_compute_pnl_excludes_self_client_and_subtracts_salary():
 
 
 def test_pay_salary_creates_finance_with_nexus_bot_and_salary_category(client):
+    from miniapp.backend.routes import arcana_finance
     fake_pnl = {"cash_balance": 30000, "income_month": 0, "expenses_month": 0,
                 "profit_month": 0, "salary_month": 0, "salary_lifetime": 0,
                 "income_breakdown": {}, "expenses_by_category": [],
                 "debt_money": 0, "barter_open_count": 0,
                 "period": {"year": 2026, "month": 5}}
+    fa = AsyncMock(return_value="fin-XX")
     with patch("miniapp.backend.routes.arcana_finance.compute_pnl",
                AsyncMock(return_value=fake_pnl)), \
-         patch("miniapp.backend.routes.arcana_finance.finance_add",
-               AsyncMock(return_value="fin-XX")) as fa, \
+         patch.object(arcana_finance._fin_repo, "add", fa), \
          patch("miniapp.backend.routes.arcana_finance.get_user_notion_id",
                AsyncMock(return_value=FAKE_NOTION_USER)):
         r = client.post("/api/arcana/finance/pay_salary", json={"amount": 20000})
@@ -125,15 +126,16 @@ def test_pay_salary_creates_finance_with_nexus_bot_and_salary_category(client):
 
 
 def test_pay_salary_warns_when_cash_too_low(client):
+    from miniapp.backend.routes import arcana_finance
     fake_pnl = {"cash_balance": 5000, "income_month": 0, "expenses_month": 0,
                 "profit_month": 0, "salary_month": 0, "salary_lifetime": 0,
                 "income_breakdown": {}, "expenses_by_category": [],
                 "debt_money": 0, "barter_open_count": 0,
                 "period": {"year": 2026, "month": 5}}
+    fa = AsyncMock(return_value="fin-X")
     with patch("miniapp.backend.routes.arcana_finance.compute_pnl",
                AsyncMock(return_value=fake_pnl)), \
-         patch("miniapp.backend.routes.arcana_finance.finance_add",
-               AsyncMock(return_value="fin-X")) as fa, \
+         patch.object(arcana_finance._fin_repo, "add", fa), \
          patch("miniapp.backend.routes.arcana_finance.get_user_notion_id",
                AsyncMock(return_value=FAKE_NOTION_USER)):
         r = client.post("/api/arcana/finance/pay_salary", json={"amount": 20000})

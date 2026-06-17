@@ -17,7 +17,7 @@ from core.cash_register import (
     SALARY_CATEGORY,
     compute_pnl,
 )
-from core.notion_client import finance_add
+from core.repos.finance_repo import FinanceRepo
 from core.user_manager import get_user_notion_id
 from core.bot_notify import notify_user
 
@@ -26,6 +26,8 @@ from miniapp.backend.auth import current_user_id
 logger = logging.getLogger("miniapp.arcana.finance")
 
 router = APIRouter()
+
+_fin_repo = FinanceRepo()
 
 
 @router.get("/arcana/finance/pnl")
@@ -69,7 +71,7 @@ async def pay_salary(
             "cash_balance": cash,
             "message": f"В кассе {cash:,}₽ — выплатить всё равно? Передай force=true.",
         }
-    fin_id = await finance_add(
+    fin_id = await _fin_repo.add(
         date=today.strftime("%Y-%m-%d"),
         amount=float(body.amount),
         category=SALARY_CATEGORY,
