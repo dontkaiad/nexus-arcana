@@ -247,7 +247,7 @@ def get_all_patches() -> list:
         patch("core.notion_client.get_db_options", side_effect=_fake_get_db_options),
         patch("core.notion_client.task_add", side_effect=_fake_task_add),
         patch("core.notion_client.tasks_active", side_effect=_fake_tasks_active),
-        patch("core.notion_client.finance_add", side_effect=_fake_finance_add),
+        patch("core.repos.finance_repo._repo.add", side_effect=_fake_finance_add),
         patch("core.notion_client.finance_month", side_effect=_fake_finance_month),
         patch("core.notion_client.note_add", side_effect=_fake_note_add),
         patch("core.notion_client.notes_search", side_effect=_fake_notes_search),

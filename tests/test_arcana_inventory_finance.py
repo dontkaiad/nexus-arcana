@@ -46,7 +46,7 @@ async def test_check_items_arcana_writes_finance_with_arcana_bot():
 
     with patch.object(lm._arcana_repo, "search", AsyncMock(return_value=[fake_item])), \
          patch.object(lm._arcana_repo, "update_status", AsyncMock(return_value=True)), \
-         patch.object(lm, "finance_add", AsyncMock(return_value="fin-1")) as fa:
+         patch.object(lm._fin_repo, "add", AsyncMock(return_value="fin-1")) as fa:
         result = await check_items(
             [{"name": "соль", "price": 200}],
             bot_name="🌒 Arcana",

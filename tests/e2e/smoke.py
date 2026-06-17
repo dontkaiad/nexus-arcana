@@ -228,8 +228,8 @@ async def main():
 
     # Финансы (finance_add)
     try:
-        from core.notion_client import finance_add
-        page_id = await finance_add(
+        from core.repos.finance_repo import _repo as _fin_repo
+        page_id = await _fin_repo.add(
             date=datetime.now(timezone.utc).strftime("%Y-%m-%d"),
             amount=1.0,
             category="💳 Прочее",

@@ -1221,7 +1221,7 @@ async def handle_photo(msg: Message, user_notion_id: str = "") -> None:
 async def on_receipt(query: CallbackQuery, user_notion_id: str = "") -> None:
     """Подтверждение записи фото-чека в финансы."""
     from core.list_manager import pending_get, pending_del
-    from core.notion_client import finance_add
+    from core.repos.finance_repo import _repo as _fin_repo
     from core.classifier import today_moscow
 
     uid = query.from_user.id
@@ -1261,7 +1261,7 @@ async def on_receipt(query: CallbackQuery, user_notion_id: str = "") -> None:
     for key, data in by_cat.items():
         desc = ", ".join(data["names"])
         fin_type = "💰 Доход" if data["type"] == "income" else "💸 Расход"
-        await finance_add(
+        await _fin_repo.add(
             date=today_moscow(),
             amount=float(data["total"]),
             category=data["cat"],
@@ -1361,7 +1361,7 @@ async def on_arcana_choice(query: CallbackQuery, user_notion_id: str = "") -> No
 @dp.callback_query(lambda c: c.data and c.data.startswith("fin_type_"))
 async def on_finance_clarify(query: CallbackQuery, user_notion_id: str = "") -> None:
     """Handle finance type clarification (expense/income/barter)."""
-    from core.notion_client import finance_add
+    from core.repos.finance_repo import _repo as _fin_repo
     from core.classifier import today_moscow
 
     uid = query.from_user.id
@@ -1397,13 +1397,14 @@ async def on_finance_clarify(query: CallbackQuery, user_notion_id: str = "") -> 
     else:
         return
 
-    result = await finance_add(
+    result = await _fin_repo.add(
         date=today_moscow(),
         amount=finance_data["amount"],
         category=finance_data["category"],
         type_=type_label,
         source=source,
         description=finance_data["title"],
+        bot_label="☀️ Nexus",
         user_notion_id=stored_uid or user_notion_id,
     )
 

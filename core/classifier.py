@@ -8,7 +8,8 @@ from datetime import datetime, timezone, timedelta
 from typing import Any, Dict
 
 from core.claude_client import ask_claude
-from core.notion_client import finance_add, log_error
+from core.notion_client import log_error
+from core.repos.finance_repo import _repo as _fin_repo
 from core.config import ARCANA_KEYWORDS
 from core.list_classifier import (
     _LIST_BUY_RE, _LIST_CHECK_RE, _SUBTASK_RE, _LIST_INV_ADD_RE,
@@ -1018,13 +1019,14 @@ async def process_item(data: Dict[str, Any], original_text: str, msg, clarify: d
 
         # High confidence + amount > 0 → сохранить в Notion
         logger.info("process_item: saving to Notion - %s %s %s", type_label, amount, category)
-        result = await finance_add(
+        result = await _fin_repo.add(
             date=today_moscow(),
             amount=amount,
             category=category,
             type_=type_label,
             source=source,
             description=title,
+            bot_label="☀️ Nexus",
             user_notion_id=user_notion_id,
         )
         if result:

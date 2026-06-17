@@ -12,6 +12,7 @@ from typing import Optional
 
 from core import list_manager as _lm
 from core import notion_client as _notion
+from core.repos.finance_repo import _repo as _fin_repo
 
 # ── Re-exports so handlers don't import list_manager or notion_client ─────────
 
@@ -158,7 +159,7 @@ class ListsRepo:
         Returns (page_id, finance_category).
         """
         finance_cat = CATEGORY_TO_FINANCE.get(list_category, "💳 Прочее")
-        fin_id = await _notion.finance_add(
+        fin_id = await _fin_repo.add(
             date=_lm._today_iso(),
             amount=float(amount),
             category=finance_cat,

@@ -17,7 +17,8 @@ from datetime import datetime, timezone, timedelta
 from typing import Optional
 
 from core.config import config
-from core.notion_client import finance_add, query_pages
+from core.notion_client import query_pages
+from core.repos.finance_repo import _repo as _fin_repo
 
 from core.repos.pg_nexus_lists_repo import (
     PgNexusListsRepo, PgArcanaInventoryRepo,
@@ -442,7 +443,7 @@ async def check_items(
 
             if price:
                 finance_cat = CATEGORY_TO_FINANCE.get(item_category, "💳 Прочее")
-                fin_id = await finance_add(
+                fin_id = await _fin_repo.add(
                     date=_today_iso(),
                     amount=float(price),
                     category=finance_cat,
@@ -456,7 +457,7 @@ async def check_items(
         else:
             if price:
                 finance_cat = CATEGORY_TO_FINANCE.get(category or "💳 Прочее", "💳 Прочее")
-                fin_id = await finance_add(
+                fin_id = await _fin_repo.add(
                     date=_today_iso(),
                     amount=float(price),
                     category=finance_cat,
@@ -513,7 +514,7 @@ async def check_items_bulk(
                     await _arcana_repo.update_status(str(it.id), "Done")
                     checked.append({"id": str(it.id), "name": it.name})
 
-        fin_id = await finance_add(
+        fin_id = await _fin_repo.add(
             date=_today_iso(),
             amount=float(amount),
             category=finance_cat,
@@ -615,7 +616,7 @@ async def buy_mark_done_by_id(page_id: str, price: float, bot_name: str, user_pa
     if price:
         item_category = it.category
         finance_cat = CATEGORY_TO_FINANCE.get(item_category, "💳 Прочее")
-        fin_id = await finance_add(
+        fin_id = await _fin_repo.add(
             date=_today_iso(),
             amount=price,
             category=finance_cat,

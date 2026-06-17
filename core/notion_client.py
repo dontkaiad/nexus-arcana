@@ -356,24 +356,6 @@ async def match_select(db_id: str, prop_name: str, value: str) -> str:
 
 # ─── Finance ──────────────────────────────────────────────────────────────────
 
-async def finance_add(
-    date: str,
-    amount: float,
-    category: str,
-    type_: str,
-    source: str = "💳 Карта",
-    bot_label: str = "☀️ Nexus",
-    description: str = "",
-    user_notion_id: str = "",
-) -> Optional[str]:
-    """Write to PG (nexus_budget or arcana_pnl by bot_label). Notion write removed."""
-    from core.repos.finance_repo import _repo as _fin_repo
-    return await _fin_repo.add(
-        date=date, amount=amount, category=category, type_=type_,
-        source=source, bot_label=bot_label, description=description,
-        user_notion_id=user_notion_id,
-    )
-
 async def finance_month(month: str, user_notion_id: str = "",
                         description_filter: str = "",
                         type_filter: str = "") -> List[dict]:
