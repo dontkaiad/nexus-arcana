@@ -650,7 +650,10 @@ async def handle_add_session(
         client_id: Optional[str] = None
         self_client_missing = False
         if client_name:
-            from core.client_resolve import resolve_or_create
+            from core.client_resolve import resolve_or_create, is_valid_client_name
+            if not is_valid_client_name(client_name):
+                await message.answer("🤔 Не разобрала имя клиента — напиши ещё раз?")
+                return
             client_id = await resolve_or_create(
                 message, client_name, user_notion_id=user_notion_id,
             )
@@ -857,6 +860,11 @@ async def _handle_multi_session(
     deck_raw = data.get("deck") or "Уэйт"
     deck = _match_deck(deck_raw) or "Уэйт"
     parsed_client_name = (data.get("client_name") or "").strip() or None
+    if parsed_client_name and not forced_client_name:
+        from core.client_resolve import is_valid_client_name
+        if not is_valid_client_name(parsed_client_name):
+            await message.answer("🤔 Не разобрала имя клиента — напиши ещё раз?")
+            return
     client_name = forced_client_name or parsed_client_name
 
     # Клиент / личный — если уже резолвлен через dialog, используем как есть.

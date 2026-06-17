@@ -1,4 +1,7 @@
 """tests/test_ritual_parser.py — toleranсе к опечаткам и clarification flow."""
+import json
+import pytest
+from unittest.mock import AsyncMock, MagicMock, patch
 from arcana.handlers.rituals import PARSE_RITUAL_SYSTEM, CLARIFICATION_TEXT
 
 
@@ -51,3 +54,73 @@ def test_pg_rituals_code_to_goal_display_maps():
     assert CODE_TO_RESULT["positive"] == "✅ Сработало"
     assert CODE_TO_RESULT["unverified"] == "⏳ Не проверено"
     assert CODE_TO_PLACE["home"] == "🏠 Дома"
+
+
+# ── UX: невалидное имя клиента в ритуале → переспрос ────────────────────────
+
+def _ritual_msg():
+    bot_msg = MagicMock()
+    bot_msg.chat.id = 100
+    bot_msg.message_id = 555
+    msg = MagicMock()
+    msg.from_user.id = 7
+    msg.answer = AsyncMock(return_value=bot_msg)
+    return msg
+
+
+_BASE_RITUAL_JSON = {
+    "name": "Ритуал защиты",
+    "goal": "protect",
+    "needs_clarification": False,
+    "consumables": "", "consumables_cost": 0,
+    "duration_min": 60,
+    "offerings": "", "forces": "", "structure": "",
+    "amount": 0, "paid": 0, "payment_source": None,
+    "offerings_cost": 0,
+}
+
+
+@pytest.mark.asyncio
+async def test_invalid_client_name_ritual_sends_clarification():
+    """LLM-рефузал в client_name → бот переспрашивает, клиент не создаётся."""
+    import arcana.handlers.rituals as rit
+    import core.client_resolve as cr
+
+    bad_json = json.dumps(dict(_BASE_RITUAL_JSON, client_name="не могу извлечь имя"))
+    msg = _ritual_msg()
+    foc = AsyncMock()
+
+    with patch("arcana.handlers.rituals.ask_claude", AsyncMock(return_value=bad_json)), \
+         patch("arcana.handlers.rituals.get_user_tz", AsyncMock(return_value=3)), \
+         patch("arcana.pending_tarot.get_pending", AsyncMock(return_value=None)), \
+         patch.object(cr, "find_or_create_client", foc):
+        await rit.handle_add_ritual(msg, "ритуал", user_notion_id="u")
+
+    texts = [c.args[0] for c in msg.answer.call_args_list if c.args]
+    assert any("имя клиента" in t for t in texts)
+    foc.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_valid_client_name_ritual_no_clarification():
+    """Валидное имя → переспрос не шлётся, resolve_or_create вызывается."""
+    import arcana.handlers.rituals as rit
+    import core.client_resolve as cr
+
+    good_json = json.dumps(dict(_BASE_RITUAL_JSON, client_name="оля"))
+    msg = _ritual_msg()
+    roc = AsyncMock(return_value="c-olia")
+    repo_result = MagicMock()
+    repo_result.id = "ritual-1"
+
+    with patch("arcana.handlers.rituals.ask_claude", AsyncMock(return_value=good_json)), \
+         patch("arcana.handlers.rituals.get_user_tz", AsyncMock(return_value=3)), \
+         patch("arcana.pending_tarot.get_pending", AsyncMock(return_value=None)), \
+         patch.object(cr, "resolve_or_create", roc), \
+         patch.object(rit._repo, "create", AsyncMock(return_value=repo_result)), \
+         patch("core.message_pages.save_message_page", AsyncMock()):
+        await rit.handle_add_ritual(msg, "ритуал оля", user_notion_id="u")
+
+    roc.assert_awaited_once()
+    texts = [c.args[0] for c in msg.answer.call_args_list if c.args]
+    assert not any("имя клиента" in t for t in texts)

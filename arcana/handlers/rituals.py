@@ -102,7 +102,10 @@ async def handle_add_ritual(message: Message, text: str, user_notion_id: str = "
         client_name = data.get("client_name")
         client_id = None
         if client_name:
-            from core.client_resolve import resolve_or_create
+            from core.client_resolve import resolve_or_create, is_valid_client_name
+            if not is_valid_client_name(client_name):
+                await message.answer("🤔 Не разобрала имя клиента — напиши ещё раз?")
+                return
             client_id = await resolve_or_create(
                 message, client_name, user_notion_id=user_notion_id,
             )
