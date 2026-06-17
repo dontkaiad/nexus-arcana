@@ -78,15 +78,16 @@ def _inv_item(iid: str, name: str = "соль", qty: float = 200.0,
 
 
 def test_purchase_endpoint_writes_finance_and_appends_qty(client):
+    from miniapp.backend.routes import arcana_inventory
     inv_item = _inv_item("1", qty=100.0)
     mock_repo = MagicMock()
     mock_repo.get_by_id = AsyncMock(return_value=inv_item)
     mock_repo.update = AsyncMock(return_value=True)
+    fa = AsyncMock(return_value="fin-X")
     with patch("miniapp.backend.routes.arcana_inventory.get_user_notion_id",
                AsyncMock(return_value=FAKE_NOTION_USER)), \
          patch("miniapp.backend.routes.arcana_inventory._arcana_inv_repo", mock_repo), \
-         patch("miniapp.backend.routes.arcana_inventory.finance_add",
-               AsyncMock(return_value="fin-X")) as fa:
+         patch.object(arcana_inventory._fin_repo, "add", fa):
         r = client.post(
             "/api/arcana/inventory/1/purchase",
             json={"price": 250, "qty_added": 500},
@@ -103,6 +104,32 @@ def test_purchase_endpoint_writes_finance_and_appends_qty(client):
     mock_repo.update.assert_awaited_once()
     up_kwargs = mock_repo.update.await_args.kwargs
     assert up_kwargs.get("quantity") == 600.0
+
+
+def test_purchase_arcana_pnl_guard(client):
+    """Регресс: расход расходника → bot_label=🌒 Arcana и type_=💸 Расход.
+    Гард: запись идёт в arcana_pnl, НЕ в nexus_budget."""
+    from miniapp.backend.routes import arcana_inventory
+    inv_item = _inv_item("3", name="ладан", cat="🌿 Травы/Масла", qty=50.0)
+    mock_repo = MagicMock()
+    mock_repo.get_by_id = AsyncMock(return_value=inv_item)
+    mock_repo.update = AsyncMock(return_value=True)
+    fa = AsyncMock(return_value="fin-guard")
+    with patch("miniapp.backend.routes.arcana_inventory.get_user_notion_id",
+               AsyncMock(return_value=FAKE_NOTION_USER)), \
+         patch("miniapp.backend.routes.arcana_inventory._arcana_inv_repo", mock_repo), \
+         patch.object(arcana_inventory._fin_repo, "add", fa):
+        r = client.post(
+            "/api/arcana/inventory/3/purchase",
+            json={"price": 180},
+        )
+    assert r.status_code == 200, r.text
+    fa.assert_awaited_once()
+    kw = fa.await_args.kwargs
+    assert kw["bot_label"] == "🌒 Arcana"   # → arcana_pnl, не nexus_budget
+    assert kw["type_"] == "💸 Расход"
+    assert kw["category"] == "🕯️ Расходники"  # Травы/Масла → Расходники via CATEGORY_TO_FINANCE
+    assert kw["amount"] == 180.0
 
 
 def test_depleted_endpoint_archives_and_optionally_adds_to_buy(client):

@@ -14,7 +14,7 @@ from core.list_manager import (
     CATEGORY_TO_FINANCE,
     _today_iso,
 )
-from core.notion_client import finance_add
+from core.repos.finance_repo import FinanceRepo
 from core.repos.pg_nexus_lists_repo import (
     PgArcanaInventoryRepo as _PgArcanaInventoryRepoClass,
     InventoryItem,
@@ -26,6 +26,7 @@ from miniapp.backend.auth import current_user_id
 from miniapp.backend._helpers import BOT_ARCANA
 
 _arcana_inv_repo = _PgArcanaInventoryRepoClass()
+_fin_repo = FinanceRepo()
 
 logger = logging.getLogger("miniapp.arcana.inventory")
 
@@ -167,7 +168,7 @@ async def purchase_inventory(
     title = inv_item.name or "покупка"
     cat = inv_item.category or "💳 Прочее"
     finance_cat = CATEGORY_TO_FINANCE.get(cat, "🕯️ Расходники")
-    fin_id = await finance_add(
+    fin_id = await _fin_repo.add(
         date=_today_iso(),
         amount=float(body.price),
         category=finance_cat,
