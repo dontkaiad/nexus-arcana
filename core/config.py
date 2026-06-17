@@ -51,13 +51,7 @@ ARCANA_KEYWORDS = {
 
 
 # ── Finance constants ──────────────────────────────────────────────────────────
-FINANCE_CATEGORIES = [
-    "🐾 Коты", "🏠 Жильё", "🚬 Привычки", "🍜 Продукты",
-    "🍱 Кафе/Доставка", "🚕 Транспорт", "💅 Бьюти", "👗 Гардероб",
-    "💻 Подписки", "🏥 Здоровье", "🕯️ Расходники", "📚 Хобби/Учеба",
-    "💰 Зарплата", "🔮 Практика", "💳 Прочее",
-]
-
+# Nexus personal finance — расходы и доходы раздельно (используются miniapp /categories API).
 EXPENSE_CATEGORIES = [
     "🐾 Коты", "🏠 Жильё", "🚬 Привычки", "🍜 Продукты",
     "🍱 Кафе/Доставка", "🚕 Транспорт", "💅 Бьюти", "👗 Гардероб",
@@ -68,6 +62,20 @@ INCOME_CATEGORIES = [
     "💰 Зарплата", "💼 Фриланс", "🎁 Подарок",
     "💵 Возврат/кэшбэк", "💱 Продажа", "💳 Прочее",
 ]
+
+# Arcana-domain categories — не показываются юзеру в Nexus-фильтрах.
+ARCANA_CATEGORIES = ["🔮 Практика", "🕯️ Расходники"]
+
+# Полная вселенная для LLM-парсера: EXPENSE + INCOME + ARCANA, без дублей.
+# «💳 Прочее» есть в EXPENSE и INCOME — дедуплицируется.
+_seen: set = set()
+_all: list = []
+for _cat in EXPENSE_CATEGORIES + INCOME_CATEGORIES + ARCANA_CATEGORIES:
+    if _cat not in _seen:
+        _seen.add(_cat)
+        _all.append(_cat)
+FINANCE_CATEGORIES: list = _all
+del _seen, _all, _cat
 
 FINANCE_SOURCES = ["💳 Карта", "💵 Наличные", "🔄 Бартер"]
 FINANCE_TYPES   = ["💰 Доход", "💸 Расход"]

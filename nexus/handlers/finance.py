@@ -19,6 +19,7 @@ from core.claude_client import ask_claude, ask_claude_vision
 from nexus.handlers.utils import react
 from core.notion_client import log_error, create_report_page, _title, _number, _select, _date, _text
 from core.repos.finance_repo import _repo
+from core.config import FINANCE_CATEGORIES as CATEGORIES
 
 # Парсинг бюджета вынесен в core.budget — здесь re-export под старыми именами
 # для backward compat с существующими call-sites в модуле.
@@ -725,13 +726,6 @@ async def get_finance_stats(month: str, user_notion_id: str = "", compare_prev: 
             lines.append(advice)
 
     return "\n".join(lines)
-
-CATEGORIES = [
-    "🐾 Коты", "🏠 Жильё", "🚬 Привычки", "🍜 Продукты",
-    "🍱 Кафе/Доставка", "🚕 Транспорт", "💅 Бьюти", "👗 Гардероб",
-    "💻 Подписки", "🏥 Здоровье", "🕯️ Расходники", "📚 Хобби/Учеба",
-    "💰 Зарплата", "🔮 Практика", "💳 Прочее",
-]
 
 SOURCES = ["💳 Карта", "💵 Наличные", "🔄 Бартер"]
 
