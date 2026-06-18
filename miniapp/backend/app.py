@@ -7,6 +7,7 @@ import pathlib
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from miniapp.backend.routes import today, tasks, finance, lists, memory, writes
 from miniapp.backend.routes import calendar as cal
@@ -69,10 +70,25 @@ async def health() -> dict:
     return {"ok": True}
 
 
+class SPAStaticFiles(StaticFiles):
+    """StaticFiles с SPA-fallback: неизвестный путь фронта → index.html (200).
+
+    Пути /api/* НЕ получают fallback — их 404 пробрасывается как есть,
+    чтобы JS-клиент мог распознать ошибку API.
+    Starlette strip-ает mount-prefix ("/"), поэтому path здесь без ведущего "/":
+    запрос /nexus → path="nexus", запрос /api/foo → path="api/foo".
+    """
+    async def get_response(self, path: str, scope):
+        try:
+            return await super().get_response(path, scope)
+        except StarletteHTTPException as exc:
+            if exc.status_code == 404 and not path.startswith("api/"):
+                return await super().get_response("index.html", scope)
+            raise
+
+
 # Статика: монтируем ПОСЛЕ /api и /health, чтобы роутеры выигрывали.
-# Навигация в Mini App — чистый React state, не URL-роутер, поэтому
-# html=True (отдать index.html для несуществующих путей) достаточно.
 # В dev без собранного dist — mount пропускается, бэкенд работает как API.
 _DIST = pathlib.Path(__file__).parent.parent / "frontend" / "dist"
 if _DIST.is_dir():
-    app.mount("/", StaticFiles(directory=str(_DIST), html=True), name="static")
+    app.mount("/", SPAStaticFiles(directory=str(_DIST), html=True), name="spa")
