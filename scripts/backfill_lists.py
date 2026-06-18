@@ -128,6 +128,7 @@ async def _diagnose(pages: list, engine) -> None:
             nexus_lists.c.notion_id, nexus_lists.c.list_type,
             nexus_lists.c.task_id, nexus_lists.c.works_id,
             nexus_lists.c.name, nexus_lists.c.group_name,
+            nexus_lists.c.user_notion_id,
         )).fetchall()
         ar = conn.execute(sa_select(
             arcana_inventory.c.notion_id, arcana_inventory.c.list_type,
@@ -151,10 +152,12 @@ async def _diagnose(pages: list, engine) -> None:
     ar_check_rel = sum(1 for r in ar_check if r[2])             # works_id
     print(f"[diagnose] PG checklist rows: nexus_lists={len(nx_check)} (с relation={nx_check_rel}), "
           f"arcana_inventory={len(ar_check)} (с works_id={ar_check_rel})")
-    # nexus_lists checklist: (notion_id, list_type, task_id, works_id, name, group_name)
+    # nexus_lists checklist: (notion_id, list_type, task_id, works_id, name, group_name, user_notion_id)
+    nx_check_users = {(r[6] or "(пусто)") for r in nx_check}
+    print(f"[diagnose] nexus_lists checklist distinct user_notion_id: {nx_check_users}")
     for r in nx_check[:20]:
-        print(f"    nx-check | name={(r[4] or '<EMPTY>')[:30]:30} | group={(r[5] or '-')[:20]:20} "
-              f"| task={'Y' if r[2] else '-'} works={'Y' if r[3] else '-'}")
+        print(f"    nx-check | name={(r[4] or '<EMPTY>')[:28]:28} | group={(r[5] or '-')[:20]:20} "
+              f"| task={'Y' if r[2] else '-'} works={'Y' if r[3] else '-'} | user={(r[6] or '-')[:8]}")
     # arcana_inventory checklist: (notion_id, list_type, works_id, name, group_name)
     for r in ar_check[:20]:
         print(f"    ar-check | name={(r[3] or '<EMPTY>')[:30]:30} | group={(r[4] or '-')[:20]:20} "
