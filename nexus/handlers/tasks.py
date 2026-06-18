@@ -244,6 +244,8 @@ async def restore_reminders_on_startup() -> None:
     Проход 1: задачи с будущим напоминанием — планируем как есть.
     Проход 2: повторяющиеся задачи с прошедшим напоминанием —
               сдвигаем до ближайшей будущей даты, обновляем PG, планируем.
+    Проход 3: задачи с repeat_time, но reminder IS NULL — оживляем,
+              вычисляем первый future-run, записываем в PG и планируем.
     """
     from core.config import config
     from core.user_manager import get_user
@@ -389,7 +391,36 @@ async def restore_reminders_on_startup() -> None:
                                      title, repeat, ivl_days, new_reminder, deadline_start or "none")
                         restored += 1
                 except Exception as e:
-                    logger.error("restore pass2: task %s error: %s", page.get("id"), e)
+                    logger.error("restore pass2: task %s error: %s", task.id, e)
+
+            # ── Проход 3: repeat_time есть, reminder IS NULL — оживление ─────────
+            revived = 0
+            for task in await _pg.active_recurring_without_reminder(user_notion_id):
+                try:
+                    repeat_time_raw = task.repeat_time
+                    if not repeat_time_raw:
+                        continue
+                    time_str, _ivl = _parse_repeat_time(repeat_time_raw)
+                    try:
+                        h, m = map(int, time_str.split(":"))
+                    except Exception:
+                        h, m = 9, 0
+                    user_tz = timezone(timedelta(hours=tz_offset))
+                    now_local = datetime.now(user_tz)
+                    first_run = now_local.replace(hour=h, minute=m, second=0, microsecond=0)
+                    if first_run <= now_local:
+                        first_run = first_run + timedelta(days=1)
+                    new_reminder = first_run.strftime("%Y-%m-%dT%H:%M")
+                    await _repo.set_props(task.id, {"Напоминание": _date_with_tz(new_reminder, tz_offset)})
+                    await _schedule_reminder(tg_id, task.title or "Задача", new_reminder, task.id, tz_offset)
+                    revived += 1
+                    logger.info("restore pass3: revived '%s' repeat_time=%s next=%s",
+                                task.title, repeat_time_raw, new_reminder)
+                except Exception as e:
+                    logger.error("restore pass3: task %s error: %s", task.id, e)
+            if revived:
+                logger.info("restore pass3: revived %d recurring tasks without reminder", revived)
+                restored += revived
 
         except Exception as e:
             logger.error("restore_reminders_on_startup: tg_id=%s error: %s", tg_id, e)
@@ -975,10 +1006,25 @@ async def _handle_recurring_task_reset(
         new_deadline = current_deadline[:10] if current_deadline else ""
     else:
         new_deadline = _next_cycle_date(current_deadline, repeat, tz_offset, ivl_days) if current_deadline else ""
-        new_reminder = _next_cycle_date(
-            current_reminder, repeat, tz_offset, ivl_days,
-            override_time=canon_time,
-        ) if current_reminder else ""
+        if current_reminder:
+            new_reminder = _next_cycle_date(
+                current_reminder, repeat, tz_offset, ivl_days,
+                override_time=canon_time,
+            )
+        elif canon_time:
+            # reminder не был проставлен при создании — вычисляем первый future-run из repeat_time
+            try:
+                h, m = map(int, canon_time.split(":"))
+            except Exception:
+                h, m = 9, 0
+            user_tz = timezone(timedelta(hours=tz_offset))
+            now_local = datetime.now(user_tz)
+            fr = now_local.replace(hour=h, minute=m, second=0, microsecond=0)
+            if fr <= now_local:
+                fr = fr + timedelta(days=1)
+            new_reminder = fr.strftime("%Y-%m-%dT%H:%M")
+        else:
+            new_reminder = ""
 
     # v1.2.5 (bug #1): повторяющаяся задача после клика «Сделано» должна
     # оставаться в «In progress» (а не сваливаться в Not started, как было),
@@ -992,7 +1038,7 @@ async def _handle_recurring_task_reset(
     }
     if current_deadline and new_deadline:
         update_props["Дедлайн"] = _date_with_tz(new_deadline[:10], tz_offset)
-    if current_reminder and new_reminder:
+    if new_reminder:
         update_props["Напоминание"] = _date_with_tz(new_reminder, tz_offset)
 
     try:
@@ -1003,7 +1049,7 @@ async def _handle_recurring_task_reset(
         chat_id = message.chat.id
         if _scheduler:
             # Напоминание
-            if current_reminder and new_reminder:
+            if new_reminder:
                 try:
                     _scheduler.remove_job(f"reminder_{task_id}")
                 except Exception:
@@ -1015,7 +1061,7 @@ async def _handle_recurring_task_reset(
                     _scheduler.remove_job(f"deadline_{task_id}")
                 except Exception:
                     pass
-                if not (current_reminder and new_reminder):
+                if not new_reminder:
                     await _schedule_deadline_check(chat_id, title, new_deadline, task_id, tz_offset)
 
         await message.answer(f"🔄 Повторяющаяся задача сброшена. Следующий раз: {next_display}")

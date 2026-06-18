@@ -417,6 +417,26 @@ def _active_with_past_reminder_sync(user_notion_id: str) -> List[Task]:
     return [_to_task(r) for r in rows]
 
 
+def _active_recurring_without_reminder_sync(user_notion_id: str) -> List[Task]:
+    """Активные задачи с repeat_time заполненным, но reminder IS NULL."""
+    _ensure_lookups()
+    done_ids = select(task_status.c.id).where(
+        task_status.c.code.in_(["Done", "Archived"])
+    )
+    q = (
+        select(tasks)
+        .where(tasks.c.status_id.notin_(done_ids))
+        .where(tasks.c.repeat_time.isnot(None))
+        .where(tasks.c.repeat_time != "")
+        .where(tasks.c.reminder.is_(None))
+    )
+    if user_notion_id:
+        q = q.where(tasks.c.user_notion_id == user_notion_id)
+    with get_engine().connect() as conn:
+        rows = conn.execute(q).fetchall()
+    return [_to_task(r) for r in rows]
+
+
 # ── Public async API ───────────────────────────────────────────────────────────
 
 class PgTasksRepo:
@@ -486,6 +506,9 @@ class PgTasksRepo:
 
     async def active_with_past_reminder(self, user_notion_id: str = "") -> List[Task]:
         return await asyncio.to_thread(_active_with_past_reminder_sync, user_notion_id)
+
+    async def active_recurring_without_reminder(self, user_notion_id: str = "") -> List[Task]:
+        return await asyncio.to_thread(_active_recurring_without_reminder_sync, user_notion_id)
 
     async def get_by_notion_id(self, notion_id: str) -> Optional[Task]:
         """Find task by Notion page ID (for backfill cross-reference)."""

@@ -351,3 +351,104 @@ def test_non_recurring_completion_field_does_not_break_today(client):
     )
     assert "t-nonrec" in all_ids, \
         "non-recurring задача с completed_at должна остаться видимой"
+
+
+# ── Fix C: #137 — recurring с repeat_time, reminder IS NULL ─────────────────
+
+
+@pytest.mark.asyncio
+async def test_reset_recurring_null_reminder_computes_first_run():
+    """_handle_recurring_task_reset: reminder пуст + repeat_time задан →
+    new_reminder вычисляется из repeat_time, PG и scheduler обновляются.
+
+    Это фикс #137: раньше new_reminder оставался '', PG не писался, scheduler
+    не ставился, задача молчала вечно.
+    """
+    from nexus.handlers import tasks
+
+    msg = _make_message()
+    # reminder = "" (NULL-задача), repeat_time = "16:00|every_2d"
+    task = _make_task(repeat_time="16:00|every_2d", deadline="", reminder="")
+
+    captured: dict = {}
+
+    async def capture_update(task_id, props_dict):
+        captured["props"] = props_dict
+
+    with patch.object(tasks._repo, "set_props", AsyncMock(side_effect=capture_update)), \
+         patch.object(tasks, "_scheduler", None), \
+         patch.object(tasks, "_get_user_tz", AsyncMock(return_value=3)):
+        await tasks._handle_recurring_task_reset(
+            msg, "task-null-rem", task, "Ежедневно", "напоминай каждые 2 дня", uid=999_001,
+        )
+
+    assert captured, "set_props должен быть вызван"
+    assert "Напоминание" in captured["props"], "Напоминание должно быть записано в PG"
+    reminder_iso = captured["props"]["Напоминание"]["date"]["start"]
+    # Должно содержать 16:00 (canonical time из repeat_time)
+    assert "T16:00" in reminder_iso, f"Ожидался T16:00 в reminder, got {reminder_iso}"
+    # Должно быть в будущем: дата >= сегодня
+    from datetime import timezone as _tz
+    now_local = datetime.now(_tz(timedelta(hours=3)))
+    reminder_dt = datetime.fromisoformat(reminder_iso.replace("+03:00", ""))
+    assert reminder_dt > now_local.replace(tzinfo=None), \
+        f"reminder должен быть в будущем, got {reminder_iso}"
+
+
+@pytest.mark.asyncio
+async def test_restore_pass3_revives_recurring_without_reminder():
+    """restore_reminders_on_startup проход 3: задача с repeat_time и reminder=NULL
+    получает reminder в PG и APScheduler job (#137).
+    """
+    from nexus.handlers import tasks
+    from nexus.repos.pg_tasks_repo import Task as PgTask
+
+    orphan = PgTask(
+        id="orphan-1",
+        title="каждые 2 дня",
+        repeat="Ежедневно",
+        repeat_time="16:00|every_2d",
+        reminder="",
+        deadline="",
+        user_notion_id="notion-user-x",
+    )
+
+    set_props_calls: list = []
+    schedule_calls: list = []
+
+    async def fake_set_props(task_id, props):
+        set_props_calls.append((task_id, props))
+
+    async def fake_schedule(chat_id, title, reminder_dt, task_id, tz_offset=3):
+        schedule_calls.append((task_id, reminder_dt))
+
+    fake_pg = MagicMock()
+    fake_pg.active_with_future_reminder = AsyncMock(return_value=[])
+    fake_pg.active_with_past_reminder = AsyncMock(return_value=[])
+    fake_pg.active_recurring_without_reminder = AsyncMock(return_value=[orphan])
+
+    fake_bot = MagicMock()
+    fake_scheduler = MagicMock()
+
+    with patch.object(tasks, "_scheduler", fake_scheduler), \
+         patch.object(tasks, "_bot", fake_bot), \
+         patch.object(tasks._repo, "set_props", AsyncMock(side_effect=fake_set_props)), \
+         patch.object(tasks, "_schedule_reminder", fake_schedule), \
+         patch.object(tasks, "_get_user_tz", AsyncMock(return_value=3)), \
+         patch("nexus.repos.pg_tasks_repo.PgTasksRepo", return_value=fake_pg), \
+         patch("core.user_manager.get_user",
+               AsyncMock(return_value={"notion_page_id": "notion-user-x"})), \
+         patch("core.config.config") as mock_cfg:
+        mock_cfg.allowed_ids = [999_001]
+        await tasks.restore_reminders_on_startup()
+
+    assert set_props_calls, "set_props должен быть вызван для orphan"
+    task_id, props = set_props_calls[0]
+    assert task_id == "orphan-1"
+    assert "Напоминание" in props
+
+    reminder_iso = props["Напоминание"]["date"]["start"]
+    assert "T16:00" in reminder_iso, f"Ожидался T16:00, got {reminder_iso}"
+
+    assert schedule_calls, "scheduler должен получить job для orphan"
+    assert schedule_calls[0][0] == "orphan-1"
