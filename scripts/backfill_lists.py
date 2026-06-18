@@ -4,8 +4,9 @@ All 80 existing rows are Nexus → nexus_lists.
 arcana_inventory stays empty (for future Arcana barter/inventory items).
 
 Usage:
-    python3 scripts/backfill_lists.py          # dry-run
-    python3 scripts/backfill_lists.py --apply  # insert into PG
+    python3 scripts/backfill_lists.py            # dry-run
+    python3 scripts/backfill_lists.py --apply    # insert into PG
+    python3 scripts/backfill_lists.py --diagnose # read-only: why checklists vanished
 """
 from __future__ import annotations
 
@@ -111,7 +112,56 @@ def _parse_row(page: dict) -> dict:
     }
 
 
-async def main(apply: bool) -> None:
+async def _diagnose(pages: list, engine) -> None:
+    """Read-only: почему подзадачи (📋 Чеклист) пропали при миграции.
+
+    Ничего не пишет. Сверяет checklist-строки Notion с обеими PG-таблицами
+    и печатает кандидатов корня (пустое Название / Бот-routing / missing in PG).
+    """
+    from core.repos.lists_table import nexus_lists, arcana_inventory
+    from sqlalchemy import select as sa_select
+
+    with engine.connect() as conn:
+        nexus_ids = {r[0] for r in conn.execute(sa_select(nexus_lists.c.notion_id)).fetchall() if r[0]}
+        arcana_ids = {r[0] for r in conn.execute(sa_select(arcana_inventory.c.notion_id)).fetchall() if r[0]}
+    pg_ids = nexus_ids | arcana_ids
+    print(f"[diagnose] PG rows: nexus_lists={len(nexus_ids)}, arcana_inventory={len(arcana_ids)}")
+
+    rows = [_parse_row(p) for p in pages]
+    checklist = [r for r in rows if r["list_type"] == "чеклист"]
+    print(f"[diagnose] Notion rows total={len(rows)}, of them 📋 Чеклист={len(checklist)}")
+
+    by_bot: dict = {}
+    no_name = []
+    with_works = 0
+    with_task = 0
+    missing_in_pg = []
+    for r in checklist:
+        by_bot[r["bot"] or "(пусто)"] = by_bot.get(r["bot"] or "(пусто)", 0) + 1
+        if not r["name"]:
+            no_name.append(r["notion_id"])
+        if r["works_id"]:
+            with_works += 1
+        if r["task_id"]:
+            with_task += 1
+        if r["notion_id"] not in pg_ids:
+            missing_in_pg.append(r)
+
+    print(f"[diagnose] checklist by Бот: {by_bot}")
+    print(f"[diagnose] checklist with works_id={with_works}, with task_id={with_task}")
+    print(f"[diagnose] checklist SKIP (no name)={len(no_name)}: {no_name[:10]}")
+    print(f"[diagnose] checklist MISSING in both PG tables={len(missing_in_pg)} (= потерянные)")
+    for r in missing_in_pg[:20]:
+        print(
+            f"    miss | bot={r['bot'] or '-':10} | name={(r['name'] or '<EMPTY>')[:30]:30} "
+            f"| works={'Y' if r['works_id'] else '-'} task={'Y' if r['task_id'] else '-'} "
+            f"| {r['notion_id']}"
+        )
+    if not missing_in_pg:
+        print("[diagnose] все checklist-строки Notion есть в PG → корень в READ-path, не в миграции")
+
+
+async def main(apply: bool, diagnose: bool = False) -> None:
     from core.notion_client import query_pages
     from core.repos.lists_table import nexus_lists, arcana_inventory
     from sqlalchemy import select as sa_select
@@ -126,6 +176,10 @@ async def main(apply: bool) -> None:
 
     from arcana.repos.pg_sessions_repo import get_engine
     engine = get_engine()
+
+    if diagnose:
+        await _diagnose(pages, engine)
+        return
 
     # Skip if already backfilled
     with engine.connect() as conn:
@@ -260,4 +314,5 @@ async def main(apply: bool) -> None:
 
 if __name__ == "__main__":
     apply = "--apply" in sys.argv
-    asyncio.run(main(apply))
+    diagnose = "--diagnose" in sys.argv
+    asyncio.run(main(apply, diagnose))
