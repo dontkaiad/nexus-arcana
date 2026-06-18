@@ -454,6 +454,81 @@ async def test_restore_pass3_revives_recurring_without_reminder():
     assert schedule_calls[0][0] == "orphan-1"
 
 
+# ── #143: restore pass 1 — reminder из PG (UTC) не сдвигается на tz_offset ───
+
+
+@pytest.mark.asyncio
+async def test_restore_pass1_utc_reminder_keeps_local_wall_time():
+    """restore_reminders_on_startup проход 1: reminder в PG хранится с явным
+    offset UTC ('...+00:00'). _schedule_reminder должен получить ЛОКАЛЬНОЕ
+    настенное время, а не UTC-часы (#143 — повтор срабатывал на 3ч раньше).
+
+    11:00 UTC при tz_offset=3 = 14:00 МСК. Раньше [:16] выкидывал +00:00 и
+    14:00 МСК превращалось в 11:00 МСК (сдвиг на 3ч раньше).
+    """
+    from nexus.handlers import tasks
+    from nexus.repos.pg_tasks_repo import Task as PgTask
+
+    task_utc = PgTask(
+        id="utc-rem-1",
+        title="менять лоток котам",
+        repeat="Ежедневно",
+        repeat_time="14:00|every_1d",
+        # 11:00 UTC = 14:00 МСК (offset 3); дальняя дата → future-reminder
+        reminder="2099-01-15T11:00:00+00:00",
+        deadline="",
+        user_notion_id="notion-user-z",
+    )
+
+    schedule_calls: list = []
+
+    async def fake_schedule(chat_id, title, reminder_dt, task_id, tz_offset=3):
+        schedule_calls.append((task_id, reminder_dt, tz_offset))
+
+    fake_pg = MagicMock()
+    fake_pg.active_with_future_reminder = AsyncMock(return_value=[task_utc])
+    fake_pg.active_with_past_reminder = AsyncMock(return_value=[])
+    fake_pg.active_recurring_without_reminder = AsyncMock(return_value=[])
+
+    fake_bot = MagicMock()
+    fake_scheduler = MagicMock()
+
+    with patch.object(tasks, "_scheduler", fake_scheduler), \
+         patch.object(tasks, "_bot", fake_bot), \
+         patch.object(tasks, "_schedule_reminder", fake_schedule), \
+         patch.object(tasks, "_get_user_tz", AsyncMock(return_value=3)), \
+         patch("nexus.repos.pg_tasks_repo.PgTasksRepo", return_value=fake_pg), \
+         patch("core.user_manager.get_user",
+               AsyncMock(return_value={"notion_page_id": "notion-user-z"})), \
+         patch("core.config.config") as mock_cfg:
+        mock_cfg.allowed_ids = [999_001]
+        await tasks.restore_reminders_on_startup()
+
+    assert schedule_calls, "scheduler должен получить job для utc-rem-1"
+    task_id, reminder_str, tz_off = schedule_calls[0]
+    assert task_id == "utc-rem-1"
+    assert tz_off == 3
+    # Локальное настенное время 14:00 (НЕ 11:00 — иначе сдвиг на 3ч раньше)
+    assert "T14:00" in reminder_str, \
+        f"Ожидался T14:00 (локальное МСК), got {reminder_str}"
+    assert "T11:00" not in reminder_str, \
+        f"reminder не должен нести UTC-часы 11:00, got {reminder_str}"
+
+
+def test_to_local_wall_honors_explicit_offset():
+    """_to_local_wall: UTC-строка → локальное настенное время; наивная — как есть."""
+    from nexus.handlers import tasks
+
+    # 11:00 UTC = 14:00 при offset 3
+    assert tasks._to_local_wall("2026-06-18T11:00:00+00:00", 3) == "2026-06-18T14:00"
+    # +03:00 при offset 3 — настенное время неизменно
+    assert tasks._to_local_wall("2026-06-18T14:00:00+03:00", 3) == "2026-06-18T14:00"
+    # наивная локальная строка — режется до минут как есть
+    assert tasks._to_local_wall("2026-06-18T14:00", 3) == "2026-06-18T14:00"
+    # offset 5: 11:00 UTC = 16:00
+    assert tasks._to_local_wall("2026-06-18T11:00:00+00:00", 5) == "2026-06-18T16:00"
+
+
 # ── Fix D: смена часового пояса → пересборка APScheduler jobs ────────────────
 
 
