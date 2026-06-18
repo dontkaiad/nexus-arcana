@@ -163,10 +163,11 @@ async def _diagnose(pages: list, engine) -> None:
 
 async def main(apply: bool, diagnose: bool = False) -> None:
     from core.notion_client import query_pages
+    from core.config import config  # триггерит load_dotenv() + резолвит db_lists из .env
     from core.repos.lists_table import nexus_lists, arcana_inventory
     from sqlalchemy import select as sa_select
 
-    db_id = os.environ.get("NOTION_DB_LISTS")
+    db_id = config.db_lists or os.environ.get("NOTION_DB_LISTS")
     if not db_id:
         print("[backfill] ERROR: NOTION_DB_LISTS not set")
         sys.exit(1)
