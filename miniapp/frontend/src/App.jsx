@@ -1454,10 +1454,26 @@ function NxDay({ s, openTask, navigate, openStreaks }) {
 // NEXUS — TASKS
 // ═══════════════════════════════════════════════════════════════
 
-function NxTasks({ s, openTask }) {
+function NxTasks({ s, openTask, taskClosedSig }) {
   const [f, setF] = useState("active");
   const { data, loading, error, refetch } = useApi(`/api/tasks?filter=${f}`, [f]);
   const list = loading || error ? [] : adaptTasks(data);
+  // Закрытие задачи из шита (done/cancel): в фильтрах где задача после закрытия
+  // исчезает — проигрываем exit-анимацию, затем refetch. Иначе просто refetch.
+  const [removing, setRemoving] = useState({});
+  useEffect(() => {
+    if (!taskClosedSig?.id) return;
+    const id = taskClosedSig.id;
+    if (f === "active" || f === "overdue") {
+      setRemoving((p) => ({ ...p, [id]: true }));
+      const tmo = setTimeout(() => {
+        setRemoving((p) => { const n = { ...p }; delete n[id]; return n; });
+        refetch();
+      }, 300);
+      return () => clearTimeout(tmo);
+    }
+    refetch();
+  }, [taskClosedSig]);  // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 0 }}>
@@ -1479,7 +1495,7 @@ function NxTasks({ s, openTask }) {
           : <Empty s={s} emoji="🌿" title="Чилл" text="Активных задач нет." />
       )}
       {!loading && !error && list.map((t) => (
-        <div key={t.id} className={`task glass${(t.status === "done" || t.status === "cancelled") ? " done" : ""}`} onClick={() => openTask(t)} style={{ cursor: "pointer" }}>
+        <div key={t.id} className={`task glass${(t.status === "done" || t.status === "cancelled") ? " done" : ""}${removing[t.id] ? " removing" : ""}`} onClick={() => !removing[t.id] && openTask(t)} style={{ cursor: "pointer" }}>
           <div className="body">
             <div className="title">{t.title}</div>
             <div className="meta">
@@ -5912,13 +5928,14 @@ function QuickAdd({ s, actions, onPick }) {
 // TASK SHEET (с working write actions)
 // ═══════════════════════════════════════════════════════════════
 
-function TaskSheet({ s, task, onClose }) {
+function TaskSheet({ s, task, onClose, onClosed }) {
   const [busy, setBusy] = useState(null);
   const [editOpen, setEditOpen] = useState(false);
   const run = async (label, fn) => {
     setBusy(label);
     try {
       await fn();
+      if ((label === "done" || label === "cancel") && task.id) onClosed?.(task.id);
       onClose();
     } catch (e) {
       alert(`Не получилось: ${e.message}`);
@@ -7304,6 +7321,8 @@ export default function App() {
   const [nxP, setNxP] = useState("day");
   const [arP, setArP] = useState("day");
   const [modal, setModal] = useState(null);
+  // Сигнал «задача закрыта из шита» → списки проигрывают exit-анимацию + refetch.
+  const [taskClosedSig, setTaskClosedSig] = useState(null);
   const [fabOpen, setFabOpen] = useState(false);
   const [fabForm, setFabForm] = useState(null);
   const aRef = useRef(null);
@@ -7381,6 +7400,7 @@ export default function App() {
   const shared = {
     s: sky, openTask, openAdhd, openClient, openSession, openRitual, openGrimoire, openWork,
     openStreaks, openMoonPhases,
+    taskClosedSig,
     sessFilterRequest, consumeSessFilter,
     // wave6.3: навигация по табам из виджетов
     navigate: (tab, opts) => {
@@ -7631,6 +7651,7 @@ export default function App() {
             s={sky}
             task={modal.payload}
             onClose={() => setModal(null)}
+            onClosed={(id) => setTaskClosedSig({ id, ts: Date.now() })}
           />
         )}
       </Sheet>

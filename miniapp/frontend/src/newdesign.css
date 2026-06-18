@@ -251,6 +251,16 @@
 .task.glass { margin-bottom: 8px; }
 .task.done { opacity: 0.5; }
 .task.done .title { text-decoration: line-through; }
+.task.removing {
+  animation: task-collapse 0.3s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+  pointer-events: none;
+  overflow: hidden;
+}
+@keyframes task-collapse {
+  0%   { opacity: 1; transform: translateX(0); max-height: 120px; margin-bottom: 8px; padding-top: 14px; padding-bottom: 14px; }
+  40%  { opacity: 0; transform: translateX(24px); }
+  100% { opacity: 0; transform: translateX(24px); max-height: 0; margin-bottom: 0; padding-top: 0; padding-bottom: 0; }
+}
 .task .time {
   font-family: var(--f-mono);
   font-size: 13px;
