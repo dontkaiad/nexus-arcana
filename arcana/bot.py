@@ -275,7 +275,7 @@ async def main():
     dp, bot = create_dp_and_bot()
 
     # ── Команды в меню Telegram ──────────────────────────────────────────────
-    from aiogram.types import BotCommand, MenuButtonCommands
+    from aiogram.types import BotCommand, MenuButtonWebApp, WebAppInfo
     try:
         await bot.set_my_commands([
             BotCommand(command="start",    description="🌒 Начало работы"),
@@ -286,7 +286,10 @@ async def main():
             BotCommand(command="grimoire", description="📖 Гримуар"),
             BotCommand(command="tz",       description="🕐 Часовой пояс"),
         ])
-        await bot.set_chat_menu_button(menu_button=MenuButtonCommands())
+        _base = config.miniapp_base_url
+        await bot.set_chat_menu_button(menu_button=MenuButtonWebApp(
+            text="🌒 Arcana", web_app=WebAppInfo(url=f"{_base}/arcana")
+        ))
     except Exception as e:
         logger.warning("set_my_commands/menu failed: %s", e)
 

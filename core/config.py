@@ -125,16 +125,18 @@ class AppConfig:
     model_haiku: str  = MODEL_HAIKU
     model_sonnet: str = MODEL_SONNET
     openai_key: str = ""
+    miniapp_base_url: str = "https://core.heylark.dev"
 
 
 def load_config() -> AppConfig:
     return AppConfig(
-        allowed_ids   = _id_list("ALLOWED_TELEGRAM_IDS"),
-        notion_token  = os.getenv("NOTION_TOKEN"),
-        anthropic_key = _require("ANTHROPIC_API_KEY"),
-        db_users      = _optional("NOTION_DB_USERS"),
-        db_lists      = _optional("NOTION_DB_LISTS"),
-        openai_key    = _optional("OPENAI_API_KEY"),
+        allowed_ids      = _id_list("ALLOWED_TELEGRAM_IDS"),
+        notion_token     = os.getenv("NOTION_TOKEN"),
+        anthropic_key    = _require("ANTHROPIC_API_KEY"),
+        db_users         = _optional("NOTION_DB_USERS"),
+        db_lists         = _optional("NOTION_DB_LISTS"),
+        openai_key       = _optional("OPENAI_API_KEY"),
+        miniapp_base_url = _optional("MINIAPP_BASE_URL", "https://core.heylark.dev"),
         nexus = NexusConfig(
             tg_token     = _require("NEXUS_BOT_TOKEN"),
             db_finance   = _optional("NOTION_DB_FINANCE"),

@@ -1493,7 +1493,7 @@ async def handle_unauthorized(msg: Message) -> None:
 async def main() -> None:
     logger.info("Nexus bot starting...")
     from nexus.handlers.tasks import init_scheduler
-    from aiogram.types import BotCommand, MenuButtonCommands
+    from aiogram.types import BotCommand, MenuButtonWebApp, WebAppInfo
 
     await bot.set_my_commands([
         BotCommand(command="start",   description="☀️ Начало работы"),
@@ -1510,7 +1510,10 @@ async def main() -> None:
         BotCommand(command="tz",      description="🕐 Часовой пояс"),
     ])
     try:
-        await bot.set_chat_menu_button(menu_button=MenuButtonCommands())
+        _base = config.miniapp_base_url
+        await bot.set_chat_menu_button(menu_button=MenuButtonWebApp(
+            text="☀️ Nexus", web_app=WebAppInfo(url=f"{_base}/nexus")
+        ))
     except Exception as e:
         logger.warning("set_chat_menu_button failed: %s", e)
 
