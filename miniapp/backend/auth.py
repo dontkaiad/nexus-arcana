@@ -7,7 +7,7 @@ import json
 import logging
 import os
 import time
-from typing import Optional
+from typing import List, Optional
 from urllib.parse import parse_qsl
 
 from fastapi import Header, HTTPException
@@ -24,10 +24,20 @@ except ValueError:
     INIT_DATA_TTL = 24 * 3600
 
 
-def verify_init_data(init_data: str) -> int:
+def _hmac_matches(data_check_string: str, received_hash: str, bot_token: str) -> bool:
+    """Проверить HMAC для одного токена бота."""
+    secret_key = hmac.new(b"WebAppData", bot_token.encode(), hashlib.sha256).digest()
+    expected = hmac.new(secret_key, data_check_string.encode(), hashlib.sha256).hexdigest()
+    return hmac.compare_digest(expected, received_hash)
+
+
+def verify_init_data(init_data: str, extra_tokens: Optional[List[str]] = None) -> int:
     """Validate Telegram WebApp initData, return tg_id. Raise ValueError on failure.
 
     Spec: https://core.telegram.org/bots/webapps#validating-data-received-via-the-mini-app
+
+    Проверяется против nexus-токена И arcana-токена — Mini App открывается из обоих ботов.
+    extra_tokens используется в тестах для передачи фейковых токенов без патча конфига.
     """
     if not init_data:
         raise ValueError("empty init_data")
@@ -40,10 +50,14 @@ def verify_init_data(init_data: str) -> int:
         raise ValueError("no hash in init_data")
 
     data_check_string = "\n".join(f"{k}={data[k]}" for k in sorted(data.keys()))
-    secret_key = hmac.new(b"WebAppData", config.nexus.tg_token.encode(), hashlib.sha256).digest()
-    expected = hmac.new(secret_key, data_check_string.encode(), hashlib.sha256).hexdigest()
 
-    if not hmac.compare_digest(expected, received_hash):
+    # Собираем токены: nexus обязателен, arcana опционален (может быть пустым)
+    if extra_tokens is not None:
+        tokens = [t for t in extra_tokens if t]
+    else:
+        tokens = [t for t in [config.nexus.tg_token, config.arcana.tg_token] if t]
+
+    if not any(_hmac_matches(data_check_string, received_hash, t) for t in tokens):
         raise ValueError("hash mismatch")
 
     auth_date_raw = data.get("auth_date", "0")
@@ -73,7 +87,11 @@ async def current_user_id(
     if not x_telegram_init_data:
         raise HTTPException(status_code=401, detail="missing X-Telegram-Init-Data")
     try:
-        return verify_init_data(x_telegram_init_data)
+        tg_id = verify_init_data(x_telegram_init_data)
     except ValueError as e:
         logger.warning("init_data validation failed: %s", e)
         raise HTTPException(status_code=401, detail=f"invalid init_data: {e}")
+    if tg_id not in config.allowed_ids:
+        logger.warning("owner check failed: tg_id=%s not in allowed_ids", tg_id)
+        raise HTTPException(status_code=403, detail="forbidden")
+    return tg_id
