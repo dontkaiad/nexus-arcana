@@ -7297,8 +7297,10 @@ const arTabs = [
 ];
 
 export default function App() {
-  const [isN, setIsN] = useState(false);
-  const [prog, setProg] = useState(0);
+  // Начальный вид без анимации: /arcana → Night, всё остальное → Day.
+  // Lazy-initializer гарантирует однократное чтение pathname до первого рендера.
+  const [isN, setIsN] = useState(() => typeof window !== "undefined" && window.location.pathname === "/arcana");
+  const [prog, setProg] = useState(() => (typeof window !== "undefined" && window.location.pathname === "/arcana") ? 1 : 0);
   const [nxP, setNxP] = useState("day");
   const [arP, setArP] = useState("day");
   const [modal, setModal] = useState(null);
@@ -7309,6 +7311,8 @@ export default function App() {
 
   const go = (toN) => {
     if (aRef.current) cancelAnimationFrame(aRef.current);
+    // URL обновляется немедленно — без перезагрузки, анимация продолжается
+    history.pushState(null, "", toN ? "/arcana" : "/nexus");
     // #37: при переключении ботов всегда сбрасываем оба бота на первый таб
     // («День» — Мой день / Сегодня), а не показываем последнее открытое.
     setNxP("day");
@@ -7326,6 +7330,20 @@ export default function App() {
     setIsN(toN);
     aRef.current = requestAnimationFrame(an);
   };
+
+  // Синхронизировать вид при навигации «Назад» (без анимации — поведение браузера)
+  useEffect(() => {
+    const onPop = () => {
+      if (aRef.current) cancelAnimationFrame(aRef.current);
+      const toArcana = window.location.pathname === "/arcana";
+      setIsN(toArcana);
+      setProg(toArcana ? 1 : 0);
+      setNxP("day");
+      setArP("day");
+    };
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, []);
 
   const sky = useMemo(() => getSky(prog), [prog]);
   // wave7.4: погодный тинт фона для Nexus
