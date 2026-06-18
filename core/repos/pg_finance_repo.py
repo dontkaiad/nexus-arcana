@@ -131,6 +131,9 @@ def _nb_add_sync(description: str, amount: float, category: str, type_: str,
 def _nb_query_sync(date_from: str, date_to: str, type_: Optional[str],
                     category: Optional[str], page_size: int,
                     user_notion_id: str = "") -> List[BudgetEntry]:
+    # fail-closed: никогда не агрегируем данные разных пользователей (#139)
+    if not user_notion_id:
+        return []
     conds = [
         nexus_budget.c.date >= date_from,
         nexus_budget.c.date <= date_to,
@@ -154,6 +157,9 @@ def _nb_query_sync(date_from: str, date_to: str, type_: Optional[str],
 
 def _nb_search_desc_sync(text: str, page_size: int,
                           user_notion_id: str = "") -> List[BudgetEntry]:
+    # fail-closed: никогда не возвращаем данные без привязки к юзеру (#139)
+    if not user_notion_id:
+        return []
     conds = [nexus_budget.c.description.ilike(f"%{text}%")]
     if user_notion_id:
         conds.append(nexus_budget.c.user_notion_id == user_notion_id)
@@ -171,6 +177,9 @@ def _nb_search_desc_sync(text: str, page_size: int,
 def _nb_query_month_sync(month: str, description_filter: str,
                           type_filter: str,
                           user_notion_id: str = "") -> List[BudgetEntry]:
+    # fail-closed: никогда не агрегируем данные разных пользователей (#139)
+    if not user_notion_id:
+        return []
     d_from, d_to = _month_range(month)
     conds = [
         nexus_budget.c.date >= d_from,
@@ -281,6 +290,9 @@ def _ap_add_sync(description: str, amount: float, category: str, type_: str,
 def _ap_query_sync(date_from: str, date_to: str, type_: Optional[str],
                     category: Optional[str], page_size: int,
                     user_notion_id: str = "") -> List[PnlEntry]:
+    # fail-closed: никогда не агрегируем данные разных пользователей (#139)
+    if not user_notion_id:
+        return []
     conds = [
         arcana_pnl.c.date >= date_from,
         arcana_pnl.c.date <= date_to,
@@ -305,6 +317,9 @@ def _ap_query_sync(date_from: str, date_to: str, type_: Optional[str],
 def _ap_query_month_sync(month: str, description_filter: str,
                           type_filter: str,
                           user_notion_id: str = "") -> List[PnlEntry]:
+    # fail-closed: никогда не агрегируем данные разных пользователей (#139)
+    if not user_notion_id:
+        return []
     d_from, d_to = _month_range(month)
     conds = [
         arcana_pnl.c.date >= d_from,
