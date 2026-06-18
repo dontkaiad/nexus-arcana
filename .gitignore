@@ -130,6 +130,7 @@ celerybeat.pid
 
 # Environments
 .env
+.env.dev
 .venv
 env/
 venv/
@@ -220,6 +221,10 @@ session_cache.db
 *.db-wal
 *.db-shm
 *.pyc
+
+# дев-дампы Postgres (реальные данные, не коммитить)
+*.dump
+dev-db.dump
 
 # случайно подтянутое — не коммитить
 KarinaLark-*.pdf
