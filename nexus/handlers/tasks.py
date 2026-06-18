@@ -564,6 +564,48 @@ _CITY_TZ = {
 }
 
 
+async def _reschedule_all_for_tz(uid: int, chat_id: int, old_offset: int, new_offset: int) -> None:
+    """Пересобрать APScheduler jobs при смене часового пояса.
+
+    Сохраняет «намеренное» локальное время (H:M) и пересчитывает UTC
+    для нового пояса. Обновляет PG и APScheduler за один проход.
+    """
+    from core.user_manager import get_user as _get_user
+    from nexus.repos.pg_tasks_repo import PgTasksRepo as _PgTasksRepo
+    from nexus.repos.pg_tasks_repo import _parse_iso
+    try:
+        user_data = await _get_user(uid)
+        if not user_data:
+            return
+        user_notion_id = user_data.get("notion_page_id", "")
+        _pg = _PgTasksRepo()
+        task_list = await _pg.active_with_future_reminder(user_notion_id)
+        rescheduled = 0
+        for task in task_list:
+            try:
+                utc_dt = _parse_iso(task.reminder)
+                if not utc_dt:
+                    continue
+                # Восстанавливаем «намеренное» локальное время в старом поясе
+                local_dt = utc_dt.astimezone(timezone(timedelta(hours=old_offset)))
+                local_str = local_dt.strftime("%Y-%m-%dT%H:%M")
+                # Обновляем PG с новым tz суффиксом
+                await _repo.set_props(task.id, {"Напоминание": _date_with_tz(local_str, new_offset)})
+                # Снимаем старый job и планируем новый
+                try:
+                    _scheduler.remove_job(f"reminder_{task.id}")
+                except Exception:
+                    pass
+                await _schedule_reminder(chat_id, task.title or "Задача", local_str, task.id, new_offset)
+                rescheduled += 1
+            except Exception as e:
+                logger.error("tz_reschedule: task %s error: %s", task.id, e)
+        if rescheduled:
+            logger.info("tz_reschedule: uid=%s %s→%s, rescheduled %d jobs", uid, old_offset, new_offset, rescheduled)
+    except Exception as e:
+        logger.error("tz_reschedule outer: %s", e)
+
+
 async def _update_user_tz(message: Message, text: str) -> None:
     from core.repos.pg_memory_repo import PgMemoryRepo as _MemRepo
     uid = message.from_user.id
@@ -571,9 +613,11 @@ async def _update_user_tz(message: Message, text: str) -> None:
 
     # Сначала пробуем словарь городов (быстро, без API)
     offset = None
+    matched_city = None
     for city, tz in _CITY_TZ.items():
         if city in text_low:
             offset = tz
+            matched_city = city
             break
 
     # Потом пробуем UTC±X паттерн
@@ -597,10 +641,19 @@ async def _update_user_tz(message: Message, text: str) -> None:
         except Exception:
             offset = 3
 
+    old_offset = await _get_user_tz(uid)
     _user_tz_offset[uid] = offset
-    await _MemRepo().upsert(fact=str(offset), key=f"tz_{uid}", category="Настройки")
+    mem_repo = _MemRepo()
+    await mem_repo.upsert(fact=str(offset), key=f"tz_{uid}", category="Настройки")
+    # Сохранить город для будущей интеграции погоды
+    if matched_city:
+        await mem_repo.upsert(fact=matched_city, key=f"city_{uid}", category="Настройки")
     sign = "+" if offset >= 0 else ""
     await message.answer(f"🕐 Часовой пояс обновлён: UTC{sign}{offset}")
+
+    # Пересобрать APScheduler jobs с новым поясом
+    if old_offset != offset and _scheduler and _bot:
+        await _reschedule_all_for_tz(uid, message.chat.id, old_offset, offset)
 
 # ── Human date → ISO converter ────────────────────────────────────────────────
 

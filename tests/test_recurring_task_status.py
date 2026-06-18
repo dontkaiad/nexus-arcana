@@ -452,3 +452,75 @@ async def test_restore_pass3_revives_recurring_without_reminder():
 
     assert schedule_calls, "scheduler должен получить job для orphan"
     assert schedule_calls[0][0] == "orphan-1"
+
+
+# ── Fix D: смена часового пояса → пересборка APScheduler jobs ────────────────
+
+
+@pytest.mark.asyncio
+async def test_reschedule_all_for_tz_preserves_local_clock_time():
+    """_reschedule_all_for_tz: смена UTC+5 → UTC+3 сохраняет H:M локального
+    времени (16:00) и пересчитывает UTC.
+
+    Reminder хранится как 11:00 UTC (= 16:00 UTC+5).
+    После смены на UTC+3 job должен встать на 16:00+03:00 (= 13:00 UTC).
+    """
+    from nexus.handlers import tasks
+    from nexus.repos.pg_tasks_repo import Task as PgTask
+
+    # Reminder 11:00 UTC = 16:00 UTC+5
+    task_with_reminder = PgTask(
+        id="tz-task-1",
+        title="утренний ритуал",
+        repeat="Ежедневно",
+        repeat_time="16:00|every_1d",
+        reminder="2026-06-19T11:00:00+00:00",
+        deadline="",
+        user_notion_id="notion-user-y",
+    )
+
+    set_props_calls: list = []
+    schedule_calls: list = []
+
+    async def fake_set_props(task_id, props):
+        set_props_calls.append((task_id, props))
+
+    async def fake_schedule(chat_id, title, reminder_dt, task_id, tz_offset=3):
+        schedule_calls.append((task_id, reminder_dt, tz_offset))
+
+    fake_pg = MagicMock()
+    fake_pg.active_with_future_reminder = AsyncMock(return_value=[task_with_reminder])
+
+    fake_scheduler = MagicMock()
+
+    with patch.object(tasks._repo, "set_props", AsyncMock(side_effect=fake_set_props)), \
+         patch.object(tasks, "_schedule_reminder", fake_schedule), \
+         patch.object(tasks, "_scheduler", fake_scheduler), \
+         patch("nexus.repos.pg_tasks_repo.PgTasksRepo", return_value=fake_pg), \
+         patch("core.user_manager.get_user",
+               AsyncMock(return_value={"notion_page_id": "notion-user-y"})):
+        await tasks._reschedule_all_for_tz(
+            uid=999_001,
+            chat_id=999_001,
+            old_offset=5,
+            new_offset=3,
+        )
+
+    # PG обновлён с новым суффиксом +03:00
+    assert set_props_calls, "set_props должен быть вызван"
+    _, props = set_props_calls[0]
+    assert "Напоминание" in props
+    new_reminder_iso = props["Напоминание"]["date"]["start"]
+    # Локальное время 16:00 сохранено, суффикс изменился
+    assert "T16:00" in new_reminder_iso, f"Ожидался T16:00, got {new_reminder_iso}"
+    assert "+03:00" in new_reminder_iso, f"Ожидался суффикс +03:00, got {new_reminder_iso}"
+
+    # APScheduler job поставлен с новым tz_offset=3
+    assert schedule_calls, "scheduler должен получить новый job"
+    task_id, reminder_str, tz_off = schedule_calls[0]
+    assert task_id == "tz-task-1"
+    assert "T16:00" in reminder_str, f"Ожидался T16:00 в reminder_str, got {reminder_str}"
+    assert tz_off == 3, f"Ожидался tz_offset=3, got {tz_off}"
+
+    # Старый job снят
+    fake_scheduler.remove_job.assert_called_with("reminder_tz-task-1")
