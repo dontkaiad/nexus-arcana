@@ -2,9 +2,11 @@
 from __future__ import annotations
 
 import os
+import pathlib
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 from miniapp.backend.routes import today, tasks, finance, lists, memory, writes
 from miniapp.backend.routes import calendar as cal
@@ -65,3 +67,12 @@ for _r in (
 @app.get("/health")
 async def health() -> dict:
     return {"ok": True}
+
+
+# Статика: монтируем ПОСЛЕ /api и /health, чтобы роутеры выигрывали.
+# Навигация в Mini App — чистый React state, не URL-роутер, поэтому
+# html=True (отдать index.html для несуществующих путей) достаточно.
+# В dev без собранного dist — mount пропускается, бэкенд работает как API.
+_DIST = pathlib.Path(__file__).parent.parent / "frontend" / "dist"
+if _DIST.is_dir():
+    app.mount("/", StaticFiles(directory=str(_DIST), html=True), name="static")

@@ -12,3 +12,5 @@ pgdata/
 *.db
 *.sqlite
 .DS_Store
+miniapp/frontend/node_modules
+miniapp/frontend/dist
