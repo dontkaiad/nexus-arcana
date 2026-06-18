@@ -20,19 +20,17 @@ ILIKE_PATTERNS = [
     "%asdf%",
 ]
 
-# ── Таблицы (table_name, text_column)
-# Порядок: потомки перед родителями по FK
+# ── Целевые колонки: только name/title-поля сущностей.
+# НЕ включаем description/fact/notes — «тест» может встречаться в легитимном тексте.
+# Порядок: потомки перед родителями по FK (sessions → clients, nexus_lists → tasks).
 _TABLES = [
-    ("nexus_budget",    "description"),
-    ("arcana_pnl",      "description"),
-    ("debts",           "name"),
-    ("nexus_lists",     "name"),
+    ("nexus_lists",      "name"),
     ("arcana_inventory", "name"),
-    ("memories",        "fact_text"),
-    ("tasks",           "title"),
-    ("sessions",        "title"),
-    ("clients",         "name"),
-    ("notes",           "title"),
+    ("debts",            "name"),
+    ("sessions",         "title"),
+    ("tasks",            "title"),
+    ("notes",            "title"),
+    ("clients",          "name"),
 ]
 
 
@@ -80,9 +78,14 @@ def main() -> None:
 
     engine = _get_engine()
 
-    # ── Scan ──────────────────────────────────────────────────────────────────
-    print("\n=== Поиск тестовых данных ===\n")
-    print(f"Паттерны: {ILIKE_PATTERNS}\n")
+    # ── Заголовок ─────────────────────────────────────────────────────────────
+    print("\n⚠️  Перед --apply сделай бэкап:  ~/backups/pg_backup.sh\n")
+    print("=== Поиск тестовых данных ===\n")
+    print(f"Паттерны: {ILIKE_PATTERNS}")
+    print("Сканируются колонки:")
+    for tbl, col in _TABLES:
+        print(f"  {tbl}.{col}")
+    print()
 
     found: dict = {}
     total = 0
@@ -107,7 +110,6 @@ def main() -> None:
         return
 
     # ── Apply ─────────────────────────────────────────────────────────────────
-    print("\n⚠️  ВАЖНО: сделай бэкап ПЕРЕД удалением:  ~/backups/pg_backup.sh")
     print(f"\nБудет удалено {total} строк из таблиц: {', '.join(found)}")
     answer = input("\nНапиши DELETE для подтверждения: ").strip()
     if answer != "DELETE":
