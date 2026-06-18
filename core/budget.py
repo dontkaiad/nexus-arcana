@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import logging
 import re
+from datetime import datetime, timedelta, timezone as _tz
 from typing import Dict, List
 
 logger = logging.getLogger(__name__)
@@ -202,3 +203,63 @@ async def load_budget_data(user_notion_id: str = "") -> Dict[str, list]:
     result["лимиты"] = list(seen_limit_names.values())
 
     return result
+
+
+_MOSCOW_TZ = _tz(timedelta(hours=3))
+
+
+async def _budget_payday() -> int:
+    """День пэйдея из Памяти (PG). Default 1."""
+    try:
+        from core.repos.pg_memory_repo import PgMemoryRepo
+        mems = await PgMemoryRepo().find_by_exact_key("budget_payday")
+        stored = mems[0].fact if mems else None
+        if stored:
+            m = re.search(r"(\d+)", stored)
+            if m:
+                return int(m.group(1))
+    except Exception:
+        pass
+    return 1
+
+
+def _period_days_remaining(payday: int) -> int:
+    """Дней до конца бюджетного периода (не считая сегодня) → делитель."""
+    now = datetime.now(_MOSCOW_TZ)
+    today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    if now.day >= payday:
+        next_month = now.month + 1 if now.month < 12 else 1
+        next_year = now.year if now.month < 12 else now.year + 1
+        period_end = datetime(next_year, next_month, payday, tzinfo=_MOSCOW_TZ) - timedelta(days=1)
+    else:
+        period_end = now.replace(day=payday, hour=0, minute=0, second=0, microsecond=0) - timedelta(days=1)
+    return max(1, (period_end - today_start).days)
+
+
+async def budget_day_limit_from_plan(user_notion_id: str) -> int:
+    """Дневной лимит из сохранённого плана в Памяти.
+
+    free = доход − обязательные − лимиты − цели.saving − долги.monthly_payment
+    day_limit = max(0, free // дни_до_пэйдея)
+    Возвращает 0 если план не задан или доход отсутствует.
+    """
+    try:
+        budget = await load_budget_data(user_notion_id)
+        total_income = sum(d["amount"] for d in budget["доходы"])
+        if total_income <= 0:
+            return 0
+        total_obligatory = sum(d["amount"] for d in budget["обязательные"])
+        total_limits = sum(d["amount"] for d in budget["лимиты"])
+        total_goals_saving = sum(d.get("saving", 0) for d in budget["цели"])
+        total_debt_monthly = sum(
+            d.get("monthly_payment") or 0 for d in budget["долги"]
+            if (d.get("monthly_payment") or 0) > 0
+        )
+        free = (total_income - total_obligatory - total_limits
+                - total_goals_saving - total_debt_monthly)
+        payday = await _budget_payday()
+        days = _period_days_remaining(payday)
+        return max(0, int(free / days))
+    except Exception:
+        logger.error("budget_day_limit_from_plan: unexpected error", exc_info=True)
+        return 0

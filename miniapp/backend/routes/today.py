@@ -9,8 +9,8 @@ from fastapi import APIRouter, Depends
 
 from core.claude_client import ask_claude
 from core.user_manager import get_user_notion_id
+from core.budget import budget_day_limit_from_plan
 from core.repos.pg_finance_repo import PgNexusBudgetRepo
-from core.repos.pg_memory_repo import PgMemoryRepo
 from nexus.repos.pg_tasks_repo import PgTasksRepo, Task as PgTask
 
 from miniapp.backend import cache
@@ -33,11 +33,9 @@ logger = logging.getLogger("miniapp.today")
 router = APIRouter()
 
 _budget_repo = PgNexusBudgetRepo()
-_memory_repo = PgMemoryRepo()
 _tasks_repo = PgTasksRepo()
 
 _WEEKDAYS_RU = ["пн", "вт", "ср", "чт", "пт", "сб", "вс"]
-_DEFAULT_BUDGET_DAY = 4166
 
 
 def _date_start(prop: dict) -> str:
@@ -91,7 +89,7 @@ async def _spent_today(user_notion_id: str, today_iso: str, tomorrow_iso: str) -
     try:
         entries = await _budget_repo.query(
             date_from=today_iso,
-            date_to=tomorrow_iso,
+            date_to=today_iso,
             type_="💸 Расход",
             page_size=100,
             user_notion_id=user_notion_id,
@@ -100,16 +98,6 @@ async def _spent_today(user_notion_id: str, today_iso: str, tomorrow_iso: str) -
     except Exception as e:
         logger.warning("_spent_today PG query failed: %s", e)
         return 0
-
-
-async def _budget_day_limit() -> int:
-    try:
-        mems = await _memory_repo.find_by_exact_key("budget_day_limit")
-        if mems:
-            return int(float(mems[0].fact))
-    except (ValueError, TypeError, Exception):
-        pass
-    return _DEFAULT_BUDGET_DAY
 
 
 async def _adhd_context_memories(user_notion_id: str) -> list[str]:
@@ -366,7 +354,7 @@ async def get_today(tg_id: int = Depends(current_user_id)) -> dict[str, Any]:
     overdue.sort(key=lambda x: -x["days_ago"])
 
     spent_today = await _spent_today(user_notion_id, today_str, tomorrow_str)
-    day_limit = await _budget_day_limit()
+    day_limit = await budget_day_limit_from_plan(user_notion_id)
     left = day_limit - spent_today
     pct = int(round(spent_today / day_limit * 100)) if day_limit else 0
 

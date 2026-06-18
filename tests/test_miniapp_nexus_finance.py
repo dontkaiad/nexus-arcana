@@ -211,8 +211,8 @@ def test_finance_401_without_init_data():
 def test_finance_today_returns_budget_block(client):
     with patch("miniapp.backend.routes.finance._budget_repo.query",
                AsyncMock(return_value=[])), \
-         patch("miniapp.backend.routes.finance._mem_repo.find_by_exact_key",
-               AsyncMock(return_value=[])), \
+         patch("miniapp.backend.routes.finance.budget_day_limit_from_plan",
+               AsyncMock(return_value=4166)), \
          patch("miniapp.backend.routes.finance.today_user_tz",
                AsyncMock(return_value=(_today_date(), 3))), \
          patch("miniapp.backend.routes.finance.get_user_notion_id",
@@ -222,7 +222,7 @@ def test_finance_today_returns_budget_block(client):
     assert r.status_code == 200
     data = r.json()
     assert "budget" in data
-    assert data["budget"]["day"] == 4166  # дефолт
+    assert data["budget"]["day"] == 4166
     assert data["budget"]["spent"] == 0
     assert data["budget"]["left"] == 4166
     assert data["budget"]["pct"] == 0
@@ -233,8 +233,8 @@ def test_finance_today_budget_reflects_spending(client):
 
     with patch("miniapp.backend.routes.finance._budget_repo.query",
                AsyncMock(return_value=entries)), \
-         patch("miniapp.backend.routes.finance._mem_repo.find_by_exact_key",
-               AsyncMock(return_value=[])), \
+         patch("miniapp.backend.routes.finance.budget_day_limit_from_plan",
+               AsyncMock(return_value=4166)), \
          patch("miniapp.backend.routes.finance.today_user_tz",
                AsyncMock(return_value=(_today_date(), 3))), \
          patch("miniapp.backend.routes.finance.get_user_notion_id",
@@ -533,3 +533,26 @@ def test_categories_income_returns_defaults_when_empty(client):
     cats = r.json()["categories"]
     assert "💰 Зарплата" in cats
     assert "💳 Прочее" in cats
+
+
+def test_view_today_query_uses_today_as_date_to(client):
+    """_view_today не включает завтрашние траты — date_to=today (#140)."""
+    today_dt = _today_date()
+    today_str = today_dt.isoformat()
+    tomorrow_str = (today_dt + timedelta(days=1)).isoformat()
+
+    query_mock = AsyncMock(return_value=[])
+
+    with patch("miniapp.backend.routes.finance._budget_repo.query", query_mock), \
+         patch("miniapp.backend.routes.finance.budget_day_limit_from_plan",
+               AsyncMock(return_value=0)), \
+         patch("miniapp.backend.routes.finance.today_user_tz",
+               AsyncMock(return_value=(today_dt, 3))), \
+         patch("miniapp.backend.routes.finance.get_user_notion_id",
+               AsyncMock(return_value=FAKE_NOTION_USER)):
+        r = client.get("/api/finance?view=today")
+
+    assert r.status_code == 200
+    kw = query_mock.call_args.kwargs
+    assert kw["date_to"] == today_str, f"date_to должен быть today={today_str!r}, не tomorrow={tomorrow_str!r}"
+    assert kw["date_to"] != tomorrow_str

@@ -12,7 +12,6 @@ from miniapp.backend.app import app
 from miniapp.backend.auth import current_user_id
 from miniapp.backend.routes.today import first_emoji
 from core.repos.pg_finance_repo import BudgetEntry
-from core.repos.pg_memory_repo import Memory
 from nexus.repos.pg_tasks_repo import Task as PgTask
 
 
@@ -122,7 +121,7 @@ def test_today_returns_all_keys_and_classifies_tasks(client):
 
     with patch("miniapp.backend.routes.today._tasks_repo.active", AsyncMock(return_value=tasks)), \
          patch("miniapp.backend.routes.today._budget_repo.query", AsyncMock(return_value=expenses)), \
-         patch("miniapp.backend.routes.today._memory_repo.find_by_exact_key", AsyncMock(return_value=[])), \
+         patch("miniapp.backend.routes.today.budget_day_limit_from_plan", AsyncMock(return_value=4166)), \
          patch("miniapp.backend.routes.today.ask_claude", claude_mock), \
          patch("miniapp.backend.routes.today.today_user_tz", AsyncMock(return_value=(_today_local_date(tz), tz))), \
          patch("miniapp.backend.routes.today.get_user_notion_id",
@@ -191,7 +190,7 @@ def test_today_caches_adhd_tip_across_calls(client):
 
     with patch("miniapp.backend.routes.today._tasks_repo.active", AsyncMock(return_value=[])), \
          patch("miniapp.backend.routes.today._budget_repo.query", AsyncMock(return_value=[])), \
-         patch("miniapp.backend.routes.today._memory_repo.find_by_exact_key", AsyncMock(return_value=[])), \
+         patch("miniapp.backend.routes.today.budget_day_limit_from_plan", AsyncMock(return_value=0)), \
          patch("miniapp.backend.routes.today.ask_claude", claude_mock), \
          patch("miniapp.backend.routes.today.today_user_tz", AsyncMock(return_value=(_today_local_date(tz), tz))), \
          patch("miniapp.backend.routes.today.get_user_notion_id",
@@ -212,23 +211,24 @@ def test_today_caches_adhd_tip_across_calls(client):
     assert claude_mock.await_count == 1
 
 
-def test_today_uses_custom_budget_from_memory(client):
+def test_today_plan_based_budget_day_limit(client):
+    """budget['day'] берётся из budget_day_limit_from_plan, не из hardcoded 4166 (#141)."""
     tz = 3
     today_iso = _today_local_iso(tz)
-    budget_mem = Memory(id="1", fact="5000", category="💰 Лимит", related_to="", key="budget_day_limit")
     expense_entry = BudgetEntry(id="f1", description="test", amount=600,
                                 category="🍜 Продукты", type_="💸 Расход",
                                 source="💳 Карта", date=today_iso, user_notion_id="")
     with patch("miniapp.backend.routes.today._tasks_repo.active", AsyncMock(return_value=[])), \
          patch("miniapp.backend.routes.today._budget_repo.query",
                AsyncMock(return_value=[expense_entry])), \
-         patch("miniapp.backend.routes.today._memory_repo.find_by_exact_key",
-               AsyncMock(return_value=[budget_mem])), \
+         patch("miniapp.backend.routes.today.budget_day_limit_from_plan",
+               AsyncMock(return_value=5000)), \
          patch("miniapp.backend.routes.today.ask_claude",
                AsyncMock(return_value="tip")), \
-         patch("miniapp.backend.routes.today.today_user_tz", AsyncMock(return_value=(_today_local_date(tz), tz))), \
+         patch("miniapp.backend.routes.today.today_user_tz",
+               AsyncMock(return_value=(_today_local_date(tz), tz))), \
          patch("miniapp.backend.routes.today.get_user_notion_id",
-               AsyncMock(return_value="")), \
+               AsyncMock(return_value=FAKE_NOTION_USER)), \
          patch("nexus.handlers.streaks.get_streak",
                return_value={"streak": 0, "best": 0, "last_activity_date": None,
                              "rest_day_date": None, "rest_days_used": 0,
@@ -240,6 +240,35 @@ def test_today_uses_custom_budget_from_memory(client):
     assert resp.json()["budget"]["day"] == 5000
     assert resp.json()["budget"]["spent_today"] == 600
     assert resp.json()["budget"]["left"] == 4400
+
+
+def test_spent_today_query_uses_today_as_date_to(client):
+    """_spent_today не включает завтрашние траты — date_to=today (#140)."""
+    tz = 3
+    today = _today_local_iso(tz)
+    tomorrow = (datetime.strptime(today, "%Y-%m-%d") + timedelta(days=1)).strftime("%Y-%m-%d")
+
+    query_mock = AsyncMock(return_value=[])
+
+    with patch("miniapp.backend.routes.today._tasks_repo.active", AsyncMock(return_value=[])), \
+         patch("miniapp.backend.routes.today._budget_repo.query", query_mock), \
+         patch("miniapp.backend.routes.today.budget_day_limit_from_plan", AsyncMock(return_value=0)), \
+         patch("miniapp.backend.routes.today.ask_claude", AsyncMock(return_value="tip")), \
+         patch("miniapp.backend.routes.today.today_user_tz",
+               AsyncMock(return_value=(_today_local_date(tz), tz))), \
+         patch("miniapp.backend.routes.today.get_user_notion_id",
+               AsyncMock(return_value=FAKE_NOTION_USER)), \
+         patch("nexus.handlers.streaks.get_streak",
+               return_value={"streak": 0, "best": 0, "last_activity_date": None,
+                             "rest_day_date": None, "rest_days_used": 0,
+                             "streak_start_date": None}), \
+         patch("nexus.handlers.streaks.is_rest_day_available", return_value=False):
+        r = client.get("/api/today")
+
+    assert r.status_code == 200
+    kw = query_mock.call_args.kwargs
+    assert kw["date_to"] == today, f"date_to должен быть today={today!r}, не tomorrow={tomorrow!r}"
+    assert kw["date_to"] != tomorrow
 
 
 def test_today_rejects_missing_init_data():

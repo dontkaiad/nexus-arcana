@@ -11,6 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from core.user_manager import get_user_notion_id
 from core.budget import (
     GOAL_RE,
+    budget_day_limit_from_plan,
     cat_link,
     display_limit_name,
     get_limits,
@@ -89,31 +90,17 @@ def _extract_finance_item(entry: BudgetEntry) -> dict:
 
 # ── View: today ──────────────────────────────────────────────────────────────
 
-_DEFAULT_BUDGET_DAY = 4166
-
-
-async def _budget_day_limit() -> int:
-    try:
-        mems = await _mem_repo.find_by_exact_key("budget_day_limit")
-        if mems:
-            return int(float(mems[0].fact))
-    except (ValueError, TypeError, Exception):
-        pass
-    return _DEFAULT_BUDGET_DAY
-
-
 async def _view_today(tg_id: int) -> dict:
     today_date, _ = await today_user_tz(tg_id)
     today_iso = today_date.isoformat()
-    tomorrow_iso = (today_date + timedelta(days=1)).isoformat()
     user_notion_id = (await get_user_notion_id(tg_id)) or ""
 
-    records = await _nexus_finance_records(user_notion_id, today_iso, tomorrow_iso,
+    records = await _nexus_finance_records(user_notion_id, today_iso, today_iso,
                                            type_filter="💸 Расход")
     items = [_extract_finance_item(e) for e in records]
     total = sum(i["amt"] for i in items)
 
-    budget_day = await _budget_day_limit()
+    budget_day = await budget_day_limit_from_plan(user_notion_id)
     left = max(0, budget_day - total)
     pct = _pct(total, budget_day)
     return {

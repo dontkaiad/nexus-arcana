@@ -231,7 +231,7 @@ def _today_get_response(client, tasks):
     today_date = _today_local_date(3)
     with patch("miniapp.backend.routes.today._tasks_repo.active", AsyncMock(return_value=tasks)), \
          patch("miniapp.backend.routes.today._budget_repo.query", AsyncMock(return_value=[])), \
-         patch("miniapp.backend.routes.today._memory_repo.find_by_exact_key", AsyncMock(return_value=[])), \
+         patch("miniapp.backend.routes.today.budget_day_limit_from_plan", AsyncMock(return_value=0)), \
          patch("miniapp.backend.routes.today.ask_claude",
                AsyncMock(return_value="tip")), \
          patch("miniapp.backend.routes.today.today_user_tz",
