@@ -151,8 +151,11 @@ async def get_lists(
         ]
 
     if group:
-        g_target = group.strip().lower()
-        items = [i for i in items if (i.get("group") or "").strip().lower() == g_target]
+        # wave8.62.1: та же нормализация что в _attach_parent_tasks (lower +
+        # схлопнутые пробелы) — иначе дрейф whitespace между заголовком задачи
+        # и полем Группа прятал подзадачи в шите задачи.
+        g_target = _norm_title(group)
+        items = [i for i in items if _norm_title(i.get("group") or "") == g_target]
 
     if type == "inv":
         items.sort(key=lambda i: (i["expires"] is None, i["expires"] or ""))

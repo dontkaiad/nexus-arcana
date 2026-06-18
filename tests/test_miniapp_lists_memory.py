@@ -420,6 +420,34 @@ def test_check_items_with_group_param_show_even_if_parent_closed(client):
     assert ids == ["c-done-parent-1", "c-done-parent-2"]
 
 
+def test_check_items_group_param_matches_despite_whitespace_drift(client):
+    """Regression: подзадачи прятались в шите задачи когда заголовок задачи и
+    сохранённый group_name отличались регистром / лишними пробелами. group-фильтр
+    должен нормализовать так же, как _attach_parent_tasks (lower + collapse spaces)."""
+    from core.repos.pg_nexus_lists_repo import ListItem
+
+    pg_items = [
+        ListItem(id="g-1", name="разобрать шкаф", list_type="чеклист",
+                 status="not_started", group_name="Разобрать  Гардероб"),
+        ListItem(id="g-2", name="помыть обувь", list_type="чеклист",
+                 status="not_started", group_name="Разобрать  Гардероб"),
+    ]
+    with patch("miniapp.backend.routes.lists._nexus_lists_repo") as mock_repo, \
+         patch("miniapp.backend.routes.lists._tasks_repo.list_all",
+               AsyncMock(return_value=[])), \
+         patch("miniapp.backend.routes.lists.get_user_notion_id",
+               AsyncMock(return_value=FAKE_NOTION_USER)), \
+         patch("miniapp.backend.routes.lists.today_user_tz",
+               AsyncMock(return_value=(_today_date(), 3))):
+        mock_repo.get_summary_items = AsyncMock(return_value=pg_items)
+        # query: другой регистр + одинарный пробел
+        r = client.get("/api/lists?type=check&group=разобрать%20гардероб")
+
+    assert r.status_code == 200
+    ids = [i["id"] for i in r.json()["items"]]
+    assert ids == ["g-1", "g-2"]
+
+
 # ── POST /api/lists create/done/delete ───────────────────────────────────────
 
 def test_list_create_inv_arcana_uses_arcana_bot_label(client):
