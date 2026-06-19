@@ -1864,19 +1864,15 @@ async def _partial_debt_payment(name: str, payment: int, user_notion_id: str = "
 
 
 async def _deactivate_goal(name: str, user_notion_id: str = "") -> bool:
-    """Deactivate a goal in Memory. Returns True if found."""
-    mem_db = os.environ.get("NOTION_DB_MEMORY")
-    if not mem_db:
+    """Deactivate a goal in Memory (PG, #145). Returns True if found."""
+    if not user_notion_id:
         return False
     key_hint = name.lower().replace(" ", "_")
-    from core.notion_client import db_query, update_page
-    existing = await db_query(mem_db, filter_obj={"and": [
-        {"property": "Ключ", "rich_text": {"contains": "цель_" + key_hint}},
-        {"property": "Актуально", "checkbox": {"equals": True}},
-    ]}, page_size=5)
-    if existing:
-        for page in existing:
-            await update_page(page["id"], {"Актуально": {"checkbox": False}})
+    from core.repos.memory_repo import _repo as _mem_repo
+    mems = await _mem_repo.find_by_key_prefixes(["цель_" + key_hint], user_notion_id)
+    active = [m for m in mems if m.is_current]
+    if active:
+        await _mem_repo.set_active([m.id for m in active], False)
         return True
     return False
 
@@ -3510,27 +3506,21 @@ async def _save_budget_plan(message: Message, uid: int) -> None:
         text = "доход: {} — {}₽/мес".format(name, amt)
         await _save_memory_entry(key, text, notion_uid)
 
-    # Фиксы — сначала деактивируем удалённые, потом сохраняем актуальные
-    mem_db = os.environ.get("NOTION_DB_MEMORY", "")
+    # Фиксы — сначала деактивируем удалённые, потом сохраняем актуальные (PG, #145)
     new_fixed_keys = set()
     for f in plan.get("fixed", []):
         cat = f.get("category", "📌 Прочее")
         name = f.get("name", "?")
         new_fixed_keys.add("обязательно_{}".format(_cat_link(cat) + "_" + name.lower().replace(" ", "_")))
 
-    if mem_db:
+    if notion_uid:
         try:
-            from core.notion_client import db_query as _dbq, update_page
-            old_fixed = await _dbq(mem_db, filter_obj={"and": [
-                {"property": "Ключ", "rich_text": {"starts_with": "обязательно_"}},
-                {"property": "Бот", "select": {"equals": "☀️ Nexus"}},
-                {"property": "Актуально", "checkbox": {"equals": True}},
-            ]}, page_size=100)
-            for page in old_fixed:
-                key = (page["properties"].get("Ключ", {}).get("rich_text") or [{}])[0].get("plain_text", "")
-                if key and key not in new_fixed_keys:
-                    await update_page(page["id"], {"Актуально": {"checkbox": False}})
-                    logger.info("_save_budget_plan: deactivated removed fixed=%s", key)
+            from core.repos.memory_repo import _repo as _mem_repo
+            old_fixed = await _mem_repo.find_by_key_prefixes(["обязательно_"], notion_uid)
+            stale_ids = [m.id for m in old_fixed if m.is_current and m.key not in new_fixed_keys]
+            if stale_ids:
+                await _mem_repo.set_active(stale_ids, False)
+                logger.info("_save_budget_plan: deactivated %d removed fixed", len(stale_ids))
         except Exception as e:
             logger.error("_save_budget_plan: failed to deactivate old fixed: %s", e)
 
@@ -3554,20 +3544,16 @@ async def _save_budget_plan(message: Message, uid: int) -> None:
         if l.get("manual"):
             manual_tag = " [ручной]"
         else:
-            # Check existing memory for manual tag
-            from core.notion_client import db_query as _dbq
-            mem_db = os.environ.get("NOTION_DB_MEMORY", "")
+            # Не перезаписывать ручной лимит — читаем существующий из PG (#145)
             _skip = False
-            if mem_db:
+            if notion_uid:
                 try:
-                    _existing = await _dbq(mem_db, filter_obj={"and": [
-                        {"property": "Ключ", "rich_text": {"equals": "лимит_{}".format(cat_key)}},
-                        {"property": "Бот", "select": {"equals": "☀️ Nexus"}},
-                    ]}, page_size=1)
-                    if _existing:
-                        _fact = (_existing[0]["properties"].get("Текст", {}).get("title", [{}])[0].get("plain_text", ""))
-                        if "[ручной]" in _fact:
-                            _skip = True
+                    from core.repos.pg_memory_repo import PgMemoryRepo
+                    _existing = await PgMemoryRepo().find_by_exact_key(
+                        "лимит_{}".format(cat_key), notion_uid,
+                    )
+                    if _existing and "[ручной]" in (_existing[0].fact or ""):
+                        _skip = True
                 except Exception:
                     pass
             if _skip:
@@ -3686,46 +3672,22 @@ async def _save_budget_plan(message: Message, uid: int) -> None:
 # ── Save to Memory ───────────────────────────────────────────────────────────
 
 
-def _notion_cat_for_key(key: str) -> str:
-    """Определить категорию Notion по префиксу ключа."""
-    for prefix, cat in _BUDGET_KEY_TO_CATEGORY.items():
-        if key.startswith(prefix):
-            return cat
-    return "💰 Лимит"
-
-
 async def _save_memory_entry(key: str, fact: str, user_notion_id: str = "") -> None:
-    """Сохранить или обновить запись в Памяти с правильной категорией."""
-    mem_db = os.environ.get("NOTION_DB_MEMORY")
-    if not mem_db:
-        logger.error("_save_memory_entry: NOTION_DB_MEMORY not set!")
+    """Upsert бюджет-памяти в PG (#145).
+
+    Единая категория «💰 Лимит» для ВСЕХ бюджетных ключей (обязательно_/цель_/
+    лимит_/income_/долг_) — консистентно с натуральным путём
+    core.memory._PARSE_SYSTEM. find по key+category → update; иначе create.
+    """
+    if not user_notion_id:
+        logger.warning("_save_memory_entry: no user_notion_id, skip key=%s", key)
         return
-    notion_cat = _notion_cat_for_key(key)
-    logger.info("_save_memory_entry: key=%s cat=%s user=%s", key, notion_cat, user_notion_id[:8] if user_notion_id else "none")
-    props = {
-        "Текст": _title(fact),
-        "Ключ": _text(key),
-        "Категория": _select(notion_cat),
-        "Бот": _select("☀️ Nexus"),
-        "Актуально": {"checkbox": True},
-    }
-    if user_notion_id:
-        from core.notion_client import _relation
-        props["🪪 Пользователи"] = _relation(user_notion_id)
+    from core.repos.memory_repo import _repo as _mem_repo
+    logger.info("_save_memory_entry: key=%s user=%s", key, user_notion_id[:8])
     try:
-        from core.notion_client import db_query, update_page, page_create
-        # Ищем существующую запись по ключу (в ЛЮБОЙ бюджетной категории — на случай миграции)
-        existing = await db_query(mem_db, filter_obj={"and": [
-            {"property": "Ключ", "rich_text": {"equals": key}},
-            {"property": "Бот", "select": {"equals": "☀️ Nexus"}},
-        ]}, page_size=1)
-        if existing:
-            logger.info("_save_memory_entry: updating existing page %s", existing[0]["id"])
-            await update_page(existing[0]["id"], props)
-        else:
-            logger.info("_save_memory_entry: creating new page")
-            result = await page_create(mem_db, props)
-            logger.info("_save_memory_entry: created page %s", result)
+        await _mem_repo.upsert(
+            fact, key, "💰 Лимит", "nexus", "", "manual", user_notion_id,
+        )
     except Exception as e:
         logger.error("_save_memory_entry FAILED: %s for key=%s", e, key)
 
