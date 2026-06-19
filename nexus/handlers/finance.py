@@ -17,7 +17,7 @@ from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKe
 from aiogram import Router, F
 from core.claude_client import ask_claude, ask_claude_vision
 from nexus.handlers.utils import react
-from core.notion_client import log_error, create_report_page, _title, _number, _select, _date, _text
+from core.notion_client import log_error, _title, _number, _select, _date, _text
 from core.repos.finance_repo import _repo
 from core.config import FINANCE_CATEGORIES as CATEGORIES
 
@@ -1770,15 +1770,7 @@ async def handle_finance_summary(query: str = "", user_notion_id: str = "", uid:
 
 
 async def _stats_publish(title: str, lines: List[str]) -> str:
-    """Создать Notion-страницу отчёта (если настроена) или вернуть текст."""
-    from core.config import config
-    page_reports = config.nexus.page_reports
-    if page_reports:
-        url = await create_report_page(title, lines, page_reports)
-        if url:
-            return f"📊 <b>Отчёт готов:</b> <a href=\"{url}\">{title}</a>"
-
-    # Fallback: форматированный текст с HTML
+    """Вернуть форматированный HTML-текст отчёта (рендерится в чат)."""
     out = []
     for line in lines:
         if not line:
