@@ -1334,28 +1334,33 @@ async def on_arcana_choice(query: CallbackQuery, user_notion_id: str = "") -> No
             "Там я помогу с ритуалами, практикой и сеансами."
         )
     else:
-        from core.notion_client import task_add
-        result = await task_add(title=text, category="💳 Прочее", priority="Важно",
-                                user_notion_id=user_notion_id)
+        from core.notion_client import _title, _status, _select, _relation
+        from nexus.repos.tasks_repo import _repo
+        props = {
+            "Задача":    _title(text),
+            "Статус":    _status("Not started"),
+            "Приоритет": _select("Важно"),
+            "Категория": _select("💳 Прочее"),
+        }
+        if user_notion_id:
+            props["🪪 Пользователи"] = _relation(user_notion_id)
+        result = await _repo.create(config.nexus.db_tasks, props)
         if result:
-            msg_text = f"✓ <b>{text}</b>\n🟡 Важно · 💳 Прочее\n\n<i>↩️ Реплай чтобы дополнить</i>"
+            msg_text = (
+                f"✓ <b>{text}</b>\n🟡 Важно · 💳 Прочее\n\n"
+                f"<i>💬 Допиши дедлайн, напоминание или категорию — добавлю к этой задаче</i>"
+            )
         else:
             msg_text = "❌ Ошибка при создании задачи"
             result = None
 
-    edited = await query.message.edit_text(msg_text, parse_mode="HTML")
+    await query.message.edit_text(msg_text, parse_mode="HTML")
     await query.answer("✅ Выбор принят")
 
     if choice != "yes" and result:
-        from core.message_pages import save_message_page
-        target = edited if hasattr(edited, "message_id") else query.message
-        await save_message_page(
-            chat_id=target.chat.id,
-            message_id=target.message_id,
-            page_id=result,
-            page_type="task",
-            bot="nexus",
-        )
+        from nexus.handlers.tasks import last_record_set, _last_task_set
+        last_record_set(uid, "task", result)
+        _last_task_set(uid, result)
 
 
 @dp.callback_query(lambda c: c.data and c.data.startswith("fin_type_"))
@@ -1448,23 +1453,26 @@ async def on_unknown_clarify(query: CallbackQuery, user_notion_id: str = "") -> 
         await query.answer("🛒 Добавляю в покупки")
 
     elif action == "task":
-        from core.notion_client import task_add
-        result = await task_add(title=original_text, category="💳 Прочее", priority="Важно",
-                                user_notion_id=notion_id)
+        from core.notion_client import _title, _status, _select, _relation
+        from nexus.repos.tasks_repo import _repo
+        from nexus.handlers.tasks import last_record_set, _last_task_set
+        props = {
+            "Задача":    _title(original_text),
+            "Статус":    _status("Not started"),
+            "Приоритет": _select("Важно"),
+            "Категория": _select("💳 Прочее"),
+        }
+        if notion_id:
+            props["🪪 Пользователи"] = _relation(notion_id)
+        result = await _repo.create(config.nexus.db_tasks, props)
         if result:
-            edited = await query.message.edit_text(
-                f"📋 <b>{original_text}</b>\n🟡 Важно · 💳 Прочее\n\n<i>↩️ Реплай чтобы дополнить</i>",
+            await query.message.edit_text(
+                f"📋 <b>{original_text}</b>\n🟡 Важно · 💳 Прочее\n\n"
+                f"<i>💬 Допиши дедлайн, напоминание или категорию — добавлю к этой задаче</i>",
                 parse_mode="HTML",
             )
-            from core.message_pages import save_message_page
-            target = edited if hasattr(edited, "message_id") else query.message
-            await save_message_page(
-                chat_id=target.chat.id,
-                message_id=target.message_id,
-                page_id=result,
-                page_type="task",
-                bot="nexus",
-            )
+            last_record_set(uid, "task", result)
+            _last_task_set(uid, result)
         else:
             await query.message.edit_text("❌ Ошибка при создании задачи")
         await query.answer("📋 Задача создана" if result else "❌ Ошибка")

@@ -221,3 +221,95 @@ class TestDataGetPattern:
         result = data.get("key", "default")
         assert result is None, \
             "get(key, default) вернул default для None — неожиданно"
+
+
+class TestQuickCreateTasksPG:
+    """Quick-create задач (on_arcana_choice «нет» + on_unknown_clarify task)
+    создают задачу в PG через _repo.create, регистрируют контекст-правку
+    (last_record_set/_last_task_set) и НЕ трогают Notion task_add/save_message_page.
+    """
+
+    @staticmethod
+    def _patches():
+        from unittest.mock import MagicMock
+        return (
+            patch("nexus.repos.tasks_repo._repo.create",
+                  new=AsyncMock(return_value="pg-123")),
+            patch("nexus.handlers.tasks.last_record_set", new=MagicMock()),
+            patch("nexus.handlers.tasks._last_task_set", new=MagicMock()),
+            patch("core.notion_client.task_add", new=AsyncMock(return_value="should-not-be-used")),
+            patch("core.message_pages.save_message_page", new=AsyncMock()),
+        )
+
+    @pytest.mark.asyncio
+    async def test_arcana_choice_no_creates_task_in_pg(self, mock_callback):
+        from nexus.nexus_bot import on_arcana_choice, _pending_arcana
+        from nexus.repos.pg_tasks_repo import (
+            _extract_title, _extract_status, _extract_select,
+        )
+
+        uid = 67686090
+        _pending_arcana[uid] = "купить молоко"
+        cb = mock_callback(data="arcana_choice_no", from_id=uid)
+
+        p_create, p_lr, p_lt, p_taskadd, p_smp = self._patches()
+        with p_create as m_create, p_lr as m_lr, p_lt as m_lt, \
+             p_taskadd as m_taskadd, p_smp as m_smp:
+            await on_arcana_choice(cb, user_notion_id="u-1")
+
+            m_create.assert_awaited_once()
+            props = m_create.call_args.args[1]
+            assert _extract_title(props["Задача"]) == "купить молоко"
+            assert _extract_status(props["Статус"]) == "Not started"
+            assert _extract_select(props["Приоритет"]) == "Важно"
+            assert _extract_select(props["Категория"]) == "💳 Прочее"
+            assert props["🪪 Пользователи"]["relation"][0]["id"] == "u-1"
+
+            m_lr.assert_called_once_with(uid, "task", "pg-123")
+            m_lt.assert_called_once_with(uid, "pg-123")
+            m_taskadd.assert_not_called()
+            m_smp.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_arcana_choice_no_without_uid_omits_relation(self, mock_callback):
+        from nexus.nexus_bot import on_arcana_choice, _pending_arcana
+
+        uid = 67686090
+        _pending_arcana[uid] = "позвонить в банк"
+        cb = mock_callback(data="arcana_choice_no", from_id=uid)
+
+        p_create, p_lr, p_lt, p_taskadd, p_smp = self._patches()
+        with p_create as m_create, p_lr, p_lt, p_taskadd, p_smp:
+            await on_arcana_choice(cb, user_notion_id="")
+            props = m_create.call_args.args[1]
+            assert "🪪 Пользователи" not in props
+
+    @pytest.mark.asyncio
+    async def test_unknown_clarify_task_creates_task_in_pg(self, mock_callback):
+        import time as _time
+        from nexus.nexus_bot import on_unknown_clarify, _pending_unknown
+        from nexus.repos.pg_tasks_repo import (
+            _extract_title, _extract_status, _extract_select,
+        )
+
+        uid = 67686090
+        _pending_unknown[uid] = ("сделать отчёт", "u-2", _time.time())
+        cb = mock_callback(data="unk_task_1", from_id=uid)
+
+        p_create, p_lr, p_lt, p_taskadd, p_smp = self._patches()
+        with p_create as m_create, p_lr as m_lr, p_lt as m_lt, \
+             p_taskadd as m_taskadd, p_smp as m_smp:
+            await on_unknown_clarify(cb, user_notion_id="")
+
+            m_create.assert_awaited_once()
+            props = m_create.call_args.args[1]
+            assert _extract_title(props["Задача"]) == "сделать отчёт"
+            assert _extract_status(props["Статус"]) == "Not started"
+            assert _extract_select(props["Приоритет"]) == "Важно"
+            assert _extract_select(props["Категория"]) == "💳 Прочее"
+            assert props["🪪 Пользователи"]["relation"][0]["id"] == "u-2"
+
+            m_lr.assert_called_once_with(uid, "task", "pg-123")
+            m_lt.assert_called_once_with(uid, "pg-123")
+            m_taskadd.assert_not_called()
+            m_smp.assert_not_called()
