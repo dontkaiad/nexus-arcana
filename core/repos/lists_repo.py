@@ -180,8 +180,9 @@ class ListsRepo:
         return fin_id, finance_cat
 
     async def mark_task_done(self, task_id: str) -> bool:
-        """Set Статус=Done on a ✅ Задача page."""
-        return await _notion.update_task_status(task_id, "Done")
+        """Set Статус=Done on a ✅ Задача (PG)."""
+        from nexus.repos.tasks_repo import _repo as _tasks_repo
+        return await _tasks_repo.set_status(task_id, "Done")
 
     async def create_reminder_task(
         self,
