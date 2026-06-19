@@ -11,7 +11,7 @@ from __future__ import annotations
 from typing import Optional
 
 from core import list_manager as _lm
-from core import notion_client as _notion
+from core import props as _props
 from core.repos.finance_repo import _repo as _fin_repo
 
 # ── Re-exports so handlers don't import list_manager or notion_client ─────────
@@ -141,13 +141,13 @@ class ListsRepo:
         Props-формат как у quick-create — pg_tasks_repo.create парсит их в PG.
         """
         props: dict = {
-            "Задача":    _notion._title(title),
-            "Статус":    _notion._status("Not started"),
-            "Приоритет": _notion._select("Важно"),
-            "Категория": _notion._select("💳 Прочее"),
+            "Задача":    _props._title(title),
+            "Статус":    _props._status("Not started"),
+            "Приоритет": _props._select("Важно"),
+            "Категория": _props._select("💳 Прочее"),
         }
         if user_notion_id:
-            props["🪪 Пользователи"] = _notion._relation(user_notion_id)
+            props["🪪 Пользователи"] = _props._relation(user_notion_id)
         from nexus.repos.tasks_repo import _repo as _tasks_repo
         from core.config import config
         return await _tasks_repo.create(config.nexus.db_tasks, props)
@@ -199,16 +199,16 @@ class ListsRepo:
         (output of _date or _date_with_tz from nexus/handlers/tasks.py).
         """
         props: dict = {
-            "Задача": _notion._title(f"Купить {item_name}"),
-            "Статус": _notion._status("Not started"),
-            "Дедлайн": _notion._date(deadline_iso),
+            "Задача": _props._title(f"Купить {item_name}"),
+            "Статус": _props._status("Not started"),
+            "Дедлайн": _props._date(deadline_iso),
             "Напоминание": reminder_date_prop,
-            "Приоритет": _notion._select("Важно"),
+            "Приоритет": _props._select("Важно"),
         }
         if category:
-            props["Категория"] = _notion._select(category)
+            props["Категория"] = _props._select(category)
         if user_page_id:
-            props["🪪 Пользователи"] = _notion._relation(user_page_id)
+            props["🪪 Пользователи"] = _props._relation(user_page_id)
         from nexus.repos.tasks_repo import _repo as _tasks_repo
         return await _tasks_repo.create(db_tasks, props)
 

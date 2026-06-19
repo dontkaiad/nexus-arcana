@@ -13,7 +13,7 @@ from aiogram import Router, F, Bot
 from aiogram.filters import BaseFilter
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from core.claude_client import ask_claude
-from core.notion_client import _title, _select, _date, _status, _relation, match_select
+from core.props import _title, _select, _date, _status, _relation
 from nexus.repos.tasks_repo import _repo
 from nexus.handlers.utils import react
 from core.layout import maybe_convert

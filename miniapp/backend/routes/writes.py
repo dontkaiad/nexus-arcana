@@ -15,7 +15,7 @@ from typing import Any, Optional
 from fastapi import APIRouter, Depends, Header, HTTPException
 from pydantic import BaseModel, Field
 
-from core.notion_client import _title, _text, _select, _status, _number, _date, _relation
+from core.props import _title, _text, _select, _status, _number, _date, _relation
 from core.repos.finance_repo import FinanceRepo
 from core.user_manager import get_user_notion_id
 from core.bot_notify import notify_user, clear_task_reminder

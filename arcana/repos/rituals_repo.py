@@ -10,7 +10,7 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Optional
 
-from core import notion_client as _notion
+from core import props as _props
 
 
 @dataclass
@@ -39,11 +39,11 @@ class Ritual:
 
 def goal_label(goal: str) -> str:
     """Return display label for a ritual goal key (e.g. 'финансы' → '💰 Финансы')."""
-    return _notion._RITUAL_GOAL_MAP.get(goal.lower(), goal)
+    return _props._RITUAL_GOAL_MAP.get(goal.lower(), goal)
 
 
 def place_label(place: str) -> str:
     """Return display label for a ritual place key (e.g. 'дома' → '🏠 Дома')."""
-    return _notion._RITUAL_PLACE_MAP.get(place.lower(), place)
+    return _props._RITUAL_PLACE_MAP.get(place.lower(), place)
 
 
