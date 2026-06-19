@@ -1,22 +1,22 @@
-"""arcana/handlers/delete.py"""
+"""arcana/handlers/delete.py — generic /delete (PG soft-archive)."""
 from __future__ import annotations
 
 import logging
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram import Router, F
 from core.deleter import (
-    parse_delete_intent, find_pages_to_delete,
-    delete_pages, format_page_preview
+    parse_delete_intent, select_records, archive_records, format_record,
+    GATED_DOMAINS,
 )
-from core.config import config
 
 router = Router()
 logger = logging.getLogger("arcana.delete")
 
-ARCANA_TARGETS = {
-    "sessions": (config.arcana.db_sessions, "Дата и время", "🃏 Сеансы"),
-    "rituals":  (config.arcana.db_rituals,  "Дата",         "🕯️ Ритуалы"),
-    "clients":  (config.arcana.db_clients,  "Первое обращение", "👤 Клиенты"),
+# target (domain) → human label
+ARCANA_DOMAINS = {
+    "sessions": "🃏 Сеансы",
+    "rituals":  "🕯️ Ритуалы",
+    "clients":  "👤 Клиенты",
 }
 
 PARSE_TARGET_SYSTEM = """Определи что удаляем в боте Arcana. Ответь ТОЛЬКО одним словом:
@@ -25,62 +25,81 @@ rituals  — ритуалы
 clients  — клиенты
 unknown  — непонятно"""
 
-_pending: dict[int, list[str]] = {}
+# uid → (domain, [ids], scope) — domain хранится ВМЕСТЕ с ids (проверка на confirm)
+_pending: dict[int, tuple] = {}
 
 
-async def handle_delete(message: Message, text: str) -> None:
+async def handle_delete(message: Message, text: str, user_notion_id: str = "") -> None:
     from core.claude_client import ask_claude
 
+    # fail-closed: без пользователя ничего не выбираем/не удаляем
+    if not user_notion_id:
+        await message.answer("⚠️ Не могу определить пользователя — удаление отменено.")
+        return
+
     target = (await ask_claude(text, system=PARSE_TARGET_SYSTEM, max_tokens=10, temperature=0)).strip().lower()
-    if target not in ARCANA_TARGETS:
+    if target not in ARCANA_DOMAINS:
         await message.answer("⚠️ Уточни что удалить: сеансы, ритуалы или клиенты.")
         return
 
-    db_id, date_field, label = ARCANA_TARGETS[target]
+    if target in GATED_DOMAINS:
+        await message.answer("🚫 Удаление клиентов пока недоступно.")
+        return
+
+    label = ARCANA_DOMAINS[target]
     intent = await parse_delete_intent(text)
+    scope = intent["scope"]
 
-    pages = await find_pages_to_delete(
-        db_id=db_id,
-        date_field=date_field,
-        scope=intent["scope"],
-        date=intent.get("date"),
-        month=intent.get("month"),
+    records = await select_records(
+        target, scope,
+        date=intent.get("date"), month=intent.get("month"),
         count=int(intent.get("count") or 1),
+        user_notion_id=user_notion_id,
     )
-
-    if not pages:
+    if not records:
         await message.answer("📭 Записей не найдено.")
         return
 
-    previews = [format_page_preview(p, date_field=date_field) for p in pages[:10]]
+    previews = [format_record(r) for r in records[:10]]
     preview_text = "\n".join(f"• {p}" for p in previews if p)
-    if len(pages) > 10:
-        preview_text += f"\n... и ещё {len(pages) - 10}"
+    if len(records) > 10:
+        preview_text += f"\n... и ещё {len(records) - 10}"
 
     uid = message.from_user.id
-    _pending[uid] = [p["id"] for p in pages]
+    _pending[uid] = (target, [r["id"] for r in records], scope)
 
     from core.utils import cancel_button
+    confirm_cb = f"del_confirm_arcana:{target}"
+    if scope == "all":
+        prompt = f"⚠️ Удалить ВСЕ {len(records)} записей · {label}?\n\n{preview_text}"
+        btn = f"⚠️ Да, удалить ВСЕ ({len(records)})"
+    else:
+        prompt = f"{label} — найдено {len(records)} записей:\n\n{preview_text}\n\nУдалить?"
+        btn = f"🗑 Да, удалить ({len(records)})"
     kb = InlineKeyboardMarkup(inline_keyboard=[[
-        cancel_button(f"🗑 Да, удалить ({len(pages)})", "del_confirm_arcana"),
+        cancel_button(btn, confirm_cb),
         InlineKeyboardButton(text="❌ Отмена", callback_data="del_cancel_arcana"),
     ]])
-
-    await message.answer(
-        f"{label} — найдено {len(pages)} записей:\n\n{preview_text}\n\nУдалить?",
-        reply_markup=kb,
-    )
+    await message.answer(prompt, reply_markup=kb)
 
 
-@router.callback_query(F.data == "del_confirm_arcana")
+@router.callback_query(F.data.startswith("del_confirm_arcana"))
 async def confirm_delete(call: CallbackQuery) -> None:
     uid = call.from_user.id
-    page_ids = _pending.pop(uid, [])
-    if not page_ids:
+    pending = _pending.pop(uid, None)
+    if not pending:
         await call.answer("Ничего не найдено.")
         return
-    deleted = await delete_pages(page_ids)
-    await call.message.edit_text(f"✅ Удалено {deleted} записей.")
+    domain, ids, _scope = pending
+    # guard: домен в кнопке должен совпасть с тем, что в _pending
+    cb_domain = call.data.split(":", 1)[1] if ":" in call.data else ""
+    if cb_domain != domain:
+        await call.message.edit_text("⚠️ Сессия устарела — повтори /delete.")
+        await call.answer()
+        return
+
+    deleted = await archive_records(domain, ids)
+    await call.message.edit_text(f"✅ Удалено (в архив): {deleted}")
     await call.answer()
 
 
