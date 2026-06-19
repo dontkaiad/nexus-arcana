@@ -1,8 +1,9 @@
-"""core/reply_update.py — парсеры reply-дополнений и обновление Notion.
+"""core/reply_update.py — парсеры reply-дополнений и обновление записей в PG.
 
-Когда юзер делает reply на сообщение бота, мы достаём page_id из
-message_pages и применяем правки к Notion-странице. Парсер для
-каждого типа свой — возвращает набор полей-обновлений.
+Когда юзер делает reply на сообщение бота, мы достаём page_id (PG id) из
+message_pages и применяем правки через per-domain PG-репозитории
+(`set_props`). Парсер для каждого типа свой — возвращает набор
+полей-обновлений (Haiku). Notion больше не используется (#156).
 """
 from __future__ import annotations
 
@@ -11,15 +12,6 @@ import logging
 from typing import Any, Dict, Optional
 
 from core.claude_client import ask_claude
-from core.notion_client import (
-    _multi_select,
-    _number,
-    _relation,
-    _select,
-    _text,
-    match_select,
-    update_page,
-)
 
 logger = logging.getLogger("core.reply_update")
 
@@ -199,140 +191,195 @@ async def apply_updates(
     updates: Dict[str, Any],
     user_notion_id: str = "",
 ) -> Dict[str, Any]:
-    """Сформировать Notion props и отправить update_page.
+    """Применить reply-правки к записи через per-domain PG `set_props`.
 
+    Диспатч по `page_type` (task/client/session/ritual/work). Notion не
+    используется — каждый PG-репозиторий сам резолвит select/FK и сам
+    дописывает append-поля (read-modify-write внутри `set_props`).
+    `db_id` игнорируется (PG-репозитории не нуждаются в database_id).
     Возвращает dict {human_field_name: value} для подтверждения юзеру.
-    Для полей '*_append' — дописывает к существующему тексту через
-    отдельный запрос.
     """
-    from core.notion_client import _notion
+    if not updates:
+        return {}
+    if page_type == "task":
+        return await _apply_task(page_id, updates)
+    if page_type == "client":
+        return await _apply_client(page_id, updates)
+    if page_type == "session":
+        return await _apply_session(page_id, updates, user_notion_id)
+    if page_type == "ritual":
+        return await _apply_ritual(page_id, updates)
+    if page_type == "work":
+        return await _apply_work(page_id, updates)
+    return {}
 
-    fields_map = _TYPE_TO_FIELDS.get(page_type, {})
+
+# ── inline prop-builders (Notion-format dict для PgTasksRepo.set_props) ────────
+
+def _p_select(name: Any) -> Dict[str, Any]:
+    return {"select": {"name": str(name)}}
+
+
+def _p_date(iso: str) -> Dict[str, Any]:
+    return {"date": {"start": iso}}
+
+
+async def _apply_task(page_id: str, updates: Dict[str, Any]) -> Dict[str, Any]:
+    """✅ Задачи Nexus → PgTasksRepo.set_props (Notion-format props, PG резолвит)."""
     props: Dict[str, Any] = {}
     applied: Dict[str, Any] = {}
-    append_tasks: list = []  # [(notion_field, new_text)]
+    if updates.get("deadline"):
+        iso = _coerce_date(str(updates["deadline"]))
+        if iso:
+            props["Дедлайн"] = _p_date(iso)
+            applied["Дедлайн"] = iso
+    if updates.get("category"):
+        props["Категория"] = _p_select(updates["category"])
+        applied["Категория"] = updates["category"]
+    if updates.get("priority"):
+        pr = _PRIORITY_MAP.get(str(updates["priority"]).lower(), updates["priority"])
+        props["Приоритет"] = _p_select(pr)
+        applied["Приоритет"] = pr
+    if props:
+        from nexus.repos.pg_tasks_repo import PgTasksRepo
+        await PgTasksRepo().set_props(page_id, props)
+    return applied
 
-    # Особый случай: session + client_name → relation + Тип сеанса=Клиентский
-    if page_type == "session" and updates.get("client_name"):
-        client_name = str(updates.pop("client_name")).strip()
-        if client_name:
-            from core.notion_client import client_find
+
+async def _apply_client(page_id: str, updates: Dict[str, Any]) -> Dict[str, Any]:
+    """👥 Клиенты → PgClientsRepo.update_profile. contact/request/notes —
+    append (read-modify-write на PG-колонке)."""
+    from arcana.repos.pg_clients_repo import PgClientsRepo
+    repo = PgClientsRepo()
+    applied: Dict[str, Any] = {}
+    kw: Dict[str, Any] = {}
+
+    nt = updates.get("new_type")
+    if nt:
+        t = str(nt).strip().lower()
+        if "self" in t or "🌟" in t:
+            code = "self"
+        elif "беспл" in t or "🎁" in t or "free" in t:
+            code = "free"
+        else:
+            code = "paid"
+        kw["type_code"] = code
+        applied["Тип клиента"] = nt
+        # Self-кеш в notion_client (PG-shim) мог измениться — сбросить best-effort.
+        try:
+            from core.notion_client import _SELF_CLIENT_CACHE
+            _SELF_CLIENT_CACHE.clear()
+        except Exception:
+            pass
+
+    if updates.get("new_name"):
+        kw["name"] = str(updates["new_name"])
+        applied["Имя"] = updates["new_name"]
+
+    append_keys = [k for k in ("contact", "request", "notes") if updates.get(k)]
+    if append_keys:
+        try:
+            cur = await repo.find_by_id(int(page_id))
+        except (ValueError, TypeError):
+            cur = None
+        for k in append_keys:
+            existing = (getattr(cur, k, "") if cur else "") or ""
+            new_part = str(updates[k])
+            kw[k] = (existing + "\n" + new_part).strip() if existing else new_part
+            applied[k] = f"+ {updates[k]}"
+
+    if kw:
+        try:
+            await repo.update_profile(int(page_id), **kw)
+        except (ValueError, TypeError):
+            pass
+    return applied
+
+
+async def _apply_session(
+    page_id: str, updates: Dict[str, Any], user_notion_id: str,
+) -> Dict[str, Any]:
+    """🃏 Расклады → PgSessionsRepo.set_props. client_name → find_or_create_client
+    (PG) → client_id + type='client'. notes → дописать Трактовку."""
+    from arcana.repos.pg_sessions_repo import PgSessionsRepo
+    fields: Dict[str, Any] = {}
+    applied: Dict[str, Any] = {}
+
+    if updates.get("question"):
+        fields["question"] = updates["question"]
+        applied["Тема"] = updates["question"]
+    if updates.get("area"):
+        fields["area"] = updates["area"]
+        applied["Область"] = updates["area"]
+    if updates.get("notes"):
+        fields["append_interpretation"] = updates["notes"]
+        applied["Трактовка"] = f"+ {updates['notes']}"
+
+    cn = updates.get("client_name")
+    if cn:
+        client_name = str(cn).strip()
+        # fail-closed: привязка клиента требует юзера (find_or_create в его БД).
+        if client_name and user_notion_id:
             try:
-                client = await client_find(client_name, user_notion_id=user_notion_id)
+                from core.notion_client import find_or_create_client
+                client_id, _ = await find_or_create_client(
+                    client_name, user_notion_id=user_notion_id,
+                )
             except Exception as e:
-                logger.warning("client_find in reply failed: %s", e)
-                client = None
-            if client:
-                props["👥 Клиенты"] = _relation(client["id"])
-                applied["👥 Клиенты"] = client_name
-                if db_id:
-                    real_type = await match_select(db_id, "Тип сеанса", "🤝 Клиентский")
-                    props["Тип сеанса"] = _select(real_type)
-                    applied["Тип сеанса"] = real_type
-                else:
-                    props["Тип сеанса"] = _select("🤝 Клиентский")
-                    applied["Тип сеанса"] = "🤝 Клиентский"
+                logger.warning("find_or_create_client in reply failed: %s", e)
+                client_id = None
+            if client_id:
+                fields["client_id"] = client_id
+                fields["type_code"] = "client"
+                applied["Клиент"] = client_name
             else:
                 applied["Клиент не найден"] = client_name
 
-    for key, value in updates.items():
-        mapping = fields_map.get(key)
-        if not mapping:
-            continue
-        notion_field, field_type = mapping
+    if fields:
+        await PgSessionsRepo().set_props(page_id, **fields)
+    return applied
 
-        if field_type == "text":
-            props[notion_field] = _text(str(value))
-            applied[notion_field] = value
 
-        elif field_type == "title":
-            from core.notion_client import _title
-            props[notion_field] = _title(str(value))
-            applied[notion_field] = value
+async def _apply_ritual(page_id: str, updates: Dict[str, Any]) -> Dict[str, Any]:
+    """🕯 Ритуалы → PgRitualsRepo.set_props."""
+    from arcana.repos.pg_rituals_repo import PgRitualsRepo
+    fields: Dict[str, Any] = {}
+    applied: Dict[str, Any] = {}
+    for key, label in (
+        ("forces", "Силы"), ("structure", "Структура"),
+        ("consumables", "Расходники"), ("offerings", "Подношения/Откуп"),
+        ("notes", "Заметки"),
+    ):
+        if updates.get(key):
+            fields[key] = updates[key]
+            applied[label] = updates[key]
+    if updates.get("duration_min") is not None:
+        fields["duration_min"] = updates["duration_min"]
+        applied["Время (мин)"] = updates["duration_min"]
+    if fields:
+        await PgRitualsRepo().set_props(page_id, **fields)
+    return applied
 
-        elif field_type == "number":
-            try:
-                props[notion_field] = _number(float(value))
-                applied[notion_field] = value
-            except (TypeError, ValueError):
-                pass
 
-        elif field_type == "date":
-            iso = _coerce_date(str(value))
-            if iso:
-                props[notion_field] = {"date": {"start": iso}}
-                applied[notion_field] = iso
-
-        elif field_type == "select":
-            # Применить тип-специфичные маппинги
-            mapped = value
-            if page_type in ("work", "task") and key == "category":
-                mapped = _WORK_CATEGORY_MAP.get(str(value).lower(), value)
-            if key == "priority":
-                mapped = _PRIORITY_MAP.get(str(value).lower(), value)
-            real = mapped
-            if db_id:
-                real = await match_select(db_id, notion_field, str(mapped))
-            props[notion_field] = _select(real)
-            applied[notion_field] = real
-
-        elif field_type == "multi_select":
-            real = value
-            if db_id:
-                real = await match_select(db_id, notion_field, str(value))
-            props[notion_field] = _multi_select([real])
-            applied[notion_field] = real
-
-        elif field_type == "client_type":
-            from core.notion_client import (
-                CLIENT_TYPE_PAID, CLIENT_TYPE_FREE, CLIENT_TYPE_SELF,
-                _SELF_CLIENT_CACHE,
-            )
-            t = str(value).strip().lower()
-            if "self" in t or "🌟" in t:
-                canonical = CLIENT_TYPE_SELF
-            elif "беспл" in t or "🎁" in t or "free" in t:
-                canonical = CLIENT_TYPE_FREE
-            else:
-                canonical = CLIENT_TYPE_PAID
-            props[notion_field] = _select(canonical)
-            applied[notion_field] = canonical
-            # Self-кеш мог измениться — сбросить.
-            _SELF_CLIENT_CACHE.clear()
-
-        elif field_type == "append_text":
-            # Разбираем псевдо-имя 'Foo_append'
-            real_field = notion_field.replace("_append", "")
-            append_tasks.append((real_field, str(value)))
-            applied[real_field] = f"+ {value}"
-
-    # Первый батч — обычные set-props
-    if props:
-        await update_page(page_id, props)
-
-    # Append-tasks: для каждого текстового поля читаем текущее содержимое
-    # и дописываем через перевод строки
-    if append_tasks:
-        notion = _notion()
-        page = await notion._client.pages.retrieve(page_id=page_id)
-        existing_props = page.get("properties", {})
-        append_props: Dict[str, Any] = {}
-        for field, new_text in append_tasks:
-            cur_prop = existing_props.get(field) or {}
-            cur_items = cur_prop.get("rich_text") or cur_prop.get("title") or []
-            cur_text = "".join(
-                (it.get("text", {}) or {}).get("content", "")
-                for it in cur_items
-            )
-            combined = (cur_text + "\n" + new_text).strip() if cur_text else new_text
-            if cur_prop.get("type") == "title":
-                from core.notion_client import _title
-                append_props[field] = _title(combined[:2000])
-            else:
-                append_props[field] = _text(combined[:2000])
-        if append_props:
-            await update_page(page_id, append_props)
-
+async def _apply_work(page_id: str, updates: Dict[str, Any]) -> Dict[str, Any]:
+    """🔮 Работы → PgWorksRepo.set_props."""
+    from arcana.repos.pg_works_repo import PgWorksRepo
+    fields: Dict[str, Any] = {}
+    applied: Dict[str, Any] = {}
+    if updates.get("category"):
+        cat = _WORK_CATEGORY_MAP.get(str(updates["category"]).lower(), updates["category"])
+        fields["category"] = cat
+        applied["Категория"] = cat
+    if updates.get("priority"):
+        fields["priority"] = updates["priority"]
+        applied["Приоритет"] = _PRIORITY_MAP.get(
+            str(updates["priority"]).lower(), updates["priority"],
+        )
+    if updates.get("deadline"):
+        fields["deadline"] = _coerce_date(str(updates["deadline"]))
+        applied["Дедлайн"] = fields["deadline"]
+    if fields:
+        await PgWorksRepo().set_props(page_id, **fields)
     return applied
 
 
@@ -350,12 +397,7 @@ async def format_applied(applied: Dict[str, Any]) -> str:
 
 
 def get_db_id_for_type(page_type: str) -> Optional[str]:
-    """Вернуть database_id для данного типа (для match_select)."""
-    from core.config import config
-    return {
-        "ritual":  config.arcana.db_rituals,
-        "session": config.arcana.db_sessions,
-        "work":    getattr(config.arcana, "db_works", None),
-        "client":  config.arcana.db_clients,
-        "task":    getattr(config.nexus, "db_tasks", None),
-    }.get(page_type)
+    """Deprecated (#156): db_id больше не нужен — PG-репозитории резолвят
+    select/FK сами. Оставлен для совместимости сигнатуры хендлеров; всегда None.
+    """
+    return None

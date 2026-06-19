@@ -232,6 +232,50 @@ class PgWorksRepo:
             )
         return res.rowcount > 0
 
+    def _set_props_sync(self, work_id: str, fields: dict) -> bool:
+        try:
+            wid = int(work_id)
+        except (ValueError, TypeError):
+            return False
+        with get_engine().begin() as conn:
+            vals = {}
+            cat = fields.get("category")
+            if cat is not None:
+                vals["category"] = str(cat)
+            pr = fields.get("priority")
+            if pr is not None:
+                pcode = _code_for(_PRIORITY_TO_CODE, pr)
+                pid = _resolve(conn, work_priority, pcode) if pcode else None
+                if pid:
+                    vals["priority_id"] = pid
+            dl = fields.get("deadline")
+            if dl:
+                iso = str(dl).replace(" ", "T")
+                parsed = None
+                try:
+                    parsed = datetime.strptime(iso[:16], "%Y-%m-%dT%H:%M")
+                except ValueError:
+                    try:
+                        parsed = datetime.strptime(iso[:10], "%Y-%m-%d")
+                    except ValueError:
+                        parsed = None
+                if parsed:
+                    if parsed.tzinfo is None:
+                        parsed = parsed.replace(tzinfo=timezone.utc)
+                    vals["deadline"] = parsed
+            if not vals:
+                return False
+            res = conn.execute(works.update().where(works.c.id == wid).values(**vals))
+        return res.rowcount > 0
+
+    async def set_props(self, work_id: str, **fields) -> bool:
+        """Обновить поля Работы (reply-правка #156; переиспользуемо #154).
+
+        Поля: category (Text), priority ('срочно/важно/можно потом'),
+        deadline ('YYYY-MM-DD[ HH:MM]').
+        """
+        return await asyncio.to_thread(self._set_props_sync, work_id, fields)
+
     # ── Public async interface ────────────────────────────────────────────────
 
     async def list_open(self, user_notion_id: str = "") -> List[Work]:

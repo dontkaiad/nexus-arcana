@@ -120,42 +120,33 @@ async def test_reply_self_emoji_updates_client_type():
 
 
 @pytest.mark.asyncio
-async def test_apply_updates_client_type_self_writes_select():
-    """apply_updates с new_type=Self → props['Тип клиента'] = select(🌟 Self)."""
+async def test_apply_updates_client_type_self_sets_type_code():
+    """apply_updates с new_type=Self → PgClientsRepo.update_profile(type_code='self')."""
     import core.reply_update as ru
+    from arcana.repos.pg_clients_repo import PgClientsRepo
 
-    captured: dict = {}
-
-    async def fake_update_page(page_id, props):
-        captured["page_id"] = page_id
-        captured["props"] = props
-        return True
-
-    with patch.object(ru, "update_page", fake_update_page):
+    with patch.object(PgClientsRepo, "find_by_id", AsyncMock(return_value=None)), \
+         patch.object(PgClientsRepo, "update_profile", AsyncMock()) as m:
         applied = await ru.apply_updates(
-            page_id="c-1", page_type="client", db_id=None,
+            page_id="1", page_type="client", db_id=None,
             updates={"new_type": "Self"},
         )
-    assert "Тип клиента" in captured["props"]
-    assert captured["props"]["Тип клиента"]["select"]["name"] == "🌟 Self"
-    assert applied.get("Тип клиента") == "🌟 Self"
+    assert m.await_args.kwargs["type_code"] == "self"
+    assert applied.get("Тип клиента") == "Self"
 
 
 @pytest.mark.asyncio
-async def test_apply_updates_client_type_free_writes_select():
+async def test_apply_updates_client_type_free_sets_type_code():
     import core.reply_update as ru
+    from arcana.repos.pg_clients_repo import PgClientsRepo
 
-    captured: dict = {}
-
-    async def fake_update_page(page_id, props):
-        captured["props"] = props
-
-    with patch.object(ru, "update_page", fake_update_page):
+    with patch.object(PgClientsRepo, "find_by_id", AsyncMock(return_value=None)), \
+         patch.object(PgClientsRepo, "update_profile", AsyncMock()) as m:
         await ru.apply_updates(
-            page_id="c-1", page_type="client", db_id=None,
+            page_id="1", page_type="client", db_id=None,
             updates={"new_type": "Бесплатный"},
         )
-    assert captured["props"]["Тип клиента"]["select"]["name"] == "🎁 Бесплатный"
+    assert m.await_args.kwargs["type_code"] == "free"
 
 
 # ── Дыра в session больше не сирота ─────────────────────────────────────────

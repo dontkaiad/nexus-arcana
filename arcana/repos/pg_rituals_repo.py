@@ -488,3 +488,32 @@ class PgRitualsRepo:
     async def set_work_id(self, ritual_id: str, work_id: str) -> bool:
         """Привязать ритуал к Работе (#151): set work_id."""
         return await asyncio.to_thread(self._set_work_id_sync, ritual_id, work_id)
+
+    def _set_props_sync(self, ritual_id: str, fields: dict) -> bool:
+        try:
+            rid = int(ritual_id)
+        except (ValueError, TypeError):
+            return False
+        vals = {}
+        for col in ("forces", "structure", "consumables", "offerings", "notes"):
+            v = fields.get(col)
+            if v is not None:
+                vals[col] = str(v)
+        dm = fields.get("duration_min")
+        if dm is not None:
+            try:
+                vals["duration_min"] = int(dm)
+            except (ValueError, TypeError):
+                pass
+        if not vals:
+            return False
+        with get_engine().begin() as conn:
+            res = conn.execute(rituals.update().where(rituals.c.id == rid).values(**vals))
+        return res.rowcount > 0
+
+    async def set_props(self, ritual_id: str, **fields) -> bool:
+        """Обновить поля ритуала (reply-правка #156; переиспользуемо #154).
+
+        Поля: forces/structure/consumables/offerings/notes (text), duration_min (int).
+        """
+        return await asyncio.to_thread(self._set_props_sync, ritual_id, fields)

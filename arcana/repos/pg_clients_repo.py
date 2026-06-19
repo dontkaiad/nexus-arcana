@@ -198,8 +198,11 @@ class PgClientsRepo:
         photo_url: Optional[str] = None,
         object_photos: Optional[str] = None,
         type_code: Optional[str] = None,
+        name: Optional[str] = None,
     ) -> None:
         vals = {}
+        if name is not None:
+            vals["name"] = name
         if contact is not None:
             vals["contact"] = contact
         if request is not None:
@@ -273,11 +276,13 @@ class PgClientsRepo:
         photo_url: Optional[str] = None,
         object_photos: Optional[str] = None,
         type_code: Optional[str] = None,
+        name: Optional[str] = None,
     ) -> None:
         await asyncio.to_thread(
             self._update_profile_sync, pg_id,
             contact=contact, request=request, notes=notes, birthday=birthday,
             photo_url=photo_url, object_photos=object_photos, type_code=type_code,
+            name=name,
         )
 
     async def get_object_photos(self, pg_id: int) -> str:

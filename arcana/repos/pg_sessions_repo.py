@@ -480,6 +480,52 @@ class PgSessionsRepo:
         """Привязать расклад к Работе (#151): set work_id."""
         return await asyncio.to_thread(self._set_work_id_sync, session_id, work_id)
 
+    def _set_props_sync(self, session_id: str, fields: dict) -> bool:
+        try:
+            sid = int(session_id)
+        except (ValueError, TypeError):
+            return False
+        with get_engine().begin() as conn:
+            vals = {}
+            q = fields.get("question")
+            if q is not None:
+                vals["question"] = str(q)
+            ar = fields.get("area")
+            if ar is not None:
+                vals["area"] = str(ar)
+            cid = fields.get("client_id")
+            if cid is not None:
+                resolved = _resolve_client_id(conn, cid)
+                if resolved is not None:
+                    vals["client_id"] = resolved
+            tc = fields.get("type_code")
+            if tc:
+                tid = _resolve(conn, engagement_type, tc)
+                if tid:
+                    vals["type_id"] = tid
+            app = fields.get("append_interpretation")
+            if app:
+                row = conn.execute(
+                    select(sessions.c.interpretation).where(sessions.c.id == sid)
+                ).fetchone()
+                cur = (row[0] if row and row[0] else "") or ""
+                combined = (cur + "\n" + str(app)).strip() if cur else str(app)
+                vals["interpretation"] = combined[:4000]
+            if not vals:
+                return False
+            res = conn.execute(
+                sessions.update().where(sessions.c.id == sid).values(**vals)
+            )
+        return res.rowcount > 0
+
+    async def set_props(self, session_id: str, **fields) -> bool:
+        """Обновить поля расклада (reply-правка #156; переиспользуемо #154).
+
+        Поля: question (Тема), area (Область), append_interpretation (Трактовка,
+        дописать), client_id + type_code='client' (привязка клиента).
+        """
+        return await asyncio.to_thread(self._set_props_sync, session_id, fields)
+
     async def canonical_session_name(
         self, name: str, client_id: Optional[str], user_notion_id: str
     ) -> str:
