@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from sqlalchemy import (
     BigInteger,
+    Boolean,
     Column,
     ForeignKey,
     Integer,
@@ -69,6 +70,8 @@ rituals = Table(
     Column("offerings",   Text),
     Column("barter_what", Text),
     Column("notes",       Text),
+
+    Column("archived", Boolean, nullable=False, server_default=text("false")),
 
     Column("created_at", TIMESTAMP(timezone=True), server_default=text("now()")),
     Column("updated_at", TIMESTAMP(timezone=True), server_default=text("now()")),

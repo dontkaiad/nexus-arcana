@@ -327,7 +327,11 @@ class PgRitualsRepo:
         cid_int = _client_id_int(client_id)
         if cid_int is None:
             return []
-        stmt = _select_rituals().where(rituals.c.client_id == cid_int)
+        stmt = (
+            _select_rituals()
+            .where(rituals.c.client_id == cid_int)
+            .where(rituals.c.archived == False)  # noqa: E712
+        )
         with get_engine().connect() as conn:
             rows = conn.execute(stmt).fetchall()
         return [_row_to_ritual(r) for r in rows]
@@ -337,7 +341,7 @@ class PgRitualsRepo:
         user_notion_id: str,
         result_filter: Optional[str],
     ) -> List[Ritual]:
-        stmt = _select_rituals()
+        stmt = _select_rituals().where(rituals.c.archived == False)  # noqa: E712
         if result_filter:
             code = _code_for(_RESULT_TO_CODE, result_filter) or result_filter
             oc = outcome_status.alias("oc")
@@ -356,6 +360,17 @@ class PgRitualsRepo:
                 rituals.delete().where(rituals.c.id == int(ritual_id))
             )
         return result.rowcount > 0
+
+    def _archive_sync(self, ritual_id: str) -> bool:
+        try:
+            rid = int(ritual_id)
+        except (ValueError, TypeError):
+            return False
+        with get_engine().begin() as conn:
+            res = conn.execute(
+                rituals.update().where(rituals.c.id == rid).values(archived=True)
+            )
+        return res.rowcount > 0
 
     def _set_result_sync(self, ritual_id: str, result_code: str) -> bool:
         code = _code_for(_RESULT_TO_CODE, result_code) or result_code
@@ -422,6 +437,11 @@ class PgRitualsRepo:
 
     async def delete(self, ritual_id: str) -> bool:
         return await asyncio.to_thread(self._delete_sync, ritual_id)
+
+    async def archive(self, ritual_id: str) -> bool:
+        """Soft-delete: помечает archived=True (запись остаётся в БД,
+        пропадает из list_all/list_by_client, но находится find_by_id)."""
+        return await asyncio.to_thread(self._archive_sync, ritual_id)
 
     async def set_result(self, ritual_id: str, result_code: str) -> bool:
         return await asyncio.to_thread(self._set_result_sync, ritual_id, result_code)
