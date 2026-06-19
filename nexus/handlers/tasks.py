@@ -2721,49 +2721,46 @@ async def _build_today_digest(uid: int, user_notion_id: str = "", greeting: str 
     budget_line = ""
     try:
         from nexus.handlers.finance import _calc_free_remaining, _get_limits, _cat_link
-        import os as _os
         result = await _calc_free_remaining(user_notion_id)
         if result:
             free_left, days_rem = result
             daily_budget = free_left / max(days_rem, 1)
             budget_line = f"💰 Свободных: <b>{free_left:,.0f}₽</b> · {daily_budget:,.0f}₽/день"
 
-            mem_db = _os.environ.get("NOTION_DB_MEMORY")
-            if mem_db:
-                from core.classifier import today_moscow
-                limits = await _get_limits(mem_db)
-                if limits:
-                    today_str_b = today_moscow()
-                    month_start = today_str_b[:7] + "-01"
-                    try:
-                        from core.repos.pg_finance_repo import PgNexusBudgetRepo
-                        expense_recs = await PgNexusBudgetRepo().query_month(
-                            today_str_b[:7], type_filter="expense",
-                            user_notion_id=user_notion_id,
-                        )
-                        by_cat_b: dict[str, float] = {}
-                        for e in expense_recs:
-                            cat_r = e.category or ""
-                            by_cat_b[cat_r] = by_cat_b.get(cat_r, 0) + (e.amount or 0)
-                    except Exception:
-                        by_cat_b = {}
+            from core.classifier import today_moscow
+            limits = await _get_limits("")
+            if limits:
+                today_str_b = today_moscow()
+                month_start = today_str_b[:7] + "-01"
+                try:
+                    from core.repos.pg_finance_repo import PgNexusBudgetRepo
+                    expense_recs = await PgNexusBudgetRepo().query_month(
+                        today_str_b[:7], type_filter="expense",
+                        user_notion_id=user_notion_id,
+                    )
+                    by_cat_b: dict[str, float] = {}
+                    for e in expense_recs:
+                        cat_r = e.category or ""
+                        by_cat_b[cat_r] = by_cat_b.get(cat_r, 0) + (e.amount or 0)
+                except Exception:
+                    by_cat_b = {}
 
-                    warns = []
-                    for lim_key, lim_val in limits.items():
-                        if lim_val <= 0:
-                            continue
-                        spent_b = 0.0
-                        for cat_k, cat_s in by_cat_b.items():
-                            cl = _cat_link(cat_k)
-                            if lim_key in cl or cl in lim_key:
-                                spent_b += cat_s
-                        pct = int(spent_b / lim_val * 100)
-                        if pct >= 50:
-                            color = "🔴" if pct >= 90 else "🟡" if pct >= 70 else "🟢"
-                            short = lim_key.capitalize()
-                            warns.append(f"{short} {pct}% {color}")
-                    if warns:
-                        budget_line += "\n📊 " + " · ".join(warns[:4])
+                warns = []
+                for lim_key, lim_val in limits.items():
+                    if lim_val <= 0:
+                        continue
+                    spent_b = 0.0
+                    for cat_k, cat_s in by_cat_b.items():
+                        cl = _cat_link(cat_k)
+                        if lim_key in cl or cl in lim_key:
+                            spent_b += cat_s
+                    pct = int(spent_b / lim_val * 100)
+                    if pct >= 50:
+                        color = "🔴" if pct >= 90 else "🟡" if pct >= 70 else "🟢"
+                        short = lim_key.capitalize()
+                        warns.append(f"{short} {pct}% {color}")
+                if warns:
+                    budget_line += "\n📊 " + " · ".join(warns[:4])
     except Exception as e:
         logger.warning("_build_today_digest budget error: %s", e)
 

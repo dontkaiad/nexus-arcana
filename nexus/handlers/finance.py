@@ -103,10 +103,6 @@ def _parse_user_amount(text: str) -> Optional[int]:
 
 async def _calc_free_remaining(user_notion_id: str = "") -> Optional[Tuple[float, int]]:
     """Возвращает (остаток_свободных, дней_до_конца_месяца) или None."""
-    mem_db = os.environ.get("NOTION_DB_MEMORY")
-    if not mem_db:
-        return None
-
     budget = await _load_budget_data(user_notion_id)
     obligatory_total = sum(o["amount"] for o in budget["обязательные"])
     savings_total = sum(g["saving"] for g in budget["цели"])
@@ -310,12 +306,8 @@ async def build_budget_message(user_notion_id: str = "") -> Optional[str]:
 async def _check_budget_limit(category: str, message: Message, user_notion_id: str = "", amount: float = 0) -> None:
     """После записи расхода — проверить бюджетный лимит по категории (period-aware)."""
     logger.info("_check_budget_limit called: category=%s amount=%.0f", category, amount)
-    mem_db = os.environ.get("NOTION_DB_MEMORY")
-    if not mem_db:
-        logger.info("_check_budget_limit: NOTION_DB_MEMORY not set, skip")
-        return
     link = _cat_link(category)
-    limits = await _get_limits(mem_db)
+    limits = await _get_limits("")
     logger.info("_check_budget_limit: limits=%s link=%r", limits, link)
     limit_amount: Optional[float] = None
     for key, val in limits.items():
@@ -525,7 +517,6 @@ async def get_finance_period(start_date: str, end_date: str, label: str,
 async def get_finance_stats(month: str, user_notion_id: str = "", compare_prev: bool = False) -> str:
     """Сводка за месяц с лимитами. month = 'YYYY-MM'."""
     from core.praise import get_praise
-    mem_db = os.environ.get("NOTION_DB_MEMORY")
     try:
         records = await _repo.month(month, user_notion_id=user_notion_id)
     except Exception as e:
@@ -635,10 +626,8 @@ async def get_finance_stats(month: str, user_notion_id: str = "", compare_prev: 
             logger.error("compare_prev: %s", e, exc_info=True)
             # fallback — продолжить обычный вывод
 
-    limits: Dict[str, float] = {}
-    if mem_db:
-        limits = await _get_limits(mem_db)
-    logger.info("get_finance_stats: mem_db=%r limits=%s by_cat=%s", mem_db, limits, by_cat)
+    limits = await _get_limits("")
+    logger.info("get_finance_stats: limits=%s by_cat=%s", limits, by_cat)
 
     y, m = int(month[:4]), int(month[5:7])
     month_label = f"{_RU_MONTHS.get(m, month)} {y}"
@@ -1238,8 +1227,6 @@ async def on_set_limit(call: CallbackQuery, user_notion_id: str = "") -> None:
 async def _save_limit_to_memory(cat_link: str, amount: int, user_notion_id: str = "") -> None:
     """Сохранить лимит в Память."""
     from core.repos.memory_repo import _repo as _mem_repo
-    if not os.environ.get("NOTION_DB_MEMORY"):
-        return
     key = f"лимит_{cat_link}"
     fact = f"лимит: {cat_link} — {amount}₽/мес"
     try:
@@ -1495,9 +1482,8 @@ async def _handle_multimonth_stats(
     # Лимит если есть категория расходов
     if category_filter and type_filter != "income":
         try:
-            mem_db = os.environ.get("NOTION_DB_MEMORY")
-            if mem_db:
-                limits = await _get_limits(mem_db)
+            limits = await _get_limits("")
+            if limits:
                 link = _cat_link(category_filter)
                 limit_val: Optional[float] = None
                 for key, val in limits.items():
@@ -1665,9 +1651,8 @@ async def handle_finance_summary(query: str = "", user_notion_id: str = "", uid:
         if category_filter and type_filter != "income":
             try:
                 from core.praise import get_praise
-                mem_db = os.environ.get("NOTION_DB_MEMORY")
-                if mem_db:
-                    limits = await _get_limits(mem_db)
+                limits = await _get_limits("")
+                if limits:
                     link = _cat_link(category_filter)
                     limit_val: Optional[float] = None
                     for key, val in limits.items():
@@ -2143,14 +2128,12 @@ async def _handle_impulse_overflow(category: str, overflow: float, message: Mess
 
 async def _calc_impulse_status(period_start: str, user_notion_id: str = "") -> Tuple[float, float]:
     """Calculate impulse budget limit and usage for period."""
-    mem_db = os.environ.get("NOTION_DB_MEMORY")
     impulse_limit = 0.0
-    if mem_db:
-        limits = await _get_limits(mem_db)
-        for k, v in limits.items():
-            if "импульсивн" in k.lower():
-                impulse_limit = v
-                break
+    limits = await _get_limits("")
+    for k, v in limits.items():
+        if "импульсивн" in k.lower():
+            impulse_limit = v
+            break
     if impulse_limit == 0:
         return 0.0, 0.0
     now = datetime.now(MOSCOW_TZ)
@@ -3535,7 +3518,7 @@ async def _save_budget_plan(message: Message, uid: int) -> None:
         )
 
     # Лимиты — НЕ перезаписывать [ручной]
-    existing_limits = await _get_limits(os.environ.get("NOTION_DB_MEMORY", ""))
+    existing_limits = await _get_limits("")
     for l in plan.get("limits", []):
         cat = l.get("category", "📌 Прочее")
         amt = l.get("amount", 0)
@@ -3711,9 +3694,8 @@ async def _budget_period_review(user_notion_id: str = "") -> Tuple[str, float]:
         cat = r.category or "Прочее"
         spending_by_cat[cat] = spending_by_cat.get(cat, 0) + amt
 
-    # Get limits from Memory
-    mem_db = os.environ.get("NOTION_DB_MEMORY")
-    limits = await _get_limits(mem_db) if mem_db else {}
+    # Get limits from Memory (PG)
+    limits = await _get_limits("")
 
     # Get debt payments
     budget_data = await _load_budget_data(user_notion_id)

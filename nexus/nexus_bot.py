@@ -417,12 +417,8 @@ async def cmd_finance(msg: Message, user_notion_id: str = "") -> None:
     else:
         free_left, days_rem, daily_budget = 0, 0, 0
 
-    # Лимиты
-    import os as _os
-    mem_db = _os.environ.get("NOTION_DB_MEMORY")
-    limits: dict[str, float] = {}
-    if mem_db:
-        limits = await _get_limits(mem_db)
+    # Лимиты (PG)
+    limits: dict[str, float] = await _get_limits("")
 
     lines: list[str] = [f"💰 <b>{month_label}</b>\n"]
 
