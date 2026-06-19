@@ -25,7 +25,6 @@ HAIKU_REQUIRED = [
     "arcana/handlers/grimoire.py",
     "arcana/handlers/rituals.py",
     "nexus/handlers/notes.py",
-    "nexus/handlers/notes_smart_select.py",
     "nexus/nexus_bot.py",
     "miniapp/backend/routes/today.py",  # ADHD tip — короткая фраза, Haiku
 ]
