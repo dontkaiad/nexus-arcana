@@ -572,6 +572,22 @@ Sub-agents живут в `.claude/agents/*.md`. Папка `.claude/` в `.gitig
 - Если что-то не получается — формулируй задачу обратно Кай как 
   вопрос со списком вариантов
 
+## 📑 Spec conventions
+
+Rules for every spec under `docs/specs/` (and any new doc/spec):
+
+- All docs and specs are written in English.
+- A spec describes the data model and contract, not a snapshot. No
+  tech-debt/known-limitations section — track fixes in Issues, reference as
+  (see #N).
+- Enumerations (statuses, categories, lookup codes) are NOT restated in full
+  — point to the owning code constant/migration; examples must be marked
+  non-exhaustive.
+- Header carries «Code conforms to: <hash>» and the rule «update in the same
+  PR that changes the model».
+- Every claim must be verifiable from the «Verify against code» file list.
+  No guessed issue refs, no completeness claims without a grep/check.
+
 ## Спеки проекта Claude.ai
 
 Канонические версии спек (живут в проекте Claude.ai; часть продублирована
