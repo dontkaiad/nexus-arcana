@@ -30,8 +30,6 @@ _FULL_UUID_RE = re.compile(
 
 async def task_subtask_cb(call: CallbackQuery) -> None:
     from core.list_manager import pending_set as list_pending_set
-    from core.config import config
-    from core.notion_client import db_query
     from core.user_manager import get_user_notion_id
 
     parts = call.data.split("_", 3)
@@ -46,33 +44,17 @@ async def task_subtask_cb(call: CallbackQuery) -> None:
                 break
 
     # Resolve full page_id for the relation.
-    # New buttons store the full UUID directly — no DB scan needed.
-    # Old (truncated) callbacks: try a scan for backwards compat, but NEVER
-    # fall through to using a partial id (that would create orphan subtasks).
+    # New buttons store the full UUID directly. Legacy truncated callbacks used
+    # to be resolved by scanning Notion; Notion is gone, so a non-UUID id no
+    # longer resolves — NEVER fall through to a partial id (orphan subtasks).
     task_id = None
-    try:
-        if _FULL_UUID_RE.match(raw_id):
-            task_id = raw_id
-        else:
-            # Legacy truncated id_prefix — scan with larger window
-            db_id = (
-                config.arcana.db_works if rel_type == "work" else config.nexus.db_tasks
-            )
-            if db_id and raw_id:
-                pages = await db_query(db_id, page_size=100)
-                prefix_hex = raw_id.replace("-", "")
-                for page in pages:
-                    pid = page.get("id", "").replace("-", "")
-                    if pid.startswith(prefix_hex):
-                        task_id = page["id"]
-                        break
-            if task_id is None:
-                logger.error(
-                    "task_subtask: could not resolve id for raw_id=%r rel=%s",
-                    raw_id, rel_type,
-                )
-    except Exception as e:
-        logger.warning("task_subtask: lookup error: %s", e)
+    if _FULL_UUID_RE.match(raw_id):
+        task_id = raw_id
+    else:
+        logger.error(
+            "task_subtask: could not resolve id for raw_id=%r rel=%s",
+            raw_id, rel_type,
+        )
 
     if not task_id:
         await call.message.answer(

@@ -1,14 +1,12 @@
 """core/memory.py — общая логика долгосрочной памяти (Nexus + Arcana).
 
 Storage: PG via core/repos/memory_repo.py (ADR-0005).
-Notion db_query остаётся ТОЛЬКО для _search_finance / _search_tasks (другие БД).
 """
 from __future__ import annotations
 
 import asyncio
 import json
 import logging
-import os
 import re
 from typing import Dict, List, Optional, Set, Tuple
 
@@ -17,7 +15,6 @@ from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
 from core.claude_client import ask_claude
 from core.config import config as _cfg
 from core.layout import maybe_convert
-from core.notion_client import db_query
 from core.repos.memory_repo import _repo as _mem_repo
 from core.repos.pg_memory_repo import Memory, bot_to_scope
 
@@ -403,47 +400,31 @@ async def _search_finance(query: str, page_size: int = 5) -> list:
         return []
 
 
-async def _search_tasks(query: str, page_size: int = 5) -> List[dict]:
-    """Поиск по базе задач Notion (другая БД — остаётся на Notion)."""
-    db_id = os.environ.get("NOTION_DB_TASKS")
-    if not db_id or not query:
-        return []
-    try:
-        return await db_query(db_id, filter_obj={"and": [
-            {"property": "Задача", "title": {"contains": query}},
-            {"property": "Статус", "status": {"does_not_equal": "Done"}},
-        ]}, page_size=page_size)
-    except Exception as e:
-        logger.error("memory search_tasks: %s", e)
-        return []
-
-
 async def search_memory(
     message: Message,
     query: str,
     user_notion_id: str,
     del_prefix: str = "mem_del",
 ) -> None:
-    """Поиск по памяти + финансам + задачам параллельно."""
+    """Поиск по памяти + финансам параллельно."""
     query = query.strip()
 
     if query:
         tokens = _tokenize_hint(query) or [query]
         mem_coro = _mem_repo.search(tokens, page_size=10)
         fin_coro = _search_finance(query, page_size=5)
-        task_coro = _search_tasks(query, page_size=5)
-        mems, fin_pages, task_pages = await asyncio.gather(mem_coro, fin_coro, task_coro)
-        logger.info("memory search: hint=%r mems=%d fin=%d tasks=%d",
-                    query, len(mems), len(fin_pages), len(task_pages))
+        mems, fin_pages = await asyncio.gather(mem_coro, fin_coro)
+        logger.info("memory search: hint=%r mems=%d fin=%d",
+                    query, len(mems), len(fin_pages))
     else:
         try:
             mems = await _mem_repo.find_recent(is_current=True, page_size=10)
         except Exception as e:
             logger.error("memory search: %s", e)
             mems = []
-        fin_pages, task_pages = [], []
+        fin_pages = []
 
-    if not mems and not fin_pages and not task_pages:
+    if not mems and not fin_pages:
         suffix = f" по «{query}»" if query else ""
         await message.answer(f"🧠 Ничего не нашёл в памяти{suffix}")
         return
@@ -524,21 +505,6 @@ async def search_memory(
             parts.append("💰 <b>Финансы:</b>\n" + "\n".join(fin_lines))
         except Exception as e:
             logger.error("search_memory finance formatting error: %s", e, exc_info=True)
-
-    # ── Задачи ──
-    if task_pages:
-        try:
-            task_lines = []
-            for p in task_pages:
-                props = p.get("properties", {})
-                title_parts = props.get("Задача", {}).get("title", [])
-                title = title_parts[0]["plain_text"] if title_parts else "—"
-                deadline = (props.get("Дедлайн", {}).get("date") or {}).get("start", "")[:10]
-                deadline_str = f" · до {deadline}" if deadline else ""
-                task_lines.append(f"· {title}{deadline_str}")
-            parts.append("✅ <b>Задачи:</b>\n" + "\n".join(task_lines))
-        except Exception as e:
-            logger.error("search_memory tasks formatting error: %s", e, exc_info=True)
 
     text = "\n\n".join(parts)
     if not text.strip():

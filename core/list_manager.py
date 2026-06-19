@@ -3,7 +3,6 @@
 Storage: nexus_lists (☀️ Nexus) + arcana_inventory (🌒 Arcana).
 GUARD: 🔄 Бартер category → ONLY arcana_inventory; never nexus_lists.
 finance_add → routes to PG via finance_repo (nexus_budget or arcana_pnl by bot_label).
-find_task_by_name → Notion ✅ Задачи (Tasks DB stays on Notion).
 """
 from __future__ import annotations
 
@@ -17,7 +16,6 @@ from datetime import datetime, timezone, timedelta
 from typing import Optional
 
 from core.config import config
-from core.notion_client import query_pages
 from core.repos.finance_repo import _repo as _fin_repo
 
 from core.repos.pg_nexus_lists_repo import (
@@ -245,34 +243,14 @@ async def search_memory_categories(item_names: list) -> dict:
 async def find_task_by_name(
     query: str, user_page_id: str, db_id: str = "", title_prop: str = "Задача",
 ) -> list:
-    """Поиск задачи/работы в Notion ✅ Задачи по названию.
+    """Поиск задачи по названию — деградировал до пустого результата.
 
-    Stays on Notion — Tasks DB not yet migrated to PG.
+    Раньше искал в Notion ✅ Задачи. Notion вырезан, а PG-эквивалента поиска
+    задачи по названию нет (PgTasksRepo не имеет title-search), поэтому
+    «привязка списка к задаче» возвращает [] и вызыватели идут по ветке
+    «задача не найдена».
     """
-    if not db_id:
-        db_id = os.environ.get("NOTION_DB_TASKS") or config.nexus.db_tasks
-    if not db_id:
-        return []
-    conditions: list = [
-        {"property": title_prop, "title": {"contains": query}},
-        {"property": "Статус", "status": {"does_not_equal": "Done"}},
-        {"property": "Статус", "status": {"does_not_equal": "Archived"}},
-    ]
-    if user_page_id:
-        conditions.append({"property": "🪪 Пользователи", "relation": {"contains": user_page_id}})
-    try:
-        pages = await query_pages(db_id, filters={"and": conditions}, page_size=10)
-    except Exception as e:
-        logger.error("find_task_by_name(%s): %s", query, e)
-        return []
-    results = []
-    for p in pages:
-        props = p.get("properties", {})
-        title_parts = props.get(title_prop, {}).get("title", [])
-        name = title_parts[0]["plain_text"] if title_parts else "—"
-        status = (props.get("Статус", {}).get("status") or {}).get("name", "")
-        results.append({"id": p["id"], "name": name, "status": status})
-    return results
+    return []
 
 
 # ── CRUD ──────────────────────────────────────────────────────────────────────
