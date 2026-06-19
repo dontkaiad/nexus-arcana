@@ -136,13 +136,21 @@ class ListsRepo:
     async def add_checklist_task(
         self, title: str, user_notion_id: str
     ) -> Optional[str]:
-        """Create a parent ✅ Задача for a checklist group. Returns page_id or None."""
-        return await _notion.task_add(
-            title=title,
-            category="💳 Прочее",
-            priority="Важно",
-            user_notion_id=user_notion_id,
-        )
+        """Create a parent ✅ Задача for a checklist group (PG). Returns task id or None.
+
+        Props-формат как у quick-create — pg_tasks_repo.create парсит их в PG.
+        """
+        props: dict = {
+            "Задача":    _notion._title(title),
+            "Статус":    _notion._status("Not started"),
+            "Приоритет": _notion._select("Важно"),
+            "Категория": _notion._select("💳 Прочее"),
+        }
+        if user_notion_id:
+            props["🪪 Пользователи"] = _notion._relation(user_notion_id)
+        from nexus.repos.tasks_repo import _repo as _tasks_repo
+        from core.config import config
+        return await _tasks_repo.create(config.nexus.db_tasks, props)
 
     async def record_purchase(
         self,
