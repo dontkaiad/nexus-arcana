@@ -1590,7 +1590,7 @@ function NxFinance({ s }) {
               <Glass s={s} accent={s.acc} style={{ padding: "12px 14px" }}>
                 <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, fontWeight: 500, opacity: 0.75, marginBottom: 6 }}>
                   <span>Бюджет дня</span>
-                  <span style={{ color: budget.pct > 85 ? s.red : budget.pct > 60 ? s.amber : undefined, fontWeight: 500 }}>{budget.day.toLocaleString()} ₽ · {budget.pct}%</span>
+                  <span style={{ color: budget.pct > 85 ? s.red : budget.pct > 60 ? s.amber : undefined, fontWeight: 500 }}>{budget.day.toLocaleString()} ₽ · {budget.day && Number.isFinite(budget.pct) ? `${budget.pct}%` : "—"}</span>
                 </div>
                 <Bar s={s} pct={budget.pct} color={budget.pct > 85 ? s.red : budget.pct > 60 ? s.amber : s.acc} />
                 <div style={{ fontSize: 12, opacity: 0.6, marginTop: 6 }}>
