@@ -26,14 +26,12 @@ async def test_yesterday_expenses_true_from_pg():
     y = _yesterday()
     entries = [BudgetEntry(id="1", amount=500.0, type_="💸 Расход", category="🍜 Продукты", date=y)]
 
-    with patch.object(PgNexusBudgetRepo, "query_month", AsyncMock(return_value=entries)) as m_qm, \
-         patch("core.notion_client.db_query", AsyncMock()) as m_dq:
+    with patch.object(PgNexusBudgetRepo, "query_month", AsyncMock(return_value=entries)) as m_qm:
         res = await _check_yesterday_expenses("u-1", tz_offset=3)
 
     assert res is True
     m_qm.assert_awaited_once()
     assert m_qm.call_args.kwargs["user_notion_id"] == "u-1"
-    m_dq.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -45,9 +43,7 @@ async def test_yesterday_expenses_false_when_none_yesterday():
     other = _yesterday()[:8] + "01"
     entries = [BudgetEntry(id="2", amount=100.0, type_="💸 Расход", category="🍱 Кафе", date=other)]
 
-    with patch.object(PgNexusBudgetRepo, "query_month", AsyncMock(return_value=entries)), \
-         patch("core.notion_client.db_query", AsyncMock()) as m_dq:
+    with patch.object(PgNexusBudgetRepo, "query_month", AsyncMock(return_value=entries)):
         res = await _check_yesterday_expenses("u-1", tz_offset=3)
 
     assert res is False
-    m_dq.assert_not_called()

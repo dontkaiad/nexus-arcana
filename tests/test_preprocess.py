@@ -176,7 +176,7 @@ async def test_find_or_create_client_invalidates_whitelist_cache():
     pp._cache_set("u", ["A", "B"])
     assert pp._cache_get("u") == ["A", "B"]
 
-    from core import notion_client as nc
+    from core import client_resolve as nc
     with patch("arcana.repos.pg_clients_repo.PgClientsRepo.find",
                AsyncMock(return_value=None)), \
          patch("arcana.repos.pg_clients_repo.PgClientsRepo.create",

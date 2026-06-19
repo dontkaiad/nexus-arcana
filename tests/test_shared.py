@@ -53,10 +53,9 @@ async def test_city_whitelist_resolves_tz_without_claude(text, expected_tz):
     msg.answer = AsyncMock()
 
     ask = AsyncMock(side_effect=AssertionError("Claude не должен звониться для whitelist-города"))
-    memset = AsyncMock()
 
     with patch.object(tasks_mod, "ask_claude", ask), \
-         patch("core.notion_client.memory_set", memset):
+         patch("core.repos.pg_memory_repo.PgMemoryRepo.upsert", AsyncMock()):
         await tasks_mod._update_user_tz(msg, text)
 
     assert tasks_mod._user_tz_offset[999] == expected_tz

@@ -11,7 +11,7 @@ def _make_client(pg_id: str):
 
 @pytest.mark.asyncio
 async def test_resolve_self_client_finds_lichniy():
-    from core.notion_client import resolve_self_client, _SELF_CLIENT_CACHE
+    from core.client_resolve import resolve_self_client, _SELF_CLIENT_CACHE
 
     _SELF_CLIENT_CACHE.clear()
     with patch(
@@ -25,7 +25,7 @@ async def test_resolve_self_client_finds_lichniy():
 @pytest.mark.asyncio
 async def test_resolve_self_client_caches_result():
     """Повторный вызов не должен идти в PG — id берётся из process-кеша."""
-    from core.notion_client import resolve_self_client, _SELF_CLIENT_CACHE
+    from core.client_resolve import resolve_self_client, _SELF_CLIENT_CACHE
 
     _SELF_CLIENT_CACHE.clear()
     mock = AsyncMock(return_value=_make_client("kai-id"))
@@ -38,7 +38,7 @@ async def test_resolve_self_client_caches_result():
 
 @pytest.mark.asyncio
 async def test_resolve_self_client_returns_none_when_not_found():
-    from core.notion_client import resolve_self_client, _SELF_CLIENT_CACHE
+    from core.client_resolve import resolve_self_client, _SELF_CLIENT_CACHE
 
     _SELF_CLIENT_CACHE.clear()
     with patch(
@@ -51,7 +51,7 @@ async def test_resolve_self_client_returns_none_when_not_found():
 
 @pytest.mark.asyncio
 async def test_resolve_self_client_isolated_per_user():
-    from core.notion_client import resolve_self_client, _SELF_CLIENT_CACHE
+    from core.client_resolve import resolve_self_client, _SELF_CLIENT_CACHE
 
     _SELF_CLIENT_CACHE.clear()
     sequence = [_make_client("u1-self"), _make_client("u2-self")]

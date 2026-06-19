@@ -27,7 +27,7 @@ def test_short_resolve_slug_unique():
 async def test_create_resolved_client_paid():
     from arcana.handlers import sessions as sess
     from arcana.handlers.sessions import _create_resolved_client
-    from core.notion_client import CLIENT_TYPE_PAID
+    from core.client_resolve import CLIENT_TYPE_PAID
 
     with patch.object(sess._client_repo, "add", AsyncMock(return_value="new-page-id")):
         res = await _create_resolved_client("u1", "Маша", CLIENT_TYPE_PAID)
@@ -39,7 +39,7 @@ async def test_create_resolved_client_paid():
 async def test_create_resolved_client_free():
     from arcana.handlers import sessions as sess
     from arcana.handlers.sessions import _create_resolved_client
-    from core.notion_client import CLIENT_TYPE_FREE
+    from core.client_resolve import CLIENT_TYPE_FREE
 
     with patch.object(sess._client_repo, "add", AsyncMock(return_value="p2")):
         res = await _create_resolved_client("u1", "Аня", CLIENT_TYPE_FREE)

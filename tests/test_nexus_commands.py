@@ -134,7 +134,7 @@ class TestNotionHelpers:
     def test_select_builder(self):
         """_select() строит правильный объект."""
         try:
-            from core.notion_client import _select
+            from core.props import _select
             result = _select("Тест")
             assert result == {"select": {"name": "Тест"}}
         except ImportError:
@@ -143,7 +143,7 @@ class TestNotionHelpers:
     def test_status_builder(self):
         """_status() строит правильный объект."""
         try:
-            from core.notion_client import _status
+            from core.props import _status
             result = _status("Done")
             assert result == {"status": {"name": "Done"}}
         except ImportError:
@@ -152,7 +152,7 @@ class TestNotionHelpers:
     def test_status_vs_select(self):
         """Status и Select — разные структуры."""
         try:
-            from core.notion_client import _select, _status
+            from core.props import _select, _status
             sel = _select("Done")
             sta = _status("Done")
             assert sel != sta, "Status и Select совпали — баг!"
@@ -161,49 +161,6 @@ class TestNotionHelpers:
         except ImportError:
             pytest.skip("helpers не найдены")
 
-
-class TestMatchSelect:
-    """Тесты match_select — async (db_id, prop_name, value)."""
-
-    @pytest.mark.asyncio
-    async def test_match_returns_string(self):
-        """match_select(db_id, prop_name, value) возвращает строку."""
-        try:
-            from core.notion_client import match_select
-
-            with patch("core.notion_client.get_db_options", new_callable=AsyncMock) as mock_opts:
-                mock_opts.return_value = ["🍜 Продукты", "🚬 Привычки", "💳 Прочее"]
-                result = await match_select("fake-db-id", "Категория", "продукты")
-                assert isinstance(result, str), f"match_select вернул не строку: {type(result)}"
-        except ImportError:
-            pytest.skip("match_select не найден")
-
-    @pytest.mark.asyncio
-    async def test_match_exact_emoji_prefix(self):
-        """match_select находит полное совпадение с emoji."""
-        try:
-            from core.notion_client import match_select
-
-            with patch("core.notion_client.get_db_options", new_callable=AsyncMock) as mock_opts:
-                mock_opts.return_value = ["🍜 Продукты", "🚬 Привычки"]
-                result = await match_select("fake-db-id", "Категория", "🍜 Продукты")
-                assert result == "🍜 Продукты", f"Точное совпадение не сработало: {result}"
-        except ImportError:
-            pytest.skip("match_select не найден")
-
-    @pytest.mark.asyncio
-    async def test_match_partial_text(self):
-        """match_select находит по тексту без emoji."""
-        try:
-            from core.notion_client import match_select
-
-            with patch("core.notion_client.get_db_options", new_callable=AsyncMock) as mock_opts:
-                mock_opts.return_value = ["🍜 Продукты", "🚬 Привычки", "💳 Прочее"]
-                result = await match_select("fake-db-id", "Категория", "привычк")
-                # Должен найти что-то (не пустая строка / не ошибка)
-                assert result, f"match_select не нашёл 'привычк': {result}"
-        except ImportError:
-            pytest.skip("match_select не найден")
 
 
 class TestDataGetPattern:
@@ -226,7 +183,7 @@ class TestDataGetPattern:
 class TestQuickCreateTasksPG:
     """Quick-create задач (on_arcana_choice «нет» + on_unknown_clarify task)
     создают задачу в PG через _repo.create, регистрируют контекст-правку
-    (last_record_set/_last_task_set) и НЕ трогают Notion task_add/save_message_page.
+    (last_record_set/_last_task_set) и НЕ трогают save_message_page.
     """
 
     @staticmethod
@@ -237,7 +194,6 @@ class TestQuickCreateTasksPG:
                   new=AsyncMock(return_value="pg-123")),
             patch("nexus.handlers.tasks.last_record_set", new=MagicMock()),
             patch("nexus.handlers.tasks._last_task_set", new=MagicMock()),
-            patch("core.notion_client.task_add", new=AsyncMock(return_value="should-not-be-used")),
             patch("core.message_pages.save_message_page", new=AsyncMock()),
         )
 
@@ -252,9 +208,8 @@ class TestQuickCreateTasksPG:
         _pending_arcana[uid] = "купить молоко"
         cb = mock_callback(data="arcana_choice_no", from_id=uid)
 
-        p_create, p_lr, p_lt, p_taskadd, p_smp = self._patches()
-        with p_create as m_create, p_lr as m_lr, p_lt as m_lt, \
-             p_taskadd as m_taskadd, p_smp as m_smp:
+        p_create, p_lr, p_lt, p_smp = self._patches()
+        with p_create as m_create, p_lr as m_lr, p_lt as m_lt, p_smp as m_smp:
             await on_arcana_choice(cb, user_notion_id="u-1")
 
             m_create.assert_awaited_once()
@@ -267,7 +222,6 @@ class TestQuickCreateTasksPG:
 
             m_lr.assert_called_once_with(uid, "task", "pg-123")
             m_lt.assert_called_once_with(uid, "pg-123")
-            m_taskadd.assert_not_called()
             m_smp.assert_not_called()
 
     @pytest.mark.asyncio
@@ -278,8 +232,8 @@ class TestQuickCreateTasksPG:
         _pending_arcana[uid] = "позвонить в банк"
         cb = mock_callback(data="arcana_choice_no", from_id=uid)
 
-        p_create, p_lr, p_lt, p_taskadd, p_smp = self._patches()
-        with p_create as m_create, p_lr, p_lt, p_taskadd, p_smp:
+        p_create, p_lr, p_lt, p_smp = self._patches()
+        with p_create as m_create, p_lr, p_lt, p_smp:
             await on_arcana_choice(cb, user_notion_id="")
             props = m_create.call_args.args[1]
             assert "🪪 Пользователи" not in props
@@ -296,9 +250,8 @@ class TestQuickCreateTasksPG:
         _pending_unknown[uid] = ("сделать отчёт", "u-2", _time.time())
         cb = mock_callback(data="unk_task_1", from_id=uid)
 
-        p_create, p_lr, p_lt, p_taskadd, p_smp = self._patches()
-        with p_create as m_create, p_lr as m_lr, p_lt as m_lt, \
-             p_taskadd as m_taskadd, p_smp as m_smp:
+        p_create, p_lr, p_lt, p_smp = self._patches()
+        with p_create as m_create, p_lr as m_lr, p_lt as m_lt, p_smp as m_smp:
             await on_unknown_clarify(cb, user_notion_id="")
 
             m_create.assert_awaited_once()
@@ -311,5 +264,4 @@ class TestQuickCreateTasksPG:
 
             m_lr.assert_called_once_with(uid, "task", "pg-123")
             m_lt.assert_called_once_with(uid, "pg-123")
-            m_taskadd.assert_not_called()
             m_smp.assert_not_called()

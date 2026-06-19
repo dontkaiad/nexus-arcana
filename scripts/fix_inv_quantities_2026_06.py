@@ -53,7 +53,8 @@ try:
 except ImportError:
     pass
 
-from core.notion_client import query_pages, update_page, _title, _number, _text, _date  # noqa: E402
+from core.props import _title, _number, _text, _date
+from core.notion_client import query_pages, update_page  # noqa: E402
 from core.inv_line_parser import parse_inv_line as _parse_inv_line  # noqa: E402
 
 logger = logging.getLogger("fix_inv_quantities_2026_06")

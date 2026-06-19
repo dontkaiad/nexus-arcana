@@ -73,7 +73,7 @@ class TestArcanaFindOrCreate:
     async def test_find_existing_client(self, mock_notion):
         """Если клиент найден — не создавать нового."""
         try:
-            from core.notion_client import client_find
+            from core.client_resolve import client_find
 
             mock_notion.query_database = AsyncMock(return_value=[{
                 "id": "existing-id",

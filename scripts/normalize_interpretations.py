@@ -21,7 +21,8 @@ sys.path.insert(0, str(ROOT))
 
 from core.config import config  # noqa: E402
 from core.html_sanitize import sanitize_interpretation  # noqa: E402
-from core.notion_client import _text, query_pages, update_page  # noqa: E402
+from core.props import _text
+from core.notion_client import query_pages, update_page  # noqa: E402
 
 
 def _rich_text(page: dict, name: str) -> str:

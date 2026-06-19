@@ -32,7 +32,6 @@ async def test_cmd_finance_reads_pg_nexus_budget(mock_message):
 
     with patch.object(PgNexusBudgetRepo, "query_month",
                       AsyncMock(return_value=_entries())) as m_qm, \
-         patch("core.notion_client.finance_month", AsyncMock()) as m_fm, \
          patch("core.classifier.today_moscow", MagicMock(return_value="2026-06-19")), \
          patch("nexus.handlers.finance._calc_free_remaining", AsyncMock(return_value=None)), \
          patch("nexus.handlers.finance._load_budget_data", AsyncMock(return_value={"доходы": []})), \
@@ -43,7 +42,6 @@ async def test_cmd_finance_reads_pg_nexus_budget(mock_message):
     m_qm.assert_awaited_once()
     assert m_qm.call_args.args[0] == "2026-06"           # month
     assert m_qm.call_args.kwargs["user_notion_id"] == "u-1"
-    m_fm.assert_not_called()
 
     out = "\n".join(str(c.args[0]) for c in msg.answer.call_args_list)
     # total expense = 100+50+30 = 180 (доход 1000 пропущен)

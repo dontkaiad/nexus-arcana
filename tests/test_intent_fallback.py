@@ -114,7 +114,6 @@ async def test_ritual_planned_routes_to_work_preview_no_immediate_write():
                AsyncMock()) as work_mock, \
          patch("arcana.handlers.rituals.handle_add_ritual",
                AsyncMock()) as ritual_mock, \
-         patch("core.notion_client.work_add", AsyncMock()) as add_mock, \
          patch("arcana.handlers.base.react", AsyncMock()), \
          patch("arcana.pending_clients.get_pending_client",
                AsyncMock(return_value=None)), \
@@ -127,7 +126,6 @@ async def test_ritual_planned_routes_to_work_preview_no_immediate_write():
 
     work_mock.assert_awaited_once()
     ritual_mock.assert_not_called()
-    add_mock.assert_not_called()
 
 
 @pytest.mark.asyncio

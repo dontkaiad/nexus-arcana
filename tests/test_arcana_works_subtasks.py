@@ -155,9 +155,7 @@ async def test_subtasks_handler_full_uuid_no_scan():
         captured["uid"] = uid
         captured["data"] = data
 
-    db_mock = AsyncMock()
     with patch("core.list_manager.pending_set", fake_set), \
-         patch("core.notion_client.db_query", db_mock), \
          patch("core.user_manager.get_user_notion_id", AsyncMock(return_value="notion-u-42")):
         await task_subtask_cb(call)
 
@@ -172,8 +170,6 @@ async def test_subtasks_handler_full_uuid_no_scan():
     assert captured["data"]["user_notion_id"] == "notion-u-42", (
         "user_notion_id должен быть реальным, не пустой строкой"
     )
-    # Полный UUID → скан не нужен
-    db_mock.assert_not_awaited()
     call.message.answer.assert_awaited_once()
 
 
@@ -203,7 +199,6 @@ async def test_subtasks_handler_truncated_id_not_found_fails_gracefully():
 
     # db_query возвращает пустой список — задача не найдена
     with patch("core.list_manager.pending_set", fake_set), \
-         patch("core.notion_client.db_query", AsyncMock(return_value=[])), \
          patch("core.user_manager.get_user_notion_id", AsyncMock(return_value="u")):
         await task_subtask_cb(call)
 
@@ -299,7 +294,6 @@ async def test_subtasks_handler_stores_real_user_notion_id():
         captured["data"] = data
 
     with patch("core.list_manager.pending_set", fake_set), \
-         patch("core.notion_client.db_query", AsyncMock()), \
          patch("core.user_manager.get_user_notion_id",
                AsyncMock(return_value="real-notion-page-id")):
         await task_subtask_cb(call)

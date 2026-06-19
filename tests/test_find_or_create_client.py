@@ -8,11 +8,11 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 
-# ── core.notion_client.find_or_create_client ────────────────────────────────
+# ── core.client_resolve.find_or_create_client ────────────────────────────────
 
 @pytest.mark.asyncio
 async def test_find_existing_returns_id_not_created():
-    from core import notion_client as nc
+    from core import client_resolve as nc
     from arcana.repos.clients_repo import Client
 
     fake = Client(id="c-1", name="Маша", contact="", request="", notes="", since="")
@@ -27,7 +27,7 @@ async def test_find_existing_returns_id_not_created():
 
 @pytest.mark.asyncio
 async def test_find_missing_creates_with_default_paid():
-    from core import notion_client as nc
+    from core import client_resolve as nc
 
     with patch("arcana.repos.pg_clients_repo.PgClientsRepo.find",
                AsyncMock(return_value=None)), \
@@ -44,7 +44,7 @@ async def test_find_missing_creates_with_default_paid():
 
 @pytest.mark.asyncio
 async def test_create_failure_returns_none_gracefully():
-    from core import notion_client as nc
+    from core import client_resolve as nc
 
     with patch("arcana.repos.pg_clients_repo.PgClientsRepo.find",
                AsyncMock(return_value=None)), \

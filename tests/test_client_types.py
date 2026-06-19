@@ -3,7 +3,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from core.notion_client import (
+from core.client_resolve import (
     CLIENT_TYPE_FREE, CLIENT_TYPE_PAID, CLIENT_TYPE_SELF,
     should_skip_payment,
 )
@@ -25,63 +25,9 @@ def test_should_not_skip_none_or_unknown():
 
 
 @pytest.mark.asyncio
-async def test_client_add_default_paid():
-    from core.notion_client import client_add
-
-    captured: dict = {}
-
-    async def fake_create(db_id, props):
-        captured["props"] = props
-        return "p1"
-
-    with patch("core.notion_client.page_create", new=fake_create):
-        await client_add(name="Маша")
-
-    assert captured["props"]["Тип клиента"]["select"]["name"] == CLIENT_TYPE_PAID
-
-
-@pytest.mark.asyncio
-async def test_client_add_explicit_free():
-    from core.notion_client import client_add
-
-    captured: dict = {}
-
-    async def fake_create(db_id, props):
-        captured["props"] = props
-        return "p2"
-
-    with patch("core.notion_client.page_create", new=fake_create):
-        await client_add(name="Аня", client_type=CLIENT_TYPE_FREE)
-
-    assert captured["props"]["Тип клиента"]["select"]["name"] == CLIENT_TYPE_FREE
-
-
-@pytest.mark.asyncio
-async def test_client_add_falls_back_when_field_missing():
-    from core.notion_client import client_add
-
-    calls: dict = {"n": 0}
-    captured: list = []
-
-    async def fake_create(db_id, props):
-        captured.append(dict(props))
-        calls["n"] += 1
-        if calls["n"] == 1:
-            raise RuntimeError("validation_error: Тип клиента is not a property")
-        return "p3"
-
-    with patch("core.notion_client.page_create", new=fake_create):
-        pid = await client_add(name="Лена", client_type=CLIENT_TYPE_FREE)
-
-    assert pid == "p3"
-    assert "Тип клиента" in captured[0]
-    assert "Тип клиента" not in captured[1]
-
-
-@pytest.mark.asyncio
 async def test_resolve_self_uses_type_filter():
     """resolve_self_client находит self-клиента через PgClientsRepo.find_self."""
-    from core.notion_client import resolve_self_client, _SELF_CLIENT_CACHE
+    from core.client_resolve import resolve_self_client, _SELF_CLIENT_CACHE
     from arcana.repos.clients_repo import Client
 
     _SELF_CLIENT_CACHE.clear()

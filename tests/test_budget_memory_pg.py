@@ -18,10 +18,7 @@ async def test_save_memory_entry_writes_pg_unified_category():
     from nexus.handlers.finance import _save_memory_entry
 
     with patch("core.repos.memory_repo._repo.upsert",
-               AsyncMock(return_value=("m-1", False))) as m_upsert, \
-         patch("core.notion_client.db_query", AsyncMock()) as m_dq, \
-         patch("core.notion_client.page_create", AsyncMock()) as m_pc, \
-         patch("core.notion_client.update_page", AsyncMock()) as m_up:
+               AsyncMock(return_value=("m-1", False))) as m_upsert:
         await _save_memory_entry("обязательно_жильё_квартира",
                                  "обязательно: квартира — 25000₽/мес", "u-1")
 
@@ -33,10 +30,6 @@ async def test_save_memory_entry_writes_pg_unified_category():
     assert args[3] == "nexus"
     assert args[5] == "manual"
     assert args[6] == "u-1"
-    # Notion не зовётся
-    m_dq.assert_not_called()
-    m_pc.assert_not_called()
-    m_up.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -57,16 +50,12 @@ async def test_deactivate_goal_via_set_active():
     with patch("core.repos.memory_repo._repo.find_by_key_prefixes",
                AsyncMock(return_value=mems)) as m_find, \
          patch("core.repos.memory_repo._repo.set_active",
-               AsyncMock(return_value=1)) as m_sa, \
-         patch("core.notion_client.db_query", AsyncMock()) as m_dq, \
-         patch("core.notion_client.update_page", AsyncMock()) as m_up:
+               AsyncMock(return_value=1)) as m_sa:
         ok = await _deactivate_goal("телефон", "u-1")
 
     assert ok is True
     m_find.assert_awaited_once()
     m_sa.assert_awaited_once_with(["7"], False)
-    m_dq.assert_not_called()
-    m_up.assert_not_called()
 
 
 @pytest.mark.asyncio

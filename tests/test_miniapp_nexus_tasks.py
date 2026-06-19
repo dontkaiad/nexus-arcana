@@ -573,8 +573,6 @@ async def test_nexus_today_digest_complete_ending():
         return []
 
     with patch("core.notion_client.query_pages", AsyncMock(side_effect=fake_query_pages)), \
-         patch("core.notion_client.db_query", AsyncMock(return_value=[])), \
-         patch("core.notion_client.memory_get", AsyncMock(return_value=None)), \
          patch("nexus.handlers.tasks.ask_claude", AsyncMock(return_value=fake_advice)), \
          patch("nexus.handlers.tasks._get_user_tz", AsyncMock(return_value=3)), \
          patch("nexus.handlers.streaks.get_streak",
