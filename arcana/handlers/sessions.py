@@ -521,24 +521,19 @@ async def _save_and_post_triplet(
         await message.answer("⚠️ Не получилось сохранить расклад.")
         return None
 
-    # Авто-привязка к открытой Работе (категория 🃏 Расклад) + закрыть её.
+    # Авто-привязка к открытой Работе (категория 🃏 Расклад) + закрыть её (PG, #151).
     work_closed = False
     if client_id:
         try:
-            from core.config import config as _cfg
             from core.work_relation import (
-                attach_event_to_work, close_work_as_done,
+                set_event_work_id, close_work_as_done,
                 find_active_work_for_client,
             )
             w_id = await find_active_work_for_client(
                 client_id, "🃏 Расклад", user_notion_id,
             )
             if w_id:
-                ok = await attach_event_to_work(
-                    event_db_id=_cfg.arcana.db_sessions,
-                    event_page_id=page_id,
-                    work_page_id=w_id,
-                )
+                ok = await set_event_work_id("session", page_id, w_id)
                 if ok:
                     await close_work_as_done(w_id)
                     work_closed = True

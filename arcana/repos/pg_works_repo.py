@@ -103,6 +103,30 @@ class PgWorksRepo:
             rows = conn.execute(stmt).fetchall()
         return [_row_to_work(r) for r in rows]
 
+    def _find_active_for_client_sync(
+        self, client_id: str, category: str, user_notion_id: str
+    ) -> Optional[Work]:
+        """Первая открытая Работа клиента нужной категории (для авто-привязки
+        записи #151). category — точное совпадение works.category
+        («🃏 Расклад»/«✨ Ритуал»). Status не done/archived, сорт дедлайн ASC."""
+        try:
+            cid = int(client_id)
+        except (ValueError, TypeError):
+            return None
+        stmt = (
+            _select_works()
+            .where(works.c.client_id == cid)
+            .where(works.c.category == category)
+            .where(work_status.c.code.notin_(["done", "archived"]))
+            .order_by(works.c.deadline.asc().nullslast())
+            .limit(1)
+        )
+        if user_notion_id:
+            stmt = stmt.where(works.c.user_notion_id == user_notion_id)
+        with get_engine().connect() as conn:
+            row = conn.execute(stmt).fetchone()
+        return _row_to_work(row) if row else None
+
     def _create_sync(
         self,
         title: str,
@@ -221,6 +245,13 @@ class PgWorksRepo:
 
     async def active_with_future_reminder(self, user_notion_id: str = "") -> List[Work]:
         return await asyncio.to_thread(self._active_with_future_reminder_sync, user_notion_id)
+
+    async def find_active_for_client(
+        self, client_id: str, category: str, user_notion_id: str = "",
+    ) -> Optional[Work]:
+        return await asyncio.to_thread(
+            self._find_active_for_client_sync, client_id, category, user_notion_id
+        )
 
     async def set_status(self, work_id: str, status_code: str) -> bool:
         return await asyncio.to_thread(self._set_status_sync, work_id, status_code)

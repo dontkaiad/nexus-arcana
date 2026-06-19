@@ -155,12 +155,11 @@ async def handle_add_ritual(message: Message, text: str, user_notion_id: str = "
             await message.answer("⚠️ Ошибка записи в Notion.")
             return
 
-        # Авто-привязка к открытой Работе (категория ✨ Ритуал) + закрыть её.
+        # Авто-привязка к открытой Работе (категория ✨ Ритуал) + закрыть её (PG, #151).
         work_closed = False
         try:
-            from core.config import config as _cfg
             from core.work_relation import (
-                attach_event_to_work, close_work_as_done,
+                set_event_work_id, close_work_as_done,
                 find_active_work_for_client,
             )
             if client_id:
@@ -168,11 +167,7 @@ async def handle_add_ritual(message: Message, text: str, user_notion_id: str = "
                     client_id, "✨ Ритуал", user_notion_id,
                 )
                 if w_id:
-                    ok = await attach_event_to_work(
-                        event_db_id=_cfg.arcana.db_rituals,
-                        event_page_id=result.id,
-                        work_page_id=w_id,
-                    )
+                    ok = await set_event_work_id("ritual", result.id, w_id)
                     if ok:
                         await close_work_as_done(w_id)
                         work_closed = True

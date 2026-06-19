@@ -1,122 +1,120 @@
-"""tests/test_work_relations.py — авто-привязка работа↔ритуал/расклад."""
+"""tests/test_work_relations.py — авто-привязка Работа↔Расклад/Ритуал на PG (#151).
+
+- PgWorksRepo.find_active_for_client: открытая Работа клиента нужной категории
+  (точный match category, status≠done/archived, client filter) — не цепляет чужую.
+- work_relation: find → set_event_work_id (session/ritual dispatch) → close (set_status done).
+- fail-closed по юзеру.
+"""
+from __future__ import annotations
+
+from datetime import datetime
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from sqlalchemy import BigInteger, Column, Table, create_engine
+from sqlalchemy.pool import StaticPool
 
-from core.work_relation import (
-    _RELATION_FIELD_CACHE,
-    attach_event_to_work,
-    close_work_as_done,
-    find_active_work_for_client,
-    find_relation_field_to_works,
-)
+from arcana.repos.rituals_tables import metadata
+from arcana.repos.works_tables import works, work_status, work_priority
+from arcana.repos.works_repo import Work
+import arcana.repos.pg_works_repo as pgw
 
-
-@pytest.fixture(autouse=True)
-def _clear_cache():
-    _RELATION_FIELD_CACHE.clear()
-    yield
-    _RELATION_FIELD_CACHE.clear()
+_NOW = datetime(2026, 6, 1, 12, 0)
 
 
-@pytest.mark.asyncio
-async def test_find_relation_field_resolves_via_schema():
-    """Имя relation-поля резолвится из schema (любое — бот не знает заранее)."""
-    schema = {
-        "properties": {
-            "Заметки": {"type": "rich_text"},
-            "Ритуалы": {  # имя кривое, но указывает на 🔮 Работы
-                "type": "relation",
-                "relation": {"database_id": "works-db-id-fake"},
-            },
-        }
-    }
+# ── find_active_for_client (реальный SQL на in-memory sqlite) ────────────────
 
-    class _Fake:
-        async def retrieve(self, database_id):
-            return schema
-
-    class _N:
-        databases = _Fake()
-
-    with patch("core.work_relation.get_notion", return_value=_N()):
-        # config.arcana.db_works должен совпадать с relation target.
-        with patch("core.work_relation.config") as cfg:
-            cfg.arcana.db_works = "works-db-id-fake"
-            field = await find_relation_field_to_works("ritual-db")
-    assert field == "Ритуалы"
-
-
-@pytest.mark.asyncio
-async def test_find_relation_returns_none_if_no_works_relation():
-    schema = {"properties": {"Заметки": {"type": "rich_text"}}}
-
-    class _Fake:
-        async def retrieve(self, database_id):
-            return schema
-
-    class _N:
-        databases = _Fake()
-
-    with patch("core.work_relation.get_notion", return_value=_N()):
-        with patch("core.work_relation.config") as cfg:
-            cfg.arcana.db_works = "works-db-id-fake"
-            field = await find_relation_field_to_works("ritual-db")
-    assert field is None
+@pytest.fixture
+def works_engine(monkeypatch):
+    clients_stub = Table("clients", metadata, Column("id", BigInteger, primary_key=True))
+    engine = create_engine(
+        "sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool,
+    )
+    try:
+        metadata.create_all(engine, tables=[work_status, work_priority, clients_stub, works])
+        with engine.begin() as c:
+            for sid, code in [(1, "open"), (2, "done"), (3, "archived")]:
+                c.execute(work_status.insert().values(id=sid, code=code, label=code))
+            c.execute(work_priority.insert().values(id=1, code="later", label="Можно потом"))
+            base = dict(priority_id=1, created_at=_NOW, updated_at=_NOW)
+            # open расклад клиента 5 — ЦЕЛЬ
+            c.execute(works.insert().values(id=1, title="расклад Оле", category="🃏 Расклад",
+                      client_id=5, status_id=1, **base))
+            # open ритуал клиента 5
+            c.execute(works.insert().values(id=2, title="ритуал Оле", category="✨ Ритуал",
+                      client_id=5, status_id=1, **base))
+            # done расклад клиента 5 — НЕ цель
+            c.execute(works.insert().values(id=3, title="старый расклад", category="🃏 Расклад",
+                      client_id=5, status_id=2, **base))
+            # archived расклад клиента 5 — НЕ цель
+            c.execute(works.insert().values(id=5, title="архив", category="🃏 Расклад",
+                      client_id=5, status_id=3, **base))
+            # open расклад ЧУЖОГО клиента 9
+            c.execute(works.insert().values(id=4, title="чужой", category="🃏 Расклад",
+                      client_id=9, status_id=1, **base))
+        monkeypatch.setattr(pgw, "get_engine", lambda: engine)
+        yield engine
+    finally:
+        metadata.remove(clients_stub)
 
 
 @pytest.mark.asyncio
-async def test_find_active_work_returns_first():
-    """find_active_work_for_client возвращает page_id первой совпадающей."""
-    pages = [{"id": "w1"}, {"id": "w2"}]
-    with patch(
-        "core.work_relation.query_pages", new=AsyncMock(return_value=pages)
-    ), patch("core.work_relation.config") as cfg:
-        cfg.arcana.db_works = "works-db"
-        wid = await find_active_work_for_client("c1", "✨ Ритуал", "u1")
-    assert wid == "w1"
+async def test_find_active_matches_open_same_category_client(works_engine):
+    repo = pgw.PgWorksRepo()
+    w = await repo.find_active_for_client("5", "🃏 Расклад", "")
+    assert w is not None and w.id == "1"          # open расклад клиента 5
+    w2 = await repo.find_active_for_client("5", "✨ Ритуал", "")
+    assert w2 is not None and w2.id == "2"
 
 
 @pytest.mark.asyncio
-async def test_find_active_work_empty_returns_none():
-    with patch(
-        "core.work_relation.query_pages", new=AsyncMock(return_value=[])
-    ), patch("core.work_relation.config") as cfg:
-        cfg.arcana.db_works = "works-db"
-        wid = await find_active_work_for_client("c1", "✨ Ритуал", "u1")
-    assert wid is None
+async def test_find_active_excludes_done_archived_and_other_client(works_engine):
+    repo = pgw.PgWorksRepo()
+    # done(3)/archived(5) не возвращаются; чужой клиент 9 не цепляется к 5
+    w = await repo.find_active_for_client("5", "🃏 Расклад", "")
+    assert w.id not in ("3", "5", "4")
+    # категория не совпала → не закрываем чужую → None
+    assert await repo.find_active_for_client("5", "🍕 Прочее", "") is None
+    # чужой клиент 9 — своя работа
+    other = await repo.find_active_for_client("9", "🃏 Расклад", "")
+    assert other is not None and other.id == "4"
+
+
+# ── work_relation orchestration (mocked repos) ───────────────────────────────
+
+@pytest.mark.asyncio
+async def test_work_relation_dispatch_and_close():
+    from core import work_relation as wr
+    from arcana.repos.pg_works_repo import PgWorksRepo
+    from arcana.repos.pg_sessions_repo import PgSessionsRepo
+    from arcana.repos.pg_rituals_repo import PgRitualsRepo
+
+    work = Work(id="9", title="W", priority="Можно потом",
+                deadline_str="", category_str="", has_client=True)
+
+    with patch.object(PgWorksRepo, "find_active_for_client", AsyncMock(return_value=work)) as m_find, \
+         patch.object(PgSessionsRepo, "set_work_id", AsyncMock(return_value=True)) as m_s, \
+         patch.object(PgRitualsRepo, "set_work_id", AsyncMock(return_value=True)) as m_r, \
+         patch.object(PgWorksRepo, "set_status", AsyncMock(return_value=True)) as m_close:
+        wid = await wr.find_active_work_for_client("5", "🃏 Расклад", "u-1")
+        assert wid == "9"
+        m_find.assert_awaited_once_with("5", "🃏 Расклад", "u-1")
+
+        assert await wr.set_event_work_id("session", "s1", "9") is True
+        m_s.assert_awaited_once_with("s1", "9")
+
+        assert await wr.set_event_work_id("ritual", "r1", "9") is True
+        m_r.assert_awaited_once_with("r1", "9")
+
+        assert await wr.close_work_as_done("9") is True
+        m_close.assert_awaited_once_with("9", "done")
 
 
 @pytest.mark.asyncio
-async def test_attach_event_to_work_uses_resolved_field():
-    captured: dict = {}
-
-    async def fake_update_page(page_id, props):
-        captured["page_id"] = page_id
-        captured["props"] = props
-
-    async def fake_find_field(db_id):
-        return "Ритуалы"
-
-    with patch("core.work_relation.update_page", new=fake_update_page), \
-         patch("core.work_relation.find_relation_field_to_works", new=fake_find_field):
-        ok = await attach_event_to_work(
-            event_db_id="ritual-db", event_page_id="r1", work_page_id="w1",
-        )
-    assert ok is True
-    assert captured["props"] == {"Ритуалы": {"relation": [{"id": "w1"}]}}
-
-
-@pytest.mark.asyncio
-async def test_close_work_as_done():
-    captured: dict = {}
-
-    async def fake_update_page(page_id, props):
-        captured["page_id"] = page_id
-        captured["props"] = props
-
-    with patch("core.work_relation.update_page", new=fake_update_page):
-        ok = await close_work_as_done("w1")
-    assert ok is True
-    assert captured["page_id"] == "w1"
-    assert captured["props"]["Status"]["status"]["name"] == "Done"
+async def test_find_active_work_fail_closed_no_user():
+    from core import work_relation as wr
+    from arcana.repos.pg_works_repo import PgWorksRepo
+    with patch.object(PgWorksRepo, "find_active_for_client", AsyncMock()) as m_find:
+        assert await wr.find_active_work_for_client("5", "🃏 Расклад", "") is None
+        assert await wr.find_active_work_for_client("", "🃏 Расклад", "u") is None
+    m_find.assert_not_called()

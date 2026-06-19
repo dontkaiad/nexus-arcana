@@ -472,3 +472,19 @@ class PgRitualsRepo:
 
     async def update_photo_url(self, ritual_id: str, url: str) -> bool:
         return await asyncio.to_thread(self._update_photo_url_sync, ritual_id, url)
+
+    def _set_work_id_sync(self, ritual_id: str, work_id: str) -> bool:
+        try:
+            rid = int(ritual_id)
+            wid = int(work_id)
+        except (ValueError, TypeError):
+            return False
+        with get_engine().begin() as conn:
+            res = conn.execute(
+                rituals.update().where(rituals.c.id == rid).values(work_id=wid)
+            )
+        return res.rowcount > 0
+
+    async def set_work_id(self, ritual_id: str, work_id: str) -> bool:
+        """Привязать ритуал к Работе (#151): set work_id."""
+        return await asyncio.to_thread(self._set_work_id_sync, ritual_id, work_id)

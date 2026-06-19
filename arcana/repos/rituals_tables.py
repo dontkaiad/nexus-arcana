@@ -51,6 +51,8 @@ rituals = Table(
     Column("title",          Text,         nullable=False),
     Column("occurred_at",    TIMESTAMP(timezone=True)),
     Column("client_id",      BigInteger),  # FK deferred — clients not in PG yet
+    # work_id: FK → works.id на уровне БД (миграция s9t0u1v2w3x4); связь #151.
+    Column("work_id",        BigInteger),
 
     Column("payment_src_id", SmallInteger, ForeignKey("payment_source.id")),
     Column("type_id",        SmallInteger, ForeignKey("engagement_type.id")),

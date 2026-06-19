@@ -464,6 +464,22 @@ class PgSessionsRepo:
     async def archive(self, session_id: str) -> bool:
         return await asyncio.to_thread(self._archive_sync, session_id)
 
+    def _set_work_id_sync(self, session_id: str, work_id: str) -> bool:
+        try:
+            sid = int(session_id)
+            wid = int(work_id)
+        except (ValueError, TypeError):
+            return False
+        with get_engine().begin() as conn:
+            res = conn.execute(
+                sessions.update().where(sessions.c.id == sid).values(work_id=wid)
+            )
+        return res.rowcount > 0
+
+    async def set_work_id(self, session_id: str, work_id: str) -> bool:
+        """Привязать расклад к Работе (#151): set work_id."""
+        return await asyncio.to_thread(self._set_work_id_sync, session_id, work_id)
+
     async def canonical_session_name(
         self, name: str, client_id: Optional[str], user_notion_id: str
     ) -> str:

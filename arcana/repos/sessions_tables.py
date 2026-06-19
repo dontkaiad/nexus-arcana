@@ -51,6 +51,8 @@ sessions = Table(
     Column("payment_src_id",  SmallInteger, ForeignKey("payment_source.id")),
     Column("outcome_id",      SmallInteger, ForeignKey("session_outcome.id")),
     Column("client_id",       BigInteger,   ForeignKey("clients.id")),
+    # work_id: FK → works.id на уровне БД (миграция s9t0u1v2w3x4); связь #151.
+    Column("work_id",          BigInteger),
 
     Column("barter_what",      Text),
     Column("photo_url",        Text),
