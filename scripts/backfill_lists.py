@@ -146,6 +146,19 @@ async def _diagnose(pages: list, engine) -> None:
     print(f"[diagnose] nexus_lists by list_type: {_by_type(nx)}")
     print(f"[diagnose] arcana_inventory by list_type: {_by_type(ar)}")
 
+    def _users_by_type(rows):
+        d: dict = {}
+        for r in rows:
+            lt = r[1] or "(пусто)"
+            d.setdefault(lt, {})
+            u = (r[6] or "(пусто)")[:8]
+            d[lt][u] = d[lt].get(u, 0) + 1
+        return d
+
+    # КЛЮЧЕВОЕ: если у 'чеклист' user_notion_id другой/пустой чем у 'покупки'/'инвентарь'
+    # — read-path фильтрует их по юзеру → в Mini App пусто, хотя в PG есть.
+    print(f"[diagnose] nexus_lists user_notion_id по типам: {_users_by_type(nx)}")
+
     nx_check = [r for r in nx if r[1] == "чеклист"]
     ar_check = [r for r in ar if r[1] == "чеклист"]
     nx_check_rel = sum(1 for r in nx_check if (r[2] or r[3]))   # task_id|works_id
