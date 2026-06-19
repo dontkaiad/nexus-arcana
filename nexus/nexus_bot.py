@@ -361,9 +361,15 @@ async def cmd_budget(msg: Message, user_notion_id: str = "") -> None:
 async def cmd_finance(msg: Message, user_notion_id: str = "") -> None:
     """Финансы: свободных/день + лимиты на грани + по категориям."""
     import random
-    from core.notion_client import finance_month
     from core.classifier import today_moscow
     from nexus.handlers.finance import _calc_free_remaining, _get_limits, _cat_link
+    from core.repos.pg_finance_repo import PgNexusBudgetRepo
+
+    # fail-closed: пустой user в query_month вернул бы [] (#139), но явный
+    # guard честнее — без юзера финансы не показываем.
+    if not user_notion_id:
+        await msg.answer("⚠️ Не могу определить пользователя — финансы не показаны.")
+        return
 
     _FINANCE_ADHD_TIPS = [
         "💡 Записал — значит контролируешь. Мозг с СДВГ не считает в фоне.",
@@ -383,26 +389,24 @@ async def cmd_finance(msg: Message, user_notion_id: str = "") -> None:
     now = datetime.now(MOSCOW_TZ)
     month_label = f"{_RU_MONTHS_CMD.get(now.month, '')} {now.year}"
 
-    records = await finance_month(month, user_notion_id=user_notion_id)
+    # PG: только nexus_budget этого юзера (НЕ FinanceRepo.month — там union
+    # с arcana_pnl = протечка P&L Арканы в личные финансы).
+    records = await PgNexusBudgetRepo().query_month(month, user_notion_id=user_notion_id)
 
     # Считаем расходы по категориям + сегодня
     total_expense = 0.0
     by_cat: dict[str, float] = {}
     today_lines: list[str] = []
     today_total = 0.0
-    for r in records:
-        props = r["properties"]
-        amount = props.get("Сумма", {}).get("number") or 0
-        type_name = (props.get("Тип", {}).get("select") or {}).get("name", "")
-        if "Расход" not in type_name:
+    for e in records:
+        amount = e.amount or 0
+        if "Расход" not in (e.type_ or ""):
             continue
-        cat = (props.get("Категория", {}).get("select") or {}).get("name", "")
+        cat = e.category or ""
         total_expense += amount
         by_cat[cat] = by_cat.get(cat, 0) + amount
-        date = (props.get("Дата", {}).get("date") or {}).get("start", "")[:10]
-        if date == today:
-            desc_parts = props.get("Описание", {}).get("title", [])
-            desc = desc_parts[0]["plain_text"] if desc_parts else "—"
+        if (e.date or "")[:10] == today:
+            desc = e.description or "—"
             today_lines.append(f"  💸 {desc} · {cat} · {amount:,.0f}₽")
             today_total += amount
 
