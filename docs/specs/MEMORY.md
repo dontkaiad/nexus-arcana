@@ -1,45 +1,47 @@
-# MEMORY — модель данных Памяти
+# MEMORY — memory data model
 
 > **Status: AS-BUILT SNAPSHOT at commit cf53a9e.** This documents the memory
 > subsystem *before* the RAG/embeddings rework and Notion-path unification.
 > It will be rewritten as a stable data-model contract once RAG lands. Kept
 > as an evolution baseline.
 
-> Источник истины — код, не Notion-спеки. Каждое утверждение проверяемо по
-> файлам из раздела «Свериться с кодом» в конце. Где код расходится с
-> ADR-0005 — задокументирован КОД, расхождение помечено явно.
+> Source of truth is the code, not Notion specs. Every statement is
+> verifiable against the files in the "Verify against code" section at the
+> end. Where the code diverges from ADR-0005, the CODE is documented and the
+> divergence is flagged explicitly.
 
-## Назначение
+## Purpose
 
-Память — долгосрочное хранилище фактов про пользователя и его окружение,
-общее для обоих ботов (Nexus + Arcana). Хранит короткие текстовые
-утверждения с категорией, тегом-ключом и связью с человеком/объектом.
+Memory is the long-term store of facts about the user and their surroundings,
+shared by both bots (Nexus + Arcana). It holds short textual assertions with a
+category, a key tag, and a relation to a person/object.
 
-Что хранит (категории, `core/memory.py:CATEGORIES`, 15 шт.):
+What it holds (categories, `core/memory.py:CATEGORIES`, 15 items):
 `🦋 СДВГ`, `👥 Люди`, `🏥 Здоровье`, `🛒 Предпочтения`, `💼 Работа`,
 `🏠 Быт`, `🔄 Паттерн`, `💡 Инсайт`, `🔮 Практика`, `🐾 Коты`,
 `💰 Лимит`, `🔒 Обязательные`, `📥 Доход`, `📋 Долги`, `🎯 Цели`.
 
-Граница «память про юзера» vs «доменное знание»:
-- Память — про пользователя и связанных людей/объектов (предпочтения,
-  паттерны, СДВГ-адаптации, заметки про людей и котов).
-- Доменное знание (гримуар Арканы, карты Таро, и т.п.) — НЕ память, живёт
-  в своих доменных таблицах. В коде памяти доменных сущностей нет.
-- Бюджетная конфигурация (лимиты/доход/обязательные/цели/долги) физически
-  лежит в той же таблице `memories` под категорией `💰 Лимит` и
-  ключами с префиксами `лимит_`/`обязательно_`/`цель_`/`долг_`/`income_`,
-  читается отдельным путём (`core/budget.py`). ADR-0005 помечает это как
-  «parked follow-up» — кандидат на вынос в finance-модуль; в коде пока НЕ
-  вынесено.
+Boundary "memory about the user" vs "domain knowledge":
+- Memory — about the user and related people/objects (preferences, patterns,
+  ADHD adaptations, notes about people and cats).
+- Domain knowledge (the Arcana grimoire, Tarot cards, etc.) — NOT memory, it
+  lives in its own domain tables. There are no domain entities in the memory
+  code.
+- Budget configuration (limits/income/obligatory/goals/debts) physically
+  lives in the same `memories` table under category `💰 Лимит` and keys with
+  prefixes `лимит_`/`обязательно_`/`цель_`/`долг_`/`income_`, read via a
+  separate path (`core/budget.py`). ADR-0005 marks this as a "parked
+  follow-up" — a candidate for extraction into the finance module; in the
+  code it is NOT extracted yet.
 
-## Схема (реально, из миграции)
+## Schema (as built, from the migration)
 
-Одна таблица `memories` (PostgreSQL). Миграция Alembic
+A single `memories` table (PostgreSQL). Alembic migration
 `alembic/versions/j0c1d2e3f4g5_core_memories_pg.py`, revision `j0c1d2e3f4g5`,
-down_revision `i9d0e1f2g3h4`. Зеркало в SQLAlchemy Core —
-`core/repos/memories_table.py` (совпадает колонка-в-колонку).
+down_revision `i9d0e1f2g3h4`. SQLAlchemy Core mirror —
+`core/repos/memories_table.py` (matches column-for-column).
 
-| Колонка | Тип | Constraints / default |
+| Column | Type | Constraints / default |
 |---|---|---|
 | `id` | BigInteger | PK, autoincrement |
 | `notion_id` | Text | UNIQUE (nullable) |
@@ -56,174 +58,173 @@ down_revision `i9d0e1f2g3h4`. Зеркало в SQLAlchemy Core —
 | `created_at` | TIMESTAMP(tz) | default `now()` |
 | `updated_at` | TIMESTAMP(tz) | default `now()` |
 
-Индексы (из миграции):
+Indexes (from the migration):
 `ix_memories_key_name` (key_name), `ix_memories_category` (category),
 `ix_memories_scope` (scope), `ix_memories_is_current` (is_current),
 `ix_memories_user` (user_notion_id).
 
-Доменный объект `Memory` (`core/repos/pg_memory_repo.py`,
-`@dataclass`) маппит строку: `id` (str), `fact`←fact_text, `key`←key_name,
+Domain object `Memory` (`core/repos/pg_memory_repo.py`,
+`@dataclass`) maps a row: `id` (str), `fact`←fact_text, `key`←key_name,
 `value`←value_text, `category`, `scope`, `source`, `related_to`←related_to,
 `is_current`, `is_archived`, `user_notion_id`, `date`←created_at[:10],
 `updated_at`←ISO.
 
-Значения полей по факту использования в коде:
-- `scope` ∈ {`global`, `nexus`, `arcana`}. Маппинг bot_label→scope:
-  `☀️ Nexus`→`nexus`, `🌒 Arcana`→`arcana`, иначе `global`
+Field values as actually used in the code:
+- `scope` ∈ {`global`, `nexus`, `arcana`}. bot_label→scope mapping:
+  `☀️ Nexus`→`nexus`, `🌒 Arcana`→`arcana`, otherwise `global`
   (`pg_memory_repo.bot_to_scope`).
-- `source` ∈ {`manual`, `auto`} по схеме, но все пути записи хардкодят
-  `"manual"` — `auto` на входе не появляется (см. #148).
-- `notion_id` в обычной записи = `None`; параметр `notion_id` у `add`
-  задействован только бэкфиллом `scripts/backfill_memories.py` (маппинг на
-  старые Notion-записи).
+- `source` ∈ {`manual`, `auto`} per schema, but every write path hardcodes
+  `"manual"` — `auto` never appears on input (see #148).
+- `notion_id` in a normal write = `None`; the `notion_id` parameter of `add`
+  is used only by the backfill `scripts/backfill_memories.py` (mapping to
+  old Notion records).
 
-## Как работает
+## How it works
 
-### Слои
+### Layers
 `handlers → core/memory.py → core/repos/memory_repo.py (_repo) →
 core/repos/pg_memory_repo.py → memories_table (PG)`.
-`memory_repo.py` — тонкий seam над `PgMemoryRepo`; синглтон `_repo`.
-Все sync-SQL обёрнуты в `asyncio.to_thread`.
+`memory_repo.py` — a thin seam over `PgMemoryRepo`; singleton `_repo`.
+All sync SQL is wrapped in `asyncio.to_thread`.
 
-### Запись
+### Write
 `core/memory.py:save_memory(message, text, user_notion_id, bot_label)`:
-1. `maybe_convert` (раскладка EN→RU).
+1. `maybe_convert` (EN→RU keyboard layout).
 2. `_parse_fact` — Haiku (`claude-haiku-4-5-20251001`, temperature=0,
-   max_tokens=200) → `(fact, category, связь, ключ)`. Невалидная
-   категория → `💡 Инсайт`; полный фейл парсинга → fallback
+   max_tokens=200) → `(fact, category, связь, ключ)`. Invalid category →
+   `💡 Инсайт`; full parse failure → fallback
    `(текст, "💡 Инсайт", "", "факт")`.
 3. `scope = bot_to_scope(bot_label)`.
-4. Для не-лимитных фактов со `связь` — `_resolve_alias`: канонизация имени
-   через уже сохранённые записи (regex-паттерны кличек/алиасов, глубина ≤3,
-   защита от циклов).
-5. Запись:
-   - `category == "💰 Лимит"` и есть `ключ` → `_repo.upsert` (найти по
-     `key_name`+`category` среди не-архивных, обновить; иначе создать).
-     Возвращает `(id, was_updated)`.
-   - иначе → `_repo.add` (всегда INSERT новой строки).
-6. Side-effect: при категории `🦋 СДВГ` и новой записи — `_get_adhd_tip`
-   (Sonnet, `config.model_sonnet`, temperature=0.7) шлёт совет.
+4. For non-limit facts with `связь` — `_resolve_alias`: canonicalize the name
+   through already-saved records (regex patterns for nicknames/aliases,
+   depth ≤3, cycle protection).
+5. Write:
+   - `category == "💰 Лимит"` and `ключ` present → `_repo.upsert` (find by
+     `key_name`+`category` among non-archived, update; else create).
+     Returns `(id, was_updated)`.
+   - otherwise → `_repo.add` (always INSERT a new row).
+6. Side-effect: for category `🦋 СДВГ` and a new record — `_get_adhd_tip`
+   (Sonnet, `config.model_sonnet`, temperature=0.7) sends a tip.
 
-Контракт записи: `value_text` ни одним путём записи не заполняется — для
-читателей всегда `''` (значение факта живёт в `fact_text`) (см. #146).
+Write contract: `value_text` is not populated by any write path — for readers
+it is always `''` (the fact value lives in `fact_text`) (see #146).
 
-### Чтение
-Два режима:
+### Read
+Two modes:
 
-1. Точный ключ — `find_by_exact_key(key, user_notion_id, page_size)`:
-   `key_name == key` (строгое равенство), `is_current=True`,
-   `is_archived=False`, сортировка по `updated_at desc`. Реальные вызовы:
-   `tz_{tg_id}` (таймзона — `core/shared_handlers.py`,
+1. Exact key — `find_by_exact_key(key, user_notion_id, page_size)`:
+   `key_name == key` (strict equality), `is_current=True`,
+   `is_archived=False`, sorted by `updated_at desc`. Actual calls:
+   `tz_{tg_id}` (timezone — `core/shared_handlers.py`,
    `nexus/handlers/tasks.py`, `miniapp/.../weather.py`),
    `budget_payday` (`nexus/handlers/finance.py`).
-2. Подстрочный поиск — `search(terms, scope, user_notion_id, page_size)`:
-   `OR` из `ILIKE %term%` по `fact_text`, `key_name`, `related_to`;
-   фильтр активности (`is_current=True`, `is_archived=False`); опционально
-   `scope` (совпадение ИЛИ `global`) и `user_notion_id`; сорт
-   `created_at desc`. Контракт: это substring/contains-матч, НЕ семантика;
-   запрос не находит синонимы/парафразы (см. #147).
+2. Substring search — `search(terms, scope, user_notion_id, page_size)`:
+   `OR` of `ILIKE %term%` over `fact_text`, `key_name`, `related_to`;
+   activity filter (`is_current=True`, `is_archived=False`); optional
+   `scope` (match OR `global`) and `user_notion_id`; sorted by
+   `created_at desc`. Contract: this is a substring/contains match, NOT
+   semantic; the query does not find synonyms/paraphrases (see #147).
 
-Производные чтения:
+Derived reads:
 - `find_by_category(category, is_current, scope, user_notion_id, page_size)`
-  — точный матч категории (пустая `category` = без фильтра по категории).
+  — exact category match (empty `category` = no category filter).
 - `find_by_key_prefixes(prefixes, user_notion_id)` — `key_name ILIKE p%`;
-  используется бюджетом (`core/budget.py`, префиксы `income_`,
+  used by the budget (`core/budget.py`, prefixes `income_`,
   `обязательно_`, `лимит_`, `цель_`).
-- `find_recent(is_current, scope, user_notion_id, page_size)` — последние
-  не-архивные.
+- `find_recent(is_current, scope, user_notion_id, page_size)` — the latest
+  non-archived ones.
 
-`core/memory.py:_find_pages_by_hint` поверх `search`: шорткат по имени
-категории (`сдвг`/`люди`/…→категория, через `find_by_category`), иначе
-токенизация hint (стоп-слова + наивный стемминг `_normalize_word`) → `search`.
+`core/memory.py:_find_pages_by_hint` on top of `search`: shortcut by category
+name (`сдвг`/`люди`/…→category, via `find_by_category`), otherwise
+tokenizes the hint (stop words + naive stemming `_normalize_word`) → `search`.
 
-### Жизненный цикл записи (soft-delete, два флага)
-- `is_current` — «актуальность». `deactivate_memory` → `set_active(ids, False)`
-  (`_pg.set_current`), `is_current=False`. Запись остаётся в выдаче поиска,
-  но помечается «(неактуально)»; можно восстановить (reactivate).
-- `is_archived` — «удаление». `delete_memory` → `archive(id)`,
-  `is_archived=True`. Архивные исключены из всех чтений
-  (`_base_active_q` фильтрует `is_archived == False`). Хард-delete строки в
-  коде нет.
+### Record lifecycle (soft-delete, two flags)
+- `is_current` — "currency". `deactivate_memory` → `set_active(ids, False)`
+  (`_pg.set_current`), `is_current=False`. The record stays in search
+  results but is marked "(неактуально)"; it can be restored (reactivate).
+- `is_archived` — "deletion". `delete_memory` → `archive(id)`,
+  `is_archived=True`. Archived records are excluded from all reads
+  (`_base_active_q` filters `is_archived == False`). There is no hard row
+  delete in the code.
 
-### Кто вызывает
-- Боты, хендлеры памяти: `nexus/handlers/memory.py`,
+### Callers
+- Bots, memory handlers: `nexus/handlers/memory.py`,
   `arcana/handlers/memory.py` — save / search / deactivate / delete /
-  auto_suggest (inline да/нет).
-- Контекст для промптов: `get_memories_for_context(user_notion_id,
-  keywords, bot_label, max_results)` — фильтрует по scope (оставляет
-  совпадение scope ИЛИ `global`), отдаёт текстовый блок «Контекст из
-  памяти:». Вызывают `arcana/handlers/sessions.py`, `clients.py`,
-  `rituals.py`.
-- Авто-сохранение: `core/classifier.py` (kind `timezone_update` →
+  auto_suggest (inline yes/no).
+- Prompt context: `get_memories_for_context(user_notion_id,
+  keywords, bot_label, max_results)` — filters by scope (keeps a scope
+  match OR `global`), returns a text block "Контекст из памяти:". Called by
+  `arcana/handlers/sessions.py`, `clients.py`, `rituals.py`.
+- Auto-save: `core/classifier.py` (kind `timezone_update` →
   `save_memory(..., "☀️ Nexus")`).
-- Бюджет: `core/budget.py` через `find_by_key_prefixes`.
-- Recall по слову: `recall_from_memory(keyword)` (finance/tasks Nexus).
-- Mini App (PG-native, `PgMemoryRepo` напрямую):
-  `miniapp/backend/routes/memory.py` — `GET /api/memory` (исключает
-  бюджетные/ADHD категории) и `GET /api/memory/adhd` (группировка
-  patterns/strategies/triggers/specifics + Sonnet-профиль);
-  `miniapp/.../weather.py` (таймзона через `find_by_exact_key`).
+- Budget: `core/budget.py` via `find_by_key_prefixes`.
+- Recall by word: `recall_from_memory(keyword)` (Nexus finance/tasks).
+- Mini App (PG-native, `PgMemoryRepo` directly):
+  `miniapp/backend/routes/memory.py` — `GET /api/memory` (excludes
+  budget/ADHD categories) and `GET /api/memory/adhd` (grouping
+  patterns/strategies/triggers/specifics + Sonnet profile);
+  `miniapp/.../weather.py` (timezone via `find_by_exact_key`).
 
-### Роутинг моделей (из кода, не из памяти)
-- Haiku `claude-haiku-4-5-20251001` — `_parse_fact` (разбор факта при save).
+### Model routing (from the code, not from memory)
+- Haiku `claude-haiku-4-5-20251001` — `_parse_fact` (parsing a fact on save).
 - Sonnet `claude-sonnet-4-6` (`config.model_sonnet`) —
-  `core/memory.py:_get_adhd_tip` (совет при сохранении СДВГ-факта) и
-  `miniapp/backend/routes/memory.py:_generate_adhd_profile` (СДВГ-профиль).
-- Чтение/поиск/деактивация/архивация — без LLM (чистый SQL).
+  `core/memory.py:_get_adhd_tip` (tip when saving an ADHD fact) and
+  `miniapp/backend/routes/memory.py:_generate_adhd_profile` (ADHD profile).
+- Read/search/deactivate/archive — no LLM (pure SQL).
 
-## Ключевые решения и trade-offs (ADR-0005)
+## Key decisions and trade-offs (ADR-0005)
 
-1. **Хранилище: PG, не Notion.** Память переехала в PG (миграция
-   `j0c1d2e3f4g5`). Плата: нужен живой PG-engine (берётся из
-   `arcana.repos.pg_sessions_repo.get_engine`), теряется «человекочитаемость»
-   Notion-таблицы.
-   - Расхождение: `nexus/handlers/finance.py:_save_memory_entry` ВСЁ ЕЩЁ
-     пишет бюджетную память в Notion (`NOTION_DB_MEMORY`, select-поля
-     `Бот`/`Категория`/`Актуально`). Это параллельный путь записи мимо PG —
-     не соответствует «storage = PG» (см. #145).
+1. **Storage: PG, not Notion.** Memory moved to PG (migration
+   `j0c1d2e3f4g5`). Cost: a live PG engine is required (obtained from
+   `arcana.repos.pg_sessions_repo.get_engine`), and the human-readability of
+   the Notion table is lost.
+   - Divergence: `nexus/handlers/finance.py:_save_memory_entry` STILL
+     writes budget memory to Notion (`NOTION_DB_MEMORY`, select fields
+     `Бот`/`Категория`/`Актуально`). This is a parallel write path bypassing
+     PG — it does not match "storage = PG" (see #145).
 
-2. **`scope` вместо поля `Бот`.** Один столбец `scope`
-   (`global`/`nexus`/`arcana`) заменил Notion-select `Бот`. Почему:
-   большинство фактов общие (`global`), а редкий бот-специфичный факт не
-   требует разносить память по доменам/таблицам. Плата: фильтрация scope —
-   прикладная логика в каждом чтении (`scope == X OR scope == global`), а не
-   жёсткое разделение.
+2. **`scope` instead of a `Бот` field.** A single `scope` column
+   (`global`/`nexus`/`arcana`) replaced the Notion select `Бот`. Why:
+   most facts are shared (`global`), and a rare bot-specific fact does not
+   require splitting memory across domains/tables. Cost: scope filtering is
+   application logic in every read (`scope == X OR scope == global`), not a
+   hard split.
 
-3. **Soft-delete вместо удаления.** Два флага `is_current` (актуальность,
-   обратимо) и `is_archived` (скрытие из выдачи). Почему: история не
-   теряется, «неактуальное» можно вернуть. Плата: строки копятся, каждое
-   чтение тащит фильтр активности; реального освобождения места нет.
+3. **Soft-delete instead of deletion.** Two flags `is_current` (currency,
+   reversible) and `is_archived` (hiding from results). Why: history is not
+   lost, "стало неактуальным" can be brought back. Cost: rows accumulate,
+   every read carries an activity filter; there is no real space reclamation.
 
-4. **facts/observations split — НЕ реализован (расхождение с ADR-0005).**
-   ADR-0005 (Decision) предписывает ДВЕ таблицы: `facts` (точный
-   key→value) и `observations` (свободный текст + категория + семантика).
-   Реально создана ОДНА таблица `memories` с обоими наборами полей
-   (`key_name`/`value_text` И `fact_text`/`category`) — это ровно тот
-   «unified memory table», который ADR в разделе Alternatives ПОМЕТИЛ как
-   rejected. Таблиц `facts`/`observations` в коде/миграциях НЕТ.
-   Trade-off по факту: проще (одна таблица, один репозиторий), но смешаны
-   два паттерна доступа (точный ключ vs contains-поиск) в одном месте —
-   ровно тот минус, от которого ADR хотел уйти. Вырожденный артефакт этого
-   решения — незаполняемая `value_text` (см. #146).
+4. **facts/observations split — NOT implemented (divergence with ADR-0005).**
+   ADR-0005 (Decision) prescribes TWO tables: `facts` (exact
+   key→value) and `observations` (free text + category + semantics).
+   In reality a SINGLE table `memories` was created with both sets of fields
+   (`key_name`/`value_text` AND `fact_text`/`category`) — exactly the
+   "unified memory table" that the ADR MARKED as rejected in the Alternatives
+   section. There are NO `facts`/`observations` tables in the code/migrations.
+   Trade-off as built: simpler (one table, one repository), but two access
+   patterns (exact key vs contains-search) are mixed in one place — exactly
+   the downside the ADR wanted to avoid. The degenerate artifact of this
+   decision is the unpopulated `value_text` (see #146).
 
 ---
 
-Свериться с кодом:
-- `alembic/versions/j0c1d2e3f4g5_core_memories_pg.py` — миграция таблицы
-- `core/repos/memories_table.py` — SQLAlchemy Core определение `memories`
+Verify against code:
+- `alembic/versions/j0c1d2e3f4g5_core_memories_pg.py` — table migration
+- `core/repos/memories_table.py` — SQLAlchemy Core definition of `memories`
 - `core/repos/pg_memory_repo.py` — `Memory` dataclass + sync SQL + async API
-- `core/repos/memory_repo.py` — seam-репозиторий, синглтон `_repo`
-- `core/memory.py` — save/search/deactivate/delete/recall/контекст,
+- `core/repos/memory_repo.py` — seam repository, singleton `_repo`
+- `core/memory.py` — save/search/deactivate/delete/recall/context,
   `_parse_fact` (Haiku), `_get_adhd_tip` (Sonnet), `CATEGORIES`
-- `core/budget.py` — чтение бюджета через `find_by_key_prefixes`
-- `core/classifier.py` — авто-save (timezone_update)
+- `core/budget.py` — budget reads via `find_by_key_prefixes`
+- `core/classifier.py` — auto-save (timezone_update)
 - `core/shared_handlers.py`, `nexus/handlers/tasks.py` — `find_by_exact_key("tz_…")`
 - `nexus/handlers/finance.py` — `find_by_exact_key("budget_payday")`,
-  `_save_memory_entry` (запись в Notion `NOTION_DB_MEMORY`)
-- `nexus/handlers/memory.py`, `arcana/handlers/memory.py` — хендлеры памяти
+  `_save_memory_entry` (write to Notion `NOTION_DB_MEMORY`)
+- `nexus/handlers/memory.py`, `arcana/handlers/memory.py` — memory handlers
 - `arcana/handlers/sessions.py`, `clients.py`, `rituals.py` —
   `get_memories_for_context`
 - `miniapp/backend/routes/memory.py` — `GET /api/memory`, `/api/memory/adhd`
-- `miniapp/backend/routes/weather.py` — таймзона через `find_by_exact_key`
+- `miniapp/backend/routes/weather.py` — timezone via `find_by_exact_key`
 - `core/config.py` — `MODEL_HAIKU`, `MODEL_SONNET` (`claude-sonnet-4-6`)
-- `docs/CASES/0005-memory-store.md` — ADR (код расходится: см. раздел выше)
+- `docs/CASES/0005-memory-store.md` — ADR (code diverges: see the section above)
