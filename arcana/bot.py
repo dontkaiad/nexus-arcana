@@ -32,6 +32,52 @@ from core.reminder_scheduler import ReminderScheduler
 arcana_reminder_flow = ReminderScheduler(callback_prefix="work")
 
 
+async def restore_work_reminders() -> int:
+    """Пере-планировать напоминания Работ из PG на старте (паритет с Nexus
+    restore_reminders_on_startup).
+
+    APScheduler-джобы живут в памяти и теряются при рестарте; колонка
+    works.reminder в PG переживает рестарт, но без этого restore никто её не
+    перечитывает. Берём только БУДУЩИЕ напоминания не-done/не-archived Работ
+    (active_with_future_reminder фильтрует reminder > now()). Прошедшие НЕ
+    воскрешаем — чтобы не слать «missed» при каждом рестарте.
+
+    Ключ джобы (`reminder_{page_id}`, page_id=str(work.id)) совпадает с тем,
+    что ставит cb_work_save → replace_existing, без дублей.
+    """
+    from core.config import config as _cfg
+    from core.user_manager import get_user
+    from core.shared_handlers import get_user_tz
+    from arcana.repos.pg_works_repo import PgWorksRepo
+
+    _pg = PgWorksRepo()
+    restored = 0
+    for tg_id in _cfg.allowed_ids:
+        try:
+            user_data = await get_user(tg_id)
+            if not user_data or not user_data.get("permissions", {}).get("arcana", False):
+                continue
+            user_notion_id = user_data.get("notion_page_id", "")
+            tz_offset = await get_user_tz(tg_id)
+            for w in await _pg.active_with_future_reminder(user_notion_id):
+                if not w.reminder_dt:
+                    continue
+                reminder_iso = w.reminder_dt.strftime("%Y-%m-%dT%H:%M")
+                ok = await arcana_reminder_flow.schedule_reminder(
+                    chat_id=tg_id,
+                    title=w.title or "Работа",
+                    reminder_dt=reminder_iso,
+                    page_id=str(w.id),
+                    tz_offset=int(tz_offset),
+                )
+                if ok:
+                    restored += 1
+        except Exception as e:
+            logger.warning("restore_work_reminders for %s failed: %s", tg_id, e)
+    logger.info("restored %d work reminders on startup", restored)
+    return restored
+
+
 def create_dp_and_bot():
     """Создать dp + bot без запуска polling. Для тестов и main()."""
     bot = Bot(token=config.arcana.tg_token, default=DefaultBotProperties(parse_mode="HTML"))
@@ -339,6 +385,11 @@ async def main():
         # сможет ставить APScheduler-job на дедлайн напоминания работы.
         arcana_reminder_flow.init(bot, scheduler)
         logger.info("arcana_reminder_flow ready (callback_prefix=work)")
+        # Restore Work-напоминаний из PG (apscheduler-джобы не переживают рестарт).
+        try:
+            await restore_work_reminders()
+        except Exception as e:
+            logger.warning("restore_work_reminders failed: %s", e)
     except ImportError:
         logger.warning("apscheduler not installed — monthly reminder disabled")
 

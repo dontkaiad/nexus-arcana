@@ -6,7 +6,7 @@ import logging
 from datetime import date, datetime, timezone
 from typing import Optional, List
 
-from sqlalchemy import select
+from sqlalchemy import select, text
 
 from arcana.repos.works_repo import Work
 from arcana.repos.works_tables import works, work_priority, work_status
@@ -162,6 +162,21 @@ class PgWorksRepo:
             rows = conn.execute(stmt).fetchall()
         return [_row_to_work(r) for r in rows]
 
+    def _active_with_future_reminder_sync(self, user_notion_id: str) -> List[Work]:
+        """Работы, у которых есть будущее напоминание и статус не done/archived
+        (для restore reminders на старте — паритет с Nexus tasks)."""
+        stmt = (
+            _select_works()
+            .where(work_status.c.code.notin_(["done", "archived"]))
+            .where(works.c.reminder.isnot(None))
+            .where(works.c.reminder > text("now()"))
+        )
+        if user_notion_id:
+            stmt = stmt.where(works.c.user_notion_id == user_notion_id)
+        with get_engine().connect() as conn:
+            rows = conn.execute(stmt).fetchall()
+        return [_row_to_work(r) for r in rows]
+
     def _set_status_sync(self, work_id: str, status_code: str) -> bool:
         try:
             wid = int(work_id)
@@ -203,6 +218,9 @@ class PgWorksRepo:
 
     async def list_all(self, user_notion_id: str = "") -> List[Work]:
         return await asyncio.to_thread(self._list_all_sync, user_notion_id)
+
+    async def active_with_future_reminder(self, user_notion_id: str = "") -> List[Work]:
+        return await asyncio.to_thread(self._active_with_future_reminder_sync, user_notion_id)
 
     async def set_status(self, work_id: str, status_code: str) -> bool:
         return await asyncio.to_thread(self._set_status_sync, work_id, status_code)
