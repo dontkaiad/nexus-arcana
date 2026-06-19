@@ -1,7 +1,7 @@
 """Универсальный хелпер для Select/Multi-select полей Notion.
 Используется одинаково в Nexus и Arcana."""
 import re
-from typing import List, Tuple
+from typing import List
 
 OPTION_EMOJI = {
     # Заметки
@@ -34,25 +34,6 @@ def format_option(raw: str) -> str:
     word_lower = clean.lower()
     emoji = OPTION_EMOJI.get(word_lower, "")
     return f"{emoji} {clean.capitalize()}" if emoji else clean.capitalize()
-
-
-async def find_or_prepare(
-    db_id: str, field: str, raw: str
-) -> Tuple[str, bool]:
-    """Найти опцию в существующих или подготовить новую.
-    Возвращает (значение, is_new).
-    is_new=False → существующая опция (брать как есть)
-    is_new=True  → новая опция (требует подтверждения)
-    """
-    from core.notion_client import get_db_options
-    existing = await get_db_options(db_id, field)
-    raw_clean = strip_emoji(raw).lower()
-    for opt in existing:
-        if raw_clean == strip_emoji(opt).lower():
-            return opt, False
-        if raw_clean in strip_emoji(opt).lower() or strip_emoji(opt).lower() in raw_clean:
-            return opt, False
-    return format_option(raw), True
 
 
 def confirm_keyboard(uid: int, new_opts: List[str], existing: List[str]):

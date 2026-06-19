@@ -2111,12 +2111,10 @@ async def handle_goal_command(message: Message, user_notion_id: str = "") -> Non
 async def handle_limit_override(message: Message, category: str, amount_str: str, user_notion_id: str = "") -> None:
     """User manually sets a limit: 'лимит привычки 12к'."""
     amount = _parse_k_amount(amount_str)
-    # Resolve category to full Notion name
-    from core.notion_client import match_select
-    from core.config import config
-    real_cat = await match_select(config.nexus.db_finance, "Категория", category)
-    if not real_cat or real_cat == category:
-        # Try fuzzy: capitalize
+    # Канонизация категории лимита локально (PG/Memory, без Notion).
+    from core.budget import display_limit_name
+    real_cat = display_limit_name(category)
+    if real_cat == category:
         real_cat = category.capitalize()
     link = _cat_link(real_cat)
     await _save_memory_entry(
