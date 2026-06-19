@@ -1,6 +1,6 @@
 # FINANCE — data-model contract (💰 Финансы)
 
-Code conforms to: 3f17a0b. This spec describes the finance data model as of
+Code conforms to: c7466ec. This spec describes the finance data model as of
 that commit; update it in the same PR that changes the model.
 
 > Contract, not snapshot. Describes the persistent model, the guarantees of
