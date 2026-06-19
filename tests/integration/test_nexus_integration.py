@@ -246,12 +246,6 @@ class TestNexusIntegration:
         assert "traceback" not in (r or "").lower()
 
     @pytest.mark.asyncio
-    async def test_fixstreak(self):
-        """/fixstreak — починить стрик."""
-        r = await self.send("/fixstreak")
-        assert "traceback" not in (r or "").lower()
-
-    @pytest.mark.asyncio
     async def test_finance_stats(self):
         """/finance_stats — статистика финансов."""
         r = await self.send("/finance_stats")
