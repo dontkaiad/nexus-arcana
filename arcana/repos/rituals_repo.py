@@ -33,6 +33,8 @@ class Ritual:
     structure: str = ""
     notes: Optional[str] = None
     photo_url: Optional[str] = None
+    payment_source: Optional[str] = None  # display label, e.g. "💵 Наличные"
+    barter_what: str = ""
 
 
 def goal_label(goal: str) -> str:

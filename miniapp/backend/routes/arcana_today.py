@@ -11,12 +11,13 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
 from core.config import config
-from core.notion_client import query_pages, rituals_all, update_page_select
 from core.repos.pg_finance_repo import PgArcanaPnlRepo
 from arcana.repos.pg_sessions_repo import PgSessionsRepo as _PgSessionsRepoClass
 _pg_sessions_repo = _PgSessionsRepoClass()
 from arcana.repos.pg_works_repo import PgWorksRepo as _PgWorksRepoClass
 _pg_works_repo = _PgWorksRepoClass()
+from arcana.repos.pg_rituals_repo import PgRitualsRepo as _PgRitualsRepoClass
+_pg_rituals_repo = _PgRitualsRepoClass()
 from core.repos.pg_nexus_lists_repo import PgArcanaInventoryRepo as _PgArcanaInventoryRepoClass
 _arcana_inv_repo_lists = _PgArcanaInventoryRepoClass()
 _pnl_repo = PgArcanaPnlRepo()
@@ -49,9 +50,23 @@ from miniapp.backend.routes._arcana_common import (
     SESSION_YES,
     SUPPLIES_CATEGORIES,
     load_clients_map,
+    ritual_to_stub,
     serialize_session_brief,
     triplet_to_stub,
 )
+
+
+async def _load_rituals(user_notion_id: str) -> list[dict]:
+    """Все ритуалы юзера из PG → Notion-подобные стабы для аналитики.
+
+    Defensive: при сбое запроса возвращает [] (вкладка «Сегодня» не падает),
+    как раньше делал Notion-путь."""
+    try:
+        _pg = await _pg_rituals_repo.list_all(user_notion_id=user_notion_id)
+    except Exception as e:
+        logger.warning("load_rituals pg query failed: %s", e)
+        return []
+    return [ritual_to_stub(r) for r in _pg]
 
 logger = logging.getLogger("miniapp.arcana.today")
 
@@ -327,7 +342,7 @@ async def get_arcana_today(tg_id: int = Depends(current_user_id)) -> dict[str, A
     month_accuracy, _, sessions_in_month = _accuracy(all_sessions, month)
 
     # Аккуратность по сеансам + ритуалам (взвешенно за всё время)
-    rituals = await rituals_all(user_notion_id=user_notion_id)
+    rituals = await _load_rituals(user_notion_id)
     acc = _compute_accuracy(all_sessions, rituals, scope="all")
     pending_sessions, pending_rituals = _count_pending(all_sessions, rituals)
 
@@ -542,7 +557,7 @@ async def get_arcana_stats(
     user_notion_id = (await get_user_notion_id(tg_id)) or ""
     _pg_sess = await _pg_sessions_repo.list_all(user_notion_id=user_notion_id)
     sessions = [triplet_to_stub(t) for t in _pg_sess]
-    rituals = await rituals_all(user_notion_id=user_notion_id)
+    rituals = await _load_rituals(user_notion_id)
     clients_map = await load_clients_map(user_notion_id)
 
     acc_overall = _compute_accuracy(sessions, rituals, "all")
@@ -768,55 +783,6 @@ def _pending_barters(sessions: list[dict], rituals: list[dict], clients_map: dic
     return out
 
 
-async def _fetch_subtasks_by_work(
-    user_notion_id: str, work_ids: set[str]
-) -> dict[str, list[dict]]:
-    """Один запрос к 🗒️ Списки → группировка по работе.
-
-    Возвращает {work_id: [{id, name, done}, ...]}.
-    Перформанс: один запрос на все работы (не N+1).
-    """
-    if not work_ids:
-        return {}
-    db_lists = config.db_lists
-    if not db_lists:
-        return {}
-    from core.notion_client import _with_user_filter, query_pages
-    base_filter: dict = {
-        "and": [
-            {"property": "Тип", "select": {"equals": "📋 Чеклист"}},
-            {"property": "🔮 Работы", "relation": {"is_not_empty": True}},
-        ]
-    }
-    filters = _with_user_filter(base_filter, user_notion_id)
-    try:
-        pages = await query_pages(db_lists, filters=filters, page_size=500)
-    except Exception as e:
-        logger.warning("subtasks fetch failed: %s", e)
-        return {}
-
-    out: dict[str, list[dict]] = {}
-    for p in pages:
-        props = p.get("properties", {})
-        rels = (props.get("🔮 Работы", {}).get("relation") or [])
-        if not rels:
-            continue
-        title = title_plain(p, "Название")
-        if not title:
-            continue
-        status = (props.get("Статус", {}).get("status") or {}).get("name", "")
-        done = status in ("Done", "Complete", "Archived")
-        for r in rels:
-            wid = r.get("id", "")
-            if wid in work_ids:
-                out.setdefault(wid, []).append({
-                    "id": p.get("id", ""),
-                    "name": title,
-                    "done": done,
-                })
-    return out
-
-
 @router.get("/arcana/works")
 async def get_arcana_works(
     tg_id: int = Depends(current_user_id),
@@ -882,7 +848,7 @@ async def get_arcana_accuracy(
     user_notion_id = (await get_user_notion_id(tg_id)) or ""
     _pg_sess = await _pg_sessions_repo.list_all(user_notion_id=user_notion_id)
     sessions = [triplet_to_stub(t) for t in _pg_sess]
-    rituals = await rituals_all(user_notion_id=user_notion_id)
+    rituals = await _load_rituals(user_notion_id)
     clients_map = await load_clients_map(user_notion_id)
     acc = _compute_accuracy(sessions, rituals, scope)
     pending_sessions, pending_rituals = _count_pending(sessions, rituals)
@@ -919,7 +885,9 @@ async def post_arcana_accuracy_verify(
         _outcome_map = {"yes": "yes", "half": "partial", "no": "no"}
         ok = await _pg_sessions_repo.set_outcome(body.id, _outcome_map[body.verdict])
     elif body.type == "ritual":
-        ok = await update_page_select(body.id, "Результат", _VERDICT_TO_RITUAL[body.verdict])
+        # PG-backed ritual verdict: "yes"/"half"/"no" → outcome code
+        _ritual_outcome_map = {"yes": "positive", "half": "partial", "no": "negative"}
+        ok = await _pg_rituals_repo.set_result(body.id, _ritual_outcome_map[body.verdict])
     else:
         raise HTTPException(status_code=400, detail="type must be session|ritual")
     if not ok:
@@ -930,7 +898,7 @@ async def post_arcana_accuracy_verify(
     user_notion_id = (await get_user_notion_id(tg_id)) or ""
     _pg_sess = await _pg_sessions_repo.list_all(user_notion_id=user_notion_id)
     sessions = [triplet_to_stub(t) for t in _pg_sess]
-    rituals = await rituals_all(user_notion_id=user_notion_id)
+    rituals = await _load_rituals(user_notion_id)
     acc = _compute_accuracy(sessions, rituals, "all")
     pending_sessions, pending_rituals = _count_pending(sessions, rituals)
     return {

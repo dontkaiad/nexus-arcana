@@ -113,6 +113,37 @@ def triplet_to_stub(t) -> dict:
     }
 
 
+_RITUAL_RESULT_CODE_TO_RU = {
+    "positive":   RITUAL_YES,
+    "partial":    RITUAL_PARTIAL,
+    "negative":   RITUAL_NO,
+    "unverified": "⏳ Не проверено",
+}
+
+
+def ritual_to_stub(r) -> dict:
+    """Convert PG Ritual → Notion-page-like dict for shared analytics fns.
+
+    Mirrors triplet_to_stub so arcana_today/stats helpers consume PG rituals
+    without rewriting field access. clients_map is PG-keyed (by client_id).
+    """
+    result_ru = _RITUAL_RESULT_CODE_TO_RU.get(r.result or "unverified", "⏳ Не проверено")
+    date_iso = r.date.isoformat() if r.date else ""
+    return {
+        "id": r.id,
+        "properties": {
+            "Название": {"title": [{"plain_text": r.name or ""}]},
+            "Дата": {"date": {"start": date_iso}},
+            "Результат": {"select": {"name": result_ru}},
+            "👥 Клиенты": {"relation": [{"id": r.client_id}] if r.client_id else []},
+            "Цена за ритуал": {"number": float(r.price or 0)},
+            "Оплачено": {"number": float(r.paid or 0)},
+            "Источник оплаты": {"select": {"name": r.payment_source or ""}},
+            "Бартер · что": {"rich_text": [{"plain_text": r.barter_what or ""}]},
+        },
+    }
+
+
 def client_name_from(page: dict, clients_map: dict) -> tuple[str, Optional[str]]:
     """→ (name, client_id | None). Если relation пуст → ('Личный', None)."""
     ids = relation_ids_of(page, "👥 Клиенты")

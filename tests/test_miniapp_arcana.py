@@ -282,8 +282,10 @@ def test_arcana_today_happy(client):
 
     with patch("miniapp.backend.routes.arcana_today._pg_sessions_repo", mock_sess), \
          patch("miniapp.backend.routes._arcana_common._common_clients_repo", mock_cl), \
-         patch("miniapp.backend.routes.arcana_today.query_pages",
-               AsyncMock(return_value=works)), \
+         patch("miniapp.backend.routes.arcana_today._pg_rituals_repo.list_all",
+               AsyncMock(return_value=[])), \
+         patch("miniapp.backend.routes.arcana_today._pg_works_repo.list_all",
+               AsyncMock(return_value=[])), \
          patch("miniapp.backend.routes.arcana_today._pnl_repo.query_month",
                AsyncMock(return_value=fin_entries)), \
          patch("miniapp.backend.routes.arcana_today.today_user_tz",
@@ -341,7 +343,10 @@ def test_arcana_today_finance_loop_pg_format(client):
     ]
     with patch("miniapp.backend.routes.arcana_today._pg_sessions_repo", mock_sess), \
          patch("miniapp.backend.routes._arcana_common._common_clients_repo", mock_cl), \
-         patch("miniapp.backend.routes.arcana_today.query_pages", AsyncMock(return_value=[])), \
+         patch("miniapp.backend.routes.arcana_today._pg_rituals_repo.list_all",
+               AsyncMock(return_value=[])), \
+         patch("miniapp.backend.routes.arcana_today._pg_works_repo.list_all",
+               AsyncMock(return_value=[])), \
          patch("miniapp.backend.routes.arcana_today._pnl_repo.query_month",
                AsyncMock(return_value=fin_entries)), \
          patch("miniapp.backend.routes.arcana_today.today_user_tz",
@@ -753,7 +758,7 @@ def test_arcana_stats_computes_overall_and_months(client):
 
     # /arcana/stats обслуживает arcana_today (расширенная статистика).
     with patch("miniapp.backend.routes.arcana_today._pg_sessions_repo", mock_sess), \
-         patch("miniapp.backend.routes.arcana_today.rituals_all",
+         patch("miniapp.backend.routes.arcana_today._pg_rituals_repo.list_all",
                AsyncMock(return_value=[])), \
          patch("miniapp.backend.routes.arcana_today.load_clients_map",
                AsyncMock(return_value={})), \

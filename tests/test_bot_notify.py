@@ -224,7 +224,7 @@ def test_arcana_accuracy_verify_notifies(client):
     notify = AsyncMock(return_value=True)
     with patch("miniapp.backend.routes.arcana_today.notify_user", notify), \
          patch("miniapp.backend.routes.arcana_today._pg_sessions_repo", mock_sess_repo), \
-         patch("miniapp.backend.routes.arcana_today.rituals_all",
+         patch("miniapp.backend.routes.arcana_today._pg_rituals_repo.list_all",
                AsyncMock(return_value=[])), \
          patch("miniapp.backend.routes.arcana_today.get_user_notion_id",
                AsyncMock(return_value=FAKE_NOTION_USER)):

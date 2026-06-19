@@ -110,6 +110,13 @@ _PAYMENT_TO_CODE = {
     "бартер":      "barter",
 }
 
+# payment_source code → display label (reverse of _PAYMENT_TO_CODE)
+_CODE_TO_PAYMENT = {
+    "card":   "💳 Карта",
+    "cash":   "💵 Наличные",
+    "barter": "🔄 Бартер",
+}
+
 # result: "⏳ Не проверено" default; also accept codes directly
 _RESULT_TO_CODE = {
     "⏳ не проверено":  "unverified",
@@ -175,6 +182,8 @@ def _row_to_ritual(row) -> Ritual:
         structure=getattr(row, "structure", None) or "",
         notes=getattr(row, "notes", None) or None,
         photo_url=getattr(row, "photo_url", None) or None,
+        payment_source=_CODE_TO_PAYMENT.get(getattr(row, "payment_code", None)),
+        barter_what=getattr(row, "barter_what", None) or "",
     )
 
 
@@ -197,6 +206,7 @@ def _select_rituals():
     mp = magical_purpose.alias("mp")
     rp = ritual_place.alias("rp")
     et = engagement_type.alias("et")
+    ps = t_payment_source.alias("ps")
     return (
         select(
             rituals.c.id,
@@ -212,15 +222,18 @@ def _select_rituals():
             rituals.c.offerings,
             rituals.c.notes,
             rituals.c.duration_min,
+            rituals.c.barter_what,
             oc.c.code.label("outcome_code"),
             mp.c.code.label("purpose_code"),
             rp.c.code.label("place_code"),
             et.c.code.label("type_code"),
+            ps.c.code.label("payment_code"),
         )
         .outerjoin(oc,  rituals.c.outcome_id  == oc.c.id)
         .outerjoin(mp,  rituals.c.purpose_id  == mp.c.id)
         .outerjoin(rp,  rituals.c.place_id    == rp.c.id)
         .outerjoin(et,  rituals.c.type_id     == et.c.id)
+        .outerjoin(ps,  rituals.c.payment_src_id == ps.c.id)
         .order_by(rituals.c.occurred_at.desc().nullslast())
     )
 
