@@ -8,7 +8,7 @@ from datetime import datetime, timezone, timedelta
 
 from aiogram.types import Message
 from core.claude_client import ask_claude
-from core.notion_client import log_error
+from core.error_log import log_error
 from core.repos.finance_repo import _repo as _finance_repo
 from core.shared_handlers import get_user_tz
 from arcana.repos.pg_rituals_repo import PgRitualsRepo as RitualsRepo
@@ -212,7 +212,7 @@ async def handle_add_ritual(message: Message, text: str, user_notion_id: str = "
         # Если ритуал на 🤝 Платного клиента — сразу прикрепляем inline-оплату.
         pay_kb = None
         try:
-            from core.notion_client import client_get_type, should_skip_payment
+            from core.client_resolve import client_get_type, should_skip_payment
             client_type = await client_get_type(client_id) if client_id else None
             if client_id and not should_skip_payment(client_type):
                 from arcana.handlers.payment import payment_keyboard

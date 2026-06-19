@@ -10,7 +10,7 @@ from aiogram.types import Message, CallbackQuery
 from arcana.handlers.reactions import reaction_for
 from core.claude_client import ask_claude
 from core.config import config as _cfg
-from core.notion_client import log_error
+from core.error_log import log_error
 from core.utils import react
 
 router = Router()
@@ -208,7 +208,7 @@ async def _handle_tarot_correction(
     from arcana.pending_tarot import save_pending
     from arcana.tarot_loader import get_cards_context
     from core.claude_client import ask_claude
-    from core.notion_client import client_find
+    from core.client_resolve import client_find
     from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
     # ── Извлечь обновления полей (имя/вопрос/область) из правки ───────

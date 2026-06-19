@@ -9,7 +9,7 @@ from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 
 from core.claude_client import ask_claude
-from core.notion_client import log_error
+from core.error_log import log_error
 from arcana.repos.grimoire_repo import (
     GrimoireRepo, GrimoireEntry, RitualSummary,
 )

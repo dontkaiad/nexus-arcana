@@ -10,7 +10,7 @@ from typing import List, Optional
 from aiogram.types import Message
 
 from core.claude_client import ask_claude
-from core.notion_client import log_error
+from core.error_log import log_error
 from arcana.repos.pg_rituals_repo import PgRitualsRepo
 from arcana.repos.pg_sessions_repo import PgSessionsRepo
 from arcana.repos.pg_clients_repo import PgClientsRepo

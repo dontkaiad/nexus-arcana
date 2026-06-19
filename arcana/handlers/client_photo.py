@@ -17,7 +17,7 @@ from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKe
 
 from core.cloudinary_client import cloudinary_upload
 from core.message_pages import get_message_page
-from core.notion_client import find_or_create_client
+from core.client_resolve import find_or_create_client
 
 from arcana.pending_client_photo import (
     delete as drop_pending,

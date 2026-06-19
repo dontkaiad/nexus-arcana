@@ -13,7 +13,7 @@ from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKe
 
 from core.config import config
 from core.middleware import WhitelistMiddleware
-from core.notion_client import log_error
+from core.error_log import log_error
 from core.classifier import classify, process_item
 
 logging.basicConfig(
@@ -622,7 +622,7 @@ async def handle_text(msg: Message, user_notion_id: str = "") -> None:
         type_word = _type_m.group(4).lower()
         new_type = "💰 Доход" if type_word == "доход" else "💸 Расход"
         # Ищем последнюю запись противоположного типа (чтобы исправить на нужный)
-        from core.notion_client import finance_update
+        from core.repos.finance_repo import finance_update
         ok = await finance_update(
             target_type="expense" if type_word == "доход" else "income",
             field="type_",
@@ -649,7 +649,7 @@ async def handle_text(msg: Message, user_notion_id: str = "") -> None:
         last_fin = _last_finance_ts.get(msg.from_user.id, 0)
         if _time_now.time() - last_fin < 120:  # 2 минуты
             new_cat = _fin_edit_m.group(3).strip()
-            from core.notion_client import finance_update
+            from core.repos.finance_repo import finance_update
             ok = await finance_update(target_type="expense", field="category", new_value=new_cat)
             if not ok:
                 ok = await finance_update(target_type="income", field="category", new_value=new_cat)
@@ -1288,7 +1288,7 @@ async def on_arcana_choice(query: CallbackQuery, user_notion_id: str = "") -> No
             "Там я помогу с ритуалами, практикой и сеансами."
         )
     else:
-        from core.notion_client import _title, _status, _select, _relation
+        from core.props import _title, _status, _select, _relation
         from nexus.repos.tasks_repo import _repo
         props = {
             "Задача":    _title(text),
@@ -1407,7 +1407,7 @@ async def on_unknown_clarify(query: CallbackQuery, user_notion_id: str = "") -> 
         await query.answer("🛒 Добавляю в покупки")
 
     elif action == "task":
-        from core.notion_client import _title, _status, _select, _relation
+        from core.props import _title, _status, _select, _relation
         from nexus.repos.tasks_repo import _repo
         from nexus.handlers.tasks import last_record_set, _last_task_set
         props = {

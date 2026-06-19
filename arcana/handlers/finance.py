@@ -17,7 +17,7 @@ from aiogram.types import (
 
 from core.cash_register import compute_pnl, BOT_NEXUS, SALARY_CATEGORY
 from core.claude_client import ask_claude
-from core.notion_client import log_error
+from core.error_log import log_error
 from core.repos.finance_repo import _repo
 
 router = Router()

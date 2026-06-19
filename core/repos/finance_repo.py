@@ -226,3 +226,12 @@ async def _query_both(
 
 
 _repo = FinanceRepo()
+
+
+async def finance_update(target_type: str, field: str, new_value: str) -> bool:
+    """Update most-recent finance record of a type (expense/income). Routes to PG.
+
+    Релокейт-шим из notion_client (Notion-removal): просто делегирует в
+    FinanceRepo.update_last. Сохранён как функция ради совместимости вызывателей.
+    """
+    return await _repo.update_last(target_type, field, new_value)

@@ -8,7 +8,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Any, Dict
 
 from core.claude_client import ask_claude
-from core.notion_client import log_error
+from core.error_log import log_error
 from core.repos.finance_repo import _repo as _fin_repo
 from core.config import ARCANA_KEYWORDS
 from core.list_classifier import (
@@ -1088,7 +1088,7 @@ async def process_item(data: Dict[str, Any], original_text: str, msg, clarify: d
 
     # UPDATE - исправить последнюю финансовую запись
     if kind == "update":
-        from core.notion_client import finance_update
+        from core.repos.finance_repo import finance_update
         target = data.get("target", "expense")  # expense или income
         field = data.get("field", "source")  # source, category, amount
         new_value = data.get("new_value", "")

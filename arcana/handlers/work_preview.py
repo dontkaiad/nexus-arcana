@@ -32,7 +32,8 @@ from aiogram.types import (
 )
 
 from core.claude_client import ask_claude
-from core.notion_client import client_find, log_error  # noqa: F401  # client_find via mock.patch
+from core.client_resolve import client_find  # noqa: F401  # client_find via mock.patch
+from core.error_log import log_error
 from core.shared_handlers import get_user_tz
 from core.utils import cancel_button, react
 from arcana.repos.pg_works_repo import PgWorksRepo

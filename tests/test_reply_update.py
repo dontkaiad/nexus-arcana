@@ -84,7 +84,7 @@ async def test_session_reply_appends_interpretation():
 async def test_session_reply_client_name_resolves_and_sets_type():
     from arcana.repos.pg_sessions_repo import PgSessionsRepo
     with patch.object(PgSessionsRepo, "set_props", AsyncMock()) as m, \
-         patch("core.notion_client.find_or_create_client",
+         patch("core.client_resolve.find_or_create_client",
                AsyncMock(return_value=("99", False))) as m_resolve:
         applied = await ru.apply_updates(
             "3", "session", None, {"client_name": "Маша"}, "u-1",
@@ -100,7 +100,7 @@ async def test_session_reply_client_name_resolves_and_sets_type():
 async def test_session_client_name_fail_closed_no_user():
     from arcana.repos.pg_sessions_repo import PgSessionsRepo
     with patch.object(PgSessionsRepo, "set_props", AsyncMock()) as m, \
-         patch("core.notion_client.find_or_create_client", AsyncMock()) as m_resolve:
+         patch("core.client_resolve.find_or_create_client", AsyncMock()) as m_resolve:
         await ru.apply_updates("3", "session", None, {"client_name": "Маша"}, "")
     m_resolve.assert_not_called()   # без юзера клиента не резолвим
     m.assert_not_awaited()          # больше нечего писать → set_props не зовём

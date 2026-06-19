@@ -17,7 +17,8 @@ from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKe
 from aiogram import Router, F
 from core.claude_client import ask_claude, ask_claude_vision
 from nexus.handlers.utils import react
-from core.notion_client import log_error, _title, _number, _select, _date, _text
+from core.error_log import log_error
+from core.props import _title, _number, _select, _date, _text
 from core.repos.finance_repo import _repo
 from core.config import FINANCE_CATEGORIES as CATEGORIES
 

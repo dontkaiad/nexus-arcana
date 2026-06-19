@@ -6,7 +6,7 @@ import traceback as tb
 
 from aiogram.types import Message
 from core.claude_client import ask_claude
-from core.notion_client import log_error
+from core.error_log import log_error
 from arcana.repos.works_repo import WorksRepo
 
 logger = logging.getLogger("arcana.works")

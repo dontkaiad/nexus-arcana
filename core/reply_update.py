@@ -267,7 +267,7 @@ async def _apply_client(page_id: str, updates: Dict[str, Any]) -> Dict[str, Any]
         applied["Тип клиента"] = nt
         # Self-кеш в notion_client (PG-shim) мог измениться — сбросить best-effort.
         try:
-            from core.notion_client import _SELF_CLIENT_CACHE
+            from core.client_resolve import _SELF_CLIENT_CACHE
             _SELF_CLIENT_CACHE.clear()
         except Exception:
             pass
@@ -321,7 +321,7 @@ async def _apply_session(
         # fail-closed: привязка клиента требует юзера (find_or_create в его БД).
         if client_name and user_notion_id:
             try:
-                from core.notion_client import find_or_create_client
+                from core.client_resolve import find_or_create_client
                 client_id, _ = await find_or_create_client(
                     client_name, user_notion_id=user_notion_id,
                 )

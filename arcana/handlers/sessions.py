@@ -19,7 +19,7 @@ from aiogram.types import (
 
 from core.claude_client import ask_claude, ask_claude_vision
 from core.config import config as _cfg
-from core.notion_client import log_error
+from core.error_log import log_error
 from core.shared_handlers import get_user_tz
 from arcana.repos.sessions_repo import (
     SessionsRepo, TripletEntry, PrevSessionSnippet, SessionSearchResult,
@@ -481,7 +481,7 @@ async def _save_and_post_triplet(
     для платного клиента). Возвращает page_id."""
     from core.html_sanitize import sanitize_interpretation
     from core.html_for_telegram import html_to_telegram
-    from core.notion_client import client_get_type, should_skip_payment
+    from core.client_resolve import client_get_type, should_skip_payment
     from core.message_pages import save_message_page
 
     cards_en = _canon_cards_str(cards_text, deck or "Уэйт") or cards_text
@@ -655,7 +655,7 @@ async def handle_add_session(
             )
         else:
             # Личный расклад → автоматически на self-клиента «Кай (личный)».
-            from core.notion_client import resolve_self_client
+            from core.client_resolve import resolve_self_client
             client_id = await resolve_self_client(user_notion_id=user_notion_id)
             if not client_id:
                 # Fallback: ищем по имени из user_manager (legacy путь).
@@ -893,7 +893,7 @@ async def _handle_multi_session(
                 return
         else:
             # session_name пустой → self-сессия по умолчанию.
-            from core.notion_client import resolve_self_client
+            from core.client_resolve import resolve_self_client
             client_id = await resolve_self_client(user_notion_id=user_notion_id)
 
     if not client_id and not forced_is_personal:
@@ -1104,7 +1104,7 @@ async def _handle_multi_session(
     # Skip для self/бесплатных и для сессий, где ни одного триплета не сохранили.
     if first_page_id and client_id:
         try:
-            from core.notion_client import client_get_type, should_skip_payment
+            from core.client_resolve import client_get_type, should_skip_payment
             from arcana.handlers.payment import payment_keyboard
             ctype = await client_get_type(client_id)
             if not should_skip_payment(ctype):
@@ -1300,7 +1300,7 @@ async def cb_client_resolve_self(call: CallbackQuery) -> None:
     if pending.get("slug") != slug or pending.get("type") != "client_resolve_pending":
         return
     user_notion_id = pending.get("user_notion_id") or ""
-    from core.notion_client import resolve_self_client
+    from core.client_resolve import resolve_self_client
     cid = await resolve_self_client(user_notion_id=user_notion_id)
     await call.message.answer("🌟 Личная сессия · обрабатываю…")
     await _resume_multi_after_resolve(
@@ -1468,7 +1468,7 @@ async def handle_tarot_photo(message: Message, user_notion_id: str = "") -> None
         tz_offset = await get_user_tz(tg_id)
 
         # Личный расклад с фото — резолвим self-клиента (новый путь).
-        from core.notion_client import resolve_self_client
+        from core.client_resolve import resolve_self_client
         self_client_id: Optional[str] = await resolve_self_client(
             user_notion_id=user_notion_id
         )
