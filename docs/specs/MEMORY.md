@@ -1,5 +1,10 @@
 # MEMORY — модель данных Памяти
 
+> **Status: AS-BUILT SNAPSHOT at commit cf53a9e.** This documents the memory
+> subsystem *before* the RAG/embeddings rework and Notion-path unification.
+> It will be rewritten as a stable data-model contract once RAG lands. Kept
+> as an evolution baseline.
+
 > Источник истины — код, не Notion-спеки. Каждое утверждение проверяемо по
 > файлам из раздела «Свериться с кодом» в конце. Где код расходится с
 > ADR-0005 — задокументирован КОД, расхождение помечено явно.
@@ -66,8 +71,8 @@ down_revision `i9d0e1f2g3h4`. Зеркало в SQLAlchemy Core —
 - `scope` ∈ {`global`, `nexus`, `arcana`}. Маппинг bot_label→scope:
   `☀️ Nexus`→`nexus`, `🌒 Arcana`→`arcana`, иначе `global`
   (`pg_memory_repo.bot_to_scope`).
-- `source` ∈ {`manual`, `auto`}. На практике все записи через `save_memory`
-  пишутся с `"manual"` (см. ниже «Известные ограничения»).
+- `source` ∈ {`manual`, `auto`} по схеме, но все пути записи хардкодят
+  `"manual"` — `auto` на входе не появляется (см. #148).
 - `notion_id` в обычной записи = `None`; параметр `notion_id` у `add`
   задействован только бэкфиллом `scripts/backfill_memories.py` (маппинг на
   старые Notion-записи).
@@ -99,8 +104,8 @@ core/repos/pg_memory_repo.py → memories_table (PG)`.
 6. Side-effect: при категории `🦋 СДВГ` и новой записи — `_get_adhd_tip`
    (Sonnet, `config.model_sonnet`, temperature=0.7) шлёт совет.
 
-`value_text` при записи НЕ задаётся (ни `add`, ни `upsert` его не пишут) —
-всегда остаётся `''`. См. «Известные ограничения».
+Контракт записи: `value_text` ни одним путём записи не заполняется — для
+читателей всегда `''` (значение факта живёт в `fact_text`) (см. #146).
 
 ### Чтение
 Два режима:
@@ -115,7 +120,8 @@ core/repos/pg_memory_repo.py → memories_table (PG)`.
    `OR` из `ILIKE %term%` по `fact_text`, `key_name`, `related_to`;
    фильтр активности (`is_current=True`, `is_archived=False`); опционально
    `scope` (совпадение ИЛИ `global`) и `user_notion_id`; сорт
-   `created_at desc`. Это НЕ семантика — только substring/contains.
+   `created_at desc`. Контракт: это substring/contains-матч, НЕ семантика;
+   запрос не находит синонимы/парафразы (см. #147).
 
 Производные чтения:
 - `find_by_category(category, is_current, scope, user_notion_id, page_size)`
@@ -174,7 +180,7 @@ core/repos/pg_memory_repo.py → memories_table (PG)`.
    - Расхождение: `nexus/handlers/finance.py:_save_memory_entry` ВСЁ ЕЩЁ
      пишет бюджетную память в Notion (`NOTION_DB_MEMORY`, select-поля
      `Бот`/`Категория`/`Актуально`). Это параллельный путь записи мимо PG —
-     не соответствует «storage = PG». См. техдолг.
+     не соответствует «storage = PG» (см. #145).
 
 2. **`scope` вместо поля `Бот`.** Один столбец `scope`
    (`global`/`nexus`/`arcana`) заменил Notion-select `Бот`. Почему:
@@ -197,34 +203,8 @@ core/repos/pg_memory_repo.py → memories_table (PG)`.
    rejected. Таблиц `facts`/`observations` в коде/миграциях НЕТ.
    Trade-off по факту: проще (одна таблица, один репозиторий), но смешаны
    два паттерна доступа (точный ключ vs contains-поиск) в одном месте —
-   ровно тот минус, от которого ADR хотел уйти.
-
-## Известные ограничения / техдолг
-
-- **`value_text` — мёртвая колонка.** Есть в схеме и читается в
-  `Memory.value`, но НИ ОДИН путь записи (`_add_sync`, `_upsert_sync`) его
-  не заполняет — всегда `''`. Задуманная пара «точный key→value» (ADR
-  `facts`) фактически вырождена: и ключ, и значение, и текст живут в
-  `key_name`/`fact_text`.
-- **Нет embedding/семантики.** ADR-0001/0005 называют `observations`
-  источником для RAG, но в коде поиск только `ILIKE`-substring. Колонок
-  под эмбеддинги, pgvector, индексов сходства — нет. Семантический слой
-  НЕ реализован.
-- **Параллельная запись в Notion.** `_save_memory_entry`
-  (`nexus/handlers/finance.py`) пишет бюджетные записи в Notion-базу
-  `NOTION_DB_MEMORY` мимо PG-репозитория. Источник истины для бюджета
-  раздваивается (PG `memories` ⟷ Notion). Кандидат на унификацию.
-- **`source` фактически всегда `manual`.** Значение `auto` предусмотрено
-  схемой/дефолтом, но `save_memory`/`save_parsed` хардкодят `"manual"`;
-  отдельного потока записи с `source="auto"` в коде не найдено
-  (проверить, если появится авто-экстракция).
-- **`_resolve_alias` зависит от качества записей.** Канонизация имён —
-  regex по тексту существующих фактов; при «грязных» формулировках алиас
-  не разрезолвится (тихий fallback на исходную связь).
-- **Бюджетные категории внутри памяти.** `💰 Лимит`/`📥 Доход`/
-  `🔒 Обязательные`/`📋 Долги`/`🎯 Цели` живут в `memories`, но
-  концептуально это finance-конфиг (ADR-0005 «parked follow-up»). Вынос в
-  finance-модуль не сделан.
+   ровно тот минус, от которого ADR хотел уйти. Вырожденный артефакт этого
+   решения — незаполняемая `value_text` (см. #146).
 
 ---
 
