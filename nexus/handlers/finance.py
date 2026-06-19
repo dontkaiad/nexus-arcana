@@ -469,11 +469,8 @@ async def _show_free_remaining(message: Message, user_notion_id: str = "") -> No
 async def get_finance_period(start_date: str, end_date: str, label: str,
                              user_notion_id: str = "", show_daily_avg: bool = False) -> str:
     """Сводка за произвольный период. start_date/end_date = 'YYYY-MM-DD'."""
-    from core.config import config
-
-    db_id = os.environ.get("NOTION_DB_FINANCE") or config.nexus.db_finance
     records = await _repo.query_records(
-        date_from=start_date, date_to=end_date, page_size=200, db_id=db_id,
+        date_from=start_date, date_to=end_date, page_size=200,
     )
 
     total_expense = 0.0

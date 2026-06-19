@@ -85,29 +85,24 @@ MODEL_HAIKU  = "claude-haiku-4-5-20251001"
 MODEL_SONNET = "claude-sonnet-4-6"
 
 
+# Notion-removal: оставлены только db-id, которые ещё читают рантайм (как
+# backward-compat db_id для PG-репо) или backfill/migration-скрипты в scripts/.
+# Мёртвые NOTION_DB_* (memory/errors/page_reports/clients/rituals/stats/
+# notes-arcana/finance-arcana/grimoire/users) удалены — 0 читателей.
 @dataclass
 class NexusConfig:
     tg_token: str
-    db_finance: str
-    db_tasks: str
-    db_memory: str
-    db_notes: str
-    db_errors: str
-    page_reports: str = ""  # Родительская страница для отчётов (опционально)
+    db_finance: str   # runtime: _save_finance backward-compat db_id
+    db_tasks: str     # runtime: tasks_repo.create backward-compat db_id
+    db_notes: str     # runtime: handle_note backward-compat db_id
 
 
 @dataclass
 class ArcanaConfig:
     tg_token: str
-    db_clients: str
-    db_sessions: str
-    db_rituals: str
-    db_tasks: str
-    db_stats: str
-    db_notes: str
-    db_finance: str
-    db_works: str = ""
-    db_grimoire: str = ""
+    db_sessions: str  # scripts: migrate/normalize source db
+    db_tasks: str     # runtime: arcana lists fallback db_id
+    db_works: str = ""  # runtime: arcana lists db_id
 
 
 @dataclass
@@ -117,8 +112,7 @@ class AppConfig:
     anthropic_key: str
     nexus: NexusConfig
     arcana: ArcanaConfig
-    db_users: str = ""
-    db_lists: str = ""
+    db_lists: str = ""  # scripts: backfill_lists source db
     finance_categories: List[str] = field(default_factory=lambda: FINANCE_CATEGORIES)
     finance_sources: List[str]    = field(default_factory=lambda: FINANCE_SOURCES)
     finance_types: List[str]      = field(default_factory=lambda: FINANCE_TYPES)
@@ -131,9 +125,8 @@ class AppConfig:
 def load_config() -> AppConfig:
     return AppConfig(
         allowed_ids      = _id_list("ALLOWED_TELEGRAM_IDS"),
-        notion_token     = os.getenv("NOTION_TOKEN"),
+        notion_token     = os.getenv("NOTION_TOKEN"),  # scripts: notion_client read-adapter
         anthropic_key    = _require("ANTHROPIC_API_KEY"),
-        db_users         = _optional("NOTION_DB_USERS"),
         db_lists         = _optional("NOTION_DB_LISTS"),
         openai_key       = _optional("OPENAI_API_KEY"),
         miniapp_base_url = _optional("MINIAPP_BASE_URL", "https://core.heylark.dev"),
@@ -141,22 +134,13 @@ def load_config() -> AppConfig:
             tg_token     = _require("NEXUS_BOT_TOKEN"),
             db_finance   = _optional("NOTION_DB_FINANCE"),
             db_tasks     = _optional("NOTION_DB_TASKS"),
-            db_memory    = _optional("NOTION_DB_MEMORY"),
             db_notes     = _optional("NOTION_DB_NOTES"),
-            db_errors    = _optional("NOTION_DB_ERRORS"),
-            page_reports = _optional("NOTION_PAGE_REPORTS"),
         ),
         arcana = ArcanaConfig(
             tg_token    = _optional("ARCANA_BOT_TOKEN"),
-            db_clients  = _optional("NOTION_DB_CLIENTS"),
             db_sessions = _optional("NOTION_DB_SESSIONS"),
-            db_rituals  = _optional("NOTION_DB_RITUALS"),
             db_tasks    = _optional("NOTION_DB_ARCANA_TASKS"),
-            db_stats    = _optional("NOTION_DB_STATS"),
-            db_notes    = _optional("NOTION_DB_NOTES"),
-            db_finance  = _optional("NOTION_DB_FINANCE"),
             db_works    = _optional("NOTION_DB_WORKS"),
-            db_grimoire = _optional("NOTION_DB_GRIMOIRE"),
         ),
     )
 
