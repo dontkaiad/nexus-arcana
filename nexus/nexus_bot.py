@@ -140,25 +140,20 @@ async def cmd_help(msg: Message, user_notion_id: str = "") -> None:
 @dp.message(Command("tasks"))
 async def cmd_tasks(msg: Message, user_notion_id: str = "") -> None:
     """Задачи: СЕГОДНЯ + стрик + все остальные + СДВГ-совет."""
-    from core.notion_client import query_pages, _with_user_filter
-    from core.config import config
     from datetime import date as _date
     import random
+    from nexus.repos.tasks_repo import _repo
 
     uid = msg.from_user.id if msg.from_user else 0
 
-    # Все активные задачи
-    base_filter = {"and": [
-        {"property": "Статус", "status": {"does_not_equal": "Done"}},
-        {"property": "Статус", "status": {"does_not_equal": "Archived"}},
-        {"property": "Статус", "status": {"does_not_equal": "Complete"}},
-    ]}
-    filters = _with_user_filter(base_filter, user_notion_id)
-    all_tasks = await query_pages(
-        config.nexus.db_tasks, filters=filters,
-        sorts=[{"property": "Приоритет", "direction": "descending"}],
-        page_size=100,
-    )
+    # fail-closed: пустой user в active("") вернул бы чужие задачи
+    if not user_notion_id:
+        await msg.answer("⚠️ Не могу определить пользователя — задачи не показаны.")
+        return
+
+    # Все активные задачи из PG (active() исключает Done/Archived,
+    # сортит priority asc — urgent first, как делал Notion-запрос).
+    all_tasks = await _repo.active(user_notion_id=user_notion_id)
     if not all_tasks:
         await msg.answer("📭 Задач нет.")
         return
@@ -173,19 +168,17 @@ async def cmd_tasks(msg: Message, user_notion_id: str = "") -> None:
     other_items = []
 
     for t in all_tasks:
-        props = t["properties"]
-        title_parts = props.get("Задача", {}).get("title", [])
-        title = title_parts[0]["plain_text"] if title_parts else "—"
-        priority_raw = (props.get("Приоритет", {}).get("select") or {}).get("name", "Важно")
+        title = t.title or "—"
+        priority_raw = t.priority or "Важно"
         priority = priority_raw
         for _pk in _pri_icons:
             if _pk in priority_raw:
                 priority = _pk
                 break
-        category = (props.get("Категория", {}).get("select") or {}).get("name", "")
-        deadline_raw = (props.get("Дедлайн", {}).get("date") or {}).get("start", "")
-        reminder_raw = (props.get("Напоминание", {}).get("date") or {}).get("start", "")
-        repeat = (props.get("Повтор", {}).get("select") or {}).get("name", "")
+        category = t.category or ""
+        deadline_raw = t.deadline or ""
+        reminder_raw = t.reminder or ""
+        repeat = t.repeat or ""
         is_repeat = repeat and repeat != "Нет"
         cat_icon = category[0] if category else "📌"
 
