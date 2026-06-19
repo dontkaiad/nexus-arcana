@@ -2736,16 +2736,15 @@ async def _build_today_digest(uid: int, user_notion_id: str = "", greeting: str 
                     today_str_b = today_moscow()
                     month_start = today_str_b[:7] + "-01"
                     try:
-                        expense_recs = await db_query(config.nexus.db_finance, filter_obj={"and": [
-                            {"property": "Тип", "select": {"equals": "💸 Расход"}},
-                            {"property": "Дата", "date": {"on_or_after": month_start}},
-                            {"property": "Дата", "date": {"on_or_before": today_str_b}},
-                        ]}, page_size=500)
+                        from core.repos.pg_finance_repo import PgNexusBudgetRepo
+                        expense_recs = await PgNexusBudgetRepo().query_month(
+                            today_str_b[:7], type_filter="expense",
+                            user_notion_id=user_notion_id,
+                        )
                         by_cat_b: dict[str, float] = {}
-                        for r in expense_recs:
-                            cat_r = (r["properties"].get("Категория", {}).get("select") or {}).get("name", "")
-                            amt_r = r["properties"].get("Сумма", {}).get("number") or 0
-                            by_cat_b[cat_r] = by_cat_b.get(cat_r, 0) + amt_r
+                        for e in expense_recs:
+                            cat_r = e.category or ""
+                            by_cat_b[cat_r] = by_cat_b.get(cat_r, 0) + (e.amount or 0)
                     except Exception:
                         by_cat_b = {}
 
@@ -2837,16 +2836,15 @@ async def handle_tasks_today(message: Message, user_notion_id: str = "") -> None
 
 
 async def _check_yesterday_expenses(user_notion_id: str, tz_offset: int) -> bool:
-    """Return True if there were any expenses recorded yesterday."""
-    from core.config import config
+    """Return True if there were any expenses recorded yesterday (PG nexus_budget)."""
+    from core.repos.pg_finance_repo import PgNexusBudgetRepo
     user_tz = timezone(timedelta(hours=tz_offset))
     yesterday = (datetime.now(user_tz) - timedelta(days=1)).strftime("%Y-%m-%d")
     try:
-        recs = await db_query(config.nexus.db_finance, filter_obj={"and": [
-            {"property": "Тип", "select": {"equals": "💸 Расход"}},
-            {"property": "Дата", "date": {"equals": yesterday}},
-        ]}, page_size=1)
-        return len(recs) > 0
+        recs = await PgNexusBudgetRepo().query_month(
+            yesterday[:7], type_filter="expense", user_notion_id=user_notion_id,
+        )
+        return any((e.date or "")[:10] == yesterday for e in recs)
     except Exception as e:
         logger.warning("_check_yesterday_expenses error: %s", e)
         return True  # assume yes on error — don't nag
