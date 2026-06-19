@@ -224,7 +224,18 @@ session_cache.db
 
 # дев-дампы Postgres (реальные данные, не коммитить)
 *.dump
+*.sql.dump
 dev-db.dump
+
+# Secrets hardening — любые env-варианты (.env.prod/.env.staging/...) кроме шаблонов
+.env.*
+!.env.example
+!miniapp/frontend/.env.example
+# Приватные ключи и сертификаты
+*.key
+*.pem
+*.p12
+*.pfx
 
 # случайно подтянутое — не коммитить
 KarinaLark-*.pdf
