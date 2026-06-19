@@ -1,7 +1,7 @@
 # TASKS — data-model contract (Nexus ✅ Задачи)
 
-Conforms to: 903e657
-Update this spec in the same PR that changes the tasks data model.
+Code conforms to: e938907. This spec describes the tasks data model as of
+that commit; update it in the same PR that changes the model.
 
 > Contract, not snapshot. Describes the persistent model, the guarantees of
 > each operation, and the invariants — the things that should not drift with
@@ -29,7 +29,7 @@ down_revision `g7b8c9d0e1f2`). SQLAlchemy Core mirror:
 | Column | Type | Constraints / default |
 |---|---|---|
 | `id` | BigInteger | PK, autoincrement |
-| `notion_id` | Text | UNIQUE (nullable) — backfill cross-reference |
+| `notion_id` | Text | UNIQUE (nullable) — legacy Notion-migration artifact; not written by the current create path; slated for removal (see #149) |
 | `title` | Text | NOT NULL |
 | `status_id` | SmallInteger | NOT NULL, FK → `task_status.id` |
 | `repeat_id` | SmallInteger | FK → `task_repeat.id` (nullable) |
@@ -51,13 +51,14 @@ Indexes: `idx_tasks_user_notion_id` (user_notion_id),
 ### Lookup tables (`id SMALLINT PK`, `code TEXT UNIQUE`)
 
 `task_status`, `task_repeat`, `task_day_of_week`, `task_priority`,
-`task_category`. Codes are seeded in the migration `upgrade()` and cached
-once per process (`pg_tasks_repo._load_lookups_sync`). The seeded code set is
-owned by the migration — do not restate it here; examples:
-- `task_status`: `Not started`, `In progress`, `Done`, `Archived`.
-- `task_repeat`: `Нет`, `Ежедневно`, `Еженедельно`, `Ежемесячно`.
-- `task_priority`: e.g. `🟡 Важно`, `🔴 Срочно` (3 codes).
-- `task_category`: e.g. `👥 Люди`, `💳 Прочее`, `🐾 Коты` (15 codes).
+`task_category`. The code set is owned and seeded by the migration
+`upgrade()` (the source of truth) and cached once per process
+(`pg_tasks_repo._load_lookups_sync`) — do not restate it in full here.
+Examples below are non-exhaustive; see the migration for the full seeded set:
+- `task_status`: `Not started`, `In progress`, `Done`, `Archived` (examples, non-exhaustive — see migration for the full seeded set).
+- `task_repeat`: `Нет`, `Ежедневно`, `Еженедельно`, `Ежемесячно` (examples, non-exhaustive — see migration for the full seeded set).
+- `task_priority`: `🟡 Важно`, `🔴 Срочно` (examples, non-exhaustive — see migration for the full seeded set).
+- `task_category`: `👥 Люди`, `💳 Прочее`, `🐾 Коты` (examples, non-exhaustive — see migration for the full seeded set).
 
 ### Domain object
 
@@ -130,8 +131,12 @@ extracts/normalizes them — a leftover of the Notion-era interface.
   persisted to `reminder`, and scheduled
   (`active_recurring_without_reminder`). Pass 1 reschedules future
   reminders; pass 2 advances/handles past-due ones.
-- **Streaks are not in `tasks`.** Two independent SQLite-backed systems:
-  - per-task streak — `core/task_streaks.py` (`data/nexus_streaks.db`,
+- **Streaks are not in `tasks`.** They live in two SQLite tables in
+  `data/nexus_streaks.db` (per-task + global daily); verified no other streak
+  writer in the codebase as of e938907 (only `core/task_streaks.py` writes
+  `task_streaks`, and `nexus/handlers/streaks.py` writes `streaks` plus a
+  `streak_calls` log; arcana has none, the Mini App only delegates to these):
+  - per-task streak — `core/task_streaks.py` (table `task_streaks`,
     PK `(user_id, task_id)`); extended only for repeating tasks. Rule:
     same-day completion is a no-op; completion exactly one period after the
     last extends `current` (`best = max`); otherwise `current` resets to 1.
