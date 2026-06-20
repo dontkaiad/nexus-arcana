@@ -63,7 +63,7 @@ async def notify_user(tg_id: int, text: str, bot: str = "nexus") -> bool:
 async def notify_log_group(text: str, thread_id: str = "") -> bool:
     """Отправить text в общую TG-группу логов через ОБЩИЙ лог-бот.
 
-    Токен лог-бота (LOG_BOT_TOKEN) и id группы (LOG_CHAT_ID) берутся из .env.
+    Токен лог-бота (TG_LOG_BOT_TOKEN) и id группы (TG_LOG_CHAT_ID) берутся из .env.
     Если что-то из них пусто — фича выключена: тихо возвращаем False, прод
     работает как раньше. thread_id — message_thread_id топика форума (per-bot);
     пусто → шлём без топика.
@@ -103,7 +103,7 @@ async def notify_startup(bot: str) -> bool:
 
     Текст и топик форума выбираются по bot ('nexus'|'arcana') — каждый бот
     в свой топик. Fail-safe: переиспользует notify_log_group, который сам
-    no-op'ит без LOG_BOT_TOKEN/LOG_CHAT_ID, поэтому старт бота НЕ падает,
+    no-op'ит без TG_LOG_BOT_TOKEN/TG_LOG_CHAT_ID, поэтому старт бота НЕ падает,
     если лог-группа не настроена. Старт важнее лога.
     """
     if bot == "arcana":

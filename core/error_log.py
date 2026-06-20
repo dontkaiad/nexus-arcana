@@ -61,7 +61,7 @@ async def log_error(
     )
     # Зеркалим в общую TG-группу логов (если включено в .env). Лениво
     # импортим sender, чтобы избежать циклов импорта; sender сам no-op'ит
-    # когда LOG_BOT_TOKEN/LOG_CHAT_ID пусты. Логирование ошибки не должно
+    # когда TG_LOG_BOT_TOKEN/TG_LOG_CHAT_ID пусты. Логирование ошибки не должно
     # само бросать — оборачиваем в широкий guard.
     try:
         from core.bot_notify import notify_log_group

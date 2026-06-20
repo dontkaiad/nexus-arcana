@@ -100,7 +100,7 @@ class StructuredErrorHandler(logging.Handler):
         # Зеркалим непойманную ошибку в общую TG-группу логов (за дебаунс-гейтом
         # выше — не чаще раза в 5 мин на одинаковую ошибку). emit() синхронный,
         # notify_log_group async → fire-and-forget на running loop; нет loop →
-        # тихий скип. notify_log_group сам no-op'ит без LOG_BOT_TOKEN. Всё в
+        # тихий скип. notify_log_group сам no-op'ит без TG_LOG_BOT_TOKEN. Всё в
         # guard: сбой зеркала не должен ломать логирование.
         try:
             from core.bot_notify import notify_log_group

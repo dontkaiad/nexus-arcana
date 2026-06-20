@@ -1,11 +1,11 @@
 """Тесты отправки ошибок Nexus/Arcana в общую TG-группу логов.
 
-Развилка Б: шлём токеном ОБЩЕГО лог-бота (LOG_BOT_TOKEN) в группу
-(LOG_CHAT_ID), Nexus и Arcana — в свои топики форума (per-bot).
+Развилка Б: шлём токеном ОБЩЕГО лог-бота (TG_LOG_BOT_TOKEN) в группу
+(TG_LOG_CHAT_ID), Nexus и Arcana — в свои топики форума (per-bot).
 
 Покрываем:
 - notify_log_group постит в группу с message_thread_id и токеном лог-бота;
-- пустой LOG_BOT_TOKEN → не шлёт, не падает (фича опциональна);
+- пустой TG_LOG_BOT_TOKEN → не шлёт, не падает (фича опциональна);
 - сетевой сбой проглатывается → False;
 - log_error роутит nexus→thread_nexus, arcana→thread_arcana.
 """
@@ -83,7 +83,7 @@ async def test_notify_log_group_no_thread_omits_field():
 
 @pytest.mark.asyncio
 async def test_notify_log_group_disabled_when_no_token():
-    """Пустой LOG_BOT_TOKEN → фича выключена: не шлёт, не падает."""
+    """Пустой TG_LOG_BOT_TOKEN → фича выключена: не шлёт, не падает."""
     from core import bot_notify
     _CaptureClient.captured = {}
     with patch.object(bot_notify.config, "log_bot_token", ""), \
@@ -193,7 +193,7 @@ async def test_notify_startup_routes_per_bot():
 
 @pytest.mark.asyncio
 async def test_notify_startup_disabled_when_no_token_does_not_raise():
-    """Без LOG_BOT_TOKEN старт проходит: notify_startup no-op → False, не падает."""
+    """Без TG_LOG_BOT_TOKEN старт проходит: notify_startup no-op → False, не падает."""
     from core import bot_notify
     with patch.object(bot_notify.config, "log_bot_token", ""), \
          patch.object(bot_notify.config, "log_chat_id", ""):
