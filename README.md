@@ -55,4 +55,4 @@ my AI/LLM engineering proving ground. Built AI-augmented: I own the architecture
 UX, and review; execution is delegated under detailed specs, and every change ships with a
 green test suite.
 
-Bots: [@nexus_kailark_bot](https://t.me/nexus_kailark_bot) · [@arcana_kailark_bot](https://t.me/arcana_kailark_bot) — by Kai Lark ([@hey_lark](https://t.me/hey_lark))
+Two Telegram bots — **☀️ Nexus** and **🌒 Arcana** — by Kai Lark ([@hey_lark](https://t.me/hey_lark))
