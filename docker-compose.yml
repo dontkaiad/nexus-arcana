@@ -27,6 +27,14 @@ services:
       db:
         condition: service_healthy
     restart: unless-stopped
+    # heartbeat: unhealthy если /tmp/heartbeat протух (процесс завис/умер).
+    # $$ → литеральный $ после compose-интерполяции.
+    healthcheck:
+      test: ["CMD-SHELL", "test $$(( $$(date +%s) - $$(cat /tmp/heartbeat) )) -lt 90"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 40s
 
   arcana:
     build: .
@@ -38,6 +46,14 @@ services:
       db:
         condition: service_healthy
     restart: unless-stopped
+    # heartbeat: unhealthy если /tmp/heartbeat протух (процесс завис/умер).
+    # $$ → литеральный $ после compose-интерполяции.
+    healthcheck:
+      test: ["CMD-SHELL", "test $$(( $$(date +%s) - $$(cat /tmp/heartbeat) )) -lt 90"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 40s
 
 volumes:
   pgdata:

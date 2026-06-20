@@ -5,6 +5,7 @@ from aiogram.client.default import DefaultBotProperties
 from core.config import config
 from core.middleware import WhitelistMiddleware
 from core.bot_notify import notify_startup
+from core.heartbeat import start_heartbeat
 from arcana.handlers.base import router
 from arcana.handlers.memory import router as memory_router
 from arcana.handlers.lists import router as lists_router
@@ -396,6 +397,7 @@ async def main():
 
     async def _on_startup(**kwargs) -> None:
         await notify_startup("arcana")  # стартовый пинг в лог-группу (fail-safe)
+        start_heartbeat()  # фоновый heartbeat для docker healthcheck
 
     dp.startup.register(_on_startup)
     await dp.start_polling(bot)
