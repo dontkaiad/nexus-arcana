@@ -14,6 +14,7 @@ from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKe
 from core.config import config
 from core.middleware import WhitelistMiddleware
 from core.error_log import log_error
+from core.bot_notify import notify_startup
 from core.classifier import classify, process_item
 
 logging.basicConfig(
@@ -1548,6 +1549,7 @@ async def main() -> None:
 
     async def _on_startup(**kwargs) -> None:
         await restore_reminders_on_startup()
+        await notify_startup("nexus")  # стартовый пинг в лог-группу (fail-safe)
 
     dp.startup.register(_on_startup)
     await dp.start_polling(bot, allowed_updates=["message", "callback_query"])

@@ -4,6 +4,7 @@ from aiogram.types import Message, CallbackQuery
 from aiogram.client.default import DefaultBotProperties
 from core.config import config
 from core.middleware import WhitelistMiddleware
+from core.bot_notify import notify_startup
 from arcana.handlers.base import router
 from arcana.handlers.memory import router as memory_router
 from arcana.handlers.lists import router as lists_router
@@ -393,6 +394,10 @@ async def main():
     except ImportError:
         logger.warning("apscheduler not installed — monthly reminder disabled")
 
+    async def _on_startup(**kwargs) -> None:
+        await notify_startup("arcana")  # стартовый пинг в лог-группу (fail-safe)
+
+    dp.startup.register(_on_startup)
     await dp.start_polling(bot)
 
 if __name__ == "__main__": asyncio.run(main())

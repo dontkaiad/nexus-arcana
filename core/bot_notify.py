@@ -10,6 +10,8 @@
 from __future__ import annotations
 
 import logging
+import socket
+from datetime import datetime, timezone
 from html import escape as _esc
 
 import httpx
@@ -94,6 +96,27 @@ async def notify_log_group(text: str, thread_id: str = "") -> bool:
     except Exception as e:
         logger.warning("notify_log_group failed: %s", e)
         return False
+
+
+async def notify_startup(bot: str) -> bool:
+    """Стартовый пинг в общую TG-группу логов (как klgpff «поднялся»).
+
+    Текст и топик форума выбираются по bot ('nexus'|'arcana') — каждый бот
+    в свой топик. Fail-safe: переиспользует notify_log_group, который сам
+    no-op'ит без LOG_BOT_TOKEN/LOG_CHAT_ID, поэтому старт бота НЕ падает,
+    если лог-группа не настроена. Старт важнее лога.
+    """
+    if bot == "arcana":
+        label, thread = "🌒 <b>Arcana</b>", config.log_thread_arcana
+    else:
+        label, thread = "☀️ <b>Nexus</b>", config.log_thread_nexus
+    try:
+        host = socket.gethostname()
+    except Exception:
+        host = "?"
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    text = f"{label} поднялся\n<code>{_esc(host)}</code> · {now}"
+    return await notify_log_group(text, thread)
 
 
 async def clear_task_reminder(task_id: str, bot: str = "nexus") -> bool:

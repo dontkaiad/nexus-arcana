@@ -164,3 +164,38 @@ async def test_log_error_never_raises_on_send_failure():
     with patch.object(bot_notify, "notify_log_group", _boom):
         ok = await error_log.log_error("boom", "processing_error")
     assert ok is True  # log_error всё равно вернул True
+
+
+# ── notify_startup (стартовый пинг «поднялся») ───────────────────────────────
+
+@pytest.mark.asyncio
+async def test_notify_startup_routes_per_bot():
+    """nexus → log_thread_nexus, arcana → log_thread_arcana."""
+    from core import bot_notify
+    calls: list = []
+
+    async def _fake_send(text, thread_id=""):
+        calls.append({"text": text, "thread": thread_id})
+        return True
+
+    with patch.object(bot_notify.config, "log_thread_nexus", "111"), \
+         patch.object(bot_notify.config, "log_thread_arcana", "222"), \
+         patch.object(bot_notify, "notify_log_group", _fake_send):
+        await bot_notify.notify_startup("nexus")
+        await bot_notify.notify_startup("arcana")
+
+    assert calls[0]["thread"] == "111"
+    assert "Nexus" in calls[0]["text"]
+    assert "поднялся" in calls[0]["text"]
+    assert calls[1]["thread"] == "222"
+    assert "Arcana" in calls[1]["text"]
+
+
+@pytest.mark.asyncio
+async def test_notify_startup_disabled_when_no_token_does_not_raise():
+    """Без LOG_BOT_TOKEN старт проходит: notify_startup no-op → False, не падает."""
+    from core import bot_notify
+    with patch.object(bot_notify.config, "log_bot_token", ""), \
+         patch.object(bot_notify.config, "log_chat_id", ""):
+        ok = await bot_notify.notify_startup("nexus")
+    assert ok is False
