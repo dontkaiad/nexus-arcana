@@ -7,7 +7,7 @@
 
 > Все примеры — production-код. Личные данные (профиль пользователя, имена
 > клиентов, суммы) в этом документе обобщены/заменены плейсхолдерами; в коде
-> они тянутся из Notion в рантайме.
+> они тянутся из PostgreSQL в рантайме.
 
 ---
 
@@ -270,7 +270,7 @@ Few-shot — основной приём структурированных па
 ### 9.1 Whitelist spell-correction
 - **`core/preprocess.py`**: Haiku исправляет опечатки, но в промпт инжектится
   whitelist «НИКОГДА не исправляй»: 78 RU-карт Таро + ~30 эзо-терминов + **имена
-  клиентов из Notion**. SQLite-кеш whitelist, `TTL=3600s` (`:37`); при создании
+  клиентов из PostgreSQL**. SQLite-кеш whitelist, `TTL=3600s` (`:37`); при создании
   клиента — `invalidate_whitelist` (`:126`), иначе свежее имя «исправится».
 - Реальный баг, который это чинит (`tests/test_preprocess.py:48-60`): Haiku
   превращал имя клиента в нарицательное слово. Whitelist это блокирует.
@@ -333,7 +333,7 @@ parametrize разворачивает счёт). AI-специфичные:
 | `tests/test_tip_validation.py` | анти-плейсхолдер, границы длины, retry→fallback, гигиена кеша | Behavioral eval качества генерации |
 | `tests/test_lists_v1_2.py` | `max_tokens >= 2000` для длинных списков | Регрессия на обрезание вывода |
 | `tests/test_lists_parser_tech_category.py` | few-shot фиксит 💻 Техника vs 💻 Подписки | Eval против конкретной галлюцинации |
-| `tests/test_grimoire_parse.py` | невалидный JSON Sonnet → эвристический fallback пишет в Notion | Graceful degradation |
+| `tests/test_grimoire_parse.py` | невалидный JSON Sonnet → эвристический fallback пишет в PG | Graceful degradation |
 | `tests/test_arcana_memory.py` | auto-suggest на 3-м повторении; только нужные интенты | Behavioral trigger памяти |
 
 - **Почему круто:** модели тестируются как **контракты** — статически (где какая
