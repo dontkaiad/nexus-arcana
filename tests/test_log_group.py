@@ -199,3 +199,121 @@ async def test_notify_startup_disabled_when_no_token_does_not_raise():
          patch.object(bot_notify.config, "log_chat_id", ""):
         ok = await bot_notify.notify_startup("nexus")
     assert ok is False
+
+
+# ── StructuredErrorHandler → мост непойманных исключений в группу ─────────────
+
+def _make_record(name: str = "aiogram.event", msg: str = "boom", exc: bool = True):
+    """Сконструировать LogRecord уровня ERROR (опц. с traceback)."""
+    import logging as _logging
+    import sys
+    exc_info = None
+    if exc:
+        try:
+            raise ValueError("kaboom")
+        except ValueError:
+            exc_info = sys.exc_info()
+    return _logging.LogRecord(
+        name=name, level=_logging.ERROR, pathname=__file__, lineno=1,
+        msg=msg, args=(), exc_info=exc_info,
+    )
+
+
+@pytest.mark.asyncio
+async def test_uncaught_exception_mirrors_to_group():
+    """Непойманное исключение (root ERROR) → зеркалится в свой топик бота."""
+    import asyncio
+    from core import logging_notion, error_log
+    logging_notion._recent.clear()
+    sent: list = []
+
+    async def _fake(text, thread_id=""):
+        sent.append({"text": text, "thread": thread_id})
+        return True
+
+    with patch.object(error_log.config, "log_thread_nexus", "111"), \
+         patch("core.bot_notify.notify_log_group", _fake):
+        h = logging_notion.StructuredErrorHandler(bot_label="☀️ Nexus")
+        h.emit(_make_record(exc=True))
+        await asyncio.sleep(0.02)  # дать fire-and-forget таску выполниться
+
+    assert len(sent) == 1
+    assert sent[0]["thread"] == "111"          # роутинг по self.bot_label
+    assert "Nexus" in sent[0]["text"]
+    assert "uncaught" in sent[0]["text"]
+
+
+@pytest.mark.asyncio
+async def test_uncaught_arcana_routes_to_arcana_thread():
+    import asyncio
+    from core import logging_notion, error_log
+    logging_notion._recent.clear()
+    sent: list = []
+
+    async def _fake(text, thread_id=""):
+        sent.append({"text": text, "thread": thread_id})
+        return True
+
+    with patch.object(error_log.config, "log_thread_arcana", "222"), \
+         patch("core.bot_notify.notify_log_group", _fake):
+        h = logging_notion.StructuredErrorHandler(bot_label="🌒 Arcana")
+        h.emit(_make_record(exc=True))
+        await asyncio.sleep(0.02)
+
+    assert sent[0]["thread"] == "222"
+    assert "Arcana" in sent[0]["text"]
+
+
+@pytest.mark.asyncio
+async def test_debounce_suppresses_repeat_to_group():
+    """Одинаковая ошибка в дебаунс-окне → в группу уходит только раз."""
+    import asyncio
+    from core import logging_notion
+    logging_notion._recent.clear()
+    sent: list = []
+
+    async def _fake(text, thread_id=""):
+        sent.append(1)
+        return True
+
+    with patch("core.bot_notify.notify_log_group", _fake):
+        h = logging_notion.StructuredErrorHandler(bot_label="☀️ Nexus")
+        h.emit(_make_record(name="aiogram.event", msg="same boom", exc=False))
+        h.emit(_make_record(name="aiogram.event", msg="same boom", exc=False))
+        await asyncio.sleep(0.02)
+
+    assert len(sent) == 1  # второй вызов погашен дебаунсом
+
+
+@pytest.mark.asyncio
+async def test_sender_failure_does_not_break_emit():
+    """Сбой отправки в группу не валит emit (важнее логирование)."""
+    import asyncio
+    from core import logging_notion
+    logging_notion._recent.clear()
+
+    async def _boom(text, thread_id=""):
+        raise RuntimeError("network down")
+
+    with patch("core.bot_notify.notify_log_group", _boom):
+        h = logging_notion.StructuredErrorHandler(bot_label="☀️ Nexus")
+        # emit не должен бросить
+        assert h.emit(_make_record(exc=True)) is None
+        await asyncio.sleep(0.02)  # таск падает и тихо проглатывается
+
+
+def test_emit_no_running_loop_silent_skip():
+    """Нет running loop (sync-контекст) → тихий скип, не краш, не шлёт."""
+    from core import logging_notion
+    logging_notion._recent.clear()
+    ran: list = []
+
+    async def _fake(text, thread_id=""):
+        ran.append(1)  # тело корутины НЕ должно выполниться
+        return True
+
+    with patch("core.bot_notify.notify_log_group", _fake):
+        h = logging_notion.StructuredErrorHandler(bot_label="☀️ Nexus")
+        # вызов вне event loop — emit не падает
+        assert h.emit(_make_record(exc=True)) is None
+    assert ran == []  # корутина закрыта, не запланирована
