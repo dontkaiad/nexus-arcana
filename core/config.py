@@ -120,6 +120,13 @@ class AppConfig:
     model_sonnet: str = MODEL_SONNET
     openai_key: str = ""
     miniapp_base_url: str = "https://core.heylark.dev"
+    # ── Общая TG-группа логов (общий лог-бот). Всё опционально:
+    # если token/chat пусты — отправка ошибок в группу выключена, бот
+    # стартует и работает как раньше. Топики форума — per-bot.
+    log_bot_token: str = ""
+    log_chat_id: str = ""
+    log_thread_nexus: str = ""
+    log_thread_arcana: str = ""
 
 
 def load_config() -> AppConfig:
@@ -130,6 +137,10 @@ def load_config() -> AppConfig:
         db_lists         = _optional("NOTION_DB_LISTS"),
         openai_key       = _optional("OPENAI_API_KEY"),
         miniapp_base_url = _optional("MINIAPP_BASE_URL", "https://core.heylark.dev"),
+        log_bot_token    = _optional("LOG_BOT_TOKEN"),
+        log_chat_id      = _optional("LOG_CHAT_ID"),
+        log_thread_nexus = _optional("LOG_THREAD_ID_NEXUS"),
+        log_thread_arcana = _optional("LOG_THREAD_ID_ARCANA"),
         nexus = NexusConfig(
             tg_token     = _require("NEXUS_BOT_TOKEN"),
             db_finance   = _optional("NOTION_DB_FINANCE"),

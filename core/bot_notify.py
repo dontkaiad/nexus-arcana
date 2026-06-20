@@ -58,6 +58,44 @@ async def notify_user(tg_id: int, text: str, bot: str = "nexus") -> bool:
         return False
 
 
+async def notify_log_group(text: str, thread_id: str = "") -> bool:
+    """Отправить text в общую TG-группу логов через ОБЩИЙ лог-бот.
+
+    Токен лог-бота (LOG_BOT_TOKEN) и id группы (LOG_CHAT_ID) берутся из .env.
+    Если что-то из них пусто — фича выключена: тихо возвращаем False, прод
+    работает как раньше. thread_id — message_thread_id топика форума (per-bot);
+    пусто → шлём без топика.
+
+    Никогда не бросает: сбой отправки лога не должен валить обработку ошибки.
+    Возвращает True если Telegram принял сообщение.
+    """
+    token = config.log_bot_token
+    chat_id = config.log_chat_id
+    if not token or not chat_id:
+        return False
+    payload = {
+        "chat_id": chat_id,
+        "text": text,
+        "parse_mode": "HTML",
+        "disable_web_page_preview": True,
+    }
+    if thread_id:
+        try:
+            payload["message_thread_id"] = int(thread_id)
+        except (TypeError, ValueError):
+            pass
+    try:
+        async with httpx.AsyncClient(timeout=5) as client:
+            resp = await client.post(_API.format(token=token), json=payload)
+        if resp.status_code != 200:
+            logger.warning("notify_log_group: %s %s", resp.status_code, resp.text[:200])
+            return False
+        return True
+    except Exception as e:
+        logger.warning("notify_log_group failed: %s", e)
+        return False
+
+
 async def clear_task_reminder(task_id: str, bot: str = "nexus") -> bool:
     """Погасить живую плашку-напоминание задачи в чате.
 
