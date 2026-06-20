@@ -72,7 +72,7 @@ a nullable `client_id` FK pointing back to it; nobody duplicates client identity
 the bot extracts a client name from a message, `core/client_resolve.py` resolves-or-
 creates exactly one row and hands back its id ([CLIENTS spec](specs/CLIENTS.md)).
 User identity is the same shape one level up — `core_identity` is authoritative, keyed
-by the page id every other table references ([ADR-0007](CASES/ADR-0007-identity-pg.md)).
+by the page id every other table references ([ADR-0007](CASES/0007-identity-pg.md)).
 
 **Alternatives rejected.** Denormalizing client fields onto each event record (fast
 reads, but every rename/retype becomes a migration and the data drifts), and a generic

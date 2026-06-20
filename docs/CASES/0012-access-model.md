@@ -1,4 +1,4 @@
-# ADR-0007 — Access model: single owner, deferred guests, calendar visibility tiers
+# ADR-0012 — Access model: single owner, deferred guests, calendar visibility tiers
 
 - **Status:** Accepted
 - **Date:** 2026-06-13
