@@ -274,7 +274,7 @@ async def restore_reminders_on_startup() -> None:
                     title = task.title or "Задача"
                     reminder_start = task.reminder
                     if reminder_start:
-                        await _schedule_reminder(tg_id, title, reminder_start[:16], task_id, tz_offset)
+                        await _schedule_reminder(tg_id, title, _to_local_wall(reminder_start, tz_offset), task_id, tz_offset)
                         restored += 1
                 except Exception as e:
                     logger.error("restore pass1: task %s error: %s", task.id, e)
@@ -292,13 +292,13 @@ async def restore_reminders_on_startup() -> None:
                     if repeat == "Нет":
                         # ── Одноразовая задача — отправить "пропущено" СРАЗУ ──
                         try:
-                            _rs = _ensure_datetime(reminder_start[:16])
+                            _rs = _ensure_datetime(_to_local_wall(reminder_start, tz_offset))
                             rem_dt = datetime.strptime(_rs, "%Y-%m-%dT%H:%M").replace(
                                 tzinfo=timezone(timedelta(hours=tz_offset))
                             )
                             missed_time = rem_dt.strftime("%d.%m в %H:%M")
                         except ValueError:
-                            missed_time = reminder_start[:16]
+                            missed_time = _to_local_wall(reminder_start, tz_offset)
 
                         try:
                             await _repo.set_in_progress(task_id)
@@ -323,13 +323,13 @@ async def restore_reminders_on_startup() -> None:
                     else:
                         # ── Повторяющаяся задача — уведомить + сдвинуть ──
                         try:
-                            _rs = _ensure_datetime(reminder_start[:16])
+                            _rs = _ensure_datetime(_to_local_wall(reminder_start, tz_offset))
                             rem_dt = datetime.strptime(_rs, "%Y-%m-%dT%H:%M").replace(
                                 tzinfo=timezone(timedelta(hours=tz_offset))
                             )
                             missed_time = rem_dt.strftime("%d.%m в %H:%M")
                         except ValueError:
-                            missed_time = reminder_start[:16]
+                            missed_time = _to_local_wall(reminder_start, tz_offset)
 
                         kb = InlineKeyboardMarkup(inline_keyboard=[[
                             InlineKeyboardButton(text="✅ Сделано!", callback_data=f"task_complete_{task_id}"),
@@ -353,7 +353,7 @@ async def restore_reminders_on_startup() -> None:
 
                         # Сдвигаем до ближайшей будущей даты
                         canon_time, ivl_days = _parse_repeat_time(task.repeat_time)
-                        new_reminder = _ensure_datetime(reminder_start[:16])
+                        new_reminder = _ensure_datetime(_to_local_wall(reminder_start, tz_offset))
                         for _ in range(400):
                             new_reminder = _next_cycle_date(
                                 new_reminder, repeat, tz_offset, ivl_days,
@@ -440,6 +440,36 @@ def _ensure_datetime(iso: str, default_time: str = "09:00") -> str:
     if "T" not in iso:
         return iso[:10] + "T" + default_time
     return iso
+
+
+def _to_local_wall(iso: str, tz_offset: int) -> str:
+    """Normalize an ISO datetime to naive local wall time 'YYYY-MM-DDTHH:MM'.
+
+    Reminders/deadlines read from Postgres come back tz-aware with an explicit
+    offset (e.g. '2026-06-18T10:40:00+00:00' = 13:40 in UTC+3). Slicing such a
+    string with `[:16]` silently drops the offset, and `_schedule_reminder`
+    re-stamps the bare digits as local time → the job fires `tz_offset` hours
+    off (issue #143). Honor the explicit offset by converting into the user's
+    timezone first; naive strings are already local wall time and pass through.
+    Date-only strings ('YYYY-MM-DD') are returned unchanged.
+    """
+    if not iso:
+        return iso
+    s = iso.strip()
+    if "T" not in s:
+        return s[:10]
+    time_part = s.split("T", 1)[1]
+    has_tz = s.endswith("Z") or "+" in time_part or "-" in time_part
+    if has_tz:
+        norm = s[:-1] + "+00:00" if s.endswith("Z") else s
+        for fmt in ("%Y-%m-%dT%H:%M:%S%z", "%Y-%m-%dT%H:%M%z"):
+            try:
+                dt = datetime.strptime(norm, fmt)
+                local = dt.astimezone(timezone(timedelta(hours=tz_offset)))
+                return local.strftime("%Y-%m-%dT%H:%M")
+            except ValueError:
+                continue
+    return s[:16]
 
 
 async def _schedule_reminder(chat_id: int, title: str, reminder_dt: str, task_id: str, tz_offset: int = 3) -> None:
@@ -1044,7 +1074,7 @@ async def _handle_recurring_task_reset(
     _already_future = False
     if current_reminder:
         try:
-            _cr = _ensure_datetime(current_reminder[:16])
+            _cr = _ensure_datetime(_to_local_wall(current_reminder, tz_offset))
             rem_dt = datetime.strptime(_cr, "%Y-%m-%dT%H:%M").replace(
                 tzinfo=timezone(timedelta(hours=tz_offset))
             )
@@ -1055,13 +1085,13 @@ async def _handle_recurring_task_reset(
             pass
 
     if _already_future:
-        new_reminder = current_reminder[:16]
+        new_reminder = _to_local_wall(current_reminder, tz_offset)
         new_deadline = current_deadline[:10] if current_deadline else ""
     else:
         new_deadline = _next_cycle_date(current_deadline, repeat, tz_offset, ivl_days) if current_deadline else ""
         if current_reminder:
             new_reminder = _next_cycle_date(
-                current_reminder, repeat, tz_offset, ivl_days,
+                _to_local_wall(current_reminder, tz_offset), repeat, tz_offset, ivl_days,
                 override_time=canon_time,
             )
         elif canon_time:
@@ -2286,10 +2316,24 @@ async def handle_task_cancel(message: Message, task_hint: str, user_notion_id: s
         return
 
     scored.sort(key=lambda x: x[0], reverse=True)
+
+    # Неоднозначность: несколько задач с одинаковым лучшим скором. Отмена
+    # деструктивна (Archived) — не отменяем вслепую первую попавшуюся, а просим
+    # уточнить (паттерн handle_task_done, иначе параллельная реализация = баг).
+    if len(scored) > 1 and scored[0][0] == scored[1][0]:
+        tied = [s for s in scored if s[0] == scored[0][0]][:5]
+        listed = "\n".join(f"  • {t}" for _, t, _ in tied)
+        await message.answer(
+            "🔍 Нашёл несколько подходящих задач — уточни какую отменить:\n"
+            f"{listed}"
+        )
+        return
+
     _, title, task_id = scored[0]
 
     try:
         await _repo.set_archived(task_id)
+        await delete_task_reminder(task_id)
         # Удаляем scheduler jobs
         if _scheduler:
             for prefix in ("reminder_", "deadline_"):
@@ -2660,15 +2704,21 @@ async def _build_today_digest(uid: int, user_notion_id: str = "", greeting: str 
         repeat = t.repeat
         is_repeat = repeat and repeat != "Нет"
 
-        deadline_date = deadline_raw[:10] if deadline_raw else ""
-        reminder_date = reminder_raw[:10] if reminder_raw else ""
+        # PG отдаёт reminder/deadline tz-aware (UTC, '+00:00'); приводим к
+        # локальному настенному времени, иначе дата/время дайджеста сдвинуты
+        # на tz_offset (issue #143 — тот же корень, что у напоминалок).
+        reminder_local = _to_local_wall(reminder_raw, tz_offset) if reminder_raw else ""
+        deadline_local = _to_local_wall(deadline_raw, tz_offset) if deadline_raw else ""
+
+        deadline_date = deadline_local[:10] if deadline_local else ""
+        reminder_date = reminder_local[:10] if reminder_local else ""
         cat_icon = category[0] if category else "📌"
 
         time_str = ""
-        if "T" in reminder_raw:
-            time_str = reminder_raw.split("T")[1][:5]
-        elif "T" in deadline_raw:
-            time_str = deadline_raw.split("T")[1][:5]
+        if "T" in reminder_local:
+            time_str = reminder_local.split("T")[1][:5]
+        elif "T" in deadline_local:
+            time_str = deadline_local.split("T")[1][:5]
 
         _, ivl = _parse_repeat_time(t.repeat_time) if is_repeat else (None, 0)
 
