@@ -1,6 +1,6 @@
 # TASKS — data-model contract (Nexus ✅ Задачи)
 
-Code conforms to: e938907. This spec describes the tasks data model as of
+Code conforms to: 0bc132e. This spec describes the tasks data model as of
 that commit; update it in the same PR that changes the model.
 
 > Contract, not snapshot. Describes the persistent model, the guarantees of

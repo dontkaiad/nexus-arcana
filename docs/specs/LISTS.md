@@ -1,6 +1,6 @@
 # LISTS — data-model contract (🗒️ Списки)
 
-Code conforms to: c7466ec. This spec describes the lists data model as of
+Code conforms to: 0bc132e. This spec describes the lists data model as of
 that commit; update it in the same PR that changes the model.
 
 > Contract, not snapshot. Describes the persistent model, the guarantees of

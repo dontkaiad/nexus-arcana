@@ -1,6 +1,6 @@
 # RITUALS — data-model contract (🕯 Ритуалы)
 
-Code conforms to: 596c5ea. This spec describes the rituals data model as of
+Code conforms to: 0bc132e. This spec describes the rituals data model as of
 that commit; update it in the same PR that changes the model.
 
 > Contract, not snapshot. Describes the persistent model, the guarantees of
@@ -47,10 +47,12 @@ NULL). SQLAlchemy Core mirror: `arcana/repos/rituals_tables.py`.
 | `offerings` | Text | |
 | `barter_what` | Text | barter item (Arcana-only) |
 | `notes` | Text | |
+| `work_id` | BigInteger | FK → `works.id` (ON DELETE SET NULL, indexed; #151) |
+| `archived` | Boolean | NOT NULL default false — soft-archive |
 | `created_at` / `updated_at` | TIMESTAMP(tz) | default `now()` |
 
-Indexes: `idx_rituals_client_id`, `idx_rituals_occurred_at`. No `notion_id`
-column.
+Indexes: `idx_rituals_client_id`, `idx_rituals_occurred_at`, `idx_rituals_work_id`.
+No `notion_id` column.
 
 `ritual_debt` is a **computed SQL view** (`debt = COALESCE(price,0) −
 COALESCE(paid,0)`), created in the migration — debt is never stored.
@@ -105,9 +107,9 @@ non-exhaustive:
 create → outcome set (set_result: сработал?) → [delete]
 ```
 
-Unlike sessions (soft-delete via `archived`), rituals expose a **hard
-`delete`** and have no `archived` flag. Outcome can be revised via
-`set_result`.
+Rituals expose **both** a hard `delete` and a soft `archive` (the `archived`
+flag, default false; archived rows drop out of `list_all`/`list_by_client` but
+stay findable by id). Outcome can be revised via `set_result`.
 
 ## Callers
 

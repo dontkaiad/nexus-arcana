@@ -1,9 +1,10 @@
 # MEMORY — memory data model
 
-> **Status: AS-BUILT SNAPSHOT at commit cf53a9e.** This documents the memory
-> subsystem *before* the RAG/embeddings rework and Notion-path unification.
-> It will be rewritten as a stable data-model contract once RAG lands. Kept
-> as an evolution baseline.
+> **Status: AS-BUILT SNAPSHOT at commit 0bc132e.** This documents the memory
+> subsystem *before* the planned RAG/embeddings rework (ADR-0006). The
+> Notion→PostgreSQL migration is complete; what remains is the RAG layer. Will
+> be rewritten as a stable data-model contract once RAG lands. Kept as an
+> evolution baseline.
 
 > Source of truth is the code, not Notion specs. Every statement is
 > verifiable against the files in the "Verify against code" section at the

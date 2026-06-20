@@ -1,6 +1,6 @@
 # WORKS — data-model contract (🔮 Работы)
 
-Code conforms to: 596c5ea. This spec describes the works data model as of
+Code conforms to: 0bc132e. This spec describes the works data model as of
 that commit; update it in the same PR that changes the model.
 
 > Contract, not snapshot. Describes the persistent model, the guarantees of
@@ -67,12 +67,13 @@ Owned by the migrations (source of truth). Examples, non-exhaustive:
 
 ## Invariants
 
-- **Works is a standalone entity, not an aggregator.** There is **no PG FK or
-  junction** linking a `works` row to a specific session or ritual: `sessions`
-  and `rituals` have no `works_id`/`work_id` column (verified — none in the
-  schema or repos), and `works` has no session/ritual reference. The
-  Работа↔Расклад/Ритуал relation is maintained only in the Notion layer by
-  `core/work_relation.py` (Notion API), not in PG (see #151).
+- **Work↔event link is a PG FK on the event, 1:1 (#151).** `sessions` and
+  `rituals` each carry a nullable `work_id` → `works.id` (`ON DELETE SET NULL`,
+  indexed; migration `s9t0u1v2w3x4`). `works` itself holds no session/ritual
+  reference — the link is owned by the event row, not the work. Creating a
+  session/ritual finds the one open Work for that client+category, stamps
+  `work_id`, and closes the Work — in PG, via `core/work_relation.py` (no Notion).
+  A junction table was rejected because the cardinality is 1:1 (see ARCHITECTURE.md).
 - **`engagement_type` (client/personal) is NOT on works.** That lookup lives
   on `sessions`/`rituals` (`type_id`). A work carries only `priority`/`status`
   plus a `category` label; client attribution is via `client_id` only.

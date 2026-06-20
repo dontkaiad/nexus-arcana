@@ -1,6 +1,6 @@
 # CLIENTS — data-model contract (👥 Клиенты)
 
-Code conforms to: 596c5ea. This spec describes the clients data model as of
+Code conforms to: 0bc132e. This spec describes the clients data model as of
 that commit; update it in the same PR that changes the model.
 
 > Contract, not snapshot. Describes the persistent model, the guarantees of
