@@ -51,6 +51,10 @@ from core.classifier import (
     # _CANCEL_RE — отмена/удаление задачи
     pytest.param(_CANCEL_RE, "search", "отмени задачу тест", id="cancel-task"),
     pytest.param(_CANCEL_RE, "search", "удали задачу", id="cancel-delete-task"),
+    # #158: прошедшее время отмены без слова «задача» (отменённое событие)
+    pytest.param(_CANCEL_RE, "search", "отменила встречу с врачом сегодня", id="cancel-past-fem"),
+    pytest.param(_CANCEL_RE, "search", "отменил звонок клиенту", id="cancel-past-masc"),
+    pytest.param(_CANCEL_RE, "search", "отменили поездку", id="cancel-past-plural"),
     # _DONE_RE — задача выполнена
     pytest.param(_DONE_RE, "search", "сделала тест", id="done-sdelala"),
     pytest.param(_DONE_RE, "search", "готово", id="done-ready"),
@@ -121,6 +125,8 @@ def test_regex_matches(regex, method, text):
     pytest.param(_EDIT_RE, "search", "купить молоко", id="edit-plain-text"),
     pytest.param(_RENAME_RE, "search", "переименуй задачу просто", id="rename-without-v"),
     pytest.param(_CANCEL_RE, "search", "отмени заметку", id="cancel-note-not-task"),
+    # #158: глагол выполнения НЕ должен срабатывать как отмена
+    pytest.param(_CANCEL_RE, "search", "сделала встречу с врачом", id="cancel-not-done-verb"),
     pytest.param(_ZAPOMNI_RE, "match", "ты запомни что", id="zapomni-not-at-start"),
     # _TASK_EXPLICIT_RE — не должна матчить поиск/просмотр/удаление (B2-fix)
     pytest.param(_TASK_EXPLICIT_RE, "match", "покажи задачи на сегодня", id="task-explicit-no-show"),
@@ -130,6 +136,29 @@ def test_regex_matches(regex, method, text):
 def test_regex_no_match(regex, method, text):
     """Негативные кейсы: фильтр НЕ должен срабатывать на этом тексте."""
     assert not getattr(regex, method)(text), f"unexpected {method} of {regex.pattern!r} on {text!r}"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("text", [
+    "отменила встречу с врачом сегодня",
+    "отменил звонок клиенту",
+    "отмени задачу позвонить маме",
+])
+async def test_classify_cancel_routes_to_task_cancel(text):
+    """#158: отмена (в т.ч. прошедшее время) → task_cancel, НЕ task_done.
+
+    _CANCEL_RE срабатывает в classify ДО обращения к LLM, поэтому сети нет."""
+    from core.classifier import classify
+    res = await classify(text)
+    assert res and res[0]["type"] == "task_cancel", res
+
+
+@pytest.mark.asyncio
+async def test_classify_done_still_routes_to_task_done():
+    """#158 guard: глагол выполнения по-прежнему task_done."""
+    from core.classifier import classify
+    res = await classify("сделала тестовая задача")
+    assert res and res[0]["type"] == "task_done", res
 
 
 @pytest.mark.parametrize("text,group1,group2", [
