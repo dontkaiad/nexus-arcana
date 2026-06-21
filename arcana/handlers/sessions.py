@@ -1156,7 +1156,13 @@ async def _handle_multi_session(
         except Exception as e:
             logger.warning("session_summary generation failed: %s", e)
 
-    # Кеш саммари сессии (для миниапа). Инвалидируем старое и пишем новое.
+    # Саммари сессии «насовсем» — в БД на якорный (первый) триплет (#162);
+    # кеш для миниапа как fast-path.
+    if first_page_id and session_summary_text:
+        try:
+            await _repo.set_session_summary(first_page_id, session_summary_text)
+        except Exception as e:
+            logger.warning("session_summary PG write failed: %s", e)
     try:
         from core.session_cache import session_summary_key, cache_delete, cache_set
         if session_name:
@@ -1243,13 +1249,17 @@ async def cb_triplet_remove_yes(call: CallbackQuery) -> None:
     if not ok:
         await call.message.edit_text("⚠️ Не удалось удалить триплет.")
         return
-    # Инвалидация кеша саммари сессии.
-    try:
-        from core.session_cache import cache_delete, session_summary_key
-        if entry.session_name:
+    # Триплет удалён → общее саммари сессии устарело: чистим БД + кеш (#162).
+    if entry.session_name:
+        try:
+            await _repo.clear_session_summary(entry.session_name, entry.client_id)
+        except Exception as e:
+            logger.warning("clear_session_summary failed: %s", e)
+        try:
+            from core.session_cache import cache_delete, session_summary_key
             cache_delete(session_summary_key(entry.session_name, entry.client_id))
-    except Exception:
-        pass
+        except Exception:
+            pass
     await call.message.edit_text("🗑 Триплет удалён.")
 
 
@@ -1480,13 +1490,18 @@ async def handle_triplet_correction(
     new_summary = await _make_triplet_summary(question, cards_ru, bottom_ru, new_interp)
     await _repo.update_interpretation(page_id, new_interp, new_summary)
 
-    # Инвалидация кеша сессии
-    try:
-        from core.session_cache import cache_delete, session_summary_key
-        if sname:
+    # Триплет изменён → общее саммари сессии устарело: чистим БД + кеш,
+    # миниап предложит регенерацию (#162).
+    if sname:
+        try:
+            await _repo.clear_session_summary(sname, cid)
+        except Exception as e:
+            logger.warning("clear_session_summary failed: %s", e)
+        try:
+            from core.session_cache import cache_delete, session_summary_key
             cache_delete(session_summary_key(sname, cid))
-    except Exception:
-        pass
+        except Exception:
+            pass
 
     await delete_pending(message.from_user.id)
 

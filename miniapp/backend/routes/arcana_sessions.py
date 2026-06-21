@@ -357,7 +357,11 @@ async def session_by_slug(
             decks.append(t.deck)
 
     first_date_local = to_local_date(first.date or "", tz_offset)
-    summary_cached = cache_get(session_summary_key(sname, cid)) if sname else None
+    # Источник истины — session_summary в БД (на якорном триплете). Кеш — fallback
+    # для записей, сделанных до миграции #162.
+    session_summary = (first.session_summary or "").strip() or None
+    if not session_summary and sname:
+        session_summary = cache_get(session_summary_key(sname, cid))
     session_photo = next((t["photo_url"] for t in triplets if t.get("photo_url")), None)
 
     return {
@@ -371,7 +375,7 @@ async def session_by_slug(
         "type": "",
         "decks": decks,
         "first_date": first_date_local.isoformat() if first_date_local else None,
-        "summary": summary_cached,
+        "summary": session_summary,
         "photo_url": session_photo,
         "is_solo": False,
         "triplets": triplets,
@@ -391,21 +395,24 @@ async def session_summarize(
     user_notion_id = (await get_user_notion_id(tg_id)) or ""
 
     matching = await _sessions_repo.list_by_slug(slug, user_notion_id)
-    sname = matching[0].session_name if matching else ""
-    cid = matching[0].client_id if matching else None
-
-    if not matching or not sname:
+    if not matching or not matching[0].session_name:
         raise HTTPException(status_code=404, detail="session not found")
-
-    cache_key = session_summary_key(sname, cid)
-    cached = cache_get(cache_key)
-    if cached:
-        return {"summary": cached, "cached": True}
 
     matching.sort(key=lambda x: (
         _index_in_title(x.question) or 9999,
         x.date or "",
     ))
+    anchor = matching[0]
+    sname = anchor.session_name
+    cid = anchor.client_id
+    cache_key = session_summary_key(sname, cid)
+
+    # Источник истины — БД (якорный триплет). Уже посчитанное саммари не
+    # перегенерируем (бережём токены Кай) — отдаём как cached (#162).
+    existing = (anchor.session_summary or "").strip() or cache_get(cache_key)
+    if existing:
+        cache_set(cache_key, existing)
+        return {"summary": existing, "cached": True}
 
     parts: List[str] = []
     for t in matching:
@@ -435,6 +442,8 @@ async def session_summarize(
     summary = sanitize_summary(summary or "")
     if not summary:
         raise HTTPException(status_code=500, detail="empty summary")
+    # Насовсем — в БД (якорный триплет), кеш как fast-path (#162).
+    await _sessions_repo.set_session_summary(anchor.id, summary)
     cache_set(cache_key, summary)
     return {"summary": summary, "cached": False}
 

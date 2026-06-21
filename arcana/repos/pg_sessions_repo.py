@@ -106,6 +106,7 @@ def _row_to_triplet(row) -> TripletEntry:
         spread_type=row.spread_type or "",
         area=row.area or "",
         triplet_summary=row.triplet_summary or "",
+        session_summary=row.session_summary or "",
         barter_what=row.barter_what or "",
         bottom_card=row.bottom_card or "",
         photo_url=row.photo_url or None,
@@ -146,6 +147,7 @@ def _select_sessions():
             sessions.c.cards,
             sessions.c.interpretation,
             sessions.c.triplet_summary,
+            sessions.c.session_summary,
             sessions.c.bottom_card,
             sessions.c.session_name,
             sessions.c.spread_type,
@@ -336,6 +338,40 @@ class PgSessionsRepo:
                 .values(triplet_summary=summary[:2000] if summary else None)
             )
 
+    def _set_session_summary_sync(self, session_id: str, summary: str) -> bool:
+        """Пишет общее саммари сессии на якорный (первый) триплет (#162)."""
+        try:
+            sid = int(session_id)
+        except (ValueError, TypeError):
+            return False
+        with get_engine().begin() as conn:
+            res = conn.execute(
+                sessions.update().where(sessions.c.id == sid)
+                .values(session_summary=(summary or None) and summary[:4000])
+            )
+        return res.rowcount > 0
+
+    def _clear_session_summary_sync(
+        self, session_name: str, client_id: Optional[str]
+    ) -> int:
+        """Сбрасывает session_summary на всех триплетах сессии (стало устаревшим
+        после правки/удаления триплета) → миниап предложит регенерацию (#162)."""
+        if not session_name:
+            return 0
+        cond = sessions.c.session_name == session_name
+        if client_id:
+            try:
+                cond = cond & (sessions.c.client_id == int(client_id))
+            except (ValueError, TypeError):
+                cond = cond & (sessions.c.client_id.is_(None))
+        else:
+            cond = cond & (sessions.c.client_id.is_(None))
+        with get_engine().begin() as conn:
+            res = conn.execute(
+                sessions.update().where(cond).values(session_summary=None)
+            )
+        return res.rowcount or 0
+
     def _list_by_slug_sync(self, slug: str, user_notion_id: str) -> List[TripletEntry]:
         """Load all sessions and filter by slug (session_name__client_id|self)."""
         all_entries = self._list_all_sync(user_notion_id, None)
@@ -452,6 +488,18 @@ class PgSessionsRepo:
 
     async def update_summary(self, session_id: str, summary: str) -> None:
         await asyncio.to_thread(self._update_summary_sync, session_id, summary)
+
+    async def set_session_summary(self, session_id: str, summary: str) -> bool:
+        return await asyncio.to_thread(
+            self._set_session_summary_sync, session_id, summary
+        )
+
+    async def clear_session_summary(
+        self, session_name: str, client_id: Optional[str]
+    ) -> int:
+        return await asyncio.to_thread(
+            self._clear_session_summary_sync, session_name, client_id
+        )
 
     async def list_by_slug(
         self, slug: str, user_notion_id: str = ""

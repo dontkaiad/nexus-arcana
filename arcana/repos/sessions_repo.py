@@ -26,6 +26,7 @@ class TripletEntry:
     spread_type: str = ""     # Тип расклада
     area: str = ""            # Область
     triplet_summary: str = "" # Саммари / AI_Summary
+    session_summary: str = "" # Общее саммари сессии (на якорном триплете), #162
     barter_what: str = ""     # Бартер · что
     bottom_card: str = ""     # Дно колоды
     photo_url: Optional[str] = None
@@ -138,3 +139,11 @@ class SessionsRepo:
 
     async def set_photo_url(self, page_id: str, url: str) -> bool:
         return await _pg_repo().set_photo_url(page_id, url)
+
+    async def set_session_summary(self, page_id: str, summary: str) -> bool:
+        return await _pg_repo().set_session_summary(page_id, summary)
+
+    async def clear_session_summary(
+        self, session_name: str, client_id: Optional[str]
+    ) -> int:
+        return await _pg_repo().clear_session_summary(session_name, client_id)
