@@ -119,3 +119,29 @@ def test_next_cycle_date_utc_input_no_override_uses_local_time():
     from nexus.handlers.tasks import _next_cycle_date
     out = _next_cycle_date("2026-06-18T10:40:00+00:00", "Ежедневно", tz_offset=3)
     assert out.endswith("T13:40"), f"ожидался T13:40 (локальное), got {out}"
+
+
+# ── дисплей дайджеста: показываем локальное настенное время, не UTC ───────────
+
+@pytest.mark.asyncio
+async def test_today_digest_shows_local_time_not_utc():
+    """_build_today_digest для reminder '...+00:00' (13:00 UTC = 16:00 МСК)
+    должен показать 16:00, а не 13:00 (issue #143 — дисплей тоже сдвигало)."""
+    from nexus.handlers import tasks
+    from nexus.repos.pg_tasks_repo import Task
+
+    # 13:00 UTC == 16:00 МСК; ежедневная задача → всегда попадает в «сегодня».
+    task = Task(id="t-9", title="менять лоток", priority="⚪ Можно потом",
+                category="🐾 Коты", repeat="Ежедневно", repeat_time="16:00",
+                reminder="2026-06-21T13:00:00+00:00")
+
+    with patch.object(tasks, "_get_user_tz", AsyncMock(return_value=3)), \
+         patch.object(tasks._repo, "active", AsyncMock(return_value=[task])), \
+         patch.object(tasks, "ask_claude", AsyncMock(return_value="")), \
+         patch("nexus.handlers.streaks.get_streak", return_value=None), \
+         patch("nexus.handlers.finance._calc_free_remaining",
+               AsyncMock(return_value=None)):
+        text = await tasks._build_today_digest(999_001, user_notion_id="u-1")
+
+    assert "16:00" in text, f"ожидалось локальное 16:00 в дайджесте:\n{text}"
+    assert "13:00" not in text, f"UTC-время 13:00 не должно показываться:\n{text}"

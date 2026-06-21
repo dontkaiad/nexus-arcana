@@ -141,7 +141,6 @@ async def cmd_help(msg: Message, user_notion_id: str = "") -> None:
 @dp.message(Command("tasks"))
 async def cmd_tasks(msg: Message, user_notion_id: str = "") -> None:
     """Задачи: СЕГОДНЯ + стрик + все остальные + СДВГ-совет."""
-    from datetime import date as _date
     import random
     from nexus.repos.tasks_repo import _repo
 
@@ -159,7 +158,11 @@ async def cmd_tasks(msg: Message, user_notion_id: str = "") -> None:
         await msg.answer("📭 Задач нет.")
         return
 
-    today_str = _date.today().isoformat()
+    # issue #143: считаем «сегодня» и показываем время в поясе пользователя,
+    # а не на серверном времени.
+    from nexus.handlers.tasks import _get_user_tz, _to_local_wall
+    tz_offset = await _get_user_tz(uid)
+    today_str = datetime.now(timezone(timedelta(hours=tz_offset))).strftime("%Y-%m-%d")
     _pri_icons = {"Срочно": "🔴", "Важно": "🟡", "Можно потом": "⚪"}
     _rep_labels = {"Ежедневно": "ежедневно", "Еженедельно": "еженедельно", "Ежемесячно": "ежемесячно"}
 
@@ -177,8 +180,9 @@ async def cmd_tasks(msg: Message, user_notion_id: str = "") -> None:
                 priority = _pk
                 break
         category = t.category or ""
-        deadline_raw = t.deadline or ""
-        reminder_raw = t.reminder or ""
+        # issue #143: PG-строки несут UTC-offset → в локальное настенное время.
+        deadline_raw = _to_local_wall(t.deadline, tz_offset) if t.deadline else ""
+        reminder_raw = _to_local_wall(t.reminder, tz_offset) if t.reminder else ""
         repeat = t.repeat or ""
         is_repeat = repeat and repeat != "Нет"
         cat_icon = category[0] if category else "📌"

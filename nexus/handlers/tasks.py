@@ -2690,8 +2690,11 @@ async def _build_today_digest(uid: int, user_notion_id: str = "", greeting: str 
                 priority = _pk
                 break
         category = t.category
-        deadline_raw = t.deadline
-        reminder_raw = t.reminder
+        # issue #143: PG отдаёт reminder/deadline с явным UTC-offset'ом
+        # ('...+00:00'). Конвертируем в локальное настенное время ДО извлечения
+        # даты/времени, иначе дисплей показывает UTC-часы (16:00 МСК → «13:00»).
+        deadline_raw = _to_local_wall(t.deadline, tz_offset) if t.deadline else ""
+        reminder_raw = _to_local_wall(t.reminder, tz_offset) if t.reminder else ""
         repeat = t.repeat
         is_repeat = repeat and repeat != "Нет"
 
