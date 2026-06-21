@@ -157,6 +157,26 @@ class TestArcanaTarotLoader:
 
         assert missing_cards("Несуществующая колода", ["туз мечей"]) == []
 
+    def test_get_cards_context_en_form(self):
+        """EN-имена (как карты хранятся в PG) находят справочник — correction-флоу."""
+        from arcana.tarot_loader import get_cards_context, missing_cards
+
+        # «Eight of Swords» должно найти ключ «8 Мечей» через реестр-алиасы.
+        for en in ["Eight of Swords", "The Lovers", "Four of Swords"]:
+            assert get_cards_context("Уэйт", [en]), f"{en} не нашлась в справочнике"
+        assert missing_cards(
+            "Уэйт", ["Eight of Swords", "The Lovers", "Four of Swords"]
+        ) == []
+
+    def test_cards_to_ru_en_to_russian(self):
+        """_cards_to_ru: EN-строка карт → RU-имена для заголовков трактовки."""
+        from arcana.handlers.sessions import _cards_to_ru
+
+        ru = _cards_to_ru("Eight of Swords, The Lovers", "Уэйт")
+        assert "Влюблённые" in ru
+        assert "Eight of Swords" not in ru  # EN не должно протечь в заголовки
+        assert "Мечей" in ru
+
     def test_deck_styles_loads(self):
         """arcana/tarot_refs/deck_styles.json существует и читается."""
         import json

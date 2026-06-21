@@ -95,7 +95,7 @@ def get_cards_context(deck_name: str, card_names: List[str]) -> str:
 
     found: List[str] = []
     for card_name in card_names:
-        card_info = _find_card(deck_data, _norm(card_name))
+        card_info = _lookup_card(deck_data, deck_name, card_name)
         if card_info:
             found.append(f"📍 {card_name}:\n{_format_card_info(card_info)}")
 
@@ -107,6 +107,38 @@ def get_cards_context(deck_name: str, card_names: List[str]) -> str:
     if style:
         header += f"\nСтиль: {style}"
     return header + "\n\n" + "\n\n".join(found)
+
+
+def _card_match_names(deck_name: str, card_name: str) -> List[str]:
+    """Кандидаты для матчинга карты в справочнике: само имя + все формы из
+    реестра deck_cards.json (en / ru / aliases).
+
+    Справочник (waite.json и пр.) хранит одну форму ключа — «8 Мечей». Карта
+    же может прийти как «Eight of Swords» (так хранится canonical в PG) или
+    «Восьмёрка Мечей». Реестр знает все формы, включая цифровой алиас
+    «8 мечей», который и матчит ключ справочника. Без этого correction-флоу
+    (правит уже сохранённую EN-строку карт) терял справочник целиком (#160)."""
+    names = [card_name]
+    try:
+        from miniapp.backend.tarot import resolve_deck_id, find_card
+        c = find_card(resolve_deck_id(deck_name or "Уэйт"), card_name)
+        if c:
+            for key in ("ru", "en"):
+                if c.get(key):
+                    names.append(c[key])
+            names.extend(a for a in (c.get("aliases") or []) if a)
+    except Exception:
+        pass
+    return names
+
+
+def _lookup_card(deck_data: dict, deck_name: str, card_name: str) -> Optional[dict]:
+    """Ищет карту в справочнике, пробуя все формы имени (см. _card_match_names)."""
+    for cand in _card_match_names(deck_name, card_name):
+        info = _find_card(deck_data, _norm(cand))
+        if info:
+            return info
+    return None
 
 
 def _find_card(deck_data: dict, card_lower: str) -> Optional[dict]:
@@ -154,7 +186,7 @@ def missing_cards(deck_name: str, card_names: List[str]) -> List[str]:
         return []
     missing: List[str] = []
     for name in card_names:
-        if name and not _find_card(deck_data, _norm(name)):
+        if name and not _lookup_card(deck_data, deck_name, name):
             missing.append(name)
     return missing
 

@@ -382,6 +382,59 @@ def _canon_card(card: str, deck: str) -> str:
         return card.strip()
 
 
+def _cards_to_ru(cards_str: str, deck: str) -> str:
+    """Канон-строка карт (в PG хранится EN) → RU-имена для показа в трактовке.
+
+    Нужно для correction-флоу: иначе Sonnet берёт EN-имена из промпта и пишет
+    заголовки «Eight of Swords» вместо «Восьмёрка Мечей» (#160)."""
+    if not cards_str:
+        return ""
+    try:
+        from miniapp.backend.tarot import resolve_deck_id, find_card
+        deck_id = resolve_deck_id(deck or "Уэйт")
+        out: List[str] = []
+        for raw in cards_str.split(","):
+            raw = raw.strip()
+            if not raw:
+                continue
+            c = find_card(deck_id, raw)
+            out.append((c and c.get("ru")) or raw)
+        return ", ".join(out)
+    except Exception:
+        return cards_str
+
+
+def _canon_card_ru(card: str, deck: str) -> str:
+    if not card:
+        return ""
+    try:
+        from miniapp.backend.tarot import resolve_deck_id, find_card
+        c = find_card(resolve_deck_id(deck or "Уэйт"), card.strip())
+        return (c and c.get("ru")) or card.strip()
+    except Exception:
+        return card.strip()
+
+
+async def _upload_spread_photo(message: Message) -> str:
+    """Если к сообщению расклада приложено фото — грузим его в Cloudinary
+    (folder arcana-sessions) и возвращаем secure_url. Иначе ''.
+
+    Это путь «текст + фото расклада»: карты введены текстом, фото идёт как
+    приложение и раньше тихо терялось (в Cloudinary не уезжало) — #161."""
+    if not getattr(message, "photo", None):
+        return ""
+    try:
+        from core.cloudinary_client import cloudinary_upload
+        file = await message.bot.get_file(message.photo[-1].file_id)
+        bio = await message.bot.download_file(file.file_path)
+        return await cloudinary_upload(
+            bio.read(), filename="spread.jpg", folder="arcana-sessions",
+        ) or ""
+    except Exception as e:
+        logger.warning("spread photo upload failed: %s", e)
+        return ""
+
+
 async def _make_triplet_summary(
     question: str, cards: str, bottom: str, interpretation: str
 ) -> str:
@@ -750,7 +803,7 @@ async def handle_add_session(
         )
         amount = float(data.get("amount") or 0)
         paid = float(data.get("paid") or 0)
-        await _save_and_post_triplet(
+        page_id = await _save_and_post_triplet(
             message,
             tz=tz,
             user_notion_id=user_notion_id,
@@ -769,6 +822,12 @@ async def handle_add_session(
             paid=paid,
             self_client_missing=self_client_missing,
         )
+
+        # Фото расклада приложено к сообщению → в Cloudinary + на запись (#161).
+        if page_id:
+            photo_url = await _upload_spread_photo(message)
+            if photo_url:
+                await _repo.set_photo_url(page_id, photo_url)
 
     except SessionParseError as e:
         logger.warning("session parse error: %s", e)
@@ -1059,6 +1118,13 @@ async def _handle_multi_session(
                 })
         except Exception as e:
             logger.error("multi-session item %d failed: %s", idx, e)
+
+    # Фото расклада приложено к сообщению → в Cloudinary + на якорный
+    # (первый) триплет сессии (#161). Одно фото на всю сессию.
+    if first_page_id:
+        photo_url = await _upload_spread_photo(message)
+        if photo_url:
+            await _repo.set_photo_url(first_page_id, photo_url)
 
     # Финальный общий вывод: Sonnet → plain text, кеш в session_cache.
     session_summary_text = ""
@@ -1356,30 +1422,37 @@ async def handle_triplet_correction(
     question = entry.question
     cards_raw = entry.cards
     interp_raw = entry.interpretation
-    deck = entry.deck
+    deck = entry.deck or "Уэйт"
     sname = entry.session_name
     cid = entry.client_id
+    bottom_raw = getattr(entry, "bottom_card", "") or ""
+
+    # Карты в PG хранятся canonical-EN. Для трактовки нужны RU-имена (заголовки)
+    # и справочник колоды — иначе Sonnet пишет EN-заголовки без значений (#160).
+    cards_ru = _cards_to_ru(cards_raw, deck) or cards_raw
+    bottom_ru = _canon_card_ru(bottom_raw, deck) if bottom_raw else ""
 
     from arcana.tarot_loader import get_cards_context
-    card_names = [c.strip() for c in cards_raw.split(",") if c.strip()]
-    cards_context = get_cards_context(deck, card_names)
+    ctx_cards = [c.strip() for c in cards_ru.split(",") if c.strip()]
+    if bottom_ru:
+        ctx_cards.append(bottom_ru)
+    cards_context = get_cards_context(deck, ctx_cards)
 
-    system = (
-        "Ты таролог Кай. Поправь трактовку триплета на основе её комментария.\n"
-        "Сохрани HTML-структуру (h3 для блоков карт, p для текста, b для "
-        "акцентов, i для эмоциональных моментов). НЕ добавляй временные "
-        "позиции (Прошлое/Настоящее/Будущее). Триплет — это раскрытие сути "
-        "ситуации тремя ракурсами.\n"
-        "ВЫВОДИ ТОЛЬКО HTML с тегами <h3>, <b>, <i>, <p>. Никакого markdown.\n"
-    )
+    # Переиспользуем канонический TAROT_SYSTEM (эмодзи-заголовки, RU-имена,
+    # структура Общий смысл/карты/дно/Вывод, запрет позиций) — чтобы правка
+    # выходила в ТОМ ЖЕ формате, что и исходная трактовка, а не в параллельном.
+    system = TAROT_SYSTEM
     if cards_context:
-        system += f"\n--- СПРАВОЧНИК КАРТ ---\n{cards_context}"
+        system += f"\n\n--- СПРАВОЧНИК КАРТ ---\n{cards_context}"
     prompt = (
+        "Это ПРАВКА уже сохранённой трактовки триплета по замечанию Кай. "
+        "Верни ПОЛНУЮ новую трактовку в том же формате (структура и эмодзи "
+        "по правилам выше), учтя замечание.\n\n"
         f"Вопрос триплета: {question}\n"
-        f"Карты: {cards_raw}\n"
-        f"Текущая трактовка:\n{interp_raw}\n\n"
-        f"Замечание Кай: {correction_text}\n\n"
-        f"Дай ПОЛНУЮ исправленную трактовку триплета."
+        f"Карты: {cards_ru}\n"
+        + (f"Дно колоды: {bottom_ru}\n" if bottom_ru else "")
+        + f"\nТекущая трактовка (контекст):\n{interp_raw}\n\n"
+        f"Замечание Кай: {correction_text}"
     )
     try:
         new_interp = await ask_claude(
@@ -1395,10 +1468,16 @@ async def handle_triplet_correction(
 
     from core.html_sanitize import sanitize_interpretation
     from core.html_for_telegram import html_to_telegram
+    # Дно — фоновый блок, как в create-флоу (если Sonnet его не дал сам).
+    if bottom_ru and "🂠" not in new_interp:
+        new_interp = (
+            new_interp.rstrip()
+            + f"\n\n<h3>🂠 {bottom_ru} · фон</h3><p>Скрытый фон расклада.</p>"
+        )
     new_interp = sanitize_interpretation(new_interp)
 
     # Регенерим Haiku-саммари, затем обновляем Notion одним вызовом репо.
-    new_summary = await _make_triplet_summary(question, cards_raw, "", new_interp)
+    new_summary = await _make_triplet_summary(question, cards_ru, bottom_ru, new_interp)
     await _repo.update_interpretation(page_id, new_interp, new_summary)
 
     # Инвалидация кеша сессии

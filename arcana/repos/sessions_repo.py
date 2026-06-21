@@ -135,3 +135,6 @@ class SessionsRepo:
 
     async def archive(self, page_id: str) -> bool:
         return await _pg_repo().archive(page_id)
+
+    async def set_photo_url(self, page_id: str, url: str) -> bool:
+        return await _pg_repo().set_photo_url(page_id, url)
