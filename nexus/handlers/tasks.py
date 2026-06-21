@@ -274,7 +274,7 @@ async def restore_reminders_on_startup() -> None:
                     title = task.title or "Задача"
                     reminder_start = task.reminder
                     if reminder_start:
-                        await _schedule_reminder(tg_id, title, reminder_start[:16], task_id, tz_offset)
+                        await _schedule_reminder(tg_id, title, _to_local_wall(reminder_start, tz_offset), task_id, tz_offset)
                         restored += 1
                 except Exception as e:
                     logger.error("restore pass1: task %s error: %s", task.id, e)
@@ -292,7 +292,7 @@ async def restore_reminders_on_startup() -> None:
                     if repeat == "Нет":
                         # ── Одноразовая задача — отправить "пропущено" СРАЗУ ──
                         try:
-                            _rs = _ensure_datetime(reminder_start[:16])
+                            _rs = _ensure_datetime(_to_local_wall(reminder_start, tz_offset))
                             rem_dt = datetime.strptime(_rs, "%Y-%m-%dT%H:%M").replace(
                                 tzinfo=timezone(timedelta(hours=tz_offset))
                             )
@@ -323,7 +323,7 @@ async def restore_reminders_on_startup() -> None:
                     else:
                         # ── Повторяющаяся задача — уведомить + сдвинуть ──
                         try:
-                            _rs = _ensure_datetime(reminder_start[:16])
+                            _rs = _ensure_datetime(_to_local_wall(reminder_start, tz_offset))
                             rem_dt = datetime.strptime(_rs, "%Y-%m-%dT%H:%M").replace(
                                 tzinfo=timezone(timedelta(hours=tz_offset))
                             )
@@ -353,7 +353,7 @@ async def restore_reminders_on_startup() -> None:
 
                         # Сдвигаем до ближайшей будущей даты
                         canon_time, ivl_days = _parse_repeat_time(task.repeat_time)
-                        new_reminder = _ensure_datetime(reminder_start[:16])
+                        new_reminder = _ensure_datetime(_to_local_wall(reminder_start, tz_offset))
                         for _ in range(400):
                             new_reminder = _next_cycle_date(
                                 new_reminder, repeat, tz_offset, ivl_days,
@@ -440,6 +440,36 @@ def _ensure_datetime(iso: str, default_time: str = "09:00") -> str:
     if "T" not in iso:
         return iso[:10] + "T" + default_time
     return iso
+
+
+def _to_local_wall(iso: str, tz_offset: int) -> str:
+    """Нормализовать сохранённую дату-время в НАИВНОЕ ЛОКАЛЬНОЕ настенное время
+    'YYYY-MM-DDTHH:MM' (issue #143).
+
+    PG отдаёт reminder/deadline с явным offset'ом (обычно UTC, '...+00:00').
+    Срез `[:16]` выбрасывал бы offset, а `_schedule_reminder` переклеивал его
+    как локальный `+tz_offset` → сдвиг на tz_offset часов раньше. Здесь honor'им
+    явный offset (`astimezone` → пояс пользователя) и отдаём наивное локальное
+    время. Наивные строки уже считаются локальными и возвращаются как есть.
+    Date-only (без 'T') — без изменений: нет времени, нечего сдвигать.
+
+    Свойство: корректно для '+00:00' (UTC), '+03:00' (локально) и наивных
+    строк — поэтому безопасно прогонять везде, где раньше резали `[:16]`.
+    """
+    if not iso:
+        return iso
+    s = iso.strip()
+    if s.endswith("Z"):
+        s = s[:-1] + "+00:00"
+    if "T" not in s:
+        return s[:10]
+    try:
+        dt = datetime.fromisoformat(s)
+    except ValueError:
+        return s[:16]
+    if dt.tzinfo is not None:
+        dt = dt.astimezone(timezone(timedelta(hours=tz_offset)))
+    return dt.strftime("%Y-%m-%dT%H:%M")
 
 
 async def _schedule_reminder(chat_id: int, title: str, reminder_dt: str, task_id: str, tz_offset: int = 3) -> None:
@@ -980,6 +1010,11 @@ def _next_cycle_date(current_date_str: str, repeat: str, tz_offset: int = 3,
     заменяет HH:MM из current_date_str. Это нужно после снуза напоминания: иначе
     снузенное время навсегда «портит» каноническое (issue #67).
     """
+    # issue #143: входная строка может нести явный offset (PG отдаёт '+00:00').
+    # Нормализуем в локальное настенное время ДО извлечения даты/времени, иначе
+    # split("T")[1] вернёт UTC-часы, а [:10] — UTC-дату (сдвиг у полуночи).
+    if current_date_str:
+        current_date_str = _to_local_wall(current_date_str, tz_offset)
     has_time = "T" in (current_date_str or "")
     now = datetime.now(timezone(timedelta(hours=tz_offset)))
     today = now.date()
@@ -1044,7 +1079,7 @@ async def _handle_recurring_task_reset(
     _already_future = False
     if current_reminder:
         try:
-            _cr = _ensure_datetime(current_reminder[:16])
+            _cr = _ensure_datetime(_to_local_wall(current_reminder, tz_offset))
             rem_dt = datetime.strptime(_cr, "%Y-%m-%dT%H:%M").replace(
                 tzinfo=timezone(timedelta(hours=tz_offset))
             )
@@ -1055,7 +1090,7 @@ async def _handle_recurring_task_reset(
             pass
 
     if _already_future:
-        new_reminder = current_reminder[:16]
+        new_reminder = _to_local_wall(current_reminder, tz_offset)
         new_deadline = current_deadline[:10] if current_deadline else ""
     else:
         new_deadline = _next_cycle_date(current_deadline, repeat, tz_offset, ivl_days) if current_deadline else ""
