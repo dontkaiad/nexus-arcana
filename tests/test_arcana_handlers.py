@@ -128,6 +128,35 @@ class TestArcanaTarotLoader:
         # хотя бы одна карта найдена → в контексте есть упоминание
         assert "меч" in ctx.lower()
 
+    def test_get_cards_context_yo_insensitive(self):
+        """«влюбленные» (без ё) матчится к ключу «VI Влюблённые» (с ё) — #159."""
+        from arcana.tarot_loader import get_cards_context
+
+        ctx = get_cards_context("Уэйт", ["влюбленные"])
+        assert ctx, "карта без ё не нашлась в справочнике (ё≠е баг)"
+        assert "влюбл" in ctx.lower()
+
+    def test_missing_cards_yo_insensitive(self):
+        """Триплет с «влюбленные» (без ё) — все карты в справочнике, missing=[]."""
+        from arcana.tarot_loader import missing_cards
+
+        assert missing_cards(
+            "Уэйт", ["8 мечей", "влюбленные", "4 мечей", "3 мечей"]
+        ) == []
+
+    def test_missing_cards_reports_absent(self):
+        """Карта, которой нет в справочнике, попадает в missing (для мониторинга)."""
+        from arcana.tarot_loader import missing_cards
+
+        missing = missing_cards("Уэйт", ["влюбленные", "абракадабра"])
+        assert missing == ["абракадабра"]
+
+    def test_missing_cards_unknown_deck_silent(self):
+        """Неизвестная колода → missing=[] (нечего мониторить, не наша ошибка)."""
+        from arcana.tarot_loader import missing_cards
+
+        assert missing_cards("Несуществующая колода", ["туз мечей"]) == []
+
     def test_deck_styles_loads(self):
         """arcana/tarot_refs/deck_styles.json существует и читается."""
         import json

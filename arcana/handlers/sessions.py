@@ -682,9 +682,18 @@ async def handle_add_session(
         question = data.get("question") or area
 
         # 2. Справочник — нужные карты + дно (если есть)
-        from arcana.tarot_loader import get_cards_context
+        from arcana.tarot_loader import get_cards_context, missing_cards
         ctx_cards = card_names + ([bottom_card] if bottom_card else [])
         cards_context = get_cards_context(deck, ctx_cards)
+        # Карта расклада без значения в справочнике → трактовка деградирует
+        # (Sonnet отказывается), но исключения нет — логируем в мониторинг (#159).
+        missing = missing_cards(deck, ctx_cards)
+        if missing:
+            await log_error(
+                f"Колода {deck}: нет в справочнике — {', '.join(missing)}",
+                "card_not_in_ref", bot_label="🌒 Arcana", error_code="ref",
+                context=(message.text or "")[:200],
+            )
 
         # 3. Память
         memory_context = ""
@@ -917,7 +926,7 @@ async def _handle_multi_session(
         except Exception:
             pass
 
-    from arcana.tarot_loader import get_cards_context
+    from arcana.tarot_loader import get_cards_context, missing_cards
     from core.html_for_telegram import html_to_telegram
     saved_n = 0
     first_page_id: Optional[str] = None
@@ -939,6 +948,15 @@ async def _handle_multi_session(
             card_names = [c.strip() for c in cards_text.split(",") if c.strip()]
             ctx_cards = card_names + ([bottom_card] if bottom_card else [])
             cards_context = get_cards_context(deck, ctx_cards)
+            # Карты триплета без значения в справочнике → лог в мониторинг (#159).
+            missing = missing_cards(deck, ctx_cards)
+            if missing:
+                await log_error(
+                    f"Колода {deck} · «{question}»: нет в справочнике — "
+                    f"{', '.join(missing)}",
+                    "card_not_in_ref", bot_label="🌒 Arcana", error_code="ref",
+                    context=(message.text or "")[:200],
+                )
 
             # Sonnet — трактовка
             interpretation = ""

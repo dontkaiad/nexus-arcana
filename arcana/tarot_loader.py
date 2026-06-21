@@ -36,6 +36,15 @@ _PLAYING_SUITS = ("Пики", "Трефы", "Червы", "Бубны")
 _cache: Dict[str, dict] = {}
 
 
+def _norm(s: str) -> str:
+    """Нормализация для матчинга карт: lower + ё→е.
+
+    Парсер (Haiku) часто отдаёт имена без ё («влюбленные»), а ключи в
+    справочниках написаны с ё («VI Влюблённые»). Подстрочное сравнение
+    посимвольное, поэтому ё≠е ломало поиск карты (см. #159)."""
+    return (s or "").lower().replace("ё", "е").strip()
+
+
 def _load_deck(filename: str) -> dict:
     if filename in _cache:
         return _cache[filename]
@@ -86,7 +95,7 @@ def get_cards_context(deck_name: str, card_names: List[str]) -> str:
 
     found: List[str] = []
     for card_name in card_names:
-        card_info = _find_card(deck_data, card_name.lower().strip())
+        card_info = _find_card(deck_data, _norm(card_name))
         if card_info:
             found.append(f"📍 {card_name}:\n{_format_card_info(card_info)}")
 
@@ -101,27 +110,53 @@ def get_cards_context(deck_name: str, card_names: List[str]) -> str:
 
 
 def _find_card(deck_data: dict, card_lower: str) -> Optional[dict]:
-    """Нечёткий поиск карты во всех форматах справочников."""
+    """Нечёткий поиск карты во всех форматах справочников.
+
+    Обе стороны прогоняются через _norm (ё→е), иначе «влюбленные» не
+    матчилось бы к ключу «VI Влюблённые» (см. #159)."""
+    card_lower = _norm(card_lower)
     # 1. Секционный формат (waite, dark_wood, deviant_moon)
     for section in _SUIT_SECTIONS:
         for key, val in deck_data.get(section, {}).items():
-            if card_lower in key.lower():
+            if card_lower in _norm(key):
                 return val if isinstance(val, dict) else {"up": str(val)}
 
     # 2. Масти (playing_cards)
     for suit in _PLAYING_SUITS:
         for key, val in deck_data.get(suit, {}).items():
-            if card_lower in key.lower():
+            if card_lower in _norm(key):
                 return val if isinstance(val, dict) else {"meaning": str(val)}
 
     # 3. Верхний уровень без метаданных (lenormand)
     for key, val in deck_data.items():
         if key.startswith("_"):
             continue
-        if card_lower in key.lower() and isinstance(val, dict):
+        if card_lower in _norm(key) and isinstance(val, dict):
             return val
 
     return None
+
+
+def missing_cards(deck_name: str, card_names: List[str]) -> List[str]:
+    """Карты расклада, которых НЕТ в справочнике колоды.
+
+    Пустой список = все нашлись. Если колода неизвестна или её справочник
+    не загрузился — возвращаем [] (не наша ошибка, мониторить нечего).
+    Используется для лога в мониторинг: тихий пропуск карты деградирует
+    трактовку, но не бросает исключение (см. #159)."""
+    if not card_names:
+        return []
+    filename = get_deck_file(deck_name)
+    if not filename:
+        return []
+    deck_data = _load_deck(filename)
+    if not deck_data:
+        return []
+    missing: List[str] = []
+    for name in card_names:
+        if name and not _find_card(deck_data, _norm(name)):
+            missing.append(name)
+    return missing
 
 
 def _format_card_info(info: dict) -> str:
