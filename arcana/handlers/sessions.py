@@ -483,6 +483,72 @@ def _format_prev_sessions(snippets: List[PrevSessionSnippet]) -> str:
     return "\n\n".join(lines)
 
 
+_RAG_VOICE_HEADER = "--- ПОХОЖИЕ ТВОИ ПРОШЛЫЕ ТРАКТОВКИ (стиль/тон) ---"
+
+
+async def _rag_voice_block(
+    cards_text: str, question: str, exclude_id: Optional[str] = None
+) -> str:
+    """RAG-AB интеграция A (консистентность голоса): семантический поиск ПОХОЖИХ
+    прошлых трактовок ПО ВСЕМ клиентам (не история одного) → блок для system.
+
+    Возвращает готовый блок (с ведущими \\n\\n) или '' — чисто аддитивно.
+    Текущий триплет (exclude_id) и пустые трактовки исключаются. Никогда не
+    бросает — RAG вторичен, трактовка работает и без него."""
+    q = f"{cards_text or ''} {question or ''}".strip()
+    if not q:
+        return ""
+    try:
+        import asyncio as _aio
+        from core.rag import search_triplets
+        hits = await _aio.to_thread(search_triplets, q, 3, None)
+    except Exception as e:
+        logger.warning("rag voice retrieve failed: %s", e)
+        return ""
+    lines: List[str] = []
+    for h in (hits or []):
+        if exclude_id and str(h.get("triplet_id")) == str(exclude_id):
+            continue
+        excerpt = (h.get("interp_excerpt") or "").strip()
+        if not excerpt:
+            continue
+        cards = (h.get("cards") or "").strip()
+        lines.append(f"• {cards}: {excerpt}" if cards else f"• {excerpt}")
+    if not lines:
+        return ""
+    return (
+        f"\n\n{_RAG_VOICE_HEADER}\n"
+        "Это твои прежние трактовки похожих раскладов. Опирайся на свой "
+        "устоявшийся голос, тон и манеру — но НЕ копируй формулировки дословно.\n"
+        + "\n".join(lines)
+    )
+
+
+async def _rag_index_safe(
+    page_id: Optional[str],
+    *,
+    cards: str,
+    question: str,
+    interpretation: str,
+    client_id: Optional[str],
+    session_name: Optional[str],
+    occurred_at: Optional[str],
+) -> None:
+    """RAG-AB индексация триплета после сохранения. Провал НЕ роняет save —
+    данные уже в PG, Qdrant вторичен."""
+    if not page_id:
+        return
+    try:
+        import asyncio as _aio
+        from core.rag import index_triplet
+        await _aio.to_thread(
+            index_triplet, page_id, cards, question, interpretation,
+            client_id, session_name, occurred_at,
+        )
+    except Exception as e:
+        logger.warning("rag index failed for %s: %s", page_id, e)
+
+
 def _triplet_keyboard(page_id: str) -> InlineKeyboardMarkup:
     """Кнопки [✏️ Поправить] [🗑 Удалить] под сохранённым триплетом."""
     from core.utils import cancel_button, secondary_button
@@ -573,6 +639,13 @@ async def _save_and_post_triplet(
     if not page_id:
         await message.answer("⚠️ Не получилось сохранить расклад.")
         return None
+
+    # RAG-AB: индексируем триплет в Qdrant (для будущих retrieve). Провал НЕ
+    # роняет сохранение — данные уже в PG, Qdrant вторичен (#166).
+    await _rag_index_safe(
+        page_id, cards=cards_text, question=question, interpretation=interpretation,
+        client_id=client_id, session_name=session_name, occurred_at=_now_iso(tz)[:10],
+    )
 
     # Авто-привязка к открытой Работе (категория 🃏 Расклад) + закрыть её (PG, #151).
     work_closed = False
@@ -778,6 +851,9 @@ async def handle_add_session(
                 system += f"\n\n--- ПАМЯТЬ ---\n{memory_context}"
             if prev_context:
                 system += f"\n\n--- ПРЕДЫДУЩИЕ РАСКЛАДЫ КЛИЕНТА ---\n{prev_context}"
+            # RAG-AB интеграция A: похожие прошлые трактовки ПО ВСЕМ клиентам
+            # (консистентность голоса). Аддитивно, graceful (#166).
+            system += await _rag_voice_block(cards_text, question)
 
             user_prompt = (
                 f"Расклад: {data.get('spread_type') or ''}\n"
@@ -1037,6 +1113,9 @@ async def _handle_multi_session(
                     system += f"\n\n--- СПРАВОЧНИК КАРТ ---\n{cards_context}"
                 if prev_context:
                     system += f"\n\n--- ПРЕДЫДУЩИЕ РАСКЛАДЫ КЛИЕНТА ---\n{prev_context}"
+                # RAG-AB интеграция A: похожие прошлые трактовки ПО ВСЕМ клиентам
+                # (консистентность голоса). Аддитивно, graceful (#166).
+                system += await _rag_voice_block(cards_text, question)
                 user_prompt = (
                     f"Сессия: {session_name}\n"
                     f"Расклад: {spread_type}\n"
@@ -1092,6 +1171,13 @@ async def _handle_multi_session(
                 saved_titles.append(question)
                 if not first_page_id:
                     first_page_id = page_id
+
+                # RAG-AB: индексируем триплет (provал не роняет сессию, #166).
+                await _rag_index_safe(
+                    page_id, cards=cards_text, question=question,
+                    interpretation=interpretation, client_id=client_id,
+                    session_name=session_name or None, occurred_at=_now_iso(tz)[:10],
+                )
 
                 # Триплет в чат: вопрос + карты + дно + трактовка (telegram-safe).
                 interp_tg = html_to_telegram(interpretation)

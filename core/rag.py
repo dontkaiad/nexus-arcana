@@ -30,6 +30,9 @@ logger = logging.getLogger("core.rag")
 VOYAGE_MODEL = "voyage-4-lite"
 VOYAGE_DIM = 1024
 
+# Коллекция Qdrant с триплетами Арканы (создаётся ensure_collection).
+COLLECTION_TRIPLETS = "arcana_triplets"
+
 _voyage_client = None
 _qdrant_client = None
 
@@ -127,4 +130,139 @@ def ensure_collection(
         return True
     except Exception as e:
         logger.warning("ensure_collection(%s) failed: %s", name, e)
+        return False
+
+
+# ────────────────────────── Триплеты (RAG-AB) ──────────────────────────────
+
+def _point_id(triplet_id) -> object:
+    """PG id (int-строка) → числовой point id Qdrant (детерминированно,
+    upsert перезапишет при правке). Нечисловой id → стабильный uuid5."""
+    s = str(triplet_id)
+    if s.isdigit():
+        return int(s)
+    import uuid
+    return str(uuid.uuid5(uuid.NAMESPACE_URL, f"arcana_triplet:{s}"))
+
+
+def _interp_excerpt(interpretation: str, limit: int = 400) -> str:
+    """Короткий plain-text огрызок трактовки для инъекции «стиль/тон» —
+    снимаем HTML-теги, схлопываем пробелы, режем по limit."""
+    if not interpretation:
+        return ""
+    import re
+    txt = re.sub(r"<[^>]+>", " ", interpretation)
+    txt = re.sub(r"\s+", " ", txt).strip()
+    return txt[:limit]
+
+
+def index_triplet(
+    triplet_id,
+    cards: str,
+    question: str,
+    interpretation: str,
+    client_id: Optional[str] = None,
+    session_name: Optional[str] = None,
+    occurred_at: Optional[str] = None,
+) -> bool:
+    """Индексирует триплет в arcana_triplets (upsert по детерминированному id).
+
+    Текст эмбеддинга = непустые части {cards, question, interpretation}
+    (пустой interpretation не ломает — собираем из того, что есть).
+    Graceful: Qdrant/Voyage недоступны → warning + False, без исключения."""
+    client = get_qdrant_client()
+    if client is None:
+        return False
+    parts = [str(p).strip() for p in (cards, question, interpretation) if p and str(p).strip()]
+    text = " ".join(parts)
+    if not text:
+        logger.warning("index_triplet(%s): пустой текст — пропуск", triplet_id)
+        return False
+    vecs = _embed(text, input_type="document")
+    if not vecs:
+        return False  # _embed уже залогировал (нет ключа/ошибка)
+    try:
+        from qdrant_client.models import PointStruct
+        client.upsert(
+            collection_name=COLLECTION_TRIPLETS,
+            points=[PointStruct(
+                id=_point_id(triplet_id),
+                vector=vecs[0],
+                payload={
+                    "triplet_id": str(triplet_id),
+                    "client_id": str(client_id) if client_id else None,
+                    "session_name": session_name or None,
+                    "occurred_at": occurred_at or None,
+                    "question": question or None,
+                    "cards": cards or None,
+                    # огрызок трактовки — чтобы поиск отдавал текст для инъекции
+                    # «стиль/тон» без обратного похода в PG.
+                    "interp_excerpt": _interp_excerpt(interpretation),
+                },
+            )],
+        )
+        return True
+    except Exception as e:
+        logger.warning("index_triplet(%s) upsert failed: %s", triplet_id, e)
+        return False
+
+
+def search_triplets(
+    query_text: str, top_k: int = 5, client_id: Optional[str] = None
+) -> List[dict]:
+    """Семантический поиск похожих триплетов. Возвращает список payload+score.
+
+    client_id задан → Filter по payload.client_id (история одного клиента);
+    None → по ВСЕМ (для консистентности голоса автора).
+    Graceful: Qdrant/Voyage недоступны → []. Без исключения."""
+    if not query_text or not str(query_text).strip():
+        return []
+    client = get_qdrant_client()
+    if client is None:
+        return []
+    vecs = _embed(query_text, input_type="query")
+    if not vecs:
+        return []
+    try:
+        qfilter = None
+        if client_id:
+            from qdrant_client.models import Filter, FieldCondition, MatchValue
+            qfilter = Filter(must=[
+                FieldCondition(key="client_id", match=MatchValue(value=str(client_id)))
+            ])
+        # gotcha: метод query_points (НЕ search), результаты — через .points.
+        resp = client.query_points(
+            collection_name=COLLECTION_TRIPLETS,
+            query=vecs[0],
+            limit=top_k,
+            query_filter=qfilter,
+            with_payload=True,
+        )
+        out: List[dict] = []
+        for p in resp.points:
+            item = dict(p.payload or {})
+            item["score"] = p.score
+            out.append(item)
+        return out
+    except Exception as e:
+        logger.warning("search_triplets failed: %s", e)
+        return []
+
+
+def delete_triplet(triplet_id) -> bool:
+    """Удаляет точку триплета из arcana_triplets (для правки/удаления).
+    Вызов из хендлеров правки в этом коммите НЕ подключён — только функция.
+    Graceful: Qdrant недоступен → False, без исключения."""
+    client = get_qdrant_client()
+    if client is None:
+        return False
+    try:
+        from qdrant_client.models import PointIdsList
+        client.delete(
+            collection_name=COLLECTION_TRIPLETS,
+            points_selector=PointIdsList(points=[_point_id(triplet_id)]),
+        )
+        return True
+    except Exception as e:
+        logger.warning("delete_triplet(%s) failed: %s", triplet_id, e)
         return False
