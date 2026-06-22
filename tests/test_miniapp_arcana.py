@@ -490,6 +490,50 @@ def test_arcana_clients_list_aggregates_stats(client):
     assert anna["initial"] == "А"
 
 
+def test_arcana_clients_count_sessions_not_triplets(client):
+    """5 триплетов одной сессии → 1 сеанс в карточке клиента (не 5), #164."""
+    clients_list = [_make_client("1", "Кай")]
+    sessions = [
+        _make_triplet(f"t{i}", f"{i}) вопрос", client_id="1",
+                      date="2026-06-22", session_name="Вадим")
+        for i in range(5)
+    ]
+    mock_cl = _mock_clients_repo(list_all_result=clients_list)
+    mock_sess = _mock_sessions_repo_all(all_result=sessions)
+    mock_rit = _mock_rituals_repo(list_all_result=[])
+    with patch("miniapp.backend.routes.arcana_clients._clients_repo", mock_cl), \
+         patch("miniapp.backend.routes.arcana_clients._sessions_repo", mock_sess), \
+         patch("miniapp.backend.routes.arcana_clients._rituals_repo", mock_rit), \
+         patch("miniapp.backend.routes.arcana_clients.get_user_notion_id",
+               AsyncMock(return_value=FAKE_NOTION_USER)):
+        r = client.get("/api/arcana/clients")
+    assert r.status_code == 200, r.text
+    kai = next(c for c in r.json()["clients"] if c["id"] == "1")
+    assert kai["sessions_count"] == 1
+
+
+def test_arcana_dossier_counts_sessions_not_triplets(client):
+    """Досье клиента: 5 триплетов одной сессии → stats.sessions == 1 (#164)."""
+    c_obj = _make_client("1", "Кай")
+    sess = [
+        _make_triplet(f"t{i}", f"{i})", client_id="1",
+                      date="2026-06-22", session_name="Вадим")
+        for i in range(5)
+    ]
+    mock_cl = _mock_clients_repo(find_by_id_result=c_obj)
+    mock_sess = _mock_sessions_repo_all(all_result=sess)
+    mock_rit = _mock_rituals_repo(list_all_result=[])
+    mock_rit.list_by_client = AsyncMock(return_value=[])
+    with patch("miniapp.backend.routes.arcana_clients._clients_repo", mock_cl), \
+         patch("miniapp.backend.routes.arcana_clients._sessions_repo", mock_sess), \
+         patch("miniapp.backend.routes.arcana_clients._rituals_repo", mock_rit), \
+         patch("miniapp.backend.routes.arcana_clients.get_user_notion_id",
+               AsyncMock(return_value=FAKE_NOTION_USER)):
+        r = client.get("/api/arcana/clients/1")
+    assert r.status_code == 200, r.text
+    assert r.json()["stats"]["sessions"] == 1
+
+
 def test_arcana_clients_401():
     app.dependency_overrides.clear()
     c = TestClient(app)

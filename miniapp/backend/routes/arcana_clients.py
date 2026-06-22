@@ -48,8 +48,11 @@ async def list_clients(tg_id: int = Depends(current_user_id)) -> dict[str, Any]:
     agg: dict = {}
     for s in all_sessions:
         cid = s.client_id or ""
-        b = agg.setdefault(cid, {"sessions": 0, "rituals": 0, "debt": 0.0, "paid": 0.0})
-        b["sessions"] += 1
+        b = agg.setdefault(cid, {"sessions": set(), "rituals": 0, "debt": 0.0, "paid": 0.0})
+        # Считаем СЕССИИ, не триплеты: триплеты одной сессии = один сеанс (#164).
+        b["sessions"].add(
+            s.session_name.strip().lower() if s.session_name else f"solo:{s.id}"
+        )
         amt = float(s.amount or 0)
         pd = float(s.paid or 0)
         b["paid"] += pd
@@ -57,7 +60,7 @@ async def list_clients(tg_id: int = Depends(current_user_id)) -> dict[str, Any]:
             b["debt"] += amt - pd
     for r in all_rituals:
         cid = r.client_id or ""
-        b = agg.setdefault(cid, {"sessions": 0, "rituals": 0, "debt": 0.0, "paid": 0.0})
+        b = agg.setdefault(cid, {"sessions": set(), "rituals": 0, "debt": 0.0, "paid": 0.0})
         b["rituals"] += 1
         price = float(r.price or 0)
         pd = float(r.paid or 0)
@@ -69,7 +72,7 @@ async def list_clients(tg_id: int = Depends(current_user_id)) -> dict[str, Any]:
     total_debt = 0.0
     total_paid_all = 0.0
     for c in clients_list:
-        b = agg.get(c.id, {"sessions": 0, "rituals": 0, "debt": 0.0, "paid": 0.0})
+        b = agg.get(c.id, {"sessions": set(), "rituals": 0, "debt": 0.0, "paid": 0.0})
         type_full = TYPE_CODE_TO_FULL.get(c.type_code or "", "")
         debt = int(round(b["debt"]))
         total_debt += debt
@@ -81,7 +84,7 @@ async def list_clients(tg_id: int = Depends(current_user_id)) -> dict[str, Any]:
             "status": STATUS_CODE_TO_LABEL.get(c.status_code or "", ""),
             "type": _type_icon(type_full),
             "type_full": type_full,
-            "sessions_count": b["sessions"],
+            "sessions_count": len(b["sessions"]),
             "rituals_count": b["rituals"],
             "debt": debt,
             "barter_count": 0,
@@ -178,7 +181,11 @@ async def client_dossier(
         "photo_url": c.photo_url,
         "photos": photos,
         "stats": {
-            "sessions": len(my_sessions),
+            # СЕССИИ, не триплеты (триплеты одной сессии = один сеанс), #164.
+            "sessions": len({
+                s.session_name.strip().lower() if s.session_name else f"solo:{s.id}"
+                for s in my_sessions
+            }),
             "rituals": len(my_rituals),
             "total_paid": int(round(total_paid)),
             "debt": int(round(debt)),
