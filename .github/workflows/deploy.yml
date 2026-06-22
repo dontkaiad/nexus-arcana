@@ -7,22 +7,31 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Deploy over SSH
+        id: deploy
         uses: appleboy/ssh-action@v1.2.5
         with:
           host: ${{ secrets.SERVER_HOST }}
           username: ${{ secrets.SERVER_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           command_timeout: "10m"
-          # Падение на ошибке в v1.2.5 — через set -e в скрипте (инпут
-          # script_stop в этой версии убран). set -e роняет шаг при non-zero
-          # от команды → if: failure() → Telegram-алерт.
+          # ssh-action@v1.2.5 ГЛОТАЕТ exit-код удалённого скрипта (доказано:
+          # exit 1 / script_stop / false — все оставляли шаг green). Поэтому
+          # детект фейла — снаружи, по success-маркеру в captured stdout: под
+          # set -e упавшая команда останавливает скрипт ДО echo "DEPLOY_OK".
+          capture_stdout: true
           script: |
             set -e
-            false
             cd ~/nexus-arcana
             git pull origin main
             docker compose up -d --build
             docker compose ps
+            echo "DEPLOY_OK"
+
+      - name: Verify deploy marker
+        if: always()
+        run: |
+          echo "${{ steps.deploy.outputs.stdout }}"
+          echo "${{ steps.deploy.outputs.stdout }}" | grep -q "DEPLOY_OK" || { echo "marker missing — deploy failed"; exit 1; }
 
       - name: Notify Telegram on failure
         if: failure()
