@@ -80,11 +80,18 @@ class SPAStaticFiles(StaticFiles):
     """
     async def get_response(self, path: str, scope):
         try:
-            return await super().get_response(path, scope)
+            response = await super().get_response(path, scope)
         except StarletteHTTPException as exc:
             if exc.status_code == 404 and not path.startswith("api/"):
-                return await super().get_response("index.html", scope)
-            raise
+                response = await super().get_response("index.html", scope)
+            else:
+                raise
+        # index.html не кэшируем: Telegram WebApp иначе залипает на старом
+        # бандле (ссылка на хэшированный JS живёт в index.html). Сам JS/CSS —
+        # immutable по хэшу в имени, их StaticFiles кэширует как обычно.
+        if (getattr(response, "media_type", "") or "").startswith("text/html"):
+            response.headers["Cache-Control"] = "no-cache, must-revalidate"
+        return response
 
 
 # Статика: монтируем ПОСЛЕ /api и /health, чтобы роутеры выигрывали.
