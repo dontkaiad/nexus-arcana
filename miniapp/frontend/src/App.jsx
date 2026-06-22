@@ -1053,9 +1053,9 @@ const TaskRow = ({ s, t, done, onToggle, onOpen, withTime }) => (
             <span>📅</span><span>{t.deadlineTime}</span>
           </span>
         )}
-        {t.reminderTime && (
+        {(t.reminderTime || t.reminderDate) && (
           <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-            <Bell size={fs(12)} /><span>{t.reminderTime}</span>
+            <Bell size={fs(12)} /><span>{[t.reminderDate, t.reminderTime].filter(Boolean).join(" ")}</span>
           </span>
         )}
         {t.rem && !t.reminderTime && (
@@ -1504,9 +1504,9 @@ function NxTasks({ s, openTask, taskClosedSig }) {
                   <span>📅</span><span>{t.date}{t.deadlineTime ? ` ${t.deadlineTime}` : ""}</span>
                 </span>
               )}
-              {t.reminderTime && (
+              {(t.reminderTime || t.reminderDate) && (
                 <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-                  <Bell size={fs(12)} /><span>{t.reminderTime}</span>
+                  <Bell size={fs(12)} /><span>{[t.reminderDate, t.reminderTime].filter(Boolean).join(" ")}</span>
                 </span>
               )}
               {t.rpt && <span>{t.rpt}</span>}
@@ -6065,6 +6065,12 @@ function TaskSheet({ s, task, onClose, onClosed }) {
         {metaCard("Дедлайн", task.date || task.time || task.rpt || "—")}
         {metaCard("Приоритет", task.prio || "—")}
       </div>
+      {(task.reminderTime || task.reminderDate) && (
+        <div style={{ fontSize: fs(12), color: s.tM, marginBottom: 12, display: "flex", alignItems: "center", gap: 6 }}>
+          <Bell size={fs(13)} />
+          <span>{[task.reminderDate, task.reminderTime].filter(Boolean).join(" ")}</span>
+        </div>
+      )}
       <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
         <ActionRow
           s={s}
@@ -6757,21 +6763,13 @@ function TaskForm({ s, onSubmit, busy }) {
 }
 
 function TaskEditForm({ s, task, busy, onSave }) {
-  // Разобрать исходный дедлайн в YYYY-MM-DD + HH:MM
-  const parseInitial = () => {
-    const raw = task?.date || task?.time || "";
-    if (!raw) return { d: "", t: "" };
-    const m = String(raw).match(/^(\d{4}-\d{2}-\d{2})(?:[ T](\d{2}):(\d{2}))?/);
-    if (m) return { d: m[1], t: m[2] && m[3] ? `${m[2]}:${m[3]}` : "" };
-    return { d: "", t: "" };
-  };
-  const initial = parseInitial();
-
   const [title, setTitle] = useState(task?.title || "");
   const [cat, setCat] = useState(task?.cat || "");
   const [prio, setPrio] = useState(task?.prio || "⚪");
-  const [date, setDate] = useState(initial.d);
-  const [time, setTime] = useState(initial.t);
+  // Дедлайн и напоминание редактируются раздельно (пред-заполнено из raw ISO).
+  const [date, setDate] = useState(task?.deadlineDateRaw || "");
+  const [remDate, setRemDate] = useState(task?.reminderDateRaw || "");
+  const [remTime, setRemTime] = useState(task?.reminderTimeRaw || "");
   const [cats, setCats] = useState([]);
 
   useEffect(() => {
@@ -6789,7 +6787,8 @@ function TaskEditForm({ s, task, busy, onSave }) {
     return () => { cancelled = true; };
   }, [task?.cat]);
 
-  const valid = !!date && title.trim().length > 0;
+  // Менять можно что угодно — достаточно непустого названия.
+  const valid = title.trim().length > 0;
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
       <Input s={s} value={title} onChange={setTitle} placeholder="Название задачи" />
@@ -6801,25 +6800,37 @@ function TaskEditForm({ s, task, busy, onSave }) {
       )}
       <div style={{ fontSize: fs(11), color: s.tS }}>Приоритет</div>
       <PillSelect s={s} value={prio} onChange={setPrio} options={PRIOS} />
+      <div style={{ fontSize: fs(11), color: s.tS }}>📅 Дедлайн</div>
+      <Input s={s} value={date} onChange={setDate} placeholder="Дата" type="date" />
+      <div style={{ fontSize: fs(11), color: s.tS }}>🔔 Напоминание</div>
       <div style={{ display: "flex", gap: 8 }}>
         <div style={{ flex: 1 }}>
-          <Input s={s} value={date} onChange={setDate} placeholder="Дата" type="date" />
+          <Input s={s} value={remDate} onChange={setRemDate} placeholder="Дата" type="date" />
         </div>
         <div style={{ flex: 1 }}>
-          <Input s={s} value={time} onChange={setTime} placeholder="чч:мм" type="time" />
+          <Input s={s} value={remTime} onChange={setRemTime} placeholder="чч:мм" type="time" />
         </div>
       </div>
       <SubmitBtn
         s={s}
         disabled={!valid || busy}
-        label={busy ? "Сохраняю..." : "Перенести"}
-        onClick={() => onSave({
-          title: title.trim(),
-          cat: cat || null,
-          prio,
-          date,
-          time: time || null,
-        })}
+        label={busy ? "Сохраняю..." : "Сохранить"}
+        onClick={() => {
+          // Напоминание трогаем только если юзер задал его дату или время —
+          // иначе правка одного дедлайна не должна молча создавать «напоминание».
+          const wantsReminder = !!(remDate || remTime);
+          // Дата без времени → дефолт 09:00 (как в боте). reminder_date пуст →
+          // бэкенд берёт дату дедлайна как якорь.
+          const rTime = wantsReminder ? (remTime || "09:00") : null;
+          onSave({
+            title: title.trim(),
+            cat: cat || null,
+            prio,
+            date: date || null,
+            reminder_date: wantsReminder ? (remDate || null) : null,
+            time: rTime,
+          });
+        }}
       />
     </div>
   );

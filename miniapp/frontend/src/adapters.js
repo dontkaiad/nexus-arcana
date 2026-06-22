@@ -276,6 +276,10 @@ export function adaptTasks(data) {
     // #57: 🔄 показывает интервал повтора (every_2d → «каждые 2 дня»),
     // а не время — оно уже отрисовано иконкой Bell как reminderTime.
     const ivl = _repeatDisplayInterval(t.repeat_time, repeat)
+    // Дата напоминания показывается, только если отличается от дедлайна
+    // (иначе день уже виден в 📅) — без неё «🔔 12:00» выглядело как
+    // потерянная дата.
+    const showRemDate = t.reminder && (!t.deadline || t.reminder !== t.deadline)
     return {
       id: t.id,
       title: t.title || '',
@@ -286,6 +290,11 @@ export function adaptTasks(data) {
       time,
       deadlineTime: t.deadline_time || null,
       reminderTime: t.reminder_time || null,
+      reminderDate: showRemDate ? formatDate(t.reminder, 'full') : null,
+      // raw ISO (YYYY-MM-DD / HH:MM) для пред-заполнения формы редактирования
+      deadlineDateRaw: t.deadline || null,
+      reminderDateRaw: t.reminder || null,
+      reminderTimeRaw: t.reminder_time || null,
       rpt: ivl ? `🔄 ${ivl}` : undefined,
       streak: t.streak || 0,
       closedAt: t.closed_at || null,

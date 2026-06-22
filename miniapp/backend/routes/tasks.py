@@ -56,6 +56,7 @@ def _serialize_pg_task(task: PgTask, today_date, tz_offset: int) -> dict:
     deadline_local = to_local_date(deadline_raw, tz_offset)
     deadline_time = extract_time(deadline_raw, tz_offset)
     reminder_raw = task.reminder or ""
+    reminder_local = to_local_date(reminder_raw, tz_offset)
     reminder_time = extract_time(reminder_raw, tz_offset)
     status = task.status
 
@@ -82,6 +83,7 @@ def _serialize_pg_task(task: PgTask, today_date, tz_offset: int) -> dict:
         "status": computed_status,
         "deadline": deadline_local.isoformat() if deadline_local else None,
         "deadline_time": deadline_time,
+        "reminder": reminder_local.isoformat() if reminder_local else None,
         "reminder_time": reminder_time,
         "reminder_iso": reminder_raw or None,
         "deadline_iso": deadline_raw or None,

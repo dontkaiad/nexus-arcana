@@ -80,6 +80,26 @@ async def _load_owned_task(task_id: str, user_notion_id: str) -> _PgTask:
     return task
 
 
+async def _reschedule_task_reminder(
+    task_id: str, tg_id: int, title: str, local_dt: str, tz_offset: int,
+) -> None:
+    """Перепланировать APScheduler-job напоминания задачи в текущем процессе.
+
+    miniapp backend поднимается внутри процесса Nexus-бота (nexus_bot.py),
+    поэтому write-эндпоинт дотягивается до общего AsyncIOScheduler и
+    напоминание срабатывает без рестарта. `local_dt` — наивное локальное
+    'YYYY-MM-DDTHH:MM'; `_schedule_reminder` сам клеит tz_offset и
+    replace_existing'ит старый job. Никогда не бросает — провал
+    планирования не должен валить write-действие (на худой конец job
+    восстановится через restore_reminders_on_startup).
+    """
+    try:
+        from nexus.handlers.tasks import _schedule_reminder
+        await _schedule_reminder(tg_id, title, local_dt, task_id, tz_offset)
+    except Exception as e:
+        logger.warning("live reminder reschedule failed for %s: %s", (task_id or "?")[:8], e)
+
+
 # ═══════════════════════════════════════════════════════════════
 # TASKS
 # ═══════════════════════════════════════════════════════════════
@@ -201,6 +221,10 @@ async def task_postpone(
             await _tasks_pg_repo.set_props(task_id, {"Напоминание": _date(remind_iso)})
         except Exception as e:
             logger.warning("could not set reminder: %s", e)
+        await _reschedule_task_reminder(
+            task_id, tg_id, task.title,
+            f"{new_date.isoformat()}T{int(hh):02d}:{int(mm):02d}", tz_offset,
+        )
 
     await notify_user(
         tg_id,
@@ -235,8 +259,9 @@ class TaskEditBody(BaseModel):
     title: Optional[str] = None
     cat: Optional[str] = None
     prio: Optional[str] = None
-    date: Optional[str] = None           # YYYY-MM-DD
-    time: Optional[str] = None           # HH:MM (reminder)
+    date: Optional[str] = None           # YYYY-MM-DD — дедлайн
+    time: Optional[str] = None           # HH:MM — время напоминания
+    reminder_date: Optional[str] = None  # YYYY-MM-DD — дата напоминания (независимо от дедлайна)
 
 
 @router.post("/tasks/{task_id}/edit")
@@ -262,15 +287,22 @@ async def task_edit(
         except ValueError:
             raise HTTPException(status_code=400, detail="invalid date, expected YYYY-MM-DD")
         props["Дедлайн"] = _date(new_date.isoformat())
-        if body.time:
-            try:
-                hh, mm = body.time.split(":")
-                tz = timezone(timedelta(hours=tz_offset))
-                remind_dt = datetime(new_date.year, new_date.month, new_date.day,
-                                     int(hh), int(mm), tzinfo=tz)
-                props["Напоминание"] = _date(remind_dt.isoformat())
-            except (ValueError, TypeError):
-                raise HTTPException(status_code=400, detail="invalid time, expected HH:MM")
+
+    # Напоминание редактируется независимо от дедлайна: дата берётся из
+    # reminder_date, при его отсутствии — из дедлайна (обратная совместимость
+    # со старым флоу «дата + время = напоминание на день дедлайна»).
+    remind_anchor = body.reminder_date or body.date
+    remind_local_dt: Optional[str] = None  # наивное локальное 'YYYY-MM-DDTHH:MM' для APScheduler
+    if body.time and remind_anchor:
+        try:
+            rdate = datetime.strptime(remind_anchor, "%Y-%m-%d").date()
+            hh, mm = body.time.split(":")
+            tz = timezone(timedelta(hours=tz_offset))
+            remind_dt = datetime(rdate.year, rdate.month, rdate.day, int(hh), int(mm), tzinfo=tz)
+            props["Напоминание"] = _date(remind_dt.isoformat())
+            remind_local_dt = f"{rdate.isoformat()}T{int(hh):02d}:{int(mm):02d}"
+        except (ValueError, TypeError):
+            raise HTTPException(status_code=400, detail="invalid reminder, expected date YYYY-MM-DD + time HH:MM")
 
     if not props:
         return {"ok": True, "noop": True}
@@ -281,6 +313,11 @@ async def task_edit(
         logger.error("task_edit set_props failed: %s", e)
         raise HTTPException(status_code=500, detail="failed to update task")
     new_title = (body.title or "").strip() or task.title
+    # Перепланировать живой APScheduler-job: Nexus-бот и miniapp backend живут
+    # в одном процессе, поэтому напоминание срабатывает сразу, без рестарта
+    # (restore_reminders_on_startup нужен только для холодного старта).
+    if remind_local_dt:
+        await _reschedule_task_reminder(task_id, tg_id, new_title, remind_local_dt, tz_offset)
     await notify_user(tg_id, f"✏️ Изменила: <b>{_esc(new_title)}</b>", bot="nexus")
     return {"ok": True}
 
