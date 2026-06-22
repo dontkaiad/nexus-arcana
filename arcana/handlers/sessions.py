@@ -563,6 +563,19 @@ async def _rag_index_batch_safe(items: List[dict]) -> None:
         logger.warning("rag batch index failed (%s items): %s", len(items), e)
 
 
+async def _rag_delete_safe(triplet_id: Optional[str]) -> None:
+    """RAG-AB: убрать вектор триплета из Qdrant (при удалении расклада). Провал
+    НЕ роняет операцию — PG источник истины (#166)."""
+    if not triplet_id:
+        return
+    try:
+        import asyncio as _aio
+        from core.rag import delete_triplet
+        await _aio.to_thread(delete_triplet, triplet_id)
+    except Exception as e:
+        logger.warning("rag delete failed for %s: %s", triplet_id, e)
+
+
 def _triplet_keyboard(page_id: str) -> InlineKeyboardMarkup:
     """Кнопки [✏️ Поправить] [🗑 Удалить] под сохранённым триплетом."""
     from core.utils import cancel_button, secondary_button
@@ -1379,12 +1392,20 @@ async def cb_triplet_remove_yes(call: CallbackQuery) -> None:
     if not ok:
         await call.message.edit_text("⚠️ Не удалось удалить триплет.")
         return
-    # Триплет удалён → общее саммари сессии устарело: чистим БД + кеш (#162).
+    # RAG-AB: убрать вектор из Qdrant — soft-delete оставляет строку в PG, но
+    # иначе search отдавал бы удалённый триплет (#166). Провал не роняет удаление.
+    await _rag_delete_safe(entry.id)
+    # Триплет удалён → общее саммари сессии И кросс-дневная сводка темы устарели:
+    # чистим БД + кеш (#162 #165).
     if entry.session_name:
         try:
             await _repo.clear_session_summary(entry.session_name, entry.client_id)
         except Exception as e:
             logger.warning("clear_session_summary failed: %s", e)
+        try:
+            await _repo.clear_theme_summary(entry.session_name, entry.client_id)
+        except Exception as e:
+            logger.warning("clear_theme_summary failed: %s", e)
         try:
             from core.session_cache import cache_delete, session_summary_key
             cache_delete(session_summary_key(entry.session_name, entry.client_id))
@@ -1620,13 +1641,25 @@ async def handle_triplet_correction(
     new_summary = await _make_triplet_summary(question, cards_ru, bottom_ru, new_interp)
     await _repo.update_interpretation(page_id, new_interp, new_summary)
 
-    # Триплет изменён → общее саммари сессии устарело: чистим БД + кеш,
-    # миниап предложит регенерацию (#162).
+    # RAG-AB: текст трактовки изменился → перезаписываем вектор (upsert по id,
+    # delete не нужен). Карты — в RU-форме (cards_ru), как индексировал create-флоу
+    # (там cards_text был RU), чтобы вектор не разошёлся с корпусом (#165 #166).
+    await _rag_index_safe(
+        page_id, cards=cards_ru, question=question, interpretation=new_interp,
+        client_id=cid, session_name=sname, occurred_at=entry.date,
+    )
+
+    # Триплет изменён → общее саммари сессии И кросс-дневная сводка темы устарели:
+    # чистим БД + кеш, миниап предложит регенерацию (#162 #165).
     if sname:
         try:
             await _repo.clear_session_summary(sname, cid)
         except Exception as e:
             logger.warning("clear_session_summary failed: %s", e)
+        try:
+            await _repo.clear_theme_summary(sname, cid)
+        except Exception as e:
+            logger.warning("clear_theme_summary failed: %s", e)
         try:
             from core.session_cache import cache_delete, session_summary_key
             cache_delete(session_summary_key(sname, cid))
