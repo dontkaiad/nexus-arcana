@@ -38,7 +38,8 @@ sessions = Table(
     Column("cards",           Text),
     Column("interpretation",  Text),
     Column("triplet_summary", Text),
-    Column("session_summary", Text),  # общее саммари сессии (на якорном триплете), #162
+    Column("session_summary", Text),  # саммари СОБЫТИЯ — триплеты одной отправки, #162
+    Column("theme_summary",   Text),  # кросс-дневная сводка ТЕМЫ (name, client), #165
     Column("bottom_card",     Text),
     Column("session_name",    Text),
     Column("spread_type",     Text),

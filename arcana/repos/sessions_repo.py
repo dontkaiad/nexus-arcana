@@ -26,7 +26,8 @@ class TripletEntry:
     spread_type: str = ""     # Тип расклада
     area: str = ""            # Область
     triplet_summary: str = "" # Саммари / AI_Summary
-    session_summary: str = "" # Общее саммари сессии (на якорном триплете), #162
+    session_summary: str = "" # Саммари СОБЫТИЯ — триплеты одной отправки, #162
+    theme_summary: str = ""   # Кросс-дневная сводка ТЕМЫ (name, client), #165
     barter_what: str = ""     # Бартер · что
     bottom_card: str = ""     # Дно колоды
     photo_url: Optional[str] = None
@@ -147,3 +148,18 @@ class SessionsRepo:
         self, session_name: str, client_id: Optional[str]
     ) -> int:
         return await _pg_repo().clear_session_summary(session_name, client_id)
+
+    async def set_theme_summary(self, page_id: str, summary: str) -> bool:
+        return await _pg_repo().set_theme_summary(page_id, summary)
+
+    async def clear_theme_summary(
+        self, session_name: str, client_id: Optional[str]
+    ) -> int:
+        return await _pg_repo().clear_theme_summary(session_name, client_id)
+
+    async def session_group_exists(
+        self, session_name: str, client_id: Optional[str], user_notion_id: str
+    ) -> bool:
+        return await _pg_repo().session_group_exists(
+            session_name, client_id, user_notion_id
+        )

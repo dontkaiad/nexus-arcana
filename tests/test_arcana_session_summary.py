@@ -1,12 +1,14 @@
-"""tests/test_arcana_session_summary.py — общее саммари сессии живёт в БД (#162).
+"""tests/test_arcana_session_summary.py — сводка ТЕМЫ живёт в БД (#162, #165).
+
+После #165 кросс-дневная сводка группы — это theme_summary якоря.
 
 GET /api/arcana/sessions/by-slug/{slug}:
-- summary берётся из session_summary якорного триплета (источник истины),
+- summary берётся из theme_summary якорного триплета (источник истины),
   кеш — fallback для домиграционных записей.
 
 POST /api/arcana/sessions/by-slug/{slug}/summarize:
-- уже посчитанное (в БД) саммари возвращается как cached, без вызова Sonnet;
-- свежее — пишется в БД на якорный триплет (set_session_summary) + кеш.
+- уже посчитанная (в theme_summary) сводка возвращается как cached, без Sonnet;
+- свежая — пишется в theme_summary якоря (set_theme_summary), НЕ в session_summary.
 """
 from __future__ import annotations
 
@@ -34,7 +36,8 @@ def client():
         app.dependency_overrides.clear()
 
 
-def _pg_triplet(pid, sname, client_id="c-1", topic="Q", session_summary=""):
+def _pg_triplet(pid, sname, client_id="c-1", topic="Q", session_summary="",
+                theme_summary=""):
     from arcana.repos.sessions_repo import TripletEntry
     return TripletEntry(
         id=pid, question=topic, cards="2 мечей, шут, маг",
@@ -42,8 +45,8 @@ def _pg_triplet(pid, sname, client_id="c-1", topic="Q", session_summary=""):
         date="2026-05-01", outcome="unverified",
         amount=Decimal("0"), paid=Decimal("0"),
         spread_type="", area="", triplet_summary="кратко",
-        session_summary=session_summary, barter_what="",
-        bottom_card="", photo_url=None,
+        session_summary=session_summary, theme_summary=theme_summary,
+        barter_what="", bottom_card="", photo_url=None,
     )
 
 
@@ -61,10 +64,11 @@ def _patch_get(mock_repo):
 
 
 def test_get_prefers_db_summary_over_cache(client):
+    # #165: summary группы берётся из theme_summary якоря (кросс-дневная тема).
     sname = "Вадим"
     slug = f"{slugify(sname)}__c-1"
     matching = [
-        _pg_triplet("t1", sname, "c-1", "1) общее", session_summary="ИЗ БД"),
+        _pg_triplet("t1", sname, "c-1", "1) общее", theme_summary="ИЗ БД"),
         _pg_triplet("t2", sname, "c-1", "2) чувства"),
     ]
     repo = MagicMock()
@@ -110,12 +114,12 @@ def test_summarize_returns_db_summary_without_sonnet(client):
     sname = "Вадим"
     slug = f"{slugify(sname)}__c-1"
     matching = [
-        _pg_triplet("t1", sname, "c-1", "1) общее", session_summary="ГОТОВОЕ"),
+        _pg_triplet("t1", sname, "c-1", "1) общее", theme_summary="ГОТОВОЕ"),
         _pg_triplet("t2", sname, "c-1", "2) чувства"),
     ]
     repo = MagicMock()
     repo.list_by_slug = AsyncMock(return_value=matching)
-    repo.set_session_summary = AsyncMock(return_value=True)
+    repo.set_theme_summary = AsyncMock(return_value=True)
     ask = AsyncMock(return_value="НЕ ДОЛЖНО ВЫЗВАТЬСЯ")
     with patch("miniapp.backend.routes.arcana_sessions._sessions_repo", repo), \
          patch("miniapp.backend.routes.arcana_sessions.get_user_notion_id",
@@ -129,7 +133,7 @@ def test_summarize_returns_db_summary_without_sonnet(client):
     assert body["summary"] == "ГОТОВОЕ"
     assert body["cached"] is True
     ask.assert_not_awaited()
-    repo.set_session_summary.assert_not_awaited()
+    repo.set_theme_summary.assert_not_awaited()
 
 
 def test_summarize_persists_fresh_to_db_anchor(client):
@@ -141,8 +145,8 @@ def test_summarize_persists_fresh_to_db_anchor(client):
     ]
     repo = MagicMock()
     repo.list_by_slug = AsyncMock(return_value=matching)
-    repo.set_session_summary = AsyncMock(return_value=True)
-    ask = AsyncMock(return_value="свежее общее саммари сессии")
+    repo.set_theme_summary = AsyncMock(return_value=True)
+    ask = AsyncMock(return_value="свежая кросс-дневная сводка темы")
     with patch("miniapp.backend.routes.arcana_sessions._sessions_repo", repo), \
          patch("miniapp.backend.routes.arcana_sessions.get_user_notion_id",
                AsyncMock(return_value=FAKE_NOTION)), \
@@ -152,9 +156,10 @@ def test_summarize_persists_fresh_to_db_anchor(client):
         r = client.post(f"/api/arcana/sessions/by-slug/{slug}/summarize")
     assert r.status_code == 200, r.text
     body = r.json()
-    assert body["summary"] == "свежее общее саммари сессии"
+    assert body["summary"] == "свежая кросс-дневная сводка темы"
     assert body["cached"] is False
     ask.assert_awaited_once()
     # Якорь = «1) общее» (index 1) после сортировки → t1, не t2.
-    repo.set_session_summary.assert_awaited_once()
-    assert repo.set_session_summary.await_args.args[0] == "t1"
+    # Пишется в theme_summary (НЕ session_summary), #165.
+    repo.set_theme_summary.assert_awaited_once()
+    assert repo.set_theme_summary.await_args.args[0] == "t1"

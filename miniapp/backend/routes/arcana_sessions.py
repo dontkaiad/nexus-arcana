@@ -329,6 +329,7 @@ async def session_by_slug(
                 "decks": [triplet_data["deck"]] if triplet_data["deck"] else [],
                 "first_date": triplet_data["date"],
                 "summary": None,
+                "session_summaries": [],
                 "photo_url": triplet_data.get("photo_url"),
                 "is_solo": True,
                 "triplets": [triplet_data],
@@ -357,11 +358,25 @@ async def session_by_slug(
             decks.append(t.deck)
 
     first_date_local = to_local_date(first.date or "", tz_offset)
-    # Источник истины — session_summary в БД (на якорном триплете). Кеш — fallback
-    # для записей, сделанных до миграции #162.
-    session_summary = (first.session_summary or "").strip() or None
-    if not session_summary and sname:
-        session_summary = cache_get(session_summary_key(sname, cid))
+    # Сводка ТЕМЫ (кросс-день) — theme_summary якоря группы; кеш — fallback для
+    # домиграционных записей (#165).
+    theme_summary = (first.theme_summary or "").strip() or None
+    if not theme_summary and sname:
+        theme_summary = cache_get(session_summary_key(sname, cid))
+
+    # Саммари СОБЫТИЙ по дням: на каждый occurred_at группы — session_summary
+    # дневного якоря (первый непустой триплет дня в порядке сортировки), #165.
+    _by_day: dict = {}
+    for t in matching:  # matching уже отсортирован по (index_in_title, date)
+        d = t.date or ""
+        if not d:
+            continue
+        _by_day.setdefault(d, "")
+        if not _by_day[d] and (t.session_summary or "").strip():
+            _by_day[d] = t.session_summary.strip()
+    session_summaries = [
+        {"date": d, "summary": _by_day[d] or None} for d in sorted(_by_day)
+    ]
     session_photo = next((t["photo_url"] for t in triplets if t.get("photo_url")), None)
 
     return {
@@ -375,7 +390,8 @@ async def session_by_slug(
         "type": "",
         "decks": decks,
         "first_date": first_date_local.isoformat() if first_date_local else None,
-        "summary": session_summary,
+        "summary": theme_summary,
+        "session_summaries": session_summaries,
         "photo_url": session_photo,
         "is_solo": False,
         "triplets": triplets,
@@ -407,11 +423,13 @@ async def session_summarize(
     cid = anchor.client_id
     cache_key = session_summary_key(sname, cid)
 
-    # Источник истины — БД (якорный триплет). Уже посчитанное саммари не
-    # перегенерируем (бережём токены Кай) — отдаём как cached (#162).
-    existing = (anchor.session_summary or "").strip() or cache_get(cache_key)
+    # Источник истины — theme_summary якоря (кросс-дневная сводка ТЕМЫ, #165).
+    # Гейт ТОЛЬКО на theme_summary: если есть — отдаём (не жжём Sonnet); если
+    # пуста — пересчитываем. На session_summary/кеш не короткозамыкаемся —
+    # session_summary это саммари СОБЫТИЯ (другое), а пустой theme_summary после
+    # пополнения темы должен приводить к свежему пересчёту.
+    existing = (anchor.theme_summary or "").strip()
     if existing:
-        cache_set(cache_key, existing)
         return {"summary": existing, "cached": True}
 
     parts: List[str] = []
@@ -442,8 +460,8 @@ async def session_summarize(
     summary = sanitize_summary(summary or "")
     if not summary:
         raise HTTPException(status_code=500, detail="empty summary")
-    # Насовсем — в БД (якорный триплет), кеш как fast-path (#162).
-    await _sessions_repo.set_session_summary(anchor.id, summary)
+    # Сводка ТЕМЫ — в theme_summary якоря (НЕ в session_summary), кеш fast-path (#165).
+    await _sessions_repo.set_theme_summary(anchor.id, summary)
     cache_set(cache_key, summary)
     return {"summary": summary, "cached": False}
 

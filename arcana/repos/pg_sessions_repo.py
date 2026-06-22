@@ -107,6 +107,7 @@ def _row_to_triplet(row) -> TripletEntry:
         area=row.area or "",
         triplet_summary=row.triplet_summary or "",
         session_summary=row.session_summary or "",
+        theme_summary=getattr(row, "theme_summary", None) or "",
         barter_what=row.barter_what or "",
         bottom_card=row.bottom_card or "",
         photo_url=row.photo_url or None,
@@ -148,6 +149,7 @@ def _select_sessions():
             sessions.c.interpretation,
             sessions.c.triplet_summary,
             sessions.c.session_summary,
+            sessions.c.theme_summary,
             sessions.c.bottom_card,
             sessions.c.session_name,
             sessions.c.spread_type,
@@ -372,6 +374,62 @@ class PgSessionsRepo:
             )
         return res.rowcount or 0
 
+    @staticmethod
+    def _theme_group_cond(session_name: str, client_id: Optional[str]):
+        """WHERE для ТЕМЫ (session_name ilike + client) — кросс-дневная группа."""
+        cond = sessions.c.session_name.ilike(session_name.strip())
+        if client_id:
+            try:
+                cond = cond & (sessions.c.client_id == int(client_id))
+            except (ValueError, TypeError):
+                cond = cond & (sessions.c.client_id.is_(None))
+        else:
+            cond = cond & (sessions.c.client_id.is_(None))
+        return cond
+
+    def _set_theme_summary_sync(self, session_id: str, summary: str) -> bool:
+        """Пишет кросс-дневную сводку ТЕМЫ на якорный триплет группы (#165)."""
+        try:
+            sid = int(session_id)
+        except (ValueError, TypeError):
+            return False
+        with get_engine().begin() as conn:
+            res = conn.execute(
+                sessions.update().where(sessions.c.id == sid)
+                .values(theme_summary=(summary or None) and summary[:4000])
+            )
+        return res.rowcount > 0
+
+    def _clear_theme_summary_sync(
+        self, session_name: str, client_id: Optional[str]
+    ) -> int:
+        """Сбрасывает theme_summary на всех триплетах ТЕМЫ — после пополнения
+        группы сводка устарела, миниап предложит «Сгенерировать» (#165)."""
+        if not session_name:
+            return 0
+        with get_engine().begin() as conn:
+            res = conn.execute(
+                sessions.update()
+                .where(self._theme_group_cond(session_name, client_id))
+                .values(theme_summary=None)
+            )
+        return res.rowcount or 0
+
+    def _session_group_exists_sync(
+        self, session_name: str, client_id: Optional[str], user_notion_id: str
+    ) -> bool:
+        """Существует ли ТЕМА (session_name ilike + client) хотя бы одной строкой.
+        Используется до сохранения новой отправки, чтобы понять — пополняем ли
+        существующую тему (тогда её theme_summary надо обнулить), #165."""
+        if not session_name:
+            return False
+        cond = self._theme_group_cond(session_name, client_id)
+        if user_notion_id:
+            cond = cond & (sessions.c.user_notion_id == user_notion_id)
+        stmt = select(sessions.c.id).where(cond).limit(1)
+        with get_engine().connect() as conn:
+            return conn.execute(stmt).first() is not None
+
     def _list_by_slug_sync(self, slug: str, user_notion_id: str) -> List[TripletEntry]:
         """Load all sessions and filter by slug (session_name__client_id|self)."""
         all_entries = self._list_all_sync(user_notion_id, None)
@@ -499,6 +557,25 @@ class PgSessionsRepo:
     ) -> int:
         return await asyncio.to_thread(
             self._clear_session_summary_sync, session_name, client_id
+        )
+
+    async def set_theme_summary(self, session_id: str, summary: str) -> bool:
+        return await asyncio.to_thread(
+            self._set_theme_summary_sync, session_id, summary
+        )
+
+    async def clear_theme_summary(
+        self, session_name: str, client_id: Optional[str]
+    ) -> int:
+        return await asyncio.to_thread(
+            self._clear_theme_summary_sync, session_name, client_id
+        )
+
+    async def session_group_exists(
+        self, session_name: str, client_id: Optional[str], user_notion_id: str
+    ) -> bool:
+        return await asyncio.to_thread(
+            self._session_group_exists_sync, session_name, client_id, user_notion_id
         )
 
     async def list_by_slug(

@@ -975,6 +975,18 @@ async def _handle_multi_session(
                 client_id = sc.id
     is_personal = forced_is_personal or not client_name
 
+    # Существовала ли ТЕМА (session_name+client) ДО этой отправки? Если да —
+    # после сохранения обнулим её theme_summary (кросс-дневная сводка устарела),
+    # вкладка покажет «Сгенерировать» (#165). Проверяем ДО вставки новых строк.
+    theme_preexisted = False
+    if session_name:
+        try:
+            theme_preexisted = await _repo.session_group_exists(
+                session_name, client_id, user_notion_id
+            )
+        except Exception as e:
+            logger.warning("session_group_exists failed: %s", e)
+
     # Контекст предыдущих раскладов клиента — общий для всех триплетов
     prev_context = ""
     if client_id:
@@ -1156,13 +1168,21 @@ async def _handle_multi_session(
         except Exception as e:
             logger.warning("session_summary generation failed: %s", e)
 
-    # Саммари сессии «насовсем» — в БД на якорный (первый) триплет (#162);
-    # кеш для миниапа как fast-path.
+    # Саммари СОБЫТИЯ (триплеты этой отправки) — в БД на якорный (первый)
+    # триплет этой отправки (#162); кеш для миниапа как fast-path.
     if first_page_id and session_summary_text:
         try:
             await _repo.set_session_summary(first_page_id, session_summary_text)
         except Exception as e:
             logger.warning("session_summary PG write failed: %s", e)
+
+    # Тема пополнилась новой отправкой → кросс-дневная сводка устарела: обнуляем
+    # theme_summary всей группы, миниап предложит «Сгенерировать» (#165).
+    if theme_preexisted and session_name:
+        try:
+            await _repo.clear_theme_summary(session_name, client_id)
+        except Exception as e:
+            logger.warning("clear_theme_summary failed: %s", e)
     try:
         from core.session_cache import session_summary_key, cache_delete, cache_set
         if session_name:
