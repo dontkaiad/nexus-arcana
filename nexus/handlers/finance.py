@@ -18,6 +18,7 @@ from aiogram import Router, F
 from core.claude_client import ask_claude, ask_claude_vision
 from nexus.handlers.utils import react
 from core.error_log import log_error
+from core.tg_send import send_long
 from core.props import _title, _number, _select, _date, _text
 from core.repos.finance_repo import _repo
 from core.config import FINANCE_CATEGORIES as CATEGORIES
@@ -3244,8 +3245,11 @@ async def _run_budget_analysis(message: Message, uid: int) -> None:
             await message.bot.delete_message(message.chat.id, loading.message_id)
         except Exception:
             pass
-        sent = await message.answer(
-            plan_text, parse_mode="HTML",
+        # План Sonnet может превысить 4096 (оба варианта + survival-планы) —
+        # edit_text не режется, поэтому в fallback шлём чанками. Кнопки —
+        # на последнее сообщение, его id и трекаем для последующих правок.
+        sent = await send_long(
+            message, plan_text, parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons),
         )
         state["msg_id"] = sent.message_id
@@ -3645,7 +3649,9 @@ async def _save_budget_plan(message: Message, uid: int) -> None:
         await loading.edit_text(result_text, parse_mode="HTML", reply_markup=markup)
     except Exception:
         try:
-            await message.answer(result_text, parse_mode="HTML", reply_markup=markup)
+            # Длинный план → чанки <4096 (edit_text не режется); короткий
+            # «✅ План сохранён» остаётся крайней страховкой на любой иной сбой.
+            await send_long(message, result_text, parse_mode="HTML", reply_markup=markup)
         except Exception:
             await message.answer("✅ План сохранён! Вызови /budget для просмотра.")
 

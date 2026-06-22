@@ -925,7 +925,12 @@ async def handle_voice(msg: Message, user_notion_id: str = "") -> None:
         await msg.answer("🎤 Не удалось распознать голосовое.")
         return
 
-    await msg.answer(f"🎤 <i>«{text}»</i>", parse_mode="HTML")
+    # Длинное голосовое → длинная расшифровка: режем на чанки <4096,
+    # иначе TelegramBadRequest «message is too long» (uncaught). Эхо —
+    # plain text: единый <i>…</i> не пережил бы разбиение (битый тег в
+    # чанке), а расшифровка Whisper не экранирована под HTML.
+    from core.tg_send import send_long
+    await send_long(msg, f"🎤 «{text}»")
 
     # Lists pending — могут ждать ответ на чек/чеклист
     from nexus.handlers.lists import handle_list_pending
