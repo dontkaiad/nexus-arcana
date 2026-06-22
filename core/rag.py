@@ -48,7 +48,9 @@ def get_voyage_client():
         return None
     try:
         import voyageai
-        _voyage_client = voyageai.Client(api_key=key)
+        # max_retries>0 включает нативный wait-and-retry SDK на rate-limit (429).
+        # Дефолт 0 (не повторяет) — под бесплатный тир 3 RPM это критично.
+        _voyage_client = voyageai.Client(api_key=key, max_retries=5)
         return _voyage_client
     except Exception as e:  # SDK не установлен / иная ошибка инициализации
         logger.warning("Voyage init failed: %s", e)
@@ -95,11 +97,32 @@ def _embed(
     if client is None:
         return []
     try:
+        # client.embed принимает СПИСОК → один запрос на весь батч; embeddings
+        # возвращаются в порядке входных текстов.
         resp = client.embed(texts, model=VOYAGE_MODEL, input_type=input_type)
         return list(resp.embeddings or [])
     except Exception as e:
-        logger.warning("Voyage embed failed (%s texts): %s", len(texts), e)
+        if _is_rate_limit(e):
+            # max_retries=5 в клиенте уже исчерпан → точку(и) пропускаем.
+            logger.warning(
+                "Voyage rate limit (3 RPM) исчерпан после ретраев — %s текст(ов) "
+                "пропущено", len(texts),
+            )
+        else:
+            logger.warning("Voyage embed failed (%s texts): %s", len(texts), e)
         return []
+
+
+def _is_rate_limit(e: Exception) -> bool:
+    """Это rate-limit ошибка Voyage (429)? Сначала по классу RateLimitError
+    (если SDK его экспортирует), иначе по status_code==429 — на случай старого SDK."""
+    try:
+        from voyageai import RateLimitError
+        if isinstance(e, RateLimitError):
+            return True
+    except ImportError:
+        pass
+    return getattr(e, "status_code", None) == 429
 
 
 def ensure_collection(
@@ -156,6 +179,28 @@ def _interp_excerpt(interpretation: str, limit: int = 400) -> str:
     return txt[:limit]
 
 
+def _triplet_text(cards, question, interpretation) -> str:
+    """Текст для эмбеддинга — непустые части {cards, question, interpretation}."""
+    parts = [str(p).strip() for p in (cards, question, interpretation) if p and str(p).strip()]
+    return " ".join(parts)
+
+
+def _triplet_payload(
+    triplet_id, cards, question, interpretation, client_id, session_name, occurred_at
+) -> dict:
+    return {
+        "triplet_id": str(triplet_id),
+        "client_id": str(client_id) if client_id else None,
+        "session_name": session_name or None,
+        "occurred_at": occurred_at or None,
+        "question": question or None,
+        "cards": cards or None,
+        # огрызок трактовки — чтобы поиск отдавал текст для инъекции «стиль/тон»
+        # без обратного похода в PG.
+        "interp_excerpt": _interp_excerpt(interpretation),
+    }
+
+
 def index_triplet(
     triplet_id,
     cards: str,
@@ -165,22 +210,21 @@ def index_triplet(
     session_name: Optional[str] = None,
     occurred_at: Optional[str] = None,
 ) -> bool:
-    """Индексирует триплет в arcana_triplets (upsert по детерминированному id).
+    """Индексирует ОДИН триплет в arcana_triplets (upsert по детерминированному id).
+    Один _embed = один запрос Voyage. Для N триплетов сессии используй
+    index_triplets_batch (один запрос на всех — бережёт 3 RPM).
 
-    Текст эмбеддинга = непустые части {cards, question, interpretation}
-    (пустой interpretation не ломает — собираем из того, что есть).
     Graceful: Qdrant/Voyage недоступны → warning + False, без исключения."""
     client = get_qdrant_client()
     if client is None:
         return False
-    parts = [str(p).strip() for p in (cards, question, interpretation) if p and str(p).strip()]
-    text = " ".join(parts)
+    text = _triplet_text(cards, question, interpretation)
     if not text:
         logger.warning("index_triplet(%s): пустой текст — пропуск", triplet_id)
         return False
     vecs = _embed(text, input_type="document")
     if not vecs:
-        return False  # _embed уже залогировал (нет ключа/ошибка)
+        return False  # _embed уже залогировал (нет ключа / rate-limit / ошибка)
     try:
         from qdrant_client.models import PointStruct
         client.upsert(
@@ -188,23 +232,64 @@ def index_triplet(
             points=[PointStruct(
                 id=_point_id(triplet_id),
                 vector=vecs[0],
-                payload={
-                    "triplet_id": str(triplet_id),
-                    "client_id": str(client_id) if client_id else None,
-                    "session_name": session_name or None,
-                    "occurred_at": occurred_at or None,
-                    "question": question or None,
-                    "cards": cards or None,
-                    # огрызок трактовки — чтобы поиск отдавал текст для инъекции
-                    # «стиль/тон» без обратного похода в PG.
-                    "interp_excerpt": _interp_excerpt(interpretation),
-                },
+                payload=_triplet_payload(
+                    triplet_id, cards, question, interpretation,
+                    client_id, session_name, occurred_at,
+                ),
             )],
         )
         return True
     except Exception as e:
         logger.warning("index_triplet(%s) upsert failed: %s", triplet_id, e)
         return False
+
+
+def index_triplets_batch(triplets: List[dict]) -> int:
+    """Индексирует N триплетов ОДНИМ запросом Voyage (батч-эмбеддинг) + ОДНИМ
+    upsert в Qdrant. Критично под лимит 3 RPM: N триплетов = 1 запрос, не N.
+
+    triplets: список dict с ключами triplet_id, cards, question, interpretation,
+    client_id, session_name, occurred_at. Триплеты с пустым текстом пропускаются.
+    Возвращает число проиндексированных точек. Graceful: 0 при недоступности."""
+    client = get_qdrant_client()
+    if client is None:
+        return 0
+    # (исходный dict, текст) только для непустых — сохраняем выравнивание векторов.
+    prepared = []
+    for t in (triplets or []):
+        text = _triplet_text(t.get("cards"), t.get("question"), t.get("interpretation"))
+        if text:
+            prepared.append((t, text))
+    if not prepared:
+        return 0
+    vecs = _embed([txt for _, txt in prepared], input_type="document")
+    if not vecs:
+        return 0  # нет ключа / rate-limit / ошибка — _embed уже залогировал
+    if len(vecs) != len(prepared):
+        logger.warning(
+            "index_triplets_batch: векторов %s != текстов %s — пропуск батча",
+            len(vecs), len(prepared),
+        )
+        return 0
+    try:
+        from qdrant_client.models import PointStruct
+        points = [
+            PointStruct(
+                id=_point_id(t["triplet_id"]),
+                vector=vec,
+                payload=_triplet_payload(
+                    t["triplet_id"], t.get("cards"), t.get("question"),
+                    t.get("interpretation"), t.get("client_id"),
+                    t.get("session_name"), t.get("occurred_at"),
+                ),
+            )
+            for (t, _), vec in zip(prepared, vecs)
+        ]
+        client.upsert(collection_name=COLLECTION_TRIPLETS, points=points)
+        return len(points)
+    except Exception as e:
+        logger.warning("index_triplets_batch upsert failed: %s", e)
+        return 0
 
 
 def search_triplets(

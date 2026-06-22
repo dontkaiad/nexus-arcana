@@ -192,10 +192,86 @@ async def test_voice_block_skips_empty_interp(monkeypatch):
     assert await S._rag_voice_block("X", "Y") == ""
 
 
-# ── backfill ──────────────────────────────────────────────────────────────────
+# ── batch embedding (порядок + один запрос) ───────────────────────────────────
+
+def test_embed_batch_returns_vectors_in_order(monkeypatch):
+    client = MagicMock()
+    client.embed.return_value = types.SimpleNamespace(embeddings=[[1.0], [2.0], [3.0]])
+    monkeypatch.setattr(rag, "get_voyage_client", lambda: client)
+    out = rag._embed(["a", "b", "c"], input_type="document")
+    assert out == [[1.0], [2.0], [3.0]]  # порядок входа сохранён
+    # один запрос на весь батч (список из 3 текстов)
+    client.embed.assert_called_once()
+    assert client.embed.call_args.args[0] == ["a", "b", "c"]
+
+
+def test_index_triplets_batch_single_embed(monkeypatch, fake_models):
+    client = MagicMock()
+    monkeypatch.setattr(rag, "get_qdrant_client", lambda: client)
+    embed_mock = MagicMock(return_value=[[0.1], [0.2], [0.3]])
+    monkeypatch.setattr(rag, "_embed", embed_mock)
+
+    items = [
+        {"triplet_id": str(i), "cards": "c", "question": "q", "interpretation": "i",
+         "client_id": "c1", "session_name": "S", "occurred_at": "2026-06-22"}
+        for i in (1, 2, 3)
+    ]
+    n = rag.index_triplets_batch(items)
+    assert n == 3
+    embed_mock.assert_called_once()                 # ОДИН _embed на N триплетов
+    assert client.upsert.call_count == 1            # один upsert пакетом
+    pts = client.upsert.call_args.kwargs["points"]
+    assert [p.id for p in pts] == [1, 2, 3]
+
+
+def test_index_triplets_batch_skips_empty_text(monkeypatch, fake_models):
+    client = MagicMock()
+    monkeypatch.setattr(rag, "get_qdrant_client", lambda: client)
+    captured = {}
+    monkeypatch.setattr(rag, "_embed", lambda texts, input_type="document": (
+        captured.update(texts=texts) or [[0.1]] * len(texts)))
+    items = [
+        {"triplet_id": "1", "cards": "", "question": "", "interpretation": ""},  # пустой
+        {"triplet_id": "2", "cards": "c", "question": "q", "interpretation": "i"},
+    ]
+    n = rag.index_triplets_batch(items)
+    assert n == 1                                   # пустой пропущен
+    assert len(captured["texts"]) == 1
+
+
+# ── rate-limit ловится отдельно ───────────────────────────────────────────────
+
+def test_rate_limit_caught_separately(monkeypatch, caplog):
+    client = MagicMock()
+
+    class _RL(Exception):
+        status_code = 429
+
+    client.embed.side_effect = _RL("rate limited")
+    monkeypatch.setattr(rag, "get_voyage_client", lambda: client)
+    import logging
+    with caplog.at_level(logging.WARNING, logger="core.rag"):
+        out = rag._embed(["a"])
+    assert out == []
+    assert any("rate limit" in r.message.lower() for r in caplog.records)
+
+
+def test_other_error_not_treated_as_rate_limit(monkeypatch, caplog):
+    client = MagicMock()
+    client.embed.side_effect = RuntimeError("boom")  # без status_code
+    monkeypatch.setattr(rag, "get_voyage_client", lambda: client)
+    import logging
+    with caplog.at_level(logging.WARNING, logger="core.rag"):
+        out = rag._embed(["a"])
+    assert out == []
+    assert not any("rate limit" in r.message.lower() for r in caplog.records)
+    assert rag._is_rate_limit(RuntimeError("boom")) is False
+
+
+# ── backfill (батч) ───────────────────────────────────────────────────────────
 
 @pytest.mark.asyncio
-async def test_backfill_indexes_each_row(monkeypatch):
+async def test_backfill_uses_batch(monkeypatch):
     import scripts.backfill_arcana_rag as bf
     from arcana.repos.sessions_repo import TripletEntry
 
@@ -207,9 +283,11 @@ async def test_backfill_indexes_each_row(monkeypatch):
         for i in (1, 2, 3)
     ]
     monkeypatch.setattr(bf.PgSessionsRepo, "list_all", AsyncMock(return_value=rows))
-    calls = []
-    monkeypatch.setattr(bf, "index_triplet", lambda *a, **k: bool(calls.append(a[0])) or True)
-
+    seen = {}
+    monkeypatch.setattr(
+        bf, "index_triplets_batch",
+        lambda items: seen.update(ids=[t["triplet_id"] for t in items]) or len(items),
+    )
     n = await bf.backfill()
     assert n == 3
-    assert calls == ["1", "2", "3"]
+    assert seen["ids"] == ["1", "2", "3"]  # один батч на всю историю

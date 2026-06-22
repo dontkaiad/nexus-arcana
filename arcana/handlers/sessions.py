@@ -549,6 +549,20 @@ async def _rag_index_safe(
         logger.warning("rag index failed for %s: %s", page_id, e)
 
 
+async def _rag_index_batch_safe(items: List[dict]) -> None:
+    """RAG-AB батч-индексация N триплетов сессии ОДНИМ запросом Voyage (бережём
+    3 RPM). items — список dict для index_triplets_batch. Провал НЕ роняет
+    сессию (данные уже в PG)."""
+    if not items:
+        return
+    try:
+        import asyncio as _aio
+        from core.rag import index_triplets_batch
+        await _aio.to_thread(index_triplets_batch, items)
+    except Exception as e:
+        logger.warning("rag batch index failed (%s items): %s", len(items), e)
+
+
 def _triplet_keyboard(page_id: str) -> InlineKeyboardMarkup:
     """Кнопки [✏️ Поправить] [🗑 Удалить] под сохранённым триплетом."""
     from core.utils import cancel_button, secondary_button
@@ -1079,6 +1093,7 @@ async def _handle_multi_session(
     first_page_id: Optional[str] = None
     saved_titles: List[str] = []
     saved_triplets: List[dict] = []  # для финального саммари сессии
+    rag_batch: List[dict] = []       # триплеты для одного RAG-батч-эмбеддинга (#166)
 
     await message.answer(
         f"🃏 Сессия «{html.escape(session_name or '—')}» · {len(items)} триплетов — обрабатываю…"
@@ -1172,12 +1187,17 @@ async def _handle_multi_session(
                 if not first_page_id:
                     first_page_id = page_id
 
-                # RAG-AB: индексируем триплет (provал не роняет сессию, #166).
-                await _rag_index_safe(
-                    page_id, cards=cards_text, question=question,
-                    interpretation=interpretation, client_id=client_id,
-                    session_name=session_name or None, occurred_at=_now_iso(tz)[:10],
-                )
+                # RAG-AB: копим триплет для ОДНОГО батч-эмбеддинга после цикла
+                # (N триплетов = 1 запрос Voyage, бережём лимит 3 RPM, #166).
+                rag_batch.append({
+                    "triplet_id": page_id,
+                    "cards": cards_text,
+                    "question": question,
+                    "interpretation": interpretation,
+                    "client_id": client_id,
+                    "session_name": session_name or None,
+                    "occurred_at": _now_iso(tz)[:10],
+                })
 
                 # Триплет в чат: вопрос + карты + дно + трактовка (telegram-safe).
                 interp_tg = html_to_telegram(interpretation)
@@ -1216,6 +1236,10 @@ async def _handle_multi_session(
                 })
         except Exception as e:
             logger.error("multi-session item %d failed: %s", idx, e)
+
+    # RAG-AB: все триплеты сессии — ОДНИМ батч-эмбеддингом + одним upsert
+    # (вместо N запросов; критично под 3 RPM Voyage, #166).
+    await _rag_index_batch_safe(rag_batch)
 
     # Фото расклада приложено к сообщению → в Cloudinary + на якорный
     # (первый) триплет сессии (#161). Одно фото на всю сессию.
