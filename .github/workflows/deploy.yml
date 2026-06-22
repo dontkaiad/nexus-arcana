@@ -34,7 +34,7 @@ jobs:
           OUT: ${{ steps.deploy.outputs.stdout }}
         run: |
           echo "$OUT"
-          echo "$OUT" | grep -q "deploy done" || { echo "marker missing — deploy failed"; exit 1; }
+          echo "$OUT" | grep -q "deploy done THIS_WILL_NOT_MATCH" || { echo "marker missing — deploy failed"; exit 1; }
 
       - name: Notify Telegram on failure
         if: failure()
