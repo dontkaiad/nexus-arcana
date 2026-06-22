@@ -13,4 +13,9 @@ jobs:
           username: ${{ secrets.SERVER_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           command_timeout: "10m"
-          script: "deploy"
+          script: |
+            set -e
+            cd ~/nexus-arcana
+            git pull origin main
+            docker compose up -d --build
+            docker compose ps
