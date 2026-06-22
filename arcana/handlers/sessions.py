@@ -128,7 +128,8 @@ PARSE_SESSION_SYSTEM = (
     '"area": "Отношения|Финансы|Работа|Здоровье|Род|Общая ситуация", '
     '"deck": "Уэйт|Dark Wood|Ленорман|Игральные|Deviant Moon или null", '
     '"amount": число, "paid": число, '
-    '"payment_source": "карта|наличные|бартер или null"}\n\n'
+    '"payment_source": "карта|наличные|бартер или null", '
+    '"interpretation": "трактовка пользователя ДОСЛОВНО ИЛИ null"}\n\n'
     "═══ ФОРМАТ A — нумерованная сессия ═══\n"
     "  Вадим:\n"
     "  1) что думает — шут маг жрица дно король кубков\n"
@@ -152,7 +153,28 @@ PARSE_SESSION_SYSTEM = (
     '"deck": "Уэйт|...", "amount": число, "paid": число, "payment_source": "...", '
     '"triplets": [{"question": "вопрос1", "cards": ["карта1","карта2","карта3"], '
     '"bottom_card": "карта или null", "area": "Отношения|Финансы|Работа|Здоровье|'
-    'Род|Общая ситуация", "spread_type": "Триплет"}, ...]}\n\n'
+    'Род|Общая ситуация", "spread_type": "Триплет", '
+    '"interpretation": "трактовка ЭТОГО триплета ДОСЛОВНО ИЛИ null"}, ...]}\n\n'
+    "═══ ПОЛЕ interpretation (КРИТИЧНО — авторская трактовка для CRM) ═══\n"
+    "Различай ДВА случая и НЕ путай:\n"
+    "1) ТОЛЬКО КАРТЫ — пользователь назвал имена карт + вопрос, БЕЗ пояснения "
+    "что карты значат. → interpretation = null.\n"
+    "   Примеры (interpretation=null):\n"
+    "   - «оля, что чувствует — король кубков туз мечей дно двойка»\n"
+    "   - «устроюсь ли на работу — жрица суд шут дно король кубков»\n"
+    "   - «вадим, что думает — шут маг жрица»\n"
+    "2) КАРТЫ + ТРАКТОВКА — есть НАРРАТИВ поверх имён карт: что карта значит, "
+    "к чему ведёт, совет, вывод. → interpretation = этот текст ДОСЛОВНО (слова "
+    "пользователя; НЕ сочиняй, НЕ переписывай своими словами, только перенеси речь).\n"
+    "   Примеры (interpretation=<текст>):\n"
+    "   - «король кубков тёплый но закрыт, туз мечей режет иллюзии, дно двойка — "
+    "выбор не сделан» → interpretation: «король кубков тёплый но закрыт, туз мечей "
+    "режет иллюзии, дно двойка — выбор не сделан»\n"
+    "   - «жрица говорит жди, не лезь сейчас, суд — ответ придёт позже» → "
+    "interpretation: «жрица говорит жди, не лезь сейчас, суд — ответ придёт позже»\n"
+    "СТРОГО: НЕ клади в interpretation кусок вопроса, имя клиента, оплату или "
+    "болтовню/мету — ТОЛЬКО смысловую трактовку карт. Сомневаешься, трактовка это "
+    "или просто вопрос — ставь null. В мульти interpretation своя у КАЖДОГО триплета.\n\n"
     "ОПРЕДЕЛЕНИЕ session_name — 1-5 слов, отражает СУТЬ группы:\n"
     "- если в тексте есть и имя клиента, и тема/практика → "
     "'{Имя клиента} — {Тема}' "
@@ -283,6 +305,32 @@ TAROT_SYSTEM = (
     "🂠 строго для дна колоды.\n\n"
     "Имена карт и ключевые сущности выделяй <b>...</b>. Цитаты/акценты — <i>...</i>. "
     "Не используй <br>, разделяй блоки тегами <h3>/<p>."
+)
+
+# Режим A: Кай НАДИКТОВАЛА свою трактовку — её надо ПРИЧЕСАТЬ, а не сочинить
+# заново. Sonnet (не Haiku): сохранить связность и голос автора, не сломав
+# смысл — это narrative-задача с эмпатией, Haiku пересушит и переврёт (CLAUDE.md
+# разрешает Sonnet для трактовок sessions.py). Регрессия — test_models_audit.
+PERSONAL_INTERP_SYSTEM = (
+    "Кай — таролог — НАДИКТОВАЛА свою трактовку расклада голосом. Твоя задача — "
+    "ПРИЧЕСАТЬ её речь, НЕ сочиняя заново. Это ЕЁ трактовка, не твоя.\n\n"
+    "Правила:\n"
+    "1. СОХРАНИ смысл и формулировки Кай дословно по сути. Перенеси её мысль, "
+    "не подменяй своей.\n"
+    "2. Исправь орфографию, опечатки, раскладку; убери слова-паразиты и оговорки "
+    "(«ну», «это самое», «короче», «эээ»); почини пунктуацию.\n"
+    "3. Структурируй для читаемости. НО НЕ навязывай разбивку по картам, если "
+    "Кай дала холистическую трактовку (сплошным потоком) — сохрани её структуру.\n"
+    "4. НЕ подменяй значениями из справочника. НЕ добавляй карты, смыслы или "
+    "выводы, которых Кай не озвучила. Ничего не доизобретай — только её слова.\n"
+    "5. Если Кай прошлась по картам по очереди — оформи карты заголовками. "
+    "Если говорила потоком — оставь абзацами.\n\n"
+    "ВЫВОДИ ТОЛЬКО HTML с тегами <h3>, <b>, <i>, <p>. Никакого markdown "
+    "(никаких **, __, ##, *, _ — никогда). Других тегов нет "
+    "(<div>, <span>, <strong>, <em> — запрещены).\n"
+    "Имена карт и ключевые сущности — <b>...</b>. Акценты/цитаты — <i>...</i>. "
+    "Заголовки разделов/карт — <h3>...</h3>, текст — <p>...</p>. Без <br>.\n"
+    "Эмодзи карт по желанию (🃏 ⚔️ 🪙 🍷 🪄); 🂠 — строго для дна колоды."
 )
 
 VISION_SYSTEM = (
@@ -463,6 +511,32 @@ async def _make_triplet_summary(
         return ""
 
 
+async def _polish_authored_interpretation(
+    authored: str, cards_text: str, bottom_card: str, question: str
+) -> str:
+    """Режим A: причесать НАДИКТОВАННУЮ Кай трактовку (не сочинять). Sonnet с
+    PERSONAL_INTERP_SYSTEM. Возвращает HTML; на пустом authored → ''.
+
+    Общий для single и multi флоу — чтобы режим A не разошёлся параллельными
+    реализациями (CLAUDE.md: Nexus/Arcana и оба session-флоу — один паттерн).
+    """
+    if not authored:
+        return ""
+    user_prompt = (
+        f"Карты расклада: {cards_text}\n"
+        + (f"Дно колоды: {bottom_card}\n" if bottom_card else "")
+        + f"Вопрос: {question}\n\n"
+        f"Сырая трактовка Кай (причеши, не сочиняй заново):\n{authored}"
+    )
+    return await ask_claude(
+        user_prompt,
+        system=PERSONAL_INTERP_SYSTEM,
+        model=_cfg.model_sonnet,
+        max_tokens=2000,
+        temperature=0.3,
+    )
+
+
 def _parse_json_safe(raw: str) -> Optional[dict]:
     try:
         clean = raw.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
@@ -617,6 +691,7 @@ async def _save_and_post_triplet(
     bottom_card: str,
     area: str,
     interpretation: str,
+    authored: bool = False,
     session_name: Optional[str] = None,
     payment_source: Optional[str] = None,
     amount: float = 0,
@@ -625,7 +700,11 @@ async def _save_and_post_triplet(
 ) -> Optional[str]:
     """Унифицированный путь: канон → Sonnet-трактовка уже готова → Haiku-саммари
     → запись в Notion → пост в чат с кнопками [Поправить/Удалить] (+оплата
-    для платного клиента). Возвращает page_id."""
+    для платного клиента). Возвращает page_id.
+
+    authored=True (режим A — авторская трактовка из голоса): НЕ дописываем
+    машинный блок дна, иначе он загрязнит текст Кай выдуманным описанием. Дно
+    всё равно видно в шапке сообщения и хранится в своём поле bottom_card."""
     from core.html_sanitize import sanitize_interpretation
     from core.html_for_telegram import html_to_telegram
     from core.client_resolve import client_get_type, should_skip_payment
@@ -633,7 +712,7 @@ async def _save_and_post_triplet(
 
     cards_en = _canon_cards_str(cards_text, deck or "Уэйт") or cards_text
     bottom_en = _canon_card(bottom_card, deck or "Уэйт") if bottom_card else ""
-    if bottom_en and "🂠" not in interpretation:
+    if bottom_en and "🂠" not in interpretation and not authored:
         interpretation = (
             interpretation.rstrip()
             + f"\n\n<h3>🂠 {bottom_en} · фон</h3><p>Скрытый фон расклада.</p>"
@@ -870,9 +949,17 @@ async def handle_add_session(
             except Exception:
                 pass
 
-        # 5. Трактовка через Sonnet
+        # 5. Трактовка: режим A (причесать авторскую из голоса) vs B (сгенерить).
+        authored = (data.get("interpretation") or "").strip()
         interpretation = ""
-        if card_names:
+        if authored:
+            # Режим A — Кай надиктовала свою трактовку. Её причёсанный текст идёт
+            # в interpretation → дальше в саммари/RAG (учимся на голосе Кай).
+            interpretation = await _polish_authored_interpretation(
+                authored, cards_text, bottom_card, question
+            )
+        elif card_names:
+            # Режим B — трактовки в голосе нет, генерим по картам (как раньше).
             system = TAROT_SYSTEM
             if cards_context:
                 system += f"\n\n--- СПРАВОЧНИК КАРТ ---\n{cards_context}"
@@ -921,6 +1008,7 @@ async def handle_add_session(
             bottom_card=bottom_card,
             area=area,
             interpretation=interpretation,
+            authored=bool(authored),
             session_name=None,  # одиночный — без сессии
             payment_source=payment_source,
             amount=amount,
@@ -1135,9 +1223,16 @@ async def _handle_multi_session(
                     context=(message.text or "")[:200],
                 )
 
-            # Sonnet — трактовка
+            # Трактовка: режим A (причесать авторскую из голоса) vs B (сгенерить).
+            authored = (it.get("interpretation") or "").strip()
             interpretation = ""
-            if card_names:
+            if authored:
+                # Режим A — авторская трактовка этого триплета из голоса.
+                interpretation = await _polish_authored_interpretation(
+                    authored, cards_text, bottom_card, question
+                )
+            elif card_names:
+                # Режим B — генерим по картам (как раньше).
                 system = TAROT_SYSTEM
                 if cards_context:
                     system += f"\n\n--- СПРАВОЧНИК КАРТ ---\n{cards_context}"
@@ -1160,7 +1255,7 @@ async def _handle_multi_session(
                     temperature=0.7,
                 )
 
-            # Haiku — саммари триплета
+            # Haiku — саммари триплета (по interpretation: авторской или машинной)
             t_summary = await _make_triplet_summary(
                 question, cards_text, bottom_card, interpretation
             )
@@ -1168,7 +1263,8 @@ async def _handle_multi_session(
             # Канон → EN для Notion
             cards_en = _canon_cards_str(cards_text, deck)
             bottom_en = _canon_card(bottom_card, deck) if bottom_card else ""
-            if bottom_en and "🂠" not in interpretation:
+            # Режим A: не дописываем машинный блок дна к авторскому тексту.
+            if bottom_en and "🂠" not in interpretation and not authored:
                 interpretation = (
                     interpretation.rstrip()
                     + f"\n\n<h3>🂠 {bottom_en} · фон</h3>"
