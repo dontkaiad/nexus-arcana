@@ -6346,7 +6346,19 @@ const FAB_TITLE = {
 
 const PRIOS = ["🔴", "🟡", "⚪"];
 
+// Светлый ли цвет (для выбора colorScheme нативных контролов). #rrggbb → яркость.
+function _isLightColor(c) {
+  const m = /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})/i.exec(String(c || ""));
+  if (!m) return false;
+  const r = parseInt(m[1], 16), g = parseInt(m[2], 16), b = parseInt(m[3], 16);
+  return (0.299 * r + 0.587 * g + 0.114 * b) > 140;
+}
+
 function Input({ s, value, onChange, placeholder, type = "text", step }) {
+  // Нативные date/time на iOS/Telegram не наследуют color: значение
+  // рисуется системным (в OS dark mode — бледным) → нечитаемо. Форсим цвет
+  // через WebkitTextFillColor + colorScheme по теме (день=light, ночь=dark).
+  const scheme = _isLightColor(s.text) ? "dark" : "light";
   return (
     <input
       type={type}
@@ -6360,6 +6372,8 @@ function Input({ s, value, onChange, placeholder, type = "text", step }) {
         borderRadius: 10,
         padding: "10px 12px",
         color: s.text,
+        WebkitTextFillColor: s.text,
+        colorScheme: scheme,
         fontFamily: B,
         fontSize: fs(13),
         outline: "none",
