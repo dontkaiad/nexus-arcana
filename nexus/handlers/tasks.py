@@ -19,6 +19,13 @@ from nexus.handlers.utils import react
 from core.layout import maybe_convert
 from core.utils import cancel_button, secondary_button
 from core.task_reminder_msg import save_task_reminder, delete_task_reminder
+from core.location import (
+    CITY_TZ as _CITY_TZ,
+    get_user_tz as _location_get_user_tz,
+    set_user_location as _set_user_location,
+    resolve_offset as _resolve_offset,
+    _tz_offsets as _user_tz_offset,
+)
 
 logger = logging.getLogger("nexus.tasks")
 MOSCOW_TZ = timezone(timedelta(hours=3))
@@ -186,7 +193,8 @@ def _last_task_del(uid: int) -> None:
 
 
 # ── Global state ───────────────────────────────────────────────────────────────
-_user_tz_offset: dict = {}
+# _user_tz_offset импортируется из core.location (#170) — единый tz-кеш,
+# общий для бота, time_manager и _now(); пишется через set_user_location.
 _scheduler = None
 _bot: Optional[Bot] = None
 
@@ -586,48 +594,8 @@ async def _schedule_deadline_check(chat_id: int, title: str, deadline_dt: str, t
         logger.error("Schedule deadline error: %s", e)
 
 async def _get_user_tz(uid: int) -> int:
-    if uid in _user_tz_offset:
-        return _user_tz_offset[uid]
-    from core.repos.pg_memory_repo import PgMemoryRepo as _MemRepo
-    mems = await _MemRepo().find_by_exact_key(f"tz_{uid}")
-    stored = mems[0].fact if mems else None
-    if stored:
-        try:
-            offset = int(stored)
-            _user_tz_offset[uid] = offset
-            return offset
-        except Exception:
-            pass
-    return 3
-
-_CITY_TZ = {
-    # Россия
-    "москва": 3, "мск": 3, "московск": 3,
-    "спб": 3, "санкт-петербург": 3, "питер": 3, "петербург": 3,
-    "калининград": 2,
-    "самара": 4, "удмуртия": 5, "ижевск": 5,
-    "екатеринбург": 5, "екб": 5, "ебург": 5, "свердловск": 5, "уфа": 5,
-    "челябинск": 5, "тюмень": 5, "башкирия": 5, "пермь": 5,
-    "омск": 6,
-    "новосибирск": 7, "новосиб": 7, "красноярск": 7, "томск": 7, "барнаул": 7,
-    "иркутск": 8, "улан-удэ": 8,
-    "якутск": 9, "хабаровск": 10, "владивосток": 10, "магадан": 11,
-    "сахалин": 11, "камчатка": 12,
-    # Другие
-    "дубай": 4, "абу-даби": 4,
-    "берлин": 1, "варшава": 1, "рим": 1, "париж": 1,
-    "лондон": 0,
-    "бангкок": 7, "токио": 9, "сеул": 9, "пекин": 8,
-    # Турция (UTC+3 круглый год с 2016)
-    "турци": 3, "стамбул": 3, "анкара": 3,
-    "анталь": 3, "алани": 3, "измир": 3,
-    "бодрум": 3, "кемер": 3, "фетхие": 3, "мерсин": 3,
-    # Грузия / Армения
-    "тбилис": 4, "батум": 4, "ереван": 4,
-    # Кипр / Израиль
-    "кипр": 2, "ларнак": 2, "лимасол": 2, "никос": 2,
-    "израил": 2, "тель-авив": 2, "иерусалим": 2,
-}
+    """tz пользователя из единого источника (core.location, #170)."""
+    return await _location_get_user_tz(uid)
 
 
 async def _reschedule_all_for_tz(uid: int, chat_id: int, old_offset: int, new_offset: int) -> None:
@@ -672,31 +640,13 @@ async def _reschedule_all_for_tz(uid: int, chat_id: int, old_offset: int, new_of
         logger.error("tz_reschedule outer: %s", e)
 
 
-async def _update_user_tz(message: Message, text: str) -> None:
-    from core.repos.pg_memory_repo import PgMemoryRepo as _MemRepo
+async def _update_user_tz(message: Message, text: str, user_notion_id: str = "") -> None:
     uid = message.from_user.id
-    text_low = text.lower()
 
-    # Сначала пробуем словарь городов (быстро, без API)
-    offset = None
-    matched_city = None
-    for city, tz in _CITY_TZ.items():
-        if city in text_low:
-            offset = tz
-            matched_city = city
-            break
+    # Город/UTC → offset через общий справочник (#170).
+    offset, matched_city = _resolve_offset(text)
 
-    # Потом пробуем UTC±X паттерн
-    if offset is None:
-        import re as _re
-        m = _re.search(r"utc\s*([+-]?\d+)", text_low)
-        if m:
-            try:
-                offset = int(m.group(1))
-            except ValueError:
-                pass
-
-    # Крайний случай — спрашиваем Claude
+    # Крайний случай — спрашиваем Claude (Haiku), graceful fallback на 3.
     if offset is None:
         system = """Пользователь указывает часовой пояс. Ответь ТОЛЬКО числом — смещение UTC в часах.
 Примеры: Екатеринбург=5, Москва=3, Спб=3, Дубай=4, Берлин=1, Бангкок=7, Токио=9, Новосибирск=7, Иркутск=8
@@ -708,12 +658,9 @@ async def _update_user_tz(message: Message, text: str) -> None:
             offset = 3
 
     old_offset = await _get_user_tz(uid)
-    _user_tz_offset[uid] = offset
-    mem_repo = _MemRepo()
-    await mem_repo.upsert(fact=str(offset), key=f"tz_{uid}", category="Настройки")
-    # Сохранить город для будущей интеграции погоды
-    if matched_city:
-        await mem_repo.upsert(fact=matched_city, key=f"city_{uid}", category="Настройки")
+    # Единый writer: tz_ + city_ синхронно + инвалидация кеша (#170).
+    await _set_user_location(uid, offset=offset, city=matched_city, user_notion_id=user_notion_id)
+
     sign = "+" if offset >= 0 else ""
     await message.answer(f"🕐 Часовой пояс обновлён: UTC{sign}{offset}")
 

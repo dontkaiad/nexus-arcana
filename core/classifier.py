@@ -849,7 +849,7 @@ async def process_item(data: Dict[str, Any], original_text: str, msg, clarify: d
     # TIMEZONE UPDATE
     if kind == "timezone_update":
         from nexus.handlers.tasks import _update_user_tz
-        await _update_user_tz(msg, data.get("text", original_text))
+        await _update_user_tz(msg, data.get("text", original_text), user_notion_id=user_notion_id)
         try:
             from core.memory import save_memory
             await save_memory(msg, original_text, user_notion_id, "☀️ Nexus")

@@ -491,7 +491,7 @@ async def cmd_stats(msg: Message, user_notion_id: str = "") -> None:
 async def set_tz(msg: Message, user_notion_id: str = "") -> None:
     """Установить часовой пояс. /tz UTC+5 или /tz Екатеринбург"""
     from nexus.handlers.tasks import _update_user_tz
-    await _update_user_tz(msg, msg.text.replace("/tz", "").strip())
+    await _update_user_tz(msg, msg.text.replace("/tz", "").strip(), user_notion_id=user_notion_id)
 
 
 @dp.message(Command("list"))

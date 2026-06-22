@@ -3,18 +3,13 @@ from aiogram.types import Message
 
 
 async def get_user_tz(tg_id: int) -> int:
-    """Получить timezone offset пользователя из Памяти.
-    Ключ в базе: tz_{tg_id}. Возвращает offset в часах (default: 3 для МСК).
+    """Получить timezone offset пользователя (ключ tz_{tg_id}).
+
+    Единый источник чтения — core.location.get_user_tz (#170): TTL-кеш +
+    PgMemoryRepo. Default 3 (МСК).
     """
-    from core.repos.pg_memory_repo import PgMemoryRepo as _MemRepo
-    mems = await _MemRepo().find_by_exact_key(f"tz_{tg_id}")
-    stored = mems[0].fact if mems else None
-    if stored:
-        try:
-            return int(stored)
-        except Exception:
-            pass
-    return 3
+    from core.location import get_user_tz as _get
+    return await _get(tg_id)
 
 
 async def handle_tz_command(message: Message, user_notion_id: str = "") -> None:
@@ -23,4 +18,4 @@ async def handle_tz_command(message: Message, user_notion_id: str = "") -> None:
     """
     from nexus.handlers.tasks import _update_user_tz
     text = (message.text or "").replace("/tz", "").strip()
-    await _update_user_tz(message, text)
+    await _update_user_tz(message, text, user_notion_id=user_notion_id)

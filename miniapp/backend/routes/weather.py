@@ -395,23 +395,28 @@ async def set_weather_city(
     tg_id: int = Depends(current_user_id),
     payload: dict = Body(...),
 ) -> dict:
-    """wave8.9: пользователь задаёт свой город. Сохраняем в Память + чистим кэш."""
+    """wave8.9 / #170: пользователь задаёт свой город.
+
+    Пишем ОБА поля локации (city_ + tz_) через единый writer core.location, чтобы
+    часовой пояс задач не отставал от погоды. Если город вне справочника —
+    graceful: сохраняем city_ (погода найдёт), tz не трогаем, логируем.
+    """
+    from core.location import resolve_offset, set_user_location
+
     city = (payload.get("city") or "").strip()
     if not city:
         return {"ok": False, "error": "city_empty"}
     user_notion_id = (await get_user_notion_id(tg_id)) or ""
-    await _memory_repo.upsert(
-        fact=city,
-        key=f"city_{tg_id}",
-        category="⭐ Предпочтения",
-        scope="nexus",
-        source="auto",
-        user_notion_id=user_notion_id,
-    )
+
+    offset, _matched = resolve_offset(city)
+    await set_user_location(tg_id, offset=offset, city=city, user_notion_id=user_notion_id)
+    if offset is None:
+        logger.info("set_weather_city[%s]: город %r вне справочника CITY_TZ — tz не изменён", tg_id, city)
+
     con = sqlite3.connect(_cache._DB_PATH)
     try:
         con.execute("DELETE FROM weather_cache WHERE tg_id = ?", (tg_id,))
         con.commit()
     finally:
         con.close()
-    return {"ok": True, "city": city}
+    return {"ok": True, "city": city, "tz": offset}
