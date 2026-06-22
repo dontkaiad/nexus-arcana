@@ -21,6 +21,7 @@ from core.claude_client import ask_claude, ask_claude_vision
 from core.config import config as _cfg
 from core.error_log import log_error
 from core.shared_handlers import get_user_tz
+from core.tg_send import send_long, split_text
 from arcana.repos.sessions_repo import (
     SessionsRepo, TripletEntry, PrevSessionSnippet, SessionSearchResult,
 )
@@ -722,16 +723,17 @@ async def _save_and_post_triplet(
     ctype = await client_get_type(client_id) if client_id else None
     show_payment = bool(client_id) and not should_skip_payment(ctype)
 
-    if len(body) <= 3500:
-        bot_msg = await message.answer(
-            body, parse_mode="HTML", reply_markup=triplet_kb,
+    # Режем на чанки <4096 по границам (без потери хвоста и битых тегов).
+    # Кнопки — на последнее сообщение, reply-mapping — на первое (где head).
+    chunks = split_text(body)
+    bot_msg = None
+    for i, chunk in enumerate(chunks):
+        sent = await message.answer(
+            chunk, parse_mode="HTML",
+            reply_markup=triplet_kb if i == len(chunks) - 1 else None,
         )
-    else:
-        bot_msg = await message.answer(head, parse_mode="HTML")
-        await message.answer(interp_tg[:3500], parse_mode="HTML")
-        if len(interp_tg) > 3500:
-            await message.answer(interp_tg[3500:7000], parse_mode="HTML")
-        await message.answer("—", reply_markup=triplet_kb)
+        if bot_msg is None:
+            bot_msg = sent
 
     # Привязка msg→page для reply-flow.
     try:
@@ -1228,18 +1230,8 @@ async def _handle_multi_session(
                     head += f"🂠 {html.escape(bottom_card)}\n"
                 body_full = f"{head}\n{interp_tg}"
                 tkb = _triplet_keyboard(page_id)
-                # Telegram лимит ~4096; режем по 3500 для безопасности.
-                if len(body_full) <= 3500:
-                    await message.answer(body_full, parse_mode="HTML", reply_markup=tkb)
-                else:
-                    await message.answer(head, parse_mode="HTML")
-                    chunk = interp_tg[:3500]
-                    await message.answer(chunk, parse_mode="HTML")
-                    if len(interp_tg) > 3500:
-                        await message.answer(interp_tg[3500:7000], parse_mode="HTML")
-                    await message.answer(
-                        "—", parse_mode="HTML", reply_markup=tkb
-                    )
+                # Чанки <4096; кнопки — на последнее сообщение.
+                await send_long(message, body_full, parse_mode="HTML", reply_markup=tkb)
 
                 saved_triplets.append({
                     "question": question,
@@ -1331,7 +1323,7 @@ async def _handle_multi_session(
             f"\n<b>Общий вывод</b>\n"
             f"<i>{html.escape(session_summary_text)}</i>"
         )
-    await message.answer(final_msg, parse_mode="HTML")
+    await send_long(message, final_msg, parse_mode="HTML")
 
     # Кнопки оплаты ЗА СЕССИЮ ЦЕЛИКОМ — anchor = first saved triplet.
     # Skip для self/бесплатных и для сессий, где ни одного триплета не сохранили.
@@ -1672,14 +1664,7 @@ async def handle_triplet_correction(
     head = f"✏️ <b>{html.escape(question)}</b>\n"
     body = f"{head}\n{interp_tg}"
     tkb = _triplet_keyboard(page_id)
-    if len(body) <= 3500:
-        await message.answer(body, parse_mode="HTML", reply_markup=tkb)
-    else:
-        await message.answer(head, parse_mode="HTML")
-        await message.answer(interp_tg[:3500], parse_mode="HTML")
-        if len(interp_tg) > 3500:
-            await message.answer(interp_tg[3500:7000], parse_mode="HTML")
-        await message.answer("—", parse_mode="HTML", reply_markup=tkb)
+    await send_long(message, body, parse_mode="HTML", reply_markup=tkb)
 
 
 # ────────────────────────── Фото расклада ──────────────────────────────────
@@ -1834,8 +1819,6 @@ async def handle_tarot_interpret(message: Message, text: str) -> None:
         max_tokens=2000,
         temperature=0.7,
     )
-    await message.answer(
-        f"🔮 <b>Трактовка:</b>\n\n{interpretation[:4000]}", parse_mode="HTML"
+    await send_long(
+        message, f"🔮 <b>Трактовка:</b>\n\n{interpretation}", parse_mode="HTML"
     )
-    if len(interpretation) > 4000:
-        await message.answer(interpretation[4000:8000], parse_mode="HTML")

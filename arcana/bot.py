@@ -156,7 +156,12 @@ def create_dp_and_bot():
             await msg.answer("🎤 Не удалось распознать голосовое.")
             return
 
-        await msg.answer(f"🎤 <i>«{text}»</i>", parse_mode="HTML")
+        # Длинное голосовое → длинная расшифровка: режем на чанки <4096,
+        # иначе TelegramBadRequest «message is too long» (uncaught). Эхо —
+        # plain text: единый <i>…</i> не пережил бы разбиение (битый тег в
+        # чанке), а расшифровка Whisper не экранирована под HTML.
+        from core.tg_send import send_long
+        await send_long(msg, f"🎤 «{text}»")
 
         # Lists pending
         from arcana.handlers.lists import handle_list_pending

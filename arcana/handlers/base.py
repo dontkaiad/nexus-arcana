@@ -11,6 +11,7 @@ from arcana.handlers.reactions import reaction_for
 from core.claude_client import ask_claude
 from core.config import config as _cfg
 from core.error_log import log_error
+from core.tg_send import send_long
 from core.utils import react
 
 router = Router()
@@ -287,13 +288,13 @@ async def _handle_tarot_correction(
         secondary_button("✏️ Поправить ещё", f"tarot_edit:{uid}"),
         cancel_button("❌ Отмена", f"tarot_cancel:{uid}"),
     ]])
-    await message.answer(
-        f"✏️ <b>Исправленная трактовка:</b>\n\n{new_interp_tg[:3500]}",
-        reply_markup=kb,
+    # Чанки <4096 (без потери хвоста и битых тегов); кнопки — на последнее.
+    await send_long(
+        message,
+        f"✏️ <b>Исправленная трактовка:</b>\n\n{new_interp_tg}",
         parse_mode="HTML",
+        reply_markup=kb,
     )
-    if len(new_interp_tg) > 3500:
-        await message.answer(new_interp_tg[3500:7000], parse_mode="HTML")
 
 
 @router.message()
