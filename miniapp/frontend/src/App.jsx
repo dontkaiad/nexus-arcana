@@ -6110,7 +6110,7 @@ function TaskSheet({ s, task, onClose, onClosed }) {
               ? <ChevronDown size={fs(16)} />
               : <ChevronRight size={fs(16)} />}
           </span>
-          <span style={{ fontSize: fs(14) }}>Перенести</span>
+          <span style={{ fontSize: fs(14) }}>Редактировать</span>
         </div>
         {editOpen && (
           <div style={{ marginTop: 8 }}>
