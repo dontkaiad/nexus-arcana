@@ -126,14 +126,19 @@ def test_next_cycle_date_utc_input_no_override_uses_local_time():
 @pytest.mark.asyncio
 async def test_today_digest_shows_local_time_not_utc():
     """_build_today_digest для reminder '...+00:00' (13:00 UTC = 16:00 МСК)
-    должен показать 16:00, а не 13:00 (issue #143 — дисплей тоже сдвигало)."""
+    должен показать 16:00, а не 13:00 (issue #143 — дисплей тоже сдвигало).
+
+    issue #169: повторяющиеся задачи теперь рендерятся как "🔄 <label>" без
+    времени, поэтому проверяем tz-конверсию на разовом напоминании «сегодня»
+    (попадает в секцию СЕГОДНЯ → рендерит 🔔 с локальным временем)."""
     from nexus.handlers import tasks
     from nexus.repos.pg_tasks_repo import Task
 
-    # 13:00 UTC == 16:00 МСК; ежедневная задача → всегда попадает в «сегодня».
+    # reminder сегодня по МСК: 13:00 UTC == 16:00 МСК.
+    today_msk = datetime.now(timezone(timedelta(hours=3))).strftime("%Y-%m-%d")
     task = Task(id="t-9", title="менять лоток", priority="⚪ Можно потом",
-                category="🐾 Коты", repeat="Ежедневно", repeat_time="16:00",
-                reminder="2026-06-21T13:00:00+00:00")
+                category="🐾 Коты", repeat="Нет",
+                reminder=f"{today_msk}T13:00:00+00:00")
 
     with patch.object(tasks, "_get_user_tz", AsyncMock(return_value=3)), \
          patch.object(tasks._repo, "active", AsyncMock(return_value=[task])), \
@@ -143,5 +148,6 @@ async def test_today_digest_shows_local_time_not_utc():
                AsyncMock(return_value=None)):
         text = await tasks._build_today_digest(999_001, user_notion_id="u-1")
 
+    assert "🔔" in text, f"ожидался блок напоминания 🔔 в дайджесте:\n{text}"
     assert "16:00" in text, f"ожидалось локальное 16:00 в дайджесте:\n{text}"
     assert "13:00" not in text, f"UTC-время 13:00 не должно показываться:\n{text}"

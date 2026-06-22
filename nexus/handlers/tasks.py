@@ -472,6 +472,42 @@ def _to_local_wall(iso: str, tz_offset: int) -> str:
     return dt.strftime("%Y-%m-%dT%H:%M")
 
 
+def _format_task_dates(
+    deadline_raw: str,
+    reminder_raw: str,
+    is_repeat: bool = False,
+    repeat_label: str = "",
+) -> str:
+    """Единый формат дат задачи для /tasks и дейли-пинга (issue #169).
+
+    Дедлайн и напоминание — две независимые даты (обе полный timestamp, любая
+    может отсутствовать, могут различаться по дню/часу — штатно). Разводим
+    визуально, иконками как в пушах бота ("⏰ Дедлайн" / "🔔 Напоминание"):
+      - дедлайн     → "⏰ DD.MM HH:MM" (HH:MM только если у дедлайна есть время)
+      - напоминание → "🔔 DD.MM HH:MM"
+      - показываем ТОЛЬКО присутствующие, склейка через " · "
+      - повторяющиеся → "🔄 <label>", дат не показываем
+
+    Вход — УЖЕ локализованные настенные строки (см. `_to_local_wall`), формат
+    'YYYY-MM-DD' или 'YYYY-MM-DDTHH:MM'. Возвращает строку (может быть пустой).
+    """
+    if is_repeat:
+        return f"🔄 {repeat_label}" if repeat_label else "🔄"
+
+    parts = []
+    for icon, raw in (("⏰", deadline_raw or ""), ("🔔", reminder_raw or "")):
+        if not raw or len(raw) < 10:
+            continue
+        date_part = raw[:10]
+        s = f"{icon} {date_part[8:10]}.{date_part[5:7]}"
+        if "T" in raw:
+            time_part = raw.split("T", 1)[1][:5]
+            if time_part:
+                s += f" {time_part}"
+        parts.append(s)
+    return " · ".join(parts)
+
+
 async def _schedule_reminder(chat_id: int, title: str, reminder_dt: str, task_id: str, tz_offset: int = 3) -> None:
     if not _scheduler or not _bot:
         return
@@ -2716,6 +2752,9 @@ async def _build_today_digest(uid: int, user_notion_id: str = "", greeting: str 
             "pri_icon": _priority_icons.get(priority, "⚪"),
             "time_str": time_str, "is_repeat": is_repeat,
             "repeat": repeat, "interval_days": ivl,
+            # issue #169: обе даты раздельно для общего форматтера ⏰/🔔.
+            "deadline_raw": deadline_raw, "reminder_raw": reminder_raw,
+            "repeat_label": _repeat_labels.get(repeat, (repeat or "").lower()),
         }
 
         if is_repeat and repeat == "Ежедневно":
@@ -2804,10 +2843,14 @@ async def _build_today_digest(uid: int, user_notion_id: str = "", greeting: str 
         logger.warning("_build_today_digest budget error: %s", e)
 
     def _fmt(it: dict) -> str:
-        repeat_mark = " 🔄" if it.get("is_repeat") else ""
-        line = f"  {it['pri_icon']} {it['title']} · {it['cat_icon']}{repeat_mark}"
-        if it.get("time_str"):
-            line += f" · {it['time_str']}"
+        line = f"  {it['pri_icon']} {it['title']} · {it['cat_icon']}"
+        # issue #169: дедлайн (⏰) и напоминание (🔔) — раздельно, общий хелпер.
+        dates = _format_task_dates(
+            it.get("deadline_raw", ""), it.get("reminder_raw", ""),
+            it.get("is_repeat", False), it.get("repeat_label", ""),
+        )
+        if dates:
+            line += f" · {dates}"
         return line
 
     header = greeting or f"📅 <b>Сегодня · ☀️ Nexus</b>"

@@ -160,7 +160,7 @@ async def cmd_tasks(msg: Message, user_notion_id: str = "") -> None:
 
     # issue #143: считаем «сегодня» и показываем время в поясе пользователя,
     # а не на серверном времени.
-    from nexus.handlers.tasks import _get_user_tz, _to_local_wall
+    from nexus.handlers.tasks import _get_user_tz, _to_local_wall, _format_task_dates
     tz_offset = await _get_user_tz(uid)
     today_str = datetime.now(timezone(timedelta(hours=tz_offset))).strftime("%Y-%m-%d")
     _pri_icons = {"Срочно": "🔴", "Важно": "🟡", "Можно потом": "⚪"}
@@ -190,22 +190,10 @@ async def cmd_tasks(msg: Message, user_notion_id: str = "") -> None:
         deadline_date = deadline_raw[:10] if deadline_raw else ""
         reminder_date = reminder_raw[:10] if reminder_raw else ""
 
-        # Время
-        time_str = ""
-        if "T" in reminder_raw:
-            time_str = reminder_raw.split("T")[1][:5]
-        elif "T" in deadline_raw:
-            time_str = deadline_raw.split("T")[1][:5]
-
-        # Дедлайн дисплей
-        if is_repeat:
-            dl = f"🔄 {_rep_labels.get(repeat, repeat.lower())}"
-        elif deadline_date:
-            dl = f"до {deadline_date[8:10]}.{deadline_date[5:7]}"
-        else:
-            dl = ""
-        if time_str and not is_repeat:
-            dl += f" {time_str}" if dl else time_str
+        # issue #169: дедлайн и напоминание — две независимые даты; разводим
+        # визуально общим хелпером (⏰ дедлайн / 🔔 напоминание), а не гибридом.
+        repeat_label = _rep_labels.get(repeat, repeat.lower())
+        dl = _format_task_dates(deadline_raw, reminder_raw, is_repeat, repeat_label)
 
         pri_icon = _pri_icons.get(priority, "⚪")
         item = {"pri_icon": pri_icon, "cat_icon": cat_icon, "title": title, "dl": dl,
