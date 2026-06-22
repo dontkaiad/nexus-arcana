@@ -8,6 +8,12 @@ aiofiles==23.2.1
 anthropic==0.40.0
 httpx==0.27.2
 
+# RAG (Voyage AI embeddings + Qdrant) — RAG-0. Floor-пины (не ==):
+# voyageai — нужна свежая, иначе не знает модель voyage-4-lite;
+# qdrant-client — нужен query_points()/.points + collection-API.
+voyageai>=0.3.2
+qdrant-client>=1.12.0
+
 # Postgres / ORM / миграции
 SQLAlchemy==2.0.48
 psycopg2-binary==2.9.12

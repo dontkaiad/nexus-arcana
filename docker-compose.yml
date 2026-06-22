@@ -23,6 +23,10 @@ services:
     container_name: nexus-bot
     command: ["python", "-m", "nexus.nexus_bot"]
     env_file: .env
+    # Qdrant крутится сервисом klgpff на хосте (127.0.0.1:6333), своей сети нет —
+    # ходим через хост. QDRANT_HOST/PORT/VOYAGE_API_KEY приходят из .env (env_file).
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       db:
         condition: service_healthy
@@ -42,6 +46,10 @@ services:
     container_name: arcana-bot
     command: ["python", "-m", "arcana.bot"]
     env_file: .env
+    # Qdrant крутится сервисом klgpff на хосте (127.0.0.1:6333), своей сети нет —
+    # ходим через хост. QDRANT_HOST/PORT/VOYAGE_API_KEY приходят из .env (env_file).
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       db:
         condition: service_healthy
