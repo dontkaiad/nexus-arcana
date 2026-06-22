@@ -15,6 +15,7 @@ jobs:
           command_timeout: "10m"
           script: |
             set -e
+            exit 1
             cd ~/nexus-arcana
             git pull origin main
             docker compose up -d --build
