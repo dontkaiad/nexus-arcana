@@ -27,6 +27,7 @@ HAIKU_REQUIRED = [
     "nexus/handlers/notes.py",
     "nexus/nexus_bot.py",
     "miniapp/backend/routes/today.py",  # ADHD tip — короткая фраза, Haiku
+    "miniapp/backend/routes/arcana_today.py",  # подпись-настроение — Haiku (#163)
 ]
 
 

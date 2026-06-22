@@ -10,7 +10,6 @@ from typing import Any, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
-from core.config import config
 from core.repos.pg_finance_repo import PgArcanaPnlRepo
 from arcana.repos.pg_sessions_repo import PgSessionsRepo as _PgSessionsRepoClass
 _pg_sessions_repo = _PgSessionsRepoClass()
@@ -138,7 +137,11 @@ async def get_arcana_tip(
         "Напиши одну короткую фразу-подпись (5–8 слов, строчными, без точки в конце, без смайлов). "
         "Тон — спокойный, поэтичный, немного мистический. Только сама фраза."
     )
-    tip = await ask_claude(prompt, model=config.model_sonnet, max_tokens=60, temperature=0.7)
+    # Haiku: подпись-настроение это короткая фраза, Sonnet тут лишний (деньги).
+    # Sonnet в Аркане — только трактовка/саммари сессий (#163).
+    tip = await ask_claude(
+        prompt, model="claude-haiku-4-5-20251001", max_tokens=60, temperature=0.7
+    )
     tip = tip.strip().rstrip(".!").lower() if tip else ""
     if tip:
         _store_tip(tg_id, tip)
@@ -313,6 +316,22 @@ async def get_arcana_today(tg_id: int = Depends(current_user_id)) -> dict[str, A
             "status": status,
         })
 
+    # «Встречи» сегодня для подписи-настроения: считаем distinct КЛИЕНТСКИЕ
+    # сессии (триплеты одной сессии = одна встреча), исключая self/личные
+    # расклады — личное гадание это не встреча (#163).
+    _meeting_keys: set = set()
+    for _t in _pg_sessions:
+        if to_local_date(_t.date or "", tz_offset) != today_date:
+            continue
+        _cid = _t.client_id
+        if not _cid:
+            continue  # личный расклад без клиента
+        if ((clients_map.get(_cid) or {}).get("type_code") or "") == "self":
+            continue  # self-client (сама Кай) — не встреча
+        _sn = (_t.session_name or "").strip().lower()
+        _meeting_keys.add((_sn, _cid) if _sn else (f"solo:{_t.id}", _cid))
+    client_sessions_today = len(_meeting_keys)
+
     works_overdue, works = await _works_schedule(user_notion_id, today_date, tz_offset)
     unchecked = await _unchecked_30d(all_sessions, today_date)
     accuracy_overall, _, _ = _accuracy(all_sessions)
@@ -370,6 +389,7 @@ async def get_arcana_today(tg_id: int = Depends(current_user_id)) -> dict[str, A
         "tz_offset": tz_offset,
         "moon": moon,
         "sessions_today": sessions_today,
+        "client_sessions_today": client_sessions_today,
         "works_today": works,
         "works_overdue": works_overdue,
         "unchecked_30d": unchecked,

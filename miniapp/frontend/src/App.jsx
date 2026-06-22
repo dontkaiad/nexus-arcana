@@ -3497,7 +3497,8 @@ function ArDay({ s, openClient, navigate, openMoonPhases }) {
   const pnlApi = useApi('/api/arcana/finance/pnl');
   const { data, loading, error, refetch } = useApi('/api/arcana/today');
   const weatherApi = useApi('/api/weather');
-  const rawSessions = data?.sessions_today?.length || 0;
+  // «Встречи» для подписи = клиентские сессии (не триплеты, без self), #163
+  const rawSessions = data?.client_sessions_today ?? 0;
   const rawWorks = data?.works_today?.length || 0;
   const tipApi = useApi(data ? `/api/arcana/tip?sessions=${rawSessions}&works=${rawWorks}` : null, [rawSessions, rawWorks]);
 
