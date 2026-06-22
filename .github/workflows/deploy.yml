@@ -14,10 +14,12 @@ jobs:
           username: ${{ secrets.SERVER_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           command_timeout: "10m"
-          # ssh-action@v1.2.5 ГЛОТАЕТ exit-код удалённого скрипта (доказано:
-          # exit 1 / script_stop / false — все оставляли шаг green). Поэтому
-          # детект фейла — снаружи, по success-маркеру в captured stdout: под
-          # set -e упавшая команда останавливает скрипт ДО echo "DEPLOY_OK".
+          # Сервер использует forced command (~/.ssh/authorized_keys:
+          # command="/home/kai/deploy.sh") → ЭТОТ script игнорируется, всегда
+          # гоняется deploy.sh. ssh-action к тому же глотает exit-код. Детект
+          # фейла — снаружи (Verify) по маркеру deploy.sh «deploy done», который
+          # печатается ПОСЛЕДНЕЙ строкой только при успехе (set -euo pipefail).
+          # capture_stdout кладёт вывод в steps.deploy.outputs.stdout для Verify.
           capture_stdout: true
           script: |
             set -e
@@ -25,21 +27,27 @@ jobs:
             git pull origin main
             docker compose up -d --build
             docker compose ps
-            echo "DEPLOY_OK"
 
       - name: Verify deploy marker
         if: always()
+        env:
+          OUT: ${{ steps.deploy.outputs.stdout }}
         run: |
-          echo "${{ steps.deploy.outputs.stdout }}"
-          echo "${{ steps.deploy.outputs.stdout }}" | grep -q "DEPLOY_OK" || { echo "marker missing — deploy failed"; exit 1; }
+          echo "$OUT"
+          echo "$OUT" | grep -q "deploy done" || { echo "marker missing — deploy failed"; exit 1; }
 
       - name: Notify Telegram on failure
         if: failure()
         run: |
-          curl -s -X POST "https://api.telegram.org/bot${{ secrets.TG_LOG_BOT_TOKEN }}/sendMessage" \
-            --data-urlencode "chat_id=${{ secrets.TG_LOG_CHAT_ID }}" \
-            --data-urlencode "parse_mode=HTML" \
-            --data-urlencode "text=❌ <b>Деплой упал</b>
+          send() {
+            curl -s -X POST "https://api.telegram.org/bot${{ secrets.TG_LOG_BOT_TOKEN }}/sendMessage" \
+              --data-urlencode "chat_id=${{ secrets.TG_LOG_CHAT_ID }}" \
+              --data-urlencode "message_thread_id=$1" \
+              --data-urlencode "parse_mode=HTML" \
+              --data-urlencode "text=❌ <b>Деплой упал</b>
           commit: <code>${{ github.sha }}</code>
           автор: ${{ github.actor }}
           <a href=\"${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}\">открыть run</a>"
+          }
+          send "${{ secrets.TG_LOG_THREAD_NEXUS }}"
+          send "${{ secrets.TG_LOG_THREAD_ARCANA }}"
