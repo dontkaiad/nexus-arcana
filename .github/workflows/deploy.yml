@@ -18,6 +18,7 @@ jobs:
           # от команды → if: failure() → Telegram-алерт.
           script: |
             set -e
+            false
             cd ~/nexus-arcana
             git pull origin main
             docker compose up -d --build
