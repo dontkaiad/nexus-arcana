@@ -13,13 +13,11 @@ jobs:
           username: ${{ secrets.SERVER_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           command_timeout: "10m"
-          # script_stop: пробрасывать non-zero код удалённого скрипта (дефолт
-          # false его глотает) → реальное падение деплоя делает шаг red →
-          # if: failure() → Telegram-алерт.
-          script_stop: true
+          # Падение на ошибке в v1.2.5 — через set -e в скрипте (инпут
+          # script_stop в этой версии убран). set -e роняет шаг при non-zero
+          # от команды → if: failure() → Telegram-алерт.
           script: |
             set -e
-            exit 1
             cd ~/nexus-arcana
             git pull origin main
             docker compose up -d --build
