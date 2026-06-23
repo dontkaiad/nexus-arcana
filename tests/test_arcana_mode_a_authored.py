@@ -45,12 +45,22 @@ def test_parse_schema_has_interpretation_field():
     assert "у КАЖДОГО триплета" in PARSE_SESSION_SYSTEM  # multi — своя трактовка
 
 
-def test_personal_interp_prompt_polishes_not_invents():
-    """PERSONAL_INTERP_SYSTEM: причесать, не сочинять, тот же HTML-формат."""
+def test_personal_interp_prompt_expands_via_meanings_no_hallucination():
+    """PERSONAL_INTERP_SYSTEM: развернуть тезисы по значениям карт из справочника,
+    запрет галлюцинаций, блок «Общий вывод», тот же HTML-формат."""
     p = PERSONAL_INTERP_SYSTEM
-    assert "ПРИЧЕСАТЬ" in p
-    assert "НЕ сочиня" in p or "не сочиня" in p.lower()
-    assert "справочник" in p.lower()  # запрет подмены значениями из справочника
+    # разворачивание тезисного ввода (а не дословное причёсывание)
+    assert "РАЗВЕРНУ" in p
+    assert "тезис" in p.lower()
+    assert "акцент" in p.lower()
+    # опора на справочник + явный запрет галлюцинаций
+    assert "справочник" in p.lower()
+    assert "ГАЛЛЮЦИНАЦИЙ" in p or "галлюцинаци" in p.lower()
+    assert "НЕ вводи смысл" in p  # грань: ни в карте, ни в акценте → нельзя
+    # приоритет акценту автора при расхождении со справочником
+    assert "приоритет у АКЦЕНТА" in p or "приоритет у акцента" in p.lower()
+    # синтез триплета
+    assert "Общий вывод" in p
     # выход — те же теги, что у TAROT_SYSTEM (sanitize/html_to_telegram не трогаем)
     for tag in ("<h3>", "<b>", "<i>", "<p>"):
         assert tag in p
@@ -59,19 +69,38 @@ def test_personal_interp_prompt_polishes_not_invents():
 # ───────────────────── 2. _polish_authored_interpretation ───────────────────
 
 @pytest.mark.asyncio
-async def test_polish_uses_personal_system_and_keeps_author_text():
+async def test_polish_passes_card_reference_and_personal_system():
+    """Режим A: справочник (cards_context) прокинут в system PERSONAL — опора
+    против выдумки; авторский тезис — в промпт; Sonnet, temperature 0.5."""
+    ref = "Туз Мечей — ясность, решение, прорыв через интеллект"
     with patch.object(sessions, "ask_claude",
-                      AsyncMock(return_value="<p>причёсано</p>")) as ask:
+                      AsyncMock(return_value="<h3>⚔️ Туз</h3><p>...</p>")) as ask:
         out = await _polish_authored_interpretation(
-            "король тёплый, туз режет", "король кубков, туз мечей", "двойка", "что чувствует"
+            "туз — прорыв", "туз мечей, шут, маг", "двойка", "выйду ли на работу",
+            cards_context=ref,
         )
-    assert out == "<p>причёсано</p>"
-    # system == режим A, не TAROT
-    assert ask.await_args.kwargs["system"] == PERSONAL_INTERP_SYSTEM
-    # сырой авторский текст передан в промпт (причёсываем именно его)
-    assert "король тёплый, туз режет" in ask.await_args.args[0]
-    # Sonnet (CLAUDE.md: трактовки sessions.py — Sonnet)
+    assert out.startswith("<h3>")
+    system = ask.await_args.kwargs["system"]
+    # базовый промпт режима A + справочник реальных значений карт
+    assert PERSONAL_INTERP_SYSTEM in system
+    assert ref in system, "справочник карт не прокинут в режим A — будет галлюцинация"
+    # авторский тезис передан как акцент
+    assert "туз — прорыв" in ask.await_args.args[0]
+    # Sonnet + temperature 0.5 (связность, не вольное сочинение)
     assert ask.await_args.kwargs["model"] == sessions._cfg.model_sonnet
+    assert ask.await_args.kwargs["temperature"] == 0.5
+
+
+@pytest.mark.asyncio
+async def test_polish_without_reference_uses_bare_personal_system():
+    """Без справочника system == голый PERSONAL_INTERP_SYSTEM (карты нет в
+    справочнике → разворачиваем только по акценту автора)."""
+    with patch.object(sessions, "ask_claude",
+                      AsyncMock(return_value="<p>x</p>")) as ask:
+        await _polish_authored_interpretation(
+            "туз — прорыв", "туз мечей", "", "вопрос", cards_context=""
+        )
+    assert ask.await_args.kwargs["system"] == PERSONAL_INTERP_SYSTEM
 
 
 @pytest.mark.asyncio
@@ -154,16 +183,18 @@ async def test_mode_b_still_appends_machine_bottom_block():
 
 def _make_fake_ask(parse_json):
     """ask_claude-мок, различающий вызовы по system-промпту."""
-    cap = {"systems": [], "personal_prompt": None, "tarot_prompt": None}
+    cap = {"systems": [], "personal_prompt": None, "personal_system": None,
+           "tarot_prompt": None}
 
     async def fake_ask(prompt, system=None, **kw):
         sys = system or ""
         cap["systems"].append(sys)
         if "Извлеки данные о сеансе" in sys:
             return json.dumps(parse_json)
-        if "ПРИЧЕСАТЬ её речь" in sys:           # PERSONAL_INTERP_SYSTEM (режим A)
+        if "РАЗВЕРНУТЬ её тезисы" in sys:         # PERSONAL_INTERP_SYSTEM (режим A)
             cap["personal_prompt"] = prompt
-            return "<p>POLISHED Kai</p>"
+            cap["personal_system"] = sys
+            return "<h3>🃏 Туз</h3><p>...</p><h3>Общий вывод</h3><p>POLISHED Kai</p>"
         if "Трактуй строго по справочнику" in sys:  # TAROT_SYSTEM (режим B)
             cap["tarot_prompt"] = prompt
             return "<h3>Общий смысл</h3><p>MACHINE</p>"
@@ -228,11 +259,36 @@ async def test_single_mode_a_routes_to_personal_and_rag_gets_author():
             st.enter_context(p)
         await handle_add_session(_msg(), "голос", user_notion_id="u")
 
-    assert any("ПРИЧЕСАТЬ её речь" in s for s in cap["systems"]), "режим A не сработал"
+    assert any("РАЗВЕРНУТЬ её тезисы" in s for s in cap["systems"]), "режим A не сработал"
     assert not any("Трактуй строго по справочнику" in s for s in cap["systems"]), \
         "в режиме A не должно быть генерации TAROT"
-    assert "король тёплый но закрыт" in cap["personal_prompt"]  # причёсываем авторский
+    assert "король тёплый но закрыт" in cap["personal_prompt"]  # разворачиваем авторский тезис
     assert "POLISHED Kai" in rag.await_args.kwargs["interpretation"]
+
+
+@pytest.mark.asyncio
+async def test_single_mode_a_passes_card_reference_into_personal():
+    """Single режим A: реальный справочник карт (get_cards_context) долетает до
+    system PERSONAL — без него разворачивание = галлюцинация."""
+    ref = "СПРАВ_МАРКЕР Туз Мечей — ясность, прорыв"
+    rag = AsyncMock()
+    fake_ask, cap = _make_fake_ask({
+        "client_name": None, "spread_type": "триплет", "question": "выйду ли на работу",
+        "cards": ["туз мечей", "шут", "маг"], "bottom_card": None,
+        "area": "Работа", "deck": "Уэйт", "amount": 0, "paid": 0,
+        "payment_source": None, "interpretation": "туз — прорыв",
+    })
+    with ExitStack() as st:
+        for p in _common_handler_patches(fake_ask, rag_safe=rag):
+            st.enter_context(p)
+        # перекрываем дефолтный пустой get_cards_context на реальный справочник
+        st.enter_context(
+            patch("arcana.tarot_loader.get_cards_context", MagicMock(return_value=ref))
+        )
+        await handle_add_session(_msg(), "голос", user_notion_id="u")
+
+    assert cap["personal_system"] is not None, "режим A не вызван"
+    assert ref in cap["personal_system"], "справочник карт не прокинут в режим A"
 
 
 @pytest.mark.asyncio
@@ -251,8 +307,8 @@ async def test_single_mode_b_routes_to_tarot_when_no_authored():
         await handle_add_session(_msg(), "голос", user_notion_id="u")
 
     assert any("Трактуй строго по справочнику" in s for s in cap["systems"]), "режим B не сработал"
-    assert not any("ПРИЧЕСАТЬ её речь" in s for s in cap["systems"]), \
-        "без авторского текста не должно быть причёсывания"
+    assert not any("РАЗВЕРНУТЬ её тезисы" in s for s in cap["systems"]), \
+        "без авторского текста не должно быть разворачивания"
     assert "MACHINE" in rag.await_args.kwargs["interpretation"]
 
 
@@ -279,7 +335,7 @@ async def test_multi_mode_a_per_triplet():
             _msg(), data, items, TZ, 3.0, "u", forced_is_personal=True,
         )
 
-    assert any("ПРИЧЕСАТЬ её речь" in s for s in cap["systems"]), "режим A (триплет 1) не сработал"
+    assert any("РАЗВЕРНУТЬ её тезисы" in s for s in cap["systems"]), "режим A (триплет 1) не сработал"
     assert any("Трактуй строго по справочнику" in s for s in cap["systems"]), "режим B (триплет 2) не сработал"
     # RAG-батч: триплет 1 — авторский (POLISHED), триплет 2 — машинный (MACHINE)
     batch = rag_batch.await_args.args[0]
