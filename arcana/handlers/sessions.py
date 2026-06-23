@@ -1017,14 +1017,37 @@ async def handle_add_session(
         ground_cards_in_data(
             data, text, resolver=lambda s: bool(find_card(_gr_deck, s)),
         )
-        # Итог грунинга → в ops-группу (видно на проде что заменил, не лазая в
-        # docker logs). Не бросает — диагностика вторична.
+
+        # Канонизация имён карт в правильную RU-форму ПОСЛЕ грунинга: «туз мячей»
+        # → «Туз Мечей», грунинг-восстановленное «крыльево мячей» → «Королева
+        # Мечей». Иначе заголовок показывал сырой вывод парсера/мисхёрд, хотя
+        # хранение/трактовка были канон. Нераспознанные (find_card=None) остаются
+        # дословно — для Поправить.
+        def _canon_ru(card):
+            if not isinstance(card, str) or not card.strip():
+                return card
+            c = find_card(_gr_deck, card)
+            return (c.get("ru") or card) if c else card
+
+        if isinstance(data.get("cards"), list):
+            data["cards"] = [_canon_ru(c) for c in data["cards"]]
+        if data.get("bottom_card"):
+            data["bottom_card"] = _canon_ru(data["bottom_card"])
+        for it in (data.get("triplets") or data.get("items") or []):
+            if isinstance(it, dict):
+                if isinstance(it.get("cards"), list):
+                    it["cards"] = [_canon_ru(c) for c in it["cards"]]
+                if it.get("bottom_card"):
+                    it["bottom_card"] = _canon_ru(it["bottom_card"])
+
+        # Итог (грунинг + канонизация) → в ops-группу: видно на проде net-замену
+        # карт, не лазая в docker logs. Не бросает — диагностика вторична.
         try:
             _gr_diff = [
                 f"{b}→{a}" for b, a in zip(_gr_before, _flat_cards(data)) if b != a
             ]
             from core.bot_notify import notify_log_group
-            _gr_msg = "🔍 грунинг: " + ("; ".join(_gr_diff) if _gr_diff else "без замен")
+            _gr_msg = "🔍 карты: " + ("; ".join(_gr_diff) if _gr_diff else "без замен")
             await notify_log_group(html.escape(_gr_msg[:1500]), _cfg.log_thread_arcana)
         except Exception as _e:
             logger.warning("grounding ops-log failed: %s", _e)
