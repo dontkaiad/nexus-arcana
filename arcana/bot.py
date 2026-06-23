@@ -163,6 +163,17 @@ def create_dp_and_bot():
         from core.tg_send import send_long
         await send_long(msg, f"🎤 «{text}»")
 
+        # Голос идёт мимо текстового spell-слоя: route_message пропускает уже
+        # заданный _text (base.py:359), поэтому транскрипт НЕ чистился whitelist-
+        # spell'ом. Прогоняем его тем же normalize_text (карты/клиенты/термины),
+        # что и печатный путь — «крыльева мечей» → «Королева Мечей» ДО парсера.
+        # route_message с _text уже не нормализует повторно (двойного прохода нет).
+        try:
+            from core.preprocess import normalize_text
+            text = await normalize_text(text, user_notion_id=user_notion_id)
+        except Exception as e:
+            logger.warning("voice normalize_text failed (use raw): %s", e)
+
         # Lists pending
         from arcana.handlers.lists import handle_list_pending
         if await handle_list_pending(msg, user_notion_id):

@@ -62,6 +62,11 @@ async def transcribe(file_bytes: bytes, filename: str = "voice.ogg") -> Optional
                             result = await resp.json()
                             text = result.get("text", "").strip()
                             logger.info("transcribe: OK, %d chars", len(text))
+                            # Сам транскрипт — ТОЛЬКО локально (journald/docker logs)
+                            # на DEBUG, для отладки мисхёрдов голоса. НИКОГДА не
+                            # через log_error/notify_log_group: транскрипт = личный
+                            # текст пользователя, в TG-группу логов его слать нельзя.
+                            logger.debug("transcribe: text=%r", text)
                             return text
                         transient = resp.status == 429 or resp.status >= 500
                         if not transient or attempt >= MAX_ATTEMPTS - 1:
