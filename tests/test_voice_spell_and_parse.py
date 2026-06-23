@@ -96,9 +96,10 @@ def test_parse_prompt_forbids_card_hallucination():
     assert "ОБЯЗАН вернуть его ДОСЛОВНО" in p
     assert "НЕ угадывай ранг" in p
     assert "null" in p
-    # few-shot дословного fallback (recon: Haiku имитирует примеры)
+    # позитивный few-shot дословного fallback (recon: Haiku имитирует примеры)
     assert "крыльева мячей" in p, "нет few-shot искажённой карты → дословно"
-    assert "Король Жезлов" in p, "нет контрпримера подмены, который запрещаем"
+    # негативный пример с конкретной картой убран (priming) — см. card-grounding
+    assert "НЕ «Король Жезлов»" not in p
 
 
 # ───────────── FIX 3: транскрипт логируется локально, НЕ в TG ────────────────
