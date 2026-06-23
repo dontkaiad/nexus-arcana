@@ -117,10 +117,10 @@ async def test_card_edit_updates_cards_context_interp_rag_and_confirms():
     repo.update_interpretation.assert_awaited_once()
     # 4) RAG reindex новыми cards_ru
     assert rag.await_args.kwargs["cards"] == "король кубков, шут, маг"
-    # 5) подтверждение смены видно пользователю
+    # 5) подтверждение смены + заголовок пересобран с НОВОЙ картой (📍)
     sent = " ".join(str(c.args[0]) for c in msg.answer.await_args_list)
     assert "🔄 Карта обновлена" in sent
-    assert "король кубков" in sent
+    assert "📍 король кубков" in sent, "заголовок не пересобран с новой картой"
 
 
 @pytest.mark.asyncio
@@ -143,6 +143,7 @@ async def test_text_only_edit_does_not_touch_cards():
     assert rag.await_args.kwargs["cards"] == "королева кубков, шут, маг"
     sent = " ".join(str(c.args[0]) for c in msg.answer.await_args_list)
     assert "🔄 Карта обновлена" not in sent
+    assert "📍" not in sent, "правка текста не должна трогать заголовок-карту"
 
 
 # ───────────── BUG B: reply на карточку = правка (паритет Nexus) ─────────────

@@ -1944,15 +1944,22 @@ async def _apply_triplet_correction(
             pass
 
     interp_tg = html_to_telegram(new_interp)
-    head = f"✏️ <b>{html.escape(question)}</b>\n"
+    head_lines = [f"✏️ <b>{html.escape(question)}</b>"]
     if card_edit:
-        # Явное подтверждение смены карты — видно, что изменились ДАННЫЕ, не
-        # только текст (пожелание Кай: кнопка «Поправить» иначе неявная).
-        head += (
-            f"🔄 Карта обновлена: {html.escape(old_cards_ru)} → "
-            f"{html.escape(cards_ru)}\n"
+        # Смена карты → ПЕРЕСОБИРАЕМ заголовок с НОВОЙ картой (📍/🂠), как в
+        # create-флоу. Иначе карточка после правки оставалась бы со старой картой
+        # в заголовке при новой трактовке. Правка ТЕКСТА сюда не заходит —
+        # заголовок не трогаем.
+        head_lines.append(
+            f"🔄 Карта обновлена: {html.escape(old_cards_ru)} → {html.escape(cards_ru)}"
         )
-    body = f"{head}\n{interp_tg}"
+        new_cards_line = ", ".join(c.strip() for c in cards_ru.split(",") if c.strip())
+        if new_cards_line:
+            head_lines.append(f"📍 {html.escape(new_cards_line)}")
+        if bottom_ru:
+            head_lines.append(f"🂠 {html.escape(bottom_ru)}")
+    head = "\n".join(head_lines)
+    body = f"{head}\n\n{interp_tg}"
     tkb = _triplet_keyboard(page_id)
     await send_long(message, body, parse_mode="HTML", reply_markup=tkb)
 
