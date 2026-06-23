@@ -66,6 +66,18 @@ def test_personal_interp_prompt_expands_via_meanings_no_hallucination():
         assert tag in p
 
 
+def test_personal_interp_preserves_first_person():
+    """Режим A сохраняет ПЕРВОЕ ЛИЦО автора: «я читаю» не превращается в «Кай читает»."""
+    p = PERSONAL_INTERP_SYSTEM
+    assert "ТОЧКА ЗРЕНИЯ автора" in p
+    assert "ПЕРВОЕ ЛИЦО" in p
+    assert "НЕ заменяй «я» на имя «Кай»" in p
+    assert "в третьем лице" in p
+    # few-shot сохранения первого лица
+    assert "я читаю это как" in p
+    assert "НЕ «Кай читает это как…»" in p
+
+
 # ───────────────────── 2. _polish_authored_interpretation ───────────────────
 
 @pytest.mark.asyncio

@@ -167,13 +167,19 @@ def create_dp_and_bot():
         # ДО парсинга. Чтобы при разборе расклада было видно, ЧТО реально услышал
         # Whisper, до того как парсер это интерпретировал (голосовые баги иначе
         # неотлаживаемы). Не бросает: notify сам no-op'ит без лог-бота в .env.
+        # Длинное голосовое (режим A) превышает лимит TG-сообщения → бьём на
+        # чанки <4096, иначе хвост транскрипта обрезался бы жёстким cap'ом.
+        # Escape делаем ПОСЛЕ split (per-chunk), иначе можно порвать HTML-entity.
         try:
             from core.bot_notify import notify_log_group
+            from core.tg_send import split_text
             from html import escape as _esc
-            await notify_log_group(
-                f"🎤 транскрипт: {_esc(text[:1500])}",
-                config.log_thread_arcana,
-            )
+            chunks = split_text(text, limit=3500)
+            for _i, _ch in enumerate(chunks):
+                _prefix = "🎤 транскрипт:" if _i == 0 else "🎤 …продолжение:"
+                await notify_log_group(
+                    f"{_prefix} {_esc(_ch)}", config.log_thread_arcana,
+                )
         except Exception as e:
             logger.warning("voice transcript log to group failed: %s", e)
 

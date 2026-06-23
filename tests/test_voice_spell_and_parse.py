@@ -176,6 +176,29 @@ def test_handle_voice_logs_transcript_to_group_before_parse():
     assert i_log < body.index("route_message(msg"), "лог должен быть ДО парсинга"
 
 
+def test_transcript_logged_full_not_truncated_at_1500():
+    """FIX: длинный транскрипт НЕ обрезается до 1500 — бьётся на чанки через
+    split_text (полная видимость длинного голосового в мониторинге)."""
+    import re
+    src = (REPO / "arcana" / "bot.py").read_text(encoding="utf-8")
+    start = src.index("async def handle_voice")
+    end = src.index("async def handle_photo", start)
+    body = src[start:end]
+    assert "[:1500]" not in body, "транскрипт всё ещё обрезается до 1500"
+    assert "split_text(text" in body, "транскрипт не бьётся на чанки"
+    m = re.search(r"split_text\(text,\s*limit=(\d+)\)", body)
+    assert m and int(m.group(1)) < 4096, "лимит чанка должен быть < лимита Telegram"
+
+
+def test_long_transcript_tail_not_dropped():
+    """Хвост длинного транскрипта (>1500) доезжает целиком — старый [:1500] его терял."""
+    from core.tg_send import split_text
+    text = ("слово " * 400) + "ХВОСТМАРКЕР_В_КОНЦЕ"  # ~2400 символов, > 1500
+    chunks = split_text(text, limit=3500)
+    assert any("ХВОСТМАРКЕР_В_КОНЦЕ" in c for c in chunks), \
+        "хвост длинного транскрипта потерян (регрессия [:1500])"
+
+
 # ─────── NEW FIX 2: «клиент я» → self (null), не залипший «Оля» ──────────────
 
 def test_parse_prompt_has_self_client_rule_and_no_personal_names():
