@@ -27,9 +27,12 @@ Recon-диагноз (#166-след): промпт-правила Haiku игно
 from __future__ import annotations
 
 import re
+import logging
 from difflib import SequenceMatcher
 from itertools import permutations
 from typing import List, Tuple
+
+logger = logging.getLogger("arcana.grounding")
 
 GROUND_THRESHOLD = 0.75
 
@@ -147,10 +150,15 @@ def ground_cards(
         if score >= threshold:
             out.append(card)
             cursor = min(idx + k, len(norm))
+            logger.info("grounding: %r score=%.2f >= %.2f → keep", card, score, threshold)
         else:
             span, s_idx, s_k = _recover_span(cw, raw, norm, cursor, resolver)
             out.append(span or card)
             cursor = min(s_idx + s_k, len(norm))
+            logger.info(
+                "grounding: %r score=%.2f < %.2f → replace with %r",
+                card, score, threshold, span or card,
+            )
     return out
 
 
@@ -187,7 +195,12 @@ def ground_cards_in_data(
     multi (triplets[].cards + bottom_card). Один вызов — оба флоу. resolver(span)
     → bool: резолвится ли фрагмент в реальную карту колоды (для надёжной замены)."""
     if not isinstance(data, dict) or not transcript:
+        logger.info("grounding: SKIP (no data/transcript; transcript_len=%d)",
+                    len(transcript or ""))
         return
+    n_tri = len(data.get("triplets") or data.get("items") or [])
+    logger.info("grounding: START transcript_len=%d single_cards=%d triplets=%d resolver=%s",
+                len(transcript), len(data.get("cards") or []), n_tri, resolver is not None)
     _ground_block(data, transcript, threshold, resolver)
     for item in (data.get("triplets") or data.get("items") or []):
         if isinstance(item, dict):

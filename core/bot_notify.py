@@ -98,8 +98,19 @@ async def notify_log_group(text: str, thread_id: str = "") -> bool:
         return False
 
 
-def _git_commit() -> str:
-    """Короткий хэш текущего HEAD — для версии в стартовом пинге. Fail-safe → '?'."""
+def _version_stamp() -> str:
+    """Версия для старт-пинга. В контейнере — время сборки из /app/BUILD_STAMP
+    (.git в образ не копируется, git внутри не работает). Локально — git-хэш.
+    Fail-safe → '?'. По стампу видно, перечитал ли бот код после деплоя."""
+    try:
+        import os
+        if os.path.exists("/app/BUILD_STAMP"):
+            with open("/app/BUILD_STAMP", encoding="utf-8") as f:
+                stamp = f.read().strip()
+            if stamp:
+                return stamp
+    except Exception:
+        pass
     try:
         import os
         import subprocess
@@ -133,7 +144,7 @@ async def notify_startup(bot: str) -> bool:
     # Хэш коммита — чтобы в мониторинге было видно, КАКАЯ версия реально
     # задеплоена на сервере (иначе старый код от нового вживую не отличить).
     text = (
-        f"{label} поднялся · <code>{_esc(_git_commit())}</code>\n"
+        f"{label} поднялся · <code>{_esc(_version_stamp())}</code>\n"
         f"<code>{_esc(host)}</code> · {now}"
     )
     return await notify_log_group(text, thread)
