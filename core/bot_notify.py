@@ -98,6 +98,21 @@ async def notify_log_group(text: str, thread_id: str = "") -> bool:
         return False
 
 
+def _git_commit() -> str:
+    """Короткий хэш текущего HEAD — для версии в стартовом пинге. Fail-safe → '?'."""
+    try:
+        import os
+        import subprocess
+        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        out = subprocess.run(
+            ["git", "-C", root, "rev-parse", "--short", "HEAD"],
+            capture_output=True, text=True, timeout=3,
+        )
+        return out.stdout.strip() or "?"
+    except Exception:
+        return "?"
+
+
 async def notify_startup(bot: str) -> bool:
     """Стартовый пинг в общую TG-группу логов (как klgpff «поднялся»).
 
@@ -115,7 +130,12 @@ async def notify_startup(bot: str) -> bool:
     except Exception:
         host = "?"
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
-    text = f"{label} поднялся\n<code>{_esc(host)}</code> · {now}"
+    # Хэш коммита — чтобы в мониторинге было видно, КАКАЯ версия реально
+    # задеплоена на сервере (иначе старый код от нового вживую не отличить).
+    text = (
+        f"{label} поднялся · <code>{_esc(_git_commit())}</code>\n"
+        f"<code>{_esc(host)}</code> · {now}"
+    )
     return await notify_log_group(text, thread)
 
 
