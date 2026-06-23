@@ -163,6 +163,20 @@ def create_dp_and_bot():
         from core.tg_send import send_long
         await send_long(msg, f"🎤 «{text}»")
 
+        # Сырой транскрипт Whisper → в ops-группу логов (инфо-событие, не error),
+        # ДО парсинга. Чтобы при разборе расклада было видно, ЧТО реально услышал
+        # Whisper, до того как парсер это интерпретировал (голосовые баги иначе
+        # неотлаживаемы). Не бросает: notify сам no-op'ит без лог-бота в .env.
+        try:
+            from core.bot_notify import notify_log_group
+            from html import escape as _esc
+            await notify_log_group(
+                f"🎤 транскрипт: {_esc(text[:1500])}",
+                config.log_thread_arcana,
+            )
+        except Exception as e:
+            logger.warning("voice transcript log to group failed: %s", e)
+
         # Голос идёт мимо текстового spell-слоя: route_message пропускает уже
         # заданный _text (base.py:359), поэтому транскрипт НЕ чистился whitelist-
         # spell'ом. Прогоняем его тем же normalize_text (карты/клиенты/термины),
