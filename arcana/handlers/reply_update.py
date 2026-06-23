@@ -38,6 +38,23 @@ async def handle_reply_update(message: Message, user_notion_id: str = "") -> boo
     if not reply_text:
         return False
 
+    # Reply на карточку триплета = правка свободным текстом (карта/трактовка),
+    # как кнопка «Поправить» и как reply-правка в Nexus. Раньше session-reply шёл
+    # в ограниченный _apply_session (только тема/область) → смена карты не
+    # работала, а «королева мечей не король жезлов» свободным текстом улетала в
+    # НОВЫЙ расклад. Теперь reply → полный триплет-correction (#B8 #B9).
+    if page_type == "session":
+        from arcana.handlers.sessions import correct_triplet_by_id
+        try:
+            ok = await correct_triplet_by_id(message, reply_text, page_id, user_notion_id)
+        except Exception as e:
+            logger.error("session reply correction failed: %s", tb.format_exc())
+            ok = False
+        if not ok:
+            await message.answer("⚠️ Триплет не найден для правки.")
+        await react(message, "✍️")
+        return True
+
     try:
         updates = await parse_reply(page_type, reply_text)
         if not updates:

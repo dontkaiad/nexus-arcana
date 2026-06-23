@@ -1467,7 +1467,19 @@ async def _handle_multi_session(
                 body_full = f"{head}\n{interp_tg}"
                 tkb = _triplet_keyboard(page_id)
                 # Чанки <4096; кнопки — на последнее сообщение.
-                await send_long(message, body_full, parse_mode="HTML", reply_markup=tkb)
+                sent = await send_long(message, body_full, parse_mode="HTML", reply_markup=tkb)
+                # Маппим сообщение триплета → reply на него = правка (как в single,
+                # иначе reply на карточку в мульти-сессии не находил page → уходил
+                # в НОВЫЙ расклад). Паритет reply-правки single/multi.
+                if sent is not None:
+                    try:
+                        from core.message_pages import save_message_page
+                        await save_message_page(
+                            chat_id=sent.chat.id, message_id=sent.message_id,
+                            page_id=page_id, page_type="session", bot="arcana",
+                        )
+                    except Exception:
+                        pass
 
                 saved_triplets.append({
                     "question": question,
@@ -1797,16 +1809,38 @@ async def cb_client_resolve_cancel(call: CallbackQuery) -> None:
 async def handle_triplet_correction(
     message: Message, correction_text: str, pending: dict, user_notion_id: str
 ) -> None:
-    """Вход — pending {awaiting_triplet_edit, triplet_short_id} + текст правки.
-    Загружаем триплет из Notion, гоним Sonnet, обновляем поле «Трактовка»,
-    регенерим Haiku-саммари, инвалидируем кеш сессии."""
+    """Кнопка «Поправить»: pending{triplet_short_id} + текст правки → правка
+    триплета (карта и/или трактовка). Делегирует в общее ядро."""
+    from arcana.pending_tarot import delete_pending
+    await delete_pending(message.from_user.id)
     short_id = pending.get("triplet_short_id") or ""
     entry = await _resolve_triplet_page(short_id, user_notion_id)
-    from arcana.pending_tarot import delete_pending
     if not entry:
-        await delete_pending(message.from_user.id)
         await message.answer("⚠️ Триплет не найден.")
         return
+    await _apply_triplet_correction(message, correction_text, entry, user_notion_id)
+
+
+async def correct_triplet_by_id(
+    message: Message, correction_text: str, page_id: str, user_notion_id: str
+) -> bool:
+    """Reply на карточку триплета = правка СВОБОДНЫМ ТЕКСТОМ (карта/трактовка),
+    как кнопка «Поправить» — паритет с Nexus (reply = правка). page_id берётся
+    из message_pages. Возвращает False если триплет не найден."""
+    entry = await _resolve_triplet_page(page_id, user_notion_id)
+    if not entry:
+        return False
+    await _apply_triplet_correction(message, correction_text, entry, user_notion_id)
+    return True
+
+
+async def _apply_triplet_correction(
+    message: Message, correction_text: str, entry: TripletEntry, user_notion_id: str
+) -> None:
+    """Ядро правки триплета — ОБЩЕЕ для кнопки «Поправить» и reply на карточку:
+    card_edit → пересбор карт + справочника → Sonnet регенерит трактовку →
+    update_cards + update_interpretation → RAG reindex → репост с подтверждением.
+    Pending НЕ трогает (это забота вызывающего)."""
     page_id = entry.id
     question = entry.question
     cards_raw = entry.cards
@@ -1860,7 +1894,6 @@ async def handle_triplet_correction(
         )
     except Exception as e:
         logger.error("triplet correction sonnet failed: %s", e)
-        await delete_pending(message.from_user.id)
         await message.answer("❌ Не получилось скорректировать трактовку.")
         return
 
@@ -1909,8 +1942,6 @@ async def handle_triplet_correction(
             cache_delete(session_summary_key(sname, cid))
         except Exception:
             pass
-
-    await delete_pending(message.from_user.id)
 
     interp_tg = html_to_telegram(new_interp)
     head = f"✏️ <b>{html.escape(question)}</b>\n"

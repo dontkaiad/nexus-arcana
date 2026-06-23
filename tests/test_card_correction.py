@@ -143,3 +143,58 @@ async def test_text_only_edit_does_not_touch_cards():
     assert rag.await_args.kwargs["cards"] == "королева кубков, шут, маг"
     sent = " ".join(str(c.args[0]) for c in msg.answer.await_args_list)
     assert "🔄 Карта обновлена" not in sent
+
+
+# ───────────── BUG B: reply на карточку = правка (паритет Nexus) ─────────────
+
+@pytest.mark.asyncio
+async def test_correct_triplet_by_id_applies_card_change():
+    """Reply-путь: correct_triplet_by_id грузит триплет по page_id и правит карту."""
+    from arcana.handlers.sessions import correct_triplet_by_id
+    repo = _repo_mock()
+    get_ctx = MagicMock(return_value="<ctx>")
+    rag = AsyncMock()
+    card_edit = {"cards_ru": "король кубков, шут, маг", "bottom_ru": ""}
+    msg = _msg()
+    with contextlib.ExitStack() as st:
+        for p in _correction_patches(repo, get_ctx, card_edit, rag):
+            st.enter_context(p)
+        ok = await correct_triplet_by_id(
+            msg, "королева кубков, а не король", "pg-1", "u",
+        )
+    assert ok is True
+    repo.update_cards.assert_awaited_once()
+    repo.update_interpretation.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_correct_triplet_by_id_not_found_returns_false():
+    """Триплет не найден по page_id → False (caller не уронит в новый расклад)."""
+    from arcana.handlers import sessions
+    from arcana.handlers.sessions import correct_triplet_by_id
+    with patch.object(sessions, "_resolve_triplet_page", AsyncMock(return_value=None)):
+        ok = await correct_triplet_by_id(_msg(), "текст", "pg-x", "u")
+    assert ok is False
+
+
+@pytest.mark.asyncio
+async def test_session_reply_routes_to_triplet_correction_not_new_session():
+    """Reply на карточку триплета → правка (correct_triplet_by_id), НЕ новый
+    расклад. Раньше session-reply шёл в _apply_session (без карт)."""
+    from arcana.handlers import reply_update as ru
+    msg = _msg()
+    msg.chat = MagicMock(id=1)
+    msg.reply_to_message = MagicMock(message_id=99)
+    msg.text = "королева мечей, а не король жезлов"
+    msg.caption = None
+    spy = AsyncMock(return_value=True)
+    with patch("arcana.handlers.reply_update.get_message_page",
+               AsyncMock(return_value={"page_type": "session", "page_id": "7", "bot": "arcana"})), \
+         patch("arcana.handlers.sessions.correct_triplet_by_id", spy), \
+         patch("arcana.handlers.reply_update.react", AsyncMock()):
+        handled = await ru.handle_reply_update(msg, user_notion_id="u")
+    assert handled is True, "reply должен быть обработан как правка"
+    spy.assert_awaited_once()
+    # прокинут page_id из mapping и текст правки
+    assert spy.await_args.args[2] == "7"
+    assert "королева мечей" in spy.await_args.args[1]
