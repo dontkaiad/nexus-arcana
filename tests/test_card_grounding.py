@@ -81,6 +81,42 @@ def test_full_chain_hallucination_to_correct_card():
     assert _lookup_card(dd, "Уэйт", grounded), "грундированная карта не нашлась в waite"
 
 
+def _waite_resolver():
+    from miniapp.backend.tarot import resolve_deck_id, find_card
+    did = resolve_deck_id("Уэйт")
+    return lambda s: bool(find_card(did, s))
+
+
+def test_recovery_skips_noise_via_resolver_real_case():
+    """Реальный кейс (скрин): парсер выдал «паж жезлов» по ОПИСАНИЮ Кай (резкая/
+    порывистая = ключи Пажа Жезлов), хотя названа Королева Мечей → Whisper
+    «крыльева мячей». Длинный режим-A транскрипт: без resolver замена цеплялась
+    за шум «на ценностях»; с resolver — берём фрагмент, что резолвится в карту."""
+    from miniapp.backend.tarot import normalize_card_input
+    transcript = (
+        "что вадим чувствует прямо сейчас туз пентаклей это реальный материальный "
+        "шанс новая работа деньги влюбленные внутри выбор завязанный на ценностях "
+        "крыльева мячей женщина которая ранит резкая порывистая дно семь кубков иллюзия"
+    )
+    data = {"cards": ["туз пентаклей", "влюбленные", "паж жезлов"],
+            "bottom_card": "семь кубков"}
+    ground_cards_in_data(data, transcript, resolver=_waite_resolver())
+    assert data["cards"][0] == "туз пентаклей"
+    assert data["cards"][1] == "влюбленные"
+    assert data["cards"][2] == "крыльева мячей", "не восстановил названную карту из транскрипта"
+    assert normalize_card_input(data["cards"][2]) == "королева мечей"  # → Королева Мечей
+
+
+def test_resolver_recovery_beats_similarity_noise():
+    """С resolver выдуманная 3-я карта восстанавливается из «крыльева мячей»,
+    а не из шума «на ценностях» (курсор идёт по порядку карт)."""
+    from core.card_grounding import ground_cards
+    transcript = "туз пентаклей влюбленные на ценностях крыльева мячей шут"
+    cards = ["туз пентаклей", "влюбленные", "паж жезлов"]
+    grounded = ground_cards(cards, transcript, resolver=_waite_resolver())
+    assert grounded[2] == "крыльева мячей", f"resolver не нашёл карту, дал {grounded[2]!r}"
+
+
 # ───────────────────── мутация data (single + multi + дно) ──────────────────
 
 def test_ground_cards_in_data_single_and_bottom():
@@ -134,6 +170,8 @@ def test_grounding_wired_after_parse():
     ДО split single/multi (покрывает оба флоу)."""
     src = (REPO / "arcana" / "handlers" / "sessions.py").read_text(encoding="utf-8")
     i_parse = src.index("system=PARSE_SESSION_SYSTEM")
-    i_ground = src.index("ground_cards_in_data(data, text)")
+    i_ground = src.index("ground_cards_in_data(")
     i_multi = src.index("_handle_multi_session(")
     assert i_parse < i_ground < i_multi, "граундинг должен быть после парса и до multi-split"
+    # резолвер колоды прокинут (надёжная замена через нормализатор)
+    assert "resolver=lambda s: bool(find_card(" in src

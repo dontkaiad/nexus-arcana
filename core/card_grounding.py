@@ -100,10 +100,34 @@ def _rank_anchor(rank: str, norm_words: List[str], start: int) -> int:
     return max(rng, key=lambda i: _ratio(rank, norm_words[i]))
 
 
-def ground_cards(cards, transcript: str, threshold: float = GROUND_THRESHOLD) -> List[str]:
+def _recover_span(
+    card_words: List[str], raw: List[str], norm: List[str], cursor: int, resolver
+) -> Tuple[str, int, int]:
+    """Дословный фрагмент транскрипта под выдуманную карту, начиная с cursor.
+
+    (1) Если есть resolver (нормализатор колоды) — берём ПЕРВЫЙ фрагмент, который
+    РЕАЛЬНО резолвится в карту: «крыльева мячей»→Королева Мечей резолвится, шум
+    «на ценностях» — нет. Это надёжнее фонетической близости (короткие слова-
+    паразиты «на»/«не» липнут к коротким рангам «паж»/«туз»).
+    (2) Без resolver — fallback: окно с якорем на ранге."""
+    if resolver:
+        for k in (2, 1):
+            for i in range(cursor, len(raw) - k + 1):
+                span = " ".join(raw[i:i + k])
+                if resolver(span):
+                    return span, i, k
+    k = len(card_words)
+    anchor = _rank_anchor(card_words[0], norm, cursor)
+    start = min(anchor, max(cursor, len(raw) - k)) if len(raw) >= k else cursor
+    return (" ".join(raw[start:start + k]) if raw else ""), start, k
+
+
+def ground_cards(
+    cards, transcript: str, threshold: float = GROUND_THRESHOLD, resolver=None
+) -> List[str]:
     """Сверяет список карт парсера (по ПОРЯДКУ) с транскриптом. Негрундящиеся →
-    дословный фрагмент транскрипта. Курсор идёт по транскрипту, чтобы карта N не
-    схватила регион карты N-1 (одинаковые ранги)."""
+    дословный фрагмент транскрипта (resolver находит тот, что резолвится в карту).
+    Курсор идёт по транскрипту, чтобы карта N не схватила регион карты N-1."""
     cards = list(cards or [])
     if not transcript:
         return cards
@@ -124,22 +148,22 @@ def ground_cards(cards, transcript: str, threshold: float = GROUND_THRESHOLD) ->
             out.append(card)
             cursor = min(idx + k, len(norm))
         else:
-            anchor = _rank_anchor(cw[0], norm, cursor)
-            start = min(anchor, max(cursor, len(raw) - k)) if len(raw) >= k else cursor
-            span = " ".join(raw[start:start + k]) if raw else ""
+            span, s_idx, s_k = _recover_span(cw, raw, norm, cursor, resolver)
             out.append(span or card)
-            cursor = min(start + k, len(norm))
+            cursor = min(s_idx + s_k, len(norm))
     return out
 
 
-def ground_card(card: str, transcript: str, threshold: float = GROUND_THRESHOLD) -> str:
+def ground_card(
+    card: str, transcript: str, threshold: float = GROUND_THRESHOLD, resolver=None
+) -> str:
     """Одна карта (без контекста порядка). Для bottom_card и юнит-тестов."""
     if not card or not card.strip():
         return card
-    return ground_cards([card], transcript, threshold)[0]
+    return ground_cards([card], transcript, threshold, resolver)[0]
 
 
-def _ground_block(block: dict, transcript: str, threshold: float) -> None:
+def _ground_block(block: dict, transcript: str, threshold: float, resolver) -> None:
     """In-place: грундит cards + bottom_card блока ОДНОЙ упорядоченной
     последовательностью (дно идёт после карт → курсор течёт сквозь оба,
     bottom не схватит регион ранней одноимённой карты)."""
@@ -149,19 +173,22 @@ def _ground_block(block: dict, transcript: str, threshold: float) -> None:
     if cards is None and not has_bottom:
         return
     seq = (cards or []) + ([bottom] if has_bottom else [])
-    grounded = ground_cards(seq, transcript, threshold)
+    grounded = ground_cards(seq, transcript, threshold, resolver)
     if cards is not None:
         block["cards"] = grounded[:len(cards)]
     if has_bottom:
         block["bottom_card"] = grounded[-1]
 
 
-def ground_cards_in_data(data: dict, transcript: str, threshold: float = GROUND_THRESHOLD) -> None:
+def ground_cards_in_data(
+    data: dict, transcript: str, threshold: float = GROUND_THRESHOLD, resolver=None
+) -> None:
     """In-place граундинг карт парс-результата: single (cards + bottom_card) +
-    multi (triplets[].cards + bottom_card). Один вызов — оба флоу."""
+    multi (triplets[].cards + bottom_card). Один вызов — оба флоу. resolver(span)
+    → bool: резолвится ли фрагмент в реальную карту колоды (для надёжной замены)."""
     if not isinstance(data, dict) or not transcript:
         return
-    _ground_block(data, transcript, threshold)
+    _ground_block(data, transcript, threshold, resolver)
     for item in (data.get("triplets") or data.get("items") or []):
         if isinstance(item, dict):
-            _ground_block(item, transcript, threshold)
+            _ground_block(item, transcript, threshold, resolver)

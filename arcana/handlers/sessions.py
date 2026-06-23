@@ -999,7 +999,11 @@ async def handle_add_session(
         # («крыльева мячей» → «Королева Мечей»). ДО split single/multi и resolve-
         # диалога → покрывает оба флоу одним вызовом, grounded data едет в pending.
         from core.card_grounding import ground_cards_in_data
-        ground_cards_in_data(data, text)
+        from miniapp.backend.tarot import resolve_deck_id, find_card
+        _gr_deck = resolve_deck_id(data.get("deck") or "Уэйт")
+        ground_cards_in_data(
+            data, text, resolver=lambda s: bool(find_card(_gr_deck, s)),
+        )
 
         # 1b. Multi-question session → отдельная ветка: сразу сохраняем N триплетов.
         # Принимаем оба ключа: новый "triplets" и legacy "items".
