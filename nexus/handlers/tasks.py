@@ -2020,13 +2020,41 @@ async def _update_notion_on_reschedule(task_id: str, new_reminder: str, tz_offse
         logger.error("_update_notion_on_reschedule error: %s", e)
 
 
+def _is_future_dt(dt_str: str, tz_offset: int) -> bool:
+    """True если dt_str (YYYY-MM-DD[THH:MM]) в будущем относительно now(tz).
+
+    Anti-loop guard: перенос в прошлое заставит _schedule_reminder сработать
+    мгновенно (missed ≤ 120с) → напоминание всплывёт снова → петля."""
+    try:
+        dt_str = _ensure_datetime(dt_str)
+        dt = datetime.strptime(dt_str, "%Y-%m-%dT%H:%M").replace(
+            tzinfo=timezone(timedelta(hours=tz_offset))
+        )
+        return dt > datetime.now(timezone(timedelta(hours=tz_offset)))
+    except Exception:
+        return True  # не блокируем при ошибке парсинга
+
+
+async def handle_reminder_reply_reschedule(
+    message: Message, task_id: str, title: str
+) -> None:
+    """Reply на плашку напоминания = перенос (как «❌ Не сделал» → время).
+
+    Выставляет pending reschedule и переиспользует общий пайплайн переноса,
+    чтобы reply «напомни в 19» / «в 19» парсился так же, как ручной ввод."""
+    _pending_set(message.from_user.id, {
+        "task_id": task_id, "action": "reschedule", "title": title or "",
+    })
+    await handle_reschedule_reminder(message)
+
+
 async def handle_reschedule_reminder(message: Message) -> None:
     """Обработка переноса напоминания."""
     from core.config import config
     from core.layout import maybe_convert
     uid = message.from_user.id
     pending = _pending_get(uid)
-    
+
     if not pending or pending.get("action") != "reschedule":
         return
     
@@ -2061,12 +2089,15 @@ async def handle_reschedule_reminder(message: Message) -> None:
 
         now_str = datetime.now(timezone(timedelta(hours=tz_offset))).strftime("%Y-%m-%d %H:%M")
 
-        system = f"""Пользователь указывает новое напоминание. Парсь и верни ТОЛЬКО JSON без markdown:
+        system = f"""Пользователь переносит напоминание (указывает новое время). Парсь и верни ТОЛЬКО JSON без markdown:
 {{"reminder_time": "YYYY-MM-DDTHH:MM"}}
 
 Правила:
-- "завтра в 10:00" → завтра в 10:00
-- "в понедельник" → в понедельник в 09:00
+- Слова "напомни / напоминай / напоминание" — НЕ часть времени, игнорируй их.
+- "напомни в 19" / "в 19" → сегодня в 19:00; если 19:00 уже прошло — завтра в 19:00.
+- "завтра в 10:00" → завтра в 10:00.
+- "в понедельник" → ближайший понедельник в 09:00.
+- reminder_time ВСЕГДА строго в будущем относительно "Сейчас".
 
 Сейчас: {now_str} (МСК, UTC+{tz_offset})"""
 
@@ -2076,6 +2107,15 @@ async def handle_reschedule_reminder(message: Message) -> None:
 
         if parsed.get("reminder_time"):
             reminder_time = parsed["reminder_time"]
+            # Anti-loop: перенос в прошлое сработает мгновенно → петля. Переспросить,
+            # pending НЕ удаляем — следующее сообщение повторит попытку.
+            if not _is_future_dt(reminder_time, tz_offset):
+                await message.answer(
+                    "⏰ Это время уже прошло. Укажи будущее:\n"
+                    "<code>в 19:00</code>, <code>завтра в 10:00</code>, <code>через 2 часа</code>",
+                    parse_mode="HTML",
+                )
+                return
             await _schedule_reminder(message.chat.id, task_title, reminder_time, task_id, tz_offset)
             await _update_notion_on_reschedule(task_id, reminder_time, tz_offset)
             _pending_del(uid)

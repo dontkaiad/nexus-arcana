@@ -683,6 +683,18 @@ async def process_text(msg: Message, text: str, user_notion_id: str = "") -> Non
             msg.reply_to_message.from_user
             and msg.reply_to_message.from_user.is_bot
         ):
+            # Reply на плашку напоминания/дедлайна = перенос этого напоминания
+            # (intuitive UX: Кай отвечает «напомни в 19» прямо на плашку, #170).
+            from core.task_reminder_msg import get_task_reminder_by_message
+            _rem = await get_task_reminder_by_message(
+                msg.chat.id, msg.reply_to_message.message_id
+            )
+            if _rem:
+                from nexus.handlers.tasks import handle_reminder_reply_reschedule
+                await handle_reminder_reply_reschedule(
+                    msg, _rem["task_id"], _rem.get("title") or ""
+                )
+                return
             from nexus.handlers.reply_update import handle_reply_update
             if await handle_reply_update(msg, user_notion_id=user_notion_id):
                 return
