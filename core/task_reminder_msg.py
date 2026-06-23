@@ -84,6 +84,31 @@ async def get_task_reminder(task_id: str) -> Optional[dict]:
     }
 
 
+async def get_task_reminder_by_message(chat_id: int, message_id: int) -> Optional[dict]:
+    """Найти задачу по плашке (chat_id, message_id) — для reply-переноса.
+
+    Reply на «🔔 Напоминание: …» / «⏰ Дедлайн: …» = перенос этого
+    напоминания. Возвращает {task_id, title, ...} или None (нет строки /
+    старше 47ч)."""
+    if not message_id:
+        return None
+    await _ensure_table()
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            "SELECT task_id, title, created_at "
+            "FROM task_reminder_msg WHERE chat_id=? AND message_id=?",
+            (chat_id, message_id),
+        ) as cursor:
+            row = await cursor.fetchone()
+    if not row:
+        return None
+    task_id, title, created_at = row
+    if time.time() - created_at > _TTL:
+        await delete_task_reminder(task_id)
+        return None
+    return {"task_id": task_id, "title": title, "created_at": created_at}
+
+
 async def delete_task_reminder(task_id: str) -> None:
     if not task_id:
         return
