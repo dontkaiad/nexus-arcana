@@ -99,13 +99,14 @@ def get_cards_context(deck_name: str, card_names: List[str]) -> str:
         if card_info:
             found.append(f"📍 {card_name}:\n{_format_card_info(card_info)}")
 
-    if not found:
-        return ""
-
     style = get_deck_style(deck_name)
     header = f"Колода: {deck_name}"
     if style:
         header += f"\nСтиль: {style}"
+    if not found:
+        # Карты не нашлись, но ИМЯ колоды отдаём — чтобы deck-conditional правило
+        # промпта (Уэйт=канон vs авторская=строго) сработало даже на missing.
+        return header
     return header + "\n\n" + "\n\n".join(found)
 
 
