@@ -175,3 +175,19 @@ def test_grounding_wired_after_parse():
     assert i_parse < i_ground < i_multi, "граундинг должен быть после парса и до multi-split"
     # резолвер колоды прокинут (надёжная замена через нормализатор)
     assert "resolver=lambda s: bool(find_card(" in src
+
+
+def test_narration_words_dont_false_ground_hallucination():
+    """Режим A (реальный баг 6:47 PM): выдуманная «король жезлов» НЕ должна
+    грундиться к словам «королева»/«жезлов» из НАРРАТИВА Кай дальше в тексте.
+    lookahead ограничивает грунинг окрестностью курсора."""
+    transcript = (
+        "туз пентакли влюбленные крыльево мячей дно семь кубков "
+        "королева жезлов это женщина огненная резкая властная она его ранила"
+    )
+    data = {"cards": ["туз пентакли", "влюбленные", "король жезлов"],
+            "bottom_card": "семь кубков"}
+    ground_cards_in_data(data, transcript, resolver=_waite_resolver())
+    assert data["cards"][2] == "крыльево мячей", "выдумка ложно сгрундилась к нарративу"
+    from miniapp.backend.tarot import normalize_card_input
+    assert normalize_card_input(data["cards"][2]) == "королева мечей"

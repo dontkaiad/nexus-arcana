@@ -35,6 +35,10 @@ from typing import List, Tuple
 logger = logging.getLogger("arcana.grounding")
 
 GROUND_THRESHOLD = 0.75
+# Карта грундится только в ОКРЕСТНОСТИ курсора (карты в речи названы подряд).
+# Иначе выдуманная карта цепляется за похожие слова из НАРРАТИВА режима A
+# («король жезлов» → «королева»+«жезлов» где-то дальше в трактовке Кай).
+GROUND_LOOKAHEAD = 4
 
 _STRIP = re.compile(r"[^а-яa-z0-9]")
 _SPLIT = re.compile(r"\s+")
@@ -78,12 +82,23 @@ def _bijective(card_words: List[str], window: List[str]) -> float:
     return best
 
 
-def _best_window(card_words: List[str], norm_words: List[str], start: int) -> Tuple[float, int]:
-    """(score, idx) лучшего окна длины k среди позиций >= start."""
+def _best_window(
+    card_words: List[str], norm_words: List[str], start: int,
+    lookahead: int = -1,
+) -> Tuple[float, int]:
+    """(score, idx) лучшего окна длины k среди позиций start..start+lookahead.
+
+    lookahead ограничивает поиск ОКРЕСТНОСТЬЮ курсора: карты в речи названы
+    подряд, поэтому карта N стоит сразу после карты N-1. Без лимита выдуманная
+    карта («король жезлов») цеплялась за слова из НАРРАТИВА режима A («королева»,
+    «жезлов» где-то дальше) и ложно «грундилась» (score 0.86). lookahead=-1 —
+    без лимита (для recovery-резолвера, ему нужен весь хвост)."""
     k = len(card_words)
     if k == 0 or start >= len(norm_words):
         return 0.0, start
     end = len(norm_words) - k + 1
+    if lookahead >= 0:
+        end = min(end, start + lookahead + 1)
     if end <= start:  # хвост короче карты — одно окно от start
         return _bijective(card_words, norm_words[start:]), start
     best_s, best_i = -1.0, start
@@ -114,7 +129,12 @@ def _recover_span(
     паразиты «на»/«не» липнут к коротким рангам «паж»/«туз»).
     (2) Без resolver — fallback: окно с якорем на ранге."""
     if resolver:
-        for k in (2, 1):
+        # Длину карты пробуем ПЕРВОЙ: для 1-словной карты («влюблённые») сначала
+        # 1-словные спаны, иначе схватили бы соседний 2-словный («крыльева мячей»).
+        kc = len(card_words)
+        for k in [kc] + [x for x in (2, 1) if x != kc]:
+            if k < 1:
+                continue
             for i in range(cursor, len(raw) - k + 1):
                 span = " ".join(raw[i:i + k])
                 if resolver(span):
@@ -146,7 +166,7 @@ def ground_cards(
             out.append(card)
             continue
         k = len(cw)
-        score, idx = _best_window(cw, norm, cursor)
+        score, idx = _best_window(cw, norm, cursor, lookahead=GROUND_LOOKAHEAD)
         if score >= threshold:
             out.append(card)
             cursor = min(idx + k, len(norm))
