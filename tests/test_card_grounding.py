@@ -191,3 +191,19 @@ def test_narration_words_dont_false_ground_hallucination():
     assert data["cards"][2] == "крыльево мячей", "выдумка ложно сгрундилась к нарративу"
     from miniapp.backend.tarot import normalize_card_input
     assert normalize_card_input(data["cards"][2]) == "королева мечей"
+
+
+@pytest.mark.parametrize("said,parsed", [
+    ("туз мячей", "туз жезлов"),
+    ("девятка мячей", "девятка жезлов"),
+    ("паж мячей", "паж жезлов"),
+    ("рыцарь мячей", "рыцарь жезлов"),
+])
+def test_swords_systematic_not_grounded_to_wands(said, parsed):
+    """Системно: парсер выдаёт X ЖЕЗЛОВ из X МЯЧЕЙ (мечей) — НЕ должно
+    грундиться; восстанавливается в Мечи (вся масть, не только королева)."""
+    from miniapp.backend.tarot import normalize_card_input
+    transcript = f"что чувствует {said} шут маг это про конфликт мысли борьбу"
+    out = ground_card(parsed, transcript, resolver=_waite_resolver())
+    assert out != parsed, f"{parsed!r} ложно сгрундилось как Жезлы"
+    assert "мечей" in normalize_card_input(out), f"не восстановилось в Мечи: {out!r}"

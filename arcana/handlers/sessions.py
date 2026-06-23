@@ -1001,9 +1001,33 @@ async def handle_add_session(
         from core.card_grounding import ground_cards_in_data
         from miniapp.backend.tarot import resolve_deck_id, find_card
         _gr_deck = resolve_deck_id(data.get("deck") or "Уэйт")
+
+        def _flat_cards(d: dict) -> List[str]:
+            out = list(d.get("cards") or [])
+            if d.get("bottom_card"):
+                out.append(d["bottom_card"])
+            for it in (d.get("triplets") or d.get("items") or []):
+                if isinstance(it, dict):
+                    out += list(it.get("cards") or [])
+                    if it.get("bottom_card"):
+                        out.append(it["bottom_card"])
+            return out
+
+        _gr_before = _flat_cards(data)
         ground_cards_in_data(
             data, text, resolver=lambda s: bool(find_card(_gr_deck, s)),
         )
+        # Итог грунинга → в ops-группу (видно на проде что заменил, не лазая в
+        # docker logs). Не бросает — диагностика вторична.
+        try:
+            _gr_diff = [
+                f"{b}→{a}" for b, a in zip(_gr_before, _flat_cards(data)) if b != a
+            ]
+            from core.bot_notify import notify_log_group
+            _gr_msg = "🔍 грунинг: " + ("; ".join(_gr_diff) if _gr_diff else "без замен")
+            await notify_log_group(html.escape(_gr_msg[:1500]), _cfg.log_thread_arcana)
+        except Exception as _e:
+            logger.warning("grounding ops-log failed: %s", _e)
 
         # 1b. Multi-question session → отдельная ветка: сразу сохраняем N триплетов.
         # Принимаем оба ключа: новый "triplets" и legacy "items".
