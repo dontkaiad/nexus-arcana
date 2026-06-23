@@ -23,10 +23,12 @@ COPY . .
 COPY --from=frontend /frontend/dist /app/miniapp/frontend/dist
 
 # Версия образа для старт-пинга в мониторинг. .git в образ НЕ копируется
-# (.dockerignore), поэтому git rev-parse внутри контейнера не работает — печём
-# ВРЕМЯ СБОРКИ. Слой пересобирается всегда, когда менялся код (его parent —
-# `COPY . .`), → свежий деплой = свежий BUILD_STAMP. Если в мониторинге время
-# старое — контейнер не перечитал код (рестарт/кеш не доехал).
-RUN date -u +'built %Y-%m-%dT%H:%M:%SZ' > /app/BUILD_STAMP
+# (.dockerignore), git внутри контейнера не работает — печём ВРЕМЯ СБОРКИ
+# (+ короткий SHA коммита, если deploy передал --build-arg GIT_SHA). Слой
+# пересобирается всегда, когда менялся код (его parent — `COPY . .`), → свежий
+# деплой = свежий BUILD_STAMP. Старое время в мониторинге = контейнер не
+# перечитал код. GIT_SHA пуст → стамп = только время сборки, без мусора.
+ARG GIT_SHA=
+RUN printf 'built %s%s' "$(date -u +%Y-%m-%dT%H:%MZ)" "${GIT_SHA:+ · $GIT_SHA}" > /app/BUILD_STAMP
 
 CMD ["python", "-m", "nexus.nexus_bot"]

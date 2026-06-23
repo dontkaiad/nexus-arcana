@@ -119,9 +119,9 @@ def _version_stamp() -> str:
             ["git", "-C", root, "rev-parse", "--short", "HEAD"],
             capture_output=True, text=True, timeout=3,
         )
-        return out.stdout.strip() or "?"
+        return out.stdout.strip() or "unknown"
     except Exception:
-        return "?"
+        return "unknown"
 
 
 async def notify_startup(bot: str) -> bool:
@@ -141,11 +141,13 @@ async def notify_startup(bot: str) -> bool:
     except Exception:
         host = "?"
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
-    # Хэш коммита — чтобы в мониторинге было видно, КАКАЯ версия реально
-    # задеплоена на сервере (иначе старый код от нового вживую не отличить).
+    # Версия (время сборки / SHA) — чтобы в мониторинге было видно, КАКАЯ версия
+    # реально задеплоена. host — id контейнера (помечаем 🖥, чтобы не путать с
+    # хэшем коммита). Версия первой строкой, явным «🔖».
     text = (
-        f"{label} поднялся · <code>{_esc(_version_stamp())}</code>\n"
-        f"<code>{_esc(host)}</code> · {now}"
+        f"{label} поднялся\n"
+        f"🔖 <code>{_esc(_version_stamp())}</code>\n"
+        f"🖥 <code>{_esc(host)}</code> · {now}"
     )
     return await notify_log_group(text, thread)
 
