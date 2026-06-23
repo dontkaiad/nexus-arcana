@@ -45,6 +45,27 @@ def test_voice_nominative_cards_now_resolve(card):
     assert _lookup_card(_deck(), DECK, card), f"{card!r} не нашлась в справочнике"
 
 
+# Фонетические мисхёрды Whisper (мечей↔мячей, королева↔крыльева) → канон.
+WHISPER_MISHEARS = [
+    ("туз мячей", "туз мечей"),
+    ("шесть мячей", "шестёрка мечей"),
+    ("крыльева мячей", "королева мечей"),   # двойное искажение (recon-кейс)
+    ("крыльева мечей", "королева мечей"),
+    ("кралева кубков", "королева кубков"),
+]
+
+
+@pytest.mark.parametrize("raw,canon", WHISPER_MISHEARS)
+def test_whisper_mishears_normalize(raw, canon):
+    from miniapp.backend.tarot import normalize_card_input
+    assert normalize_card_input(raw) == canon
+
+
+@pytest.mark.parametrize("raw", [m[0] for m in WHISPER_MISHEARS])
+def test_whisper_mishears_resolve_in_deck(raw):
+    assert _lookup_card(_deck(), DECK, raw), f"мисхёрд {raw!r} не сматчился"
+
+
 @pytest.mark.parametrize("card", CONTROL_OK)
 def test_previously_working_forms_still_resolve(card):
     """Регресс: родительный/цифра/порядковое/двор всё ещё резолвятся."""

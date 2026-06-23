@@ -91,11 +91,14 @@ def test_handle_voice_calls_normalize_before_route():
 
 def test_parse_prompt_forbids_card_hallucination():
     from arcana.handlers.sessions import PARSE_SESSION_SYSTEM as p
-    assert "НЕ ВЫДУМЫВАЙ КАРТУ" in p
-    assert "НЕ подменяй ближайшей знакомой картой" in p
+    # императив (не сравнительное «лучше…чем»)
+    assert "ЗАПРЕЩЕНО ВЫДУМЫВАТЬ КАРТУ" in p
+    assert "ОБЯЗАН вернуть его ДОСЛОВНО" in p
     assert "НЕ угадывай ранг" in p
-    assert "ДОСЛОВНО" in p
     assert "null" in p
+    # few-shot дословного fallback (recon: Haiku имитирует примеры)
+    assert "крыльева мячей" in p, "нет few-shot искажённой карты → дословно"
+    assert "Король Жезлов" in p, "нет контрпримера подмены, который запрещаем"
 
 
 # ───────────── FIX 3: транскрипт логируется локально, НЕ в TG ────────────────

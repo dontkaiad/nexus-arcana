@@ -302,6 +302,21 @@ class PgSessionsRepo:
         with get_engine().begin() as conn:
             conn.execute(sessions.update().where(sessions.c.id == sid).values(**vals))
 
+    def _update_cards_sync(
+        self, session_id: str, cards: str, bottom_card: Optional[str],
+    ) -> None:
+        """Правка КАРТ триплета. cards — каноническая EN-строка (как в add).
+        bottom_card=None → не трогаем дно; "" → очищаем."""
+        try:
+            sid = int(session_id)
+        except (ValueError, TypeError):
+            return
+        vals = {"cards": cards or None}
+        if bottom_card is not None:
+            vals["bottom_card"] = bottom_card or None
+        with get_engine().begin() as conn:
+            conn.execute(sessions.update().where(sessions.c.id == sid).values(**vals))
+
     def _set_outcome_sync(self, session_id: str, outcome_code: str) -> bool:
         code = _code_for(_OUTCOME_TO_CODE, outcome_code) or outcome_code
         try:
@@ -539,6 +554,13 @@ class PgSessionsRepo:
     ) -> None:
         await asyncio.to_thread(
             self._update_interp_sync, session_id, interpretation, summary
+        )
+
+    async def update_cards(
+        self, session_id: str, cards: str, bottom_card: Optional[str] = None
+    ) -> None:
+        await asyncio.to_thread(
+            self._update_cards_sync, session_id, cards, bottom_card
         )
 
     async def set_photo_url(self, session_id: str, url: str) -> bool:

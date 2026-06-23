@@ -240,6 +240,18 @@ async def _handle_tarot_correction(
         pending["area"] = _normalize_area(new_area)
 
     deck = pending.get("deck") or "Уэйт"
+
+    # ── Правка КАРТЫ (не только текста)? Тот же helper, что у saved-триплета ──
+    old_cards_disp = pending.get("cards") or ""
+    from arcana.handlers.sessions import _parse_card_edit
+    card_edit = await _parse_card_edit(
+        correction_text, old_cards_disp, pending.get("bottom_card") or "",
+    )
+    if card_edit:
+        pending["cards"] = card_edit["cards_ru"]
+        pending["bottom_card"] = card_edit["bottom_ru"]
+        await save_pending(uid, pending)
+
     card_names = [c.strip() for c in (pending.get("cards") or "").split(",") if c.strip()]
     bottom_card = pending.get("bottom_card") or ""
     ctx_cards = card_names + ([bottom_card] if bottom_card else [])
@@ -289,9 +301,15 @@ async def _handle_tarot_correction(
         cancel_button("❌ Отмена", f"tarot_cancel:{uid}"),
     ]])
     # Чанки <4096 (без потери хвоста и битых тегов); кнопки — на последнее.
+    import html as _html
+    card_line = (
+        f"🔄 Карта обновлена: {_html.escape(old_cards_disp)} → "
+        f"{_html.escape(pending.get('cards') or '')}\n"
+        if card_edit else ""
+    )
     await send_long(
         message,
-        f"✏️ <b>Исправленная трактовка:</b>\n\n{new_interp_tg}",
+        f"✏️ <b>Исправленная трактовка:</b>\n{card_line}\n{new_interp_tg}",
         parse_mode="HTML",
         reply_markup=kb,
     )

@@ -239,12 +239,19 @@ PARSE_SESSION_SYSTEM = (
     "Если совсем непонятно — 'Общая ситуация'.\n"
     "Карты в cards — массив строк (можно с числовыми именами '9 пентаклей', "
     "'2 мечей' — код их сам нормализует).\n"
-    "НЕ ВЫДУМЫВАЙ КАРТУ: заноси в cards только то, что уверенно узнал из текста. "
-    "Если слово неразборчиво/искажено (мисхёрд голоса) или не похоже на реальную "
-    "карту таро — НЕ подменяй ближайшей знакомой картой, НЕ угадывай ранг и масть. "
-    "Перенеси слово ДОСЛОВНО как услышано ИЛИ оставь null. Лучше явно неузнанная "
-    "карта (видно искажение, код залогирует card_not_in_ref), чем тихо "
-    "подставленная ЧУЖАЯ карта — по чужой карте трактовка пойдёт неверной.\n"
+    "ЗАПРЕЩЕНО ВЫДУМЫВАТЬ КАРТУ. Заноси в cards только то, что ОДНОЗНАЧНО узнал "
+    "как реальную карту таро. Если слово неразборчиво/искажено (мисхёрд голоса) "
+    "или не похоже однозначно на реальную карту — ты ОБЯЗАН вернуть его ДОСЛОВНО "
+    "как в тексте (или null). НЕ подменяй знакомой картой, НЕ угадывай ранг и "
+    "масть, НЕ «исправляй» к ближайшей. Тихая подмена чужой картой = испорченная "
+    "трактовка; дословный мусор в карточке (код залогирует card_not_in_ref) "
+    "пользователь увидит и поправит сам.\n"
+    "  Примеры:\n"
+    "  - «...король кубков, крыльева мячей, шут...» → cards: "
+    "[\"король кубков\", \"крыльева мячей\", \"шут\"] "
+    "(«крыльева мячей» искажено — ДОСЛОВНО, НЕ «Король Жезлов» и не любая карта)\n"
+    "  - «...королева мечей, шут, маг...» → cards: "
+    "[\"королева мечей\", \"шут\", \"маг\"] (узнаваемо — как есть)\n"
     "Колода (deck): канонические названия БЕЗ склонений — "
     "'Уэйт' (не 'Уэйта'/'Уэйту'), 'Dark Wood', 'Ленорман', 'Игральные', 'Deviant Moon'.\n"
     "Если в тексте есть упоминание 'дно', 'дно колоды', 'bottom' — "
@@ -280,6 +287,20 @@ CORRECTION_PARSE_SYSTEM = (
     '"question": "новый вопрос или null", '
     '"area": "Отношения|Финансы|Работа|Здоровье|Род|Общая ситуация или null"}\n'
     "Если поле не упоминается в правке — ставь null. Только изменения."
+)
+
+CARD_EDIT_PARSE_SYSTEM = (
+    "Пользователь правит уже сохранённый триплет таро. Определи, меняет ли правка "
+    "КАРТУ расклада (а не только текст трактовки). Ответь ТОЛЬКО JSON без markdown:\n"
+    '{"card_edit": true ИЛИ false, '
+    '"cards": ["карта1","карта2","карта3"] ИЛИ null, '
+    '"bottom_card": "карта ИЛИ null"}\n'
+    "card_edit=true ТОЛЬКО при явной замене карты: «X а не Y», «первая карта Z», "
+    "«там не король а королева», «дно не маг а жрица». Тогда cards — ПОЛНЫЙ новый "
+    "список карт триплета (обычно 3) RU-именами с учётом замены; остальные карты "
+    "оставь как в текущем наборе. bottom_card — новое дно если менялось, иначе null.\n"
+    "card_edit=false если правка про ТЕКСТ трактовки (тон, «добавь про деньги», "
+    "«перепиши мягче», «учти прошлый расклад») — карты НЕ трогаются, cards=null."
 )
 
 SESSION_SEARCH_PARSE_SYSTEM = (
@@ -593,6 +614,36 @@ def _parse_json_safe(raw: str) -> Optional[dict]:
         return json.loads(clean)
     except Exception:
         return None
+
+
+async def _parse_card_edit(
+    correction_text: str, cards_ru: str, bottom_ru: str,
+) -> Optional[dict]:
+    """Haiku: меняет ли правка КАРТУ (vs только текст)? Общий для обоих
+    correction-флоу (saved-триплет и preview), чтобы не было параллельных
+    реализаций. Возвращает {"cards_ru": str, "bottom_ru": str} с НОВЫМ полным
+    набором RU-карт, или None если правка только текстовая. Graceful → None."""
+    try:
+        raw = await ask_claude(
+            f"Текущие карты: {cards_ru}\n"
+            + (f"Текущее дно: {bottom_ru}\n" if bottom_ru else "")
+            + f"Замечание: {correction_text}",
+            system=CARD_EDIT_PARSE_SYSTEM,
+            model="claude-haiku-4-5-20251001",
+            max_tokens=200,
+            temperature=0,
+        )
+        data = _parse_json_safe(raw) or {}
+    except Exception as e:
+        logger.warning("card edit parse failed: %s", e)
+        return None
+    if not data.get("card_edit"):
+        return None
+    new_cards = _coerce_cards_str(data.get("cards"))
+    if not new_cards:
+        return None
+    new_bottom = (data.get("bottom_card") or "").strip()
+    return {"cards_ru": new_cards, "bottom_ru": new_bottom or bottom_ru}
 
 
 def _format_prev_sessions(snippets: List[PrevSessionSnippet]) -> str:
@@ -1733,6 +1784,15 @@ async def handle_triplet_correction(
     cards_ru = _cards_to_ru(cards_raw, deck) or cards_raw
     bottom_ru = _canon_card_ru(bottom_raw, deck) if bottom_raw else ""
 
+    # Правка может менять КАРТУ («королева кубков, а не король»), а не только
+    # текст. Тогда пересобираем карты ДО справочника/генерации — иначе трактовка
+    # уйдёт по старой карте, а данные останутся противоречивыми (#166 #3).
+    old_cards_ru = cards_ru
+    card_edit = await _parse_card_edit(correction_text, cards_ru, bottom_ru)
+    if card_edit:
+        cards_ru = card_edit["cards_ru"]
+        bottom_ru = card_edit["bottom_ru"]
+
     from arcana.tarot_loader import get_cards_context
     ctx_cards = [c.strip() for c in cards_ru.split(",") if c.strip()]
     if bottom_ru:
@@ -1781,6 +1841,13 @@ async def handle_triplet_correction(
     new_summary = await _make_triplet_summary(question, cards_ru, bottom_ru, new_interp)
     await _repo.update_interpretation(page_id, new_interp, new_summary)
 
+    # Карта реально сменилась → пишем новые карты в данные (canonical-EN, как в
+    # create-флоу), иначе при новом тексте заголовок остался бы старой картой.
+    if card_edit:
+        cards_en = _canon_cards_str(cards_ru, deck) or cards_ru
+        bottom_en = _canon_card(bottom_ru, deck) if bottom_ru else None
+        await _repo.update_cards(page_id, cards_en, bottom_en)
+
     # RAG-AB: текст трактовки изменился → перезаписываем вектор (upsert по id,
     # delete не нужен). Карты — в RU-форме (cards_ru), как индексировал create-флоу
     # (там cards_text был RU), чтобы вектор не разошёлся с корпусом (#165 #166).
@@ -1810,6 +1877,13 @@ async def handle_triplet_correction(
 
     interp_tg = html_to_telegram(new_interp)
     head = f"✏️ <b>{html.escape(question)}</b>\n"
+    if card_edit:
+        # Явное подтверждение смены карты — видно, что изменились ДАННЫЕ, не
+        # только текст (пожелание Кай: кнопка «Поправить» иначе неявная).
+        head += (
+            f"🔄 Карта обновлена: {html.escape(old_cards_ru)} → "
+            f"{html.escape(cards_ru)}\n"
+        )
     body = f"{head}\n{interp_tg}"
     tkb = _triplet_keyboard(page_id)
     await send_long(message, body, parse_mode="HTML", reply_markup=tkb)

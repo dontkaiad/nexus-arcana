@@ -135,6 +135,11 @@ class SessionsRepo:
     ) -> None:
         await _pg_repo().update_interpretation(page_id, interpretation, summary)
 
+    async def update_cards(
+        self, page_id: str, cards: str, bottom_card: Optional[str] = None
+    ) -> None:
+        await _pg_repo().update_cards(page_id, cards, bottom_card)
+
     async def archive(self, page_id: str) -> bool:
         return await _pg_repo().archive(page_id)
 
