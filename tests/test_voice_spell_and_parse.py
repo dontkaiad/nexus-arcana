@@ -83,7 +83,7 @@ def test_handle_voice_calls_normalize_before_route():
     body = src[start:end]
     # сверяем порядок ВЫЗОВОВ (call-syntax), не упоминаний в комментах
     assert "normalize_text(text" in body, "голос не чистится whitelist-spell'ом"
-    assert body.index("normalize_text(text") < body.index("route_message(msg"), \
+    assert body.index("normalize_text(text") < body.index("route_message("), \
         "normalize_text должен примениться ДО парсинга (route_message)"
 
 
@@ -174,7 +174,7 @@ def test_handle_voice_logs_transcript_to_group_before_parse():
     # порядок ВЫЗОВОВ: лог транскрипта → нормализация → парсинг
     i_log = body.index("notify_log_group(")
     assert i_log < body.index("normalize_text(text"), "лог должен быть до нормализации (сырой)"
-    assert i_log < body.index("route_message(msg"), "лог должен быть ДО парсинга"
+    assert i_log < body.index("route_message("), "лог должен быть ДО парсинга"
 
 
 def test_transcript_logged_full_not_truncated_at_1500():

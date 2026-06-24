@@ -316,7 +316,12 @@ async def _handle_tarot_correction(
 
 
 @router.message()
-async def route_message(message: Message, user_notion_id: str = "", _text: str = "") -> None:
+async def route_message(
+    message: Message, user_notion_id: str = "", _text: str = "", _raw: str = "",
+) -> None:
+    # _raw — сырой Whisper-транскрипт ДО normalize_text (только голос). Реферренс
+    # граундинга карт: сверяем карты парсера с тем, что реально сказано, а не со
+    # спелл-выводом, который мог переписать мисхёрд. Пусто (текст) → граунд по text.
     _final_emoji = "⚡"
     try:
         # Начальная реакция «вижу сообщение»
@@ -525,8 +530,8 @@ async def route_message(message: Message, user_notion_id: str = "", _text: str =
         dispatch = {
             "new_client":   lambda: handle_add_client(message, text, user_notion_id),
             # session_done и session — расклад со всеми деталями (multi/single)
-            "session":        lambda: handle_add_session(message, text, user_notion_id),
-            "session_done":   lambda: handle_add_session(message, text, user_notion_id),
+            "session":        lambda: handle_add_session(message, text, user_notion_id, ground_ref=_raw),
+            "session_done":   lambda: handle_add_session(message, text, user_notion_id, ground_ref=_raw),
             "session_search": lambda: handle_session_search(message, text, user_notion_id),
             # session_planned — это работа с категорией 🃏 Расклад (через preview)
             "session_planned": lambda: handle_add_work(message, text, user_notion_id),

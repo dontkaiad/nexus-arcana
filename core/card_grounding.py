@@ -35,6 +35,13 @@ from typing import List, Tuple
 logger = logging.getLogger("arcana.grounding")
 
 GROUND_THRESHOLD = 0.75
+# Near-miss: лучшее окно карты в СЫРОМ транскрипте 0.60..0.75 — обычно ТА ЖЕ
+# карта с опечаткой/искажением ранга мисхёрда (Whisper «тус пентакли», спелл
+# починил → парсер «Туз Пентаклей»; против сырого верная карта скорит ~0.71-
+# 0.745). Грань 0.60 отделяет опечатку (~0.71+) от чистого шума (~0.35, где на
+# позиции реально ДРУГАЯ карта). В этой полосе не воруем соседний фрагмент, если
+# на позиции не стоит другая резолвящаяся карта (см. _names_other_card).
+GROUND_NEAR_MISS = 0.60
 
 _STRIP = re.compile(r"[^а-яa-z0-9]")
 _SPLIT = re.compile(r"\s+")
@@ -142,6 +149,26 @@ def _recover_span(
     return (" ".join(raw[start:start + k]) if raw else ""), start, k
 
 
+def _names_other_card(card: str, span_words: List[str], resolver) -> bool:
+    """На позиции карты в сыром транскрипте стоит ДРУГАЯ реальная карта (подмена),
+    а не та же карта с опечаткой мисхёрда и не шум?
+
+    resolver(span) → каноничное имя карты колоды или None. «крыльево мячей»
+    резолвится в Королева Мечей; «тус пентакли» (искажение ранга) и шум — нет.
+    Окно резолвится в карту И (карта парсера НЕ резолвится — мусор-мисхёрд
+    «каралева меча» — ЛИБО резолвится в ДРУГУЮ карту) → подмена, восстанавливаем.
+    Окно не резолвится (шум/опечатка) или та же карта → держим карту парсера."""
+    if not resolver:
+        return False
+    sid = resolver(" ".join(span_words))
+    if not sid:
+        return False
+    cid = resolver(card)
+    # cid is None: карта парсера — нераспознаваемый мусор, а на позиции стоит
+    # реальная карта → это лучше, чем мусор → восстанавливаем (не near-miss keep).
+    return (cid is None) or (sid != cid)
+
+
 def ground_cards(
     cards, transcript: str, threshold: float = GROUND_THRESHOLD, resolver=None
 ) -> List[str]:
@@ -168,6 +195,22 @@ def ground_cards(
             out.append(card)
             cursor = min(idx + k, len(norm))
             logger.info("grounding: %r score=%.2f >= %.2f → keep", card, score, threshold)
+        elif (
+            k >= 2
+            and score >= GROUND_NEAR_MISS
+            and not _names_other_card(card, raw[idx:idx + k], resolver)
+        ):
+            # Near-miss к ТОЙ ЖЕ карте: лучшее окно сырого транскрипта — та же карта
+            # с опечаткой/искажением ранга (Whisper «тус пентакли» → спелл починил →
+            # парсер «Туз Пентаклей»; против сырого ~0.745). На позиции НЕ стоит
+            # другая реальная карта → держим карту парсера, НЕ воруем соседний
+            # фрагмент (иначе уничтожали бы верную карту — регрессия граундинга).
+            # k>=2 ОБЯЗАТЕЛЕН: 1-словный мажор латчится за случайное общее слово
+            # («Луна»←«на», «Колесница»←«клиента», score 0.6-0.67) и держал бы
+            # НЕназванную карту. ≥2 слов = ранг+масть дают корроборацию.
+            out.append(card)
+            cursor = min(idx + k, len(norm))
+            logger.info("grounding: %r score=%.2f near-miss → keep", card, score)
         else:
             span, s_idx, s_k = _recover_span(cw, raw, norm, cursor, resolver)
             out.append(span or card)
@@ -210,7 +253,8 @@ def ground_cards_in_data(
 ) -> None:
     """In-place граундинг карт парс-результата: single (cards + bottom_card) +
     multi (triplets[].cards + bottom_card). Один вызов — оба флоу. resolver(span)
-    → bool: резолвится ли фрагмент в реальную карту колоды (для надёжной замены)."""
+    → каноничное имя карты колоды или None (для надёжной замены и распознавания
+    подмены vs опечатки в near-miss; см. _names_other_card)."""
     if not isinstance(data, dict) or not transcript:
         logger.info("grounding: SKIP (no data/transcript; transcript_len=%d)",
                     len(transcript or ""))

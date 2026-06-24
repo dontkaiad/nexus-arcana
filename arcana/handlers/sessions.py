@@ -975,7 +975,7 @@ async def _save_and_post_triplet(
 # ────────────────────────── Основной обработчик ────────────────────────────
 
 async def handle_add_session(
-    message: Message, text: str, user_notion_id: str = ""
+    message: Message, text: str, user_notion_id: str = "", ground_ref: str = ""
 ) -> None:
     try:
         tg_id = message.from_user.id
@@ -1013,9 +1013,20 @@ async def handle_add_session(
                         out.append(it["bottom_card"])
             return out
 
+        # Референс граундинга — СЫРОЙ Whisper-транскрипт (ground_ref, ДО спелла),
+        # если проброшен (голос). Спелл недетерминированно переписывает мисхёрд
+        # «крыльево мячей» → «король жезлов» ЕЩЁ ДО парсера; сверка с сырым даёт
+        # низкий score на отравленной карте → recover → дословный фрагмент →
+        # алиас «крыльево мячей» → Королева Мечей. Текст без голоса: ground_ref
+        # пуст → сверяем с самим text (поведение прежнее, юзер пишет осознанно).
+        _gr_ref = ground_ref or text
         _gr_before = _flat_cards(data)
+        # resolver → каноничное имя карты или None: нужно не только «резолвится ли»,
+        # но и КАКАЯ карта — near-miss отличает подмену (другая карта) от опечатки
+        # мисхёрда той же карты (см. core/card_grounding._names_other_card).
         ground_cards_in_data(
-            data, text, resolver=lambda s: bool(find_card(_gr_deck, s)),
+            data, _gr_ref,
+            resolver=lambda s: (find_card(_gr_deck, s) or {}).get("ru") or None,
         )
 
         # Канонизация имён карт в правильную RU-форму ПОСЛЕ грунинга: «туз мячей»

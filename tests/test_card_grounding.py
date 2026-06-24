@@ -14,6 +14,7 @@ import pytest
 from core.card_grounding import (
     GROUND_THRESHOLD,
     ground_card,
+    ground_cards,
     ground_cards_in_data,
     _best_window,
     _card_words,
@@ -84,7 +85,8 @@ def test_full_chain_hallucination_to_correct_card():
 def _waite_resolver():
     from miniapp.backend.tarot import resolve_deck_id, find_card
     did = resolve_deck_id("Уэйт")
-    return lambda s: bool(find_card(did, s))
+    # каноничное имя карты или None (near-miss отличает подмену от опечатки)
+    return lambda s: (find_card(did, s) or {}).get("ru") or None
 
 
 def test_recovery_skips_noise_via_resolver_real_case():
@@ -173,8 +175,8 @@ def test_grounding_wired_after_parse():
     i_ground = src.index("ground_cards_in_data(")
     i_multi = src.index("_handle_multi_session(")
     assert i_parse < i_ground < i_multi, "граундинг должен быть после парса и до multi-split"
-    # резолвер колоды прокинут (надёжная замена через нормализатор)
-    assert "resolver=lambda s: bool(find_card(" in src
+    # резолвер колоды прокинут (возвращает имя карты/None для near-miss)
+    assert "resolver=lambda s: (find_card(_gr_deck, s)" in src
 
 
 def test_real_cards_after_preamble_kept_and_hallucination_recovers():
@@ -249,3 +251,101 @@ def test_swords_systematic_not_grounded_to_wands(said, parsed):
     out = ground_card(parsed, transcript, resolver=_waite_resolver())
     assert out != parsed, f"{parsed!r} ложно сгрундилось как Жезлы"
     assert "мечей" in normalize_card_input(out), f"не восстановилось в Мечи: {out!r}"
+
+
+# ───────────── граундинг против СЫРОГО транскрипта, не спелл-вывода ──────────
+
+def test_poison_spell_text_vs_raw_transcript():
+    """Корень бага: спелл (normalize_text) переписал «крыльево мячей» → «король
+    жезлов» ДО парсера. Граундинг против СПЕЛЛ-текста сверяет яд с ядом (1.00
+    keep) — карта НЕ чинится. Против СЫРОГО транскрипта «король жезлов» не
+    грундится → recover → дословный фрагмент → алиас → Королева Мечей."""
+    from miniapp.backend.tarot import normalize_card_input
+    cards = ["туз пентаклей", "влюбленные", "король жезлов"]  # 3-я отравлена спеллом
+    spell_text = ("что человек чувствует прямо сейчас туз пентаклей влюбленные "
+                  "король жезлов дно семь кубков")
+    raw_text = ("что человек чувствует прямо сейчас туз пентакли влюбленные "
+                "крыльево мячей дно семь кубков")
+    d_spell = {"cards": list(cards), "bottom_card": "семь кубков"}
+    d_raw = {"cards": list(cards), "bottom_card": "семь кубков"}
+    ground_cards_in_data(d_spell, spell_text, resolver=_waite_resolver())
+    ground_cards_in_data(d_raw, raw_text, resolver=_waite_resolver())
+    # против спелл-текста — баг воспроизводится (яд уцелел)
+    assert d_spell["cards"][2] == "король жезлов"
+    # против сырого — восстановлено реально сказанное
+    assert d_raw["cards"][2] == "крыльево мячей"
+    assert normalize_card_input(d_raw["cards"][2]) == "королева мечей"
+
+
+def test_spell_repaired_rank_mishear_not_destroyed_by_raw():
+    """Регрессия (ревью raw-ref): Whisper исказил РАНГ — «тус пентакли» (т/с swap).
+    Спелл ПРАВИЛЬНО починил → парсер выдал «туз пентаклей». Граундинг против
+    сырого «тус пентакли» скорит 0.745 < 0.75, НО «тус пентакли» не резолвится
+    (не алиас) → near-miss keep: держим карту парсера, НЕ воруем «семь кубков».
+    Без фикса карта[0] превращалась в «семь кубков» + дубль на дне."""
+    from miniapp.backend.tarot import normalize_card_input
+    data = {"cards": ["туз пентаклей", "влюбленные", "шут"], "bottom_card": "семь кубков"}
+    raw = "что чувствует тус пентакли влюбленные шут дно семь кубков"
+    ground_cards_in_data(data, raw, resolver=_waite_resolver())
+    assert data["cards"][0] == "туз пентаклей", f"верная карта уничтожена: {data['cards']}"
+    assert data["cards"][1] == "влюбленные"
+    assert data["cards"][2] == "шут"
+    assert data["bottom_card"] == "семь кубков"
+    # «семь кубков» не задублировалось в cards (кражи соседа не было)
+    assert "семь кубков" not in [normalize_card_input(c) for c in data["cards"]]
+
+
+def test_spell_repaired_card_still_recovers_real_substitution():
+    """Near-miss НЕ ломает ловлю подмены: «король жезлов» (подмена из «крыльево
+    мячей») против сырого — на позиции стоит ДРУГАЯ резолвящаяся карта (Королева
+    Мечей ≠ Король Жезлов) → _names_other_card=True → recover, не near-miss keep."""
+    from miniapp.backend.tarot import normalize_card_input
+    data = {"cards": ["туз пентакли", "влюбленные", "король жезлов"],
+            "bottom_card": "семь кубков"}
+    raw = "что чувствует туз пентакли влюбленные крыльево мячей дно семь кубков"
+    ground_cards_in_data(data, raw, resolver=_waite_resolver())
+    assert data["cards"][2] == "крыльево мячей", "подмену перестали ловить из-за near-miss"
+    assert normalize_card_input(data["cards"][2]) == "королева мечей"
+
+
+def test_nearmiss_does_not_keep_1word_hallucination_latching_common_word():
+    """Регрессия (ревью near-miss): 1-словный мажор НЕ должен near-miss-держаться,
+    залатчившись за случайное общее слово. Парсер выдумал «Колесница», в сыром —
+    «клиента» (преамбула), score ~0.62 → раньше держал НЕназванную карту. Теперь
+    k>=2 обязателен → recover к реально сказанному."""
+    transcript = "расклад на клиента первая карта десятка мечей вторая туз кубков"
+    out = ground_cards(["Колесница", "туз кубков"], transcript, resolver=_waite_resolver())
+    assert out[0] != "Колесница", f"1-словная галлюцинация удержана near-miss: {out}"
+
+
+def test_nearmiss_does_not_keep_gibberish_parser_card():
+    """Регрессия (ревью near-miss): карта парсера — нераспознаваемый мусор
+    («каралева меча»), а на позиции в сыром стоит реальная карта (королева мечей).
+    _names_other_card должен вернуть True (cid=None) → recover, не держать мусор."""
+    from miniapp.backend.tarot import normalize_card_input
+    data = {"cards": ["туз пентаклей", "влюбленные", "шут", "каралева меча"]}
+    raw = "туз пентаклей влюбленные шут королева мечей"
+    ground_cards_in_data(data, raw, resolver=_waite_resolver())
+    assert data["cards"][3] != "каралева меча", "мусорная карта удержана near-miss"
+    assert normalize_card_input(data["cards"][3]) == "королева мечей"
+
+
+def test_handle_add_session_grounds_against_ground_ref():
+    """Source-guard: handle_add_session принимает ground_ref (сырой транскрипт) и
+    грундит против него с фолбэком на text."""
+    src = (REPO / "arcana" / "handlers" / "sessions.py").read_text(encoding="utf-8")
+    assert 'ground_ref: str = ""' in src, "нет параметра ground_ref"
+    assert "ground_ref or text" in src, "граундинг не использует сырой ref с фолбэком"
+
+
+def test_raw_transcript_threaded_voice_to_grounding():
+    """Source-guard: сырой Whisper пробрасывается голос → route_message →
+    handle_add_session, захвачен ДО normalize_text."""
+    bot_src = (REPO / "arcana" / "bot.py").read_text(encoding="utf-8")
+    assert "_raw_transcript = text" in bot_src, "сырой транскрипт не захвачен в bot.py"
+    assert "_raw=_raw_transcript" in bot_src, "_raw не проброшен в route_message"
+    # захват ДО спелла: _raw_transcript присвоен раньше, чем normalize_text зовётся
+    assert bot_src.index("_raw_transcript = text") < bot_src.index("normalize_text(text")
+    base_src = (REPO / "arcana" / "handlers" / "base.py").read_text(encoding="utf-8")
+    assert '_raw: str = ""' in base_src, "route_message не принимает _raw"
+    assert "ground_ref=_raw" in base_src, "route_message не прокидывает ground_ref=_raw"

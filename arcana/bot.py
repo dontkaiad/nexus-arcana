@@ -188,6 +188,11 @@ def create_dp_and_bot():
         # spell'ом. Прогоняем его тем же normalize_text (карты/клиенты/термины),
         # что и печатный путь — «крыльева мечей» → «Королева Мечей» ДО парсера.
         # route_message с _text уже не нормализует повторно (двойного прохода нет).
+        # Сырой транскрипт ДО спелла — РЕФЕРЕНС граундинга карт. normalize_text
+        # недетерминированно переписывает мисхёрд («крыльево мячей» → «король
+        # жезлов») ещё до парсера; сверять карты надо с тем, что РЕАЛЬНО сказано,
+        # иначе яд против яда (score 1.00 keep). Протягиваем _raw в route_message.
+        _raw_transcript = text
         try:
             from core.preprocess import normalize_text
             text = await normalize_text(text, user_notion_id=user_notion_id)
@@ -217,7 +222,9 @@ def create_dp_and_bot():
 
         # Полный pipeline — передаём текст явно (msg заморожен)
         from arcana.handlers.base import route_message
-        await route_message(msg, user_notion_id=user_notion_id, _text=text)
+        await route_message(
+            msg, user_notion_id=user_notion_id, _text=text, _raw=_raw_transcript,
+        )
 
     @dp.message(F.photo)
     async def handle_photo(msg: Message, user_notion_id: str = "") -> None:
