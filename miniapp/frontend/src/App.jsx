@@ -5265,7 +5265,6 @@ function SessionDetail({ s, id, slug }) {
   const [page, setPage] = useState(0);
   const [summarizing, setSummarizing] = useState(false);
   const [localSummary, setLocalSummary] = useState(null);
-  const touchRef = useRef({ x: 0 });
 
   if (loading) return <Empty s={s} text="Загружаю..." />;
   if (error) return <ErrorBox s={s} error={error} refetch={refetch} />;
@@ -5293,20 +5292,12 @@ function SessionDetail({ s, id, slug }) {
 
   const groupForRender = { ...group, summary: localSummary || group.summary };
 
-  const onTouchStart = (e) => { touchRef.current.x = e.touches[0].clientX; };
-  const onTouchEnd = (e) => {
-    const dx = e.changedTouches[0].clientX - touchRef.current.x;
-    if (Math.abs(dx) < 40) return;
-    if (dx < 0 && page < totalSlides - 1) setPage(page + 1);
-    else if (dx > 0 && page > 0) setPage(page - 1);
-  };
-
   const handleVerdict = (tid, newV) => {
     triplets.forEach((tt) => { if (tt.id === tid) tt.verdict = newV; });
   };
 
   return (
-    <div onTouchStart={onTouchStart} onTouchEnd={onTouchEnd}>
+    <div>
       {!isSolo && (
         <div style={{
           display: "flex", justifyContent: "center", gap: 6, marginBottom: 10,
@@ -7352,7 +7343,6 @@ export default function App() {
   const [fabOpen, setFabOpen] = useState(false);
   const [fabForm, setFabForm] = useState(null);
   const aRef = useRef(null);
-  const tX = useRef(null);
 
   const go = (toN) => {
     if (aRef.current) cancelAnimationFrame(aRef.current);
@@ -7441,18 +7431,6 @@ export default function App() {
   return (
     <div
       className={isDay ? "day" : "night"}
-      onTouchStart={(e) => {
-        tX.current = e.touches[0].clientX;
-      }}
-      onTouchEnd={(e) => {
-        if (!tX.current) return;
-        const dx = e.changedTouches[0].clientX - tX.current;
-        tX.current = null;
-        if (Math.abs(dx) > 60) {
-          if (dx < 0 && !isN) go(true);
-          if (dx > 0 && isN) go(false);
-        }
-      }}
       style={{
         position: "relative",
         width: "100%",
