@@ -91,6 +91,71 @@ class TestReminderGuardBehavior:
         assert data["reminder"] == "2026-05-10T15:00"
 
 
+class TestVoiceTranscriptReachesGuard:
+    """Регресс: при диктовке голосовым `message.text` пуст — транскрипт Whisper
+    приходит аргументом `original_text`. Раньше handle_task_parsed брал текст
+    только из message.text, поэтому has_remind=False и легитимное напоминание
+    срезалось гвардом #33 («Напоминание: нет» на скрине Кай)."""
+
+    def _voice_msg(self):
+        from unittest.mock import AsyncMock, MagicMock
+        m = MagicMock()
+        m.from_user.id = 42
+        m.chat.id = 1
+        m.text = ""  # голосовое: текста нет, транскрипт идёт отдельным аргументом
+        m.answer = AsyncMock()
+        return m
+
+    @pytest.mark.asyncio
+    async def test_voice_reminder_survives_via_original_text(self):
+        """Два времени в транскрипте: deadline 15:30 + reminder 14:00 — оба доезжают."""
+        from unittest.mock import AsyncMock, patch
+        from nexus.handlers import tasks
+
+        msg = self._voice_msg()
+        data = {
+            "title": "встреча с Мишей",
+            "deadline": "2026-07-27T15:30",
+            "reminder": "2026-07-27T14:00",  # отдельное напоминание от Haiku
+            "repeat": "Нет",
+        }
+        with patch.object(tasks, "_do_save_task", AsyncMock()) as save:
+            await tasks.handle_task_parsed(
+                msg, data,
+                original_text=(
+                    "двадцать седьмого числа в пятнадцать тридцать встреча с мишей "
+                    "напомни мне двадцать седьмого числа в четырнадцать часов"
+                ),
+            )
+        save.assert_awaited_once()
+        saved = save.await_args.args[1]
+        assert saved.get("reminder_time") == "2026-07-27T14:00"
+        assert saved.get("deadline") == "2026-07-27T15:30"
+
+    @pytest.mark.asyncio
+    async def test_voice_guard_still_drops_hallucination(self):
+        """Без слова «напомни» в транскрипте гвард #33 по-прежнему срезает reminder."""
+        from unittest.mock import AsyncMock, patch
+        from nexus.handlers import tasks
+
+        msg = self._voice_msg()
+        data = {
+            "title": "купить корм",
+            "deadline": "2026-07-28",
+            "reminder": "2026-07-28T09:00",  # галлюцинация Haiku
+            "repeat": "Нет",
+        }
+        with patch.object(tasks, "_do_save_task", AsyncMock()) as save, \
+             patch.object(tasks, "_get_user_tz", AsyncMock(return_value=3)), \
+             patch.object(tasks, "_pending_set", lambda *a, **k: None):
+            await tasks.handle_task_parsed(
+                msg, data, original_text="купить корм коту завтра",
+            )
+        save.assert_not_awaited()  # reminder выброшен → не explicit-save
+        sent = msg.answer.await_args.args[0]
+        assert "Напоминание: нет" in sent
+
+
 class TestExtractExplicitClock:
     """`_extract_explicit_clock` — достаёт явное время HH:MM из текста."""
 

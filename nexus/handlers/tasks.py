@@ -1227,9 +1227,13 @@ async def _check_procrastination_nudge(title: str) -> str:
         return ""
 
 
-async def handle_task_parsed(message: Message, data: dict) -> None:
+async def handle_task_parsed(message: Message, data: dict, original_text: str = "") -> None:
     """Парсим задачу. Если есть 'напомни' — уже знаем reminder, спрашиваем дедлайн.
-    Иначе — спрашиваем когда напомнить."""
+    Иначе — спрашиваем когда напомнить.
+
+    `original_text` — авторитетный текст юзера от вызывающего (classifier).
+    Для голосовых это транскрипт Whisper; `message.text` там пуст, поэтому
+    опираться на него нельзя (иначе гвард #33 срежет легитимное напоминание)."""
     uid = message.from_user.id
     logger.info("handle_task_parsed: title=%s deadline=%s", data.get("title"), data.get("deadline"))
 
@@ -1263,8 +1267,9 @@ async def handle_task_parsed(message: Message, data: dict) -> None:
         await _do_save_task(message, data, chat_id=message.chat.id, uid=uid)
         return
 
-    # Определяем оригинальный текст из message
-    original_text = message.text or ""
+    # Авторитетный текст от classifier (транскрипт для голосовых); fallback
+    # на message.text для прямых вызовов/текстовых сообщений.
+    original_text = original_text or message.text or ""
     has_remind = _has_remind_word(original_text)
 
     # Гвард: если Haiku додумал reminder, но в тексте нет слова «напомни» —

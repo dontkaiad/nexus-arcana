@@ -1158,7 +1158,10 @@ async def process_item(data: Dict[str, Any], original_text: str, msg, clarify: d
 
         logger.info("classifier: calling handle_task_parsed with full data=%s", data)
         data["user_notion_id"] = user_notion_id
-        await handle_task_parsed(msg, data)
+        # original_text — авторитетный текст юзера (для голосовых = транскрипт
+        # Whisper, msg.text там пуст). Без него гвард #33 срезает легитимный
+        # reminder при диктовке голосом.
+        await handle_task_parsed(msg, data, original_text)
         return ""
 
     # ЗАМЕТКИ
