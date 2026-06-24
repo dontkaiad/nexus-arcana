@@ -35,10 +35,6 @@ from typing import List, Tuple
 logger = logging.getLogger("arcana.grounding")
 
 GROUND_THRESHOLD = 0.75
-# Карта грундится только в ОКРЕСТНОСТИ курсора (карты в речи названы подряд).
-# Иначе выдуманная карта цепляется за похожие слова из НАРРАТИВА режима A
-# («король жезлов» → «королева»+«жезлов» где-то дальше в трактовке Кай).
-GROUND_LOOKAHEAD = 4
 
 _STRIP = re.compile(r"[^а-яa-z0-9]")
 _SPLIT = re.compile(r"\s+")
@@ -86,13 +82,14 @@ def _best_window(
     card_words: List[str], norm_words: List[str], start: int,
     lookahead: int = -1,
 ) -> Tuple[float, int]:
-    """(score, idx) лучшего окна длины k среди позиций start..start+lookahead.
+    """(score, idx) лучшего скользящего окна длины k во ВСЁМ хвосте start..конец.
 
-    lookahead ограничивает поиск ОКРЕСТНОСТЬЮ курсора: карты в речи названы
-    подряд, поэтому карта N стоит сразу после карты N-1. Без лимита выдуманная
-    карта («король жезлов») цеплялась за слова из НАРРАТИВА режима A («королева»,
-    «жезлов» где-то дальше) и ложно «грундилась» (score 0.86). lookahead=-1 —
-    без лимита (для recovery-резолвера, ему нужен весь хвост)."""
+    Реальная карта названа ГДЕ-ТО в транскрипте (после преамбулы «Расклад на X.
+    Клиента Я. Колода…», вопросов, нарратива) → ищем её по всему хвосту, иначе
+    карта тонет (score ~0.2) и рабочий расклад портится. score = близость карты
+    к её ЛУЧШЕМУ окну, НЕ ко всему транскрипту. lookahead (по умолчанию -1 = без
+    лимита) оставлен параметром для возможных точечных вызовов; курсор сам не даёт
+    карте N схватить регион карты N-1."""
     k = len(card_words)
     if k == 0 or start >= len(norm_words):
         return 0.0, start
@@ -166,7 +163,7 @@ def ground_cards(
             out.append(card)
             continue
         k = len(cw)
-        score, idx = _best_window(cw, norm, cursor, lookahead=GROUND_LOOKAHEAD)
+        score, idx = _best_window(cw, norm, cursor)
         if score >= threshold:
             out.append(card)
             cursor = min(idx + k, len(norm))
