@@ -192,10 +192,15 @@ def missing_cards(deck_name: str, card_names: List[str]) -> List[str]:
     return missing
 
 
+# Reversed-значения во всех справочниках — никогда не нужны в LLM-промпте:
+# Уэйт и игральные: "rev"; Dark Wood: "перевёрнутая"; Deviant Moon: "перевёрнутое".
+_REVERSED_KEYS = frozenset({"rev", "перевёрнутая", "перевёрнутое"})
+
+
 def _format_card_info(info: dict) -> str:
     parts: List[str] = []
     for key, val in info.items():
-        if key.startswith("_") or key == "error":
+        if key.startswith("_") or key == "error" or key in _REVERSED_KEYS:
             continue
         if isinstance(val, str) and val:
             parts.append(f"  {key}: {val[:600]}")
