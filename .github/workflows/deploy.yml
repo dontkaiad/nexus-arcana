@@ -22,11 +22,7 @@ jobs:
           # capture_stdout кладёт вывод в steps.deploy.outputs.stdout для Verify.
           capture_stdout: true
           script: |
-            set -e
-            cd ~/nexus-arcana
-            git pull origin main
-            docker compose up -d --build
-            docker compose ps
+            # Forced command in authorized_keys runs /home/kai/deploy.sh; script body ignored. See ADR-0014.
 
       - name: Verify deploy marker
         if: always()
