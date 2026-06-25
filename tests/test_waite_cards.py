@@ -432,3 +432,27 @@ def test_sessions_forks_waite_to_hard_parser():
     assert i_fork < i_waite < i_multi
     # авторская ветка (grounding) сохранена
     assert i_fork < i_ground
+
+
+# ───────────────────────────── scan_card_spans ──────────────────────────────
+
+def test_scan_card_spans_finds_mishear_and_clean_cards():
+    from core.waite_cards import scan_card_spans
+    spans = scan_card_spans("вопрос крыльево мячей шут нарратив какой-то")
+    assert "крыльево мячей" in spans
+    assert "шут" in spans
+    assert "вопрос" not in spans
+    assert "нарратив" not in spans
+
+
+def test_scan_card_spans_new_dict_entries():
+    from core.waite_cards import scan_card_spans, resolve_waite
+    assert resolve_waite("крылева мачей") == "Queen of Swords"
+    spans = scan_card_spans("крылева мачей")
+    assert spans == ["крылева мачей"]
+
+
+def test_scan_card_spans_empty_on_no_cards():
+    from core.waite_cards import scan_card_spans
+    assert scan_card_spans("") == []
+    assert scan_card_spans("просто нарратив без карт совсем") == []

@@ -193,9 +193,19 @@ def create_dp_and_bot():
         # жезлов») ещё до парсера; сверять карты надо с тем, что РЕАЛЬНО сказано,
         # иначе яд против яда (score 1.00 keep). Протягиваем _raw в route_message.
         _raw_transcript = text
+        _card_spans: list = []
+        try:
+            from core.waite_cards import scan_card_spans as _scan_spans
+            _card_spans = _scan_spans(text)
+        except Exception as _e:
+            logger.warning("scan_card_spans failed: %s", _e)
         try:
             from core.preprocess import normalize_text
-            text = await normalize_text(text, user_notion_id=user_notion_id)
+            text = await normalize_text(
+                text,
+                user_notion_id=user_notion_id,
+                extra_protect=_card_spans or None,
+            )
         except Exception as e:
             logger.warning("voice normalize_text failed (use raw): %s", e)
 

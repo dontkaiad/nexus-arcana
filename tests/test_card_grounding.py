@@ -345,7 +345,7 @@ def test_raw_transcript_threaded_voice_to_grounding():
     assert "_raw_transcript = text" in bot_src, "сырой транскрипт не захвачен в bot.py"
     assert "_raw=_raw_transcript" in bot_src, "_raw не проброшен в route_message"
     # захват ДО спелла: _raw_transcript присвоен раньше, чем normalize_text зовётся
-    assert bot_src.index("_raw_transcript = text") < bot_src.index("normalize_text(text")
+    assert bot_src.index("_raw_transcript = text") < bot_src.index("normalize_text(")
     base_src = (REPO / "arcana" / "handlers" / "base.py").read_text(encoding="utf-8")
     assert '_raw: str = ""' in base_src, "route_message не принимает _raw"
     assert "ground_ref=_raw" in base_src, "route_message не прокидывает ground_ref=_raw"

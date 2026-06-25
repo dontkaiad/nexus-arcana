@@ -147,6 +147,7 @@ _RANK_LEX: dict = {
     # Фонетические мисхёрды Whisper для «королева» (стабильно искажается).
     "крыльева": "Queen", "кралева": "Queen", "коралева": "Queen",
     "крыльево": "Queen", "королево": "Queen", "каралева": "Queen",
+    "крылева": "Queen",   # без мягкого знака (Whisper gap, крылева мачей)
     "король": "King", "king": "King", "14": "King",
 }
 
@@ -160,6 +161,7 @@ _SUIT_LEX: dict = {
     "swords": "Swords", "sword": "Swords",
     # Фонетический мисхёрд Whisper: «мечей» стабильно слышится как «мячей».
     "мячей": "Swords", "мячи": "Swords", "мяч": "Swords",
+    "мачей": "Swords",   # а вместо я (Whisper gap)
     "пентакли": "Pentacles", "пентаклей": "Pentacles", "пентакль": "Pentacles",
     "монеты": "Pentacles", "монет": "Pentacles", "монета": "Pentacles",
     "диски": "Pentacles", "дисков": "Pentacles",
@@ -175,7 +177,9 @@ _SUIT_LEX: dict = {
 # (adversarial: surface-похожесть не отличает фантом «{rank} жезлов» от истока).
 _MISHEAR_KEYS = frozenset({
     "крыльева", "кралева", "коралева", "крыльево", "королево", "каралева",
+    "крылева",   # без мягкого знака (Whisper gap)
     "мячей", "мячи", "мяч",
+    "мачей",     # а вместо я (Whisper gap)
 })
 
 
@@ -367,6 +371,16 @@ def _scan_raw_pairs(raw_ref: str) -> List[Tuple[str, str]]:
         else:
             i += 1
     return out
+
+
+def scan_card_spans(text: str) -> List[str]:
+    """СЫРОЙ транскрипт → список спанов карт Уэйта (lower, ё→е).
+
+    Только детерминированный путь; LLM не вызывается.
+    Предназначен для extra_protect в normalize_text: spell не трогает
+    найденные спаны, предотвращая подмену мисхёрдов в чужую валидную карту.
+    """
+    return [span for _, span in _scan_raw_pairs(text)]
 
 
 def _assign_waite_slots(

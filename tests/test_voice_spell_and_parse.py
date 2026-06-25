@@ -75,15 +75,17 @@ async def test_route_message_normalizes_typed_text():
 
 
 def test_handle_voice_calls_normalize_before_route():
-    """handle_voice (nested в create_dp_and_bot, не импортируется) — source-guard:
-    транскрипт прогоняется через normalize_text ДО route_message."""
+    """handle_voice — source-guard: scan_card_spans → normalize_text → route_message."""
     src = (REPO / "arcana" / "bot.py").read_text(encoding="utf-8")
     start = src.index("async def handle_voice")
     end = src.index("async def handle_photo", start)
     body = src[start:end]
-    # сверяем порядок ВЫЗОВОВ (call-syntax), не упоминаний в комментах
-    assert "normalize_text(text" in body, "голос не чистится whitelist-spell'ом"
-    assert body.index("normalize_text(text") < body.index("route_message("), \
+    assert "scan_card_spans" in body, "scan_card_spans отсутствует в handle_voice"
+    assert "normalize_text(" in body, "голос не чистится whitelist-spell'ом"
+    assert "extra_protect" in body, "extra_protect не передаётся в normalize_text"
+    assert body.index("scan_card_spans") < body.index("normalize_text("), \
+        "scan_card_spans должен быть ДО normalize_text"
+    assert body.index("normalize_text(") < body.index("route_message("), \
         "normalize_text должен примениться ДО парсинга (route_message)"
 
 
@@ -173,7 +175,7 @@ def test_handle_voice_logs_transcript_to_group_before_parse():
     assert "config.log_thread_arcana" in body, "не в топик Arcana"
     # порядок ВЫЗОВОВ: лог транскрипта → нормализация → парсинг
     i_log = body.index("notify_log_group(")
-    assert i_log < body.index("normalize_text(text"), "лог должен быть до нормализации (сырой)"
+    assert i_log < body.index("normalize_text("), "лог должен быть до нормализации (сырой)"
     assert i_log < body.index("route_message("), "лог должен быть ДО парсинга"
 
 

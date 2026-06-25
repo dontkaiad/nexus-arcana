@@ -22,7 +22,7 @@ import logging
 import os
 import sqlite3
 import time
-from typing import Optional
+from typing import List, Optional
 
 from core.claude_client import ask_claude
 from core.layout import maybe_convert
@@ -186,8 +186,18 @@ def _truncated(corrected: str, original: str) -> bool:
 
 # ── Public API ───────────────────────────────────────────────────────────────
 
-async def normalize_text(text: str, *, user_notion_id: str = "") -> str:
+async def normalize_text(
+    text: str,
+    *,
+    user_notion_id: str = "",
+    extra_protect: Optional[List[str]] = None,
+) -> str:
     """1) раскладка EN→RU 2) Haiku spell-correction с whitelist guard.
+
+    extra_protect: дополнительные спаны (напр. карты из сырого транскрипта
+    голоса, найденные scan_card_spans), которые spell не должен трогать.
+    Добавляются к relevant по той же substring-логике. Обратно совместимо
+    — все существующие вызовы без extra_protect работают без изменений.
 
     Безопасно: на любую ошибку или подозрительный output Haiku возвращает
     оригинал.
@@ -207,6 +217,12 @@ async def normalize_text(text: str, *, user_notion_id: str = "") -> str:
     # экономим токены промпта. case-insensitive.
     low = converted.lower()
     relevant = [w for w in whitelist if w.lower() in low]
+    # on-the-fly защита спанов карт из сырого транскрипта (голос).
+    # Спаны из scan_card_spans уже lower+ё→е; low — lowercase converted.
+    if extra_protect:
+        for span in extra_protect:
+            if span in low and span not in relevant:
+                relevant.append(span)
 
     system_lines = [
         "Исправь опечатки и описки. Если нет ошибок — верни текст как есть.",

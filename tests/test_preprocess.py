@@ -195,3 +195,42 @@ async def test_empty_text_passthrough():
     assert out == ""
     out2 = await pp.normalize_text("   ", user_notion_id="u")
     assert out2 == "   "
+
+
+# ── extra_protect ────────────────────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_extra_protect_spans_appear_in_prompt():
+    _fresh()
+    captured = {}
+
+    async def fake(text, system="", **kw):
+        captured["system"] = system
+        return text
+
+    with patch("core.preprocess.ask_claude", side_effect=fake):
+        await pp.normalize_text(
+            "крыльево мячей шут",
+            user_notion_id="u",
+            extra_protect=["крыльево мячей", "шут"],
+        )
+    assert "крыльево мячей" in captured["system"]
+    assert "шут" in captured["system"]
+
+
+@pytest.mark.asyncio
+async def test_extra_protect_absent_span_not_added():
+    _fresh()
+    captured = {}
+
+    async def fake(text, system="", **kw):
+        captured["system"] = system
+        return text
+
+    with patch("core.preprocess.ask_claude", side_effect=fake):
+        await pp.normalize_text(
+            "просто текст",
+            user_notion_id="u",
+            extra_protect=["крыльево мячей"],
+        )
+    assert "крыльево мячей" not in captured.get("system", "")
