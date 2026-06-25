@@ -172,6 +172,32 @@ is a guard that fails the build if Haiku ever disappears from the router/parsers
 Sonnet creeps somewhere it shouldn't.** A cost decision that isn't enforced is a cost
 decision that regresses on the next refactor.
 
+### 7. Vector semantic recall — pgvector + Voyage, in the Postgres I already run
+
+**Context.** I wanted past readings searchable by *meaning*, not keyword — so the
+interpretation prompt can surface a client's own similar history and keep my voice
+consistent. The vectors used to live in a Qdrant container that belonged to a
+*neighbouring* bot, reached over an external Docker network; when that bot was down the
+network vanished and recall silently became a no-op.
+
+**Choice.** I decoupled it: reading triplets (cards · question · interpretation) are
+embedded with Voyage `voyage-4-lite` (dim 1024) and stored in **pgvector, in the same
+Postgres** the bot already runs — one store, no extra service. History is backfilled,
+and the whole path is graceful: no Voyage key / DB down / pgvector absent → warning +
+no-op, never a failed reading. Embedding is batched (one reading = one Voyage call) to
+respect the free tier's 3 RPM.
+
+**Alternatives rejected.** Staying on the neighbour's Qdrant (made recall hostage to an
+unrelated bot's uptime, and Qdrant's real zone — millions of vectors — is a scale this
+personal practice will never reach), and keyword-only recall (the deterministic layered
+prompt assembly already covers context-by-key; it can't do similarity by meaning).
+
+**Trade-off.** pgvector + HNSW is right-sized for thousands of vectors, not millions; at
+that scale I'd re-open the choice. I held off committing until I'd actually decided
+rather than reaching for a vector DB by reflex — the reasoning is in ADR-0006. Memory
+rows and other sources beyond reading triplets stay on deterministic/keyword recall for
+now.
+
 ## How it's built
 
 ```mermaid
@@ -279,11 +305,6 @@ In order — because sequencing is part of the engineering:
   structured evals on the interpretation/parse paths and real tracing on the LLM calls,
   not just logs — so I can tell whether a prompt change made things *better*, not just
   different.
-- **Semantic recall — still an open design question.** I want memory and past sessions
-  searchable by meaning, not keyword. RAG with embeddings is the obvious candidate, but
-  I'm deliberately *not* committing yet: I'm weighing alternatives (hierarchical /
-  tree-structured recall among them), and I'll write the ADR when I've actually decided —
-  not to rationalize a vector DB I reached for by reflex.
 - **The Works epic** — deepening the planned-work ↔ fulfilled-event pipeline now that the
   FK foundation is in place.
 - **Apple-ecosystem integration** (planned, not built) — native reach into the
