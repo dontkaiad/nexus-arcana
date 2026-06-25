@@ -1,6 +1,10 @@
 services:
   db:
-    image: postgres:16
+    # Свой образ: postgres:16 + pgvector (docker/postgres/Dockerfile). FROM
+    # postgres:16 → glibc как у прод-тома (Debian 13) → нет collation-mismatch,
+    # REINDEX не нужен. deploy.yml `up -d --build` пересоберёт db автоматически.
+    build:
+      context: docker/postgres
     container_name: nexus-arcana-db
     environment:
       POSTGRES_USER: kai
@@ -28,13 +32,6 @@ services:
     container_name: nexus-bot
     command: ["python", "-m", "nexus.nexus_bot"]
     env_file: .env
-    # Qdrant — сервис klgpff в его docker-сети (klgpff-bot_default), забинжен на
-    # 127.0.0.1 → host-gateway не достаёт. Цепляемся к сети klgpff и зовём по
-    # DNS-имени сервиса `qdrant` (QDRANT_HOST=qdrant в .env). Обе сети ЯВНО:
-    # default — связь с db, klgpff_net — Qdrant.
-    networks:
-      - default
-      - klgpff_net
     depends_on:
       db:
         condition: service_healthy
@@ -57,13 +54,6 @@ services:
     container_name: arcana-bot
     command: ["python", "-m", "arcana.bot"]
     env_file: .env
-    # Qdrant — сервис klgpff в его docker-сети (klgpff-bot_default), забинжен на
-    # 127.0.0.1 → host-gateway не достаёт. Цепляемся к сети klgpff и зовём по
-    # DNS-имени сервиса `qdrant` (QDRANT_HOST=qdrant в .env). Обе сети ЯВНО:
-    # default — связь с db, klgpff_net — Qdrant.
-    networks:
-      - default
-      - klgpff_net
     depends_on:
       db:
         condition: service_healthy
@@ -79,10 +69,3 @@ services:
 
 volumes:
   pgdata:
-
-networks:
-  # Дефолтная сеть проекта nexus-arcana создаётся неявно (db + боты).
-  # klgpff_net — внешняя сеть проекта klgpff, где живёт Qdrant. klgpff не трогаем.
-  klgpff_net:
-    external: true
-    name: klgpff-bot_default

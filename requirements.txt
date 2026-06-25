@@ -8,12 +8,11 @@ aiofiles==23.2.1
 anthropic==0.40.0
 httpx==0.27.2
 
-# RAG (Voyage AI embeddings + Qdrant):
-# voyageai — нужна свежая, иначе не знает модель voyage-4-lite;
-# qdrant-client — последняя для Python 3.9 (1.16.2+ требует py>=3.10). С сервером
-# Qdrant 1.18.2 только косметический version-warning, работает.
+# RAG (Voyage AI embeddings + pgvector):
+# voyageai — нужна свежая, иначе не знает модель voyage-4-lite.
+# Векторный стор — pgvector в том же Postgres (см. SQLAlchemy/psycopg2 ниже);
+# python-пакет pgvector НЕ нужен — core/rag.py передаёт vector через CAST в SQL.
 voyageai>=0.3.2
-qdrant-client==1.16.1
 
 # Postgres / ORM / миграции
 SQLAlchemy==2.0.48
