@@ -309,6 +309,34 @@ async def test_clean_card_in_narrative_not_recovered_into_swapped_slot():
     assert data["cards"] == ["The Magician", "The High Priestess", "King of Wands"]
 
 
+async def test_dropped_card_slot_does_not_steal_dirty_neighbor():
+    """Двойной сбой: истинную карту slot0 Whisper УРОНИЛ как гарбл (парсер тоже не
+    разобрал → novel), а в той же дырке грязный сосед — origin спелл-подмены slot1.
+    Novel-слот НЕ eligible для грязного спана → не крадёт; slot1 получает свой
+    origin, slot0 → Haiku/дословно."""
+    raw = "бубубу крыльева мячей жрица"
+    data = {"cards": ["бубубу", "король жезлов", "жрица"], "bottom_card": None}
+
+    async def no_llm(phrase):
+        return None                                # Haiku гарбл не узнал
+    with patch.object(wc, "classify_waite_card_llm", side_effect=no_llm):
+        await normalize_waite_cards_in_data(data, raw)
+    assert data["cards"][0] == "бубубу"            # гарбл остался (для Поправить)
+    assert data["cards"][1] == "Queen of Swords"   # origin slot1 НЕ украден
+    assert data["cards"][2] == "The High Priestess"
+
+
+async def test_dropped_origin_among_swaps_keeps_enp_no_guess():
+    """Две подмены, но origin одной УРОНЕН (грязных < eligible) → счёт не сошёлся
+    → НЕ гадаем, оба eligible держат enP (не присваиваем чужой спан)."""
+    # slot0 подмена с уронённым origin (нет в сыром), slot1 подмена с origin
+    raw = "крыльева мячей жрица"   # только origin slot1 в сыром; slot0 origin отсутствует
+    data = {"cards": ["туз жезлов", "король жезлов", "жрица"], "bottom_card": None}
+    await normalize_waite_cards_in_data(data, raw)
+    # eligible=[slot0,slot1] (2), грязных=1 → 2≠1 → держим enP, не крадём
+    assert data["cards"] == ["Ace of Wands", "King of Wands", "The High Priestess"]
+
+
 async def test_two_adjacent_spell_swaps_recovered_by_span_similarity():
     """Две подмены подряд (реалистично: спелл исказил написание, не до
     неузнаваемости) → каждая тянется к своему истоку по близости спана."""
