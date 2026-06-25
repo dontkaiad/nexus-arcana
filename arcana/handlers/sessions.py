@@ -998,7 +998,6 @@ async def handle_add_session(
         # негрундящиеся → дословный фрагмент → дальше нормализатор смапит алиасами
         # («крыльева мячей» → «Королева Мечей»). ДО split single/multi и resolve-
         # диалога → покрывает оба флоу одним вызовом, grounded data едет в pending.
-        from core.card_grounding import ground_cards_in_data
         from miniapp.backend.tarot import resolve_deck_id, find_card
         _gr_deck = resolve_deck_id(data.get("deck") or "Уэйт")
 
@@ -1013,45 +1012,55 @@ async def handle_add_session(
                         out.append(it["bottom_card"])
             return out
 
-        # Референс граундинга — СЫРОЙ Whisper-транскрипт (ground_ref, ДО спелла),
-        # если проброшен (голос). Спелл недетерминированно переписывает мисхёрд
-        # «крыльево мячей» → «король жезлов» ЕЩЁ ДО парсера; сверка с сырым даёт
-        # низкий score на отравленной карте → recover → дословный фрагмент →
-        # алиас «крыльево мячей» → Королева Мечей. Текст без голоса: ground_ref
-        # пуст → сверяем с самим text (поведение прежнее, юзер пишет осознанно).
+        # Референс карт — СЫРОЙ Whisper-транскрипт (ground_ref, ДО спелла), если
+        # проброшен (голос). Спелл недетерминированно переписывает мисхёрд
+        # «крыльево мячей» → «король жезлов» ЕЩЁ ДО парсера → источник истины по
+        # картам только сырой транскрипт. Текст без голоса: ground_ref пуст →
+        # берём сам text (юзер пишет осознанно).
         _gr_ref = ground_ref or text
         _gr_before = _flat_cards(data)
-        # resolver → каноничное имя карты или None: нужно не только «резолвится ли»,
-        # но и КАКАЯ карта — near-miss отличает подмену (другая карта) от опечатки
-        # мисхёрда той же карты (см. core/card_grounding._names_other_card).
-        ground_cards_in_data(
-            data, _gr_ref,
-            resolver=lambda s: (find_card(_gr_deck, s) or {}).get("ru") or None,
-        )
 
-        # Канонизация имён карт в правильную RU-форму ПОСЛЕ грунинга: «туз мячей»
-        # → «Туз Мечей», грунинг-восстановленное «крыльево мячей» → «Королева
-        # Мечей». Иначе заголовок показывал сырой вывод парсера/мисхёрд, хотя
-        # хранение/трактовка были канон. Нераспознанные (find_card=None) остаются
-        # дословно — для Поправить.
-        def _canon_ru(card):
-            if not isinstance(card, str) or not card.strip():
-                return card
-            c = find_card(_gr_deck, card)
-            return (c.get("ru") or card) if c else card
+        # ── Развилка по колоде ───────────────────────────────────────────────
+        # Уэйт (rider-waite): жёсткий ДЕТЕРМИНИРОВАННЫЙ разбор карт из сырого
+        # транскрипта (РАНГ+МАСТЬ / имя старшего → одна из 78 canonical EN), без
+        # grounding-угадайки SequenceMatcher и без зависимости от спелла; выход —
+        # английский («Queen of Swords»). Авторские колоды (Dark Wood, Deviant
+        # Moon, Ленорман, игральные) — ПРЕЖНИЙ путь (grounding + canon RU): их у
+        # find_card нет в реестре, свои нестандартные имена → не трогаем.
+        if _gr_deck == "rider-waite":
+            from core.waite_cards import normalize_waite_cards_in_data
+            await normalize_waite_cards_in_data(data, _gr_ref)
+        else:
+            from core.card_grounding import ground_cards_in_data
+            # resolver → каноничное имя карты или None: нужно не только «резолвится
+            # ли», но и КАКАЯ карта — near-miss отличает подмену (другая карта) от
+            # опечатки мисхёрда той же карты (см. card_grounding._names_other_card).
+            ground_cards_in_data(
+                data, _gr_ref,
+                resolver=lambda s: (find_card(_gr_deck, s) or {}).get("ru") or None,
+            )
 
-        if isinstance(data.get("cards"), list):
-            data["cards"] = [_canon_ru(c) for c in data["cards"]]
-        if data.get("bottom_card"):
-            data["bottom_card"] = _canon_ru(data["bottom_card"])
-        for it in (data.get("triplets") or data.get("items") or []):
-            if isinstance(it, dict):
-                if isinstance(it.get("cards"), list):
-                    it["cards"] = [_canon_ru(c) for c in it["cards"]]
-                if it.get("bottom_card"):
-                    it["bottom_card"] = _canon_ru(it["bottom_card"])
+            # Канонизация имён карт в правильную RU-форму ПОСЛЕ грунинга. Иначе
+            # заголовок показывал сырой вывод парсера/мисхёрд. Нераспознанные
+            # (find_card=None) остаются дословно — для Поправить.
+            def _canon_ru(card):
+                if not isinstance(card, str) or not card.strip():
+                    return card
+                c = find_card(_gr_deck, card)
+                return (c.get("ru") or card) if c else card
 
-        # Итог (грунинг + канонизация) → в ops-группу: видно на проде net-замену
+            if isinstance(data.get("cards"), list):
+                data["cards"] = [_canon_ru(c) for c in data["cards"]]
+            if data.get("bottom_card"):
+                data["bottom_card"] = _canon_ru(data["bottom_card"])
+            for it in (data.get("triplets") or data.get("items") or []):
+                if isinstance(it, dict):
+                    if isinstance(it.get("cards"), list):
+                        it["cards"] = [_canon_ru(c) for c in it["cards"]]
+                    if it.get("bottom_card"):
+                        it["bottom_card"] = _canon_ru(it["bottom_card"])
+
+        # Итог (разбор карт) → в ops-группу: видно на проде net-замену
         # карт, не лазая в docker logs. Не бросает — диагностика вторична.
         try:
             _gr_diff = [
