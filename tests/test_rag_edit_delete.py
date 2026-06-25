@@ -1,7 +1,7 @@
 """tests/test_rag_edit_delete.py — RAG/тема инвалидация при правке/удалении (#165 #166).
 
 Правка триплета → reindex вектора (index_triplet с RU-картами) + clear_theme_summary.
-Удаление триплета → delete_triplet (убрать из Qdrant) + clear_theme_summary.
+Удаление триплета → delete_triplet (убрать из pgvector) + clear_theme_summary.
 Провал RAG НЕ роняет операцию (данные уже в PG). Моки, без реальной сети.
 """
 from __future__ import annotations
@@ -73,7 +73,7 @@ async def test_edit_survives_rag_failure(monkeypatch):
 
     # index_triplet кидает → _rag_index_safe гасит, правка доходит до конца.
     monkeypatch.setattr("core.rag.index_triplet",
-                        MagicMock(side_effect=RuntimeError("qdrant down")))
+                        MagicMock(side_effect=RuntimeError("pg down")))
 
     msg = MagicMock()
     msg.from_user.id = 123
@@ -122,7 +122,7 @@ async def test_delete_survives_rag_failure(monkeypatch):
     monkeypatch.setattr(S._repo, "clear_session_summary", AsyncMock())
     monkeypatch.setattr(S._repo, "clear_theme_summary", AsyncMock())
     monkeypatch.setattr("core.rag.delete_triplet",
-                        MagicMock(side_effect=RuntimeError("qdrant down")))
+                        MagicMock(side_effect=RuntimeError("pg down")))
 
     call = _call()
     await S.cb_triplet_remove_yes(call)

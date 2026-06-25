@@ -1,71 +1,22 @@
 """tests/test_rag_triplets.py — RAG-AB: индексация / поиск / инъекция голоса (#166).
 
-Моки Voyage (_embed) и Qdrant (клиент + qdrant_client.models). Реальной сети НЕТ.
+Моки Voyage (_embed) и БД (get_engine — фейковый engine, см. _rag_fake_engine).
+Реальной сети/БД НЕТ; реальное исполнение pgvector-SQL покрыто смоуком/backfill.
 """
 from __future__ import annotations
-
-import sys
-import types
 
 import pytest
 from unittest.mock import AsyncMock, MagicMock
 
 import core.rag as rag
-
-
-# ── фейковый qdrant_client.models для index/search/delete путей ───────────────
-class _PointStruct:
-    def __init__(self, id=None, vector=None, payload=None):
-        self.id = id
-        self.vector = vector
-        self.payload = payload
-
-
-class _Filter:
-    def __init__(self, must=None):
-        self.must = must
-
-
-class _FieldCondition:
-    def __init__(self, key=None, match=None):
-        self.key = key
-        self.match = match
-
-
-class _MatchValue:
-    def __init__(self, value=None):
-        self.value = value
-
-
-class _PointIdsList:
-    def __init__(self, points=None):
-        self.points = points
-
-
-@pytest.fixture
-def fake_models(monkeypatch):
-    mod = types.ModuleType("qdrant_client.models")
-    mod.PointStruct = _PointStruct
-    mod.Filter = _Filter
-    mod.FieldCondition = _FieldCondition
-    mod.MatchValue = _MatchValue
-    mod.PointIdsList = _PointIdsList
-    parent = types.ModuleType("qdrant_client")
-    parent.models = mod
-    monkeypatch.setitem(sys.modules, "qdrant_client", parent)
-    monkeypatch.setitem(sys.modules, "qdrant_client.models", mod)
-    return mod
-
-
-def _scored(payload, score=0.9):
-    return types.SimpleNamespace(payload=payload, score=score)
+from tests._rag_fake_engine import FakeEngine, boom_engine
 
 
 # ── index_triplet ─────────────────────────────────────────────────────────────
 
-def test_index_triplet_text_from_nonempty_parts(monkeypatch, fake_models):
-    client = MagicMock()
-    monkeypatch.setattr(rag, "get_qdrant_client", lambda: client)
+def test_index_triplet_text_from_nonempty_parts(monkeypatch):
+    eng = FakeEngine()
+    monkeypatch.setattr(rag, "get_engine", lambda: eng)
     captured = {}
 
     def fake_embed(text, input_type="document"):
@@ -77,69 +28,75 @@ def test_index_triplet_text_from_nonempty_parts(monkeypatch, fake_models):
 
     ok = rag.index_triplet(
         "42", "8 мечей, шут", "что чувствует", "",  # interpretation ПУСТОЙ
-        client_id="c1", session_name="Вадим", occurred_at="2026-06-22",
+        client_id="5", session_name="Вадим", occurred_at="2026-06-22",
     )
     assert ok is True
     # пустой interpretation НЕ попал в текст эмбеддинга
     assert captured["text"] == "8 мечей, шут что чувствует"
     assert captured["input_type"] == "document"
 
-    client.upsert.assert_called_once()
-    pts = client.upsert.call_args.kwargs["points"]
-    assert pts[0].id == 42  # числовой point id из "42"
-    assert pts[0].payload["triplet_id"] == "42"
-    assert pts[0].payload["client_id"] == "c1"
-    assert pts[0].payload["interp_excerpt"] == ""  # пустая трактовка → пусто
+    # один INSERT; параметры строки
+    assert len(eng.calls) == 1
+    _sql, row = eng.calls[0]
+    assert row["session_id"] == 42            # числовой ключ из "42"
+    assert row["client_id"] == 5              # bigint id клиента
+    assert row["interp_excerpt"] == ""        # пустая трактовка → пусто
+    assert row["cards"] == "8 мечей, шут"
 
 
-def test_index_triplet_interp_excerpt_strips_html(monkeypatch, fake_models):
-    client = MagicMock()
-    monkeypatch.setattr(rag, "get_qdrant_client", lambda: client)
-    monkeypatch.setattr(rag, "_embed", lambda t, input_type="document": [[0.1]])
+def test_index_triplet_interp_excerpt_strips_html(monkeypatch):
+    eng = FakeEngine()
+    monkeypatch.setattr(rag, "get_engine", lambda: eng)
+    monkeypatch.setattr(rag, "_embed", lambda t, input_type="document": [[0.1] * rag.VOYAGE_DIM])
     rag.index_triplet("1", "карты", "вопрос", "<h3>Итог</h3><p>тупик</p>")
-    payload = client.upsert.call_args.kwargs["points"][0].payload
-    assert payload["interp_excerpt"] == "Итог тупик"
+    row = eng.calls[0][1]
+    assert row["interp_excerpt"] == "Итог тупик"
+    assert row["interpretation"] == "<h3>Итог</h3><p>тупик</p>"  # полная — тоже хранится
 
 
 # ── search_triplets ───────────────────────────────────────────────────────────
 
-def test_search_with_client_id_builds_filter(monkeypatch, fake_models):
-    client = MagicMock()
-    client.query_points.return_value = types.SimpleNamespace(
-        points=[_scored({"triplet_id": "1", "cards": "X", "interp_excerpt": "e"})]
-    )
-    monkeypatch.setattr(rag, "get_qdrant_client", lambda: client)
-    monkeypatch.setattr(rag, "_embed", lambda t, input_type="query": [[0.2]])
+def test_search_with_client_id_builds_filter(monkeypatch):
+    eng = FakeEngine(rows=[{
+        "session_id": 1, "cards": "X", "interp_excerpt": "e", "score": 0.9,
+        "client_id": 5, "session_name": None, "occurred_at": None,
+        "question": None, "bottom_card": None, "deck": None,
+    }])
+    monkeypatch.setattr(rag, "get_engine", lambda: eng)
+    monkeypatch.setattr(rag, "_embed", lambda t, input_type="query": [[0.2] * rag.VOYAGE_DIM])
 
-    out = rag.search_triplets("запрос", top_k=3, client_id="c1")
+    out = rag.search_triplets("запрос", top_k=3, client_id="5")
     assert out and out[0]["score"] == 0.9 and out[0]["triplet_id"] == "1"
-    qf = client.query_points.call_args.kwargs["query_filter"]
-    assert qf is not None
-    assert qf.must[0].key == "client_id"
-    assert qf.must[0].match.value == "c1"
+    sql, params = eng.calls[0]
+    assert "WHERE client_id = :client_id" in sql   # фильтр построен
+    assert params["client_id"] == 5
+    assert params["k"] == 3
 
 
-def test_search_without_client_id_no_filter(monkeypatch, fake_models):
-    client = MagicMock()
-    client.query_points.return_value = types.SimpleNamespace(points=[])
-    monkeypatch.setattr(rag, "get_qdrant_client", lambda: client)
-    monkeypatch.setattr(rag, "_embed", lambda t, input_type="query": [[0.2]])
+def test_search_without_client_id_no_filter(monkeypatch):
+    eng = FakeEngine(rows=[])
+    monkeypatch.setattr(rag, "get_engine", lambda: eng)
+    monkeypatch.setattr(rag, "_embed", lambda t, input_type="query": [[0.2] * rag.VOYAGE_DIM])
 
     assert rag.search_triplets("запрос", top_k=3, client_id=None) == []
-    assert client.query_points.call_args.kwargs["query_filter"] is None
+    sql, params = eng.calls[0]
+    assert "WHERE client_id" not in sql            # фильтра нет
+    assert "client_id" not in params
 
 
-# ── graceful (Qdrant/Voyage недоступны) ───────────────────────────────────────
+# ── graceful (БД/Voyage недоступны) ───────────────────────────────────────────
 
-def test_graceful_qdrant_down(monkeypatch):
-    monkeypatch.setattr(rag, "get_qdrant_client", lambda: None)
+def test_graceful_db_down(monkeypatch):
+    monkeypatch.setattr(rag, "_embed", lambda t, input_type="document": [[0.1] * rag.VOYAGE_DIM])
+    monkeypatch.setattr(rag, "get_engine", boom_engine)
     assert rag.search_triplets("q") == []          # пусто, без исключения
     assert rag.index_triplet("1", "c", "q", "i") is False  # no-op
     assert rag.delete_triplet("1") is False
 
 
 def test_search_graceful_when_embed_empty(monkeypatch):
-    monkeypatch.setattr(rag, "get_qdrant_client", lambda: MagicMock())
+    # _embed пуст → search [] ДО касания БД
+    monkeypatch.setattr(rag, "get_engine", boom_engine)
     monkeypatch.setattr(rag, "_embed", lambda t, input_type="query": [])
     assert rag.search_triplets("q") == []
 
@@ -196,7 +153,7 @@ async def test_voice_block_skips_empty_interp(monkeypatch):
 
 def test_embed_batch_returns_vectors_in_order(monkeypatch):
     client = MagicMock()
-    client.embed.return_value = types.SimpleNamespace(embeddings=[[1.0], [2.0], [3.0]])
+    client.embed.return_value = type("R", (), {"embeddings": [[1.0], [2.0], [3.0]]})()
     monkeypatch.setattr(rag, "get_voyage_client", lambda: client)
     out = rag._embed(["a", "b", "c"], input_type="document")
     assert out == [[1.0], [2.0], [3.0]]  # порядок входа сохранён
@@ -205,28 +162,28 @@ def test_embed_batch_returns_vectors_in_order(monkeypatch):
     assert client.embed.call_args.args[0] == ["a", "b", "c"]
 
 
-def test_index_triplets_batch_single_embed(monkeypatch, fake_models):
-    client = MagicMock()
-    monkeypatch.setattr(rag, "get_qdrant_client", lambda: client)
+def test_index_triplets_batch_single_embed(monkeypatch):
+    eng = FakeEngine()
+    monkeypatch.setattr(rag, "get_engine", lambda: eng)
     embed_mock = MagicMock(return_value=[[0.1], [0.2], [0.3]])
     monkeypatch.setattr(rag, "_embed", embed_mock)
 
     items = [
         {"triplet_id": str(i), "cards": "c", "question": "q", "interpretation": "i",
-         "client_id": "c1", "session_name": "S", "occurred_at": "2026-06-22"}
+         "client_id": "5", "session_name": "S", "occurred_at": "2026-06-22"}
         for i in (1, 2, 3)
     ]
     n = rag.index_triplets_batch(items)
     assert n == 3
     embed_mock.assert_called_once()                 # ОДИН _embed на N триплетов
-    assert client.upsert.call_count == 1            # один upsert пакетом
-    pts = client.upsert.call_args.kwargs["points"]
-    assert [p.id for p in pts] == [1, 2, 3]
+    assert len(eng.calls) == 1                       # один INSERT пакетом
+    _sql, rows = eng.calls[0]
+    assert [r["session_id"] for r in rows] == [1, 2, 3]
 
 
-def test_index_triplets_batch_skips_empty_text(monkeypatch, fake_models):
-    client = MagicMock()
-    monkeypatch.setattr(rag, "get_qdrant_client", lambda: client)
+def test_index_triplets_batch_skips_empty_text(monkeypatch):
+    eng = FakeEngine()
+    monkeypatch.setattr(rag, "get_engine", lambda: eng)
     captured = {}
     monkeypatch.setattr(rag, "_embed", lambda texts, input_type="document": (
         captured.update(texts=texts) or [[0.1]] * len(texts)))
