@@ -312,10 +312,13 @@ async def restore_reminders_on_startup() -> None:
                             await _repo.set_in_progress(task_id)
                         except Exception as e:
                             logger.warning("restore pass2: failed to set In progress for '%s': %s", title, e)
-                        kb = InlineKeyboardMarkup(inline_keyboard=[[
-                            InlineKeyboardButton(text="✅ Сделано!", callback_data=f"task_complete_{task_id}"),
-                            cancel_button("❌ Не сделал", f"task_failed_{task_id}"),
-                        ]])
+                        kb = InlineKeyboardMarkup(inline_keyboard=[
+                            [
+                                InlineKeyboardButton(text="✅ Сделано!", callback_data=f"task_complete_{task_id}"),
+                                cancel_button("❌ Не сделал", f"task_failed_{task_id}"),
+                            ],
+                            [InlineKeyboardButton(text="⏳ В процессе", callback_data=f"task_wip_{task_id}")],
+                        ])
                         try:
                             _m = await _bot.send_message(
                                 tg_id,
@@ -339,10 +342,13 @@ async def restore_reminders_on_startup() -> None:
                         except ValueError:
                             missed_time = reminder_start[:16]
 
-                        kb = InlineKeyboardMarkup(inline_keyboard=[[
-                            InlineKeyboardButton(text="✅ Сделано!", callback_data=f"task_complete_{task_id}"),
-                            cancel_button("❌ Не сделал", f"task_failed_{task_id}"),
-                        ]])
+                        kb = InlineKeyboardMarkup(inline_keyboard=[
+                            [
+                                InlineKeyboardButton(text="✅ Сделано!", callback_data=f"task_complete_{task_id}"),
+                                cancel_button("❌ Не сделал", f"task_failed_{task_id}"),
+                            ],
+                            [InlineKeyboardButton(text="⏳ В процессе", callback_data=f"task_wip_{task_id}")],
+                        ])
                         # Read interval for display
                         _, ivl_days_pre = _parse_repeat_time(task.repeat_time)
                         repeat_display = _interval_label(ivl_days_pre) if ivl_days_pre > 1 else repeat
@@ -530,10 +536,13 @@ async def _schedule_reminder(chat_id: int, title: str, reminder_dt: str, task_id
                 await _repo.set_in_progress(task_id)
             except Exception as e:
                 logger.warning("send_reminder: failed to set In progress: %s", e)
-            kb = InlineKeyboardMarkup(inline_keyboard=[[
-                InlineKeyboardButton(text="✅ Сделано!", callback_data=f"task_complete_{task_id}"),
-                cancel_button("❌ Не сделал", f"task_failed_{task_id}"),
-            ]])
+            kb = InlineKeyboardMarkup(inline_keyboard=[
+                [
+                    InlineKeyboardButton(text="✅ Сделано!", callback_data=f"task_complete_{task_id}"),
+                    cancel_button("❌ Не сделал", f"task_failed_{task_id}"),
+                ],
+                [InlineKeyboardButton(text="⏳ В процессе", callback_data=f"task_wip_{task_id}")],
+            ])
             _m = await _bot.send_message(
                 chat_id,
                 f"🔔 <b>Напоминание:</b> {title}\n\nСделано?",
@@ -1889,6 +1898,13 @@ _SUPPORT_POSTPONE = [
     "Иногда отложить = правильное решение ✨",
 ]
 
+_SUPPORT_WIP = [
+    "Огонь, в процессе — напомню! ⚡",
+    "Принято, работаем 💪 Когда пнуть снова?",
+    "Ок, в процессе. Когда напомнить?",
+    "Трекаем! Напомнить через сколько?",
+]
+
 
 @router.callback_query(F.data.startswith("task_complete_"))
 async def task_complete(call: CallbackQuery) -> None:
@@ -1968,6 +1984,42 @@ async def task_failed(call: CallbackQuery) -> None:
         "⏰ <b>Когда напомнить снова?</b>\n"
         "Примеры: <code>завтра в 10:00</code>, <code>через 2 часа</code>, <code>в понедельник</code>"
     )
+
+@router.callback_query(F.data.startswith("task_wip_"))
+async def task_wip(call: CallbackQuery) -> None:
+    """Задача в процессе — статус остаётся In progress, спрашиваем когда напомнить снова."""
+    import random
+    uid = call.from_user.id
+    task_id = call.data.split("_", 2)[2]
+    logger.info("task_wip callback: task_id=%s uid=%s", task_id, uid)
+
+    msg_text = call.message.text or ""
+    task_title = ""
+    if "Напоминание:" in msg_text:
+        task_title = msg_text.split("Напоминание:")[1].strip().split("\n")[0].strip()
+    elif "Пропущено" in msg_text:
+        # "⏰ Пропущено (25.06 в 20:00): заголовок"
+        parts = msg_text.split(":", 1)
+        if len(parts) > 1:
+            task_title = parts[1].strip().split("\n")[0].strip()
+
+    try:
+        await _repo.set_in_progress(task_id)
+    except Exception as e:
+        logger.warning("task_wip: failed to set In progress: %s", e)
+
+    _pending_set(uid, {"task_id": task_id, "action": "reschedule", "title": task_title})
+    await call.message.edit_reply_markup()
+    await delete_task_reminder(task_id)
+    support = random.choice(_SUPPORT_WIP)
+    await call.message.answer(
+        f"{support}\n\n"
+        "⏰ <b>Когда напомнить снова?</b>\n"
+        "Примеры: <code>завтра в 10:00</code>, <code>через 2 часа</code>, <code>в понедельник</code>",
+        parse_mode="HTML",
+    )
+    await call.answer("⏳ В процессе")
+
 
 @router.callback_query(F.data.startswith("task_reschedule_"))
 async def task_reschedule(call: CallbackQuery) -> None:
