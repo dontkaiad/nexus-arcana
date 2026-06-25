@@ -170,7 +170,8 @@ async def test_mode_a_does_not_append_machine_bottom_block():
 
 @pytest.mark.asyncio
 async def test_mode_b_still_appends_machine_bottom_block():
-    """Режим B (authored=False) — старое поведение: блок дна дописывается."""
+    """Режим B (authored=False): блок дна дописывается к трактовке (в Notion/саммари),
+    но в RAG НЕ индексируется — machine-generated голос не загрязняет corpus."""
     summary_mock = AsyncMock(return_value="саммари")
     rag_mock = AsyncMock()
     msg = MagicMock()
@@ -187,8 +188,11 @@ async def test_mode_b_still_appends_machine_bottom_block():
             authored=False,
         )
 
-    rag_interp = rag_mock.await_args.kwargs["interpretation"]
-    assert "Скрытый фон расклада" in rag_interp
+    # Блок дна по-прежнему дописывается (до саммари и Notion) — но НЕ в RAG.
+    summ_interp = summary_mock.await_args.args[3]
+    assert "Скрытый фон расклада" in summ_interp
+    # RAG НЕ вызывается в режиме B — corpus защищён от машинного голоса.
+    rag_mock.assert_not_awaited()
 
 
 # ───────────────── 4. Развилка A/B: single + multi флоу ─────────────────────
@@ -321,13 +325,14 @@ async def test_single_mode_b_routes_to_tarot_when_no_authored():
     assert any("Трактуй строго по справочнику" in s for s in cap["systems"]), "режим B не сработал"
     assert not any("РАЗВЕРНУТЬ её тезисы" in s for s in cap["systems"]), \
         "без авторского текста не должно быть разворачивания"
-    assert "MACHINE" in rag.await_args.kwargs["interpretation"]
+    # Режим B: RAG НЕ вызывается — machine-generated голос не попадает в corpus.
+    rag.assert_not_awaited()
 
 
 @pytest.mark.asyncio
 async def test_multi_mode_a_per_triplet():
     """Multi: триплет с авторской трактовкой → PERSONAL; без → TAROT.
-    В RAG-батч уходят оба (авторский и машинный) — каждый из своего поля."""
+    В RAG-батч уходит ТОЛЬКО authored (триплет 1); машинный (триплет 2) — нет."""
     rag_batch = AsyncMock()
     fake_ask, cap = _make_fake_ask({})  # parse не вызывается — items передаём явно
     items = [
@@ -349,8 +354,55 @@ async def test_multi_mode_a_per_triplet():
 
     assert any("РАЗВЕРНУТЬ её тезисы" in s for s in cap["systems"]), "режим A (триплет 1) не сработал"
     assert any("Трактуй строго по справочнику" in s for s in cap["systems"]), "режим B (триплет 2) не сработал"
-    # RAG-батч: триплет 1 — авторский (POLISHED), триплет 2 — машинный (MACHINE)
+    # RAG-батч: только authored (триплет 1) — машинный (триплет 2) не попадает в corpus.
     batch = rag_batch.await_args.args[0]
     interps = [t["interpretation"] for t in batch]
+    assert len(batch) == 1, "в батч должен попасть только 1 authored триплет"
     assert any("POLISHED Kai" in i for i in interps), "авторская трактовка не попала в RAG"
-    assert any("MACHINE" in i for i in interps), "машинная трактовка триплета B не попала в RAG"
+    assert not any("MACHINE" in i for i in interps), "машинная трактовка не должна быть в RAG"
+
+
+# ──────────────── 5. RAG gate: authored=True → индексируется, False → нет ─────
+
+@pytest.mark.asyncio
+async def test_rag_gate_authored_single_calls_index():
+    """_save_and_post_triplet с authored=True → _rag_index_safe ВЫЗВАН."""
+    summary_mock = AsyncMock(return_value="саммари")
+    rag_mock = AsyncMock()
+    msg = MagicMock()
+    msg.answer = AsyncMock(return_value=MagicMock(chat=MagicMock(id=1), message_id=2))
+
+    with ExitStack() as st:
+        for p in _save_post_patches(summary_mock, rag_mock):
+            st.enter_context(p)
+        await _save_and_post_triplet(
+            msg, tz=TZ, user_notion_id="u", client_id=None, client_name=None,
+            deck="Уэйт", spread_type="🔺 Триплет", question="вопрос",
+            cards_text="туз мечей", bottom_card=None,
+            area="Работа", interpretation="<p>авторский текст</p>",
+            authored=True,
+        )
+
+    rag_mock.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_rag_gate_mode_b_single_does_not_call_index():
+    """_save_and_post_triplet с authored=False → _rag_index_safe НЕ вызван."""
+    summary_mock = AsyncMock(return_value="саммари")
+    rag_mock = AsyncMock()
+    msg = MagicMock()
+    msg.answer = AsyncMock(return_value=MagicMock(chat=MagicMock(id=1), message_id=2))
+
+    with ExitStack() as st:
+        for p in _save_post_patches(summary_mock, rag_mock):
+            st.enter_context(p)
+        await _save_and_post_triplet(
+            msg, tz=TZ, user_notion_id="u", client_id=None, client_name=None,
+            deck="Уэйт", spread_type="🔺 Триплет", question="вопрос",
+            cards_text="туз мечей", bottom_card=None,
+            area="Работа", interpretation="<p>машинный текст</p>",
+            authored=False,
+        )
+
+    rag_mock.assert_not_awaited()

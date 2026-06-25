@@ -871,12 +871,13 @@ async def _save_and_post_triplet(
         await message.answer("⚠️ Не получилось сохранить расклад.")
         return None
 
-    # RAG-AB: индексируем триплет в Qdrant (для будущих retrieve). Провал НЕ
-    # роняет сохранение — данные уже в PG, Qdrant вторичен (#166).
-    await _rag_index_safe(
-        page_id, cards=cards_text, question=question, interpretation=interpretation,
-        client_id=client_id, session_name=session_name, occurred_at=_now_iso(tz)[:10],
-    )
+    # RAG-AB: индексируем только authored (режим A) — voice corpus не загрязняется
+    # машинными трактовками режима B. Провал НЕ роняет сохранение (#166).
+    if authored:
+        await _rag_index_safe(
+            page_id, cards=cards_text, question=question, interpretation=interpretation,
+            client_id=client_id, session_name=session_name, occurred_at=_now_iso(tz)[:10],
+        )
 
     # Авто-привязка к открытой Работе (категория 🃏 Расклад) + закрыть её (PG, #151).
     work_closed = False
@@ -1505,17 +1506,19 @@ async def _handle_multi_session(
                 if not first_page_id:
                     first_page_id = page_id
 
-                # RAG-AB: копим триплет для ОДНОГО батч-эмбеддинга после цикла
-                # (N триплетов = 1 запрос Voyage, бережём лимит 3 RPM, #166).
-                rag_batch.append({
-                    "triplet_id": page_id,
-                    "cards": cards_text,
-                    "question": question,
-                    "interpretation": interpretation,
-                    "client_id": client_id,
-                    "session_name": session_name or None,
-                    "occurred_at": _now_iso(tz)[:10],
-                })
+                # RAG-AB: копим только authored (режим A) для одного батч-эмбеддинга
+                # после цикла (N триплетов = 1 запрос Voyage, бережём 3 RPM, #166).
+                # Режим B не индексируется — machine-generated голос не попадает в corpus.
+                if authored:
+                    rag_batch.append({
+                        "triplet_id": page_id,
+                        "cards": cards_text,
+                        "question": question,
+                        "interpretation": interpretation,
+                        "client_id": client_id,
+                        "session_name": session_name or None,
+                        "occurred_at": _now_iso(tz)[:10],
+                    })
 
                 # Триплет в чат: вопрос + карты + дно + трактовка (telegram-safe).
                 interp_tg = html_to_telegram(interpretation)
