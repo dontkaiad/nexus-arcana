@@ -227,6 +227,18 @@ def get_streak(user_id: int) -> dict:
     }
 
 
+def _plural_days(n: int) -> str:
+    """Русское склонение 'день/дня/дней' для числа n."""
+    if 11 <= n % 100 <= 14:
+        return "дней"
+    r = n % 10
+    if r == 1:
+        return "день"
+    if 2 <= r <= 4:
+        return "дня"
+    return "дней"
+
+
 def format_streak_msg(streak: int, best: int, is_new_best: bool = False) -> str:
     """Return a praise message based on streak length (Russian)."""
     msg = ""
@@ -250,7 +262,7 @@ def format_streak_msg(streak: int, best: int, is_new_best: bool = False) -> str:
         msg = "\u2b50\U0001f525{} \u2014 \u044d\u043b\u0438\u0442\u043d\u044b\u0439 \u043a\u043b\u0443\u0431!".format(streak)
 
     if is_new_best and best > 0:
-        record = "\U0001f3c6 \u041d\u043e\u0432\u044b\u0439 \u0440\u0435\u043a\u043e\u0440\u0434: {} \u0434\u043d\u0435\u0439!".format(best)
+        record = "\U0001f3c6 \u041d\u043e\u0432\u044b\u0439 \u0440\u0435\u043a\u043e\u0440\u0434: {} {}!".format(best, _plural_days(best))
         if msg:
             msg = "{}\n{}".format(msg, record)
         else:

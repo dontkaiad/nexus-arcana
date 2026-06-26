@@ -690,6 +690,30 @@ async def process_text(msg: Message, text: str, user_notion_id: str = "") -> Non
                 msg.chat.id, msg.reply_to_message.message_id
             )
             if _rem:
+                # Reply «сделано/готово» на плашку = отметить задачу выполненной
+                _done_words = {
+                    "сделано", "готово", "выполнено", "done", "да", "ок", "ok",
+                    "✅", "сделал", "сделала", "выполнил", "выполнила",
+                }
+                if text.strip().lower() in _done_words:
+                    from nexus.handlers.tasks import _repo, _remove_task_jobs, _DONE_PHRASES, _update_streak_line
+                    from nexus.handlers.utils import react
+                    import random as _random
+                    _task_id = _rem["task_id"]
+                    _task_title = _rem.get("title") or ""
+                    result = await _repo.set_status(_task_id, "Done")
+                    if result:
+                        _remove_task_jobs(_task_id)
+                        from core.task_reminder_msg import delete_task_reminder
+                        await delete_task_reminder(_task_id)
+                        phrase = _random.choice(_DONE_PHRASES)
+                        title_line = f"\n✅ {_task_title} — выполнено" if _task_title else "\n✅ Выполнено"
+                        streak_line = await _update_streak_line(uid, _task_id)
+                        await react(msg, "🔥")
+                        await msg.reply(f"{phrase}{title_line}{streak_line}")
+                    else:
+                        await msg.reply("⚠️ Ошибка обновления задачи.")
+                    return
                 from nexus.handlers.tasks import handle_reminder_reply_reschedule
                 await handle_reminder_reply_reschedule(
                     msg, _rem["task_id"], _rem.get("title") or ""
