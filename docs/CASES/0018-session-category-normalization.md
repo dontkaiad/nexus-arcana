@@ -1,12 +1,13 @@
 # ADR-0018 — Session category as a first-class dimension
 
-**Status:** Proposed  
+**Status:** Accepted  
 **Date:** 2026-06-26  
 **Relates to:** ADR-0008 (lookup tables — establishes the pattern used here),
 ADR-0017 (scan-before-spell — same principle: add a deterministic signal rather
 than repair a stochastic one)  
-**Code conforms to:** (hash to fill in when phase 4 lands)  
+**Code conforms to:** 077d093 (drop spread_type; all 5 phases complete)  
 **Verify against:** arcana/repos/sessions_tables.py, alembic/versions/w3x4y5z6a7b8_session_category.py,
+alembic/versions/x4y5z6a7b8c9_drop_sessions_spread_type.py,
 arcana/repos/pg_sessions_repo.py, arcana/handlers/sessions.py,
 miniapp/backend/routes/arcana_sessions.py, core/schema.py, core/reply_update.py
 
@@ -115,6 +116,25 @@ the wrong→correct case from Haiku drift.
 | **3** | Backfill: real categories → direct map; shape-trash → client anchor → fallback sphere. Three SQL steps run manually on VPS with `count(*)` checks. | **Кай manually on VPS** | `UPDATE sessions SET category_id = NULL WHERE ...` |
 | **4** | All readers switch to `category_id`. Reply-update gains category support. Mini-app, bot header, schema, Notion adapter all read from lookup. | deploy | revert to phase-2 code |
 | **5** | Separate Alembic migration: `ALTER TABLE sessions DROP COLUMN spread_type`. Only after explicit go from Кай. | `alembic upgrade` manually | irreversible — requires restore |
+
+---
+
+## Production evidence
+
+All five phases deployed and verified on 2026-06-26:
+
+- **Phase 1–2** (commits 3287755, c4108d1): `session_category` table seeded with 5 rows;
+  `sessions.category_id` FK column added; dual-write active.
+- **Phase 3** (backfill): 33 existing sessions backfilled — all assigned `category_id → sphere`
+  (code `"sphere"`, id=1); client anchor populated for repeat clients.
+- **Phase 4** (commit 077d093): bot header shows `🌐 Сфера жизни · Уэйт`; mini-app list
+  and by-slug return `category_display` from JOIN; `core/reply_update.py` accepts
+  category phrase in reply to session card → writes FK directly.
+- **Phase 5** (commit 077d093, migration x4y5z6a7b8c9): `ALTER TABLE sessions DROP COLUMN
+  spread_type` applied; `TripletEntry.spread_type` removed; 1601 tests green.
+
+Client anchor observed working: new session for client with prior `sphere` history
+inherits `category_id=1` without Haiku hint.
 
 ---
 
