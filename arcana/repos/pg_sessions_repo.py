@@ -10,13 +10,13 @@ from datetime import date as _date, datetime
 from decimal import Decimal
 from typing import Optional, List
 
-from sqlalchemy import select, or_
+from sqlalchemy import select, or_, func
 
 from arcana.repos.sessions_repo import (
     TripletEntry, PrevSessionSnippet, SessionSearchResult,
 )
 from arcana.repos.sessions_tables import (
-    sessions, session_outcome,
+    sessions, session_outcome, session_category,
     payment_source as t_payment_source,
     engagement_type,
 )
@@ -104,6 +104,7 @@ def _row_to_triplet(row) -> TripletEntry:
         amount=row.amount or Decimal("0"),
         paid=row.paid or Decimal("0"),
         spread_type=row.spread_type or "",
+        category_id=row.category_id if row.category_id else None,
         area=row.area or "",
         triplet_summary=row.triplet_summary or "",
         session_summary=row.session_summary or "",
@@ -153,6 +154,7 @@ def _select_sessions():
             sessions.c.bottom_card,
             sessions.c.session_name,
             sessions.c.spread_type,
+            sessions.c.category_id,
             sessions.c.area,
             sessions.c.deck,
             sessions.c.occurred_at,
@@ -194,6 +196,7 @@ class PgSessionsRepo:
         outcome_code: str,
         client_id: Optional[str],
         user_notion_id: str,
+        category_id: Optional[int] = None,
     ) -> Optional[str]:
         type_code    = _code_for(_SESSION_TYPE_TO_CODE, session_type)
         pay_code     = _code_for(_PAYMENT_TO_CODE,      payment_source)
@@ -215,6 +218,7 @@ class PgSessionsRepo:
                     bottom_card=bottom_card or None,
                     session_name=session_name or None,
                     spread_type=spread_type or None,
+                    category_id=category_id,
                     area=area or None,
                     deck=deck or None,
                     amount=Decimal(str(amount)) if amount else Decimal("0"),
@@ -515,13 +519,14 @@ class PgSessionsRepo:
         outcome_code: str = "unverified",
         client_id: Optional[str] = None,
         user_notion_id: str = "",
+        category_id: Optional[int] = None,
     ) -> Optional[str]:
         return await asyncio.to_thread(
             self._create_sync,
             title, occurred_at, question, cards, interpretation,
             triplet_summary, bottom_card, session_name, spread_type,
             area, deck, amount, paid, session_type, payment_source,
-            outcome_code, client_id, user_notion_id,
+            outcome_code, client_id, user_notion_id, category_id,
         )
 
     async def find_by_id(self, session_id: str) -> Optional[TripletEntry]:
@@ -626,6 +631,32 @@ class PgSessionsRepo:
     async def set_work_id(self, session_id: str, work_id: str) -> bool:
         """Привязать расклад к Работе (#151): set work_id."""
         return await asyncio.to_thread(self._set_work_id_sync, session_id, work_id)
+
+    def _get_mode_category_for_client_sync(self, client_id: str) -> Optional[int]:
+        """SELECT mode category_id for client — детерминированный якорь (#174)."""
+        cid_int = _resolve_client_id(None, client_id)
+        if cid_int is None:
+            return None
+        with get_engine().connect() as conn:
+            row = conn.execute(
+                select(sessions.c.category_id, func.count().label("n"))
+                .where(sessions.c.client_id == cid_int)
+                .where(sessions.c.category_id.isnot(None))
+                .group_by(sessions.c.category_id)
+                .order_by(func.count().desc())
+                .limit(1)
+            ).fetchone()
+        return row[0] if row else None
+
+    async def get_mode_category_for_client(self, client_id: str) -> Optional[int]:
+        return await asyncio.to_thread(self._get_mode_category_for_client_sync, client_id)
+
+    def _resolve_category_code_sync(self, code: str) -> Optional[int]:
+        with get_engine().connect() as conn:
+            return _resolve(conn, session_category, code)
+
+    async def resolve_category_code(self, code: str) -> Optional[int]:
+        return await asyncio.to_thread(self._resolve_category_code_sync, code)
 
     def _set_props_sync(self, session_id: str, fields: dict) -> bool:
         try:

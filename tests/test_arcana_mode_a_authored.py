@@ -128,6 +128,8 @@ async def test_polish_empty_returns_blank_no_llm():
 def _save_post_patches(summary_mock, rag_mock):
     repo = MagicMock()
     repo.add = AsyncMock(return_value="pg-1")
+    repo.get_mode_category_for_client = AsyncMock(return_value=None)
+    repo.resolve_category_code = AsyncMock(return_value=None)
     return [
         patch.object(sessions, "_repo", repo),
         patch.object(sessions, "_canon_card", lambda c, d: c),
@@ -229,6 +231,8 @@ def _common_handler_patches(fake_ask, rag_safe=None, rag_batch=None):
     repo.set_photo_url = AsyncMock(return_value=True)
     repo.set_session_summary = AsyncMock(return_value=True)
     repo.clear_theme_summary = AsyncMock(return_value=0)
+    repo.get_mode_category_for_client = AsyncMock(return_value=None)
+    repo.resolve_category_code = AsyncMock(return_value=None)
     return [
         patch.object(sessions, "ask_claude", side_effect=fake_ask),
         patch.object(sessions, "get_user_tz", AsyncMock(return_value=3)),

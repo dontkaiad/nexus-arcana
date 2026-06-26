@@ -24,6 +24,7 @@ class TripletEntry:
     amount: Decimal = field(default_factory=lambda: Decimal("0"))
     paid: Decimal = field(default_factory=lambda: Decimal("0"))
     spread_type: str = ""     # Тип расклада
+    category_id: Optional[int] = None  # FK → session_category (phase 2+ of #174)
     area: str = ""            # Область
     triplet_summary: str = "" # Саммари / AI_Summary
     session_summary: str = "" # Саммари СОБЫТИЯ — триплеты одной отправки, #162
@@ -75,6 +76,7 @@ class SessionsRepo:
         session: Optional[str] = None,
         triplet_summary: Optional[str] = None,
         bottom_card: Optional[str] = None,
+        category_id: Optional[int] = None,
     ) -> Optional[str]:
         # Resolve canonical session name for multi-triplet grouping
         session_name = session or ""
@@ -109,6 +111,7 @@ class SessionsRepo:
             outcome_code="unverified",
             client_id=client_id,
             user_notion_id=user_notion_id,
+            category_id=category_id,
         )
 
     async def prev_for_client(
@@ -168,3 +171,11 @@ class SessionsRepo:
         return await _pg_repo().session_group_exists(
             session_name, client_id, user_notion_id
         )
+
+    async def get_mode_category_for_client(self, client_id: str) -> Optional[int]:
+        """Mode category_id across client's sessions — deterministic anchor (#174)."""
+        return await _pg_repo().get_mode_category_for_client(client_id)
+
+    async def resolve_category_code(self, code: str) -> Optional[int]:
+        """Lookup session_category.id by stable code string (#174)."""
+        return await _pg_repo().resolve_category_code(code)

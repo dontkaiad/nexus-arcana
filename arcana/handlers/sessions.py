@@ -477,6 +477,54 @@ def _resolve_session_category(
     return "🌐 Сфера жизни"
 
 
+# Stable code strings for session_category lookup (#174 phase 2)
+# Shape hints (Триплет / Кельтский крест) intentionally absent — shape is dropped.
+CATEGORY_CODE_MAP = {
+    "сфера жизни":             "sphere",
+    "отношения":               "sphere",
+    "работа":                  "sphere",
+    "финансы":                 "sphere",
+    "здоровье":                "sphere",
+    "род":                     "ancestral",
+    "родовое":                 "ancestral",
+    "магические воздействия":  "magical",
+    "диагностика":             "diag_ritual",
+    "диагностика перед ритуалом": "diag_ritual",
+    "диагностика способностей":   "diag_ability",
+}
+
+
+async def _resolve_category(
+    client_id: Optional[str],
+    haiku_hint: Optional[str],
+) -> Optional[int]:
+    """Phase 2 dual-write: client anchor → Haiku hint → None.
+
+    Priority mirrors ADR-0017 (deterministic signal first): if the client
+    has a majority category in their session history, trust that over the
+    Haiku parse. Haiku hint is consulted only when the anchor is absent.
+    """
+    # 1. Client anchor — most common category_id for this client
+    if client_id:
+        anchor = await _repo.get_mode_category_for_client(client_id)
+        if anchor is not None:
+            return anchor
+
+    # 2. Haiku hint — map hint text → code → DB id
+    if haiku_hint:
+        low = haiku_hint.strip().lower()
+        code = CATEGORY_CODE_MAP.get(low)
+        if not code:
+            for k, v in CATEGORY_CODE_MAP.items():
+                if k in low or low in k:
+                    code = v
+                    break
+        if code:
+            return await _repo.resolve_category_code(code)
+
+    return None
+
+
 def _coerce_cards_str(value) -> str:
     """Sonnet может вернуть cards как list или str — приводим к comma-string."""
     if value is None:
@@ -821,6 +869,7 @@ async def _save_and_post_triplet(
     amount: float = 0,
     paid: float = 0,
     self_client_missing: bool = False,
+    category_id: Optional[int] = None,
 ) -> Optional[str]:
     """Унифицированный путь: канон → Sonnet-трактовка уже готова → Haiku-саммари
     → запись в Notion → пост в чат с кнопками [Поправить/Удалить] (+оплата
@@ -866,6 +915,7 @@ async def _save_and_post_triplet(
         session=session_name,
         triplet_summary=triplet_summary or None,
         bottom_card=bottom_en or None,
+        category_id=category_id,
     )
     if not page_id:
         await message.answer("⚠️ Не получилось сохранить расклад.")
@@ -1202,6 +1252,10 @@ async def handle_add_session(
         )
         amount = float(data.get("amount") or 0)
         paid = float(data.get("paid") or 0)
+        category_id = await _resolve_category(
+            client_id,
+            data.get("spread_type") or data.get("session_category"),
+        )
         page_id = await _save_and_post_triplet(
             message,
             tz=tz,
@@ -1221,6 +1275,7 @@ async def handle_add_session(
             amount=amount,
             paid=paid,
             self_client_missing=self_client_missing,
+            category_id=category_id,
         )
 
         # Фото расклада приложено к сообщению → в Cloudinary + на запись (#161).
@@ -1322,6 +1377,8 @@ async def _handle_multi_session(
         len(items),
         all_triplets=all_triplets,
     )
+    # Phase 2 dual-write: compute category_id once for all triplets in the session (#174)
+    session_cat_hint = data.get("session_category") or session_name or None
     deck_raw = data.get("deck") or "Уэйт"
     deck = _match_deck(deck_raw) or "Уэйт"
     parsed_client_name = (data.get("client_name") or "").strip() or None
@@ -1374,6 +1431,8 @@ async def _handle_multi_session(
             if sc:
                 client_id = sc.id
     is_personal = forced_is_personal or not client_name
+    # Phase 2 dual-write: resolve once, reuse for every triplet in the session (#174)
+    session_cat_id: Optional[int] = await _resolve_category(client_id, session_cat_hint)
 
     # Существовала ли ТЕМА (session_name+client) ДО этой отправки? Если да —
     # после сохранения обнулим её theme_summary (кросс-дневная сводка устарела),
@@ -1499,6 +1558,7 @@ async def _handle_multi_session(
                 session=session_name or None,
                 triplet_summary=t_summary or None,
                 bottom_card=bottom_en or None,
+                category_id=session_cat_id,
             )
             if page_id:
                 saved_n += 1
@@ -2102,6 +2162,8 @@ async def handle_tarot_photo(message: Message, user_notion_id: str = "") -> None
         self_client_missing = not bool(self_client_id)
 
         tz = timezone(timedelta(hours=tz_offset))
+        # Vision: no Haiku category hint — anchor on self-client history or NULL (#174)
+        vision_cat_id = await _resolve_category(self_client_id, None)
         await _save_and_post_triplet(
             message,
             tz=tz,
@@ -2120,6 +2182,7 @@ async def handle_tarot_photo(message: Message, user_notion_id: str = "") -> None
             amount=0.0,
             paid=0.0,
             self_client_missing=self_client_missing,
+            category_id=vision_cat_id,
         )
 
     except Exception as e:
