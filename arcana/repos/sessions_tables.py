@@ -1,6 +1,6 @@
 """arcana/repos/sessions_tables.py — SQLAlchemy Core table definitions for the sessions slice.
 
-Mirrors migration a1f2e3d4c5b6 exactly.
+Mirrors migration a1f2e3d4c5b6 + w3x4y5z6a7b8 exactly.
 Shares payment_source and engagement_type lookup tables with rituals.
 """
 from __future__ import annotations
@@ -15,6 +15,18 @@ from arcana.repos.rituals_tables import (
     metadata,
     payment_source,
     engagement_type,
+)
+
+# ── Session-specific lookup ────────────────────────────────────────────────────
+
+session_category = Table(
+    "session_category",
+    metadata,
+    Column("id",    SmallInteger, primary_key=True, autoincrement=True),
+    Column("code",  Text,         nullable=False, unique=True),
+    Column("emoji", Text),
+    Column("label", Text,         nullable=False),
+    Column("sort",  SmallInteger, server_default=text("0")),
 )
 
 session_outcome = Table(
@@ -43,6 +55,7 @@ sessions = Table(
     Column("bottom_card",     Text),
     Column("session_name",    Text),
     Column("spread_type",     Text),
+    Column("category_id",     SmallInteger, ForeignKey("session_category.id")),
     Column("area",            Text),
     Column("deck",            Text),
 
