@@ -724,7 +724,7 @@ async def _rag_index_safe(
     occurred_at: Optional[str],
 ) -> None:
     """RAG-AB индексация триплета после сохранения. Провал НЕ роняет save —
-    данные уже в PG, Qdrant вторичен."""
+    данные уже в PG (pgvector), RAG вторичен."""
     if not page_id:
         return
     try:
@@ -753,7 +753,7 @@ async def _rag_index_batch_safe(items: List[dict]) -> None:
 
 
 async def _rag_delete_safe(triplet_id: Optional[str]) -> None:
-    """RAG-AB: убрать вектор триплета из Qdrant (при удалении расклада). Провал
+    """RAG-AB: убрать вектор триплета из pgvector (при удалении расклада). Провал
     НЕ роняет операцию — PG источник истины (#166)."""
     if not triplet_id:
         return
@@ -1698,7 +1698,7 @@ async def cb_triplet_remove_yes(call: CallbackQuery) -> None:
     if not ok:
         await call.message.edit_text("⚠️ Не удалось удалить триплет.")
         return
-    # RAG-AB: убрать вектор из Qdrant — soft-delete оставляет строку в PG, но
+    # RAG-AB: убрать вектор из pgvector — soft-delete оставляет строку в PG, но
     # иначе search отдавал бы удалённый триплет (#166). Провал не роняет удаление.
     await _rag_delete_safe(entry.id)
     # Триплет удалён → общее саммари сессии И кросс-дневная сводка темы устарели:

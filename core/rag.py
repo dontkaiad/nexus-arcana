@@ -312,7 +312,7 @@ def search_triplets(
         for r in rows:
             d = dict(r)
             sid = d.pop("session_id", None)
-            # контракт Qdrant-payload: triplet_id (строка), как раньше
+            # triplet_id (строка) — ID в pgvector-индексе
             d["triplet_id"] = str(sid) if sid is not None else None
             if d.get("occurred_at") is not None:
                 d["occurred_at"] = str(d["occurred_at"])
