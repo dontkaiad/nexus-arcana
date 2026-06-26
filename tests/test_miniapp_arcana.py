@@ -164,7 +164,7 @@ def _make_client(cid, name, *, contact="", request="", notes="",
 
 
 def _make_triplet(sid, question, *, client_id=None, date=None, amount=0, paid=0,
-                  outcome="unverified", area="", spread_type="", cards="",
+                  outcome="unverified", area="", category_display="", cards="",
                   interpretation="", barter_what="", session_name="",
                   deck="Уэйт", photo_url=None, bottom_card="", triplet_summary=""):
     from arcana.repos.sessions_repo import TripletEntry
@@ -174,7 +174,7 @@ def _make_triplet(sid, question, *, client_id=None, date=None, amount=0, paid=0,
         deck=deck, session_name=session_name, client_id=client_id,
         date=date or "", outcome=outcome,
         amount=Decimal(str(amount)), paid=Decimal(str(paid)),
-        spread_type=spread_type, area=area, barter_what=barter_what,
+        category_display=category_display, area=area, barter_what=barter_what,
         bottom_card=bottom_card, photo_url=photo_url,
         triplet_summary=triplet_summary,
     )
@@ -247,7 +247,7 @@ def test_arcana_today_happy(client):
     sessions_pg = [
         _make_triplet("s_today", "Что думает Вадим",
                       client_id="c1", date=today_iso, area="Отношения",
-                      spread_type="🗝️ Кельтский крест", outcome="unverified"),
+                      category_display="🌐 Сфера жизни", outcome="unverified"),
         _make_triplet("s_old_pending", "Стар Q",
                       client_id="c1",
                       date=(today - timedelta(days=60)).isoformat(),
@@ -414,7 +414,7 @@ def test_arcana_session_detail_parses_cards_and_bottom(client):
         "sX", "Планы Вадима",
         client_id="c1", date=today.isoformat(),
         area="Отношения", deck="Dark Wood Tarot",
-        spread_type="🗝️ Кельтский крест",
+        category_display="🌐 Сфера жизни",
         cards="1. Суть — Туз Мечей\n2. Препятствие — Башня\n3. Совет — Звезда",
         interpretation="Расклад указывает на...",
         bottom_card="Король Кубков",

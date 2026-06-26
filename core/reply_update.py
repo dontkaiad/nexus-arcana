@@ -36,12 +36,19 @@ _SESSION_REPLY_SYSTEM = (
     '{"client_name": "имя клиента если расклад привязывают к нему или null", '
     '"question": "новый/уточнённый вопрос или null", '
     '"area": "Отношения|Финансы|Работа|Здоровье|Род|Общая ситуация или null", '
+    '"category": "сфера жизни|родовой узел|магические воздействия|диагностика перед ритуалом|диагностика способностей или null", '
     '"notes": "заметки или null"}\n\n'
     "Примеры client_name:\n"
     "- 'это для Маши' → client_name: 'Маша'\n"
     "- 'расклад Вадиму' → client_name: 'Вадим'\n"
     "- 'привязать к Ане' → client_name: 'Аня'\n"
     "- 'сделал личный' → client_name: null (это не имя)\n\n"
+    "Примеры category:\n"
+    "- 'сфера', 'жизненная сфера' → 'сфера жизни'\n"
+    "- 'родовой', 'род' → 'родовой узел'\n"
+    "- 'магия', 'воздействия', 'порча' → 'магические воздействия'\n"
+    "- 'перед ритуалом', 'диаг ритуал' → 'диагностика перед ритуалом'\n"
+    "- 'способности', 'диаг способ' → 'диагностика способностей'\n"
     "Если поле не упоминается — null."
 )
 
@@ -100,8 +107,9 @@ _RITUAL_FIELDS = {
 }
 
 _SESSION_FIELDS = {
-    "question": ("Тема",    "title"),
-    "area":     ("Область", "multi_select"),
+    "question": ("Тема",      "title"),
+    "area":     ("Область",   "multi_select"),
+    "category": ("Категория", "category_code"),
     "notes":    ("Трактовка_append", "append_text"),
 }
 
@@ -314,6 +322,12 @@ async def _apply_session(
     if updates.get("notes"):
         fields["append_interpretation"] = updates["notes"]
         applied["Трактовка"] = f"+ {updates['notes']}"
+    if updates.get("category"):
+        from arcana.handlers.sessions import CATEGORY_CODE_MAP
+        cat_code = CATEGORY_CODE_MAP.get(updates["category"].strip().lower())
+        if cat_code:
+            fields["category_code"] = cat_code
+            applied["Категория"] = cat_code
 
     cn = updates.get("client_name")
     if cn:

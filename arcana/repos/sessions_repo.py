@@ -23,8 +23,8 @@ class TripletEntry:
     outcome: str = ""         # PG code: yes/no/partial/unverified
     amount: Decimal = field(default_factory=lambda: Decimal("0"))
     paid: Decimal = field(default_factory=lambda: Decimal("0"))
-    spread_type: str = ""     # Тип расклада
-    category_id: Optional[int] = None  # FK → session_category (phase 2+ of #174)
+    category_id: Optional[int] = None  # FK → session_category (#174)
+    category_display: str = ""        # emoji + label из session_category, пустая если NULL
     area: str = ""            # Область
     triplet_summary: str = "" # Саммари / AI_Summary
     session_summary: str = "" # Саммари СОБЫТИЯ — триплеты одной отправки, #162
@@ -46,7 +46,7 @@ class PrevSessionSnippet:
 class SessionSearchResult:
     date: str
     theme: str
-    spread_name: str
+    category_name: str   # category_display (was spread_name) (#174)
     area_name: str
     cards_short: str
 
@@ -60,7 +60,6 @@ class SessionsRepo:
     async def add(
         self,
         date: str,
-        spread_type: str = "",
         question: str = "",
         cards: str = "",
         interpretation: str = "",
@@ -93,7 +92,7 @@ class SessionsRepo:
                 pass
 
         return await _pg_repo().create(
-            title=title or question or spread_type or "Сеанс",
+            title=title or question or "Сеанс",
             occurred_at=occurred_at,
             question=question,
             cards=cards,
@@ -101,7 +100,6 @@ class SessionsRepo:
             triplet_summary=triplet_summary or "",
             bottom_card=bottom_card or "",
             session_name=session_name,
-            spread_type=spread_type,
             area=area or "",
             deck=deck or "",
             amount=amount,
@@ -172,8 +170,8 @@ class SessionsRepo:
             session_name, client_id, user_notion_id
         )
 
-    async def get_mode_category_for_client(self, client_id: str) -> Optional[int]:
-        """Mode category_id across client's sessions — deterministic anchor (#174)."""
+    async def get_mode_category_for_client(self, client_id: str):
+        """Mode (category_id, category_code) for client — deterministic anchor (#174)."""
         return await _pg_repo().get_mode_category_for_client(client_id)
 
     async def resolve_category_code(self, code: str) -> Optional[int]:

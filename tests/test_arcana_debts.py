@@ -46,7 +46,7 @@ def _pg_triplet(sid, question, cid, sum_=3000, paid_=0):
         deck="Уэйт", session_name="", client_id=cid,
         date="2026-04-10", outcome="unverified",
         amount=Decimal(str(sum_)), paid=Decimal(str(paid_)),
-        spread_type="", area="", barter_what="", bottom_card="", photo_url=None,
+        category_display="", area="", barter_what="", bottom_card="", photo_url=None,
     )
 
 

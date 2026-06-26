@@ -91,6 +91,9 @@ def _row_to_triplet(row) -> TripletEntry:
     cid = str(row.client_id) if row.client_id else None
     d = row.occurred_at
     date_str = d.strftime("%Y-%m-%d") if d else ""
+    cat_emoji = getattr(row, "category_emoji", None) or ""
+    cat_label = getattr(row, "category_label_col", None) or ""
+    category_display = f"{cat_emoji} {cat_label}".strip() if cat_label else ""
     return TripletEntry(
         id=str(row.id),
         question=row.question or row.title or "",
@@ -103,8 +106,8 @@ def _row_to_triplet(row) -> TripletEntry:
         outcome=row.outcome_code or "unverified",
         amount=row.amount or Decimal("0"),
         paid=row.paid or Decimal("0"),
-        spread_type=row.spread_type or "",
         category_id=row.category_id if row.category_id else None,
+        category_display=category_display,
         area=row.area or "",
         triplet_summary=row.triplet_summary or "",
         session_summary=row.session_summary or "",
@@ -131,10 +134,13 @@ def _row_to_search_result(row) -> SessionSearchResult:
     d = row.occurred_at
     date_str = d.strftime("%Y-%m-%d") if d else ""
     cards = row.cards or ""
+    cat_emoji = getattr(row, "category_emoji", None) or ""
+    cat_label = getattr(row, "category_label_col", None) or ""
+    category_display = f"{cat_emoji} {cat_label}".strip() if cat_label else ""
     return SessionSearchResult(
         date=date_str,
         theme=row.question or row.title or "—",
-        spread_name=row.spread_type or "",
+        category_name=category_display,
         area_name=row.area or "",
         cards_short=(cards[:80] + "…") if len(cards) > 80 else cards,
     )
@@ -153,7 +159,6 @@ def _select_sessions():
             sessions.c.theme_summary,
             sessions.c.bottom_card,
             sessions.c.session_name,
-            sessions.c.spread_type,
             sessions.c.category_id,
             sessions.c.area,
             sessions.c.deck,
@@ -165,8 +170,11 @@ def _select_sessions():
             sessions.c.client_id,
             sessions.c.user_notion_id,
             session_outcome.c.code.label("outcome_code"),
+            session_category.c.emoji.label("category_emoji"),
+            session_category.c.label.label("category_label_col"),
         )
         .outerjoin(session_outcome, sessions.c.outcome_id == session_outcome.c.id)
+        .outerjoin(session_category, sessions.c.category_id == session_category.c.id)
         .where(sessions.c.archived == False)
         .order_by(sessions.c.occurred_at.desc().nullslast())
     )
@@ -186,7 +194,6 @@ class PgSessionsRepo:
         triplet_summary: str,
         bottom_card: str,
         session_name: str,
-        spread_type: str,
         area: str,
         deck: str,
         amount: float,
@@ -209,7 +216,7 @@ class PgSessionsRepo:
 
             row = conn.execute(
                 sessions.insert().values(
-                    title=title or question or spread_type or "Сеанс",
+                    title=title or question or "Сеанс",
                     occurred_at=occurred_at,
                     question=question or None,
                     cards=cards or None,
@@ -217,7 +224,6 @@ class PgSessionsRepo:
                     triplet_summary=triplet_summary[:2000] if triplet_summary else None,
                     bottom_card=bottom_card or None,
                     session_name=session_name or None,
-                    spread_type=spread_type or None,
                     category_id=category_id,
                     area=area or None,
                     deck=deck or None,
@@ -509,7 +515,6 @@ class PgSessionsRepo:
         triplet_summary: str = "",
         bottom_card: str = "",
         session_name: str = "",
-        spread_type: str = "",
         area: str = "",
         deck: str = "",
         amount: float = 0,
@@ -524,7 +529,7 @@ class PgSessionsRepo:
         return await asyncio.to_thread(
             self._create_sync,
             title, occurred_at, question, cards, interpretation,
-            triplet_summary, bottom_card, session_name, spread_type,
+            triplet_summary, bottom_card, session_name,
             area, deck, amount, paid, session_type, payment_source,
             outcome_code, client_id, user_notion_id, category_id,
         )
@@ -632,23 +637,32 @@ class PgSessionsRepo:
         """Привязать расклад к Работе (#151): set work_id."""
         return await asyncio.to_thread(self._set_work_id_sync, session_id, work_id)
 
-    def _get_mode_category_for_client_sync(self, client_id: str) -> Optional[int]:
-        """SELECT mode category_id for client — детерминированный якорь (#174)."""
+    def _get_mode_category_for_client_sync(self, client_id: str):
+        """SELECT mode (category_id, category_code) for client — anchor (#174)."""
         cid_int = _resolve_client_id(None, client_id)
         if cid_int is None:
-            return None
+            return (None, None)
         with get_engine().connect() as conn:
             row = conn.execute(
-                select(sessions.c.category_id, func.count().label("n"))
+                select(
+                    sessions.c.category_id,
+                    session_category.c.code,
+                    func.count().label("n"),
+                )
+                .outerjoin(
+                    session_category,
+                    sessions.c.category_id == session_category.c.id,
+                )
                 .where(sessions.c.client_id == cid_int)
                 .where(sessions.c.category_id.isnot(None))
-                .group_by(sessions.c.category_id)
+                .group_by(sessions.c.category_id, session_category.c.code)
                 .order_by(func.count().desc())
                 .limit(1)
             ).fetchone()
-        return row[0] if row else None
+        return (row[0], row[1]) if row else (None, None)
 
-    async def get_mode_category_for_client(self, client_id: str) -> Optional[int]:
+    async def get_mode_category_for_client(self, client_id: str):
+        """Returns (category_id, category_code) tuple (#174)."""
         return await asyncio.to_thread(self._get_mode_category_for_client_sync, client_id)
 
     def _resolve_category_code_sync(self, code: str) -> Optional[int]:
@@ -681,6 +695,11 @@ class PgSessionsRepo:
                 tid = _resolve(conn, engagement_type, tc)
                 if tid:
                     vals["type_id"] = tid
+            cat_code = fields.get("category_code")
+            if cat_code:
+                cat_id = _resolve(conn, session_category, cat_code)
+                if cat_id:
+                    vals["category_id"] = cat_id
             app = fields.get("append_interpretation")
             if app:
                 row = conn.execute(

@@ -8,7 +8,6 @@ import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 from arcana.handlers.sessions import (
     _coerce_cards_str,
-    _resolve_session_category,
     SessionParseError,
     PARSE_HELP_TEXT,
 )
@@ -29,40 +28,6 @@ def test_coerce_cards_none():
 def test_coerce_cards_dirty_list():
     # Пустые элементы и пробелы.
     assert _coerce_cards_str(["шут", "", "  ", "маг"]) == "шут, маг"
-
-
-def test_resolve_category_by_name():
-    # Имя человека → Сфера жизни (если контекст не явный)
-    assert "🌐" in _resolve_session_category("Вадим", 3)
-    assert "🌐" in _resolve_session_category("Маша", 2)
-
-
-def test_resolve_category_work():
-    assert _resolve_session_category("Работа", 4) in (
-        "🌐 Сфера жизни",  # имя «работа» матчится по подстроке к «работа» в map
-    )
-
-
-def test_resolve_category_solo_default():
-    assert _resolve_session_category(None, 1) == "🔺 Триплет"
-
-
-def test_resolve_category_multi_default():
-    assert _resolve_session_category(None, 3) == "🌐 Сфера жизни"
-
-
-def test_resolve_category_all_triplets_default():
-    # Multi-session, но все записи — триплеты (3 карты). Без явной категории
-    # дефолт «🔺 Триплет», не «🌐 Сфера жизни». См. #83.
-    assert _resolve_session_category(None, 9, all_triplets=True) == "🔺 Триплет"
-
-
-def test_resolve_category_explicit_overrides_all_triplets():
-    # Если Haiku явно вернула «Магические воздействия» — она важнее
-    # all_triplets=True.
-    assert "Магические" in _resolve_session_category(
-        "Магические воздействия", 9, all_triplets=True
-    )
 
 
 def test_session_parse_error_class():

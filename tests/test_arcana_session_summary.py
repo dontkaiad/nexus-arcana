@@ -44,7 +44,7 @@ def _pg_triplet(pid, sname, client_id="c-1", topic="Q", session_summary="",
         interpretation="", deck="Уэйт", session_name=sname, client_id=client_id,
         date="2026-05-01", outcome="unverified",
         amount=Decimal("0"), paid=Decimal("0"),
-        spread_type="", area="", triplet_summary="кратко",
+        category_display="", area="", triplet_summary="кратко",
         session_summary=session_summary, theme_summary=theme_summary,
         barter_what="", bottom_card="", photo_url=None,
     )

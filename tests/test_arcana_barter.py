@@ -109,7 +109,7 @@ def _make_pg_triplet(sid, question, cid, dt, barter_what="", amount=3000):
         deck="Уэйт", session_name="", client_id=cid,
         date=dt, outcome="unverified",
         amount=Decimal(str(amount)), paid=Decimal("0"),
-        spread_type="", area="", barter_what=barter_what,
+        category_display="", area="", barter_what=barter_what,
         bottom_card="", photo_url=None,
     )
 

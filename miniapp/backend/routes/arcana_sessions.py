@@ -151,7 +151,7 @@ def _serialize_triplet_pg(
         "area": [t.area] if t.area else [],
         "deck": deck_raw,
         "deck_id": deck_id,
-        "type": t.spread_type or None,
+        "type": t.category_display or None,
         "date": date_local.isoformat() if date_local else None,
         "cards_raw": t.cards or None,
         "cards": cards,
@@ -252,9 +252,10 @@ async def list_sessions(
 
         ru_title = sname or first.question or "—"
         first_q = first.question or ""
-        category = first.spread_type or ("🌐 Сфера жизни" if not is_solo else "🔺 Триплет")
+        category = first.category_display or None
 
         group_has_barter = any(bool(t.barter_what) for t in triplets)
+        unique_areas = list(dict.fromkeys(t.area for t in triplets if t.area))
 
         done_label = _OUTCOME_DONE_LABEL.get(first.outcome or "unverified", "⏳ Не проверено")
 
@@ -270,6 +271,7 @@ async def list_sessions(
             "client_type_full": ctype_full,
             "has_barter": group_has_barter,
             "type": "",
+            "areas": unique_areas,
             "decks": decks,
             "first_date": first_date_local.isoformat() if first_date_local else None,
             "last_date": last_date_local.isoformat() if last_date_local else None,
@@ -326,6 +328,7 @@ async def session_by_slug(
                 "client": triplet_data["client"],
                 "client_id": triplet_data["client_id"],
                 "type": "",
+                "areas": triplet_data.get("area", []),
                 "decks": [triplet_data["deck"]] if triplet_data["deck"] else [],
                 "first_date": triplet_data["date"],
                 "summary": None,
@@ -351,7 +354,7 @@ async def session_by_slug(
     cid = first.client_id
 
     client_name = name_map.get(cid, "Личный") if cid else "Личный"
-    category = first.spread_type or "🌐 Сфера жизни"
+    category = first.category_display or None
     decks: List[str] = []
     for t in matching:
         if t.deck and t.deck not in decks:
@@ -378,6 +381,7 @@ async def session_by_slug(
         {"date": d, "summary": _by_day[d] or None} for d in sorted(_by_day)
     ]
     session_photo = next((t["photo_url"] for t in triplets if t.get("photo_url")), None)
+    slug_areas = list(dict.fromkeys(t.area for t in matching if t.area))
 
     return {
         "slug": slug,
@@ -388,6 +392,7 @@ async def session_by_slug(
         "client": client_name,
         "client_id": cid,
         "type": "",
+        "areas": slug_areas,
         "decks": decks,
         "first_date": first_date_local.isoformat() if first_date_local else None,
         "summary": theme_summary,

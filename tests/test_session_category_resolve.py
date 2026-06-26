@@ -1,9 +1,10 @@
-"""tests/test_session_category_resolve.py — unit tests for phase 2 of #174.
+"""tests/test_session_category_resolve.py — unit tests for phases 2+4 of #174.
 
 Tests cover:
 - CATEGORY_CODE_MAP exact + substring matching
-- _resolve_category priority: client anchor → haiku hint → None
-- Shape strings (триплет / кельтский крест) produce None (not stored)
+- _resolve_category priority: client anchor → haiku hint → (None, "")
+- _resolve_category returns (category_id, display_label) tuple (#174 phase 4)
+- Shape strings (триплет / кельтский крест) produce (None, "") (not stored)
 """
 import pytest
 from unittest.mock import AsyncMock, patch, MagicMock
@@ -13,8 +14,12 @@ from unittest.mock import AsyncMock, patch, MagicMock
 # Helpers — mock _repo so we don't touch the DB
 # ──────────────────────────────────────────────────────────────────────────────
 
-def _make_repo(*, anchor=None, resolve_code=None):
-    """Return a mock SessionsRepo with controllable responses."""
+def _make_repo(*, anchor=(None, None), resolve_code=None):
+    """Return a mock SessionsRepo with controllable responses.
+
+    anchor: (category_id, category_code) tuple returned by get_mode_category_for_client.
+    resolve_code: int returned by resolve_category_code.
+    """
     repo = MagicMock()
     repo.get_mode_category_for_client = AsyncMock(return_value=anchor)
     repo.resolve_category_code = AsyncMock(return_value=resolve_code)
@@ -48,67 +53,70 @@ def test_category_code_map_no_shape_keys():
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# _resolve_category tests
+# _resolve_category tests — returns (id, label) tuple (#174 phase 4)
 # ──────────────────────────────────────────────────────────────────────────────
 
 @pytest.mark.asyncio
 async def test_resolve_category_client_anchor_wins():
-    """Client anchor (id=3) is returned even when haiku hint would map differently."""
-    repo = _make_repo(anchor=3, resolve_code=1)
+    """Client anchor (id=3, code='magical') → label from CATEGORY_CODE_DISPLAY."""
+    repo = _make_repo(anchor=(3, "magical"), resolve_code=1)
     with patch("arcana.handlers.sessions._repo", repo):
         from arcana.handlers.sessions import _resolve_category
-        result = await _resolve_category("client-abc", "сфера жизни")
-    assert result == 3
+        cat_id, label = await _resolve_category("client-abc", "сфера жизни")
+    assert cat_id == 3
+    assert "Магические" in label
     repo.get_mode_category_for_client.assert_awaited_once_with("client-abc")
     repo.resolve_category_code.assert_not_awaited()
 
 
 @pytest.mark.asyncio
 async def test_resolve_category_haiku_hint_fallback():
-    """When anchor is absent, haiku hint resolves via code lookup."""
-    repo = _make_repo(anchor=None, resolve_code=2)
+    """When anchor absent, haiku hint resolves via code lookup."""
+    repo = _make_repo(anchor=(None, None), resolve_code=2)
     with patch("arcana.handlers.sessions._repo", repo):
         from arcana.handlers.sessions import _resolve_category
-        result = await _resolve_category("client-xyz", "родовое")
-    assert result == 2
+        cat_id, label = await _resolve_category("client-xyz", "родовое")
+    assert cat_id == 2
+    assert "Родовой" in label
     repo.resolve_category_code.assert_awaited_once_with("ancestral")
 
 
 @pytest.mark.asyncio
 async def test_resolve_category_no_client_haiku_hint():
     """No client_id — haiku hint still works."""
-    repo = _make_repo(anchor=None, resolve_code=3)
+    repo = _make_repo(anchor=(None, None), resolve_code=3)
     with patch("arcana.handlers.sessions._repo", repo):
         from arcana.handlers.sessions import _resolve_category
-        result = await _resolve_category(None, "магические воздействия")
-    assert result == 3
+        cat_id, label = await _resolve_category(None, "магические воздействия")
+    assert cat_id == 3
+    assert "Магические" in label
     repo.get_mode_category_for_client.assert_not_awaited()
     repo.resolve_category_code.assert_awaited_once_with("magical")
 
 
 @pytest.mark.asyncio
 async def test_resolve_category_shape_hint_returns_none():
-    """Shape strings like 'триплет' produce None — not stored in phase 2."""
-    repo = _make_repo(anchor=None, resolve_code=None)
+    """Shape strings like 'триплет' produce (None, '') — not stored."""
+    repo = _make_repo(anchor=(None, None), resolve_code=None)
     with patch("arcana.handlers.sessions._repo", repo):
         from arcana.handlers.sessions import _resolve_category
         result_triplet = await _resolve_category(None, "триплет")
         result_cross = await _resolve_category(None, "🔺 Триплет")
         result_celtic = await _resolve_category(None, "кельтский крест")
-    assert result_triplet is None
-    assert result_cross is None
-    assert result_celtic is None
+    assert result_triplet == (None, "")
+    assert result_cross == (None, "")
+    assert result_celtic == (None, "")
     repo.resolve_category_code.assert_not_awaited()
 
 
 @pytest.mark.asyncio
 async def test_resolve_category_no_client_no_hint_returns_none():
-    """Vision path with no history — category_id stays NULL."""
-    repo = _make_repo(anchor=None, resolve_code=None)
+    """Vision path with no history — category_id stays NULL, label empty."""
+    repo = _make_repo(anchor=(None, None), resolve_code=None)
     with patch("arcana.handlers.sessions._repo", repo):
         from arcana.handlers.sessions import _resolve_category
         result = await _resolve_category(None, None)
-    assert result is None
+    assert result == (None, "")
     repo.get_mode_category_for_client.assert_not_awaited()
     repo.resolve_category_code.assert_not_awaited()
 
@@ -116,10 +124,9 @@ async def test_resolve_category_no_client_no_hint_returns_none():
 @pytest.mark.asyncio
 async def test_resolve_category_substring_hint():
     """Haiku may return 'родовой узел' — substring match finds 'ancestral'."""
-    repo = _make_repo(anchor=None, resolve_code=2)
+    repo = _make_repo(anchor=(None, None), resolve_code=2)
     with patch("arcana.handlers.sessions._repo", repo):
         from arcana.handlers.sessions import _resolve_category
-        result = await _resolve_category(None, "родовой узел")
-    # 'родовое' is in CATEGORY_CODE_MAP and 'родовое' is substring of 'родовой узел'
-    # OR 'родовой узел' contains 'род' — either way code='ancestral'
-    assert result == 2
+        cat_id, label = await _resolve_category(None, "родовой узел")
+    assert cat_id == 2
+    assert "Родовой" in label

@@ -35,23 +35,13 @@ _client_repo = ClientsRepo()
 
 # ────────────────────────── Справочники ────────────────────────────────────
 
-SPREAD_MAP = {
-    "триплет":                     "🔺 Триплет",
-    "3 карты":                     "🔺 Триплет",
-    "три карты":                   "🔺 Триплет",
-    "сфера":                       "🌐 Сфера жизни",
-    "сфера жизни":                 "🌐 Сфера жизни",
-    "кельтский":                   "✝️ Кельтский крест",
-    "кельтский крест":             "✝️ Кельтский крест",
-    "celtic cross":                "✝️ Кельтский крест",
-    "воздействия":                 "⚡ Магические воздействия",
-    "магические воздействия":      "⚡ Магические воздействия",
-    "диагностика перед ритуалом":  "🔍 Диагностика перед ритуалом",
-    "диагностика":                 "🔍 Диагностика перед ритуалом",
-    "способности":                 "✨ Диагностика способностей",
-    "диагностика способностей":    "✨ Диагностика способностей",
-    "родовой":                     "🌳 Родовой узел",
-    "родовой узел":                "🌳 Родовой узел",
+# Display labels per category_code — single source of truth (#174 phase 5).
+CATEGORY_CODE_DISPLAY = {
+    "sphere":       "🌐 Сфера жизни",
+    "ancestral":    "🌳 Родовой узел",
+    "magical":      "⚡ Магические воздействия",
+    "diag_ritual":  "🔍 Диагностика перед ритуалом",
+    "diag_ability": "✨ Диагностика способностей",
 }
 
 PAYMENT_SOURCE_MAP = {
@@ -73,18 +63,6 @@ DECK_MAP = {
 
 AREA_VALUES = {"Отношения", "Финансы", "Работа", "Здоровье", "Род", "Общая ситуация"}
 AREA_DEFAULT = "Общая ситуация"
-
-
-def _match_spread(text: str) -> str:
-    if not text:
-        return ""
-    low = text.strip().lower()
-    if low in SPREAD_MAP:
-        return SPREAD_MAP[low]
-    for key, value in SPREAD_MAP.items():
-        if key in low or low in key:
-            return value
-    return text.strip()
 
 
 def _match_deck(text: str) -> str:
@@ -438,47 +416,8 @@ VISION_SYSTEM = (
 
 # ────────────────────────── Вспомогательные ────────────────────────────────
 
-# Маппинг session_category из парсера → значение поля «Тип расклада» в Notion
-SESSION_CATEGORY_MAP = {
-    "сфера жизни":             "🌐 Сфера жизни",
-    "отношения":               "🌐 Сфера жизни",
-    "работа":                  "🌐 Сфера жизни",
-    "финансы":                 "🌐 Сфера жизни",
-    "здоровье":                "🌐 Сфера жизни",
-    "род":                     "🌳 Родовой узел",
-    "родовое":                 "🌳 Родовой узел",
-    "магические воздействия":  "⚡ Магические воздействия",
-    "диагностика":             "🔍 Диагностика перед ритуалом",
-    "кельтский крест":         "✝️ Кельтский крест",
-    "триплет":                 "🔺 Триплет",
-}
-
-
-def _resolve_session_category(
-    name: Optional[str], items_count: int, *, all_triplets: bool = False,
-) -> str:
-    """Категория расклада по названию темы.
-
-    Дефолт:
-    - одиночный (items_count <= 1) → 🔺 Триплет
-    - multi-session где КАЖДАЯ запись — триплет (3 карты + дно), но Haiku
-      не дала явной категории → 🔺 Триплет (через all_triplets=True). См. #83
-    - иначе multi-session без явной категории → 🌐 Сфера жизни
-    """
-    if name:
-        low = name.strip().lower()
-        if low in SESSION_CATEGORY_MAP:
-            return SESSION_CATEGORY_MAP[low]
-        for k, v in SESSION_CATEGORY_MAP.items():
-            if k in low or low in k:
-                return v
-    if items_count <= 1 or all_triplets:
-        return "🔺 Триплет"
-    return "🌐 Сфера жизни"
-
-
-# Stable code strings for session_category lookup (#174 phase 2)
-# Shape hints (Триплет / Кельтский крест) intentionally absent — shape is dropped.
+# Stable code strings for session_category lookup.
+# Shape hints (Триплет / Кельтский крест) intentionally absent — shape is dropped (#174).
 CATEGORY_CODE_MAP = {
     "сфера жизни":             "sphere",
     "отношения":               "sphere",
@@ -497,18 +436,19 @@ CATEGORY_CODE_MAP = {
 async def _resolve_category(
     client_id: Optional[str],
     haiku_hint: Optional[str],
-) -> Optional[int]:
-    """Phase 2 dual-write: client anchor → Haiku hint → None.
+):
+    """Client anchor → Haiku hint → (None, "").
 
-    Priority mirrors ADR-0017 (deterministic signal first): if the client
-    has a majority category in their session history, trust that over the
-    Haiku parse. Haiku hint is consulted only when the anchor is absent.
+    Returns (category_id, display_label). Priority: deterministic anchor first
+    (ADR-0017), Haiku hint as fallback. Both paths derive label from
+    CATEGORY_CODE_DISPLAY so display is always in sync with the DB row (#174).
     """
-    # 1. Client anchor — most common category_id for this client
+    # 1. Client anchor — mode category_id + code from client's session history
     if client_id:
-        anchor = await _repo.get_mode_category_for_client(client_id)
-        if anchor is not None:
-            return anchor
+        anchor_id, anchor_code = await _repo.get_mode_category_for_client(client_id)
+        if anchor_id is not None:
+            label = CATEGORY_CODE_DISPLAY.get(anchor_code or "", "")
+            return (anchor_id, label)
 
     # 2. Haiku hint — map hint text → code → DB id
     if haiku_hint:
@@ -520,9 +460,11 @@ async def _resolve_category(
                     code = v
                     break
         if code:
-            return await _repo.resolve_category_code(code)
+            cat_id = await _repo.resolve_category_code(code)
+            label = CATEGORY_CODE_DISPLAY.get(code, "")
+            return (cat_id, label)
 
-    return None
+    return (None, "")
 
 
 def _coerce_cards_str(value) -> str:
@@ -857,7 +799,6 @@ async def _save_and_post_triplet(
     client_id: Optional[str],
     client_name: Optional[str],
     deck: str,
-    spread_type: str,
     question: str,
     cards_text: str,
     bottom_card: str,
@@ -870,6 +811,7 @@ async def _save_and_post_triplet(
     paid: float = 0,
     self_client_missing: bool = False,
     category_id: Optional[int] = None,
+    category_label: str = "",
 ) -> Optional[str]:
     """Унифицированный путь: канон → Sonnet-трактовка уже готова → Haiku-саммари
     → запись в Notion → пост в чат с кнопками [Поправить/Удалить] (+оплата
@@ -899,7 +841,6 @@ async def _save_and_post_triplet(
 
     page_id = await _repo.add(
         date=_now_iso(tz),
-        spread_type=spread_type,
         title=question,
         question=question,
         cards=cards_en,
@@ -952,9 +893,12 @@ async def _save_and_post_triplet(
     interp_tg = html_to_telegram(interpretation)
     cards_line = ", ".join(c.strip() for c in cards_text.split(",") if c.strip())
     head_lines = [f"<b>{html.escape(question or 'Расклад')}</b>"]
-    head_lines.append(
-        f"🃏 {html.escape(spread_type or 'Триплет')} · {html.escape(deck or 'Уэйт')}"
+    _cat_deck = (
+        f"🃏 {html.escape(category_label)} · {html.escape(deck or 'Уэйт')}"
+        if category_label else
+        f"🃏 {html.escape(deck or 'Уэйт')}"
     )
+    head_lines.append(_cat_deck)
     head_lines.append(
         f"👤 {html.escape(client_name)}" if client_name else "🔮 Личный"
     )
@@ -1243,8 +1187,7 @@ async def handle_add_session(
                 temperature=0.7,
             )
 
-        # 6. Сохраняем сразу в Notion + постим в чат с кнопками управления.
-        spread = _match_spread(data.get("spread_type") or "")
+        # 6. Сохраняем + постим в чат с кнопками управления.
         payment_source_raw = data.get("payment_source") or None
         payment_source = (
             PAYMENT_SOURCE_MAP.get((payment_source_raw or "").lower(), payment_source_raw)
@@ -1252,7 +1195,7 @@ async def handle_add_session(
         )
         amount = float(data.get("amount") or 0)
         paid = float(data.get("paid") or 0)
-        category_id = await _resolve_category(
+        category_id, category_label = await _resolve_category(
             client_id,
             data.get("spread_type") or data.get("session_category"),
         )
@@ -1263,7 +1206,6 @@ async def handle_add_session(
             client_id=client_id,
             client_name=client_name,
             deck=deck,
-            spread_type=spread or "🔺 Триплет",
             question=question,
             cards_text=cards_text,
             bottom_card=bottom_card,
@@ -1276,6 +1218,7 @@ async def handle_add_session(
             paid=paid,
             self_client_missing=self_client_missing,
             category_id=category_id,
+            category_label=category_label,
         )
 
         # Фото расклада приложено к сообщению → в Cloudinary + на запись (#161).
@@ -1367,17 +1310,6 @@ async def _handle_multi_session(
     """
     tg_id = message.from_user.id
     session_name: str = (data.get("session_name") or "").strip()
-    # Если КАЖДЫЙ item — триплет (3 карты + опц. дно), и Haiku не дала явной
-    # категории — пишем «🔺 Триплет», а не «🌐 Сфера жизни» (см. #83).
-    all_triplets = bool(items) and all(
-        len((it.get("cards") or [])) == 3 for it in items
-    )
-    session_category = _resolve_session_category(
-        data.get("session_category") or session_name,
-        len(items),
-        all_triplets=all_triplets,
-    )
-    # Phase 2 dual-write: compute category_id once for all triplets in the session (#174)
     session_cat_hint = data.get("session_category") or session_name or None
     deck_raw = data.get("deck") or "Уэйт"
     deck = _match_deck(deck_raw) or "Уэйт"
@@ -1431,8 +1363,8 @@ async def _handle_multi_session(
             if sc:
                 client_id = sc.id
     is_personal = forced_is_personal or not client_name
-    # Phase 2 dual-write: resolve once, reuse for every triplet in the session (#174)
-    session_cat_id: Optional[int] = await _resolve_category(client_id, session_cat_hint)
+    # Resolve category once for all triplets in the session (#174).
+    session_cat_id, session_cat_label = await _resolve_category(client_id, session_cat_hint)
 
     # Существовала ли ТЕМА (session_name+client) ДО этой отправки? Если да —
     # после сохранения обнулим её theme_summary (кросс-дневная сводка устарела),
@@ -1543,7 +1475,6 @@ async def _handle_multi_session(
 
             page_id = await _repo.add(
                 date=_now_iso(tz),
-                spread_type=session_category,
                 title=question,
                 question=question,
                 cards=cards_en or cards_text,
@@ -1586,9 +1517,14 @@ async def _handle_multi_session(
                     ", ".join(c.strip() for c in cards_text.split(",") if c.strip())
                     if cards_text else ""
                 )
+                _triplet_cat = (
+                    f"🃏 {html.escape(session_cat_label)} · {html.escape(deck)}"
+                    if session_cat_label else
+                    f"🃏 {html.escape(deck)}"
+                )
                 head = (
                     f"<b>{html.escape(question)}</b>\n"
-                    f"🔺 Триплет · {html.escape(deck)}\n"
+                    f"{_triplet_cat}\n"
                 )
                 if cards_line:
                     head += f"🃏 {html.escape(cards_line)}\n"
@@ -2163,7 +2099,7 @@ async def handle_tarot_photo(message: Message, user_notion_id: str = "") -> None
 
         tz = timezone(timedelta(hours=tz_offset))
         # Vision: no Haiku category hint — anchor on self-client history or NULL (#174)
-        vision_cat_id = await _resolve_category(self_client_id, None)
+        vision_cat_id, vision_cat_label = await _resolve_category(self_client_id, None)
         await _save_and_post_triplet(
             message,
             tz=tz,
@@ -2171,7 +2107,6 @@ async def handle_tarot_photo(message: Message, user_notion_id: str = "") -> None
             client_id=self_client_id,
             client_name=None,
             deck=deck,
-            spread_type=spread_type or "🔺 Триплет",
             question=question,
             cards_text=cards_text,
             bottom_card=bottom_card,
@@ -2183,6 +2118,7 @@ async def handle_tarot_photo(message: Message, user_notion_id: str = "") -> None
             paid=0.0,
             self_client_missing=self_client_missing,
             category_id=vision_cat_id,
+            category_label=vision_cat_label,
         )
 
     except Exception as e:

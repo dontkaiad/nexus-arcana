@@ -128,7 +128,7 @@ async def test_polish_empty_returns_blank_no_llm():
 def _save_post_patches(summary_mock, rag_mock):
     repo = MagicMock()
     repo.add = AsyncMock(return_value="pg-1")
-    repo.get_mode_category_for_client = AsyncMock(return_value=None)
+    repo.get_mode_category_for_client = AsyncMock(return_value=(None, None))
     repo.resolve_category_code = AsyncMock(return_value=None)
     return [
         patch.object(sessions, "_repo", repo),
@@ -154,7 +154,7 @@ async def test_mode_a_does_not_append_machine_bottom_block():
             st.enter_context(p)
         await _save_and_post_triplet(
             msg, tz=TZ, user_notion_id="u", client_id=None, client_name=None,
-            deck="Уэйт", spread_type="🔺 Триплет", question="что чувствует",
+            deck="Уэйт", question="что чувствует",
             cards_text="король кубков, туз мечей, шут", bottom_card="двойка кубков",
             area="Отношения", interpretation="<p>авторский текст Кай</p>",
             authored=True,
@@ -184,7 +184,7 @@ async def test_mode_b_still_appends_machine_bottom_block():
             st.enter_context(p)
         await _save_and_post_triplet(
             msg, tz=TZ, user_notion_id="u", client_id=None, client_name=None,
-            deck="Уэйт", spread_type="🔺 Триплет", question="что чувствует",
+            deck="Уэйт", question="что чувствует",
             cards_text="король кубков, туз мечей, шут", bottom_card="двойка кубков",
             area="Отношения", interpretation="<h3>Общий смысл</h3><p>сгенерено</p>",
             authored=False,
@@ -231,7 +231,7 @@ def _common_handler_patches(fake_ask, rag_safe=None, rag_batch=None):
     repo.set_photo_url = AsyncMock(return_value=True)
     repo.set_session_summary = AsyncMock(return_value=True)
     repo.clear_theme_summary = AsyncMock(return_value=0)
-    repo.get_mode_category_for_client = AsyncMock(return_value=None)
+    repo.get_mode_category_for_client = AsyncMock(return_value=(None, None))
     repo.resolve_category_code = AsyncMock(return_value=None)
     return [
         patch.object(sessions, "ask_claude", side_effect=fake_ask),
@@ -381,7 +381,7 @@ async def test_rag_gate_authored_single_calls_index():
             st.enter_context(p)
         await _save_and_post_triplet(
             msg, tz=TZ, user_notion_id="u", client_id=None, client_name=None,
-            deck="Уэйт", spread_type="🔺 Триплет", question="вопрос",
+            deck="Уэйт", question="вопрос",
             cards_text="туз мечей", bottom_card=None,
             area="Работа", interpretation="<p>авторский текст</p>",
             authored=True,
@@ -403,7 +403,7 @@ async def test_rag_gate_mode_b_single_does_not_call_index():
             st.enter_context(p)
         await _save_and_post_triplet(
             msg, tz=TZ, user_notion_id="u", client_id=None, client_name=None,
-            deck="Уэйт", spread_type="🔺 Триплет", question="вопрос",
+            deck="Уэйт", question="вопрос",
             cards_text="туз мечей", bottom_card=None,
             area="Работа", interpretation="<p>машинный текст</p>",
             authored=False,

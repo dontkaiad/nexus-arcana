@@ -54,7 +54,6 @@ sessions = Table(
     Column("theme_summary",   Text),  # кросс-дневная сводка ТЕМЫ (name, client), #165
     Column("bottom_card",     Text),
     Column("session_name",    Text),
-    Column("spread_type",     Text),
     Column("category_id",     SmallInteger, ForeignKey("session_category.id")),
     Column("area",            Text),
     Column("deck",            Text),

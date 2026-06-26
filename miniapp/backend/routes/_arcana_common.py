@@ -100,7 +100,7 @@ def triplet_to_stub(t) -> dict:
             "Дата": {"date": {"start": t.date or ""}},
             "Сбылось": {"select": {"name": outcome_ru}},
             "Тема": {"title": [{"plain_text": t.question or ""}]},
-            "Тип расклада": {"multi_select": [{"name": t.spread_type}] if t.spread_type else []},
+            "Тип расклада": {"multi_select": [{"name": t.category_display}] if t.category_display else []},
             "Карты": {"rich_text": [{"plain_text": t.cards or ""}]},
             "Колоды": {"multi_select": [{"name": t.deck}] if t.deck else []},
             "Область": {"multi_select": [{"name": t.area}] if t.area else []},

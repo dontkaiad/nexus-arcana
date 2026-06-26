@@ -159,7 +159,7 @@ def test_session_verify_notifies(client):
         deck="Уэйт", session_name="", client_id=None,
         date="2026-05-01", outcome="unverified",
         amount=Decimal("0"), paid=Decimal("0"),
-        spread_type="", area="", barter_what="", bottom_card="", photo_url=None,
+        category_display="", area="", barter_what="", bottom_card="", photo_url=None,
     )
     mock_repo = MagicMock()
     mock_repo.find_by_id = AsyncMock(return_value=triplet)
