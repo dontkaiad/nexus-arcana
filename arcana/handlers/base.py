@@ -456,6 +456,15 @@ async def route_message(
         if await handle_list_pending(message, user_notion_id):
             return
 
+        # ── Pending: перенос Work-напоминания (work_wip / work_reschedule) ──
+        from arcana.handlers.work_reminder_kb import (
+            has_pending_reschedule as _has_work_reschedule,
+            handle_work_reschedule_text as _handle_work_reschedule,
+        )
+        if _has_work_reschedule(uid):
+            await _handle_work_reschedule(message)
+            return
+
         # ── Pending: превью работы (preview-flow, паритет с Nexus) ────────
         from arcana.handlers.work_preview import (
             has_pending as has_work_pending, handle_work_clarification,

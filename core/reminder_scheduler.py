@@ -75,11 +75,14 @@ class ReminderScheduler:
 
     def _build_reminder_kb(self, page_id: str) -> InlineKeyboardMarkup:
         cp = self.callback_prefix
-        return InlineKeyboardMarkup(inline_keyboard=[[
-            InlineKeyboardButton(text="✅ Сделала", callback_data=f"{cp}_complete_{page_id}"),
-            InlineKeyboardButton(text="⏭ Перенести", callback_data=f"{cp}_reschedule_{page_id}"),
-            InlineKeyboardButton(text="🗑 Удалить", callback_data=f"{cp}_delete_{page_id}"),
-        ]])
+        return InlineKeyboardMarkup(inline_keyboard=[
+            [
+                InlineKeyboardButton(text="✅ Сделала", callback_data=f"{cp}_complete_{page_id}"),
+                InlineKeyboardButton(text="⏭ Перенести", callback_data=f"{cp}_reschedule_{page_id}"),
+                InlineKeyboardButton(text="🗑 Удалить", callback_data=f"{cp}_delete_{page_id}"),
+            ],
+            [InlineKeyboardButton(text="⏳ В процессе", callback_data=f"{cp}_wip_{page_id}")],
+        ])
 
     def _build_deadline_kb(self, page_id: str) -> InlineKeyboardMarkup:
         cp = self.callback_prefix
