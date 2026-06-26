@@ -366,10 +366,20 @@ async def get_arcana_today(tg_id: int = Depends(current_user_id)) -> dict[str, A
     pending_sessions, pending_rituals = _count_pending(all_sessions, rituals)
 
     # «Работы N/M» — счётчик практики за сегодня:
-    #   done = сегодняшние сессии (свершившиеся события) +
+    #   done = уникальные сеансы сегодня (session_name+client_id — один сеанс
+    #          может иметь несколько триплетов/раскладов, считаем сеансы) +
     #          ритуалы сегодня с Результатом != ⏳ +
     #          работы из 🔮 Работы со статусом выполнено сегодня (db уже фильтрует)
     #   total = done + pending works (из _works_schedule, они != Done)
+    _session_keys_today: set = set()
+    for _t in _pg_sessions:
+        if to_local_date(_t.date or "", tz_offset) != today_date:
+            continue
+        _sn = (_t.session_name or "").strip().lower()
+        _cid = _t.client_id or ""
+        _session_keys_today.add((_sn, _cid) if _sn else (f"solo:{_t.id}", _cid))
+    unique_sessions_today = len(_session_keys_today)
+
     rituals_done_today = 0
     for p in rituals:
         raw = (p.get("properties", {}).get("Дата", {}).get("date") or {}).get("start", "")
@@ -380,7 +390,7 @@ async def get_arcana_today(tg_id: int = Depends(current_user_id)) -> dict[str, A
         if result and not result.startswith("⏳"):
             rituals_done_today += 1
 
-    works_done_today = len(sessions_today) + rituals_done_today
+    works_done_today = unique_sessions_today + rituals_done_today
     works_total_today = works_done_today + len(works) + len(works_overdue)
 
     return {
