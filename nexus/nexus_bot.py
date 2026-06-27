@@ -494,6 +494,23 @@ async def set_tz(msg: Message, user_notion_id: str = "") -> None:
     await _update_user_tz(msg, msg.text.replace("/tz", "").strip(), user_notion_id=user_notion_id)
 
 
+@dp.message(Command("setmenu"))
+async def cmd_setmenu(msg: Message) -> None:
+    """Принудительно обновить кнопку миниаппа (восстановить иконку ☀️ Nexus)."""
+    from aiogram.types import MenuButtonWebApp, WebAppInfo
+    try:
+        await bot.set_chat_menu_button(
+            menu_button=MenuButtonWebApp(
+                text="☀️ Nexus",
+                web_app=WebAppInfo(url=f"{config.miniapp_base_url}/nexus"),
+            )
+        )
+        await msg.answer(f"✅ Кнопка обновлена → {config.miniapp_base_url}/nexus")
+    except Exception as e:
+        logger.error("setmenu command failed: %s", e)
+        await msg.answer(f"❌ Ошибка: {e}")
+
+
 @dp.message(Command("list"))
 async def cmd_list(msg: Message, user_notion_id: str = "") -> None:
     from nexus.handlers.lists import handle_list_command
@@ -1506,13 +1523,19 @@ async def main() -> None:
         BotCommand(command="adhd",    description="🦋 СДВГ-профиль"),
         BotCommand(command="tz",      description="🕐 Часовой пояс"),
     ])
-    try:
-        _base = config.miniapp_base_url
-        await bot.set_chat_menu_button(menu_button=MenuButtonWebApp(
-            text="☀️ Nexus", web_app=WebAppInfo(url=f"{_base}/nexus")
-        ))
-    except Exception as e:
-        logger.warning("set_chat_menu_button failed: %s", e)
+    _base = config.miniapp_base_url
+    for _attempt in range(3):
+        try:
+            await bot.set_chat_menu_button(menu_button=MenuButtonWebApp(
+                text="☀️ Nexus", web_app=WebAppInfo(url=f"{_base}/nexus")
+            ))
+            logger.info("set_chat_menu_button OK → %s/nexus", _base)
+            break
+        except Exception as e:
+            logger.warning("set_chat_menu_button attempt %d failed: %s", _attempt + 1, e)
+            if _attempt < 2:
+                import asyncio as _aio
+                await _aio.sleep(5)
 
     init_scheduler(bot)
 
