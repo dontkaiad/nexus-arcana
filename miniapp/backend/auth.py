@@ -10,9 +10,10 @@ import time
 from typing import List, Optional
 from urllib.parse import parse_qsl
 
-from fastapi import Header, HTTPException
+from fastapi import Cookie, Header, HTTPException
 
 from core.config import config
+from miniapp.backend import tg_auth
 
 logger = logging.getLogger("miniapp.auth")
 
@@ -82,16 +83,27 @@ def verify_init_data(init_data: str, extra_tokens: Optional[List[str]] = None) -
 
 async def current_user_id(
     x_telegram_init_data: Optional[str] = Header(None, alias="X-Telegram-Init-Data"),
+    hl_session: Optional[str] = Cookie(None),
 ) -> int:
-    """FastAPI dependency: extract and validate tg_id from X-Telegram-Init-Data header."""
-    if not x_telegram_init_data:
-        raise HTTPException(status_code=401, detail="missing X-Telegram-Init-Data")
-    try:
-        tg_id = verify_init_data(x_telegram_init_data)
-    except ValueError as e:
-        logger.warning("init_data validation failed: %s", e)
-        raise HTTPException(status_code=401, detail=f"invalid init_data: {e}")
-    if tg_id not in config.allowed_ids:
-        logger.warning("owner check failed: tg_id=%s not in allowed_ids", tg_id)
-        raise HTTPException(status_code=403, detail="forbidden")
-    return tg_id
+    """FastAPI dependency: validate tg_id from X-Telegram-Init-Data header or hl_session cookie."""
+    if x_telegram_init_data:
+        try:
+            tg_id = verify_init_data(x_telegram_init_data)
+        except ValueError as e:
+            logger.warning("init_data validation failed: %s", e)
+            raise HTTPException(status_code=401, detail=f"invalid init_data: {e}")
+        if tg_id not in config.allowed_ids:
+            logger.warning("owner check failed: tg_id=%s not in allowed_ids", tg_id)
+            raise HTTPException(status_code=403, detail="forbidden")
+        return tg_id
+
+    if hl_session and config.session_secret:
+        tg_id = tg_auth.read_session(hl_session, secret=config.session_secret)
+        if tg_id is not None:
+            if tg_id not in config.allowed_ids:
+                logger.warning("cookie auth: tg_id=%s not in allowed_ids", tg_id)
+                raise HTTPException(status_code=403, detail="forbidden")
+            return tg_id
+        logger.warning("invalid or expired hl_session cookie")
+
+    raise HTTPException(status_code=401, detail="missing or invalid auth")

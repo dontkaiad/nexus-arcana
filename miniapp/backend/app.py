@@ -14,6 +14,7 @@ from miniapp.backend.routes import calendar as cal
 from miniapp.backend.routes import categories
 from miniapp.backend.routes import streaks
 from miniapp.backend.routes import weather
+from miniapp.backend.routes import login as login_routes
 from miniapp.backend.routes import (
     arcana_today,
     arcana_sessions,
@@ -54,6 +55,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+app.include_router(login_routes.router)  # /login, /auth/callback, /logout — no /api prefix
 
 for _r in (
     today, tasks, finance, lists, memory, cal, categories, streaks, weather,

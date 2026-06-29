@@ -127,6 +127,11 @@ class AppConfig:
     log_chat_id: str = ""
     log_thread_nexus: str = ""
     log_thread_arcana: str = ""
+    # ── Telegram Login Widget SSO (browser sessions via hl_session cookie) ──
+    session_secret: str = ""
+    tg_login_bot_token: str = ""
+    tg_login_bot_username: str = ""
+    cookie_domain: str = ".heylark.dev"
 
 
 def load_config() -> AppConfig:
@@ -141,6 +146,10 @@ def load_config() -> AppConfig:
         log_chat_id      = _optional("TG_LOG_CHAT_ID"),
         log_thread_nexus = _optional("TG_LOG_THREAD_NEXUS"),
         log_thread_arcana = _optional("TG_LOG_THREAD_ARCANA"),
+        session_secret       = _optional("SESSION_SECRET"),
+        tg_login_bot_token   = _optional("TG_LOGIN_BOT_TOKEN"),
+        tg_login_bot_username = _optional("TG_LOGIN_BOT_USERNAME"),
+        cookie_domain        = _optional("COOKIE_DOMAIN", ".heylark.dev"),
         nexus = NexusConfig(
             tg_token     = _require("NEXUS_BOT_TOKEN"),
             db_finance   = _optional("NOTION_DB_FINANCE"),
