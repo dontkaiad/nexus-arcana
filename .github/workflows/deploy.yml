@@ -13,7 +13,7 @@ jobs:
           host: ${{ secrets.SERVER_HOST }}
           username: ${{ secrets.SERVER_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
-          command_timeout: "10m"
+          command_timeout: "20m"
           # Сервер использует forced command (~/.ssh/authorized_keys:
           # command="/home/kai/deploy.sh") → ЭТОТ script игнорируется, всегда
           # гоняется deploy.sh. ssh-action к тому же глотает exit-код. Детект
