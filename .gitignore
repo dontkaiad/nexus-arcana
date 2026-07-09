@@ -184,6 +184,7 @@ cython_debug/
 .DS_Store
 CLAUDE.md
 CLAUDE.local.md
+CONTRIBUTING.md
 miniapp/CLAUDE.md
 # Design prototypes / standalone concept artifacts (not source code)
 Nexus Arcana.html
