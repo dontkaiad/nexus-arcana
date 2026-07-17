@@ -825,11 +825,22 @@ def _apply_user_time(reminder_time: str, original_text: str) -> str:
 
 # ── Follow-up clarification after task creation ────────────────────────────────
 
+_REMINDER_KW_RE = _re.compile(
+    r"напоминалк[уа]?|напомни(?:лку)?|поставь\s+напоминани[ея]|добавь\s+напоминани[ея]",
+    _re.IGNORECASE,
+)
+
 _CLARIFY_REMINDER_RE = _re.compile(
     r"(?:напоминалк[уа]?|напомни(?:лку)?|поставь\s+напоминани[ея]|добавь\s+напоминани[ея])"
     r"\s+(?:в\s+)?(\d{1,2})(?::(\d{2}))?\s*(?:часов?|ч\.?)?\b",
     _re.IGNORECASE,
 )
+
+# «20 числа», «21-го числа» — день месяца. Если это есть в тексте, число
+# перед ним НЕ час — _CLARIFY_REMINDER_RE иначе хватает его как час
+# ("напомни 20 числа в 18 часов" → регэксп без этой проверки читает
+# час=20 и теряет "18", день месяца при этом тоже нигде не учитывается).
+_DAY_OF_MONTH_MARK_RE = _re.compile(r"\d{1,2}[\s-]*(?:го\s*)?числ", _re.IGNORECASE)
 
 _CLARIFY_DEADLINE_RE = _re.compile(
     r"^(?:дедлайн|до|срок(?:\s+до)?)\s+(.+)$",
@@ -856,6 +867,41 @@ _CLARIFY_RE = _re.compile(
 )
 
 
+async def _haiku_parse_reminder_dt(text: str, tz_offset: int) -> Optional[str]:
+    """Абсолютное время напоминания через Haiku — фолбэк когда
+    `_CLARIFY_REMINDER_RE` не подходит (день месяца, дни недели и т.п.).
+
+    Общий парсер для `handle_last_task_clarify` и `handle_reschedule_reminder`
+    (issue: одинаковый паттерн, было бы дублирование — #«Параллельная
+    реализация = БАГ» из CLAUDE.md).
+    """
+    now_str = datetime.now(timezone(timedelta(hours=tz_offset))).strftime("%Y-%m-%d %H:%M")
+    system = f"""Пользователь указывает когда напомнить. Парсь и верни ТОЛЬКО JSON без markdown:
+{{"reminder_time": "YYYY-MM-DDTHH:MM"}}
+
+Правила:
+- Слова "напомни / напоминай / напоминание" — НЕ часть времени, игнорируй их.
+- "напомни в 19" / "в 19" → сегодня в 19:00; если 19:00 уже прошло — завтра в 19:00.
+- "завтра в 10:00" → завтра в 10:00.
+- "в понедельник" → ближайший понедельник в 09:00.
+- "20 числа в 18 часов" / "20-го в 18" → 20-е число месяца (текущего, а если
+  текущий день месяца уже позже 20 — следующего), время 18:00.
+- reminder_time ВСЕГДА строго в будущем относительно "Сейчас".
+
+Сейчас: {now_str} (МСК, UTC+{tz_offset})"""
+    try:
+        raw = await ask_claude(text, system=system, max_tokens=100,
+                               model="claude-haiku-4-5-20251001", temperature=0)
+        raw = raw.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
+        parsed = json.loads(raw)
+        val = parsed.get("reminder_time")
+        if val and _re.match(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$", val):
+            return val
+    except Exception as e:
+        logger.error("_haiku_parse_reminder_dt error: %s", e)
+    return None
+
+
 async def handle_last_task_clarify(
     message: Message,
     text: str,
@@ -879,7 +925,9 @@ async def handle_last_task_clarify(
     reschedule_reminder: Optional[tuple] = None
 
     # ── Напоминание ──────────────────────────────────────────────────────────────
-    m_rem = _CLARIFY_REMINDER_RE.search(text)
+    # Пропускаем быстрый regex, если в тексте есть день месяца («20 числа») —
+    # он не умеет отличать день от часа и хватает первое число как час.
+    m_rem = None if _DAY_OF_MONTH_MARK_RE.search(text) else _CLARIFY_REMINDER_RE.search(text)
     if m_rem:
         h = int(m_rem.group(1))
         mi = int(m_rem.group(2)) if m_rem.group(2) else 0
@@ -890,6 +938,15 @@ async def handle_last_task_clarify(
         update_props["Напоминание"] = _date_with_tz(dt_str, tz_offset)
         reschedule_reminder = (dt_str, page_id)
         response_text = f"🔔 Напоминание: {run_dt.strftime('%d.%m в %H:%M')}"
+
+    elif _REMINDER_KW_RE.search(text):
+        # Быстрый regex не подошёл (день месяца, день недели и т.п.) — Haiku.
+        dt_str = await _haiku_parse_reminder_dt(text, tz_offset)
+        if dt_str:
+            update_props["Напоминание"] = _date_with_tz(dt_str, tz_offset)
+            reschedule_reminder = (dt_str, page_id)
+            run_dt = datetime.strptime(dt_str, "%Y-%m-%dT%H:%M")
+            response_text = f"🔔 Напоминание: {run_dt.strftime('%d.%m в %H:%M')}"
 
     # ── Дедлайн ──────────────────────────────────────────────────────────────────
     elif _CLARIFY_DEADLINE_RE.search(text):
@@ -931,6 +988,7 @@ async def handle_last_task_clarify(
     try:
         await _repo.set_props(page_id, update_props)
 
+        title_str = ""
         if reschedule_reminder:
             dt_str, tid = reschedule_reminder
             if _scheduler:
@@ -948,7 +1006,16 @@ async def handle_last_task_clarify(
             await _schedule_reminder(message.chat.id, title_str, dt_str, tid, tz_offset)
 
         _last_task_del(uid)
-        await message.answer(f"✏️ {response_text}")
+        sent = await message.answer(f"✏️ {response_text}")
+        if reschedule_reminder:
+            # Зарегистрировать эту плашку как «живое напоминание» задачи —
+            # иначе reply-исправление на неё не находит task_id и уходит
+            # в общий классификатор, создавая отдельную новую задачу.
+            _, tid = reschedule_reminder
+            try:
+                await save_task_reminder(tid, message.chat.id, sent.message_id, title_str)
+            except Exception:
+                pass
         return True
     except Exception as e:
         logger.error("handle_last_task_clarify error: %s", e)
@@ -2144,26 +2211,9 @@ async def handle_reschedule_reminder(message: Message) -> None:
             await message.answer(f"✅ Напоминание перенесено на {relative.replace('T', ' ')}")
             return
 
-        now_str = datetime.now(timezone(timedelta(hours=tz_offset))).strftime("%Y-%m-%d %H:%M")
+        reminder_time = await _haiku_parse_reminder_dt(text, tz_offset)
 
-        system = f"""Пользователь переносит напоминание (указывает новое время). Парсь и верни ТОЛЬКО JSON без markdown:
-{{"reminder_time": "YYYY-MM-DDTHH:MM"}}
-
-Правила:
-- Слова "напомни / напоминай / напоминание" — НЕ часть времени, игнорируй их.
-- "напомни в 19" / "в 19" → сегодня в 19:00; если 19:00 уже прошло — завтра в 19:00.
-- "завтра в 10:00" → завтра в 10:00.
-- "в понедельник" → ближайший понедельник в 09:00.
-- reminder_time ВСЕГДА строго в будущем относительно "Сейчас".
-
-Сейчас: {now_str} (МСК, UTC+{tz_offset})"""
-
-        raw = await ask_claude(text, system=system, max_tokens=100, model="claude-haiku-4-5-20251001", temperature=0)
-        raw = raw.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
-        parsed = json.loads(raw)
-
-        if parsed.get("reminder_time"):
-            reminder_time = parsed["reminder_time"]
+        if reminder_time:
             # Anti-loop: перенос в прошлое сработает мгновенно → петля. Переспросить,
             # pending НЕ удаляем — следующее сообщение повторит попытку.
             if not _is_future_dt(reminder_time, tz_offset):
