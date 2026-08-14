@@ -75,6 +75,43 @@ def _priority_display(priority: str) -> str:
             return f"{icon} {name}"
     return f"🟡 {p}"
 
+
+def resolve_task_category(raw: str) -> "tuple[Optional[str], list[str]]":
+    """Матчит сырой ввод пользователя ("работа", "коты" ...) на канонический
+    список категорий задач (`core.classifier._TASK_CATS`).
+
+    Возвращает (matched_category, similar_suggestions).
+    matched_category is None когда точного/подстрочного совпадения нет —
+    вызывающий код НЕ должен писать raw в Notion в этом случае (см.
+    match_select() правило в NEXUS_CAPABILITIES.md: "НЕ пишет в Notion без
+    совпадения"), а должен показать похожие варианты и переспросить.
+    """
+    import difflib
+    from core.classifier import _TASK_CATS
+
+    raw_clean = (raw or "").strip()
+    if not raw_clean:
+        return None, []
+
+    raw_low = raw_clean.lower()
+
+    # 1) точное совпадение (с эмодзи или без)
+    for tc in _TASK_CATS:
+        if raw_low == tc.lower() or raw_low == tc.split(" ", 1)[-1].lower():
+            return tc, []
+
+    # 2) подстрочное совпадение в любую сторону
+    for tc in _TASK_CATS:
+        tc_word = tc.split(" ", 1)[-1].lower()
+        if raw_low in tc_word or tc_word in raw_low:
+            return tc, []
+
+    # 3) не нашли — предлагаем похожие через fuzzy-матчинг
+    words = {tc.split(" ", 1)[-1].lower(): tc for tc in _TASK_CATS}
+    close = difflib.get_close_matches(raw_low, words.keys(), n=3, cutoff=0.5)
+    suggestions = [words[w] for w in close]
+    return None, suggestions
+
 # ── SQLite persistent pending ──────────────────────────────────────────────────
 import os as _os
 _PENDING_DB = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "../../pending_tasks.db")
@@ -1434,6 +1471,7 @@ async def handle_task_parsed(message: Message, data: dict, original_text: str = 
                 ]])
             )
             data["msg_id"] = msg_obj.message_id
+            data["_awaiting_reminder_time"] = True
             _pending_set(uid, data)
             return
 
@@ -1477,6 +1515,7 @@ async def handle_task_parsed(message: Message, data: dict, original_text: str = 
                 ]])
             )
             data["msg_id"] = msg_obj.message_id
+            data["_awaiting_reminder_time"] = True
             _pending_set(uid, data)
             return
         reminder_display = data["reminder_time"].replace("T", " ")
@@ -1578,6 +1617,18 @@ async def handle_task_clarification(message: Message) -> None:
         await _handle_combined_clarification(message, text, pending, uid)
         return
 
+    # _awaiting_reminder_time: бот уже знает дату из «напомни 21 августа» (без
+    # времени, data["reminder_time"]="2026-08-21") и ждёт ТОЛЬКО время ответом
+    # текстом («в 15:00»). Обрабатываем ОТДЕЛЬНО от общего confirm-режима: если
+    # эту ветку пускать через _is_confirm_mode/_handle_task_refinement, дата
+    # молча терялась, потому что тот промпт ничего не знает про уже известную
+    # дату и пересчитывает reminder_time от «сейчас» — задача сохранялась (или не
+    # сохранялась вовсе, если Claude решал что это not_refinement) с сегодняшней
+    # датой вместо задуманной (баг: «создаётся напоминание, но не задача»).
+    if pending.get("_awaiting_reminder_time"):
+        await _handle_awaiting_reminder_time(message, text, pending, uid)
+        return
+
     # Если нет _awaiting_* флагов → задача в режиме подтверждения ("Всё верно?")
     # Любой текст = уточнение задачи (дедлайн, напоминание, категория, приоритет)
     _is_confirm_mode = not pending.get("_awaiting_deadline") and not pending.get("_awaiting_combined")
@@ -1635,6 +1686,63 @@ async def handle_task_clarification(message: Message) -> None:
     except Exception as e:
         logger.error("parse reminder error: %s", e)
         await message.answer("❌ Ошибка при обработке. Попробуй ещё раз")
+
+
+async def _handle_awaiting_reminder_time(message: Message, text: str, pending: dict, uid: int) -> None:
+    """Пользователь отвечает временем на «⏰ В какое время напомнить?», когда дата
+    уже известна (напр. «напомни 21 августа» → pending['reminder_time']='2026-08-21').
+
+    Комбинируем известную дату с временем из ответа НАПРЯМУЮ (регексом), вместо
+    того чтобы заново прогонять весь ответ через Claude без контекста о дате —
+    именно там дата пользователя молча терялась и подставлялось «сегодня»."""
+    known_date = (pending.get("reminder_time") or "")[:10]
+    tz_offset = await _get_user_tz(uid)
+
+    # 1) "через N мин/часов/дней" — самостоятельная точка отсчёта, дата тут не нужна
+    relative = _parse_relative_time(text, tz_offset)
+    if relative:
+        pending["reminder_time"] = relative
+        pending.pop("_awaiting_reminder_time", None)
+        _pending_set(uid, pending)
+        await _show_task_confirm(message, pending, uid)
+        return
+
+    # 2) Явное время в тексте ("в 15:00", "15 часов", "в 15") — комбинируем
+    #    детерминированно с уже известной датой, без похода к Claude.
+    clock = _extract_explicit_clock(text)
+    if clock and known_date:
+        pending["reminder_time"] = f"{known_date}T{clock}"
+        pending.pop("_awaiting_reminder_time", None)
+        _pending_set(uid, pending)
+        await _show_task_confirm(message, pending, uid)
+        return
+
+    # 3) Фоллбек — Claude, но явно передаём уже известную дату, чтобы он не
+    #    придумывал сегодняшнюю дату и вернул ТОЛЬКО время.
+    try:
+        now_str = datetime.now(timezone(timedelta(hours=tz_offset))).strftime("%Y-%m-%d %H:%M")
+        system = f"""Пользователь отвечает на вопрос «В какое время напомнить?» — дата
+УЖЕ ИЗВЕСТНА ({known_date or "не важно"}), нужно определить ТОЛЬКО время суток.
+Верни ТОЛЬКО JSON без markdown: {{"time": "HH:MM или null"}}
+Примеры: "в 10 утра"→"10:00", "вечером"→"19:00", "днём"→"13:00", "в 18:30"→"18:30"
+Сейчас: {now_str} (UTC+{tz_offset})"""
+        raw = await ask_claude(text, system=system, max_tokens=50, model="claude-haiku-4-5-20251001", temperature=0)
+        raw = raw.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
+        parsed = json.loads(raw)
+        parsed_time = parsed.get("time")
+    except Exception as e:
+        logger.error("_handle_awaiting_reminder_time Claude fallback error: %s", e)
+        parsed_time = None
+
+    if parsed_time and known_date:
+        pending["reminder_time"] = f"{known_date}T{parsed_time}"
+        pending.pop("_awaiting_reminder_time", None)
+        _pending_set(uid, pending)
+        await _show_task_confirm(message, pending, uid)
+        return
+
+    logger.warning("_handle_awaiting_reminder_time: could not resolve time for %r (known_date=%r)", text, known_date)
+    await message.answer("⏰ Не понял время. Укажи, например:\n<code>в 10:00</code>, <code>в 18:30</code>, <code>через 2 часа</code>")
 
 
 async def _handle_task_refinement(message: Message, text: str, pending: dict, uid: int) -> None:
@@ -1707,15 +1815,17 @@ async def _handle_task_refinement(message: Message, text: str, pending: dict, ui
             pending["reminder_time"] = parsed["reminder_time"]
             updated = True
         if parsed.get("category"):
-            # Найти ближайшую категорию
             raw_cat = parsed["category"]
-            best = raw_cat
-            for tc in _TASK_CATS:
-                if raw_cat.lower() in tc.lower():
-                    best = tc
-                    break
-            pending["category"] = best
-            updated = True
+            matched, suggestions = resolve_task_category(raw_cat)
+            if matched:
+                pending["category"] = matched
+                updated = True
+            else:
+                hint = f" Похожие: {', '.join(suggestions)}" if suggestions else ""
+                await message.answer(f"❓ Не нашла «{raw_cat}».{hint} — уточни?")
+                if not (parsed.get("deadline") or parsed.get("reminder_time") or
+                        (parsed.get("priority") in ("Срочно", "Важно", "Можно потом"))):
+                    return
         if parsed.get("priority") and parsed["priority"] in ("Срочно", "Важно", "Можно потом"):
             pending["priority"] = parsed["priority"]
             updated = True
@@ -2753,15 +2863,20 @@ async def _apply_edit(
             await _repo.set_props(page_id, {"Задача": _title(new_value)})
             await message.answer(f"✏️ Переименовано{ctx_label}:\n«{label}» → «{new_value}»")
         elif field == "category":
-            real_cat = _match_code(_category_id, new_value, "💳 Прочее")
-            # Если не нашёл — попробуем _TASK_CATS
-            if real_cat == new_value or real_cat is None:
-                from core.classifier import _TASK_CATS
-                _nv = new_value.lower().strip()
-                for tc in _TASK_CATS:
-                    if _nv in tc.lower():
-                        real_cat = tc
-                        break
+            # match_select-правило (см. NEXUS_CAPABILITIES.md): категория
+            # НЕ пишется в Notion без реального совпадения — раньше здесь был
+            # silent fallback на "💳 Прочее" для ЛЮБОГО непонятого значения
+            # (напр. "работа"), из-за чего пользователь получал успешный
+            # ответ, но задача молча улетала в чужую категорию.
+            real_cat = _match_code(_category_id, new_value, default=None)
+            if not real_cat:
+                real_cat, suggestions = resolve_task_category(new_value)
+            else:
+                suggestions = []
+            if not real_cat:
+                hint = f" Похожие: {', '.join(suggestions)}" if suggestions else ""
+                await message.answer(f"❓ Не нашла «{new_value}».{hint} — уточни?")
+                return
             await _repo.set_props(page_id, {"Категория": _select(real_cat)})
             await message.answer(f"✏️ Категория{ctx_label}:\n📌 {label}\n🏷 → {real_cat}")
         elif field == "priority":

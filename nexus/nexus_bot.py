@@ -586,18 +586,26 @@ async def handle_text(msg: Message, user_notion_id: str = "") -> None:
             _text_low, _re.IGNORECASE,
         )
         if _edit_match:
-            from nexus.handlers.tasks import _pending_set
-            from core.classifier import _TASK_CATS
+            from nexus.handlers.tasks import _pending_set, _show_task_confirm, resolve_task_category
             new_cat = _edit_match.group(1).strip()
-            # Ищем в _TASK_CATS
-            real_cat = new_cat
-            for tc in _TASK_CATS:
-                if new_cat.lower() in tc.lower():
-                    real_cat = tc
-                    break
+            real_cat, suggestions = resolve_task_category(new_cat)
+            if not real_cat:
+                # match_select-правило: без реального совпадения в Notion
+                # не пишем — раньше здесь молча принимался сырой текст
+                # пользователя (напр. "работа", которой нет в списке
+                # категорий), и pending обновлялся невидимым для юзера
+                # образом без кнопки «Сохранить».
+                hint = f" Похожие: {', '.join(suggestions)}" if suggestions else ""
+                await msg.answer(f"❓ Не нашла «{new_cat}».{hint} — уточни?")
+                await react(msg, "🤔")
+                return
             pending["category"] = real_cat
             _pending_set(msg.from_user.id, pending)
-            await msg.answer(f"✏️ Категория обновлена: {real_cat}\n\n<i>Уточни дедлайн или нажми «Сохранить»</i>")
+            # Пере-показываем карточку подтверждения с рабочей кнопкой
+            # «Сохранить» — раньше этот шорткат просто отвечал текстом без
+            # клавиатуры, и пользователь не мог понять, применится ли
+            # правка вообще (см. баг: "не уверена, сохранилась ли категория").
+            await _show_task_confirm(msg, pending, msg.from_user.id)
             await react(msg, "⚡")
             return
         _edit_pri = _re.search(
@@ -605,13 +613,17 @@ async def handle_text(msg: Message, user_notion_id: str = "") -> None:
             _text_low, _re.IGNORECASE,
         )
         if _edit_pri:
-            from nexus.handlers.tasks import _pending_set
+            from nexus.handlers.tasks import _pending_set, _show_task_confirm
             new_pri = _edit_pri.group(1).strip()
             _pri_map = {"срочно": "Срочно", "важно": "Важно", "можно потом": "Можно потом", "потом": "Можно потом"}
             real_pri = _pri_map.get(new_pri.lower(), new_pri)
+            if real_pri not in ("Срочно", "Важно", "Можно потом"):
+                await msg.answer("❓ Не поняла приоритет. Варианты: срочно / важно / можно потом — уточни?")
+                await react(msg, "🤔")
+                return
             pending["priority"] = real_pri
             _pending_set(msg.from_user.id, pending)
-            await msg.answer(f"✏️ Приоритет обновлён: {real_pri}\n\n<i>Уточни дедлайн или нажми «Сохранить»</i>")
+            await _show_task_confirm(msg, pending, msg.from_user.id)
             await react(msg, "⚡")
             return
         await handle_task_clarification(msg)
