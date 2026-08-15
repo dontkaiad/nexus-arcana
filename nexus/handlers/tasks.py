@@ -2441,9 +2441,10 @@ async def _do_save_task(message: Message, data: dict, chat_id: int = None, uid: 
     await react(message, "⚡")
 
     # Редактируем старое сообщение вместо создания нового
+    confirm_msg = None
     if msg_id:
         try:
-            await message.bot.edit_message_text(
+            confirm_msg = await message.bot.edit_message_text(
                 chat_id=message.chat.id,
                 message_id=msg_id,
                 text=text_content,
@@ -2452,9 +2453,27 @@ async def _do_save_task(message: Message, data: dict, chat_id: int = None, uid: 
             )
         except Exception as e:
             logger.warning("edit_message error: %s, fallback to answer", e)
-            await message.answer(text_content, parse_mode="HTML", reply_markup=_suggest_kb)
+            confirm_msg = await message.answer(text_content, parse_mode="HTML", reply_markup=_suggest_kb)
     else:
-        await message.answer(text_content, parse_mode="HTML", reply_markup=_suggest_kb)
+        confirm_msg = await message.answer(text_content, parse_mode="HTML", reply_markup=_suggest_kb)
+
+    # Регистрируем плашку "Задача создана" в message_pages, чтобы reply на неё
+    # ("перенеси на среду", "смени приоритет на срочно" и т.д.) шёл через
+    # handle_reply_update вместо того чтобы проваливаться в общий classify(),
+    # который не понимает контекст задачи и возвращает {"type":"unknown"}.
+    _confirm_msg_id = getattr(confirm_msg, "message_id", None) or msg_id
+    if _confirm_msg_id:
+        try:
+            from core.message_pages import save_message_page
+            await save_message_page(
+                chat_id=message.chat.id,
+                message_id=_confirm_msg_id,
+                page_id=result,
+                page_type="task",
+                bot="nexus",
+            )
+        except Exception as e:
+            logger.warning("save_message_page failed for task %s: %s", result[:8], e)
 
     try:
         from nexus.handlers.memory import suggest_memory

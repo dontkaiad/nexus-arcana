@@ -9,11 +9,28 @@ from __future__ import annotations
 
 import json
 import logging
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Optional
 
 from core.claude_client import ask_claude
 
 logger = logging.getLogger("core.reply_update")
+
+_DOW_RU = ["понедельник", "вторник", "среда", "четверг", "пятница", "суббота", "воскресенье"]
+
+
+def _date_context(tz_offset: int) -> str:
+    """'Сегодня: ...' + ближайшие даты дней недели — без этого Haiku не может
+    посчитать 'перенеси на среду' в конкретную ISO-дату (#reply-broken)."""
+    now = datetime.now(timezone(timedelta(hours=tz_offset)))
+    today = now.date()
+    lines = [f"Сегодня: {today.isoformat()}, {_DOW_RU[now.weekday()]}."]
+    for i, name in enumerate(_DOW_RU):
+        days_ahead = (i - now.weekday()) % 7
+        if days_ahead == 0:
+            days_ahead = 7
+        lines.append(f"  {name} → {(today + timedelta(days=days_ahead)).isoformat()}")
+    return "\n".join(lines)
 
 
 # ────────────────────────── Промпты парсинга по типу ─────────────────────────
@@ -52,22 +69,35 @@ _SESSION_REPLY_SYSTEM = (
     "Если поле не упоминается — null."
 )
 
-_WORK_REPLY_SYSTEM = (
-    "Ты парсишь дополнение к записанной работе/задаче. Ответь JSON без markdown:\n"
-    '{"category": "расклад|ритуал|соцсети|расходники|обучение|прочее или null", '
-    '"deadline": "YYYY-MM-DD HH:MM или null", '
-    '"priority": "срочно|важно|можно потом или null", '
-    '"notes": "заметки или null"}\n'
-    "Если поле не упомянуто — null."
-)
+def _work_reply_system(tz_offset: int = 3) -> str:
+    return (
+        "Ты парсишь дополнение к записанной работе/задаче. Ответь JSON без markdown:\n"
+        '{"category": "расклад|ритуал|соцсети|расходники|обучение|прочее или null", '
+        '"deadline": "YYYY-MM-DD HH:MM или null", '
+        '"priority": "срочно|важно|можно потом или null", '
+        '"notes": "заметки или null"}\n'
+        "Если поле не упомянуто — null.\n\n"
+        + _date_context(tz_offset)
+        + "\nСлова 'перенеси на X' / 'дедлайн X' → deadline = ISO-дата дня недели X "
+        "из таблицы выше (без времени, если время не названо)."
+    )
 
-_TASK_REPLY_SYSTEM = (
-    "Ты парсишь дополнение к записанной задаче Nexus. Ответь JSON без markdown:\n"
-    '{"deadline": "YYYY-MM-DD HH:MM или null", '
-    '"category": "строка или null", '
-    '"priority": "срочно|важно|можно потом или null"}\n'
-    "Если поле не упомянуто — null."
-)
+
+def _task_reply_system(tz_offset: int = 3) -> str:
+    return (
+        "Ты парсишь дополнение к записанной задаче Nexus. Ответь JSON без markdown:\n"
+        '{"deadline": "YYYY-MM-DD HH:MM или null", '
+        '"category": "строка или null", '
+        '"priority": "срочно|важно|можно потом или null"}\n'
+        "Если поле не упомянуто — null.\n\n"
+        + _date_context(tz_offset)
+        + "\nСлова 'перенеси на X' / 'дедлайн X' / 'перенос на X' → deadline = ISO-дата "
+        "дня недели X из таблицы выше (без времени, если время не названо).\n"
+        "Примеры:\n"
+        "  'перенеси на среду' → deadline='<дата среды из таблицы>'\n"
+        "  'перенеси на пятницу в 18' → deadline='<дата пятницы> 18:00'"
+    )
+
 
 _CLIENT_REPLY_SYSTEM = (
     "Ты парсишь reply Кай на сообщение бота про клиента. Ответь JSON без markdown:\n"
@@ -89,9 +119,15 @@ _CLIENT_REPLY_SYSTEM = (
 _TYPE_TO_SYSTEM = {
     "ritual":  _RITUAL_REPLY_SYSTEM,
     "session": _SESSION_REPLY_SYSTEM,
-    "work":    _WORK_REPLY_SYSTEM,
-    "task":    _TASK_REPLY_SYSTEM,
     "client":  _CLIENT_REPLY_SYSTEM,
+}
+
+# task/work промпты зависят от "сегодня" (относительные даты типа "среда") —
+# строятся динамически через _task_reply_system/_work_reply_system, а не
+# берутся статически из _TYPE_TO_SYSTEM.
+_TYPE_TO_DYNAMIC_SYSTEM = {
+    "task": _task_reply_system,
+    "work": _work_reply_system,
 }
 
 
@@ -180,9 +216,10 @@ def _coerce_date(val: str) -> str:
     return val.replace(" ", "T") if " " in val else val
 
 
-async def parse_reply(page_type: str, reply_text: str) -> Dict[str, Any]:
+async def parse_reply(page_type: str, reply_text: str, tz_offset: int = 3) -> Dict[str, Any]:
     """Спарсить reply-текст для данного типа. Вернёт dict с ненулевыми полями."""
-    system = _TYPE_TO_SYSTEM.get(page_type)
+    dynamic = _TYPE_TO_DYNAMIC_SYSTEM.get(page_type)
+    system = dynamic(tz_offset) if dynamic else _TYPE_TO_SYSTEM.get(page_type)
     if not system:
         return {}
     raw = await ask_claude(reply_text, system=system, max_tokens=300,

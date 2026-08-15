@@ -22,6 +22,34 @@ from arcana.repos.clients_repo import Client
 
 # ── task ──────────────────────────────────────────────────────────────────────
 
+def test_task_reply_system_has_today_and_weekday_dates():
+    """Reply-broken bug: 'перенеси на среду' needs a 'today' anchor to resolve
+    to a concrete ISO date — the prompt used to have none, so Haiku had no way
+    to compute it and the reply fell through to unknown."""
+    from datetime import datetime, timedelta, timezone
+    tz_offset = 3
+    now = datetime.now(timezone(timedelta(hours=tz_offset)))
+    today = now.date()
+    system = ru._task_reply_system(tz_offset)
+    assert today.isoformat() in system
+    for i, name in enumerate(ru._DOW_RU):
+        days_ahead = (i - now.weekday()) % 7 or 7
+        expected = (today + timedelta(days=days_ahead)).isoformat()
+        assert f"{name} → {expected}" in system
+
+
+@pytest.mark.asyncio
+async def test_parse_reply_task_passes_date_context_to_claude():
+    """parse_reply('task', ...) must build the system prompt dynamically per
+    tz_offset (not a static string) so relative dates resolve correctly."""
+    with patch.object(ru, "ask_claude", AsyncMock(return_value='{"deadline": null}')) as m:
+        await ru.parse_reply("task", "перенеси на среду", tz_offset=3)
+    m.assert_awaited_once()
+    system = m.await_args.kwargs["system"]
+    assert "Сегодня:" in system
+    assert "среда →" in system
+
+
 @pytest.mark.asyncio
 async def test_task_reply_calls_pg_tasks_set_props():
     from nexus.repos.pg_tasks_repo import PgTasksRepo

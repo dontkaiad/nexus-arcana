@@ -39,7 +39,11 @@ async def handle_reply_update(message: Message, user_notion_id: str = "") -> boo
         return False
 
     try:
-        updates = await parse_reply(page_type, reply_text)
+        tz_offset = 3
+        if page_type == "task":
+            from nexus.handlers.tasks import _get_user_tz
+            tz_offset = await _get_user_tz(message.from_user.id)
+        updates = await parse_reply(page_type, reply_text, tz_offset=tz_offset)
         if not updates:
             await message.answer("✏️ Не поняла что дополнить.")
             await react(message, "🤔")
