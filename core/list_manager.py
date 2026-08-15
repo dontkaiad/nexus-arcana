@@ -243,14 +243,25 @@ async def search_memory_categories(item_names: list) -> dict:
 async def find_task_by_name(
     query: str, user_page_id: str, db_id: str = "", title_prop: str = "Задача",
 ) -> list:
-    """Поиск задачи по названию — деградировал до пустого результата.
+    """Поиск задачи/работы по названию для «привязать список к задаче» (#152).
 
-    Раньше искал в Notion ✅ Задачи. Notion вырезан, а PG-эквивалента поиска
-    задачи по названию нет (PgTasksRepo не имеет title-search), поэтому
-    «привязка списка к задаче» возвращает [] и вызыватели идут по ветке
-    «задача не найдена».
+    title_prop различает домен так же, как раньше различал Notion-пропу:
+    "Работа" → 🔮 Работы Арканы (PgWorksRepo), иначе → ✅ Задачи Nexus
+    (PgTasksRepo). Возвращает список плоских dict {"id": str, "name": str} —
+    вызыватели (nexus/handlers/lists.py, arcana/handlers/lists.py) индексируют
+    именно по этим ключам.
     """
-    return []
+    try:
+        if title_prop == "Работа":
+            from arcana.repos.pg_works_repo import PgWorksRepo
+            items = await PgWorksRepo().find_by_title(query, user_notion_id=user_page_id)
+        else:
+            from nexus.repos.pg_tasks_repo import PgTasksRepo
+            items = await PgTasksRepo().find_by_title(query, user_notion_id=user_page_id)
+        return [{"id": it.id, "name": it.title} for it in items]
+    except Exception as e:
+        logger.warning("find_task_by_name(%r, title_prop=%r): %s", query, title_prop, e)
+        return []
 
 
 # ── CRUD ──────────────────────────────────────────────────────────────────────

@@ -7,24 +7,32 @@
 """
 from __future__ import annotations
 
-from datetime import date, timedelta
+from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from nexus.repos.pg_tasks_repo import Task
 
+# issue #168: тест раньше строил дедлайны от date.today() (машинное/UTC время),
+# но cmd_tasks считает "сегодня" через _get_user_tz(uid) — раньше НЕ замоканный,
+# значит реально бил в PG за tz_67686090 (=5 на проде). При расхождении offset'ов
+# "сегодня" теста и "сегодня" cmd_tasks расходились на день ближе к полуночи —
+# просроченная/сегодняшняя категоризация съезжала. Фиксируем оба на один offset.
+_TEST_TZ_OFFSET = 3
+_TEST_TZ = timezone(timedelta(hours=_TEST_TZ_OFFSET))
+
 
 def _today():
-    return date.today().isoformat()
+    return datetime.now(_TEST_TZ).date().isoformat()
 
 
 def _yesterday():
-    return (date.today() - timedelta(days=1)).isoformat()
+    return (datetime.now(_TEST_TZ).date() - timedelta(days=1)).isoformat()
 
 
 def _tomorrow():
-    return (date.today() + timedelta(days=1)).isoformat()
+    return (datetime.now(_TEST_TZ).date() + timedelta(days=1)).isoformat()
 
 
 def _tasks():
@@ -49,6 +57,8 @@ async def test_cmd_tasks_reads_pg_and_categorizes(mock_message):
     with patch("nexus.repos.tasks_repo._repo.active",
                AsyncMock(return_value=_tasks())) as m_active, \
          patch("core.notion_client.query_pages", AsyncMock()) as m_qp, \
+         patch("nexus.handlers.tasks._get_user_tz",
+               AsyncMock(return_value=_TEST_TZ_OFFSET)), \
          patch("nexus.handlers.streaks.get_streak",
                MagicMock(return_value={"streak": 2, "best": 4})):
         await cmd_tasks(msg, user_notion_id="u-1")

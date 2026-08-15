@@ -156,6 +156,54 @@ async def test_list_all_empty_user_returns_all(engine):
     assert len(result) == 2
 
 
+# ── find_by_title (#152) ───────────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_find_by_title_matches_substring(engine):
+    from arcana.repos.pg_works_repo import PgWorksRepo
+    _insert_work(engine, title="Расклад для Оли", user="u1")
+    _insert_work(engine, title="Ритуал очищения", user="u1")
+    repo = PgWorksRepo()
+    with patch("arcana.repos.pg_works_repo.get_engine", return_value=engine):
+        result = await repo.find_by_title("Оли", "u1")
+    assert len(result) == 1
+    assert result[0].title == "Расклад для Оли"
+
+
+@pytest.mark.asyncio
+async def test_find_by_title_excludes_done(engine):
+    from arcana.repos.pg_works_repo import PgWorksRepo
+    _insert_work(engine, title="Готовая работа", user="u1", status_code="done")
+    repo = PgWorksRepo()
+    with patch("arcana.repos.pg_works_repo.get_engine", return_value=engine):
+        result = await repo.find_by_title("работа", "u1")
+    assert result == []
+
+
+@pytest.mark.asyncio
+async def test_find_by_title_filters_by_user(engine):
+    from arcana.repos.pg_works_repo import PgWorksRepo
+    _insert_work(engine, title="Общее имя", user="u1")
+    _insert_work(engine, title="Общее имя", user="u2")
+    repo = PgWorksRepo()
+    with patch("arcana.repos.pg_works_repo.get_engine", return_value=engine):
+        result = await repo.find_by_title("Общее имя", "u1")
+    assert len(result) == 1
+
+
+@pytest.mark.asyncio
+async def test_find_by_title_empty_query_returns_all_open(engine):
+    """Пустой query (as used by on_complete_task's id-prefix lookup) → все
+    открытые работы пользователя, без фильтра по названию."""
+    from arcana.repos.pg_works_repo import PgWorksRepo
+    _insert_work(engine, title="А", user="u1")
+    _insert_work(engine, title="Б", user="u1")
+    repo = PgWorksRepo()
+    with patch("arcana.repos.pg_works_repo.get_engine", return_value=engine):
+        result = await repo.find_by_title("", "u1")
+    assert len(result) == 2
+
+
 # ── set_status ───────────────────────────────────────────────────────────────
 
 @pytest.mark.asyncio

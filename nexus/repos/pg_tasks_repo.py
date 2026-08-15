@@ -204,6 +204,28 @@ def _to_task(row) -> Task:
 
 # ── Sync helpers (run in asyncio.to_thread) ───────────────────────────────────
 
+def _find_by_title_sync(query: str, user_notion_id: str) -> List[Task]:
+    """ILIKE-поиск активных задач по названию (#152: PG-эквивалент старого
+    Notion title-contains для «привязать список к задаче»)."""
+    _ensure_lookups()
+    q = select(tasks).where(
+        tasks.c.status_id.notin_(
+            select(task_status.c.id).where(
+                task_status.c.code.in_(["Done", "Archived"])
+            )
+        )
+    )
+    if query:
+        q = q.where(tasks.c.title.ilike(f"%{query}%"))
+    if user_notion_id:
+        q = q.where(tasks.c.user_notion_id == user_notion_id)
+    q = q.order_by(tasks.c.priority_id.asc().nulls_last()).limit(10)
+
+    with get_engine().connect() as conn:
+        rows = conn.execute(q).fetchall()
+    return [_to_task(r) for r in rows]
+
+
 def _list_active_sync(user_notion_id: str, include_in_progress: bool) -> List[Task]:
     _ensure_lookups()
     q = select(tasks).where(
@@ -440,6 +462,9 @@ def _active_recurring_without_reminder_sync(user_notion_id: str) -> List[Task]:
 # ── Public async API ───────────────────────────────────────────────────────────
 
 class PgTasksRepo:
+    async def find_by_title(self, query: str, user_notion_id: str = "") -> List[Task]:
+        return await asyncio.to_thread(_find_by_title_sync, query, user_notion_id)
+
     async def active(
         self, user_notion_id: str = "", include_in_progress: bool = True
     ) -> List[Task]:

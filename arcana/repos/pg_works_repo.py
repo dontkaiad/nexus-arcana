@@ -103,6 +103,19 @@ class PgWorksRepo:
             rows = conn.execute(stmt).fetchall()
         return [_row_to_work(r) for r in rows]
 
+    def _find_by_title_sync(self, query: str, user_notion_id: str) -> List[Work]:
+        """ILIKE-поиск открытых Работ по названию (#152: PG-эквивалент старого
+        Notion title-contains для «привязать список к работе»)."""
+        stmt = _select_works().where(work_status.c.code != "done")
+        if query:
+            stmt = stmt.where(works.c.title.ilike(f"%{query}%"))
+        if user_notion_id:
+            stmt = stmt.where(works.c.user_notion_id == user_notion_id)
+        stmt = stmt.order_by(works.c.deadline.asc().nullslast()).limit(10)
+        with get_engine().connect() as conn:
+            rows = conn.execute(stmt).fetchall()
+        return [_row_to_work(r) for r in rows]
+
     def _find_active_for_client_sync(
         self, client_id: str, category: str, user_notion_id: str
     ) -> Optional[Work]:
@@ -283,6 +296,9 @@ class PgWorksRepo:
 
     async def find_by_id(self, work_id: str) -> Optional[Work]:
         return await asyncio.to_thread(self._find_by_id_sync, work_id)
+
+    async def find_by_title(self, query: str, user_notion_id: str = "") -> List[Work]:
+        return await asyncio.to_thread(self._find_by_title_sync, query, user_notion_id)
 
     async def list_all(self, user_notion_id: str = "") -> List[Work]:
         return await asyncio.to_thread(self._list_all_sync, user_notion_id)
