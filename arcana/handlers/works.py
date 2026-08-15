@@ -92,8 +92,9 @@ async def handle_work_done(message: Message, text: str, user_notion_id: str = ""
         best_score = 0
         for item in items:
             name = item.title.lower()
-            # считаем сколько слов из hint есть в названии
-            words = [w for w in hint_lower.split() if len(w) > 2]
+            # считаем сколько слов из hint есть в названии (#94: >2 роняло
+            # 2-буквенные хинты вроде "лу"/"1С" в words=[] → всегда "не нашла")
+            words = [w for w in hint_lower.split() if len(w) >= 2]
             score = sum(1 for w in words if w in name)
             if score > best_score:
                 best_score = score

@@ -2526,11 +2526,17 @@ _DONE_STOP_WORDS = {
 
 
 def _hint_words(text: str):
-    """Извлечь значимые слова из фразы (без стоп-слов и коротких)."""
+    """Извлечь значимые слова из фразы (без стоп-слов и коротких).
+
+    #94-класс: порог был >2 и ронял двухбуквенные значимые хинты
+    ("лу", "1С") в пустой набор → всюду score=0 → «не нашёл» при точном
+    совпадении. Предлоги длиной 1-2 буквы уже в _DONE_STOP_WORDS, так что
+    >=2 не открывает дорогу мусору.
+    """
     result = set()
     for w in text.lower().split():
         w_clean = w.strip(".,!?;:—–\"'")
-        if w_clean and w_clean not in _DONE_STOP_WORDS and len(w_clean) > 2:
+        if w_clean and w_clean not in _DONE_STOP_WORDS and len(w_clean) >= 2:
             result.add(w_clean)
     return result
 
@@ -2555,7 +2561,7 @@ async def handle_task_cancel(message: Message, task_hint: str, user_notion_id: s
     cancel_words = set()
     for w in task_hint.lower().split():
         w_clean = w.strip(".,!?;:—–\"'")
-        if w_clean and w_clean not in _CANCEL_STOP_WORDS and len(w_clean) > 2:
+        if w_clean and w_clean not in _CANCEL_STOP_WORDS and len(w_clean) >= 2:
             cancel_words.add(w_clean)
 
     if not cancel_words:
@@ -2724,6 +2730,7 @@ async def cb_done_multi_confirm(call: CallbackQuery) -> None:
         await call.message.edit_text("☐ Ничего не выбрано.")
         return
     done_titles = []
+    last_done_task_id = None
     for _, title, task_id, task in tasks:
         if task_id not in selected:
             continue
@@ -2735,9 +2742,13 @@ async def cb_done_multi_confirm(call: CallbackQuery) -> None:
             if result:
                 _remove_task_jobs(task_id)
                 done_titles.append(title)
+                last_done_task_id = task_id
     if done_titles:
         phrase = _random.choice(_DONE_PHRASES)
-        streak_line = await _update_streak_line(uid, task_id)
+        # #116: раньше сюда попадал task_id — последнее значение цикла ПО
+        # ВСЕМ показанным задачам, а не по реально отмеченным. last_done_task_id
+        # хранит id последней успешно завершённой (не-повторяющейся) задачи.
+        streak_line = await _update_streak_line(uid, last_done_task_id)
         lines = "\n".join(f"✅ {t}" for t in done_titles)
         await call.message.edit_text(f"{phrase}\n{lines}{streak_line}")
     else:
