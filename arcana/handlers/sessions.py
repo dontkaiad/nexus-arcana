@@ -787,8 +787,19 @@ def _triplet_remove_confirm_keyboard(short_id: str) -> InlineKeyboardMarkup:
 
 
 async def _resolve_triplet_page(short_id: str, user_notion_id: str) -> Optional[TripletEntry]:
-    """short_id (32 hex без дефисов) → TripletEntry. None если не найден."""
-    return await _repo.find_by_short_id(short_id, user_notion_id)
+    """short_id (32 hex без дефисов) → TripletEntry. None если не найден или чужой.
+
+    #108: find_by_short_id принимает user_notion_id, но сам запрос его не
+    фильтрует (поиск идёт по id) — любой callback с валидным short_id мог
+    зарезолвить чужой триплет. Сверяем владельца здесь: fail-closed, если у
+    записи ЕСТЬ owner и он не совпадает с вызывающим. Пустой user_notion_id
+    в старых пре-миграционных строках не блокируем — legacy-данные без
+    зафиксированного владельца.
+    """
+    entry = await _repo.find_by_short_id(short_id, user_notion_id)
+    if entry and entry.user_notion_id and user_notion_id and entry.user_notion_id != user_notion_id:
+        return None
+    return entry
 
 
 async def _save_and_post_triplet(
@@ -2136,7 +2147,7 @@ async def handle_session_search(
     try:
         raw = await ask_claude(
             text, system=SESSION_SEARCH_PARSE_SYSTEM, max_tokens=150,
-            temperature=0,
+            model="claude-haiku-4-5-20251001", temperature=0,
         )
         data = _parse_json_safe(raw) or {}
         keywords = [

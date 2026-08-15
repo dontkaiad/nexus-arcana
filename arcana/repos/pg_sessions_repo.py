@@ -115,6 +115,7 @@ def _row_to_triplet(row) -> TripletEntry:
         barter_what=row.barter_what or "",
         bottom_card=row.bottom_card or "",
         photo_url=row.photo_url or None,
+        user_notion_id=getattr(row, "user_notion_id", None) or "",
     )
 
 

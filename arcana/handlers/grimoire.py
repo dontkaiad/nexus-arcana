@@ -101,8 +101,6 @@ def _heuristic_grimoire_parse(text: str) -> dict:
         "source": None,
     }
 
-_pending_search: dict = {}  # uid → user_notion_id
-
 
 def _menu_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
@@ -279,7 +277,8 @@ async def cb_grim_inventory(callback: CallbackQuery, user_notion_id: str = "") -
 async def cb_grim_search(callback: CallbackQuery, user_notion_id: str = "") -> None:
     await callback.answer()
     uid = callback.from_user.id
-    _pending_search[uid] = user_notion_id
+    from arcana.pending_grimoire_search import save_pending_search
+    await save_pending_search(uid, user_notion_id)
     await callback.message.edit_text(
         "🔍 Введи поисковый запрос (слово, тема или категория):",
         reply_markup=_back_keyboard(),
@@ -381,8 +380,9 @@ async def handle_grimoire_search(message: Message, text: str, user_notion_id: st
 async def check_pending_search(message: Message, text: str) -> bool:
     """Если юзер ожидает ввода поискового запроса — обработать и вернуть True."""
     uid = message.from_user.id
-    if uid not in _pending_search:
+    from arcana.pending_grimoire_search import pop_pending_search
+    user_notion_id = await pop_pending_search(uid)
+    if user_notion_id is None:
         return False
-    user_notion_id = _pending_search.pop(uid)
     await handle_grimoire_search(message, text, user_notion_id)
     return True

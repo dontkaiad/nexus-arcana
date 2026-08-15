@@ -32,6 +32,7 @@ class TripletEntry:
     barter_what: str = ""     # Бартер · что
     bottom_card: str = ""     # Дно колоды
     photo_url: Optional[str] = None
+    user_notion_id: str = ""  # владелец записи, для ownership-проверок (#108)
 
 
 @dataclass

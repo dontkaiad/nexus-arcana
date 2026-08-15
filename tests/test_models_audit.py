@@ -24,6 +24,7 @@ HAIKU_REQUIRED = [
     "arcana/handlers/clients.py",
     "arcana/handlers/grimoire.py",
     "arcana/handlers/rituals.py",
+    "arcana/handlers/sessions.py",  # session search keyword parsing (#106)
     "nexus/handlers/notes.py",
     "nexus/nexus_bot.py",
     "miniapp/backend/routes/today.py",  # ADHD tip — короткая фраза, Haiku

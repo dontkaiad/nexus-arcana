@@ -148,7 +148,8 @@ async def handle_note_callback(query: CallbackQuery) -> None:
             return
         old_tag = parts[2]
         new_tag = parts[3]
-        pending = _pending.pop(uid, {})
+        from nexus.pending_note_edit import pop_pending_note_edit
+        pending = await pop_pending_note_edit(uid) or {}
         page_id = pending.get("page_id")
         current_tags = pending.get("current_tags", [])
         if not page_id:
@@ -236,7 +237,8 @@ async def handle_edit_note(message: Message, data: dict, user_notion_id: str) ->
     uid = message.from_user.id
 
     if len(note.tags) > 1:
-        _pending[uid] = {"page_id": note.id, "current_tags": note.tags, "new_value": tag_name}
+        from nexus.pending_note_edit import save_pending_note_edit
+        await save_pending_note_edit(uid, note.id, note.tags, tag_name)
         buttons = [
             [InlineKeyboardButton(
                 text=t,
