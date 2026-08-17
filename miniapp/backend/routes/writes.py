@@ -100,6 +100,24 @@ async def _reschedule_task_reminder(
         logger.warning("live reminder reschedule failed for %s: %s", (task_id or "?")[:8], e)
 
 
+def _cancel_task_jobs(task_id: str) -> None:
+    """Снять APScheduler jobs (reminder_/deadline_) задачи в общем процессе.
+
+    Зеркалит то, что делает бот в task_complete/handle_task_cancel
+    (nexus/handlers/tasks.py) — Mini App раньше этого не делала, из-за чего
+    задача, закрытая ДО срабатывания напоминания/дедлайна, всё равно потом
+    пинговала (#73 закрыл только уже-отправленную плашку в чате, сам job
+    оставался живым). Per TASKS.md: reminder/deadline — projections, job
+    disposable — можно смело снимать, при рестарте пересоберётся из колонок
+    если что. Никогда не бросает.
+    """
+    try:
+        from nexus.handlers.tasks import _remove_task_jobs
+        _remove_task_jobs(task_id)
+    except Exception as e:
+        logger.warning("cancel scheduler jobs failed for %s: %s", (task_id or "?")[:8], e)
+
+
 # ═══════════════════════════════════════════════════════════════
 # TASKS
 # ═══════════════════════════════════════════════════════════════
@@ -152,6 +170,12 @@ async def task_done(
     await notify_user(tg_id, f"{verb}: <b>{_esc(task.title)}</b>", bot="nexus")
     # #73: погасить живую плашку-напоминание этой задачи в чате (если висит).
     await clear_task_reminder(task_id, bot="nexus")
+    if not is_repeating:
+        # Одноразовая задача реально завершена (Done) — снимаем ещё не
+        # сработавшие reminder_/deadline_ jobs, иначе они всё равно
+        # пингуют позже. Повторяющиеся (→ In progress) job не трогаем: это
+        # штатное ожидание дедлайн-этапа (см. TASKS.md "complete").
+        _cancel_task_jobs(task_id)
     return {"ok": True, "status": new_status}
 
 
@@ -245,6 +269,10 @@ async def task_cancel(
     if not ok:
         raise HTTPException(status_code=500, detail="failed to cancel")
     await notify_user(tg_id, f"❌ Отменила: <b>{_esc(task.title)}</b>", bot="nexus")
+    # Отменённая задача не должна пинговать напоминанием/дедлайном позже
+    # (симметрично боту, см. handle_task_cancel).
+    await clear_task_reminder(task_id, bot="nexus")
+    _cancel_task_jobs(task_id)
     return {"ok": True}
 
 

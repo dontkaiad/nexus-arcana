@@ -524,7 +524,7 @@ const Sheet = ({ s, open, onClose, title, children }) => {
         onClick={(e) => e.stopPropagation()}
         style={{
           width: "100%",
-          background: "transparent",
+          background: s.card,
           backdropFilter: "blur(40px)",
           WebkitBackdropFilter: "blur(40px)",
           boxShadow: sheetShadow,
