@@ -27,14 +27,32 @@ async def test_task_reply_calls_pg_tasks_set_props_with_reminder():
     from nexus.repos.pg_tasks_repo import PgTasksRepo
     with patch.object(PgTasksRepo, "set_props", AsyncMock()) as m:
         applied = await ru.apply_updates(
-            "42", "task", None, {"reminder": "2026-08-19 11:00"},
+            "42", "task", None, {"reminder": "2026-08-19 11:00"}, tz_offset=3,
         )
     m.assert_awaited_once()
     page_id, props = m.await_args.args
     assert page_id == "42"
-    assert props["Напоминание"] == {"date": {"start": "2026-08-19T11:00"}}
+    assert props["Напоминание"] == {"date": {"start": "2026-08-19T11:00+03:00"}}
     assert "Дедлайн" not in props
     assert applied["Напоминание"] == "2026-08-19T11:00"
+
+
+@pytest.mark.asyncio
+async def test_task_reply_reminder_stamped_with_users_own_tz_offset():
+    """Repro of the follow-up bug report: task created (deadline 11:00
+    local, correct — creation already used _date_with_tz). Reply
+    "напоминание завтра в 11" wrote the reminder via _apply_task's _p_date
+    with NO tz suffix at all, so PgTasksRepo._parse_iso silently tagged it
+    UTC and the Mini App (which does correctly convert stored-UTC → local)
+    displayed it shifted by the user's tz_offset (11:00 -> 16:00 for a
+    UTC+5 user). Fix must stamp the same tz_offset used everywhere else."""
+    from nexus.repos.pg_tasks_repo import PgTasksRepo
+    with patch.object(PgTasksRepo, "set_props", AsyncMock()) as m:
+        await ru.apply_updates(
+            "42", "task", None, {"reminder": "2026-08-19 11:00"}, tz_offset=5,
+        )
+    _, props = m.await_args.args
+    assert props["Напоминание"] == {"date": {"start": "2026-08-19T11:00+05:00"}}
 
 
 @pytest.mark.asyncio

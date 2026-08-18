@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Optional, List
 
 from sqlalchemy import select, text
@@ -245,7 +245,7 @@ class PgWorksRepo:
             )
         return res.rowcount > 0
 
-    def _set_props_sync(self, work_id: str, fields: dict) -> bool:
+    def _set_props_sync(self, work_id: str, fields: dict, tz_offset: int = 3) -> bool:
         try:
             wid = int(work_id)
         except (ValueError, TypeError):
@@ -274,20 +274,26 @@ class PgWorksRepo:
                         parsed = None
                 if parsed:
                     if parsed.tzinfo is None:
-                        parsed = parsed.replace(tzinfo=timezone.utc)
+                        # `dl` идёт от Haiku как наивная строка ЛОКАЛЬНОГО
+                        # времени юзера, не UTC — раньше здесь молча
+                        # ставился timezone.utc, из-за чего в PG уезжало
+                        # время (тот же баг что был в reply-правке задач
+                        # Nexus, см. core/reply_update.py _with_tz_suffix).
+                        parsed = parsed.replace(tzinfo=timezone(timedelta(hours=tz_offset)))
                     vals["deadline"] = parsed
             if not vals:
                 return False
             res = conn.execute(works.update().where(works.c.id == wid).values(**vals))
         return res.rowcount > 0
 
-    async def set_props(self, work_id: str, **fields) -> bool:
+    async def set_props(self, work_id: str, tz_offset: int = 3, **fields) -> bool:
         """Обновить поля Работы (reply-правка #156; переиспользуемо #154).
 
         Поля: category (Text), priority ('срочно/важно/можно потом'),
-        deadline ('YYYY-MM-DD[ HH:MM]').
+        deadline ('YYYY-MM-DD[ HH:MM]'). `tz_offset` — часовой пояс юзера,
+        применяется к naive deadline (см. _set_props_sync).
         """
-        return await asyncio.to_thread(self._set_props_sync, work_id, fields)
+        return await asyncio.to_thread(self._set_props_sync, work_id, fields, tz_offset)
 
     # ── Public async interface ────────────────────────────────────────────────
 

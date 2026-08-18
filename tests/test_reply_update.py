@@ -57,14 +57,35 @@ async def test_task_reply_calls_pg_tasks_set_props():
         applied = await ru.apply_updates(
             "42", "task", None,
             {"deadline": "2026-07-01 18:00", "priority": "срочно", "category": "Дом"},
+            tz_offset=3,
         )
     m.assert_awaited_once()
     page_id, props = m.await_args.args
     assert page_id == "42"
-    assert props["Дедлайн"] == {"date": {"start": "2026-07-01T18:00"}}
+    # Наивная строка от Haiku должна уйти в PG с явным offset'ом — без него
+    # PgTasksRepo._parse_iso молча трактует её как UTC и время в PG уезжает
+    # на tz_offset часов (issue: "напоминание завтра в 11" сохранялось со
+    # сдвигом, видно было по расхождению бот vs Mini App).
+    assert props["Дедлайн"] == {"date": {"start": "2026-07-01T18:00+03:00"}}
     assert props["Приоритет"] == {"select": {"name": "Срочно"}}
     assert props["Категория"] == {"select": {"name": "Дом"}}
     assert applied["Приоритет"] == "Срочно"
+    # applied — то что показываем юзеру в чате, offset туда не подмешиваем.
+    assert applied["Дедлайн"] == "2026-07-01T18:00"
+
+
+@pytest.mark.asyncio
+async def test_task_reply_deadline_offset_follows_tz_offset():
+    """Non-default tz_offset (e.g. +5) must produce a matching suffix, not a
+    hardcoded +03:00 — otherwise the bug just reappears for any user whose
+    timezone isn't Moscow."""
+    from nexus.repos.pg_tasks_repo import PgTasksRepo
+    with patch.object(PgTasksRepo, "set_props", AsyncMock()) as m:
+        await ru.apply_updates(
+            "42", "task", None, {"deadline": "2026-08-19 11:00"}, tz_offset=5,
+        )
+    _, props = m.await_args.args
+    assert props["Дедлайн"] == {"date": {"start": "2026-08-19T11:00+05:00"}}
 
 
 # ── client: append concatenates, not overwrites ──────────────────────────────

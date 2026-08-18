@@ -242,6 +242,7 @@ async def apply_updates(
     db_id: Optional[str],
     updates: Dict[str, Any],
     user_notion_id: str = "",
+    tz_offset: int = 3,
 ) -> Dict[str, Any]:
     """Применить reply-правки к записи через per-domain PG `set_props`.
 
@@ -249,12 +250,17 @@ async def apply_updates(
     используется — каждый PG-репозиторий сам резолвит select/FK и сам
     дописывает append-поля (read-modify-write внутри `set_props`).
     `db_id` игнорируется (PG-репозитории не нуждаются в database_id).
+    `tz_offset` нужен "task" (см. `_apply_task`) и "work" (см. `_apply_work`)
+    — Haiku возвращает наивные локальные строки, а PG-запись без явного
+    оффсета молча интерпретирует их как UTC (issue: reply "напоминание
+    завтра в 11" / "перенеси на X" сохранялось со сдвигом на tz_offset
+    часов).
     Возвращает dict {human_field_name: value} для подтверждения юзеру.
     """
     if not updates:
         return {}
     if page_type == "task":
-        return await _apply_task(page_id, updates)
+        return await _apply_task(page_id, updates, tz_offset)
     if page_type == "client":
         return await _apply_client(page_id, updates)
     if page_type == "session":
@@ -262,7 +268,7 @@ async def apply_updates(
     if page_type == "ritual":
         return await _apply_ritual(page_id, updates)
     if page_type == "work":
-        return await _apply_work(page_id, updates)
+        return await _apply_work(page_id, updates, tz_offset)
     return {}
 
 
@@ -276,19 +282,31 @@ def _p_date(iso: str) -> Dict[str, Any]:
     return {"date": {"start": iso}}
 
 
-async def _apply_task(page_id: str, updates: Dict[str, Any]) -> Dict[str, Any]:
+def _with_tz_suffix(iso: str, tz_offset: int) -> str:
+    """Append '+HH:00' to a naive 'YYYY-MM-DDTHH:MM' string so PgTasksRepo's
+    _parse_iso stores the correct instant instead of silently treating a
+    naive datetime as UTC (mirrors nexus.handlers.tasks._date_with_tz — same
+    fix, this module's own write path, to avoid a nexus.handlers import
+    cycle). Date-only strings pass through unchanged."""
+    if "T" in iso and "+" not in iso and "Z" not in iso:
+        sign = "+" if tz_offset >= 0 else "-"
+        iso = f"{iso}{sign}{abs(tz_offset):02d}:00"
+    return iso
+
+
+async def _apply_task(page_id: str, updates: Dict[str, Any], tz_offset: int = 3) -> Dict[str, Any]:
     """✅ Задачи Nexus → PgTasksRepo.set_props (Notion-format props, PG резолвит)."""
     props: Dict[str, Any] = {}
     applied: Dict[str, Any] = {}
     if updates.get("deadline"):
         iso = _coerce_date(str(updates["deadline"]))
         if iso:
-            props["Дедлайн"] = _p_date(iso)
+            props["Дедлайн"] = _p_date(_with_tz_suffix(iso, tz_offset))
             applied["Дедлайн"] = iso
     if updates.get("reminder"):
         iso = _coerce_date(str(updates["reminder"]))
         if iso:
-            props["Напоминание"] = _p_date(iso)
+            props["Напоминание"] = _p_date(_with_tz_suffix(iso, tz_offset))
             applied["Напоминание"] = iso
     if updates.get("category"):
         props["Категория"] = _p_select(updates["category"])
@@ -424,7 +442,7 @@ async def _apply_ritual(page_id: str, updates: Dict[str, Any]) -> Dict[str, Any]
     return applied
 
 
-async def _apply_work(page_id: str, updates: Dict[str, Any]) -> Dict[str, Any]:
+async def _apply_work(page_id: str, updates: Dict[str, Any], tz_offset: int = 3) -> Dict[str, Any]:
     """🔮 Работы → PgWorksRepo.set_props."""
     from arcana.repos.pg_works_repo import PgWorksRepo
     fields: Dict[str, Any] = {}
@@ -442,7 +460,7 @@ async def _apply_work(page_id: str, updates: Dict[str, Any]) -> Dict[str, Any]:
         fields["deadline"] = _coerce_date(str(updates["deadline"]))
         applied["Дедлайн"] = fields["deadline"]
     if fields:
-        await PgWorksRepo().set_props(page_id, **fields)
+        await PgWorksRepo().set_props(page_id, tz_offset=tz_offset, **fields)
     return applied
 
 
