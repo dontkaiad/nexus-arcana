@@ -51,7 +51,8 @@ async def handle_reply_update(message: Message, user_notion_id: str = "") -> boo
 
         db_id = get_db_id_for_type(page_type)
         applied = await apply_updates(
-            page_id, page_type, db_id, updates, user_notion_id=user_notion_id
+            page_id, page_type, db_id, updates,
+            user_notion_id=user_notion_id, tz_offset=tz_offset,
         )
         summary = await format_applied(applied)
 
