@@ -3680,7 +3680,7 @@ function BreakdownChips({ s, breakdown }) {
   );
 }
 
-function ArSessions({ s, openSession, sessFilterRequest, consumeSessFilter }) {
+function ArSessions({ s, openSession, sessFilterRequest, consumeSessFilter, sessChangedSig }) {
   const [f, setF] = useState("all");
   // Внешний триггер из ArDay → выставить wait и сбросить запрос.
   useEffect(() => {
@@ -3692,7 +3692,7 @@ function ArSessions({ s, openSession, sessFilterRequest, consumeSessFilter }) {
   let path = "/api/arcana/sessions";
   if (f === "wait") path += "?filter=status:wait";
   else if (f === "done") path += "?filter=status:done";
-  const { data, loading, error, refetch } = useApi(path, [f]);
+  const { data, loading, error, refetch } = useApi(path, [f, sessChangedSig]);
   const list = loading || error ? [] : adaptSessions(data);
 
   const pinned = list.find((x) => x.status === "wait" || x.status === "proc");
@@ -5324,7 +5324,7 @@ function SessionDetail({ s, id, slug }) {
           onSummarize={summarize} summarizing={summarizing}
         />
       ) : t ? (
-        <TripletSlide s={s} t={t} deckId={deckId} onVerdict={handleVerdict} />
+        <TripletSlide key={t.id} s={s} t={t} deckId={deckId} onVerdict={handleVerdict} />
       ) : null}
 
       {!isSolo && (
@@ -7352,6 +7352,11 @@ export default function App() {
   const [modal, setModal] = useState(null);
   // Сигнал «задача закрыта из шита» → списки проигрывают exit-анимацию + refetch.
   const [taskClosedSig, setTaskClosedSig] = useState(null);
+  // wave: статус сессии расклада вычисляется на бэке из вердиктов триплетов
+  // (не хранится отдельным полем) — список ArSessions не узнаёт о вердиктах,
+  // проставленных внутри открытого шита. Бампаем при закрытии шита сессии,
+  // чтобы список перезапросил актуальный статус.
+  const [sessChangedSig, setSessChangedSig] = useState(0);
   const [fabOpen, setFabOpen] = useState(false);
   const [fabForm, setFabForm] = useState(null);
   const aRef = useRef(null);
@@ -7429,6 +7434,7 @@ export default function App() {
     s: sky, openTask, openAdhd, openClient, openSession, openRitual, openGrimoire, openWork,
     openStreaks, openMoonPhases,
     taskClosedSig,
+    sessChangedSig,
     sessFilterRequest, consumeSessFilter,
     // wave6.3: навигация по табам из виджетов
     navigate: (tab, opts) => {
@@ -7696,7 +7702,7 @@ export default function App() {
       <Sheet
         s={sky}
         open={modal?.type === "session"}
-        onClose={() => setModal(null)}
+        onClose={() => { setModal(null); setSessChangedSig((x) => x + 1); }}
         title="Расклад"
       >
         {(modal?.payload?.slug || modal?.payload?.id) && (
