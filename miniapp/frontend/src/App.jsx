@@ -6771,10 +6771,17 @@ function TaskEditForm({ s, task, busy, onSave }) {
   const [title, setTitle] = useState(task?.title || "");
   const [cat, setCat] = useState(task?.cat || "");
   const [prio, setPrio] = useState(task?.prio || "⚪");
-  // Дедлайн и напоминание редактируются раздельно (пред-заполнено из raw ISO).
-  const [date, setDate] = useState(task?.deadlineDateRaw || "");
-  const [remDate, setRemDate] = useState(task?.reminderDateRaw || "");
-  const [remTime, setRemTime] = useState(task?.reminderTimeRaw || "");
+  // Дедлайн и напоминание редактируются раздельно, пред-заполнено из полей
+  // GET /api/tasks (miniapp/backend/routes/tasks.py::_serialize_pg_task):
+  // deadline/reminder — уже "YYYY-MM-DD" (to_local_date), reminder_time —
+  // "HH:MM" (extract_time). Раньше здесь читались deadlineDateRaw/
+  // reminderDateRaw/reminderTimeRaw — таких полей в объекте задачи никогда
+  // не было (мёртвый код с самого первого коммита файла), так что форма
+  // всегда открывалась с пустыми полями (или тем что подставил браузерный
+  // autofill даты/времени — отсюда путаница "почему 12:30, я ставила 11").
+  const [date, setDate] = useState(task?.deadline || "");
+  const [remDate, setRemDate] = useState(task?.reminder || "");
+  const [remTime, setRemTime] = useState(task?.reminder_time || "");
   const [cats, setCats] = useState([]);
 
   useEffect(() => {
