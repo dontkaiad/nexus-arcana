@@ -104,10 +104,19 @@ def build_system(tz_offset: int = 3) -> str:
     now_local = datetime.now(timezone(timedelta(hours=tz_offset)))
     today = now_local.strftime("%Y-%m-%d")
     today_dow = _DOW_RU[now_local.weekday()]
+    is_night = now_local.hour < 5
     night_rule = (
         f"- НОЧНАЯ ЛОГИКА: сейчас {now_local.strftime('%H:%M')} (ночь до 05:00) — "
         f"'завтра' = СЕГОДНЯ ({today}), 'послезавтра' = завтра ({(now_local + timedelta(days=1)).strftime('%Y-%m-%d')})"
-    ) if now_local.hour < 5 else ""
+    ) if is_night else ""
+    # Дата для слова "завтра" в примерах ниже — должна согласовываться с
+    # night_rule, а не всегда быть +1 день. Раньше пример 'напомни ... завтра
+    # ...' считал tomorrow_iso как now_local+1 день безусловно — это конкретный
+    # worked example, который перетягивал модель против абстрактного
+    # night_rule для СТРУКТУРНО идентичных сообщений ("напомни X завтра в Y"),
+    # даже когда night_rule формально присутствовал в промпте (issue: в 1 ночи
+    # "напомни завтра в 14 достать рыбу" ушло на +2 дня вместо "сегодня").
+    tomorrow_iso = today if is_night else (now_local + timedelta(days=1)).strftime("%Y-%m-%d")
     # NOTION_DATABASES_v4 sync: добавлены 🎲 Импульсивные / 🔮 Практика /
     # 🕯️ Расходники — реально существуют в БД 💰 Финансы.Категория, до этого
     # Haiku не знал и сваливал расходы в 💳 Прочее.
@@ -344,8 +353,8 @@ def build_system(tz_offset: int = 3) -> str:
         "ПРИМЕР ОДНОРАЗОВЫЕ (БЕЗ 'каждый'):",
         "  Ввод: 'напомни в воскресенье в 19 часов зарядить наушники' (есть 'напомни'+время → REMINDER)",
         '  Ответ: {"type":"task","title":"зарядить наушники","category":"🏠 Жильё","priority":"Можно потом","deadline":null,"reminder":"' + _next_weekday_iso("Вс") + 'T19:00","repeat":"Нет","repeat_time":null,"day_of_week":null,"confidence":"high"}',
-        "  Ввод: 'напомни написать Диме завтра в 9 вечера' (есть 'напомни'+время → REMINDER)",
-        '  Ответ: {"type":"task","title":"написать Диме","category":"💳 Прочее","priority":"Важно","deadline":null,"reminder":"' + (now_local + timedelta(days=1)).strftime("%Y-%m-%d") + 'T21:00","repeat":"Нет","repeat_time":null,"day_of_week":null,"confidence":"high"}',
+        "  Ввод: 'напомни написать Диме завтра в 9 вечера' (есть 'напомни'+время → REMINDER; 'завтра' здесь = tomorrow_iso выше — СЕГОДНЯ если сейчас ночь до 05:00, иначе реальное завтра)",
+        '  Ответ: {"type":"task","title":"написать Диме","category":"💳 Прочее","priority":"Важно","deadline":null,"reminder":"' + tomorrow_iso + 'T21:00","repeat":"Нет","repeat_time":null,"day_of_week":null,"confidence":"high"}',
         "  Ввод: 'напомни в субботу в 11 утра поискать кольцо' (есть 'напомни'+время → REMINDER)",
         '  Ответ: {"type":"task","title":"поискать кольцо","category":"💳 Прочее","priority":"Можно потом","deadline":null,"reminder":"' + _next_weekday_iso("Сб") + 'T11:00","repeat":"Нет","repeat_time":null,"day_of_week":null,"confidence":"high"}',
         "  Ввод: 'напомни в пятницу позвонить врачу' (БЕЗ времени → дата как deadline, reminder=null)",
