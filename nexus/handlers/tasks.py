@@ -568,6 +568,20 @@ async def _schedule_reminder(chat_id: int, title: str, reminder_dt: str, task_id
             tzinfo=timezone(timedelta(hours=tz_offset))
         )
         async def send_reminder() -> None:
+            # Задача могла быть завершена/отменена (в т.ч. из Mini App) уже
+            # ПОСЛЕ того как этот job был поставлен в очередь — колонки БД
+            # источник истины, job — производная и может протухнуть (см.
+            # TASKS.md "reminder/deadline — projections"). Перепроверяем
+            # статус прямо перед отправкой, чтобы не пинговать выполненную
+            # задачу.
+            if task_id:
+                try:
+                    _cur = await _repo.retrieve_page(task_id)
+                    if _cur and _cur.status in ("Done", "Archived"):
+                        logger.info("send_reminder: task %s already %s, skipping", task_id, _cur.status)
+                        return
+                except Exception as e:
+                    logger.warning("send_reminder: status check failed: %s", e)
             # Ставим статус "In progress" при срабатывании напоминания
             try:
                 await _repo.set_in_progress(task_id)
@@ -619,6 +633,17 @@ async def _schedule_deadline_check(chat_id: int, title: str, deadline_dt: str, t
             return
 
         async def check_deadline() -> None:
+            # См. комментарий в send_reminder() — та же перепроверка статуса
+            # перед отправкой, job может протухнуть если задачу закрыли
+            # раньше (напр. из Mini App).
+            if task_id:
+                try:
+                    _cur = await _repo.retrieve_page(task_id)
+                    if _cur and _cur.status in ("Done", "Archived"):
+                        logger.info("check_deadline: task %s already %s, skipping", task_id, _cur.status)
+                        return
+                except Exception as e:
+                    logger.warning("check_deadline: status check failed: %s", e)
             kb = InlineKeyboardMarkup(inline_keyboard=[[
                 InlineKeyboardButton(text="✅ Выполнено!", callback_data=f"task_complete_{task_id}"),
                 InlineKeyboardButton(text="⏳ Отложить", callback_data=f"task_reschedule_{task_id}"),
