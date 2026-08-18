@@ -144,6 +144,29 @@ async def _generate_tip(kind: str, temp: int, description: str) -> str:
     return tip.strip().rstrip(".!").lower() if tip else ""
 
 
+async def _llm_normalize_city(raw_city: str) -> Optional[str]:
+    """Резервная канонизация имени города, когда открытый геокодинг не нашёл
+    `raw_city` как есть (частая причина — сырой русский падеж или город вне
+    хардкод-списков _CITY_PREFIXES/CITY_TZ). Возвращает англ. имя для
+    Open-Meteo или None если Haiku сам не уверен — не выдумываем город."""
+    system = (
+        "Тебе дают возможно склонённое/русское название города или региона. "
+        "Ответь ТОЛЬКО каноничным названием этого города на английском (как для "
+        "геокодинга погоды), без пояснений. Если это не похоже на реальный "
+        "город или ты не уверен — ответь ровно 'unknown'."
+    )
+    try:
+        raw = await ask_claude(raw_city, system=system, max_tokens=20,
+                                model="claude-haiku-4-5-20251001", temperature=0)
+        name = raw.strip().strip(".,!?\"'")
+        if not name or name.lower() == "unknown":
+            return None
+        return name
+    except Exception as e:
+        logger.warning("_llm_normalize_city(%r) failed: %s", raw_city, e)
+        return None
+
+
 async def _fetch_openmeteo(city: str) -> Optional[dict]:
     try:
         async with httpx.AsyncClient(timeout=5) as client:
@@ -168,7 +191,10 @@ async def _fetch_openmeteo(city: str) -> Optional[dict]:
             code = int(cur.get("weather_code", 0))
             kind, desc = WMO_CODES.get(code, ("clear", "—"))
             return {
-                "city": city,
+                # Показываем каноничное имя из геокодинга, не то что передали
+                # на вход — иначе склонённая/сырая строка ("Уфе") утекает в
+                # UI даже когда сам геокодинг отработал.
+                "city": loc.get("name") or city,
                 "temp": round(float(cur.get("temperature_2m", 0))),
                 "code": code,
                 "kind": kind,
@@ -188,6 +214,15 @@ _CITY_PREFIXES = [
     ("спб",             "Saint Petersburg"),
     ("москв",           "Moscow"),
     ("мск",             "Moscow"),
+    ("уф",              "Ufa"),
+    ("екатеринбург",    "Yekaterinburg"),
+    ("екб",             "Yekaterinburg"),
+    ("новосибирск",     "Novosibirsk"),
+    ("казан",           "Kazan"),
+    ("самар",           "Samara"),
+    ("сочи",            "Sochi"),
+    ("краснодар",       "Krasnodar"),
+    ("тул",             "Tula"),
     ("тбилис",          "Tbilisi"),
     ("батум",           "Batumi"),
     ("ереван",          "Yerevan"),
@@ -365,8 +400,19 @@ async def get_weather(tg_id: int = Depends(current_user_id)) -> dict:
 
         data = await _fetch_openmeteo(city)
         if not data:
-            return {"city": city, "temp": 0, "code": 0, "kind": "clear",
-                    "description": "—", "tip": "", "error": "fetch_failed"}
+            # Геокодинг не нашёл `city` как есть — частая причина: сырой
+            # склонённый текст ("Уфе") или город вне _CITY_PREFIXES.
+            # Просим Haiku канонизировать имя (англ., как для weather API)
+            # и пробуем ещё раз, вместо того чтобы сразу молча падать в
+            # 0°/clear — это и есть "нишевый город" из жалобы: справочник
+            # не всеобъемлющий, LLM обычно знает город даже без него.
+            normalized = await _llm_normalize_city(city)
+            if normalized and normalized.lower() != city.lower():
+                logger.info("weather[%s]: geocoding miss for %r, retrying as %r", tg_id, city, normalized)
+                data = await _fetch_openmeteo(normalized)
+            if not data:
+                return {"city": city, "temp": 0, "code": 0, "kind": "clear",
+                        "description": "—", "tip": "", "error": "fetch_failed"}
 
         data["tip"] = await _generate_tip(data["kind"], data["temp"], data["description"])
         _store(tg_id, data)

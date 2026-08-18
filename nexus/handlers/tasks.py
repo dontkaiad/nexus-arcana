@@ -717,16 +717,45 @@ async def _update_user_tz(message: Message, text: str, user_notion_id: str = "")
     # Город/UTC → offset через общий справочник (#170).
     offset, matched_city = _resolve_offset(text)
 
-    # Крайний случай — спрашиваем Claude (Haiku), graceful fallback на 3.
+    # Справочник не распознал город (нишевый/незнакомый) — спрашиваем Claude
+    # (Haiku) за offset И канонiчное название города В ОДНОМ вызове, иначе
+    # matched_city остаётся None и set_user_location молча не пишет city_ —
+    # погода/Mini App продолжают показывать старую локацию, даже когда tz
+    # обновился верно (issue: "я в уфе" — офсет от Haiku приходил, а город в
+    # памяти не менялся, потому что справочник не совпал по падежу и Haiku
+    # об этом никто не спрашивал).
+    confident = True
     if offset is None:
-        system = """Пользователь указывает часовой пояс. Ответь ТОЛЬКО числом — смещение UTC в часах.
-Примеры: Екатеринбург=5, Москва=3, Спб=3, Дубай=4, Берлин=1, Бангкок=7, Токио=9, Новосибирск=7, Иркутск=8
-Если не понял → 3"""
+        system = """Пользователь указывает где он находится (город/регион). Ответь ТОЛЬКО JSON без markdown:
+{"offset": <смещение UTC в часах, целое число, или null>, "city": "<канонiчное имя города на английском для геокодинга погоды, или null>", "confident": <true|false>}
+
+Примеры:
+"я в екатеринбурге" → {"offset":5,"city":"Yekaterinburg","confident":true}
+"переехала в дубай" → {"offset":4,"city":"Dubai","confident":true}
+"я в улан-баторе" → {"offset":8,"city":"Ulaanbaatar","confident":true}
+confident=false ТОЛЬКО если реально не можешь определить ни город, ни офсет по тексту (не путать с "непопулярный город" — если понял что за город, offset обычно ясен)."""
         try:
-            raw = await ask_claude(text, system=system, max_tokens=5, model="claude-haiku-4-5-20251001", temperature=0)
-            offset = int(raw.strip().split()[0])
-        except Exception:
-            offset = 3
+            raw = await ask_claude(text, system=system, max_tokens=100, model="claude-haiku-4-5-20251001", temperature=0)
+            parsed = json.loads(raw.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip())
+            confident = bool(parsed.get("confident", True))
+            if confident:
+                offset = int(parsed["offset"])
+                matched_city = parsed.get("city") or matched_city
+            else:
+                offset = None
+        except Exception as e:
+            # Инфраструктурный сбой (сеть/битый JSON) — не то же самое что
+            # "не поняла где ты": деградируем на старое поведение (МСК), а не
+            # притворяемся что не распознали локацию.
+            logger.warning("_update_user_tz: haiku fallback failed, defaulting to UTC+3: %s", e)
+            offset, confident = 3, True
+
+    if not confident or offset is None:
+        await message.answer(
+            "🌍 Не поняла, где ты — уточни, пожалуйста, страну или область "
+            "(например «Россия, Башкортостан» или просто UTC+5), и я обновлю пояс и погоду."
+        )
+        return
 
     old_offset = await _get_user_tz(uid)
     # Единый writer: tz_ + city_ синхронно + инвалидация кеша (#170).
