@@ -250,10 +250,11 @@ async def apply_updates(
     используется — каждый PG-репозиторий сам резолвит select/FK и сам
     дописывает append-поля (read-modify-write внутри `set_props`).
     `db_id` игнорируется (PG-репозитории не нуждаются в database_id).
-    `tz_offset` нужен только "task" (см. `_apply_task`) — Haiku возвращает
-    наивные локальные строки, а PG-запись без явного оффсета молча
-    интерпретирует их как UTC (issue: reply "напоминание завтра в 11"
-    сохранялось со сдвигом на tz_offset часов).
+    `tz_offset` нужен "task" (см. `_apply_task`) и "work" (см. `_apply_work`)
+    — Haiku возвращает наивные локальные строки, а PG-запись без явного
+    оффсета молча интерпретирует их как UTC (issue: reply "напоминание
+    завтра в 11" / "перенеси на X" сохранялось со сдвигом на tz_offset
+    часов).
     Возвращает dict {human_field_name: value} для подтверждения юзеру.
     """
     if not updates:
@@ -267,7 +268,7 @@ async def apply_updates(
     if page_type == "ritual":
         return await _apply_ritual(page_id, updates)
     if page_type == "work":
-        return await _apply_work(page_id, updates)
+        return await _apply_work(page_id, updates, tz_offset)
     return {}
 
 
@@ -441,7 +442,7 @@ async def _apply_ritual(page_id: str, updates: Dict[str, Any]) -> Dict[str, Any]
     return applied
 
 
-async def _apply_work(page_id: str, updates: Dict[str, Any]) -> Dict[str, Any]:
+async def _apply_work(page_id: str, updates: Dict[str, Any], tz_offset: int = 3) -> Dict[str, Any]:
     """🔮 Работы → PgWorksRepo.set_props."""
     from arcana.repos.pg_works_repo import PgWorksRepo
     fields: Dict[str, Any] = {}
@@ -459,7 +460,7 @@ async def _apply_work(page_id: str, updates: Dict[str, Any]) -> Dict[str, Any]:
         fields["deadline"] = _coerce_date(str(updates["deadline"]))
         applied["Дедлайн"] = fields["deadline"]
     if fields:
-        await PgWorksRepo().set_props(page_id, **fields)
+        await PgWorksRepo().set_props(page_id, tz_offset=tz_offset, **fields)
     return applied
 
 

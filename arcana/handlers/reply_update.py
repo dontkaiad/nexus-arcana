@@ -66,7 +66,8 @@ async def handle_reply_update(message: Message, user_notion_id: str = "") -> boo
 
         db_id = get_db_id_for_type(page_type)
         applied = await apply_updates(
-            page_id, page_type, db_id, updates, user_notion_id=user_notion_id
+            page_id, page_type, db_id, updates,
+            user_notion_id=user_notion_id, tz_offset=tz_offset,
         )
         summary = await format_applied(applied)
 
@@ -75,7 +76,7 @@ async def handle_reply_update(message: Message, user_notion_id: str = "") -> boo
         if page_type == "work" and "Дедлайн" in applied:
             try:
                 import asyncio as _asyncio
-                from datetime import datetime, timedelta
+                from datetime import datetime, timedelta, timezone as _tz
                 from core.shared_handlers import get_user_tz
                 from arcana.bot import arcana_reminder_flow
                 from arcana.repos.works_tables import works as t_works
@@ -85,17 +86,23 @@ async def handle_reply_update(message: Message, user_notion_id: str = "") -> boo
                 iso = deadline if "T" in deadline else f"{deadline[:10]}T09:00"
                 dt = datetime.strptime(iso[:16], "%Y-%m-%dT%H:%M")
                 reminder = (dt - timedelta(days=1)).strftime("%Y-%m-%dT%H:%M")
-                tz_offset = await get_user_tz(message.from_user.id)
+                reminder_tz_offset = await get_user_tz(message.from_user.id)
                 await arcana_reminder_flow.schedule_reminder(
                     chat_id=message.chat.id,
                     title=applied.get("Работа") or "Работа",
                     reminder_dt=reminder,
                     page_id=page_id,
-                    tz_offset=int(tz_offset),
+                    tz_offset=int(reminder_tz_offset),
                 )
 
                 def _set_reminder():
-                    rd = datetime.strptime(reminder, "%Y-%m-%dT%H:%M")
+                    # `reminder` — наивная строка ЛОКАЛЬНОГО времени юзера.
+                    # Вставка naive datetime в timestamptz без явного tzinfo
+                    # молча трактуется как UTC (тот же баг, см. правку
+                    # PgWorksRepo._set_props_sync выше).
+                    rd = datetime.strptime(reminder, "%Y-%m-%dT%H:%M").replace(
+                        tzinfo=_tz(timedelta(hours=int(reminder_tz_offset)))
+                    )
                     with get_engine().begin() as conn:
                         conn.execute(
                             t_works.update()
