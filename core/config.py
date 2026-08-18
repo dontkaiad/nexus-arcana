@@ -127,11 +127,12 @@ class AppConfig:
     log_chat_id: str = ""
     log_thread_nexus: str = ""
     log_thread_arcana: str = ""
-    # ── Telegram Login Widget SSO (browser sessions via hl_session cookie) ──
+    # ── Единый вход heylark.dev: cookie hl_session ставит login.heylark.dev,
+    # nexus-arcana только проверяет её (см. miniapp/backend/auth.py) и
+    # редиректит неавторизованных на LOGIN_BASE_URL/login?next=... ──
     session_secret: str = ""
-    tg_login_bot_token: str = ""
-    tg_login_bot_username: str = ""
     cookie_domain: str = ".heylark.dev"
+    login_base_url: str = "https://login.heylark.dev"
 
 
 def load_config() -> AppConfig:
@@ -147,9 +148,8 @@ def load_config() -> AppConfig:
         log_thread_nexus = _optional("TG_LOG_THREAD_NEXUS"),
         log_thread_arcana = _optional("TG_LOG_THREAD_ARCANA"),
         session_secret       = _optional("SESSION_SECRET"),
-        tg_login_bot_token   = _optional("TG_LOGIN_BOT_TOKEN"),
-        tg_login_bot_username = _optional("TG_LOGIN_BOT_USERNAME"),
         cookie_domain        = _optional("COOKIE_DOMAIN", ".heylark.dev"),
+        login_base_url       = _optional("LOGIN_BASE_URL", "https://login.heylark.dev"),
         nexus = NexusConfig(
             tg_token     = _require("NEXUS_BOT_TOKEN"),
             db_finance   = _optional("NOTION_DB_FINANCE"),
