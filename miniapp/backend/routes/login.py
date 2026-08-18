@@ -4,9 +4,11 @@ nexus-arcana НЕ хостит свой Telegram Login Widget (виджет од
 верифицируется Telegram только для одного домена /setdomain — уже занят
 под login.heylark.dev). Вместо этого:
 
-  GET  /login   → редирект на login.heylark.dev/login?next=<исходный URL>.
-                  Тот сервис выписывает hl_session на Domain=.heylark.dev
-                  и редиректит браузер обратно на next — cookie уже видна
+  GET  /login   → редирект на login.heylark.dev/?next=<исходный URL>
+                  (страница логина там висит на корне, не на /login —
+                  см. heylark-infra/login/login_service.py). Тот сервис
+                  выписывает hl_session на Domain=.heylark.dev и
+                  редиректит браузер обратно на next — cookie уже видна
                   здесь без какого-либо callback на этой стороне.
   POST /logout  → чистит hl_session локально (домен общий, так что это
                   разлогинивает и остальные *.heylark.dev приложения).
@@ -47,7 +49,7 @@ async def login_redirect(request: Request, next: str = "/"):
     target = next if is_safe_next(next) else "/"
     absolute_next = str(request.base_url).rstrip("/") + target
     return RedirectResponse(
-        f"{config.login_base_url}/login?next={quote(absolute_next, safe='')}",
+        f"{config.login_base_url}/?next={quote(absolute_next, safe='')}",
         status_code=307,
     )
 
