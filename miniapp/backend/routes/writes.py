@@ -366,7 +366,17 @@ async def task_create(
     if body.cat:
         props["Категория"] = _select(body.cat)
     if body.date:
-        props["Дедлайн"] = _date(body.date)
+        deadline_iso = body.date
+        # TaskForm шлёт "YYYY-MM-DDTHH:MM:SS" (наивное локальное время юзера)
+        # когда указаны и дата, и время — без явного offset'а PgTasksRepo.
+        # _parse_iso молча трактует это как UTC (тот же класс бага, что и в
+        # reply-правках, см. core/reply_update.py _with_tz_suffix).
+        # Дата без времени ("YYYY-MM-DD") — offset не нужен, не трогаем.
+        if "T" in deadline_iso and "+" not in deadline_iso and "Z" not in deadline_iso:
+            _, tz_offset = await today_user_tz(tg_id)
+            sign = "+" if tz_offset >= 0 else "-"
+            deadline_iso = f"{deadline_iso}{sign}{abs(tz_offset):02d}:00"
+        props["Дедлайн"] = _date(deadline_iso)
     if user_notion_id:
         props["🪪 Пользователи"] = _relation(user_notion_id)
     pg_id = await _tasks_pg_repo.create("", props)

@@ -459,6 +459,42 @@ def test_task_create_minimal(client):
     assert props["Статус"]["status"]["name"] == "Not started"
 
 
+def test_task_create_with_time_stamps_tz_offset(client):
+    """Regression: TaskForm sends 'YYYY-MM-DDTHH:MM:SS' (naive local time,
+    same shape the reply-edit tz-drift bug had) when both date and time are
+    set. Without an explicit offset, PgTasksRepo._parse_iso silently treats
+    it as UTC and the deadline drifts by the user's own tz_offset — the same
+    bug class fixed for reply-edits, but in the Mini App's own create path."""
+    with patch("miniapp.backend.routes.writes._tasks_pg_repo.create",
+               AsyncMock(return_value="42")) as pc, \
+         patch("miniapp.backend.routes.writes.get_user_notion_id",
+               AsyncMock(return_value=FAKE_NOTION_USER)), \
+         patch("miniapp.backend.routes.writes.today_user_tz",
+               AsyncMock(return_value=(_today_date(5), 5))):
+        r = client.post("/api/tasks", json={
+            "title": "такси", "date": "2026-08-19T11:00:00",
+        })
+    assert r.status_code == 200
+    _, props = pc.await_args.args
+    assert props["Дедлайн"]["date"]["start"] == "2026-08-19T11:00:00+05:00"
+
+
+def test_task_create_date_only_untouched(client):
+    """A pure date (no time) deadline must not get an offset appended —
+    there's no wall-clock time to anchor it to, and _parse_iso already
+    handles bare 'YYYY-MM-DD' correctly."""
+    with patch("miniapp.backend.routes.writes._tasks_pg_repo.create",
+               AsyncMock(return_value="42")) as pc, \
+         patch("miniapp.backend.routes.writes.get_user_notion_id",
+               AsyncMock(return_value=FAKE_NOTION_USER)), \
+         patch("miniapp.backend.routes.writes.today_user_tz",
+               AsyncMock(side_effect=AssertionError("tz not needed for date-only"))):
+        r = client.post("/api/tasks", json={"title": "купить корм", "date": "2026-08-19"})
+    assert r.status_code == 200
+    _, props = pc.await_args.args
+    assert props["Дедлайн"]["date"]["start"] == "2026-08-19"
+
+
 # ── /api/calendar ────────────────────────────────────────────────────────────
 
 def test_calendar_groups_tasks_by_day(client):
