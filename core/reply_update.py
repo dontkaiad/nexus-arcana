@@ -87,15 +87,21 @@ def _task_reply_system(tz_offset: int = 3) -> str:
     return (
         "Ты парсишь дополнение к записанной задаче Nexus. Ответь JSON без markdown:\n"
         '{"deadline": "YYYY-MM-DD HH:MM или null", '
+        '"reminder": "YYYY-MM-DD HH:MM или null", '
         '"category": "строка или null", '
         '"priority": "срочно|важно|можно потом или null"}\n'
         "Если поле не упомянуто — null.\n\n"
         + _date_context(tz_offset)
         + "\nСлова 'перенеси на X' / 'дедлайн X' / 'перенос на X' → deadline = ISO-дата "
         "дня недели X из таблицы выше (без времени, если время не названо).\n"
+        "КРИТИЧНО: слова 'напомни X' / 'напоминание X' / 'напоминалка X' / 'напоминай X' "
+        "→ ЭТО reminder, НЕ deadline! Дата/время после этих слов идёт ТОЛЬКО в reminder, "
+        "deadline остаётся null (если только дедлайн не назван отдельно в том же тексте).\n"
         "Примеры:\n"
-        "  'перенеси на среду' → deadline='<дата среды из таблицы>'\n"
-        "  'перенеси на пятницу в 18' → deadline='<дата пятницы> 18:00'"
+        "  'перенеси на среду' → deadline='<дата среды из таблицы>', reminder=null\n"
+        "  'перенеси на пятницу в 18' → deadline='<дата пятницы> 18:00', reminder=null\n"
+        "  'напоминание завтра в 11' → reminder='<завтрашняя дата> 11:00', deadline=null\n"
+        "  'напомни в среду в 10' → reminder='<дата среды из таблицы> 10:00', deadline=null"
     )
 
 
@@ -156,9 +162,10 @@ _WORK_FIELDS = {
 }
 
 _TASK_FIELDS = {
-    "deadline": ("Дедлайн",   "date"),
-    "category": ("Категория", "select"),
-    "priority": ("Приоритет", "select"),
+    "deadline": ("Дедлайн",     "date"),
+    "reminder": ("Напоминание", "date"),
+    "category": ("Категория",   "select"),
+    "priority": ("Приоритет",   "select"),
 }
 
 _CLIENT_FIELDS = {
@@ -278,6 +285,11 @@ async def _apply_task(page_id: str, updates: Dict[str, Any]) -> Dict[str, Any]:
         if iso:
             props["Дедлайн"] = _p_date(iso)
             applied["Дедлайн"] = iso
+    if updates.get("reminder"):
+        iso = _coerce_date(str(updates["reminder"]))
+        if iso:
+            props["Напоминание"] = _p_date(iso)
+            applied["Напоминание"] = iso
     if updates.get("category"):
         props["Категория"] = _p_select(updates["category"])
         applied["Категория"] = updates["category"]

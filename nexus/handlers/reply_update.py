@@ -55,6 +55,29 @@ async def handle_reply_update(message: Message, user_notion_id: str = "") -> boo
         )
         summary = await format_applied(applied)
 
+        # Дедлайн/напоминание в reply — не только колонка в БД, это ещё и
+        # APScheduler job (reminder_{id}/deadline_{id}, см. TASKS.md
+        # "reminder/deadline — projections"). Без перепланирования правка
+        # молча повисает: старый job с прежней датой продолжает жить, а
+        # новая дата никогда не сработает до рестарта бота.
+        if page_type == "task" and ("Дедлайн" in applied or "Напоминание" in applied):
+            try:
+                from nexus.repos.tasks_repo import _repo as _tasks_repo
+                from nexus.handlers.tasks import _schedule_reminder, _schedule_deadline_check
+
+                task = await _tasks_repo.retrieve_page(page_id)
+                title = task.title if task else "Задача"
+                if "Напоминание" in applied:
+                    await _schedule_reminder(
+                        message.chat.id, title, applied["Напоминание"], page_id, tz_offset,
+                    )
+                if "Дедлайн" in applied:
+                    await _schedule_deadline_check(
+                        message.chat.id, title, applied["Дедлайн"], page_id, tz_offset,
+                    )
+            except Exception as e:
+                logger.warning("reply_update: live reschedule failed for %s: %s", page_id, e)
+
         await message.answer(f"✏️ Дополнено:\n{summary}")
         await react(message, "✍️")
         return True
