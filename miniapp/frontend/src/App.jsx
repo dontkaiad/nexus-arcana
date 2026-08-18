@@ -21,6 +21,7 @@ import {
   Plus, Search,
   Bell, RefreshCw, X, Camera, Mic, Pencil, ChevronRight, ChevronDown,
   Wallet, HeartPulse, StickyNote, Candy, Trash2, Clock, RotateCcw,
+  CloudSun, CloudRain, CloudSnow, CloudFog,
 } from "lucide-react";
 import {
   Moon as PhMoon,
@@ -1076,17 +1077,16 @@ const TaskRow = ({ s, t, done, onToggle, onOpen, withTime }) => (
 // NEXUS — MY DAY
 // ═══════════════════════════════════════════════════════════════
 
-// ☀️/❄️ — легаси-дингбаты (U+2600/U+2744), эмодзи-презентация только через
-// variation selector VS16. На части Android-эмодзи-шрифтов (в т.ч. в
-// Telegram WebView на MIUI) VS16 для этих двух конкретных символов не
-// подхватывается — рисуется пустой квадратик вместо цветного эмодзи.
-// 🌞/🌨️ — нативные emoji-блока (SMP), без этой проблемы.
+// Эмодзи для погоды рисовались пустым квадратиком в Telegram WebView —
+// воспроизводилось и на Android, и на macOS, т.е. дело не в конкретных
+// кодпоинтах/variation selector'ах, а в том, что embedded webview не всегда
+// умеет в цветной emoji-шрифт. SVG-иконки не зависят от шрифтов вообще.
 const WEATHER_ICON = {
-  clear: "🌞",
-  cloudy: "⛅",
-  rain: "🌧️",
-  snow: "🌨️",
-  fog: "🌫️",
+  clear: Sun,
+  cloudy: CloudSun,
+  rain: CloudRain,
+  snow: CloudSnow,
+  fog: CloudFog,
 };
 
 // wave8.24: длинные англ. имена города ломают шапку «Мой день»; рисуем
@@ -1359,8 +1359,8 @@ function NxDay({ s, openTask, navigate, openStreaks }) {
           </div>
           <div className="hero-meta">
             <div style={{ whiteSpace: "nowrap" }}>{t.date}</div>
-            {weatherApi.data && <div style={{ marginTop: 3, whiteSpace: "nowrap" }}>
-              {WEATHER_ICON[weatherApi.data.kind] || "🌤"} {weatherApi.data.temp > 0 ? "+" : ""}{weatherApi.data.temp}° · {shortCity(weatherApi.data.city)}
+            {weatherApi.data && <div style={{ marginTop: 3, whiteSpace: "nowrap", display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 4 }}>
+              {React.createElement(WEATHER_ICON[weatherApi.data.kind] || CloudSun, { size: 14 })} {weatherApi.data.temp > 0 ? "+" : ""}{weatherApi.data.temp}° · {shortCity(weatherApi.data.city)}
             </div>}
           </div>
         </div>
@@ -3538,8 +3538,8 @@ function ArDay({ s, openClient, navigate, openMoonPhases }) {
           </div>
           <div className="hero-meta">
             <div>{a.date}</div>
-            {weatherApi.data && <div style={{ marginTop: 3, whiteSpace: "nowrap" }}>
-              {WEATHER_ICON[weatherApi.data.kind] || "🌤"} {weatherApi.data.temp > 0 ? "+" : ""}{weatherApi.data.temp}° · {shortCity(weatherApi.data.city)}
+            {weatherApi.data && <div style={{ marginTop: 3, whiteSpace: "nowrap", display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 4 }}>
+              {React.createElement(WEATHER_ICON[weatherApi.data.kind] || CloudSun, { size: 14 })} {weatherApi.data.temp > 0 ? "+" : ""}{weatherApi.data.temp}° · {shortCity(weatherApi.data.city)}
             </div>}
           </div>
         </div>
