@@ -1076,11 +1076,16 @@ const TaskRow = ({ s, t, done, onToggle, onOpen, withTime }) => (
 // NEXUS — MY DAY
 // ═══════════════════════════════════════════════════════════════
 
+// ☀️/❄️ — легаси-дингбаты (U+2600/U+2744), эмодзи-презентация только через
+// variation selector VS16. На части Android-эмодзи-шрифтов (в т.ч. в
+// Telegram WebView на MIUI) VS16 для этих двух конкретных символов не
+// подхватывается — рисуется пустой квадратик вместо цветного эмодзи.
+// 🌞/🌨️ — нативные emoji-блока (SMP), без этой проблемы.
 const WEATHER_ICON = {
-  clear: "☀️",
+  clear: "🌞",
   cloudy: "⛅",
   rain: "🌧️",
-  snow: "❄️",
+  snow: "🌨️",
   fog: "🌫️",
 };
 
@@ -1353,7 +1358,7 @@ function NxDay({ s, openTask, navigate, openStreaks }) {
             </div>
           </div>
           <div className="hero-meta">
-            <div>{t.date}</div>
+            <div style={{ whiteSpace: "nowrap" }}>{t.date}</div>
             {weatherApi.data && <div style={{ marginTop: 3, whiteSpace: "nowrap" }}>
               {WEATHER_ICON[weatherApi.data.kind] || "🌤"} {weatherApi.data.temp > 0 ? "+" : ""}{weatherApi.data.temp}° · {shortCity(weatherApi.data.city)}
             </div>}
