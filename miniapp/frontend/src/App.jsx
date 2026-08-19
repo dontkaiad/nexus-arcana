@@ -7342,7 +7342,41 @@ const arTabs = [
   { k: "grim", I: BookOpen, l: "Гримуар" },
 ];
 
-export default function App() {
+// Единый вход на всю инфраструктуру: core.heylark.dev должен требовать
+// логин так же, как остальные *.heylark.dev. Внутри настоящего Telegram
+// Mini App initData доступен синхронно ещё до первого рендера (main.jsx
+// зовёт Telegram.WebApp.ready() до ReactDOM.render) — так что просто
+// открыть приложение можно всегда, когда оно реально запущено из Telegram.
+//
+// Если initData нет (обычный браузер, зашли на core.heylark.dev напрямую) —
+// первый заход редиректим на единый логин. После возврата оттуда initData
+// всё равно не появится (это не Telegram) — но к этому моменту уже должна
+// стоять hl_session-кука на .heylark.dev, а /api/* её тоже принимает
+// (auth.py: current_user_id), fetch на том же домене шлёт cookie сама. Так
+// что второй раз НЕ редиректим — рендерим приложение и даём /api-запросам
+// пройти по куке; sessionStorage-флаг только гасит петлю редиректа.
+export default function AppGate() {
+  // Dev-режим (vite dev, вне Telegram) подставляет initData через env — тот же
+  // fallback, что уже использует api.js для заголовка X-Telegram-Init-Data.
+  const hasInitData = typeof window !== "undefined" &&
+    !!(window.Telegram?.WebApp?.initData || import.meta.env.VITE_DEV_INIT_DATA);
+  const alreadyTriedLogin = typeof window !== "undefined" && sessionStorage.getItem("hl_login_attempt") === "1";
+
+  useEffect(() => {
+    if (hasInitData || alreadyTriedLogin || typeof window === "undefined") return;
+    sessionStorage.setItem("hl_login_attempt", "1");
+    const next = encodeURIComponent(window.location.origin + window.location.pathname);
+    window.location.replace("https://login.heylark.dev/?next=" + next);
+  }, [hasInitData, alreadyTriedLogin]);
+
+  if (!hasInitData && !alreadyTriedLogin) {
+    return null; // редирект на login.heylark.dev уже запущен
+  }
+
+  return <AppShell />;
+}
+
+function AppShell() {
   // Начальный вид без анимации: /arcana → Night, всё остальное → Day.
   // Lazy-initializer гарантирует однократное чтение pathname до первого рендера.
   const [isN, setIsN] = useState(() => typeof window !== "undefined" && window.location.pathname === "/arcana");
