@@ -4,14 +4,11 @@ from __future__ import annotations
 import os
 import pathlib
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import PlainTextResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from core.config import config
-from miniapp.backend import tg_auth
 from miniapp.backend.routes import today, tasks, finance, lists, memory, writes
 from miniapp.backend.routes import calendar as cal
 from miniapp.backend.routes import categories
@@ -59,37 +56,18 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Пути, открытые без hl_session: сам логин-редирект, логаут, health-check
-# (его дёргает docker healthcheck без cookie) и /api/* (там своя проверка
-# через current_user_id — initData из Telegram WebApp тоже валиден).
-_PUBLIC_PREFIXES = ("/login", "/logout", "/health", "/api")
-
-
-@app.middleware("http")
-async def require_owner_session(request: Request, call_next):
-    """Гейт для страничных (не /api) запросов: единый вход + только владелец.
-
-    /api/* сюда не попадает — там auth.current_user_id уже проверяет и
-    cookie, и Telegram WebApp initData. Здесь закрываем оставшуюся дыру:
-    браузер, зашедший на core.heylark.dev напрямую (не из Mini App), должен
-    залогиниться через login.heylark.dev, иначе видит SPA без данных.
-    """
-    path = request.url.path
-    if path.startswith(_PUBLIC_PREFIXES):
-        return await call_next(request)
-
-    session_cookie = request.cookies.get(tg_auth.SESSION_COOKIE)
-    tg_id = tg_auth.read_session(session_cookie, secret=config.session_secret) if session_cookie else None
-
-    if tg_id is None:
-        next_url = f"{path}?{request.url.query}" if request.url.query else path
-        return RedirectResponse(f"/login?next={next_url}", status_code=307)
-    if tg_id not in config.allowed_ids:
-        return PlainTextResponse("Доступ запрещён.", status_code=403)
-
-    return await call_next(request)
-
-
+# NB: there is deliberately no page-level "require hl_session cookie or
+# redirect to /login" gate here. A real Telegram Mini App load of /nexus or
+# /arcana NEVER carries the hl_session cookie — Telegram only ever hands the
+# app initData (via the WebApp JS bridge, sent as a header on /api/* calls),
+# not a cookie, on the top-level HTML request. A cookie-gate on these paths
+# was tried once (see git history) and it 307-redirected every real Mini App
+# session straight to login.heylark.dev before any of its own JS ever ran —
+# the login widget shown there doesn't even work inside Telegram's own
+# WebView (nested iframe), so that redirect was a dead end for every user.
+# The actual auth boundary is /api/* (auth.current_user_id, cookie OR
+# initData) — the SPA shell itself is just static JS/HTML with no data in
+# it, so serving it unauthenticated leaks nothing.
 app.include_router(login_routes.router)  # /login, /logout — no /api prefix
 
 for _r in (
