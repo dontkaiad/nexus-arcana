@@ -8,6 +8,7 @@ Three routes (not under /api — HTML/redirect, not JSON):
 """
 from __future__ import annotations
 
+import json
 import logging
 import pathlib
 from typing import Optional
@@ -51,6 +52,14 @@ async def login_page(request: Request, next: Optional[str] = None, error: Option
     if next and _is_safe_next(next):
         callback_url = callback_url + f"?next={next}"
     next_label = "Nexus × Arcana" if next else None
+    # /login is the browser SSO page — it's never a valid destination inside
+    # the actual Telegram Mini App (Telegram's own WebView also can't render
+    # the Login Widget iframe there, so it would just be stuck). If this is
+    # somehow loaded from inside a real Mini App session (window.Telegram.
+    # WebApp.initData already present — stale menu-button cache, a shared
+    # link tapped inside Telegram, etc.), bounce straight past the widget
+    # into the app; it already authenticates itself via initData.
+    fallback_app_path = next if (next and _is_safe_next(next)) else "/nexus"
     return templates.TemplateResponse(
         "login.html",
         {
@@ -59,6 +68,7 @@ async def login_page(request: Request, next: Optional[str] = None, error: Option
             "callback_url": callback_url,
             "next_label": next_label,
             "error": bool(error),
+            "fallback_app_path_json": json.dumps(fallback_app_path),
         },
     )
 

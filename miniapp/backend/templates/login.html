@@ -14,6 +14,7 @@
     {{ callback_url }}  — URL, куда Telegram вернёт данные авторизации (data-auth-url)
     {{ next_label }}    — необязательно: имя сервиса из ?next (пусто → нейтрально)
     {{ error }}         — истина, если предыдущая попытка входа не удалась
+    {{ fallback_app_path_json }} — JSON-строка пути мини-аппа (см. блок ниже)
 
   ТЕХНИЧЕСКИЙ ИНВАРИАНТ:
     • Блок Telegram Login Widget трогать нельзя — он сам рендерит синюю кнопку
@@ -28,6 +29,18 @@
   зависимость кроме скрипта Telegram.
   ============================================================================
 #}
+
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<script>
+  // This page is browser-only SSO. If we're actually inside a live Telegram
+  // Mini App session (initData present), the Login Widget below can't work
+  // there anyway — skip straight into the real app, which auths via initData.
+  (function () {
+    if (window.Telegram && window.Telegram.WebApp && window.Telegram.WebApp.initData) {
+      location.replace({{ fallback_app_path_json | safe }});
+    }
+  })();
+</script>
 
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
