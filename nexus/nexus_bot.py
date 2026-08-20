@@ -520,7 +520,7 @@ async def cmd_list(msg: Message, user_notion_id: str = "") -> None:
 @dp.message(F.text)
 async def handle_text(msg: Message, user_notion_id: str = "") -> None:
     from core.layout import maybe_convert
-    from nexus.handlers.tasks import _pending_has, _pending_get, handle_task_clarification, handle_reschedule_reminder
+    from nexus.handlers.tasks import _pending_has, _pending_get, handle_task_clarification
 
     # Budget v2: payday reminder (once per period start)
     try:
@@ -572,12 +572,12 @@ async def handle_text(msg: Message, user_notion_id: str = "") -> None:
         await react(msg, "⚡")
         return
 
+    from nexus.handlers.tasks import maybe_handle_reschedule_pending
+    if await maybe_handle_reschedule_pending(msg):
+        return
+
     if _pending_has(msg.from_user.id):
         pending = _pending_get(msg.from_user.id)
-        if pending and pending.get("action") == "reschedule":
-            await handle_reschedule_reminder(msg)
-            await react(msg, "⚡")
-            return
         # Если это edit-команда — обновляем pending задачу напрямую
         import re as _re
         _text_low = (msg.text or "").strip()
@@ -997,6 +997,11 @@ async def handle_voice(msg: Message, user_notion_id: str = "") -> None:
     from core.tg_send import send_long
     await send_long(msg, f"🎤 «{text}»")
 
+    # Reschedule pending — «когда напомнить снова?» тоже можно ответить голосом
+    from nexus.handlers.tasks import maybe_handle_reschedule_pending
+    if await maybe_handle_reschedule_pending(msg, text=text):
+        return
+
     # Lists pending — могут ждать ответ на чек/чеклист
     from nexus.handlers.lists import handle_list_pending
     if await handle_list_pending(msg, user_notion_id):
@@ -1230,6 +1235,12 @@ async def handle_photo(msg: Message, user_notion_id: str = "") -> None:
     elif msg.caption:
         from core.layout import maybe_convert
         text = maybe_convert(msg.caption.strip())
+
+        # Reschedule pending — «когда напомнить снова?» можно ответить подписью к фото
+        from nexus.handlers.tasks import maybe_handle_reschedule_pending
+        if await maybe_handle_reschedule_pending(msg, text=text):
+            return
+
         await process_text(msg, text, user_notion_id)
     else:
         await msg.answer("📸 Не смог распознать. Попробуй сфоткать ровнее или напиши текстом.")

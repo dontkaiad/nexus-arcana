@@ -2336,7 +2336,28 @@ async def handle_reminder_reply_reschedule(
     await handle_reschedule_reminder(message)
 
 
-async def handle_reschedule_reminder(message: Message) -> None:
+async def maybe_handle_reschedule_pending(message: Message, text: Optional[str] = None) -> bool:
+    """Единая точка входа: если для юзера открыт reschedule-pending («когда
+    напомнить снова?» после WIP/Failed/Перенести), обработать ЛЮБОЙ входящий
+    текст (набранный, из голосового, из подписи к фото) как ответ на него.
+
+    `text` — переопределить `message.text` (для голосовых, где транскрипт
+    лежит отдельно, а `message.text` пустой).
+
+    Раньше эту проверку делал только `handle_text` — голосовые и подписи к
+    фото шли прямиком в `process_text`/classify мимо pending, и ответ на
+    «когда напомнить?» создавал новую задачу вместо переноса (баг с реплаем,
+    #170 и повторы). Общая функция — чтобы не плодить параллельную
+    реализацию одной и той же проверки («Параллельная реализация = БАГ»)."""
+    pending = _pending_get(message.from_user.id)
+    if not pending or pending.get("action") != "reschedule":
+        return False
+    await handle_reschedule_reminder(message, text=text)
+    await react(message, "⚡")
+    return True
+
+
+async def handle_reschedule_reminder(message: Message, text: Optional[str] = None) -> None:
     """Обработка переноса напоминания."""
     from core.config import config
     from core.layout import maybe_convert
@@ -2345,11 +2366,11 @@ async def handle_reschedule_reminder(message: Message) -> None:
 
     if not pending or pending.get("action") != "reschedule":
         return
-    
+
     task_id = pending.get("task_id")
     if not task_id:
         return
-    
+
     try:
         # Получить название из PG если нет в pending
         task_title = pending.get("title") or f"Задача #{task_id}"
@@ -2362,7 +2383,7 @@ async def handle_reschedule_reminder(message: Message) -> None:
                 pass
         
         tz_offset = await _get_user_tz(uid)
-        text = maybe_convert(message.text)
+        text = maybe_convert(text if text is not None else message.text)
 
         # Быстрый парсер для "через N мин/часов/дней"
         relative = _parse_relative_time(text, tz_offset)
