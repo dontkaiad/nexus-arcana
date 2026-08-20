@@ -521,6 +521,21 @@ _TASK_EXPLICIT_RE = re.compile(
     re.IGNORECASE,
 )
 
+# Признак даты/времени в тексте задачи — если он есть, no-LLM fast-path'ы
+# (_BUY_TASK_RE, _TASK_EXPLICIT_RE) НЕ подходят: они не парсят deadline/reminder
+# вообще (см. ниже) и записали бы дату прямо в title как есть. С этим сигналом
+# отдаём текст в полный classify() через Claude — только он умеет вытащить
+# deadline/reminder по правилам build_system() (баг: «создай задачу написать
+# X завтра в 10 напомни в 9:30» → title = весь текст с датой внутри, deadline
+# и напоминание вообще не ставились).
+_HAS_DATETIME_SIGNAL_RE = re.compile(
+    r"напомни\w*|напоминани\w*|"
+    r"\bзавтра\b|\bпослезавтра\b|\bсегодня\b|\bдедлайн\b|через\s+\d+\s*(мин|час|дн|недел)\w*|"
+    r"\b(понедельник\w*|вторник\w*|сред[а-я]*|четверг\w*|пятниц\w*|суббот\w*|воскресень\w*)\b|"
+    r"\d{1,2}[:.]\d{2}\b|\d{1,2}\s*(час\w*|ч\.)\b|\d{1,2}\.\d{2}(\.\d{2,4})?\b",
+    re.IGNORECASE,
+)
+
 # Поиск по долгосрочной памяти (НЕ заметки)
 _MEMORY_SEARCH_RE = re.compile(
     r"(что\s+(ты\s+)?помнишь|что\s+знаешь\s+о|расскажи\s+про"
@@ -805,7 +820,10 @@ async def classify(text: str, tz_offset: int = 3) -> list[dict]:
         return [{"type": "memory_search", "query": hint, "text": text}]
 
     # Быстрый pre-фильтр: "купить/купи X" без явной суммы → задача, не финансы
-    if _BUY_TASK_RE.match(text) and not _CURRENCY_RE.search(text):
+    # (но не если в тексте есть дата/время/напомни — fast-path их не парсит,
+    # отдаём полному classify() ниже)
+    if (_BUY_TASK_RE.match(text) and not _CURRENCY_RE.search(text)
+            and not _HAS_DATETIME_SIGNAL_RE.search(text)):
         logger.info("classify: buy_task matched (no currency)")
         category = await _haiku_task_category(text)
         logger.info("classify: buy_task category=%r", category)
@@ -813,9 +831,13 @@ async def classify(text: str, tz_offset: int = 3) -> list[dict]:
                  "priority": "Важно", "deadline": None, "repeat": "Нет",
                  "repeat_time": None, "day_of_week": None, "confidence": "low"}]
 
-    # Детерминированный fast-path: «добавь задачу X» / «задача: X» — явный add без LLM
+    # Детерминированный fast-path: «добавь задачу X» / «задача: X» — явный add без LLM.
+    # Пропускаем, если в X есть дата/время/напомни — этот путь не умеет парсить
+    # deadline/reminder (баг: "создай задачу написать X завтра в 10 напомни в
+    # 9:30" → вся фраза с датой внутри уходила в title, дедлайн и напоминание
+    # терялись); такие фразы идут в полный classify() через Claude ниже.
     m = _TASK_EXPLICIT_RE.match(text)
-    if m:
+    if m and not _HAS_DATETIME_SIGNAL_RE.search(m.group(1)):
         title = m.group(1).strip()
         logger.info("classify: task_explicit matched, title=%r", title)
         category = await _haiku_task_category(title)
