@@ -55,6 +55,13 @@ _RU_WEEKDAY_NUM = {
     'воскресенья': 6, 'вс': 6,
 }
 
+# Ночная логика «завтра» = «сегодня» (см. build_system night_rule) — Haiku
+# иногда не следует этому правилу из промпта (маленькая модель, длинный
+# промпт с кучей других инструкций). \b исключает «послезавтра» само по
+# себе (нет границы слова перед «завтра» внутри него). Используется в
+# post-processing ниже как детерминированный страховочный фикс.
+_BARE_TOMORROW_RE = re.compile(r"\bзавтра\b", re.IGNORECASE)
+
 
 def _nearest_weekday_iso(target_wd: int, tz_offset: int) -> str:
     """Ближайший target_wd от завтра включительно. Если сегодня уже этот день → +7."""
@@ -1214,6 +1221,27 @@ async def process_item(data: Dict[str, Any], original_text: str, msg, clarify: d
             correct_deadline = _nearest_weekday_iso(target_wd, tz_offset)
             logger.info("classifier: weekday deadline '%s' → %s", wd_match.group(1), correct_deadline)
             data["deadline"] = correct_deadline
+
+        # Post-processing: ночная логика «завтра» = «сегодня» (до 05:00, см.
+        # build_system night_rule) — страховка на случай если Claude не
+        # соблюл эту инструкцию из промпта и всё равно посчитал реальное
+        # завтра. Правим ТОЛЬКО когда дата фактически совпала с "неверным
+        # завтра" — если Claude и так вернул сегодня, ничего не трогаем.
+        if _BARE_TOMORROW_RE.search(original_text):
+            tz_offset = await _get_user_tz(msg.from_user.id)
+            now_local = datetime.now(timezone(timedelta(hours=tz_offset)))
+            if now_local.hour < 5:
+                today_str = now_local.strftime("%Y-%m-%d")
+                wrong_tomorrow_str = (now_local + timedelta(days=1)).strftime("%Y-%m-%d")
+                for field in ("deadline", "reminder"):
+                    val = data.get(field)
+                    if val and val.startswith(wrong_tomorrow_str):
+                        fixed = today_str + val[len(wrong_tomorrow_str):]
+                        logger.info(
+                            "classifier: night-owl 'завтра' correction %s %s → %s",
+                            field, val, fixed,
+                        )
+                        data[field] = fixed
 
         logger.info("classifier: calling handle_task_parsed with full data=%s", data)
         data["user_notion_id"] = user_notion_id
