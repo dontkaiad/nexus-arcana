@@ -119,16 +119,10 @@ async def handle_add_ritual(message: Message, text: str, user_notion_id: str = "
         amount = float(data.get("amount") or 0)
         paid = float(data.get("paid") or 0)
 
-        # Подмешиваем контекст из памяти (про клиента + цель ритуала). Не блокирует.
-        try:
-            from core.memory import get_memories_for_context
-            kw = [w for w in (client_name, goal, data.get("name")) if w]
-            if kw:
-                _ = await get_memories_for_context(user_notion_id, kw)
-                # На уровне ritual_add контекст пока не пробрасывается в LLM-промпт —
-                # вызов нужен чтобы записи были «прогреты»/доступны для будущей связки.
-        except Exception:
-            pass
+        # Контекст из памяти здесь НЕ запрашивается: результат никуда не шёл
+        # (мёртвый вызов, #187), а после #184 каждый такой вызов мог жечь до
+        # 3 Voyage-запросов из общего 3 RPM бюджета. Вернуть вместе с реальной
+        # прокидкой в LLM-промпт, когда фича появится.
 
         today = datetime.now(tz).strftime("%Y-%m-%d")
         result = await _repo.create(
