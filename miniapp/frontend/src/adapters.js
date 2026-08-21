@@ -579,6 +579,7 @@ export function adaptSessionGroup(data) {
   return {
     slug: data.slug || '',
     sessionName: data.session_name || null,
+    subjectId: data.subject_id || null,
     title: data.ru_title || '—',
     firstQ: data.first_question || '',
     category: data.category || '',
@@ -591,6 +592,20 @@ export function adaptSessionGroup(data) {
     photoUrl: data.photo_url || null,
     isSolo: !!data.is_solo,
     triplets: (data.triplets || []).map(adaptSessionDetail),
+    // #189: только для темы (subject_id) — сессии-события за всё время.
+    events: (data.events || []).map(adaptThemeEvent),
+  }
+}
+
+// #189: одна строка списка «Тема» — сессия-событие (session_name на тот
+// момент, дата, N триплетов, статус). slug ведёт на обычный SessionDetail.
+export function adaptThemeEvent(x) {
+  return {
+    slug: x.slug || '',
+    sessionName: x.session_name || null,
+    date: x.date ? formatDate(x.date, 'full') : '',
+    tripletCount: x.triplet_count || 1,
+    status: x.status || 'wait',
   }
 }
 

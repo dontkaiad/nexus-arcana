@@ -380,10 +380,40 @@ def _aggregate_group(
     session_photo = next((t["photo_url"] for t in triplets if t.get("photo_url")), None)
     slug_areas = list(dict.fromkeys(t.area for t in matching if t.area))
 
+    # Тема (#189): список сессий-событий за всё время — каждое своё
+    # (session_name, client_id) внутри темы отдельной строкой (дата ·
+    # формулировка на тот момент · N триплетов · статус). Только для
+    # subject-группы — обычной сессии (уже ровно одна такая группа) не нужно.
+    events: Optional[List[dict]] = None
+    if subject_id is not None:
+        from typing import Dict, Tuple
+        ev_groups: Dict[Tuple[str, Optional[str]], List[TripletEntry]] = {}
+        for t in matching:
+            ev_groups.setdefault((t.session_name or "", t.client_id), []).append(t)
+        events = []
+        for (ev_sname, ev_cid), ev_triplets in ev_groups.items():
+            ev_triplets = sorted(ev_triplets, key=lambda x: (
+                _index_in_title(x.question) or 9999, x.date or "",
+            ))
+            ev_dates = [t.date for t in ev_triplets if t.date]
+            ev_date = min(ev_dates) if ev_dates else None
+            ev_date_local = to_local_date(ev_date or "", tz_offset)
+            events.append({
+                "slug": (
+                    _slug_for(ev_sname, ev_cid) if ev_sname else ev_triplets[0].id
+                ),
+                "session_name": ev_sname or None,
+                "date": ev_date_local.isoformat() if ev_date_local else None,
+                "triplet_count": len(ev_triplets),
+                "status": _compute_status([_verdict_of(t) for t in ev_triplets]),
+            })
+        events.sort(key=lambda e: e["date"] or "")
+
     return {
         "slug": slug,
         "session_name": sname or None,
         "subject_id": subject_id,
+        "events": events,
         "ru_title": sname or first.question,
         "first_question": first.question,
         "category": category,

@@ -97,6 +97,30 @@ def test_by_slug_subj_prefix_uses_list_by_subject(client):
     mock_repo.list_by_subject.assert_awaited_once()
     assert mock_repo.list_by_subject.await_args.args[0] == 42
 
+    # events — по одному на каждый (session_name, client_id), хронологически.
+    assert len(data["events"]) == 2
+    assert [e["session_name"] for e in data["events"]] == ["Вадим", "Вадим — диагностика"]
+    assert [e["date"] for e in data["events"]] == ["2026-05-01", "2026-05-02"]
+    assert all(e["triplet_count"] == 1 for e in data["events"])
+    for e in data["events"]:
+        assert "slug" in e and e["slug"]
+        assert "status" in e
+
+
+def test_regular_session_has_no_events_field(client):
+    matching = [
+        _make_triplet("1", "Q1", session_name="Обычная тема", date="2026-05-01"),
+    ]
+    mock_repo = MagicMock()
+    mock_repo.list_by_slug = AsyncMock(return_value=matching)
+
+    ctx = _ctx(mock_repo)
+    with ctx[0], ctx[1], ctx[2], ctx[3]:
+        r = client.get("/api/arcana/sessions/by-slug/obychnaya-tema__self")
+
+    assert r.status_code == 200
+    assert r.json()["events"] is None
+
 
 def test_by_slug_subj_prefix_404_when_empty(client):
     mock_repo = MagicMock()

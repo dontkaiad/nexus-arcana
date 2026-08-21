@@ -5297,30 +5297,98 @@ function SessionPagerOverview({ s, group, onJump, onSummarize, summarizing }) {
   );
 }
 
+// Тема (#189): агрегат subject_id — саммари темы сверху + список сессий-
+// событий за всё время (session_name как он был на тот момент). По тапу на
+// событие открывается обычный SessionDetail (пейджер триплетов), см. вызов
+// onOpenEvent в SessionDetail. Визуально — тот же язык, что и
+// SessionPagerOverview (Glass-карточки + SectionLabel + glass-tap список).
+function ThemeOverview({ s, group, onOpenEvent, onSummarize, summarizing }) {
+  const events = group.events || [];
+  return (
+    <div>
+      <Glass s={s} style={{ padding: "14px 16px", marginBottom: 12 }}>
+        <div style={{ fontSize: fs(11), color: s.acc, marginBottom: 4 }}>
+          🧠 Тема
+        </div>
+        <div style={{ fontFamily: H, fontSize: fs(20), fontWeight: 500, lineHeight: 1.2 }}>
+          {group.title}
+        </div>
+        <div style={{ fontSize: fs(11), opacity: 0.65, marginTop: 6, display: "flex", gap: 6, flexWrap: "wrap" }}>
+          {[group.client, `${events.length} сессий`, `${(group.triplets || []).length} триплетов всего`]
+            .filter(Boolean).map((it, i) => <span key={i}>{it}</span>)}
+        </div>
+      </Glass>
+
+      <Glass s={s} style={{ padding: "10px 14px", marginBottom: 10 }}>
+        <div style={{ fontSize: fs(10), color: s.acc, marginBottom: 6 }}>⚡ Саммари темы</div>
+        {group.summary ? (
+          <div style={{ fontSize: fs(13), color: s.text, lineHeight: 1.5 }}>{group.summary}</div>
+        ) : (
+          <div onClick={onSummarize} style={{
+            display: "inline-block", padding: "4px 10px", borderRadius: 6,
+            background: `${s.acc}22`, color: s.acc,
+            cursor: summarizing ? "wait" : "pointer", fontSize: fs(12),
+          }}>{summarizing ? "Генерирую..." : "Сгенерировать саммари"}</div>
+        )}
+      </Glass>
+
+      <SectionLabel s={s}>Сессии темы</SectionLabel>
+      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+        {events.map((ev, idx) => (
+          <div key={ev.slug || idx} className="glass tap"
+               style={{ padding: "10px 14px" }}
+               onClick={() => onOpenEvent(ev.slug)}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: fs(13), color: s.text, fontWeight: 500 }}>
+                  {ev.sessionName || "—"}
+                </div>
+                <div style={{ fontSize: fs(11), color: s.tM, marginTop: 2 }}>
+                  {[ev.date, `${ev.tripletCount} трип.`].filter(Boolean).join(" · ")}
+                </div>
+              </div>
+              <StatusTag s={s} status={ev.status} />
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function SessionDetail({ s, id, slug }) {
-  const useSlug = slug || id;
+  const rootSlug = slug || id;
+  // Тема (#189) открывается прямо по своему slug ("subj-N"). Тап по сессии-
+  // событию внутри темы переключает activeSlug на неё же, не открывая новый
+  // Sheet — backSlug держит slug темы, чтобы вернуться назад.
+  const [activeSlug, setActiveSlug] = useState(rootSlug);
+  const [backSlug, setBackSlug] = useState(null);
+  useEffect(() => {
+    setActiveSlug(rootSlug);
+    setBackSlug(null);
+  }, [rootSlug]);
+
   const { data, loading, error, refetch } = useApi(
-    useSlug ? `/api/arcana/sessions/by-slug/${useSlug}` : null, [useSlug]
+    activeSlug ? `/api/arcana/sessions/by-slug/${activeSlug}` : null, [activeSlug]
   );
   const [page, setPage] = useState(0);
   const [summarizing, setSummarizing] = useState(false);
   const [localSummary, setLocalSummary] = useState(null);
+  useEffect(() => {
+    setPage(0);
+    setSummarizing(false);
+    setLocalSummary(null);
+  }, [activeSlug]);
 
   if (loading) return <Empty s={s} text="Загружаю..." />;
   if (error) return <ErrorBox s={s} error={error} refetch={refetch} />;
   const group = adaptSessionGroup(data);
   if (!group) return null;
 
-  const triplets = group.triplets || [];
-  const isSolo = group.isSolo || triplets.length <= 1;
-  const totalSlides = isSolo ? triplets.length : triplets.length + 1;
-  const showOverview = !isSolo && page === 0;
-  const tripletIdx = isSolo ? page : page - 1;
-  const t = triplets[tripletIdx];
-  const deckId = t?.deckId || "rider-waite";
+  const isSolo = group.isSolo || (group.triplets || []).length <= 1;
 
   const summarize = async () => {
-    if (summarizing || isSolo) return;
+    if (summarizing || (isSolo && !group.subjectId)) return;
     setSummarizing(true);
     try {
       const r = await apiPost(`/api/arcana/sessions/by-slug/${group.slug}/summarize`);
@@ -5332,12 +5400,36 @@ function SessionDetail({ s, id, slug }) {
 
   const groupForRender = { ...group, summary: localSummary || group.summary };
 
+  // Тема (subject_id) на верхнем уровне — не сессия-событие, а список
+  // сессий-событий за всё время + агрегированное саммари темы.
+  if (group.subjectId && !backSlug) {
+    return (
+      <ThemeOverview
+        s={s} group={groupForRender}
+        onSummarize={summarize} summarizing={summarizing}
+        onOpenEvent={(evSlug) => { setBackSlug(activeSlug); setActiveSlug(evSlug); }}
+      />
+    );
+  }
+
+  const triplets = group.triplets || [];
+  const totalSlides = isSolo ? triplets.length : triplets.length + 1;
+  const showOverview = !isSolo && page === 0;
+  const tripletIdx = isSolo ? page : page - 1;
+  const t = triplets[tripletIdx];
+  const deckId = t?.deckId || "rider-waite";
+
   const handleVerdict = (tid, newV) => {
     triplets.forEach((tt) => { if (tt.id === tid) tt.verdict = newV; });
   };
 
   return (
     <div>
+      {backSlug && (
+        <div className="tap" onClick={() => { setActiveSlug(backSlug); setBackSlug(null); }} style={{
+          fontSize: fs(12), color: s.acc, marginBottom: 10, cursor: "pointer",
+        }}>‹ Назад к теме</div>
+      )}
       {!isSolo && (
         <div style={{
           display: "flex", justifyContent: "center", gap: 6, marginBottom: 10,
