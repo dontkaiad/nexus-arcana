@@ -15,6 +15,7 @@ from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
 from core.claude_client import ask_claude
 from core.config import config as _cfg
 from core.layout import maybe_convert
+from core import memory_rag as _memory_rag
 from core.repos.memory_repo import _repo as _mem_repo
 from core.repos.pg_memory_repo import Memory, bot_to_scope
 
@@ -153,7 +154,46 @@ def _tokenize_hint(hint: str) -> List[str]:
     return tokens
 
 
-async def _find_pages_by_hint(hint: str, page_size: int = 10) -> List[Memory]:
+async def _rag_index_memory_safe(memory_id: str, fact: str, category: str, related_to: str) -> None:
+    """Фоновая индексация факта в pgvector (#184) — никогда не бросает и не
+    блокирует пользовательский ответ (вызывается ПОСЛЕ message.answer)."""
+    try:
+        embed_text = _memory_rag._embed_text(fact, related_to, category)
+        await asyncio.to_thread(_memory_rag.index_memory, memory_id, embed_text)
+    except Exception as e:
+        logger.warning("memory: RAG index failed for %s: %s", memory_id, e)
+
+
+async def _semantic_search_memory(
+    query: str,
+    existing: List[Memory],
+    scope: str = "",
+    user_notion_id: str = "",
+    cap: int = 10,
+) -> List[Memory]:
+    """Semantic-фоллбэк (#184): дёргаем Voyage ТОЛЬКО если ILIKE уже нашёл
+    < 3 совпадений (экономим 3 RPM free-tier). Мердж по id, ILIKE-хиты
+    первыми, semantic — довеском, общий кап. Graceful: любая ошибка →
+    исходный список без изменений, пользователь ничего не замечает."""
+    if len(existing) >= 3 or not query or not query.strip():
+        return existing
+    try:
+        extra = await asyncio.to_thread(
+            _memory_rag.search_memory_semantic, query, scope, user_notion_id, 5
+        )
+    except Exception as e:
+        logger.warning("memory: semantic search fallback failed: %s", e)
+        return existing
+    seen = {m.id for m in existing}
+    merged = list(existing)
+    for m in extra:
+        if m.id not in seen:
+            merged.append(m)
+            seen.add(m.id)
+    return merged[:cap]
+
+
+async def _find_pages_by_hint(hint: str, page_size: int = 10, use_semantic: bool = True) -> List[Memory]:
     """Умный поиск по hint через PG. Возвращает List[Memory].
 
     Функция оставлена module-level: тесты test_memory_aliases патчат её.
@@ -185,6 +225,8 @@ async def _find_pages_by_hint(hint: str, page_size: int = 10) -> List[Memory]:
     try:
         results = await _mem_repo.search(search_terms, page_size=page_size)
         logger.info("_find_pages_by_hint: found=%d for terms=%s", len(results), search_terms)
+        if use_semantic:
+            results = await _semantic_search_memory(hint, results, cap=page_size)
         return results
     except Exception as e:
         logger.error("memory _find_pages_by_hint: %s", e, exc_info=True)
@@ -240,7 +282,10 @@ async def _resolve_alias(
     seen = seen | {link_lower}
 
     try:
-        mems = await _find_pages_by_hint(связь)
+        # use_semantic=False: recall алиаса должен быть точным (иначе
+        # semantic-довесок может подменить имя на «похожее» на каждом
+        # уровне рекурсии) — см. #184.
+        mems = await _find_pages_by_hint(связь, use_semantic=False)
     except Exception as e:
         logger.warning("memory _resolve_alias: _find_pages_by_hint failed for %r: %s",
                        связь, e)
@@ -379,6 +424,9 @@ async def save_memory(
                             await message.answer(tip)
                     except Exception as e:
                         logger.debug("adhd tip error: %s", e)
+            # RAG-индексация (#184) — ПОСЛЕ message.answer, чтобы задержка
+            # Voyage не тормозила пользовательский ответ.
+            await _rag_index_memory_safe(result, fact, category, связь)
         else:
             logger.error("memory save: repo returned None")
             await message.answer("⚠️ Ошибка записи в базу")
@@ -414,6 +462,7 @@ async def search_memory(
         mem_coro = _mem_repo.search(tokens, page_size=10)
         fin_coro = _search_finance(query, page_size=5)
         mems, fin_pages = await asyncio.gather(mem_coro, fin_coro)
+        mems = await _semantic_search_memory(query, mems)
         logger.info("memory search: hint=%r mems=%d fin=%d",
                     query, len(mems), len(fin_pages))
     else:

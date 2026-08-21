@@ -81,7 +81,6 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     op.drop_table("arcana_triplets")          # сносит и свои индексы
-    # В БД nexus_arcana расширение vector создаёт ТОЛЬКО эта миграция → на down
-    # его убираем. IF EXISTS — безопасно. (Если позже vector понадобится памяти —
-    # этот DROP здесь пересмотреть.)
-    op.execute("DROP EXTENSION IF EXISTS vector")
+    # Расширение vector НЕ дропаем: с миграции memories_embedding_pgvector
+    # (#184) его использует ещё и memories.embedding — общий ресурс, владелец
+    # выпиливания теперь та миграция, не эта.

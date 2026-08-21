@@ -1,0 +1,161 @@
+"""tests/test_memory_rag.py — RAG по 🧠 Память: индексация / семантический поиск (#184).
+
+Моки Voyage (_embed) и БД (get_engine — фейковый engine, см. _rag_fake_engine),
+как test_rag_triplets.py/test_rag_smoke.py. Реальной сети/БД нет.
+"""
+from __future__ import annotations
+
+import core.memory_rag as memory_rag
+from tests._rag_fake_engine import FakeEngine, boom_engine
+
+
+# ── _embed_text ──────────────────────────────────────────────────────────────
+
+def test_embed_text_joins_nonempty_parts():
+    assert memory_rag._embed_text("факт", "связь", "🏠 Быт") == "факт связь 🏠 Быт"
+
+
+def test_embed_text_skips_empty_parts():
+    assert memory_rag._embed_text("факт", "", "") == "факт"
+
+
+def test_embed_text_empty_fact_empty_result():
+    assert memory_rag._embed_text("", "", "") == ""
+
+
+# ── index_memory ─────────────────────────────────────────────────────────────
+
+def test_index_memory_empty_text_is_noop(monkeypatch):
+    eng = FakeEngine()
+    monkeypatch.setattr(memory_rag, "get_engine", lambda: eng)
+    ok = memory_rag.index_memory("1", "")
+    assert ok is False
+    assert eng.calls == []
+
+
+def test_index_memory_no_key_graceful(monkeypatch):
+    eng = FakeEngine()
+    monkeypatch.setattr(memory_rag, "get_engine", lambda: eng)
+    monkeypatch.setattr(memory_rag, "_embed", lambda t, input_type="document": [])
+    ok = memory_rag.index_memory("1", "факт")
+    assert ok is False
+    assert eng.calls == []  # _embed вернул [] (нет ключа) — до БД не дошло
+
+
+def test_index_memory_builds_update(monkeypatch):
+    eng = FakeEngine()
+    monkeypatch.setattr(memory_rag, "get_engine", lambda: eng)
+    monkeypatch.setattr(
+        memory_rag, "_embed",
+        lambda t, input_type="document": [[0.1] * 1024],
+    )
+    ok = memory_rag.index_memory("42", "факт про кота")
+    assert ok is True
+    assert len(eng.calls) == 1
+    sql, params = eng.calls[0]
+    assert "UPDATE memories SET embedding" in sql
+    assert params["id"] == 42
+    assert params["e"].startswith("[0.1,")
+
+
+def test_index_memory_db_down_graceful():
+    ok_calls = []
+
+    def fake_embed(t, input_type="document"):
+        ok_calls.append(t)
+        return [[0.1] * 1024]
+
+    import unittest.mock as mock
+    with mock.patch.object(memory_rag, "_embed", fake_embed), \
+         mock.patch.object(memory_rag, "get_engine", boom_engine):
+        ok = memory_rag.index_memory("1", "факт")
+    assert ok is False
+    assert ok_calls == ["факт"]  # embed вызван, а вот БД упала — не раскрылось
+
+
+# ── index_memories_batch ─────────────────────────────────────────────────────
+
+def test_index_memories_batch_one_embed_call_for_n_rows(monkeypatch):
+    eng = FakeEngine()
+    monkeypatch.setattr(memory_rag, "get_engine", lambda: eng)
+    calls = []
+
+    def fake_embed(texts, input_type="document"):
+        calls.append(texts)
+        return [[0.1] * 1024 for _ in texts]
+
+    monkeypatch.setattr(memory_rag, "_embed", fake_embed)
+    items = [
+        {"memory_id": "1", "embed_text": "факт раз"},
+        {"memory_id": "2", "embed_text": "факт два"},
+        {"memory_id": "3", "embed_text": ""},  # пустой — пропускается
+    ]
+    n = memory_rag.index_memories_batch(items)
+    assert n == 2
+    assert len(calls) == 1 and calls[0] == ["факт раз", "факт два"]
+    assert len(eng.calls) == 2  # два UPDATE в одном batch
+
+
+def test_index_memories_batch_empty_input():
+    assert memory_rag.index_memories_batch([]) == 0
+    assert memory_rag.index_memories_batch([{"memory_id": "1", "embed_text": ""}]) == 0
+
+
+# ── search_memory_semantic ───────────────────────────────────────────────────
+
+def _row(id_=1, fact="факт", category="🏠 Быт"):
+    return {
+        "id": id_, "fact_text": fact, "key_name": "k", "value_text": "",
+        "category": category, "scope": "global", "source": "auto",
+        "related_to": "", "is_current": True, "is_archived": False,
+        "user_notion_id": "", "created_at": None, "updated_at": None,
+    }
+
+
+def test_search_memory_semantic_builds_scope_filter(monkeypatch):
+    eng = FakeEngine(rows=[_row()])
+    monkeypatch.setattr(memory_rag, "get_engine", lambda: eng)
+    monkeypatch.setattr(memory_rag, "_embed", lambda t, input_type="query": [[0.2] * 1024])
+
+    out = memory_rag.search_memory_semantic("гай", scope="nexus", top_k=5)
+    assert len(out) == 1 and out[0].fact == "факт"
+    sql, params = eng.calls[0]
+    assert "scope = :scope OR scope = 'global'" in sql
+    assert params["scope"] == "nexus"
+    assert params["k"] == 5
+
+
+def test_search_memory_semantic_no_scope_no_filter(monkeypatch):
+    eng = FakeEngine(rows=[])
+    monkeypatch.setattr(memory_rag, "get_engine", lambda: eng)
+    monkeypatch.setattr(memory_rag, "_embed", lambda t, input_type="query": [[0.2] * 1024])
+
+    out = memory_rag.search_memory_semantic("гай")
+    assert out == []
+    sql, params = eng.calls[0]
+    assert "scope" not in params
+
+
+def test_search_memory_semantic_empty_query_no_call(monkeypatch):
+    eng = FakeEngine()
+    monkeypatch.setattr(memory_rag, "get_engine", lambda: eng)
+    out = memory_rag.search_memory_semantic("")
+    assert out == []
+    assert eng.calls == []
+
+
+def test_search_memory_semantic_db_down_graceful():
+    import unittest.mock as mock
+    with mock.patch.object(memory_rag, "_embed", lambda t, input_type="query": [[0.2] * 1024]), \
+         mock.patch.object(memory_rag, "get_engine", boom_engine):
+        out = memory_rag.search_memory_semantic("гай")
+    assert out == []
+
+
+def test_search_memory_semantic_no_key_graceful(monkeypatch):
+    eng = FakeEngine()
+    monkeypatch.setattr(memory_rag, "get_engine", lambda: eng)
+    monkeypatch.setattr(memory_rag, "_embed", lambda t, input_type="query": [])
+    out = memory_rag.search_memory_semantic("гай")
+    assert out == []
+    assert eng.calls == []
