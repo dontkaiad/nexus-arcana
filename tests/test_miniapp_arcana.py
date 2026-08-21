@@ -398,6 +398,13 @@ def test_arcana_sessions_list_and_filter(client):
     assert r_client.json()["total"] == 1
     assert r_client.json()["sessions"][0]["client"] == "Борис"
 
+    # "areas" — уникальные area всех триплетов группы; контракт, на который
+    # опирается фронтенд для динамических кнопок-фильтров (miniapp/frontend
+    # /src/App.jsx ArSessions areaOptions).
+    by_id = {s["id"]: s for s in r_all.json()["sessions"] if s.get("id")}
+    assert by_id["s1"]["areas"] == ["Отношения"]
+    assert by_id["s2"]["areas"] == ["Финансы"]
+
 
 def test_arcana_sessions_401():
     app.dependency_overrides.clear()

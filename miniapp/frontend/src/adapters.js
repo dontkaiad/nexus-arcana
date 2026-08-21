@@ -553,6 +553,7 @@ export function adaptSessionGroupBrief(x) {
     title: x.ru_title || x.first_question || '—',
     firstQ: x.first_question || '',
     category: x.category || '',
+    areas: x.areas || [],
     client: x.client || 'Личный',
     clientId: x.client_id || null,
     clientType: x.client_type || '',

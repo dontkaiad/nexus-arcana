@@ -3692,14 +3692,26 @@ function ArSessions({ s, openSession, sessFilterRequest, consumeSessFilter, sess
   let path = "/api/arcana/sessions";
   if (f === "wait") path += "?filter=status:wait";
   else if (f === "done") path += "?filter=status:done";
+  else if (f.startsWith("area:")) path += `?filter=${encodeURIComponent(f)}`;
   const { data, loading, error, refetch } = useApi(path, [f, sessChangedSig]);
   const list = loading || error ? [] : adaptSessions(data);
+
+  // Кнопки «Область» строим из реально встречающихся значений, а не хардкодом
+  // 6 констант — тянем полный (без фильтра по area) список отдельно, иначе
+  // при активном area-фильтре набор кнопок схлопнется до одной.
+  const { data: allSessData } = useApi("/api/arcana/sessions", [sessChangedSig]);
+  const areaOptions = useMemo(() => {
+    const set = new Set();
+    (allSessData?.sessions || []).forEach((x) => (x.areas || []).forEach((a) => a && set.add(a)));
+    return Array.from(set);
+  }, [allSessData]);
 
   const pinned = list.find((x) => x.status === "wait" || x.status === "proc");
   const filters = [
     { k: "all",  l: "Все" },
     { k: "wait", l: "⏳ Непроверенные" },
     { k: "done", l: "Сбылось" },
+    ...areaOptions.map((a) => ({ k: `area:${a}`, l: a })),
   ];
   const total = list.length;
   const waitCount = list.filter((x) => x.status === "wait" || x.status === "proc").length;
