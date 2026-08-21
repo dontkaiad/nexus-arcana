@@ -732,6 +732,32 @@ class PgSessionsRepo:
             self._group_subject_id_sync, session_name, client_id, user_notion_id
         )
 
+    def _recent_areas_for_subject_sync(self, subject_id: int, limit: int) -> List[str]:
+        """Последние (по occurred_at desc) непустые area темы, без повторов
+        подряд — контекстная подсказка для area-классификатора (#190). НЕ
+        анкер: используется только как best-guess при отсутствии явного
+        триггера в самом вопросе, см. arcana/handlers/sessions.py."""
+        stmt = (
+            select(sessions.c.area)
+            .where(sessions.c.subject_id == subject_id)
+            .where(sessions.c.area.isnot(None))
+            .where(sessions.c.area != "")
+            .order_by(sessions.c.occurred_at.desc().nullslast(), sessions.c.id.desc())
+            .limit(20)
+        )
+        with get_engine().connect() as conn:
+            rows = [r[0] for r in conn.execute(stmt)]
+        out: List[str] = []
+        for a in rows:
+            if a not in out:
+                out.append(a)
+            if len(out) >= limit:
+                break
+        return out
+
+    async def recent_areas_for_subject(self, subject_id: int, limit: int = 3) -> List[str]:
+        return await asyncio.to_thread(self._recent_areas_for_subject_sync, subject_id, limit)
+
     def _set_props_sync(self, session_id: str, fields: dict) -> bool:
         try:
             sid = int(session_id)

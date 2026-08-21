@@ -42,12 +42,13 @@ def _cleanup():
         conn.execute(delete(memories).where(memories.c.user_notion_id == MARK))
 
 
-def _ins_session(conn, sname, *, client_id=None, subject_id=None, q="q"):
+def _ins_session(conn, sname, *, client_id=None, subject_id=None, q="q",
+                  area=None, occurred_at=None):
     return conn.execute(
         insert(sessions).values(
-            title=q, question=q, occurred_at=None,
+            title=q, question=q, occurred_at=occurred_at,
             session_name=sname, client_id=client_id, subject_id=subject_id,
-            user_notion_id=MARK, archived=False,
+            area=area, user_notion_id=MARK, archived=False,
         ).returning(sessions.c.id)
     ).scalar_one()
 
@@ -161,3 +162,54 @@ async def test_list_by_subject_collapses_different_session_names(repo):
     got = await repo.list_by_subject(mem_id, MARK)
     assert {t.id for t in got} == {str(i) for i in ids}
     assert all(t.subject_id == mem_id for t in got)
+
+
+# ── recent_areas_for_subject (#190) ──────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_recent_areas_for_subject_most_recent_first_deduped(repo):
+    from datetime import date
+
+    with get_engine().begin() as conn:
+        mem_id = _ins_memory(conn)
+        _ins_session(conn, "Вадим", subject_id=mem_id, area="Отношения",
+                     occurred_at=date(2026, 1, 1))
+        _ins_session(conn, "Вадим — деньги", subject_id=mem_id, area="Финансы",
+                     occurred_at=date(2026, 2, 1))
+        _ins_session(conn, "Вадим — снова", subject_id=mem_id, area="Отношения",
+                     occurred_at=date(2026, 3, 1))
+        # шум: пустая area не должна попасть в подсказку.
+        _ins_session(conn, "Вадим — без темы", subject_id=mem_id, area=None,
+                     occurred_at=date(2026, 3, 15))
+        # другая тема — не должна попасть.
+        other_mem = _ins_memory(conn, fact="Маша", related_to="маша")
+        _ins_session(conn, "Маша", subject_id=other_mem, area="Здоровье",
+                     occurred_at=date(2026, 3, 20))
+
+    got = await repo.recent_areas_for_subject(mem_id, limit=3)
+    # most-recent-first, без повторов подряд одного значения дважды в списке.
+    assert got == ["Отношения", "Финансы"]
+
+
+@pytest.mark.asyncio
+async def test_recent_areas_for_subject_respects_limit(repo):
+    from datetime import date
+
+    with get_engine().begin() as conn:
+        mem_id = _ins_memory(conn)
+        for i, area in enumerate(["Отношения", "Финансы", "Здоровье", "Работа"]):
+            _ins_session(conn, f"Вадим — {i}", subject_id=mem_id, area=area,
+                         occurred_at=date(2026, 1, i + 1))
+
+    got = await repo.recent_areas_for_subject(mem_id, limit=2)
+    assert got == ["Работа", "Здоровье"]
+
+
+@pytest.mark.asyncio
+async def test_recent_areas_for_subject_empty_when_no_history(repo):
+    with get_engine().begin() as conn:
+        mem_id = _ins_memory(conn)
+        _ins_session(conn, "Вадим", subject_id=mem_id, area=None)
+
+    got = await repo.recent_areas_for_subject(mem_id, limit=3)
+    assert got == []

@@ -194,3 +194,8 @@ class SessionsRepo:
         subject_id на любой строке — вернуть его, чтобы новая отправка
         унаследовала его молча, без повторного вопроса (#189)."""
         return await _pg_repo().group_subject_id(session_name, client_id, user_notion_id)
+
+    async def recent_areas_for_subject(self, subject_id: int, limit: int = 3) -> List[str]:
+        """Последние непустые area темы — контекстная подсказка для
+        area-классификатора, НЕ анкер (#190)."""
+        return await _pg_repo().recent_areas_for_subject(subject_id, limit)
