@@ -164,3 +164,90 @@ async def test_upsert_update_path_survives_missing_embedding_column():
     with eng.connect() as conn:
         row = conn.execute(sa.text("SELECT fact_text FROM memories WHERE id=:id"), {"id": int(mem_id)}).fetchone()
     assert row[0] == "лимит: кафе 5000"  # апдейт факта прошёл, несмотря на отсутствие колонки
+
+
+# ── update_fields (#188: reply-исправление по id) ────────────────────────────
+
+@pytest.mark.asyncio
+async def test_update_fields_by_id_updates_fact_and_reindexes():
+    import core.repos.pg_memory_repo as pgmod
+    from core.repos.pg_memory_repo import PgMemoryRepo
+
+    eng = _make_engine()
+    with eng.begin() as conn:
+        conn.execute(sa.text(
+            "INSERT INTO memories (key_name, category, fact_text, related_to, embedding, is_current) "
+            "VALUES ('s7', '🐾 Коты', 'старый текст', 'S7', 'old-vector', 1)"
+        ))
+
+    with patch.object(pgmod, "get_engine", return_value=eng), \
+         patch("core.memory_rag.index_memory") as idx:
+        idx.return_value = True
+        repo = PgMemoryRepo()
+        ok = await repo.update_fields("1", fact="новый текст")
+        await _drain_index_tasks()
+
+    assert ok is True
+    with eng.connect() as conn:
+        row = conn.execute(sa.text("SELECT fact_text, category FROM memories WHERE id=1")).fetchone()
+    assert row[0] == "новый текст"
+    assert row[1] == "🐾 Коты"  # category не трогали
+    idx.assert_called_once()
+    called_id, embed_text = idx.call_args[0]
+    assert called_id == "1"
+    assert embed_text == "новый текст S7 🐾 Коты"  # переиндексирован свежий (не старый) факт
+
+
+@pytest.mark.asyncio
+async def test_update_fields_by_id_updates_category_only():
+    import core.repos.pg_memory_repo as pgmod
+    from core.repos.pg_memory_repo import PgMemoryRepo
+
+    eng = _make_engine()
+    with eng.begin() as conn:
+        conn.execute(sa.text(
+            "INSERT INTO memories (key_name, category, fact_text, is_current) "
+            "VALUES ('s7', '🐾 Коты', 'факт', 1)"
+        ))
+
+    with patch.object(pgmod, "get_engine", return_value=eng), \
+         patch("core.memory_rag.index_memory", return_value=True):
+        repo = PgMemoryRepo()
+        ok = await repo.update_fields("1", category="🛒 Предпочтения")
+        await _drain_index_tasks()
+
+    assert ok is True
+    with eng.connect() as conn:
+        row = conn.execute(sa.text("SELECT fact_text, category FROM memories WHERE id=1")).fetchone()
+    assert row == ("факт", "🛒 Предпочтения")
+
+
+@pytest.mark.asyncio
+async def test_update_fields_nonexistent_id_returns_false():
+    import core.repos.pg_memory_repo as pgmod
+    from core.repos.pg_memory_repo import PgMemoryRepo
+
+    eng = _make_engine()
+    with patch.object(pgmod, "get_engine", return_value=eng):
+        repo = PgMemoryRepo()
+        ok = await repo.update_fields("999", fact="что угодно")
+
+    assert ok is False
+
+
+@pytest.mark.asyncio
+async def test_update_fields_nothing_passed_returns_false():
+    import core.repos.pg_memory_repo as pgmod
+    from core.repos.pg_memory_repo import PgMemoryRepo
+
+    eng = _make_engine()
+    with eng.begin() as conn:
+        conn.execute(sa.text(
+            "INSERT INTO memories (key_name, category, fact_text, is_current) "
+            "VALUES ('s7', '🐾 Коты', 'факт', 1)"
+        ))
+    with patch.object(pgmod, "get_engine", return_value=eng):
+        repo = PgMemoryRepo()
+        ok = await repo.update_fields("1")  # ни fact, ни category, ни related_to
+
+    assert ok is False

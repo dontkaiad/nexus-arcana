@@ -95,6 +95,20 @@ class MemoryRepo:
     async def archive(self, memory_id: str) -> bool:
         return await self._pg.archive(memory_id)
 
+    async def update_fields(
+        self,
+        memory_id: str,
+        fact: Optional[str] = None,
+        category: Optional[str] = None,
+        related_to: Optional[str] = None,
+    ) -> bool:
+        """Точечная правка по id (reply-исправление, #188)."""
+        try:
+            return await self._pg.update_fields(memory_id, fact=fact, category=category, related_to=related_to)
+        except Exception as e:
+            logger.error("MemoryRepo.update_fields: %s", e)
+            return False
+
     # ── Read ──────────────────────────────────────────────────────────────────
 
     async def search(

@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 import logging
+import re
 import traceback as tb
+from datetime import datetime, timezone
 
 from aiogram.types import Message
 
@@ -16,6 +18,38 @@ from core.reply_update import (
 from core.utils import react
 
 logger = logging.getLogger("nexus.reply_update")
+
+_MEMORY_PLAQUE_RE = re.compile(r"^🧠 Запомнил(?:\s*\[[^\]]*\])?:\s*(.+)$", re.DOTALL)
+
+
+async def _move_memory_to_notes(message: Message, orig: Message, page_id: str, user_notion_id: str) -> bool:
+    """Перенос факта из 🧠 Память в 📝 Заметки: архивирует memory-строку +
+    создаёт note с тем же текстом (#188). Текст факта берём из ТЕКСТА плашки
+    (не из БД) — плашка уже содержит канонический fact, лишний round-trip
+    в PgMemoryRepo не нужен. Возвращает True если обработано (плашка
+    распозналась), False — пусть падает в обычный field-update путь."""
+    orig_text = orig.text or orig.caption or ""
+    m = _MEMORY_PLAQUE_RE.match(orig_text)
+    if not m:
+        return False
+    fact_text = m.group(1).strip()
+    if not fact_text:
+        return False
+    try:
+        from core.repos.memory_repo import _repo as mem_repo
+        from nexus.repos.notes_repo import NotesRepo
+        today = datetime.now(timezone.utc).date().isoformat()
+        note_id = await NotesRepo().add(text=fact_text, tags=[], date=today, user_notion_id=user_notion_id)
+        if not note_id:
+            await message.answer("⚠️ Не получилось создать заметку.")
+            return True
+        await mem_repo.archive(page_id)
+        await message.answer(f"📝 Перенесено в заметки: {fact_text}")
+        await react(message, "✍️")
+    except Exception as e:
+        logger.error("_move_memory_to_notes: %s", e)
+        await message.answer("❌ Не удалось перенести в заметки.")
+    return True
 
 
 async def handle_reply_update(message: Message, user_notion_id: str = "") -> bool:
@@ -44,6 +78,16 @@ async def handle_reply_update(message: Message, user_notion_id: str = "") -> boo
             from nexus.handlers.tasks import _get_user_tz
             tz_offset = await _get_user_tz(message.from_user.id)
         updates = await parse_reply(page_type, reply_text, tz_offset=tz_offset)
+
+        # #188: «это в заметки» на плашку памяти — не field-апдейт, а перенос
+        # в другой домен (архив факта + новая запись в 📝 Заметки). pop() ДО
+        # проверки "нечего менять", т.к. move_to_notes=False всегда присутствует
+        # ключом в JSON-ответе Haiku (не фильтруется как null/"").
+        if page_type == "memory" and updates.pop("move_to_notes", False):
+            handled = await _move_memory_to_notes(message, orig, page_id, user_notion_id)
+            if handled:
+                return True
+
         if not updates:
             await message.answer("✏️ Не поняла что дополнить.")
             await react(message, "🤔")

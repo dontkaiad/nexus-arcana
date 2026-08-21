@@ -406,7 +406,20 @@ async def save_memory(
                     await message.answer(f"📋 Добавил долг: {fact}")
                 else:
                     cat_label = f" [{category}]" if category else ""
-                    await message.answer(f"🧠 Запомнил{cat_label}: {fact}")
+                    sent = await message.answer(f"🧠 Запомнил{cat_label}: {fact}")
+                    # Регистрируем плашку для reply-исправлений (#188) — БЕЗ
+                    # этого reply на «🧠 Запомнил» падал в общий classify() с
+                    # текстом-контекстом, который Haiku не понимал ({"type":
+                    # "unknown"}). Только для обычных фактов: бюджетные ветки
+                    # (обязательно_/цель_/долг_) уже правятся через /budget.
+                    try:
+                        from core.message_pages import save_message_page
+                        await save_message_page(
+                            chat_id=sent.chat.id, message_id=sent.message_id,
+                            page_id=result, page_type="memory", bot=scope,
+                        )
+                    except Exception as e:
+                        logger.warning("memory save: register message_page failed: %s", e)
                 if category == "🦋 СДВГ":
                     try:
                         tip = await _get_adhd_tip(fact)

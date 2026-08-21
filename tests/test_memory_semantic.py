@@ -70,6 +70,25 @@ def test_save_memory_answers_user_on_success():
     msg.answer.assert_called()
 
 
+def test_save_memory_registers_plaque_for_reply_correction():
+    """#188: плашка «🧠 Запомнил» должна регистрироваться в message_pages,
+    иначе reply-исправление ('это в заметки' и т.п.) падает в общий classify()
+    и не понимается ({"type":"unknown"})."""
+    msg = _mk_message()
+    sent = AsyncMock()
+    sent.chat.id = 555
+    sent.message_id = 777
+    msg.answer = AsyncMock(return_value=sent)
+    with patch("core.memory._parse_fact", AsyncMock(return_value=("факт", "🐾 Коты", "", "ключ"))), \
+         patch("core.memory._mem_repo") as mem_repo, \
+         patch("core.message_pages.save_message_page", AsyncMock()) as save_page:
+        mem_repo.add = AsyncMock(return_value="99")
+        asyncio.run(save_memory(msg, "текст", "user1", "☀️ Nexus"))
+    save_page.assert_called_once_with(
+        chat_id=555, message_id=777, page_id="99", page_type="memory", bot="nexus",
+    )
+
+
 def test_save_memory_error_reply_on_write_failure():
     msg = _mk_message()
     with patch("core.memory._parse_fact", AsyncMock(return_value=("факт", "🏠 Быт", "", "ключ"))), \

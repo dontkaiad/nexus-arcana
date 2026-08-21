@@ -190,6 +190,51 @@ async def test_work_reply_set_props_maps_category():
     assert applied["Категория"] == "✨ Ритуал"
 
 
+# ── memory: reply-исправление факта/категории (#188) ─────────────────────────
+
+@pytest.mark.asyncio
+async def test_memory_reply_system_lists_categories():
+    from core.memory import CATEGORIES
+    system = ru._memory_reply_system()
+    for cat in CATEGORIES:
+        assert cat in system
+
+
+@pytest.mark.asyncio
+async def test_memory_reply_updates_fact():
+    from core.repos.memory_repo import MemoryRepo
+    with patch.object(MemoryRepo, "update_fields", AsyncMock(return_value=True)) as m:
+        applied = await ru.apply_updates("42", "memory", None, {"fact": "исправленный текст"})
+    m.assert_awaited_once_with("42", fact="исправленный текст", category=None)
+    assert applied["Факт"] == "исправленный текст"
+
+
+@pytest.mark.asyncio
+async def test_memory_reply_updates_category():
+    from core.repos.memory_repo import MemoryRepo
+    with patch.object(MemoryRepo, "update_fields", AsyncMock(return_value=True)) as m:
+        applied = await ru.apply_updates("42", "memory", None, {"category": "🏠 Быт"})
+    m.assert_awaited_once_with("42", fact=None, category="🏠 Быт")
+    assert applied["Категория"] == "🏠 Быт"
+
+
+@pytest.mark.asyncio
+async def test_memory_reply_nothing_to_update_noop():
+    from core.repos.memory_repo import MemoryRepo
+    with patch.object(MemoryRepo, "update_fields", AsyncMock()) as m:
+        applied = await ru.apply_updates("42", "memory", None, {"move_to_notes": False})
+    m.assert_not_called()
+    assert applied == {}
+
+
+@pytest.mark.asyncio
+async def test_memory_reply_repo_failure_returns_empty():
+    from core.repos.memory_repo import MemoryRepo
+    with patch.object(MemoryRepo, "update_fields", AsyncMock(return_value=False)):
+        applied = await ru.apply_updates("42", "memory", None, {"fact": "X"})
+    assert applied == {}
+
+
 # ── dispatch guards ──────────────────────────────────────────────────────────
 
 @pytest.mark.asyncio

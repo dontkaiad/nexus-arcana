@@ -59,6 +59,14 @@ async def handle_reply_update(message: Message, user_notion_id: str = "") -> boo
         from core.shared_handlers import get_user_tz
         tz_offset = int(await get_user_tz(message.from_user.id))
         updates = await parse_reply(page_type, reply_text, tz_offset=tz_offset)
+
+        # #188: в Arcana нет 📝 Заметок (Nexus-специфичная фича) — move_to_notes
+        # игнорируем graceful, не даём улететь в "не поняла что дополнить".
+        if page_type == "memory" and updates.pop("move_to_notes", False):
+            await message.answer("📝 В Arcana заметок нет — могу поправить только сам факт/категорию.")
+            await react(message, "🤔")
+            return True
+
         if not updates:
             await message.answer("✏️ Не поняла что дополнить.")
             await react(message, "🤔")

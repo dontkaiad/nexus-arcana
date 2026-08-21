@@ -121,6 +121,32 @@ _CLIENT_REPLY_SYSTEM = (
     "Если поле не упомянуто — null."
 )
 
+# #188: reply на плашку 🧠 Памяти («🧠 Запомнил [кат]: факт») раньше падал в
+# общий classify() и не понимался (page_type "memory" не был зарегистрирован
+# в message_pages вообще). move_to_notes — отдельный флаг, не field-апдейт:
+# вызывающая сторона (nexus/handlers/reply_update.py) обрабатывает его ДО
+# apply_updates, потому что перенос в 📝 Заметки — это архивация факта +
+# создание note в другом PG-репозитории (NotesRepo, Nexus-специфичный), а не
+# простая правка колонки.
+def _memory_reply_system(tz_offset: int = 3) -> str:  # tz_offset unused, matches dynamic-system signature
+    from core.memory import CATEGORIES
+    cats = " / ".join(CATEGORIES)
+    return (
+        "Ты обрабатываешь reply на уже сохранённый факт в 🧠 Память бота. "
+        "Ответь ТОЛЬКО JSON без markdown:\n"
+        '{"move_to_notes": true/false, '
+        '"fact": "исправленный/уточнённый текст факта или null", '
+        '"category": "новая категория или null"}\n\n'
+        "move_to_notes=true — ТОЛЬКО если явно просят перенести эту запись в "
+        "заметки («это в заметки», «перенеси в заметки», «это не факт, а "
+        "заметка/идея»).\n"
+        "fact — ТОЛЬКО если пользователь исправляет/уточняет текст самого "
+        "факта (не перенос в другой раздел).\n"
+        f"category — ТОЛЬКО если явно просят сменить категорию, ИЗ списка: {cats}\n"
+        "Если ничего из вышеперечисленного не подходит — "
+        "move_to_notes=false, fact=null, category=null."
+    )
+
 
 _TYPE_TO_SYSTEM = {
     "ritual":  _RITUAL_REPLY_SYSTEM,
@@ -134,6 +160,7 @@ _TYPE_TO_SYSTEM = {
 _TYPE_TO_DYNAMIC_SYSTEM = {
     "task": _task_reply_system,
     "work": _work_reply_system,
+    "memory": _memory_reply_system,
 }
 
 
@@ -269,6 +296,8 @@ async def apply_updates(
         return await _apply_ritual(page_id, updates)
     if page_type == "work":
         return await _apply_work(page_id, updates, tz_offset)
+    if page_type == "memory":
+        return await _apply_memory(page_id, updates)
     return {}
 
 
@@ -368,6 +397,26 @@ async def _apply_client(page_id: str, updates: Dict[str, Any]) -> Dict[str, Any]
             await repo.update_profile(int(page_id), **kw)
         except (ValueError, TypeError):
             pass
+    return applied
+
+
+async def _apply_memory(page_id: str, updates: Dict[str, Any]) -> Dict[str, Any]:
+    """🧠 Память → PgMemoryRepo.update_fields (#188). Только fact/category —
+    move_to_notes обрабатывается вызывающей стороной ДО apply_updates (это
+    архивация + новая запись в другом домене, не field-апдейт этой строки)."""
+    from core.repos.memory_repo import _repo as mem_repo
+    fact = updates.get("fact")
+    category = updates.get("category")
+    if not fact and not category:
+        return {}
+    ok = await mem_repo.update_fields(page_id, fact=fact, category=category)
+    if not ok:
+        return {}
+    applied: Dict[str, Any] = {}
+    if fact:
+        applied["Факт"] = fact
+    if category:
+        applied["Категория"] = category
     return applied
 
 
