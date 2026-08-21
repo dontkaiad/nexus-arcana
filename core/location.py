@@ -46,6 +46,9 @@ CITY_TZ: Dict[str, int] = {
     "москва": 3, "москве": 3, "мск": 3, "московск": 3,
     "спб": 3, "санкт-петербург": 3, "питер": 3, "петербург": 3,
     "калининград": 2,
+    # Гай (Оренбургская обл., #184). ТОЛЬКО "гай"/"гае": формы "гая"/"гаю"
+    # нельзя — substring-матч ловит их внутри «помогаю/полагаю/помогая/пугая».
+    "гай": 5, "гае": 5,
     "самара": 4, "самаре": 4,
     "удмуртия": 5, "удмуртии": 5, "ижевск": 5,
     "екатеринбург": 5, "екб": 5, "ебург": 5, "свердловск": 5,
@@ -169,14 +172,17 @@ async def set_user_location(
     graceful, погода всё равно получит city_). Возвращает записанный offset."""
     repo = PgMemoryRepo()
     if offset is not None:
+        # category="Настройки" не входит в core/memory.py:CATEGORIES (15
+        # canonical значений) — тот же класс бага, что и "⭐ Предпочтения"
+        # у city (#184). Ближайший подходящий существующий бакет — 🏠 Быт.
         await repo.upsert(
-            fact=str(offset), key=f"tz_{tg_id}", category="Настройки",
+            fact=str(offset), key=f"tz_{tg_id}", category="🏠 Быт",
             scope="global", source="auto", user_notion_id=user_notion_id,
         )
         _cache_offset(tg_id, offset)  # свой процесс — обновляем кеш сразу
     if city:
         await repo.upsert(
-            fact=city, key=f"city_{tg_id}", category="⭐ Предпочтения",
+            fact=city, key=f"city_{tg_id}", category="🛒 Предпочтения",
             scope="nexus", source="auto", user_notion_id=user_notion_id,
         )
     return offset

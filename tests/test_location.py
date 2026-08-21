@@ -31,6 +31,10 @@ from core.repos.pg_memory_repo import Memory
     ("Екатеринбург", 5, "екатеринбург"),
     ("UTC+5", 5, None),
     ("utc-3", -3, None),
+    ("я в гае", 5, "гае"),   # Оренбургская область (#184)
+    ("Гай", 5, "гай"),
+    # substring-регрессия (#184): «помогаю» не должно ловиться как «гаю»
+    ("я в казани, помогаю маме", 3, "казани"),
 ])
 def test_resolve_offset_known(text, exp_offset, exp_city):
     assert loc.resolve_offset(text) == (exp_offset, exp_city)
@@ -57,6 +61,10 @@ async def test_set_user_location_writes_both_keys():
     assert all(c.kwargs["user_notion_id"] == "u-1" for c in upsert.call_args_list)
     # кеш обновлён в своём процессе
     assert loc._tz_offsets[77] == 3
+    # категории — только из core/memory.py:CATEGORIES, не "⭐ Предпочтения"/
+    # "Настройки" (#184: обе были невалидны, не совпадали с списком).
+    cats = {c.kwargs["key"]: c.kwargs["category"] for c in upsert.call_args_list}
+    assert cats == {"tz_77": "🏠 Быт", "city_77": "🛒 Предпочтения"}
 
 
 @pytest.mark.asyncio
