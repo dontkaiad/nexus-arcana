@@ -106,7 +106,11 @@ def index_memories_batch(items: List[dict]) -> int:
 
 
 def search_memory_semantic(
-    query_text: str, scope: str = "", user_notion_id: str = "", top_k: int = 5
+    query_text: str,
+    scope: str = "",
+    user_notion_id: str = "",
+    top_k: int = 5,
+    min_score: Optional[float] = None,
 ) -> List[Memory]:
     """Семантический поиск похожих memory-фактов (косинус). Возвращает
     `Memory` (тот же тип, что `PgMemoryRepo`) для прямого мержа с
@@ -114,7 +118,14 @@ def search_memory_semantic(
 
     scope задан → доп. фильтр (scope=:scope OR scope='global'); пусто →
     без фильтра scope (как текущий ILIKE-путь). Только is_current и не
-    is_archived. Graceful: БД/Voyage недоступны → []."""
+    is_archived. Graceful: БД/Voyage недоступны → [].
+
+    min_score (#185): векторный поиск ВСЕГДА что-то находит — top_k ближайших
+    соседей возвращаются, даже когда ничего релевантного нет. Порог пока НЕ
+    задан по умолчанию (None = без фильтра) — калиброваться должен по
+    реальному распределению score на проде, не угадыванием; см. лог ниже и
+    issue #185. Когда порог выберется — передать min_score явно с вызывающей
+    стороны (core/memory.py)."""
     if not query_text or not str(query_text).strip():
         return []
     vecs = _embed(query_text, input_type="query")
@@ -132,7 +143,8 @@ def search_memory_semantic(
         sql = sa.text(f"""
             SELECT id, fact_text, key_name, value_text, category, scope, source,
                    related_to, is_current, is_archived, user_notion_id,
-                   created_at, updated_at
+                   created_at, updated_at,
+                   1 - (embedding <=> CAST(:q AS vector)) AS score
             FROM {TABLE_MEMORIES}
             WHERE embedding IS NOT NULL
               AND is_archived = false
@@ -143,9 +155,21 @@ def search_memory_semantic(
         """)
         with get_engine().connect() as conn:
             rows = conn.execute(sql, params).mappings().all()
+        # Сырое распределение score — данные для калибровки порога (#185),
+        # НЕ фильтр по умолчанию (min_score=None -> ничего не отсекаем).
+        if rows:
+            scores = [dict(r).get("score") for r in rows]
+            logger.info(
+                "search_memory_semantic: query=%r scores=%s min_score=%s",
+                query_text[:60], [round(s, 3) if s is not None else None for s in scores],
+                min_score,
+            )
         out: List[Memory] = []
         for r in rows:
             d = dict(r)
+            score = d.get("score")
+            if min_score is not None and score is not None and score < min_score:
+                continue
             created = d.get("created_at")
             updated = d.get("updated_at")
             out.append(Memory(

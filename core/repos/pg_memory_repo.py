@@ -151,6 +151,21 @@ def _upsert_sync(
                         updated_at=text("now()"),
                     )
                 )
+            # Текст факта сменился → старый вектор ему больше не соответствует.
+            # NULL-им отдельной транзакцией/try (#186, до переиндексации): если
+            # эмбеддинг-колонки ещё нет (миграция не накатана) или БД капризит,
+            # это НЕ должно откатить уже подтверждённое обновление факта выше.
+            # Raw SQL: колонка embedding намеренно не описана в Table (см.
+            # core/memory_rag.py). Небольшое окно гонки до переиндексации —
+            # тот же trade-off, что и у всех остальных RAG-хуков в этом файле.
+            try:
+                with get_engine().begin() as conn:
+                    conn.execute(
+                        text("UPDATE memories SET embedding = NULL WHERE id = :mid"),
+                        {"mid": mem_id},
+                    )
+            except Exception as e:
+                logger.warning("memory upsert: embedding NULL-reset failed for %s: %s", mem_id, e)
             return str(mem_id), True
     mem_id = _add_sync(fact, key, category, scope, related_to, source, user_notion_id)
     return mem_id, False
@@ -305,6 +320,41 @@ def _find_recent_sync(
     return [_row_to_memory(r) for r in rows]
 
 
+# ── Embedding index hook (#186) ────────────────────────────────────────────────
+# Индексация на уровне репо — ЕДИНСТВЕННАЯ точка, через которую проходят ВСЕ
+# записи памяти (save_memory, save_parsed авто-подсказки, бюджетные upsert'ы
+# finance, локация set_user_location). Fire-and-forget task: запись/ответ
+# пользователю не ждут Voyage; сбой — warning + no-op (строка остаётся с
+# embedding=NULL, подберёт backfill-скрипт).
+
+_index_tasks: set = set()  # держим ссылки, иначе GC снимет незавершённый task
+
+
+async def _index_embedding_safe(
+    memory_id: str, fact: str, related_to: str, category: str
+) -> None:
+    try:
+        # Лениво: core.memory_rag импортирует Memory из ЭТОГО модуля.
+        from core import memory_rag
+        embed_text = memory_rag._embed_text(fact, related_to, category)
+        await asyncio.to_thread(memory_rag.index_memory, memory_id, embed_text)
+    except Exception as e:
+        logger.warning("memory embedding index failed for %s: %s", memory_id, e)
+
+
+def _spawn_index(memory_id: str, fact: str, related_to: str, category: str) -> None:
+    # add/upsert сами async — вызывающий loop всегда есть на момент вызова.
+    # get_running_loop() тут не может бросить, но по-минимуму защищаемся —
+    # без loop эта строка всё равно подберётся backfill-скриптом.
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return
+    task = loop.create_task(_index_embedding_safe(memory_id, fact, related_to, category))
+    _index_tasks.add(task)
+    task.add_done_callback(_index_tasks.discard)
+
+
 # ── Public async API ───────────────────────────────────────────────────────────
 
 class PgMemoryRepo:
@@ -319,9 +369,12 @@ class PgMemoryRepo:
         user_notion_id: str = "",
         notion_id: Optional[str] = None,
     ) -> str:
-        return await asyncio.to_thread(
+        mem_id = await asyncio.to_thread(
             _add_sync, fact, key, category, scope, related_to, source, user_notion_id, notion_id
         )
+        if mem_id:
+            _spawn_index(mem_id, fact, related_to, category)
+        return mem_id
 
     async def upsert(
         self,
@@ -333,9 +386,12 @@ class PgMemoryRepo:
         source: str = "manual",
         user_notion_id: str = "",
     ) -> Tuple[str, bool]:
-        return await asyncio.to_thread(
+        mem_id, was_updated = await asyncio.to_thread(
             _upsert_sync, fact, key, category, scope, related_to, source, user_notion_id
         )
+        if mem_id:
+            _spawn_index(mem_id, fact, related_to, category)
+        return mem_id, was_updated
 
     async def set_current(self, memory_ids: List[str], is_current: bool) -> int:
         return await asyncio.to_thread(_set_current_sync, memory_ids, is_current)

@@ -154,16 +154,6 @@ def _tokenize_hint(hint: str) -> List[str]:
     return tokens
 
 
-async def _rag_index_memory_safe(memory_id: str, fact: str, category: str, related_to: str) -> None:
-    """Фоновая индексация факта в pgvector (#184) — никогда не бросает и не
-    блокирует пользовательский ответ (вызывается ПОСЛЕ message.answer)."""
-    try:
-        embed_text = _memory_rag._embed_text(fact, related_to, category)
-        await asyncio.to_thread(_memory_rag.index_memory, memory_id, embed_text)
-    except Exception as e:
-        logger.warning("memory: RAG index failed for %s: %s", memory_id, e)
-
-
 async def _semantic_search_memory(
     query: str,
     existing: List[Memory],
@@ -424,9 +414,9 @@ async def save_memory(
                             await message.answer(tip)
                     except Exception as e:
                         logger.debug("adhd tip error: %s", e)
-            # RAG-индексация (#184) — ПОСЛЕ message.answer, чтобы задержка
-            # Voyage не тормозила пользовательский ответ.
-            await _rag_index_memory_safe(result, fact, category, связь)
+            # RAG-индексация теперь спущена в PgMemoryRepo.add/upsert (#186) —
+            # единая точка для ВСЕХ писателей (save_memory, auto-suggest,
+            # бюджет, локация), не только этого пути.
         else:
             logger.error("memory save: repo returned None")
             await message.answer("⚠️ Ошибка записи в базу")

@@ -4,8 +4,9 @@
 - **Date:** 2026-08-21
 - **Relates to:** ADR-0005 (memory store), ADR-0006 (RAG vector backend —
   first pgvector consumer), ADR-0016 (single-writer location)
-- **Code conforms to:** `core/memory_rag.py`, `core/memory.py`, Alembic
-  migration `y5z6a7b8c9d0_memories_embedding_pgvector.py`,
+- **Code conforms to:** `core/memory_rag.py`, `core/memory.py`,
+  `core/repos/pg_memory_repo.py`, Alembic migration
+  `y5z6a7b8c9d0_memories_embedding_pgvector.py`,
   `scripts/migrate_memory_embeddings.py`
 - Update this ADR in the same PR that changes the memory-RAG schema or
   search strategy.
@@ -54,19 +55,33 @@ removed from the older migration's `downgrade()`; the new migration
 on its own downgrade either — extension lifecycle is no longer owned by
 either single table.
 
-**Indexing hook: inside `core/memory.py:save_memory()`, not per-handler.**
-`save_memory` is already the single write path both bots funnel through
-(scope field distinguishes bot). A thin wrapper
-(`core.memory._rag_index_memory_safe`, calling `core.memory_rag.index_memory`)
-runs right after a successful write, embedding `fact_text + related_to +
-category` (category/related_to add real retrieval signal; the machine-slug
-`key_name` is excluded as noise). It fires *after* the user-facing
-`message.answer(...)`, so Voyage's network round-trip never delays the
-visible "🧠 Запомнил" ack. This differs from Arcana's own
-`_rag_index_safe()` wrapper pattern (called explicitly at each
-sessions.py call site) — that pattern only exists there because sessions
-are Arcana-only; memory is already the shared choke point, so both bots
-get indexing automatically without their handlers needing to call anything.
+**Indexing hook: inside `PgMemoryRepo.add`/`.upsert`, not `save_memory()`
+and not per-handler.** The first cut of this change hooked
+`core/memory.py:save_memory()` — but that's not actually the single write
+path: `save_parsed` (auto-suggest confirm, both bots' `cb_*_auto_yes`
+callbacks), the budget writer (`nexus/handlers/finance.py:_save_memory_entry`),
+and `core/location.py:set_user_location` all write memory rows directly
+through the repo, bypassing `save_memory()` entirely — those rows would
+have had no embedding, and any that get `upsert`-updated later would keep
+a *stale* one for the old fact text (see #186). Moving the hook one layer
+down, into `PgMemoryRepo.add`/`.upsert` themselves, is the actual single
+choke point every writer passes through. A fire-and-forget `asyncio` task
+(`_spawn_index`, tracked in a module-level set so it isn't GC'd mid-flight)
+embeds `fact_text + related_to + category` (category/related_to add real
+retrieval signal; the machine-slug `key_name` is excluded as noise) without
+the caller awaiting it — the write and the user-facing reply never wait on
+Voyage's round-trip. On the `upsert`-update path specifically, the row's
+`embedding` is first reset to `NULL` in its own try/except'd
+transaction *before* the reindex task fires — belt-and-suspenders against
+the stale-vector case, and deliberately tolerant of the embedding column
+not existing yet (a fresh checkout that hasn't run the migration): that
+reset failing logs a warning and leaves the already-committed fact update
+untouched, rather than risking a rollback of the primary write over a
+schema mismatch. This differs from Arcana's own `_rag_index_safe()`
+wrapper pattern (called explicitly at each sessions.py call site) — that
+pattern only exists there because sessions are Arcana-only; the memory
+repo is the actual shared choke point, so every writer gets indexing
+without needing to call anything.
 
 **Search: hybrid, ILIKE first, semantic only as a thin fallback.** Every
 search path (`search_memory`, `get_memories_for_context` via
@@ -142,11 +157,23 @@ bug report.
 - Existing rows have no embedding until the backfill script runs — search
   quality for old facts is unchanged (ILIKE-only) until then; new facts
   are indexed live from this change onward.
-- The semantic query has no minimum-similarity cutoff yet — when nothing
-  relevant exists, the nearest neighbors still come back and get merged
-  into thin ILIKE results (see #185).
-- Indexing hooks only `save_memory()`; writes that go straight through
-  the repo (auto-suggest confirm `save_parsed`, budget `_save_memory_entry`
-  upserts, location `set_user_location`) produce rows without embeddings —
-  and, worse, an upsert of a previously-embedded row leaves a stale
-  vector for the old fact text (see #186).
+- The semantic query supports a `min_score` cutoff (`search_memory_semantic`),
+  but no caller passes one yet — the query still logs the raw score
+  distribution on every call instead of filtering, so a real cutoff can be
+  picked from logged production data rather than guessed (#185 stays open
+  for the actual calibration + wiring a default through from
+  `core/memory.py`). Until then, nothing-relevant queries still return
+  top-k nearest neighbors as-is.
+- (#186, closed) Indexing originally hooked only `save_memory()`, so writes
+  that go straight through the repo (auto-suggest confirm `save_parsed`,
+  budget `_save_memory_entry` upserts, location `set_user_location`) had no
+  embedding, and an upsert of a previously-embedded row kept a stale vector
+  for the old fact text. Fixed by moving the hook into
+  `PgMemoryRepo.add`/`.upsert` (see Decision) — every writer now gets fresh
+  embeddings, and `upsert`'s update path nulls the stale vector before
+  reindexing.
+- (#187, closed) `arcana/handlers/rituals.py` fetched
+  `get_memories_for_context` and discarded the result — dead even before
+  this change, but after it the dead call could burn up to 3 semantic
+  Voyage requests per ritual save for a result nobody read. Removed; a
+  real ritual-context feature can re-add it deliberately.
