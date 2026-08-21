@@ -3680,6 +3680,23 @@ function BreakdownChips({ s, breakdown }) {
   );
 }
 
+// Область (тема вопроса — Работа/Отношения/...) — содержательнее для поиска,
+// чем category (тип расклада/структура, ADR-0018). Показываем как чипы;
+// category — мелким текстом в метастроке карточки (см. #варианта ниже).
+function AreaChips({ s, areas }) {
+  if (!areas?.length) return null;
+  return (
+    <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 6 }}>
+      {areas.map((a) => (
+        <span key={a} style={{
+          fontSize: fs(11), color: s.acc, padding: "1px 6px", borderRadius: 8,
+          background: `${s.acc}14`, border: `1px solid ${s.acc}33`,
+        }}>{a}</span>
+      ))}
+    </div>
+  );
+}
+
 function ArSessions({ s, openSession, sessFilterRequest, consumeSessFilter, sessChangedSig }) {
   const [f, setF] = useState("all");
   // Внешний триггер из ArDay → выставить wait и сбросить запрос.
@@ -3753,7 +3770,6 @@ function ArSessions({ s, openSession, sessFilterRequest, consumeSessFilter, sess
               </div>
               <div style={{ fontSize: fs(11), opacity: 0.65, marginTop: 4, display: "flex", gap: 6, flexWrap: "wrap" }}>
                 {[
-                  pinned.category,
                   pinned.client && `${pinned.clientType ? pinned.clientType + " " : ""}${pinned.client}`,
                   pinned.firstDate,
                   `${pinned.tripletCount} трип.`,
@@ -3763,7 +3779,11 @@ function ArSessions({ s, openSession, sessFilterRequest, consumeSessFilter, sess
                 {pinned.lastDate && pinned.rawLastDate !== pinned.rawDate && (
                   <span style={{ opacity: 0.5, fontSize: fs(10) }}>· обновлено {pinned.lastDate}</span>
                 )}
+                {pinned.category && (
+                  <span style={{ opacity: 0.45, fontSize: fs(10) }}>· {pinned.category}</span>
+                )}
               </div>
+              <AreaChips s={s} areas={pinned.areas} />
               <BreakdownChips s={s} breakdown={pinned.breakdown} />
             </div>
             <StatusTag s={s} status={pinned.status} />
@@ -3779,7 +3799,6 @@ function ArSessions({ s, openSession, sessFilterRequest, consumeSessFilter, sess
               </div>
               <div style={{ fontSize: fs(11), opacity: 0.65, marginTop: 4, display: "flex", gap: 6, flexWrap: "wrap" }}>
                 {[
-                  x.category,
                   x.client && `${x.clientType ? x.clientType + " " : ""}${x.client}`,
                   x.firstDate,
                   x.tripletCount > 1 ? `${x.tripletCount} трип.` : null,
@@ -3789,7 +3808,11 @@ function ArSessions({ s, openSession, sessFilterRequest, consumeSessFilter, sess
                 {x.lastDate && x.rawLastDate !== x.rawDate && (
                   <span style={{ opacity: 0.5, fontSize: fs(10) }}>· обновлено {x.lastDate}</span>
                 )}
+                {x.category && (
+                  <span style={{ opacity: 0.45, fontSize: fs(10) }}>· {x.category}</span>
+                )}
               </div>
+              <AreaChips s={s} areas={x.areas} />
               {x.tripletCount > 1 && <BreakdownChips s={s} breakdown={x.breakdown} />}
             </div>
             <StatusTag s={s} status={x.status} />
