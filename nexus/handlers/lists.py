@@ -876,7 +876,22 @@ async def handle_list_buy(msg: Message, data: dict, user_notion_id: str = "") ->
         lines.append(f"\n🌒 {names} — это к Аркане! Напиши @arcana_kailark_bot")
     if not nexus_items and arcana_items:
         lines = ["🌒 Это к Аркане! Напиши @arcana_kailark_bot"]
-    await msg.answer("\n".join(lines), parse_mode="HTML")
+    sent = await msg.answer("\n".join(lines), parse_mode="HTML")
+
+    # Реплай-флоу (#192): мапим плашку на ПОСЛЕДНИЙ созданный item — реплай
+    # обычно про то, что только что добавили. Плашка может перечислять
+    # несколько позиций разом; вешать её на все сразу нельзя (маппинг
+    # msg_id→page_id один-к-одному), а первый созданный обычно уже не то,
+    # о чём вспоминают, отвечая на сообщение.
+    if created:
+        try:
+            from core.message_pages import save_message_page
+            await save_message_page(
+                chat_id=sent.chat.id, message_id=sent.message_id,
+                page_id=created[-1]["id"], page_type="list", bot="nexus",
+            )
+        except Exception as e:
+            logger.warning("handle_list_buy: save_message_page failed: %s", e)
 
 
 # ── v1.2: команда «сумма X» / «сколько по X» ─────────────────────────────────

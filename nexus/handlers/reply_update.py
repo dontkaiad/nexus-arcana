@@ -52,6 +52,41 @@ async def _move_memory_to_notes(message: Message, orig: Message, page_id: str, u
     return True
 
 
+async def _move_list_item_to_notes(message: Message, page_id: str, user_notion_id: str) -> bool:
+    """Перенос позиции 🛒 Покупки/📋 Чеклист в 📝 Заметки: архивирует
+    list-item + создаёт note с тем же текстом (#192, по образцу #188
+    _move_memory_to_notes выше). В отличие от memory, текст берём из БД
+    (get_by_id), а не из текста плашки — плашка «Добавлено в покупки» может
+    перечислять НЕСКОЛЬКО позиций разом, а маппинг (см. handle_list_buy)
+    указывает на ОДНУ конкретную (последнюю созданную); вычленять её имя из
+    multi-line текста регэкспом ненадёжнее одного PG lookup по уже известному
+    page_id. Возвращает True если обработано (item найден), False — пусть
+    падает в обычный field-update путь."""
+    from core import list_manager as _lm
+    item = await _lm._nexus_repo.get_by_id(page_id)
+    if not item:
+        item = await _lm._arcana_repo.get_by_id(page_id)
+    if not item or not item.name:
+        return False
+    try:
+        from nexus.repos.notes_repo import NotesRepo
+        from core.repos.lists_repo import _repo as lists_repo
+        today = datetime.now(timezone.utc).date().isoformat()
+        note_id = await NotesRepo().add(
+            text=item.name, tags=[], date=today, user_notion_id=user_notion_id,
+        )
+        if not note_id:
+            await message.answer("⚠️ Не получилось создать заметку.")
+            return True
+        await lists_repo.archive([page_id])
+        await message.answer(f"📝 Перенесено в заметки: {item.name}")
+        await react(message, "✍️")
+    except Exception as e:
+        logger.error("_move_list_item_to_notes: %s", e)
+        await message.answer("❌ Не удалось перенести в заметки.")
+    return True
+
+
 async def handle_reply_update(message: Message, user_notion_id: str = "") -> bool:
     """Если reply на сообщение бота — попытаться обновить Notion-запись.
 
@@ -85,6 +120,14 @@ async def handle_reply_update(message: Message, user_notion_id: str = "") -> boo
         # ключом в JSON-ответе Haiku (не фильтруется как null/"").
         if page_type == "memory" and updates.pop("move_to_notes", False):
             handled = await _move_memory_to_notes(message, orig, page_id, user_notion_id)
+            if handled:
+                return True
+
+        # #192: «отправь в заметки» на плашку «Добавлено в покупки» — тот же
+        # паттерн, что и #188 для памяти: перенос в другой домен, а не
+        # field-апдейт этой строки списка.
+        if page_type == "list" and updates.pop("move_to_notes", False):
+            handled = await _move_list_item_to_notes(message, page_id, user_notion_id)
             if handled:
                 return True
 

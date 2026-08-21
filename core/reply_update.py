@@ -148,6 +148,27 @@ def _memory_reply_system(tz_offset: int = 3) -> str:  # tz_offset unused, matche
     )
 
 
+# #192: reply на плашку «Добавлено в покупки» (nexus/handlers/lists.py,
+# handle_list_buy) — по образцу #188 (_memory_reply_system выше). Плашка
+# мапится (save_message_page) на ПОСЛЕДНИЙ созданный item; move_to_notes —
+# такой же отдельный флаг, обрабатывается ДО apply_updates вызывающей
+# стороной (nexus/handlers/reply_update.py), т.к. перенос в 📝 Заметки —
+# архивация list-item + создание note в другом PG-репозитории, не
+# field-апдейт этой строки. Других полей пока не описываем — reply на
+# покупку сегодня умеет только "отправь в заметки", не переименование/
+# смену категории через reply (это отдельная фича, не в скоупе #192).
+def _list_reply_system(tz_offset: int = 3) -> str:  # tz_offset unused, matches dynamic-system signature
+    return (
+        "Ты обрабатываешь reply на подтверждение добавленной позиции списка "
+        "(покупка/чеклист). Ответь ТОЛЬКО JSON без markdown:\n"
+        '{"move_to_notes": true/false}\n\n'
+        "move_to_notes=true — ТОЛЬКО если явно просят перенести эту позицию в "
+        "заметки («отправь в заметки», «это в заметки», «перенеси в заметки», "
+        "«это не покупка, а заметка/идея»).\n"
+        "Иначе — move_to_notes=false."
+    )
+
+
 _TYPE_TO_SYSTEM = {
     "ritual":  _RITUAL_REPLY_SYSTEM,
     "session": _SESSION_REPLY_SYSTEM,
@@ -161,6 +182,7 @@ _TYPE_TO_DYNAMIC_SYSTEM = {
     "task": _task_reply_system,
     "work": _work_reply_system,
     "memory": _memory_reply_system,
+    "list": _list_reply_system,
 }
 
 
@@ -298,6 +320,8 @@ async def apply_updates(
         return await _apply_work(page_id, updates, tz_offset)
     if page_type == "memory":
         return await _apply_memory(page_id, updates)
+    if page_type == "list":
+        return await _apply_list(page_id, updates)
     return {}
 
 
@@ -418,6 +442,17 @@ async def _apply_memory(page_id: str, updates: Dict[str, Any]) -> Dict[str, Any]
     if category:
         applied["Категория"] = category
     return applied
+
+
+async def _apply_list(page_id: str, updates: Dict[str, Any]) -> Dict[str, Any]:
+    """list page_type — сейчас сюда всегда прилетает {} (#192): единственное
+    поле _list_reply_system (move_to_notes) снимается ДО apply_updates
+    вызывающей стороной (nexus/handlers/reply_update.py), как и у memory —
+    guard `if not updates: return {}` выше срабатывает раньше диспатча.
+    Оставлено для структурного паритета с остальными page_type и на случай
+    будущих field-апдейтов позиции списка через reply (переименовать, сменить
+    категорию) — сегодня таких полей в _list_reply_system не описано."""
+    return {}
 
 
 async def _apply_session(
