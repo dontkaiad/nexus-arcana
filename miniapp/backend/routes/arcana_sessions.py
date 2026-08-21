@@ -15,6 +15,8 @@ Endpoints:
   GET  /api/arcana/sessions/by-subject/{id}    — вьюха «Тема»: все сессии
                                                   за всё время по subject_id
   POST /api/arcana/sessions/by-slug/{slug}/summarize — сгенерировать общее саммари
+  GET  /api/arcana/sessions/by-slug/{slug}/summarize/stream — то же самое,
+                                                  SSE (#191), для Mini App
   GET  /api/arcana/sessions/{session_id}       — detail одного триплета
 """
 from __future__ import annotations
@@ -511,16 +513,21 @@ async def session_by_subject(
 
 # ── session summarize ────────────────────────────────────────────────────────
 
-@router.post("/arcana/sessions/by-slug/{slug}/summarize")
-async def session_summarize(
-    slug: str,
-    tg_id: int = Depends(current_user_id),
-) -> dict[str, Any]:
-    from core.claude_client import ask_claude
-    from core.config import config as _cfg
+class _SummarizePrep:
+    """Результат резолва группы для саммаризации — общий для POST (целиком)
+    и GET .../stream (SSE, #191). anchor/prompt строятся один раз, дальше
+    оба endpoint'а расходятся только в том, КАК получают текст от Claude."""
+    __slots__ = ("anchor", "cache_key", "prompt", "existing", "triplet_count")
 
-    user_notion_id = (await get_user_notion_id(tg_id)) or ""
+    def __init__(self, anchor, cache_key: str, prompt: str, existing: str, triplet_count: int):
+        self.anchor = anchor
+        self.cache_key = cache_key
+        self.prompt = prompt
+        self.existing = existing
+        self.triplet_count = triplet_count
 
+
+async def _prepare_summarize(slug: str, user_notion_id: str) -> _SummarizePrep:
     if slug.startswith("subj-"):
         try:
             subject_id = int(slug[len("subj-"):])
@@ -549,8 +556,6 @@ async def session_summarize(
     # session_summary это саммари СОБЫТИЯ (другое), а пустой theme_summary после
     # пополнения темы должен приводить к свежему пересчёту.
     existing = (anchor.theme_summary or "").strip()
-    if existing:
-        return {"summary": existing, "cached": True}
 
     parts: List[str] = []
     for t in matching:
@@ -568,9 +573,25 @@ async def session_summarize(
         f"no HTML tags, no emojis. Обращайся на 'ты'.\n\n"
         f"--- ТРИПЛЕТЫ ---\n{aggregated}"
     )
+    return _SummarizePrep(anchor, cache_key, prompt, existing, len(matching))
+
+
+@router.post("/arcana/sessions/by-slug/{slug}/summarize")
+async def session_summarize(
+    slug: str,
+    tg_id: int = Depends(current_user_id),
+) -> dict[str, Any]:
+    from core.claude_client import ask_claude
+    from core.config import config as _cfg
+
+    user_notion_id = (await get_user_notion_id(tg_id)) or ""
+    prep = await _prepare_summarize(slug, user_notion_id)
+    if prep.existing:
+        return {"summary": prep.existing, "cached": True}
+
     try:
         summary = await ask_claude(
-            prompt, max_tokens=500, model=_cfg.model_sonnet, temperature=0.5
+            prep.prompt, max_tokens=500, model=_cfg.model_sonnet, temperature=0.5
         )
     except Exception as e:
         logger.error("session summarize failed: %s", e)
@@ -581,9 +602,68 @@ async def session_summarize(
     if not summary:
         raise HTTPException(status_code=500, detail="empty summary")
     # Сводка ТЕМЫ — в theme_summary якоря (НЕ в session_summary), кеш fast-path (#165).
-    await _sessions_repo.set_theme_summary(anchor.id, summary)
-    cache_set(cache_key, summary)
+    await _sessions_repo.set_theme_summary(prep.anchor.id, summary)
+    cache_set(prep.cache_key, summary)
     return {"summary": summary, "cached": False}
+
+
+@router.get("/arcana/sessions/by-slug/{slug}/summarize/stream")
+async def session_summarize_stream(
+    slug: str,
+    tg_id: int = Depends(current_user_id),
+):
+    """SSE-версия того же саммари (#191): токены Sonnet допечатываются в
+    реальном времени вместо одной блокирующей плашки на 5+ секунд. GET, не
+    POST — EventSource в браузере умеет только GET и не может выставить тело
+    запроса; параметров кроме slug эндпоинту не нужно.
+
+    Персистит РОВНО ТО ЖЕ самое, что и POST-версия (set_theme_summary +
+    cache_set) с тем же sanitize_summary на полном собранном тексте — клиент
+    получает "на лету" сырые дельты для эффекта печати, а не то, что
+    сохраняется как источник истины. Событие "done" несёт уже санитайзнутый
+    итог, на него ориентируется фронтенд после конца потока (см. тест
+    test_stream_final_text_matches_non_streaming_after_sanitize)."""
+    from fastapi.responses import StreamingResponse
+    from core.claude_client import ask_claude_stream
+    from core.config import config as _cfg
+    from core.html_sanitize import sanitize_summary
+    import json
+
+    user_notion_id = (await get_user_notion_id(tg_id)) or ""
+    # Резолвится ДО открытия потока — 404 должен быть обычным HTTP-статусом,
+    # не SSE-событием (EventSource не умеет читать тело/статус ошибки).
+    prep = await _prepare_summarize(slug, user_notion_id)
+
+    async def gen():
+        if prep.existing:
+            yield f"data: {json.dumps({'delta': prep.existing})}\n\n"
+            yield f"data: {json.dumps({'done': True, 'cached': True, 'summary': prep.existing})}\n\n"
+            return
+
+        chunks: List[str] = []
+        try:
+            async for delta in ask_claude_stream(
+                prep.prompt, max_tokens=500, model=_cfg.model_sonnet, temperature=0.5,
+            ):
+                chunks.append(delta)
+                yield f"data: {json.dumps({'delta': delta})}\n\n"
+        except Exception as e:
+            logger.error("session summarize stream failed: %s", e)
+            yield f"data: {json.dumps({'error': 'summarize failed'})}\n\n"
+            return
+
+        summary = sanitize_summary("".join(chunks))
+        if not summary:
+            yield f"data: {json.dumps({'error': 'empty summary'})}\n\n"
+            return
+        await _sessions_repo.set_theme_summary(prep.anchor.id, summary)
+        cache_set(prep.cache_key, summary)
+        yield f"data: {json.dumps({'done': True, 'cached': False, 'summary': summary})}\n\n"
+
+    return StreamingResponse(
+        gen(), media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 # ── single (legacy / direct id) ─────────────────────────────────────────────

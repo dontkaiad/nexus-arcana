@@ -5,7 +5,7 @@ import asyncio
 import functools
 import logging
 import random
-from typing import List, Dict, Optional
+from typing import AsyncIterator, List, Dict, Optional
 
 import anthropic
 
@@ -115,6 +115,45 @@ async def ask_claude(
     except anthropic.APIError as e:
         logger.error("Claude API error: %s", e)
         return ""
+
+
+async def ask_claude_stream(
+    prompt: str,
+    system: str = "",
+    model: str = "",
+    max_tokens: int = 1024,
+    temperature: Optional[float] = None,
+) -> AsyncIterator[str]:
+    """Стримит текстовые дельты вместо возврата готовой строки — для SSE-
+    эндпоинтов Mini App (Server-Sent Events), где текст должен допечатываться
+    по мере генерации. Бот в Telegram сюда не ходит — ему нужен только
+    финальный текст целиком, для него остаётся ask_claude().
+
+    Без @retry_transient: тот декоратор ретраит целый атомарный вызов с одним
+    возвращаемым значением. Здесь часть токенов уже могла уйти клиенту по
+    SSE до сетевого сбоя — молча ретраить и слать вторую копию с начала
+    нельзя. При ошибке генератор просто останавливается; вызывающий SSE-
+    эндпоинт закрывает поток с тем текстом, что успел прийти.
+    """
+    used_model = model or config.model_haiku
+
+    kwargs: Dict = {
+        "model": used_model,
+        "max_tokens": max_tokens,
+        "messages": [{"role": "user", "content": prompt}],
+    }
+    if system:
+        kwargs["system"] = system
+    if temperature is not None:
+        kwargs["temperature"] = temperature
+
+    try:
+        async with get_anthropic().messages.stream(**kwargs) as stream:
+            async for text in stream.text_stream:
+                yield text
+    except anthropic.APIError as e:
+        logger.error("Claude API stream error: %s", e)
+        return
 
 
 async def ask_claude_vision(

@@ -13,7 +13,7 @@ import {
   adaptGrimoire, adaptGrimoireDetail,
   formatMonth, formatDate, formatShortDate,
 } from "./adapters";
-import { apiGet, apiPost } from "./api";
+import { apiGet, apiPost, apiStream } from "./api";
 import { SelfListCard, SelfDetailHeader } from "./components/self/SelfClientCard.jsx";
 import {
   Sun, Moon as LucideMoon, Check, Coins, List as ListIcon, Brain, Calendar,
@@ -5244,8 +5244,11 @@ function SessionPagerOverview({ s, group, onJump, onSummarize, summarizing }) {
 
       <Glass s={s} style={{ padding: "10px 14px", marginBottom: 10 }}>
         <div style={{ fontSize: fs(10), color: s.acc, marginBottom: 6 }}>⚡ Общее саммари</div>
-        {group.summary ? (
-          <div style={{ fontSize: fs(13), color: s.text, lineHeight: 1.5 }}>{group.summary}</div>
+        {group.summary || summarizing ? (
+          <div style={{ fontSize: fs(13), color: s.text, lineHeight: 1.5 }}>
+            {group.summary}
+            {summarizing && <span style={{ opacity: 0.5 }}>▍</span>}
+          </div>
         ) : (
           <div onClick={onSummarize} style={{
             display: "inline-block", padding: "4px 10px", borderRadius: 6,
@@ -5321,8 +5324,11 @@ function ThemeOverview({ s, group, onOpenEvent, onSummarize, summarizing }) {
 
       <Glass s={s} style={{ padding: "10px 14px", marginBottom: 10 }}>
         <div style={{ fontSize: fs(10), color: s.acc, marginBottom: 6 }}>⚡ Саммари темы</div>
-        {group.summary ? (
-          <div style={{ fontSize: fs(13), color: s.text, lineHeight: 1.5 }}>{group.summary}</div>
+        {group.summary || summarizing ? (
+          <div style={{ fontSize: fs(13), color: s.text, lineHeight: 1.5 }}>
+            {group.summary}
+            {summarizing && <span style={{ opacity: 0.5 }}>▍</span>}
+          </div>
         ) : (
           <div onClick={onSummarize} style={{
             display: "inline-block", padding: "4px 10px", borderRadius: 6,
@@ -5387,18 +5393,30 @@ function SessionDetail({ s, id, slug }) {
 
   const isSolo = group.isSolo || (group.triplets || []).length <= 1;
 
+  // #191: SSE-стриминг вместо одного блокирующего POST — текст допечатывается
+  // по мере генерации Sonnet. localSummary стартует с "" (не null), чтобы
+  // groupForRender.summary сразу стал непустой строкой-в-процессе — иначе
+  // "" || group.summary откатился бы на null/старое значение между чанками.
   const summarize = async () => {
     if (summarizing || (isSolo && !group.subjectId)) return;
     setSummarizing(true);
+    setLocalSummary("");
     try {
-      const r = await apiPost(`/api/arcana/sessions/by-slug/${group.slug}/summarize`);
-      setLocalSummary(r.summary || "");
+      const done = await apiStream(
+        `/api/arcana/sessions/by-slug/${group.slug}/summarize/stream`,
+        (delta) => setLocalSummary((prev) => (prev ?? "") + delta),
+      );
+      if (done && typeof done.summary === "string") setLocalSummary(done.summary);
     } catch (e) {
       alert("Не получилось: " + e.message);
+      setLocalSummary(null);
     } finally { setSummarizing(false); }
   };
 
-  const groupForRender = { ...group, summary: localSummary || group.summary };
+  const groupForRender = {
+    ...group,
+    summary: localSummary !== null ? localSummary : group.summary,
+  };
 
   // Тема (subject_id) на верхнем уровне — не сессия-событие, а список
   // сессий-событий за всё время + агрегированное саммари темы.
