@@ -88,11 +88,18 @@ search path (`search_memory`, `get_memories_for_context` via
 `_find_pages_by_hint`) runs the existing ILIKE query first; a semantic
 query only fires when ILIKE returns fewer than 3 hits, merged in
 (ILIKE-first, deduped by id, capped at the existing page size). Always-on
-semantic search was rejected: `get_memories_for_context` can fire several
-times per single incoming Telegram message (once per extracted keyword),
-and Voyage's free tier is 3 RPM — always-on would burn the shared budget
-(now split across two RAG consumers) on a single message. Three callers
-opt out of the semantic fallback entirely (`use_semantic=False`):
+semantic search was rejected on three grounds, not just rate limits: ILIKE
+is a local query with no network round-trip, an exact substring match is
+almost always the best possible match when one exists, and
+`get_memories_for_context` can fire several times per single incoming
+Telegram message (once per extracted keyword) — without a payment method
+on the Voyage account, the free tier is a hard 3 RPM, which always-on
+would burn through on one message alone (shared with `arcana_triplets`,
+the other RAG consumer). That rate ceiling lifts substantially (Tier 1:
+2000 RPM / 8M TPM) once a payment method is on file — Voyage's free
+200M-token allowance still applies, so this isn't a cost decision — but
+the first two grounds (latency, match quality) hold regardless of tier.
+Three callers opt out of the semantic fallback entirely (`use_semantic=False`):
 
 - the recursive alias resolver (`_resolve_alias`) — alias recall needs to
   stay exact; a "close enough" semantic match at each recursion level
@@ -131,9 +138,11 @@ bug report.
 ## Alternatives considered
 
 - **Mirror table (`memory_embeddings`)** — rejected; see Schema above.
-- **Always-on semantic search** — rejected; burns the shared 3 RPM Voyage
-  budget on every search/context-injection call, most of which ILIKE
-  already answers correctly and near-instantly.
+- **Always-on semantic search** — rejected; adds a Voyage network round-trip
+  to every search/context-injection call, most of which ILIKE already
+  answers correctly and near-instantly, and (without billing on the Voyage
+  account) burns the shared 3 RPM free-tier budget on a single message —
+  see Decision above for the full reasoning.
 - **Per-handler indexing (mirroring Arcana's `_rag_index_safe` call
   sites)** — rejected; memory already has one write path shared by both
   bots, duplicating the wrapper call at every handler would be exactly the
@@ -144,10 +153,12 @@ bug report.
 
 ## Consequences
 
-- Two RAG consumers (`arcana_triplets`, `memories`) now share one Voyage
-  free-tier budget (3 RPM) — worth monitoring if either surface's usage
-  grows; the hybrid ILIKE-first strategy is the main guardrail against
-  starving one consumer of budget the other needs.
+- Two RAG consumers (`arcana_triplets`, `memories`) share one Voyage
+  account's rate limit and free 200M-token allowance. With a payment
+  method on file the RPM ceiling is 2000/8M TPM (Tier 1) rather than the
+  card-less 3 RPM, so rate contention between the two consumers is not the
+  live risk it would be otherwise; the hybrid ILIKE-first strategy still
+  holds on its own merits (latency, exact-match quality — see Decision).
 - `core/repos/memories_table.py`'s SQLAlchemy Core `Table` intentionally
   does *not* know about the `embedding` column — all embedding
   reads/writes go through raw SQL in `core/memory_rag.py`, exactly
