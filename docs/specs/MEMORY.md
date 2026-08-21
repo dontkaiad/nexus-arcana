@@ -1,15 +1,14 @@
 # MEMORY — memory data model
 
-> **Status: AS-BUILT SNAPSHOT at commit 0bc132e.** This documents the memory
-> subsystem *before* the planned RAG/embeddings rework (ADR-0006). The
-> Notion→PostgreSQL migration is complete; what remains is the RAG layer. Will
-> be rewritten as a stable data-model contract once RAG lands. Kept as an
-> evolution baseline.
+> **Status: AS-BUILT, code conforms to `720f975`.** Notion→PostgreSQL
+> migration is complete; the semantic-search layer (ADR-0006 pgvector
+> backend, applied to memory by ADR-0020) has landed. Update this spec in
+> the same PR that changes the memory schema or search strategy.
 
 > Source of truth is the code, not Notion specs. Every statement is
 > verifiable against the files in the "Verify against code" section at the
-> end. Where the code diverges from ADR-0005, the CODE is documented and the
-> divergence is flagged explicitly.
+> end. Where the code diverges from ADR-0005/ADR-0020, the CODE is
+> documented and the divergence is flagged explicitly.
 
 ## Purpose
 
@@ -58,11 +57,23 @@ down_revision `i9d0e1f2g3h4`. SQLAlchemy Core mirror —
 | `user_notion_id` | Text | NOT NULL, default `''` |
 | `created_at` | TIMESTAMP(tz) | default `now()` |
 | `updated_at` | TIMESTAMP(tz) | default `now()` |
+| `embedding` | vector(1024) | nullable |
 
 Indexes (from the migration):
 `ix_memories_key_name` (key_name), `ix_memories_category` (category),
 `ix_memories_scope` (scope), `ix_memories_is_current` (is_current),
 `ix_memories_user` (user_notion_id).
+
+`embedding` was added by a second migration
+(`alembic/versions/y5z6a7b8c9d0_memories_embedding_pgvector.py`, down_revision
+`x4y5z6a7b8c9`) with its own `hnsw (embedding vector_cosine_ops)` index
+(`idx_memories_embedding`) and a `CREATE EXTENSION IF NOT EXISTS vector`
+shared with `arcana_triplets` (ADR-0006's table — the first pgvector
+consumer). This column is intentionally **not** declared on the
+`core/repos/memories_table.py` SQLAlchemy Core `Table` object — all reads/
+writes of it go through raw SQL in `core/memory_rag.py`, the same pattern
+`core/rag.py` uses for `arcana_triplets`. Nullable: existing rows have no
+embedding until `scripts/migrate_memory_embeddings.py` backfills them.
 
 Domain object `Memory` (`core/repos/pg_memory_repo.py`,
 `@dataclass`) maps a row: `id` (str), `fact`←fact_text, `key`←key_name,
@@ -74,8 +85,10 @@ Field values as actually used in the code:
 - `scope` ∈ {`global`, `nexus`, `arcana`}. bot_label→scope mapping:
   `☀️ Nexus`→`nexus`, `🌒 Arcana`→`arcana`, otherwise `global`
   (`pg_memory_repo.bot_to_scope`).
-- `source` ∈ {`manual`, `auto`} per schema, but every write path hardcodes
-  `"manual"` — `auto` never appears on input (see #148).
+- `source` ∈ {`manual`, `auto`}. `core/memory.py:save_memory` and
+  `MemoryRepo.save_parsed` (auto-suggest confirm) both hardcode `"manual"`
+  regardless of how the fact was captured (see #148); `core/location.py`
+  is the one path that actually writes `source="auto"`.
 - `notion_id` in a normal write = `None`; the `notion_id` parameter of `add`
   is used only by the backfill `scripts/backfill_memories.py` (mapping to
   old Notion records).
@@ -106,9 +119,53 @@ All sync SQL is wrapped in `asyncio.to_thread`.
    - otherwise → `_repo.add` (always INSERT a new row).
 6. Side-effect: for category `🦋 СДВГ` and a new record — `_get_adhd_tip`
    (Sonnet, `config.model_sonnet`, temperature=0.7) sends a tip.
+7. For the plain-fact reply branch (not a budget key), the confirmation
+   message is registered in `message_pages` (`page_type="memory"`,
+   `bot=scope`) so a reply on it can later correct the record (see Reply
+   corrections below).
 
 Write contract: `value_text` is not populated by any write path — for readers
 it is always `''` (the fact value lives in `fact_text`) (see #146).
+
+### Embedding indexing (ADR-0020)
+
+Every write that reaches `PgMemoryRepo.add`/`.upsert` — not just
+`save_memory()` — spawns a fire-and-forget `asyncio` task
+(`core/repos/pg_memory_repo.py:_spawn_index`) that embeds
+`fact_text + " " + related_to + " " + category` via Voyage
+(`voyage-4-lite`, dim 1024, client shared with `core/rag.py`) and writes it
+to the `embedding` column. This covers `save_memory()`, auto-suggest
+confirm (`save_parsed`), budget upserts (`_save_memory_entry`), and
+`core/location.py:set_user_location` uniformly, because the hook lives at
+the repo layer, not in any one caller.
+
+`upsert`'s update-existing-row path first `NULL`s the row's `embedding` in
+its own try/except'd transaction (separate from the field-update
+transaction) before the reindex task fires — a changed fact must not keep
+matching on its old text, and a missing `embedding` column (unmigrated
+checkout) must not roll back the primary write.
+
+`PgMemoryRepo.update_fields(memory_id, fact=, category=, related_to=)` is a
+point-update by `id` (distinct from `upsert`, which matches by
+`key_name`+`category`) used by the reply-correction path; it re-embeds the
+row's current values the same way.
+
+### Reply corrections (#188)
+
+A reply to a "🧠 Запомнил …" plaque is parsed by
+`core/reply_update.py`'s `page_type="memory"` schema into
+`{move_to_notes, fact, category}`:
+- `fact`/`category` set → `PgMemoryRepo.update_fields` patches the row
+  in place (`core/reply_update.py:_apply_memory`).
+- `move_to_notes=true` — handled by the bot-specific handler *before*
+  `apply_updates` (it's a cross-domain move, not a field patch): Nexus
+  archives the memory row and creates a `📝 Заметки` entry from the
+  plaque's own text (`nexus/handlers/reply_update.py:_move_memory_to_notes`);
+  Arcana has no notes feature, so the same reply gets an explicit
+  "нет заметок" message instead of falling through to `unknown`.
+
+Budget-key branches (`обязательно_`/`цель_`/`долг_`/limit facts) are not
+registered for reply-correction — they're already editable via `/budget`.
 
 ### Read
 Two modes:
@@ -123,8 +180,30 @@ Two modes:
    `OR` of `ILIKE %term%` over `fact_text`, `key_name`, `related_to`;
    activity filter (`is_current=True`, `is_archived=False`); optional
    `scope` (match OR `global`) and `user_notion_id`; sorted by
-   `created_at desc`. Contract: this is a substring/contains match, NOT
-   semantic; the query does not find synonyms/paraphrases (see #147).
+   `created_at desc`.
+
+### Semantic fallback (ADR-0020)
+
+`search`/`_find_pages_by_hint` results are ILIKE-only by construction (see
+above) — semantics is layered on top by the *caller*, in
+`core/memory.py:_semantic_search_memory`, not inside the repo query.
+Contract: **ILIKE-first, semantic only as a thin fallback** — a semantic
+query (`core/memory_rag.py:search_memory_semantic`, Voyage cosine over
+`embedding`) only fires when the ILIKE result has fewer than 3 rows,
+merged after the ILIKE hits and deduped by id, capped at the caller's page
+size. Both `search_memory` (`/memory`) and `get_memories_for_context`
+(prompt injection, via `_find_pages_by_hint`) use this; `_resolve_alias`
+opts out entirely (`use_semantic=False` — alias recall must stay exact,
+not "closest match"), as do the destructive flows `deactivate_memory` and
+`delete_memory` (they act on every/the-only found row without
+confirmation, so a nearest-neighbor false positive would silently
+deactivate/archive the wrong fact).
+
+`search_memory_semantic` accepts an optional `min_score` cosine-similarity
+cutoff, but **no caller passes one yet** (#185 open) — every call today
+returns its raw top-k nearest neighbors, and logs the score distribution
+instead of filtering, so a real cutoff can be picked from logged
+production data rather than guessed.
 
 Derived reads:
 - `find_by_category(category, is_current, scope, user_notion_id, page_size)`
@@ -156,10 +235,17 @@ tokenizes the hint (stop words + naive stemming `_normalize_word`) → `search`.
   keywords, bot_label, max_results)` — filters by scope (keeps a scope
   match OR `global`), returns a text block "Контекст из памяти:". Called by
   `arcana/handlers/sessions.py`, `clients.py`, `rituals.py`.
-- Auto-save: `core/classifier.py` (kind `timezone_update` →
-  `save_memory(..., "☀️ Nexus")`).
+- Auto-save: `core/location.py:set_user_location` (`tz_`/`city_` on a
+  resolved location) — the sole location writer (ADR-0016). It used to be
+  double-called from `core/classifier.py`'s `timezone_update` branch
+  together with a separate raw-text `save_memory()`, producing two
+  uncoordinated rows from one message; the duplicate call was removed.
 - Budget: `core/budget.py` via `find_by_key_prefixes`.
-- Recall by word: `recall_from_memory(keyword)` (Nexus finance/tasks).
+- Recall by word: `recall_from_memory(keyword)` (Nexus finance/tasks) — ILIKE
+  only, no semantic fallback (synchronous, called inline during parsing of
+  other flows; latency-sensitive).
+- Reply corrections: `core/reply_update.py` (`page_type="memory"`),
+  `nexus/handlers/reply_update.py`, `arcana/handlers/reply_update.py`.
 - Mini App (PG-native, `PgMemoryRepo` directly):
   `miniapp/backend/routes/memory.py` — `GET /api/memory` (excludes
   budget/ADHD categories) and `GET /api/memory/adhd` (grouping
@@ -178,11 +264,9 @@ tokenizes the hint (stop words + naive stemming `_normalize_word`) → `search`.
 1. **Storage: PG, not Notion.** Memory moved to PG (migration
    `j0c1d2e3f4g5`). Cost: a live PG engine is required (obtained from
    `arcana.repos.pg_sessions_repo.get_engine`), and the human-readability of
-   the Notion table is lost.
-   - Divergence: `nexus/handlers/finance.py:_save_memory_entry` STILL
-     writes budget memory to Notion (`NOTION_DB_MEMORY`, select fields
-     `Бот`/`Категория`/`Актуально`). This is a parallel write path bypassing
-     PG — it does not match "storage = PG" (see #145).
+   the Notion table is lost. The parallel Notion write path that used to
+   exist in `nexus/handlers/finance.py:_save_memory_entry` is gone (#145
+   closed) — all memory writes go through PG.
 
 2. **`scope` instead of a `Бот` field.** A single `scope` column
    (`global`/`nexus`/`arcana`) replaced the Notion select `Бот`. Why:
@@ -208,20 +292,41 @@ tokenizes the hint (stop words + naive stemming `_normalize_word`) → `search`.
    the downside the ADR wanted to avoid. The degenerate artifact of this
    decision is the unpopulated `value_text` (see #146).
 
+5. **Semantic layer: `embedding` column on `memories`, not a mirror table
+   (ADR-0020).** `arcana_triplets` (ADR-0006) needed a separate table
+   because triplets are a derived read-model over `sessions`; a memory row
+   is already the atomic fact-level unit, so a column keeps embedding and
+   fact always in sync through the same `upsert`/`update_fields` write
+   path instead of risking a second table drifting out of step. Cost: two
+   pgvector consumers now share one Voyage free-tier budget (3 RPM),
+   mitigated by the ILIKE-first hybrid search strategy (see Read above)
+   rather than querying Voyage on every search.
+
 ---
 
 Verify against code:
 - `alembic/versions/j0c1d2e3f4g5_core_memories_pg.py` — table migration
+- `alembic/versions/y5z6a7b8c9d0_memories_embedding_pgvector.py` —
+  `embedding` column + hnsw index migration
 - `core/repos/memories_table.py` — SQLAlchemy Core definition of `memories`
+  (no `embedding` — see Schema above)
 - `core/repos/pg_memory_repo.py` — `Memory` dataclass + sync SQL + async API
+  (`add`/`upsert`/`update_fields` + `_spawn_index`/`_index_embedding_safe`)
 - `core/repos/memory_repo.py` — seam repository, singleton `_repo`
 - `core/memory.py` — save/search/deactivate/delete/recall/context,
-  `_parse_fact` (Haiku), `_get_adhd_tip` (Sonnet), `CATEGORIES`
+  `_parse_fact` (Haiku), `_get_adhd_tip` (Sonnet), `CATEGORIES`,
+  `_semantic_search_memory`
+- `core/memory_rag.py` — `index_memory`/`index_memories_batch`/
+  `search_memory_semantic` (Voyage + pgvector, reuses `core/rag.py`'s client)
+- `core/reply_update.py` — `page_type="memory"` parse/apply
+- `nexus/handlers/reply_update.py`, `arcana/handlers/reply_update.py` —
+  reply dispatch, `_move_memory_to_notes` (Nexus only)
+- `scripts/migrate_memory_embeddings.py` — embedding backfill (dry-run default)
 - `core/budget.py` — budget reads via `find_by_key_prefixes`
-- `core/classifier.py` — auto-save (timezone_update)
+- `core/location.py` — sole location writer (`set_user_location`, ADR-0016)
 - `core/shared_handlers.py`, `nexus/handlers/tasks.py` — `find_by_exact_key("tz_…")`
 - `nexus/handlers/finance.py` — `find_by_exact_key("budget_payday")`,
-  `_save_memory_entry` (write to Notion `NOTION_DB_MEMORY`)
+  `_save_memory_entry` (PG upsert)
 - `nexus/handlers/memory.py`, `arcana/handlers/memory.py` — memory handlers
 - `arcana/handlers/sessions.py`, `clients.py`, `rituals.py` —
   `get_memories_for_context`
@@ -229,3 +334,4 @@ Verify against code:
 - `miniapp/backend/routes/weather.py` — timezone via `find_by_exact_key`
 - `core/config.py` — `MODEL_HAIKU`, `MODEL_SONNET` (`claude-sonnet-4-6`)
 - `docs/CASES/0005-memory-store.md` — ADR (code diverges: see the section above)
+- `docs/CASES/0020-memory-rag.md` — ADR for the semantic layer
