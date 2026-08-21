@@ -166,7 +166,8 @@ def _make_client(cid, name, *, contact="", request="", notes="",
 def _make_triplet(sid, question, *, client_id=None, date=None, amount=0, paid=0,
                   outcome="unverified", area="", category_display="", cards="",
                   interpretation="", barter_what="", session_name="",
-                  deck="Уэйт", photo_url=None, bottom_card="", triplet_summary=""):
+                  deck="Уэйт", photo_url=None, bottom_card="", triplet_summary="",
+                  subject_id=None):
     from arcana.repos.sessions_repo import TripletEntry
     from decimal import Decimal
     return TripletEntry(
@@ -174,7 +175,8 @@ def _make_triplet(sid, question, *, client_id=None, date=None, amount=0, paid=0,
         deck=deck, session_name=session_name, client_id=client_id,
         date=date or "", outcome=outcome,
         amount=Decimal(str(amount)), paid=Decimal(str(paid)),
-        category_display=category_display, area=area, barter_what=barter_what,
+        category_display=category_display, subject_id=subject_id,
+        area=area, barter_what=barter_what,
         bottom_card=bottom_card, photo_url=photo_url,
         triplet_summary=triplet_summary,
     )

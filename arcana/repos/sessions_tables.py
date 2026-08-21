@@ -1,6 +1,6 @@
 """arcana/repos/sessions_tables.py — SQLAlchemy Core table definitions for the sessions slice.
 
-Mirrors migration a1f2e3d4c5b6 + w3x4y5z6a7b8 exactly.
+Mirrors migration a1f2e3d4c5b6 + w3x4y5z6a7b8 + z6a7b8c9d0e1 exactly.
 Shares payment_source and engagement_type lookup tables with rituals.
 """
 from __future__ import annotations
@@ -55,6 +55,12 @@ sessions = Table(
     Column("bottom_card",     Text),
     Column("session_name",    Text),
     Column("category_id",     SmallInteger, ForeignKey("session_category.id")),
+    # subject_id: якорь на core.memory.memories.id — устойчивая группировка
+    # "тема" НЕЗАВИСИМО от того, как в этот раз сформулирован session_name
+    # (#189). Без Python-level ForeignKey — memories живёт в отдельной
+    # MetaData (core/repos/memories_table.py); реальный FK на уровне БД
+    # объявлен в миграции z6a7b8c9d0e1.
+    Column("subject_id",      BigInteger),
     Column("area",            Text),
     Column("deck",            Text),
 

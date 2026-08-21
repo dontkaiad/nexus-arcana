@@ -742,6 +742,34 @@ async def recall_from_memory(keyword: str) -> Optional[str]:
     return None
 
 
+async def find_memories_by_subject_name(
+    name: str, user_notion_id: str = ""
+) -> List[Memory]:
+    """Публичная обёртка над _find_pages_by_hint для сопоставления субъекта
+    расклада с существующей памятью (#189, arcana session subject_id).
+
+    use_semantic=False: сопоставление субъекта («тот же Вадим?») должно быть
+    точным — semantic-довесок мог бы подсунуть «похожего» человека вместо
+    того же самого (см. ту же оговорку в _resolve_alias, #184).
+    Приоритет отдаём записям, где Memory.related_to совпадает с именем
+    дословно (регистронезависимо) — это самый сильный сигнал «про того же
+    человека», а не просто содержит имя где-то в тексте факта.
+    """
+    if not name or not name.strip():
+        return []
+    try:
+        mems = await _find_pages_by_hint(name, use_semantic=False)
+    except Exception as e:
+        logger.warning("find_memories_by_subject_name: lookup failed for %r: %s", name, e)
+        return []
+    if user_notion_id:
+        mems = [m for m in mems if not m.user_notion_id or m.user_notion_id == user_notion_id]
+    mems = [m for m in mems if m.is_current and not m.is_archived]
+    name_lower = name.strip().lower()
+    exact = [m for m in mems if (m.related_to or "").strip().lower() == name_lower]
+    return exact or mems
+
+
 def extract_context_keywords(data: dict, client_name: Optional[str] = None) -> List[str]:
     """Извлекает ключевые слова для поиска в памяти из распарсенных данных."""
     keywords: List[str] = []

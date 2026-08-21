@@ -25,6 +25,7 @@ class TripletEntry:
     paid: Decimal = field(default_factory=lambda: Decimal("0"))
     category_id: Optional[int] = None  # FK → session_category (#174)
     category_display: str = ""        # emoji + label из session_category, пустая если NULL
+    subject_id: Optional[int] = None  # якорь на core.memory.memories.id (#189)
     area: str = ""            # Область
     triplet_summary: str = "" # Саммари / AI_Summary
     session_summary: str = "" # Саммари СОБЫТИЯ — триплеты одной отправки, #162
@@ -77,6 +78,7 @@ class SessionsRepo:
         triplet_summary: Optional[str] = None,
         bottom_card: Optional[str] = None,
         category_id: Optional[int] = None,
+        subject_id: Optional[int] = None,
     ) -> Optional[str]:
         # Resolve canonical session name for multi-triplet grouping
         session_name = session or ""
@@ -111,6 +113,7 @@ class SessionsRepo:
             client_id=client_id,
             user_notion_id=user_notion_id,
             category_id=category_id,
+            subject_id=subject_id,
         )
 
     async def prev_for_client(
@@ -178,3 +181,16 @@ class SessionsRepo:
     async def resolve_category_code(self, code: str) -> Optional[int]:
         """Lookup session_category.id by stable code string (#174)."""
         return await _pg_repo().resolve_category_code(code)
+
+    async def set_subject(self, page_ids: List[str], subject_id: int) -> int:
+        """Проставить subject_id (якорь core.memory) на список триплетов —
+        подтверждено ботом через диалог (#189). Возвращает число обновлённых строк."""
+        return await _pg_repo().set_subject(page_ids, subject_id)
+
+    async def group_subject_id(
+        self, session_name: str, client_id: Optional[str], user_notion_id: str
+    ) -> Optional[int]:
+        """Если у ТЕМЫ (session_name+client, ilike) уже есть подтверждённый
+        subject_id на любой строке — вернуть его, чтобы новая отправка
+        унаследовала его молча, без повторного вопроса (#189)."""
+        return await _pg_repo().group_subject_id(session_name, client_id, user_notion_id)

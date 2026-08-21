@@ -108,6 +108,7 @@ def _row_to_triplet(row) -> TripletEntry:
         paid=row.paid or Decimal("0"),
         category_id=row.category_id if row.category_id else None,
         category_display=category_display,
+        subject_id=row.subject_id if getattr(row, "subject_id", None) else None,
         area=row.area or "",
         triplet_summary=row.triplet_summary or "",
         session_summary=row.session_summary or "",
@@ -161,6 +162,7 @@ def _select_sessions():
             sessions.c.bottom_card,
             sessions.c.session_name,
             sessions.c.category_id,
+            sessions.c.subject_id,
             sessions.c.area,
             sessions.c.deck,
             sessions.c.occurred_at,
@@ -205,6 +207,7 @@ class PgSessionsRepo:
         client_id: Optional[str],
         user_notion_id: str,
         category_id: Optional[int] = None,
+        subject_id: Optional[int] = None,
     ) -> Optional[str]:
         type_code    = _code_for(_SESSION_TYPE_TO_CODE, session_type)
         pay_code     = _code_for(_PAYMENT_TO_CODE,      payment_source)
@@ -226,6 +229,7 @@ class PgSessionsRepo:
                     bottom_card=bottom_card or None,
                     session_name=session_name or None,
                     category_id=category_id,
+                    subject_id=subject_id,
                     area=area or None,
                     deck=deck or None,
                     amount=Decimal(str(amount)) if amount else Decimal("0"),
@@ -470,6 +474,12 @@ class PgSessionsRepo:
                 result.append(e)
         return result
 
+    def _list_by_subject_sync(self, subject_id: int, user_notion_id: str) -> List[TripletEntry]:
+        """Все сессии, привязанные к теме (subject_id) — за ВСЁ время, поперёк
+        любых формулировок session_name (#189)."""
+        all_entries = self._list_all_sync(user_notion_id, None)
+        return [e for e in all_entries if e.subject_id == subject_id]
+
     def _archive_sync(self, session_id: str) -> bool:
         try:
             sid = int(session_id)
@@ -526,13 +536,14 @@ class PgSessionsRepo:
         client_id: Optional[str] = None,
         user_notion_id: str = "",
         category_id: Optional[int] = None,
+        subject_id: Optional[int] = None,
     ) -> Optional[str]:
         return await asyncio.to_thread(
             self._create_sync,
             title, occurred_at, question, cards, interpretation,
             triplet_summary, bottom_card, session_name,
             area, deck, amount, paid, session_type, payment_source,
-            outcome_code, client_id, user_notion_id, category_id,
+            outcome_code, client_id, user_notion_id, category_id, subject_id,
         )
 
     async def find_by_id(self, session_id: str) -> Optional[TripletEntry]:
@@ -616,6 +627,11 @@ class PgSessionsRepo:
     ) -> List[TripletEntry]:
         return await asyncio.to_thread(self._list_by_slug_sync, slug, user_notion_id)
 
+    async def list_by_subject(
+        self, subject_id: int, user_notion_id: str = ""
+    ) -> List[TripletEntry]:
+        return await asyncio.to_thread(self._list_by_subject_sync, subject_id, user_notion_id)
+
     async def set_outcome(self, session_id: str, outcome_code: str) -> bool:
         return await asyncio.to_thread(self._set_outcome_sync, session_id, outcome_code)
 
@@ -672,6 +688,49 @@ class PgSessionsRepo:
 
     async def resolve_category_code(self, code: str) -> Optional[int]:
         return await asyncio.to_thread(self._resolve_category_code_sync, code)
+
+    def _set_subject_sync(self, page_ids: List[str], subject_id: int) -> int:
+        ids = []
+        for pid in page_ids:
+            try:
+                ids.append(int(pid))
+            except (ValueError, TypeError):
+                continue
+        if not ids:
+            return 0
+        with get_engine().begin() as conn:
+            res = conn.execute(
+                sessions.update()
+                .where(sessions.c.id.in_(ids))
+                .values(subject_id=subject_id)
+            )
+        return res.rowcount or 0
+
+    async def set_subject(self, page_ids: List[str], subject_id: int) -> int:
+        return await asyncio.to_thread(self._set_subject_sync, page_ids, subject_id)
+
+    def _group_subject_id_sync(
+        self, session_name: str, client_id: Optional[str], user_notion_id: str
+    ) -> Optional[int]:
+        """Уже подтверждённый subject_id для этой ТЕМЫ (session_name+client),
+        если хоть одна строка группы его несёт — новые отправки наследуют
+        молча, без повторного вопроса боту (#189)."""
+        if not session_name:
+            return None
+        cond = self._theme_group_cond(session_name, client_id) & sessions.c.subject_id.isnot(None)
+        if user_notion_id:
+            cond = cond & (sessions.c.user_notion_id == user_notion_id)
+        stmt = select(sessions.c.subject_id).where(cond).limit(1)
+        with get_engine().connect() as conn:
+            row = conn.execute(stmt).first()
+        return int(row[0]) if row and row[0] is not None else None
+
+    async def group_subject_id(
+        self, session_name: str, client_id: Optional[str], user_notion_id: str
+    ) -> Optional[int]:
+        return await asyncio.to_thread(
+            self._group_subject_id_sync, session_name, client_id, user_notion_id
+        )
 
     def _set_props_sync(self, session_id: str, fields: dict) -> bool:
         try:

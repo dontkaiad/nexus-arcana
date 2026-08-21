@@ -128,6 +128,8 @@ PARSE_SESSION_SYSTEM = (
     '"session_category": "Сфера жизни|Отношения|Работа|Финансы|Здоровье|Род|'
     'Магические воздействия|Диагностика|Кельтский крест или null", '
     '"client_name": "имя или null", '
+    '"subject_name": "имя ЧЕЛОВЕКА (не темы), о котором сессия, или null '
+    '(см. правило ниже)", '
     '"deck": "Уэйт|...", "amount": число, "paid": число, "payment_source": "...", '
     '"triplets": [{"question": "вопрос1", "cards": ["карта1","карта2","карта3"], '
     '"bottom_card": "карта или null", "area": "Отношения|Финансы|Работа|Здоровье|'
@@ -178,6 +180,15 @@ PARSE_SESSION_SYSTEM = (
     "(пр.: '{Имя}' → '{Имя}')\n"
     "Темы/практики (триггеры): приворот, отворот, привязка, печать, "
     "очищение, чистка, снятие, диагностика, родовая работа, защита.\n\n"
+    "ОПРЕДЕЛЕНИЕ subject_name — имя ЧЕЛОВЕКА, о котором вопрос (субъект "
+    "ситуации), в ИМЕНИТЕЛЬНОМ падеже. НЕ путай с client_name (кто заказал):\n"
+    "- 'что чувствует {Имя}', 'будем ли вместе с {Имя}', '{Имя} диагностика "
+    "порчи' → subject_name = '{Имя}' (приведи к именительному падежу: "
+    "'с {Именем}' → '{Имя}').\n"
+    "- если вопрос про самого пользователя ('моё здоровье', 'мои перспективы') "
+    "или тема без конкретного человека ('работа', 'финансы') → subject_name = null.\n"
+    "- если в тексте несколько разных имён (несколько субъектов) → "
+    "subject_name = null (не гадай, какое имя главное).\n\n"
     "ОПРЕДЕЛЕНИЕ session_category — по НАЗВАНИЮ темы и контексту, не по числу пунктов.\n"
     "СНАЧАЛА проверяй маркеры магии и диагностики (они приоритетнее):\n"
     "- 'приворот' / 'отворот' / 'привязка' / 'печать' / 'как лег ритуал' / "
@@ -1322,6 +1333,7 @@ async def _handle_multi_session(
     tg_id = message.from_user.id
     session_name: str = (data.get("session_name") or "").strip()
     session_cat_hint = data.get("session_category") or session_name or None
+    subject_name: str = (data.get("subject_name") or "").strip()
     deck_raw = data.get("deck") or "Уэйт"
     deck = _match_deck(deck_raw) or "Уэйт"
     parsed_client_name = (data.get("client_name") or "").strip() or None
@@ -1389,6 +1401,17 @@ async def _handle_multi_session(
         except Exception as e:
             logger.warning("session_group_exists failed: %s", e)
 
+    # Тема уже подтверждала субъекта раньше (#189) → новые триплеты наследуют
+    # subject_id молча, БЕЗ повторного вопроса боту.
+    known_subject_id: Optional[int] = None
+    if session_name:
+        try:
+            known_subject_id = await _repo.group_subject_id(
+                session_name, client_id, user_notion_id
+            )
+        except Exception as e:
+            logger.warning("group_subject_id failed: %s", e)
+
     # Контекст предыдущих раскладов клиента — общий для всех триплетов
     prev_context = ""
     if client_id:
@@ -1403,6 +1426,7 @@ async def _handle_multi_session(
     from core.html_for_telegram import html_to_telegram
     saved_n = 0
     first_page_id: Optional[str] = None
+    saved_page_ids: List[str] = []
     saved_titles: List[str] = []
     saved_triplets: List[dict] = []  # для финального саммари сессии
     rag_batch: List[dict] = []       # триплеты для одного RAG-батч-эмбеддинга (#166)
@@ -1501,10 +1525,12 @@ async def _handle_multi_session(
                 triplet_summary=t_summary or None,
                 bottom_card=bottom_en or None,
                 category_id=session_cat_id,
+                subject_id=known_subject_id,
             )
             if page_id:
                 saved_n += 1
                 saved_titles.append(question)
+                saved_page_ids.append(page_id)
                 if not first_page_id:
                     first_page_id = page_id
 
@@ -1666,6 +1692,115 @@ async def _handle_multi_session(
                 )
         except Exception as e:
             logger.warning("multi-flow payment kb skipped: %s", e)
+
+    # Тема без известного subject_id, но есть имя субъекта — спросим, тот ли
+    # это человек, что уже есть в памяти (#189). Не блокирует сохранение:
+    # сессия уже записана и работает как раньше (группировка по session_name)
+    # независимо от ответа.
+    if known_subject_id is None and subject_name and saved_page_ids and session_name:
+        try:
+            await _maybe_prompt_subject_match(
+                message, tg_id,
+                subject_name=subject_name,
+                session_name=session_name,
+                client_id=client_id,
+                user_notion_id=user_notion_id,
+                page_ids=saved_page_ids,
+            )
+        except Exception as e:
+            logger.warning("subject match prompt failed: %s", e)
+
+
+# ──────────────── subject_id: якорь темы через core.memory (#189) ──────────
+
+def _subject_confirm_keyboard(slug: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text="✅ Да", callback_data=f"subj_yes:{slug}"),
+        InlineKeyboardButton(text="❌ Другой человек", callback_data=f"subj_no:{slug}"),
+    ]])
+
+
+async def _maybe_prompt_subject_match(
+    message: Message,
+    tg_id: int,
+    *,
+    subject_name: str,
+    session_name: str,
+    client_id: Optional[str],
+    user_notion_id: str,
+    page_ids: List[str],
+) -> None:
+    """Ищет subject_name в core.memory; если нашла — спрашивает Кай через
+    inline-кнопки, тот ли это человек, и по «Да» проставляет subject_id на
+    ВСЕ триплеты этой отправки разом (#189). По «Нет»/без совпадения —
+    ничего не меняется, сессия работает как раньше (по session_name)."""
+    from core.memory import find_memories_by_subject_name
+
+    mems = await find_memories_by_subject_name(subject_name, user_notion_id)
+    if not mems:
+        return
+    best = mems[0]
+    if not best.id:
+        return
+
+    from arcana.pending_tarot import save_pending
+    slug = _short_resolve_slug()
+    await save_pending(tg_id, {
+        "type": "subject_confirm_pending",
+        "slug": slug,
+        "memory_id": best.id,
+        "subject_name": subject_name,
+        "page_ids": page_ids,
+    })
+    fact_preview = (best.fact or "").strip()
+    fact_line = f"\n«{html.escape(fact_preview)}»" if fact_preview else ""
+    await message.answer(
+        f"🧠 Это тот же <b>{html.escape(subject_name)}</b>, что в памяти?{fact_line}",
+        parse_mode="HTML",
+        reply_markup=_subject_confirm_keyboard(slug),
+    )
+
+
+@router.callback_query(F.data.startswith("subj_yes:"))
+async def cb_subject_confirm_yes(call: CallbackQuery) -> None:
+    await call.answer()
+    slug = call.data.split(":", 1)[1]
+    from arcana.pending_tarot import get_pending, delete_pending
+    pending = await get_pending(call.from_user.id) or {}
+    if pending.get("slug") != slug or pending.get("type") != "subject_confirm_pending":
+        return
+    memory_id = pending.get("memory_id")
+    page_ids = pending.get("page_ids") or []
+    subject_name = pending.get("subject_name") or ""
+    await delete_pending(call.from_user.id)
+    if not memory_id or not page_ids:
+        return
+    n = await _repo.set_subject(page_ids, int(memory_id))
+    try:
+        await call.message.edit_reply_markup(reply_markup=None)
+    except Exception:
+        pass
+    if n:
+        await call.message.answer(
+            f"✅ Привязала к теме «{html.escape(subject_name)}» — "
+            f"дальше группируется по ней, а не по формулировке."
+        )
+
+
+@router.callback_query(F.data.startswith("subj_no:"))
+async def cb_subject_confirm_no(call: CallbackQuery) -> None:
+    await call.answer()
+    slug = call.data.split(":", 1)[1]
+    from arcana.pending_tarot import get_pending, delete_pending
+    pending = await get_pending(call.from_user.id) or {}
+    if pending.get("slug") != slug or pending.get("type") != "subject_confirm_pending":
+        return
+    await delete_pending(call.from_user.id)
+    try:
+        await call.message.edit_reply_markup(reply_markup=None)
+    except Exception:
+        pass
+    await call.message.answer("Ок, отдельная тема.")
 
 
 # ────────────────────────── Callbacks ──────────────────────────────────────

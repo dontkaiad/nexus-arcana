@@ -4,9 +4,16 @@
 с одинаковым session_name + client = одна сессия. Записи без session_name —
 одиночные сессии (1 триплет = 1 сессия).
 
+Группировка предпочитает subject_id (якорь core.memory, #189) над session_name,
+когда он проставлен — устойчива к тому, как в этот раз сформулирован
+session_name. Slug группы по теме — "subj-{subject_id}".
+
 Endpoints:
   GET  /api/arcana/sessions                    — лента сессий (агрегаты)
   GET  /api/arcana/sessions/by-slug/{slug}     — сессия со всеми триплетами
+                                                  (slug "subj-N" → по теме)
+  GET  /api/arcana/sessions/by-subject/{id}    — вьюха «Тема»: все сессии
+                                                  за всё время по subject_id
   POST /api/arcana/sessions/by-slug/{slug}/summarize — сгенерировать общее саммари
   GET  /api/arcana/sessions/{session_id}       — detail одного триплета
 """
@@ -103,6 +110,10 @@ def _index_in_title(title: str) -> Optional[int]:
 
 def _slug_for(session_name: str, client_id: Optional[str]) -> str:
     return f"{slugify(session_name)}__{client_id or 'self'}"
+
+
+def _subject_slug(subject_id: int) -> str:
+    return f"subj-{subject_id}"
 
 
 def _clients_name_map(clients_list) -> dict:
@@ -211,19 +222,27 @@ async def list_sessions(
     area_f = filters.get("area")
     client_f = filters.get("client_id")
 
-    # Group by (session_name, client_id). Empty session_name → solo triplet.
+    # Группировка (#189): subject_id — устойчивый якорь на core.memory,
+    # выигрывает у session_name (разные формулировки одной темы схлопываются
+    # в одну группу). Без subject_id — прежнее поведение: (session_name,
+    # client_id), пустой session_name → одиночный триплет.
     from typing import Dict, Tuple
-    groups: Dict[Tuple[str, Optional[str]], List[TripletEntry]] = {}
+    groups: Dict[Tuple, List[TripletEntry]] = {}
     for t in all_triplets:
         if client_f and t.client_id != client_f:
             continue
         if area_f and t.area != area_f:
             continue
-        key = (t.session_name, t.client_id) if t.session_name else (f"__solo__{t.id}", t.client_id)
+        if t.subject_id:
+            key = ("subj", t.subject_id)
+        elif t.session_name:
+            key = ("sess", t.session_name, t.client_id)
+        else:
+            key = ("solo", t.id, t.client_id)
         groups.setdefault(key, []).append(t)
 
     items: List[dict] = []
-    for (sname_or_solo, cid), triplets in groups.items():
+    for key, triplets in groups.items():
         triplets.sort(key=lambda x: (
             _index_in_title(x.question) or 9999,
             x.date or "",
@@ -232,8 +251,11 @@ async def list_sessions(
         verdicts = [_verdict_of(t) for t in triplets]
         status = _compute_status(verdicts)
 
-        sname = "" if sname_or_solo.startswith("__solo__") else sname_or_solo
-        is_solo = not sname
+        kind = key[0]
+        cid = first.client_id
+        subject_id = key[1] if kind == "subj" else None
+        sname = "" if kind == "solo" else (first.session_name or "")
+        is_solo = kind == "solo"
 
         client_name = name_map.get(cid, "Личный") if cid else "Личный"
         ctype_full = type_map.get(cid, "") if cid else ""
@@ -259,9 +281,14 @@ async def list_sessions(
 
         done_label = _OUTCOME_DONE_LABEL.get(first.outcome or "unverified", "⏳ Не проверено")
 
+        slug = (
+            _subject_slug(subject_id) if subject_id
+            else (_slug_for(sname, cid) if sname else first.id)
+        )
         items.append({
-            "slug": _slug_for(sname, cid) if sname else first.id,
+            "slug": slug,
             "session_name": sname or None,
+            "subject_id": subject_id,
             "ru_title": ru_title,
             "first_question": first_q,
             "category": category,
@@ -298,52 +325,22 @@ async def list_sessions(
     }
 
 
-# ── session by slug ──────────────────────────────────────────────────────────
+# ── session by slug / by subject ─────────────────────────────────────────────
 
-@router.get("/arcana/sessions/by-slug/{slug}")
-async def session_by_slug(
+def _aggregate_group(
+    matching: List[TripletEntry],
     slug: str,
-    tg_id: int = Depends(current_user_id),
-) -> dict[str, Any]:
-    user_notion_id = (await get_user_notion_id(tg_id)) or ""
-    _, tz_offset = await today_user_tz(tg_id)
-
-    clients_list = await _clients_repo.list_all(user_notion_id)
-    name_map = _clients_name_map(clients_list)
-
-    # Try numeric id → single triplet (direct GET /by-slug/<pg_id>)
-    if "__" not in slug:
-        try:
-            t = await _sessions_repo.find_by_id(slug)
-        except Exception:
-            t = None
-        if t:
-            triplet_data = _serialize_triplet_pg(t, name_map, tz_offset)
-            return {
-                "slug": slug,
-                "session_name": None,
-                "ru_title": triplet_data["question"],
-                "first_question": triplet_data["question"],
-                "category": triplet_data["type"],
-                "client": triplet_data["client"],
-                "client_id": triplet_data["client_id"],
-                "type": "",
-                "areas": triplet_data.get("area", []),
-                "decks": [triplet_data["deck"]] if triplet_data["deck"] else [],
-                "first_date": triplet_data["date"],
-                "summary": None,
-                "session_summaries": [],
-                "photo_url": triplet_data.get("photo_url"),
-                "is_solo": True,
-                "triplets": [triplet_data],
-            }
-        raise HTTPException(status_code=404, detail="session not found")
-
-    matching = await _sessions_repo.list_by_slug(slug, user_notion_id)
-    if not matching:
-        raise HTTPException(status_code=404, detail="session not found")
-
-    matching.sort(key=lambda x: (
+    name_map: dict,
+    tz_offset: int,
+    *,
+    subject_id: Optional[int] = None,
+) -> dict:
+    """Общая агрегация группы триплетов (по session_name+client ИЛИ по
+    subject_id, #189) в detail-ответ: сортировка, якорная сводка ТЕМЫ,
+    саммари по дням, уникальные area/декс. Используется session_by_slug
+    и session_by_subject — единственное расхождение между ними это то,
+    ОТКУДА взялся список matching."""
+    matching = sorted(matching, key=lambda x: (
         _index_in_title(x.question) or 9999,
         x.date or "",
     ))
@@ -386,6 +383,7 @@ async def session_by_slug(
     return {
         "slug": slug,
         "session_name": sname or None,
+        "subject_id": subject_id,
         "ru_title": sname or first.question,
         "first_question": first.question,
         "category": category,
@@ -403,6 +401,84 @@ async def session_by_slug(
     }
 
 
+@router.get("/arcana/sessions/by-slug/{slug}")
+async def session_by_slug(
+    slug: str,
+    tg_id: int = Depends(current_user_id),
+) -> dict[str, Any]:
+    user_notion_id = (await get_user_notion_id(tg_id)) or ""
+    _, tz_offset = await today_user_tz(tg_id)
+
+    clients_list = await _clients_repo.list_all(user_notion_id)
+    name_map = _clients_name_map(clients_list)
+
+    # Группа по теме (subject_id, #189) — устойчива к формулировке session_name.
+    if slug.startswith("subj-"):
+        try:
+            subject_id = int(slug[len("subj-"):])
+        except ValueError:
+            raise HTTPException(status_code=404, detail="session not found")
+        matching = await _sessions_repo.list_by_subject(subject_id, user_notion_id)
+        if not matching:
+            raise HTTPException(status_code=404, detail="session not found")
+        return _aggregate_group(matching, slug, name_map, tz_offset, subject_id=subject_id)
+
+    # Try numeric id → single triplet (direct GET /by-slug/<pg_id>)
+    if "__" not in slug:
+        try:
+            t = await _sessions_repo.find_by_id(slug)
+        except Exception:
+            t = None
+        if t:
+            triplet_data = _serialize_triplet_pg(t, name_map, tz_offset)
+            return {
+                "slug": slug,
+                "session_name": None,
+                "subject_id": None,
+                "ru_title": triplet_data["question"],
+                "first_question": triplet_data["question"],
+                "category": triplet_data["type"],
+                "client": triplet_data["client"],
+                "client_id": triplet_data["client_id"],
+                "type": "",
+                "areas": triplet_data.get("area", []),
+                "decks": [triplet_data["deck"]] if triplet_data["deck"] else [],
+                "first_date": triplet_data["date"],
+                "summary": None,
+                "session_summaries": [],
+                "photo_url": triplet_data.get("photo_url"),
+                "is_solo": True,
+                "triplets": [triplet_data],
+            }
+        raise HTTPException(status_code=404, detail="session not found")
+
+    matching = await _sessions_repo.list_by_slug(slug, user_notion_id)
+    if not matching:
+        raise HTTPException(status_code=404, detail="session not found")
+    return _aggregate_group(matching, slug, name_map, tz_offset)
+
+
+@router.get("/arcana/sessions/by-subject/{subject_id}")
+async def session_by_subject(
+    subject_id: int,
+    tg_id: int = Depends(current_user_id),
+) -> dict[str, Any]:
+    """Вьюха «Тема» (#189): все сессии за всё время, привязанные к subject_id,
+    независимо от того, как формулировался session_name на момент сохранения."""
+    user_notion_id = (await get_user_notion_id(tg_id)) or ""
+    _, tz_offset = await today_user_tz(tg_id)
+
+    clients_list = await _clients_repo.list_all(user_notion_id)
+    name_map = _clients_name_map(clients_list)
+
+    matching = await _sessions_repo.list_by_subject(subject_id, user_notion_id)
+    if not matching:
+        raise HTTPException(status_code=404, detail="subject not found")
+    return _aggregate_group(
+        matching, _subject_slug(subject_id), name_map, tz_offset, subject_id=subject_id,
+    )
+
+
 # ── session summarize ────────────────────────────────────────────────────────
 
 @router.post("/arcana/sessions/by-slug/{slug}/summarize")
@@ -415,9 +491,18 @@ async def session_summarize(
 
     user_notion_id = (await get_user_notion_id(tg_id)) or ""
 
-    matching = await _sessions_repo.list_by_slug(slug, user_notion_id)
-    if not matching or not matching[0].session_name:
-        raise HTTPException(status_code=404, detail="session not found")
+    if slug.startswith("subj-"):
+        try:
+            subject_id = int(slug[len("subj-"):])
+        except ValueError:
+            raise HTTPException(status_code=404, detail="session not found")
+        matching = await _sessions_repo.list_by_subject(subject_id, user_notion_id)
+        if not matching:
+            raise HTTPException(status_code=404, detail="session not found")
+    else:
+        matching = await _sessions_repo.list_by_slug(slug, user_notion_id)
+        if not matching or not matching[0].session_name:
+            raise HTTPException(status_code=404, detail="session not found")
 
     matching.sort(key=lambda x: (
         _index_in_title(x.question) or 9999,
