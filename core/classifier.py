@@ -914,13 +914,12 @@ async def process_item(data: Dict[str, Any], original_text: str, msg, clarify: d
 
     # TIMEZONE UPDATE
     if kind == "timezone_update":
+        # _update_user_tz уже пишет город/пояс в память сам (set_user_location,
+        # #184) — отдельный save_memory() здесь дублировал запись, заново
+        # парся тот же сырой текст независимым Haiku-экстрактором без
+        # контекста «это про локацию».
         from nexus.handlers.tasks import _update_user_tz
         await _update_user_tz(msg, data.get("text", original_text), user_notion_id=user_notion_id)
-        try:
-            from core.memory import save_memory
-            await save_memory(msg, original_text, user_notion_id, "☀️ Nexus")
-        except Exception:
-            pass
         return ""
 
     # БЮДЖЕТ — v2: всегда Sonnet
