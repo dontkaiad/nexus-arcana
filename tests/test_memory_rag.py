@@ -103,12 +103,13 @@ def test_index_memories_batch_empty_input():
 
 # ── search_memory_semantic ───────────────────────────────────────────────────
 
-def _row(id_=1, fact="факт", category="🏠 Быт"):
+def _row(id_=1, fact="факт", category="🏠 Быт", score=0.9):
     return {
         "id": id_, "fact_text": fact, "key_name": "k", "value_text": "",
         "category": category, "scope": "global", "source": "auto",
         "related_to": "", "is_current": True, "is_archived": False,
         "user_notion_id": "", "created_at": None, "updated_at": None,
+        "score": score,
     }
 
 
@@ -159,3 +160,23 @@ def test_search_memory_semantic_no_key_graceful(monkeypatch):
     out = memory_rag.search_memory_semantic("гай")
     assert out == []
     assert eng.calls == []
+
+
+def test_search_memory_semantic_no_min_score_returns_all(monkeypatch):
+    """#185: без min_score (дефолт) векторный поиск НЕ фильтрует — top_k
+    соседей возвращаются как есть, даже с низким score."""
+    eng = FakeEngine(rows=[_row(1, score=0.9), _row(2, score=0.1)])
+    monkeypatch.setattr(memory_rag, "get_engine", lambda: eng)
+    monkeypatch.setattr(memory_rag, "_embed", lambda t, input_type="query": [[0.2] * 1024])
+
+    out = memory_rag.search_memory_semantic("гай")
+    assert len(out) == 2
+
+
+def test_search_memory_semantic_min_score_filters_low_scores(monkeypatch):
+    eng = FakeEngine(rows=[_row(1, score=0.9), _row(2, score=0.1)])
+    monkeypatch.setattr(memory_rag, "get_engine", lambda: eng)
+    monkeypatch.setattr(memory_rag, "_embed", lambda t, input_type="query": [[0.2] * 1024])
+
+    out = memory_rag.search_memory_semantic("гай", min_score=0.5)
+    assert len(out) == 1 and out[0].id == "1"
