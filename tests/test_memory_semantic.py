@@ -84,6 +84,34 @@ def test_save_memory_indexes_after_successful_write():
     msg.answer.assert_called()  # пользовательский ответ всё равно отправлен
 
 
+def test_deactivate_memory_hint_path_disables_semantic():
+    """«забудь X» деактивирует ВСЁ найденное без подтверждения — semantic
+    (top-K без порога похожести) там запрещён (#184)."""
+    msg = _mk_message()
+    msg.from_user.id = 7
+    find = AsyncMock(return_value=[_mk_page("1")])
+    with patch("core.memory._find_pages_by_hint", find), \
+         patch("core.memory._mem_repo") as mem_repo:
+        mem_repo.set_active = AsyncMock(return_value=1)
+        from core.memory import deactivate_memory
+        asyncio.run(deactivate_memory(msg, "какой-то хинт", "u1"))
+    find.assert_called_once_with("какой-то хинт", use_semantic=False)
+
+
+def test_delete_memory_hint_path_disables_semantic():
+    """«удали из памяти X» при 1 матче архивирует НЕМЕДЛЕННО — semantic
+    там запрещён (#184)."""
+    msg = _mk_message()
+    msg.from_user.id = 8
+    find = AsyncMock(return_value=[_mk_page("1")])
+    with patch("core.memory._find_pages_by_hint", find), \
+         patch("core.memory._mem_repo") as mem_repo:
+        mem_repo.archive = AsyncMock(return_value=True)
+        from core.memory import delete_memory
+        asyncio.run(delete_memory(msg, "какой-то хинт", "u1"))
+    find.assert_called_once_with("какой-то хинт", use_semantic=False)
+
+
 def test_save_memory_no_index_on_write_failure():
     msg = _mk_message()
     with patch("core.memory._parse_fact", AsyncMock(return_value=("факт", "🏠 Быт", "", "ключ"))), \

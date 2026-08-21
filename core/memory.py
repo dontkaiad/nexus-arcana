@@ -588,7 +588,10 @@ async def deactivate_memory(
             return
         mems = [last[idx]]
     else:
-        mems = await _find_pages_by_hint(hint) if hint else []
+        # use_semantic=False: деактивация применяется КО ВСЕМ найденным без
+        # подтверждения — semantic-довесок (top-K ближайших БЕЗ порога
+        # похожести) может подмешать нерелевантные факты (#184).
+        mems = await _find_pages_by_hint(hint, use_semantic=False) if hint else []
         if not mems:
             tokens = _tokenize_hint(hint)
             subject = tokens[0] if tokens else hint
@@ -687,7 +690,10 @@ async def delete_memory(
             return
         mems = [last[idx]]
     else:
-        mems = await _find_pages_by_hint(hint) if hint else []
+        # use_semantic=False: ровно один матч архивируется НЕМЕДЛЕННО без
+        # подтверждения — semantic-сосед (без порога похожести) на пустом
+        # ILIKE снёс бы не тот факт (#184).
+        mems = await _find_pages_by_hint(hint, use_semantic=False) if hint else []
         if not mems:
             tokens = _tokenize_hint(hint)
             subject = tokens[0] if tokens else hint

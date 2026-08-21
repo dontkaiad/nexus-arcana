@@ -76,11 +76,22 @@ query only fires when ILIKE returns fewer than 3 hits, merged in
 semantic search was rejected: `get_memories_for_context` can fire several
 times per single incoming Telegram message (once per extracted keyword),
 and Voyage's free tier is 3 RPM — always-on would burn the shared budget
-(now split across two RAG consumers) on a single message. The recursive
-alias resolver (`_resolve_alias` → `_find_pages_by_hint`) opts out of the
-semantic fallback entirely (`use_semantic=False`) — alias recall needs to
-stay exact; a "close enough" semantic match at each recursion level risks
-silently renaming the wrong entity.
+(now split across two RAG consumers) on a single message. Three callers
+opt out of the semantic fallback entirely (`use_semantic=False`):
+
+- the recursive alias resolver (`_resolve_alias`) — alias recall needs to
+  stay exact; a "close enough" semantic match at each recursion level
+  risks silently renaming the wrong entity;
+- `deactivate_memory` ("забудь X") — it deactivates *every* found row
+  without confirmation, and the semantic query has no similarity
+  threshold (see #185), so a thin ILIKE result would get padded with
+  nearest-neighbor facts that then all get deactivated;
+- `delete_memory` ("удали из памяти X") — an exactly-one-match result is
+  archived *immediately* without confirmation; a lone semantic neighbor
+  on an empty ILIKE would archive the wrong fact.
+
+Destructive operations use exact matching only; semantic recall is a
+read-path feature.
 
 **Backfill is a separate, explicit script**
 (`scripts/migrate_memory_embeddings.py`), dry-run by default, `--apply`
@@ -131,3 +142,11 @@ bug report.
 - Existing rows have no embedding until the backfill script runs — search
   quality for old facts is unchanged (ILIKE-only) until then; new facts
   are indexed live from this change onward.
+- The semantic query has no minimum-similarity cutoff yet — when nothing
+  relevant exists, the nearest neighbors still come back and get merged
+  into thin ILIKE results (see #185).
+- Indexing hooks only `save_memory()`; writes that go straight through
+  the repo (auto-suggest confirm `save_parsed`, budget `_save_memory_entry`
+  upserts, location `set_user_location`) produce rows without embeddings —
+  and, worse, an upsert of a previously-embedded row leaves a stale
+  vector for the old fact text (see #186).
