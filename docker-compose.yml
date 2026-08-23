@@ -35,6 +35,12 @@ services:
     depends_on:
       db:
         condition: service_healthy
+    # #191: data/*.db (стрики, ru_calendar, ...) жили только в файловой системе
+    # контейнера — каждый `up -d --build` (деплой на push в main, а пушим часто)
+    # стирал их без следа. Отсюда стрик всегда 0, несмотря на регулярные Done.
+    # Postgres такую защиту уже имел (volume pgdata) — sqlite её не имела.
+    volumes:
+      - nexus_sqlite_data:/app/data
     restart: unless-stopped
     # heartbeat: unhealthy если /tmp/heartbeat протух (процесс завис/умер).
     # $$ → литеральный $ после compose-интерполяции.
@@ -57,6 +63,11 @@ services:
     depends_on:
       db:
         condition: service_healthy
+    # #191: своя папка, не общая с nexus — оба контейнера пишут в data/ (напр.
+    # ru_calendar.db) независимо, общий volume рисковал бы sqlite file-lock
+    # контеншном между двумя процессами.
+    volumes:
+      - arcana_sqlite_data:/app/data
     restart: unless-stopped
     # heartbeat: unhealthy если /tmp/heartbeat протух (процесс завис/умер).
     # $$ → литеральный $ после compose-интерполяции.
@@ -69,3 +80,5 @@ services:
 
 volumes:
   pgdata:
+  nexus_sqlite_data:
+  arcana_sqlite_data:
