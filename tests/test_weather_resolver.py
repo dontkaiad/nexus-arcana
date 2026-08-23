@@ -85,3 +85,58 @@ def test_turkey_cities_normalize_to_english():
     assert _extract_city_from_text("сейчас в Анталье") == "Antalya"
     assert _extract_city_from_text("в Стамбуле") == "Istanbul"
     assert _extract_city_from_text("в Батуми") == "Batumi"
+
+
+# ── Гай (Оренбургская обл.): geocoding-лотерея по склонённым формам ──────────
+
+@pytest.mark.parametrize("raw,extracted", [
+    ("я в Гае, Оренбургская область", "гае"),
+    ("я из Гая", "гая"),
+    ("Гаю", "гаю"),
+    ("живу в Гай", "гай"),
+])
+def test_gay_declensions_extracted_as_is(raw, extracted):
+    """_normalize_city не знает «Гай» (в отличие от core/location.py:CITY_TZ)
+    и пропускает склонённую форму как есть — именно её и ловит _known_coords."""
+    from miniapp.backend.routes.weather import _extract_city_from_text
+    got = _extract_city_from_text(raw)
+    assert got is not None and got.strip().lower() == extracted
+
+
+@pytest.mark.parametrize("form", ["Гай", "Гае", "Гая", "Гаю", "гае"])
+def test_gay_known_coords_bypasses_geocoding(form):
+    """Регрессия: «Гае» матчило геокодингом «Гаери» (Буркина-Фасо), «Гая» —
+    пустой результат → Haiku угадывал «Gaya» (Индия). Все словоформы должны
+    резолвиться на те же координаты города Гай, Оренбургская область, без
+    похода в geocoding API."""
+    from miniapp.backend.routes.weather import _known_coords
+    coords = _known_coords(form)
+    assert coords is not None
+    lat, lon, display_name = coords
+    assert display_name == "Гай"
+    assert round(lat, 2) == 51.47
+    assert round(lon, 2) == 58.45
+
+
+@pytest.mark.asyncio
+async def test_fetch_openmeteo_gay_skips_geocoding_call():
+    from unittest.mock import AsyncMock, MagicMock
+    from miniapp.backend.routes import weather
+
+    fc_response = MagicMock()
+    fc_response.json.return_value = {"current": {"temperature_2m": -5.0, "weather_code": 3}}
+
+    mock_client = AsyncMock()
+    mock_client.get = AsyncMock(return_value=fc_response)
+    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_client.__aexit__ = AsyncMock(return_value=False)
+
+    with patch("httpx.AsyncClient", return_value=mock_client):
+        data = await weather._fetch_openmeteo("Гае")
+
+    assert data["city"] == "Гай"
+    assert data["temp"] == -5
+    # Единственный HTTP-вызов — forecast, не geocoding-api.
+    mock_client.get.assert_awaited_once()
+    call_url = mock_client.get.await_args.args[0]
+    assert "geocoding" not in call_url

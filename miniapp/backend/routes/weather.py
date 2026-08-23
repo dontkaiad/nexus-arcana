@@ -167,9 +167,61 @@ async def _llm_normalize_city(raw_city: str) -> Optional[str]:
         return None
 
 
+# Явные координаты для городов, чьё имя геокодингу открывает лотерею — либо
+# склонённая форма промахивается мимо базы («Гае» → геокодинг матчит "Гаери"
+# в Буркина-Фасо, «Гая» → пусто → Haiku-фоллбэк угадывает "Gaya", Индия),
+# либо само название неоднозначно даже в именительном (5 сёл «Гай» в РФ —
+# open-meteo возвращает первым нужное только по счастливой сортировке по
+# населению). core/location.py:CITY_TZ ограничивает ключи "гай"/"гае" — там
+# substring-матч идёт по СЫРОМУ тексту сообщения, где "гая"/"гаю" ловят
+# "помогаю"/"пугая" и т.п. Здесь input — уже вычлененное
+# _extract_city_from_text одно слово (startswith), не сырой текст, так что
+# "гая"/"гаю" безопасны и добавлены тоже. Пропускаем геокодинг совсем — идём
+# прямиком в forecast по координатам.
+_KNOWN_COORDS = {
+    "гай": (51.47274, 58.45155, "Гай"),
+    "гае": (51.47274, 58.45155, "Гай"),
+    "гая": (51.47274, 58.45155, "Гай"),
+    "гаю": (51.47274, 58.45155, "Гай"),
+}
+
+
+def _known_coords(city: str) -> Optional[tuple]:
+    key = (city or "").strip().lower()
+    for prefix, coords in _KNOWN_COORDS.items():
+        if key.startswith(prefix):
+            return coords
+    return None
+
+
+async def _fetch_by_coords(client: httpx.AsyncClient, lat: float, lon: float, display_name: str) -> dict:
+    fc_r = await client.get(
+        "https://api.open-meteo.com/v1/forecast",
+        params={
+            "latitude": lat, "longitude": lon,
+            "current": "temperature_2m,weather_code",
+        },
+    )
+    cur = (fc_r.json() or {}).get("current") or {}
+    code = int(cur.get("weather_code", 0))
+    kind, desc = WMO_CODES.get(code, ("clear", "—"))
+    return {
+        "city": display_name,
+        "temp": round(float(cur.get("temperature_2m", 0))),
+        "code": code,
+        "kind": kind,
+        "description": desc,
+    }
+
+
 async def _fetch_openmeteo(city: str) -> Optional[dict]:
     try:
         async with httpx.AsyncClient(timeout=5) as client:
+            known = _known_coords(city)
+            if known:
+                lat, lon, display_name = known
+                return await _fetch_by_coords(client, lat, lon, display_name)
+
             geo_r = await client.get(
                 "https://geocoding-api.open-meteo.com/v1/search",
                 params={"name": city, "count": 1, "language": "ru"},
@@ -180,26 +232,12 @@ async def _fetch_openmeteo(city: str) -> Optional[dict]:
             loc = results[0]
             lat, lon = loc["latitude"], loc["longitude"]
 
-            fc_r = await client.get(
-                "https://api.open-meteo.com/v1/forecast",
-                params={
-                    "latitude": lat, "longitude": lon,
-                    "current": "temperature_2m,weather_code",
-                },
-            )
-            cur = (fc_r.json() or {}).get("current") or {}
-            code = int(cur.get("weather_code", 0))
-            kind, desc = WMO_CODES.get(code, ("clear", "—"))
-            return {
-                # Показываем каноничное имя из геокодинга, не то что передали
-                # на вход — иначе склонённая/сырая строка ("Уфе") утекает в
-                # UI даже когда сам геокодинг отработал.
-                "city": loc.get("name") or city,
-                "temp": round(float(cur.get("temperature_2m", 0))),
-                "code": code,
-                "kind": kind,
-                "description": desc,
-            }
+            data = await _fetch_by_coords(client, lat, lon,
+                                           # Показываем каноничное имя из геокодинга, не то что
+                                           # передали на вход — иначе склонённая/сырая строка
+                                           # ("Уфе") утекает в UI даже когда геокодинг отработал.
+                                           loc.get("name") or city)
+            return data
     except Exception as e:
         logger.warning("openmeteo fetch failed for %s: %s", city, e)
         return None
