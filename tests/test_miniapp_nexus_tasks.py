@@ -443,6 +443,86 @@ def test_task_cancel_sets_archived(client):
     upd.assert_awaited_once_with("t-5", "Archived")
 
 
+# ── POST /api/tasks/{id}/edit — deadline time (#195 follow-up) ──────────────
+# Postgres "Дедлайн" — TIMESTAMPTZ, не может быть "просто датой": любое
+# значение несёт конкретное время суток. Раньше редактирование через Mini App
+# слало голую "YYYY-MM-DD" без offset'а, PgTasksRepo._parse_iso молча читал
+# такую строку как ПОЛНОЧЬ UTC, а при показе назад она конвертировалась в
+# локальный tz юзера — для UTC+5 полночь UTC становится 05:00 локально.
+# Плюс сама форма редактирования вообще не предлагала время дедлайна.
+
+def test_task_edit_deadline_preserves_existing_time_when_not_given(client):
+    """Правишь только дату дедлайна (время не трогаешь) → старое время суток
+    должно сохраниться, а не съехать на дефолт/полночь-UTC."""
+    tz = 3
+    task = _pg_task("t-edit-1", "Test",
+                     deadline="2026-08-20T18:30:00+03:00",  # 18:30 локально
+                     user_notion_id=FAKE_NOTION_USER)
+    with patch("miniapp.backend.routes.writes._tasks_pg_repo.retrieve_page",
+               AsyncMock(return_value=task)), \
+         patch("miniapp.backend.routes.writes._tasks_pg_repo.set_props",
+               AsyncMock(return_value=None)) as upd, \
+         patch("miniapp.backend.routes.writes.today_user_tz",
+               AsyncMock(return_value=(_today_date(tz), tz))), \
+         patch("miniapp.backend.routes.writes.get_user_notion_id",
+               AsyncMock(return_value=FAKE_NOTION_USER)):
+        r = client.post("/api/tasks/t-edit-1/edit", json={"date": "2026-08-23"})
+    assert r.status_code == 200
+    props = upd.await_args.args[1]
+    assert props["Дедлайн"]["date"]["start"] == "2026-08-23T18:30:00+03:00"
+
+
+def test_task_edit_deadline_uses_explicit_deadline_time(client):
+    tz = 3
+    task = _pg_task("t-edit-2", "Test", deadline="2026-08-20T18:30:00+03:00",
+                     user_notion_id=FAKE_NOTION_USER)
+    with patch("miniapp.backend.routes.writes._tasks_pg_repo.retrieve_page",
+               AsyncMock(return_value=task)), \
+         patch("miniapp.backend.routes.writes._tasks_pg_repo.set_props",
+               AsyncMock(return_value=None)) as upd, \
+         patch("miniapp.backend.routes.writes.today_user_tz",
+               AsyncMock(return_value=(_today_date(tz), tz))), \
+         patch("miniapp.backend.routes.writes.get_user_notion_id",
+               AsyncMock(return_value=FAKE_NOTION_USER)):
+        r = client.post("/api/tasks/t-edit-2/edit",
+                         json={"date": "2026-08-23", "deadline_time": "11:00"})
+    assert r.status_code == 200
+    props = upd.await_args.args[1]
+    assert props["Дедлайн"]["date"]["start"] == "2026-08-23T11:00:00+03:00"
+
+
+def test_task_edit_deadline_defaults_0900_when_no_existing_time(client):
+    """Задача без дедлайна вообще, юзер ставит только дату → 09:00 локально
+    (существующий дефолт бота), НЕ полночь UTC."""
+    tz = 5  # Гай / Оренбургская обл.
+    task = _pg_task("t-edit-3", "Test", deadline="", user_notion_id=FAKE_NOTION_USER)
+    with patch("miniapp.backend.routes.writes._tasks_pg_repo.retrieve_page",
+               AsyncMock(return_value=task)), \
+         patch("miniapp.backend.routes.writes._tasks_pg_repo.set_props",
+               AsyncMock(return_value=None)) as upd, \
+         patch("miniapp.backend.routes.writes.today_user_tz",
+               AsyncMock(return_value=(_today_date(tz), tz))), \
+         patch("miniapp.backend.routes.writes.get_user_notion_id",
+               AsyncMock(return_value=FAKE_NOTION_USER)):
+        r = client.post("/api/tasks/t-edit-3/edit", json={"date": "2026-08-23"})
+    assert r.status_code == 200
+    props = upd.await_args.args[1]
+    assert props["Дедлайн"]["date"]["start"] == "2026-08-23T09:00:00+05:00"
+
+
+def test_task_edit_invalid_deadline_time_400s(client):
+    task = _pg_task("t-edit-4", "Test", user_notion_id=FAKE_NOTION_USER)
+    with patch("miniapp.backend.routes.writes._tasks_pg_repo.retrieve_page",
+               AsyncMock(return_value=task)), \
+         patch("miniapp.backend.routes.writes.today_user_tz",
+               AsyncMock(return_value=(_today_date(3), 3))), \
+         patch("miniapp.backend.routes.writes.get_user_notion_id",
+               AsyncMock(return_value=FAKE_NOTION_USER)):
+        r = client.post("/api/tasks/t-edit-4/edit",
+                         json={"date": "2026-08-23", "deadline_time": "not-a-time"})
+    assert r.status_code == 400
+
+
 # ── POST /api/tasks (create) ─────────────────────────────────────────────────
 
 def test_task_create_minimal(client):

@@ -6942,17 +6942,20 @@ function TaskEditForm({ s, task, busy, onSave }) {
   const [title, setTitle] = useState(task?.title || "");
   const [cat, setCat] = useState(task?.cat || "");
   const [prio, setPrio] = useState(task?.prio || "⚪");
-  // Дедлайн и напоминание редактируются раздельно, пред-заполнено из полей
-  // GET /api/tasks (miniapp/backend/routes/tasks.py::_serialize_pg_task):
-  // deadline/reminder — уже "YYYY-MM-DD" (to_local_date), reminder_time —
-  // "HH:MM" (extract_time). Раньше здесь читались deadlineDateRaw/
-  // reminderDateRaw/reminderTimeRaw — таких полей в объекте задачи никогда
-  // не было (мёртвый код с самого первого коммита файла), так что форма
-  // всегда открывалась с пустыми полями (или тем что подставил браузерный
-  // autofill даты/времени — отсюда путаница "почему 12:30, я ставила 11").
-  const [date, setDate] = useState(task?.deadline || "");
-  const [remDate, setRemDate] = useState(task?.reminder || "");
-  const [remTime, setRemTime] = useState(task?.reminder_time || "");
+  // Дедлайн и напоминание редактируются раздельно, пред-заполнено из ADAPTED
+  // объекта задачи (adaptTasks, src/adapters.js) — там `date`/`time` уже
+  // ЧЕЛОВЕКОЧИТАЕМЫЕ строки для карточки ("23 августа"), а сырые ISO/HH:MM
+  // под форму редактирования лежат отдельно: deadlineDateRaw, deadlineTime,
+  // reminderDateRaw, reminderTimeRaw. Раньше здесь читались task?.deadline/
+  // task?.reminder/task?.reminder_time — таких ключей на адаптированном
+  // объекте нет вообще (ни формат "23 августа", ни ISO под них не
+  // подходит) — state молча уходил в "" на каждое открытие формы, отсюда и
+  // "дедлайн 5 утра" (пусто → сервер сам подставлял время), и "напоминание
+  // вообще не показывается".
+  const [date, setDate] = useState(task?.deadlineDateRaw || "");
+  const [dlTime, setDlTime] = useState(task?.deadlineTime || "");
+  const [remDate, setRemDate] = useState(task?.reminderDateRaw || "");
+  const [remTime, setRemTime] = useState(task?.reminderTimeRaw || "");
   const [cats, setCats] = useState([]);
 
   useEffect(() => {
@@ -6984,7 +6987,14 @@ function TaskEditForm({ s, task, busy, onSave }) {
       <div style={{ fontSize: fs(11), color: s.tS }}>Приоритет</div>
       <PillSelect s={s} value={prio} onChange={setPrio} options={PRIOS} />
       <div style={{ fontSize: fs(11), color: s.tS }}>📅 Дедлайн</div>
-      <Input s={s} value={date} onChange={setDate} placeholder="Дата" type="date" />
+      <div style={{ display: "flex", gap: 8 }}>
+        <div style={{ flex: 1 }}>
+          <Input s={s} value={date} onChange={setDate} placeholder="Дата" type="date" />
+        </div>
+        <div style={{ flex: 1 }}>
+          <Input s={s} value={dlTime} onChange={setDlTime} placeholder="чч:мм" type="time" />
+        </div>
+      </div>
       <div style={{ fontSize: fs(11), color: s.tS }}>🔔 Напоминание</div>
       <div style={{ display: "flex", gap: 8 }}>
         <div style={{ flex: 1 }}>
@@ -7010,6 +7020,7 @@ function TaskEditForm({ s, task, busy, onSave }) {
             cat: cat || null,
             prio,
             date: date || null,
+            deadline_time: date ? (dlTime || null) : null,
             reminder_date: wantsReminder ? (remDate || null) : null,
             time: rTime,
           });

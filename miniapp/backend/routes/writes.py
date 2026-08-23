@@ -56,6 +56,7 @@ from miniapp.backend.auth import current_user_id
 from core.repos.idempotency_repo import idempotent
 from miniapp.backend._helpers import (
     BOT_NEXUS,
+    extract_time,
     today_user_tz,
 )
 
@@ -288,6 +289,7 @@ class TaskEditBody(BaseModel):
     cat: Optional[str] = None
     prio: Optional[str] = None
     date: Optional[str] = None           # YYYY-MM-DD — дедлайн
+    deadline_time: Optional[str] = None  # HH:MM — время дедлайна (см. task_edit)
     time: Optional[str] = None           # HH:MM — время напоминания
     reminder_date: Optional[str] = None  # YYYY-MM-DD — дата напоминания (независимо от дедлайна)
 
@@ -314,7 +316,30 @@ async def task_edit(
             new_date = datetime.strptime(body.date, "%Y-%m-%d").date()
         except ValueError:
             raise HTTPException(status_code=400, detail="invalid date, expected YYYY-MM-DD")
-        props["Дедлайн"] = _date(new_date.isoformat())
+        # Дедлайн в PG — TIMESTAMPTZ, "просто дата" не существует: любое
+        # значение хранится с конкретным временем суток. Раньше сюда уходила
+        # голая "YYYY-MM-DD" без offset'а — PgTasksRepo._parse_iso молча
+        # трактовал полночь как UTC (тот же класс бага, что и в task_create
+        # выше и в core/reply_update.py:_with_tz_suffix), а при чтении назад
+        # эта UTC-полночь конвертировалась в локальный tz юзера — для
+        # tz_offset=+5 полночь UTC показывалась как 05:00, и форма
+        # редактирования эту "5 утра" не показывала и не давала поправить
+        # (deadline_time вообще не было в контракте). Теперь: явное время
+        # (deadline_time) → старое время текущего дедлайна (сохраняем,
+        # если юзер поменял только дату) → 09:00 по умолчанию — и всегда
+        # с явным offset'ом, чтобы _parse_iso не гадал.
+        deadline_hhmm = body.deadline_time
+        if not deadline_hhmm and task.deadline:
+            deadline_hhmm = extract_time(task.deadline, tz_offset)
+        deadline_hhmm = deadline_hhmm or "09:00"
+        try:
+            dl_h, dl_m = deadline_hhmm.split(":")
+            dl_tz = timezone(timedelta(hours=tz_offset))
+            dl_dt = datetime(new_date.year, new_date.month, new_date.day,
+                              int(dl_h), int(dl_m), tzinfo=dl_tz)
+        except (ValueError, TypeError):
+            raise HTTPException(status_code=400, detail="invalid deadline_time, expected HH:MM")
+        props["Дедлайн"] = _date(dl_dt.isoformat())
 
     # Напоминание редактируется независимо от дедлайна: дата берётся из
     # reminder_date, при его отсутствии — из дедлайна (обратная совместимость
