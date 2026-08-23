@@ -122,13 +122,26 @@ def _upsert_sync(
     source: str,
     user_notion_id: str,
 ) -> Tuple[str, bool]:
-    """Find existing by key+category, update; else create. Returns (id, was_updated)."""
+    """Find existing by key (+ owner), update; else create. Returns (id, was_updated).
+
+    Раньше матч шёл по key+category — если у вызывающей стороны менялось
+    каноническое имя категории того же ключа (напр. core/location.py:
+    tz_{tg_id} писался как "Настройки", потом переехал на "🏠 Быт", #184-класс
+    бага), апдейт переставал находить старую строку, category в WHERE не
+    совпадал → тихо создавалась ВТОРАЯ строка с тем же key_name, старая
+    зависала в БД навсегда (is_current=true, показывалась в Mini App).
+    key_name уже несёт достаточно семантики сам по себе (лимит_еда,
+    tz_67686090, цель_вес) — категория одного и того же ключа не должна
+    определять, это ли та же запись. Также добавлен user_notion_id в матч:
+    без него совпадение key_name у двух РАЗНЫХ юзеров (напр. одинаковый
+    сгенерированный ключ бюджетного лимита) перезаписало бы чужую запись.
+    """
     if key and category:
         with get_engine().connect() as conn:
             row = conn.execute(
                 select(memories.c.id)
                 .where(memories.c.key_name == key)
-                .where(memories.c.category == category)
+                .where(memories.c.user_notion_id == (user_notion_id or ""))
                 .where(memories.c.is_archived == False)  # noqa: E712
                 .order_by(memories.c.created_at.desc())
                 .limit(1)

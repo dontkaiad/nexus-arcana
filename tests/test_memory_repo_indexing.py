@@ -166,6 +166,79 @@ async def test_upsert_update_path_survives_missing_embedding_column():
     assert row[0] == "лимит: кафе 5000"  # апдейт факта прошёл, несмотря на отсутствие колонки
 
 
+# ── upsert matching: key (+owner), NOT key+category (#193 follow-up) ────────
+
+@pytest.mark.asyncio
+async def test_upsert_finds_row_by_key_even_after_category_renamed():
+    """Регрессия: core/location.py раньше писал tz_{tg_id} под category=
+    "Настройки", потом переехал на "🏠 Быт" — апдейт с новой категорией
+    матчился по key+category, не находил старую строку (category не
+    совпадал), создавал ВТОРУЮ и оставлял первую висеть в БД навсегда.
+    Матч теперь только по key_name (+ owner) — должен найти и обновить
+    ту же строку, поправив category заодно."""
+    import core.repos.pg_memory_repo as pgmod
+    from core.repos.pg_memory_repo import PgMemoryRepo
+
+    eng = _make_engine()
+    with eng.begin() as conn:
+        conn.execute(sa.text(
+            "INSERT INTO memories (key_name, category, fact_text, user_notion_id, is_current) "
+            "VALUES ('tz_67686090', 'Настройки', '5', 'u1', 1)"
+        ))
+
+    with patch.object(pgmod, "get_engine", return_value=eng), \
+         patch("core.memory_rag.index_memory") as idx:
+        idx.return_value = True
+        repo = PgMemoryRepo()
+        mem_id, was_updated = await repo.upsert(
+            "5", key="tz_67686090", category="🏠 Быт", user_notion_id="u1",
+        )
+        await _drain_index_tasks()
+
+    assert was_updated is True
+    with eng.connect() as conn:
+        rows = conn.execute(sa.text(
+            "SELECT category FROM memories WHERE key_name='tz_67686090'"
+        )).fetchall()
+    # Одна строка, не две — старая обновлена на месте, не осиротела.
+    assert len(rows) == 1
+    assert rows[0][0] == "🏠 Быт"
+
+
+@pytest.mark.asyncio
+async def test_upsert_does_not_cross_user_boundary():
+    """Без user_notion_id в матче совпадение key_name у ДВУХ разных юзеров
+    (напр. одинаковый сгенерированный ключ лимита) перезаписало бы чужую
+    запись. user_notion_id теперь часть матча — чужая строка не трогается,
+    для нового юзера создаётся своя."""
+    import core.repos.pg_memory_repo as pgmod
+    from core.repos.pg_memory_repo import PgMemoryRepo
+
+    eng = _make_engine()
+    with eng.begin() as conn:
+        conn.execute(sa.text(
+            "INSERT INTO memories (key_name, category, fact_text, user_notion_id, is_current) "
+            "VALUES ('лимит_еда', '💰 Лимит', 'лимит: еда 3000', 'user-A', 1)"
+        ))
+
+    with patch.object(pgmod, "get_engine", return_value=eng), \
+         patch("core.memory_rag.index_memory") as idx:
+        idx.return_value = True
+        repo = PgMemoryRepo()
+        mem_id, was_updated = await repo.upsert(
+            "лимит: еда 4000", key="лимит_еда", category="💰 Лимит", user_notion_id="user-B",
+        )
+        await _drain_index_tasks()
+
+    assert was_updated is False  # новая строка для user-B, не апдейт чужой
+    with eng.connect() as conn:
+        rows = {r[0]: r[1] for r in conn.execute(sa.text(
+            "SELECT user_notion_id, fact_text FROM memories WHERE key_name='лимит_еда'"
+        )).fetchall()}
+    assert rows["user-A"] == "лимит: еда 3000"   # не тронута
+    assert rows["user-B"] == "лимит: еда 4000"   # новая своя
+
+
 # ── update_fields (#188: reply-исправление по id) ────────────────────────────
 
 @pytest.mark.asyncio
