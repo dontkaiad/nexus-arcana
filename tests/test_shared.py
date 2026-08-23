@@ -55,7 +55,8 @@ async def test_city_whitelist_resolves_tz_without_claude(text, expected_tz):
     ask = AsyncMock(side_effect=AssertionError("Claude не должен звониться для whitelist-города"))
 
     with patch.object(tasks_mod, "ask_claude", ask), \
-         patch("core.repos.pg_memory_repo.PgMemoryRepo.upsert", AsyncMock()):
+         patch("core.repos.pg_memory_repo.PgMemoryRepo.upsert", AsyncMock()), \
+         patch("core.location._invalidate_weather_cache"):
         await tasks_mod._update_user_tz(msg, text)
 
     assert tasks_mod._user_tz_offset[999] == expected_tz

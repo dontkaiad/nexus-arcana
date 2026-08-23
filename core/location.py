@@ -98,6 +98,18 @@ CITY_TZ: Dict[str, int] = {
 
 _UTC_RE = re.compile(r"utc\s*([+-]?\d+)", re.IGNORECASE)
 
+# Города с несколькими явными словоформами-ключами в CITY_TZ (см. коммент у
+# "гай"/"гае" выше) отдают сырой матч КАК ЕСТЬ — substring-совпадение это
+# часто склонённая форма, не каноничное имя. matched_city идёт прямиком в
+# fact памяти (`set_user_location`) и дальше может утечь в geocoding погоды,
+# так что для таких городов нужна явная канонизация. Заполняется по мере
+# обнаружения (сейчас — только Гай, #194 follow-up); у большинства
+# однословных городов в CITY_TZ такой проблемы нет, substring там и есть
+# канон.
+_CANONICAL_CITY = {
+    "гай": "Гай", "гае": "Гай",
+}
+
 
 def resolve_offset(text: str) -> Tuple[Optional[int], Optional[str]]:
     """text → (offset, matched_city). Справочник `CITY_TZ` (substring, первый
@@ -108,7 +120,7 @@ def resolve_offset(text: str) -> Tuple[Optional[int], Optional[str]]:
     low = text.lower()
     for city, tz in CITY_TZ.items():
         if city in low:
-            return tz, city
+            return tz, _CANONICAL_CITY.get(city, city)
     m = _UTC_RE.search(low)
     if m:
         try:
@@ -185,4 +197,31 @@ async def set_user_location(
             fact=city, key=f"city_{tg_id}", category="🛒 Предпочтения",
             scope="nexus", source="auto", user_notion_id=user_notion_id,
         )
+    if offset is not None or city:
+        _invalidate_weather_cache(tg_id)
     return offset
+
+
+def _invalidate_weather_cache(tg_id: int) -> None:
+    """miniapp/backend/routes/weather.py:set_weather_city уже чистит свой
+    10-минутный кеш САМ, но это единственный из двух вызывающих —
+    `_update_user_tz` (бот, "я в Гае" в чате) идёт через этот же
+    `set_user_location`, но кеш не трогал: смена локации из бота обновляла
+    tz/city в памяти корректно, а Mini App продолжала показывать погоду
+    старого города до истечения TTL. Единый writer — единая точка инвалидации,
+    вместо дублирования DELETE у каждого вызывающего отдельно. Локальный
+    import и graceful no-op: core/ не должен падать, если miniapp backend
+    ещё не поднят в этом процессе (напр. скрипты/тесты)."""
+    try:
+        import sqlite3
+        from miniapp.backend import cache as _cache
+        from miniapp.backend.routes.weather import _init_weather_cache
+        _init_weather_cache()
+        con = sqlite3.connect(_cache._DB_PATH)
+        try:
+            con.execute("DELETE FROM weather_cache WHERE tg_id = ?", (tg_id,))
+            con.commit()
+        finally:
+            con.close()
+    except Exception as e:
+        logger.warning("_invalidate_weather_cache(%s) failed: %s", tg_id, e)

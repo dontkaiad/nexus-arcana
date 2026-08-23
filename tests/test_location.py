@@ -31,8 +31,12 @@ from core.repos.pg_memory_repo import Memory
     ("Екатеринбург", 5, "екатеринбург"),
     ("UTC+5", 5, None),
     ("utc-3", -3, None),
-    ("я в гае", 5, "гае"),   # Оренбургская область (#184)
-    ("Гай", 5, "гай"),
+    # Оренбургская область (#184): "гай"/"гае" — оба листингуются явно
+    # (substring-матч не покрывает падеж), matched_city канонизируется на
+    # "Гай" (#194 follow-up) — раньше отдавался сырой матч ("гае"/"гай")
+    # и утекал как есть в fact памяти / geocoding погоды.
+    ("я в гае", 5, "Гай"),
+    ("Гай", 5, "Гай"),
     # substring-регрессия (#184): «помогаю» не должно ловиться как «гаю»
     ("я в казани, помогаю маме", 3, "казани"),
 ])
@@ -51,7 +55,8 @@ def test_resolve_offset_unknown(text):
 async def test_set_user_location_writes_both_keys():
     loc.invalidate_tz_cache(77)
     upsert = AsyncMock(return_value=("1", True))
-    with patch.object(loc.PgMemoryRepo, "upsert", upsert):
+    with patch.object(loc.PgMemoryRepo, "upsert", upsert), \
+         patch.object(loc, "_invalidate_weather_cache"):
         ret = await loc.set_user_location(77, offset=3, city="спб", user_notion_id="u-1")
 
     assert ret == 3
@@ -71,13 +76,73 @@ async def test_set_user_location_writes_both_keys():
 async def test_set_user_location_offset_none_writes_only_city():
     loc.invalidate_tz_cache(78)
     upsert = AsyncMock(return_value=("1", True))
-    with patch.object(loc.PgMemoryRepo, "upsert", upsert):
+    with patch.object(loc.PgMemoryRepo, "upsert", upsert), \
+         patch.object(loc, "_invalidate_weather_cache"):
         ret = await loc.set_user_location(78, offset=None, city="нарния", user_notion_id="u-2")
 
     assert ret is None
     written = {c.kwargs["key"]: c.kwargs["fact"] for c in upsert.call_args_list}
     assert written == {"city_78": "нарния"}      # tz_ НЕ трогали
     assert 78 not in loc._tz_offsets             # tz-кеш не тронут
+
+
+# ── set_user_location инвалидирует кеш погоды у ВСЕХ вызывающих ──────────────
+
+@pytest.mark.asyncio
+async def test_set_user_location_invalidates_weather_cache():
+    """Регрессия: смена локации из бота ("я в Гае" в чате → _update_user_tz →
+    set_user_location) корректно обновляла tz_/city_ в памяти, но кеш погоды
+    (10 мин TTL) не трогала — Mini App продолжала показывать погоду старого
+    города до истечения TTL, хотя часовой пояс уже поменялся. Раньше кеш
+    чистил только miniapp/backend/routes/weather.py:set_weather_city (путь
+    из Mini App) — единый writer теперь чистит кеш САМ, для обоих вызывающих."""
+    loc.invalidate_tz_cache(555)
+    upsert = AsyncMock(return_value=("1", True))
+    with patch.object(loc.PgMemoryRepo, "upsert", upsert), \
+         patch.object(loc, "_invalidate_weather_cache") as invalidate:
+        await loc.set_user_location(555, offset=5, city="Гай", user_notion_id="u-x")
+
+    invalidate.assert_called_once_with(555)
+
+
+@pytest.mark.asyncio
+async def test_set_user_location_offset_none_still_invalidates_cache():
+    """city_ без tz_ (город вне справочника) всё равно должен сбросить кеш —
+    погода резолвится по city_, а не по offset."""
+    loc.invalidate_tz_cache(556)
+    upsert = AsyncMock(return_value=("1", True))
+    with patch.object(loc.PgMemoryRepo, "upsert", upsert), \
+         patch.object(loc, "_invalidate_weather_cache") as invalidate:
+        await loc.set_user_location(556, offset=None, city="Нарния", user_notion_id="u-y")
+
+    invalidate.assert_called_once_with(556)
+
+
+@pytest.mark.asyncio
+async def test_invalidate_weather_cache_deletes_row(tmp_path, monkeypatch):
+    """Прямая проверка _invalidate_weather_cache: реально удаляет строку
+    tg_id из weather_cache (SQLite, изолированный tmp-файл — не прод)."""
+    import sqlite3
+    from miniapp.backend import cache as _cache
+    from miniapp.backend.routes import weather as weather_mod
+
+    db_file = tmp_path / "adhd_cache.db"
+    monkeypatch.setattr(_cache, "_DB_PATH", str(db_file))
+    weather_mod._init_weather_cache()
+    con = sqlite3.connect(str(db_file))
+    con.execute(
+        "INSERT INTO weather_cache (tg_id, city, temp, code, kind, description, updated_at) "
+        "VALUES (777, 'Уфа', 20, 0, 'clear', 'Ясно', 9999999999)"
+    )
+    con.commit()
+    con.close()
+
+    loc._invalidate_weather_cache(777)
+
+    con = sqlite3.connect(str(db_file))
+    row = con.execute("SELECT * FROM weather_cache WHERE tg_id = 777").fetchone()
+    con.close()
+    assert row is None
 
 
 # ── get_user_tz: чтение + TTL + инвалидация ───────────────────────────────────
@@ -123,6 +188,7 @@ async def test_set_weather_city_updates_tz_and_city():
     loc.invalidate_tz_cache(42)
     upsert = AsyncMock(return_value=("1", True))
     with patch.object(loc.PgMemoryRepo, "upsert", upsert), \
+         patch.object(loc, "_invalidate_weather_cache"), \
          patch.object(weather, "get_user_notion_id", AsyncMock(return_value="notion-x")), \
          patch.object(weather, "sqlite3", MagicMock()):
         res = await weather.set_weather_city(tg_id=42, payload={"city": "Питер"})
@@ -139,6 +205,7 @@ async def test_set_weather_city_unknown_city_keeps_tz():
     loc.invalidate_tz_cache(43)
     upsert = AsyncMock(return_value=("1", True))
     with patch.object(loc.PgMemoryRepo, "upsert", upsert), \
+         patch.object(loc, "_invalidate_weather_cache"), \
          patch.object(weather, "get_user_notion_id", AsyncMock(return_value="notion-y")), \
          patch.object(weather, "sqlite3", MagicMock()):
         res = await weather.set_weather_city(tg_id=43, payload={"city": "Нарния"})
@@ -162,6 +229,7 @@ async def test_bot_text_path_writes_both():
     upsert = AsyncMock(return_value=("1", True))
     with patch.object(loc.PgMemoryRepo, "upsert", upsert), \
          patch.object(loc.PgMemoryRepo, "find_by_exact_key", AsyncMock(return_value=[])), \
+         patch.object(loc, "_invalidate_weather_cache"), \
          patch.object(tasks_mod, "ask_claude",
                       AsyncMock(side_effect=AssertionError("whitelist-город — Claude не нужен"))):
         await tasks_mod._update_user_tz(msg, "я в спб", user_notion_id="u-9")

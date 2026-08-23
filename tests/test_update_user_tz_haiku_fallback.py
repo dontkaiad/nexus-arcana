@@ -38,6 +38,7 @@ async def test_niche_city_syncs_both_tz_and_city_via_haiku():
 
     with patch.object(loc.PgMemoryRepo, "upsert", upsert), \
          patch.object(loc.PgMemoryRepo, "find_by_exact_key", AsyncMock(return_value=[])), \
+         patch.object(loc, "_invalidate_weather_cache"), \
          patch.object(tasks_mod, "ask_claude", haiku):
         await tasks_mod._update_user_tz(msg, "я в улан-баторе", user_notion_id="u-9")
 
@@ -57,6 +58,7 @@ async def test_unclear_location_asks_for_clarification_and_writes_nothing():
 
     with patch.object(loc.PgMemoryRepo, "upsert", upsert), \
          patch.object(loc.PgMemoryRepo, "find_by_exact_key", AsyncMock(return_value=[])), \
+         patch.object(loc, "_invalidate_weather_cache"), \
          patch.object(tasks_mod, "ask_claude", haiku):
         await tasks_mod._update_user_tz(msg, "я где-то там", user_notion_id="u-9")
 
@@ -79,6 +81,7 @@ async def test_haiku_infra_failure_degrades_gracefully_not_as_unclear():
 
     with patch.object(loc.PgMemoryRepo, "upsert", upsert), \
          patch.object(loc.PgMemoryRepo, "find_by_exact_key", AsyncMock(return_value=[])), \
+         patch.object(loc, "_invalidate_weather_cache"), \
          patch.object(tasks_mod, "ask_claude", haiku):
         await tasks_mod._update_user_tz(msg, "я в нарнии", user_notion_id="u-9")
 
