@@ -7,9 +7,10 @@
 
 Callback data: ``task_subtask_{rel_type}_{page_id}``
 - rel_type ∈ {"task", "work"} — какое relation писать
-- page_id — полный Notion page_id с дефисами (xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx).
-  Старый формат (усечённый id_prefix без дефисов) поддерживается для compat,
-  но если не удаётся разрешить — выдаём ошибку и NOT создаём сироту (fixes #109).
+- page_id — PG BigInteger id родительской задачи/работы (например "59"),
+  который кнопка получает напрямую из ``pg_tasks_repo.create`` /
+  ``pg_works_repo`` при создании записи. Если формат не распознан —
+  выдаём ошибку и NOT создаём сироту (fixes #109).
 """
 from __future__ import annotations
 
@@ -21,11 +22,8 @@ from aiogram.types import CallbackQuery
 
 logger = logging.getLogger("core.subtasks_handler")
 
-# Полный Notion UUID: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
-_FULL_UUID_RE = re.compile(
-    r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
-    re.IGNORECASE,
-)
+# PG BigInteger id ✅ Задачи / 🔮 Работы (str(pid) из pg_*_repo.create)
+_PG_ID_RE = re.compile(r'^\d+$')
 
 
 async def task_subtask_cb(call: CallbackQuery) -> None:
@@ -43,12 +41,13 @@ async def task_subtask_cb(call: CallbackQuery) -> None:
                 task_name = line.replace("📌", "").strip()
                 break
 
-    # Resolve full page_id for the relation.
-    # New buttons store the full UUID directly. Legacy truncated callbacks used
-    # to be resolved by scanning Notion; Notion is gone, so a non-UUID id no
-    # longer resolves — NEVER fall through to a partial id (orphan subtasks).
+    # Resolve the parent id for the relation.
+    # Buttons store the PG BigInteger id directly. Legacy truncated Notion
+    # callbacks used to be resolved by scanning Notion; Notion is gone, so a
+    # non-numeric id no longer resolves — NEVER fall through to a partial id
+    # (orphan subtasks).
     task_id = None
-    if _FULL_UUID_RE.match(raw_id):
+    if _PG_ID_RE.match(raw_id):
         task_id = raw_id
     else:
         logger.error(

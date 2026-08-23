@@ -135,14 +135,14 @@ def test_arcana_works_returns_open_only(client):
 
 @pytest.mark.asyncio
 async def test_subtasks_handler_full_uuid_no_scan():
-    """Кнопка с полным UUID → pending ставится с точным task_id, db_query не вызывается."""
+    """Кнопка с PG id → pending ставится с точным task_id, db_query не вызывается."""
     from core.subtasks_handler import task_subtask_cb
 
-    FULL_UUID = "deadbeef-1234-5678-9abc-def012345678"
+    PG_ID = "59"
 
     call = MagicMock()
     call.from_user.id = 7
-    call.data = f"task_subtask_work_{FULL_UUID}"
+    call.data = f"task_subtask_work_{PG_ID}"
     call.message = MagicMock()
     call.message.text = "⚡ Работа создана!\n📌 Подготовить колоду\nfoo"
     call.message.edit_reply_markup = AsyncMock()
@@ -162,8 +162,8 @@ async def test_subtasks_handler_full_uuid_no_scan():
     assert captured.get("uid") == 7
     assert captured["data"]["action"] == "subtask_items"
     assert captured["data"]["rel_type"] == "work"
-    assert captured["data"]["task_id"] == FULL_UUID, (
-        "task_id должен быть полным UUID, а не усечённым"
+    assert captured["data"]["task_id"] == PG_ID, (
+        "task_id должен быть полным PG id, а не усечённым"
     )
     assert captured["data"]["task_name"] == "Подготовить колоду"
     assert captured["data"]["bot"] == "arcana"
@@ -175,16 +175,16 @@ async def test_subtasks_handler_full_uuid_no_scan():
 
 @pytest.mark.asyncio
 async def test_subtasks_handler_truncated_id_not_found_fails_gracefully():
-    """Регрессия #109: усечённый id_prefix не найден в db → ошибка юзеру, сирота НЕ создаётся.
+    """Регрессия #109: нечисловой id не найден в db → ошибка юзеру, сирота НЕ создаётся.
 
-    Старый код: task_id = id_prefix (усечённый) → pending_set вызывался с невалидным UUID.
+    Старый код: task_id = id_prefix (усечённый) → pending_set вызывался с невалидным id.
     Новый код: task_id = None → сообщение об ошибке → return (pending_set НЕ вызывается).
     """
     from core.subtasks_handler import task_subtask_cb
 
     call = MagicMock()
     call.from_user.id = 7
-    call.data = "task_subtask_work_abc123def456"  # усечённый, не full UUID
+    call.data = "task_subtask_work_abc123def456"  # не числовой PG id
     call.message = MagicMock()
     call.message.text = "⚡ Работа создана!\n📌 Колода\nfoo"
     call.message.edit_reply_markup = AsyncMock()
@@ -277,11 +277,11 @@ async def test_subtasks_handler_stores_real_user_notion_id():
     """
     from core.subtasks_handler import task_subtask_cb
 
-    FULL_UUID = "cafebabe-1234-5678-9abc-def012345678"
+    PG_ID = "77"
 
     call = MagicMock()
     call.from_user.id = 42
-    call.data = f"task_subtask_task_{FULL_UUID}"
+    call.data = f"task_subtask_task_{PG_ID}"
     call.message = MagicMock()
     call.message.text = "⚡ Задача создана!\n📌 Отладить код\nfoo"
     call.message.edit_reply_markup = AsyncMock()
