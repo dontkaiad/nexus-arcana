@@ -58,6 +58,18 @@ export async function apiStream(path, onDelta) {
   return finalEvent
 }
 
+export async function apiDelete(path) {
+  const r = await fetch(`${BASE}${path}`, {
+    method: 'DELETE',
+    headers: { 'X-Telegram-Init-Data': getInitData() },
+  })
+  if (!r.ok) {
+    const text = await r.text().catch(() => '')
+    throw new Error(`${r.status} ${r.statusText}${text ? ` — ${text.slice(0, 120)}` : ''}`)
+  }
+  return r.json()
+}
+
 export async function apiPost(path, body, opts = {}) {
   const headers = {
     'Content-Type': 'application/json',

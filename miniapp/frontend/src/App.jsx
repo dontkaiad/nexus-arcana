@@ -13,7 +13,7 @@ import {
   adaptGrimoire, adaptGrimoireDetail,
   formatMonth, formatDate, formatShortDate,
 } from "./adapters";
-import { apiGet, apiPost, apiStream } from "./api";
+import { apiGet, apiPost, apiDelete, apiStream } from "./api";
 import { SelfListCard, SelfDetailHeader } from "./components/self/SelfClientCard.jsx";
 import {
   Sun, Moon as LucideMoon, Check, Coins, List as ListIcon, Brain, Calendar,
@@ -2507,6 +2507,7 @@ function SearchInput({ s, value, onChange, placeholder }) {
 function NxMemory({ s, openAdhd }) {
   const [cat, setCat] = useState("all");
   const [q, setQ] = useState("");
+  const [deletingId, setDeletingId] = useState(null);
   const params = [];
   if (cat !== "all") params.push(`cat=${encodeURIComponent(cat)}`);
   if (q) params.push(`q=${encodeURIComponent(q)}`);
@@ -2514,6 +2515,19 @@ function NxMemory({ s, openAdhd }) {
   const { data, loading, error, refetch } = useApi(path, [cat, q]);
   const view = loading || error ? { items: [], categories: [] } : adaptMemory(data);
   const cats = ["all", ...view.categories];
+
+  const removeMemory = async (m) => {
+    if (!confirm(`Удалить из памяти навсегда?\n\n«${m.text}»`)) return;
+    setDeletingId(m.id);
+    try {
+      await apiDelete(`/api/memory/${m.id}`);
+      refetch();
+    } catch (e) {
+      alert("Не получилось удалить: " + e.message);
+    } finally {
+      setDeletingId(null);
+    }
+  };
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
@@ -2567,6 +2581,7 @@ function NxMemory({ s, openAdhd }) {
         // #49(a): иконка категории справа (как в задачах/списках), без текстовой
         // подписи внизу карточки.
         const catEmojiOnly = m.cat ? String(m.cat).split(" ")[0] : "";
+        const busy = deletingId === m.id;
         return (
           <Glass key={m.id} s={s} style={{ padding: "10px 14px", marginBottom: 4 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
@@ -2583,6 +2598,12 @@ function NxMemory({ s, openAdhd }) {
                   {catEmojiOnly}
                 </span>
               )}
+              <Trash2
+                size={fs(15)}
+                color={s.red}
+                style={{ flexShrink: 0, cursor: busy ? "default" : "pointer", opacity: busy ? 0.4 : 0.6 }}
+                onClick={() => !busy && removeMemory(m)}
+              />
             </div>
           </Glass>
         );

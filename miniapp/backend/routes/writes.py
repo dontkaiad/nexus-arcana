@@ -1219,3 +1219,24 @@ async def memory_create(
     if not pg_id:
         raise HTTPException(status_code=500, detail="failed to create memory")
     return {"ok": True, "id": pg_id}
+
+
+@router.delete("/memory/{memory_id}")
+async def memory_delete(
+    memory_id: str,
+    tg_id: int = Depends(current_user_id),
+) -> dict[str, Any]:
+    """Удаление записи из 🧠 Память — жёсткий DELETE (не archive): строка
+    физически уходит из Postgres вместе с колонкой embedding, что автоматом
+    убирает факт и из RAG-поиска (core/memory_rag.py читает embedding из
+    той же строки, отдельного vector store нет)."""
+    user_notion_id = (await get_user_notion_id(tg_id)) or ""
+    mem = await _memory_repo.get_by_id(memory_id)
+    if not mem:
+        raise HTTPException(status_code=404, detail="not found")
+    if user_notion_id and mem.user_notion_id and mem.user_notion_id != user_notion_id:
+        raise HTTPException(status_code=404, detail="not found")
+    ok = await _memory_repo.delete(memory_id)
+    if not ok:
+        raise HTTPException(status_code=500, detail="failed to delete memory")
+    return {"ok": True}

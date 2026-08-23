@@ -652,3 +652,56 @@ def test_memory_create(client):
     assert r.json() == {"ok": True, "id": "mem-id"}
     assert mem_add.call_args.kwargs["fact"] == "Chapman = сигареты"
     assert mem_add.call_args.kwargs["category"] == "🛒 Предпочтения"
+
+
+# ── DELETE /api/memory/{id} ──────────────────────────────────────────────────
+
+def test_memory_delete_hard_deletes_owned_record(client):
+    """Удаление зовёт репо .delete (жёсткий DELETE), не .archive —
+    строка должна физически уйти из Postgres вместе с embedding/RAG."""
+    mem = Memory(id="mem-1", fact="Chapman = сигареты", user_notion_id=FAKE_NOTION_USER)
+    with patch("miniapp.backend.routes.writes._memory_repo.get_by_id",
+               AsyncMock(return_value=mem)), \
+         patch("miniapp.backend.routes.writes._memory_repo.delete",
+               AsyncMock(return_value=True)) as mem_delete, \
+         patch("miniapp.backend.routes.writes.get_user_notion_id",
+               AsyncMock(return_value=FAKE_NOTION_USER)):
+        r = client.delete("/api/memory/mem-1")
+    assert r.status_code == 200
+    assert r.json() == {"ok": True}
+    mem_delete.assert_awaited_once_with("mem-1")
+
+
+def test_memory_delete_missing_record_404s(client):
+    with patch("miniapp.backend.routes.writes._memory_repo.get_by_id",
+               AsyncMock(return_value=None)), \
+         patch("miniapp.backend.routes.writes.get_user_notion_id",
+               AsyncMock(return_value=FAKE_NOTION_USER)):
+        r = client.delete("/api/memory/does-not-exist")
+    assert r.status_code == 404
+
+
+def test_memory_delete_other_users_record_404s_not_403():
+    """Владение проверяется как у задач (_load_owned_task) — 404, не 403,
+    чтобы не подтверждать существование чужой записи."""
+    app.dependency_overrides[current_user_id] = lambda: FAKE_TG_ID
+    other_users_mem = Memory(id="mem-2", fact="секрет другого юзера",
+                              user_notion_id="someone-elses-notion-id")
+    try:
+        with patch("miniapp.backend.routes.writes._memory_repo.get_by_id",
+                   AsyncMock(return_value=other_users_mem)), \
+             patch("miniapp.backend.routes.writes._memory_repo.delete",
+                   AsyncMock(return_value=True)) as mem_delete, \
+             patch("miniapp.backend.routes.writes.get_user_notion_id",
+                   AsyncMock(return_value=FAKE_NOTION_USER)):
+            r = TestClient(app).delete("/api/memory/mem-2")
+        assert r.status_code == 404
+        mem_delete.assert_not_awaited()
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_memory_delete_401_without_init_data():
+    app.dependency_overrides.clear()
+    c = TestClient(app)
+    assert c.delete("/api/memory/mem-1").status_code == 401

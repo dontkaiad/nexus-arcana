@@ -257,6 +257,36 @@ def _archive_sync(memory_id: str) -> bool:
         return False
 
 
+def _get_by_id_sync(memory_id: str) -> Optional[Memory]:
+    try:
+        mid = int(memory_id)
+    except (TypeError, ValueError):
+        return None
+    with get_engine().connect() as conn:
+        row = conn.execute(
+            select(memories).where(memories.c.id == mid)
+        ).fetchone()
+    return _row_to_memory(row) if row else None
+
+
+def _delete_sync(memory_id: str) -> bool:
+    """Hard DELETE — не archive. Строка (и её embedding-колонка, #191) уходит
+    из Postgres целиком, включая RAG: search_memory_semantic читает embedding
+    прямо из этой же строки (core/memory_rag.py), отдельного vector store
+    нет, так что удаление строки = удаление из RAG за один SQL DELETE."""
+    try:
+        mid = int(memory_id)
+    except (TypeError, ValueError):
+        return False
+    try:
+        with get_engine().begin() as conn:
+            result = conn.execute(memories.delete().where(memories.c.id == mid))
+        return result.rowcount > 0
+    except Exception as e:
+        logger.error("delete %s failed: %s", memory_id, e)
+        return False
+
+
 def _base_active_q():
     return (
         select(memories)
@@ -468,6 +498,12 @@ class PgMemoryRepo:
 
     async def archive(self, memory_id: str) -> bool:
         return await asyncio.to_thread(_archive_sync, memory_id)
+
+    async def get_by_id(self, memory_id: str) -> Optional[Memory]:
+        return await asyncio.to_thread(_get_by_id_sync, memory_id)
+
+    async def delete(self, memory_id: str) -> bool:
+        return await asyncio.to_thread(_delete_sync, memory_id)
 
     async def search(
         self,
