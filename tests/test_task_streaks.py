@@ -77,6 +77,18 @@ def test_reset_broken_streaks_only_for_daily(fresh_db):
     assert rows["t-weekly"]["current"] == 1
 
 
+def test_reset_broken_streaks_recognizes_ezhednevno(fresh_db):
+    """repeat_kind реально приходит как "Ежедневно" (см. nexus/handlers/tasks.py),
+    не "каждый день". Старый _is_daily проверял substring "ден", которого в
+    "ежедневно" нет — reset никогда не срабатывал для настоящих ежедневных задач."""
+    ts = fresh_db
+    ts.update_task_streak(42, "t", "Зарядка", "Ежедневно", "2026-05-01")
+    n = ts.reset_broken_streaks(42, "2026-05-03")
+    assert n == 1
+    rows = {r["task_id"]: r for r in ts.get_user_task_streaks(42)}
+    assert rows["t"]["current"] == 0
+
+
 def test_weekly_extension_uses_7_day_period(fresh_db):
     ts = fresh_db
     ts.update_task_streak(42, "w", "Уборка", "Каждую неделю", "2026-04-26")

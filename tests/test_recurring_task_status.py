@@ -77,6 +77,37 @@ async def test_reset_recurring_no_deadline_sets_in_progress_and_completion():
 
 
 @pytest.mark.asyncio
+async def test_recurring_deadline_done_updates_both_streaks():
+    """Bug: per-task стрик (core/task_streaks.py) раньше писался ТОЛЬКО из Mini
+    App — бот на завершении повторяющейся задачи звал только глобальный
+    update_streak. Из-за этого per-task стрик задачи, которую отмечают через
+    бота, никогда не продлевался и обнулялся при следующем reset_broken_streaks.
+    _handle_recurring_deadline_done должен звать оба апдейта."""
+    from nexus.handlers import tasks
+
+    msg = _make_message()
+    task = _make_task()
+
+    with patch.object(tasks._repo, "set_in_progress", AsyncMock()), \
+         patch.object(tasks, "_handle_recurring_task_reset", AsyncMock()), \
+         patch.object(tasks, "_get_user_tz", AsyncMock(return_value=3)), \
+         patch("nexus.handlers.streaks.update_streak", AsyncMock(return_value=None)) as m_global, \
+         patch("core.task_streaks.update_task_streak", MagicMock(return_value=None)) as m_per_task:
+        await tasks._handle_recurring_deadline_done(
+            msg, "task-id-1", task, "Ежедневно", "тестовая задача", uid=999_001,
+        )
+
+    m_global.assert_awaited_once()
+    assert m_global.await_args.kwargs.get("task_id") == "task-id-1"
+
+    m_per_task.assert_called_once()
+    kwargs = m_per_task.call_args.kwargs
+    assert kwargs["user_id"] == 999_001
+    assert kwargs["task_id"] == "task-id-1"
+    assert kwargs["repeat_kind"] == "Ежедневно"
+
+
+@pytest.mark.asyncio
 async def test_reset_recurring_with_deadline_keeps_in_progress():
     """Recurring с дедлайном → тоже In progress + completion."""
     from nexus.handlers import tasks

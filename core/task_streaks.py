@@ -67,8 +67,12 @@ def _period_days(repeat_kind: str) -> int:
 
 
 def _is_daily(repeat_kind: str) -> bool:
+    """"Ежедневно" — канонический repeat_kind ежедневных задач (см.
+    nexus/handlers/tasks.py). Раньше проверка была на substring "ден", которого
+    в слове "ежедневно" нет (е-ж-е-д-н-е-в-н-о — есть "дне", не "ден") —
+    reset_broken_streaks никогда не срабатывал для ежедневных стриков."""
     rk = (repeat_kind or "").strip().lower()
-    return "ден" in rk or rk == "" or rk == "каждый день"
+    return rk in ("", "каждый день", "ежедневно")
 
 
 def _date_minus(date_str: str, days: int) -> str:

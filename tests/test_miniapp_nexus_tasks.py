@@ -633,11 +633,16 @@ async def test_nexus_today_digest_complete_ending():
 # ── /api/streaks ─────────────────────────────────────────────────────────────
 
 def test_streaks_endpoint_returns_current_and_best(client):
+    # #65 regression: reset_broken_streaks/get_user_task_streaks (core.task_streaks)
+    # были незамоканы и писали/читали PROD data/nexus_streaks.db под
+    # FAKE_TG_ID=67686090 (= реальный tg Кай) на каждый прогон этого теста.
     with patch("nexus.handlers.streaks.get_streak",
                return_value={"streak": 12, "best": 30, "last_activity_date": "2026-04-21",
                              "rest_day_date": None, "rest_days_used": 0,
                              "streak_start_date": "2026-04-10"}), \
-         patch("nexus.handlers.streaks.is_rest_day_available", return_value=True):
+         patch("nexus.handlers.streaks.is_rest_day_available", return_value=True), \
+         patch("core.task_streaks.reset_broken_streaks", return_value=0), \
+         patch("core.task_streaks.get_user_task_streaks", return_value=[]):
         r = client.get("/api/streaks")
     assert r.status_code == 200
     data = r.json()

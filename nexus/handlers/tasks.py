@@ -1340,12 +1340,30 @@ async def _handle_recurring_deadline_done(
     # включая повторяющиеся. Раньше recurring-путь возвращался не дёрнув
     # update_streak — счётчик пропускал день.
     if uid:
+        tz = await _get_user_tz(uid) or 3
         try:
             from nexus.handlers.streaks import update_streak
-            tz = await _get_user_tz(uid) or 3
             await update_streak(uid, tz, source="bot_recurring_done", task_id=task_id)
         except Exception as e:
             logger.debug("recurring streak update error: %s", e)
+        # per-task стрик (core/task_streaks.py) раньше писался ТОЛЬКО из
+        # Mini App (miniapp/backend/routes/writes.py) — бот отмечал только
+        # общий дневной стрик выше. Из-за этого per-task стрик повторяющейся
+        # задачи никогда не продлевался при завершении через бота: следующий
+        # visit /api/streaks видел устаревший last_done_date и обнулял
+        # current через reset_broken_streaks. Зеркалим Mini App-путь здесь.
+        try:
+            from core.task_streaks import update_task_streak
+            today_local = datetime.now(timezone(timedelta(hours=tz))).strftime("%Y-%m-%d")
+            update_task_streak(
+                user_id=uid,
+                task_id=task_id,
+                task_title=title,
+                repeat_kind=repeat or "Ежедневно",
+                today_local=today_local,
+            )
+        except Exception as e:
+            logger.debug("per-task streak update error: %s", e)
     await _handle_recurring_task_reset(message, task_id, task, repeat, title, uid)
 
 
