@@ -30,6 +30,14 @@ EXCLUDED_CATEGORIES = {
     "🎯 Цели",
 }
 
+# tz_{tg_id}/city_{tg_id} (core/location.py:set_user_location) — не «твоя
+# память», а внутреннее состояние бота (нужно погоде и дедлайнам задач).
+# Раньше они утекали в общий список как ничего не говорящие "5"/"Гай" —
+# Кай приняла их за баг/мусор. Прячем из списка, оставляя рабочими под
+# капотом (get_user_tz/_resolve_city_from_memory ходят напрямую по key,
+# этот фильтр их не касается).
+EXCLUDED_KEY_PREFIXES = ("tz_", "city_")
+
 # #49: канонический список категорий (из core/memory.py CATEGORIES,
 # без бюджетных/ADHD). Возвращаем всегда, чтобы фронт показывал все табы,
 # даже если в какой-то категории пусто.
@@ -84,6 +92,8 @@ async def get_memory(
     for mem in raw:
         c = mem.category or None
         if c in EXCLUDED_CATEGORIES:
+            continue
+        if (mem.key or "").startswith(EXCLUDED_KEY_PREFIXES):
             continue
         if c:
             categories.add(c)

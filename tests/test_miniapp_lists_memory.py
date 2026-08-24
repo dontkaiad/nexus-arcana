@@ -565,6 +565,27 @@ def test_memory_excludes_budget_and_adhd_categories(client):
     assert cats.isdisjoint({"🦋 СДВГ", "📥 Доход", "🔒 Обязательные", "💰 Лимит", "📋 Долги", "🎯 Цели"})
 
 
+def test_memory_excludes_tz_and_city_system_keys(client):
+    """tz_{tg_id}/city_{tg_id} (core/location.py) — внутреннее состояние бота
+    для погоды/дедлайнов, не «память» юзера. Раньше утекали в общий список
+    как голые "5"/"Гай" — Кай приняла их за мусор/баг."""
+    mems = [
+        _mem_pg("m1", "Chapman = сигареты", cat="🛒 Предпочтения", key="chapman"),
+        _mem_pg("m2", "5", cat="🏠 Быт", key="tz_67686090"),
+        _mem_pg("m3", "Гай", cat="🛒 Предпочтения", key="city_67686090"),
+    ]
+
+    with patch("miniapp.backend.routes.memory._memory_repo.find_by_category",
+               AsyncMock(return_value=mems)), \
+         patch("miniapp.backend.routes.memory.get_user_notion_id",
+               AsyncMock(return_value=FAKE_NOTION_USER)):
+        r = client.get("/api/memory")
+
+    assert r.status_code == 200
+    ids = {i["id"] for i in r.json()["items"]}
+    assert ids == {"m1"}
+
+
 def test_memory_cat_filter(client):
     mems = [
         _mem_pg("m1", "A", cat="🛒 Предпочтения"),
