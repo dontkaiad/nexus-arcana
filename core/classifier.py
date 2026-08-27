@@ -410,7 +410,14 @@ _EDIT_RE = re.compile(
     r"\b(поменяй|измени|обнови|исправь|смени|замени|измените|обновите|исправьте|сменить|изменить|поменять)\b"
     r".{0,50}\b(категорию|категория|приоритет|название|заголовок|дедлайн|имя|источник|статус)\b"
     r"|"
-    r"\b(категорию|приоритет|название|дедлайн|источник)\b.{0,30}\b(поменяй|измени|обнови|исправь|смени)\b",
+    r"\b(категорию|приоритет|название|дедлайн|источник)\b.{0,30}\b(поменяй|измени|обнови|исправь|смени)\b"
+    r"|"
+    # "перенеси X на 28.08 10:00 (и напоминалку в 9:30)" — без реплая раньше
+    # проваливалось в общий classify(), который не умеет несколько правок
+    # одной записи в одном ответе (см. _EDIT_PARSE_SYSTEM — у него уже есть
+    # edits-список для этого). Реплай-версия этой же фразы работает через
+    # core/reply_update.py — эта ветка приводит native-путь к паритету с ним.
+    r"\bперенес(и|ите|ти)\b.{0,80}\bна\b",
     re.IGNORECASE,
 )
 
@@ -866,17 +873,34 @@ async def classify(text: str, tz_offset: int = 3) -> list[dict]:
     raw = await ask_claude(text, system=build_system(tz_offset), max_tokens=1024, temperature=0)
     global _classify_last_raw
     _classify_last_raw = raw
-    
+
+    stripped = raw.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
     try:
-        raw = raw.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
-        items = json.loads(raw)
+        items = json.loads(stripped)
         if not isinstance(items, list):
             items = [items]
         logger.info("classify: parsed %d items: %s", len(items), [i.get("type") for i in items])
         return items
     except (json.JSONDecodeError, ValueError) as e:
-        logger.warning("classify: bad JSON for %r → %r", text, raw)
-        await log_error(text, "parse_error", raw, str(e), error_code="–")
+        # Страховка: вместо ОДНОГО JSON-массива модель иногда возвращает
+        # НЕСКОЛЬКО отдельных ```json блоков (напр. составная правка одной
+        # записи — "перенеси X на дату и напоминалку на время" — без общей
+        # схемы edits для этой ветки распадается на 2 независимых объекта).
+        # Наивный json.loads после снятия одной пары ``` тогда падает с
+        # "Extra data". Пробуем вытащить и распарсить блоки по отдельности,
+        # прежде чем сдаваться в parse_error.
+        blocks = re.findall(r"```(?:json)?\s*(\{.*?\})\s*```", raw, re.DOTALL)
+        recovered = []
+        for b in blocks:
+            try:
+                recovered.append(json.loads(b))
+            except json.JSONDecodeError:
+                pass
+        if recovered:
+            logger.warning("classify: recovered %d items from multi-block response for %r", len(recovered), text)
+            return recovered
+        logger.warning("classify: bad JSON for %r → %r", text, stripped)
+        await log_error(text, "parse_error", stripped, str(e), error_code="–")
         return [{"type": "parse_error"}]
 
 
