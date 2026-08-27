@@ -864,6 +864,31 @@ def _parse_relative_time(text: str, tz_offset: int) -> Optional[str]:
     return result.strftime("%Y-%m-%dT%H:%M")
 
 
+# Ночная логика «завтра» = «сегодня» (до 05:00) — детерминированная страховка
+# поверх prompt-инструкции для Haiku, аналогично core/classifier.py
+# _BARE_TOMORROW_RE (маленькая модель не гарантированно следует инструкции
+# из промпта на каждый запрос). \b исключает «послезавтра».
+_NIGHT_OWL_TOMORROW_RE = _re.compile(r"\bзавтра\b", _re.IGNORECASE)
+
+
+def _correct_night_owl_tomorrow(dt_str: Optional[str], text: str, tz_offset: int) -> Optional[str]:
+    """Правит дату на «сегодня», если в тексте голое «завтра», сейчас ночь
+    (до 05:00) и Claude всё равно посчитал реальное завтра. Если Claude сам
+    уже вернул сегодня — не трогаем (иначе можно откатить верную дату)."""
+    if not dt_str or not text or not _NIGHT_OWL_TOMORROW_RE.search(text):
+        return dt_str
+    now_local = datetime.now(timezone(timedelta(hours=tz_offset)))
+    if now_local.hour >= 5:
+        return dt_str
+    today_str = now_local.strftime("%Y-%m-%d")
+    wrong_tomorrow_str = (now_local + timedelta(days=1)).strftime("%Y-%m-%d")
+    if dt_str.startswith(wrong_tomorrow_str):
+        fixed = today_str + dt_str[len(wrong_tomorrow_str):]
+        logger.info("night-owl 'завтра' correction: %s -> %s", dt_str, fixed)
+        return fixed
+    return dt_str
+
+
 # ── Явное время в тексте задачи (issues #33, #89) ──────────────────────────────
 
 # Извлекаемое время: «18:30», «13 часов», «в 13». «через N часов» исключено
@@ -966,7 +991,13 @@ async def _haiku_parse_reminder_dt(text: str, tz_offset: int) -> Optional[str]:
     (issue: одинаковый паттерн, было бы дублирование — #«Параллельная
     реализация = БАГ» из CLAUDE.md).
     """
-    now_str = datetime.now(timezone(timedelta(hours=tz_offset))).strftime("%Y-%m-%d %H:%M")
+    now_dt = datetime.now(timezone(timedelta(hours=tz_offset)))
+    now_str = now_dt.strftime("%Y-%m-%d %H:%M")
+    is_night = now_dt.hour < 5
+    tomorrow_note = (
+        "ВАЖНО: сейчас ночь (до 05:00) — 'завтра' означает СЕГОДНЯ (тот же календарный день)!"
+        if is_night else ""
+    )
     system = f"""Пользователь указывает когда напомнить. Парсь и верни ТОЛЬКО JSON без markdown:
 {{"reminder_time": "YYYY-MM-DDTHH:MM"}}
 
@@ -978,6 +1009,7 @@ async def _haiku_parse_reminder_dt(text: str, tz_offset: int) -> Optional[str]:
 - "20 числа в 18 часов" / "20-го в 18" → 20-е число месяца (текущего, а если
   текущий день месяца уже позже 20 — следующего), время 18:00.
 - reminder_time ВСЕГДА строго в будущем относительно "Сейчас".
+{tomorrow_note}
 
 Сейчас: {now_str} (МСК, UTC+{tz_offset})"""
     try:
@@ -987,7 +1019,7 @@ async def _haiku_parse_reminder_dt(text: str, tz_offset: int) -> Optional[str]:
         parsed = json.loads(raw)
         val = parsed.get("reminder_time")
         if val and _re.match(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$", val):
-            return val
+            return _correct_night_owl_tomorrow(val, text, tz_offset)
     except Exception as e:
         logger.error("_haiku_parse_reminder_dt error: %s", e)
     return None
@@ -1745,7 +1777,7 @@ async def handle_task_clarification(message: Message) -> None:
         parsed = json.loads(raw)
 
         if parsed.get("reminder_time"):
-            pending["reminder_time"] = parsed["reminder_time"]
+            pending["reminder_time"] = _correct_night_owl_tomorrow(parsed["reminder_time"], text, tz_offset)
             _pending_set(uid, pending)
             logger.info("parsed reminder_time: %s", pending["reminder_time"])
             await _show_task_confirm(message, pending, uid)
@@ -1881,10 +1913,10 @@ async def _handle_task_refinement(message: Message, text: str, pending: dict, ui
 
         updated = False
         if parsed.get("deadline"):
-            pending["deadline"] = parsed["deadline"]
+            pending["deadline"] = _correct_night_owl_tomorrow(parsed["deadline"], text, tz_offset)
             updated = True
         if parsed.get("reminder_time"):
-            pending["reminder_time"] = parsed["reminder_time"]
+            pending["reminder_time"] = _correct_night_owl_tomorrow(parsed["reminder_time"], text, tz_offset)
             updated = True
         if parsed.get("category"):
             raw_cat = parsed["category"]
@@ -1950,9 +1982,9 @@ async def _handle_combined_clarification(message: Message, text: str, pending: d
         parsed = json.loads(raw)
 
         if parsed.get("deadline"):
-            pending["deadline"] = parsed["deadline"]
+            pending["deadline"] = _correct_night_owl_tomorrow(parsed["deadline"], text, tz_offset)
         if parsed.get("reminder_time"):
-            pending["reminder_time"] = parsed["reminder_time"]
+            pending["reminder_time"] = _correct_night_owl_tomorrow(parsed["reminder_time"], text, tz_offset)
 
         pending.pop("_awaiting_combined", None)
         _pending_set(uid, pending)
