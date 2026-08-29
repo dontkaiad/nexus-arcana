@@ -154,18 +154,29 @@ def _memory_reply_system(tz_offset: int = 3) -> str:  # tz_offset unused, matche
 # такой же отдельный флаг, обрабатывается ДО apply_updates вызывающей
 # стороной (nexus/handlers/reply_update.py), т.к. перенос в 📝 Заметки —
 # архивация list-item + создание note в другом PG-репозитории, не
-# field-апдейт этой строки. Других полей пока не описываем — reply на
-# покупку сегодня умеет только "отправь в заметки", не переименование/
-# смену категории через reply (это отдельная фича, не в скоупе #192).
+# field-апдейт этой строки.
+# add_item — второе поле (изначально не было в скоупе #192): reply вида
+# «и ещё соль» на подтверждение покупки раньше не понимался вообще (Haiku
+# возвращал только move_to_notes=false, updates пустел, юзер видел «✏️ Не
+# поняла что дополнить»), хотя это самый естественный ответ на плашку
+# «Добавлено в покупки». Добавляет позицию в ТОТ ЖЕ список/категорию, что
+# у оригинальной позиции (см. _apply_list) — не field-апдейт этой строки,
+# а создание новой, поэтому обрабатывается через apply_updates как обычно
+# (в отличие от move_to_notes, ему не нужен спец-путь в вызывающей стороне).
 def _list_reply_system(tz_offset: int = 3) -> str:  # tz_offset unused, matches dynamic-system signature
     return (
         "Ты обрабатываешь reply на подтверждение добавленной позиции списка "
         "(покупка/чеклист). Ответь ТОЛЬКО JSON без markdown:\n"
-        '{"move_to_notes": true/false}\n\n'
+        '{"move_to_notes": true/false, '
+        '"add_item": "текст новой позиции для добавления в тот же список или null"}\n\n'
         "move_to_notes=true — ТОЛЬКО если явно просят перенести эту позицию в "
         "заметки («отправь в заметки», «это в заметки», «перенеси в заметки», "
         "«это не покупка, а заметка/идея»).\n"
-        "Иначе — move_to_notes=false."
+        "add_item — ТОЛЬКО если явно называют ЕЩЁ ОДНУ позицию, которую нужно "
+        "добавить в тот же список («и ещё соль», «добавь хлеб», «туда же "
+        "молоко»). Это НЕ исправление уже добавленной позиции — исправления "
+        "пока не поддерживаются, в этом случае add_item=null.\n"
+        "Если ни то ни другое не подходит — move_to_notes=false, add_item=null."
     )
 
 
@@ -445,14 +456,34 @@ async def _apply_memory(page_id: str, updates: Dict[str, Any]) -> Dict[str, Any]
 
 
 async def _apply_list(page_id: str, updates: Dict[str, Any]) -> Dict[str, Any]:
-    """list page_type — сейчас сюда всегда прилетает {} (#192): единственное
-    поле _list_reply_system (move_to_notes) снимается ДО apply_updates
-    вызывающей стороной (nexus/handlers/reply_update.py), как и у memory —
-    guard `if not updates: return {}` выше срабатывает раньше диспатча.
-    Оставлено для структурного паритета с остальными page_type и на случай
-    будущих field-апдейтов позиции списка через reply (переименовать, сменить
-    категорию) — сегодня таких полей в _list_reply_system не описано."""
-    return {}
+    """list page_type → добавляет новую позицию в тот же список, что и
+    оригинальная (add_item — единственное поле, которое сюда реально
+    доходит; move_to_notes снимается ДО apply_updates вызывающей стороной,
+    см. _list_reply_system). Список/категория/юзер берутся с оригинальной
+    позиции (get_by_id) — reply «и ещё соль» не обязан их повторять."""
+    add_item_text = updates.get("add_item")
+    if not add_item_text:
+        return {}
+    from core import list_manager as _lm
+    from core.repos.lists_repo import _repo as lists_repo
+    from core.repos.pg_nexus_lists_repo import _notion_type
+
+    item = await _lm._nexus_repo.get_by_id(page_id)
+    bot_name = "☀️ Nexus"
+    if not item:
+        item = await _lm._arcana_repo.get_by_id(page_id)
+        bot_name = "🌒 Arcana"
+    if not item:
+        return {}
+
+    created = await lists_repo.add(
+        [{"name": str(add_item_text), "category": item.category or "💳 Прочее",
+          "group": item.group_name or ""}],
+        _notion_type(item.list_type), bot_name, item.user_notion_id,
+    )
+    if not created:
+        return {}
+    return {"Добавлено": str(add_item_text)}
 
 
 async def _apply_session(
