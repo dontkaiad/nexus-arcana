@@ -8,8 +8,9 @@ GET /api/arcana/sessions:
 GET /api/arcana/sessions/by-slug/{slug}:
 - slug "subj-N" уходит через list_by_subject, а не list_by_slug.
 
-GET /api/arcana/sessions/by-subject/{subject_id}:
-- та же агрегация напрямую по числовому id.
+(GET /api/arcana/sessions/by-subject/{id} существовал как альтернативный
+вход в ту же _aggregate_group по числовому id, но фронт им не пользовался
+ни разу — удалён, см. by-slug/subj-N тесты ниже для той же логики.)
 """
 from __future__ import annotations
 
@@ -129,33 +130,5 @@ def test_by_slug_subj_prefix_404_when_empty(client):
     ctx = _ctx(mock_repo)
     with ctx[0], ctx[1], ctx[2], ctx[3]:
         r = client.get("/api/arcana/sessions/by-slug/subj-999")
-
-    assert r.status_code == 404
-
-
-def test_by_subject_endpoint(client):
-    matching = [
-        _make_triplet("1", "Q1", session_name="Вадим", subject_id=42, date="2026-05-01"),
-    ]
-    mock_repo = MagicMock()
-    mock_repo.list_by_subject = AsyncMock(return_value=matching)
-
-    ctx = _ctx(mock_repo)
-    with ctx[0], ctx[1], ctx[2], ctx[3]:
-        r = client.get("/api/arcana/sessions/by-subject/42")
-
-    assert r.status_code == 200
-    data = r.json()
-    assert data["subject_id"] == 42
-    assert data["slug"] == "subj-42"
-
-
-def test_by_subject_endpoint_404_when_none(client):
-    mock_repo = MagicMock()
-    mock_repo.list_by_subject = AsyncMock(return_value=[])
-
-    ctx = _ctx(mock_repo)
-    with ctx[0], ctx[1], ctx[2], ctx[3]:
-        r = client.get("/api/arcana/sessions/by-subject/999")
 
     assert r.status_code == 404

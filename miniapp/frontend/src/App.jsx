@@ -5341,6 +5341,7 @@ function ThemeOverview({ s, group, onOpenEvent, onSummarize, summarizing }) {
           {[group.client, `${events.length} сессий`, `${(group.triplets || []).length} триплетов всего`]
             .filter(Boolean).map((it, i) => <span key={i}>{it}</span>)}
         </div>
+        <AreaChips s={s} areas={group.areas} />
       </Glass>
 
       <Glass s={s} style={{ padding: "10px 14px", marginBottom: 10 }}>

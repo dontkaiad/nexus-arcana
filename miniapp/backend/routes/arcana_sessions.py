@@ -11,9 +11,10 @@ session_name. Slug группы по теме — "subj-{subject_id}".
 Endpoints:
   GET  /api/arcana/sessions                    — лента сессий (агрегаты)
   GET  /api/arcana/sessions/by-slug/{slug}     — сессия со всеми триплетами
-                                                  (slug "subj-N" → по теме)
-  GET  /api/arcana/sessions/by-subject/{id}    — вьюха «Тема»: все сессии
-                                                  за всё время по subject_id
+                                                  (slug "subj-N" → вьюха «Тема»,
+                                                  все сессии за всё время по
+                                                  subject_id — фронт всегда
+                                                  ходит сюда, не по id напрямую)
   POST /api/arcana/sessions/by-slug/{slug}/summarize — сгенерировать общее саммари
   GET  /api/arcana/sessions/by-slug/{slug}/summarize/stream — то же самое,
                                                   SSE (#191), для Mini App
@@ -339,9 +340,8 @@ def _aggregate_group(
 ) -> dict:
     """Общая агрегация группы триплетов (по session_name+client ИЛИ по
     subject_id, #189) в detail-ответ: сортировка, якорная сводка ТЕМЫ,
-    саммари по дням, уникальные area/декс. Используется session_by_slug
-    и session_by_subject — единственное расхождение между ними это то,
-    ОТКУДА взялся список matching."""
+    саммари по дням, уникальные area/декс. Единственный вызывающий —
+    session_by_slug (slug "subj-N" → subject_id, иначе session_name+client)."""
     matching = sorted(matching, key=lambda x: (
         _index_in_title(x.question) or 9999,
         x.date or "",
@@ -488,27 +488,6 @@ async def session_by_slug(
     if not matching:
         raise HTTPException(status_code=404, detail="session not found")
     return _aggregate_group(matching, slug, name_map, tz_offset)
-
-
-@router.get("/arcana/sessions/by-subject/{subject_id}")
-async def session_by_subject(
-    subject_id: int,
-    tg_id: int = Depends(current_user_id),
-) -> dict[str, Any]:
-    """Вьюха «Тема» (#189): все сессии за всё время, привязанные к subject_id,
-    независимо от того, как формулировался session_name на момент сохранения."""
-    user_notion_id = (await get_user_notion_id(tg_id)) or ""
-    _, tz_offset = await today_user_tz(tg_id)
-
-    clients_list = await _clients_repo.list_all(user_notion_id)
-    name_map = _clients_name_map(clients_list)
-
-    matching = await _sessions_repo.list_by_subject(subject_id, user_notion_id)
-    if not matching:
-        raise HTTPException(status_code=404, detail="subject not found")
-    return _aggregate_group(
-        matching, _subject_slug(subject_id), name_map, tz_offset, subject_id=subject_id,
-    )
 
 
 # ── session summarize ────────────────────────────────────────────────────────

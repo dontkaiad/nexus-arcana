@@ -586,6 +586,7 @@ export function adaptSessionGroup(data) {
     client: data.client || 'Личный',
     clientId: data.client_id || null,
     type: data.type || '',
+    areas: data.areas || [],
     decks: data.decks || [],
     firstDate: data.first_date ? formatDate(data.first_date, 'full') : '',
     summary: data.summary || null,
