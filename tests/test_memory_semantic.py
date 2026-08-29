@@ -37,8 +37,9 @@ def test_semantic_search_skipped_when_ilike_found_enough():
 
 def test_semantic_search_called_when_ilike_thin():
     existing = [_mk_page("1")]
-    extra = [_mk_page("2"), _mk_page("1")]  # "1" дубль — должен схлопнуться
-    with patch("core.memory_rag.search_memory_semantic", return_value=extra):
+    candidates = [_mk_page("2"), _mk_page("1")]  # "1" дубль — должен схлопнуться
+    with patch("core.memory_rag.search_memory_semantic", return_value=candidates), \
+         patch("core.memory_rag.rerank_memory_candidates", AsyncMock(return_value=candidates)):
         out = asyncio.run(_semantic_search_memory("запрос", existing))
     ids = [m.id for m in out]
     assert ids == ["1", "2"]  # ILIKE-хиты первыми, дубли не повторяются
@@ -57,6 +58,51 @@ def test_semantic_search_failure_returns_existing():
     with patch("core.memory_rag.search_memory_semantic", side_effect=RuntimeError("boom")):
         out = asyncio.run(_semantic_search_memory("запрос", existing))
     assert out == existing  # сбой semantic не всплывает
+
+
+# ── реранк (ADR-0021, #185): pgvector top_k=10 → Haiku отбирает по смыслу ──
+
+def test_semantic_search_uses_reranked_subset_only():
+    """Топ-1 по cosine distance («2»), отклонённый Haiku, не должен попасть
+    в результат — только то, что реранк подтвердил («3»)."""
+    existing = [_mk_page("1")]
+    candidates = [_mk_page("2"), _mk_page("3")]
+    with patch("core.memory_rag.search_memory_semantic", return_value=candidates), \
+         patch("core.memory_rag.rerank_memory_candidates", AsyncMock(return_value=[_mk_page("3")])):
+        out = asyncio.run(_semantic_search_memory("что я помню про луну", existing))
+    assert [m.id for m in out] == ["1", "3"]
+
+
+def test_semantic_search_reranker_empty_keeps_only_ilike():
+    """Реранк отфильтровал всё в ноль → semantic-довесок не добавляется
+    вообще, без сообщения-заглушки — пользователь видит только ILIKE-хиты."""
+    existing = [_mk_page("1")]
+    candidates = [_mk_page("2"), _mk_page("3")]
+    with patch("core.memory_rag.search_memory_semantic", return_value=candidates), \
+         patch("core.memory_rag.rerank_memory_candidates", AsyncMock(return_value=[])):
+        out = asyncio.run(_semantic_search_memory("запрос", existing))
+    assert [m.id for m in out] == ["1"]
+
+
+def test_semantic_search_no_candidates_skips_rerank_call():
+    """pgvector не нашёл кандидатов → реранк вообще не дёргается (нечего
+    ранжировать, лишний Haiku-вызов не нужен)."""
+    existing = [_mk_page("1")]
+    rerank = AsyncMock()
+    with patch("core.memory_rag.search_memory_semantic", return_value=[]), \
+         patch("core.memory_rag.rerank_memory_candidates", rerank):
+        out = asyncio.run(_semantic_search_memory("запрос", existing))
+    assert out == existing
+    rerank.assert_not_called()
+
+
+def test_semantic_search_rerank_failure_returns_existing():
+    existing = [_mk_page("1")]
+    candidates = [_mk_page("2")]
+    with patch("core.memory_rag.search_memory_semantic", return_value=candidates), \
+         patch("core.memory_rag.rerank_memory_candidates", AsyncMock(side_effect=RuntimeError("boom"))):
+        out = asyncio.run(_semantic_search_memory("запрос", existing))
+    assert out == existing  # сбой реранка не всплывает
 
 
 # ── save_memory: ответ пользователю не зависит от индексации ────────────────

@@ -161,18 +161,32 @@ async def _semantic_search_memory(
     user_notion_id: str = "",
     cap: int = 10,
 ) -> List[Memory]:
-    """Semantic-фоллбэк (#184): дёргаем Voyage ТОЛЬКО если ILIKE уже нашёл
-    < 3 совпадений (экономим 3 RPM free-tier). Мердж по id, ILIKE-хиты
-    первыми, semantic — довеском, общий кап. Graceful: любая ошибка →
-    исходный список без изменений, пользователь ничего не замечает."""
+    """Semantic-фоллбэк (#184) + Haiku-реранк (ADR-0021, #185): дёргаем
+    Voyage ТОЛЬКО если ILIKE уже нашёл < 3 совпадений (экономим 3 RPM
+    free-tier). pgvector отдаёт top_k=10 кандидатов (шире сеть — топ-1 по
+    cosine distance не всегда топ-1 по смыслу), Haiku отфильтровывает
+    нерелевантные по факту/категории/связи. Мердж по id, ILIKE-хиты
+    первыми, semantic-довесок — только то, что подтвердил реранк.
+
+    Graceful: сбой Voyage/Haiku/JSON → исходный список без изменений,
+    пользователь ничего не замечает. Если реранк отфильтровал всё в ноль —
+    semantic-довесок просто не добавляется (без сообщения-заглушки)."""
     if len(existing) >= 3 or not query or not query.strip():
         return existing
     try:
-        extra = await asyncio.to_thread(
-            _memory_rag.search_memory_semantic, query, scope, user_notion_id, 5
+        candidates = await asyncio.to_thread(
+            _memory_rag.search_memory_semantic, query, scope, user_notion_id,
+            _memory_rag.DEFAULT_TOP_K,
         )
     except Exception as e:
         logger.warning("memory: semantic search fallback failed: %s", e)
+        return existing
+    if not candidates:
+        return existing
+    try:
+        extra = await _memory_rag.rerank_memory_candidates(query, candidates)
+    except Exception as e:
+        logger.warning("memory: rerank fallback failed: %s", e)
         return existing
     seen = {m.id for m in existing}
     merged = list(existing)
