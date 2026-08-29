@@ -1392,7 +1392,7 @@ function NxDay({ s, openTask, navigate, openStreaks }) {
         <div className="hero-budget">
           <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6, fontSize: 13, fontWeight: 500, cursor: "pointer" }} onClick={() => navigate?.("fin")}>
             <span style={{ opacity: 0.75 }}>Бюджет дня</span>
-            <span style={{ color: leftPct > 85 ? s.red : leftPct > 60 ? s.amber : undefined, fontWeight: 500 }}>{t.budgetDay.toLocaleString()} ₽ · {leftPct}%</span>
+            <span style={{ color: leftPct > 85 ? s.red : leftPct > 60 ? s.amber : undefined, fontWeight: 500 }}>{t.budgetDay.toLocaleString()} ₽ · {t.budgetDay && Number.isFinite(leftPct) ? `${leftPct}%` : "—"}</span>
           </div>
           <Bar s={s} pct={leftPct} color={leftPct > 85 ? s.red : leftPct > 60 ? s.amber : s.acc} />
           <div style={{ fontSize: 12, opacity: 0.6, marginTop: 6 }}>потрачено {t.spentDay.toLocaleString()} ₽ из {t.budgetDay.toLocaleString()} ₽</div>
