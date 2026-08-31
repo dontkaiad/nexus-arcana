@@ -1416,17 +1416,29 @@ _NUDGE_SYSTEM = """Ты знаешь человека с СДВГ — её зо�
 - Откладывает дела требующие длительной концентрации
 - Откладывает неприятные но важные дела (врач, документы, звонки)
 - Легко забывает задачи без напоминания
-Пользователь только что создал задачу. Определи: есть ли риск прокрастинации?
+Пользователь только что создал задачу. Тебе дан заголовок задачи и явно указано,
+задан ли уже дедлайн и/или напоминание (см. блок "Уже задано" в сообщении).
+Определи: есть ли риск прокрастинации?
 Если ДА — дай ОДИН короткий, не банальный совет (1 предложение, начни с эмодзи).
-Учитывай что у человека уже есть напоминания и дедлайны — не советуй их ставить.
+ЗАПРЕТ: если в блоке "Уже задано" указан дедлайн — не советуй "запишись на
+конкретное время/дату", он уже есть. Если указано напоминание — не советуй
+его ставить, оно уже есть. Совет должен добавлять что-то новое, а не
+повторять то, что уже зафиксировано.
 Если риска нет (задача срочная/простая/приятная) — верни пустую строку.
 Отвечай ТОЛЬКО советом или пустой строкой. Без объяснений."""
 
 
-async def _check_procrastination_nudge(title: str) -> str:
+async def _check_procrastination_nudge(title: str, deadline: str = "", reminder_time: str = "") -> str:
+    known_bits = []
+    if deadline:
+        known_bits.append(f"дедлайн: {deadline}")
+    if reminder_time:
+        known_bits.append(f"напоминание: {reminder_time}")
+    known = "; ".join(known_bits) if known_bits else "нет ни дедлайна, ни напоминания"
+    prompt = f"Задача: {title}\nУже задано: {known}"
     try:
         result = await ask_claude(
-            title,
+            prompt,
             system=_NUDGE_SYSTEM,
             max_tokens=100,
             model="claude-haiku-4-5-20251001",
@@ -2633,7 +2645,11 @@ async def _do_save_task(message: Message, data: dict, chat_id: int = None, uid: 
         if (title and title.strip() and _is_high_priority and not _is_routine
                 and not _recall_shown and _repeat_count >= _AUTOSUGGEST_MIN_REPEATS):
             await suggest_memory(message, title.strip(), data.get("user_notion_id", ""))
-        nudge = await _check_procrastination_nudge(data.get("title", ""))
+        nudge = await _check_procrastination_nudge(
+            data.get("title", ""),
+            deadline=data.get("deadline") or "",
+            reminder_time=data.get("reminder_time") or "",
+        )
         if nudge:
             await message.answer(nudge)
     except Exception as e:
@@ -3068,7 +3084,7 @@ async def _apply_edit(
 
 
 async def _build_today_digest(uid: int, user_notion_id: str = "", greeting: str = "") -> str:
-    """Build the daily digest text (HTML). Used by /today and the morning cron job."""
+    """Build the daily digest text (HTML). Used by /today."""
     tz_offset = await _get_user_tz(uid)
     user_tz = timezone(timedelta(hours=tz_offset))
     today_str = datetime.now(user_tz).strftime("%Y-%m-%d")
@@ -3276,121 +3292,6 @@ async def handle_tasks_today(message: Message, user_notion_id: str = "") -> None
             await message.answer(plain)
         except Exception:
             await message.answer("⚠️ Ошибка формирования дайджеста. Попробуй /tasks.")
-
-
-async def _check_yesterday_expenses(user_notion_id: str, tz_offset: int) -> bool:
-    """Return True if there were any expenses recorded yesterday (PG nexus_budget)."""
-    from core.repos.pg_finance_repo import PgNexusBudgetRepo
-    user_tz = timezone(timedelta(hours=tz_offset))
-    yesterday = (datetime.now(user_tz) - timedelta(days=1)).strftime("%Y-%m-%d")
-    try:
-        recs = await PgNexusBudgetRepo().query_month(
-            yesterday[:7], type_filter="expense", user_notion_id=user_notion_id,
-        )
-        return any((e.date or "")[:10] == yesterday for e in recs)
-    except Exception as e:
-        logger.warning("_check_yesterday_expenses error: %s", e)
-        return True  # assume yes on error — don't nag
-
-
-# ── Morning digest per-day dedup (защита от двойной отправки при рестарте в 07:00)
-_MORNING_DB = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "../../pending_tasks.db")
-
-
-def _morning_digest_already_sent(uid: int, date_str: str) -> bool:
-    """True если утренний дайджест уже отправлен uid за date_str (локальный день)."""
-    with _sqlite3.connect(_MORNING_DB) as con:
-        con.execute(
-            "CREATE TABLE IF NOT EXISTS morning_digest_sent "
-            "(uid INTEGER, date TEXT, ts REAL, PRIMARY KEY (uid, date))"
-        )
-        row = con.execute(
-            "SELECT ts FROM morning_digest_sent WHERE uid=? AND date=?",
-            (uid, date_str),
-        ).fetchone()
-    return row is not None
-
-
-def _morning_digest_mark(uid: int, date_str: str) -> None:
-    with _sqlite3.connect(_MORNING_DB) as con:
-        con.execute(
-            "CREATE TABLE IF NOT EXISTS morning_digest_sent "
-            "(uid INTEGER, date TEXT, ts REAL, PRIMARY KEY (uid, date))"
-        )
-        con.execute(
-            "INSERT OR REPLACE INTO morning_digest_sent (uid, date, ts) VALUES (?,?,?)",
-            (uid, date_str, _time.time()),
-        )
-
-
-async def send_morning_digest(bot) -> None:
-    """Cron job: утренний дайджест задач + напоминание о тратах.
-
-    Multi-user safe:
-    - dedup `allowed_ids` (на случай дубликата в .env)
-    - skip пользователей без permissions.nexus
-    - per-day SQLite guard (`morning_digest_sent`) — защита от рестарта в 07:00
-    """
-    from core.config import config
-    from core.user_manager import get_user
-
-    seen: set[int] = set()
-    for tg_id in config.allowed_ids:
-        if tg_id in seen:
-            continue
-        seen.add(tg_id)
-        try:
-            user_data = await get_user(tg_id)
-            if not user_data:
-                continue
-            if not user_data.get("permissions", {}).get("nexus", False):
-                logger.info("send_morning_digest: skip tg_id=%s (no nexus permission)", tg_id)
-                continue
-            user_notion_id = user_data.get("notion_page_id", "")
-            tz_offset = await _get_user_tz(tg_id)
-
-            user_tz = timezone(timedelta(hours=tz_offset))
-            today_local = datetime.now(user_tz).strftime("%Y-%m-%d")
-            if _morning_digest_already_sent(tg_id, today_local):
-                logger.info("send_morning_digest: skip tg_id=%s (already sent on %s)", tg_id, today_local)
-                continue
-
-            # Проверка трат за вчера
-            had_expenses = await _check_yesterday_expenses(user_notion_id, tz_offset)
-            expense_block = ""
-            if not had_expenses:
-                expense_block = (
-                    "\n💸 Вчера не записано трат — были расходы?\n"
-                    "Напиши что потратила, например: <code>500 продукты, 200 кафе</code>\n"
-                )
-
-            text = await _build_today_digest(
-                tg_id, user_notion_id,
-                greeting="☀️ <b>Доброе утро!</b>",
-            )
-
-            # Вставить expense_block после приветствия
-            if expense_block:
-                text = text.replace("☀️ <b>Доброе утро!</b>\n", "☀️ <b>Доброе утро!</b>\n" + expense_block, 1)
-
-            kb = None
-            if not had_expenses:
-                kb = InlineKeyboardMarkup(inline_keyboard=[[
-                    InlineKeyboardButton(text="🚫 Вчера без трат", callback_data="morning_no_expense"),
-                ]])
-
-            await bot.send_message(tg_id, text, parse_mode="HTML", reply_markup=kb)
-            _morning_digest_mark(tg_id, today_local)
-            logger.info("send_morning_digest: sent to %s (yesterday_expenses=%s)", tg_id, had_expenses)
-        except Exception as e:
-            logger.error("send_morning_digest: tg_id=%s error: %s", tg_id, e)
-
-
-@router.callback_query(F.data == "morning_no_expense")
-async def on_morning_no_expense(call: CallbackQuery) -> None:
-    """Кнопка '🚫 Вчера без трат' — просто подтверждение."""
-    await call.answer("👍")
-    await call.message.edit_reply_markup()
 
 
 # ── /stats — статистика задач ─────────────────────────────────────────────────

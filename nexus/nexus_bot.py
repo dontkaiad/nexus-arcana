@@ -1575,16 +1575,6 @@ async def main() -> None:
     from nexus.handlers.notes import send_notes_digest_all
     from apscheduler.triggers.cron import CronTrigger
     from nexus.handlers.tasks import _scheduler as nexus_scheduler
-    # ☀️ Утренний дайджест задач — ежедневно 07:00 UTC (10:00 МСК)
-    from nexus.handlers.tasks import send_morning_digest
-    if nexus_scheduler:
-        nexus_scheduler.add_job(
-            send_morning_digest,
-            args=[bot],
-            trigger=CronTrigger(hour=7, minute=0),
-            id="daily_morning_digest",
-            replace_existing=True,
-        )
     # Дайджест заметок за неделю: каждое воскресенье в 09:00 UTC (12:00 МСК)
     if nexus_scheduler:
         nexus_scheduler.add_job(

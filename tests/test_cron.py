@@ -23,11 +23,6 @@ class TestNexusCronCallables:
             except Exception:
                 pass
 
-    def test_send_morning_digest_exists(self):
-        """send_morning_digest импортируется."""
-        from nexus.handlers.tasks import send_morning_digest
-        assert callable(send_morning_digest)
-
     def test_send_notes_digest_all_exists(self):
         """send_notes_digest_all импортируется."""
         from nexus.handlers.notes import send_notes_digest_all
@@ -69,23 +64,6 @@ class TestNexusCronCallables:
     def test_init_scheduler_exists(self):
         from nexus.handlers.tasks import init_scheduler
         assert callable(init_scheduler)
-
-    @pytest.mark.asyncio
-    async def test_send_morning_digest_no_crash(self):
-        """send_morning_digest не крашится с моком бота + пустыми задачами."""
-        from nexus.handlers.tasks import send_morning_digest
-
-        fake_bot = MagicMock()
-        fake_bot.send_message = AsyncMock()
-        # Моки уже в setup_patches (tasks_active → [])
-        try:
-            await send_morning_digest(fake_bot)
-        except Exception as e:
-            # Допустимо — если зависит от инит скедулера
-            # Но не должно крашить на импорте
-            if "not iterable" in str(e) or "NoneType" in str(e):
-                pytest.skip(f"Требует дополнительного setup: {e}")
-            raise
 
     @pytest.mark.asyncio
     async def test_send_notes_digest_all_no_crash(self):
