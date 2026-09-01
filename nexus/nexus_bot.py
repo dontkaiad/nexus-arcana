@@ -197,7 +197,8 @@ async def cmd_tasks(msg: Message, user_notion_id: str = "") -> None:
 
         pri_icon = _pri_icons.get(priority, "⚪")
         item = {"pri_icon": pri_icon, "cat_icon": cat_icon, "title": title, "dl": dl,
-                "priority": priority, "is_repeat": is_repeat}
+                "priority": priority, "is_repeat": is_repeat,
+                "note": (getattr(t, "note", "") or "").strip()}
 
         # Разделяем: просроченные / сегодня / ежедневные / остальные
         if is_repeat and repeat == "Ежедневно":
@@ -219,6 +220,8 @@ async def cmd_tasks(msg: Message, user_notion_id: str = "") -> None:
             line = f"  <i>{it['pri_icon']} {it['title']} · {it['cat_icon']}"
             if it["dl"]:
                 line += f" · {it['dl']} ⚠️"
+            if it.get("note"):
+                line += f" · 📝 {it['note']}"
             line += "</i>"
             lines.append(line)
         lines.append("")
@@ -230,12 +233,16 @@ async def cmd_tasks(msg: Message, user_notion_id: str = "") -> None:
             line = f"  <i>{it['pri_icon']} {it['title']} · {it['cat_icon']}"
             if it["dl"]:
                 line += f" · {it['dl']}"
+            if it.get("note"):
+                line += f" · 📝 {it['note']}"
             line += "</i>"
             lines.append(line)
         for it in daily_items:
             line = f"  <i>{it['pri_icon']} {it['title']} · {it['cat_icon']}"
             if it["dl"]:
                 line += f" · {it['dl']}"
+            if it.get("note"):
+                line += f" · 📝 {it['note']}"
             line += "</i>"
             lines.append(line)
     else:
@@ -272,6 +279,8 @@ async def cmd_tasks(msg: Message, user_notion_id: str = "") -> None:
             line = f"  <i>{it['pri_icon']} {it['title']} · {it['cat_icon']}"
             if it["dl"]:
                 line += f" · {it['dl']}"
+            if it.get("note"):
+                line += f" · 📝 {it['note']}"
             line += "</i>"
             lines.append(line)
         if len(other_items) > 10:

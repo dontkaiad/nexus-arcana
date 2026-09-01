@@ -2198,6 +2198,53 @@ async def handle_one_time_expense(message: Message, text: str, bot_label: str = 
         )
 
 
+async def expense_from_task_note(note: str, user_notion_id: str = "", uid: int = 0,
+                                 bot_label: str = "☀️ Nexus") -> "Optional[Tuple[str, float, str]]":
+    """Заметка к задаче с денежной деталью → finance-транзакция при выполнении.
+
+    Задача с будущим дедлайном («прийти к нотариусу в среду, оплата 1250») не
+    должна порождать расход в момент создания — упоминание денег кладётся в
+    tasks.note, а списывается реально только когда задача закрыта.
+
+    Сумму берём существующим парсером (_parse_user_amount). Категорию —
+    Haiku-парсером разовых расходов (тот же _ONE_TIME_PARSE_SYSTEM). Если суммы
+    в заметке нет — возвращаем None, вызывающий закрывает задачу как обычно.
+    Возвращает (описание, сумма, категория) записанной траты или None.
+    """
+    from core.config import config as _cfg
+    note = (note or "").strip()
+    if not note:
+        return None
+    amount = _parse_user_amount(note)
+    if not amount or amount <= 0:
+        return None
+
+    amount = float(amount)
+    cat = "💳 Прочее"
+    try:
+        raw = await ask_claude(note, system=_ONE_TIME_PARSE_SYSTEM, model=_cfg.model_haiku,
+                               max_tokens=200, temperature=0)
+        raw = raw.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
+        items = json.loads(raw).get("items", [])
+        if items:
+            c = items[0].get("category")
+            if c in CATEGORIES:
+                cat = c
+            try:
+                a = float(items[0].get("amount") or 0)
+                if a > 0:
+                    amount = a
+            except (TypeError, ValueError):
+                pass
+    except Exception as e:
+        logger.error("expense_from_task_note category parse: %s", e)
+
+    page_id = await _write_one_time_expense(note, amount, cat, user_notion_id, bot_label, uid)
+    if not page_id:
+        return None
+    return (note, amount, cat)
+
+
 # ── Budget: Impulse Overflow ─────────────────────────────────────────────────
 
 

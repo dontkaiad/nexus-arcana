@@ -40,6 +40,7 @@ down_revision `g7b8c9d0e1f2`). SQLAlchemy Core mirror:
 | `reminder` | TIMESTAMP(tz) | nullable |
 | `completed_at` | TIMESTAMP(tz) | nullable |
 | `repeat_time` | Text | nullable — free-form repeat spec (see Recurring) |
+| `note` | Text | nullable — raw money/other detail that is neither deadline nor priority (see Deferred expense) |
 | `parent_task_id` | BigInteger | self-FK → `tasks.id` `ON DELETE SET NULL` |
 | `user_notion_id` | Text | NOT NULL, default `''` |
 | `created_at` | TIMESTAMP(tz) | NOT NULL, default `now()` |
@@ -93,8 +94,8 @@ extracts/normalizes them — a leftover of the Notion-era interface.
   that matches nothing → no-op `False` (status never silently corrupted).
 - **field edit** — `set_props(id, props)` maps Notion fields
   (`Задача`/`Статус`/`Приоритет`/`Категория`/`Повтор`/`День недели`/
-  `Время повтора`/`Дедлайн`/`Напоминание`/`Время завершения`) onto columns;
-  no-op if nothing but `updated_at` resolves.
+  `Время повтора`/`Дедлайн`/`Напоминание`/`Время завершения`/`Заметка`) onto
+  columns; no-op if nothing but `updated_at` resolves.
 - **repeat fields** — `set_repeat_fields(id, repeat, day_of_week,
   repeat_time)` sets `repeat_id`/`day_of_week_id`/`repeat_time`.
 - **complete** — non-recurring: status → `Done`, reminder/deadline jobs
@@ -110,6 +111,19 @@ extracts/normalizes them — a leftover of the Notion-era interface.
   `tasks._parse_repeat_time`) drives the next-run time and interval; the
   `repeat` code drives the period. Reminders advance per cycle rather than
   the task reaching a terminal state.
+
+## Deferred expense (`note`)
+
+A task whose text mentions money that will be spent *at the deadline*, not now
+("прийти к нотариусу в среду, оплата 1250"), is classified as a single `task`
+item with the raw mention in `note` — the classifier does **not** emit a
+separate `expense` (see `core/classifier.build_system`). On completion of a
+non-recurring task, `tasks._expense_from_note_on_done` →
+`finance.expense_from_task_note` parses an amount from `note`
+(`_parse_user_amount`) and, if found, writes a real `💸 Расход` transaction
+dated today (reusing `_write_one_time_expense`) with a Haiku-picked category
+(`_ONE_TIME_PARSE_SYSTEM`, default `💳 Прочее`) and posts "📤 Записал расход".
+No amount in `note` → nothing written, completion is never blocked.
 
 ## Invariants
 
@@ -181,11 +195,14 @@ Mini App uses to hide the task until the next run.
 `nexus/handlers/tasks.py` uses Haiku exclusively
 (`claude-haiku-4-5-20251001`): parsing date/priority/category/repeat from
 free text and short ADHD advice lines. No Sonnet, no Opus in the tasks path.
-Reads/writes/status/streak logic are pure SQL/SQLite — no LLM.
+Reads/writes/status/streak logic are pure SQL/SQLite — no LLM. Deferred-expense
+category resolution on completion also runs on Haiku
+(`finance.expense_from_task_note`).
 
 ## Verify against code
 
 - `alembic/versions/h8c9d0e1f2a3_nexus_tasks_pg.py` — tables + seeded codes
+- `alembic/versions/a7b8c9d0e1f2_tasks_note.py` — `note` column
 - `nexus/repos/tasks_tables.py` — SQLAlchemy Core definitions
 - `nexus/repos/pg_tasks_repo.py` — `Task` dataclass, lookup cache, `_match`,
   create/status/props/repeat, reminder-restore queries
@@ -194,6 +211,8 @@ Reads/writes/status/streak logic are pure SQL/SQLite — no LLM.
   (`_handle_recurring_task_reset`, `_handle_recurring_reminder_done`),
   `restore_reminders_on_startup`, `_parse_repeat_time`, `_reschedule_all_for_tz`,
   `_update_streak_line`, Haiku `ask_claude` calls
+- `core/classifier.py` — `build_system` future-task-money → `note` rule
+- `nexus/handlers/finance.py` — `expense_from_task_note`, `_write_one_time_expense`
 - `core/task_streaks.py` — per-task streak store + rules
 - `nexus/handlers/streaks.py` — global daily streak
 - `core/subtasks_handler.py` — "📋 Подзадачи" factory router → 🗒️ Списки

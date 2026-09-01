@@ -13,7 +13,7 @@ from aiogram import Router, F, Bot
 from aiogram.filters import BaseFilter
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from core.claude_client import ask_claude
-from core.props import _title, _select, _date, _status, _relation
+from core.props import _title, _select, _date, _status, _relation, _text
 from nexus.repos.tasks_repo import _repo
 from nexus.handlers.utils import react
 from core.layout import maybe_convert
@@ -2513,6 +2513,9 @@ async def _do_save_task(message: Message, data: dict, chat_id: int = None, uid: 
         props["Дедлайн"] = _date_with_tz(data["deadline"], tz_offset)
     if data.get("reminder_time"):
         props["Напоминание"] = _date_with_tz(data["reminder_time"], tz_offset)
+    note = (data.get("note") or "").strip()
+    if note:
+        props["Заметка"] = _text(note)
     if user_notion_id:
         props["🪪 Пользователи"] = _relation(user_notion_id)
 
@@ -2567,13 +2570,15 @@ async def _do_save_task(message: Message, data: dict, chat_id: int = None, uid: 
             repeat_parts.append(f"в {_rtime_raw}")
         repeat_line = f"\n🔄 Повтор: {' '.join(repeat_parts)}"
 
+    note_line = f"\n📝 Заметка: {note}" if note else ""
+
     msg_id = data.get("msg_id")
     text_content = (
         f"⚡ <b>Задача создана!</b>\n"
         f"📌 {data['title']}\n"
         f"🏷 {real_category} · {_priority_display(real_priority)}\n"
         f"📅 Дедлайн: {deadline_display}\n"
-        f"🔔 Напоминание: {reminder_display}{repeat_line}"
+        f"🔔 Напоминание: {reminder_display}{repeat_line}{note_line}"
     )
 
     # Inline-кнопки: предложить разбить на подзадачи
@@ -2755,6 +2760,28 @@ async def handle_task_cancel(message: Message, task_hint: str, user_notion_id: s
         await message.answer("⚠️ Ошибка при отмене задачи.")
 
 
+async def _expense_from_note_on_done(message: Message, task, uid: int,
+                                     user_notion_id: str = "") -> None:
+    """Отложенная трата: если у выполненной задачи есть заметка с суммой —
+    создаём реальную finance-транзакцию (💸 Расход) в день выполнения и явно
+    сообщаем об этом. Без суммы в заметке — ничего не делаем, закрытие задачи
+    не блокируем.
+    """
+    note = (getattr(task, "note", "") or "").strip()
+    if not note:
+        return
+    notion_uid = (getattr(task, "user_notion_id", "") or "") or user_notion_id
+    try:
+        from nexus.handlers.finance import expense_from_task_note
+        res = await expense_from_task_note(note, user_notion_id=notion_uid, uid=uid)
+    except Exception as e:
+        logger.error("_expense_from_note_on_done: %s", e)
+        return
+    if res:
+        desc, amount, _cat = res
+        await message.answer(f"📤 Записал расход: {amount:,.0f}₽ — {desc}")
+
+
 async def handle_task_done(message: Message, task_hint: str, user_notion_id: str = "") -> None:
     """Найти активную задачу по ключевым словам и отметить выполненной."""
     import random
@@ -2802,6 +2829,7 @@ async def handle_task_done(message: Message, task_hint: str, user_notion_id: str
             phrase = random.choice(_DONE_PHRASES)
             streak_line = await _update_streak_line(uid, task_id)
             await message.answer(f"{phrase}\n✅ {title} — выполнено{streak_line}")
+            await _expense_from_note_on_done(message, task, uid, user_notion_id)
         else:
             await message.answer("⚠️ Ошибка обновления в Notion.")
         return
@@ -2852,6 +2880,8 @@ async def task_done_select(call: CallbackQuery) -> None:
         streak_line = await _update_streak_line(uid, task_id)
         await call.answer("✅ Записано!")
         await call.message.reply(phrase + "\n✅ Выполнено" + streak_line)
+        if sel_task:
+            await _expense_from_note_on_done(call.message, sel_task, uid)
     else:
         await call.answer("⚠️ Ошибка обновления", show_alert=True)
 
@@ -2893,6 +2923,8 @@ async def cb_done_multi_confirm(call: CallbackQuery) -> None:
                 _remove_task_jobs(task_id)
                 done_titles.append(title)
                 last_done_task_id = task_id
+                if task:
+                    await _expense_from_note_on_done(call.message, task, uid)
     if done_titles:
         phrase = _random.choice(_DONE_PHRASES)
         # #116: раньше сюда попадал task_id — последнее значение цикла ПО

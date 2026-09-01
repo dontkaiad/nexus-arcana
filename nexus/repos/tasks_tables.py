@@ -52,6 +52,7 @@ tasks = Table(
     Column("reminder", TIMESTAMP(timezone=True)),
     Column("completed_at", TIMESTAMP(timezone=True)),
     Column("repeat_time", Text),
+    Column("note", Text),
     Column("parent_task_id", BigInteger, ForeignKey("tasks.id")),
     Column("user_notion_id", Text, nullable=False, server_default=text("''")),
     Column("created_at", TIMESTAMP(timezone=True), nullable=False,

@@ -44,6 +44,7 @@ class Task:
     deadline: str = ""       # ISO string or ""
     reminder: str = ""       # ISO string or ""
     completed_at: str = ""   # ISO string or ""
+    note: str = ""           # свободная заметка (денежные/прочие детали задачи)
     last_edited: str = ""    # ISO string from updated_at
     created_at: str = ""     # ISO string from created_at
     archived: bool = False
@@ -195,6 +196,7 @@ def _to_task(row) -> Task:
         deadline=_fmt(row.deadline),
         reminder=_fmt(row.reminder),
         completed_at=_fmt(row.completed_at),
+        note=getattr(row, "note", "") or "",
         last_edited=_fmt(updated),
         created_at=_fmt(created),
         archived=False,
@@ -284,6 +286,7 @@ def _create_sync(
     deadline: Optional[str],
     reminder: Optional[str],
     user_notion_id: str,
+    note: Optional[str] = None,
 ) -> Optional[int]:
     _ensure_lookups()
     status_id = _match(_status_id, status, "Not started")
@@ -297,6 +300,7 @@ def _create_sync(
         "deadline": _parse_iso(deadline),
         "reminder": _parse_iso(reminder),
         "user_notion_id": user_notion_id or "",
+        "note": (note or "").strip() or None,
     }
     with get_engine().begin() as conn:
         result = conn.execute(tasks.insert().values(**vals).returning(tasks.c.id))
@@ -361,6 +365,8 @@ def _set_props_sync(task_id: str, props: dict) -> None:
             vals["reminder"] = _parse_iso(_extract_date(prop))
         elif field == "Время завершения":
             vals["completed_at"] = _parse_iso(_extract_date(prop))
+        elif field == "Заметка":
+            vals["note"] = _extract_text(prop) or None
 
     if len(vals) <= 1:
         return
@@ -486,6 +492,7 @@ class PgTasksRepo:
         category = _extract_select(props.get("Категория", {}))
         deadline = _extract_date(props.get("Дедлайн", {}))
         reminder = _extract_date(props.get("Напоминание", {}))
+        note = _extract_text(props.get("Заметка", {}))
         user_notion_id = ""
         rel = props.get("🪪 Пользователи", {})
         if rel:
@@ -495,7 +502,7 @@ class PgTasksRepo:
 
         pid = await asyncio.to_thread(
             _create_sync, title, status, priority, category,
-            deadline, reminder, user_notion_id,
+            deadline, reminder, user_notion_id, note,
         )
         return str(pid) if pid else None
 
