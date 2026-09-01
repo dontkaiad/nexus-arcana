@@ -61,6 +61,15 @@ class TestNexusCronCallables:
         from nexus.handlers.tasks import restore_reminders_on_startup
         assert callable(restore_reminders_on_startup)
 
+    def test_on_startup_calls_proactive_budget_review_once(self):
+        """_on_startup (внутри nexus_bot.main) дёргает proactive_budget_review
+        ровно один раз — cron 07:30 UTC теряется молча при дневном рестарте
+        контейнера (APScheduler сдвигает next_run_time на завтра)."""
+        import inspect
+        from nexus import nexus_bot
+        src = inspect.getsource(nexus_bot.main)
+        assert src.count("await proactive_budget_review(bot)") == 1
+
     def test_init_scheduler_exists(self):
         from nexus.handlers.tasks import init_scheduler
         assert callable(init_scheduler)

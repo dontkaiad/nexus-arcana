@@ -1619,6 +1619,15 @@ async def main() -> None:
 
     async def _on_startup(**kwargs) -> None:
         await restore_reminders_on_startup()
+        # Ревью бюджета разово на старте — cron 07:30 UTC пропадает молча, если
+        # контейнер рестартнул после 07:30 (дневной деплой): APScheduler сдвигает
+        # next_run_time на завтра. proactive_budget_review идемпотентна
+        # (_payday_already_sent/_payday_mark), лишний вызов задвоения не даёт.
+        try:
+            from nexus.handlers.finance import proactive_budget_review
+            await proactive_budget_review(bot)
+        except Exception as e:
+            logger.error("proactive_budget_review on startup failed: %s", e)
         await notify_startup("nexus")  # стартовый пинг в лог-группу (fail-safe)
         start_heartbeat()  # фоновый heartbeat для docker healthcheck
 
