@@ -2524,6 +2524,11 @@ BUDGET_SONNET_SYSTEM = (
     "Другие не выдумывать: никаких категорий доходов, практики, ритуальных расходников и т.п.\n"
     "- Лимит с пометкой [ручной] — НЕ ТРОГАТЬ, распределять остаток вокруг него\n"
     "- Коты = ФИКСИРОВАННЫЕ расходы (живые существа!)\n"
+    "- Категорию для фикс-расходов (fixed[].category) ставь эмодзи-префиксом как "
+    "везде в плане (напр. 🏠 для жилья/коммуналки, 💻 для техники/подписок, "
+    "🐾 для котов, 📄 для документов/налогов, 🚕 для транспорта) — НЕ словом. "
+    "И НЕ дублируй слово, которое уже есть в name позиции: если name = "
+    "'Коммуналка Питер', category = просто иконка, не 'Коммуналка Коммуналка Питер'\n"
     "- Привычки: Chapman = СИГАРЕТЫ (не чай!). Детализируй в habit_strategy "
     "(сигареты, кола, монстр) но итоговый лимит = одна строка 🚬 Привычки\n"
     "- Импульсивные ВСЕГДА > 0 (мин 1000₽)\n"
@@ -2558,7 +2563,9 @@ BUDGET_SONNET_SYSTEM = (
     ' "savings": {"amount": N, "note": "X"},\n'
     ' "limits": [{"category": "X", "amount": N, "current": N, "change": "X", "manual": false}],\n'
     ' "limits_total": N, "impulse_budget": N,\n'
-    ' "goals": [{"name": "X", "monthly": N, "total": N, "starts_after": "X or null"}],\n'
+    ' "goals": [{"name": "X", "monthly": N, "total": N,\n'
+    '   "starts_after": "условие разблокировки БЕЗ слова \'после\' в начале '
+    "(шаблон вывода добавит сам: 'после ' + это значение) or null\"}],\n"
     ' "relief_timeline": "X", "summary": "X", "habit_strategy": "X"}\n'
     "ВАЖНО: При нормальном месяце variant_a=null, variant_b=null, заполнить limits/savings/impulse_budget на верхнем уровне.\n"
     "При тяжёлом месяце limits/savings/impulse_budget на верхнем уровне = null, "
@@ -2668,7 +2675,9 @@ _BUDGET_PARSE_PROMPT_LEGACY = """Финансовый советник. Поль
 
 Входные данные: {all_messages}
 Категории для ЛИМИТОВ (переменные траты) — ТОЛЬКО из этого списка, других не выдумывать: {budget_limit_categories}
-(ФИКС-расходы из шага 2 — жильё/коммуналка/подписки/коты — это не лимиты, категорию для них ставь по смыслу.)
+(ФИКС-расходы из шага 2 — жильё/коммуналка/подписки/коты — это не лимиты.
+Категорию для фикс-расходов ставь эмодзи-префиксом как везде в плане (например 🏠 для жилья/коммуналки, 💻 для техники/подписок, 🐾 для котов, 📄 для документов/налогов, 🚕 для транспорта) — НЕ словом.
+И НЕ дублируй слово, которое уже есть в названии позиции: если описание уже 'Коммуналка Питер', категория — просто иконка без повторного слова, не 'Коммуналка Коммуналка Питер'.)
 Уже потрачено в этом периоде (already_spent): {already_spent}₽
 Экономия с прошлого периода (savings_from_last_period): {savings_from_last_period}₽
 
@@ -2775,7 +2784,8 @@ variant_b: "Уменьшить платежи" — предложить сниз
  "savings": {{"amount": N, "note": "X"}},
  "limits": [{{"category": "X", "amount": N, "current": N, "change": "X", "manual": false}}],
  "limits_total": N, "impulse_budget": N,
- "goals": [{{"name": "X", "monthly": N, "total": N, "starts_after": "X or null"}}],
+ "goals": [{{"name": "X", "monthly": N, "total": N,
+   "starts_after": "условие разблокировки БЕЗ слова 'после' в начале (шаблон вывода добавит сам) or null"}}],
  "relief_timeline": "X", "summary": "X", "habit_strategy": "X"}}
 ВАЖНО: При нормальном месяце variant_a=null, variant_b=null, заполнить limits/savings/impulse_budget на верхнем уровне.
 При тяжёлом — limits/savings/impulse_budget на верхнем уровне = null, заполнить ВНУТРИ variant_a и variant_b."""
@@ -3665,7 +3675,12 @@ def _format_plan(plan: dict) -> str:
             else:
                 starts = g.get("starts_after", g.get("note", ""))
                 if starts:
-                    lines.append("  {} — {:,}₽ · после {}".format(g.get("name", "?"), total, starts))
+                    # Sonnet иногда всё равно пишет "после X" — не дублируем слово.
+                    starts_str = str(starts).strip()
+                    if starts_str.lower().startswith("после"):
+                        lines.append("  {} — {:,}₽ · {}".format(g.get("name", "?"), total, starts_str))
+                    else:
+                        lines.append("  {} — {:,}₽ · после {}".format(g.get("name", "?"), total, starts_str))
                 else:
                     lines.append("  {} — {:,}₽ · после закрытия долгов".format(g.get("name", "?"), total))
 

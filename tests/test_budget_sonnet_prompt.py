@@ -226,3 +226,41 @@ def test_sonnet_prompt_one_time_feeds_already_spent():
     # в разделе Шаг 1.5
     step = S.split("Шаг 1.5:")[1].split("Шаг 1.6:")[0]
     assert "one_time_total" in step
+
+
+# ── fix: категория фикс-расходов эмодзи без дублей слов ───────────────────────
+
+@pytest.mark.parametrize("name,prompt", _BOTH_PROMPTS.items())
+def test_fixed_category_is_emoji_prefix_not_word(name, prompt):
+    """Категорию фикс-расхода ставить эмодзи-префиксом, НЕ словом."""
+    assert "эмодзи-префиксом" in prompt, name
+    assert "НЕ словом" in prompt or "не словом" in prompt.lower(), name
+
+
+@pytest.mark.parametrize("name,prompt", _BOTH_PROMPTS.items())
+def test_fixed_category_no_word_duplication_rule(name, prompt):
+    """Не дублировать слово, уже присутствующее в названии позиции."""
+    assert "Коммуналка Коммуналка Питер" in prompt, name
+
+
+@pytest.mark.parametrize("name,prompt", _BOTH_PROMPTS.items())
+def test_goal_starts_after_without_leading_posle(name, prompt):
+    """starts_after: значение БЕЗ слова 'после' в начале (шаблон добавит сам)."""
+    assert "БЕЗ слова 'после' в начале" in prompt, name
+
+
+# ── fix: двойное "после" в целях ─────────────────────────────────────────────
+
+def test_format_plan_goal_starts_after_no_double_posle():
+    plan = {"goals": [{"name": "Отпуск", "total": 120000, "monthly": 0,
+                       "starts_after": "после закрытия Ани"}]}
+    out = _format_plan(plan)
+    assert "после закрытия Ани" in out
+    assert "после после" not in out
+
+
+def test_format_plan_goal_starts_after_adds_posle_when_missing():
+    plan = {"goals": [{"name": "Отпуск", "total": 120000, "monthly": 0,
+                       "starts_after": "закрытия Ани"}]}
+    out = _format_plan(plan)
+    assert "после закрытия Ани" in out
