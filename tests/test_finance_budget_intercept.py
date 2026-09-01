@@ -510,3 +510,45 @@ async def test_run_budget_analysis_legacy_branch_defaults_to_zero(tmp_budget_db)
     text = loading.edit_text.call_args.args[0]
     assert "Уже потрачено" not in text
     assert "Экономия с прошлого периода" not in text
+
+
+# ── Тяжёлый месяц без платежа по долгу → ОДИН план, без кнопок А/Б ──────────
+
+@pytest.mark.asyncio
+async def test_tight_month_no_debt_payment_renders_single_plan(tmp_budget_db):
+    """Sonnet вернул is_tight_month:false + маленький остаток + variant_a/b:null
+    (что промпт теперь и предписывает при total_debt_payment == 0) →
+    кнопки обычные (✅ Принять), НЕ 🅰️/🅱️, плюс плашка «жёстко»."""
+    from nexus.handlers import finance
+
+    uid = 999_300
+    _seed_state(uid, {"buf": ["зп 40к"], "notion_uid": "u-1", "state": "collecting"})
+
+    loading = await _fake_loading()
+    msg = MagicMock()
+    msg.from_user.id = uid
+    msg.chat.id = 1
+    msg.bot = AsyncMock()
+    msg.answer = AsyncMock(return_value=loading)
+
+    empty_budget = {"доходы": [], "постоянные": [], "цели": [], "долги": [], "лимиты": []}
+    plan_json = json.dumps({
+        "is_tight_month": False, "variant_a": None, "variant_b": None,
+        "free_after_debts": 12000, "income_total": 40000, "fixed_total": 0,
+        "limits": [{"category": "🍜 Продукты", "amount": 6000}],
+    }, ensure_ascii=False)
+
+    with patch.object(finance, "_load_budget_data", AsyncMock(return_value=empty_budget)), \
+         patch.object(finance, "_period_spending", AsyncMock(return_value=({}, 0.0))), \
+         patch.object(finance, "ask_claude", AsyncMock(return_value=plan_json)):
+        await finance._run_budget_analysis(msg, uid)
+
+    _, kwargs = loading.edit_text.call_args
+    kb = kwargs["reply_markup"]
+    all_cb = [b.callback_data for row in kb.inline_keyboard for b in row]
+    assert "bsetup_accept" in all_cb
+    assert "bsetup_variant_a" not in all_cb
+    assert "bsetup_variant_b" not in all_cb
+
+    text = loading.edit_text.call_args.args[0]
+    assert "жёстко" in text  # 12000 < 15500, плашка всё равно есть
