@@ -1809,7 +1809,9 @@ function NxFinance({ s }) {
                       <span style={{ fontSize: fs(14), color: s.tS, fontFamily: H }}>{g.t.toLocaleString()} ₽</span>
                     </div>
                     <div style={{ fontSize: fs(12), color: s.tS, marginTop: 3 }}>
-                      достигнута{g.closedAt ? ` · ${fmtClosed(g.closedAt)}` : ""}
+                      {/* «закрыта», не «достигнута»: деактивация цели ≠ накопила сумму.
+                          Реального трекинга накоплений нет — см. _load_closed_budget. */}
+                      закрыта{g.closedAt ? ` · ${fmtClosed(g.closedAt)}` : ""}
                     </div>
                   </Glass>
                 ))}

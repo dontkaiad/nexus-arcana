@@ -195,6 +195,37 @@ def test_finance_view_goals(client):
     assert isinstance(goal["after"], str) and goal["after"].startswith("~")
 
 
+def test_finance_closed_goal_is_neutral_not_achieved(client):
+    """Закрытая цель = «закрыта», НЕ «достигнута»: деактивация Memory-факта
+    происходит по разным причинам (замена/чистка/ручное удаление), не только
+    «накопила target». API не отдаёт saved-заглушку (=target) для закрытых целей."""
+    tz = 3
+    closed_goal_mem = Memory(
+        id="m-cg", key="цель_flip", is_current=False,
+        fact="цель: Samsung Flip — 100000₽ · откладываю 8000₽",
+        date="2026-08-15",
+    )
+    with patch("miniapp.backend.routes.finance.load_budget_data",
+               AsyncMock(return_value={"доходы": [], "постоянные": [], "лимиты": [],
+                                       "цели": [], "долги": []})), \
+         patch("miniapp.backend.routes.finance._mem_repo.find_by_category",
+               AsyncMock(return_value=[closed_goal_mem])), \
+         patch("core.repos.pg_debts_repo._repo.list_closed", AsyncMock(return_value=[])), \
+         patch("miniapp.backend.routes.finance.today_user_tz",
+               AsyncMock(return_value=(_today_date(tz), tz))), \
+         patch("miniapp.backend.routes.finance.get_user_notion_id",
+               AsyncMock(return_value=FAKE_NOTION_USER)):
+        r = client.get("/api/finance?view=goals")
+
+    assert r.status_code == 200
+    cg_list = r.json()["closed_goals"]
+    assert len(cg_list) == 1
+    cg = cg_list[0]
+    assert cg["name"] == "Samsung Flip"
+    assert cg["target"] == 100000
+    assert "saved" not in cg, "saved-заглушка (=target) не должна возвращаться для закрытой цели"
+
+
 def test_finance_invalid_view(client):
     r = client.get("/api/finance?view=bogus")
     assert r.status_code == 400

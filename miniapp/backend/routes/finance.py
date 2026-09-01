@@ -402,11 +402,17 @@ async def _load_closed_budget(user_notion_id: str) -> dict:
                 continue
             saving = parse_amount(m.group(3)) if m.group(3) else 0
             closed_at = (mem.date or "")[:10] or None
+            # "закрыта", НЕ "достигнута": is_current=False у Memory-факта цели
+            # ставится по разным причинам — замена, ручное удаление, чистка
+            # базы — не только "накопила target". Реального трекинга накоплений
+            # в системе нет, поэтому НЕ отдаём "saved"/процент прогресса для
+            # закрытых целей — target-заглушка рисовала любую закрытую цель как
+            # 100%. Нужен отдельный явный механизм трекинга, если захочется
+            # показывать реальное выполнение/прогресс.
             out["цели"].append({
                 "key": key,
                 "name": m.group(1).strip(),
                 "target": int(round(parse_amount(m.group(2)))),
-                "saved": int(round(parse_amount(m.group(2)))),
                 "monthly": int(round(saving)),
                 "closed_at": closed_at,
             })
