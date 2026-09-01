@@ -1,6 +1,6 @@
 # BUDGET — data-model contract (бюджет / day limit)
 
-Code conforms to: bfec51d. This spec describes the budget data model as of
+Code conforms to: 6cf5e6e. This spec describes the budget data model as of
 that commit; update it in the same PR that changes the model.
 
 > Contract, not snapshot. Describes the derived model and the guarantees of
@@ -35,6 +35,13 @@ that commit; update it in the same PR that changes the model.
    Разовая трата НЕ становится фактом Памяти — это обычная запись в
    финансах (💸 Расход). В следующем периоде она никак не всплывает и
    пересчитывать бюджет из-за нее не нужно.
+   Это работает и **внутри composite-дампа /budget**: если в одном
+   сообщении настройки пометить строки «разовый: билет 15000» — Sonnet
+   кладёт их в отдельный массив `one_time` (не в `fixed`), они входят в
+   `already_spent` этого периода, а при «✅ Принять» пишутся как
+   finance-транзакции 💸, НЕ как `постоянно_*`-факты. (До фикса от 2026-09-02
+   помеченные разовыми строки попадали в `fixed` и уходили в `постоянно_*`
+   навсегда при первом же Принятии.)
 
 3. **Доход** — тут ДВЕ разные вещи с похожим названием, легко спутать:
    - **План дохода** (ключ `income_`) — «бюджет 100000 рублей» / «у меня
@@ -88,9 +95,13 @@ that commit; update it in the same PR that changes the model.
      без А/Б). Варианту Б нечего уменьшать → развилку не показываем.
 4. Если был выбор А/Б — жмёшь кнопку, план обновляется под выбранный вариант.
 5. «✅ Принять» — план сохраняется как набор фактов: лимиты (`лимит_*`,
-   ручные `[ручной]` не трогаются), постоянные (если менялись), доход,
-   цели (`цель_*`, включая подушку), долги (в таблицу `debts` со
-   стратегией/платежом).
+   ручные `[ручной]` не трогаются), постоянные из `plan["fixed"]` (`постоянно_*`),
+   доход, цели (`цель_*`, включая подушку), долги (в таблицу `debts` со
+   стратегией/платежом). Позиции из `plan["one_time"]` пишутся как
+   finance-транзакции 💸 (через тот же `_write_one_time_expense`, что и команда
+   «разовый расход X Y»), **никогда** как `постоянно_*`. В цикле `fixed`
+   стоит sanity-`warning`, если туда всё же попадёт что-то со словом
+   «разов» в названии.
 6. Пока план не принят: «📋 Стратегия долгов» — переспросить стратегию,
    «✏️ Изменить данные» — свободным текстом сказать что поправить и
    пересчитать, «❌ Закрыть план» — выйти из режима настройки совсем.
@@ -99,10 +110,13 @@ that commit; update it in the same PR that changes the model.
 
 - **already_spent** — сумма ВСЕХ трат текущего периода (не только
   разовых — любая обычная финансовая запись, включая обычные «потратила
-  X на Y»). При пересчёте плана Sonnet сначала вычитает её из
-  «Распределяемых» — то есть уже потраченное не считается ещё раз. В
-  начале нового периода (после дня зарплаты) она сама обнуляется — период
-  для подсчёта сдвигается.
+  X на Y») **плюс `one_time_total`** — разовые, помеченные прямо в
+  composite-дампе /budget (они ещё не финансовые транзакции на момент
+  расчёта, но деньги уже считаются потраченными). При пересчёте плана
+  Sonnet сначала вычитает объединённый `already_spent` из «Распределяемых»
+  — уже потраченное не считается ещё раз. В начале нового периода (после
+  дня зарплаты) финансовая часть сама обнуляется — период для подсчёта
+  сдвигается.
 - **savings_from_last_period** — если в закончившемся периоде остались
   неизрасходованные деньги по лимитам, при переходе на новый период
   (день зарплаты) бот присылает обзор и держит эту сумму в памяти сессии
@@ -228,11 +242,15 @@ Budget has **no table of its own** — there is no migration, no
 3. **One-time expenses are NOT budget facts.** `разовый расход X` /
    `разовые: ...` is classified as `one_time_expense` (`core/classifier.py`,
    `_ONE_TIME_EXPENSE_RE`, checked before `memory_save`/`budget`) and
-   written as ordinary `nexus_budget` finance transactions
-   (`nexus/handlers/finance.py:handle_one_time_expense` → `_save_finance` →
-   `_repo.create_entry`, type `💸 Расход`). They feed into the plan
-   only indirectly, via `spending_by_category` → `already_spent` (see
-   Model routing).
+   written as ordinary `nexus_budget` finance transactions via the shared
+   `nexus/handlers/finance.py:_write_one_time_expense` → `_save_finance` →
+   `_repo.create_entry`, type `💸 Расход`. They feed into the plan only
+   indirectly, via `spending_by_category` → `already_spent` (see Model
+   routing). **Inside a composite `/budget` dump**, lines tagged `разовый:`
+   are returned by Sonnet in a separate `one_time` array (not `fixed`),
+   contribute to `one_time_total`/`already_spent`, and on **Accept**
+   `_save_budget_plan` writes them via the *same* `_write_one_time_expense`
+   — never as `постоянно_*`.
 
 The limit display map (`лимит` link → emoji label) is owned by
 `core/budget.py:LIMIT_DISPLAY`.
@@ -335,10 +353,17 @@ session is open) uses Sonnet and picks one of **two different prompts**
   `_BUDGET_PARSE_PROMPT_LEGACY`, user's raw setup text only (no
   `_build_sonnet_input` context — no `income_from_memory`, `manual_limits`, etc.).
 
+Both prompt schemas split recurring vs one-off into two arrays — `fixed`
+(→ `fixed_total`, → `постоянно_*` on Accept) and `one_time` (→
+`one_time_total`, → 💸 finance transactions on Accept). `one_time` is
+**not** in `fixed_total`; it is added into `already_spent`.
+
 Both prompts get `already_spent` (sum of `spending_by_category` — all
-`nexus_budget` transactions this period, one-time expenses included) and
-`savings_from_last_period` (carried in the `pending_budget.db` session
-state, set by `_send_payday_review`) from the **same** helper,
+`nexus_budget` transactions this period, one-time expenses included, **plus
+`one_time_total`** from the current dump) and `savings_from_last_period`
+(carried in the `pending_budget.db` session state, set by
+`_send_payday_review`) — the `spending_by_category`/finance part from the
+**same** helper,
 `_period_spending()` — extracted specifically so the two prompts can't
 drift apart on this (they did once, see the `18500`/`15500` note above).
 
@@ -372,7 +397,9 @@ expense items → `_ONE_TIME_PARSE_SYSTEM`).
   `start_budget_analysis`, `_run_budget_analysis`, `_build_sonnet_input`,
   `_period_spending` (shared already_spent/income-this-period source),
   `BUDGET_SONNET_SYSTEM`, `_BUDGET_PARSE_PROMPT_LEGACY`, `_format_plan`,
-  `_save_budget_plan`, `handle_one_time_expense`, `_ONE_TIME_PARSE_SYSTEM`,
+  `_save_budget_plan` (`fixed` → `постоянно_*`, `one_time` → 💸 tx),
+  `handle_one_time_expense`, `_write_one_time_expense` (shared one-time
+  writer), `_ONE_TIME_PARSE_SYSTEM`,
   `_BUDGET_VARIABLE_CATS` (the 8 limit categories fed to both prompts),
   `_bdb`/`_BUDGET_DB` (session store), `_send_payday_review`
 - `nexus/nexus_bot.py` — `/budget` wiring, startup `proactive_budget_review`

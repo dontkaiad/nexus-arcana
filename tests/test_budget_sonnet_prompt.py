@@ -23,8 +23,9 @@ def test_prompt_has_step_1_5_subtract_spending():
     """Подшаг 1.5: уже потраченное в периоде вычитается из Распределяемых."""
     assert "Шаг 1.5" in BUDGET_SONNET_SYSTEM
     assert "spending_by_category" in BUDGET_SONNET_SYSTEM
-    # именно вычитание из распределяемых, до долгов/лимитов
-    assert "Распределяемые = Распределяемые − сумма всех значений spending_by_category" in BUDGET_SONNET_SYSTEM
+    # вычитание already_spent из распределяемых, до долгов/лимитов
+    assert "Распределяемые = Распределяемые − already_spent" in BUDGET_SONNET_SYSTEM
+    assert "one_time_total" in BUDGET_SONNET_SYSTEM  # разовые из буфера входят в already_spent
     assert BUDGET_SONNET_SYSTEM.index("Шаг 1.5") < BUDGET_SONNET_SYSTEM.index("Шаг 2:")
 
 
@@ -195,3 +196,33 @@ def test_fork_requires_active_debt_payment(name, prompt):
     """total_debt_payment == 0 в тяжёлый месяц → один план, без А/Б."""
     assert "total_debt_payment == 0" in prompt, name
     assert "total_debt_payment > 0" in prompt, name
+
+
+# ── Разовые из composite-дампа: отдельный массив one_time, НЕ fixed ─────────
+
+@pytest.mark.parametrize("name,prompt", _BOTH_PROMPTS.items())
+def test_prompt_splits_fixed_and_one_time(name, prompt):
+    """Разовые (метка 'разовый:'/'разово:') → отдельный массив one_time,
+    НЕ смешиваются с fixed, НЕ входят в fixed_total."""
+    assert '"one_time"' in prompt, name
+    assert '"one_time_total"' in prompt, name
+    assert "one_time" in prompt and "fixed_total" in prompt, name
+    # метка разового явно упомянута
+    assert "разовый:" in prompt or "разово:" in prompt, name
+    # приписка "(разовый)" в name больше НЕ нужна
+    assert '"(разовый)"' in prompt or "(разовый)" in prompt, name  # упомянута как «НЕ добавлять»
+
+
+def test_legacy_prompt_one_time_feeds_already_spent():
+    """already_spent legacy = finance-траты + one_time_total (буфер composite-дампа)."""
+    from nexus.handlers.finance import _BUDGET_PARSE_PROMPT_LEGACY as P
+    assert "already_spent = {already_spent} (реальные finance-траты периода) + one_time_total" in P
+    assert "one_time НЕ входит в fixed_total" in P
+
+
+def test_sonnet_prompt_one_time_feeds_already_spent():
+    from nexus.handlers.finance import BUDGET_SONNET_SYSTEM as S
+    assert "one_time_total" in S
+    # в разделе Шаг 1.5
+    step = S.split("Шаг 1.5:")[1].split("Шаг 1.6:")[0]
+    assert "one_time_total" in step

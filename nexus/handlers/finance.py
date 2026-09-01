@@ -2124,6 +2124,24 @@ _ONE_TIME_PARSE_SYSTEM = (
 )
 
 
+async def _write_one_time_expense(desc: str, amount: float, category: str = "💳 Прочее",
+                                  user_notion_id: str = "", bot_label: str = "☀️ Nexus",
+                                  uid: int = 0) -> "Optional[str]":
+    """Единый писатель разовой траты → обычная finance-транзакция (💸 Расход).
+
+    Используется И командой «разовый расход X Y» (handle_one_time_expense), И
+    one_time-позициями из composite-дампа /budget (_save_budget_plan) — логика
+    записи в ОДНОМ месте, чтобы не разъезжались (см. #191-класс дрейфа).
+    """
+    from core.config import config
+    cat = category if category in CATEGORIES else "💳 Прочее"
+    return await _save_finance(
+        {"amount": float(amount or 0), "category": cat, "type_": "💸 Расход",
+         "source": "💳 Карта", "description": (desc or "разовый расход").strip()},
+        config.nexus.db_finance, bot_label, user_notion_id, uid=uid,
+    )
+
+
 async def handle_one_time_expense(message: Message, text: str, bot_label: str = "☀️ Nexus",
                                   user_notion_id: str = "") -> None:
     """Разовый расход(ы) → обычные finance-транзакции (💸 Расход), НЕ в память.
@@ -2133,7 +2151,6 @@ async def handle_one_time_expense(message: Message, text: str, bot_label: str = 
     распределяемых только в этом периоде.
     Составной ввод («разовые: X 3500, Y 8500») — Haiku-парсер на N позиций.
     """
-    from core.config import config
     from core.config import config as _cfg
     uid = message.from_user.id
     raw = await ask_claude(text, system=_ONE_TIME_PARSE_SYSTEM, model=_cfg.model_haiku,
@@ -2164,11 +2181,7 @@ async def handle_one_time_expense(message: Message, text: str, bot_label: str = 
         return
 
     for desc, amount, cat in parsed:
-        page_id = await _save_finance(
-            {"amount": amount, "category": cat, "type_": "💸 Расход",
-             "source": "💳 Карта", "description": desc},
-            config.nexus.db_finance, bot_label, user_notion_id, uid=uid,
-        )
+        page_id = await _write_one_time_expense(desc, amount, cat, user_notion_id, bot_label, uid)
         if page_id:
             _last_page_id[uid] = page_id
 
@@ -2367,11 +2380,14 @@ BUDGET_SONNET_SYSTEM = (
     "  income_this_period — это ФАКТИЧЕСКИЕ поступления за текущий период, НЕ использовать как базу!\n"
     "  Если income_from_memory пусто → использовать income_this_period как fallback.\n"
     "  Если income_from_memory НЕ пусто → income_total = сумма всех amount из income_from_memory.\n"
-    "  Шаг 1.5: Распределяемые = Распределяемые − сумма всех значений spending_by_category\n"
-    "    (это уже потраченные в этом периоде деньги — разовые расходы, чеки и т.д.,\n"
-    "    записанные обычными тратами, а не постоянными). Остаток = то что реально\n"
-    "    доступно распределить на оставшуюся часть месяца.\n"
-    "    already_spent = сумма всех значений spending_by_category (0 если трат нет) — вернуть в JSON.\n"
+    "  Фикс/one_time: в fixed — ТОЛЬКО повторяющиеся ежемесячно расходы. Позиции\n"
+    "    из user_messages с явной меткой 'разовый:'/'разово:' → массив one_time\n"
+    "    ({name, category, amount}), приписку '(разовый)' в name НЕ добавлять,\n"
+    "    в fixed НЕ класть. one_time_total = sum(one_time), в fixed_total НЕ входит.\n"
+    "  Шаг 1.5: Распределяемые = Распределяемые − already_spent, где\n"
+    "    already_spent = сумма всех значений spending_by_category (реальные траты\n"
+    "    периода) + one_time_total (разовые из user_messages). Вернуть объединённое\n"
+    "    already_spent в JSON. Это уже потраченные деньги — реально вычитаются.\n"
     "  Шаг 1.6: Распределяемые = Распределяемые + savings_from_last_period\n"
     "    (экономия с прошлого периода — реально прибавляется к сумме на этот месяц,\n"
     "    а не только упоминается в тексте). Вернуть savings_from_last_period в JSON.\n"
@@ -2473,6 +2489,7 @@ BUDGET_SONNET_SYSTEM = (
     "Схема JSON:\n"
     '{"income": [{"source": "X", "amount": N}], "income_total": N,\n'
     ' "fixed": [{"name": "X", "category": "X", "amount": N}], "fixed_total": N,\n'
+    ' "one_time": [{"name": "X", "category": "X", "amount": N}], "one_time_total": N,\n'
     ' "already_spent": N, "savings_from_last_period": N,\n'
     ' "distributable": N,\n'
     ' "debts_monthly": [{"name": "X", "total": N, "monthly": N, "deadline": "X", "strategy": "X"}],\n'
@@ -2610,12 +2627,19 @@ _BUDGET_PARSE_PROMPT_LEGACY = """Финансовый советник. Поль
 
 РАСЧЁТ:
 1. ДОХОД — все источники. "к"=тысяч, "млн"=миллионов, "в год"→/12. Диапазон→верхняя граница.
-2. ФИКС = ж***+коммуналка+подписки+интернет+вода+коты(живые существа). Не трогать.
-3. РАСПРЕДЕЛЯЕМЫЕ = доход - фикс - already_spent + savings_from_last_period
-   (already_spent — уже потраченные в этом периоде деньги, реально вычитаются, не
-   только упоминаются; savings_from_last_period — экономия с прошлого периода,
-   реально прибавляется). already_spent и savings_from_last_period вернуть в JSON
-   как есть (0, если значение выше 0₽ не указано).
+2. РАЗДЕЛИ расходы на ДВА массива:
+   - fixed — ТОЛЬКО реально повторяющиеся КАЖДЫЙ месяц (позиция с меткой "фикс:"
+     в буфере ИЛИ без метки по умолчанию): ж***, коммуналка, подписки, интернет,
+     вода, коты. Не трогать.
+   - one_time — ТОЛЬКО позиции с ЯВНОЙ меткой "разовый:" / "разово:" в буфере
+     (билет, справка, госпошлина). {{name, category, amount}}. Приписку
+     "(разовый)" в name НЕ добавлять — массив отдельный, метка не нужна.
+   fixed_total = sum(fixed). one_time_total = sum(one_time). one_time НЕ входит в fixed_total.
+3. already_spent = {already_spent} (реальные finance-траты периода) + one_time_total
+   (разовые из буфера). Вернуть в JSON объединённое already_spent.
+   РАСПРЕДЕЛЯЕМЫЕ = доход - fixed_total - already_spent + savings_from_last_period
+   (already_spent реально вычитается; savings_from_last_period реально прибавляется,
+   вернуть как есть, 0 если не указано).
 4. ДОЛГИ — использовать ТОЛЬКО monthly_payment из данных:
    - Каждый долг имеет поле monthly_payment — это сумма которую Кай РЕАЛЬНО платит
    - КЛЮЧЕВОЕ ПРАВИЛО: считай ТОЛЬКО ПЕРВЫЙ долг по дедлайну!
@@ -2685,6 +2709,7 @@ variant_b: "Уменьшить платежи" — предложить сниз
 Схема JSON:
 {{"income": [{{"source": "X", "amount": N}}], "income_total": N,
  "fixed": [{{"name": "X", "category": "X", "amount": N}}], "fixed_total": N,
+ "one_time": [{{"name": "X", "category": "X", "amount": N}}], "one_time_total": N,
  "already_spent": N, "savings_from_last_period": N,
  "distributable": N,
  "debts_monthly": [{{"name": "X", "total": N, "monthly": N, "deadline": "X", "strategy": "X"}}],
@@ -3463,10 +3488,17 @@ def _format_plan(plan: dict) -> str:
     """Форматирует Sonnet-план в красивое сообщение."""
     lines = ["<b>💰 Финансовый план</b>"]
 
-    # Уже потрачено в этом периоде (разовые траты, вычтено из распределяемых)
+    # Уже потрачено в этом периоде (реальные траты + разовые из этого дампа,
+    # всё вычтено из распределяемых)
     already_spent = plan.get("already_spent", 0) or 0
+    one_time = plan.get("one_time", []) or []
+    ot_total = plan.get("one_time_total", sum(float(o.get("amount", 0) or 0) for o in one_time)) if one_time else 0
     if already_spent > 0:
         lines.append("\n📤 Уже потрачено в этом периоде: {:,}₽".format(already_spent))
+        if ot_total > 0:
+            lines.append("  ↳ из них разовых из этого плана: {:,}₽".format(int(ot_total)))
+    elif ot_total > 0:
+        lines.append("\n📤 Разовые из этого плана: {:,}₽ (учтутся только сейчас)".format(int(ot_total)))
 
     last_savings = plan.get("savings_from_last_period", 0) or 0
     if last_savings > 0:
@@ -3676,11 +3708,32 @@ async def _save_budget_plan(message: Message, uid: int) -> None:
         cat = f.get("category", "📌 Прочее")
         name = f.get("name", "?")
         amt = f.get("amount", 0)
+        if "разов" in name.lower():
+            # sanity-check: разовые должны быть в plan["one_time"], не тут.
+            # Пишем как постоянно_ всё равно (не роняем критичный путь), но громко логируем.
+            logger.warning(
+                "_save_budget_plan: fixed item %r выглядит разовым — one_time-разделение "
+                "в промпте не сработало; пишу в постоянно_ всё равно", name,
+            )
         await _save_memory_entry(
             "постоянно_{}".format(_cat_link(cat) + "_" + name.lower().replace(" ", "_")),
             "постоянно: {} ({}) — {}₽/мес".format(name, cat, amt),
             notion_uid,
         )
+
+    # Разовые из composite-дампа /budget — обычные finance-транзакции (💸 Расход),
+    # НЕ постоянные факты. До этого фикса они попадали в "fixed" и уходили в
+    # постоянно_* НАВСЕГДА при первом же Принятии плана.
+    for ot in plan.get("one_time", []) or []:
+        ot_name = ot.get("name") or ot.get("description") or "разовый расход"
+        ot_amt = ot.get("amount", 0)
+        if not ot_amt:
+            continue
+        await _write_one_time_expense(
+            ot_name, ot_amt, ot.get("category") or "💳 Прочее",
+            notion_uid, uid=uid,
+        )
+        logger.info("_save_budget_plan: one_time → finance tx %r %s₽", ot_name, ot_amt)
 
     # Лимиты — НЕ перезаписывать [ручной]
     existing_limits = await _get_limits("")

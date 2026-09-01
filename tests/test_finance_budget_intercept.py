@@ -552,3 +552,89 @@ async def test_tight_month_no_debt_payment_renders_single_plan(tmp_budget_db):
 
     text = loading.edit_text.call_args.args[0]
     assert "жёстко" in text  # 12000 < 15500, плашка всё равно есть
+
+
+# ── Разовые из composite-дампа НЕ становятся постоянными при Принятии ───────
+#
+# Баг: Кай в composite-дампе /budget помечает «разовый: билет 15000», но JSON
+# Sonnet имел один массив "fixed" — разовые уходили туда и при _save_budget_plan
+# писались в Память как постоянно_* НАВСЕГДА.
+
+@pytest.mark.asyncio
+async def test_save_budget_plan_one_time_written_as_finance_not_permanent(tmp_budget_db):
+    from nexus.handlers import finance
+    from core.repos import memory_repo as mrmod
+
+    uid = 999_400
+    plan = {
+        "fixed": [
+            {"name": "квартира", "category": "🏠 Жильё", "amount": 30000},
+            {"name": "подписки", "category": "💻 Подписки", "amount": 5000},
+        ],
+        "fixed_total": 35000,
+        "one_time": [
+            {"name": "билет в питер", "category": "🚕 Транспорт", "amount": 15000},
+            {"name": "госпошлина", "category": "💳 Прочее", "amount": 3500},
+        ],
+        "one_time_total": 18500,
+    }
+    _seed_state(uid, {"plan": plan, "notion_uid": "u-1", "state": "has_plan", "msg_id": 0})
+
+    loading = await _fake_loading()
+    msg = MagicMock()
+    msg.chat.id = 1
+    msg.bot = AsyncMock()
+    msg.answer = AsyncMock(return_value=loading)
+
+    mem_keys = []
+    ot_writes = []
+
+    async def cap_mem(key, fact, notion_uid=""):
+        mem_keys.append(key)
+
+    async def cap_ot(desc, amount, category="💳 Прочее", user_notion_id="", bot_label="☀️ Nexus", uid=0):
+        ot_writes.append((desc, amount, category))
+        return "pg-tx"
+
+    with patch.object(finance, "_save_memory_entry", AsyncMock(side_effect=cap_mem)), \
+         patch.object(finance, "_write_one_time_expense", AsyncMock(side_effect=cap_ot)), \
+         patch.object(finance, "_get_limits", AsyncMock(return_value={})), \
+         patch.object(finance, "build_budget_message", AsyncMock(return_value="ok")), \
+         patch.object(mrmod._repo, "find_by_key_prefixes", AsyncMock(return_value=[])), \
+         patch.object(mrmod._repo, "set_active", AsyncMock()):
+        await finance._save_budget_plan(msg, uid)
+
+    perm_keys = [k for k in mem_keys if k.startswith("постоянно_")]
+    assert len(perm_keys) == 2, f"постоянно_* только для fixed, получили {perm_keys}"
+    assert not any(w in k for k in perm_keys for w in ("билет", "питер", "госпошлин"))
+
+    assert len(ot_writes) == 2
+    assert {(d, a) for d, a, _ in ot_writes} == {("билет в питер", 15000), ("госпошлина", 3500)}
+    assert dict((d, c) for d, _, c in ot_writes)["билет в питер"] == "🚕 Транспорт"
+
+
+def test_format_plan_fixed_total_excludes_one_time_regression():
+    """Регресс кейса из бага: 3 «фикс:» + 3 «разовый:» вперемешку →
+    fixed_total = 54 650₽ (без разовых), НЕ 83 150₽."""
+    from nexus.handlers.finance import _format_plan
+
+    plan = {
+        "income_total": 200000,
+        "fixed": [
+            {"name": "квартира", "category": "🏠 Жильё", "amount": 40000},
+            {"name": "коммуналка", "category": "🏠 Жильё", "amount": 8000},
+            {"name": "подписки", "category": "💻 Подписки", "amount": 6650},
+        ],
+        "fixed_total": 54650,
+        "one_time": [
+            {"name": "билет", "category": "🚕 Транспорт", "amount": 15000},
+            {"name": "виза", "category": "💳 Прочее", "amount": 8000},
+            {"name": "страховка", "category": "💳 Прочее", "amount": 5500},
+        ],
+        "one_time_total": 28500,
+        "already_spent": 28500,
+    }
+    out = _format_plan(plan)
+    assert "🔒 Фикс: 54,650₽" in out
+    assert "83,150" not in out
+    assert "↳ из них разовых из этого плана: 28,500₽" in out
