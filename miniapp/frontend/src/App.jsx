@@ -1531,11 +1531,48 @@ function NxTasks({ s, openTask, taskClosedSig }) {
 // NEXUS — FINANCE
 // ═══════════════════════════════════════════════════════════════
 
+const _nowMonthStr = () => {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+};
+
 function NxFinance({ s }) {
   const [tab, setTab] = useState("today");
+  const [finMonth, setFinMonth] = useState(_nowMonthStr);  // YYYY-MM для вкладки «Месяц»
   const [drillCat, setDrillCat] = useState(null);  // wave6.1.2
   const [drillDebt, setDrillDebt] = useState(null);  // wave8.51
-  const { data, loading, error, refetch } = useApi(`/api/finance?view=${tab}`, [tab]);
+  // Бэкенд GET /finance?view=month&month=YYYY-MM уже поддерживал произвольный
+  // месяц — не хватало только UI навигации на фронте.
+  const finPath = tab === "month"
+    ? `/api/finance?view=month&month=${finMonth}`
+    : `/api/finance?view=${tab}`;
+  const { data, loading, error, refetch } = useApi(finPath, [tab, finMonth]);
+
+  const shiftFinMonth = (delta) => {
+    const [y, m] = finMonth.split("-").map(Number);
+    const d = new Date(y, m - 1 + delta, 1);
+    setFinMonth(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`);
+  };
+  const monthNav = tab === "month" ? (
+    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+      <span
+        onClick={() => shiftFinMonth(-1)}
+        aria-label="Предыдущий месяц"
+        style={{ cursor: "pointer", padding: "2px 10px", color: s.tS, fontSize: fs(20), lineHeight: 1 }}
+      >‹</span>
+      <span style={{ flex: 1, textAlign: "center", fontFamily: H, fontSize: fs(15), color: s.text, fontWeight: 500 }}>
+        {formatMonth(finMonth) || finMonth}
+      </span>
+      {finMonth !== _nowMonthStr() && (
+        <Pill s={s} onClick={() => setFinMonth(_nowMonthStr())}>Сейчас</Pill>
+      )}
+      <span
+        onClick={() => shiftFinMonth(1)}
+        aria-label="Следующий месяц"
+        style={{ cursor: "pointer", padding: "2px 10px", color: s.tS, fontSize: fs(20), lineHeight: 1 }}
+      >›</span>
+    </div>
+  ) : null;
 
   const tabsUi = (
     <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
@@ -1557,6 +1594,7 @@ function NxFinance({ s }) {
       <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
         <div className="page-title">Финансы</div>
         {tabsUi}
+        {monthNav}
         <Empty s={s} text="Загружаю..." />
       </div>
     );
@@ -1566,6 +1604,7 @@ function NxFinance({ s }) {
       <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
         <div className="page-title">Финансы</div>
         {tabsUi}
+        {monthNav}
         <ErrorBox s={s} error={error} refetch={refetch} />
       </div>
     );
@@ -1575,6 +1614,7 @@ function NxFinance({ s }) {
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
       <div className="page-title">Финансы</div>
       {tabsUi}
+      {monthNav}
 
       {tab === "today" && (() => {
         const { total, items, budget } = adaptFinanceToday(data);
@@ -1640,15 +1680,14 @@ function NxFinance({ s }) {
 
       {tab === "month" && (() => {
         const { inc, exp, balance, cats } = adaptFinanceMonth(data);
-        const monthIso = data?.month || "";
-        const monthLabel = formatMonth(monthIso) || monthIso;
+        const monthIso = data?.month || finMonth;
         return (
           <>
+            {/* Месяц показывает monthNav выше (стрелки ‹ ›). */}
             {/* #43 v2: реальный реюз <Metric> + .hero-metrics — тот же
                 компонент что блоки 0/4 ЗАДАЧИ / Nк СВОБОДНО / 🔥 N СТРИК
                 на Мой день (App.jsx:1362-1381). Те же шрифты, padding,
                 border-radius, glass-фон, флекс-распределение. */}
-            <div style={{ fontSize: fs(13), color: s.tS, marginBottom: 6, paddingLeft: 4 }}>{monthLabel}</div>
             <div className="hero-metrics" style={{ marginBottom: 10 }}>
               <Metric
                 s={s}
