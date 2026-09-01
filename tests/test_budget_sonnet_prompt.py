@@ -121,16 +121,71 @@ def test_priority_split_in_both_normal_and_tight(name, prompt):
 @pytest.mark.parametrize("name,prompt", _BOTH_PROMPTS.items())
 def test_budget_prompts_do_not_name_arcana_categories(name, prompt):
     """🔮 Практика и 🕯️ Расходники — категории Арканы, НЕ личного бюджета.
-    В шаблонах промптов их быть не должно (утечка полного CATEGORIES в
-    рантайм-контекст задокументирована отдельно в docs/specs/BUDGET.md)."""
+    В промптах их быть не должно даже как негативных примеров."""
     assert "Практика" not in prompt, name
     assert "Расходники" not in prompt, name
+
+
+# ── Sonnet видит ТОЛЬКО 8 бюджетных категорий, не все 19 общих Финансов ─────
+
+from core.config import FINANCE_CATEGORIES
+
+_NON_BUDGET_CATS = [c for c in FINANCE_CATEGORIES if c not in _BUDGET_VARIABLE_CATS]
 
 
 def test_budget_variable_cats_has_no_arcana():
     assert "🔮 Практика" not in _BUDGET_VARIABLE_CATS
     assert "🕯️ Расходники" not in _BUDGET_VARIABLE_CATS
     assert len(_BUDGET_VARIABLE_CATS) == 8
+
+
+def test_budget_variable_cats_matches_priority_split():
+    """_BUDGET_VARIABLE_CATS == 3 якорных + 5 приоритетного дележа (из прошлого
+    коммита). Расхождений быть не должно — теперь список реально используется."""
+    priority = ["🍱 Кафе/Доставка", "💅 Бьюти", "🏥 Здоровье", "👗 Гардероб", "📚 Хобби/Учеба"]
+    anchors = ["🚬 Привычки", "🍜 Продукты", "🚕 Транспорт"]
+    assert set(priority) | set(anchors) == set(_BUDGET_VARIABLE_CATS)
+
+
+def test_legacy_prompt_limit_categories_only_8_no_leak():
+    """Отрендеренный legacy-промпт: 8 бюджетных категорий есть, 11 остальных
+    (Практика/Расходники/Зарплата/Фриланс/Коты/Жильё/…) отсутствуют."""
+    rendered = _BUDGET_PARSE_PROMPT_LEGACY.format(
+        all_messages="", budget_limit_categories=", ".join(_BUDGET_VARIABLE_CATS),
+        current_date="", already_spent=0, savings_from_last_period=0,
+    )
+    for cat in _BUDGET_VARIABLE_CATS:
+        assert cat in rendered, cat
+    for cat in _NON_BUDGET_CATS:
+        assert cat not in rendered, f"утечка не-бюджетной категории: {cat}"
+    assert "{finance_categories}" not in _BUDGET_PARSE_PROMPT_LEGACY  # старый плейсхолдер убран
+
+
+@pytest.mark.asyncio
+async def test_sonnet_context_limit_categories_only_8_no_leak():
+    """_build_sonnet_input кладёт в контекст ТОЛЬКО _BUDGET_VARIABLE_CATS,
+    поля finance_categories больше нет, ни одна из 11 не-бюджетных не просочилась."""
+    import json as _json
+    from unittest.mock import AsyncMock, patch
+    from nexus.handlers import finance
+
+    empty = {"доходы": [], "постоянные": [], "цели": [], "долги": [], "лимиты": []}
+    with patch.object(finance, "_load_budget_data", AsyncMock(return_value=empty)), \
+         patch.object(finance, "_get_payday", AsyncMock(return_value=1)), \
+         patch.object(finance._repo, "query_records", AsyncMock(return_value=[])), \
+         patch.object(finance, "_budget_get", lambda uid: {}):
+        raw = await finance._build_sonnet_input(uid=1, user_notion_id="u")
+
+    ctx = _json.loads(raw)
+    assert ctx["budget_limit_categories"] == list(_BUDGET_VARIABLE_CATS)
+    assert "finance_categories" not in ctx
+    for cat in _NON_BUDGET_CATS:
+        assert cat not in raw, f"утечка не-бюджетной категории в контекст: {cat}"
+
+
+@pytest.mark.parametrize("name,prompt", _BOTH_PROMPTS.items())
+def test_prompts_instruct_limits_only_from_budget_list(name, prompt):
+    assert "budget_limit_categories" in prompt, name
 
 
 # ── Вариант Б только при реальном платеже по долгу ──────────────────────────

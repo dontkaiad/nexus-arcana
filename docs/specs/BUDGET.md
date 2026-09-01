@@ -1,6 +1,6 @@
 # BUDGET — data-model contract (бюджет / day limit)
 
-Code conforms to: bd9f0b9. This spec describes the budget data model as of
+Code conforms to: bfec51d. This spec describes the budget data model as of
 that commit; update it in the same PR that changes the model.
 
 > Contract, not snapshot. Describes the derived model and the guarantees of
@@ -181,24 +181,15 @@ that commit; update it in the same PR that changes the model.
   finance-транзакция типа «Доход», не персистентная). Если решишь это
   переименовать так же, как «обязательные → постоянные» — заводи отдельную
   задачу, здесь только зафиксировано наблюдение.
-- **Утечка полного списка категорий в бюджетные промпты.**
-  `_BUDGET_VARIABLE_CATS` (`nexus/handlers/finance.py:2228`, 8 категорий:
-  Привычки/Бьюти/Транспорт/Продукты/Кафе-Доставка/Здоровье/Гардероб/
-  Хобби-Учеба) заявлен как канонический список переменных бюджетных
-  категорий, **но нигде в коде не используется** — это мёртвая константа.
-  Оба промпта на деле получают ПОЛНЫЙ `CATEGORIES` (= `FINANCE_CATEGORIES`,
-  19 шт.): legacy — через `Категории финансов: {finance_categories}`,
-  Sonnet — через `"finance_categories": CATEGORIES` в контекст-JSON
-  (`_build_sonnet_input`). Туда попадают 🔮 Практика и 🕯️ Расходники
-  (категории **Арканы** — ритуальные расходники и доход от практики, не
-  личный бюджет; см. `arcana/handlers/rituals.py`,
-  `arcana/handlers/ritual_writeoff.py`, `core/arcana_inventory.py`), а также
-  💰 Зарплата, 💼 Фриланс, 🎁 Подарок, 💵 Возврат/кэшбэк, 💱 Продажа,
-  💻 Подписки, 💳 Прочее. Жёсткого ограничения «лимиты ТОЛЬКО из
-  `_BUDGET_VARIABLE_CATS`» ни в одном промпте нет. Практический риск низкий
-  (оба промпта в правилах дележа называют конкретные категории), но ничто
-  не мешает Sonnet выдать `лимит_практика`. **Не исправлено** — вынесено
-  отдельной задачей.
+- ~~Утечка полного списка категорий (19 шт., с 🔮 Практика / 🕯️ Расходники
+  Арканы, 💰 Зарплата, 💼 Фриланс) в бюджетные промпты; `_BUDGET_VARIABLE_CATS`
+  — мёртвая константа~~ — **исправлено**. Оба промпта теперь получают
+  ТОЛЬКО `_BUDGET_VARIABLE_CATS` (8) как категории для лимитов: legacy —
+  плейсхолдер `{budget_limit_categories}` (`{finance_categories}` убран),
+  Sonnet — поле `"budget_limit_categories"` в контекст-JSON
+  (`_build_sonnet_input`, `"finance_categories"` убрано). В `ОГРАНИЧЕНИЯ`
+  обоих промптов — «категории для limits ТОЛЬКО из этого списка».
+  `_BUDGET_VARIABLE_CATS` совпадает с 3 якорными + 5 приоритетного дележа.
 
 ---
 
@@ -351,6 +342,13 @@ state, set by `_send_payday_review`) from the **same** helper,
 `_period_spending()` — extracted specifically so the two prompts can't
 drift apart on this (they did once, see the `18500`/`15500` note above).
 
+Both prompts also see **only** `_BUDGET_VARIABLE_CATS` (8 categories) as the
+limit-category vocabulary — legacy via the `{budget_limit_categories}`
+placeholder, Sonnet via the `budget_limit_categories` context field. The
+full 19-item `FINANCE_CATEGORIES` (with the Arcana `🔮 Практика` /
+`🕯️ Расходники` and income categories) is **not** exposed to the budget
+prompts.
+
 Sonnet is justified for both (long-form budget reasoning, debt-strategy
 trade-offs); Haiku is used only for the smaller sub-parses along the way
 (debt-strategy free text → `_parse_debt_strategy_with_haiku`, one-time
@@ -375,7 +373,7 @@ expense items → `_ONE_TIME_PARSE_SYSTEM`).
   `_period_spending` (shared already_spent/income-this-period source),
   `BUDGET_SONNET_SYSTEM`, `_BUDGET_PARSE_PROMPT_LEGACY`, `_format_plan`,
   `_save_budget_plan`, `handle_one_time_expense`, `_ONE_TIME_PARSE_SYSTEM`,
-  `_BUDGET_VARIABLE_CATS` (declared canonical, currently unreferenced),
+  `_BUDGET_VARIABLE_CATS` (the 8 limit categories fed to both prompts),
   `_bdb`/`_BUDGET_DB` (session store), `_send_payday_review`
 - `nexus/nexus_bot.py` — `/budget` wiring, startup `proactive_budget_review`
 - `miniapp/backend/routes/finance.py` — limits/goals views, day limit

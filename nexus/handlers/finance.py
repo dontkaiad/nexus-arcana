@@ -2457,6 +2457,8 @@ BUDGET_SONNET_SYSTEM = (
     "- Логика: долги сначала, потом жизнь, потом накопления.\n"
     "- В варианте A тяжёлого месяца savings = 0₽ ВСЕГДА (см. выше).\n\n"
     "ОГРАНИЧЕНИЯ:\n"
+    "- Категории для limits — ТОЛЬКО из budget_limit_categories (в контексте). "
+    "Другие не выдумывать: никаких категорий доходов, практики, ритуальных расходников и т.п.\n"
     "- Лимит с пометкой [ручной] — НЕ ТРОГАТЬ, распределять остаток вокруг него\n"
     "- Коты = ФИКСИРОВАННЫЕ расходы (живые существа!)\n"
     "- Привычки: Chapman = СИГАРЕТЫ (не чай!). Детализируй в habit_strategy "
@@ -2586,7 +2588,10 @@ async def _build_sonnet_input(uid: int, user_notion_id: str) -> str:
         "current_limits": budget.get("лимиты", []),
         "manual_limits": manual_limits,
         "spending_by_category": spending_by_cat,
-        "finance_categories": CATEGORIES,
+        # ТОЛЬКО бюджетные переменные категории (8), не все 19 общих Финансов —
+        # иначе Sonnet мог бы выдать лимит на 🔮 Практику / 🕯️ Расходники (Аркана)
+        # или 💰 Зарплату / 💼 Фриланс.
+        "budget_limit_categories": _BUDGET_VARIABLE_CATS,
     }
     return json.dumps(context, ensure_ascii=False, indent=2)
 
@@ -2598,7 +2603,8 @@ _BUDGET_PARSE_PROMPT_LEGACY = """Финансовый советник. Поль
 Текущая дата: {current_date}.
 
 Входные данные: {all_messages}
-Категории финансов: {finance_categories}
+Категории для ЛИМИТОВ (переменные траты) — ТОЛЬКО из этого списка, других не выдумывать: {budget_limit_categories}
+(ФИКС-расходы из шага 2 — жильё/коммуналка/подписки/коты — это не лимиты, категорию для них ставь по смыслу.)
 Уже потрачено в этом периоде (already_spent): {already_spent}₽
 Экономия с прошлого периода (savings_from_last_period): {savings_from_last_period}₽
 
@@ -2628,7 +2634,8 @@ _BUDGET_PARSE_PROMPT_LEGACY = """Финансовый советник. Поль
      уменьшить платёж по долгу — если платежа нет, сравнивать нечего, форк не нужен.
 
 РАСПРЕДЕЛЕНИЕ ЛИМИТОВ:
-После вычета долгов — остаток по ВСЕМ жизненным категориям.
+После вычета долгов — остаток по бюджетным переменным категориям.
+Категории limits — ТОЛЬКО из списка budget_limit_categories выше, других не выдумывать.
 НИКОГДА не ставить 0₽ на продукты или транспорт.
 
 АБСОЛЮТНЫЕ МИНИМУМЫ (НЕ может ниже):
@@ -3288,7 +3295,10 @@ async def _run_budget_analysis(message: Message, uid: int) -> None:
             # в полном промпте (Шаг 1.5/1.6, BUDGET_SONNET_SYSTEM), через общий
             # _period_spending() — чтобы это не разъехалось между промптами
             # (как разъехался порог 18500/15500, см. #191-класс дрейфа).
-            finance_cats_str = ", ".join(CATEGORIES) if CATEGORIES else "неизвестно"
+            # Лимиты Sonnet выбирает ТОЛЬКО из бюджетных переменных категорий
+            # (8 шт.), не из всех 19 общих Финансов — иначе в план утекали
+            # 🔮 Практика / 🕯️ Расходники (Аркана) и 💰 Зарплата / 💼 Фриланс.
+            budget_cats_str = ", ".join(_BUDGET_VARIABLE_CATS)
             current_date = datetime.now(MOSCOW_TZ).strftime("%d.%m.%Y")
             try:
                 spending_by_cat_legacy, _ = await _period_spending()
@@ -3298,7 +3308,8 @@ async def _run_budget_analysis(message: Message, uid: int) -> None:
                 already_spent_legacy = 0
             savings_legacy = state.get("savings_from_last_period", 0) or 0
             prompt = _BUDGET_PARSE_PROMPT_LEGACY.format(
-                all_messages=all_text, finance_categories=finance_cats_str, current_date=current_date,
+                all_messages=all_text, budget_limit_categories=budget_cats_str,
+                current_date=current_date,
                 already_spent=int(already_spent_legacy), savings_from_last_period=int(savings_legacy),
             )
             raw = await ask_claude(prompt, model=_cfg.model_sonnet, max_tokens=4096, temperature=0)
