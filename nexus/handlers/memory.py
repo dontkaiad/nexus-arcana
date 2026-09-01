@@ -59,7 +59,7 @@ async def handle_memory_list(
                     matched_cat = v
                     break
 
-    _BUDGET_CATS = {"💰 Лимит", "📥 Доход", "🔒 Обязательные", "🎯 Цели", "📋 Долги"}
+    _BUDGET_CATS = {"💰 Лимит", "📥 Доход", "🔒 Постоянные", "🎯 Цели", "📋 Долги"}
 
     try:
         if matched_cat:

@@ -106,7 +106,7 @@ def _parse_user_amount(text: str) -> Optional[int]:
 async def _calc_free_remaining(user_notion_id: str = "") -> Optional[Tuple[float, int]]:
     """Возвращает (остаток_свободных, дней_до_конца_месяца) или None."""
     budget = await _load_budget_data(user_notion_id)
-    obligatory_total = sum(o["amount"] for o in budget["обязательные"])
+    obligatory_total = sum(o["amount"] for o in budget["постоянные"])
     savings_total = sum(g["saving"] for g in budget["цели"])
 
     now = datetime.now(MOSCOW_TZ)
@@ -138,7 +138,7 @@ async def _calc_free_remaining(user_notion_id: str = "") -> Optional[Tuple[float
         total_expenses = 0
 
     # Свободные = доход - все расходы - накопления
-    # obligatory_total НЕ вычитаем отдельно — обязательные платежи
+    # obligatory_total НЕ вычитаем отдельно — постоянные платежи
     # уже записаны в расходы когда оплачены
     free_left = total_income - total_expenses - savings_total
     return (free_left, days_remaining)
@@ -147,7 +147,7 @@ async def _calc_free_remaining(user_notion_id: str = "") -> Optional[Tuple[float
 async def build_budget_message(user_notion_id: str = "") -> Optional[str]:
     """Формирует полное сообщение /budget из сохранённых данных. НЕ вызывает Sonnet."""
     budget = await _load_budget_data(user_notion_id)
-    has_data = budget.get("обязательные") or budget.get("лимиты")
+    has_data = budget.get("постоянные") or budget.get("лимиты")
     if not has_data:
         return None
 
@@ -182,7 +182,7 @@ async def build_budget_message(user_notion_id: str = "") -> Optional[str]:
     except Exception:
         pass
 
-    # ── Хелпер: убрать "(🏠 Жильё)" из названия обязательного ──
+    # ── Хелпер: убрать "(🏠 Жильё)" из названия постоянного ──
     _CAT_IN_PARENS = re.compile(r'\s*\([^)]*[🐾🍜🚕🚬💅🏥💻🏠👗💳📚🎲][^)]*\)\s*')
 
     def _clean_name(name: str) -> str:
@@ -199,11 +199,11 @@ async def build_budget_message(user_notion_id: str = "") -> Optional[str]:
         for d in income_items:
             lines.append("  <i>{} — {:,}₽</i>".format(d["name"], int(d["amount"])))
 
-    # Обязательные — группируем по категории, чистые имена
-    obligatory_items = budget.get("обязательные", [])
+    # Постоянные — группируем по категории, чистые имена
+    obligatory_items = budget.get("постоянные", [])
     obligatory_total = sum(o["amount"] for o in obligatory_items)
     if obligatory_items:
-        lines.append("\n<b>🔒 Обязательные ({:,}₽):</b>".format(int(obligatory_total)))
+        lines.append("\n<b>🔒 Постоянные ({:,}₽):</b>".format(int(obligatory_total)))
         # Группировка по категории из скобок
         by_ob_cat: dict[str, list] = {}
         for ob in obligatory_items:
@@ -330,11 +330,11 @@ async def _check_budget_limit(category: str, message: Message, user_notion_id: s
                 )
         except Exception:
             pass
-        # Проверить: если категория — обязательный расход, НЕ предлагать лимит
+        # Проверить: если категория — постоянный расход, НЕ предлагать лимит
         is_obligatory = False
         try:
             budget = await _load_budget_data(user_notion_id)
-            for ob in budget.get("обязательные", []):
+            for ob in budget.get("постоянные", []):
                 ob_link = _cat_link(ob.get("name", ""))
                 if ob_link in link or link in ob_link:
                     is_obligatory = True
@@ -2108,6 +2108,83 @@ async def handle_limit_override(message: Message, category: str, amount_str: str
     )
 
 
+# ── Разовые расходы ──────────────────────────────────────────────────────────
+
+_ONE_TIME_PARSE_SYSTEM = (
+    "Извлеки разовые расходы из текста. Разовый расход — трата в этом месяце, "
+    "которая НЕ повторяется (билет, госпошлина, налог, справка, доверенность).\n"
+    "Ответь ТОЛЬКО JSON без markdown:\n"
+    '{"items": [{"description": "кратко", "amount": число, "category": "категория"}]}\n'
+    f"Категории: {', '.join(CATEGORIES)}\n"
+    "Категория неясна → '💳 Прочее'. Сумма — число в рублях без ₽ и пробелов.\n"
+    "Поддержи несколько позиций через запятую или перенос строки.\n"
+    "Примеры:\n"
+    '  "разовый расход билет в питер 15000" → {"items":[{"description":"билет в питер","amount":15000,"category":"🚕 Транспорт"}]}\n'
+    '  "разовые: доверенность 3500, налоги 8500" → {"items":[{"description":"доверенность","amount":3500,"category":"💳 Прочее"},{"description":"налоги","amount":8500,"category":"💳 Прочее"}]}\n'
+)
+
+
+async def handle_one_time_expense(message: Message, text: str, bot_label: str = "☀️ Nexus",
+                                  user_notion_id: str = "") -> None:
+    """Разовый расход(ы) → обычные finance-транзакции (💸 Расход), НЕ в память.
+
+    Так трата не пересчитывается в бюджете следующего периода, но попадает в
+    spending_by_category → already_spent (Шаг 1.5) и вычитается из
+    распределяемых только в этом периоде.
+    Составной ввод («разовые: X 3500, Y 8500») — Haiku-парсер на N позиций.
+    """
+    from core.config import config
+    from core.config import config as _cfg
+    uid = message.from_user.id
+    raw = await ask_claude(text, system=_ONE_TIME_PARSE_SYSTEM, model=_cfg.model_haiku,
+                           max_tokens=400, temperature=0)
+    try:
+        raw = raw.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
+        items = json.loads(raw).get("items", [])
+    except Exception as e:
+        logger.error("handle_one_time_expense parse: %s / raw=%r", e, raw[:200])
+        items = []
+
+    parsed = []
+    for it in items:
+        try:
+            amount = float(it.get("amount") or 0)
+        except (TypeError, ValueError):
+            amount = 0.0
+        if amount <= 0:
+            continue
+        cat = it.get("category") or "💳 Прочее"
+        if cat not in CATEGORIES:
+            cat = "💳 Прочее"
+        desc = (it.get("description") or "разовый расход").strip()
+        parsed.append((desc, amount, cat))
+
+    if not parsed:
+        await message.answer("🤔 Не понял сумму разового расхода. Пример: «разовый расход билет 15000».")
+        return
+
+    for desc, amount, cat in parsed:
+        page_id = await _save_finance(
+            {"amount": amount, "category": cat, "type_": "💸 Расход",
+             "source": "💳 Карта", "description": desc},
+            config.nexus.db_finance, bot_label, user_notion_id, uid=uid,
+        )
+        if page_id:
+            _last_page_id[uid] = page_id
+
+    if len(parsed) == 1:
+        desc, amount, _ = parsed[0]
+        await message.answer(
+            f"📤 Разовый расход: {desc} — {amount:,.0f}₽ (учтётся только в этом периоде)"
+        )
+    else:
+        total = sum(a for _, a, _ in parsed)
+        body = "\n".join(f"  · {d} — {a:,.0f}₽" for d, a, _ in parsed)
+        await message.answer(
+            f"📤 Разовые расходы — {total:,.0f}₽ (учтутся только в этом периоде):\n{body}"
+        )
+
+
 # ── Budget: Impulse Overflow ─────────────────────────────────────────────────
 
 
@@ -2287,7 +2364,7 @@ BUDGET_SONNET_SYSTEM = (
     "  Если income_from_memory НЕ пусто → income_total = сумма всех amount из income_from_memory.\n"
     "  Шаг 1.5: Распределяемые = Распределяемые − сумма всех значений spending_by_category\n"
     "    (это уже потраченные в этом периоде деньги — разовые расходы, чеки и т.д.,\n"
-    "    записанные обычными тратами, а не обязательными). Остаток = то что реально\n"
+    "    записанные обычными тратами, а не постоянными). Остаток = то что реально\n"
     "    доступно распределить на оставшуюся часть месяца.\n"
     "    already_spent = сумма всех значений spending_by_category (0 если трат нет) — вернуть в JSON.\n"
     "  Шаг 1.6: Распределяемые = Распределяемые + savings_from_last_period\n"
@@ -2475,7 +2552,7 @@ async def _build_sonnet_input(uid: int, user_notion_id: str) -> str:
         "income_this_period": income_total,
         "savings_from_last_period": savings_bonus,
         "income_from_memory": budget.get("доходы", []),
-        "obligatory": budget.get("обязательные", []),
+        "obligatory": budget.get("постоянные", []),
         "debts": debts_for_sonnet,
         "goals": budget.get("цели", []),
         "current_limits": budget.get("лимиты", []),
@@ -2711,7 +2788,7 @@ async def start_budget_analysis(message: Message, user_notion_id: str = "") -> N
     """v3.0: /budget shows SAVED plan from Memory. Recalc only via button."""
     uid = message.from_user.id
     budget = await _load_budget_data(user_notion_id)
-    has_data = budget.get("лимиты") or budget.get("обязательные")
+    has_data = budget.get("лимиты") or budget.get("постоянные")
 
     if not has_data:
         await start_budget_setup(message, user_notion_id)
@@ -3349,7 +3426,7 @@ def _format_plan(plan: dict) -> str:
     fixed_total = plan.get("fixed_total", sum(f.get("amount", 0) for f in plan.get("fixed", [])))
     distributable = income_total - fixed_total if income_total > 0 else plan.get("distributable", 0)
     if distributable < 0:
-        lines.append("\n⚠️ <b>Обязательные расходы ({:,}₽) превышают доход ({:,}₽). Проверь данные.</b>".format(
+        lines.append("\n⚠️ <b>Постоянные расходы ({:,}₽) превышают доход ({:,}₽). Проверь данные.</b>".format(
             fixed_total, income_total))
         return "\n".join(lines)
     distributable -= already_spent
@@ -3501,7 +3578,7 @@ async def _save_budget_plan(message: Message, uid: int) -> None:
             pass
     loading = await message.answer("💾 <b>Сохраняю план...</b>", parse_mode="HTML")
 
-    # Доходы — категория 🔒 Обязательные, ключ income_*
+    # Доходы — категория 🔒 Постоянные, ключ income_*
     for inc in plan.get("income", []):
         name = inc.get("source", inc.get("name", "?"))
         amt = inc.get("amount", 0)
@@ -3514,12 +3591,12 @@ async def _save_budget_plan(message: Message, uid: int) -> None:
     for f in plan.get("fixed", []):
         cat = f.get("category", "📌 Прочее")
         name = f.get("name", "?")
-        new_fixed_keys.add("обязательно_{}".format(_cat_link(cat) + "_" + name.lower().replace(" ", "_")))
+        new_fixed_keys.add("постоянно_{}".format(_cat_link(cat) + "_" + name.lower().replace(" ", "_")))
 
     if notion_uid:
         try:
             from core.repos.memory_repo import _repo as _mem_repo
-            old_fixed = await _mem_repo.find_by_key_prefixes(["обязательно_"], notion_uid)
+            old_fixed = await _mem_repo.find_by_key_prefixes(["постоянно_"], notion_uid)
             stale_ids = [m.id for m in old_fixed if m.is_current and m.key not in new_fixed_keys]
             if stale_ids:
                 await _mem_repo.set_active(stale_ids, False)
@@ -3532,8 +3609,8 @@ async def _save_budget_plan(message: Message, uid: int) -> None:
         name = f.get("name", "?")
         amt = f.get("amount", 0)
         await _save_memory_entry(
-            "обязательно_{}".format(_cat_link(cat) + "_" + name.lower().replace(" ", "_")),
-            "обязательно: {} ({}) — {}₽/мес".format(name, cat, amt),
+            "постоянно_{}".format(_cat_link(cat) + "_" + name.lower().replace(" ", "_")),
+            "постоянно: {} ({}) — {}₽/мес".format(name, cat, amt),
             notion_uid,
         )
 
@@ -3680,7 +3757,7 @@ async def _save_budget_plan(message: Message, uid: int) -> None:
 async def _save_memory_entry(key: str, fact: str, user_notion_id: str = "") -> None:
     """Upsert бюджет-памяти в PG (#145).
 
-    Единая категория «💰 Лимит» для ВСЕХ бюджетных ключей (обязательно_/цель_/
+    Единая категория «💰 Лимит» для ВСЕХ бюджетных ключей (постоянно_/цель_/
     лимит_/income_/долг_) — консистентно с натуральным путём
     core.memory._PARSE_SYSTEM. find по key+category → update; иначе create.
     """

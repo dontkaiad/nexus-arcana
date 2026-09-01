@@ -20,7 +20,7 @@ _DAYS_PATH = "core.budget._period_days_remaining"
 def _plan(income=0, obligatory=0, limits=0, saving=0, debt_monthly=0):
     return {
         "доходы":      [{"name": "зп", "amount": income}] if income else [],
-        "обязательные": [{"name": "аренда", "amount": obligatory}] if obligatory else [],
+        "постоянные":  [{"name": "аренда", "amount": obligatory}] if obligatory else [],
         "лимиты":      [{"name": "продукты", "amount": limits}] if limits else [],
         "цели":        [{"name": "подушка", "target": 100000, "saving": saving}] if saving else [],
         "долги":       [{"name": "кредит", "amount": 50000, "monthly_payment": debt_monthly}]

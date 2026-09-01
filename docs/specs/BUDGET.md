@@ -25,7 +25,7 @@ Budget has **no table of its own** — there is no migration, no
    prefix and category. The prefix↔category map is owned by
    `core/budget.py:BUDGET_KEY_TO_CATEGORY`. Examples, non-exhaustive — see
    that constant:
-   - `income_` → `📥 Доход`; `обязательно_` → `🔒 Обязательные`;
+   - `income_` → `📥 Доход`; `постоянно_` → `🔒 Постоянные`;
      `лимит_` → `💰 Лимит`; `цель_` → `🎯 Цели`; `долг_` → `📋 Долги`.
    - the payday is a single Memory fact at exact key `budget_payday`
      (default `1` if absent).
@@ -46,9 +46,9 @@ All in `core/budget.py` (pure async functions; no repo class):
 - **get_limits()** → `{cat_link: amount}` — reads current `💰 Лимит`
   memories (`find_by_category`), extracts the category link and amount per
   fact. Skips facts where link or amount can't be parsed.
-- **load_budget_data(user_notion_id)** → `{"доходы", "обязательные", "цели",
+- **load_budget_data(user_notion_id)** → `{"доходы", "постоянные", "цели",
   "долги", "лимиты"}` — reads budget memories by key prefix
-  (`find_by_key_prefixes(["income_", "обязательно_", "лимит_", "цель_"])`,
+  (`find_by_key_prefixes(["income_", "постоянно_", "лимит_", "цель_"])`,
   current rows only) plus active `i_owe` debts; parses each into a list of
   `{name, amount, …}` dicts. Limits are de-duplicated by display name (the
   higher amount wins).

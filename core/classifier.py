@@ -463,11 +463,20 @@ _MEMORY_SAVE_RE = re.compile(
     r"|^\s*лимит\b"
     r"|^\s*поставь\s+лимит\b"
     r"|^\s*установи\s+лимит\b"
-    r"|^\s*обязательн\w*\s+расход\b"
+    r"|^\s*(?:обязательн|постоянн)\w*\s+расход\b"
     r"|^\s*цель\s+\S+"
     r"|^\s*долг\s+\S+"
-    r"|^\s*убери\s+обязательн"
-    r"|^\s*измени\s+обязательн",
+    r"|^\s*убери\s+(?:обязательн|постоянн)"
+    r"|^\s*измени\s+(?:обязательн|постоянн)",
+    re.IGNORECASE,
+)
+
+# Разовый расход — обязателен в этом месяце, но НЕ повторяется. Пишется обычной
+# finance-транзакцией (💸 Расход), НЕ в память. Ловим и одиночный, и составной
+# ввод ("разовые: доверенность 3500, налоги 8500").
+_ONE_TIME_EXPENSE_RE = re.compile(
+    r"^\s*разов\w*\s+расход\w*\b"
+    r"|^\s*разов\w*\s*:",
     re.IGNORECASE,
 )
 
@@ -711,6 +720,13 @@ async def classify(text: str, tz_offset: int = 3) -> list[dict]:
     if m:
         logger.info("classify: limit_override matched cat=%s amt=%s", m.group(1), m.group(2))
         return [{"type": "limit_override", "text": text, "category": m.group(1), "amount": m.group(2)}]
+
+    # Разовый расход → finance-транзакция (НЕ память, НЕ generic finance-classify).
+    # ПЕРЕД med_inventory/budget — составной ввод "разовые:\nX\nY" не должен
+    # уехать в инвентарь лекарств или в пересчёт бюджета.
+    if _ONE_TIME_EXPENSE_RE.match(text):
+        logger.info("classify: one_time_expense pattern matched")
+        return [{"type": "one_time_expense", "text": text}]
 
     # Эвристика: многострочный список лекарств без явного префикса.
     # Должна стоять ПЕРЕД budget — иначе Sonnet впустую считает бюджет
@@ -974,6 +990,13 @@ async def process_item(data: Dict[str, Any], original_text: str, msg, clarify: d
     if kind == "limit_override":
         from nexus.handlers.finance import handle_limit_override
         await handle_limit_override(msg, data.get("category", ""), data.get("amount", "0"), user_notion_id)
+        return ""
+
+    # РАЗОВЫЙ РАСХОД — обычная finance-транзакция, вычтется из распределяемых
+    # только в этом периоде (spending_by_category → already_spent, Шаг 1.5).
+    if kind == "one_time_expense":
+        from nexus.handlers.finance import handle_one_time_expense
+        await handle_one_time_expense(msg, data.get("text", original_text), user_notion_id=user_notion_id)
         return ""
 
     # ПАМЯТЬ (memory_save)

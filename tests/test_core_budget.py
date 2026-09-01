@@ -11,7 +11,7 @@ from core.budget import (
     INCOME_RE,
     LIMIT_AMOUNT_RE,
     LIMIT_FACT_RE,
-    OBLIGATORY_RE,
+    PERMANENT_RE,
     cat_link,
     display_limit_name,
     load_budget_data,
@@ -43,7 +43,7 @@ def test_display_limit_name_mapping():
 def test_budget_key_to_category_map_complete():
     # все 5 префиксов должны быть мапаны на Notion-категории
     assert set(BUDGET_KEY_TO_CATEGORY) == {
-        "income_", "обязательно_", "лимит_", "цель_", "долг_"
+        "income_", "постоянно_", "лимит_", "цель_", "долг_"
     }
 
 
@@ -56,8 +56,8 @@ def test_income_regex_extracts_name_and_amount():
     assert parse_amount(m.group(2)) == 115000.0
 
 
-def test_obligatory_regex():
-    m = OBLIGATORY_RE.search("обязательно: аренда — 40000₽")
+def test_permanent_regex():
+    m = PERMANENT_RE.search("постоянно: аренда — 40000₽")
     assert m and parse_amount(m.group(2)) == 40000.0
 
 
@@ -101,7 +101,7 @@ async def test_load_budget_data_routes_keys_into_buckets():
 
     fake_mems = [
         Memory(id="1", fact="доход: зарплата — 115 000₽/мес", key="income_salary"),
-        Memory(id="2", fact="обязательно: аренда — 40000₽", key="обязательно_rent"),
+        Memory(id="2", fact="постоянно: аренда — 40000₽", key="постоянно_rent"),
         Memory(id="3", fact="цель: Samsung Flip — 100 000₽ · откладываю 8000₽", key="цель_flip"),
         Memory(id="5", fact="лимит: 🚬 Привычки — 17685₽/мес", key="лимит_habits",
                related_to="привычки"),
@@ -117,7 +117,7 @@ async def test_load_budget_data_routes_keys_into_buckets():
             data = await load_budget_data()
 
     assert len(data["доходы"]) == 1 and data["доходы"][0]["amount"] == 115000
-    assert len(data["обязательные"]) == 1
+    assert len(data["постоянные"]) == 1
     assert len(data["цели"]) == 1
     assert data["цели"][0]["saving"] == 8000
     assert data["цели"][0]["target"] == 100000

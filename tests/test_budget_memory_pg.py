@@ -19,14 +19,14 @@ async def test_save_memory_entry_writes_pg_unified_category():
 
     with patch("core.repos.memory_repo._repo.upsert",
                AsyncMock(return_value=("m-1", False))) as m_upsert:
-        await _save_memory_entry("обязательно_жильё_квартира",
-                                 "обязательно: квартира — 25000₽/мес", "u-1")
+        await _save_memory_entry("постоянно_жильё_квартира",
+                                 "постоянно: квартира — 25000₽/мес", "u-1")
 
     m_upsert.assert_awaited_once()
     args = m_upsert.call_args.args
     # (fact, key, category, scope, related_to, source, user_notion_id)
-    assert args[1] == "обязательно_жильё_квартира"
-    assert args[2] == "💰 Лимит"          # ЕДИНАЯ категория, НЕ «🔒 Обязательные»
+    assert args[1] == "постоянно_жильё_квартира"
+    assert args[2] == "💰 Лимит"          # ЕДИНАЯ категория, НЕ «🔒 Постоянные»
     assert args[3] == "nexus"
     assert args[5] == "manual"
     assert args[6] == "u-1"

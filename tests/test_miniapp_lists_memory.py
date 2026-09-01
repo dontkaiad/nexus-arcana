@@ -562,7 +562,7 @@ def test_memory_excludes_budget_and_adhd_categories(client):
     # с реальными данными присутствуют + бюджетные/ADHD исключены.
     cats = set(data["categories"])
     assert {"🛒 Предпочтения", "👥 Люди"}.issubset(cats)
-    assert cats.isdisjoint({"🦋 СДВГ", "📥 Доход", "🔒 Обязательные", "💰 Лимит", "📋 Долги", "🎯 Цели"})
+    assert cats.isdisjoint({"🦋 СДВГ", "📥 Доход", "🔒 Постоянные", "💰 Лимит", "📋 Долги", "🎯 Цели"})
 
 
 def test_memory_excludes_tz_and_city_system_keys(client):

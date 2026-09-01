@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 
 BUDGET_KEY_TO_CATEGORY: Dict[str, str] = {
     "income_": "📥 Доход",
-    "обязательно_": "🔒 Обязательные",
+    "постоянно_": "🔒 Постоянные",
     "лимит_": "💰 Лимит",
     "цель_": "🎯 Цели",
     "долг_": "📋 Долги",
@@ -54,8 +54,8 @@ INCOME_RE = re.compile(
     r'доход:\s*(.+?)\s*[—\-]\s*(\d[\d\s]*(?:[.,]\d+)?)\s*[₽р]',
     re.IGNORECASE,
 )
-OBLIGATORY_RE = re.compile(
-    r'обязательно:\s*(.+?)\s*[—\-]\s*(\d[\d\s]*(?:[.,]\d+)?)\s*[₽р]',
+PERMANENT_RE = re.compile(
+    r'постоянно:\s*(.+?)\s*[—\-]\s*(\d[\d\s]*(?:[.,]\d+)?)\s*[₽р]',
     re.IGNORECASE,
 )
 GOAL_RE = re.compile(
@@ -120,22 +120,22 @@ async def get_limits(mem_db: str = "") -> Dict[str, float]:
 async def load_budget_data(user_notion_id: str = "") -> Dict[str, list]:
     """Все бюджетные записи Памяти (PG).
 
-    Возвращает {"доходы": [...], "обязательные": [...], "цели": [...],
+    Возвращает {"доходы": [...], "постоянные": [...], "цели": [...],
                 "долги": [...], "лимиты": [...]}.
     """
     from core.repos.memory_repo import _repo as _mem_repo
 
-    empty = {"доходы": [], "обязательные": [], "цели": [], "долги": [], "лимиты": []}
+    empty = {"доходы": [], "постоянные": [], "цели": [], "долги": [], "лимиты": []}
     try:
         mems = await _mem_repo.find_by_key_prefixes(
-            ["income_", "обязательно_", "лимит_", "цель_"],
+            ["income_", "постоянно_", "лимит_", "цель_"],
             user_notion_id=user_notion_id,
         )
     except Exception as e:
         logger.error("load_budget_data: %s", e)
         return empty
 
-    result: Dict[str, list] = {"доходы": [], "обязательные": [], "цели": [],
+    result: Dict[str, list] = {"доходы": [], "постоянные": [], "цели": [],
                                "долги": [], "лимиты": []}
     for m in mems:
         fact = m.fact or ""
@@ -149,12 +149,12 @@ async def load_budget_data(user_notion_id: str = "") -> Dict[str, list]:
                 amt = parse_amount(m.group(2))
                 if amt > 0:
                     result["доходы"].append({"name": m.group(1).strip(), "amount": amt})
-        elif key.startswith("обязательно_"):
-            m = OBLIGATORY_RE.search(fact)
+        elif key.startswith("постоянно_"):
+            m = PERMANENT_RE.search(fact)
             if m:
                 amt = parse_amount(m.group(2))
                 if amt > 0:
-                    result["обязательные"].append({"name": m.group(1).strip(), "amount": amt})
+                    result["постоянные"].append({"name": m.group(1).strip(), "amount": amt})
         elif key.startswith("цель_"):
             m = GOAL_RE.search(fact)
             if m:
@@ -239,7 +239,7 @@ def _period_days_remaining(payday: int) -> int:
 async def budget_day_limit_from_plan(user_notion_id: str) -> int:
     """Дневной лимит из сохранённого плана в Памяти.
 
-    free = доход − обязательные − лимиты − цели.saving − долги.monthly_payment
+    free = доход − постоянные − лимиты − цели.saving − долги.monthly_payment
     day_limit = max(0, free // дни_до_пэйдея)
     Возвращает 0 если план не задан или доход отсутствует.
     """
@@ -248,7 +248,7 @@ async def budget_day_limit_from_plan(user_notion_id: str) -> int:
         total_income = sum(d["amount"] for d in budget["доходы"])
         if total_income <= 0:
             return 0
-        total_obligatory = sum(d["amount"] for d in budget["обязательные"])
+        total_obligatory = sum(d["amount"] for d in budget["постоянные"])
         total_limits = sum(d["amount"] for d in budget["лимиты"])
         total_goals_saving = sum(d.get("saving", 0) for d in budget["цели"])
         total_debt_monthly = sum(

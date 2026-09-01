@@ -31,7 +31,7 @@ async def test_get_limits_reads_pg_ignoring_env(monkeypatch):
 async def test_calc_free_remaining_not_gated_by_env(monkeypatch):
     monkeypatch.delenv("NOTION_DB_MEMORY", raising=False)
     from nexus.handlers import finance
-    budget = {"обязательные": [{"amount": 1000}], "цели": [{"saving": 0}],
+    budget = {"постоянные": [{"amount": 1000}], "цели": [{"saving": 0}],
               "доходы": [], "долги": [], "лимиты": []}
     # income → 5000, expenses → []  (раньше gate возвращал None ещё до этого)
     income = [SimpleNamespace(amount=5000)]

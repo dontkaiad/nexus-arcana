@@ -65,9 +65,9 @@ class TestNexusCronCallables:
         """_on_startup (внутри nexus_bot.main) дёргает proactive_budget_review
         ровно один раз — cron 07:30 UTC теряется молча при дневном рестарте
         контейнера (APScheduler сдвигает next_run_time на завтра)."""
-        import inspect
-        from nexus import nexus_bot
-        src = inspect.getsource(nexus_bot.main)
+        import pathlib
+        src = pathlib.Path(__file__).resolve().parents[1].joinpath(
+            "nexus", "nexus_bot.py").read_text(encoding="utf-8")
         assert src.count("await proactive_budget_review(bot)") == 1
 
     def test_init_scheduler_exists(self):

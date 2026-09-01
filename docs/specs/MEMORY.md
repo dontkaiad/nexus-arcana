@@ -19,7 +19,7 @@ category, a key tag, and a relation to a person/object.
 What it holds (categories, `core/memory.py:CATEGORIES`, 15 items):
 `🦋 СДВГ`, `👥 Люди`, `🏥 Здоровье`, `🛒 Предпочтения`, `💼 Работа`,
 `🏠 Быт`, `🔄 Паттерн`, `💡 Инсайт`, `🔮 Практика`, `🐾 Коты`,
-`💰 Лимит`, `🔒 Обязательные`, `📥 Доход`, `📋 Долги`, `🎯 Цели`.
+`💰 Лимит`, `🔒 Постоянные`, `📥 Доход`, `📋 Долги`, `🎯 Цели`.
 
 Boundary "memory about the user" vs "domain knowledge":
 - Memory — about the user and related people/objects (preferences, patterns,
@@ -29,7 +29,7 @@ Boundary "memory about the user" vs "domain knowledge":
   code.
 - Budget configuration (limits/income/obligatory/goals/debts) physically
   lives in the same `memories` table under category `💰 Лимит` and keys with
-  prefixes `лимит_`/`обязательно_`/`цель_`/`долг_`/`income_`, read via a
+  prefixes `лимит_`/`постоянно_`/`цель_`/`долг_`/`income_`, read via a
   separate path (`core/budget.py`). ADR-0005 marks this as a "parked
   follow-up" — a candidate for extraction into the finance module; in the
   code it is NOT extracted yet.
@@ -164,7 +164,7 @@ A reply to a "🧠 Запомнил …" plaque is parsed by
   Arcana has no notes feature, so the same reply gets an explicit
   "нет заметок" message instead of falling through to `unknown`.
 
-Budget-key branches (`обязательно_`/`цель_`/`долг_`/limit facts) are not
+Budget-key branches (`постоянно_`/`цель_`/`долг_`/limit facts) are not
 registered for reply-correction — they're already editable via `/budget`.
 
 ### Read
@@ -210,7 +210,7 @@ Derived reads:
   — exact category match (empty `category` = no category filter).
 - `find_by_key_prefixes(prefixes, user_notion_id)` — `key_name ILIKE p%`;
   used by the budget (`core/budget.py`, prefixes `income_`,
-  `обязательно_`, `лимит_`, `цель_`).
+  `постоянно_`, `лимит_`, `цель_`).
 - `find_recent(is_current, scope, user_notion_id, page_size)` — the latest
   non-archived ones.
 

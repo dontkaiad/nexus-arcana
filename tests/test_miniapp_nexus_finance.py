@@ -164,7 +164,7 @@ def test_finance_view_limits_only_shows_categories_with_limit(client):
 def test_finance_view_goals(client):
     tz = 3
     budget = {
-        "доходы": [], "обязательные": [], "лимиты": [],
+        "доходы": [], "постоянные": [], "лимиты": [],
         "цели": [{"name": "Samsung Flip", "target": 100000, "saving": 8000,
                   "key": "цель_flip", "fact": "цель: Samsung Flip — 100 000₽ · откладываю 8000₽"}],
         "долги": [{"name": "***", "amount": 50000, "deadline": "апрель",
