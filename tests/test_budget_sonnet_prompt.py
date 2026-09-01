@@ -17,8 +17,17 @@ def test_prompt_has_step_1_5_subtract_spending():
     assert BUDGET_SONNET_SYSTEM.index("Шаг 1.5") < BUDGET_SONNET_SYSTEM.index("Шаг 2:")
 
 
+def test_prompt_has_step_1_6_add_last_savings():
+    """Подшаг 1.6: экономия прошлого периода прибавляется к Распределяемым."""
+    assert "Шаг 1.6" in BUDGET_SONNET_SYSTEM
+    assert "Распределяемые = Распределяемые + savings_from_last_period" in BUDGET_SONNET_SYSTEM
+    # после 1.5, до долгов
+    assert BUDGET_SONNET_SYSTEM.index("Шаг 1.5") < BUDGET_SONNET_SYSTEM.index("Шаг 1.6") < BUDGET_SONNET_SYSTEM.index("Шаг 2:")
+
+
 def test_prompt_json_schema_has_already_spent():
     assert '"already_spent"' in BUDGET_SONNET_SYSTEM
+    assert '"savings_from_last_period"' in BUDGET_SONNET_SYSTEM
 
 
 def test_format_plan_shows_already_spent_when_positive():
@@ -43,3 +52,24 @@ def test_format_plan_distributable_subtracts_already_spent():
     # 100000 - 30000 - 12000 = 58000
     assert "💳 Распределяемые: <b>58,000₽</b>" in out
     assert "70,000₽" not in out  # старое поведение (без вычета) не должно светиться
+
+
+def test_format_plan_distributable_adds_last_savings():
+    """'Распределяемые' = доход - фикс - already_spent + savings_from_last_period."""
+    plan = {
+        "income_total": 100000,
+        "fixed": [{"name": "аренда", "category": "🏠 Жильё", "amount": 30000}],
+        "fixed_total": 30000,
+        "already_spent": 12000,
+        "savings_from_last_period": 5000,
+    }
+    out = _format_plan(plan)
+    assert "🛡️ Экономия с прошлого периода: +5,000₽" in out
+    # 100000 - 30000 - 12000 + 5000 = 63000
+    assert "💳 Распределяемые: <b>63,000₽</b>" in out
+
+
+def test_format_plan_hides_last_savings_when_zero_or_missing():
+    assert "Экономия с прошлого периода" not in _format_plan(
+        {"income_total": 100000, "savings_from_last_period": 0})
+    assert "Экономия с прошлого периода" not in _format_plan({"income_total": 100000})

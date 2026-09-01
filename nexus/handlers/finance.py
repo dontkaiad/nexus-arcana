@@ -2290,6 +2290,9 @@ BUDGET_SONNET_SYSTEM = (
     "    записанные обычными тратами, а не обязательными). Остаток = то что реально\n"
     "    доступно распределить на оставшуюся часть месяца.\n"
     "    already_spent = сумма всех значений spending_by_category (0 если трат нет) — вернуть в JSON.\n"
+    "  Шаг 1.6: Распределяемые = Распределяемые + savings_from_last_period\n"
+    "    (экономия с прошлого периода — реально прибавляется к сумме на этот месяц,\n"
+    "    а не только упоминается в тексте). Вернуть savings_from_last_period в JSON.\n"
     "Шаг 2: ДОЛГИ — ОДИН ДОЛГ ЗА РАЗ:\n"
     "  - Каждый долг имеет поле monthly_payment — это сумма которую Кай РЕАЛЬНО платит\n"
     "  - КЛЮЧЕВОЕ ПРАВИЛО: считай monthly_payment ТОЛЬКО для ПЕРВОГО долга по дедлайну!\n"
@@ -2377,7 +2380,7 @@ BUDGET_SONNET_SYSTEM = (
     "Схема JSON:\n"
     '{"income": [{"source": "X", "amount": N}], "income_total": N,\n'
     ' "fixed": [{"name": "X", "category": "X", "amount": N}], "fixed_total": N,\n'
-    ' "already_spent": N,\n'
+    ' "already_spent": N, "savings_from_last_period": N,\n'
     ' "distributable": N,\n'
     ' "debts_monthly": [{"name": "X", "total": N, "monthly": N, "deadline": "X", "strategy": "X"}],\n'
     ' "debts_monthly_total": N,\n'
@@ -3320,6 +3323,10 @@ def _format_plan(plan: dict) -> str:
     if already_spent > 0:
         lines.append("\n📤 Уже потрачено в этом периоде: {:,}₽".format(already_spent))
 
+    last_savings = plan.get("savings_from_last_period", 0) or 0
+    if last_savings > 0:
+        lines.append("\n🛡️ Экономия с прошлого периода: +{:,}₽".format(last_savings))
+
     # Доход
     income_total = plan.get("income_total", 0)
     if income_total:
@@ -3336,7 +3343,8 @@ def _format_plan(plan: dict) -> str:
             cat_emoji = f.get("category", "").split()[0] if f.get("category") else "📌"
             lines.append("  {} {} — {:,}₽".format(cat_emoji, f.get("name", "?"), f.get("amount", 0)))
 
-    # Распределяемые = Доход - Фикс - already_spent (совпадает с базой лимитов/долгов ниже)
+    # Распределяемые = Доход - Фикс - already_spent + savings_from_last_period
+    # (совпадает с базой лимитов/долгов ниже)
     income_total = plan.get("income_total", 0)
     fixed_total = plan.get("fixed_total", sum(f.get("amount", 0) for f in plan.get("fixed", [])))
     distributable = income_total - fixed_total if income_total > 0 else plan.get("distributable", 0)
@@ -3345,6 +3353,7 @@ def _format_plan(plan: dict) -> str:
             fixed_total, income_total))
         return "\n".join(lines)
     distributable -= already_spent
+    distributable += last_savings
     if distributable > 0:
         lines.append("\n💳 Распределяемые: <b>{:,}₽</b>".format(distributable))
 
