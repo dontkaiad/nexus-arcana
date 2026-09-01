@@ -107,6 +107,50 @@ _PARSE_SYSTEM = (
 
 _STRIP_RE = re.compile(r"^\s*запомни\s+(что\s+)?", re.IGNORECASE)
 
+# Долг из fact: сумма в ₽ + опциональный "дедлайн: <месяц> <год>"
+_DEBT_AMOUNT_RE = re.compile(r"(\d[\d\s]*(?:[.,]\d+)?)\s*[₽р]")
+_DEBT_DEADLINE_RE = re.compile(r"дедлайн:\s*(.+)", re.IGNORECASE)
+
+
+def _parse_debt_from_fact(fact: str) -> Tuple[float, Optional[str]]:
+    """'долг: 👩 X — 50000₽ · дедлайн: апрель 2026' → (50000.0, 'апрель 2026')."""
+    amount = 0.0
+    m = _DEBT_AMOUNT_RE.search(fact)
+    if m:
+        try:
+            amount = float(m.group(1).replace(" ", "").replace(",", "."))
+        except ValueError:
+            amount = 0.0
+    deadline: Optional[str] = None
+    dm = _DEBT_DEADLINE_RE.search(fact)
+    if dm:
+        deadline = dm.group(1).strip().rstrip("·").strip() or None
+    return amount, deadline
+
+
+async def _save_debt_from_memory(
+    message: Message, fact: str, связь: str, ключ: str, user_notion_id: str,
+) -> None:
+    """Долг из save_memory пишется в таблицу debts (kind='i_owe'), НЕ в Память —
+    иначе load_budget_data (читает долги только из pg_debts_repo) его не увидит.
+    Прямой вызов pg_debts_repo, как в core/budget.py (nexus в core не тянем)."""
+    from core.repos.pg_debts_repo import _repo as _debt_repo
+
+    name = (связь or ключ[len("долг_"):]).strip()
+    amount, deadline = _parse_debt_from_fact(fact)
+    try:
+        await _debt_repo.upsert(
+            user_notion_id, name, "i_owe", amount=amount, deadline=deadline,
+        )
+        logger.info(
+            "memory save: debt → debts table name=%r amount=%s deadline=%s",
+            name, amount, deadline,
+        )
+        await message.answer(f"📋 Добавил долг: {fact}")
+    except Exception as e:
+        logger.error("memory save: debt upsert error %s", e)
+        await message.answer(f"⚠️ Ошибка записи: {e}")
+
 
 # ── Парсинг факта через Haiku ──────────────────────────────────────────────────
 
@@ -379,6 +423,10 @@ async def save_memory(
 
     fact, category, связь, ключ = await _parse_fact(text)
     scope = bot_to_scope(bot_label)
+
+    if ключ.startswith("долг_"):
+        await _save_debt_from_memory(message, fact, связь, ключ, user_notion_id)
+        return
 
     if category != "💰 Лимит" and связь:
         original_link = связь

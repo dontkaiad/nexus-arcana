@@ -65,3 +65,60 @@ async def test_deactivate_goal_no_user():
         ok = await _deactivate_goal("телефон", "")
     assert ok is False
     m_sa.assert_not_called()
+
+
+# ── БАГ 1: долг из обычного save_memory пишется в debts table, не в Память ────
+
+@pytest.mark.asyncio
+async def test_save_memory_debt_writes_debts_table_not_memory():
+    """save_memory() с ключом 'долг_...' → pg_debts_repo.upsert(kind='i_owe'),
+    БЕЗ записи в Память (иначе load_budget_data его не видит)."""
+    import core.memory as cmem
+    from core.memory import save_memory
+
+    msg = AsyncMock()
+    msg.answer = AsyncMock()
+
+    fact = "долг: 👩 Подружка — 50000₽ · дедлайн: апрель 2026"
+    with patch("core.memory._parse_fact",
+               AsyncMock(return_value=(fact, "💰 Лимит", "подружка", "долг_подружка"))), \
+         patch("core.repos.pg_debts_repo._repo.upsert", AsyncMock()) as m_debt, \
+         patch.object(cmem._mem_repo, "add", AsyncMock()) as m_add, \
+         patch.object(cmem._mem_repo, "upsert", AsyncMock()) as m_up:
+        await save_memory(msg, "долг подружке 50000 до апреля", "u-1", "☀️ Nexus")
+
+    m_add.assert_not_awaited()
+    m_up.assert_not_awaited()
+    m_debt.assert_awaited_once()
+    args, kwargs = m_debt.call_args
+    assert args[0] == "u-1"
+    assert args[1] == "подружка"
+    assert args[2] == "i_owe"
+    assert kwargs["amount"] == 50000.0
+    assert kwargs["deadline"] == "апрель 2026"
+    msg.answer.assert_awaited_once_with(f"📋 Добавил долг: {fact}")
+
+
+@pytest.mark.asyncio
+async def test_save_memory_debt_without_deadline():
+    import core.memory as cmem
+    from core.memory import save_memory
+
+    msg = AsyncMock()
+    msg.answer = AsyncMock()
+
+    fact = "долг: 👤 Друг — 40000₽"
+    with patch("core.memory._parse_fact",
+               AsyncMock(return_value=(fact, "💰 Лимит", "друг", "долг_друг"))), \
+         patch("core.repos.pg_debts_repo._repo.upsert", AsyncMock()) as m_debt, \
+         patch.object(cmem._mem_repo, "add", AsyncMock()) as m_add, \
+         patch.object(cmem._mem_repo, "upsert", AsyncMock()) as m_up:
+        await save_memory(msg, "долг другу 40000", "u-1", "☀️ Nexus")
+
+    m_add.assert_not_awaited()
+    m_up.assert_not_awaited()
+    m_debt.assert_awaited_once()
+    args, kwargs = m_debt.call_args
+    assert args[1] == "друг"
+    assert kwargs["amount"] == 40000.0
+    assert kwargs["deadline"] is None
