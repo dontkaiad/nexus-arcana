@@ -3545,17 +3545,21 @@ def _format_plan(plan: dict) -> str:
     """Форматирует Sonnet-план в красивое сообщение."""
     lines = ["<b>💰 Финансовый план</b>"]
 
-    # Уже потрачено в этом периоде (реальные траты + разовые из этого дампа,
-    # всё вычтено из распределяемых)
+    # Вычтено из распределяемых: реальные finance-траты периода + разовые
+    # обязательства из этого дампа. already_spent, который вернула модель,
+    # ВКЛЮЧАЕТ one_time_total (см. Шаг 1.5) — «реальные траты» = остаток.
     already_spent = plan.get("already_spent", 0) or 0
     one_time = plan.get("one_time", []) or []
-    ot_total = plan.get("one_time_total", sum(float(o.get("amount", 0) or 0) for o in one_time)) if one_time else 0
-    if already_spent > 0:
-        lines.append("\n📤 Уже потрачено в этом периоде: {:,}₽".format(already_spent))
-        if ot_total > 0:
-            lines.append("  ↳ из них разовых из этого плана: {:,}₽".format(int(ot_total)))
+    ot_total = int(plan.get("one_time_total")
+                   or sum(float(o.get("amount", 0) or 0) for o in one_time))
+    real_spent = int(max(0, already_spent - ot_total))
+    if real_spent > 0 and ot_total > 0:
+        lines.append("\n📤 Уже потрачено (реальные траты): {:,}₽".format(real_spent))
+        lines.append("📤 Разовые из этого плана: {:,}₽".format(ot_total))
+    elif real_spent > 0:
+        lines.append("\n📤 Уже потрачено (реальные траты): {:,}₽".format(real_spent))
     elif ot_total > 0:
-        lines.append("\n📤 Разовые из этого плана: {:,}₽ (учтутся только сейчас)".format(int(ot_total)))
+        lines.append("\n📤 Разовые в этом периоде: {:,}₽".format(ot_total))
 
     last_savings = plan.get("savings_from_last_period", 0) or 0
     if last_savings > 0:

@@ -42,14 +42,41 @@ def test_prompt_json_schema_has_already_spent():
     assert '"savings_from_last_period"' in BUDGET_SONNET_SYSTEM
 
 
-def test_format_plan_shows_already_spent_when_positive():
+def test_format_plan_shows_real_spending_when_positive_no_one_time():
+    """already_spent без one_time → «реальные траты» (без слова «уже потрачено в периоде»)."""
     out = _format_plan({"already_spent": 12000, "income_total": 100000})
-    assert "📤 Уже потрачено в этом периоде: 12,000₽" in out
+    assert "📤 Уже потрачено (реальные траты): 12,000₽" in out
+    assert "Разовые" not in out
+
+
+def test_format_plan_one_time_only_says_razovye_not_uzhe_potracheno():
+    """Только разовые (реальных прошлых трат нет) → одна строка «Разовые в этом периоде»."""
+    out = _format_plan({
+        "already_spent": 8000, "one_time_total": 8000,
+        "one_time": [{"name": "билет", "category": "🚕 Транспорт", "amount": 8000}],
+        "income_total": 100000,
+    })
+    assert "📤 Разовые в этом периоде: 8,000₽" in out
+    assert "Уже потрачено" not in out
+    assert "из них разовых" not in out
+
+
+def test_format_plan_real_and_one_time_shown_separately():
+    """И реальные траты, и разовые из плана → две раздельные строки с понятными подписями."""
+    out = _format_plan({
+        "already_spent": 20000, "one_time_total": 8000,
+        "one_time": [{"name": "билет", "category": "🚕 Транспорт", "amount": 8000}],
+        "income_total": 100000,
+    })
+    assert "📤 Уже потрачено (реальные траты): 12,000₽" in out  # 20000 - 8000
+    assert "📤 Разовые из этого плана: 8,000₽" in out
+    assert "из них разовых" not in out
 
 
 def test_format_plan_hides_already_spent_when_zero_or_missing():
-    assert "Уже потрачено" not in _format_plan({"already_spent": 0, "income_total": 100000})
-    assert "Уже потрачено" not in _format_plan({"income_total": 100000})
+    assert "потрачено" not in _format_plan({"already_spent": 0, "income_total": 100000})
+    assert "Разовые" not in _format_plan({"already_spent": 0, "income_total": 100000})
+    assert "потрачено" not in _format_plan({"income_total": 100000})
 
 
 def test_format_plan_distributable_subtracts_already_spent():

@@ -468,7 +468,7 @@ async def test_run_budget_analysis_legacy_branch_passes_already_spent(tmp_budget
     assert "3000" in prompt
 
     text = loading.edit_text.call_args.args[0]
-    assert "📤 Уже потрачено в этом периоде: 4,500₽" in text
+    assert "📤 Уже потрачено (реальные траты): 4,500₽" in text
     assert "🛡️ Экономия с прошлого периода: +3,000₽" in text
 
 
@@ -637,4 +637,4 @@ def test_format_plan_fixed_total_excludes_one_time_regression():
     out = _format_plan(plan)
     assert "🔒 Фикс: 54,650₽" in out
     assert "83,150" not in out
-    assert "↳ из них разовых из этого плана: 28,500₽" in out
+    assert "📤 Разовые в этом периоде: 28,500₽" in out
