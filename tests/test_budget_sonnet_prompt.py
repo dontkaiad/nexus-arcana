@@ -108,6 +108,48 @@ def test_format_plan_distributable_adds_last_savings():
     assert "💳 Распределяемые: <b>63,000₽</b>" in out
 
 
+def test_format_plan_income_block_comes_first():
+    """Порядок чтения: заголовок → 📥 Доход → 📤 траты/разовые → 🔒 Фикс."""
+    from nexus.handlers.finance import _format_plan
+    plan = {
+        "income_total": 100000,
+        "income": [{"source": "ЗП", "amount": 100000}],
+        "already_spent": 12000,
+        "savings_from_last_period": 5000,
+        "fixed": [{"name": "аренда", "category": "🏠 Жильё", "amount": 30000}],
+        "fixed_total": 30000,
+    }
+    out = _format_plan(plan)
+    i_income = out.index("📥 Доход")
+    i_spent = out.index("Уже потрачено")
+    i_savings = out.index("Экономия с прошлого периода")
+    i_fixed = out.index("🔒 Фикс")
+    assert i_income < i_spent < i_savings < i_fixed
+    assert out.index("💰 Финансовый план") < i_income
+
+
+# ── _format_limits_block: суффикс изменения ──────────────────────────────────
+
+def test_format_limits_block_new_change_hidden():
+    from nexus.handlers.finance import _format_limits_block
+    out = "\n".join(_format_limits_block(
+        [{"category": "🍜 Продукты", "amount": 15000, "change": "new"}], 15000))
+    assert "(new)" not in out
+    assert "new" not in out
+    assert "🍜 Продукты — 15,000₽" in out
+
+
+def test_format_limits_block_change_russian_suffix():
+    from nexus.handlers.finance import _format_limits_block
+    out = "\n".join(_format_limits_block([
+        {"category": "🍜 Продукты", "amount": 18000, "change": "increased"},
+        {"category": "🚕 Транспорт", "amount": 3000, "change": "decreased"},
+    ], 21000))
+    assert "🍜 Продукты — 18,000₽ (выросла)" in out
+    assert "🚕 Транспорт — 3,000₽ (снизилась)" in out
+    assert "increased" not in out and "decreased" not in out
+
+
 def test_format_plan_hides_last_savings_when_zero_or_missing():
     assert "Экономия с прошлого периода" not in _format_plan(
         {"income_total": 100000, "savings_from_last_period": 0})

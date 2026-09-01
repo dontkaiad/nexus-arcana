@@ -3496,8 +3496,13 @@ def _format_limits_block(limits: list, limits_total: int = 0) -> list:
         return lines
     total = limits_total or sum(l.get("amount", 0) for l in limits)
     lines.append("<b>📊 Лимиты: {:,}₽</b>".format(total))
+    # change="new" (первый расчёт) — это не new information для пользователя,
+    # суффикс не пишем. Реальный пересчёт: increased→выросла, decreased→снизилась.
+    _change_ru = {"increased": "выросла", "decreased": "снизилась"}
     for l in limits:
-        change = " ({})".format(l["change"]) if l.get("change") else ""
+        raw_change = str(l.get("change") or "").strip().lower()
+        change_ru = _change_ru.get(raw_change, "")
+        change = " ({})".format(change_ru) if change_ru else ""
         amt = l.get("amount", 0)
         manual = " 🔒" if l.get("manual") else ""
         lines.append("  {} — {:,}₽{}{}".format(l.get("category", "?"), amt, change, manual))
@@ -3545,6 +3550,16 @@ def _format_plan(plan: dict) -> str:
     """Форматирует Sonnet-план в красивое сообщение."""
     lines = ["<b>💰 Финансовый план</b>"]
 
+    # Порядок блоков = естественный порядок чтения: доход → что уже съедено →
+    # фикс → распределяемые → долги → лимиты → цели.
+
+    # Доход
+    income_total = plan.get("income_total", 0)
+    if income_total:
+        lines.append("\n<b>📥 Доход: {:,}₽</b>".format(income_total))
+        for i in plan.get("income", []):
+            lines.append("  {} — {:,}₽".format(i.get("source", "?"), i.get("amount", 0)))
+
     # Вычтено из распределяемых: реальные finance-траты периода + разовые
     # обязательства из этого дампа. already_spent, который вернула модель,
     # ВКЛЮЧАЕТ one_time_total (см. Шаг 1.5) — «реальные траты» = остаток.
@@ -3564,13 +3579,6 @@ def _format_plan(plan: dict) -> str:
     last_savings = plan.get("savings_from_last_period", 0) or 0
     if last_savings > 0:
         lines.append("\n🛡️ Экономия с прошлого периода: +{:,}₽".format(last_savings))
-
-    # Доход
-    income_total = plan.get("income_total", 0)
-    if income_total:
-        lines.append("\n<b>📥 Доход: {:,}₽</b>".format(income_total))
-        for i in plan.get("income", []):
-            lines.append("  {} — {:,}₽".format(i.get("source", "?"), i.get("amount", 0)))
 
     # Фикс
     fixed = plan.get("fixed", [])
