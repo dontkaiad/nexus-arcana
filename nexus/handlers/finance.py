@@ -2230,13 +2230,18 @@ _BUDGET_VARIABLE_CATS = [
     "🍱 Кафе/Доставка", "🏥 Здоровье", "👗 Гардероб", "📚 Хобби/Учеба",
 ]
 
-_BUDGET_DB = os.path.join(os.path.dirname(os.path.abspath(__file__)), "../../pending_budget.db")
+# #191: SQLite должна жить в /app/data (volume nexus_sqlite_data), иначе файл
+# в корне /app теряется при каждом пересоздании контейнера — как стрики/ru_calendar.
+_BUDGET_DB = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "..", "..", "data", "pending_budget.db"
+)
 _BUDGET_TTL = 3600           # 60 min — для setup-стадии (collecting/adjusting)
 _BUDGET_HAS_PLAN_TTL = 900   # 15 min — для has_plan (Кай должна явно закрыть кнопкой)
 _PAYDAY_TTL = 90000          # 25 часов — для маркера "ревью уже отправлено сегодня"
 
 
 def _bdb() -> _sqlite3.Connection:
+    os.makedirs(os.path.dirname(_BUDGET_DB), exist_ok=True)
     con = _sqlite3.connect(_BUDGET_DB)
     con.execute(
         "CREATE TABLE IF NOT EXISTS budget_pending "

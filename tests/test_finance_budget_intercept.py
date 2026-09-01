@@ -21,6 +21,16 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 
+def test_budget_db_lives_in_data_dir():
+    """#191: pending_budget.db должна лежать в /app/data (volume), не в корне /app —
+    иначе payday_sent/pending теряются при каждом пересоздании контейнера."""
+    import os
+    from nexus.handlers import finance
+    parts = os.path.normpath(finance._BUDGET_DB).split(os.sep)
+    assert parts[-2] == "data"
+    assert parts[-1] == "pending_budget.db"
+
+
 @pytest.fixture
 def tmp_budget_db(tmp_path, monkeypatch):
     """Изолированная SQLite для пакета тестов — без касания продовой ../pending_budget.db."""
