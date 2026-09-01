@@ -6189,6 +6189,12 @@ function TaskSheet({ s, task, onClose, onClosed }) {
             {closedLabel} {closedDate}
           </div>
         )}
+        {task.note && (
+          <div style={{ fontSize: fs(12), color: s.tM, marginBottom: 12, display: "flex", alignItems: "flex-start", gap: 6 }}>
+            <span>📝</span>
+            <span style={{ wordBreak: "break-word" }}>{task.note}</span>
+          </div>
+        )}
         <ActionRow
           s={s}
           icon={<RotateCcw size={fs(16)} />}
@@ -6273,6 +6279,12 @@ function TaskSheet({ s, task, onClose, onClosed }) {
         <div style={{ fontSize: fs(12), color: s.tM, marginBottom: 12, display: "flex", alignItems: "center", gap: 6 }}>
           <Bell size={fs(13)} />
           <span>{[task.reminderDate, task.reminderTime].filter(Boolean).join(" ")}</span>
+        </div>
+      )}
+      {task.note && (
+        <div style={{ fontSize: fs(12), color: s.tM, marginBottom: 12, display: "flex", alignItems: "flex-start", gap: 6 }}>
+          <span>📝</span>
+          <span style={{ wordBreak: "break-word" }}>{task.note}</span>
         </div>
       )}
       <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>

@@ -78,6 +78,7 @@ def _serialize_pg_task(task: PgTask, today_date, tz_offset: int) -> dict:
     return {
         "id": task.id,
         "title": task.title,
+        "note": task.note or None,
         "cat": cat_from_notion(task.category),
         "prio": prio_from_notion(task.priority),
         "status": computed_status,

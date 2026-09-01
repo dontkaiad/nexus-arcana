@@ -283,6 +283,7 @@ export function adaptTasks(data) {
     return {
       id: t.id,
       title: t.title || '',
+      note: t.note || null,
       cat: catFull(t.cat),
       prio: t.prio || '⚪',
       status: t.status || 'active',
