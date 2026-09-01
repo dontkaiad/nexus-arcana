@@ -388,3 +388,125 @@ def test_format_plan_variant_a_no_tight_label_at_15500():
     }
     out = _format_plan(plan)
     assert "жёстко" not in out
+
+
+# ── already_spent/savings_from_last_period в legacy-промпте (первый /budget) ─
+#
+# BUDGET_SONNET_SYSTEM (полный контекст) получил Шаг 1.5/1.6 раньше;
+# _BUDGET_PARSE_PROMPT_LEGACY (первый /budget с нуля, пустая Память) — нет.
+# already_spent/savings_from_last_period теперь считаются один раз в общем
+# _period_spending() и пробрасываются в оба промпта.
+
+@pytest.mark.asyncio
+async def test_period_spending_splits_income_and_expense():
+    from nexus.handlers import finance
+
+    r1 = MagicMock(amount=1000, category="🍜 Продукты", type_="💸 Расход")
+    r2 = MagicMock(amount=500, category="🍱 Кафе/Доставка", type_="💸 Расход")
+    r3 = MagicMock(amount=60000, category="💰 Зарплата", type_="💰 Доход")
+
+    with patch.object(finance, "_get_payday", AsyncMock(return_value=1)), \
+         patch.object(finance._repo, "query_records", AsyncMock(return_value=[r1, r2, r3])):
+        spending, income = await finance._period_spending()
+
+    assert spending == {"🍜 Продукты": 1000.0, "🍱 Кафе/Доставка": 500.0}
+    assert income == 60000.0
+
+
+def test_legacy_prompt_template_has_already_spent_placeholders():
+    """Регресс: раньше already_spent/savings_from_last_period были только
+    в BUDGET_SONNET_SYSTEM, в legacy-промпте про них не было ни слова."""
+    from nexus.handlers.finance import _BUDGET_PARSE_PROMPT_LEGACY
+
+    assert "{already_spent}" in _BUDGET_PARSE_PROMPT_LEGACY
+    assert "{savings_from_last_period}" in _BUDGET_PARSE_PROMPT_LEGACY
+    assert '"already_spent"' in _BUDGET_PARSE_PROMPT_LEGACY
+    assert '"savings_from_last_period"' in _BUDGET_PARSE_PROMPT_LEGACY
+    # already_spent реально вычитается, а не только упоминается — как в Шаге 1.5
+    assert "already_spent" in _BUDGET_PARSE_PROMPT_LEGACY.split("РАСЧЁТ:")[1].split("4.")[0]
+
+
+@pytest.mark.asyncio
+async def test_run_budget_analysis_legacy_branch_passes_already_spent(tmp_budget_db):
+    """Первый /budget с нуля (пустая Память → legacy-ветка): already_spent из
+    _period_spending и savings_from_last_period из state реально попадают в
+    промпт Sonnet, а из ответа — в итоговое сообщение (через _format_plan)."""
+    from nexus.handlers import finance
+
+    uid = 999_200
+    _seed_state(uid, {
+        "buf": ["зп 60к, аренда 20к"], "notion_uid": "u-1", "state": "collecting",
+        "savings_from_last_period": 3000,
+    })
+
+    loading = await _fake_loading()
+    msg = MagicMock()
+    msg.from_user.id = uid
+    msg.chat.id = 1
+    msg.bot = AsyncMock()
+    msg.answer = AsyncMock(return_value=loading)
+
+    empty_budget = {"доходы": [], "постоянные": [], "цели": [], "долги": [], "лимиты": []}
+    captured = {}
+
+    async def fake_ask(prompt, **kw):
+        captured["prompt"] = prompt
+        return json.dumps({
+            "is_tight_month": False, "variant_a": None, "variant_b": None,
+            "free_after_debts": 20000,
+            "already_spent": 4500, "savings_from_last_period": 3000,
+        }, ensure_ascii=False)
+
+    with patch.object(finance, "_load_budget_data", AsyncMock(return_value=empty_budget)), \
+         patch.object(finance, "_period_spending",
+                      AsyncMock(return_value=({"🍜 Продукты": 4500.0}, 0.0))), \
+         patch.object(finance, "ask_claude", fake_ask):
+        await finance._run_budget_analysis(msg, uid)
+
+    prompt = captured["prompt"]
+    assert "4500" in prompt
+    assert "3000" in prompt
+
+    text = loading.edit_text.call_args.args[0]
+    assert "📤 Уже потрачено в этом периоде: 4,500₽" in text
+    assert "🛡️ Экономия с прошлого периода: +3,000₽" in text
+
+
+@pytest.mark.asyncio
+async def test_run_budget_analysis_legacy_branch_defaults_to_zero(tmp_budget_db):
+    """Совсем свежий пользователь: нет прошлых трат, нет экономии → 0, промпт
+    не падает, already_spent/экономия не показываются в сообщении."""
+    from nexus.handlers import finance
+
+    uid = 999_201
+    _seed_state(uid, {"buf": ["зп 60к"], "notion_uid": "u-1", "state": "collecting"})
+
+    loading = await _fake_loading()
+    msg = MagicMock()
+    msg.from_user.id = uid
+    msg.chat.id = 1
+    msg.bot = AsyncMock()
+    msg.answer = AsyncMock(return_value=loading)
+
+    empty_budget = {"доходы": [], "постоянные": [], "цели": [], "долги": [], "лимиты": []}
+    captured = {}
+
+    async def fake_ask(prompt, **kw):
+        captured["prompt"] = prompt
+        return json.dumps({
+            "is_tight_month": False, "variant_a": None, "variant_b": None,
+            "free_after_debts": 40000, "already_spent": 0, "savings_from_last_period": 0,
+        }, ensure_ascii=False)
+
+    with patch.object(finance, "_load_budget_data", AsyncMock(return_value=empty_budget)), \
+         patch.object(finance, "_period_spending", AsyncMock(return_value=({}, 0.0))), \
+         patch.object(finance, "ask_claude", fake_ask):
+        await finance._run_budget_analysis(msg, uid)
+
+    prompt = captured["prompt"]
+    assert "already_spent}: 0₽" not in prompt  # плейсхолдер реально подставлен
+    assert "0₽" in prompt
+
+    text = loading.edit_text.call_args.args[0]
+    assert "Уже потрачено" not in text
+    assert "Экономия с прошлого периода" not in text

@@ -105,11 +105,11 @@ that commit; update it in the same PR that changes the model.
   до следующего пересчёта; при пересчёте плана она **прибавляется** к
   «Распределяемым» — сэкономленное реально уходит в план, а не просто
   упоминается фразой в тексте.
-- ⚠️ Оба механизма работают **только** когда пересчёт идёт через полный
-  промпт (`BUDGET_SONNET_SYSTEM`) — это происходит когда в Памяти уже
-  есть хоть какие-то бюджетные данные. Самый первый `/budget` с нуля
-  (совсем пустая Память) считается по упрощённому legacy-промпту без
-  already_spent/экономии — они появятся начиная со второго пересчёта.
+- Оба механизма считаются **один раз**, в общей `_period_spending()`
+  (`nexus/handlers/finance.py`), и пробрасываются в **оба** промпта —
+  полный (`BUDGET_SONNET_SYSTEM`, Шаг 1.5/1.6) и legacy (первый `/budget`
+  с нуля, `_BUDGET_PARSE_PROMPT_LEGACY`, шаг 3). Одно место расчёта
+  специально, чтобы не разъезжались как порог 18500/15500 ниже.
 
 ### Шпаргалка команд
 
@@ -136,9 +136,9 @@ that commit; update it in the same PR that changes the model.
   суммируются в 15 500₽, но два UI-порога «показать ⚠️ жёстко» сравнивали
   со старым 18 500₽~~ — синхронизировано, оба места (`_run_budget_analysis`,
   `_format_plan`) теперь сравнивают с `15500`.
-- already_spent/savings_from_last_period реализованы только в «полном»
-  промпте (`BUDGET_SONNET_SYSTEM`), не в legacy-промпте первого запуска
-  (`_BUDGET_PARSE_PROMPT_LEGACY`) — см. раздел выше.
+- ~~already_spent/savings_from_last_period реализованы только в «полном»
+  промпте, не в legacy-промпте первого запуска~~ — синхронизировано,
+  оба промпта получают эти значения через общий `_period_spending()`.
 - «Доход» как название путает две разные сущности: план дохода (`income_`,
   Памяти-факт, персистентный) и разовое поступление денег (обычная
   finance-транзакция типа «Доход», не персистентная). Если решишь это
@@ -284,15 +284,17 @@ session is open) uses Sonnet and picks one of **two different prompts**
 (`nexus/handlers/finance.py:_run_budget_analysis`):
 - **`has_existing_data == True`** (`load_budget_data` — Memory facts plus
   debts — already has *any* non-empty bucket) →
-  full context via `_build_sonnet_input` + `BUDGET_SONNET_SYSTEM`. This is
-  the only path that computes `already_spent` (Шаг 1.5, sum of
-  `spending_by_category` — all `nexus_budget` transactions this period,
-  one-time expenses included) and applies `savings_from_last_period`
-  (Шаг 1.6, carried in the `pending_budget.db` session state, set by
-  `_send_payday_review`).
+  full context via `_build_sonnet_input` + `BUDGET_SONNET_SYSTEM` (Шаг 1.5/1.6).
 - **`has_existing_data == False`** (brand-new setup, empty Memory) →
-  `_BUDGET_PARSE_PROMPT_LEGACY`, user's raw setup text only. No
-  already_spent/savings adjustment here.
+  `_BUDGET_PARSE_PROMPT_LEGACY`, user's raw setup text only (no
+  `_build_sonnet_input` context — no `income_from_memory`, `manual_limits`, etc.).
+
+Both prompts get `already_spent` (sum of `spending_by_category` — all
+`nexus_budget` transactions this period, one-time expenses included) and
+`savings_from_last_period` (carried in the `pending_budget.db` session
+state, set by `_send_payday_review`) from the **same** helper,
+`_period_spending()` — extracted specifically so the two prompts can't
+drift apart on this (they did once, see the `18500`/`15500` note above).
 
 Sonnet is justified for both (long-form budget reasoning, debt-strategy
 trade-offs); Haiku is used only for the smaller sub-parses along the way
@@ -315,6 +317,7 @@ expense items → `_ONE_TIME_PARSE_SYSTEM`).
 - `core/repos/pg_debts_repo.py` — active `i_owe` debts read by `load_budget_data`
 - `nexus/handlers/finance.py` — `start_budget_setup`, `handle_budget_setup_text`,
   `start_budget_analysis`, `_run_budget_analysis`, `_build_sonnet_input`,
+  `_period_spending` (shared already_spent/income-this-period source),
   `BUDGET_SONNET_SYSTEM`, `_BUDGET_PARSE_PROMPT_LEGACY`, `_format_plan`,
   `_save_budget_plan`, `handle_one_time_expense`, `_ONE_TIME_PARSE_SYSTEM`,
   `_bdb`/`_BUDGET_DB` (session store), `_send_payday_review`

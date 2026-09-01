@@ -2491,9 +2491,13 @@ BUDGET_SONNET_SYSTEM = (
 )
 
 
-async def _build_sonnet_input(uid: int, user_notion_id: str) -> str:
-    """Build full context JSON for Sonnet analysis."""
-    budget = await _load_budget_data(user_notion_id)
+async def _period_spending() -> Tuple[Dict[str, float], float]:
+    """(spending_by_category, income_this_period) за текущий бюджетный период.
+
+    Общая для _build_sonnet_input (полный контекст) и legacy-промпта
+    (первый /budget с нуля) — единственное место, где считается already_spent,
+    чтобы не разъезжаться как было с порогом 18500/15500 (#191-класс дрейфа
+    промптов друг от друга)."""
     payday = await _get_payday()
     period_start, period_end = _period_bounds(payday)
     now = datetime.now(MOSCOW_TZ)
@@ -2502,8 +2506,8 @@ async def _build_sonnet_input(uid: int, user_notion_id: str) -> str:
         date_from=period_start, date_to=now.strftime("%Y-%m-%d"), page_size=500,
     )
 
-    spending_by_cat = {}
-    income_total = 0
+    spending_by_cat: Dict[str, float] = {}
+    income_total = 0.0
     for r in records:
         amt = float(r.amount or 0)
         cat = r.category or "Прочее"
@@ -2512,6 +2516,16 @@ async def _build_sonnet_input(uid: int, user_notion_id: str) -> str:
             income_total += amt
         else:
             spending_by_cat[cat] = spending_by_cat.get(cat, 0) + amt
+    return spending_by_cat, income_total
+
+
+async def _build_sonnet_input(uid: int, user_notion_id: str) -> str:
+    """Build full context JSON for Sonnet analysis."""
+    budget = await _load_budget_data(user_notion_id)
+    payday = await _get_payday()
+    period_start, period_end = _period_bounds(payday)
+    now = datetime.now(MOSCOW_TZ)
+    spending_by_cat, income_total = await _period_spending()
 
     state = _budget_get(uid) or {}
     user_messages = "\n".join(state.get("buf", []))
@@ -2576,11 +2590,17 @@ _BUDGET_PARSE_PROMPT_LEGACY = """Финансовый советник. Поль
 
 Входные данные: {all_messages}
 Категории финансов: {finance_categories}
+Уже потрачено в этом периоде (already_spent): {already_spent}₽
+Экономия с прошлого периода (savings_from_last_period): {savings_from_last_period}₽
 
 РАСЧЁТ:
 1. ДОХОД — все источники. "к"=тысяч, "млн"=миллионов, "в год"→/12. Диапазон→верхняя граница.
 2. ФИКС = ж***+коммуналка+подписки+интернет+вода+коты(живые существа). Не трогать.
-3. РАСПРЕДЕЛЯЕМЫЕ = доход - фикс.
+3. РАСПРЕДЕЛЯЕМЫЕ = доход - фикс - already_spent + savings_from_last_period
+   (already_spent — уже потраченные в этом периоде деньги, реально вычитаются, не
+   только упоминаются; savings_from_last_period — экономия с прошлого периода,
+   реально прибавляется). already_spent и savings_from_last_period вернуть в JSON
+   как есть (0, если значение выше 0₽ не указано).
 4. ДОЛГИ — использовать ТОЛЬКО monthly_payment из данных:
    - Каждый долг имеет поле monthly_payment — это сумма которую Кай РЕАЛЬНО платит
    - КЛЮЧЕВОЕ ПРАВИЛО: считай ТОЛЬКО ПЕРВЫЙ долг по дедлайну!
@@ -2641,6 +2661,7 @@ variant_b: "Уменьшить платежи" — предложить сниз
 Схема JSON:
 {{"income": [{{"source": "X", "amount": N}}], "income_total": N,
  "fixed": [{{"name": "X", "category": "X", "amount": N}}], "fixed_total": N,
+ "already_spent": N, "savings_from_last_period": N,
  "distributable": N,
  "debts_monthly": [{{"name": "X", "total": N, "monthly": N, "deadline": "X", "strategy": "X"}}],
  "debts_monthly_total": N,
@@ -3245,11 +3266,23 @@ async def _run_budget_analysis(message: Message, uid: int) -> None:
             sonnet_input = await _build_sonnet_input(uid, notion_uid)
             raw = await ask_claude(sonnet_input, system=BUDGET_SONNET_SYSTEM, model=_cfg.model_sonnet, max_tokens=4096, temperature=0)
         else:
-            # Legacy: setup flow with user messages only
+            # Legacy: setup flow with user messages only.
+            # already_spent/savings_from_last_period — тот же класс данных, что и
+            # в полном промпте (Шаг 1.5/1.6, BUDGET_SONNET_SYSTEM), через общий
+            # _period_spending() — чтобы это не разъехалось между промптами
+            # (как разъехался порог 18500/15500, см. #191-класс дрейфа).
             finance_cats_str = ", ".join(CATEGORIES) if CATEGORIES else "неизвестно"
             current_date = datetime.now(MOSCOW_TZ).strftime("%d.%m.%Y")
+            try:
+                spending_by_cat_legacy, _ = await _period_spending()
+                already_spent_legacy = sum(spending_by_cat_legacy.values())
+            except Exception as e:
+                logger.warning("legacy budget prompt: already_spent lookup failed: %s", e)
+                already_spent_legacy = 0
+            savings_legacy = state.get("savings_from_last_period", 0) or 0
             prompt = _BUDGET_PARSE_PROMPT_LEGACY.format(
                 all_messages=all_text, finance_categories=finance_cats_str, current_date=current_date,
+                already_spent=int(already_spent_legacy), savings_from_last_period=int(savings_legacy),
             )
             raw = await ask_claude(prompt, model=_cfg.model_sonnet, max_tokens=4096, temperature=0)
 
