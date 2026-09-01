@@ -29,3 +29,17 @@ def test_format_plan_shows_already_spent_when_positive():
 def test_format_plan_hides_already_spent_when_zero_or_missing():
     assert "Уже потрачено" not in _format_plan({"already_spent": 0, "income_total": 100000})
     assert "Уже потрачено" not in _format_plan({"income_total": 100000})
+
+
+def test_format_plan_distributable_subtracts_already_spent():
+    """'Распределяемые' в выводе = доход - фикс - already_spent (цифры бьются с низом)."""
+    plan = {
+        "income_total": 100000,
+        "fixed": [{"name": "аренда", "category": "🏠 Жильё", "amount": 30000}],
+        "fixed_total": 30000,
+        "already_spent": 12000,
+    }
+    out = _format_plan(plan)
+    # 100000 - 30000 - 12000 = 58000
+    assert "💳 Распределяемые: <b>58,000₽</b>" in out
+    assert "70,000₽" not in out  # старое поведение (без вычета) не должно светиться

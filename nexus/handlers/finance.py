@@ -3336,7 +3336,7 @@ def _format_plan(plan: dict) -> str:
             cat_emoji = f.get("category", "").split()[0] if f.get("category") else "📌"
             lines.append("  {} {} — {:,}₽".format(cat_emoji, f.get("name", "?"), f.get("amount", 0)))
 
-    # Распределяемые = Доход - Фикс (ВСЕГДА)
+    # Распределяемые = Доход - Фикс - already_spent (совпадает с базой лимитов/долгов ниже)
     income_total = plan.get("income_total", 0)
     fixed_total = plan.get("fixed_total", sum(f.get("amount", 0) for f in plan.get("fixed", [])))
     distributable = income_total - fixed_total if income_total > 0 else plan.get("distributable", 0)
@@ -3344,7 +3344,8 @@ def _format_plan(plan: dict) -> str:
         lines.append("\n⚠️ <b>Обязательные расходы ({:,}₽) превышают доход ({:,}₽). Проверь данные.</b>".format(
             fixed_total, income_total))
         return "\n".join(lines)
-    if distributable:
+    distributable -= already_spent
+    if distributable > 0:
         lines.append("\n💳 Распределяемые: <b>{:,}₽</b>".format(distributable))
 
     # Долги — все с пометкой стратегии
