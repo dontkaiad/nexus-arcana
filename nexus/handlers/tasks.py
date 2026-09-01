@@ -1083,13 +1083,22 @@ async def handle_last_task_clarify(
     # ── Категория ─────────────────────────────────────────────────────────────────
     elif _CLARIFY_CATEGORY_RE.search(text):
         m_cat = _CLARIFY_CATEGORY_RE.search(text)
-        from core.classifier import _TASK_CATS
         cat_raw = m_cat.group(1).strip()
-        real_cat = cat_raw
-        for tc in _TASK_CATS:
-            if cat_raw.lower() in tc.lower():
-                real_cat = tc
-                break
+        # match_select-правило (NEXUS_CAPABILITIES.md): категория НЕ пишется
+        # без реального совпадения. Тот же класс бага, что чинили в
+        # handle_edit_record ("измени категорию на X") — примитивный
+        # substring-цикл писал в Notion/PG целое предложение как категорию
+        # и отвечал успехом на непонятое значение.
+        from nexus.repos.pg_tasks_repo import _match_code, _category_id, _ensure_lookups
+        await asyncio.to_thread(_ensure_lookups)
+        real_cat = _match_code(_category_id, cat_raw, default=None)
+        suggestions: list = []
+        if not real_cat:
+            real_cat, suggestions = resolve_task_category(cat_raw)
+        if not real_cat:
+            hint = f" Похожие: {', '.join(suggestions)}" if suggestions else ""
+            await message.answer(f"❓ Не нашла «{cat_raw}».{hint} — уточни?")
+            return True  # сообщение обработано, но в update_props ничего не пишем
         update_props["Категория"] = _select(real_cat)
         response_text = f"🏷 Категория: {real_cat}"
 
