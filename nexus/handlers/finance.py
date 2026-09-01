@@ -2285,6 +2285,11 @@ BUDGET_SONNET_SYSTEM = (
     "  income_this_period — это ФАКТИЧЕСКИЕ поступления за текущий период, НЕ использовать как базу!\n"
     "  Если income_from_memory пусто → использовать income_this_period как fallback.\n"
     "  Если income_from_memory НЕ пусто → income_total = сумма всех amount из income_from_memory.\n"
+    "  Шаг 1.5: Распределяемые = Распределяемые − сумма всех значений spending_by_category\n"
+    "    (это уже потраченные в этом периоде деньги — разовые расходы, чеки и т.д.,\n"
+    "    записанные обычными тратами, а не обязательными). Остаток = то что реально\n"
+    "    доступно распределить на оставшуюся часть месяца.\n"
+    "    already_spent = сумма всех значений spending_by_category (0 если трат нет) — вернуть в JSON.\n"
     "Шаг 2: ДОЛГИ — ОДИН ДОЛГ ЗА РАЗ:\n"
     "  - Каждый долг имеет поле monthly_payment — это сумма которую Кай РЕАЛЬНО платит\n"
     "  - КЛЮЧЕВОЕ ПРАВИЛО: считай monthly_payment ТОЛЬКО для ПЕРВОГО долга по дедлайну!\n"
@@ -2372,6 +2377,7 @@ BUDGET_SONNET_SYSTEM = (
     "Схема JSON:\n"
     '{"income": [{"source": "X", "amount": N}], "income_total": N,\n'
     ' "fixed": [{"name": "X", "category": "X", "amount": N}], "fixed_total": N,\n'
+    ' "already_spent": N,\n'
     ' "distributable": N,\n'
     ' "debts_monthly": [{"name": "X", "total": N, "monthly": N, "deadline": "X", "strategy": "X"}],\n'
     ' "debts_monthly_total": N,\n'
@@ -3308,6 +3314,11 @@ def _format_variant(v: dict, label: str) -> list:
 def _format_plan(plan: dict) -> str:
     """Форматирует Sonnet-план в красивое сообщение."""
     lines = ["<b>💰 Финансовый план</b>"]
+
+    # Уже потрачено в этом периоде (разовые траты, вычтено из распределяемых)
+    already_spent = plan.get("already_spent", 0) or 0
+    if already_spent > 0:
+        lines.append("\n📤 Уже потрачено в этом периоде: {:,}₽".format(already_spent))
 
     # Доход
     income_total = plan.get("income_total", 0)
