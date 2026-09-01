@@ -289,3 +289,102 @@ def test_ttl_collecting_expires_at_61min(tmp_budget_db):
 
     result = finance._budget_get(uid)
     assert result is None
+
+
+# ── Порог "тяжёлый месяц" синхронизирован с железными минимумами (15500) ────
+#
+# Минимумы в BUDGET_SONNET_SYSTEM = 15 500₽ (после удаления бьюти, ad41f02).
+# Два места сравнивали остаток со старым 18 500₽ — синхронизировано здесь.
+
+async def _fake_loading() -> AsyncMock:
+    loading = AsyncMock()
+    loading.message_id = 555
+    loading.edit_text = AsyncMock()
+    return loading
+
+
+@pytest.mark.asyncio
+async def test_run_budget_analysis_warns_just_below_15500(tmp_budget_db):
+    """free_after=15499 (< 15500) → нормальный месяц, но плашка «жёстко»."""
+    from nexus.handlers import finance
+
+    uid = 999_100
+    _seed_state(uid, {"buf": ["зп 60к"], "notion_uid": "u-1", "state": "collecting"})
+
+    loading = await _fake_loading()
+    msg = MagicMock()
+    msg.from_user.id = uid
+    msg.chat.id = 1
+    msg.bot = AsyncMock()
+    msg.answer = AsyncMock(return_value=loading)
+
+    empty_budget = {"доходы": [], "постоянные": [], "цели": [], "долги": [], "лимиты": []}
+    plan_json = json.dumps({
+        "is_tight_month": False, "variant_a": None, "variant_b": None,
+        "free_after_debts": 15499, "income_total": 60000, "fixed_total": 0,
+    }, ensure_ascii=False)
+
+    with patch.object(finance, "_load_budget_data", AsyncMock(return_value=empty_budget)), \
+         patch.object(finance, "ask_claude", AsyncMock(return_value=plan_json)):
+        await finance._run_budget_analysis(msg, uid)
+
+    text = loading.edit_text.call_args.args[0]
+    assert "жёстко" in text
+
+
+@pytest.mark.asyncio
+async def test_run_budget_analysis_no_warning_at_15500(tmp_budget_db):
+    """free_after=15500 (граница, НЕ < 15500) → без плашки «жёстко».
+
+    Регресс: до фикса порог был 18500 — этот же remaining под старым кодом
+    ещё считался «жёстко», хотя реальные железные минимумы уже 15500."""
+    from nexus.handlers import finance
+
+    uid = 999_101
+    _seed_state(uid, {"buf": ["зп 60к"], "notion_uid": "u-1", "state": "collecting"})
+
+    loading = await _fake_loading()
+    msg = MagicMock()
+    msg.from_user.id = uid
+    msg.chat.id = 1
+    msg.bot = AsyncMock()
+    msg.answer = AsyncMock(return_value=loading)
+
+    empty_budget = {"доходы": [], "постоянные": [], "цели": [], "долги": [], "лимиты": []}
+    plan_json = json.dumps({
+        "is_tight_month": False, "variant_a": None, "variant_b": None,
+        "free_after_debts": 15500, "income_total": 60000, "fixed_total": 0,
+    }, ensure_ascii=False)
+
+    with patch.object(finance, "_load_budget_data", AsyncMock(return_value=empty_budget)), \
+         patch.object(finance, "ask_claude", AsyncMock(return_value=plan_json)):
+        await finance._run_budget_analysis(msg, uid)
+
+    text = loading.edit_text.call_args.args[0]
+    assert "жёстко" not in text
+
+
+def test_format_plan_variant_a_tight_label_just_below_15500():
+    """remaining=15499 (< 15500) → лейбл «⚠️ жёстко» на варианте А."""
+    from nexus.handlers.finance import _format_plan
+
+    plan = {
+        "is_tight_month": True,
+        "variant_a": {"label": "Платить по плану", "remaining": 15499},
+        "variant_b": {"label": "Пересмотреть стратегию", "remaining": 20000},
+    }
+    out = _format_plan(plan)
+    assert "жёстко" in out
+
+
+def test_format_plan_variant_a_no_tight_label_at_15500():
+    """remaining=15500 (граница) → БЕЗ лейбла «жёстко» (было бы < 18500 раньше)."""
+    from nexus.handlers.finance import _format_plan
+
+    plan = {
+        "is_tight_month": True,
+        "variant_a": {"label": "Платить по плану", "remaining": 15500},
+        "variant_b": {"label": "Пересмотреть стратегию", "remaining": 20000},
+    }
+    out = _format_plan(plan)
+    assert "жёстко" not in out

@@ -3301,7 +3301,7 @@ async def _run_budget_analysis(message: Message, uid: int) -> None:
     if free_after < 0:
         plan_text += "\n\n⚠️ <b>После платежей дефицит {:,}₽.</b>\n".format(abs(free_after))
         plan_text += "Можно пересмотреть стратегию долгов."
-    elif 0 < free_after < 18500 and not is_tight:
+    elif 0 < free_after < 15500 and not is_tight:
         plan_text += "\n\n⚠️ <b>После платежей остаётся {:,}₽ — жёстко.</b>".format(free_after)
 
     if is_tight:
@@ -3480,7 +3480,7 @@ def _format_plan(plan: dict) -> str:
     if is_tight and variant_a and variant_b:
         # ВСЕГДА показывать оба варианта — Кай сама решит
         remaining_a = variant_a.get("remaining", 0)
-        if remaining_a < 18500:
+        if remaining_a < 15500:
             lines.extend(_format_variant(variant_a, "Вариант А: {} ⚠️ жёстко".format(
                 variant_a.get("label", "Платить по плану"))))
             lines.append("\n⚠️ <i>Остаётся {:,}₽ — жёстко, но реально если готова.</i>".format(
