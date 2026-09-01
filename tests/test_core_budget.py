@@ -141,3 +141,37 @@ async def test_load_budget_data_skips_inactive():
         data = await load_budget_data()
 
     assert data["цели"] == []
+
+
+# ── БАГ 2: "бюджет X рублей" / "у меня 100к в месяц" распознаётся как income_ ──
+
+def test_parse_system_has_budget_income_examples():
+    from core.memory import _PARSE_SYSTEM
+
+    assert "бюджет 100000 рублей" in _PARSE_SYSTEM
+    assert "у меня 100к в месяц" in _PARSE_SYSTEM
+    assert '"ключ":"income_бюджет"' in _PARSE_SYSTEM
+    # ключ дохода/бюджета обязан начинаться с income_
+    assert "'income_'" in _PARSE_SYSTEM
+
+
+def test_income_regex_parses_budget_phrasing_fact():
+    m = INCOME_RE.search("доход: 💰 Бюджет — 100000₽/мес")
+    assert m
+    assert m.group(1).strip() == "💰 Бюджет"
+    assert parse_amount(m.group(2)) == 100000.0
+
+
+@pytest.mark.asyncio
+async def test_load_budget_data_reads_budget_phrasing_income():
+    from unittest.mock import AsyncMock
+    from core.repos.pg_memory_repo import Memory
+    from core.repos import memory_repo as mrmod
+
+    fake_mems = [
+        Memory(id="1", fact="доход: 💰 Бюджет — 100000₽/мес", key="income_бюджет"),
+    ]
+    with patch.object(mrmod._repo, "find_by_key_prefixes", AsyncMock(return_value=fake_mems)):
+        data = await load_budget_data()
+
+    assert data["доходы"] == [{"name": "💰 Бюджет", "amount": 100000.0}]
