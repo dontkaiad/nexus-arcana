@@ -75,7 +75,10 @@ async def test_handle_one_time_expense_writes_finance_not_memory():
     m_mem_add.assert_not_awaited()
     m_mem_up.assert_not_awaited()
     msg.answer.assert_awaited_once()
-    assert "учтётся только в этом периоде" in msg.answer.call_args.args[0]
+    out = msg.answer.call_args.args[0]
+    assert out.startswith("📤 Разовые: билет в питер — 15,000₽")
+    assert "учтётся только в этом периоде" in out
+    assert "расход" not in out  # однословное название, как у Постоянные/Долги/Цели
 
 
 @pytest.mark.asyncio
@@ -92,7 +95,8 @@ async def test_handle_one_time_expense_compound_writes_n_transactions():
         await finance.handle_one_time_expense(msg, msg.text, user_notion_id="u-1")
 
     assert m_fin.await_count == 2
-    assert "12,000₽" in msg.answer.call_args.args[0]
+    out = msg.answer.call_args.args[0]
+    assert out.startswith("📤 Разовые — 12,000₽")
 
 
 @pytest.mark.asyncio

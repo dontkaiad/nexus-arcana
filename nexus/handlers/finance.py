@@ -2175,13 +2175,13 @@ async def handle_one_time_expense(message: Message, text: str, bot_label: str = 
     if len(parsed) == 1:
         desc, amount, _ = parsed[0]
         await message.answer(
-            f"📤 Разовый расход: {desc} — {amount:,.0f}₽ (учтётся только в этом периоде)"
+            f"📤 Разовые: {desc} — {amount:,.0f}₽ (учтётся только в этом периоде)"
         )
     else:
         total = sum(a for _, a, _ in parsed)
         body = "\n".join(f"  · {d} — {a:,.0f}₽" for d, a, _ in parsed)
         await message.answer(
-            f"📤 Разовые расходы — {total:,.0f}₽ (учтутся только в этом периоде):\n{body}"
+            f"📤 Разовые — {total:,.0f}₽ (учтутся только в этом периоде):\n{body}"
         )
 
 
