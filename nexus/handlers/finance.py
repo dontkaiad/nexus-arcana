@@ -32,6 +32,9 @@ from core.budget import (
     display_limit_name as _display_limit_name,
     get_limits as _get_limits,
     load_budget_data as _load_budget_data,
+    compute_limits as _compute_limits,
+    pick_debt_payment as _pick_debt_payment,
+    CAT_IMPULSE as _CAT_IMPULSE,
 )
 
 logger = logging.getLogger("nexus.finance")
@@ -2421,7 +2424,11 @@ def _is_other_domain_command(text: str) -> bool:
 BUDGET_SONNET_SYSTEM = (
     "Ты финансовый аналитик. Пользователь — Кай, женщина с СДВГ.\n"
     "Тон: тёплый, поддерживающий, без менторства. Женский род.\n\n"
-    "АЛГОРИТМ РАСЧЁТА (СТРОГО ПО ШАГАМ):\n"
+    "ЭТО ФАЗА 1 — РАЗБОР ДАННЫХ. Ты НЕ считаешь лимиты по категориям, НЕ считаешь\n"
+    "подушку, НЕ пишешь summary/habit_strategy/advice. Всю арифметику лимитов\n"
+    "делает детерминированный код после тебя. Твоя задача — распарсить вход в\n"
+    "структурированный JSON: доходы, фикс, разовые, уже потраченное, долги, цели.\n\n"
+    "АЛГОРИТМ РАЗБОРА (СТРОГО ПО ШАГАМ):\n"
     "Шаг 1: Доход − Фикс = Распределяемые\n"
     "  ВАЖНО: Доход = сумма ПЛАНОВЫХ доходов из income_from_memory (зарплата, аренда и т.д.).\n"
     "  income_this_period — это ФАКТИЧЕСКИЕ поступления за текущий период, НЕ использовать как базу!\n"
@@ -2438,107 +2445,41 @@ BUDGET_SONNET_SYSTEM = (
     "  Шаг 1.6: Распределяемые = Распределяемые + savings_from_last_period\n"
     "    (экономия с прошлого периода — реально прибавляется к сумме на этот месяц,\n"
     "    а не только упоминается в тексте). Вернуть savings_from_last_period в JSON.\n"
-    "Шаг 2: ДОЛГИ — ОДИН ДОЛГ ЗА РАЗ:\n"
+    "Шаг 2: ДОЛГИ — распарсить, НЕ считать:\n"
     "  - Каждый долг имеет поле monthly_payment — это сумма которую Кай РЕАЛЬНО платит\n"
-    "  - КЛЮЧЕВОЕ ПРАВИЛО: считай monthly_payment ТОЛЬКО для ПЕРВОГО долга по дедлайну!\n"
-    "  - Остальные долги с monthly_payment > 0 — ПЕРЕНЕСИ на месяц после закрытия первого\n"
-    "  - НЕ СКЛАДЫВАЙ все платежи одновременно!\n"
-    "  - Пример: Аня 20к (апрель), Петя 8к/мес → в марте платёж = ТОЛЬКО Аня.\n"
-    "    Петя начнёт С АПРЕЛЯ (после закрытия Ани)\n"
-    "  - Если monthly_payment = 0 → НЕ вычитай (наследство, отложен)\n"
+    "  - НЕ СКЛАДЫВАЙ все платежи одновременно! Код сам выберет первый долг по дедлайну\n"
+    "    и посчитает total_debt_payment. Ты только возвращаешь долги как есть.\n"
+    "  - Если monthly_payment = 0 → долг отложен (наследство, после другого).\n"
     "  - НИКОГДА не пересчитывай monthly_payment самостоятельно. Кай уже решила.\n"
-    "  - total_debt_payment = monthly_payment ПЕРВОГО горящего долга\n"
-    "  - В debts_monthly включить ТОЛЬКО текущий долг (первый по дедлайну с monthly_payment > 0)\n"
-    "  - В queued_debts — все остальные долги (информативно, с пометкой 'с [месяц]')\n"
-    "  - Остаток = распределяемые - total_debt_payment\n"
-    "Шаг 3: Оценить остаток:\n"
-    "  - Остаток >= 30000₽ → НОРМАЛЬНЫЙ МЕСЯЦ → один план\n"
-    "  - Остаток < 30000₽ И total_debt_payment > 0 → ТЯЖЁЛЫЙ МЕСЯЦ → ДВА ВАРИАНТА (A и B)\n"
-    "  - Остаток < 30000₽ НО total_debt_payment == 0 → ОДИН план: is_tight_month: false,\n"
-    "    variant_a/variant_b: null, limits/savings/impulse_budget на верхнем уровне.\n"
-    "    Развилка A/B нужна ТОЛЬКО когда Вариант Б может предложить уменьшить реальный\n"
-    "    платёж по долгу — нет платежа = сравнивать нечего = НЕ форкать.\n\n"
-    "НОРМАЛЬНЫЙ МЕСЯЦ (один план):\n"
-    "  Из остатка: лимиты по категориям → подушка → цели → импульсивные\n"
-    "  is_tight_month: false, variant_a и variant_b: null\n\n"
-    "ТЯЖЁЛЫЙ МЕСЯЦ (два варианта):\n"
-    "  is_tight_month: true\n"
-    "  variant_a: \"Платить по плану\"\n"
-    "    - Все monthly_payment вычитаются\n"
-    "    - Жёсткий но РЕАЛЬНЫЙ план из маленького остатка\n"
-    "    - ДАЖЕ В ВАРИАНТЕ А соблюдай ЖЕЛЕЗНЫЕ минимумы:\n"
-    "      🍜 Продукты — минимум 3,000₽ (человек должен есть!)\n"
-    "      🚕 Транспорт — минимум 1,500₽ (метро)\n"
-    "      🎲 Импульсивные — минимум 1,000₽\n"
-    "      Итого железные минимумы = 5,500₽\n"
-    "      discretionary_pool = остаток ПОСЛЕ железных минимумов и total_debt_payment.\n"
-    "      Привычки ≤ discretionary_pool × 0.5 (ПОТОЛОК — процент, НЕ абсолютное число).\n"
-    "      Привычки — ЕДИНСТВЕННАЯ категория которая может быть ниже 10к в варианте А.\n"
-    "      products_min = max(3000, привычки / 2).\n"
-    "      Остаток пула → по ФИКСИРОВАННОМУ приоритету (каждая следующая из остатка\n"
-    "      после предыдущей; не хватило на всех → младшие = 0):\n"
-    "      1) 🍱 Кафе/Доставка  2) 💅 Бьюти  3) 🏥 Здоровье  4) 👗 Гардероб  5) 📚 Хобби/Учеба\n"
-    "      НИКОГДА не обнуляй продукты/транспорт ради привычек!\n"
-    "    - ПОДУШКА В ВАРИАНТЕ А: savings = 0₽ ВСЕГДА.\n"
-    "      Логика: если лимиты урезаны настолько что несколько категорий = 0₽,\n"
-    "      откладывать в подушку жестоко и бессмысленно. Весь остаток → жизнь.\n"
-    "      savings: {\"amount\": 0, \"note\": \"\"} в variant_a.\n"
-    "    - adhd_survival_plan: КОНКРЕТНЫЙ план как пережить месяц\n"
-    "    - relief: когда станет легче\n"
-    "  variant_b: \"Пересмотреть стратегию\"\n"
-    "    - Предложить уменьшить monthly_payment\n"
-    "    - Комфортный план из большего остатка\n"
-    "    - creditor_script: что сказать кредитору (1 предложение)\n"
-    "    - relief: когда закроется полностью\n\n"
-    "РАСПРЕДЕЛЕНИЕ ЛИМИТОВ:\n"
-    "  После вычета долгов — остаток распределяется по ВСЕМ жизненным категориям.\n"
-    "  НИКОГДА не ставить 0₽ на продукты или транспорт.\n\n"
-    "  АБСОЛЮТНЫЕ МИНИМУМЫ (НЕ может ниже):\n"
-    "  🚬 Привычки — 10,000₽ (СДВГ, невозможно ниже)\n"
-    "  🍜 Продукты — 3,000₽ (человек должен есть)\n"
-    "  🚕 Транспорт — 1,500₽ (СПб, метро)\n"
-    "  🎲 Импульсивные — 1,000₽ (СДВГ, дофамин)\n"
-    "  Сумма минимумов = 15,500₽\n\n"
-    "  Если остаток < 15,500₽ → ЖЁСТКИЙ вариант, но ВСЕГДА показывать план. Кай решит сама.\n"
-    "  Если остаток >= 15,500₽ → распределять так:\n"
-    "    1. Железные минимумы: продукты 3000 + транспорт 1500 + импульсивные 1000.\n"
-    "    2. discretionary_pool = Распределяемые − железные минимумы − total_debt_payment.\n"
-    "    3. Привычки ≤ discretionary_pool × 0.5 (ПОТОЛОК — процент, НЕ абсолютное число;\n"
-    "       нормальный месяц — не ниже 10 000₽). Не засовывать весь пул в привычки.\n"
-    "    4. products_min = max(3000, привычки / 2) — top-up продуктов сверх 3000, из пула.\n"
-    "    5. Остаток пула (discretionary_pool − привычки − products top-up) → по\n"
-    "       ФИКСИРОВАННОМУ приоритету: каждая следующая категория получает то, что\n"
-    "       осталось после предыдущей. НЕ поровну, НЕ занулять всех сразу. Не хватило\n"
-    "       на всех → младшие по списку = 0, это нормально:\n"
-    "       1) 🍱 Кафе/Доставка  2) 💅 Бьюти  3) 🏥 Здоровье  4) 👗 Гардероб  5) 📚 Хобби/Учеба\n\n"
-    "  СОВЕТ СДВГ при сокращении привычек:\n"
-    "  Если привычки урезаны — дать КОНКРЕТНЫЙ совет в habit_strategy:\n"
-    "  купить блок Chapman заранее, заменить колу водой 3 дня/нед, 1 монстр вместо 2.\n\n"
-    "ПОДУШКА (savings):\n"
-    "- Копить подушку ТОЛЬКО если лимиты по основным категориям адекватные.\n"
-    "- Критерий: если 3+ категорий имеют лимит 0₽ → savings = 0₽.\n"
-    "- Логика: долги сначала, потом жизнь, потом накопления.\n"
-    "- В варианте A тяжёлого месяца savings = 0₽ ВСЕГДА (см. выше).\n\n"
+    "  - В debts_monthly верни ВСЕ долги: {name, total, monthly, deadline, strategy}.\n"
+    "    Дедлайн — строкой ('апрель 2026'), код распарсит в дату.\n"
+    "  - strategy — короткий человеческий текст, ТОЛЬКО если неочевиден из данных\n"
+    "    ('вику сразу если помещаемся', '10к апрель + 10к май'). Иначе ''.\n"
+    "  - variant_b_debt_payment: если у первого горящего долга крупный платёж —\n"
+    "    предложи РЕАЛИСТИЧНУЮ уменьшенную помесячную сумму (число) для разговора с\n"
+    "    кредитором. Нечего уменьшать → null.\n"
+    "  - Форк A/B строит КОД: только когда total_debt_payment > 0 и остаток мал.\n"
+    "    При total_debt_payment == 0 план всегда один, без вариантов.\n\n"
+    "ЛИМИТЫ ТЫ НЕ СЧИТАЕШЬ. Вся арифметика распределения (транспорт, импульсивные,\n"
+    "продукты, привычки, кафе, бьюти, здоровье, гардероб, хобби, подушка) — в коде.\n"
+    "НЕ возвращай поля: limits, limits_total, impulse_budget, savings, is_tight_month,\n"
+    "variant_a, variant_b, free_after_debts, summary, habit_strategy, relief_timeline,\n"
+    "adhd_survival_plan. Их заполнят код и Фаза 2.\n\n"
     "ОГРАНИЧЕНИЯ:\n"
-    "- Категории для limits — ТОЛЬКО из budget_limit_categories (в контексте). "
-    "Другие не выдумывать: никаких категорий доходов, практики, ритуальных расходников и т.п.\n"
-    "- Лимит с пометкой [ручной] — НЕ ТРОГАТЬ, распределять остаток вокруг него\n"
+    "- Категории для one_time[].category и целей — ориентир budget_limit_categories\n"
+    "  (в контексте) плюс обычные бытовые. Не выдумывать категории доходов, практики,\n"
+    "  ритуальных расходников и т.п.\n"
     "- Коты = ФИКСИРОВАННЫЕ расходы (живые существа!)\n"
     "- Категорию для фикс-расходов (fixed[].category) ставь эмодзи-префиксом как "
     "везде в плане (напр. 🏠 для жилья/коммуналки, 💻 для техники/подписок, "
     "🐾 для котов, 📄 для документов/налогов, 🚕 для транспорта) — НЕ словом. "
     "И НЕ дублируй слово, которое уже есть в name позиции: если name = "
     "'Коммуналка Питер', category = просто иконка, не 'Коммуналка Коммуналка Питер'\n"
-    "- Привычки: Chapman = СИГАРЕТЫ (не чай!). Детализируй в habit_strategy "
-    "(сигареты, кола, монстр) но итоговый лимит = одна строка 🚬 Привычки\n"
-    "- Импульсивные ВСЕГДА > 0 (мин 1000₽)\n"
-    "- note/summary/habit_strategy — максимум 15 слов\n"
-    "- relief_timeline обязательно если есть долги\n"
-    "- НЕ выдумывать деньги, НЕ показывать отрицательные суммы\n"
-    "- НИКОГДА не ставить ВСЕ лимиты в 0₽\n"
-    "- Если savings_from_last_period > 0: 'В прошлом периоде сэкономила X₽ — молодец!' в summary\n\n"
+    "- Привычки: Chapman = СИГАРЕТЫ (не чай!) — детали в strategy долга/цели не нужны,\n"
+    "  итоговый лимит будет одна строка 🚬 Привычки (её посчитает код)\n"
+    "- НЕ выдумывать деньги, НЕ показывать отрицательные суммы\n\n"
     "Ответ: ТОЛЬКО JSON, без markdown, без пояснений.\n"
-    "Схема JSON:\n"
+    "Схема JSON (Фаза 1 — разбор, без лимитов):\n"
     '{"income": [{"source": "X", "amount": N}], "income_total": N,\n'
     ' "fixed": [{"name": "X", "category": "X", "amount": N}], "fixed_total": N,\n'
     ' "one_time": [{"name": "X", "category": "X", "amount": N}], "one_time_total": N,\n'
@@ -2547,29 +2488,10 @@ BUDGET_SONNET_SYSTEM = (
     ' "debts_monthly": [{"name": "X", "total": N, "monthly": N, "deadline": "X", "strategy": "X"}],\n'
     ' "debts_monthly_total": N,\n'
     ' "queued_debts": [{"name": "X", "total": N, "deadline": "X", "strategy": "X"}],\n'
-    ' "free_after_debts": N,\n'
-    ' "is_tight_month": false,\n'
-    ' "variant_a": null or {"label": "Платить по плану", "debt_payment": N, "remaining": N,\n'
-    '   "limits": [{"category": "X", "amount": N}], "limits_total": N,\n'
-    '   "impulse_budget": N, "savings": {"amount": N, "note": "X"},\n'
-    '   "adhd_survival_plan": "КОНКРЕТНЫЙ план: что купить, где сэкономить, как не сорваться",\n'
-    '   "relief": "С мая +20к свободных!",\n'
-    '   "warning": "СДВГ-риск: привычки -30%, высокий риск срыва" or null},\n'
-    ' "variant_b": null or {"label": "Уменьшить платежи", "debt_payment": N, "remaining": N,\n'
-    '   "limits": [{"category": "X", "amount": N}], "limits_total": N,\n'
-    '   "impulse_budget": N, "savings": {"amount": N, "note": "X"},\n'
-    '   "creditor_script": "Что сказать кредитору",\n'
-    '   "relief": "Долг закроется в мае"},\n'
-    ' "savings": {"amount": N, "note": "X"},\n'
-    ' "limits": [{"category": "X", "amount": N, "current": N, "change": "X", "manual": false}],\n'
-    ' "limits_total": N, "impulse_budget": N,\n'
+    ' "variant_b_debt_payment": N or null,\n'
     ' "goals": [{"name": "X", "monthly": N, "total": N,\n'
     '   "starts_after": "условие разблокировки БЕЗ слова \'после\' в начале '
-    "(шаблон вывода добавит сам: 'после ' + это значение) or null\"}],\n"
-    ' "relief_timeline": "X", "summary": "X", "habit_strategy": "X"}\n'
-    "ВАЖНО: При нормальном месяце variant_a=null, variant_b=null, заполнить limits/savings/impulse_budget на верхнем уровне.\n"
-    "При тяжёлом месяце limits/savings/impulse_budget на верхнем уровне = null, "
-    "заполнить ВНУТРИ variant_a и variant_b."
+    "(шаблон вывода добавит сам: 'после ' + это значение) or null\"}]}"
 )
 
 
@@ -2667,16 +2589,20 @@ async def _build_sonnet_input(uid: int, user_notion_id: str) -> str:
     return json.dumps(context, ensure_ascii=False, indent=2)
 
 
-_BUDGET_PARSE_PROMPT_LEGACY = """Финансовый советник. Пользователь — Кай, женщина с СДВГ (женский род).
+_BUDGET_PARSE_PROMPT_LEGACY = """Финансовый аналитик. Пользователь — Кай, женщина с СДВГ (женский род).
 Тон: тёплый, поддерживающий, без менторства.
 
-КОНТЕКСТ: Chapman = СИГАРЕТЫ (не чай!). СДВГ → резкие ограничения = срыв.
-Текущая дата: {current_date}.
+ЭТО ФАЗА 1 — РАЗБОР ДАННЫХ. Ты НЕ считаешь лимиты по категориям, НЕ считаешь
+подушку, НЕ пишешь summary/habit_strategy. Всю арифметику распределения делает
+детерминированный код после тебя. Задача — распарсить вход в структурированный JSON.
+
+КОНТЕКСТ: Chapman = СИГАРЕТЫ (не чай!). Текущая дата: {current_date}.
 
 Входные данные: {all_messages}
-Категории для ЛИМИТОВ (переменные траты) — ТОЛЬКО из этого списка, других не выдумывать: {budget_limit_categories}
-(ФИКС-расходы из шага 2 — жильё/коммуналка/подписки/коты — это не лимиты.
-Категорию для фикс-расходов ставь эмодзи-префиксом как везде в плане (например 🏠 для жилья/коммуналки, 💻 для техники/подписок, 🐾 для котов, 📄 для документов/налогов, 🚕 для транспорта) — НЕ словом.
+Ориентир по категориям для one_time[].category и целей (не выдумывать категории
+доходов / практики / расходников): {budget_limit_categories}
+(ФИКС-расходы — жильё/коммуналка/подписки/коты. Категорию для фикс-расходов ставь
+эмодзи-префиксом как везде в плане (например 🏠 для жилья/коммуналки, 💻 для техники/подписок, 🐾 для котов, 📄 для документов/налогов, 🚕 для транспорта) — НЕ словом.
 И НЕ дублируй слово, которое уже есть в названии позиции: если описание уже 'Коммуналка Питер', категория — просто иконка без повторного слова, не 'Коммуналка Коммуналка Питер'.)
 Уже потрачено в этом периоде (already_spent): {already_spent}₽
 Экономия с прошлого периода (savings_from_last_period): {savings_from_last_period}₽
@@ -2693,76 +2619,30 @@ _BUDGET_PARSE_PROMPT_LEGACY = """Финансовый советник. Поль
    fixed_total = sum(fixed). one_time_total = sum(one_time). one_time НЕ входит в fixed_total.
 3. already_spent = {already_spent} (реальные finance-траты периода) + one_time_total
    (разовые из буфера). Вернуть в JSON объединённое already_spent.
-   РАСПРЕДЕЛЯЕМЫЕ = доход - fixed_total - already_spent + savings_from_last_period
-   (already_spent реально вычитается; savings_from_last_period реально прибавляется,
-   вернуть как есть, 0 если не указано).
-4. ДОЛГИ — использовать ТОЛЬКО monthly_payment из данных:
-   - Каждый долг имеет поле monthly_payment — это сумма которую Кай РЕАЛЬНО платит
-   - КЛЮЧЕВОЕ ПРАВИЛО: считай ТОЛЬКО ПЕРВЫЙ долг по дедлайну!
-   - Остальные долги с monthly_payment > 0 — перенеси на месяц после закрытия первого
-   - НЕ СКЛАДЫВАЙ все платежи одновременно!
-   - Если monthly_payment = 0 → НЕ вычитай (наследство, отложен)
-   - НИКОГДА не пересчитывай monthly_payment. Кай уже решила.
-   - total_debt_payment = monthly_payment ПЕРВОГО горящего долга
-   - В debts_monthly — ТОЛЬКО текущий долг (первый по дедлайну)
-   - В queued_debts — все остальные (с пометкой "с [месяц]")
-5. Остаток = распределяемые - total_debt_payment
-6. Остаток >= 30к → НОРМАЛЬНЫЙ МЕСЯЦ (is_tight_month: false)
-   Остаток < 30к И total_debt_payment > 0 → ТЯЖЁЛЫЙ МЕСЯЦ (is_tight_month: true) → ДВА ВАРИАНТА
-   Остаток < 30к НО total_debt_payment == 0 → ОДИН план (is_tight_month: false,
-     variant_a/variant_b: null, limits на верхнем уровне). Вариант Б предлагает
-     уменьшить платёж по долгу — если платежа нет, сравнивать нечего, форк не нужен.
+   savings_from_last_period вернуть как есть ({savings_from_last_period}, 0 если не указано).
+   РАСПРЕДЕЛЯЕМЫЕ (distributable) = доход - fixed_total - already_spent + savings_from_last_period
+   — верни это число, дальше распределением займётся код.
+4. ДОЛГИ — распарсить, НЕ считать:
+   - Каждый долг: {{name, total, monthly, deadline, strategy}}. monthly = monthly_payment,
+     сумма которую Кай РЕАЛЬНО платит. monthly = 0 → долг отложен.
+   - НЕ СКЛАДЫВАЙ платежи. Код сам выберет первый долг по дедлайну и посчитает
+     total_debt_payment. Дедлайн — строкой ('апрель 2026'), код распарсит.
+   - НИКОГДА не пересчитывай monthly. Кай уже решила.
+   - strategy — короткий текст ТОЛЬКО если неочевиден ('10к апрель + 10к май'), иначе ''.
+   - В debts_monthly — все долги. В queued_debts можно продублировать отложенные.
+   - variant_b_debt_payment: если у горящего долга крупный платёж — предложи
+     реалистичную уменьшенную помесячную сумму (число) для разговора с кредитором.
+     Нечего уменьшать → null.
+   - Форк A/B строит КОД: только при total_debt_payment > 0 и малом остатке.
+     При total_debt_payment == 0 план всегда один.
 
-РАСПРЕДЕЛЕНИЕ ЛИМИТОВ:
-После вычета долгов — остаток по бюджетным переменным категориям.
-Категории limits — ТОЛЬКО из списка budget_limit_categories выше, других не выдумывать.
-НИКОГДА не ставить 0₽ на продукты или транспорт.
-
-АБСОЛЮТНЫЕ МИНИМУМЫ (НЕ может ниже):
-🚬 Привычки — 10,000₽ (СДВГ, невозможно ниже)
-🍜 Продукты — 3,000₽ (человек должен есть)
-🚕 Транспорт — 1,500₽ (СПб, метро)
-🎲 Импульсивные — 1,000₽ (СДВГ, дофамин)
-Сумма минимумов = 15,500₽
-
-Если остаток < 15,500₽ → ЖЁСТКИЙ вариант, но ВСЕГДА показывать. Кай решит сама.
-Если остаток >= 15,500₽ → распределять так:
-1. Железные минимумы: продукты 3000 + транспорт 1500 + импульсивные 1000.
-2. discretionary_pool = Распределяемые − железные минимумы − total_debt_payment.
-3. Привычки ≤ discretionary_pool × 0.5 (ПОТОЛОК — процент, НЕ абсолютное число;
-   нормальный месяц — не ниже 10 000₽). Не засовывать весь пул в привычки.
-4. products_min = max(3000, привычки / 2) — top-up продуктов сверх 3000, из пула.
-5. Остаток пула (discretionary_pool − привычки − products top-up) → по
-   ФИКСИРОВАННОМУ приоритету: каждая следующая категория получает то, что
-   осталось после предыдущей, пока пул не кончится. НЕ поровну, НЕ занулять всех
-   сразу. Не хватило на всех → младшие по списку = 0, это нормально:
-   1) 🍱 Кафе/Доставка  2) 💅 Бьюти  3) 🏥 Здоровье  4) 👗 Гардероб  5) 📚 Хобби/Учеба
-
-ТЯЖЁЛЫЙ МЕСЯЦ:
-variant_a: "Платить по плану" — все monthly_payment
-  ДАЖЕ В ВАРИАНТЕ А — железные минимумы: продукты 3к, транспорт 1.5к, импульсивные 1к = 5.5к.
-  discretionary_pool = остаток после железных минимумов и total_debt_payment.
-  Привычки ≤ discretionary_pool × 0.5 (ПОТОЛОК — процент). ТОЛЬКО привычки могут быть < 10к.
-  products_min = max(3000, привычки / 2).
-  Остаток пула → по приоритету 1) 🍱 Кафе/Доставка 2) 💅 Бьюти 3) 🏥 Здоровье
-  4) 👗 Гардероб 5) 📚 Хобби/Учеба (каждая из остатка после предыдущей; не хватило → младшие = 0).
-  НИКОГДА не обнуляй продукты/транспорт ради привычек!
-  ПОДУШКА В ВАРИАНТЕ А: savings = 0₽ ВСЕГДА. Если 3+ категорий = 0₽ — человеку не до накоплений.
-variant_b: "Уменьшить платежи" — предложить снизить
-
-ПОДУШКА (savings):
-Копить ТОЛЬКО если лимиты по основным категориям адекватные.
-Если 3+ категорий имеют лимит 0₽ → savings = 0₽.
-В варианте A тяжёлого месяца savings = 0₽ ВСЕГДА.
-
-ПРАВИЛА:
-- Привычки (сигареты+кола+энергетики) = ОДНА категория "🚬 Привычки". НЕ разбивать!
-- Коты = фиксированные расходы (живые существа!)
-- Цели: если 0₽/мес → "после долгов (месяц год)"
-- note/summary/habit_strategy — макс 15 слов
+ЛИМИТЫ ТЫ НЕ СЧИТАЕШЬ. НЕ возвращай поля limits / limits_total / impulse_budget /
+savings / is_tight_month / variant_a / variant_b / free_after_debts / summary /
+habit_strategy / relief_timeline — их заполнят код и Фаза 2.
+Привычки (сигареты+кола+энергетики) — код сведёт в одну категорию 🚬 Привычки.
 
 Ответ: ТОЛЬКО JSON, без markdown.
-Схема JSON:
+Схема JSON (Фаза 1 — разбор, без лимитов):
 {{"income": [{{"source": "X", "amount": N}}], "income_total": N,
  "fixed": [{{"name": "X", "category": "X", "amount": N}}], "fixed_total": N,
  "one_time": [{{"name": "X", "category": "X", "amount": N}}], "one_time_total": N,
@@ -2771,24 +2651,9 @@ variant_b: "Уменьшить платежи" — предложить сниз
  "debts_monthly": [{{"name": "X", "total": N, "monthly": N, "deadline": "X", "strategy": "X"}}],
  "debts_monthly_total": N,
  "queued_debts": [{{"name": "X", "total": N, "deadline": "X", "strategy": "X"}}],
- "free_after_debts": N,
- "is_tight_month": false,
- "variant_a": null or {{"viable": true, "label": "X", "debt_payment": N, "remaining": N,
-   "limits": [{{"category": "X", "amount": N}}], "limits_total": N,
-   "impulse_budget": N, "savings": {{"amount": N, "note": "X"}},
-   "adhd_survival_plan": "X", "relief": "X", "warning": "X or null"}},
- "variant_b": null or {{"label": "X", "debt_payment": N, "remaining": N,
-   "limits": [{{"category": "X", "amount": N}}], "limits_total": N,
-   "impulse_budget": N, "savings": {{"amount": N, "note": "X"}},
-   "creditor_script": "X", "relief": "X"}},
- "savings": {{"amount": N, "note": "X"}},
- "limits": [{{"category": "X", "amount": N, "current": N, "change": "X", "manual": false}}],
- "limits_total": N, "impulse_budget": N,
+ "variant_b_debt_payment": N or null,
  "goals": [{{"name": "X", "monthly": N, "total": N,
-   "starts_after": "условие разблокировки БЕЗ слова 'после' в начале (шаблон вывода добавит сам) or null"}}],
- "relief_timeline": "X", "summary": "X", "habit_strategy": "X"}}
-ВАЖНО: При нормальном месяце variant_a=null, variant_b=null, заполнить limits/savings/impulse_budget на верхнем уровне.
-При тяжёлом — limits/savings/impulse_budget на верхнем уровне = null, заполнить ВНУТРИ variant_a и variant_b."""
+   "starts_after": "условие разблокировки БЕЗ слова 'после' в начале (шаблон вывода добавит сам) or null"}}]}}"""
 
 
 _DEBT_EXTRACT_HAIKU_PROMPT = """Извлеки долги из текста пользователя. Ищи паттерны:
@@ -3338,6 +3203,148 @@ async def on_budget_priority_goal(call: CallbackQuery) -> None:
 
 # ── Sonnet Analysis ──────────────────────────────────────────────────────────
 
+# ── Детерминированное распределение лимитов поверх разбора Sonnet ────────────
+#
+# Sonnet (Фаза 1) отдаёт только разбор: доходы, фикс, разовые, долги, цели.
+# Все цифры лимитов считает compute_limits() здесь. Тяжёлый месяц → два вызова
+# с разным total_debt_payment (вариант А — полный платёж, вариант Б —
+# уменьшенный). Фаза 2 (Sonnet) пишет текст вокруг готовых чисел.
+
+# discretionary ниже этого порога — priority-категории (кафе/бьюти/…) уже = 0,
+# показываем плашку «жёстко». 23000 (продукты 10к + привычки-потолок 13к) + 2500
+# железных (транспорт + импульсивные).
+BUDGET_TIGHT_WARN = 25500
+
+_BUDGET_NARRATION_FIELDS = ("summary", "habit_strategy", "relief_timeline")
+
+BUDGET_PHASE2_SYSTEM = (
+    "Ты финансовый аналитик. Пользователь — Кай, женщина с СДВГ. Женский род, "
+    "тёплый тон без менторства.\n"
+    "Тебе дают ГОТОВЫЙ финансовый план: лимиты по категориям уже посчитаны кодом, "
+    "менять их НЕЛЬЗЯ, свои цифры не называть. Задача — короткие текстовые "
+    "пояснения ВОКРУГ готовых цифр. Chapman = сигареты (не чай).\n\n"
+    "Верни ТОЛЬКО JSON:\n"
+    '{"summary": "1 фраза ≤15 слов — суть месяца",\n'
+    ' "habit_strategy": "≤15 слов — как удержать привычки в лимит (блок Chapman '
+    "заранее, кола→вода, 1 монстр вместо 2), или '' если лимит привычек комфортный\",\n"
+    ' "relief_timeline": "когда станет легче / закроются долги, или \'\'",\n'
+    ' "variant_a": null or {"adhd_survival_plan": "конкретный план как пережить '
+    'месяц", "warning": "СДВГ-риск или null"},\n'
+    ' "variant_b": null or {"creditor_script": "1 фраза что сказать кредитору"}}\n'
+    "План без вариантов → variant_a/variant_b = null."
+)
+
+
+def _plan_distributable(plan: dict) -> float:
+    """Распределяемые = доход − фикс − already_spent + savings_from_last_period.
+
+    Детерминированно из полей разбора; совпадает с числом в _format_plan.
+    """
+    income_total = float(plan.get("income_total", 0) or 0)
+    fixed_total = float(plan.get("fixed_total", 0)
+                        or sum(f.get("amount", 0) for f in plan.get("fixed", [])))
+    already_spent = float(plan.get("already_spent", 0) or 0)
+    last_savings = float(plan.get("savings_from_last_period", 0) or 0)
+    base = (income_total - fixed_total) if income_total > 0 else float(plan.get("distributable", 0) or 0)
+    return max(0.0, base - already_spent + last_savings)
+
+
+def _limits_fields(distributable: float, debt_payment: float) -> dict:
+    """compute_limits → поля плана: limits[], limits_total, impulse_budget."""
+    lim = _compute_limits(distributable, debt_payment)
+    impulse = int(lim.pop(_CAT_IMPULSE, 0))
+    items = [{"category": cat, "amount": int(amt), "change": "new"}
+             for cat, amt in lim.items() if amt > 0]
+    return {
+        "limits": items,
+        "limits_total": sum(i["amount"] for i in items),
+        "impulse_budget": impulse,
+    }
+
+
+def _apply_computed_limits(plan: dict) -> None:
+    """Заменить всю арифметику лимитов детерминированным compute_limits().
+
+    Sonnet цифры лимитов НЕ отдаёт — только разбор. Здесь: выбрать первый горящий
+    долг (по распарсенному дедлайну), решить тяжёлый ли месяц, посчитать лимиты
+    (для тяжёлого — дважды, вариант А/Б).
+    """
+    distributable = _plan_distributable(plan)
+
+    all_debts = list(plan.get("debts_monthly") or []) + list(plan.get("queued_debts") or [])
+    total_debt_payment = _pick_debt_payment(all_debts)
+    free_after = distributable - total_debt_payment
+    plan["debts_monthly_total"] = int(round(total_debt_payment))
+    plan["free_after_debts"] = int(round(free_after))
+
+    is_tight = free_after < 30000 and total_debt_payment > 0
+    if is_tight:
+        pay_b = plan.get("variant_b_debt_payment")
+        try:
+            pay_b = float(pay_b) if pay_b is not None else total_debt_payment
+        except (TypeError, ValueError):
+            pay_b = total_debt_payment
+        pay_b = max(0.0, min(pay_b, total_debt_payment))
+
+        plan["is_tight_month"] = True
+        va = {"label": "Платить по плану",
+              "debt_payment": int(round(total_debt_payment)),
+              "remaining": int(round(distributable - total_debt_payment)),
+              "savings": {"amount": 0, "note": ""}}
+        va.update(_limits_fields(distributable, total_debt_payment))
+        vb = {"label": "Пересмотреть стратегию",
+              "debt_payment": int(round(pay_b)),
+              "remaining": int(round(distributable - pay_b)),
+              "savings": {"amount": 0, "note": ""}}
+        vb.update(_limits_fields(distributable, pay_b))
+        plan["variant_a"] = va
+        plan["variant_b"] = vb
+        plan["limits"] = None
+        plan["limits_total"] = None
+        plan["impulse_budget"] = None
+        plan["savings"] = None
+    else:
+        plan["is_tight_month"] = False
+        plan["variant_a"] = None
+        plan["variant_b"] = None
+        plan.update(_limits_fields(distributable, total_debt_payment))
+        plan.setdefault("savings", {"amount": 0, "note": ""})
+
+
+def _merge_budget_narration(plan: dict, narr: dict) -> None:
+    """Слить текстовые поля Фазы 2 в план, не трогая цифры."""
+    for f in _BUDGET_NARRATION_FIELDS:
+        val = narr.get(f)
+        if isinstance(val, str) and val.strip():
+            plan[f] = val.strip()
+    for vk in ("variant_a", "variant_b"):
+        src = narr.get(vk)
+        tgt = plan.get(vk)
+        if isinstance(src, dict) and isinstance(tgt, dict):
+            for key in ("adhd_survival_plan", "warning", "creditor_script", "relief"):
+                v = src.get(key)
+                if isinstance(v, str) and v.strip():
+                    tgt[key] = v.strip()
+
+
+async def _budget_phase2_narration(plan: dict) -> None:
+    """Фаза 2: Sonnet пишет текст вокруг уже посчитанных лимитов. Мягкий фейл."""
+    from core.config import config as _cfg
+    try:
+        raw = await ask_claude(
+            json.dumps(plan, ensure_ascii=False), system=BUDGET_PHASE2_SYSTEM,
+            model=_cfg.model_sonnet, max_tokens=1500, temperature=0,
+        )
+        if not raw or not raw.strip():
+            return
+        m = re.search(r'\{[\s\S]*\}', raw)
+        narr = json.loads(m.group(0) if m else raw)
+        if isinstance(narr, dict):
+            _merge_budget_narration(plan, narr)
+    except Exception as e:
+        logger.warning("budget phase 2 narration failed: %s", e)
+
+
 async def _run_budget_analysis(message: Message, uid: int) -> None:
     """Собрать буфер, отправить Sonnet, показать план."""
     state = _budget_get(uid) or {}
@@ -3430,6 +3437,13 @@ async def _run_budget_analysis(message: Message, uid: int) -> None:
         )
         return
 
+    # ── Детерминированная арифметика лимитов (Фаза 1 → код) + текст (Фаза 2) ──
+    try:
+        _apply_computed_limits(plan)
+    except Exception:
+        logger.error("_apply_computed_limits failed", exc_info=True)
+    await _budget_phase2_narration(plan)
+
     state["plan"] = plan
     state["state"] = "has_plan"
     _budget_set(uid, state)
@@ -3444,7 +3458,7 @@ async def _run_budget_analysis(message: Message, uid: int) -> None:
     if free_after < 0:
         plan_text += "\n\n⚠️ <b>После платежей дефицит {:,}₽.</b>\n".format(abs(free_after))
         plan_text += "Можно пересмотреть стратегию долгов."
-    elif 0 < free_after < 15500 and not is_tight:
+    elif 0 < free_after < BUDGET_TIGHT_WARN and not is_tight:
         plan_text += "\n\n⚠️ <b>После платежей остаётся {:,}₽ — жёстко.</b>".format(free_after)
 
     if is_tight:
@@ -3642,7 +3656,7 @@ def _format_plan(plan: dict) -> str:
     if is_tight and variant_a and variant_b:
         # ВСЕГДА показывать оба варианта — Кай сама решит
         remaining_a = variant_a.get("remaining", 0)
-        if remaining_a < 15500:
+        if remaining_a < BUDGET_TIGHT_WARN:
             lines.extend(_format_variant(variant_a, "Вариант А: {} ⚠️ жёстко".format(
                 variant_a.get("label", "Платить по плану"))))
             lines.append("\n⚠️ <i>Остаётся {:,}₽ — жёстко, но реально если готова.</i>".format(

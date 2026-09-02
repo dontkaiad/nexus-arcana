@@ -162,30 +162,47 @@ import pytest
 
 
 @pytest.mark.parametrize("name,prompt", _BOTH_PROMPTS.items())
-def test_habits_cap_50_percent_described(name, prompt):
-    """Привычки ≤ discretionary_pool × 0.5 — процент, не абсолют. Оба промпта."""
-    assert "discretionary_pool" in prompt, name
-    assert "× 0.5" in prompt, name
-    assert "ПОТОЛОК" in prompt, name
-    # products_min правило не трогали
-    assert "max(3000, привычки / 2)" in prompt, name
+def test_prompts_no_longer_contain_limit_formulas(name, prompt):
+    """Арифметика лимитов переехала в core/budget.py::compute_limits — в промптах
+    (Фаза 1, разбор) формул распределения больше быть не должно."""
+    for banned in (
+        "× 0.5", "ПОТОЛОК", "discretionary_pool", "max(3000",
+        "АБСОЛЮТНЫЕ МИНИМУМЫ", "РАСПРЕДЕЛЕНИЕ ЛИМИТОВ", "железные минимумы",
+        "products_min", "15,500", "15 500",
+    ):
+        assert banned not in prompt, f"{name}: осталась формула лимитов «{banned}»"
 
 
 @pytest.mark.parametrize("name,prompt", _BOTH_PROMPTS.items())
-def test_priority_split_order(name, prompt):
-    """Остаток пула делится по фиксированному приоритету в правильном порядке."""
-    positions = [prompt.find(cat) for cat in _PRIORITY_ORDER]
-    assert all(p != -1 for p in positions), f"{name}: не все категории приоритета найдены"
-    assert positions == sorted(positions), f"{name}: порядок приоритета нарушен"
+def test_prompts_say_model_does_not_compute_limits(name, prompt):
+    """Фаза 1 явно снимает с модели расчёт лимитов."""
+    assert "ЛИМИТЫ ТЫ НЕ СЧИТАЕШЬ" in prompt, name
+    assert "Фаза 1" in prompt or "ФАЗА 1" in prompt, name
 
 
 @pytest.mark.parametrize("name,prompt", _BOTH_PROMPTS.items())
-def test_priority_split_in_both_normal_and_tight(name, prompt):
-    """Правило описано и в общем распределении, и в варианте А тяжёлого месяца
-    (два места, как было с бьюти — дублируются намеренно)."""
-    assert prompt.count("discretionary_pool") >= 2, name
-    # приоритетный список встречается минимум дважды (обычный + вариант А)
-    assert prompt.count("🍱 Кафе/Доставка") >= 2, name
+def test_prompts_do_not_list_priority_categories(name, prompt):
+    """Приоритетная цепочка (Кафе→Бьюти→…) теперь только в compute_limits."""
+    hits = [cat for cat in _PRIORITY_ORDER if cat in prompt]
+    assert not hits, f"{name}: цепочка приоритета всё ещё в промпте: {hits}"
+
+
+def test_priority_chain_order_lives_in_core():
+    """Регресс: порядок приоритета — в детерминированном коде, не в промпте."""
+    from core.budget import PRIORITY_CHAIN
+    assert PRIORITY_CHAIN == [
+        "🍱 Кафе/Доставка", "💅 Бьюти", "🏥 Здоровье", "👗 Гардероб", "📚 Хобби/Учеба",
+    ]
+
+
+def test_run_budget_analysis_calls_compute_limits():
+    """Регресс: _run_budget_analysis прогоняет план через детерминированный
+    _apply_computed_limits (который зовёт compute_limits), а не доверяет Sonnet."""
+    import inspect
+    from nexus.handlers import finance
+    src = inspect.getsource(finance._run_budget_analysis)
+    assert "_apply_computed_limits(plan)" in src
+    assert "_compute_limits" in inspect.getsource(finance._limits_fields)
 
 
 @pytest.mark.parametrize("name,prompt", _BOTH_PROMPTS.items())

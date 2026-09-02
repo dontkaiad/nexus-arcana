@@ -7,8 +7,8 @@ from __future__ import annotations
 
 import logging
 import re
-from datetime import datetime, timedelta, timezone as _tz
-from typing import Dict, List
+from datetime import date, datetime, timedelta, timezone as _tz
+from typing import Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -298,6 +298,96 @@ def compute_limits(distributable_pool: float, total_debt_payment: float) -> Dict
         # цепочка приоритета остаётся 0
 
     return limits
+
+
+# ── Выбор «первого горящего долга» — детерминированно, по дедлайну ───────────
+
+_RU_MONTHS: Dict[str, int] = {}
+for _i, _base in enumerate([
+    "январ", "феврал", "март", "апрел", "ма", "июн",
+    "июл", "август", "сентябр", "октябр", "ноябр", "декабр",
+], start=1):
+    _RU_MONTHS[_base] = _i
+# частые полные формы, чтобы не зависеть от префикс-матча по «ма»
+_RU_MONTHS_FULL = {
+    "январь": 1, "января": 1, "февраль": 2, "февраля": 2, "март": 3, "марта": 3,
+    "апрель": 4, "апреля": 4, "май": 5, "мая": 5, "июнь": 6, "июня": 6,
+    "июль": 7, "июля": 7, "август": 8, "августа": 8, "сентябрь": 9, "сентября": 9,
+    "октябрь": 10, "октября": 10, "ноябрь": 11, "ноября": 11, "декабрь": 12, "декабря": 12,
+}
+
+
+def parse_deadline(s: str, *, today: Optional[date] = None) -> Optional[date]:
+    """'апрель 2026' / 'до апреля' / '2026-04' / '04.2026' → date(y, m, 1).
+
+    Без года — ближайшее будущее вхождение месяца (если месяц уже прошёл в этом
+    году → следующий год). Не распарсилось → None.
+    """
+    if not s:
+        return None
+    today = today or datetime.now(_MOSCOW_TZ).date()
+    low = s.strip().lower()
+
+    # ISO / числовые: 2026-04, 2026-04-15, 04.2026, 4/2026
+    m = re.search(r'(20\d{2})[-./](\d{1,2})', low)
+    if m:
+        year, month = int(m.group(1)), int(m.group(2))
+        if 1 <= month <= 12:
+            return date(year, month, 1)
+    m = re.search(r'(\d{1,2})[./](20\d{2})', low)
+    if m:
+        month, year = int(m.group(1)), int(m.group(2))
+        if 1 <= month <= 12:
+            return date(year, month, 1)
+
+    month = _RU_MONTHS_FULL.get(low)
+    if month is None:
+        for word in re.findall(r'[а-яё]+', low):
+            if word in _RU_MONTHS_FULL:
+                month = _RU_MONTHS_FULL[word]
+                break
+            for base, num in _RU_MONTHS.items():
+                if word.startswith(base):
+                    month = num
+                    break
+            if month is not None:
+                break
+    if month is None:
+        return None
+
+    ym = re.search(r'20\d{2}', low)
+    if ym:
+        return date(int(ym.group(0)), month, 1)
+    year = today.year
+    if month < today.month:
+        year += 1
+    return date(year, month, 1)
+
+
+def pick_debt_payment(debts: List[dict]) -> float:
+    """monthly_payment ПЕРВОГО горящего долга (по дедлайну).
+
+    Долги без платежа (monthly_payment/monthly ≤ 0) игнорируются — наследство,
+    отложенные. Долг без распознанного дедлайна уходит в конец очереди.
+    Ни одного платящего долга → 0.0 (обычный месяц, без вычета).
+    """
+    dated: List = []
+    for d in debts or []:
+        mp = d.get("monthly_payment")
+        if mp is None:
+            mp = d.get("monthly", 0)
+        try:
+            mp = float(mp or 0)
+        except (TypeError, ValueError):
+            mp = 0.0
+        if mp <= 0:
+            continue
+        dl = parse_deadline(str(d.get("deadline") or ""))
+        dated.append((dl or date.max, mp))
+    if not dated:
+        return 0.0
+    dated.sort(key=lambda t: t[0])
+    return dated[0][1]
 
 
 _MOSCOW_TZ = _tz(timedelta(hours=3))
