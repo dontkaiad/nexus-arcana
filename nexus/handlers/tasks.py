@@ -2423,9 +2423,9 @@ async def maybe_handle_reschedule_pending(message: Message, text: Optional[str] 
     pending = _pending_get(message.from_user.id)
     if not pending or pending.get("action") != "reschedule":
         return False
-    # Реакцию ставит сама handle_reschedule_reminder (⚡ на перенос, 🗑️ на
+    # Реакцию ставит сама handle_reschedule_reminder (⚡ на перенос, 💔 на
     # отмену, никакой — если дату не удалось распознать и ждём повторный
-    # ввод) — дублирующий react() здесь затирал 🗑️ на ⚡ и подсвечивал ⚡
+    # ввод) — дублирующий react() здесь затирал 💔 на ⚡ и подсвечивал ⚡
     # даже на «не смог распарсить дату».
     await handle_reschedule_reminder(message, text=text)
     return True
@@ -2485,7 +2485,7 @@ async def handle_reschedule_reminder(message: Message, text: Optional[str] = Non
                     except Exception:
                         pass
             _pending_del(uid)
-            await react(message, "🗑️")
+            await react(message, "💔")
             await message.answer(f"🗑️ Задача «{task_title}» отменена")
             return
 

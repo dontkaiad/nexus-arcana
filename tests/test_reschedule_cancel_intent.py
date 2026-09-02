@@ -45,7 +45,7 @@ async def test_cancel_intent_archives_task_without_trying_to_parse_date():
 
         archived.assert_awaited_once_with("t-cancel-1")
         haiku.assert_not_awaited()
-        react_mock.assert_awaited_once_with(msg, "🗑️")
+        react_mock.assert_awaited_once_with(msg, "💔")
         assert "отменена" in msg.answer.call_args[0][0].lower()
         # pending очищен — следующее сообщение не попадёт снова в reschedule
         assert tasks._pending_get(uid) is None
