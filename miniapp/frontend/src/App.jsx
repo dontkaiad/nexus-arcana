@@ -1982,20 +1982,10 @@ function CushionScreen({ s, data, refetch }) {
 
   return (
     <>
-      {/* Тот же паттерн, что «Потрачено сегодня» — plain Glass, флекс-строка. */}
-      <Glass s={s}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-          <div>
-            <div style={{ fontSize: 13, fontWeight: 500, opacity: 0.75, marginBottom: 4 }}>Финансовая подушка</div>
-            <div style={{ fontFamily: H, fontSize: fs(32), fontWeight: 500, lineHeight: 1 }}>
-              {Math.round(balance).toLocaleString()} <span style={{ fontSize: fs(18), fontWeight: 400 }}>₽</span>
-            </div>
-          </div>
-          <span style={{ fontSize: fs(36) }}>🛡️</span>
-        </div>
-      </Glass>
+      <SectionLabel s={s}>Подушка</SectionLabel>
 
-      {/* Те же три плашки, что ДОХОД/РАСХОД/БАЛАНС во вкладке «Месяц». */}
+      {/* Три плашки БАЛАНС/ЦЕЛЬ/ОСТАЛОСЬ — единственный источник цифр,
+          тот же компонент что ДОХОД/РАСХОД/БАЛАНС во вкладке «Месяц». */}
       <div className="hero-metrics" style={{ marginBottom: 10 }}>
         <Metric s={s} v={kfmt(balance)} unit="₽" sub="баланс" accent={s.acc} />
         <Metric s={s} v={target > 0 ? kfmt(target) : "—"} unit={target > 0 ? "₽" : undefined} sub="цель" />
