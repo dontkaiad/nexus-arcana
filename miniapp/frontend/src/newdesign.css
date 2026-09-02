@@ -933,3 +933,14 @@
 .list-group-h.lg { font-size: clamp(20px, 5.5vw, 24px); }
 .day .list-group-h  { color: #1a3528; }
 .night .list-group-h { color: var(--ar-text); }
+
+/* Числовые поля — убрать нативные стрелочки-степперы (выбиваются из дизайна) */
+input[type="number"]::-webkit-outer-spin-button,
+input[type="number"]::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+input[type="number"] {
+  -moz-appearance: textfield;
+  appearance: textfield;
+}

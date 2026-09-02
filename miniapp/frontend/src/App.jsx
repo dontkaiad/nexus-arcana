@@ -1952,19 +1952,35 @@ function CushionScreen({ s, data, refetch }) {
   const [editing, setEditing] = useState(false);
   const [tgt, setTgt] = useState(target ? String(Math.round(target)) : "");
   const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState("");
   const pct = target > 0 ? Math.min(100, Math.round((balance / target) * 100)) : 0;
 
+  const toggleEdit = () => {
+    setErr("");
+    setEditing((v) => !v);
+  };
+
   const save = async () => {
+    const raw = tgt.trim();
+    // пусто = снять цель (это осмысленно). Иначе — только положительное число.
+    if (raw !== "") {
+      const val = Number(raw);
+      if (!Number.isFinite(val) || val <= 0) {
+        setErr("цель должна быть больше 0");
+        return;
+      }
+    }
+    setErr("");
     setSaving(true);
     try {
-      const val = parseInt(tgt, 10);
+      const val = Number(raw);
       await apiPost("/api/finance/cushion/target", {
-        target: Number.isFinite(val) && val > 0 ? val : null,
+        target: raw !== "" && val > 0 ? Math.round(val) : null,
       });
       setEditing(false);
       refetch();
     } catch (_) {
-      /* оставляем форму открытой */
+      setErr("не удалось сохранить, попробуй ещё раз");
     } finally {
       setSaving(false);
     }
@@ -2008,24 +2024,26 @@ function CushionScreen({ s, data, refetch }) {
         </div>
       )}
 
-      <div style={{ textAlign: "right", marginBottom: 4 }}>
-        <span
-          onClick={() => setEditing((v) => !v)}
-          style={{ cursor: "pointer", color: s.acc, fontSize: fs(13) }}
-        >
-          {editing ? "отмена" : "изменить цель"}
-        </span>
-      </div>
+      {!editing && (
+        <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 6 }}>
+          <Pill s={s} onClick={toggleEdit}>изменить цель</Pill>
+        </div>
+      )}
       {editing && (
         <Glass s={s} style={{ padding: "10px 14px", marginBottom: 8 }}>
           <Input
-            s={s} value={tgt} onChange={setTgt}
-            placeholder="Цель, ₽ (пусто — снять)" type="number" step="1000"
+            s={s} value={tgt} onChange={(v) => { setTgt(v); if (err) setErr(""); }}
+            placeholder="Цель, ₽ (пусто — снять)"
+            type="number" step="1000" min="0" inputMode="numeric"
           />
-          <div style={{ marginTop: 8 }}>
+          {err && (
+            <div style={{ fontSize: fs(12), color: s.red, marginTop: 6 }}>{err}</div>
+          )}
+          <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
             <Pill s={s} active onClick={saving ? undefined : save}>
               {saving ? "Сохраняю…" : "Сохранить"}
             </Pill>
+            <Pill s={s} onClick={toggleEdit}>отмена</Pill>
           </div>
         </Glass>
       )}
@@ -6676,7 +6694,7 @@ function _isLightColor(c) {
   return (0.299 * r + 0.587 * g + 0.114 * b) > 140;
 }
 
-function Input({ s, value, onChange, placeholder, type = "text", step }) {
+function Input({ s, value, onChange, placeholder, type = "text", step, min, inputMode }) {
   // Нативные date/time на iOS/Telegram не наследуют color: значение
   // рисуется системным (в OS dark mode — бледным) → нечитаемо. Форсим цвет
   // через WebkitTextFillColor + colorScheme по теме (день=light, ночь=dark).
@@ -6685,6 +6703,8 @@ function Input({ s, value, onChange, placeholder, type = "text", step }) {
     <input
       type={type}
       step={step}
+      min={min}
+      inputMode={inputMode}
       value={value ?? ""}
       onChange={(e) => onChange(e.target.value)}
       placeholder={placeholder}
