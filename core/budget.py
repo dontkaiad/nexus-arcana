@@ -205,6 +205,101 @@ async def load_budget_data(user_notion_id: str = "") -> Dict[str, list]:
     return result
 
 
+# ── Детерминированный расчёт лимитов ─────────────────────────────────────────
+#
+# Вся арифметика распределения переменных лимитов живёт здесь, а не в
+# LLM-инструкциях. Sonnet больше не считает ни одной цифры лимита — только
+# текстовые пояснения вокруг готовых чисел из compute_limits().
+
+CAT_TRANSPORT = "🚕 Транспорт"
+CAT_IMPULSE = "🎲 Импульсивные"
+CAT_PRODUCTS = "🍜 Продукты"
+CAT_HABITS = "🚬 Привычки"
+
+# Железные категории — всегда, никогда не режутся (пока discretionary их покрывает).
+IRON_TRANSPORT = 1500
+IRON_IMPULSE = 1000
+IRON_TOTAL = IRON_TRANSPORT + IRON_IMPULSE  # 2500
+
+PRODUCTS_TARGET = 10000
+HABITS_CEILING = 13000
+_PRIORITY_FLOOR = PRODUCTS_TARGET + HABITS_CEILING  # 23000
+
+# Приоритет распределения остатка: каждая категория забирает 50% того, что
+# осталось после предыдущей; последняя в списке — весь остаток (иначе из-за
+# округления виснет копейка и сумма не сходится с discretionary).
+PRIORITY_CHAIN = [
+    "🍱 Кафе/Доставка",
+    "💅 Бьюти",
+    "🏥 Здоровье",
+    "👗 Гардероб",
+    "📚 Хобби/Учеба",
+]
+
+# Все категории, которые compute_limits() всегда возвращает (0, если не профинансированы).
+LIMIT_CATEGORIES = [CAT_TRANSPORT, CAT_IMPULSE, CAT_PRODUCTS, CAT_HABITS] + PRIORITY_CHAIN
+
+
+def compute_limits(distributable_pool: float, total_debt_payment: float) -> Dict[str, int]:
+    """Детерминированное распределение переменных лимитов. Без LLM.
+
+    discretionary = distributable_pool − total_debt_payment.
+
+    Возвращает {категория: рубли(int)} по всем LIMIT_CATEGORIES. Сумма всех
+    значений ТОЧНО равна discretionary (округление round() до рубля, последняя
+    категория цепочки приоритета забирает остаток без деления пополам —
+    поэтому копейки от округления не теряются и не создаются).
+
+    Ветки:
+      • discretionary ≤ 0        → все категории 0 (в минус не уходим).
+      • discretionary < 2500     → железные транспорт/импульсивные урезаны
+                                    пропорционально их долям в IRON_TOTAL,
+                                    остальное 0 (крайний случай).
+      • pool_after_iron ≥ 23000  → продукты=10000, привычки≤13000, остаток
+                                    по PRIORITY_CHAIN делением пополам.
+      • иначе                    → продукты/привычки делят pool_after_iron
+                                    пополам, цепочка приоритета = 0.
+    """
+    limits: Dict[str, int] = {cat: 0 for cat in LIMIT_CATEGORIES}
+
+    discretionary = round(distributable_pool - total_debt_payment)
+    if discretionary <= 0:
+        return limits
+
+    if discretionary < IRON_TOTAL:
+        # Транспорт+импульсивные не покрываются — режем их пропорционально,
+        # остаток цепочки/продуктов/привычек = 0. Сумма = discretionary ровно
+        # (транспорт берёт свою долю, импульсивные — весь остаток).
+        transport = round(discretionary * IRON_TRANSPORT / IRON_TOTAL)
+        limits[CAT_TRANSPORT] = transport
+        limits[CAT_IMPULSE] = discretionary - transport
+        return limits
+
+    limits[CAT_TRANSPORT] = IRON_TRANSPORT
+    limits[CAT_IMPULSE] = IRON_IMPULSE
+    pool_after_iron = discretionary - IRON_TOTAL
+
+    if pool_after_iron >= _PRIORITY_FLOOR:
+        limits[CAT_PRODUCTS] = PRODUCTS_TARGET
+        limits[CAT_HABITS] = min(HABITS_CEILING, pool_after_iron - PRODUCTS_TARGET)
+        remaining = pool_after_iron - limits[CAT_PRODUCTS] - limits[CAT_HABITS]
+        last_idx = len(PRIORITY_CHAIN) - 1
+        for i, cat in enumerate(PRIORITY_CHAIN):
+            if i == last_idx:
+                limits[cat] = remaining  # весь остаток, без деления — сумма сходится
+            else:
+                amount = round(remaining / 2)
+                limits[cat] = amount
+                remaining -= amount
+    else:
+        products = round(pool_after_iron / 2)
+        limits[CAT_PRODUCTS] = products
+        limits[CAT_HABITS] = pool_after_iron - products
+        # цепочка приоритета остаётся 0
+
+    return limits
+
+
 _MOSCOW_TZ = _tz(timedelta(hours=3))
 
 
