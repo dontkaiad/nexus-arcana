@@ -2449,10 +2449,12 @@ BUDGET_SONNET_SYSTEM = (
     "  - Каждый долг имеет поле monthly_payment — это сумма которую Кай РЕАЛЬНО платит\n"
     "  - НЕ СКЛАДЫВАЙ все платежи одновременно! Код сам выберет первый долг по дедлайну\n"
     "    и посчитает total_debt_payment. Ты только возвращаешь долги как есть.\n"
-    "  - Если monthly_payment = 0 → долг отложен (наследство, после другого).\n"
     "  - НИКОГДА не пересчитывай monthly_payment самостоятельно. Кай уже решила.\n"
-    "  - В debts_monthly верни ВСЕ долги: {name, total, monthly, deadline, strategy}.\n"
-    "    Дедлайн — строкой ('апрель 2026'), код распарсит в дату.\n"
+    "  - Каждый долг — ТОЛЬКО в ОДНОМ массиве. monthly_payment > 0 → debts_monthly.\n"
+    "    monthly_payment == 0 / стратегия 'Отложен' (наследство, после другого) →\n"
+    "    queued_debts. НИКОГДА не дублируй один и тот же долг в обоих массивах.\n"
+    "    Формат: {name, total, monthly, deadline, strategy}. Дедлайн — строкой\n"
+    "    ('апрель 2026'), код распарсит в дату.\n"
     "  - strategy — короткий человеческий текст, ТОЛЬКО если неочевиден из данных\n"
     "    ('вику сразу если помещаемся', '10к апрель + 10к май'). Иначе ''.\n"
     "  - variant_b_debt_payment: если у первого горящего долга крупный платёж —\n"
@@ -2629,7 +2631,9 @@ _BUDGET_PARSE_PROMPT_LEGACY = """Финансовый аналитик. Поль
      total_debt_payment. Дедлайн — строкой ('апрель 2026'), код распарсит.
    - НИКОГДА не пересчитывай monthly. Кай уже решила.
    - strategy — короткий текст ТОЛЬКО если неочевиден ('10к апрель + 10к май'), иначе ''.
-   - В debts_monthly — все долги. В queued_debts можно продублировать отложенные.
+   - Каждый долг — ТОЛЬКО в ОДНОМ массиве. monthly > 0 → debts_monthly.
+     monthly == 0 / стратегия 'Отложен' → queued_debts. НИКОГДА не дублируй
+     один и тот же долг в обоих массивах.
    - variant_b_debt_payment: если у горящего долга крупный платёж — предложи
      реалистичную уменьшенную помесячную сумму (число) для разговора с кредитором.
      Нечего уменьшать → null.
@@ -3235,6 +3239,18 @@ BUDGET_PHASE2_SYSTEM = (
 )
 
 
+def _dedup_queued_debts(debts_monthly: list, queued: list) -> list:
+    """Убрать из queued_debts долги, которые уже есть в debts_monthly (по имени).
+
+    Защита от Sonnet, который иногда кладёт один долг в оба массива. Раз он попал
+    в debts_monthly — там платёж ненулевой, эту версию и оставляем.
+    """
+    monthly_names = {str(d.get("name", "")).strip().lower()
+                     for d in (debts_monthly or []) if d.get("name")}
+    return [q for q in (queued or [])
+            if str(q.get("name", "")).strip().lower() not in monthly_names]
+
+
 def _plan_distributable(plan: dict) -> float:
     """Распределяемые = доход − фикс − already_spent + savings_from_last_period.
 
@@ -3253,8 +3269,10 @@ def _limits_fields(distributable: float, debt_payment: float) -> dict:
     """compute_limits → поля плана: limits[], limits_total, impulse_budget."""
     lim = _compute_limits(distributable, debt_payment)
     impulse = int(lim.pop(_CAT_IMPULSE, 0))
+    # Показываем ВСЕ категории, включая нулевые — прозрачность важнее компактности:
+    # видно, что категория получила 0₽ осознанно, а не потерялась.
     items = [{"category": cat, "amount": int(amt), "change": "new"}
-             for cat, amt in lim.items() if amt > 0]
+             for cat, amt in lim.items()]
     return {
         "limits": items,
         "limits_total": sum(i["amount"] for i in items),
@@ -3271,7 +3289,9 @@ def _apply_computed_limits(plan: dict) -> None:
     """
     distributable = _plan_distributable(plan)
 
-    all_debts = list(plan.get("debts_monthly") or []) + list(plan.get("queued_debts") or [])
+    debts_monthly = list(plan.get("debts_monthly") or [])
+    plan["queued_debts"] = _dedup_queued_debts(debts_monthly, plan.get("queued_debts"))
+    all_debts = debts_monthly + list(plan["queued_debts"])
     total_debt_payment = _pick_debt_payment(all_debts)
     free_after = distributable - total_debt_payment
     plan["debts_monthly_total"] = int(round(total_debt_payment))
@@ -3619,7 +3639,8 @@ def _format_plan(plan: dict) -> str:
 
     # Долги — все с пометкой стратегии
     debts_monthly = plan.get("debts_monthly", plan.get("debts", []))
-    queued = plan.get("queued_debts", [])
+    # Защита: Sonnet иногда кладёт долг и в debts_monthly, и в queued — показать один раз
+    queued = _dedup_queued_debts(debts_monthly, plan.get("queued_debts", []))
     all_debts = debts_monthly + queued
     total_monthly_payments = 0
     if all_debts:

@@ -634,3 +634,66 @@ def test_format_plan_fixed_total_excludes_one_time_regression():
     assert "🔒 Фикс: 54,650₽" in out
     assert "83,150" not in out
     assert "📤 Разовые в этом периоде: 28,500₽" in out
+
+
+# ── Нулевые категории лимитов не пропадают из вывода ─────────────────────────
+
+def test_limits_fields_keeps_zero_categories():
+    """_limits_fields показывает ВСЕ категории compute_limits, включая нулевые —
+    прозрачность: видно, что категория получила 0₽ осознанно, а не потерялась."""
+    from nexus.handlers.finance import _limits_fields
+    from core.budget import PRIORITY_CHAIN, CAT_PRODUCTS, CAT_HABITS
+
+    # discretionary 15 350 → priority-цепочка вся по нулям, продукты/привычки делят пополам
+    fields = _limits_fields(15350, 0)
+    by_cat = {i["category"]: i["amount"] for i in fields["limits"]}
+    for cat in PRIORITY_CHAIN:
+        assert cat in by_cat, f"категория {cat} потерялась"
+        assert by_cat[cat] == 0
+    assert by_cat[CAT_PRODUCTS] == 6425
+    assert by_cat[CAT_HABITS] == 6425
+    # транспорт 1500 + продукты 6425 + привычки 6425; нули цепочки не влияют
+    assert fields["limits_total"] == 1500 + 6425 + 6425
+    assert fields["impulse_budget"] == 1000
+
+
+def test_limits_fields_all_zero_when_no_money():
+    from nexus.handlers.finance import _limits_fields
+    fields = _limits_fields(0, 0)
+    assert len(fields["limits"]) == 8  # все переменные категории, кроме импульсивных
+    assert all(i["amount"] == 0 for i in fields["limits"])
+    assert fields["limits_total"] == 0
+
+
+# ── Дедуп долга, продублированного Sonnet в оба массива ─────────────────────
+
+def test_format_plan_dedups_debt_in_both_arrays():
+    """Sonnet положил один долг и в debts_monthly, и в queued_debts →
+    рендер показывает его ОДИН раз (версию с платежом)."""
+    from nexus.handlers.finance import _format_plan
+
+    plan = {
+        "income_total": 80000, "fixed_total": 0,
+        "debts_monthly": [{"name": "Аня", "total": 50000, "monthly": 20000, "strategy": ""}],
+        "queued_debts": [{"name": "Аня", "total": 50000, "strategy": "Отложен"}],
+    }
+    out = _format_plan(plan)
+    assert out.count("Аня") == 1
+    assert "платёж 20,000₽/мес" in out
+    assert "Отложен" not in out
+
+
+def test_apply_computed_limits_dedups_queued():
+    from nexus.handlers.finance import _apply_computed_limits
+
+    plan = {
+        "income_total": 80000, "fixed_total": 0,
+        "debts_monthly": [{"name": "Петя", "monthly": 8000, "deadline": "май 2026"}],
+        "queued_debts": [{"name": "Петя", "monthly": 0, "strategy": "Отложен"},
+                         {"name": "Лена", "monthly": 0, "deadline": "август 2026"}],
+    }
+    _apply_computed_limits(plan)
+    names = [q.get("name") for q in plan["queued_debts"]]
+    assert names == ["Лена"]  # дубль Пети вычищен
+
+
