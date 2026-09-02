@@ -387,11 +387,12 @@ export function adaptFinanceGoals(data) {
 // ── /api/finance?view=cushion → экран Подушки ────────────────────────────
 
 export function adaptFinanceCushion(data) {
-  if (!data) return { balance: 0, target: null, monthly: 0, txs: [], hasMore: false, page: 0 }
+  if (!data) return { balance: 0, target: null, planned: 0, txs: [], hasMore: false, page: 0 }
   return {
     balance: data.balance ?? 0,
     target: data.target ?? null,
-    monthly: data.monthly_contribution ?? 0,
+    // взнос из последнего принятого плана (20% дохода в комфортный месяц, 0 в тяжёлый)
+    planned: data.planned_contribution ?? 0,
     hasMore: !!data.has_more,
     page: data.page ?? 0,
     txs: (data.transactions || []).map((t) => ({

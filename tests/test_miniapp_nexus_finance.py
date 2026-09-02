@@ -202,7 +202,7 @@ def test_finance_view_goals_no_cushion_field(client):
         "доходы": [], "постоянные": [], "лимиты": [], "долги": [],
         "цели": [{"name": "Телефон", "target": 100000, "saving": 0,
                   "key": "цель_телефон", "fact": "цель: Телефон — 100000₽ · откладываю 0₽"}],
-        "подушка": {"balance": 42000, "target": 300000, "monthly_contribution": 5000},
+        "подушка": {"balance": 42000, "target": 300000, "planned_contribution": 5000},
     }
     with patch("miniapp.backend.routes.finance.load_budget_data",
                AsyncMock(return_value=budget)), \
@@ -225,7 +225,7 @@ def test_finance_view_goals_no_cushion_field(client):
 def test_finance_view_cushion_structure(client):
     """view=cushion: баланс/цель/взнос + постраничный лог пополнений."""
     from core.repos.pg_cushion_repo import Cushion, CushionTx
-    c = Cushion(balance=42000, target=300000, monthly_contribution=5000)
+    c = Cushion(balance=42000, target=300000, planned_contribution=5000)
     txs = [
         CushionTx(amount=5000, source="payday_auto", note="взнос за период 2026-08",
                   created_at="2026-08-01T00:00:00+00:00"),
@@ -243,7 +243,7 @@ def test_finance_view_cushion_structure(client):
     d = r.json()
     assert d["view"] == "cushion"
     assert d["balance"] == 42000.0 and d["target"] == 300000.0
-    assert d["monthly_contribution"] == 5000.0
+    assert d["planned_contribution"] == 5000.0
     assert d["has_more"] is False and d["page"] == 0
     assert d["transactions"][0] == {
         "amount": 5000.0, "source": "payday_auto",

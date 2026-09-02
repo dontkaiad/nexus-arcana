@@ -60,7 +60,7 @@ async def test_load_budget_data_reads_cushion_separately():
     ]
     with patch.object(mrmod._repo, "find_by_key_prefixes", AsyncMock(return_value=fake_mems)), \
          patch.object(crmod._repo, "get", AsyncMock(return_value=Cushion(
-             user_notion_id="u", balance=42000, target=300000, monthly_contribution=5000))):
+             user_notion_id="u", balance=42000, target=300000, planned_contribution=5000))):
         data = await load_budget_data("u")
 
     names = [g["name"] for g in data["цели"]]

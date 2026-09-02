@@ -1,8 +1,9 @@
 """core/repos/cushion_table.py — SQLAlchemy table for the financial cushion (#подушка).
 
 Подушка — отдельная сущность, НЕ цель_-факт памяти. Один ряд на пользователя:
-накопленный баланс + необязательная цель-ориентир + месячный взнос (для
-авто-кредита баланса на payday-переходе).
+накопленный баланс + необязательная цель-ориентир + planned_contribution
+(взнос из последнего принятого плана — 20% дохода в комфортный месяц, 0 в
+тяжёлый; кредитуется в баланс на payday-переходе вместе с реальной экономией).
 """
 from __future__ import annotations
 
@@ -18,7 +19,7 @@ cushion = Table(
     Column("user_notion_id",       Text, nullable=False, server_default=text("''")),
     Column("balance",              Numeric, nullable=False, server_default=text("0")),
     Column("target",               Numeric, nullable=True),
-    Column("monthly_contribution", Numeric, nullable=False, server_default=text("0")),
+    Column("planned_contribution", Numeric, nullable=False, server_default=text("0")),
     Column("created_at",           TIMESTAMP(timezone=True), server_default=text("now()")),
     Column("updated_at",           TIMESTAMP(timezone=True), server_default=text("now()")),
 )

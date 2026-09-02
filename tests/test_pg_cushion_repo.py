@@ -1,7 +1,7 @@
 """tests/test_pg_cushion_repo.py — PgCushionRepo unit tests (#подушка).
 
 Подушка — отдельная сущность. balance инкрементится (не перезаписывается),
-target/monthly_contribution правятся. Один ряд на пользователя.
+target/planned_contribution правятся. Один ряд на пользователя.
 """
 from __future__ import annotations
 
@@ -27,7 +27,7 @@ def _make_engine():
             "user_notion_id TEXT NOT NULL DEFAULT '', "
             "balance REAL NOT NULL DEFAULT 0, "
             "target REAL, "
-            "monthly_contribution REAL NOT NULL DEFAULT 0, "
+            "planned_contribution REAL NOT NULL DEFAULT 0, "
             "created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, "
             "updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)"
         ))
@@ -73,15 +73,15 @@ async def test_set_target_and_monthly_do_not_touch_balance():
         repo = PgCushionRepo()
         await repo.add_to_balance("u1", 7000)
         await repo.set_target("u1", 300000)
-        await repo.set_monthly_contribution("u1", 8000)
+        await repo.set_planned_contribution("u1", 8000)
         c = await repo.get("u1")
         assert c.balance == 7000
         assert c.target == 300000
-        assert c.monthly_contribution == 8000
+        assert c.planned_contribution == 8000
         # повторное принятие плана только меняет взнос, баланс не трогает
-        await repo.set_monthly_contribution("u1", 5000)
+        await repo.set_planned_contribution("u1", 5000)
         c = await repo.get("u1")
-        assert c.balance == 7000 and c.monthly_contribution == 5000
+        assert c.balance == 7000 and c.planned_contribution == 5000
 
 
 @pytest.mark.asyncio

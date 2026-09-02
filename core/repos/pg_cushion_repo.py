@@ -2,7 +2,7 @@
 
 Подушка — отдельная сущность, не цель_-факт памяти. Один ряд на пользователя.
 balance инкрементируется (никогда не перезаписывается), target и
-monthly_contribution — правятся.
+planned_contribution — правятся.
 
 Async методы = asyncio.to_thread над sync SQLAlchemy (как pg_debts_repo).
 """
@@ -35,7 +35,7 @@ class Cushion:
     user_notion_id: str = ""
     balance: float = 0.0
     target: Optional[float] = None
-    monthly_contribution: float = 0.0
+    planned_contribution: float = 0.0
     updated_at: str = ""
 
 
@@ -62,7 +62,7 @@ def _row_to_cushion(row) -> Cushion:
         user_notion_id=row.user_notion_id or "",
         balance=float(row.balance or 0),
         target=(float(row.target) if row.target is not None else None),
-        monthly_contribution=float(row.monthly_contribution or 0),
+        planned_contribution=float(row.planned_contribution or 0),
         updated_at=(row.updated_at.isoformat() if isinstance(row.updated_at, datetime)
                     else str(row.updated_at or "")),
     )
@@ -85,7 +85,7 @@ class PgCushionRepo:
         if row is None:
             conn.execute(cushion.insert().values(
                 user_notion_id=user_notion_id, balance=0, target=None,
-                monthly_contribution=0, created_at=_now(), updated_at=_now(),
+                planned_contribution=0, created_at=_now(), updated_at=_now(),
             ))
             row = self._get_row_sync(conn, user_notion_id)
         return row
@@ -130,12 +130,12 @@ class PgCushionRepo:
                 .values(target=target, updated_at=_now())
             )
 
-    def _set_monthly_contribution_sync(self, user_notion_id: str, amount: float) -> None:
+    def _set_planned_contribution_sync(self, user_notion_id: str, amount: float) -> None:
         with _get_engine().begin() as conn:
             row = self._ensure_row_sync(conn, user_notion_id)
             conn.execute(
                 cushion.update().where(cushion.c.id == row.id)
-                .values(monthly_contribution=float(amount or 0), updated_at=_now())
+                .values(planned_contribution=float(amount or 0), updated_at=_now())
             )
 
     # ── async API ────────────────────────────────────────────────────────────
@@ -161,8 +161,8 @@ class PgCushionRepo:
     async def set_target(self, user_notion_id: str, target: Optional[float]) -> None:
         await asyncio.to_thread(self._set_target_sync, user_notion_id, target)
 
-    async def set_monthly_contribution(self, user_notion_id: str, amount: float) -> None:
-        await asyncio.to_thread(self._set_monthly_contribution_sync, user_notion_id, amount)
+    async def set_planned_contribution(self, user_notion_id: str, amount: float) -> None:
+        await asyncio.to_thread(self._set_planned_contribution_sync, user_notion_id, amount)
 
 
 _repo = PgCushionRepo()

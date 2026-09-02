@@ -205,7 +205,7 @@ async def load_budget_data(user_notion_id: str = "") -> Dict[str, list]:
             result["подушка"] = {
                 "balance": c.balance,
                 "target": c.target,
-                "monthly_contribution": c.monthly_contribution,
+                "planned_contribution": c.planned_contribution,
             }
     except Exception as e:
         logger.error("load_budget_data cushion: %s", e)
@@ -243,6 +243,11 @@ PRODUCTS_TARGET = 10000
 HABITS_CEILING = 13000
 _PRIORITY_FLOOR = PRODUCTS_TARGET + HABITS_CEILING  # 23000
 
+# Доля дохода, которую в КОМФОРТНЫЙ месяц (pool_after_iron ≥ 23000) откладываем
+# в финансовую подушку ДО расчёта лимитов. Настраивается — поменять число
+# достаточно здесь, вся арифметика ниже пляшет от этой константы.
+CUSHION_COMFORTABLE_RATE = 0.20
+
 # Приоритет распределения остатка: каждая категория забирает 50% того, что
 # осталось после предыдущей; последняя в списке — весь остаток (иначе из-за
 # округления виснет копейка и сумма не сходится с discretionary).
@@ -258,36 +263,24 @@ PRIORITY_CHAIN = [
 LIMIT_CATEGORIES = [CAT_TRANSPORT, CAT_IMPULSE, CAT_PRODUCTS, CAT_HABITS] + PRIORITY_CHAIN
 
 
-def compute_limits(distributable_pool: float, total_debt_payment: float) -> Dict[str, int]:
-    """Детерминированное распределение переменных лимитов. Без LLM.
-
-    discretionary = distributable_pool − total_debt_payment.
-
-    Возвращает {категория: рубли(int)} по всем LIMIT_CATEGORIES. Сумма всех
-    значений ТОЧНО равна discretionary (округление round() до рубля, последняя
-    категория цепочки приоритета забирает остаток без деления пополам —
-    поэтому копейки от округления не теряются и не создаются).
+def _distribute_limits(discretionary: int) -> Dict[str, int]:
+    """Разложить discretionary по категориям. Сумма значений ТОЧНО равна
+    discretionary (последняя категория цепочки забирает остаток без деления —
+    копейки от округления не теряются и не создаются).
 
     Ветки:
       • discretionary ≤ 0        → все категории 0 (в минус не уходим).
       • discretionary < 2500     → железные транспорт/импульсивные урезаны
-                                    пропорционально их долям в IRON_TOTAL,
-                                    остальное 0 (крайний случай).
+                                    пропорционально долям в IRON_TOTAL, остальное 0.
       • pool_after_iron ≥ 23000  → продукты=10000, привычки≤13000, остаток
                                     по PRIORITY_CHAIN делением пополам.
-      • иначе                    → продукты/привычки делят pool_after_iron
-                                    пополам, цепочка приоритета = 0.
+      • иначе                    → продукты/привычки делят pool_after_iron пополам.
     """
     limits: Dict[str, int] = {cat: 0 for cat in LIMIT_CATEGORIES}
-
-    discretionary = round(distributable_pool - total_debt_payment)
     if discretionary <= 0:
         return limits
 
     if discretionary < IRON_TOTAL:
-        # Транспорт+импульсивные не покрываются — режем их пропорционально,
-        # остаток цепочки/продуктов/привычек = 0. Сумма = discretionary ровно
-        # (транспорт берёт свою долю, импульсивные — весь остаток).
         transport = round(discretionary * IRON_TRANSPORT / IRON_TOTAL)
         limits[CAT_TRANSPORT] = transport
         limits[CAT_IMPULSE] = discretionary - transport
@@ -304,7 +297,7 @@ def compute_limits(distributable_pool: float, total_debt_payment: float) -> Dict
         last_idx = len(PRIORITY_CHAIN) - 1
         for i, cat in enumerate(PRIORITY_CHAIN):
             if i == last_idx:
-                limits[cat] = remaining  # весь остаток, без деления — сумма сходится
+                limits[cat] = remaining
             else:
                 amount = round(remaining / 2)
                 limits[cat] = amount
@@ -313,9 +306,47 @@ def compute_limits(distributable_pool: float, total_debt_payment: float) -> Dict
         products = round(pool_after_iron / 2)
         limits[CAT_PRODUCTS] = products
         limits[CAT_HABITS] = pool_after_iron - products
-        # цепочка приоритета остаётся 0
 
     return limits
+
+
+def compute_limits(distributable_pool: float, total_debt_payment: float,
+                   income_total: float = 0.0) -> dict:
+    """Детерминированное распределение переменных лимитов + взнос в подушку. Без LLM.
+
+    discretionary = distributable_pool − total_debt_payment.
+
+    Комфортный месяц (pool_after_iron ≥ 23000, порог PRIORITY_FLOOR):
+      резервируем CUSHION_COMFORTABLE_RATE (20%) от income_total в подушку ДО
+      расчёта лимитов — лимиты считаются от уменьшенного пула.
+    Тяжёлый месяц (pool_after_iron < 23000): ничего заранее не резервируем,
+      весь остаток идёт на жизнь (cushion_contribution = 0).
+
+    Возвращает:
+      {
+        "limits": {категория: рубли(int)} по всем LIMIT_CATEGORIES,
+                  сумма == discretionary после вычета подушки,
+        "cushion_contribution": int — сколько зарезервировано в подушку (явно,
+                  не вычтено молча).
+      }
+    """
+    discretionary = round(distributable_pool - total_debt_payment)
+
+    # Комфортность определяется по пулу ДО резерва подушки: хватает ли после
+    # железных на продукты-цель + потолок привычек.
+    comfortable = (discretionary - IRON_TOTAL) >= _PRIORITY_FLOOR
+
+    cushion_contribution = 0
+    if comfortable and income_total and income_total > 0:
+        cushion_contribution = round(income_total * CUSHION_COMFORTABLE_RATE)
+        # Не уводим лимиты в минус: подушка не больше, чем есть в пуле.
+        cushion_contribution = max(0, min(cushion_contribution, discretionary))
+        discretionary -= cushion_contribution
+
+    return {
+        "limits": _distribute_limits(discretionary),
+        "cushion_contribution": int(cushion_contribution),
+    }
 
 
 # ── Выбор «первого горящего долга» — детерминированно, по дедлайну ───────────

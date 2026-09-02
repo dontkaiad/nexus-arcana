@@ -484,7 +484,7 @@ async def _view_cushion(tg_id: int, page: int = 0) -> dict:
         "view": "cushion",
         "balance": float(c.balance) if c else 0.0,
         "target": (float(c.target) if c and c.target else None),
-        "monthly_contribution": float(c.monthly_contribution) if c else 0.0,
+        "planned_contribution": float(c.planned_contribution) if c else 0.0,
         "page": max(0, page),
         "has_more": has_more,
         "transactions": [

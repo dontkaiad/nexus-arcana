@@ -1948,7 +1948,7 @@ function DebtDrillSheet({ s, debt }) {
 }
 
 function CushionScreen({ s, data, refetch }) {
-  const { balance, target, monthly, txs } = adaptFinanceCushion(data);
+  const { balance, target, planned, txs } = adaptFinanceCushion(data);
   const [editing, setEditing] = useState(false);
   const [tgt, setTgt] = useState(target ? String(Math.round(target)) : "");
   const [saving, setSaving] = useState(false);
@@ -1994,9 +1994,9 @@ function CushionScreen({ s, data, refetch }) {
             </div>
           </>
         )}
-        {monthly > 0 && (
+        {planned > 0 && (
           <div style={{ fontSize: fs(12), color: s.tS, marginTop: 6 }}>
-            план: +{Math.round(monthly).toLocaleString()} ₽/мес с зарплаты
+            план прошлого периода: +{Math.round(planned).toLocaleString()} ₽ (20% дохода)
           </div>
         )}
       </Glass>

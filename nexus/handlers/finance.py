@@ -36,6 +36,7 @@ from core.budget import (
     pick_debt_payment as _pick_debt_payment,
     parse_deadline as _parse_deadline,
     CAT_IMPULSE as _CAT_IMPULSE,
+    CUSHION_COMFORTABLE_RATE as _CUSHION_RATE,
 )
 
 logger = logging.getLogger("nexus.finance")
@@ -3354,9 +3355,12 @@ def _plan_distributable(plan: dict) -> float:
     return max(0.0, base - already_spent + last_savings)
 
 
-def _limits_fields(distributable: float, debt_payment: float) -> dict:
-    """compute_limits → поля плана: limits[], limits_total, impulse_budget."""
-    lim = _compute_limits(distributable, debt_payment)
+def _limits_fields(distributable: float, debt_payment: float,
+                   income_total: float = 0.0) -> dict:
+    """compute_limits → поля плана: limits[], limits_total, impulse_budget,
+    cushion_contribution (20% дохода в комфортный месяц, 0 в тяжёлый)."""
+    res = _compute_limits(distributable, debt_payment, income_total)
+    lim = dict(res["limits"])
     impulse = int(lim.pop(_CAT_IMPULSE, 0))
     # Показываем ВСЕ категории, включая нулевые — прозрачность важнее компактности:
     # видно, что категория получила 0₽ осознанно, а не потерялась.
@@ -3366,6 +3370,7 @@ def _limits_fields(distributable: float, debt_payment: float) -> dict:
         "limits": items,
         "limits_total": sum(i["amount"] for i in items),
         "impulse_budget": impulse,
+        "cushion_contribution": int(res["cushion_contribution"]),
     }
 
 
@@ -3377,6 +3382,7 @@ def _apply_computed_limits(plan: dict) -> None:
     (для тяжёлого — дважды, вариант А/Б).
     """
     distributable = _plan_distributable(plan)
+    income_total = float(plan.get("income_total", 0) or 0)
 
     debts_monthly = list(plan.get("debts_monthly") or [])
     plan["queued_debts"] = _dedup_queued_debts(debts_monthly, plan.get("queued_debts"))
@@ -3400,23 +3406,26 @@ def _apply_computed_limits(plan: dict) -> None:
               "debt_payment": int(round(total_debt_payment)),
               "remaining": int(round(distributable - total_debt_payment)),
               "savings": {"amount": 0, "note": ""}}
-        va.update(_limits_fields(distributable, total_debt_payment))
+        va.update(_limits_fields(distributable, total_debt_payment, income_total))
         vb = {"label": "Пересмотреть стратегию",
               "debt_payment": int(round(pay_b)),
               "remaining": int(round(distributable - pay_b)),
               "savings": {"amount": 0, "note": ""}}
-        vb.update(_limits_fields(distributable, pay_b))
+        vb.update(_limits_fields(distributable, pay_b, income_total))
         plan["variant_a"] = va
         plan["variant_b"] = vb
         plan["limits"] = None
         plan["limits_total"] = None
         plan["impulse_budget"] = None
         plan["savings"] = None
+        # На верхнем уровне — взнос выбранного «по умолчанию» варианта А
+        # (полная выплата долга). _format_plan покажет ветку по is_tight_month.
+        plan["cushion_contribution"] = va["cushion_contribution"]
     else:
         plan["is_tight_month"] = False
         plan["variant_a"] = None
         plan["variant_b"] = None
-        plan.update(_limits_fields(distributable, total_debt_payment))
+        plan.update(_limits_fields(distributable, total_debt_payment, income_total))
         plan.setdefault("savings", {"amount": 0, "note": ""})
 
 
@@ -3761,6 +3770,8 @@ def _format_plan(plan: dict) -> str:
     cushion = plan.get("cushion") or {}
     c_balance = cushion.get("balance", 0) or 0
     c_target = cushion.get("target") or 0
+    cushion_contrib = int(plan.get("cushion_contribution", 0) or 0)
+    plan_is_tight = plan.get("is_tight_month", False)
     if c_balance > 0 or c_target > 0:
         if c_target > 0:
             pct = int(round(100 * c_balance / c_target)) if c_target else 0
@@ -3768,6 +3779,12 @@ def _format_plan(plan: dict) -> str:
                 c_balance, c_target, pct))
         else:
             lines.append("\n<b>🛡️ Подушка: {:,.0f}₽</b>".format(c_balance))
+    # Динамический взнос этого периода
+    if cushion_contrib > 0:
+        lines.append("🛡️ Подушка: +{:,}₽ ({:.0%} дохода, комфортный месяц)".format(
+            cushion_contrib, _CUSHION_RATE))
+    elif plan_is_tight:
+        lines.append("🛡️ Подушка: 0₽ в этом периоде — тяжёлый месяц, остаток пойдёт по факту")
 
     # ── ТЯЖЁЛЫЙ МЕСЯЦ: два варианта ──
     is_tight = plan.get("is_tight_month", False)
@@ -3994,17 +4011,18 @@ async def _save_budget_plan(message: Message, uid: int) -> None:
             notion_uid,
         )
 
-    # Подушка — отдельный трекер (не цель_-факт). Здесь только запоминаем месячный
-    # взнос; сам баланс кредитуется один раз на payday-переходе (_send_payday_review),
-    # чтобы повторное Принятие того же плана не задваивало накопление.
-    savings = plan.get("savings", {}) or {}
+    # Подушка — отдельный трекер (не цель_-факт). Здесь только запоминаем взнос
+    # этого плана (20% дохода в комфортный месяц / 0 в тяжёлый); сам баланс
+    # кредитуется один раз на payday-переходе (_send_payday_review) этой суммой
+    # ПЛЮС реальной экономией периода — чтобы повторное Принятие того же плана
+    # не задваивало накопление.
     try:
         from core.repos.pg_cushion_repo import _repo as _cushion_repo
-        await _cushion_repo.set_monthly_contribution(
-            notion_uid, float(savings.get("amount", 0) or 0),
+        await _cushion_repo.set_planned_contribution(
+            notion_uid, float(plan.get("cushion_contribution", 0) or 0),
         )
     except Exception as e:
-        logger.error("_save_budget_plan cushion monthly: %s", e)
+        logger.error("_save_budget_plan cushion planned: %s", e)
 
     # Долги (поддержка и debts_monthly и queued_debts)
     from core.repos.pg_debts_repo import _repo as _debt_repo
@@ -4246,6 +4264,7 @@ async def _send_payday_review(uid: int, user_notion_id: str = "", bot=None) -> N
         bot = Bot(token=config.nexus.tg_token)
 
     # Generate period review first
+    savings_total = 0.0
     try:
         review_text, savings_total = await _budget_period_review(user_notion_id)
         state["savings_from_last_period"] = savings_total
@@ -4255,23 +4274,28 @@ async def _send_payday_review(uid: int, user_notion_id: str = "", bot=None) -> N
         logger.error("payday review error: %s", e, exc_info=True)
         _budget_set(uid, state)
 
-    # Кредитуем подушку месячным взносом принятого плана — ОДИН раз за период
-    # (эта функция уже под guard'ом _payday_already_sent). Повторное Принятие
-    # плана в течение месяца баланс не двигает — только этот переход.
+    # Кредитуем подушку на payday-переходе ОДИН раз за период (функция под guard'ом
+    # _payday_already_sent). Повторное Принятие плана в течение месяца баланс не
+    # двигает — только этот переход. Сумма = взнос принятого плана прошлого периода
+    # (20% дохода в комфортный месяц) ПЛЮС реальная экономия периода (total_saved
+    # из ревью, если > 0 — работает в обоих типах месяца).
     try:
         from core.repos.pg_cushion_repo import _repo as _cushion_repo
         c = await _cushion_repo.get(user_notion_id)
-        contrib = float(c.monthly_contribution) if c else 0.0
-        if contrib > 0:
+        planned = float(c.planned_contribution) if c else 0.0
+        saved = float(savings_total) if savings_total and savings_total > 0 else 0.0
+        total = int(round(planned + saved))
+        if total > 0:
             _prev_start, _prev_end = _period_bounds(await _get_payday(), previous=True)
             new_balance = await _cushion_repo.add_to_balance(
-                user_notion_id, contrib, source="payday_auto",
-                note="взнос за период {}".format(_prev_start[:7]),
+                user_notion_id, total, source="payday_auto",
+                note="план {:.0f} + экономия {:.0f} · период {}".format(
+                    planned, saved, _prev_start[:7]),
             )
             await bot.send_message(
                 uid,
-                "🛡️ В подушку ушло <b>{:,.0f}₽</b> за прошлый период. Теперь в ней: "
-                "<b>{:,.0f}₽</b>.".format(contrib, new_balance),
+                "🛡️ В подушку ушло <b>{:,}₽</b> (план: {:,.0f}₽ + экономия: {:,.0f}₽). "
+                "Теперь в ней: <b>{:,.0f}₽</b>.".format(total, planned, saved, new_balance),
                 parse_mode="HTML",
             )
     except Exception as e:
