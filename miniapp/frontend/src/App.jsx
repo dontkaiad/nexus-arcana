@@ -1977,43 +1977,55 @@ function CushionScreen({ s, data, refetch }) {
     return `${parseInt(d, 10)} ${months[parseInt(m, 10) - 1] || m}`;
   };
 
+  const kfmt = (n) => (Math.abs(n) >= 1000 ? `${Math.round(n / 1000)}к` : Math.round(n));
+  const remaining = target > 0 ? Math.max(0, target - balance) : 0;
+
   return (
     <>
-      <Glass s={s} accent={s.acc} glow style={{ padding: "16px", marginBottom: 8 }}>
-        <div style={{ fontSize: fs(13), color: s.tS }}>🛡️ Финансовая подушка</div>
-        <div style={{ fontSize: fs(32), color: s.acc, fontWeight: 600, fontFamily: H, marginTop: 2 }}>
-          {Math.round(balance).toLocaleString()} ₽
-        </div>
-        {target > 0 && (
-          <>
-            <div style={{ fontSize: fs(13), color: s.tS, marginTop: 4 }}>
-              {pct}% от цели {Math.round(target).toLocaleString()} ₽
+      {/* Тот же паттерн, что «Потрачено сегодня» — plain Glass, флекс-строка. */}
+      <Glass s={s}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+          <div>
+            <div style={{ fontSize: 13, fontWeight: 500, opacity: 0.75, marginBottom: 4 }}>Финансовая подушка</div>
+            <div style={{ fontFamily: H, fontSize: fs(32), fontWeight: 500, lineHeight: 1 }}>
+              {Math.round(balance).toLocaleString()} <span style={{ fontSize: fs(18), fontWeight: 400 }}>₽</span>
             </div>
-            <div style={{ marginTop: 8 }}>
-              <Bar s={s} pct={pct} color={s.acc} />
-            </div>
-          </>
-        )}
-        {planned > 0 && (
-          <div style={{ fontSize: fs(12), color: s.tS, marginTop: 6 }}>
-            план прошлого периода: +{Math.round(planned).toLocaleString()} ₽ (20% дохода)
           </div>
-        )}
+          <span style={{ fontSize: fs(36) }}>🛡️</span>
+        </div>
       </Glass>
 
-      <SectionLabel
-        s={s}
-        action={
-          <span
-            onClick={() => setEditing((v) => !v)}
-            style={{ cursor: "pointer", color: s.acc, fontSize: fs(13) }}
-          >
-            {editing ? "отмена" : "изменить цель"}
-          </span>
-        }
-      >
-        Цель
-      </SectionLabel>
+      {/* Те же три плашки, что ДОХОД/РАСХОД/БАЛАНС во вкладке «Месяц». */}
+      <div className="hero-metrics" style={{ marginBottom: 10 }}>
+        <Metric s={s} v={kfmt(balance)} unit="₽" sub="баланс" accent={s.acc} />
+        <Metric s={s} v={target > 0 ? kfmt(target) : "—"} unit={target > 0 ? "₽" : undefined} sub="цель" />
+        <Metric s={s} v={target > 0 ? kfmt(remaining) : "—"} unit={target > 0 ? "₽" : undefined} sub="осталось" accent={s.amber} />
+      </div>
+
+      {target > 0 && (
+        <Glass s={s} style={{ padding: "12px 14px", marginBottom: 8 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, fontWeight: 500, opacity: 0.75, marginBottom: 6 }}>
+            <span>Прогресс до цели</span>
+            <span style={{ fontWeight: 500 }}>{pct}%</span>
+          </div>
+          <Bar s={s} pct={pct} color={s.acc} />
+        </Glass>
+      )}
+
+      {planned > 0 && (
+        <div style={{ fontSize: 12, opacity: 0.6, marginBottom: 8 }}>
+          план прошлого периода: +{Math.round(planned).toLocaleString()} ₽ (20% дохода)
+        </div>
+      )}
+
+      <div style={{ textAlign: "right", marginBottom: 4 }}>
+        <span
+          onClick={() => setEditing((v) => !v)}
+          style={{ cursor: "pointer", color: s.acc, fontSize: fs(13) }}
+        >
+          {editing ? "отмена" : "изменить цель"}
+        </span>
+      </div>
       {editing && (
         <Glass s={s} style={{ padding: "10px 14px", marginBottom: 8 }}>
           <Input
