@@ -348,8 +348,12 @@ export function adaptFinanceLimits(data) {
 }
 
 export function adaptFinanceGoals(data) {
-  if (!data) return { debts: [], goals: [], closedDebts: [], closedGoals: [] }
+  if (!data) return { debts: [], goals: [], closedDebts: [], closedGoals: [], cushion: null }
+  const c = data.cushion || null
   return {
+    cushion: c && (c.balance > 0 || c.target)
+      ? { balance: c.balance ?? 0, target: c.target ?? null }
+      : null,
     debts: (data.debts || []).map((d) => ({
       n: d.name,
       total: d.total ?? 0,

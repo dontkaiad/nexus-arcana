@@ -156,6 +156,11 @@ async def load_budget_data(user_notion_id: str = "") -> Dict[str, list]:
                 if amt > 0:
                     result["постоянные"].append({"name": m.group(1).strip(), "amount": amt})
         elif key.startswith("цель_"):
+            # Подушка больше НЕ цель — отдельная сущность (таблица cushion).
+            # Старый факт цель_подушка у Кай игнорируем, чтобы не смешивался
+            # с покупками (айфон/наушники) в списке целей.
+            if key == "цель_подушка":
+                continue
             m = GOAL_RE.search(fact)
             if m:
                 saving = parse_amount(m.group(3)) if m.group(3) else 0
@@ -191,6 +196,19 @@ async def load_budget_data(user_notion_id: str = "") -> Dict[str, list]:
             })
     except Exception as e:
         logger.error("load_budget_data debts: %s", e)
+
+    # Подушка — отдельная сущность (таблица cushion), НЕ цель_-факт.
+    try:
+        from core.repos.pg_cushion_repo import _repo as _cushion_repo
+        c = await _cushion_repo.get(user_notion_id)
+        if c is not None:
+            result["подушка"] = {
+                "balance": c.balance,
+                "target": c.target,
+                "monthly_contribution": c.monthly_contribution,
+            }
+    except Exception as e:
+        logger.error("load_budget_data cushion: %s", e)
 
     # Дедупликация лимитов по display-имени
     seen_limit_names: dict = {}

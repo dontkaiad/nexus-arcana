@@ -1773,7 +1773,7 @@ function NxFinance({ s }) {
       })()}
 
       {tab === "goals" && (() => {
-        const { debts, goals, closedDebts, closedGoals } = adaptFinanceGoals(data);
+        const { debts, goals, closedDebts, closedGoals, cushion } = adaptFinanceGoals(data);
         const fmtClosed = (iso) => {
           if (!iso) return "";
           const [y, m, d] = iso.split("-");
@@ -1807,6 +1807,30 @@ function NxFinance({ s }) {
                 )}
               </Glass>
             ))}
+            {cushion && (
+              <>
+                <SectionLabel s={s}>Подушка</SectionLabel>
+                <Glass key="cushion" s={s} accent={s.acc} style={{ padding: "10px 14px", marginBottom: 4 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between" }}>
+                    <span style={{ fontSize: fs(16), color: s.text, fontWeight: 500 }}>🛡️ Финансовая подушка</span>
+                    <span style={{ fontSize: fs(16), color: s.acc, fontWeight: 500, fontFamily: H }}>
+                      {Math.round(cushion.balance).toLocaleString()} ₽
+                      {cushion.target ? ` / ${Math.round(cushion.target).toLocaleString()} ₽` : ""}
+                    </span>
+                  </div>
+                  {cushion.target > 0 && (
+                    <>
+                      <div style={{ fontSize: fs(13), color: s.tS, marginTop: 3 }}>
+                        {Math.round((cushion.balance / cushion.target) * 100)}% от цели
+                      </div>
+                      <div style={{ marginTop: 6 }}>
+                        <Bar s={s} pct={(cushion.balance / cushion.target) * 100} color={s.acc} />
+                      </div>
+                    </>
+                  )}
+                </Glass>
+              </>
+            )}
             <SectionLabel s={s}>Цели</SectionLabel>
             {goals.length === 0 && <Empty s={s} text="Целей пока нет" />}
             {goals.map((g, i) => (

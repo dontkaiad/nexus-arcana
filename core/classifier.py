@@ -516,6 +516,11 @@ _GOAL_CMD_RE = re.compile(
     re.IGNORECASE,
 )
 
+# Budget v2: подушка — отдельный трекер накоплений (не цель).
+# "положила в подушку 5000" / "добавь в подушку 5к" → пополнение баланса
+# "подушка 300000" / "измени подушку на 300к" / "подушка цель 300000" → цель
+_CUSHION_CMD_RE = re.compile(r"подушк\w*", re.IGNORECASE)
+
 # Budget v2: ручной лимит ("лимит привычки 15к", "лимит на кафе 10000")
 _LIMIT_OVERRIDE_RE = re.compile(
     r"лимит\s+(?:на\s+)?(\w+)\s+(\d+[кk]?\d*)",
@@ -709,6 +714,12 @@ async def classify(text: str, tz_offset: int = 3) -> list[dict]:
     if _THEY_OWE_CMD_RE.search(text):
         logger.info("classify: they_owe_command matched")
         return [{"type": "they_owe_command", "text": text}]
+
+    # Budget v2: подушка (ПЕРЕД целями/долгами/memory_save — иначе "подушка 300к"
+    # уедет в цель_подушка через LLM-classify)
+    if _CUSHION_CMD_RE.search(text) and re.search(r"\d", text):
+        logger.info("classify: cushion_command matched")
+        return [{"type": "cushion_command", "text": text}]
 
     # Budget v2: команды долгов → budget handler (ПЕРЕД budget и memory_save!)
     if _DEBT_CMD_RE.search(text):
@@ -977,6 +988,12 @@ async def process_item(data: Dict[str, Any], original_text: str, msg, clarify: d
     if kind == "debt_command":
         from nexus.handlers.finance import handle_debt_command
         await handle_debt_command(msg, user_notion_id)
+        return ""
+
+    # ПОДУШКА — v2 (отдельный трекер накоплений)
+    if kind == "cushion_command":
+        from nexus.handlers.finance import handle_cushion_command
+        await handle_cushion_command(msg, data.get("text", original_text), user_notion_id)
         return ""
 
     # МНЕ ДОЛЖНЫ — v2

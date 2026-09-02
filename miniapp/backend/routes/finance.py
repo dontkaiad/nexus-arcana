@@ -394,8 +394,8 @@ async def _load_closed_budget(user_notion_id: str) -> dict:
         )
         for mem in all_closed:
             key = (mem.key or "").strip().lower()
-            if not key.startswith("цель_"):
-                continue
+            if not key.startswith("цель_") or key == "цель_подушка":
+                continue  # подушка — отдельный трекер (см. cushion), не цель
             fact = mem.fact or ""
             m = GOAL_RE.search(fact)
             if not m:
@@ -455,6 +455,14 @@ async def _view_goals(tg_id: int) -> dict:
     closed = await _load_closed_budget(user_notion_id)
     closed["долги"].sort(key=lambda x: x.get("closed_at") or "", reverse=True)
     closed["цели"].sort(key=lambda x: x.get("closed_at") or "", reverse=True)
+
+    # Подушка — отдельная сущность, НЕ в общем списке целей.
+    cush = data.get("подушка") or {}
+    cushion = {
+        "balance": float(cush.get("balance", 0) or 0),
+        "target": (float(cush["target"]) if cush.get("target") else None),
+    }
+
     return {
         "view": "goals",
         "debts": debts_ser,
@@ -462,6 +470,7 @@ async def _view_goals(tg_id: int) -> dict:
         "debts_close_at": all_close,
         "closed_debts": closed["долги"],
         "closed_goals": closed["цели"],
+        "cushion": cushion,
     }
 
 

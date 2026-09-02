@@ -195,6 +195,33 @@ def test_finance_view_goals(client):
     assert isinstance(goal["after"], str) and goal["after"].startswith("~")
 
 
+def test_finance_view_goals_cushion_separate_from_goals(client):
+    """Подушка — отдельное поле `cushion`, НЕ в списке goals/closed_goals."""
+    tz = 3
+    budget = {
+        "доходы": [], "постоянные": [], "лимиты": [], "долги": [],
+        "цели": [{"name": "Телефон", "target": 100000, "saving": 0,
+                  "key": "цель_телефон", "fact": "цель: Телефон — 100000₽ · откладываю 0₽"}],
+        "подушка": {"balance": 42000, "target": 300000, "monthly_contribution": 5000},
+    }
+    with patch("miniapp.backend.routes.finance.load_budget_data",
+               AsyncMock(return_value=budget)), \
+         patch("miniapp.backend.routes.finance._mem_repo.find_by_category",
+               AsyncMock(return_value=[])), \
+         patch("core.repos.pg_debts_repo._repo.list_closed", AsyncMock(return_value=[])), \
+         patch("miniapp.backend.routes.finance.today_user_tz",
+               AsyncMock(return_value=(_today_date(tz), tz))), \
+         patch("miniapp.backend.routes.finance.get_user_notion_id",
+               AsyncMock(return_value="")):
+        r = client.get("/api/finance?view=goals")
+
+    assert r.status_code == 200
+    data = r.json()
+    assert data["cushion"] == {"balance": 42000.0, "target": 300000.0}
+    names = [g["name"] for g in data["goals"]] + [g["name"] for g in data["closed_goals"]]
+    assert not any("одушк" in n for n in names)
+
+
 def test_finance_closed_goal_is_neutral_not_achieved(client):
     """Закрытая цель = «закрыта», НЕ «достигнута»: деактивация Memory-факта
     происходит по разным причинам (замена/чистка/ручное удаление), не только

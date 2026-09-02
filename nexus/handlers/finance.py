@@ -10,7 +10,7 @@ import random
 import re
 import sqlite3 as _sqlite3
 import time as _time
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone, timedelta, date as _date
 from typing import Dict, List, Optional, Set, Tuple
 
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
@@ -34,6 +34,7 @@ from core.budget import (
     load_budget_data as _load_budget_data,
     compute_limits as _compute_limits,
     pick_debt_payment as _pick_debt_payment,
+    parse_deadline as _parse_deadline,
     CAT_IMPULSE as _CAT_IMPULSE,
 )
 
@@ -1938,6 +1939,92 @@ async def handle_debt_command(message: Message, user_notion_id: str = "") -> Non
     await message.answer("🤔 Не поняла команду. Примеры:\n<i>новый долг Маша 10к до июня\nзакрыла долг ***\nотдала *** 25к</i>", parse_mode="HTML")
 
 
+# ── Подушка — отдельный трекер накоплений ────────────────────────────────────
+
+_CUSHION_DEPOSIT_RE = re.compile(
+    r"(?:положил|отложил|закинул|кинул|добав\w*|перевел\w*|скинул|внесл)\w*", re.IGNORECASE,
+)
+_CUSHION_AMOUNT_RE = re.compile(r"(\d[\d\s]*(?:[.,]\d+)?\s*[кk]?)", re.IGNORECASE)
+
+
+async def handle_cushion_command(message: Message, text: str = "", user_notion_id: str = "") -> None:
+    """Подушка: пополнение баланса или установка цели-ориентира.
+
+    "положила в подушку 5000" / "добавь в подушку 5к" → +5000 к балансу.
+    "подушка 300000" / "измени подушку на 300к" / "подушка цель 300к" → цель.
+    """
+    from core.repos.pg_cushion_repo import _repo as _cushion_repo
+
+    text = (text or message.text or "").strip()
+    amt_m = _CUSHION_AMOUNT_RE.search(re.sub(r"подушк\w*", " ", text, flags=re.IGNORECASE))
+    if not amt_m:
+        await message.answer(
+            "🤔 Не поняла сумму. Примеры:\n"
+            "<i>положила в подушку 5000\nподушка цель 300000</i>",
+            parse_mode="HTML",
+        )
+        return
+    amount = _parse_k_amount(amt_m.group(1).replace(" ", "").replace(",", "."))
+    if amount <= 0:
+        await message.answer("🤔 Сумма должна быть больше нуля.", parse_mode="HTML")
+        return
+
+    is_deposit = bool(_CUSHION_DEPOSIT_RE.search(text))
+    try:
+        await message.react([{"type": "emoji", "emoji": "🫡"}])
+    except Exception:
+        pass
+
+    if is_deposit:
+        new_balance = await _cushion_repo.add_to_balance(user_notion_id, amount)
+        c = await _cushion_repo.get(user_notion_id)
+        target = c.target if c else None
+        tail = ""
+        if target:
+            pct = int(round(100 * new_balance / target)) if target else 0
+            tail = " / {:,.0f}₽ ({}%)".format(target, pct)
+        await message.answer(
+            "🛡️ Положила <b>{:,.0f}₽</b> в подушку.\nТеперь в ней: <b>{:,.0f}₽</b>{}".format(
+                amount, new_balance, tail),
+            parse_mode="HTML",
+        )
+    else:
+        await _cushion_repo.set_target(user_notion_id, float(amount))
+        c = await _cushion_repo.get(user_notion_id)
+        balance = c.balance if c else 0
+        await message.answer(
+            "🛡️ Цель подушки: <b>{:,.0f}₽</b>\nСейчас накоплено: {:,.0f}₽".format(amount, balance),
+            parse_mode="HTML",
+        )
+
+
+def _first_burning_debt_name(debts: list) -> str:
+    """Имя первого горящего долга (по дедлайну, monthly_payment > 0). '' если нет."""
+    dated = []
+    for d in debts or []:
+        mp = d.get("monthly_payment") or d.get("monthly") or 0
+        try:
+            mp = float(mp or 0)
+        except (TypeError, ValueError):
+            mp = 0.0
+        if mp <= 0:
+            continue
+        dl = _parse_deadline(str(d.get("deadline") or ""))
+        dated.append((dl or _date.max, d.get("name", "")))
+    if not dated:
+        return ""
+    dated.sort(key=lambda t: t[0])
+    return dated[0][1]
+
+
+def _nearest_goal(goals: list) -> dict:
+    """Ближайшая цель: по распознанной дате unlock, иначе — по наименьшей сумме."""
+    def _key(g):
+        d = _parse_deadline(str(g.get("deadline") or g.get("starts_after") or ""))
+        return (0, d) if d else (1, float(g.get("target", 0) or 0))
+    return sorted(goals, key=_key)[0]
+
+
 # ── they_owe: мне должны ──────────────────────────────────────────────────────
 
 _THEY_OWE_PRONOUNS: frozenset = frozenset({
@@ -3462,6 +3549,7 @@ async def _run_budget_analysis(message: Message, uid: int) -> None:
         _apply_computed_limits(plan)
     except Exception:
         logger.error("_apply_computed_limits failed", exc_info=True)
+    plan["cushion"] = budget_data.get("подушка")  # отдельный трекер, для _format_plan
     await _budget_phase2_narration(plan)
 
     state["plan"] = plan
@@ -3666,6 +3754,18 @@ def _format_plan(plan: dict) -> str:
                 q.get("name", "?"), q.get("total", 0), strategy))
         if total_monthly_payments > 0:
             lines.append("💳 Всего платежей: <b>{:,}₽/мес</b>".format(total_monthly_payments))
+
+    # Подушка — отдельный трекер (не цель). Секция после Долгов, до Целей.
+    cushion = plan.get("cushion") or {}
+    c_balance = cushion.get("balance", 0) or 0
+    c_target = cushion.get("target") or 0
+    if c_balance > 0 or c_target > 0:
+        if c_target > 0:
+            pct = int(round(100 * c_balance / c_target)) if c_target else 0
+            lines.append("\n<b>🛡️ Подушка: {:,.0f}₽ / {:,.0f}₽ ({}%)</b>".format(
+                c_balance, c_target, pct))
+        else:
+            lines.append("\n<b>🛡️ Подушка: {:,.0f}₽</b>".format(c_balance))
 
     # ── ТЯЖЁЛЫЙ МЕСЯЦ: два варианта ──
     is_tight = plan.get("is_tight_month", False)
@@ -3892,14 +3992,17 @@ async def _save_budget_plan(message: Message, uid: int) -> None:
             notion_uid,
         )
 
-    # Подушка
-    savings = plan.get("savings", {})
-    if savings and savings.get("amount", 0) > 0:
-        await _save_memory_entry(
-            "цель_подушка",
-            "цель: 💰 Подушка — 100000₽ · откладываю {}₽/мес".format(savings["amount"]),
-            notion_uid,
+    # Подушка — отдельный трекер (не цель_-факт). Здесь только запоминаем месячный
+    # взнос; сам баланс кредитуется один раз на payday-переходе (_send_payday_review),
+    # чтобы повторное Принятие того же плана не задваивало накопление.
+    savings = plan.get("savings", {}) or {}
+    try:
+        from core.repos.pg_cushion_repo import _repo as _cushion_repo
+        await _cushion_repo.set_monthly_contribution(
+            notion_uid, float(savings.get("amount", 0) or 0),
         )
+    except Exception as e:
+        logger.error("_save_budget_plan cushion monthly: %s", e)
 
     # Долги (поддержка и debts_monthly и queued_debts)
     from core.repos.pg_debts_repo import _repo as _debt_repo
@@ -4086,6 +4189,31 @@ async def _budget_period_review(user_notion_id: str = "") -> Tuple[str, float]:
         if name and amt:
             lines.append("\n📋 Долг {}: осталось {:,.0f}₽".format(name, amt))
 
+    # ── Совет куда направить экономию периода (детерминированно, без LLM) ──
+    # При перерасходе (total_saved <= 0) совета нет.
+    if total_saved > 0:
+        saved_int = int(round(total_saved))
+        cushion = budget_data.get("подушка") or {}
+        c_balance = float(cushion.get("balance", 0) or 0)
+        c_target = float(cushion.get("target") or 0)
+        goals = budget_data.get("цели", [])
+        debt_name = _first_burning_debt_name(debts)
+        debt_payment = _pick_debt_payment(debts)
+
+        if debt_payment > 0 and debt_name:
+            lines.append(
+                "\n💡 Сэкономленные {:,}₽ уйдут в общий пул следующего периода — "
+                "можно направить их на ускорение выплаты {}.".format(saved_int, debt_name))
+        elif c_target > 0 and c_balance < c_target:
+            lines.append(
+                "\n💡 Есть смысл отправить эти {:,}₽ в подушку — сейчас в ней "
+                "{:,.0f}₽ из {:,.0f}₽.".format(saved_int, c_balance, c_target))
+        elif goals:
+            g = _nearest_goal(goals)
+            lines.append(
+                "\n💡 Можно приблизить «{}» ({:,.0f}₽) — сейчас у тебя {:,}₽ сверху плана.".format(
+                    g.get("name", "цель"), float(g.get("target", 0) or 0), saved_int))
+
     return "\n".join(lines), total_saved
 
 
@@ -4124,6 +4252,24 @@ async def _send_payday_review(uid: int, user_notion_id: str = "", bot=None) -> N
     except Exception as e:
         logger.error("payday review error: %s", e, exc_info=True)
         _budget_set(uid, state)
+
+    # Кредитуем подушку месячным взносом принятого плана — ОДИН раз за период
+    # (эта функция уже под guard'ом _payday_already_sent). Повторное Принятие
+    # плана в течение месяца баланс не двигает — только этот переход.
+    try:
+        from core.repos.pg_cushion_repo import _repo as _cushion_repo
+        c = await _cushion_repo.get(user_notion_id)
+        contrib = float(c.monthly_contribution) if c else 0.0
+        if contrib > 0:
+            new_balance = await _cushion_repo.add_to_balance(user_notion_id, contrib)
+            await bot.send_message(
+                uid,
+                "🛡️ В подушку ушло <b>{:,.0f}₽</b> за прошлый период. Теперь в ней: "
+                "<b>{:,.0f}₽</b>.".format(contrib, new_balance),
+                parse_mode="HTML",
+            )
+    except Exception as e:
+        logger.error("payday cushion credit error: %s", e)
 
     # Then the reminder
     await bot.send_message(
