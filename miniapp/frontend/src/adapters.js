@@ -348,12 +348,8 @@ export function adaptFinanceLimits(data) {
 }
 
 export function adaptFinanceGoals(data) {
-  if (!data) return { debts: [], goals: [], closedDebts: [], closedGoals: [], cushion: null }
-  const c = data.cushion || null
+  if (!data) return { debts: [], goals: [], closedDebts: [], closedGoals: [] }
   return {
-    cushion: c && (c.balance > 0 || c.target)
-      ? { balance: c.balance ?? 0, target: c.target ?? null }
-      : null,
     debts: (data.debts || []).map((d) => ({
       n: d.name,
       total: d.total ?? 0,
@@ -384,6 +380,26 @@ export function adaptFinanceGoals(data) {
       t: g.target ?? 0,
       monthly: g.monthly ?? 0,
       closedAt: g.closed_at || null,
+    })),
+  }
+}
+
+// ── /api/finance?view=cushion → экран Подушки ────────────────────────────
+
+export function adaptFinanceCushion(data) {
+  if (!data) return { balance: 0, target: null, monthly: 0, txs: [], hasMore: false, page: 0 }
+  return {
+    balance: data.balance ?? 0,
+    target: data.target ?? null,
+    monthly: data.monthly_contribution ?? 0,
+    hasMore: !!data.has_more,
+    page: data.page ?? 0,
+    txs: (data.transactions || []).map((t) => ({
+      amount: t.amount ?? 0,
+      // 'manual' → «вручную», 'payday_auto' → «с зарплаты»
+      sourceLabel: t.source === 'payday_auto' ? 'с зарплаты' : 'вручную',
+      note: t.note || '',
+      date: t.created_at || '',
     })),
   }
 }

@@ -503,6 +503,30 @@ async def finance_debt_create(
     return {"ok": True, "name": name, "amount": int(body.amount)}
 
 
+class CushionTargetBody(BaseModel):
+    target: Optional[float] = Field(default=None, ge=0)
+
+
+@router.post("/finance/cushion/target")
+async def finance_cushion_set_target(
+    body: CushionTargetBody,
+    tg_id: int = Depends(current_user_id),
+) -> dict[str, Any]:
+    """Правка цели-ориентира подушки из Mini App. Баланс не трогается.
+
+    target=null / 0 — снять цель.
+    """
+    from core.repos.pg_cushion_repo import _repo as _cushion_repo
+    user_notion_id = (await get_user_notion_id(tg_id)) or ""
+    target = body.target if (body.target and body.target > 0) else None
+    try:
+        await _cushion_repo.set_target(user_notion_id, target)
+    except Exception as e:
+        logger.error("finance_cushion_set_target failed: %s", e)
+        raise HTTPException(status_code=500, detail="failed to set cushion target")
+    return {"ok": True, "target": target}
+
+
 # DEPRECATED: use /api/finance instead (alias сохранён для обратной совместимости)
 @router.post("/expenses")
 async def expense_create(

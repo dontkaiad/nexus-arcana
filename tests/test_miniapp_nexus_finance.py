@@ -195,8 +195,8 @@ def test_finance_view_goals(client):
     assert isinstance(goal["after"], str) and goal["after"].startswith("~")
 
 
-def test_finance_view_goals_cushion_separate_from_goals(client):
-    """Подушка — отдельное поле `cushion`, НЕ в списке goals/closed_goals."""
+def test_finance_view_goals_no_cushion_field(client):
+    """Подушка живёт в своей вкладке (view=cushion), не в view=goals."""
     tz = 3
     budget = {
         "доходы": [], "постоянные": [], "лимиты": [], "долги": [],
@@ -217,9 +217,52 @@ def test_finance_view_goals_cushion_separate_from_goals(client):
 
     assert r.status_code == 200
     data = r.json()
-    assert data["cushion"] == {"balance": 42000.0, "target": 300000.0}
+    assert "cushion" not in data
     names = [g["name"] for g in data["goals"]] + [g["name"] for g in data["closed_goals"]]
     assert not any("одушк" in n for n in names)
+
+
+def test_finance_view_cushion_structure(client):
+    """view=cushion: баланс/цель/взнос + постраничный лог пополнений."""
+    from core.repos.pg_cushion_repo import Cushion, CushionTx
+    c = Cushion(balance=42000, target=300000, monthly_contribution=5000)
+    txs = [
+        CushionTx(amount=5000, source="payday_auto", note="взнос за период 2026-08",
+                  created_at="2026-08-01T00:00:00+00:00"),
+        CushionTx(amount=3000, source="manual", note="", created_at="2026-07-15T10:00:00+00:00"),
+    ]
+    with patch("core.repos.pg_cushion_repo._repo.get", AsyncMock(return_value=c)), \
+         patch("core.repos.pg_cushion_repo._repo.list_transactions",
+               AsyncMock(return_value=(txs, False))), \
+         patch("miniapp.backend.routes.finance.today_user_tz",
+               AsyncMock(return_value=(_today_date(3), 3))), \
+         patch("miniapp.backend.routes.finance.get_user_notion_id", AsyncMock(return_value="u")):
+        r = client.get("/api/finance?view=cushion")
+
+    assert r.status_code == 200
+    d = r.json()
+    assert d["view"] == "cushion"
+    assert d["balance"] == 42000.0 and d["target"] == 300000.0
+    assert d["monthly_contribution"] == 5000.0
+    assert d["has_more"] is False and d["page"] == 0
+    assert d["transactions"][0] == {
+        "amount": 5000.0, "source": "payday_auto",
+        "note": "взнос за период 2026-08", "created_at": "2026-08-01",
+    }
+
+
+def test_finance_cushion_set_target_endpoint(client):
+    """POST /finance/cushion/target меняет только target, баланс не трогает."""
+    with patch("core.repos.pg_cushion_repo._repo.set_target", AsyncMock()) as m_set, \
+         patch("core.repos.pg_cushion_repo._repo.add_to_balance", AsyncMock()) as m_add, \
+         patch("miniapp.backend.routes.writes.get_user_notion_id", AsyncMock(return_value="u")):
+        r = client.post("/api/finance/cushion/target", json={"target": 250000})
+
+    assert r.status_code == 200
+    assert r.json() == {"ok": True, "target": 250000.0}
+    m_set.assert_awaited_once()
+    assert m_set.await_args.args[1] == 250000.0
+    m_add.assert_not_awaited()
 
 
 def test_finance_closed_goal_is_neutral_not_achieved(client):

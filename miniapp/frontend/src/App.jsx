@@ -5,7 +5,7 @@ import './newdesign.css'
 import { useApi } from "./hooks/useApi";
 import {
   adaptToday, adaptArcanaToday,
-  adaptTasks, adaptFinanceToday, adaptFinanceMonth, adaptFinanceLimits, adaptFinanceGoals,
+  adaptTasks, adaptFinanceToday, adaptFinanceMonth, adaptFinanceLimits, adaptFinanceGoals, adaptFinanceCushion,
   adaptLists, adaptListsSummary, formatRub, adaptMemory, adaptAdhd, adaptCalendar,
   adaptSessions, adaptSessionDetail, adaptSessionGroup,
   adaptClients, adaptClientDossier,
@@ -1581,6 +1581,7 @@ function NxFinance({ s }) {
         ["month", "Месяц"],
         ["limits", "Лимиты"],
         ["goals", "Цели"],
+        ["cushion", "Подушка"],
       ].map(([k, l]) => (
         <Pill key={k} s={s} active={tab === k} onClick={() => setTab(k)}>
           {l}
@@ -1773,7 +1774,7 @@ function NxFinance({ s }) {
       })()}
 
       {tab === "goals" && (() => {
-        const { debts, goals, closedDebts, closedGoals, cushion } = adaptFinanceGoals(data);
+        const { debts, goals, closedDebts, closedGoals } = adaptFinanceGoals(data);
         const fmtClosed = (iso) => {
           if (!iso) return "";
           const [y, m, d] = iso.split("-");
@@ -1807,30 +1808,6 @@ function NxFinance({ s }) {
                 )}
               </Glass>
             ))}
-            {cushion && (
-              <>
-                <SectionLabel s={s}>Подушка</SectionLabel>
-                <Glass key="cushion" s={s} accent={s.acc} style={{ padding: "10px 14px", marginBottom: 4 }}>
-                  <div style={{ display: "flex", justifyContent: "space-between" }}>
-                    <span style={{ fontSize: fs(16), color: s.text, fontWeight: 500 }}>🛡️ Финансовая подушка</span>
-                    <span style={{ fontSize: fs(16), color: s.acc, fontWeight: 500, fontFamily: H }}>
-                      {Math.round(cushion.balance).toLocaleString()} ₽
-                      {cushion.target ? ` / ${Math.round(cushion.target).toLocaleString()} ₽` : ""}
-                    </span>
-                  </div>
-                  {cushion.target > 0 && (
-                    <>
-                      <div style={{ fontSize: fs(13), color: s.tS, marginTop: 3 }}>
-                        {Math.round((cushion.balance / cushion.target) * 100)}% от цели
-                      </div>
-                      <div style={{ marginTop: 6 }}>
-                        <Bar s={s} pct={(cushion.balance / cushion.target) * 100} color={s.acc} />
-                      </div>
-                    </>
-                  )}
-                </Glass>
-              </>
-            )}
             <SectionLabel s={s}>Цели</SectionLabel>
             {goals.length === 0 && <Empty s={s} text="Целей пока нет" />}
             {goals.map((g, i) => (
@@ -1883,6 +1860,8 @@ function NxFinance({ s }) {
           </>
         );
       })()}
+
+      {tab === "cushion" && <CushionScreen s={s} data={data} refetch={refetch} />}
 
       {/* wave6.1.2: drill-down sheet для категорий */}
       <Sheet
@@ -1965,6 +1944,107 @@ function DebtDrillSheet({ s, debt }) {
         </>
       )}
     </div>
+  );
+}
+
+function CushionScreen({ s, data, refetch }) {
+  const { balance, target, monthly, txs } = adaptFinanceCushion(data);
+  const [editing, setEditing] = useState(false);
+  const [tgt, setTgt] = useState(target ? String(Math.round(target)) : "");
+  const [saving, setSaving] = useState(false);
+  const pct = target > 0 ? Math.min(100, Math.round((balance / target) * 100)) : 0;
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      const val = parseInt(tgt, 10);
+      await apiPost("/api/finance/cushion/target", {
+        target: Number.isFinite(val) && val > 0 ? val : null,
+      });
+      setEditing(false);
+      refetch();
+    } catch (_) {
+      /* оставляем форму открытой */
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const fmtDate = (iso) => {
+    if (!iso) return "";
+    const [y, m, d] = iso.split("-");
+    const months = ["янв", "фев", "мар", "апр", "мая", "июн", "июл", "авг", "сен", "окт", "ноя", "дек"];
+    return `${parseInt(d, 10)} ${months[parseInt(m, 10) - 1] || m}`;
+  };
+
+  return (
+    <>
+      <Glass s={s} accent={s.acc} glow style={{ padding: "16px", marginBottom: 8 }}>
+        <div style={{ fontSize: fs(13), color: s.tS }}>🛡️ Финансовая подушка</div>
+        <div style={{ fontSize: fs(32), color: s.acc, fontWeight: 600, fontFamily: H, marginTop: 2 }}>
+          {Math.round(balance).toLocaleString()} ₽
+        </div>
+        {target > 0 && (
+          <>
+            <div style={{ fontSize: fs(13), color: s.tS, marginTop: 4 }}>
+              {pct}% от цели {Math.round(target).toLocaleString()} ₽
+            </div>
+            <div style={{ marginTop: 8 }}>
+              <Bar s={s} pct={pct} color={s.acc} />
+            </div>
+          </>
+        )}
+        {monthly > 0 && (
+          <div style={{ fontSize: fs(12), color: s.tS, marginTop: 6 }}>
+            план: +{Math.round(monthly).toLocaleString()} ₽/мес с зарплаты
+          </div>
+        )}
+      </Glass>
+
+      <SectionLabel
+        s={s}
+        action={
+          <span
+            onClick={() => setEditing((v) => !v)}
+            style={{ cursor: "pointer", color: s.acc, fontSize: fs(13) }}
+          >
+            {editing ? "отмена" : "изменить цель"}
+          </span>
+        }
+      >
+        Цель
+      </SectionLabel>
+      {editing && (
+        <Glass s={s} style={{ padding: "10px 14px", marginBottom: 8 }}>
+          <Input
+            s={s} value={tgt} onChange={setTgt}
+            placeholder="Цель, ₽ (пусто — снять)" type="number" step="1000"
+          />
+          <div style={{ marginTop: 8 }}>
+            <Pill s={s} active onClick={saving ? undefined : save}>
+              {saving ? "Сохраняю…" : "Сохранить"}
+            </Pill>
+          </div>
+        </Glass>
+      )}
+
+      <SectionLabel s={s}>История пополнений</SectionLabel>
+      {txs.length === 0 && <Empty s={s} text="Пополнений пока нет" />}
+      {txs.map((t, i) => (
+        <Glass key={i} s={s} style={{ padding: "10px 14px", marginBottom: 4 }}>
+          <div style={{ display: "flex", justifyContent: "space-between" }}>
+            <span style={{ fontSize: fs(15), color: s.text, fontWeight: 500 }}>
+              +{Math.round(t.amount).toLocaleString()} ₽
+            </span>
+            <span style={{ fontSize: fs(13), color: s.tS, fontFamily: H }}>{fmtDate(t.date)}</span>
+          </div>
+          <div style={{ fontSize: fs(12), color: s.tS, marginTop: 3 }}>
+            {t.sourceLabel}
+            {t.note ? ` · ${t.note}` : ""}
+          </div>
+        </Glass>
+      ))}
+    </>
   );
 }
 

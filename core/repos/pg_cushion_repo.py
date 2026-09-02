@@ -14,9 +14,9 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Optional
 
-from sqlalchemy import select
+from sqlalchemy import desc, select
 
-from core.repos.cushion_table import cushion
+from core.repos.cushion_table import cushion, cushion_transactions
 
 logger = logging.getLogger("core.pg_cushion_repo")
 
@@ -37,6 +37,24 @@ class Cushion:
     target: Optional[float] = None
     monthly_contribution: float = 0.0
     updated_at: str = ""
+
+
+@dataclass
+class CushionTx:
+    amount: float = 0.0
+    source: str = "manual"
+    note: str = ""
+    created_at: str = ""
+
+
+def _row_to_tx(row) -> CushionTx:
+    return CushionTx(
+        amount=float(row.amount or 0),
+        source=row.source or "manual",
+        note=row.note or "",
+        created_at=(row.created_at.isoformat() if isinstance(row.created_at, datetime)
+                    else str(row.created_at or "")),
+    )
 
 
 def _row_to_cushion(row) -> Cushion:
@@ -72,7 +90,8 @@ class PgCushionRepo:
             row = self._get_row_sync(conn, user_notion_id)
         return row
 
-    def _add_to_balance_sync(self, user_notion_id: str, amount: float) -> float:
+    def _add_to_balance_sync(self, user_notion_id: str, amount: float,
+                             source: str, note: str) -> float:
         with _get_engine().begin() as conn:
             row = self._ensure_row_sync(conn, user_notion_id)
             new_balance = float(row.balance or 0) + float(amount or 0)
@@ -80,7 +99,28 @@ class PgCushionRepo:
                 cushion.update().where(cushion.c.id == row.id)
                 .values(balance=new_balance, updated_at=_now())
             )
+            # Лог операции — в той же транзакции, что и инкремент баланса.
+            conn.execute(cushion_transactions.insert().values(
+                user_notion_id=user_notion_id,
+                amount=float(amount or 0),
+                source=source,
+                note=note or "",
+                created_at=_now(),
+            ))
             return new_balance
+
+    def _list_transactions_sync(self, user_notion_id: str, limit: int, offset: int):
+        with _get_engine().connect() as conn:
+            q = (
+                select(cushion_transactions)
+                .where(cushion_transactions.c.user_notion_id == user_notion_id)
+                .order_by(desc(cushion_transactions.c.created_at),
+                          desc(cushion_transactions.c.id))
+                .limit(limit + 1).offset(offset)
+            )
+            rows = conn.execute(q).fetchall()
+            has_more = len(rows) > limit
+            return [_row_to_tx(r) for r in rows[:limit]], has_more
 
     def _set_target_sync(self, user_notion_id: str, target: Optional[float]) -> None:
         with _get_engine().begin() as conn:
@@ -103,9 +143,20 @@ class PgCushionRepo:
     async def get(self, user_notion_id: str) -> Optional[Cushion]:
         return await asyncio.to_thread(self._get_sync, user_notion_id)
 
-    async def add_to_balance(self, user_notion_id: str, amount: float) -> float:
-        """Прибавить к балансу (инкремент, не перезапись). Возвращает новый баланс."""
-        return await asyncio.to_thread(self._add_to_balance_sync, user_notion_id, amount)
+    async def add_to_balance(self, user_notion_id: str, amount: float,
+                             source: str = "manual", note: str = "") -> float:
+        """Прибавить к балансу (инкремент, не перезапись) + записать строку лога
+        в cushion_transactions в той же транзакции. Возвращает новый баланс."""
+        return await asyncio.to_thread(
+            self._add_to_balance_sync, user_notion_id, amount, source, note,
+        )
+
+    async def list_transactions(self, user_notion_id: str, limit: int = 20,
+                                offset: int = 0):
+        """(transactions, has_more) — последние операции, новые первыми."""
+        return await asyncio.to_thread(
+            self._list_transactions_sync, user_notion_id, limit, offset,
+        )
 
     async def set_target(self, user_notion_id: str, target: Optional[float]) -> None:
         await asyncio.to_thread(self._set_target_sync, user_notion_id, target)

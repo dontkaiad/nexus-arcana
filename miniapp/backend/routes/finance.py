@@ -34,7 +34,9 @@ router = APIRouter()
 _budget_repo = PgNexusBudgetRepo()
 _mem_repo = PgMemoryRepo()
 
-ALLOWED_VIEWS = {"today", "month", "limits", "goals"}
+ALLOWED_VIEWS = {"today", "month", "limits", "goals", "cushion"}
+
+_CUSHION_TX_PAGE = 20
 
 
 def _pct(spent: float, limit: float) -> int:
@@ -456,13 +458,6 @@ async def _view_goals(tg_id: int) -> dict:
     closed["долги"].sort(key=lambda x: x.get("closed_at") or "", reverse=True)
     closed["цели"].sort(key=lambda x: x.get("closed_at") or "", reverse=True)
 
-    # Подушка — отдельная сущность, НЕ в общем списке целей.
-    cush = data.get("подушка") or {}
-    cushion = {
-        "balance": float(cush.get("balance", 0) or 0),
-        "target": (float(cush["target"]) if cush.get("target") else None),
-    }
-
     return {
         "view": "goals",
         "debts": debts_ser,
@@ -470,7 +465,37 @@ async def _view_goals(tg_id: int) -> dict:
         "debts_close_at": all_close,
         "closed_debts": closed["долги"],
         "closed_goals": closed["цели"],
-        "cushion": cushion,
+    }
+
+
+# ── View: cushion ────────────────────────────────────────────────────────────
+
+async def _view_cushion(tg_id: int, page: int = 0) -> dict:
+    """Подушка: текущий баланс/цель/взнос + постраничный лог пополнений."""
+    user_notion_id = (await get_user_notion_id(tg_id)) or ""
+    from core.repos.pg_cushion_repo import _repo as _cushion_repo
+
+    c = await _cushion_repo.get(user_notion_id)
+    offset = max(0, page) * _CUSHION_TX_PAGE
+    txs, has_more = await _cushion_repo.list_transactions(
+        user_notion_id, limit=_CUSHION_TX_PAGE, offset=offset,
+    )
+    return {
+        "view": "cushion",
+        "balance": float(c.balance) if c else 0.0,
+        "target": (float(c.target) if c and c.target else None),
+        "monthly_contribution": float(c.monthly_contribution) if c else 0.0,
+        "page": max(0, page),
+        "has_more": has_more,
+        "transactions": [
+            {
+                "amount": t.amount,
+                "source": t.source,
+                "note": t.note,
+                "created_at": (t.created_at or "")[:10],
+            }
+            for t in txs
+        ],
     }
 
 
@@ -479,8 +504,9 @@ async def _view_goals(tg_id: int) -> dict:
 @router.get("/finance")
 async def get_finance(
     tg_id: int = Depends(current_user_id),
-    view: str = Query("today", description="today|month|limits|goals"),
+    view: str = Query("today", description="today|month|limits|goals|cushion"),
     month: Optional[str] = Query(None, description="YYYY-MM"),
+    page: int = Query(0, ge=0, description="страница лога подушки (view=cushion)"),
 ) -> dict:
     if view not in ALLOWED_VIEWS:
         raise HTTPException(status_code=400, detail=f"view must be one of {sorted(ALLOWED_VIEWS)}")
@@ -495,6 +521,8 @@ async def get_finance(
         return await _view_month(tg_id, month)
     if view == "limits":
         return await _view_limits(tg_id, month)
+    if view == "cushion":
+        return await _view_cushion(tg_id, page)
     return await _view_goals(tg_id)
 
 

@@ -1976,7 +1976,9 @@ async def handle_cushion_command(message: Message, text: str = "", user_notion_i
         pass
 
     if is_deposit:
-        new_balance = await _cushion_repo.add_to_balance(user_notion_id, amount)
+        new_balance = await _cushion_repo.add_to_balance(
+            user_notion_id, amount, source="manual", note="",
+        )
         c = await _cushion_repo.get(user_notion_id)
         target = c.target if c else None
         tail = ""
@@ -4261,7 +4263,11 @@ async def _send_payday_review(uid: int, user_notion_id: str = "", bot=None) -> N
         c = await _cushion_repo.get(user_notion_id)
         contrib = float(c.monthly_contribution) if c else 0.0
         if contrib > 0:
-            new_balance = await _cushion_repo.add_to_balance(user_notion_id, contrib)
+            _prev_start, _prev_end = _period_bounds(await _get_payday(), previous=True)
+            new_balance = await _cushion_repo.add_to_balance(
+                user_notion_id, contrib, source="payday_auto",
+                note="взнос за период {}".format(_prev_start[:7]),
+            )
             await bot.send_message(
                 uid,
                 "🛡️ В подушку ушло <b>{:,.0f}₽</b> за прошлый период. Теперь в ней: "
