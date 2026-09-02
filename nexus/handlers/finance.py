@@ -3602,13 +3602,21 @@ def _format_plan(plan: dict) -> str:
     ot_total = int(plan.get("one_time_total")
                    or sum(float(o.get("amount", 0) or 0) for o in one_time))
     real_spent = int(max(0, already_spent - ot_total))
+
+    def _one_time_lines() -> None:
+        for ot in one_time:
+            lines.append("  {} {} — {:,}₽".format(
+                ot.get("category", "?"), ot.get("name", "?"), int(ot.get("amount", 0) or 0)))
+
     if real_spent > 0 and ot_total > 0:
         lines.append("\n📤 Уже потрачено (реальные траты): {:,}₽".format(real_spent))
         lines.append("📤 Разовые из этого плана: {:,}₽".format(ot_total))
+        _one_time_lines()
     elif real_spent > 0:
         lines.append("\n📤 Уже потрачено (реальные траты): {:,}₽".format(real_spent))
     elif ot_total > 0:
         lines.append("\n📤 Разовые в этом периоде: {:,}₽".format(ot_total))
+        _one_time_lines()
 
     last_savings = plan.get("savings_from_last_period", 0) or 0
     if last_savings > 0:

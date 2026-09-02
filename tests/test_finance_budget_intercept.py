@@ -697,3 +697,34 @@ def test_apply_computed_limits_dedups_queued():
     assert names == ["Лена"]  # дубль Пети вычищен
 
 
+
+
+# ── Позиции разовых расходов видны в плане, не только итоговая сумма ────────
+
+def test_format_plan_lists_one_time_line_items():
+    from nexus.handlers.finance import _format_plan
+
+    plan = {
+        "income_total": 100000, "fixed_total": 0,
+        "already_spent": 12000, "one_time_total": 12000,
+        "one_time": [
+            {"name": "билет в Питер", "category": "🚕 Транспорт", "amount": 8000},
+            {"name": "госпошлина", "category": "📄 Документы", "amount": 4000},
+        ],
+    }
+    out = _format_plan(plan)
+    assert "🚕 Транспорт билет в Питер — 8,000₽" in out
+    assert "📄 Документы госпошлина — 4,000₽" in out
+
+
+def test_format_plan_lists_one_time_items_when_also_real_spent():
+    from nexus.handlers.finance import _format_plan
+
+    plan = {
+        "income_total": 100000, "fixed_total": 0,
+        "already_spent": 20000, "one_time_total": 8000,
+        "one_time": [{"name": "виза", "category": "📄 Документы", "amount": 8000}],
+    }
+    out = _format_plan(plan)
+    assert "📤 Разовые из этого плана: 8,000₽" in out
+    assert "📄 Документы виза — 8,000₽" in out
