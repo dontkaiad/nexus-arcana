@@ -2423,9 +2423,26 @@ async def maybe_handle_reschedule_pending(message: Message, text: Optional[str] 
     pending = _pending_get(message.from_user.id)
     if not pending or pending.get("action") != "reschedule":
         return False
+    # Реакцию ставит сама handle_reschedule_reminder (⚡ на перенос, 🗑️ на
+    # отмену, никакой — если дату не удалось распознать и ждём повторный
+    # ввод) — дублирующий react() здесь затирал 🗑️ на ⚡ и подсвечивал ⚡
+    # даже на «не смог распарсить дату».
     await handle_reschedule_reminder(message, text=text)
-    await react(message, "⚡")
     return True
+
+
+_CANCEL_INTENT_WORDS = {
+    "отмени", "отменить", "отмена", "отменил", "отменила", "отменили", "отмените",
+    "удали", "убери", "cancel",
+}
+
+
+def _is_cancel_intent(text: Optional[str]) -> bool:
+    """Похоже ли ответ на «когда напомнить снова?» на «отмени задачу», а не на дату."""
+    if not text:
+        return False
+    words = {w.strip(".,!?;:—–\"'").lower() for w in text.split()}
+    return bool(words & _CANCEL_INTENT_WORDS)
 
 
 async def handle_reschedule_reminder(message: Message, text: Optional[str] = None) -> None:
@@ -2452,9 +2469,25 @@ async def handle_reschedule_reminder(message: Message, text: Optional[str] = Non
                     task_title = pg_page.title
             except Exception:
                 pass
-        
+
         tz_offset = await _get_user_tz(uid)
         text = maybe_convert(text if text is not None else message.text)
+
+        # Вместо даты пользователь просит отменить задачу целиком —
+        # не пытаемся парсить это как время, а сразу архивируем.
+        if _is_cancel_intent(text):
+            await _repo.set_archived(task_id)
+            if _scheduler:
+                for prefix in ("reminder_", "deadline_"):
+                    try:
+                        _scheduler.remove_job(f"{prefix}{task_id}")
+                        logger.info("Cancelled %s job: %s%s", prefix.rstrip("_"), prefix, task_id)
+                    except Exception:
+                        pass
+            _pending_del(uid)
+            await react(message, "🗑️")
+            await message.answer(f"🗑️ Задача «{task_title}» отменена")
+            return
 
         # Быстрый парсер для "через N мин/часов/дней"
         relative = _parse_relative_time(text, tz_offset)
