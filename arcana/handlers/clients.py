@@ -14,7 +14,14 @@ from arcana.repos.clients_repo import ClientsRepo, CLIENT_TYPE_PAID, CLIENT_TYPE
 
 logger = logging.getLogger("arcana.clients")
 _repo = ClientsRepo()
-MOSCOW_TZ = timezone(timedelta(hours=3))
+MOSCOW_TZ = timezone(timedelta(hours=3))  # серверный fallback, не граница дня юзера
+
+
+async def _today_for(uid: int) -> str:
+    """Дата «сегодня» по личному tz пользователя (для штампа даты клиента)."""
+    from core.shared_handlers import get_user_tz
+    tz = int(await get_user_tz(uid)) if uid else 3
+    return datetime.now(timezone(timedelta(hours=tz))).strftime("%Y-%m-%d")
 
 router = Router()
 
@@ -220,7 +227,7 @@ async def handle_add_client(message: Message, text: str, user_notion_id: str = "
     # ── Не найден — создаём сразу ────────────────────────────────────────────
     contact = data.get("contact") or ""
     request = data.get("request") or ""
-    today = datetime.now(MOSCOW_TZ).strftime("%Y-%m-%d")
+    today = await _today_for(uid)
 
     parsed_type = (data.get("client_type") or "").strip().lower()
     client_type = (
@@ -409,7 +416,7 @@ async def cb_create_from_search(callback: CallbackQuery, user_notion_id: str = "
 
     name = pending.get("name") or ""
     user_nid = pending.get("user_notion_id") or user_notion_id
-    today = datetime.now(MOSCOW_TZ).strftime("%Y-%m-%d")
+    today = await _today_for(uid)
 
     page_id = await _repo.add(name=name, date=today, user_notion_id=user_nid)
     if not page_id:
@@ -464,7 +471,7 @@ async def cb_create_new(callback: CallbackQuery, user_notion_id: str = "") -> No
 
     name = pending.get("name") or ""
     user_nid = pending.get("user_notion_id") or user_notion_id
-    today = datetime.now(MOSCOW_TZ).strftime("%Y-%m-%d")
+    today = await _today_for(uid)
 
     page_id = await _repo.add(name=name, date=today, user_notion_id=user_nid)
     if not page_id:
