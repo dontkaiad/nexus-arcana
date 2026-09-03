@@ -22,6 +22,7 @@ from core.tg_send import send_long
 from core.props import _title, _number, _select, _date, _text
 from core.repos.finance_repo import _repo
 from core.config import FINANCE_CATEGORIES as CATEGORIES
+from core.location import get_user_tz as _get_user_tz  # личный tz юзера (дефолт 3)
 
 # Парсинг бюджета вынесен в core.budget — здесь re-export под старыми именами
 # для backward compat с существующими call-sites в модуле.
@@ -109,13 +110,16 @@ def _parse_user_amount(text: str) -> Optional[int]:
     return None
 
 
-async def _calc_free_remaining(user_notion_id: str = "") -> Optional[Tuple[float, int]]:
-    """Возвращает (остаток_свободных, дней_до_конца_месяца) или None."""
+async def _calc_free_remaining(user_notion_id: str = "", tz_offset: int = 3) -> Optional[Tuple[float, int]]:
+    """Возвращает (остаток_свободных, дней_до_конца_месяца) или None.
+
+    tz_offset — личный tz пользователя (граница «сегодня»/«конец месяца» его).
+    """
     budget = await _load_budget_data(user_notion_id)
     obligatory_total = sum(o["amount"] for o in budget["постоянные"])
     savings_total = sum(g["saving"] for g in budget["цели"])
 
-    now = datetime.now(MOSCOW_TZ)
+    now = datetime.now(_user_tz(tz_offset))
     month_str = now.strftime("%Y-%m")
     month_start = f"{month_str}-01"
     today_str = now.strftime("%Y-%m-%d")
@@ -150,16 +154,19 @@ async def _calc_free_remaining(user_notion_id: str = "") -> Optional[Tuple[float
     return (free_left, days_remaining)
 
 
-async def build_budget_message(user_notion_id: str = "") -> Optional[str]:
-    """Формирует полное сообщение /budget из сохранённых данных. НЕ вызывает Sonnet."""
+async def build_budget_message(user_notion_id: str = "", tz_offset: int = 3) -> Optional[str]:
+    """Формирует полное сообщение /budget из сохранённых данных. НЕ вызывает Sonnet.
+
+    tz_offset — личный tz пользователя (день периода / остаток / «сегодня» его).
+    """
     budget = await _load_budget_data(user_notion_id)
     has_data = budget.get("постоянные") or budget.get("лимиты")
     if not has_data:
         return None
 
-    now = datetime.now(MOSCOW_TZ)
+    now = datetime.now(_user_tz(tz_offset))
     payday = await _get_payday()
-    period_start, period_end = _period_bounds(payday)
+    period_start, period_end = _period_bounds(payday, tz_offset=tz_offset)
     today_str = now.strftime("%Y-%m-%d")
     try:
         start_dt = datetime.strptime(period_start, "%Y-%m-%d")
@@ -345,8 +352,13 @@ async def build_budget_message(user_notion_id: str = "") -> Optional[str]:
     return "\n".join(lines)
 
 
-async def _check_budget_limit(category: str, message: Message, user_notion_id: str = "", amount: float = 0) -> None:
-    """После записи расхода — проверить бюджетный лимит по категории (period-aware)."""
+async def _check_budget_limit(category: str, message: Message, user_notion_id: str = "",
+                              amount: float = 0, tz_offset: int = 3) -> None:
+    """После записи расхода — проверить бюджетный лимит по категории (period-aware).
+
+    tz_offset — личный tz пользователя: границы периода/«сегодня» считаются по
+    его дню, не серверному. Дефолт 3 = поведение до фикса.
+    """
     logger.info("_check_budget_limit called: category=%s amount=%.0f", category, amount)
     link = _cat_link(category)
     limits = await _get_limits("")
@@ -360,7 +372,7 @@ async def _check_budget_limit(category: str, message: Message, user_notion_id: s
         logger.info("_check_budget_limit: no limit for category=%r, skip", category)
         # Показать остаток свободных даже без лимита
         try:
-            result = await _calc_free_remaining(user_notion_id)
+            result = await _calc_free_remaining(user_notion_id, tz_offset)
             if result:
                 free_left, days_rem = result
                 daily = free_left / max(days_rem, 1)
@@ -408,9 +420,9 @@ async def _check_budget_limit(category: str, message: Message, user_notion_id: s
                 logger.debug("limit suggest error: %s", e)
         return
 
-    now = datetime.now(MOSCOW_TZ)
+    now = datetime.now(_user_tz(tz_offset))
     payday = await _get_payday()
-    period_start, period_end = _period_bounds(payday)
+    period_start, period_end = _period_bounds(payday, tz_offset=tz_offset)
     today_str = now.strftime("%Y-%m-%d")
     try:
         records = await _repo.query_records(
@@ -442,7 +454,7 @@ async def _check_budget_limit(category: str, message: Message, user_notion_id: s
         parts.append(f"🚨 {category}: <b>{period_total:,.0f} / {limit_amount:,.0f}₽</b> ({pct:.0f}%!) +{over:,.0f}₽ overflow")
         # Impulse overflow
         try:
-            impulse_limit, impulse_used = await _calc_impulse_status(period_start, user_notion_id)
+            impulse_limit, impulse_used = await _calc_impulse_status(period_start, user_notion_id, tz_offset)
             if impulse_limit > 0:
                 impulse_left = impulse_limit - impulse_used
                 imp_pct = impulse_used / impulse_limit * 100
@@ -453,7 +465,7 @@ async def _check_budget_limit(category: str, message: Message, user_notion_id: s
                     parts.append("🚨 Импульсивный бюджет исчерпан!")
                 # Auto-create impulse expense for overflow
                 try:
-                    await _handle_impulse_overflow(category, over, message, user_notion_id, period_start)
+                    await _handle_impulse_overflow(category, over, message, user_notion_id, period_start, tz_offset)
                 except Exception as _oe:
                     logger.debug("impulse overflow create: %s", _oe)
             else:
@@ -480,7 +492,7 @@ async def _check_budget_limit(category: str, message: Message, user_notion_id: s
 
     # Free/day
     try:
-        result = await _calc_free_remaining(user_notion_id)
+        result = await _calc_free_remaining(user_notion_id, tz_offset)
         if result:
             free_left, days_rem = result
             daily = free_left / max(days_rem, 1)
@@ -502,7 +514,7 @@ async def _check_budget_limit(category: str, message: Message, user_notion_id: s
 async def _show_free_remaining(message: Message, user_notion_id: str = "") -> None:
     """Показать остаток свободных денег после расхода."""
     try:
-        result = await _calc_free_remaining(user_notion_id)
+        result = await _calc_free_remaining(user_notion_id, tz_offset)
         if result:
             free_left, days_rem = result
             daily = free_left / max(days_rem, 1)
@@ -557,8 +569,10 @@ async def get_finance_period(start_date: str, end_date: str, label: str,
     return "\n".join(lines)
 
 
-async def get_finance_stats(month: str, user_notion_id: str = "", compare_prev: bool = False) -> str:
-    """Сводка за месяц с лимитами. month = 'YYYY-MM'."""
+async def get_finance_stats(month: str, user_notion_id: str = "", compare_prev: bool = False,
+                            tz_offset: int = 3) -> str:
+    """Сводка за месяц с лимитами. month = 'YYYY-MM'. tz_offset — личный tz (для
+    прогноза «до конца месяца» — день считается по дню пользователя)."""
     from core.praise import get_praise
     try:
         records = await _repo.month(month, user_notion_id=user_notion_id)
@@ -736,7 +750,7 @@ async def get_finance_stats(month: str, user_notion_id: str = "", compare_prev: 
 
     # Прогноз до конца месяца
     import calendar as _cal
-    now_fc = datetime.now(MOSCOW_TZ)
+    now_fc = datetime.now(_user_tz(tz_offset))
     day = now_fc.day
     if day >= 5 and day < 25 and cat_review:
         days_in_month = _cal.monthrange(now_fc.year, now_fc.month)[1]
@@ -885,12 +899,17 @@ _pending_finance: dict = {}
 _last_page_id: dict = {}
 
 
-def _today() -> str:
-    return datetime.now(MOSCOW_TZ).strftime("%Y-%m-%d")
+def _user_tz(tz_offset: int = 3) -> timezone:
+    """timezone для личного часового пояса пользователя. Дефолт 3 = как было."""
+    return timezone(timedelta(hours=tz_offset))
 
 
-def _month() -> str:
-    return datetime.now(MOSCOW_TZ).strftime("%Y-%m")
+def _today(tz_offset: int = 3) -> str:
+    return datetime.now(_user_tz(tz_offset)).strftime("%Y-%m-%d")
+
+
+def _month(tz_offset: int = 3) -> str:
+    return datetime.now(_user_tz(tz_offset)).strftime("%Y-%m")
 
 
 def _format_record(data: dict) -> str:
@@ -906,11 +925,15 @@ def _format_record(data: dict) -> str:
 
 async def _save_finance(data: dict, db_id: str, bot_label: str = "☀️ Nexus",
                         user_notion_id: str = "", uid: int = 0) -> str:
-    """Создаёт запись в Notion. Возвращает page_id или None."""
+    """Создаёт запись в Notion. Возвращает page_id или None.
+
+    Дата транзакции — по личному tz пользователя (uid); uid=0 → дефолт 3.
+    """
+    tz_offset = await _get_user_tz(uid) if uid else 3
     page_id = await _repo.create_entry(
         db_id,
         description=data.get("description") or "",
-        date=_today(),
+        date=_today(tz_offset),
         amount=float(data["amount"]),
         category=data.get("category", "💳 Прочее"),
         type_=data.get("type_", "💸 Расход"),
@@ -1056,7 +1079,8 @@ async def handle_finance_text(message: Message, text: str, bot_label: str = "☀
     if "Расход" in data.get("type_", ""):
         logger.info("finance saved: category=%s — calling budget check", data.get("category", ""))
         try:
-            await _check_budget_limit(data.get("category", ""), message, user_notion_id)
+            await _check_budget_limit(data.get("category", ""), message, user_notion_id,
+                                      tz_offset=await _get_user_tz(uid))
         except Exception as e:
             logger.error("budget check error: %s", e, exc_info=True)
         # Предложить вычеркнуть из списка покупок
@@ -1088,7 +1112,7 @@ async def handle_finance_text(message: Message, text: str, bot_label: str = "☀
     # Триггер при зарплате: показать краткий бюджет
     if "Доход" in data.get("type_", "") and "Зарплата" in data.get("category", ""):
         try:
-            budget_msg = await build_budget_message(user_notion_id)
+            budget_msg = await build_budget_message(user_notion_id, await _get_user_tz(uid))
             if budget_msg:
                 await message.answer(f"💰 Зарплата получена! Твой бюджет на месяц:\n\n{budget_msg}", parse_mode="HTML")
         except Exception as e:
@@ -1101,6 +1125,7 @@ async def handle_finance_clarification(message: Message, user_notion_id: str = "
     from core.config import config
 
     uid = message.from_user.id
+    _tz = await _get_user_tz(uid)
 
     # Перехват "это доход" / "это расход" — исправляем тип последней записи
     m = _TYPE_CORRECTION_RE.match((message.text or "").strip())
@@ -1155,7 +1180,7 @@ async def handle_finance_clarification(message: Message, user_notion_id: str = "
             await message.answer(_format_record(pending))
             if "Расход" in pending.get("type_", ""):
                 try:
-                    await _check_budget_limit(pending.get("category", ""), message, stored_uid)
+                    await _check_budget_limit(pending.get("category", ""), message, stored_uid, tz_offset=_tz)
                 except Exception as e:
                     logger.debug("budget check skip: %s", e)
         else:
@@ -1187,7 +1212,7 @@ async def handle_finance_clarification(message: Message, user_notion_id: str = "
     await message.answer(_format_record(pending))
     if "Расход" in pending.get("type_", ""):
         try:
-            await _check_budget_limit(pending.get("category", ""), message, stored_uid)
+            await _check_budget_limit(pending.get("category", ""), message, stored_uid, tz_offset=_tz)
         except Exception as e:
             logger.debug("budget check skip: %s", e)
 
@@ -1211,7 +1236,8 @@ async def fin_save_asis(call: CallbackQuery) -> None:
     if "Расход" in pending.get("type_", ""):
         logger.info("finance saved (asis): category=%s — calling budget check", pending.get("category", ""))
         try:
-            await _check_budget_limit(pending.get("category", ""), call.message, stored_uid)
+            await _check_budget_limit(pending.get("category", ""), call.message, stored_uid,
+                                      tz_offset=await _get_user_tz(uid))
         except Exception as e:
             logger.error("budget check error: %s", e, exc_info=True)
     await call.answer()
@@ -1328,7 +1354,7 @@ async def handle_finance_clarify(call: CallbackQuery, user_notion_id: str = "") 
     result = await _repo.create_entry(
         db_id,
         description=description,
-        date=datetime.now(MOSCOW_TZ).strftime("%Y-%m-%d"),
+        date=_today(await _get_user_tz(uid)),
         amount=amount,
         category=category,
         type_=type_label,
@@ -1346,7 +1372,7 @@ async def handle_finance_clarify(call: CallbackQuery, user_notion_id: str = "") 
         await call.message.edit_text(text, parse_mode="HTML")
         _pending_finance.pop(uid, None)
         if action != "income":
-            await _check_budget_limit(category, call.message)
+            await _check_budget_limit(category, call.message, tz_offset=await _get_user_tz(uid))
     else:
         await call.message.edit_text("⚠️ Ошибка записи. Попробуй позже.")
 
@@ -1558,6 +1584,7 @@ async def _handle_multimonth_stats(
 async def handle_finance_summary(query: str = "", user_notion_id: str = "", uid: int = 0) -> str:
     """Возвращает строку со статистикой. Вызывающий сам отправляет её пользователю."""
     logger.info("handle_finance_summary: user_notion_id=%r query=%r", user_notion_id, query)
+    tz_offset = await _get_user_tz(uid)
     # Попробовать распарсить категорию и имя из запроса
     category_filter = None
     type_filter = None
@@ -1581,7 +1608,8 @@ async def handle_finance_summary(query: str = "", user_notion_id: str = "", uid:
 
     # Сравнение текущий vs предыдущий — приоритет над мультимесячным режимом
     if compare_mode:
-        return await get_finance_stats(_month(), user_notion_id=user_notion_id, compare_prev=True)
+        return await get_finance_stats(_month(tz_offset), user_notion_id=user_notion_id,
+                                      compare_prev=True, tz_offset=tz_offset)
 
     # Мультимесячный режим
     if months_count > 1:
@@ -1596,7 +1624,7 @@ async def handle_finance_summary(query: str = "", user_notion_id: str = "", uid:
         )
 
     # Месяц: из текста запроса или текущий
-    month_str = _parse_month_from_query(query) if query else _month()
+    month_str = _parse_month_from_query(query) if query else _month(tz_offset)
 
     # Первые 4-5 символов для Notion title contains (fuzzy: "вадима" → "вади" → найдёт "вадиму")
     notion_desc_kw = (description_search or "")[:5].strip() if description_search else ""
@@ -1608,7 +1636,7 @@ async def handle_finance_summary(query: str = "", user_notion_id: str = "", uid:
         description_filter=notion_desc_kw,
         type_filter=type_filter or "",
     )
-    now = datetime.now(MOSCOW_TZ)
+    now = datetime.now(_user_tz(tz_offset))
 
     # Запрос по категории, описанию ИЛИ конкретному типу дохода/расхода
     if category_filter or description_search or type_filter:
@@ -1830,20 +1858,25 @@ async def _get_payday() -> int:
     return 1
 
 
-def _period_bounds(payday: int, previous: bool = False) -> Tuple[str, str]:
-    """Calculate start/end of budget period. If previous=True, return the PREVIOUS period."""
-    now = datetime.now(MOSCOW_TZ)
+def _period_bounds(payday: int, previous: bool = False, tz_offset: int = 3) -> Tuple[str, str]:
+    """Calculate start/end of budget period. If previous=True, return the PREVIOUS period.
+
+    tz_offset — личный часовой пояс пользователя: граница периода (1→1) считается
+    по его дню, не серверному. Дефолт 3 = поведение до фикса.
+    """
+    tz = _user_tz(tz_offset)
+    now = datetime.now(tz)
     if now.day >= payday:
         start = now.replace(day=payday, hour=0, minute=0, second=0, microsecond=0)
         if now.month == 12:
-            end = datetime(now.year + 1, 1, payday, tzinfo=MOSCOW_TZ) - timedelta(days=1)
+            end = datetime(now.year + 1, 1, payday, tzinfo=tz) - timedelta(days=1)
         else:
-            end = datetime(now.year, now.month + 1, payday, tzinfo=MOSCOW_TZ) - timedelta(days=1)
+            end = datetime(now.year, now.month + 1, payday, tzinfo=tz) - timedelta(days=1)
     else:
         if now.month == 1:
-            start = datetime(now.year - 1, 12, payday, tzinfo=MOSCOW_TZ)
+            start = datetime(now.year - 1, 12, payday, tzinfo=tz)
         else:
-            start = datetime(now.year, now.month - 1, payday, tzinfo=MOSCOW_TZ)
+            start = datetime(now.year, now.month - 1, payday, tzinfo=tz)
         end = now.replace(day=payday, hour=0, minute=0, second=0, microsecond=0) - timedelta(days=1)
 
     if previous:
@@ -1851,7 +1884,7 @@ def _period_bounds(payday: int, previous: bool = False) -> Tuple[str, str]:
         prev_end = start - timedelta(days=1)
         prev_start_month = start.month - 1 if start.month > 1 else 12
         prev_start_year = start.year if start.month > 1 else start.year - 1
-        prev_start = datetime(prev_start_year, prev_start_month, payday, tzinfo=MOSCOW_TZ)
+        prev_start = datetime(prev_start_year, prev_start_month, payday, tzinfo=tz)
         return prev_start.strftime("%Y-%m-%d"), prev_end.strftime("%Y-%m-%d")
 
     return start.strftime("%Y-%m-%d"), end.strftime("%Y-%m-%d")
@@ -2381,10 +2414,10 @@ async def expense_from_task_note(note: str, user_notion_id: str = "", uid: int =
 
 
 async def _handle_impulse_overflow(category: str, overflow: float, message: Message,
-                                    user_notion_id: str, period_start: str) -> None:
+                                    user_notion_id: str, period_start: str, tz_offset: int = 3) -> None:
     """Auto-create impulse expense for overspend."""
     await _repo.add(
-        date=datetime.now(MOSCOW_TZ).strftime("%Y-%m-%d"),
+        date=datetime.now(_user_tz(tz_offset)).strftime("%Y-%m-%d"),
         amount=overflow,
         category="🎲 Импульсивные",
         type_="💸 Расход",
@@ -2394,7 +2427,8 @@ async def _handle_impulse_overflow(category: str, overflow: float, message: Mess
     )
 
 
-async def _calc_impulse_status(period_start: str, user_notion_id: str = "") -> Tuple[float, float]:
+async def _calc_impulse_status(period_start: str, user_notion_id: str = "",
+                               tz_offset: int = 3) -> Tuple[float, float]:
     """Calculate impulse budget limit and usage for period."""
     impulse_limit = 0.0
     limits = await _get_limits("")
@@ -2404,7 +2438,7 @@ async def _calc_impulse_status(period_start: str, user_notion_id: str = "") -> T
             break
     if impulse_limit == 0:
         return 0.0, 0.0
-    now = datetime.now(MOSCOW_TZ)
+    now = datetime.now(_user_tz(tz_offset))
     records = await _repo.query_records(
         type_="💸 Расход", category="🎲 Импульсивные",
         date_from=period_start, date_to=now.strftime("%Y-%m-%d"), page_size=200,
@@ -2626,16 +2660,16 @@ BUDGET_SONNET_SYSTEM = (
 )
 
 
-async def _period_spending() -> Tuple[Dict[str, float], float]:
+async def _period_spending(tz_offset: int = 3) -> Tuple[Dict[str, float], float]:
     """(spending_by_category, income_this_period) за текущий бюджетный период.
 
     Общая для _build_sonnet_input (полный контекст) и legacy-промпта
     (первый /budget с нуля) — единственное место, где считается already_spent,
     чтобы не разъезжаться как было с порогом 18500/15500 (#191-класс дрейфа
-    промптов друг от друга)."""
+    промптов друг от друга). tz_offset — личный tz пользователя."""
     payday = await _get_payday()
-    period_start, period_end = _period_bounds(payday)
-    now = datetime.now(MOSCOW_TZ)
+    period_start, period_end = _period_bounds(payday, tz_offset=tz_offset)
+    now = datetime.now(_user_tz(tz_offset))
 
     records = await _repo.query_records(
         date_from=period_start, date_to=now.strftime("%Y-%m-%d"), page_size=500,
@@ -2656,11 +2690,12 @@ async def _period_spending() -> Tuple[Dict[str, float], float]:
 
 async def _build_sonnet_input(uid: int, user_notion_id: str) -> str:
     """Build full context JSON for Sonnet analysis."""
+    tz_offset = await _get_user_tz(uid)
     budget = await _load_budget_data(user_notion_id)
     payday = await _get_payday()
-    period_start, period_end = _period_bounds(payday)
-    now = datetime.now(MOSCOW_TZ)
-    spending_by_cat, income_total = await _period_spending()
+    period_start, period_end = _period_bounds(payday, tz_offset=tz_offset)
+    now = datetime.now(_user_tz(tz_offset))
+    spending_by_cat, income_total = await _period_spending(tz_offset)
 
     state = _budget_get(uid) or {}
     user_messages = "\n".join(state.get("buf", []))
@@ -2925,7 +2960,7 @@ async def start_budget_analysis(message: Message, user_notion_id: str = "") -> N
         return
 
     # Has data → show saved plan with progress (NO Sonnet call)
-    budget_text = await build_budget_message(user_notion_id)
+    budget_text = await build_budget_message(user_notion_id, await _get_user_tz(uid))
     if not budget_text:
         await start_budget_setup(message, user_notion_id)
         return
@@ -3506,6 +3541,7 @@ async def _run_budget_analysis(message: Message, uid: int) -> None:
     state = _budget_get(uid) or {}
     all_text = "\n".join(state.get("buf", []))
     notion_uid = state.get("notion_uid", "")
+    tz_offset = await _get_user_tz(uid)
 
     # Удалить старое сообщение-инструкцию и отправить "считаю" НИЖЕ чата
     old_msg_id = state.get("msg_id", 0)
@@ -3544,9 +3580,9 @@ async def _run_budget_analysis(message: Message, uid: int) -> None:
             # (8 шт.), не из всех 19 общих Финансов — иначе в план утекали
             # 🔮 Практика / 🕯️ Расходники (Аркана) и 💰 Зарплата / 💼 Фриланс.
             budget_cats_str = ", ".join(_BUDGET_VARIABLE_CATS)
-            current_date = datetime.now(MOSCOW_TZ).strftime("%d.%m.%Y")
+            current_date = datetime.now(_user_tz(tz_offset)).strftime("%d.%m.%Y")
             try:
-                spending_by_cat_legacy, _ = await _period_spending()
+                spending_by_cat_legacy, _ = await _period_spending(tz_offset)
                 already_spent_legacy = sum(spending_by_cat_legacy.values())
             except Exception as e:
                 logger.warning("legacy budget prompt: already_spent lookup failed: %s", e)
@@ -3937,6 +3973,7 @@ async def _handle_adjust_text(message: Message, uid: int) -> bool:
 
 async def _save_budget_plan(message: Message, uid: int) -> None:
     """Сохранить принятый план в Notion Память."""
+    tz_offset = await _get_user_tz(uid)
     state = _budget_get(uid) or {}
     plan = state.get("plan", {})
     notion_uid = state.get("notion_uid", "")
@@ -4151,9 +4188,9 @@ async def _save_budget_plan(message: Message, uid: int) -> None:
             goal_buttons_rows.append(goal_btns[j:j+2])
 
     # Показать итоговый бюджет
-    budget_msg = await build_budget_message(notion_uid)
+    budget_msg = await build_budget_message(notion_uid, tz_offset)
     result_text = "✅ <b>План на {} принят и сохранён!</b>\n\n{}".format(
-        _RU_MONTHS.get(datetime.now(MOSCOW_TZ).month, "месяц"),
+        _RU_MONTHS.get(datetime.now(_user_tz(tz_offset)).month, "месяц"),
         budget_msg or "Вызови /budget для просмотра.",
     )
 
@@ -4206,10 +4243,12 @@ async def _save_memory_entry(key: str, fact: str, user_notion_id: str = "") -> N
 # ── Payday Review + Reminder ─────────────────────────────────────────────────
 
 
-async def _budget_period_review(user_notion_id: str = "") -> Tuple[str, float]:
-    """Review spending vs limits for the PREVIOUS period. Returns (formatted_text, savings_total)."""
+async def _budget_period_review(user_notion_id: str = "", tz_offset: int = 3) -> Tuple[str, float]:
+    """Review spending vs limits for the PREVIOUS period. Returns (formatted_text, savings_total).
+
+    tz_offset — личный tz пользователя (границы прошлого периода по его дню)."""
     payday = await _get_payday()
-    period_start_str, period_end_str = _period_bounds(payday, previous=True)
+    period_start_str, period_end_str = _period_bounds(payday, previous=True, tz_offset=tz_offset)
 
     # Get spending for that period
     records = await _repo.query_records(
@@ -4308,16 +4347,22 @@ async def _budget_period_review(user_notion_id: str = "") -> Tuple[str, float]:
 async def maybe_payday_reminder(message: Message, user_notion_id: str = "") -> None:
     """Send period review + payday reminder once per period start."""
     payday = await _get_payday()
-    now = datetime.now(MOSCOW_TZ)
+    uid = message.from_user.id
+    tz_offset = await _get_user_tz(uid)
+    now = datetime.now(_user_tz(tz_offset))
     if now.day != payday:
         return
-    uid = message.from_user.id
-    await _send_payday_review(uid, user_notion_id)
+    await _send_payday_review(uid, user_notion_id, tz_offset=tz_offset)
 
 
-async def _send_payday_review(uid: int, user_notion_id: str = "", bot=None) -> None:
-    """Core payday review logic — works both reactively and from cron."""
-    today_str = datetime.now(MOSCOW_TZ).strftime("%Y-%m-%d")
+async def _send_payday_review(uid: int, user_notion_id: str = "", bot=None,
+                              tz_offset: Optional[int] = None) -> None:
+    """Core payday review logic — works both reactively and from cron.
+
+    tz_offset — личный tz пользователя; None → резолвим по uid (путь из крона)."""
+    if tz_offset is None:
+        tz_offset = await _get_user_tz(uid)
+    today_str = datetime.now(_user_tz(tz_offset)).strftime("%Y-%m-%d")
     if _payday_already_sent(uid, today_str):
         return
     # Сразу помечаем — чтобы параллельные вызовы (cron + message) не задвоили
@@ -4334,7 +4379,7 @@ async def _send_payday_review(uid: int, user_notion_id: str = "", bot=None) -> N
     # Generate period review first
     savings_total = 0.0
     try:
-        review_text, savings_total = await _budget_period_review(user_notion_id)
+        review_text, savings_total = await _budget_period_review(user_notion_id, tz_offset)
         state["savings_from_last_period"] = savings_total
         _budget_set(uid, state)
         await bot.send_message(uid, review_text, parse_mode="HTML")
@@ -4354,7 +4399,7 @@ async def _send_payday_review(uid: int, user_notion_id: str = "", bot=None) -> N
         saved = float(savings_total) if savings_total and savings_total > 0 else 0.0
         total = int(round(planned + saved))
         if total > 0:
-            _prev_start, _prev_end = _period_bounds(await _get_payday(), previous=True)
+            _prev_start, _prev_end = _period_bounds(await _get_payday(), previous=True, tz_offset=tz_offset)
             new_balance = await _cushion_repo.add_to_balance(
                 user_notion_id, total, source="payday_auto",
                 note="план {:.0f} + экономия {:.0f} · период {}".format(
@@ -4388,6 +4433,10 @@ async def _send_payday_review(uid: int, user_notion_id: str = "", bot=None) -> N
 async def proactive_budget_review(bot) -> None:
     """Cron job: check if today is payday and send budget review to users with finance permission."""
     payday = await _get_payday()
+    # Серверный якорь запуска sweep'а (категория B) — оставлен намеренно. Дата/
+    # границы периода для КОНКРЕТНОГО юзера дальше считаются по его личному tz
+    # внутри _send_payday_review (резолв по tg_id). Точность per-user payday-гейта
+    # в кроне — отдельная задача (см. аудит tz-рефакторинга).
     now = datetime.now(MOSCOW_TZ)
     if now.day != payday:
         return
