@@ -593,14 +593,14 @@ async def test_tight_month_no_debt_payment_renders_single_plan(tmp_budget_db):
     assert "жёстко" in text  # discretionary 18 000 < 25 500 → плашка
 
 
-# ── Разовые из composite-дампа: НЕ в Память как постоянно_*, И НЕ в Финансы ──
+# ── Разовые/постоянные → Память + категории лимита 🔒 Фикс / 📦 Разовые ─────
 #
-# Железный принцип: планирование бюджета никогда не пишет в Финансы. Разовые
-# участвуют только в арифметике плана (already_spent → меньше распределяемых).
-# Постоянные из fixed → постоянно_*, разовые → никуда.
+# Планирование не пишет в Финансы. Разовые — как постоянные: каждая позиция
+# сохраняется индивидуально (разовый_* / постоянно_*) для сопоставления трат,
+# плюс два факта-лимита с прямой суммой позиций.
 
 @pytest.mark.asyncio
-async def test_save_budget_plan_one_time_not_written_anywhere(tmp_budget_db):
+async def test_save_budget_plan_one_time_not_written_to_finance(tmp_budget_db):
     from nexus.handlers import finance
     from core.repos import memory_repo as mrmod
 
@@ -625,11 +625,11 @@ async def test_save_budget_plan_one_time_not_written_anywhere(tmp_budget_db):
     msg.bot = AsyncMock()
     msg.answer = AsyncMock(return_value=loading)
 
-    mem_keys = []
+    mem_writes = []
     ot_writes = []
 
     async def cap_mem(key, fact, notion_uid=""):
-        mem_keys.append(key)
+        mem_writes.append((key, fact))
 
     async def cap_ot(desc, amount, category="💳 Прочее", user_notion_id="", bot_label="☀️ Nexus", uid=0):
         ot_writes.append((desc, amount, category))
@@ -637,19 +637,76 @@ async def test_save_budget_plan_one_time_not_written_anywhere(tmp_budget_db):
 
     with patch.object(finance, "_save_memory_entry", AsyncMock(side_effect=cap_mem)), \
          patch.object(finance, "_write_one_time_expense", AsyncMock(side_effect=cap_ot)), \
+         patch.object(finance, "_save_finance", AsyncMock()) as m_fin, \
          patch.object(finance, "_get_limits", AsyncMock(return_value={})), \
          patch.object(finance, "build_budget_message", AsyncMock(return_value="ok")), \
          patch.object(mrmod._repo, "find_by_key_prefixes", AsyncMock(return_value=[])), \
          patch.object(mrmod._repo, "set_active", AsyncMock()):
         await finance._save_budget_plan(msg, uid)
 
-    perm_keys = [k for k in mem_keys if k.startswith("постоянно_")]
-    assert len(perm_keys) == 2, f"постоянно_* только для fixed, получили {perm_keys}"
-    assert not any(w in k for k in perm_keys for w in ("билет", "питер", "госпошлин"))
+    keys = [k for k, _ in mem_writes]
+    facts = dict(mem_writes)
 
-    assert ot_writes == [], (
-        "планирование не пишет в Финансы: one_time участвуют только в арифметике"
-    )
+    # ни одна транзакция в Финансы
+    assert ot_writes == []
+    m_fin.assert_not_called()
+
+    # постоянные — индивидуально
+    perm_keys = [k for k in keys if k.startswith("постоянно_")]
+    assert len(perm_keys) == 2
+
+    # разовые — индивидуально, ключ разовый_<имя>, факт "разовое: ... — N₽"
+    assert "разовый_билет_в_питер" in keys
+    assert "разовый_госпошлина" in keys
+    assert facts["разовый_билет_в_питер"] == "разовое: билет в питер — 15000₽"
+
+    # два лимит-факта с прямой суммой позиций
+    assert facts["лимит_фикс"] == "лимит: 🔒 Фикс — 35000₽/мес"
+    assert facts["лимит_разовые"] == "лимит: 📦 Разовые — 18500₽/мес"
+
+
+@pytest.mark.asyncio
+async def test_save_budget_plan_deactivates_stale_one_time(tmp_budget_db):
+    """Старые разовый_* прошлого периода, которых нет в новом плане, — деактивируются
+    (как постоянно_*)."""
+    from nexus.handlers import finance
+    from core.repos import memory_repo as mrmod
+
+    uid = 999_401
+    plan = {
+        "fixed": [], "fixed_total": 0,
+        "one_time": [{"name": "виза", "category": "💳 Прочее", "amount": 8000}],
+        "one_time_total": 8000,
+    }
+    _seed_state(uid, {"plan": plan, "notion_uid": "u-1", "state": "has_plan", "msg_id": 0})
+
+    loading = await _fake_loading()
+    msg = MagicMock()
+    msg.chat.id = 1
+    msg.bot = AsyncMock()
+    msg.answer = AsyncMock(return_value=loading)
+
+    stale = MagicMock(id="m-old", is_current=True, key="разовый_старая_поездка", fact="разовое: старая поездка — 5000₽")
+    keep = MagicMock(id="m-viza", is_current=True, key="разовый_виза", fact="разовое: виза — 8000₽")
+
+    async def fake_prefixes(prefixes, user_notion_id=""):
+        if "разовый_" in prefixes:
+            return [stale, keep]
+        return []
+
+    set_active_calls = []
+
+    with patch.object(finance, "_save_memory_entry", AsyncMock()), \
+         patch.object(finance, "_write_one_time_expense", AsyncMock()), \
+         patch.object(finance, "_get_limits", AsyncMock(return_value={})), \
+         patch.object(finance, "build_budget_message", AsyncMock(return_value="ok")), \
+         patch.object(mrmod._repo, "find_by_key_prefixes", AsyncMock(side_effect=fake_prefixes)), \
+         patch.object(mrmod._repo, "set_active", AsyncMock(side_effect=lambda ids, active: set_active_calls.append((list(ids), active)))):
+        await finance._save_budget_plan(msg, uid)
+
+    deactivated = [i for call in set_active_calls if call[1] is False for i in call[0]]
+    assert "m-old" in deactivated
+    assert "m-viza" not in deactivated
 
 
 @pytest.mark.asyncio

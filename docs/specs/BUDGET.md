@@ -41,11 +41,29 @@ that commit; update it in the same PR that changes the model.
    **НЕ создают finance-транзакцию** — ни при показе плана, ни при «✅ Принять».
    Они участвуют **только в арифметике текущего расчёта**: входят в
    `one_time_total` → `already_spent` и уменьшают распределяемые в этом
-   плане. Реальная транзакция появляется отдельно — когда Кай сама сообщает
-   о трате обычным путём («потратила 15000 на билет»). (До фикса от 2026-09-02
-   помеченные разовыми строки уходили в `fixed` → `постоянно_*` навсегда;
-   до фикса от 2026-09-03 при «Принять» они писались в Финансы, что давало
-   двойной счёт при пересчёте.)
+   плане.
+
+   **📦 Разовые — это обычная категория лимита** (как 🍜 Продукты). При «✅ Принять»:
+   каждая позиция сохраняется в Память индивидуально (ключ `разовый_<имя>`,
+   факт `разовое: <имя> — <сумма>₽`) — не для диалога, а чтобы сопоставлять
+   текст будущих трат; плюс факт-лимит `лимит_разовые` = сумма всех разовых
+   этого дампа. Дальше в течение месяца, когда Кай пишет трату («коммуналка
+   гай 8к»), classify() сверяет описание с известными позициями и, если
+   похоже, ставит `category='📦 Разовые'` — трата списывается с `лимит_разовые`
+   тем же механизмом, что 🍜 Продукты. Повторная трата по той же позиции —
+   снова `📦 Разовые` (пооперационно «оплачено/не оплачено» не отслеживается,
+   только общий остаток категории). Перерасход → в 🎲 Импульсивные, как у
+   любого лимита.
+
+   Постоянные расходы — та же схема, категория **🔒 Фикс**, факт-лимит
+   `лимит_фикс` (постоянные и так хранятся индивидуально как `постоянно_*`).
+
+   ⚠️ Ранее проектировалось отдельное понятие «разовый долг» (таблица `debts`,
+   диалог «ещё будут платежи?», компенсация превышения из подушки) —
+   **отменено** как избыточное. Простая категория лимита решает ту же задачу.
+   (История фиксов: до 2026-09-02 помеченные разовыми строки уходили в
+   `fixed` → `постоянно_*` навсегда; до 2026-09-03 при «Принять» писались в
+   Финансы, что давало двойной счёт.)
 
 3. **Доход** — тут ДВЕ разные вещи с похожим названием, легко спутать:
    - **План дохода** (ключ `income_`) — «бюджет 100000 рублей» / «у меня
@@ -125,10 +143,17 @@ that commit; update it in the same PR that changes the model.
    вкладка, см. `CUSHION.md`), долги (в таблицу `debts` со
    стратегией/платежом). Взнос плана в подушку (`cushion_contribution`)
    записывается в `cushion.planned_contribution` и кредитуется в баланс
-   один раз на переходе периода. Позиции из `plan["one_time"]` **никуда не
-   пишутся** — ни в Память, ни в Финансы; они уже сделали своё дело в
-   арифметике расчёта (см. «already_spent» ниже). В цикле `fixed` стоит
-   sanity-`warning`, если туда всё же попадёт что-то со словом «разов» в названии.
+   один раз на переходе периода.
+   Позиции из `plan["one_time"]` — в Финансы **не** пишутся (принцип выше),
+   но сохраняются в Память индивидуально (`разовый_<имя>`, факт
+   `разовое: <имя> — N₽`) для сопоставления будущих трат; старые `разовый_*`,
+   которых нет в новом списке, деактивируются (как `постоянно_*`).
+   Плюс два факта-лимита с прямой суммой позиций: `лимит_фикс` = `fixed_total`
+   (🔒 Фикс), `лимит_разовые` = `one_time_total` (📦 Разовые). Апсерт по ключу —
+   каждый период разовые свои. Эти две категории **не** в `_BUDGET_VARIABLE_CATS`
+   и **не** участвуют в `compute_limits`/приоритетном дележе — параллельные
+   счётчики. В цикле `fixed` стоит sanity-`warning`, если туда всё же попадёт
+   что-то со словом «разов» в названии.
 6. Пока план не принят: «📋 Стратегия долгов» — переспросить стратегию,
    «✏️ Изменить данные» — свободным текстом сказать что поправить и
    пересчитать, «❌ Закрыть план» — выйти из режима настройки совсем.
@@ -281,11 +306,13 @@ Budget has **no table of its own** — there is no migration, no
    `core/budget.py:BUDGET_KEY_TO_CATEGORY`. Examples, non-exhaustive — see
    that constant:
    - `income_` → `📥 Доход`; `постоянно_` → `🔒 Постоянные`;
-     `лимит_` → `💰 Лимит`; `цель_` → `🎯 Цели`; `долг_` → `📋 Долги`.
+     `лимит_` → `💰 Лимит`; `цель_` → `🎯 Цели`; `долг_` → `📋 Долги`;
+     `разовый_` → one one-time position each (fact `разовое: <name> — N₽`),
+     saved on Accept for expense matching only.
    - the payday is a single Memory fact at exact key `budget_payday`
      (default `1` if absent).
    Amounts are parsed from the fact text by the regexes in `core/budget.py`
-   (`LIMIT_AMOUNT_RE`, `INCOME_RE`, `PERMANENT_RE`, `GOAL_RE`).
+   (`LIMIT_AMOUNT_RE`, `INCOME_RE`, `PERMANENT_RE`, `GOAL_RE`, `ONE_TIME_FACT_RE`).
 2. **`debts`** (see the debts domain, `core/repos/pg_debts_repo.py`) — active
    debts with `kind='i_owe'`; the fields consumed are `name`, `amount`,
    `deadline`, `strategy`, `monthly_payment`. Debts come from this table, not
@@ -294,23 +321,30 @@ Budget has **no table of its own** — there is no migration, no
    LLM) and the free-text `долг X` phrasing routed through `memory_save` →
    `core/memory.py:save_memory` (Haiku-parsed, then redirected to
    `pg_debts_repo` instead of Memory — see `_save_debt_from_memory`).
-3. **One-time expenses are NOT budget facts.** `разовый расход X` /
+3. **One-time expenses.** The standalone command `разовый расход X` /
    `разовые: ...` is classified as `one_time_expense` (`core/classifier.py`,
    `_ONE_TIME_EXPENSE_RE`, checked before `memory_save`/`budget`) and
-   written as ordinary `nexus_budget` finance transactions via the shared
-   `nexus/handlers/finance.py:_write_one_time_expense` → `_save_finance` →
-   `_repo.create_entry`, type `💸 Расход`. They feed into the plan only
-   indirectly, via `spending_by_category` → `already_spent` (see Model
-   routing). **Inside a composite `/budget` dump**, lines tagged `разовый:`
-   are returned by Sonnet in a separate `one_time` array (not `fixed`) and
-   contribute to `one_time_total`/`already_spent` **only** — arithmetic of
-   the current recalc. `_save_budget_plan` writes them **nowhere**: not to
-   Memory, not to Finance. **Planning never creates a finance transaction**
-   (see the iron rule below); the real transaction is created separately when
-   Kai reports the spend herself.
+   written as an ordinary `nexus_budget` finance transaction via
+   `nexus/handlers/finance.py:_write_one_time_expense` → `_save_finance`,
+   type `💸 Расход` — that is a real spend, not planning.
+
+   **Inside a composite `/budget` dump**, lines tagged `разовый:` are returned
+   by Sonnet in a separate `one_time` array (not `fixed`), contribute to
+   `one_time_total`/`already_spent` for the recalc, and on Accept
+   `_save_budget_plan` writes: (a) one `разовый_<name>` Memory fact per
+   position (matching only), (b) a `лимит_разовые` fact = `one_time_total`
+   → the `📦 Разовые` limit category. It writes **nothing** to Finance
+   (**planning never creates a finance transaction** — see the iron rule).
+   The real transaction appears later when Kai reports a spend and
+   `classify()` maps its description to `📦 Разовые` (see Model routing).
+   `🔒 Фикс` / `лимит_фикс` is the same idea for `постоянно_*` positions.
 
 The limit display map (`лимит` link → emoji label) is owned by
-`core/budget.py:LIMIT_DISPLAY`.
+`core/budget.py:LIMIT_DISPLAY` (includes `фикс` → `🔒 Фикс`,
+`разовые` → `📦 Разовые`). These two are **not** in `_BUDGET_VARIABLE_CATS`
+and take no part in `compute_limits` — their amount is the direct position
+sum; they are parallel counters checked by the ordinary limit machinery
+(`get_limits` / `_check_budget_limit`).
 
 ## Operations & contract
 
@@ -411,9 +445,19 @@ session is open) uses Sonnet and picks one of **two different prompts**
   `_build_sonnet_input` context — no `income_from_memory`, `manual_limits`, etc.).
 
 Both prompt schemas split recurring vs one-off into two arrays — `fixed`
-(→ `fixed_total`, → `постоянно_*` on Accept) and `one_time` (→
-`one_time_total`, arithmetic only — **not persisted anywhere** on Accept).
+(→ `fixed_total`, → `постоянно_*` + `лимит_фикс` on Accept) and `one_time`
+(→ `one_time_total` for the recalc arithmetic; on Accept → `разовый_*`
+Memory facts + `лимит_разовые`, **never** a finance transaction).
 `one_time` is **not** in `fixed_total`; it is added into `already_spent`.
+
+**Expense classification** (`core/classifier.py:classify`) takes an optional
+`user_notion_id`. When present, `_known_budget_positions` reads the current
+`постоянно_*` / `разовый_*` facts and `_budget_positions_prompt` appends them
+to the same Haiku call (no extra LLM request): if a spend's description
+matches a known position by meaning, Haiku returns `category='🔒 Фикс'` /
+`'📦 Разовые'` instead of the by-meaning category. No match → normal
+categorization. A repeated spend against the same still-current position
+matches again (no per-position "already paid" tracking).
 
 Both prompts get `already_spent` (sum of `spending_by_category` — all
 `nexus_budget` transactions this period, one-time expenses included, **plus
@@ -439,7 +483,7 @@ expense items → `_ONE_TIME_PARSE_SYSTEM`).
 ## Verify against code
 
 - `core/budget.py` — `BUDGET_KEY_TO_CATEGORY`, `LIMIT_DISPLAY`, regexes
-  (`PERMANENT_RE` et al.), `get_limits`, `load_budget_data`,
+  (`PERMANENT_RE`, `ONE_TIME_FACT_RE` et al.), `get_limits`, `load_budget_data`,
   `_budget_payday`, `_period_days_remaining`, `budget_day_limit_from_plan`,
   limit-math constants (`IRON_TRANSPORT`/`IRON_IMPULSE`/`IRON_TOTAL`,
   `PRODUCTS_TARGET`, `HABITS_CEILING`, `_PRIORITY_FLOOR`,
@@ -450,7 +494,9 @@ expense items → `_ONE_TIME_PARSE_SYSTEM`).
   `pg_debts_repo`, not Memory)
 - `core/classifier.py` — `_MEMORY_SAVE_RE` (постоянн/обязательн dual
   support), `_ONE_TIME_EXPENSE_RE`, `_DEBT_CMD_RE`, `_GOAL_CMD_RE`,
-  `_LIMIT_OVERRIDE_RE`, `_BUDGET_RE`, `classify()`/`process_item()` routing
+  `_LIMIT_OVERRIDE_RE`, `_BUDGET_RE`, `classify()`/`process_item()` routing,
+  `_known_budget_positions`/`_budget_positions_prompt` (expense→🔒 Фикс/📦 Разовые
+  matching, `classify(user_notion_id=...)`)
 - `core/repos/memory_repo.py` / `core/repos/pg_memory_repo.py` —
   `find_by_category`, `find_by_key_prefixes`, `find_by_exact_key` (budget facts)
 - `core/repos/pg_debts_repo.py` — active `i_owe` debts read by `load_budget_data`
@@ -458,9 +504,11 @@ expense items → `_ONE_TIME_PARSE_SYSTEM`).
   `start_budget_analysis`, `_run_budget_analysis`, `_build_sonnet_input`,
   `_period_spending` (shared already_spent/income-this-period source),
   `BUDGET_SONNET_SYSTEM`, `_BUDGET_PARSE_PROMPT_LEGACY`, `_format_plan`,
-  `_save_budget_plan` (`fixed` → `постоянно_*`; `one_time` → not persisted),
+  `_save_budget_plan` (`fixed` → `постоянно_*` + `лимит_фикс`; `one_time` →
+  `разовый_*` facts + `лимит_разовые`, никогда не в Финансы),
+  `_check_budget_limit` (matches `🔒 Фикс`/`📦 Разовые` like any limit),
   `handle_one_time_expense`, `_write_one_time_expense` (shared one-time
-  writer), `_ONE_TIME_PARSE_SYSTEM`,
+  writer, standalone command only), `_ONE_TIME_PARSE_SYSTEM`,
   `_BUDGET_VARIABLE_CATS` (the 8 limit categories fed to both prompts),
   `_apply_computed_limits`/`_limits_fields` (deterministic limit math),
   `BUDGET_TIGHT_WARN` (alias of `core.budget.BUDGET_TIGHT_THRESHOLD`),

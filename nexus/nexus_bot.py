@@ -779,7 +779,7 @@ async def process_text(msg: Message, text: str, user_notion_id: str = "") -> Non
         original = _clarify.pop(uid)
         combined = f"{original}\nУточнение: {text}"
         try:
-            items = await classify(combined, tz_offset=tz_offset)
+            items = await classify(combined, tz_offset=tz_offset, user_notion_id=user_notion_id)
             if items and items[0].get("type") not in ("unknown", "parse_error", None):
                 lines = []
                 for data in items:
@@ -823,7 +823,7 @@ async def process_text(msg: Message, text: str, user_notion_id: str = "") -> Non
         if _url_shortcut:
             items = _url_items
         else:
-            items = await classify(original_text, tz_offset=tz_offset)
+            items = await classify(original_text, tz_offset=tz_offset, user_notion_id=user_notion_id)
         logger.info("handle_text: classify returned %d items: %s", len(items), [i.get("type") for i in items])
 
         lines = []

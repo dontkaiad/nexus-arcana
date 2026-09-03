@@ -3960,15 +3960,47 @@ async def _save_budget_plan(message: Message, uid: int) -> None:
     # Разовые из composite-дампа /budget НЕ пишутся в Финансы. Железный принцип
     # проекта: планирование бюджета никогда не создаёт запись в Финансах —
     # только в Память и служебные таблицы (debts, cushion). См. docs/specs/BUDGET.md.
+    # НЕ возвращать сюда вызов _write_one_time_expense / _save_finance.
     #
-    # plan["one_time"] — это объявленные намерения («разовый: билет 15к»), а не
-    # факт оплаты. Своё дело они уже сделали: one_time_total участвует в
-    # already_spent (Шаг 1.5) и уменьшает распределяемые в этом расчёте. Реальная
-    # транзакция появится позже, когда Кай сама сообщит о трате обычным путём.
-    #
-    # НЕ возвращать сюда вызов _write_one_time_expense / _save_finance: это давало
-    # двойной счёт при пересчёте после Принятия (one_time и в Финансах как tx,
-    # и снова прибавляются из буфера).
+    # Но каждая позиция сохраняется в Память индивидуально (ключ разовый_*) —
+    # не для диалога, а чтобы было с чем сопоставлять текст будущих транзакций
+    # (classify → category="📦 Разовые"). Старые разовый_* прошлого периода,
+    # которых нет в новом списке, — деактивируем (как постоянно_* выше).
+    one_time_items = plan.get("one_time", []) or []
+    new_one_time_keys = set()
+    for ot in one_time_items:
+        ot_name = ot.get("name") or ot.get("description") or "разовый расход"
+        new_one_time_keys.add("разовый_{}".format(ot_name.lower().replace(" ", "_")))
+
+    if notion_uid:
+        try:
+            from core.repos.memory_repo import _repo as _mem_repo
+            old_ot = await _mem_repo.find_by_key_prefixes(["разовый_"], notion_uid)
+            stale_ot_ids = [m.id for m in old_ot if m.is_current and m.key not in new_one_time_keys]
+            if stale_ot_ids:
+                await _mem_repo.set_active(stale_ot_ids, False)
+                logger.info("_save_budget_plan: deactivated %d stale one-time", len(stale_ot_ids))
+        except Exception as e:
+            logger.error("_save_budget_plan: failed to deactivate old one-time: %s", e)
+
+    for ot in one_time_items:
+        ot_name = ot.get("name") or ot.get("description") or "разовый расход"
+        ot_amt = ot.get("amount", 0)
+        await _save_memory_entry(
+            "разовый_{}".format(ot_name.lower().replace(" ", "_")),
+            "разовое: {} — {}₽".format(ot_name, ot_amt),
+            notion_uid,
+        )
+
+    # 🔒 Фикс и 📦 Разовые — обычные категории лимита. Размер = прямая сумма
+    # позиций (НЕ compute_limits, НЕ приоритетный делёж). Апсерт по ключу —
+    # каждый период разовые свои, перезаписываются при новом Принятии.
+    fixed_total = int(plan.get("fixed_total")
+                      or sum(float(f.get("amount", 0) or 0) for f in plan.get("fixed", [])))
+    one_time_total = int(plan.get("one_time_total")
+                         or sum(float(o.get("amount", 0) or 0) for o in one_time_items))
+    await _save_memory_entry("лимит_фикс", "лимит: 🔒 Фикс — {}₽/мес".format(fixed_total), notion_uid)
+    await _save_memory_entry("лимит_разовые", "лимит: 📦 Разовые — {}₽/мес".format(one_time_total), notion_uid)
 
     # Лимиты — НЕ перезаписывать [ручной]
     existing_limits = await _get_limits("")

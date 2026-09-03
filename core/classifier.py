@@ -411,6 +411,70 @@ def build_system(tz_offset: int = 3) -> str:
     ])
 
 
+async def _known_budget_positions(user_notion_id: str) -> "tuple[list[str], list[str]]":
+    """(постоянные, разовые) — имена + суммы из Памяти для сопоставления трат.
+
+    Дешёвый PG-запрос (не LLM). Пусто при любой ошибке / без user_notion_id.
+    """
+    if not user_notion_id:
+        return [], []
+    try:
+        from core.repos.memory_repo import _repo as _mem_repo
+        from core.budget import PERMANENT_RE, ONE_TIME_FACT_RE
+        mems = await _mem_repo.find_by_key_prefixes(
+            ["постоянно_", "разовый_"], user_notion_id=user_notion_id,
+        )
+    except Exception as e:
+        logger.error("_known_budget_positions: %s", e)
+        return [], []
+
+    fixed: list[str] = []
+    one_time: list[str] = []
+    for m in mems:
+        if not getattr(m, "is_current", True):
+            continue
+        key = (m.key or "").lower()
+        fact = m.fact or ""
+        if key.startswith("постоянно_"):
+            pm = PERMANENT_RE.search(fact)
+            if pm:
+                nm = re.sub(r"\s*\([^)]*\)\s*$", "", pm.group(1).strip()).strip()
+                fixed.append("{} — {:.0f}₽".format(
+                    nm, float(pm.group(2).replace(" ", "").replace(",", "."))))
+        elif key.startswith("разовый_"):
+            om = ONE_TIME_FACT_RE.search(fact)
+            if om:
+                one_time.append("{} — {:.0f}₽".format(
+                    om.group(1).strip(), float(om.group(2).replace(" ", "").replace(",", "."))))
+    return fixed, one_time
+
+
+def _budget_positions_prompt(fixed: "list[str]", one_time: "list[str]") -> str:
+    """Доп. блок к системному промпту classify: сверка траты с известными позициями."""
+    lines = [
+        "",
+        "СОПОСТАВЛЕНИЕ ТРАТЫ С ИЗВЕСТНЫМИ РАСХОДАМИ (только для type=expense):",
+        "У пользователя есть заранее объявленные постоянные и разовые расходы.",
+        "Если описание траты по СМЫСЛУ похоже на одну из позиций ниже — поставь:",
+        "  постоянная позиция → category='🔒 Фикс'",
+        "  разовая позиция    → category='📦 Разовые'",
+        "Не похоже ни на одну — категоризируй как обычно по смыслу товара/услуги.",
+        "Похожесть по смыслу, не по точному тексту. Повторная трата по той же "
+        "позиции — СНОВА та же категория (не «уже оплачено, дальше не матчить»).",
+    ]
+    if fixed:
+        lines.append("Известные постоянные: " + json.dumps(fixed, ensure_ascii=False))
+    if one_time:
+        lines.append("Известные разовые: " + json.dumps(one_time, ensure_ascii=False))
+    lines += [
+        "Примеры (при наличии разовой «Коммуналка Гай — 16000₽»):",
+        '  "коммуналка гай 8к"  → {"type":"expense","amount":8000,...,"category":"📦 Разовые"}',
+        '  "коммуналка гай 10к" → category="📦 Разовые" (та же позиция снова)',
+        '  "такси 500"          → category="🚕 Транспорт" (не похоже ни на что)',
+    ]
+    return "\n".join(lines)
+
+
 _EDIT_RE = re.compile(
     r"\b(поменяй|измени|обнови|исправь|смени|замени|измените|обновите|исправьте|сменить|изменить|поменять)\b"
     r".{0,50}\b(категорию|категория|приоритет|название|заголовок|дедлайн|имя|источник|статус)\b"
@@ -683,7 +747,7 @@ async def _parse_edit_record(text: str) -> dict:
         return {"type": "edit_record", "record_hint": text, "edits": [{"field": "unknown", "new_value": ""}]}
 
 
-async def classify(text: str, tz_offset: int = 3) -> list[dict]:
+async def classify(text: str, tz_offset: int = 3, user_notion_id: str = "") -> list[dict]:
     """Классифицировать текст через Claude."""
     logger.info("classify: input text=%r tz_offset=%d", text[:100], tz_offset)
 
@@ -902,7 +966,17 @@ async def classify(text: str, tz_offset: int = 3) -> list[dict]:
         logger.warning("classify: detected leaked Claude response as input, returning unknown. text=%r", text[:80])
         return [{"type": "unknown"}]
 
-    raw = await ask_claude(text, system=build_system(tz_offset), max_tokens=1024, temperature=0)
+    system = build_system(tz_offset)
+    # Сверка траты с заранее объявленными постоянными/разовыми расходами —
+    # обогащаем ТОТ ЖЕ вызов (не отдельный LLM-запрос), см. _budget_positions_prompt.
+    try:
+        _fixed_pos, _one_time_pos = await _known_budget_positions(user_notion_id)
+        if _fixed_pos or _one_time_pos:
+            system += "\n" + _budget_positions_prompt(_fixed_pos, _one_time_pos)
+    except Exception as e:
+        logger.error("classify: budget positions enrich failed: %s", e)
+
+    raw = await ask_claude(text, system=system, max_tokens=1024, temperature=0)
     global _classify_last_raw
     _classify_last_raw = raw
 
