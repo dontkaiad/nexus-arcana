@@ -72,12 +72,14 @@ def _nearest_weekday_iso(target_wd: int, tz_offset: int) -> str:
     return (today + timedelta(days=days_ahead)).strftime("%Y-%m-%d")
 
 
-def today_moscow() -> str:
-    return datetime.now(MOSCOW_TZ).strftime("%Y-%m-%d")
+def today_moscow(tz_offset: int = 3) -> str:
+    """«Сегодня» пользователя. tz_offset — его личный часовой пояс (дефолт 3 =
+    серверный МСК, поведение как было пока tz не задан явно)."""
+    return datetime.now(timezone(timedelta(hours=tz_offset))).strftime("%Y-%m-%d")
 
 
-def _today() -> str:
-    return datetime.now(MOSCOW_TZ).isoformat()[:10]
+def _today(tz_offset: int = 3) -> str:
+    return datetime.now(timezone(timedelta(hours=tz_offset))).isoformat()[:10]
 
 
 def _next_weekday_iso(day_ru: str) -> str:
@@ -1249,8 +1251,15 @@ async def process_item(data: Dict[str, Any], original_text: str, msg, clarify: d
 
         # High confidence + amount > 0 → сохранить в Notion
         logger.info("process_item: saving to Notion - %s %s %s", type_label, amount, category)
+        _fin_tz = 3
+        try:
+            if msg and getattr(msg, "from_user", None):
+                from nexus.handlers.tasks import _get_user_tz
+                _fin_tz = await _get_user_tz(msg.from_user.id)
+        except Exception:
+            pass
         result = await _fin_repo.add(
-            date=today_moscow(),
+            date=today_moscow(_fin_tz),
             amount=amount,
             category=category,
             type_=type_label,
@@ -1266,7 +1275,7 @@ async def process_item(data: Dict[str, Any], original_text: str, msg, clarify: d
                 logger.info("finance saved via classifier: category=%s — calling budget check", category)
                 try:
                     from nexus.handlers.finance import _check_budget_limit
-                    await _check_budget_limit(category, msg, user_notion_id, amount=amount)
+                    await _check_budget_limit(category, msg, user_notion_id, amount=amount, tz_offset=_fin_tz)
                 except Exception as e:
                     logger.error("budget check error: %s", e, exc_info=True)
                 # Предложить вычеркнуть из списка покупок
