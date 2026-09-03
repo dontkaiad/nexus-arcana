@@ -37,6 +37,7 @@ from core.budget import (
     parse_deadline as _parse_deadline,
     CAT_IMPULSE as _CAT_IMPULSE,
     CUSHION_COMFORTABLE_RATE as _CUSHION_RATE,
+    BUDGET_TIGHT_THRESHOLD,
 )
 
 logger = logging.getLogger("nexus.finance")
@@ -3299,10 +3300,11 @@ async def on_budget_priority_goal(call: CallbackQuery, user_notion_id: str = "")
 # с разным total_debt_payment (вариант А — полный платёж, вариант Б —
 # уменьшенный). Фаза 2 (Sonnet) пишет текст вокруг готовых чисел.
 
-# discretionary ниже этого порога — priority-категории (кафе/бьюти/…) уже = 0,
-# показываем плашку «жёстко». 23000 (продукты 10к + привычки-потолок 13к) + 2500
-# железных (транспорт + импульсивные).
-BUDGET_TIGHT_WARN = 25500
+# free_after_debts ниже этого порога — priority-категории (кафе/бьюти/…) уже = 0,
+# подушка не резервируется, продукты/привычки делят пополам → показываем плашку
+# «жёстко». Порог = единая константа core.budget.BUDGET_TIGHT_THRESHOLD
+# (_PRIORITY_FLOOR 23000 + IRON_TOTAL 2500 = 25500). НЕ хардкодить число здесь.
+BUDGET_TIGHT_WARN = BUDGET_TIGHT_THRESHOLD
 
 _BUDGET_NARRATION_FIELDS = ("summary", "habit_strategy", "relief_timeline")
 
@@ -3387,7 +3389,10 @@ def _apply_computed_limits(plan: dict) -> None:
     plan["debts_monthly_total"] = int(round(total_debt_payment))
     plan["free_after_debts"] = int(round(free_after))
 
-    is_tight = free_after < 30000 and total_debt_payment > 0
+    # Тяжёлый месяц ⟺ месяц НЕ комфортный по той же границе, что compute_limits()
+    # (free_after − IRON_TOTAL < _PRIORITY_FLOOR), И есть реальный платёж по долгу,
+    # который варианту Б есть смысл уменьшать. Порог — единая BUDGET_TIGHT_THRESHOLD.
+    is_tight = free_after < BUDGET_TIGHT_THRESHOLD and total_debt_payment > 0
     if is_tight:
         pay_b = plan.get("variant_b_debt_payment")
         try:

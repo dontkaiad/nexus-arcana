@@ -363,14 +363,14 @@ async def test_run_budget_analysis_no_warning_above_tight_warn(tmp_budget_db):
     assert "жёстко" not in text
 
 
-def test_format_plan_variant_a_tight_label_just_below_15500():
-    """remaining=15499 (< 15500) → лейбл «⚠️ жёстко» на варианте А."""
+def test_format_plan_variant_a_tight_label_just_below_threshold():
+    """remaining=25499 (< BUDGET_TIGHT_WARN 25500) → лейбл «⚠️ жёстко» на варианте А."""
     from nexus.handlers.finance import _format_plan
 
     plan = {
         "is_tight_month": True,
-        "variant_a": {"label": "Платить по плану", "remaining": 15499},
-        "variant_b": {"label": "Пересмотреть стратегию", "remaining": 20000},
+        "variant_a": {"label": "Платить по плану", "remaining": 25499},
+        "variant_b": {"label": "Пересмотреть стратегию", "remaining": 28000},
     }
     out = _format_plan(plan)
     assert "жёстко" in out
@@ -387,6 +387,49 @@ def test_format_plan_variant_a_no_tight_label_at_tight_warn():
     }
     out = _format_plan(plan)
     assert "жёстко" not in out
+
+
+# ── Единый порог тяжёлого месяца: ОДНА константа, не три числа ──────────────
+
+def test_tight_threshold_is_single_source_of_truth():
+    """finance.BUDGET_TIGHT_WARN — это core.budget.BUDGET_TIGHT_THRESHOLD,
+    а он выведен из _PRIORITY_FLOOR + IRON_TOTAL. Нигде не захардкожено 30000/25500."""
+    import inspect
+    from nexus.handlers import finance
+    from core import budget
+
+    assert finance.BUDGET_TIGHT_WARN == budget.BUDGET_TIGHT_THRESHOLD
+    assert budget.BUDGET_TIGHT_THRESHOLD == budget._PRIORITY_FLOOR + budget.IRON_TOTAL
+
+    src = inspect.getsource(finance._apply_computed_limits)
+    assert "BUDGET_TIGHT_THRESHOLD" in src
+    assert "30000" not in src and "30_000" not in src
+
+
+@pytest.mark.asyncio
+async def test_apply_computed_limits_tight_split_uses_threshold():
+    """free_after между 25500 и старым 30000 + есть платёж по долгу →
+    больше НЕ тяжёлый месяц (раньше при пороге 30000 показывалась развилка А/Б)."""
+    from nexus.handlers.finance import _apply_computed_limits
+
+    # income 60000, fixed 0 → distributable 60000; долг 33000/мес → free_after 27000
+    plan = {
+        "income_total": 60000, "fixed_total": 0,
+        "debts_monthly": [{"name": "Аня", "monthly": 33000, "deadline": "май 2026"}],
+    }
+    _apply_computed_limits(plan)
+    assert plan["free_after_debts"] == 27000
+    assert plan["is_tight_month"] is False
+    assert plan["variant_a"] is None and plan["variant_b"] is None
+
+    # а ниже 25500 (долг 36000 → free_after 24000) — тяжёлый, развилка есть
+    plan2 = {
+        "income_total": 60000, "fixed_total": 0,
+        "debts_monthly": [{"name": "Аня", "monthly": 36000, "deadline": "май 2026"}],
+    }
+    _apply_computed_limits(plan2)
+    assert plan2["free_after_debts"] == 24000
+    assert plan2["is_tight_month"] is True
 
 
 # ── already_spent/savings_from_last_period в legacy-промпте (первый /budget) ─

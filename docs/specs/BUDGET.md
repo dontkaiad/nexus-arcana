@@ -106,9 +106,12 @@ that commit; update it in the same PR that changes the model.
 2. Если в тексте 2+ долга без стратегии — бот спрашивает «как планируешь
    отдавать?» (свободный текст). Один долг — стратегия сама (сумма /
    месяцы до дедлайна).
-3. Sonnet считает план:
-   - обычный месяц (остаток после долгов ≥ 30 000₽) — один план;
-   - тяжёлый месяц (< 30 000₽) **И есть реальный платёж по долгу в этом
+3. Python считает план (`_apply_computed_limits` → `compute_limits`):
+   - комфортный месяц (`free_after_debts ≥ 25 500₽`, т.е. остаток **после
+     железных** транспорт+импульс ≥ 23 000₽ — единый порог
+     `core.budget.BUDGET_TIGHT_THRESHOLD = _PRIORITY_FLOOR + IRON_TOTAL`) —
+     один план;
+   - тяжёлый месяц (`< 25 500₽`) **И есть реальный платёж по долгу в этом
      периоде** (`total_debt_payment > 0`) — два варианта: **А** «Платить
      по плану» (жёстко, с железными минимумами на еду/транспорт/импульсивные)
      и **Б** «Пересмотреть стратегию» (мягче, но платёж по долгу меньше);
@@ -158,35 +161,38 @@ that commit; update it in the same PR that changes the model.
   с нуля, `_BUDGET_PARSE_PROMPT_LEGACY`, шаг 3). Одно место расчёта
   специально, чтобы не разъезжались как порог 18500/15500 ниже.
 
-### Как Sonnet распределяет лимиты по категориям
+### Как Python распределяет лимиты по категориям
 
-Правило одинаковое для обычного месяца и для варианта А тяжёлого месяца
-(в промптах прописано в двух местах — `BUDGET_SONNET_SYSTEM` и
-`_BUDGET_PARSE_PROMPT_LEGACY`):
+Считает **только** `core/budget.py:compute_limits()` (Sonnet цифры лимитов
+не выдаёт). Все числа — именованные константы в начале `core/budget.py`,
+менять там. Логика одна для комфортного месяца и для варианта А/Б тяжёлого:
 
-1. **Железные минимумы** снимаются первыми: 🍜 Продукты 3 000 + 🚕 Транспорт
-   1 500 + 🎲 Импульсивные 1 000 = 5 500₽ (🚬 Привычки в железные минимумы
-   НЕ входят). 💅 Бьюти тоже больше не в минимумах (убрана — маникюр
-   перестал быть фиксом).
-2. `discretionary_pool` = Распределяемые − железные минимумы − платёж по
-   долгу (`total_debt_payment`).
-3. **🚬 Привычки — потолок 50% от `discretionary_pool`** (процент, не
-   абсолютное число). В обычный месяц не ниже 10 000₽; в варианте А
-   тяжёлого месяца могут быть и ниже 10к. Раньше в привычки уходил *весь*
-   излишек после минимумов — теперь максимум половина.
-4. 🍜 Продукты: `products_min = max(3000, привычки / 2)` — top-up сверх
-   железных 3 000₽, из пула. Правило само подстраивается под меньшие
-   привычки.
-5. Остаток пула (`discretionary_pool − привычки − products top-up`)
-   распределяется по **фиксированному приоритету** — каждая следующая
-   категория получает то, что осталось после предыдущей, пока пул не
-   кончится. Не поровну, не занулять всех сразу. Не хватило на всех →
-   младшие по списку = 0, это ожидаемо:
-   1. 🍱 Кафе/Доставка
-   2. 💅 Бьюти
-   3. 🏥 Здоровье
-   4. 👗 Гардероб
-   5. 📚 Хобби/Учеба
+1. `discretionary = distributable_pool − total_debt_payment` (это
+   `free_after_debts`).
+2. **Железные категории** снимаются первыми: 🚕 Транспорт `IRON_TRANSPORT`
+   (1 500) + 🎲 Импульсивные `IRON_IMPULSE` (1 000) = `IRON_TOTAL` 2 500₽.
+   🍜 Продукты и 🚬 Привычки в железные **не входят**. 💅 Бьюти — тоже нет
+   (маникюр перестал быть фиксом). Если `discretionary < IRON_TOTAL` —
+   транспорт и импульсивные режутся пропорционально, остальное 0.
+3. `pool_after_iron = discretionary − IRON_TOTAL`.
+4. **Комфортный месяц** (`pool_after_iron ≥ _PRIORITY_FLOOR`, 23 000):
+   - в подушку резервируется `CUSHION_COMFORTABLE_RATE` (20%) от
+     `income_total` **до** раздачи лимитов — лимиты считаются от
+     уменьшенного пула;
+   - 🍜 Продукты = `PRODUCTS_TARGET` (10 000) плоско;
+   - 🚬 Привычки = `min(HABITS_CEILING 13 000, остаток пула − продукты)`;
+   - остаток после продуктов и привычек — по **фиксированному приоритету**
+     `PRIORITY_CHAIN`, каждая категория забирает 50% оставшегося, последняя
+     в цепочке — весь хвост (округление не теряется). Не хватило → младшие
+     = 0, это ожидаемо:
+     1. 🍱 Кафе/Доставка
+     2. 💅 Бьюти
+     3. 🏥 Здоровье
+     4. 👗 Гардероб
+     5. 📚 Хобби/Учеба
+5. **Тяжёлый месяц** (`pool_after_iron < _PRIORITY_FLOOR`): подушка 0₽,
+   `pool_after_iron` делится **пополам** между 🍜 Продуктами и 🚬 Привычками,
+   `PRIORITY_CHAIN` вся по нулям.
 
 🐾 Коты и 🏠 Жильё/подписки — это `постоянные`/фикс, не переменные лимиты,
 в этом дележе не участвуют.
@@ -224,6 +230,14 @@ that commit; update it in the same PR that changes the model.
   двойной счёт при пересчёте после Принятия~~ — **исправлено** (2026-09-03):
   `_save_budget_plan` больше не трогает Финансы, `one_time` живёт только в
   арифметике расчёта.
+- ~~Порог «тяжёлого месяца» жил тремя разными числами: `is_tight` в
+  `_apply_computed_limits` сравнивал `free_after` с `30000`, плашка «жёстко»
+  и лейбл варианта А — с `25500`, а `compute_limits` — с `_PRIORITY_FLOOR`
+  (23000) на `pool_after_iron`~~ — **исправлено** (2026-09-03): одна константа
+  `core.budget.BUDGET_TIGHT_THRESHOLD = _PRIORITY_FLOOR + IRON_TOTAL` (25500,
+  измеряется на `free_after_debts`), импортируется в `finance.py` в оба места.
+  Развилка А/Б теперь включается ровно тогда, когда `compute_limits` считает
+  месяц не комфортным.
 - «Доход» как название путает две разные сущности: план дохода (`income_`,
   Памяти-факт, персистентный) и разовое поступление денег (обычная
   finance-транзакция типа «Доход», не персистентная). Если решишь это
@@ -426,7 +440,11 @@ expense items → `_ONE_TIME_PARSE_SYSTEM`).
 
 - `core/budget.py` — `BUDGET_KEY_TO_CATEGORY`, `LIMIT_DISPLAY`, regexes
   (`PERMANENT_RE` et al.), `get_limits`, `load_budget_data`,
-  `_budget_payday`, `_period_days_remaining`, `budget_day_limit_from_plan`
+  `_budget_payday`, `_period_days_remaining`, `budget_day_limit_from_plan`,
+  limit-math constants (`IRON_TRANSPORT`/`IRON_IMPULSE`/`IRON_TOTAL`,
+  `PRODUCTS_TARGET`, `HABITS_CEILING`, `_PRIORITY_FLOOR`,
+  `CUSHION_COMFORTABLE_RATE`, `BUDGET_TIGHT_THRESHOLD`), `compute_limits`,
+  `_distribute_limits`, `PRIORITY_CHAIN`
 - `core/memory.py` — `CATEGORIES`, `_PARSE_SYSTEM` (постоянно_/долг_/
   income_ examples), `save_memory` (`долг_` → redirected to
   `pg_debts_repo`, not Memory)
@@ -444,6 +462,8 @@ expense items → `_ONE_TIME_PARSE_SYSTEM`).
   `handle_one_time_expense`, `_write_one_time_expense` (shared one-time
   writer), `_ONE_TIME_PARSE_SYSTEM`,
   `_BUDGET_VARIABLE_CATS` (the 8 limit categories fed to both prompts),
+  `_apply_computed_limits`/`_limits_fields` (deterministic limit math),
+  `BUDGET_TIGHT_WARN` (alias of `core.budget.BUDGET_TIGHT_THRESHOLD`),
   `_bdb`/`_BUDGET_DB` (session store), `_send_payday_review`
 - `nexus/nexus_bot.py` — `/budget` wiring, startup `proactive_budget_review`
 - `miniapp/backend/routes/finance.py` — limits/goals views, day limit
