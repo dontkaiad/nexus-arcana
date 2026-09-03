@@ -97,6 +97,73 @@ async def test_budget_day_limit_from_plan_divisor_uses_days():
     assert result_10 > result_30
 
 
+# ── Личный часовой пояс: граница периода считается по дню пользователя ──────
+
+from datetime import datetime as _real_dt, timezone as _tzc
+
+
+def _frozen_dt(instant_utc):
+    class _DT(_real_dt):
+        @classmethod
+        def now(cls, tz=None):
+            return instant_utc.astimezone(tz) if tz is not None else instant_utc.replace(tzinfo=None)
+    return _DT
+
+
+def test_period_days_remaining_uses_user_tz(monkeypatch):
+    """Момент, когда у сервера (UTC+3) ещё 15 июня, а у юзера (UTC+5) уже 16-е →
+    «дней до пэйдея» отличается на 1 (дата у него перевалила)."""
+    import core.budget as B
+
+    instant = _real_dt(2026, 6, 15, 20, 0, tzinfo=_tzc.utc)  # +3 → 23:00 15-го, +5 → 01:00 16-го
+    monkeypatch.setattr(B, "datetime", _frozen_dt(instant))
+
+    d_msk = B._period_days_remaining(1, tz_offset=3)
+    d_user = B._period_days_remaining(1, tz_offset=5)
+
+    assert d_msk == 15
+    assert d_user == 14
+    # регресс: дефолт == явный 3
+    assert B._period_days_remaining(1) == d_msk
+
+
+@pytest.mark.asyncio
+async def test_budget_day_limit_from_plan_passes_tz_through():
+    """tz_offset пробрасывается в _period_days_remaining."""
+    from core.budget import budget_day_limit_from_plan
+
+    captured = {}
+
+    def fake_days(payday, tz_offset=3):
+        captured["tz"] = tz_offset
+        return 20
+
+    with patch(_PLAN_PATH, AsyncMock(return_value=_plan(income=60000))), \
+         patch(_PAYDAY_PATH, AsyncMock(return_value=1)), \
+         patch(_DAYS_PATH, side_effect=fake_days):
+        await budget_day_limit_from_plan("user-x", tz_offset=5)
+
+    assert captured["tz"] == 5
+
+
+@pytest.mark.asyncio
+async def test_budget_day_limit_from_plan_default_tz_is_3():
+    from core.budget import budget_day_limit_from_plan
+
+    captured = {}
+
+    def fake_days(payday, tz_offset=3):
+        captured["tz"] = tz_offset
+        return 20
+
+    with patch(_PLAN_PATH, AsyncMock(return_value=_plan(income=60000))), \
+         patch(_PAYDAY_PATH, AsyncMock(return_value=1)), \
+         patch(_DAYS_PATH, side_effect=fake_days):
+        await budget_day_limit_from_plan("user-x")
+
+    assert captured["tz"] == 3
+
+
 @pytest.mark.asyncio
 async def test_budget_day_limit_from_plan_negative_free_returns_zero():
     """Расходы превышают доход → max(0, ...) → 0."""

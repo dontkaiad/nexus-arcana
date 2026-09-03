@@ -354,7 +354,7 @@ async def get_today(tg_id: int = Depends(current_user_id)) -> dict[str, Any]:
     overdue.sort(key=lambda x: -x["days_ago"])
 
     spent_today = await _spent_today(user_notion_id, today_str, tomorrow_str)
-    day_limit = await budget_day_limit_from_plan(user_notion_id)
+    day_limit = await budget_day_limit_from_plan(user_notion_id, tz_offset)
     left = day_limit - spent_today
     pct = int(round(spent_today / day_limit * 100)) if day_limit else 0
 

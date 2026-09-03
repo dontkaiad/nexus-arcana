@@ -93,7 +93,7 @@ def _extract_finance_item(entry: BudgetEntry) -> dict:
 # ── View: today ──────────────────────────────────────────────────────────────
 
 async def _view_today(tg_id: int) -> dict:
-    today_date, _ = await today_user_tz(tg_id)
+    today_date, tz_offset = await today_user_tz(tg_id)
     today_iso = today_date.isoformat()
     user_notion_id = (await get_user_notion_id(tg_id)) or ""
 
@@ -102,7 +102,7 @@ async def _view_today(tg_id: int) -> dict:
     items = [_extract_finance_item(e) for e in records]
     total = sum(i["amt"] for i in items)
 
-    budget_day = await budget_day_limit_from_plan(user_notion_id)
+    budget_day = await budget_day_limit_from_plan(user_notion_id, tz_offset)
     left = max(0, budget_day - total)
     pct = _pct(total, budget_day)
     return {

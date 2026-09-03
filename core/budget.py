@@ -479,25 +479,33 @@ async def _budget_payday() -> int:
     return 1
 
 
-def _period_days_remaining(payday: int) -> int:
-    """Дней до конца бюджетного периода (не считая сегодня) → делитель."""
-    now = datetime.now(_MOSCOW_TZ)
+def _period_days_remaining(payday: int, tz_offset: int = 3) -> int:
+    """Дней до конца бюджетного периода (не считая сегодня) → делитель.
+
+    tz_offset — личный часовой пояс пользователя (граница дня/периода его,
+    не серверная). Дефолт 3 = поведение до фикса, когда tz не задан.
+    """
+    user_tz = _tz(timedelta(hours=tz_offset))
+    now = datetime.now(user_tz)
     today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
     if now.day >= payday:
         next_month = now.month + 1 if now.month < 12 else 1
         next_year = now.year if now.month < 12 else now.year + 1
-        period_end = datetime(next_year, next_month, payday, tzinfo=_MOSCOW_TZ) - timedelta(days=1)
+        period_end = datetime(next_year, next_month, payday, tzinfo=user_tz) - timedelta(days=1)
     else:
         period_end = now.replace(day=payday, hour=0, minute=0, second=0, microsecond=0) - timedelta(days=1)
     return max(1, (period_end - today_start).days)
 
 
-async def budget_day_limit_from_plan(user_notion_id: str) -> int:
+async def budget_day_limit_from_plan(user_notion_id: str, tz_offset: int = 3) -> int:
     """Дневной лимит из сохранённого плана в Памяти.
 
     free = доход − постоянные − лимиты − цели.saving − долги.monthly_payment
     day_limit = max(0, free // дни_до_пэйдея)
     Возвращает 0 если план не задан или доход отсутствует.
+
+    tz_offset — личный часовой пояс пользователя (делитель «дней до пэйдея»
+    считается по его дню, не серверному). Дефолт 3.
     """
     try:
         budget = await load_budget_data(user_notion_id)
@@ -514,7 +522,7 @@ async def budget_day_limit_from_plan(user_notion_id: str) -> int:
         free = (total_income - total_obligatory - total_limits
                 - total_goals_saving - total_debt_monthly)
         payday = await _budget_payday()
-        days = _period_days_remaining(payday)
+        days = _period_days_remaining(payday, tz_offset)
         return max(0, int(free / days))
     except Exception:
         logger.error("budget_day_limit_from_plan: unexpected error", exc_info=True)
