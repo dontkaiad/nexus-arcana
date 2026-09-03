@@ -153,7 +153,10 @@ class TestVoiceTranscriptReachesGuard:
             )
         save.assert_not_awaited()  # reminder выброшен → не explicit-save
         sent = msg.answer.await_args.args[0]
-        assert "Напоминание: нет" in sent
+        # Дедлайн уже назван → карточка подтверждения «Всё верно?»
+        # (не объединённый вопрос «когда сделать?»). Главное — напоминания нет.
+        assert "Напомню: нет" in sent
+        assert "Дедлайн: 2026-07-28" in sent
 
 
 class TestExtractExplicitClock:

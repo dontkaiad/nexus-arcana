@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import os
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -59,10 +59,12 @@ async def test_voice_reply_to_reschedule_prompt_reschedules_not_creates_task():
 
     classify_mock = AsyncMock(return_value=[{"type": "task", "title": "завтра в 19"}])
     process_item_mock = AsyncMock(return_value="task created")
+    # Будущая дата — иначе _is_future_dt (anti-loop guard) отсечёт перенос.
+    _future = (datetime.now(timezone.utc).astimezone() + timedelta(days=10)).strftime("%Y-%m-%dT19:00")
 
     try:
         with patch.object(tasks, "_get_user_tz", AsyncMock(return_value=3)), \
-             patch.object(tasks, "ask_claude", AsyncMock(return_value='{"reminder_time": "2026-08-21T19:00"}')), \
+             patch.object(tasks, "ask_claude", AsyncMock(return_value='{"reminder_time": "%s"}' % _future)), \
              patch.object(tasks, "_schedule_reminder", AsyncMock()) as sched, \
              patch.object(tasks, "_update_notion_on_reschedule", AsyncMock()) as notion_update, \
              patch.object(tasks, "react", AsyncMock()), \
@@ -102,10 +104,12 @@ async def test_photo_caption_reply_to_reschedule_prompt_reschedules_not_creates_
 
     classify_mock = AsyncMock(return_value=[{"type": "task", "title": "завтра в 19"}])
     process_item_mock = AsyncMock(return_value="task created")
+    # Будущая дата — иначе _is_future_dt (anti-loop guard) отсечёт перенос.
+    _future = (datetime.now(timezone.utc).astimezone() + timedelta(days=10)).strftime("%Y-%m-%dT19:00")
 
     try:
         with patch.object(tasks, "_get_user_tz", AsyncMock(return_value=3)), \
-             patch.object(tasks, "ask_claude", AsyncMock(return_value='{"reminder_time": "2026-08-21T19:00"}')), \
+             patch.object(tasks, "ask_claude", AsyncMock(return_value='{"reminder_time": "%s"}' % _future)), \
              patch.object(tasks, "_schedule_reminder", AsyncMock()) as sched, \
              patch.object(tasks, "_update_notion_on_reschedule", AsyncMock()) as notion_update, \
              patch.object(tasks, "react", AsyncMock()), \

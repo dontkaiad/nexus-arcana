@@ -1,4 +1,4 @@
-"""Regression: три бага из отчёта Кай (сентябрь). #198 / #199 / #200.
+"""Regression: баги из отчёта Кай (сентябрь). #198 / #199 / #200 / #201.
 
 1. reply «добавь заметку <сумма> торг» на созданную задачу → «Не поняла
    что дополнить»: в task-схеме reply-дополнения (`core/reply_update.py`)
@@ -94,6 +94,33 @@ async def test_refinement_applies_priority_and_deadline_together():
 ])
 def test_pure_clarifications_recognised(text):
     assert T._is_clarification_not_new_task(text) is True
+
+
+@pytest.mark.asyncio
+async def test_deadline_in_text_skips_when_to_do_question():
+    """Со скрина: «подготовить … дедлайн 13 сентября» — дата уже распознана и
+    стоит на карточке, но бот всё равно спрашивал «Когда сделать?».
+    Теперь при известном дедлайне (и без «напомни») показываем обычную
+    карточку подтверждения «Всё верно?», как во flow работ Arcana."""
+    msg = MagicMock()
+    msg.chat = MagicMock(id=999)
+    msg.text = "подготовить предмет к продаже дедлайн 13 сентября"
+    msg.answer = AsyncMock(return_value=MagicMock(message_id=5))
+    data = {"title": "подготовить предмет к продаже", "deadline": "2026-09-13",
+            "category": "🏠 Жильё", "repeat": "Нет"}
+
+    with patch.object(T, "_get_user_tz", AsyncMock(return_value=3)), \
+         patch.object(T, "_do_save_task", AsyncMock()) as save, \
+         patch.object(T, "_pending_set", lambda *a, **k: None), \
+         patch.object(T, "_has_remind_word", lambda *a, **k: False):
+        await T.handle_task_parsed(msg, data,
+                                   original_text="подготовить предмет к продаже дедлайн 13 сентября")
+
+    save.assert_not_awaited()
+    sent = msg.answer.await_args.args[0]
+    assert "Когда сделать" not in sent
+    assert "Всё верно" in sent
+    assert "2026-09-13" in sent
 
 
 @pytest.mark.parametrize("text", [

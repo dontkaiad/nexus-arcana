@@ -1690,14 +1690,21 @@ async def handle_task_parsed(message: Message, data: dict, original_text: str = 
         _pending_set(uid, data)
         return
 
-    # Нет "напомни" и нет reminder_time → один объединённый вопрос
-    deadline_str = data.get("deadline") or ""
-    deadline_hint = deadline_str.replace("T", " ") if deadline_str else "не указан"
+    # Нет "напомни" и нет reminder_time.
+    # Если дедлайн уже назван пользователем — вопрос «когда сделать?» вводит в
+    # заблуждение (дата на карточке уже стоит). Показываем обычную карточку
+    # подтверждения «Всё верно?» — любой follow-up текст («напомни в 15»,
+    # «срочно») уйдёт в _handle_task_refinement как в confirm-режиме.
+    if data.get("deadline"):
+        _pending_set(uid, data)
+        await _show_task_confirm(message, data, uid)
+        return
 
+    # Дедлайна нет и напоминания нет → один объединённый вопрос.
     msg = await message.answer(
         f"📌 <b>{data.get('title')}</b>\n"
         f"🗂 {data.get('category', '?')} · {_priority_display(data.get('priority'))}\n"
-        f"📅 Дедлайн: {deadline_hint}\n"
+        f"📅 Дедлайн: не указан\n"
         f"🔔 Напоминание: нет\n\n"
         f"❓ Уточни:\n"
         f"— Когда сделать? («завтра», «15 марта», «через 2 дня»)\n"

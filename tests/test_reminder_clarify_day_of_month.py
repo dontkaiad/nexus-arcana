@@ -167,7 +167,10 @@ async def test_haiku_parse_reminder_dt_used_by_reschedule():
 
     uid = 771_104
     msg, _sent = _msg(uid, "20 числа в 18 часов")
-    future_dt = "2026-08-20T18:00"
+    # Дата должна быть в будущем — _is_future_dt отсекает прошлое (anti-loop),
+    # иначе _schedule_reminder не вызывается. Не хардкодим август.
+    from datetime import datetime, timedelta, timezone
+    future_dt = (datetime.now(timezone(timedelta(hours=3))) + timedelta(days=15)).strftime("%Y-%m-%dT18:00")
 
     tasks._pending_set(uid, {"task_id": "t-dom", "action": "reschedule", "title": "почта"})
     try:
