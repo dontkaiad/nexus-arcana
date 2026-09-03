@@ -154,3 +154,39 @@ async def test_check_budget_limit_matches_one_time_category():
     assert msg.answer.await_count >= 1
     out = " ".join(c.args[0] for c in msg.answer.await_args_list if c.args)
     assert "Разовые" in out or "разов" in out.lower()
+
+
+# ── Строка «📋 Долги» в чеке после траты — только при активном платеже ──────
+
+async def _check_limit_out(debts: list) -> str:
+    from nexus.handlers import finance
+
+    msg = MagicMock()
+    msg.from_user.id = 7
+    msg.answer = AsyncMock()
+    rec = MagicMock(amount=1000.0)
+    budget_data = {"долги": debts, "постоянные": [], "лимиты": [], "доходы": [], "цели": []}
+    with patch.object(finance, "_get_limits", AsyncMock(return_value={"продукты": 10000.0})), \
+         patch.object(finance._repo, "query_records", AsyncMock(return_value=[rec])), \
+         patch.object(finance, "_get_payday", AsyncMock(return_value=1)), \
+         patch.object(finance, "_load_budget_data", AsyncMock(return_value=budget_data)):
+        await finance._check_budget_limit("🍜 Продукты", msg, "u-1", amount=1000)
+    return " ".join(c.args[0] for c in msg.answer.await_args_list if c.args)
+
+
+@pytest.mark.asyncio
+async def test_check_budget_limit_hides_debt_line_when_all_deferred():
+    out = await _check_limit_out([
+        {"name": "Аня", "amount": 50000, "monthly_payment": 0},
+        {"name": "Дядя", "amount": 30000, "monthly_payment": 0},
+    ])
+    assert "📋 Долги" not in out
+
+
+@pytest.mark.asyncio
+async def test_check_budget_limit_shows_debt_line_when_active_payment():
+    out = await _check_limit_out([
+        {"name": "Аня", "amount": 50000, "monthly_payment": 20000},
+        {"name": "Дядя", "amount": 30000, "monthly_payment": 0},
+    ])
+    assert "📋 Долги: 50,000₽" in out  # только долг с активным платежом

@@ -465,11 +465,15 @@ async def _check_budget_limit(category: str, message: Message, user_notion_id: s
     else:
         parts.append(f"📊 {category}: {period_total:,.0f} / {limit_amount:,.0f}₽ ({pct:.0f}%) {indicator}")
 
-    # Debt remaining
+    # Debt remaining — только если в этом периоде есть хоть один долг с активным
+    # платежом. Все долги отложены (monthly_payment=0) → строку не показываем:
+    # это чек после траты, а не полный отчёт.
     try:
         budget_data = await _load_budget_data(user_notion_id)
-        if budget_data.get("долги"):
-            debt_total = sum(d.get("amount", 0) for d in budget_data["долги"])
+        active_debts = [d for d in budget_data.get("долги", [])
+                        if (d.get("monthly_payment") or 0) > 0]
+        if active_debts:
+            debt_total = sum(d.get("amount", 0) for d in active_debts)
             parts.append(f"📋 Долги: {debt_total:,.0f}₽")
     except Exception:
         pass
