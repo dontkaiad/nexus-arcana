@@ -728,3 +728,69 @@ def test_format_plan_lists_one_time_items_when_also_real_spent():
     out = _format_plan(plan)
     assert "📤 Разовые из этого плана: 8,000₽" in out
     assert "📄 Документы виза — 8,000₽" in out
+
+
+# ── ✅ Принять закрывает сессию сам (тот же баг, что кнопка «Закрыть план») ──
+
+@pytest.mark.asyncio
+async def test_accept_closes_session_next_message_not_intercepted(tmp_budget_db):
+    """После успешного ✅ Принять _budget_get(uid) → None; следующее произвольное
+    сообщение («подушка 300000») идёт ОБЫЧНЫМ путём (cushion regex), а не как
+    КОРРЕКТИРОВКА бюджета через Sonnet."""
+    from nexus.handlers import finance
+
+    uid = 999_500
+    _seed_state(uid, {
+        "plan": {"income_total": 100000, "fixed": [], "goals": [], "limits": []},
+        "notion_uid": "u-1", "state": "has_plan", "msg_id": 0,
+    })
+
+    loading = await _fake_loading()
+    call = MagicMock()
+    call.from_user.id = uid
+    call.answer = AsyncMock()
+    call.message = MagicMock()
+    call.message.chat.id = 1
+    call.message.bot = AsyncMock()
+    call.message.answer = AsyncMock(return_value=loading)
+
+    with patch.object(finance, "_save_memory_entry", AsyncMock()), \
+         patch.object(finance, "_write_one_time_expense", AsyncMock(return_value="tx")), \
+         patch.object(finance, "_get_limits", AsyncMock(return_value={})), \
+         patch.object(finance, "build_budget_message", AsyncMock(return_value="ok")), \
+         patch("core.repos.memory_repo._repo.find_by_key_prefixes", AsyncMock(return_value=[])), \
+         patch("core.repos.memory_repo._repo.set_active", AsyncMock()), \
+         patch("core.repos.pg_debts_repo._repo.upsert", AsyncMock()):
+        await finance.on_budget_accept(call)
+
+    assert finance._budget_get(uid) is None, "сессия должна закрыться после Принять"
+
+    msg = _make_message(uid, "подушка 300000")
+    with patch("nexus.handlers.finance._run_budget_analysis", AsyncMock()) as m_analysis:
+        result = await finance.handle_budget_setup_text(msg, "u-1")
+
+    assert result is False, "бюджет не должен перехватывать — сессии больше нет"
+    m_analysis.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_accept_failure_keeps_session_for_retry(tmp_budget_db):
+    """Если _save_budget_plan бросил — сессия НЕ теряется, можно повторить."""
+    from nexus.handlers import finance
+
+    uid = 999_501
+    _seed_state(uid, {
+        "plan": {"income_total": 100000, "fixed": [], "goals": [], "limits": []},
+        "notion_uid": "u-1", "state": "has_plan", "msg_id": 0,
+    })
+
+    call = MagicMock()
+    call.from_user.id = uid
+    call.answer = AsyncMock()
+    call.message = MagicMock()
+
+    with patch.object(finance, "_save_budget_plan", AsyncMock(side_effect=RuntimeError("boom"))):
+        with pytest.raises(RuntimeError):
+            await finance.on_budget_accept(call)
+
+    assert finance._budget_get(uid) is not None, "неудачное сохранение не должно терять данные"

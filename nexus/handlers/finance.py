@@ -3128,6 +3128,12 @@ async def on_budget_accept(call: CallbackQuery) -> None:
         return
     await call.answer("💾 Сохраняю...")
     await _save_budget_plan(call.message, uid)
+    # Закрыть сессию СРАЗУ после успешного сохранения. Без этого has_plan /
+    # goal_priority живёт до TTL (15 мин) и любое следующее сообщение уезжает в
+    # Sonnet как «корректировка» вместо нормальной обработки (тот же баг, что
+    # чинит кнопка «❌ Закрыть план», см. on_budget_close). Если _save_budget_plan
+    # бросил исключение — сюда не дойдём, данные не потеряны, можно повторить.
+    _budget_del(uid)
 
 
 @router.callback_query(F.data == "bsetup_recalc")
@@ -3253,35 +3259,24 @@ async def on_budget_variant_choice(call: CallbackQuery) -> None:
         )
 
 
-@router.callback_query(F.data.startswith("bsetup_prio_"))
-async def on_budget_priority_goal(call: CallbackQuery) -> None:
-    """Выбор приоритетной цели — ТОЛЬКО сохранить в Память, НЕ пересчитывать."""
-    uid = call.from_user.id
-    state = _budget_get(uid)
-    notion_uid = state.get("notion_uid", "") if state else ""
-    idx = int(call.data.split("_")[-1])
+@router.callback_query(F.data.startswith("bsetup_priog_"))
+async def on_budget_priority_goal(call: CallbackQuery, user_notion_id: str = "") -> None:
+    """Выбор приоритетной цели после Принятия — маркер в Память, БЕЗ пересчёта.
 
-    # Get goals from plan (may still be in state) or from saved data
-    plan = state.get("plan", {}) if state else {}
-    goals = plan.get("goals", [])
-    if idx >= len(goals):
+    Сессия /budget к этому моменту уже закрыта (on_budget_accept), поэтому имя
+    цели берём из callback_data, а user_notion_id — из middleware.
+    """
+    goal_name = call.data[len("bsetup_priog_"):].strip()
+    if not goal_name:
         await call.answer()
         return
 
-    chosen = goals[idx]
-    goal_name = chosen.get("name", "?")
-
-    # Save priority to Memory — just a marker, no recalculation
-    if notion_uid:
+    if user_notion_id:
         await _save_memory_entry(
             "goal_priority",
             "приоритет цели: {}".format(goal_name),
-            notion_uid,
+            user_notion_id,
         )
-
-    # Cleanup state after goal selection
-    if state:
-        _budget_del(uid)
 
     await call.answer("🎯 Приоритет: {}".format(goal_name))
     try:
@@ -4069,11 +4064,14 @@ async def _save_budget_plan(message: Message, uid: int) -> None:
     goal_buttons_rows = []
     if len(active_goals) > 1:
         goal_btns = []
-        for i, g in enumerate(goals[:6]):
+        for g in goals[:6]:
             if g.get("monthly", 0) > 0:
+                name = str(g.get("name", "?"))
                 goal_btns.append(InlineKeyboardButton(
-                    text="🎯 {}".format(g.get("name", "?")),
-                    callback_data="bsetup_prio_{}".format(i),
+                    text="🎯 {}".format(name),
+                    # Имя цели прямо в callback_data — сессия к моменту нажатия
+                    # уже закрыта (on_budget_accept), из state его не достать.
+                    callback_data="bsetup_priog_{}".format(name[:40]),
                 ))
         for j in range(0, len(goal_btns), 2):
             goal_buttons_rows.append(goal_btns[j:j+2])
@@ -4093,13 +4091,9 @@ async def _save_budget_plan(message: Message, uid: int) -> None:
 
     markup = InlineKeyboardMarkup(inline_keyboard=goal_buttons_rows) if goal_buttons_rows else None
 
-    # Cleanup state AFTER showing result (keep plan for goal priority callback)
-    if not goal_buttons_rows:
-        _budget_del(uid)
-    else:
-        # Keep state briefly for goal callback
-        state["state"] = "goal_priority"
-        _budget_set(uid, state)
+    # Сессия закрывается здесь ВСЕГДА (и дублируется в on_budget_accept). Кнопки
+    # «🎯 приоритет» больше не зависят от state — имя цели в их callback_data.
+    _budget_del(uid)
 
     try:
         await loading.edit_text(result_text, parse_mode="HTML", reply_markup=markup)
