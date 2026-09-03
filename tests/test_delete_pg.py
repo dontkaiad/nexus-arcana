@@ -95,6 +95,39 @@ def test_apply_scope_variants():
     assert len(_apply_scope(recs, "all", None, None, 1)) == 3
 
 
+def test_apply_scope_today_uses_user_tz(monkeypatch):
+    """scope='today' фильтрует по ДНЮ пользователя, не серверному."""
+    import core.deleter as d
+    from datetime import datetime as _real_dt, timezone as _tzc
+
+    class _DT(_real_dt):
+        @classmethod
+        def now(cls, tz=None):
+            inst = _real_dt(2026, 6, 30, 20, 0, tzinfo=_tzc.utc)  # +3 → 30-е, +5 → 1 июля
+            return inst.astimezone(tz) if tz is not None else inst
+    monkeypatch.setattr(d, "datetime", _DT)
+
+    recs = [
+        {"id": "jun30", "title": "a", "date": "2026-06-30"},
+        {"id": "jul01", "title": "b", "date": "2026-07-01"},
+    ]
+    assert [r["id"] for r in d._apply_scope(recs, "today", None, None, 1, tz_offset=3)] == ["jun30"]
+    assert [r["id"] for r in d._apply_scope(recs, "today", None, None, 1, tz_offset=5)] == ["jul01"]
+    # регресс: дефолт == 3
+    assert [r["id"] for r in d._apply_scope(recs, "today", None, None, 1)] == ["jun30"]
+
+
+@pytest.mark.asyncio
+async def test_select_records_passes_tz_to_scope(monkeypatch):
+    import core.deleter as d
+    captured = {}
+    monkeypatch.setattr(d, "_apply_scope",
+                        lambda *a: captured.setdefault("tz", a[5]) or [])
+    monkeypatch.setattr(d, "_fetch_all", AsyncMock(return_value=[]))
+    await d.select_records("tasks", "today", user_notion_id="u", tz_offset=5)
+    assert captured["tz"] == 5
+
+
 @pytest.mark.asyncio
 async def test_select_records_gated_returns_empty():
     from core import deleter

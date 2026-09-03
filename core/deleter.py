@@ -100,8 +100,11 @@ async def _fetch_all(domain: str, user_notion_id: str) -> List[dict]:
 
 
 def _apply_scope(records: List[dict], scope: str, date: Optional[str],
-                 month: Optional[str], count: int) -> List[dict]:
-    today = datetime.now(MOSCOW_TZ).strftime("%Y-%m-%d")
+                 month: Optional[str], count: int, tz_offset: int = 3) -> List[dict]:
+    # «сегодня» для удаления — по личному tz пользователя: иначе у юзера не на
+    # МСК под удаление «за сегодня» могут попасть вчерашние записи или не попасть
+    # сегодняшние. Дефолт 3 = поведение до фикса.
+    today = datetime.now(timezone(timedelta(hours=tz_offset))).strftime("%Y-%m-%d")
     if scope == "today":
         return [r for r in records if r["date"] == today]
     if scope == "date" and date:
@@ -122,8 +125,12 @@ async def select_records(
     month: Optional[str] = None,
     count: int = 1,
     user_notion_id: str = "",
+    tz_offset: int = 3,
 ) -> List[dict]:
-    """Records selected for deletion: [{id, title, date}], scope-filtered."""
+    """Records selected for deletion: [{id, title, date}], scope-filtered.
+
+    tz_offset — личный tz пользователя (для scope='today'). Дефолт 3.
+    """
     if domain not in SUPPORTED_DOMAINS:
         return []
     try:
@@ -131,7 +138,7 @@ async def select_records(
     except Exception as e:
         logger.error("select_records(%s): %s", domain, e)
         return []
-    return _apply_scope(records, scope, date, month, int(count or 1))
+    return _apply_scope(records, scope, date, month, int(count or 1), tz_offset)
 
 
 def format_record(rec: dict) -> str:

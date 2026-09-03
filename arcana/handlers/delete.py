@@ -50,11 +50,14 @@ async def handle_delete(message: Message, text: str, user_notion_id: str = "") -
     intent = await parse_delete_intent(text)
     scope = intent["scope"]
 
+    from core.location import get_user_tz
+    tz_offset = await get_user_tz(message.from_user.id) if message.from_user else 3
+
     records = await select_records(
         target, scope,
         date=intent.get("date"), month=intent.get("month"),
         count=int(intent.get("count") or 1),
-        user_notion_id=user_notion_id,
+        user_notion_id=user_notion_id, tz_offset=tz_offset,
     )
     if not records:
         await message.answer("📭 Записей не найдено.")
