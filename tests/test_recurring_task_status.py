@@ -182,8 +182,10 @@ async def test_recurring_reminder_done_already_in_progress():
 
 
 @pytest.mark.asyncio
-async def test_completion_timestamp_format_moscow_tz():
-    """Время завершения должно быть в Moscow tz (+03:00) и валидным ISO."""
+@pytest.mark.parametrize("tz,expected_off", [(3, 3), (5, 5)])
+async def test_completion_timestamp_uses_user_tz(tz, expected_off):
+    """Время завершения (маркер «выполнено сегодня» в Mini App) — в личном tz
+    пользователя. tz=3 → +03:00 (регресс), tz=5 → +05:00."""
     from nexus.handlers import tasks
 
     msg = _make_message()
@@ -196,16 +198,15 @@ async def test_completion_timestamp_format_moscow_tz():
 
     with patch.object(tasks._repo, "set_props", AsyncMock(side_effect=capture_update)), \
          patch.object(tasks, "_scheduler", None), \
-         patch.object(tasks, "_get_user_tz", AsyncMock(return_value=3)):
+         patch.object(tasks, "_get_user_tz", AsyncMock(return_value=tz)):
         await tasks._handle_recurring_task_reset(
             msg, "task-id-4", task, "Ежедневно", "x", uid=999_001,
         )
 
     iso = captured["props"]["Время завершения"]["date"]["start"]
-    # Парсится как ISO
     parsed = datetime.fromisoformat(iso)
-    assert parsed.utcoffset() == timedelta(hours=3), \
-        f"expected Moscow tz +03:00, got {parsed.utcoffset()}"
+    assert parsed.utcoffset() == timedelta(hours=expected_off), \
+        f"expected +{expected_off:02d}:00, got {parsed.utcoffset()}"
 
 
 # ── Fix B: today.py фильтр completed_today ──────────────────────────────────

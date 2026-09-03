@@ -1336,7 +1336,10 @@ async def _handle_recurring_task_reset(
     # потому что повтор никогда полностью не Done. Дополнительно фиксируем
     # «Время завершения = now» — это маркер для Mini App «выполнено сегодня»,
     # чтобы расписание скрыло задачу до следующей итерации.
-    completed_now = datetime.now(MOSCOW_TZ).strftime("%Y-%m-%dT%H:%M:%S+03:00")
+    # По личному tz пользователя (tz_offset уже вычислен выше) — маркер «выполнено
+    # сегодня» в Mini App должен совпадать с ЕГО днём, не серверным.
+    _ct = datetime.now(timezone(timedelta(hours=tz_offset)))
+    completed_now = _ct.strftime("%Y-%m-%dT%H:%M:%S") + "{:+03d}:00".format(tz_offset)
     update_props = {
         "Статус": _status("In progress"),
         "Время завершения": _date(completed_now),
@@ -2079,18 +2082,19 @@ async def task_deadline_choice(call: CallbackQuery) -> None:
 
     choice = call.data  # task_deadline_same / task_deadline_plus1 / task_deadline_plus3
     reminder_time = d.get("reminder_time", "")
+    _tz = timezone(timedelta(hours=await _get_user_tz(uid)))
 
     if reminder_time and "T" in reminder_time:
         reminder_date = reminder_time.split("T")[0]
     elif reminder_time:
         reminder_date = reminder_time[:10]
     else:
-        reminder_date = datetime.now(MOSCOW_TZ).strftime("%Y-%m-%d")
+        reminder_date = datetime.now(_tz).strftime("%Y-%m-%d")
 
     try:
         base_dt = datetime.strptime(reminder_date, "%Y-%m-%d")
     except ValueError:
-        base_dt = datetime.now(MOSCOW_TZ)
+        base_dt = datetime.now(_tz)
 
     if choice == "task_deadline_same":
         deadline = base_dt.strftime("%Y-%m-%d")
@@ -3302,16 +3306,15 @@ async def _build_today_digest(uid: int, user_notion_id: str = "", greeting: str 
     budget_line = ""
     try:
         from nexus.handlers.finance import _calc_free_remaining, _get_limits, _cat_link
-        result = await _calc_free_remaining(user_notion_id)
+        result = await _calc_free_remaining(user_notion_id, tz_offset)
         if result:
             free_left, days_rem = result
             daily_budget = free_left / max(days_rem, 1)
             budget_line = f"💰 Свободных: <b>{free_left:,.0f}₽</b> · {daily_budget:,.0f}₽/день"
 
-            from core.classifier import today_moscow
             limits = await _get_limits("")
             if limits:
-                today_str_b = today_moscow()
+                today_str_b = today_str  # уже посчитан по личному tz пользователя
                 month_start = today_str_b[:7] + "-01"
                 try:
                     from core.repos.pg_finance_repo import PgNexusBudgetRepo
