@@ -417,11 +417,21 @@ marker).
 
 The Nexus `/budget` command with no active session and existing data
 renders the saved plan and does **not** call Sonnet — see Model routing.
+This render is `build_budget_message` (distinct from `_format_plan`, which
+runs only on a fresh Sonnet recalc). Its **«💳 Распределяемые»** header =
+`income − постоянные − лимит_разовые` (the discretionary pool `compute_limits`
+divided; `лимит_фикс` is *not* subtracted again — постоянные already cover it).
+The **«📊 Лимиты» / «📉 Потрачено» / «💳 Свободных · N₽/день»** block sums only
+the discretionary limit rows: `🔒 Фикс` is omitted (shown in the Постоянные
+section), `📦 Разовые` is shown as an informational row but excluded from the
+per-day free-money math (not a daily spend). Old data with no `лимит_разовые`
+fact → `one_time_limit = 0`, identical to pre-949fb10 behavior.
 
 ## Callers
 
 - Nexus — `nexus/handlers/finance.py` (`/budget`: `get_limits`,
-  `load_budget_data`; the message renders the saved plan), `nexus/nexus_bot.py`.
+  `load_budget_data`; `build_budget_message` renders the saved plan),
+  `nexus/nexus_bot.py`.
 - Mini App — `miniapp/backend/routes/finance.py` (`get_limits`,
   `load_budget_data`, `budget_day_limit_from_plan` for limit/goal views) and
   `miniapp/backend/routes/today.py` (`budget_day_limit_from_plan` for the day
@@ -503,7 +513,9 @@ expense items → `_ONE_TIME_PARSE_SYSTEM`).
 - `nexus/handlers/finance.py` — `start_budget_setup`, `handle_budget_setup_text`,
   `start_budget_analysis`, `_run_budget_analysis`, `_build_sonnet_input`,
   `_period_spending` (shared already_spent/income-this-period source),
-  `BUDGET_SONNET_SYSTEM`, `_BUDGET_PARSE_PROMPT_LEGACY`, `_format_plan`,
+  `BUDGET_SONNET_SYSTEM`, `_BUDGET_PARSE_PROMPT_LEGACY`, `_format_plan`
+  (fresh recalc render), `build_budget_message` (saved-plan render;
+  discretionary base = income − постоянные − `лимит_разовые`),
   `_save_budget_plan` (`fixed` → `постоянно_*` + `лимит_фикс`; `one_time` →
   `разовый_*` facts + `лимит_разовые`, никогда не в Финансы),
   `_check_budget_limit` (matches `🔒 Фикс`/`📦 Разовые` like any limit),

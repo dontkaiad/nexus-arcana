@@ -194,6 +194,23 @@ async def build_budget_message(user_notion_id: str = "") -> Optional[str]:
     def _clean_name(name: str) -> str:
         return _CAT_IN_PARENS.sub("", name).strip()
 
+    # ── 🔒 Фикс / 📦 Разовые — параллельные категории лимита (коммит 949fb10) ──
+    # Их суммы персистятся как обычные лимит-факты (лимит_фикс / лимит_разовые).
+    # НЕ часть дискреционного пула: фикс уже учтён через obligatory_total,
+    # разовые — отдельный бакет. Читаем напрямую, already_spent не пересчитываем.
+    _all_limits = budget.get("лимиты", [])
+
+    def _limit_tag(l: dict) -> str:
+        return ((l.get("name") or "").lower().replace("лимит_", "") + " "
+                + _display_limit_name(l.get("name") or "").lower())
+
+    def _is_parallel_limit(l: dict) -> bool:
+        return any(p in _limit_tag(l) for p in ("фикс", "разов"))
+
+    one_time_limit = next(
+        (float(l.get("amount") or 0) for l in _all_limits if "разов" in _limit_tag(l)), 0.0,
+    )
+
     # ── Формируем сообщение ──
     lines = ["<b>💰 Бюджет на {} (день {}/{})</b>".format(ru_month, day_of_period, days_in_period)]
 
@@ -228,7 +245,11 @@ async def build_budget_message(user_notion_id: str = "") -> Optional[str]:
             else:
                 for name, amt in items_list:
                     lines.append("  <i>{} — {:,}₽</i>".format(name, int(amt)))
-    lines.append("<b>💳 Распределяемые: {:,}₽</b>".format(int(max(0, income_total - obligatory_total))))
+    # Распределяемые = доход − постоянные − разовые (дискреционный пул, от
+    # которого compute_limits раздал Продукты/Привычки/… — совпадает с суммой
+    # лимитов ниже). Долговые платежи показаны отдельной строкой.
+    distributable_shown = int(max(0, income_total - obligatory_total - one_time_limit))
+    lines.append("<b>💳 Распределяемые: {:,}₽</b>".format(distributable_shown))
 
     # Долги — сортировка: сначала с платежами (по убыванию платежа), потом отложенные
     debts = budget.get("долги", [])
@@ -254,22 +275,35 @@ async def build_budget_message(user_notion_id: str = "") -> Optional[str]:
                     d["name"], int(d["amount"]), strat_display))
         lines.append("<b>💳 Платежей: {:,}₽/мес</b>".format(int(total_debt_payments)))
 
-    # Лимиты с прогрессом
+    # Лимиты с прогрессом. Дискреционные (Продукты/Привычки/…) — их сумма и есть
+    # база для «Потрачено» / «Свободных на день». 🔒 Фикс дублирует секцию
+    # Постоянные — в списке не показываем; 📦 Разовые показываем отдельной
+    # строкой (уникальная инфа), но в дневной остаток НЕ включаем — это не
+    # ежедневные траты.
     limits = budget.get("лимиты", [])
-    if limits:
-        limits_total = sum(l["amount"] for l in limits)
+
+    def _spent_for_limit(l: dict) -> float:
+        name_key = l["name"].lower().replace("лимит_", "")
+        s = 0.0
+        for cat_key, cat_spent in by_expense_cat.items():
+            cat_link_key = _cat_link(cat_key)
+            if name_key in cat_link_key or cat_link_key in name_key or name_key in cat_key.lower():
+                s += cat_spent
+        return s
+
+    disc_limits = [l for l in limits if not _is_parallel_limit(l)]
+    one_time_rows = [l for l in limits if "разов" in _limit_tag(l)]
+
+    if disc_limits or one_time_rows:
+        limits_total = sum(l["amount"] for l in disc_limits)
         lines.append("\n<b>📊 Лимиты · {}:</b>".format(ru_month))
-        spent_in_limits = 0
-        for l in limits:
+        spent_in_limits = 0.0
+        for l in disc_limits + one_time_rows:
             display_name = _display_limit_name(l["name"])
             limit_amt = l["amount"]
-            spent = 0.0
-            for cat_key, cat_spent in by_expense_cat.items():
-                cat_link_key = _cat_link(cat_key)
-                name_key = l["name"].lower().replace("лимит_", "")
-                if name_key in cat_link_key or cat_link_key in name_key or name_key in cat_key.lower():
-                    spent += cat_spent
-            spent_in_limits += spent
+            spent = _spent_for_limit(l)
+            if l in disc_limits:
+                spent_in_limits += spent
             pct = int(spent / limit_amt * 100) if limit_amt else 0
             indicator = "🟢" if pct < 70 else ("🟡" if pct < 90 else "🔴")
             if day_of_period > 1:
