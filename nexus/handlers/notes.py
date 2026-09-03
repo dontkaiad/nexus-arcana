@@ -16,7 +16,13 @@ from nexus.repos.notes_repo import NotesRepo
 _repo = NotesRepo()
 
 logger = logging.getLogger("nexus.notes")
-MOSCOW_TZ = timezone(timedelta(hours=3))
+MOSCOW_TZ = timezone(timedelta(hours=3))  # серверный fallback, не граница дня юзера
+
+from core.location import get_user_tz as _get_user_tz
+
+
+def _user_now(tz_offset: int):
+    return datetime.now(timezone(timedelta(hours=tz_offset)))
 
 # Pending: user_id → {text, selected, new, existing, date, user_notion_id, chosen}
 _pending: Dict[int, dict] = {}
@@ -41,7 +47,8 @@ async def handle_note(
 ) -> None:
     """Основной обработчик заметки со smart-select тегов."""
     import json
-    date = datetime.now(MOSCOW_TZ).strftime("%Y-%m-%d")
+    _tz = await _get_user_tz(message.from_user.id) if message.from_user else 3
+    date = _user_now(_tz).strftime("%Y-%m-%d")
     existing = await _repo.get_all_tags()
 
     # Если теги переданы из classifier — нормализовать через find_or_prepare_tag
@@ -345,7 +352,8 @@ async def handle_note_search(
     # Считаем неразобранные (старше 7 дней) для дайджест-шапки
     digest_header = ""
     if not q:
-        cutoff = (datetime.now(MOSCOW_TZ) - timedelta(days=7)).strftime("%Y-%m-%d")
+        _tz = await _get_user_tz(message.from_user.id) if message.from_user else 3
+        cutoff = (_user_now(_tz) - timedelta(days=7)).strftime("%Y-%m-%d")
         old_count = sum(1 for note in combined if note.date and note.date < cutoff)
         if old_count > 0:
             tip = random.choice(_ADHD_TIPS)
