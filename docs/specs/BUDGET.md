@@ -1,6 +1,6 @@
 # BUDGET — data-model contract (бюджет / day limit)
 
-Code conforms to: e2f05fc. This spec describes the budget data model as of
+Code conforms to: b79d5fd. This spec describes the budget data model as of
 that commit; update it in the same PR that changes the model.
 
 > Contract, not snapshot. Describes the derived model and the guarantees of
@@ -359,9 +359,11 @@ All in `core/budget.py` (pure async functions; no repo class):
   current rows only) plus active `i_owe` debts; parses each into a list of
   `{name, amount, …}` dicts. Limits are de-duplicated by display name (the
   higher amount wins).
-- **budget_day_limit_from_plan(user_notion_id)** → `int` — the daily spend
-  limit from the saved plan (see Invariants for the exact formula). Returns
-  `0` when there is no income or on any error.
+- **budget_day_limit_from_plan(user_notion_id, tz_offset=3)** → `int` — the
+  daily spend limit from the saved plan (see Invariants for the exact formula).
+  Returns `0` when there is no income or on any error. `tz_offset` is the
+  viewer's personal timezone (Mini App passes `today_user_tz(tg_id)`'s offset);
+  default `3` reproduces the pre-fix server-MSK behavior.
 
 ## Invariants
 
@@ -379,10 +381,14 @@ All in `core/budget.py` (pure async functions; no repo class):
   full-recalc path (which additionally applies `already_spent` and
   `savings_from_last_period` — see Model routing); this is the
   lightweight day-limit-only computation used by the Mini App today view.
-- **`days_remaining`** comes from `_period_days_remaining(payday)`: days from
-  today (00:00 MSK, `_MOSCOW_TZ = UTC+3`) to the day before the next payday,
-  floored at `1`. `payday` is read from Memory key `budget_payday`
-  (`_budget_payday`, default `1`).
+- **`days_remaining`** comes from `_period_days_remaining(payday, tz_offset=3)`:
+  days from today (00:00 in the user's timezone `UTC+tz_offset`) to the day
+  before the next payday, floored at `1`. Server budget period boundaries
+  (`nexus/handlers/finance.py:_period_bounds`, `_today`, `_check_budget_limit`,
+  `_period_spending`, `build_budget_message`, transaction dates) likewise take
+  a `tz_offset` resolved from `core.location.get_user_tz(tg_id)`; `_MOSCOW_TZ` /
+  default `3` is the fallback when a user has no `tz_{tg_id}` fact. `payday` is
+  read from Memory key `budget_payday` (`_budget_payday`, default `1`).
 - **Debts are sourced from the `debts` table**, not Memory; only
   `kind='i_owe'`, and only `monthly_payment > 0` contributes to the daily
   formula. Only the single nearest-deadline debt with a monthly payment is
@@ -492,7 +498,7 @@ expense items → `_ONE_TIME_PARSE_SYSTEM`).
 
 ## Verify against code
 
-- `core/budget.py` — `BUDGET_KEY_TO_CATEGORY`, `LIMIT_DISPLAY`, regexes
+- `core/budget.py` — `_period_days_remaining(payday, tz_offset)`, `BUDGET_KEY_TO_CATEGORY`, `LIMIT_DISPLAY`, regexes
   (`PERMANENT_RE`, `ONE_TIME_FACT_RE` et al.), `get_limits`, `load_budget_data`,
   `_budget_payday`, `_period_days_remaining`, `budget_day_limit_from_plan`,
   limit-math constants (`IRON_TRANSPORT`/`IRON_IMPULSE`/`IRON_TOTAL`,
