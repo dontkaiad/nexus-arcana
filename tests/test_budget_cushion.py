@@ -198,3 +198,46 @@ async def test_review_no_advice_on_overspend():
     )
     assert saved < 0
     assert "💡" not in text
+
+
+# ── payday-переход: кредит подушки = план + экономия, с напоминанием о переводе ─
+
+@pytest.mark.asyncio
+async def test_payday_cushion_message_plan_plus_saved_and_manual_reminder():
+    from nexus.handlers import finance
+    import core.repos.pg_cushion_repo as crmod
+    from core.repos.pg_cushion_repo import Cushion
+
+    bot = AsyncMock()
+
+    with patch.object(finance, "_payday_already_sent", lambda *a: False), \
+         patch.object(finance, "_payday_mark", lambda *a: None), \
+         patch.object(finance, "_budget_get", lambda uid: {"notion_uid": "u"}), \
+         patch.object(finance, "_budget_set", lambda uid, st: None), \
+         patch.object(finance, "_get_payday", AsyncMock(return_value=1)), \
+         patch.object(finance, "_budget_period_review",
+                      AsyncMock(return_value=("ревью", 3000.0))), \
+         patch.object(crmod._repo, "get", AsyncMock(return_value=Cushion(
+             planned_contribution=5000))), \
+         patch.object(crmod._repo, "add_to_balance",
+                      AsyncMock(return_value=50000)) as m_add:
+        await finance._send_payday_review(1, "u", bot=bot)
+
+    # план 5000 + экономия 3000 = +8000 к балансу
+    assert m_add.await_args.args[1] == 8000
+    assert m_add.await_args.kwargs["source"] == "payday_auto"
+
+    cushion_msg = next(
+        c.args[1] for c in bot.send_message.call_args_list
+        if "подушк" in c.args[1].lower()
+    )
+    # оба факта по-прежнему видны
+    assert "план: 5,000₽" in cushion_msg
+    assert "экономия: 3,000₽" in cushion_msg
+    assert "8,000₽" in cushion_msg
+    assert "50,000₽" in cushion_msg
+    # формулировка не создаёт впечатление реального перевода + напоминание
+    assert "В подушку ушло" not in cushion_msg
+    assert "Расчёт подушки" in cushion_msg
+    assert "перевести" in cushion_msg and "вручную" in cushion_msg
+    assert "трекер сам деньги не двигает" in cushion_msg

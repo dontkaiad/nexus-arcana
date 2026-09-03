@@ -4294,8 +4294,11 @@ async def _send_payday_review(uid: int, user_notion_id: str = "", bot=None) -> N
             )
             await bot.send_message(
                 uid,
-                "🛡️ В подушку ушло <b>{:,}₽</b> (план: {:,.0f}₽ + экономия: {:,.0f}₽). "
-                "Теперь в ней: <b>{:,.0f}₽</b>.".format(total, planned, saved, new_balance),
+                "🛡️ Расчёт подушки: +<b>{:,}₽</b> (план: {:,.0f}₽ + экономия: {:,.0f}₽). "
+                "В трекере теперь: <b>{:,.0f}₽</b>.\n"
+                "💳 Не забудь перевести {:,}₽ на реальный счёт подушки вручную — "
+                "трекер сам деньги не двигает, только считает.".format(
+                    total, planned, saved, new_balance, total),
                 parse_mode="HTML",
             )
     except Exception as e:
