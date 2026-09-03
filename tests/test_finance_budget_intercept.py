@@ -550,14 +550,14 @@ async def test_tight_month_no_debt_payment_renders_single_plan(tmp_budget_db):
     assert "жёстко" in text  # discretionary 18 000 < 25 500 → плашка
 
 
-# ── Разовые из composite-дампа НЕ становятся постоянными при Принятии ───────
+# ── Разовые из composite-дампа: НЕ в Память как постоянно_*, И НЕ в Финансы ──
 #
-# Баг: Кай в composite-дампе /budget помечает «разовый: билет 15000», но JSON
-# Sonnet имел один массив "fixed" — разовые уходили туда и при _save_budget_plan
-# писались в Память как постоянно_* НАВСЕГДА.
+# Железный принцип: планирование бюджета никогда не пишет в Финансы. Разовые
+# участвуют только в арифметике плана (already_spent → меньше распределяемых).
+# Постоянные из fixed → постоянно_*, разовые → никуда.
 
 @pytest.mark.asyncio
-async def test_save_budget_plan_one_time_written_as_finance_not_permanent(tmp_budget_db):
+async def test_save_budget_plan_one_time_not_written_anywhere(tmp_budget_db):
     from nexus.handlers import finance
     from core.repos import memory_repo as mrmod
 
@@ -604,9 +604,57 @@ async def test_save_budget_plan_one_time_written_as_finance_not_permanent(tmp_bu
     assert len(perm_keys) == 2, f"постоянно_* только для fixed, получили {perm_keys}"
     assert not any(w in k for k in perm_keys for w in ("билет", "питер", "госпошлин"))
 
-    assert len(ot_writes) == 2
-    assert {(d, a) for d, a, _ in ot_writes} == {("билет в питер", 15000), ("госпошлина", 3500)}
-    assert dict((d, c) for d, _, c in ot_writes)["билет в питер"] == "🚕 Транспорт"
+    assert ot_writes == [], (
+        "планирование не пишет в Финансы: one_time участвуют только в арифметике"
+    )
+
+
+@pytest.mark.asyncio
+async def test_save_budget_plan_no_finance_tx_with_income_and_one_time(tmp_budget_db):
+    """_save_budget_plan с непустыми one_time И income: ни _write_one_time_expense,
+    ни _save_finance не вызваны ни разу; при этом income_* и постоянно_* факты
+    в Памяти созданы — план сохранился нормально, просто без транзакций."""
+    from nexus.handlers import finance
+    from core.repos import memory_repo as mrmod
+
+    uid = 999_410
+    plan = {
+        "income": [{"source": "зарплата", "amount": 120000}],
+        "income_total": 120000,
+        "fixed": [{"name": "квартира", "category": "🏠 Жильё", "amount": 30000}],
+        "fixed_total": 30000,
+        "one_time": [
+            {"name": "билет в питер", "category": "🚕 Транспорт", "amount": 15000},
+            {"name": "госпошлина", "category": "💳 Прочее", "amount": 3500},
+        ],
+        "one_time_total": 18500,
+    }
+    _seed_state(uid, {"plan": plan, "notion_uid": "u-1", "state": "has_plan", "msg_id": 0})
+
+    loading = await _fake_loading()
+    msg = MagicMock()
+    msg.chat.id = 1
+    msg.bot = AsyncMock()
+    msg.answer = AsyncMock(return_value=loading)
+
+    mem_keys = []
+
+    async def cap_mem(key, fact, notion_uid=""):
+        mem_keys.append(key)
+
+    with patch.object(finance, "_save_memory_entry", AsyncMock(side_effect=cap_mem)), \
+         patch.object(finance, "_write_one_time_expense", AsyncMock()) as m_ot, \
+         patch.object(finance, "_save_finance", AsyncMock()) as m_fin, \
+         patch.object(finance, "_get_limits", AsyncMock(return_value={})), \
+         patch.object(finance, "build_budget_message", AsyncMock(return_value="ok")), \
+         patch.object(mrmod._repo, "find_by_key_prefixes", AsyncMock(return_value=[])), \
+         patch.object(mrmod._repo, "set_active", AsyncMock()):
+        await finance._save_budget_plan(msg, uid)
+
+    m_ot.assert_not_called()
+    m_fin.assert_not_called()
+    assert any(k.startswith("income_") for k in mem_keys), mem_keys
+    assert any(k.startswith("постоянно_") for k in mem_keys), mem_keys
 
 
 def test_format_plan_fixed_total_excludes_one_time_regression():

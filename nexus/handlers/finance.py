@@ -3952,19 +3952,18 @@ async def _save_budget_plan(message: Message, uid: int) -> None:
             notion_uid,
         )
 
-    # Разовые из composite-дампа /budget — обычные finance-транзакции (💸 Расход),
-    # НЕ постоянные факты. До этого фикса они попадали в "fixed" и уходили в
-    # постоянно_* НАВСЕГДА при первом же Принятии плана.
-    for ot in plan.get("one_time", []) or []:
-        ot_name = ot.get("name") or ot.get("description") or "разовый расход"
-        ot_amt = ot.get("amount", 0)
-        if not ot_amt:
-            continue
-        await _write_one_time_expense(
-            ot_name, ot_amt, ot.get("category") or "💳 Прочее",
-            notion_uid, uid=uid,
-        )
-        logger.info("_save_budget_plan: one_time → finance tx %r %s₽", ot_name, ot_amt)
+    # Разовые из composite-дампа /budget НЕ пишутся в Финансы. Железный принцип
+    # проекта: планирование бюджета никогда не создаёт запись в Финансах —
+    # только в Память и служебные таблицы (debts, cushion). См. docs/specs/BUDGET.md.
+    #
+    # plan["one_time"] — это объявленные намерения («разовый: билет 15к»), а не
+    # факт оплаты. Своё дело они уже сделали: one_time_total участвует в
+    # already_spent (Шаг 1.5) и уменьшает распределяемые в этом расчёте. Реальная
+    # транзакция появится позже, когда Кай сама сообщит о трате обычным путём.
+    #
+    # НЕ возвращать сюда вызов _write_one_time_expense / _save_finance: это давало
+    # двойной счёт при пересчёте после Принятия (one_time и в Финансах как tx,
+    # и снова прибавляются из буфера).
 
     # Лимиты — НЕ перезаписывать [ручной]
     existing_limits = await _get_limits("")
