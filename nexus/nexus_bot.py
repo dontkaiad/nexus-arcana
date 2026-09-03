@@ -50,7 +50,13 @@ dp.include_router(finance_router)
 dp.include_router(memory_router)
 dp.include_router(lists_router)
 
-MOSCOW_TZ = timezone(timedelta(hours=3))
+MOSCOW_TZ = timezone(timedelta(hours=3))  # серверный fallback, не граница дня юзера
+
+from core.location import get_user_tz as _get_user_tz
+
+
+def _user_tz(tz_offset: int) -> timezone:
+    return timezone(timedelta(hours=tz_offset))
 _clarify: dict = {}
 _pending_finance: dict = {}  # user_id → (kind, amount, category, source, title)
 _last_finance_ts: dict = {}  # user_id → timestamp последней записанной финансовой записи
@@ -363,7 +369,6 @@ async def cmd_budget(msg: Message, user_notion_id: str = "") -> None:
 async def cmd_finance(msg: Message, user_notion_id: str = "") -> None:
     """Финансы: свободных/день + лимиты на грани + по категориям."""
     import random
-    from core.classifier import today_moscow
     from nexus.handlers.finance import _calc_free_remaining, _get_limits, _cat_link
     from core.repos.pg_finance_repo import PgNexusBudgetRepo
 
@@ -372,6 +377,8 @@ async def cmd_finance(msg: Message, user_notion_id: str = "") -> None:
     if not user_notion_id:
         await msg.answer("⚠️ Не могу определить пользователя — финансы не показаны.")
         return
+
+    tz_offset = await _get_user_tz(msg.from_user.id)
 
     _FINANCE_ADHD_TIPS = [
         "💡 Записал — значит контролируешь. Мозг с СДВГ не считает в фоне.",
@@ -386,9 +393,9 @@ async def cmd_finance(msg: Message, user_notion_id: str = "") -> None:
                       5: "Май", 6: "Июнь", 7: "Июль", 8: "Август",
                       9: "Сентябрь", 10: "Октябрь", 11: "Ноябрь", 12: "Декабрь"}
 
-    today = today_moscow()
+    now = datetime.now(_user_tz(tz_offset))
+    today = now.strftime("%Y-%m-%d")
     month = today[:7]
-    now = datetime.now(MOSCOW_TZ)
     month_label = f"{_RU_MONTHS_CMD.get(now.month, '')} {now.year}"
 
     # PG: только nexus_budget этого юзера (НЕ FinanceRepo.month — там union
@@ -413,7 +420,7 @@ async def cmd_finance(msg: Message, user_notion_id: str = "") -> None:
             today_total += amount
 
     # Свободных/день
-    free_result = await _calc_free_remaining(user_notion_id)
+    free_result = await _calc_free_remaining(user_notion_id, tz_offset)
     if free_result:
         free_left, days_rem = free_result
         daily_budget = free_left / max(days_rem, 1)
@@ -1263,13 +1270,15 @@ async def on_receipt(query: CallbackQuery, user_notion_id: str = "") -> None:
     """Подтверждение записи фото-чека в финансы."""
     from core.list_manager import pending_get, pending_del
     from core.repos.finance_repo import _repo as _fin_repo
-    from core.classifier import today_moscow
 
     uid = query.from_user.id
     pending = pending_get(uid)
     if not pending or pending.get("action") != "photo_receipt":
         await query.answer("⏰ Сессия истекла.")
         return
+
+    tz_offset = await _get_user_tz(uid)
+    today_str = datetime.now(_user_tz(tz_offset)).strftime("%Y-%m-%d")
 
     action = query.data.replace("receipt_", "")
     if action == "cancel":
@@ -1303,7 +1312,7 @@ async def on_receipt(query: CallbackQuery, user_notion_id: str = "") -> None:
         desc = ", ".join(data["names"])
         fin_type = "💰 Доход" if data["type"] == "income" else "💸 Расход"
         await _fin_repo.add(
-            date=today_moscow(),
+            date=today_str,
             amount=float(data["total"]),
             category=data["cat"],
             type_=fin_type,
@@ -1336,7 +1345,8 @@ async def on_receipt(query: CallbackQuery, user_notion_id: str = "") -> None:
         if data["type"] == "expense":
             try:
                 from nexus.handlers.finance import _check_budget_limit
-                await _check_budget_limit(data["cat"], query.message, p_user_id, amount=data["total"])
+                await _check_budget_limit(data["cat"], query.message, p_user_id,
+                                          amount=data["total"], tz_offset=tz_offset)
             except Exception:
                 pass
 
@@ -1408,12 +1418,13 @@ async def on_arcana_choice(query: CallbackQuery, user_notion_id: str = "") -> No
 async def on_finance_clarify(query: CallbackQuery, user_notion_id: str = "") -> None:
     """Handle finance type clarification (expense/income/barter)."""
     from core.repos.finance_repo import _repo as _fin_repo
-    from core.classifier import today_moscow
 
     uid = query.from_user.id
     if uid not in _pending_finance:
         await query.answer("⏱ Время истекло, попробуй снова")
         return
+
+    _tz = await _get_user_tz(uid)
 
     parts = query.data.split("_")
     if len(parts) < 3:
@@ -1444,7 +1455,7 @@ async def on_finance_clarify(query: CallbackQuery, user_notion_id: str = "") -> 
         return
 
     result = await _fin_repo.add(
-        date=today_moscow(),
+        date=datetime.now(_user_tz(_tz)).strftime("%Y-%m-%d"),
         amount=finance_data["amount"],
         category=finance_data["category"],
         type_=type_label,

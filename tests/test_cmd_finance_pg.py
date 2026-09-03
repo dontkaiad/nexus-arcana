@@ -7,11 +7,20 @@
 """
 from __future__ import annotations
 
+from datetime import datetime as _real_dt, timezone as _tzc
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from core.repos.pg_finance_repo import BudgetEntry
+
+
+def _frozen_dt(instant_utc):
+    class _DT(_real_dt):
+        @classmethod
+        def now(cls, tz=None):
+            return instant_utc.astimezone(tz) if tz is not None else instant_utc.replace(tzinfo=None)
+    return _DT
 
 
 def _entries():
@@ -30,9 +39,13 @@ async def test_cmd_finance_reads_pg_nexus_budget(mock_message):
 
     msg = mock_message("/finance")
 
+    import nexus.nexus_bot as nb
+    frozen = _frozen_dt(_real_dt(2026, 6, 19, 12, 0, tzinfo=_tzc.utc))
+
     with patch.object(PgNexusBudgetRepo, "query_month",
                       AsyncMock(return_value=_entries())) as m_qm, \
-         patch("core.classifier.today_moscow", MagicMock(return_value="2026-06-19")), \
+         patch.object(nb, "datetime", frozen), \
+         patch.object(nb, "_get_user_tz", AsyncMock(return_value=3)), \
          patch("nexus.handlers.finance._calc_free_remaining", AsyncMock(return_value=None)), \
          patch("nexus.handlers.finance._load_budget_data", AsyncMock(return_value={"доходы": []})), \
          patch("nexus.handlers.finance._get_limits", AsyncMock(return_value={})):
@@ -50,6 +63,27 @@ async def test_cmd_finance_reads_pg_nexus_budget(mock_message):
     assert "Сегодня" in out and "130" in out
     # доход Арканы/зарплаты не протёк в расходы
     assert "1 000" not in out and "1000" not in out
+
+
+@pytest.mark.asyncio
+async def test_cmd_finance_month_by_user_tz(mock_message):
+    """У сервера ещё 30 июня, у юзера (+5) уже 1 июля → /finance показывает июль."""
+    from nexus.nexus_bot import cmd_finance
+    from core.repos.pg_finance_repo import PgNexusBudgetRepo
+    import nexus.nexus_bot as nb
+
+    msg = mock_message("/finance")
+    frozen = _frozen_dt(_real_dt(2026, 6, 30, 20, 0, tzinfo=_tzc.utc))
+
+    with patch.object(PgNexusBudgetRepo, "query_month", AsyncMock(return_value=[])) as m_qm, \
+         patch.object(nb, "datetime", frozen), \
+         patch.object(nb, "_get_user_tz", AsyncMock(return_value=5)), \
+         patch("nexus.handlers.finance._calc_free_remaining", AsyncMock(return_value=None)), \
+         patch("nexus.handlers.finance._load_budget_data", AsyncMock(return_value={"доходы": []})), \
+         patch("nexus.handlers.finance._get_limits", AsyncMock(return_value={})):
+        await cmd_finance(msg, user_notion_id="u-1")
+
+    assert m_qm.call_args.args[0] == "2026-07"
 
 
 @pytest.mark.asyncio
