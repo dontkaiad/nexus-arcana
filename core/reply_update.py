@@ -89,8 +89,12 @@ def _task_reply_system(tz_offset: int = 3) -> str:
         '{"deadline": "YYYY-MM-DD HH:MM или null", '
         '"reminder": "YYYY-MM-DD HH:MM или null", '
         '"category": "строка или null", '
-        '"priority": "срочно|важно|можно потом или null"}\n'
-        "Если поле не упомянуто — null.\n\n"
+        '"priority": "срочно|важно|можно потом или null", '
+        '"note": "текст свободной заметки к задаче или null"}\n'
+        "Если поле не упомянуто — null.\n"
+        "'добавь заметку X' / 'заметка: X' / 'примечание X' → note='X' "
+        "(сохраняем как есть, вместе с суммами и деталями торга).\n"
+        "Можно вернуть НЕСКОЛЬКО полей сразу (напр. и priority, и deadline).\n\n"
         + _date_context(tz_offset)
         + "\nСлова 'перенеси на X' / 'дедлайн X' / 'перенос на X' → deadline = ISO-дата "
         "дня недели X из таблицы выше (без времени, если время не названо).\n"
@@ -226,6 +230,7 @@ _TASK_FIELDS = {
     "reminder": ("Напоминание", "date"),
     "category": ("Категория",   "select"),
     "priority": ("Приоритет",   "select"),
+    "note":     ("Заметка",     "append_text"),
 }
 
 _CLIENT_FIELDS = {
@@ -379,6 +384,20 @@ async def _apply_task(page_id: str, updates: Dict[str, Any], tz_offset: int = 3)
         pr = _PRIORITY_MAP.get(str(updates["priority"]).lower(), updates["priority"])
         props["Приоритет"] = _p_select(pr)
         applied["Приоритет"] = pr
+    if updates.get("note"):
+        new_note = str(updates["note"]).strip()
+        if new_note:
+            existing = ""
+            try:
+                from nexus.repos.tasks_repo import _repo as _tasks_repo
+                cur = await _tasks_repo.retrieve_page(page_id)
+                existing = (getattr(cur, "note", "") or "").strip()
+            except Exception as e:
+                logger.warning("_apply_task: could not read existing note for %s: %s", page_id, e)
+            merged = (existing + "\n" + new_note).strip() if existing else new_note
+            from core.props import _text
+            props["Заметка"] = _text(merged)
+            applied["Заметка"] = f"+ {new_note}"
     if props:
         from nexus.repos.pg_tasks_repo import PgTasksRepo
         await PgTasksRepo().set_props(page_id, props)

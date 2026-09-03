@@ -641,8 +641,11 @@ async def handle_text(msg: Message, user_notion_id: str = "") -> None:
 
     # ── Уточнение после создания задачи (5-мин окно) ─────────────────────────
     _raw_text = (msg.text or "").strip()
-    from nexus.handlers.tasks import _last_task_get, _CLARIFY_RE, handle_last_task_clarify
-    if _last_task_get(msg.from_user.id) and _CLARIFY_RE.search(_raw_text):
+    from nexus.handlers.tasks import (
+        _last_task_get, _CLARIFY_RE, _is_clarification_not_new_task, handle_last_task_clarify,
+    )
+    if (_last_task_get(msg.from_user.id) and _CLARIFY_RE.search(_raw_text)
+            and _is_clarification_not_new_task(_raw_text)):
         _handled = await handle_last_task_clarify(msg, _raw_text, msg.from_user.id, user_notion_id)
         if _handled:
             await react(msg, "⚡")

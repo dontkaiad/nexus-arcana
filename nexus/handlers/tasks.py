@@ -983,6 +983,27 @@ _CLARIFY_RE = _re.compile(
 )
 
 
+def _is_clarification_not_new_task(text: str) -> bool:
+    """True — текст выглядит как уточнение к уже созданной задаче (5-мин окно),
+    False — это новая задача, в которой просто встретились слова «напомни /
+    дедлайн / приоритет» (напр. «отдать подушки одеяла напомни завтра в 14
+    дедлайн 13 сентября»). Баг: `_CLARIFY_RE` матчит ключевое слово в любом
+    месте строки, и новая задача уходила уточнением в предыдущую.
+
+    Эвристика: у настоящего уточнения перед первым ключевым словом почти
+    нет собственного текста (≤2 значимых слова). Если впереди 3+ слова —
+    это заголовок новой задачи.
+    """
+    m = _CLARIFY_RE.search(text or "")
+    if not m:
+        return False
+    lead = (text[: m.start()]).strip()
+    if not lead:
+        return True
+    lead_words = [w for w in _re.split(r"\s+", lead) if len(w) > 1]
+    return len(lead_words) <= 2
+
+
 async def _haiku_parse_reminder_dt(text: str, tz_offset: int) -> Optional[str]:
     """Абсолютное время напоминания через Haiku — фолбэк когда
     `_CLARIFY_REMINDER_RE` не подходит (день месяца, дни недели и т.п.).
@@ -1038,6 +1059,11 @@ async def handle_last_task_clarify(
     """
     page_id = _last_task_get(uid)
     if not page_id:
+        return False
+
+    # Защита: «отдать подушки … напомни завтра в 14» — новая задача, а не
+    # уточнение предыдущей (см. _is_clarification_not_new_task).
+    if not _is_clarification_not_new_task(text):
         return False
 
     tz_offset = await _get_user_tz(uid)
@@ -1692,12 +1718,15 @@ async def _show_task_confirm(message: Message, pending: dict, uid: int) -> None:
     is_practice_cat = pending.get("category", "") in PRACTICE_CATEGORIES
     deadline_display = (pending.get("deadline") or "не указана").replace("T", " ")
     reminder_display = (pending.get("reminder_time") or "нет").replace("T", " ")
+    note_val = (pending.get("note") or "").strip()
+    note_line = f"📝 Заметка: {note_val}\n" if note_val else ""
 
     text_content = (
         f"📌 <b>{pending['title']}</b>\n"
         f"🏷 {pending.get('category', '?')} · {_priority_display(pending.get('priority'))}\n"
         f"📅 Дедлайн: {deadline_display}\n"
-        f"🔔 Напомню: {reminder_display}\n\n"
+        f"🔔 Напомню: {reminder_display}\n"
+        f"{note_line}\n"
     )
     if is_practice_cat:
         text_content += "🕯️ Это для практики (Arcana) или для себя?"
@@ -1894,16 +1923,18 @@ async def _handle_task_refinement(message: Message, text: str, pending: dict, ui
         system = f"""Пользователь уточняет задачу. Парсь и верни ТОЛЬКО JSON без markdown.
 Текущая задача: "{pending.get('title', '')}"
 
-Верни ТОЛЬКО изменённые поля:
-{{"deadline": "YYYY-MM-DD или null", "reminder_time": "YYYY-MM-DDTHH:MM или null", "category": "категория или null", "priority": "Срочно|Важно|Можно потом или null", "not_refinement": true/false}}
+Верни ТОЛЬКО изменённые поля (можно НЕСКОЛЬКО сразу):
+{{"deadline": "YYYY-MM-DD или null", "reminder_time": "YYYY-MM-DDTHH:MM или null", "category": "категория или null", "priority": "Срочно|Важно|Можно потом или null", "note": "текст свободной заметки или null", "not_refinement": true/false}}
 
 Правила:
 - "дедлайн в воскресенье" → deadline=ближайшее вс
 - "напомни в 19" / "напомни в воскресенье в 19" → reminder_time=YYYY-MM-DDTHH:MM
-- "срочно" / "это срочно" → priority="Срочно"
-- "важно" → priority="Важно"
-- "потом" / "не срочно" → priority="Можно потом"
+- "срочно" / "это срочно" / "приоритет срочно" → priority="Срочно"
+- "важно" / "приоритет важно" → priority="Важно"
+- "потом" / "не срочно" / "приоритет потом" → priority="Можно потом"
 - "категория коты" → category=ближайшая из: {cats_str}
+- "добавь заметку X" / "заметка: X" / "примечание X" → note="X" (с суммами и деталями торга как есть)
+- ВАЖНО: если в тексте несколько уточнений ("приоритет срочно дедлайн 13 сентября") — верни ВСЕ поля сразу, не только одно
 - Если текст НЕ похож на уточнение задачи (новая задача, вопрос, другая тема) → not_refinement=true
 {tomorrow_note}
 Сейчас: {now_str} (UTC+{tz_offset})"""
@@ -1951,9 +1982,20 @@ async def _handle_task_refinement(message: Message, text: str, pending: dict, ui
                 if not (parsed.get("deadline") or parsed.get("reminder_time") or
                         (parsed.get("priority") in ("Срочно", "Важно", "Можно потом"))):
                     return
-        if parsed.get("priority") and parsed["priority"] in ("Срочно", "Важно", "Можно потом"):
-            pending["priority"] = parsed["priority"]
-            updated = True
+        if parsed.get("priority"):
+            _pr_norm = {
+                "срочно": "Срочно", "важно": "Важно", "можно потом": "Можно потом",
+                "потом": "Можно потом", "не срочно": "Можно потом",
+            }.get(str(parsed["priority"]).strip().lower())
+            if _pr_norm:
+                pending["priority"] = _pr_norm
+                updated = True
+        if parsed.get("note"):
+            _note_new = str(parsed["note"]).strip()
+            if _note_new:
+                _note_old = (pending.get("note") or "").strip()
+                pending["note"] = (_note_old + "\n" + _note_new).strip() if _note_old else _note_new
+                updated = True
 
         if updated:
             _pending_set(uid, pending)
