@@ -368,11 +368,14 @@ All in `core/budget.py` (pure async functions; no repo class):
   memories (`find_by_category`), extracts the category link and amount per
   fact. Skips facts where link or amount can't be parsed.
 - **load_budget_data(user_notion_id)** → `{"доходы", "постоянные", "цели",
-  "долги", "лимиты"}` — reads budget memories by key prefix
-  (`find_by_key_prefixes(["income_", "постоянно_", "лимит_", "цель_"])`,
-  current rows only) plus active `i_owe` debts; parses each into a list of
-  `{name, amount, …}` dicts. Limits are de-duplicated by display name (the
-  higher amount wins).
+  "долги", "лимиты", "разовые"}` — reads budget memories by key prefix
+  (`find_by_key_prefixes(["income_", "постоянно_", "лимит_", "цель_",
+  "разовый_"])`, current rows only) plus active `i_owe` debts; parses each
+  into a list of `{name, amount, …}` dicts. Limits are de-duplicated by
+  display name (the higher amount wins). `"разовые"` (`ONE_TIME_FACT_RE`) is
+  the persisted one_time positions of the last accepted plan — its only
+  consumer is `_build_sonnet_input` (see below), as a fallback for a
+  recalc's empty session buffer.
 - **budget_day_limit_from_plan(user_notion_id, tz_offset=3)** → `int` — the
   daily spend limit from the saved plan (see Invariants for the exact formula).
   Returns `0` when there is no income or on any error. `tz_offset` is the
@@ -494,6 +497,16 @@ Both prompt schemas split recurring vs one-off into two arrays — `fixed`
 (→ `fixed_total`, → `постоянно_*` + `лимит_фикс` on Accept) and `one_time`
 (→ `one_time_total` for the recalc arithmetic; on Accept → `разовый_*`
 Memory facts + `лимит_разовые`, **never** a finance transaction).
+
+`one_time` is parsed by Sonnet from `context["user_messages"]` text (marker
+`разовый:`/`разово:`), not a dedicated JSON field — so a recalc of an
+*already-accepted* plan (`🔄 Пересчитать` on a plan that was already Accepted,
+new `/budget` session, `state.buf` empty) would otherwise lose it: the prior
+session's buffer is gone. `_build_sonnet_input` covers this — when
+`user_messages` has no `разовый:`/`разово:` marker, it appends one
+synthesized per persisted `разовые` position (`_ONE_TIME_MARKER_RE`); an
+explicit marker already in `state.buf` takes priority and persisted facts
+are not appended (no double-counting).
 `one_time` is **not** in `fixed_total`; it is added into `already_spent`.
 
 **Expense classification** (`core/classifier.py:classify`) takes an optional

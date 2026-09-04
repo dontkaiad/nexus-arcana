@@ -163,6 +163,34 @@ def test_income_regex_parses_budget_phrasing_fact():
 
 
 @pytest.mark.asyncio
+async def test_load_budget_data_reads_persistent_one_time():
+    """load_budget_data читает разовый_* факты в bucket 'разовые' (переиспользует
+    ONE_TIME_FACT_RE) — нужно чтобы пересчёт принятого плана не терял one_time."""
+    from unittest.mock import AsyncMock
+    from core.repos.pg_memory_repo import Memory
+    from core.repos import memory_repo as mrmod
+
+    fake_mems = [
+        Memory(id="1", fact="разовое: билет в питер — 15000₽", key="разовый_билет_в_питер"),
+        Memory(id="2", fact="разовое: госпошлина — 3500₽", key="разовый_госпошлина"),
+        Memory(id="3", fact="разовое: старое — 999₽", key="разовый_старое", is_current=False),
+    ]
+    captured_prefixes = {}
+
+    async def fake_find(prefixes, user_notion_id=""):
+        captured_prefixes["prefixes"] = prefixes
+        return fake_mems
+
+    with patch.object(mrmod._repo, "find_by_key_prefixes", fake_find):
+        data = await load_budget_data("u-1")
+
+    assert "разовый_" in captured_prefixes["prefixes"]
+    assert len(data["разовые"]) == 2  # неактивная запись пропущена
+    names = {r["name"]: r["amount"] for r in data["разовые"]}
+    assert names == {"билет в питер": 15000.0, "госпошлина": 3500.0}
+
+
+@pytest.mark.asyncio
 async def test_load_budget_data_reads_budget_phrasing_income():
     from unittest.mock import AsyncMock
     from core.repos.pg_memory_repo import Memory

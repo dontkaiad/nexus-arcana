@@ -148,14 +148,18 @@ async def load_budget_data(user_notion_id: str = "") -> Dict[str, list]:
     """Все бюджетные записи Памяти (PG).
 
     Возвращает {"доходы": [...], "постоянные": [...], "цели": [...],
-                "долги": [...], "лимиты": [...]}.
+                "долги": [...], "лимиты": [...], "разовые": [...]}.
+    "разовые" — персистентные разовый_* факты (индивидуальные позиции
+    принятого плана), нужны чтобы пересчёт УЖЕ принятого плана не терял
+    one_time (см. nexus/handlers/finance.py:_build_sonnet_input — сессионный
+    буфер к тому моменту пуст, факты в Памяти — источник истины).
     """
     from core.repos.memory_repo import _repo as _mem_repo
 
-    empty = {"доходы": [], "постоянные": [], "цели": [], "долги": [], "лимиты": []}
+    empty = {"доходы": [], "постоянные": [], "цели": [], "долги": [], "лимиты": [], "разовые": []}
     try:
         mems = await _mem_repo.find_by_key_prefixes(
-            ["income_", "постоянно_", "лимит_", "цель_"],
+            ["income_", "постоянно_", "лимит_", "цель_", "разовый_"],
             user_notion_id=user_notion_id,
         )
     except Exception as e:
@@ -163,7 +167,7 @@ async def load_budget_data(user_notion_id: str = "") -> Dict[str, list]:
         return empty
 
     result: Dict[str, list] = {"доходы": [], "постоянные": [], "цели": [],
-                               "долги": [], "лимиты": []}
+                               "долги": [], "лимиты": [], "разовые": []}
     for m in mems:
         fact = m.fact or ""
         key = (m.key or "").strip().lower()
@@ -206,6 +210,12 @@ async def load_budget_data(user_notion_id: str = "") -> Dict[str, list]:
                     "name": связь or key,
                     "amount": parse_amount(amount_m.group(1)),
                 })
+        elif key.startswith("разовый_"):
+            ot_m = ONE_TIME_FACT_RE.search(fact)
+            if ot_m:
+                amt = parse_amount(ot_m.group(2))
+                if amt > 0:
+                    result["разовые"].append({"name": ot_m.group(1).strip(), "amount": amt})
 
     # Долги — читаем из таблицы debts (not Memory)
     try:

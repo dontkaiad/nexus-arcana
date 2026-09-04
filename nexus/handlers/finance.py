@@ -2703,6 +2703,11 @@ async def _period_spending(tz_offset: int = 3) -> Tuple[Dict[str, float], float]
     return spending_by_cat, income_total
 
 
+# Маркер разовой позиции в сыром тексте сессии — тот же, что BUDGET_SONNET_SYSTEM
+# просит искать в user_messages ("метка 'разовый:'/'разово:'").
+_ONE_TIME_MARKER_RE = re.compile(r'разов(ый|о)\s*:', re.IGNORECASE)
+
+
 async def _build_sonnet_input(uid: int, user_notion_id: str) -> str:
     """Build full context JSON for Sonnet analysis."""
     tz_offset = await _get_user_tz(uid)
@@ -2714,6 +2719,18 @@ async def _build_sonnet_input(uid: int, user_notion_id: str) -> str:
 
     state = _budget_get(uid) or {}
     user_messages = "\n".join(state.get("buf", []))
+
+    # Пересчёт УЖЕ принятого плана: сессия свежая, buf пуст (закрылась после
+    # ✅ Принять) — Sonnet парсит one_time ТОЛЬКО из user_messages по метке
+    # 'разовый:'/'разово:', поэтому без этого разовые "терялись" при пересчёте.
+    # buf с явной меткой — приоритет (свежий явный ввод); персистентные
+    # разовый_* факты из Памяти — fallback только когда в buf их нет.
+    if not _ONE_TIME_MARKER_RE.search(user_messages) and budget.get("разовые"):
+        ot_lines = [
+            "разовый: {} — {}₽".format(ot.get("name", "?"), int(ot.get("amount", 0) or 0))
+            for ot in budget["разовые"]
+        ]
+        user_messages = "\n".join([user_messages] + ot_lines) if user_messages else "\n".join(ot_lines)
 
     # Collect manual limits
     manual_limits = {}
