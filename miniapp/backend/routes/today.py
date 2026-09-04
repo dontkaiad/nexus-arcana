@@ -444,5 +444,9 @@ async def get_today(tg_id: int = Depends(current_user_id)) -> dict[str, Any]:
         "scheduled": scheduled,
         "tasks": tasks_out,
         "no_date": no_date,
+        # Счётчик прогресса «Мой день» (0/N) — ТОЛЬКО задачи с реальным
+        # дедлайном/напоминанием на сегодня: scheduled (время) + today_no_time
+        # (без времени). no_date (бэклог без даты вообще) в счётчик НЕ входит.
+        "progress_total": len(scheduled) + len(tasks_out),
         "adhd_tip": tip,
     }

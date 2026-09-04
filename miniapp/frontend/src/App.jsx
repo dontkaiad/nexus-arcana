@@ -1356,7 +1356,9 @@ function NxDay({ s, openTask, navigate, openStreaks }) {
 
   const t = adaptToday(data);
   const doneCount = Object.values(done).filter(Boolean).length;
-  const total = t.scheduled.length + t.tasks.length + (t.noDate?.length || 0);
+  // «Мой день» 0/N — только задачи с дедлайном/напоминанием на сегодня;
+  // бэклог без даты (t.noDate) в счётчик не входит.
+  const total = t.progressTotal;
   const leftPct = Math.round((t.spentDay / t.budgetDay) * 100);
   // Toggle done ↔ not started. Задача остаётся в списке локально — refetch не делаем,
   // чтобы пользователь мог отменить случайное закрытие повторным тапом.

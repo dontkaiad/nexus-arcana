@@ -183,6 +183,41 @@ def test_today_returns_all_keys_and_classifies_tasks(client):
     assert claude_mock.await_count == 1
 
 
+def test_today_progress_total_excludes_no_date_tasks(client):
+    """Счётчик «Мой день» (0/N) = scheduled + today_no_time; задачи без даты
+    вообще (no_date, весь бэклог) в него НЕ входят, даже если их много."""
+    tz = 3
+    today = _today_local_iso(tz)
+    tasks = [
+        _make_task("s1", "Врач", deadline=f"{today}T09:00:00+03:00",
+                   cat="🏥 Здоровье", prio="🟡 Важно"),                       # scheduled
+        _make_task("t1", "Разобрать лоток", deadline=today,
+                   cat="🏠 Быт", prio="⚪ Можно потом"),                       # today_no_time
+        _make_task("n1", "Прочитать статью", cat="💡 Инсайт", prio="⚪ Можно потом"),   # no_date
+        _make_task("n2", "Разобрать шкаф", cat="🏠 Быт", prio="⚪ Можно потом"),        # no_date
+        _make_task("n3", "Позвонить в банк", cat="💳 Прочее", prio="⚪ Можно потом"),   # no_date
+    ]
+
+    with patch("miniapp.backend.routes.today._tasks_repo.active", AsyncMock(return_value=tasks)), \
+         patch("miniapp.backend.routes.today._budget_repo.query", AsyncMock(return_value=[])), \
+         patch("miniapp.backend.routes.today.budget_day_limit_from_plan", AsyncMock(return_value=0)), \
+         patch("miniapp.backend.routes.today.get_limits", AsyncMock(return_value={})), \
+         patch("miniapp.backend.routes.today._budget_payday", AsyncMock(return_value=1)), \
+         patch("miniapp.backend.routes.today.ask_claude", AsyncMock(return_value="tip")), \
+         patch("miniapp.backend.routes.today.today_user_tz",
+               AsyncMock(return_value=(_today_local_date(tz), tz))), \
+         patch("miniapp.backend.routes.today.get_user_notion_id", AsyncMock(return_value=FAKE_NOTION_USER)), \
+         patch("nexus.handlers.streaks.get_streak",
+               return_value={"streak": 0, "best": 0, "last_activity_date": None,
+                             "rest_day_date": None, "rest_days_used": 0, "streak_start_date": None}), \
+         patch("nexus.handlers.streaks.is_rest_day_available", return_value=False):
+        data = client.get("/api/today").json()
+
+    assert len(data["no_date"]) == 3           # бэклог отдан в ответе (не удалён)
+    assert data["progress_total"] == 2         # 1 scheduled + 1 today_no_time, БЕЗ no_date
+    assert data["progress_total"] == len(data["scheduled"]) + len(data["tasks"])
+
+
 def test_today_caches_adhd_tip_across_calls(client):
     tz = 3
     today = _today_local_iso(tz)

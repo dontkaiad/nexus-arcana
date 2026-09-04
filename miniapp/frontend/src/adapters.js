@@ -201,6 +201,10 @@ export function adaptToday(data) {
         rpt: ivl ? `🔄 ${ivl}` : undefined,
       }
     }),
+    // Счётчик «Мой день» 0/N — только дедлайн/напоминание на сегодня
+    // (scheduled + today_no_time); задачи без даты (noDate) не в счёте.
+    progressTotal: data.progress_total
+      ?? ((data.scheduled || []).length + (data.tasks || []).length),
     adhdTip: data.adhd_tip || '',
   }
 }
