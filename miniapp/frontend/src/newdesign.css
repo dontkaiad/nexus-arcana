@@ -120,12 +120,7 @@
   padding: 12px 16px 10px;
   position: relative;
   overflow: hidden;
-  /* Mini App — mobile-first; общего max-width у страницы нет. На десктоп/веб
-     без потолка ряд «Задачи/Свободно/Стрик» растягивается на треть экрана и
-     квадратная holo-карточка стрика выглядит непропорционально. Держим hero
-     мобильной ширины и центрируем — три ячейки делят её поровну на любом экране. */
-  max-width: 440px;
-  margin: 0 auto 18px;
+  margin-bottom: 18px;
 }
 .day .hero { background: rgba(255, 255, 254, 0.45); }
 .night .hero { background: rgba(14, 18, 34, 0.55); }

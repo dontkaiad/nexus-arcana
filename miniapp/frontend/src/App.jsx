@@ -1328,19 +1328,22 @@ function NxDay({ s, openTask, navigate, openStreaks }) {
   const weatherApi = useApi('/api/weather');
 
   // Карточка стрика — holo-компонент с фиксированной геометрией (всё внутри
-  // масштабируется линейно от prop width). Три ячейки ряда «Задачи/Свободно/
-  // Стрик» делят ширину поровну (flex:1 + minWidth:0). Реальная ширина ряда
-  // ограничена сверху `.hero { max-width }`, поэтому ячейка всегда мобильного
-  // размера (~100–135px); меряем её и подгоняем карточку под ту же ширину, что
-  // и плитки. Клэмп [110, 176] — только страховка. height = width * 112/110.
+  // масштабируется линейно от prop width). Ячейка карточки в ряду ограничена
+  // сверху STREAK_MAX (иначе на десктопе flex:1 растянул бы её на треть экрана,
+  // а квадратная holo-карточка такого размера давит соседей). maxWidth на
+  // ЯЧЕЙКЕ → flexbox отдаёт остаток «Задачам»/«Свободно» (они flex:1 без
+  // потолка). На мобиле ячейка = 1/3 ряда (< STREAK_MAX), карточка ≈ плитки.
+  // Меряем ячейку и подгоняем prop width; height = width * 112/110.
+  const STREAK_MIN = 110;   // минимальная читаемость holo-контента
+  const STREAK_MAX = 200;
   const streakCellRef = useRef(null);
-  const [streakW, setStreakW] = useState(110);
+  const [streakW, setStreakW] = useState(STREAK_MIN);
   useEffect(() => {
     const el = streakCellRef.current;
     if (!el || typeof ResizeObserver === "undefined") return;
     const measure = () => {
-      const w = Math.round(el.clientWidth || 110);
-      setStreakW(Math.max(110, Math.min(w, 176)));
+      const w = Math.round(el.clientWidth || STREAK_MIN);
+      setStreakW(Math.max(STREAK_MIN, Math.min(w, STREAK_MAX)));
     };
     measure();
     const ro = new ResizeObserver(measure);
@@ -1393,7 +1396,7 @@ function NxDay({ s, openTask, navigate, openStreaks }) {
             <Metric s={s} v={`${Math.round((t.budgetDay - t.spentDay) / 1000)}к`} unit="₽" sub="свободно" />
           </div>
           {t.streak >= 3 ? (
-            <div ref={streakCellRef} style={{ flex: 1, minWidth: 0, display: "flex", justifyContent: "center" }}>
+            <div ref={streakCellRef} style={{ flex: 1, minWidth: 0, maxWidth: STREAK_MAX, display: "flex", justifyContent: "center" }}>
               <StreakAchievedCard
                 width={streakW}
                 height={Math.round(streakW * 112 / 110)}
