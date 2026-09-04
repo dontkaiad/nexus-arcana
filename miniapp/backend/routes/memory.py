@@ -6,10 +6,21 @@ from typing import Any, List, Optional
 
 from fastapi import APIRouter, Depends, Query
 
+import re
+from datetime import datetime
+
 from core.config import config
 from core.claude_client import ask_claude
 from core.user_manager import get_user_notion_id
 from core.repos.pg_memory_repo import PgMemoryRepo, Memory
+from core.budget import (
+    INCOME_RE,
+    LIMIT_AMOUNT_RE,
+    LIMIT_FACT_RE,
+    ONE_TIME_FACT_RE,
+    PERMANENT_RE,
+    parse_amount,
+)
 
 from miniapp.backend import cache
 from miniapp.backend.auth import current_user_id
@@ -25,10 +36,99 @@ EXCLUDED_CATEGORIES = {
     "🦋 СДВГ",
     "📥 Доход",
     "🔒 Постоянные",
-    "💰 Лимит",
     "📋 Долги",
     "🎯 Цели",
 }
+
+# «💰 Лимит» — специальная категория бюджета. НЕ показываем плоским списком
+# (сырые строки «постоянно: … — 20000₽/мес»), а отдаём сгруппированной
+# структурой по префиксу ключа при cat="💰 Лимит". Записи бюджета опознаём по
+# префиксу ключа (в БД все они лежат под категорией «💰 Лимит», но матч по
+# ключу надёжнее — не зависит от того, каким путём факт создан).
+LIMIT_CATEGORY = "💰 Лимит"
+_BUDGET_KEY_PREFIXES = ("income_", "постоянно_", "разовый_", "лимит_")
+# лимит_фикс / лимит_разовые — агрегаты (= суммы Постоянных / Разовых, уже
+# показанных отдельными группами), не самостоятельные позиции.
+_BUDGET_AGGREGATE_KEYS = {"лимит_фикс", "лимит_разовые"}
+
+_RU_MONTHS = {
+    1: "январь", 2: "февраль", 3: "март", 4: "апрель", 5: "май", 6: "июнь",
+    7: "июль", 8: "август", 9: "сентябрь", 10: "октябрь", 11: "ноябрь", 12: "декабрь",
+}
+_EMOJI_RE = re.compile(r"[\U0001F000-\U0001FAFF☀-➿]")
+
+
+def _name_amount(fact: str) -> tuple[str, str, float]:
+    """(читаемое_имя, эмодзи, сумма) из fact_text бюджетной записи.
+
+    Переиспользует те же регексы core.budget, что парсер сопоставления
+    Фикс/Разовые (PERMANENT_RE / ONE_TIME_FACT_RE), плюс INCOME_RE / LIMIT_FACT_RE.
+    """
+    for rx in (PERMANENT_RE, ONE_TIME_FACT_RE, INCOME_RE):
+        m = rx.search(fact)
+        if m:
+            raw = m.group(1).strip()
+            emoji_m = _EMOJI_RE.search(raw)
+            name = re.sub(r"\s*\([^)]*\)\s*$", "", raw).strip()  # убрать хвост «(🏠 Жильё)»
+            return name, (emoji_m.group(0) if emoji_m else ""), parse_amount(m.group(2))
+
+    m = LIMIT_FACT_RE.search(fact)
+    if m:
+        raw = m.group(1).strip()            # напр. «🍜 Продукты»
+        emoji_m = _EMOJI_RE.search(raw)
+        emoji = emoji_m.group(0) if emoji_m else ""
+        name = raw[len(emoji):].strip() if emoji else raw
+        return name, emoji, parse_amount(m.group(2))
+
+    # запас: сумма регексом, имя — вся строка после «:» без суммы
+    am = LIMIT_AMOUNT_RE.search(fact)
+    amount = float(am.group(1).replace(" ", "").replace(",", ".")) if am else 0.0
+    name = re.sub(r"\s*[—-]\s*\d.*$", "", fact.split(":", 1)[-1]).strip() or fact
+    return name, "", amount
+
+
+def _group_budget_memories(mems: list[Memory]) -> list[dict]:
+    """[{title, meta, subtitle?, items:[{id,name,emoji,amount,unit}]}] — непустые группы."""
+    buckets: dict[str, list[dict]] = {
+        "📥 Доход": [], "🔒 Постоянные": [], "📦 Разовые": [], "📊 Лимиты категорий": [],
+    }
+    for m in mems:
+        key = (m.key or "").lower()
+        if key in _BUDGET_AGGREGATE_KEYS:
+            continue
+        if key.startswith("income_"):
+            grp = "📥 Доход"
+        elif key.startswith("постоянно_"):
+            grp = "🔒 Постоянные"
+        elif key.startswith("разовый_"):
+            grp = "📦 Разовые"
+        elif key.startswith("лимит_"):
+            grp = "📊 Лимиты категорий"
+        else:
+            continue
+        name, emoji, amount = _name_amount(m.fact or "")
+        buckets[grp].append({
+            "id": m.id,
+            "name": name,
+            "emoji": emoji,
+            "amount": int(round(amount)),
+            "unit": "₽" if grp == "📦 Разовые" else "₽/мес",
+        })
+
+    now = datetime.now()
+    groups: list[dict] = []
+    for title, items in buckets.items():
+        if not items:
+            continue
+        g = {
+            "title": title,
+            "meta": "{:,} ₽".format(sum(i["amount"] for i in items)).replace(",", " "),
+            "items": items,
+        }
+        if title == "📦 Разовые":
+            g["subtitle"] = "{} {}".format(_RU_MONTHS.get(now.month, ""), now.year)
+        groups.append(g)
+    return groups
 
 # tz_{tg_id}/city_{tg_id} (core/location.py:set_user_location) — не «твоя
 # память», а внутреннее состояние бота (нужно погоде и дедлайнам задач).
@@ -52,6 +152,13 @@ CANONICAL_CATEGORIES = [
     "🔮 Практика",
     "🐾 Коты",
 ]
+
+
+def _all_categories(present: set[str]) -> list[str]:
+    """#49(b): канонический список + реально встреченные + всегда «💰 Лимит» (спец-вид)."""
+    seen = set(CANONICAL_CATEGORIES)
+    extra = sorted(c for c in present if c not in seen and c != LIMIT_CATEGORY)
+    return list(CANONICAL_CATEGORIES) + extra + [LIMIT_CATEGORY]
 
 
 def _serialize_memory(mem: Memory) -> dict:
@@ -89,7 +196,11 @@ async def get_memory(
 
     items: list[dict] = []
     categories: set[str] = set()
+    budget_mems: list[Memory] = []
     for mem in raw:
+        if (mem.key or "").lower().startswith(_BUDGET_KEY_PREFIXES):
+            budget_mems.append(mem)   # → сгруппированный вид «💰 Лимит», не плоский список
+            continue
         c = mem.category or None
         if c in EXCLUDED_CATEGORIES:
             continue
@@ -98,6 +209,15 @@ async def get_memory(
         if c:
             categories.add(c)
         items.append(_serialize_memory(mem))
+
+    # «💰 Лимит» — сгруппированный спец-вид (Постоянные / Разовые / Лимиты / Доход)
+    if cat == LIMIT_CATEGORY:
+        return {
+            "items": [],
+            "categories": _all_categories(categories),
+            "grouped": True,
+            "groups": _group_budget_memories(budget_mems),
+        }
 
     if cat:
         items = [i for i in items if i["cat"] == cat]
@@ -111,14 +231,9 @@ async def get_memory(
             or needle in (i["related"] or "").lower()
         ]
 
-    # #49(b): объединяем канонический список с теми, что реально есть в данных.
-    seen = set(CANONICAL_CATEGORIES)
-    extra = sorted(c for c in categories if c not in seen)
-    all_cats = list(CANONICAL_CATEGORIES) + extra
-
     return {
         "items": items,
-        "categories": all_cats,
+        "categories": _all_categories(categories),
     }
 
 

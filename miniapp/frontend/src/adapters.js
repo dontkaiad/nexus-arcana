@@ -480,7 +480,7 @@ export function formatRub(n) {
 // ── /api/memory → {items, categories} ─────────────────────────────────────
 
 export function adaptMemory(data) {
-  if (!data) return { items: [], categories: [] }
+  if (!data) return { items: [], categories: [], groups: null }
   return {
     items: (data.items || []).map((m) => ({
       id: m.id,
@@ -488,6 +488,8 @@ export function adaptMemory(data) {
       cat: m.cat || '—',
     })),
     categories: data.categories || [],
+    // «💰 Лимит» — сгруппированный спец-вид (Постоянные/Разовые/Лимиты/Доход)
+    groups: data.grouped ? (data.groups || []) : null,
   }
 }
 

@@ -2761,12 +2761,38 @@ function NxMemory({ s, openAdhd }) {
       </div>
       {loading && <Empty s={s} text="Загружаю..." />}
       {error && <ErrorBox s={s} error={error} refetch={refetch} />}
-      {!loading && !error && view.items.length === 0 && (
+
+      {/* «💰 Лимит» — сгруппированный вид: секции Постоянные/Разовые/Лимиты/Доход */}
+      {!loading && !error && view.groups && (
+        (view.groups.length === 0)
+          ? <Empty s={s} emoji="💰" text="Бюджет ещё не настроен — открой /budget в боте." />
+          : view.groups.map((g) => (
+            <div key={g.title} style={{ marginBottom: 6 }}>
+              <SectionLabel s={s} meta={g.meta}>
+                {g.subtitle ? `${g.title} · ${g.subtitle}` : g.title}
+              </SectionLabel>
+              {g.items.map((it) => (
+                <Glass key={it.id} s={s} style={{ padding: "10px 14px", marginBottom: 4 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                    <span style={{ flex: 1, minWidth: 0, fontSize: fs(14), color: s.text, wordBreak: "break-word" }}>
+                      {it.emoji ? `${it.emoji} ` : ""}{it.name}
+                    </span>
+                    <span style={{ flexShrink: 0, fontSize: fs(14), color: s.text, fontWeight: 500 }}>
+                      {it.amount.toLocaleString("ru")} {it.unit}
+                    </span>
+                  </div>
+                </Glass>
+              ))}
+            </div>
+          ))
+      )}
+
+      {!loading && !error && !view.groups && view.items.length === 0 && (
         cat === "all"
           ? <Empty s={s} emoji="🧠" title="Память пуста" text="Тут будут твои заметки и паттерны." />
           : <Empty s={s} emoji="🌿" text="Нет записей в этой категории." />
       )}
-      {!loading && !error && view.items.map((m) => {
+      {!loading && !error && !view.groups && view.items.map((m) => {
         // #49(a): иконка категории справа (как в задачах/списках), без текстовой
         // подписи внизу карточки.
         const catEmojiOnly = m.cat ? String(m.cat).split(" ")[0] : "";

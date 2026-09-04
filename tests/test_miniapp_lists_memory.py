@@ -562,7 +562,12 @@ def test_memory_excludes_budget_and_adhd_categories(client):
     # с реальными данными присутствуют + бюджетные/ADHD исключены.
     cats = set(data["categories"])
     assert {"🛒 Предпочтения", "👥 Люди"}.issubset(cats)
-    assert cats.isdisjoint({"🦋 СДВГ", "📥 Доход", "🔒 Постоянные", "💰 Лимит", "📋 Долги", "🎯 Цели"})
+    # "💰 Лимит" теперь всегда в списке (спец-сгруппированный вид); остальные
+    # бюджетные/ADHD — по-прежнему исключены из плоского списка.
+    assert cats.isdisjoint({"🦋 СДВГ", "📥 Доход", "🔒 Постоянные", "📋 Долги", "🎯 Цели"})
+    assert "💰 Лимит" in cats
+    # доход:… (income_*) не протёк сырой строкой в плоский список
+    assert all(i["id"] != "m3" for i in data["items"])
 
 
 def test_memory_excludes_tz_and_city_system_keys(client):
@@ -601,6 +606,67 @@ def test_memory_cat_filter(client):
     assert r.status_code == 200
     items = r.json()["items"]
     assert len(items) == 1 and items[0]["id"] == "m2"
+
+
+# ── «💰 Лимит» — сгруппированный спец-вид ──────────────────────────────────
+
+_LIMIT_CAT_Q = "?cat=%F0%9F%92%B0%20%D0%9B%D0%B8%D0%BC%D0%B8%D1%82"  # 💰 Лимит
+
+
+def _limit_mems():
+    return [
+        _mem_pg("k1", "постоянно: Аренда Питер (🏠 Жильё) — 20000₽/мес", cat="💰 Лимит", key="постоянно_жильё_аренда_питер"),
+        _mem_pg("k2", "постоянно: Коммуналка (🏠 Жильё) — 7000₽/мес", cat="💰 Лимит", key="постоянно_жильё_коммуналка"),
+        _mem_pg("k3", "разовое: коммуналка гай — 16000₽", cat="💰 Лимит", key="разовый_коммуналка_гай"),
+        _mem_pg("k4", "доход: зарплата — 100000₽/мес", cat="💰 Лимит", key="income_зарплата"),
+        _mem_pg("k5", "лимит: 🍜 Продукты — 10000₽/мес", cat="💰 Лимит", key="лимит_продукты"),
+        _mem_pg("k6", "лимит: 🔒 Фикс — 27000₽/мес", cat="💰 Лимит", key="лимит_фикс"),        # агрегат
+        _mem_pg("k7", "лимит: 📦 Разовые — 16000₽/мес", cat="💰 Лимит", key="лимит_разовые"),   # агрегат
+        _mem_pg("m1", "Chapman = сигареты", cat="🛒 Предпочтения", key="chapman"),
+    ]
+
+
+def test_memory_limit_category_grouped(client):
+    with patch("miniapp.backend.routes.memory._memory_repo.find_by_category",
+               AsyncMock(return_value=_limit_mems())), \
+         patch("miniapp.backend.routes.memory.get_user_notion_id",
+               AsyncMock(return_value=FAKE_NOTION_USER)):
+        data = client.get("/api/memory" + _LIMIT_CAT_Q).json()
+
+    assert data["grouped"] is True
+    assert data["items"] == []           # НЕ плоский список
+    groups = {g["title"]: g for g in data["groups"]}
+    assert set(groups) == {"🔒 Постоянные", "📦 Разовые", "📊 Лимиты категорий", "📥 Доход"}
+
+    perm = groups["🔒 Постоянные"]["items"]
+    by_name = {i["name"]: i for i in perm}
+    assert by_name["Аренда Питер"]["amount"] == 20000       # читаемое имя + сумма
+    assert by_name["Аренда Питер"]["emoji"] == "🏠"          # сырая строка не отдаётся
+    assert groups["🔒 Постоянные"]["meta"] == "27 000 ₽"     # сумма группы
+
+    one = groups["📦 Разовые"]["items"]
+    assert one[0]["name"] == "коммуналка гай" and one[0]["amount"] == 16000
+    assert "subtitle" in groups["📦 Разовые"]                # период/месяц
+
+    disc = groups["📊 Лимиты категорий"]["items"]
+    assert [i["name"] for i in disc] == ["Продукты"]         # лимит_фикс/лимит_разовые НЕ здесь
+    assert all("Фикс" not in i["name"] and "Разовые" not in i["name"]
+               for g in data["groups"] for i in g["items"])
+
+    assert groups["📥 Доход"]["items"][0]["name"] == "зарплата"
+
+
+def test_memory_limit_category_in_category_list(client):
+    """«💰 Лимит» всегда присутствует в списке категорий (спец-таб)."""
+    with patch("miniapp.backend.routes.memory._memory_repo.find_by_category",
+               AsyncMock(return_value=[_mem_pg("m1", "x", cat="🛒 Предпочтения")])), \
+         patch("miniapp.backend.routes.memory.get_user_notion_id",
+               AsyncMock(return_value=FAKE_NOTION_USER)):
+        data = client.get("/api/memory").json()
+
+    assert "💰 Лимит" in data["categories"]
+    # но сырые бюджетные строки не в плоском списке
+    assert data.get("grouped") is None
 
 
 def test_memory_search_matches_key_and_related(client):
