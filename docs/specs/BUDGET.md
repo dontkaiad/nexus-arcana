@@ -405,6 +405,18 @@ All in `core/budget.py` (pure async functions; no repo class):
   plan's derived numbers (`лимит_*`, `цель_*`, debt strategies) ARE persisted
   as facts by `_save_budget_plan`, and stay static until the next accepted
   recalculation (see Human cheat sheet above — "what recalculates on its own").
+- **Period-spend queries are scoped by `user_notion_id`.** Every
+  `core.repos.finance_repo._repo.query_records()` call in
+  `nexus/handlers/finance.py` that has `user_notion_id` in scope must pass
+  it through — the repo defaults to `""` and silently returns records
+  matching an empty `user_notion_id` (i.e. none, for real users) if it's
+  omitted. `_check_budget_limit` shipped without this for an unknown
+  period (found+fixed: category progress `X/Y` always read `0` spent for
+  any category, for every user); `_calc_free_remaining`,
+  `build_budget_message`, `get_finance_period`, `_calc_impulse_status` and
+  `_budget_period_review` had the same gap and were fixed alongside it.
+  `_period_spending` doesn't have `user_notion_id` in its signature at
+  all — a separate, pre-existing gap, not covered by this fix.
 
 ## Lifecycle / status model
 

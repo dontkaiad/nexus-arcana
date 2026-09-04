@@ -131,6 +131,7 @@ async def _calc_free_remaining(user_notion_id: str = "", tz_offset: int = 3) -> 
     try:
         income_records = await _repo.query_records(
             type_="💰 Доход", date_from=month_start, date_to=today_str, page_size=200,
+            user_notion_id=user_notion_id,
         )
         total_income = sum(float(p.amount or 0) for p in income_records)
     except Exception:
@@ -143,6 +144,7 @@ async def _calc_free_remaining(user_notion_id: str = "", tz_offset: int = 3) -> 
     try:
         expense_records = await _repo.query_records(
             type_="💸 Расход", date_from=month_start, date_to=today_str, page_size=500,
+            user_notion_id=user_notion_id,
         )
         total_expenses = sum(float(p.amount or 0) for p in expense_records)
     except Exception:
@@ -187,6 +189,7 @@ async def build_budget_message(user_notion_id: str = "", tz_offset: int = 3) -> 
     try:
         expense_records = await _repo.query_records(
             type_="💸 Расход", date_from=period_start, date_to=today_str, page_size=500,
+            user_notion_id=user_notion_id,
         )
         for r in expense_records:
             cat = r.category or "💳 Прочее"
@@ -430,6 +433,7 @@ async def _check_budget_limit(category: str, message: Message, user_notion_id: s
         records = await _repo.query_records(
             type_="💸 Расход", category=category,
             date_from=period_start, date_to=today_str, page_size=200,
+            user_notion_id=user_notion_id,
         )
         period_total = sum(float(p.amount or 0) for p in records)
         logger.info("_check_budget_limit: period_total=%.0f limit=%.0f category=%s",
@@ -530,6 +534,7 @@ async def get_finance_period(start_date: str, end_date: str, label: str,
     """Сводка за произвольный период. start_date/end_date = 'YYYY-MM-DD'."""
     records = await _repo.query_records(
         date_from=start_date, date_to=end_date, page_size=200,
+        user_notion_id=user_notion_id,
     )
 
     total_expense = 0.0
@@ -2444,6 +2449,7 @@ async def _calc_impulse_status(period_start: str, user_notion_id: str = "",
     records = await _repo.query_records(
         type_="💸 Расход", category="🎲 Импульсивные",
         date_from=period_start, date_to=now.strftime("%Y-%m-%d"), page_size=200,
+        user_notion_id=user_notion_id,
     )
     impulse_used = sum(float(p.amount or 0) for p in records)
     return impulse_limit, impulse_used
@@ -4255,6 +4261,7 @@ async def _budget_period_review(user_notion_id: str = "", tz_offset: int = 3) ->
     # Get spending for that period
     records = await _repo.query_records(
         type_="💸 Расход", date_from=period_start_str, date_to=period_end_str, page_size=500,
+        user_notion_id=user_notion_id,
     )
 
     spending_by_cat: Dict[str, float] = {}

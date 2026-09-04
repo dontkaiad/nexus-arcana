@@ -107,6 +107,84 @@ async def test_check_budget_limit_period_uses_user_tz(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_check_budget_limit_passes_user_notion_id(monkeypatch):
+    """_check_budget_limit должен передавать user_notion_id в query_records —
+    иначе запрос ищет записи с пустым user_notion_id и period_total всегда 0
+    (баг: строка вызова была без этого аргумента, хотя функция его получает)."""
+    monkeypatch.setattr(finance, "datetime", _frozen_dt(_INSTANT))
+
+    seen = {}
+
+    async def fake_query(**kw):
+        seen.update(kw)
+        return []
+
+    msg = MagicMock()
+    msg.from_user.id = 7
+    msg.answer = AsyncMock()
+
+    with patch.object(finance, "_get_limits", AsyncMock(return_value={"продукты": 10000.0})), \
+         patch.object(finance._repo, "query_records", AsyncMock(side_effect=fake_query)), \
+         patch.object(finance, "_get_payday", AsyncMock(return_value=1)), \
+         patch.object(finance, "_load_budget_data", AsyncMock(return_value={"долги": [], "постоянные": []})), \
+         patch.object(finance, "_calc_free_remaining", AsyncMock(return_value=None)):
+        await finance._check_budget_limit("🍜 Продукты", msg, "u-1", amount=500, tz_offset=5)
+
+    assert seen["user_notion_id"] == "u-1"
+
+
+@pytest.mark.asyncio
+async def test_check_budget_limit_period_total_isolated_between_users(monkeypatch):
+    """period_total считает только записи ТЕКУЩЕГО пользователя. Регресс: раньше
+    (без user_notion_id в query_records) чужие записи той же категории
+    подмешивались бы в сумму — здесь два пользователя с одинаковыми
+    категориями/суммами не должны смешиваться."""
+    from core.repos import finance_repo as fr
+    from core.repos.pg_finance_repo import BudgetEntry
+
+    monkeypatch.setattr(finance, "datetime", _frozen_dt(_INSTANT))
+
+    def make_entry(uid_marker):
+        return BudgetEntry(
+            id=f"e-{uid_marker}", description="кофе", amount=500.0,
+            category="🍜 Продукты", type_="💸 Расход", source="",
+            date="2026-06-15",
+        )
+
+    async def fake_nexus_query(date_from, date_to, type_, category, page_size, user_notion_id=""):
+        if user_notion_id == "u-1":
+            return [make_entry("u1-a"), make_entry("u1-b")]
+        return []  # другой пользователь / без фильтра — ничего своего не находит
+
+    async def fake_arcana_query(date_from, date_to, type_, category, page_size, user_notion_id=""):
+        return []
+
+    msg = MagicMock()
+    msg.from_user.id = 7
+    msg.answer = AsyncMock()
+
+    period_totals = []
+
+    def fake_log_info(fmt, *args):
+        if fmt.startswith("_check_budget_limit: period_total="):
+            period_totals.append(args[0])  # period_total значение
+
+    with patch.object(fr._nexus_repo, "query", AsyncMock(side_effect=fake_nexus_query)), \
+         patch.object(fr._arcana_repo, "query", AsyncMock(side_effect=fake_arcana_query)), \
+         patch.object(finance, "_get_limits", AsyncMock(return_value={"продукты": 10000.0})), \
+         patch.object(finance, "_get_payday", AsyncMock(return_value=1)), \
+         patch.object(finance, "_load_budget_data", AsyncMock(return_value={"долги": [], "постоянные": []})), \
+         patch.object(finance, "_calc_free_remaining", AsyncMock(return_value=None)), \
+         patch.object(finance.logger, "info", side_effect=fake_log_info):
+        await finance._check_budget_limit("🍜 Продукты", msg, "u-1", amount=500, tz_offset=5)
+        await finance._check_budget_limit("🍜 Продукты", msg, "u-2", amount=500, tz_offset=5)
+
+    # u-1 находит свои 2 записи по 500 = 1000; u-2 (другой пользователь,
+    # те же категория/сумма в фикстуре) не подмешивает их себе — 0.
+    assert period_totals == [1000.0, 0.0]
+
+
+@pytest.mark.asyncio
 async def test_build_budget_message_default_tz_regression(monkeypatch):
     """build_budget_message без явного tz → период по МСК, как раньше."""
     monkeypatch.setattr(finance, "datetime", _frozen_dt(_INSTANT))
