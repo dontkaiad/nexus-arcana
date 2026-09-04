@@ -349,6 +349,35 @@ def test_finance_today_budget_reflects_spending(client):
     assert b["pct"] == round(2000 / 4166 * 100)
 
 
+def test_finance_today_excludes_parallel_categories_from_day_budget(client):
+    """📦 Разовые / 🔒 Фикс — свой лимит на период, не дневная норма: видны в
+    items, но не в total/budget.spent/left/pct."""
+    entries = [
+        _budget_entry(1000, cat="🍜 Продукты", desc="магнит", eid="p1"),
+        _budget_entry(8000, cat="📦 Разовые", desc="коммуналка гай", eid="r1"),
+        _budget_entry(20000, cat="🔒 Фикс", desc="аренда", eid="f1"),
+    ]
+    with patch("miniapp.backend.routes.finance._budget_repo.query",
+               AsyncMock(return_value=entries)), \
+         patch("miniapp.backend.routes.finance.budget_day_limit_from_plan",
+               AsyncMock(return_value=4166)), \
+         patch("miniapp.backend.routes.finance.today_user_tz",
+               AsyncMock(return_value=(_today_date(), 3))), \
+         patch("miniapp.backend.routes.finance.get_user_notion_id",
+               AsyncMock(return_value=FAKE_NOTION_USER)):
+        r = client.get("/api/finance?view=today")
+
+    data = r.json()
+    # в дневной бюджет — только обычная категория
+    assert data["total"] == 1000
+    assert data["budget"]["spent"] == 1000
+    assert data["budget"]["left"] == 4166 - 1000
+    assert data["budget"]["pct"] == round(1000 / 4166 * 100)
+    # но в истории транзакций видно всё
+    cats = {i["cat"]["full"] for i in data["items"]}
+    assert cats == {"🍜 Продукты", "📦 Разовые", "🔒 Фикс"}
+
+
 # ── GET /api/finance/category — drill-down ──────────────────────────────────
 
 def test_finance_category_drill_down(client):

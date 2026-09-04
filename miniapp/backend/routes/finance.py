@@ -15,6 +15,7 @@ from core.budget import (
     cat_link,
     display_limit_name,
     get_limits,
+    is_parallel_limit,
     load_budget_data,
     parse_amount,
 )
@@ -100,7 +101,12 @@ async def _view_today(tg_id: int) -> dict:
     records = await _nexus_finance_records(user_notion_id, today_iso, today_iso,
                                            type_filter="💸 Расход")
     items = [_extract_finance_item(e) for e in records]
-    total = sum(i["amt"] for i in items)
+    # 📦 Разовые / 🔒 Фикс — свой лимит на весь период (лимит_разовые/лимит_фикс),
+    # не дневная норма. В total (числитель дневного сравнения) не считаем; в items
+    # для истории «Транзакции» — оставляем всё. Тот же принцип, что в
+    # build_budget_message / budget_day_limit_from_plan (core.budget.is_parallel_limit).
+    total = sum(int(round(e.amount)) for e in records
+                if not is_parallel_limit(e.category or ""))
 
     budget_day = await budget_day_limit_from_plan(user_notion_id, tz_offset)
     left = max(0, budget_day - total)
