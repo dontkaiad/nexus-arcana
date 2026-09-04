@@ -92,6 +92,9 @@ async def _fetch_nexus_tasks(user_notion_id: str) -> list[PgTask]:
 
 
 async def _spent_today(user_notion_id: str, today_iso: str, tomorrow_iso: str) -> int:
+    """Потрачено сегодня для «Бюджета дня». 📦 Разовые / 🔒 Фикс исключены —
+    у них свой лимит на весь период, не дневная норма (тот же принцип, что в
+    finance.py::_view_today, коммит 894228b; предикат core.budget.is_parallel_limit)."""
     try:
         entries = await _budget_repo.query(
             date_from=today_iso,
@@ -100,7 +103,9 @@ async def _spent_today(user_notion_id: str, today_iso: str, tomorrow_iso: str) -
             page_size=100,
             user_notion_id=user_notion_id,
         )
-        return int(round(sum(e.amount for e in entries)))
+        return int(round(sum(
+            e.amount for e in entries if not is_parallel_limit(e.category or "")
+        )))
     except Exception as e:
         logger.warning("_spent_today PG query failed: %s", e)
         return 0

@@ -367,6 +367,30 @@ def test_discretionary_free_ignores_parallel_categories(client):
     assert b["discretionary_free"] == 16350   # без изменений
 
 
+def test_spent_today_excludes_parallel_categories(client):
+    """«Потрачено сегодня» для «Бюджета дня» не включает 📦 Разовые / 🔒 Фикс
+    (у них свой лимит на период). Обычная категория — входит как раньше."""
+    tz = 3
+    today = _today_local_iso(tz)
+    period_start = today[:8] + "01"
+    ctx = _today_ctx(tz=tz, day_limit=628,
+                     limits={"продукты": 10000, "привычки": 6350},
+                     expenses_by_from={
+                         today: [_entry(9313, "📦 Разовые", today),   # ← коммуналка, не в счёт
+                                 _entry(1200, "🍜 Продукты", today)],  # ← обычная, в счёт
+                         period_start: [],
+                     })
+    import contextlib
+    with contextlib.ExitStack() as st:
+        for p in ctx:
+            st.enter_context(p)
+        b = client.get("/api/today").json()["budget"]
+
+    assert b["spent_today"] == 1200          # только Продукты, 9313 Разовых исключены
+    assert b["left"] == 628 - 1200
+    assert b["pct"] == round(1200 / 628 * 100)
+
+
 def test_spent_today_query_uses_today_as_date_to(client):
     """_spent_today не включает завтрашние траты — date_to=today (#140)."""
     tz = 3
