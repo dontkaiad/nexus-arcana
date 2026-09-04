@@ -1328,18 +1328,20 @@ function NxDay({ s, openTask, navigate, openStreaks }) {
   const weatherApi = useApi('/api/weather');
 
   // Карточка стрика — holo-компонент с фиксированной геометрией (всё внутри
-  // масштабируется линейно от prop width). Меряем ширину своей flex-ячейки,
-  // чтобы карточка делила ряд наравне с «Задачи»/«Свободно» на любом экране
-  // (мобилка И десктоп/веб — общего max-width у страницы нет). Верхнего
-  // потолка нет: ячейка = (ряд − gap)/3, карточка ровно её заполняет.
-  // Нижний 110 — минимальная читаемость контента внутри holo-карточки.
-  // Пропорции сохраняются (height = width * 112/110).
+  // масштабируется линейно от prop width). Три ячейки ряда «Задачи/Свободно/
+  // Стрик» делят ширину поровну (flex:1 + minWidth:0). Реальная ширина ряда
+  // ограничена сверху `.hero { max-width }`, поэтому ячейка всегда мобильного
+  // размера (~100–135px); меряем её и подгоняем карточку под ту же ширину, что
+  // и плитки. Клэмп [110, 176] — только страховка. height = width * 112/110.
   const streakCellRef = useRef(null);
   const [streakW, setStreakW] = useState(110);
   useEffect(() => {
     const el = streakCellRef.current;
     if (!el || typeof ResizeObserver === "undefined") return;
-    const measure = () => setStreakW(Math.max(110, Math.round(el.clientWidth || 110)));
+    const measure = () => {
+      const w = Math.round(el.clientWidth || 110);
+      setStreakW(Math.max(110, Math.min(w, 176)));
+    };
     measure();
     const ro = new ResizeObserver(measure);
     ro.observe(el);
@@ -1384,14 +1386,14 @@ function NxDay({ s, openTask, navigate, openStreaks }) {
           </div>
         </div>
         <div className="hero-metrics">
-          <div style={{ flex: 1, cursor: "pointer" }} onClick={() => navigate?.("tasks")}>
+          <div style={{ flex: 1, minWidth: 0, cursor: "pointer" }} onClick={() => navigate?.("tasks")}>
             <Metric s={s} v={doneCount} unit={`/${total}`} sub="задачи" />
           </div>
-          <div style={{ flex: 1, cursor: "pointer" }} onClick={() => navigate?.("fin")}>
+          <div style={{ flex: 1, minWidth: 0, cursor: "pointer" }} onClick={() => navigate?.("fin")}>
             <Metric s={s} v={`${Math.round((t.budgetDay - t.spentDay) / 1000)}к`} unit="₽" sub="свободно" />
           </div>
           {t.streak >= 3 ? (
-            <div ref={streakCellRef} style={{ flex: 1, display: "flex", justifyContent: "center" }}>
+            <div ref={streakCellRef} style={{ flex: 1, minWidth: 0, display: "flex", justifyContent: "center" }}>
               <StreakAchievedCard
                 width={streakW}
                 height={Math.round(streakW * 112 / 110)}
