@@ -512,36 +512,53 @@ def _period_days_remaining(payday: int, tz_offset: int = 3) -> int:
 
 
 async def budget_day_limit_from_plan(user_notion_id: str, tz_offset: int = 3) -> int:
-    """Дневной лимит из сохранённого плана в Памяти.
+    """«Бюджет дня» — сколько можно тратить в день на повседневное.
 
-    free = доход − постоянные − лимиты − цели.saving − долги.monthly_payment
-    day_limit = max(0, free // дни_до_пэйдея)
-    Возвращает 0 если план не задан или доход отсутствует.
+    Явно, термин-в-термин (каждый — из своего источника, НЕ через сумму лимит_*,
+    которая уже дважды разъезжалась с этой формулой):
 
-    tz_offset — личный часовой пояс пользователя (делитель «дней до пэйдея»
-    считается по его дню, не серверному). Дефолт 3.
+      остаток = Доход
+              − Фикс      (Память: постоянно_*)
+              − Разовые   (Память: лимит_разовые, если задан)
+              − Долги     (таблица debts: сумма monthly_payment активных долгов)
+              − Подушка   (таблица cushion: planned_contribution; 0 в тяжёлый месяц)
+              − Цели      (Память: цель_*.saving — ежемесячный взнос; 0 если цели
+                           просто ждут starts_after без активного взноса)
+      день   = max(0, остаток / дней_до_конца_платёжного_периода)
+
+    tz_offset — личный tz пользователя (граница периода по его дню). Дефолт 3.
+    Возвращает 0 если плана нет / нет дохода / при любой ошибке.
     """
     try:
         budget = await load_budget_data(user_notion_id)
-        total_income = sum(d["amount"] for d in budget["доходы"])
-        if total_income <= 0:
+
+        income = sum(d["amount"] for d in budget["доходы"])
+        if income <= 0:
             return 0
-        total_obligatory = sum(d["amount"] for d in budget["постоянные"])
-        # Только дискреционные категории. лимит_фикс задвоил бы постоянные
-        # (они уже в total_obligatory), лимит_разовые — отдельный бакет,
-        # в этой формуле ему не место. См. is_parallel_limit.
-        total_limits = sum(d["amount"] for d in budget["лимиты"]
-                           if not is_parallel_limit(d.get("name", "")))
-        total_goals_saving = sum(d.get("saving", 0) for d in budget["цели"])
-        total_debt_monthly = sum(
-            d.get("monthly_payment") or 0 for d in budget["долги"]
+
+        fixed = sum(d["amount"] for d in budget["постоянные"])
+
+        one_time = next(
+            (d["amount"] for d in budget["лимиты"]
+             if "разов" in (d.get("name") or "").lower()
+             or "разов" in display_limit_name(d.get("name") or "").lower()),
+            0,
+        )
+
+        debts_monthly = sum(
+            (d.get("monthly_payment") or 0) for d in budget["долги"]
             if (d.get("monthly_payment") or 0) > 0
         )
-        free = (total_income - total_obligatory - total_limits
-                - total_goals_saving - total_debt_monthly)
+
+        cushion_contribution = float((budget.get("подушка") or {}).get("planned_contribution", 0) or 0)
+
+        goals_saving = sum((d.get("saving") or 0) for d in budget["цели"])
+
+        remainder = income - fixed - one_time - debts_monthly - cushion_contribution - goals_saving
+
         payday = await _budget_payday()
         days = _period_days_remaining(payday, tz_offset)
-        return max(0, int(free / days))
+        return max(0, int(remainder / days))
     except Exception:
         logger.error("budget_day_limit_from_plan: unexpected error", exc_info=True)
         return 0

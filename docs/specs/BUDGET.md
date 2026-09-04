@@ -1,6 +1,6 @@
 # BUDGET — data-model contract (бюджет / day limit)
 
-Code conforms to: b79d5fd. This spec describes the budget data model as of
+Code conforms to: 608e049. This spec describes the budget data model as of
 that commit; update it in the same PR that changes the model.
 
 > Contract, not snapshot. Describes the derived model and the guarantees of
@@ -367,20 +367,24 @@ All in `core/budget.py` (pure async functions; no repo class):
 
 ## Invariants
 
-- **Day-limit formula** (`budget_day_limit_from_plan`), exactly as coded:
+- **Day-limit formula** (`budget_day_limit_from_plan`), term-by-term, each
+  from its own source (**not** via `sum(лимит_*)` — that indirection drifted
+  from this formula twice, #see history):
   ```
-  free = total_income
-       − total_obligatory          # sum of постоянные[].amount
-       − total_limits
-       − total_goals_saving        # sum of цели[].saving
-       − total_debt_monthly        # sum of долги[].monthly_payment > 0
-  day_limit = max(0, int(free / days_remaining))
+  remainder = income                       # sum(доходы[].amount)
+            − fixed                        # sum(постоянные[].amount)               — Memory постоянно_*
+            − one_time                     # лимит_разовые fact amount (0 if absent) — Memory
+            − debts_monthly                # sum(долги[].monthly_payment > 0)        — debts table
+            − cushion_contribution         # подушка.planned_contribution (0 if none) — cushion table
+            − goals_saving                 # sum(цели[].saving)                       — Memory цель_*
+  day_limit = max(0, int(remainder / days_remaining))
   ```
-  where `total_income = sum(доходы[].amount)`; if `total_income <= 0` the
-  function returns `0` immediately. **Not the same formula** as the Sonnet
-  full-recalc path (which additionally applies `already_spent` and
-  `savings_from_last_period` — see Model routing); this is the
-  lightweight day-limit-only computation used by the Mini App today view.
+  `income <= 0` → returns `0` immediately. Discretionary category limits
+  (Продукты/Привычки/…) are **not** subtracted — `remainder` *is* the
+  discretionary pool, so `remainder / days` is the daily spend allowance.
+  **Not the same formula** as the Sonnet full-recalc path (which applies
+  `already_spent` and `savings_from_last_period` — see Model routing); this is
+  the lightweight day-limit computation used by the Mini App today view.
 - **`days_remaining`** comes from `_period_days_remaining(payday, tz_offset=3)`:
   days from today (00:00 in the user's timezone `UTC+tz_offset`) to the day
   before the next payday, floored at `1`. Server budget period boundaries
