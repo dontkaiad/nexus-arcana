@@ -1037,12 +1037,19 @@ async def handle_finance_text(message: Message, text: str, bot_label: str = "☀
 
     # Низкая уверенность — уточняем только если есть маркеры дохода/бартера или ambiguous
     if data.get("confidence") == "low" and data.get("question"):
-        has_income = bool(_INCOME_MARKERS_RE.search(text)) or bool(_AMBIGUOUS_RE.search(text))
+        explicit_income = bool(_INCOME_MARKERS_RE.search(text))
+        is_ambiguous = bool(_AMBIGUOUS_RE.search(text))
         has_barter = bool(_BARTER_MARKERS_RE.search(text))
-        if not has_income and not has_barter:
-            # Нет маркеров дохода/бартера → автоматически расход
+        if not explicit_income and not is_ambiguous and not has_barter:
+            # Нет маркеров дохода/бартера/ambiguous → автоматически расход
             logger.info("finance: low confidence but no income/barter markers → auto-expense")
             data["type_"] = "💸 Расход"
+            data["confidence"] = "high"
+        elif explicit_income and not is_ambiguous and not has_barter:
+            # Явный маркер дохода (доход/получила/зарплата/перевели/вернули/...)
+            # без ambiguous-слов и без бартера → однозначно доход, не спрашиваем
+            logger.info("finance: explicit income marker, no ambiguity/barter → auto-income")
+            data["type_"] = "💰 Доход"
             data["confidence"] = "high"
         else:
             _pending_finance[uid] = (data, user_notion_id)
