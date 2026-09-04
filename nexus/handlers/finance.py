@@ -39,6 +39,7 @@ from core.budget import (
     CAT_IMPULSE as _CAT_IMPULSE,
     CUSHION_COMFORTABLE_RATE as _CUSHION_RATE,
     BUDGET_TIGHT_THRESHOLD,
+    is_parallel_limit as _is_parallel_limit_name,
 )
 
 logger = logging.getLogger("nexus.finance")
@@ -212,7 +213,8 @@ async def build_budget_message(user_notion_id: str = "", tz_offset: int = 3) -> 
                 + _display_limit_name(l.get("name") or "").lower())
 
     def _is_parallel_limit(l: dict) -> bool:
-        return any(p in _limit_tag(l) for p in ("фикс", "разов"))
+        # Единый предикат из core.budget (тот же, что budget_day_limit_from_plan).
+        return _is_parallel_limit_name(l.get("name") or "")
 
     one_time_limit = next(
         (float(l.get("amount") or 0) for l in _all_limits if "разов" in _limit_tag(l)), 0.0,

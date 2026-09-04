@@ -164,6 +164,63 @@ async def test_budget_day_limit_from_plan_default_tz_is_3():
     assert captured["tz"] == 3
 
 
+# ── лимит_фикс / лимит_разовые НЕ входят в total_limits ────────────────────
+
+@pytest.mark.asyncio
+async def test_day_limit_excludes_fixed_and_one_time_limits():
+    """budget["лимиты"] содержит лимит_фикс (задвоил бы постоянные) и
+    лимит_разовые (отдельный бакет) — оба исключаются из формулы."""
+    from core.budget import budget_day_limit_from_plan
+
+    plan = {
+        "доходы":     [{"name": "зп", "amount": 100000}],
+        "постоянные": [{"name": "аренда", "amount": 40000}],
+        "цели": [], "долги": [],
+        "лимиты": [
+            {"name": "лимит_продукты", "amount": 10000},
+            {"name": "лимит_привычки", "amount": 6000},
+            {"name": "лимит_фикс",    "amount": 40000},   # = постоянные, задвоение
+            {"name": "лимит_разовые", "amount": 43650},   # отдельный бакет
+        ],
+    }
+    with patch(_PLAN_PATH, AsyncMock(return_value=plan)), \
+         patch(_PAYDAY_PATH, AsyncMock(return_value=1)), \
+         patch(_DAYS_PATH, return_value=10):
+        result = await budget_day_limit_from_plan("u")
+
+    # free = 100000 − 40000(постоянные) − 16000(только дискреционные лимиты) = 44000
+    assert result == 44000 // 10
+    assert result > 0  # не ушло в 0 из-за задвоения
+
+
+@pytest.mark.asyncio
+async def test_day_limit_regression_no_parallel_limits():
+    """Старые данные без лимит_фикс/лимит_разовые → как раньше."""
+    from core.budget import budget_day_limit_from_plan
+
+    plan = {
+        "доходы":     [{"name": "зп", "amount": 90000}],
+        "постоянные": [{"name": "аренда", "amount": 30000}],
+        "цели": [], "долги": [],
+        "лимиты": [{"name": "продукты", "amount": 10000}],
+    }
+    with patch(_PLAN_PATH, AsyncMock(return_value=plan)), \
+         patch(_PAYDAY_PATH, AsyncMock(return_value=1)), \
+         patch(_DAYS_PATH, return_value=10):
+        result = await budget_day_limit_from_plan("u")
+
+    assert result == (90000 - 30000 - 10000) // 10
+
+
+def test_is_parallel_limit_predicate():
+    from core.budget import is_parallel_limit
+    assert is_parallel_limit("лимит_фикс")
+    assert is_parallel_limit("лимит_разовые")
+    assert is_parallel_limit("разовые")        # по display-имени
+    assert not is_parallel_limit("лимит_продукты")
+    assert not is_parallel_limit("привычки")
+
+
 @pytest.mark.asyncio
 async def test_budget_day_limit_from_plan_negative_free_returns_zero():
     """Расходы превышают доход → max(0, ...) → 0."""

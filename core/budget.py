@@ -96,6 +96,20 @@ def display_limit_name(raw_name: str) -> str:
     return LIMIT_DISPLAY.get(key, raw_name)
 
 
+# 🔒 Фикс / 📦 Разовые — категории-счётчики с прямой суммой позиций, НЕ часть
+# дискреционного пула compute_limits(). В любых формулах, вычитающих «лимиты»
+# из свободных денег, их учитывать НЕЛЬЗЯ: постоянные вычитаются отдельно
+# (total_obligatory), разовые — вообще отдельный бакет. Единый предикат для
+# build_budget_message (nexus/handlers/finance.py) и budget_day_limit_from_plan.
+_PARALLEL_LIMIT_MARKERS = ("фикс", "разов")
+
+
+def is_parallel_limit(name: str) -> bool:
+    """True для лимит_фикс / лимит_разовые — по ключу ИЛИ по display-имени."""
+    tag = (name or "").lower().replace("лимит_", "") + " " + display_limit_name(name or "").lower()
+    return any(m in tag for m in _PARALLEL_LIMIT_MARKERS)
+
+
 # ── Public API ───────────────────────────────────────────────────────────────
 
 async def get_limits(mem_db: str = "") -> Dict[str, float]:
@@ -513,7 +527,11 @@ async def budget_day_limit_from_plan(user_notion_id: str, tz_offset: int = 3) ->
         if total_income <= 0:
             return 0
         total_obligatory = sum(d["amount"] for d in budget["постоянные"])
-        total_limits = sum(d["amount"] for d in budget["лимиты"])
+        # Только дискреционные категории. лимит_фикс задвоил бы постоянные
+        # (они уже в total_obligatory), лимит_разовые — отдельный бакет,
+        # в этой формуле ему не место. См. is_parallel_limit.
+        total_limits = sum(d["amount"] for d in budget["лимиты"]
+                           if not is_parallel_limit(d.get("name", "")))
         total_goals_saving = sum(d.get("saving", 0) for d in budget["цели"])
         total_debt_monthly = sum(
             d.get("monthly_payment") or 0 for d in budget["долги"]
