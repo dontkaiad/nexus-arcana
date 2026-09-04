@@ -242,6 +242,96 @@ def test_today_plan_based_budget_day_limit(client):
     assert resp.json()["budget"]["left"] == 4400
 
 
+def _today_ctx(tz=3, expenses_by_from=None, limits=None, day_limit=5000, payday=1):
+    """Хелпер: патчит окружение /api/today. expenses_by_from — dict date_from→[entries]."""
+    exp = expenses_by_from or {}
+
+    async def fake_query(**kw):
+        return exp.get(kw.get("date_from"), [])
+
+    return [
+        patch("miniapp.backend.routes.today._tasks_repo.active", AsyncMock(return_value=[])),
+        patch("miniapp.backend.routes.today._budget_repo.query", AsyncMock(side_effect=fake_query)),
+        patch("miniapp.backend.routes.today.budget_day_limit_from_plan", AsyncMock(return_value=day_limit)),
+        patch("miniapp.backend.routes.today.get_limits", AsyncMock(return_value=(limits or {}))),
+        patch("miniapp.backend.routes.today._budget_payday", AsyncMock(return_value=payday)),
+        patch("miniapp.backend.routes.today.ask_claude", AsyncMock(return_value="tip")),
+        patch("miniapp.backend.routes.today.today_user_tz",
+              AsyncMock(return_value=(_today_local_date(tz), tz))),
+        patch("miniapp.backend.routes.today.get_user_notion_id", AsyncMock(return_value=FAKE_NOTION_USER)),
+        patch("nexus.handlers.streaks.get_streak",
+              return_value={"streak": 0, "best": 0, "last_activity_date": None,
+                            "rest_day_date": None, "rest_days_used": 0, "streak_start_date": None}),
+        patch("nexus.handlers.streaks.is_rest_day_available", return_value=False),
+    ]
+
+
+def _entry(amount, cat, date):
+    return BudgetEntry(id=f"e{amount}", description="t", amount=amount, category=cat,
+                       type_="💸 Расход", source="💳 Карта", date=date, user_notion_id="")
+
+
+def test_discretionary_free_no_spending(client):
+    """Реальный случай Кай: дискр. лимиты 16350, трат по ним 0 → свободно = 16350.
+    Отдельно от «Бюджета дня» (day_limit)."""
+    tz = 3
+    today = _today_local_iso(tz)
+    period_start = today[:8] + "01"  # payday=1
+    ctx = _today_ctx(tz=tz, day_limit=628,
+                     limits={"продукты": 10000, "привычки": 6350,
+                             "фикс": 40000, "разовые": 43650},   # фикс/разовые фильтруются
+                     expenses_by_from={today: [], period_start: []})
+    import contextlib
+    with contextlib.ExitStack() as st:
+        for p in ctx:
+            st.enter_context(p)
+        b = client.get("/api/today").json()["budget"]
+
+    assert b["discretionary_free"] == 16350
+    assert b["day"] == 628                       # «Бюджет дня» не тронут
+    assert b["spent_today"] == 0
+
+
+def test_discretionary_free_subtracts_period_spending(client):
+    """Транзакция 2000₽ 🍜 Продукты в этом периоде → свободно 16350 − 2000 = 14350."""
+    tz = 3
+    today = _today_local_iso(tz)
+    period_start = today[:8] + "01"
+    ctx = _today_ctx(tz=tz,
+                     limits={"продукты": 10000, "привычки": 6350},
+                     expenses_by_from={
+                         today: [_entry(2000, "🍜 Продукты", today)],
+                         period_start: [_entry(2000, "🍜 Продукты", today)],
+                     })
+    import contextlib
+    with contextlib.ExitStack() as st:
+        for p in ctx:
+            st.enter_context(p)
+        b = client.get("/api/today").json()["budget"]
+
+    assert b["discretionary_free"] == 14350
+
+
+def test_discretionary_free_ignores_parallel_categories(client):
+    """Транзакция 9313₽ категории 📦 Разовые НЕ влияет на «свободно» вообще."""
+    tz = 3
+    today = _today_local_iso(tz)
+    period_start = today[:8] + "01"
+    ctx = _today_ctx(tz=tz,
+                     limits={"продукты": 10000, "привычки": 6350},
+                     expenses_by_from={
+                         today: [_entry(9313, "📦 Разовые", today)],
+                         period_start: [_entry(9313, "📦 Разовые", today)],
+                     })
+    import contextlib
+    with contextlib.ExitStack() as st:
+        for p in ctx:
+            st.enter_context(p)
+        b = client.get("/api/today").json()["budget"]
+
+    assert b["discretionary_free"] == 16350   # без изменений
+
+
 def test_spent_today_query_uses_today_as_date_to(client):
     """_spent_today не включает завтрашние траты — date_to=today (#140)."""
     tz = 3

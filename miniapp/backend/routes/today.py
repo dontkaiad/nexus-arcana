@@ -9,7 +9,13 @@ from fastapi import APIRouter, Depends
 
 from core.claude_client import ask_claude
 from core.user_manager import get_user_notion_id
-from core.budget import budget_day_limit_from_plan
+from core.budget import (
+    LIMIT_CATEGORIES,
+    _budget_payday,
+    budget_day_limit_from_plan,
+    get_limits,
+    is_parallel_limit,
+)
 from core.repos.pg_finance_repo import PgNexusBudgetRepo
 from nexus.repos.pg_tasks_repo import PgTasksRepo, Task as PgTask
 
@@ -97,6 +103,56 @@ async def _spent_today(user_notion_id: str, today_iso: str, tomorrow_iso: str) -
         return int(round(sum(e.amount for e in entries)))
     except Exception as e:
         logger.warning("_spent_today PG query failed: %s", e)
+        return 0
+
+
+def _period_start_iso(payday: int, tz_offset: int) -> str:
+    """Начало текущего платёжного периода (payday → payday) по личному tz."""
+    from datetime import datetime, timezone
+    now = datetime.now(timezone(timedelta(hours=tz_offset)))
+    if now.day >= payday:
+        y, m = now.year, now.month
+    elif now.month == 1:
+        y, m = now.year - 1, 12
+    else:
+        y, m = now.year, now.month - 1
+    import calendar as _cal
+    d = min(payday, _cal.monthrange(y, m)[1])
+    return "{:04d}-{:02d}-{:02d}".format(y, m, d)
+
+
+async def _discretionary_free(user_notion_id: str, today_iso: str, tz_offset: int) -> int:
+    """«Свободно» в «Мой день» — НАКОПИТЕЛЬНЫЙ остаток дискреционных лимитов за
+    период (Продукты/Привычки/Транспорт/Кафе/Бьюти/Здоровье/Гардероб/Хобби/
+    Импульсивные). Отдельная величина от «Бюджета дня» (day_limit − spent_today).
+
+      свободно = max(0, Σ дискреционных лимитов
+                        − Σ реальных 💸 Расход этих категорий с начала периода)
+
+    🔒 Фикс / 📦 Разовые в расчёт НЕ входят (свой лимит на весь период).
+    """
+    try:
+        limits = await get_limits()   # {cat_link: amount}
+        disc_total = sum(amt for link, amt in limits.items()
+                         if not is_parallel_limit(link))
+        if disc_total <= 0:
+            return 0
+
+        payday = await _budget_payday()
+        period_start = _period_start_iso(payday, tz_offset)
+        disc_cats = set(LIMIT_CATEGORIES)   # 9 канонических дискреционных категорий
+
+        entries = await _budget_repo.query(
+            date_from=period_start, date_to=today_iso,
+            type_="💸 Расход", page_size=1000, user_notion_id=user_notion_id,
+        )
+        spent = sum(
+            e.amount for e in entries
+            if (e.category in disc_cats) and not is_parallel_limit(e.category or "")
+        )
+        return int(round(max(0, disc_total - spent)))
+    except Exception as e:
+        logger.warning("_discretionary_free failed: %s", e)
         return 0
 
 
@@ -357,6 +413,9 @@ async def get_today(tg_id: int = Depends(current_user_id)) -> dict[str, Any]:
     day_limit = await budget_day_limit_from_plan(user_notion_id, tz_offset)
     left = day_limit - spent_today
     pct = int(round(spent_today / day_limit * 100)) if day_limit else 0
+    # «Свободно» — отдельная накопительная величина (Σ дискр. лимитов − Σ трат
+    # этих категорий с начала периода). НЕ путать с «Бюджет дня» выше.
+    discretionary_free = await _discretionary_free(user_notion_id, today_str, tz_offset)
 
     streak_data = get_streak(tg_id)
     rest_available = is_rest_day_available(tg_id)
@@ -377,8 +436,9 @@ async def get_today(tg_id: int = Depends(current_user_id)) -> dict[str, Any]:
         "budget": {
             "day": day_limit,
             "spent_today": spent_today,
-            "left": left,
+            "left": left,               # day_limit − spent_today (для «Бюджет дня»)
             "pct": pct,
+            "discretionary_free": discretionary_free,   # для карточки «Свободно»
         },
         "overdue": overdue,
         "scheduled": scheduled,

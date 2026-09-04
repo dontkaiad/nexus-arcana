@@ -144,6 +144,9 @@ export function adaptToday(data) {
     todayIso,
     budgetDay: data.budget?.day ?? 0,
     spentDay: data.budget?.spent_today ?? 0,
+    // «Свободно» — накопительный остаток дискреционных лимитов за период
+    // (отдельно от «Бюджета дня»); см. today.py:_discretionary_free
+    discretionaryFree: data.budget?.discretionary_free ?? 0,
     overdue: (data.overdue || []).map((o) => ({
       id: o.id,
       title: o.title,

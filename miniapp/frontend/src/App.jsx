@@ -1393,7 +1393,7 @@ function NxDay({ s, openTask, navigate, openStreaks }) {
             <Metric s={s} v={doneCount} unit={`/${total}`} sub="задачи" />
           </div>
           <div style={{ flex: 1, minWidth: 0, cursor: "pointer" }} onClick={() => navigate?.("fin")}>
-            <Metric s={s} v={`${Math.round((t.budgetDay - t.spentDay) / 1000)}к`} unit="₽" sub="свободно" />
+            <Metric s={s} v={`${Math.round(t.discretionaryFree / 1000)}к`} unit="₽" sub="свободно" />
           </div>
           {t.streak >= 3 ? (
             <div ref={streakCellRef} style={{ flex: 1, minWidth: 0, maxWidth: STREAK_MAX, display: "flex", justifyContent: "center" }}>
