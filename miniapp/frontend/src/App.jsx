@@ -1562,17 +1562,25 @@ const _nowMonthStr = () => {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
 };
 
+const _nowDayStr = () => {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+};
+
 function NxFinance({ s }) {
   const [tab, setTab] = useState("today");
   const [finMonth, setFinMonth] = useState(_nowMonthStr);  // YYYY-MM для вкладки «Месяц»
+  const [finDay, setFinDay] = useState(_nowDayStr);  // YYYY-MM-DD для вкладки «Сегодня»
   const [drillCat, setDrillCat] = useState(null);  // wave6.1.2
   const [drillDebt, setDrillDebt] = useState(null);  // wave8.51
   // Бэкенд GET /finance?view=month&month=YYYY-MM уже поддерживал произвольный
-  // месяц — не хватало только UI навигации на фронте.
+  // месяц — не хватало только UI навигации на фронте. Тот же паттерн для дня.
   const finPath = tab === "month"
     ? `/api/finance?view=month&month=${finMonth}`
+    : tab === "today"
+    ? `/api/finance?view=today&date=${finDay}`
     : `/api/finance?view=${tab}`;
-  const { data, loading, error, refetch } = useApi(finPath, [tab, finMonth]);
+  const { data, loading, error, refetch } = useApi(finPath, [tab, finMonth, finDay]);
 
   const shiftFinMonth = (delta) => {
     const [y, m] = finMonth.split("-").map(Number);
@@ -1600,6 +1608,32 @@ function NxFinance({ s }) {
     </div>
   ) : null;
 
+  const shiftFinDay = (delta) => {
+    const [y, m, d] = finDay.split("-").map(Number);
+    const dt = new Date(y, m - 1, d + delta);  // Date сам переносит через границы месяца
+    setFinDay(`${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, "0")}-${String(dt.getDate()).padStart(2, "0")}`);
+  };
+  const dayNav = tab === "today" ? (
+    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+      <span
+        onClick={() => shiftFinDay(-1)}
+        aria-label="Предыдущий день"
+        style={{ cursor: "pointer", padding: "2px 10px", color: s.tS, fontSize: fs(20), lineHeight: 1 }}
+      >‹</span>
+      <span style={{ flex: 1, textAlign: "center", fontFamily: H, fontSize: fs(15), color: s.text, fontWeight: 500 }}>
+        {formatShortDate(finDay) || finDay}
+      </span>
+      {finDay !== _nowDayStr() && (
+        <Pill s={s} onClick={() => setFinDay(_nowDayStr())}>Сегодня</Pill>
+      )}
+      <span
+        onClick={() => shiftFinDay(1)}
+        aria-label="Следующий день"
+        style={{ cursor: "pointer", padding: "2px 10px", color: s.tS, fontSize: fs(20), lineHeight: 1 }}
+      >›</span>
+    </div>
+  ) : null;
+
   const tabsUi = (
     <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
       {[
@@ -1622,6 +1656,7 @@ function NxFinance({ s }) {
         <div className="page-title">Финансы</div>
         {tabsUi}
         {monthNav}
+        {dayNav}
         <Empty s={s} text="Загружаю..." />
       </div>
     );
@@ -1632,6 +1667,7 @@ function NxFinance({ s }) {
         <div className="page-title">Финансы</div>
         {tabsUi}
         {monthNav}
+        {dayNav}
         <ErrorBox s={s} error={error} refetch={refetch} />
       </div>
     );
@@ -1642,15 +1678,17 @@ function NxFinance({ s }) {
       <div className="page-title">Финансы</div>
       {tabsUi}
       {monthNav}
+      {dayNav}
 
       {tab === "today" && (() => {
         const { total, items, budget } = adaptFinanceToday(data);
+        const isToday = finDay === _nowDayStr();
         return (
           <>
             <Glass s={s}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
                 <div>
-                  <div style={{ fontSize: 13, fontWeight: 500, opacity: 0.75, marginBottom: 4 }}>Потрачено сегодня</div>
+                  <div style={{ fontSize: 13, fontWeight: 500, opacity: 0.75, marginBottom: 4 }}>{isToday ? "Потрачено сегодня" : "Потрачено"}</div>
                   <div style={{ fontFamily: H, fontSize: fs(32), fontWeight: 500, lineHeight: 1 }}>
                     {total.toLocaleString()} <span style={{ fontSize: fs(18), fontWeight: 400 }}>₽</span>
                   </div>
@@ -1679,7 +1717,7 @@ function NxFinance({ s }) {
                 <div style={{ textAlign: "center", padding: "12px 4px 4px" }}>
                   <div style={{ fontSize: fs(36), marginBottom: 6 }}>💚</div>
                   <div style={{ fontFamily: H, fontSize: fs(18), color: s.text }}>Пока не тратила</div>
-                  <div style={{ fontSize: fs(13), color: s.tM, marginTop: 4 }}>Сегодня без трат — приятно.</div>
+                  <div style={{ fontSize: fs(13), color: s.tM, marginTop: 4 }}>{isToday ? "Сегодня без трат — приятно." : "В этот день без трат — приятно."}</div>
                 </div>
               ) : (
                 <div style={{ display: "flex", flexDirection: "column" }}>

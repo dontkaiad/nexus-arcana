@@ -313,7 +313,7 @@ export function adaptTasks(data) {
 // ── /api/finance — 4 view-adapt ───────────────────────────────────────────
 
 export function adaptFinanceToday(data) {
-  if (!data) return { total: 0, items: [], budget: null }
+  if (!data) return { total: 0, items: [], budget: null, date: null }
   return {
     total: data.total ?? 0,
     items: (data.items || []).map((x) => ({
@@ -323,6 +323,7 @@ export function adaptFinanceToday(data) {
       amt: x.amt ?? 0,
     })),
     budget: data.budget || null,
+    date: data.date ?? null,  // дата, за которую отдан total/items (навигация по дням)
   }
 }
 

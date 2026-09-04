@@ -98,6 +98,81 @@ def test_finance_view_today(client):
     assert data["items"][0]["cat"]["emoji"] in {"🚬", "🍜"}
 
 
+def test_finance_view_today_explicit_date_navigates_not_real_today(client):
+    """?view=today&date=YYYY-MM-DD — total/items за ЭТУ дату, не за реальное
+    сегодня. «Бюджет дня» (budget.spent/left/pct) при этом остаётся про
+    реальное сегодня — не переезжает с датой навигации."""
+    tz = 3
+    today_iso = _today_iso(tz)
+    other_date = "2020-01-15"  # заведомо не сегодня
+
+    other_day_entries = [_budget_entry(700, cat="🍜 Продукты", eid="e-other", date=other_date)]
+    today_entries = [_budget_entry(300, cat="🚕 Транспорт", eid="e-today", date=today_iso)]
+
+    calls = []
+
+    async def fake_query(**kw):
+        calls.append(kw)
+        if kw.get("date_from") == other_date:
+            return other_day_entries
+        if kw.get("date_from") == today_iso:
+            return today_entries
+        return []
+
+    with patch("miniapp.backend.routes.finance._budget_repo.query",
+               AsyncMock(side_effect=fake_query)), \
+         patch("miniapp.backend.routes.finance._mem_repo.find_by_exact_key",
+               AsyncMock(return_value=[])), \
+         patch("miniapp.backend.routes.finance.today_user_tz",
+               AsyncMock(return_value=(_today_date(tz), tz))), \
+         patch("miniapp.backend.routes.finance.get_user_notion_id",
+               AsyncMock(return_value=FAKE_NOTION_USER)):
+        r = client.get(f"/api/finance?view=today&date={other_date}")
+
+    assert r.status_code == 200, r.text
+    data = r.json()
+    assert data["date"] == other_date
+    assert data["total"] == 700
+    assert len(data["items"]) == 1
+    assert data["items"][0]["desc"] == "test"
+    assert data["items"][0]["amt"] == 700
+
+    # budget.spent — за реальное сегодня (300), НЕ за просматриваемую дату (700).
+    assert data["budget"]["spent"] == 300
+
+    # Два отдельных запроса: за просматриваемую дату и за реальное сегодня.
+    date_froms = {c["date_from"] for c in calls}
+    assert date_froms == {other_date, today_iso}
+
+
+def test_finance_view_today_no_date_param_defaults_to_today(client):
+    """Без ?date= — поведение как раньше: одна дата, один запрос."""
+    tz = 3
+    entries = [_budget_entry(500, cat="🍜 Продукты")]
+
+    calls = []
+
+    async def fake_query(**kw):
+        calls.append(kw)
+        return entries
+
+    with patch("miniapp.backend.routes.finance._budget_repo.query",
+               AsyncMock(side_effect=fake_query)), \
+         patch("miniapp.backend.routes.finance._mem_repo.find_by_exact_key",
+               AsyncMock(return_value=[])), \
+         patch("miniapp.backend.routes.finance.today_user_tz",
+               AsyncMock(return_value=(_today_date(tz), tz))), \
+         patch("miniapp.backend.routes.finance.get_user_notion_id",
+               AsyncMock(return_value=FAKE_NOTION_USER)):
+        r = client.get("/api/finance?view=today")
+
+    data = r.json()
+    assert data["date"] == _today_iso(tz)
+    assert data["total"] == 500
+    assert data["budget"]["spent"] == 500
+    assert len(calls) == 1  # без навигации — один запрос, как раньше
+
+
 def test_finance_view_month_calculates_income_expense_and_limits(client):
     """income = sum Доход, expense = sum Расход, by_category маппится на лимиты."""
     tz = 3

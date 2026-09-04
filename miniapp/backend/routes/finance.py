@@ -104,12 +104,19 @@ def _extract_finance_item(entry: BudgetEntry) -> dict:
 
 # ── View: today ──────────────────────────────────────────────────────────────
 
-async def _view_today(tg_id: int) -> dict:
+async def _view_today(tg_id: int, date: Optional[str] = None) -> dict:
+    """«Сегодня» — список трат за day (по умолчанию — реальное сегодня, либо
+    произвольная дата из `date` для навигации по дням).
+
+    «Бюджет дня» (budget.day/spent/left/pct) намеренно НЕ следует за `date` —
+    это дневной лимит трат, привязан к РЕАЛЬНОМУ сегодня, не к просматриваемой
+    дате. Листается только total/items (см. Mini App wave: навигация по дням)."""
     today_date, tz_offset = await today_user_tz(tg_id)
     today_iso = today_date.isoformat()
+    view_iso = date or today_iso
     user_notion_id = (await get_user_notion_id(tg_id)) or ""
 
-    records = await _nexus_finance_records(user_notion_id, today_iso, today_iso,
+    records = await _nexus_finance_records(user_notion_id, view_iso, view_iso,
                                            type_filter="💸 Расход")
     items = [_extract_finance_item(e) for e in records]
     # 📦 Разовые / 🔒 Фикс — свой лимит на весь период (лимит_разовые/лимит_фикс),
@@ -119,17 +126,27 @@ async def _view_today(tg_id: int) -> dict:
     total = sum(int(round(e.amount)) for e in records
                 if not is_parallel_limit(e.category or ""))
 
+    # «Бюджет дня» — всегда про реальное сегодня. Если смотрим другую дату,
+    # total выше (для этой даты) ≠ то, что нужно budget.spent — считаем отдельно.
+    if view_iso == today_iso:
+        spent_today = total
+    else:
+        today_records = await _nexus_finance_records(user_notion_id, today_iso, today_iso,
+                                                      type_filter="💸 Расход")
+        spent_today = sum(int(round(e.amount)) for e in today_records
+                          if not is_parallel_limit(e.category or ""))
+
     budget_day = await budget_day_limit_from_plan(user_notion_id, tz_offset)
-    left = max(0, budget_day - total)
-    pct = _pct(total, budget_day)
+    left = max(0, budget_day - spent_today)
+    pct = _pct(spent_today, budget_day)
     return {
         "view": "today",
-        "date": today_iso,
+        "date": view_iso,
         "total": total,
         "items": items,
         "budget": {
             "day": budget_day,
-            "spent": total,
+            "spent": spent_today,
             "left": left,
             "pct": pct,
         },
@@ -523,6 +540,7 @@ async def get_finance(
     tg_id: int = Depends(current_user_id),
     view: str = Query("today", description="today|month|limits|goals|cushion"),
     month: Optional[str] = Query(None, description="YYYY-MM"),
+    date: Optional[str] = Query(None, description="YYYY-MM-DD — навигация по дням (view=today)"),
     page: int = Query(0, ge=0, description="страница лога подушки (view=cushion)"),
 ) -> dict:
     if view not in ALLOWED_VIEWS:
@@ -533,7 +551,7 @@ async def get_finance(
         month = today_date.strftime("%Y-%m")
 
     if view == "today":
-        return await _view_today(tg_id)
+        return await _view_today(tg_id, date)
     if view == "month":
         return await _view_month(tg_id, month)
     if view == "limits":
