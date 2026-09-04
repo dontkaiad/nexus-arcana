@@ -339,6 +339,20 @@ Budget has **no table of its own** — there is no migration, no
    `classify()` maps its description to `📦 Разовые` (see Model routing).
    `🔒 Фикс` / `лимит_фикс` is the same idea for `постоянно_*` positions.
 
+On Accept, `_save_budget_plan` also upserts two checklist ✅ Задачи —
+"Оплатить Фикс — {месяц год}" / "Оплатить Разовые — {месяц год}" — one
+subtask per `fixed`/`one_time` position (`nexus/handlers/finance.py:
+_upsert_budget_checklist`), skipped when that list is empty. Subtasks are
+plain 🗒️ Списки items relating to the parent task (`task_rel`), the same
+pattern `core/subtasks_handler.py` uses for the "📋 Подзадачи" button —
+**not** `tasks.parent_task_id` (that column exists in schema but is unread
+by any code path). Deadline = period end (`_period_bounds`); reminder = 3
+days before, soft (no separate deadline job when a reminder is set — same
+rule as ordinary task creation, `nexus/handlers/tasks.py:_do_save_task`).
+Re-accepting the same period matches by exact task title, replaces its
+subtasks instead of creating a duplicate task. Checking a subtask off is a
+plain checklist tick — it has no automatic link to a finance transaction.
+
 The limit display map (`лимит` link → emoji label) is owned by
 `core/budget.py:LIMIT_DISPLAY` (includes `фикс` → `🔒 Фикс`,
 `разовые` → `📦 Разовые`). These two are **not** in `_BUDGET_VARIABLE_CATS`

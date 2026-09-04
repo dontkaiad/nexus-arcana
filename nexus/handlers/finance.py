@@ -3984,6 +3984,93 @@ async def _handle_adjust_text(message: Message, uid: int) -> bool:
     return True
 
 
+# ── Save Plan: чеклист-задачи «Оплатить Фикс/Разовые» ────────────────────────
+
+async def _upsert_budget_checklist(
+    title: str,
+    item_names: List[str],
+    deadline_iso: str,
+    user_notion_id: str,
+    chat_id: int,
+    tz_offset: int = 3,
+) -> None:
+    """Создать/обновить задачу-чеклист с подзадачами на позиции плана.
+
+    Паттерн — тот же, что у «📋 Подзадачи» (core/subtasks_handler.py,
+    handle_list_subtask в lists.py): родительская ✅ Задача + чеклист в
+    🗒️ Списки с relation task_rel на неё. НЕ tasks.parent_task_id — эта
+    колонка в схеме есть, но нигде в коде не читается/не пишется, реальные
+    подзадачи в системе всегда идут через 🗒️ Списки.
+
+    Дедупликация по точному совпадению title (месяц+год внутри title —
+    одна и та же задача на весь период): повторное Принятие плана в том же
+    периоде находит существующую активную задачу и пересоздаёт её подзадачи
+    под новый список вместо создания дубля.
+
+    Дедлайн — конец периода. Напоминание — мягкое, за 3 дня до дедлайна
+    (тот же паттерн, что у обычных задач: _do_save_task в tasks.py — при
+    заданном напоминании отдельный deadline-job не ставится, только оно).
+    """
+    if not item_names:
+        return
+
+    from core.props import _title, _status, _select, _relation
+    from nexus.handlers.tasks import (
+        _date_with_tz, _schedule_reminder, _schedule_deadline_check,
+    )
+    from nexus.repos.pg_tasks_repo import PgTasksRepo as _PgTasksRepo
+    from core.repos.lists_repo import _repo as _lists_repo
+
+    # NB: "_date" в этом модуле — core.props._date (билдер Notion date-проп),
+    # НЕ datetime.date (перекрыт более поздним импортом) — парсим через
+    # datetime.strptime, как остальной код файла (см. _period_bounds).
+    deadline_dt = datetime.strptime(deadline_iso, "%Y-%m-%d")
+    reminder_dt = deadline_dt - timedelta(days=3)
+    today_local = datetime.now(_user_tz(tz_offset)).replace(hour=0, minute=0, second=0, microsecond=0)
+    reminder_iso = reminder_dt.strftime("%Y-%m-%d") if reminder_dt.date() > today_local.date() else ""
+
+    pg_tasks = _PgTasksRepo()
+    existing = await pg_tasks.find_by_title(title, user_notion_id=user_notion_id)
+    task_id = next((t.id for t in existing if t.title == title), None)
+
+    if task_id:
+        # Пересоздаём подзадачи под новый список — дедлайн/напоминание не
+        # трогаем (тот же период, тот же title → они не изменились).
+        old_items = await _lists_repo.get("📋 Чеклист", "☀️ Nexus", user_notion_id)
+        stale_ids = [it["id"] for it in old_items if it.get("task_rel") == task_id]
+        if stale_ids:
+            await _lists_repo.archive(stale_ids)
+            logger.info("_upsert_budget_checklist: archived %d stale items for %r", len(stale_ids), title)
+    else:
+        props: dict = {
+            "Задача": _title(title),
+            "Статус": _status("Not started"),
+            "Приоритет": _select("Важно"),
+            "Категория": _select("💳 Прочее"),
+            "Дедлайн": _date_with_tz(deadline_iso, tz_offset),
+        }
+        if reminder_iso:
+            props["Напоминание"] = _date_with_tz(reminder_iso, tz_offset)
+        if user_notion_id:
+            props["🪪 Пользователи"] = _relation(user_notion_id)
+
+        from nexus.repos.tasks_repo import _repo as _tasks_repo
+        from core.config import config
+        task_id = await _tasks_repo.create(config.nexus.db_tasks, props)
+        if not task_id:
+            logger.error("_upsert_budget_checklist: failed to create parent task %r", title)
+            return
+        logger.info("_upsert_budget_checklist: created task %s %r", task_id, title)
+
+        if reminder_iso:
+            await _schedule_reminder(chat_id, title, reminder_iso, task_id, tz_offset)
+        else:
+            await _schedule_deadline_check(chat_id, title, deadline_iso, task_id, tz_offset)
+
+    items = [{"name": name, "group": title, "task_rel": task_id} for name in item_names]
+    await _lists_repo.add(items, "📋 Чеклист", "☀️ Nexus", user_notion_id)
+
+
 # ── Save Plan ────────────────────────────────────────────────────────────────
 
 async def _save_budget_plan(message: Message, uid: int) -> None:
@@ -4181,6 +4268,41 @@ async def _save_budget_plan(message: Message, uid: int) -> None:
             "цель: {} — {}₽ · откладываю {}₽/мес".format(name, total, monthly),
             notion_uid,
         )
+
+    # Чеклист-задачи «Оплатить Фикс / Разовые» — дедлайн = конец периода
+    # (день перед следующим payday).
+    try:
+        payday = await _get_payday()
+        period_start, period_end = _period_bounds(payday, tz_offset=tz_offset)
+        period_start_dt = datetime.strptime(period_start, "%Y-%m-%d")
+        month_label = "{} {}".format(
+            _RU_MONTHS.get(period_start_dt.month, str(period_start_dt.month)),
+            period_start_dt.year,
+        )
+        chat_id = message.chat.id
+
+        fixed_names = [
+            "{} — {}₽".format(f.get("name", "?"), int(f.get("amount", 0) or 0))
+            for f in plan.get("fixed", [])
+        ]
+        await _upsert_budget_checklist(
+            "Оплатить Фикс — {}".format(month_label), fixed_names,
+            period_end, notion_uid, chat_id, tz_offset,
+        )
+
+        one_time_names = [
+            "{} — {}₽".format(
+                ot.get("name") or ot.get("description") or "разовый расход",
+                int(ot.get("amount", 0) or 0),
+            )
+            for ot in one_time_items
+        ]
+        await _upsert_budget_checklist(
+            "Оплатить Разовые — {}".format(month_label), one_time_names,
+            period_end, notion_uid, chat_id, tz_offset,
+        )
+    except Exception as e:
+        logger.error("_save_budget_plan: checklist tasks failed: %s", e, exc_info=True)
 
     logger.info("_save_budget_plan: all entries saved, building budget message")
 
