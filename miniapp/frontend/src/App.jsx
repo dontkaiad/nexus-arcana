@@ -1328,18 +1328,18 @@ function NxDay({ s, openTask, navigate, openStreaks }) {
   const weatherApi = useApi('/api/weather');
 
   // Карточка стрика — holo-компонент с фиксированной геометрией (всё внутри
-  // масштабируется от prop width). Меряем ширину своей flex-ячейки, чтобы
-  // карточка делила ряд наравне с «Задачи»/«Свободно», а не висела статичной
-  // плашкой 110px сбоку. Пропорции сохраняются (height = width * 112/110).
+  // масштабируется линейно от prop width). Меряем ширину своей flex-ячейки,
+  // чтобы карточка делила ряд наравне с «Задачи»/«Свободно» на любом экране
+  // (мобилка И десктоп/веб — общего max-width у страницы нет). Верхнего
+  // потолка нет: ячейка = (ряд − gap)/3, карточка ровно её заполняет.
+  // Нижний 110 — минимальная читаемость контента внутри holo-карточки.
+  // Пропорции сохраняются (height = width * 112/110).
   const streakCellRef = useRef(null);
   const [streakW, setStreakW] = useState(110);
   useEffect(() => {
     const el = streakCellRef.current;
     if (!el || typeof ResizeObserver === "undefined") return;
-    const measure = () => {
-      const w = el.clientWidth || 110;
-      setStreakW(Math.max(110, Math.min(Math.round(w), 176)));
-    };
+    const measure = () => setStreakW(Math.max(110, Math.round(el.clientWidth || 110)));
     measure();
     const ro = new ResizeObserver(measure);
     ro.observe(el);
