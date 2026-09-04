@@ -403,9 +403,34 @@ def test_finance_category_drill_down(client):
     assert data["month"] == "2026-04"
     assert data["total"] == 5300
     assert data["count"] == 2
-    # Сортировка по дате desc — самая свежая трата сверху.
-    assert data["items"][0]["desc"] == "интернет"
-    assert data["items"][1]["desc"] == "коммуналка"
+    # Сортировка по дате asc — от старой к новой.
+    assert data["items"][0]["desc"] == "коммуналка"
+    assert data["items"][1]["desc"] == "интернет"
+
+
+def test_finance_category_same_day_sorted_by_creation_order(client):
+    """Три траты ОДНОГО дня, разное время создания (эмулируется через id —
+    autoincrement, совпадает с порядком создания) → идут от старой к новой
+    по id, не в порядке "как вернул SQL" (тут — намеренно перемешанный)."""
+    entries = [
+        _budget_entry(300, cat="🏠 Жильё", desc="третья", eid="30", date="2026-04-10"),
+        _budget_entry(100, cat="🏠 Жильё", desc="первая", eid="10", date="2026-04-10"),
+        _budget_entry(200, cat="🏠 Жильё", desc="вторая", eid="20", date="2026-04-10"),
+    ]
+
+    with patch("miniapp.backend.routes.finance._budget_repo.query",
+               AsyncMock(return_value=entries)), \
+         patch("miniapp.backend.routes.finance._mem_repo.find_by_category",
+               AsyncMock(return_value=[])), \
+         patch("miniapp.backend.routes.finance.today_user_tz",
+               AsyncMock(return_value=(_today_date(), 3))), \
+         patch("miniapp.backend.routes.finance.get_user_notion_id",
+               AsyncMock(return_value=FAKE_NOTION_USER)):
+        r = client.get("/api/finance/category?cat=🏠%20Жильё&month=2026-04")
+
+    data = r.json()
+    assert [i["desc"] for i in data["items"]] == ["первая", "вторая", "третья"]
+    assert "_sort_key" not in data["items"][0]
 
 
 # ── POST /api/expenses (deprecated alias) ───────────────────────────────────

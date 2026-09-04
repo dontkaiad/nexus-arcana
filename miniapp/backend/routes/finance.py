@@ -81,6 +81,17 @@ async def _nexus_finance_records(
         return []
 
 
+def _id_sort_key(entry_id) -> tuple:
+    """Сравнимый ключ для entry.id как вторичного ключа сортировки: числовые id
+    (обычный случай — autoincrement bigint из БД) сравниваются как числа,
+    нечисловые (например в тестовых фикстурах) — как строки, без TypeError
+    при смешении типов внутри одного sort()."""
+    try:
+        return (0, int(entry_id))
+    except (TypeError, ValueError):
+        return (1, str(entry_id))
+
+
 def _extract_finance_item(entry: BudgetEntry) -> dict:
     return {
         "id": entry.id,
@@ -567,13 +578,19 @@ async def get_finance_category(
             "amount": entry.amount,
             "desc": entry.description,
             "date": entry.date[:10] if entry.date else "",
+            "_sort_key": entry.date or "",  # полная дата ДО обрезки — для сортировки
         })
         total += entry.amount
         raw_key = (entry.description or "—").strip().lower()
         key = synonyms.get(raw_key, raw_key)
         by_desc[key] = by_desc.get(key, 0) + entry.amount
 
-    items.sort(key=lambda x: x["date"], reverse=True)
+    # От старой к новой. entry.date в БД хранит только дату без времени —
+    # для стабильного порядка внутри одного дня используем id (autoincrement,
+    # совпадает с порядком создания) как вторичный ключ.
+    items.sort(key=lambda x: (x["_sort_key"], _id_sort_key(x["id"])))
+    for it in items:
+        del it["_sort_key"]
 
     by_desc_list = [
         {"name": name, "amount": int(round(amt))}
