@@ -1327,6 +1327,25 @@ function NxDay({ s, openTask, navigate, openStreaks }) {
   // wave6.5: погода (календарь стриков теперь только в StreaksSheet)
   const weatherApi = useApi('/api/weather');
 
+  // Карточка стрика — holo-компонент с фиксированной геометрией (всё внутри
+  // масштабируется от prop width). Меряем ширину своей flex-ячейки, чтобы
+  // карточка делила ряд наравне с «Задачи»/«Свободно», а не висела статичной
+  // плашкой 110px сбоку. Пропорции сохраняются (height = width * 112/110).
+  const streakCellRef = useRef(null);
+  const [streakW, setStreakW] = useState(110);
+  useEffect(() => {
+    const el = streakCellRef.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const measure = () => {
+      const w = el.clientWidth || 110;
+      setStreakW(Math.max(110, Math.min(Math.round(w), 176)));
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [data]);
+
   if (loading) return <Empty s={s} text="Загружаю..." />;
   if (error) return <ErrorBox s={s} error={error} refetch={refetch} />;
 
@@ -1372,10 +1391,10 @@ function NxDay({ s, openTask, navigate, openStreaks }) {
             <Metric s={s} v={`${Math.round((t.budgetDay - t.spentDay) / 1000)}к`} unit="₽" sub="свободно" />
           </div>
           {t.streak >= 3 ? (
-            <div style={{ flex: 1, display: "flex", justifyContent: "center" }}>
+            <div ref={streakCellRef} style={{ flex: 1, display: "flex", justifyContent: "center" }}>
               <StreakAchievedCard
-                width={110}
-                height={112}
+                width={streakW}
+                height={Math.round(streakW * 112 / 110)}
                 current={t.streak}
                 best={t.streakBest || t.streak}
                 lastDateIso={t.streakLastDate}
