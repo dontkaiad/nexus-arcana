@@ -87,15 +87,32 @@ _GOAL_TO_CODE = {
     "другое":      "other",
 }
 
-# place: lowercase Russian (from LLM parser)
+# place: lowercase Russian (from LLM parser). Canonical labels + colloquial
+# synonyms so the parser resolves «кладбище»/«озеро»/«храм» too — same synonym
+# set the Arcana router keys off (see core/ritual_places.py).
 _PLACE_TO_CODE = {
     "дома":         "home",
+    "дом":          "home",
     "лес":          "forest",
+    "роща":         "forest",
+    "чаща":         "forest",
     "погост":       "graveyard",
+    "кладбище":     "graveyard",
+    "могила":       "graveyard",
     "перекрёсток":  "crossroad",
+    "перекресток":  "crossroad",
+    "распутье":     "crossroad",
     "церковь":      "church",
+    "храм":         "church",
+    "часовня":      "church",
     "водоём":       "water",
+    "водоем":       "water",
+    "озеро":        "water",
+    "пруд":         "water",
+    "речка":        "water",
+    "река":         "water",
     "поле":         "field",
+    "луг":          "field",
     "другое":       "other",
 }
 

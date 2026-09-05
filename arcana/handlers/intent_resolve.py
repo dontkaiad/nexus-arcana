@@ -100,8 +100,15 @@ _PRACTICE_KEYWORDS = _re.compile(
 
 
 def looks_like_practice(text: str) -> bool:
-    """Текст содержит хотя бы один маркер эзотерической практики."""
-    return bool(_PRACTICE_KEYWORDS.search(text or ""))
+    """Текст содержит хотя бы один маркер эзотерической практики.
+
+    Маркер — явное слово (ритуал/расклад/таро/…) ИЛИ упоминание места
+    практики из закрытой таксономии ``ritual_place`` (кладбище/перекрёсток/
+    водоём/церковь/лес — см. core/ritual_places.py). «Работа на кладбище» —
+    это практика, не бытовая задача.
+    """
+    from core.ritual_places import mentions_ritual_place
+    return bool(_PRACTICE_KEYWORDS.search(text or "")) or mentions_ritual_place(text)
 
 
 def _practice_kb(slug: str) -> InlineKeyboardMarkup:

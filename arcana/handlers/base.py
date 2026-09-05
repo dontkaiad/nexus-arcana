@@ -40,7 +40,7 @@ tarot_interp — трактовка таро
 delete       — удалить записи («удали», «удалить», «убери»)
 work_done    — работа ПО ПРАКТИКЕ сделана (прошедшее время) с эзо-маркером.
 work_list    — список работ, что делать по практике
-nexus_redirect — БЫТОВЫЕ задачи и финансы. Любое «сделать X», «купить Y», «позвонить Z», «написать», «починить», «созвон», «миниапп», «код», «запись врача» БЕЗ слов про практику (ритуал/расклад/таро/клиент/свечи/колода) → nexus_redirect. Слово «задача» — всегда nexus_redirect. Бытовые покупки → nexus_redirect.
+nexus_redirect — БЫТОВЫЕ задачи и финансы. Любое «сделать X», «купить Y», «позвонить Z», «написать», «починить», «созвон», «миниапп», «код», «запись врача» БЕЗ слов про практику (ритуал/расклад/таро/клиент/свечи/колода) → nexus_redirect. Слово «задача» — всегда nexus_redirect. Бытовые покупки → nexus_redirect. НО: упоминание места практики (кладбище/погост/могила, перекрёсток/распутье, водоём/озеро/пруд/речка, церковь/храм/часовня, лес/роща/чаща) = это Аркана (ritual_planned / ritual_done), НЕ nexus_redirect.
 finance      — финансы практики, сколько заработала, расходы, прибыль
 grimoire_add    — записать в гримуар (заговор, рецепт, комбинация, заметка)
 grimoire        — открыть гримуар, посмотреть записи
@@ -70,6 +70,12 @@ unknown      — остальное
 Выход: nexus_redirect
 Вход: «починить погоду на сайте»
 Выход: nexus_redirect
+Вход: «работа на кладбище сегодня в 17»
+Выход: ritual_planned
+Вход: «сделала на перекрёстке откуп»
+Выход: ritual_done
+Вход: «занести на погост в субботу»
+Выход: ritual_planned
 Вход: «запиши в гримуар: тест — заговор на деньги, читать на убывающую луну»
 Выход: grimoire_add
 Вход: «в гримуар: рецепт масла защиты»
@@ -518,6 +524,15 @@ async def route_message(
         from arcana.handlers.intent_resolve import (
             looks_like_practice, send_nexus_redirect,
         )
+
+        # Место практики (кладбище/перекрёсток/водоём/церковь/лес — закрытая
+        # таксономия ritual_place) = сильный сигнал Арканы. Haiku иногда всё
+        # равно кидает такое в nexus_redirect / work / unknown — перехватываем.
+        from core.ritual_places import mentions_ritual_place
+        if intent in ("nexus_redirect", "work", "task", "unknown", "") \
+                and mentions_ritual_place(text):
+            intent = "ritual_done" if _has_past_tense(text) else "ritual_planned"
+            logger.info("ritual-place signal → intent=%s | %s", intent, text[:60])
 
         # Legacy/неоднозначные алиасы → нормализуем в актуальные intent'ы.
         if intent in ("work", "task"):
