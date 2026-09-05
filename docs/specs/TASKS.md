@@ -1,6 +1,6 @@
 # TASKS — data-model contract (Nexus ✅ Задачи)
 
-Code conforms to: 0bc132e. This spec describes the tasks data model as of
+Code conforms to: 4efb540 (+ this change: recurring reminder-done counts toward global streak). This spec describes the tasks data model as of
 that commit; update it in the same PR that changes the model.
 
 > Contract, not snapshot. Describes the persistent model, the guarantees of
@@ -138,7 +138,10 @@ No amount in `note` → nothing written, completion is never blocked.
   on a recurring task → `In progress` (`_handle_recurring_reminder_done`);
   only the deadline path (or a recurring task with no deadline) advances the
   cycle. Between cycles a recurring task stays `In progress` with
-  `completed_at` marking the last completion.
+  `completed_at` marking the last completion. The reminder-done click still
+  counts toward the **global daily streak** (`source="bot_recurring_reminder_done"`)
+  even though the status stays `In progress` — «I did it today» is a streak
+  day regardless of which ping was answered.
 - **Recurring-without-reminder is revived on startup.** `restore_reminders_
   on_startup` pass 3: a non-terminal task with `repeat_time` set but
   `reminder IS NULL` gets its first future run computed from `repeat_time`,
@@ -158,8 +161,15 @@ No amount in `note` → nothing written, completion is never blocked.
     (`reset_broken_streaks`); weekly/monthly are not auto-reset. Written
     only from the Mini App completion path.
   - global daily streak — `nexus/handlers/streaks.py`, incremented on ANY
-    `Done` task from the bot path (`_update_streak_line`,
-    `source="bot_task_done"`).
+    task completion from the bot: non-recurring `Done`
+    (`_update_streak_line`, `source="bot_task_done"`), recurring deadline-done
+    (`_handle_recurring_deadline_done`, `source="bot_recurring_done"`), and
+    recurring reminder-done (`_handle_recurring_reminder_done`,
+    `source="bot_recurring_reminder_done"`); plus the Mini App
+    (`source="miniapp_task_done"`). Same-day repeat calls are no-ops
+    (idempotent on `last_activity_date`). It has **no lazy decay** — the
+    counter only drops inside `update_streak` when the last activity is
+    older than yesterday (no `reset_broken_streaks` for the global table).
 - **`reminder`/`deadline` are projections.** APScheduler jobs are derived
   from these columns and rebuilt on startup; the columns are the source of
   truth, the jobs are disposable.

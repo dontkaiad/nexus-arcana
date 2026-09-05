@@ -1296,6 +1296,7 @@ async def _handle_recurring_reminder_done(
     message: Message,
     task_id: str,
     title: str,
+    uid: int = 0,
 ) -> None:
     """Повторяющаяся задача: напоминание выполнено → статус 'In progress', ждём дедлайн."""
     try:
@@ -1304,6 +1305,21 @@ async def _handle_recurring_reminder_done(
     except Exception as e:
         logger.error("_handle_recurring_reminder_done error: %s", e)
         await message.answer("⚠️ Ошибка обновления статуса.")
+    # Глобальный дневной стрик засчитывается от ЛЮБОГО «сделано» — включая клик
+    # ✅ на НАПОМИНАНИИ повторяющейся задачи (не только на дедлайн-пинге). Без
+    # этого день, в который Кай закрыла recurring через reminder, был пустой →
+    # reset на 1 (стрик 3→1, streak_calls пуст за день). Отдельный source-тег,
+    # чтобы в логе было видно путь. НЕ трогаем per-task core/task_streaks.py —
+    # он про дедлайн-цикл, вызывается в _handle_recurring_deadline_done.
+    if uid:
+        tz = await _get_user_tz(uid) or 3
+        try:
+            from nexus.handlers.streaks import update_streak
+            await update_streak(
+                uid, tz, source="bot_recurring_reminder_done", task_id=task_id,
+            )
+        except Exception as e:
+            logger.debug("recurring reminder streak update error: %s", e)
 
 
 async def _handle_recurring_deadline_done(
@@ -2215,7 +2231,7 @@ async def task_complete(call: CallbackQuery) -> None:
             await _handle_recurring_deadline_done(call.message, task_id, pg_task, repeat, task_title, uid)
             await call.answer("✅ Выполнено!")
         else:
-            await _handle_recurring_reminder_done(call.message, task_id, task_title)
+            await _handle_recurring_reminder_done(call.message, task_id, task_title, uid)
             await call.answer("👍 В процессе")
     else:
         result = await _repo.set_status(task_id, "Done")

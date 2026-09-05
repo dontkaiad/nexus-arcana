@@ -182,6 +182,49 @@ async def test_recurring_reminder_done_already_in_progress():
 
 
 @pytest.mark.asyncio
+async def test_recurring_reminder_done_counts_global_streak():
+    """Клик ✅ на НАПОМИНАНИИ повторяющейся задачи (не дедлайн-пинге) должен
+    засчитываться в глобальный дневной стрик. Прод-баг: streak_calls пуст за
+    день, стрик 3→1, т.к. этот путь не звал update_streak.
+
+    Отдельный source-тег 'bot_recurring_reminder_done' — чтобы в логе
+    streak_calls был виден путь. core/task_streaks.py здесь НЕ трогаем."""
+    from nexus.handlers import tasks
+
+    msg = _make_message()
+
+    with patch.object(tasks._repo, "set_in_progress", AsyncMock()), \
+         patch.object(tasks, "_get_user_tz", AsyncMock(return_value=3)), \
+         patch("nexus.handlers.streaks.update_streak",
+               AsyncMock(return_value=None)) as m_streak, \
+         patch("core.task_streaks.update_task_streak") as m_per_task:
+        await tasks._handle_recurring_reminder_done(
+            msg, "task-id-7", "тестовая задача", uid=999_001,
+        )
+
+    m_streak.assert_awaited_once()
+    kwargs = m_streak.await_args.kwargs
+    assert kwargs["source"] == "bot_recurring_reminder_done"
+    assert kwargs["task_id"] == "task-id-7"
+    assert m_streak.await_args.args[0] == 999_001
+    # per-task стрик (дедлайн-цикл) этим путём НЕ трогается
+    m_per_task.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_recurring_reminder_done_no_uid_skips_streak():
+    """uid=0 (legacy-вызовы без uid) → update_streak не зовётся, не падает."""
+    from nexus.handlers import tasks
+
+    msg = _make_message()
+    with patch.object(tasks._repo, "set_in_progress", AsyncMock()), \
+         patch("nexus.handlers.streaks.update_streak", AsyncMock()) as m_streak:
+        await tasks._handle_recurring_reminder_done(msg, "task-id-8", "x")
+
+    m_streak.assert_not_called()
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("tz,expected_off", [(3, 3), (5, 5)])
 async def test_completion_timestamp_uses_user_tz(tz, expected_off):
     """Время завершения (маркер «выполнено сегодня» в Mini App) — в личном tz
