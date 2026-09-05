@@ -101,11 +101,13 @@ pointer to this ADR.
 ## Out of scope — repeat
 
 **Repeat *is* wanted** for genuinely recurring practice work (a monthly retainer
-ritual, a weekly social-media batch) and **will be ported separately**, with its
-own ADR at implementation time. Repeat is a scheduling/recurrence feature; it is
-**independent of streaks**. Porting repeat does not pull streaks in with it — the
-`_handle_recurring_deadline_done` path in Nexus happens to call both, but for
-Arcana the recurrence half is in scope and the streak half is not (this ADR).
+ritual, a weekly social-media batch). Repeat is a scheduling/recurrence feature;
+it is **independent of streaks**. Porting repeat does not pull streaks in with it
+— the `_handle_recurring_deadline_done` path in Nexus happens to call both, but
+for Arcana the recurrence half is in scope and the streak half is not (this ADR).
 
-The audit row «Repeat + repeat_time» stays an **open item**, annotated to point
-here for the streak-independence note.
+**Status: repeat implemented** (migration `ab12cd34ef56`, `core/recurrence.py`,
+`arcana/handlers/work_reminder_kb.py::_handle_recurring_work_done`). It calls the
+shared recurrence math and reminder scheduler and, per this ADR, **does not**
+call `core/task_streaks.py`. See the updated «Repeat + repeat_time» row in the
+audit doc.

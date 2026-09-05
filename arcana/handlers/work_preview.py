@@ -174,19 +174,30 @@ def _format_preview(data: dict) -> str:
 
     deadline_disp = (deadline or "не указан").replace("T", " ")
     reminder_disp = (reminder or "нет").replace("T", " ")
+    repeat = data.get("repeat") or "Нет"
+    is_recurring = repeat and repeat != "Нет"
 
     lines = [
         f"🔮 <b>{title}</b>",
         f"🏷 {category} · {pemoji} {priority}",
-        f"📅 Дедлайн: {deadline_disp}",
-        f"🔔 Напоминание: {reminder_disp}",
-        f"👥 {work_type}" + (f" · {client_name}" if client_name else ""),
     ]
+    if is_recurring:
+        rt = data.get("repeat_time")
+        dow = data.get("day_of_week")
+        rep_bits = [repeat]
+        if dow:
+            rep_bits.append(dow)
+        if rt:
+            rep_bits.append(f"в {rt}")
+        lines.append(f"🔄 Повтор: {' '.join(rep_bits)}")
+    else:
+        lines.append(f"📅 Дедлайн: {deadline_disp}")
+    lines.append(f"🔔 Напоминание: {reminder_disp}")
+    lines.append(f"👥 {work_type}" + (f" · {client_name}" if client_name else ""))
 
-    # Спрашиваем уточнение ТОЛЬКО если нет дедлайна. Если он есть —
-    # auto-reminder = deadline - 1 день подставится в cb_work_save сам,
-    # юзера про напоминание не дёргаем.
-    if not deadline:
+    # Спрашиваем уточнение ТОЛЬКО для одноразовой работы без дедлайна.
+    # Повторяющуюся не дёргаем — repeat_time/дефолт 09:00 подставится сам.
+    if not deadline and not is_recurring:
         lines.append("")
         lines.append("❓ Уточни:")
         lines.append("— Когда сделать? («завтра», «1 июня», «через 2 дня»)")
@@ -239,8 +250,14 @@ async def _parse_work_text(text: str, tz_offset: int) -> dict:
     category = WORK_CATEGORY_MAP.get(category_raw) if category_raw else None
     work_type = "🤝 Клиентская" if client_name or "клиент" in type_raw else "🌟 Личная"
 
+    _REPEATS = {"нет", "ежедневно", "еженедельно", "ежемесячно"}
+    repeat_raw = (data.get("repeat") or "Нет").strip().capitalize()
+    repeat = repeat_raw if repeat_raw.lower() in _REPEATS else "Нет"
+    repeat_time = data.get("repeat_time") or None
+    day_of_week = data.get("day_of_week") or None
+
     deadline = None
-    if deadline_raw:
+    if deadline_raw and repeat == "Нет":
         deadline = deadline_raw.replace(" ", "T") if " " in deadline_raw else deadline_raw
 
     return {
@@ -251,6 +268,9 @@ async def _parse_work_text(text: str, tz_offset: int) -> dict:
         "client_name": client_name,
         "deadline": deadline,
         "reminder": None,
+        "repeat": repeat,
+        "repeat_time": repeat_time,
+        "day_of_week": day_of_week,
     }
 
 
@@ -302,6 +322,27 @@ def _auto_reminder(deadline: str) -> str:
     return (dt - timedelta(days=1)).strftime("%Y-%m-%dT%H:%M")
 
 
+def _first_recurring_reminder(repeat_time: Optional[str], tz_offset: int) -> str:
+    """Первое future-напоминание повторяющейся Работы из «Времени повтора».
+
+    repeat_time — 'HH:MM' или 'HH:MM|every_Nd'; None → 09:00. Если время
+    сегодня уже прошло — переносим на завтра. Паритет с nexus
+    _handle_recurring_task_reset (ветка «reminder не был проставлен»).
+    """
+    from core.recurrence import parse_repeat_time
+    canon_time, _ivl = parse_repeat_time(repeat_time or "")
+    try:
+        h, m = map(int, canon_time.split(":"))
+    except Exception:
+        h, m = 9, 0
+    tz = timezone(timedelta(hours=tz_offset))
+    now_local = datetime.now(tz)
+    fr = now_local.replace(hour=h, minute=m, second=0, microsecond=0)
+    if fr <= now_local:
+        fr = fr + timedelta(days=1)
+    return fr.strftime("%Y-%m-%dT%H:%M")
+
+
 # ── Partial pending (нет деталей — ждём дополнения) ─────────────────────────
 
 async def _save_partial_pending(
@@ -323,6 +364,9 @@ async def _save_partial_pending(
         "client_id": None,
         "deadline": (parsed or {}).get("deadline"),
         "reminder": None,
+        "repeat": (parsed or {}).get("repeat") or "Нет",
+        "repeat_time": (parsed or {}).get("repeat_time"),
+        "day_of_week": (parsed or {}).get("day_of_week"),
         "user_notion_id": user_notion_id,
         "msg_id": None,
         "chat_id": message.chat.id,
@@ -361,6 +405,7 @@ async def handle_add_work_preview(
             and not data.get("category")
             and not data.get("client_name")
             and not data.get("deadline")
+            and (data.get("repeat") or "Нет") == "Нет"
         )
         if is_partial:
             await _save_partial_pending(message, text, user_notion_id, parsed=data)
@@ -510,6 +555,7 @@ async def cb_work_save(call: CallbackQuery) -> None:
                 deadline_dt = _dt.strptime(deadline_str[:16], fmt).replace(tzinfo=_tz.utc)
             except ValueError:
                 pass
+        repeat = data.get("repeat") or "Нет"
         result = await _works_repo.create(
             title=data.get("title") or "Работа",
             priority=data.get("priority") or "Можно потом",
@@ -517,6 +563,9 @@ async def cb_work_save(call: CallbackQuery) -> None:
             category=data.get("category"),
             client_id=data.get("client_id"),
             user_notion_id=data.get("user_notion_id") or "",
+            repeat=repeat,
+            repeat_time=data.get("repeat_time"),
+            day_of_week=data.get("day_of_week"),
         )
     except Exception as e:
         logger.error("works_repo.create failed: %s", e)
@@ -528,12 +577,15 @@ async def cb_work_save(call: CallbackQuery) -> None:
 
     _pending_del(uid)
 
-    # Reminder = указанное юзером ИЛИ deadline - 1 день
+    tz_offset = await get_user_tz(uid)
+
+    # Reminder: указанное юзером ИЛИ (одноразовая) deadline - 1 день ИЛИ
+    # (повторяющаяся) первый future-run из repeat_time / дефолт 09:00.
     reminder = data.get("reminder")
+    if not reminder and repeat != "Нет":
+        reminder = _first_recurring_reminder(data.get("repeat_time"), int(tz_offset))
     if not reminder and data.get("deadline"):
         reminder = _auto_reminder(data["deadline"])
-
-    tz_offset = await get_user_tz(uid)
     if reminder:
         try:
             import asyncio as _asyncio
@@ -571,11 +623,19 @@ async def cb_work_save(call: CallbackQuery) -> None:
     work_type = data.get("work_type") or "🌟 Личная"
     client_name = data.get("client_name")
 
+    if repeat != "Нет":
+        _rt = data.get("repeat_time")
+        _dow = data.get("day_of_week")
+        _bits = [repeat] + ([_dow] if _dow else []) + ([f"в {_rt}"] if _rt else [])
+        when_line = f"🔄 Повтор: {' '.join(_bits)}\n"
+    else:
+        when_line = f"📅 Дедлайн: {deadline_disp}\n"
+
     text_content = (
         f"⚡ <b>Работа создана!</b>\n"
         f"🔮 {title}\n"
         f"🏷 {category} · {pemoji} {priority}\n"
-        f"📅 Дедлайн: {deadline_disp}\n"
+        f"{when_line}"
         f"🔔 Напоминание: {reminder_disp}\n"
         f"👥 {work_type}"
         + (f" · {client_name}" if client_name else "")

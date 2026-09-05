@@ -15,7 +15,9 @@ from sqlalchemy import BigInteger, Column, Table, create_engine
 from sqlalchemy.pool import StaticPool
 
 from arcana.repos.rituals_tables import metadata
-from arcana.repos.works_tables import works, work_status, work_priority
+from arcana.repos.works_tables import (
+    works, work_status, work_priority, work_repeat, work_day_of_week,
+)
 from arcana.repos.works_repo import Work
 import arcana.repos.pg_works_repo as pgw
 
@@ -31,7 +33,10 @@ def works_engine(monkeypatch):
         "sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool,
     )
     try:
-        metadata.create_all(engine, tables=[work_status, work_priority, clients_stub, works])
+        metadata.create_all(engine, tables=[
+            work_status, work_priority, work_repeat, work_day_of_week,
+            clients_stub, works,
+        ])
         with engine.begin() as c:
             for sid, code in [(1, "open"), (2, "done"), (3, "archived")]:
                 c.execute(work_status.insert().values(id=sid, code=code, label=code))

@@ -23,6 +23,11 @@ class Work:
     reminder_dt: Optional[Any] = None   # datetime with tz from PG
     deadline_iso: str = ""
     category: str = ""
+    # repeat (recurring works — ADR-0023). `repeat` holds the RU label
+    # ("Нет"/"Ежедневно"/"Еженедельно"/"Ежемесячно"), like Task.repeat.
+    repeat: str = "Нет"
+    day_of_week: str = ""
+    repeat_time: str = ""
 
 
 def _pg_repo():

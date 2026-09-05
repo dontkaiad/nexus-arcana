@@ -101,6 +101,82 @@ def _parse_relative_time(text: str, tz_offset: int) -> Optional[str]:
 
 # ── callbacks ──────────────────────────────────────────────────────────────────
 
+async def _handle_recurring_work_done(
+    message: Message, work_id: str, work, title: str, tz_offset: int,
+) -> str:
+    """Повторяющаяся Работа завершена → сдвинуть на следующий цикл, НЕ mark_done.
+
+    Аналог nexus ``_handle_recurring_deadline_done``, но:
+    - БЕЗ ``update_task_streak`` — стрики сознательно исключены (ADR-0023);
+    - без промежуточного «In progress» — у Работ Арканы статусы open/done/archived,
+      recycled-работа возвращается в 'open' с будущими датами.
+
+    Возвращает дату следующего вхождения ('YYYY-MM-DD') или '' если не удалось.
+    """
+    from core.recurrence import parse_repeat_time, next_cycle_date
+    from arcana.bot import arcana_reminder_flow
+    from arcana.repos.pg_works_repo import PgWorksRepo
+
+    repeat = (work.repeat if work else "") or "Ежедневно"
+    canon_time, ivl_days = parse_repeat_time((work.repeat_time if work else "") or "")
+
+    cur_deadline = work.deadline_dt.isoformat() if (work and work.deadline_dt) else ""
+    cur_reminder = work.reminder_dt.isoformat() if (work and work.reminder_dt) else ""
+
+    new_deadline = (
+        next_cycle_date(cur_deadline, repeat, tz_offset, ivl_days)
+        if cur_deadline else ""
+    )
+    if cur_reminder:
+        new_reminder = next_cycle_date(
+            cur_reminder, repeat, tz_offset, ivl_days, override_time=canon_time,
+        )
+    elif canon_time and repeat != "Нет":
+        # reminder не был выставлен при создании — первый future-run из repeat_time
+        try:
+            h, m = map(int, canon_time.split(":"))
+        except Exception:
+            h, m = 9, 0
+        tz = timezone(timedelta(hours=tz_offset))
+        now_local = datetime.now(tz)
+        fr = now_local.replace(hour=h, minute=m, second=0, microsecond=0)
+        if fr <= now_local:
+            fr = fr + timedelta(days=1)
+        new_reminder = fr.strftime("%Y-%m-%dT%H:%M")
+    else:
+        new_reminder = ""
+
+    def _to_dt(s: str):
+        if not s:
+            return None
+        try:
+            fmt = "%Y-%m-%dT%H:%M" if "T" in s else "%Y-%m-%d"
+            return datetime.strptime(s[:16], fmt).replace(
+                tzinfo=timezone(timedelta(hours=tz_offset))
+            )
+        except ValueError:
+            return None
+
+    await PgWorksRepo().reschedule_cycle(
+        work_id, deadline=_to_dt(new_deadline), reminder=_to_dt(new_reminder),
+    )
+
+    try:
+        arcana_reminder_flow.remove_jobs(work_id)
+    except Exception:
+        pass
+    if new_reminder:
+        try:
+            await arcana_reminder_flow.schedule_reminder(
+                chat_id=message.chat.id, title=title, reminder_dt=new_reminder,
+                page_id=work_id, tz_offset=tz_offset,
+            )
+        except Exception as e:
+            logger.warning("_handle_recurring_work_done: schedule failed: %s", e)
+
+    return (new_deadline or new_reminder or "")[:10]
+
+
 @router.callback_query(F.data.startswith("work_complete_"))
 async def work_complete(call: CallbackQuery) -> None:
     work_id = call.data.split("_", 2)[2]
@@ -109,9 +185,22 @@ async def work_complete(call: CallbackQuery) -> None:
     try:
         from arcana.repos.pg_works_repo import PgWorksRepo
         repo = PgWorksRepo()
+        work = await repo.find_by_id(work_id)
+        is_recurring = bool(work and work.repeat and work.repeat != "Нет")
+        if is_recurring:
+            tz_offset = await _get_tz(call.from_user.id)
+            title = _get_title(call.message.text or "") or (work.title if work else "Работа")
+            nxt = await _handle_recurring_work_done(
+                call.message, work_id, work, title, tz_offset,
+            )
+            await call.message.edit_reply_markup()
+            await call.answer("✅ Выполнено!")
+            tail = f"\n🔄 Повтор: {work.repeat.lower()} — следующий раз {nxt}" if nxt else ""
+            await call.message.reply(f"💅 Готово!\n✅ {title} — выполнено{tail}")
+            return
         await repo.mark_done(work_id)
     except Exception as e:
-        logger.error("work_complete: mark_done failed: %s", e)
+        logger.error("work_complete: failed: %s", e)
         await call.answer("⚠️ Ошибка обновления", show_alert=True)
         return
 

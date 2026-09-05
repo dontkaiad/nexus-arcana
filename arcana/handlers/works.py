@@ -18,7 +18,10 @@ PARSE_WORK_SYSTEM = (
     '"priority": "срочно/важно/можно потом", '
     '"category": "расклад/ритуал/соцсети/расходники/обучение/прочее или null", '
     '"client_name": "имя клиента или null", '
-    '"type": "личная/клиентская"}\n\n'
+    '"type": "личная/клиентская", '
+    '"repeat": "Нет|Ежедневно|Еженедельно|Ежемесячно", '
+    '"repeat_time": "HH:MM или null", '
+    '"day_of_week": "Пн|Вт|Ср|Чт|Пт|Сб|Вс или null"}\n\n'
     "Правила парсинга deadline (как в Nexus):\n"
     "- 'завтра' → дата=завтра без времени (YYYY-MM-DD)\n"
     "- 'послезавтра' → +2 дня\n"
@@ -27,17 +30,38 @@ PARSE_WORK_SYSTEM = (
     "- 'завтра в 18' / 'в субботу в 19:30' → YYYY-MM-DDTHH:MM\n"
     "- 'к 10 мая' → 2026-05-10 (год — текущий или следующий по контексту)\n"
     "- если дедлайн НЕ упомянут — null. Не выдумывай.\n\n"
+    "Правила repeat (повторяющиеся ритуалы/работы, как в Nexus):\n"
+    "- 'каждый день/ежедневно/каждое утро/каждый вечер' → repeat='Ежедневно'\n"
+    "- 'каждую неделю/каждый [день недели]/еженедельно' → repeat='Еженедельно'\n"
+    "- 'раз в месяц/ежемесячно/каждый месяц' → repeat='Ежемесячно'\n"
+    "- 'каждые N дней/раз в N дней' → repeat='Ежедневно', repeat_time='HH:MM|every_Nd'\n"
+    "- иначе repeat='Нет'\n"
+    "- если repeat != 'Нет': deadline=null (не ставь текущую дату!)\n"
+    "- day_of_week: только при repeat='Еженедельно' (пн→'Пн', вт→'Вт', ...)\n"
+    "- repeat_time: 'каждый день в 10' → '10:00'; 'каждое утро' → '09:00'; "
+    "'каждый вечер' → '20:00'; время не указано → null\n\n"
     "title — короткий, по-делу: «Финансовый ритуал для Маши», «Расклад на работу Игоря».\n\n"
     "Примеры (для Haiku — следуй формату строго):\n"
     'Вход: «сделать маше финансовый ритуал завтра в 18»\n'
     'Выход: {"title":"Финансовый ритуал для Маши","deadline":"<завтра>T18:00",'
-    '"priority":"важно","category":"ритуал","client_name":"Маша","type":"клиентская"}\n\n'
+    '"priority":"важно","category":"ритуал","client_name":"Маша","type":"клиентская",'
+    '"repeat":"Нет","repeat_time":null,"day_of_week":null}\n\n'
     'Вход: «расклад на работу игоря к пятнице»\n'
     'Выход: {"title":"Расклад на работу Игоря","deadline":"<ближайшая пятница>",'
-    '"priority":"важно","category":"расклад","client_name":"Игорь","type":"клиентская"}\n\n'
+    '"priority":"важно","category":"расклад","client_name":"Игорь","type":"клиентская",'
+    '"repeat":"Нет","repeat_time":null,"day_of_week":null}\n\n'
+    'Вход: «чистка чакр себе каждое утро в 8»\n'
+    'Выход: {"title":"Чистка чакр","deadline":null,'
+    '"priority":"важно","category":"ритуал","client_name":null,"type":"личная",'
+    '"repeat":"Ежедневно","repeat_time":"08:00","day_of_week":null}\n\n'
+    'Вход: «пост в канал каждый понедельник»\n'
+    'Выход: {"title":"Пост в канал","deadline":null,'
+    '"priority":"можно потом","category":"соцсети","client_name":null,"type":"личная",'
+    '"repeat":"Еженедельно","repeat_time":null,"day_of_week":"Пн"}\n\n'
     'Вход: «закупить свечи»\n'
     'Выход: {"title":"Закупить свечи","deadline":null,'
-    '"priority":"можно потом","category":"расходники","client_name":null,"type":"личная"}'
+    '"priority":"можно потом","category":"расходники","client_name":null,"type":"личная",'
+    '"repeat":"Нет","repeat_time":null,"day_of_week":null}'
 )
 
 WORK_CATEGORY_MAP = {
@@ -102,6 +126,21 @@ async def handle_work_done(message: Message, text: str, user_notion_id: str = ""
 
         if not best or best_score == 0:
             await message.answer(f"❌ Не нашла работу по «{hint}».")
+            return
+
+        # Повторяющаяся Работа → следующий цикл, не закрываем (ADR-0023: repeat
+        # да, стрики нет). `best` из list_open уже несёт repeat/repeat_time.
+        if best.repeat and best.repeat != "Нет":
+            from core.shared_handlers import get_user_tz
+            from arcana.repos.pg_works_repo import PgWorksRepo
+            from arcana.handlers.work_reminder_kb import _handle_recurring_work_done
+            tz_offset = int(await get_user_tz(message.from_user.id))
+            full = await PgWorksRepo().find_by_id(best.id)
+            nxt = await _handle_recurring_work_done(
+                message, best.id, full or best, best.title, tz_offset,
+            )
+            tail = f"\n🔄 Повтор: {best.repeat.lower()} — следующий раз {nxt}" if nxt else ""
+            await message.answer(f"🔥 Работа выполнена!\n🔮 {best.title}{tail}")
             return
 
         ok = await _repo.mark_done(best.id)

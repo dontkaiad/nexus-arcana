@@ -31,6 +31,28 @@ work_status = Table(
     Column("sort",  SmallInteger, server_default=text("0")),
 )
 
+# repeat / day-of-week lookups — mirror nexus task_repeat / task_day_of_week
+# (migration ab12cd34ef56). See ADR-0023 (repeat in scope, streaks not).
+work_repeat = Table(
+    "work_repeat",
+    metadata,
+    Column("id",    SmallInteger, primary_key=True, autoincrement=True),
+    Column("code",  Text,         nullable=False,  unique=True),
+    Column("emoji", Text),
+    Column("label", Text,         nullable=False),
+    Column("sort",  SmallInteger, server_default=text("0")),
+)
+
+work_day_of_week = Table(
+    "work_day_of_week",
+    metadata,
+    Column("id",    SmallInteger, primary_key=True, autoincrement=True),
+    Column("code",  Text,         nullable=False,  unique=True),
+    Column("emoji", Text),
+    Column("label", Text,         nullable=False),
+    Column("sort",  SmallInteger, server_default=text("0")),
+)
+
 works = Table(
     "works",
     metadata,
@@ -42,6 +64,10 @@ works = Table(
     Column("priority_id", SmallInteger, ForeignKey("work_priority.id")),
     Column("status_id",   SmallInteger, ForeignKey("work_status.id")),
     Column("client_id",   BigInteger,   ForeignKey("clients.id")),
+
+    Column("repeat_id",      SmallInteger, ForeignKey("work_repeat.id")),
+    Column("day_of_week_id", SmallInteger, ForeignKey("work_day_of_week.id")),
+    Column("repeat_time",    Text),
 
     Column("reminder",     TIMESTAMP(timezone=True)),
     Column("user_notion_id", Text),

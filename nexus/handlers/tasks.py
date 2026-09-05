@@ -14,6 +14,11 @@ from aiogram.filters import BaseFilter
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from core.claude_client import ask_claude
 from core.props import _title, _select, _date, _status, _relation, _text
+from core.recurrence import (
+    parse_repeat_time as _parse_repeat_time,
+    interval_label as _interval_label,
+    next_cycle_date as _next_cycle_date,
+)
 from nexus.repos.tasks_repo import _repo
 from nexus.handlers.utils import react
 from core.layout import maybe_convert
@@ -1180,100 +1185,9 @@ async def handle_last_task_clarify(
         return False
 
 
-import calendar as _calendar
-
-
-def _parse_repeat_time(raw: str) -> tuple:
-    """Parse 'HH:MM|every_Nd' → ('HH:MM', N).  Returns ('HH:MM', 0) if no interval."""
-    if not raw:
-        return ("09:00", 0)
-    if "|every_" in raw:
-        parts = raw.split("|every_", 1)
-        time_str = parts[0] or "09:00"
-        m = _re.match(r"(\d+)d", parts[1])
-        return (time_str, int(m.group(1)) if m else 0)
-    # Haiku иногда возвращает "every_Nd" без времени — извлекаем интервал, ставим дефолт 09:00
-    m = _re.match(r"every_(\d+)d$", raw)
-    if m:
-        return ("09:00", int(m.group(1)))
-    return (raw, 0)
-
-
-def _interval_label(interval_days: int) -> str:
-    """Human-readable label: 'каждые 2 дня' / 'каждые 5 дней'."""
-    if interval_days <= 0:
-        return ""
-    last = interval_days % 10
-    last100 = interval_days % 100
-    if last == 1 and last100 != 11:
-        word = "день"
-    elif 2 <= last <= 4 and not (12 <= last100 <= 14):
-        word = "дня"
-    else:
-        word = "дней"
-    return f"каждые {interval_days} {word}"
-
-
-def _next_cycle_date(current_date_str: str, repeat: str, tz_offset: int = 3,
-                     interval_days: int = 0,
-                     override_time: Optional[str] = None) -> str:
-    """Вычислить дату следующего цикла для повторяющейся задачи.
-
-    base = max(old_date, today) — чтобы не прыгать в прошлое если задача просрочена.
-    Если входная строка содержит время (YYYY-MM-DDTHH:MM) — время сохраняется.
-    Возвращает YYYY-MM-DD или YYYY-MM-DDTHH:MM.
-
-    `override_time` (HH:MM) — каноническое время из «Время повтора»; если задано,
-    заменяет HH:MM из current_date_str. Это нужно после снуза напоминания: иначе
-    снузенное время навсегда «портит» каноническое (issue #67).
-    """
-    # issue #143: входная строка может нести явный offset (PG отдаёт '+00:00').
-    # Нормализуем в локальное настенное время ДО извлечения даты/времени, иначе
-    # split("T")[1] вернёт UTC-часы, а [:10] — UTC-дату (сдвиг у полуночи).
-    if current_date_str:
-        current_date_str = _to_local_wall(current_date_str, tz_offset)
-    has_time = "T" in (current_date_str or "")
-    now = datetime.now(timezone(timedelta(hours=tz_offset)))
-    today = now.date()
-
-    if current_date_str:
-        try:
-            old_date = datetime.strptime(current_date_str[:10], "%Y-%m-%d").date()
-        except ValueError:
-            old_date = today
-    else:
-        old_date = today
-
-    # Всегда считаем от сегодня или позже — не от просроченной даты
-    base = max(old_date, today)
-
-    if repeat == "Ежедневно":
-        step = interval_days if interval_days > 1 else 1
-        next_date = base + timedelta(days=step)
-    elif repeat == "Еженедельно":
-        next_date = base + timedelta(weeks=1)
-    elif repeat == "Ежемесячно":
-        month = base.month + 1
-        year = base.year
-        if month > 12:
-            month = 1
-            year += 1
-        try:
-            next_date = base.replace(year=year, month=month)
-        except ValueError:
-            last_day = _calendar.monthrange(year, month)[1]
-            next_date = base.replace(year=year, month=month, day=last_day)
-    else:
-        next_date = base + timedelta(days=1)
-
-    result = next_date.strftime("%Y-%m-%d")
-    if has_time:
-        if override_time and _re.match(r"^\d{2}:\d{2}$", override_time):
-            time_part = override_time
-        else:
-            time_part = current_date_str.split("T")[1][:5]
-        result = result + "T" + time_part
-    return result
+# _parse_repeat_time / _interval_label / _next_cycle_date вынесены в
+# core/recurrence.py (общий код с Arcana works, см. ADR-0023) — импортируются
+# вверху файла под теми же приватными именами.
 
 
 async def _handle_recurring_task_reset(

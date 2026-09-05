@@ -12,7 +12,9 @@ import sqlalchemy as sa
 from sqlalchemy.pool import StaticPool
 
 from arcana.repos.works_repo import Work
-from arcana.repos.works_tables import metadata, work_priority, work_status, works
+from arcana.repos.works_tables import (
+    metadata, work_priority, work_status, works, work_repeat, work_day_of_week,
+)
 
 
 # ── Shared in-memory engine ──────────────────────────────────────────────────
@@ -42,16 +44,35 @@ def engine():
             "(id INTEGER PRIMARY KEY AUTOINCREMENT, code TEXT NOT NULL UNIQUE, "
             "emoji TEXT, label TEXT NOT NULL, sort INTEGER DEFAULT 0)"
         ))
+        for _t in ("work_repeat", "work_day_of_week"):
+            conn.execute(sa.text(
+                f"CREATE TABLE {_t} "
+                "(id INTEGER PRIMARY KEY AUTOINCREMENT, code TEXT NOT NULL UNIQUE, "
+                "emoji TEXT, label TEXT NOT NULL, sort INTEGER DEFAULT 0)"
+            ))
         conn.execute(sa.text(
             "CREATE TABLE works "
             "(id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT NOT NULL, "
             "deadline TIMESTAMP, reminder TIMESTAMP, category TEXT, "
             "priority_id INTEGER, status_id INTEGER, client_id INTEGER, "
+            "repeat_id INTEGER, day_of_week_id INTEGER, repeat_time TEXT, "
             "user_notion_id TEXT, "
             "created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, "
             "updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)"
         ))
     with eng.begin() as conn:
+        conn.execute(work_repeat.insert().values(
+            [{"code": "none", "emoji": "", "label": "Нет", "sort": 0},
+             {"code": "daily", "emoji": "🔁", "label": "Ежедневно", "sort": 1},
+             {"code": "weekly", "emoji": "🔁", "label": "Еженедельно", "sort": 2},
+             {"code": "monthly", "emoji": "🔁", "label": "Ежемесячно", "sort": 3}]
+        ))
+        conn.execute(work_day_of_week.insert().values(
+            [{"code": c, "emoji": "", "label": l, "sort": i + 1}
+             for i, (c, l) in enumerate(
+                 [("mon", "Пн"), ("tue", "Вт"), ("wed", "Ср"), ("thu", "Чт"),
+                  ("fri", "Пт"), ("sat", "Сб"), ("sun", "Вс")])]
+        ))
         conn.execute(work_priority.insert().values(
             [{"code": "urgent", "emoji": "🔴", "label": "Срочно", "sort": 0},
              {"code": "important", "emoji": "🟡", "label": "Важно", "sort": 1},
