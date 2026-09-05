@@ -85,7 +85,7 @@ async def test_return_partial_calls_reduce_amount():
 
     msg = _make_msg("Маша вернула 2к")
     with patch.object(drmod._repo, "reduce_amount",
-                      new_callable=AsyncMock, return_value=(3000.0, False)) as mock_reduce:
+                      new_callable=AsyncMock, return_value=(3000.0, False, 0.0)) as mock_reduce:
         await handle_they_owe_command(msg, user_notion_id="uid1")
 
     mock_reduce.assert_called_once()

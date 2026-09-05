@@ -70,10 +70,10 @@ async def test_partial_debt_payment_returns_int_new_amount():
     from nexus.handlers.finance import _partial_debt_payment
 
     with patch.object(drmod._repo, "reduce_amount",
-                      new_callable=AsyncMock, return_value=(7000.0, False)):
+                      new_callable=AsyncMock, return_value=(7000.0, False, 0.0)):
         result = await _partial_debt_payment("Аня", 3000, user_notion_id="uid1")
 
-    assert result == 7000
+    assert result == (7000, 0.0)
 
 
 @pytest.mark.asyncio
@@ -82,10 +82,23 @@ async def test_partial_debt_payment_zero_when_closed():
     from nexus.handlers.finance import _partial_debt_payment
 
     with patch.object(drmod._repo, "reduce_amount",
-                      new_callable=AsyncMock, return_value=(0.0, True)):
+                      new_callable=AsyncMock, return_value=(0.0, True, 0.0)):
         result = await _partial_debt_payment("Аня", 99999, user_notion_id="uid1")
 
-    assert result == 0
+    assert result == (0, 0.0)
+
+
+@pytest.mark.asyncio
+async def test_partial_debt_payment_propagates_overpaid():
+    """payment > amount → overpaid проброшен, не потерян."""
+    import core.repos.pg_debts_repo as drmod
+    from nexus.handlers.finance import _partial_debt_payment
+
+    with patch.object(drmod._repo, "reduce_amount",
+                      new_callable=AsyncMock, return_value=(0.0, True, 2000.0)):
+        result = await _partial_debt_payment("Аня", 7000, user_notion_id="uid1")
+
+    assert result == (0, 2000.0)
 
 
 @pytest.mark.asyncio

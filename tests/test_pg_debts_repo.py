@@ -129,9 +129,10 @@ async def test_reduce_amount_partial():
         result = await repo.reduce_amount("u1", "i_owe", "Аня", payment=3000)
 
     assert result is not None
-    new_amount, closed = result
+    new_amount, closed, overpaid = result
     assert new_amount == 7000.0
     assert closed is False
+    assert overpaid == 0.0
     row = _get_row(eng, name="Аня")
     assert bool(row.is_active) is True
     assert float(row.amount) == 7000.0
@@ -146,11 +147,27 @@ async def test_reduce_amount_closes_when_zero():
         result = await repo.reduce_amount("u1", "i_owe", "Аня", payment=6000)
 
     assert result is not None
-    new_amount, closed = result
+    new_amount, closed, overpaid = result
     assert new_amount == 0.0
     assert closed is True
+    assert overpaid == 1000.0
     row = _get_row(eng, name="Аня")
     assert bool(row.is_active) is False
+
+
+@pytest.mark.asyncio
+async def test_reduce_amount_no_overpaid_when_exact():
+    """payment == amount → долг закрыт ровно, overpaid = 0 (не 1000 из предыдущего теста)."""
+    eng = _make_engine()
+    repo = PgDebtsRepo()
+    with patch("core.repos.pg_debts_repo._get_engine", return_value=eng):
+        await repo.upsert("u1", "Аня", "i_owe", amount=5000)
+        result = await repo.reduce_amount("u1", "i_owe", "Аня", payment=5000)
+
+    new_amount, closed, overpaid = result
+    assert new_amount == 0.0
+    assert closed is True
+    assert overpaid == 0.0
 
 
 @pytest.mark.asyncio

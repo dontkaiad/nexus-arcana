@@ -115,6 +115,8 @@ class TestSQLitePending:
             "_pending_unknown",   # UI: ожидание выбора категории
             "_last_finance_ts",   # rate-limit timestamp
             "_photo_pending",     # UI: ожидание фото
+            "_pending_overpaid",  # UI: ожидание выбора кнопки после переплаты по долгу
+            "_pending_windfall_manual",  # UI: ожидание выбора кнопки для крупного дохода
         }
 
         suspicious = []

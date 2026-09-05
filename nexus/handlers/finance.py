@@ -1016,22 +1016,25 @@ async def _add_impulse_windfall_bonus(user_notion_id: str, period_start: str, am
     return new_total
 
 
-async def _distribute_windfall_income(amount: float, uid: int, user_notion_id: str) -> str:
-    """Непредвиденный доход (не Зарплата/Практика) — авто-распределение.
+# Порог, выше которого непредвиденный доход слишком крупный для автоматики —
+# показываем предпросмотр авто-разбивки + кнопки ручного выбора вместо
+# молчаливого распределения (#часть2, коммит после 206f118).
+WINDFALL_MANUAL_THRESHOLD = 50000.0
+
+# uid → {"amount", "plan", "user_notion_id"} — между сообщением-предпросмотром
+# и нажатием одной из 4 кнопок ручного распределения крупной суммы.
+_pending_windfall_manual: Dict[int, dict] = {}
+
+
+async def _compute_windfall_plan(amount: float, user_notion_id: str, tz_offset: int) -> dict:
+    """Чистый расчёт (без записи в БД) — что случилось бы с этой суммой.
 
     Тяжёлый месяц (BUDGET_TIGHT_THRESHOLD, core.budget — та же граница что
     comfortable в compute_limits(), от персистентных фактов Памяти, не от
     Sonnet-плана сессии): сперва докидываем 🎲 Импульсивные, с потолком
-    _IMPULSE_WINDFALL_CAP за период; остаток — как в обычном месяце.
-    Обычный месяц: активный долг с monthly_payment > 0 → туда (reduce_amount,
-    тот же метод что «отдала X»); иначе → в подушку (add_to_balance).
-    Возвращает готовое сообщение для пользователя ("" если amount <= 0).
+    _IMPULSE_WINDFALL_CAP за период; остаток — как в обычном месяце: активный
+    долг с monthly_payment > 0, иначе подушка.
     """
-    amount = float(amount or 0)
-    if amount <= 0:
-        return ""
-
-    tz_offset = await _get_user_tz(uid)
     payday = await _get_payday()
     period_start, _period_end = _period_bounds(payday, tz_offset=tz_offset)
     budget_data = await _load_budget_data(user_notion_id)
@@ -1044,25 +1047,44 @@ async def _distribute_windfall_income(amount: float, uid: int, user_notion_id: s
     is_tight = free_after < BUDGET_TIGHT_THRESHOLD
 
     to_impulse = 0.0
-    used_after = 0.0
     remainder = amount
-
     if is_tight:
         accumulated = await _get_impulse_windfall_bonus(user_notion_id, period_start)
         headroom = max(0.0, _IMPULSE_WINDFALL_CAP - accumulated)
         to_impulse = min(amount, headroom)
         remainder = amount - to_impulse
 
-        if to_impulse > 0:
-            used_after = await _add_impulse_windfall_bonus(user_notion_id, period_start, to_impulse)
-            limits = await _get_limits("")
-            current_impulse = limits.get(_cat_link(_CAT_IMPULSE), 0)
-            new_impulse = current_impulse + to_impulse
-            await _save_memory_entry(
-                "лимит_импульсивный",
-                "лимит: {} — {}₽/мес".format(_CAT_IMPULSE, int(round(new_impulse))),
-                user_notion_id,
-            )
+    debt_name = _first_burning_debt_name(debts) if debt_payment > 0 else ""
+    return {
+        "period_start": period_start,
+        "is_tight": is_tight,
+        "to_impulse": to_impulse,
+        "remainder": remainder,
+        "debt_name": debt_name,
+        "debts": debts,
+    }
+
+
+async def _apply_windfall_plan(amount: float, user_notion_id: str, plan: dict) -> str:
+    """Записывает план из _compute_windfall_plan в БД, возвращает готовое
+    сообщение для пользователя. reduce_amount теперь возвращает overpaid —
+    если долг закрылся с излишком, он не теряется, уходит в подушку."""
+    to_impulse = plan["to_impulse"]
+    remainder = plan["remainder"]
+    period_start = plan["period_start"]
+    debt_name = plan["debt_name"]
+
+    used_after = 0.0
+    if to_impulse > 0:
+        used_after = await _add_impulse_windfall_bonus(user_notion_id, period_start, to_impulse)
+        limits = await _get_limits("")
+        current_impulse = limits.get(_cat_link(_CAT_IMPULSE), 0)
+        new_impulse = current_impulse + to_impulse
+        await _save_memory_entry(
+            "лимит_импульсивный",
+            "лимит: {} — {}₽/мес".format(_CAT_IMPULSE, int(round(new_impulse))),
+            user_notion_id,
+        )
 
     parts = ["💰 Непредвиденный доход {:,.0f}₽ распределён:".format(amount)]
     if to_impulse > 0:
@@ -1071,16 +1093,26 @@ async def _distribute_windfall_income(amount: float, uid: int, user_notion_id: s
         ))
 
     if remainder > 0:
-        debt_name = _first_burning_debt_name(debts)
+        from core.repos.pg_cushion_repo import _repo as _cushion_repo
         new_debt_amount = None
-        if debt_payment > 0 and debt_name:
-            new_debt_amount = await _partial_debt_payment(debt_name, int(round(remainder)), user_notion_id)
+        overpaid = 0.0
+        if debt_name:
+            result = await _partial_debt_payment(debt_name, int(round(remainder)), user_notion_id)
+            if result is not None:
+                new_debt_amount, overpaid = result
         if new_debt_amount is not None:
             parts.append("→ 📋 Долг {} +{:,.0f}₽ (осталось {:,}₽)".format(
                 debt_name, remainder, new_debt_amount,
             ))
+            if overpaid > 0:
+                new_balance = await _cushion_repo.add_to_balance(
+                    user_notion_id, overpaid, source="windfall_income",
+                    note="переплата по долгу из непредвиденного дохода",
+                )
+                parts.append("→ 🛡️ Переплата {:,.0f}₽ сверху ушла в подушку (баланс {:,.0f}₽)".format(
+                    overpaid, new_balance,
+                ))
         else:
-            from core.repos.pg_cushion_repo import _repo as _cushion_repo
             new_balance = await _cushion_repo.add_to_balance(
                 user_notion_id, remainder, source="windfall_income",
                 note="непредвиденный доход",
@@ -1088,6 +1120,157 @@ async def _distribute_windfall_income(amount: float, uid: int, user_notion_id: s
             parts.append("→ 🛡️ Подушка +{:,.0f}₽ (баланс {:,.0f}₽)".format(remainder, new_balance))
 
     return "\n".join(parts)
+
+
+def _format_windfall_preview(plan: dict) -> str:
+    """То же сообщение, что _apply_windfall_plan вернула бы, но БЕЗ записи —
+    для предпросмотра при amount >= WINDFALL_MANUAL_THRESHOLD. Сумма долга —
+    из уже загруженных budget_data (read-only), reduce_amount не вызываем."""
+    to_impulse = plan["to_impulse"]
+    remainder = plan["remainder"]
+    debt_name = plan["debt_name"]
+    parts = []
+    if to_impulse > 0:
+        parts.append("→ 🎲 Импульсивные +{:,.0f}₽".format(to_impulse))
+    if remainder > 0:
+        if debt_name:
+            debt = next((d for d in plan["debts"] if d.get("name") == debt_name), None)
+            debt_amt = float(debt.get("amount", 0) or 0) if debt else 0.0
+            new_amount = max(0.0, debt_amt - remainder)
+            parts.append("→ 📋 Долг {} +{:,.0f}₽ (осталось {:,.0f}₽)".format(debt_name, remainder, new_amount))
+        else:
+            parts.append("→ 🛡️ Подушка +{:,.0f}₽".format(remainder))
+    return "\n".join(parts)
+
+
+def _windfall_manual_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🛡️ Вся сумма в подушку", callback_data="windfall_all_cushion")],
+        [InlineKeyboardButton(text="📋 Закрыть долги полностью", callback_data="windfall_close_debts")],
+        [InlineKeyboardButton(text="⚖️ Разделить между подушкой и целями", callback_data="windfall_split")],
+        [InlineKeyboardButton(text="✅ Оставить как предложено выше", callback_data="windfall_asis")],
+    ])
+
+
+async def _send_windfall_manual_prompt(message: Message, amount: float, uid: int, user_notion_id: str) -> None:
+    """amount >= WINDFALL_MANUAL_THRESHOLD — не распределяем молча, показываем
+    предпросмотр авто-разбивки + кнопки ручного выбора."""
+    tz_offset = await _get_user_tz(uid)
+    plan = await _compute_windfall_plan(amount, user_notion_id, tz_offset)
+    _pending_windfall_manual[uid] = {"amount": amount, "plan": plan, "user_notion_id": user_notion_id}
+    preview = _format_windfall_preview(plan)
+    text = (
+        "💰 <b>Крупное поступление: {:,.0f}₽</b>\n\n"
+        "Автоматически получилось бы:\n{}\n\n"
+        "Это слишком большая сумма для автоматики — как распределить?"
+    ).format(amount, preview or "→ 🛡️ Подушка +{:,.0f}₽".format(amount))
+    await message.answer(text, reply_markup=_windfall_manual_keyboard(), parse_mode="HTML")
+
+
+@router.callback_query(F.data == "windfall_all_cushion")
+async def on_windfall_all_cushion(call: CallbackQuery, user_notion_id: str = "") -> None:
+    uid = call.from_user.id
+    pending = _pending_windfall_manual.pop(uid, None)
+    if not pending:
+        await call.answer("Нет данных.")
+        return
+    amount = pending["amount"]
+    unid = pending.get("user_notion_id") or user_notion_id
+    from core.repos.pg_cushion_repo import _repo as _cushion_repo
+    new_balance = await _cushion_repo.add_to_balance(
+        unid, amount, source="windfall_income", note="крупное поступление — вся сумма в подушку",
+    )
+    await call.message.edit_text(
+        "🛡️ Вся сумма {:,.0f}₽ ушла в подушку. Баланс: {:,.0f}₽".format(amount, new_balance),
+        parse_mode="HTML",
+    )
+    await call.answer()
+
+
+@router.callback_query(F.data == "windfall_close_debts")
+async def on_windfall_close_debts(call: CallbackQuery, user_notion_id: str = "") -> None:
+    uid = call.from_user.id
+    pending = _pending_windfall_manual.pop(uid, None)
+    if not pending:
+        await call.answer("Нет данных.")
+        return
+    amount = pending["amount"]
+    unid = pending.get("user_notion_id") or user_notion_id
+    debts = pending["plan"].get("debts", [])
+
+    remaining = amount
+    closed_names = []
+    for d in debts:
+        if remaining <= 0:
+            break
+        name = d.get("name", "?")
+        debt_amt = float(d.get("amount", 0) or 0)
+        if debt_amt <= 0:
+            continue
+        payment = min(remaining, debt_amt)
+        result = await _partial_debt_payment(name, int(round(payment)), unid)
+        if result is not None:
+            closed_names.append(name)
+            remaining -= payment
+
+    parts = ["📋 Долги погашены: {}".format(", ".join(closed_names) if closed_names else "—")]
+    if remaining > 0:
+        from core.repos.pg_cushion_repo import _repo as _cushion_repo
+        new_balance = await _cushion_repo.add_to_balance(
+            unid, remaining, source="windfall_income", note="остаток после закрытия долгов",
+        )
+        parts.append("🛡️ Остаток {:,.0f}₽ ушёл в подушку (баланс {:,.0f}₽)".format(remaining, new_balance))
+    await call.message.edit_text("\n".join(parts), parse_mode="HTML")
+    await call.answer()
+
+
+@router.callback_query(F.data == "windfall_split")
+async def on_windfall_split(call: CallbackQuery) -> None:
+    """Уточняющий вопрос текстом — Кай сама пишет разбивку (тот же паттерн,
+    что у других уточнений в файле: свободный текст, не форма)."""
+    uid = call.from_user.id
+    pending = _pending_windfall_manual.get(uid)
+    if not pending:
+        await call.answer("Нет данных.")
+        return
+    amount = pending["amount"]
+    half = amount / 2
+    await call.message.edit_text(
+        "⚖️ Раздели {:,.0f}₽ между подушкой и целями текстом, например:\n"
+        "«{:,.0f} в подушку, {:,.0f} на цель Х»".format(amount, half, half),
+        parse_mode="HTML",
+    )
+    await call.answer()
+
+
+@router.callback_query(F.data == "windfall_asis")
+async def on_windfall_asis(call: CallbackQuery, user_notion_id: str = "") -> None:
+    uid = call.from_user.id
+    pending = _pending_windfall_manual.pop(uid, None)
+    if not pending:
+        await call.answer("Нет данных.")
+        return
+    amount = pending["amount"]
+    unid = pending.get("user_notion_id") or user_notion_id
+    msg_text = await _apply_windfall_plan(amount, unid, pending["plan"])
+    await call.message.edit_text(msg_text, parse_mode="HTML")
+    await call.answer()
+
+
+async def _distribute_windfall_income(amount: float, uid: int, user_notion_id: str) -> str:
+    """Непредвиденный доход (не Зарплата/Практика) — авто-распределение.
+
+    amount >= WINDFALL_MANUAL_THRESHOLD — НЕ распределяет молча, возвращает ""
+    (caller обязан вызвать _send_windfall_manual_prompt вместо этого).
+    Возвращает готовое сообщение для пользователя ("" если amount <= 0).
+    """
+    amount = float(amount or 0)
+    if amount <= 0 or amount >= WINDFALL_MANUAL_THRESHOLD:
+        return ""
+
+    tz_offset = await _get_user_tz(uid)
+    plan = await _compute_windfall_plan(amount, user_notion_id, tz_offset)
+    return await _apply_windfall_plan(amount, user_notion_id, plan)
 
 
 async def handle_finance_text(message: Message, text: str, bot_label: str = "☀️ Nexus",
@@ -1260,11 +1443,15 @@ async def handle_finance_text(message: Message, text: str, bot_label: str = "☀
         exc in data.get("category", "") for exc in _WINDFALL_EXCLUDED_CATEGORIES
     ):
         try:
-            windfall_msg = await _distribute_windfall_income(
-                data.get("amount", 0), uid, user_notion_id,
-            )
-            if windfall_msg:
-                await message.answer(windfall_msg, parse_mode="HTML")
+            windfall_amount = float(data.get("amount", 0) or 0)
+            if windfall_amount >= WINDFALL_MANUAL_THRESHOLD:
+                await _send_windfall_manual_prompt(message, windfall_amount, uid, user_notion_id)
+            else:
+                windfall_msg = await _distribute_windfall_income(
+                    windfall_amount, uid, user_notion_id,
+                )
+                if windfall_msg:
+                    await message.answer(windfall_msg, parse_mode="HTML")
         except Exception as e:
             logger.error("windfall income distribution error: %s", e, exc_info=True)
 
@@ -2058,20 +2245,69 @@ def _recalc_keyboard() -> InlineKeyboardMarkup:
     ]])
 
 
+# ── Переплата при закрытии долга (reduce_amount overpaid) ────────────────────
+# uid → overpaid₽, между сообщением-предупреждением и нажатием кнопки.
+_pending_overpaid: Dict[int, float] = {}
+
+
+def _overpaid_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text="🛡️ В подушку", callback_data="overpaid_cushion"),
+        InlineKeyboardButton(text="Оставить так", callback_data="overpaid_keep"),
+    ]])
+
+
+async def _notify_overpaid(message: Message, overpaid: float) -> None:
+    """Долг закрыт с излишком — не молчим, спрашиваем что с ним делать."""
+    _pending_overpaid[message.from_user.id] = overpaid
+    await message.answer(
+        "Переплата {:,.0f}₽ — долг закрыт, остаток не потерян, что с ним делать?".format(overpaid),
+        reply_markup=_overpaid_keyboard(), parse_mode="HTML",
+    )
+
+
+@router.callback_query(F.data == "overpaid_cushion")
+async def on_overpaid_cushion(call: CallbackQuery, user_notion_id: str = "") -> None:
+    uid = call.from_user.id
+    overpaid = _pending_overpaid.pop(uid, None)
+    if not overpaid:
+        await call.answer("Нет данных.")
+        return
+    from core.repos.pg_cushion_repo import _repo as _cushion_repo
+    new_balance = await _cushion_repo.add_to_balance(
+        user_notion_id, overpaid, source="debt_overpaid", note="переплата по долгу",
+    )
+    await call.message.edit_text(
+        "🛡️ Переплата {:,.0f}₽ ушла в подушку. Баланс: {:,.0f}₽".format(overpaid, new_balance),
+        parse_mode="HTML",
+    )
+    await call.answer()
+
+
+@router.callback_query(F.data == "overpaid_keep")
+async def on_overpaid_keep(call: CallbackQuery) -> None:
+    _pending_overpaid.pop(call.from_user.id, None)
+    await call.message.edit_text("✅ Ок, оставляю как есть.", parse_mode="HTML")
+    await call.answer()
+
+
 async def _deactivate_debt(name: str, user_notion_id: str = "") -> bool:
     """Deactivate a debt. Returns True if found."""
     from core.repos.pg_debts_repo import _repo as _debt_repo
     return await _debt_repo.deactivate(user_notion_id, "i_owe", name)
 
 
-async def _partial_debt_payment(name: str, payment: int, user_notion_id: str = "") -> Optional[int]:
-    """Reduce debt by payment. Returns new remaining or None if not found."""
+async def _partial_debt_payment(name: str, payment: int, user_notion_id: str = "") -> Optional[Tuple[int, float]]:
+    """Reduce debt by payment. Returns (new_amount, overpaid) or None if not found.
+
+    overpaid > 0 — платёж больше остатка долга: долг закрыт (new_amount=0),
+    излишек не потерян, caller решает что с ним делать (см. вызывающие места)."""
     from core.repos.pg_debts_repo import _repo as _debt_repo
     result = await _debt_repo.reduce_amount(user_notion_id, "i_owe", name, float(payment))
     if result is None:
         return None
-    new_amount, _closed = result
-    return int(new_amount)
+    new_amount, _closed, overpaid = result
+    return int(new_amount), overpaid
 
 
 async def _deactivate_goal(name: str, user_notion_id: str = "") -> bool:
@@ -2144,19 +2380,23 @@ async def handle_debt_command(message: Message, user_notion_id: str = "") -> Non
     if partial_m:
         name = partial_m.group(1)
         amount = _parse_k_amount(partial_m.group(2))
-        remaining = await _partial_debt_payment(name, amount, user_notion_id)
-        if remaining is None:
+        result = await _partial_debt_payment(name, amount, user_notion_id)
+        if result is None:
             await message.answer(f"🤔 Не нашла долг «{name}» в памяти.", parse_mode="HTML")
-        elif remaining == 0:
-            await message.answer(
-                f"🎉 <b>Долг {name} полностью закрыт!</b> Ты молодец!",
-                reply_markup=_recalc_keyboard(), parse_mode="HTML",
-            )
         else:
-            await message.answer(
-                f"💰 Внесла {amount:,.0f}₽ за долг {name}\n📋 Осталось: <b>{remaining:,.0f}₽</b>",
-                reply_markup=_recalc_keyboard(), parse_mode="HTML",
-            )
+            remaining, overpaid = result
+            if remaining == 0:
+                await message.answer(
+                    f"🎉 <b>Долг {name} полностью закрыт!</b> Ты молодец!",
+                    reply_markup=_recalc_keyboard(), parse_mode="HTML",
+                )
+                if overpaid > 0:
+                    await _notify_overpaid(message, overpaid)
+            else:
+                await message.answer(
+                    f"💰 Внесла {amount:,.0f}₽ за долг {name}\n📋 Осталось: <b>{remaining:,.0f}₽</b>",
+                    reply_markup=_recalc_keyboard(), parse_mode="HTML",
+                )
         return
 
     await message.answer("🤔 Не поняла команду. Примеры:\n<i>новый долг Маша 10к до июня\nзакрыла долг ***\nотдала *** 25к</i>", parse_mode="HTML")
@@ -2282,14 +2522,17 @@ async def _deactivate_they_owe(name: str, user_notion_id: str = "") -> bool:
     return await _debt_repo.deactivate(user_notion_id, "they_owe", name)
 
 
-async def _partial_they_owe_payment(name: str, payment: int, user_notion_id: str = "") -> Optional[int]:
-    """Record partial return of a they_owe debt. Returns new remaining or None if not found."""
+async def _partial_they_owe_payment(name: str, payment: int, user_notion_id: str = "") -> Optional[Tuple[int, float]]:
+    """Record partial return of a they_owe debt. Returns (new_amount, overpaid) or None if not found.
+
+    overpaid > 0 — вернули больше, чем был должен: долг закрыт (new_amount=0),
+    излишек не потерян, caller решает что с ним делать (см. вызывающее место)."""
     from core.repos.pg_debts_repo import _repo as _debt_repo
     result = await _debt_repo.reduce_amount(user_notion_id, "they_owe", name, float(payment))
     if result is None:
         return None
-    new_amount, _closed = result
-    return int(new_amount)
+    new_amount, _closed, overpaid = result
+    return int(new_amount), overpaid
 
 
 async def handle_they_owe_command(message: Message, user_notion_id: str = "") -> None:
@@ -2321,19 +2564,23 @@ async def handle_they_owe_command(message: Message, user_notion_id: str = "") ->
             amount_str = ret_m.group(2)
             if amount_str:
                 payment = _parse_k_amount(amount_str)
-                remaining = await _partial_they_owe_payment(name, payment, user_notion_id)
-                if remaining is None:
+                result = await _partial_they_owe_payment(name, payment, user_notion_id)
+                if result is None:
                     await message.answer(f"🤔 Не нашла долг «{name}».", parse_mode="HTML")
-                elif remaining == 0:
-                    await message.answer(
-                        f"🎉 <b>{name} вернул(а) долг полностью!</b>",
-                        parse_mode="HTML",
-                    )
                 else:
-                    await message.answer(
-                        f"💰 {name} вернул(а) {payment:,.0f}₽\n📋 Остаток: <b>{remaining:,.0f}₽</b>",
-                        parse_mode="HTML",
-                    )
+                    remaining, overpaid = result
+                    if remaining == 0:
+                        await message.answer(
+                            f"🎉 <b>{name} вернул(а) долг полностью!</b>",
+                            parse_mode="HTML",
+                        )
+                        if overpaid > 0:
+                            await _notify_overpaid(message, overpaid)
+                    else:
+                        await message.answer(
+                            f"💰 {name} вернул(а) {payment:,.0f}₽\n📋 Остаток: <b>{remaining:,.0f}₽</b>",
+                            parse_mode="HTML",
+                        )
             else:
                 found = await _deactivate_they_owe(name, user_notion_id)
                 if found:

@@ -140,10 +140,12 @@ class PgDebtsRepo:
         kind: str,
         name: str,
         payment: float,
-    ) -> Optional[Tuple[float, bool]]:
+    ) -> Optional[Tuple[float, bool, float]]:
         """Subtract payment from amount. Deactivates if result <= 0.
 
-        Returns (new_amount, closed) or None if debt not found.
+        Returns (new_amount, closed, overpaid) or None if debt not found.
+        overpaid = max(0, payment - amount) — излишек сверх суммы долга, не
+        теряется молча: caller решает, куда его направить (подушка/оставить).
         """
         with _get_engine().begin() as conn:
             row = self._find_row_sync(conn, user_notion_id, kind, name, active_only=True)
@@ -151,7 +153,9 @@ class PgDebtsRepo:
             if row is None:
                 return None
 
-            new_amount = max(0.0, float(row.amount) - payment)
+            old_amount = float(row.amount)
+            new_amount = max(0.0, old_amount - payment)
+            overpaid = max(0.0, payment - old_amount)
             closed = new_amount <= 0
             conn.execute(
                 debts.update()
@@ -162,7 +166,7 @@ class PgDebtsRepo:
                     updated_at=_now(),
                 )
             )
-            return new_amount, closed
+            return new_amount, closed, overpaid
 
     def _deactivate_sync(
         self,
@@ -237,7 +241,7 @@ class PgDebtsRepo:
         kind: str,
         name: str,
         payment: float,
-    ) -> Optional[Tuple[float, bool]]:
+    ) -> Optional[Tuple[float, bool, float]]:
         return await asyncio.to_thread(
             self._reduce_amount_sync, user_notion_id, kind, name, payment,
         )

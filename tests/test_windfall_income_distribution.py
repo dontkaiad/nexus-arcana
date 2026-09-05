@@ -88,7 +88,7 @@ async def test_tight_month_partial_headroom_splits_impulse_and_debt():
     budget = dict(_BUDGET_TIGHT, долги=[{"name": "Вика", "amount": 20000,
                   "deadline": "2026-12-01", "strategy": "", "monthly_payment": 1000}])
     with _apply(_patches(budget, impulse_bonus=0.0)), \
-         patch.object(finance, "_partial_debt_payment", AsyncMock(return_value=18000)) as m_debt:
+         patch.object(finance, "_partial_debt_payment", AsyncMock(return_value=(18000, 0.0))) as m_debt:
         msg = await finance._distribute_windfall_income(5000, uid=1, user_notion_id="u-1")
 
     assert "Импульсивные +3" in msg
@@ -103,7 +103,7 @@ async def test_tight_month_headroom_exhausted_all_to_debt():
     budget = dict(_BUDGET_TIGHT, долги=[{"name": "Вика", "amount": 20000,
                   "deadline": "2026-12-01", "strategy": "", "monthly_payment": 1000}])
     with _apply(_patches(budget, impulse_bonus=3000.0)), \
-         patch.object(finance, "_partial_debt_payment", AsyncMock(return_value=18000)) as m_debt:
+         patch.object(finance, "_partial_debt_payment", AsyncMock(return_value=(18000, 0.0))) as m_debt:
         msg = await finance._distribute_windfall_income(2000, uid=1, user_notion_id="u-1")
 
     assert "Импульсивные" not in msg
@@ -115,7 +115,7 @@ async def test_tight_month_headroom_exhausted_all_to_debt():
 async def test_normal_month_with_active_debt_all_to_debt():
     """Обычный месяц, есть активный долг → весь доход в долг."""
     with _apply(_patches(_BUDGET_NORMAL_WITH_DEBT)), \
-         patch.object(finance, "_partial_debt_payment", AsyncMock(return_value=12000)) as m_debt, \
+         patch.object(finance, "_partial_debt_payment", AsyncMock(return_value=(12000, 0.0))) as m_debt, \
          patch("core.repos.pg_cushion_repo._repo.add_to_balance", AsyncMock()) as m_cushion:
         msg = await finance._distribute_windfall_income(8000, uid=1, user_notion_id="u-1")
 
