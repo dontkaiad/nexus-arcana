@@ -40,4 +40,5 @@ async def test_calc_free_remaining_not_gated_by_env(monkeypatch):
                       AsyncMock(side_effect=[income, []])):
         res = await finance._calc_free_remaining("u")
     assert res is not None   # дошли до расчёта — gate на NOTION_DB_MEMORY снят
-    assert res[0] == 5000.0  # 5000 income − 0 expenses − 0 savings
+    # BUDGET_SPEC: 5000 income − 1000 fixed − 0 debt − 0 expenses = 4000
+    assert res[0] == 4000.0

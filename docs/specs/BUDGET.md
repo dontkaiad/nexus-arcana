@@ -1,6 +1,6 @@
 # BUDGET — data-model contract (бюджет / day limit)
 
-Code conforms to: 372a8bd. This spec describes the budget data model as of
+Code conforms to: 5a57b8c (+ this change: _calc_free_remaining formula). This spec describes the budget data model as of
 that commit; update it in the same PR that changes the model.
 
 > Contract, not snapshot. Describes the derived model and the guarantees of
@@ -465,6 +465,30 @@ the discretionary limit rows: `🔒 Фикс` is omitted (shown in the Пост�
 section), `📦 Разовые` is shown as an informational row but excluded from the
 per-day free-money math (not a daily spend). Old data with no `лимит_разовые`
 fact → `one_time_limit = 0`, identical to pre-949fb10 behavior.
+
+The **post-transaction «💳 Свободных: N₽ · M₽/день»** line (shown by
+`_check_budget_limit` after any recorded expense — `_calc_free_remaining`) is a
+distinct calc from the `/budget` render above and follows the spec formula
+directly:
+
+    Остаток на жизнь = Доход − Фикс − платёж по активному долгу
+    Свободных        = Остаток на жизнь − Σ(дискреционные траты периода)
+    /день            = Свободных / дней до конца платёжного периода
+
+- **Доход** = `💰 Доход` transactions in the current pay period (returns `None`
+  if `0` — nothing to divide).
+- **Фикс** = `Σ budget["постоянные"].amount` (plan facts), subtracted as a
+  whole-period forward obligation — *not* re-counted from transactions.
+- **платёж по долгу** = `core.budget.pick_debt_payment` (first burning active
+  debt only — same source as `_do_budget_calc` and the plan builder). Deferred
+  debts (`monthly_payment == 0`) contribute nothing.
+- **дискреционные траты** = `💸 Расход` in the pay period **excluding**
+  `is_parallel_limit` categories (`🔒 Фикс` / `📦 Разовые`) — those have their
+  own period bucket; counting them here would double-subtract Фикс. Same
+  predicate as `_spent_today` / `budget_day_limit_from_plan`.
+- **окно и делитель** = pay period (`_period_bounds` / `_period_days_remaining`,
+  by the user's tz), **not** the calendar month. Goals (`цель_*.saving`) are
+  **not** subtracted — they sit after debts, not inside the life remainder.
 
 ## Callers
 

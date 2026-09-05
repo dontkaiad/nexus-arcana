@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import base64
-import calendar
 import json
 import logging
 import os
@@ -40,6 +39,7 @@ from core.budget import (
     CUSHION_COMFORTABLE_RATE as _CUSHION_RATE,
     BUDGET_TIGHT_THRESHOLD,
     is_parallel_limit as _is_parallel_limit_name,
+    _period_days_remaining as _budget_period_days_remaining,
 )
 
 logger = logging.getLogger("nexus.finance")
@@ -112,25 +112,42 @@ def _parse_user_amount(text: str) -> Optional[int]:
 
 
 async def _calc_free_remaining(user_notion_id: str = "", tz_offset: int = 3) -> Optional[Tuple[float, int]]:
-    """Возвращает (остаток_свободных, дней_до_конца_месяца) или None.
+    """(Свободных, дней до конца платёжного периода) или None.
 
-    tz_offset — личный tz пользователя (граница «сегодня»/«конец месяца» его).
+    Формула BUDGET_SPEC / BUDGET_IDEAL_SPEC:
+
+        Остаток на жизнь = Доход − Фикс − платёж по активному долгу
+        Свободных        = Остаток на жизнь − Σ(дискреционные траты периода)
+        /день            = Свободных / дней_до_конца_периода
+
+    Термы income/fixed/debt — те же источники, что `_do_budget_calc` и
+    `core.budget.budget_day_limit_from_plan` (плановый доход/фикс + первый
+    горящий долг через `pick_debt_payment`). Цели (savings) в «Свободных» НЕ
+    входят — они после долгов, не часть остатка на жизнь.
+
+    Окно и делитель — платёжный ПЕРИОД (`_period_bounds` / `_period_days_remaining`),
+    не календарный месяц (issue: раньше `%Y-%m-01` + `days_in_month`).
+
+    Дискреционные траты = 💸 Расход периода МИНУС 🔒 Фикс / 📦 Разовые
+    (`is_parallel_limit`) — иначе Фикс вычелся бы дважды (как терм и как
+    транзакция). Тот же предикат, что в `_spent_today` виджета «Мой день».
+
+    tz_offset — личный tz пользователя (границы периода по его дню).
     """
     budget = await _load_budget_data(user_notion_id)
-    obligatory_total = sum(o["amount"] for o in budget["постоянные"])
-    savings_total = sum(g["saving"] for g in budget["цели"])
+    fixed_total = sum(float(o.get("amount", 0) or 0) for o in budget.get("постоянные", []))
+    debt_payment = _pick_debt_payment(budget.get("долги", []))
 
+    payday = await _get_payday()
+    period_start, _period_end = _period_bounds(payday, tz_offset=tz_offset)
     now = datetime.now(_user_tz(tz_offset))
-    month_str = now.strftime("%Y-%m")
-    month_start = f"{month_str}-01"
     today_str = now.strftime("%Y-%m-%d")
-    days_in_month = calendar.monthrange(now.year, now.month)[1]
-    days_remaining = days_in_month - now.day
+    days_remaining = _budget_period_days_remaining(payday, tz_offset)
 
-    # Доходы за месяц
+    # Доход за период
     try:
         income_records = await _repo.query_records(
-            type_="💰 Доход", date_from=month_start, date_to=today_str, page_size=200,
+            type_="💰 Доход", date_from=period_start, date_to=today_str, page_size=200,
             user_notion_id=user_notion_id,
         )
         total_income = sum(float(p.amount or 0) for p in income_records)
@@ -140,20 +157,20 @@ async def _calc_free_remaining(user_notion_id: str = "", tz_offset: int = 3) -> 
     if total_income == 0:
         return None  # нет дохода — нечего считать
 
-    # Расходы за месяц
+    # Дискреционные траты за период (Фикс/Разовые исключены — свой лимит)
     try:
         expense_records = await _repo.query_records(
-            type_="💸 Расход", date_from=month_start, date_to=today_str, page_size=500,
+            type_="💸 Расход", date_from=period_start, date_to=today_str, page_size=500,
             user_notion_id=user_notion_id,
         )
-        total_expenses = sum(float(p.amount or 0) for p in expense_records)
+        period_expenses = sum(
+            float(p.amount or 0) for p in expense_records
+            if not _is_parallel_limit_name(p.category or "")
+        )
     except Exception:
-        total_expenses = 0
+        period_expenses = 0
 
-    # Свободные = доход - все расходы - накопления
-    # obligatory_total НЕ вычитаем отдельно — постоянные платежи
-    # уже записаны в расходы когда оплачены
-    free_left = total_income - total_expenses - savings_total
+    free_left = total_income - fixed_total - debt_payment - period_expenses
     return (free_left, days_remaining)
 
 
