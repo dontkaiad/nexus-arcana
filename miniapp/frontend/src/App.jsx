@@ -2270,7 +2270,10 @@ function NxLists({ s }) {
 
   // локальные оптимистик-апдейты, сбрасываем при смене tab/q
   const [overrides, setOverrides] = useState({});
-  useEffect(() => { setOverrides({}); setSelectedChecklist(null); }, [tab]);
+  // Выполненные пункты (Покупки/Чеклист) скрыты из основного вида — доступны
+  // в свёрнутой секции "Куплено/Выполнено (N)" внизу списка.
+  const [showDone, setShowDone] = useState(false);
+  useEffect(() => { setOverrides({}); setSelectedChecklist(null); setShowDone(false); }, [tab]);
   useEffect(() => { setOverrides({}); }, [q]);
 
   const items = apiItems.map((x) => (x.id in overrides ? { ...x, done: overrides[x.id] } : x));
@@ -2348,8 +2351,9 @@ function NxLists({ s }) {
         const [title, group] = selectedGroup;
         const task = parentByTitle[title];
         const total = group.length;
-        const doneCount = group.filter((x) => x.done).length;
-        const allDone = total > 0 && doneCount === total;
+        const activeItems = group.filter((x) => !x.done);
+        const doneItems = group.filter((x) => x.done);
+        const allDone = total > 0 && doneItems.length === total;
         return (
           <>
             <ChecklistHeader s={s} title={title} task={task} large
@@ -2358,9 +2362,17 @@ function NxLists({ s }) {
               <Glass s={s} style={{ padding: "24px 14px", textAlign: "center" }}>
                 <div style={{ fontSize: fs(14), color: s.text }}>всё закрыто ✨</div>
               </Glass>
-            ) : group.map((x) => (
+            ) : activeItems.map((x) => (
               <ChecklistItemRow key={x.id} s={s} item={x} onToggle={toggleDone} />
             ))}
+            {!allDone && doneItems.length > 0 && (
+              <DoneSection s={s} label="Выполнено" count={doneItems.length}
+                open={showDone} onToggle={() => setShowDone(!showDone)}>
+                {doneItems.map((x) => (
+                  <ChecklistItemRow key={x.id} s={s} item={x} onToggle={toggleDone} />
+                ))}
+              </DoneSection>
+            )}
             {/* Локальный FAB «+» для чеклиста уровня 2:
                 prefill type=check + group=title (issue #12). */}
             <div
@@ -2390,11 +2402,21 @@ function NxLists({ s }) {
       {!loading && !error && tab === "check" && !selectedGroup && checklistGroups.map(([title, group]) => {
         if (!title) {
           // items без группы — рендерим как обычные строки без заголовка
+          const activeItems = group.filter((x) => !x.done);
+          const doneItems = group.filter((x) => x.done);
           return (
             <React.Fragment key="_no_group">
-              {group.map((x) => (
+              {activeItems.map((x) => (
                 <ChecklistItemRow key={x.id} s={s} item={x} onToggle={toggleDone} />
               ))}
+              {doneItems.length > 0 && (
+                <DoneSection s={s} label="Выполнено" count={doneItems.length}
+                  open={showDone} onToggle={() => setShowDone(!showDone)}>
+                  {doneItems.map((x) => (
+                    <ChecklistItemRow key={x.id} s={s} item={x} onToggle={toggleDone} />
+                  ))}
+                </DoneSection>
+              )}
             </React.Fragment>
           );
         }
@@ -2472,113 +2494,85 @@ function NxLists({ s }) {
           </div>
         </Glass>
       )}
-      {!loading && !error && tab === "buy" && groupByCat(items).map(([catName, group]) => (
+      {!loading && !error && tab === "buy" && groupByCat(items.filter((x) => !x.done)).map(([catName, group]) => (
         <React.Fragment key={catName || "—"}>
           {catName && (
             <div className="list-group-h">{catName}</div>
           )}
           {group.map((x) => (
-            <Glass
-              key={x.id} s={s}
-              style={{
-                padding: "10px 14px", marginBottom: 4, opacity: x.done ? 0.5 : 1,
-                cursor: "pointer",
-              }}
-              onClick={() => toggleDone(x)}
-            >
-              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                <Chk s={s} done={x.done} />
-                <span style={{
-                  flex: 1, minWidth: 0,
-                  fontSize: fs(16), color: s.text, fontWeight: 500,
-                  wordBreak: "break-word",
-                  textDecoration: x.done ? "line-through" : "none",
-                }}>
-                  {x.name}
-                </span>
-                {x.priority && (
-                  <span title={x.priority} style={{
-                    width: 8, height: 8, borderRadius: 4, flexShrink: 0,
-                    background: x.priority.startsWith("🔴") ? "#ef4444"
-                      : x.priority.startsWith("🟡") ? "#eab308"
-                      : "#94a3b8",
-                  }} />
-                )}
-                {x.cat && (
-                  <span style={{
-                    display: "inline-flex", alignItems: "center",
-                    padding: "3px 9px", borderRadius: 10,
-                    fontSize: fs(13), background: `${s.acc}33`, color: s.text, fontWeight: 500,
-                    flexShrink: 0, whiteSpace: "nowrap",
-                  }}>
-                    {x.cat}
-                  </span>
-                )}
-              </div>
-              {(x.pricePlan || x.source || x.note || (x.done && x.price)) && (
-                <div style={{
-                  marginTop: 4, marginLeft: 26,
-                  fontSize: fs(12), color: s.tS,
-                  display: "flex", flexWrap: "wrap", gap: 6,
-                }}>
-                  {x.pricePlan && (
-                    <span style={{ color: s.acc, fontWeight: 500 }}>
-                      {formatRub(x.pricePlan)}₽
-                    </span>
-                  )}
-                  {x.source && <span>· {x.source}</span>}
-                  {x.done && x.price && x.price !== x.pricePlan && (
-                    <span style={{ color: s.tM }}>· факт {formatRub(x.price)}₽</span>
-                  )}
-                  {x.note && (
-                    <span style={{ fontStyle: "italic", opacity: 0.75, flexBasis: "100%" }}>
-                      {x.note}
-                    </span>
-                  )}
-                </div>
-              )}
-            </Glass>
+            <BuyItemRow key={x.id} s={s} item={x} onToggle={toggleDone} />
           ))}
         </React.Fragment>
       ))}
+      {!loading && !error && tab === "buy" && (() => {
+        const doneItems = items.filter((x) => x.done);
+        if (doneItems.length === 0) return null;
+        return (
+          <DoneSection s={s} label="Куплено" count={doneItems.length}
+            open={showDone} onToggle={() => setShowDone(!showDone)}>
+            {doneItems.map((x) => (
+              <BuyItemRow key={x.id} s={s} item={x} onToggle={toggleDone} />
+            ))}
+          </DoneSection>
+        );
+      })()}
 
       {/* ─── Инвентарь ────────────────────────────────────────────── */}
-      {!loading && !error && tab === "inv" && groupByCat(items).map(([catName, group]) => (
+      {!loading && !error && tab === "inv" && groupByCat(items.filter((x) => !x.done)).map(([catName, group]) => (
         <React.Fragment key={catName || "—"}>
           {catName && <SectionLabel s={s}>{catName}</SectionLabel>}
           {group.map((x) => (
-            <Glass key={x.id} s={s} style={{ padding: "10px 14px", marginBottom: 4 }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <span style={{
-                  flex: 1, fontSize: fs(16), color: s.text, fontWeight: 500,
-                  wordBreak: "break-word",
-                }}>
-                  {x.name}
-                </span>
-                {x.qty != null && (
-                  <span style={{ fontSize: fs(13), color: s.acc, fontWeight: 500, flexShrink: 0 }}>
-                    {x.qty} шт
-                  </span>
-                )}
-                {x.cat && (
-                  <span style={{
-                    display: "inline-flex", alignItems: "center",
-                    padding: "3px 9px", borderRadius: 10,
-                    fontSize: fs(13), background: `${s.acc}33`, color: s.text, fontWeight: 500,
-                    flexShrink: 0, whiteSpace: "nowrap",
-                  }}>
-                    {x.cat}
-                  </span>
-                )}
-              </div>
-              {x.exp && (
-                <div style={{ fontSize: fs(13), color: s.tS, marginTop: 3 }}>до {x.exp}</div>
-              )}
-            </Glass>
+            <InvItemRow key={x.id} s={s} item={x} />
           ))}
         </React.Fragment>
       ))}
+      {!loading && !error && tab === "inv" && (() => {
+        const doneItems = items.filter((x) => x.done);
+        if (doneItems.length === 0) return null;
+        return (
+          <DoneSection s={s} label="Использовано" count={doneItems.length}
+            open={showDone} onToggle={() => setShowDone(!showDone)}>
+            {doneItems.map((x) => (
+              <InvItemRow key={x.id} s={s} item={x} />
+            ))}
+          </DoneSection>
+        );
+      })()}
     </div>
+  );
+}
+
+function InvItemRow({ s, item: x }) {
+  return (
+    <Glass s={s} style={{ padding: "10px 14px", marginBottom: 4, opacity: x.done ? 0.5 : 1 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <span style={{
+          flex: 1, fontSize: fs(16), color: s.text, fontWeight: 500,
+          wordBreak: "break-word",
+          textDecoration: x.done ? "line-through" : "none",
+        }}>
+          {x.name}
+        </span>
+        {x.qty != null && (
+          <span style={{ fontSize: fs(13), color: s.acc, fontWeight: 500, flexShrink: 0 }}>
+            {x.qty} шт
+          </span>
+        )}
+        {x.cat && (
+          <span style={{
+            display: "inline-flex", alignItems: "center",
+            padding: "3px 9px", borderRadius: 10,
+            fontSize: fs(13), background: `${s.acc}33`, color: s.text, fontWeight: 500,
+            flexShrink: 0, whiteSpace: "nowrap",
+          }}>
+            {x.cat}
+          </span>
+        )}
+      </div>
+      {x.exp && (
+        <div style={{ fontSize: fs(13), color: s.tS, marginTop: 3 }}>до {x.exp}</div>
+      )}
+    </Glass>
   );
 }
 
@@ -2633,6 +2627,118 @@ function ChecklistHeader({ s, title, task, large, onBack }) {
         </div>
       )}
     </div>
+  );
+}
+
+// Свёрнутая по умолчанию секция для выполненных пунктов списка (Покупки/
+// Чеклист) — прячет их из основного вида, не теряя историю (тот же принцип,
+// что «Закрытые» долги/цели во вкладке Финансов, но сворачиваемая).
+function DoneSection({ s, label, count, open, onToggle, children }) {
+  return (
+    <div style={{ marginTop: 6 }}>
+      <div
+        onClick={onToggle}
+        style={{
+          display: "flex", justifyContent: "space-between", alignItems: "center",
+          padding: "8px 4px", cursor: "pointer",
+          fontSize: fs(13), color: s.tS, fontWeight: 500,
+        }}
+      >
+        <span>✅ {label} ({count})</span>
+        <span>{open ? "▾" : "▸"}</span>
+      </div>
+      {open && children}
+    </div>
+  );
+}
+
+// Строка чеклиста внутри TaskSheet (детали задачи) — тот же вид, что
+// ChecklistItemRow во вкладке Списки, но без цены/источника/заметки (тут не нужны).
+function TaskChecklistRow({ s, item: it, onToggle }) {
+  return (
+    <Glass
+      s={s}
+      style={{
+        padding: "10px 14px",
+        display: "flex", alignItems: "center", gap: 10,
+        opacity: it.done ? 0.5 : 1, cursor: "pointer",
+      }}
+      onClick={() => onToggle(it)}
+    >
+      <Chk s={s} done={it.done} />
+      <span style={{
+        flex: 1, fontSize: fs(15), color: s.text,
+        textDecoration: it.done ? "line-through" : "none",
+        wordBreak: "break-word",
+      }}>
+        {it.name}
+      </span>
+    </Glass>
+  );
+}
+
+function BuyItemRow({ s, item: x, onToggle }) {
+  return (
+    <Glass
+      s={s}
+      style={{
+        padding: "10px 14px", marginBottom: 4, opacity: x.done ? 0.5 : 1,
+        cursor: "pointer",
+      }}
+      onClick={() => onToggle(x)}
+    >
+      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        <Chk s={s} done={x.done} />
+        <span style={{
+          flex: 1, minWidth: 0,
+          fontSize: fs(16), color: s.text, fontWeight: 500,
+          wordBreak: "break-word",
+          textDecoration: x.done ? "line-through" : "none",
+        }}>
+          {x.name}
+        </span>
+        {x.priority && (
+          <span title={x.priority} style={{
+            width: 8, height: 8, borderRadius: 4, flexShrink: 0,
+            background: x.priority.startsWith("🔴") ? "#ef4444"
+              : x.priority.startsWith("🟡") ? "#eab308"
+              : "#94a3b8",
+          }} />
+        )}
+        {x.cat && (
+          <span style={{
+            display: "inline-flex", alignItems: "center",
+            padding: "3px 9px", borderRadius: 10,
+            fontSize: fs(13), background: `${s.acc}33`, color: s.text, fontWeight: 500,
+            flexShrink: 0, whiteSpace: "nowrap",
+          }}>
+            {x.cat}
+          </span>
+        )}
+      </div>
+      {(x.pricePlan || x.source || x.note || (x.done && x.price)) && (
+        <div style={{
+          marginTop: 4, marginLeft: 26,
+          fontSize: fs(12), color: s.tS,
+          display: "flex", flexWrap: "wrap", gap: 6,
+        }}>
+          {x.pricePlan && (
+            <span style={{ color: s.acc, fontWeight: 500 }}>
+              {formatRub(x.pricePlan)}₽
+            </span>
+          )}
+          {x.source && <span>· {x.source}</span>}
+          {x.done && x.price && x.price !== x.pricePlan && (
+            <span style={{ color: s.tM }}>· факт {formatRub(x.price)}₽</span>
+          )}
+          {x.note && (
+            <span style={{ fontStyle: "italic", opacity: 0.75, flexBasis: "100%" }}>
+              {x.note}
+            </span>
+          )}
+        </div>
+      )}
+    </Glass>
   );
 }
 
@@ -6370,6 +6476,7 @@ function TaskSheet({ s, task, onClose, onClosed }) {
   const checklist = clData ? adaptLists(clData) : [];
   // hook order должен быть стабильным — clOverrides объявляем ДО early return для closed-ветки.
   const [clOverrides, setClOverrides] = useState({});
+  const [showDoneCl, setShowDoneCl] = useState(false);
   // wave8.62: закрытые задачи (done/cancelled) — read-only вид + кнопка «Восстановить» + read-only чеклист.
   const isClosed = task.status === "done" || task.status === "cancelled";
   if (isClosed) {
@@ -6553,36 +6660,32 @@ function TaskSheet({ s, task, onClose, onClosed }) {
           </div>
         )}
       </div>
-      {clItems.length > 0 && (
+      {clItems.length > 0 && (() => {
+        const activeCl = clItems.filter((it) => !it.done);
+        const doneCl = clItems.filter((it) => it.done);
+        return (
         <>
           <div style={{ fontFamily: H, fontSize: fs(15), color: s.text, margin: "16px 0 8px" }}>
             Чеклист
           </div>
           <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-            {clItems.map((it) => (
-              <Glass
-                key={it.id}
-                s={s}
-                style={{
-                  padding: "10px 14px",
-                  display: "flex", alignItems: "center", gap: 10,
-                  opacity: it.done ? 0.5 : 1, cursor: "pointer",
-                }}
-                onClick={() => toggleCl(it)}
-              >
-                <Chk s={s} done={it.done} />
-                <span style={{
-                  flex: 1, fontSize: fs(15), color: s.text,
-                  textDecoration: it.done ? "line-through" : "none",
-                  wordBreak: "break-word",
-                }}>
-                  {it.name}
-                </span>
-              </Glass>
+            {activeCl.map((it) => (
+              <TaskChecklistRow key={it.id} s={s} item={it} onToggle={toggleCl} />
             ))}
           </div>
+          {doneCl.length > 0 && (
+            <DoneSection s={s} label="Выполнено" count={doneCl.length}
+              open={showDoneCl} onToggle={() => setShowDoneCl(!showDoneCl)}>
+              <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                {doneCl.map((it) => (
+                  <TaskChecklistRow key={it.id} s={s} item={it} onToggle={toggleCl} />
+                ))}
+              </div>
+            </DoneSection>
+          )}
         </>
-      )}
+        );
+      })()}
     </div>
   );
 }
