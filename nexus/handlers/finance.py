@@ -967,6 +967,129 @@ _TYPE_CORRECTION_RE = re.compile(
     re.IGNORECASE,
 )
 
+# ── Непредвиденный доход: авто-распределение ─────────────────────────────────
+#
+# Регулярные категории дохода — НЕ «непредвиденные», их не трогаем (для
+# Зарплаты уже есть отдельный триггер выше/ниже). «Аренда» как income-категория
+# в кодовой базе не существует (core/config.py INCOME_CATEGORIES её не
+# содержит) — если такая категория появится, добавить сюда.
+_WINDFALL_EXCLUDED_CATEGORIES = ("Зарплата", "Практика")
+
+# Потолок бонуса в 🎲 Импульсивные из windfall-доходов ЗА ПЕРИОД (не за раз).
+_IMPULSE_WINDFALL_CAP = 3000.0
+_IMPULSE_WINDFALL_KEY_PREFIX = "impulse_windfall_бонус_"
+
+
+async def _get_impulse_windfall_bonus(user_notion_id: str, period_start: str) -> float:
+    """Сколько уже добавлено в 🎲 Импульсивные из windfall-доходов ЗА ТЕКУЩИЙ
+    период. Ключ содержит period_start — новый период (после payday) → новый
+    ключ → 0, отдельного сброса на ✅ Принять не требуется."""
+    if not user_notion_id:
+        return 0.0
+    try:
+        from core.repos.pg_memory_repo import PgMemoryRepo
+        mems = await PgMemoryRepo().find_by_exact_key(
+            _IMPULSE_WINDFALL_KEY_PREFIX + period_start, user_notion_id,
+        )
+        if mems and mems[0].is_current:
+            return float(mems[0].fact or 0)
+    except Exception as e:
+        logger.error("_get_impulse_windfall_bonus: %s", e)
+    return 0.0
+
+
+async def _add_impulse_windfall_bonus(user_notion_id: str, period_start: str, amount: float) -> float:
+    """Прибавить к накопленному windfall-бонусу этого периода. Возвращает новую сумму.
+
+    Ключ НЕ входит в income_/постоянно_/разовый_/лимит_ — это внутренний
+    счётчик, не факт Памяти для показа Кай. Спрятан из Mini App «Память»
+    через EXCLUDED_KEY_PREFIXES (miniapp/backend/routes/memory.py), тем же
+    способом что tz_/city_."""
+    current = await _get_impulse_windfall_bonus(user_notion_id, period_start)
+    new_total = current + float(amount or 0)
+    if user_notion_id:
+        from core.repos.memory_repo import _repo as _mem_repo
+        await _mem_repo.upsert(
+            str(new_total), _IMPULSE_WINDFALL_KEY_PREFIX + period_start,
+            "💰 Лимит", "nexus", "", "manual", user_notion_id,
+        )
+    return new_total
+
+
+async def _distribute_windfall_income(amount: float, uid: int, user_notion_id: str) -> str:
+    """Непредвиденный доход (не Зарплата/Практика) — авто-распределение.
+
+    Тяжёлый месяц (BUDGET_TIGHT_THRESHOLD, core.budget — та же граница что
+    comfortable в compute_limits(), от персистентных фактов Памяти, не от
+    Sonnet-плана сессии): сперва докидываем 🎲 Импульсивные, с потолком
+    _IMPULSE_WINDFALL_CAP за период; остаток — как в обычном месяце.
+    Обычный месяц: активный долг с monthly_payment > 0 → туда (reduce_amount,
+    тот же метод что «отдала X»); иначе → в подушку (add_to_balance).
+    Возвращает готовое сообщение для пользователя ("" если amount <= 0).
+    """
+    amount = float(amount or 0)
+    if amount <= 0:
+        return ""
+
+    tz_offset = await _get_user_tz(uid)
+    payday = await _get_payday()
+    period_start, _period_end = _period_bounds(payday, tz_offset=tz_offset)
+    budget_data = await _load_budget_data(user_notion_id)
+
+    income_total = sum(float(i.get("amount", 0) or 0) for i in budget_data.get("доходы", []))
+    fixed_total = sum(float(f.get("amount", 0) or 0) for f in budget_data.get("постоянные", []))
+    debts = budget_data.get("долги", [])
+    debt_payment = _pick_debt_payment(debts)
+    free_after = income_total - fixed_total - debt_payment
+    is_tight = free_after < BUDGET_TIGHT_THRESHOLD
+
+    to_impulse = 0.0
+    used_after = 0.0
+    remainder = amount
+
+    if is_tight:
+        accumulated = await _get_impulse_windfall_bonus(user_notion_id, period_start)
+        headroom = max(0.0, _IMPULSE_WINDFALL_CAP - accumulated)
+        to_impulse = min(amount, headroom)
+        remainder = amount - to_impulse
+
+        if to_impulse > 0:
+            used_after = await _add_impulse_windfall_bonus(user_notion_id, period_start, to_impulse)
+            limits = await _get_limits("")
+            current_impulse = limits.get(_cat_link(_CAT_IMPULSE), 0)
+            new_impulse = current_impulse + to_impulse
+            await _save_memory_entry(
+                "лимит_импульсивный",
+                "лимит: {} — {}₽/мес".format(_CAT_IMPULSE, int(round(new_impulse))),
+                user_notion_id,
+            )
+
+    parts = ["💰 Непредвиденный доход {:,.0f}₽ распределён:".format(amount)]
+    if to_impulse > 0:
+        parts.append("→ 🎲 Импульсивные +{:,.0f}₽ (потолок {:,.0f}/{:,.0f}₽ за месяц)".format(
+            to_impulse, used_after, _IMPULSE_WINDFALL_CAP,
+        ))
+
+    if remainder > 0:
+        debt_name = _first_burning_debt_name(debts)
+        new_debt_amount = None
+        if debt_payment > 0 and debt_name:
+            new_debt_amount = await _partial_debt_payment(debt_name, int(round(remainder)), user_notion_id)
+        if new_debt_amount is not None:
+            parts.append("→ 📋 Долг {} +{:,.0f}₽ (осталось {:,}₽)".format(
+                debt_name, remainder, new_debt_amount,
+            ))
+        else:
+            from core.repos.pg_cushion_repo import _repo as _cushion_repo
+            new_balance = await _cushion_repo.add_to_balance(
+                user_notion_id, remainder, source="windfall_income",
+                note="непредвиденный доход",
+            )
+            parts.append("→ 🛡️ Подушка +{:,.0f}₽ (баланс {:,.0f}₽)".format(remainder, new_balance))
+
+    return "\n".join(parts)
+
+
 async def handle_finance_text(message: Message, text: str, bot_label: str = "☀️ Nexus",
                               user_notion_id: str = "") -> None:
     from core.config import config
@@ -1131,6 +1254,19 @@ async def handle_finance_text(message: Message, text: str, bot_label: str = "☀
                 await message.answer(f"💰 Зарплата получена! Твой бюджет на месяц:\n\n{budget_msg}", parse_mode="HTML")
         except Exception as e:
             logger.debug("salary budget trigger: %s", e)
+    # Непредвиденный доход — та же проверка "необычного" дохода, что у
+    # зарплатного триггера выше, расширенная под остальные регулярные категории.
+    elif "Доход" in data.get("type_", "") and not any(
+        exc in data.get("category", "") for exc in _WINDFALL_EXCLUDED_CATEGORIES
+    ):
+        try:
+            windfall_msg = await _distribute_windfall_income(
+                data.get("amount", 0), uid, user_notion_id,
+            )
+            if windfall_msg:
+                await message.answer(windfall_msg, parse_mode="HTML")
+        except Exception as e:
+            logger.error("windfall income distribution error: %s", e, exc_info=True)
 
 
 @router.message(F.text)

@@ -136,7 +136,10 @@ def _group_budget_memories(mems: list[Memory]) -> list[dict]:
 # Кай приняла их за баг/мусор. Прячем из списка, оставляя рабочими под
 # капотом (get_user_tz/_resolve_city_from_memory ходят напрямую по key,
 # этот фильтр их не касается).
-EXCLUDED_KEY_PREFIXES = ("tz_", "city_")
+# impulse_windfall_бонус_{период} (nexus/handlers/finance.py:
+# _distribute_windfall_income) — тот же случай: внутренний счётчик потолка
+# бонуса в Импульсивные, не факт для показа Кай.
+EXCLUDED_KEY_PREFIXES = ("tz_", "city_", "impulse_windfall_")
 
 # #49: канонический список категорий (из core/memory.py CATEGORIES,
 # без бюджетных/ADHD). Возвращаем всегда, чтобы фронт показывал все табы,
