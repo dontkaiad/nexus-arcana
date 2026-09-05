@@ -184,6 +184,13 @@ class ListsRepo:
         from nexus.repos.tasks_repo import _repo as _tasks_repo
         return await _tasks_repo.set_status(task_id, "Done")
 
+    async def mark_work_done(self, work_id: str) -> bool:
+        """Set Статус=Done on a 🔮 Работа (PG). Arcana counterpart of mark_task_done —
+        used by the same subtask-group-complete flow (see arcana/handlers/lists.py
+        on_checkout, mirrors nexus/handlers/lists.py on_checkout)."""
+        from arcana.repos.pg_works_repo import PgWorksRepo
+        return await PgWorksRepo().mark_done(work_id)
+
     async def create_reminder_task(
         self,
         item_name: str,

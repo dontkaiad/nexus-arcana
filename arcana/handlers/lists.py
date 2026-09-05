@@ -510,7 +510,44 @@ async def on_checkout(query: CallbackQuery, user_notion_id: str = "") -> None:
     if check_ids:
         await _repo.mark_done(check_ids)
         names = [items_map[p]["name"] for p in check_ids if p in items_map]
-        await query.message.answer(f"✅ Чеклист: {', '.join(names)}", parse_mode="HTML")
+
+        # Автозавершение группы подзадач → предложить закрыть родительскую
+        # Работу (паритет с nexus/handlers/lists.py on_checkout; #АУДИТ
+        # works_vs_tasks: раньше здесь не было group_complete вообще —
+        # чеклист чекался, но работа никогда не предлагалась/не закрывалась).
+        groups_done = set()
+        for pid in check_ids:
+            it = items_map.get(pid)
+            if it and it.get("group"):
+                remaining = [i for i in all_items
+                             if i.get("type") == "📋 Чеклист"
+                             and i.get("group") == it["group"]
+                             and i.get("status") != "Done"
+                             and i["id"] not in check_ids]
+                if not remaining:
+                    groups_done.add(it["group"])
+
+        lines = [f"✅ Чеклист: {', '.join(names)}"]
+        for g in groups_done:
+            lines.append(f"🎉 Все подзадачи «{g}» готовы!")
+        await query.message.answer("\n".join(lines), parse_mode="HTML")
+
+        for g in groups_done:
+            work_rel = ""
+            for pid in check_ids:
+                it = items_map.get(pid)
+                if it and it.get("group") == g and it.get("work_rel"):
+                    work_rel = it["work_rel"]
+                    break
+            if work_rel:
+                kb = InlineKeyboardMarkup(inline_keyboard=[[
+                    InlineKeyboardButton(text="✅ Завершить работу", callback_data=f"list_complete_work_{work_rel[:28]}"),
+                    InlineKeyboardButton(text="Оставить открытой", callback_data="list_keep_work"),
+                ]])
+                await query.message.answer(
+                    f"🎯 Завершить работу «{g}»?",
+                    reply_markup=kb,
+                )
 
     if buy_items:
         categories: dict[str, list[str]] = {}
@@ -1142,3 +1179,33 @@ async def on_list_cross_no(query: CallbackQuery, user_notion_id: str = "") -> No
         await query.message.edit_reply_markup(reply_markup=None)
     except Exception:
         pass
+
+
+# ── Callback: завершить Работу после автозавершения группы подзадач ─────────
+# (паритет с nexus/handlers/lists.py on_complete_task; work_rel — уже полный
+# PG id (короткая цифровая строка), обрезка [:28] в кнопке выше — no-op на
+# практике, но держим тот же формат, что и у Nexus.)
+
+@router.callback_query(lambda c: c.data and c.data.startswith("list_complete_work_"))
+async def on_complete_work(query: CallbackQuery, user_notion_id: str = "") -> None:
+    """Завершить работу после автозавершения всех подзадач."""
+    work_id = query.data.replace("list_complete_work_", "")
+    result = await _repo.mark_work_done(work_id)
+    if result:
+        try:
+            await query.message.edit_reply_markup()
+        except Exception:
+            pass
+        await query.answer("✅ Работа завершена!")
+        await query.message.reply("✅ Работа отмечена как выполненная!")
+    else:
+        await query.answer("⚠️ Не удалось обновить.", show_alert=True)
+
+
+@router.callback_query(lambda c: c.data == "list_keep_work")
+async def on_keep_work(query: CallbackQuery, user_notion_id: str = "") -> None:
+    try:
+        await query.message.edit_reply_markup()
+    except Exception:
+        pass
+    await query.answer("👌 Работа остаётся открытой")
