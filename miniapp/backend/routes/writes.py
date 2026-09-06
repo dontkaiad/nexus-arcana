@@ -1258,16 +1258,19 @@ async def memory_create(
     body: NoteBody,
     tg_id: int = Depends(current_user_id),
 ) -> dict[str, Any]:
+    """FAB «В память» — как в боте: Haiku парсит текст (категория/связь/ключ),
+    долги уходят в `debts`, алиас канонизируется, потом уведомление в Nexus
+    (#6). `body.cat` из формы игнорируется — категорию ставит парсер."""
     user_id = (await get_user_id(tg_id)) or ""
-    pg_id = await _memory_repo.add(
-        fact=body.text,
-        category=body.cat or "",
-        user_id=user_id,
-        source="miniapp",
-    )
-    if not pg_id:
+    from core.memory import parse_and_store
+    r = await parse_and_store(body.text, user_id, bot_label="☀️ Nexus")
+    if r["kind"] == "error":
         raise HTTPException(status_code=500, detail="failed to create memory")
-    return {"ok": True, "id": pg_id}
+    if r["kind"] == "debt":
+        await notify_user(tg_id, f"📋 Записала долг: <b>{_esc(r['fact'])}</b>", bot="nexus")
+        return {"ok": True, "id": None, "kind": "debt"}
+    await notify_user(tg_id, f"🧠 Запомнила: <b>{_esc(r['fact'])}</b>", bot="nexus")
+    return {"ok": True, "id": r["memory_id"]}
 
 
 @router.delete("/memory/{memory_id}")

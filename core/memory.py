@@ -415,22 +415,30 @@ async def _get_adhd_tip(fact: str) -> str:
     return tip.strip()
 
 
-async def save_memory(
-    message: Message,
-    text: str,
-    user_id: str,
-    bot_label: str,
-) -> None:
-    """Распарсить текст через Haiku и сохранить факт в PG."""
-    text = maybe_convert(text.strip())
-    logger.info("memory save: text=%r bot=%s", text[:60], bot_label)
+async def parse_and_store(text: str, user_id: str, bot_label: str) -> dict:
+    """Message-free ядро сохранения памяти: раскладка → Haiku-парс →
+    диверсия долгов в `debts` → канонизация алиаса → запись.
 
+    Возвращает `{kind, fact, category, key, memory_id, was_updated, debt_name}`.
+    `kind` ∈ {"debt", "memory", "error"}. Используется Mini App FAB (#6);
+    `save_memory` (бот) вызывает то же и добавляет реплаи/СДВГ-совет/плашку.
+    """
+    text = maybe_convert(text.strip())
     fact, category, связь, ключ = await _parse_fact(text)
     scope = bot_to_scope(bot_label)
 
     if ключ.startswith("долг_"):
-        await _save_debt_from_memory(message, fact, связь, ключ, user_id)
-        return
+        name = (связь or ключ[len("долг_"):]).strip()
+        amount, deadline = _parse_debt_from_fact(fact)
+        try:
+            from core.repos.pg_debts_repo import _repo as _debt_repo
+            await _debt_repo.upsert(user_id, name, "i_owe", amount=amount, deadline=deadline)
+            return {"kind": "debt", "fact": fact, "category": category, "key": ключ,
+                    "memory_id": None, "was_updated": False, "debt_name": name, "link": name}
+        except Exception as e:
+            logger.error("parse_and_store: debt upsert error %s", e)
+            return {"kind": "error", "fact": fact, "category": category, "key": ключ,
+                    "memory_id": None, "was_updated": False, "debt_name": name, "link": name}
 
     if category != "💰 Лимит" and связь:
         original_link = связь
@@ -443,24 +451,50 @@ async def save_memory(
                 ключ = canonical_link.lower() + old_key[len(original_link):]
             elif old_key.lower() == orig_lower:
                 ключ = canonical_link.lower()
-            logger.info(
-                "memory: canonicalized link %r→%r, key %r→%r",
-                original_link, canonical_link, old_key, ключ,
-            )
+            logger.info("memory: canonicalized link %r→%r, key %r→%r",
+                        original_link, canonical_link, old_key, ключ)
 
-    logger.info("memory save: writing to PG fact=%r key=%s cat=%s", fact, ключ, category)
     try:
         was_updated = False
         if category == "💰 Лимит" and ключ:
             mid, was_updated = await _mem_repo.upsert(
                 fact, ключ, category, scope, связь, "manual", user_id
             )
-            result = mid
         else:
-            result = await _mem_repo.add(
+            mid = await _mem_repo.add(
                 fact, ключ, category, scope, связь, "manual", user_id
             )
+    except Exception as e:
+        logger.error("parse_and_store: write error %s", e)
+        return {"kind": "error", "fact": fact, "category": category, "key": ключ,
+                "memory_id": None, "was_updated": False, "debt_name": "", "link": связь}
+    return {"kind": "memory" if mid else "error", "fact": fact, "category": category,
+            "key": ключ, "memory_id": mid, "was_updated": was_updated, "debt_name": "", "link": связь}
 
+
+async def save_memory(
+    message: Message,
+    text: str,
+    user_id: str,
+    bot_label: str,
+) -> None:
+    """Распарсить текст через Haiku и сохранить факт в PG (бот-путь)."""
+    logger.info("memory save: text=%r bot=%s", text[:60], bot_label)
+    r = await parse_and_store(text, user_id, bot_label)
+    fact, category, ключ = r["fact"], r["category"], r["key"]
+    связь = r.get("link", "")
+    scope = bot_to_scope(bot_label)
+
+    if r["kind"] == "debt":
+        await message.answer(f"📋 Добавил долг: {fact}")
+        return
+    if r["kind"] == "error":
+        await message.answer("⚠️ Ошибка записи в базу")
+        return
+
+    result = r["memory_id"]
+    was_updated = r["was_updated"]
+    try:
         if result:
             logger.info("memory save: %s id=%s", "updated" if was_updated else "created", result)
             if was_updated:

@@ -109,7 +109,13 @@ core/repos/pg_memory_repo.py → memories_table (PG)`.
 All sync SQL is wrapped in `asyncio.to_thread`.
 
 ### Write
-`core/memory.py:save_memory(message, text, user_id, bot_label)`:
+`core/memory.py:parse_and_store(text, user_id, bot_label)` is the
+Message-free core (Haiku parse → `долг_` diversion → alias canonicalization
+→ write); `save_memory(message, …)` calls it and layers the bot-side
+effects (replies, СДВГ tip, `message_pages` plaque). The Mini App FAB calls
+`parse_and_store` directly (#6). Steps:
+
+`save_memory(message, text, user_id, bot_label)`:
 1. `maybe_convert` (EN→RU keyboard layout).
 2. `_parse_fact` — Haiku (`claude-haiku-4-5-20251001`, temperature=0,
    max_tokens=200) → `(fact, category, связь, ключ)`. Invalid category →
@@ -298,9 +304,11 @@ tokenizes the hint (stop words + naive stemming `_normalize_word`) → `search`.
     fallback in the Mini App**.
   - `GET /api/memory/adhd` (`routes/memory.py`) — grouping
     patterns/strategies/triggers/specifics + Sonnet profile.
-  - `POST /api/memory` (`routes/writes.py`) — create a row via
-    `PgMemoryRepo.add` (no Haiku parse — fields come straight from the FAB
-    form). Unlike task creation (#72) it sends no bot notification (#6).
+  - `POST /api/memory` (`routes/writes.py`) — runs the same Message-free
+    core as the bot (`core/memory.py:parse_and_store`): Haiku parse
+    (category / связь / ключ), `долг_` → `debts` table, alias
+    canonicalization, then `notify_user(bot="nexus")` (#6). The form's
+    `cat` field is ignored — the parser assigns the category.
   - `DELETE /api/memory/{id}` (`routes/writes.py`, #193) — ownership check
     (404 on missing/foreign, never 403), then a real SQL `DELETE` via
     `PgMemoryRepo.delete` (**hard delete, not archive** — differs from the

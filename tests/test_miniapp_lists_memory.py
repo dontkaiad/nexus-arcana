@@ -745,18 +745,37 @@ def test_memory_401_without_init_data():
 # ── POST /api/memory ─────────────────────────────────────────────────────────
 
 def test_memory_create(client):
-    with patch("miniapp.backend.routes.writes._memory_repo.add",
-               AsyncMock(return_value="mem-id")) as mem_add, \
+    """#6: FAB зовёт общее ядро parse_and_store (Haiku-парс + запись) и
+    шлёт уведомление в Nexus."""
+    pas = AsyncMock(return_value={
+        "kind": "memory", "fact": "Chapman = сигареты", "category": "🛒 Предпочтения",
+        "key": "chapman", "memory_id": "mem-id", "was_updated": False,
+        "debt_name": "", "link": "chapman",
+    })
+    with patch("core.memory.parse_and_store", pas), \
+         patch("miniapp.backend.routes.writes.notify_user", AsyncMock()) as notif, \
          patch("miniapp.backend.routes.writes.get_user_id",
                AsyncMock(return_value=FAKE_USER_ID)):
-        r = client.post("/api/memory", json={
-            "text": "Chapman = сигареты",
-            "cat": "🛒 Предпочтения",
-        })
+        r = client.post("/api/memory", json={"text": "Chapman = сигареты", "cat": "🛒 Предпочтения"})
     assert r.status_code == 200
     assert r.json() == {"ok": True, "id": "mem-id"}
-    assert mem_add.call_args.kwargs["fact"] == "Chapman = сигареты"
-    assert mem_add.call_args.kwargs["category"] == "🛒 Предпочтения"
+    assert pas.await_args.args[0] == "Chapman = сигареты"
+    assert "Запомнила" in notif.await_args.args[1]
+
+
+def test_memory_create_debt_goes_to_debts_and_notifies(client):
+    pas = AsyncMock(return_value={
+        "kind": "debt", "fact": "долг: 👤 Маша — 5000₽", "category": "💰 Лимит",
+        "key": "долг_маша", "memory_id": None, "was_updated": False,
+        "debt_name": "маша", "link": "маша",
+    })
+    with patch("core.memory.parse_and_store", pas), \
+         patch("miniapp.backend.routes.writes.notify_user", AsyncMock()) as notif, \
+         patch("miniapp.backend.routes.writes.get_user_id",
+               AsyncMock(return_value=FAKE_USER_ID)):
+        r = client.post("/api/memory", json={"text": "долг маше 5000", "cat": None})
+    assert r.status_code == 200 and r.json()["kind"] == "debt"
+    assert "долг" in notif.await_args.args[1].lower()
 
 
 # ── DELETE /api/memory/{id} ──────────────────────────────────────────────────

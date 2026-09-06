@@ -11,7 +11,7 @@ from __future__ import annotations
 import asyncio
 from unittest.mock import AsyncMock, patch
 
-from core.memory import _semantic_search_memory, save_memory
+from core.memory import _semantic_search_memory, save_memory, parse_and_store
 from core.repos.pg_memory_repo import Memory
 
 
@@ -158,6 +158,29 @@ def test_deactivate_memory_hint_path_disables_semantic():
         from core.memory import deactivate_memory
         asyncio.run(deactivate_memory(msg, "какой-то хинт", "u1"))
     find.assert_called_once_with("какой-то хинт", use_semantic=False, user_id="u1")
+
+
+def test_parse_and_store_diverts_debt_to_debts_table():
+    """#6: общее ядро — долг_ ключ уходит в debts, не в memories."""
+    debt_repo = AsyncMock()
+    with patch("core.memory._parse_fact",
+               AsyncMock(return_value=("долг: Маша — 5000₽", "💰 Лимит", "маша", "долг_маша"))), \
+         patch("core.repos.pg_debts_repo._repo", debt_repo), \
+         patch("core.memory._mem_repo") as mem_repo:
+        r = asyncio.run(parse_and_store("долг маше 5000", "owner-1", "☀️ Nexus"))
+    assert r["kind"] == "debt" and r["debt_name"] == "маша"
+    debt_repo.upsert.assert_awaited_once()
+    mem_repo.add.assert_not_called()
+
+
+def test_parse_and_store_writes_plain_fact():
+    with patch("core.memory._parse_fact",
+               AsyncMock(return_value=("любит чай", "🛒 Предпочтения", "", "chai"))), \
+         patch("core.memory._mem_repo") as mem_repo:
+        mem_repo.add = AsyncMock(return_value="m-9")
+        r = asyncio.run(parse_and_store("люблю чай", "owner-1", "☀️ Nexus"))
+    assert r["kind"] == "memory" and r["memory_id"] == "m-9"
+    assert mem_repo.add.await_args.args[6] == "owner-1"  # user_id threaded
 
 
 def test_find_pages_by_hint_forwards_user_id_to_repo():
