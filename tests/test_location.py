@@ -70,6 +70,9 @@ async def test_set_user_location_writes_both_keys():
     # "Настройки" (#184: обе были невалидны, не совпадали с списком).
     cats = {c.kwargs["key"]: c.kwargs["category"] for c in upsert.call_args_list}
     assert cats == {"tz_77": "🏠 Быт", "city_77": "🛒 Предпочтения"}
+    # #148: авто-детект локации — единственный поток записи памяти с
+    # source="auto"; поле различимо в чтениях (Memory.source, memory_rag).
+    assert all(c.kwargs["source"] == "auto" for c in upsert.call_args_list)
 
 
 @pytest.mark.asyncio
