@@ -1,6 +1,6 @@
 # MEMORY — memory data model
 
-> **Status: AS-BUILT, code conforms to `9c7fec4` + #202 owner-scoping.** Notion→PostgreSQL
+> **Status: AS-BUILT, code conforms to `da17d0a`.** Notion→PostgreSQL
 > migration is complete. Schema: `value_text` dropped (#146), `notion_id`
 > dropped (#149), `user_notion_id`→`user_id` (#144). Search: the semantic
 > layer (ADR-0006 pgvector backend, applied to memory by ADR-0020) plus a
@@ -29,7 +29,7 @@ writes every budget fact with `category="💰 Лимит"`; `🔒 Постоян
 from the key prefix (`постоянно_` / `income_` / `цель_`) on read — no row is
 stored with those categories. `📋 Долги` is dead in `memories`: a `долг_`
 fact from `save_memory` is diverted to the `debts` table
-(`_save_debt_from_memory`, see Write) so the budget's single debt reader
+(`parse_and_store`, see Write) so the budget's single debt reader
 (`pg_debts_repo`) sees it.
 
 Boundary "memory about the user" vs "domain knowledge":
@@ -127,7 +127,7 @@ effects (replies, СДВГ tip, `message_pages` plaque). The Mini App FAB calls
    depth ≤3, cycle protection).
 5. Write:
    - `ключ` starts with `долг_` → **not written to `memories`**:
-     `_save_debt_from_memory` parses amount/deadline out of the fact and
+     `_parse_debt_from_fact` parses amount/deadline out of the fact and
      `pg_debts_repo.upsert(user_id, name, "i_owe", …)`. Keeps the budget's
      debt reader (`pg_debts_repo` only) in sync (`b0116c6`).
    - `category == "💰 Лимит"` and `ключ` present → `_repo.upsert` (find by
