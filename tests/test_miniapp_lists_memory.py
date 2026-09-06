@@ -546,7 +546,7 @@ def test_memory_excludes_budget_and_adhd_categories(client):
         _mem_pg("m4", "подруга Аня", cat="👥 Люди", key="anya"),
     ]
 
-    with patch("miniapp.backend.routes.memory._memory_repo.find_by_category",
+    with patch("miniapp.backend.routes.memory._memory_repo.find_recent",
                AsyncMock(return_value=mems)), \
          patch("miniapp.backend.routes.memory.get_user_id",
                AsyncMock(return_value=FAKE_USER_ID)):
@@ -580,7 +580,7 @@ def test_memory_excludes_tz_and_city_system_keys(client):
         _mem_pg("m3", "Гай", cat="🛒 Предпочтения", key="city_67686090"),
     ]
 
-    with patch("miniapp.backend.routes.memory._memory_repo.find_by_category",
+    with patch("miniapp.backend.routes.memory._memory_repo.find_recent",
                AsyncMock(return_value=mems)), \
          patch("miniapp.backend.routes.memory.get_user_id",
                AsyncMock(return_value=FAKE_USER_ID)):
@@ -600,7 +600,7 @@ def test_memory_excludes_goal_keys(client):
         _mem_pg("m2", "цель: 📱 Телефон — 100000₽ · откладываю 0₽/мес",
                 cat="💰 Лимит", key="цель_телефон"),
     ]
-    with patch("miniapp.backend.routes.memory._memory_repo.find_by_category",
+    with patch("miniapp.backend.routes.memory._memory_repo.find_recent",
                AsyncMock(return_value=mems)), \
          patch("miniapp.backend.routes.memory.get_user_id",
                AsyncMock(return_value=FAKE_USER_ID)):
@@ -615,7 +615,7 @@ def test_memory_cat_filter(client):
         _mem_pg("m2", "B", cat="👥 Люди"),
     ]
 
-    with patch("miniapp.backend.routes.memory._memory_repo.find_by_category",
+    with patch("miniapp.backend.routes.memory._memory_repo.find_recent",
                AsyncMock(return_value=mems)), \
          patch("miniapp.backend.routes.memory.get_user_id",
                AsyncMock(return_value="")):
@@ -645,7 +645,7 @@ def _limit_mems():
 
 
 def test_memory_limit_category_grouped(client):
-    with patch("miniapp.backend.routes.memory._memory_repo.find_by_category",
+    with patch("miniapp.backend.routes.memory._memory_repo.find_recent",
                AsyncMock(return_value=_limit_mems())), \
          patch("miniapp.backend.routes.memory.get_user_id",
                AsyncMock(return_value=FAKE_USER_ID)):
@@ -676,7 +676,7 @@ def test_memory_limit_category_grouped(client):
 
 def test_memory_limit_category_in_category_list(client):
     """«💰 Лимит» всегда присутствует в списке категорий (спец-таб)."""
-    with patch("miniapp.backend.routes.memory._memory_repo.find_by_category",
+    with patch("miniapp.backend.routes.memory._memory_repo.find_recent",
                AsyncMock(return_value=[_mem_pg("m1", "x", cat="🛒 Предпочтения")])), \
          patch("miniapp.backend.routes.memory.get_user_id",
                AsyncMock(return_value=FAKE_USER_ID)):
@@ -695,7 +695,7 @@ def test_memory_search_matches_key_and_related(client):
         _mem_pg("m3", "не относится", cat="🏠 Быт"),
     ]
 
-    with patch("miniapp.backend.routes.memory._memory_repo.find_by_category",
+    with patch("miniapp.backend.routes.memory._memory_repo.find_recent",
                AsyncMock(return_value=mems)), \
          patch("miniapp.backend.routes.memory.get_user_id",
                AsyncMock(return_value=FAKE_USER_ID)):
@@ -776,6 +776,65 @@ def test_memory_create_debt_goes_to_debts_and_notifies(client):
         r = client.post("/api/memory", json={"text": "долг маше 5000", "cat": None})
     assert r.status_code == 200 and r.json()["kind"] == "debt"
     assert "долг" in notif.await_args.args[1].lower()
+
+
+# ── PATCH /api/memory/{id} — обратимая «неактуально» (#6) ───────────────────
+
+def test_memory_patch_toggles_is_current(client):
+    mem = Memory(id="m-1", fact="была правдой", user_id=FAKE_USER_ID, is_current=True)
+    with patch("miniapp.backend.routes.writes._memory_repo.get_by_id",
+               AsyncMock(return_value=mem)), \
+         patch("miniapp.backend.routes.writes._memory_repo.set_current",
+               AsyncMock(return_value=1)) as sc, \
+         patch("miniapp.backend.routes.writes.get_user_id",
+               AsyncMock(return_value=FAKE_USER_ID)):
+        r = client.patch("/api/memory/m-1", json={"is_current": False})
+    assert r.status_code == 200 and r.json() == {"ok": True, "is_current": False}
+    sc.assert_awaited_once_with(["m-1"], False)
+
+
+def test_memory_patch_foreign_record_404s(client):
+    mem = Memory(id="m-1", fact="чужое", user_id="someone-else", is_current=True)
+    with patch("miniapp.backend.routes.writes._memory_repo.get_by_id",
+               AsyncMock(return_value=mem)), \
+         patch("miniapp.backend.routes.writes.get_user_id",
+               AsyncMock(return_value=FAKE_USER_ID)):
+        r = client.patch("/api/memory/m-1", json={"is_current": False})
+    assert r.status_code == 404
+
+
+def test_memory_include_inactive_lists_deactivated(client):
+    mems = [
+        _mem_pg("m1", "актуальное", cat="🛒 Предпочтения"),
+        Memory(id="m2", fact="неактуальное", category="🛒 Предпочтения", is_current=False),
+    ]
+    with patch("miniapp.backend.routes.memory._memory_repo.find_recent",
+               AsyncMock(return_value=mems)) as fr, \
+         patch("miniapp.backend.routes.memory.get_user_id",
+               AsyncMock(return_value=FAKE_USER_ID)):
+        r = client.get("/api/memory?include_inactive=1")
+    assert r.status_code == 200
+    by_id = {i["id"]: i for i in r.json()["items"]}
+    assert by_id["m1"]["is_current"] is True
+    assert by_id["m2"]["is_current"] is False
+    assert fr.await_args.kwargs["is_current"] is None
+
+
+def test_memory_search_semantic_fallback_when_few_ilike_hits(client):
+    """#6: <3 ILIKE-хитов → semantic-фоллбэк (Voyage+rerank), отфильтрованный
+    по видимым записям."""
+    visible = [_mem_pg("m1", "любит зелёный чай", cat="🛒 Предпочтения"),
+               _mem_pg("m2", "не относится", cat="🏠 Быт")]
+    sem = AsyncMock(return_value=[visible[0]])  # rerank оставил m1
+    with patch("miniapp.backend.routes.memory._memory_repo.find_recent",
+               AsyncMock(return_value=visible)), \
+         patch("core.memory._semantic_search_memory", sem), \
+         patch("miniapp.backend.routes.memory.get_user_id",
+               AsyncMock(return_value=FAKE_USER_ID)):
+        r = client.get("/api/memory?q=напиток")   # нет ILIKE-совпадений
+    assert r.status_code == 200
+    assert {i["id"] for i in r.json()["items"]} == {"m1"}
+    assert sem.await_args.kwargs["user_id"] == FAKE_USER_ID
 
 
 # ── DELETE /api/memory/{id} ──────────────────────────────────────────────────

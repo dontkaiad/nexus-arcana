@@ -491,6 +491,10 @@ export function adaptMemory(data) {
       id: m.id,
       text: m.text || '',
       cat: m.cat || '—',
+      related: m.related || null,   // #6: связь — мелкой строкой под текстом
+      key: m.key || null,           // #6: ключ — там же
+      date: m.date || null,         // #6: created_at[:10] — в детализации по тапу
+      isCurrent: m.is_current !== false,  // #6: обратимая «неактуально»
     })),
     categories: data.categories || [],
     // «💰 Лимит» — сгруппированный спец-вид (Постоянные/Разовые/Лимиты/Доход)

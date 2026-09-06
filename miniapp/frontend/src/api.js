@@ -89,3 +89,19 @@ export async function apiPost(path, body, opts = {}) {
   }
   return r.json()
 }
+
+export async function apiPatch(path, body) {
+  const r = await fetch(`${BASE}${path}`, {
+    method: 'PATCH',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Telegram-Init-Data': getInitData(),
+    },
+    body: JSON.stringify(body || {}),
+  })
+  if (!r.ok) {
+    const text = await r.text().catch(() => '')
+    throw new Error(`${r.status} ${r.statusText}${text ? ` — ${text.slice(0, 120)}` : ''}`)
+  }
+  return r.json()
+}

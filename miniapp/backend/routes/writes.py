@@ -1273,6 +1273,30 @@ async def memory_create(
     return {"ok": True, "id": r["memory_id"]}
 
 
+class MemoryPatchBody(BaseModel):
+    is_current: bool
+
+
+@router.patch("/memory/{memory_id}")
+async def memory_set_current(
+    memory_id: str,
+    body: MemoryPatchBody,
+    tg_id: int = Depends(current_user_id),
+) -> dict[str, Any]:
+    """#6: обратимая «неактуально» — toggle is_current (не archive/delete).
+    Запись остаётся в БД и в поиске, помечена (не)актуальной."""
+    user_id = (await get_user_id(tg_id)) or ""
+    mem = await _memory_repo.get_by_id(memory_id)
+    if not mem:
+        raise HTTPException(status_code=404, detail="not found")
+    if user_id and mem.user_id and mem.user_id != user_id:
+        raise HTTPException(status_code=404, detail="not found")
+    n = await _memory_repo.set_current([memory_id], body.is_current)
+    if not n:
+        raise HTTPException(status_code=500, detail="failed to update memory")
+    return {"ok": True, "is_current": body.is_current}
+
+
 @router.delete("/memory/{memory_id}")
 async def memory_delete(
     memory_id: str,

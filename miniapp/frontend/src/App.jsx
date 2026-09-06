@@ -13,14 +13,14 @@ import {
   adaptGrimoire, adaptGrimoireDetail,
   formatMonth, formatDate, formatShortDate,
 } from "./adapters";
-import { apiGet, apiPost, apiDelete, apiStream } from "./api";
+import { apiGet, apiPost, apiDelete, apiPatch, apiStream } from "./api";
 import { SelfListCard, SelfDetailHeader } from "./components/self/SelfClientCard.jsx";
 import {
   Sun, Moon as LucideMoon, Check, Coins, List as ListIcon, Brain, Calendar,
   Sparkles as LucideSparkles, Users, Flame as LucideFlame, BookOpen as LucideBookOpen,
   Plus, Search,
   Bell, RefreshCw, X, Camera, Mic, Pencil, ChevronRight, ChevronDown,
-  Wallet, HeartPulse, StickyNote, Candy, Trash2, Clock, RotateCcw,
+  Wallet, HeartPulse, StickyNote, Candy, Trash2, Clock, RotateCcw, EyeOff,
   CloudSun, CloudRain, CloudSnow, CloudFog,
 } from "lucide-react";
 import {
@@ -2843,11 +2843,15 @@ function NxMemory({ s, openAdhd }) {
   const [cat, setCat] = useState("all");
   const [q, setQ] = useState("");
   const [deletingId, setDeletingId] = useState(null);
+  const [patchingId, setPatchingId] = useState(null);
+  const [expandedId, setExpandedId] = useState(null);
+  const [showInactive, setShowInactive] = useState(false);
   const params = [];
   if (cat !== "all") params.push(`cat=${encodeURIComponent(cat)}`);
   if (q) params.push(`q=${encodeURIComponent(q)}`);
+  if (showInactive) params.push("include_inactive=1");
   const path = "/api/memory" + (params.length ? "?" + params.join("&") : "");
-  const { data, loading, error, refetch } = useApi(path, [cat, q]);
+  const { data, loading, error, refetch } = useApi(path, [cat, q, showInactive]);
   const view = loading || error ? { items: [], categories: [] } : adaptMemory(data);
   const cats = ["all", ...view.categories];
 
@@ -2861,6 +2865,19 @@ function NxMemory({ s, openAdhd }) {
       alert("Не получилось удалить: " + e.message);
     } finally {
       setDeletingId(null);
+    }
+  };
+
+  // #6: обратимая «неактуально» — toggle is_current, запись остаётся в БД
+  const toggleActual = async (m) => {
+    setPatchingId(m.id);
+    try {
+      await apiPatch(`/api/memory/${m.id}`, { is_current: !m.isCurrent });
+      refetch();
+    } catch (e) {
+      alert("Не получилось: " + e.message);
+    } finally {
+      setPatchingId(null);
     }
   };
 
@@ -2890,6 +2907,18 @@ function NxMemory({ s, openAdhd }) {
         </div>
       </Glass>
       <SearchInput s={s} value={q} onChange={setQ} placeholder="Поиск по памяти" />
+      {/* #6: показать записи, помеченные «неактуально» (is_current=false) */}
+      <div
+        onClick={() => setShowInactive((v) => !v)}
+        style={{
+          fontSize: fs(11), color: showInactive ? s.acc : s.tS,
+          cursor: "pointer", alignSelf: "flex-start",
+          display: "inline-flex", alignItems: "center", gap: 4,
+        }}
+      >
+        <EyeOff size={fs(12)} />
+        {showInactive ? "Скрыть неактуальные" : "Показать неактуальные"}
+      </div>
       {/* #62: 10+ канонических чипов категорий рвались на 4 строки — горизонтальный
           скролл в одну строку без wrap, как тут с табами повсюду в боте. */}
       <div style={{
@@ -2942,12 +2971,32 @@ function NxMemory({ s, openAdhd }) {
         // #49(a): иконка категории справа (как в задачах/списках), без текстовой
         // подписи внизу карточки.
         const catEmojiOnly = m.cat ? String(m.cat).split(" ")[0] : "";
-        const busy = deletingId === m.id;
+        const busy = deletingId === m.id || patchingId === m.id;
+        const dim = m.isCurrent === false;
+        const sub = [m.key && `🔑 ${m.key}`, m.related && `👤 ${m.related}`]
+          .filter(Boolean).join("  ·  ");
+        const expanded = expandedId === m.id;
         return (
-          <Glass key={m.id} s={s} style={{ padding: "10px 14px", marginBottom: 4 }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-              <span style={{ flex: 1, minWidth: 0, fontSize: fs(13), color: s.text, wordBreak: "break-word" }}>
+          <Glass key={m.id} s={s} style={{ padding: "10px 14px", marginBottom: 4, opacity: dim ? 0.5 : 1 }}>
+            <div style={{ display: "flex", alignItems: "flex-start", gap: 10 }}>
+              <span
+                onClick={() => setExpandedId(expanded ? null : m.id)}
+                style={{ flex: 1, minWidth: 0, fontSize: fs(13), color: s.text, wordBreak: "break-word", cursor: "pointer" }}
+              >
                 {m.text}
+                {dim && <span style={{ color: s.tS, fontSize: fs(11) }}>  (неактуально)</span>}
+                {/* #6 (1a): ключ / связь — мелкой строкой под текстом */}
+                {sub && (
+                  <span style={{ display: "block", marginTop: 3, fontSize: fs(11), color: s.tS }}>
+                    {sub}
+                  </span>
+                )}
+                {/* #6 (2): дата — в детализации по тапу */}
+                {expanded && m.date && (
+                  <span style={{ display: "block", marginTop: 3, fontSize: fs(11), color: s.tS }}>
+                    📅 {m.date}
+                  </span>
+                )}
               </span>
               {catEmojiOnly && (
                 <span title={m.cat} style={{
@@ -2958,6 +3007,22 @@ function NxMemory({ s, openAdhd }) {
                 }}>
                   {catEmojiOnly}
                 </span>
+              )}
+              {/* #6 (3): обратимая «неактуально» */}
+              {m.isCurrent === false ? (
+                <RotateCcw
+                  size={fs(15)}
+                  color={s.acc}
+                  style={{ flexShrink: 0, cursor: busy ? "default" : "pointer", opacity: busy ? 0.4 : 0.7 }}
+                  onClick={() => !busy && toggleActual(m)}
+                />
+              ) : (
+                <EyeOff
+                  size={fs(15)}
+                  color={s.tS}
+                  style={{ flexShrink: 0, cursor: busy ? "default" : "pointer", opacity: busy ? 0.4 : 0.6 }}
+                  onClick={() => !busy && toggleActual(m)}
+                />
               )}
               <Trash2
                 size={fs(15)}

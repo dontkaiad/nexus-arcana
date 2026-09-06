@@ -288,12 +288,15 @@ tokenizes the hint (stop words + naive stemming `_normalize_word`) → `search`.
   `nexus/handlers/reply_update.py`, `arcana/handlers/reply_update.py`.
 - Mini App (PG-native, `PgMemoryRepo` directly):
   - `GET /api/memory` (`routes/memory.py`) — actual rows only
-    (`is_current=True`). Hides the budget/ADHD categories
-    (`EXCLUDED_CATEGORIES` — own screens) and system / finance-only keys
-    (`EXCLUDED_KEY_PREFIXES` = `tz_` / `city_` / `impulse_windfall_` /
-    `цель_` — the last because goals are stored under `💰 Лимит`, not
-    `🎯 Цели`, so the category filter misses them; #197, #6). Budget-prefixed
-    rows
+    (`is_current=True`, or all non-archived when `include_inactive=1`, #6).
+    Hides the budget/ADHD categories (`EXCLUDED_CATEGORIES` — own screens)
+    and system / finance-only keys (`EXCLUDED_KEY_PREFIXES` = `tz_` /
+    `city_` / `impulse_windfall_` / `цель_` — the last because goals are
+    stored under `💰 Лимит`, not `🎯 Цели`, so the category filter misses
+    them; #197, #6). `q` runs ILIKE over text+key+related and, if that
+    returns fewer than 3 rows, the same Voyage + Haiku-rerank semantic
+    fallback the bot uses (`_semantic_search_memory`, scoped by `user_id`,
+    re-filtered to the visible set; #6). Budget-prefixed rows
     (`income_`/`постоянно_`/`разовый_`/`лимит_`) are pulled out of the flat
     list into a grouped `💰 Лимит` special view
     (`_group_budget_memories`, #49b) returned only when `cat=💰 Лимит`.
@@ -309,12 +312,15 @@ tokenizes the hint (stop words + naive stemming `_normalize_word`) → `search`.
     (category / связь / ключ), `долг_` → `debts` table, alias
     canonicalization, then `notify_user(bot="nexus")` (#6). The form's
     `cat` field is ignored — the parser assigns the category.
+  - `PATCH /api/memory/{id}` (`routes/writes.py`, #6) — `{is_current: bool}`,
+    ownership check, `PgMemoryRepo.set_current`. Reversible "неактуально"
+    (the row stays; `include_inactive=1` lists it back for reactivation) —
+    parity with the bot's `deactivate_memory` / `reactivate`.
   - `DELETE /api/memory/{id}` (`routes/writes.py`, #193) — ownership check
     (404 on missing/foreign, never 403), then a real SQL `DELETE` via
     `PgMemoryRepo.delete` (**hard delete, not archive** — differs from the
     bot's `delete_memory`, which sets `is_archived`). Removing the row also
-    removes its `embedding` from semantic search in the same statement. No
-    deactivate (`is_current=False`) endpoint — that toggle is bot-only.
+    removes its `embedding` from semantic search in the same statement.
   - `routes/weather.py` — timezone via `find_by_exact_key`.
 
 ### Model routing (from the code, not from memory)

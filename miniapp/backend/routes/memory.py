@@ -177,20 +177,20 @@ def _serialize_memory(mem: Memory) -> dict:
         "related": mem.related_to or None,
         "key": mem.key or None,
         "date": mem.date or None,   # created_at[:10]; front decides whether to show (#6)
+        "is_current": bool(mem.is_current),   # #6: обратимая «неактуально»
     }
 
 
-async def _fetch_actual(user_id: str) -> List[Memory]:
-    """Все актуальные записи Памяти юзера (is_current == True)."""
+async def _fetch_rows(user_id: str, include_inactive: bool) -> List[Memory]:
+    """Записи Памяти юзера. include_inactive=False → только is_current."""
     try:
-        return await _memory_repo.find_by_category(
-            "",
-            is_current=True,
+        return await _memory_repo.find_recent(
+            is_current=None if include_inactive else True,
             user_id=user_id,
             page_size=500,
         )
     except Exception as e:
-        logger.warning("_fetch_actual PG query failed: %s", e)
+        logger.warning("_fetch_rows PG query failed: %s", e)
         return []
 
 
@@ -199,11 +199,12 @@ async def get_memory(
     tg_id: int = Depends(current_user_id),
     cat: Optional[str] = Query(None, description="фильтр по категории"),
     q: Optional[str] = Query(None, description="case-insensitive contains по тексту"),
+    include_inactive: bool = Query(False, description="показать записи с is_current=False"),
 ) -> dict[str, Any]:
     user_id = (await get_user_id(tg_id)) or ""
-    raw = await _fetch_actual(user_id)
+    raw = await _fetch_rows(user_id, include_inactive)
 
-    items: list[dict] = []
+    visible: list[Memory] = []
     categories: set[str] = set()
     budget_mems: list[Memory] = []
     for mem in raw:
@@ -217,7 +218,7 @@ async def get_memory(
             continue
         if c:
             categories.add(c)
-        items.append(_serialize_memory(mem))
+        visible.append(mem)
 
     # «💰 Лимит» — сгруппированный спец-вид (Постоянные / Разовые / Лимиты / Доход)
     if cat == LIMIT_CATEGORY:
@@ -229,19 +230,29 @@ async def get_memory(
         }
 
     if cat:
-        items = [i for i in items if i["cat"] == cat]
+        visible = [m for m in visible if (m.category or None) == cat]
     if q:
-        # Выравнивание с ботом: core.memory._find_pages ищет по Текст+Ключ+Связь.
+        # Выравнивание с ботом: ILIKE по Текст+Ключ+Связь, потом — если хитов
+        # < 3 — semantic-фоллбэк (Voyage + Haiku-реранк), как в core.memory (#6).
         needle = q.lower().strip()
-        items = [
-            i for i in items
-            if needle in (i["text"] or "").lower()
-            or needle in (i["key"] or "").lower()
-            or needle in (i["related"] or "").lower()
+        hits = [
+            m for m in visible
+            if needle in (m.fact or "").lower()
+            or needle in (m.key or "").lower()
+            or needle in (m.related_to or "").lower()
         ]
+        if len(hits) < 3:
+            try:
+                from core.memory import _semantic_search_memory
+                merged = await _semantic_search_memory(q, hits, user_id=user_id, cap=20)
+                allowed = {m.id for m in visible}
+                hits = [m for m in merged if m.id in allowed]
+            except Exception as e:
+                logger.warning("get_memory semantic fallback failed: %s", e)
+        visible = hits
 
     return {
-        "items": items,
+        "items": [_serialize_memory(m) for m in visible],
         "categories": _all_categories(categories),
     }
 
