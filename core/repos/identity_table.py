@@ -3,8 +3,10 @@
 core_identity is the PG source of truth for Telegram user identity,
 replacing Notion 🪪 Пользователи DB as the read-path for user resolution.
 
-notion_id TEXT PRIMARY KEY matches the existing user_id TEXT column
-in all other PG tables (owner-key pattern — no FK constraint needed).
+notion_id TEXT PRIMARY KEY is the per-device identity id; user_id TEXT is
+the shared owner key that matches the user_id column in every other PG table
+(owner-key pattern — no FK constraint). Two device rows of the same person
+carry the same user_id (#202); a fresh identity self-owns (user_id = notion_id).
 """
 from __future__ import annotations
 
@@ -16,6 +18,7 @@ core_identity = Table(
     "core_identity",
     metadata,
     Column("notion_id", Text, primary_key=True),
+    Column("user_id", Text, nullable=False, server_default=text("''")),
     Column("tg_id", BigInteger, nullable=False),
     Column("name", Text, nullable=False, server_default=text("''")),
     Column("role", Text, nullable=False, server_default=text("'Тест'")),

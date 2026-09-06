@@ -30,6 +30,7 @@ def _get_engine():
 class IdentityUser:
     """Domain representation of a Пользователи record."""
     notion_id: str = ""
+    user_id: str = ""          # shared owner key (#202); falls back to notion_id
     tg_id: int = 0
     name: str = ""
     role: str = ""
@@ -39,8 +40,10 @@ class IdentityUser:
 
 
 def _row_to_user(row) -> IdentityUser:
+    nid = row.notion_id or ""
     return IdentityUser(
-        notion_id=row.notion_id or "",
+        notion_id=nid,
+        user_id=(getattr(row, "user_id", "") or "") or nid,
         tg_id=int(row.tg_id or 0),
         name=row.name or "",
         role=row.role or "",
@@ -89,6 +92,7 @@ def _upsert_sync(
         pg_insert(core_identity)
         .values(
             notion_id=notion_id,
+            user_id=notion_id,   # fresh identity self-owns; a merge sets this manually (#202)
             tg_id=tg_id,
             name=name,
             role=role,
@@ -105,13 +109,16 @@ def _upsert_sync(
                 perm_nexus=perm_nexus,
                 perm_arcana=perm_arcana,
                 perm_finance=perm_finance,
-            ),
+            ),  # user_id intentionally not touched on update — preserves an owner merge
         )
     )
     with _get_engine().begin() as conn:
         conn.execute(stmt)
-    return IdentityUser(
-        notion_id=notion_id, tg_id=tg_id, name=name, role=role,
+        row = conn.execute(
+            select(core_identity).where(core_identity.c.notion_id == notion_id)
+        ).fetchone()
+    return _row_to_user(row) if row else IdentityUser(
+        notion_id=notion_id, user_id=notion_id, tg_id=tg_id, name=name, role=role,
         perm_nexus=perm_nexus, perm_arcana=perm_arcana, perm_finance=perm_finance,
     )
 

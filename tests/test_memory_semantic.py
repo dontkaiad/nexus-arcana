@@ -157,7 +157,20 @@ def test_deactivate_memory_hint_path_disables_semantic():
         mem_repo.set_active = AsyncMock(return_value=1)
         from core.memory import deactivate_memory
         asyncio.run(deactivate_memory(msg, "какой-то хинт", "u1"))
-    find.assert_called_once_with("какой-то хинт", use_semantic=False)
+    find.assert_called_once_with("какой-то хинт", use_semantic=False, user_id="u1")
+
+
+def test_find_pages_by_hint_forwards_user_id_to_repo():
+    """#202: owner-ключ пробрасывается в ILIKE и в semantic-фоллбэк, а не
+    теряется на уровне core/memory.py."""
+    from core.memory import _find_pages_by_hint
+    search = AsyncMock(return_value=[])
+    with patch("core.memory._mem_repo") as mem_repo, \
+         patch("core.memory._semantic_search_memory", AsyncMock(return_value=[])) as sem:
+        mem_repo.search = search
+        asyncio.run(_find_pages_by_hint("маша", page_size=5, user_id="owner-1"))
+    assert search.await_args.kwargs["user_id"] == "owner-1"
+    assert sem.await_args.kwargs["user_id"] == "owner-1"
 
 
 def test_delete_memory_hint_path_disables_semantic():
@@ -171,4 +184,4 @@ def test_delete_memory_hint_path_disables_semantic():
         mem_repo.archive = AsyncMock(return_value=True)
         from core.memory import delete_memory
         asyncio.run(delete_memory(msg, "какой-то хинт", "u1"))
-    find.assert_called_once_with("какой-то хинт", use_semantic=False)
+    find.assert_called_once_with("какой-то хинт", use_semantic=False, user_id="u1")

@@ -249,8 +249,14 @@ async def _semantic_search_memory(
     return merged[:cap]
 
 
-async def _find_pages_by_hint(hint: str, page_size: int = 10, use_semantic: bool = True) -> List[Memory]:
+async def _find_pages_by_hint(
+    hint: str, page_size: int = 10, use_semantic: bool = True, user_id: str = "",
+) -> List[Memory]:
     """Умный поиск по hint через PG. Возвращает List[Memory].
+
+    `user_id` — owner-ключ (#202): пусто → поиск по всей памяти владельца
+    (текущее поведение для одного владельца на нескольких устройствах —
+    все identity-строки делят один user_id). Непусто → фильтр по владельцу.
 
     Функция оставлена module-level: тесты test_memory_aliases патчат её.
     """
@@ -268,7 +274,9 @@ async def _find_pages_by_hint(hint: str, page_size: int = 10, use_semantic: bool
         matched_cat = _CAT_MAP[hint_lower]
         logger.info("_find_pages_by_hint: category shortcut → %s", matched_cat)
         try:
-            results = await _mem_repo.find_by_category(matched_cat, is_current=True, page_size=100)
+            results = await _mem_repo.find_by_category(
+                matched_cat, is_current=True, user_id=user_id, page_size=100,
+            )
             logger.info("_find_pages_by_hint category shortcut: found=%d", len(results))
             return results
         except Exception as e:
@@ -279,10 +287,10 @@ async def _find_pages_by_hint(hint: str, page_size: int = 10, use_semantic: bool
 
     search_terms = tokens if tokens else [hint.strip()]
     try:
-        results = await _mem_repo.search(search_terms, page_size=page_size)
+        results = await _mem_repo.search(search_terms, user_id=user_id, page_size=page_size)
         logger.info("_find_pages_by_hint: found=%d for terms=%s", len(results), search_terms)
         if use_semantic:
-            results = await _semantic_search_memory(hint, results, cap=page_size)
+            results = await _semantic_search_memory(hint, results, user_id=user_id, cap=page_size)
         return results
     except Exception as e:
         logger.error("memory _find_pages_by_hint: %s", e, exc_info=True)
@@ -341,7 +349,7 @@ async def _resolve_alias(
         # use_semantic=False: recall алиаса должен быть точным (иначе
         # semantic-довесок может подменить имя на «похожее» на каждом
         # уровне рекурсии) — см. #184.
-        mems = await _find_pages_by_hint(связь, use_semantic=False)
+        mems = await _find_pages_by_hint(связь, use_semantic=False, user_id=user_id)
     except Exception as e:
         logger.warning("memory _resolve_alias: _find_pages_by_hint failed for %r: %s",
                        связь, e)
@@ -532,15 +540,15 @@ async def search_memory(
 
     if query:
         tokens = _tokenize_hint(query) or [query]
-        mem_coro = _mem_repo.search(tokens, page_size=10)
+        mem_coro = _mem_repo.search(tokens, user_id=user_id, page_size=10)
         fin_coro = _search_finance(query, page_size=5)
         mems, fin_pages = await asyncio.gather(mem_coro, fin_coro)
-        mems = await _semantic_search_memory(query, mems)
+        mems = await _semantic_search_memory(query, mems, user_id=user_id)
         logger.info("memory search: hint=%r mems=%d fin=%d",
                     query, len(mems), len(fin_pages))
     else:
         try:
-            mems = await _mem_repo.find_recent(is_current=True, page_size=10)
+            mems = await _mem_repo.find_recent(is_current=True, user_id=user_id, page_size=10)
         except Exception as e:
             logger.error("memory search: %s", e)
             mems = []
@@ -664,7 +672,7 @@ async def deactivate_memory(
         # use_semantic=False: деактивация применяется КО ВСЕМ найденным без
         # подтверждения — semantic-довесок (top-K ближайших БЕЗ порога
         # похожести) может подмешать нерелевантные факты (#184).
-        mems = await _find_pages_by_hint(hint, use_semantic=False) if hint else []
+        mems = await _find_pages_by_hint(hint, use_semantic=False, user_id=user_id) if hint else []
         if not mems:
             tokens = _tokenize_hint(hint)
             subject = tokens[0] if tokens else hint
@@ -766,7 +774,7 @@ async def delete_memory(
         # use_semantic=False: ровно один матч архивируется НЕМЕДЛЕННО без
         # подтверждения — semantic-сосед (без порога похожести) на пустом
         # ILIKE снёс бы не тот факт (#184).
-        mems = await _find_pages_by_hint(hint, use_semantic=False) if hint else []
+        mems = await _find_pages_by_hint(hint, use_semantic=False, user_id=user_id) if hint else []
         if not mems:
             tokens = _tokenize_hint(hint)
             subject = tokens[0] if tokens else hint
@@ -828,7 +836,7 @@ async def find_memories_by_subject_name(
     if not name or not name.strip():
         return []
     try:
-        mems = await _find_pages_by_hint(name, use_semantic=False)
+        mems = await _find_pages_by_hint(name, use_semantic=False, user_id=user_id)
     except Exception as e:
         logger.warning("find_memories_by_subject_name: lookup failed for %r: %s", name, e)
         return []
@@ -868,7 +876,7 @@ async def get_memories_for_context(
         for kw in keywords:
             if not kw or len(kw) < 2:
                 continue
-            found = await _find_pages_by_hint(kw, page_size=max_results)
+            found = await _find_pages_by_hint(kw, page_size=max_results, user_id=user_id)
             for m in found:
                 if m.id in seen_ids:
                     continue

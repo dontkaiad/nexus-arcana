@@ -1,6 +1,6 @@
 # MEMORY — memory data model
 
-> **Status: AS-BUILT, code conforms to `ffd99ef`.** Notion→PostgreSQL
+> **Status: AS-BUILT, code conforms to `9c7fec4` + #202 owner-scoping.** Notion→PostgreSQL
 > migration is complete. Schema: `value_text` dropped (#146), `notion_id`
 > dropped (#149), `user_notion_id`→`user_id` (#144). Search: the semantic
 > layer (ADR-0006 pgvector backend, applied to memory by ADR-0020) plus a
@@ -178,6 +178,14 @@ registered for reply-correction — they're already editable via `/budget`.
 ### Read
 Two modes:
 
+**Owner scoping (#202).** Every owner-scoped table keys on `user_id`. Both
+Telegram accounts of the single owner resolve to one shared `user_id`
+(`core_identity.user_id`, folded by migration `e067a1b2c3d4`), so
+`_find_pages_by_hint` / `search_memory` / `get_memories_for_context` / the
+destructive flows now pass `user_id` down to the query without fragmenting
+the owner's own memory across devices. `recall_from_memory` is the one
+exception — it stays owner-wide (inline, latency-sensitive, read-only hint).
+
 1. Exact key — `find_by_exact_key(key, user_id, page_size)`:
    `key_name == key` (strict equality), `is_current=True`,
    `is_archived=False`, sorted by `updated_at desc`. Actual calls:
@@ -257,12 +265,10 @@ tokenizes the hint (stop words + naive stemming `_normalize_word`) → `search`.
   `arcana/handlers/memory.py` — save / search / deactivate / delete /
   auto_suggest (inline yes/no).
 - Prompt context: `get_memories_for_context(user_id,
-  keywords, bot_label, max_results)` — filters by scope (keeps a scope
+  keywords, bot_label, max_results)` — filters by owner (`user_id`, threaded
+  through `_find_pages_by_hint` since #202) **and** by scope (keeps a scope
   match OR `global`), returns a text block "Контекст из памяти:". Called by
-  `arcana/handlers/sessions.py`, `clients.py`, `rituals.py`. Note: the
-  `user_id` argument is **not** applied to the underlying query — memory
-  search across the whole stack is currently owner-wide, not user-scoped
-  (see #202).
+  `arcana/handlers/sessions.py`, `clients.py`, `rituals.py`.
 - Auto-save: `core/location.py:set_user_location` (`tz_`/`city_` on a
   resolved location) — the sole location writer (ADR-0016). It used to be
   double-called from `core/classifier.py`'s `timezone_update` branch
@@ -383,6 +389,8 @@ Verify against code:
   reply dispatch, `_move_memory_to_notes` (Nexus only)
 - `scripts/migrate_memory_embeddings.py` — embedding backfill (dry-run default)
 - `core/budget.py` — budget reads via `find_by_key_prefixes`
+- `alembic/versions/e067a1b2c3d4_core_identity_user_id_owner_merge.py` — shared owner key (#202)
+- `core/repos/identity_table.py`, `core/repos/pg_identity_repo.py` — `core_identity.user_id`
 - `core/location.py` — sole location writer (`set_user_location`, ADR-0016)
 - `core/shared_handlers.py`, `nexus/handlers/tasks.py` — `find_by_exact_key("tz_…")`
 - `nexus/handlers/finance.py` — `find_by_exact_key("budget_payday")`,

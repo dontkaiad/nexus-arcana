@@ -19,7 +19,7 @@ _CACHE_TTL = 300
 def _to_user_dict(user) -> dict:
     """Convert IdentityUser → dict format used by middleware + handlers."""
     return {
-        "user_id": user.notion_id,  # core_identity PK (see ADR-0024)
+        "user_id": user.user_id or user.notion_id,  # shared owner key (#202); PK fallback
         "name": user.name,
         "role": user.role,
         "permissions": {
