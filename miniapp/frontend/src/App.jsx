@@ -2908,16 +2908,13 @@ function NxMemory({ s, openAdhd }) {
       </Glass>
       <SearchInput s={s} value={q} onChange={setQ} placeholder="Поиск по памяти" />
       {/* #6: показать записи, помеченные «неактуально» (is_current=false) */}
-      <div
-        onClick={() => setShowInactive((v) => !v)}
-        style={{
-          fontSize: fs(11), color: showInactive ? s.acc : s.tS,
-          cursor: "pointer", alignSelf: "flex-start",
-          display: "inline-flex", alignItems: "center", gap: 4,
-        }}
-      >
-        <EyeOff size={fs(12)} />
-        {showInactive ? "Скрыть неактуальные" : "Показать неактуальные"}
+      <div style={{ alignSelf: "flex-start" }}>
+        <Pill s={s} active={showInactive} onClick={() => setShowInactive((v) => !v)}>
+          <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
+            <EyeOff size={fs(13)} />
+            {showInactive ? "Скрыть неактуальные" : "Неактуальные"}
+          </span>
+        </Pill>
       </div>
       {/* #62: 10+ канонических чипов категорий рвались на 4 строки — горизонтальный
           скролл в одну строку без wrap, как тут с табами повсюду в боте. */}
