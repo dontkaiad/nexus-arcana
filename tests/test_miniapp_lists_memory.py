@@ -695,6 +695,24 @@ def test_memory_limit_view_excludes_deactivated_budget_rows_even_with_include_in
     assert not any("Старый зал" in n for n in names)
 
 
+def test_limit_category_row_with_odd_key_never_reaches_flat_list(client):
+    """Любая строка категории «💰 Лимит» — бюджет, у неё свой экран. Даже если
+    ключ сгенерился нестандартно (не `лимит_…`), она не должна протекать
+    карточкой в плоский список — и уж точно не с пометкой «неактуально»,
+    если план её деактивировал."""
+    mems = [
+        _mem_pg("ok", "любит чай", cat="🛒 Предпочтения", key="chai"),
+        Memory(id="odd", fact="лимит: 🍜 Продукты — 10000₽/мес", category="💰 Лимит",
+               key="продукты_лимит", is_current=False),  # кривой ключ + деактивирован
+    ]
+    with patch("miniapp.backend.routes.memory._memory_repo.find_recent",
+               AsyncMock(return_value=mems)), \
+         patch("miniapp.backend.routes.memory.get_user_id",
+               AsyncMock(return_value=FAKE_USER_ID)):
+        r = client.get("/api/memory?include_inactive=1")
+    assert {i["id"] for i in r.json()["items"]} == {"ok"}
+
+
 def test_memory_limit_category_in_category_list(client):
     """«💰 Лимит» всегда присутствует в списке категорий (спец-таб)."""
     with patch("miniapp.backend.routes.memory._memory_repo.find_recent",

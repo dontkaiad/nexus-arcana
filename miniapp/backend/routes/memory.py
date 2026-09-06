@@ -208,16 +208,17 @@ async def get_memory(
     categories: set[str] = set()
     budget_mems: list[Memory] = []
     for mem in raw:
-        if (mem.key or "").lower().startswith(_BUDGET_KEY_PREFIXES):
-            # Сгруппированный вид «💰 Лимит» ЗЕРКАЛИТ бюджет, а бюджет
-            # (core/budget.py) считает только is_current=True. Деактивированные
-            # бюджет-строки (убраны из плана в _save_budget_plan) сюда не идут
-            # даже при include_inactive — тот флаг только про плоский личный
-            # список, не про бюджет.
+        c = mem.category or None
+        # ЛЮБАЯ строка категории «💰 Лимит» — это бюджет, у неё свой
+        # сгруппированный экран, в плоский личный список она не идёт (не
+        # только по префиксу ключа — ключ мог сгенериться нестандартно, тогда
+        # строка протекала карточкой и, если деактивирована планом, с
+        # пометкой «неактуально»). Сгруппированный вид зеркалит бюджет, а он
+        # считает только is_current=True — include_inactive этого не касается.
+        if c == LIMIT_CATEGORY or (mem.key or "").lower().startswith(_BUDGET_KEY_PREFIXES):
             if mem.is_current:
                 budget_mems.append(mem)
             continue
-        c = mem.category or None
         if c in EXCLUDED_CATEGORIES:
             continue
         if (mem.key or "").startswith(EXCLUDED_KEY_PREFIXES):
