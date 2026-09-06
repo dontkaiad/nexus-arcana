@@ -101,6 +101,35 @@ async def test_upsert_case_insensitive_updates_not_duplicates():
     assert float(row.monthly_payment) == 10000.0
 
 
+@pytest.mark.asyncio
+async def test_upsert_declension_insensitive_updates_not_duplicates():
+    """#136: запись и возврат долга часто в разных падежах — «Ивану» / «Ивана» /
+    «Иван» должны попадать в одну запись, а не плодить дубли."""
+    eng = _make_engine()
+    repo = PgDebtsRepo()
+    with patch("core.repos.pg_debts_repo._get_engine", return_value=eng):
+        await repo.upsert("u1", "Ивану", "i_owe", amount=5000)
+        await repo.upsert("u1", "ивана", "i_owe", amount=3000)
+        result = await repo.reduce_amount("u1", "i_owe", "Иван", 3000)
+
+    assert _count(eng) == 1, "«Ивану»/«ивана»/«Иван» — одна запись"
+    assert result is not None, "reduce по «Иван» должен найти долг, записанный как «Ивану»"
+    new_amount, closed, _ = result
+    assert new_amount == 0.0 and closed is True
+
+
+@pytest.mark.asyncio
+async def test_upsert_declension_does_not_merge_distinct_names():
+    """Стем-матч не должен схлопывать разные короткие имена (без fuzzy по опечаткам)."""
+    eng = _make_engine()
+    repo = PgDebtsRepo()
+    with patch("core.repos.pg_debts_repo._get_engine", return_value=eng):
+        await repo.upsert("u1", "Аня", "i_owe", amount=1000)
+        await repo.upsert("u1", "Оля", "i_owe", amount=2000)
+
+    assert _count(eng) == 2
+
+
 # ── Test 3: i_owe и they_owe с одним именем → две строки ────────────────────
 
 @pytest.mark.asyncio

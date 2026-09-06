@@ -318,8 +318,10 @@ async def _handle_collecting(
     if data.get("request"):
         updates["request"] = data["request"]
     if data.get("notes"):
-        existing_notes = pending.get("notes") or ""
-        updates["notes"] = (existing_notes + " " + data["notes"]).strip()
+        # #101: передаём только НОВЫЙ фрагмент — мерж с текущим значением
+        # делает update_pending_client на свежем state (как contacts), чтобы
+        # параллельное сообщение не затёрло заметку по устаревшему pending.
+        updates["notes"] = data["notes"]
 
     if updates:
         await update_pending_client(uid, updates)

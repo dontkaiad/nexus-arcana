@@ -4,7 +4,8 @@ kind='i_owe'   — Кай должна кому-то (бюджет, finance.py, 
 kind='they_owe' — кто-то должен Кай (будущий экран «мне должны»)
 
 All async methods use asyncio.to_thread over sync SQLAlchemy (no asyncpg).
-Name-matching is always case-insensitive: lower(name) == lower(incoming).
+Name-matching is case- and declension-insensitive (#136): exact lower match
+first, then match on Russian case stems (core/ru_morph.normalize_phrase).
 """
 from __future__ import annotations
 
@@ -76,7 +77,14 @@ class PgDebtsRepo:
 
     def _find_row_sync(self, conn, user_id: str, kind: str, name: str,
                        active_only: bool = False):
-        """Case-insensitive row lookup in Python (SQLite lower() is ASCII-only)."""
+        """Row lookup in Python (SQLite lower() is ASCII-only).
+
+        Match is case- AND declension-insensitive (#136): «Ивану»/«Ивана»/«Иван»
+        всё матчит одну запись — запись и возврат долга часто в разных падежах.
+        Порядок: точное lower-совпадение → совпадение по падежным основам
+        (core/ru_morph). Стем-матч не делает fuzzy по опечаткам — для денег
+        рискованно; только морфология.
+        """
         q = select(debts).where(
             (debts.c.user_id == user_id)
             & (debts.c.kind == kind)
@@ -84,8 +92,20 @@ class PgDebtsRepo:
         if active_only:
             q = q.where(debts.c.is_active == True)
         rows = conn.execute(q).fetchall()
-        name_low = name.lower()
-        return next((r for r in rows if (r.name or "").lower() == name_low), None)
+
+        name_low = name.lower().strip()
+        exact = next((r for r in rows if (r.name or "").lower().strip() == name_low), None)
+        if exact is not None:
+            return exact
+
+        from core.ru_morph import normalize_phrase
+        name_norm = normalize_phrase(name_low)
+        if not name_norm:
+            return None
+        return next(
+            (r for r in rows if normalize_phrase((r.name or "").lower().strip()) == name_norm),
+            None,
+        )
 
     def _upsert_sync(
         self,

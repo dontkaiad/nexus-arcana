@@ -73,5 +73,12 @@ async def update_pending_client(user_id: int, updates: Dict[str, Any]) -> None:
                 if c.get("value") and c["value"] not in seen:
                     existing.append(c)
                     seen.add(c["value"])
+        # #101: заметки тоже накапливаются на СВЕЖЕМ state (не по устаревшему
+        # снапшоту у вызывающей стороны) — caller шлёт только новый фрагмент.
+        if "notes" in updates:
+            frag = (updates.pop("notes") or "").strip()
+            if frag:
+                existing_notes = (state.get("notes") or "").strip()
+                state["notes"] = f"{existing_notes} {frag}".strip() if existing_notes else frag
         state.update(updates)
         await save_pending_client(user_id, state)

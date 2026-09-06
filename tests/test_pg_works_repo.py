@@ -202,6 +202,31 @@ async def test_find_by_title_excludes_done(engine):
 
 
 @pytest.mark.asyncio
+async def test_list_open_excludes_terminal_statuses(engine):
+    """#95: /works показывает только открытые — done И archived (soft-delete)
+    оба исключены, не только done."""
+    from arcana.repos.pg_works_repo import PgWorksRepo
+    _insert_work(engine, title="Открытая", user="u1", status_code="open")
+    _insert_work(engine, title="Готовая", user="u1", status_code="done")
+    _insert_work(engine, title="Архивная", user="u1", status_code="archived")
+    repo = PgWorksRepo()
+    with patch("arcana.repos.pg_works_repo.get_engine", return_value=engine):
+        result = await repo.list_open("u1")
+    assert [w.title for w in result] == ["Открытая"]
+
+
+@pytest.mark.asyncio
+async def test_find_by_title_excludes_archived(engine):
+    """#95: title-поиск тоже не должен возвращать архивные работы."""
+    from arcana.repos.pg_works_repo import PgWorksRepo
+    _insert_work(engine, title="Архивная работа", user="u1", status_code="archived")
+    repo = PgWorksRepo()
+    with patch("arcana.repos.pg_works_repo.get_engine", return_value=engine):
+        result = await repo.find_by_title("работа", "u1")
+    assert result == []
+
+
+@pytest.mark.asyncio
 async def test_find_by_title_filters_by_user(engine):
     from arcana.repos.pg_works_repo import PgWorksRepo
     _insert_work(engine, title="Общее имя", user="u1")

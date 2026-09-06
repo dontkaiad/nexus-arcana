@@ -16,6 +16,11 @@ from core.db import get_engine
 
 logger = logging.getLogger("arcana.pg_works")
 
+# Терминальные статусы работы — не показываются в «открытых» выборках (#95).
+# Единый источник: любой новый терминальный код (напр. "cancelled") добавляется
+# сюда и автоматически исключается всеми open-запросами.
+_TERMINAL_STATUS = ("done", "archived")
+
 _PRIORITY_TO_CODE = {
     "срочно":      "urgent",
     "важно":       "important",
@@ -124,7 +129,7 @@ class PgWorksRepo:
     def _list_open_sync(self, user_id: str) -> List[Work]:
         stmt = (
             _select_works()
-            .where(work_status.c.code != "done")
+            .where(work_status.c.code.notin_(_TERMINAL_STATUS))
             .order_by(works.c.deadline.asc().nullslast())
         )
         if user_id:
@@ -136,7 +141,7 @@ class PgWorksRepo:
     def _find_by_title_sync(self, query: str, user_id: str) -> List[Work]:
         """ILIKE-поиск открытых Работ по названию (#152: PG-эквивалент старого
         Notion title-contains для «привязать список к работе»)."""
-        stmt = _select_works().where(work_status.c.code != "done")
+        stmt = _select_works().where(work_status.c.code.notin_(_TERMINAL_STATUS))
         if query:
             stmt = stmt.where(works.c.title.ilike(f"%{query}%"))
         if user_id:
@@ -160,7 +165,7 @@ class PgWorksRepo:
             _select_works()
             .where(works.c.client_id == cid)
             .where(works.c.category == category)
-            .where(work_status.c.code.notin_(["done", "archived"]))
+            .where(work_status.c.code.notin_(_TERMINAL_STATUS))
             .order_by(works.c.deadline.asc().nullslast())
             .limit(1)
         )
@@ -270,7 +275,7 @@ class PgWorksRepo:
         (для restore reminders на старте — паритет с Nexus tasks)."""
         stmt = (
             _select_works()
-            .where(work_status.c.code.notin_(["done", "archived"]))
+            .where(work_status.c.code.notin_(_TERMINAL_STATUS))
             .where(works.c.reminder.isnot(None))
             .where(works.c.reminder > text("now()"))
         )

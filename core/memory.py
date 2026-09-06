@@ -18,6 +18,7 @@ from core.layout import maybe_convert
 from core import memory_rag as _memory_rag
 from core.repos.memory_repo import _repo as _mem_repo
 from core.repos.pg_memory_repo import Memory, bot_to_scope
+from core.ru_morph import strip_case_ending as _normalize_word  # #136: вынесено в core/ru_morph
 
 logger = logging.getLogger("core.memory")
 
@@ -191,18 +192,8 @@ async def _parse_fact(text: str) -> Tuple[str, str, str, str]:
 _SEARCH_STOP = {"про", "о", "об", "и", "не", "это", "что", "как", "из", "по",
                 "для", "на", "в", "с", "к", "у", "за", "от"}
 
-
-def _normalize_word(word: str) -> str:
-    """Убрать падежные окончания для поиска contains. Минимальная основа — 3 символа."""
-    for suffix in ("ами", "ями", "ого", "его", "ому", "ему", "ой", "ей",
-                   "ом", "ем", "ах", "ях", "ам", "ям", "ую", "юю",
-                   "ов", "ев", "ёв", "ий", "ый", "ая", "яя",
-                   "у", "ю", "а", "я", "е", "и", "ы", "о"):
-        if word.endswith(suffix):
-            stem = word[:-len(suffix)]
-            if len(stem) >= 3:
-                return stem
-    return word
+# _normalize_word — падежный стеммер, вынесен в core/ru_morph (#136,
+# переиспользуется матчингом имён долгов). Импорт — в шапке модуля.
 
 
 def _tokenize_hint(hint: str) -> List[str]:

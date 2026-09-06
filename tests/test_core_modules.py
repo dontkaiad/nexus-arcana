@@ -122,6 +122,23 @@ class TestPendingClients:
 
         await delete_pending_client(99996)
 
+    @pytest.mark.asyncio
+    async def test_update_pending_client_notes_accumulate(self):
+        """#101: заметки мержатся на свежем state, не перезаписываются
+        фрагментом от вызывающей стороны."""
+        from arcana.pending_clients import (
+            save_pending_client, get_pending_client,
+            update_pending_client, delete_pending_client,
+        )
+        await save_pending_client(99994, {"step": "collecting", "notes": ""})
+        await update_pending_client(99994, {"notes": "любит чай"})
+        await update_pending_client(99994, {"notes": "не любит спешку"})
+
+        data = await get_pending_client(99994)
+        assert data["notes"] == "любит чай не любит спешку"
+
+        await delete_pending_client(99994)
+
 
 class TestPendingTarot:
     """arcana/pending_tarot.py — save/get/update/delete."""
