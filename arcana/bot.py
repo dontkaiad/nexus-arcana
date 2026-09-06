@@ -60,7 +60,7 @@ async def restore_work_reminders() -> int:
             user_data = await get_user(tg_id)
             if not user_data or not user_data.get("permissions", {}).get("arcana", False):
                 continue
-            user_id = user_data.get("notion_page_id", "")
+            user_id = user_data.get("user_id", "")
             tz_offset = await get_user_tz(tg_id)
             for w in await _pg.active_with_future_reminder(user_id):
                 if not w.reminder_dt:
@@ -416,7 +416,7 @@ async def main():
                         continue
                     if not user_data.get("permissions", {}).get("arcana", False):
                         continue
-                    notion_id = user_data.get("notion_page_id", "")
+                    notion_id = user_data.get("user_id", "")
                     count = await get_unverified_count(notion_id, older_than_days=30)
                     if count > 0:
                         await bot.send_message(

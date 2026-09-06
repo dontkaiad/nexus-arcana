@@ -68,7 +68,7 @@ class WhitelistMiddleware(BaseMiddleware):
                 return
 
         # Прикрепляем данные пользователя к data для хэндлеров
-        data["user_id"] = user_data.get("notion_page_id", "")
+        data["user_id"] = user_data.get("user_id", "")
         data["user_data"] = user_data
 
         return await handler(event, data)

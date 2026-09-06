@@ -17,9 +17,9 @@ _CACHE_TTL = 300
 
 
 def _to_user_dict(user) -> dict:
-    """Convert IdentityUser → legacy dict format (all callers unchanged)."""
+    """Convert IdentityUser → dict format used by middleware + handlers."""
     return {
-        "notion_page_id": user.notion_id,
+        "user_id": user.notion_id,  # core_identity PK (see ADR-0024)
         "name": user.name,
         "role": user.role,
         "permissions": {
@@ -61,11 +61,11 @@ async def check_permission(tg_id: int, feature: str) -> bool:
 
 
 async def get_user_id(tg_id: int) -> Optional[str]:
-    """Вернуть Notion page ID пользователя для Relation полей."""
+    """Вернуть внутренний user id (core_identity PK) — owner-ключ для PG-строк."""
     user = await get_user(tg_id)
     if user is None:
         return None
-    return user.get("notion_page_id")
+    return user.get("user_id")
 
 
 def invalidate_cache(tg_id: int = 0) -> None:

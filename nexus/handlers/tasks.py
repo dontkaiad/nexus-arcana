@@ -314,7 +314,7 @@ async def restore_reminders_on_startup() -> None:
             user_data = await get_user(tg_id)
             if not user_data:
                 continue
-            user_id = user_data.get("notion_page_id", "")
+            user_id = user_data.get("user_id", "")
             tz_offset = await _get_user_tz(tg_id)
 
             # ── Проход 1: будущие напоминания ────────────────────────────────────
@@ -687,7 +687,7 @@ async def _reschedule_all_for_tz(uid: int, chat_id: int, old_offset: int, new_of
         user_data = await _get_user(uid)
         if not user_data:
             return
-        user_id = user_data.get("notion_page_id", "")
+        user_id = user_data.get("user_id", "")
         _pg = _PgTasksRepo()
         task_list = await _pg.active_with_future_reminder(user_id)
         rescheduled = 0

@@ -8,7 +8,7 @@ import json
 def _fake_user_data(tg_id: int = 67686090) -> dict:
     """Данные пользователя как из get_user()."""
     return {
-        "notion_page_id": "test-user-notion-id",
+        "user_id": "test-user-notion-id",
         "name": "Кай",
         "role": "👑 Владелец",
         "permissions": {

@@ -47,7 +47,7 @@ for k, v in _TEST_ENV.items():
 # bot_factory.py прогоняет РЕАЛЬНЫЕ хендлеры через dp.feed_update() против
 # РЕАЛЬНОГО core.db.get_engine() — только внешние API (Notion/Claude/OpenAI)
 # замоканы (mock_externals.py). _fake_user_data() там подставляет фиксированный
-# notion_page_id="test-user-notion-id" вместо реального пользователя. Раньше
+# user_id="test-user-notion-id" вместо реального пользователя. Раньше
 # ничего не чистило за собой: строки копились в persistent Docker volume
 # бесконечно (обнаружено при расследовании расхождения дев/прод в 🧠 Память —
 # за ~2.5 месяца прогонов накопилось 398 мусорных memories, почти все с

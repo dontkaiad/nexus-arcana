@@ -16,7 +16,7 @@ from miniapp.backend.auth import current_user_id
 from nexus.repos.pg_tasks_repo import Task as PgTask
 
 FAKE_TG_ID = 67686090
-FAKE_NOTION_USER = "user-notion-id-42"
+FAKE_USER_ID = "user-notion-id-42"
 
 
 @pytest.fixture
@@ -129,7 +129,7 @@ async def test_clear_swallows_edit_error_and_still_deletes(_tmp_store):
 
 def test_task_done_calls_clear_task_reminder():
     app.dependency_overrides[current_user_id] = lambda: FAKE_TG_ID
-    task = PgTask(id="task-1", title="разобрать гардероб", user_id=FAKE_NOTION_USER)
+    task = PgTask(id="task-1", title="разобрать гардероб", user_id=FAKE_USER_ID)
     clear = AsyncMock(return_value=True)
     try:
         with patch("miniapp.backend.routes.writes.clear_task_reminder", clear), \
@@ -140,7 +140,7 @@ def test_task_done_calls_clear_task_reminder():
              patch("miniapp.backend.routes.writes._tasks_pg_repo.set_props",
                    AsyncMock(return_value=None)), \
              patch("miniapp.backend.routes.writes.get_user_id",
-                   AsyncMock(return_value=FAKE_NOTION_USER)), \
+                   AsyncMock(return_value=FAKE_USER_ID)), \
              patch("nexus.handlers.streaks.update_streak", AsyncMock(return_value=None)):
             c = TestClient(app)
             r = c.post("/api/tasks/task-1/done")

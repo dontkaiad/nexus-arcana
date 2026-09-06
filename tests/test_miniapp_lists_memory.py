@@ -23,7 +23,7 @@ from core.repos.pg_memory_repo import Memory
 
 
 FAKE_TG_ID = 67686090
-FAKE_NOTION_USER = "user-notion-id-42"
+FAKE_USER_ID = "user-notion-id-42"
 
 
 @pytest.fixture(autouse=True)
@@ -89,7 +89,7 @@ def _mem(mid, text, cat=None, related=None, key=None, actual=True):
     return {"id": mid, "properties": props}
 
 
-def _page(pid: str, *, owner: str = FAKE_NOTION_USER, extra: dict | None = None) -> dict:
+def _page(pid: str, *, owner: str = FAKE_USER_ID, extra: dict | None = None) -> dict:
     props = {
         "🪪 Пользователи": {"relation": [{"id": owner}]},
         "Статус": {"status": {"name": "Not started"}},
@@ -101,7 +101,7 @@ def _page(pid: str, *, owner: str = FAKE_NOTION_USER, extra: dict | None = None)
 
 
 def _parent_task_pg(title, *, status="Not started",
-                    user_id=FAKE_NOTION_USER) -> PgTask:
+                    user_id=FAKE_USER_ID) -> PgTask:
     return PgTask(
         id=f"parent-{title}",
         title=title,
@@ -124,7 +124,7 @@ def test_lists_buy_returns_items(client):
     ]
     with patch("miniapp.backend.routes.lists._nexus_lists_repo") as mock_repo, \
          patch("miniapp.backend.routes.lists.get_user_id",
-               AsyncMock(return_value=FAKE_NOTION_USER)):
+               AsyncMock(return_value=FAKE_USER_ID)):
         mock_repo.get_summary_items = AsyncMock(return_value=pg_items)
         r = client.get("/api/lists?type=buy")
 
@@ -150,7 +150,7 @@ def test_lists_inv_sorts_by_expiry(client):
     ]
     with patch("miniapp.backend.routes.lists._nexus_lists_repo") as mock_repo, \
          patch("miniapp.backend.routes.lists.get_user_id",
-               AsyncMock(return_value=FAKE_NOTION_USER)):
+               AsyncMock(return_value=FAKE_USER_ID)):
         mock_repo.get_summary_items = AsyncMock(return_value=pg_items)
         r = client.get("/api/lists?type=inv")
 
@@ -168,7 +168,7 @@ def test_lists_q_filter(client):
     ]
     with patch("miniapp.backend.routes.lists._nexus_lists_repo") as mock_repo, \
          patch("miniapp.backend.routes.lists.get_user_id",
-               AsyncMock(return_value=FAKE_NOTION_USER)):
+               AsyncMock(return_value=FAKE_USER_ID)):
         mock_repo.get_summary_items = AsyncMock(return_value=pg_items)
         r = client.get("/api/lists?type=buy&q=мол")
 
@@ -209,7 +209,7 @@ def test_lists_filter_allows_empty_bot(client):
     ]
     with patch("miniapp.backend.routes.lists._nexus_lists_repo") as mock_repo, \
          patch("miniapp.backend.routes.lists.get_user_id",
-               AsyncMock(return_value=FAKE_NOTION_USER)):
+               AsyncMock(return_value=FAKE_USER_ID)):
         mock_repo.get_summary_items = AsyncMock(return_value=pg_items)
         r = client.get("/api/lists?type=check")
 
@@ -229,7 +229,7 @@ def test_lists_check_loads_with_exact_emoji(client):
     ]
     with patch("miniapp.backend.routes.lists._nexus_lists_repo") as mock_repo, \
          patch("miniapp.backend.routes.lists.get_user_id",
-               AsyncMock(return_value=FAKE_NOTION_USER)):
+               AsyncMock(return_value=FAKE_USER_ID)):
         mock_repo.get_summary_items = AsyncMock(return_value=pg_items)
         r = client.get("/api/lists?type=check")
 
@@ -247,7 +247,7 @@ def test_lists_check_loads_when_type_has_diff_spacing(client):
     ]
     with patch("miniapp.backend.routes.lists._nexus_lists_repo") as mock_repo, \
          patch("miniapp.backend.routes.lists.get_user_id",
-               AsyncMock(return_value=FAKE_NOTION_USER)):
+               AsyncMock(return_value=FAKE_USER_ID)):
         mock_repo.get_summary_items = AsyncMock(return_value=pg_items)
         r = client.get("/api/lists?type=check")
 
@@ -265,7 +265,7 @@ def test_lists_inv_matches_partial_keyword(client):
     ]
     with patch("miniapp.backend.routes.lists._nexus_lists_repo") as mock_repo, \
          patch("miniapp.backend.routes.lists.get_user_id",
-               AsyncMock(return_value=FAKE_NOTION_USER)):
+               AsyncMock(return_value=FAKE_USER_ID)):
         mock_repo.get_summary_items = AsyncMock(return_value=pg_items)
         r = client.get("/api/lists?type=inv")
 
@@ -281,7 +281,7 @@ def test_lists_archived_filtered_out(client):
     ]
     with patch("miniapp.backend.routes.lists._nexus_lists_repo") as mock_repo, \
          patch("miniapp.backend.routes.lists.get_user_id",
-               AsyncMock(return_value=FAKE_NOTION_USER)):
+               AsyncMock(return_value=FAKE_USER_ID)):
         mock_repo.get_summary_items = AsyncMock(return_value=pg_items)
         r = client.get("/api/lists?type=check")
 
@@ -313,7 +313,7 @@ def test_check_items_with_done_parent_are_hidden(client):
          patch("miniapp.backend.routes.lists._tasks_repo.list_all",
                AsyncMock(return_value=pg_tasks)), \
          patch("miniapp.backend.routes.lists.get_user_id",
-               AsyncMock(return_value=FAKE_NOTION_USER)), \
+               AsyncMock(return_value=FAKE_USER_ID)), \
          patch("miniapp.backend.routes.lists.today_user_tz",
                AsyncMock(return_value=(_today_date(), 3))):
         mock_repo.get_summary_items = AsyncMock(return_value=pg_items)
@@ -343,7 +343,7 @@ def test_check_items_match_parent_case_insensitive(client):
          patch("miniapp.backend.routes.lists._tasks_repo.list_all",
                AsyncMock(return_value=pg_tasks)), \
          patch("miniapp.backend.routes.lists.get_user_id",
-               AsyncMock(return_value=FAKE_NOTION_USER)), \
+               AsyncMock(return_value=FAKE_USER_ID)), \
          patch("miniapp.backend.routes.lists.today_user_tz",
                AsyncMock(return_value=(_today_date(), 3))):
         mock_repo.get_summary_items = AsyncMock(return_value=pg_items)
@@ -377,7 +377,7 @@ def test_check_items_match_parent_without_user_relation(client):
          patch("miniapp.backend.routes.lists._tasks_repo.list_all",
                side_effect=fake_list_all), \
          patch("miniapp.backend.routes.lists.get_user_id",
-               AsyncMock(return_value=FAKE_NOTION_USER)), \
+               AsyncMock(return_value=FAKE_USER_ID)), \
          patch("miniapp.backend.routes.lists.today_user_tz",
                AsyncMock(return_value=(_today_date(), 3))):
         mock_repo.get_summary_items = AsyncMock(return_value=pg_items)
@@ -385,7 +385,7 @@ def test_check_items_match_parent_without_user_relation(client):
 
     assert r.status_code == 200
     # list_all вызван с user_id
-    assert captured_uid["v"] == FAKE_NOTION_USER
+    assert captured_uid["v"] == FAKE_USER_ID
     # item с parent Done спрятан
     assert r.json()["items"] == []
 
@@ -408,7 +408,7 @@ def test_check_items_with_group_param_show_even_if_parent_closed(client):
          patch("miniapp.backend.routes.lists._tasks_repo.list_all",
                AsyncMock(return_value=pg_tasks)), \
          patch("miniapp.backend.routes.lists.get_user_id",
-               AsyncMock(return_value=FAKE_NOTION_USER)), \
+               AsyncMock(return_value=FAKE_USER_ID)), \
          patch("miniapp.backend.routes.lists.today_user_tz",
                AsyncMock(return_value=(_today_date(), 3))):
         mock_repo.get_summary_items = AsyncMock(return_value=pg_items)
@@ -436,7 +436,7 @@ def test_check_items_group_param_matches_despite_whitespace_drift(client):
          patch("miniapp.backend.routes.lists._tasks_repo.list_all",
                AsyncMock(return_value=[])), \
          patch("miniapp.backend.routes.lists.get_user_id",
-               AsyncMock(return_value=FAKE_NOTION_USER)), \
+               AsyncMock(return_value=FAKE_USER_ID)), \
          patch("miniapp.backend.routes.lists.today_user_tz",
                AsyncMock(return_value=(_today_date(), 3))):
         mock_repo.get_summary_items = AsyncMock(return_value=pg_items)
@@ -459,7 +459,7 @@ def test_list_create_inv_arcana_uses_arcana_bot_label(client):
     )
     with patch("miniapp.backend.routes.writes._arcana_inv_repo") as mock_inv, \
          patch("miniapp.backend.routes.writes.get_user_id",
-               AsyncMock(return_value=FAKE_NOTION_USER)):
+               AsyncMock(return_value=FAKE_USER_ID)):
         mock_inv.add_item = AsyncMock(return_value=fake_item)
         r = client.post("/api/lists", json={
             "type": "inv",
@@ -480,7 +480,7 @@ def test_list_create_buy(client):
     fake_item = ListItem(id="list-id", name="Молоко", list_type="покупки", status="not_started")
     with patch("miniapp.backend.routes.writes._nexus_lists_repo") as mock_nx, \
          patch("miniapp.backend.routes.writes.get_user_id",
-               AsyncMock(return_value=FAKE_NOTION_USER)):
+               AsyncMock(return_value=FAKE_USER_ID)):
         mock_nx.add_item = AsyncMock(return_value=fake_item)
         r = client.post("/api/lists", json={
             "type": "buy",
@@ -503,12 +503,12 @@ def test_lists_done_endpoint_marks_status(client):
     from core.repos.pg_nexus_lists_repo import ListItem
     fake_item = ListItem(
         id="list-item-1", name="Молоко", list_type="покупки", status="not_started",
-        user_id=FAKE_NOTION_USER,
+        user_id=FAKE_USER_ID,
     )
     with patch("miniapp.backend.routes.writes._nexus_lists_repo") as mock_nx, \
          patch("miniapp.backend.routes.writes._arcana_inv_repo") as mock_inv, \
          patch("miniapp.backend.routes.writes.get_user_id",
-               AsyncMock(return_value=FAKE_NOTION_USER)):
+               AsyncMock(return_value=FAKE_USER_ID)):
         mock_nx.get_by_id = AsyncMock(return_value=fake_item)
         mock_nx.update_status = AsyncMock(return_value=True)
         mock_inv.get_by_id = AsyncMock(return_value=None)
@@ -522,12 +522,12 @@ def test_list_delete_archives(client):
     from core.repos.pg_nexus_lists_repo import ListItem
     fake_item = ListItem(
         id="l-2", name="test", list_type="покупки", status="not_started",
-        user_id=FAKE_NOTION_USER,
+        user_id=FAKE_USER_ID,
     )
     with patch("miniapp.backend.routes.writes._nexus_lists_repo") as mock_nx, \
          patch("miniapp.backend.routes.writes._arcana_inv_repo") as mock_inv, \
          patch("miniapp.backend.routes.writes.get_user_id",
-               AsyncMock(return_value=FAKE_NOTION_USER)):
+               AsyncMock(return_value=FAKE_USER_ID)):
         mock_nx.get_by_id = AsyncMock(return_value=fake_item)
         mock_nx.update_status = AsyncMock(return_value=True)
         mock_inv.get_by_id = AsyncMock(return_value=None)
@@ -549,7 +549,7 @@ def test_memory_excludes_budget_and_adhd_categories(client):
     with patch("miniapp.backend.routes.memory._memory_repo.find_by_category",
                AsyncMock(return_value=mems)), \
          patch("miniapp.backend.routes.memory.get_user_id",
-               AsyncMock(return_value=FAKE_NOTION_USER)):
+               AsyncMock(return_value=FAKE_USER_ID)):
         r = client.get("/api/memory")
 
     assert r.status_code == 200
@@ -583,7 +583,7 @@ def test_memory_excludes_tz_and_city_system_keys(client):
     with patch("miniapp.backend.routes.memory._memory_repo.find_by_category",
                AsyncMock(return_value=mems)), \
          patch("miniapp.backend.routes.memory.get_user_id",
-               AsyncMock(return_value=FAKE_NOTION_USER)):
+               AsyncMock(return_value=FAKE_USER_ID)):
         r = client.get("/api/memory")
 
     assert r.status_code == 200
@@ -630,7 +630,7 @@ def test_memory_limit_category_grouped(client):
     with patch("miniapp.backend.routes.memory._memory_repo.find_by_category",
                AsyncMock(return_value=_limit_mems())), \
          patch("miniapp.backend.routes.memory.get_user_id",
-               AsyncMock(return_value=FAKE_NOTION_USER)):
+               AsyncMock(return_value=FAKE_USER_ID)):
         data = client.get("/api/memory" + _LIMIT_CAT_Q).json()
 
     assert data["grouped"] is True
@@ -661,7 +661,7 @@ def test_memory_limit_category_in_category_list(client):
     with patch("miniapp.backend.routes.memory._memory_repo.find_by_category",
                AsyncMock(return_value=[_mem_pg("m1", "x", cat="🛒 Предпочтения")])), \
          patch("miniapp.backend.routes.memory.get_user_id",
-               AsyncMock(return_value=FAKE_NOTION_USER)):
+               AsyncMock(return_value=FAKE_USER_ID)):
         data = client.get("/api/memory").json()
 
     assert "💰 Лимит" in data["categories"]
@@ -680,7 +680,7 @@ def test_memory_search_matches_key_and_related(client):
     with patch("miniapp.backend.routes.memory._memory_repo.find_by_category",
                AsyncMock(return_value=mems)), \
          patch("miniapp.backend.routes.memory.get_user_id",
-               AsyncMock(return_value=FAKE_NOTION_USER)):
+               AsyncMock(return_value=FAKE_USER_ID)):
         # совпадение по Ключу (в тексте слова «невролог» нет)
         r_key = client.get("/api/memory?q=невролог")
         # совпадение по Связи
@@ -704,7 +704,7 @@ def test_memory_adhd_returns_records_and_uses_cache(client):
                AsyncMock(return_value=mems)), \
          patch("miniapp.backend.routes.memory.ask_claude", sonnet), \
          patch("miniapp.backend.routes.memory.get_user_id",
-               AsyncMock(return_value=FAKE_NOTION_USER)):
+               AsyncMock(return_value=FAKE_USER_ID)):
         r1 = client.get("/api/memory/adhd")
         r2 = client.get("/api/memory/adhd")
 
@@ -730,7 +730,7 @@ def test_memory_create(client):
     with patch("miniapp.backend.routes.writes._memory_repo.add",
                AsyncMock(return_value="mem-id")) as mem_add, \
          patch("miniapp.backend.routes.writes.get_user_id",
-               AsyncMock(return_value=FAKE_NOTION_USER)):
+               AsyncMock(return_value=FAKE_USER_ID)):
         r = client.post("/api/memory", json={
             "text": "Chapman = сигареты",
             "cat": "🛒 Предпочтения",
@@ -746,13 +746,13 @@ def test_memory_create(client):
 def test_memory_delete_hard_deletes_owned_record(client):
     """Удаление зовёт репо .delete (жёсткий DELETE), не .archive —
     строка должна физически уйти из Postgres вместе с embedding/RAG."""
-    mem = Memory(id="mem-1", fact="Chapman = сигареты", user_id=FAKE_NOTION_USER)
+    mem = Memory(id="mem-1", fact="Chapman = сигареты", user_id=FAKE_USER_ID)
     with patch("miniapp.backend.routes.writes._memory_repo.get_by_id",
                AsyncMock(return_value=mem)), \
          patch("miniapp.backend.routes.writes._memory_repo.delete",
                AsyncMock(return_value=True)) as mem_delete, \
          patch("miniapp.backend.routes.writes.get_user_id",
-               AsyncMock(return_value=FAKE_NOTION_USER)):
+               AsyncMock(return_value=FAKE_USER_ID)):
         r = client.delete("/api/memory/mem-1")
     assert r.status_code == 200
     assert r.json() == {"ok": True}
@@ -763,7 +763,7 @@ def test_memory_delete_missing_record_404s(client):
     with patch("miniapp.backend.routes.writes._memory_repo.get_by_id",
                AsyncMock(return_value=None)), \
          patch("miniapp.backend.routes.writes.get_user_id",
-               AsyncMock(return_value=FAKE_NOTION_USER)):
+               AsyncMock(return_value=FAKE_USER_ID)):
         r = client.delete("/api/memory/does-not-exist")
     assert r.status_code == 404
 
@@ -780,7 +780,7 @@ def test_memory_delete_other_users_record_404s_not_403():
              patch("miniapp.backend.routes.writes._memory_repo.delete",
                    AsyncMock(return_value=True)) as mem_delete, \
              patch("miniapp.backend.routes.writes.get_user_id",
-                   AsyncMock(return_value=FAKE_NOTION_USER)):
+                   AsyncMock(return_value=FAKE_USER_ID)):
             r = TestClient(app).delete("/api/memory/mem-2")
         assert r.status_code == 404
         mem_delete.assert_not_awaited()

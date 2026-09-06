@@ -180,7 +180,7 @@ async def main():
         from core.user_manager import get_user
         user = await get_user(67686090)
         if user:
-            user_id = user.get("notion_page_id", "")
+            user_id = user.get("user_id", "")
             name = user.get("name", "?")
             log_pass("get_user(67686090)",
                      f"найден: {name}, notion_id={user_id[:12]}...")

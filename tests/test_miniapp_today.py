@@ -16,7 +16,7 @@ from nexus.repos.pg_tasks_repo import Task as PgTask
 
 
 FAKE_TG_ID = 67686090
-FAKE_NOTION_USER = "user-notion-id-42"
+FAKE_USER_ID = "user-notion-id-42"
 
 
 @pytest.fixture(autouse=True)
@@ -60,7 +60,7 @@ def _make_task(task_id, title, *, status="Not started", prio="🔴 Срочно"
         repeat_time=repeat_time or "",
         repeat=repeat or "Нет",
         completed_at=completed_at or "",
-        user_id=FAKE_NOTION_USER,
+        user_id=FAKE_USER_ID,
     )
 
 
@@ -125,7 +125,7 @@ def test_today_returns_all_keys_and_classifies_tasks(client):
          patch("miniapp.backend.routes.today.ask_claude", claude_mock), \
          patch("miniapp.backend.routes.today.today_user_tz", AsyncMock(return_value=(_today_local_date(tz), tz))), \
          patch("miniapp.backend.routes.today.get_user_id",
-               AsyncMock(return_value=FAKE_NOTION_USER)), \
+               AsyncMock(return_value=FAKE_USER_ID)), \
          patch("nexus.handlers.streaks.get_streak",
                return_value={"streak": 8, "best": 12, "last_activity_date": today,
                              "rest_day_date": None, "rest_days_used": 0,
@@ -206,7 +206,7 @@ def test_today_progress_total_excludes_no_date_tasks(client):
          patch("miniapp.backend.routes.today.ask_claude", AsyncMock(return_value="tip")), \
          patch("miniapp.backend.routes.today.today_user_tz",
                AsyncMock(return_value=(_today_local_date(tz), tz))), \
-         patch("miniapp.backend.routes.today.get_user_id", AsyncMock(return_value=FAKE_NOTION_USER)), \
+         patch("miniapp.backend.routes.today.get_user_id", AsyncMock(return_value=FAKE_USER_ID)), \
          patch("nexus.handlers.streaks.get_streak",
                return_value={"streak": 0, "best": 0, "last_activity_date": None,
                              "rest_day_date": None, "rest_days_used": 0, "streak_start_date": None}), \
@@ -229,7 +229,7 @@ def test_today_caches_adhd_tip_across_calls(client):
          patch("miniapp.backend.routes.today.ask_claude", claude_mock), \
          patch("miniapp.backend.routes.today.today_user_tz", AsyncMock(return_value=(_today_local_date(tz), tz))), \
          patch("miniapp.backend.routes.today.get_user_id",
-               AsyncMock(return_value=FAKE_NOTION_USER)), \
+               AsyncMock(return_value=FAKE_USER_ID)), \
          patch("nexus.handlers.streaks.get_streak",
                return_value={"streak": 0, "best": 0, "last_activity_date": None,
                              "rest_day_date": None, "rest_days_used": 0,
@@ -263,7 +263,7 @@ def test_today_plan_based_budget_day_limit(client):
          patch("miniapp.backend.routes.today.today_user_tz",
                AsyncMock(return_value=(_today_local_date(tz), tz))), \
          patch("miniapp.backend.routes.today.get_user_id",
-               AsyncMock(return_value=FAKE_NOTION_USER)), \
+               AsyncMock(return_value=FAKE_USER_ID)), \
          patch("nexus.handlers.streaks.get_streak",
                return_value={"streak": 0, "best": 0, "last_activity_date": None,
                              "rest_day_date": None, "rest_days_used": 0,
@@ -293,7 +293,7 @@ def _today_ctx(tz=3, expenses_by_from=None, limits=None, day_limit=5000, payday=
         patch("miniapp.backend.routes.today.ask_claude", AsyncMock(return_value="tip")),
         patch("miniapp.backend.routes.today.today_user_tz",
               AsyncMock(return_value=(_today_local_date(tz), tz))),
-        patch("miniapp.backend.routes.today.get_user_id", AsyncMock(return_value=FAKE_NOTION_USER)),
+        patch("miniapp.backend.routes.today.get_user_id", AsyncMock(return_value=FAKE_USER_ID)),
         patch("nexus.handlers.streaks.get_streak",
               return_value={"streak": 0, "best": 0, "last_activity_date": None,
                             "rest_day_date": None, "rest_days_used": 0, "streak_start_date": None}),
@@ -406,7 +406,7 @@ def test_spent_today_query_uses_today_as_date_to(client):
          patch("miniapp.backend.routes.today.today_user_tz",
                AsyncMock(return_value=(_today_local_date(tz), tz))), \
          patch("miniapp.backend.routes.today.get_user_id",
-               AsyncMock(return_value=FAKE_NOTION_USER)), \
+               AsyncMock(return_value=FAKE_USER_ID)), \
          patch("nexus.handlers.streaks.get_streak",
                return_value={"streak": 0, "best": 0, "last_activity_date": None,
                              "rest_day_date": None, "rest_days_used": 0,

@@ -16,7 +16,7 @@ from miniapp.backend.auth import current_user_id
 from nexus.repos.pg_tasks_repo import Task as PgTask
 
 FAKE_TG_ID = 67686090
-FAKE_NOTION_USER = "user-notion-id-42"
+FAKE_USER_ID = "user-notion-id-42"
 
 
 @pytest.fixture
@@ -32,7 +32,7 @@ def _task_page(pid: str, title: str = "разобрать гардероб") -> 
     return {
         "id": pid,
         "properties": {
-            "🪪 Пользователи": {"relation": [{"id": FAKE_NOTION_USER}]},
+            "🪪 Пользователи": {"relation": [{"id": FAKE_USER_ID}]},
             "Статус": {"status": {"name": "Not started"}},
             "Задача": {"title": [{"plain_text": title}]},
         },
@@ -99,7 +99,7 @@ async def test_notify_user_no_token_for_arcana():
 # ── routes call notify_user ──────────────────────────────────────────────────
 
 def test_task_done_notifies(client):
-    task = PgTask(id="task-1", title="разобрать гардероб", user_id=FAKE_NOTION_USER)
+    task = PgTask(id="task-1", title="разобрать гардероб", user_id=FAKE_USER_ID)
     notify = AsyncMock(return_value=True)
     with patch("miniapp.backend.routes.writes.notify_user", notify), \
          patch("miniapp.backend.routes.writes._tasks_pg_repo.retrieve_page",
@@ -109,7 +109,7 @@ def test_task_done_notifies(client):
          patch("miniapp.backend.routes.writes._tasks_pg_repo.set_props",
                AsyncMock(return_value=None)), \
          patch("miniapp.backend.routes.writes.get_user_id",
-               AsyncMock(return_value=FAKE_NOTION_USER)), \
+               AsyncMock(return_value=FAKE_USER_ID)), \
          patch("nexus.handlers.streaks.update_streak", AsyncMock(return_value=None)):
         r = client.post("/api/tasks/task-1/done")
     assert r.status_code == 200
@@ -126,7 +126,7 @@ def test_task_create_notifies(client):
          patch("miniapp.backend.routes.writes._tasks_pg_repo.create",
                AsyncMock(return_value="new-id")), \
          patch("miniapp.backend.routes.writes.get_user_id",
-               AsyncMock(return_value=FAKE_NOTION_USER)):
+               AsyncMock(return_value=FAKE_USER_ID)):
         r = client.post("/api/tasks", json={"title": "купить молоко"})
     assert r.status_code == 200
     notify.assert_awaited_once()
@@ -135,7 +135,7 @@ def test_task_create_notifies(client):
 
 
 def test_task_cancel_notifies(client):
-    task = PgTask(id="task-9", title="старая задача", user_id=FAKE_NOTION_USER)
+    task = PgTask(id="task-9", title="старая задача", user_id=FAKE_USER_ID)
     notify = AsyncMock(return_value=True)
     with patch("miniapp.backend.routes.writes.notify_user", notify), \
          patch("miniapp.backend.routes.writes._tasks_pg_repo.retrieve_page",
@@ -143,7 +143,7 @@ def test_task_cancel_notifies(client):
          patch("miniapp.backend.routes.writes._tasks_pg_repo.set_status",
                AsyncMock(return_value=True)), \
          patch("miniapp.backend.routes.writes.get_user_id",
-               AsyncMock(return_value=FAKE_NOTION_USER)):
+               AsyncMock(return_value=FAKE_USER_ID)):
         r = client.post("/api/tasks/task-9/cancel")
     assert r.status_code == 200
     notify.assert_awaited_once()
@@ -168,7 +168,7 @@ def test_session_verify_notifies(client):
     with patch("miniapp.backend.routes.writes.notify_user", notify), \
          patch("miniapp.backend.routes.writes._sessions_pg_repo", mock_repo), \
          patch("miniapp.backend.routes.writes.get_user_id",
-               AsyncMock(return_value=FAKE_NOTION_USER)):
+               AsyncMock(return_value=FAKE_USER_ID)):
         r = client.post("/api/arcana/sessions/s-1/verify", json={"status": "✅ Да"})
     assert r.status_code == 200
     notify.assert_awaited_once()
@@ -188,7 +188,7 @@ def test_ritual_result_notifies(client):
     with patch("miniapp.backend.routes.writes.notify_user", notify), \
          patch("miniapp.backend.routes.writes._rituals_pg_repo", mock_repo), \
          patch("miniapp.backend.routes.writes.get_user_id",
-               AsyncMock(return_value=FAKE_NOTION_USER)):
+               AsyncMock(return_value=FAKE_USER_ID)):
         r = client.post("/api/arcana/rituals/r-1/result", json={"status": "✅ Сработало"})
     assert r.status_code == 200
     notify.assert_awaited_once()
@@ -227,7 +227,7 @@ def test_arcana_accuracy_verify_notifies(client):
          patch("miniapp.backend.routes.arcana_today._pg_rituals_repo.list_all",
                AsyncMock(return_value=[])), \
          patch("miniapp.backend.routes.arcana_today.get_user_id",
-               AsyncMock(return_value=FAKE_NOTION_USER)):
+               AsyncMock(return_value=FAKE_USER_ID)):
         r = client.post("/api/arcana/accuracy/verify",
                         json={"id": "s-1", "type": "session", "verdict": "yes"})
     assert r.status_code == 200

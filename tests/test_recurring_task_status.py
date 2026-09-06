@@ -255,7 +255,7 @@ async def test_completion_timestamp_uses_user_tz(tz, expected_off):
 # ── Fix B: today.py фильтр completed_today ──────────────────────────────────
 
 FAKE_TG_ID = 67686090
-FAKE_NOTION_USER = "user-notion-id-fix-1"
+FAKE_USER_ID = "user-notion-id-fix-1"
 
 
 @pytest.fixture(autouse=True)
@@ -298,7 +298,7 @@ def _make_task_page(task_id, title, *, status="Not started", prio="🔴 Сроч
         repeat_time=repeat_time or "",
         repeat=repeat or "Нет",
         completed_at=completed or "",
-        user_id=FAKE_NOTION_USER,
+        user_id=FAKE_USER_ID,
     )
 
 
@@ -312,7 +312,7 @@ def _today_get_response(client, tasks):
          patch("miniapp.backend.routes.today.today_user_tz",
                AsyncMock(return_value=(today_date, 3))), \
          patch("miniapp.backend.routes.today.get_user_id",
-               AsyncMock(return_value=FAKE_NOTION_USER)), \
+               AsyncMock(return_value=FAKE_USER_ID)), \
          patch("nexus.handlers.streaks.get_streak", return_value={
              "streak": 0, "best": 0, "last_activity_date": str(today_date),
              "rest_day_date": None, "rest_days_used": 0,
@@ -512,7 +512,7 @@ async def test_restore_pass3_revives_recurring_without_reminder():
          patch.object(tasks, "_get_user_tz", AsyncMock(return_value=3)), \
          patch("nexus.repos.pg_tasks_repo.PgTasksRepo", return_value=fake_pg), \
          patch("core.user_manager.get_user",
-               AsyncMock(return_value={"notion_page_id": "notion-user-x"})), \
+               AsyncMock(return_value={"user_id": "notion-user-x"})), \
          patch("core.config.config") as mock_cfg:
         mock_cfg.allowed_ids = [999_001]
         await tasks.restore_reminders_on_startup()
@@ -573,7 +573,7 @@ async def test_reschedule_all_for_tz_preserves_local_clock_time():
          patch.object(tasks, "_scheduler", fake_scheduler), \
          patch("nexus.repos.pg_tasks_repo.PgTasksRepo", return_value=fake_pg), \
          patch("core.user_manager.get_user",
-               AsyncMock(return_value={"notion_page_id": "notion-user-y"})):
+               AsyncMock(return_value={"user_id": "notion-user-y"})):
         await tasks._reschedule_all_for_tz(
             uid=999_001,
             chat_id=999_001,

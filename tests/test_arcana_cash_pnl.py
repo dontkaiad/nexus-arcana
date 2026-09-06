@@ -17,7 +17,7 @@ from core.repos.pg_finance_repo import PnlEntry, BudgetEntry
 
 
 FAKE_TG_ID = 67686090
-FAKE_NOTION_USER = "user-notion-id-42"
+FAKE_USER_ID = "user-notion-id-42"
 
 
 @pytest.fixture
@@ -80,7 +80,7 @@ async def test_compute_pnl_excludes_self_client_and_subtracts_salary():
          patch("core.cash_register._load_arcana_finance", AsyncMock(return_value=finance)), \
          patch("core.cash_register._load_salary_records", AsyncMock(return_value=salary)), \
          patch("core.cash_register._count_open_barter", AsyncMock(return_value=2)):
-        pnl = await compute_pnl(FAKE_NOTION_USER, 2026, 5)
+        pnl = await compute_pnl(FAKE_USER_ID, 2026, 5)
 
     # Self исключён → доход 5000+3500+5000 = 13500
     assert pnl["income_month"] == 13500
@@ -110,7 +110,7 @@ def test_pay_salary_creates_finance_with_nexus_bot_and_salary_category(client):
                AsyncMock(return_value=fake_pnl)), \
          patch.object(arcana_finance._fin_repo, "add", fa), \
          patch("miniapp.backend.routes.arcana_finance.get_user_id",
-               AsyncMock(return_value=FAKE_NOTION_USER)):
+               AsyncMock(return_value=FAKE_USER_ID)):
         r = client.post("/api/arcana/finance/pay_salary", json={"amount": 20000})
     assert r.status_code == 200, r.text
     body = r.json()
@@ -137,7 +137,7 @@ def test_pay_salary_warns_when_cash_too_low(client):
                AsyncMock(return_value=fake_pnl)), \
          patch.object(arcana_finance._fin_repo, "add", fa), \
          patch("miniapp.backend.routes.arcana_finance.get_user_id",
-               AsyncMock(return_value=FAKE_NOTION_USER)):
+               AsyncMock(return_value=FAKE_USER_ID)):
         r = client.post("/api/arcana/finance/pay_salary", json={"amount": 20000})
     body = r.json()
     assert body["ok"] is False

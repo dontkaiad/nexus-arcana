@@ -32,7 +32,7 @@ from core.repos.pg_finance_repo import PnlEntry, BudgetEntry
 
 
 FAKE_TG_ID = 67686090
-FAKE_NOTION_USER = "user-notion-id-42"
+FAKE_USER_ID = "user-notion-id-42"
 
 
 @pytest.fixture
@@ -131,7 +131,7 @@ async def test_full_pnl_flow():
                              barter_open=3)
     for cm in cms: cm.start()
     try:
-        pnl = await compute_pnl(FAKE_NOTION_USER, 2026, 5)
+        pnl = await compute_pnl(FAKE_USER_ID, 2026, 5)
     finally:
         for cm in cms: cm.stop()
 
@@ -166,7 +166,7 @@ async def test_self_client_excluded_from_pnl():
                              arcana_finance=[], salary=[])
     for cm in cms: cm.start()
     try:
-        pnl = await compute_pnl(FAKE_NOTION_USER, 2026, 5)
+        pnl = await compute_pnl(FAKE_USER_ID, 2026, 5)
     finally:
         for cm in cms: cm.stop()
 
@@ -200,7 +200,7 @@ def test_pay_salary_twice_subtracts_from_cash(client):
     with patch("miniapp.backend.routes.arcana_finance.compute_pnl", AsyncMock(side_effect=fake_pnl)), \
          patch.object(arcana_finance._fin_repo, "add", fa), \
          patch("miniapp.backend.routes.arcana_finance.get_user_id",
-               AsyncMock(return_value=FAKE_NOTION_USER)):
+               AsyncMock(return_value=FAKE_USER_ID)):
         r1 = client.post("/api/arcana/finance/pay_salary", json={"amount": 1000})
         assert r1.json()["cash_balance_after"] == 9000
         state["cash"] = 9000
@@ -230,7 +230,7 @@ def test_pay_salary_force_overrides_low_cash(client):
                AsyncMock(return_value=fake_pnl)), \
          patch.object(arcana_finance._fin_repo, "add", fa), \
          patch("miniapp.backend.routes.arcana_finance.get_user_id",
-               AsyncMock(return_value=FAKE_NOTION_USER)):
+               AsyncMock(return_value=FAKE_USER_ID)):
         # без force — warning
         r1 = client.post("/api/arcana/finance/pay_salary", json={"amount": 1000})
         body1 = r1.json()
@@ -264,7 +264,7 @@ def test_barter_listing_filters_only_open(client):
     with patch.object(arcana_barter._inv_repo, "get_open_barter",
                       AsyncMock(return_value=items_pg)), \
          patch("miniapp.backend.routes.arcana_barter.get_user_id",
-               AsyncMock(return_value=FAKE_NOTION_USER)):
+               AsyncMock(return_value=FAKE_USER_ID)):
         r = client.get("/api/arcana/barter?only_open=true")
     assert r.status_code == 200, r.text
     body = r.json()
@@ -283,7 +283,7 @@ def test_barter_toggle_done_via_lists_endpoint(client):
     from core.repos.pg_nexus_lists_repo import ListItem
     nx_item = ListItem(
         id="99", name="блок сигарет", list_type="чеклист",
-        status="not_started", user_id=FAKE_NOTION_USER,
+        status="not_started", user_id=FAKE_USER_ID,
     )
     mock_nx = MagicMock()
     mock_nx.get_by_id = AsyncMock(return_value=nx_item)
@@ -293,7 +293,7 @@ def test_barter_toggle_done_via_lists_endpoint(client):
     with patch("miniapp.backend.routes.writes._nexus_lists_repo", mock_nx), \
          patch("miniapp.backend.routes.writes._arcana_inv_repo", mock_ai), \
          patch("miniapp.backend.routes.writes.get_user_id",
-               AsyncMock(return_value=FAKE_NOTION_USER)):
+               AsyncMock(return_value=FAKE_USER_ID)):
         r = client.post("/api/lists/99/done")
     assert r.status_code == 200, r.text
     mock_nx.update_status.assert_awaited_once_with("99", "Done")
@@ -313,7 +313,7 @@ def test_inventory_add_writes_arcana_label_and_inv_type(client):
     mock_ai.add_item = AsyncMock(return_value=created)
     with patch("miniapp.backend.routes.writes._arcana_inv_repo", mock_ai), \
          patch("miniapp.backend.routes.writes.get_user_id",
-               AsyncMock(return_value=FAKE_NOTION_USER)):
+               AsyncMock(return_value=FAKE_USER_ID)):
         r = client.post("/api/lists", json={
             "type": "inv", "name": "соль", "qty": 200,
             "cat": "🕯️ Расходники", "bot": "arcana",
@@ -354,7 +354,7 @@ async def test_bot_pay_self_parses_amount(phrase):
     with patch("arcana.handlers.finance.compute_pnl",
                AsyncMock(return_value=fake_pnl)), \
          patch.object(arcana_finance._repo, "add", fa):
-        await handle_pay_self(msg, phrase, user_id=FAKE_NOTION_USER)
+        await handle_pay_self(msg, phrase, user_id=FAKE_USER_ID)
 
     fa.assert_awaited_once()
     kw = fa.await_args.kwargs
@@ -400,7 +400,7 @@ async def test_finance_handler_renders_pnl_with_pay_button():
                AsyncMock(return_value=fake_pnl)), \
          patch("core.shared_handlers.get_user_tz",
                AsyncMock(return_value=3)):
-        await handle_arcana_finance(msg, user_id=FAKE_NOTION_USER, text="")
+        await handle_arcana_finance(msg, user_id=FAKE_USER_ID, text="")
 
     msg.answer.assert_awaited()
     args, kwargs = msg.answer.await_args

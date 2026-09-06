@@ -5009,7 +5009,7 @@ async def proactive_budget_review(bot) -> None:
             if not user_data.get("permissions", {}).get("finance", False):
                 logger.info("proactive_budget_review: skip uid=%s (no finance permission)", tg_id)
                 continue
-            user_id = user_data.get("notion_page_id", "")
+            user_id = user_data.get("user_id", "")
             await _send_payday_review(tg_id, user_id, bot)
         except Exception as e:
             logger.error("proactive_budget_review: uid=%s error: %s", tg_id, e)

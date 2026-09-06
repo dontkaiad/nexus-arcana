@@ -20,7 +20,7 @@ from arcana.repos.clients_repo import Client as _ArcanaClient
 
 
 FAKE_TG_ID = 67686090
-FAKE_NOTION_USER = "user-notion-id-42"
+FAKE_USER_ID = "user-notion-id-42"
 
 
 @pytest.fixture(autouse=True)
@@ -53,7 +53,7 @@ def _client_page(cid, name, status="🟢 Активный", contact="", request=
         "Контакт": {"rich_text": [{"plain_text": contact}] if contact else []},
         "Запрос": {"rich_text": [{"plain_text": request}] if request else []},
         "Заметки": {"rich_text": [{"plain_text": notes}] if notes else []},
-        "🪪 Пользователи": {"relation": [{"id": FAKE_NOTION_USER}]},
+        "🪪 Пользователи": {"relation": [{"id": FAKE_USER_ID}]},
     }
     if photo:
         props["Фото"] = {"url": photo}
@@ -77,7 +77,7 @@ def _session_page(sid, question, *, date=None, session_type="🤝 Клиентс
         "Сумма": {"number": price},
         "Оплачено": {"number": paid},
         "👥 Клиенты": {"relation": [{"id": c} for c in (client_ids or [])]},
-        "🪪 Пользователи": {"relation": [{"id": FAKE_NOTION_USER}]},
+        "🪪 Пользователи": {"relation": [{"id": FAKE_USER_ID}]},
     }
     if photo:
         props["Фото"] = {"url": photo}
@@ -104,7 +104,7 @@ def _ritual_page(rid, name, *, date=None, client_ids=None, goal=None,
         "Оплачено": {"number": paid},
         "Результат": {"select": {"name": result}},
         "👥 Клиенты": {"relation": [{"id": c} for c in (client_ids or [])]},
-        "🪪 Пользователи": {"relation": [{"id": FAKE_NOTION_USER}]},
+        "🪪 Пользователи": {"relation": [{"id": FAKE_USER_ID}]},
     }
     if goal_multi:
         props["Цель"] = {"multi_select": [{"name": g} for g in goal_multi]}
@@ -228,7 +228,7 @@ def _work_page(wid, title, *, cat=None, prio="🟡 Важно", deadline=None):
     }
 
 
-def _page(pid: str, *, owner: str = FAKE_NOTION_USER, extra: dict | None = None) -> dict:
+def _page(pid: str, *, owner: str = FAKE_USER_ID, extra: dict | None = None) -> dict:
     props = {
         "🪪 Пользователи": {"relation": [{"id": owner}]},
         "Статус": {"status": {"name": "Not started"}},
@@ -293,7 +293,7 @@ def test_arcana_today_happy(client):
          patch("miniapp.backend.routes.arcana_today.today_user_tz",
                AsyncMock(return_value=(today, tz))), \
          patch("miniapp.backend.routes.arcana_today.get_user_id",
-               AsyncMock(return_value=FAKE_NOTION_USER)):
+               AsyncMock(return_value=FAKE_USER_ID)):
         r = client.get("/api/arcana/today")
 
     assert r.status_code == 200, r.text
@@ -354,7 +354,7 @@ def test_arcana_today_finance_loop_pg_format(client):
          patch("miniapp.backend.routes.arcana_today.today_user_tz",
                AsyncMock(return_value=(today, tz))), \
          patch("miniapp.backend.routes.arcana_today.get_user_id",
-               AsyncMock(return_value=FAKE_NOTION_USER)):
+               AsyncMock(return_value=FAKE_USER_ID)):
         r = client.get("/api/arcana/today")
 
     assert r.status_code == 200, r.text
@@ -383,7 +383,7 @@ def test_arcana_sessions_list_and_filter(client):
          patch("miniapp.backend.routes.arcana_sessions.today_user_tz",
                AsyncMock(return_value=(today, tz))), \
          patch("miniapp.backend.routes.arcana_sessions.get_user_id",
-               AsyncMock(return_value=FAKE_NOTION_USER)):
+               AsyncMock(return_value=FAKE_USER_ID)):
         r_all = client.get("/api/arcana/sessions")
         r_area = client.get("/api/arcana/sessions?filter=area:Отношения")
         r_client = client.get("/api/arcana/sessions?filter=client_id:c2")
@@ -437,7 +437,7 @@ def test_arcana_session_detail_parses_cards_and_bottom(client):
          patch("miniapp.backend.routes.arcana_sessions.today_user_tz",
                AsyncMock(return_value=(today, tz))), \
          patch("miniapp.backend.routes.arcana_sessions.get_user_id",
-               AsyncMock(return_value=FAKE_NOTION_USER)):
+               AsyncMock(return_value=FAKE_USER_ID)):
         r = client.get("/api/arcana/sessions/sX")
 
     assert r.status_code == 200, r.text
@@ -460,7 +460,7 @@ def test_arcana_session_detail_404_not_found(client):
          patch("miniapp.backend.routes.arcana_sessions.today_user_tz",
                AsyncMock(return_value=(_today_date(3), 3))), \
          patch("miniapp.backend.routes.arcana_sessions.get_user_id",
-               AsyncMock(return_value=FAKE_NOTION_USER)):
+               AsyncMock(return_value=FAKE_USER_ID)):
         r = client.get("/api/arcana/sessions/sX")
     assert r.status_code == 404
 
@@ -484,7 +484,7 @@ def test_arcana_clients_list_aggregates_stats(client):
          patch("miniapp.backend.routes.arcana_clients._sessions_repo", mock_sess), \
          patch("miniapp.backend.routes.arcana_clients._rituals_repo", mock_rit), \
          patch("miniapp.backend.routes.arcana_clients.get_user_id",
-               AsyncMock(return_value=FAKE_NOTION_USER)):
+               AsyncMock(return_value=FAKE_USER_ID)):
         r = client.get("/api/arcana/clients")
 
     assert r.status_code == 200, r.text
@@ -514,7 +514,7 @@ def test_arcana_clients_count_sessions_not_triplets(client):
          patch("miniapp.backend.routes.arcana_clients._sessions_repo", mock_sess), \
          patch("miniapp.backend.routes.arcana_clients._rituals_repo", mock_rit), \
          patch("miniapp.backend.routes.arcana_clients.get_user_id",
-               AsyncMock(return_value=FAKE_NOTION_USER)):
+               AsyncMock(return_value=FAKE_USER_ID)):
         r = client.get("/api/arcana/clients")
     assert r.status_code == 200, r.text
     kai = next(c for c in r.json()["clients"] if c["id"] == "1")
@@ -537,7 +537,7 @@ def test_arcana_dossier_counts_sessions_not_triplets(client):
          patch("miniapp.backend.routes.arcana_clients._sessions_repo", mock_sess), \
          patch("miniapp.backend.routes.arcana_clients._rituals_repo", mock_rit), \
          patch("miniapp.backend.routes.arcana_clients.get_user_id",
-               AsyncMock(return_value=FAKE_NOTION_USER)):
+               AsyncMock(return_value=FAKE_USER_ID)):
         r = client.get("/api/arcana/clients/1")
     assert r.status_code == 200, r.text
     assert r.json()["stats"]["sessions"] == 1
@@ -566,7 +566,7 @@ def test_arcana_client_dossier_mixes_history(client):
          patch("miniapp.backend.routes.arcana_clients._sessions_repo", mock_sess), \
          patch("miniapp.backend.routes.arcana_clients._rituals_repo", mock_rit), \
          patch("miniapp.backend.routes.arcana_clients.get_user_id",
-               AsyncMock(return_value=FAKE_NOTION_USER)):
+               AsyncMock(return_value=FAKE_USER_ID)):
         r = client.get("/api/arcana/clients/1")
 
     assert r.status_code == 200
@@ -587,7 +587,7 @@ def test_arcana_client_dossier_404_not_found(client):
     mock_cl = _mock_clients_repo(find_by_id_result=None)
     with patch("miniapp.backend.routes.arcana_clients._clients_repo", mock_cl), \
          patch("miniapp.backend.routes.arcana_clients.get_user_id",
-               AsyncMock(return_value=FAKE_NOTION_USER)):
+               AsyncMock(return_value=FAKE_USER_ID)):
         r = client.get("/api/arcana/clients/999")
     assert r.status_code == 404
 
@@ -605,7 +605,7 @@ def test_arcana_rituals_list_and_filter_by_goal(client):
          patch("miniapp.backend.routes.arcana_rituals.today_user_tz",
                AsyncMock(return_value=(_today_date(3), 3))), \
          patch("miniapp.backend.routes.arcana_rituals.get_user_id",
-               AsyncMock(return_value=FAKE_NOTION_USER)):
+               AsyncMock(return_value=FAKE_USER_ID)):
         r_all = client.get("/api/arcana/rituals")
         r_filt = client.get("/api/arcana/rituals?goal=%F0%9F%9B%A1%EF%B8%8F%20%D0%97%D0%B0%D1%89%D0%B8%D1%82%D0%B0")
 
@@ -639,7 +639,7 @@ def test_arcana_ritual_detail_parses_supplies_and_structure(client):
          patch("miniapp.backend.routes.arcana_rituals.today_user_tz",
                AsyncMock(return_value=(_today_date(3), 3))), \
          patch("miniapp.backend.routes.arcana_rituals.get_user_id",
-               AsyncMock(return_value=FAKE_NOTION_USER)):
+               AsyncMock(return_value=FAKE_USER_ID)):
         r = client.get("/api/arcana/rituals/rX")
 
     assert r.status_code == 200
@@ -664,7 +664,7 @@ def test_arcana_ritual_404_wrong_owner(client):
          patch("miniapp.backend.routes.arcana_rituals.today_user_tz",
                AsyncMock(return_value=(_today_date(3), 3))), \
          patch("miniapp.backend.routes.arcana_rituals.get_user_id",
-               AsyncMock(return_value=FAKE_NOTION_USER)):
+               AsyncMock(return_value=FAKE_USER_ID)):
         r = client.get("/api/arcana/rituals/rX")
     assert r.status_code == 404
 
@@ -682,7 +682,7 @@ def test_arcana_grimoire_list_and_cat_filter(client):
     with patch("miniapp.backend.routes.arcana_grimoire._grimoire_repo",
                _mock_grimoire_repo(list_all_result=entries)), \
          patch("miniapp.backend.routes.arcana_grimoire.get_user_id",
-               AsyncMock(return_value=FAKE_NOTION_USER)):
+               AsyncMock(return_value=FAKE_USER_ID)):
         r_all = client.get("/api/arcana/grimoire")
         r_q = client.get("/api/arcana/grimoire?q=рецепт")
 
@@ -711,7 +711,7 @@ def test_arcana_grimoire_search_matches_theme(client):
     with patch("miniapp.backend.routes.arcana_grimoire._grimoire_repo",
                _mock_grimoire_repo(list_all_result=entries)), \
          patch("miniapp.backend.routes.arcana_grimoire.get_user_id",
-               AsyncMock(return_value=FAKE_NOTION_USER)):
+               AsyncMock(return_value=FAKE_USER_ID)):
         # «финансы» есть только в Теме g1
         r_theme = client.get("/api/arcana/grimoire?q=финансы")
         # «защита» — только в Теме g2
@@ -726,7 +726,7 @@ def test_arcana_grimoire_categories_always_returned(client):
     with patch("miniapp.backend.routes.arcana_grimoire._grimoire_repo",
                _mock_grimoire_repo(list_all_result=[])), \
          patch("miniapp.backend.routes.arcana_grimoire.get_user_id",
-               AsyncMock(return_value=FAKE_NOTION_USER)):
+               AsyncMock(return_value=FAKE_USER_ID)):
         r = client.get("/api/arcana/grimoire")
     assert r.status_code == 200
     cats = r.json()["categories"]
@@ -747,7 +747,7 @@ def test_arcana_grimoire_categories_counts(client):
     with patch("miniapp.backend.routes.arcana_grimoire._grimoire_repo",
                _mock_grimoire_repo(list_all_result=entries)), \
          patch("miniapp.backend.routes.arcana_grimoire.get_user_id",
-               AsyncMock(return_value=FAKE_NOTION_USER)):
+               AsyncMock(return_value=FAKE_USER_ID)):
         r = client.get("/api/arcana/grimoire?cat=%F0%9F%93%BF%20%D0%97%D0%B0%D0%B3%D0%BE%D0%B2%D0%BE%D1%80")
     assert r.status_code == 200
     body = r.json()
@@ -767,7 +767,7 @@ def test_arcana_grimoire_detail(client):
     with patch("miniapp.backend.routes.arcana_grimoire._grimoire_repo",
                _mock_grimoire_repo(find_by_id_result=entry)), \
          patch("miniapp.backend.routes.arcana_grimoire.get_user_id",
-               AsyncMock(return_value=FAKE_NOTION_USER)):
+               AsyncMock(return_value=FAKE_USER_ID)):
         r = client.get("/api/arcana/grimoire/gX")
 
     assert r.status_code == 200
@@ -782,7 +782,7 @@ def test_arcana_grimoire_detail_404_wrong_owner(client):
     with patch("miniapp.backend.routes.arcana_grimoire._grimoire_repo",
                _mock_grimoire_repo(find_by_id_result=None)), \
          patch("miniapp.backend.routes.arcana_grimoire.get_user_id",
-               AsyncMock(return_value=FAKE_NOTION_USER)):
+               AsyncMock(return_value=FAKE_USER_ID)):
         r = client.get("/api/arcana/grimoire/gX")
     assert r.status_code == 404
 
@@ -816,7 +816,7 @@ def test_arcana_stats_computes_overall_and_months(client):
          patch("miniapp.backend.routes.arcana_today.load_clients_map",
                AsyncMock(return_value={})), \
          patch("miniapp.backend.routes.arcana_today.get_user_id",
-               AsyncMock(return_value=FAKE_NOTION_USER)):
+               AsyncMock(return_value=FAKE_USER_ID)):
         r = client.get("/api/arcana/stats")
 
     assert r.status_code == 200, r.text
@@ -846,7 +846,7 @@ def test_session_verify_updates_select(client):
     mock_repo.set_outcome = AsyncMock(return_value=True)
     with patch("miniapp.backend.routes.writes._sessions_pg_repo", mock_repo), \
          patch("miniapp.backend.routes.writes.get_user_id",
-               AsyncMock(return_value=FAKE_NOTION_USER)):
+               AsyncMock(return_value=FAKE_USER_ID)):
         r = client.post("/api/arcana/sessions/s-1/verify", json={"status": "✅ Да"})
     assert r.status_code == 200
     mock_repo.set_outcome.assert_awaited_once_with("s-1", "yes")
@@ -854,7 +854,7 @@ def test_session_verify_updates_select(client):
 
 def test_session_verify_rejects_unknown_status(client):
     with patch("miniapp.backend.routes.writes.get_user_id",
-               AsyncMock(return_value=FAKE_NOTION_USER)):
+               AsyncMock(return_value=FAKE_USER_ID)):
         r = client.post("/api/arcana/sessions/s-1/verify", json={"status": "😀 bogus"})
     assert r.status_code == 400
 
@@ -866,7 +866,7 @@ def test_ritual_result_updates_select(client):
     mock_repo = _mock_rituals_repo(find_by_id_result=ritual)
     with patch("miniapp.backend.routes.writes._rituals_pg_repo", mock_repo), \
          patch("miniapp.backend.routes.writes.get_user_id",
-               AsyncMock(return_value=FAKE_NOTION_USER)):
+               AsyncMock(return_value=FAKE_USER_ID)):
         r = client.post("/api/arcana/rituals/r-1/result",
                         json={"status": "✅ Сработало"})
     assert r.status_code == 200
@@ -879,7 +879,7 @@ def test_arcana_client_create(client):
     mock_cr = _mock_clients_repo(add_result="7")
     with patch("miniapp.backend.routes.writes._clients_repo", mock_cr), \
          patch("miniapp.backend.routes.writes.get_user_id",
-               AsyncMock(return_value=FAKE_NOTION_USER)):
+               AsyncMock(return_value=FAKE_USER_ID)):
         r = client.post("/api/arcana/clients", json={
             "name": "Анна",
             "contact": "@anna_tarot",
@@ -897,7 +897,7 @@ def test_arcana_client_create_with_type_and_notes(client):
     mock_cr = _mock_clients_repo(add_result="8")
     with patch("miniapp.backend.routes.writes._clients_repo", mock_cr), \
          patch("miniapp.backend.routes.writes.get_user_id",
-               AsyncMock(return_value=FAKE_NOTION_USER)):
+               AsyncMock(return_value=FAKE_USER_ID)):
         r = client.post("/api/arcana/clients", json={
             "name": "Лиза",
             "type": "🎁 Бесплатный",
@@ -914,7 +914,7 @@ def test_arcana_client_edit_updates_fields(client):
     mock_cr = _mock_clients_repo(find_by_id_result=c_obj)
     with patch("miniapp.backend.routes.writes._clients_repo", mock_cr), \
          patch("miniapp.backend.routes.writes.get_user_id",
-               AsyncMock(return_value=FAKE_NOTION_USER)):
+               AsyncMock(return_value=FAKE_USER_ID)):
         r = client.post("/api/arcana/clients/3/edit", json={
             "notes": "новая заметка",
             "request": "карьера",
@@ -932,7 +932,7 @@ def test_arcana_client_edit_self_blocks_type(client):
     mock_cr = _mock_clients_repo(find_by_id_result=c_obj)
     with patch("miniapp.backend.routes.writes._clients_repo", mock_cr), \
          patch("miniapp.backend.routes.writes.get_user_id",
-               AsyncMock(return_value=FAKE_NOTION_USER)):
+               AsyncMock(return_value=FAKE_USER_ID)):
         r = client.post("/api/arcana/clients/99/edit", json={
             "notes": "ok",
             "type": "🤝 Платный",
@@ -947,7 +947,7 @@ def test_client_create_with_birthday(client):
     mock_cr = _mock_clients_repo(add_result="10")
     with patch("miniapp.backend.routes.writes._clients_repo", mock_cr), \
          patch("miniapp.backend.routes.writes.get_user_id",
-               AsyncMock(return_value=FAKE_NOTION_USER)):
+               AsyncMock(return_value=FAKE_USER_ID)):
         r = client.post("/api/arcana/clients", json={
             "name": "Аня",
             "birthday": "2000-10-02",
@@ -970,7 +970,7 @@ def test_session_photo_upload_writes_url(client):
          patch("miniapp.backend.routes.writes._cloudinary_upload",
                AsyncMock(return_value=fake_url)) as cu, \
          patch("miniapp.backend.routes.writes.get_user_id",
-               AsyncMock(return_value=FAKE_NOTION_USER)):
+               AsyncMock(return_value=FAKE_USER_ID)):
         r = client.post(
             "/api/arcana/sessions/sess-1/photo",
             files={"file": ("card.jpg", b"FAKEJPG", "image/jpeg")},
@@ -987,7 +987,7 @@ def test_session_photo_upload_rejects_non_image(client):
     mock_repo.find_by_id = AsyncMock(return_value=triplet)
     with patch("miniapp.backend.routes.writes._sessions_pg_repo", mock_repo), \
          patch("miniapp.backend.routes.writes.get_user_id",
-               AsyncMock(return_value=FAKE_NOTION_USER)):
+               AsyncMock(return_value=FAKE_USER_ID)):
         r = client.post(
             "/api/arcana/sessions/sess-2/photo",
             files={"file": ("note.txt", b"hello", "text/plain")},
@@ -1005,7 +1005,7 @@ def test_ritual_photo_upload_writes_url(client):
          patch("miniapp.backend.routes.writes._cloudinary_upload_folder",
                AsyncMock(return_value=fake_url)) as cu, \
          patch("miniapp.backend.routes.writes.get_user_id",
-               AsyncMock(return_value=FAKE_NOTION_USER)):
+               AsyncMock(return_value=FAKE_USER_ID)):
         r = client.post(
             "/api/arcana/rituals/rit-1/photo",
             files={"file": ("ritual.jpg", b"FAKE", "image/jpeg")},
@@ -1026,7 +1026,7 @@ def test_client_object_photo_appends_url(client):
          patch("miniapp.backend.routes.writes._cloudinary_upload_folder",
                AsyncMock(return_value=fake_url)) as cu, \
          patch("miniapp.backend.routes.writes.get_user_id",
-               AsyncMock(return_value=FAKE_NOTION_USER)):
+               AsyncMock(return_value=FAKE_USER_ID)):
         r = client.post(
             "/api/arcana/clients/7/object_photo",
             files={"file": ("obj.jpg", b"FAKE", "image/jpeg")},
@@ -1053,7 +1053,7 @@ def test_client_object_photo_edit_note(client):
     mock_cr = _mock_clients_repo(find_by_id_result=c_obj)
     with patch("miniapp.backend.routes.writes._clients_repo", mock_cr), \
          patch("miniapp.backend.routes.writes.get_user_id",
-               AsyncMock(return_value=FAKE_NOTION_USER)):
+               AsyncMock(return_value=FAKE_USER_ID)):
         r = client.patch(
             "/api/arcana/clients/9/object_photo/1",
             json={"note": "мама"},
@@ -1070,7 +1070,7 @@ def test_client_object_photo_delete(client):
     mock_cr = _mock_clients_repo(find_by_id_result=c_obj)
     with patch("miniapp.backend.routes.writes._clients_repo", mock_cr), \
          patch("miniapp.backend.routes.writes.get_user_id",
-               AsyncMock(return_value=FAKE_NOTION_USER)):
+               AsyncMock(return_value=FAKE_USER_ID)):
         r = client.delete("/api/arcana/clients/11/object_photo/1")
     assert r.status_code == 200
     photos = r.json()["photos"]
@@ -1084,7 +1084,7 @@ def test_client_object_photo_index_404(client):
     with patch("miniapp.backend.routes.writes._clients_repo.find_by_id",
                AsyncMock(return_value=c)), \
          patch("miniapp.backend.routes.writes.get_user_id",
-               AsyncMock(return_value=FAKE_NOTION_USER)):
+               AsyncMock(return_value=FAKE_USER_ID)):
         r = client.delete("/api/arcana/clients/cli-z/object_photo/99")
     assert r.status_code == 404
 
@@ -1103,7 +1103,7 @@ def test_summarize_returns_cached_when_ai_summary_exists(client):
 
     with patch("miniapp.backend.routes.writes._sessions_pg_repo", mock_repo), \
          patch("miniapp.backend.routes.writes.get_user_id",
-               AsyncMock(return_value=FAKE_NOTION_USER)), \
+               AsyncMock(return_value=FAKE_USER_ID)), \
          patch("core.claude_client.ask_claude", claude_mock):
         r = client.post("/api/arcana/sessions/s1/summarize")
 
@@ -1124,7 +1124,7 @@ def test_summarize_generates_when_empty(client):
 
     with patch("miniapp.backend.routes.writes._sessions_pg_repo", mock_repo), \
          patch("miniapp.backend.routes.writes.get_user_id",
-               AsyncMock(return_value=FAKE_NOTION_USER)), \
+               AsyncMock(return_value=FAKE_USER_ID)), \
          patch("core.claude_client.ask_claude", claude_mock):
         r = client.post("/api/arcana/sessions/s2/summarize")
 
@@ -1185,7 +1185,7 @@ def test_arcana_barter_pg_status_conversion(client):
     with patch.object(arcana_barter._inv_repo, "get_open_barter",
                       AsyncMock(return_value=[done_item, open_item])), \
          patch("miniapp.backend.routes.arcana_barter.get_user_id",
-               AsyncMock(return_value=FAKE_NOTION_USER)):
+               AsyncMock(return_value=FAKE_USER_ID)):
         r = client.get("/api/arcana/barter")
 
     assert r.status_code == 200, r.text
@@ -1220,13 +1220,13 @@ def test_arcana_barter_only_open_false_calls_get_list(client):
     with patch.object(arcana_barter._inv_repo, "get_open_barter", mock_get_open), \
          patch.object(arcana_barter._inv_repo, "get_list", mock_get_list), \
          patch("miniapp.backend.routes.arcana_barter.get_user_id",
-               AsyncMock(return_value=FAKE_NOTION_USER)):
+               AsyncMock(return_value=FAKE_USER_ID)):
         r = client.get("/api/arcana/barter?only_open=false")
 
     assert r.status_code == 200, r.text
     mock_get_open.assert_not_awaited()
     mock_get_list.assert_awaited_once_with(
-        category=BARTER_CATEGORY, user_id=FAKE_NOTION_USER
+        category=BARTER_CATEGORY, user_id=FAKE_USER_ID
     )
     assert len(r.json()["items"]) == 1
 
@@ -1251,7 +1251,7 @@ def test_arcana_pay_salary_bot_nexus_guard(client):
          patch("miniapp.backend.routes.arcana_finance.compute_pnl",
                AsyncMock(return_value=fake_pnl)), \
          patch("miniapp.backend.routes.arcana_finance.get_user_id",
-               AsyncMock(return_value=FAKE_NOTION_USER)):
+               AsyncMock(return_value=FAKE_USER_ID)):
         r = client.post("/api/arcana/finance/pay_salary", json={"amount": 2500})
 
     assert r.status_code == 200, r.text

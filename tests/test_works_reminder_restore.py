@@ -84,7 +84,7 @@ async def test_restore_reschedules_with_matching_key():
         reminder_dt=datetime(2026, 12, 31, 17, 0),
     )
 
-    fake_user = {"permissions": {"arcana": True}, "notion_page_id": "u-1"}
+    fake_user = {"permissions": {"arcana": True}, "user_id": "u-1"}
 
     with patch.object(config, "allowed_ids", [7]), \
          patch("core.user_manager.get_user", AsyncMock(return_value=fake_user)), \

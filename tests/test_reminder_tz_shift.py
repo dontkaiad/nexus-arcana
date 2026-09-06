@@ -78,7 +78,7 @@ async def test_restore_pass1_utc_reminder_no_shift():
     task = Task(id="t-1", title="generic task", repeat="Ежедневно",
                 repeat_time="13:40", reminder=utc_reminder)
 
-    fake_user = {"permissions": {"nexus": True}, "notion_page_id": "u-1"}
+    fake_user = {"permissions": {"nexus": True}, "user_id": "u-1"}
 
     with patch("core.config.config.allowed_ids", [7]), \
          patch("core.user_manager.get_user", AsyncMock(return_value=fake_user)), \

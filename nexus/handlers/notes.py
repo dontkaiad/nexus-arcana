@@ -311,7 +311,7 @@ async def send_notes_digest_all(bot) -> None:
             if not user_data.get("permissions", {}).get("nexus", False):
                 logger.info("send_notes_digest_all: skip tg_id=%s (no nexus permission)", tg_id)
                 continue
-            user_id = user_data.get("notion_page_id", "")
+            user_id = user_data.get("user_id", "")
             await send_notes_digest(bot, tg_id, user_id)
         except Exception as e:
             logger.error("send_notes_digest_all: tg_id=%s error: %s", tg_id, e)

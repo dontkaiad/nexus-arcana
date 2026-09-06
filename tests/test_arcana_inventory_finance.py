@@ -19,7 +19,7 @@ from miniapp.backend.auth import current_user_id
 
 
 FAKE_TG_ID = 67686090
-FAKE_NOTION_USER = "user-notion-id-42"
+FAKE_USER_ID = "user-notion-id-42"
 
 
 @pytest.fixture
@@ -41,7 +41,7 @@ async def test_check_items_arcana_writes_finance_with_arcana_bot():
 
     fake_item = InventoryItem(
         id="1", name="соль", list_type="инвентарь", status="not_started",
-        category="🕯️ Расходники", user_id=FAKE_NOTION_USER,
+        category="🕯️ Расходники", user_id=FAKE_USER_ID,
     )
 
     with patch.object(lm._arcana_repo, "search", AsyncMock(return_value=[fake_item])), \
@@ -50,7 +50,7 @@ async def test_check_items_arcana_writes_finance_with_arcana_bot():
         result = await check_items(
             [{"name": "соль", "price": 200}],
             bot_name="🌒 Arcana",
-            user_page_id=FAKE_NOTION_USER,
+            user_page_id=FAKE_USER_ID,
         )
 
     assert result["finance_results"][0]["category"] == "🕯️ Расходники"
@@ -64,7 +64,7 @@ async def test_check_items_arcana_writes_finance_with_arcana_bot():
 # ── 2. /api/arcana/inventory/{id}/purchase → finance_add + qty append ──────
 
 def _inv_item(iid: str, name: str = "соль", qty: float = 200.0,
-              cat: str = "🕯️ Расходники", owner: str = FAKE_NOTION_USER):
+              cat: str = "🕯️ Расходники", owner: str = FAKE_USER_ID):
     from core.repos.pg_nexus_lists_repo import InventoryItem
     return InventoryItem(
         id=iid,
@@ -85,7 +85,7 @@ def test_purchase_endpoint_writes_finance_and_appends_qty(client):
     mock_repo.update = AsyncMock(return_value=True)
     fa = AsyncMock(return_value="fin-X")
     with patch("miniapp.backend.routes.arcana_inventory.get_user_id",
-               AsyncMock(return_value=FAKE_NOTION_USER)), \
+               AsyncMock(return_value=FAKE_USER_ID)), \
          patch("miniapp.backend.routes.arcana_inventory._arcana_inv_repo", mock_repo), \
          patch.object(arcana_inventory._fin_repo, "add", fa):
         r = client.post(
@@ -116,7 +116,7 @@ def test_purchase_arcana_pnl_guard(client):
     mock_repo.update = AsyncMock(return_value=True)
     fa = AsyncMock(return_value="fin-guard")
     with patch("miniapp.backend.routes.arcana_inventory.get_user_id",
-               AsyncMock(return_value=FAKE_NOTION_USER)), \
+               AsyncMock(return_value=FAKE_USER_ID)), \
          patch("miniapp.backend.routes.arcana_inventory._arcana_inv_repo", mock_repo), \
          patch.object(arcana_inventory._fin_repo, "add", fa):
         r = client.post(
@@ -138,7 +138,7 @@ def test_depleted_endpoint_archives_and_optionally_adds_to_buy(client):
     mock_repo.get_by_id = AsyncMock(return_value=inv_item)
     mock_repo.update_status = AsyncMock(return_value=True)
     with patch("miniapp.backend.routes.arcana_inventory.get_user_id",
-               AsyncMock(return_value=FAKE_NOTION_USER)), \
+               AsyncMock(return_value=FAKE_USER_ID)), \
          patch("miniapp.backend.routes.arcana_inventory._arcana_inv_repo", mock_repo), \
          patch("core.list_manager.add_items",
                AsyncMock(return_value=[{"id": "buy-1", "name": "соль"}])):
@@ -159,17 +159,17 @@ def test_inventory_list_returns_categories_with_counts(client):
     from core.repos.pg_nexus_lists_repo import InventoryItem
     pg_items = [
         InventoryItem(id="a", name="соль", list_type="инвентарь", status="not_started",
-                      category="🕯️ Расходники", user_id=FAKE_NOTION_USER),
+                      category="🕯️ Расходники", user_id=FAKE_USER_ID),
         InventoryItem(id="b", name="лаванда", list_type="инвентарь", status="not_started",
-                      category="🌿 Травы/Масла", user_id=FAKE_NOTION_USER),
+                      category="🌿 Травы/Масла", user_id=FAKE_USER_ID),
         InventoryItem(id="c", name="свеча", list_type="инвентарь", status="not_started",
-                      category="🕯️ Расходники", user_id=FAKE_NOTION_USER),
+                      category="🕯️ Расходники", user_id=FAKE_USER_ID),
     ]
     mock_repo = MagicMock()
     mock_repo.get_list = AsyncMock(return_value=pg_items)
     with patch("miniapp.backend.routes.arcana_inventory._arcana_inv_repo", mock_repo), \
          patch("miniapp.backend.routes.arcana_inventory.get_user_id",
-               AsyncMock(return_value=FAKE_NOTION_USER)):
+               AsyncMock(return_value=FAKE_USER_ID)):
         r = client.get("/api/arcana/inventory")
     assert r.status_code == 200, r.text
     body = r.json()
