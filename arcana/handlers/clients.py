@@ -95,10 +95,12 @@ def _format_contacts(contacts: List[Dict[str, str]]) -> str:
 
 def _card(pending: dict) -> str:
     """Текущее состояние карточки клиента."""
+    bday = pending.get("birthday")
     return (
         f"👤 <b>{pending.get('name') or '—'}</b>\n"
         f"📱 {_format_contacts(pending.get('contacts') or [])}\n"
-        f"💬 {pending.get('request') or '—'}\n"
+        + (f"🎂 {bday}\n" if bday else "")
+        + f"💬 {pending.get('request') or '—'}\n"
         f"📝 {pending.get('notes') or '—'}"
     )
 
@@ -360,9 +362,18 @@ async def handle_client_photo_input(message: Message, image_b64: str, pending: d
         updates["contacts"] = new_contacts  # накапливается
     if data.get("name") and not pending.get("name"):
         updates["name"] = data["name"]
+
+    # #102: ДР — единичное значение. Пусто → пишем сразу. Совпадает → no-op.
+    # Отличается → НЕ перезатираем молча (кривой OCR второго скрина), спрашиваем.
     bday = (data.get("birthday") or "").strip()
-    if bday and not pending.get("birthday"):
-        updates["birthday"] = bday
+    existing_bday = (pending.get("birthday") or "").strip()
+    bday_conflict = ""
+    if bday and bday != existing_bday:
+        if not existing_bday:
+            updates["birthday"] = bday
+        else:
+            bday_conflict = bday
+            updates["birthday_new"] = bday  # держим до ответа на кнопку
 
     if updates:
         await update_pending_client(uid, updates)
@@ -378,6 +389,17 @@ async def handle_client_photo_input(message: Message, image_b64: str, pending: d
         reply_markup=_collecting_kb(uid),
         parse_mode="HTML",
     )
+
+    if bday_conflict:
+        await message.answer(
+            f"📅 На фото другая дата рождения: <b>{bday_conflict}</b> "
+            f"(сейчас <b>{existing_bday}</b>). Обновить?",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
+                InlineKeyboardButton(text="✅ Обновить", callback_data=f"client_bday_yes:{uid}"),
+                InlineKeyboardButton(text="↩️ Оставить", callback_data=f"client_bday_no:{uid}"),
+            ]]),
+            parse_mode="HTML",
+        )
 
 
 async def handle_debts(message: Message, user_id: str = "") -> None:
@@ -513,6 +535,38 @@ async def cb_done(callback: CallbackQuery, user_id: str = "") -> None:
         f"✅ <b>{pending.get('name') or 'Клиент'}</b> сохранён\n\n{_card(pending)}",
         parse_mode="HTML",
     )
+
+
+@router.callback_query(F.data.startswith("client_bday_yes:"))
+async def cb_bday_yes(callback: CallbackQuery, user_id: str = "") -> None:
+    """#102: подтверждение перезаписи дня рождения новым распознанным значением."""
+    uid = int(callback.data.split(":", 1)[1])
+    if uid != callback.from_user.id:
+        return
+    from arcana.pending_clients import get_pending_client, update_pending_client
+    pending = await get_pending_client(uid) or {}
+    new_bday = (pending.get("birthday_new") or "").strip()
+    if not new_bday:
+        await callback.answer("Нечего обновлять")
+        await callback.message.edit_text("📅 Дата рождения не изменена.")
+        return
+    await update_pending_client(uid, {"birthday": new_bday, "birthday_new": None})
+    fresh = await get_pending_client(uid) or {}
+    if fresh.get("page_id"):
+        await _update_notion(fresh["page_id"], fresh)
+    await callback.answer("Обновлено")
+    await callback.message.edit_text(f"📅 Дата рождения обновлена: <b>{new_bday}</b>", parse_mode="HTML")
+
+
+@router.callback_query(F.data.startswith("client_bday_no:"))
+async def cb_bday_no(callback: CallbackQuery, user_id: str = "") -> None:
+    uid = int(callback.data.split(":", 1)[1])
+    if uid != callback.from_user.id:
+        return
+    from arcana.pending_clients import update_pending_client
+    await update_pending_client(uid, {"birthday_new": None})
+    await callback.answer("Оставлено как есть")
+    await callback.message.edit_text("↩️ Дата рождения не изменена.")
 
 
 @router.callback_query(F.data.startswith("client_cancel:"))

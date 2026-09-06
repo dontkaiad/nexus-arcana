@@ -348,6 +348,70 @@ async def test_analyze_image_call_signature_correct():
 
 
 @pytest.mark.asyncio
+async def test_birthday_written_directly_when_absent():
+    """#102: ДР пусто → новое значение пишется сразу, без вопроса."""
+    from arcana.handlers.clients import handle_client_photo_input
+    from arcana.pending_clients import save_pending_client, get_pending_client
+
+    msg = MagicMock(); msg.from_user.id = 72; msg.answer = AsyncMock()
+    await save_pending_client(72, {"step": "collecting", "page_id": "cli-72",
+                                    "name": "Оля", "contacts": [], "request": "", "notes": ""})
+    with patch("arcana.handlers.clients.ask_claude_vision",
+               AsyncMock(return_value='{"contacts":[],"birthday":"1990-05-01"}')), \
+         patch("arcana.handlers.clients._update_notion", AsyncMock(return_value=None)):
+        await handle_client_photo_input(msg, "B64", await get_pending_client(72))
+
+    assert (await get_pending_client(72))["birthday"] == "1990-05-01"
+    assert msg.answer.await_count == 1  # только карточка, вопроса нет
+
+
+@pytest.mark.asyncio
+async def test_birthday_conflict_asks_before_overwrite():
+    """#102: ДР отличается от сохранённого → не перезаписываем, шлём кнопки."""
+    from arcana.handlers.clients import handle_client_photo_input, cb_bday_yes, cb_bday_no
+    from arcana.pending_clients import save_pending_client, get_pending_client
+
+    msg = MagicMock(); msg.from_user.id = 73; msg.answer = AsyncMock()
+    await save_pending_client(73, {"step": "collecting", "page_id": "cli-73",
+                                    "name": "Оля", "birthday": "1990-05-01",
+                                    "contacts": [], "request": "", "notes": ""})
+    with patch("arcana.handlers.clients.ask_claude_vision",
+               AsyncMock(return_value='{"contacts":[],"birthday":"1991-06-02"}')), \
+         patch("arcana.handlers.clients._update_notion", AsyncMock(return_value=None)):
+        await handle_client_photo_input(msg, "B64", await get_pending_client(73))
+
+    state = await get_pending_client(73)
+    assert state["birthday"] == "1990-05-01"          # НЕ перезаписано
+    assert state["birthday_new"] == "1991-06-02"      # отложено до ответа
+    assert msg.answer.await_count == 2                # карточка + вопрос
+    kb = msg.answer.await_args_list[1].kwargs["reply_markup"]
+    cbs = {b.callback_data for row in kb.inline_keyboard for b in row}
+    assert cbs == {"client_bday_yes:73", "client_bday_no:73"}
+
+    # ✅ Обновить
+    cb = MagicMock(); cb.data = "client_bday_yes:73"; cb.from_user.id = 73
+    cb.answer = AsyncMock(); cb.message.edit_text = AsyncMock()
+    with patch("arcana.handlers.clients._update_notion", AsyncMock(return_value=None)):
+        await cb_bday_yes(cb)
+    upd = await get_pending_client(73)
+    assert upd["birthday"] == "1991-06-02" and not upd.get("birthday_new")
+
+
+@pytest.mark.asyncio
+async def test_birthday_conflict_keep_old():
+    from arcana.handlers.clients import cb_bday_no
+    from arcana.pending_clients import save_pending_client, get_pending_client
+
+    await save_pending_client(74, {"step": "collecting", "birthday": "2000-01-01",
+                                    "birthday_new": "2001-02-02"})
+    cb = MagicMock(); cb.data = "client_bday_no:74"; cb.from_user.id = 74
+    cb.answer = AsyncMock(); cb.message.edit_text = AsyncMock()
+    await cb_bday_no(cb)
+    st = await get_pending_client(74)
+    assert st["birthday"] == "2000-01-01" and not st.get("birthday_new")
+
+
+@pytest.mark.asyncio
 async def test_reply_with_photo_starts_confirm_flow():
     from arcana.handlers.client_photo import handle_pending_photo
     from arcana.pending_client_photo import get as get_pending
