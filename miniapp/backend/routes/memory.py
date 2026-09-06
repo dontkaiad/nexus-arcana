@@ -209,7 +209,13 @@ async def get_memory(
     budget_mems: list[Memory] = []
     for mem in raw:
         if (mem.key or "").lower().startswith(_BUDGET_KEY_PREFIXES):
-            budget_mems.append(mem)   # → сгруппированный вид «💰 Лимит», не плоский список
+            # Сгруппированный вид «💰 Лимит» ЗЕРКАЛИТ бюджет, а бюджет
+            # (core/budget.py) считает только is_current=True. Деактивированные
+            # бюджет-строки (убраны из плана в _save_budget_plan) сюда не идут
+            # даже при include_inactive — тот флаг только про плоский личный
+            # список, не про бюджет.
+            if mem.is_current:
+                budget_mems.append(mem)
             continue
         c = mem.category or None
         if c in EXCLUDED_CATEGORIES:

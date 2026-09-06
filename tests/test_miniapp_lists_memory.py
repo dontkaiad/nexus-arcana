@@ -674,6 +674,27 @@ def test_memory_limit_category_grouped(client):
     assert groups["📥 Доход"]["items"][0]["name"] == "зарплата"
 
 
+def test_memory_limit_view_excludes_deactivated_budget_rows_even_with_include_inactive(client):
+    """Сгруппированный «💰 Лимит» зеркалит бюджет — бюджет (core/budget.py)
+    считает только is_current=True. Деактивированные (убранные из плана в
+    _save_budget_plan) строки не должны просачиваться в этот вид даже при
+    include_inactive=1 — тот флаг только про плоский личный список."""
+    mems = [
+        _mem_pg("cur", "постоянно: Аренда (🏠 Жильё) — 20000₽/мес",
+                cat="💰 Лимит", key="постоянно_жильё_аренда"),
+        Memory(id="dead", fact="постоянно: Старый зал — 5000₽/мес", category="💰 Лимит",
+               key="постоянно_прочее_зал", is_current=False),
+    ]
+    with patch("miniapp.backend.routes.memory._memory_repo.find_recent",
+               AsyncMock(return_value=mems)), \
+         patch("miniapp.backend.routes.memory.get_user_id",
+               AsyncMock(return_value=FAKE_USER_ID)):
+        data = client.get("/api/memory" + _LIMIT_CAT_Q + "&include_inactive=1").json()
+
+    names = {it["name"] for g in data["groups"] for it in g["items"]}
+    assert not any("Старый зал" in n for n in names)
+
+
 def test_memory_limit_category_in_category_list(client):
     """«💰 Лимит» всегда присутствует в списке категорий (спец-таб)."""
     with patch("miniapp.backend.routes.memory._memory_repo.find_recent",
