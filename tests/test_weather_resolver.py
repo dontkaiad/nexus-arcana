@@ -10,8 +10,8 @@ from unittest.mock import AsyncMock, patch
 from core.repos.pg_memory_repo import Memory
 
 
-def _mem(fact, key="", updated_at="", value=""):
-    return Memory(id="1", fact=fact, key=key, value=value, updated_at=updated_at)
+def _mem(fact, key="", updated_at=""):
+    return Memory(id="1", fact=fact, key=key, updated_at=updated_at)
 
 
 @pytest.mark.asyncio

@@ -162,7 +162,7 @@ def search_memory_semantic(
             where_extra += " AND user_notion_id = :uid"
             params["uid"] = user_notion_id
         sql = sa.text(f"""
-            SELECT id, fact_text, key_name, value_text, category, scope, source,
+            SELECT id, fact_text, key_name, category, scope, source,
                    related_to, is_current, is_archived, user_notion_id,
                    created_at, updated_at,
                    1 - (embedding <=> CAST(:q AS vector)) AS score
@@ -199,7 +199,6 @@ def search_memory_semantic(
                 id=str(d["id"]),
                 fact=d.get("fact_text") or "",
                 key=d.get("key_name") or "",
-                value=d.get("value_text") or "",
                 category=d.get("category") or "",
                 scope=d.get("scope") or "global",
                 source=d.get("source") or "manual",

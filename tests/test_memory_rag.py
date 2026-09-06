@@ -105,7 +105,7 @@ def test_index_memories_batch_empty_input():
 
 def _row(id_=1, fact="факт", category="🏠 Быт", score=0.9):
     return {
-        "id": id_, "fact_text": fact, "key_name": "k", "value_text": "",
+        "id": id_, "fact_text": fact, "key_name": "k",
         "category": category, "scope": "global", "source": "auto",
         "related_to": "", "is_current": True, "is_archived": False,
         "user_notion_id": "", "created_at": None, "updated_at": None,

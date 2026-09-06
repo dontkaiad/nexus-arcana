@@ -47,7 +47,6 @@ class Memory:
     id: str
     fact: str
     key: str = ""
-    value: str = ""
     category: str = ""
     scope: str = "global"    # "global" | "nexus" | "arcana"
     source: str = "manual"
@@ -70,7 +69,6 @@ def _row_to_memory(row) -> Memory:
         id=str(row.id),
         fact=row.fact_text or "",
         key=row.key_name or "",
-        value=row.value_text or "",
         category=row.category or "",
         scope=row.scope or "global",
         source=row.source or "manual",

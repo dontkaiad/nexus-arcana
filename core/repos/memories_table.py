@@ -14,7 +14,6 @@ memories = Table(
     Column("notion_id",      Text,       unique=True),
     Column("fact_text",      Text,       nullable=False),
     Column("key_name",       Text,       nullable=False, server_default=text("''")),
-    Column("value_text",     Text,       nullable=False, server_default=text("''")),
     Column("category",       Text,       nullable=False, server_default=text("''")),
     # scope: "global" | "nexus" | "arcana"  (replaces Бот select)
     Column("scope",          Text,       nullable=False, server_default=text("'global'")),

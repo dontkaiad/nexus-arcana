@@ -356,7 +356,7 @@ async def _resolve_city_from_memory(tg_id: int, user_notion_id: str) -> Optional
     for key in (f"city_{tg_id}", f"location_{tg_id}"):
         mems = await _memory_repo.find_by_exact_key(key, user_notion_id)
         if mems:
-            raw = mems[0].value or mems[0].fact
+            raw = mems[0].fact
             city = _extract_city_from_text(raw) or _normalize_city(raw)
             if city:
                 logger.info("resolve_city[%s]: override key=%s → %s", tg_id, key, city)
@@ -408,7 +408,7 @@ async def weather_debug(tg_id: int = Depends(current_user_id)) -> dict:
     user_notion_id = (await get_user_notion_id(tg_id)) or ""
     resolved = await _resolve_city_from_memory(tg_id, user_notion_id)
     tz_mems = await _memory_repo.find_by_exact_key(f"tz_{tg_id}", user_notion_id)
-    tz_raw = (tz_mems[0].value or tz_mems[0].fact) if tz_mems else ""
+    tz_raw = tz_mems[0].fact if tz_mems else ""
     return {
         "tg_id": tg_id,
         "user_notion_id": user_notion_id,
@@ -430,7 +430,7 @@ async def get_weather(tg_id: int = Depends(current_user_id)) -> dict:
         source = "memory"
         if not city:
             tz_mems = await _memory_repo.find_by_exact_key(f"tz_{tg_id}", user_notion_id)
-            tz_raw = (tz_mems[0].value or tz_mems[0].fact) if tz_mems else ""
+            tz_raw = tz_mems[0].fact if tz_mems else ""
             tz = (tz_raw or "Europe/Moscow").strip()
             city = TZ_TO_CITY.get(tz, "Moscow")
             source = f"tz_fallback({tz})"

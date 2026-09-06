@@ -25,7 +25,6 @@ def _make_engine():
             "notion_id TEXT UNIQUE, "
             "fact_text TEXT NOT NULL DEFAULT '', "
             "key_name TEXT NOT NULL DEFAULT '', "
-            "value_text TEXT NOT NULL DEFAULT '', "
             "category TEXT NOT NULL DEFAULT '', "
             "scope TEXT NOT NULL DEFAULT 'global', "
             "source TEXT NOT NULL DEFAULT 'manual', "
