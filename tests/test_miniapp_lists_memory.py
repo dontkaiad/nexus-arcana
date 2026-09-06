@@ -591,6 +591,24 @@ def test_memory_excludes_tz_and_city_system_keys(client):
     assert ids == {"m1"}
 
 
+def test_memory_excludes_goal_keys(client):
+    """цель_{имя} хранится под категорией «💰 Лимит» (Haiku), но экран целей —
+    Финансы → Цели, не Память. Не должна протекать сырой карточкой в плоский
+    список (#6)."""
+    mems = [
+        _mem_pg("m1", "любит чай", cat="🛒 Предпочтения", key="chai"),
+        _mem_pg("m2", "цель: 📱 Телефон — 100000₽ · откладываю 0₽/мес",
+                cat="💰 Лимит", key="цель_телефон"),
+    ]
+    with patch("miniapp.backend.routes.memory._memory_repo.find_by_category",
+               AsyncMock(return_value=mems)), \
+         patch("miniapp.backend.routes.memory.get_user_id",
+               AsyncMock(return_value=FAKE_USER_ID)):
+        r = client.get("/api/memory")
+    assert r.status_code == 200
+    assert {i["id"] for i in r.json()["items"]} == {"m1"}
+
+
 def test_memory_cat_filter(client):
     mems = [
         _mem_pg("m1", "A", cat="🛒 Предпочтения"),

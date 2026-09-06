@@ -1,9 +1,11 @@
 # MEMORY — memory data model
 
-> **Status: AS-BUILT, code conforms to `b9d3367` (drops `value_text` #146, `notion_id` #149; `user_notion_id`→`user_id` #144).** Notion→PostgreSQL
-> migration is complete; the semantic-search layer (ADR-0006 pgvector
-> backend, applied to memory by ADR-0020) has landed. Update this spec in
-> the same PR that changes the memory schema or search strategy.
+> **Status: AS-BUILT, code conforms to `ffd99ef`.** Notion→PostgreSQL
+> migration is complete. Schema: `value_text` dropped (#146), `notion_id`
+> dropped (#149), `user_notion_id`→`user_id` (#144). Search: the semantic
+> layer (ADR-0006 pgvector backend, applied to memory by ADR-0020) plus a
+> Haiku reranker over its candidates (ADR-0021). Update this spec in the
+> same PR that changes the memory schema or search strategy.
 
 > Source of truth is the code, not Notion specs. Every statement is
 > verifiable against the files in the "Verify against code" section at the
@@ -21,18 +23,28 @@ What it holds (categories, `core/memory.py:CATEGORIES`, 15 items):
 `🏠 Быт`, `🔄 Паттерн`, `💡 Инсайт`, `🔮 Практика`, `🐾 Коты`,
 `💰 Лимит`, `🔒 Постоянные`, `📥 Доход`, `📋 Долги`, `🎯 Цели`.
 
+Of these, only the first eleven are real stored categories. `save_memory`
+writes every budget fact with `category="💰 Лимит"`; `🔒 Постоянные` /
+`📥 Доход` / `🎯 Цели` are *display labels* that `core/budget.py` derives
+from the key prefix (`постоянно_` / `income_` / `цель_`) on read — no row is
+stored with those categories. `📋 Долги` is dead in `memories`: a `долг_`
+fact from `save_memory` is diverted to the `debts` table
+(`_save_debt_from_memory`, see Write) so the budget's single debt reader
+(`pg_debts_repo`) sees it.
+
 Boundary "memory about the user" vs "domain knowledge":
 - Memory — about the user and related people/objects (preferences, patterns,
   ADHD adaptations, notes about people and cats).
 - Domain knowledge (the Arcana grimoire, Tarot cards, etc.) — NOT memory, it
   lives in its own domain tables. There are no domain entities in the memory
   code.
-- Budget configuration (limits/income/obligatory/goals/debts) physically
-  lives in the same `memories` table under category `💰 Лимит` and keys with
-  prefixes `лимит_`/`постоянно_`/`цель_`/`долг_`/`income_`, read via a
-  separate path (`core/budget.py`). ADR-0005 marks this as a "parked
-  follow-up" — a candidate for extraction into the finance module; in the
-  code it is NOT extracted yet.
+- Budget configuration (limits/income/obligatory/goals) physically lives in
+  the same `memories` table under category `💰 Лимит` and keys with prefixes
+  `лимит_`/`постоянно_`/`цель_`/`income_`, read via a separate path
+  (`core/budget.py`). Debts are the exception — they were moved out to the
+  `debts` table (`b0116c6`); a `долг_` fact never reaches `memories`. ADR-0005
+  marks the rest as a "parked follow-up" — a candidate for extraction into
+  the finance module; in the code it is NOT extracted yet.
 
 ## Schema (as built, from the migration)
 
@@ -108,9 +120,13 @@ All sync SQL is wrapped in `asyncio.to_thread`.
    through already-saved records (regex patterns for nicknames/aliases,
    depth ≤3, cycle protection).
 5. Write:
+   - `ключ` starts with `долг_` → **not written to `memories`**:
+     `_save_debt_from_memory` parses amount/deadline out of the fact and
+     `pg_debts_repo.upsert(user_id, name, "i_owe", …)`. Keeps the budget's
+     debt reader (`pg_debts_repo` only) in sync (`b0116c6`).
    - `category == "💰 Лимит"` and `ключ` present → `_repo.upsert` (find by
-     `key_name`+`category` among non-archived, update; else create).
-     Returns `(id, was_updated)`.
+     `key_name` + owner among non-archived, update; else create — key match
+     is category-independent since `a730a43`/#194). Returns `(id, was_updated)`.
    - otherwise → `_repo.add` (always INSERT a new row).
 6. Side-effect: for category `🦋 СДВГ` and a new record — `_get_adhd_tip`
    (Sonnet, `config.model_sonnet`, temperature=0.7) sends a tip.
@@ -139,8 +155,8 @@ checkout) must not roll back the primary write.
 
 `PgMemoryRepo.update_fields(memory_id, fact=, category=, related_to=)` is a
 point-update by `id` (distinct from `upsert`, which matches by
-`key_name`+`category`) used by the reply-correction path; it re-embeds the
-row's current values the same way.
+`key_name` + owner, category-independent since #194) used by the
+reply-correction path; it re-embeds the row's current values the same way.
 
 ### Reply corrections (#188)
 
@@ -174,28 +190,45 @@ Two modes:
    `scope` (match OR `global`) and `user_id`; sorted by
    `created_at desc`.
 
-### Semantic fallback (ADR-0020)
+### Semantic fallback (ADR-0020) + Haiku rerank (ADR-0021)
 
 `search`/`_find_pages_by_hint` results are ILIKE-only by construction (see
 above) — semantics is layered on top by the *caller*, in
 `core/memory.py:_semantic_search_memory`, not inside the repo query.
-Contract: **ILIKE-first, semantic only as a thin fallback** — a semantic
-query (`core/memory_rag.py:search_memory_semantic`, Voyage cosine over
-`embedding`) only fires when the ILIKE result has fewer than 3 rows,
-merged after the ILIKE hits and deduped by id, capped at the caller's page
-size. Both `search_memory` (`/memory`) and `get_memories_for_context`
-(prompt injection, via `_find_pages_by_hint`) use this; `_resolve_alias`
-opts out entirely (`use_semantic=False` — alias recall must stay exact,
-not "closest match"), as do the destructive flows `deactivate_memory` and
-`delete_memory` (they act on every/the-only found row without
-confirmation, so a nearest-neighbor false positive would silently
+Contract: **ILIKE-first, semantic only as a thin fallback**. The pipeline
+when the ILIKE result has fewer than 3 rows:
+
+1. `core/memory_rag.py:search_memory_semantic` — Voyage query embedding,
+   pgvector cosine over `embedding`, returns `DEFAULT_TOP_K` (10) nearest
+   candidates (a wide net — top-1 by cosine distance is not always top-1 by
+   meaning on short facts).
+2. `core/memory_rag.py:rerank_memory_candidates` — **Haiku**
+   (`claude-haiku-4-5-20251001`, temp 0) is handed the query and the
+   candidate lines (`id` / `факт` / `категория` / `связь`) and returns a
+   JSON id-list of the ones that are actually relevant. Rationale
+   (ADR-0021): a general-purpose embedding cannot tell «луна»-the-word from
+   «Луна»-the-cat's-name; the category/relation give Haiku the context the
+   vector lacks.
+3. Merge: ILIKE hits first, then the rerank-approved semantic rows deduped
+   by id, capped at the caller's page size.
+
+Graceful at every step — Voyage down / Haiku error / bad JSON / rerank
+culls everything to zero → the original ILIKE list is returned unchanged,
+no placeholder message.
+
+Callers of the fallback: `search_memory` (`/memory`) and
+`get_memories_for_context` (prompt injection, via `_find_pages_by_hint`).
+Opted out (`use_semantic=False`): `_resolve_alias` (alias recall must stay
+exact, not "closest match") and the destructive flows `deactivate_memory` /
+`delete_memory` (they act on every / the-only found row without
+confirmation — a nearest-neighbor false positive would silently
 deactivate/archive the wrong fact).
 
-`search_memory_semantic` accepts an optional `min_score` cosine-similarity
-cutoff, but **no caller passes one yet** (#185 open) — every call today
-returns its raw top-k nearest neighbors, and logs the score distribution
-instead of filtering, so a real cutoff can be picked from logged
-production data rather than guessed.
+`search_memory_semantic` still accepts an optional `min_score` cosine
+cutoff and no caller passes one — with the Haiku reranker now doing the
+relevance filtering, a raw distance threshold is redundant; `min_score`
+stays as a coarse pre-filter option and the score distribution is still
+logged (#185).
 
 Derived reads:
 - `find_by_category(category, is_current, scope, user_id, page_size)`
@@ -226,7 +259,10 @@ tokenizes the hint (stop words + naive stemming `_normalize_word`) → `search`.
 - Prompt context: `get_memories_for_context(user_id,
   keywords, bot_label, max_results)` — filters by scope (keeps a scope
   match OR `global`), returns a text block "Контекст из памяти:". Called by
-  `arcana/handlers/sessions.py`, `clients.py`, `rituals.py`.
+  `arcana/handlers/sessions.py`, `clients.py`, `rituals.py`. Note: the
+  `user_id` argument is **not** applied to the underlying query — memory
+  search across the whole stack is currently owner-wide, not user-scoped
+  (see #202).
 - Auto-save: `core/location.py:set_user_location` (`tz_`/`city_` on a
   resolved location) — the sole location writer (ADR-0016). It used to be
   double-called from `core/classifier.py`'s `timezone_update` branch
@@ -239,17 +275,45 @@ tokenizes the hint (stop words + naive stemming `_normalize_word`) → `search`.
 - Reply corrections: `core/reply_update.py` (`page_type="memory"`),
   `nexus/handlers/reply_update.py`, `arcana/handlers/reply_update.py`.
 - Mini App (PG-native, `PgMemoryRepo` directly):
-  `miniapp/backend/routes/memory.py` — `GET /api/memory` (excludes
-  budget/ADHD categories) and `GET /api/memory/adhd` (grouping
-  patterns/strategies/triggers/specifics + Sonnet profile);
-  `miniapp/.../weather.py` (timezone via `find_by_exact_key`).
+  - `GET /api/memory` (`routes/memory.py`) — actual rows only
+    (`is_current=True`). Hides the budget/ADHD categories
+    (`EXCLUDED_CATEGORIES` — own screens) and system / finance-only keys
+    (`EXCLUDED_KEY_PREFIXES` = `tz_` / `city_` / `impulse_windfall_` /
+    `цель_` — the last because goals are stored under `💰 Лимит`, not
+    `🎯 Цели`, so the category filter misses them; #197, #6). Budget-prefixed
+    rows
+    (`income_`/`постоянно_`/`разовый_`/`лимит_`) are pulled out of the flat
+    list into a grouped `💰 Лимит` special view
+    (`_group_budget_memories`, #49b) returned only when `cat=💰 Лимит`.
+    `_serialize_memory` → `{id, text, cat, related, key, date}` (`date` is
+    `created_at[:10]`; the front decides whether to render it, #6). `q` is a
+    case-insensitive contains over text + key + related (aligned with the
+    bot's `_find_pages` after `8f3622d`), **ILIKE only — no semantic
+    fallback in the Mini App**.
+  - `GET /api/memory/adhd` (`routes/memory.py`) — grouping
+    patterns/strategies/triggers/specifics + Sonnet profile.
+  - `POST /api/memory` (`routes/writes.py`) — create a row via
+    `PgMemoryRepo.add` (no Haiku parse — fields come straight from the FAB
+    form). Unlike task creation (#72) it sends no bot notification (#6).
+  - `DELETE /api/memory/{id}` (`routes/writes.py`, #193) — ownership check
+    (404 on missing/foreign, never 403), then a real SQL `DELETE` via
+    `PgMemoryRepo.delete` (**hard delete, not archive** — differs from the
+    bot's `delete_memory`, which sets `is_archived`). Removing the row also
+    removes its `embedding` from semantic search in the same statement. No
+    deactivate (`is_current=False`) endpoint — that toggle is bot-only.
+  - `routes/weather.py` — timezone via `find_by_exact_key`.
 
 ### Model routing (from the code, not from memory)
-- Haiku `claude-haiku-4-5-20251001` — `_parse_fact` (parsing a fact on save).
+- Haiku `claude-haiku-4-5-20251001` — `_parse_fact` (parsing a fact on
+  save) and `core/memory_rag.py:rerank_memory_candidates` (relevance filter
+  over the semantic-search candidates, ADR-0021).
 - Sonnet `claude-sonnet-4-6` (`config.model_sonnet`) —
   `core/memory.py:_get_adhd_tip` (tip when saving an ADHD fact) and
   `miniapp/backend/routes/memory.py:_generate_adhd_profile` (ADHD profile).
-- Read/search/deactivate/archive — no LLM (pure SQL).
+- Voyage `voyage-4-lite` — embedding of facts on write and of the query on
+  semantic search (`core/memory_rag.py`, client shared with `core/rag.py`).
+- Read/search/deactivate/archive/delete — no LLM (pure SQL), except the
+  Haiku reranker on the semantic fallback path above.
 
 ## Key decisions and trade-offs (ADR-0005)
 
@@ -312,7 +376,8 @@ Verify against code:
   `_parse_fact` (Haiku), `_get_adhd_tip` (Sonnet), `CATEGORIES`,
   `_semantic_search_memory`
 - `core/memory_rag.py` — `index_memory`/`index_memories_batch`/
-  `search_memory_semantic` (Voyage + pgvector, reuses `core/rag.py`'s client)
+  `search_memory_semantic` + `rerank_memory_candidates` (Voyage + pgvector
+  + Haiku rerank, reuses `core/rag.py`'s client)
 - `core/reply_update.py` — `page_type="memory"` parse/apply
 - `nexus/handlers/reply_update.py`, `arcana/handlers/reply_update.py` —
   reply dispatch, `_move_memory_to_notes` (Nexus only)
@@ -326,7 +391,9 @@ Verify against code:
 - `arcana/handlers/sessions.py`, `clients.py`, `rituals.py` —
   `get_memories_for_context`
 - `miniapp/backend/routes/memory.py` — `GET /api/memory`, `/api/memory/adhd`
+- `miniapp/backend/routes/writes.py` — `POST /api/memory`, `DELETE /api/memory/{id}` (#193)
 - `miniapp/backend/routes/weather.py` — timezone via `find_by_exact_key`
 - `core/config.py` — `MODEL_HAIKU`, `MODEL_SONNET` (`claude-sonnet-4-6`)
 - `docs/CASES/0005-memory-store.md` — ADR (code diverges: see the section above)
 - `docs/CASES/0020-memory-rag.md` — ADR for the semantic layer
+- `docs/CASES/0021-memory-rag-reranking.md` — ADR for the Haiku reranker

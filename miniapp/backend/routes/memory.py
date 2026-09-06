@@ -139,7 +139,12 @@ def _group_budget_memories(mems: list[Memory]) -> list[dict]:
 # impulse_windfall_бонус_{период} (nexus/handlers/finance.py:
 # _distribute_windfall_income) — тот же случай: внутренний счётчик потолка
 # бонуса в Импульсивные, не факт для показа Кай.
-EXCLUDED_KEY_PREFIXES = ("tz_", "city_", "impulse_windfall_")
+# цель_{имя} — цели живут под категорией «💰 Лимит» (Haiku), но их экран —
+# Финансы → Цели (/api/finance?view=goals), не Память. Ключ не попадает ни в
+# _BUDGET_KEY_PREFIXES (сгруппированный вид), ни в EXCLUDED_CATEGORIES
+# (хранятся как «💰 Лимит», не «🎯 Цели») — без этой строки протекали сырой
+# карточкой «цель: … — 100000₽» в плоский список Памяти.
+EXCLUDED_KEY_PREFIXES = ("tz_", "city_", "impulse_windfall_", "цель_")
 
 # #49: канонический список категорий (из core/memory.py CATEGORIES,
 # без бюджетных/ADHD). Возвращаем всегда, чтобы фронт показывал все табы,
@@ -171,6 +176,7 @@ def _serialize_memory(mem: Memory) -> dict:
         "cat": mem.category or None,
         "related": mem.related_to or None,
         "key": mem.key or None,
+        "date": mem.date or None,   # created_at[:10]; front decides whether to show (#6)
     }
 
 
