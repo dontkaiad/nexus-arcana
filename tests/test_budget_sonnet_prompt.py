@@ -261,7 +261,7 @@ async def test_sonnet_context_limit_categories_only_8_no_leak():
          patch.object(finance, "_get_payday", AsyncMock(return_value=1)), \
          patch.object(finance._repo, "query_records", AsyncMock(return_value=[])), \
          patch.object(finance, "_budget_get", lambda uid: {}):
-        raw = await finance._build_sonnet_input(uid=1, user_notion_id="u")
+        raw = await finance._build_sonnet_input(uid=1, user_id="u")
 
     ctx = _json.loads(raw)
     assert ctx["budget_limit_categories"] == list(_BUDGET_VARIABLE_CATS)

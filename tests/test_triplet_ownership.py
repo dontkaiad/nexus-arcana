@@ -1,14 +1,14 @@
 """tests/test_triplet_ownership.py — issue #108.
 
-_resolve_triplet_page(short_id, user_notion_id) is the shared chokepoint used
+_resolve_triplet_page(short_id, user_id) is the shared chokepoint used
 by every triplet-correct/-remove callback (and the reply-edit path). Callers
-already resolve the acting user's user_notion_id and pass it through, on the
+already resolve the acting user's user_id and pass it through, on the
 assumption that a mismatch means "not found" — but the underlying
 find_by_short_id → find_by_id query only ever filtered by id, never by
 owner, so any user who could produce/guess another user's short_id could
 resolve (and then edit/archive) a triplet that wasn't theirs.
 
-_resolve_triplet_page now checks the resolved entry's own user_notion_id
+_resolve_triplet_page now checks the resolved entry's own user_id
 against the caller's before returning it.
 """
 from __future__ import annotations
@@ -24,7 +24,7 @@ from arcana.repos.sessions_repo import TripletEntry
 def _entry(owner: str) -> TripletEntry:
     return TripletEntry(
         id="1", question="q", cards="c", interpretation="i", deck="Уэйт",
-        session_name="", client_id=None, user_notion_id=owner,
+        session_name="", client_id=None, user_id=owner,
     )
 
 

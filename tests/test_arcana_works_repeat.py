@@ -53,7 +53,7 @@ def engine():
             "title TEXT NOT NULL, deadline TIMESTAMP, reminder TIMESTAMP, "
             "category TEXT, priority_id INTEGER, status_id INTEGER, client_id INTEGER, "
             "repeat_id INTEGER, day_of_week_id INTEGER, repeat_time TEXT, "
-            "user_notion_id TEXT, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, "
+            "user_id TEXT, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, "
             "updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)"
         ))
     with eng.begin() as conn:
@@ -117,7 +117,7 @@ async def test_create_and_read_recurring_work(engine):
     with patch("arcana.repos.pg_works_repo.get_engine", return_value=engine):
         wid = await repo.create(
             title="Чистка чакр", priority="Важно", category="✨ Ритуал",
-            repeat="Ежедневно", repeat_time="08:00", user_notion_id="u1",
+            repeat="Ежедневно", repeat_time="08:00", user_id="u1",
         )
         w = await repo.find_by_id(wid)
     assert w.repeat == "Ежедневно"
@@ -130,7 +130,7 @@ async def test_set_repeat_fields(engine):
     from arcana.repos.pg_works_repo import PgWorksRepo
     repo = PgWorksRepo()
     with patch("arcana.repos.pg_works_repo.get_engine", return_value=engine):
-        wid = await repo.create(title="Пост", priority="Можно потом", user_notion_id="u1")
+        wid = await repo.create(title="Пост", priority="Можно потом", user_id="u1")
         ok = await repo.set_repeat_fields(wid, "Еженедельно", day_of_week="Пн")
         w = await repo.find_by_id(wid)
     assert ok is True
@@ -143,7 +143,7 @@ async def test_non_recurring_work_defaults_to_net(engine):
     from arcana.repos.pg_works_repo import PgWorksRepo
     repo = PgWorksRepo()
     with patch("arcana.repos.pg_works_repo.get_engine", return_value=engine):
-        wid = await repo.create(title="Закупить свечи", user_notion_id="u1")
+        wid = await repo.create(title="Закупить свечи", user_id="u1")
         w = await repo.find_by_id(wid)
     assert w.repeat == "Нет"
 

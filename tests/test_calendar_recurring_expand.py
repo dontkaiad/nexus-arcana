@@ -49,7 +49,7 @@ def _pg_task(*, title="Зарядка", repeat_select=None, repeat_time="",
         created_at=created or "",
         priority="",
         category="",
-        user_notion_id=FAKE_NOTION,
+        user_id=FAKE_NOTION,
     )
 
 
@@ -57,7 +57,7 @@ def _patches(tasks):
     return [
         patch("miniapp.backend.routes.calendar._tasks_repo.active",
               AsyncMock(return_value=tasks)),
-        patch("miniapp.backend.routes.calendar.get_user_notion_id",
+        patch("miniapp.backend.routes.calendar.get_user_id",
               AsyncMock(return_value=FAKE_NOTION)),
         patch("miniapp.backend._helpers.get_user_tz",
               AsyncMock(return_value=3)),
@@ -177,9 +177,9 @@ def test_fetch_tasks_in_month_pg_native_single_query():
     """
     import asyncio
     tasks = [
-        PgTask(id="a", title="A", user_notion_id="u1"),
-        PgTask(id="b", title="B", user_notion_id="u1"),
-        PgTask(id="c", title="C", user_notion_id="u1"),
+        PgTask(id="a", title="A", user_id="u1"),
+        PgTask(id="b", title="B", user_id="u1"),
+        PgTask(id="c", title="C", user_id="u1"),
     ]
     with patch("miniapp.backend.routes.calendar._tasks_repo.active",
                AsyncMock(return_value=tasks)) as mock_active:

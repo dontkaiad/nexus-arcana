@@ -12,10 +12,10 @@ async def get_user_tz(tg_id: int) -> int:
     return await _get(tg_id)
 
 
-async def handle_tz_command(message: Message, user_notion_id: str = "") -> None:
+async def handle_tz_command(message: Message, user_id: str = "") -> None:
     """Команда /tz — одинакова для Nexus и Arcana.
     /tz UTC+5 или /tz Екатеринбург
     """
     from nexus.handlers.tasks import _update_user_tz
     text = (message.text or "").replace("/tz", "").strip()
-    await _update_user_tz(message, text, user_notion_id=user_notion_id)
+    await _update_user_tz(message, text, user_id=user_id)

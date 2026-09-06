@@ -37,7 +37,7 @@ def _pg_repo():
 
 class WorksRepo:
     async def list_open(self, user_id: str = "") -> List[Work]:
-        return await _pg_repo().list_open(user_notion_id=user_id)
+        return await _pg_repo().list_open(user_id=user_id)
 
     async def mark_done(self, work_id: str) -> bool:
         return await _pg_repo().mark_done(work_id)

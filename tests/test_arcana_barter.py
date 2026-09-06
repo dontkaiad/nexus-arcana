@@ -83,7 +83,7 @@ def test_clients_payload_has_type_and_barter_count(client):
     with patch("miniapp.backend.routes.arcana_clients._clients_repo", mock_cl), \
          patch("miniapp.backend.routes.arcana_clients._sessions_repo", mock_sess), \
          patch("miniapp.backend.routes.arcana_clients._rituals_repo", mock_rit), \
-         patch("miniapp.backend.routes.arcana_clients.get_user_notion_id",
+         patch("miniapp.backend.routes.arcana_clients.get_user_id",
                AsyncMock(return_value=FAKE_NOTION)):
         r = client.get("/api/arcana/clients")
 
@@ -141,7 +141,7 @@ def test_sessions_list_payload_has_client_type_and_has_barter(client):
          patch("miniapp.backend.routes.arcana_sessions._clients_repo", mock_cl), \
          patch("miniapp.backend.routes.arcana_sessions.today_user_tz",
                AsyncMock(return_value=(today, 3))), \
-         patch("miniapp.backend.routes.arcana_sessions.get_user_notion_id",
+         patch("miniapp.backend.routes.arcana_sessions.get_user_id",
                AsyncMock(return_value=FAKE_NOTION)):
         r = client.get("/api/arcana/sessions")
 

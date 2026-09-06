@@ -29,7 +29,7 @@ def _make_engine():
         conn.execute(sa.text(
             "CREATE TABLE debts ("
             "id INTEGER PRIMARY KEY AUTOINCREMENT, "
-            "user_notion_id TEXT NOT NULL DEFAULT '', "
+            "user_id TEXT NOT NULL DEFAULT '', "
             "name TEXT NOT NULL, "
             "kind TEXT NOT NULL DEFAULT 'i_owe', "
             "amount REAL NOT NULL, "
@@ -51,7 +51,7 @@ async def test_save_debt_calls_upsert_i_owe():
     from nexus.handlers.finance import _save_debt
 
     with patch.object(drmod._repo, "upsert", new_callable=AsyncMock) as mock_upsert:
-        await _save_debt("Аня", 5000, "июнь 2026", user_notion_id="uid1")
+        await _save_debt("Аня", 5000, "июнь 2026", user_id="uid1")
 
     mock_upsert.assert_called_once()
     args, kwargs = mock_upsert.call_args
@@ -71,7 +71,7 @@ async def test_partial_debt_payment_returns_int_new_amount():
 
     with patch.object(drmod._repo, "reduce_amount",
                       new_callable=AsyncMock, return_value=(7000.0, False, 0.0)):
-        result = await _partial_debt_payment("Аня", 3000, user_notion_id="uid1")
+        result = await _partial_debt_payment("Аня", 3000, user_id="uid1")
 
     assert result == (7000, 0.0)
 
@@ -83,7 +83,7 @@ async def test_partial_debt_payment_zero_when_closed():
 
     with patch.object(drmod._repo, "reduce_amount",
                       new_callable=AsyncMock, return_value=(0.0, True, 0.0)):
-        result = await _partial_debt_payment("Аня", 99999, user_notion_id="uid1")
+        result = await _partial_debt_payment("Аня", 99999, user_id="uid1")
 
     assert result == (0, 0.0)
 
@@ -96,7 +96,7 @@ async def test_partial_debt_payment_propagates_overpaid():
 
     with patch.object(drmod._repo, "reduce_amount",
                       new_callable=AsyncMock, return_value=(0.0, True, 2000.0)):
-        result = await _partial_debt_payment("Аня", 7000, user_notion_id="uid1")
+        result = await _partial_debt_payment("Аня", 7000, user_id="uid1")
 
     assert result == (0, 2000.0)
 
@@ -108,7 +108,7 @@ async def test_partial_debt_payment_none_if_not_found():
 
     with patch.object(drmod._repo, "reduce_amount",
                       new_callable=AsyncMock, return_value=None):
-        result = await _partial_debt_payment("Несуществующий", 100, user_notion_id="uid1")
+        result = await _partial_debt_payment("Несуществующий", 100, user_id="uid1")
 
     assert result is None
 
@@ -122,7 +122,7 @@ async def test_deactivate_debt_propagates_bool():
 
     with patch.object(drmod._repo, "deactivate",
                       new_callable=AsyncMock, return_value=True) as mock_deact:
-        result = await _deactivate_debt("Аня", user_notion_id="uid1")
+        result = await _deactivate_debt("Аня", user_id="uid1")
 
     assert result is True
     mock_deact.assert_called_once_with("uid1", "i_owe", "Аня")
@@ -138,7 +138,7 @@ async def test_load_budget_data_uses_list_active_for_debts():
     from core.budget import load_budget_data
 
     fake_debts = [
-        Debt(id="1", user_notion_id="uid1", name="Банк", kind="i_owe",
+        Debt(id="1", user_id="uid1", name="Банк", kind="i_owe",
              amount=120000.0, deadline="декабрь 2026",
              strategy="лавина", monthly_payment=15000.0,
              is_active=True, created_at="", updated_at=""),
@@ -173,7 +173,7 @@ async def test_save_debt_visible_in_load_budget_data():
 
     with patch.object(drmod, "_get_engine", return_value=eng):
         with patch.object(mrmod._repo, "find_by_key_prefixes", AsyncMock(return_value=[])):
-            await _save_debt("Аня", 5000, "июль 2026", user_notion_id="uid_cons")
+            await _save_debt("Аня", 5000, "июль 2026", user_id="uid_cons")
             data = await load_budget_data("uid_cons")
 
     assert len(data["долги"]) == 1
@@ -197,8 +197,8 @@ async def test_deactivated_debt_visible_in_load_closed_budget():
 
     with patch.object(drmod, "_get_engine", return_value=eng):
         with patch.object(fin_mod._mem_repo, "find_by_category", AsyncMock(return_value=[])):
-            await _save_debt("Петя", 10000, "октябрь 2026", user_notion_id="uid_cl")
-            await _deactivate_debt("Петя", user_notion_id="uid_cl")
+            await _save_debt("Петя", 10000, "октябрь 2026", user_id="uid_cl")
+            await _deactivate_debt("Петя", user_id="uid_cl")
             result = await _load_closed_budget("uid_cl")
 
     assert len(result["долги"]) == 1

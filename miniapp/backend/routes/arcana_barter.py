@@ -18,7 +18,7 @@ from core.repos.pg_nexus_lists_repo import (
     PgArcanaInventoryRepo,
     _notion_status,
 )
-from core.user_manager import get_user_notion_id
+from core.user_manager import get_user_id
 
 from miniapp.backend.auth import current_user_id
 
@@ -40,13 +40,13 @@ def _serialize_item(item: InventoryItem) -> dict:
     }
 
 
-async def _fetch(user_notion_id: str, only_open: bool = True) -> list:
+async def _fetch(user_id: str, only_open: bool = True) -> list:
     try:
         if only_open:
-            items = await _inv_repo.get_open_barter(user_notion_id)
+            items = await _inv_repo.get_open_barter(user_id)
         else:
             items = await _inv_repo.get_list(
-                category=BARTER_CATEGORY, user_notion_id=user_notion_id
+                category=BARTER_CATEGORY, user_id=user_id
             )
     except Exception as e:
         logger.warning("barter fetch failed: %s", e)
@@ -60,8 +60,8 @@ async def list_barter(
     group: Optional[str] = Query(None, description="точное совпадение по полю Группа"),
     tg_id: int = Depends(current_user_id),
 ) -> dict:
-    user_notion_id = (await get_user_notion_id(tg_id)) or ""
-    items = await _fetch(user_notion_id, only_open=only_open)
+    user_id = (await get_user_id(tg_id)) or ""
+    items = await _fetch(user_id, only_open=only_open)
     if group:
         items = [i for i in items if (i.get("group") or "") == group]
     by_group: dict = {}

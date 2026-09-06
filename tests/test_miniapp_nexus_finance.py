@@ -53,7 +53,7 @@ def _today_date(tz: int = 3):
 
 def _budget_entry(amount, *, cat="🚬 Привычки", type_="💸 Расход", desc="test", eid="fin-1", date="2026-06-01"):
     return BudgetEntry(id=eid, description=desc, amount=amount, category=cat,
-                       type_=type_, source="💳 Карта", date=date, user_notion_id="")
+                       type_=type_, source="💳 Карта", date=date, user_id="")
 
 
 def _mem_pg(mid, text, cat=None, key=None):
@@ -86,7 +86,7 @@ def test_finance_view_today(client):
                AsyncMock(return_value=[])), \
          patch("miniapp.backend.routes.finance.today_user_tz",
                AsyncMock(return_value=(_today_date(tz), tz))), \
-         patch("miniapp.backend.routes.finance.get_user_notion_id",
+         patch("miniapp.backend.routes.finance.get_user_id",
                AsyncMock(return_value=FAKE_NOTION_USER)):
         r = client.get("/api/finance?view=today")
 
@@ -125,7 +125,7 @@ def test_finance_view_today_explicit_date_navigates_not_real_today(client):
                AsyncMock(return_value=[])), \
          patch("miniapp.backend.routes.finance.today_user_tz",
                AsyncMock(return_value=(_today_date(tz), tz))), \
-         patch("miniapp.backend.routes.finance.get_user_notion_id",
+         patch("miniapp.backend.routes.finance.get_user_id",
                AsyncMock(return_value=FAKE_NOTION_USER)):
         r = client.get(f"/api/finance?view=today&date={other_date}")
 
@@ -162,7 +162,7 @@ def test_finance_view_today_no_date_param_defaults_to_today(client):
                AsyncMock(return_value=[])), \
          patch("miniapp.backend.routes.finance.today_user_tz",
                AsyncMock(return_value=(_today_date(tz), tz))), \
-         patch("miniapp.backend.routes.finance.get_user_notion_id",
+         patch("miniapp.backend.routes.finance.get_user_id",
                AsyncMock(return_value=FAKE_NOTION_USER)):
         r = client.get("/api/finance?view=today")
 
@@ -190,7 +190,7 @@ def test_finance_view_month_calculates_income_expense_and_limits(client):
                AsyncMock(return_value={"привычки": 17685})), \
          patch("miniapp.backend.routes.finance.today_user_tz",
                AsyncMock(return_value=(_today_date(tz), tz))), \
-         patch("miniapp.backend.routes.finance.get_user_notion_id",
+         patch("miniapp.backend.routes.finance.get_user_id",
                AsyncMock(return_value=FAKE_NOTION_USER)):
         r = client.get(f"/api/finance?view=month&month={month}")
 
@@ -224,7 +224,7 @@ def test_finance_view_limits_only_shows_categories_with_limit(client):
                AsyncMock(return_value={"привычки": 17685})), \
          patch("miniapp.backend.routes.finance.today_user_tz",
                AsyncMock(return_value=(_today_date(tz), tz))), \
-         patch("miniapp.backend.routes.finance.get_user_notion_id",
+         patch("miniapp.backend.routes.finance.get_user_id",
                AsyncMock(return_value=FAKE_NOTION_USER)):
         r = client.get(f"/api/finance?view=limits&month={month}")
 
@@ -251,7 +251,7 @@ def test_finance_view_goals(client):
                AsyncMock(return_value=budget)), \
          patch("miniapp.backend.routes.finance.today_user_tz",
                AsyncMock(return_value=(_today_date(tz), tz))), \
-         patch("miniapp.backend.routes.finance.get_user_notion_id",
+         patch("miniapp.backend.routes.finance.get_user_id",
                AsyncMock(return_value="")):
         r = client.get("/api/finance?view=goals")
 
@@ -286,7 +286,7 @@ def test_finance_view_goals_no_cushion_field(client):
          patch("core.repos.pg_debts_repo._repo.list_closed", AsyncMock(return_value=[])), \
          patch("miniapp.backend.routes.finance.today_user_tz",
                AsyncMock(return_value=(_today_date(tz), tz))), \
-         patch("miniapp.backend.routes.finance.get_user_notion_id",
+         patch("miniapp.backend.routes.finance.get_user_id",
                AsyncMock(return_value="")):
         r = client.get("/api/finance?view=goals")
 
@@ -311,7 +311,7 @@ def test_finance_view_cushion_structure(client):
                AsyncMock(return_value=(txs, False))), \
          patch("miniapp.backend.routes.finance.today_user_tz",
                AsyncMock(return_value=(_today_date(3), 3))), \
-         patch("miniapp.backend.routes.finance.get_user_notion_id", AsyncMock(return_value="u")):
+         patch("miniapp.backend.routes.finance.get_user_id", AsyncMock(return_value="u")):
         r = client.get("/api/finance?view=cushion")
 
     assert r.status_code == 200
@@ -330,7 +330,7 @@ def test_finance_cushion_set_target_endpoint(client):
     """POST /finance/cushion/target меняет только target, баланс не трогает."""
     with patch("core.repos.pg_cushion_repo._repo.set_target", AsyncMock()) as m_set, \
          patch("core.repos.pg_cushion_repo._repo.add_to_balance", AsyncMock()) as m_add, \
-         patch("miniapp.backend.routes.writes.get_user_notion_id", AsyncMock(return_value="u")):
+         patch("miniapp.backend.routes.writes.get_user_id", AsyncMock(return_value="u")):
         r = client.post("/api/finance/cushion/target", json={"target": 250000})
 
     assert r.status_code == 200
@@ -358,7 +358,7 @@ def test_finance_closed_goal_is_neutral_not_achieved(client):
          patch("core.repos.pg_debts_repo._repo.list_closed", AsyncMock(return_value=[])), \
          patch("miniapp.backend.routes.finance.today_user_tz",
                AsyncMock(return_value=(_today_date(tz), tz))), \
-         patch("miniapp.backend.routes.finance.get_user_notion_id",
+         patch("miniapp.backend.routes.finance.get_user_id",
                AsyncMock(return_value=FAKE_NOTION_USER)):
         r = client.get("/api/finance?view=goals")
 
@@ -391,7 +391,7 @@ def test_finance_today_returns_budget_block(client):
                AsyncMock(return_value=4166)), \
          patch("miniapp.backend.routes.finance.today_user_tz",
                AsyncMock(return_value=(_today_date(), 3))), \
-         patch("miniapp.backend.routes.finance.get_user_notion_id",
+         patch("miniapp.backend.routes.finance.get_user_id",
                AsyncMock(return_value=FAKE_NOTION_USER)):
         r = client.get("/api/finance?view=today")
 
@@ -413,7 +413,7 @@ def test_finance_today_budget_reflects_spending(client):
                AsyncMock(return_value=4166)), \
          patch("miniapp.backend.routes.finance.today_user_tz",
                AsyncMock(return_value=(_today_date(), 3))), \
-         patch("miniapp.backend.routes.finance.get_user_notion_id",
+         patch("miniapp.backend.routes.finance.get_user_id",
                AsyncMock(return_value=FAKE_NOTION_USER)):
         r = client.get("/api/finance?view=today")
 
@@ -438,7 +438,7 @@ def test_finance_today_excludes_parallel_categories_from_day_budget(client):
                AsyncMock(return_value=4166)), \
          patch("miniapp.backend.routes.finance.today_user_tz",
                AsyncMock(return_value=(_today_date(), 3))), \
-         patch("miniapp.backend.routes.finance.get_user_notion_id",
+         patch("miniapp.backend.routes.finance.get_user_id",
                AsyncMock(return_value=FAKE_NOTION_USER)):
         r = client.get("/api/finance?view=today")
 
@@ -468,7 +468,7 @@ def test_finance_category_drill_down(client):
                AsyncMock(return_value=[])), \
          patch("miniapp.backend.routes.finance.today_user_tz",
                AsyncMock(return_value=(_today_date(), 3))), \
-         patch("miniapp.backend.routes.finance.get_user_notion_id",
+         patch("miniapp.backend.routes.finance.get_user_id",
                AsyncMock(return_value=FAKE_NOTION_USER)):
         r = client.get("/api/finance/category?cat=🏠%20Жильё&month=2026-04")
 
@@ -499,7 +499,7 @@ def test_finance_category_same_day_sorted_by_creation_order(client):
                AsyncMock(return_value=[])), \
          patch("miniapp.backend.routes.finance.today_user_tz",
                AsyncMock(return_value=(_today_date(), 3))), \
-         patch("miniapp.backend.routes.finance.get_user_notion_id",
+         patch("miniapp.backend.routes.finance.get_user_id",
                AsyncMock(return_value=FAKE_NOTION_USER)):
         r = client.get("/api/finance/category?cat=🏠%20Жильё&month=2026-04")
 
@@ -518,7 +518,7 @@ def test_expense_create_uses_finance_add(client):
     with patch.object(_writes_mod._fin_repo, "add", fa), \
          patch("miniapp.backend.routes.writes.today_user_tz",
                AsyncMock(return_value=(today, tz))), \
-         patch("miniapp.backend.routes.writes.get_user_notion_id",
+         patch("miniapp.backend.routes.writes.get_user_id",
                AsyncMock(return_value=FAKE_NOTION_USER)):
         r = client.post("/api/expenses", json={
             "amount": 1500,
@@ -556,7 +556,7 @@ def test_expenses_alias_still_works(client):
     with patch.object(_writes_mod._fin_repo, "add", fa), \
          patch("miniapp.backend.routes.writes.today_user_tz",
                AsyncMock(return_value=(_today_date(), 3))), \
-         patch("miniapp.backend.routes.writes.get_user_notion_id",
+         patch("miniapp.backend.routes.writes.get_user_id",
                AsyncMock(return_value=FAKE_NOTION_USER)):
         r = client.post("/api/expenses", json={
             "amount": 200, "cat": "🍜 Продукты", "desc": "test",
@@ -581,7 +581,7 @@ def test_finance_post_expense_routes_to_finance_add(client):
     with patch.object(_writes_mod._fin_repo, "add", fa), \
          patch("miniapp.backend.routes.writes.today_user_tz",
                AsyncMock(return_value=(_today_date(), 3))), \
-         patch("miniapp.backend.routes.writes.get_user_notion_id",
+         patch("miniapp.backend.routes.writes.get_user_id",
                AsyncMock(return_value=FAKE_NOTION_USER)):
         r = client.post("/api/finance", json={
             "type": "expense",
@@ -612,7 +612,7 @@ def test_finance_post_income_default_category(client):
     with patch.object(_writes_mod._fin_repo, "add", fa), \
          patch("miniapp.backend.routes.writes.today_user_tz",
                AsyncMock(return_value=(_today_date(), 3))), \
-         patch("miniapp.backend.routes.writes.get_user_notion_id",
+         patch("miniapp.backend.routes.writes.get_user_id",
                AsyncMock(return_value=FAKE_NOTION_USER)):
         r = client.post("/api/finance", json={
             "type": "income",
@@ -638,7 +638,7 @@ def test_finance_post_practice_income_forces_arcana(client):
     with patch.object(_writes_mod._fin_repo, "add", fa), \
          patch("miniapp.backend.routes.writes.today_user_tz",
                AsyncMock(return_value=(_today_date(), 3))), \
-         patch("miniapp.backend.routes.writes.get_user_notion_id",
+         patch("miniapp.backend.routes.writes.get_user_id",
                AsyncMock(return_value=FAKE_NOTION_USER)):
         r = client.post("/api/finance", json={
             "type": "practice_income",
@@ -655,7 +655,7 @@ def test_finance_post_practice_income_forces_arcana(client):
 def test_finance_expense_requires_category(client):
     with patch("miniapp.backend.routes.writes.today_user_tz",
                AsyncMock(return_value=(_today_date(), 3))), \
-         patch("miniapp.backend.routes.writes.get_user_notion_id",
+         patch("miniapp.backend.routes.writes.get_user_id",
                AsyncMock(return_value=FAKE_NOTION_USER)):
         r = client.post("/api/finance", json={
             "type": "expense",
@@ -678,7 +678,7 @@ def test_finance_bot_arcana_sets_arcana_label(client):
     with patch.object(_writes_mod._fin_repo, "add", fa), \
          patch("miniapp.backend.routes.writes.today_user_tz",
                AsyncMock(return_value=(_today_date(), 3))), \
-         patch("miniapp.backend.routes.writes.get_user_notion_id",
+         patch("miniapp.backend.routes.writes.get_user_id",
                AsyncMock(return_value=FAKE_NOTION_USER)):
         r = client.post("/api/finance", json={
             "type": "expense",
@@ -697,7 +697,7 @@ def test_finance_bot_arcana_sets_arcana_label(client):
     with patch.object(_writes_mod._fin_repo, "add", fa2), \
          patch("miniapp.backend.routes.writes.today_user_tz",
                AsyncMock(return_value=(_today_date(), 3))), \
-         patch("miniapp.backend.routes.writes.get_user_notion_id",
+         patch("miniapp.backend.routes.writes.get_user_id",
                AsyncMock(return_value=FAKE_NOTION_USER)):
         r2 = client.post("/api/finance", json={
             "type": "expense", "amount": 100, "cat": "🍜 Продукты", "bot": "nexus",
@@ -778,7 +778,7 @@ def test_view_today_query_uses_today_as_date_to(client):
                AsyncMock(return_value=0)), \
          patch("miniapp.backend.routes.finance.today_user_tz",
                AsyncMock(return_value=(today_dt, 3))), \
-         patch("miniapp.backend.routes.finance.get_user_notion_id",
+         patch("miniapp.backend.routes.finance.get_user_id",
                AsyncMock(return_value=FAKE_NOTION_USER)):
         r = client.get("/api/finance?view=today")
 

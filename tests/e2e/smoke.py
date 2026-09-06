@@ -175,15 +175,15 @@ async def main():
     # ═══════════════════════════════════════
     section("USER MANAGER")
 
-    user_notion_id = ""
+    user_id = ""
     try:
         from core.user_manager import get_user
         user = await get_user(67686090)
         if user:
-            user_notion_id = user.get("notion_page_id", "")
+            user_id = user.get("notion_page_id", "")
             name = user.get("name", "?")
             log_pass("get_user(67686090)",
-                     f"найден: {name}, notion_id={user_notion_id[:12]}...")
+                     f"найден: {name}, notion_id={user_id[:12]}...")
         else:
             log_fail("get_user(67686090)", "пользователь не найден")
     except Exception as e:
@@ -216,7 +216,7 @@ async def main():
             title="[SMOKE TEST] тестовая задача — удалить",
             category="💳 Прочее",
             priority="⚪ Можно потом",
-            user_notion_id=user_notion_id,
+            user_id=user_id,
         )
         if page_id:
             cleanup_ids.append(("task", page_id))
@@ -237,7 +237,7 @@ async def main():
             source="💳 Карта",
             bot_label="☀️ Nexus",
             description="[SMOKE TEST] — удалить",
-            user_notion_id=user_notion_id,
+            user_id=user_id,
         )
         if page_id:
             cleanup_ids.append(("finance", page_id))
@@ -253,7 +253,7 @@ async def main():
         page_id = await note_add(
             text="[SMOKE TEST] тестовая заметка — удалить",
             tags=["тест"],
-            user_notion_id=user_notion_id,
+            user_id=user_id,
         )
         if page_id:
             cleanup_ids.append(("note", page_id))
@@ -273,8 +273,8 @@ async def main():
             "Актуально": {"checkbox": True},
         }
         # Пользователь как relation (реальная колонка: "🪪 Пользователи")
-        if user_notion_id:
-            props["🪪 Пользователи"] = {"relation": [{"id": user_notion_id}]}
+        if user_id:
+            props["🪪 Пользователи"] = {"relation": [{"id": user_id}]}
 
         page_id = await page_create(db_memory, props)
         if page_id:
@@ -288,7 +288,7 @@ async def main():
     # client_find (должен вернуть None для несуществующего имени)
     try:
         from core.notion_client import client_find
-        found = await client_find("[SMOKE TEST] клиент_не_существует_xyz", user_notion_id)
+        found = await client_find("[SMOKE TEST] клиент_не_существует_xyz", user_id)
         if found is None:
             log_pass("client_find (not exists)", "вернул None — ОК")
         else:

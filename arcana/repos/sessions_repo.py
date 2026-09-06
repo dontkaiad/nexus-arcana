@@ -33,7 +33,7 @@ class TripletEntry:
     barter_what: str = ""     # Бартер · что
     bottom_card: str = ""     # Дно колоды
     photo_url: Optional[str] = None
-    user_notion_id: str = ""  # владелец записи, для ownership-проверок (#108)
+    user_id: str = ""  # владелец записи, для ownership-проверок (#108)
 
 
 @dataclass
@@ -69,7 +69,7 @@ class SessionsRepo:
         paid: float = 0,
         session_type: str = "Личный",
         client_id: Optional[str] = None,
-        user_notion_id: str = "",
+        user_id: str = "",
         area: Optional[str] = None,
         deck: Optional[str] = None,
         payment_source: Optional[str] = None,
@@ -84,7 +84,7 @@ class SessionsRepo:
         session_name = session or ""
         if session_name:
             session_name = await _pg_repo().canonical_session_name(
-                session_name, client_id, user_notion_id
+                session_name, client_id, user_id
             )
 
         occurred_at: Optional[_date] = None
@@ -111,26 +111,26 @@ class SessionsRepo:
             payment_source=payment_source,
             outcome_code="unverified",
             client_id=client_id,
-            user_notion_id=user_notion_id,
+            user_id=user_id,
             category_id=category_id,
             subject_id=subject_id,
         )
 
     async def prev_for_client(
-        self, client_id: str, user_notion_id: str = ""
+        self, client_id: str, user_id: str = ""
     ) -> List[PrevSessionSnippet]:
         return await _pg_repo().list_by_client(client_id)
 
     async def search(
         self,
         keywords: List[str],
-        user_notion_id: str = "",
+        user_id: str = "",
         limit: int = 10,
     ) -> List[SessionSearchResult]:
-        return await _pg_repo().search(keywords, user_notion_id=user_notion_id, limit=limit)
+        return await _pg_repo().search(keywords, user_id=user_id, limit=limit)
 
     async def find_by_short_id(
-        self, short_id: str, user_notion_id: str = ""
+        self, short_id: str, user_id: str = ""
     ) -> Optional[TripletEntry]:
         """short_id = str(pg_id) after PG migration."""
         return await _pg_repo().find_by_id(short_id)
@@ -168,10 +168,10 @@ class SessionsRepo:
         return await _pg_repo().clear_theme_summary(session_name, client_id)
 
     async def session_group_exists(
-        self, session_name: str, client_id: Optional[str], user_notion_id: str
+        self, session_name: str, client_id: Optional[str], user_id: str
     ) -> bool:
         return await _pg_repo().session_group_exists(
-            session_name, client_id, user_notion_id
+            session_name, client_id, user_id
         )
 
     async def get_mode_category_for_client(self, client_id: str):
@@ -188,12 +188,12 @@ class SessionsRepo:
         return await _pg_repo().set_subject(page_ids, subject_id)
 
     async def group_subject_id(
-        self, session_name: str, client_id: Optional[str], user_notion_id: str
+        self, session_name: str, client_id: Optional[str], user_id: str
     ) -> Optional[int]:
         """Если у ТЕМЫ (session_name+client, ilike) уже есть подтверждённый
         subject_id на любой строке — вернуть его, чтобы новая отправка
         унаследовала его молча, без повторного вопроса (#189)."""
-        return await _pg_repo().group_subject_id(session_name, client_id, user_notion_id)
+        return await _pg_repo().group_subject_id(session_name, client_id, user_id)
 
     async def recent_areas_for_subject(self, subject_id: int, limit: int = 3) -> List[str]:
         """Последние непустые area темы — контекстная подсказка для

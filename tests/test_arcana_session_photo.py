@@ -68,7 +68,7 @@ def test_session_photo_writes_to_all_triplets(client):
     with patch("miniapp.backend.routes.writes._sessions_pg_repo", mock_repo), \
          patch("miniapp.backend.routes.writes._cloudinary_upload",
                AsyncMock(return_value=fake_url)) as cu, \
-         patch("miniapp.backend.routes.writes.get_user_notion_id",
+         patch("miniapp.backend.routes.writes.get_user_id",
                AsyncMock(return_value=FAKE_NOTION)):
         r = client.post(
             f"/api/arcana/sessions/by-slug/{slug}/photo",
@@ -96,7 +96,7 @@ def test_session_photo_solo_triplet(client):
     with patch("miniapp.backend.routes.writes._sessions_pg_repo", mock_repo), \
          patch("miniapp.backend.routes.writes._cloudinary_upload",
                AsyncMock(return_value=fake_url)), \
-         patch("miniapp.backend.routes.writes.get_user_notion_id",
+         patch("miniapp.backend.routes.writes.get_user_id",
                AsyncMock(return_value=FAKE_NOTION)):
         r = client.post(
             f"/api/arcana/sessions/by-slug/{slug}/photo",
@@ -123,7 +123,7 @@ def test_session_get_returns_session_level_photo_url(client):
 
     with patch("miniapp.backend.routes.arcana_sessions._sessions_repo", mock_repo), \
          patch("miniapp.backend.routes.arcana_sessions._clients_repo", mock_cl), \
-         patch("miniapp.backend.routes.arcana_sessions.get_user_notion_id",
+         patch("miniapp.backend.routes.arcana_sessions.get_user_id",
                AsyncMock(return_value=FAKE_NOTION)), \
          patch("miniapp.backend.routes.arcana_sessions.today_user_tz",
                AsyncMock(return_value=(__import__("datetime").date(2026, 5, 1), 3))):

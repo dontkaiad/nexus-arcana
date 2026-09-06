@@ -116,7 +116,7 @@ def _row_to_triplet(row) -> TripletEntry:
         barter_what=row.barter_what or "",
         bottom_card=row.bottom_card or "",
         photo_url=row.photo_url or None,
-        user_notion_id=getattr(row, "user_notion_id", None) or "",
+        user_id=getattr(row, "user_id", None) or "",
     )
 
 
@@ -171,7 +171,7 @@ def _select_sessions():
             sessions.c.barter_what,
             sessions.c.photo_url,
             sessions.c.client_id,
-            sessions.c.user_notion_id,
+            sessions.c.user_id,
             session_outcome.c.code.label("outcome_code"),
             session_category.c.emoji.label("category_emoji"),
             session_category.c.label.label("category_label_col"),
@@ -205,7 +205,7 @@ class PgSessionsRepo:
         payment_source: Optional[str],
         outcome_code: str,
         client_id: Optional[str],
-        user_notion_id: str,
+        user_id: str,
         category_id: Optional[int] = None,
         subject_id: Optional[int] = None,
     ) -> Optional[str]:
@@ -238,7 +238,7 @@ class PgSessionsRepo:
                     payment_src_id=pay_id,
                     outcome_id=outcome_id,
                     client_id=cid_int,
-                    user_notion_id=user_notion_id or None,
+                    user_id=user_id or None,
                 ).returning(sessions.c.id)
             ).fetchone()
         return str(row[0]) if row else None
@@ -265,12 +265,12 @@ class PgSessionsRepo:
 
     def _list_all_sync(
         self,
-        user_notion_id: str,
+        user_id: str,
         outcome_filter: Optional[str],
     ) -> List[TripletEntry]:
         stmt = _select_sessions()
-        if user_notion_id:
-            stmt = stmt.where(sessions.c.user_notion_id == user_notion_id)
+        if user_id:
+            stmt = stmt.where(sessions.c.user_id == user_id)
         if outcome_filter:
             code = _code_for(_OUTCOME_TO_CODE, outcome_filter) or outcome_filter
             stmt = stmt.where(session_outcome.c.code == code)
@@ -281,14 +281,14 @@ class PgSessionsRepo:
     def _search_sync(
         self,
         keywords: List[str],
-        user_notion_id: str,
+        user_id: str,
         limit: int,
     ) -> List[SessionSearchResult]:
         if not keywords:
             return []
         stmt = _select_sessions()
-        if user_notion_id:
-            stmt = stmt.where(sessions.c.user_notion_id == user_notion_id)
+        if user_id:
+            stmt = stmt.where(sessions.c.user_id == user_id)
         filters = [
             or_(
                 sessions.c.title.ilike(f"%{kw}%"),
@@ -446,7 +446,7 @@ class PgSessionsRepo:
         return res.rowcount or 0
 
     def _session_group_exists_sync(
-        self, session_name: str, client_id: Optional[str], user_notion_id: str
+        self, session_name: str, client_id: Optional[str], user_id: str
     ) -> bool:
         """Существует ли ТЕМА (session_name ilike + client) хотя бы одной строкой.
         Используется до сохранения новой отправки, чтобы понять — пополняем ли
@@ -454,15 +454,15 @@ class PgSessionsRepo:
         if not session_name:
             return False
         cond = self._theme_group_cond(session_name, client_id)
-        if user_notion_id:
-            cond = cond & (sessions.c.user_notion_id == user_notion_id)
+        if user_id:
+            cond = cond & (sessions.c.user_id == user_id)
         stmt = select(sessions.c.id).where(cond).limit(1)
         with get_engine().connect() as conn:
             return conn.execute(stmt).first() is not None
 
-    def _list_by_slug_sync(self, slug: str, user_notion_id: str) -> List[TripletEntry]:
+    def _list_by_slug_sync(self, slug: str, user_id: str) -> List[TripletEntry]:
         """Load all sessions and filter by slug (session_name__client_id|self)."""
-        all_entries = self._list_all_sync(user_notion_id, None)
+        all_entries = self._list_all_sync(user_id, None)
         from core.session_cache import slugify as _slugify
         result = []
         for e in all_entries:
@@ -474,10 +474,10 @@ class PgSessionsRepo:
                 result.append(e)
         return result
 
-    def _list_by_subject_sync(self, subject_id: int, user_notion_id: str) -> List[TripletEntry]:
+    def _list_by_subject_sync(self, subject_id: int, user_id: str) -> List[TripletEntry]:
         """Все сессии, привязанные к теме (subject_id) — за ВСЁ время, поперёк
         любых формулировок session_name (#189)."""
-        all_entries = self._list_all_sync(user_notion_id, None)
+        all_entries = self._list_all_sync(user_id, None)
         return [e for e in all_entries if e.subject_id == subject_id]
 
     def _archive_sync(self, session_id: str) -> bool:
@@ -492,7 +492,7 @@ class PgSessionsRepo:
         return res.rowcount > 0
 
     def _canonical_session_name_sync(
-        self, name: str, client_id: Optional[str], user_notion_id: str
+        self, name: str, client_id: Optional[str], user_id: str
     ) -> str:
         """Return the earliest-used spelling of session_name for merge dedup."""
         if not name:
@@ -507,8 +507,8 @@ class PgSessionsRepo:
             stmt = stmt.where(sessions.c.client_id == cid_int)
         else:
             stmt = stmt.where(sessions.c.client_id.is_(None))
-        if user_notion_id:
-            stmt = stmt.where(sessions.c.user_notion_id == user_notion_id)
+        if user_id:
+            stmt = stmt.where(sessions.c.user_id == user_id)
         stmt = stmt.order_by(sessions.c.occurred_at.asc().nullsfirst()).limit(1)
         with get_engine().connect() as conn:
             row = conn.execute(stmt).fetchone()
@@ -534,7 +534,7 @@ class PgSessionsRepo:
         payment_source: Optional[str] = None,
         outcome_code: str = "unverified",
         client_id: Optional[str] = None,
-        user_notion_id: str = "",
+        user_id: str = "",
         category_id: Optional[int] = None,
         subject_id: Optional[int] = None,
     ) -> Optional[str]:
@@ -543,7 +543,7 @@ class PgSessionsRepo:
             title, occurred_at, question, cards, interpretation,
             triplet_summary, bottom_card, session_name,
             area, deck, amount, paid, session_type, payment_source,
-            outcome_code, client_id, user_notion_id, category_id, subject_id,
+            outcome_code, client_id, user_id, category_id, subject_id,
         )
 
     async def find_by_id(self, session_id: str) -> Optional[TripletEntry]:
@@ -554,21 +554,21 @@ class PgSessionsRepo:
 
     async def list_all(
         self,
-        user_notion_id: str = "",
+        user_id: str = "",
         outcome_filter: Optional[str] = None,
     ) -> List[TripletEntry]:
         return await asyncio.to_thread(
-            self._list_all_sync, user_notion_id, outcome_filter
+            self._list_all_sync, user_id, outcome_filter
         )
 
     async def search(
         self,
         keywords: List[str],
-        user_notion_id: str = "",
+        user_id: str = "",
         limit: int = 10,
     ) -> List[SessionSearchResult]:
         return await asyncio.to_thread(
-            self._search_sync, keywords, user_notion_id, limit
+            self._search_sync, keywords, user_id, limit
         )
 
     async def update_interpretation(
@@ -616,21 +616,21 @@ class PgSessionsRepo:
         )
 
     async def session_group_exists(
-        self, session_name: str, client_id: Optional[str], user_notion_id: str
+        self, session_name: str, client_id: Optional[str], user_id: str
     ) -> bool:
         return await asyncio.to_thread(
-            self._session_group_exists_sync, session_name, client_id, user_notion_id
+            self._session_group_exists_sync, session_name, client_id, user_id
         )
 
     async def list_by_slug(
-        self, slug: str, user_notion_id: str = ""
+        self, slug: str, user_id: str = ""
     ) -> List[TripletEntry]:
-        return await asyncio.to_thread(self._list_by_slug_sync, slug, user_notion_id)
+        return await asyncio.to_thread(self._list_by_slug_sync, slug, user_id)
 
     async def list_by_subject(
-        self, subject_id: int, user_notion_id: str = ""
+        self, subject_id: int, user_id: str = ""
     ) -> List[TripletEntry]:
-        return await asyncio.to_thread(self._list_by_subject_sync, subject_id, user_notion_id)
+        return await asyncio.to_thread(self._list_by_subject_sync, subject_id, user_id)
 
     async def set_outcome(self, session_id: str, outcome_code: str) -> bool:
         return await asyncio.to_thread(self._set_outcome_sync, session_id, outcome_code)
@@ -710,7 +710,7 @@ class PgSessionsRepo:
         return await asyncio.to_thread(self._set_subject_sync, page_ids, subject_id)
 
     def _group_subject_id_sync(
-        self, session_name: str, client_id: Optional[str], user_notion_id: str
+        self, session_name: str, client_id: Optional[str], user_id: str
     ) -> Optional[int]:
         """Уже подтверждённый subject_id для этой ТЕМЫ (session_name+client),
         если хоть одна строка группы его несёт — новые отправки наследуют
@@ -718,18 +718,18 @@ class PgSessionsRepo:
         if not session_name:
             return None
         cond = self._theme_group_cond(session_name, client_id) & sessions.c.subject_id.isnot(None)
-        if user_notion_id:
-            cond = cond & (sessions.c.user_notion_id == user_notion_id)
+        if user_id:
+            cond = cond & (sessions.c.user_id == user_id)
         stmt = select(sessions.c.subject_id).where(cond).limit(1)
         with get_engine().connect() as conn:
             row = conn.execute(stmt).first()
         return int(row[0]) if row and row[0] is not None else None
 
     async def group_subject_id(
-        self, session_name: str, client_id: Optional[str], user_notion_id: str
+        self, session_name: str, client_id: Optional[str], user_id: str
     ) -> Optional[int]:
         return await asyncio.to_thread(
-            self._group_subject_id_sync, session_name, client_id, user_notion_id
+            self._group_subject_id_sync, session_name, client_id, user_id
         )
 
     def _recent_areas_for_subject_sync(self, subject_id: int, limit: int) -> List[str]:
@@ -810,8 +810,8 @@ class PgSessionsRepo:
         return await asyncio.to_thread(self._set_props_sync, session_id, fields)
 
     async def canonical_session_name(
-        self, name: str, client_id: Optional[str], user_notion_id: str
+        self, name: str, client_id: Optional[str], user_id: str
     ) -> str:
         return await asyncio.to_thread(
-            self._canonical_session_name_sync, name, client_id, user_notion_id
+            self._canonical_session_name_sync, name, client_id, user_id
         )

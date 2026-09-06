@@ -6,7 +6,7 @@ from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
-from core.user_manager import get_user_notion_id
+from core.user_manager import get_user_id
 from miniapp.backend.auth import current_user_id
 from miniapp.backend._helpers import (
     cat_from_notion,
@@ -107,12 +107,12 @@ async def get_tasks(
 
     today_date, tz_offset = await today_user_tz(tg_id)
     today_iso = today_date.isoformat()
-    user_notion_id = (await get_user_notion_id(tg_id)) or ""
+    user_id = (await get_user_id(tg_id)) or ""
 
     if filter in ("done", "all"):
-        raw = await _tasks_repo.list_all(user_notion_id)
+        raw = await _tasks_repo.list_all(user_id)
     else:
-        raw = await _tasks_repo.active(user_notion_id)
+        raw = await _tasks_repo.active(user_id)
 
     items = [_serialize_pg_task(t, today_date, tz_offset) for t in raw]
 

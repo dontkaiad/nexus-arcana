@@ -13,8 +13,8 @@ class TasksRepo:
     def __init__(self) -> None:
         self._pg = _PgTasksRepo()
 
-    async def active(self, user_notion_id: str = "", include_in_progress: bool = True) -> List[Task]:
-        return await self._pg.active(user_notion_id=user_notion_id,
+    async def active(self, user_id: str = "", include_in_progress: bool = True) -> List[Task]:
+        return await self._pg.active(user_id=user_id,
                                      include_in_progress=include_in_progress)
 
     async def retrieve_page(self, page_id: str) -> Optional[Task]:
@@ -35,8 +35,8 @@ class TasksRepo:
     async def set_props(self, page_id: str, props: dict) -> None:
         await self._pg.set_props(page_id, props)
 
-    async def list_all(self, user_notion_id: str = "") -> List[Task]:
-        return await self._pg.list_all(user_notion_id=user_notion_id)
+    async def list_all(self, user_id: str = "") -> List[Task]:
+        return await self._pg.list_all(user_id=user_id)
 
     async def set_repeat_fields(
         self,

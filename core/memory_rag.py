@@ -127,7 +127,7 @@ def index_memories_batch(items: List[dict]) -> int:
 def search_memory_semantic(
     query_text: str,
     scope: str = "",
-    user_notion_id: str = "",
+    user_id: str = "",
     top_k: int = DEFAULT_TOP_K,
     min_score: Optional[float] = None,
 ) -> List[Memory]:
@@ -158,12 +158,12 @@ def search_memory_semantic(
         if scope:
             where_extra += " AND (scope = :scope OR scope = 'global')"
             params["scope"] = scope
-        if user_notion_id:
-            where_extra += " AND user_notion_id = :uid"
-            params["uid"] = user_notion_id
+        if user_id:
+            where_extra += " AND user_id = :uid"
+            params["uid"] = user_id
         sql = sa.text(f"""
             SELECT id, fact_text, key_name, category, scope, source,
-                   related_to, is_current, is_archived, user_notion_id,
+                   related_to, is_current, is_archived, user_id,
                    created_at, updated_at,
                    1 - (embedding <=> CAST(:q AS vector)) AS score
             FROM {TABLE_MEMORIES}
@@ -205,7 +205,7 @@ def search_memory_semantic(
                 related_to=d.get("related_to") or "",
                 is_current=bool(d.get("is_current")),
                 is_archived=bool(d.get("is_archived")),
-                user_notion_id=d.get("user_notion_id") or "",
+                user_id=d.get("user_id") or "",
                 date=created.date().isoformat() if created else "",
                 updated_at=updated.isoformat() if updated else "",
             ))

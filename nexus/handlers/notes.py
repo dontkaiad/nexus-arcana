@@ -24,7 +24,7 @@ from core.location import get_user_tz as _get_user_tz
 def _user_now(tz_offset: int):
     return datetime.now(timezone(timedelta(hours=tz_offset)))
 
-# Pending: user_id → {text, selected, new, existing, date, user_notion_id, chosen}
+# Pending: user_id → {text, selected, new, existing, date, user_id, chosen}
 _pending: Dict[int, dict] = {}
 
 # Последний дайджест: user_id → [{"page_id": ..., "title": ..., "tags": [...]}]
@@ -43,7 +43,7 @@ async def handle_note(
     text: str,
     db_notes_id: str,
     tags: str = "",
-    user_notion_id: str = "",
+    user_id: str = "",
 ) -> None:
     """Основной обработчик заметки со smart-select тегов."""
     import json
@@ -83,7 +83,7 @@ async def handle_note(
                     "new": pending_new,
                     "existing": existing,
                     "date": date,
-                    "user_notion_id": user_notion_id,
+                    "user_id": user_id,
                 }
                 new_str = " · ".join(f"#{t}" for t in pending_new)
                 existing_str = ", ".join(existing) if existing else "нет"
@@ -97,7 +97,7 @@ async def handle_note(
 
             # Все теги найдены — сохранить сразу
             if confirmed:
-                await _save_note(message, text, confirmed, date, user_notion_id=user_notion_id)
+                await _save_note(message, text, confirmed, date, user_id=user_id)
                 return
 
     # Иначе — спросить Claude
@@ -116,7 +116,7 @@ async def handle_note(
 
     if not needs_confirm:
         final_tags = selected if selected else ["🧠 Мысль"]
-        await _save_note(message, text, final_tags, date, user_notion_id=user_notion_id)
+        await _save_note(message, text, final_tags, date, user_id=user_id)
         return
 
     # Нужно подтверждение новых тегов
@@ -128,7 +128,7 @@ async def handle_note(
         "new": new_tags,
         "existing": existing,
         "date": date,
-        "user_notion_id": user_notion_id,
+        "user_id": user_id,
     }
 
     existing_str = ", ".join(existing) if existing else "нет"
@@ -178,17 +178,17 @@ async def handle_note_callback(query: CallbackQuery) -> None:
     selected = pending["selected"]
     new_tags = pending["new"]
     existing = pending["existing"]
-    user_notion_id = pending.get("user_notion_id", "")
+    user_id = pending.get("user_id", "")
 
     if data.startswith("opt_add:"):
         tags = selected + new_tags
         del _pending[uid]
-        await _save_note(query.message, text, tags, date, edit=True, user_notion_id=user_notion_id)
+        await _save_note(query.message, text, tags, date, edit=True, user_id=user_id)
 
     elif data.startswith("opt_pick:"):
         if not existing:
             del _pending[uid]
-            await _save_note(query.message, text, selected or ["🧠 Мысль"], date, edit=True, user_notion_id=user_notion_id)
+            await _save_note(query.message, text, selected or ["🧠 Мысль"], date, edit=True, user_id=user_id)
             return
         _pending[uid]["chosen"] = list(selected)
         await query.message.edit_text("Выбери теги (можно несколько):", reply_markup=pick_keyboard(uid, existing))
@@ -204,11 +204,11 @@ async def handle_note_callback(query: CallbackQuery) -> None:
     elif data.startswith("opt_done:"):
         chosen = _pending.get(uid, {}).get("chosen", selected or ["🧠 Мысль"])
         del _pending[uid]
-        await _save_note(query.message, text, chosen, date, edit=True, user_notion_id=user_notion_id)
+        await _save_note(query.message, text, chosen, date, edit=True, user_id=user_id)
 
     elif data.startswith("opt_skip:"):
         del _pending[uid]
-        await _save_note(query.message, text, selected or [], date, edit=True, user_notion_id=user_notion_id)
+        await _save_note(query.message, text, selected or [], date, edit=True, user_id=user_id)
 
 
 async def _save_note(
@@ -217,9 +217,9 @@ async def _save_note(
     tags: List[str],
     date: str,
     edit: bool = False,
-    user_notion_id: str = "",
+    user_id: str = "",
 ) -> None:
-    result = await _repo.add(text=text, tags=tags, date=date, user_notion_id=user_notion_id)
+    result = await _repo.add(text=text, tags=tags, date=date, user_id=user_id)
     tags_str = ", ".join(tags) if tags else "нет"
     reply = f"💡 Заметка сохранена! Теги: {tags_str}" if result else "⚠️ Ошибка записи."
     if result:
@@ -230,13 +230,13 @@ async def _save_note(
         await message.answer(reply)
 
 
-async def handle_edit_note(message: Message, data: dict, user_notion_id: str) -> None:
+async def handle_edit_note(message: Message, data: dict, user_id: str) -> None:
     hint = (data.get("hint") or "последняя").strip()
     new_value = (data.get("new_value") or "").strip()
     if not new_value:
         await message.answer("❌ Не указан новый тег")
         return
-    note = await _repo.find_for_edit(hint, user_notion_id=user_notion_id)
+    note = await _repo.find_for_edit(hint, user_id=user_id)
     if not note:
         await message.answer("❌ Заметка не найдена")
         return
@@ -275,9 +275,9 @@ _ADHD_TIPS = [
 ]
 
 
-async def send_notes_digest(bot, user_tg_id: int, user_notion_id: str) -> None:
+async def send_notes_digest(bot, user_tg_id: int, user_id: str) -> None:
     """Напоминание о неразобранных заметках (>7 дней)."""
-    notes_list = await _repo.find_older_than_days(user_notion_id=user_notion_id, days=7)
+    notes_list = await _repo.find_older_than_days(user_id=user_id, days=7)
     if not notes_list:
         return
 
@@ -311,8 +311,8 @@ async def send_notes_digest_all(bot) -> None:
             if not user_data.get("permissions", {}).get("nexus", False):
                 logger.info("send_notes_digest_all: skip tg_id=%s (no nexus permission)", tg_id)
                 continue
-            user_notion_id = user_data.get("notion_page_id", "")
-            await send_notes_digest(bot, tg_id, user_notion_id)
+            user_id = user_data.get("notion_page_id", "")
+            await send_notes_digest(bot, tg_id, user_id)
         except Exception as e:
             logger.error("send_notes_digest_all: tg_id=%s error: %s", tg_id, e)
 
@@ -320,7 +320,7 @@ async def send_notes_digest_all(bot) -> None:
 async def handle_note_search(
     message: Message,
     data,  # dict с "query" или строка (legacy)
-    user_notion_id: str = "",
+    user_id: str = "",
 ) -> None:
     """Поиск заметок с пагинацией + дайджест неразобранных."""
     import asyncio as _asyncio
@@ -332,11 +332,11 @@ async def handle_note_search(
         q = (data or "").strip()
 
     if not q:
-        combined = await _repo.list_recent(user_notion_id=user_notion_id, limit=50)
+        combined = await _repo.list_recent(user_id=user_id, limit=50)
     else:
         tag_results, title_results = await _asyncio.gather(
-            _repo.search_by_tag(q, user_notion_id),
-            _repo.search_by_title(q, user_notion_id),
+            _repo.search_by_tag(q, user_id),
+            _repo.search_by_title(q, user_id),
         )
         seen_ids: set = set()
         combined = []
@@ -391,7 +391,7 @@ async def handle_note_search(
     await message.answer(get_page_text(uid), reply_markup=get_page_keyboard(uid), parse_mode="HTML")
 
 
-async def handle_note_delete(message: Message, data: dict, user_notion_id: str = "") -> None:
+async def handle_note_delete(message: Message, data: dict, user_id: str = "") -> None:
     """Удалить заметки из последнего дайджеста по ключевому слову."""
     uid = message.from_user.id
     hint = (data.get("hint") or "").strip().lower()

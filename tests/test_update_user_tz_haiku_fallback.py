@@ -40,7 +40,7 @@ async def test_niche_city_syncs_both_tz_and_city_via_haiku():
          patch.object(loc.PgMemoryRepo, "find_by_exact_key", AsyncMock(return_value=[])), \
          patch.object(loc, "_invalidate_weather_cache"), \
          patch.object(tasks_mod, "ask_claude", haiku):
-        await tasks_mod._update_user_tz(msg, "я в улан-баторе", user_notion_id="u-9")
+        await tasks_mod._update_user_tz(msg, "я в улан-баторе", user_id="u-9")
 
     written = {c.kwargs["key"]: c.kwargs["fact"] for c in upsert.call_args_list}
     assert written == {"tz_555": "8", "city_555": "Ulaanbaatar"}
@@ -60,7 +60,7 @@ async def test_unclear_location_asks_for_clarification_and_writes_nothing():
          patch.object(loc.PgMemoryRepo, "find_by_exact_key", AsyncMock(return_value=[])), \
          patch.object(loc, "_invalidate_weather_cache"), \
          patch.object(tasks_mod, "ask_claude", haiku):
-        await tasks_mod._update_user_tz(msg, "я где-то там", user_notion_id="u-9")
+        await tasks_mod._update_user_tz(msg, "я где-то там", user_id="u-9")
 
     upsert.assert_not_awaited()
     msg.answer.assert_awaited_once()
@@ -83,7 +83,7 @@ async def test_haiku_infra_failure_degrades_gracefully_not_as_unclear():
          patch.object(loc.PgMemoryRepo, "find_by_exact_key", AsyncMock(return_value=[])), \
          patch.object(loc, "_invalidate_weather_cache"), \
          patch.object(tasks_mod, "ask_claude", haiku):
-        await tasks_mod._update_user_tz(msg, "я в нарнии", user_notion_id="u-9")
+        await tasks_mod._update_user_tz(msg, "я в нарнии", user_id="u-9")
 
     written = {c.kwargs["key"]: c.kwargs["fact"] for c in upsert.call_args_list}
     assert written == {"tz_557": "3"}   # старый дефолт МСК, city_ не трогаем (matched_city=None)

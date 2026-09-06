@@ -33,7 +33,7 @@ async def test_classify_prompt_enriched_with_known_positions():
 
     with patch("core.repos.memory_repo._repo.find_by_key_prefixes", AsyncMock(return_value=mems)), \
          patch.object(clf, "ask_claude", side_effect=fake_ask):
-        res = await clf.classify("коммуналка гай 8к", user_notion_id="u-1")
+        res = await clf.classify("коммуналка гай 8к", user_id="u-1")
 
     assert res[0]["category"] == "📦 Разовые"
     sys = captured["system"]
@@ -57,8 +57,8 @@ async def test_classify_repeat_expense_same_position_still_matches():
 
     with patch("core.repos.memory_repo._repo.find_by_key_prefixes", AsyncMock(return_value=mems)), \
          patch.object(clf, "ask_claude", side_effect=fake_ask):
-        await clf.classify("коммуналка гай 8к", user_notion_id="u-1")
-        await clf.classify("коммуналка гай 10к", user_notion_id="u-1")
+        await clf.classify("коммуналка гай 8к", user_id="u-1")
+        await clf.classify("коммуналка гай 10к", user_id="u-1")
 
     assert all("коммуналка Гай" in s for s in seen)
     assert len(seen) == 2
@@ -75,7 +75,7 @@ async def test_classify_no_positions_prompt_not_enriched():
 
     with patch("core.repos.memory_repo._repo.find_by_key_prefixes", AsyncMock(return_value=[])), \
          patch.object(clf, "ask_claude", side_effect=fake_ask):
-        res = await clf.classify("такси 500", user_notion_id="u-1")
+        res = await clf.classify("такси 500", user_id="u-1")
 
     assert res[0]["category"] == "🚕 Транспорт"
     assert "СОПОСТАВЛЕНИЕ ТРАТЫ С ИЗВЕСТНЫМИ РАСХОДАМИ" not in captured["system"]
@@ -83,7 +83,7 @@ async def test_classify_no_positions_prompt_not_enriched():
 
 @pytest.mark.asyncio
 async def test_classify_without_notion_id_skips_memory_lookup():
-    """Без user_notion_id — не ходим в Память вообще."""
+    """Без user_id — не ходим в Память вообще."""
     m_prefix = AsyncMock(return_value=[])
 
     async def fake_ask(text, system="", **kw):

@@ -104,7 +104,7 @@ async def test_card_edit_updates_cards_context_interp_rag_and_confirms():
             st.enter_context(p)
         await handle_triplet_correction(
             msg, "королева кубков, а не король",
-            {"triplet_short_id": "abc"}, user_notion_id="u",
+            {"triplet_short_id": "abc"}, user_id="u",
         )
 
     # 1) данные карт обновлены (canonical-EN)
@@ -134,7 +134,7 @@ async def test_text_only_edit_does_not_touch_cards():
         for p in _correction_patches(repo, get_ctx, None, rag):  # None = текстовая правка
             st.enter_context(p)
         await handle_triplet_correction(
-            msg, "перепиши мягче", {"triplet_short_id": "abc"}, user_notion_id="u",
+            msg, "перепиши мягче", {"triplet_short_id": "abc"}, user_id="u",
         )
 
     repo.update_cards.assert_not_awaited()
@@ -193,7 +193,7 @@ async def test_session_reply_routes_to_triplet_correction_not_new_session():
                AsyncMock(return_value={"page_type": "session", "page_id": "7", "bot": "arcana"})), \
          patch("arcana.handlers.sessions.correct_triplet_by_id", spy), \
          patch("arcana.handlers.reply_update.react", AsyncMock()):
-        handled = await ru.handle_reply_update(msg, user_notion_id="u")
+        handled = await ru.handle_reply_update(msg, user_id="u")
     assert handled is True, "reply должен быть обработан как правка"
     spy.assert_awaited_once()
     # прокинут page_id из mapping и текст правки

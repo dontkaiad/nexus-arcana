@@ -1,7 +1,7 @@
 """tests/test_cmd_tasks_pg.py — /tasks (cmd_tasks) читает задачи из PG (_repo.active).
 
 Покрытие:
-- cmd_tasks зовёт _repo.active(user_notion_id), НЕ query_pages;
+- cmd_tasks зовёт _repo.active(user_id), НЕ query_pages;
 - категоризация overdue / today / daily / other по PG Task-объектам;
 - fail-closed: пустой user → не листит, active не вызывается.
 """
@@ -61,10 +61,10 @@ async def test_cmd_tasks_reads_pg_and_categorizes(mock_message):
                AsyncMock(return_value=_TEST_TZ_OFFSET)), \
          patch("nexus.handlers.streaks.get_streak",
                MagicMock(return_value={"streak": 2, "best": 4})):
-        await cmd_tasks(msg, user_notion_id="u-1")
+        await cmd_tasks(msg, user_id="u-1")
 
     # читали PG, не Notion
-    m_active.assert_awaited_once_with(user_notion_id="u-1")
+    m_active.assert_awaited_once_with(user_id="u-1")
     m_qp.assert_not_called()
 
     # собираем весь вывод (может быть несколько answer-чанков)
@@ -90,7 +90,7 @@ async def test_cmd_tasks_fail_closed_empty_user(mock_message):
     msg = mock_message("/tasks")
 
     with patch("nexus.repos.tasks_repo._repo.active", AsyncMock()) as m_active:
-        await cmd_tasks(msg, user_notion_id="")
+        await cmd_tasks(msg, user_id="")
 
     m_active.assert_not_called()
     txt = msg.answer.call_args.args[0]

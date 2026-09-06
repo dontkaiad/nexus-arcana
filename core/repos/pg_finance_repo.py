@@ -56,7 +56,7 @@ class BudgetEntry:
     type_: str = ""
     source: str = ""
     date: str = ""
-    user_notion_id: str = ""
+    user_id: str = ""
 
 
 @dataclass
@@ -69,7 +69,7 @@ class PnlEntry:
     type_: str = ""
     source: str = ""
     date: str = ""
-    user_notion_id: str = ""
+    user_id: str = ""
 
 
 def _row_to_budget(row) -> BudgetEntry:
@@ -81,7 +81,7 @@ def _row_to_budget(row) -> BudgetEntry:
         type_=row.type_ or "",
         source=row.source or "",
         date=_parse_date(row.date),
-        user_notion_id=row.user_notion_id or "",
+        user_id=row.user_id or "",
     )
 
 
@@ -94,7 +94,7 @@ def _row_to_pnl(row) -> PnlEntry:
         type_=row.type_ or "",
         source=row.source or "",
         date=_parse_date(row.date),
-        user_notion_id=row.user_notion_id or "",
+        user_id=row.user_id or "",
     )
 
 
@@ -113,7 +113,7 @@ def _type_cond(table, type_filter: str):
 # ── PgNexusBudgetRepo ──────────────────────────────────────────────────────────
 
 def _nb_add_sync(description: str, amount: float, category: str, type_: str,
-                  source: str, date_val, user_notion_id: str) -> str:
+                  source: str, date_val, user_id: str) -> str:
     ins = nexus_budget.insert().values(
         description=description,
         amount=amount,
@@ -121,7 +121,7 @@ def _nb_add_sync(description: str, amount: float, category: str, type_: str,
         type_=type_,
         source=source,
         date=date_val,
-        user_notion_id=user_notion_id,
+        user_id=user_id,
     )
     with _get_engine().begin() as conn:
         result = conn.execute(ins)
@@ -130,9 +130,9 @@ def _nb_add_sync(description: str, amount: float, category: str, type_: str,
 
 def _nb_query_sync(date_from: str, date_to: str, type_: Optional[str],
                     category: Optional[str], page_size: int,
-                    user_notion_id: str = "") -> List[BudgetEntry]:
+                    user_id: str = "") -> List[BudgetEntry]:
     # fail-closed: никогда не агрегируем данные разных пользователей (#139)
-    if not user_notion_id:
+    if not user_id:
         return []
     conds = [
         nexus_budget.c.date >= date_from,
@@ -142,8 +142,8 @@ def _nb_query_sync(date_from: str, date_to: str, type_: Optional[str],
         conds.append(nexus_budget.c.type_ == type_)
     if category:
         conds.append(nexus_budget.c.category == category)
-    if user_notion_id:
-        conds.append(nexus_budget.c.user_notion_id == user_notion_id)
+    if user_id:
+        conds.append(nexus_budget.c.user_id == user_id)
     q = (
         select(nexus_budget)
         .where(and_(*conds))
@@ -156,13 +156,13 @@ def _nb_query_sync(date_from: str, date_to: str, type_: Optional[str],
 
 
 def _nb_search_desc_sync(text: str, page_size: int,
-                          user_notion_id: str = "") -> List[BudgetEntry]:
+                          user_id: str = "") -> List[BudgetEntry]:
     # fail-closed: никогда не возвращаем данные без привязки к юзеру (#139)
-    if not user_notion_id:
+    if not user_id:
         return []
     conds = [nexus_budget.c.description.ilike(f"%{text}%")]
-    if user_notion_id:
-        conds.append(nexus_budget.c.user_notion_id == user_notion_id)
+    if user_id:
+        conds.append(nexus_budget.c.user_id == user_id)
     q = (
         select(nexus_budget)
         .where(and_(*conds))
@@ -176,9 +176,9 @@ def _nb_search_desc_sync(text: str, page_size: int,
 
 def _nb_query_month_sync(month: str, description_filter: str,
                           type_filter: str,
-                          user_notion_id: str = "") -> List[BudgetEntry]:
+                          user_id: str = "") -> List[BudgetEntry]:
     # fail-closed: никогда не агрегируем данные разных пользователей (#139)
-    if not user_notion_id:
+    if not user_id:
         return []
     d_from, d_to = _month_range(month)
     conds = [
@@ -190,8 +190,8 @@ def _nb_query_month_sync(month: str, description_filter: str,
         conds.append(tc)
     if description_filter:
         conds.append(nexus_budget.c.description.ilike(f"%{description_filter}%"))
-    if user_notion_id:
-        conds.append(nexus_budget.c.user_notion_id == user_notion_id)
+    if user_id:
+        conds.append(nexus_budget.c.user_id == user_id)
     q = (
         select(nexus_budget)
         .where(and_(*conds))
@@ -233,34 +233,34 @@ def _nb_latest_by_type_sync(target_type: str) -> Optional[str]:
 class PgNexusBudgetRepo:
     async def add_entry(self, description: str, amount: float, category: str,
                          type_: str, source: str, date_iso: str,
-                         user_notion_id: str) -> str:
+                         user_id: str) -> str:
         try:
             d = date.fromisoformat(date_iso[:10])
         except ValueError:
             d = None
         return await asyncio.to_thread(
-            _nb_add_sync, description, amount, category, type_, source, d, user_notion_id
+            _nb_add_sync, description, amount, category, type_, source, d, user_id
         )
 
     async def query(self, date_from: str, date_to: str, type_: Optional[str] = None,
                      category: Optional[str] = None, page_size: int = 200,
-                     user_notion_id: str = "") -> List[BudgetEntry]:
+                     user_id: str = "") -> List[BudgetEntry]:
         return await asyncio.to_thread(
-            _nb_query_sync, date_from, date_to, type_, category, page_size, user_notion_id
+            _nb_query_sync, date_from, date_to, type_, category, page_size, user_id
         )
 
     async def query_month(self, month: str, description_filter: str = "",
                            type_filter: str = "",
-                           user_notion_id: str = "") -> List[BudgetEntry]:
+                           user_id: str = "") -> List[BudgetEntry]:
         return await asyncio.to_thread(
-            _nb_query_month_sync, month, description_filter, type_filter, user_notion_id
+            _nb_query_month_sync, month, description_filter, type_filter, user_id
         )
 
     async def search_description(self, text: str, page_size: int = 5,
-                                  user_notion_id: str = "") -> List[BudgetEntry]:
+                                  user_id: str = "") -> List[BudgetEntry]:
         if not text:
             return []
-        return await asyncio.to_thread(_nb_search_desc_sync, text, page_size, user_notion_id)
+        return await asyncio.to_thread(_nb_search_desc_sync, text, page_size, user_id)
 
     async def update(self, row_id: str, **fields) -> bool:
         return await asyncio.to_thread(_nb_update_sync, row_id, **fields)
@@ -272,7 +272,7 @@ class PgNexusBudgetRepo:
 # ── PgArcanaPnlRepo ───────────────────────────────────────────────────────────
 
 def _ap_add_sync(description: str, amount: float, category: str, type_: str,
-                  source: str, date_val, user_notion_id: str) -> str:
+                  source: str, date_val, user_id: str) -> str:
     ins = arcana_pnl.insert().values(
         description=description,
         amount=amount,
@@ -280,7 +280,7 @@ def _ap_add_sync(description: str, amount: float, category: str, type_: str,
         type_=type_,
         source=source,
         date=date_val,
-        user_notion_id=user_notion_id,
+        user_id=user_id,
     )
     with _get_engine().begin() as conn:
         result = conn.execute(ins)
@@ -289,9 +289,9 @@ def _ap_add_sync(description: str, amount: float, category: str, type_: str,
 
 def _ap_query_sync(date_from: str, date_to: str, type_: Optional[str],
                     category: Optional[str], page_size: int,
-                    user_notion_id: str = "") -> List[PnlEntry]:
+                    user_id: str = "") -> List[PnlEntry]:
     # fail-closed: никогда не агрегируем данные разных пользователей (#139)
-    if not user_notion_id:
+    if not user_id:
         return []
     conds = [
         arcana_pnl.c.date >= date_from,
@@ -301,8 +301,8 @@ def _ap_query_sync(date_from: str, date_to: str, type_: Optional[str],
         conds.append(arcana_pnl.c.type_ == type_)
     if category:
         conds.append(arcana_pnl.c.category == category)
-    if user_notion_id:
-        conds.append(arcana_pnl.c.user_notion_id == user_notion_id)
+    if user_id:
+        conds.append(arcana_pnl.c.user_id == user_id)
     q = (
         select(arcana_pnl)
         .where(and_(*conds))
@@ -316,9 +316,9 @@ def _ap_query_sync(date_from: str, date_to: str, type_: Optional[str],
 
 def _ap_query_month_sync(month: str, description_filter: str,
                           type_filter: str,
-                          user_notion_id: str = "") -> List[PnlEntry]:
+                          user_id: str = "") -> List[PnlEntry]:
     # fail-closed: никогда не агрегируем данные разных пользователей (#139)
-    if not user_notion_id:
+    if not user_id:
         return []
     d_from, d_to = _month_range(month)
     conds = [
@@ -330,8 +330,8 @@ def _ap_query_month_sync(month: str, description_filter: str,
         conds.append(tc)
     if description_filter:
         conds.append(arcana_pnl.c.description.ilike(f"%{description_filter}%"))
-    if user_notion_id:
-        conds.append(arcana_pnl.c.user_notion_id == user_notion_id)
+    if user_id:
+        conds.append(arcana_pnl.c.user_id == user_id)
     q = (
         select(arcana_pnl)
         .where(and_(*conds))
@@ -372,27 +372,27 @@ def _ap_latest_by_type_sync(target_type: str) -> Optional[str]:
 class PgArcanaPnlRepo:
     async def add_entry(self, description: str, amount: float, category: str,
                          type_: str, source: str, date_iso: str,
-                         user_notion_id: str) -> str:
+                         user_id: str) -> str:
         try:
             d = date.fromisoformat(date_iso[:10])
         except ValueError:
             d = None
         return await asyncio.to_thread(
-            _ap_add_sync, description, amount, category, type_, source, d, user_notion_id
+            _ap_add_sync, description, amount, category, type_, source, d, user_id
         )
 
     async def query(self, date_from: str, date_to: str, type_: Optional[str] = None,
                      category: Optional[str] = None, page_size: int = 200,
-                     user_notion_id: str = "") -> List[PnlEntry]:
+                     user_id: str = "") -> List[PnlEntry]:
         return await asyncio.to_thread(
-            _ap_query_sync, date_from, date_to, type_, category, page_size, user_notion_id
+            _ap_query_sync, date_from, date_to, type_, category, page_size, user_id
         )
 
     async def query_month(self, month: str, description_filter: str = "",
                            type_filter: str = "",
-                           user_notion_id: str = "") -> List[PnlEntry]:
+                           user_id: str = "") -> List[PnlEntry]:
         return await asyncio.to_thread(
-            _ap_query_month_sync, month, description_filter, type_filter, user_notion_id
+            _ap_query_month_sync, month, description_filter, type_filter, user_id
         )
 
     async def update(self, row_id: str, **fields) -> bool:

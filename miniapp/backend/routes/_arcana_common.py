@@ -55,13 +55,13 @@ def _resolve_card_en(raw: str) -> str:
 
 # ── Client name map ─────────────────────────────────────────────────────────
 
-async def load_clients_map(user_notion_id: str) -> dict:
+async def load_clients_map(user_id: str) -> dict:
     """Загружает всех клиентов из PG, возвращает {pg_client_id: {...details...}}.
 
     Keyed by PG integer string. Notion-UUID-keyed callers (Works) will get
     degraded client names until Works domain is migrated to PG.
     """
-    clients = await _common_clients_repo.list_all(user_notion_id)
+    clients = await _common_clients_repo.list_all(user_id)
     out: dict = {}
     for c in clients:
         type_full = TYPE_CODE_TO_FULL.get(c.type_code or "", "")

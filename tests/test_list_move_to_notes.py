@@ -42,7 +42,7 @@ async def test_list_move_to_notes_archives_item_and_creates_note():
          patch("core.list_manager._nexus_repo.get_by_id", AsyncMock(return_value=item)), \
          patch("nexus.repos.notes_repo.NotesRepo.add", AsyncMock(return_value="note-1")) as note_add, \
          patch("core.repos.lists_repo.ListsRepo.archive", AsyncMock(return_value=1)) as archive:
-        handled = await ru.handle_reply_update(msg, user_notion_id="u1")
+        handled = await ru.handle_reply_update(msg, user_id="u1")
 
     assert handled is True
     note_add.assert_awaited_once()
@@ -66,7 +66,7 @@ async def test_list_move_to_notes_falls_back_to_arcana_repo():
          patch("core.list_manager._arcana_repo.get_by_id", AsyncMock(return_value=item)), \
          patch("nexus.repos.notes_repo.NotesRepo.add", AsyncMock(return_value="note-2")) as note_add, \
          patch("core.repos.lists_repo.ListsRepo.archive", AsyncMock(return_value=1)) as archive:
-        handled = await ru.handle_reply_update(msg, user_notion_id="u1")
+        handled = await ru.handle_reply_update(msg, user_id="u1")
 
     assert handled is True
     assert note_add.await_args.kwargs["text"] == "Свеча ритуальная"
@@ -85,7 +85,7 @@ async def test_list_move_to_notes_note_create_failure_reports_error():
          patch("core.list_manager._nexus_repo.get_by_id", AsyncMock(return_value=item)), \
          patch("nexus.repos.notes_repo.NotesRepo.add", AsyncMock(return_value=None)), \
          patch("core.repos.lists_repo.ListsRepo.archive", AsyncMock()) as archive:
-        handled = await ru.handle_reply_update(msg, user_notion_id="u1")
+        handled = await ru.handle_reply_update(msg, user_id="u1")
 
     assert handled is True
     archive.assert_not_called()  # не архивируем item, если заметка не создалась
@@ -106,7 +106,7 @@ async def test_list_item_not_found_anywhere_falls_through():
          patch("core.list_manager._nexus_repo.get_by_id", AsyncMock(return_value=None)), \
          patch("core.list_manager._arcana_repo.get_by_id", AsyncMock(return_value=None)), \
          patch("nexus.repos.notes_repo.NotesRepo.add", AsyncMock()) as note_add:
-        handled = await ru.handle_reply_update(msg, user_notion_id="u1")
+        handled = await ru.handle_reply_update(msg, user_id="u1")
 
     assert handled is True
     note_add.assert_not_awaited()
@@ -124,7 +124,7 @@ async def test_list_move_flag_false_falls_through_to_field_update():
     with patch("nexus.handlers.reply_update.get_message_page", AsyncMock(return_value=mapping)), \
          patch("nexus.handlers.reply_update.parse_reply", AsyncMock(return_value={"move_to_notes": False})), \
          patch("core.list_manager._nexus_repo.get_by_id", AsyncMock()) as get_by_id:
-        handled = await ru.handle_reply_update(msg, user_notion_id="u1")
+        handled = await ru.handle_reply_update(msg, user_id="u1")
 
     assert handled is True
     get_by_id.assert_not_awaited()  # move_to_notes=False → _move_list_item_to_notes не вызывается
@@ -162,7 +162,7 @@ async def test_handle_list_buy_registers_last_created_item_for_reply():
              {"id": "item-2", "name": "Яйца", "category": "💳 Прочее"},
          ])), \
          patch("core.message_pages.save_message_page", AsyncMock()) as save_mp:
-        await nx.handle_list_buy(msg, {"text": msg.text}, user_notion_id="u1")
+        await nx.handle_list_buy(msg, {"text": msg.text}, user_id="u1")
 
     save_mp.assert_awaited_once_with(
         chat_id=555, message_id=777, page_id="item-2", page_type="list", bot="nexus",
@@ -191,6 +191,6 @@ async def test_handle_list_buy_no_registration_when_nothing_created():
              {"name": "Молоко"},
          ])), \
          patch("core.message_pages.save_message_page", AsyncMock()) as save_mp:
-        await nx.handle_list_buy(msg, {"text": msg.text}, user_notion_id="u1")
+        await nx.handle_list_buy(msg, {"text": msg.text}, user_id="u1")
 
     save_mp.assert_not_awaited()

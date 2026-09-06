@@ -3,7 +3,7 @@
 core_identity is the PG source of truth for Telegram user identity,
 replacing Notion 🪪 Пользователи DB as the read-path for user resolution.
 
-notion_id TEXT PRIMARY KEY matches the existing user_notion_id TEXT column
+notion_id TEXT PRIMARY KEY matches the existing user_id TEXT column
 in all other PG tables (owner-key pattern — no FK constraint needed).
 """
 from __future__ import annotations

@@ -107,9 +107,9 @@ async def test_check_budget_limit_period_uses_user_tz(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_check_budget_limit_passes_user_notion_id(monkeypatch):
-    """_check_budget_limit должен передавать user_notion_id в query_records —
-    иначе запрос ищет записи с пустым user_notion_id и period_total всегда 0
+async def test_check_budget_limit_passes_user_id(monkeypatch):
+    """_check_budget_limit должен передавать user_id в query_records —
+    иначе запрос ищет записи с пустым user_id и period_total всегда 0
     (баг: строка вызова была без этого аргумента, хотя функция его получает)."""
     monkeypatch.setattr(finance, "datetime", _frozen_dt(_INSTANT))
 
@@ -130,13 +130,13 @@ async def test_check_budget_limit_passes_user_notion_id(monkeypatch):
          patch.object(finance, "_calc_free_remaining", AsyncMock(return_value=None)):
         await finance._check_budget_limit("🍜 Продукты", msg, "u-1", amount=500, tz_offset=5)
 
-    assert seen["user_notion_id"] == "u-1"
+    assert seen["user_id"] == "u-1"
 
 
 @pytest.mark.asyncio
 async def test_check_budget_limit_period_total_isolated_between_users(monkeypatch):
     """period_total считает только записи ТЕКУЩЕГО пользователя. Регресс: раньше
-    (без user_notion_id в query_records) чужие записи той же категории
+    (без user_id в query_records) чужие записи той же категории
     подмешивались бы в сумму — здесь два пользователя с одинаковыми
     категориями/суммами не должны смешиваться."""
     from core.repos import finance_repo as fr
@@ -151,12 +151,12 @@ async def test_check_budget_limit_period_total_isolated_between_users(monkeypatc
             date="2026-06-15",
         )
 
-    async def fake_nexus_query(date_from, date_to, type_, category, page_size, user_notion_id=""):
-        if user_notion_id == "u-1":
+    async def fake_nexus_query(date_from, date_to, type_, category, page_size, user_id=""):
+        if user_id == "u-1":
             return [make_entry("u1-a"), make_entry("u1-b")]
         return []  # другой пользователь / без фильтра — ничего своего не находит
 
-    async def fake_arcana_query(date_from, date_to, type_, category, page_size, user_notion_id=""):
+    async def fake_arcana_query(date_from, date_to, type_, category, page_size, user_id=""):
         return []
 
     msg = MagicMock()

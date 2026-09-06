@@ -1,6 +1,6 @@
 """core/user_manager.py — Управление пользователями через core_identity (PG).
 
-get_user() / check_permission() / get_user_notion_id() — публичный API без изменений.
+get_user() / check_permission() / get_user_id() — публичный API без изменений.
 Бэкенд переключён с Notion 🪪 Пользователи на PG core_identity (ADR-0007).
 """
 from __future__ import annotations
@@ -60,7 +60,7 @@ async def check_permission(tg_id: int, feature: str) -> bool:
     return user.get("permissions", {}).get(feature, False)
 
 
-async def get_user_notion_id(tg_id: int) -> Optional[str]:
+async def get_user_id(tg_id: int) -> Optional[str]:
     """Вернуть Notion page ID пользователя для Relation полей."""
     user = await get_user(tg_id)
     if user is None:

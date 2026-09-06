@@ -97,7 +97,7 @@ def _call():
 
 @pytest.mark.asyncio
 async def test_delete_removes_vector_and_clears_theme(monkeypatch):
-    monkeypatch.setattr("core.user_manager.get_user_notion_id", AsyncMock(return_value="u1"))
+    monkeypatch.setattr("core.user_manager.get_user_id", AsyncMock(return_value="u1"))
     monkeypatch.setattr(S, "_resolve_triplet_page", AsyncMock(return_value=_entry()))
     monkeypatch.setattr(S._repo, "archive", AsyncMock(return_value=True))
     monkeypatch.setattr(S._repo, "clear_session_summary", AsyncMock())
@@ -116,7 +116,7 @@ async def test_delete_removes_vector_and_clears_theme(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_delete_survives_rag_failure(monkeypatch):
-    monkeypatch.setattr("core.user_manager.get_user_notion_id", AsyncMock(return_value="u1"))
+    monkeypatch.setattr("core.user_manager.get_user_id", AsyncMock(return_value="u1"))
     monkeypatch.setattr(S, "_resolve_triplet_page", AsyncMock(return_value=_entry()))
     monkeypatch.setattr(S._repo, "archive", AsyncMock(return_value=True))
     monkeypatch.setattr(S._repo, "clear_session_summary", AsyncMock())

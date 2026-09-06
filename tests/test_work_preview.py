@@ -122,7 +122,7 @@ async def test_clarification_updates_deadline_and_edits_preview():
         "title": "Ритуал", "category": "✨ Ритуал", "priority": "Важно",
         "work_type": "🌟 Личная", "client_name": None, "client_id": None,
         "deadline": None, "reminder": None,
-        "msg_id": 999, "chat_id": 100, "user_notion_id": "u",
+        "msg_id": 999, "chat_id": 100, "user_id": "u",
     })
 
     msg = _make_message(uid=42, text="через 2 дня")
@@ -147,7 +147,7 @@ async def test_work_save_creates_notion_and_schedules_reminder():
         "title": "Ритуал", "category": "✨ Ритуал", "priority": "Важно",
         "work_type": "🤝 Клиентская", "client_name": "Маша", "client_id": "c1",
         "deadline": "2026-05-05", "reminder": None,
-        "msg_id": 999, "chat_id": 100, "user_notion_id": "u",
+        "msg_id": 999, "chat_id": 100, "user_id": "u",
     })
 
     call = MagicMock()

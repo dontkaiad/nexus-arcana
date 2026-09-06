@@ -31,7 +31,7 @@ async def test_prompt_sent_when_memory_match_found(mock_message):
         await sess_mod._maybe_prompt_subject_match(
             msg, 67686090,
             subject_name="Вадим", session_name="Вадим — диагностика",
-            client_id=None, user_notion_id="u-1", page_ids=["1", "2"],
+            client_id=None, user_id="u-1", page_ids=["1", "2"],
         )
 
     msg.answer.assert_awaited_once()
@@ -53,7 +53,7 @@ async def test_no_prompt_when_no_memory_match(mock_message):
         await sess_mod._maybe_prompt_subject_match(
             msg, 67686090,
             subject_name="Незнакомец", session_name="Незнакомец — тема",
-            client_id=None, user_notion_id="u-1", page_ids=["1"],
+            client_id=None, user_id="u-1", page_ids=["1"],
         )
 
     msg.answer.assert_not_awaited()

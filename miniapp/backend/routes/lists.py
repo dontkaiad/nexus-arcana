@@ -6,7 +6,7 @@ from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
-from core.user_manager import get_user_notion_id
+from core.user_manager import get_user_id
 from nexus.repos.pg_tasks_repo import PgTasksRepo as _PgTasksRepoClass
 _tasks_repo = _PgTasksRepoClass()
 from core.repos.pg_nexus_lists_repo import (
@@ -129,10 +129,10 @@ async def get_lists(
     if type not in _TYPE_MAP:
         raise HTTPException(status_code=400, detail=f"type must be one of {sorted(_TYPE_MAP)}")
 
-    user_notion_id = (await get_user_notion_id(tg_id)) or ""
+    user_id = (await get_user_id(tg_id)) or ""
     try:
         pg_items = await _nexus_lists_repo.get_summary_items(
-            user_notion_id, list_type=_TYPE_MAP[type]
+            user_id, list_type=_TYPE_MAP[type]
         )
     except Exception as e:
         logger.warning("lists PG query failed: %s", e)
@@ -161,7 +161,7 @@ async def get_lists(
         items.sort(key=lambda i: (i["expires"] is None, i["expires"] or ""))
 
     if type == "check" and items:
-        await _attach_parent_tasks(items, tg_id, user_notion_id)
+        await _attach_parent_tasks(items, tg_id, user_id)
         if not group:
             items = [
                 i for i in items
@@ -179,13 +179,13 @@ def _norm_title(s: str) -> str:
     return " ".join(s.lower().split())
 
 
-async def _attach_parent_tasks(items: list[dict], tg_id: int, user_notion_id: str) -> None:
+async def _attach_parent_tasks(items: list[dict], tg_id: int, user_id: str) -> None:
     groups = {_norm_title(i.get("group") or "") for i in items if (i.get("group") or "").strip()}
     if not groups:
         return
     today_date, tz_offset = await today_user_tz(tg_id)
     try:
-        pg_tasks = await _tasks_repo.list_all(user_notion_id)
+        pg_tasks = await _tasks_repo.list_all(user_id)
     except Exception as e:
         logger.warning("attach_parent_tasks query failed: %s", e)
         return

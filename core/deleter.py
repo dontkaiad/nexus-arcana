@@ -68,19 +68,19 @@ def _date_str(val) -> str:
 #   tasks → deadline, notes → date, sessions → occurred_at, rituals → occurred_at,
 #   works → deadline.
 
-async def _fetch_all(domain: str, user_notion_id: str) -> List[dict]:
+async def _fetch_all(domain: str, user_id: str) -> List[dict]:
     """Fetch all candidate records for a domain as [{id, title, date}]."""
     if domain == "tasks":
         from nexus.repos.pg_tasks_repo import PgTasksRepo
-        rows = await PgTasksRepo().list_all(user_notion_id)
+        rows = await PgTasksRepo().list_all(user_id)
         return [{"id": r.id, "title": r.title, "date": _date_str(r.deadline)} for r in rows]
     if domain == "notes":
         from nexus.repos.pg_notes_repo import PgNotesRepo
-        rows = await PgNotesRepo().list_recent(user_notion_id, limit=500)
+        rows = await PgNotesRepo().list_recent(user_id, limit=500)
         return [{"id": r.id, "title": r.title, "date": _date_str(r.date)} for r in rows]
     if domain == "sessions":
         from arcana.repos.pg_sessions_repo import PgSessionsRepo
-        rows = await PgSessionsRepo().list_all(user_notion_id)
+        rows = await PgSessionsRepo().list_all(user_id)
         return [{"id": r.id, "title": (r.session_name or r.question or "—"),
                  "date": _date_str(r.date)} for r in rows]
     if domain == "rituals":
@@ -88,11 +88,11 @@ async def _fetch_all(domain: str, user_notion_id: str) -> List[dict]:
         # field); the entry guard requires a user, but rituals isolation is
         # repo-wide. Acceptable for single-user; revisit if multi-user.
         from arcana.repos.pg_rituals_repo import PgRitualsRepo
-        rows = await PgRitualsRepo().list_all(user_notion_id=user_notion_id)
+        rows = await PgRitualsRepo().list_all(user_id=user_id)
         return [{"id": r.id, "title": r.name, "date": _date_str(r.date)} for r in rows]
     if domain == "works":
         from arcana.repos.pg_works_repo import PgWorksRepo
-        rows = await PgWorksRepo().list_all(user_notion_id)
+        rows = await PgWorksRepo().list_all(user_id)
         return [{"id": r.id, "title": r.title,
                  "date": _date_str(getattr(r, "deadline_iso", "") or getattr(r, "deadline_dt", None))}
                 for r in rows]
@@ -124,7 +124,7 @@ async def select_records(
     date: Optional[str] = None,
     month: Optional[str] = None,
     count: int = 1,
-    user_notion_id: str = "",
+    user_id: str = "",
     tz_offset: int = 3,
 ) -> List[dict]:
     """Records selected for deletion: [{id, title, date}], scope-filtered.
@@ -134,7 +134,7 @@ async def select_records(
     if domain not in SUPPORTED_DOMAINS:
         return []
     try:
-        records = await _fetch_all(domain, user_notion_id)
+        records = await _fetch_all(domain, user_id)
     except Exception as e:
         logger.error("select_records(%s): %s", domain, e)
         return []

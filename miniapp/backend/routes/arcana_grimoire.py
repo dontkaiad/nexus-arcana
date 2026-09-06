@@ -11,7 +11,7 @@ from typing import Any, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from arcana.repos.grimoire_repo import GrimoireRepo
-from core.user_manager import get_user_notion_id
+from core.user_manager import get_user_id
 
 from miniapp.backend.auth import current_user_id
 from miniapp.backend._helpers import first_emoji
@@ -46,10 +46,10 @@ async def list_grimoire(
     def _empty_categories() -> list:
         return [{"name": name, "count": 0} for name in GRIMOIRE_CATEGORY_OPTIONS]
 
-    user_notion_id = (await get_user_notion_id(tg_id)) or ""
+    user_id = (await get_user_id(tg_id)) or ""
 
     try:
-        entries = await _grimoire_repo.list_all(user_notion_id)
+        entries = await _grimoire_repo.list_all(user_id)
     except Exception as e:
         logger.warning("grimoire list_all failed: %s", e)
         return {"items": [], "categories": _empty_categories()}
@@ -101,9 +101,9 @@ async def grimoire_detail(
     entry_id: str,
     tg_id: int = Depends(current_user_id),
 ) -> dict[str, Any]:
-    user_notion_id = (await get_user_notion_id(tg_id)) or ""
+    user_id = (await get_user_id(tg_id)) or ""
     try:
-        entry = await _grimoire_repo.find_by_id(entry_id, user_notion_id)
+        entry = await _grimoire_repo.find_by_id(entry_id, user_id)
     except Exception:
         raise HTTPException(status_code=404, detail="grimoire entry not found")
     if not entry:

@@ -36,7 +36,7 @@ class MemoryRepo:
         связь: str,
         ключ: str,
         bot_label: str,
-        user_notion_id: str = "",
+        user_id: str = "",
         upsert: bool = False,
     ) -> Optional[str]:
         """Save a pre-parsed memory fact. Returns memory_id or None.
@@ -48,11 +48,11 @@ class MemoryRepo:
         try:
             if upsert:
                 pid, _ = await self._pg.upsert(
-                    fact, ключ, category, scope, связь, "manual", user_notion_id
+                    fact, ключ, category, scope, связь, "manual", user_id
                 )
                 return pid
             return await self._pg.add(
-                fact, ключ, category, scope, связь, "manual", user_notion_id
+                fact, ключ, category, scope, связь, "manual", user_id
             )
         except Exception as e:
             logger.error("MemoryRepo.save_parsed: %s", e)
@@ -66,11 +66,11 @@ class MemoryRepo:
         scope: str,
         related_to: str,
         source: str,
-        user_notion_id: str,
+        user_id: str,
     ) -> Optional[str]:
         """Lower-level add (used by save_memory directly)."""
         try:
-            return await self._pg.add(fact, key, category, scope, related_to, source, user_notion_id)
+            return await self._pg.add(fact, key, category, scope, related_to, source, user_id)
         except Exception as e:
             logger.error("MemoryRepo.add: %s", e)
             return None
@@ -83,11 +83,11 @@ class MemoryRepo:
         scope: str,
         related_to: str,
         source: str,
-        user_notion_id: str,
+        user_id: str,
     ) -> Tuple[Optional[str], bool]:
         """Upsert (find by key+category → update; else create). Returns (id, was_updated)."""
         try:
-            return await self._pg.upsert(fact, key, category, scope, related_to, source, user_notion_id)
+            return await self._pg.upsert(fact, key, category, scope, related_to, source, user_id)
         except Exception as e:
             logger.error("MemoryRepo.upsert: %s", e)
             return None, False
@@ -115,36 +115,36 @@ class MemoryRepo:
         self,
         terms: List[str],
         scope: str = "",
-        user_notion_id: str = "",
+        user_id: str = "",
         page_size: int = 10,
     ) -> List[Memory]:
-        return await self._pg.search(terms, scope, user_notion_id, page_size)
+        return await self._pg.search(terms, scope, user_id, page_size)
 
     async def find_by_category(
         self,
         category: str,
         is_current: bool = True,
         scope: str = "",
-        user_notion_id: str = "",
+        user_id: str = "",
         page_size: int = 100,
     ) -> List[Memory]:
-        return await self._pg.find_by_category(category, is_current, scope, user_notion_id, page_size)
+        return await self._pg.find_by_category(category, is_current, scope, user_id, page_size)
 
     async def find_by_key_prefixes(
         self,
         prefixes: List[str],
-        user_notion_id: str = "",
+        user_id: str = "",
     ) -> List[Memory]:
-        return await self._pg.find_by_key_prefixes(prefixes, user_notion_id)
+        return await self._pg.find_by_key_prefixes(prefixes, user_id)
 
     async def find_recent(
         self,
         is_current: Optional[bool] = None,
         scope: str = "",
-        user_notion_id: str = "",
+        user_id: str = "",
         page_size: int = 10,
     ) -> List[Memory]:
-        return await self._pg.find_recent(is_current, scope, user_notion_id, page_size)
+        return await self._pg.find_recent(is_current, scope, user_id, page_size)
 
 
 _repo = MemoryRepo()

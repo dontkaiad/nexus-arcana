@@ -53,7 +53,7 @@ class Memory:
     related_to: str = ""
     is_current: bool = True
     is_archived: bool = False
-    user_notion_id: str = ""
+    user_id: str = ""
     date: str = ""           # created_at[:10]
     updated_at: str = ""     # ISO string from updated_at column
 
@@ -75,7 +75,7 @@ def _row_to_memory(row) -> Memory:
         related_to=row.related_to or "",
         is_current=bool(row.is_current),
         is_archived=bool(row.is_archived),
-        user_notion_id=row.user_notion_id or "",
+        user_id=row.user_id or "",
         date=date_str,
         updated_at=updated_str,
     )
@@ -90,7 +90,7 @@ def _add_sync(
     scope: str,
     related_to: str,
     source: str,
-    user_notion_id: str,
+    user_id: str,
 ) -> str:
     with get_engine().begin() as conn:
         result = conn.execute(
@@ -103,7 +103,7 @@ def _add_sync(
                 related_to=related_to or "",
                 is_current=True,
                 is_archived=False,
-                user_notion_id=user_notion_id or "",
+                user_id=user_id or "",
             ).returning(memories.c.id)
         )
         return str(result.fetchone()[0])
@@ -116,7 +116,7 @@ def _upsert_sync(
     scope: str,
     related_to: str,
     source: str,
-    user_notion_id: str,
+    user_id: str,
 ) -> Tuple[str, bool]:
     """Find existing by key (+ owner), update; else create. Returns (id, was_updated).
 
@@ -128,7 +128,7 @@ def _upsert_sync(
     зависала в БД навсегда (is_current=true, показывалась в Mini App).
     key_name уже несёт достаточно семантики сам по себе (лимит_еда,
     tz_67686090, цель_вес) — категория одного и того же ключа не должна
-    определять, это ли та же запись. Также добавлен user_notion_id в матч:
+    определять, это ли та же запись. Также добавлен user_id в матч:
     без него совпадение key_name у двух РАЗНЫХ юзеров (напр. одинаковый
     сгенерированный ключ бюджетного лимита) перезаписало бы чужую запись.
     """
@@ -137,7 +137,7 @@ def _upsert_sync(
             row = conn.execute(
                 select(memories.c.id)
                 .where(memories.c.key_name == key)
-                .where(memories.c.user_notion_id == (user_notion_id or ""))
+                .where(memories.c.user_id == (user_id or ""))
                 .where(memories.c.is_archived == False)  # noqa: E712
                 .order_by(memories.c.created_at.desc())
                 .limit(1)
@@ -156,7 +156,7 @@ def _upsert_sync(
                         source=source or "manual",
                         related_to=related_to or "",
                         is_current=True,
-                        user_notion_id=user_notion_id or "",
+                        user_id=user_id or "",
                         updated_at=text("now()"),
                     )
                 )
@@ -176,7 +176,7 @@ def _upsert_sync(
             except Exception as e:
                 logger.warning("memory upsert: embedding NULL-reset failed for %s: %s", mem_id, e)
             return str(mem_id), True
-    mem_id = _add_sync(fact, key, category, scope, related_to, source, user_notion_id)
+    mem_id = _add_sync(fact, key, category, scope, related_to, source, user_id)
     return mem_id, False
 
 
@@ -307,7 +307,7 @@ def _base_active_q():
 def _search_sync(
     terms: List[str],
     scope: str = "",
-    user_notion_id: str = "",
+    user_id: str = "",
     page_size: int = 10,
 ) -> List[Memory]:
     if not terms:
@@ -321,8 +321,8 @@ def _search_sync(
     q = _base_active_q().where(or_(*conditions))
     if scope and scope != "global":
         q = q.where(or_(memories.c.scope == scope, memories.c.scope == "global"))
-    if user_notion_id:
-        q = q.where(memories.c.user_notion_id == user_notion_id)
+    if user_id:
+        q = q.where(memories.c.user_id == user_id)
     q = q.order_by(memories.c.created_at.desc()).limit(page_size)
     with get_engine().connect() as conn:
         rows = conn.execute(q).fetchall()
@@ -333,7 +333,7 @@ def _find_by_category_sync(
     category: str,
     is_current: bool = True,
     scope: str = "",
-    user_notion_id: str = "",
+    user_id: str = "",
     page_size: int = 100,
 ) -> List[Memory]:
     q = (
@@ -345,8 +345,8 @@ def _find_by_category_sync(
         q = q.where(memories.c.category == category)
     if scope and scope != "global":
         q = q.where(or_(memories.c.scope == scope, memories.c.scope == "global"))
-    if user_notion_id:
-        q = q.where(memories.c.user_notion_id == user_notion_id)
+    if user_id:
+        q = q.where(memories.c.user_id == user_id)
     q = q.order_by(memories.c.created_at.desc()).limit(page_size)
     with get_engine().connect() as conn:
         rows = conn.execute(q).fetchall()
@@ -355,7 +355,7 @@ def _find_by_category_sync(
 
 def _find_by_key_prefixes_sync(
     prefixes: List[str],
-    user_notion_id: str = "",
+    user_id: str = "",
 ) -> List[Memory]:
     """Find memories whose key_name starts with any of the given prefixes."""
     if not prefixes:
@@ -365,8 +365,8 @@ def _find_by_key_prefixes_sync(
         _base_active_q()
         .where(or_(*conditions))
     )
-    if user_notion_id:
-        q = q.where(memories.c.user_notion_id == user_notion_id)
+    if user_id:
+        q = q.where(memories.c.user_id == user_id)
     q = q.order_by(memories.c.created_at.desc()).limit(500)
     with get_engine().connect() as conn:
         rows = conn.execute(q).fetchall()
@@ -375,7 +375,7 @@ def _find_by_key_prefixes_sync(
 
 def _find_by_exact_key_sync(
     key: str,
-    user_notion_id: str = "",
+    user_id: str = "",
     page_size: int = 1,
 ) -> List[Memory]:
     """Точный матч по key_name (==), не ilike. is_current=True, не архивирована."""
@@ -383,8 +383,8 @@ def _find_by_exact_key_sync(
         _base_active_q()
         .where(memories.c.key_name == key)
     )
-    if user_notion_id:
-        q = q.where(memories.c.user_notion_id == user_notion_id)
+    if user_id:
+        q = q.where(memories.c.user_id == user_id)
     q = q.order_by(memories.c.updated_at.desc()).limit(page_size)
     with get_engine().connect() as conn:
         rows = conn.execute(q).fetchall()
@@ -394,7 +394,7 @@ def _find_by_exact_key_sync(
 def _find_recent_sync(
     is_current: Optional[bool] = None,
     scope: str = "",
-    user_notion_id: str = "",
+    user_id: str = "",
     page_size: int = 10,
 ) -> List[Memory]:
     q = select(memories).where(memories.c.is_archived == False)  # noqa: E712
@@ -402,8 +402,8 @@ def _find_recent_sync(
         q = q.where(memories.c.is_current == is_current)
     if scope and scope != "global":
         q = q.where(or_(memories.c.scope == scope, memories.c.scope == "global"))
-    if user_notion_id:
-        q = q.where(memories.c.user_notion_id == user_notion_id)
+    if user_id:
+        q = q.where(memories.c.user_id == user_id)
     q = q.order_by(memories.c.created_at.desc()).limit(page_size)
     with get_engine().connect() as conn:
         rows = conn.execute(q).fetchall()
@@ -456,10 +456,10 @@ class PgMemoryRepo:
         scope: str = "global",
         related_to: str = "",
         source: str = "manual",
-        user_notion_id: str = "",
+        user_id: str = "",
     ) -> str:
         mem_id = await asyncio.to_thread(
-            _add_sync, fact, key, category, scope, related_to, source, user_notion_id
+            _add_sync, fact, key, category, scope, related_to, source, user_id
         )
         if mem_id:
             _spawn_index(mem_id, fact, related_to, category)
@@ -473,10 +473,10 @@ class PgMemoryRepo:
         scope: str = "global",
         related_to: str = "",
         source: str = "manual",
-        user_notion_id: str = "",
+        user_id: str = "",
     ) -> Tuple[str, bool]:
         mem_id, was_updated = await asyncio.to_thread(
-            _upsert_sync, fact, key, category, scope, related_to, source, user_notion_id
+            _upsert_sync, fact, key, category, scope, related_to, source, user_id
         )
         if mem_id:
             _spawn_index(mem_id, fact, related_to, category)
@@ -517,45 +517,45 @@ class PgMemoryRepo:
         self,
         terms: List[str],
         scope: str = "",
-        user_notion_id: str = "",
+        user_id: str = "",
         page_size: int = 10,
     ) -> List[Memory]:
-        return await asyncio.to_thread(_search_sync, terms, scope, user_notion_id, page_size)
+        return await asyncio.to_thread(_search_sync, terms, scope, user_id, page_size)
 
     async def find_by_category(
         self,
         category: str,
         is_current: bool = True,
         scope: str = "",
-        user_notion_id: str = "",
+        user_id: str = "",
         page_size: int = 100,
     ) -> List[Memory]:
         return await asyncio.to_thread(
-            _find_by_category_sync, category, is_current, scope, user_notion_id, page_size
+            _find_by_category_sync, category, is_current, scope, user_id, page_size
         )
 
     async def find_by_key_prefixes(
         self,
         prefixes: List[str],
-        user_notion_id: str = "",
+        user_id: str = "",
     ) -> List[Memory]:
-        return await asyncio.to_thread(_find_by_key_prefixes_sync, prefixes, user_notion_id)
+        return await asyncio.to_thread(_find_by_key_prefixes_sync, prefixes, user_id)
 
     async def find_by_exact_key(
         self,
         key: str,
-        user_notion_id: str = "",
+        user_id: str = "",
         page_size: int = 1,
     ) -> List[Memory]:
-        return await asyncio.to_thread(_find_by_exact_key_sync, key, user_notion_id, page_size)
+        return await asyncio.to_thread(_find_by_exact_key_sync, key, user_id, page_size)
 
     async def find_recent(
         self,
         is_current: Optional[bool] = None,
         scope: str = "",
-        user_notion_id: str = "",
+        user_id: str = "",
         page_size: int = 10,
     ) -> List[Memory]:
         return await asyncio.to_thread(
-            _find_recent_sync, is_current, scope, user_notion_id, page_size
+            _find_recent_sync, is_current, scope, user_id, page_size
         )

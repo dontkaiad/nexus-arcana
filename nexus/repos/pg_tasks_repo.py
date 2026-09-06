@@ -48,7 +48,7 @@ class Task:
     last_edited: str = ""    # ISO string from updated_at
     created_at: str = ""     # ISO string from created_at
     archived: bool = False
-    user_notion_id: str = "" # Notion UUID of owning user
+    user_id: str = "" # Notion UUID of owning user
 
 
 # ── Lookup caches (loaded once per process) ────────────────────────────────────
@@ -200,13 +200,13 @@ def _to_task(row) -> Task:
         last_edited=_fmt(updated),
         created_at=_fmt(created),
         archived=False,
-        user_notion_id=getattr(row, "user_notion_id", "") or "",
+        user_id=getattr(row, "user_id", "") or "",
     )
 
 
 # ── Sync helpers (run in asyncio.to_thread) ───────────────────────────────────
 
-def _find_by_title_sync(query: str, user_notion_id: str) -> List[Task]:
+def _find_by_title_sync(query: str, user_id: str) -> List[Task]:
     """ILIKE-поиск активных задач по названию (#152: PG-эквивалент старого
     Notion title-contains для «привязать список к задаче»)."""
     _ensure_lookups()
@@ -219,8 +219,8 @@ def _find_by_title_sync(query: str, user_notion_id: str) -> List[Task]:
     )
     if query:
         q = q.where(tasks.c.title.ilike(f"%{query}%"))
-    if user_notion_id:
-        q = q.where(tasks.c.user_notion_id == user_notion_id)
+    if user_id:
+        q = q.where(tasks.c.user_id == user_id)
     q = q.order_by(tasks.c.priority_id.asc().nulls_last()).limit(10)
 
     with get_engine().connect() as conn:
@@ -228,7 +228,7 @@ def _find_by_title_sync(query: str, user_notion_id: str) -> List[Task]:
     return [_to_task(r) for r in rows]
 
 
-def _list_active_sync(user_notion_id: str, include_in_progress: bool) -> List[Task]:
+def _list_active_sync(user_id: str, include_in_progress: bool) -> List[Task]:
     _ensure_lookups()
     q = select(tasks).where(
         tasks.c.status_id.notin_(
@@ -243,8 +243,8 @@ def _list_active_sync(user_notion_id: str, include_in_progress: bool) -> List[Ta
                 task_status.c.code == "In progress"
             ).scalar_subquery()
         )
-    if user_notion_id:
-        q = q.where(tasks.c.user_notion_id == user_notion_id)
+    if user_id:
+        q = q.where(tasks.c.user_id == user_id)
     q = q.order_by(tasks.c.priority_id.asc().nulls_last())
 
     with get_engine().connect() as conn:
@@ -267,12 +267,12 @@ def _get_sync(task_id: str) -> Optional[Task]:
     return _to_task(row)
 
 
-def _list_all_sync(user_notion_id: str) -> List[Task]:
+def _list_all_sync(user_id: str) -> List[Task]:
     """Return ALL tasks (including Done/Archived) for stats."""
     _ensure_lookups()
     q = select(tasks).order_by(tasks.c.updated_at.desc())
-    if user_notion_id:
-        q = q.where(tasks.c.user_notion_id == user_notion_id)
+    if user_id:
+        q = q.where(tasks.c.user_id == user_id)
     with get_engine().connect() as conn:
         rows = conn.execute(q).fetchall()
     return [_to_task(r) for r in rows]
@@ -285,7 +285,7 @@ def _create_sync(
     category: Optional[str],
     deadline: Optional[str],
     reminder: Optional[str],
-    user_notion_id: str,
+    user_id: str,
     note: Optional[str] = None,
 ) -> Optional[int]:
     _ensure_lookups()
@@ -299,7 +299,7 @@ def _create_sync(
         "category_id": _match(_category_id, category, "💳 Прочее"),
         "deadline": _parse_iso(deadline),
         "reminder": _parse_iso(reminder),
-        "user_notion_id": user_notion_id or "",
+        "user_id": user_id or "",
         "note": (note or "").strip() or None,
     }
     with get_engine().begin() as conn:
@@ -410,7 +410,7 @@ def _set_repeat_fields_sync(
 
 # Active tasks with future reminder (for restore_reminders pass 1) ─────────────
 
-def _active_with_future_reminder_sync(user_notion_id: str) -> List[Task]:
+def _active_with_future_reminder_sync(user_id: str) -> List[Task]:
     _ensure_lookups()
     done_ids = select(task_status.c.id).where(
         task_status.c.code.in_(["Done", "Archived"])
@@ -420,14 +420,14 @@ def _active_with_future_reminder_sync(user_notion_id: str) -> List[Task]:
         .where(tasks.c.status_id.notin_(done_ids))
         .where(tasks.c.reminder > text("now()"))
     )
-    if user_notion_id:
-        q = q.where(tasks.c.user_notion_id == user_notion_id)
+    if user_id:
+        q = q.where(tasks.c.user_id == user_id)
     with get_engine().connect() as conn:
         rows = conn.execute(q).fetchall()
     return [_to_task(r) for r in rows]
 
 
-def _active_with_past_reminder_sync(user_notion_id: str) -> List[Task]:
+def _active_with_past_reminder_sync(user_id: str) -> List[Task]:
     _ensure_lookups()
     done_ids = select(task_status.c.id).where(
         task_status.c.code.in_(["Done", "Archived"])
@@ -438,14 +438,14 @@ def _active_with_past_reminder_sync(user_notion_id: str) -> List[Task]:
         .where(tasks.c.reminder < text("now()"))
         .where(tasks.c.reminder.isnot(None))
     )
-    if user_notion_id:
-        q = q.where(tasks.c.user_notion_id == user_notion_id)
+    if user_id:
+        q = q.where(tasks.c.user_id == user_id)
     with get_engine().connect() as conn:
         rows = conn.execute(q).fetchall()
     return [_to_task(r) for r in rows]
 
 
-def _active_recurring_without_reminder_sync(user_notion_id: str) -> List[Task]:
+def _active_recurring_without_reminder_sync(user_id: str) -> List[Task]:
     """Активные задачи с repeat_time заполненным, но reminder IS NULL."""
     _ensure_lookups()
     done_ids = select(task_status.c.id).where(
@@ -458,8 +458,8 @@ def _active_recurring_without_reminder_sync(user_notion_id: str) -> List[Task]:
         .where(tasks.c.repeat_time != "")
         .where(tasks.c.reminder.is_(None))
     )
-    if user_notion_id:
-        q = q.where(tasks.c.user_notion_id == user_notion_id)
+    if user_id:
+        q = q.where(tasks.c.user_id == user_id)
     with get_engine().connect() as conn:
         rows = conn.execute(q).fetchall()
     return [_to_task(r) for r in rows]
@@ -468,14 +468,14 @@ def _active_recurring_without_reminder_sync(user_notion_id: str) -> List[Task]:
 # ── Public async API ───────────────────────────────────────────────────────────
 
 class PgTasksRepo:
-    async def find_by_title(self, query: str, user_notion_id: str = "") -> List[Task]:
-        return await asyncio.to_thread(_find_by_title_sync, query, user_notion_id)
+    async def find_by_title(self, query: str, user_id: str = "") -> List[Task]:
+        return await asyncio.to_thread(_find_by_title_sync, query, user_id)
 
     async def active(
-        self, user_notion_id: str = "", include_in_progress: bool = True
+        self, user_id: str = "", include_in_progress: bool = True
     ) -> List[Task]:
         return await asyncio.to_thread(
-            _list_active_sync, user_notion_id, include_in_progress
+            _list_active_sync, user_id, include_in_progress
         )
 
     async def retrieve_page(self, page_id: str) -> Optional[Task]:
@@ -493,16 +493,16 @@ class PgTasksRepo:
         deadline = _extract_date(props.get("Дедлайн", {}))
         reminder = _extract_date(props.get("Напоминание", {}))
         note = _extract_text(props.get("Заметка", {}))
-        user_notion_id = ""
+        user_id = ""
         rel = props.get("🪪 Пользователи", {})
         if rel:
             parts = rel.get("relation", [])
             if parts:
-                user_notion_id = parts[0].get("id", "")
+                user_id = parts[0].get("id", "")
 
         pid = await asyncio.to_thread(
             _create_sync, title, status, priority, category,
-            deadline, reminder, user_notion_id, note,
+            deadline, reminder, user_id, note,
         )
         return str(pid) if pid else None
 
@@ -529,15 +529,15 @@ class PgTasksRepo:
             _set_repeat_fields_sync, page_id, repeat, day_of_week, repeat_time
         )
 
-    async def list_all(self, user_notion_id: str = "") -> List[Task]:
+    async def list_all(self, user_id: str = "") -> List[Task]:
         """Return all tasks (Done/Archived included) for stats."""
-        return await asyncio.to_thread(_list_all_sync, user_notion_id)
+        return await asyncio.to_thread(_list_all_sync, user_id)
 
-    async def active_with_future_reminder(self, user_notion_id: str = "") -> List[Task]:
-        return await asyncio.to_thread(_active_with_future_reminder_sync, user_notion_id)
+    async def active_with_future_reminder(self, user_id: str = "") -> List[Task]:
+        return await asyncio.to_thread(_active_with_future_reminder_sync, user_id)
 
-    async def active_with_past_reminder(self, user_notion_id: str = "") -> List[Task]:
-        return await asyncio.to_thread(_active_with_past_reminder_sync, user_notion_id)
+    async def active_with_past_reminder(self, user_id: str = "") -> List[Task]:
+        return await asyncio.to_thread(_active_with_past_reminder_sync, user_id)
 
-    async def active_recurring_without_reminder(self, user_notion_id: str = "") -> List[Task]:
-        return await asyncio.to_thread(_active_recurring_without_reminder_sync, user_notion_id)
+    async def active_recurring_without_reminder(self, user_id: str = "") -> List[Task]:
+        return await asyncio.to_thread(_active_recurring_without_reminder_sync, user_id)

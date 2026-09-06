@@ -44,7 +44,7 @@ async def test_nexus_checkout_offers_complete_task_on_group_done():
         "action": "list_select",
         "selected": ["101"],
         "list_type": None,
-        "user_notion_id": "u1",
+        "user_id": "u1",
     })
     item = {
         "id": "101", "name": "Зажечь свечу", "type": "📋 Чеклист",
@@ -54,7 +54,7 @@ async def test_nexus_checkout_offers_complete_task_on_group_done():
 
     with patch.object(nx, "_fetch_all_display_items", AsyncMock(return_value=[item])), \
          patch.object(nx._repo, "mark_done", AsyncMock(return_value=1)):
-        await nx.on_checkout(q, user_notion_id="u1")
+        await nx.on_checkout(q, user_id="u1")
 
     texts = [c.args[0] for c in q.message.answer.await_args_list]
     assert any("🎉 Все подзадачи «Ритуал для Маши» готовы!" in t for t in texts)
@@ -76,7 +76,7 @@ async def test_nexus_on_complete_task_marks_status_done():
 
     with patch.object(nx._repo, "find_task", AsyncMock(return_value=[])), \
          patch.object(nx._repo, "mark_task_done", AsyncMock(return_value=True)) as mock_done:
-        await nx.on_complete_task(q, user_notion_id="u1")
+        await nx.on_complete_task(q, user_id="u1")
 
     mock_done.assert_awaited_once_with("42")
     q.message.reply.assert_awaited_once()
@@ -92,7 +92,7 @@ async def test_arcana_checkout_offers_complete_work_on_group_done():
         "action": "list_select",
         "selected": ["201"],
         "list_type": None,
-        "user_notion_id": "u2",
+        "user_id": "u2",
     })
     item = {
         "id": "201", "name": "Зажечь свечу", "type": "📋 Чеклист",
@@ -102,7 +102,7 @@ async def test_arcana_checkout_offers_complete_work_on_group_done():
 
     with patch.object(ar, "_fetch_all_display_items", AsyncMock(return_value=[item])), \
          patch.object(ar._repo, "mark_done", AsyncMock(return_value=1)):
-        await ar.on_checkout(q, user_notion_id="u2")
+        await ar.on_checkout(q, user_id="u2")
 
     texts = [c.args[0] for c in q.message.answer.await_args_list]
     assert any("🎉 Все подзадачи «Ритуал для Маши» готовы!" in t for t in texts), (
@@ -125,7 +125,7 @@ async def test_arcana_on_complete_work_marks_status_done():
     q = _fake_query("list_complete_work_77")
 
     with patch.object(ar._repo, "mark_work_done", AsyncMock(return_value=True)) as mock_done:
-        await ar.on_complete_work(q, user_notion_id="u2")
+        await ar.on_complete_work(q, user_id="u2")
 
     mock_done.assert_awaited_once_with("77")
     q.message.reply.assert_awaited_once()

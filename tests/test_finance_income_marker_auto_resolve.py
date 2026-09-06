@@ -50,7 +50,7 @@ async def test_explicit_income_marker_auto_resolves_no_buttons():
          patch.object(finance, "_save_finance", save_mock), \
          patch.object(finance, "react", AsyncMock()):
         msg = _msg()
-        await finance.handle_finance_text(msg, text, user_notion_id="u-1")
+        await finance.handle_finance_text(msg, text, user_id="u-1")
 
     # Никаких кнопок — сохранили сразу, одно сообщение с записью.
     for call in msg.answer.call_args_list:
@@ -71,7 +71,7 @@ async def test_ambiguous_word_alone_still_asks_buttons():
 
     with patch.object(finance, "ask_claude", AsyncMock(return_value=json.dumps(data, ensure_ascii=False))):
         msg = _msg()
-        await finance.handle_finance_text(msg, text, user_notion_id="u-1")
+        await finance.handle_finance_text(msg, text, user_id="u-1")
 
     assert finance._pending_finance.get(msg.from_user.id) is not None
     last_call = msg.answer.call_args_list[-1]
@@ -88,7 +88,7 @@ async def test_income_marker_mixed_with_ambiguous_still_asks_buttons():
 
     with patch.object(finance, "ask_claude", AsyncMock(return_value=json.dumps(data, ensure_ascii=False))):
         msg = _msg()
-        await finance.handle_finance_text(msg, text, user_notion_id="u-1")
+        await finance.handle_finance_text(msg, text, user_id="u-1")
 
     last_call = msg.answer.call_args_list[-1]
     assert "reply_markup" in last_call.kwargs
@@ -103,7 +103,7 @@ async def test_barter_marker_still_asks_buttons():
 
     with patch.object(finance, "ask_claude", AsyncMock(return_value=json.dumps(data, ensure_ascii=False))):
         msg = _msg()
-        await finance.handle_finance_text(msg, text, user_notion_id="u-1")
+        await finance.handle_finance_text(msg, text, user_id="u-1")
 
     last_call = msg.answer.call_args_list[-1]
     assert "reply_markup" in last_call.kwargs
@@ -122,7 +122,7 @@ async def test_no_markers_at_all_auto_expense_regression():
          patch.object(finance, "react", AsyncMock()), \
          patch.object(finance, "_check_budget_limit", AsyncMock()):
         msg = _msg()
-        await finance.handle_finance_text(msg, text, user_notion_id="u-1")
+        await finance.handle_finance_text(msg, text, user_id="u-1")
 
     saved_data = save_mock.call_args.args[0]
     assert saved_data["type_"] == "💸 Расход"

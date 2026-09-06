@@ -11,7 +11,7 @@ from datetime import datetime
 
 from core.config import config
 from core.claude_client import ask_claude
-from core.user_manager import get_user_notion_id
+from core.user_manager import get_user_id
 from core.repos.pg_memory_repo import PgMemoryRepo, Memory
 from core.budget import (
     INCOME_RE,
@@ -174,13 +174,13 @@ def _serialize_memory(mem: Memory) -> dict:
     }
 
 
-async def _fetch_actual(user_notion_id: str) -> List[Memory]:
+async def _fetch_actual(user_id: str) -> List[Memory]:
     """Все актуальные записи Памяти юзера (is_current == True)."""
     try:
         return await _memory_repo.find_by_category(
             "",
             is_current=True,
-            user_notion_id=user_notion_id,
+            user_id=user_id,
             page_size=500,
         )
     except Exception as e:
@@ -194,8 +194,8 @@ async def get_memory(
     cat: Optional[str] = Query(None, description="фильтр по категории"),
     q: Optional[str] = Query(None, description="case-insensitive contains по тексту"),
 ) -> dict[str, Any]:
-    user_notion_id = (await get_user_notion_id(tg_id)) or ""
-    raw = await _fetch_actual(user_notion_id)
+    user_id = (await get_user_id(tg_id)) or ""
+    raw = await _fetch_actual(user_id)
 
     items: list[dict] = []
     categories: set[str] = set()
@@ -242,12 +242,12 @@ async def get_memory(
 
 # ── /api/memory/adhd ────────────────────────────────────────────────────────
 
-async def _adhd_records(user_notion_id: str) -> List[Memory]:
+async def _adhd_records(user_id: str) -> List[Memory]:
     try:
         return await _memory_repo.find_by_category(
             "🦋 СДВГ",
             is_current=True,
-            user_notion_id=user_notion_id,
+            user_id=user_id,
             page_size=100,
         )
     except Exception as e:
@@ -346,8 +346,8 @@ def _classify_adhd(fact: str) -> str:
 
 @router.get("/memory/adhd")
 async def get_memory_adhd(tg_id: int = Depends(current_user_id)) -> dict[str, Any]:
-    user_notion_id = (await get_user_notion_id(tg_id)) or ""
-    raw = await _adhd_records(user_notion_id)
+    user_id = (await get_user_id(tg_id)) or ""
+    raw = await _adhd_records(user_id)
     groups: dict[str, list[str]] = {
         "patterns": [], "strategies": [], "triggers": [], "specifics": [],
     }

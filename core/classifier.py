@@ -413,18 +413,18 @@ def build_system(tz_offset: int = 3) -> str:
     ])
 
 
-async def _known_budget_positions(user_notion_id: str) -> "tuple[list[str], list[str]]":
+async def _known_budget_positions(user_id: str) -> "tuple[list[str], list[str]]":
     """(постоянные, разовые) — имена + суммы из Памяти для сопоставления трат.
 
-    Дешёвый PG-запрос (не LLM). Пусто при любой ошибке / без user_notion_id.
+    Дешёвый PG-запрос (не LLM). Пусто при любой ошибке / без user_id.
     """
-    if not user_notion_id:
+    if not user_id:
         return [], []
     try:
         from core.repos.memory_repo import _repo as _mem_repo
         from core.budget import PERMANENT_RE, ONE_TIME_FACT_RE
         mems = await _mem_repo.find_by_key_prefixes(
-            ["постоянно_", "разовый_"], user_notion_id=user_notion_id,
+            ["постоянно_", "разовый_"], user_id=user_id,
         )
     except Exception as e:
         logger.error("_known_budget_positions: %s", e)
@@ -749,7 +749,7 @@ async def _parse_edit_record(text: str) -> dict:
         return {"type": "edit_record", "record_hint": text, "edits": [{"field": "unknown", "new_value": ""}]}
 
 
-async def classify(text: str, tz_offset: int = 3, user_notion_id: str = "") -> list[dict]:
+async def classify(text: str, tz_offset: int = 3, user_id: str = "") -> list[dict]:
     """Классифицировать текст через Claude."""
     logger.info("classify: input text=%r tz_offset=%d", text[:100], tz_offset)
 
@@ -972,7 +972,7 @@ async def classify(text: str, tz_offset: int = 3, user_notion_id: str = "") -> l
     # Сверка траты с заранее объявленными постоянными/разовыми расходами —
     # обогащаем ТОТ ЖЕ вызов (не отдельный LLM-запрос), см. _budget_positions_prompt.
     try:
-        _fixed_pos, _one_time_pos = await _known_budget_positions(user_notion_id)
+        _fixed_pos, _one_time_pos = await _known_budget_positions(user_id)
         if _fixed_pos or _one_time_pos:
             system += "\n" + _budget_positions_prompt(_fixed_pos, _one_time_pos)
     except Exception as e:
@@ -1012,7 +1012,7 @@ async def classify(text: str, tz_offset: int = 3, user_notion_id: str = "") -> l
         return [{"type": "parse_error"}]
 
 
-async def process_item(data: Dict[str, Any], original_text: str, msg, clarify: dict, user_notion_id: str = "") -> str:
+async def process_item(data: Dict[str, Any], original_text: str, msg, clarify: dict, user_id: str = "") -> str:
     """Обработка классифицированного элемента."""
     kind = data.get("type", "unknown")
     logger.info("process_item: type=%r data=%s", kind, data)
@@ -1027,21 +1027,21 @@ async def process_item(data: Dict[str, Any], original_text: str, msg, clarify: d
             field=data.get("field", ""),
             new_value=data.get("new_value", ""),
             record_type=data.get("record_type", "task"),
-            user_notion_id=user_notion_id,
+            user_id=user_id,
         )
         return ""
 
     # TASK CANCEL
     if kind == "task_cancel":
         from nexus.handlers.tasks import handle_task_cancel
-        await handle_task_cancel(msg, data.get("task_hint", original_text), user_notion_id=user_notion_id)
+        await handle_task_cancel(msg, data.get("task_hint", original_text), user_id=user_id)
         return ""
 
     # TASK DONE
     if kind == "task_done":
         await react(msg, "🔥")
         from nexus.handlers.tasks import handle_task_done
-        await handle_task_done(msg, data.get("task_hint", original_text), user_notion_id=user_notion_id)
+        await handle_task_done(msg, data.get("task_hint", original_text), user_id=user_id)
         return ""
 
     # TIMEZONE UPDATE
@@ -1051,50 +1051,50 @@ async def process_item(data: Dict[str, Any], original_text: str, msg, clarify: d
         # парся тот же сырой текст независимым Haiku-экстрактором без
         # контекста «это про локацию».
         from nexus.handlers.tasks import _update_user_tz
-        await _update_user_tz(msg, data.get("text", original_text), user_notion_id=user_notion_id)
+        await _update_user_tz(msg, data.get("text", original_text), user_id=user_id)
         return ""
 
     # БЮДЖЕТ — v2: всегда Sonnet
     if kind == "budget":
         from nexus.handlers.finance import start_budget_analysis
-        await start_budget_analysis(msg, user_notion_id)
+        await start_budget_analysis(msg, user_id)
         return ""
 
     # ДОЛГИ — v2
     if kind == "debt_command":
         from nexus.handlers.finance import handle_debt_command
-        await handle_debt_command(msg, user_notion_id)
+        await handle_debt_command(msg, user_id)
         return ""
 
     # ПОДУШКА — v2 (отдельный трекер накоплений)
     if kind == "cushion_command":
         from nexus.handlers.finance import handle_cushion_command
-        await handle_cushion_command(msg, data.get("text", original_text), user_notion_id)
+        await handle_cushion_command(msg, data.get("text", original_text), user_id)
         return ""
 
     # МНЕ ДОЛЖНЫ — v2
     if kind == "they_owe_command":
         from nexus.handlers.finance import handle_they_owe_command
-        await handle_they_owe_command(msg, user_notion_id)
+        await handle_they_owe_command(msg, user_id)
         return ""
 
     # ЦЕЛИ — v2
     if kind == "goal_command":
         from nexus.handlers.finance import handle_goal_command
-        await handle_goal_command(msg, user_notion_id)
+        await handle_goal_command(msg, user_id)
         return ""
 
     # РУЧНОЙ ЛИМИТ — v2
     if kind == "limit_override":
         from nexus.handlers.finance import handle_limit_override
-        await handle_limit_override(msg, data.get("category", ""), data.get("amount", "0"), user_notion_id)
+        await handle_limit_override(msg, data.get("category", ""), data.get("amount", "0"), user_id)
         return ""
 
     # РАЗОВЫЙ РАСХОД — обычная finance-транзакция, вычтется из распределяемых
     # только в этом периоде (spending_by_category → already_spent, Шаг 1.5).
     if kind == "one_time_expense":
         from nexus.handlers.finance import handle_one_time_expense
-        await handle_one_time_expense(msg, data.get("text", original_text), user_notion_id=user_notion_id)
+        await handle_one_time_expense(msg, data.get("text", original_text), user_id=user_id)
         return ""
 
     # ПАМЯТЬ (memory_save)
@@ -1102,78 +1102,78 @@ async def process_item(data: Dict[str, Any], original_text: str, msg, clarify: d
         await react(msg, "💅")
         from nexus.handlers.memory import handle_memory_save
         data["text"] = data.get("text", original_text)
-        await handle_memory_save(msg, data, user_notion_id=user_notion_id)
+        await handle_memory_save(msg, data, user_id=user_id)
         return ""
 
     # ПАМЯТЬ (memory_search)
     if kind == "memory_search":
         from nexus.handlers.memory import handle_memory_search
-        await handle_memory_search(msg, data, user_notion_id=user_notion_id)
+        await handle_memory_search(msg, data, user_id=user_id)
         return ""
 
     # ПАМЯТЬ (memory_deactivate)
     if kind == "memory_deactivate":
         from nexus.handlers.memory import handle_memory_deactivate
-        await handle_memory_deactivate(msg, data, user_notion_id=user_notion_id)
+        await handle_memory_deactivate(msg, data, user_id=user_id)
         return ""
 
     # ПАМЯТЬ (memory_delete)
     if kind == "memory_delete":
         from nexus.handlers.memory import handle_memory_delete
-        await handle_memory_delete(msg, data, user_notion_id=user_notion_id)
+        await handle_memory_delete(msg, data, user_id=user_id)
         return ""
 
     # ЗАМЕТКИ (note_delete из дайджеста)
     if kind == "note_delete":
         from nexus.handlers.notes import handle_note_delete
-        await handle_note_delete(msg, data, user_notion_id=user_notion_id)
+        await handle_note_delete(msg, data, user_id=user_id)
         return ""
 
     # ── СПИСКИ ────────────────────────────────────────────────────────────────
     if kind == "list_buy":
         await react(msg, "🫡")
         from nexus.handlers.lists import handle_list_buy
-        await handle_list_buy(msg, data, user_notion_id=user_notion_id)
+        await handle_list_buy(msg, data, user_id=user_id)
         return ""
 
     if kind in ("list_done", "list_done_bulk"):
         await react(msg, "💸")
         from nexus.handlers.lists import handle_list_done
-        await handle_list_done(msg, data, user_notion_id=user_notion_id)
+        await handle_list_done(msg, data, user_id=user_id)
         return ""
 
     if kind == "list_check":
         await react(msg, "🫡")
         from nexus.handlers.lists import handle_list_check
-        await handle_list_check(msg, data, user_notion_id=user_notion_id)
+        await handle_list_check(msg, data, user_id=user_id)
         return ""
 
     if kind == "list_subtask":
         await react(msg, "🫡")
         from nexus.handlers.lists import handle_list_subtask
-        await handle_list_subtask(msg, data, user_notion_id=user_notion_id)
+        await handle_list_subtask(msg, data, user_id=user_id)
         return ""
 
     if kind == "list_inventory_add":
         await react(msg, "🫡")
         from nexus.handlers.lists import handle_list_inv_add
-        await handle_list_inv_add(msg, data, user_notion_id=user_notion_id)
+        await handle_list_inv_add(msg, data, user_id=user_id)
         return ""
 
     if kind == "list_inventory_search":
         from nexus.handlers.lists import handle_list_inv_search
-        await handle_list_inv_search(msg, data, user_notion_id=user_notion_id)
+        await handle_list_inv_search(msg, data, user_id=user_id)
         return ""
 
     if kind == "list_inventory_update":
         await react(msg, "🫡")
         from nexus.handlers.lists import handle_list_inv_update
-        await handle_list_inv_update(msg, data, user_notion_id=user_notion_id)
+        await handle_list_inv_update(msg, data, user_id=user_id)
         return ""
 
     if kind == "list_sum":
         from nexus.handlers.lists import handle_list_sum
-        await handle_list_sum(msg, data, user_notion_id=user_notion_id)
+        await handle_list_sum(msg, data, user_id=user_id)
         return ""
 
     if kind == "unknown":
@@ -1266,7 +1266,7 @@ async def process_item(data: Dict[str, Any], original_text: str, msg, clarify: d
             source=source,
             description=title,
             bot_label="☀️ Nexus",
-            user_notion_id=user_notion_id,
+            user_id=user_id,
         )
         if result:
             sign = "−" if kind == "expense" else "+"
@@ -1275,14 +1275,14 @@ async def process_item(data: Dict[str, Any], original_text: str, msg, clarify: d
                 logger.info("finance saved via classifier: category=%s — calling budget check", category)
                 try:
                     from nexus.handlers.finance import _check_budget_limit
-                    await _check_budget_limit(category, msg, user_notion_id, amount=amount, tz_offset=_fin_tz)
+                    await _check_budget_limit(category, msg, user_id, amount=amount, tz_offset=_fin_tz)
                 except Exception as e:
                     logger.error("budget check error: %s", e, exc_info=True)
                 # Предложить вычеркнуть из списка покупок
                 try:
                     from core.list_manager import find_matching_items
                     from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-                    matches = await find_matching_items(title, category, "☀️ Nexus", user_notion_id)
+                    matches = await find_matching_items(title, category, "☀️ Nexus", user_id)
                     if matches:
                         buttons = []
                         item_names = []
@@ -1395,7 +1395,7 @@ async def process_item(data: Dict[str, Any], original_text: str, msg, clarify: d
                         data[field] = fixed
 
         logger.info("classifier: calling handle_task_parsed with full data=%s", data)
-        data["user_notion_id"] = user_notion_id
+        data["user_id"] = user_id
         # original_text — авторитетный текст юзера (для голосовых = транскрипт
         # Whisper, msg.text там пуст). Без него гвард #33 срезает легитимный
         # reminder при диктовке голосом.
@@ -1425,32 +1425,32 @@ async def process_item(data: Dict[str, Any], original_text: str, msg, clarify: d
             raw_tags = ", ".join(enriched_tags)
         
         await handle_note(msg, data.get("text", original_text), config.nexus.db_notes, raw_tags,
-                          user_notion_id=user_notion_id)
+                          user_id=user_id)
         return ""
 
     # РЕДАКТИРОВАНИЕ ЗАМЕТКИ
     if kind == "edit_note":
         from nexus.handlers.notes import handle_edit_note
-        await handle_edit_note(msg, data, user_notion_id)
+        await handle_edit_note(msg, data, user_id)
         return ""
 
     # ПОИСК ЗАМЕТОК
     if kind == "note_search":
         from nexus.handlers.notes import handle_note_search
         logger.info("process_item: note_search query=%r", data.get("query", ""))
-        await handle_note_search(msg, data, user_notion_id=user_notion_id)
+        await handle_note_search(msg, data, user_id=user_id)
         return ""
 
     # СТАТИСТИКА
     if kind == "stats":
         tg_id = msg.from_user.id if msg and msg.from_user else 0
         logger.info(
-            "process_item: stats request - tg_id=%s user_notion_id=%r query=%r",
-            tg_id, user_notion_id, data.get("query", ""),
+            "process_item: stats request - tg_id=%s user_id=%r query=%r",
+            tg_id, user_id, data.get("query", ""),
         )
         from nexus.handlers.finance import handle_finance_summary
         result = await handle_finance_summary(
-            query=data.get("query", ""), user_notion_id=user_notion_id, uid=int(tg_id) if tg_id else 0
+            query=data.get("query", ""), user_id=user_id, uid=int(tg_id) if tg_id else 0
         )
         # Если есть пагинация — отправить сводку + список отдельными сообщениями
         if tg_id:

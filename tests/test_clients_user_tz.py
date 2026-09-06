@@ -51,6 +51,6 @@ async def test_handle_add_client_stamps_user_tz_date(monkeypatch):
          patch("core.shared_handlers.get_user_tz", AsyncMock(return_value=5)), \
          patch("arcana.pending_clients.save_pending_client", AsyncMock()), \
          patch("core.client_resolve.announce_client_created", AsyncMock(), create=True):
-        await clients.handle_add_client(msg, "создай клиента Оля", user_notion_id="u-1")
+        await clients.handle_add_client(msg, "создай клиента Оля", user_id="u-1")
 
     assert add.call_args.kwargs["date"] == "2026-07-01"

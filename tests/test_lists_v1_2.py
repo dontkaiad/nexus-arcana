@@ -317,7 +317,7 @@ async def test_get_list_summary_aggregates():
     with patch.object(list_manager._nexus_repo, "get_summary_items",
                        AsyncMock(return_value=fake_items)):
         out = await list_manager.get_list_summary(
-            user_notion_id="user-1", bot_name="☀️ Nexus",
+            user_id="user-1", bot_name="☀️ Nexus",
             type_="🛒 Покупки", group="Apple-стек",
         )
 
@@ -335,7 +335,7 @@ async def test_get_list_summary_empty():
     with patch.object(list_manager._nexus_repo, "get_summary_items",
                        AsyncMock(return_value=[])):
         out = await list_manager.get_list_summary(
-            user_notion_id="user-1", bot_name="☀️ Nexus",
+            user_id="user-1", bot_name="☀️ Nexus",
         )
 
     assert out["count_total"] == 0
@@ -372,7 +372,7 @@ async def test_handle_list_buy_with_full_fields():
             {"id": "p1", "name": "iPhone Pro", "category": "💳 Прочее"},
         ])) as mock_add,
     ):
-        await nx.handle_list_buy(msg, {"text": msg.text}, user_notion_id="u1")
+        await nx.handle_list_buy(msg, {"text": msg.text}, user_id="u1")
 
     # add_items получил пункты с price_plan и source
     items_arg = mock_add.await_args.args[0]
@@ -403,7 +403,7 @@ async def test_handle_list_sum_by_group():
         patch.object(nx, "react", AsyncMock()),
         patch.object(nx._repo, "get_summary", AsyncMock(return_value=summary)) as mock_sum,
     ):
-        await nx.handle_list_sum(msg, {"text": msg.text}, user_notion_id="u1")
+        await nx.handle_list_sum(msg, {"text": msg.text}, user_id="u1")
 
     kwargs = mock_sum.await_args.kwargs
     assert kwargs["group"] == "Apple-стек"
@@ -428,7 +428,7 @@ async def test_handle_list_sum_empty():
         patch.object(nx, "react", AsyncMock()),
         patch.object(nx._repo, "get_summary", AsyncMock(return_value=empty_summary)),
     ):
-        await nx.handle_list_sum(msg, {"text": msg.text}, user_notion_id="u1")
+        await nx.handle_list_sum(msg, {"text": msg.text}, user_id="u1")
     sent = msg.answer.await_args.args[0]
     assert "Пусто" in sent or "пусто" in sent
 

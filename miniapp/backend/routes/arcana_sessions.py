@@ -37,7 +37,7 @@ from core.session_cache import (
     session_summary_key,
     slugify,
 )
-from core.user_manager import get_user_notion_id
+from core.user_manager import get_user_id
 
 from miniapp.backend.auth import current_user_id
 from miniapp.backend._helpers import (
@@ -206,7 +206,7 @@ async def list_sessions(
 ) -> dict[str, Any]:
     filters = _parse_filter(filter)
     today_date, tz_offset = await today_user_tz(tg_id)
-    user_notion_id = (await get_user_notion_id(tg_id)) or ""
+    user_id = (await get_user_id(tg_id)) or ""
 
     outcome_filter: Optional[str] = None
     status_f = filters.get("status")
@@ -216,9 +216,9 @@ async def list_sessions(
         outcome_filter = "yes"
 
     all_triplets = await _sessions_repo.list_all(
-        user_notion_id=user_notion_id, outcome_filter=outcome_filter
+        user_id=user_id, outcome_filter=outcome_filter
     )
-    clients_list = await _clients_repo.list_all(user_notion_id)
+    clients_list = await _clients_repo.list_all(user_id)
     name_map = _clients_name_map(clients_list)
     type_map = _clients_type_map(clients_list)
 
@@ -438,10 +438,10 @@ async def session_by_slug(
     slug: str,
     tg_id: int = Depends(current_user_id),
 ) -> dict[str, Any]:
-    user_notion_id = (await get_user_notion_id(tg_id)) or ""
+    user_id = (await get_user_id(tg_id)) or ""
     _, tz_offset = await today_user_tz(tg_id)
 
-    clients_list = await _clients_repo.list_all(user_notion_id)
+    clients_list = await _clients_repo.list_all(user_id)
     name_map = _clients_name_map(clients_list)
 
     # Группа по теме (subject_id, #189) — устойчива к формулировке session_name.
@@ -450,7 +450,7 @@ async def session_by_slug(
             subject_id = int(slug[len("subj-"):])
         except ValueError:
             raise HTTPException(status_code=404, detail="session not found")
-        matching = await _sessions_repo.list_by_subject(subject_id, user_notion_id)
+        matching = await _sessions_repo.list_by_subject(subject_id, user_id)
         if not matching:
             raise HTTPException(status_code=404, detail="session not found")
         return _aggregate_group(matching, slug, name_map, tz_offset, subject_id=subject_id)
@@ -484,7 +484,7 @@ async def session_by_slug(
             }
         raise HTTPException(status_code=404, detail="session not found")
 
-    matching = await _sessions_repo.list_by_slug(slug, user_notion_id)
+    matching = await _sessions_repo.list_by_slug(slug, user_id)
     if not matching:
         raise HTTPException(status_code=404, detail="session not found")
     return _aggregate_group(matching, slug, name_map, tz_offset)
@@ -506,17 +506,17 @@ class _SummarizePrep:
         self.triplet_count = triplet_count
 
 
-async def _prepare_summarize(slug: str, user_notion_id: str) -> _SummarizePrep:
+async def _prepare_summarize(slug: str, user_id: str) -> _SummarizePrep:
     if slug.startswith("subj-"):
         try:
             subject_id = int(slug[len("subj-"):])
         except ValueError:
             raise HTTPException(status_code=404, detail="session not found")
-        matching = await _sessions_repo.list_by_subject(subject_id, user_notion_id)
+        matching = await _sessions_repo.list_by_subject(subject_id, user_id)
         if not matching:
             raise HTTPException(status_code=404, detail="session not found")
     else:
-        matching = await _sessions_repo.list_by_slug(slug, user_notion_id)
+        matching = await _sessions_repo.list_by_slug(slug, user_id)
         if not matching or not matching[0].session_name:
             raise HTTPException(status_code=404, detail="session not found")
 
@@ -563,8 +563,8 @@ async def session_summarize(
     from core.claude_client import ask_claude
     from core.config import config as _cfg
 
-    user_notion_id = (await get_user_notion_id(tg_id)) or ""
-    prep = await _prepare_summarize(slug, user_notion_id)
+    user_id = (await get_user_id(tg_id)) or ""
+    prep = await _prepare_summarize(slug, user_id)
     if prep.existing:
         return {"summary": prep.existing, "cached": True}
 
@@ -608,10 +608,10 @@ async def session_summarize_stream(
     from core.html_sanitize import sanitize_summary
     import json
 
-    user_notion_id = (await get_user_notion_id(tg_id)) or ""
+    user_id = (await get_user_id(tg_id)) or ""
     # Резолвится ДО открытия потока — 404 должен быть обычным HTTP-статусом,
     # не SSE-событием (EventSource не умеет читать тело/статус ошибки).
-    prep = await _prepare_summarize(slug, user_notion_id)
+    prep = await _prepare_summarize(slug, user_id)
 
     async def gen():
         if prep.existing:
@@ -652,12 +652,12 @@ async def session_detail(
     session_id: str,
     tg_id: int = Depends(current_user_id),
 ) -> dict[str, Any]:
-    user_notion_id = (await get_user_notion_id(tg_id)) or ""
+    user_id = (await get_user_id(tg_id)) or ""
     t = await _sessions_repo.find_by_id(session_id)
     if not t:
         raise HTTPException(status_code=404, detail="session not found")
 
-    clients_list = await _clients_repo.list_all(user_notion_id)
+    clients_list = await _clients_repo.list_all(user_id)
     name_map = _clients_name_map(clients_list)
     _, tz_offset = await today_user_tz(tg_id)
     return _serialize_triplet_pg(t, name_map, tz_offset)

@@ -17,7 +17,7 @@ from pydantic import BaseModel, Field
 
 from core.props import _title, _text, _select, _status, _number, _date, _relation
 from core.repos.finance_repo import FinanceRepo
-from core.user_manager import get_user_notion_id
+from core.user_manager import get_user_id
 from core.bot_notify import notify_user, clear_task_reminder
 
 from arcana.repos.pg_rituals_repo import PgRitualsRepo as _PgRitualsRepoClass
@@ -67,7 +67,7 @@ router = APIRouter()
 
 # ── Ownership check (PG tasks) ───────────────────────────────────────────────
 
-async def _load_owned_task(task_id: str, user_notion_id: str) -> _PgTask:
+async def _load_owned_task(task_id: str, user_id: str) -> _PgTask:
     """Загружает задачу из PG и проверяет владение. 404 если нет доступа."""
     try:
         task = await _tasks_pg_repo.retrieve_page(task_id)
@@ -76,7 +76,7 @@ async def _load_owned_task(task_id: str, user_notion_id: str) -> _PgTask:
         raise HTTPException(status_code=404, detail="not found")
     if not task:
         raise HTTPException(status_code=404, detail="not found")
-    if user_notion_id and task.user_notion_id and task.user_notion_id != user_notion_id:
+    if user_id and task.user_id and task.user_id != user_id:
         raise HTTPException(status_code=404, detail="not found")
     return task
 
@@ -128,8 +128,8 @@ async def task_done(
     task_id: str,
     tg_id: int = Depends(current_user_id),
 ) -> dict[str, Any]:
-    user_notion_id = (await get_user_notion_id(tg_id)) or ""
-    task = await _load_owned_task(task_id, user_notion_id)
+    user_id = (await get_user_id(tg_id)) or ""
+    task = await _load_owned_task(task_id, user_id)
     # Повторяющаяся задача (есть «Время повтора») → In progress, не Done.
     repeat_time = (task.repeat_time or "").strip()
     repeat_kind = task.repeat if task.repeat not in ("Нет", None) else ""
@@ -185,8 +185,8 @@ async def task_reopen(
     task_id: str,
     tg_id: int = Depends(current_user_id),
 ) -> dict[str, Any]:
-    user_notion_id = (await get_user_notion_id(tg_id)) or ""
-    task = await _load_owned_task(task_id, user_notion_id)
+    user_id = (await get_user_id(tg_id)) or ""
+    task = await _load_owned_task(task_id, user_id)
     ok = await _tasks_pg_repo.set_status(task_id, "Not started")
     if not ok:
         raise HTTPException(status_code=500, detail="failed to update status")
@@ -206,8 +206,8 @@ async def task_postpone(
     body: PostponeBody,
     tg_id: int = Depends(current_user_id),
 ) -> dict[str, Any]:
-    user_notion_id = (await get_user_notion_id(tg_id)) or ""
-    task = await _load_owned_task(task_id, user_notion_id)
+    user_id = (await get_user_id(tg_id)) or ""
+    task = await _load_owned_task(task_id, user_id)
     today_date, tz_offset = await today_user_tz(tg_id)
 
     if body.date:
@@ -264,8 +264,8 @@ async def task_cancel(
     task_id: str,
     tg_id: int = Depends(current_user_id),
 ) -> dict[str, Any]:
-    user_notion_id = (await get_user_notion_id(tg_id)) or ""
-    task = await _load_owned_task(task_id, user_notion_id)
+    user_id = (await get_user_id(tg_id)) or ""
+    task = await _load_owned_task(task_id, user_id)
     ok = await _tasks_pg_repo.set_status(task_id, "Archived")
     if not ok:
         raise HTTPException(status_code=500, detail="failed to cancel")
@@ -300,8 +300,8 @@ async def task_edit(
     body: TaskEditBody,
     tg_id: int = Depends(current_user_id),
 ) -> dict[str, Any]:
-    user_notion_id = (await get_user_notion_id(tg_id)) or ""
-    task = await _load_owned_task(task_id, user_notion_id)
+    user_id = (await get_user_id(tg_id)) or ""
+    task = await _load_owned_task(task_id, user_id)
     _today_date, tz_offset = await today_user_tz(tg_id)
 
     props: dict = {}
@@ -380,7 +380,7 @@ async def task_create(
     body: TaskCreateBody,
     tg_id: int = Depends(current_user_id),
 ) -> dict[str, Any]:
-    user_notion_id = (await get_user_notion_id(tg_id)) or ""
+    user_id = (await get_user_id(tg_id)) or ""
     # База задач — Nexus-only, поле "Бот" отсутствует в её схеме.
     props: dict = {
         "Задача": _title(body.title),
@@ -402,8 +402,8 @@ async def task_create(
             sign = "+" if tz_offset >= 0 else "-"
             deadline_iso = f"{deadline_iso}{sign}{abs(tz_offset):02d}:00"
         props["Дедлайн"] = _date(deadline_iso)
-    if user_notion_id:
-        props["🪪 Пользователи"] = _relation(user_notion_id)
+    if user_id:
+        props["🪪 Пользователи"] = _relation(user_id)
     pg_id = await _tasks_pg_repo.create("", props)
     if not pg_id:
         raise HTTPException(status_code=500, detail="failed to create task")
@@ -444,7 +444,7 @@ async def finance_create(
     tg_id: int = Depends(current_user_id),
     idempotency_key: Optional[str] = Header(None, alias="Idempotency-Key"),
 ) -> dict[str, Any]:
-    user_notion_id = (await get_user_notion_id(tg_id)) or ""
+    user_id = (await get_user_id(tg_id)) or ""
     today_date, _tz = await today_user_tz(tg_id)
 
     if body.type == "expense":
@@ -471,7 +471,7 @@ async def finance_create(
             source="💳 Карта",
             bot_label=bot_label,
             description=body.desc,
-            user_notion_id=user_notion_id,
+            user_id=user_id,
         )
         if not page_id:
             raise HTTPException(status_code=500, detail="failed to create finance entry")
@@ -493,10 +493,10 @@ async def finance_debt_create(
 ) -> dict[str, Any]:
     """Новый долг → запись в Памяти с категорией 📋 Долги (как в боте)."""
     from nexus.handlers.finance import _save_debt
-    user_notion_id = (await get_user_notion_id(tg_id)) or ""
+    user_id = (await get_user_id(tg_id)) or ""
     name = body.name.strip()
     try:
-        await _save_debt(name, int(body.amount), body.deadline.strip(), user_notion_id)
+        await _save_debt(name, int(body.amount), body.deadline.strip(), user_id)
     except Exception as e:
         logger.error("finance_debt_create failed: %s", e)
         raise HTTPException(status_code=500, detail="failed to save debt")
@@ -517,10 +517,10 @@ async def finance_cushion_set_target(
     target=null / 0 — снять цель.
     """
     from core.repos.pg_cushion_repo import _repo as _cushion_repo
-    user_notion_id = (await get_user_notion_id(tg_id)) or ""
+    user_id = (await get_user_id(tg_id)) or ""
     target = body.target if (body.target and body.target > 0) else None
     try:
-        await _cushion_repo.set_target(user_notion_id, target)
+        await _cushion_repo.set_target(user_id, target)
     except Exception as e:
         logger.error("finance_cushion_set_target failed: %s", e)
         raise HTTPException(status_code=500, detail="failed to set cushion target")
@@ -610,7 +610,7 @@ async def upload_session_photo_by_slug(
     tg_id: int = Depends(current_user_id),
 ) -> dict[str, Any]:
     """Фото на уровне сессии — пишет URL в photo_url каждого триплета сессии."""
-    user_notion_id = (await get_user_notion_id(tg_id)) or ""
+    user_id = (await get_user_id(tg_id)) or ""
 
     content = await file.read()
     if len(content) > 5 * 1024 * 1024:
@@ -618,7 +618,7 @@ async def upload_session_photo_by_slug(
     if not (file.content_type or "").startswith("image/"):
         raise HTTPException(status_code=415, detail="only image/* allowed")
 
-    matching = await _sessions_pg_repo.list_by_slug(slug, user_notion_id)
+    matching = await _sessions_pg_repo.list_by_slug(slug, user_id)
     if not matching:
         # Fallback: treat slug as direct PG session id
         t = await _sessions_pg_repo.find_by_id(slug)
@@ -783,7 +783,7 @@ async def upload_client_object_photo(
     tg_id: int = Depends(current_user_id),
 ) -> dict[str, Any]:
     """Append «URL | note» в поле object_photos клиента (PG text)."""
-    user_notion_id = (await get_user_notion_id(tg_id)) or ""
+    user_id = (await get_user_id(tg_id)) or ""
     c = await _clients_repo.find_by_id(client_id)
     if not c:
         raise HTTPException(status_code=404, detail="not found")
@@ -819,7 +819,7 @@ async def edit_client_object_photo_note(
     body: ObjectPhotoNoteBody,
     tg_id: int = Depends(current_user_id),
 ) -> dict[str, Any]:
-    user_notion_id = (await get_user_notion_id(tg_id)) or ""
+    user_id = (await get_user_id(tg_id)) or ""
     c = await _clients_repo.find_by_id(client_id)
     if not c:
         raise HTTPException(status_code=404, detail="not found")
@@ -839,7 +839,7 @@ async def delete_client_object_photo(
     index: int,
     tg_id: int = Depends(current_user_id),
 ) -> dict[str, Any]:
-    user_notion_id = (await get_user_notion_id(tg_id)) or ""
+    user_id = (await get_user_id(tg_id)) or ""
     c = await _clients_repo.find_by_id(client_id)
     if not c:
         raise HTTPException(status_code=404, detail="not found")
@@ -959,13 +959,13 @@ async def arcana_client_create(
     body: ClientBody,
     tg_id: int = Depends(current_user_id),
 ) -> dict[str, Any]:
-    user_notion_id = (await get_user_notion_id(tg_id)) or ""
+    user_id = (await get_user_id(tg_id)) or ""
     ctype = body.type if body.type in _CLIENT_TYPES_ALLOWED_CREATE else None
     pg_id_str = await _clients_repo.add(
         name=body.name,
         contact=body.contact,
         request=body.request,
-        user_notion_id=user_notion_id,
+        user_id=user_id,
         client_type=ctype,
     )
     if not pg_id_str:
@@ -996,7 +996,7 @@ async def arcana_client_edit(
     body: ClientUpdateBody,
     tg_id: int = Depends(current_user_id),
 ) -> dict[str, Any]:
-    user_notion_id = (await get_user_notion_id(tg_id)) or ""
+    user_id = (await get_user_id(tg_id)) or ""
     c = await _clients_repo.find_by_id(client_id)
     if not c:
         raise HTTPException(status_code=404, detail="not found")
@@ -1045,20 +1045,20 @@ _LIST_TYPES = {
 }
 
 
-async def _get_list_item_pg(item_id: str, user_notion_id: str):
+async def _get_list_item_pg(item_id: str, user_id: str):
     """Найти item в nexus_lists (first) или arcana_inventory. 404 если не найден.
 
     Returns (item, is_arcana: bool).
-    Ownership: разрешаем legacy items без user_notion_id (allow_empty_owner).
+    Ownership: разрешаем legacy items без user_id (allow_empty_owner).
     """
     nx_item = await _nexus_lists_repo.get_by_id(item_id)
     if nx_item:
-        if user_notion_id and nx_item.user_notion_id and nx_item.user_notion_id != user_notion_id:
+        if user_id and nx_item.user_id and nx_item.user_id != user_id:
             raise HTTPException(status_code=404, detail="not found")
         return nx_item, False
     ai_item = await _arcana_inv_repo.get_by_id(item_id)
     if ai_item:
-        if user_notion_id and ai_item.user_notion_id and ai_item.user_notion_id != user_notion_id:
+        if user_id and ai_item.user_id and ai_item.user_id != user_id:
             raise HTTPException(status_code=404, detail="not found")
         return ai_item, True
     raise HTTPException(status_code=404, detail="not found")
@@ -1088,7 +1088,7 @@ async def list_create(
 ) -> dict[str, Any]:
     if body.type not in _LIST_TYPES:
         raise HTTPException(status_code=400, detail=f"type must be one of {sorted(_LIST_TYPES)}")
-    user_notion_id = (await get_user_notion_id(tg_id)) or ""
+    user_id = (await get_user_id(tg_id)) or ""
     notion_type = _LIST_TYPES[body.type]
     is_arcana = (body.bot or "").lower() == "arcana"
     try:
@@ -1100,7 +1100,7 @@ async def list_create(
                 quantity=body.qty,
                 note=body.note or "",
                 group_name=body.group or "",
-                user_notion_id=user_notion_id,
+                user_id=user_id,
             )
         else:
             item = await _nexus_lists_repo.add_item(
@@ -1116,7 +1116,7 @@ async def list_create(
                 group_name=body.group or "",
                 priority=body.priority or "",
                 expires_at=body.expires,
-                user_notion_id=user_notion_id,
+                user_id=user_id,
             )
     except Exception as e:
         logger.error("list_create PG failed: %s", e)
@@ -1130,8 +1130,8 @@ async def list_done(
     tg_id: int = Depends(current_user_id),
 ) -> dict[str, Any]:
     """Помечает Done. Не пишет в Финансы (для этого есть /checkout)."""
-    user_notion_id = (await get_user_notion_id(tg_id)) or ""
-    item, is_arcana = await _get_list_item_pg(item_id, user_notion_id)
+    user_id = (await get_user_id(tg_id)) or ""
+    item, is_arcana = await _get_list_item_pg(item_id, user_id)
     try:
         if is_arcana:
             await _arcana_inv_repo.update_status(item_id, "Done")
@@ -1168,8 +1168,8 @@ async def list_checkout(
     """
     from core.list_manager import CATEGORY_TO_FINANCE
 
-    user_notion_id = (await get_user_notion_id(tg_id)) or ""
-    item, is_arcana = await _get_list_item_pg(item_id, user_notion_id)
+    user_id = (await get_user_id(tg_id)) or ""
+    item, is_arcana = await _get_list_item_pg(item_id, user_id)
 
     name = item.name or ""
     category = item.category or "💳 Прочее"
@@ -1211,7 +1211,7 @@ async def list_checkout(
                     source="💳 Карта",
                     description=body.note or name or "покупка",
                     bot_label=bot_label,
-                    user_notion_id=user_notion_id,
+                    user_id=user_id,
                 )
             except Exception as e:
                 logger.error("list_checkout: finance_add failed: %s", e)
@@ -1231,8 +1231,8 @@ async def list_delete(
     tg_id: int = Depends(current_user_id),
 ) -> dict[str, Any]:
     """Soft delete — переводим в Archived, не удаляем физически."""
-    user_notion_id = (await get_user_notion_id(tg_id)) or ""
-    item, is_arcana = await _get_list_item_pg(item_id, user_notion_id)
+    user_id = (await get_user_id(tg_id)) or ""
+    item, is_arcana = await _get_list_item_pg(item_id, user_id)
     try:
         if is_arcana:
             await _arcana_inv_repo.update_status(item_id, "Archived")
@@ -1258,11 +1258,11 @@ async def memory_create(
     body: NoteBody,
     tg_id: int = Depends(current_user_id),
 ) -> dict[str, Any]:
-    user_notion_id = (await get_user_notion_id(tg_id)) or ""
+    user_id = (await get_user_id(tg_id)) or ""
     pg_id = await _memory_repo.add(
         fact=body.text,
         category=body.cat or "",
-        user_notion_id=user_notion_id,
+        user_id=user_id,
         source="miniapp",
     )
     if not pg_id:
@@ -1279,11 +1279,11 @@ async def memory_delete(
     физически уходит из Postgres вместе с колонкой embedding, что автоматом
     убирает факт и из RAG-поиска (core/memory_rag.py читает embedding из
     той же строки, отдельного vector store нет)."""
-    user_notion_id = (await get_user_notion_id(tg_id)) or ""
+    user_id = (await get_user_id(tg_id)) or ""
     mem = await _memory_repo.get_by_id(memory_id)
     if not mem:
         raise HTTPException(status_code=404, detail="not found")
-    if user_notion_id and mem.user_notion_id and mem.user_notion_id != user_notion_id:
+    if user_id and mem.user_id and mem.user_id != user_id:
         raise HTTPException(status_code=404, detail="not found")
     ok = await _memory_repo.delete(memory_id)
     if not ok:

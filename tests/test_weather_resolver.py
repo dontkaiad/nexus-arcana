@@ -19,7 +19,7 @@ async def test_explicit_city_key_overrides_fuzzy_scan():
     """city_{tg_id} найден в find_by_exact_key → find_recent не вызывается."""
     from miniapp.backend.routes import weather
 
-    async def fake_find_by_exact_key(key, user_notion_id="", page_size=1):
+    async def fake_find_by_exact_key(key, user_id="", page_size=1):
         if key == "city_42":
             return [_mem("Питер", key=key)]
         return []
@@ -40,7 +40,7 @@ async def test_fuzzy_scan_sorts_by_updated_at_desc():
     from miniapp.backend.routes import weather
 
     # find_by_exact_key не находит override
-    async def no_override(key, user_notion_id="", page_size=1):
+    async def no_override(key, user_id="", page_size=1):
         return []
 
     # find_recent возвращает «Москва» раньше «Питер» в списке,
@@ -51,9 +51,9 @@ async def test_fuzzy_scan_sorts_by_updated_at_desc():
     ]
     captured = {}
 
-    async def fake_find_recent(is_current=None, user_notion_id="", page_size=10):
+    async def fake_find_recent(is_current=None, user_id="", page_size=10):
         captured["is_current"] = is_current
-        captured["user_notion_id"] = user_notion_id
+        captured["user_id"] = user_id
         captured["page_size"] = page_size
         return memories
 
@@ -63,7 +63,7 @@ async def test_fuzzy_scan_sorts_by_updated_at_desc():
 
     # find_recent вызван с нужными параметрами
     assert captured.get("is_current") is True
-    assert captured.get("user_notion_id") == "user-x"
+    assert captured.get("user_id") == "user-x"
     assert captured.get("page_size") == 200
     # Питер (более свежий) победил Москву
     assert city == "Saint Petersburg"

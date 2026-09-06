@@ -31,6 +31,6 @@ grimoire_entries = Table(
     Column("verified",    Boolean,      server_default=text("false")),
     Column("text",        Text),
     Column("source",      Text),
-    Column("user_notion_id", Text),
+    Column("user_id", Text),
     Column("created_at", TIMESTAMP(timezone=True), server_default=text("now()")),
 )

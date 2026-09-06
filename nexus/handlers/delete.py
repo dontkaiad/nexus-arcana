@@ -29,11 +29,11 @@ unknown  — непонятно"""
 _pending: dict[int, tuple] = {}
 
 
-async def handle_delete(message: Message, text: str, user_notion_id: str = "") -> None:
+async def handle_delete(message: Message, text: str, user_id: str = "") -> None:
     from core.claude_client import ask_claude
 
     # fail-closed: без пользователя ничего не выбираем/не удаляем
-    if not user_notion_id:
+    if not user_id:
         await message.answer("⚠️ Не могу определить пользователя — удаление отменено.")
         return
 
@@ -57,7 +57,7 @@ async def handle_delete(message: Message, text: str, user_notion_id: str = "") -
         target, scope,
         date=intent.get("date"), month=intent.get("month"),
         count=int(intent.get("count") or 1),
-        user_notion_id=user_notion_id, tz_offset=tz_offset,
+        user_id=user_id, tz_offset=tz_offset,
     )
     if not records:
         await message.answer("📭 Записей не найдено.")

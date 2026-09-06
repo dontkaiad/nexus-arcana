@@ -24,7 +24,7 @@ def _pg_item(pid, name, group="приворот — Оля", status="not_started
         status=status,
         category="🔄 Бартер",
         group_name=group,
-        user_notion_id="u1",
+        user_id="u1",
     )
 
 
@@ -62,7 +62,7 @@ async def test_pending_text_creates_n_checklist_items():
     with patch.object(barter_prompt._lists_repo, "add", mock_add):
         handled = await handle_pending_text(
             msg, "2 блока сигарет, мерч улицы восток, поездка в беларусь",
-            user_notion_id="u1",
+            user_id="u1",
         )
     assert handled is True
     mock_add.assert_awaited_once()
@@ -118,7 +118,7 @@ async def test_reply_otdala_marks_done():
                AsyncMock(return_value=mock_ritual)), \
          patch.object(lm._arcana_repo, "get_list", AsyncMock(return_value=pg_items)), \
          patch.object(lm._arcana_repo, "update_status", mock_up_status):
-        ok = await handle_reply_text(msg, "отдала блок сигарет", user_notion_id="u1")
+        ok = await handle_reply_text(msg, "отдала блок сигарет", user_id="u1")
     assert ok is True
     mock_up_status.assert_awaited_once()
     args = mock_up_status.await_args.args
@@ -154,7 +154,7 @@ async def test_reply_vmesto_renames_and_marks_done():
          patch.object(lm._arcana_repo, "get_list", AsyncMock(return_value=pg_items)), \
          patch.object(lm._arcana_repo, "update", mock_update):
         ok = await handle_reply_text(msg, "вместо блока сигарет колода таро",
-                                       user_notion_id="u1")
+                                       user_id="u1")
     assert ok is True
     mock_update.assert_awaited_once()
     args, kwargs = mock_update.await_args.args, mock_update.await_args.kwargs
@@ -197,7 +197,7 @@ async def test_reply_money_creates_finance_and_closes_money_item():
          patch.object(lm._arcana_repo, "update_status", mock_up_status), \
          patch.object(barter_prompt._fin_repo, "add", fa):
         ok = await handle_reply_text(msg, "закинула 1500₽ за приворот",
-                                       user_notion_id="u1")
+                                       user_id="u1")
     assert ok is True
     fa.assert_awaited_once()
     kw = fa.await_args.kwargs

@@ -2,12 +2,12 @@
 подзадачам в nexus_lists.
 
 Контекст: при Notion→PG бэкфилле checklist-строки приехали с пустым
-user_notion_id (в Notion у них не было relation на Пользователей). Read-path
-Mini App фильтрует списки по user_notion_id → подзадачи невидимы в шите задачи
+user_id (в Notion у них не было relation на Пользователей). Read-path
+Mini App фильтрует списки по user_id → подзадачи невидимы в шите задачи
 и во вкладке Чеклист, хотя в PG лежат.
 
-Фикс: nexus_lists, list_type='чеклист', пустой user_notion_id → проставить
-владельца (по умолчанию — доминирующий user_notion_id среди непустых строк
+Фикс: nexus_lists, list_type='чеклист', пустой user_id → проставить
+владельца (по умолчанию — доминирующий user_id среди непустых строк
 nexus_lists; можно переопределить через NEXUS_FIX_OWNER).
 
 Usage:
@@ -36,7 +36,7 @@ def main(apply: bool) -> None:
 
     with engine.connect() as conn:
         rows = conn.execute(sa_select(
-            nexus_lists.c.list_type, nexus_lists.c.user_notion_id,
+            nexus_lists.c.list_type, nexus_lists.c.user_id,
         )).fetchall()
 
     # доминирующий непустой владелец
@@ -48,7 +48,7 @@ def main(apply: bool) -> None:
         max(counts, key=counts.get) if counts else ""
     )
     if not target:
-        print("[fix] ERROR: не нашёл ни одного непустого user_notion_id — нечем заполнять. STOP")
+        print("[fix] ERROR: не нашёл ни одного непустого user_id — нечем заполнять. STOP")
         sys.exit(1)
 
     orphans = [r for r in rows if r[0] == "чеклист" and not r[1]]
@@ -66,8 +66,8 @@ def main(apply: bool) -> None:
     stmt = (
         sa_update(nexus_lists)
         .where(nexus_lists.c.list_type == "чеклист")
-        .where(or_(nexus_lists.c.user_notion_id == "", nexus_lists.c.user_notion_id.is_(None)))
-        .values(user_notion_id=target)
+        .where(or_(nexus_lists.c.user_id == "", nexus_lists.c.user_id.is_(None)))
+        .values(user_id=target)
     )
     with engine.begin() as conn:
         result = conn.execute(stmt)
@@ -77,7 +77,7 @@ def main(apply: bool) -> None:
     with engine.connect() as conn:
         still = conn.execute(sa_select(nexus_lists.c.id)
             .where(nexus_lists.c.list_type == "чеклист")
-            .where(or_(nexus_lists.c.user_notion_id == "", nexus_lists.c.user_notion_id.is_(None)))
+            .where(or_(nexus_lists.c.user_id == "", nexus_lists.c.user_id.is_(None)))
         ).fetchall()
     if still:
         print(f"[fix] WARNING: осталось {len(still)} строк без владельца")

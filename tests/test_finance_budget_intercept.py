@@ -631,7 +631,7 @@ async def test_save_budget_plan_one_time_not_written_to_finance(tmp_budget_db):
     async def cap_mem(key, fact, notion_uid=""):
         mem_writes.append((key, fact))
 
-    async def cap_ot(desc, amount, category="💳 Прочее", user_notion_id="", bot_label="☀️ Nexus", uid=0):
+    async def cap_ot(desc, amount, category="💳 Прочее", user_id="", bot_label="☀️ Nexus", uid=0):
         ot_writes.append((desc, amount, category))
         return "pg-tx"
 
@@ -689,7 +689,7 @@ async def test_save_budget_plan_deactivates_stale_one_time(tmp_budget_db):
     stale = MagicMock(id="m-old", is_current=True, key="разовый_старая_поездка", fact="разовое: старая поездка — 5000₽")
     keep = MagicMock(id="m-viza", is_current=True, key="разовый_виза", fact="разовое: виза — 8000₽")
 
-    async def fake_prefixes(prefixes, user_notion_id=""):
+    async def fake_prefixes(prefixes, user_id=""):
         if "разовый_" in prefixes:
             return [stale, keep]
         return []

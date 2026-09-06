@@ -44,7 +44,7 @@ async def _route(intent: str, text: str):
          patch("arcana.pending_tarot.get_pending",
                AsyncMock(return_value=None)), \
          patch("arcana.handlers.work_preview.has_pending", return_value=False):
-        await base.route_message(msg, user_notion_id="u")
+        await base.route_message(msg, user_id="u")
     return {
         "redirect": redirect_mock,
         "work": work_mock,
@@ -122,7 +122,7 @@ async def test_ritual_planned_routes_to_work_preview_no_immediate_write():
          patch("arcana.pending_tarot.get_pending",
                AsyncMock(return_value=None)), \
          patch("arcana.handlers.work_preview.has_pending", return_value=False):
-        await base.route_message(msg, user_notion_id="u")
+        await base.route_message(msg, user_id="u")
 
     work_mock.assert_awaited_once()
     ritual_mock.assert_not_called()
@@ -147,7 +147,7 @@ async def test_session_planned_also_routes_to_work_preview():
          patch("arcana.pending_tarot.get_pending",
                AsyncMock(return_value=None)), \
          patch("arcana.handlers.work_preview.has_pending", return_value=False):
-        await base.route_message(msg, user_notion_id="u")
+        await base.route_message(msg, user_id="u")
 
     work_mock.assert_awaited_once()
     sess_mock.assert_not_called()

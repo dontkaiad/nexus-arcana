@@ -298,7 +298,7 @@ def _make_task_page(task_id, title, *, status="Not started", prio="🔴 Сроч
         repeat_time=repeat_time or "",
         repeat=repeat or "Нет",
         completed_at=completed or "",
-        user_notion_id=FAKE_NOTION_USER,
+        user_id=FAKE_NOTION_USER,
     )
 
 
@@ -311,7 +311,7 @@ def _today_get_response(client, tasks):
                AsyncMock(return_value="tip")), \
          patch("miniapp.backend.routes.today.today_user_tz",
                AsyncMock(return_value=(today_date, 3))), \
-         patch("miniapp.backend.routes.today.get_user_notion_id",
+         patch("miniapp.backend.routes.today.get_user_id",
                AsyncMock(return_value=FAKE_NOTION_USER)), \
          patch("nexus.handlers.streaks.get_streak", return_value={
              "streak": 0, "best": 0, "last_activity_date": str(today_date),
@@ -485,7 +485,7 @@ async def test_restore_pass3_revives_recurring_without_reminder():
         repeat_time="16:00|every_2d",
         reminder="",
         deadline="",
-        user_notion_id="notion-user-x",
+        user_id="notion-user-x",
     )
 
     set_props_calls: list = []
@@ -551,7 +551,7 @@ async def test_reschedule_all_for_tz_preserves_local_clock_time():
         repeat_time="16:00|every_1d",
         reminder="2026-06-19T11:00:00+00:00",
         deadline="",
-        user_notion_id="notion-user-y",
+        user_id="notion-user-y",
     )
 
     set_props_calls: list = []

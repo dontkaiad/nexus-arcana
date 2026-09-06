@@ -60,7 +60,7 @@ class DebtItem:
 
 class ClientsRepo:
     async def find(
-        self, name: str, user_notion_id: str = ""
+        self, name: str, user_id: str = ""
     ) -> Optional[Client]:
         return await _pg_clients().find(name)
 
@@ -70,7 +70,7 @@ class ClientsRepo:
         contact: str = "",
         request: str = "",
         date: str = "",
-        user_notion_id: str = "",
+        user_id: str = "",
         client_type: Optional[str] = None,
     ) -> Optional[str]:
         # Map Notion display labels to PG codes
@@ -86,7 +86,7 @@ class ClientsRepo:
         return str(pg_id) if pg_id else None
 
     async def sessions_for(
-        self, client_id: str, user_notion_id: str = ""
+        self, client_id: str, user_id: str = ""
     ) -> List[HistoryItem]:
         snippets = await _pg_sessions().list_by_client(client_id)
         return [
@@ -100,7 +100,7 @@ class ClientsRepo:
         ]
 
     async def rituals_for(
-        self, client_id: str, user_notion_id: str = ""
+        self, client_id: str, user_id: str = ""
     ) -> List[HistoryItem]:
         rituals = await _pg_rituals().list_by_client(client_id)
         return [
@@ -136,8 +136,8 @@ class ClientsRepo:
             type_code=type_code,
         )
 
-    async def list_all(self, user_notion_id: str = "") -> List[Client]:
-        return await _pg_clients().list_all(user_notion_id)
+    async def list_all(self, user_id: str = "") -> List[Client]:
+        return await _pg_clients().list_all(user_id)
 
     async def find_by_id(self, client_id: str) -> Optional[Client]:
         try:
@@ -168,7 +168,7 @@ class ClientsRepo:
         await _pg_clients().update_profile(pg_id, photo_url=url)
 
     async def all_debts(
-        self, user_notion_id: str = ""
+        self, user_id: str = ""
     ) -> List[DebtItem]:
         result: List[DebtItem] = []
         pg_client_cache: dict = {}
@@ -195,7 +195,7 @@ class ClientsRepo:
             ))
 
         # Sessions
-        all_sessions = await _pg_sessions().list_all(user_notion_id=user_notion_id)
+        all_sessions = await _pg_sessions().list_all(user_id=user_id)
         for s in all_sessions:
             # Sessions currently don't store amount/paid — skip debt for now
             pass

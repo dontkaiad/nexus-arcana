@@ -12,7 +12,7 @@ class TestNexusCommands:
         msg = mock_message("/start")
 
         from nexus.nexus_bot import cmd_start
-        await cmd_start(msg, user_notion_id="fake-user-id")
+        await cmd_start(msg, user_id="fake-user-id")
 
         assert msg.answer.called or msg.reply.called, \
             "/start не вызвал answer/reply"
@@ -30,7 +30,7 @@ class TestNexusCommands:
         msg = mock_message("/help")
 
         from nexus.nexus_bot import cmd_help
-        await cmd_help(msg, user_notion_id="fake-user-id")
+        await cmd_help(msg, user_id="fake-user-id")
 
         assert msg.answer.called or msg.reply.called, \
             "/help не вызвал ответ"
@@ -210,7 +210,7 @@ class TestQuickCreateTasksPG:
 
         p_create, p_lr, p_lt, p_smp = self._patches()
         with p_create as m_create, p_lr as m_lr, p_lt as m_lt, p_smp as m_smp:
-            await on_arcana_choice(cb, user_notion_id="u-1")
+            await on_arcana_choice(cb, user_id="u-1")
 
             m_create.assert_awaited_once()
             props = m_create.call_args.args[1]
@@ -234,7 +234,7 @@ class TestQuickCreateTasksPG:
 
         p_create, p_lr, p_lt, p_smp = self._patches()
         with p_create as m_create, p_lr, p_lt, p_smp:
-            await on_arcana_choice(cb, user_notion_id="")
+            await on_arcana_choice(cb, user_id="")
             props = m_create.call_args.args[1]
             assert "🪪 Пользователи" not in props
 
@@ -252,7 +252,7 @@ class TestQuickCreateTasksPG:
 
         p_create, p_lr, p_lt, p_smp = self._patches()
         with p_create as m_create, p_lr as m_lr, p_lt as m_lt, p_smp as m_smp:
-            await on_unknown_clarify(cb, user_notion_id="")
+            await on_unknown_clarify(cb, user_id="")
 
             m_create.assert_awaited_once()
             props = m_create.call_args.args[1]

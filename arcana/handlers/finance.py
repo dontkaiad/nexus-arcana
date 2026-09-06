@@ -91,7 +91,7 @@ async def _format_pnl(pnl: dict) -> str:
     return "\n".join(lines)
 
 
-async def handle_pay_self(message: Message, text: str, user_notion_id: str = "") -> None:
+async def handle_pay_self(message: Message, text: str, user_id: str = "") -> None:
     """«выплати X / зарплата X / выплати себе X» → Финансы Бот=Nexus, Кат=Зарплата."""
     m = re.search(r"(\d[\d\s.,]*)\s*(?:к|тыс|тысяч|т)?", text or "", re.IGNORECASE)
     if not m:
@@ -111,7 +111,7 @@ async def handle_pay_self(message: Message, text: str, user_notion_id: str = "")
         amount *= 1000
 
     today = datetime.now(timezone(timedelta(hours=3))).date()
-    pnl = await compute_pnl(user_notion_id, today.year, today.month)
+    pnl = await compute_pnl(user_id, today.year, today.month)
     cash_before = pnl["cash_balance"]
     fin_id = await _repo.add(
         date=today.strftime("%Y-%m-%d"),
@@ -121,7 +121,7 @@ async def handle_pay_self(message: Message, text: str, user_notion_id: str = "")
         source="💳 Карта",
         description="Выплата себе",
         bot_label=BOT_NEXUS,
-        user_notion_id=user_notion_id,
+        user_id=user_id,
     )
     if not fin_id:
         await message.answer("⚠️ Не удалось записать выплату.")
@@ -133,14 +133,14 @@ async def handle_pay_self(message: Message, text: str, user_notion_id: str = "")
 
 
 @router.callback_query(F.data == "arc_pay_self")
-async def cb_pay_self(cb: CallbackQuery, user_notion_id: str = "") -> None:
+async def cb_pay_self(cb: CallbackQuery, user_id: str = "") -> None:
     await cb.answer()
     await cb.message.answer(
         "💸 Сколько выплатить? Напиши «выплати 20к» или «зарплата 20000».",
     )
 
 
-async def handle_arcana_finance(message: Message, user_notion_id: str = "", text: str = "") -> None:
+async def handle_arcana_finance(message: Message, user_id: str = "", text: str = "") -> None:
     """Финансовая аналитика практики. Без text — текущий месяц."""
     try:
         from core.shared_handlers import get_user_tz
@@ -150,7 +150,7 @@ async def handle_arcana_finance(message: Message, user_notion_id: str = "", text
 
         # Если текст похож на pay_self — раскручиваем
         if text and re.search(r"\bвыплат|зарплат\b", text, re.IGNORECASE) and re.search(r"\d", text):
-            await handle_pay_self(message, text, user_notion_id)
+            await handle_pay_self(message, text, user_id)
             return
 
         month: Optional[int] = now.month
@@ -168,7 +168,7 @@ async def handle_arcana_finance(message: Message, user_notion_id: str = "", text
                 year = int(parsed["year"])
 
         # Новый формат — P&L с кассой через cash_register.compute_pnl.
-        pnl = await compute_pnl(user_notion_id, year, month)
+        pnl = await compute_pnl(user_id, year, month)
         reply = await _format_pnl(pnl)
         await message.answer(reply, parse_mode="HTML", reply_markup=_pay_kb())
         return

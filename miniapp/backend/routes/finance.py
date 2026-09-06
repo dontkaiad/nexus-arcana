@@ -8,7 +8,7 @@ from typing import Any, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
-from core.user_manager import get_user_notion_id
+from core.user_manager import get_user_id
 from core.budget import (
     GOAL_RE,
     budget_day_limit_from_plan,
@@ -62,7 +62,7 @@ def _month_bounds(month: str) -> tuple:
 
 
 async def _nexus_finance_records(
-    user_notion_id: str,
+    user_id: str,
     date_on_or_after: str,
     date_before: str,
     type_filter: Optional[str] = None,
@@ -74,7 +74,7 @@ async def _nexus_finance_records(
             date_to=date_before,
             type_=type_filter or None,
             page_size=500,
-            user_notion_id=user_notion_id,
+            user_id=user_id,
         )
     except Exception as e:
         logger.warning("_nexus_finance_records PG query failed: %s", e)
@@ -114,9 +114,9 @@ async def _view_today(tg_id: int, date: Optional[str] = None) -> dict:
     today_date, tz_offset = await today_user_tz(tg_id)
     today_iso = today_date.isoformat()
     view_iso = date or today_iso
-    user_notion_id = (await get_user_notion_id(tg_id)) or ""
+    user_id = (await get_user_id(tg_id)) or ""
 
-    records = await _nexus_finance_records(user_notion_id, view_iso, view_iso,
+    records = await _nexus_finance_records(user_id, view_iso, view_iso,
                                            type_filter="💸 Расход")
     items = [_extract_finance_item(e) for e in records]
     # 📦 Разовые / 🔒 Фикс — свой лимит на весь период (лимит_разовые/лимит_фикс),
@@ -131,12 +131,12 @@ async def _view_today(tg_id: int, date: Optional[str] = None) -> dict:
     if view_iso == today_iso:
         spent_today = total
     else:
-        today_records = await _nexus_finance_records(user_notion_id, today_iso, today_iso,
+        today_records = await _nexus_finance_records(user_id, today_iso, today_iso,
                                                       type_filter="💸 Расход")
         spent_today = sum(int(round(e.amount)) for e in today_records
                           if not is_parallel_limit(e.category or ""))
 
-    budget_day = await budget_day_limit_from_plan(user_notion_id, tz_offset)
+    budget_day = await budget_day_limit_from_plan(user_id, tz_offset)
     left = max(0, budget_day - spent_today)
     pct = _pct(spent_today, budget_day)
     return {
@@ -156,10 +156,10 @@ async def _view_today(tg_id: int, date: Optional[str] = None) -> dict:
 # ── View: month ──────────────────────────────────────────────────────────────
 
 async def _view_month(tg_id: int, month: str) -> dict:
-    user_notion_id = (await get_user_notion_id(tg_id)) or ""
+    user_id = (await get_user_id(tg_id)) or ""
     start, end = _month_bounds(month)
 
-    records = await _nexus_finance_records(user_notion_id, start, end)
+    records = await _nexus_finance_records(user_id, start, end)
     income = 0.0
     expense = 0.0
     by_cat: dict = {}
@@ -197,10 +197,10 @@ async def _view_month(tg_id: int, month: str) -> dict:
 # ── View: limits ─────────────────────────────────────────────────────────────
 
 async def _view_limits(tg_id: int, month: str) -> dict:
-    user_notion_id = (await get_user_notion_id(tg_id)) or ""
+    user_id = (await get_user_id(tg_id)) or ""
     start, end = _month_bounds(month)
 
-    records = await _nexus_finance_records(user_notion_id, start, end,
+    records = await _nexus_finance_records(user_id, start, end,
                                            type_filter="💸 Расход")
     spent_by_link: dict = {}
     for entry in records:
@@ -352,12 +352,12 @@ def _serialize_goal(g: dict, today_d: date, all_debts_close: Optional[str]) -> d
     }
 
 
-async def _find_debt_taken_dates(user_notion_id: str, today_d: date) -> dict:
+async def _find_debt_taken_dates(user_id: str, today_d: date) -> dict:
     """Ищет в финансах доходы со словом «долг» в описании за последние 5 лет."""
     start = date(today_d.year - 5, 1, 1).isoformat()
     end = date(today_d.year + 1, 1, 1).isoformat()
     try:
-        records = await _nexus_finance_records(user_notion_id, start, end)
+        records = await _nexus_finance_records(user_id, start, end)
     except Exception as e:
         logger.warning("debt taken-dates query failed: %s", e)
         return {}
@@ -388,13 +388,13 @@ def _match_taken_date(debt_name: str, taken_map: dict) -> Optional[str]:
     return best
 
 
-async def _load_desc_synonyms(user_notion_id: str) -> dict:
+async def _load_desc_synonyms(user_id: str) -> dict:
     """wave8.64: из записей памяти «🛒 Предпочтения» строит карту синоним→канон."""
     try:
         mems = await _mem_repo.find_by_category(
             "🛒 Предпочтения",
             is_current=True,
-            user_notion_id=user_notion_id,
+            user_id=user_id,
             page_size=200,
         )
     except Exception as e:
@@ -416,7 +416,7 @@ async def _load_desc_synonyms(user_notion_id: str) -> dict:
     return syn
 
 
-async def _load_closed_budget(user_notion_id: str) -> dict:
+async def _load_closed_budget(user_id: str) -> dict:
     """Закрытые цели (Memory is_current=False) + закрытые долги (debts.is_active=False)."""
     out: dict = {"долги": [], "цели": []}
 
@@ -425,7 +425,7 @@ async def _load_closed_budget(user_notion_id: str) -> dict:
         all_closed = await _mem_repo.find_by_category(
             "",
             is_current=False,
-            user_notion_id=user_notion_id,
+            user_id=user_id,
             page_size=200,
         )
         for mem in all_closed:
@@ -458,7 +458,7 @@ async def _load_closed_budget(user_notion_id: str) -> dict:
     # Закрытые долги — debts table
     try:
         from core.repos.pg_debts_repo import _repo as _debt_repo
-        closed_debts = await _debt_repo.list_closed(user_notion_id, kind="i_owe")
+        closed_debts = await _debt_repo.list_closed(user_id, kind="i_owe")
         for d in closed_debts:
             closed_at = d.updated_at[:10] if d.updated_at else None
             out["долги"].append({
@@ -477,10 +477,10 @@ async def _load_closed_budget(user_notion_id: str) -> dict:
 
 
 async def _view_goals(tg_id: int) -> dict:
-    user_notion_id = (await get_user_notion_id(tg_id)) or ""
-    data = await load_budget_data(user_notion_id)
+    user_id = (await get_user_id(tg_id)) or ""
+    data = await load_budget_data(user_id)
     today_d, _ = await today_user_tz(tg_id)
-    taken_map = await _find_debt_taken_dates(user_notion_id, today_d)
+    taken_map = await _find_debt_taken_dates(user_id, today_d)
     debts_ser = []
     for d in data.get("долги", []):
         ser = _serialize_debt(d, today_d)
@@ -488,7 +488,7 @@ async def _view_goals(tg_id: int) -> dict:
         debts_ser.append(ser)
     all_close = _all_debts_close_label(debts_ser)
     goals_ser = [_serialize_goal(g, today_d, all_close) for g in data.get("цели", [])]
-    closed = await _load_closed_budget(user_notion_id)
+    closed = await _load_closed_budget(user_id)
     closed["долги"].sort(key=lambda x: x.get("closed_at") or "", reverse=True)
     closed["цели"].sort(key=lambda x: x.get("closed_at") or "", reverse=True)
 
@@ -506,13 +506,13 @@ async def _view_goals(tg_id: int) -> dict:
 
 async def _view_cushion(tg_id: int, page: int = 0) -> dict:
     """Подушка: текущий баланс/цель/взнос + постраничный лог пополнений."""
-    user_notion_id = (await get_user_notion_id(tg_id)) or ""
+    user_id = (await get_user_id(tg_id)) or ""
     from core.repos.pg_cushion_repo import _repo as _cushion_repo
 
-    c = await _cushion_repo.get(user_notion_id)
+    c = await _cushion_repo.get(user_id)
     offset = max(0, page) * _CUSHION_TX_PAGE
     txs, has_more = await _cushion_repo.list_transactions(
-        user_notion_id, limit=_CUSHION_TX_PAGE, offset=offset,
+        user_id, limit=_CUSHION_TX_PAGE, offset=offset,
     )
     return {
         "view": "cushion",
@@ -572,16 +572,16 @@ async def get_finance_category(
         today_date, _ = await today_user_tz(tg_id)
         month = today_date.strftime("%Y-%m")
 
-    user_notion_id = (await get_user_notion_id(tg_id)) or ""
+    user_id = (await get_user_id(tg_id)) or ""
     start_iso, end_iso = _month_bounds(month)
 
     try:
-        records = await _nexus_finance_records(user_notion_id, start_iso, end_iso)
+        records = await _nexus_finance_records(user_id, start_iso, end_iso)
     except Exception as e:
         logger.warning("finance/category query failed: %s", e)
         records = []
 
-    synonyms = await _load_desc_synonyms(user_notion_id)
+    synonyms = await _load_desc_synonyms(user_id)
 
     items: List[dict] = []
     total = 0.0

@@ -67,12 +67,12 @@ _TYPE_CORRECTION_RE = _re_nexus.compile(
     _re_nexus.IGNORECASE,
 )
 _pending_arcana: dict = {}  # user_id → text (оригинальный для arcana_clarify)
-_pending_unknown: dict = {}  # user_id → (text, user_notion_id, ts)
+_pending_unknown: dict = {}  # user_id → (text, user_id, ts)
 
 
 @dp.message(Command("start"))
-async def cmd_start(msg: Message, user_notion_id: str = "") -> None:
-    if not user_notion_id:
+async def cmd_start(msg: Message, user_id: str = "") -> None:
+    if not user_id:
         await msg.answer("⛔ У тебя нет доступа. Обратись к владельцу.")
         return
     await msg.answer(
@@ -96,7 +96,7 @@ async def cmd_start(msg: Message, user_notion_id: str = "") -> None:
 
 
 @dp.message(Command("help"))
-async def cmd_help(msg: Message, user_notion_id: str = "") -> None:
+async def cmd_help(msg: Message, user_id: str = "") -> None:
     await msg.answer(
         "☀️ <b>Nexus</b> — помощник на каждый день\n"
         "Пойму текст, голосовое 🎤 или скрин из банка 📸.\n\n"
@@ -145,7 +145,7 @@ async def cmd_help(msg: Message, user_notion_id: str = "") -> None:
 
 
 @dp.message(Command("tasks"))
-async def cmd_tasks(msg: Message, user_notion_id: str = "") -> None:
+async def cmd_tasks(msg: Message, user_id: str = "") -> None:
     """Задачи: СЕГОДНЯ + стрик + все остальные + СДВГ-совет."""
     import random
     from nexus.repos.tasks_repo import _repo
@@ -153,13 +153,13 @@ async def cmd_tasks(msg: Message, user_notion_id: str = "") -> None:
     uid = msg.from_user.id if msg.from_user else 0
 
     # fail-closed: пустой user в active("") вернул бы чужие задачи
-    if not user_notion_id:
+    if not user_id:
         await msg.answer("⚠️ Не могу определить пользователя — задачи не показаны.")
         return
 
     # Все активные задачи из PG (active() исключает Done/Archived,
     # сортит priority asc — urgent first, как делал Notion-запрос).
-    all_tasks = await _repo.active(user_notion_id=user_notion_id)
+    all_tasks = await _repo.active(user_id=user_id)
     if not all_tasks:
         await msg.answer("📭 Задач нет.")
         return
@@ -320,21 +320,21 @@ async def cmd_tasks(msg: Message, user_notion_id: str = "") -> None:
 
 
 @dp.message(Command("today"))
-async def cmd_today(msg: Message, user_notion_id: str = "") -> None:
+async def cmd_today(msg: Message, user_id: str = "") -> None:
     """Экспресс: сегодня + стрик + бюджет + совет — всё в одном."""
     from nexus.handlers.tasks import handle_tasks_today
-    await handle_tasks_today(msg, user_notion_id=user_notion_id)
+    await handle_tasks_today(msg, user_id=user_id)
 
 
 @dp.message(Command("notes"))
-async def cmd_notes(msg: Message, user_notion_id: str = "") -> None:
+async def cmd_notes(msg: Message, user_id: str = "") -> None:
     """Показать все заметки с пагинацией."""
     from nexus.handlers.notes import handle_note_search
-    await handle_note_search(msg, {"query": ""}, user_notion_id=user_notion_id)
+    await handle_note_search(msg, {"query": ""}, user_id=user_id)
 
 
 @dp.message(Command("memory"))
-async def cmd_memory(msg: Message, user_notion_id: str = "") -> None:
+async def cmd_memory(msg: Message, user_id: str = "") -> None:
     """/memory [категория] — все активные записи памяти, сгруппированные по категориям."""
     from core.layout import maybe_convert
     text = maybe_convert(msg.text or "")
@@ -346,27 +346,27 @@ async def cmd_memory(msg: Message, user_notion_id: str = "") -> None:
     is_budget_request = cat_low in ("лимит", "бюджет", "💰 лимит", "финансы")
     from nexus.handlers.memory import handle_memory_list
     await handle_memory_list(msg, category_filter=category_filter,
-                             user_notion_id=user_notion_id,
+                             user_id=user_id,
                              exclude_adhd=not is_adhd_request,
                              exclude_budget=not is_budget_request)
 
 
 @dp.message(Command("adhd"))
-async def cmd_adhd(msg: Message, user_notion_id: str = "") -> None:
+async def cmd_adhd(msg: Message, user_id: str = "") -> None:
     from nexus.handlers.memory import handle_adhd_command
-    await handle_adhd_command(msg, user_notion_id=user_notion_id)
+    await handle_adhd_command(msg, user_id=user_id)
 
 
 @dp.message(Command("budget"))
-async def cmd_budget(msg: Message, user_notion_id: str = "") -> None:
+async def cmd_budget(msg: Message, user_id: str = "") -> None:
     """v2: всегда Sonnet-анализ с текущими данными."""
     from nexus.handlers.finance import start_budget_analysis
-    await start_budget_analysis(msg, user_notion_id)
+    await start_budget_analysis(msg, user_id)
 
 
 
 @dp.message(Command("finance"))
-async def cmd_finance(msg: Message, user_notion_id: str = "") -> None:
+async def cmd_finance(msg: Message, user_id: str = "") -> None:
     """Финансы: свободных/день + лимиты на грани + по категориям."""
     import random
     from nexus.handlers.finance import _calc_free_remaining, _get_limits, _cat_link
@@ -374,7 +374,7 @@ async def cmd_finance(msg: Message, user_notion_id: str = "") -> None:
 
     # fail-closed: пустой user в query_month вернул бы [] (#139), но явный
     # guard честнее — без юзера финансы не показываем.
-    if not user_notion_id:
+    if not user_id:
         await msg.answer("⚠️ Не могу определить пользователя — финансы не показаны.")
         return
 
@@ -400,7 +400,7 @@ async def cmd_finance(msg: Message, user_notion_id: str = "") -> None:
 
     # PG: только nexus_budget этого юзера (НЕ FinanceRepo.month — там union
     # с arcana_pnl = протечка P&L Арканы в личные финансы).
-    records = await PgNexusBudgetRepo().query_month(month, user_notion_id=user_notion_id)
+    records = await PgNexusBudgetRepo().query_month(month, user_id=user_id)
 
     # Считаем расходы по категориям + сегодня
     total_expense = 0.0
@@ -420,7 +420,7 @@ async def cmd_finance(msg: Message, user_notion_id: str = "") -> None:
             today_total += amount
 
     # Свободных/день
-    free_result = await _calc_free_remaining(user_notion_id, tz_offset)
+    free_result = await _calc_free_remaining(user_id, tz_offset)
     if free_result:
         free_left, days_rem = free_result
         daily_budget = free_left / max(days_rem, 1)
@@ -437,7 +437,7 @@ async def cmd_finance(msg: Message, user_notion_id: str = "") -> None:
         lines.append(f"💳 Свободных: <b>{free_left:,.0f}₽</b> · {daily_budget:,.0f}₽/день")
     # Потрачено из планового бюджета (income)
     from nexus.handlers.finance import _load_budget_data
-    budget = await _load_budget_data(user_notion_id)
+    budget = await _load_budget_data(user_id)
     plan_income = sum(d["amount"] for d in budget.get("доходы", []))
     if plan_income > 0:
         lines.append(f"📊 Потрачено: {total_expense:,.0f}₽ из {plan_income:,.0f}₽")
@@ -490,24 +490,24 @@ async def cmd_finance(msg: Message, user_notion_id: str = "") -> None:
 
 
 @dp.message(Command("finance_stats"))
-async def cmd_finance_stats(msg: Message, user_notion_id: str = "") -> None:
+async def cmd_finance_stats(msg: Message, user_id: str = "") -> None:
     """Алиас → /finance."""
-    await cmd_finance(msg, user_notion_id=user_notion_id)
+    await cmd_finance(msg, user_id=user_id)
 
 
 @dp.message(Command("stats"))
-async def cmd_stats(msg: Message, user_notion_id: str = "") -> None:
+async def cmd_stats(msg: Message, user_id: str = "") -> None:
     """Статистика задач и стрики."""
     from nexus.handlers.tasks import handle_task_stats
-    await handle_task_stats(msg, user_notion_id=user_notion_id)
+    await handle_task_stats(msg, user_id=user_id)
 
 
 
 @dp.message(Command("tz"))
-async def set_tz(msg: Message, user_notion_id: str = "") -> None:
+async def set_tz(msg: Message, user_id: str = "") -> None:
     """Установить часовой пояс. /tz UTC+5 или /tz Екатеринбург"""
     from nexus.handlers.tasks import _update_user_tz
-    await _update_user_tz(msg, msg.text.replace("/tz", "").strip(), user_notion_id=user_notion_id)
+    await _update_user_tz(msg, msg.text.replace("/tz", "").strip(), user_id=user_id)
 
 
 @dp.message(Command("setmenu"))
@@ -528,20 +528,20 @@ async def cmd_setmenu(msg: Message) -> None:
 
 
 @dp.message(Command("list"))
-async def cmd_list(msg: Message, user_notion_id: str = "") -> None:
+async def cmd_list(msg: Message, user_id: str = "") -> None:
     from nexus.handlers.lists import handle_list_command
-    await handle_list_command(msg, user_notion_id=user_notion_id)
+    await handle_list_command(msg, user_id=user_id)
 
 
 @dp.message(F.text)
-async def handle_text(msg: Message, user_notion_id: str = "") -> None:
+async def handle_text(msg: Message, user_id: str = "") -> None:
     from core.layout import maybe_convert
     from nexus.handlers.tasks import _pending_has, _pending_get, handle_task_clarification
 
     # Budget v2: payday reminder (once per period start)
     try:
         from nexus.handlers.finance import maybe_payday_reminder
-        await maybe_payday_reminder(msg, user_notion_id)
+        await maybe_payday_reminder(msg, user_id)
     except Exception:
         pass
 
@@ -549,18 +549,18 @@ async def handle_text(msg: Message, user_notion_id: str = "") -> None:
 
     # Budget setup — перехватывает текст пока идёт настройка
     from nexus.handlers.finance import handle_budget_setup_text
-    if await handle_budget_setup_text(msg, user_notion_id):
+    if await handle_budget_setup_text(msg, user_id):
         await react(msg, "⚡")
         return
 
     # Lists pending — чеклист пункты, срок годности
     from nexus.handlers.lists import handle_list_pending
-    if await handle_list_pending(msg, user_notion_id):
+    if await handle_list_pending(msg, user_id):
         await react(msg, "🫡")
         return
 
     # Receipt clarify pending — уточнение категорий фото-чека текстом
-    if await _handle_receipt_clarify(msg, user_notion_id):
+    if await _handle_receipt_clarify(msg, user_id):
         await react(msg, "👌")
         return
 
@@ -571,7 +571,7 @@ async def handle_text(msg: Message, user_notion_id: str = "") -> None:
     import re as _quick_re
     if _quick_re.search(r"покажи бюджет|сколько (могу тратить|свободных)|бюджет на месяц", _tl):
         from nexus.handlers.finance import start_budget_analysis
-        await start_budget_analysis(msg, user_notion_id)
+        await start_budget_analysis(msg, user_id)
         await react(msg, "🏆")
         return
 
@@ -653,7 +653,7 @@ async def handle_text(msg: Message, user_notion_id: str = "") -> None:
     )
     if (_last_task_get(msg.from_user.id) and _CLARIFY_RE.search(_raw_text)
             and _is_clarification_not_new_task(_raw_text)):
-        _handled = await handle_last_task_clarify(msg, _raw_text, msg.from_user.id, user_notion_id)
+        _handled = await handle_last_task_clarify(msg, _raw_text, msg.from_user.id, user_id)
         if _handled:
             await react(msg, "⚡")
             return
@@ -702,10 +702,10 @@ async def handle_text(msg: Message, user_notion_id: str = "") -> None:
             return
 
     text = maybe_convert(msg.text.strip())
-    await process_text(msg, text, user_notion_id)
+    await process_text(msg, text, user_id)
 
 
-async def process_text(msg: Message, text: str, user_notion_id: str = "") -> None:
+async def process_text(msg: Message, text: str, user_id: str = "") -> None:
     """Ядро обработки текста: spell correction → classify → process_item → ответ.
 
     Вызывается из handle_text, handle_voice, handle_photo (caption).
@@ -721,7 +721,7 @@ async def process_text(msg: Message, text: str, user_notion_id: str = "") -> Non
     # anti-conversational + length guard.
     try:
         from core.preprocess import normalize_text
-        text = await normalize_text(text, user_notion_id=user_notion_id)
+        text = await normalize_text(text, user_id=user_id)
     except Exception as e:
         logger.error("normalize_text failed: %s", e)
 
@@ -768,7 +768,7 @@ async def process_text(msg: Message, text: str, user_notion_id: str = "") -> Non
                 )
                 return
             from nexus.handlers.reply_update import handle_reply_update
-            if await handle_reply_update(msg, user_notion_id=user_notion_id):
+            if await handle_reply_update(msg, user_id=user_id):
                 return
 
         prev = maybe_convert(msg.reply_to_message.text.strip())
@@ -786,11 +786,11 @@ async def process_text(msg: Message, text: str, user_notion_id: str = "") -> Non
         original = _clarify.pop(uid)
         combined = f"{original}\nУточнение: {text}"
         try:
-            items = await classify(combined, tz_offset=tz_offset, user_notion_id=user_notion_id)
+            items = await classify(combined, tz_offset=tz_offset, user_id=user_id)
             if items and items[0].get("type") not in ("unknown", "parse_error", None):
                 lines = []
                 for data in items:
-                    line = await process_item(data, combined, msg, _clarify, user_notion_id=user_notion_id)
+                    line = await process_item(data, combined, msg, _clarify, user_id=user_id)
                     if line:
                         lines.append(line)
                 if lines:
@@ -830,7 +830,7 @@ async def process_text(msg: Message, text: str, user_notion_id: str = "") -> Non
         if _url_shortcut:
             items = _url_items
         else:
-            items = await classify(original_text, tz_offset=tz_offset, user_notion_id=user_notion_id)
+            items = await classify(original_text, tz_offset=tz_offset, user_id=user_id)
         logger.info("handle_text: classify returned %d items: %s", len(items), [i.get("type") for i in items])
 
         lines = []
@@ -841,7 +841,7 @@ async def process_text(msg: Message, text: str, user_notion_id: str = "") -> Non
 
         for data in items:
             logger.info("handle_text: processing item type=%s", data.get("type"))
-            line = await process_item(data, original_text, msg, _clarify, user_notion_id=user_notion_id)
+            line = await process_item(data, original_text, msg, _clarify, user_id=user_id)
             logger.info("handle_text: process_item returned: %s", line[:50] if line else "None/empty")
 
             if line and line.startswith("finance_clarify:"):
@@ -856,7 +856,7 @@ async def process_text(msg: Message, text: str, user_notion_id: str = "") -> Non
                         "source": source,
                         "title": title,
                     }
-                    _pending_finance[msg.from_user.id] = (finance_data, text, user_notion_id)
+                    _pending_finance[msg.from_user.id] = (finance_data, text, user_id)
                     has_clarify = True
             elif line and line.startswith("arcana_clarify:"):
                 parts = line.split(":", 1)
@@ -866,7 +866,7 @@ async def process_text(msg: Message, text: str, user_notion_id: str = "") -> Non
             elif line and line.startswith("unknown_clarify:"):
                 unknown_clarify_text = line.split(":", 1)[1]
                 import time as _time
-                _pending_unknown[msg.from_user.id] = (unknown_clarify_text, user_notion_id, _time.time())
+                _pending_unknown[msg.from_user.id] = (unknown_clarify_text, user_id, _time.time())
             elif line:
                 lines.append(line)
                 # Запомнить время последней финансовой записи для контекста редактирования
@@ -986,7 +986,7 @@ async def process_text(msg: Message, text: str, user_notion_id: str = "") -> Non
 # ── Voice messages ──────────────────────────────────────────────────────────
 
 @dp.message(F.voice | F.audio)
-async def handle_voice(msg: Message, user_notion_id: str = "") -> None:
+async def handle_voice(msg: Message, user_id: str = "") -> None:
     """Голосовое → Whisper → текст → pipeline."""
     from nexus.handlers.utils import react
     from core.voice import transcribe
@@ -1023,10 +1023,10 @@ async def handle_voice(msg: Message, user_notion_id: str = "") -> None:
 
     # Lists pending — могут ждать ответ на чек/чеклист
     from nexus.handlers.lists import handle_list_pending
-    if await handle_list_pending(msg, user_notion_id):
+    if await handle_list_pending(msg, user_id):
         return
 
-    await process_text(msg, text, user_notion_id)
+    await process_text(msg, text, user_id)
 
 
 # ── Photo messages (receipts) ──────────────────────────────────────────────
@@ -1087,7 +1087,7 @@ def _receipt_summary_lines(items: list[dict]) -> list[str]:
     return lines
 
 
-async def _handle_receipt_clarify(msg: Message, user_notion_id: str = "") -> bool:
+async def _handle_receipt_clarify(msg: Message, user_id: str = "") -> bool:
     """Обработка текстового уточнения категорий фото-чека."""
     from core.list_manager import pending_get, pending_set, pending_del
     from core.vision import _VALID_EXPENSE_CATS
@@ -1103,7 +1103,7 @@ async def _handle_receipt_clarify(msg: Message, user_notion_id: str = "") -> boo
 
     items = pending.get("items", [])
     is_bank = pending.get("is_bank", False)
-    p_user_id = pending.get("user_notion_id", user_notion_id)
+    p_user_id = pending.get("user_id", user_id)
 
     skip_words = {"нет", "пропустить", "skip", "no", "—", "-"}
     if text.lower() in skip_words:
@@ -1177,7 +1177,7 @@ async def _handle_receipt_clarify(msg: Message, user_notion_id: str = "") -> boo
         "action": "photo_receipt",
         "items": items,
         "is_bank": is_bank,
-        "user_notion_id": p_user_id,
+        "user_id": p_user_id,
     })
 
     lines = _receipt_summary_lines(items)
@@ -1203,7 +1203,7 @@ def _receipt_confirm_kb(is_bank: bool) -> InlineKeyboardMarkup:
 
 
 @dp.message(F.photo)
-async def handle_photo(msg: Message, user_notion_id: str = "") -> None:
+async def handle_photo(msg: Message, user_id: str = "") -> None:
     """Фото → Vision → парсинг чека ИЛИ caption → текст."""
     from nexus.handlers.utils import react
     from core.vision import parse_receipt
@@ -1237,7 +1237,7 @@ async def handle_photo(msg: Message, user_notion_id: str = "") -> None:
                 "action": "receipt_clarify",
                 "items": items,
                 "is_bank": is_bank,
-                "user_notion_id": user_notion_id,
+                "user_id": user_id,
             })
             await msg.answer("\n".join(lines), parse_mode="HTML")
         else:
@@ -1247,7 +1247,7 @@ async def handle_photo(msg: Message, user_notion_id: str = "") -> None:
                 "action": "photo_receipt",
                 "items": items,
                 "is_bank": is_bank,
-                "user_notion_id": user_notion_id,
+                "user_id": user_id,
             })
             await msg.answer("\n".join(lines), parse_mode="HTML",
                              reply_markup=_receipt_confirm_kb(is_bank))
@@ -1260,13 +1260,13 @@ async def handle_photo(msg: Message, user_notion_id: str = "") -> None:
         if await maybe_handle_reschedule_pending(msg, text=text):
             return
 
-        await process_text(msg, text, user_notion_id)
+        await process_text(msg, text, user_id)
     else:
         await msg.answer("📸 Не смог распознать. Попробуй сфоткать ровнее или напиши текстом.")
 
 
 @dp.callback_query(lambda c: c.data and c.data.startswith("receipt_"))
-async def on_receipt(query: CallbackQuery, user_notion_id: str = "") -> None:
+async def on_receipt(query: CallbackQuery, user_id: str = "") -> None:
     """Подтверждение записи фото-чека в финансы."""
     from core.list_manager import pending_get, pending_del
     from core.repos.finance_repo import _repo as _fin_repo
@@ -1293,7 +1293,7 @@ async def on_receipt(query: CallbackQuery, user_notion_id: str = "") -> None:
     is_bank = pending.get("is_bank", False)
     source = "💳 Карта" if (action == "card" or is_bank) else "💵 Наличные"
     items = pending.get("items", [])
-    p_user_id = pending.get("user_notion_id", user_notion_id)
+    p_user_id = pending.get("user_id", user_id)
     pending_del(uid)
 
     # Группировать по типу + категории
@@ -1319,7 +1319,7 @@ async def on_receipt(query: CallbackQuery, user_notion_id: str = "") -> None:
             source=source,
             description=desc,
             bot_label="☀️ Nexus",
-            user_notion_id=p_user_id,
+            user_id=p_user_id,
         )
         sign = "+" if data["type"] == "income" else ""
         lines.append(f"  {data['cat']}: {sign}{int(data['total'])}₽ ({desc})")
@@ -1354,19 +1354,19 @@ async def on_receipt(query: CallbackQuery, user_notion_id: str = "") -> None:
 
 
 @dp.callback_query(lambda c: c.data and (c.data.startswith("opt_") or c.data.startswith("note_replace:")))
-async def on_note_opt_callback(query: CallbackQuery, user_notion_id: str = "") -> None:
+async def on_note_opt_callback(query: CallbackQuery, user_id: str = "") -> None:
     from nexus.handlers.notes import handle_note_callback
     await handle_note_callback(query)
 
 
 @dp.callback_query(lambda c: c.data and c.data.startswith("page:"))
-async def on_page_callback(query: CallbackQuery, user_notion_id: str = "") -> None:
+async def on_page_callback(query: CallbackQuery, user_id: str = "") -> None:
     from core.pagination import handle_page_callback
     await handle_page_callback(query)
 
 
 @dp.callback_query(lambda c: c.data and c.data.startswith("arcana_choice_"))
-async def on_arcana_choice(query: CallbackQuery, user_notion_id: str = "") -> None:
+async def on_arcana_choice(query: CallbackQuery, user_id: str = "") -> None:
     """Handle: выбор между Аркана и Задача."""
     uid = query.from_user.id
     if uid not in _pending_arcana:
@@ -1393,8 +1393,8 @@ async def on_arcana_choice(query: CallbackQuery, user_notion_id: str = "") -> No
             "Приоритет": _select("Важно"),
             "Категория": _select("💳 Прочее"),
         }
-        if user_notion_id:
-            props["🪪 Пользователи"] = _relation(user_notion_id)
+        if user_id:
+            props["🪪 Пользователи"] = _relation(user_id)
         result = await _repo.create(config.nexus.db_tasks, props)
         if result:
             msg_text = (
@@ -1415,7 +1415,7 @@ async def on_arcana_choice(query: CallbackQuery, user_notion_id: str = "") -> No
 
 
 @dp.callback_query(lambda c: c.data and c.data.startswith("fin_type_"))
-async def on_finance_clarify(query: CallbackQuery, user_notion_id: str = "") -> None:
+async def on_finance_clarify(query: CallbackQuery, user_id: str = "") -> None:
     """Handle finance type clarification (expense/income/barter)."""
     from core.repos.finance_repo import _repo as _fin_repo
 
@@ -1432,12 +1432,12 @@ async def on_finance_clarify(query: CallbackQuery, user_notion_id: str = "") -> 
 
     fin_type = parts[2]  # expense, income, barter
     pending_entry = _pending_finance.pop(uid)
-    # Support both old (2-tuple) and new (3-tuple with user_notion_id) formats
+    # Support both old (2-tuple) and new (3-tuple with user_id) formats
     if len(pending_entry) == 3:
         finance_data, original_text, stored_uid = pending_entry
     else:
         finance_data, original_text = pending_entry
-        stored_uid = user_notion_id
+        stored_uid = user_id
 
     if fin_type == "expense":
         type_label = "💸 Расход"
@@ -1462,7 +1462,7 @@ async def on_finance_clarify(query: CallbackQuery, user_notion_id: str = "") -> 
         source=source,
         description=finance_data["title"],
         bot_label="☀️ Nexus",
-        user_notion_id=stored_uid or user_notion_id,
+        user_id=stored_uid or user_id,
     )
 
     if result:
@@ -1482,7 +1482,7 @@ _UNKNOWN_TTL = 300  # 5 min
 
 
 @dp.callback_query(lambda c: c.data and c.data.startswith("unk_"))
-async def on_unknown_clarify(query: CallbackQuery, user_notion_id: str = "") -> None:
+async def on_unknown_clarify(query: CallbackQuery, user_id: str = "") -> None:
     """Handle unknown text → user chose action type."""
     import time as _time
 
@@ -1493,7 +1493,7 @@ async def on_unknown_clarify(query: CallbackQuery, user_notion_id: str = "") -> 
         return
 
     original_text, stored_uid, _ = pending
-    notion_id = stored_uid or user_notion_id
+    notion_id = stored_uid or user_id
 
     # Parse action: unk_buy_123, unk_task_123, unk_note_123, unk_mem_123
     action = query.data.split("_")[1]  # buy, task, note, mem
@@ -1501,7 +1501,7 @@ async def on_unknown_clarify(query: CallbackQuery, user_notion_id: str = "") -> 
     if action == "buy":
         from nexus.handlers.lists import handle_list_buy
         fake_data = {"text": original_text}
-        await handle_list_buy(query.message, fake_data, user_notion_id=notion_id)
+        await handle_list_buy(query.message, fake_data, user_id=notion_id)
         await query.answer("🛒 Добавляю в покупки")
 
     elif action == "task":
@@ -1532,13 +1532,13 @@ async def on_unknown_clarify(query: CallbackQuery, user_notion_id: str = "") -> 
     elif action == "note":
         from nexus.handlers.notes import handle_note
         await handle_note(query.message, original_text, config.nexus.db_notes,
-                          user_notion_id=notion_id)
+                          user_id=notion_id)
         await query.answer("📝 Создаю заметку")
 
     elif action == "mem":
         from nexus.handlers.memory import handle_memory_save
         fake_data = {"text": original_text}
-        await handle_memory_save(query.message, fake_data, user_notion_id=notion_id)
+        await handle_memory_save(query.message, fake_data, user_id=notion_id)
         await query.answer("🧠 Сохраняю в память")
 
 

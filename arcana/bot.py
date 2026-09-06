@@ -26,7 +26,7 @@ from core.subtasks_handler import make_subtasks_router
 
 logger = logging.getLogger("arcana.bot")
 
-_photo_pending: dict = {}  # uid → (message_id, user_notion_id, ts)
+_photo_pending: dict = {}  # uid → (message_id, user_id, ts)
 _PHOTO_TTL = 120  # 2 минуты
 
 # Глобальная инстанция планировщика напоминаний для Arcana (см. core/reminder_scheduler.py).
@@ -60,9 +60,9 @@ async def restore_work_reminders() -> int:
             user_data = await get_user(tg_id)
             if not user_data or not user_data.get("permissions", {}).get("arcana", False):
                 continue
-            user_notion_id = user_data.get("notion_page_id", "")
+            user_id = user_data.get("notion_page_id", "")
             tz_offset = await get_user_tz(tg_id)
-            for w in await _pg.active_with_future_reminder(user_notion_id):
+            for w in await _pg.active_with_future_reminder(user_id):
                 if not w.reminder_dt:
                     continue
                 reminder_iso = w.reminder_dt.strftime("%Y-%m-%dT%H:%M")
@@ -111,29 +111,29 @@ def create_dp_and_bot():
     from arcana.handlers.stats import handle_stats
 
     @dp.message(ArcanaCommand("list"))
-    async def cmd_list(msg: Message, user_notion_id: str = "") -> None:
-        await arcana_list_cmd(msg, user_notion_id=user_notion_id)
+    async def cmd_list(msg: Message, user_id: str = "") -> None:
+        await arcana_list_cmd(msg, user_id=user_id)
 
     @dp.message(ArcanaCommand("works"))
-    async def cmd_works(msg: Message, user_notion_id: str = "") -> None:
-        await arcana_works_list(msg, user_notion_id)
+    async def cmd_works(msg: Message, user_id: str = "") -> None:
+        await arcana_works_list(msg, user_id)
 
     @dp.message(ArcanaCommand("stats"))
-    async def cmd_stats(msg: Message, user_notion_id: str = "") -> None:
-        await handle_stats(msg, user_notion_id)
+    async def cmd_stats(msg: Message, user_id: str = "") -> None:
+        await handle_stats(msg, user_id)
 
     @dp.message(ArcanaCommand("finance"))
-    async def cmd_finance(msg: Message, user_notion_id: str = "") -> None:
+    async def cmd_finance(msg: Message, user_id: str = "") -> None:
         from arcana.handlers.finance import handle_arcana_finance
-        await handle_arcana_finance(msg, user_notion_id)
+        await handle_arcana_finance(msg, user_id)
 
     @dp.message(ArcanaCommand("grimoire"))
-    async def cmd_grimoire(msg: Message, user_notion_id: str = "") -> None:
+    async def cmd_grimoire(msg: Message, user_id: str = "") -> None:
         from arcana.handlers.grimoire import handle_grimoire_menu
-        await handle_grimoire_menu(msg, user_notion_id)
+        await handle_grimoire_menu(msg, user_id)
 
     @dp.message(F.voice | F.audio)
-    async def handle_voice(msg: Message, user_notion_id: str = "") -> None:
+    async def handle_voice(msg: Message, user_id: str = "") -> None:
         """Голосовое → Whisper → текст → base router."""
         from core.voice import transcribe
 
@@ -205,7 +205,7 @@ def create_dp_and_bot():
             from core.preprocess import normalize_text
             text = await normalize_text(
                 text,
-                user_notion_id=user_notion_id,
+                user_id=user_id,
                 extra_protect=_card_spans or None,
             )
         except Exception as e:
@@ -213,7 +213,7 @@ def create_dp_and_bot():
 
         # Lists pending
         from arcana.handlers.lists import handle_list_pending
-        if await handle_list_pending(msg, user_notion_id):
+        if await handle_list_pending(msg, user_id):
             return
 
         # Pending: режим сбора инфы о клиенте
@@ -221,7 +221,7 @@ def create_dp_and_bot():
         pending_client = await get_pending_client(msg.from_user.id)
         if pending_client and pending_client.get("step") == "collecting":
             from arcana.handlers.clients import _handle_collecting
-            await _handle_collecting(msg, text, pending_client, user_notion_id)
+            await _handle_collecting(msg, text, pending_client, user_id)
             return
 
         # Pending: правка трактовки таро
@@ -229,17 +229,17 @@ def create_dp_and_bot():
         pending = await get_pending(msg.from_user.id)
         if pending and pending.get("awaiting_edit"):
             from arcana.handlers.base import _handle_tarot_correction
-            await _handle_tarot_correction(msg, text, pending, user_notion_id)
+            await _handle_tarot_correction(msg, text, pending, user_id)
             return
 
         # Полный pipeline — передаём текст явно (msg заморожен)
         from arcana.handlers.base import route_message
         await route_message(
-            msg, user_notion_id=user_notion_id, _text=text, _raw=_raw_transcript,
+            msg, user_id=user_id, _text=text, _raw=_raw_transcript,
         )
 
     @dp.message(F.photo)
-    async def handle_photo(msg: Message, user_notion_id: str = "") -> None:
+    async def handle_photo(msg: Message, user_id: str = "") -> None:
         """Фото: collecting → скрин контакта. С подписью → route_message. Без → спросить."""
         from arcana.pending_clients import get_pending_client
         pending_client = await get_pending_client(msg.from_user.id)
@@ -254,7 +254,7 @@ def create_dp_and_bot():
 
         if msg.caption:
             from arcana.handlers.base import route_message
-            await route_message(msg, user_notion_id=user_notion_id, _text=msg.caption)
+            await route_message(msg, user_id=user_id, _text=msg.caption)
             return
 
         # Фото без подписи и без контекста — спросить что это
@@ -262,7 +262,7 @@ def create_dp_and_bot():
         from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
         import time as _t
         # Сохраняем message_id фото для последующей обработки
-        _photo_pending[uid] = (msg.message_id, user_notion_id, _t.time())
+        _photo_pending[uid] = (msg.message_id, user_id, _t.time())
         from core.utils import cancel_button
         kb = InlineKeyboardMarkup(inline_keyboard=[[
             InlineKeyboardButton(text="🃏 Расклад",          callback_data=f"photo_tarot:{uid}"),
@@ -272,7 +272,7 @@ def create_dp_and_bot():
         await msg.reply("Что это за фото?", reply_markup=kb)
 
     @dp.message(F.contact)
-    async def handle_contact(msg: Message, user_notion_id: str = "") -> None:
+    async def handle_contact(msg: Message, user_id: str = "") -> None:
         """TG контакт (share contact) → дополнить карточку если есть collecting."""
         from arcana.pending_clients import get_pending_client, update_pending_client
 
@@ -309,12 +309,12 @@ def create_dp_and_bot():
         )
 
     @dp.callback_query(lambda c: c.data and c.data.startswith("opt_"))
-    async def on_opt_callback(query: CallbackQuery, user_notion_id: str = "") -> None:
+    async def on_opt_callback(query: CallbackQuery, user_id: str = "") -> None:
         from nexus.handlers.notes import handle_note_callback
         await handle_note_callback(query)
 
     @dp.callback_query(lambda c: c.data and c.data.startswith("photo_"))
-    async def on_photo_choice(query: CallbackQuery, user_notion_id: str = "") -> None:
+    async def on_photo_choice(query: CallbackQuery, user_id: str = "") -> None:
         import time as _t, base64
         uid = query.from_user.id
         pending = _photo_pending.pop(uid, None)
@@ -351,7 +351,7 @@ def create_dp_and_bot():
             await query.message.edit_text("🔍 Распознаю карты...")
             from arcana.handlers.sessions import handle_tarot_photo
             # Передаём управление в tarot через photo_msg (там есть photo)
-            await handle_tarot_photo(photo_msg, notion_id or user_notion_id)
+            await handle_tarot_photo(photo_msg, notion_id or user_id)
 
         elif action == "photo_client":
             await query.answer("👤 Извлекаю контакт")

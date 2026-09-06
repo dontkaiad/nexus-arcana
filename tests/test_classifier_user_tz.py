@@ -48,6 +48,6 @@ async def test_process_item_expense_date_by_user_tz(monkeypatch):
          patch("nexus.handlers.finance._check_budget_limit", AsyncMock()), \
          patch("core.classifier.log_error", AsyncMock(return_value="e")):
         await clf.process_item(data=data, original_text="продукты 500р",
-                               msg=msg, clarify={}, user_notion_id="u-1")
+                               msg=msg, clarify={}, user_id="u-1")
 
     assert fake_add.call_args.kwargs["date"] == "2026-07-01"

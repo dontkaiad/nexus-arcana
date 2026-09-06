@@ -18,7 +18,7 @@ from core.utils import react
 logger = logging.getLogger("arcana.reply_update")
 
 
-async def handle_reply_update(message: Message, user_notion_id: str = "") -> bool:
+async def handle_reply_update(message: Message, user_id: str = "") -> bool:
     """Если reply на сообщение бота — попытаться обновить Notion-запись.
 
     Возвращает True если reply был обработан (отвечаем пользователю),
@@ -46,7 +46,7 @@ async def handle_reply_update(message: Message, user_notion_id: str = "") -> boo
     if page_type == "session":
         from arcana.handlers.sessions import correct_triplet_by_id
         try:
-            ok = await correct_triplet_by_id(message, reply_text, page_id, user_notion_id)
+            ok = await correct_triplet_by_id(message, reply_text, page_id, user_id)
         except Exception as e:
             logger.error("session reply correction failed: %s", tb.format_exc())
             ok = False
@@ -75,7 +75,7 @@ async def handle_reply_update(message: Message, user_notion_id: str = "") -> boo
         db_id = get_db_id_for_type(page_type)
         applied = await apply_updates(
             page_id, page_type, db_id, updates,
-            user_notion_id=user_notion_id, tz_offset=tz_offset,
+            user_id=user_id, tz_offset=tz_offset,
         )
         summary = await format_applied(applied)
 

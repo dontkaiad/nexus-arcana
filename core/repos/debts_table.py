@@ -11,7 +11,7 @@ metadata = MetaData()
 debts = Table(
     "debts", metadata,
     Column("id",              BigInteger, primary_key=True, autoincrement=True),
-    Column("user_notion_id",  Text,    nullable=False, server_default=text("''")),
+    Column("user_id",  Text,    nullable=False, server_default=text("''")),
     Column("name",            Text,    nullable=False),
     Column("kind",            Text,    nullable=False, server_default=text("'i_owe'")),
     Column("amount",          Numeric, nullable=False),

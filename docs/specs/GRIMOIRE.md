@@ -1,6 +1,6 @@
 # GRIMOIRE — data-model contract (📖 Гримуар)
 
-Code conforms to: 0bc132e. This spec describes the grimoire data model as of
+Code conforms to: 0bc132e. (+ #144: user_notion_id → user_id.) This spec describes the grimoire data model as of
 that commit; update it in the same PR that changes the model.
 
 > Contract, not snapshot. Describes the persistent model, the guarantees of
@@ -32,7 +32,7 @@ mirror: `arcana/repos/grimoire_tables.py`.
 | `verified` | Boolean | default false |
 | `text` | Text | the entry body |
 | `source` | Text | provenance |
-| `user_notion_id` | Text | owner |
+| `user_id` | Text | owner |
 | `created_at` | TIMESTAMP(tz) | default `now()` |
 
 Indexes: `idx_grimoire_category_id`, `idx_grimoire_user`. No `notion_id`
@@ -70,7 +70,7 @@ entry is append-and-read.
   comma-separated text.
 - **`verified` is a quality flag** on the entry (default false), independent
   of any lifecycle.
-- **Scoped by `user_notion_id`** for ownership; reads filter by it when
+- **Scoped by `user_id`** for ownership; reads filter by it when
   provided.
 
 ## Lifecycle / status model

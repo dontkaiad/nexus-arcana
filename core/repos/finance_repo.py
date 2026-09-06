@@ -83,7 +83,7 @@ class FinanceRepo:
         source: str = "💳 Карта",
         bot_label: str = "☀️ Nexus",
         description: str = "",
-        user_notion_id: str = "",
+        user_id: str = "",
     ) -> Optional[str]:
         """Add a finance record. Routes to nexus_budget or arcana_pnl by bot_label."""
         source = _guard_source(source, bot_label)
@@ -91,12 +91,12 @@ class FinanceRepo:
             return await _arcana_repo.add_entry(
                 description=description, amount=float(amount),
                 category=category, type_=type_, source=source,
-                date_iso=date, user_notion_id=user_notion_id,
+                date_iso=date, user_id=user_id,
             )
         return await _nexus_repo.add_entry(
             description=description, amount=float(amount),
             category=category, type_=type_, source=source,
-            date_iso=date, user_notion_id=user_notion_id,
+            date_iso=date, user_id=user_id,
         )
 
     async def create_entry(
@@ -110,13 +110,13 @@ class FinanceRepo:
         type_: str,
         source: str,
         bot_label: str,
-        user_notion_id: str = "",
+        user_id: str = "",
     ) -> Optional[str]:
         """Create finance record (PG). db_id is ignored."""
         return await self.add(
             date=date, amount=amount, category=category, type_=type_,
             source=source, bot_label=bot_label, description=description,
-            user_notion_id=user_notion_id,
+            user_id=user_id,
         )
 
     async def update_last(self, target_type: str, field: str, new_value: str) -> bool:
@@ -175,14 +175,14 @@ class FinanceRepo:
         type_: Optional[str] = None,
         category: Optional[str] = None,
         page_size: int = 200,
-        user_notion_id: str = "",
+        user_id: str = "",
         db_id: Optional[str] = None,  # backward compat, ignored
     ) -> List[FinanceEntry]:
         """Query records by date range. Unions nexus_budget + arcana_pnl."""
         nexus_rows, arcana_rows = await _query_both(
             date_from=date_from, date_to=date_to,
             type_=type_, category=category, page_size=page_size,
-            user_notion_id=user_notion_id,
+            user_id=user_id,
         )
         result = (
             [_budget_to_fe(r) for r in nexus_rows]
@@ -194,16 +194,16 @@ class FinanceRepo:
     async def month(
         self,
         month: str,
-        user_notion_id: str = "",
+        user_id: str = "",
         description_filter: str = "",
         type_filter: str = "",
     ) -> List[FinanceEntry]:
         """Return all records for a month (YYYY-MM) from both tables."""
         nexus_rows = await _nexus_repo.query_month(
-            month, description_filter, type_filter, user_notion_id
+            month, description_filter, type_filter, user_id
         )
         arcana_rows = await _arcana_repo.query_month(
-            month, description_filter, type_filter, user_notion_id
+            month, description_filter, type_filter, user_id
         )
         result = (
             [_budget_to_fe(r) for r in nexus_rows]
@@ -216,12 +216,12 @@ class FinanceRepo:
 async def _query_both(
     date_from: str, date_to: str,
     type_: Optional[str], category: Optional[str], page_size: int,
-    user_notion_id: str = "",
+    user_id: str = "",
 ):
     import asyncio as _asyncio
     return await _asyncio.gather(
-        _nexus_repo.query(date_from, date_to, type_, category, page_size, user_notion_id),
-        _arcana_repo.query(date_from, date_to, type_, category, page_size, user_notion_id),
+        _nexus_repo.query(date_from, date_to, type_, category, page_size, user_id),
+        _arcana_repo.query(date_from, date_to, type_, category, page_size, user_id),
     )
 
 

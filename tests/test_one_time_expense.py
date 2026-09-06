@@ -65,7 +65,7 @@ async def test_handle_one_time_expense_writes_finance_not_memory():
          patch("core.repos.memory_repo._repo.add", AsyncMock()) as m_mem_add, \
          patch("core.repos.memory_repo._repo.upsert", AsyncMock()) as m_mem_up:
         msg = _msg("разовый расход билет в питер 15000")
-        await finance.handle_one_time_expense(msg, msg.text, user_notion_id="u-1")
+        await finance.handle_one_time_expense(msg, msg.text, user_id="u-1")
 
     m_fin.assert_awaited_once()
     payload = m_fin.call_args.args[0]
@@ -92,7 +92,7 @@ async def test_handle_one_time_expense_compound_writes_n_transactions():
     with patch.object(finance, "ask_claude", fake_haiku), \
          patch.object(finance, "_save_finance", AsyncMock(return_value="pg-x")) as m_fin:
         msg = _msg("разовые: доверенность 3500, налоги 8500")
-        await finance.handle_one_time_expense(msg, msg.text, user_notion_id="u-1")
+        await finance.handle_one_time_expense(msg, msg.text, user_id="u-1")
 
     assert m_fin.await_count == 2
     out = msg.answer.call_args.args[0]
@@ -106,7 +106,7 @@ async def test_handle_one_time_expense_no_amount_asks_again():
     with patch.object(finance, "ask_claude", AsyncMock(return_value='{"items": []}')), \
          patch.object(finance, "_save_finance", AsyncMock()) as m_fin:
         msg = _msg("разовый расход хрень")
-        await finance.handle_one_time_expense(msg, msg.text, user_notion_id="u-1")
+        await finance.handle_one_time_expense(msg, msg.text, user_id="u-1")
 
     m_fin.assert_not_awaited()
     assert "Не понял" in msg.answer.call_args.args[0]

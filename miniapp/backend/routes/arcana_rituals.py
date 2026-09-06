@@ -18,7 +18,7 @@ from arcana.repos.pg_rituals_repo import (
     CODE_TO_RESULT,
     CODE_TO_TYPE,
 )
-from core.user_manager import get_user_notion_id
+from core.user_manager import get_user_id
 
 from miniapp.backend.auth import current_user_id
 from miniapp.backend._helpers import today_user_tz
@@ -64,11 +64,11 @@ async def list_rituals(
     goal: Optional[str] = Query(None, description="фильтр по Цели, напр. '🛡️ Защита'"),
     client_id: Optional[str] = Query(None),
 ) -> dict[str, Any]:
-    user_notion_id = (await get_user_notion_id(tg_id)) or ""
+    user_id = (await get_user_id(tg_id)) or ""
     _, tz_offset = await today_user_tz(tg_id)
 
     try:
-        entries = await _rituals_repo.list_all(user_notion_id)
+        entries = await _rituals_repo.list_all(user_id)
     except Exception as e:
         logger.warning("rituals list_all failed: %s", e)
         return {"total": 0, "rituals": []}

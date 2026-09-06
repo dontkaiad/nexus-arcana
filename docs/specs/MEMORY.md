@@ -1,6 +1,6 @@
 # MEMORY — memory data model
 
-> **Status: AS-BUILT, code conforms to `b9d3367` (drops `value_text` #146, `notion_id` #149).** Notion→PostgreSQL
+> **Status: AS-BUILT, code conforms to `b9d3367` (drops `value_text` #146, `notion_id` #149; `user_notion_id`→`user_id` #144).** Notion→PostgreSQL
 > migration is complete; the semantic-search layer (ADR-0006 pgvector
 > backend, applied to memory by ADR-0020) has landed. Update this spec in
 > the same PR that changes the memory schema or search strategy.
@@ -52,7 +52,7 @@ down_revision `i9d0e1f2g3h4`. SQLAlchemy Core mirror —
 | `related_to` | Text | NOT NULL, default `''` |
 | `is_current` | Boolean | NOT NULL, default `true` |
 | `is_archived` | Boolean | NOT NULL, default `false` |
-| `user_notion_id` | Text | NOT NULL, default `''` |
+| `user_id` | Text | NOT NULL, default `''` |
 | `created_at` | TIMESTAMP(tz) | default `now()` |
 | `updated_at` | TIMESTAMP(tz) | default `now()` |
 | `embedding` | vector(1024) | nullable |
@@ -60,7 +60,7 @@ down_revision `i9d0e1f2g3h4`. SQLAlchemy Core mirror —
 Indexes (from the migration):
 `ix_memories_key_name` (key_name), `ix_memories_category` (category),
 `ix_memories_scope` (scope), `ix_memories_is_current` (is_current),
-`ix_memories_user` (user_notion_id).
+`ix_memories_user` (user_id).
 
 `embedding` was added by a second migration
 (`alembic/versions/y5z6a7b8c9d0_memories_embedding_pgvector.py`, down_revision
@@ -76,7 +76,7 @@ embedding until `scripts/migrate_memory_embeddings.py` backfills them.
 Domain object `Memory` (`core/repos/pg_memory_repo.py`,
 `@dataclass`) maps a row: `id` (str), `fact`←fact_text, `key`←key_name,
 `category`, `scope`, `source`, `related_to`←related_to,
-`is_current`, `is_archived`, `user_notion_id`, `date`←created_at[:10],
+`is_current`, `is_archived`, `user_id`, `date`←created_at[:10],
 `updated_at`←ISO.
 
 Field values as actually used in the code:
@@ -97,7 +97,7 @@ core/repos/pg_memory_repo.py → memories_table (PG)`.
 All sync SQL is wrapped in `asyncio.to_thread`.
 
 ### Write
-`core/memory.py:save_memory(message, text, user_notion_id, bot_label)`:
+`core/memory.py:save_memory(message, text, user_id, bot_label)`:
 1. `maybe_convert` (EN→RU keyboard layout).
 2. `_parse_fact` — Haiku (`claude-haiku-4-5-20251001`, temperature=0,
    max_tokens=200) → `(fact, category, связь, ключ)`. Invalid category →
@@ -162,16 +162,16 @@ registered for reply-correction — they're already editable via `/budget`.
 ### Read
 Two modes:
 
-1. Exact key — `find_by_exact_key(key, user_notion_id, page_size)`:
+1. Exact key — `find_by_exact_key(key, user_id, page_size)`:
    `key_name == key` (strict equality), `is_current=True`,
    `is_archived=False`, sorted by `updated_at desc`. Actual calls:
    `tz_{tg_id}` (timezone — `core/shared_handlers.py`,
    `nexus/handlers/tasks.py`, `miniapp/.../weather.py`),
    `budget_payday` (`nexus/handlers/finance.py`).
-2. Substring search — `search(terms, scope, user_notion_id, page_size)`:
+2. Substring search — `search(terms, scope, user_id, page_size)`:
    `OR` of `ILIKE %term%` over `fact_text`, `key_name`, `related_to`;
    activity filter (`is_current=True`, `is_archived=False`); optional
-   `scope` (match OR `global`) and `user_notion_id`; sorted by
+   `scope` (match OR `global`) and `user_id`; sorted by
    `created_at desc`.
 
 ### Semantic fallback (ADR-0020)
@@ -198,12 +198,12 @@ instead of filtering, so a real cutoff can be picked from logged
 production data rather than guessed.
 
 Derived reads:
-- `find_by_category(category, is_current, scope, user_notion_id, page_size)`
+- `find_by_category(category, is_current, scope, user_id, page_size)`
   — exact category match (empty `category` = no category filter).
-- `find_by_key_prefixes(prefixes, user_notion_id)` — `key_name ILIKE p%`;
+- `find_by_key_prefixes(prefixes, user_id)` — `key_name ILIKE p%`;
   used by the budget (`core/budget.py`, prefixes `income_`,
   `постоянно_`, `лимит_`, `цель_`).
-- `find_recent(is_current, scope, user_notion_id, page_size)` — the latest
+- `find_recent(is_current, scope, user_id, page_size)` — the latest
   non-archived ones.
 
 `core/memory.py:_find_pages_by_hint` on top of `search`: shortcut by category
@@ -223,7 +223,7 @@ tokenizes the hint (stop words + naive stemming `_normalize_word`) → `search`.
 - Bots, memory handlers: `nexus/handlers/memory.py`,
   `arcana/handlers/memory.py` — save / search / deactivate / delete /
   auto_suggest (inline yes/no).
-- Prompt context: `get_memories_for_context(user_notion_id,
+- Prompt context: `get_memories_for_context(user_id,
   keywords, bot_label, max_results)` — filters by scope (keeps a scope
   match OR `global`), returns a text block "Контекст из памяти:". Called by
   `arcana/handlers/sessions.py`, `clients.py`, `rituals.py`.
@@ -300,6 +300,7 @@ Verify against code:
 - `alembic/versions/j0c1d2e3f4g5_core_memories_pg.py` — table migration
 - `alembic/versions/bc23de45f012_drop_memories_value_text.py` — `value_text` dropped (#146)
 - `alembic/versions/cd34ef56a1b2_drop_dead_notion_id_columns.py` — `notion_id` dropped (#149)
+- `alembic/versions/df56a1b2c3d4_rename_user_notion_id_to_user_id.py` — user_notion_id → user_id (#144)
 - `alembic/versions/y5z6a7b8c9d0_memories_embedding_pgvector.py` —
   `embedding` column + hnsw index migration
 - `core/repos/memories_table.py` — SQLAlchemy Core definition of `memories`

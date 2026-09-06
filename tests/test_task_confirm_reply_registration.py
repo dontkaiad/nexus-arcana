@@ -74,7 +74,7 @@ async def test_reply_to_confirm_message_routes_to_task_update():
          patch("nexus.handlers.reply_update.apply_updates",
                AsyncMock(return_value={"Дедлайн": "2026-08-19"})), \
          patch("nexus.handlers.reply_update.format_applied", AsyncMock(return_value="Дедлайн: 2026-08-19")):
-        handled = await handle_reply_update(reply_msg, user_notion_id="u")
+        handled = await handle_reply_update(reply_msg, user_id="u")
 
     assert handled is True
     m_parse.assert_awaited_once()

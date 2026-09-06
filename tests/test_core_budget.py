@@ -107,7 +107,7 @@ async def test_load_budget_data_routes_keys_into_buckets():
                related_to="привычки"),
     ]
     fake_debts = [
-        Debt(id="4", user_notion_id="", name="Vika", kind="i_owe",
+        Debt(id="4", user_id="", name="Vika", kind="i_owe",
              amount=50000.0, deadline="апрель", strategy="", monthly_payment=0.0,
              is_active=True, created_at="", updated_at=""),
     ]
@@ -177,7 +177,7 @@ async def test_load_budget_data_reads_persistent_one_time():
     ]
     captured_prefixes = {}
 
-    async def fake_find(prefixes, user_notion_id=""):
+    async def fake_find(prefixes, user_id=""):
         captured_prefixes["prefixes"] = prefixes
         return fake_mems
 

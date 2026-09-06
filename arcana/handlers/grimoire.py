@@ -177,30 +177,30 @@ def _format_ritual_list(items: List[RitualSummary]) -> str:
 
 # ── Menu ──────────────────────────────────────────────────────────────────────
 
-async def handle_grimoire_menu(message: Message, user_notion_id: str = "") -> None:
+async def handle_grimoire_menu(message: Message, user_id: str = "") -> None:
     await message.answer("📖 <b>Гримуар</b>", reply_markup=_menu_keyboard(), parse_mode="HTML")
 
 
 # ── Callback handlers ─────────────────────────────────────────────────────────
 
-async def _get_user_notion_id(callback: CallbackQuery) -> str:
-    """Извлечь user_notion_id из middleware data (через bot_data fallback)."""
-    # middleware прикрепляет user_notion_id к data при каждом апдейте;
+async def _get_user_id(callback: CallbackQuery) -> str:
+    """Извлечь user_id из middleware data (через bot_data fallback)."""
+    # middleware прикрепляет user_id к data при каждом апдейте;
     # для callback_query тоже проходит через middleware, значение доступно напрямую
     return ""  # будет перекрыто при регистрации через wrapper
 
 
 @router.callback_query(F.data == "grim_menu")
-async def cb_grim_menu(callback: CallbackQuery, user_notion_id: str = "") -> None:
+async def cb_grim_menu(callback: CallbackQuery, user_id: str = "") -> None:
     await callback.message.edit_text("📖 <b>Гримуар</b>", reply_markup=_menu_keyboard(), parse_mode="HTML")
     await callback.answer()
 
 
 @router.callback_query(F.data == "grim_rituals")
-async def cb_grim_rituals(callback: CallbackQuery, user_notion_id: str = "") -> None:
+async def cb_grim_rituals(callback: CallbackQuery, user_id: str = "") -> None:
     await callback.answer()
     try:
-        items = await _repo.rituals_list(user_notion_id)
+        items = await _repo.rituals_list(user_id)
         text = _format_ritual_list(items)
         await callback.message.edit_text(text, reply_markup=_back_keyboard(), parse_mode="HTML")
     except Exception as e:
@@ -209,10 +209,10 @@ async def cb_grim_rituals(callback: CallbackQuery, user_notion_id: str = "") -> 
 
 
 @router.callback_query(F.data == "grim_spells")
-async def cb_grim_spells(callback: CallbackQuery, user_notion_id: str = "") -> None:
+async def cb_grim_spells(callback: CallbackQuery, user_id: str = "") -> None:
     await callback.answer()
     try:
-        items = await _repo.list_by_category("📿 Заговор", user_notion_id)
+        items = await _repo.list_by_category("📿 Заговор", user_id)
         text = _format_grimoire_list(items, "📿 Заговоры")
         await callback.message.edit_text(text, reply_markup=_back_keyboard(), parse_mode="HTML")
     except Exception as e:
@@ -221,10 +221,10 @@ async def cb_grim_spells(callback: CallbackQuery, user_notion_id: str = "") -> N
 
 
 @router.callback_query(F.data == "grim_recipes")
-async def cb_grim_recipes(callback: CallbackQuery, user_notion_id: str = "") -> None:
+async def cb_grim_recipes(callback: CallbackQuery, user_id: str = "") -> None:
     await callback.answer()
     try:
-        items = await _repo.list_by_category("🧴 Рецепт", user_notion_id)
+        items = await _repo.list_by_category("🧴 Рецепт", user_id)
         text = _format_grimoire_list(items, "🧴 Рецепты")
         await callback.message.edit_text(text, reply_markup=_back_keyboard(), parse_mode="HTML")
     except Exception as e:
@@ -233,10 +233,10 @@ async def cb_grim_recipes(callback: CallbackQuery, user_notion_id: str = "") -> 
 
 
 @router.callback_query(F.data == "grim_combos")
-async def cb_grim_combos(callback: CallbackQuery, user_notion_id: str = "") -> None:
+async def cb_grim_combos(callback: CallbackQuery, user_id: str = "") -> None:
     await callback.answer()
     try:
-        items = await _repo.list_by_category("✨ Комбинация", user_notion_id)
+        items = await _repo.list_by_category("✨ Комбинация", user_id)
         text = _format_grimoire_list(items, "✨ Комбинации")
         await callback.message.edit_text(text, reply_markup=_back_keyboard(), parse_mode="HTML")
     except Exception as e:
@@ -245,10 +245,10 @@ async def cb_grim_combos(callback: CallbackQuery, user_notion_id: str = "") -> N
 
 
 @router.callback_query(F.data == "grim_notes")
-async def cb_grim_notes(callback: CallbackQuery, user_notion_id: str = "") -> None:
+async def cb_grim_notes(callback: CallbackQuery, user_id: str = "") -> None:
     await callback.answer()
     try:
-        items = await _repo.list_by_category("📝 Заметка", user_notion_id)
+        items = await _repo.list_by_category("📝 Заметка", user_id)
         text = _format_grimoire_list(items, "📝 Заметки")
         await callback.message.edit_text(text, reply_markup=_back_keyboard(), parse_mode="HTML")
     except Exception as e:
@@ -257,11 +257,11 @@ async def cb_grim_notes(callback: CallbackQuery, user_notion_id: str = "") -> No
 
 
 @router.callback_query(F.data == "grim_inventory")
-async def cb_grim_inventory(callback: CallbackQuery, user_notion_id: str = "") -> None:
+async def cb_grim_inventory(callback: CallbackQuery, user_id: str = "") -> None:
     await callback.answer()
     try:
         from arcana.handlers.lists import _fetch_all_display_items, render_inv_screen, BOT_NAME
-        all_items = await _fetch_all_display_items(None, BOT_NAME, user_notion_id)
+        all_items = await _fetch_all_display_items(None, BOT_NAME, user_id)
         text, buttons = render_inv_screen(all_items)
         # replace back button with grimoire back
         kb = InlineKeyboardMarkup(inline_keyboard=[
@@ -274,11 +274,11 @@ async def cb_grim_inventory(callback: CallbackQuery, user_notion_id: str = "") -
 
 
 @router.callback_query(F.data == "grim_search")
-async def cb_grim_search(callback: CallbackQuery, user_notion_id: str = "") -> None:
+async def cb_grim_search(callback: CallbackQuery, user_id: str = "") -> None:
     await callback.answer()
     uid = callback.from_user.id
     from arcana.pending_grimoire_search import save_pending_search
-    await save_pending_search(uid, user_notion_id)
+    await save_pending_search(uid, user_id)
     await callback.message.edit_text(
         "🔍 Введи поисковый запрос (слово, тема или категория):",
         reply_markup=_back_keyboard(),
@@ -287,7 +287,7 @@ async def cb_grim_search(callback: CallbackQuery, user_notion_id: str = "") -> N
 
 # ── Text handlers (add / search) ──────────────────────────────────────────────
 
-async def handle_grimoire_add(message: Message, text: str, user_notion_id: str = "") -> None:
+async def handle_grimoire_add(message: Message, text: str, user_id: str = "") -> None:
     """Записать новую запись в гримуар. «запиши в гримуар: ...»"""
     try:
         raw = await ask_claude(
@@ -317,7 +317,7 @@ async def handle_grimoire_add(message: Message, text: str, user_notion_id: str =
             themes=themes if themes else None,
             text=data.get("text") or "",
             source=data.get("source") or "",
-            user_notion_id=user_notion_id,
+            user_id=user_id,
         )
         if page_id:
             theme_str = (" · ".join(themes)) if themes else ""
@@ -333,7 +333,7 @@ async def handle_grimoire_add(message: Message, text: str, user_notion_id: str =
         await message.answer("Ошибка при записи в гримуар.")
 
 
-async def handle_grimoire_search(message: Message, text: str, user_notion_id: str = "") -> None:
+async def handle_grimoire_search(message: Message, text: str, user_id: str = "") -> None:
     """Поиск в гримуаре по тексту или теме."""
     try:
         # Определить тему из текста
@@ -348,7 +348,7 @@ async def handle_grimoire_search(message: Message, text: str, user_notion_id: st
         items = await _repo.search(
             query=query if len(query) >= 2 else "",
             theme=theme,
-            user_notion_id=user_notion_id,
+            user_id=user_id,
         )
 
         if not items:
@@ -381,8 +381,8 @@ async def check_pending_search(message: Message, text: str) -> bool:
     """Если юзер ожидает ввода поискового запроса — обработать и вернуть True."""
     uid = message.from_user.id
     from arcana.pending_grimoire_search import pop_pending_search
-    user_notion_id = await pop_pending_search(uid)
-    if user_notion_id is None:
+    user_id = await pop_pending_search(uid)
+    if user_id is None:
         return False
-    await handle_grimoire_search(message, text, user_notion_id)
+    await handle_grimoire_search(message, text, user_id)
     return True

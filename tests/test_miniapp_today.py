@@ -60,7 +60,7 @@ def _make_task(task_id, title, *, status="Not started", prio="🔴 Срочно"
         repeat_time=repeat_time or "",
         repeat=repeat or "Нет",
         completed_at=completed_at or "",
-        user_notion_id=FAKE_NOTION_USER,
+        user_id=FAKE_NOTION_USER,
     )
 
 
@@ -112,9 +112,9 @@ def test_today_returns_all_keys_and_classifies_tasks(client):
     ]
     expenses = [
         BudgetEntry(id="f1", description="test", amount=1500, category="🚬 Привычки",
-                    type_="💸 Расход", source="💳 Карта", date=today, user_notion_id=""),
+                    type_="💸 Расход", source="💳 Карта", date=today, user_id=""),
         BudgetEntry(id="f2", description="test", amount=1104, category="🍜 Продукты",
-                    type_="💸 Расход", source="💳 Карта", date=today, user_notion_id=""),
+                    type_="💸 Расход", source="💳 Карта", date=today, user_id=""),
     ]
 
     claude_mock = AsyncMock(return_value="Начни с лотка — 2 минуты.")
@@ -124,7 +124,7 @@ def test_today_returns_all_keys_and_classifies_tasks(client):
          patch("miniapp.backend.routes.today.budget_day_limit_from_plan", AsyncMock(return_value=4166)), \
          patch("miniapp.backend.routes.today.ask_claude", claude_mock), \
          patch("miniapp.backend.routes.today.today_user_tz", AsyncMock(return_value=(_today_local_date(tz), tz))), \
-         patch("miniapp.backend.routes.today.get_user_notion_id",
+         patch("miniapp.backend.routes.today.get_user_id",
                AsyncMock(return_value=FAKE_NOTION_USER)), \
          patch("nexus.handlers.streaks.get_streak",
                return_value={"streak": 8, "best": 12, "last_activity_date": today,
@@ -206,7 +206,7 @@ def test_today_progress_total_excludes_no_date_tasks(client):
          patch("miniapp.backend.routes.today.ask_claude", AsyncMock(return_value="tip")), \
          patch("miniapp.backend.routes.today.today_user_tz",
                AsyncMock(return_value=(_today_local_date(tz), tz))), \
-         patch("miniapp.backend.routes.today.get_user_notion_id", AsyncMock(return_value=FAKE_NOTION_USER)), \
+         patch("miniapp.backend.routes.today.get_user_id", AsyncMock(return_value=FAKE_NOTION_USER)), \
          patch("nexus.handlers.streaks.get_streak",
                return_value={"streak": 0, "best": 0, "last_activity_date": None,
                              "rest_day_date": None, "rest_days_used": 0, "streak_start_date": None}), \
@@ -228,7 +228,7 @@ def test_today_caches_adhd_tip_across_calls(client):
          patch("miniapp.backend.routes.today.budget_day_limit_from_plan", AsyncMock(return_value=0)), \
          patch("miniapp.backend.routes.today.ask_claude", claude_mock), \
          patch("miniapp.backend.routes.today.today_user_tz", AsyncMock(return_value=(_today_local_date(tz), tz))), \
-         patch("miniapp.backend.routes.today.get_user_notion_id",
+         patch("miniapp.backend.routes.today.get_user_id",
                AsyncMock(return_value=FAKE_NOTION_USER)), \
          patch("nexus.handlers.streaks.get_streak",
                return_value={"streak": 0, "best": 0, "last_activity_date": None,
@@ -252,7 +252,7 @@ def test_today_plan_based_budget_day_limit(client):
     today_iso = _today_local_iso(tz)
     expense_entry = BudgetEntry(id="f1", description="test", amount=600,
                                 category="🍜 Продукты", type_="💸 Расход",
-                                source="💳 Карта", date=today_iso, user_notion_id="")
+                                source="💳 Карта", date=today_iso, user_id="")
     with patch("miniapp.backend.routes.today._tasks_repo.active", AsyncMock(return_value=[])), \
          patch("miniapp.backend.routes.today._budget_repo.query",
                AsyncMock(return_value=[expense_entry])), \
@@ -262,7 +262,7 @@ def test_today_plan_based_budget_day_limit(client):
                AsyncMock(return_value="tip")), \
          patch("miniapp.backend.routes.today.today_user_tz",
                AsyncMock(return_value=(_today_local_date(tz), tz))), \
-         patch("miniapp.backend.routes.today.get_user_notion_id",
+         patch("miniapp.backend.routes.today.get_user_id",
                AsyncMock(return_value=FAKE_NOTION_USER)), \
          patch("nexus.handlers.streaks.get_streak",
                return_value={"streak": 0, "best": 0, "last_activity_date": None,
@@ -293,7 +293,7 @@ def _today_ctx(tz=3, expenses_by_from=None, limits=None, day_limit=5000, payday=
         patch("miniapp.backend.routes.today.ask_claude", AsyncMock(return_value="tip")),
         patch("miniapp.backend.routes.today.today_user_tz",
               AsyncMock(return_value=(_today_local_date(tz), tz))),
-        patch("miniapp.backend.routes.today.get_user_notion_id", AsyncMock(return_value=FAKE_NOTION_USER)),
+        patch("miniapp.backend.routes.today.get_user_id", AsyncMock(return_value=FAKE_NOTION_USER)),
         patch("nexus.handlers.streaks.get_streak",
               return_value={"streak": 0, "best": 0, "last_activity_date": None,
                             "rest_day_date": None, "rest_days_used": 0, "streak_start_date": None}),
@@ -303,7 +303,7 @@ def _today_ctx(tz=3, expenses_by_from=None, limits=None, day_limit=5000, payday=
 
 def _entry(amount, cat, date):
     return BudgetEntry(id=f"e{amount}", description="t", amount=amount, category=cat,
-                       type_="💸 Расход", source="💳 Карта", date=date, user_notion_id="")
+                       type_="💸 Расход", source="💳 Карта", date=date, user_id="")
 
 
 def test_discretionary_free_no_spending(client):
@@ -405,7 +405,7 @@ def test_spent_today_query_uses_today_as_date_to(client):
          patch("miniapp.backend.routes.today.ask_claude", AsyncMock(return_value="tip")), \
          patch("miniapp.backend.routes.today.today_user_tz",
                AsyncMock(return_value=(_today_local_date(tz), tz))), \
-         patch("miniapp.backend.routes.today.get_user_notion_id",
+         patch("miniapp.backend.routes.today.get_user_id",
                AsyncMock(return_value=FAKE_NOTION_USER)), \
          patch("nexus.handlers.streaks.get_streak",
                return_value={"streak": 0, "best": 0, "last_activity_date": None,

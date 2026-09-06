@@ -56,7 +56,7 @@ async def test_route_message_skips_normalize_for_voice_text():
     with contextlib.ExitStack() as st:
         for p in _route_patches(spy):
             st.enter_context(p)
-        await base.route_message(_msg(text="x"), user_notion_id="u",
+        await base.route_message(_msg(text="x"), user_id="u",
                                  _text="королева мечей")
     spy.assert_not_awaited()
 
@@ -70,7 +70,7 @@ async def test_route_message_normalizes_typed_text():
     with contextlib.ExitStack() as st:
         for p in _route_patches(spy):
             st.enter_context(p)
-        await base.route_message(_msg(text="расклад на работу"), user_notion_id="u")
+        await base.route_message(_msg(text="расклад на работу"), user_id="u")
     spy.assert_awaited_once()
 
 
@@ -272,7 +272,7 @@ async def test_client_ya_routes_to_self_not_named():
         for p in _session_patches(fake, self_spy, create_spy):
             st.enter_context(p)
         await handle_add_session(_msg(text="клиент я, что меня ждёт — шут маг жрица"),
-                                 "клиент я", user_notion_id="u")
+                                 "клиент я", user_id="u")
     self_spy.assert_awaited()
     create_spy.assert_not_awaited()
 
@@ -295,7 +295,7 @@ async def test_name_in_question_but_client_ya_still_self():
         for p in _session_patches(fake, self_spy, create_spy):
             st.enter_context(p)
         await handle_add_session(_msg(text="себе, что чувствует Артём — ..."),
-                                 "себе, что чувствует Артём", user_notion_id="u")
+                                 "себе, что чувствует Артём", user_id="u")
     self_spy.assert_awaited()
     create_spy.assert_not_awaited()
 
@@ -317,6 +317,6 @@ async def test_named_client_routes_to_resolve_or_create():
         for p in _session_patches(fake, self_spy, create_spy):
             st.enter_context(p)
         await handle_add_session(_msg(text="клиентка Клиент-Тест ..."),
-                                 "клиентка Клиент-Тест", user_notion_id="u")
+                                 "клиентка Клиент-Тест", user_id="u")
     create_spy.assert_awaited()
     self_spy.assert_not_awaited()

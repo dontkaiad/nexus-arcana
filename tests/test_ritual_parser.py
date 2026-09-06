@@ -94,7 +94,7 @@ async def test_invalid_client_name_ritual_sends_clarification():
          patch("arcana.handlers.rituals.get_user_tz", AsyncMock(return_value=3)), \
          patch("arcana.pending_tarot.get_pending", AsyncMock(return_value=None)), \
          patch.object(cr, "find_or_create_client", foc):
-        await rit.handle_add_ritual(msg, "ритуал", user_notion_id="u")
+        await rit.handle_add_ritual(msg, "ритуал", user_id="u")
 
     texts = [c.args[0] for c in msg.answer.call_args_list if c.args]
     assert any("имя клиента" in t for t in texts)
@@ -119,7 +119,7 @@ async def test_valid_client_name_ritual_no_clarification():
          patch.object(cr, "resolve_or_create", roc), \
          patch.object(rit._repo, "create", AsyncMock(return_value=repo_result)), \
          patch("core.message_pages.save_message_page", AsyncMock()):
-        await rit.handle_add_ritual(msg, "ритуал оля", user_notion_id="u")
+        await rit.handle_add_ritual(msg, "ритуал оля", user_id="u")
 
     roc.assert_awaited_once()
     texts = [c.args[0] for c in msg.answer.call_args_list if c.args]

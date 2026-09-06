@@ -15,7 +15,7 @@ class WhitelistMiddleware(BaseMiddleware):
     """
     Двухслойная проверка:
     1. Whitelist (allowed_ids) — быстрый gate
-    2. База Пользователей в Notion — права и user_notion_id
+    2. База Пользователей в Notion — права и user_id
     require_feature: если задано, проверяет checkbox у пользователя (arcana/nexus/finance)
     """
 
@@ -68,7 +68,7 @@ class WhitelistMiddleware(BaseMiddleware):
                 return
 
         # Прикрепляем данные пользователя к data для хэндлеров
-        data["user_notion_id"] = user_data.get("notion_page_id", "")
+        data["user_id"] = user_data.get("notion_page_id", "")
         data["user_data"] = user_data
 
         return await handler(event, data)

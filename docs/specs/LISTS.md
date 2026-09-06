@@ -1,6 +1,6 @@
 # LISTS — data-model contract (🗒️ Списки)
 
-Code conforms to: b9d3367 (+ this change: #149 — notion_id column dropped). This spec describes the lists data model as of
+Code conforms to: b9d3367 (+ this change: #149 — notion_id column dropped). (+ #144: user_notion_id → user_id.) This spec describes the lists data model as of
 that commit; update it in the same PR that changes the model.
 
 > Contract, not snapshot. Describes the persistent model, the guarantees of
@@ -45,7 +45,7 @@ Two tables. Migration:
 | `stage` | BigInteger | nullable |
 | `task_id` | Text | NOT NULL, default `''` — ✅ Задачи page_id |
 | `works_id` | Text | NOT NULL, default `''` — 🔮 Работы page_id |
-| `user_notion_id` | Text | NOT NULL, default `''` |
+| `user_id` | Text | NOT NULL, default `''` |
 | `created_at` | TIMESTAMP(tz) | default `now()` |
 | `updated_at` | TIMESTAMP(tz) | default `now()` |
 
@@ -60,7 +60,7 @@ Same shape minus the shopping-specific columns (`price_actual`, `price_plan`,
 `'инвентарь'`. Columns: `id`, `name`,
 `list_type`, `status`, `category`, `quantity`, `note`, `group_name`
 (barter: session/ritual title), `is_recurring`, `remind_days`, `expires_at`,
-`works_id`, `user_notion_id`, `created_at`, `updated_at`. Indexes:
+`works_id`, `user_id`, `created_at`, `updated_at`. Indexes:
 `ix_arcana_inventory_list_type`, `…_status`, `…_category`, `…_user`,
 `…_expires_at`.
 
@@ -94,9 +94,9 @@ multi-step flows; handlers call the facade, not the repos directly.
 - **add** — `add_item(...)` inserts a row and returns the domain object.
   Inputs normalized to PG codes; unknown labels fall back to defaults
   (`покупки` / `not_started`). `PgArcanaInventoryRepo` is the barter store.
-- **read** — `get_list(list_type/category, status, user_notion_id)` and
+- **read** — `get_list(list_type/category, status, user_id)` and
   `search(query, …)` (`name ILIKE %query%`); both default to excluding
-  `archived`. Scoped by `user_notion_id` when provided; ordered
+  `archived`. Scoped by `user_id` when provided; ordered
   `created_at desc`.
 - **update / status** — `update(id, **fields)` and `update_status(id, code)`
   stamp `updated_at = now()`; return `False` if the id resolves to no row.
@@ -114,7 +114,7 @@ multi-step flows; handlers call the facade, not the repos directly.
 - **recurring / expiry** — `get_recurring()` returns `done` +
   `is_recurring` items (re-cloned by `list_manager.clone_recurring`);
   `get_expiry_due(today)` returns inventory rows with `expires_at` set.
-- **barter (Arcana)** — `get_open_barter(user_notion_id)` returns
+- **barter (Arcana)** — `get_open_barter(user_id)` returns
   `arcana_inventory` rows with `category = '🔄 Бартер'` not yet done/archived.
 
 ## Invariants
@@ -129,7 +129,7 @@ multi-step flows; handlers call the facade, not the repos directly.
   explicit status is requested).
 - **Item↔task/work link is by stored page_id string** (`task_id` /
   `works_id`), not an FK; relation reads also include rows with empty
-  `user_notion_id` (shared/legacy).
+  `user_id` (shared/legacy).
 - **`group_name` groups items** within a list_type (checklist groups; for
   barter it carries the session/ritual title).
 
@@ -167,6 +167,7 @@ text). No Sonnet, no Opus. Reads/writes/status are pure SQL.
 
 - `alembic/versions/k1d2e3f4g5h6_nexus_lists_arcana_inventory_pg.py` — tables + indexes
 - `alembic/versions/cd34ef56a1b2_drop_dead_notion_id_columns.py` — notion_id dropped (#149)
+- `alembic/versions/df56a1b2c3d4_rename_user_notion_id_to_user_id.py` — user_notion_id → user_id (#144)
 - `core/repos/lists_table.py` — SQLAlchemy Core definitions + column comments
 - `core/repos/pg_nexus_lists_repo.py` — `ListItem`/`InventoryItem`, value maps,
   sync helpers, `PgNexusListsRepo`/`PgArcanaInventoryRepo`, barter guard

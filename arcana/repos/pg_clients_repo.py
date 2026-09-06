@@ -134,23 +134,23 @@ class PgClientsRepo:
             row = conn.execute(stmt).fetchone()
         return _row_to_client_full(row) if row else None
 
-    def _list_all_sync(self, user_notion_id: str) -> List[Client]:
+    def _list_all_sync(self, user_id: str) -> List[Client]:
         stmt = _select_clients_full()
-        if user_notion_id:
-            stmt = stmt.where(clients.c.user_notion_id == user_notion_id)
+        if user_id:
+            stmt = stmt.where(clients.c.user_id == user_id)
         with get_engine().connect() as conn:
             rows = conn.execute(stmt).fetchall()
         return [_row_to_client_full(r) for r in rows]
 
-    def _find_self_sync(self, user_notion_id: str) -> Optional[Client]:
+    def _find_self_sync(self, user_id: str) -> Optional[Client]:
         """Find the self-type client (used in resolve_self_client)."""
         with get_engine().connect() as conn:
             self_id = _resolve_lookup(conn, client_type, "self")
             if self_id is None:
                 return None
             stmt = select(clients).where(clients.c.type_id == self_id)
-            if user_notion_id:
-                stmt = stmt.where(clients.c.user_notion_id == user_notion_id)
+            if user_id:
+                stmt = stmt.where(clients.c.user_id == user_id)
             row = conn.execute(stmt.limit(1)).fetchone()
         return _row_to_client(row) if row else None
 
@@ -162,7 +162,7 @@ class PgClientsRepo:
         contact: Optional[str] = None,
         request: Optional[str] = None,
         notes: Optional[str] = None,
-        user_notion_id: Optional[str] = None,
+        user_id: Optional[str] = None,
     ) -> Optional[int]:
         with get_engine().begin() as conn:
             # Check existing by exact name first (avoid duplicates)
@@ -182,7 +182,7 @@ class PgClientsRepo:
                     contact=contact or None,
                     request=request or None,
                     notes=notes or None,
-                    user_notion_id=user_notion_id or None,
+                    user_id=user_id or None,
                 ).returning(clients.c.id)
             ).fetchone()
         return row[0] if row else None
@@ -244,11 +244,11 @@ class PgClientsRepo:
     async def find_by_id(self, pg_id: int) -> Optional[Client]:
         return await asyncio.to_thread(self._find_by_id_sync, pg_id)
 
-    async def list_all(self, user_notion_id: str = "") -> List[Client]:
-        return await asyncio.to_thread(self._list_all_sync, user_notion_id)
+    async def list_all(self, user_id: str = "") -> List[Client]:
+        return await asyncio.to_thread(self._list_all_sync, user_id)
 
-    async def find_self(self, user_notion_id: str = "") -> Optional[Client]:
-        return await asyncio.to_thread(self._find_self_sync, user_notion_id)
+    async def find_self(self, user_id: str = "") -> Optional[Client]:
+        return await asyncio.to_thread(self._find_self_sync, user_id)
 
     async def create(
         self,
@@ -258,11 +258,11 @@ class PgClientsRepo:
         contact: Optional[str] = None,
         request: Optional[str] = None,
         notes: Optional[str] = None,
-        user_notion_id: Optional[str] = None,
+        user_id: Optional[str] = None,
     ) -> Optional[int]:
         return await asyncio.to_thread(
             self._create_sync,
-            name, type_code, status_code, contact, request, notes, user_notion_id,
+            name, type_code, status_code, contact, request, notes, user_id,
         )
 
     async def update_profile(

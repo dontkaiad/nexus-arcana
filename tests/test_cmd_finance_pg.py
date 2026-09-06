@@ -1,7 +1,7 @@
 """tests/test_cmd_finance_pg.py — /finance (cmd_finance) читает из PG nexus_budget.
 
 Покрытие:
-- cmd_finance зовёт PgNexusBudgetRepo.query_month(month, user_notion_id), НЕ finance_month;
+- cmd_finance зовёт PgNexusBudgetRepo.query_month(month, user_id), НЕ finance_month;
 - агрегирует расходы (by_cat/total/today) по BudgetEntry, доход пропускает;
 - fail-closed: пустой user → не листит, query_month не вызывается.
 """
@@ -49,12 +49,12 @@ async def test_cmd_finance_reads_pg_nexus_budget(mock_message):
          patch("nexus.handlers.finance._calc_free_remaining", AsyncMock(return_value=None)), \
          patch("nexus.handlers.finance._load_budget_data", AsyncMock(return_value={"доходы": []})), \
          patch("nexus.handlers.finance._get_limits", AsyncMock(return_value={})):
-        await cmd_finance(msg, user_notion_id="u-1")
+        await cmd_finance(msg, user_id="u-1")
 
     # читали PG nexus_budget, user-scoped; Notion не звали
     m_qm.assert_awaited_once()
     assert m_qm.call_args.args[0] == "2026-06"           # month
-    assert m_qm.call_args.kwargs["user_notion_id"] == "u-1"
+    assert m_qm.call_args.kwargs["user_id"] == "u-1"
 
     out = "\n".join(str(c.args[0]) for c in msg.answer.call_args_list)
     # total expense = 100+50+30 = 180 (доход 1000 пропущен)
@@ -81,7 +81,7 @@ async def test_cmd_finance_month_by_user_tz(mock_message):
          patch("nexus.handlers.finance._calc_free_remaining", AsyncMock(return_value=None)), \
          patch("nexus.handlers.finance._load_budget_data", AsyncMock(return_value={"доходы": []})), \
          patch("nexus.handlers.finance._get_limits", AsyncMock(return_value={})):
-        await cmd_finance(msg, user_notion_id="u-1")
+        await cmd_finance(msg, user_id="u-1")
 
     assert m_qm.call_args.args[0] == "2026-07"
 
@@ -94,7 +94,7 @@ async def test_cmd_finance_fail_closed_empty_user(mock_message):
     msg = mock_message("/finance")
 
     with patch.object(PgNexusBudgetRepo, "query_month", AsyncMock()) as m_qm:
-        await cmd_finance(msg, user_notion_id="")
+        await cmd_finance(msg, user_id="")
 
     m_qm.assert_not_called()
     assert "не могу определить" in msg.answer.call_args.args[0].lower()

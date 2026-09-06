@@ -125,7 +125,7 @@ async def _update_notion(page_id: str, pending: dict) -> None:
 
 # ── Main handlers ─────────────────────────────────────────────────────────────
 
-async def handle_client_info(message: Message, text: str, user_notion_id: str = "") -> None:
+async def handle_client_info(message: Message, text: str, user_id: str = "") -> None:
     """«клиент Оля» / «что у Оли» → поиск. Найден: полное досье. Нет: предложить создать."""
     from arcana.pending_clients import save_pending_client
 
@@ -137,7 +137,7 @@ async def handle_client_info(message: Message, text: str, user_notion_id: str = 
         temperature=0,
     )).strip()
 
-    client = await _repo.find(name, user_notion_id=user_notion_id)
+    client = await _repo.find(name, user_id=user_id)
     if not client:
         uid = message.from_user.id
         await save_pending_client(uid, {
@@ -146,7 +146,7 @@ async def handle_client_info(message: Message, text: str, user_notion_id: str = 
             "contacts": [],
             "request": "",
             "notes": "",
-            "user_notion_id": user_notion_id,
+            "user_id": user_id,
         })
         await message.answer(
             f"❌ Не нашла «<b>{name}</b>» в базе. Создать?",
@@ -155,8 +155,8 @@ async def handle_client_info(message: Message, text: str, user_notion_id: str = 
         )
         return
 
-    sessions = await _repo.sessions_for(client.id, user_notion_id=user_notion_id)
-    rituals = await _repo.rituals_for(client.id, user_notion_id=user_notion_id)
+    sessions = await _repo.sessions_for(client.id, user_id=user_id)
+    rituals = await _repo.rituals_for(client.id, user_id=user_id)
 
     total = 0.0
     debt = 0.0
@@ -170,7 +170,7 @@ async def handle_client_info(message: Message, text: str, user_notion_id: str = 
     hist_str = "\n".join(history[:5]) or "  (нет записей)"
 
     from core.memory import get_memories_for_context
-    memory_context = await get_memories_for_context(user_notion_id, [client.name])
+    memory_context = await get_memories_for_context(user_id, [client.name])
     mem_block = f"\n\n🧠 <b>Из памяти:</b>\n{memory_context}" if memory_context else ""
 
     n_sessions = len(sessions)
@@ -188,7 +188,7 @@ async def handle_client_info(message: Message, text: str, user_notion_id: str = 
     )
 
 
-async def handle_add_client(message: Message, text: str, user_notion_id: str = "") -> None:
+async def handle_add_client(message: Message, text: str, user_id: str = "") -> None:
     """«создай клиента Оля» → проверка дублей → создать / дополнить / сбор инфы."""
     from arcana.pending_clients import save_pending_client
 
@@ -203,7 +203,7 @@ async def handle_add_client(message: Message, text: str, user_notion_id: str = "
     uid = message.from_user.id
 
     # ── Проверка дублей ──────────────────────────────────────────────────────
-    existing = await _repo.find(name, user_notion_id=user_notion_id)
+    existing = await _repo.find(name, user_id=user_id)
     if existing:
         await save_pending_client(uid, {
             "step": "confirm_duplicate",
@@ -212,7 +212,7 @@ async def handle_add_client(message: Message, text: str, user_notion_id: str = "
             "contacts": [{"value": existing.contact, "label": ""}] if existing.contact else [],
             "request": existing.request,
             "notes": "",
-            "user_notion_id": user_notion_id,
+            "user_id": user_id,
         })
         await message.answer(
             f"👤 Нашла <b>{existing.name}</b>\n"
@@ -239,7 +239,7 @@ async def handle_add_client(message: Message, text: str, user_notion_id: str = "
         contact=contact,
         request=request,
         date=today,
-        user_notion_id=user_notion_id,
+        user_id=user_id,
         client_type=client_type,
     )
     if not page_id:
@@ -258,7 +258,7 @@ async def handle_add_client(message: Message, text: str, user_notion_id: str = "
             "contacts": contacts_list,
             "request": request,
             "notes": "",
-            "user_notion_id": user_notion_id,
+            "user_id": user_id,
         })
         pending_stub = {"name": name, "contacts": contacts_list, "request": request, "notes": ""}
         bot_msg = await message.answer(
@@ -299,7 +299,7 @@ async def handle_add_client(message: Message, text: str, user_notion_id: str = "
 
 
 async def _handle_collecting(
-    message: Message, text: str, pending: dict, user_notion_id: str = ""
+    message: Message, text: str, pending: dict, user_id: str = ""
 ) -> None:
     """Режим сбора инфы — каждый текст дополняет карточку и сразу пишет в Notion."""
     from arcana.pending_clients import update_pending_client, get_pending_client
@@ -378,8 +378,8 @@ async def handle_client_photo_input(message: Message, image_b64: str, pending: d
     )
 
 
-async def handle_debts(message: Message, user_notion_id: str = "") -> None:
-    items = await _repo.all_debts(user_notion_id=user_notion_id)
+async def handle_debts(message: Message, user_id: str = "") -> None:
+    items = await _repo.all_debts(user_id=user_id)
     if not items:
         await message.answer("✅ Долгов нет.")
         return
@@ -400,7 +400,7 @@ async def handle_debts(message: Message, user_notion_id: str = "") -> None:
 # ── Callback handlers ─────────────────────────────────────────────────────────
 
 @router.callback_query(F.data.startswith("client_create_from_search:"))
-async def cb_create_from_search(callback: CallbackQuery, user_notion_id: str = "") -> None:
+async def cb_create_from_search(callback: CallbackQuery, user_id: str = "") -> None:
     """«Не найден» → юзер нажал [➕ Создать] → создаём в Notion → collecting."""
     uid = int(callback.data.split(":", 1)[1])
     if uid != callback.from_user.id:
@@ -415,10 +415,10 @@ async def cb_create_from_search(callback: CallbackQuery, user_notion_id: str = "
         return
 
     name = pending.get("name") or ""
-    user_nid = pending.get("user_notion_id") or user_notion_id
+    user_nid = pending.get("user_id") or user_id
     today = await _today_for(uid)
 
-    page_id = await _repo.add(name=name, date=today, user_notion_id=user_nid)
+    page_id = await _repo.add(name=name, date=today, user_id=user_nid)
     if not page_id:
         await callback.message.edit_text("⚠️ Ошибка создания в Notion.")
         return
@@ -435,7 +435,7 @@ async def cb_create_from_search(callback: CallbackQuery, user_notion_id: str = "
 
 
 @router.callback_query(F.data.startswith("client_update_existing:"))
-async def cb_update_existing(callback: CallbackQuery, user_notion_id: str = "") -> None:
+async def cb_update_existing(callback: CallbackQuery, user_id: str = "") -> None:
     """«Да, это она» → дополняем существующую карточку → collecting."""
     uid = int(callback.data.split(":", 1)[1])
     if uid != callback.from_user.id:
@@ -455,7 +455,7 @@ async def cb_update_existing(callback: CallbackQuery, user_notion_id: str = "") 
 
 
 @router.callback_query(F.data.startswith("client_create_new:"))
-async def cb_create_new(callback: CallbackQuery, user_notion_id: str = "") -> None:
+async def cb_create_new(callback: CallbackQuery, user_id: str = "") -> None:
     """«Нет, новый клиент» → создаём нового → collecting."""
     uid = int(callback.data.split(":", 1)[1])
     if uid != callback.from_user.id:
@@ -470,10 +470,10 @@ async def cb_create_new(callback: CallbackQuery, user_notion_id: str = "") -> No
         return
 
     name = pending.get("name") or ""
-    user_nid = pending.get("user_notion_id") or user_notion_id
+    user_nid = pending.get("user_id") or user_id
     today = await _today_for(uid)
 
-    page_id = await _repo.add(name=name, date=today, user_notion_id=user_nid)
+    page_id = await _repo.add(name=name, date=today, user_id=user_nid)
     if not page_id:
         await callback.message.edit_text("⚠️ Ошибка создания.")
         return
@@ -496,7 +496,7 @@ async def cb_create_new(callback: CallbackQuery, user_notion_id: str = "") -> No
 
 
 @router.callback_query(F.data.startswith("client_done:"))
-async def cb_done(callback: CallbackQuery, user_notion_id: str = "") -> None:
+async def cb_done(callback: CallbackQuery, user_id: str = "") -> None:
     """Завершить сбор — показать итоговую карточку, очистить pending."""
     uid = int(callback.data.split(":", 1)[1])
     if uid != callback.from_user.id:
@@ -514,7 +514,7 @@ async def cb_done(callback: CallbackQuery, user_notion_id: str = "") -> None:
 
 
 @router.callback_query(F.data.startswith("client_cancel:"))
-async def cb_cancel(callback: CallbackQuery, user_notion_id: str = "") -> None:
+async def cb_cancel(callback: CallbackQuery, user_id: str = "") -> None:
     uid = int(callback.data.split(":", 1)[1])
     if uid != callback.from_user.id:
         return

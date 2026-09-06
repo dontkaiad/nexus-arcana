@@ -38,7 +38,7 @@ def _mk_reply_message(reply_text: str, chat_id: int = 1, orig_msg_id: int = 10):
 async def test_apply_list_adds_item_with_inherited_category_and_type():
     item = SimpleNamespace(
         id="42", name="Молоко", list_type="покупки", category="🍜 Продукты",
-        group_name="", user_notion_id="u1",
+        group_name="", user_id="u1",
     )
     with patch("core.list_manager._nexus_repo.get_by_id", AsyncMock(return_value=item)), \
          patch("core.repos.lists_repo.ListsRepo.add", AsyncMock(
@@ -56,7 +56,7 @@ async def test_apply_list_adds_item_with_inherited_category_and_type():
 async def test_apply_list_falls_back_to_arcana_repo():
     item = SimpleNamespace(
         id="7", name="Свеча", list_type="инвентарь", category="🕯️ Расходники",
-        group_name="", user_notion_id="u1",
+        group_name="", user_id="u1",
     )
     with patch("core.list_manager._nexus_repo.get_by_id", AsyncMock(return_value=None)), \
          patch("core.list_manager._arcana_repo.get_by_id", AsyncMock(return_value=item)), \
@@ -91,7 +91,7 @@ async def test_apply_list_item_not_found_anywhere_returns_empty():
 async def test_apply_list_add_failure_returns_empty():
     item = SimpleNamespace(
         id="42", name="Молоко", list_type="покупки", category="🍜 Продукты",
-        group_name="", user_notion_id="u1",
+        group_name="", user_id="u1",
     )
     with patch("core.list_manager._nexus_repo.get_by_id", AsyncMock(return_value=item)), \
          patch("core.repos.lists_repo.ListsRepo.add", AsyncMock(return_value=[])):
@@ -108,7 +108,7 @@ async def test_reply_add_item_end_to_end_confirms_to_user():
     mapping = {"page_id": "42", "page_type": "list", "bot": "nexus"}
     item = SimpleNamespace(
         id="42", name="Молоко", list_type="покупки", category="🍜 Продукты",
-        group_name="", user_notion_id="u1",
+        group_name="", user_id="u1",
     )
 
     with patch("nexus.handlers.reply_update.get_message_page", AsyncMock(return_value=mapping)), \
@@ -118,7 +118,7 @@ async def test_reply_add_item_end_to_end_confirms_to_user():
          patch("core.repos.lists_repo.ListsRepo.add", AsyncMock(
              return_value=[{"id": "99", "name": "Соль"}])), \
          patch("nexus.handlers.reply_update.react", AsyncMock()):
-        handled = await ru.handle_reply_update(msg, user_notion_id="u1")
+        handled = await ru.handle_reply_update(msg, user_id="u1")
 
     assert handled is True
     msg.answer.assert_any_call("✏️ Дополнено:\n  • Добавлено: Соль")

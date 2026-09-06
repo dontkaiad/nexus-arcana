@@ -55,7 +55,7 @@ for k, v in _TEST_ENV.items():
 # фактов и core/memory.py:_parse_fact падает в fallback-категорию).
 TEST_USER_NOTION_ID = "test-user-notion-id"
 
-# Все таблицы схемы с колонкой user_notion_id (не только memories, куда
+# Все таблицы схемы с колонкой user_id (не только memories, куда
 # реально писали на момент находки) — на случай, если будущий тест начнёт
 # писать тем же фейковым id в любую из них.
 _CLEANUP_TABLES = (
@@ -71,7 +71,7 @@ def _delete_test_user_rows() -> None:
         with get_engine().begin() as conn:
             for table in _CLEANUP_TABLES:
                 conn.execute(
-                    sa.text(f"DELETE FROM {table} WHERE user_notion_id = :uid"),
+                    sa.text(f"DELETE FROM {table} WHERE user_id = :uid"),
                     {"uid": TEST_USER_NOTION_ID},
                 )
     except Exception as e:

@@ -23,44 +23,44 @@ _EPOCH = "2020-01-01"
 _FUTURE = "2099-12-31"
 
 
-async def _load_clients(user_notion_id: str) -> List:
+async def _load_clients(user_id: str) -> List:
     from arcana.repos.pg_clients_repo import PgClientsRepo
-    return await PgClientsRepo().list_all(user_notion_id)
+    return await PgClientsRepo().list_all(user_id)
 
 
-async def _load_sessions(user_notion_id: str) -> List:
+async def _load_sessions(user_id: str) -> List:
     from arcana.repos.pg_sessions_repo import PgSessionsRepo
-    return await PgSessionsRepo().list_all(user_notion_id=user_notion_id)
+    return await PgSessionsRepo().list_all(user_id=user_id)
 
 
-async def _load_rituals(user_notion_id: str) -> List:
+async def _load_rituals(user_id: str) -> List:
     from arcana.repos.pg_rituals_repo import PgRitualsRepo
-    return await PgRitualsRepo().list_all(user_notion_id=user_notion_id)
+    return await PgRitualsRepo().list_all(user_id=user_id)
 
 
-async def _load_arcana_finance(user_notion_id: str) -> List:
+async def _load_arcana_finance(user_id: str) -> List:
     from core.repos.pg_finance_repo import PgArcanaPnlRepo
     return await PgArcanaPnlRepo().query(
         _EPOCH, _FUTURE,
         page_size=2000,
-        user_notion_id=user_notion_id,
+        user_id=user_id,
     )
 
 
-async def _load_salary_records(user_notion_id: str) -> List:
+async def _load_salary_records(user_id: str) -> List:
     from core.repos.pg_finance_repo import PgNexusBudgetRepo
     return await PgNexusBudgetRepo().query(
         _EPOCH, _FUTURE,
         type_="💰 Доход",
         category=SALARY_CATEGORY,
         page_size=1000,
-        user_notion_id=user_notion_id,
+        user_id=user_id,
     )
 
 
-async def _count_open_barter(user_notion_id: str) -> int:
+async def _count_open_barter(user_id: str) -> int:
     from core.repos.pg_nexus_lists_repo import PgArcanaInventoryRepo
-    items = await PgArcanaInventoryRepo().get_open_barter(user_notion_id)
+    items = await PgArcanaInventoryRepo().get_open_barter(user_id)
     return len(items)
 
 
@@ -78,7 +78,7 @@ def _in_month_entry(date_val, year: int, month: int) -> bool:
 
 
 async def compute_pnl(
-    user_notion_id: str,
+    user_id: str,
     year: Optional[int] = None,
     month: Optional[int] = None,
 ) -> dict:
@@ -91,11 +91,11 @@ async def compute_pnl(
         today = _date.today()
         year, month = today.year, today.month
 
-    clients = await _load_clients(user_notion_id)
+    clients = await _load_clients(user_id)
     self_ids = _self_client_ids(clients)
 
-    sessions = await _load_sessions(user_notion_id)
-    rituals = await _load_rituals(user_notion_id)
+    sessions = await _load_sessions(user_id)
+    rituals = await _load_rituals(user_id)
 
     sessions_paying = [s for s in sessions if s.client_id not in self_ids]
     rituals_paying = [r for r in rituals if r.client_id not in self_ids]
@@ -108,7 +108,7 @@ async def compute_pnl(
     income_month_total = income_sessions + income_rituals
 
     # ── Расходы Arcana за месяц ───────────────────────────────────────────────
-    finance_lifetime = await _load_arcana_finance(user_notion_id)
+    finance_lifetime = await _load_arcana_finance(user_id)
     expenses_month_by_cat: dict = {}
     expenses_month_total = 0.0
     for rec in finance_lifetime:
@@ -132,7 +132,7 @@ async def compute_pnl(
         float(rec.amount) for rec in finance_lifetime
         if "Доход" not in (rec.type_ or "")
     )
-    salary_records = await _load_salary_records(user_notion_id)
+    salary_records = await _load_salary_records(user_id)
     salary_lifetime = sum(float(r.amount) for r in salary_records)
     salary_month = sum(
         float(r.amount) for r in salary_records
@@ -151,7 +151,7 @@ async def compute_pnl(
         paid = float(r.paid)
         debt_money += max(0.0, price - paid)
 
-    barter_open = await _count_open_barter(user_notion_id)
+    barter_open = await _count_open_barter(user_id)
 
     return {
         "period": {"year": year, "month": month},

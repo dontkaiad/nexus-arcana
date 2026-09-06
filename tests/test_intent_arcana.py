@@ -121,7 +121,7 @@ async def test_guard_redirects_non_practice_work_intent():
          patch("arcana.pending_tarot.get_pending",
                AsyncMock(return_value=None)), \
          patch("arcana.handlers.work_preview.has_pending", return_value=False):
-        await base.route_message(msg, user_notion_id="u")
+        await base.route_message(msg, user_id="u")
 
     redirect_mock.assert_awaited_once()
     add_mock.assert_not_called()
@@ -155,7 +155,7 @@ async def test_guard_lets_practice_work_through():
          patch("arcana.pending_tarot.get_pending",
                AsyncMock(return_value=None)), \
          patch("arcana.handlers.work_preview.has_pending", return_value=False):
-        await base.route_message(msg, user_notion_id="u")
+        await base.route_message(msg, user_id="u")
 
     ask_mock.assert_not_called()
     add_mock.assert_awaited_once()

@@ -4,7 +4,7 @@
 - whitelist защищает имена клиентов и карты Таро от «исправления» Haiku
 - conversational/слишком длинный ответ Haiku отвергается, возвращается оригинал
 - кеш miss → один pull, hit → не пуллит
-- find_or_create_client инвалидирует кеш user_notion_id
+- find_or_create_client инвалидирует кеш user_id
 """
 from __future__ import annotations
 
@@ -56,7 +56,7 @@ async def test_whitelist_protects_client_name_lena():
     # Имитируем что Haiku послушался whitelist'а и вернул как есть
     with patch("core.preprocess.ask_claude",
                AsyncMock(return_value="напомни про Лену")):
-        out = await pp.normalize_text("напомни про Лену", user_notion_id="u")
+        out = await pp.normalize_text("напомни про Лену", user_id="u")
     assert out == "напомни про Лену"
 
 
@@ -71,7 +71,7 @@ async def test_prompt_includes_card_name_jрица_when_present():
         return text
 
     with patch("core.preprocess.ask_claude", side_effect=fake):
-        await pp.normalize_text("выпала Жрица", user_notion_id="u")
+        await pp.normalize_text("выпала Жрица", user_id="u")
     assert "Жрица" in captured["system"]
 
 
@@ -85,7 +85,7 @@ async def test_prompt_includes_eso_term_when_present():
         return text
 
     with patch("core.preprocess.ask_claude", side_effect=fake):
-        await pp.normalize_text("сделать приворот", user_notion_id="u")
+        await pp.normalize_text("сделать приворот", user_id="u")
     assert "приворот" in captured["system"]
 
 
@@ -96,7 +96,7 @@ async def test_conversational_response_rejected():
     _fresh()
     with patch("core.preprocess.ask_claude",
                AsyncMock(return_value="Извините, я не могу помочь...")):
-        out = await pp.normalize_text("привет", user_notion_id="u")
+        out = await pp.normalize_text("привет", user_id="u")
     assert out == "привет", "разговорный ответ Haiku должен быть отклонён"
 
 
@@ -106,7 +106,7 @@ async def test_too_long_response_rejected():
     long_resp = "тут очень длинный ответ от Haiku " * 10
     with patch("core.preprocess.ask_claude",
                AsyncMock(return_value=long_resp)):
-        out = await pp.normalize_text("кот", user_notion_id="u")
+        out = await pp.normalize_text("кот", user_id="u")
     assert out == "кот"
 
 
@@ -115,7 +115,7 @@ async def test_haiku_exception_returns_original():
     _fresh()
     with patch("core.preprocess.ask_claude",
                AsyncMock(side_effect=Exception("api boom"))):
-        out = await pp.normalize_text("текст", user_notion_id="u")
+        out = await pp.normalize_text("текст", user_id="u")
     assert out == "текст"
 
 
@@ -127,7 +127,7 @@ async def test_layout_conversion_runs_first():
     # `ghbdtn` на английской раскладке = «привет» на русской
     with patch("core.preprocess.ask_claude",
                AsyncMock(side_effect=lambda t, **kw: t)):
-        out = await pp.normalize_text("ghbdtn", user_notion_id="u")
+        out = await pp.normalize_text("ghbdtn", user_id="u")
     assert out == "привет"
 
 
@@ -181,7 +181,7 @@ async def test_find_or_create_client_invalidates_whitelist_cache():
                AsyncMock(return_value=None)), \
          patch("arcana.repos.pg_clients_repo.PgClientsRepo.create",
                AsyncMock(return_value=99)):
-        await nc.find_or_create_client("Новый", user_notion_id="u")
+        await nc.find_or_create_client("Новый", user_id="u")
 
     # Кеш сброшен (TTL не истёк, но invalidate_whitelist дёрнут)
     assert pp._cache_get("u") is None
@@ -191,9 +191,9 @@ async def test_find_or_create_client_invalidates_whitelist_cache():
 
 @pytest.mark.asyncio
 async def test_empty_text_passthrough():
-    out = await pp.normalize_text("", user_notion_id="u")
+    out = await pp.normalize_text("", user_id="u")
     assert out == ""
-    out2 = await pp.normalize_text("   ", user_notion_id="u")
+    out2 = await pp.normalize_text("   ", user_id="u")
     assert out2 == "   "
 
 
@@ -211,7 +211,7 @@ async def test_extra_protect_spans_appear_in_prompt():
     with patch("core.preprocess.ask_claude", side_effect=fake):
         await pp.normalize_text(
             "крыльево мячей шут",
-            user_notion_id="u",
+            user_id="u",
             extra_protect=["крыльево мячей", "шут"],
         )
     assert "крыльево мячей" in captured["system"]
@@ -230,7 +230,7 @@ async def test_extra_protect_absent_span_not_added():
     with patch("core.preprocess.ask_claude", side_effect=fake):
         await pp.normalize_text(
             "просто текст",
-            user_notion_id="u",
+            user_id="u",
             extra_protect=["крыльево мячей"],
         )
     assert "крыльево мячей" not in captured.get("system", "")

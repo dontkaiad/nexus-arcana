@@ -104,14 +104,14 @@ class ListsRepo:
 
     async def get_summary(
         self,
-        user_notion_id: str,
+        user_id: str,
         bot_name: str,
         type_: Optional[str] = None,
         group: Optional[str] = None,
         category: Optional[str] = None,
     ) -> dict:
         return await _lm.get_list_summary(
-            user_notion_id, bot_name, type_=type_, group=group, category=category
+            user_id, bot_name, type_=type_, group=group, category=category
         )
 
     # ── PG writes — sealed from handlers ────────────────────────────────────
@@ -134,7 +134,7 @@ class ListsRepo:
             await _lm._arcana_repo.update_status(item_id, "Done")
 
     async def add_checklist_task(
-        self, title: str, user_notion_id: str
+        self, title: str, user_id: str
     ) -> Optional[str]:
         """Create a parent ✅ Задача for a checklist group (PG). Returns task id or None.
 
@@ -146,8 +146,8 @@ class ListsRepo:
             "Приоритет": _props._select("Важно"),
             "Категория": _props._select("💳 Прочее"),
         }
-        if user_notion_id:
-            props["🪪 Пользователи"] = _props._relation(user_notion_id)
+        if user_id:
+            props["🪪 Пользователи"] = _props._relation(user_id)
         from nexus.repos.tasks_repo import _repo as _tasks_repo
         from core.config import config
         return await _tasks_repo.create(config.nexus.db_tasks, props)
@@ -159,7 +159,7 @@ class ListsRepo:
         source: str,
         description: str,
         bot_label: str,
-        user_notion_id: str,
+        user_id: str,
     ) -> tuple:
         """Write one 💸 Расход to 💰 Финансы.
 
@@ -175,7 +175,7 @@ class ListsRepo:
             source=source,
             description=description,
             bot_label=bot_label,
-            user_notion_id=user_notion_id,
+            user_id=user_id,
         )
         return fin_id, finance_cat
 

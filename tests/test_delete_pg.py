@@ -124,15 +124,15 @@ async def test_select_records_passes_tz_to_scope(monkeypatch):
     monkeypatch.setattr(d, "_apply_scope",
                         lambda *a: captured.setdefault("tz", a[5]) or [])
     monkeypatch.setattr(d, "_fetch_all", AsyncMock(return_value=[]))
-    await d.select_records("tasks", "today", user_notion_id="u", tz_offset=5)
+    await d.select_records("tasks", "today", user_id="u", tz_offset=5)
     assert captured["tz"] == 5
 
 
 @pytest.mark.asyncio
 async def test_select_records_gated_returns_empty():
     from core import deleter
-    assert await deleter.select_records("finance", "all", user_notion_id="u") == []
-    assert await deleter.select_records("clients", "all", user_notion_id="u") == []
+    assert await deleter.select_records("finance", "all", user_id="u") == []
+    assert await deleter.select_records("clients", "all", user_id="u") == []
 
 
 # ── HANDLER: gating finance/clients ──────────────────────────────────────────
@@ -145,7 +145,7 @@ async def test_nexus_finance_gated(mock_message):
     with patch("core.claude_client.ask_claude", AsyncMock(return_value="finance")), \
          patch.object(d, "select_records", AsyncMock()) as sel, \
          patch.object(d, "archive_records", AsyncMock()) as arch:
-        await d.handle_delete(msg, "удали все финансы", user_notion_id="u")
+        await d.handle_delete(msg, "удали все финансы", user_id="u")
     txt = msg.answer.call_args.args[0]
     assert "недоступно" in txt.lower()
     sel.assert_not_called()
@@ -160,7 +160,7 @@ async def test_arcana_clients_gated(mock_message):
     msg = mock_message("удали клиента")
     with patch("core.claude_client.ask_claude", AsyncMock(return_value="clients")), \
          patch.object(d, "select_records", AsyncMock()) as sel:
-        await d.handle_delete(msg, "удали клиента", user_notion_id="u")
+        await d.handle_delete(msg, "удали клиента", user_id="u")
     assert "недоступно" in msg.answer.call_args.args[0].lower()
     sel.assert_not_called()
 
@@ -171,7 +171,7 @@ async def test_nexus_no_user_fail_closed(mock_message):
     msg = mock_message("удали последнее")
     with patch("core.claude_client.ask_claude", AsyncMock(return_value="tasks")) as ac, \
          patch.object(d, "select_records", AsyncMock()) as sel:
-        await d.handle_delete(msg, "удали последнее", user_notion_id="")
+        await d.handle_delete(msg, "удали последнее", user_id="")
     ac.assert_not_called()
     sel.assert_not_called()
 
@@ -188,7 +188,7 @@ async def test_nexus_scope_all_strong_confirm(mock_message):
     with patch("core.claude_client.ask_claude", AsyncMock(return_value="tasks")), \
          patch.object(d, "parse_delete_intent", AsyncMock(return_value={"scope": "all", "date": None, "month": None, "count": 1})), \
          patch.object(d, "select_records", AsyncMock(return_value=recs)):
-        await d.handle_delete(msg, "удали все задачи", user_notion_id="u")
+        await d.handle_delete(msg, "удали все задачи", user_id="u")
     prompt = msg.answer.call_args.args[0]
     assert "ВСЕ" in prompt and "⚠️" in prompt
     assert d._pending[msg.from_user.id] == ("tasks", ["1", "2"], "all")

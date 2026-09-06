@@ -79,7 +79,7 @@ def test_same_key_twice_creates_one_finance_record(client):
          patch.object(_writes_mod._fin_repo, "add", AsyncMock(side_effect=fake_add)), \
          patch("miniapp.backend.routes.writes.today_user_tz",
                AsyncMock(return_value=(date(2026, 6, 17), 3))), \
-         patch("miniapp.backend.routes.writes.get_user_notion_id",
+         patch("miniapp.backend.routes.writes.get_user_id",
                AsyncMock(return_value=FAKE_NOTION_USER)):
 
         r1 = client.post(
@@ -121,7 +121,7 @@ def test_different_keys_create_two_finance_records(client):
          patch.object(_writes_mod._fin_repo, "add", AsyncMock(side_effect=fake_add)), \
          patch("miniapp.backend.routes.writes.today_user_tz",
                AsyncMock(return_value=(date(2026, 6, 17), 3))), \
-         patch("miniapp.backend.routes.writes.get_user_notion_id",
+         patch("miniapp.backend.routes.writes.get_user_id",
                AsyncMock(return_value=FAKE_NOTION_USER)):
 
         r1 = client.post(
@@ -154,10 +154,10 @@ def test_checkout_already_done_item_skips_finance(client):
     done_item.category = "🍜 Продукты"
     done_item.status = "done"  # already done
     done_item.price_plan = None
-    done_item.user_notion_id = FAKE_NOTION_USER
+    done_item.user_id = FAKE_NOTION_USER
 
     with patch.object(_writes_mod._fin_repo, "add", add_mock), \
-         patch("miniapp.backend.routes.writes.get_user_notion_id",
+         patch("miniapp.backend.routes.writes.get_user_id",
                AsyncMock(return_value=FAKE_NOTION_USER)), \
          patch("miniapp.backend.routes.writes._get_list_item_pg",
                AsyncMock(return_value=(done_item, False))), \
@@ -188,7 +188,7 @@ def test_finance_without_idempotency_key_works(client):
     with patch.object(_writes_mod._fin_repo, "add", AsyncMock(side_effect=fake_add)), \
          patch("miniapp.backend.routes.writes.today_user_tz",
                AsyncMock(return_value=(date(2026, 6, 17), 3))), \
-         patch("miniapp.backend.routes.writes.get_user_notion_id",
+         patch("miniapp.backend.routes.writes.get_user_id",
                AsyncMock(return_value=FAKE_NOTION_USER)):
 
         # No Idempotency-Key header at all

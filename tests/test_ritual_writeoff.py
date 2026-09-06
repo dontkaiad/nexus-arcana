@@ -42,7 +42,7 @@ async def test_propose_writeoff_shows_preview_with_inventory_match():
                ])), \
          patch("arcana.handlers.ritual_writeoff.inventory_search",
                AsyncMock(side_effect=inventory_results)):
-        await propose_writeoff(msg, "соль 50г, травы", user_notion_id="u1")
+        await propose_writeoff(msg, "соль 50г, травы", user_id="u1")
 
     msg.answer.assert_awaited_once()
     args, kwargs = msg.answer.await_args
@@ -75,7 +75,7 @@ async def test_apply_callback_writes_inventory():
 @pytest.mark.asyncio
 async def test_handle_pending_edit_recomputes_preview():
     from arcana.handlers.ritual_writeoff import handle_pending_edit, _save, _load
-    _save(33, {"rows": [], "user_notion_id": "u1", "awaiting_edit": True})
+    _save(33, {"rows": [], "user_id": "u1", "awaiting_edit": True})
     msg = MagicMock()
     msg.from_user.id = 33
     msg.answer = AsyncMock()

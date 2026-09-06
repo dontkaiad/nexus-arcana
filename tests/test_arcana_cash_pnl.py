@@ -109,7 +109,7 @@ def test_pay_salary_creates_finance_with_nexus_bot_and_salary_category(client):
     with patch("miniapp.backend.routes.arcana_finance.compute_pnl",
                AsyncMock(return_value=fake_pnl)), \
          patch.object(arcana_finance._fin_repo, "add", fa), \
-         patch("miniapp.backend.routes.arcana_finance.get_user_notion_id",
+         patch("miniapp.backend.routes.arcana_finance.get_user_id",
                AsyncMock(return_value=FAKE_NOTION_USER)):
         r = client.post("/api/arcana/finance/pay_salary", json={"amount": 20000})
     assert r.status_code == 200, r.text
@@ -136,7 +136,7 @@ def test_pay_salary_warns_when_cash_too_low(client):
     with patch("miniapp.backend.routes.arcana_finance.compute_pnl",
                AsyncMock(return_value=fake_pnl)), \
          patch.object(arcana_finance._fin_repo, "add", fa), \
-         patch("miniapp.backend.routes.arcana_finance.get_user_notion_id",
+         patch("miniapp.backend.routes.arcana_finance.get_user_id",
                AsyncMock(return_value=FAKE_NOTION_USER)):
         r = client.post("/api/arcana/finance/pay_salary", json={"amount": 20000})
     body = r.json()

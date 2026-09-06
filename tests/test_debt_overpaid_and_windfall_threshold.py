@@ -50,7 +50,7 @@ async def test_partial_debt_payment_returns_overpaid_tuple():
     with eng.begin() as conn:
         conn.execute(sa.text(
             "CREATE TABLE debts (id INTEGER PRIMARY KEY AUTOINCREMENT, "
-            "user_notion_id TEXT NOT NULL DEFAULT '', name TEXT NOT NULL, "
+            "user_id TEXT NOT NULL DEFAULT '', name TEXT NOT NULL, "
             "kind TEXT NOT NULL DEFAULT 'i_owe', amount REAL NOT NULL, "
             "deadline TEXT, strategy TEXT, monthly_payment REAL NOT NULL DEFAULT 0, "
             "is_active INTEGER NOT NULL DEFAULT 1, "
@@ -78,7 +78,7 @@ async def test_debt_command_overpaid_shows_buttons():
     msg.text = "отдала Ане 7к"
     with patch.object(drmod._repo, "reduce_amount",
                       AsyncMock(return_value=(0.0, True, 2000.0))):
-        await finance.handle_debt_command(msg, user_notion_id="u-1")
+        await finance.handle_debt_command(msg, user_id="u-1")
 
     calls = [c.args[0] for c in msg.answer.call_args_list]
     assert any("закрыт" in t for t in calls)
@@ -96,7 +96,7 @@ async def test_they_owe_overpaid_shows_buttons():
     msg.text = "Маша вернула 7к"
     with patch.object(drmod._repo, "reduce_amount",
                       AsyncMock(return_value=(0.0, True, 2000.0))):
-        await finance.handle_they_owe_command(msg, user_notion_id="u-1")
+        await finance.handle_they_owe_command(msg, user_id="u-1")
 
     calls = [c.args[0] for c in msg.answer.call_args_list]
     assert any("полностью" in t for t in calls)
@@ -113,7 +113,7 @@ async def test_debt_command_no_overpaid_no_extra_message():
     msg.text = "отдала Ане 5к"
     with patch.object(drmod._repo, "reduce_amount",
                       AsyncMock(return_value=(0.0, True, 0.0))):
-        await finance.handle_debt_command(msg, user_notion_id="u-1")
+        await finance.handle_debt_command(msg, user_id="u-1")
 
     assert msg.answer.call_count == 1
     assert "Переплата" not in msg.answer.call_args_list[0].args[0]
@@ -125,7 +125,7 @@ async def test_overpaid_cushion_button_adds_to_balance():
     call = _call(42, "overpaid_cushion")
     with patch("core.repos.pg_cushion_repo._repo.add_to_balance",
                AsyncMock(return_value=9000.0)) as m_cushion:
-        await finance.on_overpaid_cushion(call, user_notion_id="u-1")
+        await finance.on_overpaid_cushion(call, user_id="u-1")
 
     m_cushion.assert_awaited_once()
     assert m_cushion.call_args.args[0] == "u-1"
@@ -196,7 +196,7 @@ async def test_below_threshold_still_auto_distributes_regression():
     with _apply(_threshold_patches(_BUDGET_NORMAL_NO_DEBT)), \
          patch("core.repos.pg_cushion_repo._repo.add_to_balance",
                AsyncMock(return_value=30000)) as m_cushion:
-        msg = await finance._distribute_windfall_income(30000, uid=1, user_notion_id="u-1")
+        msg = await finance._distribute_windfall_income(30000, uid=1, user_id="u-1")
 
     assert "распределён" in msg
     assert "Подушка +30,000₽" in msg
@@ -210,7 +210,7 @@ async def test_above_threshold_returns_empty_no_auto_distribution():
     with _apply(_threshold_patches(_BUDGET_NORMAL_WITH_DEBTS)), \
          patch("core.repos.pg_cushion_repo._repo.add_to_balance", AsyncMock()) as m_cushion, \
          patch.object(finance, "_partial_debt_payment", AsyncMock()) as m_debt:
-        msg = await finance._distribute_windfall_income(2_500_000, uid=1, user_notion_id="u-1")
+        msg = await finance._distribute_windfall_income(2_500_000, uid=1, user_id="u-1")
 
     assert msg == ""
     m_cushion.assert_not_called()
@@ -221,7 +221,7 @@ async def test_above_threshold_returns_empty_no_auto_distribution():
 async def test_manual_prompt_shows_preview_and_buttons():
     msg = _msg()
     with _apply(_threshold_patches(_BUDGET_NORMAL_WITH_DEBTS)):
-        await finance._send_windfall_manual_prompt(msg, 2_500_000, uid=1, user_notion_id="u-1")
+        await finance._send_windfall_manual_prompt(msg, 2_500_000, uid=1, user_id="u-1")
 
     text, kwargs = msg.answer.call_args.args[0], msg.answer.call_args.kwargs
     assert "2,500,000₽" in text
@@ -239,7 +239,7 @@ async def test_manual_prompt_shows_preview_and_buttons():
 @pytest.mark.asyncio
 async def test_windfall_all_cushion_button_moves_whole_amount():
     finance._pending_windfall_manual[42] = {
-        "amount": 2_500_000, "plan": {"debts": []}, "user_notion_id": "u-1",
+        "amount": 2_500_000, "plan": {"debts": []}, "user_id": "u-1",
     }
     call = _call(42, "windfall_all_cushion")
     with patch("core.repos.pg_cushion_repo._repo.add_to_balance",
@@ -263,14 +263,14 @@ async def test_windfall_close_debts_button_closes_all_remainder_to_cushion():
         {"name": "Банк", "amount": 30000},
     ]
     finance._pending_windfall_manual[42] = {
-        "amount": 2_500_000, "plan": {"debts": debts}, "user_notion_id": "u-1",
+        "amount": 2_500_000, "plan": {"debts": debts}, "user_id": "u-1",
     }
     call = _call(42, "windfall_close_debts")
 
     debt_calls = []
 
-    async def fake_partial(name, payment, user_notion_id):
-        debt_calls.append((name, payment, user_notion_id))
+    async def fake_partial(name, payment, user_id):
+        debt_calls.append((name, payment, user_id))
         return (0, 0.0)
 
     with patch.object(finance, "_partial_debt_payment", AsyncMock(side_effect=fake_partial)), \
@@ -291,7 +291,7 @@ async def test_windfall_close_debts_button_closes_all_remainder_to_cushion():
 @pytest.mark.asyncio
 async def test_windfall_split_button_asks_clarifying_question_keeps_pending():
     finance._pending_windfall_manual[42] = {
-        "amount": 2_500_000, "plan": {"debts": []}, "user_notion_id": "u-1",
+        "amount": 2_500_000, "plan": {"debts": []}, "user_id": "u-1",
     }
     call = _call(42, "windfall_split")
     await finance.on_windfall_split(call)
@@ -309,7 +309,7 @@ async def test_windfall_asis_button_applies_computed_plan():
         "amount": 60000,
         "plan": {"period_start": "2026-09-01", "is_tight": False,
                  "to_impulse": 0.0, "remainder": 60000, "debt_name": "", "debts": []},
-        "user_notion_id": "u-1",
+        "user_id": "u-1",
     }
     call = _call(42, "windfall_asis")
     with patch("core.repos.pg_cushion_repo._repo.add_to_balance",

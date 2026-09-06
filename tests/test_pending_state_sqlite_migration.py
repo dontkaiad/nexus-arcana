@@ -39,7 +39,7 @@ class TestPendingGrimoireSearch:
         assert await pop_pending_search(999991) is None
 
     @pytest.mark.asyncio
-    async def test_empty_user_notion_id_is_not_treated_as_missing(self):
+    async def test_empty_user_id_is_not_treated_as_missing(self):
         """Empty string is a valid stored value (no linked Notion user) — must
         not be conflated with 'no pending state' (that's why pop returns
         Optional[str] with None sentinel, not a truthiness check)."""

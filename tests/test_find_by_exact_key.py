@@ -30,7 +30,7 @@ def _make_engine():
             "related_to TEXT NOT NULL DEFAULT '', "
             "is_current INTEGER NOT NULL DEFAULT 1, "
             "is_archived INTEGER NOT NULL DEFAULT 0, "
-            "user_notion_id TEXT NOT NULL DEFAULT '', "
+            "user_id TEXT NOT NULL DEFAULT '', "
             "created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, "
             "updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)"
         ))

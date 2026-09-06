@@ -254,10 +254,10 @@ async def find_task_by_name(
     try:
         if title_prop == "Работа":
             from arcana.repos.pg_works_repo import PgWorksRepo
-            items = await PgWorksRepo().find_by_title(query, user_notion_id=user_page_id)
+            items = await PgWorksRepo().find_by_title(query, user_id=user_page_id)
         else:
             from nexus.repos.pg_tasks_repo import PgTasksRepo
-            items = await PgTasksRepo().find_by_title(query, user_notion_id=user_page_id)
+            items = await PgTasksRepo().find_by_title(query, user_id=user_page_id)
         return [{"id": it.id, "name": it.title} for it in items]
     except Exception as e:
         logger.warning("find_task_by_name(%r, title_prop=%r): %s", query, title_prop, e)
@@ -324,7 +324,7 @@ async def add_items(
                     stage=int(item["stage"]) if item.get("stage") else None,
                     task_id=item.get("task_rel") or "",
                     works_id=item.get("work_rel") or "",
-                    user_notion_id=user_page_id or "",
+                    user_id=user_page_id or "",
                 )
             else:
                 new_item = await _arcana_repo.add_item(
@@ -338,7 +338,7 @@ async def add_items(
                     remind_days=int(remind_days) if remind_days else None,
                     expires_at=str(expiry_val)[:10] if expiry_val else None,
                     works_id=item.get("work_rel") or "",
-                    user_notion_id=user_page_id or "",
+                    user_id=user_page_id or "",
                 )
 
             if new_item:
@@ -366,7 +366,7 @@ async def get_list(
         items = await _nexus_repo.get_list(list_type, status, user_page_id)
         return [_item_to_dict(it) for it in items]
     else:
-        items = await _arcana_repo.get_list(status=status, user_notion_id=user_page_id)
+        items = await _arcana_repo.get_list(status=status, user_id=user_page_id)
         return [_inv_to_dict(it) for it in items]
 
 
@@ -398,7 +398,7 @@ async def check_items(
                 query=name,
                 list_type="🛒 Покупки",
                 status="Not started",
-                user_notion_id=user_page_id,
+                user_id=user_page_id,
             )
             if results:
                 found = _item_to_dict(results[0])
@@ -407,7 +407,7 @@ async def check_items(
             results = await _arcana_repo.search(
                 query=name,
                 status="Not started",
-                user_notion_id=user_page_id,
+                user_id=user_page_id,
             )
             if results:
                 found = _inv_to_dict(results[0])
@@ -440,7 +440,7 @@ async def check_items(
                     source="💳 Карта",
                     description=found["name"],
                     bot_label=bot_name,
-                    user_notion_id=user_page_id,
+                    user_id=user_page_id,
                 )
                 finance_results.append({"page_id": fin_id, "amount": price, "category": finance_cat})
         else:
@@ -454,7 +454,7 @@ async def check_items(
                     source="💳 Карта",
                     description=name or "покупка",
                     bot_label=bot_name,
-                    user_notion_id=user_page_id,
+                    user_id=user_page_id,
                 )
                 finance_results.append({"page_id": fin_id, "amount": price, "category": finance_cat})
             checked.append({"id": None, "name": name, "price": price, "category": category, "not_found": True})
@@ -496,7 +496,7 @@ async def check_items_bulk(
                     await _nexus_repo.update_status(str(it.id), "Done")
                     checked.append({"id": str(it.id), "name": it.name})
         else:
-            all_items = await _arcana_repo.get_list(status="Not started", user_notion_id=user_page_id)
+            all_items = await _arcana_repo.get_list(status="Not started", user_id=user_page_id)
             for it in all_items:
                 page_cat = it.category.split(" ", 1)[-1].lower() if it.category else ""
                 if page_cat and (page_cat in raw_cat.lower() or raw_cat.lower() in page_cat):
@@ -511,7 +511,7 @@ async def check_items_bulk(
             source="💳 Карта",
             description="покупки (%s)" % raw_cat,
             bot_label=bot_name,
-            user_notion_id=user_page_id,
+            user_id=user_page_id,
         )
         finance_results.append({"page_id": fin_id, "amount": amount, "category": finance_cat})
 
@@ -526,7 +526,7 @@ async def checklist_toggle(
     """Чек пункта чеклиста. После чека — проверить автозавершение группы."""
     if bot_name == "☀️ Nexus":
         results = await _nexus_repo.search(
-            item_name, list_type="📋 Чеклист", status="Not started", user_notion_id=user_page_id
+            item_name, list_type="📋 Чеклист", status="Not started", user_id=user_page_id
         )
         if not results:
             return {"error": "not_found", "name": item_name}
@@ -540,7 +540,7 @@ async def checklist_toggle(
         return {"checked": it.name, "group": group, "group_complete": group_complete}
     else:
         results = await _arcana_repo.search(
-            item_name, status="Not started", user_notion_id=user_page_id
+            item_name, status="Not started", user_id=user_page_id
         )
         if not results:
             return {"error": "not_found", "name": item_name}
@@ -613,7 +613,7 @@ async def buy_mark_done_by_id(page_id: str, price: float, bot_name: str, user_pa
             source="💳 Карта",
             description=it.name,
             bot_label=bot_name,
-            user_notion_id=user_page_id,
+            user_id=user_page_id,
         )
         finance_result = {"page_id": fin_id, "amount": price, "category": finance_cat}
 
@@ -657,7 +657,7 @@ async def find_matching_items(
     if bot_name == "☀️ Nexus":
         all_items = await _nexus_repo.get_list("🛒 Покупки", "Not started", user_page_id, page_size=100)
     else:
-        all_items = await _arcana_repo.get_list(status="Not started", user_notion_id=user_page_id)
+        all_items = await _arcana_repo.get_list(status="Not started", user_id=user_page_id)
 
     desc_lower = description.lower().strip()
     matches = []
@@ -678,11 +678,11 @@ async def inventory_search(
     """Поиск в инвентаре."""
     if bot_name == "☀️ Nexus":
         items = await _nexus_repo.search(
-            query, list_type="📦 Инвентарь", user_notion_id=user_page_id, page_size=20
+            query, list_type="📦 Инвентарь", user_id=user_page_id, page_size=20
         )
         return [_item_to_dict(it) for it in items]
     else:
-        items = await _arcana_repo.search(query, user_notion_id=user_page_id, page_size=20)
+        items = await _arcana_repo.search(query, user_id=user_page_id, page_size=20)
         return [_inv_to_dict(it) for it in items]
 
 
@@ -695,7 +695,7 @@ async def inventory_update(
     """Обновить количество. Если 0 → Archived, предложить в покупки."""
     if bot_name == "☀️ Nexus":
         results = await _nexus_repo.search(
-            item_name, list_type="📦 Инвентарь", user_notion_id=user_page_id, page_size=5
+            item_name, list_type="📦 Инвентарь", user_id=user_page_id, page_size=5
         )
         if not results:
             return {"error": "not_found", "name": item_name}
@@ -706,7 +706,7 @@ async def inventory_update(
         else:
             await _nexus_repo.update(iid, quantity=float(quantity))
     else:
-        results = await _arcana_repo.search(item_name, user_notion_id=user_page_id, page_size=5)
+        results = await _arcana_repo.search(item_name, user_id=user_page_id, page_size=5)
         if not results:
             return {"error": "not_found", "name": item_name}
         it = results[0]
@@ -739,7 +739,7 @@ async def clone_recurring() -> int:
                 priority=_notion_priority(it.priority),
                 group_name=it.group_name,
                 is_recurring=True,
-                user_notion_id=it.user_notion_id,
+                user_id=it.user_id,
             )
             if new:
                 await _nexus_repo.update_status(str(it.id), "Archived")
@@ -757,7 +757,7 @@ async def clone_recurring() -> int:
                 category=it.category,
                 group_name=it.group_name,
                 is_recurring=True,
-                user_notion_id=it.user_notion_id,
+                user_id=it.user_id,
             )
             if new:
                 await _arcana_repo.update_status(str(it.id), "Archived")
@@ -770,7 +770,7 @@ async def clone_recurring() -> int:
 
 
 async def get_list_summary(
-    user_notion_id: str,
+    user_id: str,
     bot_name: str,
     type_: Optional[str] = None,
     group: Optional[str] = None,
@@ -778,10 +778,10 @@ async def get_list_summary(
 ) -> dict:
     """Агрегации по 🗒️ Списки."""
     if bot_name == "☀️ Nexus":
-        items_raw = await _nexus_repo.get_summary_items(user_notion_id, type_, group, category)
+        items_raw = await _nexus_repo.get_summary_items(user_id, type_, group, category)
         items = [_item_to_dict(it) for it in items_raw]
     else:
-        items_raw = await _arcana_repo.get_list(category=category, user_notion_id=user_notion_id)
+        items_raw = await _arcana_repo.get_list(category=category, user_id=user_id)
         items = [_inv_to_dict(it) for it in items_raw]
         if group:
             g_target = group.strip().lower()

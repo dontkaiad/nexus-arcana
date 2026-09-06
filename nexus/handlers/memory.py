@@ -42,7 +42,7 @@ CAT_MAP = {
 async def handle_memory_list(
     message: Message,
     category_filter: str = "",
-    user_notion_id: str = "",
+    user_id: str = "",
     exclude_adhd: bool = False,
     exclude_budget: bool = False,
 ) -> None:
@@ -127,7 +127,7 @@ _ADHD_SUMMARY_SYSTEM = """Пишешь о человеке по имени Ка�
 Только текст, без заголовков."""
 
 
-async def handle_adhd_command(message: Message, user_notion_id: str = "") -> None:
+async def handle_adhd_command(message: Message, user_id: str = "") -> None:
     """/adhd — личный СДВГ-профиль с группировкой и саммари от Sonnet."""
     try:
         mems = await _mem_repo.find_by_category("🦋 СДВГ", is_current=True, page_size=100)
@@ -210,7 +210,7 @@ async def handle_adhd_command(message: Message, user_notion_id: str = "") -> Non
 
 
 
-# Pending auto-suggest: uid → {"text": ..., "user_notion_id": ...}
+# Pending auto-suggest: uid → {"text": ..., "user_id": ...}
 _pending_auto: Dict[int, dict] = {}
 
 
@@ -219,38 +219,38 @@ _pending_auto: Dict[int, dict] = {}
 async def handle_memory_save(
     message: Message,
     data: dict,
-    user_notion_id: str = "",
+    user_id: str = "",
 ) -> None:
     text = data.get("text", message.text or "")
-    await mem.save_memory(message, text, user_notion_id, BOT_LABEL)
+    await mem.save_memory(message, text, user_id, BOT_LABEL)
 
 
 async def handle_memory_search(
     message: Message,
     data: dict,
-    user_notion_id: str = "",
+    user_id: str = "",
 ) -> None:
     query = (data.get("query") or data.get("text") or "").strip()
-    await mem.search_memory(message, query, user_notion_id, del_prefix="mem_del")
+    await mem.search_memory(message, query, user_id, del_prefix="mem_del")
 
 
 async def handle_memory_deactivate(
     message: Message,
     data: dict,
-    user_notion_id: str = "",
+    user_id: str = "",
 ) -> None:
     hint = (data.get("hint") or data.get("text") or "").strip()
-    await mem.deactivate_memory(message, hint, user_notion_id)
+    await mem.deactivate_memory(message, hint, user_id)
 
 
 async def handle_memory_delete(
     message: Message,
     data: dict,
-    user_notion_id: str = "",
+    user_id: str = "",
 ) -> None:
     hint = (data.get("hint") or data.get("text") or "").strip()
     await mem.delete_memory(
-        message, hint, user_notion_id,
+        message, hint, user_id,
         del_prefix="mem_del", cancel_cb="mem_cancel",
     )
 
@@ -258,18 +258,18 @@ async def handle_memory_delete(
 async def handle_memory_auto_suggest(
     message: Message,
     text: str,
-    user_notion_id: str = "",
+    user_id: str = "",
 ) -> None:
     await mem.auto_suggest_memory(
-        message, text, user_notion_id, BOT_LABEL, _pending_auto,
+        message, text, user_id, BOT_LABEL, _pending_auto,
         yes_prefix="mem_auto_yes", no_prefix="mem_auto_no",
     )
 
 
-async def suggest_memory(message: Message, text: str, user_notion_id: str = "") -> None:
+async def suggest_memory(message: Message, text: str, user_id: str = "") -> None:
     """Удобная обёртка для вызова из других хендлеров (tasks.py и т.д.)."""
     await mem.auto_suggest_memory(
-        message, text, user_notion_id, BOT_LABEL, _pending_auto,
+        message, text, user_id, BOT_LABEL, _pending_auto,
         yes_prefix="mem_auto_yes", no_prefix="mem_auto_no",
     )
 
@@ -455,7 +455,7 @@ async def cb_mem_auto_yes(call: CallbackQuery) -> None:
     fact, category, связь, ключ = await mem._parse_fact(pending["text"])
     result = await _mem_repo.save_parsed(
         fact, category, связь, ключ, BOT_LABEL,
-        user_notion_id=pending.get("user_notion_id", ""),
+        user_id=pending.get("user_id", ""),
     )
     if result:
         cat_label = f" [{category}]" if category else ""

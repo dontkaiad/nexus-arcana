@@ -1,6 +1,6 @@
 # CLIENTS — data-model contract (👥 Клиенты)
 
-Code conforms to: 0bc132e. This spec describes the clients data model as of
+Code conforms to: 0bc132e. (+ #144: user_notion_id → user_id.) This spec describes the clients data model as of
 that commit; update it in the same PR that changes the model.
 
 > Contract, not snapshot. Describes the persistent model, the guarantees of
@@ -20,8 +20,8 @@ photos).
 One table `clients` plus two seeded lookup tables. Migrations:
 `alembic/versions/0857b6b83518_clients_slice_schema.py` (creates table +
 `client_type`/`client_status`), `d4f5e6a7b8c9_clients_pg_native.py` (drops the
-`notion_id` bridge — clients are PG-native), `e5f6a7b8c9d0_clients_add_user_notion_id.py`
-(adds `user_notion_id`). SQLAlchemy Core mirror: `arcana/repos/clients_tables.py`.
+`notion_id` bridge — clients are PG-native), `e5f6a7b8c9d0_clients_add_user_id.py`
+(adds `user_id`). SQLAlchemy Core mirror: `arcana/repos/clients_tables.py`.
 
 ### `clients`
 
@@ -37,10 +37,10 @@ One table `clients` plus two seeded lookup tables. Migrations:
 | `contact` | Text | nullable |
 | `photo_url` | Text | nullable — Cloudinary URL (avatar) |
 | `object_photos` | Text | nullable — newline list of `URL | note` |
-| `user_notion_id` | Text | nullable |
+| `user_id` | Text | nullable |
 
 Indexes (from migrations): `idx_clients_name` (name), `idx_clients_user`
-(user_notion_id). There is **no `notion_id` column** — it was dropped when the
+(user_id). There is **no `notion_id` column** — it was dropped when the
 clients slice went PG-native (`d4f5e6a7b8c9`); `client_id` is the canonical
 key everywhere.
 
@@ -65,7 +65,7 @@ sync SQLAlchemy). Notion-style type/status labels are mapped to codes via
 
 - **resolve / find** — `find(name)` matches `name ILIKE %name%`, ordered by
   `id`, limit 1 (lowest-id wins). `find_by_id(pg_id)` returns the full
-  profile. `find_self(user_notion_id)` returns the `self`-type client.
+  profile. `find_self(user_id)` returns the `self`-type client.
 - **create (with dedup guard)** — `create(name, type_code, …)` first checks
   `name ILIKE name` (case-insensitive exact) and **returns the existing id if
   found**, else inserts (default `type='paid'`, `status='active'`). This
@@ -78,7 +78,7 @@ sync SQLAlchemy). Notion-style type/status labels are mapped to codes via
 - **update profile** — `update_profile(...)` sets contact/request/notes/
   birthday/photo_url/object_photos and optionally type. `get_object_photos`
   reads the raw `object_photos` text.
-- **list** — `list_all(user_notion_id)` returns full client rows (scoped by
+- **list** — `list_all(user_id)` returns full client rows (scoped by
   user when provided).
 
 ## Invariants
@@ -128,7 +128,7 @@ Reads/writes are pure SQL.
 
 - `alembic/versions/0857b6b83518_clients_slice_schema.py` — table + lookups
 - `alembic/versions/d4f5e6a7b8c9_clients_pg_native.py` — notion_id dropped, rituals FK
-- `alembic/versions/e5f6a7b8c9d0_clients_add_user_notion_id.py` — user column
+- `alembic/versions/e5f6a7b8c9d0_clients_add_user_id.py` — user column
 - `arcana/repos/clients_tables.py` — SQLAlchemy Core mirror
 - `arcana/repos/pg_clients_repo.py` — `PgClientsRepo`, find/create dedup guard, profile
 - `arcana/repos/clients_repo.py` — seam + `Client` object

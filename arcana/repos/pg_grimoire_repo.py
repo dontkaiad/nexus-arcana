@@ -95,7 +95,7 @@ class PgGrimoireRepo:
         themes: Optional[List[str]],
         text: str,
         source: str,
-        user_notion_id: str,
+        user_id: str,
     ) -> Optional[str]:
         cat_code = _code_for(category)
         themes_str = ", ".join(themes) if themes else None
@@ -109,13 +109,13 @@ class PgGrimoireRepo:
                     verified=False,
                     text=text or None,
                     source=source or None,
-                    user_notion_id=user_notion_id or None,
+                    user_id=user_id or None,
                 ).returning(grimoire_entries.c.id)
             ).fetchone()
         return str(row[0]) if row else None
 
     def _list_by_category_sync(
-        self, category: str, user_notion_id: str
+        self, category: str, user_id: str
     ) -> List[GrimoireEntry]:
         cat_code = _code_for(category)
         if not cat_code:
@@ -124,8 +124,8 @@ class PgGrimoireRepo:
             _select_grimoire()
             .where(grimoire_category.c.code == cat_code)
         )
-        if user_notion_id:
-            stmt = stmt.where(grimoire_entries.c.user_notion_id == user_notion_id)
+        if user_id:
+            stmt = stmt.where(grimoire_entries.c.user_id == user_id)
         with get_engine().connect() as conn:
             rows = conn.execute(stmt).fetchall()
         return [_row_to_entry(r) for r in rows]
@@ -134,11 +134,11 @@ class PgGrimoireRepo:
         self,
         query: str,
         theme: Optional[str],
-        user_notion_id: str,
+        user_id: str,
     ) -> List[GrimoireEntry]:
         stmt = _select_grimoire()
-        if user_notion_id:
-            stmt = stmt.where(grimoire_entries.c.user_notion_id == user_notion_id)
+        if user_id:
+            stmt = stmt.where(grimoire_entries.c.user_id == user_id)
         if query:
             stmt = stmt.where(
                 or_(
@@ -162,53 +162,53 @@ class PgGrimoireRepo:
         themes: Optional[List[str]] = None,
         text: str = "",
         source: str = "",
-        user_notion_id: str = "",
+        user_id: str = "",
     ) -> Optional[str]:
         return await asyncio.to_thread(
-            self._create_sync, title, category, themes, text, source, user_notion_id
+            self._create_sync, title, category, themes, text, source, user_id
         )
 
     async def list_by_category(
-        self, category: str, user_notion_id: str = ""
+        self, category: str, user_id: str = ""
     ) -> List[GrimoireEntry]:
         return await asyncio.to_thread(
-            self._list_by_category_sync, category, user_notion_id
+            self._list_by_category_sync, category, user_id
         )
 
     async def search(
         self,
         query: str = "",
         theme: Optional[str] = None,
-        user_notion_id: str = "",
+        user_id: str = "",
     ) -> List[GrimoireEntry]:
         return await asyncio.to_thread(
-            self._search_sync, query, theme, user_notion_id
+            self._search_sync, query, theme, user_id
         )
 
-    def _list_all_sync(self, user_notion_id: str) -> List[GrimoireEntry]:
+    def _list_all_sync(self, user_id: str) -> List[GrimoireEntry]:
         stmt = _select_grimoire()
-        if user_notion_id:
-            stmt = stmt.where(grimoire_entries.c.user_notion_id == user_notion_id)
+        if user_id:
+            stmt = stmt.where(grimoire_entries.c.user_id == user_id)
         with get_engine().connect() as conn:
             rows = conn.execute(stmt).fetchall()
         return [_row_to_entry(r) for r in rows]
 
-    def _find_by_id_sync(self, entry_id: str, user_notion_id: str) -> Optional[GrimoireEntry]:
+    def _find_by_id_sync(self, entry_id: str, user_id: str) -> Optional[GrimoireEntry]:
         try:
             eid = int(entry_id)
         except (ValueError, TypeError):
             return None
         stmt = _select_grimoire().where(grimoire_entries.c.id == eid)
-        if user_notion_id:
-            stmt = stmt.where(grimoire_entries.c.user_notion_id == user_notion_id)
+        if user_id:
+            stmt = stmt.where(grimoire_entries.c.user_id == user_id)
         with get_engine().connect() as conn:
             row = conn.execute(stmt).fetchone()
         return _row_to_entry(row) if row else None
 
-    async def list_all(self, user_notion_id: str = "") -> List[GrimoireEntry]:
-        return await asyncio.to_thread(self._list_all_sync, user_notion_id)
+    async def list_all(self, user_id: str = "") -> List[GrimoireEntry]:
+        return await asyncio.to_thread(self._list_all_sync, user_id)
 
     async def find_by_id(
-        self, entry_id: str, user_notion_id: str = ""
+        self, entry_id: str, user_id: str = ""
     ) -> Optional[GrimoireEntry]:
-        return await asyncio.to_thread(self._find_by_id_sync, entry_id, user_notion_id)
+        return await asyncio.to_thread(self._find_by_id_sync, entry_id, user_id)

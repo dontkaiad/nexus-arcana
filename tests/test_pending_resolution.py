@@ -80,7 +80,7 @@ def _seed_pending(uid: int = 7) -> None:
         "priority": "Важно", "work_type": "🌟 Личная",
         "client_name": None, "client_id": None,
         "deadline": None, "reminder": None,
-        "msg_id": 999, "chat_id": 100, "user_notion_id": "u",
+        "msg_id": 999, "chat_id": 100, "user_id": "u",
     })
 
 

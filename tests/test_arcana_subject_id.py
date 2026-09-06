@@ -9,7 +9,7 @@
       фрагментация — «Вадим» / «Вадим — диагностика» / …), если у них
       общий subject_id — это и есть фикс #189.
 
-Все строки помечаются user_notion_id=MARK и удаляются после каждого теста.
+Все строки помечаются user_id=MARK и удаляются после каждого теста.
 """
 from __future__ import annotations
 
@@ -38,8 +38,8 @@ def repo():
 def _cleanup():
     yield
     with get_engine().begin() as conn:
-        conn.execute(delete(sessions).where(sessions.c.user_notion_id == MARK))
-        conn.execute(delete(memories).where(memories.c.user_notion_id == MARK))
+        conn.execute(delete(sessions).where(sessions.c.user_id == MARK))
+        conn.execute(delete(memories).where(memories.c.user_id == MARK))
 
 
 def _ins_session(conn, sname, *, client_id=None, subject_id=None, q="q",
@@ -48,7 +48,7 @@ def _ins_session(conn, sname, *, client_id=None, subject_id=None, q="q",
         insert(sessions).values(
             title=q, question=q, occurred_at=occurred_at,
             session_name=sname, client_id=client_id, subject_id=subject_id,
-            area=area, user_notion_id=MARK, archived=False,
+            area=area, user_id=MARK, archived=False,
         ).returning(sessions.c.id)
     ).scalar_one()
 
@@ -57,7 +57,7 @@ def _ins_memory(conn, fact="Вадим — бывший, тревожит", rela
     return conn.execute(
         insert(memories).values(
             fact_text=fact, related_to=related_to, category="👥 Люди",
-            user_notion_id=MARK,
+            user_id=MARK,
         ).returning(memories.c.id)
     ).scalar_one()
 

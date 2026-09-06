@@ -188,6 +188,6 @@ def mock_claude():
 
 
 @pytest.fixture
-def user_notion_id():
+def user_id():
     """Фейковый Notion user ID."""
     return "fake-user-notion-id"

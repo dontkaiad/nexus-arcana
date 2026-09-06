@@ -121,33 +121,33 @@ def _select_works():
 
 class PgWorksRepo:
 
-    def _list_open_sync(self, user_notion_id: str) -> List[Work]:
+    def _list_open_sync(self, user_id: str) -> List[Work]:
         stmt = (
             _select_works()
             .where(work_status.c.code != "done")
             .order_by(works.c.deadline.asc().nullslast())
         )
-        if user_notion_id:
-            stmt = stmt.where(works.c.user_notion_id == user_notion_id)
+        if user_id:
+            stmt = stmt.where(works.c.user_id == user_id)
         with get_engine().connect() as conn:
             rows = conn.execute(stmt).fetchall()
         return [_row_to_work(r) for r in rows]
 
-    def _find_by_title_sync(self, query: str, user_notion_id: str) -> List[Work]:
+    def _find_by_title_sync(self, query: str, user_id: str) -> List[Work]:
         """ILIKE-поиск открытых Работ по названию (#152: PG-эквивалент старого
         Notion title-contains для «привязать список к работе»)."""
         stmt = _select_works().where(work_status.c.code != "done")
         if query:
             stmt = stmt.where(works.c.title.ilike(f"%{query}%"))
-        if user_notion_id:
-            stmt = stmt.where(works.c.user_notion_id == user_notion_id)
+        if user_id:
+            stmt = stmt.where(works.c.user_id == user_id)
         stmt = stmt.order_by(works.c.deadline.asc().nullslast()).limit(10)
         with get_engine().connect() as conn:
             rows = conn.execute(stmt).fetchall()
         return [_row_to_work(r) for r in rows]
 
     def _find_active_for_client_sync(
-        self, client_id: str, category: str, user_notion_id: str
+        self, client_id: str, category: str, user_id: str
     ) -> Optional[Work]:
         """Первая открытая Работа клиента нужной категории (для авто-привязки
         записи #151). category — точное совпадение works.category
@@ -164,8 +164,8 @@ class PgWorksRepo:
             .order_by(works.c.deadline.asc().nullslast())
             .limit(1)
         )
-        if user_notion_id:
-            stmt = stmt.where(works.c.user_notion_id == user_notion_id)
+        if user_id:
+            stmt = stmt.where(works.c.user_id == user_id)
         with get_engine().connect() as conn:
             row = conn.execute(stmt).fetchone()
         return _row_to_work(row) if row else None
@@ -177,7 +177,7 @@ class PgWorksRepo:
         deadline: Optional[datetime],
         category: Optional[str],
         client_id: Optional[str],
-        user_notion_id: str,
+        user_id: str,
         repeat: str = "Нет",
         repeat_time: Optional[str] = None,
         day_of_week: Optional[str] = None,
@@ -202,7 +202,7 @@ class PgWorksRepo:
                     repeat_id=rep_id,
                     day_of_week_id=dow_id,
                     repeat_time=repeat_time or None,
-                    user_notion_id=user_notion_id or None,
+                    user_id=user_id or None,
                 ).returning(works.c.id)
             ).fetchone()
         return str(row[0]) if row else None
@@ -257,15 +257,15 @@ class PgWorksRepo:
             row = conn.execute(stmt).fetchone()
         return _row_to_work(row) if row else None
 
-    def _list_all_sync(self, user_notion_id: str) -> List[Work]:
+    def _list_all_sync(self, user_id: str) -> List[Work]:
         stmt = _select_works().order_by(works.c.deadline.asc().nullslast())
-        if user_notion_id:
-            stmt = stmt.where(works.c.user_notion_id == user_notion_id)
+        if user_id:
+            stmt = stmt.where(works.c.user_id == user_id)
         with get_engine().connect() as conn:
             rows = conn.execute(stmt).fetchall()
         return [_row_to_work(r) for r in rows]
 
-    def _active_with_future_reminder_sync(self, user_notion_id: str) -> List[Work]:
+    def _active_with_future_reminder_sync(self, user_id: str) -> List[Work]:
         """Работы, у которых есть будущее напоминание и статус не done/archived
         (для restore reminders на старте — паритет с Nexus tasks)."""
         stmt = (
@@ -274,8 +274,8 @@ class PgWorksRepo:
             .where(works.c.reminder.isnot(None))
             .where(works.c.reminder > text("now()"))
         )
-        if user_notion_id:
-            stmt = stmt.where(works.c.user_notion_id == user_notion_id)
+        if user_id:
+            stmt = stmt.where(works.c.user_id == user_id)
         with get_engine().connect() as conn:
             rows = conn.execute(stmt).fetchall()
         return [_row_to_work(r) for r in rows]
@@ -406,26 +406,26 @@ class PgWorksRepo:
 
     # ── Public async interface ────────────────────────────────────────────────
 
-    async def list_open(self, user_notion_id: str = "") -> List[Work]:
-        return await asyncio.to_thread(self._list_open_sync, user_notion_id)
+    async def list_open(self, user_id: str = "") -> List[Work]:
+        return await asyncio.to_thread(self._list_open_sync, user_id)
 
     async def find_by_id(self, work_id: str) -> Optional[Work]:
         return await asyncio.to_thread(self._find_by_id_sync, work_id)
 
-    async def find_by_title(self, query: str, user_notion_id: str = "") -> List[Work]:
-        return await asyncio.to_thread(self._find_by_title_sync, query, user_notion_id)
+    async def find_by_title(self, query: str, user_id: str = "") -> List[Work]:
+        return await asyncio.to_thread(self._find_by_title_sync, query, user_id)
 
-    async def list_all(self, user_notion_id: str = "") -> List[Work]:
-        return await asyncio.to_thread(self._list_all_sync, user_notion_id)
+    async def list_all(self, user_id: str = "") -> List[Work]:
+        return await asyncio.to_thread(self._list_all_sync, user_id)
 
-    async def active_with_future_reminder(self, user_notion_id: str = "") -> List[Work]:
-        return await asyncio.to_thread(self._active_with_future_reminder_sync, user_notion_id)
+    async def active_with_future_reminder(self, user_id: str = "") -> List[Work]:
+        return await asyncio.to_thread(self._active_with_future_reminder_sync, user_id)
 
     async def find_active_for_client(
-        self, client_id: str, category: str, user_notion_id: str = "",
+        self, client_id: str, category: str, user_id: str = "",
     ) -> Optional[Work]:
         return await asyncio.to_thread(
-            self._find_active_for_client_sync, client_id, category, user_notion_id
+            self._find_active_for_client_sync, client_id, category, user_id
         )
 
     async def set_status(self, work_id: str, status_code: str) -> bool:
@@ -441,14 +441,14 @@ class PgWorksRepo:
         deadline: Optional[datetime] = None,
         category: Optional[str] = None,
         client_id: Optional[str] = None,
-        user_notion_id: str = "",
+        user_id: str = "",
         repeat: str = "Нет",
         repeat_time: Optional[str] = None,
         day_of_week: Optional[str] = None,
     ) -> Optional[str]:
         return await asyncio.to_thread(
             self._create_sync,
-            title, priority, deadline, category, client_id, user_notion_id,
+            title, priority, deadline, category, client_id, user_id,
             repeat, repeat_time, day_of_week,
         )
 

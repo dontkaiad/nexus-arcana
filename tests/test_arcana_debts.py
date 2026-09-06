@@ -90,7 +90,7 @@ def _patches(clients=None, sessions=None, rituals=None, barter_items=None):
         patch("miniapp.backend.routes.arcana_debts._sessions_repo", mock_sess),
         patch("miniapp.backend.routes.arcana_debts._rituals_repo", mock_rit),
         patch("miniapp.backend.routes.arcana_debts._arcana_inv_repo", mock_inv),
-        patch("miniapp.backend.routes.arcana_debts.get_user_notion_id",
+        patch("miniapp.backend.routes.arcana_debts.get_user_id",
               AsyncMock(return_value=FAKE_NOTION)),
     ]
 

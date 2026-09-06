@@ -37,5 +37,5 @@ async def test_resolve_self_uses_type_filter():
         "arcana.repos.pg_clients_repo.PgClientsRepo.find_self",
         AsyncMock(return_value=fake_client),
     ):
-        cid = await resolve_self_client(user_notion_id="u1")
+        cid = await resolve_self_client(user_id="u1")
     assert cid == "kai-self"

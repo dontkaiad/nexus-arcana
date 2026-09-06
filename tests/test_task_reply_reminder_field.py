@@ -86,7 +86,7 @@ async def test_reply_напоминание_reschedules_reminder_job_not_deadlin
          patch("nexus.repos.tasks_repo._repo.retrieve_page", AsyncMock(return_value=task)), \
          patch("nexus.handlers.tasks._schedule_reminder", AsyncMock()) as m_rem, \
          patch("nexus.handlers.tasks._schedule_deadline_check", AsyncMock()) as m_dl:
-        handled = await handle_reply_update(reply_msg, user_notion_id="u")
+        handled = await handle_reply_update(reply_msg, user_id="u")
 
     assert handled is True
     m_rem.assert_awaited_once_with(111, "позвонить нотариусу", "2026-08-19T11:00", "pgtask-1", 3)

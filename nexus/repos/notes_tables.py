@@ -19,7 +19,7 @@ notes = Table(
     Column("id", BigInteger, primary_key=True, autoincrement=True),
     Column("title", Text, nullable=False),
     Column("date", Date),
-    Column("user_notion_id", Text, nullable=False, server_default=text("''")),
+    Column("user_id", Text, nullable=False, server_default=text("''")),
     Column("is_archived", Boolean, nullable=False, server_default=text("false")),
     Column("created_at", TIMESTAMP(timezone=True), nullable=False,
            server_default=text("now()")),

@@ -177,7 +177,7 @@ async def set_user_location(
     *,
     offset: Optional[int] = None,
     city: Optional[str] = None,
-    user_notion_id: str = "",
+    user_id: str = "",
 ) -> Optional[int]:
     """ЕДИНСТВЕННЫЙ writer локации. Пишет `tz_` и/или `city_` СИНХРОННО +
     обновляет кеш. `offset=None` → tz_ НЕ трогаем (город вне справочника —
@@ -189,13 +189,13 @@ async def set_user_location(
         # у city (#184). Ближайший подходящий существующий бакет — 🏠 Быт.
         await repo.upsert(
             fact=str(offset), key=f"tz_{tg_id}", category="🏠 Быт",
-            scope="global", source="auto", user_notion_id=user_notion_id,
+            scope="global", source="auto", user_id=user_id,
         )
         _cache_offset(tg_id, offset)  # свой процесс — обновляем кеш сразу
     if city:
         await repo.upsert(
             fact=city, key=f"city_{tg_id}", category="🛒 Предпочтения",
-            scope="nexus", source="auto", user_notion_id=user_notion_id,
+            scope="nexus", source="auto", user_id=user_id,
         )
     if offset is not None or city:
         _invalidate_weather_cache(tg_id)

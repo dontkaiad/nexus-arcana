@@ -128,7 +128,7 @@ async def parse_supplies(text: str) -> List[dict]:
 
 # ── Match against inventory ──────────────────────────────────────────────────
 
-async def _match_inventory(items: List[dict], user_notion_id: str) -> List[dict]:
+async def _match_inventory(items: List[dict], user_id: str) -> List[dict]:
     """Для каждого айтема — ищем в инвентаре, считаем превью списания."""
     out: List[dict] = []
     for it in items:
@@ -137,7 +137,7 @@ async def _match_inventory(items: List[dict], user_notion_id: str) -> List[dict]
         unit = it.get("unit") or ""
         if not name:
             continue
-        matches = await inventory_search(name, BOT_NAME, user_notion_id)
+        matches = await inventory_search(name, BOT_NAME, user_id)
         if matches:
             inv = matches[0]
             current = float(inv.get("quantity") or 0)
@@ -194,7 +194,7 @@ def _kb(uid: int) -> InlineKeyboardMarkup:
 async def propose_writeoff(
     message: Message,
     supplies_text: str,
-    user_notion_id: str = "",
+    user_id: str = "",
 ) -> None:
     """Распарсить расходники + показать сообщение с превью + сохранить pending."""
     if not supplies_text or not supplies_text.strip():
@@ -202,17 +202,17 @@ async def propose_writeoff(
     items = await parse_supplies(supplies_text)
     if not items:
         return
-    rows = await _match_inventory(items, user_notion_id)
+    rows = await _match_inventory(items, user_id)
     if not rows:
         return
     uid = message.from_user.id
-    _save(uid, {"rows": rows, "user_notion_id": user_notion_id})
+    _save(uid, {"rows": rows, "user_id": user_id})
     await message.answer(_format_preview(rows), reply_markup=_kb(uid))
 
 
 # ── Callbacks ────────────────────────────────────────────────────────────────
 
-async def _apply(rows: List[dict], user_notion_id: str) -> List[str]:
+async def _apply(rows: List[dict], user_id: str) -> List[str]:
     """Списать из инвентаря, вернуть human-сообщения о результатах."""
     notes: List[str] = []
     for r in rows:
@@ -222,7 +222,7 @@ async def _apply(rows: List[dict], user_notion_id: str) -> List[str]:
         new_qty = float(r.get("after") or 0)
         res = await inventory_update(
             r["inventory_name"], int(new_qty) if new_qty.is_integer() else new_qty,
-            BOT_NAME, user_notion_id,
+            BOT_NAME, user_id,
         )
         if res.get("error"):
             notes.append(f"{r['name']}: ошибка ({res['error']})")
@@ -234,7 +234,7 @@ async def _apply(rows: List[dict], user_notion_id: str) -> List[str]:
 
 
 @router.callback_query(F.data.startswith("wo_apply:"))
-async def cb_apply(cb: CallbackQuery, user_notion_id: str = "") -> None:
+async def cb_apply(cb: CallbackQuery, user_id: str = "") -> None:
     uid = int(cb.data.split(":", 1)[1])
     if cb.from_user.id != uid:
         return
@@ -242,7 +242,7 @@ async def cb_apply(cb: CallbackQuery, user_notion_id: str = "") -> None:
     if not pending:
         await cb.answer("Запрос устарел.")
         return
-    notes = await _apply(pending["rows"], pending.get("user_notion_id") or user_notion_id)
+    notes = await _apply(pending["rows"], pending.get("user_id") or user_id)
     _drop(uid)
     await cb.answer("Списано.")
     text = "🕯️ Списано:\n" + "\n".join(f"• {n}" for n in notes)
@@ -253,7 +253,7 @@ async def cb_apply(cb: CallbackQuery, user_notion_id: str = "") -> None:
 
 
 @router.callback_query(F.data.startswith("wo_cancel:"))
-async def cb_cancel(cb: CallbackQuery, user_notion_id: str = "") -> None:
+async def cb_cancel(cb: CallbackQuery, user_id: str = "") -> None:
     uid = int(cb.data.split(":", 1)[1])
     if cb.from_user.id != uid:
         return
@@ -266,7 +266,7 @@ async def cb_cancel(cb: CallbackQuery, user_notion_id: str = "") -> None:
 
 
 @router.callback_query(F.data.startswith("wo_edit:"))
-async def cb_edit(cb: CallbackQuery, user_notion_id: str = "") -> None:
+async def cb_edit(cb: CallbackQuery, user_id: str = "") -> None:
     uid = int(cb.data.split(":", 1)[1])
     if cb.from_user.id != uid:
         return
@@ -286,7 +286,7 @@ async def cb_edit(cb: CallbackQuery, user_notion_id: str = "") -> None:
 
 # ── Text intercept (called from base.py) ─────────────────────────────────────
 
-async def handle_pending_edit(message: Message, text: str, user_notion_id: str = "") -> bool:
+async def handle_pending_edit(message: Message, text: str, user_id: str = "") -> bool:
     """Если у юзера есть pending writeoff в режиме awaiting_edit — обновить
     список и показать новое превью. Возвращает True если перехватили."""
     uid = message.from_user.id
@@ -297,7 +297,7 @@ async def handle_pending_edit(message: Message, text: str, user_notion_id: str =
     if not items:
         await message.answer("Не понял список — попробуй ещё раз.")
         return True
-    rows = await _match_inventory(items, pending.get("user_notion_id") or user_notion_id)
+    rows = await _match_inventory(items, pending.get("user_id") or user_id)
     pending["rows"] = rows
     pending["awaiting_edit"] = False
     _save(uid, pending)

@@ -34,7 +34,7 @@ def _make_engine():
         conn.execute(sa.text(
             "CREATE TABLE debts ("
             "id INTEGER PRIMARY KEY AUTOINCREMENT, "
-            "user_notion_id TEXT NOT NULL DEFAULT '', "
+            "user_id TEXT NOT NULL DEFAULT '', "
             "name TEXT NOT NULL, "
             "kind TEXT NOT NULL DEFAULT 'i_owe', "
             "amount REAL NOT NULL, "
@@ -64,7 +64,7 @@ async def test_save_they_owe_calls_upsert():
 
     msg = _make_msg("дала Маше 5к до июня")
     with patch.object(drmod._repo, "upsert", new_callable=AsyncMock) as mock_upsert:
-        await handle_they_owe_command(msg, user_notion_id="uid1")
+        await handle_they_owe_command(msg, user_id="uid1")
 
     mock_upsert.assert_called_once()
     args, kwargs = mock_upsert.call_args
@@ -86,7 +86,7 @@ async def test_return_partial_calls_reduce_amount():
     msg = _make_msg("Маша вернула 2к")
     with patch.object(drmod._repo, "reduce_amount",
                       new_callable=AsyncMock, return_value=(3000.0, False, 0.0)) as mock_reduce:
-        await handle_they_owe_command(msg, user_notion_id="uid1")
+        await handle_they_owe_command(msg, user_id="uid1")
 
     mock_reduce.assert_called_once()
     args, _ = mock_reduce.call_args
@@ -108,7 +108,7 @@ async def test_return_full_calls_deactivate():
     msg = _make_msg("Маша вернула долг")
     with patch.object(drmod._repo, "deactivate",
                       new_callable=AsyncMock, return_value=True) as mock_deact:
-        await handle_they_owe_command(msg, user_notion_id="uid1")
+        await handle_they_owe_command(msg, user_id="uid1")
 
     mock_deact.assert_called_once_with("uid1", "they_owe", "Маша")
     msg.answer.assert_called_once()
@@ -124,17 +124,17 @@ async def test_view_they_owe_list():
     from nexus.handlers.finance import handle_they_owe_command
 
     fake = [
-        Debt(id="1", user_notion_id="uid1", name="Маша", kind="they_owe",
+        Debt(id="1", user_id="uid1", name="Маша", kind="they_owe",
              amount=5000.0, deadline="июнь", strategy="", monthly_payment=0.0,
              is_active=True, created_at="", updated_at=""),
-        Debt(id="2", user_notion_id="uid1", name="Петя", kind="they_owe",
+        Debt(id="2", user_id="uid1", name="Петя", kind="they_owe",
              amount=3000.0, deadline="", strategy="", monthly_payment=0.0,
              is_active=True, created_at="", updated_at=""),
     ]
     msg = _make_msg("мне должны")
     with patch.object(drmod._repo, "list_active",
                       new_callable=AsyncMock, return_value=fake) as mock_la:
-        await handle_they_owe_command(msg, user_notion_id="uid1")
+        await handle_they_owe_command(msg, user_id="uid1")
 
     mock_la.assert_called_once_with("uid1", kind="they_owe")
     reply = msg.answer.call_args[0][0]
@@ -213,7 +213,7 @@ async def test_guard_pronoun_name_no_db_write():
     with patch.object(drmod._repo, "reduce_amount", new_callable=AsyncMock) as mock_reduce:
         with patch.object(drmod._repo, "deactivate", new_callable=AsyncMock) as mock_deact:
             with patch.object(drmod._repo, "upsert", new_callable=AsyncMock) as mock_upsert:
-                await handle_they_owe_command(msg, user_notion_id="uid1")
+                await handle_they_owe_command(msg, user_id="uid1")
 
     mock_reduce.assert_not_called()
     mock_deact.assert_not_called()
@@ -236,7 +236,7 @@ async def test_save_they_owe_visible_in_list_active_invisible_in_budget():
 
     with patch.object(drmod, "_get_engine", return_value=eng):
         with patch.object(mrmod._repo, "find_by_key_prefixes", AsyncMock(return_value=[])):
-            await _save_they_owe("Маша", 5000, "июнь", user_notion_id="uid_cons")
+            await _save_they_owe("Маша", 5000, "июнь", user_id="uid_cons")
 
             repo = PgDebtsRepo()
             they_owe_list = await repo.list_active("uid_cons", kind="they_owe")
@@ -262,8 +262,8 @@ async def test_deactivated_they_owe_visible_in_list_closed():
 
     with patch.object(drmod, "_get_engine", return_value=eng):
         repo = PgDebtsRepo()
-        await _save_they_owe("Петя", 10000, "октябрь", user_notion_id="uid_cl")
-        await _deactivate_they_owe("Петя", user_notion_id="uid_cl")
+        await _save_they_owe("Петя", 10000, "октябрь", user_id="uid_cl")
+        await _deactivate_they_owe("Петя", user_id="uid_cl")
 
         active = await repo.list_active("uid_cl", kind="they_owe")
         closed = await repo.list_closed("uid_cl", kind="they_owe")

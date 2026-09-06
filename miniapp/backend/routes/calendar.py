@@ -11,7 +11,7 @@ from core.ru_calendar import get_month_info as _get_ru_month_info
 
 from fastapi import APIRouter, Depends, Query
 
-from core.user_manager import get_user_notion_id
+from core.user_manager import get_user_id
 from nexus.repos.pg_tasks_repo import PgTasksRepo, Task as PgTask
 
 from miniapp.backend.auth import current_user_id
@@ -41,7 +41,7 @@ def _month_bounds(month: str) -> tuple[str, str]:
     return start, end
 
 
-async def _fetch_tasks_in_month(user_notion_id: str) -> list[PgTask]:
+async def _fetch_tasks_in_month(user_id: str) -> list[PgTask]:
     """PG-native: все активные задачи юзера.
 
     Проекцию occurrences в нужный месяц делаем в Python ниже (повторяющиеся
@@ -49,7 +49,7 @@ async def _fetch_tasks_in_month(user_notion_id: str) -> list[PgTask]:
     (deadline / reminder / recurring + dedup) была обходом лимита вложенности
     фильтров Notion — в PG не нужна, `.active()` отдаёт всё разом.
     """
-    return await _tasks_repo.active(user_notion_id)
+    return await _tasks_repo.active(user_id)
 
 
 _EVERY_RE = re.compile(r"every_(\d+)d")
@@ -129,8 +129,8 @@ async def get_calendar(
     if not month:
         month = today_date.strftime("%Y-%m")
 
-    user_notion_id = (await get_user_notion_id(tg_id)) or ""
-    raw = await _fetch_tasks_in_month(user_notion_id)
+    user_id = (await get_user_id(tg_id)) or ""
+    raw = await _fetch_tasks_in_month(user_id)
 
     y, m = int(month[:4]), int(month[5:7])
     days_in_month = _calendar.monthrange(y, m)[1]

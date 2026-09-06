@@ -40,7 +40,7 @@ def should_skip_payment(client_type: Optional[str]) -> bool:
 async def find_or_create_client(
     name: str,
     *,
-    user_notion_id: str = "",
+    user_id: str = "",
     default_type: Optional[str] = None,
 ) -> tuple[Optional[str], bool]:
     """Находит клиента по имени в PG; если нет — создаёт там же.
@@ -65,12 +65,12 @@ async def find_or_create_client(
         pg_id = await repo.create(
             name=name,
             type_code=type_code,
-            user_notion_id=user_notion_id or None,
+            user_id=user_id or None,
         )
         if pg_id:
             try:
                 from core.preprocess import invalidate_whitelist
-                invalidate_whitelist(user_notion_id)
+                invalidate_whitelist(user_id)
             except Exception:
                 pass
             return str(pg_id), True
@@ -80,7 +80,7 @@ async def find_or_create_client(
         return None, False
 
 
-async def client_find(name: str, user_notion_id: str = "") -> Optional[dict]:
+async def client_find(name: str, user_id: str = "") -> Optional[dict]:
     """PG-backed поиск клиента по имени. Возвращает {'id': str, 'name': str} или None."""
     try:
         from arcana.repos.pg_clients_repo import PgClientsRepo
@@ -93,15 +93,15 @@ async def client_find(name: str, user_notion_id: str = "") -> Optional[dict]:
         return None
 
 
-async def resolve_self_client(user_notion_id: str = "") -> Optional[str]:
+async def resolve_self_client(user_id: str = "") -> Optional[str]:
     """Найти self-клиента в PG. Возвращает str(pg_id) или None."""
-    cache_key = user_notion_id or "_default_"
+    cache_key = user_id or "_default_"
     cached = _SELF_CLIENT_CACHE.get(cache_key)
     if cached:
         return cached
     from arcana.repos.pg_clients_repo import PgClientsRepo as _PGC
     try:
-        c = await _PGC().find_self(user_notion_id=user_notion_id)
+        c = await _PGC().find_self(user_id=user_id)
         if c:
             _SELF_CLIENT_CACHE[cache_key] = c.id
             return c.id
@@ -191,7 +191,7 @@ async def resolve_or_create(
     message: Message,
     name: str,
     *,
-    user_notion_id: str = "",
+    user_id: str = "",
     default_type: str = "🤝 Платный",
     announce: bool = True,
 ) -> Optional[str]:
@@ -210,7 +210,7 @@ async def resolve_or_create(
         logger.warning("invalid client name rejected: %r", name)
         return None
     cid, created = await find_or_create_client(
-        name, user_notion_id=user_notion_id, default_type=default_type,
+        name, user_id=user_id, default_type=default_type,
     )
     if not cid:
         return None

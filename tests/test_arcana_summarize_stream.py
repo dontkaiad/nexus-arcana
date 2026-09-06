@@ -85,7 +85,7 @@ def _ctx(repo, fake_stream):
     return [
         patch("miniapp.backend.routes.arcana_sessions._sessions_repo", repo),
         patch("miniapp.backend.routes.arcana_sessions._clients_repo", mock_cl),
-        patch("miniapp.backend.routes.arcana_sessions.get_user_notion_id",
+        patch("miniapp.backend.routes.arcana_sessions.get_user_id",
               AsyncMock(return_value=FAKE_NOTION)),
         patch("miniapp.backend.routes.arcana_sessions.cache_get", return_value=None),
         patch("miniapp.backend.routes.arcana_sessions.cache_set"),
@@ -147,7 +147,7 @@ def test_stream_final_text_matches_non_streaming_for_same_claude_output(client):
     repo_post.set_theme_summary = AsyncMock(return_value=True)
     ask = AsyncMock(return_value=raw_text)
     with patch("miniapp.backend.routes.arcana_sessions._sessions_repo", repo_post), \
-         patch("miniapp.backend.routes.arcana_sessions.get_user_notion_id",
+         patch("miniapp.backend.routes.arcana_sessions.get_user_id",
                AsyncMock(return_value=FAKE_NOTION)), \
          patch("miniapp.backend.routes.arcana_sessions.cache_get", return_value=None), \
          patch("miniapp.backend.routes.arcana_sessions.cache_set"), \

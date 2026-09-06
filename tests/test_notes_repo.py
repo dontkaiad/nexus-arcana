@@ -31,10 +31,10 @@ async def test_notes_repo_add_delegates_to_pg():
 
     repo = NotesRepo()
     with patch.object(repo._pg, "add", AsyncMock(return_value="42")) as m:
-        result = await repo.add("мысль", tags=["идея"], date="2026-06-01", user_notion_id="u")
+        result = await repo.add("мысль", tags=["идея"], date="2026-06-01", user_id="u")
 
     assert result == "42"
-    m.assert_awaited_once_with(text="мысль", tags=["идея"], date="2026-06-01", user_notion_id="u")
+    m.assert_awaited_once_with(text="мысль", tags=["идея"], date="2026-06-01", user_id="u")
 
 
 @pytest.mark.asyncio
@@ -45,7 +45,7 @@ async def test_notes_repo_find_for_edit_latest():
     note = _make_note("p-1", "Старая мысль", tags=["идея"])
     repo = NotesRepo()
     with patch.object(repo._pg, "find_for_edit", AsyncMock(return_value=note)) as m:
-        result = await repo.find_for_edit("последняя", user_notion_id="u")
+        result = await repo.find_for_edit("последняя", user_id="u")
 
     assert result is not None
     assert result.id == "p-1"
@@ -62,7 +62,7 @@ async def test_notes_repo_find_for_edit_by_hint():
     note = _make_note("p-2", "Про котов", tags=["коты", "мысль"])
     repo = NotesRepo()
     with patch.object(repo._pg, "find_for_edit", AsyncMock(return_value=note)):
-        result = await repo.find_for_edit("котов", user_notion_id="u")
+        result = await repo.find_for_edit("котов", user_id="u")
 
     assert result is not None
     assert result.id == "p-2"
@@ -127,7 +127,7 @@ async def test_save_note_uses_repo_add():
 
     with patch.object(nmod._repo, "add", AsyncMock(return_value="42")), \
          patch("nexus.handlers.notes.react", AsyncMock()):
-        await nmod._save_note(msg, "мысль", ["идея"], "2026-06-01", user_notion_id="u")
+        await nmod._save_note(msg, "мысль", ["идея"], "2026-06-01", user_id="u")
 
     msg.answer.assert_awaited_once()
     assert "сохранена" in msg.answer.call_args.args[0].lower()

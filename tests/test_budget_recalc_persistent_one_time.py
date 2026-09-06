@@ -64,7 +64,7 @@ async def test_build_sonnet_input_uses_persistent_one_time_when_buf_empty():
          patch.object(finance, "_get_payday", AsyncMock(return_value=1)), \
          patch.object(finance._repo, "query_records", AsyncMock(return_value=[])), \
          patch.object(finance, "_budget_get", lambda uid: {"buf": []}):
-        raw = await finance._build_sonnet_input(uid=1, user_notion_id="u")
+        raw = await finance._build_sonnet_input(uid=1, user_id="u")
 
     ctx = json.loads(raw)
     assert "разовый: виза — 3500₽" in ctx["user_messages"]
@@ -85,7 +85,7 @@ async def test_build_sonnet_input_buf_marker_takes_priority_no_duplication():
          patch.object(finance, "_get_payday", AsyncMock(return_value=1)), \
          patch.object(finance._repo, "query_records", AsyncMock(return_value=[])), \
          patch.object(finance, "_budget_get", lambda uid: {"buf": ["разовый: новая виза 5000"]}):
-        raw = await finance._build_sonnet_input(uid=1, user_notion_id="u")
+        raw = await finance._build_sonnet_input(uid=1, user_id="u")
 
     ctx = json.loads(raw)
     assert "новая виза" in ctx["user_messages"]
@@ -103,7 +103,7 @@ async def test_build_sonnet_input_no_one_time_anywhere_regression():
          patch.object(finance, "_get_payday", AsyncMock(return_value=1)), \
          patch.object(finance._repo, "query_records", AsyncMock(return_value=[])), \
          patch.object(finance, "_budget_get", lambda uid: {"buf": ["зп 100к, аренда 30к"]}):
-        raw = await finance._build_sonnet_input(uid=1, user_notion_id="u")
+        raw = await finance._build_sonnet_input(uid=1, user_id="u")
 
     ctx = json.loads(raw)
     assert ctx["user_messages"] == "зп 100к, аренда 30к"

@@ -85,7 +85,7 @@ async def test_save_parsed_creates_page():
     with patch.object(repo._pg, "add", AsyncMock(return_value="42")) as add:
         result = await repo.save_parsed(
             "маша не ест мясо", "👥 Люди", "маша", "маша_диета",
-            "☀️ Nexus", user_notion_id="user-1",
+            "☀️ Nexus", user_id="user-1",
         )
 
     assert result == "42"
@@ -254,7 +254,7 @@ async def test_cb_mem_auto_yes_uses_repo():
     import core.memory as mem
 
     uid = 55
-    hmod._pending_auto[uid] = {"text": "маша не ест мясо", "user_notion_id": "u-1"}
+    hmod._pending_auto[uid] = {"text": "маша не ест мясо", "user_id": "u-1"}
 
     call = MagicMock()
     call.answer = AsyncMock()
@@ -284,7 +284,7 @@ async def test_save_limit_to_memory_uses_repo():
     from core.repos import memory_repo as mrmod
 
     with patch.object(mrmod._repo, "save_parsed", AsyncMock(return_value="p-lim")) as sp:
-        await fmod._save_limit_to_memory("кафе", 5000, user_notion_id="u-2")
+        await fmod._save_limit_to_memory("кафе", 5000, user_id="u-2")
 
     sp.assert_awaited_once()
     kw = sp.await_args.kwargs

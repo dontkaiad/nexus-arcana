@@ -108,7 +108,7 @@ async def test_accept_creates_two_checklist_tasks_with_subtasks(tmp_budget_db, m
     created_tasks = []
     added_items = []
 
-    async def fake_find_by_title(self, query, user_notion_id=""):
+    async def fake_find_by_title(self, query, user_id=""):
         return []  # ничего не существует — обе задачи новые
 
     async def fake_create(db_id, props):
@@ -176,7 +176,7 @@ async def test_reaccept_same_period_updates_not_duplicates(tmp_budget_db):
     # Существующая задача найдётся ТОЛЬКО для точного совпадения title.
     existing_holder = {}
 
-    async def fake_find_by_title(self, query, user_notion_id=""):
+    async def fake_find_by_title(self, query, user_id=""):
         title = existing_holder.get("title")
         if title:
             return [_FakeTask("existing-42", title)]

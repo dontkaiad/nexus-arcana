@@ -56,7 +56,7 @@ def _patch_get(mock_repo):
     return [
         patch("miniapp.backend.routes.arcana_sessions._sessions_repo", mock_repo),
         patch("miniapp.backend.routes.arcana_sessions._clients_repo", mock_cl),
-        patch("miniapp.backend.routes.arcana_sessions.get_user_notion_id",
+        patch("miniapp.backend.routes.arcana_sessions.get_user_id",
               AsyncMock(return_value=FAKE_NOTION)),
         patch("miniapp.backend.routes.arcana_sessions.today_user_tz",
               AsyncMock(return_value=(datetime.date(2026, 5, 1), 3))),
@@ -122,7 +122,7 @@ def test_summarize_returns_db_summary_without_sonnet(client):
     repo.set_theme_summary = AsyncMock(return_value=True)
     ask = AsyncMock(return_value="НЕ ДОЛЖНО ВЫЗВАТЬСЯ")
     with patch("miniapp.backend.routes.arcana_sessions._sessions_repo", repo), \
-         patch("miniapp.backend.routes.arcana_sessions.get_user_notion_id",
+         patch("miniapp.backend.routes.arcana_sessions.get_user_id",
                AsyncMock(return_value=FAKE_NOTION)), \
          patch("miniapp.backend.routes.arcana_sessions.cache_get", return_value=None), \
          patch("miniapp.backend.routes.arcana_sessions.cache_set"), \
@@ -148,7 +148,7 @@ def test_summarize_persists_fresh_to_db_anchor(client):
     repo.set_theme_summary = AsyncMock(return_value=True)
     ask = AsyncMock(return_value="свежая кросс-дневная сводка темы")
     with patch("miniapp.backend.routes.arcana_sessions._sessions_repo", repo), \
-         patch("miniapp.backend.routes.arcana_sessions.get_user_notion_id",
+         patch("miniapp.backend.routes.arcana_sessions.get_user_id",
                AsyncMock(return_value=FAKE_NOTION)), \
          patch("miniapp.backend.routes.arcana_sessions.cache_get", return_value=None), \
          patch("miniapp.backend.routes.arcana_sessions.cache_set"), \

@@ -144,7 +144,7 @@ async def get_limits(mem_db: str = "") -> Dict[str, float]:
     return limits
 
 
-async def load_budget_data(user_notion_id: str = "") -> Dict[str, list]:
+async def load_budget_data(user_id: str = "") -> Dict[str, list]:
     """Все бюджетные записи Памяти (PG).
 
     Возвращает {"доходы": [...], "постоянные": [...], "цели": [...],
@@ -160,7 +160,7 @@ async def load_budget_data(user_notion_id: str = "") -> Dict[str, list]:
     try:
         mems = await _mem_repo.find_by_key_prefixes(
             ["income_", "постоянно_", "лимит_", "цель_", "разовый_"],
-            user_notion_id=user_notion_id,
+            user_id=user_id,
         )
     except Exception as e:
         logger.error("load_budget_data: %s", e)
@@ -220,7 +220,7 @@ async def load_budget_data(user_notion_id: str = "") -> Dict[str, list]:
     # Долги — читаем из таблицы debts (not Memory)
     try:
         from core.repos.pg_debts_repo import _repo as _debt_repo
-        active_debts = await _debt_repo.list_active(user_notion_id, kind="i_owe")
+        active_debts = await _debt_repo.list_active(user_id, kind="i_owe")
         for d in active_debts:
             result["долги"].append({
                 "name": d.name,
@@ -237,7 +237,7 @@ async def load_budget_data(user_notion_id: str = "") -> Dict[str, list]:
     # Подушка — отдельная сущность (таблица cushion), НЕ цель_-факт.
     try:
         from core.repos.pg_cushion_repo import _repo as _cushion_repo
-        c = await _cushion_repo.get(user_notion_id)
+        c = await _cushion_repo.get(user_id)
         if c is not None:
             result["подушка"] = {
                 "balance": c.balance,
@@ -521,7 +521,7 @@ def _period_days_remaining(payday: int, tz_offset: int = 3) -> int:
     return max(1, (period_end - today_start).days)
 
 
-async def budget_day_limit_from_plan(user_notion_id: str, tz_offset: int = 3) -> int:
+async def budget_day_limit_from_plan(user_id: str, tz_offset: int = 3) -> int:
     """«Бюджет дня» — сколько можно тратить в день на повседневное.
 
     Явно, термин-в-термин (каждый — из своего источника, НЕ через сумму лимит_*,
@@ -540,7 +540,7 @@ async def budget_day_limit_from_plan(user_notion_id: str, tz_offset: int = 3) ->
     Возвращает 0 если плана нет / нет дохода / при любой ошибке.
     """
     try:
-        budget = await load_budget_data(user_notion_id)
+        budget = await load_budget_data(user_id)
 
         income = sum(d["amount"] for d in budget["доходы"])
         if income <= 0:

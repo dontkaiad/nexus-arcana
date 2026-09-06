@@ -19,7 +19,7 @@ async def test_find_existing_returns_id_not_created():
     with patch("arcana.repos.pg_clients_repo.PgClientsRepo.find",
                AsyncMock(return_value=fake)):
         cid, created = await nc.find_or_create_client(
-            "Маша", user_notion_id="u",
+            "Маша", user_id="u",
         )
     assert cid == "c-1"
     assert created is False
@@ -34,7 +34,7 @@ async def test_find_missing_creates_with_default_paid():
          patch("arcana.repos.pg_clients_repo.PgClientsRepo.create",
                AsyncMock(return_value=99)) as create_mock:
         cid, created = await nc.find_or_create_client(
-            "Лена", user_notion_id="u",
+            "Лена", user_id="u",
         )
     assert cid == "99"
     assert created is True
@@ -51,7 +51,7 @@ async def test_create_failure_returns_none_gracefully():
          patch("arcana.repos.pg_clients_repo.PgClientsRepo.create",
                AsyncMock(side_effect=Exception("pg error"))):
         cid, created = await nc.find_or_create_client(
-            "Аня", user_notion_id="u",
+            "Аня", user_id="u",
         )
     assert cid is None
     assert created is False
@@ -78,7 +78,7 @@ async def test_resolve_or_create_announces_when_created():
     with patch.object(cr, "find_or_create_client",
                       AsyncMock(return_value=("c-new", True))), \
          patch.object(cr, "save_message_page", save_mock):
-        cid = await cr.resolve_or_create(msg, "Маша", user_notion_id="u")
+        cid = await cr.resolve_or_create(msg, "Маша", user_id="u")
     assert cid == "c-new"
     msg.answer.assert_awaited_once()
     sent = msg.answer.await_args.args[0]
@@ -96,7 +96,7 @@ async def test_resolve_or_create_silent_when_found():
     with patch.object(cr, "find_or_create_client",
                       AsyncMock(return_value=("c-old", False))), \
          patch.object(cr, "save_message_page", AsyncMock()):
-        cid = await cr.resolve_or_create(msg, "Маша", user_notion_id="u")
+        cid = await cr.resolve_or_create(msg, "Маша", user_id="u")
     assert cid == "c-old"
     msg.answer.assert_not_called()
 
@@ -169,7 +169,7 @@ async def test_session_with_unknown_client_now_creates_relation():
     with patch.object(cr, "find_or_create_client",
                       AsyncMock(return_value=("c-lena", True))), \
          patch.object(cr, "save_message_page", AsyncMock()):
-        cid = await cr.resolve_or_create(msg, "Лена", user_notion_id="u")
+        cid = await cr.resolve_or_create(msg, "Лена", user_id="u")
 
     assert cid == "c-lena", "клиент должен создаться, не оставаться сиротой"
 
@@ -205,7 +205,7 @@ async def test_resolve_returns_none_for_refusal_without_db_call():
     msg = _msg()
     foc = AsyncMock(return_value=("c-x", True))
     with patch.object(cr, "find_or_create_client", foc):
-        result = await cr.resolve_or_create(msg, "не могу извлечь имя", user_notion_id="u")
+        result = await cr.resolve_or_create(msg, "не могу извлечь имя", user_id="u")
     assert result is None
     foc.assert_not_awaited()
 
@@ -218,6 +218,6 @@ async def test_resolve_proceeds_for_valid_name():
     foc = AsyncMock(return_value=("c-olia", False))
     with patch.object(cr, "find_or_create_client", foc), \
          patch.object(cr, "save_message_page", AsyncMock()):
-        result = await cr.resolve_or_create(msg, "оля", user_notion_id="u")
+        result = await cr.resolve_or_create(msg, "оля", user_id="u")
     assert result == "c-olia"
     foc.assert_awaited_once()

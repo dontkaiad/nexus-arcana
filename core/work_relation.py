@@ -14,16 +14,16 @@ logger = logging.getLogger("core.work_relation")
 
 
 async def find_active_work_for_client(
-    client_id: str, category: str, user_notion_id: str,
+    client_id: str, category: str, user_id: str,
 ) -> Optional[str]:
     """Первая открытая Работа клиента нужной категории (PG). Возвращает work id
     или None. category: '✨ Ритуал' | '🃏 Расклад' — точное совпадение
-    works.category. fail-closed: без client_id/user_notion_id → None."""
-    if not client_id or not user_notion_id:
+    works.category. fail-closed: без client_id/user_id → None."""
+    if not client_id or not user_id:
         return None
     try:
         from arcana.repos.pg_works_repo import PgWorksRepo
-        w = await PgWorksRepo().find_active_for_client(client_id, category, user_notion_id)
+        w = await PgWorksRepo().find_active_for_client(client_id, category, user_id)
         return w.id if w else None
     except Exception as e:
         logger.warning("find_active_work_for_client failed: %s", e)

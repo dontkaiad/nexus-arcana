@@ -47,7 +47,7 @@ async def _pg_clients():
 
 
 @router.message(Command("client_photo"))
-async def cmd_client_photo(message: Message, user_notion_id: str = "") -> None:
+async def cmd_client_photo(message: Message, user_id: str = "") -> None:
     uid = message.from_user.id
     if message.reply_to_message and message.reply_to_message.from_user and message.reply_to_message.from_user.is_bot:
         mp = await get_message_page(message.chat.id, message.reply_to_message.message_id)
@@ -69,7 +69,7 @@ async def cmd_client_photo(message: Message, user_notion_id: str = "") -> None:
     )
 
 
-async def handle_pending_text(message: Message, text: str, user_notion_id: str = "") -> bool:
+async def handle_pending_text(message: Message, text: str, user_id: str = "") -> bool:
     """Возвращает True если перехватили этап «await_name»."""
     uid = message.from_user.id
     pending = await get_pending(uid)
@@ -79,7 +79,7 @@ async def handle_pending_text(message: Message, text: str, user_notion_id: str =
     if not name:
         await message.answer("Напиши имя клиента или /cancel.")
         return True
-    page_id, _ = await find_or_create_client(name, user_notion_id=user_notion_id)
+    page_id, _ = await find_or_create_client(name, user_id=user_id)
     if not page_id:
         await message.answer(f"Не получилось найти/создать клиента «{name}».")
         await drop_pending(uid)
@@ -93,7 +93,7 @@ async def handle_pending_text(message: Message, text: str, user_notion_id: str =
     return True
 
 
-async def handle_pending_photo(message: Message, user_notion_id: str = "") -> bool:
+async def handle_pending_photo(message: Message, user_id: str = "") -> bool:
     """Если есть pending await_photo — загружаем и пишем в PG."""
     uid = message.from_user.id
     pending = await get_pending(uid)
@@ -133,14 +133,14 @@ async def handle_pending_photo(message: Message, user_notion_id: str = "") -> bo
     if not pending or pending.get("step") != "await_photo" or not message.photo:
         return False
 
-    await _attach_photo(message, pending, user_notion_id=user_notion_id)
+    await _attach_photo(message, pending, user_id=user_id)
     return True
 
 
 async def _attach_photo(
     message: Message,
     pending: dict,
-    user_notion_id: str = "",
+    user_id: str = "",
     file_id: Optional[str] = None,
 ) -> None:
     uid = message.from_user.id
@@ -300,7 +300,7 @@ async def attach_photo_to_client(
 
 
 @router.callback_query(F.data.startswith("client_photo_confirm:"))
-async def cb_confirm(cb: CallbackQuery, user_notion_id: str = "") -> None:
+async def cb_confirm(cb: CallbackQuery, user_id: str = "") -> None:
     uid = int(cb.data.split(":", 1)[1])
     if cb.from_user.id != uid:
         return
@@ -309,11 +309,11 @@ async def cb_confirm(cb: CallbackQuery, user_notion_id: str = "") -> None:
         await cb.answer("Запрос устарел.")
         return
     await cb.answer("Загружаю...")
-    await _attach_photo(cb.message, pending, user_notion_id=user_notion_id, file_id=pending.get("file_id"))
+    await _attach_photo(cb.message, pending, user_id=user_id, file_id=pending.get("file_id"))
 
 
 @router.callback_query(F.data.startswith("client_photo_cancel:"))
-async def cb_cancel(cb: CallbackQuery, user_notion_id: str = "") -> None:
+async def cb_cancel(cb: CallbackQuery, user_id: str = "") -> None:
     uid = int(cb.data.split(":", 1)[1])
     if cb.from_user.id != uid:
         return

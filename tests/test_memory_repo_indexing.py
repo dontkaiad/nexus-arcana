@@ -43,7 +43,7 @@ def _make_engine():
             "related_to TEXT NOT NULL DEFAULT '', "
             "is_current INTEGER NOT NULL DEFAULT 1, "
             "is_archived INTEGER NOT NULL DEFAULT 0, "
-            "user_notion_id TEXT NOT NULL DEFAULT '', "
+            "user_id TEXT NOT NULL DEFAULT '', "
             "embedding TEXT, "  # SQLite: просто колонка, не pgvector — под NULL-reset
             "created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, "
             "updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)"
@@ -139,7 +139,7 @@ async def test_upsert_update_path_survives_missing_embedding_column():
             "category TEXT NOT NULL DEFAULT '', "
             "scope TEXT NOT NULL DEFAULT 'global', source TEXT NOT NULL DEFAULT 'manual', "
             "related_to TEXT NOT NULL DEFAULT '', is_current INTEGER NOT NULL DEFAULT 1, "
-            "is_archived INTEGER NOT NULL DEFAULT 0, user_notion_id TEXT NOT NULL DEFAULT '', "
+            "is_archived INTEGER NOT NULL DEFAULT 0, user_id TEXT NOT NULL DEFAULT '', "
             "created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, "
             "updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)"  # НЕТ embedding
         ))
@@ -180,7 +180,7 @@ async def test_upsert_finds_row_by_key_even_after_category_renamed():
     eng = _make_engine()
     with eng.begin() as conn:
         conn.execute(sa.text(
-            "INSERT INTO memories (key_name, category, fact_text, user_notion_id, is_current) "
+            "INSERT INTO memories (key_name, category, fact_text, user_id, is_current) "
             "VALUES ('tz_67686090', 'Настройки', '5', 'u1', 1)"
         ))
 
@@ -189,7 +189,7 @@ async def test_upsert_finds_row_by_key_even_after_category_renamed():
         idx.return_value = True
         repo = PgMemoryRepo()
         mem_id, was_updated = await repo.upsert(
-            "5", key="tz_67686090", category="🏠 Быт", user_notion_id="u1",
+            "5", key="tz_67686090", category="🏠 Быт", user_id="u1",
         )
         await _drain_index_tasks()
 
@@ -205,9 +205,9 @@ async def test_upsert_finds_row_by_key_even_after_category_renamed():
 
 @pytest.mark.asyncio
 async def test_upsert_does_not_cross_user_boundary():
-    """Без user_notion_id в матче совпадение key_name у ДВУХ разных юзеров
+    """Без user_id в матче совпадение key_name у ДВУХ разных юзеров
     (напр. одинаковый сгенерированный ключ лимита) перезаписало бы чужую
-    запись. user_notion_id теперь часть матча — чужая строка не трогается,
+    запись. user_id теперь часть матча — чужая строка не трогается,
     для нового юзера создаётся своя."""
     import core.repos.pg_memory_repo as pgmod
     from core.repos.pg_memory_repo import PgMemoryRepo
@@ -215,7 +215,7 @@ async def test_upsert_does_not_cross_user_boundary():
     eng = _make_engine()
     with eng.begin() as conn:
         conn.execute(sa.text(
-            "INSERT INTO memories (key_name, category, fact_text, user_notion_id, is_current) "
+            "INSERT INTO memories (key_name, category, fact_text, user_id, is_current) "
             "VALUES ('лимит_еда', '💰 Лимит', 'лимит: еда 3000', 'user-A', 1)"
         ))
 
@@ -224,14 +224,14 @@ async def test_upsert_does_not_cross_user_boundary():
         idx.return_value = True
         repo = PgMemoryRepo()
         mem_id, was_updated = await repo.upsert(
-            "лимит: еда 4000", key="лимит_еда", category="💰 Лимит", user_notion_id="user-B",
+            "лимит: еда 4000", key="лимит_еда", category="💰 Лимит", user_id="user-B",
         )
         await _drain_index_tasks()
 
     assert was_updated is False  # новая строка для user-B, не апдейт чужой
     with eng.connect() as conn:
         rows = {r[0]: r[1] for r in conn.execute(sa.text(
-            "SELECT user_notion_id, fact_text FROM memories WHERE key_name='лимит_еда'"
+            "SELECT user_id, fact_text FROM memories WHERE key_name='лимит_еда'"
         )).fetchall()}
     assert rows["user-A"] == "лимит: еда 3000"   # не тронута
     assert rows["user-B"] == "лимит: еда 4000"   # новая своя

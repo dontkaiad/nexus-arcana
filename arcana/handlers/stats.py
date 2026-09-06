@@ -130,7 +130,7 @@ def _pct(count: int, total: int) -> int:
 # ── handle_verify ─────────────────────────────────────────────────────────────
 
 async def handle_verify(
-    message: Message, text: str, user_notion_id: str = ""
+    message: Message, text: str, user_id: str = ""
 ) -> None:
     """Отметить расклад или ритуал как сбывшийся/не сбывшийся."""
     try:
@@ -209,10 +209,10 @@ async def handle_verify(
         if client_name:
             client = await _clients_repo.find(client_name)
             if client:
-                session_list = await _sessions_repo.list_all(user_notion_id=user_notion_id)
+                session_list = await _sessions_repo.list_all(user_id=user_id)
                 session_list = [s for s in session_list if s.client_id == client.id]
         if not session_list:
-            session_list = await _sessions_repo.list_all(user_notion_id=user_notion_id)
+            session_list = await _sessions_repo.list_all(user_id=user_id)
 
         if target_date:
             candidates = [s for s in session_list if _date_matches(s.date, target_date)]
@@ -265,13 +265,13 @@ async def handle_verify(
 
 # ── handle_stats ──────────────────────────────────────────────────────────────
 
-async def handle_stats(message: Message, user_notion_id: str = "") -> None:
+async def handle_stats(message: Message, user_id: str = "") -> None:
     """Статистика сбывшихся раскладов и ритуалов."""
     try:
         await message.answer("📊 Считаю статистику...")
 
-        sessions = await _sessions_repo.list_all(user_notion_id=user_notion_id)
-        rituals  = await _rituals_repo.list_all(user_notion_id=user_notion_id)
+        sessions = await _sessions_repo.list_all(user_id=user_id)
+        rituals  = await _rituals_repo.list_all(user_id=user_id)
 
         # ── Статистика сеансов (PG codes) ────────────────────────────────
         s_total = len(sessions)
@@ -374,9 +374,9 @@ async def handle_stats(message: Message, user_notion_id: str = "") -> None:
 
 # ── Утилита для cron ──────────────────────────────────────────────────────────
 
-async def get_unverified_count(user_notion_id: str, older_than_days: int = 30) -> int:
+async def get_unverified_count(user_id: str, older_than_days: int = 30) -> int:
     """Количество непроверенных раскладов старше N дней (PG)."""
-    sessions = await _sessions_repo.list_all(user_notion_id=user_notion_id)
+    sessions = await _sessions_repo.list_all(user_id=user_id)
     cutoff = date.today() - timedelta(days=older_than_days)
     count = 0
     for s in sessions:

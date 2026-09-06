@@ -27,7 +27,7 @@ async def test_handle_note_date_by_user_tz(monkeypatch, tz, expected):
 
     captured = {}
 
-    async def fake_save(message, text, tags, date, user_notion_id=""):
+    async def fake_save(message, text, tags, date, user_id=""):
         captured["date"] = date
 
     msg = MagicMock()
@@ -38,6 +38,6 @@ async def test_handle_note_date_by_user_tz(monkeypatch, tz, expected):
          patch.object(notes, "_get_user_tz", AsyncMock(return_value=tz)), \
          patch.object(notes._repo, "get_all_tags", AsyncMock(return_value=[])), \
          patch.object(notes, "ask_claude", AsyncMock(return_value='{"selected":["🧠 Мысль"],"new":[],"needs_confirm":false}')):
-        await notes.handle_note(msg, "мысль про бюджет", "db-notes", user_notion_id="u-1")
+        await notes.handle_note(msg, "мысль про бюджет", "db-notes", user_id="u-1")
 
     assert captured["date"] == expected

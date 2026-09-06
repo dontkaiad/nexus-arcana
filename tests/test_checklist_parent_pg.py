@@ -19,7 +19,7 @@ async def test_add_checklist_task_creates_in_pg():
 
     repo = ListsRepo()
     with patch("nexus.repos.tasks_repo._repo.create", AsyncMock(return_value="pg-77")) as m_create:
-        result = await repo.add_checklist_task("Покупки на дачу", user_notion_id="u-1")
+        result = await repo.add_checklist_task("Покупки на дачу", user_id="u-1")
 
     assert result == "pg-77"
     m_create.assert_awaited_once()
@@ -37,6 +37,6 @@ async def test_add_checklist_task_no_user_omits_relation():
 
     repo = ListsRepo()
     with patch("nexus.repos.tasks_repo._repo.create", AsyncMock(return_value="pg-1")) as m_create:
-        await repo.add_checklist_task("Чеклист", user_notion_id="")
+        await repo.add_checklist_task("Чеклист", user_id="")
     props = m_create.call_args.args[1]
     assert "🪪 Пользователи" not in props

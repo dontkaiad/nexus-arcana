@@ -26,7 +26,7 @@ nexus_budget = Table(
     # source: "💳 Карта" | "💵 Наличные" | etc.  GUARD: never "🔄 Бартер"
     Column("source",         Text,       nullable=False, server_default=text("''")),
     Column("date",           Date,       nullable=True),
-    Column("user_notion_id", Text,       nullable=False, server_default=text("''")),
+    Column("user_id", Text,       nullable=False, server_default=text("''")),
     Column("created_at",     TIMESTAMP(timezone=True), server_default=text("now()")),
 )
 
@@ -42,6 +42,6 @@ arcana_pnl = Table(
     # source: "💳 Карта" | "💵 Наличные" | "🔄 Бартер" | "📱 СБП" | etc.
     Column("source",         Text,       nullable=False, server_default=text("''")),
     Column("date",           Date,       nullable=True),
-    Column("user_notion_id", Text,       nullable=False, server_default=text("''")),
+    Column("user_id", Text,       nullable=False, server_default=text("''")),
     Column("created_at",     TIMESTAMP(timezone=True), server_default=text("now()")),
 )

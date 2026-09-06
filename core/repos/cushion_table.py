@@ -16,7 +16,7 @@ metadata = MetaData()
 cushion = Table(
     "cushion", metadata,
     Column("id",                   BigInteger, primary_key=True, autoincrement=True),
-    Column("user_notion_id",       Text, nullable=False, server_default=text("''")),
+    Column("user_id",       Text, nullable=False, server_default=text("''")),
     Column("balance",              Numeric, nullable=False, server_default=text("0")),
     Column("target",               Numeric, nullable=True),
     Column("planned_contribution", Numeric, nullable=False, server_default=text("0")),
@@ -30,7 +30,7 @@ cushion = Table(
 cushion_transactions = Table(
     "cushion_transactions", metadata,
     Column("id",             BigInteger, primary_key=True, autoincrement=True),
-    Column("user_notion_id", Text, nullable=False, server_default=text("''")),
+    Column("user_id", Text, nullable=False, server_default=text("''")),
     Column("amount",         Numeric, nullable=False),
     Column("source",         Text, nullable=False, server_default=text("'manual'")),
     Column("note",           Text, nullable=False, server_default=text("''")),

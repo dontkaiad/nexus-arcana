@@ -1,6 +1,6 @@
 # WORKS — data-model contract (🔮 Работы)
 
-Code conforms to: 0bc132e. This spec describes the works data model as of
+Code conforms to: 0bc132e. (+ #144: user_notion_id → user_id.) This spec describes the works data model as of
 that commit; update it in the same PR that changes the model.
 
 > Contract, not snapshot. Describes the persistent model, the guarantees of
@@ -35,7 +35,7 @@ status code). SQLAlchemy Core mirror: `arcana/repos/works_tables.py`.
 | `status_id` | SmallInteger | FK → `work_status.id` |
 | `client_id` | BigInteger | FK → `clients.id` |
 | `reminder` | TIMESTAMP(tz) | nullable |
-| `user_notion_id` | Text | owner |
+| `user_id` | Text | owner |
 | `created_at` / `updated_at` | TIMESTAMP(tz) | default `now()` |
 
 Indexes: `idx_works_status_id`, `idx_works_deadline`, `idx_works_client_id`.
@@ -60,7 +60,7 @@ Owned by the migrations (source of truth). Examples, non-exhaustive:
 
 - **create** — inserts a work; client (if any) resolved beforehand via
   `core/client_resolve.py` and passed as `client_id`.
-- **read** — `list_open(user_notion_id)`, `find_by_id`, `list_all`.
+- **read** — `list_open(user_id)`, `find_by_id`, `list_all`.
 - **status** — `set_status(id, code)`, `mark_done(id)` (status → `done`).
 - **schedule** — `set_deadline(id, …)`; `reminder` drives APScheduler jobs
   (the shared reminder flow, `core/reminder_scheduler.py`).

@@ -34,7 +34,7 @@ def _make_engine():
         conn.execute(sa.text(
             "CREATE TABLE debts ("
             "id INTEGER PRIMARY KEY AUTOINCREMENT, "
-            "user_notion_id TEXT NOT NULL DEFAULT '', "
+            "user_id TEXT NOT NULL DEFAULT '', "
             "name TEXT NOT NULL, "
             "kind TEXT NOT NULL DEFAULT 'i_owe', "
             "amount REAL NOT NULL, "
@@ -51,7 +51,7 @@ def _make_engine():
 def _count(engine, user="u1") -> int:
     with engine.connect() as conn:
         return conn.execute(
-            sa.text("SELECT COUNT(*) FROM debts WHERE user_notion_id = :u"),
+            sa.text("SELECT COUNT(*) FROM debts WHERE user_id = :u"),
             {"u": user},
         ).scalar()
 
@@ -61,7 +61,7 @@ def _get_row(engine, user="u1", name=None, kind="i_owe"):
         return conn.execute(
             sa.text(
                 "SELECT * FROM debts "
-                "WHERE user_notion_id=:u AND lower(name)=lower(:n) AND kind=:k"
+                "WHERE user_id=:u AND lower(name)=lower(:n) AND kind=:k"
             ),
             {"u": user, "n": name, "k": kind},
         ).fetchone()

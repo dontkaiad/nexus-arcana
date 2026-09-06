@@ -45,16 +45,16 @@ def _disambig_kb(slug: str) -> InlineKeyboardMarkup:
 
 
 async def ask_ritual_disambiguation(
-    message: Message, text: str, user_notion_id: str,
+    message: Message, text: str, user_id: str,
 ) -> None:
-    """Сохраняем text + user_notion_id в pending_tarot, шлём 2 кнопки."""
+    """Сохраняем text + user_id в pending_tarot, шлём 2 кнопки."""
     from arcana.pending_tarot import save_pending
     slug = _slug(text)
     await save_pending(message.from_user.id, {
         "type": "intent_resolve_pending",
         "slug": slug,
         "text": text,
-        "user_notion_id": user_notion_id,
+        "user_id": user_id,
     })
     await message.answer(
         "🤔 Это надо запланировать или уже сделала?",
@@ -70,7 +70,7 @@ async def _resume_with_handler(
     if pending.get("slug") != slug or pending.get("type") != "intent_resolve_pending":
         return
     text = pending.get("text") or ""
-    user_notion_id = pending.get("user_notion_id") or ""
+    user_id = pending.get("user_id") or ""
     await delete_pending(call.from_user.id)
     try:
         await call.message.edit_reply_markup(reply_markup=None)
@@ -79,10 +79,10 @@ async def _resume_with_handler(
 
     if handler_kind == "planned":
         from arcana.handlers.works import handle_add_work
-        await handle_add_work(call.message, text, user_notion_id)
+        await handle_add_work(call.message, text, user_id)
     elif handler_kind == "done":
         from arcana.handlers.rituals import handle_add_ritual
-        await handle_add_ritual(call.message, text, user_notion_id)
+        await handle_add_ritual(call.message, text, user_id)
 
 
 # ── Practice vs Nexus redirect ───────────────────────────────────────────────
@@ -125,7 +125,7 @@ def _practice_kb(slug: str) -> InlineKeyboardMarkup:
 
 
 async def ask_practice_or_nexus(
-    message: Message, text: str, user_notion_id: str,
+    message: Message, text: str, user_id: str,
 ) -> None:
     """Текст похож на бытовую задачу — переспросить куда записать."""
     from arcana.pending_tarot import save_pending
@@ -134,7 +134,7 @@ async def ask_practice_or_nexus(
         "type": "practice_or_nexus_pending",
         "slug": slug,
         "text": text,
-        "user_notion_id": user_notion_id,
+        "user_id": user_id,
     })
     await message.answer(
         "❓ Это про практику или общая задача?",
@@ -163,14 +163,14 @@ async def cb_intent_practice(call: CallbackQuery) -> None:
     if pending.get("slug") != slug or pending.get("type") != "practice_or_nexus_pending":
         return
     text = pending.get("text") or ""
-    user_notion_id = pending.get("user_notion_id") or ""
+    user_id = pending.get("user_id") or ""
     await delete_pending(call.from_user.id)
     try:
         await call.message.edit_reply_markup(reply_markup=None)
     except Exception:
         pass
     from arcana.handlers.works import handle_add_work
-    await handle_add_work(call.message, text, user_notion_id)
+    await handle_add_work(call.message, text, user_id)
 
 
 @router.callback_query(F.data.startswith("intent_nexus:"))
@@ -264,7 +264,7 @@ async def cb_clarify_new(call: CallbackQuery) -> None:
     call.message.text = text
     call.message.from_user = call.from_user
     from arcana.handlers.base import route_message
-    await route_message(call.message, user_notion_id="")
+    await route_message(call.message, user_id="")
 
 
 @router.callback_query(F.data.startswith("intent_planned:"))

@@ -1,6 +1,6 @@
 # FINANCE — data-model contract (💰 Финансы)
 
-Code conforms to: 0bc132e. This spec describes the finance data model as of
+Code conforms to: 0bc132e. (+ #144: user_notion_id → user_id.) This spec describes the finance data model as of
 that commit; update it in the same PR that changes the model.
 
 > Contract, not snapshot. Describes the persistent model, the guarantees of
@@ -35,7 +35,7 @@ down_revision `k1d2e3f4g5h6`). SQLAlchemy Core mirror:
 | `type_` | Text | NOT NULL, default `''` |
 | `source` | Text | NOT NULL, default `''` |
 | `date` | Date | nullable |
-| `user_notion_id` | Text | NOT NULL, default `''` |
+| `user_id` | Text | NOT NULL, default `''` |
 | `created_at` | TIMESTAMP(tz) | default `now()` |
 
 Indexes: `ix_nexus_budget_date`, `ix_nexus_budget_type_` (and the analogous
@@ -62,13 +62,13 @@ canonical entry point; `PgNexusBudgetRepo`/`PgArcanaPnlRepo` are the
 per-table implementations.
 
 - **add / create_entry** — `add(*, date, amount, category, type_, source,
-  bot_label, description, user_notion_id)` routes by `bot_label`
+  bot_label, description, user_id)` routes by `bot_label`
   (`_is_arcana`) to `arcana_pnl` or `nexus_budget` and returns the new id.
   `create_entry(db_id, …)` is a back-compat wrapper; `db_id` is ignored.
   Barter guard applies (see Invariants).
 - **read by range** — `query_records(*, date_from, date_to, type_, category,
-  page_size, user_notion_id)` unions both tables, sorts `date desc`, trims to
-  `page_size`. `month(month, user_notion_id, description_filter, type_filter)`
+  page_size, user_id)` unions both tables, sorts `date desc`, trims to
+  `page_size`. `month(month, user_id, description_filter, type_filter)`
   returns all rows for `YYYY-MM` from both tables. Per-table `query` /
   `query_month` accept `type_filter` ∈ {`expense`→`%Расход%`,
   `income`→`%Доход%`, exact}.
@@ -89,7 +89,7 @@ append-plus-edit; rows are not removed in code.
   source to `'💳 Карта'` for any non-Arcana write (logged). There is no
   barter concept in `nexus_budget`.
 - **Reads are fail-closed per user.** All per-table query helpers return `[]`
-  when `user_notion_id` is empty — finance data is never aggregated across
+  when `user_id` is empty — finance data is never aggregated across
   users (#139).
 - **`type_` is the income/expense axis** (`💰 Доход` / `💸 Расход`); the
   `expense`/`income` filters match by substring (`%Расход%` / `%Доход%`).

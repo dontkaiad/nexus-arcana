@@ -29,7 +29,7 @@ async def test_routes_to_tasks_repo_by_default():
                AsyncMock()) as m_works:
         result = await find_task_by_name("корм", "u-1")
 
-    m_tasks.assert_awaited_once_with("корм", user_notion_id="u-1")
+    m_tasks.assert_awaited_once_with("корм", user_id="u-1")
     m_works.assert_not_called()
     assert result == [{"id": "t1", "name": "купить корм"}]
 
@@ -43,7 +43,7 @@ async def test_routes_to_works_repo_for_rabota_title_prop():
                AsyncMock()) as m_tasks:
         result = await find_task_by_name("Оли", "u-1", title_prop="Работа")
 
-    m_works.assert_awaited_once_with("Оли", user_notion_id="u-1")
+    m_works.assert_awaited_once_with("Оли", user_id="u-1")
     m_tasks.assert_not_called()
     assert result == [{"id": "w1", "name": "расклад для Оли"}]
 
@@ -95,7 +95,7 @@ async def test_handle_list_subtask_single_match_sets_pending(mock_message):
          patch("nexus.repos.pg_tasks_repo.PgTasksRepo.find_by_title",
                AsyncMock(return_value=[item])), \
          patch.object(nexus_lists, "pending_set") as m_pending_set:
-        await nexus_lists.handle_list_subtask(msg, {"text": msg.text}, user_notion_id="u-1")
+        await nexus_lists.handle_list_subtask(msg, {"text": msg.text}, user_id="u-1")
 
     m_pending_set.assert_called_once()
     uid, state = m_pending_set.call_args.args

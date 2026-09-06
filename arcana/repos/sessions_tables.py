@@ -76,7 +76,7 @@ sessions = Table(
 
     Column("barter_what",      Text),
     Column("photo_url",        Text),
-    Column("user_notion_id",  Text),
+    Column("user_id",  Text),
     Column("archived",        Boolean,      server_default=text("false")),
 
     Column("created_at", TIMESTAMP(timezone=True), server_default=text("now()")),

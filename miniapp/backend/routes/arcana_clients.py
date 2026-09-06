@@ -14,7 +14,7 @@ from arcana.repos.clients_repo import ClientsRepo
 from arcana.repos.pg_clients_repo import TYPE_CODE_TO_FULL, STATUS_CODE_TO_LABEL
 from arcana.repos.pg_rituals_repo import PgRitualsRepo
 from arcana.repos.pg_sessions_repo import PgSessionsRepo
-from core.user_manager import get_user_notion_id
+from core.user_manager import get_user_id
 
 from miniapp.backend.auth import current_user_id
 
@@ -38,11 +38,11 @@ def _type_icon(type_full: str) -> str:
 
 @router.get("/arcana/clients")
 async def list_clients(tg_id: int = Depends(current_user_id)) -> dict[str, Any]:
-    user_notion_id = (await get_user_notion_id(tg_id)) or ""
+    user_id = (await get_user_id(tg_id)) or ""
 
-    clients_list = await _clients_repo.list_all(user_notion_id)
-    all_sessions = await _sessions_repo.list_all(user_notion_id)
-    all_rituals = await _rituals_repo.list_all(user_notion_id)
+    clients_list = await _clients_repo.list_all(user_id)
+    all_sessions = await _sessions_repo.list_all(user_id)
+    all_rituals = await _rituals_repo.list_all(user_id)
 
     # Aggregate stats by PG client_id (str)
     agg: dict = {}
@@ -105,14 +105,14 @@ async def client_dossier(
     client_id: str,
     tg_id: int = Depends(current_user_id),
 ) -> dict[str, Any]:
-    user_notion_id = (await get_user_notion_id(tg_id)) or ""
+    user_id = (await get_user_id(tg_id)) or ""
 
     c = await _clients_repo.find_by_id(client_id)
     if not c:
         raise HTTPException(status_code=404, detail="client not found")
 
     # Load all sessions for this user, filter by client_id (gets TripletEntry with id + amount/paid)
-    all_sessions = await _sessions_repo.list_all(user_notion_id)
+    all_sessions = await _sessions_repo.list_all(user_id)
     my_sessions = [s for s in all_sessions if s.client_id == client_id]
     my_rituals = await _rituals_repo.list_by_client(client_id)
 

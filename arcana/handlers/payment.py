@@ -77,7 +77,7 @@ def _label_for_target(target: str) -> str:
     return "Расклад" if target == "sessions" else "Ритуал"
 
 
-async def _resolve_full_id(short_id: str, target: str, user_notion_id: str) -> Optional[str]:
+async def _resolve_full_id(short_id: str, target: str, user_id: str) -> Optional[str]:
     """short_id = PG bigint string — validate and return."""
     try:
         int(short_id)
@@ -125,10 +125,10 @@ async def cb_pay_money(call: CallbackQuery) -> None:
 async def cb_pay_gift(call: CallbackQuery) -> None:
     await call.answer()
     _, target, sid = call.data.split(":", 2)
-    from core.user_manager import get_user_notion_id
+    from core.user_manager import get_user_id
     uid = call.from_user.id
-    user_notion_id = (await get_user_notion_id(uid)) or ""
-    page_id = await _resolve_full_id(sid, target, user_notion_id)
+    user_id = (await get_user_id(uid)) or ""
+    page_id = await _resolve_full_id(sid, target, user_id)
     if not page_id:
         await call.message.answer("⚠️ Запись не найдена.")
         return
@@ -179,9 +179,9 @@ async def cb_barter_done(call: CallbackQuery) -> None:
     _, target, sid = call.data.split(":", 2)
     pending = await _get_pending(call.from_user.id) or {}
     barter_what = pending.get("barter_what") or ""
-    from core.user_manager import get_user_notion_id
-    user_notion_id = (await get_user_notion_id(call.from_user.id)) or ""
-    page_id = await _resolve_full_id(sid, target, user_notion_id)
+    from core.user_manager import get_user_id
+    user_id = (await get_user_id(call.from_user.id)) or ""
+    page_id = await _resolve_full_id(sid, target, user_id)
     if not page_id:
         await call.message.answer("⚠️ Запись не найдена.")
         return
@@ -204,9 +204,9 @@ async def cb_barter_wait(call: CallbackQuery) -> None:
     _, target, sid = call.data.split(":", 2)
     pending = await _get_pending(call.from_user.id) or {}
     barter_what = pending.get("barter_what") or ""
-    from core.user_manager import get_user_notion_id
-    user_notion_id = (await get_user_notion_id(call.from_user.id)) or ""
-    page_id = await _resolve_full_id(sid, target, user_notion_id)
+    from core.user_manager import get_user_id
+    user_id = (await get_user_id(call.from_user.id)) or ""
+    page_id = await _resolve_full_id(sid, target, user_id)
     if not page_id:
         await call.message.answer("⚠️ Запись не найдена.")
         return
@@ -231,9 +231,9 @@ async def cb_barter_wait(call: CallbackQuery) -> None:
 async def cb_barter_resolve(call: CallbackQuery) -> None:
     await call.answer()
     _, target, sid = call.data.split(":", 2)
-    from core.user_manager import get_user_notion_id
-    user_notion_id = (await get_user_notion_id(call.from_user.id)) or ""
-    page_id = await _resolve_full_id(sid, target, user_notion_id)
+    from core.user_manager import get_user_id
+    user_id = (await get_user_id(call.from_user.id)) or ""
+    page_id = await _resolve_full_id(sid, target, user_id)
     if not page_id:
         return
     try:
@@ -266,7 +266,7 @@ async def cb_barter_to_money(call: CallbackQuery) -> None:
 
 
 async def handle_payment_text(
-    message: Message, text: str, pending: dict, user_notion_id: str
+    message: Message, text: str, pending: dict, user_id: str
 ) -> bool:
     """True если pending обработан и можно завершать; False если не наш."""
     ptype = pending.get("type") or ""
@@ -278,7 +278,7 @@ async def handle_payment_text(
 
     target = pending.get("target") or "sessions"
     sid = pending.get("short_id") or ""
-    page_id = await _resolve_full_id(sid, target, user_notion_id)
+    page_id = await _resolve_full_id(sid, target, user_id)
     label = _label_for_target(target)
 
     if ptype == "awaiting_payment_amount":

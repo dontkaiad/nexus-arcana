@@ -12,7 +12,7 @@ from fastapi import APIRouter, Body, Depends
 from core.claude_client import ask_claude
 from core.config import config
 from core.repos.pg_memory_repo import PgMemoryRepo
-from core.user_manager import get_user_notion_id
+from core.user_manager import get_user_id
 
 from miniapp.backend import cache as _cache
 from miniapp.backend.auth import current_user_id
@@ -345,7 +345,7 @@ def _extract_city_from_text(text: str) -> Optional[str]:
     return None
 
 
-async def _resolve_city_from_memory(tg_id: int, user_notion_id: str) -> Optional[str]:
+async def _resolve_city_from_memory(tg_id: int, user_id: str) -> Optional[str]:
     """Ищем город в Памяти (PG): exact-key override → fuzzy-скан find_recent.
 
     issue #70: сначала проверяем явные ключи city_{tg_id} / location_{tg_id}
@@ -354,7 +354,7 @@ async def _resolve_city_from_memory(tg_id: int, user_notion_id: str) -> Optional
     """
     # 1) Явный override (точный матч, не ilike)
     for key in (f"city_{tg_id}", f"location_{tg_id}"):
-        mems = await _memory_repo.find_by_exact_key(key, user_notion_id)
+        mems = await _memory_repo.find_by_exact_key(key, user_id)
         if mems:
             raw = mems[0].fact
             city = _extract_city_from_text(raw) or _normalize_city(raw)
@@ -364,7 +364,7 @@ async def _resolve_city_from_memory(tg_id: int, user_notion_id: str) -> Optional
 
     # 2) Full scan актуальных записей юзера
     memories_list = await _memory_repo.find_recent(
-        is_current=True, user_notion_id=user_notion_id, page_size=200
+        is_current=True, user_id=user_id, page_size=200
     )
 
     logger.info("resolve_city[%s]: scanning %d memory records", tg_id, len(memories_list))
@@ -405,13 +405,13 @@ async def _resolve_city_from_memory(tg_id: int, user_notion_id: str) -> Optional
 @router.get("/weather/debug")
 async def weather_debug(tg_id: int = Depends(current_user_id)) -> dict:
     """wave8.11: диагностика — показывает откуда резолвится город."""
-    user_notion_id = (await get_user_notion_id(tg_id)) or ""
-    resolved = await _resolve_city_from_memory(tg_id, user_notion_id)
-    tz_mems = await _memory_repo.find_by_exact_key(f"tz_{tg_id}", user_notion_id)
+    user_id = (await get_user_id(tg_id)) or ""
+    resolved = await _resolve_city_from_memory(tg_id, user_id)
+    tz_mems = await _memory_repo.find_by_exact_key(f"tz_{tg_id}", user_id)
     tz_raw = tz_mems[0].fact if tz_mems else ""
     return {
         "tg_id": tg_id,
-        "user_notion_id": user_notion_id,
+        "user_id": user_id,
         "resolved_city": resolved,
         "tz_memory": tz_raw,
         "fallback_city": TZ_TO_CITY.get((tz_raw or "Europe/Moscow").strip(), "Moscow"),
@@ -425,11 +425,11 @@ async def get_weather(tg_id: int = Depends(current_user_id)) -> dict:
         if cached:
             return cached
 
-        user_notion_id = (await get_user_notion_id(tg_id)) or ""
-        city = await _resolve_city_from_memory(tg_id, user_notion_id)
+        user_id = (await get_user_id(tg_id)) or ""
+        city = await _resolve_city_from_memory(tg_id, user_id)
         source = "memory"
         if not city:
-            tz_mems = await _memory_repo.find_by_exact_key(f"tz_{tg_id}", user_notion_id)
+            tz_mems = await _memory_repo.find_by_exact_key(f"tz_{tg_id}", user_id)
             tz_raw = tz_mems[0].fact if tz_mems else ""
             tz = (tz_raw or "Europe/Moscow").strip()
             city = TZ_TO_CITY.get(tz, "Moscow")
@@ -490,10 +490,10 @@ async def set_weather_city(
     city = (payload.get("city") or "").strip()
     if not city:
         return {"ok": False, "error": "city_empty"}
-    user_notion_id = (await get_user_notion_id(tg_id)) or ""
+    user_id = (await get_user_id(tg_id)) or ""
 
     offset, _matched = resolve_offset(city)
-    await set_user_location(tg_id, offset=offset, city=city, user_notion_id=user_notion_id)
+    await set_user_location(tg_id, offset=offset, city=city, user_id=user_id)
     if offset is None:
         logger.info("set_weather_city[%s]: город %r вне справочника CITY_TZ — tz не изменён", tg_id, city)
 

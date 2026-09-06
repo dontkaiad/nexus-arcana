@@ -306,7 +306,7 @@ async def apply_updates(
     page_type: str,
     db_id: Optional[str],
     updates: Dict[str, Any],
-    user_notion_id: str = "",
+    user_id: str = "",
     tz_offset: int = 3,
 ) -> Dict[str, Any]:
     """Применить reply-правки к записи через per-domain PG `set_props`.
@@ -329,7 +329,7 @@ async def apply_updates(
     if page_type == "client":
         return await _apply_client(page_id, updates)
     if page_type == "session":
-        return await _apply_session(page_id, updates, user_notion_id)
+        return await _apply_session(page_id, updates, user_id)
     if page_type == "ritual":
         return await _apply_ritual(page_id, updates)
     if page_type == "work":
@@ -498,7 +498,7 @@ async def _apply_list(page_id: str, updates: Dict[str, Any]) -> Dict[str, Any]:
     created = await lists_repo.add(
         [{"name": str(add_item_text), "category": item.category or "💳 Прочее",
           "group": item.group_name or ""}],
-        _notion_type(item.list_type), bot_name, item.user_notion_id,
+        _notion_type(item.list_type), bot_name, item.user_id,
     )
     if not created:
         return {}
@@ -506,7 +506,7 @@ async def _apply_list(page_id: str, updates: Dict[str, Any]) -> Dict[str, Any]:
 
 
 async def _apply_session(
-    page_id: str, updates: Dict[str, Any], user_notion_id: str,
+    page_id: str, updates: Dict[str, Any], user_id: str,
 ) -> Dict[str, Any]:
     """🃏 Расклады → PgSessionsRepo.set_props. client_name → find_or_create_client
     (PG) → client_id + type='client'. notes → дописать Трактовку."""
@@ -534,11 +534,11 @@ async def _apply_session(
     if cn:
         client_name = str(cn).strip()
         # fail-closed: привязка клиента требует юзера (find_or_create в его БД).
-        if client_name and user_notion_id:
+        if client_name and user_id:
             try:
                 from core.client_resolve import find_or_create_client
                 client_id, _ = await find_or_create_client(
-                    client_name, user_notion_id=user_notion_id,
+                    client_name, user_id=user_id,
                 )
             except Exception as e:
                 logger.warning("find_or_create_client in reply failed: %s", e)

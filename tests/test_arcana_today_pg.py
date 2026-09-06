@@ -61,7 +61,7 @@ async def test_load_rituals_uses_pg_list_all():
     ]
     with patch.object(at._pg_rituals_repo, "list_all", AsyncMock(return_value=rits)) as m:
         out = await at._load_rituals("u-1")
-    m.assert_awaited_once_with(user_notion_id="u-1")
+    m.assert_awaited_once_with(user_id="u-1")
     assert [p["id"] for p in out] == ["1", "2"]
     assert at._compute_accuracy([], out, "rituals")["yes"] == 1
 
@@ -74,7 +74,7 @@ async def test_verify_ritual_calls_set_result():
     with patch.object(at._pg_rituals_repo, "set_result", AsyncMock(return_value=True)) as m_set, \
          patch.object(at._pg_sessions_repo, "list_all", AsyncMock(return_value=[])), \
          patch.object(at._pg_rituals_repo, "list_all", AsyncMock(return_value=[])), \
-         patch.object(at, "get_user_notion_id", AsyncMock(return_value="u")), \
+         patch.object(at, "get_user_id", AsyncMock(return_value="u")), \
          patch.object(at, "notify_user", AsyncMock()):
         res = await at.post_arcana_accuracy_verify(body, tg_id=1)
     m_set.assert_awaited_once_with("3", "positive")   # yes → positive

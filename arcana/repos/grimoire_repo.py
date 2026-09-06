@@ -52,7 +52,7 @@ class GrimoireRepo:
         themes: Optional[List[str]] = None,
         text: str = "",
         source: str = "",
-        user_notion_id: str = "",
+        user_id: str = "",
     ) -> Optional[str]:
         return await _pg_repo().add(
             title=title,
@@ -60,34 +60,34 @@ class GrimoireRepo:
             themes=themes,
             text=text,
             source=source,
-            user_notion_id=user_notion_id,
+            user_id=user_id,
         )
 
     async def list_by_category(
-        self, category: str, user_notion_id: str = ""
+        self, category: str, user_id: str = ""
     ) -> List[GrimoireEntry]:
-        return await _pg_repo().list_by_category(category, user_notion_id)
+        return await _pg_repo().list_by_category(category, user_id)
 
     async def search(
         self,
         query: str = "",
         theme: Optional[str] = None,
-        user_notion_id: str = "",
+        user_id: str = "",
     ) -> List[GrimoireEntry]:
-        return await _pg_repo().search(query=query, theme=theme, user_notion_id=user_notion_id)
+        return await _pg_repo().search(query=query, theme=theme, user_id=user_id)
 
-    async def list_all(self, user_notion_id: str = "") -> List[GrimoireEntry]:
-        return await _pg_repo().list_all(user_notion_id)
+    async def list_all(self, user_id: str = "") -> List[GrimoireEntry]:
+        return await _pg_repo().list_all(user_id)
 
     async def find_by_id(
-        self, entry_id: str, user_notion_id: str = ""
+        self, entry_id: str, user_id: str = ""
     ) -> Optional[GrimoireEntry]:
-        return await _pg_repo().find_by_id(entry_id, user_notion_id)
+        return await _pg_repo().find_by_id(entry_id, user_id)
 
     async def rituals_list(
-        self, user_notion_id: str = ""
+        self, user_id: str = ""
     ) -> List[RitualSummary]:
-        rituals = await _pg_rituals().list_all(user_notion_id=user_notion_id)
+        rituals = await _pg_rituals().list_all(user_id=user_id)
         result = []
         for r in rituals:
             d = r.date

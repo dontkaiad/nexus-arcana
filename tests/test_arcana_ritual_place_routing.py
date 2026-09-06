@@ -46,7 +46,7 @@ async def _route(text: str, haiku_resp: str):
          patch("arcana.handlers.works.handle_add_work", AsyncMock()) as work_mock, \
          patch("arcana.handlers.rituals.handle_add_ritual", AsyncMock()) as ritual_mock, \
          patch("arcana.handlers.intent_resolve.send_nexus_redirect", AsyncMock()) as redirect_mock:
-        await base.route_message(_msg(text), user_notion_id="u")
+        await base.route_message(_msg(text), user_id="u")
     return work_mock, ritual_mock, redirect_mock
 
 

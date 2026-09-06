@@ -57,7 +57,7 @@ async def test_router_uses_haiku_model(common_patches):
     msg = _msg("сделать ритуал")
     with patch("arcana.handlers.base.ask_claude", side_effect=fake_ask), \
          patch("arcana.handlers.works.handle_add_work", AsyncMock()):
-        await base.route_message(msg, user_notion_id="u")
+        await base.route_message(msg, user_id="u")
 
     assert captured.get("model") == "claude-haiku-4-5-20251001", \
         "ROUTER должен использовать Haiku, не Sonnet (деньги Кай)"
@@ -113,7 +113,7 @@ async def test_intent_dispatch_regression(
                AsyncMock()) as search_mock, \
          patch("arcana.handlers.intent_resolve.send_nexus_redirect",
                AsyncMock()) as redirect_mock:
-        await base.route_message(msg, user_notion_id="u")
+        await base.route_message(msg, user_id="u")
 
     handlers = {
         "work":     work_mock,
@@ -154,7 +154,7 @@ async def test_ritual_done_no_past_tense_routes_to_disambiguation(common_patches
                disambig_mock), \
          patch("arcana.handlers.works.handle_add_work", work_mock), \
          patch("arcana.handlers.rituals.handle_add_ritual", ritual_mock):
-        await base.route_message(msg, user_notion_id="u")
+        await base.route_message(msg, user_id="u")
 
     disambig_mock.assert_awaited_once()
     work_mock.assert_not_awaited()
@@ -174,7 +174,7 @@ async def test_ritual_done_with_past_tense_still_routes_to_ritual(common_patches
                AsyncMock(return_value="ritual_done")), \
          patch("arcana.handlers.rituals.handle_add_ritual", ritual_mock), \
          patch("arcana.handlers.works.handle_add_work", work_mock):
-        await base.route_message(msg, user_notion_id="u")
+        await base.route_message(msg, user_id="u")
 
     ritual_mock.assert_awaited_once()
     work_mock.assert_not_awaited()
@@ -193,7 +193,7 @@ async def test_ritual_planned_still_routes_to_works(common_patches):
                AsyncMock(return_value="ritual_planned")), \
          patch("arcana.handlers.works.handle_add_work", work_mock), \
          patch("arcana.handlers.rituals.handle_add_ritual", ritual_mock):
-        await base.route_message(msg, user_notion_id="u")
+        await base.route_message(msg, user_id="u")
 
     work_mock.assert_awaited_once()
     ritual_mock.assert_not_awaited()

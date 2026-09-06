@@ -134,7 +134,7 @@ def _parse_debt_from_fact(fact: str) -> Tuple[float, Optional[str]]:
 
 
 async def _save_debt_from_memory(
-    message: Message, fact: str, связь: str, ключ: str, user_notion_id: str,
+    message: Message, fact: str, связь: str, ключ: str, user_id: str,
 ) -> None:
     """Долг из save_memory пишется в таблицу debts (kind='i_owe'), НЕ в Память —
     иначе load_budget_data (читает долги только из pg_debts_repo) его не увидит.
@@ -145,7 +145,7 @@ async def _save_debt_from_memory(
     amount, deadline = _parse_debt_from_fact(fact)
     try:
         await _debt_repo.upsert(
-            user_notion_id, name, "i_owe", amount=amount, deadline=deadline,
+            user_id, name, "i_owe", amount=amount, deadline=deadline,
         )
         logger.info(
             "memory save: debt → debts table name=%r amount=%s deadline=%s",
@@ -219,7 +219,7 @@ async def _semantic_search_memory(
     query: str,
     existing: List[Memory],
     scope: str = "",
-    user_notion_id: str = "",
+    user_id: str = "",
     cap: int = 10,
 ) -> List[Memory]:
     """Semantic-фоллбэк (#184) + Haiku-реранк (ADR-0021, #185): дёргаем
@@ -236,7 +236,7 @@ async def _semantic_search_memory(
         return existing
     try:
         candidates = await asyncio.to_thread(
-            _memory_rag.search_memory_semantic, query, scope, user_notion_id,
+            _memory_rag.search_memory_semantic, query, scope, user_id,
             _memory_rag.DEFAULT_TOP_K,
         )
     except Exception as e:
@@ -327,7 +327,7 @@ _ALIAS_DEPTH_LIMIT = 3
 
 async def _resolve_alias(
     связь: str,
-    user_notion_id: str = "",
+    user_id: str = "",
     _depth: int = 0,
     _seen: Optional[Set[str]] = None,
 ) -> str:
@@ -376,7 +376,7 @@ async def _resolve_alias(
                         связь, primary, match.group(0),
                     )
                     return await _resolve_alias(
-                        primary, user_notion_id,
+                        primary, user_id,
                         _depth=_depth + 1, _seen=seen,
                     )
 
@@ -419,7 +419,7 @@ async def _get_adhd_tip(fact: str) -> str:
 async def save_memory(
     message: Message,
     text: str,
-    user_notion_id: str,
+    user_id: str,
     bot_label: str,
 ) -> None:
     """Распарсить текст через Haiku и сохранить факт в PG."""
@@ -430,12 +430,12 @@ async def save_memory(
     scope = bot_to_scope(bot_label)
 
     if ключ.startswith("долг_"):
-        await _save_debt_from_memory(message, fact, связь, ключ, user_notion_id)
+        await _save_debt_from_memory(message, fact, связь, ключ, user_id)
         return
 
     if category != "💰 Лимит" and связь:
         original_link = связь
-        canonical_link = await _resolve_alias(связь, user_notion_id)
+        canonical_link = await _resolve_alias(связь, user_id)
         if canonical_link and canonical_link != original_link:
             связь = canonical_link
             old_key = ключ
@@ -454,12 +454,12 @@ async def save_memory(
         was_updated = False
         if category == "💰 Лимит" and ключ:
             mid, was_updated = await _mem_repo.upsert(
-                fact, ключ, category, scope, связь, "manual", user_notion_id
+                fact, ключ, category, scope, связь, "manual", user_id
             )
             result = mid
         else:
             result = await _mem_repo.add(
-                fact, ключ, category, scope, связь, "manual", user_notion_id
+                fact, ключ, category, scope, связь, "manual", user_id
             )
 
         if result:
@@ -533,7 +533,7 @@ async def _search_finance(query: str, page_size: int = 5) -> list:
 async def search_memory(
     message: Message,
     query: str,
-    user_notion_id: str,
+    user_id: str,
     del_prefix: str = "mem_del",
 ) -> None:
     """Поиск по памяти + финансам параллельно."""
@@ -649,7 +649,7 @@ async def search_memory(
 async def deactivate_memory(
     message: Message,
     hint: str,
-    user_notion_id: str,
+    user_id: str,
 ) -> None:
     """Пометить запись памяти как неактуальную."""
     uid = message.from_user.id
@@ -749,7 +749,7 @@ def _build_delete_keyboard(
 async def delete_memory(
     message: Message,
     hint: str,
-    user_notion_id: str,
+    user_id: str,
     del_prefix: str = "mem_del",
     cancel_cb: str = "mem_cancel",
 ) -> None:
@@ -822,7 +822,7 @@ async def recall_from_memory(keyword: str) -> Optional[str]:
 
 
 async def find_memories_by_subject_name(
-    name: str, user_notion_id: str = ""
+    name: str, user_id: str = ""
 ) -> List[Memory]:
     """Публичная обёртка над _find_pages_by_hint для сопоставления субъекта
     расклада с существующей памятью (#189, arcana session subject_id).
@@ -841,8 +841,8 @@ async def find_memories_by_subject_name(
     except Exception as e:
         logger.warning("find_memories_by_subject_name: lookup failed for %r: %s", name, e)
         return []
-    if user_notion_id:
-        mems = [m for m in mems if not m.user_notion_id or m.user_notion_id == user_notion_id]
+    if user_id:
+        mems = [m for m in mems if not m.user_id or m.user_id == user_id]
     mems = [m for m in mems if m.is_current and not m.is_archived]
     name_lower = name.strip().lower()
     exact = [m for m in mems if (m.related_to or "").strip().lower() == name_lower]
@@ -862,7 +862,7 @@ def extract_context_keywords(data: dict, client_name: Optional[str] = None) -> L
 
 
 async def get_memories_for_context(
-    user_notion_id: str,
+    user_id: str,
     keywords: List[str],
     bot_label: str = "🌒 Arcana",
     max_results: int = 10,
@@ -908,7 +908,7 @@ async def get_memories_for_context(
 async def auto_suggest_memory(
     message: Message,
     text: str,
-    user_notion_id: str,
+    user_id: str,
     bot_label: str,
     pending_store: Dict[int, dict],
     yes_prefix: str = "mem_auto_yes",
@@ -918,7 +918,7 @@ async def auto_suggest_memory(
     if not text or not text.strip() or text.strip() in ("()", "(  )"):
         return
     uid = message.from_user.id
-    pending_store[uid] = {"text": text, "user_notion_id": user_notion_id}
+    pending_store[uid] = {"text": text, "user_id": user_id}
     kb = InlineKeyboardMarkup(inline_keyboard=[[
         InlineKeyboardButton(text="🧠 Да, запомнить", callback_data=f"{yes_prefix}:{uid}"),
         InlineKeyboardButton(text="✗ Нет",            callback_data=f"{no_prefix}:{uid}"),

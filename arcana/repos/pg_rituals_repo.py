@@ -281,7 +281,7 @@ class PgRitualsRepo:
         amount: float,
         paid: float,
         client_id: Optional[str],
-        user_notion_id: str,
+        user_id: str,
         goal: Optional[str],
         place: Optional[str],
         notes: Optional[str],
@@ -352,7 +352,7 @@ class PgRitualsRepo:
     def _list_by_client_sync(
         self,
         client_id: str,
-        user_notion_id: str,
+        user_id: str,
     ) -> List[Ritual]:
         cid_int = _client_id_int(client_id)
         if cid_int is None:
@@ -368,7 +368,7 @@ class PgRitualsRepo:
 
     def _list_all_sync(
         self,
-        user_notion_id: str,
+        user_id: str,
         result_filter: Optional[str],
     ) -> List[Ritual]:
         stmt = _select_rituals().where(rituals.c.archived == False)  # noqa: E712
@@ -432,7 +432,7 @@ class PgRitualsRepo:
         amount: float = 0,
         paid: float = 0,
         client_id: Optional[str] = None,
-        user_notion_id: str = "",
+        user_id: str = "",
         goal: Optional[str] = None,
         place: Optional[str] = None,
         notes: Optional[str] = None,
@@ -443,26 +443,26 @@ class PgRitualsRepo:
             self._create_sync,
             name, date, ritual_type, consumables, consumables_cost,
             duration_min, offerings, forces, structure, amount, paid,
-            client_id, user_notion_id, goal, place, notes,
+            client_id, user_id, goal, place, notes,
             payment_source, offerings_cost,
         )
 
     async def list_by_client(
         self,
         client_id: str,
-        user_notion_id: str = "",
+        user_id: str = "",
     ) -> List[Ritual]:
         return await asyncio.to_thread(
-            self._list_by_client_sync, client_id, user_notion_id
+            self._list_by_client_sync, client_id, user_id
         )
 
     async def list_all(
         self,
-        user_notion_id: str = "",
+        user_id: str = "",
         result_filter: Optional[str] = None,
     ) -> List[Ritual]:
         return await asyncio.to_thread(
-            self._list_all_sync, user_notion_id, result_filter
+            self._list_all_sync, user_id, result_filter
         )
 
     async def delete(self, ritual_id: str) -> bool:

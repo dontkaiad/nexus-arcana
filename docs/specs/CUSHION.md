@@ -1,6 +1,6 @@
 # CUSHION — data-model contract (финансовая подушка)
 
-Code conforms to: HEAD of the `budget: динамический взнос в подушку` change.
+Code conforms to: HEAD of the `budget: динамический взнос в подушку` change.  (+ #144: user_notion_id → user_id.)
 Update this spec in the same PR that changes the model.
 
 > Contract, not snapshot. Describes the derived model and the guarantees of each
@@ -110,7 +110,7 @@ See `core/repos/cushion_table.py`.
 
 | column | meaning |
 |---|---|
-| `user_notion_id` | owner; unique (`uq_cushion_owner`) — one cushion per user |
+| `user_id` | owner; unique (`uq_cushion_owner`) — one cushion per user |
 | `balance` | accumulated total; **incremented only**, never overwritten |
 | `target` | aspirational figure for the progress %; nullable |
 | `planned_contribution` | `cushion_contribution` from the last accepted budget plan (20% of income in a comfortable month, 0 in a tight one); written by `_save_budget_plan`, read by `_send_payday_review` |

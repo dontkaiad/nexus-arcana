@@ -75,7 +75,7 @@ async def test_invalid_client_name_single_flow_sends_clarification():
     with patch("arcana.handlers.sessions.ask_claude", AsyncMock(return_value=bad_json)), \
          patch("arcana.handlers.sessions.get_user_tz", AsyncMock(return_value=3)), \
          patch.object(cr, "find_or_create_client", foc):
-        await sess.handle_add_session(_session_msg(), "test", user_notion_id="u")
+        await sess.handle_add_session(_session_msg(), "test", user_id="u")
 
     texts = [c.args[0] for c in _session_msg().answer.call_args_list if c.args]
     # Проверяем через отдельно созданный msg из функции (выше msg уже использован)
@@ -95,7 +95,7 @@ async def test_invalid_client_name_single_flow_message_text():
     with patch("arcana.handlers.sessions.ask_claude", AsyncMock(return_value=bad_json)), \
          patch("arcana.handlers.sessions.get_user_tz", AsyncMock(return_value=3)), \
          patch.object(cr, "find_or_create_client", AsyncMock()):
-        await sess.handle_add_session(msg, "test", user_notion_id="u")
+        await sess.handle_add_session(msg, "test", user_id="u")
 
     texts = [c.args[0] for c in msg.answer.call_args_list if c.args]
     assert any("имя клиента" in t for t in texts)
@@ -116,7 +116,7 @@ async def test_valid_client_name_single_flow_no_clarification():
          patch("arcana.handlers.sessions.get_user_tz", AsyncMock(return_value=3)), \
          patch.object(cr, "resolve_or_create", roc), \
          patch("arcana.handlers.sessions._save_and_post_triplet", AsyncMock()):
-        await sess.handle_add_session(msg, "оля расклад", user_notion_id="u")
+        await sess.handle_add_session(msg, "оля расклад", user_id="u")
 
     roc.assert_awaited_once()
     texts = [c.args[0] for c in msg.answer.call_args_list if c.args]
@@ -145,7 +145,7 @@ async def test_invalid_client_name_multi_flow_sends_clarification():
     with patch("arcana.handlers.sessions.ask_claude", AsyncMock(return_value=bad_json)), \
          patch("arcana.handlers.sessions.get_user_tz", AsyncMock(return_value=3)), \
          patch.object(cr, "find_or_create_client", foc):
-        await sess.handle_add_session(msg, "test", user_notion_id="u")
+        await sess.handle_add_session(msg, "test", user_id="u")
 
     texts = [c.args[0] for c in msg.answer.call_args_list if c.args]
     assert any("имя клиента" in t for t in texts)

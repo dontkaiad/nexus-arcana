@@ -79,7 +79,7 @@ async def test_cmd_tasks_uses_shared_formatter(mock_message, monkeypatch):
          patch.object(tasks_mod, "_get_user_tz", AsyncMock(return_value=3)), \
          patch("nexus.handlers.streaks.get_streak",
                MagicMock(return_value=None)):
-        await cmd_tasks(msg, user_notion_id="u-1")
+        await cmd_tasks(msg, user_id="u-1")
 
     assert calls, "cmd_tasks не вызвал общий _format_task_dates"
     out = "\n".join(str(c.args[0]) for c in msg.answer.call_args_list)
@@ -107,7 +107,7 @@ async def test_daily_ping_uses_shared_formatter(monkeypatch):
          patch("nexus.handlers.streaks.get_streak", return_value=None), \
          patch("nexus.handlers.finance._calc_free_remaining",
                AsyncMock(return_value=None)):
-        text = await tasks_mod._build_today_digest(999_002, user_notion_id="u-1")
+        text = await tasks_mod._build_today_digest(999_002, user_id="u-1")
 
     assert calls, "дейли-пинг не вызвал общий _format_task_dates"
     assert "FMT" in text

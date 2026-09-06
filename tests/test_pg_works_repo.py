@@ -56,7 +56,7 @@ def engine():
             "deadline TIMESTAMP, reminder TIMESTAMP, category TEXT, "
             "priority_id INTEGER, status_id INTEGER, client_id INTEGER, "
             "repeat_id INTEGER, day_of_week_id INTEGER, repeat_time TEXT, "
-            "user_notion_id TEXT, "
+            "user_id TEXT, "
             "created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, "
             "updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)"
         ))
@@ -98,7 +98,7 @@ def _insert_work(engine, title="Тест", user="u1", status_code="open",
         row = conn.execute(
             works.insert().values(
                 title=title, status_id=status_row[0],
-                priority_id=prio_row[0], user_notion_id=user,
+                priority_id=prio_row[0], user_id=user,
                 deadline=deadline, reminder=reminder, client_id=client_id,
             ).returning(works.c.id)
         ).fetchone()

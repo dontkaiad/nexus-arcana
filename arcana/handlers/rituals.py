@@ -61,7 +61,7 @@ CLARIFICATION_TEXT = (
 )
 
 
-async def handle_add_ritual(message: Message, text: str, user_notion_id: str = "") -> None:
+async def handle_add_ritual(message: Message, text: str, user_id: str = "") -> None:
     try:
         tg_id = message.from_user.id
         tz_offset = await get_user_tz(tg_id)
@@ -107,7 +107,7 @@ async def handle_add_ritual(message: Message, text: str, user_notion_id: str = "
                 await message.answer("🤔 Не разобрала имя клиента — напиши ещё раз?")
                 return
             client_id = await resolve_or_create(
-                message, client_name, user_notion_id=user_notion_id,
+                message, client_name, user_id=user_id,
             )
 
         goal = data.get("goal") or None
@@ -138,7 +138,7 @@ async def handle_add_ritual(message: Message, text: str, user_notion_id: str = "
             amount=amount,
             paid=paid,
             client_id=client_id,
-            user_notion_id=user_notion_id,
+            user_id=user_id,
             goal=goal,
             place=place,
             notes=notes,
@@ -158,7 +158,7 @@ async def handle_add_ritual(message: Message, text: str, user_notion_id: str = "
             )
             if client_id:
                 w_id = await find_active_work_for_client(
-                    client_id, "✨ Ритуал", user_notion_id,
+                    client_id, "✨ Ритуал", user_id,
                 )
                 if w_id:
                     ok = await set_event_work_id("ritual", result.id, w_id)
@@ -177,7 +177,7 @@ async def handle_add_ritual(message: Message, text: str, user_notion_id: str = "
                 source=payment_source or "💳 Карта",
                 bot_label="🌒 Arcana",
                 description=f"🕯️ {data.get('name') or 'Ритуал'}" + (f" — {client_name}" if client_name else ""),
-                user_notion_id=user_notion_id,
+                user_id=user_id,
             )
 
         debt = max(0, amount - paid)
@@ -232,7 +232,7 @@ async def handle_add_ritual(message: Message, text: str, user_notion_id: str = "
         if consumables:
             try:
                 from arcana.handlers.ritual_writeoff import propose_writeoff
-                await propose_writeoff(message, consumables, user_notion_id)
+                await propose_writeoff(message, consumables, user_id)
             except Exception as e:
                 logger.warning("ritual writeoff propose failed: %s", e)
 

@@ -344,7 +344,7 @@ async def test_handle_list_inv_add_batch_does_not_ask_expiry():
          patch.object(lists_mod, "react", AsyncMock()), \
          patch.object(lists_mod, "pending_set") as p_set:
         await lists_mod.handle_list_inv_add(
-            msg, {"text": msg.text}, user_notion_id="user-page-id",
+            msg, {"text": msg.text}, user_id="user-page-id",
         )
 
     p_set.assert_not_called()
@@ -370,7 +370,7 @@ async def test_handle_list_inv_add_single_asks_expiry():
          patch.object(lists_mod, "react", AsyncMock()), \
          patch.object(lists_mod, "pending_set") as p_set:
         await lists_mod.handle_list_inv_add(
-            msg, {"text": msg.text}, user_notion_id="user-page-id",
+            msg, {"text": msg.text}, user_id="user-page-id",
         )
 
     p_set.assert_called_once()
@@ -396,7 +396,7 @@ async def test_handle_list_inv_add_empty_parse_responds_gracefully():
          patch.object(lists_mod._repo, "add", AsyncMock(return_value=[])) as p_add, \
          patch.object(lists_mod, "react", AsyncMock()):
         await lists_mod.handle_list_inv_add(
-            msg, {"text": msg.text}, user_notion_id="user-page-id",
+            msg, {"text": msg.text}, user_id="user-page-id",
         )
 
     p_add.assert_not_called()
@@ -428,7 +428,7 @@ async def test_handle_list_inv_add_uses_fallback_when_haiku_returns_empty():
          patch.object(lists_mod, "react", AsyncMock()), \
          patch.object(lists_mod, "pending_set") as p_set:
         await lists_mod.handle_list_inv_add(
-            msg, {"text": text}, user_notion_id="user-page-id",
+            msg, {"text": text}, user_id="user-page-id",
         )
 
     p_add.assert_called_once()
@@ -458,7 +458,7 @@ async def test_handle_inv_add_single_with_expiry_does_not_ask():
          patch.object(lists_mod, "react", AsyncMock()), \
          patch.object(lists_mod, "pending_set") as p_set:
         await lists_mod.handle_list_inv_add(
-            msg, {"text": msg.text}, user_notion_id="user-page-id",
+            msg, {"text": msg.text}, user_id="user-page-id",
         )
 
     # add_items получил expiry
@@ -486,7 +486,7 @@ async def test_handle_list_inv_add_uses_fallback_when_haiku_raises():
          patch.object(lists_mod, "react", AsyncMock()), \
          patch.object(lists_mod, "pending_set") as p_set:
         await lists_mod.handle_list_inv_add(
-            msg, {"text": text}, user_notion_id="user-page-id",
+            msg, {"text": text}, user_id="user-page-id",
         )
 
     # 1 элемент → должен спросить срок годности

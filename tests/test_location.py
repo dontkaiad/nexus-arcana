@@ -57,13 +57,13 @@ async def test_set_user_location_writes_both_keys():
     upsert = AsyncMock(return_value=("1", True))
     with patch.object(loc.PgMemoryRepo, "upsert", upsert), \
          patch.object(loc, "_invalidate_weather_cache"):
-        ret = await loc.set_user_location(77, offset=3, city="спб", user_notion_id="u-1")
+        ret = await loc.set_user_location(77, offset=3, city="спб", user_id="u-1")
 
     assert ret == 3
     written = {c.kwargs["key"]: c.kwargs["fact"] for c in upsert.call_args_list}
     assert written == {"tz_77": "3", "city_77": "спб"}
-    # user_notion_id протянут (нужно weather, который фильтрует по нему)
-    assert all(c.kwargs["user_notion_id"] == "u-1" for c in upsert.call_args_list)
+    # user_id протянут (нужно weather, который фильтрует по нему)
+    assert all(c.kwargs["user_id"] == "u-1" for c in upsert.call_args_list)
     # кеш обновлён в своём процессе
     assert loc._tz_offsets[77] == 3
     # категории — только из core/memory.py:CATEGORIES, не "⭐ Предпочтения"/
@@ -81,7 +81,7 @@ async def test_set_user_location_offset_none_writes_only_city():
     upsert = AsyncMock(return_value=("1", True))
     with patch.object(loc.PgMemoryRepo, "upsert", upsert), \
          patch.object(loc, "_invalidate_weather_cache"):
-        ret = await loc.set_user_location(78, offset=None, city="нарния", user_notion_id="u-2")
+        ret = await loc.set_user_location(78, offset=None, city="нарния", user_id="u-2")
 
     assert ret is None
     written = {c.kwargs["key"]: c.kwargs["fact"] for c in upsert.call_args_list}
@@ -103,7 +103,7 @@ async def test_set_user_location_invalidates_weather_cache():
     upsert = AsyncMock(return_value=("1", True))
     with patch.object(loc.PgMemoryRepo, "upsert", upsert), \
          patch.object(loc, "_invalidate_weather_cache") as invalidate:
-        await loc.set_user_location(555, offset=5, city="Гай", user_notion_id="u-x")
+        await loc.set_user_location(555, offset=5, city="Гай", user_id="u-x")
 
     invalidate.assert_called_once_with(555)
 
@@ -116,7 +116,7 @@ async def test_set_user_location_offset_none_still_invalidates_cache():
     upsert = AsyncMock(return_value=("1", True))
     with patch.object(loc.PgMemoryRepo, "upsert", upsert), \
          patch.object(loc, "_invalidate_weather_cache") as invalidate:
-        await loc.set_user_location(556, offset=None, city="Нарния", user_notion_id="u-y")
+        await loc.set_user_location(556, offset=None, city="Нарния", user_id="u-y")
 
     invalidate.assert_called_once_with(556)
 
@@ -192,7 +192,7 @@ async def test_set_weather_city_updates_tz_and_city():
     upsert = AsyncMock(return_value=("1", True))
     with patch.object(loc.PgMemoryRepo, "upsert", upsert), \
          patch.object(loc, "_invalidate_weather_cache"), \
-         patch.object(weather, "get_user_notion_id", AsyncMock(return_value="notion-x")), \
+         patch.object(weather, "get_user_id", AsyncMock(return_value="notion-x")), \
          patch.object(weather, "sqlite3", MagicMock()):
         res = await weather.set_weather_city(tg_id=42, payload={"city": "Питер"})
 
@@ -209,7 +209,7 @@ async def test_set_weather_city_unknown_city_keeps_tz():
     upsert = AsyncMock(return_value=("1", True))
     with patch.object(loc.PgMemoryRepo, "upsert", upsert), \
          patch.object(loc, "_invalidate_weather_cache"), \
-         patch.object(weather, "get_user_notion_id", AsyncMock(return_value="notion-y")), \
+         patch.object(weather, "get_user_id", AsyncMock(return_value="notion-y")), \
          patch.object(weather, "sqlite3", MagicMock()):
         res = await weather.set_weather_city(tg_id=43, payload={"city": "Нарния"})
 
@@ -235,7 +235,7 @@ async def test_bot_text_path_writes_both():
          patch.object(loc, "_invalidate_weather_cache"), \
          patch.object(tasks_mod, "ask_claude",
                       AsyncMock(side_effect=AssertionError("whitelist-город — Claude не нужен"))):
-        await tasks_mod._update_user_tz(msg, "я в спб", user_notion_id="u-9")
+        await tasks_mod._update_user_tz(msg, "я в спб", user_id="u-9")
 
     written = {c.kwargs["key"]: c.kwargs["fact"] for c in upsert.call_args_list}
     assert written == {"tz_555": "3", "city_555": "спб"}

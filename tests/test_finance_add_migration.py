@@ -41,7 +41,7 @@ async def test_classifier_defaults_to_nexus():
             original_text="продукты 500р",
             msg=fake_msg,
             clarify={},
-            user_notion_id="uid-1",
+            user_id="uid-1",
         )
 
     assert fake_add.called, "_fin_repo.add не был вызван из classifier"
@@ -95,7 +95,7 @@ async def test_arcana_routing():
             source="💳 Карта",
             bot_label="🌒 Arcana",
             description="тест arcana routing",
-            user_notion_id="u-arc",
+            user_id="u-arc",
         )
 
     fake_arcana_add.assert_awaited_once()
@@ -105,7 +105,7 @@ async def test_arcana_routing():
     # Проверяем что nexus не получил Arcana-запись
     arcana_kwargs = fake_arcana_add.call_args.kwargs
     assert arcana_kwargs["description"] == "тест arcana routing"
-    assert arcana_kwargs["user_notion_id"] == "u-arc"
+    assert arcana_kwargs["user_id"] == "u-arc"
 
 
 @pytest.mark.asyncio
@@ -126,7 +126,7 @@ async def test_nexus_routing():
             source="💳 Карта",
             bot_label="☀️ Nexus",
             description="тест nexus routing",
-            user_notion_id="u-nex",
+            user_id="u-nex",
         )
 
     fake_nexus_add.assert_awaited_once()

@@ -45,7 +45,7 @@ class TestMemoryModule:
         """get_memories_for_context с пустыми keywords → пусто."""
         from core.memory import get_memories_for_context
         result = await get_memories_for_context(
-            user_notion_id="fake-id",
+            user_id="fake-id",
             keywords=[],
             bot_label="☀️ Nexus",
         )

@@ -56,7 +56,7 @@ def test_arcana_works_payload_contains_subtasks(client):
                AsyncMock(return_value={})), \
          patch("miniapp.backend.routes.arcana_today.today_user_tz",
                AsyncMock(return_value=(today, 3))), \
-         patch("miniapp.backend.routes.arcana_today.get_user_notion_id",
+         patch("miniapp.backend.routes.arcana_today.get_user_id",
                AsyncMock(return_value=FAKE_NOTION)):
         r = client.get("/api/arcana/works")
 
@@ -88,7 +88,7 @@ def test_arcana_works_subtasks_populated(client):
                AsyncMock(return_value={})), \
          patch("miniapp.backend.routes.arcana_today.today_user_tz",
                AsyncMock(return_value=(today, 3))), \
-         patch("miniapp.backend.routes.arcana_today.get_user_notion_id",
+         patch("miniapp.backend.routes.arcana_today.get_user_id",
                AsyncMock(return_value=FAKE_NOTION)):
         r = client.get("/api/arcana/works")
 
@@ -123,7 +123,7 @@ def test_arcana_works_returns_open_only(client):
                AsyncMock(return_value={})), \
          patch("miniapp.backend.routes.arcana_today.today_user_tz",
                AsyncMock(return_value=(today, 3))), \
-         patch("miniapp.backend.routes.arcana_today.get_user_notion_id",
+         patch("miniapp.backend.routes.arcana_today.get_user_id",
                AsyncMock(return_value=FAKE_NOTION)):
         r = client.get("/api/arcana/works")
 
@@ -156,7 +156,7 @@ async def test_subtasks_handler_full_uuid_no_scan():
         captured["data"] = data
 
     with patch("core.list_manager.pending_set", fake_set), \
-         patch("core.user_manager.get_user_notion_id", AsyncMock(return_value="notion-u-42")):
+         patch("core.user_manager.get_user_id", AsyncMock(return_value="notion-u-42")):
         await task_subtask_cb(call)
 
     assert captured.get("uid") == 7
@@ -167,8 +167,8 @@ async def test_subtasks_handler_full_uuid_no_scan():
     )
     assert captured["data"]["task_name"] == "Подготовить колоду"
     assert captured["data"]["bot"] == "arcana"
-    assert captured["data"]["user_notion_id"] == "notion-u-42", (
-        "user_notion_id должен быть реальным, не пустой строкой"
+    assert captured["data"]["user_id"] == "notion-u-42", (
+        "user_id должен быть реальным, не пустой строкой"
     )
     call.message.answer.assert_awaited_once()
 
@@ -199,7 +199,7 @@ async def test_subtasks_handler_truncated_id_not_found_fails_gracefully():
 
     # db_query возвращает пустой список — задача не найдена
     with patch("core.list_manager.pending_set", fake_set), \
-         patch("core.user_manager.get_user_notion_id", AsyncMock(return_value="u")):
+         patch("core.user_manager.get_user_id", AsyncMock(return_value="u")):
         await task_subtask_cb(call)
 
     # pending_set НЕ должен был вызваться — сирота не создаётся
@@ -229,7 +229,7 @@ async def test_work_save_attaches_subtasks_button():
         "priority": "Важно", "work_type": "🌟 Личная",
         "client_name": None, "client_id": None,
         "deadline": None, "reminder": None,
-        "msg_id": 1, "chat_id": 100, "user_notion_id": "u",
+        "msg_id": 1, "chat_id": 100, "user_id": "u",
     })
 
     call = MagicMock()
@@ -264,16 +264,16 @@ async def test_work_save_attaches_subtasks_button():
     assert "work_ok" in cbs
 
 
-# ── Regression #110: user_notion_id stored in pending ────────────────────────
+# ── Regression #110: user_id stored in pending ────────────────────────
 
 
 @pytest.mark.asyncio
-async def test_subtasks_handler_stores_real_user_notion_id():
-    """Регрессия #110: pending должен содержать реальный user_notion_id, а не ''.
+async def test_subtasks_handler_stores_real_user_id():
+    """Регрессия #110: pending должен содержать реальный user_id, а не ''.
 
-    Старый код: 'user_notion_id': '' → pending.get('user_notion_id', fallback) = ''
+    Старый код: 'user_id': '' → pending.get('user_id', fallback) = ''
     (ключ существует со значением '') → 🪪 Пользователи не ставилась на чеклист-пункты.
-    Новый код: get_user_notion_id(tg_id) → реальный id → pending.get(...) or fallback = реальный id.
+    Новый код: get_user_id(tg_id) → реальный id → pending.get(...) or fallback = реальный id.
     """
     from core.subtasks_handler import task_subtask_cb
 
@@ -294,13 +294,13 @@ async def test_subtasks_handler_stores_real_user_notion_id():
         captured["data"] = data
 
     with patch("core.list_manager.pending_set", fake_set), \
-         patch("core.user_manager.get_user_notion_id",
+         patch("core.user_manager.get_user_id",
                AsyncMock(return_value="real-notion-page-id")):
         await task_subtask_cb(call)
 
     assert "data" in captured, "pending_set должен был вызваться"
-    stored_uid = captured["data"]["user_notion_id"]
+    stored_uid = captured["data"]["user_id"]
     assert stored_uid == "real-notion-page-id", (
-        f"Ожидали реальный user_notion_id, получили: {stored_uid!r} "
+        f"Ожидали реальный user_id, получили: {stored_uid!r} "
         "(пустая строка = баг #110)"
     )

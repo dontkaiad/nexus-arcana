@@ -34,7 +34,7 @@ class Note:
     title: str
     tags: List[str] = field(default_factory=list)
     date: str = ""          # YYYY-MM-DD or ""
-    user_notion_id: str = ""
+    user_id: str = ""
     is_archived: bool = False
 
 
@@ -116,7 +116,7 @@ def _row_to_note(row, tag_codes: List[str]) -> Note:
         title=row.title or "",
         tags=tag_codes,
         date=date_str,
-        user_notion_id=row.user_notion_id or "",
+        user_id=row.user_id or "",
         is_archived=bool(row.is_archived),
     )
 
@@ -149,7 +149,7 @@ def _add_sync(
     title: str,
     tags: List[str],
     date: Optional[str],
-    user_notion_id: str,
+    user_id: str,
 ) -> str:
     _ensure_lookups()
     parsed_date = None
@@ -164,7 +164,7 @@ def _add_sync(
             notes.insert().values(
                 title=title,
                 date=parsed_date,
-                user_notion_id=user_notion_id or "",
+                user_id=user_id or "",
             ).returning(notes.c.id)
         )
         note_id = result.fetchone()[0]
@@ -195,16 +195,16 @@ def _find_or_prepare_tag_sync(raw: str) -> Tuple[str, bool]:
     return (formatted, True)
 
 
-def _list_active_sync(user_notion_id: str) -> List:
+def _list_active_sync(user_id: str) -> List:
     q = select(notes).where(notes.c.is_archived == False)  # noqa: E712
-    if user_notion_id:
-        q = q.where(notes.c.user_notion_id == user_notion_id)
+    if user_id:
+        q = q.where(notes.c.user_id == user_id)
     q = q.order_by(notes.c.date.desc().nulls_last(), notes.c.created_at.desc())
     with get_engine().connect() as conn:
         return conn.execute(q).fetchall()
 
 
-def _find_older_than_days_sync(user_notion_id: str, days: int) -> List[Note]:
+def _find_older_than_days_sync(user_id: str, days: int) -> List[Note]:
     from datetime import timedelta
     cutoff = datetime.now(timezone.utc).date() - timedelta(days=days)
     q = (
@@ -213,21 +213,21 @@ def _find_older_than_days_sync(user_notion_id: str, days: int) -> List[Note]:
         .where(notes.c.date <= cutoff)
         .where(notes.c.date.isnot(None))
     )
-    if user_notion_id:
-        q = q.where(notes.c.user_notion_id == user_notion_id)
+    if user_id:
+        q = q.where(notes.c.user_id == user_id)
     q = q.order_by(notes.c.date.asc())
     with get_engine().connect() as conn:
         rows = conn.execute(q).fetchall()
     return _enrich_notes_sync(rows)
 
 
-def _list_recent_sync(user_notion_id: str, limit: int = 50) -> List[Note]:
-    rows = _list_active_sync(user_notion_id)
+def _list_recent_sync(user_id: str, limit: int = 50) -> List[Note]:
+    rows = _list_active_sync(user_id)
     rows = rows[:limit]
     return _enrich_notes_sync(rows)
 
 
-def _search_by_tag_sync(tag: str, user_notion_id: str) -> List[Note]:
+def _search_by_tag_sync(tag: str, user_id: str) -> List[Note]:
     _ensure_lookups()
     tag_low = tag.lower()
     matching_ids = [tid for code, tid in _tag_id.items() if tag_low in code.lower()]
@@ -239,29 +239,29 @@ def _search_by_tag_sync(tag: str, user_notion_id: str) -> List[Note]:
         .where(note_tag_map.c.tag_id.in_(matching_ids))
         .where(notes.c.is_archived == False)  # noqa: E712
     )
-    if user_notion_id:
-        q = q.where(notes.c.user_notion_id == user_notion_id)
+    if user_id:
+        q = q.where(notes.c.user_id == user_id)
     q = q.order_by(notes.c.date.desc().nulls_last())
     with get_engine().connect() as conn:
         rows = conn.execute(q).fetchall()
     return _enrich_notes_sync(rows)
 
 
-def _search_by_title_sync(hint: str, user_notion_id: str) -> List[Note]:
+def _search_by_title_sync(hint: str, user_id: str) -> List[Note]:
     q = (
         select(notes)
         .where(notes.c.is_archived == False)  # noqa: E712
         .where(notes.c.title.ilike(f"%{hint}%"))
     )
-    if user_notion_id:
-        q = q.where(notes.c.user_notion_id == user_notion_id)
+    if user_id:
+        q = q.where(notes.c.user_id == user_id)
     q = q.order_by(notes.c.date.desc().nulls_last())
     with get_engine().connect() as conn:
         rows = conn.execute(q).fetchall()
     return _enrich_notes_sync(rows)
 
 
-def _find_for_edit_sync(hint: str, user_notion_id: str) -> Optional[Note]:
+def _find_for_edit_sync(hint: str, user_id: str) -> Optional[Note]:
     if hint == "последняя":
         q = (
             select(notes)
@@ -277,8 +277,8 @@ def _find_for_edit_sync(hint: str, user_notion_id: str) -> Optional[Note]:
             .order_by(notes.c.created_at.desc())
             .limit(1)
         )
-    if user_notion_id:
-        q = q.where(notes.c.user_notion_id == user_notion_id)
+    if user_id:
+        q = q.where(notes.c.user_id == user_id)
     with get_engine().connect() as conn:
         row = conn.execute(q).fetchone()
     if not row:
@@ -323,10 +323,10 @@ class PgNotesRepo:
         text: str,
         tags: Optional[List[str]] = None,
         date: Optional[str] = None,
-        user_notion_id: str = "",
+        user_id: str = "",
     ) -> Optional[str]:
         return await asyncio.to_thread(
-            _add_sync, text, tags or [], date, user_notion_id
+            _add_sync, text, tags or [], date, user_id
         )
 
     async def get_all_tags(self) -> List[str]:
@@ -336,29 +336,29 @@ class PgNotesRepo:
         return await asyncio.to_thread(_find_or_prepare_tag_sync, raw)
 
     async def find_older_than_days(
-        self, user_notion_id: str = "", days: int = 7
+        self, user_id: str = "", days: int = 7
     ) -> List[Note]:
-        return await asyncio.to_thread(_find_older_than_days_sync, user_notion_id, days)
+        return await asyncio.to_thread(_find_older_than_days_sync, user_id, days)
 
     async def list_recent(
-        self, user_notion_id: str = "", limit: int = 50
+        self, user_id: str = "", limit: int = 50
     ) -> List[Note]:
-        return await asyncio.to_thread(_list_recent_sync, user_notion_id, limit)
+        return await asyncio.to_thread(_list_recent_sync, user_id, limit)
 
     async def search_by_tag(
-        self, tag: str, user_notion_id: str = ""
+        self, tag: str, user_id: str = ""
     ) -> List[Note]:
-        return await asyncio.to_thread(_search_by_tag_sync, tag, user_notion_id)
+        return await asyncio.to_thread(_search_by_tag_sync, tag, user_id)
 
     async def search_by_title(
-        self, hint: str, user_notion_id: str = ""
+        self, hint: str, user_id: str = ""
     ) -> List[Note]:
-        return await asyncio.to_thread(_search_by_title_sync, hint, user_notion_id)
+        return await asyncio.to_thread(_search_by_title_sync, hint, user_id)
 
     async def find_for_edit(
-        self, hint: str, user_notion_id: str = ""
+        self, hint: str, user_id: str = ""
     ) -> Optional[Note]:
-        return await asyncio.to_thread(_find_for_edit_sync, hint, user_notion_id)
+        return await asyncio.to_thread(_find_for_edit_sync, hint, user_id)
 
     async def update_tags(self, note_id: str, tags: List[str]) -> None:
         await asyncio.to_thread(_update_tags_sync, note_id, tags)

@@ -108,7 +108,7 @@ def _split_items(text: str) -> List[str]:
 
 # ── Pending text → создать N чеклист-пунктов ──────────────────────────────────
 
-async def handle_pending_text(message: Message, text: str, user_notion_id: str = "") -> bool:
+async def handle_pending_text(message: Message, text: str, user_id: str = "") -> bool:
     """Если есть pending barter — создать пункты и сбросить state.
     Возвращает True если перехватили."""
     uid = message.from_user.id
@@ -125,7 +125,7 @@ async def handle_pending_text(message: Message, text: str, user_notion_id: str =
         for name in items
     ]
     try:
-        result = await _lists_repo.add(barter_items, LIST_TYPE_CHECKLIST, BOT_ARCANA, user_notion_id)
+        result = await _lists_repo.add(barter_items, LIST_TYPE_CHECKLIST, BOT_ARCANA, user_id)
         created = len(result)
     except Exception as e:
         logger.warning("barter add_item batch failed: %s", e)
@@ -167,7 +167,7 @@ _REPLACE_RE = re.compile(
 _AMOUNT_RE = re.compile(r"(\d[\d\s.]*)\s*(?:₽|руб|рубл)", re.IGNORECASE)
 
 
-async def _list_barter_for_group(group_name: str, user_notion_id: str) -> List[dict]:
+async def _list_barter_for_group(group_name: str, user_id: str) -> List[dict]:
     """Search arcana_inventory PG for barter checklist items of a given group."""
     if not group_name:
         return []
@@ -175,7 +175,7 @@ async def _list_barter_for_group(group_name: str, user_notion_id: str) -> List[d
     try:
         items = await _arcana_repo.get_list(
             category=BARTER_CATEGORY,
-            user_notion_id=user_notion_id,
+            user_id=user_id,
         )
         result = []
         for it in items:
@@ -220,7 +220,7 @@ def _money_word(text: str) -> bool:
     return any(w in low for w in ("откуп", "деньг", "₽", "руб"))
 
 
-async def handle_reply_text(message: Message, text: str, user_notion_id: str = "") -> bool:
+async def handle_reply_text(message: Message, text: str, user_id: str = "") -> bool:
     """Reply на сообщение бота с page_type ritual|session.
     Возвращает True если запрос был обработан как бартер-апдейт.
     """
@@ -246,7 +246,7 @@ async def handle_reply_text(message: Message, text: str, user_notion_id: str = "
     if not group_name:
         return False
 
-    items = await _list_barter_for_group(group_name, user_notion_id)
+    items = await _list_barter_for_group(group_name, user_id)
     handled = False
     low = (text or "").lower().strip()
 
@@ -267,7 +267,7 @@ async def handle_reply_text(message: Message, text: str, user_notion_id: str = "
                     source="💳 Карта",
                     description="Бартер · %s" % group_name,
                     bot_label=BOT_ARCANA,
-                    user_notion_id=user_notion_id,
+                    user_id=user_id,
                 )
                 # Закрываем money-пункт чеклиста
                 money_item = next((p for p in items if _money_word(_name(p))), None)

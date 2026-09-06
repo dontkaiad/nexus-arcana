@@ -16,7 +16,7 @@ async def test_handle_memory_save_uses_arcana_bot_label():
     with patch("core.memory.save_memory", AsyncMock(return_value=None)) as save:
         await handle_memory_save(
             msg, {"text": "запомни Оля любит таро Уэйт"},
-            user_notion_id="u1",
+            user_id="u1",
         )
     save.assert_awaited_once()
     args = save.await_args.args
@@ -32,7 +32,7 @@ async def test_handle_memory_search_calls_core_with_del_prefix():
     msg.from_user.id = 1
     with patch("core.memory.search_memory", AsyncMock(return_value=None)) as search:
         await handle_memory_search(
-            msg, {"query": "что я помню про Олю"}, user_notion_id="u1",
+            msg, {"query": "что я помню про Олю"}, user_id="u1",
         )
     search.assert_awaited_once()
     kwargs = search.await_args.kwargs
@@ -46,7 +46,7 @@ async def test_handle_memory_deactivate_passes_hint():
     msg.from_user.id = 1
     with patch("core.memory.deactivate_memory", AsyncMock(return_value=None)) as fn:
         await handle_memory_deactivate(
-            msg, {"hint": "колоду Lenormand для Оли"}, user_notion_id="u1",
+            msg, {"hint": "колоду Lenormand для Оли"}, user_id="u1",
         )
     fn.assert_awaited_once()
     args = fn.await_args.args
@@ -60,7 +60,7 @@ async def test_handle_memory_delete_uses_arcmem_callbacks():
     msg.from_user.id = 1
     with patch("core.memory.delete_memory", AsyncMock(return_value=None)) as fn:
         await handle_memory_delete(
-            msg, {"hint": "Lenormand"}, user_notion_id="u1",
+            msg, {"hint": "Lenormand"}, user_id="u1",
         )
     fn.assert_awaited_once()
     kwargs = fn.await_args.kwargs

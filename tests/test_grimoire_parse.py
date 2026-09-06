@@ -88,7 +88,7 @@ async def test_handle_grimoire_add_falls_back_to_heuristic():
                AsyncMock(return_value="не json вообще")), \
          patch.object(gmod._repo, "add",
                AsyncMock(return_value="page-1")) as ga:
-        await handle_grimoire_add(msg, text, user_notion_id="u1")
+        await handle_grimoire_add(msg, text, user_id="u1")
     ga.assert_awaited_once()
     kwargs = ga.await_args.kwargs
     assert kwargs["title"] == "тест"

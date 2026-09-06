@@ -37,7 +37,7 @@ async def test_geocoding_miss_retries_via_llm_normalize():
 
     with patch.object(weather, "_resolve_city_from_memory", AsyncMock(return_value="Уфе")), \
          patch.object(weather, "_memory_repo", weather._memory_repo), \
-         patch.object(weather, "get_user_notion_id", AsyncMock(return_value="u-1")), \
+         patch.object(weather, "get_user_id", AsyncMock(return_value="u-1")), \
          patch.object(weather, "_cached", lambda tg_id: None), \
          patch.object(weather, "_fetch_openmeteo", fake_fetch), \
          patch.object(weather, "_llm_normalize_city", AsyncMock(return_value="Ufa")), \

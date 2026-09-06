@@ -8,7 +8,7 @@ from typing import Any, Optional
 from fastapi import APIRouter, Depends
 
 from core.claude_client import ask_claude
-from core.user_manager import get_user_notion_id
+from core.user_manager import get_user_id
 from core.budget import (
     LIMIT_CATEGORIES,
     _budget_payday,
@@ -85,13 +85,13 @@ def _task_summary(task: PgTask, tz_offset: int) -> dict:
     }
 
 
-async def _fetch_nexus_tasks(user_notion_id: str) -> list[PgTask]:
+async def _fetch_nexus_tasks(user_id: str) -> list[PgTask]:
     # Активные задачи Nexus из PG (Статус != Done/Complete). Overdue включены
     # (они не Done), классификация по дедлайну — ниже в get_today.
-    return await _tasks_repo.active(user_notion_id)
+    return await _tasks_repo.active(user_id)
 
 
-async def _spent_today(user_notion_id: str, today_iso: str, tomorrow_iso: str) -> int:
+async def _spent_today(user_id: str, today_iso: str, tomorrow_iso: str) -> int:
     """Потрачено сегодня для «Бюджета дня». 📦 Разовые / 🔒 Фикс исключены —
     у них свой лимит на весь период, не дневная норма (тот же принцип, что в
     finance.py::_view_today, коммит 894228b; предикат core.budget.is_parallel_limit)."""
@@ -101,7 +101,7 @@ async def _spent_today(user_notion_id: str, today_iso: str, tomorrow_iso: str) -
             date_to=today_iso,
             type_="💸 Расход",
             page_size=100,
-            user_notion_id=user_notion_id,
+            user_id=user_id,
         )
         return int(round(sum(
             e.amount for e in entries if not is_parallel_limit(e.category or "")
@@ -126,7 +126,7 @@ def _period_start_iso(payday: int, tz_offset: int) -> str:
     return "{:04d}-{:02d}-{:02d}".format(y, m, d)
 
 
-async def _discretionary_free(user_notion_id: str, today_iso: str, tz_offset: int) -> int:
+async def _discretionary_free(user_id: str, today_iso: str, tz_offset: int) -> int:
     """«Свободно» в «Мой день» — НАКОПИТЕЛЬНЫЙ остаток дискреционных лимитов за
     период (Продукты/Привычки/Транспорт/Кафе/Бьюти/Здоровье/Гардероб/Хобби/
     Импульсивные). Отдельная величина от «Бюджета дня» (day_limit − spent_today).
@@ -149,7 +149,7 @@ async def _discretionary_free(user_notion_id: str, today_iso: str, tz_offset: in
 
         entries = await _budget_repo.query(
             date_from=period_start, date_to=today_iso,
-            type_="💸 Расход", page_size=1000, user_notion_id=user_notion_id,
+            type_="💸 Расход", page_size=1000, user_id=user_id,
         )
         spent = sum(
             e.amount for e in entries
@@ -161,11 +161,11 @@ async def _discretionary_free(user_notion_id: str, today_iso: str, tz_offset: in
         return 0
 
 
-async def _adhd_context_memories(user_notion_id: str) -> list[str]:
+async def _adhd_context_memories(user_id: str) -> list[str]:
     try:
         from core.repos.memory_repo import _repo as _mem_repo
         mems = await _mem_repo.find_by_category(
-            "🦋 СДВГ", is_current=True, user_notion_id=user_notion_id, page_size=3,
+            "🦋 СДВГ", is_current=True, user_id=user_id, page_size=3,
         )
         return [m.fact for m in mems if m.fact]
     except Exception as e:
@@ -227,14 +227,14 @@ async def _ask_tip(prompt: str) -> str:
 
 
 async def _generate_adhd_tip(tg_id: int, today_str: str,
-                             active_titles: list[str], user_notion_id: str) -> str:
+                             active_titles: list[str], user_id: str) -> str:
     cached = cache.get_tip(tg_id, today_str)
     # wave8.6: старые кэшированные советы с markdown (звёздочки, длинные) —
     # игнорируем. wave8.62: не отдаём кэш, не прошедший валидацию (issue #71).
     if cached and "**" not in cached and _validate_tip(cached)[0]:
         return cached
 
-    memories = await _adhd_context_memories(user_notion_id)
+    memories = await _adhd_context_memories(user_id)
     tasks_ctx = "\n".join(f"- {t}" for t in active_titles[:10]) or "нет активных задач"
     mem_ctx = "\n".join(f"- {m}" for m in memories) or "нет"
 
@@ -265,11 +265,11 @@ async def refresh_tip(tg_id: int = Depends(current_user_id)) -> dict[str, Any]:
     today_date, _ = await today_user_tz(tg_id)
     today_str = today_date.isoformat()
     cache.delete_tip(tg_id, today_str)
-    user_notion_id = (await get_user_notion_id(tg_id)) or ""
-    tasks_raw = await _fetch_nexus_tasks(user_notion_id)
+    user_id = (await get_user_id(tg_id)) or ""
+    tasks_raw = await _fetch_nexus_tasks(user_id)
     summaries = [_task_summary(t, 3) for t in tasks_raw]
     active_titles = [s["title"] for s in summaries if s["title"]]
-    tip = await _generate_adhd_tip(tg_id, today_str, active_titles, user_notion_id)
+    tip = await _generate_adhd_tip(tg_id, today_str, active_titles, user_id)
     return {"tip": tip}
 
 
@@ -282,9 +282,9 @@ async def get_today(tg_id: int = Depends(current_user_id)) -> dict[str, Any]:
     tomorrow_str = (today_date + timedelta(days=1)).isoformat()
     weekday = _WEEKDAYS_RU[today_date.weekday()]
 
-    user_notion_id = (await get_user_notion_id(tg_id)) or ""
+    user_id = (await get_user_id(tg_id)) or ""
 
-    tasks_raw = await _fetch_nexus_tasks(user_notion_id)
+    tasks_raw = await _fetch_nexus_tasks(user_id)
     summaries = [_task_summary(t, tz_offset) for t in tasks_raw]
     # Сохраняем прежний порядок (Notion query сортировал по дедлайну ascending).
     summaries.sort(key=lambda s: s["deadline_raw"] or "9999-99-99")
@@ -414,19 +414,19 @@ async def get_today(tg_id: int = Depends(current_user_id)) -> dict[str, Any]:
     scheduled.sort(key=lambda x: x["time"] or "")
     overdue.sort(key=lambda x: -x["days_ago"])
 
-    spent_today = await _spent_today(user_notion_id, today_str, tomorrow_str)
-    day_limit = await budget_day_limit_from_plan(user_notion_id, tz_offset)
+    spent_today = await _spent_today(user_id, today_str, tomorrow_str)
+    day_limit = await budget_day_limit_from_plan(user_id, tz_offset)
     left = day_limit - spent_today
     pct = int(round(spent_today / day_limit * 100)) if day_limit else 0
     # «Свободно» — отдельная накопительная величина (Σ дискр. лимитов − Σ трат
     # этих категорий с начала периода). НЕ путать с «Бюджет дня» выше.
-    discretionary_free = await _discretionary_free(user_notion_id, today_str, tz_offset)
+    discretionary_free = await _discretionary_free(user_id, today_str, tz_offset)
 
     streak_data = get_streak(tg_id)
     rest_available = is_rest_day_available(tg_id)
 
     active_titles = [s["title"] for s in summaries if s["title"]]
-    tip = await _generate_adhd_tip(tg_id, today_str, active_titles, user_notion_id)
+    tip = await _generate_adhd_tip(tg_id, today_str, active_titles, user_id)
 
     return {
         "date": today_str,

@@ -1,6 +1,6 @@
 # TASKS — data-model contract (Nexus ✅ Задачи)
 
-Code conforms to: b9d3367 (+ this change: #149 — notion_id column dropped). This spec describes the tasks data model as of
+Code conforms to: b9d3367 (+ this change: #149 — notion_id column dropped). (+ #144: user_notion_id → user_id.) This spec describes the tasks data model as of
 that commit; update it in the same PR that changes the model.
 
 > Contract, not snapshot. Describes the persistent model, the guarantees of
@@ -15,7 +15,7 @@ Nexus tasks ("✅ Задачи") — the user's actionable to-do items: title, s
 priority, category, optional deadline/reminder, and optional repetition.
 Storage is PostgreSQL (`tasks` table + five normalized lookup tables).
 Reminders are scheduled jobs (APScheduler), not a column; streaks are tracked
-in a separate SQLite store. Tasks belong to a user via `user_notion_id`.
+in a separate SQLite store. Tasks belong to a user via `user_id`.
 
 ## Schema
 
@@ -41,11 +41,11 @@ down_revision `g7b8c9d0e1f2`). SQLAlchemy Core mirror:
 | `repeat_time` | Text | nullable — free-form repeat spec (see Recurring) |
 | `note` | Text | nullable — raw money/other detail that is neither deadline nor priority (see Deferred expense) |
 | `parent_task_id` | BigInteger | self-FK → `tasks.id` `ON DELETE SET NULL` |
-| `user_notion_id` | Text | NOT NULL, default `''` |
+| `user_id` | Text | NOT NULL, default `''` |
 | `created_at` | TIMESTAMP(tz) | NOT NULL, default `now()` |
 | `updated_at` | TIMESTAMP(tz) | NOT NULL, default `now()` |
 
-Indexes: `idx_tasks_user_notion_id` (user_notion_id),
+Indexes: `idx_tasks_user_id` (user_id),
 `idx_tasks_status_id` (status_id).
 
 ### Lookup tables (`id SMALLINT PK`, `code TEXT UNIQUE`)
@@ -211,6 +211,7 @@ category resolution on completion also runs on Haiku
 
 - `alembic/versions/h8c9d0e1f2a3_nexus_tasks_pg.py` — tables + seeded codes
 - `alembic/versions/cd34ef56a1b2_drop_dead_notion_id_columns.py` — notion_id dropped (#149)
+- `alembic/versions/df56a1b2c3d4_rename_user_notion_id_to_user_id.py` — user_notion_id → user_id (#144)
 - `alembic/versions/a7b8c9d0e1f2_tasks_note.py` — `note` column
 - `nexus/repos/tasks_tables.py` — SQLAlchemy Core definitions
 - `nexus/repos/pg_tasks_repo.py` — `Task` dataclass, lookup cache, `_match`,

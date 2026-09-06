@@ -108,12 +108,12 @@ async def _fake_page_create(db_id, props):
     return "fake-page-id-001"
 
 
-async def _fake_tasks_active(user_notion_id="", include_in_progress=True):
+async def _fake_tasks_active(user_id="", include_in_progress=True):
     """Мок tasks_active — пустой список задач."""
     return []
 
 
-async def _fake_finance_month(month, user_notion_id="", **kwargs):
+async def _fake_finance_month(month, user_id="", **kwargs):
     """Мок finance_month — пустой список."""
     return []
 
@@ -128,7 +128,7 @@ async def _fake_memory_get(key):
     return None
 
 
-async def _fake_memory_set(key, value, category="", user_notion_id=""):
+async def _fake_memory_set(key, value, category="", user_id=""):
     """Мок memory_set — ничего не делать."""
     return None
 
@@ -157,12 +157,12 @@ async def _fake_finance_add(*args, **kwargs):
     return "fake-finance-id"
 
 
-async def _fake_notes_search(query, user_notion_id=""):
+async def _fake_notes_search(query, user_id=""):
     """Мок notes_search — пусто."""
     return []
 
 
-async def _fake_client_find(name, user_notion_id=""):
+async def _fake_client_find(name, user_id=""):
     """Мок client_find — не найден."""
     return None
 
@@ -187,22 +187,22 @@ async def _fake_session_add(*args, **kwargs):
     return "fake-session-id"
 
 
-async def _fake_works_list(user_notion_id=""):
+async def _fake_works_list(user_id=""):
     """Мок works_list — пусто."""
     return []
 
 
-async def _fake_sessions_all(user_notion_id="", sbylos_filter=None):
+async def _fake_sessions_all(user_id="", sbylos_filter=None):
     """Мок sessions_all — пусто."""
     return []
 
 
-async def _fake_rituals_all(user_notion_id="", result_filter=None):
+async def _fake_rituals_all(user_id="", result_filter=None):
     """Мок rituals_all — пусто."""
     return []
 
 
-async def _fake_arcana_all_debts(user_notion_id=""):
+async def _fake_arcana_all_debts(user_id=""):
     """Мок arcana_all_debts — пусто."""
     return []
 

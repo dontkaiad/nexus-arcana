@@ -111,7 +111,7 @@ def _parse_user_amount(text: str) -> Optional[int]:
     return None
 
 
-async def _calc_free_remaining(user_notion_id: str = "", tz_offset: int = 3) -> Optional[Tuple[float, int]]:
+async def _calc_free_remaining(user_id: str = "", tz_offset: int = 3) -> Optional[Tuple[float, int]]:
     """(Свободных, дней до конца платёжного периода) или None.
 
     Формула BUDGET_SPEC / BUDGET_IDEAL_SPEC:
@@ -134,7 +134,7 @@ async def _calc_free_remaining(user_notion_id: str = "", tz_offset: int = 3) -> 
 
     tz_offset — личный tz пользователя (границы периода по его дню).
     """
-    budget = await _load_budget_data(user_notion_id)
+    budget = await _load_budget_data(user_id)
     fixed_total = sum(float(o.get("amount", 0) or 0) for o in budget.get("постоянные", []))
     debt_payment = _pick_debt_payment(budget.get("долги", []))
 
@@ -148,7 +148,7 @@ async def _calc_free_remaining(user_notion_id: str = "", tz_offset: int = 3) -> 
     try:
         income_records = await _repo.query_records(
             type_="💰 Доход", date_from=period_start, date_to=today_str, page_size=200,
-            user_notion_id=user_notion_id,
+            user_id=user_id,
         )
         total_income = sum(float(p.amount or 0) for p in income_records)
     except Exception:
@@ -161,7 +161,7 @@ async def _calc_free_remaining(user_notion_id: str = "", tz_offset: int = 3) -> 
     try:
         expense_records = await _repo.query_records(
             type_="💸 Расход", date_from=period_start, date_to=today_str, page_size=500,
-            user_notion_id=user_notion_id,
+            user_id=user_id,
         )
         period_expenses = sum(
             float(p.amount or 0) for p in expense_records
@@ -174,12 +174,12 @@ async def _calc_free_remaining(user_notion_id: str = "", tz_offset: int = 3) -> 
     return (free_left, days_remaining)
 
 
-async def build_budget_message(user_notion_id: str = "", tz_offset: int = 3) -> Optional[str]:
+async def build_budget_message(user_id: str = "", tz_offset: int = 3) -> Optional[str]:
     """Формирует полное сообщение /budget из сохранённых данных. НЕ вызывает Sonnet.
 
     tz_offset — личный tz пользователя (день периода / остаток / «сегодня» его).
     """
-    budget = await _load_budget_data(user_notion_id)
+    budget = await _load_budget_data(user_id)
     has_data = budget.get("постоянные") or budget.get("лимиты")
     if not has_data:
         return None
@@ -206,7 +206,7 @@ async def build_budget_message(user_notion_id: str = "", tz_offset: int = 3) -> 
     try:
         expense_records = await _repo.query_records(
             type_="💸 Расход", date_from=period_start, date_to=today_str, page_size=500,
-            user_notion_id=user_notion_id,
+            user_id=user_id,
         )
         for r in expense_records:
             cat = r.category or "💳 Прочее"
@@ -374,7 +374,7 @@ async def build_budget_message(user_notion_id: str = "", tz_offset: int = 3) -> 
     return "\n".join(lines)
 
 
-async def _check_budget_limit(category: str, message: Message, user_notion_id: str = "",
+async def _check_budget_limit(category: str, message: Message, user_id: str = "",
                               amount: float = 0, tz_offset: int = 3) -> None:
     """После записи расхода — проверить бюджетный лимит по категории (period-aware).
 
@@ -394,7 +394,7 @@ async def _check_budget_limit(category: str, message: Message, user_notion_id: s
         logger.info("_check_budget_limit: no limit for category=%r, skip", category)
         # Показать остаток свободных даже без лимита
         try:
-            result = await _calc_free_remaining(user_notion_id, tz_offset)
+            result = await _calc_free_remaining(user_id, tz_offset)
             if result:
                 free_left, days_rem = result
                 daily = free_left / max(days_rem, 1)
@@ -407,7 +407,7 @@ async def _check_budget_limit(category: str, message: Message, user_notion_id: s
         # Проверить: если категория — постоянный расход, НЕ предлагать лимит
         is_obligatory = False
         try:
-            budget = await _load_budget_data(user_notion_id)
+            budget = await _load_budget_data(user_id)
             for ob in budget.get("постоянные", []):
                 ob_link = _cat_link(ob.get("name", ""))
                 if ob_link in link or link in ob_link:
@@ -450,7 +450,7 @@ async def _check_budget_limit(category: str, message: Message, user_notion_id: s
         records = await _repo.query_records(
             type_="💸 Расход", category=category,
             date_from=period_start, date_to=today_str, page_size=200,
-            user_notion_id=user_notion_id,
+            user_id=user_id,
         )
         period_total = sum(float(p.amount or 0) for p in records)
         logger.info("_check_budget_limit: period_total=%.0f limit=%.0f category=%s",
@@ -477,7 +477,7 @@ async def _check_budget_limit(category: str, message: Message, user_notion_id: s
         parts.append(f"🚨 {category}: <b>{period_total:,.0f} / {limit_amount:,.0f}₽</b> ({pct:.0f}%!) +{over:,.0f}₽ overflow")
         # Impulse overflow
         try:
-            impulse_limit, impulse_used = await _calc_impulse_status(period_start, user_notion_id, tz_offset)
+            impulse_limit, impulse_used = await _calc_impulse_status(period_start, user_id, tz_offset)
             if impulse_limit > 0:
                 impulse_left = impulse_limit - impulse_used
                 imp_pct = impulse_used / impulse_limit * 100
@@ -488,7 +488,7 @@ async def _check_budget_limit(category: str, message: Message, user_notion_id: s
                     parts.append("🚨 Импульсивный бюджет исчерпан!")
                 # Auto-create impulse expense for overflow
                 try:
-                    await _handle_impulse_overflow(category, over, message, user_notion_id, period_start, tz_offset)
+                    await _handle_impulse_overflow(category, over, message, user_id, period_start, tz_offset)
                 except Exception as _oe:
                     logger.debug("impulse overflow create: %s", _oe)
             else:
@@ -504,7 +504,7 @@ async def _check_budget_limit(category: str, message: Message, user_notion_id: s
     # платежом. Все долги отложены (monthly_payment=0) → строку не показываем:
     # это чек после траты, а не полный отчёт.
     try:
-        budget_data = await _load_budget_data(user_notion_id)
+        budget_data = await _load_budget_data(user_id)
         active_debts = [d for d in budget_data.get("долги", [])
                         if (d.get("monthly_payment") or 0) > 0]
         if active_debts:
@@ -515,7 +515,7 @@ async def _check_budget_limit(category: str, message: Message, user_notion_id: s
 
     # Free/day
     try:
-        result = await _calc_free_remaining(user_notion_id, tz_offset)
+        result = await _calc_free_remaining(user_id, tz_offset)
         if result:
             free_left, days_rem = result
             daily = free_left / max(days_rem, 1)
@@ -534,10 +534,10 @@ async def _check_budget_limit(category: str, message: Message, user_notion_id: s
     await message.answer("\n".join(parts), parse_mode="HTML")
 
 
-async def _show_free_remaining(message: Message, user_notion_id: str = "") -> None:
+async def _show_free_remaining(message: Message, user_id: str = "") -> None:
     """Показать остаток свободных денег после расхода."""
     try:
-        result = await _calc_free_remaining(user_notion_id, tz_offset)
+        result = await _calc_free_remaining(user_id, tz_offset)
         if result:
             free_left, days_rem = result
             daily = free_left / max(days_rem, 1)
@@ -547,11 +547,11 @@ async def _show_free_remaining(message: Message, user_notion_id: str = "") -> No
 
 
 async def get_finance_period(start_date: str, end_date: str, label: str,
-                             user_notion_id: str = "", show_daily_avg: bool = False) -> str:
+                             user_id: str = "", show_daily_avg: bool = False) -> str:
     """Сводка за произвольный период. start_date/end_date = 'YYYY-MM-DD'."""
     records = await _repo.query_records(
         date_from=start_date, date_to=end_date, page_size=200,
-        user_notion_id=user_notion_id,
+        user_id=user_id,
     )
 
     total_expense = 0.0
@@ -593,13 +593,13 @@ async def get_finance_period(start_date: str, end_date: str, label: str,
     return "\n".join(lines)
 
 
-async def get_finance_stats(month: str, user_notion_id: str = "", compare_prev: bool = False,
+async def get_finance_stats(month: str, user_id: str = "", compare_prev: bool = False,
                             tz_offset: int = 3) -> str:
     """Сводка за месяц с лимитами. month = 'YYYY-MM'. tz_offset — личный tz (для
     прогноза «до конца месяца» — день считается по дню пользователя)."""
     from core.praise import get_praise
     try:
-        records = await _repo.month(month, user_notion_id=user_notion_id)
+        records = await _repo.month(month, user_id=user_id)
     except Exception as e:
         logger.error("get_finance_stats: %s", e)
         return "⚠️ Ошибка получения данных"
@@ -623,7 +623,7 @@ async def get_finance_stats(month: str, user_notion_id: str = "", compare_prev: 
     if compare_prev:
         try:
             prev_month = _month_offset(1)
-            prev_records = await _repo.month(prev_month, user_notion_id=user_notion_id)
+            prev_records = await _repo.month(prev_month, user_id=user_id)
             prev_by_cat: Dict[str, float] = {}
             prev_expense_total = 0.0
             for r in prev_records:
@@ -948,7 +948,7 @@ def _format_record(data: dict) -> str:
 
 
 async def _save_finance(data: dict, db_id: str, bot_label: str = "☀️ Nexus",
-                        user_notion_id: str = "", uid: int = 0) -> str:
+                        user_id: str = "", uid: int = 0) -> str:
     """Создаёт запись в Notion. Возвращает page_id или None.
 
     Дата транзакции — по личному tz пользователя (uid); uid=0 → дефолт 3.
@@ -963,7 +963,7 @@ async def _save_finance(data: dict, db_id: str, bot_label: str = "☀️ Nexus",
         type_=data.get("type_", "💸 Расход"),
         source=data.get("source", "💳 Карта"),
         bot_label=bot_label,
-        user_notion_id=user_notion_id,
+        user_id=user_id,
     )
     if page_id and uid:
         from nexus.handlers.tasks import last_record_set
@@ -997,16 +997,16 @@ _IMPULSE_WINDFALL_CAP = 3000.0
 _IMPULSE_WINDFALL_KEY_PREFIX = "impulse_windfall_бонус_"
 
 
-async def _get_impulse_windfall_bonus(user_notion_id: str, period_start: str) -> float:
+async def _get_impulse_windfall_bonus(user_id: str, period_start: str) -> float:
     """Сколько уже добавлено в 🎲 Импульсивные из windfall-доходов ЗА ТЕКУЩИЙ
     период. Ключ содержит period_start — новый период (после payday) → новый
     ключ → 0, отдельного сброса на ✅ Принять не требуется."""
-    if not user_notion_id:
+    if not user_id:
         return 0.0
     try:
         from core.repos.pg_memory_repo import PgMemoryRepo
         mems = await PgMemoryRepo().find_by_exact_key(
-            _IMPULSE_WINDFALL_KEY_PREFIX + period_start, user_notion_id,
+            _IMPULSE_WINDFALL_KEY_PREFIX + period_start, user_id,
         )
         if mems and mems[0].is_current:
             return float(mems[0].fact or 0)
@@ -1015,20 +1015,20 @@ async def _get_impulse_windfall_bonus(user_notion_id: str, period_start: str) ->
     return 0.0
 
 
-async def _add_impulse_windfall_bonus(user_notion_id: str, period_start: str, amount: float) -> float:
+async def _add_impulse_windfall_bonus(user_id: str, period_start: str, amount: float) -> float:
     """Прибавить к накопленному windfall-бонусу этого периода. Возвращает новую сумму.
 
     Ключ НЕ входит в income_/постоянно_/разовый_/лимит_ — это внутренний
     счётчик, не факт Памяти для показа Кай. Спрятан из Mini App «Память»
     через EXCLUDED_KEY_PREFIXES (miniapp/backend/routes/memory.py), тем же
     способом что tz_/city_."""
-    current = await _get_impulse_windfall_bonus(user_notion_id, period_start)
+    current = await _get_impulse_windfall_bonus(user_id, period_start)
     new_total = current + float(amount or 0)
-    if user_notion_id:
+    if user_id:
         from core.repos.memory_repo import _repo as _mem_repo
         await _mem_repo.upsert(
             str(new_total), _IMPULSE_WINDFALL_KEY_PREFIX + period_start,
-            "💰 Лимит", "nexus", "", "manual", user_notion_id,
+            "💰 Лимит", "nexus", "", "manual", user_id,
         )
     return new_total
 
@@ -1038,12 +1038,12 @@ async def _add_impulse_windfall_bonus(user_notion_id: str, period_start: str, am
 # молчаливого распределения (#часть2, коммит после 206f118).
 WINDFALL_MANUAL_THRESHOLD = 50000.0
 
-# uid → {"amount", "plan", "user_notion_id"} — между сообщением-предпросмотром
+# uid → {"amount", "plan", "user_id"} — между сообщением-предпросмотром
 # и нажатием одной из 4 кнопок ручного распределения крупной суммы.
 _pending_windfall_manual: Dict[int, dict] = {}
 
 
-async def _compute_windfall_plan(amount: float, user_notion_id: str, tz_offset: int) -> dict:
+async def _compute_windfall_plan(amount: float, user_id: str, tz_offset: int) -> dict:
     """Чистый расчёт (без записи в БД) — что случилось бы с этой суммой.
 
     Тяжёлый месяц (BUDGET_TIGHT_THRESHOLD, core.budget — та же граница что
@@ -1054,7 +1054,7 @@ async def _compute_windfall_plan(amount: float, user_notion_id: str, tz_offset: 
     """
     payday = await _get_payday()
     period_start, _period_end = _period_bounds(payday, tz_offset=tz_offset)
-    budget_data = await _load_budget_data(user_notion_id)
+    budget_data = await _load_budget_data(user_id)
 
     income_total = sum(float(i.get("amount", 0) or 0) for i in budget_data.get("доходы", []))
     fixed_total = sum(float(f.get("amount", 0) or 0) for f in budget_data.get("постоянные", []))
@@ -1066,7 +1066,7 @@ async def _compute_windfall_plan(amount: float, user_notion_id: str, tz_offset: 
     to_impulse = 0.0
     remainder = amount
     if is_tight:
-        accumulated = await _get_impulse_windfall_bonus(user_notion_id, period_start)
+        accumulated = await _get_impulse_windfall_bonus(user_id, period_start)
         headroom = max(0.0, _IMPULSE_WINDFALL_CAP - accumulated)
         to_impulse = min(amount, headroom)
         remainder = amount - to_impulse
@@ -1082,7 +1082,7 @@ async def _compute_windfall_plan(amount: float, user_notion_id: str, tz_offset: 
     }
 
 
-async def _apply_windfall_plan(amount: float, user_notion_id: str, plan: dict) -> str:
+async def _apply_windfall_plan(amount: float, user_id: str, plan: dict) -> str:
     """Записывает план из _compute_windfall_plan в БД, возвращает готовое
     сообщение для пользователя. reduce_amount теперь возвращает overpaid —
     если долг закрылся с излишком, он не теряется, уходит в подушку."""
@@ -1093,14 +1093,14 @@ async def _apply_windfall_plan(amount: float, user_notion_id: str, plan: dict) -
 
     used_after = 0.0
     if to_impulse > 0:
-        used_after = await _add_impulse_windfall_bonus(user_notion_id, period_start, to_impulse)
+        used_after = await _add_impulse_windfall_bonus(user_id, period_start, to_impulse)
         limits = await _get_limits("")
         current_impulse = limits.get(_cat_link(_CAT_IMPULSE), 0)
         new_impulse = current_impulse + to_impulse
         await _save_memory_entry(
             "лимит_импульсивный",
             "лимит: {} — {}₽/мес".format(_CAT_IMPULSE, int(round(new_impulse))),
-            user_notion_id,
+            user_id,
         )
 
     parts = ["💰 Непредвиденный доход {:,.0f}₽ распределён:".format(amount)]
@@ -1114,7 +1114,7 @@ async def _apply_windfall_plan(amount: float, user_notion_id: str, plan: dict) -
         new_debt_amount = None
         overpaid = 0.0
         if debt_name:
-            result = await _partial_debt_payment(debt_name, int(round(remainder)), user_notion_id)
+            result = await _partial_debt_payment(debt_name, int(round(remainder)), user_id)
             if result is not None:
                 new_debt_amount, overpaid = result
         if new_debt_amount is not None:
@@ -1123,7 +1123,7 @@ async def _apply_windfall_plan(amount: float, user_notion_id: str, plan: dict) -
             ))
             if overpaid > 0:
                 new_balance = await _cushion_repo.add_to_balance(
-                    user_notion_id, overpaid, source="windfall_income",
+                    user_id, overpaid, source="windfall_income",
                     note="переплата по долгу из непредвиденного дохода",
                 )
                 parts.append("→ 🛡️ Переплата {:,.0f}₽ сверху ушла в подушку (баланс {:,.0f}₽)".format(
@@ -1131,7 +1131,7 @@ async def _apply_windfall_plan(amount: float, user_notion_id: str, plan: dict) -
                 ))
         else:
             new_balance = await _cushion_repo.add_to_balance(
-                user_notion_id, remainder, source="windfall_income",
+                user_id, remainder, source="windfall_income",
                 note="непредвиденный доход",
             )
             parts.append("→ 🛡️ Подушка +{:,.0f}₽ (баланс {:,.0f}₽)".format(remainder, new_balance))
@@ -1169,12 +1169,12 @@ def _windfall_manual_keyboard() -> InlineKeyboardMarkup:
     ])
 
 
-async def _send_windfall_manual_prompt(message: Message, amount: float, uid: int, user_notion_id: str) -> None:
+async def _send_windfall_manual_prompt(message: Message, amount: float, uid: int, user_id: str) -> None:
     """amount >= WINDFALL_MANUAL_THRESHOLD — не распределяем молча, показываем
     предпросмотр авто-разбивки + кнопки ручного выбора."""
     tz_offset = await _get_user_tz(uid)
-    plan = await _compute_windfall_plan(amount, user_notion_id, tz_offset)
-    _pending_windfall_manual[uid] = {"amount": amount, "plan": plan, "user_notion_id": user_notion_id}
+    plan = await _compute_windfall_plan(amount, user_id, tz_offset)
+    _pending_windfall_manual[uid] = {"amount": amount, "plan": plan, "user_id": user_id}
     preview = _format_windfall_preview(plan)
     text = (
         "💰 <b>Крупное поступление: {:,.0f}₽</b>\n\n"
@@ -1185,14 +1185,14 @@ async def _send_windfall_manual_prompt(message: Message, amount: float, uid: int
 
 
 @router.callback_query(F.data == "windfall_all_cushion")
-async def on_windfall_all_cushion(call: CallbackQuery, user_notion_id: str = "") -> None:
+async def on_windfall_all_cushion(call: CallbackQuery, user_id: str = "") -> None:
     uid = call.from_user.id
     pending = _pending_windfall_manual.pop(uid, None)
     if not pending:
         await call.answer("Нет данных.")
         return
     amount = pending["amount"]
-    unid = pending.get("user_notion_id") or user_notion_id
+    unid = pending.get("user_id") or user_id
     from core.repos.pg_cushion_repo import _repo as _cushion_repo
     new_balance = await _cushion_repo.add_to_balance(
         unid, amount, source="windfall_income", note="крупное поступление — вся сумма в подушку",
@@ -1205,14 +1205,14 @@ async def on_windfall_all_cushion(call: CallbackQuery, user_notion_id: str = "")
 
 
 @router.callback_query(F.data == "windfall_close_debts")
-async def on_windfall_close_debts(call: CallbackQuery, user_notion_id: str = "") -> None:
+async def on_windfall_close_debts(call: CallbackQuery, user_id: str = "") -> None:
     uid = call.from_user.id
     pending = _pending_windfall_manual.pop(uid, None)
     if not pending:
         await call.answer("Нет данных.")
         return
     amount = pending["amount"]
-    unid = pending.get("user_notion_id") or user_notion_id
+    unid = pending.get("user_id") or user_id
     debts = pending["plan"].get("debts", [])
 
     remaining = amount
@@ -1261,20 +1261,20 @@ async def on_windfall_split(call: CallbackQuery) -> None:
 
 
 @router.callback_query(F.data == "windfall_asis")
-async def on_windfall_asis(call: CallbackQuery, user_notion_id: str = "") -> None:
+async def on_windfall_asis(call: CallbackQuery, user_id: str = "") -> None:
     uid = call.from_user.id
     pending = _pending_windfall_manual.pop(uid, None)
     if not pending:
         await call.answer("Нет данных.")
         return
     amount = pending["amount"]
-    unid = pending.get("user_notion_id") or user_notion_id
+    unid = pending.get("user_id") or user_id
     msg_text = await _apply_windfall_plan(amount, unid, pending["plan"])
     await call.message.edit_text(msg_text, parse_mode="HTML")
     await call.answer()
 
 
-async def _distribute_windfall_income(amount: float, uid: int, user_notion_id: str) -> str:
+async def _distribute_windfall_income(amount: float, uid: int, user_id: str) -> str:
     """Непредвиденный доход (не Зарплата/Практика) — авто-распределение.
 
     amount >= WINDFALL_MANUAL_THRESHOLD — НЕ распределяет молча, возвращает ""
@@ -1286,12 +1286,12 @@ async def _distribute_windfall_income(amount: float, uid: int, user_notion_id: s
         return ""
 
     tz_offset = await _get_user_tz(uid)
-    plan = await _compute_windfall_plan(amount, user_notion_id, tz_offset)
-    return await _apply_windfall_plan(amount, user_notion_id, plan)
+    plan = await _compute_windfall_plan(amount, user_id, tz_offset)
+    return await _apply_windfall_plan(amount, user_id, plan)
 
 
 async def handle_finance_text(message: Message, text: str, bot_label: str = "☀️ Nexus",
-                              user_notion_id: str = "") -> None:
+                              user_id: str = "") -> None:
     from core.config import config
     uid = message.from_user.id
 
@@ -1375,7 +1375,7 @@ async def handle_finance_text(message: Message, text: str, bot_label: str = "☀
             data["type_"] = "💰 Доход"
             data["confidence"] = "high"
         else:
-            _pending_finance[uid] = (data, user_notion_id)
+            _pending_finance[uid] = (data, user_id)
             amount = data.get("amount", 0)
             description = data.get("description", "?")
             kb = InlineKeyboardMarkup(inline_keyboard=[
@@ -1393,7 +1393,7 @@ async def handle_finance_text(message: Message, text: str, bot_label: str = "☀
             return
 
     # Высокая уверенность — пишем сразу
-    page_id = await _save_finance(data, config.nexus.db_finance, bot_label, user_notion_id, uid=uid)
+    page_id = await _save_finance(data, config.nexus.db_finance, bot_label, user_id, uid=uid)
     if not page_id:
         await message.answer("⚠️ Ошибка записи в Notion.")
         return
@@ -1416,7 +1416,7 @@ async def handle_finance_text(message: Message, text: str, bot_label: str = "☀
     if "Расход" in data.get("type_", ""):
         logger.info("finance saved: category=%s — calling budget check", data.get("category", ""))
         try:
-            await _check_budget_limit(data.get("category", ""), message, user_notion_id,
+            await _check_budget_limit(data.get("category", ""), message, user_id,
                                       tz_offset=await _get_user_tz(uid))
         except Exception as e:
             logger.error("budget check error: %s", e, exc_info=True)
@@ -1426,7 +1426,7 @@ async def handle_finance_text(message: Message, text: str, bot_label: str = "☀
             desc = (data.get("description") or "").strip()
             cat = data.get("category") or ""
             if desc:
-                matches = await find_matching_items(desc, cat, bot_label, user_notion_id)
+                matches = await find_matching_items(desc, cat, bot_label, user_id)
                 if matches:
                     buttons = []
                     item_names = []
@@ -1449,7 +1449,7 @@ async def handle_finance_text(message: Message, text: str, bot_label: str = "☀
     # Триггер при зарплате: показать краткий бюджет
     if "Доход" in data.get("type_", "") and "Зарплата" in data.get("category", ""):
         try:
-            budget_msg = await build_budget_message(user_notion_id, await _get_user_tz(uid))
+            budget_msg = await build_budget_message(user_id, await _get_user_tz(uid))
             if budget_msg:
                 await message.answer(f"💰 Зарплата получена! Твой бюджет на месяц:\n\n{budget_msg}", parse_mode="HTML")
         except Exception as e:
@@ -1462,10 +1462,10 @@ async def handle_finance_text(message: Message, text: str, bot_label: str = "☀
         try:
             windfall_amount = float(data.get("amount", 0) or 0)
             if windfall_amount >= WINDFALL_MANUAL_THRESHOLD:
-                await _send_windfall_manual_prompt(message, windfall_amount, uid, user_notion_id)
+                await _send_windfall_manual_prompt(message, windfall_amount, uid, user_id)
             else:
                 windfall_msg = await _distribute_windfall_income(
-                    windfall_amount, uid, user_notion_id,
+                    windfall_amount, uid, user_id,
                 )
                 if windfall_msg:
                     await message.answer(windfall_msg, parse_mode="HTML")
@@ -1474,7 +1474,7 @@ async def handle_finance_text(message: Message, text: str, bot_label: str = "☀
 
 
 @router.message(F.text)
-async def handle_finance_clarification(message: Message, user_notion_id: str = "") -> None:
+async def handle_finance_clarification(message: Message, user_id: str = "") -> None:
     """Текстовые ответы на уточнение: вместо кнопок или уточнение данных."""
     from core.config import config
 
@@ -1500,7 +1500,7 @@ async def handle_finance_clarification(message: Message, user_notion_id: str = "
         if text_raw.isdigit():
             _pending_limit.pop(uid, None)
             amount = int(text_raw)
-            await _save_limit_to_memory(cat_link, amount, user_notion_id)
+            await _save_limit_to_memory(cat_link, amount, user_id)
             await message.answer(f"✅ Лимит на {cat_link}: <b>{amount:,}₽/мес</b>")
             return
         elif text_raw.lower() in ("отмена", "нет", "cancel"):
@@ -1511,12 +1511,12 @@ async def handle_finance_clarification(message: Message, user_notion_id: str = "
     pending_entry = _pending_finance.get(uid)
     if not pending_entry:
         return
-    # Support both formats: data dict (old) or (data, user_notion_id) tuple (new)
+    # Support both formats: data dict (old) or (data, user_id) tuple (new)
     if isinstance(pending_entry, tuple):
         pending, stored_uid = pending_entry
     else:
         pending = pending_entry
-        stored_uid = user_notion_id
+        stored_uid = user_id
 
     text_lower = (message.text or "").strip().lower()
 
@@ -1527,7 +1527,7 @@ async def handle_finance_clarification(message: Message, user_notion_id: str = "
 
     if text_lower in ("записать", "да", "ок", "ok", "✅", "записать как есть"):
         _pending_finance.pop(uid, None)
-        page_id = await _save_finance(pending, config.nexus.db_finance, user_notion_id=stored_uid, uid=uid)
+        page_id = await _save_finance(pending, config.nexus.db_finance, user_id=stored_uid, uid=uid)
         if page_id:
             _last_page_id[uid] = page_id
             await react(message, "👌" if "Расход" in pending.get("type_", "") else "🏆")
@@ -1557,7 +1557,7 @@ async def handle_finance_clarification(message: Message, user_notion_id: str = "
         pass
 
     _pending_finance.pop(uid, None)
-    page_id = await _save_finance(pending, config.nexus.db_finance, user_notion_id=stored_uid, uid=uid)
+    page_id = await _save_finance(pending, config.nexus.db_finance, user_id=stored_uid, uid=uid)
     if not page_id:
         await message.answer("⚠️ Ошибка записи в Notion.")
         return
@@ -1583,7 +1583,7 @@ async def fin_save_asis(call: CallbackQuery) -> None:
         pending, stored_uid = pending_entry
     else:
         pending, stored_uid = pending_entry, ""
-    page_id = await _save_finance(pending, config.nexus.db_finance, user_notion_id=stored_uid, uid=uid)
+    page_id = await _save_finance(pending, config.nexus.db_finance, user_id=stored_uid, uid=uid)
     if page_id:
         _last_page_id[uid] = page_id
     await call.message.edit_text(_format_record(pending))
@@ -1619,7 +1619,7 @@ async def on_msg_hide(call: CallbackQuery) -> None:
 
 
 @router.callback_query(F.data.startswith("setlim_"))
-async def on_set_limit(call: CallbackQuery, user_notion_id: str = "") -> None:
+async def on_set_limit(call: CallbackQuery, user_id: str = "") -> None:
     """Обработчик кнопок установки лимита."""
     data = call.data  # setlim_{link}_{amount} or setlim_skip or setlim_{link}_custom
     if data == "setlim_skip":
@@ -1642,12 +1642,12 @@ async def on_set_limit(call: CallbackQuery, user_notion_id: str = "") -> None:
 
     # Сохранить лимит
     amount = int(value)
-    await _save_limit_to_memory(cat_link, amount, user_notion_id)
+    await _save_limit_to_memory(cat_link, amount, user_id)
     await call.message.edit_text(f"✅ Лимит на {cat_link}: <b>{amount:,}₽/мес</b>")
     await call.answer()
 
 
-async def _save_limit_to_memory(cat_link: str, amount: int, user_notion_id: str = "") -> None:
+async def _save_limit_to_memory(cat_link: str, amount: int, user_id: str = "") -> None:
     """Сохранить лимит в Память."""
     from core.repos.memory_repo import _repo as _mem_repo
     key = f"лимит_{cat_link}"
@@ -1659,7 +1659,7 @@ async def _save_limit_to_memory(cat_link: str, amount: int, user_notion_id: str 
             связь=cat_link,
             ключ=key,
             bot_label="☀️ Nexus",
-            user_notion_id=user_notion_id,
+            user_id=user_id,
             upsert=True,
         )
     except Exception as e:
@@ -1667,7 +1667,7 @@ async def _save_limit_to_memory(cat_link: str, amount: int, user_notion_id: str 
 
 
 @router.callback_query(F.data.startswith("fin_expense") | F.data.startswith("fin_income") | F.data.startswith("fin_barter"))
-async def handle_finance_clarify(call: CallbackQuery, user_notion_id: str = "") -> None:
+async def handle_finance_clarify(call: CallbackQuery, user_id: str = "") -> None:
     """Обработчик уточнения доход/расход/бартер для неясных операций."""
     from core.config import config
 
@@ -1687,7 +1687,7 @@ async def handle_finance_clarify(call: CallbackQuery, user_notion_id: str = "") 
         pending, stored_uid = pending_entry
     else:
         pending = pending_entry
-        stored_uid = user_notion_id
+        stored_uid = user_id
 
     amount = float(pending.get("amount", 0))
     category = pending.get("category", "💳 Прочее")
@@ -1704,7 +1704,7 @@ async def handle_finance_clarify(call: CallbackQuery, user_notion_id: str = "") 
     else:
         type_label = "💸 Расход"
 
-    eff_uid = stored_uid or user_notion_id
+    eff_uid = stored_uid or user_id
     result = await _repo.create_entry(
         db_id,
         description=description,
@@ -1714,7 +1714,7 @@ async def handle_finance_clarify(call: CallbackQuery, user_notion_id: str = "") 
         type_=type_label,
         source=source,
         bot_label="☀️ Nexus",
-        user_notion_id=eff_uid,
+        user_id=eff_uid,
     )
 
     if result:
@@ -1848,7 +1848,7 @@ async def _handle_multimonth_stats(
     type_filter: Optional[str],
     description_search: Optional[str],
     compare_mode: bool,
-    user_notion_id: str,
+    user_id: str,
     uid: int,
 ) -> str:
     """Статистика за несколько месяцев с разбивкой по каждому."""
@@ -1861,7 +1861,7 @@ async def _handle_multimonth_stats(
     for ms in month_strings:
         records = await _repo.month(
             ms,
-            user_notion_id=user_notion_id,
+            user_id=user_id,
             description_filter=notion_desc_kw,
             type_filter=type_filter or "",
         )
@@ -1935,9 +1935,9 @@ async def _handle_multimonth_stats(
     return await _stats_publish(report_title, lines)
 
 
-async def handle_finance_summary(query: str = "", user_notion_id: str = "", uid: int = 0) -> str:
+async def handle_finance_summary(query: str = "", user_id: str = "", uid: int = 0) -> str:
     """Возвращает строку со статистикой. Вызывающий сам отправляет её пользователю."""
-    logger.info("handle_finance_summary: user_notion_id=%r query=%r", user_notion_id, query)
+    logger.info("handle_finance_summary: user_id=%r query=%r", user_id, query)
     tz_offset = await _get_user_tz(uid)
     # Попробовать распарсить категорию и имя из запроса
     category_filter = None
@@ -1962,7 +1962,7 @@ async def handle_finance_summary(query: str = "", user_notion_id: str = "", uid:
 
     # Сравнение текущий vs предыдущий — приоритет над мультимесячным режимом
     if compare_mode:
-        return await get_finance_stats(_month(tz_offset), user_notion_id=user_notion_id,
+        return await get_finance_stats(_month(tz_offset), user_id=user_id,
                                       compare_prev=True, tz_offset=tz_offset)
 
     # Мультимесячный режим
@@ -1973,7 +1973,7 @@ async def handle_finance_summary(query: str = "", user_notion_id: str = "", uid:
             type_filter=type_filter,
             description_search=description_search,
             compare_mode=compare_mode,
-            user_notion_id=user_notion_id,
+            user_id=user_id,
             uid=uid,
         )
 
@@ -1986,7 +1986,7 @@ async def handle_finance_summary(query: str = "", user_notion_id: str = "", uid:
     # Notion делает фильтрацию по описанию и типу на стороне API
     records = await _repo.month(
         month_str,
-        user_notion_id=user_notion_id,
+        user_id=user_id,
         description_filter=notion_desc_kw,
         type_filter=type_filter or "",
     )
@@ -2284,7 +2284,7 @@ async def _notify_overpaid(message: Message, overpaid: float) -> None:
 
 
 @router.callback_query(F.data == "overpaid_cushion")
-async def on_overpaid_cushion(call: CallbackQuery, user_notion_id: str = "") -> None:
+async def on_overpaid_cushion(call: CallbackQuery, user_id: str = "") -> None:
     uid = call.from_user.id
     overpaid = _pending_overpaid.pop(uid, None)
     if not overpaid:
@@ -2292,7 +2292,7 @@ async def on_overpaid_cushion(call: CallbackQuery, user_notion_id: str = "") -> 
         return
     from core.repos.pg_cushion_repo import _repo as _cushion_repo
     new_balance = await _cushion_repo.add_to_balance(
-        user_notion_id, overpaid, source="debt_overpaid", note="переплата по долгу",
+        user_id, overpaid, source="debt_overpaid", note="переплата по долгу",
     )
     await call.message.edit_text(
         "🛡️ Переплата {:,.0f}₽ ушла в подушку. Баланс: {:,.0f}₽".format(overpaid, new_balance),
@@ -2308,32 +2308,32 @@ async def on_overpaid_keep(call: CallbackQuery) -> None:
     await call.answer()
 
 
-async def _deactivate_debt(name: str, user_notion_id: str = "") -> bool:
+async def _deactivate_debt(name: str, user_id: str = "") -> bool:
     """Deactivate a debt. Returns True if found."""
     from core.repos.pg_debts_repo import _repo as _debt_repo
-    return await _debt_repo.deactivate(user_notion_id, "i_owe", name)
+    return await _debt_repo.deactivate(user_id, "i_owe", name)
 
 
-async def _partial_debt_payment(name: str, payment: int, user_notion_id: str = "") -> Optional[Tuple[int, float]]:
+async def _partial_debt_payment(name: str, payment: int, user_id: str = "") -> Optional[Tuple[int, float]]:
     """Reduce debt by payment. Returns (new_amount, overpaid) or None if not found.
 
     overpaid > 0 — платёж больше остатка долга: долг закрыт (new_amount=0),
     излишек не потерян, caller решает что с ним делать (см. вызывающие места)."""
     from core.repos.pg_debts_repo import _repo as _debt_repo
-    result = await _debt_repo.reduce_amount(user_notion_id, "i_owe", name, float(payment))
+    result = await _debt_repo.reduce_amount(user_id, "i_owe", name, float(payment))
     if result is None:
         return None
     new_amount, _closed, overpaid = result
     return int(new_amount), overpaid
 
 
-async def _deactivate_goal(name: str, user_notion_id: str = "") -> bool:
+async def _deactivate_goal(name: str, user_id: str = "") -> bool:
     """Deactivate a goal in Memory (PG, #145). Returns True if found."""
-    if not user_notion_id:
+    if not user_id:
         return False
     key_hint = name.lower().replace(" ", "_")
     from core.repos.memory_repo import _repo as _mem_repo
-    mems = await _mem_repo.find_by_key_prefixes(["цель_" + key_hint], user_notion_id)
+    mems = await _mem_repo.find_by_key_prefixes(["цель_" + key_hint], user_id)
     active = [m for m in mems if m.is_current]
     if active:
         await _mem_repo.set_active([m.id for m in active], False)
@@ -2341,26 +2341,26 @@ async def _deactivate_goal(name: str, user_notion_id: str = "") -> bool:
     return False
 
 
-async def _save_debt(name: str, amount: int, deadline: str, user_notion_id: str = "") -> None:
+async def _save_debt(name: str, amount: int, deadline: str, user_id: str = "") -> None:
     """Create or update a debt in the debts table."""
     from core.repos.pg_debts_repo import _repo as _debt_repo
     await _debt_repo.upsert(
-        user_notion_id, name, "i_owe",
+        user_id, name, "i_owe",
         amount=float(amount),
         deadline=deadline or None,
     )
 
 
-async def _save_goal(name: str, amount: int, user_notion_id: str = "") -> None:
+async def _save_goal(name: str, amount: int, user_id: str = "") -> None:
     """Create a new goal entry in Memory."""
     await _save_memory_entry(
         f"цель_{name.lower().replace(' ', '_')}",
         f"цель: {name} — {amount}₽ · откладываю 0₽/мес",
-        user_notion_id,
+        user_id,
     )
 
 
-async def handle_debt_command(message: Message, user_notion_id: str = "") -> None:
+async def handle_debt_command(message: Message, user_id: str = "") -> None:
     """Handle debt operations: close, new, partial payment."""
     text = (message.text or "").strip()
 
@@ -2368,7 +2368,7 @@ async def handle_debt_command(message: Message, user_notion_id: str = "") -> Non
     close_m = re.search(r'(?:закрыла?|погасила?)\s+долг\s+(\S+)', text, re.I)
     if close_m:
         name = close_m.group(1)
-        found = await _deactivate_debt(name, user_notion_id)
+        found = await _deactivate_debt(name, user_id)
         if found:
             await message.answer(
                 f"🎉 <b>Долг {name} закрыт!</b> Молодец, Кай!",
@@ -2384,7 +2384,7 @@ async def handle_debt_command(message: Message, user_notion_id: str = "") -> Non
         name = new_m.group(1)
         amount = _parse_k_amount(new_m.group(2))
         deadline = (new_m.group(3) or "").strip()
-        await _save_debt(name, amount, deadline, user_notion_id)
+        await _save_debt(name, amount, deadline, user_id)
         dl_str = f" до {deadline}" if deadline else ""
         await message.answer(
             f"📋 Записала долг: <b>{name} — {amount:,.0f}₽</b>{dl_str}",
@@ -2397,7 +2397,7 @@ async def handle_debt_command(message: Message, user_notion_id: str = "") -> Non
     if partial_m:
         name = partial_m.group(1)
         amount = _parse_k_amount(partial_m.group(2))
-        result = await _partial_debt_payment(name, amount, user_notion_id)
+        result = await _partial_debt_payment(name, amount, user_id)
         if result is None:
             await message.answer(f"🤔 Не нашла долг «{name}» в памяти.", parse_mode="HTML")
         else:
@@ -2427,7 +2427,7 @@ _CUSHION_DEPOSIT_RE = re.compile(
 _CUSHION_AMOUNT_RE = re.compile(r"(\d[\d\s]*(?:[.,]\d+)?\s*[кk]?)", re.IGNORECASE)
 
 
-async def handle_cushion_command(message: Message, text: str = "", user_notion_id: str = "") -> None:
+async def handle_cushion_command(message: Message, text: str = "", user_id: str = "") -> None:
     """Подушка: пополнение баланса или установка цели-ориентира.
 
     "положила в подушку 5000" / "добавь в подушку 5к" → +5000 к балансу.
@@ -2457,9 +2457,9 @@ async def handle_cushion_command(message: Message, text: str = "", user_notion_i
 
     if is_deposit:
         new_balance = await _cushion_repo.add_to_balance(
-            user_notion_id, amount, source="manual", note="",
+            user_id, amount, source="manual", note="",
         )
-        c = await _cushion_repo.get(user_notion_id)
+        c = await _cushion_repo.get(user_id)
         target = c.target if c else None
         tail = ""
         if target:
@@ -2471,8 +2471,8 @@ async def handle_cushion_command(message: Message, text: str = "", user_notion_i
             parse_mode="HTML",
         )
     else:
-        await _cushion_repo.set_target(user_notion_id, float(amount))
-        c = await _cushion_repo.get(user_notion_id)
+        await _cushion_repo.set_target(user_id, float(amount))
+        c = await _cushion_repo.get(user_id)
         balance = c.balance if c else 0
         await message.answer(
             "🛡️ Цель подушки: <b>{:,.0f}₽</b>\nСейчас накоплено: {:,.0f}₽".format(amount, balance),
@@ -2523,43 +2523,43 @@ _THEY_OWE_RETURN_RE = re.compile(
 )
 
 
-async def _save_they_owe(name: str, amount: int, deadline: str, user_notion_id: str = "") -> None:
+async def _save_they_owe(name: str, amount: int, deadline: str, user_id: str = "") -> None:
     """Create or update a they_owe debt (someone owes Кай)."""
     from core.repos.pg_debts_repo import _repo as _debt_repo
     await _debt_repo.upsert(
-        user_notion_id, name, "they_owe",
+        user_id, name, "they_owe",
         amount=float(amount),
         deadline=deadline or None,
     )
 
 
-async def _deactivate_they_owe(name: str, user_notion_id: str = "") -> bool:
+async def _deactivate_they_owe(name: str, user_id: str = "") -> bool:
     """Close a they_owe debt. Returns True if found."""
     from core.repos.pg_debts_repo import _repo as _debt_repo
-    return await _debt_repo.deactivate(user_notion_id, "they_owe", name)
+    return await _debt_repo.deactivate(user_id, "they_owe", name)
 
 
-async def _partial_they_owe_payment(name: str, payment: int, user_notion_id: str = "") -> Optional[Tuple[int, float]]:
+async def _partial_they_owe_payment(name: str, payment: int, user_id: str = "") -> Optional[Tuple[int, float]]:
     """Record partial return of a they_owe debt. Returns (new_amount, overpaid) or None if not found.
 
     overpaid > 0 — вернули больше, чем был должен: долг закрыт (new_amount=0),
     излишек не потерян, caller решает что с ним делать (см. вызывающее место)."""
     from core.repos.pg_debts_repo import _repo as _debt_repo
-    result = await _debt_repo.reduce_amount(user_notion_id, "they_owe", name, float(payment))
+    result = await _debt_repo.reduce_amount(user_id, "they_owe", name, float(payment))
     if result is None:
         return None
     new_amount, _closed, overpaid = result
     return int(new_amount), overpaid
 
 
-async def handle_they_owe_command(message: Message, user_notion_id: str = "") -> None:
+async def handle_they_owe_command(message: Message, user_id: str = "") -> None:
     """Handle they_owe operations: record a loan given, partial/full return, view list."""
     text = (message.text or "").strip()
 
     # "мне должны" / "мои должники" → список
     if re.search(r'мне\s+должны\b|мои\s+должник', text, re.I):
         from core.repos.pg_debts_repo import _repo as _debt_repo
-        debts = await _debt_repo.list_active(user_notion_id, kind="they_owe")
+        debts = await _debt_repo.list_active(user_id, kind="they_owe")
         if not debts:
             await message.answer("👀 Никто тебе ничего не должен.", parse_mode="HTML")
         else:
@@ -2581,7 +2581,7 @@ async def handle_they_owe_command(message: Message, user_notion_id: str = "") ->
             amount_str = ret_m.group(2)
             if amount_str:
                 payment = _parse_k_amount(amount_str)
-                result = await _partial_they_owe_payment(name, payment, user_notion_id)
+                result = await _partial_they_owe_payment(name, payment, user_id)
                 if result is None:
                     await message.answer(f"🤔 Не нашла долг «{name}».", parse_mode="HTML")
                 else:
@@ -2599,7 +2599,7 @@ async def handle_they_owe_command(message: Message, user_notion_id: str = "") ->
                             parse_mode="HTML",
                         )
             else:
-                found = await _deactivate_they_owe(name, user_notion_id)
+                found = await _deactivate_they_owe(name, user_id)
                 if found:
                     await message.answer(f"🎉 <b>{name} вернул(а) долг!</b>", parse_mode="HTML")
                 else:
@@ -2612,7 +2612,7 @@ async def handle_they_owe_command(message: Message, user_notion_id: str = "") ->
         name = create_m.group(1)
         amount = _parse_k_amount(create_m.group(2))
         deadline = (create_m.group(3) or "").strip()
-        await _save_they_owe(name, amount, deadline, user_notion_id)
+        await _save_they_owe(name, amount, deadline, user_id)
         dl_str = f" до {deadline}" if deadline else ""
         await message.answer(
             f"👥 Записала: <b>{name} должен(на) тебе {amount:,.0f}₽</b>{dl_str}",
@@ -2627,7 +2627,7 @@ async def handle_they_owe_command(message: Message, user_notion_id: str = "") ->
     )
 
 
-async def handle_goal_command(message: Message, user_notion_id: str = "") -> None:
+async def handle_goal_command(message: Message, user_id: str = "") -> None:
     """Handle goal operations: new, remove, achieved."""
     text = (message.text or "").strip()
 
@@ -2636,7 +2636,7 @@ async def handle_goal_command(message: Message, user_notion_id: str = "") -> Non
     if new_m:
         name = new_m.group(1).strip()
         amount = _parse_k_amount(new_m.group(2))
-        await _save_goal(name, amount, user_notion_id)
+        await _save_goal(name, amount, user_id)
         await message.answer(
             f"🎯 Цель: <b>{name} — {amount:,.0f}₽</b>",
             reply_markup=_recalc_keyboard(), parse_mode="HTML",
@@ -2647,7 +2647,7 @@ async def handle_goal_command(message: Message, user_notion_id: str = "") -> Non
     remove_m = re.search(r'(?:убери|достигла?|купила?)\s+цель\s+(\S+)', text, re.I)
     if remove_m:
         name = remove_m.group(1)
-        found = await _deactivate_goal(name, user_notion_id)
+        found = await _deactivate_goal(name, user_id)
         is_achieved = bool(re.search(r'(?:достигла?|купила?)', text, re.I))
         if found:
             if is_achieved:
@@ -2667,7 +2667,7 @@ async def handle_goal_command(message: Message, user_notion_id: str = "") -> Non
     await message.answer("🤔 Не поняла команду. Примеры:\n<i>новая цель ноутбук 200к\nубери цель ноутбук\nдостигла цель телефон</i>", parse_mode="HTML")
 
 
-async def handle_limit_override(message: Message, category: str, amount_str: str, user_notion_id: str = "") -> None:
+async def handle_limit_override(message: Message, category: str, amount_str: str, user_id: str = "") -> None:
     """User manually sets a limit: 'лимит привычки 12к'."""
     amount = _parse_k_amount(amount_str)
     # Канонизация категории лимита локально (PG/Memory, без Notion).
@@ -2679,7 +2679,7 @@ async def handle_limit_override(message: Message, category: str, amount_str: str
     await _save_memory_entry(
         f"лимит_{link}",
         f"лимит: {real_cat} — {amount}₽/мес [ручной]",
-        user_notion_id,
+        user_id,
     )
     await message.answer(
         f"✅ Лимит <b>{real_cat}: {amount:,.0f}₽/мес</b> [ручной]",
@@ -2704,7 +2704,7 @@ _ONE_TIME_PARSE_SYSTEM = (
 
 
 async def _write_one_time_expense(desc: str, amount: float, category: str = "💳 Прочее",
-                                  user_notion_id: str = "", bot_label: str = "☀️ Nexus",
+                                  user_id: str = "", bot_label: str = "☀️ Nexus",
                                   uid: int = 0) -> "Optional[str]":
     """Единый писатель разовой траты → обычная finance-транзакция (💸 Расход).
 
@@ -2717,12 +2717,12 @@ async def _write_one_time_expense(desc: str, amount: float, category: str = "�
     return await _save_finance(
         {"amount": float(amount or 0), "category": cat, "type_": "💸 Расход",
          "source": "💳 Карта", "description": (desc or "разовый расход").strip()},
-        config.nexus.db_finance, bot_label, user_notion_id, uid=uid,
+        config.nexus.db_finance, bot_label, user_id, uid=uid,
     )
 
 
 async def handle_one_time_expense(message: Message, text: str, bot_label: str = "☀️ Nexus",
-                                  user_notion_id: str = "") -> None:
+                                  user_id: str = "") -> None:
     """Разовый расход(ы) → обычные finance-транзакции (💸 Расход), НЕ в память.
 
     Так трата не пересчитывается в бюджете следующего периода, но попадает в
@@ -2760,7 +2760,7 @@ async def handle_one_time_expense(message: Message, text: str, bot_label: str = 
         return
 
     for desc, amount, cat in parsed:
-        page_id = await _write_one_time_expense(desc, amount, cat, user_notion_id, bot_label, uid)
+        page_id = await _write_one_time_expense(desc, amount, cat, user_id, bot_label, uid)
         if page_id:
             _last_page_id[uid] = page_id
 
@@ -2777,7 +2777,7 @@ async def handle_one_time_expense(message: Message, text: str, bot_label: str = 
         )
 
 
-async def expense_from_task_note(note: str, user_notion_id: str = "", uid: int = 0,
+async def expense_from_task_note(note: str, user_id: str = "", uid: int = 0,
                                  bot_label: str = "☀️ Nexus") -> "Optional[Tuple[str, float, str]]":
     """Заметка к задаче с денежной деталью → finance-транзакция при выполнении.
 
@@ -2818,7 +2818,7 @@ async def expense_from_task_note(note: str, user_notion_id: str = "", uid: int =
     except Exception as e:
         logger.error("expense_from_task_note category parse: %s", e)
 
-    page_id = await _write_one_time_expense(note, amount, cat, user_notion_id, bot_label, uid)
+    page_id = await _write_one_time_expense(note, amount, cat, user_id, bot_label, uid)
     if not page_id:
         return None
     return (note, amount, cat)
@@ -2828,7 +2828,7 @@ async def expense_from_task_note(note: str, user_notion_id: str = "", uid: int =
 
 
 async def _handle_impulse_overflow(category: str, overflow: float, message: Message,
-                                    user_notion_id: str, period_start: str, tz_offset: int = 3) -> None:
+                                    user_id: str, period_start: str, tz_offset: int = 3) -> None:
     """Auto-create impulse expense for overspend."""
     await _repo.add(
         date=datetime.now(_user_tz(tz_offset)).strftime("%Y-%m-%d"),
@@ -2837,11 +2837,11 @@ async def _handle_impulse_overflow(category: str, overflow: float, message: Mess
         type_="💸 Расход",
         source="💳 Карта",
         description=f"Превышение {category}: {overflow:.0f}₽",
-        user_notion_id=user_notion_id,
+        user_id=user_id,
     )
 
 
-async def _calc_impulse_status(period_start: str, user_notion_id: str = "",
+async def _calc_impulse_status(period_start: str, user_id: str = "",
                                tz_offset: int = 3) -> Tuple[float, float]:
     """Calculate impulse budget limit and usage for period."""
     impulse_limit = 0.0
@@ -2856,7 +2856,7 @@ async def _calc_impulse_status(period_start: str, user_notion_id: str = "",
     records = await _repo.query_records(
         type_="💸 Расход", category="🎲 Импульсивные",
         date_from=period_start, date_to=now.strftime("%Y-%m-%d"), page_size=200,
-        user_notion_id=user_notion_id,
+        user_id=user_id,
     )
     impulse_used = sum(float(p.amount or 0) for p in records)
     return impulse_limit, impulse_used
@@ -3108,10 +3108,10 @@ async def _period_spending(tz_offset: int = 3) -> Tuple[Dict[str, float], float]
 _ONE_TIME_MARKER_RE = re.compile(r'разов(ый|о)\s*:', re.IGNORECASE)
 
 
-async def _build_sonnet_input(uid: int, user_notion_id: str) -> str:
+async def _build_sonnet_input(uid: int, user_id: str) -> str:
     """Build full context JSON for Sonnet analysis."""
     tz_offset = await _get_user_tz(uid)
-    budget = await _load_budget_data(user_notion_id)
+    budget = await _load_budget_data(user_id)
     payday = await _get_payday()
     period_start, period_end = _period_bounds(payday, tz_offset=tz_offset)
     now = datetime.now(_user_tz(tz_offset))
@@ -3381,25 +3381,25 @@ def _months_until(deadline_str: str) -> int:
 
 # ── Start / Collect / Finish ─────────────────────────────────────────────────
 
-async def start_budget_analysis(message: Message, user_notion_id: str = "") -> None:
+async def start_budget_analysis(message: Message, user_id: str = "") -> None:
     """v3.0: /budget shows SAVED plan from Memory. Recalc only via button."""
     uid = message.from_user.id
-    budget = await _load_budget_data(user_notion_id)
+    budget = await _load_budget_data(user_id)
     has_data = budget.get("лимиты") or budget.get("постоянные")
 
     if not has_data:
-        await start_budget_setup(message, user_notion_id)
+        await start_budget_setup(message, user_id)
         return
 
     # Has data → show saved plan with progress (NO Sonnet call)
-    budget_text = await build_budget_message(user_notion_id, await _get_user_tz(uid))
+    budget_text = await build_budget_message(user_id, await _get_user_tz(uid))
     if not budget_text:
-        await start_budget_setup(message, user_notion_id)
+        await start_budget_setup(message, user_id)
         return
 
     # Store notion_uid for callbacks
     state = _budget_get(uid) or {}
-    state["notion_uid"] = user_notion_id
+    state["notion_uid"] = user_id
     _budget_set(uid, state)
 
     buttons = [[
@@ -3417,10 +3417,10 @@ async def start_budget_analysis(message: Message, user_notion_id: str = "") -> N
     )
 
 
-async def start_budget_setup(message: Message, user_notion_id: str = "") -> None:
+async def start_budget_setup(message: Message, user_id: str = "") -> None:
     """Начать сбор данных для бюджета (one-shot)."""
     uid = message.from_user.id
-    state = {"buf": [], "notion_uid": user_notion_id, "state": "collecting"}
+    state = {"buf": [], "notion_uid": user_id, "state": "collecting"}
     _budget_set(uid, state)
 
     sent = await message.answer(
@@ -3444,7 +3444,7 @@ async def start_budget_setup(message: Message, user_notion_id: str = "") -> None
     _budget_set(uid, state)
 
 
-async def handle_budget_setup_text(message: Message, user_notion_id: str = "") -> bool:
+async def handle_budget_setup_text(message: Message, user_id: str = "") -> bool:
     """Перехват текста во время настройки бюджета. Возвращает True если обработано."""
     uid = message.from_user.id
     state = _budget_get(uid)
@@ -3766,22 +3766,22 @@ async def on_budget_variant_choice(call: CallbackQuery) -> None:
 
 
 @router.callback_query(F.data.startswith("bsetup_priog_"))
-async def on_budget_priority_goal(call: CallbackQuery, user_notion_id: str = "") -> None:
+async def on_budget_priority_goal(call: CallbackQuery, user_id: str = "") -> None:
     """Выбор приоритетной цели после Принятия — маркер в Память, БЕЗ пересчёта.
 
     Сессия /budget к этому моменту уже закрыта (on_budget_accept), поэтому имя
-    цели берём из callback_data, а user_notion_id — из middleware.
+    цели берём из callback_data, а user_id — из middleware.
     """
     goal_name = call.data[len("bsetup_priog_"):].strip()
     if not goal_name:
         await call.answer()
         return
 
-    if user_notion_id:
+    if user_id:
         await _save_memory_entry(
             "goal_priority",
             "приоритет цели: {}".format(goal_name),
-            user_notion_id,
+            user_id,
         )
 
     await call.answer("🎯 Приоритет: {}".format(goal_name))
@@ -4407,7 +4407,7 @@ async def _upsert_budget_checklist(
     title: str,
     item_names: List[str],
     deadline_iso: str,
-    user_notion_id: str,
+    user_id: str,
     chat_id: int,
     tz_offset: int = 3,
 ) -> None:
@@ -4447,13 +4447,13 @@ async def _upsert_budget_checklist(
     reminder_iso = reminder_dt.strftime("%Y-%m-%d") if reminder_dt.date() > today_local.date() else ""
 
     pg_tasks = _PgTasksRepo()
-    existing = await pg_tasks.find_by_title(title, user_notion_id=user_notion_id)
+    existing = await pg_tasks.find_by_title(title, user_id=user_id)
     task_id = next((t.id for t in existing if t.title == title), None)
 
     if task_id:
         # Пересоздаём подзадачи под новый список — дедлайн/напоминание не
         # трогаем (тот же период, тот же title → они не изменились).
-        old_items = await _lists_repo.get("📋 Чеклист", "☀️ Nexus", user_notion_id)
+        old_items = await _lists_repo.get("📋 Чеклист", "☀️ Nexus", user_id)
         stale_ids = [it["id"] for it in old_items if it.get("task_rel") == task_id]
         if stale_ids:
             await _lists_repo.archive(stale_ids)
@@ -4468,8 +4468,8 @@ async def _upsert_budget_checklist(
         }
         if reminder_iso:
             props["Напоминание"] = _date_with_tz(reminder_iso, tz_offset)
-        if user_notion_id:
-            props["🪪 Пользователи"] = _relation(user_notion_id)
+        if user_id:
+            props["🪪 Пользователи"] = _relation(user_id)
 
         from nexus.repos.tasks_repo import _repo as _tasks_repo
         from core.config import config
@@ -4485,7 +4485,7 @@ async def _upsert_budget_checklist(
             await _schedule_deadline_check(chat_id, title, deadline_iso, task_id, tz_offset)
 
     items = [{"name": name, "group": title, "task_rel": task_id} for name in item_names]
-    await _lists_repo.add(items, "📋 Чеклист", "☀️ Nexus", user_notion_id)
+    await _lists_repo.add(items, "📋 Чеклист", "☀️ Nexus", user_id)
 
 
 # ── Save Plan ────────────────────────────────────────────────────────────────
@@ -4774,21 +4774,21 @@ async def _save_budget_plan(message: Message, uid: int) -> None:
 # ── Save to Memory ───────────────────────────────────────────────────────────
 
 
-async def _save_memory_entry(key: str, fact: str, user_notion_id: str = "") -> None:
+async def _save_memory_entry(key: str, fact: str, user_id: str = "") -> None:
     """Upsert бюджет-памяти в PG (#145).
 
     Единая категория «💰 Лимит» для ВСЕХ бюджетных ключей (постоянно_/цель_/
     лимит_/income_/долг_) — консистентно с натуральным путём
     core.memory._PARSE_SYSTEM. find по key+category → update; иначе create.
     """
-    if not user_notion_id:
-        logger.warning("_save_memory_entry: no user_notion_id, skip key=%s", key)
+    if not user_id:
+        logger.warning("_save_memory_entry: no user_id, skip key=%s", key)
         return
     from core.repos.memory_repo import _repo as _mem_repo
-    logger.info("_save_memory_entry: key=%s user=%s", key, user_notion_id[:8])
+    logger.info("_save_memory_entry: key=%s user=%s", key, user_id[:8])
     try:
         await _mem_repo.upsert(
-            fact, key, "💰 Лимит", "nexus", "", "manual", user_notion_id,
+            fact, key, "💰 Лимит", "nexus", "", "manual", user_id,
         )
     except Exception as e:
         logger.error("_save_memory_entry FAILED: %s for key=%s", e, key)
@@ -4797,7 +4797,7 @@ async def _save_memory_entry(key: str, fact: str, user_notion_id: str = "") -> N
 # ── Payday Review + Reminder ─────────────────────────────────────────────────
 
 
-async def _budget_period_review(user_notion_id: str = "", tz_offset: int = 3) -> Tuple[str, float]:
+async def _budget_period_review(user_id: str = "", tz_offset: int = 3) -> Tuple[str, float]:
     """Review spending vs limits for the PREVIOUS period. Returns (formatted_text, savings_total).
 
     tz_offset — личный tz пользователя (границы прошлого периода по его дню)."""
@@ -4807,7 +4807,7 @@ async def _budget_period_review(user_notion_id: str = "", tz_offset: int = 3) ->
     # Get spending for that period
     records = await _repo.query_records(
         type_="💸 Расход", date_from=period_start_str, date_to=period_end_str, page_size=500,
-        user_notion_id=user_notion_id,
+        user_id=user_id,
     )
 
     spending_by_cat: Dict[str, float] = {}
@@ -4820,7 +4820,7 @@ async def _budget_period_review(user_notion_id: str = "", tz_offset: int = 3) ->
     limits = await _get_limits("")
 
     # Get debt payments
-    budget_data = await _load_budget_data(user_notion_id)
+    budget_data = await _load_budget_data(user_id)
     debts = budget_data.get("долги", [])
 
     # Format review
@@ -4899,7 +4899,7 @@ async def _budget_period_review(user_notion_id: str = "", tz_offset: int = 3) ->
     return "\n".join(lines), total_saved
 
 
-async def maybe_payday_reminder(message: Message, user_notion_id: str = "") -> None:
+async def maybe_payday_reminder(message: Message, user_id: str = "") -> None:
     """Send period review + payday reminder once per period start."""
     payday = await _get_payday()
     uid = message.from_user.id
@@ -4907,10 +4907,10 @@ async def maybe_payday_reminder(message: Message, user_notion_id: str = "") -> N
     now = datetime.now(_user_tz(tz_offset))
     if now.day != payday:
         return
-    await _send_payday_review(uid, user_notion_id, tz_offset=tz_offset)
+    await _send_payday_review(uid, user_id, tz_offset=tz_offset)
 
 
-async def _send_payday_review(uid: int, user_notion_id: str = "", bot=None,
+async def _send_payday_review(uid: int, user_id: str = "", bot=None,
                               tz_offset: Optional[int] = None) -> None:
     """Core payday review logic — works both reactively and from cron.
 
@@ -4924,7 +4924,7 @@ async def _send_payday_review(uid: int, user_notion_id: str = "", bot=None,
     _payday_mark(uid, today_str)
 
     state = _budget_get(uid) or {}
-    state["notion_uid"] = state.get("notion_uid", user_notion_id)
+    state["notion_uid"] = state.get("notion_uid", user_id)
 
     if bot is None:
         from aiogram import Bot
@@ -4934,7 +4934,7 @@ async def _send_payday_review(uid: int, user_notion_id: str = "", bot=None,
     # Generate period review first
     savings_total = 0.0
     try:
-        review_text, savings_total = await _budget_period_review(user_notion_id, tz_offset)
+        review_text, savings_total = await _budget_period_review(user_id, tz_offset)
         state["savings_from_last_period"] = savings_total
         _budget_set(uid, state)
         await bot.send_message(uid, review_text, parse_mode="HTML")
@@ -4949,14 +4949,14 @@ async def _send_payday_review(uid: int, user_notion_id: str = "", bot=None,
     # из ревью, если > 0 — работает в обоих типах месяца).
     try:
         from core.repos.pg_cushion_repo import _repo as _cushion_repo
-        c = await _cushion_repo.get(user_notion_id)
+        c = await _cushion_repo.get(user_id)
         planned = float(c.planned_contribution) if c else 0.0
         saved = float(savings_total) if savings_total and savings_total > 0 else 0.0
         total = int(round(planned + saved))
         if total > 0:
             _prev_start, _prev_end = _period_bounds(await _get_payday(), previous=True, tz_offset=tz_offset)
             new_balance = await _cushion_repo.add_to_balance(
-                user_notion_id, total, source="payday_auto",
+                user_id, total, source="payday_auto",
                 note="план {:.0f} + экономия {:.0f} · период {}".format(
                     planned, saved, _prev_start[:7]),
             )
@@ -5009,7 +5009,7 @@ async def proactive_budget_review(bot) -> None:
             if not user_data.get("permissions", {}).get("finance", False):
                 logger.info("proactive_budget_review: skip uid=%s (no finance permission)", tg_id)
                 continue
-            user_notion_id = user_data.get("notion_page_id", "")
-            await _send_payday_review(tg_id, user_notion_id, bot)
+            user_id = user_data.get("notion_page_id", "")
+            await _send_payday_review(tg_id, user_id, bot)
         except Exception as e:
             logger.error("proactive_budget_review: uid=%s error: %s", tg_id, e)

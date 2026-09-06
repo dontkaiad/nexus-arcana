@@ -18,7 +18,7 @@ router = Router()
 logger = logging.getLogger("arcana.base")
 
 _clarify: dict = {}  # user_id → original_text
-_pending_unknown: dict = {}  # user_id → (text, user_notion_id, ts)
+_pending_unknown: dict = {}  # user_id → (text, user_id, ts)
 
 ROUTER_SYSTEM = """Сначала исправь опечатки, потом определи тип. Ответь ТОЛЬКО одним словом.
 
@@ -107,14 +107,14 @@ def _has_past_tense(text: str) -> bool:
 
 
 @router.message(Command("tz"))
-async def cmd_tz(message: Message, user_notion_id: str = "") -> None:
+async def cmd_tz(message: Message, user_id: str = "") -> None:
     """Установить часовой пояс. /tz UTC+5 или /tz Екатеринбург"""
     from core.shared_handlers import handle_tz_command
-    await handle_tz_command(message, user_notion_id)
+    await handle_tz_command(message, user_id)
 
 
 @router.message(Command("cancel"))
-async def cmd_cancel(message: Message, user_notion_id: str = "") -> None:
+async def cmd_cancel(message: Message, user_id: str = "") -> None:
     """Сбросить активный pending (partial / preview / уточнение)."""
     from arcana.handlers.work_preview import drop_pending, has_pending
     uid = message.from_user.id
@@ -124,7 +124,7 @@ async def cmd_cancel(message: Message, user_notion_id: str = "") -> None:
 
 
 @router.message(Command("clear_pending"))
-async def cmd_clear_pending(message: Message, user_notion_id: str = "") -> None:
+async def cmd_clear_pending(message: Message, user_id: str = "") -> None:
     """Дебаг: дропнуть все pending состояния пользователя
     (work_preview, tarot). Доступ ограничен whitelist'ом Арканы."""
     from arcana.handlers.work_preview import drop_pending as drop_work
@@ -164,7 +164,7 @@ async def cmd_start(message: Message) -> None:
 
 
 @router.message(Command("help"))
-async def cmd_help(message: Message, user_notion_id: str = "") -> None:
+async def cmd_help(message: Message, user_id: str = "") -> None:
     await message.answer(
         "🌒 <b>Arcana</b> — цифровой гримуар\n\n"
 
@@ -203,7 +203,7 @@ async def cmd_help(message: Message, user_notion_id: str = "") -> None:
 
 
 async def _handle_tarot_correction(
-    message: Message, correction_text: str, pending: dict, user_notion_id: str
+    message: Message, correction_text: str, pending: dict, user_id: str
 ) -> None:
     """Юзер правит трактовку — Claude корректирует по справочнику."""
     uid = message.from_user.id
@@ -236,7 +236,7 @@ async def _handle_tarot_correction(
         pending["client_name"] = new_client_name
         pending["self_client_missing"] = False
         try:
-            c = await client_find(new_client_name, user_notion_id=user_notion_id)
+            c = await client_find(new_client_name, user_id=user_id)
             pending["client_id"] = c["id"] if c else None
         except Exception:
             pending["client_id"] = None
@@ -323,7 +323,7 @@ async def _handle_tarot_correction(
 
 @router.message()
 async def route_message(
-    message: Message, user_notion_id: str = "", _text: str = "", _raw: str = "",
+    message: Message, user_id: str = "", _text: str = "", _raw: str = "",
 ) -> None:
     # _raw — сырой Whisper-транскрипт ДО normalize_text (только голос). Реферренс
     # граундинга карт: сверяем карты парсера с тем, что реально сказано, а не со
@@ -345,21 +345,21 @@ async def route_message(
             try:
                 if await _bp_reply(
                     message, message.text or message.caption or "",
-                    user_notion_id,
+                    user_id,
                 ):
                     return
             except Exception as e:
                 logger.warning("barter reply failed: %s", e)
 
             from arcana.handlers.reply_update import handle_reply_update
-            handled = await handle_reply_update(message, user_notion_id=user_notion_id)
+            handled = await handle_reply_update(message, user_id=user_id)
             if handled:
                 return
 
         if message.photo and not _text:
             # Сначала проверяем флоу /client_photo (или reply на сообщение клиента).
             from arcana.handlers.client_photo import handle_pending_photo
-            if await handle_pending_photo(message, user_notion_id):
+            if await handle_pending_photo(message, user_id):
                 return
             # Если caption на фото — «новый клиент …» → создаём клиента и
             # автоматически прикрепим фото внутри handle_add_client.
@@ -371,7 +371,7 @@ async def route_message(
                 pass  # fall through к текстовому роуту, photo поедет дальше как контекст
             else:
                 from arcana.handlers.sessions import handle_tarot_photo
-                await handle_tarot_photo(message, user_notion_id)
+                await handle_tarot_photo(message, user_id)
                 _final_emoji = reaction_for("session")
                 await react(message, _final_emoji)
                 return
@@ -388,7 +388,7 @@ async def route_message(
         if not _text:
             try:
                 from core.preprocess import normalize_text
-                text = await normalize_text(text, user_notion_id=user_notion_id)
+                text = await normalize_text(text, user_id=user_id)
             except Exception as e:
                 logger.warning("normalize_text failed (use raw): %s", e)
 
@@ -401,17 +401,17 @@ async def route_message(
 
         # ── Pending: ждём имя клиента после /client_photo ───────────────
         from arcana.handlers.client_photo import handle_pending_text as _hp_text
-        if await _hp_text(message, text, user_notion_id):
+        if await _hp_text(message, text, user_id):
             return
 
         # ── Pending: правка списка списания после ритуала ────────────────
         from arcana.handlers.ritual_writeoff import handle_pending_edit as _wo_edit
-        if await _wo_edit(message, text, user_notion_id):
+        if await _wo_edit(message, text, user_id):
             return
 
         # ── Pending: ответ на «Что в бартере?» ───────────────────────────
         from arcana.handlers.barter_prompt import handle_pending_text as _bp_text
-        if await _bp_text(message, text, user_notion_id):
+        if await _bp_text(message, text, user_id):
             return
 
         # ── Pending: режим сбора инфы о клиенте ─────────────────────────
@@ -419,7 +419,7 @@ async def route_message(
         pending_client = await get_pending_client(uid)
         if pending_client and pending_client.get("step") == "collecting":
             from arcana.handlers.clients import _handle_collecting
-            await _handle_collecting(message, text, pending_client, user_notion_id)
+            await _handle_collecting(message, text, pending_client, user_id)
             await react(message, reaction_for("new_client"))
             return
 
@@ -438,7 +438,7 @@ async def route_message(
         }
         if pending and (pending.get("type") or "") in _PAYMENT_PENDING_TYPES:
             from arcana.handlers.payment import handle_payment_text
-            handled = await handle_payment_text(message, text, pending, user_notion_id)
+            handled = await handle_payment_text(message, text, pending, user_id)
             if handled:
                 await react(message, "💰")
                 return
@@ -446,20 +446,20 @@ async def route_message(
         # ── Pending: уточнение ритуала (after needs_clarification) ────────
         if pending and pending.get("type") == "awaiting_ritual_clarification":
             from arcana.handlers.rituals import handle_add_ritual
-            await handle_add_ritual(message, text, user_notion_id)
+            await handle_add_ritual(message, text, user_id)
             await react(message, reaction_for("ritual"))
             return
 
         # ── Pending: правка трактовки уже сохранённого триплета ───────────
         if pending and pending.get("awaiting_triplet_edit"):
             from arcana.handlers.sessions import handle_triplet_correction
-            await handle_triplet_correction(message, text, pending, user_notion_id)
+            await handle_triplet_correction(message, text, pending, user_id)
             await react(message, reaction_for("session"))
             return
 
         # ── Pending: ввод подзадач после кнопки «📋 Подзадачи» ────────────
         from arcana.handlers.lists import handle_list_pending
-        if await handle_list_pending(message, user_notion_id):
+        if await handle_list_pending(message, user_id):
             return
 
         # ── Pending: перенос Work-напоминания (work_wip / work_reschedule) ──
@@ -552,34 +552,34 @@ async def route_message(
             intent = "ritual_ambiguous"
 
         dispatch = {
-            "new_client":   lambda: handle_add_client(message, text, user_notion_id),
+            "new_client":   lambda: handle_add_client(message, text, user_id),
             # session_done и session — расклад со всеми деталями (multi/single)
-            "session":        lambda: handle_add_session(message, text, user_notion_id, ground_ref=_raw),
-            "session_done":   lambda: handle_add_session(message, text, user_notion_id, ground_ref=_raw),
-            "session_search": lambda: handle_session_search(message, text, user_notion_id),
+            "session":        lambda: handle_add_session(message, text, user_id, ground_ref=_raw),
+            "session_done":   lambda: handle_add_session(message, text, user_id, ground_ref=_raw),
+            "session_search": lambda: handle_session_search(message, text, user_id),
             # session_planned — это работа с категорией 🃏 Расклад (через preview)
-            "session_planned": lambda: handle_add_work(message, text, user_notion_id),
+            "session_planned": lambda: handle_add_work(message, text, user_id),
             # ritual_done — фактический ритуал
-            "ritual":       lambda: handle_add_ritual(message, text, user_notion_id),
-            "ritual_done":  lambda: handle_add_ritual(message, text, user_notion_id),
+            "ritual":       lambda: handle_add_ritual(message, text, user_id),
+            "ritual_done":  lambda: handle_add_ritual(message, text, user_id),
             # ritual_planned — это работа с категорией ✨ Ритуал (через preview)
-            "ritual_planned": lambda: handle_add_work(message, text, user_notion_id),
-            "client_info":  lambda: handle_client_info(message, text, user_notion_id),
-            "debt":         lambda: handle_debts(message, user_notion_id),
+            "ritual_planned": lambda: handle_add_work(message, text, user_id),
+            "client_info":  lambda: handle_client_info(message, text, user_id),
+            "debt":         lambda: handle_debts(message, user_id),
             "tarot_interp": lambda: handle_tarot_interpret(message, text),
             "delete":       lambda: handle_delete(message, text),
-            "work_done":    lambda: handle_work_done(message, text, user_notion_id),
-            "work_list":    lambda: handle_works_list(message, user_notion_id),
-            "finance":         lambda: handle_arcana_finance(message, user_notion_id, text),
-            "grimoire_add":    lambda: handle_grimoire_add(message, text, user_notion_id),
-            "grimoire":        lambda: handle_grimoire_menu(message, user_notion_id),
-            "grimoire_search": lambda: handle_grimoire_search(message, text, user_notion_id),
-            "memory_save":       lambda: handle_memory_save(message, {"text": text}, user_notion_id),
-            "memory_search":     lambda: handle_memory_search(message, {"query": text}, user_notion_id),
-            "memory_deactivate": lambda: handle_memory_deactivate(message, {"hint": text}, user_notion_id),
-            "memory_delete":     lambda: handle_memory_delete(message, {"hint": text}, user_notion_id),
-            "verify":          lambda: handle_verify(message, text, user_notion_id),
-            "stats":        lambda: handle_stats(message, user_notion_id),
+            "work_done":    lambda: handle_work_done(message, text, user_id),
+            "work_list":    lambda: handle_works_list(message, user_id),
+            "finance":         lambda: handle_arcana_finance(message, user_id, text),
+            "grimoire_add":    lambda: handle_grimoire_add(message, text, user_id),
+            "grimoire":        lambda: handle_grimoire_menu(message, user_id),
+            "grimoire_search": lambda: handle_grimoire_search(message, text, user_id),
+            "memory_save":       lambda: handle_memory_save(message, {"text": text}, user_id),
+            "memory_search":     lambda: handle_memory_search(message, {"query": text}, user_id),
+            "memory_deactivate": lambda: handle_memory_deactivate(message, {"hint": text}, user_id),
+            "memory_delete":     lambda: handle_memory_delete(message, {"hint": text}, user_id),
+            "verify":          lambda: handle_verify(message, text, user_id),
+            "stats":        lambda: handle_stats(message, user_id),
             "nexus_redirect": lambda: send_nexus_redirect(message, text),
         }
 
@@ -587,7 +587,7 @@ async def route_message(
         # переспрашиваем planned vs done.
         if intent == "ritual_ambiguous":
             from arcana.handlers.intent_resolve import ask_ritual_disambiguation
-            await ask_ritual_disambiguation(message, text, user_notion_id)
+            await ask_ritual_disambiguation(message, text, user_id)
             _final_emoji = reaction_for("ritual")
             await react(message, _final_emoji)
             return
@@ -600,7 +600,7 @@ async def route_message(
         )
         if intent in ("work", "ritual_planned", "session_planned"):
             if not looks_like_practice(text):
-                await ask_practice_or_nexus(message, text, user_notion_id)
+                await ask_practice_or_nexus(message, text, user_id)
                 await react(message, "🤔")
                 return
 
@@ -610,7 +610,7 @@ async def route_message(
             _final_emoji = reaction_for(intent)
             # Auto-suggest памяти после 3+ повторений по теме intent'а.
             try:
-                await maybe_auto_suggest(message, intent, text, user_notion_id)
+                await maybe_auto_suggest(message, intent, text, user_id)
             except Exception as e:
                 logger.warning("maybe_auto_suggest hook: %s", e)
         elif intent == "nexus":
@@ -621,7 +621,7 @@ async def route_message(
             # Первый раз не поняла — показать кнопки
             import time as _time
             from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-            _pending_unknown[uid] = (text, user_notion_id, _time.time())
+            _pending_unknown[uid] = (text, user_id, _time.time())
             short = text[:60]
             kb = InlineKeyboardMarkup(inline_keyboard=[
                 [
@@ -673,7 +673,7 @@ _UNKNOWN_TTL = 300  # 5 min
 
 
 @router.callback_query(lambda c: c.data and c.data.startswith("aunk_"))
-async def on_arcana_unknown(query: CallbackQuery, user_notion_id: str = "") -> None:
+async def on_arcana_unknown(query: CallbackQuery, user_id: str = "") -> None:
     """Handle arcana unknown text → user chose action type."""
     import time as _time
 
@@ -684,7 +684,7 @@ async def on_arcana_unknown(query: CallbackQuery, user_notion_id: str = "") -> N
         return
 
     original_text, stored_uid, _ = pending
-    notion_id = stored_uid or user_notion_id
+    notion_id = stored_uid or user_id
 
     # Parse action: aunk_session_123, aunk_ritual_123, etc.
     action = query.data.split("_")[1]  # session, ritual, client, tarot

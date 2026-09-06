@@ -132,7 +132,7 @@ def test_task_dataclass_has_note_default():
 async def test_task_done_with_money_note_creates_expense(mock_message):
     msg = mock_message(text="сходила к нотариусу готово")
     task = Task(id="t1", title="прийти к нотариусу", repeat="Нет",
-                note="оплата 1250 рублей", user_notion_id="u-1")
+                note="оплата 1250 рублей", user_id="u-1")
 
     writer = AsyncMock(return_value="fin-1")
     with patch.object(tasks_mod._repo, "active", AsyncMock(return_value=[task])), \
@@ -141,7 +141,7 @@ async def test_task_done_with_money_note_creates_expense(mock_message):
          patch.object(tasks_mod, "_update_streak_line", AsyncMock(return_value="")), \
          patch("nexus.handlers.finance.ask_claude", AsyncMock(return_value='{"items":[]}')), \
          patch("nexus.handlers.finance._write_one_time_expense", writer):
-        await tasks_mod.handle_task_done(msg, "нотариус", user_notion_id="u-1")
+        await tasks_mod.handle_task_done(msg, "нотариус", user_id="u-1")
 
     writer.assert_awaited_once()
     assert writer.await_args.args[1] == 1250.0          # amount
@@ -154,14 +154,14 @@ async def test_task_done_with_money_note_creates_expense(mock_message):
 async def test_task_done_note_without_amount_no_expense(mock_message):
     msg = mock_message(text="уточнила детали готово")
     task = Task(id="t2", title="уточнить у риэлтора детали", repeat="Нет",
-                note="спросить про документы", user_notion_id="u-1")
+                note="спросить про документы", user_id="u-1")
 
     with patch.object(tasks_mod._repo, "active", AsyncMock(return_value=[task])), \
          patch.object(tasks_mod._repo, "set_status", AsyncMock(return_value=True)) as m_status, \
          patch.object(tasks_mod, "_remove_task_jobs", MagicMock()), \
          patch.object(tasks_mod, "_update_streak_line", AsyncMock(return_value="")), \
          patch("nexus.handlers.finance._write_one_time_expense", AsyncMock()) as writer:
-        await tasks_mod.handle_task_done(msg, "риэлтор", user_notion_id="u-1")
+        await tasks_mod.handle_task_done(msg, "риэлтор", user_id="u-1")
 
     m_status.assert_awaited_once()
     writer.assert_not_awaited()
@@ -172,14 +172,14 @@ async def test_task_done_note_without_amount_no_expense(mock_message):
 @pytest.mark.asyncio
 async def test_task_done_no_note_regression(mock_message):
     msg = mock_message(text="покормила кота готово")
-    task = Task(id="t3", title="покормить кота", repeat="Нет", user_notion_id="u-1")
+    task = Task(id="t3", title="покормить кота", repeat="Нет", user_id="u-1")
 
     with patch.object(tasks_mod._repo, "active", AsyncMock(return_value=[task])), \
          patch.object(tasks_mod._repo, "set_status", AsyncMock(return_value=True)), \
          patch.object(tasks_mod, "_remove_task_jobs", MagicMock()), \
          patch.object(tasks_mod, "_update_streak_line", AsyncMock(return_value="")), \
          patch("nexus.handlers.finance._write_one_time_expense", AsyncMock()) as writer:
-        await tasks_mod.handle_task_done(msg, "кот", user_notion_id="u-1")
+        await tasks_mod.handle_task_done(msg, "кот", user_id="u-1")
 
     writer.assert_not_awaited()
     msg.answer.assert_awaited_once()
@@ -194,7 +194,7 @@ async def test_expense_from_task_note_uses_haiku_category():
     haiku = AsyncMock(return_value='{"items":[{"description":"билет","amount":15000,"category":"🚕 Транспорт"}]}')
     with patch.object(fin, "ask_claude", haiku), \
          patch.object(fin, "_write_one_time_expense", writer):
-        res = await fin.expense_from_task_note("билет в питер 15000", user_notion_id="u-1")
+        res = await fin.expense_from_task_note("билет в питер 15000", user_id="u-1")
     assert res == ("билет в питер 15000", 15000.0, "🚕 Транспорт")
     assert writer.await_args.args[2] == "🚕 Транспорт"
 

@@ -24,7 +24,7 @@ from core.repos.pg_nexus_lists_repo import (
     PgArcanaInventoryRepo as _PgArcanaInventoryRepoClass,
     InventoryItem,
 )
-from core.user_manager import get_user_notion_id
+from core.user_manager import get_user_id
 
 from miniapp.backend.auth import current_user_id
 
@@ -47,10 +47,10 @@ def _is_self(type_full: str) -> bool:
     return "Self" in (type_full or "") or (type_full or "").startswith("🌟")
 
 
-async def _fetch_open_barter_items(user_notion_id: str) -> list:
+async def _fetch_open_barter_items(user_id: str) -> list:
     """Открытые barter items из PG arcana_inventory (category=🔄 Бартер)."""
     try:
-        return await _arcana_inv_repo.get_open_barter(user_notion_id)
+        return await _arcana_inv_repo.get_open_barter(user_id)
     except Exception as e:
         logger.warning("barter items PG fetch failed: %s", e)
         return []
@@ -180,17 +180,17 @@ def _build_barter(barter_items: list, sessions, rituals, clients_by_id: dict) ->
 
 @router.get("/arcana/debts")
 async def list_debts(tg_id: int = Depends(current_user_id)) -> dict[str, Any]:
-    user_notion_id = (await get_user_notion_id(tg_id)) or ""
+    user_id = (await get_user_id(tg_id)) or ""
 
-    clients_list = await _clients_repo.list_all(user_notion_id)
+    clients_list = await _clients_repo.list_all(user_id)
     clients_by_id: dict = {}
     for c in clients_list:
         type_full = TYPE_CODE_TO_FULL.get(c.type_code or "", "")
         clients_by_id[c.id] = {"name": c.name or "", "type_full": type_full}
 
-    sessions = await _sessions_repo.list_all(user_notion_id=user_notion_id)
-    rituals = await _rituals_repo.list_all(user_notion_id)
-    barter_items = await _fetch_open_barter_items(user_notion_id)
+    sessions = await _sessions_repo.list_all(user_id=user_id)
+    rituals = await _rituals_repo.list_all(user_id)
+    barter_items = await _fetch_open_barter_items(user_id)
 
     money = _build_money(sessions, rituals, clients_by_id)
     barter = _build_barter(barter_items, sessions, rituals, clients_by_id)

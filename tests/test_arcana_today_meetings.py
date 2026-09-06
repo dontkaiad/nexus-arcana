@@ -43,7 +43,7 @@ def _triplet(pid, sname, client_id, q="вопрос"):
 def _call(client, triplets, clients_map):
     patches = [
         patch.object(at, "today_user_tz", AsyncMock(return_value=(TODAY, 3))),
-        patch.object(at, "get_user_notion_id", AsyncMock(return_value="u-1")),
+        patch.object(at, "get_user_id", AsyncMock(return_value="u-1")),
         patch.object(at, "load_clients_map", AsyncMock(return_value=clients_map)),
         patch.object(at._pg_sessions_repo, "list_all",
                      AsyncMock(return_value=triplets)),

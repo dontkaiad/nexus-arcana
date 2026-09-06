@@ -346,7 +346,7 @@ def _first_recurring_reminder(repeat_time: Optional[str], tz_offset: int) -> str
 # ── Partial pending (нет деталей — ждём дополнения) ─────────────────────────
 
 async def _save_partial_pending(
-    message: Message, text: str, user_notion_id: str = "", parsed: dict = None
+    message: Message, text: str, user_id: str = "", parsed: dict = None
 ) -> None:
     """Сохраняем фрагмент как pending типа 'partial', шлём вопрос-уточнение.
     Следующее сообщение от Кай сольётся с фрагментом и пойдёт в обычный
@@ -367,7 +367,7 @@ async def _save_partial_pending(
         "repeat": (parsed or {}).get("repeat") or "Нет",
         "repeat_time": (parsed or {}).get("repeat_time"),
         "day_of_week": (parsed or {}).get("day_of_week"),
-        "user_notion_id": user_notion_id,
+        "user_id": user_id,
         "msg_id": None,
         "chat_id": message.chat.id,
     }
@@ -383,7 +383,7 @@ async def _save_partial_pending(
 # ── Главные хендлеры ──────────────────────────────────────────────────────────
 
 async def handle_add_work_preview(
-    message: Message, text: str, user_notion_id: str = ""
+    message: Message, text: str, user_id: str = ""
 ) -> None:
     """Создать pending + показать превью. НЕ пишет в Notion."""
     try:
@@ -396,7 +396,7 @@ async def handle_add_work_preview(
             # Короткий/неоднозначный ввод без структуры — сохраняем фрагмент
             # как pending и просим Кай дописать детали. В ⚠️ Ошибки НЕ пишем,
             # это нормальный пользовательский кейс, не сбой.
-            await _save_partial_pending(message, text, user_notion_id)
+            await _save_partial_pending(message, text, user_id)
             return
         # Парсер вернул JSON, но без сути (дефолтный title + нет категории/клиента/дедлайна)
         # — фрагментарный ввод, просим уточнить.
@@ -408,7 +408,7 @@ async def handle_add_work_preview(
             and (data.get("repeat") or "Нет") == "Нет"
         )
         if is_partial:
-            await _save_partial_pending(message, text, user_notion_id, parsed=data)
+            await _save_partial_pending(message, text, user_id, parsed=data)
             return
 
         # Резолвим клиента: find_or_create. Если клиента нет в БД — создаём
@@ -419,12 +419,12 @@ async def handle_add_work_preview(
                 from core.client_resolve import resolve_or_create
                 client_id = await resolve_or_create(
                     message, data["client_name"],
-                    user_notion_id=user_notion_id,
+                    user_id=user_id,
                 )
             except Exception as e:
                 logger.warning("resolve_or_create failed: %s", e)
         data["client_id"] = client_id
-        data["user_notion_id"] = user_notion_id
+        data["user_id"] = user_id
 
         slug = _make_slug(uid)
         text_content = _format_preview(data)
@@ -462,7 +462,7 @@ async def handle_work_clarification(message: Message) -> bool:
         combined = f"{pending.get('fragment', '')} {text}".strip()
         drop_pending(uid)
         await handle_add_work_preview(
-            message, combined, pending.get("user_notion_id") or "",
+            message, combined, pending.get("user_id") or "",
         )
         return True
 
@@ -562,7 +562,7 @@ async def cb_work_save(call: CallbackQuery) -> None:
             deadline=deadline_dt,
             category=data.get("category"),
             client_id=data.get("client_id"),
-            user_notion_id=data.get("user_notion_id") or "",
+            user_id=data.get("user_id") or "",
             repeat=repeat,
             repeat_time=data.get("repeat_time"),
             day_of_week=data.get("day_of_week"),

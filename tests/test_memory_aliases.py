@@ -258,7 +258,7 @@ def test_save_memory_no_alias_does_not_change_link():
         asyncio.run(save_memory(msg, "вася любит чай", "user-notion-uid", "☀️ Nexus"))
 
     mock_add.assert_awaited_once()
-    # _mem_repo.add(fact, key, category, scope, related_to, source, user_notion_id)
+    # _mem_repo.add(fact, key, category, scope, related_to, source, user_id)
     args = mock_add.await_args.args
     assert args[0] == fact          # fact unchanged
     assert args[1] == ключ          # key unchanged

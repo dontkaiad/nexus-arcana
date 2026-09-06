@@ -1,6 +1,6 @@
 # SESSIONS — data-model contract (🃏 Расклады)
 
-Code conforms to: a0b0f64. This spec describes the sessions (tarot spreads)
+Code conforms to: a0b0f64. (+ #144: user_notion_id → user_id.) This spec describes the sessions (tarot spreads)
 data model as of that commit; update it in the same PR that changes the model.
 
 > Contract, not snapshot. Describes the persistent model, the guarantees of
@@ -46,7 +46,7 @@ SQLAlchemy Core mirror: `arcana/repos/sessions_tables.py`.
 | `client_id` | BigInteger | FK → `clients.id` |
 | `barter_what` | Text | barter item (Arcana-only concept) |
 | `photo_url` | Text | Cloudinary URL |
-| `user_notion_id` | Text | owner |
+| `user_id` | Text | owner |
 | `work_id` | BigInteger | FK → `works.id` (ON DELETE SET NULL, indexed; #151) |
 | `archived` | Boolean | default false — soft-delete |
 | `created_at` / `updated_at` | TIMESTAMP(tz) | default `now()` |

@@ -6,7 +6,7 @@
   (c) пополнение существующей темы обнуляет theme_summary всей группы;
   (d) запись theme_summary НЕ затирает session_summary события.
 
-Все строки помечаются user_notion_id=MARK и удаляются после каждого теста.
+Все строки помечаются user_id=MARK и удаляются после каждого теста.
 """
 from __future__ import annotations
 
@@ -35,7 +35,7 @@ def repo():
 def _cleanup():
     yield
     with get_engine().begin() as conn:
-        conn.execute(delete(sessions).where(sessions.c.user_notion_id == MARK))
+        conn.execute(delete(sessions).where(sessions.c.user_id == MARK))
 
 
 def _ins(conn, sname, d, q, *, ssum=None, tsum=None, client_id=None):
@@ -43,7 +43,7 @@ def _ins(conn, sname, d, q, *, ssum=None, tsum=None, client_id=None):
         insert(sessions).values(
             title=q or "t", question=q, occurred_at=d,
             session_name=sname, client_id=client_id,
-            user_notion_id=MARK, archived=False,
+            user_id=MARK, archived=False,
             session_summary=ssum, theme_summary=tsum,
         ).returning(sessions.c.id)
     ).scalar_one()
@@ -96,7 +96,7 @@ def test_grouping_theme_vs_event_are_distinct():
         rows = conn.execute(
             select(
                 sessions.c.session_name, sessions.c.client_id, sessions.c.occurred_at
-            ).where(sessions.c.user_notion_id == MARK)
+            ).where(sessions.c.user_id == MARK)
         ).all()
 
     theme_keys = {(r.session_name, r.client_id) for r in rows}            # ТЕМА
@@ -126,7 +126,7 @@ async def test_adding_triplet_nulls_theme_summary(repo):
 
     with eng.connect() as conn:
         vals = conn.execute(
-            select(sessions.c.theme_summary).where(sessions.c.user_notion_id == MARK)
+            select(sessions.c.theme_summary).where(sessions.c.user_id == MARK)
         ).scalars().all()
     assert all(v is None for v in vals), "theme_summary должен обнулиться у всей группы"
 

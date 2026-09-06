@@ -50,7 +50,7 @@ async def test_handle_task_done_finds_exact_two_letter_hint(mock_message):
          patch.object(tasks_mod._repo, "set_status", AsyncMock(return_value=True)), \
          patch.object(tasks_mod, "_remove_task_jobs", MagicMock()), \
          patch.object(tasks_mod, "_update_streak_line", AsyncMock(return_value="")):
-        await tasks_mod.handle_task_done(msg, "лу", user_notion_id="")
+        await tasks_mod.handle_task_done(msg, "лу", user_id="")
 
     msg.answer.assert_awaited_once()
     reply = msg.answer.await_args.args[0]
@@ -69,7 +69,7 @@ async def test_handle_task_cancel_finds_exact_two_letter_hint(mock_message):
     with patch.object(tasks_mod._repo, "active", AsyncMock(return_value=[task])), \
          patch.object(tasks_mod._repo, "set_archived", AsyncMock(return_value=True)), \
          patch.object(tasks_mod, "_scheduler", None):
-        await tasks_mod.handle_task_cancel(msg, "лу", user_notion_id="")
+        await tasks_mod.handle_task_cancel(msg, "лу", user_id="")
 
     msg.answer.assert_awaited_once()
     reply = msg.answer.await_args.args[0]
@@ -92,7 +92,7 @@ async def test_handle_work_done_finds_exact_two_letter_hint():
     with patch.object(works_mod, "ask_claude", AsyncMock(return_value="1С")), \
          patch.object(works_mod._repo, "list_open", AsyncMock(return_value=[item])), \
          patch.object(works_mod._repo, "mark_done", AsyncMock(return_value=True)):
-        await works_mod.handle_work_done(msg, "сделала 1С", user_notion_id="")
+        await works_mod.handle_work_done(msg, "сделала 1С", user_id="")
 
     msg.answer.assert_awaited_once()
     reply = msg.answer.await_args.args[0]

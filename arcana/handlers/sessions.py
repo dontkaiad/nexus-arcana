@@ -855,18 +855,18 @@ def _triplet_remove_confirm_keyboard(short_id: str) -> InlineKeyboardMarkup:
     ]])
 
 
-async def _resolve_triplet_page(short_id: str, user_notion_id: str) -> Optional[TripletEntry]:
+async def _resolve_triplet_page(short_id: str, user_id: str) -> Optional[TripletEntry]:
     """short_id (32 hex без дефисов) → TripletEntry. None если не найден или чужой.
 
-    #108: find_by_short_id принимает user_notion_id, но сам запрос его не
+    #108: find_by_short_id принимает user_id, но сам запрос его не
     фильтрует (поиск идёт по id) — любой callback с валидным short_id мог
     зарезолвить чужой триплет. Сверяем владельца здесь: fail-closed, если у
-    записи ЕСТЬ owner и он не совпадает с вызывающим. Пустой user_notion_id
+    записи ЕСТЬ owner и он не совпадает с вызывающим. Пустой user_id
     в старых пре-миграционных строках не блокируем — legacy-данные без
     зафиксированного владельца.
     """
-    entry = await _repo.find_by_short_id(short_id, user_notion_id)
-    if entry and entry.user_notion_id and user_notion_id and entry.user_notion_id != user_notion_id:
+    entry = await _repo.find_by_short_id(short_id, user_id)
+    if entry and entry.user_id and user_id and entry.user_id != user_id:
         return None
     return entry
 
@@ -875,7 +875,7 @@ async def _save_and_post_triplet(
     message: Message,
     *,
     tz: timezone,
-    user_notion_id: str,
+    user_id: str,
     client_id: Optional[str],
     client_name: Optional[str],
     deck: str,
@@ -929,7 +929,7 @@ async def _save_and_post_triplet(
         paid=paid,
         session_type="Личный" if is_personal else "Клиентский",
         client_id=client_id,
-        user_notion_id=user_notion_id,
+        user_id=user_id,
         area=area,
         deck=deck,
         payment_source=payment_source,
@@ -959,7 +959,7 @@ async def _save_and_post_triplet(
                 find_active_work_for_client,
             )
             w_id = await find_active_work_for_client(
-                client_id, "🃏 Расклад", user_notion_id,
+                client_id, "🃏 Расклад", user_id,
             )
             if w_id:
                 ok = await set_event_work_id("session", page_id, w_id)
@@ -1050,7 +1050,7 @@ async def _save_and_post_triplet(
 # ────────────────────────── Основной обработчик ────────────────────────────
 
 async def handle_add_session(
-    message: Message, text: str, user_notion_id: str = "", ground_ref: str = ""
+    message: Message, text: str, user_id: str = "", ground_ref: str = ""
 ) -> None:
     try:
         tg_id = message.from_user.id
@@ -1152,7 +1152,7 @@ async def handle_add_session(
         items = data.get("triplets") or data.get("items") or []
         if isinstance(items, list) and len(items) >= 2:
             await _handle_multi_session(
-                message, data, items, tz, tz_offset, user_notion_id
+                message, data, items, tz, tz_offset, user_id
             )
             return
 
@@ -1165,19 +1165,19 @@ async def handle_add_session(
                 await message.answer("🤔 Не разобрала имя клиента — напиши ещё раз?")
                 return
             client_id = await resolve_or_create(
-                message, client_name, user_notion_id=user_notion_id,
+                message, client_name, user_id=user_id,
             )
         else:
             # Личный расклад → автоматически на self-клиента «Кай (личный)».
             from core.client_resolve import resolve_self_client
-            client_id = await resolve_self_client(user_notion_id=user_notion_id)
+            client_id = await resolve_self_client(user_id=user_id)
             if not client_id:
                 # Fallback: ищем по имени из user_manager (legacy путь).
                 from core.user_manager import get_user
                 owner = await get_user(tg_id)
                 owner_name = (owner or {}).get("name") or ""
                 if owner_name:
-                    sc = await _client_repo.find(owner_name, user_notion_id=user_notion_id)
+                    sc = await _client_repo.find(owner_name, user_id=user_id)
                     if sc:
                         client_id = sc.id
                     else:
@@ -1215,7 +1215,7 @@ async def handle_add_session(
             from core.memory import get_memories_for_context, extract_context_keywords
             keywords = extract_context_keywords(data, client_name)
             if keywords:
-                memory_context = await get_memories_for_context(user_notion_id, keywords)
+                memory_context = await get_memories_for_context(user_id, keywords)
         except Exception:
             pass
 
@@ -1223,7 +1223,7 @@ async def handle_add_session(
         prev_context = ""
         if client_id:
             try:
-                prev_snippets = await _repo.prev_for_client(client_id, user_notion_id=user_notion_id)
+                prev_snippets = await _repo.prev_for_client(client_id, user_id=user_id)
                 if prev_snippets:
                     prev_context = _format_prev_sessions(prev_snippets)
             except Exception:
@@ -1282,7 +1282,7 @@ async def handle_add_session(
         page_id = await _save_and_post_triplet(
             message,
             tz=tz,
-            user_notion_id=user_notion_id,
+            user_id=user_id,
             client_id=client_id,
             client_name=client_name,
             deck=deck,
@@ -1376,7 +1376,7 @@ async def _handle_multi_session(
     items: List[dict],
     tz: timezone,
     tz_offset: float,
-    user_notion_id: str,
+    user_id: str,
     *,
     forced_client_id: Optional[str] = None,
     forced_client_name: Optional[str] = None,
@@ -1408,7 +1408,7 @@ async def _handle_multi_session(
         # Сначала пробуем по client_name (если задан) или session_name (для format A/B)
         lookup_name = client_name or session_name
         if lookup_name:
-            c = await _client_repo.find(lookup_name, user_notion_id=user_notion_id)
+            c = await _client_repo.find(lookup_name, user_id=user_id)
             if c:
                 client_id = c.id
                 client_name = c.name or client_name
@@ -1421,7 +1421,7 @@ async def _handle_multi_session(
                     "slug": slug,
                     "data": data,
                     "tz_offset": tz_offset,
-                    "user_notion_id": user_notion_id,
+                    "user_id": user_id,
                 })
                 await message.answer(
                     f"«{html.escape(lookup_name)}» — это:",
@@ -1432,7 +1432,7 @@ async def _handle_multi_session(
         else:
             # session_name пустой → self-сессия по умолчанию.
             from core.client_resolve import resolve_self_client
-            client_id = await resolve_self_client(user_notion_id=user_notion_id)
+            client_id = await resolve_self_client(user_id=user_id)
 
     if not client_id and not forced_is_personal:
         # fallback на user_manager.owner
@@ -1440,7 +1440,7 @@ async def _handle_multi_session(
         owner = await get_user(tg_id)
         owner_name = (owner or {}).get("name") or ""
         if owner_name:
-            sc = await _client_repo.find(owner_name, user_notion_id=user_notion_id)
+            sc = await _client_repo.find(owner_name, user_id=user_id)
             if sc:
                 client_id = sc.id
     is_personal = forced_is_personal or not client_name
@@ -1454,7 +1454,7 @@ async def _handle_multi_session(
     if session_name:
         try:
             theme_preexisted = await _repo.session_group_exists(
-                session_name, client_id, user_notion_id
+                session_name, client_id, user_id
             )
         except Exception as e:
             logger.warning("session_group_exists failed: %s", e)
@@ -1465,7 +1465,7 @@ async def _handle_multi_session(
     if session_name:
         try:
             known_subject_id = await _repo.group_subject_id(
-                session_name, client_id, user_notion_id
+                session_name, client_id, user_id
             )
         except Exception as e:
             logger.warning("group_subject_id failed: %s", e)
@@ -1474,7 +1474,7 @@ async def _handle_multi_session(
     prev_context = ""
     if client_id:
         try:
-            prev_snippets = await _repo.prev_for_client(client_id, user_notion_id=user_notion_id)
+            prev_snippets = await _repo.prev_for_client(client_id, user_id=user_id)
             if prev_snippets:
                 prev_context = _format_prev_sessions(prev_snippets)
         except Exception:
@@ -1583,7 +1583,7 @@ async def _handle_multi_session(
                 amount=0, paid=0,
                 session_type="Личный" if is_personal else "Клиентский",
                 client_id=client_id,
-                user_notion_id=user_notion_id,
+                user_id=user_id,
                 area=area,
                 deck=deck,
                 payment_source=None,
@@ -1770,7 +1770,7 @@ async def _handle_multi_session(
                 subject_name=subject_name,
                 session_name=session_name,
                 client_id=client_id,
-                user_notion_id=user_notion_id,
+                user_id=user_id,
                 page_ids=saved_page_ids,
             )
         except Exception as e:
@@ -1793,7 +1793,7 @@ async def _maybe_prompt_subject_match(
     subject_name: str,
     session_name: str,
     client_id: Optional[str],
-    user_notion_id: str,
+    user_id: str,
     page_ids: List[str],
 ) -> None:
     """Ищет subject_name в core.memory; если нашла — спрашивает Кай через
@@ -1802,7 +1802,7 @@ async def _maybe_prompt_subject_match(
     ничего не меняется, сессия работает как раньше (по session_name)."""
     from core.memory import find_memories_by_subject_name
 
-    mems = await find_memories_by_subject_name(subject_name, user_notion_id)
+    mems = await find_memories_by_subject_name(subject_name, user_id)
     if not mems:
         return
     best = mems[0]
@@ -1900,9 +1900,9 @@ async def cb_triplet_remove_yes(call: CallbackQuery) -> None:
     """[✅ Да, удалить] — архивируем страницу в Notion."""
     await call.answer()
     short_id = call.data.split(":", 1)[1]
-    from core.user_manager import get_user_notion_id
-    user_notion_id = (await get_user_notion_id(call.from_user.id)) or ""
-    entry = await _resolve_triplet_page(short_id, user_notion_id)
+    from core.user_manager import get_user_id
+    user_id = (await get_user_id(call.from_user.id)) or ""
+    entry = await _resolve_triplet_page(short_id, user_id)
     if not entry:
         await call.message.edit_text("⚠️ Триплет не найден.")
         return
@@ -1946,9 +1946,9 @@ async def cb_triplet_remove(call: CallbackQuery) -> None:
     """[🗑 Удалить] — показать confirm-кнопки."""
     await call.answer()
     short_id = call.data.split(":", 1)[1]
-    from core.user_manager import get_user_notion_id
-    user_notion_id = (await get_user_notion_id(call.from_user.id)) or ""
-    entry = await _resolve_triplet_page(short_id, user_notion_id)
+    from core.user_manager import get_user_id
+    user_id = (await get_user_id(call.from_user.id)) or ""
+    entry = await _resolve_triplet_page(short_id, user_id)
     title = entry.question if entry else "—"
     await call.message.answer(
         f"🗑 Удалить триплет «{html.escape(title)}»?\nДействие необратимо.",
@@ -1972,7 +1972,7 @@ async def _resume_multi_after_resolve(
     from arcana.pending_tarot import delete_pending
     data = pending.get("data") or {}
     tz_offset = float(pending.get("tz_offset") or 3)
-    user_notion_id = pending.get("user_notion_id") or ""
+    user_id = pending.get("user_id") or ""
     tz = timezone(timedelta(hours=tz_offset))
     items = data.get("triplets") or data.get("items") or []
     await delete_pending(call.from_user.id)
@@ -1981,7 +1981,7 @@ async def _resume_multi_after_resolve(
     except Exception:
         pass
     await _handle_multi_session(
-        call.message, data, items, tz, tz_offset, user_notion_id,
+        call.message, data, items, tz, tz_offset, user_id,
         forced_client_id=forced_client_id,
         forced_client_name=forced_client_name,
         forced_is_personal=forced_is_personal,
@@ -1989,12 +1989,12 @@ async def _resume_multi_after_resolve(
 
 
 async def _create_resolved_client(
-    user_notion_id: str, name: str, client_type: str
+    user_id: str, name: str, client_type: str
 ) -> Optional[tuple]:
     from datetime import datetime as _dt, timezone as _tz
     today = _dt.now(_tz.utc).strftime("%Y-%m-%d")
     pid = await _client_repo.add(
-        name=name, date=today, user_notion_id=user_notion_id,
+        name=name, date=today, user_id=user_id,
         client_type=client_type,
     )
     return (pid, name) if pid else None
@@ -2008,11 +2008,11 @@ async def cb_client_resolve_new_paid(call: CallbackQuery) -> None:
     pending = await get_pending(call.from_user.id) or {}
     if pending.get("slug") != slug or pending.get("type") != "client_resolve_pending":
         return
-    user_notion_id = pending.get("user_notion_id") or ""
+    user_id = pending.get("user_id") or ""
     name = (pending.get("data", {}).get("session_name") or "").strip()
     if not name:
         return
-    res = await _create_resolved_client(user_notion_id, name, CLIENT_TYPE_PAID)
+    res = await _create_resolved_client(user_id, name, CLIENT_TYPE_PAID)
     if not res:
         await call.message.answer("⚠️ Не удалось создать клиента.")
         return
@@ -2035,11 +2035,11 @@ async def cb_client_resolve_new_free(call: CallbackQuery) -> None:
     pending = await get_pending(call.from_user.id) or {}
     if pending.get("slug") != slug or pending.get("type") != "client_resolve_pending":
         return
-    user_notion_id = pending.get("user_notion_id") or ""
+    user_id = pending.get("user_id") or ""
     name = (pending.get("data", {}).get("session_name") or "").strip()
     if not name:
         return
-    res = await _create_resolved_client(user_notion_id, name, CLIENT_TYPE_FREE)
+    res = await _create_resolved_client(user_id, name, CLIENT_TYPE_FREE)
     if not res:
         await call.message.answer("⚠️ Не удалось создать клиента.")
         return
@@ -2062,9 +2062,9 @@ async def cb_client_resolve_self(call: CallbackQuery) -> None:
     pending = await get_pending(call.from_user.id) or {}
     if pending.get("slug") != slug or pending.get("type") != "client_resolve_pending":
         return
-    user_notion_id = pending.get("user_notion_id") or ""
+    user_id = pending.get("user_id") or ""
     from core.client_resolve import resolve_self_client
-    cid = await resolve_self_client(user_notion_id=user_notion_id)
+    cid = await resolve_self_client(user_id=user_id)
     await call.message.answer("🌟 Личная сессия · обрабатываю…")
     await _resume_multi_after_resolve(
         call, pending,
@@ -2085,35 +2085,35 @@ async def cb_client_resolve_cancel(call: CallbackQuery) -> None:
 
 
 async def handle_triplet_correction(
-    message: Message, correction_text: str, pending: dict, user_notion_id: str
+    message: Message, correction_text: str, pending: dict, user_id: str
 ) -> None:
     """Кнопка «Поправить»: pending{triplet_short_id} + текст правки → правка
     триплета (карта и/или трактовка). Делегирует в общее ядро."""
     from arcana.pending_tarot import delete_pending
     await delete_pending(message.from_user.id)
     short_id = pending.get("triplet_short_id") or ""
-    entry = await _resolve_triplet_page(short_id, user_notion_id)
+    entry = await _resolve_triplet_page(short_id, user_id)
     if not entry:
         await message.answer("⚠️ Триплет не найден.")
         return
-    await _apply_triplet_correction(message, correction_text, entry, user_notion_id)
+    await _apply_triplet_correction(message, correction_text, entry, user_id)
 
 
 async def correct_triplet_by_id(
-    message: Message, correction_text: str, page_id: str, user_notion_id: str
+    message: Message, correction_text: str, page_id: str, user_id: str
 ) -> bool:
     """Reply на карточку триплета = правка СВОБОДНЫМ ТЕКСТОМ (карта/трактовка),
     как кнопка «Поправить» — паритет с Nexus (reply = правка). page_id берётся
     из message_pages. Возвращает False если триплет не найден."""
-    entry = await _resolve_triplet_page(page_id, user_notion_id)
+    entry = await _resolve_triplet_page(page_id, user_id)
     if not entry:
         return False
-    await _apply_triplet_correction(message, correction_text, entry, user_notion_id)
+    await _apply_triplet_correction(message, correction_text, entry, user_id)
     return True
 
 
 async def _apply_triplet_correction(
-    message: Message, correction_text: str, entry: TripletEntry, user_notion_id: str
+    message: Message, correction_text: str, entry: TripletEntry, user_id: str
 ) -> None:
     """Ядро правки триплета — ОБЩЕЕ для кнопки «Поправить» и reply на карточку:
     card_edit → пересбор карт + справочника → Sonnet регенерит трактовку →
@@ -2244,7 +2244,7 @@ async def _apply_triplet_correction(
 
 # ────────────────────────── Фото расклада ──────────────────────────────────
 
-async def handle_tarot_photo(message: Message, user_notion_id: str = "") -> None:
+async def handle_tarot_photo(message: Message, user_id: str = "") -> None:
     try:
         photo = message.photo[-1]
         file = await message.bot.get_file(photo.file_id)
@@ -2305,7 +2305,7 @@ async def handle_tarot_photo(message: Message, user_notion_id: str = "") -> None
         # Личный расклад с фото — резолвим self-клиента (новый путь).
         from core.client_resolve import resolve_self_client
         self_client_id: Optional[str] = await resolve_self_client(
-            user_notion_id=user_notion_id
+            user_id=user_id
         )
         self_client_missing = not bool(self_client_id)
 
@@ -2315,7 +2315,7 @@ async def handle_tarot_photo(message: Message, user_notion_id: str = "") -> None
         await _save_and_post_triplet(
             message,
             tz=tz,
-            user_notion_id=user_notion_id,
+            user_id=user_id,
             client_id=self_client_id,
             client_name=None,
             deck=deck,
@@ -2342,7 +2342,7 @@ async def handle_tarot_photo(message: Message, user_notion_id: str = "") -> None
 # ────────────────────────── Поиск раскладов ────────────────────────────────
 
 async def handle_session_search(
-    message: Message, text: str, user_notion_id: str = ""
+    message: Message, text: str, user_id: str = ""
 ) -> None:
     """Поиск прошлых раскладов по ключевым словам в Теме."""
     try:
@@ -2358,7 +2358,7 @@ async def handle_session_search(
             await message.answer("🔍 Не поняла что искать. Напиши имя или тему яснее.")
             return
 
-        results = await _repo.search(keywords, user_notion_id=user_notion_id, limit=10)
+        results = await _repo.search(keywords, user_id=user_id, limit=10)
         kw_display = html.escape(", ".join(keywords))
         if not results:
             await message.answer(f"🔍 По «{kw_display}» раскладов не нашла.")

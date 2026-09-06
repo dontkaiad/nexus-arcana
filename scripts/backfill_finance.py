@@ -80,7 +80,7 @@ async def main():
         source = ((props.get("Источник") or {}).get("select") or {}).get("name", "")
         date_val = (((props.get("Дата") or {}).get("date")) or {}).get("start", "") or ""
         user_rel = ((props.get("🪪 Пользователи") or {}).get("relation") or [{}])
-        user_notion_id = user_rel[0].get("id", "") if user_rel else ""
+        user_id = user_rel[0].get("id", "") if user_rel else ""
 
         row = {
             "description": description,
@@ -89,7 +89,7 @@ async def main():
             "type_": type_,
             "source": source,
             "date_iso": date_val[:10] if date_val else "",
-            "user_notion_id": user_notion_id,
+            "user_id": user_id,
         }
 
         if "Arcana" in bot_name or "🌒" in bot_name:

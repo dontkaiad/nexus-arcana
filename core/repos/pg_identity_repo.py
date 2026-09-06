@@ -3,7 +3,7 @@
 IdentityUser is the domain object; PgIdentityRepo wraps core_identity table.
 All async methods use asyncio.to_thread over sync SQLAlchemy (no asyncpg).
 
-notion_id is the natural key, matching user_notion_id TEXT in all other PG tables.
+notion_id is the natural key, matching user_id TEXT in all other PG tables.
 """
 from __future__ import annotations
 

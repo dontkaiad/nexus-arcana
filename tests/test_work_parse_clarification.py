@@ -90,7 +90,7 @@ async def test_partial_pending_followup_text_merges_and_reparses():
     slug = wp._make_slug(1)
     wp._pending_set(1, slug, {
         "_partial": True, "fragment": "сделать ещё одну работу",
-        "user_notion_id": "u", "chat_id": 100, "msg_id": None,
+        "user_id": "u", "chat_id": 100, "msg_id": None,
     })
 
     msg = _msg(1, "финансовый ритуал маше завтра")

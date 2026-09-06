@@ -21,7 +21,7 @@ memories = Table(
     Column("related_to",     Text,       nullable=False, server_default=text("''")),
     Column("is_current",     Boolean,    nullable=False, server_default=text("true")),
     Column("is_archived",    Boolean,    nullable=False, server_default=text("false")),
-    Column("user_notion_id", Text,       nullable=False, server_default=text("''")),
+    Column("user_id", Text,       nullable=False, server_default=text("''")),
     Column("created_at",     TIMESTAMP(timezone=True), server_default=text("now()")),
     Column("updated_at",     TIMESTAMP(timezone=True), server_default=text("now()")),
 )

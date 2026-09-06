@@ -110,7 +110,7 @@ class ListItem:
     stage: Optional[int] = None
     task_id: str = ""
     works_id: str = ""
-    user_notion_id: str = ""
+    user_id: str = ""
     date: str = ""        # created_at[:10]
 
 
@@ -129,7 +129,7 @@ class InventoryItem:
     remind_days: Optional[int] = None
     expires_at: str = ""
     works_id: str = ""
-    user_notion_id: str = ""
+    user_id: str = ""
     date: str = ""
 
 
@@ -157,7 +157,7 @@ def _row_to_list_item(row) -> ListItem:
         stage=int(row.stage) if row.stage is not None else None,
         task_id=row.task_id or "",
         works_id=row.works_id or "",
-        user_notion_id=row.user_notion_id or "",
+        user_id=row.user_id or "",
         date=date_str,
     )
 
@@ -177,7 +177,7 @@ def _row_to_inventory_item(row) -> InventoryItem:
         remind_days=int(row.remind_days) if row.remind_days is not None else None,
         expires_at=_parse_date(getattr(row, "expires_at", None)),
         works_id=row.works_id or "",
-        user_notion_id=row.user_notion_id or "",
+        user_id=row.user_id or "",
         date=_parse_date(created),
     )
 
@@ -202,7 +202,7 @@ def _nl_add_sync(
     stage: Optional[int],
     task_id: str,
     works_id: str,
-    user_notion_id: str,
+    user_id: str,
 ) -> ListItem:
     exp = None
     if expires_at:
@@ -230,7 +230,7 @@ def _nl_add_sync(
                 stage=stage,
                 task_id=task_id or "",
                 works_id=works_id or "",
-                user_notion_id=user_notion_id or "",
+                user_id=user_id or "",
             ).returning(nexus_lists)
         )
         row = result.fetchone()
@@ -240,14 +240,14 @@ def _nl_add_sync(
 def _nl_get_list_sync(
     list_type: Optional[str],
     status: str,
-    user_notion_id: str,
+    user_id: str,
     page_size: int = 100,
 ) -> List[ListItem]:
     q = select(nexus_lists).where(nexus_lists.c.status == _pg_status(status))
     if list_type:
         q = q.where(nexus_lists.c.list_type == _pg_type(list_type))
-    if user_notion_id:
-        q = q.where(nexus_lists.c.user_notion_id == user_notion_id)
+    if user_id:
+        q = q.where(nexus_lists.c.user_id == user_id)
     q = q.order_by(nexus_lists.c.created_at.desc()).limit(page_size)
     with _get_engine().connect() as conn:
         rows = conn.execute(q).fetchall()
@@ -258,7 +258,7 @@ def _nl_search_sync(
     query: str,
     list_type: Optional[str],
     status: Optional[str],
-    user_notion_id: str,
+    user_id: str,
     page_size: int = 20,
 ) -> List[ListItem]:
     q = select(nexus_lists)
@@ -270,8 +270,8 @@ def _nl_search_sync(
         q = q.where(nexus_lists.c.status == _pg_status(status))
     else:
         q = q.where(nexus_lists.c.status != "archived")
-    if user_notion_id:
-        q = q.where(nexus_lists.c.user_notion_id == user_notion_id)
+    if user_id:
+        q = q.where(nexus_lists.c.user_id == user_id)
     q = q.order_by(nexus_lists.c.created_at.desc()).limit(page_size)
     with _get_engine().connect() as conn:
         rows = conn.execute(q).fetchall()
@@ -331,7 +331,7 @@ def _nl_get_expiry_due_sync(today: date) -> List[ListItem]:
 
 
 def _nl_get_summary_sync(
-    user_notion_id: str,
+    user_id: str,
     list_type: Optional[str] = None,
     group: Optional[str] = None,
     category: Optional[str] = None,
@@ -341,8 +341,8 @@ def _nl_get_summary_sync(
         q = q.where(nexus_lists.c.list_type == _pg_type(list_type))
     if category:
         q = q.where(nexus_lists.c.category == category)
-    if user_notion_id:
-        q = q.where(nexus_lists.c.user_notion_id == user_notion_id)
+    if user_id:
+        q = q.where(nexus_lists.c.user_id == user_id)
     q = q.order_by(nexus_lists.c.created_at.desc()).limit(500)
     with _get_engine().connect() as conn:
         rows = conn.execute(q).fetchall()
@@ -380,7 +380,7 @@ def _ai_add_sync(
     remind_days: Optional[int],
     expires_at: Optional[str],
     works_id: str,
-    user_notion_id: str,
+    user_id: str,
 ) -> InventoryItem:
     exp = None
     if expires_at:
@@ -402,7 +402,7 @@ def _ai_add_sync(
                 remind_days=remind_days,
                 expires_at=exp,
                 works_id=works_id or "",
-                user_notion_id=user_notion_id or "",
+                user_id=user_id or "",
             ).returning(arcana_inventory)
         )
         row = result.fetchone()
@@ -412,7 +412,7 @@ def _ai_add_sync(
 def _ai_search_sync(
     query: str,
     status: Optional[str],
-    user_notion_id: str,
+    user_id: str,
     page_size: int = 20,
 ) -> List[InventoryItem]:
     q = select(arcana_inventory)
@@ -422,8 +422,8 @@ def _ai_search_sync(
         q = q.where(arcana_inventory.c.status == _pg_status(status))
     else:
         q = q.where(arcana_inventory.c.status != "archived")
-    if user_notion_id:
-        q = q.where(arcana_inventory.c.user_notion_id == user_notion_id)
+    if user_id:
+        q = q.where(arcana_inventory.c.user_id == user_id)
     q = q.order_by(arcana_inventory.c.created_at.desc()).limit(page_size)
     with _get_engine().connect() as conn:
         rows = conn.execute(q).fetchall()
@@ -445,7 +445,7 @@ def _ai_get_by_id_sync(item_id: str) -> Optional[InventoryItem]:
 def _ai_get_list_sync(
     category: Optional[str],
     status: Optional[str],
-    user_notion_id: str,
+    user_id: str,
     page_size: int = 100,
 ) -> List[InventoryItem]:
     q = select(arcana_inventory)
@@ -455,8 +455,8 @@ def _ai_get_list_sync(
         q = q.where(arcana_inventory.c.status == _pg_status(status))
     else:
         q = q.where(arcana_inventory.c.status != "archived")
-    if user_notion_id:
-        q = q.where(arcana_inventory.c.user_notion_id == user_notion_id)
+    if user_id:
+        q = q.where(arcana_inventory.c.user_id == user_id)
     q = q.order_by(arcana_inventory.c.created_at.desc()).limit(page_size)
     with _get_engine().connect() as conn:
         rows = conn.execute(q).fetchall()
@@ -516,7 +516,7 @@ def _ai_get_group_remaining_sync(group_name: str, list_type: str) -> int:
     return 0 if row is None else 1
 
 
-def _nl_get_items_for_works_sync(works_ids: List[str], user_notion_id: str) -> List[ListItem]:
+def _nl_get_items_for_works_sync(works_ids: List[str], user_id: str) -> List[ListItem]:
     if not works_ids:
         return []
     q = (
@@ -524,10 +524,10 @@ def _nl_get_items_for_works_sync(works_ids: List[str], user_notion_id: str) -> L
         .where(nexus_lists.c.works_id.in_(list(works_ids)))
         .where(nexus_lists.c.status != "archived")
     )
-    if user_notion_id:
+    if user_id:
         q = q.where(
-            (nexus_lists.c.user_notion_id == user_notion_id)
-            | (nexus_lists.c.user_notion_id == "")
+            (nexus_lists.c.user_id == user_id)
+            | (nexus_lists.c.user_id == "")
         )
     q = q.order_by(nexus_lists.c.created_at.asc())
     with _get_engine().connect() as conn:
@@ -535,16 +535,16 @@ def _nl_get_items_for_works_sync(works_ids: List[str], user_notion_id: str) -> L
     return [_row_to_list_item(r) for r in rows]
 
 
-def _nl_get_items_for_task_sync(task_id: str, user_notion_id: str) -> List[ListItem]:
+def _nl_get_items_for_task_sync(task_id: str, user_id: str) -> List[ListItem]:
     q = (
         select(nexus_lists)
         .where(nexus_lists.c.task_id == task_id)
         .where(nexus_lists.c.status != "archived")
     )
-    if user_notion_id:
+    if user_id:
         q = q.where(
-            (nexus_lists.c.user_notion_id == user_notion_id)
-            | (nexus_lists.c.user_notion_id == "")
+            (nexus_lists.c.user_id == user_id)
+            | (nexus_lists.c.user_id == "")
         )
     q = q.order_by(nexus_lists.c.created_at.asc())
     with _get_engine().connect() as conn:
@@ -552,7 +552,7 @@ def _nl_get_items_for_task_sync(task_id: str, user_notion_id: str) -> List[ListI
     return [_row_to_list_item(r) for r in rows]
 
 
-def _ai_get_items_for_works_sync(works_ids: List[str], user_notion_id: str) -> List[InventoryItem]:
+def _ai_get_items_for_works_sync(works_ids: List[str], user_id: str) -> List[InventoryItem]:
     if not works_ids:
         return []
     q = (
@@ -560,10 +560,10 @@ def _ai_get_items_for_works_sync(works_ids: List[str], user_notion_id: str) -> L
         .where(arcana_inventory.c.works_id.in_(list(works_ids)))
         .where(arcana_inventory.c.status != "archived")
     )
-    if user_notion_id:
+    if user_id:
         q = q.where(
-            (arcana_inventory.c.user_notion_id == user_notion_id)
-            | (arcana_inventory.c.user_notion_id == "")
+            (arcana_inventory.c.user_id == user_id)
+            | (arcana_inventory.c.user_id == "")
         )
     q = q.order_by(arcana_inventory.c.created_at.asc())
     with _get_engine().connect() as conn:
@@ -571,16 +571,16 @@ def _ai_get_items_for_works_sync(works_ids: List[str], user_notion_id: str) -> L
     return [_row_to_inventory_item(r) for r in rows]
 
 
-def _ai_get_open_barter_sync(user_notion_id: str) -> List[InventoryItem]:
+def _ai_get_open_barter_sync(user_id: str) -> List[InventoryItem]:
     q = (
         select(arcana_inventory)
         .where(arcana_inventory.c.category == BARTER_CATEGORY)
         .where(arcana_inventory.c.status.notin_(["done", "archived"]))
     )
-    if user_notion_id:
+    if user_id:
         q = q.where(
-            (arcana_inventory.c.user_notion_id == user_notion_id)
-            | (arcana_inventory.c.user_notion_id == "")
+            (arcana_inventory.c.user_id == user_id)
+            | (arcana_inventory.c.user_id == "")
         )
     q = q.order_by(arcana_inventory.c.created_at.asc())
     with _get_engine().connect() as conn:
@@ -612,7 +612,7 @@ class PgNexusListsRepo:
         stage: Optional[int] = None,
         task_id: str = "",
         works_id: str = "",
-        user_notion_id: str = "",
+        user_id: str = "",
     ) -> ListItem:
         return await asyncio.to_thread(
             _nl_add_sync,
@@ -620,18 +620,18 @@ class PgNexusListsRepo:
             category, quantity, note, price_actual, price_plan,
             store, _pg_priority(priority), group_name,
             is_recurring, remind_days, expires_at, stage,
-            task_id, works_id, user_notion_id,
+            task_id, works_id, user_id,
         )
 
     async def get_list(
         self,
         list_type: Optional[str],
         status: str = "Not started",
-        user_notion_id: str = "",
+        user_id: str = "",
         page_size: int = 100,
     ) -> List[ListItem]:
         return await asyncio.to_thread(
-            _nl_get_list_sync, list_type, status, user_notion_id, page_size
+            _nl_get_list_sync, list_type, status, user_id, page_size
         )
 
     async def search(
@@ -639,11 +639,11 @@ class PgNexusListsRepo:
         query: str,
         list_type: Optional[str] = None,
         status: Optional[str] = None,
-        user_notion_id: str = "",
+        user_id: str = "",
         page_size: int = 20,
     ) -> List[ListItem]:
         return await asyncio.to_thread(
-            _nl_search_sync, query, list_type, status, user_notion_id, page_size
+            _nl_search_sync, query, list_type, status, user_id, page_size
         )
 
     async def get_by_id(self, item_id: str) -> Optional[ListItem]:
@@ -663,27 +663,27 @@ class PgNexusListsRepo:
 
     async def get_summary_items(
         self,
-        user_notion_id: str,
+        user_id: str,
         list_type: Optional[str] = None,
         group: Optional[str] = None,
         category: Optional[str] = None,
     ) -> List[ListItem]:
         return await asyncio.to_thread(
-            _nl_get_summary_sync, user_notion_id, list_type, group, category
+            _nl_get_summary_sync, user_id, list_type, group, category
         )
 
     async def get_group_remaining(self, group_name: str, list_type: str) -> int:
         return await asyncio.to_thread(_nl_get_group_remaining_sync, group_name, list_type)
 
     async def get_items_for_works(
-        self, works_ids: List[str], user_notion_id: str = ""
+        self, works_ids: List[str], user_id: str = ""
     ) -> List[ListItem]:
-        return await asyncio.to_thread(_nl_get_items_for_works_sync, works_ids, user_notion_id)
+        return await asyncio.to_thread(_nl_get_items_for_works_sync, works_ids, user_id)
 
     async def get_items_for_task(
-        self, task_id: str, user_notion_id: str = ""
+        self, task_id: str, user_id: str = ""
     ) -> List[ListItem]:
-        return await asyncio.to_thread(_nl_get_items_for_task_sync, task_id, user_notion_id)
+        return await asyncio.to_thread(_nl_get_items_for_task_sync, task_id, user_id)
 
 
 class PgArcanaInventoryRepo:
@@ -706,36 +706,36 @@ class PgArcanaInventoryRepo:
         remind_days: Optional[int] = None,
         expires_at: Optional[str] = None,
         works_id: str = "",
-        user_notion_id: str = "",
+        user_id: str = "",
     ) -> InventoryItem:
         return await asyncio.to_thread(
             _ai_add_sync,
             name, _pg_type(list_type), _pg_status(status),
             category, quantity, note, group_name,
             is_recurring, remind_days, expires_at,
-            works_id, user_notion_id,
+            works_id, user_id,
         )
 
     async def search(
         self,
         query: str,
         status: Optional[str] = None,
-        user_notion_id: str = "",
+        user_id: str = "",
         page_size: int = 20,
     ) -> List[InventoryItem]:
         return await asyncio.to_thread(
-            _ai_search_sync, query, status, user_notion_id, page_size
+            _ai_search_sync, query, status, user_id, page_size
         )
 
     async def get_list(
         self,
         category: Optional[str] = None,
         status: Optional[str] = None,
-        user_notion_id: str = "",
+        user_id: str = "",
         page_size: int = 100,
     ) -> List[InventoryItem]:
         return await asyncio.to_thread(
-            _ai_get_list_sync, category, status, user_notion_id, page_size
+            _ai_get_list_sync, category, status, user_id, page_size
         )
 
     async def get_by_id(self, item_id: str) -> Optional[InventoryItem]:
@@ -757,9 +757,9 @@ class PgArcanaInventoryRepo:
         return await asyncio.to_thread(_ai_get_group_remaining_sync, group_name, list_type)
 
     async def get_items_for_works(
-        self, works_ids: List[str], user_notion_id: str = ""
+        self, works_ids: List[str], user_id: str = ""
     ) -> List[InventoryItem]:
-        return await asyncio.to_thread(_ai_get_items_for_works_sync, works_ids, user_notion_id)
+        return await asyncio.to_thread(_ai_get_items_for_works_sync, works_ids, user_id)
 
-    async def get_open_barter(self, user_notion_id: str = "") -> List[InventoryItem]:
-        return await asyncio.to_thread(_ai_get_open_barter_sync, user_notion_id)
+    async def get_open_barter(self, user_id: str = "") -> List[InventoryItem]:
+        return await asyncio.to_thread(_ai_get_open_barter_sync, user_id)

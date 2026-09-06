@@ -19,7 +19,7 @@ from core.repos.pg_nexus_lists_repo import (
     PgArcanaInventoryRepo as _PgArcanaInventoryRepoClass,
     InventoryItem,
 )
-from core.user_manager import get_user_notion_id
+from core.user_manager import get_user_id
 from core.bot_notify import notify_user
 
 from miniapp.backend.auth import current_user_id
@@ -54,10 +54,10 @@ def _serialize_pg(item: InventoryItem) -> dict:
     }
 
 
-async def _fetch_arcana_inventory(user_notion_id: str) -> list:
+async def _fetch_arcana_inventory(user_id: str) -> list:
     try:
         items = await _arcana_inv_repo.get_list(
-            category=None, status=None, user_notion_id=user_notion_id
+            category=None, status=None, user_id=user_id
         )
         # get_list excludes archived but may include barter; show all non-archived
         return [i for i in items if i.list_type == "инвентарь"]
@@ -72,8 +72,8 @@ async def list_inventory(
     cat: Optional[str] = Query(None),
     q: Optional[str] = Query(None),
 ) -> dict[str, Any]:
-    user_notion_id = (await get_user_notion_id(tg_id)) or ""
-    pg_items = await _fetch_arcana_inventory(user_notion_id)
+    user_id = (await get_user_id(tg_id)) or ""
+    pg_items = await _fetch_arcana_inventory(user_id)
     items: list[dict] = []
     counts: dict[str, int] = {c: 0 for c in ARCANA_INV_CATEGORIES}
     needle = (q or "").lower().strip()
@@ -96,8 +96,8 @@ async def list_inventory(
 async def inventory_categories(
     tg_id: int = Depends(current_user_id),
 ) -> dict[str, Any]:
-    user_notion_id = (await get_user_notion_id(tg_id)) or ""
-    pg_items = await _fetch_arcana_inventory(user_notion_id)
+    user_id = (await get_user_id(tg_id)) or ""
+    pg_items = await _fetch_arcana_inventory(user_id)
     counts: dict[str, int] = {c: 0 for c in ARCANA_INV_CATEGORIES}
     for inv_item in pg_items:
         it = _serialize_pg(inv_item)
@@ -116,7 +116,7 @@ class InventoryEditBody(BaseModel):
     expires: Optional[str] = None  # YYYY-MM-DD; пусто = очистить
 
 
-async def _ensure_owned(item_id: str, user_notion_id: str) -> InventoryItem:
+async def _ensure_owned(item_id: str, user_id: str) -> InventoryItem:
     """Подгрузить item из PG + проверить что это инвентарь этого юзера."""
     item = await _arcana_inv_repo.get_by_id(item_id)
     if not item:
@@ -124,7 +124,7 @@ async def _ensure_owned(item_id: str, user_notion_id: str) -> InventoryItem:
     if item.list_type != "инвентарь":
         raise HTTPException(status_code=404, detail="not an inventory item")
     # допускаем legacy items без owner
-    if user_notion_id and item.user_notion_id and item.user_notion_id != user_notion_id:
+    if user_id and item.user_id and item.user_id != user_id:
         raise HTTPException(status_code=404, detail="not found")
     return item
 
@@ -135,8 +135,8 @@ async def edit_inventory(
     body: InventoryEditBody,
     tg_id: int = Depends(current_user_id),
 ) -> dict[str, Any]:
-    user_notion_id = (await get_user_notion_id(tg_id)) or ""
-    await _ensure_owned(item_id, user_notion_id)
+    user_id = (await get_user_id(tg_id)) or ""
+    await _ensure_owned(item_id, user_id)
     fields: dict = {}
     if body.qty is not None:
         fields["quantity"] = float(body.qty)
@@ -165,8 +165,8 @@ async def purchase_inventory(
 ) -> dict[str, Any]:
     """«Купила» — append в Финансы (Бот=Arcana, кат=🕯️ Расходники) +
     приплюсовать qty в инвентарь."""
-    user_notion_id = (await get_user_notion_id(tg_id)) or ""
-    inv_item = await _ensure_owned(item_id, user_notion_id)
+    user_id = (await get_user_id(tg_id)) or ""
+    inv_item = await _ensure_owned(item_id, user_id)
     title = inv_item.name or "покупка"
     cat = inv_item.category or "💳 Прочее"
     finance_cat = CATEGORY_TO_FINANCE.get(cat, "🕯️ Расходники")
@@ -180,7 +180,7 @@ async def purchase_inventory(
             source="💳 Карта",
             description=body.description or title,
             bot_label=BOT_ARCANA,
-            user_notion_id=user_notion_id,
+            user_id=user_id,
         )
         if body.qty_added is not None and body.qty_added > 0:
             cur = float(inv_item.quantity or 0)
@@ -212,8 +212,8 @@ async def depleted_inventory(
     tg_id: int = Depends(current_user_id),
 ) -> dict[str, Any]:
     """Закончился — статус Archived. Опционально создать айтем в 🛒 Покупки."""
-    user_notion_id = (await get_user_notion_id(tg_id)) or ""
-    inv_item = await _ensure_owned(item_id, user_notion_id)
+    user_id = (await get_user_id(tg_id)) or ""
+    inv_item = await _ensure_owned(item_id, user_id)
     await _arcana_inv_repo.update_status(item_id, "Archived")
     title = inv_item.name or ""
     buy_id = None
@@ -225,7 +225,7 @@ async def depleted_inventory(
                 [{"name": title, "category": cat}],
                 "🛒 Покупки",
                 BOT_ARCANA,
-                user_notion_id,
+                user_id,
             )
             if created:
                 buy_id = created[0].get("id")

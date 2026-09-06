@@ -22,7 +22,7 @@ logger = logging.getLogger("nexus.reply_update")
 _MEMORY_PLAQUE_RE = re.compile(r"^🧠 Запомнил(?:\s*\[[^\]]*\])?:\s*(.+)$", re.DOTALL)
 
 
-async def _move_memory_to_notes(message: Message, orig: Message, page_id: str, user_notion_id: str) -> bool:
+async def _move_memory_to_notes(message: Message, orig: Message, page_id: str, user_id: str) -> bool:
     """Перенос факта из 🧠 Память в 📝 Заметки: архивирует memory-строку +
     создаёт note с тем же текстом (#188). Текст факта берём из ТЕКСТА плашки
     (не из БД) — плашка уже содержит канонический fact, лишний round-trip
@@ -39,7 +39,7 @@ async def _move_memory_to_notes(message: Message, orig: Message, page_id: str, u
         from core.repos.memory_repo import _repo as mem_repo
         from nexus.repos.notes_repo import NotesRepo
         today = datetime.now(timezone.utc).date().isoformat()
-        note_id = await NotesRepo().add(text=fact_text, tags=[], date=today, user_notion_id=user_notion_id)
+        note_id = await NotesRepo().add(text=fact_text, tags=[], date=today, user_id=user_id)
         if not note_id:
             await message.answer("⚠️ Не получилось создать заметку.")
             return True
@@ -52,7 +52,7 @@ async def _move_memory_to_notes(message: Message, orig: Message, page_id: str, u
     return True
 
 
-async def _move_list_item_to_notes(message: Message, page_id: str, user_notion_id: str) -> bool:
+async def _move_list_item_to_notes(message: Message, page_id: str, user_id: str) -> bool:
     """Перенос позиции 🛒 Покупки/📋 Чеклист в 📝 Заметки: архивирует
     list-item + создаёт note с тем же текстом (#192, по образцу #188
     _move_memory_to_notes выше). В отличие от memory, текст берём из БД
@@ -73,7 +73,7 @@ async def _move_list_item_to_notes(message: Message, page_id: str, user_notion_i
         from core.repos.lists_repo import _repo as lists_repo
         today = datetime.now(timezone.utc).date().isoformat()
         note_id = await NotesRepo().add(
-            text=item.name, tags=[], date=today, user_notion_id=user_notion_id,
+            text=item.name, tags=[], date=today, user_id=user_id,
         )
         if not note_id:
             await message.answer("⚠️ Не получилось создать заметку.")
@@ -87,7 +87,7 @@ async def _move_list_item_to_notes(message: Message, page_id: str, user_notion_i
     return True
 
 
-async def handle_reply_update(message: Message, user_notion_id: str = "") -> bool:
+async def handle_reply_update(message: Message, user_id: str = "") -> bool:
     """Если reply на сообщение бота — попытаться обновить Notion-запись.
 
     Возвращает True если обработано (сообщение уже отправлено пользователю),
@@ -119,7 +119,7 @@ async def handle_reply_update(message: Message, user_notion_id: str = "") -> boo
         # проверки "нечего менять", т.к. move_to_notes=False всегда присутствует
         # ключом в JSON-ответе Haiku (не фильтруется как null/"").
         if page_type == "memory" and updates.pop("move_to_notes", False):
-            handled = await _move_memory_to_notes(message, orig, page_id, user_notion_id)
+            handled = await _move_memory_to_notes(message, orig, page_id, user_id)
             if handled:
                 return True
 
@@ -127,7 +127,7 @@ async def handle_reply_update(message: Message, user_notion_id: str = "") -> boo
         # паттерн, что и #188 для памяти: перенос в другой домен, а не
         # field-апдейт этой строки списка.
         if page_type == "list" and updates.pop("move_to_notes", False):
-            handled = await _move_list_item_to_notes(message, page_id, user_notion_id)
+            handled = await _move_list_item_to_notes(message, page_id, user_id)
             if handled:
                 return True
 
@@ -139,7 +139,7 @@ async def handle_reply_update(message: Message, user_notion_id: str = "") -> boo
         db_id = get_db_id_for_type(page_type)
         applied = await apply_updates(
             page_id, page_type, db_id, updates,
-            user_notion_id=user_notion_id, tz_offset=tz_offset,
+            user_id=user_id, tz_offset=tz_offset,
         )
         summary = await format_applied(applied)
 

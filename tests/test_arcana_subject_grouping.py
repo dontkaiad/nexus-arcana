@@ -42,7 +42,7 @@ def _ctx(mock_repo, mock_cl=None):
     return [
         patch("miniapp.backend.routes.arcana_sessions._sessions_repo", mock_repo),
         patch("miniapp.backend.routes.arcana_sessions._clients_repo", mock_cl),
-        patch("miniapp.backend.routes.arcana_sessions.get_user_notion_id",
+        patch("miniapp.backend.routes.arcana_sessions.get_user_id",
               AsyncMock(return_value=FAKE_NOTION)),
         patch("miniapp.backend.routes.arcana_sessions.today_user_tz",
               AsyncMock(return_value=(__import__("datetime").date(2026, 5, 1), 3))),

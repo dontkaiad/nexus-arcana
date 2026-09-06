@@ -24,7 +24,7 @@ def _make_engine():
         conn.execute(sa.text(
             "CREATE TABLE cushion ("
             "id INTEGER PRIMARY KEY AUTOINCREMENT, "
-            "user_notion_id TEXT NOT NULL DEFAULT '', "
+            "user_id TEXT NOT NULL DEFAULT '', "
             "balance REAL NOT NULL DEFAULT 0, "
             "target REAL, "
             "planned_contribution REAL NOT NULL DEFAULT 0, "
@@ -34,7 +34,7 @@ def _make_engine():
         conn.execute(sa.text(
             "CREATE TABLE cushion_transactions ("
             "id INTEGER PRIMARY KEY AUTOINCREMENT, "
-            "user_notion_id TEXT NOT NULL DEFAULT '', "
+            "user_id TEXT NOT NULL DEFAULT '', "
             "amount REAL NOT NULL, "
             "source TEXT NOT NULL DEFAULT 'manual', "
             "note TEXT NOT NULL DEFAULT '', "
@@ -62,7 +62,7 @@ async def test_add_to_balance_increments_not_overwrites():
         assert c.balance == 10500
         # ровно один ряд на пользователя
         with eng.connect() as conn:
-            n = conn.execute(sa.text("SELECT COUNT(*) FROM cushion WHERE user_notion_id='u1'")).scalar()
+            n = conn.execute(sa.text("SELECT COUNT(*) FROM cushion WHERE user_id='u1'")).scalar()
         assert n == 1
 
 

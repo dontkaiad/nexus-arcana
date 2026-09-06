@@ -35,7 +35,7 @@ def _now():
 @dataclass
 class Debt:
     id: str = ""
-    user_notion_id: str = ""
+    user_id: str = ""
     name: str = ""
     kind: str = "i_owe"
     amount: float = 0.0
@@ -57,7 +57,7 @@ def _row_to_debt(row) -> Debt:
 
     return Debt(
         id=str(row.id),
-        user_notion_id=row.user_notion_id or "",
+        user_id=row.user_id or "",
         name=row.name or "",
         kind=row.kind or "i_owe",
         amount=float(row.amount or 0),
@@ -74,11 +74,11 @@ def _row_to_debt(row) -> Debt:
 
 class PgDebtsRepo:
 
-    def _find_row_sync(self, conn, user_notion_id: str, kind: str, name: str,
+    def _find_row_sync(self, conn, user_id: str, kind: str, name: str,
                        active_only: bool = False):
         """Case-insensitive row lookup in Python (SQLite lower() is ASCII-only)."""
         q = select(debts).where(
-            (debts.c.user_notion_id == user_notion_id)
+            (debts.c.user_id == user_id)
             & (debts.c.kind == kind)
         )
         if active_only:
@@ -89,7 +89,7 @@ class PgDebtsRepo:
 
     def _upsert_sync(
         self,
-        user_notion_id: str,
+        user_id: str,
         name: str,
         kind: str,
         amount: float,
@@ -105,11 +105,11 @@ class PgDebtsRepo:
         safety net for concurrent PG writes.
         """
         with _get_engine().begin() as conn:
-            row = self._find_row_sync(conn, user_notion_id, kind, name)
+            row = self._find_row_sync(conn, user_id, kind, name)
 
             if row is None:
                 conn.execute(debts.insert().values(
-                    user_notion_id=user_notion_id,
+                    user_id=user_id,
                     name=name,
                     kind=kind,
                     amount=amount,
@@ -136,7 +136,7 @@ class PgDebtsRepo:
 
     def _reduce_amount_sync(
         self,
-        user_notion_id: str,
+        user_id: str,
         kind: str,
         name: str,
         payment: float,
@@ -148,7 +148,7 @@ class PgDebtsRepo:
         теряется молча: caller решает, куда его направить (подушка/оставить).
         """
         with _get_engine().begin() as conn:
-            row = self._find_row_sync(conn, user_notion_id, kind, name, active_only=True)
+            row = self._find_row_sync(conn, user_id, kind, name, active_only=True)
 
             if row is None:
                 return None
@@ -170,13 +170,13 @@ class PgDebtsRepo:
 
     def _deactivate_sync(
         self,
-        user_notion_id: str,
+        user_id: str,
         kind: str,
         name: str,
     ) -> bool:
         """Set is_active=False. Returns True if row was found and updated."""
         with _get_engine().begin() as conn:
-            row = self._find_row_sync(conn, user_notion_id, kind, name, active_only=True)
+            row = self._find_row_sync(conn, user_id, kind, name, active_only=True)
 
             if row is None:
                 return False
@@ -190,12 +190,12 @@ class PgDebtsRepo:
 
     def _list_active_sync(
         self,
-        user_notion_id: str,
+        user_id: str,
         kind: Optional[str],
     ) -> List[Debt]:
         with _get_engine().connect() as conn:
             q = select(debts).where(
-                (debts.c.user_notion_id == user_notion_id)
+                (debts.c.user_id == user_id)
                 & (debts.c.is_active == True)
             )
             if kind is not None:
@@ -205,12 +205,12 @@ class PgDebtsRepo:
 
     def _list_closed_sync(
         self,
-        user_notion_id: str,
+        user_id: str,
         kind: Optional[str],
     ) -> List[Debt]:
         with _get_engine().connect() as conn:
             q = select(debts).where(
-                (debts.c.user_notion_id == user_notion_id)
+                (debts.c.user_id == user_id)
                 & (debts.c.is_active == False)
             )
             if kind is not None:
@@ -222,7 +222,7 @@ class PgDebtsRepo:
 
     async def upsert(
         self,
-        user_notion_id: str,
+        user_id: str,
         name: str,
         kind: str = "i_owe",
         amount: float = 0.0,
@@ -232,47 +232,47 @@ class PgDebtsRepo:
     ) -> None:
         await asyncio.to_thread(
             self._upsert_sync,
-            user_notion_id, name, kind, amount, deadline, strategy, monthly_payment,
+            user_id, name, kind, amount, deadline, strategy, monthly_payment,
         )
 
     async def reduce_amount(
         self,
-        user_notion_id: str,
+        user_id: str,
         kind: str,
         name: str,
         payment: float,
     ) -> Optional[Tuple[float, bool, float]]:
         return await asyncio.to_thread(
-            self._reduce_amount_sync, user_notion_id, kind, name, payment,
+            self._reduce_amount_sync, user_id, kind, name, payment,
         )
 
     async def deactivate(
         self,
-        user_notion_id: str,
+        user_id: str,
         kind: str,
         name: str,
     ) -> bool:
         return await asyncio.to_thread(
-            self._deactivate_sync, user_notion_id, kind, name,
+            self._deactivate_sync, user_id, kind, name,
         )
 
     async def list_active(
         self,
-        user_notion_id: str,
+        user_id: str,
         kind: Optional[str] = None,
     ) -> List[Debt]:
         return await asyncio.to_thread(
-            self._list_active_sync, user_notion_id, kind,
+            self._list_active_sync, user_id, kind,
         )
 
     async def list_closed(
         self,
-        user_notion_id: str,
+        user_id: str,
         kind: Optional[str] = None,
     ) -> List[Debt]:
         """Return inactive debts ordered by updated_at desc. closed_at = updated_at."""
         return await asyncio.to_thread(
-            self._list_closed_sync, user_notion_id, kind,
+            self._list_closed_sync, user_id, kind,
         )
 
 

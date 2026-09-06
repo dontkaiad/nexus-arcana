@@ -146,7 +146,7 @@ async def test_today_digest_shows_local_time_not_utc():
          patch("nexus.handlers.streaks.get_streak", return_value=None), \
          patch("nexus.handlers.finance._calc_free_remaining",
                AsyncMock(return_value=None)):
-        text = await tasks._build_today_digest(999_001, user_notion_id="u-1")
+        text = await tasks._build_today_digest(999_001, user_id="u-1")
 
     assert "🔔" in text, f"ожидался блок напоминания 🔔 в дайджесте:\n{text}"
     assert "16:00" in text, f"ожидалось локальное 16:00 в дайджесте:\n{text}"

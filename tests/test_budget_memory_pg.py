@@ -24,7 +24,7 @@ async def test_save_memory_entry_writes_pg_unified_category():
 
     m_upsert.assert_awaited_once()
     args = m_upsert.call_args.args
-    # (fact, key, category, scope, related_to, source, user_notion_id)
+    # (fact, key, category, scope, related_to, source, user_id)
     assert args[1] == "постоянно_жильё_квартира"
     assert args[2] == "💰 Лимит"          # ЕДИНАЯ категория, НЕ «🔒 Постоянные»
     assert args[3] == "nexus"

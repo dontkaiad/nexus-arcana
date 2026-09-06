@@ -20,7 +20,7 @@ _pg_rituals_repo = _PgRitualsRepoClass()
 from core.repos.pg_nexus_lists_repo import PgArcanaInventoryRepo as _PgArcanaInventoryRepoClass
 _arcana_inv_repo_lists = _PgArcanaInventoryRepoClass()
 _pnl_repo = PgArcanaPnlRepo()
-from core.user_manager import get_user_notion_id
+from core.user_manager import get_user_id
 from core.bot_notify import notify_user
 
 from miniapp.backend._moon import moon_phase, next_phases
@@ -55,13 +55,13 @@ from miniapp.backend.routes._arcana_common import (
 )
 
 
-async def _load_rituals(user_notion_id: str) -> list[dict]:
+async def _load_rituals(user_id: str) -> list[dict]:
     """Все ритуалы юзера из PG → Notion-подобные стабы для аналитики.
 
     Defensive: при сбое запроса возвращает [] (вкладка «Сегодня» не падает),
     как раньше делал Notion-путь."""
     try:
-        _pg = await _pg_rituals_repo.list_all(user_notion_id=user_notion_id)
+        _pg = await _pg_rituals_repo.list_all(user_id=user_id)
     except Exception as e:
         logger.warning("load_rituals pg query failed: %s", e)
         return []
@@ -179,10 +179,10 @@ def _work_local_time(dt: Optional[Any], tz_offset: int) -> Optional[str]:
         return None
 
 
-async def _works_schedule(user_notion_id: str, today_date: date, tz_offset: int) -> tuple[list[dict], list[dict]]:
+async def _works_schedule(user_id: str, today_date: date, tz_offset: int) -> tuple[list[dict], list[dict]]:
     """Возвращает (overdue, scheduled): просроченные + сегодняшние работы."""
     try:
-        works_list = await _pg_works_repo.list_all(user_notion_id)
+        works_list = await _pg_works_repo.list_all(user_id)
     except Exception as e:
         logger.warning("works_schedule pg query failed: %s", e)
         return [], []
@@ -271,16 +271,16 @@ async def get_arcana_today(tg_id: int = Depends(current_user_id)) -> dict[str, A
     today_date, tz_offset = await today_user_tz(tg_id)
     today_iso = today_date.isoformat()
     weekday = _WEEKDAYS_RU[today_date.weekday()]
-    user_notion_id = (await get_user_notion_id(tg_id)) or ""
+    user_id = (await get_user_id(tg_id)) or ""
 
     # Moon — по текущему UTC
     moon = moon_phase(datetime.now(timezone.utc))
 
     # Clients map — нужен для sessions_today
-    clients_map = await load_clients_map(user_notion_id)
+    clients_map = await load_clients_map(user_id)
 
     # Все сеансы юзера из PG → конвертируем в стабы для совместимости аналитических fn
-    _pg_sessions = await _pg_sessions_repo.list_all(user_notion_id=user_notion_id)
+    _pg_sessions = await _pg_sessions_repo.list_all(user_id=user_id)
     all_sessions = [triplet_to_stub(t) for t in _pg_sessions]
 
     sessions_today: list[dict] = []
@@ -332,7 +332,7 @@ async def get_arcana_today(tg_id: int = Depends(current_user_id)) -> dict[str, A
         _meeting_keys.add((_sn, _cid) if _sn else (f"solo:{_t.id}", _cid))
     client_sessions_today = len(_meeting_keys)
 
-    works_overdue, works = await _works_schedule(user_notion_id, today_date, tz_offset)
+    works_overdue, works = await _works_schedule(user_id, today_date, tz_offset)
     unchecked = await _unchecked_30d(all_sessions, today_date)
     accuracy_overall, _, _ = _accuracy(all_sessions)
 
@@ -344,7 +344,7 @@ async def get_arcana_today(tg_id: int = Depends(current_user_id)) -> dict[str, A
         "09": "Сентябрь", "10": "Октябрь", "11": "Ноябрь", "12": "Декабрь",
     }[month[5:7]]
     try:
-        fin_records = await _pnl_repo.query_month(month, user_notion_id=user_notion_id)
+        fin_records = await _pnl_repo.query_month(month, user_id=user_id)
     except Exception as e:
         logger.warning("arcana finance fetch failed: %s", e)
         fin_records = []
@@ -361,7 +361,7 @@ async def get_arcana_today(tg_id: int = Depends(current_user_id)) -> dict[str, A
     month_accuracy, _, sessions_in_month = _accuracy(all_sessions, month)
 
     # Аккуратность по сеансам + ритуалам (взвешенно за всё время)
-    rituals = await _load_rituals(user_notion_id)
+    rituals = await _load_rituals(user_id)
     acc = _compute_accuracy(all_sessions, rituals, scope="all")
     pending_sessions, pending_rituals = _count_pending(all_sessions, rituals)
 
@@ -562,9 +562,9 @@ def _avg_check_delay(items: list[dict], verdict_fn) -> Optional[float]:
     return round(sum(deltas) / len(deltas), 1)
 
 
-async def _client_types_map(user_notion_id: str) -> dict[str, str]:
+async def _client_types_map(user_id: str) -> dict[str, str]:
     """Возвращает {pg_client_id: type_full}. Uses PG clients (post-migration)."""
-    clients_map = await load_clients_map(user_notion_id)
+    clients_map = await load_clients_map(user_id)
     return {cid: info.get("type_full", "") for cid, info in clients_map.items()}
 
 
@@ -584,11 +584,11 @@ async def get_arcana_stats(
     tg_id: int = Depends(current_user_id),
 ) -> dict[str, Any]:
     """Развёрнутая статистика практики для StatsSheet."""
-    user_notion_id = (await get_user_notion_id(tg_id)) or ""
-    _pg_sess = await _pg_sessions_repo.list_all(user_notion_id=user_notion_id)
+    user_id = (await get_user_id(tg_id)) or ""
+    _pg_sess = await _pg_sessions_repo.list_all(user_id=user_id)
     sessions = [triplet_to_stub(t) for t in _pg_sess]
-    rituals = await _load_rituals(user_notion_id)
-    clients_map = await load_clients_map(user_notion_id)
+    rituals = await _load_rituals(user_id)
+    clients_map = await load_clients_map(user_id)
 
     acc_overall = _compute_accuracy(sessions, rituals, "all")
     acc_sessions = _compute_accuracy(sessions, [], "sessions")
@@ -693,7 +693,7 @@ async def get_arcana_stats(
         "avg_check_delay_sessions_days": _avg_check_delay(sessions, _session_verdict),
         "avg_check_delay_rituals_days": _avg_check_delay(rituals, _ritual_verdict),
     }
-    type_map = await _client_types_map(user_notion_id)
+    type_map = await _client_types_map(user_id)
     out["by_client_type"] = _by_client_type(sessions, type_map)
     out["by_payment_source"] = _by_payment_source(sessions, rituals, type_map)
     out["barters_pending"] = _pending_barters(sessions, rituals, clients_map)
@@ -818,14 +818,14 @@ async def get_arcana_works(
     tg_id: int = Depends(current_user_id),
 ) -> dict[str, Any]:
     """Активные Работы юзера из PG: status != done/archived, сорт по deadline ASC nulls last."""
-    user_notion_id = (await get_user_notion_id(tg_id)) or ""
+    user_id = (await get_user_id(tg_id)) or ""
     today_date, tz_offset = await today_user_tz(tg_id)
     try:
-        works_list = await _pg_works_repo.list_all(user_notion_id)
+        works_list = await _pg_works_repo.list_all(user_id)
     except Exception as e:
         logger.warning("works list fetch failed: %s", e)
         works_list = []
-    clients_map = await load_clients_map(user_notion_id)
+    clients_map = await load_clients_map(user_id)
     open_works = [w for w in works_list if w.status not in ("done", "archived")]
 
     # batch-fetch subtasks from arcana_inventory (works_id = PG work id)
@@ -833,7 +833,7 @@ async def get_arcana_works(
     if open_works:
         try:
             work_ids = [w.id for w in open_works]
-            sub_items = await _arcana_inv_repo_lists.get_items_for_works(work_ids, user_notion_id)
+            sub_items = await _arcana_inv_repo_lists.get_items_for_works(work_ids, user_id)
             for s in sub_items:
                 if s.works_id:
                     subtasks_by_work.setdefault(s.works_id, []).append({
@@ -875,11 +875,11 @@ async def get_arcana_accuracy(
 ) -> dict[str, Any]:
     if scope not in ("all", "sessions", "rituals"):
         scope = "all"
-    user_notion_id = (await get_user_notion_id(tg_id)) or ""
-    _pg_sess = await _pg_sessions_repo.list_all(user_notion_id=user_notion_id)
+    user_id = (await get_user_id(tg_id)) or ""
+    _pg_sess = await _pg_sessions_repo.list_all(user_id=user_id)
     sessions = [triplet_to_stub(t) for t in _pg_sess]
-    rituals = await _load_rituals(user_notion_id)
-    clients_map = await load_clients_map(user_notion_id)
+    rituals = await _load_rituals(user_id)
+    clients_map = await load_clients_map(user_id)
     acc = _compute_accuracy(sessions, rituals, scope)
     pending_sessions, pending_rituals = _count_pending(sessions, rituals)
     pending = _pending_list(sessions, rituals, scope, clients_map)
@@ -925,10 +925,10 @@ async def post_arcana_accuracy_verify(
     _kind = "Расклад" if body.type == "session" else "Ритуал"
     _verdict_word = {"yes": "сбылось ✅", "half": "частично 🌗", "no": "не сбылось ❌"}[body.verdict]
     await notify_user(tg_id, f"🔮 {_kind}: {_verdict_word}", bot="arcana")
-    user_notion_id = (await get_user_notion_id(tg_id)) or ""
-    _pg_sess = await _pg_sessions_repo.list_all(user_notion_id=user_notion_id)
+    user_id = (await get_user_id(tg_id)) or ""
+    _pg_sess = await _pg_sessions_repo.list_all(user_id=user_id)
     sessions = [triplet_to_stub(t) for t in _pg_sess]
-    rituals = await _load_rituals(user_notion_id)
+    rituals = await _load_rituals(user_id)
     acc = _compute_accuracy(sessions, rituals, "all")
     pending_sessions, pending_rituals = _count_pending(sessions, rituals)
     return {

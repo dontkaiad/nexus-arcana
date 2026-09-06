@@ -41,7 +41,7 @@ def _make_engine():
             "is_recurring INTEGER DEFAULT 0, remind_days INTEGER, "
             "expires_at DATE, stage INTEGER, "
             "task_id TEXT DEFAULT '', works_id TEXT DEFAULT '', "
-            "user_notion_id TEXT DEFAULT '', "
+            "user_id TEXT DEFAULT '', "
             "created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, "
             "updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)"
         ))
@@ -54,7 +54,7 @@ def _make_engine():
             "group_name TEXT DEFAULT '', "
             "is_recurring INTEGER DEFAULT 0, remind_days INTEGER, "
             "expires_at DATE, works_id TEXT DEFAULT '', "
-            "user_notion_id TEXT DEFAULT '', "
+            "user_id TEXT DEFAULT '', "
             "created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, "
             "updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)"
         ))
@@ -66,7 +66,7 @@ def _ins_nexus(engine, name="item", works_id="", task_id="",
     with engine.begin() as conn:
         r = conn.execute(sa.text(
             "INSERT INTO nexus_lists (name, list_type, status, works_id, task_id, "
-            "user_notion_id, category) VALUES (:n, 'чеклист', :s, :w, :t, :u, :c) "
+            "user_id, category) VALUES (:n, 'чеклист', :s, :w, :t, :u, :c) "
             "RETURNING id"
         ), {"n": name, "s": status, "w": works_id, "t": task_id, "u": user, "c": category})
         return str(r.fetchone()[0])
@@ -77,7 +77,7 @@ def _ins_arcana(engine, name="item", works_id="", user="u1",
     with engine.begin() as conn:
         r = conn.execute(sa.text(
             "INSERT INTO arcana_inventory (name, list_type, status, works_id, "
-            "user_notion_id, category) VALUES (:n, 'чеклист', :s, :w, :u, :c) "
+            "user_id, category) VALUES (:n, 'чеклист', :s, :w, :u, :c) "
             "RETURNING id"
         ), {"n": name, "s": status, "w": works_id, "u": user, "c": category})
         return str(r.fetchone()[0])

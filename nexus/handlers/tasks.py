@@ -314,11 +314,11 @@ async def restore_reminders_on_startup() -> None:
             user_data = await get_user(tg_id)
             if not user_data:
                 continue
-            user_notion_id = user_data.get("notion_page_id", "")
+            user_id = user_data.get("notion_page_id", "")
             tz_offset = await _get_user_tz(tg_id)
 
             # ── Проход 1: будущие напоминания ────────────────────────────────────
-            for task in await _pg.active_with_future_reminder(user_notion_id):
+            for task in await _pg.active_with_future_reminder(user_id):
                 try:
                     task_id = task.id
                     title = task.title or "Задача"
@@ -330,7 +330,7 @@ async def restore_reminders_on_startup() -> None:
                     logger.error("restore pass1: task %s error: %s", task.id, e)
 
             # ── Проход 2: задачи с пропущенным напоминанием ─────────────────────
-            for task in await _pg.active_with_past_reminder(user_notion_id):
+            for task in await _pg.active_with_past_reminder(user_id):
                 try:
                     task_id = task.id
                     repeat = task.repeat
@@ -451,7 +451,7 @@ async def restore_reminders_on_startup() -> None:
 
             # ── Проход 3: repeat_time есть, reminder IS NULL — оживление ─────────
             revived = 0
-            for task in await _pg.active_recurring_without_reminder(user_notion_id):
+            for task in await _pg.active_recurring_without_reminder(user_id):
                 try:
                     repeat_time_raw = task.repeat_time
                     if not repeat_time_raw:
@@ -687,9 +687,9 @@ async def _reschedule_all_for_tz(uid: int, chat_id: int, old_offset: int, new_of
         user_data = await _get_user(uid)
         if not user_data:
             return
-        user_notion_id = user_data.get("notion_page_id", "")
+        user_id = user_data.get("notion_page_id", "")
         _pg = _PgTasksRepo()
-        task_list = await _pg.active_with_future_reminder(user_notion_id)
+        task_list = await _pg.active_with_future_reminder(user_id)
         rescheduled = 0
         for task in task_list:
             try:
@@ -716,7 +716,7 @@ async def _reschedule_all_for_tz(uid: int, chat_id: int, old_offset: int, new_of
         logger.error("tz_reschedule outer: %s", e)
 
 
-async def _update_user_tz(message: Message, text: str, user_notion_id: str = "") -> None:
+async def _update_user_tz(message: Message, text: str, user_id: str = "") -> None:
     uid = message.from_user.id
 
     # Город/UTC → offset через общий справочник (#170).
@@ -764,7 +764,7 @@ confident=false ТОЛЬКО если реально не можешь опре�
 
     old_offset = await _get_user_tz(uid)
     # Единый writer: tz_ + city_ синхронно + инвалидация кеша (#170).
-    await _set_user_location(uid, offset=offset, city=matched_city, user_notion_id=user_notion_id)
+    await _set_user_location(uid, offset=offset, city=matched_city, user_id=user_id)
 
     sign = "+" if offset >= 0 else ""
     await message.answer(f"🕐 Часовой пояс обновлён: UTC{sign}{offset}")
@@ -1055,7 +1055,7 @@ async def handle_last_task_clarify(
     message: Message,
     text: str,
     uid: int,
-    user_notion_id: str = "",
+    user_id: str = "",
 ) -> bool:
     """Обработать уточнение после создания задачи (5-мин окно).
 
@@ -2517,7 +2517,7 @@ async def _do_save_task(message: Message, data: dict, chat_id: int = None, uid: 
     await asyncio.to_thread(_ensure_lookups)
     real_priority = _match_code(_priority_id, data.get("priority") or "Важно", "🟡 Важно")
     real_category = _match_code(_category_id, data.get("category") or "💳 Прочее", "💳 Прочее")
-    user_notion_id = data.get("user_notion_id", "")
+    user_id = data.get("user_id", "")
 
     props = {
         "Задача":    _title(data["title"]),
@@ -2532,8 +2532,8 @@ async def _do_save_task(message: Message, data: dict, chat_id: int = None, uid: 
     note = (data.get("note") or "").strip()
     if note:
         props["Заметка"] = _text(note)
-    if user_notion_id:
-        props["🪪 Пользователи"] = _relation(user_notion_id)
+    if user_id:
+        props["🪪 Пользователи"] = _relation(user_id)
 
     result = await _repo.create(config.nexus.db_tasks, props)
     if not result:
@@ -2674,7 +2674,7 @@ async def _do_save_task(message: Message, data: dict, chat_id: int = None, uid: 
         _repeat_count = _autosuggest_counts[_uid].get(_norm_title, 0)
         if (title and title.strip() and _is_high_priority and not _is_routine
                 and not _recall_shown and _repeat_count >= _AUTOSUGGEST_MIN_REPEATS):
-            await suggest_memory(message, title.strip(), data.get("user_notion_id", ""))
+            await suggest_memory(message, title.strip(), data.get("user_id", ""))
         nudge = await _check_procrastination_nudge(
             data.get("title", ""),
             deadline=data.get("deadline") or "",
@@ -2726,7 +2726,7 @@ _CANCEL_STOP_WORDS = {
 }
 
 
-async def handle_task_cancel(message: Message, task_hint: str, user_notion_id: str = "") -> None:
+async def handle_task_cancel(message: Message, task_hint: str, user_id: str = "") -> None:
     """Найти активную задачу по ключевым словам и отменить (статус Archived)."""
     # Убираем стоп-слова отмены из hint
     cancel_words = set()
@@ -2739,7 +2739,7 @@ async def handle_task_cancel(message: Message, task_hint: str, user_notion_id: s
         await message.answer("⚠️ Укажи какую задачу отменить. Например: «отмени задачу написать Маше»")
         return
 
-    tasks = await _repo.active(user_notion_id=user_notion_id)
+    tasks = await _repo.active(user_id=user_id)
     if not tasks:
         await message.answer("📭 Нет активных задач.")
         return
@@ -2777,7 +2777,7 @@ async def handle_task_cancel(message: Message, task_hint: str, user_notion_id: s
 
 
 async def _expense_from_note_on_done(message: Message, task, uid: int,
-                                     user_notion_id: str = "") -> None:
+                                     user_id: str = "") -> None:
     """Отложенная трата: если у выполненной задачи есть заметка с суммой —
     создаём реальную finance-транзакцию (💸 Расход) в день выполнения и явно
     сообщаем об этом. Без суммы в заметке — ничего не делаем, закрытие задачи
@@ -2786,10 +2786,10 @@ async def _expense_from_note_on_done(message: Message, task, uid: int,
     note = (getattr(task, "note", "") or "").strip()
     if not note:
         return
-    notion_uid = (getattr(task, "user_notion_id", "") or "") or user_notion_id
+    notion_uid = (getattr(task, "user_id", "") or "") or user_id
     try:
         from nexus.handlers.finance import expense_from_task_note
-        res = await expense_from_task_note(note, user_notion_id=notion_uid, uid=uid)
+        res = await expense_from_task_note(note, user_id=notion_uid, uid=uid)
     except Exception as e:
         logger.error("_expense_from_note_on_done: %s", e)
         return
@@ -2798,7 +2798,7 @@ async def _expense_from_note_on_done(message: Message, task, uid: int,
         await message.answer(f"📤 Записал расход: {amount:,.0f}₽ — {desc}")
 
 
-async def handle_task_done(message: Message, task_hint: str, user_notion_id: str = "") -> None:
+async def handle_task_done(message: Message, task_hint: str, user_id: str = "") -> None:
     """Найти активную задачу по ключевым словам и отметить выполненной."""
     import random
     uid = message.from_user.id
@@ -2807,7 +2807,7 @@ async def handle_task_done(message: Message, task_hint: str, user_notion_id: str
         await message.answer("⚠️ Не понял о какой задаче речь. Напиши точнее.")
         return
 
-    tasks = await _repo.active(user_notion_id=user_notion_id)
+    tasks = await _repo.active(user_id=user_id)
     if not tasks:
         await message.answer("📭 Нет активных задач.")
         return
@@ -2845,7 +2845,7 @@ async def handle_task_done(message: Message, task_hint: str, user_notion_id: str
             phrase = random.choice(_DONE_PHRASES)
             streak_line = await _update_streak_line(uid, task_id)
             await message.answer(f"{phrase}\n✅ {title} — выполнено{streak_line}")
-            await _expense_from_note_on_done(message, task, uid, user_notion_id)
+            await _expense_from_note_on_done(message, task, uid, user_id)
         else:
             await message.answer("⚠️ Ошибка обновления в Notion.")
         return
@@ -2971,7 +2971,7 @@ async def handle_edit_record(
     new_value: str = "",
     edits: list | None = None,
     record_type: str = "task",
-    user_notion_id: str = "",
+    user_id: str = "",
 ) -> None:
     """Найти запись по ключевым словам (или последнюю) и обновить поле(я)."""
 
@@ -3013,11 +3013,11 @@ async def handle_edit_record(
             record_type = "finance"
         for edit in edits:
             await _apply_edit(message, record_type, page_id_last, None, edit["field"], edit["new_value"],
-                              user_notion_id=user_notion_id, from_context=True)
+                              user_id=user_id, from_context=True)
         return
 
     # Поиск задачи по hint_words
-    tasks = await _repo.active(user_notion_id=user_notion_id)
+    tasks = await _repo.active(user_id=user_id)
     scored = []
     for t in tasks:
         title = t.title
@@ -3035,7 +3035,7 @@ async def handle_edit_record(
     _, title, task_id = scored[0]
     for edit in edits:
         await _apply_edit(message, "task", task_id, title, edit["field"], edit["new_value"],
-                          user_notion_id=user_notion_id)
+                          user_id=user_id)
 
 
 async def _apply_edit(
@@ -3045,7 +3045,7 @@ async def _apply_edit(
     title: Optional[str],
     field: str,
     new_value: str,
-    user_notion_id: str = "",
+    user_id: str = "",
     from_context: bool = False,
 ) -> None:
     """Применить правку к Notion-странице (задача или финансы)."""
@@ -3140,13 +3140,13 @@ async def _apply_edit(
         await message.answer("⚠️ Ошибка при обновлении.")
 
 
-async def _build_today_digest(uid: int, user_notion_id: str = "", greeting: str = "") -> str:
+async def _build_today_digest(uid: int, user_id: str = "", greeting: str = "") -> str:
     """Build the daily digest text (HTML). Used by /today."""
     tz_offset = await _get_user_tz(uid)
     user_tz = timezone(timedelta(hours=tz_offset))
     today_str = datetime.now(user_tz).strftime("%Y-%m-%d")
 
-    all_tasks = await _repo.active(user_notion_id=user_notion_id)
+    all_tasks = await _repo.active(user_id=user_id)
 
     _priority_icons = {"Срочно": "🔴", "Важно": "🟡", "Можно потом": "⚪"}
     _repeat_labels = {"Ежедневно": "ежедневно", "Еженедельно": "еженедельно", "Ежемесячно": "ежемесячно"}
@@ -3236,7 +3236,7 @@ async def _build_today_digest(uid: int, user_notion_id: str = "", greeting: str 
     budget_line = ""
     try:
         from nexus.handlers.finance import _calc_free_remaining, _get_limits, _cat_link
-        result = await _calc_free_remaining(user_notion_id, tz_offset)
+        result = await _calc_free_remaining(user_id, tz_offset)
         if result:
             free_left, days_rem = result
             daily_budget = free_left / max(days_rem, 1)
@@ -3250,7 +3250,7 @@ async def _build_today_digest(uid: int, user_notion_id: str = "", greeting: str 
                     from core.repos.pg_finance_repo import PgNexusBudgetRepo
                     expense_recs = await PgNexusBudgetRepo().query_month(
                         today_str_b[:7], type_filter="expense",
-                        user_notion_id=user_notion_id,
+                        user_id=user_id,
                     )
                     by_cat_b: dict[str, float] = {}
                     for e in expense_recs:
@@ -3335,10 +3335,10 @@ async def _build_today_digest(uid: int, user_notion_id: str = "", greeting: str 
     return "\n".join(lines)
 
 
-async def handle_tasks_today(message: Message, user_notion_id: str = "") -> None:
+async def handle_tasks_today(message: Message, user_id: str = "") -> None:
     """Задачи на сегодня: дедлайн сегодня/просрочен, напоминание сегодня, ежедневные."""
     uid = message.from_user.id if message.from_user else 0
-    text = await _build_today_digest(uid, user_notion_id)
+    text = await _build_today_digest(uid, user_id)
     try:
         await message.answer(text, parse_mode="HTML")
     except Exception as e:
@@ -3352,7 +3352,7 @@ async def handle_tasks_today(message: Message, user_notion_id: str = "") -> None
 
 # ── /stats — статистика задач ─────────────────────────────────────────────────
 
-async def handle_task_stats(message: Message, user_notion_id: str = "") -> None:
+async def handle_task_stats(message: Message, user_id: str = "") -> None:
     """Статистика задач: за неделю, месяц, стрики, топ категорий."""
     from collections import Counter
 
@@ -3364,7 +3364,7 @@ async def handle_task_stats(message: Message, user_notion_id: str = "") -> None:
     week_start = today - timedelta(days=today.weekday())  # Понедельник
     month_start = today.replace(day=1)
 
-    all_tasks = await _repo.list_all(user_notion_id=user_notion_id)
+    all_tasks = await _repo.list_all(user_id=user_id)
 
     done_week = 0
     done_month = 0

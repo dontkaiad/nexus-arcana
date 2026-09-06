@@ -1,6 +1,6 @@
 # BUDGET — data-model contract (бюджет / day limit)
 
-Code conforms to: 5a57b8c (+ this change: _calc_free_remaining formula). This spec describes the budget data model as of
+Code conforms to: 5a57b8c (+ this change: _calc_free_remaining formula). (+ #144: user_notion_id → user_id.) This spec describes the budget data model as of
 that commit; update it in the same PR that changes the model.
 
 > Contract, not snapshot. Describes the derived model and the guarantees of
@@ -367,7 +367,7 @@ All in `core/budget.py` (pure async functions; no repo class):
 - **get_limits()** → `{cat_link: amount}` — reads current `💰 Лимит`
   memories (`find_by_category`), extracts the category link and amount per
   fact. Skips facts where link or amount can't be parsed.
-- **load_budget_data(user_notion_id)** → `{"доходы", "постоянные", "цели",
+- **load_budget_data(user_id)** → `{"доходы", "постоянные", "цели",
   "долги", "лимиты", "разовые"}` — reads budget memories by key prefix
   (`find_by_key_prefixes(["income_", "постоянно_", "лимит_", "цель_",
   "разовый_"])`, current rows only) plus active `i_owe` debts; parses each
@@ -376,7 +376,7 @@ All in `core/budget.py` (pure async functions; no repo class):
   the persisted one_time positions of the last accepted plan — its only
   consumer is `_build_sonnet_input` (see below), as a fallback for a
   recalc's empty session buffer.
-- **budget_day_limit_from_plan(user_notion_id, tz_offset=3)** → `int` — the
+- **budget_day_limit_from_plan(user_id, tz_offset=3)** → `int` — the
   daily spend limit from the saved plan (see Invariants for the exact formula).
   Returns `0` when there is no income or on any error. `tz_offset` is the
   viewer's personal timezone (Mini App passes `today_user_tz(tg_id)`'s offset);
@@ -422,17 +422,17 @@ All in `core/budget.py` (pure async functions; no repo class):
   plan's derived numbers (`лимит_*`, `цель_*`, debt strategies) ARE persisted
   as facts by `_save_budget_plan`, and stay static until the next accepted
   recalculation (see Human cheat sheet above — "what recalculates on its own").
-- **Period-spend queries are scoped by `user_notion_id`.** Every
+- **Period-spend queries are scoped by `user_id`.** Every
   `core.repos.finance_repo._repo.query_records()` call in
-  `nexus/handlers/finance.py` that has `user_notion_id` in scope must pass
+  `nexus/handlers/finance.py` that has `user_id` in scope must pass
   it through — the repo defaults to `""` and silently returns records
-  matching an empty `user_notion_id` (i.e. none, for real users) if it's
+  matching an empty `user_id` (i.e. none, for real users) if it's
   omitted. `_check_budget_limit` shipped without this for an unknown
   period (found+fixed: category progress `X/Y` always read `0` spent for
   any category, for every user); `_calc_free_remaining`,
   `build_budget_message`, `get_finance_period`, `_calc_impulse_status` and
   `_budget_period_review` had the same gap and were fixed alongside it.
-  `_period_spending` doesn't have `user_notion_id` in its signature at
+  `_period_spending` doesn't have `user_id` in its signature at
   all — a separate, pre-existing gap, not covered by this fix.
 
 ## Lifecycle / status model
@@ -534,7 +534,7 @@ are not appended (no double-counting).
 `one_time` is **not** in `fixed_total`; it is added into `already_spent`.
 
 **Expense classification** (`core/classifier.py:classify`) takes an optional
-`user_notion_id`. When present, `_known_budget_positions` reads the current
+`user_id`. When present, `_known_budget_positions` reads the current
 `постоянно_*` / `разовый_*` facts and `_budget_positions_prompt` appends them
 to the same Haiku call (no extra LLM request): if a spend's description
 matches a known position by meaning, Haiku returns `category='🔒 Фикс'` /
@@ -579,7 +579,7 @@ expense items → `_ONE_TIME_PARSE_SYSTEM`).
   support), `_ONE_TIME_EXPENSE_RE`, `_DEBT_CMD_RE`, `_GOAL_CMD_RE`,
   `_LIMIT_OVERRIDE_RE`, `_BUDGET_RE`, `classify()`/`process_item()` routing,
   `_known_budget_positions`/`_budget_positions_prompt` (expense→🔒 Фикс/📦 Разовые
-  matching, `classify(user_notion_id=...)`)
+  matching, `classify(user_id=...)`)
 - `core/repos/memory_repo.py` / `core/repos/pg_memory_repo.py` —
   `find_by_category`, `find_by_key_prefixes`, `find_by_exact_key` (budget facts)
 - `core/repos/pg_debts_repo.py` — active `i_owe` debts read by `load_budget_data`

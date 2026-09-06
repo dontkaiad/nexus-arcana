@@ -153,7 +153,7 @@ async def test_mode_a_does_not_append_machine_bottom_block():
         for p in _save_post_patches(summary_mock, rag_mock):
             st.enter_context(p)
         await _save_and_post_triplet(
-            msg, tz=TZ, user_notion_id="u", client_id=None, client_name=None,
+            msg, tz=TZ, user_id="u", client_id=None, client_name=None,
             deck="Уэйт", question="что чувствует",
             cards_text="король кубков, туз мечей, шут", bottom_card="двойка кубков",
             area="Отношения", interpretation="<p>авторский текст Кай</p>",
@@ -183,7 +183,7 @@ async def test_mode_b_still_appends_machine_bottom_block():
         for p in _save_post_patches(summary_mock, rag_mock):
             st.enter_context(p)
         await _save_and_post_triplet(
-            msg, tz=TZ, user_notion_id="u", client_id=None, client_name=None,
+            msg, tz=TZ, user_id="u", client_id=None, client_name=None,
             deck="Уэйт", question="что чувствует",
             cards_text="король кубков, туз мечей, шут", bottom_card="двойка кубков",
             area="Отношения", interpretation="<h3>Общий смысл</h3><p>сгенерено</p>",
@@ -277,7 +277,7 @@ async def test_single_mode_a_routes_to_personal_and_rag_gets_author():
     with ExitStack() as st:
         for p in _common_handler_patches(fake_ask, rag_safe=rag):
             st.enter_context(p)
-        await handle_add_session(_msg(), "голос", user_notion_id="u")
+        await handle_add_session(_msg(), "голос", user_id="u")
 
     assert any("РАЗВЕРНУТЬ её тезисы" in s for s in cap["systems"]), "режим A не сработал"
     assert not any("Трактуй строго по справочнику" in s for s in cap["systems"]), \
@@ -305,7 +305,7 @@ async def test_single_mode_a_passes_card_reference_into_personal():
         st.enter_context(
             patch("arcana.tarot_loader.get_cards_context", MagicMock(return_value=ref))
         )
-        await handle_add_session(_msg(), "голос", user_notion_id="u")
+        await handle_add_session(_msg(), "голос", user_id="u")
 
     assert cap["personal_system"] is not None, "режим A не вызван"
     assert ref in cap["personal_system"], "справочник карт не прокинут в режим A"
@@ -324,7 +324,7 @@ async def test_single_mode_b_routes_to_tarot_when_no_authored():
     with ExitStack() as st:
         for p in _common_handler_patches(fake_ask, rag_safe=rag):
             st.enter_context(p)
-        await handle_add_session(_msg(), "голос", user_notion_id="u")
+        await handle_add_session(_msg(), "голос", user_id="u")
 
     assert any("Трактуй строго по справочнику" in s for s in cap["systems"]), "режим B не сработал"
     assert not any("РАЗВЕРНУТЬ её тезисы" in s for s in cap["systems"]), \
@@ -380,7 +380,7 @@ async def test_rag_gate_authored_single_calls_index():
         for p in _save_post_patches(summary_mock, rag_mock):
             st.enter_context(p)
         await _save_and_post_triplet(
-            msg, tz=TZ, user_notion_id="u", client_id=None, client_name=None,
+            msg, tz=TZ, user_id="u", client_id=None, client_name=None,
             deck="Уэйт", question="вопрос",
             cards_text="туз мечей", bottom_card=None,
             area="Работа", interpretation="<p>авторский текст</p>",
@@ -402,7 +402,7 @@ async def test_rag_gate_mode_b_single_does_not_call_index():
         for p in _save_post_patches(summary_mock, rag_mock):
             st.enter_context(p)
         await _save_and_post_triplet(
-            msg, tz=TZ, user_notion_id="u", client_id=None, client_name=None,
+            msg, tz=TZ, user_id="u", client_id=None, client_name=None,
             deck="Уэйт", question="вопрос",
             cards_text="туз мечей", bottom_card=None,
             area="Работа", interpretation="<p>машинный текст</p>",

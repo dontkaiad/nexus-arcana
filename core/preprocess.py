@@ -87,20 +87,25 @@ def _static_whitelist() -> list[str]:
 
 def _cache_db() -> sqlite3.Connection:
     con = sqlite3.connect(_WHITELIST_DB)
+    # #144: legacy .db keyed the PK column user_notion_id. TTL=1h cache — drop
+    # the stale table rather than migrate; it repopulates on next lookup.
+    cols = {r[1] for r in con.execute("PRAGMA table_info(spell_whitelist_cache)")}
+    if "user_notion_id" in cols:
+        con.execute("DROP TABLE spell_whitelist_cache")
     con.execute(
         "CREATE TABLE IF NOT EXISTS spell_whitelist_cache "
-        "(user_notion_id TEXT PRIMARY KEY, terms_json TEXT, updated_at REAL)"
+        "(user_id TEXT PRIMARY KEY, terms_json TEXT, updated_at REAL)"
     )
     con.commit()
     return con
 
 
-def _cache_get(user_notion_id: str) -> Optional[list[str]]:
-    key = user_notion_id or "_anon"
+def _cache_get(user_id: str) -> Optional[list[str]]:
+    key = user_id or "_anon"
     with _cache_db() as con:
         row = con.execute(
             "SELECT terms_json, updated_at FROM spell_whitelist_cache "
-            "WHERE user_notion_id=?",
+            "WHERE user_id=?",
             (key,),
         ).fetchone()
     if not row:
@@ -113,46 +118,46 @@ def _cache_get(user_notion_id: str) -> Optional[list[str]]:
         return None
 
 
-def _cache_set(user_notion_id: str, terms: list[str]) -> None:
-    key = user_notion_id or "_anon"
+def _cache_set(user_id: str, terms: list[str]) -> None:
+    key = user_id or "_anon"
     with _cache_db() as con:
         con.execute(
             "INSERT OR REPLACE INTO spell_whitelist_cache "
-            "(user_notion_id, terms_json, updated_at) VALUES (?,?,?)",
+            "(user_id, terms_json, updated_at) VALUES (?,?,?)",
             (key, json.dumps(terms, ensure_ascii=False), time.time()),
         )
 
 
-def invalidate_whitelist(user_notion_id: str = "") -> None:
+def invalidate_whitelist(user_id: str = "") -> None:
     """Сброс кеша. Вызывать ПОСЛЕ create нового клиента/имени, иначе
     Haiku может «исправить» только что добавленное имя.
     """
-    key = user_notion_id or "_anon"
+    key = user_id or "_anon"
     with _cache_db() as con:
         con.execute(
-            "DELETE FROM spell_whitelist_cache WHERE user_notion_id=?",
+            "DELETE FROM spell_whitelist_cache WHERE user_id=?",
             (key,),
         )
 
 
-async def _fetch_client_names(user_notion_id: str) -> list:
+async def _fetch_client_names(user_id: str) -> list:
     """Тянет имена клиентов из PG. Возвращает [] на ошибке."""
     try:
         from arcana.repos.pg_clients_repo import PgClientsRepo
-        clients = await PgClientsRepo().list_all(user_notion_id)
+        clients = await PgClientsRepo().list_all(user_id)
         return [c.name for c in clients if c.name]
     except Exception as e:
         logger.warning("fetch client names failed: %s", e)
         return []
 
 
-async def get_whitelist(user_notion_id: str = "") -> list[str]:
-    cached = _cache_get(user_notion_id)
+async def get_whitelist(user_id: str = "") -> list[str]:
+    cached = _cache_get(user_id)
     if cached is not None:
         return cached
-    client_names = await _fetch_client_names(user_notion_id)
+    client_names = await _fetch_client_names(user_id)
     full = _static_whitelist() + client_names
-    _cache_set(user_notion_id, full)
+    _cache_set(user_id, full)
     return full
 
 
@@ -189,7 +194,7 @@ def _truncated(corrected: str, original: str) -> bool:
 async def normalize_text(
     text: str,
     *,
-    user_notion_id: str = "",
+    user_id: str = "",
     extra_protect: Optional[List[str]] = None,
 ) -> str:
     """1) раскладка EN→RU 2) Haiku spell-correction с whitelist guard.
@@ -209,7 +214,7 @@ async def normalize_text(
         return converted
 
     try:
-        whitelist = await get_whitelist(user_notion_id)
+        whitelist = await get_whitelist(user_id)
     except Exception:
         whitelist = _static_whitelist()
 

@@ -86,16 +86,16 @@ _PRIORITY_EMOJI = {
 }
 
 
-async def handle_add_work(message: Message, text: str, user_notion_id: str = "") -> None:
+async def handle_add_work(message: Message, text: str, user_id: str = "") -> None:
     """Точка входа создания Работы — preview-flow (паритет с Nexus tasks).
 
     Запись в Notion НЕ создаётся здесь; сначала Кай подтверждает превью.
     """
     from arcana.handlers.work_preview import handle_add_work_preview
-    await handle_add_work_preview(message, text, user_notion_id)
+    await handle_add_work_preview(message, text, user_id)
 
 
-async def handle_work_done(message: Message, text: str, user_notion_id: str = "") -> None:
+async def handle_work_done(message: Message, text: str, user_id: str = "") -> None:
     try:
         hint = (await ask_claude(
             text,
@@ -105,7 +105,7 @@ async def handle_work_done(message: Message, text: str, user_notion_id: str = ""
             temperature=0,
         )).strip()
 
-        items = await _repo.list_open(user_notion_id)
+        items = await _repo.list_open(user_id)
         if not items:
             await message.answer("📋 Нет открытых работ.")
             return
@@ -171,9 +171,9 @@ async def handle_work_done(message: Message, text: str, user_notion_id: str = ""
         await message.answer(f"❌ {suffix} · {notion_status}")
 
 
-async def handle_works_list(message: Message, user_notion_id: str = "") -> None:
+async def handle_works_list(message: Message, user_id: str = "") -> None:
     try:
-        items = await _repo.list_open(user_notion_id)
+        items = await _repo.list_open(user_id)
         if not items:
             await message.answer("📋 Работ нет.")
             return

@@ -18,7 +18,7 @@ async def test_resolve_self_client_finds_lichniy():
         "arcana.repos.pg_clients_repo.PgClientsRepo.find_self",
         AsyncMock(return_value=_make_client("kai-self-id")),
     ):
-        cid = await resolve_self_client(user_notion_id="u1")
+        cid = await resolve_self_client(user_id="u1")
     assert cid == "kai-self-id"
 
 
@@ -30,8 +30,8 @@ async def test_resolve_self_client_caches_result():
     _SELF_CLIENT_CACHE.clear()
     mock = AsyncMock(return_value=_make_client("kai-id"))
     with patch("arcana.repos.pg_clients_repo.PgClientsRepo.find_self", mock):
-        cid1 = await resolve_self_client(user_notion_id="u1")
-        cid2 = await resolve_self_client(user_notion_id="u1")
+        cid1 = await resolve_self_client(user_id="u1")
+        cid2 = await resolve_self_client(user_id="u1")
     assert cid1 == cid2 == "kai-id"
     assert mock.await_count == 1
 
@@ -45,7 +45,7 @@ async def test_resolve_self_client_returns_none_when_not_found():
         "arcana.repos.pg_clients_repo.PgClientsRepo.find_self",
         AsyncMock(return_value=None),
     ):
-        cid = await resolve_self_client(user_notion_id="u-missing")
+        cid = await resolve_self_client(user_id="u-missing")
     assert cid is None
 
 
@@ -63,7 +63,7 @@ async def test_resolve_self_client_isolated_per_user():
         return sequence[idx]
 
     with patch("arcana.repos.pg_clients_repo.PgClientsRepo.find_self", fake_find_self):
-        a = await resolve_self_client(user_notion_id="u1")
-        b = await resolve_self_client(user_notion_id="u2")
+        a = await resolve_self_client(user_id="u1")
+        b = await resolve_self_client(user_id="u2")
     assert a == "u1-self"
     assert b == "u2-self"

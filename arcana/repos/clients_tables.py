@@ -38,5 +38,5 @@ clients = Table(
     Column("contact",        Text),
     Column("photo_url",      Text),
     Column("object_photos",  Text),
-    Column("user_notion_id", Text),
+    Column("user_id", Text),
 )
