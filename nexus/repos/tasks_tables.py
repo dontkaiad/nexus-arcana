@@ -41,7 +41,6 @@ task_category = Table(
 tasks = Table(
     "tasks", metadata,
     Column("id", BigInteger, primary_key=True, autoincrement=True),
-    Column("notion_id", Text, unique=True),
     Column("title", Text, nullable=False),
     Column("status_id", SmallInteger, ForeignKey("task_status.id"), nullable=False),
     Column("repeat_id", SmallInteger, ForeignKey("task_repeat.id")),

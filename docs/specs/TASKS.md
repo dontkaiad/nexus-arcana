@@ -1,6 +1,6 @@
 # TASKS — data-model contract (Nexus ✅ Задачи)
 
-Code conforms to: 4efb540 (+ this change: recurring reminder-done counts toward global streak). This spec describes the tasks data model as of
+Code conforms to: b9d3367 (+ this change: #149 — notion_id column dropped). This spec describes the tasks data model as of
 that commit; update it in the same PR that changes the model.
 
 > Contract, not snapshot. Describes the persistent model, the guarantees of
@@ -29,7 +29,6 @@ down_revision `g7b8c9d0e1f2`). SQLAlchemy Core mirror:
 | Column | Type | Constraints / default |
 |---|---|---|
 | `id` | BigInteger | PK, autoincrement |
-| `notion_id` | Text | UNIQUE (nullable) — legacy Notion-migration artifact; not written by the current create path; slated for removal (see #149) |
 | `title` | Text | NOT NULL |
 | `status_id` | SmallInteger | NOT NULL, FK → `task_status.id` |
 | `repeat_id` | SmallInteger | FK → `task_repeat.id` (nullable) |
@@ -198,7 +197,6 @@ Mini App uses to hide the task until the next run.
   serialize), `miniapp/backend/routes/writes.py` (status write +
   per-task/global streak update), `miniapp/backend/routes/streaks.py`
   (`reset_broken_streaks` + `get_user_task_streaks`).
-- Backfill — `scripts/backfill_tasks.py` (Notion → PG, uses `notion_id`).
 
 ## Model routing (from code)
 
@@ -212,6 +210,7 @@ category resolution on completion also runs on Haiku
 ## Verify against code
 
 - `alembic/versions/h8c9d0e1f2a3_nexus_tasks_pg.py` — tables + seeded codes
+- `alembic/versions/cd34ef56a1b2_drop_dead_notion_id_columns.py` — notion_id dropped (#149)
 - `alembic/versions/a7b8c9d0e1f2_tasks_note.py` — `note` column
 - `nexus/repos/tasks_tables.py` — SQLAlchemy Core definitions
 - `nexus/repos/pg_tasks_repo.py` — `Task` dataclass, lookup cache, `_match`,
@@ -229,4 +228,3 @@ category resolution on completion also runs on Haiku
 - `miniapp/backend/routes/tasks.py` — `GET /api/tasks`
 - `miniapp/backend/routes/writes.py` — completion write + streak updates
 - `miniapp/backend/routes/streaks.py` — per-task streak read/reset
-- `scripts/backfill_tasks.py` — Notion → PG backfill

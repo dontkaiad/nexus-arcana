@@ -16,7 +16,6 @@ nexus_lists = Table(
     "nexus_lists",
     metadata,
     Column("id",             BigInteger, primary_key=True, autoincrement=True),
-    Column("notion_id",      Text,       unique=True, nullable=True),
     Column("name",           Text,       nullable=False, server_default=text("''")),
     # list_type: "покупки" | "чеклист" | "инвентарь"
     Column("list_type",      Text,       nullable=False, server_default=text("'покупки'")),
@@ -46,7 +45,6 @@ arcana_inventory = Table(
     "arcana_inventory",
     metadata,
     Column("id",             BigInteger, primary_key=True, autoincrement=True),
-    Column("notion_id",      Text,       unique=True, nullable=True),
     Column("name",           Text,       nullable=False, server_default=text("''")),
     # list_type: "инвентарь" | "чеклист"
     Column("list_type",      Text,       nullable=False, server_default=text("'инвентарь'")),

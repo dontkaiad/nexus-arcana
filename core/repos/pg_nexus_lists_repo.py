@@ -203,7 +203,6 @@ def _nl_add_sync(
     task_id: str,
     works_id: str,
     user_notion_id: str,
-    notion_id: Optional[str] = None,
 ) -> ListItem:
     exp = None
     if expires_at:
@@ -214,7 +213,6 @@ def _nl_add_sync(
     with _get_engine().begin() as conn:
         result = conn.execute(
             nexus_lists.insert().values(
-                notion_id=notion_id,
                 name=name,
                 list_type=list_type,
                 status=status,
@@ -383,7 +381,6 @@ def _ai_add_sync(
     expires_at: Optional[str],
     works_id: str,
     user_notion_id: str,
-    notion_id: Optional[str] = None,
 ) -> InventoryItem:
     exp = None
     if expires_at:
@@ -394,7 +391,6 @@ def _ai_add_sync(
     with _get_engine().begin() as conn:
         result = conn.execute(
             arcana_inventory.insert().values(
-                notion_id=notion_id,
                 name=name,
                 list_type=list_type,
                 status=status,
@@ -617,7 +613,6 @@ class PgNexusListsRepo:
         task_id: str = "",
         works_id: str = "",
         user_notion_id: str = "",
-        notion_id: Optional[str] = None,
     ) -> ListItem:
         return await asyncio.to_thread(
             _nl_add_sync,
@@ -625,7 +620,7 @@ class PgNexusListsRepo:
             category, quantity, note, price_actual, price_plan,
             store, _pg_priority(priority), group_name,
             is_recurring, remind_days, expires_at, stage,
-            task_id, works_id, user_notion_id, notion_id,
+            task_id, works_id, user_notion_id,
         )
 
     async def get_list(
@@ -712,14 +707,13 @@ class PgArcanaInventoryRepo:
         expires_at: Optional[str] = None,
         works_id: str = "",
         user_notion_id: str = "",
-        notion_id: Optional[str] = None,
     ) -> InventoryItem:
         return await asyncio.to_thread(
             _ai_add_sync,
             name, _pg_type(list_type), _pg_status(status),
             category, quantity, note, group_name,
             is_recurring, remind_days, expires_at,
-            works_id, user_notion_id, notion_id,
+            works_id, user_notion_id,
         )
 
     async def search(

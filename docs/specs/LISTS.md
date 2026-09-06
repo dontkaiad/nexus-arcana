@@ -1,6 +1,6 @@
 # LISTS — data-model contract (🗒️ Списки)
 
-Code conforms to: 0bc132e. This spec describes the lists data model as of
+Code conforms to: b9d3367 (+ this change: #149 — notion_id column dropped). This spec describes the lists data model as of
 that commit; update it in the same PR that changes the model.
 
 > Contract, not snapshot. Describes the persistent model, the guarantees of
@@ -28,7 +28,6 @@ Two tables. Migration:
 | Column | Type | Constraints / default |
 |---|---|---|
 | `id` | BigInteger | PK, autoincrement |
-| `notion_id` | Text | UNIQUE (nullable) — legacy Notion-migration artifact; not written by the current create path; slated for removal (see #149) |
 | `name` | Text | NOT NULL, default `''` |
 | `list_type` | Text | NOT NULL, default `'покупки'` |
 | `status` | Text | NOT NULL, default `'not_started'` |
@@ -58,7 +57,7 @@ Indexes: `ix_nexus_lists_list_type`, `ix_nexus_lists_status`,
 
 Same shape minus the shopping-specific columns (`price_actual`, `price_plan`,
 `store`, `priority`, `stage`, `task_id`); `list_type` defaults to
-`'инвентарь'`. Columns: `id`, `notion_id` (legacy, see #149), `name`,
+`'инвентарь'`. Columns: `id`, `name`,
 `list_type`, `status`, `category`, `quantity`, `note`, `group_name`
 (barter: session/ritual title), `is_recurring`, `remind_days`, `expires_at`,
 `works_id`, `user_notion_id`, `created_at`, `updated_at`. Indexes:
@@ -156,7 +155,6 @@ than reopened. `archived` hides an item from all default reads.
 - Mini App — `miniapp/backend/routes/lists.py` (`GET /api/lists`),
   `arcana_inventory.py`, `arcana_barter.py`, `writes.py`, `categories.py`,
   `arcana_today.py`.
-- Backfill — `scripts/backfill_lists.py` (Notion → PG, uses `notion_id`).
 
 ## Model routing (from code)
 
@@ -168,6 +166,7 @@ text). No Sonnet, no Opus. Reads/writes/status are pure SQL.
 ## Verify against code
 
 - `alembic/versions/k1d2e3f4g5h6_nexus_lists_arcana_inventory_pg.py` — tables + indexes
+- `alembic/versions/cd34ef56a1b2_drop_dead_notion_id_columns.py` — notion_id dropped (#149)
 - `core/repos/lists_table.py` — SQLAlchemy Core definitions + column comments
 - `core/repos/pg_nexus_lists_repo.py` — `ListItem`/`InventoryItem`, value maps,
   sync helpers, `PgNexusListsRepo`/`PgArcanaInventoryRepo`, barter guard
@@ -179,4 +178,3 @@ text). No Sonnet, no Opus. Reads/writes/status are pure SQL.
 - `core/subtasks_handler.py` — checklist children (task/works relation)
 - `core/cash_register.py` — open-barter count
 - `miniapp/backend/routes/lists.py`, `arcana_inventory.py`, `arcana_barter.py`
-- `scripts/backfill_lists.py` — Notion → PG backfill

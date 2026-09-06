@@ -1,6 +1,6 @@
 # MEMORY — memory data model
 
-> **Status: AS-BUILT, code conforms to `720f975`.** Notion→PostgreSQL
+> **Status: AS-BUILT, code conforms to `b9d3367` (drops `value_text` #146, `notion_id` #149).** Notion→PostgreSQL
 > migration is complete; the semantic-search layer (ADR-0006 pgvector
 > backend, applied to memory by ADR-0020) has landed. Update this spec in
 > the same PR that changes the memory schema or search strategy.
@@ -44,10 +44,8 @@ down_revision `i9d0e1f2g3h4`. SQLAlchemy Core mirror —
 | Column | Type | Constraints / default |
 |---|---|---|
 | `id` | BigInteger | PK, autoincrement |
-| `notion_id` | Text | UNIQUE (nullable) |
 | `fact_text` | Text | NOT NULL |
 | `key_name` | Text | NOT NULL, default `''` |
-| `value_text` | Text | NOT NULL, default `''` |
 | `category` | Text | NOT NULL, default `''` |
 | `scope` | Text | NOT NULL, default `'global'` |
 | `source` | Text | NOT NULL, default `'manual'` |
@@ -77,7 +75,7 @@ embedding until `scripts/migrate_memory_embeddings.py` backfills them.
 
 Domain object `Memory` (`core/repos/pg_memory_repo.py`,
 `@dataclass`) maps a row: `id` (str), `fact`←fact_text, `key`←key_name,
-`value`←value_text, `category`, `scope`, `source`, `related_to`←related_to,
+`category`, `scope`, `source`, `related_to`←related_to,
 `is_current`, `is_archived`, `user_notion_id`, `date`←created_at[:10],
 `updated_at`←ISO.
 
@@ -89,9 +87,6 @@ Field values as actually used in the code:
   `MemoryRepo.save_parsed` (auto-suggest confirm) both hardcode `"manual"`
   regardless of how the fact was captured (see #148); `core/location.py`
   is the one path that actually writes `source="auto"`.
-- `notion_id` in a normal write = `None`; the `notion_id` parameter of `add`
-  is used only by the backfill `scripts/backfill_memories.py` (mapping to
-  old Notion records).
 
 ## How it works
 
@@ -123,9 +118,6 @@ All sync SQL is wrapped in `asyncio.to_thread`.
    message is registered in `message_pages` (`page_type="memory"`,
    `bot=scope`) so a reply on it can later correct the record (see Reply
    corrections below).
-
-Write contract: `value_text` is not populated by any write path — for readers
-it is always `''` (the fact value lives in `fact_text`) (see #146).
 
 ### Embedding indexing (ADR-0020)
 
@@ -284,13 +276,13 @@ tokenizes the hint (stop words + naive stemming `_normalize_word`) → `search`.
    ADR-0005 (Decision) prescribes TWO tables: `facts` (exact
    key→value) and `observations` (free text + category + semantics).
    In reality a SINGLE table `memories` was created with both sets of fields
-   (`key_name`/`value_text` AND `fact_text`/`category`) — exactly the
+   (`key_name` AND `fact_text`/`category`) — exactly the
    "unified memory table" that the ADR MARKED as rejected in the Alternatives
    section. There are NO `facts`/`observations` tables in the code/migrations.
    Trade-off as built: simpler (one table, one repository), but two access
    patterns (exact key vs contains-search) are mixed in one place — exactly
    the downside the ADR wanted to avoid. The degenerate artifact of this
-   decision is the unpopulated `value_text` (see #146).
+   decision was the never-populated `value_text` column, dropped in #146.
 
 5. **Semantic layer: `embedding` column on `memories`, not a mirror table
    (ADR-0020).** `arcana_triplets` (ADR-0006) needed a separate table
@@ -306,6 +298,8 @@ tokenizes the hint (stop words + naive stemming `_normalize_word`) → `search`.
 
 Verify against code:
 - `alembic/versions/j0c1d2e3f4g5_core_memories_pg.py` — table migration
+- `alembic/versions/bc23de45f012_drop_memories_value_text.py` — `value_text` dropped (#146)
+- `alembic/versions/cd34ef56a1b2_drop_dead_notion_id_columns.py` — `notion_id` dropped (#149)
 - `alembic/versions/y5z6a7b8c9d0_memories_embedding_pgvector.py` —
   `embedding` column + hnsw index migration
 - `core/repos/memories_table.py` — SQLAlchemy Core definition of `memories`

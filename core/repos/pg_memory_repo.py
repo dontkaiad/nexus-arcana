@@ -91,12 +91,10 @@ def _add_sync(
     related_to: str,
     source: str,
     user_notion_id: str,
-    notion_id: Optional[str] = None,
 ) -> str:
     with get_engine().begin() as conn:
         result = conn.execute(
             memories.insert().values(
-                notion_id=notion_id,
                 fact_text=fact,
                 key_name=key or "",
                 category=category or "",
@@ -459,10 +457,9 @@ class PgMemoryRepo:
         related_to: str = "",
         source: str = "manual",
         user_notion_id: str = "",
-        notion_id: Optional[str] = None,
     ) -> str:
         mem_id = await asyncio.to_thread(
-            _add_sync, fact, key, category, scope, related_to, source, user_notion_id, notion_id
+            _add_sync, fact, key, category, scope, related_to, source, user_notion_id
         )
         if mem_id:
             _spawn_index(mem_id, fact, related_to, category)

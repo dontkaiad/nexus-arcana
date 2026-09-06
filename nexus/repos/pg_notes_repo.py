@@ -150,7 +150,6 @@ def _add_sync(
     tags: List[str],
     date: Optional[str],
     user_notion_id: str,
-    notion_id: Optional[str] = None,
 ) -> str:
     _ensure_lookups()
     parsed_date = None
@@ -163,7 +162,6 @@ def _add_sync(
     with get_engine().begin() as conn:
         result = conn.execute(
             notes.insert().values(
-                notion_id=notion_id,
                 title=title,
                 date=parsed_date,
                 user_notion_id=user_notion_id or "",

@@ -33,7 +33,7 @@ def _make_engine():
         conn.execute(sa.text(
             "CREATE TABLE nexus_lists ("
             "id INTEGER PRIMARY KEY AUTOINCREMENT, "
-            "notion_id TEXT, name TEXT NOT NULL, list_type TEXT NOT NULL, "
+            "name TEXT NOT NULL, list_type TEXT NOT NULL, "
             "status TEXT NOT NULL DEFAULT 'not_started', "
             "category TEXT DEFAULT '', quantity REAL, note TEXT DEFAULT '', "
             "price_actual REAL, price_plan REAL, store TEXT DEFAULT '', "
@@ -48,7 +48,7 @@ def _make_engine():
         conn.execute(sa.text(
             "CREATE TABLE arcana_inventory ("
             "id INTEGER PRIMARY KEY AUTOINCREMENT, "
-            "notion_id TEXT, name TEXT NOT NULL, list_type TEXT NOT NULL, "
+            "name TEXT NOT NULL, list_type TEXT NOT NULL, "
             "status TEXT NOT NULL DEFAULT 'not_started', "
             "category TEXT DEFAULT '', quantity REAL, note TEXT DEFAULT '', "
             "group_name TEXT DEFAULT '', "

@@ -17,7 +17,6 @@ note_tags = Table(
 notes = Table(
     "notes", metadata,
     Column("id", BigInteger, primary_key=True, autoincrement=True),
-    Column("notion_id", Text, unique=True),
     Column("title", Text, nullable=False),
     Column("date", Date),
     Column("user_notion_id", Text, nullable=False, server_default=text("''")),

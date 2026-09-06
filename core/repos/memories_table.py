@@ -11,7 +11,6 @@ metadata = MetaData()
 memories = Table(
     "memories", metadata,
     Column("id",             BigInteger, primary_key=True, autoincrement=True),
-    Column("notion_id",      Text,       unique=True),
     Column("fact_text",      Text,       nullable=False),
     Column("key_name",       Text,       nullable=False, server_default=text("''")),
     Column("category",       Text,       nullable=False, server_default=text("''")),

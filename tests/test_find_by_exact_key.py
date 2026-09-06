@@ -22,7 +22,6 @@ def _make_engine():
         conn.execute(sa.text(
             "CREATE TABLE memories ("
             "id INTEGER PRIMARY KEY AUTOINCREMENT, "
-            "notion_id TEXT UNIQUE, "
             "fact_text TEXT NOT NULL DEFAULT '', "
             "key_name TEXT NOT NULL DEFAULT '', "
             "category TEXT NOT NULL DEFAULT '', "

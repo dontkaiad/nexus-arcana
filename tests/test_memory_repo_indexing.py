@@ -35,7 +35,6 @@ def _make_engine():
         conn.execute(sa.text(
             "CREATE TABLE memories ("
             "id INTEGER PRIMARY KEY AUTOINCREMENT, "
-            "notion_id TEXT UNIQUE, "
             "fact_text TEXT NOT NULL DEFAULT '', "
             "key_name TEXT NOT NULL DEFAULT '', "
             "category TEXT NOT NULL DEFAULT '', "
@@ -135,7 +134,7 @@ async def test_upsert_update_path_survives_missing_embedding_column():
     with eng.begin() as conn:
         conn.execute(sa.text(
             "CREATE TABLE memories ("
-            "id INTEGER PRIMARY KEY AUTOINCREMENT, notion_id TEXT UNIQUE, "
+            "id INTEGER PRIMARY KEY AUTOINCREMENT, "
             "fact_text TEXT NOT NULL DEFAULT '', key_name TEXT NOT NULL DEFAULT '', "
             "category TEXT NOT NULL DEFAULT '', "
             "scope TEXT NOT NULL DEFAULT 'global', source TEXT NOT NULL DEFAULT 'manual', "

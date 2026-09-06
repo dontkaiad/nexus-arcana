@@ -541,14 +541,3 @@ class PgTasksRepo:
 
     async def active_recurring_without_reminder(self, user_notion_id: str = "") -> List[Task]:
         return await asyncio.to_thread(_active_recurring_without_reminder_sync, user_notion_id)
-
-    async def get_by_notion_id(self, notion_id: str) -> Optional[Task]:
-        """Find task by Notion page ID (for backfill cross-reference)."""
-        def _sync():
-            _ensure_lookups()
-            with get_engine().connect() as conn:
-                row = conn.execute(
-                    select(tasks).where(tasks.c.notion_id == notion_id)
-                ).fetchone()
-            return _to_task(row) if row else None
-        return await asyncio.to_thread(_sync)
