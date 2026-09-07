@@ -54,18 +54,19 @@ async def test_load_budget_data_reads_cushion_separately():
     import core.repos.pg_cushion_repo as crmod
     from core.budget import load_budget_data
 
-    fake_mems = [
-        Memory(id="1", fact="цель: 📱 Телефон — 100000₽ · откладываю 0₽/мес", key="цель_телефон"),
-        Memory(id="2", fact="цель: 💰 Подушка — 300000₽ · откладываю 5000₽/мес", key="цель_подушка"),
-    ]
-    with patch.object(mrmod._repo, "find_by_key_prefixes", AsyncMock(return_value=fake_mems)), \
+    import core.repos.pg_goals_repo as grmod
+    from core.repos.pg_goals_repo import Goal
+    with patch.object(mrmod._repo, "find_by_key_prefixes", AsyncMock(return_value=[])), \
+         patch.object(grmod._repo, "list_active", AsyncMock(return_value=[
+             Goal(id="1", name="📱 Телефон", target=100000, monthly=0)])), \
          patch.object(crmod._repo, "get", AsyncMock(return_value=Cushion(
              user_id="u", balance=42000, target=300000, planned_contribution=5000))):
         data = await load_budget_data("u")
 
     names = [g["name"] for g in data["цели"]]
     assert "Телефон" in " ".join(names)
-    assert not any("одушк" in n for n in names), "цель_подушка не должна попасть в цели"
+    # подушка — своя сущность (таблица cushion), в цели не попадает
+    assert not any("одушк" in n for n in names)
     assert data["подушка"]["balance"] == 42000
     assert data["подушка"]["target"] == 300000
 

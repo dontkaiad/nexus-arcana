@@ -71,6 +71,9 @@ ONE_TIME_FACT_RE = re.compile(
     r'разов[оа][ея]:\s*(.+?)\s*[—\-]\s*(\d[\d\s]*(?:[.,]\d+)?)\s*[₽р]',
     re.IGNORECASE,
 )
+# GOAL_RE — legacy (#205): цели переехали в таблицу goals, load_budget_data
+# больше не парсит цель_*-факты. Регекс формата факта живёт теперь в
+# core/memory.py:_GOAL_FACT_RE (диверсия) и в миграции a1b2c3d4e5f6 (бэкфилл).
 GOAL_RE = re.compile(
     r'цель:\s*(.+?)\s*[—\-]\s*(\d[\d\s]*(?:[.,]\d+)?)\s*[₽р]'
     r'(?:.*?откладываю\s*(\d[\d\s]*(?:[.,]\d+)?)\s*[₽р])?',
@@ -159,7 +162,7 @@ async def load_budget_data(user_id: str = "") -> Dict[str, list]:
     empty = {"доходы": [], "постоянные": [], "цели": [], "долги": [], "лимиты": [], "разовые": []}
     try:
         mems = await _mem_repo.find_by_key_prefixes(
-            ["income_", "постоянно_", "лимит_", "цель_", "разовый_"],
+            ["income_", "постоянно_", "лимит_", "разовый_"],  # цель_ → таблица goals (#205)
             user_id=user_id,
         )
     except Exception as e:
@@ -186,22 +189,6 @@ async def load_budget_data(user_id: str = "") -> Dict[str, list]:
                 amt = parse_amount(m.group(2))
                 if amt > 0:
                     result["постоянные"].append({"name": m.group(1).strip(), "amount": amt})
-        elif key.startswith("цель_"):
-            # Подушка больше НЕ цель — отдельная сущность (таблица cushion).
-            # Старый факт цель_подушка у Кай игнорируем, чтобы не смешивался
-            # с покупками (айфон/наушники) в списке целей.
-            if key == "цель_подушка":
-                continue
-            m = GOAL_RE.search(fact)
-            if m:
-                saving = parse_amount(m.group(3)) if m.group(3) else 0
-                result["цели"].append({
-                    "name": m.group(1).strip(),
-                    "target": parse_amount(m.group(2)),
-                    "saving": saving,
-                    "key": key,
-                    "fact": fact,
-                })
         elif key.startswith("лимит_"):
             amount_m = LIMIT_AMOUNT_RE.search(fact)
             if amount_m:
@@ -233,6 +220,23 @@ async def load_budget_data(user_id: str = "") -> Dict[str, list]:
             })
     except Exception as e:
         logger.error("load_budget_data debts: %s", e)
+
+    # Цели — читаем из таблицы goals (#205, раньше цель_* факты Памяти).
+    # `saving` — старое имя ежемесячного взноса, оставлено для совместимости
+    # с формулой (_calc_free_remaining: sum(цели[].saving)).
+    try:
+        from core.repos.pg_goals_repo import _repo as _goals_repo
+        for g in await _goals_repo.list_active(user_id):
+            result["цели"].append({
+                "id": g.id,
+                "name": g.name,
+                "target": g.target,
+                "saving": g.monthly,
+                "monthly": g.monthly,
+                "saved": g.saved,
+            })
+    except Exception as e:
+        logger.error("load_budget_data goals: %s", e)
 
     # Подушка — отдельная сущность (таблица cushion), НЕ цель_-факт.
     try:

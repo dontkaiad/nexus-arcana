@@ -340,35 +340,33 @@ def test_finance_cushion_set_target_endpoint(client):
     m_add.assert_not_awaited()
 
 
-def test_finance_closed_goal_is_neutral_not_achieved(client):
-    """Закрытая цель = «закрыта», НЕ «достигнута»: деактивация Memory-факта
-    происходит по разным причинам (замена/чистка/ручное удаление), не только
-    «накопила target». API не отдаёт saved-заглушку (=target) для закрытых целей."""
+def test_finance_closed_goal_from_goals_table(client):
+    """#205: закрытые цели — из таблицы goals (status achieved|dropped)."""
+    from core.repos.pg_goals_repo import Goal
     tz = 3
-    closed_goal_mem = Memory(
-        id="m-cg", key="цель_flip", is_current=False,
-        fact="цель: Samsung Flip — 100000₽ · откладываю 8000₽",
-        date="2026-08-15",
-    )
+    closed = [
+        Goal(id="1", name="Samsung Flip", target=100000, monthly=8000,
+             saved=100000, status="achieved", closed_at="2026-08-15T00:00:00"),
+        Goal(id="2", name="Ноутбук", target=200000, monthly=0, saved=1000,
+             status="dropped", closed_at="2026-07-01T00:00:00"),
+    ]
     with patch("miniapp.backend.routes.finance.load_budget_data",
                AsyncMock(return_value={"доходы": [], "постоянные": [], "лимиты": [],
                                        "цели": [], "долги": []})), \
-         patch("miniapp.backend.routes.finance._mem_repo.find_by_category",
-               AsyncMock(return_value=[closed_goal_mem])), \
+         patch("core.repos.pg_goals_repo._repo.list_closed", AsyncMock(return_value=closed)), \
          patch("core.repos.pg_debts_repo._repo.list_closed", AsyncMock(return_value=[])), \
+         patch("core.repos.pg_debts_repo._repo.list_active", AsyncMock(return_value=[])), \
+         patch("miniapp.backend.routes.finance._find_debt_taken_dates", AsyncMock(return_value={})), \
          patch("miniapp.backend.routes.finance.today_user_tz",
                AsyncMock(return_value=(_today_date(tz), tz))), \
          patch("miniapp.backend.routes.finance.get_user_id",
                AsyncMock(return_value=FAKE_USER_ID)):
         r = client.get("/api/finance?view=goals")
 
-    assert r.status_code == 200
-    cg_list = r.json()["closed_goals"]
-    assert len(cg_list) == 1
-    cg = cg_list[0]
-    assert cg["name"] == "Samsung Flip"
-    assert cg["target"] == 100000
-    assert "saved" not in cg, "saved-заглушка (=target) не должна возвращаться для закрытой цели"
+    assert r.status_code == 200, r.text
+    cg = {g["name"]: g for g in r.json()["closed_goals"]}
+    assert cg["Samsung Flip"]["status"] == "achieved" and cg["Samsung Flip"]["saved"] == 100000
+    assert cg["Ноутбук"]["status"] == "dropped"
 
 
 def test_finance_invalid_view(client):
@@ -788,73 +786,86 @@ def test_view_today_query_uses_today_as_date_to(client):
     assert kw["date_to"] != tomorrow_str
 
 
-# ── POST /api/finance/goal, /api/finance/goal/close (#44) ────────────────────
+# ── POST /api/finance/goal{,/close,/contribute} (#44/#205) ───────────────────
 
 def test_finance_goal_create(client):
-    with patch("nexus.handlers.finance._save_memory_entry", AsyncMock()) as m_save, \
-         patch("core.repos.memory_repo._repo.find_by_key_prefixes", AsyncMock(return_value=[])), \
+    with patch("core.repos.pg_goals_repo._repo.upsert", AsyncMock()) as m_up, \
+         patch("core.repos.pg_goals_repo._repo.set_status", AsyncMock()) as m_ss, \
          patch("miniapp.backend.routes.writes.notify_user", AsyncMock()), \
          patch("miniapp.backend.routes.writes.get_user_id", AsyncMock(return_value="u")):
         r = client.post("/api/finance/goal", json={"name": "Ноутбук", "target": 200000, "monthly": 15000})
     assert r.status_code == 200, r.text
     body = r.json()
-    assert body["key"] == "цель_ноутбук" and body["target"] == 200000 and body["monthly"] == 15000
-    key, fact, uid = m_save.await_args.args
-    assert key == "цель_ноутбук"
-    assert fact == "цель: Ноутбук — 200000₽ · откладываю 15000₽/мес"
+    assert body["name"] == "Ноутбук" and body["target"] == 200000 and body["monthly"] == 15000
+    _, kw = m_up.await_args
+    assert m_up.await_args.args[1] == "Ноутбук" and kw["target"] == 200000.0 and kw["monthly"] == 15000.0
+    m_ss.assert_not_awaited()
 
 
-def test_finance_goal_rename_deactivates_old_key(client):
-    old = Memory(id="m-old", key="цель_старое_имя", is_current=True, fact="цель: Старое имя — 100000₽ · откладываю 0₽/мес")
-    with patch("nexus.handlers.finance._save_memory_entry", AsyncMock()), \
-         patch("core.repos.memory_repo._repo.find_by_key_prefixes", AsyncMock(return_value=[old])), \
-         patch("core.repos.memory_repo._repo.set_active", AsyncMock()) as m_deact, \
+def test_finance_goal_rename_drops_old(client):
+    with patch("core.repos.pg_goals_repo._repo.upsert", AsyncMock()), \
+         patch("core.repos.pg_goals_repo._repo.set_status", AsyncMock(return_value=True)) as m_ss, \
          patch("miniapp.backend.routes.writes.notify_user", AsyncMock()), \
          patch("miniapp.backend.routes.writes.get_user_id", AsyncMock(return_value="u")):
         r = client.post("/api/finance/goal", json={
-            "name": "Новое имя", "target": 100000, "monthly": 0, "key": "цель_старое_имя",
+            "name": "Новое имя", "target": 100000, "monthly": 0, "prev_name": "Старое имя",
         })
     assert r.status_code == 200, r.text
-    m_deact.assert_awaited_once_with(["m-old"], False)
+    m_ss.assert_awaited_once_with("u", "Старое имя", "dropped")
 
 
 def test_finance_goal_close(client):
-    mem = Memory(id="m-g", key="цель_ноутбук", is_current=True, fact="цель: Ноутбук — 200000₽ · откладываю 0₽/мес")
-    with patch("core.repos.memory_repo._repo.find_by_key_prefixes", AsyncMock(return_value=[mem])), \
-         patch("core.repos.memory_repo._repo.set_active", AsyncMock()) as m_deact, \
+    with patch("core.repos.pg_goals_repo._repo.set_status", AsyncMock(return_value=True)) as m_ss, \
          patch("miniapp.backend.routes.writes.notify_user", AsyncMock()), \
          patch("miniapp.backend.routes.writes.get_user_id", AsyncMock(return_value="u")):
-        r = client.post("/api/finance/goal/close", json={"key": "цель_ноутбук", "achieved": True})
+        r = client.post("/api/finance/goal/close", json={"name": "Ноутбук", "achieved": True})
     assert r.status_code == 200, r.text
-    m_deact.assert_awaited_once_with(["m-g"], False)
-
-
-def test_finance_goal_close_rejects_cushion_key(client):
-    with patch("miniapp.backend.routes.writes.get_user_id", AsyncMock(return_value="u")):
-        r = client.post("/api/finance/goal/close", json={"key": "цель_подушка"})
-    assert r.status_code == 400
+    m_ss.assert_awaited_once_with("u", "Ноутбук", "achieved")
 
 
 def test_finance_goal_close_404_when_missing(client):
-    with patch("core.repos.memory_repo._repo.find_by_key_prefixes", AsyncMock(return_value=[])), \
+    with patch("core.repos.pg_goals_repo._repo.set_status", AsyncMock(return_value=False)), \
          patch("miniapp.backend.routes.writes.get_user_id", AsyncMock(return_value="u")):
-        r = client.post("/api/finance/goal/close", json={"key": "цель_нет_такой"})
+        r = client.post("/api/finance/goal/close", json={"name": "Нет такой"})
     assert r.status_code == 404
 
 
-def test_finance_view_goals_serializes_fact(client):
+def test_finance_goal_contribute(client):
+    with patch("core.repos.pg_goals_repo._repo.add_saved", AsyncMock(return_value=55000.0)) as m_add, \
+         patch("miniapp.backend.routes.writes.notify_user", AsyncMock()), \
+         patch("miniapp.backend.routes.writes.get_user_id", AsyncMock(return_value="u")):
+        r = client.post("/api/finance/goal/contribute", json={"name": "Ноутбук", "amount": 5000})
+    assert r.status_code == 200, r.text
+    assert r.json()["saved"] == 55000
+    m_add.assert_awaited_once_with("u", "Ноутбук", 5000.0)
+
+
+def test_finance_goal_contribute_404(client):
+    with patch("core.repos.pg_goals_repo._repo.add_saved", AsyncMock(return_value=None)), \
+         patch("miniapp.backend.routes.writes.get_user_id", AsyncMock(return_value="u")):
+        r = client.post("/api/finance/goal/contribute", json={"name": "Нет", "amount": 1})
+    assert r.status_code == 404
+
+
+def test_finance_view_goals_serializes_saved_and_progress(client):
+    """#205: goals view отдаёт реальный saved + ETA от остатка."""
+    from core.repos.pg_goals_repo import Goal
     tz = 3
     budget = {"доходы": [], "постоянные": [], "лимиты": [], "долги": [],
-              "цели": [{"name": "X", "target": 100000, "saving": 8000, "key": "цель_x",
-                        "fact": "цель: X — 100000₽ · откладываю 8000₽/мес"}]}
+              "цели": [{"id": "7", "name": "X", "target": 100000, "saving": 8000,
+                        "monthly": 8000, "saved": 40000}]}
     with patch("miniapp.backend.routes.finance.load_budget_data", AsyncMock(return_value=budget)), \
-         patch("miniapp.backend.routes.finance._mem_repo.find_by_category", AsyncMock(return_value=[])), \
+         patch("core.repos.pg_goals_repo._repo.list_closed", AsyncMock(return_value=[])), \
          patch("core.repos.pg_debts_repo._repo.list_closed", AsyncMock(return_value=[])), \
+         patch("core.repos.pg_debts_repo._repo.list_active", AsyncMock(return_value=[])), \
+         patch("miniapp.backend.routes.finance._find_debt_taken_dates", AsyncMock(return_value={})), \
          patch("miniapp.backend.routes.finance.today_user_tz", AsyncMock(return_value=(_today_date(tz), tz))), \
          patch("miniapp.backend.routes.finance.get_user_id", AsyncMock(return_value="")):
         r = client.get("/api/finance?view=goals")
-    assert r.status_code == 200
-    assert r.json()["goals"][0]["fact"] == "цель: X — 100000₽ · откладываю 8000₽/мес"
+    assert r.status_code == 200, r.text
+    g = r.json()["goals"][0]
+    assert g["saved"] == 40000 and g["target"] == 100000 and g["id"] == "7"
+    assert "fact" not in g and "key" not in g
 
 
 # ── POST /api/finance/debt — 4 directions + close (#123) ─────────────────────

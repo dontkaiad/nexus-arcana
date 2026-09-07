@@ -10,7 +10,6 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 
 from core.user_manager import get_user_id
 from core.budget import (
-    GOAL_RE,
     budget_day_limit_from_plan,
     cat_link,
     display_limit_name,
@@ -333,10 +332,14 @@ def _all_debts_close_label(debts_serialized: List[dict]) -> Optional[str]:
 
 def _serialize_goal(g: dict, today_d: date, all_debts_close: Optional[str]) -> dict:
     target = int(round(g.get("target", 0)))
-    monthly = int(round(g.get("saving", 0)))
+    monthly = int(round(g.get("monthly", g.get("saving", 0))))
+    saved = int(round(g.get("saved", 0)))
+    remaining = max(0, target - saved)
     after: Optional[str] = None
-    if monthly > 0 and target > 0:
-        months_to = max(1, -(-target // monthly))  # ceil
+    if remaining == 0 and target > 0:
+        after = "цель достигнута"
+    elif monthly > 0 and remaining > 0:
+        months_to = max(1, -(-remaining // monthly))  # ceil
         eta = _add_months(date(today_d.year, today_d.month, 1), months_to - 1)
         after = f"~{_RU_MONTHS[eta.month]} {eta.year}"
     elif all_debts_close:
@@ -344,13 +347,12 @@ def _serialize_goal(g: dict, today_d: date, all_debts_close: Optional[str]) -> d
     else:
         after = "закрытия долгов"
     return {
-        "key": g.get("key") or "",
+        "id": g.get("id") or "",
         "name": g.get("name", ""),
         "target": target,
-        "saved": 0,  # реального трекинга накоплений нет — см. BUDGET.md / #44
+        "saved": saved,          # #205: реальный трекинг накоплений (goals.saved)
         "monthly": monthly,
         "after": after,
-        "fact": g.get("fact") or "",  # #44: сырой текст факта для карточки-детали
     }
 
 
@@ -419,40 +421,21 @@ async def _load_desc_synonyms(user_id: str) -> dict:
 
 
 async def _load_closed_budget(user_id: str) -> dict:
-    """Закрытые цели (Memory is_current=False) + закрытые долги (debts.is_active=False)."""
+    """Закрытые цели (goals.status != active) + закрытые долги (debts.is_active=False)."""
     out: dict = {"долги": [], "цели": []}
 
-    # Закрытые цели — Memory
+    # Закрытые цели — таблица goals (#205)
     try:
-        all_closed = await _mem_repo.find_by_category(
-            "",
-            is_current=False,
-            user_id=user_id,
-            page_size=200,
-        )
-        for mem in all_closed:
-            key = (mem.key or "").strip().lower()
-            if not key.startswith("цель_") or key == "цель_подушка":
-                continue  # подушка — отдельный трекер (см. cushion), не цель
-            fact = mem.fact or ""
-            m = GOAL_RE.search(fact)
-            if not m:
-                continue
-            saving = parse_amount(m.group(3)) if m.group(3) else 0
-            closed_at = (mem.date or "")[:10] or None
-            # "закрыта", НЕ "достигнута": is_current=False у Memory-факта цели
-            # ставится по разным причинам — замена, ручное удаление, чистка
-            # базы — не только "накопила target". Реального трекинга накоплений
-            # в системе нет, поэтому НЕ отдаём "saved"/процент прогресса для
-            # закрытых целей — target-заглушка рисовала любую закрытую цель как
-            # 100%. Нужен отдельный явный механизм трекинга, если захочется
-            # показывать реальное выполнение/прогресс.
+        from core.repos.pg_goals_repo import _repo as _goals_repo
+        for g in await _goals_repo.list_closed(user_id):
             out["цели"].append({
-                "key": key,
-                "name": m.group(1).strip(),
-                "target": int(round(parse_amount(m.group(2)))),
-                "monthly": int(round(saving)),
-                "closed_at": closed_at,
+                "id": g.id,
+                "name": g.name,
+                "target": int(round(g.target)),
+                "monthly": int(round(g.monthly)),
+                "saved": int(round(g.saved)),
+                "status": g.status,  # achieved | dropped
+                "closed_at": (g.closed_at or g.updated_at or "")[:10] or None,
             })
     except Exception as e:
         logger.warning("closed budget goals query failed: %s", e)

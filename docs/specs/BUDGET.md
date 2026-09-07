@@ -1,6 +1,6 @@
 # BUDGET — data-model contract (бюджет / day limit)
 
-Code conforms to: 5a57b8c (+ this change: _calc_free_remaining formula). (+ #144: user_notion_id → user_id; + #6: debt free-text path via `parse_and_store`; + #136: debt-name morphology match; + #44: goal create/edit/close from the Mini App; + #123: debt 4-direction form + close from the Mini App, `they_owe` list.) This spec describes the budget data model as of
+Code conforms to: 5a57b8c (+ this change: _calc_free_remaining formula). (+ #144: user_notion_id → user_id; + #6: debt free-text path via `parse_and_store`; + #136: debt-name morphology match; + #44: goal create/edit/close from the Mini App; + #123: debt 4-direction form + close from the Mini App, `they_owe` list; + #205: goals move from `цель_*` Memory facts to the `goals` table, `saved` tracking + `goal/contribute`.) This spec describes the budget data model as of
 that commit; update it in the same PR that changes the model.
 
 > Contract, not snapshot. Describes the derived model and the guarantees of
@@ -95,10 +95,16 @@ that commit; update it in the same PR that changes the model.
    `PgDebtsRepo._find_row_sync`): «долг Ивану» ↔ «вернула Ивана». Фаззи-матча
    по опечаткам нет — для денег рискованно, только морфология (#136).
 
-5. **Подушка** — пятая сущность, тоже отдельно от Памяти (своя таблица
-   `cushion`), НЕ цель. Растущий буфер без конца, пополняется динамически
-   (20% дохода в комфортный месяц / остаток факта в тяжёлый) + вручную.
-   Полностью описана в `CUSHION.md`.
+5. **Цели** (#205) — своя таблица `goals`, не факт Памяти. Название, сумма
+   (`target`), ежемесячный взнос (`monthly` — влияет на дневной лимит),
+   накопленное (`saved`), статус (`active` / `achieved` / `dropped`).
+   Команды: «новая цель ноутбук 200к», «убери цель ноутбук», «достигла цель
+   телефон». Из Mini App: создание/правка/переименование, взнос в накопление
+   (`goal/contribute`), закрытие. Накопили `target` → авто-`achieved`.
+
+6. **Подушка** — тоже отдельная таблица `cushion`, НЕ цель. Растущий буфер
+   без конца, пополняется динамически (20% дохода в комфортный месяц /
+   остаток факта в тяжёлый) + вручную. Полностью описана в `CUSHION.md`.
 
 ### Кто что считает
 
@@ -123,7 +129,7 @@ that commit; update it in the same PR that changes the model.
 ### Полный цикл /budget
 
 > **Железный принцип: планирование пишет только в Память и служебные таблицы
-> (`debts`, `cushion`). В Финансы планирование не пишет никогда.** Транзакцию
+> (`debts`, `goals`, `cushion`). В Финансы планирование не пишет никогда.** Транзакцию
 > в Финансах создаёт только Кай, вручную, по факту траты или поступления.
 
 1. `/budget` — если данных ещё вообще нет (ни постоянных, ни лимитов) →
@@ -146,11 +152,11 @@ that commit; update it in the same PR that changes the model.
      все долги отложены/на паузе) — **один план** (`is_tight_month: false`,
      без А/Б). Варианту Б нечего уменьшать → развилку не показываем.
 4. Если был выбор А/Б — жмёшь кнопку, план обновляется под выбранный вариант.
-5. «✅ Принять» — план сохраняется как набор фактов: лимиты (`лимит_*`,
-   ручные `[ручной]` не трогаются), постоянные из `plan["fixed"]` (`постоянно_*`),
-   доход, цели (`цель_*` — **подушка НЕ здесь**, у неё своя таблица и
-   вкладка, см. `CUSHION.md`), долги (в таблицу `debts` со
-   стратегией/платежом). Взнос плана в подушку (`cushion_contribution`)
+5. «✅ Принять» — план сохраняется: лимиты (`лимит_*` факты Памяти,
+   ручные `[ручной]` не трогаются), постоянные из `plan["fixed"]` (`постоянно_*`
+   факты), доход (`income_` факт), цели (в таблицу `goals`, #205), долги
+   (в таблицу `debts` со стратегией/платежом). Подушка — своя таблица
+   (`cushion`, см. `CUSHION.md`). Взнос плана в подушку (`cushion_contribution`)
    записывается в `cushion.planned_contribution` и кредитуется в баланс
    один раз на переходе периода.
    Позиции из `plan["one_time"]` — в Финансы **не** пишутся (принцип выше),
@@ -315,13 +321,16 @@ Budget has **no table of its own** — there is no migration, no
    `core/budget.py:BUDGET_KEY_TO_CATEGORY`. Examples, non-exhaustive — see
    that constant:
    - `income_` → `📥 Доход`; `постоянно_` → `🔒 Постоянные`;
-     `лимит_` → `💰 Лимит`; `цель_` → `🎯 Цели`; `долг_` → `📋 Долги`;
+     `лимит_` → `💰 Лимит`;
      `разовый_` → one one-time position each (fact `разовое: <name> — N₽`),
      saved on Accept for expense matching only.
+   - `долг_` / `цель_` keys are what Haiku *emits*, but they are diverted at
+     write time to the `debts` / `goals` tables — no such Memory row persists
+     (see below).
    - the payday is a single Memory fact at exact key `budget_payday`
      (default `1` if absent).
    Amounts are parsed from the fact text by the regexes in `core/budget.py`
-   (`LIMIT_AMOUNT_RE`, `INCOME_RE`, `PERMANENT_RE`, `GOAL_RE`, `ONE_TIME_FACT_RE`).
+   (`LIMIT_AMOUNT_RE`, `INCOME_RE`, `PERMANENT_RE`, `ONE_TIME_FACT_RE`).
 2. **`debts`** (own table, `core/repos/pg_debts_repo.py` /
    `core/repos/debts_table.py`, migration `q7r8s9t0u1v2`). Columns: `id`,
    `user_id`, `name`, `kind` (`CHECK kind IN ('i_owe','they_owe')`), `amount`,
@@ -396,9 +405,10 @@ All in `core/budget.py` (pure async functions; no repo class):
   fact. Skips facts where link or amount can't be parsed.
 - **load_budget_data(user_id)** → `{"доходы", "постоянные", "цели",
   "долги", "лимиты", "разовые"}` — reads budget memories by key prefix
-  (`find_by_key_prefixes(["income_", "постоянно_", "лимит_", "цель_",
-  "разовый_"])`, current rows only) plus active `i_owe` debts; parses each
-  into a list of `{name, amount, …}` dicts. Limits are de-duplicated by
+  (`find_by_key_prefixes(["income_", "постоянно_", "лимит_", "разовый_"])`,
+  current rows only) plus active `i_owe` debts (`debts` table) and active
+  goals (`goals` table, #205); parses each into a list of `{name, amount, …}`
+  dicts (`цели[]` carries `saving == monthly` for the formula). Limits are de-duplicated by
   display name (the higher amount wins). `"разовые"` (`ONE_TIME_FACT_RE`) is
   the persisted one_time positions of the last accepted plan — its only
   consumer is `_build_sonnet_input` (see below), as a fallback for a
@@ -409,29 +419,34 @@ All in `core/budget.py` (pure async functions; no repo class):
   viewer's personal timezone (Mini App passes `today_user_tz(tg_id)`'s offset);
   default `3` reproduces the pre-fix server-MSK behavior.
 
-### Goals (`цель_*`)
+### Goals (`goals` table, #205)
 
-A goal is a single `💰 Лимит` Memory row keyed `цель_<slug(name)>` with the
-fact text `цель: <name> — <target>₽ · откладываю <monthly>₽/мес` (parsed by
-`GOAL_RE` → name / target / monthly). `цель_подушка` is **excluded** — the
-cushion is its own table (CUSHION.md). There is **no goals table**; a goal is
-fully described by that one fact.
+A goal is a row in the **`goals`** table (`core/repos/goals_table.py` /
+`core/repos/pg_goals_repo.py`, migration `a1b2c3d4e5f6`) — not a Memory row
+any more. Columns: `id`, `user_id`, `name`, `target`, `monthly` (planned
+contribution — the old `цель_*.saving`), `saved` (accumulated), `status`
+(`CHECK IN ('active','achieved','dropped')`), timestamps + `closed_at`.
+Unique on `(user_id, lower(name))`. `цель_подушка` was never a goal — the
+cushion is its own table (CUSHION.md); the migration backfills the other
+`цель_*` facts and archives them.
 
 - **write paths** — the bot (`новая цель X 200к` / `убери цель X` /
-  `достигла цель X` → `handle_goal_command`; and the `/budget` Sonnet parse) and
-  the Mini App (`POST /api/finance/goal`, #44). All go through
-  `nexus/handlers/finance.py:_save_memory_entry` (upsert by `key` + owner) /
-  `MemoryRepo.set_active(..., False)` for close.
-- **rename** — the key is derived from the name, so a rename writes a new
-  `цель_<new-slug>` row and deactivates the old one (`POST /api/finance/goal`
-  with the old `key` in the body).
-- **monthly feeds the budget** — `load_budget_data` → `цели[].saving` →
-  `goals_saving` term of the day-limit formula (Invariants). Editing a goal's
-  monthly contribution changes the daily spend allowance.
-- **`saved` / progress is not tracked.** `_serialize_goal` returns `saved: 0`
-  and closed goals carry no percent — deactivation happens for many reasons
-  (replace / cleanup / manual), not only "reached target". A real
-  contributions ledger is a separate follow-up (see #44's discussion).
+  `достигла цель X` → `handle_goal_command`; and the `/budget` Sonnet-accept
+  loop) via `_save_goal` / `_deactivate_goal`; the free-text `цель X` phrasing
+  via `save_memory` → `parse_and_store` (`цель_` key → `_parse_goal_from_fact`
+  + `pg_goals_repo.upsert`, not a Memory row — parallel to `долг_` → `debts`);
+  the Mini App (`POST /api/finance/goal`, #44/#205). All converge on
+  `PgGoalsRepo` (`upsert` / `set_status` / `add_saved`), name-matched
+  case-insensitively.
+- **rename** — `POST /api/finance/goal` with `prev_name` in the body:
+  the old row is `set_status(..., 'dropped')`, the new name is `upsert`ed.
+- **monthly feeds the budget** — `load_budget_data` reads
+  `pg_goals_repo.list_active` into `цели[]` with `saving == monthly`, and
+  that is the `goals_saving` term of the day-limit formula (Invariants).
+- **`saved` is real (#205).** `POST /api/finance/goal/contribute`
+  (`{name, amount}`) → `add_saved`; hitting `target` auto-flips
+  `status` → `achieved`. Closed goals carry `status` (`achieved` vs `dropped`)
+  and `saved`; the Mini App shows a progress bar and «достигнута» / «убрана».
 
 ## Invariants
 
@@ -444,7 +459,7 @@ fully described by that one fact.
             − one_time                     # лимит_разовые fact amount (0 if absent) — Memory
             − debts_monthly                # sum(долги[].monthly_payment > 0)        — debts table
             − cushion_contribution         # подушка.planned_contribution (0 if none) — cushion table
-            − goals_saving                 # sum(цели[].saving)                       — Memory цель_*
+            − goals_saving                 # sum(цели[].saving == monthly)           — goals table (#205)
   day_limit = max(0, int(remainder / days_remaining))
   ```
   `income <= 0` → returns `0` immediately. Discretionary category limits
@@ -538,7 +553,7 @@ directly:
   own period bucket; counting them here would double-subtract Фикс. Same
   predicate as `_spent_today` / `budget_day_limit_from_plan`.
 - **окно и делитель** = pay period (`_period_bounds` / `_period_days_remaining`,
-  by the user's tz), **not** the calendar month. Goals (`цель_*.saving`) are
+  by the user's tz), **not** the calendar month. Goals (`goals.monthly`) are
   **not** subtracted — they sit after debts, not inside the life remainder.
 
 ## Callers
@@ -548,11 +563,13 @@ directly:
   `nexus/nexus_bot.py`.
 - Mini App — `miniapp/backend/routes/finance.py` (`get_limits`,
   `load_budget_data`, `budget_day_limit_from_plan` for limit/goal views;
-  `_serialize_goal` → `{key, name, target, saved:0, monthly, after, fact}`) and
-  `miniapp/backend/routes/today.py` (`budget_day_limit_from_plan` for the day
-  limit; `view=goals` also returns `debts` (i_owe) and `debts_incoming`
-  (they_owe, #123)). Goal writes: `POST /api/finance/goal` (create / edit
-  incl. rename), `POST /api/finance/goal/close` (`{key, achieved}`) — #44.
+  `_serialize_goal` → `{id, name, target, saved, monthly, after}` — real
+  `saved` since #205) and `miniapp/backend/routes/today.py`
+  (`budget_day_limit_from_plan` for the day limit; `view=goals` also returns
+  `debts` (i_owe) and `debts_incoming` (they_owe, #123)). Goal writes:
+  `POST /api/finance/goal` (create / edit / rename via `prev_name`),
+  `POST /api/finance/goal/close` (`{name, achieved}`),
+  `POST /api/finance/goal/contribute` (`{name, amount}` → `goals.saved`) — #44/#205.
   Debt writes: `POST /api/finance/debt` (`{name, amount, deadline, direction}`),
   `POST /api/finance/debt/close` (`{name, kind}`) — #123. All in
   `miniapp/backend/routes/writes.py`.
@@ -629,9 +646,14 @@ expense items → `_ONE_TIME_PARSE_SYSTEM`).
   `PRODUCTS_TARGET`, `HABITS_CEILING`, `_PRIORITY_FLOOR`,
   `CUSHION_COMFORTABLE_RATE`, `BUDGET_TIGHT_THRESHOLD`), `compute_limits`,
   `_distribute_limits`, `PRIORITY_CHAIN`
-- `core/memory.py` — `CATEGORIES`, `_PARSE_SYSTEM` (постоянно_/долг_/
-  income_ examples), `save_memory` → `parse_and_store` (`долг_` →
-  `_parse_debt_from_fact` + `pg_debts_repo` upsert, not Memory; #6)
+- `core/memory.py` — `CATEGORIES`, `_PARSE_SYSTEM` (постоянно_/долг_/цель_/
+  income_ examples), `save_memory` → `parse_and_store`: `долг_` →
+  `_parse_debt_from_fact` + `pg_debts_repo` (#6); `цель_` →
+  `_parse_goal_from_fact` + `pg_goals_repo` (#205) — neither writes a Memory row
+- `core/repos/goals_table.py` / `core/repos/pg_goals_repo.py` /
+  `alembic/versions/a1b2c3d4e5f6_goals.py` — `goals` table + `PgGoalsRepo`
+  (`upsert` / `set_status` / `add_saved` / `list_active` / `list_closed`); the
+  migration backfills `цель_*` Memory facts and archives them (#205)
 - `core/ru_morph.py` — `strip_case_ending` (debt-name morphology match, #136)
 - `core/classifier.py` — `_MEMORY_SAVE_RE` (постоянн/обязательн dual
   support), `_ONE_TIME_EXPENSE_RE`, `_DEBT_CMD_RE`, `_GOAL_CMD_RE`,
@@ -645,9 +667,10 @@ expense items → `_ONE_TIME_PARSE_SYSTEM`).
   `list_active` / `list_closed` (per `kind`); `load_budget_data` reads
   `list_active(kind="i_owe")`; `_find_row_sync` (exact-lower then
   `strip_case_ending` fallback, #136)
-- `nexus/handlers/finance.py` — `_save_goal` / `_deactivate_goal` /
+- `nexus/handlers/finance.py` — `_save_goal` / `_deactivate_goal` (→ `pg_goals_repo`, #205) /
   `handle_goal_command` (goal commands), `_save_memory_entry` (shared
-  `цель_*` / `лимит_*` upsert), `start_budget_setup`, `handle_budget_setup_text`,
+  `лимит_*` / `постоянно_*` upsert), `_save_budget_plan` goal loop (→ `pg_goals_repo`),
+  `start_budget_setup`, `handle_budget_setup_text`,
   `start_budget_analysis`, `_run_budget_analysis`, `_build_sonnet_input`,
   `_period_spending` (shared already_spent/income-this-period source),
   `BUDGET_SONNET_SYSTEM`, `_BUDGET_PARSE_PROMPT_LEGACY`, `_format_plan`
@@ -664,7 +687,7 @@ expense items → `_ONE_TIME_PARSE_SYSTEM`).
   `_bdb`/`_BUDGET_DB` (session store), `_send_payday_review`
 - `nexus/nexus_bot.py` — `/budget` wiring, startup `proactive_budget_review`
 - `miniapp/backend/routes/finance.py` — limits/goals views (`_serialize_goal`), day limit
-- `miniapp/backend/routes/writes.py` — `POST /api/finance/goal`, `/api/finance/goal/close` (#44); `POST /api/finance/debt` (4 directions), `/api/finance/debt/close` (#123); `/api/finance/cushion/target`
+- `miniapp/backend/routes/writes.py` — `POST /api/finance/goal` (+`/close`, `/contribute` — #44/#205); `POST /api/finance/debt` (4 directions), `/api/finance/debt/close` (#123); `/api/finance/cushion/target`, `/api/finance/cushion/deposit`
 - `miniapp/backend/routes/finance.py` — `_view_goals` (`debts` / `debts_incoming` / `goals` / closed), `_serialize_debt` / `_serialize_goal`
 - `miniapp/backend/routes/today.py` — `budget_day_limit_from_plan` (day limit)
 - `docs/specs/MEMORY.md` — budget facts live in the `memories` table

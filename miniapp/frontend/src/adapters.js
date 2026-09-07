@@ -378,13 +378,12 @@ export function adaptFinanceGoals(data) {
       by: d.by || '—',
     })),
     goals: (data.goals || []).map((g) => ({
-      key: g.key || '',
+      id: g.id || '',
       n: g.name,
       t: g.target ?? 0,
-      s: g.saved ?? 0,
+      s: g.saved ?? 0,               // #205: реальное накопление
       after: g.after || '—',
       monthly: g.monthly ?? 0,
-      fact: g.fact || '',
     })),
     closedDebts: (data.closed_debts || []).map((d) => ({
       n: d.name,
@@ -394,10 +393,12 @@ export function adaptFinanceGoals(data) {
       closedAt: d.closed_at || null,
     })),
     closedGoals: (data.closed_goals || []).map((g) => ({
-      key: g.key || '',
+      id: g.id || '',
       n: g.name,
       t: g.target ?? 0,
       monthly: g.monthly ?? 0,
+      saved: g.saved ?? 0,
+      status: g.status || 'dropped',   // achieved | dropped
       closedAt: g.closed_at || null,
     })),
   }

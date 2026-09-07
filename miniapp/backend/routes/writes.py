@@ -592,19 +592,11 @@ async def finance_debt_close(
     return {"ok": True, "name": name, "kind": body.kind}
 
 
-def _goal_key(name: str) -> str:
-    return "цель_" + name.strip().lower().replace(" ", "_")
-
-
-def _goal_fact(name: str, target: int, monthly: int) -> str:
-    return f"цель: {name.strip()} — {target}₽ · откладываю {monthly}₽/мес"
-
-
 class GoalBody(BaseModel):
     name: str = Field(min_length=1, max_length=200)
     target: float = Field(gt=0)
     monthly: float = Field(default=0, ge=0)
-    key: Optional[str] = None  # передан → правка существующей цели
+    prev_name: Optional[str] = None  # передан при переименовании
 
 
 @router.post("/finance/goal")
@@ -612,44 +604,35 @@ async def finance_goal_upsert(
     body: GoalBody,
     tg_id: int = Depends(current_user_id),
 ) -> dict[str, Any]:
-    """Создать / изменить 🎯 цель (Mini App, #44). Цель хранится как факт
-    Памяти `цель_*` под категорией «💰 Лимит» — тот же путь, что у бота
-    (`новая цель X` / `/budget`-разбор). Правка ежемесячного взноса влияет
-    на бюджет через `core/budget.py:load_budget_data`."""
-    from nexus.handlers.finance import _save_memory_entry
-    from core.repos.memory_repo import _repo as _mem_repo
+    """Создать / изменить 🎯 цель (Mini App, #44/#205). Цель — строка таблицы
+    `goals`; правка ежемесячного взноса влияет на бюджет через
+    `core/budget.py:load_budget_data`."""
+    from core.repos.pg_goals_repo import _repo as _goals_repo
 
     user_id = (await get_user_id(tg_id)) or ""
     name = body.name.strip()
     target = int(round(body.target))
     monthly = int(round(body.monthly))
-    new_key = _goal_key(name)
 
-    # Переименование: старый цель_-ключ деактивируем, чтобы не задвоить.
-    old_key = (body.key or "").strip().lower()
-    if old_key and old_key != new_key and old_key.startswith("цель_"):
-        try:
-            stale = await _mem_repo.find_by_key_prefixes([old_key], user_id)
-            ids = [m.id for m in stale if m.is_current and (m.key or "").lower() == old_key]
-            if ids:
-                await _mem_repo.set_active(ids, False)
-        except Exception as e:
-            logger.warning("goal rename: deactivate old key %s failed: %s", old_key, e)
-
+    # Переименование: старую строку закрываем (dropped), заводим новую.
+    prev = (body.prev_name or "").strip()
+    renamed = bool(prev and prev.lower() != name.lower())
     try:
-        await _save_memory_entry(new_key, _goal_fact(name, target, monthly), user_id)
+        if renamed:
+            await _goals_repo.set_status(user_id, prev, "dropped")
+        await _goals_repo.upsert(user_id, name, target=float(target), monthly=float(monthly))
     except Exception as e:
         logger.error("finance_goal_upsert failed: %s", e)
         raise HTTPException(status_code=500, detail="failed to save goal")
 
-    verb = "Обновила" if old_key else "Добавила"
+    verb = "Переименовала" if renamed else "Сохранила"
     target_disp = f"{target:,}".replace(",", " ")
     await notify_user(tg_id, f"🎯 {verb} цель: <b>{_esc(name)} — {target_disp}₽</b>", bot="nexus")
-    return {"ok": True, "key": new_key, "name": name, "target": target, "monthly": monthly}
+    return {"ok": True, "name": name, "target": target, "monthly": monthly}
 
 
 class GoalCloseBody(BaseModel):
-    key: str = Field(min_length=1)
+    name: str = Field(min_length=1)
     achieved: bool = False
 
 
@@ -658,30 +641,53 @@ async def finance_goal_close(
     body: GoalCloseBody,
     tg_id: int = Depends(current_user_id),
 ) -> dict[str, Any]:
-    """Закрыть цель (#44): деактивирует факт Памяти `цель_*` (is_current=False) —
-    как «убери цель» / «достигла цель» у бота. `achieved` только меняет текст
-    уведомления (реального трекинга накоплений нет — см. BUDGET.md)."""
-    from core.repos.memory_repo import _repo as _mem_repo
+    """Закрыть цель (#44/#205): status → achieved | dropped."""
+    from core.repos.pg_goals_repo import _repo as _goals_repo
 
     user_id = (await get_user_id(tg_id)) or ""
-    key = body.key.strip().lower()
-    if not key.startswith("цель_") or key == "цель_подушка":
-        raise HTTPException(status_code=400, detail="not a goal key")
+    name = body.name.strip()
     try:
-        mems = await _mem_repo.find_by_key_prefixes([key], user_id)
-        ids = [m.id for m in mems if m.is_current and (m.key or "").lower() == key]
-        if not ids:
-            raise HTTPException(status_code=404, detail="goal not found")
-        await _mem_repo.set_active(ids, False)
-    except HTTPException:
-        raise
+        found = await _goals_repo.set_status(
+            user_id, name, "achieved" if body.achieved else "dropped"
+        )
     except Exception as e:
         logger.error("finance_goal_close failed: %s", e)
         raise HTTPException(status_code=500, detail="failed to close goal")
+    if not found:
+        raise HTTPException(status_code=404, detail="goal not found")
 
     msg = "🎉 Цель достигнута!" if body.achieved else "✅ Цель убрана."
     await notify_user(tg_id, msg, bot="nexus")
-    return {"ok": True, "key": key, "achieved": body.achieved}
+    return {"ok": True, "name": name, "achieved": body.achieved}
+
+
+class GoalContributeBody(BaseModel):
+    name: str = Field(min_length=1)
+    amount: float = Field(gt=0)
+
+
+@router.post("/finance/goal/contribute")
+async def finance_goal_contribute(
+    body: GoalContributeBody,
+    tg_id: int = Depends(current_user_id),
+) -> dict[str, Any]:
+    """#205: ручной взнос в накопление цели (`goals.saved += amount`).
+    Достигли `target` → цель авто-переходит в `achieved`."""
+    from core.repos.pg_goals_repo import _repo as _goals_repo
+
+    user_id = (await get_user_id(tg_id)) or ""
+    name = body.name.strip()
+    amount = int(round(body.amount))
+    try:
+        new_saved = await _goals_repo.add_saved(user_id, name, float(amount))
+    except Exception as e:
+        logger.error("finance_goal_contribute failed: %s", e)
+        raise HTTPException(status_code=500, detail="failed to contribute")
+    if new_saved is None:
+        raise HTTPException(status_code=404, detail="goal not found")
+    a = f"{amount:,}".replace(",", " ")
+    await notify_user(tg_id, f"🎯 В цель «{_esc(name)}»: <b>+{a}₽</b>", bot="nexus")
+    return {"ok": True, "name": name, "saved": int(round(new_saved))}
 
 
 class CushionTargetBody(BaseModel):

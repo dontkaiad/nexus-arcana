@@ -2327,18 +2327,14 @@ async def _partial_debt_payment(name: str, payment: int, user_id: str = "") -> O
     return int(new_amount), overpaid
 
 
-async def _deactivate_goal(name: str, user_id: str = "") -> bool:
-    """Deactivate a goal in Memory (PG, #145). Returns True if found."""
+async def _deactivate_goal(name: str, user_id: str = "", achieved: bool = False) -> bool:
+    """Close a goal in the goals table (#205). Returns True if found."""
     if not user_id:
         return False
-    key_hint = name.lower().replace(" ", "_")
-    from core.repos.memory_repo import _repo as _mem_repo
-    mems = await _mem_repo.find_by_key_prefixes(["цель_" + key_hint], user_id)
-    active = [m for m in mems if m.is_current]
-    if active:
-        await _mem_repo.set_active([m.id for m in active], False)
-        return True
-    return False
+    from core.repos.pg_goals_repo import _repo as _goals_repo
+    return await _goals_repo.set_status(
+        user_id, name, "achieved" if achieved else "dropped"
+    )
 
 
 async def _save_debt(name: str, amount: int, deadline: str, user_id: str = "") -> None:
@@ -2351,13 +2347,10 @@ async def _save_debt(name: str, amount: int, deadline: str, user_id: str = "") -
     )
 
 
-async def _save_goal(name: str, amount: int, user_id: str = "") -> None:
-    """Create a new goal entry in Memory."""
-    await _save_memory_entry(
-        f"цель_{name.lower().replace(' ', '_')}",
-        f"цель: {name} — {amount}₽ · откладываю 0₽/мес",
-        user_id,
-    )
+async def _save_goal(name: str, amount: int, user_id: str = "", monthly: int = 0) -> None:
+    """Create / update a goal in the goals table (#205)."""
+    from core.repos.pg_goals_repo import _repo as _goals_repo
+    await _goals_repo.upsert(user_id, name, target=float(amount), monthly=float(monthly))
 
 
 async def handle_debt_command(message: Message, user_id: str = "") -> None:
@@ -2647,8 +2640,8 @@ async def handle_goal_command(message: Message, user_id: str = "") -> None:
     remove_m = re.search(r'(?:убери|достигла?|купила?)\s+цель\s+(\S+)', text, re.I)
     if remove_m:
         name = remove_m.group(1)
-        found = await _deactivate_goal(name, user_id)
         is_achieved = bool(re.search(r'(?:достигла?|купила?)', text, re.I))
+        found = await _deactivate_goal(name, user_id, achieved=is_achieved)
         if found:
             if is_achieved:
                 await message.answer(
@@ -2661,7 +2654,7 @@ async def handle_goal_command(message: Message, user_id: str = "") -> None:
                     reply_markup=_recalc_keyboard(), parse_mode="HTML",
                 )
         else:
-            await message.answer(f"🤔 Не нашла цель «{name}» в памяти.", parse_mode="HTML")
+            await message.answer(f"🤔 Не нашла активную цель «{name}».", parse_mode="HTML")
         return
 
     await message.answer("🤔 Не поняла команду. Примеры:\n<i>новая цель ноутбук 200к\nубери цель ноутбук\nдостигла цель телефон</i>", parse_mode="HTML")
@@ -4675,15 +4668,13 @@ async def _save_budget_plan(message: Message, uid: int) -> None:
             monthly_payment=float(monthly),
         )
 
-    # Цели
+    # Цели → таблица goals (#205)
+    from core.repos.pg_goals_repo import _repo as _goals_repo
     for g in plan.get("goals", []):
-        name = g.get("name", "?")
-        total = g.get("total", 0)
-        monthly = g.get("monthly", 0)
-        await _save_memory_entry(
-            "цель_{}".format(name.lower().replace(" ", "_")),
-            "цель: {} — {}₽ · откладываю {}₽/мес".format(name, total, monthly),
-            notion_uid,
+        await _goals_repo.upsert(
+            notion_uid, g.get("name", "?"),
+            target=float(g.get("total", 0) or 0),
+            monthly=float(g.get("monthly", 0) or 0),
         )
 
     # Чеклист-задачи «Оплатить Фикс / Разовые» — дедлайн = конец периода

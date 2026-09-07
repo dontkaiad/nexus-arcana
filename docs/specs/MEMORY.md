@@ -24,13 +24,13 @@ What it holds (categories, `core/memory.py:CATEGORIES`, 15 items):
 `💰 Лимит`, `🔒 Постоянные`, `📥 Доход`, `📋 Долги`, `🎯 Цели`.
 
 Of these, only the first eleven are real stored categories. `save_memory`
-writes every budget fact with `category="💰 Лимит"`; `🔒 Постоянные` /
-`📥 Доход` / `🎯 Цели` are *display labels* that `core/budget.py` derives
-from the key prefix (`постоянно_` / `income_` / `цель_`) on read — no row is
-stored with those categories. `📋 Долги` is dead in `memories`: a `долг_`
-fact from `save_memory` is diverted to the `debts` table
-(`parse_and_store`, see Write) so the budget's single debt reader
-(`pg_debts_repo`) sees it.
+writes budget facts with `category="💰 Лимит"`; `🔒 Постоянные` / `📥 Доход`
+are *display labels* that `core/budget.py` derives from the key prefix
+(`постоянно_` / `income_`) on read — no row is stored with those categories.
+`📋 Долги` and `🎯 Цели` are **dead in `memories`**: a `долг_` / `цель_` fact
+from `save_memory` is diverted at write time (`parse_and_store`, see Write) to
+the `debts` / `goals` table (`pg_debts_repo` / `pg_goals_repo`, #205), never
+persisted as a Memory row.
 
 Boundary "memory about the user" vs "domain knowledge":
 - Memory — about the user and related people/objects (preferences, patterns,
@@ -38,13 +38,13 @@ Boundary "memory about the user" vs "domain knowledge":
 - Domain knowledge (the Arcana grimoire, Tarot cards, etc.) — NOT memory, it
   lives in its own domain tables. There are no domain entities in the memory
   code.
-- Budget configuration (limits/income/obligatory/goals) physically lives in
-  the same `memories` table under category `💰 Лимит` and keys with prefixes
-  `лимит_`/`постоянно_`/`цель_`/`income_`, read via a separate path
-  (`core/budget.py`). Debts are the exception — they were moved out to the
-  `debts` table (`b0116c6`); a `долг_` fact never reaches `memories`. ADR-0005
-  marks the rest as a "parked follow-up" — a candidate for extraction into
-  the finance module; in the code it is NOT extracted yet.
+- Budget configuration that still lives in `memories` (category `💰 Лимит`):
+  keys `лимит_` / `постоянно_` / `income_` / `разовый_`, read via
+  `core/budget.py`. Debts (`долг_` → `debts`, `b0116c6`) and goals (`цель_` →
+  `goals`, #205) were extracted to their own tables and never reach
+  `memories`. ADR-0005 marks the remaining limit/income facts as a "parked
+  follow-up" for finance-module extraction; in the code they are NOT extracted
+  yet.
 
 ## Schema (as built, from the migration)
 
@@ -110,8 +110,8 @@ All sync SQL is wrapped in `asyncio.to_thread`.
 
 ### Write
 `core/memory.py:parse_and_store(text, user_id, bot_label)` is the
-Message-free core (Haiku parse → `долг_` diversion → alias canonicalization
-→ write); `save_memory(message, …)` calls it and layers the bot-side
+Message-free core (Haiku parse → `долг_` / `цель_` diversion → alias
+canonicalization → write); `save_memory(message, …)` calls it and layers the bot-side
 effects (replies, СДВГ tip, `message_pages` plaque). The Mini App FAB calls
 `parse_and_store` directly (#6). Steps:
 
@@ -127,9 +127,12 @@ effects (replies, СДВГ tip, `message_pages` plaque). The Mini App FAB calls
    depth ≤3, cycle protection).
 5. Write:
    - `ключ` starts with `долг_` → **not written to `memories`**:
-     `_parse_debt_from_fact` parses amount/deadline out of the fact and
-     `pg_debts_repo.upsert(user_id, name, "i_owe", …)`. Keeps the budget's
-     debt reader (`pg_debts_repo` only) in sync (`b0116c6`).
+     `_parse_debt_from_fact` parses amount/deadline and
+     `pg_debts_repo.upsert(user_id, name, "i_owe", …)` (`b0116c6`).
+   - `ключ` starts with `цель_` (≠ `цель_подушка`) → **not written to
+     `memories`**: `_parse_goal_from_fact` parses name/target/monthly and
+     `pg_goals_repo.upsert` (#205). `save_memory` returns
+     `kind: "goal"`.
    - `category == "💰 Лимит"` and `ключ` present → `_repo.upsert` (find by
      `key_name` + owner among non-archived, update; else create — key match
      is category-independent since `a730a43`/#194). Returns `(id, was_updated)`.
@@ -178,8 +181,9 @@ A reply to a "🧠 Запомнил …" plaque is parsed by
   Arcana has no notes feature, so the same reply gets an explicit
   "нет заметок" message instead of falling through to `unknown`.
 
-Budget-key branches (`постоянно_`/`цель_`/`долг_`/limit facts) are not
-registered for reply-correction — they're already editable via `/budget`.
+Budget-key branches (`постоянно_`/limit facts; and `цель_`/`долг_`, which
+never reach `memories`) are not registered for reply-correction — budget
+config is editable via `/budget` and the Mini App.
 
 ### Read
 Two modes:
@@ -249,7 +253,7 @@ Derived reads:
   — exact category match (empty `category` = no category filter).
 - `find_by_key_prefixes(prefixes, user_id)` — `key_name ILIKE p%`;
   used by the budget (`core/budget.py`, prefixes `income_`,
-  `постоянно_`, `лимит_`, `цель_`).
+  `постоянно_`, `лимит_`, `разовый_` — `цель_`/`долг_` live in their own tables).
 - `find_recent(is_current, scope, user_id, page_size)` — the latest
   non-archived ones.
 
@@ -318,8 +322,8 @@ name-matcher) → `search`.
     patterns/strategies/triggers/specifics + Sonnet profile.
   - `POST /api/memory` (`routes/writes.py`) — runs the same Message-free
     core as the bot (`core/memory.py:parse_and_store`): Haiku parse
-    (category / связь / ключ), `долг_` → `debts` table, alias
-    canonicalization, then `notify_user(bot="nexus")` (#6). The form's
+    (category / связь / ключ), `долг_` → `debts` / `цель_` → `goals` table,
+    alias canonicalization, then `notify_user(bot="nexus")` (#6). The form's
     `cat` field is ignored — the parser assigns the category.
   - `PATCH /api/memory/{id}` (`routes/writes.py`, #6) — `{is_current: bool}`,
     ownership check, `PgMemoryRepo.set_current`. Reversible "неактуально"
@@ -411,7 +415,9 @@ Verify against code:
 - `nexus/handlers/reply_update.py`, `arcana/handlers/reply_update.py` —
   reply dispatch, `_move_memory_to_notes` (Nexus only)
 - `scripts/migrate_memory_embeddings.py` — embedding backfill (dry-run default)
-- `core/budget.py` — budget reads via `find_by_key_prefixes`
+- `core/budget.py` — budget reads via `find_by_key_prefixes` (`лимит_`/`постоянно_`/`income_`/`разовый_`)
+- `core/memory.py` — `_parse_debt_from_fact` / `_parse_goal_from_fact` (write-time diversion in `parse_and_store`)
+- `core/repos/pg_debts_repo.py` / `core/repos/pg_goals_repo.py` — `долг_`/`цель_` targets (#6/#205)
 - `core/ru_morph.py` — `strip_case_ending` (case-ending stemmer, `_normalize_word`, #136)
 - `alembic/versions/e067a1b2c3d4_core_identity_user_id_owner_merge.py` — shared owner key (#202)
 - `core/repos/identity_table.py`, `core/repos/pg_identity_repo.py` — `core_identity.user_id`

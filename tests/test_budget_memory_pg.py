@@ -43,28 +43,29 @@ async def test_save_memory_entry_fail_closed_no_user():
 
 
 @pytest.mark.asyncio
-async def test_deactivate_goal_via_set_active():
+async def test_deactivate_goal_via_goals_repo():
+    """#205: _deactivate_goal → pg_goals_repo.set_status (не Память)."""
     from nexus.handlers.finance import _deactivate_goal
 
-    mems = [Memory(id="7", key="цель_телефон", fact="цель: телефон", is_current=True)]
-    with patch("core.repos.memory_repo._repo.find_by_key_prefixes",
-               AsyncMock(return_value=mems)) as m_find, \
-         patch("core.repos.memory_repo._repo.set_active",
-               AsyncMock(return_value=1)) as m_sa:
-        ok = await _deactivate_goal("телефон", "u-1")
-
+    with patch("core.repos.pg_goals_repo._repo.set_status",
+               AsyncMock(return_value=True)) as m_ss:
+        ok = await _deactivate_goal("телефон", "u-1", achieved=True)
     assert ok is True
-    m_find.assert_awaited_once()
-    m_sa.assert_awaited_once_with(["7"], False)
+    m_ss.assert_awaited_once_with("u-1", "телефон", "achieved")
+
+    with patch("core.repos.pg_goals_repo._repo.set_status",
+               AsyncMock(return_value=True)) as m_ss:
+        await _deactivate_goal("ноут", "u-1")
+    m_ss.assert_awaited_once_with("u-1", "ноут", "dropped")
 
 
 @pytest.mark.asyncio
 async def test_deactivate_goal_no_user():
     from nexus.handlers.finance import _deactivate_goal
-    with patch("core.repos.memory_repo._repo.set_active", AsyncMock()) as m_sa:
+    with patch("core.repos.pg_goals_repo._repo.set_status", AsyncMock()) as m_ss:
         ok = await _deactivate_goal("телефон", "")
     assert ok is False
-    m_sa.assert_not_called()
+    m_ss.assert_not_called()
 
 
 # ── БАГ 1: долг из обычного save_memory пишется в debts table, не в Память ────
@@ -97,6 +98,48 @@ async def test_save_memory_debt_writes_debts_table_not_memory():
     assert kwargs["amount"] == 50000.0
     assert kwargs["deadline"] == "апрель 2026"
     msg.answer.assert_awaited_once_with(f"📋 Добавил долг: {fact}")
+
+
+@pytest.mark.asyncio
+async def test_save_memory_goal_writes_goals_table_not_memory():
+    """#205: save_memory() с ключом 'цель_...' → pg_goals_repo.upsert, БЕЗ Памяти."""
+    import core.memory as cmem
+    from core.memory import save_memory
+
+    msg = AsyncMock()
+    msg.answer = AsyncMock()
+
+    fact = "цель: 💻 ПК — 200000₽ · откладываю 15000₽/мес"
+    with patch("core.memory._parse_fact",
+               AsyncMock(return_value=(fact, "💰 Лимит", "пк", "цель_пк"))), \
+         patch("core.repos.pg_goals_repo._repo.upsert", AsyncMock()) as m_goal, \
+         patch.object(cmem._mem_repo, "add", AsyncMock()) as m_add, \
+         patch.object(cmem._mem_repo, "upsert", AsyncMock()) as m_up:
+        await save_memory(msg, "цель ПК 200000", "u-1", "☀️ Nexus")
+
+    m_add.assert_not_awaited()
+    m_up.assert_not_awaited()
+    m_goal.assert_awaited_once()
+    args, kwargs = m_goal.call_args
+    assert args[0] == "u-1" and args[1] == "💻 ПК"
+    assert kwargs["target"] == 200000.0 and kwargs["monthly"] == 15000.0
+    msg.answer.assert_awaited_once_with(f"🎯 Добавил цель: {fact}")
+
+
+@pytest.mark.asyncio
+async def test_save_memory_goal_podushka_stays_memory():
+    """цель_подушка — НЕ цель (отдельный трекер), в goals не уходит."""
+    import core.memory as cmem
+    from core.memory import save_memory
+
+    msg = AsyncMock()
+    msg.answer = AsyncMock()
+    with patch("core.memory._parse_fact",
+               AsyncMock(return_value=("цель: подушка — 300000₽", "💰 Лимит", "подушка", "цель_подушка"))), \
+         patch("core.repos.pg_goals_repo._repo.upsert", AsyncMock()) as m_goal, \
+         patch.object(cmem._mem_repo, "upsert", AsyncMock(return_value=("m1", False))):
+        await save_memory(msg, "цель подушка 300000", "u-1", "☀️ Nexus")
+    m_goal.assert_not_awaited()
 
 
 @pytest.mark.asyncio

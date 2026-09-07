@@ -97,12 +97,13 @@ async def test_load_budget_data_routes_keys_into_buckets():
     from core.repos.pg_memory_repo import Memory
     from core.repos import memory_repo as mrmod
     import core.repos.pg_debts_repo as drmod
+    import core.repos.pg_goals_repo as grmod
     from core.repos.pg_debts_repo import Debt
+    from core.repos.pg_goals_repo import Goal
 
     fake_mems = [
         Memory(id="1", fact="доход: зарплата — 115 000₽/мес", key="income_salary"),
         Memory(id="2", fact="постоянно: аренда — 40000₽", key="постоянно_rent"),
-        Memory(id="3", fact="цель: Samsung Flip — 100 000₽ · откладываю 8000₽", key="цель_flip"),
         Memory(id="5", fact="лимит: 🚬 Привычки — 17685₽/мес", key="лимит_habits",
                related_to="привычки"),
     ]
@@ -111,15 +112,17 @@ async def test_load_budget_data_routes_keys_into_buckets():
              amount=50000.0, deadline="апрель", strategy="", monthly_payment=0.0,
              is_active=True, created_at="", updated_at=""),
     ]
+    fake_goals = [Goal(id="3", name="Samsung Flip", target=100000, monthly=8000, saved=0)]
 
-    with patch.object(mrmod._repo, "find_by_key_prefixes", AsyncMock(return_value=fake_mems)):
-        with patch.object(drmod._repo, "list_active", AsyncMock(return_value=fake_debts)):
-            data = await load_budget_data()
+    with patch.object(mrmod._repo, "find_by_key_prefixes", AsyncMock(return_value=fake_mems)), \
+         patch.object(drmod._repo, "list_active", AsyncMock(return_value=fake_debts)), \
+         patch.object(grmod._repo, "list_active", AsyncMock(return_value=fake_goals)):
+        data = await load_budget_data()
 
     assert len(data["доходы"]) == 1 and data["доходы"][0]["amount"] == 115000
     assert len(data["постоянные"]) == 1
     assert len(data["цели"]) == 1
-    assert data["цели"][0]["saving"] == 8000
+    assert data["цели"][0]["saving"] == 8000  # = monthly, для формулы бюджета
     assert data["цели"][0]["target"] == 100000
     assert len(data["долги"]) == 1
     assert data["долги"][0]["deadline"] == "апрель"
@@ -133,14 +136,16 @@ async def test_load_budget_data_skips_inactive():
     from core.repos.pg_memory_repo import Memory
     from core.repos import memory_repo as mrmod
 
+    import core.repos.pg_goals_repo as grmod
     fake_mems = [
-        Memory(id="99", fact="цель: X — 1000₽", key="цель_test", is_current=False),
+        Memory(id="98", fact="постоянно: X — 0₽", key="постоянно_x", is_current=False),
     ]
 
-    with patch.object(mrmod._repo, "find_by_key_prefixes", AsyncMock(return_value=fake_mems)):
+    with patch.object(mrmod._repo, "find_by_key_prefixes", AsyncMock(return_value=fake_mems)), \
+         patch.object(grmod._repo, "list_active", AsyncMock(return_value=[])):
         data = await load_budget_data()
 
-    assert data["цели"] == []
+    assert data["цели"] == [] and data["постоянные"] == []
 
 
 # ── БАГ 2: "бюджет X рублей" / "у меня 100к в месяц" распознаётся как income_ ──

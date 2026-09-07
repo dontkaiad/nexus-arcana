@@ -134,8 +134,31 @@ def _parse_debt_from_fact(fact: str) -> Tuple[float, Optional[str]]:
     return amount, deadline
 
 
-# Диверсия долгов в таблицу `debts` живёт в parse_and_store (общее ядро
-# бота и Mini App). Старый _save_debt_from_memory удалён — был Message-путь.
+# «цель: 💻 ПК — 200000₽ · откладываю 15000₽/мес»
+_GOAL_FACT_RE = re.compile(
+    r"цель:\s*(.+?)\s*[—\-]\s*(\d[\d\s]*(?:[.,]\d+)?)\s*[₽р]"
+    r"(?:.*?откладываю\s*(\d[\d\s]*(?:[.,]\d+)?)\s*[₽р])?",
+    re.IGNORECASE,
+)
+
+
+def _parse_goal_from_fact(fact: str, fallback_name: str) -> Tuple[str, float, float]:
+    """'цель: 💻 ПК — 200000₽ · откладываю 15000₽/мес' → ('💻 ПК', 200000.0, 15000.0)."""
+    m = _GOAL_FACT_RE.search(fact or "")
+    if not m:
+        return (fallback_name.strip() or "цель"), 0.0, 0.0
+
+    def _n(s: str) -> float:
+        try:
+            return float((s or "0").replace(" ", "").replace(",", "."))
+        except ValueError:
+            return 0.0
+
+    return m.group(1).strip(), _n(m.group(2)), (_n(m.group(3)) if m.group(3) else 0.0)
+
+
+# Диверсия долгов/целей в таблицы `debts`/`goals` живёт в parse_and_store
+# (общее ядро бота и Mini App). Старый _save_debt_from_memory удалён.
 
 
 # ── Парсинг факта через Haiku ──────────────────────────────────────────────────
@@ -420,6 +443,19 @@ async def parse_and_store(text: str, user_id: str, bot_label: str) -> dict:
             return {"kind": "error", "fact": fact, "category": category, "key": ключ,
                     "memory_id": None, "was_updated": False, "debt_name": name, "link": name}
 
+    # Цель → таблица goals (#205), не строка Памяти (аналог долг_ выше).
+    if ключ.startswith("цель_") and ключ != "цель_подушка":
+        g_name, g_target, g_monthly = _parse_goal_from_fact(fact, связь or ключ[len("цель_"):])
+        try:
+            from core.repos.pg_goals_repo import _repo as _goals_repo
+            await _goals_repo.upsert(user_id, g_name, target=g_target, monthly=g_monthly)
+            return {"kind": "goal", "fact": fact, "category": category, "key": ключ,
+                    "memory_id": None, "was_updated": False, "debt_name": "", "link": g_name}
+        except Exception as e:
+            logger.error("parse_and_store: goal upsert error %s", e)
+            return {"kind": "error", "fact": fact, "category": category, "key": ключ,
+                    "memory_id": None, "was_updated": False, "debt_name": "", "link": g_name}
+
     if category != "💰 Лимит" and связь:
         original_link = связь
         canonical_link = await _resolve_alias(связь, user_id)
@@ -468,6 +504,9 @@ async def save_memory(
     if r["kind"] == "debt":
         await message.answer(f"📋 Добавил долг: {fact}")
         return
+    if r["kind"] == "goal":
+        await message.answer(f"🎯 Добавил цель: {fact}")
+        return
     if r["kind"] == "error":
         await message.answer("⚠️ Ошибка записи в базу")
         return
@@ -483,19 +522,11 @@ async def save_memory(
                         await message.answer(f"🧠 Убрал постоянный расход: {связь or ключ}")
                     else:
                         await message.answer(f"🧠 Обновил постоянный расход: {fact}")
-                elif ключ.startswith("цель_"):
-                    await message.answer(f"🧠 Обновил цель: {fact}")
-                elif ключ.startswith("долг_"):
-                    await message.answer(f"🧠 Обновил долг: {fact}")
                 else:
                     await message.answer(f"🧠 Обновил лимит: {fact}")
             else:
                 if ключ.startswith("постоянно_"):
                     await message.answer(f"📌 Добавил постоянный расход: {fact}")
-                elif ключ.startswith("цель_"):
-                    await message.answer(f"🎯 Добавил цель: {fact}")
-                elif ключ.startswith("долг_"):
-                    await message.answer(f"📋 Добавил долг: {fact}")
                 else:
                     cat_label = f" [{category}]" if category else ""
                     sent = await message.answer(f"🧠 Запомнил{cat_label}: {fact}")
@@ -503,7 +534,8 @@ async def save_memory(
                     # этого reply на «🧠 Запомнил» падал в общий classify() с
                     # текстом-контекстом, который Haiku не понимал ({"type":
                     # "unknown"}). Только для обычных фактов: бюджетные ветки
-                    # (постоянно_/цель_/долг_) уже правятся через /budget.
+                    # (постоянно_) уже правятся через /budget; цели/долги —
+                    # свои таблицы (goals/debts), в Память не пишутся.
                     try:
                         from core.message_pages import save_message_page
                         await save_message_page(

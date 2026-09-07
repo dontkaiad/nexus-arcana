@@ -1905,19 +1905,24 @@ function NxFinance({ s }) {
             {goals.length === 0 && <Empty s={s} text="Целей пока нет" />}
             {goals.map((g, i) => (
               <Glass
-                key={g.key || i} s={s}
+                key={g.id || i} s={s}
                 style={{ padding: "10px 14px", marginBottom: 4, cursor: "pointer" }}
                 onClick={() => setDrillGoal(g)}
               >
                 <div style={{ display: "flex", justifyContent: "space-between" }}>
                   <span style={{ fontSize: fs(16), color: s.text, fontWeight: 500 }}>{g.n}</span>
                   <span style={{ fontSize: fs(16), color: s.acc, fontWeight: 500 }}>
-                    {g.t.toLocaleString()} ₽
+                    {g.s > 0 ? `${g.s.toLocaleString()} / ` : ""}{g.t.toLocaleString()} ₽
                   </span>
                 </div>
                 <div style={{ fontSize: fs(13), color: s.tS, marginTop: 3 }}>
                   {g.monthly > 0 ? `откладываю ${g.monthly.toLocaleString()} ₽/мес` : `после ${g.after}`}
                 </div>
+                {g.s > 0 && g.t > 0 && (
+                  <div style={{ marginTop: 6 }}>
+                    <Bar s={s} pct={Math.min(100, (g.s / g.t) * 100)} color={s.acc} />
+                  </div>
+                )}
               </Glass>
             ))}
             {(closedDebts.length > 0 || closedGoals.length > 0) && (
@@ -1937,13 +1942,14 @@ function NxFinance({ s }) {
                 {closedGoals.map((g, i) => (
                   <Glass key={`cg${i}`} s={s} style={{ padding: "10px 14px", marginBottom: 4, opacity: 0.75 }}>
                     <div style={{ display: "flex", justifyContent: "space-between" }}>
-                      <span style={{ fontSize: fs(15), color: s.text, fontWeight: 500 }}>🎯 {g.n}</span>
+                      <span style={{ fontSize: fs(15), color: s.text, fontWeight: 500 }}>
+                        {g.status === "achieved" ? "🎉" : "🎯"} {g.n}
+                      </span>
                       <span style={{ fontSize: fs(14), color: s.tS, fontFamily: H }}>{g.t.toLocaleString()} ₽</span>
                     </div>
                     <div style={{ fontSize: fs(12), color: s.tS, marginTop: 3 }}>
-                      {/* «закрыта», не «достигнута»: деактивация цели ≠ накопила сумму.
-                          Реального трекинга накоплений нет — см. _load_closed_budget. */}
-                      закрыта{g.closedAt ? ` · ${fmtClosed(g.closedAt)}` : ""}
+                      {/* #205: goals.status — achieved (накопили/купили) vs dropped (убрали) */}
+                      {g.status === "achieved" ? "достигнута" : "убрана"}{g.closedAt ? ` · ${fmtClosed(g.closedAt)}` : ""}
                     </div>
                   </Glass>
                 ))}
@@ -2005,13 +2011,17 @@ function GoalDrillSheet({ s, goal, onDone }) {
   const [name, setName] = useState(goal?.n || "");
   const [target, setTarget] = useState(goal ? String(goal.t || "") : "");
   const [monthly, setMonthly] = useState(goal ? String(goal.monthly || "") : "");
+  const [contrib, setContrib] = useState("");
   const [busy, setBusy] = useState(null);
   const [err, setErr] = useState("");
 
   const tNum = parseInt((target || "").replace(/\s/g, ""), 10) || 0;
   const mNum = parseInt((monthly || "").replace(/\s/g, ""), 10) || 0;
+  const cNum = parseInt((contrib || "").replace(/\s/g, ""), 10) || 0;
   const valid = name.trim().length > 0 && tNum > 0;
   const eta = goal?.after && goal.monthly > 0 ? goal.after : null;
+  const saved = goal?.s || 0;
+  const pct = goal && goal.t > 0 ? Math.min(100, Math.round((saved / goal.t) * 100)) : 0;
 
   const save = async () => {
     if (!valid || busy) return;
@@ -2019,7 +2029,7 @@ function GoalDrillSheet({ s, goal, onDone }) {
     try {
       await apiPost("/api/finance/goal", {
         name: name.trim(), target: tNum, monthly: mNum,
-        key: goal?.key || null,
+        prev_name: goal?.n || null,
       });
       onDone();
     } catch (e) {
@@ -2028,10 +2038,21 @@ function GoalDrillSheet({ s, goal, onDone }) {
   };
 
   const close = async (achieved) => {
-    if (busy || !goal?.key) return;
+    if (busy || !goal?.n) return;
     setBusy(achieved ? "ach" : "drop"); setErr("");
     try {
-      await apiPost("/api/finance/goal/close", { key: goal.key, achieved });
+      await apiPost("/api/finance/goal/close", { name: goal.n, achieved });
+      onDone();
+    } catch (e) {
+      setErr(e.message || "не получилось");
+    } finally { setBusy(null); }
+  };
+
+  const contribute = async () => {
+    if (cNum <= 0 || busy || !goal?.n) return;
+    setBusy("contrib"); setErr("");
+    try {
+      await apiPost("/api/finance/goal/contribute", { name: goal.n, amount: cNum });
       onDone();
     } catch (e) {
       setErr(e.message || "не получилось");
@@ -2043,11 +2064,14 @@ function GoalDrillSheet({ s, goal, onDone }) {
       {!isNew && (
         <Glass s={s} accent={s.acc} style={{ padding: "12px 14px" }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
-            <span style={{ fontSize: fs(13), color: s.acc }}>Цель</span>
+            <span style={{ fontSize: fs(13), color: s.acc }}>Накоплено</span>
             <span style={{ fontSize: fs(18), color: s.acc, fontWeight: 600, fontFamily: H }}>
-              {(goal.t || 0).toLocaleString()} ₽
+              {saved.toLocaleString()} / {(goal.t || 0).toLocaleString()} ₽
             </span>
           </div>
+          {goal.t > 0 && (
+            <div style={{ marginTop: 6 }}><Bar s={s} pct={pct} color={s.acc} /></div>
+          )}
           <div style={{ display: "flex", justifyContent: "space-between", marginTop: 6, fontSize: fs(13), color: s.tS }}>
             <span>Взнос</span>
             <span style={{ color: s.text }}>{goal.monthly > 0 ? `${goal.monthly.toLocaleString()} ₽/мес` : "не задан"}</span>
@@ -2057,6 +2081,23 @@ function GoalDrillSheet({ s, goal, onDone }) {
             <span style={{ color: s.text }}>{eta ? eta.replace(/^~/, "≈ ") : `после ${goal.after}`}</span>
           </div>
         </Glass>
+      )}
+
+      {!isNew && (
+        <div style={{ display: "flex", gap: 8 }}>
+          <div style={{ flex: 1 }}>
+            <Input s={s} value={contrib} onChange={setContrib} placeholder="Внести в накопление, ₽" type="number" inputMode="numeric" />
+          </div>
+          <div
+            onClick={() => !busy && cNum > 0 && contribute()}
+            style={{
+              padding: "10px 16px", borderRadius: 10, fontSize: fs(13), fontWeight: 500,
+              background: `${s.acc}1f`, border: `1px solid ${s.acc}55`, color: s.acc,
+              cursor: (busy || cNum <= 0) ? "not-allowed" : "pointer", opacity: cNum > 0 ? 1 : 0.5,
+              display: "flex", alignItems: "center",
+            }}
+          >{busy === "contrib" ? "…" : "Внести"}</div>
+        </div>
       )}
 
       <div style={{ fontSize: fs(11), color: s.tS }}>Название</div>
