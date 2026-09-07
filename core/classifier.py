@@ -23,6 +23,31 @@ from nexus.handlers.utils import react
 logger = logging.getLogger("nexus.classifier")
 MOSCOW_TZ = timezone(timedelta(hours=3))
 
+
+def _ARCANA_REDIRECT_MSG(original_text: str) -> str:
+    """Единый текст редиректа Nexus → Arcana."""
+    return ("🔮 <b>Это работа для Арканы!</b>\n\n"
+            "Перейди в <a href=\"https://t.me/arcana_kailark_bot\">🌒 Arcana</a> и отправь туда:\n"
+            f"<code>{original_text[:100]}</code>\n\n"
+            "Там я помогу с ритуалами, практикой и сеансами.")
+
+
+# Доход от практики (услуга Кай клиенту) — маркеры. Расход в 🔮 Практика
+# (Кай платит за СВОЁ обучение) сюда НЕ попадает: guard только для type=income.
+_PRACTICE_SERVICE_RE = re.compile(
+    r"\b(расклад\w*|раскладк\w*|ритуал\w*|сеанс\w*|сесси\w*|таро|гадани\w*|"
+    r"гримуар\w*|приворот\w*|оберег\w*|амулет\w*|чистк\w+\s+энерг\w*|"
+    r"клиент\w*|заказчи\w+)\b",
+    re.IGNORECASE,
+)
+
+
+def _is_practice_income(original_text: str, category: str) -> bool:
+    """type=income + признак практики → это доход Арканы (#128)."""
+    if (category or "").strip() == "🔮 Практика":
+        return True
+    return bool(_PRACTICE_SERVICE_RE.search(original_text or ""))
+
 # Маппинг известных тегов на эмодзи
 TAGS_EMOJI = {
     "практика": "🔮",
@@ -285,7 +310,8 @@ def build_system(tz_offset: int = 3) -> str:
         "- СЛЕНГ: энергосы/энерги/сигетки/сиги/бабки/бабосы/нал — это сленг, НЕ опечатки! Оставлять как есть в title, не исправлять.",
         "- ЭНЕРГЕТИКИ/КОЛА → 🚬 Привычки: энергосы/энерги/монстр/monster/ред булл/редбулл/redbull/burn/кола/cola/pepsi/пепси/чипман/chapman/сигареты/сиги → category='🚬 Привычки'",
         "- ИМПУЛЬСИВНЫЕ → 🎲 Импульсивные: маркер 'импульсивно/спонтанно/сорвалась/сорвался/незапланированно' (тортик 800р импульсивно / купила платье 5к спонтанно) → category='🎲 Импульсивные'",
-        "- ПРАКТИКА (Arcana) → 🔮 Практика: услуги для практики (наставник 3к/курс таро 8к/расклад у мастера/обучение раскладам) — это УСЛУГИ/ОБУЧЕНИЕ, НЕ материалы → category='🔮 Практика'",
+        "- ПРАКТИКА (Arcana) — только РАСХОД: услуги для СВОЕГО обучения (наставник 3к/курс таро 8к/расклад у мастера/обучение раскладам) → type='expense', category='🔮 Практика'.",
+        "- ДОХОД ОТ ПРАКТИКИ → arcana_redirect (НЕ income!): 'заработала на раскладе 3к', 'клиент оплатил сеанс 2000', 'получила за ритуал', 'провела расклад за деньги' — это доход Арканы, он учитывается в кассе Арканы, а не в Нексусе. Отдавай {\"type\":\"arcana_redirect\",\"text\":\"...\"}.",
         "- РАСХОДНИКИ → 🕯️ Расходники: материалы для практики/быта (соль розовая 150р/травы для бани 400р/благовония 300р/восковые свечи 250р) — МАТЕРИАЛЫ, НЕ услуги → category='🕯️ Расходники'",
         "- КОТЫ/ЖИВОТНЫЕ → 🐾 Коты: погладить кота/покормить кота/кошачий корм/ветеринар/лоток/шерсть/когти/котик/кошка → category='🐾 Коты'",
         "- ЛЮДИ → 👥 Люди: написать [имя]/позвонить [имя]/встретиться с [имя]/написать маше/позвонить руслану/встретиться с аней → category='👥 Люди'",
@@ -1187,21 +1213,21 @@ async def process_item(data: Dict[str, Any], original_text: str, msg, clarify: d
 
     # АРКАНА РЕДИРЕКТ
     if kind == "arcana_redirect":
-        return ("🔮 <b>Это работа для Арканы!</b>\n\n"
-                "Перейди в <a href=\"https://t.me/arcana_kailark_bot\">🌒 Arcana</a> и отправь туда:\n"
-                f"<code>{original_text[:100]}</code>\n\n"
-                "Там я помогу с ритуалами, практикой и сеансами.")
-    
+        return _ARCANA_REDIRECT_MSG(original_text)
+
     # АРКАНА УТОЧНЕНИЕ - спросить пользователя
     if kind == "arcana_clarify":
         confidence = data.get("confidence", "low")
         if confidence == "low":
             return f"arcana_clarify:{original_text}"
         # Если confidence=high - редирект без вопроса
-        return ("🔮 <b>Это работа для Арканы!</b>\n\n"
-                "Перейди в <a href=\"https://t.me/arcana_kailark_bot\">🌒 Arcana</a> и отправь туда:\n"
-                f"<code>{original_text[:100]}</code>\n\n"
-                "Там я помогу с ритуалами, практикой и сеансами.")
+        return _ARCANA_REDIRECT_MSG(original_text)
+
+    # ДОХОД ОТ ПРАКТИКИ → в Аркану, а не в кассу Нексуса (#128).
+    # Расход в 🔮 Практика (Кай платит за своё обучение) — легитимен, не трогаем.
+    if kind == "income" and _is_practice_income(original_text, data.get("category", "")):
+        logger.info("process_item: practice income → arcana redirect")
+        return _ARCANA_REDIRECT_MSG(original_text)
 
     # ФИНАНСЫ
     if kind in ("expense", "income"):

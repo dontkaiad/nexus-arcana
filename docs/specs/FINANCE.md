@@ -1,6 +1,6 @@
 # FINANCE — data-model contract (💰 Финансы)
 
-Code conforms to: 0bc132e. (+ #144: user_notion_id → user_id.) This spec describes the finance data model as of
+Code conforms to: 0bc132e. (+ #144: user_notion_id → user_id; + #128: practice income → Arcana redirect, Nexus never writes an Arcana row.) This spec describes the finance data model as of
 that commit; update it in the same PR that changes the model.
 
 > Contract, not snapshot. Describes the persistent model, the guarantees of
@@ -100,6 +100,14 @@ append-plus-edit; rows are not removed in code.
 - **List purchases post here.** A shopping purchase writes one `💸 Расход`
   via `FinanceRepo` (see LISTS.md `record_purchase`); 💰 Финансы does not call
   back into Lists.
+- **The Nexus bot never writes an Arcana row.** `core/classifier.py`
+  finance writes hard-code `bot_label = "☀️ Nexus"`. Practice *income*
+  ("заработала на раскладе", "клиент оплатил сеанс", or `category = 🔮 Практика`)
+  is intercepted in `process_item` (`_is_practice_income`) and turned into an
+  Arcana redirect message — it is Arcana P&L, recorded via `@arcana_kailark_bot`
+  or the Mini App (`/api/finance?bot=arcana`), #128. A practice *expense*
+  (`🔮 Практика` — Kai paying for her own learning) is a legitimate Nexus row
+  and is **not** redirected.
 
 ## Lifecycle / status model
 
@@ -139,6 +147,8 @@ BUDGET.md. Ledger reads/writes are pure SQL.
 - `core/repos/finance_repo.py` — `FinanceRepo` facade, `FinanceEntry`,
   `_guard_source` barter guard, union reads
 - `nexus/handlers/finance.py`, `arcana/handlers/finance.py` — entry/edit, model routing
+- `core/classifier.py` — `process_item` finance branch (`bot_label="☀️ Nexus"` hard-coded), `_is_practice_income` / `_ARCANA_REDIRECT_MSG` (#128)
+- `core/config.py` — `ARCANA_KEYWORDS` (practice-intent redirect vocabulary)
 - `core/cash_register.py` — Arcana P&L derivation (salary category)
 - `core/repos/lists_repo.py` — `record_purchase` (list purchase → expense)
 - `miniapp/backend/routes/finance.py`, `arcana_finance.py` — finance views, pay_salary
