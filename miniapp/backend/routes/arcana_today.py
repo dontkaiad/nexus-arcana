@@ -853,6 +853,11 @@ async def get_arcana_works(
         cli_name = cli_info.get("name", "")
         ctype_full = cli_info.get("type_full", "")
         ctype = ctype_full.split()[0] if ctype_full else ""
+        # #10: напоминание — паритет с Nexus tasks (там reminder_iso/_time)
+        try:
+            reminder_iso = w.reminder_dt.isoformat() if w.reminder_dt else None
+        except Exception:
+            reminder_iso = None
         items.append({
             "id": w.id,
             "title": w.title or "—",
@@ -861,6 +866,8 @@ async def get_arcana_works(
             "category": w.category,
             "deadline": w.deadline_iso,
             "deadline_label": w.deadline_iso[:16].replace("T", " ") if w.deadline_iso else "",
+            "reminder": reminder_iso,
+            "reminder_time": _work_local_time(w.reminder_dt, tz_offset),
             "is_overdue": is_overdue,
             "client": {"id": cli_id, "name": cli_name, "type": ctype} if cli_id else None,
             "subtasks": subtasks_by_work.get(w.id, []),

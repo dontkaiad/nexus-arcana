@@ -1,6 +1,8 @@
 # WORKS — data-model contract (🔮 Работы)
 
-Code conforms to: 0bc132e. (+ #144: user_notion_id → user_id.) This spec describes the works data model as of
+Code conforms to: 0bc132e. (+ #144: user_notion_id → user_id; + #10: Mini App
+`/api/arcana/works` serializes `reminder`/`reminder_time`, parity with Nexus
+tasks.) This spec describes the works data model as of
 that commit; update it in the same PR that changes the model.
 
 > Contract, not snapshot. Describes the persistent model, the guarantees of
@@ -101,8 +103,13 @@ attributes; reminder jobs are derived from the columns, not stored.
 - Cross-domain — `core/client_resolve.py` (client),
   `core/work_relation.py` (Notion-era auto-relation + auto-close; see #151),
   `core/reminder_scheduler.py` (reminders).
-- Mini App — (works are surfaced via Arcana today/aggregate routes;
-  `miniapp/backend/routes/arcana_today.py`).
+- Mini App — works are surfaced via Arcana today/aggregate routes
+  (`miniapp/backend/routes/arcana_today.py`). `GET /api/arcana/works`
+  serializes `deadline`/`deadline_label` and — since #10 — `reminder` (ISO)
+  plus `reminder_time` (viewer-local `HH:MM`), mirroring the Nexus tasks
+  payload; the `ArWork` card renders a 🔔 chip. `reminder` is read-only in
+  the Mini App (set/reschedule is bot-only, `set_deadline` /
+  `reschedule_cycle`).
 
 ## Model routing (from code)
 
@@ -122,3 +129,4 @@ Reads/writes are pure SQL.
 - `core/work_relation.py` — Notion-era session/ritual → work relation (#151)
 - `arcana/repos/sessions_tables.py`, `arcana/repos/rituals_tables.py` — confirm no `works_id`
 - `core/client_resolve.py` — client resolution on create
+- `miniapp/backend/routes/arcana_today.py` — `/api/arcana/works` serialization (`reminder`/`reminder_time`, #10)

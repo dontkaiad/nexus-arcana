@@ -5356,6 +5356,10 @@ function ArWork({ s, openWork }) {
                   {w.deadline_label && !w.is_overdue && (
                     <span>{w.deadline_label}</span>
                   )}
+                  {/* #10: напоминание — паритет с Nexus задачами */}
+                  {(w.reminder_time || w.reminder) && (
+                    <span> · 🔔 {w.reminder_time || (w.reminder || "").slice(0, 16).replace("T", " ")}</span>
+                  )}
                   {w.client?.name && <span> · 👤 {w.client.name}</span>}
                   {total > 0 && (
                     <span
@@ -6942,7 +6946,8 @@ const FAB_TITLE = {
   session: "Новый расклад",
   ritual: "Новый ритуал",
   work: "Работа",
-  grimoire: "В гримуар",
+  // #9: 'grimoire' убран — создания записи гримуара из мини-аппы нет (см. #203),
+  // и в ARCANA_ADD его тоже нет, так что лейбл был мёртвым.
 };
 
 const PRIOS = ["🔴", "🟡", "⚪"];

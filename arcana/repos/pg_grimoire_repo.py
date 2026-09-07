@@ -120,13 +120,19 @@ class PgGrimoireRepo:
         cat_code = _code_for(category)
         if not cat_code:
             return []
-        stmt = (
-            _select_grimoire()
-            .where(grimoire_category.c.code == cat_code)
-        )
-        if user_id:
-            stmt = stmt.where(grimoire_entries.c.user_id == user_id)
         with get_engine().connect() as conn:
+            # Резолвим код категории → id и фильтруем по grimoire_entries.category_id.
+            # Раньше здесь был .where(grimoire_category.c.code == …) на
+            # НЕ-алиасной таблице — а _select_grimoire уже джойнит алиас gc,
+            # что давало декартово произведение (SAWarning).
+            cat_id = _resolve(conn, cat_code)
+            if cat_id is None:
+                return []
+            stmt = _select_grimoire().where(
+                grimoire_entries.c.category_id == cat_id
+            )
+            if user_id:
+                stmt = stmt.where(grimoire_entries.c.user_id == user_id)
             rows = conn.execute(stmt).fetchall()
         return [_row_to_entry(r) for r in rows]
 

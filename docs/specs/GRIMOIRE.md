@@ -1,7 +1,8 @@
 # GRIMOIRE — data-model contract (📖 Гримуар)
 
-Code conforms to: 0bc132e. (+ #144: user_notion_id → user_id.) This spec describes the grimoire data model as of
-that commit; update it in the same PR that changes the model.
+Code conforms to: 0bc132e (+ #144: user_notion_id → user_id; + #9: fixed the
+cartesian product in `_list_by_category_sync`). This spec describes the
+grimoire data model; update it in the same PR that changes the model.
 
 > Contract, not snapshot. Describes the persistent model, the guarantees of
 > each operation, and the invariants. Enumerations point at the owning code
@@ -55,8 +56,12 @@ non-exhaustive:
 `PgGrimoireRepo` (`arcana/repos/pg_grimoire_repo.py`):
 
 - **add** — `add(title, category, themes, text, source, …)` inserts an entry.
-- **read** — `list_by_category(category)`, `search(query)`, `list_all`,
-  `find_by_id(id)`.
+- **read** — `list_by_category(category)` (resolves the category code → id
+  and filters `grimoire_entries.category_id`; #9 — it used to `.where` on
+  the un-aliased `grimoire_category` while `_select_grimoire` already joins
+  the `gc` alias, producing a cartesian product), `search(query, theme)`
+  (ILIKE over title + text, and — since #9's Mini App audit — themes),
+  `list_all`, `find_by_id(id)`.
 
 The repo exposes no update or delete method — within this contract a grimoire
 entry is append-and-read.
@@ -82,7 +87,8 @@ set as a quality marker. There is no archive/delete path in the repo.
 
 - Bot — `arcana/handlers/grimoire.py` (parse + save + browse).
 - Mini App — `miniapp/backend/routes/arcana_grimoire.py`
-  (`GET /api/arcana/grimoire`, `GET …/{entry_id}`).
+  (`GET /api/arcana/grimoire`, `GET …/{entry_id}`). Read-only — no create
+  endpoint or form (tracked in #203). `q` matches title + text + themes.
 
 ## Model routing (from code)
 
