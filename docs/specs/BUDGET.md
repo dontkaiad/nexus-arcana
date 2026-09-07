@@ -344,6 +344,10 @@ Budget has **no table of its own** — there is no migration, no
      `POST /api/finance/debt/close` (`{name, kind}` → `deactivate`).
    Lifecycle: `is_active` true → false; `reduce_amount` returns
    `(new_amount, closed, overpaid)` and flips `is_active` when it hits 0.
+   Overpaid (`repaid` payment > remaining): the Mini App then offers
+   «🛡 В подушку» → `POST /api/finance/cushion/deposit`
+   (`source='debt_overpaid'`) or «оставить» — the same choice the bot's
+   `overpaid_cushion` callback gives.
 3. **One-time expenses.** The standalone command `разовый расход X` /
    `разовые: ...` is classified as `one_time_expense` (`core/classifier.py`,
    `_ONE_TIME_EXPENSE_RE`, checked before `memory_save`/`budget`) and

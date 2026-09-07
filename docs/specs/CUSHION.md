@@ -145,7 +145,8 @@ transaction** as the increment.
 
 | operation | code | effect |
 |---|---|---|
-| manual deposit | `handle_cushion_command` (deposit branch) → `add_to_balance(source='manual')` | `balance += amount`; log row |
+| manual deposit | `handle_cushion_command` (deposit branch) / `POST /finance/cushion/deposit` → `add_to_balance(source='manual')` | `balance += amount`; log row |
+| debt-overpaid deposit | Mini App: `POST /finance/cushion/deposit` with `source='debt_overpaid'` after a repayment closed a debt with change (#123) — mirrors the bot's `overpaid_cushion` callback | `balance += overpaid`; log row |
 | set target | `handle_cushion_command` (target branch) / `POST /finance/cushion/target` → `set_target` | `target` set (or cleared on 0/null); **balance untouched, no log row** |
 | plan accepted | `_save_budget_plan` → `set_planned_contribution(plan["cushion_contribution"])` | `planned_contribution` overwritten; **balance untouched** |
 | period rollover | `_send_payday_review` → `add_to_balance(planned + total_saved, source='payday_auto')` | one credit = accepted plan's contribution + positive real underspend; one log row; one message |
@@ -174,9 +175,10 @@ transaction** as the increment.
   (`cushion_command`, before goal/debt/memory)
 - `core/budget.py` — `compute_limits`, `load_budget_data`
 - `miniapp/backend/routes/finance.py` — `_view_cushion`
-- `miniapp/backend/routes/writes.py` — `POST /finance/cushion/target`
-- `miniapp/frontend/src/App.jsx` — `CushionScreen`; `adapters.js` —
-  `adaptFinanceCushion`
+- `miniapp/backend/routes/writes.py` — `POST /finance/cushion/target`,
+  `POST /finance/cushion/deposit` (#123)
+- `miniapp/frontend/src/App.jsx` — `CushionScreen`, `DebtDrillSheet`
+  (debt-overpaid → cushion prompt); `adapters.js` — `adaptFinanceCushion`
 
 ## Verify against code
 

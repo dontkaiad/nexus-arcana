@@ -2111,6 +2111,7 @@ function DebtDrillSheet({ s, debt, onDone }) {
   const [pay, setPay] = useState("");
   const [busy, setBusy] = useState(null);
   const [err, setErr] = useState("");
+  const [overpaid, setOverpaid] = useState(0);  // #123: переплата — куда деть?
 
   const payNum = parseInt((pay || "").replace(/\s/g, ""), 10) || 0;
 
@@ -2118,13 +2119,32 @@ function DebtDrillSheet({ s, debt, onDone }) {
     if (payNum <= 0 || busy) return;
     setBusy("pay"); setErr("");
     try {
-      await apiPost("/api/finance/debt", {
+      const res = await apiPost("/api/finance/debt", {
         name: debt.n, amount: payNum,
         direction: incoming ? "received" : "repaid",
       });
+      // Переплата: только для «вернула свой долг» предлагаем в подушку.
+      if (!incoming && res && res.overpaid > 0) {
+        setOverpaid(res.overpaid);
+        setBusy(null);
+        return;
+      }
       onDone && onDone();
     } catch (e) { setErr(e.message || "не получилось"); }
     finally { setBusy(null); }
+  };
+
+  const routeOverpaid = async (toCushion) => {
+    if (busy) return;
+    setBusy("over");
+    try {
+      if (toCushion) {
+        await apiPost("/api/finance/cushion/deposit", {
+          amount: overpaid, source: "debt_overpaid", note: "переплата по долгу",
+        });
+      }
+      onDone && onDone();
+    } catch (e) { setErr(e.message || "не получилось"); setBusy(null); }
   };
 
   const closeFully = async () => {
@@ -2195,7 +2215,36 @@ function DebtDrillSheet({ s, debt, onDone }) {
         </>
       )}
 
+      {/* #123: переплата — долг закрыт, остаток не потерян */}
+      {overpaid > 0 && (
+        <Glass s={s} accent={s.acc} style={{ padding: "12px 14px" }}>
+          <div style={{ fontSize: fs(13), color: s.text, marginBottom: 8 }}>
+            Долг закрыт. Переплата <b>{overpaid.toLocaleString()} ₽</b> — что с ней?
+          </div>
+          {err && <div style={{ fontSize: fs(12), color: s.red, marginBottom: 6 }}>{err}</div>}
+          <div style={{ display: "flex", gap: 8 }}>
+            <div
+              onClick={() => !busy && routeOverpaid(true)}
+              style={{
+                flex: 1, textAlign: "center", padding: "10px", borderRadius: 10, fontSize: fs(13), fontWeight: 500,
+                background: `${s.acc}1f`, border: `1px solid ${s.acc}55`, color: s.acc,
+                cursor: busy ? "not-allowed" : "pointer",
+              }}
+            >{busy === "over" ? "…" : "🛡 В подушку"}</div>
+            <div
+              onClick={() => !busy && routeOverpaid(false)}
+              style={{
+                flex: 1, textAlign: "center", padding: "10px", borderRadius: 10, fontSize: fs(13), fontWeight: 500,
+                background: s.card, border: `1px solid ${s.brd}`, color: s.tS,
+                cursor: busy ? "not-allowed" : "pointer",
+              }}
+            >Оставить</div>
+          </div>
+        </Glass>
+      )}
+
       {/* #123: погашение — частичное или целиком */}
+      {overpaid === 0 && (<>
       <SectionLabel s={s}>{incoming ? "Мне вернули" : "Погашение"}</SectionLabel>
       {err && <div style={{ fontSize: fs(12), color: s.red }}>{err}</div>}
       <div style={{ display: "flex", gap: 8 }}>
@@ -2220,6 +2269,7 @@ function DebtDrillSheet({ s, debt, onDone }) {
           cursor: busy ? "not-allowed" : "pointer",
         }}
       >{busy === "close" ? "…" : (incoming ? "Закрыть (вернули всё)" : "Закрыть долг")}</div>
+      </>)}
     </div>
   );
 }

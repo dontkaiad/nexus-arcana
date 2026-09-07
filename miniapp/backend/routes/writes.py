@@ -708,6 +708,36 @@ async def finance_cushion_set_target(
     return {"ok": True, "target": target}
 
 
+class CushionDepositBody(BaseModel):
+    amount: float = Field(gt=0)
+    source: str = "manual"
+    note: str = ""
+
+
+@router.post("/finance/cushion/deposit")
+async def finance_cushion_deposit(
+    body: CushionDepositBody,
+    tg_id: int = Depends(current_user_id),
+) -> dict[str, Any]:
+    """Пополнить баланс подушки из Mini App (инкремент + строка в
+    cushion_transactions). Используется для переплаты по долгу (#123,
+    `source="debt_overpaid"`) и вручную."""
+    from core.repos.pg_cushion_repo import _repo as _cushion_repo
+    user_id = (await get_user_id(tg_id)) or ""
+    amount = int(round(body.amount))
+    try:
+        new_balance = await _cushion_repo.add_to_balance(
+            user_id, float(amount),
+            source=body.source or "manual", note=body.note or "",
+        )
+    except Exception as e:
+        logger.error("finance_cushion_deposit failed: %s", e)
+        raise HTTPException(status_code=500, detail="failed to deposit")
+    a = f"{amount:,}".replace(",", " ")
+    await notify_user(tg_id, f"🛡️ В подушку: <b>+{a}₽</b>", bot="nexus")
+    return {"ok": True, "amount": amount, "balance": int(round(new_balance))}
+
+
 # DEPRECATED: use /api/finance instead (alias сохранён для обратной совместимости)
 @router.post("/expenses")
 async def expense_create(

@@ -950,3 +950,27 @@ def test_finance_view_goals_includes_incoming_debts(client):
     assert r.status_code == 200, r.text
     di = r.json()["debts_incoming"]
     assert len(di) == 1 and di[0]["name"] == "Петя" and di[0]["total"] == 4000
+
+
+def test_finance_cushion_deposit_increments_balance(client):
+    with patch("core.repos.pg_cushion_repo._repo.add_to_balance",
+               AsyncMock(return_value=47000.0)) as m_add, \
+         patch("miniapp.backend.routes.writes.notify_user", AsyncMock()), \
+         patch("miniapp.backend.routes.writes.get_user_id", AsyncMock(return_value="u")):
+        r = client.post("/api/finance/cushion/deposit",
+                        json={"amount": 5000, "source": "debt_overpaid", "note": "переплата по долгу"})
+    assert r.status_code == 200, r.text
+    assert r.json() == {"ok": True, "amount": 5000, "balance": 47000}
+    _, kw = m_add.await_args
+    assert kw["source"] == "debt_overpaid"
+
+
+def test_debt_repaid_overpaid_reported(client):
+    """repaid с переплатой → фронт получает overpaid, дальше сам решает про подушку."""
+    with patch("core.repos.pg_debts_repo._repo.reduce_amount",
+               AsyncMock(return_value=(0.0, True, 1500.0))), \
+         patch("miniapp.backend.routes.writes.notify_user", AsyncMock()), \
+         patch("miniapp.backend.routes.writes.get_user_id", AsyncMock(return_value="u")):
+        r = client.post("/api/finance/debt", json={"name": "Аня", "amount": 6500, "direction": "repaid"})
+    assert r.status_code == 200, r.text
+    assert r.json()["closed"] is True and r.json()["overpaid"] == 1500
