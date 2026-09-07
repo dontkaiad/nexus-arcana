@@ -5060,13 +5060,18 @@ function ArRitualsList({ s, openRitual }) {
           </Pill>
         ))}
       </div>
-      <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-        {goals.map((g) => (
-          <Pill key={g} s={s} active={goal === g} onClick={() => setGoal(g)}>
-            {g === "all" ? "Все цели" : g}
-          </Pill>
-        ))}
-      </div>
+      {/* Цель ритуала (magical_purpose: 🛡️ Защита / 🧲 Привлечение / …) —
+          НЕ финансовые цели (те в Финансах). Показываем ряд, только если
+          у ритуалов реально несколько разных целей. */}
+      {goals.length > 2 && (
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+          {goals.map((g) => (
+            <Pill key={g} s={s} active={goal === g} onClick={() => setGoal(g)}>
+              {g === "all" ? "🎯 Любая цель" : g}
+            </Pill>
+          ))}
+        </div>
+      )}
       {loading && <Empty s={s} text="Загружаю..." />}
       {error && <ErrorBox s={s} error={error} refetch={refetch} />}
       {!loading && !error && list.length === 0 && (
