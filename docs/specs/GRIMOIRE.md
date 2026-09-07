@@ -1,7 +1,8 @@
 # GRIMOIRE — data-model contract (📖 Гримуар)
 
 Code conforms to: 0bc132e (+ #144: user_notion_id → user_id; + #9: fixed the
-cartesian product in `_list_by_category_sync`). This spec describes the
+cartesian product in `_list_by_category_sync`; + #203: Mini App create
+endpoint). This spec describes the
 grimoire data model; update it in the same PR that changes the model.
 
 > Contract, not snapshot. Describes the persistent model, the guarantees of
@@ -86,9 +87,12 @@ set as a quality marker. There is no archive/delete path in the repo.
 ## Callers
 
 - Bot — `arcana/handlers/grimoire.py` (parse + save + browse).
-- Mini App — `miniapp/backend/routes/arcana_grimoire.py`
-  (`GET /api/arcana/grimoire`, `GET …/{entry_id}`). Read-only — no create
-  endpoint or form (tracked in #203). `q` matches title + text + themes.
+- Mini App — reads via `miniapp/backend/routes/arcana_grimoire.py`
+  (`GET /api/arcana/grimoire`, `GET …/{entry_id}`; `q` matches title + text +
+  themes). Create via `POST /api/arcana/grimoire`
+  (`miniapp/backend/routes/writes.py`, #203) — a structural form (title /
+  category / themes / text / source), **no Haiku** (unlike the bot's
+  free-text parse). No update/delete endpoint (append-and-read, as in the repo).
 
 ## Model routing (from code)
 
@@ -102,5 +106,7 @@ Grimoire-text parsing is Haiku-only (`claude-haiku-4-5-20251001`,
 - `arcana/repos/pg_grimoire_repo.py` — `PgGrimoireRepo` (add/list/search/find)
 - `arcana/repos/grimoire_repo.py` — seam + `GrimoireEntry` object
 - `arcana/handlers/grimoire.py` — Haiku parse + save/browse
-- `miniapp/backend/routes/arcana_grimoire.py` — grimoire endpoints
+- `miniapp/backend/routes/arcana_grimoire.py` — grimoire read endpoints
+- `miniapp/backend/routes/writes.py` — `POST /api/arcana/grimoire` (#203)
+- `miniapp/backend/routes/categories.py` — `?type=grimoire` category list
 - `docs/specs/MEMORY.md` / `docs/CASES/0005-memory-store.md` — domain-knowledge-vs-memory boundary

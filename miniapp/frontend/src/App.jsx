@@ -5314,6 +5314,7 @@ function ArWork({ s, openWork }) {
   if (loading) return <Empty s={s} text="Загружаю..." />;
   if (error) return <ErrorBox s={s} error={error} refetch={refetch} />;
   const works = data?.works || [];
+  const doneWorks = data?.done || [];   // #203: выполненные расклады/ритуалы
 
   const toggleExpand = (id) => setExpanded((e) => ({ ...e, [id]: !e[id] }));
   const toggleSub = async (subId) => {
@@ -5331,7 +5332,7 @@ function ArWork({ s, openWork }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 0 }}>
       <div className="page-title" style={{ marginBottom: 10 }}>Работы</div>
-      {works.length === 0 && (
+      {works.length === 0 && doneWorks.length === 0 && (
         <Empty s={s} emoji="🌙" title="Работ нет" text="Передохни." />
       )}
       {works.map((w) => {
@@ -5408,6 +5409,33 @@ function ArWork({ s, openWork }) {
           </div>
         );
       })}
+
+      {/* #203: выполненные расклады/ритуалы — видны, но приглушены */}
+      {doneWorks.length > 0 && (
+        <>
+          <div style={{ fontSize: fs(11), color: s.tS, margin: "16px 0 6px" }}>
+            ✅ Выполненные
+          </div>
+          {doneWorks.map((w) => (
+            <div
+              key={w.id}
+              className="task glass"
+              style={{ flexDirection: "column", alignItems: "stretch", opacity: 0.6 }}
+            >
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <div className="body" style={{ flex: 1 }}>
+                  <div className="title" style={{ textDecoration: "line-through" }}>{w.title}</div>
+                  <div className="meta">
+                    <span>✅ выполнено</span>
+                    {w.client?.name && <span> · 👤 {w.client.name}</span>}
+                  </div>
+                </div>
+                {w.category && <div className="cat-badge">{String(w.category).split(" ")[0]}</div>}
+              </div>
+            </div>
+          ))}
+        </>
+      )}
     </div>
   );
 }
@@ -5699,6 +5727,19 @@ function SessionPagerOverview({ s, group, onJump, onSummarize, summarizing }) {
             🔮 из работы «{group.triplets[0].fromWork.title}»
           </div>
         )}
+        {/* #204: финансы расклада (Источник · Сумма · долг / бартер) */}
+        {(() => {
+          const t0 = group.triplets[0] || {};
+          if (!(t0.price > 0 || t0.barterWhat)) return null;
+          const debt = t0.debt ?? Math.max(0, (t0.price || 0) - (t0.paid || 0));
+          return (
+            <div style={{ fontSize: fs(12), marginTop: 6, fontWeight: 500, color: debt > 0 ? s.red : s.acc }}>
+              {t0.barterWhat
+                ? `🔄 бартер: ${t0.barterWhat}`
+                : `💳 ${t0.source ? t0.source + " · " : ""}${(t0.price || 0).toLocaleString()} ₽${debt > 0 ? ` · долг ${debt.toLocaleString()} ₽` : " · оплачено"}`}
+            </div>
+          );
+        })()}
       </Glass>
 
       <SessionPhoto
@@ -5957,136 +5998,6 @@ function SessionDetail({ s, id, slug }) {
           }}>{page < totalSlides - 1 ? "Дальше ›" : "—"}</div>
         </div>
       )}
-    </div>
-  );
-}
-
-function _SessionDetailLegacy({ s, id }) {
-  const { data, loading, error, refetch } = useApi(id ? `/api/arcana/sessions/${id}` : null, [id]);
-  if (loading) return <Empty s={s} text="Загружаю..." />;
-  if (error) return <ErrorBox s={s} error={error} refetch={refetch} />;
-  const x = adaptSessionDetail(data);
-  if (!x) return null;
-  const doneGlyph = (x.done || "⏳").split(" ")[0];
-  return (
-    <div>
-      {/* Шапка */}
-      <Glass s={s} style={{ padding: "12px 14px", marginBottom: 12 }}>
-        <div
-          style={{
-            fontFamily: H,
-            fontSize: fs(20),
-            color: s.text,
-            fontWeight: 500,
-            marginBottom: 8,
-          }}
-        >
-          {x.q}
-        </div>
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "auto 1fr auto 1fr",
-            gap: "4px 10px",
-            fontSize: fs(12),
-          }}
-        >
-          <span style={{ color: s.tS }}>👤 Клиент</span>
-          <span style={{ color: s.text, fontWeight: 500 }}>{x.client}</span>
-          <span style={{ color: s.tS }}>📅 Дата</span>
-          <span style={{ color: s.text }}>{x.date}</span>
-          <span style={{ color: s.tS }}>🂠 Тип</span>
-          <span style={{ color: s.text }}>{x.type}</span>
-          {x.deck && (
-            <>
-              <span style={{ color: s.tS }}>🎴 Колода</span>
-              <span style={{ color: s.text }}>{x.deck}</span>
-            </>
-          )}
-          <span style={{ color: s.tS }}>❓ Вопрос</span>
-          <span style={{ color: s.text, fontSize: fs(11) }}>
-            {x.q.length > 18 ? x.q.slice(0, 18) + "…" : x.q}
-          </span>
-          <span style={{ color: s.tS }}>💳 Оплата</span>
-          <span
-            style={{
-              color: x.debt > 0 ? s.red : (x.price > 0 ? s.acc : s.tM),
-              fontWeight: 500,
-            }}
-          >
-            {/* #7: Источник · Сумма · Долг / бартер */}
-            {x.barterWhat
-              ? `🔄 бартер: ${x.barterWhat}`
-              : x.price > 0
-                ? `${x.source ? x.source + " · " : ""}${x.price.toLocaleString()} ₽${x.debt > 0 ? ` · долг ${x.debt.toLocaleString()} ₽` : " · оплачено"}`
-                : "—"}
-          </span>
-          <span style={{ color: s.tS }}>⏳ Проверка</span>
-          <span style={{ color: s.text }}>{doneGlyph} {x.done.split(" ").slice(1).join(" ") || "Не проверено"}</span>
-        </div>
-      </Glass>
-
-      {/* wave6.7: Фото расклада — кликабельный загрузчик */}
-      <SessionPhoto s={s} id={x.id} url={x.photo_url} onUploaded={() => { /* refetch */ }} />
-
-      {/* wave6.7: AI-саммари */}
-      <SessionSummary s={s} id={x.id} interp={x.interp} />
-
-      {/* wave6.4: Карты в раскладе — grid с картинками */}
-      <SectionLabel s={s}>Карты в раскладе</SectionLabel>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
-        {x.cards.map((c, i) => (
-          <TarotCardTile key={i} s={s} card={c} deckId={x.deckId} />
-        ))}
-      </div>
-
-      {/* Дно колоды */}
-      {x.bottomCard && (
-        <Glass s={s} accent={s.acc} style={{ padding: "10px 12px" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <span style={{ fontSize: fs(24), flexShrink: 0 }}>🂠</span>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontSize: fs(10), color: s.tS }}>Дно</div>
-              <div style={{ fontSize: fs(14), color: s.text, fontWeight: 500 }}>
-                {x.bottomCard.en || x.bottomCard.raw || "—"}
-              </div>
-              {x.bottomCard.ru && (
-                <div style={{ fontSize: fs(11), color: s.tM }}>{x.bottomCard.ru}</div>
-              )}
-            </div>
-            {x.bottomCard.file && (
-              <img
-                src={`/decks/${x.deckId}/${x.bottomCard.file}`}
-                alt={x.bottomCard.en}
-                onError={(e) => { e.target.style.display = "none"; }}
-                style={{ width: 40, borderRadius: 4 }}
-              />
-            )}
-          </div>
-        </Glass>
-      )}
-
-      {/* Трактовка */}
-      <SectionLabel s={s}>Трактовка</SectionLabel>
-      <Glass s={s} accent={s.acc} style={{ padding: "12px 14px" }}>
-        <div
-          style={{ fontSize: fs(13), color: s.text, lineHeight: 1.6 }}
-          dangerouslySetInnerHTML={{ __html: sanitizeHtml(x.interp) }}
-        />
-      </Glass>
-
-      <VerifyButtons
-        s={s}
-        id={x.id}
-        path="/api/arcana/sessions"
-        action="verify"
-        onDone={refetch}
-        options={[
-          { label: "✓ Сбылось", status: "✅ Да", c: "#22c55e" },
-          { label: "~ Частично", status: "〰️ Частично", c: "#f59e0b" },
-          { label: "✗ Нет", status: "❌ Нет", c: "#ef4444" },
-        ]}
-      />
     </div>
   );
 }
@@ -6493,6 +6404,8 @@ const NEXUS_ADD = [
 ];
 
 const ARCANA_ADD = [
+  { key: "work", icon: Sparkles, label: "Работа" },
+  { key: "grimoire", icon: BookOpen, label: "В гримуар" },
   { key: "client", icon: Users, label: "Клиент" },
   { key: "expense", icon: Wallet, label: "Финансы" },
   { key: "photo", icon: Camera, label: "Фото расклада" },
@@ -6975,9 +6888,8 @@ const FAB_TITLE = {
   client: "Новый клиент",
   session: "Новый расклад",
   ritual: "Новый ритуал",
-  work: "Работа",
-  // #9: 'grimoire' убран — создания записи гримуара из мини-аппы нет (см. #203),
-  // и в ARCANA_ADD его тоже нет, так что лейбл был мёртвым.
+  work: "Новая работа",
+  grimoire: "В гримуар",  // #203: форма создания записи гримуара
 };
 
 const PRIOS = ["🔴", "🟡", "⚪"];
@@ -7077,6 +6989,8 @@ function QuickForm({ s, kind, onDone, botType = "nexus" }) {
   if (kind === "note" || kind === "memory") return <NoteForm s={s} onSubmit={wrap} busy={busy} />;
   if (kind === "list") return <ListAddForm s={s} onSubmit={wrap} busy={busy} />;
   if (kind === "client") return <ClientForm s={s} onSubmit={wrap} busy={busy} />;
+  if (kind === "work") return <WorkForm s={s} onSubmit={wrap} busy={busy} />;
+  if (kind === "grimoire") return <GrimoireForm s={s} onSubmit={wrap} busy={busy} />;
   if (kind === "photo") return <SessionPhotoUpload s={s} onDone={onDone} />;
   if (kind === "ritual_photo") return <SessionPhotoUpload s={s} onDone={onDone} mode="ritual" />;
 
@@ -7558,6 +7472,153 @@ function NoteForm({ s, onSubmit, busy }) {
           await apiPost("/api/memory", {
             text: text.trim(),
             cat: cat || null,
+          });
+        })}
+      />
+    </div>
+  );
+}
+
+// #203: создание 🔮 Работы из Mini App (структурная форма, без Haiku).
+function WorkForm({ s, onSubmit, busy }) {
+  const [title, setTitle] = useState("");
+  const [cat, setCat] = useState("");
+  const [prio, setPrio] = useState("⚪");
+  const [date, setDate] = useState("");
+  const [time, setTime] = useState("");
+  const [wantsReminder, setWantsReminder] = useState(false);
+  const [remTime, setRemTime] = useState("09:00");
+  const [clientId, setClientId] = useState("");
+  const [cats, setCats] = useState([]);
+  const [clients, setClients] = useState([]);
+
+  useEffect(() => {
+    let off = false;
+    (async () => {
+      try {
+        const r = await apiGet("/api/categories?type=work");
+        if (!off && r?.categories) setCats(r.categories);
+      } catch (_) { /* ignore */ }
+      try {
+        const c = await apiGet("/api/arcana/clients");
+        if (!off && c?.clients) setClients(c.clients.map((x) => ({ id: String(x.id), name: x.name })));
+      } catch (_) { /* ignore */ }
+    })();
+    return () => { off = true; };
+  }, []);
+
+  const valid = title.trim().length > 0;
+  const clientNames = clients.map((c) => c.name);
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+      <Input s={s} value={title} onChange={setTitle} placeholder="Что за работа" />
+      <div style={{ fontSize: fs(11), color: s.tS }}>Категория</div>
+      {cats.length > 0
+        ? <PillSelect s={s} value={cat} onChange={setCat} options={cats} />
+        : <Input s={s} value={cat} onChange={setCat} placeholder="🃏 Расклад" />}
+      <div style={{ fontSize: fs(11), color: s.tS }}>Приоритет</div>
+      <PillSelect s={s} value={prio} onChange={setPrio} options={PRIOS} />
+      {clientNames.length > 0 && (
+        <>
+          <div style={{ fontSize: fs(11), color: s.tS }}>Клиент (опционально)</div>
+          <PillSelect
+            s={s}
+            value={clients.find((c) => c.id === clientId)?.name || ""}
+            onChange={(nm) => {
+              const c = clients.find((x) => x.name === nm);
+              setClientId(c && c.id === clientId ? "" : (c ? c.id : ""));
+            }}
+            options={clientNames}
+          />
+        </>
+      )}
+      <div style={{ fontSize: fs(11), color: s.tS }}>📅 Дедлайн (опционально)</div>
+      <div style={{ display: "flex", gap: 8 }}>
+        <div style={{ flex: 1 }}><Input s={s} value={date} onChange={setDate} placeholder="Дата" type="date" /></div>
+        <div style={{ flex: 1 }}><Input s={s} value={time} onChange={setTime} placeholder="чч:мм" type="time" /></div>
+      </div>
+      <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: fs(12), color: s.text, cursor: "pointer" }}>
+        <input type="checkbox" checked={wantsReminder} onChange={(e) => setWantsReminder(e.target.checked)} />
+        🔔 Напоминание
+      </label>
+      {wantsReminder && (
+        <div style={{ display: "flex", gap: 8 }}>
+          <div style={{ flex: 1 }}><Input s={s} value={date} onChange={setDate} placeholder="Дата" type="date" /></div>
+          <div style={{ flex: 1 }}><Input s={s} value={remTime} onChange={setRemTime} placeholder="чч:мм" type="time" /></div>
+        </div>
+      )}
+      <SubmitBtn
+        s={s}
+        disabled={!valid || busy}
+        label={busy ? "Сохраняю..." : "Создать работу"}
+        onClick={onSubmit(async () => {
+          await apiPost("/api/arcana/works", {
+            title: title.trim(),
+            category: cat || null,
+            prio,
+            date: date || null,
+            deadline_time: date && time ? time : null,
+            reminder_date: wantsReminder ? (date || null) : null,
+            reminder_time: wantsReminder ? (remTime || "09:00") : null,
+            client_id: clientId || null,
+          });
+        })}
+      />
+    </div>
+  );
+}
+
+// #203: создание записи 📖 Гримуара из Mini App.
+function GrimoireForm({ s, onSubmit, busy }) {
+  const [title, setTitle] = useState("");
+  const [cat, setCat] = useState("📝 Заметка");
+  const [themes, setThemes] = useState("");
+  const [text, setText] = useState("");
+  const [source, setSource] = useState("");
+  const [cats, setCats] = useState([]);
+
+  useEffect(() => {
+    let off = false;
+    (async () => {
+      try {
+        const r = await apiGet("/api/categories?type=grimoire");
+        if (!off && r?.categories?.length) { setCats(r.categories); setCat(r.categories[0]); }
+      } catch (_) { /* ignore */ }
+    })();
+    return () => { off = true; };
+  }, []);
+
+  const valid = title.trim().length > 0;
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+      <Input s={s} value={title} onChange={setTitle} placeholder="Название" />
+      <div style={{ fontSize: fs(11), color: s.tS }}>Тип</div>
+      {cats.length > 0 && <PillSelect s={s} value={cat} onChange={setCat} options={cats} />}
+      <textarea
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        placeholder="Текст записи"
+        rows={5}
+        style={{
+          background: s.card, border: `1px solid ${s.brd}`, borderRadius: 10,
+          padding: "10px 12px", color: s.text, fontFamily: B, fontSize: fs(13),
+          outline: "none", width: "100%", resize: "vertical",
+        }}
+      />
+      <Input s={s} value={themes} onChange={setThemes} placeholder="Темы через запятую (🛡️ Защита, 💰 Финансы)" />
+      <Input s={s} value={source} onChange={setSource} placeholder="Источник (опционально)" />
+      <SubmitBtn
+        s={s}
+        disabled={!valid || busy}
+        label={busy ? "Сохраняю..." : "Записать в гримуар"}
+        onClick={onSubmit(async () => {
+          await apiPost("/api/arcana/grimoire", {
+            title: title.trim(),
+            category: cat || "📝 Заметка",
+            themes: themes.trim() || null,
+            text: text.trim(),
+            source: source.trim(),
           });
         })}
       />

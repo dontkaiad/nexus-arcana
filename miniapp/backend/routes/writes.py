@@ -24,6 +24,12 @@ from arcana.repos.pg_rituals_repo import PgRitualsRepo as _PgRitualsRepoClass
 _rituals_pg_repo = _PgRitualsRepoClass()
 from arcana.repos.pg_works_repo import PgWorksRepo as _PgWorksRepoClass
 _works_pg_repo = _PgWorksRepoClass()
+
+from arcana.repos.grimoire_repo import GrimoireRepo as _GrimoireRepoClass
+_grimoire_repo = _GrimoireRepoClass()
+
+# Emoji-приоритет из фронта (PRIOS) → лейбл для PgWorksRepo.create (#203)
+_WORK_PRIO_LABEL = {"🔴": "Срочно", "🟡": "Важно", "⚪": "Можно потом"}
 from core.repos.pg_nexus_lists_repo import (
     PgNexusListsRepo as _PgNexusListsRepoClass,
     PgArcanaInventoryRepo as _PgArcanaInventoryRepoClass,
@@ -915,6 +921,119 @@ async def arcana_work_postpone(
         bot="arcana",
     )
     return {"ok": True, "new_date": new_date.isoformat()}
+
+
+class ArcanaWorkCreateBody(BaseModel):
+    title: str = Field(min_length=1, max_length=300)
+    category: Optional[str] = None
+    prio: str = "⚪"
+    date: Optional[str] = None          # deadline YYYY-MM-DD или YYYY-MM-DDTHH:MM(:SS)
+    deadline_time: Optional[str] = None  # HH:MM (если date без времени)
+    reminder_date: Optional[str] = None  # YYYY-MM-DD
+    reminder_time: Optional[str] = None  # HH:MM
+    client_id: Optional[str] = None
+
+
+@router.post("/arcana/works")
+async def arcana_work_create(
+    body: ArcanaWorkCreateBody,
+    tg_id: int = Depends(current_user_id),
+) -> dict[str, Any]:
+    """#203: создать 🔮 Работу из Mini App (без Haiku — поля из формы).
+    Плановый расклад/ритуал = открытая Работа нужной категории; при
+    последующем сохранении расклада/ритуала core/work_relation её закроет."""
+    user_id = (await get_user_id(tg_id)) or ""
+    _, tz_offset = await today_user_tz(tg_id)
+
+    deadline_dt: Optional[datetime] = None
+    if body.date:
+        raw = body.date
+        if "T" not in raw and body.deadline_time:
+            raw = f"{raw}T{body.deadline_time}"
+        try:
+            if "T" in raw:
+                deadline_dt = datetime.strptime(raw[:16], "%Y-%m-%dT%H:%M")
+            else:
+                deadline_dt = datetime.strptime(raw[:10], "%Y-%m-%d")
+        except ValueError:
+            raise HTTPException(status_code=400, detail="invalid date")
+
+    work_id = await _works_pg_repo.create(
+        title=body.title.strip(),
+        priority=_WORK_PRIO_LABEL.get(body.prio, "Можно потом"),
+        deadline=deadline_dt,
+        category=body.category or None,
+        client_id=body.client_id or None,
+        user_id=user_id,
+    )
+    if not work_id:
+        raise HTTPException(status_code=500, detail="failed to create work")
+
+    # Напоминание: пользовательское, иначе (если есть дедлайн) — дефолт бота.
+    reminder_iso: Optional[str] = None
+    if body.reminder_date or body.reminder_time:
+        rd = body.reminder_date or (deadline_dt.strftime("%Y-%m-%d") if deadline_dt else None)
+        rt = body.reminder_time or "09:00"
+        if rd:
+            reminder_iso = f"{rd}T{rt}"
+    if reminder_iso:
+        try:
+            from arcana.repos.works_tables import works as _t_works
+            from core.db import get_engine as _get_engine
+            import asyncio as _asyncio
+
+            def _set_reminder() -> None:
+                rdt = datetime.strptime(reminder_iso[:16], "%Y-%m-%dT%H:%M")
+                with _get_engine().begin() as conn:
+                    conn.execute(
+                        _t_works.update()
+                        .where(_t_works.c.id == int(work_id))
+                        .values(reminder=rdt)
+                    )
+            await _asyncio.to_thread(_set_reminder)
+            from arcana.bot import arcana_reminder_flow
+            await arcana_reminder_flow.schedule_reminder(
+                chat_id=tg_id,
+                title=body.title.strip(),
+                reminder_dt=reminder_iso,
+                page_id=str(work_id),
+                tz_offset=int(tz_offset),
+            )
+        except Exception as e:  # noqa: BLE001 — restore на старте подхватит
+            logger.warning("arcana work reminder schedule failed: %s", e)
+
+    await notify_user(tg_id, f"⚡ Создала работу: <b>{_esc(body.title.strip())}</b>", bot="arcana")
+    return {"ok": True, "id": work_id, "reminder": reminder_iso}
+
+
+class ArcanaGrimoireCreateBody(BaseModel):
+    title: str = Field(min_length=1, max_length=300)
+    category: str = "📝 Заметка"
+    themes: Optional[str] = None   # запятые
+    text: str = ""
+    source: str = ""
+
+
+@router.post("/arcana/grimoire")
+async def arcana_grimoire_create(
+    body: ArcanaGrimoireCreateBody,
+    tg_id: int = Depends(current_user_id),
+) -> dict[str, Any]:
+    """#203: создать запись 📖 Гримуара из Mini App (структурная форма, без Haiku)."""
+    user_id = (await get_user_id(tg_id)) or ""
+    themes = [t.strip() for t in (body.themes or "").split(",") if t.strip()]
+    entry_id = await _grimoire_repo.add(
+        title=body.title.strip(),
+        category=body.category or "📝 Заметка",
+        themes=themes or None,
+        text=body.text or "",
+        source=body.source or "",
+        user_id=user_id,
+    )
+    if not entry_id:
+        raise HTTPException(status_code=500, detail="failed to create grimoire entry")
+    await notify_user(tg_id, f"✍️ Записала в гримуар: <b>{_esc(body.title.strip())}</b>", bot="arcana")
+    return {"ok": True, "id": entry_id}
 
 
 @router.post("/arcana/rituals/{ritual_id}/result")

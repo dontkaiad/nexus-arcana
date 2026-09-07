@@ -235,7 +235,9 @@ sessions repo. Outcome can be revised via `set_outcome`.
   finance as `price` / `paid` / `debt` (`amount − paid`, 0-floored) /
   `source` (payment_source label) / `barter_what` (#7), plus `from_work`
   (`{id, title}` or `null`, #10 — populated only when `work_title` resolved,
-  i.e. detail paths).
+  i.e. detail paths). The active `SessionPagerOverview` renders this finance
+  line and the `from_work` link (#204 — before that they were only in the
+  dead `_SessionDetailLegacy`, now removed).
 
 ## Model routing (from code)
 

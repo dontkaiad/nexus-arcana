@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import re
 import sqlite3
 import time
 from datetime import date, datetime, timedelta, timezone
@@ -15,6 +16,9 @@ from arcana.repos.pg_sessions_repo import PgSessionsRepo as _PgSessionsRepoClass
 _pg_sessions_repo = _PgSessionsRepoClass()
 from arcana.repos.pg_works_repo import PgWorksRepo as _PgWorksRepoClass
 _pg_works_repo = _PgWorksRepoClass()
+
+# Работа-«практика» (расклад/ритуал) — для «выполнено»-хвоста в /arcana/works
+_RE_PRACTICE_CAT = re.compile(r"(Расклад|Ритуал)", re.IGNORECASE)
 from arcana.repos.pg_rituals_repo import PgRitualsRepo as _PgRitualsRepoClass
 _pg_rituals_repo = _PgRitualsRepoClass()
 from core.repos.pg_nexus_lists_repo import PgArcanaInventoryRepo as _PgArcanaInventoryRepoClass
@@ -827,6 +831,12 @@ async def get_arcana_works(
         works_list = []
     clients_map = await load_clients_map(user_id)
     open_works = [w for w in works_list if w.status not in ("done", "archived")]
+    # Kai: закрытые расклады/ритуалы всё равно видны — «выполнено». Показываем
+    # done-Работы категории 🃏 Расклад / ✨ Ритуал (последние 20), приглушённо.
+    done_practice = [
+        w for w in works_list
+        if w.status == "done" and _RE_PRACTICE_CAT.search(w.category or "")
+    ][:20]
 
     # batch-fetch subtasks from arcana_inventory (works_id = PG work id)
     subtasks_by_work: dict = {}
@@ -872,7 +882,30 @@ async def get_arcana_works(
             "client": {"id": cli_id, "name": cli_name, "type": ctype} if cli_id else None,
             "subtasks": subtasks_by_work.get(w.id, []),
         })
-    return {"works": items, "total": len(items)}
+
+    done_items: list[dict] = []
+    for w in done_practice:
+        cli_info = clients_map.get(w.client_id or "") or {}
+        done_items.append({
+            "id": w.id,
+            "title": w.title or "—",
+            "status": "done",
+            "priority": w.priority,
+            "category": w.category,
+            "deadline": w.deadline_iso,
+            "deadline_label": w.deadline_iso[:16].replace("T", " ") if w.deadline_iso else "",
+            "reminder": None,
+            "reminder_time": None,
+            "is_overdue": False,
+            "client": ({"id": w.client_id, "name": cli_info.get("name", ""),
+                        "type": (cli_info.get("type_full", "").split()[0]
+                                 if cli_info.get("type_full") else "")}
+                       if w.client_id else None),
+            "subtasks": [],
+        })
+
+    return {"works": items, "done": done_items,
+            "total": len(items), "done_total": len(done_items)}
 
 
 @router.get("/arcana/accuracy")

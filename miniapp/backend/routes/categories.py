@@ -31,7 +31,7 @@ async def get_categories(
     tg_id: int = Depends(current_user_id),
     type: str = Query("task", description="task|expense|income|list|memory"),
 ) -> dict[str, Any]:
-    allowed = {"task", "expense", "income", "list", "memory"}
+    allowed = {"task", "expense", "income", "list", "memory", "work", "grimoire"}
     if type not in allowed:
         raise HTTPException(status_code=400, detail=f"type must be one of {sorted(allowed)}")
 
@@ -44,6 +44,14 @@ async def get_categories(
         cats = list(INCOME_CATEGORIES)
     elif type == "list":
         cats = list(LIST_CATEGORIES)
+    elif type == "work":
+        # 🔮 Работы Арканы — метки категорий из бота (arcana/handlers/works.py)
+        from arcana.handlers.works import WORK_CATEGORY_MAP
+        cats = list(WORK_CATEGORY_MAP.values())
+    elif type == "grimoire":
+        # 📖 Гримуар — display-лейблы категорий (arcana/repos/pg_grimoire_repo.py)
+        from arcana.repos.pg_grimoire_repo import _CODE_TO_DISPLAY
+        cats = list(_CODE_TO_DISPLAY.values())
     else:  # memory
         from miniapp.backend.routes.memory import CANONICAL_CATEGORIES
         cats = list(CANONICAL_CATEGORIES)

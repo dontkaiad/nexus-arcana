@@ -1429,3 +1429,73 @@ def test_tarot_resolve_deck_id():
     assert resolve_deck_id("") == "rider-waite"
     # fallback
     assert resolve_deck_id("какая-то неизвестная колода") == "rider-waite"
+
+
+# ── POST /api/arcana/works, /api/arcana/grimoire (#203) ──────────────────────
+
+def test_arcana_work_create_minimal(client):
+    with patch("miniapp.backend.routes.writes._works_pg_repo.create",
+               AsyncMock(return_value="w-77")) as m_create, \
+         patch("miniapp.backend.routes.writes.today_user_tz",
+               AsyncMock(return_value=(_today_date(3), 3))), \
+         patch("miniapp.backend.routes.writes.get_user_id",
+               AsyncMock(return_value=FAKE_USER_ID)):
+        r = client.post("/api/arcana/works", json={
+            "title": "Расклад на Олю", "category": "🃏 Расклад", "prio": "🟡",
+        })
+    assert r.status_code == 200, r.text
+    assert r.json()["id"] == "w-77"
+    kw = m_create.await_args.kwargs
+    assert kw["title"] == "Расклад на Олю"
+    assert kw["category"] == "🃏 Расклад"
+    assert kw["priority"] == "Важно"
+
+
+def test_arcana_work_create_with_reminder(client):
+    with patch("miniapp.backend.routes.writes._works_pg_repo.create",
+               AsyncMock(return_value="w-9")), \
+         patch("miniapp.backend.routes.writes.today_user_tz",
+               AsyncMock(return_value=(_today_date(3), 3))), \
+         patch("miniapp.backend.routes.writes.get_user_id",
+               AsyncMock(return_value=FAKE_USER_ID)), \
+         patch("arcana.repos.works_tables.works"), \
+         patch("core.db.get_engine"), \
+         patch("arcana.bot.arcana_reminder_flow") as flow:
+        flow.schedule_reminder = AsyncMock(return_value=True)
+        r = client.post("/api/arcana/works", json={
+            "title": "Ритуал защиты", "category": "✨ Ритуал",
+            "date": "2026-10-01", "reminder_date": "2026-10-01", "reminder_time": "18:00",
+        })
+    assert r.status_code == 200, r.text
+    assert r.json()["reminder"] == "2026-10-01T18:00"
+
+
+def test_arcana_work_create_rejects_empty_title(client):
+    with patch("miniapp.backend.routes.writes.get_user_id",
+               AsyncMock(return_value=FAKE_USER_ID)):
+        r = client.post("/api/arcana/works", json={"title": ""})
+    assert r.status_code == 422
+
+
+def test_arcana_grimoire_create(client):
+    with patch("miniapp.backend.routes.writes._grimoire_repo.add",
+               AsyncMock(return_value="g-5")) as m_add, \
+         patch("miniapp.backend.routes.writes.get_user_id",
+               AsyncMock(return_value=FAKE_USER_ID)):
+        r = client.post("/api/arcana/grimoire", json={
+            "title": "Заговор на деньги", "category": "📿 Заговор",
+            "themes": "💰 Финансы, 🛡️ Защита", "text": "Слова заговора",
+        })
+    assert r.status_code == 200, r.text
+    assert r.json()["id"] == "g-5"
+    kw = m_add.await_args.kwargs
+    assert kw["title"] == "Заговор на деньги"
+    assert kw["themes"] == ["💰 Финансы", "🛡️ Защита"]
+
+
+def test_categories_work_and_grimoire(client):
+    with patch("miniapp.backend.routes.categories.current_user_id", lambda: FAKE_TG_ID):
+        rw = client.get("/api/categories?type=work").json()
+        rg = client.get("/api/categories?type=grimoire").json()
+    assert "🃏 Расклад" in rw["categories"]
+    assert any("Заговор" in c for c in rg["categories"])

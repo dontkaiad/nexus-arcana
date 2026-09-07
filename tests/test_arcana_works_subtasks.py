@@ -133,6 +133,40 @@ def test_arcana_works_returns_open_only(client):
     assert data["works"][0]["id"] == "w1"
 
 
+def test_arcana_works_done_practice_shown_as_completed(client):
+    """#203: done-Работа категории Расклад/Ритуал видна в data['done']."""
+    from arcana.repos.works_repo import Work
+    all_works = [
+        _pg_work("w1", "Открытая"),
+        Work(id="w9", title="Расклад Оле", priority="Важно", deadline_str="",
+             category_str="", has_client=False, status="done",
+             category="🃏 Расклад", client_id=None, deadline_dt=None,
+             reminder_dt=None, deadline_iso=""),
+        Work(id="w8", title="Позвонить", priority="Важно", deadline_str="",
+             category_str="", has_client=False, status="done",
+             category="🗂️ Прочее", client_id=None, deadline_dt=None,
+             reminder_dt=None, deadline_iso=""),
+    ]
+    mock_repo = MagicMock()
+    mock_repo.list_all = AsyncMock(return_value=all_works)
+    today = date(2026, 5, 3)
+    with patch("miniapp.backend.routes.arcana_today._pg_works_repo", mock_repo), \
+         patch("miniapp.backend.routes.arcana_today._arcana_inv_repo_lists",
+               _mock_inv_repo([])), \
+         patch("miniapp.backend.routes.arcana_today.load_clients_map",
+               AsyncMock(return_value={})), \
+         patch("miniapp.backend.routes.arcana_today.today_user_tz",
+               AsyncMock(return_value=(today, 3))), \
+         patch("miniapp.backend.routes.arcana_today.get_user_id",
+               AsyncMock(return_value=FAKE_NOTION)):
+        r = client.get("/api/arcana/works")
+    assert r.status_code == 200, r.text
+    data = r.json()
+    assert data["total"] == 1
+    assert [w["id"] for w in data["done"]] == ["w9"]
+    assert data["done"][0]["status"] == "done"
+
+
 @pytest.mark.asyncio
 async def test_subtasks_handler_full_uuid_no_scan():
     """Кнопка с PG id → pending ставится с точным task_id, db_query не вызывается."""
