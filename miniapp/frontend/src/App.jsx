@@ -165,6 +165,26 @@ const FONT_MONO = "'JetBrains Mono', 'SF Mono', ui-monospace, Menlo, Monaco, mon
 const FS = 1.2;
 const fs = (n) => Math.round(n * FS);
 
+// #60: единая типо-шкала. JS-зеркало токенов --t-* из newdesign.css —
+// вся типографика Mini App (Nexus + Arcana) тянется отсюда, а не из
+// ad-hoc fontSize/fontFamily по месту. Роли:
+//   T.h1  — заголовок экрана / hero
+//   T.h2  — заголовок карточки / детали сущности
+//   T.sub — под-заголовок внутри карточки (группа полей), сериф без италика
+//   T.h3  — капслок-микроподпись
+//   T.num — серифные числа (суммы, метрики) — НЕ заголовок, размер по месту
+//   T.body / T.caption — текст и вторичные подписи
+// Раскрывается спредом: <div style={{ ...T.h2, color: s.text }}>.
+const T = {
+  h1:  { fontFamily: H, fontStyle: "italic", fontWeight: 500, fontSize: fs(18), lineHeight: 1.15, letterSpacing: "-0.2px" },
+  h2:  { fontFamily: H, fontStyle: "italic", fontWeight: 500, fontSize: fs(15), lineHeight: 1.2, letterSpacing: "-0.1px" },
+  sub: { fontFamily: H, fontStyle: "normal", fontWeight: 500, fontSize: fs(15), lineHeight: 1.2 },
+  h3:  { fontFamily: B, fontWeight: 600, fontSize: fs(11), textTransform: "uppercase", letterSpacing: "0.4px" },
+  num: { fontFamily: H, fontWeight: 500 },
+  body: { fontFamily: B, fontWeight: 400, fontSize: fs(13), lineHeight: 1.5 },
+  caption: { fontFamily: B, fontWeight: 400, fontSize: fs(11), lineHeight: 1.35 },
+};
+
 const plural = (n, one, few, many) => {
   const mod10 = n % 10, mod100 = n % 100;
   if (mod10 === 1 && mod100 !== 11) return one;
@@ -295,7 +315,7 @@ const Empty = ({ s, text, chill, emoji, title }) => {
       <Glass s={s} style={{ padding: "24px 14px", textAlign: "center" }}>
         {emoji && <div style={{ fontSize: fs(36), marginBottom: 6 }}>{emoji}</div>}
         {title && (
-          <div style={{ fontFamily: H, fontSize: fs(18), color: s.text }}>{title}</div>
+          <div style={{ ...T.h2, color: s.text }}>{title}</div>
         )}
         <div style={{ fontSize: fs(13), color: s.tM, marginTop: title ? 4 : 0 }}>{text}</div>
       </Glass>
@@ -1595,7 +1615,7 @@ function NxFinance({ s }) {
         aria-label="Предыдущий месяц"
         style={{ cursor: "pointer", padding: "2px 10px", color: s.tS, fontSize: fs(20), lineHeight: 1 }}
       >‹</span>
-      <span style={{ flex: 1, textAlign: "center", fontFamily: H, fontSize: fs(15), color: s.text, fontWeight: 500 }}>
+      <span style={{ ...T.h2, flex: 1, textAlign: "center", color: s.text }}>
         {formatMonth(finMonth) || finMonth}
       </span>
       {finMonth !== _nowMonthStr() && (
@@ -1621,7 +1641,7 @@ function NxFinance({ s }) {
         aria-label="Предыдущий день"
         style={{ cursor: "pointer", padding: "2px 10px", color: s.tS, fontSize: fs(20), lineHeight: 1 }}
       >‹</span>
-      <span style={{ flex: 1, textAlign: "center", fontFamily: H, fontSize: fs(15), color: s.text, fontWeight: 500 }}>
+      <span style={{ ...T.h2, flex: 1, textAlign: "center", color: s.text }}>
         {formatShortDate(finDay) || finDay}
       </span>
       {finDay !== _nowDayStr() && (
@@ -1717,7 +1737,7 @@ function NxFinance({ s }) {
               {items.length === 0 ? (
                 <div style={{ textAlign: "center", padding: "12px 4px 4px" }}>
                   <div style={{ fontSize: fs(36), marginBottom: 6 }}>💚</div>
-                  <div style={{ fontFamily: H, fontSize: fs(18), color: s.text }}>Пока не тратила</div>
+                  <div style={{ ...T.h2, color: s.text }}>Пока не тратила</div>
                   <div style={{ fontSize: fs(13), color: s.tM, marginTop: 4 }}>{isToday ? "Сегодня без трат — приятно." : "В этот день без трат — приятно."}</div>
                 </div>
               ) : (
@@ -2512,7 +2532,7 @@ function ParentTaskHeader({ s, title, task }) {
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
         <span style={{
           flex: 1, minWidth: 0,
-          fontFamily: H, fontSize: fs(16), color: s.text, fontWeight: 600,
+          ...T.h2, color: s.text,
           wordBreak: "break-word",
         }}>
           {title}
@@ -4116,12 +4136,12 @@ function CashSheet({ s, pnl, onClose, onPaid }) {
         </div>
         <div style={{ fontSize: fs(11), color: s.tS, marginBottom: 14 }}>остаток</div>
 
-        <div style={{ fontFamily: H, fontSize: fs(15), marginBottom: 4 }}>📥 Доход: {(pnl.income_month ?? 0).toLocaleString()}₽</div>
+        <div style={{ ...T.sub, marginBottom: 4 }}>📥 Доход: {(pnl.income_month ?? 0).toLocaleString()}₽</div>
         <div style={{ fontSize: fs(12), color: s.tS, marginBottom: 8, lineHeight: 1.5 }}>
           {inc.sessions?.amount > 0 && <div>Сеансы: {inc.sessions.amount.toLocaleString()}₽ ({inc.sessions.count} шт)</div>}
           {inc.rituals?.amount > 0 && <div>Ритуалы: {inc.rituals.amount.toLocaleString()}₽ ({inc.rituals.count} шт)</div>}
         </div>
-        <div style={{ fontFamily: H, fontSize: fs(15), marginBottom: 4 }}>📤 Расход: {(pnl.expenses_month ?? 0).toLocaleString()}₽</div>
+        <div style={{ ...T.sub, marginBottom: 4 }}>📤 Расход: {(pnl.expenses_month ?? 0).toLocaleString()}₽</div>
         <div style={{ fontSize: fs(12), color: s.tS, marginBottom: 8, lineHeight: 1.5 }}>
           {(pnl.expenses_by_category || []).map((c, i) => (
             <div key={i}>{c.name}: {c.amount.toLocaleString()}₽</div>
@@ -4659,7 +4679,7 @@ function ArSessions({ s, openSession, sessFilterRequest, consumeSessFilter, sess
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "start", gap: 8 }}>
             <div style={{ flex: 1 }}>
               <div style={{ fontSize: fs(10), color: s.acc, marginBottom: 4 }}>📌 в работе</div>
-              <div style={{ fontFamily: H, fontSize: fs(17), fontWeight: 500, lineHeight: 1.2 }}>
+              <div style={{ ...T.h2 }}>
                 {pinned.title}
               </div>
               <div style={{ fontSize: fs(11), opacity: 0.65, marginTop: 4, display: "flex", gap: 6, flexWrap: "wrap" }}>
@@ -4688,7 +4708,7 @@ function ArSessions({ s, openSession, sessFilterRequest, consumeSessFilter, sess
         <div key={x.slug} className="glass tap" style={{ padding: "12px 14px", marginBottom: 6 }} onClick={() => handleOpen(x)}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "start", gap: 8 }}>
             <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontFamily: H, fontSize: fs(15), fontWeight: 500, lineHeight: 1.25 }}>
+              <div style={{ ...T.h2 }}>
                 {x.title || "—"}
               </div>
               <div style={{ fontSize: fs(11), opacity: 0.65, marginTop: 4, display: "flex", gap: 6, flexWrap: "wrap" }}>
@@ -4867,7 +4887,7 @@ function DebtsSheet({ s, data, onClose }) {
 
         {!allEmpty && (
           <>
-            <div style={{ fontFamily: H, fontSize: fs(15), marginTop: 12, marginBottom: 6 }}>💸 Деньги</div>
+            <div style={{ ...T.sub, marginTop: 12, marginBottom: 6 }}>💸 Деньги</div>
             {money.length === 0 && (
               <div style={{ fontSize: fs(12), color: s.tS, marginBottom: 10 }}>Никто не должен ✨</div>
             )}
@@ -4902,7 +4922,7 @@ function DebtsSheet({ s, data, onClose }) {
               );
             })}
 
-            <div style={{ fontFamily: H, fontSize: fs(15), marginTop: 16, marginBottom: 6 }}>🔄 Бартер</div>
+            <div style={{ ...T.sub, marginTop: 16, marginBottom: 6 }}>🔄 Бартер</div>
             {barter.length === 0 && (
               <div style={{ fontSize: fs(12), color: s.tS, marginBottom: 10 }}>Все бартеры закрыты ✨</div>
             )}
@@ -5083,7 +5103,7 @@ function ArRitualsList({ s, openRitual }) {
         >
           <div style={{ display: "flex", justifyContent: "space-between" }}>
             <div>
-              <div style={{ fontSize: fs(14), color: s.text, fontWeight: 500, fontFamily: H }}>
+              <div style={{ ...T.h2, color: s.text }}>
                 {r.name}
               </div>
               <div style={{ fontSize: fs(10), color: s.tM, marginTop: 3 }}>
@@ -5407,7 +5427,7 @@ function InventoryItemSheet({ s, item, onClose, onChanged }) {
       <div className="acc-sheet-overlay" onClick={onClose} />
       <div className="acc-sheet" onClick={(e) => e.stopPropagation()}>
         <div className="acc-grip" />
-        <div style={{ fontFamily: H, fontSize: fs(20), color: s.text, marginBottom: 4 }}>
+        <div style={{ ...T.h1, color: s.text, marginBottom: 4 }}>
           {(item.cat || "📦").split(" ")[0]} {name}
         </div>
         {item.cat && (
@@ -5804,8 +5824,7 @@ function ArGrimoire({ s, openGrimoire }) {
               <span style={{ fontSize: fs(15), flexShrink: 0 }}>{catIcon(g.cat)}</span>
             )}
             <span style={{
-              fontFamily: H, fontSize: fs(16), fontWeight: 500,
-              color: s.text, flex: 1, minWidth: 0,
+              ...T.h2, color: s.text, flex: 1, minWidth: 0,
               overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
             }}>
               {g.name || "—"}
@@ -6018,7 +6037,7 @@ function ArChecklists({ s }) {
               onClick={() => setOpen((o) => ({ ...o, [cl.name]: !isOpen }))}
               style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}
             >
-              <span style={{ flex: 1, fontSize: fs(14), color: s.text, fontWeight: 500, fontFamily: H }}>
+              <span style={{ ...T.h2, flex: 1, color: s.text }}>
                 {cl.name}
               </span>
               <span style={{ fontSize: fs(12), color: s.tS }}>{cl.done}/{cl.total}</span>
@@ -6261,7 +6280,7 @@ function TripletSlide({ s, t, deckId, onVerdict }) {
   return (
     <div>
       <Glass s={s} style={{ padding: "12px 14px", marginBottom: 12 }}>
-        <div style={{ fontFamily: H, fontSize: fs(17), fontWeight: 500, lineHeight: 1.25 }}>
+        <div style={{ ...T.h2 }}>
           {t.q || "—"}
         </div>
         <div style={{ fontSize: fs(11), opacity: 0.65, marginTop: 4, display: "flex", gap: 6, flexWrap: "wrap" }}>
@@ -6330,7 +6349,7 @@ function SessionPagerOverview({ s, group, onJump, onSummarize, summarizing }) {
         <div style={{ fontSize: fs(11), color: s.acc, marginBottom: 4 }}>
           🃏 {group.category || "Сессия"}
         </div>
-        <div style={{ fontFamily: H, fontSize: fs(20), fontWeight: 500, lineHeight: 1.2 }}>
+        <div style={{ ...T.h1 }}>
           {group.title}
         </div>
         <div style={{ fontSize: fs(11), opacity: 0.65, marginTop: 6, display: "flex", gap: 6, flexWrap: "wrap" }}>
@@ -6435,7 +6454,7 @@ function ThemeOverview({ s, group, onOpenEvent, onSummarize, summarizing }) {
         <div style={{ fontSize: fs(11), color: s.acc, marginBottom: 4 }}>
           🧠 Тема
         </div>
-        <div style={{ fontFamily: H, fontSize: fs(20), fontWeight: 500, lineHeight: 1.2 }}>
+        <div style={{ ...T.h1 }}>
           {group.title}
         </div>
         <div style={{ fontSize: fs(11), opacity: 0.65, marginTop: 6, display: "flex", gap: 6, flexWrap: "wrap" }}>
@@ -6677,7 +6696,7 @@ function RitualDetail({ s, id }) {
   return (
     <div>
       <Glass s={s} style={{ padding: "12px 14px", marginBottom: 12 }}>
-        <div style={{ fontFamily: H, fontSize: fs(20), color: s.text, fontWeight: 500, lineHeight: 1.25 }}>
+        <div style={{ ...T.h1, color: s.text }}>
           {r.name}
         </div>
         <div style={{ fontSize: fs(11), opacity: 0.7, marginTop: 6, display: "flex", gap: 6, flexWrap: "wrap" }}>
@@ -6901,7 +6920,7 @@ function ClientDetail({ s, id }) {
           </div>
         )}
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontFamily: H, fontSize: fs(22), fontWeight: 500, display: "flex", alignItems: "center", gap: 6 }}>
+          <div style={{ ...T.h1, display: "flex", alignItems: "center", gap: 6 }}>
             <span>{(c.status || "").split(" ")[0]} {c.name}</span>
             <span
               onClick={() => setEditOpen((v) => !v)}
@@ -7155,7 +7174,7 @@ function TaskSheet({ s, task, onClose, onClosed }) {
         />
         {checklist.length > 0 && (
           <>
-            <div style={{ fontFamily: H, fontSize: fs(15), color: s.text, margin: "16px 0 8px" }}>
+            <div style={{ ...T.sub, color: s.text, margin: "16px 0 8px" }}>
               Чеклист
             </div>
             <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
@@ -7296,7 +7315,7 @@ function TaskSheet({ s, task, onClose, onClosed }) {
         const doneCl = clItems.filter((it) => it.done);
         return (
         <>
-          <div style={{ fontFamily: H, fontSize: fs(15), color: s.text, margin: "16px 0 8px" }}>
+          <div style={{ ...T.sub, color: s.text, margin: "16px 0 8px" }}>
             Чеклист
           </div>
           <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
@@ -7375,7 +7394,7 @@ function WorkSheet({ s, work, onClose }) {
 
   return (
     <div>
-      <div style={{ fontFamily: H, fontSize: fs(18), fontWeight: 500, marginBottom: 4 }}>
+      <div style={{ ...T.h2, marginBottom: 4 }}>
         {work.title}
       </div>
       {deadlineFmt && (
@@ -7457,7 +7476,7 @@ function WorkSheet({ s, work, onClose }) {
       </div>
       {subs.length > 0 && (
         <>
-          <div style={{ fontFamily: H, fontSize: fs(15), color: s.text, margin: "16px 0 8px" }}>
+          <div style={{ ...T.sub, color: s.text, margin: "16px 0 8px" }}>
             Подзадачи
           </div>
           <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
@@ -9316,7 +9335,7 @@ function MoonPhasesSheet({ s, open }) {
             {current.glyph}
           </div>
           <div style={{ flex: 1 }}>
-            <div style={{ fontFamily: H, fontStyle: "italic", fontSize: fs(24), fontWeight: 500 }}>
+            <div style={{ ...T.h1 }}>
               {current.name}
             </div>
             <div style={{ fontSize: fs(14), color: s.text, opacity: 0.85, marginTop: 4 }}>
@@ -9326,7 +9345,7 @@ function MoonPhasesSheet({ s, open }) {
         </div>
       </Glass>
 
-      <div style={{ fontFamily: H, fontStyle: "italic", fontSize: fs(20), fontWeight: 500, marginBottom: 6 }}>Ближайшие фазы</div>
+      <div style={{ ...T.h1, marginBottom: 6 }}>Ближайшие фазы</div>
       {upcoming.map((p, i) => {
         const dt = p.date ? new Date(p.date) : null;
         const today = new Date();
@@ -9336,7 +9355,7 @@ function MoonPhasesSheet({ s, open }) {
             <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
               <div style={{ fontSize: fs(32) }}>{p.glyph}</div>
               <div style={{ flex: 1 }}>
-                <div style={{ fontFamily: H, fontStyle: "italic", fontSize: fs(16), fontWeight: 500, color: s.text }}>{p.name}</div>
+                <div style={{ ...T.h2, color: s.text }}>{p.name}</div>
                 <div style={{ fontSize: fs(12), color: s.text, opacity: 0.75 }}>
                   {formatDate(p.date)}{daysAway !== null && daysAway > 0 ? ` · через ${daysAway} ${daysAway === 1 ? "день" : "дн."}` : ""}
                 </div>
@@ -9373,7 +9392,7 @@ function AdhdSheet({ s, open }) {
           типографикой/чипами вынесен отдельным issue. */}
       {sections.map((sec) => (
         <Glass key={sec.key} s={s} style={{ padding: "12px 14px", marginBottom: 10 }}>
-          <div style={{ fontFamily: H, fontSize: fs(14), color: s.text, marginBottom: 8 }}>
+          <div style={{ ...T.sub, color: s.text, marginBottom: 8 }}>
             {sec.glyph} {sec.title} ({sec.items.length})
           </div>
           {sec.items.map((it, i) => (
@@ -9417,10 +9436,7 @@ function GrimoireDetail({ s, id }) {
           }}>
             {catLabel || "запись"}
           </div>
-          <div style={{
-            fontFamily: H, fontSize: fs(22), fontWeight: 500,
-            color: s.text, lineHeight: 1.2,
-          }}>
+          <div style={{ ...T.h1, color: s.text }}>
             {g.name}
           </div>
           {g.themes.length > 0 && (
