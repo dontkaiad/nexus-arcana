@@ -302,6 +302,7 @@ def _serialize_debt(d: dict, today_d: date) -> dict:
     return {
         "key": d.get("key") or "",
         "name": d.get("name", ""),
+        "kind": "i_owe",  # #123: для close-action на карточке
         "total": total,
         "left": total,  # отдельного "left" пока нет — см. спеку
         "by": d.get("deadline") or None,
@@ -493,9 +494,24 @@ async def _view_goals(tg_id: int) -> dict:
     closed["долги"].sort(key=lambda x: x.get("closed_at") or "", reverse=True)
     closed["цели"].sort(key=lambda x: x.get("closed_at") or "", reverse=True)
 
+    # #123: «мне должны» (kind=they_owe) — актив, в бюджет НЕ входит, отдельный список.
+    incoming: list = []
+    try:
+        from core.repos.pg_debts_repo import _repo as _debt_repo
+        for d in await _debt_repo.list_active(user_id, kind="they_owe"):
+            incoming.append({
+                "name": d.name,
+                "total": int(round(float(d.amount or 0))),
+                "by": (d.deadline or None),
+                "kind": "they_owe",
+            })
+    except Exception as e:
+        logger.warning("incoming debts query failed: %s", e)
+
     return {
         "view": "goals",
         "debts": debts_ser,
+        "debts_incoming": incoming,
         "goals": goals_ser,
         "debts_close_at": all_close,
         "closed_debts": closed["долги"],

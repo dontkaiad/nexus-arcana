@@ -1,6 +1,6 @@
 # BUDGET — data-model contract (бюджет / day limit)
 
-Code conforms to: 5a57b8c (+ this change: _calc_free_remaining formula). (+ #144: user_notion_id → user_id; + #6: debt free-text path via `parse_and_store`; + #136: debt-name morphology match; + #44: goal create/edit/close from the Mini App.) This spec describes the budget data model as of
+Code conforms to: 5a57b8c (+ this change: _calc_free_remaining formula). (+ #144: user_notion_id → user_id; + #6: debt free-text path via `parse_and_store`; + #136: debt-name morphology match; + #44: goal create/edit/close from the Mini App; + #123: debt 4-direction form + close from the Mini App, `they_owe` list.) This spec describes the budget data model as of
 that commit; update it in the same PR that changes the model.
 
 > Contract, not snapshot. Describes the derived model and the guarantees of
@@ -75,13 +75,18 @@ that commit; update it in the same PR that changes the model.
      «эти деньги реально пришли в этом периоде». Учитывается Sonnet
      ТОЛЬКО если плана дохода вообще нет (fallback).
 
-4. **Долги** — отдельно от Памяти, своя таблица (`debts`). Две команды
-   попадают в одно и то же место:
+4. **Долги** — отдельно от Памяти, своя таблица (`debts`), НЕ финансовая
+   транзакция (заёмные деньги не считаются доходом). 4 направления
+   (`direction` в форме Mini App, #123): «заняла» / «вернула долг» (`kind=i_owe`)
+   и «дала в долг» / «мне вернули» (`kind=they_owe`). В бюджет входит только
+   `i_owe` active; «мне должны» — актив, отдельный список. Входные пути:
    - прямая команда — «новый долг Маша 10к до июня», «закрыла долг Х»,
-     «отдала Х 5к»;
+     «отдала Х 5к» (только `i_owe`);
    - или диалог внутри /budget — если в тексте настройки нашлось 2+ долга
      без стратегии, бот спросит «как планируешь отдавать?» (один долг —
-     стратегия считается сама: сумма / месяцы до дедлайна).
+     стратегия считается сама: сумма / месяцы до дедлайна);
+   - Mini App — форма долга с тумблером направления + погашение/закрытие
+     на карточке долга.
    Платёж/стратегия задаётся один раз, дальше используется автоматически.
    В расчёт месяца попадает только ПЕРВЫЙ по дедлайну долг с платежом —
    остальные ждут своей очереди.
@@ -317,15 +322,28 @@ Budget has **no table of its own** — there is no migration, no
      (default `1` if absent).
    Amounts are parsed from the fact text by the regexes in `core/budget.py`
    (`LIMIT_AMOUNT_RE`, `INCOME_RE`, `PERMANENT_RE`, `GOAL_RE`, `ONE_TIME_FACT_RE`).
-2. **`debts`** (see the debts domain, `core/repos/pg_debts_repo.py`) — active
-   debts with `kind='i_owe'`; the fields consumed are `name`, `amount`,
-   `deadline`, `strategy`, `monthly_payment`. Debts come from this table, not
-   from Memory. Two independent input paths write here: `_DEBT_CMD_RE`
-   commands (`core/classifier.py` → `handle_debt_command`, regex-only, no
-   LLM) and the free-text `долг X` phrasing routed through `memory_save` →
-   `core/memory.py:save_memory` → `parse_and_store` (Haiku-parsed; when the
-   fact is a debt, `_parse_debt_from_fact` + a `pg_debts_repo` upsert instead
-   of a Memory row — the shared bot/Mini App core, #6).
+2. **`debts`** (own table, `core/repos/pg_debts_repo.py` /
+   `core/repos/debts_table.py`, migration `q7r8s9t0u1v2`). Columns: `id`,
+   `user_id`, `name`, `kind` (`CHECK kind IN ('i_owe','they_owe')`), `amount`,
+   `deadline`, `strategy`, `monthly_payment`, `is_active`, timestamps. Unique
+   on `(user_id, kind, lower(name))`. **The budget consumes only
+   `kind='i_owe'` active rows** (`name`, `amount`, `deadline`, `strategy`,
+   `monthly_payment`); `they_owe` is an asset and never touches the budget.
+   Debt movements live entirely here — **they never become finance
+   transactions**, so borrowed money is not counted as income in P&L.
+
+   Write paths:
+   - Bot commands (`_DEBT_CMD_RE` → `handle_debt_command`, regex-only): new /
+     close / partial payment, all `kind='i_owe'`.
+   - Free-text `долг X` → `save_memory` → `parse_and_store` (`долг_` key →
+     `_parse_debt_from_fact` + `pg_debts_repo` upsert, not a Memory row; #6).
+   - `/budget` Sonnet parse → `_save_debt` on Accept.
+   - Mini App (#123): `POST /api/finance/debt` with `direction` ∈
+     `borrowed` (i_owe, create) / `repaid` (i_owe, `reduce_amount`) /
+     `lent` (they_owe, create) / `received` (they_owe, `reduce_amount`);
+     `POST /api/finance/debt/close` (`{name, kind}` → `deactivate`).
+   Lifecycle: `is_active` true → false; `reduce_amount` returns
+   `(new_amount, closed, overpaid)` and flips `is_active` when it hits 0.
 3. **One-time expenses.** The standalone command `разовый расход X` /
    `разовые: ...` is classified as `one_time_expense` (`core/classifier.py`,
    `_ONE_TIME_EXPENSE_RE`, checked before `memory_save`/`budget`) and
@@ -528,8 +546,12 @@ directly:
   `load_budget_data`, `budget_day_limit_from_plan` for limit/goal views;
   `_serialize_goal` → `{key, name, target, saved:0, monthly, after, fact}`) and
   `miniapp/backend/routes/today.py` (`budget_day_limit_from_plan` for the day
-  limit). Goal writes: `POST /api/finance/goal` (create / edit incl. rename),
-  `POST /api/finance/goal/close` (`{key, achieved}`) — `miniapp/backend/routes/writes.py`, #44.
+  limit; `view=goals` also returns `debts` (i_owe) and `debts_incoming`
+  (they_owe, #123)). Goal writes: `POST /api/finance/goal` (create / edit
+  incl. rename), `POST /api/finance/goal/close` (`{key, achieved}`) — #44.
+  Debt writes: `POST /api/finance/debt` (`{name, amount, deadline, direction}`),
+  `POST /api/finance/debt/close` (`{name, kind}`) — #123. All in
+  `miniapp/backend/routes/writes.py`.
 
 ## Model routing (from code)
 
@@ -614,8 +636,11 @@ expense items → `_ONE_TIME_PARSE_SYSTEM`).
   matching, `classify(user_id=...)`)
 - `core/repos/memory_repo.py` / `core/repos/pg_memory_repo.py` —
   `find_by_category`, `find_by_key_prefixes`, `find_by_exact_key` (budget facts)
-- `core/repos/pg_debts_repo.py` — active `i_owe` debts read by `load_budget_data`;
-  `_find_row_sync` (exact-lower then `strip_case_ending` fallback, #136)
+- `core/repos/debts_table.py` / `alembic/versions/q7r8s9t0u1v2_debts.py` — `debts` table (`kind` check, `is_active`, unique `(user_id, kind, lower(name))`)
+- `core/repos/pg_debts_repo.py` — `upsert` / `reduce_amount` / `deactivate` /
+  `list_active` / `list_closed` (per `kind`); `load_budget_data` reads
+  `list_active(kind="i_owe")`; `_find_row_sync` (exact-lower then
+  `strip_case_ending` fallback, #136)
 - `nexus/handlers/finance.py` — `_save_goal` / `_deactivate_goal` /
   `handle_goal_command` (goal commands), `_save_memory_entry` (shared
   `цель_*` / `лимит_*` upsert), `start_budget_setup`, `handle_budget_setup_text`,
@@ -635,6 +660,7 @@ expense items → `_ONE_TIME_PARSE_SYSTEM`).
   `_bdb`/`_BUDGET_DB` (session store), `_send_payday_review`
 - `nexus/nexus_bot.py` — `/budget` wiring, startup `proactive_budget_review`
 - `miniapp/backend/routes/finance.py` — limits/goals views (`_serialize_goal`), day limit
-- `miniapp/backend/routes/writes.py` — `POST /api/finance/goal`, `/api/finance/goal/close` (#44); `POST /api/finance/debt`, `/api/finance/cushion/target`
+- `miniapp/backend/routes/writes.py` — `POST /api/finance/goal`, `/api/finance/goal/close` (#44); `POST /api/finance/debt` (4 directions), `/api/finance/debt/close` (#123); `/api/finance/cushion/target`
+- `miniapp/backend/routes/finance.py` — `_view_goals` (`debts` / `debts_incoming` / `goals` / closed), `_serialize_debt` / `_serialize_goal`
 - `miniapp/backend/routes/today.py` — `budget_day_limit_from_plan` (day limit)
 - `docs/specs/MEMORY.md` — budget facts live in the `memories` table

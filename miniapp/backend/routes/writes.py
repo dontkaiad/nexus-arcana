@@ -486,10 +486,32 @@ async def finance_create(
     return await idempotent(tg_id, idempotency_key, _run)
 
 
+# #123: 4 направления долгового движения → (kind в таблице debts, операция).
+#   borrowed «заняла»      → i_owe,    создать обязательство
+#   repaid   «вернула долг» → i_owe,    уменьшить/закрыть
+#   lent     «дала в долг»  → they_owe, создать актив
+#   received «мне вернули»  → they_owe, уменьшить/закрыть
+# Все 4 живут в таблице `debts`, НЕ в финансовых транзакциях — в P&L и
+# бюджет заёмные деньги не попадают (только i_owe active влияет на бюджет,
+# core/budget.py:load_budget_data(kind="i_owe")).
+_DEBT_DIRECTIONS = {
+    "borrowed": ("i_owe", "create"),
+    "repaid":   ("i_owe", "reduce"),
+    "lent":     ("they_owe", "create"),
+    "received": ("they_owe", "reduce"),
+}
+
+
 class DebtBody(BaseModel):
-    name: str = Field(min_length=1)
+    name: str = Field(min_length=1, max_length=200)
     amount: float = Field(gt=0)
     deadline: str = ""
+    direction: str = "borrowed"
+
+
+class DebtCloseBody(BaseModel):
+    name: str = Field(min_length=1, max_length=200)
+    kind: str = "i_owe"
 
 
 @router.post("/finance/debt")
@@ -497,16 +519,77 @@ async def finance_debt_create(
     body: DebtBody,
     tg_id: int = Depends(current_user_id),
 ) -> dict[str, Any]:
-    """Новый долг → запись в Памяти с категорией 📋 Долги (как в боте)."""
-    from nexus.handlers.finance import _save_debt
+    """Долговое движение из Mini App (#123). `direction` ∈ borrowed / repaid /
+    lent / received. create → upsert в `debts`; reduce → частичное/полное
+    погашение (404 если такого долга нет)."""
+    from core.repos.pg_debts_repo import _repo as _debt_repo
+
+    if body.direction not in _DEBT_DIRECTIONS:
+        raise HTTPException(status_code=400, detail="bad direction")
+    kind, op = _DEBT_DIRECTIONS[body.direction]
     user_id = (await get_user_id(tg_id)) or ""
     name = body.name.strip()
+    amount = int(round(body.amount))
+
     try:
-        await _save_debt(name, int(body.amount), body.deadline.strip(), user_id)
+        if op == "create":
+            await _debt_repo.upsert(
+                user_id, name, kind,
+                amount=float(amount), deadline=body.deadline.strip() or None,
+            )
+            result: dict[str, Any] = {"ok": True, "direction": body.direction, "kind": kind}
+        else:
+            res = await _debt_repo.reduce_amount(user_id, kind, name, float(amount))
+            if res is None:
+                raise HTTPException(status_code=404, detail="no such debt")
+            new_amount, closed, overpaid = res
+            result = {
+                "ok": True, "direction": body.direction, "kind": kind,
+                "closed": bool(closed),
+                "remaining": int(round(max(0.0, new_amount))),
+                "overpaid": int(round(overpaid)),
+            }
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error("finance_debt_create failed: %s", e)
         raise HTTPException(status_code=500, detail="failed to save debt")
-    return {"ok": True, "name": name, "amount": int(body.amount)}
+
+    a = f"{amount:,}".replace(",", " ")
+    _MSG = {
+        "borrowed": f"📋 Записала долг: <b>{_esc(name)} — {a}₽</b>",
+        "lent":     f"🫴 Записала: <b>{_esc(name)}</b> должен(а) <b>{a}₽</b>",
+        "repaid":   (f"🎉 Долг <b>{_esc(name)}</b> закрыт!" if result.get("closed")
+                     else f"💰 Внесла {a}₽ за долг <b>{_esc(name)}</b>"),
+        "received": (f"🎉 <b>{_esc(name)}</b> вернул(а) всё!" if result.get("closed")
+                     else f"💰 <b>{_esc(name)}</b> вернул(а) {a}₽"),
+    }[body.direction]
+    await notify_user(tg_id, _MSG, bot="nexus")
+    return result
+
+
+@router.post("/finance/debt/close")
+async def finance_debt_close(
+    body: DebtCloseBody,
+    tg_id: int = Depends(current_user_id),
+) -> dict[str, Any]:
+    """Закрыть долг целиком (#123): `is_active=False`. `kind` ∈ i_owe / they_owe."""
+    from core.repos.pg_debts_repo import _repo as _debt_repo
+
+    if body.kind not in ("i_owe", "they_owe"):
+        raise HTTPException(status_code=400, detail="bad kind")
+    user_id = (await get_user_id(tg_id)) or ""
+    name = body.name.strip()
+    try:
+        found = await _debt_repo.deactivate(user_id, body.kind, name)
+    except Exception as e:
+        logger.error("finance_debt_close failed: %s", e)
+        raise HTTPException(status_code=500, detail="failed to close debt")
+    if not found:
+        raise HTTPException(status_code=404, detail="debt not found")
+    verb = "Долг" if body.kind == "i_owe" else "Долг передо мной"
+    await notify_user(tg_id, f"🎉 {verb} <b>{_esc(name)}</b> закрыт!", bot="nexus")
+    return {"ok": True, "name": name, "kind": body.kind}
 
 
 def _goal_key(name: str) -> str:

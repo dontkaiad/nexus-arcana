@@ -356,10 +356,11 @@ export function adaptFinanceLimits(data) {
 }
 
 export function adaptFinanceGoals(data) {
-  if (!data) return { debts: [], goals: [], closedDebts: [], closedGoals: [] }
+  if (!data) return { debts: [], debtsIncoming: [], goals: [], closedDebts: [], closedGoals: [] }
   return {
     debts: (data.debts || []).map((d) => ({
       n: d.name,
+      kind: d.kind || 'i_owe',
       total: d.total ?? 0,
       left: d.left ?? d.total ?? 0,
       by: d.by || '—',
@@ -368,6 +369,13 @@ export function adaptFinanceGoals(data) {
       schedule: d.schedule || [],
       ends: d.ends || null,
       takenAt: d.taken_at || null,
+    })),
+    // #123: «мне должны» (kind=they_owe) — актив, не влияет на бюджет
+    debtsIncoming: (data.debts_incoming || []).map((d) => ({
+      n: d.name,
+      kind: 'they_owe',
+      total: d.total ?? 0,
+      by: d.by || '—',
     })),
     goals: (data.goals || []).map((g) => ({
       key: g.key || '',

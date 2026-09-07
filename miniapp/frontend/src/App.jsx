@@ -1839,7 +1839,7 @@ function NxFinance({ s }) {
       })()}
 
       {tab === "goals" && (() => {
-        const { debts, goals, closedDebts, closedGoals } = adaptFinanceGoals(data);
+        const { debts, debtsIncoming, goals, closedDebts, closedGoals } = adaptFinanceGoals(data);
         const fmtClosed = (iso) => {
           if (!iso) return "";
           const [y, m, d] = iso.split("-");
@@ -1873,6 +1873,31 @@ function NxFinance({ s }) {
                 )}
               </Glass>
             ))}
+
+            {/* #123: kind=they_owe — актив, не влияет на бюджет */}
+            {debtsIncoming.length > 0 && (
+              <>
+                <SectionLabel s={s}>Мне должны</SectionLabel>
+                {debtsIncoming.map((d, i) => (
+                  <Glass
+                    key={`in${i}`} s={s}
+                    style={{ padding: "10px 14px", marginBottom: 4, cursor: "pointer" }}
+                    onClick={() => setDrillDebt(d)}
+                  >
+                    <div style={{ display: "flex", justifyContent: "space-between" }}>
+                      <span style={{ fontSize: fs(16), color: s.text, fontWeight: 500 }}>{d.n}</span>
+                      <span style={{ fontSize: fs(16), color: s.acc, fontWeight: 500, fontFamily: H }}>
+                        {d.total.toLocaleString()} ₽
+                      </span>
+                    </div>
+                    <div style={{ fontSize: fs(13), color: s.tS, marginTop: 3 }}>
+                      {d.by && d.by !== "—" ? `до ${d.by}` : "без срока"}
+                    </div>
+                  </Glass>
+                ))}
+              </>
+            )}
+
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
               <SectionLabel s={s}>Цели</SectionLabel>
               <Pill s={s} onClick={() => setDrillGoal({})}>+ цель</Pill>
@@ -1940,14 +1965,20 @@ function NxFinance({ s }) {
         {drillCat && <CategoryDrillSheet s={s} cat={drillCat.full} month={drillCat.month} />}
       </Sheet>
 
-      {/* wave8.51: drill-down sheet для долгов — график выплат + заметка */}
+      {/* wave8.51: drill-down sheet для долгов — график + заметка + погашение (#123) */}
       <Sheet
         s={s}
         open={!!drillDebt}
         onClose={() => setDrillDebt(null)}
         title={drillDebt ? drillDebt.n : ""}
       >
-        {drillDebt && <DebtDrillSheet s={s} debt={drillDebt} />}
+        {drillDebt && (
+          <DebtDrillSheet
+            s={s}
+            debt={drillDebt}
+            onDone={() => { setDrillDebt(null); refetch(); }}
+          />
+        )}
       </Sheet>
 
       {/* #44: детали цели + правка (name / target / взнос) + закрыть */}
@@ -2074,15 +2105,47 @@ function GoalDrillSheet({ s, goal, onDone }) {
   );
 }
 
-function DebtDrillSheet({ s, debt }) {
+function DebtDrillSheet({ s, debt, onDone }) {
   const sched = debt.schedule || [];
+  const incoming = debt.kind === "they_owe";  // #123: «мне должны»
+  const [pay, setPay] = useState("");
+  const [busy, setBusy] = useState(null);
+  const [err, setErr] = useState("");
+
+  const payNum = parseInt((pay || "").replace(/\s/g, ""), 10) || 0;
+
+  const submitPayment = async () => {
+    if (payNum <= 0 || busy) return;
+    setBusy("pay"); setErr("");
+    try {
+      await apiPost("/api/finance/debt", {
+        name: debt.n, amount: payNum,
+        direction: incoming ? "received" : "repaid",
+      });
+      onDone && onDone();
+    } catch (e) { setErr(e.message || "не получилось"); }
+    finally { setBusy(null); }
+  };
+
+  const closeFully = async () => {
+    if (busy) return;
+    setBusy("close"); setErr("");
+    try {
+      await apiPost("/api/finance/debt/close", {
+        name: debt.n, kind: debt.kind || "i_owe",
+      });
+      onDone && onDone();
+    } catch (e) { setErr(e.message || "не получилось"); }
+    finally { setBusy(null); }
+  };
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-      <Glass s={s} accent={s.amber} style={{ padding: "12px 14px" }}>
+      <Glass s={s} accent={incoming ? s.acc : s.amber} style={{ padding: "12px 14px" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
-          <span style={{ fontSize: fs(13), color: s.acc }}>Сумма долга</span>
-          <span style={{ fontSize: fs(18), color: s.red, fontWeight: 600, fontFamily: H }}>
-            {debt.total.toLocaleString()} ₽
+          <span style={{ fontSize: fs(13), color: s.acc }}>{incoming ? "Мне должны" : "Сумма долга"}</span>
+          <span style={{ fontSize: fs(18), color: incoming ? s.acc : s.red, fontWeight: 600, fontFamily: H }}>
+            {(debt.total || 0).toLocaleString()} ₽
           </span>
         </div>
         {debt.takenAt && (
@@ -2131,6 +2194,32 @@ function DebtDrillSheet({ s, debt }) {
           </Glass>
         </>
       )}
+
+      {/* #123: погашение — частичное или целиком */}
+      <SectionLabel s={s}>{incoming ? "Мне вернули" : "Погашение"}</SectionLabel>
+      {err && <div style={{ fontSize: fs(12), color: s.red }}>{err}</div>}
+      <div style={{ display: "flex", gap: 8 }}>
+        <div style={{ flex: 1 }}>
+          <Input s={s} value={pay} onChange={setPay} placeholder="Сумма платежа, ₽" type="number" inputMode="numeric" />
+        </div>
+        <div
+          onClick={() => !busy && payNum > 0 && submitPayment()}
+          style={{
+            padding: "10px 16px", borderRadius: 10, fontSize: fs(13), fontWeight: 500,
+            background: `${s.acc}1f`, border: `1px solid ${s.acc}55`, color: s.acc,
+            cursor: (busy || payNum <= 0) ? "not-allowed" : "pointer", opacity: payNum > 0 ? 1 : 0.5,
+            display: "flex", alignItems: "center",
+          }}
+        >{busy === "pay" ? "…" : "Внести"}</div>
+      </div>
+      <div
+        onClick={() => !busy && closeFully()}
+        style={{
+          textAlign: "center", padding: "10px", borderRadius: 10, fontSize: fs(13), fontWeight: 500,
+          background: `${s.red}1f`, border: `1px solid ${s.red}55`, color: s.red,
+          cursor: busy ? "not-allowed" : "pointer",
+        }}
+      >{busy === "close" ? "…" : (incoming ? "Закрыть (вернули всё)" : "Закрыть долг")}</div>
     </div>
   );
 }
@@ -7149,6 +7238,7 @@ function ExpenseForm({ s, onSubmit, busy, botType = "nexus" }) {
   // debt-only
   const [debtName, setDebtName] = useState("");
   const [debtDeadline, setDebtDeadline] = useState("");
+  const [debtDir, setDebtDir] = useState("borrowed");  // #123: направление
   const [expenseCats, setExpenseCats] = useState([]);
   const [incomeCats, setIncomeCats] = useState([]);
 
@@ -7215,7 +7305,7 @@ function ExpenseForm({ s, onSubmit, busy, botType = "nexus" }) {
     : type === "expense"
       ? "Сохранить расход"
       : type === "debt"
-        ? "Записать долг"
+        ? ((debtDir === "repaid" || debtDir === "received") ? "Записать платёж" : "Записать долг")
         : "Сохранить доход";
 
   const comingSoon = () => alert("Coming soon 🌱");
@@ -7232,23 +7322,46 @@ function ExpenseForm({ s, onSubmit, busy, botType = "nexus" }) {
       </div>
 
       {type === "debt" ? (
-        <>
-          <Input s={s} value={debtName} onChange={setDebtName} placeholder="Кому должна (имя)" />
-          <Input s={s} value={amount} onChange={setAmount} placeholder="Сумма долга, ₽" type="number" step="1" />
-          <Input s={s} value={debtDeadline} onChange={setDebtDeadline} placeholder="Дедлайн (например «до июня»)" />
-          <SubmitBtn
-            s={s}
-            disabled={!valid || busy}
-            label={submitLabel}
-            onClick={onSubmit(async () => {
-              await apiPost("/api/finance/debt", {
-                name: debtName.trim(),
-                amount: total,
-                deadline: debtDeadline.trim(),
-              });
-            })}
-          />
-        </>
+        (() => {
+          const DIRS = [
+            { k: "borrowed", label: "Заняла", who: "У кого заняла (имя)", dl: true },
+            { k: "repaid", label: "Вернула долг", who: "Кому вернула (имя)", dl: false },
+            { k: "lent", label: "Дала в долг", who: "Кому дала (имя)", dl: true },
+            { k: "received", label: "Мне вернули", who: "Кто вернул (имя)", dl: false },
+          ];
+          const cur = DIRS.find((d) => d.k === debtDir) || DIRS[0];
+          return (
+            <>
+              <div style={{ fontSize: fs(11), color: s.tS }}>Направление</div>
+              <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                {DIRS.map((d) => (
+                  <Pill key={d.k} s={s} active={debtDir === d.k} onClick={() => setDebtDir(d.k)}>
+                    {d.label}
+                  </Pill>
+                ))}
+              </div>
+              <Input s={s} value={debtName} onChange={setDebtName} placeholder={cur.who} />
+              <Input s={s} value={amount} onChange={setAmount}
+                     placeholder={cur.dl ? "Сумма долга, ₽" : "Сумма платежа, ₽"} type="number" step="1" />
+              {cur.dl && (
+                <Input s={s} value={debtDeadline} onChange={setDebtDeadline} placeholder="Дедлайн (например «до июня»)" />
+              )}
+              <SubmitBtn
+                s={s}
+                disabled={!valid || busy}
+                label={submitLabel}
+                onClick={onSubmit(async () => {
+                  await apiPost("/api/finance/debt", {
+                    name: debtName.trim(),
+                    amount: total,
+                    deadline: cur.dl ? debtDeadline.trim() : "",
+                    direction: debtDir,
+                  });
+                })}
+              />
+            </>
+          );
+        })()
       ) : (
         <>
           <div style={{ position: "relative" }}>

@@ -855,3 +855,98 @@ def test_finance_view_goals_serializes_fact(client):
         r = client.get("/api/finance?view=goals")
     assert r.status_code == 200
     assert r.json()["goals"][0]["fact"] == "цель: X — 100000₽ · откладываю 8000₽/мес"
+
+
+# ── POST /api/finance/debt — 4 directions + close (#123) ─────────────────────
+
+def test_debt_borrowed_creates_i_owe(client):
+    with patch("core.repos.pg_debts_repo._repo.upsert", AsyncMock()) as m_up, \
+         patch("miniapp.backend.routes.writes.notify_user", AsyncMock()), \
+         patch("miniapp.backend.routes.writes.get_user_id", AsyncMock(return_value="u")):
+        r = client.post("/api/finance/debt", json={"name": "Аня", "amount": 5000, "deadline": "до июня"})
+    assert r.status_code == 200, r.text
+    assert r.json() == {"ok": True, "direction": "borrowed", "kind": "i_owe"}
+    args, kw = m_up.await_args
+    assert args[1] == "Аня" and args[2] == "i_owe"
+    assert kw["amount"] == 5000.0 and kw["deadline"] == "до июня"
+
+
+def test_debt_lent_creates_they_owe(client):
+    with patch("core.repos.pg_debts_repo._repo.upsert", AsyncMock()) as m_up, \
+         patch("miniapp.backend.routes.writes.notify_user", AsyncMock()), \
+         patch("miniapp.backend.routes.writes.get_user_id", AsyncMock(return_value="u")):
+        r = client.post("/api/finance/debt", json={"name": "Петя", "amount": 3000, "direction": "lent"})
+    assert r.status_code == 200, r.text
+    assert r.json()["kind"] == "they_owe"
+    assert m_up.await_args.args[2] == "they_owe"
+
+
+def test_debt_repaid_reduces_and_reports_remaining(client):
+    with patch("core.repos.pg_debts_repo._repo.reduce_amount",
+               AsyncMock(return_value=(2000.0, False, 0.0))) as m_red, \
+         patch("miniapp.backend.routes.writes.notify_user", AsyncMock()), \
+         patch("miniapp.backend.routes.writes.get_user_id", AsyncMock(return_value="u")):
+        r = client.post("/api/finance/debt", json={"name": "Аня", "amount": 3000, "direction": "repaid"})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["closed"] is False and body["remaining"] == 2000
+    assert m_red.await_args.args[1:] == ("i_owe", "Аня", 3000.0)
+
+
+def test_debt_repaid_404_when_no_such_debt(client):
+    with patch("core.repos.pg_debts_repo._repo.reduce_amount", AsyncMock(return_value=None)), \
+         patch("miniapp.backend.routes.writes.get_user_id", AsyncMock(return_value="u")):
+        r = client.post("/api/finance/debt", json={"name": "Нет", "amount": 100, "direction": "repaid"})
+    assert r.status_code == 404
+
+
+def test_debt_received_reduces_they_owe(client):
+    with patch("core.repos.pg_debts_repo._repo.reduce_amount",
+               AsyncMock(return_value=(0.0, True, 500.0))) as m_red, \
+         patch("miniapp.backend.routes.writes.notify_user", AsyncMock()), \
+         patch("miniapp.backend.routes.writes.get_user_id", AsyncMock(return_value="u")):
+        r = client.post("/api/finance/debt", json={"name": "Петя", "amount": 3500, "direction": "received"})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["closed"] is True and body["overpaid"] == 500
+    assert m_red.await_args.args[1] == "they_owe"
+
+
+def test_debt_bad_direction_400(client):
+    with patch("miniapp.backend.routes.writes.get_user_id", AsyncMock(return_value="u")):
+        r = client.post("/api/finance/debt", json={"name": "X", "amount": 1, "direction": "nope"})
+    assert r.status_code == 400
+
+
+def test_debt_close_deactivates(client):
+    with patch("core.repos.pg_debts_repo._repo.deactivate", AsyncMock(return_value=True)) as m_de, \
+         patch("miniapp.backend.routes.writes.notify_user", AsyncMock()), \
+         patch("miniapp.backend.routes.writes.get_user_id", AsyncMock(return_value="u")):
+        r = client.post("/api/finance/debt/close", json={"name": "Аня", "kind": "i_owe"})
+    assert r.status_code == 200, r.text
+    m_de.assert_awaited_once_with("u", "i_owe", "Аня")
+
+
+def test_debt_close_404_when_missing(client):
+    with patch("core.repos.pg_debts_repo._repo.deactivate", AsyncMock(return_value=False)), \
+         patch("miniapp.backend.routes.writes.get_user_id", AsyncMock(return_value="u")):
+        r = client.post("/api/finance/debt/close", json={"name": "Нет", "kind": "they_owe"})
+    assert r.status_code == 404
+
+
+def test_finance_view_goals_includes_incoming_debts(client):
+    from core.repos.pg_debts_repo import Debt
+    tz = 3
+    inc = Debt(name="Петя", kind="they_owe", amount=4000, is_active=True)
+    budget = {"доходы": [], "постоянные": [], "лимиты": [], "долги": [], "цели": []}
+    with patch("miniapp.backend.routes.finance.load_budget_data", AsyncMock(return_value=budget)), \
+         patch("miniapp.backend.routes.finance._mem_repo.find_by_category", AsyncMock(return_value=[])), \
+         patch("core.repos.pg_debts_repo._repo.list_closed", AsyncMock(return_value=[])), \
+         patch("core.repos.pg_debts_repo._repo.list_active", AsyncMock(return_value=[inc])), \
+         patch("miniapp.backend.routes.finance._find_debt_taken_dates", AsyncMock(return_value={})), \
+         patch("miniapp.backend.routes.finance.today_user_tz", AsyncMock(return_value=(_today_date(tz), tz))), \
+         patch("miniapp.backend.routes.finance.get_user_id", AsyncMock(return_value="u")):
+        r = client.get("/api/finance?view=goals")
+    assert r.status_code == 200, r.text
+    di = r.json()["debts_incoming"]
+    assert len(di) == 1 and di[0]["name"] == "Петя" and di[0]["total"] == 4000
