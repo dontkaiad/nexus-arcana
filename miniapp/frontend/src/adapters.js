@@ -445,6 +445,10 @@ export function adaptLists(data) {
       stage: x.stage ?? null,
       note: x.note ?? null,
       priority: x.priority ?? null,
+      // #45: сырые значения для sheet-редактирования карточки
+      qty: x.qty ?? null,
+      expires: x.expires ?? null,
+      recurring: !!x.recurring,
     }
     if (type === 'inv') {
       return {

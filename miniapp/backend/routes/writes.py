@@ -1574,6 +1574,83 @@ async def list_delete(
     return {"ok": True}
 
 
+_LIST_PRIO_EMOJI_TO_PG = {"🔴": "срочно", "🟡": "важно", "⚪": "можно_потом", "": ""}
+_BARTER_CAT = "🔄 Бартер"
+
+
+class ListItemPatchBody(BaseModel):
+    # Все поля опциональны — патчим только присланное. #45: карточка списка/
+    # инвентаря открывается и редактируется (магазин, заметка, категория и т.д.).
+    name: Optional[str] = Field(default=None, max_length=300)
+    category: Optional[str] = Field(default=None, max_length=100)  # полный «🍜 Продукты»
+    note: Optional[str] = Field(default=None, max_length=2000)
+    qty: Optional[float] = Field(default=None, ge=0)
+    expires: Optional[str] = None       # "YYYY-MM-DD" | "" (снять)
+    recurring: Optional[bool] = None
+    store: Optional[str] = Field(default=None, max_length=200)   # только nexus_lists
+    price_plan: Optional[float] = Field(default=None, ge=0)      # только nexus_lists; 0 → снять
+    priority: Optional[str] = None      # "🔴"/"🟡"/"⚪"/"" — только nexus_lists
+
+
+@router.patch("/lists/{item_id}")
+async def list_patch(
+    item_id: str,
+    body: ListItemPatchBody,
+    tg_id: int = Depends(current_user_id),
+) -> dict[str, Any]:
+    """Правка позиции списка / инвентаря из Mini App (#45)."""
+    user_id = (await get_user_id(tg_id)) or ""
+    _item, is_arcana = await _get_list_item_pg(item_id, user_id)
+
+    fields: dict[str, Any] = {}
+    if body.name is not None:
+        n = body.name.strip()
+        if not n:
+            raise HTTPException(status_code=400, detail="name cannot be empty")
+        fields["name"] = n
+    if body.category is not None:
+        cat = body.category.strip()
+        if cat == _BARTER_CAT and not is_arcana:
+            raise HTTPException(status_code=400, detail="barter category is arcana-only")
+        fields["category"] = cat
+    if body.note is not None:
+        fields["note"] = body.note.strip()
+    if body.qty is not None:
+        fields["quantity"] = body.qty or None
+    if body.recurring is not None:
+        fields["is_recurring"] = body.recurring
+    if body.expires is not None:
+        e = body.expires.strip()
+        if not e:
+            fields["expires_at"] = None
+        else:
+            try:
+                fields["expires_at"] = datetime.strptime(e[:10], "%Y-%m-%d").date()
+            except ValueError:
+                raise HTTPException(status_code=400, detail="invalid expires date")
+
+    if not is_arcana:
+        if body.store is not None:
+            fields["store"] = body.store.strip()
+        if body.price_plan is not None:
+            fields["price_plan"] = body.price_plan or None
+        if body.priority is not None:
+            fields["priority"] = _LIST_PRIO_EMOJI_TO_PG.get(body.priority.strip(), "")
+
+    if not fields:
+        return {"ok": True, "unchanged": True}
+
+    repo = _arcana_inv_repo if is_arcana else _nexus_lists_repo
+    try:
+        ok = await repo.update(item_id, **fields)
+    except Exception as e:
+        logger.error("list_patch failed: %s", e)
+        raise HTTPException(status_code=500, detail="failed to update item")
+    if not ok:
+        raise HTTPException(status_code=404, detail="not found")
+    return {"ok": True}
+
+
 # ═══════════════════════════════════════════════════════════════
 # NOTES / MEMORY (минимум для FAB)
 # ═══════════════════════════════════════════════════════════════

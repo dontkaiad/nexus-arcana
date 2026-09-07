@@ -1,6 +1,6 @@
 # LISTS — data-model contract (🗒️ Списки)
 
-Code conforms to: b9d3367 (+ this change: #149 — notion_id column dropped). (+ #144: user_notion_id → user_id.) This spec describes the lists data model as of
+Code conforms to: b9d3367 (+ this change: #149 — notion_id column dropped). (+ #144: user_notion_id → user_id; + #45: Mini App `PATCH /api/lists/{id}` — edit a list/inventory item.) This spec describes the lists data model as of
 that commit; update it in the same PR that changes the model.
 
 > Contract, not snapshot. Describes the persistent model, the guarantees of
@@ -153,8 +153,11 @@ than reopened. `archived` hides an item from all default reads.
 - Cross-domain — `core/cash_register.py` (open-barter count),
   `nexus/handlers/finance.py` (purchase → expense), `core/classifier.py`.
 - Mini App — `miniapp/backend/routes/lists.py` (`GET /api/lists`),
-  `arcana_inventory.py`, `arcana_barter.py`, `writes.py`, `categories.py`,
-  `arcana_today.py`.
+  `arcana_inventory.py`, `arcana_barter.py`, `writes.py`
+  (`POST /api/lists`, `…/{id}/done|checkout|delete`, and — since #45 —
+  `PATCH /api/lists/{id}` editing name / category / note / store /
+  price_plan / priority / qty / expires / recurring, table auto-resolved
+  and the barter category kept arcana-only), `categories.py`, `arcana_today.py`.
 
 ## Model routing (from code)
 
@@ -170,7 +173,10 @@ text). No Sonnet, no Opus. Reads/writes/status are pure SQL.
 - `alembic/versions/df56a1b2c3d4_rename_user_notion_id_to_user_id.py` — user_notion_id → user_id (#144)
 - `core/repos/lists_table.py` — SQLAlchemy Core definitions + column comments
 - `core/repos/pg_nexus_lists_repo.py` — `ListItem`/`InventoryItem`, value maps,
-  sync helpers, `PgNexusListsRepo`/`PgArcanaInventoryRepo`, barter guard
+  sync helpers (`_nl_update_sync` / `_ai_update_sync` — generic column
+  update), `PgNexusListsRepo`/`PgArcanaInventoryRepo`, barter guard
+- `miniapp/backend/routes/writes.py` — `list_patch` (`PATCH /api/lists/{id}`, #45),
+  `list_create` / `list_done` / `list_checkout` / `list_delete`
 - `core/repos/lists_repo.py` — seam (`ListsRepo`, `record_purchase`, PG writes)
 - `core/list_manager.py` — add/check/checklist/inventory/recurring/expiry flows
 - `core/lists_parser.py` — Haiku buy-text parser

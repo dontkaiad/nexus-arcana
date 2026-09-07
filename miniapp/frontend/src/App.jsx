@@ -2577,6 +2577,7 @@ function NxLists({ s }) {
   // Выполненные пункты (Покупки/Чеклист) скрыты из основного вида — доступны
   // в свёрнутой секции "Куплено/Выполнено (N)" внизу списка.
   const [showDone, setShowDone] = useState(false);
+  const [editItem, setEditItem] = useState(null);  // #45: карточка → детали/правка
   useEffect(() => { setOverrides({}); setSelectedChecklist(null); setShowDone(false); }, [tab]);
   useEffect(() => { setOverrides({}); }, [q]);
 
@@ -2803,7 +2804,7 @@ function NxLists({ s }) {
           сама несёт бейдж категории. */}
       {!loading && !error && tab === "buy" &&
         groupByCat(items.filter((x) => !x.done)).flatMap(([, g]) => g).map((x) => (
-          <BuyItemRow key={x.id} s={s} item={x} onToggle={toggleDone} />
+          <BuyItemRow key={x.id} s={s} item={x} onToggle={toggleDone} onEdit={setEditItem} />
         ))}
       {!loading && !error && tab === "buy" && (() => {
         const doneItems = items.filter((x) => x.done);
@@ -2812,7 +2813,7 @@ function NxLists({ s }) {
           <DoneSection s={s} label="Куплено" count={doneItems.length}
             open={showDone} onToggle={() => setShowDone(!showDone)}>
             {doneItems.map((x) => (
-              <BuyItemRow key={x.id} s={s} item={x} onToggle={toggleDone} />
+              <BuyItemRow key={x.id} s={s} item={x} onToggle={toggleDone} onEdit={setEditItem} />
             ))}
           </DoneSection>
         );
@@ -2821,7 +2822,7 @@ function NxLists({ s }) {
       {/* ─── Инвентарь ────────────────────────────────────────────── */}
       {!loading && !error && tab === "inv" &&
         groupByCat(items.filter((x) => !x.done)).flatMap(([, g]) => g).map((x) => (
-          <InvItemRow key={x.id} s={s} item={x} />
+          <InvItemRow key={x.id} s={s} item={x} onEdit={setEditItem} />
         ))}
       {!loading && !error && tab === "inv" && (() => {
         const doneItems = items.filter((x) => x.done);
@@ -2830,18 +2831,170 @@ function NxLists({ s }) {
           <DoneSection s={s} label="Использовано" count={doneItems.length}
             open={showDone} onToggle={() => setShowDone(!showDone)}>
             {doneItems.map((x) => (
-              <InvItemRow key={x.id} s={s} item={x} />
+              <InvItemRow key={x.id} s={s} item={x} onEdit={setEditItem} />
             ))}
           </DoneSection>
         );
       })()}
+
+      {/* #45: детали позиции — магазин / заметка / категория / срок и т.д. */}
+      <Sheet
+        s={s}
+        open={!!editItem}
+        onClose={() => setEditItem(null)}
+        title={editItem ? editItem.name : ""}
+      >
+        {editItem && (
+          <ListItemSheet
+            s={s}
+            item={editItem}
+            isInv={tab === "inv"}
+            onDone={() => { setEditItem(null); refetch(); }}
+          />
+        )}
+      </Sheet>
     </div>
   );
 }
 
-function InvItemRow({ s, item: x }) {
+function ListItemSheet({ s, item, isInv, onDone }) {
+  const [name, setName] = useState(item.name || "");
+  const [cat, setCat] = useState(item.catFull || "");
+  const [note, setNote] = useState(item.note || "");
+  const [store, setStore] = useState(item.source || "");
+  const [pricePlan, setPricePlan] = useState(item.pricePlan ? String(Math.round(item.pricePlan)) : "");
+  const [prio, setPrio] = useState((item.priority || "").split(" ")[0] || "—");
+  const [qty, setQty] = useState(item.qty != null ? String(item.qty) : "");
+  const [expires, setExpires] = useState((item.expires || "").slice(0, 10));
+  const [recurring, setRecurring] = useState(!!item.recurring);
+  const [cats, setCats] = useState([]);
+  const [busy, setBusy] = useState(null);
+  const [err, setErr] = useState("");
+
+  useEffect(() => {
+    let off = false;
+    (async () => {
+      try {
+        const r = await apiGet("/api/categories?type=list");
+        if (!off && r?.categories) {
+          const list = r.categories.slice();
+          if (cat && !list.includes(cat)) list.unshift(cat);
+          setCats(list);
+        }
+      } catch (_) { /* ignore */ }
+    })();
+    return () => { off = true; };
+  }, []);  // eslint-disable-line react-hooks/exhaustive-deps
+
+  const save = async () => {
+    if (busy || !name.trim()) return;
+    setBusy("save"); setErr("");
+    const body = {
+      name: name.trim(), category: cat || "", note: note,
+      qty: qty ? parseFloat(qty) : 0,
+      expires: expires || "",
+      recurring,
+    };
+    if (!isInv) {
+      body.store = store;
+      body.price_plan = pricePlan ? parseInt(pricePlan.replace(/\s/g, ""), 10) : 0;
+      body.priority = prio === "—" ? "" : prio;
+    }
+    try {
+      await apiPatch(`/api/lists/${item.id}`, body);
+      onDone();
+    } catch (e) {
+      setErr(e.message || "не получилось");
+    } finally { setBusy(null); }
+  };
+
+  const remove = async () => {
+    if (busy || !confirm("Удалить позицию?")) return;
+    setBusy("del");
+    try {
+      await apiPost(`/api/lists/${item.id}/delete`, {});
+      onDone();
+    } catch (e) { setErr(e.message || "не получилось"); setBusy(null); }
+  };
+
   return (
-    <Glass s={s} style={{ padding: "10px 14px", marginBottom: 4, opacity: x.done ? 0.5 : 1 }}>
+    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+      <div style={{ fontSize: fs(11), color: s.tS }}>Название</div>
+      <Input s={s} value={name} onChange={setName} placeholder="Что" />
+
+      <div style={{ fontSize: fs(11), color: s.tS }}>Категория</div>
+      {cats.length > 0
+        ? <PillSelect s={s} value={cat} onChange={setCat} options={cats} />
+        : <Input s={s} value={cat} onChange={setCat} placeholder="🍜 Продукты" />}
+
+      {!isInv && (
+        <>
+          <div style={{ fontSize: fs(11), color: s.tS }}>🏬 Магазин</div>
+          <Input s={s} value={store} onChange={setStore} placeholder="напр. Пятёрочка" />
+          <div style={{ display: "flex", gap: 8 }}>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: fs(11), color: s.tS, marginBottom: 4 }}>Цена план, ₽</div>
+              <Input s={s} value={pricePlan} onChange={setPricePlan} placeholder="0" type="number" inputMode="numeric" />
+            </div>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: fs(11), color: s.tS, marginBottom: 4 }}>Приоритет</div>
+              <PillSelect s={s} value={prio} onChange={setPrio} options={["—", "⚪", "🟡", "🔴"]} />
+            </div>
+          </div>
+        </>
+      )}
+
+      <div style={{ display: "flex", gap: 8 }}>
+        <div style={{ flex: 1 }}>
+          <div style={{ fontSize: fs(11), color: s.tS, marginBottom: 4 }}>Количество</div>
+          <Input s={s} value={qty} onChange={setQty} placeholder="—" type="number" inputMode="numeric" />
+        </div>
+        <div style={{ flex: 1 }}>
+          <div style={{ fontSize: fs(11), color: s.tS, marginBottom: 4 }}>Срок годности</div>
+          <Input s={s} value={expires} onChange={setExpires} placeholder="дата" type="date" />
+        </div>
+      </div>
+
+      <div style={{ fontSize: fs(11), color: s.tS }}>📝 Заметка</div>
+      <textarea
+        value={note}
+        onChange={(e) => setNote(e.target.value)}
+        rows={3}
+        placeholder="магазин, бренд, детали…"
+        style={{
+          background: s.card, border: `1px solid ${s.brd}`, borderRadius: 10,
+          padding: "10px 12px", color: s.text, fontFamily: B, fontSize: fs(13),
+          outline: "none", width: "100%", resize: "vertical",
+        }}
+      />
+
+      <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: fs(12), color: s.text, cursor: "pointer" }}>
+        <input type="checkbox" checked={recurring} onChange={(e) => setRecurring(e.target.checked)} />
+        🔁 Повторяющаяся
+      </label>
+
+      {err && <div style={{ fontSize: fs(12), color: s.red }}>{err}</div>}
+
+      <SubmitBtn s={s} disabled={!name.trim() || !!busy} label={busy === "save" ? "Сохраняю..." : "Сохранить"} onClick={save} />
+      <div
+        onClick={remove}
+        style={{
+          textAlign: "center", padding: "10px", borderRadius: 10, fontSize: fs(13), fontWeight: 500,
+          background: `${s.red}1f`, border: `1px solid ${s.red}55`, color: s.red,
+          cursor: busy ? "not-allowed" : "pointer",
+        }}
+      >{busy === "del" ? "…" : "Удалить"}</div>
+    </div>
+  );
+}
+
+function InvItemRow({ s, item: x, onEdit }) {
+  return (
+    <Glass
+      s={s}
+      style={{ padding: "10px 14px", marginBottom: 4, opacity: x.done ? 0.5 : 1, cursor: onEdit ? "pointer" : "default" }}
+      onClick={onEdit ? () => onEdit(x) : undefined}
+    >
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
         <span style={{
           flex: 1, fontSize: fs(16), color: s.text, fontWeight: 500,
@@ -2973,18 +3126,20 @@ function TaskChecklistRow({ s, item: it, onToggle }) {
   );
 }
 
-function BuyItemRow({ s, item: x, onToggle }) {
+function BuyItemRow({ s, item: x, onToggle, onEdit }) {
   return (
     <Glass
       s={s}
       style={{
         padding: "10px 14px", marginBottom: 4, opacity: x.done ? 0.5 : 1,
-        cursor: "pointer",
+        cursor: onEdit ? "pointer" : "default",
       }}
-      onClick={() => onToggle(x)}
+      onClick={onEdit ? () => onEdit(x) : undefined}
     >
       <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-        <Chk s={s} done={x.done} />
+        <span onClick={(e) => { e.stopPropagation(); onToggle(x); }} style={{ display: "inline-flex", cursor: "pointer" }}>
+          <Chk s={s} done={x.done} />
+        </span>
         <span style={{
           flex: 1, minWidth: 0,
           fontSize: fs(16), color: s.text, fontWeight: 500,

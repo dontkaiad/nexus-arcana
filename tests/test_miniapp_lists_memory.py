@@ -536,6 +536,76 @@ def test_list_delete_archives(client):
     mock_nx.update_status.assert_awaited_once_with("l-2", "Archived")
 
 
+# ── PATCH /api/lists/{id} (#45) ─────────────────────────────────────────────
+
+def _patch_ctx(nx_item=None, ai_item=None):
+    from contextlib import ExitStack
+    st = ExitStack()
+    mock_nx = st.enter_context(patch("miniapp.backend.routes.writes._nexus_lists_repo"))
+    mock_inv = st.enter_context(patch("miniapp.backend.routes.writes._arcana_inv_repo"))
+    st.enter_context(patch("miniapp.backend.routes.writes.get_user_id", AsyncMock(return_value=FAKE_USER_ID)))
+    mock_nx.get_by_id = AsyncMock(return_value=nx_item)
+    mock_nx.update = AsyncMock(return_value=True)
+    mock_inv.get_by_id = AsyncMock(return_value=ai_item)
+    mock_inv.update = AsyncMock(return_value=True)
+    return st, mock_nx, mock_inv
+
+
+def test_list_patch_purchase_fields(client):
+    from core.repos.pg_nexus_lists_repo import ListItem
+    it = ListItem(id="p1", name="Молоко", list_type="покупки", status="not_started", user_id=FAKE_USER_ID)
+    st, mock_nx, _ = _patch_ctx(nx_item=it)
+    with st:
+        r = client.patch("/api/lists/p1", json={
+            "name": "Молоко 3.2%", "category": "🍜 Продукты", "note": "бородинский рядом",
+            "store": "Пятёрочка", "price_plan": 89, "priority": "🔴", "expires": "2026-10-01",
+        })
+    assert r.status_code == 200, r.text
+    _, kw = mock_nx.update.await_args
+    assert kw["name"] == "Молоко 3.2%" and kw["category"] == "🍜 Продукты"
+    assert kw["store"] == "Пятёрочка" and kw["price_plan"] == 89.0
+    assert kw["priority"] == "срочно"
+    assert str(kw["expires_at"]) == "2026-10-01"
+
+
+def test_list_patch_inventory_ignores_purchase_fields(client):
+    from core.repos.pg_nexus_lists_repo import InventoryItem
+    it = InventoryItem(id="i1", name="Соль", list_type="инвентарь", status="not_started", user_id=FAKE_USER_ID)
+    st, _, mock_inv = _patch_ctx(ai_item=it)
+    with st:
+        r = client.patch("/api/lists/i1", json={"note": "розовая", "qty": 2, "store": "X", "priority": "🔴"})
+    assert r.status_code == 200, r.text
+    _, kw = mock_inv.update.await_args
+    assert kw["note"] == "розовая" and kw["quantity"] == 2.0
+    assert "store" not in kw and "priority" not in kw
+
+
+def test_list_patch_barter_category_rejected_for_purchase(client):
+    from core.repos.pg_nexus_lists_repo import ListItem
+    it = ListItem(id="p2", name="X", list_type="покупки", status="not_started", user_id=FAKE_USER_ID)
+    st, _, _ = _patch_ctx(nx_item=it)
+    with st:
+        r = client.patch("/api/lists/p2", json={"category": "🔄 Бартер"})
+    assert r.status_code == 400
+
+
+def test_list_patch_404_when_missing(client):
+    st, _, _ = _patch_ctx()
+    with st:
+        r = client.patch("/api/lists/nope", json={"note": "x"})
+    assert r.status_code == 404
+
+
+def test_list_patch_empty_body_noop(client):
+    from core.repos.pg_nexus_lists_repo import ListItem
+    it = ListItem(id="p3", name="X", list_type="покупки", status="not_started", user_id=FAKE_USER_ID)
+    st, mock_nx, _ = _patch_ctx(nx_item=it)
+    with st:
+        r = client.patch("/api/lists/p3", json={})
+    assert r.status_code == 200 and r.json().get("unchanged") is True
+    mock_nx.update.assert_not_awaited()
+
+
 # ── GET /api/memory ──────────────────────────────────────────────────────────
 
 def test_memory_excludes_budget_and_adhd_categories(client):
