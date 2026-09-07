@@ -4,6 +4,34 @@
   --f-mono: "JetBrains Mono", "SF Mono", Menlo, monospace;
   --f-script: "Caveat", cursive;
 
+  /* #60 — единая типографическая шкала. День и ночь делят метрики,
+     различается только цвет (уже темизирован .day/.night). 5 ролей:
+       h1  — заголовок экрана / hero
+       h2  — заголовок карточки / секции / чеклиста
+       h3  — под-подпись внутри карточки (группа полей)
+       body    — основной текст
+       caption — метаданные, подписи, вторичное */
+  --t-h1-family: var(--f-display); --t-h1-size: 22px;  --t-h1-weight: 500;
+  --t-h1-lh: 1.15; --t-h1-ls: -0.2px; --t-h1-style: italic;
+
+  --t-h2-family: var(--f-display); --t-h2-size: 17px;  --t-h2-weight: 500;
+  --t-h2-lh: 1.2;  --t-h2-ls: -0.1px; --t-h2-style: italic;
+
+  --t-h3-family: var(--f-body);    --t-h3-size: 12px;  --t-h3-weight: 600;
+  --t-h3-lh: 1.3;  --t-h3-ls: 0.3px; --t-h3-style: normal;
+
+  --t-body-family: var(--f-body);   --t-body-size: 14px; --t-body-weight: 400; --t-body-lh: 1.5;
+  --t-caption-family: var(--f-body); --t-caption-size: 12px; --t-caption-weight: 400; --t-caption-lh: 1.35;
+}
+
+/* Утилиты — единственный источник истины для иерархии текста (#60). */
+.t-h1 { font-family: var(--t-h1-family); font-size: var(--t-h1-size); font-weight: var(--t-h1-weight); line-height: var(--t-h1-lh); letter-spacing: var(--t-h1-ls); font-style: var(--t-h1-style); }
+.t-h2 { font-family: var(--t-h2-family); font-size: var(--t-h2-size); font-weight: var(--t-h2-weight); line-height: var(--t-h2-lh); letter-spacing: var(--t-h2-ls); font-style: var(--t-h2-style); }
+.t-h3 { font-family: var(--t-h3-family); font-size: var(--t-h3-size); font-weight: var(--t-h3-weight); line-height: var(--t-h3-lh); letter-spacing: var(--t-h3-ls); text-transform: uppercase; }
+.t-body    { font-family: var(--t-body-family); font-size: var(--t-body-size); font-weight: var(--t-body-weight); line-height: var(--t-body-lh); }
+.t-caption { font-family: var(--t-caption-family); font-size: var(--t-caption-size); font-weight: var(--t-caption-weight); line-height: var(--t-caption-lh); }
+
+:root {
   --nx-deep: #4a7a78;
   --nx-mid:  #5a8a7a;
   --nx-warm: #8ab4a0;
@@ -127,12 +155,14 @@
 .day .hero-title, .day .section-h, .day .page-title { color: #1a3528; }
 .night .hero-title, .night .section-h, .night .page-title { color: var(--ar-text); }
 
+/* #60: заголовки экранов/карточек/секций тянут метрики из --t-* токенов. */
 .page-title {
-  font-family: var(--f-display);
-  font-style: italic;
-  font-weight: 500;
-  font-size: 22px;
-  letter-spacing: -0.2px;
+  font-family: var(--t-h1-family);
+  font-style: var(--t-h1-style);
+  font-weight: var(--t-h1-weight);
+  font-size: var(--t-h1-size);
+  line-height: var(--t-h1-lh);
+  letter-spacing: var(--t-h1-ls);
 }
 .hero-h {
   display: flex;
@@ -141,12 +171,12 @@
   margin-bottom: 14px;
 }
 .hero-title {
-  font-family: var(--f-display);
-  font-style: italic;
-  font-size: clamp(22px, 7vw, 30px);
-  font-weight: 400;
-  line-height: 1.05;
-  letter-spacing: -0.5px;
+  font-family: var(--t-h1-family);
+  font-style: var(--t-h1-style);
+  font-size: clamp(22px, 6vw, 26px);
+  font-weight: var(--t-h1-weight);
+  line-height: var(--t-h1-lh);
+  letter-spacing: var(--t-h1-ls);
   white-space: nowrap;
 }
 .hero-meta {
@@ -376,11 +406,12 @@
   align-items: baseline;
   padding: 0;
   margin: 22px 4px 10px;
-  font-family: var(--f-display);
-  font-style: italic;
-  font-weight: 400;
-  font-size: clamp(20px, 6vw, 24px);
-  letter-spacing: -0.2px;
+  font-family: var(--t-h2-family);
+  font-style: var(--t-h2-style);
+  font-weight: var(--t-h2-weight);
+  font-size: var(--t-h2-size);
+  line-height: var(--t-h2-lh);
+  letter-spacing: var(--t-h2-ls);
   gap: 10px;
 }
 .section-h > span:first-child { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
@@ -616,10 +647,12 @@
   gap: 8px;
 }
 .card-title {
-  font-family: var(--f-display);
-  font-style: italic;
-  font-size: 19px;
-  line-height: 1;
+  font-family: var(--t-h2-family);
+  font-style: var(--t-h2-style);
+  font-weight: var(--t-h2-weight);
+  font-size: var(--t-h2-size);
+  line-height: var(--t-h2-lh);
+  letter-spacing: var(--t-h2-ls);
 }
 .day .card-title { color: #1a3528; }
 .night .card-title { color: var(--ar-text); }
@@ -925,14 +958,15 @@
 /* Заголовок сущности-чеклиста и его детали (#45: категории в Покупках/
    Инвентаре больше не группируются заголовками — плоский список как в Задачах). */
 .list-group-h {
-  font-family: var(--f-display);
+  font-family: var(--t-h2-family);
   font-style: normal;
-  font-weight: 500;
-  font-size: clamp(17px, 4.8vw, 20px);
-  letter-spacing: -0.1px;
+  font-weight: var(--t-h2-weight);
+  font-size: var(--t-h2-size);
+  line-height: var(--t-h2-lh);
+  letter-spacing: var(--t-h2-ls);
   margin: 14px 4px 8px;
 }
-.list-group-h.lg { font-size: clamp(20px, 5.5vw, 24px); }
+.list-group-h.lg { font-size: var(--t-h1-size); font-style: var(--t-h1-style); }
 .day .list-group-h  { color: #1a3528; }
 .night .list-group-h { color: var(--ar-text); }
 
