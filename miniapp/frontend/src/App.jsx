@@ -3523,7 +3523,7 @@ function CalendarHolidaysSummary({ s, holidayDays, shortDays, workingWeekends, h
   const namedHolidays = (holidaysInfo || []).filter((h) => h.kind !== "short");
   const shortInfo = (holidaysInfo || []).filter((h) => h.kind === "short");
   return (
-    <Glass s={s} style={{ padding: "10px 14px", cursor: namedHolidays.length > 0 ? "pointer" : "default" }}
+    <Glass s={s} style={{ padding: "10px 14px", marginBottom: 0, cursor: namedHolidays.length > 0 ? "pointer" : "default" }}
            onClick={() => namedHolidays.length > 0 && setOpen((v) => !v)}>
       <div style={{ fontSize: fs(12), color: s.tS, lineHeight: 1.5 }}>
         {holidayDays.length > 0 && (
@@ -3601,7 +3601,6 @@ function NxCal({ s }) {
     : adaptCalendar(data);
   const { tasksByDay, overdueByDay, holidayDays, shortDays, workingWeekends, holidaysInfo } = cal;
   const holidaySet = useMemo(() => new Set(holidayDays || []), [holidayDays]);
-  const shortSet = useMemo(() => new Set(shortDays || []), [shortDays]);
   const workingWeekendSet = useMemo(() => new Set(workingWeekends || []), [workingWeekends]);
   const holidayNameByDay = useMemo(() => {
     const m = {};
@@ -3683,16 +3682,13 @@ function NxCal({ s }) {
   };
 
   const calHeader = (
-    <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+    <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
       <span
         onClick={goPrev}
         style={{ cursor: "pointer", padding: "2px 8px", color: s.tS, fontSize: fs(20), lineHeight: 1 }}
         aria-label="Предыдущий месяц"
       >‹</span>
-      <span
-        className="list-group-h"
-        style={{ flex: 1, margin: 0, fontStyle: "italic", textAlign: "center", fontSize: "clamp(18px, 5vw, 22px)" }}
-      >
+      <span style={{ ...T.h2, flex: 1, textAlign: "center" }}>
         {title}
       </span>
       {!todayMonthMatch && (
@@ -3706,6 +3702,12 @@ function NxCal({ s }) {
     </div>
   );
 
+  // #50: единый цветовой словарь ячейки — один сигнал на состояние.
+  //   золото = сегодня · акцент = выбранный день / есть задачи ·
+  //   красный = просрочка · золотая точка = нерабочий день (праздник/перенос).
+  // Будни-выходные (рабочая суббота) и сокращённые дни разъяснены в блоке
+  // «нерабочие дни» под сеткой — в самой сетке их не подсвечиваем.
+  const GOLD = "#b07a2e";
   const renderDayCell = ({ d, inMonth }, di) => {
     const isToday = inMonth && todayMonthMatch && d === todayKey;
     const isPicked = inMonth && d === picked;
@@ -3714,100 +3716,61 @@ function NxCal({ s }) {
     const hasOverdue = inMonth && !!overdueByDay[d];
     const isWeekend = di === 5 || di === 6;
     const isHoliday = inMonth && holidaySet.has(d);
-    const isShort = inMonth && shortSet.has(d);
     const isWorkingWeekend = inMonth && workingWeekendSet.has(d);
-    const dotColor = "#6b8f71";        // sage — задачи
-    const overdueColor = "#9c5440";    // red
-    const todayBorder = "#b07a2e";     // gold
-    const weekendColor = "#6b8f71";    // sage tint для обычного выходного
-    const holidayColor = "#b07a2e";    // gold для праздника/переноса
-    const shortColor = "#c08438";      // оранжевый для сокращённого
+    const isDayOff = (isWeekend || isHoliday) && !isWorkingWeekend;
+
     let numColor = s.text;
-    if (isPicked) numColor = s.acc;
-    else if (isToday) numColor = todayBorder;
-    else if (isHoliday) numColor = holidayColor;
-    else if (isShort) numColor = shortColor;
-    else if (isWorkingWeekend) numColor = s.text;  // рабочая суббота — обычный
-    else if (isWeekend) numColor = weekendColor;
+    if (isToday) numColor = GOLD;
+    else if (isPicked) numColor = s.acc;
+    else if (isDayOff) numColor = s.tM;
+
+    const dots = [];
+    if (isHoliday) dots.push(GOLD);
+    if (count > 0) dots.push(s.acc);
+    if (hasOverdue) dots.push(s.red);
+
     return (
       <div
         key={di}
         onClick={() => inMonth && setPicked(d)}
         style={{
           textAlign: "center",
-          padding: "6px 2px",
-          borderRadius: 8,
-          background: isPicked
-            ? `${s.acc}30`
-            : isToday
-            ? `${todayBorder}20`
-            : "transparent",
-          border: isToday
-            ? `1.5px solid ${todayBorder}`
-            : isPicked
-            ? `1px solid ${s.acc}99`
-            : "1px solid transparent",
+          padding: "5px 2px",
+          borderRadius: 10,
+          background: isToday ? `${GOLD}14` : isPicked ? `${s.acc}1f` : "transparent",
+          border: `1.5px solid ${isToday ? GOLD : isPicked ? s.acc : "transparent"}`,
           cursor: inMonth ? "pointer" : "default",
-          minHeight: 42,
-          position: "relative",
-          opacity: !inMonth ? 0.35 : 1,
+          minHeight: 44,
+          opacity: !inMonth ? 0.4 : 1,
         }}
       >
-        {isHoliday && !isToday && (
-          <span style={{
-            position: "absolute", top: 2, left: "50%", transform: "translateX(-50%)",
-            width: 4, height: 4, borderRadius: 2, background: holidayColor,
-          }} />
-        )}
-        {isWorkingWeekend && !isToday && !isHoliday && (
-          <span style={{
-            position: "absolute", top: 1, right: 3, fontSize: fs(8), color: s.tS,
-          }}>раб.</span>
-        )}
         <div
           style={{
             fontSize: fs(13),
-            fontWeight: isToday || isPicked || isHoliday ? 500 : 400,
+            fontWeight: isToday || isPicked ? 600 : 400,
             color: numColor,
             fontFamily: H,
-            marginTop: isHoliday && !isToday ? 4 : 0,
           }}
         >
           {d}
         </div>
-        {count > 0 && (
-          <div style={{
-            display: "flex", justifyContent: "center", gap: 2,
-            marginTop: 3, alignItems: "center",
-          }}>
-            {Array.from({ length: Math.min(count, 3) }).map((_, i) => (
-              <span key={i} style={{
-                width: 4, height: 4, borderRadius: 2, background: dotColor,
-              }} />
-            ))}
-            {hasOverdue && (
-              <span style={{
-                width: 4, height: 4, borderRadius: 2, background: overdueColor,
-                marginLeft: 1,
-              }} />
-            )}
-          </div>
-        )}
-        {!hasOverdue && count === 0 && inMonth && <div style={{ height: 7 }} />}
+        <div style={{
+          height: 8, marginTop: 3,
+          display: "flex", justifyContent: "center", alignItems: "center", gap: 3,
+        }}>
+          {dots.map((c, i) => (
+            <span key={i} style={{ width: 4, height: 4, borderRadius: 2, background: c }} />
+          ))}
+        </div>
       </div>
     );
   };
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-      <div
-        style={{
-          display: "flex",
-          justifyContent: "flex-end",
-          alignItems: "baseline",
-        }}
-      >
-        <div style={{ display: "flex", gap: 6 }}>
+    <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 10 }}>
+        <div className="page-title">Календарь</div>
+        <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
           <Pill s={s} active={view === "week"} onClick={() => setView("week")}>
             Неделя
           </Pill>
@@ -3818,7 +3781,7 @@ function NxCal({ s }) {
       </div>
       {error && <ErrorBox s={s} error={error} refetch={refetch} />}
       {view === "month" && (
-        <Glass s={s} style={{ padding: "12px 10px" }}>
+        <Glass s={s} style={{ padding: "14px 12px", marginBottom: 0 }}>
           {calHeader}
           <div
             style={{
@@ -3918,10 +3881,7 @@ function NxCal({ s }) {
               <span onClick={goPrevWeek}
                 style={{ cursor: "pointer", padding: "2px 8px", color: s.tS, fontSize: fs(20), lineHeight: 1 }}
                 aria-label="Предыдущая неделя">‹</span>
-              <span className="list-group-h" style={{
-                flex: 1, margin: 0, fontStyle: "italic", textAlign: "center",
-                fontSize: "clamp(18px, 5vw, 22px)",
-              }}>{headerTitle}</span>
+              <span style={{ ...T.h2, flex: 1, textAlign: "center" }}>{headerTitle}</span>
               {!isThisWeek && (<Pill s={s} onClick={goThisWeek}>Сегодня</Pill>)}
               <span onClick={goNextWeek}
                 style={{ cursor: "pointer", padding: "2px 8px", color: s.tS, fontSize: fs(20), lineHeight: 1 }}
@@ -4011,18 +3971,20 @@ function NxCal({ s }) {
         />
       )}
 
-      {/* Подробности выбранного дня — только в Месяце.
-          #52: в табе Неделя блок задач произвольного дня под списком 7 дней не нужен. */}
+      {/* Подробности выбранного дня — только в Месяце. #50: заголовок дня
+          вынесен из карточки в SectionLabel над ней. #52: в табе Неделя
+          блок задач произвольного дня под списком 7 дней не нужен. */}
       {view === "month" && (
-      <Glass s={s} style={{ padding: "12px 14px" }}>
-        <div className="list-group-h lg" style={{ margin: "0 0 8px" }}>
-          {picked} {RU_MONTHS_GEN[month0]}
-          {holidayNameByDay[picked] && (
-            <span style={{ fontStyle: "normal", fontSize: fs(13), fontWeight: 400, color: "#b07a2e", marginLeft: 8 }}>
-              · {holidayNameByDay[picked]}
-            </span>
-          )}
-        </div>
+      <>
+      <SectionLabel
+        s={s}
+        meta={holidayNameByDay[picked]
+          ? <span style={{ color: GOLD }}>{holidayNameByDay[picked]}</span>
+          : undefined}
+      >
+        {picked} {RU_MONTHS_GEN[month0]}
+      </SectionLabel>
+      <Glass s={s} style={{ padding: "6px 14px 10px", marginBottom: 0 }}>
         {loading && <div style={{ fontSize: fs(13), color: s.tS, padding: "6px 0" }}>Загружаю…</div>}
         {!loading && !tasksByDay[picked] && (
           <div style={{ textAlign: "center", padding: "12px 4px 4px" }}>
@@ -4076,6 +4038,7 @@ function NxCal({ s }) {
           </div>
         )}
       </Glass>
+      </>
       )}
     </div>
   );
