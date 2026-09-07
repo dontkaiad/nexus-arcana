@@ -3890,42 +3890,40 @@ function NxCal({ s }) {
             <div>
               {weekDays.map((wd, i) => {
                 const isPicked = wd.isSameMonth && wd.dayNum === picked && !wd.isToday;
-                // #50: сегодня = 2px акцентный кант + чип «СЕГОДНЯ». Золото на
-                // тёплом дневном фоне сливалось (#64 частично), поэтому текст
-                // дня всегда s.text/s.tM, выделение — только кант и чип.
-                let labelColor = s.text;
-                if (wd.isHoliday && !wd.isToday) labelColor = GOLD;
-                else if (wd.isWeekend && !wd.isToday) labelColor = s.tM;
-                // #51 sister-pattern reuse: opacity как у `.task.done`.
-                // Прошлые дни — 0.5, будущие — 1, вне месяца — 0.4.
-                const cardOpacity = !wd.isSameMonth ? 0.4 : wd.isPast ? 0.5 : 1;
+                // #50: полупрозрачное стекло на тёплом дневном градиенте
+                // топило текст. Карточки дней недели — на плотном фоне s.base,
+                // текст всегда s.text. Сегодня выделяется тёплым кантом
+                // (s.amber — основной дневной акцент) + чипом «СЕГОДНЯ»,
+                // выбранный день — тем же кантом послабее.
+                const cardOpacity = !wd.isSameMonth ? 0.45 : wd.isPast ? 0.62 : 1;
                 return (
-                  <Glass
-                    key={i} s={s}
+                  <div
+                    key={i}
+                    onClick={() => { if (wd.isSameMonth) setPicked(wd.dayNum); }}
                     style={{
-                      padding: "14px 16px",
+                      padding: "12px 14px",
                       marginBottom: 8,
                       borderRadius: 14,
                       cursor: wd.isSameMonth ? "pointer" : "default",
                       opacity: cardOpacity,
-                      background: wd.isToday ? `${s.acc}14` : undefined,
+                      background: s.base,
+                      boxShadow: "0 1px 4px rgba(60,80,70,0.10)",
                       border: wd.isToday
-                        ? `2px solid ${s.acc}`
+                        ? `2px solid ${s.amber}`
                         : isPicked
-                        ? `1.5px solid ${s.acc}99`
+                        ? `2px solid ${s.amber}77`
                         : `1px solid ${s.brd}`,
                     }}
-                    onClick={() => { if (wd.isSameMonth) setPicked(wd.dayNum); }}
                   >
                     <div style={{
                       display: "flex", justifyContent: "space-between", alignItems: "center",
-                      fontSize: fs(12), color: labelColor, fontWeight: wd.isToday ? 600 : 500,
+                      fontSize: fs(12), color: s.text, fontWeight: wd.isToday ? 700 : 500,
                     }}>
                       <span style={{ display: "inline-flex", alignItems: "center", gap: 7 }}>
                         {wd.isToday && (
                           <span style={{
                             fontSize: fs(9), fontWeight: 700, color: "#fff",
-                            background: s.acc, padding: "2px 7px", borderRadius: 7,
+                            background: s.amber, padding: "2px 7px", borderRadius: 7,
                             letterSpacing: "0.4px",
                           }}>СЕГОДНЯ</span>
                         )}
@@ -3934,25 +3932,25 @@ function NxCal({ s }) {
                           {wd.isHoliday && <span style={{ marginLeft: 5, color: GOLD }}>✦</span>}
                         </span>
                       </span>
-                      <span style={{ color: s.tS, fontSize: fs(11), fontWeight: 500 }}>
+                      <span style={{ color: s.tM, fontSize: fs(11), fontWeight: 500 }}>
                         {wd.tasks.length > 0 ? `${wd.tasks.length} шт.` : "свободно"}
                       </span>
                     </div>
                     {wd.tasks.length > 0 && (
                       <div style={{ marginTop: 6 }}>
                         {wd.tasks.slice(0, 3).map((t, j) => (
-                          <div key={j} style={{ fontSize: fs(11), color: s.tS, marginTop: 2 }}>
-                            • {t.time ? `${t.time} ` : ''}{t.title}
+                          <div key={j} style={{ fontSize: fs(12), color: s.text, marginTop: 3 }}>
+                            {t.time ? <b style={{ color: s.amber }}>{t.time}</b> : "• "}{t.time ? " " : ""}{t.title}
                           </div>
                         ))}
                         {wd.tasks.length > 3 && (
-                          <div style={{ fontSize: fs(10), color: s.tS, marginTop: 2 }}>
+                          <div style={{ fontSize: fs(11), color: s.tM, marginTop: 3 }}>
                             и ещё {wd.tasks.length - 3}…
                           </div>
                         )}
                       </div>
                     )}
-                  </Glass>
+                  </div>
                 );
               })}
             </div>
