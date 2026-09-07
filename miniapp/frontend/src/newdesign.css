@@ -922,7 +922,8 @@
   100% { transform: translate(10px, var(--dy, -30px)); opacity: 0; }
 }
 
-/* Unified group heading for Lists (Покупки + Чеклист уровень 1) */
+/* Заголовок сущности-чеклиста и его детали (#45: категории в Покупках/
+   Инвентаре больше не группируются заголовками — плоский список как в Задачах). */
 .list-group-h {
   font-family: var(--f-display);
   font-style: normal;

@@ -2798,16 +2798,13 @@ function NxLists({ s }) {
           </div>
         </Glass>
       )}
-      {!loading && !error && tab === "buy" && groupByCat(items.filter((x) => !x.done)).map(([catName, group]) => (
-        <React.Fragment key={catName || "—"}>
-          {catName && (
-            <div className="list-group-h">{catName}</div>
-          )}
-          {group.map((x) => (
-            <BuyItemRow key={x.id} s={s} item={x} onToggle={toggleDone} />
-          ))}
-        </React.Fragment>
-      ))}
+      {/* #45: плоский список, как в Задачах — без serif-заголовков категорий.
+          Порядок сохраняем из groupByCat (вес категории → имя), карточка
+          сама несёт бейдж категории. */}
+      {!loading && !error && tab === "buy" &&
+        groupByCat(items.filter((x) => !x.done)).flatMap(([, g]) => g).map((x) => (
+          <BuyItemRow key={x.id} s={s} item={x} onToggle={toggleDone} />
+        ))}
       {!loading && !error && tab === "buy" && (() => {
         const doneItems = items.filter((x) => x.done);
         if (doneItems.length === 0) return null;
@@ -2822,14 +2819,10 @@ function NxLists({ s }) {
       })()}
 
       {/* ─── Инвентарь ────────────────────────────────────────────── */}
-      {!loading && !error && tab === "inv" && groupByCat(items.filter((x) => !x.done)).map(([catName, group]) => (
-        <React.Fragment key={catName || "—"}>
-          {catName && <SectionLabel s={s}>{catName}</SectionLabel>}
-          {group.map((x) => (
-            <InvItemRow key={x.id} s={s} item={x} />
-          ))}
-        </React.Fragment>
-      ))}
+      {!loading && !error && tab === "inv" &&
+        groupByCat(items.filter((x) => !x.done)).flatMap(([, g]) => g).map((x) => (
+          <InvItemRow key={x.id} s={s} item={x} />
+        ))}
       {!loading && !error && tab === "inv" && (() => {
         const doneItems = items.filter((x) => x.done);
         if (doneItems.length === 0) return null;
@@ -2863,13 +2856,12 @@ function InvItemRow({ s, item: x }) {
           </span>
         )}
         {x.cat && (
-          <span style={{
-            display: "inline-flex", alignItems: "center",
-            padding: "3px 9px", borderRadius: 10,
-            fontSize: fs(13), background: `${s.acc}33`, color: s.text, fontWeight: 500,
-            flexShrink: 0, whiteSpace: "nowrap",
+          <span title={x.cat} style={{
+            flexShrink: 0, width: 28, height: 28, borderRadius: 8,
+            display: "flex", alignItems: "center", justifyContent: "center",
+            fontSize: fs(14), background: `${s.acc}22`,
           }}>
-            {x.cat}
+            {String(x.cat).split(" ")[0]}
           </span>
         )}
       </div>
@@ -3010,13 +3002,12 @@ function BuyItemRow({ s, item: x, onToggle }) {
           }} />
         )}
         {x.cat && (
-          <span style={{
-            display: "inline-flex", alignItems: "center",
-            padding: "3px 9px", borderRadius: 10,
-            fontSize: fs(13), background: `${s.acc}33`, color: s.text, fontWeight: 500,
-            flexShrink: 0, whiteSpace: "nowrap",
+          <span title={x.cat} style={{
+            flexShrink: 0, width: 28, height: 28, borderRadius: 8,
+            display: "flex", alignItems: "center", justifyContent: "center",
+            fontSize: fs(14), background: `${s.acc}22`,
           }}>
-            {x.cat}
+            {String(x.cat).split(" ")[0]}
           </span>
         )}
       </div>
