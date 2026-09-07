@@ -22,6 +22,7 @@ from arcana.repos.sessions_tables import (
 )
 from arcana.repos.clients_tables import clients as t_clients
 from core.db import get_engine
+from core.payment import source_label
 
 logger = logging.getLogger("arcana.pg_sessions")
 
@@ -117,6 +118,7 @@ def _row_to_triplet(row) -> TripletEntry:
         bottom_card=row.bottom_card or "",
         photo_url=row.photo_url or None,
         user_id=getattr(row, "user_id", None) or "",
+        payment_source=source_label(getattr(row, "payment_code", None)),  # #7
     )
 
 
@@ -175,9 +177,11 @@ def _select_sessions():
             session_outcome.c.code.label("outcome_code"),
             session_category.c.emoji.label("category_emoji"),
             session_category.c.label.label("category_label_col"),
+            t_payment_source.c.code.label("payment_code"),   # #7: Источник оплаты
         )
         .outerjoin(session_outcome, sessions.c.outcome_id == session_outcome.c.id)
         .outerjoin(session_category, sessions.c.category_id == session_category.c.id)
+        .outerjoin(t_payment_source, sessions.c.payment_src_id == t_payment_source.c.id)
         .where(sessions.c.archived == False)
         .order_by(sessions.c.occurred_at.desc().nullslast())
     )

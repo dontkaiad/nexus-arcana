@@ -5989,13 +5989,16 @@ function _SessionDetailLegacy({ s, id }) {
           <span style={{ color: s.tS }}>💳 Оплата</span>
           <span
             style={{
-              color: x.price > 0 ? (x.paid >= x.price ? s.acc : s.red) : s.tM,
+              color: x.debt > 0 ? s.red : (x.price > 0 ? s.acc : s.tM),
               fontWeight: 500,
             }}
           >
-            {x.price > 0
-              ? `${x.price.toLocaleString()} ₽ · ${x.paid >= x.price ? "оплачено" : "долг"}`
-              : "—"}
+            {/* #7: Источник · Сумма · Долг / бартер */}
+            {x.barterWhat
+              ? `🔄 бартер: ${x.barterWhat}`
+              : x.price > 0
+                ? `${x.source ? x.source + " · " : ""}${x.price.toLocaleString()} ₽${x.debt > 0 ? ` · долг ${x.debt.toLocaleString()} ₽` : " · оплачено"}`
+                : "—"}
           </span>
           <span style={{ color: s.tS }}>⏳ Проверка</span>
           <span style={{ color: s.text }}>{doneGlyph} {x.done.split(" ").slice(1).join(" ") || "Не проверено"}</span>
@@ -6144,12 +6147,15 @@ function RitualDetail({ s, id }) {
             <span style={{ opacity: 0.7 }}>❓ </span>{r.question}
           </div>
         )}
-        {r.price > 0 && (
+        {(r.price > 0 || r.barterWhat) && (
           <div style={{
             fontSize: fs(12), marginTop: 6, fontWeight: 500,
-            color: r.paid >= r.price ? s.acc : s.red,
+            color: (r.debt ?? (r.price - r.paid)) > 0 ? s.red : s.acc,
           }}>
-            💳 {r.price.toLocaleString()} ₽ · {r.paid >= r.price ? "оплачено" : `долг ${(r.price - r.paid).toLocaleString()} ₽`}
+            {/* #8: Источник · Сумма · Долг / бартер — как в 🃏 Раскладах (#7) */}
+            {r.barterWhat
+              ? `🔄 бартер: ${r.barterWhat}`
+              : `💳 ${r.source ? r.source + " · " : ""}${r.price.toLocaleString()} ₽${(r.debt ?? (r.price - r.paid)) > 0 ? ` · долг ${((r.debt ?? (r.price - r.paid))).toLocaleString()} ₽` : " · оплачено"}`}
           </div>
         )}
       </Glass>

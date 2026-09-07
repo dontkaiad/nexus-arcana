@@ -676,6 +676,9 @@ export function adaptSessionDetail(data) {
     done: data.done || '⏳ Не проверено',
     price: data.price ?? 0,
     paid: data.paid ?? 0,
+    debt: data.debt ?? 0,          // #7
+    source: data.source || null,  // #7: Источник оплаты
+    barterWhat: data.barter_what || null,  // #7
     photo_url: data.photo_url || null,
   }
 }
@@ -757,6 +760,9 @@ export function adaptRituals(data) {
     client: r.client || null,
     price: r.price ?? 0,
     paid: r.paid ?? 0,
+    debt: r.debt ?? 0,
+    source: r.source || null,
+    barterWhat: r.barter_what || null,
   }))
 }
 
@@ -774,6 +780,9 @@ export function adaptRitualDetail(data) {
     question: data.question || '',
     price: data.price ?? 0,
     paid: data.paid ?? 0,
+    debt: data.debt ?? 0,          // #8
+    source: data.source || null,  // #8: Источник оплаты
+    barterWhat: data.barter_what || null,
     supplies: (data.supplies || []).map((x) => ({
       name: x.name || '',
       qty: x.qty || '',

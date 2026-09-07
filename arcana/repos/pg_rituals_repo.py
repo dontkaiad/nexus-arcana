@@ -25,6 +25,7 @@ from arcana.repos.rituals_tables import (
     rituals,
 )
 from core.db import get_engine
+from core.payment import source_label
 
 logger = logging.getLogger("arcana.pg_rituals")
 
@@ -127,12 +128,8 @@ _PAYMENT_TO_CODE = {
     "бартер":      "barter",
 }
 
-# payment_source code → display label (reverse of _PAYMENT_TO_CODE)
-_CODE_TO_PAYMENT = {
-    "card":   "💳 Карта",
-    "cash":   "💵 Наличные",
-    "barter": "🔄 Бартер",
-}
+# payment_source code → display label — общий с 🃏 Раскладами
+# (core.payment.source_label, #7/#8).
 
 # result: "⏳ Не проверено" default; also accept codes directly
 _RESULT_TO_CODE = {
@@ -199,7 +196,7 @@ def _row_to_ritual(row) -> Ritual:
         structure=getattr(row, "structure", None) or "",
         notes=getattr(row, "notes", None) or None,
         photo_url=getattr(row, "photo_url", None) or None,
-        payment_source=_CODE_TO_PAYMENT.get(getattr(row, "payment_code", None)),
+        payment_source=source_label(getattr(row, "payment_code", None)),
         barter_what=getattr(row, "barter_what", None) or "",
     )
 

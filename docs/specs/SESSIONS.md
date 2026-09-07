@@ -1,7 +1,8 @@
 # SESSIONS — data-model contract (🃏 Расклады)
 
-Code conforms to: a0b0f64. (+ #144: user_notion_id → user_id.) This spec describes the sessions (tarot spreads)
-data model as of that commit; update it in the same PR that changes the model.
+Code conforms to: a0b0f64 (+ #144: user_notion_id → user_id; + #7: payment_source
+read-path + Mini App finance serialization). This spec describes the sessions
+(tarot spreads) data model; update it in the same PR that changes the model.
 
 > Contract, not snapshot. Describes the persistent model, the guarantees of
 > each operation, and the invariants. Enumerations point at the owning code
@@ -101,6 +102,10 @@ Owned by the migrations (source of truth). Examples, non-exhaustive:
 - **Outcome uses `session_outcome`** (own lookup), distinct from rituals.
 - **Barter is Arcana-only**: `payment_source` code `barter` (🔄 Бартер) +
   `barter_what`; consistent with FINANCE.md / LISTS.md.
+- **`payment_src_id` is read via an outer-join** in
+  `pg_sessions_repo._select_sessions` → `TripletEntry.payment_source`
+  (display label from `core.payment.source_label`, shared with rituals).
+  Before #7 it was written on create but never read back.
 - **`photo_url` is a Cloudinary URL** (upload via `core/cloudinary_client.py`).
 
 ## Processing layer
@@ -217,7 +222,9 @@ sessions repo. Outcome can be revised via `set_outcome`.
   WORKS.md for the PG-native picture).
 - Mini App — `miniapp/backend/routes/arcana_sessions.py`
   (`GET /api/arcana/sessions`, `…/by-slug/{slug}`, `…/by-slug/{slug}/summarize`,
-  `GET …/{session_id}`).
+  `GET …/{session_id}`). The `{session_id}` card serializes finance as
+  `price` / `paid` / `debt` (`amount − paid`, 0-floored) / `source`
+  (payment_source label) / `barter_what` (#7).
 
 ## Model routing (from code)
 
@@ -247,4 +254,5 @@ sessions repo. Outcome can be revised via `set_outcome`.
 - `core/rag.py` — `index_triplet`, `index_triplets_batch`, `search_triplets`
 - `core/client_resolve.py` — client resolution on create
 - `core/cash_register.py` — P&L reads session rows (see FINANCE.md)
-- `miniapp/backend/routes/arcana_sessions.py` — session endpoints + Sonnet summary
+- `miniapp/backend/routes/arcana_sessions.py` — session endpoints
+- `core/payment.py` — `source_label` (payment_source.code → display label, shared with rituals)

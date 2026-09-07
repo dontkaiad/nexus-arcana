@@ -1,7 +1,8 @@
 # RITUALS — data-model contract (🕯 Ритуалы)
 
-Code conforms to: 0bc132e. This spec describes the rituals data model as of
-that commit; update it in the same PR that changes the model.
+Code conforms to: 0bc132e (+ #7/#8: Mini App finance serialization, shared
+`source_label`). This spec describes the rituals data model; update it in the
+same PR that changes the model.
 
 > Contract, not snapshot. Describes the persistent model, the guarantees of
 > each operation, and the invariants. Enumerations point at the owning code
@@ -99,6 +100,8 @@ non-exhaustive:
   inventory rows.
 - **Outcome uses `outcome_status`** (distinct from sessions' `session_outcome`).
 - **Barter is Arcana-only**: `payment_source` code `barter` + `barter_what`.
+- **`payment_source` display label** comes from `core.payment.source_label`
+  (shared with sessions) — `_row_to_ritual` maps `payment_code` → label.
 - **`photo_url` is a Cloudinary URL** (`core/cloudinary_client.py`).
 
 ## Lifecycle / status model
@@ -119,7 +122,9 @@ stay findable by id). Outcome can be revised via `set_result`.
 - Cross-domain — `core/client_resolve.py` (client), `core/cash_register.py`
   (P&L), `core/work_relation.py` (Notion-era Работа↔Ритуал; see WORKS.md).
 - Mini App — `miniapp/backend/routes/arcana_rituals.py`
-  (`GET /api/arcana/rituals`, `GET …/{ritual_id}`).
+  (`GET /api/arcana/rituals`, `GET …/{ritual_id}`). Both list and card
+  serialize finance as `price` / `paid` / `debt` (`price − paid`, 0-floored)
+  / `source` (payment_source label) / `barter_what` — parity with sessions (#7/#8).
 
 ## Model routing (from code)
 
@@ -139,3 +144,4 @@ Reads/writes are pure SQL.
 - `core/client_resolve.py` — client resolution on create
 - `core/cash_register.py` — P&L reads ritual rows (see FINANCE.md)
 - `miniapp/backend/routes/arcana_rituals.py` — ritual endpoints
+- `core/payment.py` — `source_label` (shared payment_source label helper)

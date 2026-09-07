@@ -55,6 +55,10 @@ def _ritual_brief(r, tz_offset: int) -> dict:
         "result": CODE_TO_RESULT.get(r.result or "unverified", "⏳ Не проверено"),
         "price": int(r.price) if r.price else 0,
         "paid": int(r.paid) if r.paid else 0,
+        # #8: Долг / Источник оплаты / что за бартер — как в 🃏 Раскладах (#7)
+        "debt": max(0, (int(r.price) if r.price else 0) - (int(r.paid) if r.paid else 0)),
+        "source": r.payment_source or None,
+        "barter_what": r.barter_what or None,
     }
 
 
@@ -117,6 +121,9 @@ async def ritual_detail(
         "type": CODE_TO_TYPE.get(r.type_code or "") or None,
         "price": int(r.price) if r.price else 0,
         "paid": int(r.paid) if r.paid else 0,
+        "debt": max(0, (int(r.price) if r.price else 0) - (int(r.paid) if r.paid else 0)),
+        "source": r.payment_source or None,
+        "barter_what": r.barter_what or None,
         "time_min": r.time_min,
         "supplies": supplies,
         "supplies_total": supplies_total,

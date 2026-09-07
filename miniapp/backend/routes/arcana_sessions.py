@@ -180,6 +180,10 @@ def _serialize_triplet_pg(
         "done": done_label,
         "price": int(round(float(t.amount or 0))),
         "paid": int(round(float(t.paid or 0))),
+        # #7: Долг = Сумма − Оплачено (не для бартера); Источник + что за бартер
+        "debt": max(0, int(round(float(t.amount or 0))) - int(round(float(t.paid or 0)))),
+        "source": t.payment_source or None,
+        "barter_what": t.barter_what or None,
         "photo_url": t.photo_url,
     }
 

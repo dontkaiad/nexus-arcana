@@ -34,6 +34,7 @@ class TripletEntry:
     bottom_card: str = ""     # Дно колоды
     photo_url: Optional[str] = None
     user_id: str = ""  # владелец записи, для ownership-проверок (#108)
+    payment_source: Optional[str] = None  # display label «💳 Карта»/«💵 Наличные»/«🔄 Бартер» (#7)
 
 
 @dataclass

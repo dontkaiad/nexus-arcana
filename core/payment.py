@@ -22,6 +22,20 @@ SOURCE_BARTER = "🔄 Бартер"
 _PG_SRC_CASH   = "cash"
 _PG_SRC_BARTER = "barter"
 
+# PG payment_source.code → display label with emoji. Единый для 🃏 Раскладов
+# и 🕯 Ритуалов (read-path). Раньше дублировался в pg_sessions_repo и
+# pg_rituals_repo — вынесено сюда (#7/#8, сёстры-близнецы).
+CODE_TO_SOURCE = {
+    "card":   SOURCE_CARD,
+    "cash":   SOURCE_CASH,
+    "barter": SOURCE_BARTER,
+}
+
+
+def source_label(code: Optional[str]) -> Optional[str]:
+    """payment_source.code → «💳 Карта» / «💵 Наличные» / «🔄 Бартер». None → None."""
+    return CODE_TO_SOURCE.get(code) if code else None
+
 
 def _field_map(target: str) -> dict:
     """target='sessions' | 'rituals' → имена полей Notion (для build_payment_props)."""
