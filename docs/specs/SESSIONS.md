@@ -259,7 +259,8 @@ sessions repo. Outcome can be revised via `set_outcome`.
 - `alembic/versions/n4g5h6i7j8k9_sessions_photo_url.py` — `photo_url`
 - `alembic/versions/v2w3x4y5z6a7_arcana_triplets_pgvector.py` — `arcana_triplets` table (RAG)
 - `arcana/repos/sessions_tables.py` — SQLAlchemy Core mirror (shared lookups)
-- `arcana/repos/pg_sessions_repo.py` — `PgSessionsRepo` (create/update/outcome/archive)
+- `arcana/repos/pg_sessions_repo.py` — `PgSessionsRepo` (create/update/outcome/archive),
+  `_attach_work_titles` (`work_id` → Work title on detail paths, #10)
 - `arcana/repos/sessions_repo.py` — seam + `Session` object
 - `arcana/handlers/sessions.py` — card parsing, modes A/B, RAG gate, multi-flow, summary
 - `core/waite_cards.py` — deterministic Waite parser (ADR-0013)

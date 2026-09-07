@@ -1,6 +1,7 @@
 # CLIENTS — data-model contract (👥 Клиенты)
 
-Code conforms to: 0bc132e. (+ #144: user_notion_id → user_id.) This spec describes the clients data model as of
+Code conforms to: 0bc132e. (+ #144: user_notion_id → user_id; + #101: note
+merge on fresh pending state; + #102: birthday overwrite confirm.) This spec describes the clients data model as of
 that commit; update it in the same PR that changes the model.
 
 > Contract, not snapshot. Describes the persistent model, the guarantees of
@@ -97,6 +98,12 @@ sync SQLAlchemy). Notion-style type/status labels are mapped to codes via
 - **`object_photos` is a serialized text field**, one `URL | note` per line
   (parsed by `core/client_object_photos.py`); photos upload via
   `core/cloudinary_client.py`.
+- **`birthday` is write-once-then-confirm.** A vision-extracted birthday from
+  a client screenshot (`handle_client_photo_input`) is written directly only
+  when the field is empty; an equal value is a no-op; a *different* value is
+  stashed as `birthday_new` and the practitioner is asked
+  `[✅ Обновить] / [↩️ Оставить]` (`client_bday_yes` / `client_bday_no`) — a
+  bad OCR on a later screenshot can't silently clobber a correct date (#102).
 
 ## Lifecycle / status model
 
@@ -128,7 +135,7 @@ Reads/writes are pure SQL.
 
 - `alembic/versions/0857b6b83518_clients_slice_schema.py` — table + lookups
 - `alembic/versions/d4f5e6a7b8c9_clients_pg_native.py` — notion_id dropped, rituals FK
-- `alembic/versions/e5f6a7b8c9d0_clients_add_user_id.py` — user column
+- `alembic/versions/e5f6a7b8c9d0_clients_add_user_notion_id.py` — owner column (later renamed to `user_id` by `df56a1b2c3d4`, #144)
 - `arcana/repos/clients_tables.py` — SQLAlchemy Core mirror
 - `arcana/repos/pg_clients_repo.py` — `PgClientsRepo`, find/create dedup guard, profile
 - `arcana/repos/clients_repo.py` — seam + `Client` object
@@ -137,4 +144,7 @@ Reads/writes are pure SQL.
 - `core/client_object_photos.py` — `URL | note` serialization
 - `core/cloudinary_client.py` — photo upload
 - `arcana/handlers/clients.py`, `arcana/handlers/client_photo.py` — handlers
+  (`handle_client_photo_input` birthday confirm flow — #102;
+  `arcana/pending_clients.py:update_pending_client` merges note fragments on
+  fresh state — #101)
 - `miniapp/backend/routes/arcana_clients.py` — client endpoints

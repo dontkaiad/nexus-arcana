@@ -1,6 +1,6 @@
 # MEMORY — memory data model
 
-> **Status: AS-BUILT, code conforms to `da17d0a`.** Notion→PostgreSQL
+> **Status: AS-BUILT, code conforms to `26a94c4`.** Notion→PostgreSQL
 > migration is complete. Schema: `value_text` dropped (#146), `notion_id`
 > dropped (#149), `user_notion_id`→`user_id` (#144). Search: the semantic
 > layer (ADR-0006 pgvector backend, applied to memory by ADR-0020) plus a
@@ -255,7 +255,10 @@ Derived reads:
 
 `core/memory.py:_find_pages_by_hint` on top of `search`: shortcut by category
 name (`сдвг`/`люди`/…→category, via `find_by_category`), otherwise
-tokenizes the hint (stop words + naive stemming `_normalize_word`) → `search`.
+tokenizes the hint (stop words + naive case-ending stemming —
+`core/ru_morph.py:strip_case_ending`, imported into `memory.py` as
+`_normalize_word`, extracted in #136 and shared with the debts
+name-matcher) → `search`.
 
 ### Record lifecycle (soft-delete, two flags)
 - `is_current` — "currency". `deactivate_memory` → `set_active(ids, False)`
@@ -287,24 +290,30 @@ tokenizes the hint (stop words + naive stemming `_normalize_word`) → `search`.
 - Reply corrections: `core/reply_update.py` (`page_type="memory"`),
   `nexus/handlers/reply_update.py`, `arcana/handlers/reply_update.py`.
 - Mini App (PG-native, `PgMemoryRepo` directly):
-  - `GET /api/memory` (`routes/memory.py`) — actual rows only
-    (`is_current=True`, or all non-archived when `include_inactive=1`, #6).
-    Hides the budget/ADHD categories (`EXCLUDED_CATEGORIES` — own screens)
-    and system / finance-only keys (`EXCLUDED_KEY_PREFIXES` = `tz_` /
-    `city_` / `impulse_windfall_` / `цель_` — the last because goals are
-    stored under `💰 Лимит`, not `🎯 Цели`, so the category filter misses
-    them; #197, #6). `q` runs ILIKE over text+key+related and, if that
-    returns fewer than 3 rows, the same Voyage + Haiku-rerank semantic
-    fallback the bot uses (`_semantic_search_memory`, scoped by `user_id`,
-    re-filtered to the visible set; #6). Budget-prefixed rows
-    (`income_`/`постоянно_`/`разовый_`/`лимит_`) are pulled out of the flat
-    list into a grouped `💰 Лимит` special view
-    (`_group_budget_memories`, #49b) returned only when `cat=💰 Лимит`.
-    `_serialize_memory` → `{id, text, cat, related, key, date}` (`date` is
-    `created_at[:10]`; the front decides whether to render it, #6). `q` is a
-    case-insensitive contains over text + key + related (aligned with the
-    bot's `_find_pages` after `8f3622d`), **ILIKE only — no semantic
-    fallback in the Mini App**.
+  - `GET /api/memory` (`routes/memory.py`) — rows via
+    `find_recent(is_current=None if include_inactive else True, page_size=500)`:
+    `is_current=True` only, or every non-archived row when `include_inactive=1`
+    (#6, for reactivation). Excluded from the flat personal list:
+    - the budget/ADHD categories (`EXCLUDED_CATEGORIES` — own screens);
+    - system / finance-only keys (`EXCLUDED_KEY_PREFIXES` = `tz_` / `city_` /
+      `impulse_windfall_` / `цель_` — the last because goals are stored under
+      `💰 Лимит`, not `🎯 Цели`, so the category filter misses them; #197, #6);
+    - **any** row whose `category == 💰 Лимит` **or** whose key starts with a
+      `_BUDGET_KEY_PREFIXES` prefix (`income_` / `постоянно_` / `разовый_` /
+      `лимит_`) — regardless of key shape, so an oddly-keyed budget row never
+      leaks into the flat list as a card (and never shows a stray
+      "неактуально"; #6). Only the `is_current` ones of those are collected
+      into `budget_mems`, mirroring the budget which counts current rows only.
+    The grouped `💰 Лимит` view (`_group_budget_memories`, #49b — Постоянные /
+    Разовые / Лимиты / Доход) is returned **only** when `cat=💰 Лимит`
+    (`{grouped: true, groups: […]}`).
+  - `q`: case-insensitive contains over text + key + related; when that
+    yields fewer than 3 hits, the same Voyage + Haiku-rerank semantic
+    fallback the bot uses (`core.memory._semantic_search_memory`, scoped by
+    `user_id`, then re-filtered to the visible set; #6).
+  - `_serialize_memory` → `{id, text, cat, related, key, date, is_current}`
+    (`date` = `created_at[:10]`, the front decides whether to render it;
+    `is_current` drives the reversible-«неактуально» UI; #6).
   - `GET /api/memory/adhd` (`routes/memory.py`) — grouping
     patterns/strategies/triggers/specifics + Sonnet profile.
   - `POST /api/memory` (`routes/writes.py`) — runs the same Message-free
@@ -403,6 +412,7 @@ Verify against code:
   reply dispatch, `_move_memory_to_notes` (Nexus only)
 - `scripts/migrate_memory_embeddings.py` — embedding backfill (dry-run default)
 - `core/budget.py` — budget reads via `find_by_key_prefixes`
+- `core/ru_morph.py` — `strip_case_ending` (case-ending stemmer, `_normalize_word`, #136)
 - `alembic/versions/e067a1b2c3d4_core_identity_user_id_owner_merge.py` — shared owner key (#202)
 - `core/repos/identity_table.py`, `core/repos/pg_identity_repo.py` — `core_identity.user_id`
 - `core/location.py` — sole location writer (`set_user_location`, ADR-0016)
@@ -413,7 +423,10 @@ Verify against code:
 - `arcana/handlers/sessions.py`, `clients.py`, `rituals.py` —
   `get_memories_for_context`
 - `miniapp/backend/routes/memory.py` — `GET /api/memory`, `/api/memory/adhd`
-- `miniapp/backend/routes/writes.py` — `POST /api/memory`, `DELETE /api/memory/{id}` (#193)
+- `miniapp/backend/routes/writes.py` — `POST /api/memory` (`parse_and_store`),
+  `PATCH /api/memory/{id}` (`{is_current}`, #6), `DELETE /api/memory/{id}` (#193)
+- `miniapp/backend/routes/memory.py` — `_fetch_rows` / `_group_budget_memories` /
+  `EXCLUDED_KEY_PREFIXES` / semantic fallback (#6)
 - `miniapp/backend/routes/weather.py` — timezone via `find_by_exact_key`
 - `core/config.py` — `MODEL_HAIKU`, `MODEL_SONNET` (`claude-sonnet-4-6`)
 - `docs/CASES/0005-memory-store.md` — ADR (code diverges: see the section above)

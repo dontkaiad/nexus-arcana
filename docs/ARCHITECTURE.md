@@ -72,7 +72,11 @@ a nullable `client_id` FK pointing back to it; nobody duplicates client identity
 the bot extracts a client name from a message, `core/client_resolve.py` resolves-or-
 creates exactly one row and hands back its id ([CLIENTS spec](specs/CLIENTS.md)).
 User identity is the same shape one level up — `core_identity` is authoritative, keyed
-by the page id every other table references ([ADR-0007](CASES/0007-identity-pg.md)).
+by the id every other table references in its `user_id` column (renamed from
+`user_notion_id` in #144; the PK keeps the name `notion_id`,
+[ADR-0024](CASES/0024-identity-pk-keeps-notion-id-name.md)). The single owner's two
+Telegram accounts fold to one shared `user_id` so owner-scoped reads never fragment
+across devices (#202, migration `e067a1b2c3d4`) ([ADR-0007](CASES/0007-identity-pg.md)).
 
 **Alternatives rejected.** Denormalizing client fields onto each event record (fast
 reads, but every rename/retype becomes a migration and the data drifts), and a generic
@@ -288,7 +292,7 @@ over-provisioned from day one or wedged onto hardware it had outgrown. Always-av
 first, then right-sized — I'd rather upgrade infrastructure when the system earns it than
 pay for scale I'm only guessing at.
 
-The 10 specs in [`docs/specs/`](specs/) are written the same way: each one documents the
+The 11 specs in [`docs/specs/`](specs/) are written the same way: each one documents the
 code as it *is*, carries a conforms-to hash, and points at the files you can check it
 against — no aspirational data models, no "known limitations" prose (those are issues).
 A spec that describes the ideal instead of the real is a lie with a nice font.
@@ -305,8 +309,10 @@ In order — because sequencing is part of the engineering:
   structured evals on the interpretation/parse paths and real tracing on the LLM calls,
   not just logs — so I can tell whether a prompt change made things *better*, not just
   different.
-- **The Works epic** — deepening the planned-work ↔ fulfilled-event pipeline now that the
-  FK foundation is in place.
+- **The Works epic** — deepening the planned-work ↔ fulfilled-event pipeline. The FK
+  foundation is in place and the Mini App now surfaces both directions (planned badge,
+  `from_work` reverse-link, create-from-app, a "done" tail so finished practice stays
+  visible); next is richer planning ergonomics on top of it.
 - **Apple-ecosystem integration** (planned, not built) — native reach into the
   macOS/iOS side I actually live in, so the assistant meets me where I work.
 

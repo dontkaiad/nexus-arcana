@@ -1,6 +1,6 @@
 # BUDGET — data-model contract (бюджет / day limit)
 
-Code conforms to: 5a57b8c (+ this change: _calc_free_remaining formula). (+ #144: user_notion_id → user_id.) This spec describes the budget data model as of
+Code conforms to: 5a57b8c (+ this change: _calc_free_remaining formula). (+ #144: user_notion_id → user_id; + #6: debt free-text path via `parse_and_store`; + #136: debt-name morphology match.) This spec describes the budget data model as of
 that commit; update it in the same PR that changes the model.
 
 > Contract, not snapshot. Describes the derived model and the guarantees of
@@ -85,6 +85,10 @@ that commit; update it in the same PR that changes the model.
    Платёж/стратегия задаётся один раз, дальше используется автоматически.
    В расчёт месяца попадает только ПЕРВЫЙ по дедлайну долг с платежом —
    остальные ждут своей очереди.
+   Имя долга матчится сначала точным сравнением в нижнем регистре, затем —
+   fallback по падежному стеммеру (`core/ru_morph.py:strip_case_ending`,
+   `PgDebtsRepo._find_row_sync`): «долг Ивану» ↔ «вернула Ивана». Фаззи-матча
+   по опечаткам нет — для денег рискованно, только морфология (#136).
 
 5. **Подушка** — пятая сущность, тоже отдельно от Памяти (своя таблица
    `cushion`), НЕ цель. Растущий буфер без конца, пополняется динамически
@@ -319,8 +323,9 @@ Budget has **no table of its own** — there is no migration, no
    from Memory. Two independent input paths write here: `_DEBT_CMD_RE`
    commands (`core/classifier.py` → `handle_debt_command`, regex-only, no
    LLM) and the free-text `долг X` phrasing routed through `memory_save` →
-   `core/memory.py:save_memory` (Haiku-parsed, then redirected to
-   `pg_debts_repo` instead of Memory — see `_save_debt_from_memory`).
+   `core/memory.py:save_memory` → `parse_and_store` (Haiku-parsed; when the
+   fact is a debt, `_parse_debt_from_fact` + a `pg_debts_repo` upsert instead
+   of a Memory row — the shared bot/Mini App core, #6).
 3. **One-time expenses.** The standalone command `разовый расход X` /
    `разовые: ...` is classified as `one_time_expense` (`core/classifier.py`,
    `_ONE_TIME_EXPENSE_RE`, checked before `memory_save`/`budget`) and
@@ -573,8 +578,9 @@ expense items → `_ONE_TIME_PARSE_SYSTEM`).
   `CUSHION_COMFORTABLE_RATE`, `BUDGET_TIGHT_THRESHOLD`), `compute_limits`,
   `_distribute_limits`, `PRIORITY_CHAIN`
 - `core/memory.py` — `CATEGORIES`, `_PARSE_SYSTEM` (постоянно_/долг_/
-  income_ examples), `save_memory` (`долг_` → redirected to
-  `pg_debts_repo`, not Memory)
+  income_ examples), `save_memory` → `parse_and_store` (`долг_` →
+  `_parse_debt_from_fact` + `pg_debts_repo` upsert, not Memory; #6)
+- `core/ru_morph.py` — `strip_case_ending` (debt-name morphology match, #136)
 - `core/classifier.py` — `_MEMORY_SAVE_RE` (постоянн/обязательн dual
   support), `_ONE_TIME_EXPENSE_RE`, `_DEBT_CMD_RE`, `_GOAL_CMD_RE`,
   `_LIMIT_OVERRIDE_RE`, `_BUDGET_RE`, `classify()`/`process_item()` routing,
@@ -582,7 +588,8 @@ expense items → `_ONE_TIME_PARSE_SYSTEM`).
   matching, `classify(user_id=...)`)
 - `core/repos/memory_repo.py` / `core/repos/pg_memory_repo.py` —
   `find_by_category`, `find_by_key_prefixes`, `find_by_exact_key` (budget facts)
-- `core/repos/pg_debts_repo.py` — active `i_owe` debts read by `load_budget_data`
+- `core/repos/pg_debts_repo.py` — active `i_owe` debts read by `load_budget_data`;
+  `_find_row_sync` (exact-lower then `strip_case_ending` fallback, #136)
 - `nexus/handlers/finance.py` — `start_budget_setup`, `handle_budget_setup_text`,
   `start_budget_analysis`, `_run_budget_analysis`, `_build_sonnet_input`,
   `_period_spending` (shared already_spent/income-this-period source),

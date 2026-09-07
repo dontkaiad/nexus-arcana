@@ -18,13 +18,13 @@ from a prompt-engineering standpoint.
 | Cost-aware model routing | `core/config.py`, `core/claude_client.py`, `tests/test_models_audit.py` | Haiku by default + a static test guard against "leaking" onto Sonnet |
 | Two-tier intent classification | `core/classifier.py`, `arcana/handlers/base.py` | Regex pre-filter → Haiku few-shot; verb tense = planned/done |
 | Layered context injection (RAG) | `arcana/handlers/sessions.py:1170-1175` | One system-prompt assembled from 4 sources on the fly |
-| Vector semantic recall | `core/rag.py` | Reading triplets embedded into pgvector (Voyage), similarity search |
-| Keyword-RAG memory | `core/memory.py` | Fact search without embeddings: normalization + alias-resolution |
+| Vector semantic recall | `core/rag.py`, `core/memory_rag.py` | Reading triplets **and** memory facts embedded into pgvector (Voyage), similarity search + Haiku rerank |
+| Hybrid memory search | `core/memory.py`, `core/memory_rag.py` | ILIKE-first (normalization + alias-resolution); Voyage + Haiku-rerank semantic fallback when <3 hits |
 | Whitelist spell-correction guard | `core/preprocess.py` | Haiku typo-correction that does NOT touch the 78 Tarot cards + client names |
 | Constraint-based generation | `miniapp/backend/routes/today.py` | ADHD tip: ≤15 words, validator + retry + fallback, temperature=0.4 |
 | Vision parsers | `core/vision.py`, `arcana/handlers/sessions.py:287`, `arcana/handlers/clients.py` | Receipts, reading photos, profile screenshots → JSON |
 | Chain-of-thought | `arcana/handlers/sessions.py:254`, `nexus/handlers/finance.py:2313` | Step-by-step Tarot interpretation and budget algorithm |
-| Behavioral evals | `tests/` (~880 test functions, 81 files) | Mock-API contracts on intents, max_tokens, output quality |
+| Behavioral evals | `tests/` (~1600 test functions, ~180 files) | Mock-API contracts on intents, max_tokens, output quality |
 
 **Model stack:** Claude Haiku `claude-haiku-4-5-20251001` (routine),
 Claude Sonnet `claude-sonnet-4-6` / `claude-sonnet-4-20250514` (deep
@@ -52,10 +52,10 @@ architectural invariant, guarded by a test.
 ### 1.2 A test guard against price regression
 - **`tests/test_models_audit.py`** — a purely static audit (greps the sources, no
   live calls):
-  - `HAIKU_REQUIRED` (13 files: router, deleter, reply_update, finance, stats,
-    works, clients, grimoire, rituals, notes, notes_smart_select, nexus_bot,
-    miniapp/today) — each MUST contain `model="claude-haiku...`. Otherwise the test
-    fails.
+  - `HAIKU_REQUIRED` (16 files: router, deleter, reply_update, **memory_rag**
+    (the ADR-0021 reranker), Arcana finance/stats/works/clients/grimoire/rituals/
+    sessions, Nexus notes, nexus_bot, miniapp today + arcana_today) — each MUST
+    contain `model="claude-haiku...`. Otherwise the test fails.
   - `SONNET_LEGIT` (4 files: `core/memory.py`, `core/vision.py`,
     `arcana/handlers/sessions.py`, `miniapp/.../arcana_sessions.py`) — a whitelist of
     places where Sonnet is justified. Sonnet anywhere else = a red test.
@@ -71,14 +71,13 @@ architectural invariant, guarded by a test.
 | Budget analytics | `nexus/handlers/finance.py:2313 (BUDGET_SONNET_SYSTEM)`, call `:3196` | Multi-step algorithm, debt re-planning, two output variants |
 | Vision (receipts) | `core/vision.py:22-103` | Image understanding |
 | Session summary (Mini App) | `miniapp/backend/routes/arcana_sessions.py:481` | Narrative synthesis over N triplets |
-| Long-form ADHD advice | `core/memory.py:459-484` | Context-aware generation against the profile |
+| Long-form ADHD advice | `core/memory.py` — `_get_adhd_tip` (`config.model_sonnet`) | Context-aware generation against the profile |
 | Arcana's poetic tip | `miniapp/backend/routes/arcana_today.py:119` | Tone/style matter more than speed |
 
 > A note for honesty: two Sonnet literals coexist in the code —
-> `claude-sonnet-4-6` (config, `core/memory.py:484`, `nexus/handlers/memory.py:197`)
-> and `claude-sonnet-4-20250514` (calls in `arcana/handlers/sessions.py`,
-> `base.py:268`, `arcana_sessions.py:481`). A candidate for consolidation into a
-> single constant.
+> `claude-sonnet-4-6` (via `config.model_sonnet`) and `claude-sonnet-4-20250514`
+> (some direct call sites in `arcana/handlers/sessions.py`, `base.py`,
+> `arcana_sessions.py`). A candidate for consolidation into a single constant.
 
 ---
 
@@ -89,7 +88,7 @@ layer catches the obvious before the LLM**, and the LLM only sees the ambiguous.
 
 ### 2.1 Nexus: the classifier mega-prompt
 - **`core/classifier.py:88` — `build_system(tz_offset)`** builds a large dynamic
-  system-prompt (the file is ~1169 lines): 13+ types (expense / income /
+  system-prompt (the file is ~1470 lines): 13+ types (expense / income /
   task / note / memory_save / memory_search / stats / list_* / arcana_redirect…),
   dozens of few-shot examples, injection of the current date/time.
 - **`core/classifier.py:741`** — the main call goes *without* `model=` → the default
@@ -196,19 +195,29 @@ Few-shot is the primary technique for structured parsers. Examples:
   recall (see §5.4) — there it's similarity by meaning, here it's exact assembly by
   identifier.
 
-### 5.2 Keyword-RAG memory (no embeddings)
-- **`core/memory.py`**: `save_memory` (`:489`), `search_memory` (`:610`),
-  `get_memories_for_context` (`:991`), `auto_suggest_memory` (`:1044`).
-  - The fact parser `_PARSE_SYSTEM` (`:42`, Haiku, `max_tokens=200`): text → JSON
-    `{fact, category, relation, key}` with 17 categories (including 🦋 ADHD).
-  - Search — token normalization (case/diacritics/cases) + lookup over
-    Text/Key/Relation + **alias-resolution** (recognizes "also known as…",
-    recursively, depth ≤3).
-  - `get_memories_for_context` deduplicates by page_id and filters by bot label
-    (Nexus vs Arcana) — a shared store, different context.
-- **Why it's interesting:** pragmatic RAG for a small personal corpus —
-  no embeddings/infrastructure, but with alias canonicalization and injection into
-  downstream prompts.
+### 5.2 Hybrid memory search — ILIKE-first, semantic fallback
+- **`core/memory.py`**: `save_memory` / `parse_and_store` (the Message-free core,
+  shared with the Mini App), `search_memory`, `get_memories_for_context`,
+  `auto_suggest_memory`, `_semantic_search_memory`.
+  - The fact parser `_PARSE_SYSTEM` (Haiku, `max_tokens=200`): text → JSON
+    `{fact, category, relation, key}` — 15 categories in `CATEGORIES` (incl. 🦋 СДВГ);
+    4 of them are budget display labels derived on read, not stored.
+  - Primary search — token normalization
+    (`core/ru_morph.py:strip_case_ending`, case-ending stemmer) + ILIKE over
+    Text/Key/Relation + **alias-resolution** ("also known as…", recursively, depth ≤3).
+  - Semantic fallback (only when the ILIKE result has <3 rows):
+    `core/memory_rag.py:search_memory_semantic` (Voyage query embedding, pgvector
+    cosine over `memories.embedding`) → `rerank_memory_candidates` (**Haiku** picks
+    the genuinely relevant ids from the candidate lines — a general embedding can't
+    tell «Луна»-the-cat from «луна»-the-word). Merge: ILIKE hits first, then
+    rerank-approved semantic rows. Graceful — any failure returns the ILIKE list
+    unchanged.
+  - `get_memories_for_context` filters by owner (`user_id`, one shared id per
+    owner after the #202 identity fold) and by bot label (Nexus vs Arcana).
+- **Why it's interesting:** cheap exact-match path first, embeddings only as a
+  thin fallback, with an LLM reranker instead of a raw distance threshold. The
+  decision is in ADR-0020 (embedding on the `memories` row, not a mirror table)
+  and ADR-0021 (the Haiku reranker).
 
 ### 5.3 Memory auto-suggest on repetition
 - **`arcana/handlers/memory.py` / `core/memory.py`**: a counter on the pair
@@ -220,7 +229,8 @@ Few-shot is the primary technique for structured parsers. Examples:
 
 ### 5.4 Vector semantic recall (reading triplets)
 - **`core/rag.py`** — `index_triplet` / `index_triplets_batch` / `search_triplets` /
-  `delete_triplet` / `ensure_collection`.
+  `delete_triplet` / `ensure_collection`. The same pgvector + Voyage machinery was
+  later extended to the memory store (`core/memory_rag.py`, §5.2) — ADR-0020.
 - Each reading → a triplet (cards · question · interpretation), embedded with
   **Voyage `voyage-4-lite` (dim 1024)** and stored in **pgvector**, in the same
   Postgres the bot already runs (table `arcana_triplets`, HNSW `vector_cosine_ops`).
@@ -232,8 +242,8 @@ Few-shot is the primary technique for structured parsers. Examples:
   the reading still works without RAG.
 - **Why it's interesting:** real semantic recall *by meaning* (not by key, unlike
   §5.1) — and right-sized: zero extra services, no external Docker network, inside the
-  Postgres that already exists. The decision and the rejected alternatives (Qdrant,
-  keyword-RAG) are in ADR-0006.
+  Postgres that already exists. The decision and the rejected alternative (Qdrant) are
+  in ADR-0006.
 
 ---
 
@@ -342,12 +352,12 @@ The most "engineering" part: every LLM output is wrapped in protection.
 
 ## 10. Evals — tests that check model behavior
 
-~880 test functions across 81 files (per CLAUDE.md — 936 passing cases:
-parametrize expands the count). The AI-specific ones:
+~1600 test functions across ~180 files; parametrize expands that to ~2170
+passing cases. The AI-specific ones:
 
 | Test | What it checks | Why it's an eval |
 |---|---|---|
-| `tests/test_models_audit.py` | Haiku in 13 cost-critical files; Sonnet only in 4 allowed ones | A regression guard for the price architecture |
+| `tests/test_models_audit.py` | Haiku in 16 cost-critical files; Sonnet only in 4 allowed ones | A regression guard for the price architecture |
 | `tests/test_router_intents_regression.py` | mock Haiku, contract `model == "claude-haiku-4-5-20251001"`, ≥8 few-shot, 10 intent cases, the "1 intent = 1 handler" dispatcher | Behavioral eval of the classifier + dispatcher contract |
 | `tests/test_intent_arcana.py` | `ROUTER_SYSTEM` contains all intents + examples "did/performed/to plan" | Validation of the prompt's linguistic accuracy |
 | `tests/test_intent_fallback.py` | `ritual_done` without past tense → downgraded to planned | A prompt→behavior guard on top of classification |

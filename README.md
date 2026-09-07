@@ -174,7 +174,8 @@ a location change propagates to reminders, date parsing, and weather simultaneou
 - Client management with session history, payment tracking, barter support
 - Ritual logging with inventory writeoff
 - Semantic recall: past readings surface into current interpretation context
-- Mini App with session history, client cards, and practice stats
+- Mini App with session history, client cards, practice stats, and — read/write —
+  works, grimoire, and memory (create from the app, not only the bot)
 
 Both bots share the same `core/` layer: memory, payments, reminders, preprocessing
 (layout conversion EN→RU, spell correction), subtask handling, and message-to-record

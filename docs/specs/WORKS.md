@@ -3,7 +3,8 @@
 Code conforms to: 0bc132e. (+ #144: user_notion_id → user_id; + #10: Mini App
 `/api/arcana/works` serializes `reminder`/`reminder_time`, parity with Nexus
 tasks; + #8/#10: planned-practice badge + `from_work` reverse-link shown on
-the event card; + #203: Mini App create endpoint + done-practice tail.) This
+the event card; + #95: `_TERMINAL_STATUS` excludes archived from open-work
+reads; + #203: Mini App create endpoint + done-practice tail.) This
 spec describes the works data model as of
 that commit; update it in the same PR that changes the model.
 
@@ -64,7 +65,11 @@ Owned by the migrations (source of truth). Examples, non-exhaustive:
 
 - **create** — inserts a work; client (if any) resolved beforehand via
   `core/client_resolve.py` and passed as `client_id`.
-- **read** — `list_open(user_id)`, `find_by_id`, `list_all`.
+- **read** — `list_open(user_id)`, `find_by_id`, `list_all`. Every
+  "open work" query (list + title-search) excludes a single
+  `_TERMINAL_STATUS = ("done", "archived")` constant — a new terminal code is
+  hidden everywhere by adding it there (#95; before, only `!= "done"` was
+  filtered and archived works leaked into `/works`).
 - **status** — `set_status(id, code)`, `mark_done(id)` (status → `done`).
 - **schedule** — `set_deadline(id, …)`; `reminder` drives APScheduler jobs
   (the shared reminder flow, `core/reminder_scheduler.py`).

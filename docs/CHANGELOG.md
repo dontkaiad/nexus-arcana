@@ -8,8 +8,33 @@ Lists vN.x, Memory vN.x).
 
 ## [Unreleased]
 
+### Added
+- 🧠 Память Mini App: RAG semantic-fallback (Voyage + Haiku-реранк) в `GET /api/memory` при <3 ILIKE-хитах; создание записи из FAB через общее ядро бота (`parse_and_store`), уведомление в Nexus; обратимая «неактуально» (`PATCH /api/memory/{id}`, `include_inactive=1`) ([#6]).
+- 🔮 Работы / 📖 Гримуар: создание из Mini App — структурные формы `POST /api/arcana/works` и `POST /api/arcana/grimoire` (без Haiku), `/api/categories?type=work|grimoire` ([#203]).
+- 🃏 Расклады / 🕯 Ритуалы: финансы на карточках Mini App — `debt` / `source` / `barter_what`, общий `core.payment.source_label` ([#7], [#8]).
+- 🕯 Ритуалы: `consumables_written_off` — факт списания расходников из инвентаря виден в Mini App (миграция `f1a2b3c4d5e6`) ([#8]).
+- 🔮 Работы: `reminder` / `reminder_time` в `/api/arcana/works` (паритет с задачами Nexus), «🔵 запланирован» бейдж, «✅ выполнено» хвост из закрытых раскладов/ритуалов ([#10], [#203]).
+- Связь Работа↔Расклад/Ритуал видна в Mini App (`from_work` reverse-link) ([#10]).
+- `core/ru_morph.py` — падежный стеммер (вынесен из `core/memory`), общий с матчером имён долгов ([#136]).
+
+### Changed
+- Owner-key колонка `user_notion_id` → `user_id` во всех 14 таблицах ([#144]); PK `core_identity.notion_id` имя сохраняет ([ADR-0024]).
+- Два Telegram-аккаунта владельца сведены в один `user_id` — owner-scoped чтение памяти больше не фрагментируется по устройствам (миграция `e067a1b2c3d4`) ([#202]).
+- `GET /api/memory`: любая строка категории «💰 Лимит» уходит в сгруппированный вид, не протекает карточкой во flat-список ([#6]).
+
+### Fixed
+- Гримуар: декартово произведение в `_list_by_category_sync` (SAWarning в тестах) ([#9]).
+- Работы: архивные (soft-deleted) работы протекали в `/works` — унифицировано на `_TERMINAL_STATUS = ("done", "archived")` ([#95]).
+- Долги: матч имени теперь падеже-независимый («долг Ивану» ↔ «вернула Ивана»), без фаззи-матча опечаток ([#136]).
+- Клиенты: ДР из скриншота не перезаписывается молча — при расхождении спрашивает `[✅ Обновить] / [↩️ Оставить]` ([#102]); заметки клиента мёржатся на свежем pending-состоянии (гонка) ([#101]).
+- `source="auto"` пишется только `core/location.py`; `save_memory`/`save_parsed` всегда `"manual"` ([#148]).
+
+### Removed
+- Мёртвые `notion_id`-колонки (5 таблиц, кроме `core_identity.notion_id`) + backfill-скрипты под них ([#149]).
+- `memories.value_text` (никогда не заполнялась) ([#146]).
+- `core/memory._save_debt_from_memory` (0 вызовов после `parse_and_store`) ([#6]); frontend `_SessionDetailLegacy` (мёртвый), финансовая строка перенесена в живой `SessionPagerOverview` ([#204]).
+
 ### В работе
-- Mini App обследование 5 вкладок (issues [#6–#10](https://github.com/dontkaiad/nexus-arcana/issues?q=is%3Aissue+label%3Amini-app)).
 - Ручное тестирование волны Arcana v8 (фото клиентов / объектов / ритуалов, ДР, парсинг скриншотов TG-профилей, бартер-флоу).
 - Whisper для голосовых (ждёт пополнения OpenAI credits).
 - Лендинг-букинг после покупки `kailark.com`.
@@ -163,3 +188,20 @@ Lists vN.x, Memory vN.x).
 - Mini App MVP: FastAPI backend + React+Vite frontend.
 
 [Unreleased]: https://github.com/dontkaiad/nexus-arcana/compare/main...HEAD
+[#6]: https://github.com/dontkaiad/nexus-arcana/issues/6
+[#7]: https://github.com/dontkaiad/nexus-arcana/issues/7
+[#8]: https://github.com/dontkaiad/nexus-arcana/issues/8
+[#9]: https://github.com/dontkaiad/nexus-arcana/issues/9
+[#10]: https://github.com/dontkaiad/nexus-arcana/issues/10
+[#95]: https://github.com/dontkaiad/nexus-arcana/issues/95
+[#101]: https://github.com/dontkaiad/nexus-arcana/issues/101
+[#102]: https://github.com/dontkaiad/nexus-arcana/issues/102
+[#136]: https://github.com/dontkaiad/nexus-arcana/issues/136
+[#144]: https://github.com/dontkaiad/nexus-arcana/issues/144
+[#146]: https://github.com/dontkaiad/nexus-arcana/issues/146
+[#148]: https://github.com/dontkaiad/nexus-arcana/issues/148
+[#149]: https://github.com/dontkaiad/nexus-arcana/issues/149
+[#202]: https://github.com/dontkaiad/nexus-arcana/issues/202
+[#203]: https://github.com/dontkaiad/nexus-arcana/issues/203
+[#204]: https://github.com/dontkaiad/nexus-arcana/issues/204
+[ADR-0024]: CASES/0024-identity-pk-keeps-notion-id-name.md

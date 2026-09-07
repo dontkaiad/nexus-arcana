@@ -61,8 +61,11 @@ non-exhaustive:
   and filters `grimoire_entries.category_id`; #9 — it used to `.where` on
   the un-aliased `grimoire_category` while `_select_grimoire` already joins
   the `gc` alias, producing a cartesian product), `search(query, theme)`
-  (ILIKE over title + text, and — since #9's Mini App audit — themes),
-  `list_all`, `find_by_id(id)`.
+  (`_search_sync`: ILIKE over title + text for `query`, a separate ILIKE on
+  `themes` for the optional `theme` arg), `list_all`, `find_by_id(id)`.
+  The Mini App's `?q=` is a separate in-route contains match over
+  title + text + themes joined (`arcana_grimoire.py`, over `list_all()`), not
+  this repo method (#9).
 
 The repo exposes no update or delete method — within this contract a grimoire
 entry is append-and-read.
