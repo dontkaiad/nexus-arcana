@@ -1,8 +1,9 @@
 # RITUALS — data-model contract (🕯 Ритуалы)
 
 Code conforms to: 0bc132e (+ #7/#8: Mini App finance serialization, shared
-`source_label`). This spec describes the rituals data model; update it in the
-same PR that changes the model.
+`source_label`; + #8: `consumables_written_off` timestamp; + #10: `work_id`
+reverse-link surfaced in Mini App). This spec describes the rituals data
+model; update it in the same PR that changes the model.
 
 > Contract, not snapshot. Describes the persistent model, the guarantees of
 > each operation, and the invariants. Enumerations point at the owning code
@@ -49,6 +50,7 @@ NULL). SQLAlchemy Core mirror: `arcana/repos/rituals_tables.py`.
 | `barter_what` | Text | barter item (Arcana-only) |
 | `notes` | Text | |
 | `work_id` | BigInteger | FK → `works.id` (ON DELETE SET NULL, indexed; #151) |
+| `consumables_written_off` | TIMESTAMP(tz) | nullable — set when the inventory write-off is confirmed (#8, migration `f1a2b3c4d5e6`); NULL = not written off |
 | `archived` | Boolean | NOT NULL default false — soft-archive |
 | `created_at` / `updated_at` | TIMESTAMP(tz) | default `now()` |
 
@@ -79,7 +81,13 @@ non-exhaustive:
 - **create** — inserts a ritual; the client (if any) is resolved beforehand
   via `core/client_resolve.py` and passed as `client_id`.
 - **read** — `find_by_id`, `list_by_client(client_id)`, `list_all`.
+  `find_by_id` additionally resolves `work_id` → the linked Work's title via a
+  separate `SELECT` (`_work_title`; `works` is **not** joined into
+  `_select_rituals` so rituals-only test schemas stay independent of the
+  `works → clients` FK). `work_title` is `None` on list reads.
 - **result/outcome** — `set_result(...)` records the outcome (`outcome_id`).
+- **write-off** — `mark_consumables_written_off(id)` stamps
+  `consumables_written_off` (called from `ritual_writeoff.cb_apply` on ✅, #8).
 - **photo** — `update_photo_url(id, url)`.
 - **delete** — `delete(id)` hard-deletes the row.
 
@@ -97,7 +105,14 @@ non-exhaustive:
   practice inventory (`arcana_inventory`, see LISTS.md) is decremented
   operationally by `arcana/handlers/ritual_writeoff.py` after a ritual; that
   write-off is an application flow, **not** a schema FK from `rituals` to
-  inventory rows.
+  inventory rows. The only trace on the ritual is the
+  `consumables_written_off` timestamp (#8) — a "was it done" flag, not a list
+  of what moved.
+- **`work_id` is the reverse of the plan.** A *planned* ritual lives in
+  `works` (category `✨ Ритуал`); a row in `rituals` is always a *performed*
+  rite. On save, `core/work_relation.py` finds the one open Work for that
+  client+category, stamps `rituals.work_id`, and closes the Work (#151).
+  Mini App surfaces this as `from_work` on the ritual card.
 - **Outcome uses `outcome_status`** (distinct from sessions' `session_outcome`).
 - **Barter is Arcana-only**: `payment_source` code `barter` + `barter_what`.
 - **`payment_source` display label** comes from `core.payment.source_label`
@@ -117,7 +132,8 @@ stay findable by id). Outcome can be revised via `set_result`.
 ## Callers
 
 - Bot — `arcana/handlers/rituals.py` (parse/save/result),
-  `arcana/handlers/ritual_writeoff.py` (inventory write-off),
+  `arcana/handlers/ritual_writeoff.py` (inventory write-off; on ✅ also calls
+  `mark_consumables_written_off`, #8),
   `arcana/handlers/barter_prompt.py` (barter), `arcana/handlers/reply_update.py`.
 - Cross-domain — `core/client_resolve.py` (client), `core/cash_register.py`
   (P&L), `core/work_relation.py` (Notion-era Работа↔Ритуал; see WORKS.md).
@@ -125,6 +141,9 @@ stay findable by id). Outcome can be revised via `set_result`.
   (`GET /api/arcana/rituals`, `GET …/{ritual_id}`). Both list and card
   serialize finance as `price` / `paid` / `debt` (`price − paid`, 0-floored)
   / `source` (payment_source label) / `barter_what` — parity with sessions (#7/#8).
+  The card additionally serializes `from_work` (`{id, title}` or `null`, #10)
+  and `consumables_written_off` (bool, #8); the list omits `from_work` (no
+  `work_title` on list reads).
 
 ## Model routing (from code)
 
@@ -136,6 +155,7 @@ Reads/writes are pure SQL.
 
 - `alembic/versions/022e99f6431d_rituals_slice_schema.py` — table, lookups, `ritual_debt` view
 - `alembic/versions/d4f5e6a7b8c9_clients_pg_native.py` — `fk_rituals_client_id`
+- `alembic/versions/f1a2b3c4d5e6_rituals_consumables_written_off.py` — `consumables_written_off` (#8)
 - `arcana/repos/rituals_tables.py` — SQLAlchemy Core mirror
 - `arcana/repos/pg_rituals_repo.py` — `PgRitualsRepo` (create/result/delete/photo)
 - `arcana/repos/rituals_repo.py` — seam + `Ritual` object

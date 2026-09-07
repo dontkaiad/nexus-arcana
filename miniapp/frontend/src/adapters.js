@@ -679,6 +679,7 @@ export function adaptSessionDetail(data) {
     debt: data.debt ?? 0,          // #7
     source: data.source || null,  // #7: Источник оплаты
     barterWhat: data.barter_what || null,  // #7
+    fromWork: data.from_work || null,      // #10: {id, title} плановой Работы
     photo_url: data.photo_url || null,
   }
 }
@@ -763,6 +764,8 @@ export function adaptRituals(data) {
     debt: r.debt ?? 0,
     source: r.source || null,
     barterWhat: r.barter_what || null,
+    fromWork: r.from_work || null,                     // #10
+    writtenOff: !!r.consumables_written_off,           // #8
   }))
 }
 
@@ -792,6 +795,8 @@ export function adaptRitualDetail(data) {
     offerings: data.offerings || '',
     powers: data.powers || '',
     structure: data.structure || [],
+    fromWork: data.from_work || null,                  // #10: {id, title}
+    writtenOff: !!data.consumables_written_off,        // #8: расходники списаны
     photo_url: data.photo_url || null,
   }
 }

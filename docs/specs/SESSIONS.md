@@ -1,7 +1,8 @@
 # SESSIONS — data-model contract (🃏 Расклады)
 
 Code conforms to: a0b0f64 (+ #144: user_notion_id → user_id; + #7: payment_source
-read-path + Mini App finance serialization). This spec describes the sessions
+read-path + Mini App finance serialization; + #10: `work_id` reverse-link
+surfaced in Mini App). This spec describes the sessions
 (tarot spreads) data model; update it in the same PR that changes the model.
 
 > Contract, not snapshot. Describes the persistent model, the guarantees of
@@ -106,6 +107,14 @@ Owned by the migrations (source of truth). Examples, non-exhaustive:
   `pg_sessions_repo._select_sessions` → `TripletEntry.payment_source`
   (display label from `core.payment.source_label`, shared with rituals).
   Before #7 it was written on create but never read back.
+- **`work_id` is the reverse of the plan.** A *planned* reading lives in
+  `works` (category `🃏 Расклад`); a `sessions` row is always a *done*
+  reading. `core/work_relation.py` stamps `sessions.work_id` and closes the
+  Work on save (#151). `work_id` is **not** joined into `_select_sessions`
+  (the `works → clients` FK would leak into sessions-only test schemas); the
+  detail paths (`list_by_slug` / `list_by_subject` / `find_by_id`) fill
+  `TripletEntry.work_title` via a separate `SELECT` (`_attach_work_titles`).
+  List reads leave it `None`. Mini App surfaces it as `from_work`.
 - **`photo_url` is a Cloudinary URL** (upload via `core/cloudinary_client.py`).
 
 ## Processing layer
@@ -222,9 +231,11 @@ sessions repo. Outcome can be revised via `set_outcome`.
   WORKS.md for the PG-native picture).
 - Mini App — `miniapp/backend/routes/arcana_sessions.py`
   (`GET /api/arcana/sessions`, `…/by-slug/{slug}`, `…/by-slug/{slug}/summarize`,
-  `GET …/{session_id}`). The `{session_id}` card serializes finance as
-  `price` / `paid` / `debt` (`amount − paid`, 0-floored) / `source`
-  (payment_source label) / `barter_what` (#7).
+  `GET …/{session_id}`). The `{session_id}` / by-slug triplet serializes
+  finance as `price` / `paid` / `debt` (`amount − paid`, 0-floored) /
+  `source` (payment_source label) / `barter_what` (#7), plus `from_work`
+  (`{id, title}` or `null`, #10 — populated only when `work_title` resolved,
+  i.e. detail paths).
 
 ## Model routing (from code)
 

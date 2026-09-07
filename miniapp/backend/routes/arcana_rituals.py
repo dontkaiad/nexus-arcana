@@ -59,6 +59,13 @@ def _ritual_brief(r, tz_offset: int) -> dict:
         "debt": max(0, (int(r.price) if r.price else 0) - (int(r.paid) if r.paid else 0)),
         "source": r.payment_source or None,
         "barter_what": r.barter_what or None,
+        # #10: плановая Работа, из которой вырос ритуал (rituals.work_id → works).
+        # work_title заполняется только в detail-пути (find_by_id) — в списке None.
+        "from_work": ({"id": r.work_id, "title": r.work_title}
+                      if getattr(r, "work_id", None) and getattr(r, "work_title", None)
+                      else None),
+        # #8: расходники списаны из инвентаря после ритуала
+        "consumables_written_off": bool(getattr(r, "consumables_written_off", None)),
     }
 
 
@@ -133,4 +140,7 @@ async def ritual_detail(
         "notes": r.notes or None,
         "result": CODE_TO_RESULT.get(r.result or "unverified", "⏳ Не проверено"),
         "photo_url": r.photo_url or None,
+        "from_work": ({"id": r.work_id, "title": r.work_title or "Работа"}
+                      if getattr(r, "work_id", None) else None),
+        "consumables_written_off": bool(getattr(r, "consumables_written_off", None)),
     }

@@ -126,7 +126,8 @@ def _make_ritual(rid, name, *, goal=None, place=None, result="unverified",
                  price=0, paid=0, date=None, type_code=None,
                  consumables="", structure="", offerings="", powers="",
                  time_min=None, notes=None, photo_url=None,
-                 payment_source=None, barter_what=""):
+                 payment_source=None, barter_what="",
+                 work_id=None, work_title=None, consumables_written_off=None):
     from arcana.repos.rituals_repo import Ritual
     from decimal import Decimal
     from datetime import datetime, timezone
@@ -140,6 +141,8 @@ def _make_ritual(rid, name, *, goal=None, place=None, result="unverified",
         offerings=offerings, powers=powers, time_min=time_min,
         notes=notes, photo_url=photo_url,
         payment_source=payment_source, barter_what=barter_what,
+        work_id=work_id, work_title=work_title,
+        consumables_written_off=consumables_written_off,
     )
 
 
@@ -169,7 +172,8 @@ def _make_triplet(sid, question, *, client_id=None, date=None, amount=0, paid=0,
                   outcome="unverified", area="", category_display="", cards="",
                   interpretation="", barter_what="", session_name="",
                   deck="Уэйт", photo_url=None, bottom_card="", triplet_summary="",
-                  subject_id=None, payment_source=None):
+                  subject_id=None, payment_source=None,
+                  work_id=None, work_title=None):
     from arcana.repos.sessions_repo import TripletEntry
     from decimal import Decimal
     return TripletEntry(
@@ -181,6 +185,7 @@ def _make_triplet(sid, question, *, client_id=None, date=None, amount=0, paid=0,
         area=area, barter_what=barter_what,
         bottom_card=bottom_card, photo_url=photo_url,
         triplet_summary=triplet_summary, payment_source=payment_source,
+        work_id=work_id, work_title=work_title,
     )
 
 
@@ -474,6 +479,23 @@ def test_arcana_session_detail_finance_fields(client):
     assert d["source"] == "💳 Карта"
 
 
+def test_arcana_session_detail_from_work(client):
+    """#10: расклад показывает плановую Работу, если work_title заполнен."""
+    today = _today_date(3)
+    triplet = _make_triplet("sWk", "Вопрос", date=today.isoformat(),
+                            work_id="9", work_title="Разложить на Олю")
+    with patch("miniapp.backend.routes.arcana_sessions._sessions_repo",
+               _mock_sessions_repo_all(find_result=triplet)), \
+         patch("miniapp.backend.routes.arcana_sessions._clients_repo",
+               _mock_clients_repo(list_all_result=[])), \
+         patch("miniapp.backend.routes.arcana_sessions.today_user_tz",
+               AsyncMock(return_value=(today, 3))), \
+         patch("miniapp.backend.routes.arcana_sessions.get_user_id",
+               AsyncMock(return_value=FAKE_USER_ID)):
+        d = client.get("/api/arcana/sessions/sWk").json()
+    assert d["from_work"] == {"id": "9", "title": "Разложить на Олю"}
+
+
 def test_arcana_session_detail_404_not_found(client):
     mock_sess = _mock_sessions_repo_all(find_result=None)
     with patch("miniapp.backend.routes.arcana_sessions._sessions_repo", mock_sess), \
@@ -692,6 +714,39 @@ def test_arcana_ritual_detail_finance_fields(client):
         d = client.get("/api/arcana/rituals/rF").json()
     assert d["price"] == 5000 and d["paid"] == 2000
     assert d["debt"] == 3000 and d["source"] == "💵 Наличные"
+
+
+def test_arcana_ritual_detail_from_work_and_writeoff(client):
+    """#10: карточка ритуала показывает плановую Работу; #8: флаг списания."""
+    from datetime import datetime, timezone
+    entry = _make_ritual(
+        "rW", "Ритуал по плану", date="2026-04-19",
+        consumables="соль 50г",
+        work_id="42", work_title="Сделать ритуал защиты",
+        consumables_written_off=datetime(2026, 4, 19, tzinfo=timezone.utc),
+    )
+    with patch("miniapp.backend.routes.arcana_rituals._rituals_repo",
+               _mock_rituals_repo(find_by_id_result=entry)), \
+         patch("miniapp.backend.routes.arcana_rituals.today_user_tz",
+               AsyncMock(return_value=(_today_date(3), 3))), \
+         patch("miniapp.backend.routes.arcana_rituals.get_user_id",
+               AsyncMock(return_value=FAKE_USER_ID)):
+        d = client.get("/api/arcana/rituals/rW").json()
+    assert d["from_work"] == {"id": "42", "title": "Сделать ритуал защиты"}
+    assert d["consumables_written_off"] is True
+
+
+def test_arcana_ritual_list_omits_from_work_without_title(client):
+    """В списке work_title не подгружается → from_work=None (не «Работа»)."""
+    entry = _make_ritual("rL", "Ритуал", date="2026-04-19", work_id="42")
+    with patch("miniapp.backend.routes.arcana_rituals._rituals_repo",
+               _mock_rituals_repo(list_all_result=[entry])), \
+         patch("miniapp.backend.routes.arcana_rituals.today_user_tz",
+               AsyncMock(return_value=(_today_date(3), 3))), \
+         patch("miniapp.backend.routes.arcana_rituals.get_user_id",
+               AsyncMock(return_value=FAKE_USER_ID)):
+        d = client.get("/api/arcana/rituals").json()
+    assert d["rituals"][0]["from_work"] is None
 
 
 def test_arcana_ritual_404_wrong_owner(client):

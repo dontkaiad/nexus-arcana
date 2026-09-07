@@ -232,7 +232,7 @@ async def handle_add_ritual(message: Message, text: str, user_id: str = "") -> N
         if consumables:
             try:
                 from arcana.handlers.ritual_writeoff import propose_writeoff
-                await propose_writeoff(message, consumables, user_id)
+                await propose_writeoff(message, consumables, user_id, ritual_id=result.id)
             except Exception as e:
                 logger.warning("ritual writeoff propose failed: %s", e)
 

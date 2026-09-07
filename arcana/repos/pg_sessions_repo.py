@@ -21,10 +21,35 @@ from arcana.repos.sessions_tables import (
     engagement_type,
 )
 from arcana.repos.clients_tables import clients as t_clients
+from sqlalchemy import text as _sql_text
+
 from core.db import get_engine
 from core.payment import source_label
 
 logger = logging.getLogger("arcana.pg_sessions")
+
+
+def _attach_work_titles(entries: "List[TripletEntry]") -> None:
+    """#10: заполнить work_title у триплетов с work_id — отдельным запросом.
+    works не джойнится в _select_sessions (FK works→clients ломал бы
+    sessions-only тестовые схемы). None при любой ошибке."""
+    ids = {e.work_id for e in entries if getattr(e, "work_id", None)}
+    if not ids:
+        return
+    try:
+        # int_ids валидированы как int → безопасно интерполировать (и PG, и sqlite)
+        int_ids = [int(x) for x in ids]
+        in_clause = ",".join(str(i) for i in int_ids)
+        with get_engine().connect() as conn:
+            rows = conn.execute(
+                _sql_text("SELECT id, title FROM works WHERE id IN (%s)" % in_clause)
+            ).fetchall()
+        title_by_id = {str(r[0]): r[1] for r in rows}
+        for e in entries:
+            if getattr(e, "work_id", None):
+                e.work_title = title_by_id.get(str(e.work_id))
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.debug("_attach_work_titles failed: %s", exc)
 
 # ── Code maps ─────────────────────────────────────────────────────────────────
 
@@ -119,6 +144,8 @@ def _row_to_triplet(row) -> TripletEntry:
         photo_url=row.photo_url or None,
         user_id=getattr(row, "user_id", None) or "",
         payment_source=source_label(getattr(row, "payment_code", None)),  # #7
+        work_id=str(row.work_id) if getattr(row, "work_id", None) else None,   # #10
+        work_title=getattr(row, "work_title", None) or None,                    # #10
     )
 
 
@@ -174,6 +201,7 @@ def _select_sessions():
             sessions.c.photo_url,
             sessions.c.client_id,
             sessions.c.user_id,
+            sessions.c.work_id,
             session_outcome.c.code.label("outcome_code"),
             session_category.c.emoji.label("category_emoji"),
             session_category.c.label.label("category_label_col"),
@@ -256,7 +284,11 @@ class PgSessionsRepo:
             row = conn.execute(
                 _select_sessions().where(sessions.c.id == sid)
             ).fetchone()
-        return _row_to_triplet(row) if row else None
+        if not row:
+            return None
+        entry = _row_to_triplet(row)
+        _attach_work_titles([entry])
+        return entry
 
     def _list_by_client_sync(self, client_id: str) -> List[PrevSessionSnippet]:
         cid_int = _resolve_client_id(None, client_id)
@@ -476,13 +508,16 @@ class PgSessionsRepo:
                 entry_slug = e.id
             if entry_slug == slug:
                 result.append(e)
+        _attach_work_titles(result)
         return result
 
     def _list_by_subject_sync(self, subject_id: int, user_id: str) -> List[TripletEntry]:
         """Все сессии, привязанные к теме (subject_id) — за ВСЁ время, поперёк
         любых формулировок session_name (#189)."""
         all_entries = self._list_all_sync(user_id, None)
-        return [e for e in all_entries if e.subject_id == subject_id]
+        result = [e for e in all_entries if e.subject_id == subject_id]
+        _attach_work_titles(result)
+        return result
 
     def _archive_sync(self, session_id: str) -> bool:
         try:

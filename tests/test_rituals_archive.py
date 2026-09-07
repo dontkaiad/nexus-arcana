@@ -93,3 +93,23 @@ async def test_archived_still_found_by_id(repo):
 @pytest.mark.asyncio
 async def test_archive_bad_id_returns_false(repo):
     assert await repo.archive("not-an-int") is False
+
+
+@pytest.mark.asyncio
+async def test_mark_consumables_written_off(repo):
+    """#8: mark_consumables_written_off ставит timestamp; find_by_id его отдаёт."""
+    assert (await repo.find_by_id("1")).consumables_written_off is None
+    ok = await repo.mark_consumables_written_off("1")
+    assert ok is True
+    assert (await repo.find_by_id("1")).consumables_written_off is not None
+    assert await repo.mark_consumables_written_off("nope") is False
+
+
+@pytest.mark.asyncio
+async def test_find_by_id_work_title_none_without_works_table(repo):
+    """#10: works не в rituals-slice схеме — _work_title гасит ошибку → None."""
+    with repo._engine.begin() as conn:
+        conn.execute(rituals.update().where(rituals.c.id == 1).values(work_id=99))
+    found = await repo.find_by_id("1")
+    assert found.work_id == "99"
+    assert found.work_title is None

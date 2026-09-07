@@ -195,6 +195,7 @@ async def propose_writeoff(
     message: Message,
     supplies_text: str,
     user_id: str = "",
+    ritual_id: str = "",
 ) -> None:
     """Распарсить расходники + показать сообщение с превью + сохранить pending."""
     if not supplies_text or not supplies_text.strip():
@@ -206,7 +207,7 @@ async def propose_writeoff(
     if not rows:
         return
     uid = message.from_user.id
-    _save(uid, {"rows": rows, "user_id": user_id})
+    _save(uid, {"rows": rows, "user_id": user_id, "ritual_id": ritual_id or ""})
     await message.answer(_format_preview(rows), reply_markup=_kb(uid))
 
 
@@ -243,6 +244,14 @@ async def cb_apply(cb: CallbackQuery, user_id: str = "") -> None:
         await cb.answer("Запрос устарел.")
         return
     notes = await _apply(pending["rows"], pending.get("user_id") or user_id)
+    # #8: отметить на ритуале, что расходники списаны из инвентаря.
+    rid = pending.get("ritual_id") or ""
+    if rid and any(r.get("found") for r in pending["rows"]):
+        try:
+            from arcana.repos.pg_rituals_repo import PgRitualsRepo
+            await PgRitualsRepo().mark_consumables_written_off(rid)
+        except Exception as e:
+            logger.warning("mark_consumables_written_off(%s) failed: %s", rid, e)
     _drop(uid)
     await cb.answer("Списано.")
     text = "🕯️ Списано:\n" + "\n".join(f"• {n}" for n in notes)

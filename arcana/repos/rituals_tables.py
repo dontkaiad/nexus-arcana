@@ -1,6 +1,7 @@
 """arcana/repos/rituals_tables.py — SQLAlchemy Core table definitions for the rituals slice.
 
-These definitions mirror migration 022e99f6431d exactly.
+These definitions mirror migration 022e99f6431d plus later additive
+migrations (work_id — s9t0u1v2w3x4, #151; consumables_written_off — #8).
 All lookup tables share the same shape (id/code/emoji/label/sort).
 """
 from __future__ import annotations
@@ -74,6 +75,10 @@ rituals = Table(
     Column("notes",       Text),
 
     Column("archived", Boolean, nullable=False, server_default=text("false")),
+
+    # #8: timestamp когда расходники ритуала списаны из инвентаря
+    # (arcana/handlers/ritual_writeoff.py). NULL → не списывали.
+    Column("consumables_written_off", TIMESTAMP(timezone=True)),
 
     Column("created_at", TIMESTAMP(timezone=True), server_default=text("now()")),
     Column("updated_at", TIMESTAMP(timezone=True), server_default=text("now()")),

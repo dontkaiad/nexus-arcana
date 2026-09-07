@@ -35,6 +35,12 @@ class Ritual:
     photo_url: Optional[str] = None
     payment_source: Optional[str] = None  # display label, e.g. "💵 Наличные"
     barter_what: str = ""
+    # #10: обратная связь на плановую Работу (sessions/rituals.work_id → works, #151)
+    work_id: Optional[str] = None
+    work_title: Optional[str] = None
+    # #8: момент списания расходников из инвентаря после ритуала
+    # (arcana/handlers/ritual_writeoff.py). None → не списывали.
+    consumables_written_off: Optional[datetime] = None
 
 
 def goal_label(goal: str) -> str:

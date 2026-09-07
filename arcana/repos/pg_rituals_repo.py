@@ -25,6 +25,21 @@ from arcana.repos.rituals_tables import (
     rituals,
 )
 from core.db import get_engine
+from sqlalchemy import text as _sql_text
+
+
+def _work_title(conn, work_id: Optional[str]) -> Optional[str]:
+    """SELECT title FROM works WHERE id = work_id. None при любой ошибке
+    (нет таблицы works в тестовой схеме, битый id и т.п.)."""
+    if not work_id:
+        return None
+    try:
+        row = conn.execute(
+            _sql_text("SELECT title FROM works WHERE id = :wid"), {"wid": int(work_id)}
+        ).fetchone()
+        return row[0] if row else None
+    except Exception:
+        return None
 from core.payment import source_label
 
 logger = logging.getLogger("arcana.pg_rituals")
@@ -198,6 +213,9 @@ def _row_to_ritual(row) -> Ritual:
         photo_url=getattr(row, "photo_url", None) or None,
         payment_source=source_label(getattr(row, "payment_code", None)),
         barter_what=getattr(row, "barter_what", None) or "",
+        work_id=str(row.work_id) if getattr(row, "work_id", None) else None,
+        work_title=getattr(row, "work_title", None) or None,
+        consumables_written_off=getattr(row, "consumables_written_off", None) or None,
     )
 
 
@@ -237,6 +255,8 @@ def _select_rituals():
             rituals.c.notes,
             rituals.c.duration_min,
             rituals.c.barter_what,
+            rituals.c.work_id,
+            rituals.c.consumables_written_off,
             oc.c.code.label("outcome_code"),
             mp.c.code.label("purpose_code"),
             rp.c.code.label("place_code"),
@@ -481,7 +501,15 @@ class PgRitualsRepo:
         stmt = _select_rituals().where(rituals.c.id == rid)
         with get_engine().connect() as conn:
             row = conn.execute(stmt).fetchone()
-        return _row_to_ritual(row) if row else None
+            if not row:
+                return None
+            ritual = _row_to_ritual(row)
+            # #10: подтянуть заголовок плановой Работы (отдельным запросом —
+            # не джойним works в _select_rituals, чтобы не тащить FK-на-clients
+            # в rituals-only тестовые схемы).
+            if ritual.work_id:
+                ritual.work_title = _work_title(conn, ritual.work_id)
+        return ritual
 
     def _update_photo_url_sync(self, ritual_id: str, url: str) -> bool:
         try:
@@ -515,6 +543,25 @@ class PgRitualsRepo:
     async def set_work_id(self, ritual_id: str, work_id: str) -> bool:
         """Привязать ритуал к Работе (#151): set work_id."""
         return await asyncio.to_thread(self._set_work_id_sync, ritual_id, work_id)
+
+    def _mark_consumables_written_off_sync(self, ritual_id: str) -> bool:
+        try:
+            rid = int(ritual_id)
+        except (ValueError, TypeError):
+            return False
+        with get_engine().begin() as conn:
+            res = conn.execute(
+                rituals.update()
+                .where(rituals.c.id == rid)
+                .values(consumables_written_off=datetime.now(timezone.utc))
+            )
+        return res.rowcount > 0
+
+    async def mark_consumables_written_off(self, ritual_id: str) -> bool:
+        """Отметить, что расходники ритуала списаны из инвентаря (#8)."""
+        return await asyncio.to_thread(
+            self._mark_consumables_written_off_sync, ritual_id
+        )
 
     def _set_props_sync(self, ritual_id: str, fields: dict) -> bool:
         try:

@@ -184,6 +184,11 @@ def _serialize_triplet_pg(
         "debt": max(0, int(round(float(t.amount or 0))) - int(round(float(t.paid or 0)))),
         "source": t.payment_source or None,
         "barter_what": t.barter_what or None,
+        # #10: плановая Работа, из которой вырос расклад (sessions.work_id → works).
+        # work_title populated only on detail paths (by-slug / by-id), not in lists.
+        "from_work": ({"id": t.work_id, "title": t.work_title}
+                      if getattr(t, "work_id", None) and getattr(t, "work_title", None)
+                      else None),
         "photo_url": t.photo_url,
     }
 

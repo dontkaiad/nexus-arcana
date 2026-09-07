@@ -55,6 +55,44 @@ async def test_propose_writeoff_shows_preview_with_inventory_match():
 
 
 @pytest.mark.asyncio
+async def test_propose_writeoff_stores_ritual_id():
+    from arcana.handlers.ritual_writeoff import propose_writeoff, _load
+    msg = MagicMock()
+    msg.from_user.id = 101
+    msg.answer = AsyncMock()
+    with patch("arcana.handlers.ritual_writeoff.parse_supplies",
+               AsyncMock(return_value=[{"name": "соль", "qty": 50, "unit": "г"}])), \
+         patch("arcana.handlers.ritual_writeoff.inventory_search",
+               AsyncMock(return_value=[{"name": "соль", "quantity": 200}])):
+        await propose_writeoff(msg, "соль 50г", user_id="u1", ritual_id="777")
+    assert _load(101)["ritual_id"] == "777"
+
+
+@pytest.mark.asyncio
+async def test_apply_callback_marks_ritual_written_off():
+    """#8: на ✅ Списать — mark_consumables_written_off(ritual_id)."""
+    from arcana.handlers import ritual_writeoff
+    from arcana.handlers.ritual_writeoff import cb_apply, _save
+    _save(55, {
+        "rows": [{"name": "соль", "needed": 50, "unit": "г", "current": 200,
+                  "after": 150, "found": True, "inventory_name": "соль"}],
+        "user_id": "u1", "ritual_id": "777",
+    })
+    cb = MagicMock()
+    cb.from_user.id = 55
+    cb.data = "wo_apply:55"
+    cb.answer = AsyncMock()
+    cb.message.edit_text = AsyncMock()
+    mark = AsyncMock(return_value=True)
+    repo = MagicMock(mark_consumables_written_off=mark)
+    with patch("arcana.handlers.ritual_writeoff.inventory_update",
+               AsyncMock(return_value={"updated": "соль", "quantity": 150})), \
+         patch("arcana.repos.pg_rituals_repo.PgRitualsRepo", return_value=repo):
+        await cb_apply(cb, user_id="u1")
+    mark.assert_awaited_once_with("777")
+
+
+@pytest.mark.asyncio
 async def test_apply_callback_writes_inventory():
     from arcana.handlers.ritual_writeoff import _apply
     rows = [

@@ -35,6 +35,9 @@ class TripletEntry:
     photo_url: Optional[str] = None
     user_id: str = ""  # владелец записи, для ownership-проверок (#108)
     payment_source: Optional[str] = None  # display label «💳 Карта»/«💵 Наличные»/«🔄 Бартер» (#7)
+    # #10: обратная связь на плановую Работу (sessions.work_id → works, #151)
+    work_id: Optional[str] = None
+    work_title: Optional[str] = None
 
 
 @dataclass

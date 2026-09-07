@@ -5356,6 +5356,11 @@ function ArWork({ s, openWork }) {
                   {w.deadline_label && !w.is_overdue && (
                     <span>{w.deadline_label}</span>
                   )}
+                  {/* #8: расклад/ритуал в Работах = запланированная практика.
+                      Станет 🃏 Раскладом / 🕯 Ритуалом → Работа закроется. */}
+                  {/(Расклад|Ритуал)/i.test(w.category || "") && (
+                    <span style={{ color: s.acc }}> · 🔵 запланирован</span>
+                  )}
                   {/* #10: напоминание — паритет с Nexus задачами */}
                   {(w.reminder_time || w.reminder) && (
                     <span> · 🔔 {w.reminder_time || (w.reminder || "").slice(0, 16).replace("T", " ")}</span>
@@ -5618,6 +5623,12 @@ function TripletSlide({ s, t, deckId, onVerdict }) {
         <div style={{ fontSize: fs(11), opacity: 0.65, marginTop: 4, display: "flex", gap: 6, flexWrap: "wrap" }}>
           {[t.client, t.deck, t.date].filter(Boolean).map((it, i) => <span key={i}>{it}</span>)}
         </div>
+        {/* #10: связь с плановой Работой (sessions.work_id → works) */}
+        {t.fromWork && (
+          <div style={{ fontSize: fs(11), color: s.tS, marginTop: 4 }}>
+            🔮 из работы «{t.fromWork.title}»
+          </div>
+        )}
       </Glass>
 
       <SectionLabel s={s}>Карты</SectionLabel>
@@ -5682,6 +5693,12 @@ function SessionPagerOverview({ s, group, onJump, onSummarize, summarizing }) {
           {[group.client, group.firstDate, `${group.triplets.length} триплетов`]
             .filter(Boolean).map((it, i) => <span key={i}>{it}</span>)}
         </div>
+        {/* #10: связь с плановой Работой (sessions.work_id → works) */}
+        {group.triplets[0]?.fromWork && (
+          <div style={{ fontSize: fs(11), color: s.tS, marginTop: 4 }}>
+            🔮 из работы «{group.triplets[0].fromWork.title}»
+          </div>
+        )}
       </Glass>
 
       <SessionPhoto
@@ -6146,6 +6163,13 @@ function RitualDetail({ s, id }) {
             <span key={i}>{it}</span>
           ))}
         </div>
+        {/* #8: ритуал в PG всегда «проведён» (плановый живёт в Работах). #10: связь с плановой Работой. */}
+        <div style={{ fontSize: fs(11), marginTop: 6, display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+          <span className="pill" style={{ background: s.acc + "22", color: s.acc }}>✅ проведён</span>
+          {r.fromWork && (
+            <span style={{ color: s.tS }}>🔮 из работы «{r.fromWork.title}»</span>
+          )}
+        </div>
         {r.question && (
           <div style={{ fontSize: fs(12), color: s.tS, marginTop: 6 }}>
             <span style={{ opacity: 0.7 }}>❓ </span>{r.question}
@@ -6176,8 +6200,14 @@ function RitualDetail({ s, id }) {
 
       {/* Расходники */}
       <Glass s={s} style={{ padding: "12px 14px", marginBottom: 10 }}>
-        <div style={{ fontSize: fs(13), color: s.text, fontWeight: 500, marginBottom: 8 }}>
-          🕯️ Расходники
+        <div style={{ fontSize: fs(13), color: s.text, fontWeight: 500, marginBottom: 8, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <span>🕯️ Расходники</span>
+          {/* #8: факт списания из 📦 Инвентаря после ритуала (ritual_writeoff) */}
+          {(r.supplies.length > 0 || r.writtenOff) && (
+            <span style={{ fontSize: fs(11), fontWeight: 400, color: r.writtenOff ? s.acc : s.tS }}>
+              {r.writtenOff ? "📦 списаны из инвентаря" : "📦 не списаны"}
+            </span>
+          )}
         </div>
         {r.supplies.map((x, i) => (
           <div

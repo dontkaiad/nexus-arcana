@@ -2,7 +2,8 @@
 
 Code conforms to: 0bc132e. (+ #144: user_notion_id → user_id; + #10: Mini App
 `/api/arcana/works` serializes `reminder`/`reminder_time`, parity with Nexus
-tasks.) This spec describes the works data model as of
+tasks; + #8/#10: planned-practice badge + `from_work` reverse-link shown on
+the event card.) This spec describes the works data model as of
 that commit; update it in the same PR that changes the model.
 
 > Contract, not snapshot. Describes the persistent model, the guarantees of
@@ -76,6 +77,10 @@ Owned by the migrations (source of truth). Examples, non-exhaustive:
   session/ritual finds the one open Work for that client+category, stamps
   `work_id`, and closes the Work — in PG, via `core/work_relation.py` (no Notion).
   A junction table was rejected because the cardinality is 1:1 (see ARCHITECTURE.md).
+  So an **open** Work of category `🃏 Расклад` / `✨ Ритуал` *is* the planned
+  form of that practice (Mini App marks it `🔵 запланирован`); once performed
+  it closes and the event card shows the reverse link (`from_work` — see
+  SESSIONS.md / RITUALS.md).
 - **`engagement_type` (client/personal) is NOT on works.** That lookup lives
   on `sessions`/`rituals` (`type_id`). A work carries only `priority`/`status`
   plus a `category` label; client attribution is via `client_id` only.
@@ -109,7 +114,8 @@ attributes; reminder jobs are derived from the columns, not stored.
   plus `reminder_time` (viewer-local `HH:MM`), mirroring the Nexus tasks
   payload; the `ArWork` card renders a 🔔 chip. `reminder` is read-only in
   the Mini App (set/reschedule is bot-only, `set_deadline` /
-  `reschedule_cycle`).
+  `reschedule_cycle`). The `ArWork` card also renders a `🔵 запланирован`
+  badge for open practice-category works (`Расклад` / `Ритуал`), #8.
 
 ## Model routing (from code)
 
