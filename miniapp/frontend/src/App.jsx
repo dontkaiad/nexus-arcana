@@ -5033,18 +5033,14 @@ function ArArcanaPurchases({ s }) {
   );
 }
 
-const AR_RITUAL_RESULT_TABS = [
-  ["all", "Все"], ["unverified", "⏳ Не проверено"], ["verified", "✅ Проверено"],
-];
-
 function ArRitualsList({ s, openRitual }) {
   const [goal, setGoal] = useState("all");
-  const [res, setRes] = useState("all");  // #153: статус-фильтр по итогу
+  const [onlyUnv, setOnlyUnv] = useState(false);  // #153: только непроверенные
   const qs = [];
   if (goal !== "all") qs.push(`goal=${encodeURIComponent(goal)}`);
-  if (res !== "all") qs.push(`result=${res}`);
+  if (onlyUnv) qs.push("result=unverified");
   const path = "/api/arcana/rituals" + (qs.length ? `?${qs.join("&")}` : "");
-  const { data, loading, error, refetch } = useApi(path, [goal, res]);
+  const { data, loading, error, refetch } = useApi(path, [goal, onlyUnv]);
   const list = loading || error ? [] : adaptRituals(data);
   const counts = data?.counts || {};
   // Цели строим из полного набора, а не из отфильтрованного списка.
@@ -5053,13 +5049,14 @@ function ArRitualsList({ s, openRitual }) {
 
   return (
     <>
-      <div className="pills" style={{ marginBottom: 2 }}>
-        {AR_RITUAL_RESULT_TABS.map(([k, l]) => (
-          <Pill key={k} s={s} active={res === k} onClick={() => setRes(k)}>
-            {l}{k === "unverified" && counts.unverified > 0 ? ` ${counts.unverified}` : ""}
+      {/* Один тумблер вместо ряда кнопок: показать только те, где итог ещё не отмечен. */}
+      {(onlyUnv || counts.unverified > 0) && (
+        <div style={{ display: "flex" }}>
+          <Pill s={s} active={onlyUnv} onClick={() => setOnlyUnv((v) => !v)}>
+            ⏳ Непроверенные{counts.unverified > 0 ? ` · ${counts.unverified}` : ""}
           </Pill>
-        ))}
-      </div>
+        </div>
+      )}
       {/* Цель ритуала (magical_purpose: 🛡️ Защита / 🧲 Привлечение / …) —
           НЕ финансовые цели (те в Финансах). Показываем ряд, только если
           у ритуалов реально несколько разных целей. */}
