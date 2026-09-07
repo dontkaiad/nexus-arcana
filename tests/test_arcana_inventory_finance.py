@@ -178,3 +178,48 @@ def test_inventory_list_returns_categories_with_counts(client):
     assert cats["🕯️ Расходники"] == 2
     assert cats["🌿 Травы/Масла"] == 1
     assert cats["🃏 Карты/Колоды"] == 0
+
+
+# ── #45/C: 🛒 Покупки + 📋 Чеклисты Арканы (тот же arcana_inventory) ─────────
+
+def test_arcana_purchases_filters_by_list_type(client):
+    from core.repos.pg_nexus_lists_repo import InventoryItem
+    rows = [
+        InventoryItem(id="p1", name="соль розовая", list_type="покупки", status="not_started",
+                      category="🕯️ Расходники", user_id=FAKE_USER_ID),
+        InventoryItem(id="p2", name="свечи", list_type="покупки", status="done", user_id=FAKE_USER_ID),
+        InventoryItem(id="i1", name="в стоке", list_type="инвентарь", status="not_started", user_id=FAKE_USER_ID),
+    ]
+    mock_repo = MagicMock(get_list=AsyncMock(return_value=rows))
+    with patch("miniapp.backend.routes.arcana_inventory._arcana_inv_repo", mock_repo), \
+         patch("miniapp.backend.routes.arcana_inventory.get_user_id", AsyncMock(return_value=FAKE_USER_ID)):
+        r = client.get("/api/arcana/purchases")
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert {x["id"] for x in body["items"]} == {"p1", "p2"}
+    p1 = next(x for x in body["items"] if x["id"] == "p1")
+    assert p1["done"] is False and p1["cat"] == "🕯️ Расходники"
+
+
+def test_arcana_checklists_excludes_work_subtasks_and_barter(client):
+    from core.repos.pg_nexus_lists_repo import InventoryItem
+    rows = [
+        InventoryItem(id="c1", name="зажечь свечу", list_type="чеклист", status="not_started",
+                      group_name="Ритуал защиты", user_id=FAKE_USER_ID),
+        InventoryItem(id="c2", name="прочитать заговор", list_type="чеклист", status="done",
+                      group_name="Ритуал защиты", user_id=FAKE_USER_ID),
+        InventoryItem(id="c3", name="подзадача работы", list_type="чеклист", status="not_started",
+                      group_name="X", works_id="42", user_id=FAKE_USER_ID),
+        InventoryItem(id="c4", name="бартер", list_type="чеклист", status="not_started",
+                      group_name="Y", category="🔄 Бартер", user_id=FAKE_USER_ID),
+    ]
+    mock_repo = MagicMock(get_list=AsyncMock(return_value=rows))
+    with patch("miniapp.backend.routes.arcana_inventory._arcana_inv_repo", mock_repo), \
+         patch("miniapp.backend.routes.arcana_inventory.get_user_id", AsyncMock(return_value=FAKE_USER_ID)):
+        r = client.get("/api/arcana/checklists")
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert len(body["checklists"]) == 1
+    cl = body["checklists"][0]
+    assert cl["name"] == "Ритуал защиты" and cl["total"] == 2 and cl["done"] == 1
+    assert {i["id"] for i in cl["items"]} == {"c1", "c2"}

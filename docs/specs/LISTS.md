@@ -1,6 +1,6 @@
 # LISTS — data-model contract (🗒️ Списки)
 
-Code conforms to: b9d3367 (+ this change: #149 — notion_id column dropped). (+ #144: user_notion_id → user_id; + #45: Mini App `PATCH /api/lists/{id}` — edit a list/inventory item.) This spec describes the lists data model as of
+Code conforms to: b9d3367 (+ this change: #149 — notion_id column dropped). (+ #144: user_notion_id → user_id; + #45: Mini App `PATCH /api/lists/{id}` edit; + #45/C: Arcana 🛒 Покупки + 📋 Чеклисты surfaced in the Ритуалы / Работы tabs.) This spec describes the lists data model as of
 that commit; update it in the same PR that changes the model.
 
 > Contract, not snapshot. Describes the persistent model, the guarantees of
@@ -152,12 +152,24 @@ than reopened. `archived` hides an item from all default reads.
   (inventory write-off), `core/subtasks_handler.py` (checklist children).
 - Cross-domain — `core/cash_register.py` (open-barter count),
   `nexus/handlers/finance.py` (purchase → expense), `core/classifier.py`.
-- Mini App — `miniapp/backend/routes/lists.py` (`GET /api/lists`),
-  `arcana_inventory.py`, `arcana_barter.py`, `writes.py`
-  (`POST /api/lists`, `…/{id}/done|checkout|delete`, and — since #45 —
-  `PATCH /api/lists/{id}` editing name / category / note / store /
-  price_plan / priority / qty / expires / recurring, table auto-resolved
-  and the barter category kept arcana-only), `categories.py`, `arcana_today.py`.
+- Mini App —
+  - **Nexus Списки**: `miniapp/backend/routes/lists.py` (`GET /api/lists`,
+    `nexus_lists` only, `?type=buy|check|inv`).
+  - **Arcana**: the three list_types are surfaced by view, all reading
+    `arcana_inventory` (#45/C):
+    - `arcana_inventory.py` — `GET /api/arcana/inventory` (📦, segment in the
+      Ритуалы tab), `GET /api/arcana/purchases` (🛒, `list_type='покупки'`,
+      Ритуалы tab), `GET /api/arcana/checklists` (📋, `list_type='чеклист'`
+      **without `works_id`, non-barter**, `Работы` tab — checklist-per-work
+      subtasks stay on the work card via `arcana_today.py`).
+    - `arcana_barter.py` — `🔄 Бартер` checklists (Клиенты tab).
+  - **writes** (`writes.py`, both stores): `POST /api/lists` (`bot=arcana`
+    routes to `arcana_inventory`), `…/{id}/done|checkout|delete`, and — since
+    #45 — `PATCH /api/lists/{id}` (table auto-resolved; edits name / category
+    / note / qty / expires / recurring, plus store / price_plan / priority
+    for `nexus_lists` only since `arcana_inventory` lacks those columns;
+    barter category kept arcana-only).
+  - `categories.py`, `arcana_today.py`.
 
 ## Model routing (from code)
 
@@ -184,4 +196,5 @@ text). No Sonnet, no Opus. Reads/writes/status are pure SQL.
 - `arcana/handlers/barter_prompt.py`, `arcana/handlers/ritual_writeoff.py`
 - `core/subtasks_handler.py` — checklist children (task/works relation)
 - `core/cash_register.py` — open-barter count
-- `miniapp/backend/routes/lists.py`, `arcana_inventory.py`, `arcana_barter.py`
+- `miniapp/backend/routes/lists.py` (Nexus), `arcana_inventory.py`
+  (`/api/arcana/{inventory,purchases,checklists}` — #45/C), `arcana_barter.py`

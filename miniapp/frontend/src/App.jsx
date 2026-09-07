@@ -4952,18 +4952,84 @@ function DebtsSheet({ s, data, onClose }) {
 // ═══════════════════════════════════════════════════════════════
 
 function ArRituals({ s, openRitual }) {
-  const [seg, setSeg] = useState("rituals"); // rituals | inv
+  const [seg, setSeg] = useState("rituals"); // rituals | buy | inv
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
       <div className="page-title">Ритуалы</div>
-      <div style={{ display: "flex", gap: 6 }}>
+      <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
         <Pill s={s} active={seg === "rituals"} onClick={() => setSeg("rituals")}>🕯️ Ритуалы</Pill>
+        <Pill s={s} active={seg === "buy"} onClick={() => setSeg("buy")}>🛒 Покупки</Pill>
         <Pill s={s} active={seg === "inv"} onClick={() => setSeg("inv")}>📦 Инвентарь</Pill>
       </div>
-      {seg === "rituals"
-        ? <ArRitualsList s={s} openRitual={openRitual} />
-        : <ArInventory s={s} />}
+      {seg === "rituals" && <ArRitualsList s={s} openRitual={openRitual} />}
+      {seg === "buy" && <ArArcanaPurchases s={s} />}
+      {seg === "inv" && <ArInventory s={s} />}
     </div>
+  );
+}
+
+// #45/C: 🛒 Покупки практики — тот же arcana_inventory (list_type=покупки).
+// Магазина/цены/приоритета у arcana_inventory нет (нет колонок) — только
+// название / категория / заметка / кол-во / срок.
+function ArArcanaPurchases({ s }) {
+  const { data, loading, error, refetch } = useApi("/api/arcana/purchases");
+  const [editItem, setEditItem] = useState(null);
+  const [addOpen, setAddOpen] = useState(false);
+  const [name, setName] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [over, setOver] = useState({});
+
+  const items = (data?.items || []).map((x) => (x.id in over ? { ...x, done: over[x.id] } : x));
+  const active = items.filter((x) => !x.done);
+  const done = items.filter((x) => x.done);
+
+  const toggle = async (x) => {
+    if (x.done) return;
+    setOver((o) => ({ ...o, [x.id]: true }));
+    try { await apiPost(`/api/lists/${x.id}/done`, {}); } catch (_) { /* оптимистично */ }
+  };
+  const add = async () => {
+    if (!name.trim() || busy) return;
+    setBusy(true);
+    try {
+      await apiPost("/api/lists", { type: "buy", bot: "arcana", name: name.trim() });
+      setName(""); setAddOpen(false); refetch();
+    } catch (e) { alert("Не получилось: " + e.message); }
+    finally { setBusy(false); }
+  };
+
+  return (
+    <>
+      <div style={{ display: "flex", justifyContent: "flex-end" }}>
+        <Pill s={s} onClick={() => setAddOpen((v) => !v)}>{addOpen ? "× отмена" : "+ купить"}</Pill>
+      </div>
+      {addOpen && (
+        <div style={{ display: "flex", gap: 8 }}>
+          <div style={{ flex: 1 }}><Input s={s} value={name} onChange={setName} placeholder="Что докупить (соль, свечи…)" /></div>
+          <SubmitBtn s={s} disabled={!name.trim() || busy} label={busy ? "…" : "Добавить"} onClick={add} />
+        </div>
+      )}
+      {loading && <Empty s={s} text="Загружаю..." />}
+      {error && <ErrorBox s={s} error={error} refetch={refetch} />}
+      {!loading && !error && active.length === 0 && done.length === 0 && (
+        <Empty s={s} emoji="🛒" title="Список пуст" text="Всё что нужно — уже есть." />
+      )}
+      {active.map((x) => (
+        <BuyItemRow key={x.id} s={s} item={{ ...x, catFull: x.cat, cat: x.cat }} onToggle={toggle} onEdit={setEditItem} />
+      ))}
+      {done.length > 0 && (
+        <div style={{ fontSize: fs(11), color: s.tS, margin: "12px 0 4px" }}>✅ Куплено</div>
+      )}
+      {done.map((x) => (
+        <BuyItemRow key={x.id} s={s} item={{ ...x, catFull: x.cat, cat: x.cat }} onToggle={toggle} onEdit={setEditItem} />
+      ))}
+      <Sheet s={s} open={!!editItem} onClose={() => setEditItem(null)} title={editItem ? editItem.name : ""}>
+        {editItem && (
+          <ListItemSheet s={s} item={{ ...editItem, catFull: editItem.cat }} isInv
+            onDone={() => { setEditItem(null); refetch(); }} />
+        )}
+      </Sheet>
+    </>
   );
 }
 
@@ -5778,8 +5844,11 @@ const AR_WORK_TABS = [
 ];
 
 function ArWork({ s, openWork }) {
+  const [view, setView] = useState("works");  // works | checklists (#45/C)
   const [f, setF] = useState("active");  // #153: паритет с задачами Nexus
-  const { data, loading, error, refetch } = useApi(`/api/arcana/works?filter=${f}`, [f]);
+  const { data, loading, error, refetch } = useApi(
+    view === "works" ? `/api/arcana/works?filter=${f}` : null, [f, view]
+  );
   const [expanded, setExpanded] = useState({});
   const [subOverrides, setSubOverrides] = useState({});
 
@@ -5800,9 +5869,26 @@ function ArWork({ s, openWork }) {
     } catch (_) { /* оптимистично */ }
   };
 
+  if (view === "checklists") {
+    return (
+      <div style={{ display: "flex", flexDirection: "column", gap: 0 }}>
+        <div className="page-title" style={{ marginBottom: 10 }}>Работы</div>
+        <div style={{ display: "flex", gap: 6, marginBottom: 10 }}>
+          <Pill s={s} active={false} onClick={() => setView("works")}>🔮 Работы</Pill>
+          <Pill s={s} active onClick={() => setView("checklists")}>📋 Чеклисты</Pill>
+        </div>
+        <ArChecklists s={s} />
+      </div>
+    );
+  }
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 0 }}>
       <div className="page-title" style={{ marginBottom: 10 }}>Работы</div>
+      <div style={{ display: "flex", gap: 6, marginBottom: 10 }}>
+        <Pill s={s} active onClick={() => setView("works")}>🔮 Работы</Pill>
+        <Pill s={s} active={false} onClick={() => setView("checklists")}>📋 Чеклисты</Pill>
+      </div>
       <div className="pills" style={{ marginBottom: 10 }}>
         {AR_WORK_TABS.map(([k, l]) => (
           <Pill key={k} s={s} active={f === k} onClick={() => setF(k)}>
@@ -5896,6 +5982,72 @@ function ArWork({ s, openWork }) {
               </div>
             )}
           </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// #45/C: standalone-чеклисты Арканы (не привязаны к Работе, не бартер).
+function ArChecklists({ s }) {
+  const { data, loading, error, refetch } = useApi("/api/arcana/checklists");
+  const [open, setOpen] = useState({});
+  const [over, setOver] = useState({});
+
+  const toggle = async (id) => {
+    setOver((o) => ({ ...o, [id]: true }));
+    try { await apiPost(`/api/lists/${id}/done`, {}); } catch (_) { /* оптимистично */ }
+  };
+
+  if (loading) return <Empty s={s} text="Загружаю..." />;
+  if (error) return <ErrorBox s={s} error={error} refetch={refetch} />;
+  const lists = data?.checklists || [];
+  if (lists.length === 0) {
+    return <Empty s={s} emoji="📋" title="Чеклистов нет" text="Отдельные чеклисты появятся здесь. Подзадачи работ — на карточках Работ." />;
+  }
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+      {lists.map((cl) => {
+        const isOpen = open[cl.name] ?? true;
+        return (
+          <Glass key={cl.name} s={s} style={{ padding: "12px 14px" }}>
+            <div
+              onClick={() => setOpen((o) => ({ ...o, [cl.name]: !isOpen }))}
+              style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}
+            >
+              <span style={{ flex: 1, fontSize: fs(14), color: s.text, fontWeight: 500, fontFamily: H }}>
+                {cl.name}
+              </span>
+              <span style={{ fontSize: fs(12), color: s.tS }}>{cl.done}/{cl.total}</span>
+              <span style={{ fontSize: fs(12), color: s.tS }}>{isOpen ? "▾" : "▸"}</span>
+            </div>
+            {cl.total > 0 && (
+              <div style={{ marginTop: 6 }}>
+                <Bar s={s} pct={cl.total ? (cl.done / cl.total) * 100 : 0} color={s.acc} />
+              </div>
+            )}
+            {isOpen && (
+              <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 4 }}>
+                {cl.items.map((it) => {
+                  const done = over[it.id] ?? it.done;
+                  return (
+                    <div
+                      key={it.id}
+                      onClick={() => !done && toggle(it.id)}
+                      style={{
+                        display: "flex", alignItems: "center", gap: 8, fontSize: fs(13),
+                        cursor: done ? "default" : "pointer", opacity: done ? 0.5 : 1,
+                      }}
+                    >
+                      <span>{done ? "✅" : "◻️"}</span>
+                      <span style={{ textDecoration: done ? "line-through" : "none", color: s.text }}>{it.name}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </Glass>
         );
       })}
     </div>

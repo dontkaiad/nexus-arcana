@@ -108,6 +108,76 @@ async def inventory_categories(
     ]}
 
 
+# ── Покупки + Чеклисты (тот же arcana_inventory, другой list_type) — #45/C ────
+
+_BARTER_CAT = "🔄 Бартер"
+
+
+def _serialize_list_item(item: InventoryItem) -> dict:
+    return {
+        "id": item.id,
+        "name": item.name,
+        "cat": item.category or None,
+        "qty": item.quantity,
+        "note": item.note or None,
+        "expires": item.expires_at or None,
+        "recurring": bool(item.is_recurring),
+        "done": item.status == "done",
+        "group": item.group_name or None,
+    }
+
+
+@router.get("/arcana/purchases")
+async def list_purchases(
+    tg_id: int = Depends(current_user_id),
+    q: Optional[str] = Query(None),
+) -> dict[str, Any]:
+    """🛒 Покупки практики — расходники, которые надо докупить (list_type='покупки')."""
+    user_id = (await get_user_id(tg_id)) or ""
+    try:
+        rows = await _arcana_inv_repo.get_list(category=None, status=None, user_id=user_id)
+    except Exception as e:
+        logger.warning("arcana purchases query failed: %s", e)
+        rows = []
+    needle = (q or "").lower().strip()
+    items = [
+        _serialize_list_item(r) for r in rows
+        if r.list_type == "покупки"
+        and (not needle or needle in (r.name or "").lower() or needle in (r.note or "").lower())
+    ]
+    return {"items": items, "total": len(items)}
+
+
+@router.get("/arcana/checklists")
+async def list_checklists(
+    tg_id: int = Depends(current_user_id),
+) -> dict[str, Any]:
+    """📋 Standalone-чеклисты Арканы (list_type='чеклист' БЕЗ works_id, не бартер).
+    Пункты с works_id живут как подзадачи на карточках Работ; бартер — в Клиентах."""
+    user_id = (await get_user_id(tg_id)) or ""
+    try:
+        rows = await _arcana_inv_repo.get_list(category=None, status=None, user_id=user_id)
+    except Exception as e:
+        logger.warning("arcana checklists query failed: %s", e)
+        rows = []
+    groups: dict[str, list] = {}
+    for r in rows:
+        if r.list_type != "чеклист":
+            continue
+        if (r.works_id or "").strip():
+            continue
+        if (r.category or "") == _BARTER_CAT:
+            continue
+        groups.setdefault(r.group_name or "", []).append(_serialize_list_item(r))
+    out = [
+        {"name": name or "Без названия",
+         "items": sorted(its, key=lambda x: (x["done"], x["name"])),
+         "done": sum(1 for x in its if x["done"]), "total": len(its)}
+        for name, its in sorted(groups.items())
+    ]
+    return {"checklists": out, "total": sum(g["total"] for g in out)}
+
+
 # ── Mutations ────────────────────────────────────────────────────────────────
 
 class InventoryEditBody(BaseModel):
