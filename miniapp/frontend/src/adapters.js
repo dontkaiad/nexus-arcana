@@ -370,11 +370,13 @@ export function adaptFinanceGoals(data) {
       takenAt: d.taken_at || null,
     })),
     goals: (data.goals || []).map((g) => ({
+      key: g.key || '',
       n: g.name,
       t: g.target ?? 0,
       s: g.saved ?? 0,
       after: g.after || '—',
       monthly: g.monthly ?? 0,
+      fact: g.fact || '',
     })),
     closedDebts: (data.closed_debts || []).map((d) => ({
       n: d.name,
@@ -384,6 +386,7 @@ export function adaptFinanceGoals(data) {
       closedAt: d.closed_at || null,
     })),
     closedGoals: (data.closed_goals || []).map((g) => ({
+      key: g.key || '',
       n: g.name,
       t: g.target ?? 0,
       monthly: g.monthly ?? 0,

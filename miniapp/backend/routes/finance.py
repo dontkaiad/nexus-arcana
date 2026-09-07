@@ -346,9 +346,10 @@ def _serialize_goal(g: dict, today_d: date, all_debts_close: Optional[str]) -> d
         "key": g.get("key") or "",
         "name": g.get("name", ""),
         "target": target,
-        "saved": 0,
+        "saved": 0,  # реального трекинга накоплений нет — см. BUDGET.md / #44
         "monthly": monthly,
         "after": after,
+        "fact": g.get("fact") or "",  # #44: сырой текст факта для карточки-детали
     }
 
 

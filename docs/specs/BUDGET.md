@@ -1,6 +1,6 @@
 # BUDGET — data-model contract (бюджет / day limit)
 
-Code conforms to: 5a57b8c (+ this change: _calc_free_remaining formula). (+ #144: user_notion_id → user_id; + #6: debt free-text path via `parse_and_store`; + #136: debt-name morphology match.) This spec describes the budget data model as of
+Code conforms to: 5a57b8c (+ this change: _calc_free_remaining formula). (+ #144: user_notion_id → user_id; + #6: debt free-text path via `parse_and_store`; + #136: debt-name morphology match; + #44: goal create/edit/close from the Mini App.) This spec describes the budget data model as of
 that commit; update it in the same PR that changes the model.
 
 > Contract, not snapshot. Describes the derived model and the guarantees of
@@ -387,6 +387,30 @@ All in `core/budget.py` (pure async functions; no repo class):
   viewer's personal timezone (Mini App passes `today_user_tz(tg_id)`'s offset);
   default `3` reproduces the pre-fix server-MSK behavior.
 
+### Goals (`цель_*`)
+
+A goal is a single `💰 Лимит` Memory row keyed `цель_<slug(name)>` with the
+fact text `цель: <name> — <target>₽ · откладываю <monthly>₽/мес` (parsed by
+`GOAL_RE` → name / target / monthly). `цель_подушка` is **excluded** — the
+cushion is its own table (CUSHION.md). There is **no goals table**; a goal is
+fully described by that one fact.
+
+- **write paths** — the bot (`новая цель X 200к` / `убери цель X` /
+  `достигла цель X` → `handle_goal_command`; and the `/budget` Sonnet parse) and
+  the Mini App (`POST /api/finance/goal`, #44). All go through
+  `nexus/handlers/finance.py:_save_memory_entry` (upsert by `key` + owner) /
+  `MemoryRepo.set_active(..., False)` for close.
+- **rename** — the key is derived from the name, so a rename writes a new
+  `цель_<new-slug>` row and deactivates the old one (`POST /api/finance/goal`
+  with the old `key` in the body).
+- **monthly feeds the budget** — `load_budget_data` → `цели[].saving` →
+  `goals_saving` term of the day-limit formula (Invariants). Editing a goal's
+  monthly contribution changes the daily spend allowance.
+- **`saved` / progress is not tracked.** `_serialize_goal` returns `saved: 0`
+  and closed goals carry no percent — deactivation happens for many reasons
+  (replace / cleanup / manual), not only "reached target". A real
+  contributions ledger is a separate follow-up (see #44's discussion).
+
 ## Invariants
 
 - **Day-limit formula** (`budget_day_limit_from_plan`), term-by-term, each
@@ -501,9 +525,11 @@ directly:
   `load_budget_data`; `build_budget_message` renders the saved plan),
   `nexus/nexus_bot.py`.
 - Mini App — `miniapp/backend/routes/finance.py` (`get_limits`,
-  `load_budget_data`, `budget_day_limit_from_plan` for limit/goal views) and
+  `load_budget_data`, `budget_day_limit_from_plan` for limit/goal views;
+  `_serialize_goal` → `{key, name, target, saved:0, monthly, after, fact}`) and
   `miniapp/backend/routes/today.py` (`budget_day_limit_from_plan` for the day
-  limit).
+  limit). Goal writes: `POST /api/finance/goal` (create / edit incl. rename),
+  `POST /api/finance/goal/close` (`{key, achieved}`) — `miniapp/backend/routes/writes.py`, #44.
 
 ## Model routing (from code)
 
@@ -590,7 +616,9 @@ expense items → `_ONE_TIME_PARSE_SYSTEM`).
   `find_by_category`, `find_by_key_prefixes`, `find_by_exact_key` (budget facts)
 - `core/repos/pg_debts_repo.py` — active `i_owe` debts read by `load_budget_data`;
   `_find_row_sync` (exact-lower then `strip_case_ending` fallback, #136)
-- `nexus/handlers/finance.py` — `start_budget_setup`, `handle_budget_setup_text`,
+- `nexus/handlers/finance.py` — `_save_goal` / `_deactivate_goal` /
+  `handle_goal_command` (goal commands), `_save_memory_entry` (shared
+  `цель_*` / `лимит_*` upsert), `start_budget_setup`, `handle_budget_setup_text`,
   `start_budget_analysis`, `_run_budget_analysis`, `_build_sonnet_input`,
   `_period_spending` (shared already_spent/income-this-period source),
   `BUDGET_SONNET_SYSTEM`, `_BUDGET_PARSE_PROMPT_LEGACY`, `_format_plan`
@@ -606,6 +634,7 @@ expense items → `_ONE_TIME_PARSE_SYSTEM`).
   `BUDGET_TIGHT_WARN` (alias of `core.budget.BUDGET_TIGHT_THRESHOLD`),
   `_bdb`/`_BUDGET_DB` (session store), `_send_payday_review`
 - `nexus/nexus_bot.py` — `/budget` wiring, startup `proactive_budget_review`
-- `miniapp/backend/routes/finance.py` — limits/goals views, day limit
+- `miniapp/backend/routes/finance.py` — limits/goals views (`_serialize_goal`), day limit
+- `miniapp/backend/routes/writes.py` — `POST /api/finance/goal`, `/api/finance/goal/close` (#44); `POST /api/finance/debt`, `/api/finance/cushion/target`
 - `miniapp/backend/routes/today.py` — `budget_day_limit_from_plan` (day limit)
 - `docs/specs/MEMORY.md` — budget facts live in the `memories` table

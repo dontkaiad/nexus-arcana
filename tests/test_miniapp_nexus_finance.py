@@ -786,3 +786,72 @@ def test_view_today_query_uses_today_as_date_to(client):
     kw = query_mock.call_args.kwargs
     assert kw["date_to"] == today_str, f"date_to должен быть today={today_str!r}, не tomorrow={tomorrow_str!r}"
     assert kw["date_to"] != tomorrow_str
+
+
+# ── POST /api/finance/goal, /api/finance/goal/close (#44) ────────────────────
+
+def test_finance_goal_create(client):
+    with patch("nexus.handlers.finance._save_memory_entry", AsyncMock()) as m_save, \
+         patch("core.repos.memory_repo._repo.find_by_key_prefixes", AsyncMock(return_value=[])), \
+         patch("miniapp.backend.routes.writes.notify_user", AsyncMock()), \
+         patch("miniapp.backend.routes.writes.get_user_id", AsyncMock(return_value="u")):
+        r = client.post("/api/finance/goal", json={"name": "Ноутбук", "target": 200000, "monthly": 15000})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["key"] == "цель_ноутбук" and body["target"] == 200000 and body["monthly"] == 15000
+    key, fact, uid = m_save.await_args.args
+    assert key == "цель_ноутбук"
+    assert fact == "цель: Ноутбук — 200000₽ · откладываю 15000₽/мес"
+
+
+def test_finance_goal_rename_deactivates_old_key(client):
+    old = Memory(id="m-old", key="цель_старое_имя", is_current=True, fact="цель: Старое имя — 100000₽ · откладываю 0₽/мес")
+    with patch("nexus.handlers.finance._save_memory_entry", AsyncMock()), \
+         patch("core.repos.memory_repo._repo.find_by_key_prefixes", AsyncMock(return_value=[old])), \
+         patch("core.repos.memory_repo._repo.set_active", AsyncMock()) as m_deact, \
+         patch("miniapp.backend.routes.writes.notify_user", AsyncMock()), \
+         patch("miniapp.backend.routes.writes.get_user_id", AsyncMock(return_value="u")):
+        r = client.post("/api/finance/goal", json={
+            "name": "Новое имя", "target": 100000, "monthly": 0, "key": "цель_старое_имя",
+        })
+    assert r.status_code == 200, r.text
+    m_deact.assert_awaited_once_with(["m-old"], False)
+
+
+def test_finance_goal_close(client):
+    mem = Memory(id="m-g", key="цель_ноутбук", is_current=True, fact="цель: Ноутбук — 200000₽ · откладываю 0₽/мес")
+    with patch("core.repos.memory_repo._repo.find_by_key_prefixes", AsyncMock(return_value=[mem])), \
+         patch("core.repos.memory_repo._repo.set_active", AsyncMock()) as m_deact, \
+         patch("miniapp.backend.routes.writes.notify_user", AsyncMock()), \
+         patch("miniapp.backend.routes.writes.get_user_id", AsyncMock(return_value="u")):
+        r = client.post("/api/finance/goal/close", json={"key": "цель_ноутбук", "achieved": True})
+    assert r.status_code == 200, r.text
+    m_deact.assert_awaited_once_with(["m-g"], False)
+
+
+def test_finance_goal_close_rejects_cushion_key(client):
+    with patch("miniapp.backend.routes.writes.get_user_id", AsyncMock(return_value="u")):
+        r = client.post("/api/finance/goal/close", json={"key": "цель_подушка"})
+    assert r.status_code == 400
+
+
+def test_finance_goal_close_404_when_missing(client):
+    with patch("core.repos.memory_repo._repo.find_by_key_prefixes", AsyncMock(return_value=[])), \
+         patch("miniapp.backend.routes.writes.get_user_id", AsyncMock(return_value="u")):
+        r = client.post("/api/finance/goal/close", json={"key": "цель_нет_такой"})
+    assert r.status_code == 404
+
+
+def test_finance_view_goals_serializes_fact(client):
+    tz = 3
+    budget = {"доходы": [], "постоянные": [], "лимиты": [], "долги": [],
+              "цели": [{"name": "X", "target": 100000, "saving": 8000, "key": "цель_x",
+                        "fact": "цель: X — 100000₽ · откладываю 8000₽/мес"}]}
+    with patch("miniapp.backend.routes.finance.load_budget_data", AsyncMock(return_value=budget)), \
+         patch("miniapp.backend.routes.finance._mem_repo.find_by_category", AsyncMock(return_value=[])), \
+         patch("core.repos.pg_debts_repo._repo.list_closed", AsyncMock(return_value=[])), \
+         patch("miniapp.backend.routes.finance.today_user_tz", AsyncMock(return_value=(_today_date(tz), tz))), \
+         patch("miniapp.backend.routes.finance.get_user_id", AsyncMock(return_value="")):
+        r = client.get("/api/finance?view=goals")
+    assert r.status_code == 200
+    assert r.json()["goals"][0]["fact"] == "цель: X — 100000₽ · откладываю 8000₽/мес"

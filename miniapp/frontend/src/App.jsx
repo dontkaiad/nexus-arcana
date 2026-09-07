@@ -1573,6 +1573,7 @@ function NxFinance({ s }) {
   const [finDay, setFinDay] = useState(_nowDayStr);  // YYYY-MM-DD для вкладки «Сегодня»
   const [drillCat, setDrillCat] = useState(null);  // wave6.1.2
   const [drillDebt, setDrillDebt] = useState(null);  // wave8.51
+  const [drillGoal, setDrillGoal] = useState(null);  // #44 — null | {} (создание) | goal
   // Бэкенд GET /finance?view=month&month=YYYY-MM уже поддерживал произвольный
   // месяц — не хватало только UI навигации на фронте. Тот же паттерн для дня.
   const finPath = tab === "month"
@@ -1872,10 +1873,17 @@ function NxFinance({ s }) {
                 )}
               </Glass>
             ))}
-            <SectionLabel s={s}>Цели</SectionLabel>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <SectionLabel s={s}>Цели</SectionLabel>
+              <Pill s={s} onClick={() => setDrillGoal({})}>+ цель</Pill>
+            </div>
             {goals.length === 0 && <Empty s={s} text="Целей пока нет" />}
             {goals.map((g, i) => (
-              <Glass key={i} s={s} style={{ padding: "10px 14px", marginBottom: 4 }}>
+              <Glass
+                key={g.key || i} s={s}
+                style={{ padding: "10px 14px", marginBottom: 4, cursor: "pointer" }}
+                onClick={() => setDrillGoal(g)}
+              >
                 <div style={{ display: "flex", justifyContent: "space-between" }}>
                   <span style={{ fontSize: fs(16), color: s.text, fontWeight: 500 }}>{g.n}</span>
                   <span style={{ fontSize: fs(16), color: s.acc, fontWeight: 500 }}>
@@ -1885,11 +1893,6 @@ function NxFinance({ s }) {
                 <div style={{ fontSize: fs(13), color: s.tS, marginTop: 3 }}>
                   {g.monthly > 0 ? `откладываю ${g.monthly.toLocaleString()} ₽/мес` : `после ${g.after}`}
                 </div>
-                {g.t > 0 && (
-                  <div style={{ marginTop: 6 }}>
-                    <Bar s={s} pct={(g.s / g.t) * 100} color={s.acc} />
-                  </div>
-                )}
               </Glass>
             ))}
             {(closedDebts.length > 0 || closedGoals.length > 0) && (
@@ -1946,6 +1949,127 @@ function NxFinance({ s }) {
       >
         {drillDebt && <DebtDrillSheet s={s} debt={drillDebt} />}
       </Sheet>
+
+      {/* #44: детали цели + правка (name / target / взнос) + закрыть */}
+      <Sheet
+        s={s}
+        open={!!drillGoal}
+        onClose={() => setDrillGoal(null)}
+        title={drillGoal && drillGoal.n ? drillGoal.n : "Новая цель"}
+      >
+        {drillGoal && (
+          <GoalDrillSheet
+            s={s}
+            goal={drillGoal.n ? drillGoal : null}
+            onDone={() => { setDrillGoal(null); refetch(); }}
+          />
+        )}
+      </Sheet>
+    </div>
+  );
+}
+
+function GoalDrillSheet({ s, goal, onDone }) {
+  const isNew = !goal;
+  const [name, setName] = useState(goal?.n || "");
+  const [target, setTarget] = useState(goal ? String(goal.t || "") : "");
+  const [monthly, setMonthly] = useState(goal ? String(goal.monthly || "") : "");
+  const [busy, setBusy] = useState(null);
+  const [err, setErr] = useState("");
+
+  const tNum = parseInt((target || "").replace(/\s/g, ""), 10) || 0;
+  const mNum = parseInt((monthly || "").replace(/\s/g, ""), 10) || 0;
+  const valid = name.trim().length > 0 && tNum > 0;
+  const eta = goal?.after && goal.monthly > 0 ? goal.after : null;
+
+  const save = async () => {
+    if (!valid || busy) return;
+    setBusy("save"); setErr("");
+    try {
+      await apiPost("/api/finance/goal", {
+        name: name.trim(), target: tNum, monthly: mNum,
+        key: goal?.key || null,
+      });
+      onDone();
+    } catch (e) {
+      setErr(e.message || "не получилось");
+    } finally { setBusy(null); }
+  };
+
+  const close = async (achieved) => {
+    if (busy || !goal?.key) return;
+    setBusy(achieved ? "ach" : "drop"); setErr("");
+    try {
+      await apiPost("/api/finance/goal/close", { key: goal.key, achieved });
+      onDone();
+    } catch (e) {
+      setErr(e.message || "не получилось");
+    } finally { setBusy(null); }
+  };
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+      {!isNew && (
+        <Glass s={s} accent={s.acc} style={{ padding: "12px 14px" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+            <span style={{ fontSize: fs(13), color: s.acc }}>Цель</span>
+            <span style={{ fontSize: fs(18), color: s.acc, fontWeight: 600, fontFamily: H }}>
+              {(goal.t || 0).toLocaleString()} ₽
+            </span>
+          </div>
+          <div style={{ display: "flex", justifyContent: "space-between", marginTop: 6, fontSize: fs(13), color: s.tS }}>
+            <span>Взнос</span>
+            <span style={{ color: s.text }}>{goal.monthly > 0 ? `${goal.monthly.toLocaleString()} ₽/мес` : "не задан"}</span>
+          </div>
+          <div style={{ display: "flex", justifyContent: "space-between", marginTop: 4, fontSize: fs(13), color: s.tS }}>
+            <span>Готово</span>
+            <span style={{ color: s.text }}>{eta ? eta.replace(/^~/, "≈ ") : `после ${goal.after}`}</span>
+          </div>
+        </Glass>
+      )}
+
+      <div style={{ fontSize: fs(11), color: s.tS }}>Название</div>
+      <Input s={s} value={name} onChange={setName} placeholder="напр. Ноутбук" />
+      <div style={{ display: "flex", gap: 8 }}>
+        <div style={{ flex: 1 }}>
+          <div style={{ fontSize: fs(11), color: s.tS, marginBottom: 4 }}>Сумма, ₽</div>
+          <Input s={s} value={target} onChange={setTarget} placeholder="200000" type="number" inputMode="numeric" />
+        </div>
+        <div style={{ flex: 1 }}>
+          <div style={{ fontSize: fs(11), color: s.tS, marginBottom: 4 }}>Взнос ₽/мес</div>
+          <Input s={s} value={monthly} onChange={setMonthly} placeholder="0" type="number" inputMode="numeric" />
+        </div>
+      </div>
+
+      {err && <div style={{ fontSize: fs(12), color: s.red }}>{err}</div>}
+
+      <SubmitBtn
+        s={s}
+        disabled={!valid || !!busy}
+        label={busy === "save" ? "Сохраняю..." : (isNew ? "Создать цель" : "Сохранить")}
+        onClick={save}
+      />
+
+      {!isNew && (
+        <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
+          <div
+            onClick={() => !busy && close(true)}
+            style={{
+              flex: 1, textAlign: "center", padding: "10px", borderRadius: 10,
+              background: `${s.acc}1f`, border: `1px solid ${s.acc}55`, color: s.acc,
+              cursor: busy ? "not-allowed" : "pointer", fontSize: fs(13), fontWeight: 500,
+            }}
+          >{busy === "ach" ? "…" : "🎉 Достигнута"}</div>
+          <div
+            onClick={() => !busy && close(false)}
+            style={{
+              flex: 1, textAlign: "center", padding: "10px", borderRadius: 10,
+              background: `${s.red}1f`, border: `1px solid ${s.red}55`, color: s.red,
+              cursor: busy ? "not-allowed" : "pointer", fontSize: fs(13), fontWeight: 500,
+            }}
+          >{busy === "drop" ? "…" : "Убрать"}</div>
+        </div>
+      )}
     </div>
   );
 }
