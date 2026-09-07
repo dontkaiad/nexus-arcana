@@ -1,6 +1,6 @@
 # CUSHION — data-model contract (финансовая подушка)
 
-Code conforms to: HEAD of the `budget: динамический взнос в подушку` change.  (+ #144: user_notion_id → user_id.)
+Code conforms to: HEAD of the `budget: динамический взнос в подушку` change.  (+ #144: user_notion_id → user_id; + #123: `POST /finance/cushion/deposit`, debt-overpaid → cushion.)
 Update this spec in the same PR that changes the model.
 
 > Contract, not snapshot. Describes the derived model and the guarantees of each
@@ -191,5 +191,6 @@ transaction** as the increment.
   `c9d0e1f2a3b4_cushion_transactions.py`,
   `d0e1f2a3b4c5_cushion_planned_contribution.py`
 - `miniapp/backend/routes/finance.py` (`_view_cushion`),
-  `miniapp/backend/routes/writes.py` (`finance_cushion_set_target`)
+  `miniapp/backend/routes/writes.py` (`finance_cushion_set_target`,
+  `finance_cushion_deposit` — #123)
 - `docs/CASES/0022-budget-arithmetic-determinism.md`

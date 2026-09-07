@@ -305,7 +305,7 @@ turns saved plan facts into per-category limits and a single daily spend
 limit.
 
 **Iron rule: planning writes only to Memory and the service tables (`debts`,
-`cushion`). Planning never writes to Finance.** A `nexus_budget` transaction
+`goals`, `cushion`). Planning never writes to Finance.** A `nexus_budget` transaction
 is created only by Kai, by hand, on an actual spend or income event — never
 by `/budget`, plan Accept, or recalc. `plan["one_time"]` items are declared
 intentions, not payments; they affect only the arithmetic of the recalc that
@@ -357,7 +357,14 @@ Budget has **no table of its own** — there is no migration, no
    «🛡 В подушку» → `POST /api/finance/cushion/deposit`
    (`source='debt_overpaid'`) or «оставить» — the same choice the bot's
    `overpaid_cushion` callback gives.
-3. **One-time expenses.** The standalone command `разовый расход X` /
+3. **`goals`** (own table, `core/repos/pg_goals_repo.py` /
+   `core/repos/goals_table.py`, migration `a1b2c3d4e5f6`, #205). Columns:
+   `id`, `user_id`, `name`, `target`, `monthly`, `saved`, `status`
+   (`CHECK IN ('active','achieved','dropped')`), timestamps + `closed_at`.
+   Unique on `(user_id, lower(name))`. The budget reads **active** rows only;
+   `monthly` is the `goals_saving` term of the day-limit formula. Full detail
+   (write paths, `saved` tracking, endpoints) in Operations → Goals below.
+4. **One-time expenses.** The standalone command `разовый расход X` /
    `разовые: ...` is classified as `one_time_expense` (`core/classifier.py`,
    `_ONE_TIME_EXPENSE_RE`, checked before `memory_save`/`budget`) and
    written as an ordinary `nexus_budget` finance transaction via
@@ -484,10 +491,11 @@ cushion is its own table (CUSHION.md); the migration backfills the other
 - **Limits de-duplicate by display name** (`display_limit_name` via
   `LIMIT_DISPLAY`); the larger amount is kept.
 - **Computation is stateless.** Each call recomputes from current Memory +
-  debts; no computed budget is persisted between calls — but an *accepted*
-  plan's derived numbers (`лимит_*`, `цель_*`, debt strategies) ARE persisted
-  as facts by `_save_budget_plan`, and stay static until the next accepted
-  recalculation (see Human cheat sheet above — "what recalculates on its own").
+  `debts` + `goals`; no computed budget is persisted between calls — but an
+  *accepted* plan's inputs (`лимит_*` / `постоянно_*` facts, debt strategies,
+  goal rows) ARE persisted by `_save_budget_plan`, and stay static until the
+  next accepted recalculation (see Human cheat sheet above — "what
+  recalculates on its own").
 - **Period-spend queries are scoped by `user_id`.** Every
   `core.repos.finance_repo._repo.query_records()` call in
   `nexus/handlers/finance.py` that has `user_id` in scope must pass
@@ -504,8 +512,10 @@ cushion is its own table (CUSHION.md); the migration backfills the other
 ## Lifecycle / status model
 
 No lifecycle for the derived view itself — budget is recomputed per request.
-The underlying facts follow their own stores' lifecycles: budget memories
-are soft-deleted/updated per MEMORY.md; debts per the debts domain.
+The underlying stores follow their own lifecycles: budget memories are
+soft-deleted/updated per MEMORY.md; debts have `is_active` (open → closed);
+goals have `status` (`active` → `achieved` when `saved` reaches `target`, or
+`dropped` on «убрать» / rename) with `closed_at`.
 
 The **setup/recalc session**, however, does have a lifecycle, tracked in a
 separate SQLite store (`nexus/handlers/finance.py:_bdb()`,

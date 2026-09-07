@@ -1,8 +1,10 @@
 # MEMORY — memory data model
 
-> **Status: AS-BUILT, code conforms to `26a94c4`.** Notion→PostgreSQL
+> **Status: AS-BUILT, code conforms to `fcf8c74`.** Notion→PostgreSQL
 > migration is complete. Schema: `value_text` dropped (#146), `notion_id`
-> dropped (#149), `user_notion_id`→`user_id` (#144). Search: the semantic
+> dropped (#149), `user_notion_id`→`user_id` (#144). `долг_` / `цель_` facts
+> are diverted to the `debts` / `goals` tables and never persist here
+> (#6 / #205). Search: the semantic
 > layer (ADR-0006 pgvector backend, applied to memory by ADR-0020) plus a
 > Haiku reranker over its candidates (ADR-0021). Update this spec in the
 > same PR that changes the memory schema or search strategy.
