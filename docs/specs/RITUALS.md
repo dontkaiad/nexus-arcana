@@ -2,7 +2,7 @@
 
 Code conforms to: 0bc132e (+ #7/#8: Mini App finance serialization, shared
 `source_label`; + #8: `consumables_written_off` timestamp; + #10: `work_id`
-reverse-link surfaced in Mini App). This spec describes the rituals data
+reverse-link surfaced in Mini App; + #153: `?result=` outcome filter). This spec describes the rituals data
 model; update it in the same PR that changes the model.
 
 > Contract, not snapshot. Describes the persistent model, the guarantees of
@@ -143,7 +143,10 @@ stay findable by id). Outcome can be revised via `set_result`.
   / `source` (payment_source label) / `barter_what` — parity with sessions (#7/#8).
   The card additionally serializes `from_work` (`{id, title}` or `null`, #10)
   and `consumables_written_off` (bool, #8); the list omits `from_work` (no
-  `work_title` on list reads).
+  `work_title` on list reads). The list also takes `?goal=` and — since #153
+  — `?result=unverified|verified` (outcome status filter, parity with the
+  sessions tabs) and returns `counts:{unverified,verified}` for the pill
+  badges.
 
 ## Model routing (from code)
 

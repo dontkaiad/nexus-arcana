@@ -69,11 +69,17 @@ def _ritual_brief(r, tz_offset: int) -> dict:
     }
 
 
+# #153: статус-фильтр по результату — паритет с сессиями (⏳ vs ✅).
+#   unverified — outcome не проставлен; verified — любой проставленный итог.
+_RITUAL_UNVERIFIED = (None, "", "unverified")
+
+
 @router.get("/arcana/rituals")
 async def list_rituals(
     tg_id: int = Depends(current_user_id),
     goal: Optional[str] = Query(None, description="фильтр по Цели, напр. '🛡️ Защита'"),
     client_id: Optional[str] = Query(None),
+    result: Optional[str] = Query(None, description="unverified|verified (#153)"),
 ) -> dict[str, Any]:
     user_id = (await get_user_id(tg_id)) or ""
     _, tz_offset = await today_user_tz(tg_id)
@@ -82,10 +88,16 @@ async def list_rituals(
         entries = await _rituals_repo.list_all(user_id)
     except Exception as e:
         logger.warning("rituals list_all failed: %s", e)
-        return {"total": 0, "rituals": []}
+        return {"total": 0, "rituals": [], "counts": {"unverified": 0, "verified": 0}}
 
     goal_code = _GOAL_LABEL_TO_CODE.get(goal) if goal else None
+    result = result if result in ("unverified", "verified") else None
 
+    def _passes_result(r) -> bool:
+        is_unv = r.result in _RITUAL_UNVERIFIED
+        return is_unv if result == "unverified" else (not is_unv)
+
+    counts = {"unverified": 0, "verified": 0}
     items: list = []
     for r in entries:
         # client_id filter: PG rituals have NULL client_id until clients migrate
@@ -93,9 +105,15 @@ async def list_rituals(
             continue
         if goal_code and r.goal != goal_code:
             continue
+        if r.result in _RITUAL_UNVERIFIED:
+            counts["unverified"] += 1
+        else:
+            counts["verified"] += 1
+        if result and not _passes_result(r):
+            continue
         items.append(_ritual_brief(r, tz_offset))
 
-    return {"total": len(items), "rituals": items}
+    return {"total": len(items), "rituals": items, "counts": counts}
 
 
 @router.get("/arcana/rituals/{ritual_id}")

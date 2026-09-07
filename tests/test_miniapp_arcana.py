@@ -660,6 +660,28 @@ def test_arcana_rituals_list_and_filter_by_goal(client):
     assert ids == {"r1", "r3"}
 
 
+def test_arcana_rituals_filter_by_result(client):
+    """#153: ?result=unverified|verified + counts."""
+    entries = [
+        _make_ritual("r1", "A", result="unverified"),
+        _make_ritual("r2", "B", result="positive"),
+        _make_ritual("r3", "C", result="partial"),
+        _make_ritual("r4", "D", result="unverified"),
+    ]
+    with patch("miniapp.backend.routes.arcana_rituals._rituals_repo",
+               _mock_rituals_repo(list_all_result=entries)), \
+         patch("miniapp.backend.routes.arcana_rituals.today_user_tz",
+               AsyncMock(return_value=(_today_date(3), 3))), \
+         patch("miniapp.backend.routes.arcana_rituals.get_user_id",
+               AsyncMock(return_value=FAKE_USER_ID)):
+        unv = client.get("/api/arcana/rituals?result=unverified").json()
+        ver = client.get("/api/arcana/rituals?result=verified").json()
+        allr = client.get("/api/arcana/rituals").json()
+    assert {x["id"] for x in unv["rituals"]} == {"r1", "r4"}
+    assert {x["id"] for x in ver["rituals"]} == {"r2", "r3"}
+    assert allr["counts"] == {"unverified": 2, "verified": 2}
+
+
 def test_arcana_rituals_401():
     app.dependency_overrides.clear()
     c = TestClient(app)

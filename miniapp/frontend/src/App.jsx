@@ -4780,17 +4780,33 @@ function ArRituals({ s, openRitual }) {
   );
 }
 
+const AR_RITUAL_RESULT_TABS = [
+  ["all", "Все"], ["unverified", "⏳ Не проверено"], ["verified", "✅ Проверено"],
+];
+
 function ArRitualsList({ s, openRitual }) {
   const [goal, setGoal] = useState("all");
-  const path = goal === "all"
-    ? "/api/arcana/rituals"
-    : `/api/arcana/rituals?goal=${encodeURIComponent(goal)}`;
-  const { data, loading, error, refetch } = useApi(path, [goal]);
+  const [res, setRes] = useState("all");  // #153: статус-фильтр по итогу
+  const qs = [];
+  if (goal !== "all") qs.push(`goal=${encodeURIComponent(goal)}`);
+  if (res !== "all") qs.push(`result=${res}`);
+  const path = "/api/arcana/rituals" + (qs.length ? `?${qs.join("&")}` : "");
+  const { data, loading, error, refetch } = useApi(path, [goal, res]);
   const list = loading || error ? [] : adaptRituals(data);
-  const goals = ["all", ...new Set(list.map((r) => r.goal).filter(Boolean))];
+  const counts = data?.counts || {};
+  // Цели строим из полного набора, а не из отфильтрованного списка.
+  const allData = useApi("/api/arcana/rituals", []);
+  const goals = ["all", ...new Set((allData.data?.rituals || []).map((r) => r.goal).filter(Boolean))];
 
   return (
     <>
+      <div className="pills" style={{ marginBottom: 2 }}>
+        {AR_RITUAL_RESULT_TABS.map(([k, l]) => (
+          <Pill key={k} s={s} active={res === k} onClick={() => setRes(k)}>
+            {l}{k === "unverified" && counts.unverified > 0 ? ` ${counts.unverified}` : ""}
+          </Pill>
+        ))}
+      </div>
       <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
         {goals.map((g) => (
           <Pill key={g} s={s} active={goal === g} onClick={() => setGoal(g)}>
@@ -5569,15 +5585,20 @@ function ArGrimoire({ s, openGrimoire }) {
 // ARCANA — WORK (работы)
 // ═══════════════════════════════════════════════════════════════
 
+const AR_WORK_TABS = [
+  ["active", "Активные"], ["overdue", "Просрочено"],
+  ["done", "Завершено"], ["all", "Все"],
+];
+
 function ArWork({ s, openWork }) {
-  const { data, loading, error, refetch } = useApi('/api/arcana/works');
+  const [f, setF] = useState("active");  // #153: паритет с задачами Nexus
+  const { data, loading, error, refetch } = useApi(`/api/arcana/works?filter=${f}`, [f]);
   const [expanded, setExpanded] = useState({});
   const [subOverrides, setSubOverrides] = useState({});
 
-  if (loading) return <Empty s={s} text="Загружаю..." />;
-  if (error) return <ErrorBox s={s} error={error} refetch={refetch} />;
   const works = data?.works || [];
-  const doneWorks = data?.done || [];   // #203: выполненные расклады/ритуалы
+  const counts = data?.counts || {};
+  const isDone = f === "done";
 
   const toggleExpand = (id) => setExpanded((e) => ({ ...e, [id]: !e[id] }));
   const toggleSub = async (subId) => {
@@ -5595,8 +5616,21 @@ function ArWork({ s, openWork }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 0 }}>
       <div className="page-title" style={{ marginBottom: 10 }}>Работы</div>
-      {works.length === 0 && doneWorks.length === 0 && (
-        <Empty s={s} emoji="🌙" title="Работ нет" text="Передохни." />
+      <div className="pills" style={{ marginBottom: 10 }}>
+        {AR_WORK_TABS.map(([k, l]) => (
+          <Pill key={k} s={s} active={f === k} onClick={() => setF(k)}>
+            {l}{k === "overdue" && counts.overdue > 0 ? ` ${counts.overdue}` : ""}
+          </Pill>
+        ))}
+      </div>
+      {loading && <Empty s={s} text="Загружаю..." />}
+      {error && <ErrorBox s={s} error={error} refetch={refetch} />}
+      {!loading && !error && works.length === 0 && (
+        f === "overdue"
+          ? <Empty s={s} emoji="🌿" title="Чисто" text="Просроченных работ нет." />
+          : f === "done"
+            ? <Empty s={s} emoji="🗂️" title="Пусто" text="Завершённых работ нет." />
+            : <Empty s={s} emoji="🌙" title="Работ нет" text="Передохни." />
       )}
       {works.map((w) => {
         const subs = w.subtasks || [];
@@ -5607,22 +5641,27 @@ function ArWork({ s, openWork }) {
           <div
             key={w.id}
             className="task glass"
-            style={{ flexDirection: "column", alignItems: "stretch", cursor: openWork ? "pointer" : "default" }}
+            style={{
+              flexDirection: "column", alignItems: "stretch",
+              cursor: openWork ? "pointer" : "default",
+              opacity: isDone ? 0.6 : 1,
+            }}
             onClick={openWork ? () => openWork({ id: w.id, payload: w }) : undefined}
           >
             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
               <div className="body" style={{ flex: 1 }}>
-                <div className="title">{w.title}</div>
+                <div className="title" style={{ textDecoration: isDone ? "line-through" : "none" }}>{w.title}</div>
                 <div className="meta">
-                  {w.is_overdue && (
+                  {isDone && <span>{w.status === "archived" ? "🗄️ архив" : "✅ выполнено"}</span>}
+                  {!isDone && w.is_overdue && (
                     <span style={{ color: s.red, fontWeight: 600 }}>просрочена</span>
                   )}
-                  {w.deadline_label && !w.is_overdue && (
+                  {!isDone && w.deadline_label && !w.is_overdue && (
                     <span>{w.deadline_label}</span>
                   )}
                   {/* #8: расклад/ритуал в Работах = запланированная практика.
                       Станет 🃏 Раскладом / 🕯 Ритуалом → Работа закроется. */}
-                  {/(Расклад|Ритуал)/i.test(w.category || "") && (
+                  {!isDone && /(Расклад|Ритуал)/i.test(w.category || "") && (
                     <span style={{ color: s.acc }}> · 🔵 запланирован</span>
                   )}
                   {/* #10: напоминание — паритет с Nexus задачами */}
@@ -5672,33 +5711,6 @@ function ArWork({ s, openWork }) {
           </div>
         );
       })}
-
-      {/* #203: выполненные расклады/ритуалы — видны, но приглушены */}
-      {doneWorks.length > 0 && (
-        <>
-          <div style={{ fontSize: fs(11), color: s.tS, margin: "16px 0 6px" }}>
-            ✅ Выполненные
-          </div>
-          {doneWorks.map((w) => (
-            <div
-              key={w.id}
-              className="task glass"
-              style={{ flexDirection: "column", alignItems: "stretch", opacity: 0.6 }}
-            >
-              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <div className="body" style={{ flex: 1 }}>
-                  <div className="title" style={{ textDecoration: "line-through" }}>{w.title}</div>
-                  <div className="meta">
-                    <span>✅ выполнено</span>
-                    {w.client?.name && <span> · 👤 {w.client.name}</span>}
-                  </div>
-                </div>
-                {w.category && <div className="cat-badge">{String(w.category).split(" ")[0]}</div>}
-              </div>
-            </div>
-          ))}
-        </>
-      )}
     </div>
   );
 }

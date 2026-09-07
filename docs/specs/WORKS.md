@@ -4,7 +4,8 @@ Code conforms to: 0bc132e. (+ #144: user_notion_id → user_id; + #10: Mini App
 `/api/arcana/works` serializes `reminder`/`reminder_time`, parity with Nexus
 tasks; + #8/#10: planned-practice badge + `from_work` reverse-link shown on
 the event card; + #95: `_TERMINAL_STATUS` excludes archived from open-work
-reads; + #203: Mini App create endpoint + done-practice tail.) This
+reads; + #203: Mini App create endpoint; + #153: `?filter=` status tabs
+(active/overdue/done/all).) This
 spec describes the works data model as of
 that commit; update it in the same PR that changes the model.
 
@@ -115,14 +116,16 @@ attributes; reminder jobs are derived from the columns, not stored.
   `core/work_relation.py` (Notion-era auto-relation + auto-close; see #151),
   `core/reminder_scheduler.py` (reminders).
 - Mini App — reads via Arcana today/aggregate routes
-  (`miniapp/backend/routes/arcana_today.py`). `GET /api/arcana/works`
-  returns `works` (open, sorted by deadline) and — since #203 — `done` (the
-  last 20 done Works of category `Расклад` / `Ритуал`, so a completed
-  practice stays visible as «✅ выполнено»); it serializes
-  `deadline`/`deadline_label` and — since #10 — `reminder` (ISO) plus
-  `reminder_time` (viewer-local `HH:MM`), mirroring the Nexus tasks payload;
-  the `ArWork` card renders a 🔔 chip and a `🔵 запланирован` badge for open
-  practice-category works (#8). Create via `POST /api/arcana/works`
+  (`miniapp/backend/routes/arcana_today.py`). `GET /api/arcana/works?filter=`
+  takes `active` (default — open, not overdue) / `overdue` (open, past
+  deadline) / `done` (done + archived, last 40) / `all` (all open), the
+  direct analog of `/api/tasks?filter=` (#153); it returns `{works, total,
+  filter, counts:{active,overdue,done}}`. Each work serializes
+  `deadline`/`deadline_label`, `is_overdue`, and — since #10 — `reminder`
+  (ISO) plus `reminder_time` (viewer-local `HH:MM`), mirroring the Nexus
+  tasks payload; the `ArWork` card has the four filter pills, renders a 🔔
+  chip and a `🔵 запланирован` badge for open practice-category works (#8),
+  and shows done/archived rows struck-through. Create via `POST /api/arcana/works`
   (`miniapp/backend/routes/writes.py`, #203) — a structural form (title /
   category / priority / deadline / reminder / client), **no Haiku** (unlike
   the bot's preview flow); if a reminder is given it is written to
@@ -148,6 +151,6 @@ Reads/writes are pure SQL.
 - `core/work_relation.py` — Notion-era session/ritual → work relation (#151)
 - `arcana/repos/sessions_tables.py`, `arcana/repos/rituals_tables.py` — confirm no `works_id`
 - `core/client_resolve.py` — client resolution on create
-- `miniapp/backend/routes/arcana_today.py` — `/api/arcana/works` serialization (`reminder`/`reminder_time` #10; `done` tail #203)
+- `miniapp/backend/routes/arcana_today.py` — `/api/arcana/works` `?filter=` (active/overdue/done/all), counts, serialization (#10, #153)
 - `miniapp/backend/routes/writes.py` — `POST /api/arcana/works` + status transitions (#203)
 - `miniapp/backend/routes/categories.py` — `?type=work` category list

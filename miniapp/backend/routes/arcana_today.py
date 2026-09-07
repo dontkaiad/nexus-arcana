@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import logging
-import re
 import sqlite3
 import time
 from datetime import date, datetime, timedelta, timezone
@@ -17,8 +16,6 @@ _pg_sessions_repo = _PgSessionsRepoClass()
 from arcana.repos.pg_works_repo import PgWorksRepo as _PgWorksRepoClass
 _pg_works_repo = _PgWorksRepoClass()
 
-# Работа-«практика» (расклад/ритуал) — для «выполнено»-хвоста в /arcana/works
-_RE_PRACTICE_CAT = re.compile(r"(Расклад|Ритуал)", re.IGNORECASE)
 from arcana.repos.pg_rituals_repo import PgRitualsRepo as _PgRitualsRepoClass
 _pg_rituals_repo = _PgRitualsRepoClass()
 from core.repos.pg_nexus_lists_repo import PgArcanaInventoryRepo as _PgArcanaInventoryRepoClass
@@ -817,11 +814,19 @@ def _pending_barters(sessions: list[dict], rituals: list[dict], clients_map: dic
     return out
 
 
+_WORK_FILTERS = {"active", "overdue", "done", "all"}
+
+
 @router.get("/arcana/works")
 async def get_arcana_works(
     tg_id: int = Depends(current_user_id),
+    filter: str = Query("active", description="active|overdue|done|all — паритет с задачами Nexus (#153)"),
 ) -> dict[str, Any]:
-    """Активные Работы юзера из PG: status != done/archived, сорт по deadline ASC nulls last."""
+    """Работы юзера из PG со статус-фильтром (паритет с /api/tasks?filter):
+    active — открытые не просроченные; overdue — открытые просроченные;
+    done — done/archived (последние 40); all — все открытые."""
+    if filter not in _WORK_FILTERS:
+        filter = "active"
     user_id = (await get_user_id(tg_id)) or ""
     today_date, tz_offset = await today_user_tz(tg_id)
     try:
@@ -830,40 +835,50 @@ async def get_arcana_works(
         logger.warning("works list fetch failed: %s", e)
         works_list = []
     clients_map = await load_clients_map(user_id)
+
+    def _is_overdue(w) -> bool:
+        d = _work_local_date(w.deadline_dt, tz_offset)
+        return bool(d and d < today_date)
+
     open_works = [w for w in works_list if w.status not in ("done", "archived")]
-    # Kai: закрытые расклады/ритуалы всё равно видны — «выполнено». Показываем
-    # done-Работы категории 🃏 Расклад / ✨ Ритуал (последние 20), приглушённо.
-    done_practice = [
-        w for w in works_list
-        if w.status == "done" and _RE_PRACTICE_CAT.search(w.category or "")
-    ][:20]
+    closed_works = [w for w in works_list if w.status in ("done", "archived")]
+    counts = {
+        "active": sum(1 for w in open_works if not _is_overdue(w)),
+        "overdue": sum(1 for w in open_works if _is_overdue(w)),
+        "done": len(closed_works),
+    }
+
+    if filter == "overdue":
+        selected = [w for w in open_works if _is_overdue(w)]
+    elif filter == "done":
+        selected = sorted(
+            closed_works, key=lambda w: w.deadline_iso or "", reverse=True
+        )[:40]
+    elif filter == "all":
+        selected = open_works
+    else:  # active
+        selected = [w for w in open_works if not _is_overdue(w)]
 
     # batch-fetch subtasks from arcana_inventory (works_id = PG work id)
     subtasks_by_work: dict = {}
-    if open_works:
+    if selected and filter != "done":
         try:
-            work_ids = [w.id for w in open_works]
-            sub_items = await _arcana_inv_repo_lists.get_items_for_works(work_ids, user_id)
+            sub_items = await _arcana_inv_repo_lists.get_items_for_works(
+                [w.id for w in selected], user_id
+            )
             for s in sub_items:
                 if s.works_id:
                     subtasks_by_work.setdefault(s.works_id, []).append({
-                        "id": s.id,
-                        "name": s.name,
-                        "done": s.status == "done",
+                        "id": s.id, "name": s.name, "done": s.status == "done",
                     })
         except Exception as e:
             logger.warning("subtasks fetch failed: %s", e)
 
     items: list[dict] = []
-    for w in open_works:
-        deadline_date = _work_local_date(w.deadline_dt, tz_offset)
-        is_overdue = bool(deadline_date and deadline_date < today_date)
+    for w in selected:
         cli_id = w.client_id
         cli_info = clients_map.get(cli_id or "") or {}
-        cli_name = cli_info.get("name", "")
         ctype_full = cli_info.get("type_full", "")
-        ctype = ctype_full.split()[0] if ctype_full else ""
-        # #10: напоминание — паритет с Nexus tasks (там reminder_iso/_time)
         try:
             reminder_iso = w.reminder_dt.isoformat() if w.reminder_dt else None
         except Exception:
@@ -878,34 +893,14 @@ async def get_arcana_works(
             "deadline_label": w.deadline_iso[:16].replace("T", " ") if w.deadline_iso else "",
             "reminder": reminder_iso,
             "reminder_time": _work_local_time(w.reminder_dt, tz_offset),
-            "is_overdue": is_overdue,
-            "client": {"id": cli_id, "name": cli_name, "type": ctype} if cli_id else None,
+            "is_overdue": _is_overdue(w),
+            "client": ({"id": cli_id, "name": cli_info.get("name", ""),
+                        "type": ctype_full.split()[0] if ctype_full else ""}
+                       if cli_id else None),
             "subtasks": subtasks_by_work.get(w.id, []),
         })
 
-    done_items: list[dict] = []
-    for w in done_practice:
-        cli_info = clients_map.get(w.client_id or "") or {}
-        done_items.append({
-            "id": w.id,
-            "title": w.title or "—",
-            "status": "done",
-            "priority": w.priority,
-            "category": w.category,
-            "deadline": w.deadline_iso,
-            "deadline_label": w.deadline_iso[:16].replace("T", " ") if w.deadline_iso else "",
-            "reminder": None,
-            "reminder_time": None,
-            "is_overdue": False,
-            "client": ({"id": w.client_id, "name": cli_info.get("name", ""),
-                        "type": (cli_info.get("type_full", "").split()[0]
-                                 if cli_info.get("type_full") else "")}
-                       if w.client_id else None),
-            "subtasks": [],
-        })
-
-    return {"works": items, "done": done_items,
-            "total": len(items), "done_total": len(done_items)}
+    return {"works": items, "total": len(items), "filter": filter, "counts": counts}
 
 
 @router.get("/arcana/accuracy")

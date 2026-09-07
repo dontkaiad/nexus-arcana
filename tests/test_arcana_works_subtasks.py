@@ -102,69 +102,70 @@ def test_arcana_works_subtasks_populated(client):
     assert work["subtasks"][0]["done"] is False
 
 
-def test_arcana_works_returns_open_only(client):
-    """done/archived works фильтруются, open — остаются."""
+def _works_ctx(mock_repo, today=date(2026, 5, 3), tz=3):
+    from contextlib import ExitStack
+    st = ExitStack()
+    st.enter_context(patch("miniapp.backend.routes.arcana_today._pg_works_repo", mock_repo))
+    st.enter_context(patch("miniapp.backend.routes.arcana_today._arcana_inv_repo_lists", _mock_inv_repo([])))
+    st.enter_context(patch("miniapp.backend.routes.arcana_today.load_clients_map", AsyncMock(return_value={})))
+    st.enter_context(patch("miniapp.backend.routes.arcana_today.today_user_tz", AsyncMock(return_value=(today, tz))))
+    st.enter_context(patch("miniapp.backend.routes.arcana_today.get_user_id", AsyncMock(return_value=FAKE_NOTION)))
+    return st
+
+
+def _work(wid, title, *, status="open", category="", deadline_iso="", deadline_dt=None):
     from arcana.repos.works_repo import Work
+    return Work(id=wid, title=title, priority="Важно", deadline_str="",
+                category_str="", has_client=False, status=status, client_id=None,
+                category=category, deadline_dt=deadline_dt, reminder_dt=None,
+                deadline_iso=deadline_iso)
+
+
+def test_arcana_works_filter_active_excludes_closed_and_overdue(client):
+    """#153: filter=active — открытые не просроченные; done/archived/overdue вне."""
+    from datetime import datetime, timezone
+    past = datetime(2026, 4, 1, tzinfo=timezone.utc)
     all_works = [
-        _pg_work("w1", "Открытая работа"),
-        Work(id="w2", title="Готово", priority="Важно", deadline_str="",
-             category_str="", has_client=False, status="done"),
-        Work(id="w3", title="Отменена", priority="Можно потом", deadline_str="",
-             category_str="", has_client=False, status="archived"),
+        _work("w1", "Открытая"),
+        _work("w2", "Готово", status="done"),
+        _work("w3", "Отменена", status="archived"),
+        _work("wover", "Просрочена", deadline_dt=past, deadline_iso=past.isoformat()),
     ]
-    mock_repo = MagicMock()
-    mock_repo.list_all = AsyncMock(return_value=all_works)
-
-    today = date(2026, 5, 3)
-    with patch("miniapp.backend.routes.arcana_today._pg_works_repo", mock_repo), \
-         patch("miniapp.backend.routes.arcana_today._arcana_inv_repo_lists",
-               _mock_inv_repo([])), \
-         patch("miniapp.backend.routes.arcana_today.load_clients_map",
-               AsyncMock(return_value={})), \
-         patch("miniapp.backend.routes.arcana_today.today_user_tz",
-               AsyncMock(return_value=(today, 3))), \
-         patch("miniapp.backend.routes.arcana_today.get_user_id",
-               AsyncMock(return_value=FAKE_NOTION)):
-        r = client.get("/api/arcana/works")
-
-    assert r.status_code == 200
-    data = r.json()
-    assert data["total"] == 1
-    assert data["works"][0]["id"] == "w1"
+    mock_repo = MagicMock(list_all=AsyncMock(return_value=all_works))
+    with _works_ctx(mock_repo):
+        data = client.get("/api/arcana/works?filter=active").json()
+    assert [w["id"] for w in data["works"]] == ["w1"]
+    assert data["counts"] == {"active": 1, "overdue": 1, "done": 2}
 
 
-def test_arcana_works_done_practice_shown_as_completed(client):
-    """#203: done-Работа категории Расклад/Ритуал видна в data['done']."""
-    from arcana.repos.works_repo import Work
-    all_works = [
-        _pg_work("w1", "Открытая"),
-        Work(id="w9", title="Расклад Оле", priority="Важно", deadline_str="",
-             category_str="", has_client=False, status="done",
-             category="🃏 Расклад", client_id=None, deadline_dt=None,
-             reminder_dt=None, deadline_iso=""),
-        Work(id="w8", title="Позвонить", priority="Важно", deadline_str="",
-             category_str="", has_client=False, status="done",
-             category="🗂️ Прочее", client_id=None, deadline_dt=None,
-             reminder_dt=None, deadline_iso=""),
-    ]
-    mock_repo = MagicMock()
-    mock_repo.list_all = AsyncMock(return_value=all_works)
-    today = date(2026, 5, 3)
-    with patch("miniapp.backend.routes.arcana_today._pg_works_repo", mock_repo), \
-         patch("miniapp.backend.routes.arcana_today._arcana_inv_repo_lists",
-               _mock_inv_repo([])), \
-         patch("miniapp.backend.routes.arcana_today.load_clients_map",
-               AsyncMock(return_value={})), \
-         patch("miniapp.backend.routes.arcana_today.today_user_tz",
-               AsyncMock(return_value=(today, 3))), \
-         patch("miniapp.backend.routes.arcana_today.get_user_id",
-               AsyncMock(return_value=FAKE_NOTION)):
-        r = client.get("/api/arcana/works")
-    assert r.status_code == 200, r.text
-    data = r.json()
-    assert data["total"] == 1
-    assert [w["id"] for w in data["done"]] == ["w9"]
-    assert data["done"][0]["status"] == "done"
+def test_arcana_works_filter_overdue(client):
+    from datetime import datetime, timezone
+    past = datetime(2026, 4, 1, tzinfo=timezone.utc)
+    all_works = [_work("w1", "Открытая"),
+                 _work("wover", "Просрочена", deadline_dt=past, deadline_iso=past.isoformat())]
+    mock_repo = MagicMock(list_all=AsyncMock(return_value=all_works))
+    with _works_ctx(mock_repo):
+        data = client.get("/api/arcana/works?filter=overdue").json()
+    assert [w["id"] for w in data["works"]] == ["wover"]
+    assert data["works"][0]["is_overdue"] is True
+
+
+def test_arcana_works_filter_done_shows_closed(client):
+    all_works = [_work("w1", "Открытая"),
+                 _work("w9", "Расклад Оле", status="done", category="🃏 Расклад"),
+                 _work("w8", "Архив", status="archived")]
+    mock_repo = MagicMock(list_all=AsyncMock(return_value=all_works))
+    with _works_ctx(mock_repo):
+        data = client.get("/api/arcana/works?filter=done").json()
+    ids = {w["id"] for w in data["works"]}
+    assert ids == {"w9", "w8"}
+
+
+def test_arcana_works_bad_filter_falls_back_to_active(client):
+    mock_repo = MagicMock(list_all=AsyncMock(return_value=[_work("w1", "X")]))
+    with _works_ctx(mock_repo):
+        data = client.get("/api/arcana/works?filter=nope").json()
+    assert data["filter"] == "active" and [w["id"] for w in data["works"]] == ["w1"]
 
 
 @pytest.mark.asyncio
