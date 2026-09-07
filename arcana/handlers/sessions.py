@@ -1059,7 +1059,15 @@ async def handle_add_session(
 
         # 1. Haiku парсит данные. max_tokens=4000: при 9+ триплетах JSON
         # уходит за 700 токенов; 600 усекало хвост массива (см. issue #81).
-        raw = await ask_claude(text, system=PARSE_SESSION_SYSTEM, max_tokens=4000, temperature=0)
+        # #85: словарь кодовых слов из Памяти (🎭 Фигуранты) — чтобы Haiku
+        # понимала «состояние корабля» как субъект-фигуранта, а не метафору.
+        # Пусто, если у юзера нет записей-фигурантов → парсер как раньше.
+        from core.memory import get_figurant_facts, figurant_prompt_block
+        figurant_facts = await get_figurant_facts(user_id)
+        raw = await ask_claude(
+            text, system=PARSE_SESSION_SYSTEM + figurant_prompt_block(figurant_facts),
+            max_tokens=4000, temperature=0,
+        )
         data = _parse_json_safe(raw)
         if data is None:
             await log_error(text, "parse_error", bot_label="🌒 Arcana", error_code="–")
@@ -1152,7 +1160,8 @@ async def handle_add_session(
         items = data.get("triplets") or data.get("items") or []
         if isinstance(items, list) and len(items) >= 2:
             await _handle_multi_session(
-                message, data, items, tz, tz_offset, user_id
+                message, data, items, tz, tz_offset, user_id,
+                figurant_facts=figurant_facts,
             )
             return
 
@@ -1218,6 +1227,13 @@ async def handle_add_session(
                 memory_context = await get_memories_for_context(user_id, keywords)
         except Exception:
             pass
+        # #85: словарь фигурантов — всегда в контекст Sonnet (записей мало,
+        # морфология кодовых слов не ловится ILIKE-поиском по keywords).
+        if figurant_facts:
+            fig_ctx = "Кодовые слова (фигуранты):\n" + "\n".join(
+                f"- {f}" for f in figurant_facts
+            )
+            memory_context = (fig_ctx + "\n\n" + memory_context).strip()
 
         # 4. Предыдущие расклады клиента
         prev_context = ""
@@ -1381,6 +1397,7 @@ async def _handle_multi_session(
     forced_client_id: Optional[str] = None,
     forced_client_name: Optional[str] = None,
     forced_is_personal: bool = False,
+    figurant_facts: Optional[List[str]] = None,
 ) -> None:
     """Парсер увидел структуру «Тема: 1) … 2) …» — сохраняем N триплетов
     в одной сессии без preview-флоу: каждый получает свою трактовку и саммари.
@@ -1538,6 +1555,12 @@ async def _handle_multi_session(
                     system += f"\n\n--- СПРАВОЧНИК КАРТ ---\n{cards_context}"
                 if prev_context:
                     system += f"\n\n--- ПРЕДЫДУЩИЕ РАСКЛАДЫ КЛИЕНТА ---\n{prev_context}"
+                # #85: кодовые слова-фигуранты — чтобы трактовка говорила про
+                # реального фигуранта, а не про метафору («корабль»).
+                if figurant_facts:
+                    system += "\n\n--- КОДОВЫЕ СЛОВА (ФИГУРАНТЫ) ---\n" + "\n".join(
+                        f"- {f}" for f in figurant_facts
+                    )
                 # RAG-AB интеграция A: похожие прошлые трактовки ПО ВСЕМ клиентам
                 # (консистентность голоса). Аддитивно, graceful (#166).
                 system += await _rag_voice_block(cards_text, question)
@@ -1980,11 +2003,13 @@ async def _resume_multi_after_resolve(
         await call.message.edit_reply_markup(reply_markup=None)
     except Exception:
         pass
+    from core.memory import get_figurant_facts
     await _handle_multi_session(
         call.message, data, items, tz, tz_offset, user_id,
         forced_client_id=forced_client_id,
         forced_client_name=forced_client_name,
         forced_is_personal=forced_is_personal,
+        figurant_facts=await get_figurant_facts(user_id),
     )
 
 

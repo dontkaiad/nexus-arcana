@@ -33,8 +33,15 @@ _mem_selected: Dict[int, Set[str]] = {}  # uid → set of memory_id (str)
 CATEGORIES: List[str] = [
     "🦋 СДВГ", "👥 Люди", "🏥 Здоровье", "🛒 Предпочтения",
     "💼 Работа", "🏠 Быт", "🔄 Паттерн", "💡 Инсайт", "🔮 Практика", "🐾 Коты",
-    "💰 Лимит", "🔒 Постоянные", "📥 Доход", "📋 Долги", "🎯 Цели",
+    "💰 Лимит", "🔒 Постоянные", "📥 Доход", "📋 Долги", "🎯 Цели", "🎭 Фигуранты",
 ]
+
+# #85: категория 🎭 Фигуранты — словарь «кодовое слово → кто/что это».
+# Кай прячет имена фигурантов раскладов за нарицательными кличками
+# («корабль», «дом»), чтобы не светить их в переписке с ботом. Arcana-парсер
+# сессий (arcana/handlers/sessions.py) подтягивает ТОЛЬКО эту категорию в
+# промпт как словарь сущностей — см. get_figurant_dictionary().
+FIGURANT_CATEGORY = "🎭 Фигуранты"
 _CATEGORIES_STR = " / ".join(CATEGORIES)
 
 # ── Системный промпт для Haiku ─────────────────────────────────────────────────
@@ -55,8 +62,16 @@ _PARSE_SYSTEM = (
     "память/восприятие (это остаётся в 🦋 СДВГ) — сюда идут привычки в "
     "принятии решений, откладывание конкретных дел, реакции в отношениях "
     "и похожие повторяющиеся модели поведения без явной СДВГ-причины\n"
+    "🎭 Фигуранты — словарь «кодовое слово → кто/что это». Нарицательное "
+    "слово (корабль, дом, лодка), которым пользователь заменяет реального "
+    "человека/объект в раскладах таро, чтобы не писать имя. Триггеры: "
+    "«X это Y», «X — кодовое слово для Y», «под X имею в виду Y», «X = "
+    "объект/фигурант ...». ключ = само кодовое слово (snake_case), "
+    "связь = кодовое слово.\n"
     "\n"
     "Примеры:\n"
+    '  "корабль это объект приворота клиентки оли, реально пётр" → {"fact":"корабль = объект приворота клиентки Оли, реальное имя Пётр","category":"🎭 Фигуранты","связь":"корабль","ключ":"корабль"}\n'
+    '  "под домом в раскладах имею в виду квартиру мамы" → {"fact":"дом = квартира мамы (в раскладах)","category":"🎭 Фигуранты","связь":"дом","ключ":"дом"}\n'
     '  "запомни что маша не ест мясо" → {"fact":"маша не ест мясо","category":"👥 Люди","связь":"маша","ключ":"маша_диета"}\n'
     '  "у меня аллергия на пыль" → {"fact":"аллергия на пыль","category":"🏥 Здоровье","связь":"","ключ":"аллергия"}\n'
     '  "батон весит 4 кг" → {"fact":"батон весит 4 кг","category":"🏠 Быт","связь":"батон","ключ":"батон"}\n'
@@ -899,10 +914,18 @@ def extract_context_keywords(data: dict, client_name: Optional[str] = None) -> L
     keywords: List[str] = []
     if client_name:
         keywords.append(client_name)
-    for key in ("spread_type", "deck", "category", "goal", "place", "name"):
+    for key in ("spread_type", "deck", "category", "goal", "place", "name",
+                "session_name", "subject_name", "question"):
         val = data.get(key)
         if val and isinstance(val, str) and len(val) > 2:
             keywords.append(val)
+    # #85: слова из вопросов триплетов — чтобы кодовое слово-фигурант
+    # («состояние корабля») попало в поиск по Памяти и Sonnet-трактовка
+    # знала, кто такой «корабль».
+    for tr in (data.get("triplets") or []):
+        q = tr.get("question") if isinstance(tr, dict) else None
+        if q and isinstance(q, str):
+            keywords.extend(w for w in q.split() if len(w) > 3)
     return keywords
 
 
@@ -948,6 +971,46 @@ async def get_memories_for_context(
     except Exception:
         logger.warning("get_memories_for_context failed, continuing without context")
         return ""
+
+
+async def get_figurant_facts(user_id: str, max_results: int = 40) -> List[str]:
+    """#85: сырые факты из категории 🎭 Фигуранты (словарь кодовых слов).
+    Пустой список → у юзера нет фигурантов (fallback на прежнее поведение)."""
+    if not user_id:
+        return []
+    try:
+        mems = await _mem_repo.find_by_category(
+            FIGURANT_CATEGORY, is_current=True, user_id=user_id, page_size=max_results,
+        )
+    except Exception:
+        logger.warning("get_figurant_facts failed, continuing without dictionary")
+        return []
+    return [m.fact.strip() for m in (mems or []) if m.fact and m.fact.strip()]
+
+
+def figurant_prompt_block(facts: List[str]) -> str:
+    """Блок для системного промпта Haiku-парсера сессий. "" если фактов нет."""
+    if not facts:
+        return ""
+    lines = [
+        "\n\n═══ СЛОВАРЬ КОДОВЫХ СЛОВ (Память пользователя) ═══",
+        "Пользователь прячет имена фигурантов раскладов за нарицательными "
+        "кличками. Если в тексте расклада такое слово стоит как СУБЪЕКТ "
+        "вопроса («состояние корабля», «что чувствует дом») — это ФИГУРАНТ, "
+        "а не метафора.",
+        "Для session_name форматов A/B: если есть и клиент, и кодовое слово-"
+        "субъект → session_name = '{Клиент} — {кодовое слово} ({реальное имя "
+        "если оно указано в словаре})'. Практика (приворот/отворот/...) при "
+        "этом идёт в session_category, НЕ в session_name.",
+        "Словарь:",
+    ]
+    lines.extend(f"- {f[:200]}" for f in facts)
+    return "\n".join(lines)
+
+
+async def get_figurant_dictionary(user_id: str, max_results: int = 40) -> str:
+    """Готовый блок для системного промпта парсера. "" если фигурантов нет."""
+    return figurant_prompt_block(await get_figurant_facts(user_id, max_results))
 
 
 async def auto_suggest_memory(

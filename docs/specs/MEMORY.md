@@ -1,6 +1,8 @@
 # MEMORY — memory data model
 
-> **Status: AS-BUILT, code conforms to `fcf8c74`.** Notion→PostgreSQL
+> **Status: AS-BUILT, code conforms to `fcf8c74`** (+ #85: `🎭 Фигуранты`
+> codeword-dictionary category + `get_figurant_facts` / `figurant_prompt_block`).
+> Notion→PostgreSQL
 > migration is complete. Schema: `value_text` dropped (#146), `notion_id`
 > dropped (#149), `user_notion_id`→`user_id` (#144). `долг_` / `цель_` facts
 > are diverted to the `debts` / `goals` tables and never persist here
@@ -20,12 +22,13 @@ Memory is the long-term store of facts about the user and their surroundings,
 shared by both bots (Nexus + Arcana). It holds short textual assertions with a
 category, a key tag, and a relation to a person/object.
 
-What it holds (categories, `core/memory.py:CATEGORIES`, 15 items):
+What it holds (categories, `core/memory.py:CATEGORIES`, 16 items):
 `🦋 СДВГ`, `👥 Люди`, `🏥 Здоровье`, `🛒 Предпочтения`, `💼 Работа`,
 `🏠 Быт`, `🔄 Паттерн`, `💡 Инсайт`, `🔮 Практика`, `🐾 Коты`,
-`💰 Лимит`, `🔒 Постоянные`, `📥 Доход`, `📋 Долги`, `🎯 Цели`.
+`💰 Лимит`, `🔒 Постоянные`, `📥 Доход`, `📋 Долги`, `🎯 Цели`,
+`🎭 Фигуранты`.
 
-Of these, only the first eleven are real stored categories. `save_memory`
+Of these, only twelve are real stored categories. `save_memory`
 writes budget facts with `category="💰 Лимит"`; `🔒 Постоянные` / `📥 Доход`
 are *display labels* that `core/budget.py` derives from the key prefix
 (`постоянно_` / `income_`) on read — no row is stored with those categories.
@@ -33,6 +36,19 @@ are *display labels* that `core/budget.py` derives from the key prefix
 from `save_memory` is diverted at write time (`parse_and_store`, see Write) to
 the `debts` / `goals` table (`pg_debts_repo` / `pg_goals_repo`, #205), never
 persisted as a Memory row.
+
+`🎭 Фигуранты` (#85) is a codeword dictionary — a stored `memories` row per
+"codeword → who/what it is". Kai hides the identities of raskladi subjects
+behind common-noun nicknames («корабль», «дом») to keep names out of the bot
+chat. The Arcana session parser
+(`arcana/handlers/sessions.py:handle_add_session`) pulls **only this
+category** via `get_figurant_facts(user_id)` and injects it into the Haiku
+`PARSE_SESSION_SYSTEM` prompt (`figurant_prompt_block`) so a codeword used as
+a question subject is read as a figure, not a metaphor, and lands in
+`session_name` as `{Client} — {codeword} ({real name if known})`. The same
+facts also go into the Sonnet interpretation context (both the single-triplet
+and multi-session paths). No figurant rows → parser behaves exactly as
+before.
 
 Boundary "memory about the user" vs "domain knowledge":
 - Memory — about the user and related people/objects (preferences, patterns,
@@ -312,7 +328,9 @@ name-matcher) → `search`.
       into `budget_mems`, mirroring the budget which counts current rows only.
     The grouped `💰 Лимит` view (`_group_budget_memories`, #49b — Постоянные /
     Разовые / Лимиты / Доход) is returned **only** when `cat=💰 Лимит`
-    (`{grouped: true, groups: […]}`).
+    (`{grouped: true, groups: […]}`). `🎭 Фигуранты` rows (#85) are **not**
+    excluded — they surface in the flat list as ordinary cards so Kai edits
+    the codeword dictionary from the Mini App.
   - `q`: case-insensitive contains over text + key + related; when that
     yields fewer than 3 hits, the same Voyage + Haiku-rerank semantic
     fallback the bot uses (`core.memory._semantic_search_memory`, scoped by
@@ -409,7 +427,10 @@ Verify against code:
 - `core/repos/memory_repo.py` — seam repository, singleton `_repo`
 - `core/memory.py` — save/search/deactivate/delete/recall/context,
   `_parse_fact` (Haiku), `_get_adhd_tip` (Sonnet), `CATEGORIES`,
-  `_semantic_search_memory`
+  `_semantic_search_memory`, `get_figurant_facts` / `figurant_prompt_block` /
+  `get_figurant_dictionary` (#85), `extract_context_keywords`
+- `arcana/handlers/sessions.py` — `handle_add_session` / `_handle_multi_session`
+  consume the `🎭 Фигуранты` dictionary (#85)
 - `core/memory_rag.py` — `index_memory`/`index_memories_batch`/
   `search_memory_semantic` + `rerank_memory_candidates` (Voyage + pgvector
   + Haiku rerank, reuses `core/rag.py`'s client)

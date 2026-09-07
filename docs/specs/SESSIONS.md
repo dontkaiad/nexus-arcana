@@ -2,7 +2,8 @@
 
 Code conforms to: a0b0f64 (+ #144: user_notion_id → user_id; + #7: payment_source
 read-path + Mini App finance serialization; + #10: `work_id` reverse-link
-surfaced in Mini App). This spec describes the sessions
+surfaced in Mini App; + #85: `🎭 Фигуранты` codeword dictionary fed into the
+Haiku parser and Sonnet interpretation). This spec describes the sessions
 (tarot spreads) data model; update it in the same PR that changes the model.
 
 > Contract, not snapshot. Describes the persistent model, the guarantees of
@@ -205,6 +206,16 @@ After the loop, one batch embed call: `core/rag.index_triplets_batch(rag_batch)`
 (N triplets = 1 Voyage call). `session_name` slug is Haiku-generated once
 per multi-session to group all rows under one name.
 
+**Codeword dictionary (#85).** Before the parse call, `handle_add_session`
+fetches the user's `🎭 Фигуранты` memory rows (`core/memory.get_figurant_facts`)
+and appends `figurant_prompt_block(...)` to `PARSE_SESSION_SYSTEM`. When the
+text uses a codeword as a question subject, Haiku sets
+`session_name = {Client} — {codeword} ({real name if the dictionary gives one})`
+and keeps the practice (приворот/отворот/…) in `session_category`. The same
+facts are also passed into the Sonnet interpretation context (single-triplet
+path and `_handle_multi_session` via the `figurant_facts` kwarg). No figurant
+rows → identical behaviour to before.
+
 ### `_make_triplet_summary`
 
 `arcana/handlers/sessions.py:_make_triplet_summary` (`:573`):
@@ -262,7 +273,9 @@ sessions repo. Outcome can be revised via `set_outcome`.
 - `arcana/repos/pg_sessions_repo.py` — `PgSessionsRepo` (create/update/outcome/archive),
   `_attach_work_titles` (`work_id` → Work title on detail paths, #10)
 - `arcana/repos/sessions_repo.py` — seam + `Session` object
-- `arcana/handlers/sessions.py` — card parsing, modes A/B, RAG gate, multi-flow, summary
+- `arcana/handlers/sessions.py` — card parsing, modes A/B, RAG gate, multi-flow, summary,
+  `🎭 Фигуранты` codeword dictionary in the parser + Sonnet context (#85)
+- `core/memory.py` — `get_figurant_facts` / `figurant_prompt_block` (#85)
 - `core/waite_cards.py` — deterministic Waite parser (ADR-0013)
 - `core/card_grounding.py` — SequenceMatcher grounding for authored/other decks
 - `core/rag.py` — `index_triplet`, `index_triplets_batch`, `search_triplets`
