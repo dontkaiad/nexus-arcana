@@ -3889,21 +3889,15 @@ function NxCal({ s }) {
             </div>
             <div>
               {weekDays.map((wd, i) => {
-                const isPicked = wd.isSameMonth && wd.dayNum === picked;
-                const todayBorder = "#b07a2e";
-                const holidayColor = "#b07a2e";
-                // #64: picked сливался с фоном (acc-текст на acc-полупрозрачном
-                // фоне) → используем s.text, выделение остаётся через border.
-                // Weekend сливался → используем приглушённый s.tM (оттенок text,
-                // явно отличается от основного, но с достаточным контрастом).
+                const isPicked = wd.isSameMonth && wd.dayNum === picked && !wd.isToday;
+                // #50: сегодня = 2px акцентный кант + чип «СЕГОДНЯ». Золото на
+                // тёплом дневном фоне сливалось (#64 частично), поэтому текст
+                // дня всегда s.text/s.tM, выделение — только кант и чип.
                 let labelColor = s.text;
-                if (wd.isToday) labelColor = todayBorder;
-                else if (wd.isHoliday) labelColor = holidayColor;
-                else if (wd.isWeekend) labelColor = s.tM;
-                // #51 sister-pattern reuse: padding/margin/border-radius/opacity
-                // как у `.task.glass` + `.task.done` (newdesign.css:236-247).
-                // Прошлые дни — opacity 0.5 (как закрытая задача), будущие — 1,
-                // дни вне месяца — 0.4 (нерелевантны для текущего месяца).
+                if (wd.isHoliday && !wd.isToday) labelColor = GOLD;
+                else if (wd.isWeekend && !wd.isToday) labelColor = s.tM;
+                // #51 sister-pattern reuse: opacity как у `.task.done`.
+                // Прошлые дни — 0.5, будущие — 1, вне месяца — 0.4.
                 const cardOpacity = !wd.isSameMonth ? 0.4 : wd.isPast ? 0.5 : 1;
                 return (
                   <Glass
@@ -3914,26 +3908,33 @@ function NxCal({ s }) {
                       borderRadius: 14,
                       cursor: wd.isSameMonth ? "pointer" : "default",
                       opacity: cardOpacity,
-                      background: isPicked
-                        ? `${s.acc}22`
-                        : wd.isToday ? `${todayBorder}18` : undefined,
+                      background: wd.isToday ? `${s.acc}14` : undefined,
                       border: wd.isToday
-                        ? `1.5px solid ${todayBorder}`
+                        ? `2px solid ${s.acc}`
                         : isPicked
-                        ? `1px solid ${s.acc}99`
-                        : undefined,
+                        ? `1.5px solid ${s.acc}99`
+                        : `1px solid ${s.brd}`,
                     }}
                     onClick={() => { if (wd.isSameMonth) setPicked(wd.dayNum); }}
                   >
                     <div style={{
-                      display: "flex", justifyContent: "space-between", alignItems: "baseline",
-                      fontSize: fs(12), color: labelColor, fontWeight: 500,
+                      display: "flex", justifyContent: "space-between", alignItems: "center",
+                      fontSize: fs(12), color: labelColor, fontWeight: wd.isToday ? 600 : 500,
                     }}>
-                      <span>
-                        {wd.weekday}, {wd.dayNum}
-                        {wd.isHoliday && <span style={{ marginLeft: 6, fontSize: fs(10) }}>✦</span>}
+                      <span style={{ display: "inline-flex", alignItems: "center", gap: 7 }}>
+                        {wd.isToday && (
+                          <span style={{
+                            fontSize: fs(9), fontWeight: 700, color: "#fff",
+                            background: s.acc, padding: "2px 7px", borderRadius: 7,
+                            letterSpacing: "0.4px",
+                          }}>СЕГОДНЯ</span>
+                        )}
+                        <span>
+                          {wd.weekday}, {wd.dayNum}
+                          {wd.isHoliday && <span style={{ marginLeft: 5, color: GOLD }}>✦</span>}
+                        </span>
                       </span>
-                      <span style={{ color: s.tS, fontSize: fs(11) }}>
+                      <span style={{ color: s.tS, fontSize: fs(11), fontWeight: 500 }}>
                         {wd.tasks.length > 0 ? `${wd.tasks.length} шт.` : "свободно"}
                       </span>
                     </div>
