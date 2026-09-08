@@ -35,6 +35,9 @@ class TasksRepo:
     async def set_props(self, page_id: str, props: dict) -> None:
         await self._pg.set_props(page_id, props)
 
+    async def clear_reminder(self, page_id: str) -> bool:
+        return await self._pg.clear_reminder(page_id)
+
     async def list_all(self, user_id: str = "") -> List[Task]:
         return await self._pg.list_all(user_id=user_id)
 

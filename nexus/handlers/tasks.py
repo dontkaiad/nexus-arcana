@@ -369,6 +369,11 @@ async def restore_reminders_on_startup() -> None:
                                 reply_markup=kb,
                             )
                             await save_task_reminder(task_id, _m.chat.id, _m.message_id, title)
+                            # Обнуляем напоминание: оно отработало (как missed).
+                            # Иначе _active_with_past_reminder вернёт задачу
+                            # снова при СЛЕДУЮЩЕМ рестарте → дубли «⏰ Пропущено»
+                            # на каждый деплой (частые auto-reload = спам).
+                            await _pg.clear_reminder(task_id)
                             logger.info("restore pass2: sent missed reminder '%s' (was at %s)", title, missed_time)
                             restored += 1
                         except Exception as e:
@@ -579,6 +584,7 @@ async def _schedule_reminder(chat_id: int, title: str, reminder_dt: str, task_id
             # TASKS.md "reminder/deadline — projections"). Перепроверяем
             # статус прямо перед отправкой, чтобы не пинговать выполненную
             # задачу.
+            _cur = None
             if task_id:
                 try:
                     _cur = await _repo.retrieve_page(task_id)
@@ -606,6 +612,16 @@ async def _schedule_reminder(chat_id: int, title: str, reminder_dt: str, task_id
                 reply_markup=kb
             )
             await save_task_reminder(task_id, _m.chat.id, _m.message_id, title)
+            # Одноразовое напоминание отработало — обнуляем колонку, иначе
+            # при следующем рестарте restore-pass2 пришлёт «⏰ Пропущено»
+            # дубль (частые auto-reload = спам одним и тем же уведом).
+            # Повторяющиеся не трогаем — их reminder двигает cb-обработчик.
+            _rep = (getattr(_cur, "repeat", "") or "").strip() if _cur else ""
+            if task_id and _rep in ("", "Нет"):
+                try:
+                    await _repo.clear_reminder(task_id)
+                except Exception as e:
+                    logger.warning("send_reminder: clear_reminder failed: %s", e)
 
         now = _now()
         if dt <= now:

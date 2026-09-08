@@ -147,6 +147,14 @@ No amount in `note` → nothing written, completion is never blocked.
   persisted to `reminder`, and scheduled
   (`active_recurring_without_reminder`). Pass 1 reschedules future
   reminders; pass 2 advances/handles past-due ones.
+- **A one-off reminder is nulled once it has fired** (`clear_reminder`, #206).
+  Both when it fires live (`_schedule_reminder.send_reminder`) and when
+  pass 2 delivers it late as «⏰ Пропущено», `reminder` is set to `NULL`
+  afterwards — otherwise `active_with_past_reminder` (filters only
+  `Done`/`Archived`) would return the task again on the next restart and
+  re-send the missed ping. Recurring tasks are untouched here: their
+  `reminder` is advanced to the next cycle by pass 2 / the callback
+  handlers instead.
 - **Streaks are not in `tasks`.** They live in two SQLite tables in
   `data/nexus_streaks.db` (per-task + global daily); verified no other streak
   writer in the codebase as of e938907 (only `core/task_streaks.py` writes
@@ -215,8 +223,8 @@ category resolution on completion also runs on Haiku
 - `alembic/versions/a7b8c9d0e1f2_tasks_note.py` — `note` column
 - `nexus/repos/tasks_tables.py` — SQLAlchemy Core definitions
 - `nexus/repos/pg_tasks_repo.py` — `Task` dataclass, lookup cache, `_match`,
-  create/status/props/repeat, reminder-restore queries
-- `nexus/repos/tasks_repo.py` — repository seam
+  create/status/props/repeat, reminder-restore queries, `clear_reminder` (#206)
+- `nexus/repos/tasks_repo.py` — repository seam (`clear_reminder`)
 - `nexus/handlers/tasks.py` — create/complete/recurring reset
   (`_handle_recurring_task_reset`, `_handle_recurring_reminder_done`),
   `restore_reminders_on_startup`, `_parse_repeat_time`, `_reschedule_all_for_tz`,

@@ -445,6 +445,19 @@ def _active_with_past_reminder_sync(user_id: str) -> List[Task]:
     return [_to_task(r) for r in rows]
 
 
+def _clear_reminder_sync(task_id: str) -> bool:
+    """Обнулить tasks.reminder (напоминание отработало — как missed или live)."""
+    try:
+        tid = int(task_id)
+    except (ValueError, TypeError):
+        return False
+    with get_engine().begin() as conn:
+        res = conn.execute(
+            tasks.update().where(tasks.c.id == tid).values(reminder=None)
+        )
+    return res.rowcount > 0
+
+
 def _active_recurring_without_reminder_sync(user_id: str) -> List[Task]:
     """Активные задачи с repeat_time заполненным, но reminder IS NULL."""
     _ensure_lookups()
@@ -541,3 +554,6 @@ class PgTasksRepo:
 
     async def active_recurring_without_reminder(self, user_id: str = "") -> List[Task]:
         return await asyncio.to_thread(_active_recurring_without_reminder_sync, user_id)
+
+    async def clear_reminder(self, task_id: str) -> bool:
+        return await asyncio.to_thread(_clear_reminder_sync, task_id)
