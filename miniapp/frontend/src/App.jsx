@@ -1205,137 +1205,107 @@ function CardSunSigil({ size = 60 }) {
   );
 }
 
-function StreakAchievedCard({ width = 110, height = 112, current, best, lastDateIso, todayIso, onClick }) {
-  const scale = width / 110;
-  const sigilSize = Math.min(height - 50, 58) * Math.max(1, scale * 0.95);
-  const fsRank = Math.round(13 * Math.max(1, scale));
-  const fsBadge = Math.max(7, Math.round(7 * Math.max(1, scale)));
-  const fsSerial = Math.max(6.5, Math.round(7 * Math.max(1, scale)));
-  const fsSubline = Math.max(6.5, Math.round(7 * Math.max(1, scale)));
-  const fsCaption = Math.max(7, Math.round(7.5 * Math.max(1, scale)));
-  const pad = Math.max(7, Math.round(8 * Math.max(1, scale)));
-
+// #207: fluid holo-плитка стрика. Тянется по ширине И высоте ячейки как
+// соседние `.metric` (flex:1); ВСЕ внутренние размеры фиксированные, солнечный
+// сигил — центрированный watermark фикс. размера, обрезается `overflow:hidden`.
+function StreakAchievedCard({ current, best, lastDateIso, todayIso, onClick }) {
   const cur = Math.max(0, current | 0);
   const bst = Math.max(cur, best | 0);
   const pad3 = (n) => String(n).padStart(3, "0");
   const serial = `${pad3(cur)}/${pad3(bst)}`;
   const rank = streakRank(cur);
   const badge = (lastDateIso && todayIso && lastDateIso === todayIso) ? "+1" : "🔥";
-  const caption = `${cur} ДН`;
 
   return (
-    <div onClick={onClick} style={{ width, height, position: "relative", perspective: 1000, cursor: onClick ? "pointer" : "default" }}>
-      <div style={{
-        position: "relative", width: "100%", height: "100%",
-        borderRadius: 14, overflow: "hidden",
-        animation: "nx-mcard-in 900ms cubic-bezier(.2,.8,.2,1) both",
-        boxShadow: "0 1px 0 rgba(255,255,255,0.6) inset, 0 12px 28px -14px rgba(80,55,20,0.55), 0 4px 14px -6px rgba(176,122,46,0.45)",
+    <div onClick={onClick} style={{
+      position: "relative", width: "100%", height: "100%", minHeight: 74,
+      borderRadius: 14, overflow: "hidden",
+      cursor: onClick ? "pointer" : "default",
+      animation: "nx-mcard-in 900ms cubic-bezier(.2,.8,.2,1) both",
+      boxShadow: "0 1px 0 rgba(255,255,255,0.6) inset, 0 10px 24px -14px rgba(80,55,20,0.5)",
+    }}>
+      <div aria-hidden style={{
+        position: "absolute", inset: 0,
+        background: "linear-gradient(135deg, rgba(255,253,248,0.92) 0%, rgba(244,227,193,0.85) 55%, rgba(212,163,90,0.5) 100%)",
+      }} />
+      <div aria-hidden style={{
+        position: "absolute", inset: 0,
+        backgroundImage: "linear-gradient(rgba(90,60,16,0.08) 1px, transparent 1px), linear-gradient(90deg, rgba(90,60,16,0.08) 1px, transparent 1px)",
+        backgroundSize: "16px 16px",
+        maskImage: "radial-gradient(circle at 50% 50%, black 18%, transparent 78%)",
+        WebkitMaskImage: "radial-gradient(circle at 50% 50%, black 18%, transparent 78%)",
+      }} />
+      {/* солнечный сигил — фикс. размер, центр, обрезается контейнером */}
+      <div aria-hidden style={{
+        position: "absolute", top: "50%", left: "50%",
+        transform: "translate(-50%, -50%)", opacity: 0.16, pointerEvents: "none",
       }}>
+        <CardSunSigil size={78} />
+      </div>
+      <div aria-hidden style={{
+        position: "absolute", inset: 0,
+        background: `conic-gradient(from var(--nx-mcard-angle, 0deg) at 50% 50%, ${NX_HOLO.cyan}55 0deg, ${NX_HOLO.gold}77 90deg, ${NX_HOLO.magenta}55 180deg, ${NX_HOLO.violet}44 270deg, ${NX_HOLO.cyan}55 360deg)`,
+        mixBlendMode: "soft-light",
+        animation: "nx-mcard-holo 7s linear infinite",
+        opacity: 0.9,
+      }} />
+      <div aria-hidden style={{
+        position: "absolute", inset: 0, borderRadius: 14, padding: 1.4,
+        background: `linear-gradient(120deg, ${NX_HOLO.cyan}, ${NX_HOLO.magenta}, ${NX_HOLO.gold}, ${NX_HOLO.amber}, ${NX_HOLO.violet}, ${NX_HOLO.cyan})`,
+        backgroundSize: "300% 100%",
+        WebkitMask: "linear-gradient(#fff,#fff) content-box, linear-gradient(#fff,#fff)",
+        WebkitMaskComposite: "xor", maskComposite: "exclude",
+        animation: "nx-holo-border 4s linear infinite",
+        opacity: 0.9,
+      }} />
+      <div aria-hidden style={{ position: "absolute", inset: 0, overflow: "hidden", pointerEvents: "none" }}>
         <div style={{
-          position: "absolute", inset: 0, borderRadius: 14,
-          background: "linear-gradient(135deg, rgba(255,253,248,0.92) 0%, rgba(244,227,193,0.85) 45%, rgba(212,163,90,0.55) 100%)",
+          position: "absolute", top: 0, bottom: 0, width: "45%",
+          background: "linear-gradient(115deg, transparent 0%, rgba(255,250,235,0.5) 50%, transparent 100%)",
+          mixBlendMode: "overlay",
+          animation: "nx-holo-shine 5s ease-in-out infinite",
         }} />
-        <div aria-hidden style={{ position: "absolute", inset: 0, overflow: "hidden", borderRadius: 14 }}>
-          <div style={{
-            position: "absolute", inset: 0,
-            backgroundImage: "linear-gradient(rgba(90,60,16,0.10) 1px, transparent 1px), linear-gradient(90deg, rgba(90,60,16,0.10) 1px, transparent 1px)",
-            backgroundSize: "18px 18px",
-            maskImage: "radial-gradient(circle at 50% 48%, black 25%, transparent 75%)",
-            WebkitMaskImage: "radial-gradient(circle at 50% 48%, black 25%, transparent 75%)",
-          }} />
-          <svg style={{
-            position: "absolute", left: "50%", top: "50%",
-            transform: "translate(-50%, -50%)",
-            width: Math.min(height * 1.7, 220), height: Math.min(height * 1.7, 220),
-            opacity: 0.35,
-          }} viewBox="0 0 320 320">
-            <g stroke="#5a3c10" fill="none" strokeWidth="0.9" strokeOpacity="0.5">
-              <circle cx="160" cy="160" r="150" />
-              <circle cx="160" cy="160" r="118" strokeDasharray="3 5" />
-              <polygon points="160,30 272,224 48,224" />
-              <polygon points="160,290 48,96 272,96" strokeOpacity="0.32" />
-            </g>
-          </svg>
-        </div>
-        <div aria-hidden style={{
-          position: "absolute", inset: 0, borderRadius: 14,
-          background: `conic-gradient(from var(--nx-mcard-angle, 0deg) at 50% 50%, ${NX_HOLO.cyan}66 0deg, ${NX_HOLO.gold}88 60deg, ${NX_HOLO.amber}aa 120deg, ${NX_HOLO.magenta}66 180deg, ${NX_HOLO.violet}55 240deg, ${NX_HOLO.gold}88 300deg, ${NX_HOLO.cyan}66 360deg)`,
-          mixBlendMode: "soft-light",
-          animation: "nx-mcard-holo 7s linear infinite",
-          opacity: 0.95,
+      </div>
+
+      {/* идентификатор карточки: ранг + серийник */}
+      <div style={{
+        position: "absolute", top: 6, left: 8,
+        fontFamily: "var(--f-mono)", fontSize: 7, letterSpacing: "0.14em",
+        textTransform: "uppercase", opacity: 0.72, lineHeight: 1, color: "#3d2a10",
+      }}>{rank} · {serial}</div>
+      <div style={{
+        position: "absolute", top: 5, right: 6,
+        display: "inline-flex", alignItems: "center", gap: 3,
+        padding: "2px 5px", borderRadius: 999,
+        border: "0.8px solid rgba(80,55,20,0.5)",
+        background: `linear-gradient(135deg, rgba(255,250,235,0.9), ${NX_HOLO.gold}44, rgba(255,250,235,0.85))`,
+        fontFamily: "var(--f-mono)", fontSize: 7, fontWeight: 700,
+        letterSpacing: "0.1em", textTransform: "uppercase", color: "#5a3c10", lineHeight: 1,
+      }}>
+        <span style={{
+          width: 3, height: 3, borderRadius: "50%", background: "#5a3c10",
+          boxShadow: `0 0 4px ${NX_HOLO.ember}cc`,
+          animation: "nx-mcard-pulse 2s ease-in-out infinite",
         }} />
-        <div aria-hidden style={{
-          position: "absolute", inset: 0, borderRadius: 14, padding: 1.4,
-          background: `linear-gradient(120deg, ${NX_HOLO.cyan}, ${NX_HOLO.magenta}, ${NX_HOLO.gold}, ${NX_HOLO.amber}, ${NX_HOLO.violet}, ${NX_HOLO.cyan})`,
-          backgroundSize: "300% 100%",
-          WebkitMask: "linear-gradient(#fff,#fff) content-box, linear-gradient(#fff,#fff)",
-          WebkitMaskComposite: "xor", maskComposite: "exclude",
-          animation: "nx-holo-border 4s linear infinite",
-          opacity: 0.95,
-        }} />
-        <div aria-hidden style={{ position: "absolute", inset: 0, borderRadius: 14, overflow: "hidden", pointerEvents: "none" }}>
-          <div style={{
-            position: "absolute", top: 0, bottom: 0, width: "40%",
-            background: "linear-gradient(115deg, transparent 0%, rgba(255,250,235,0.55) 50%, transparent 100%)",
-            mixBlendMode: "overlay",
-            animation: "nx-holo-shine 5s ease-in-out infinite",
-          }} />
-        </div>
-        <div style={{ position: "absolute", inset: 0, padding: `${pad}px ${pad + 1}px`, color: "#3d2a10" }}>
-          <div style={{
-            position: "absolute", top: pad, left: pad + 2,
-            fontFamily: 'ui-monospace, "JetBrains Mono", monospace',
-            fontSize: fsSerial, letterSpacing: "0.18em",
-            textTransform: "uppercase", opacity: 0.78, lineHeight: 1,
-          }}>{serial}</div>
-          <div style={{
-            position: "absolute", top: pad - 2, right: pad - 2,
-            display: "inline-flex", alignItems: "center", gap: 3,
-            padding: `${Math.max(2, scale * 2)}px ${Math.max(5, scale * 5)}px`,
-            border: "0.8px solid rgba(80,55,20,0.55)",
-            borderRadius: 999,
-            background: `linear-gradient(135deg, rgba(255,250,235,0.9), ${NX_HOLO.gold}55, rgba(255,250,235,0.85))`,
-            boxShadow: "0 1px 2px rgba(80,55,20,0.22), inset 0 1px 0 rgba(255,250,235,0.7)",
-            fontFamily: "ui-monospace, monospace",
-            fontSize: fsBadge, fontWeight: 700,
-            letterSpacing: "0.16em", textTransform: "uppercase",
-            color: "#5a3c10", lineHeight: 1,
-          }}>
-            <span style={{
-              width: Math.max(3, scale * 4), height: Math.max(3, scale * 4),
-              borderRadius: "50%", background: "#5a3c10",
-              boxShadow: `0 0 4px ${NX_HOLO.ember}cc`,
-              animation: "nx-mcard-pulse 2s ease-in-out infinite",
-            }} />
-            <span>{badge}</span>
-          </div>
-          <div style={{
-            position: "absolute", inset: 0,
-            display: "flex", flexDirection: "column",
-            alignItems: "center", justifyContent: "center",
-            paddingTop: pad,
-          }}>
-            <CardSunSigil size={sigilSize} />
-            <div style={{
-              fontFamily: '"Lora", Georgia, serif',
-              fontSize: fsRank, fontStyle: "italic",
-              lineHeight: 1, marginTop: Math.max(2, scale * 3),
-              textShadow: "0 1px 0 rgba(255,250,235,0.5)",
-            }}>{rank}</div>
-            <div style={{
-              fontFamily: "ui-monospace, monospace",
-              fontSize: fsSubline, letterSpacing: "0.22em",
-              textTransform: "uppercase", opacity: 0.65,
-              marginTop: Math.max(2, scale * 2), lineHeight: 1,
-            }}>СТРИК</div>
-          </div>
-          <div style={{
-            position: "absolute", bottom: pad, left: pad + 2,
-            fontFamily: "ui-monospace, monospace",
-            fontSize: fsCaption, letterSpacing: "0.14em",
-            opacity: 0.7, lineHeight: 1,
-          }}>{caption}</div>
-        </div>
+        <span>{badge}</span>
+      </div>
+
+      {/* центр — как у `.metric`: крупное число + подпись */}
+      <div style={{
+        position: "absolute", inset: 0, padding: "14px 8px", color: "#3d2a10",
+        display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
+      }}>
+        <span style={{
+          fontFamily: "var(--f-display)", fontSize: 28, fontWeight: 500, lineHeight: 1,
+          display: "inline-flex", alignItems: "flex-end", gap: 2,
+        }}>
+          <LucideFlame size={18} fill="currentColor" style={{ color: "#b07a2e", flexShrink: 0 }} />
+          {cur}
+        </span>
+        <span style={{
+          fontSize: 12, marginTop: 6, fontWeight: 600, letterSpacing: "0.3px",
+          textTransform: "uppercase", opacity: 0.72,
+        }}>стрик</span>
       </div>
     </div>
   );
@@ -1347,29 +1317,9 @@ function NxDay({ s, openTask, navigate, openStreaks }) {
   // wave6.5: погода (календарь стриков теперь только в StreaksSheet)
   const weatherApi = useApi('/api/weather');
 
-  // Карточка стрика — holo-компонент с фиксированной геометрией (всё внутри
-  // масштабируется линейно от prop width). Ячейка карточки в ряду ограничена
-  // сверху STREAK_MAX (иначе на десктопе flex:1 растянул бы её на треть экрана,
-  // а квадратная holo-карточка такого размера давит соседей). maxWidth на
-  // ЯЧЕЙКЕ → flexbox отдаёт остаток «Задачам»/«Свободно» (они flex:1 без
-  // потолка). На мобиле ячейка = 1/3 ряда (< STREAK_MAX), карточка ≈ плитки.
-  // Меряем ячейку и подгоняем prop width; height = width * 112/110.
-  const STREAK_MIN = 110;   // минимальная читаемость holo-контента
-  const STREAK_MAX = 200;
-  const streakCellRef = useRef(null);
-  const [streakW, setStreakW] = useState(STREAK_MIN);
-  useEffect(() => {
-    const el = streakCellRef.current;
-    if (!el || typeof ResizeObserver === "undefined") return;
-    const measure = () => {
-      const w = Math.round(el.clientWidth || STREAK_MIN);
-      setStreakW(Math.max(STREAK_MIN, Math.min(w, STREAK_MAX)));
-    };
-    measure();
-    const ro = new ResizeObserver(measure);
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, [data]);
+  // #207: карточка стрика — fluid holo-плитка, тянется как соседние `.metric`
+  // (flex:1), рисунок-сигил фикс. размера и всегда внутри. Больше не меряем
+  // ячейку и не масштабируем контент от ширины.
 
   if (loading) return <Empty s={s} text="Загружаю..." />;
   if (error) return <ErrorBox s={s} error={error} refetch={refetch} />;
@@ -1418,10 +1368,8 @@ function NxDay({ s, openTask, navigate, openStreaks }) {
             <Metric s={s} v={`${Math.round(t.discretionaryFree / 1000)}к`} unit="₽" sub="свободно" />
           </div>
           {t.streak >= 3 ? (
-            <div ref={streakCellRef} style={{ flex: 1, minWidth: 0, maxWidth: STREAK_MAX, display: "flex", justifyContent: "center" }}>
+            <div style={{ flex: 1, minWidth: 0, display: "flex" }}>
               <StreakAchievedCard
-                width={streakW}
-                height={Math.round(streakW * 112 / 110)}
                 current={t.streak}
                 best={t.streakBest || t.streak}
                 lastDateIso={t.streakLastDate}
