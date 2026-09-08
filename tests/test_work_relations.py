@@ -123,3 +123,54 @@ async def test_find_active_work_fail_closed_no_user():
         assert await wr.find_active_work_for_client("5", "🃏 Расклад", "") is None
         assert await wr.find_active_work_for_client("", "🃏 Расклад", "u") is None
     m_find.assert_not_called()
+
+
+# ── #154 стадия 5: link_practice_record ──────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_link_practice_record_uses_existing_open_work():
+    from core import work_relation as wr
+    from arcana.repos.pg_works_repo import PgWorksRepo
+    from arcana.repos.pg_sessions_repo import PgSessionsRepo
+
+    work = Work(id="9", title="W", priority="Можно потом",
+                deadline_str="", category_str="", has_client=True)
+    with patch.object(PgWorksRepo, "find_active_for_client", AsyncMock(return_value=work)), \
+         patch.object(PgWorksRepo, "create", AsyncMock()) as m_create, \
+         patch.object(PgSessionsRepo, "set_work_id", AsyncMock(return_value=True)) as m_set, \
+         patch.object(PgWorksRepo, "set_status", AsyncMock(return_value=True)) as m_close:
+        wid, created = await wr.link_practice_record(
+            "session", ["s1", "s2"], "5", "🃏 Расклад", "Оля — приворот", "u",
+        )
+    assert (wid, created) == ("9", False)
+    m_create.assert_not_called()
+    assert {c.args for c in m_set.await_args_list} == {("s1", "9"), ("s2", "9")}
+    m_close.assert_awaited_once_with("9", "done")
+
+
+@pytest.mark.asyncio
+async def test_link_practice_record_creates_work_when_none():
+    from core import work_relation as wr
+    from arcana.repos.pg_works_repo import PgWorksRepo
+    from arcana.repos.pg_rituals_repo import PgRitualsRepo
+
+    with patch.object(PgWorksRepo, "find_active_for_client", AsyncMock(return_value=None)), \
+         patch.object(PgWorksRepo, "create", AsyncMock(return_value="42")) as m_create, \
+         patch.object(PgRitualsRepo, "set_work_id", AsyncMock(return_value=True)) as m_set, \
+         patch.object(PgWorksRepo, "set_status", AsyncMock(return_value=True)) as m_close:
+        wid, created = await wr.link_practice_record(
+            "ritual", "r1", "5", "✨ Ритуал", "Чистка дома", "u",
+        )
+    assert (wid, created) == ("42", True)
+    assert m_create.await_args.kwargs["category"] == "✨ Ритуал"
+    assert m_create.await_args.kwargs["client_id"] == "5"
+    m_set.assert_awaited_once_with("r1", "42")
+    m_close.assert_awaited_once_with("42", "done")
+
+
+@pytest.mark.asyncio
+async def test_link_practice_record_noop_without_client():
+    from core import work_relation as wr
+    assert await wr.link_practice_record("ritual", "r1", None, "✨ Ритуал", "X", "u") == (None, False)
+    assert await wr.link_practice_record("ritual", "r1", "5", "✨ Ритуал", "X", "") == (None, False)
+    assert await wr.link_practice_record("ritual", [], "5", "✨ Ритуал", "X", "u") == (None, False)

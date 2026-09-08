@@ -981,22 +981,18 @@ async def _save_and_post_triplet(
             client_id=client_id, session_name=session_name, occurred_at=_now_iso(tz)[:10],
         )
 
-    # Авто-привязка к открытой Работе (категория 🃏 Расклад) + закрыть её (PG, #151).
+    # Привязка к Работе (категория 🃏 Расклад): открытая → закрыть, нет →
+    # завести задним числом и закрыть (#151 + #154 стадия 5).
     work_closed = False
+    work_created = False
     if client_id:
         try:
-            from core.work_relation import (
-                set_event_work_id, close_work_as_done,
-                find_active_work_for_client,
+            from core.work_relation import link_practice_record
+            w_id, work_created = await link_practice_record(
+                "session", page_id, client_id, "🃏 Расклад",
+                session_name or question or "Расклад", user_id,
             )
-            w_id = await find_active_work_for_client(
-                client_id, "🃏 Расклад", user_id,
-            )
-            if w_id:
-                ok = await set_event_work_id("session", page_id, w_id)
-                if ok:
-                    await close_work_as_done(w_id)
-                    work_closed = True
+            work_closed = bool(w_id)
         except Exception as e:
             logger.warning("session→work relation failed: %s", e)
 
@@ -1028,7 +1024,8 @@ async def _save_and_post_triplet(
             "\n💡 Заведи себя как клиента чтобы группировать личные расклады"
         )
     if work_closed:
-        head_lines.append("✅ Связанная Работа закрыта")
+        head_lines.append("🔮 Работа заведена и закрыта" if work_created
+                          else "✅ Связанная Работа закрыта")
     if linked_ritual:
         head_lines.append(f"🕯️ Связала с ритуалом «{html.escape(linked_ritual)}»")
     head = "\n".join(head_lines)
@@ -1796,6 +1793,19 @@ async def _handle_multi_session(
             saved_page_ids, client_id, user_id
         )
 
+    # #154 стадия 5: привязка всей сессии к Работе (🃏 Расклад) —
+    # открытая → закрыть, нет → завести задним числом и закрыть.
+    work_created_multi = False
+    if client_id and saved_page_ids:
+        try:
+            from core.work_relation import link_practice_record
+            _wid, work_created_multi = await link_practice_record(
+                "session", saved_page_ids, client_id, "🃏 Расклад",
+                session_name or "Расклад", user_id,
+            )
+        except Exception as e:
+            logger.warning("multi-session→work relation failed: %s", e)
+
     bullet_list = "\n".join(f"• {html.escape(t)}" for t in saved_titles[:12])
     if len(saved_titles) > 12:
         bullet_list += f"\n• … и ещё {len(saved_titles) - 12}"
@@ -1806,6 +1816,8 @@ async def _handle_multi_session(
     )
     if linked_ritual:
         final_msg += f"🕯️ Связала с ритуалом «{html.escape(linked_ritual)}»\n"
+    if work_created_multi:
+        final_msg += "🔮 Работа заведена и закрыта\n"
     if bullet_list:
         final_msg += bullet_list + "\n"
     if session_summary_text:

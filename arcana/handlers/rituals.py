@@ -149,22 +149,18 @@ async def handle_add_ritual(message: Message, text: str, user_id: str = "") -> N
             await message.answer("⚠️ Ошибка записи в Notion.")
             return
 
-        # Авто-привязка к открытой Работе (категория ✨ Ритуал) + закрыть её (PG, #151).
+        # Привязка к Работе (категория ✨ Ритуал): открытая → закрыть, нет →
+        # завести задним числом и закрыть (#151 + #154 стадия 5).
         work_closed = False
+        work_created = False
         try:
-            from core.work_relation import (
-                set_event_work_id, close_work_as_done,
-                find_active_work_for_client,
-            )
+            from core.work_relation import link_practice_record
             if client_id:
-                w_id = await find_active_work_for_client(
-                    client_id, "✨ Ритуал", user_id,
+                w_id, work_created = await link_practice_record(
+                    "ritual", result.id, client_id, "✨ Ритуал",
+                    data.get("name") or "Ритуал", user_id,
                 )
-                if w_id:
-                    ok = await set_event_work_id("ritual", result.id, w_id)
-                    if ok:
-                        await close_work_as_done(w_id)
-                        work_closed = True
+                work_closed = bool(w_id)
         except Exception as e:
             logger.warning("ritual→work relation failed: %s", e)
 
@@ -200,7 +196,8 @@ async def handle_add_ritual(message: Message, text: str, user_id: str = "") -> N
                 money += f" · ⚠️ долг {int(debt)}₽"
             lines.append(money)
         if work_closed:
-            lines.append("✅ Связанная Работа закрыта")
+            lines.append("🔮 Работа заведена и закрыта" if work_created
+                         else "✅ Связанная Работа закрыта")
         lines.append("\n<i>↩️ Реплай чтобы дополнить</i>")
 
         # Если ритуал на 🤝 Платного клиента — сразу прикрепляем inline-оплату.
