@@ -239,15 +239,15 @@ async def test_manual_prompt_shows_preview_and_buttons():
     assert any("долги" in t for t in button_texts)
     assert any("Разделить" in t for t in button_texts)
     assert any("предложено" in t for t in button_texts)
-    assert finance._pending_windfall_manual[1]["amount"] == 2_500_000
-    finance._pending_windfall_manual.pop(1, None)
+    assert _kv.get(1, finance._PK_WINDFALL)["amount"] == 2_500_000
+    _kv.delete(1, finance._PK_WINDFALL)
 
 
 @pytest.mark.asyncio
 async def test_windfall_all_cushion_button_moves_whole_amount():
-    finance._pending_windfall_manual[42] = {
+    _kv.save(42, finance._PK_WINDFALL, {
         "amount": 2_500_000, "plan": {"debts": []}, "user_id": "u-1",
-    }
+    }, ttl=1800)
     call = _call(42, "windfall_all_cushion")
     with patch("core.repos.pg_cushion_repo._repo.add_to_balance",
                AsyncMock(return_value=2_600_000)) as m_cushion:
@@ -257,7 +257,7 @@ async def test_windfall_all_cushion_button_moves_whole_amount():
     assert m_cushion.call_args.args[0] == "u-1"
     assert m_cushion.call_args.args[1] == 2_500_000
     assert m_cushion.call_args.kwargs.get("source") == "windfall_income"
-    assert 42 not in finance._pending_windfall_manual
+    assert _kv.get(42, finance._PK_WINDFALL) is None
     assert "2,500,000₽" in call.message.edit_text.call_args.args[0]
 
 
@@ -269,9 +269,9 @@ async def test_windfall_close_debts_button_closes_all_remainder_to_cushion():
         {"name": "Вика", "amount": 20000},
         {"name": "Банк", "amount": 30000},
     ]
-    finance._pending_windfall_manual[42] = {
+    _kv.save(42, finance._PK_WINDFALL, {
         "amount": 2_500_000, "plan": {"debts": debts}, "user_id": "u-1",
-    }
+    }, ttl=1800)
     call = _call(42, "windfall_close_debts")
 
     debt_calls = []
@@ -292,32 +292,81 @@ async def test_windfall_close_debts_button_closes_all_remainder_to_cushion():
     text = call.message.edit_text.call_args.args[0]
     assert "Вика" in text and "Банк" in text
     assert "2,450,000₽" in text
-    assert 42 not in finance._pending_windfall_manual
+    assert _kv.get(42, finance._PK_WINDFALL) is None
 
 
 @pytest.mark.asyncio
 async def test_windfall_split_button_asks_clarifying_question_keeps_pending():
-    finance._pending_windfall_manual[42] = {
+    _kv.save(42, finance._PK_WINDFALL, {
         "amount": 2_500_000, "plan": {"debts": []}, "user_id": "u-1",
-    }
+    }, ttl=1800)
     call = _call(42, "windfall_split")
     await finance.on_windfall_split(call)
 
     text = call.message.edit_text.call_args.args[0]
     assert "1,250,000" in text
-    # split не завершает флоу — pending остаётся для последующего уточнения
-    assert 42 in finance._pending_windfall_manual
-    finance._pending_windfall_manual.pop(42, None)
+    # split не завершает флоу — pending остаётся + помечается mode=split
+    p = _kv.get(42, finance._PK_WINDFALL)
+    assert p is not None and p.get("mode") == "split"
+    _kv.delete(42, finance._PK_WINDFALL)
+
+
+@pytest.mark.asyncio
+async def test_windfall_split_text_parses_cushion_and_goal():
+    """После «⚖️ Разделить» Кай пишет «X в подушку, Y на цель Z» —
+    handle_windfall_split_text раскладывает."""
+    _kv.save(42, finance._PK_WINDFALL, {
+        "amount": 100000, "plan": {}, "user_id": "u-1", "mode": "split",
+    }, ttl=1800)
+    msg = _msg()
+    msg.text = "60000 в подушку, 40000 на цель телефон"
+    fake_goals = MagicMock()
+    fake_goals.add_saved = AsyncMock(return_value=40000.0)
+    with patch("core.repos.pg_cushion_repo._repo.add_to_balance",
+               AsyncMock(return_value=160000.0)) as m_cushion, \
+         patch("core.repos.pg_goals_repo._repo", fake_goals):
+        handled = await finance.handle_windfall_split_text(msg, user_id="u-1")
+
+    assert handled is True
+    assert m_cushion.await_args.args[1] == 60000.0
+    fake_goals.add_saved.assert_awaited_once_with("u-1", "телефон", 40000.0)
+    assert _kv.get(42, finance._PK_WINDFALL) is None
+
+
+@pytest.mark.asyncio
+async def test_windfall_split_text_remainder_to_cushion():
+    """Разбивка меньше суммы → остаток докидываем в подушку."""
+    _kv.save(42, finance._PK_WINDFALL, {
+        "amount": 100000, "plan": {}, "user_id": "u-1", "mode": "split",
+    }, ttl=1800)
+    msg = _msg()
+    msg.text = "30000 на цель телефон"
+    fake_goals = MagicMock()
+    fake_goals.add_saved = AsyncMock(return_value=30000.0)
+    with patch("core.repos.pg_cushion_repo._repo.add_to_balance",
+               AsyncMock(return_value=170000.0)) as m_cushion, \
+         patch("core.repos.pg_goals_repo._repo", fake_goals):
+        await finance.handle_windfall_split_text(msg, user_id="u-1")
+
+    # 100000 − 30000 (цель) = 70000 в подушку
+    assert m_cushion.await_args.args[1] == 70000.0
+
+
+@pytest.mark.asyncio
+async def test_windfall_split_text_noop_without_pending():
+    msg = _msg()
+    msg.text = "50000 в подушку"
+    assert await finance.handle_windfall_split_text(msg, user_id="u-1") is False
 
 
 @pytest.mark.asyncio
 async def test_windfall_asis_button_applies_computed_plan():
-    finance._pending_windfall_manual[42] = {
+    _kv.save(42, finance._PK_WINDFALL, {
         "amount": 60000,
         "plan": {"period_start": "2026-09-01", "is_tight": False,
                  "to_impulse": 0.0, "remainder": 60000, "debt_name": "", "debts": []},
         "user_id": "u-1",
-    }
+    }, ttl=1800)
     call = _call(42, "windfall_asis")
     with patch("core.repos.pg_cushion_repo._repo.add_to_balance",
                AsyncMock(return_value=60000)) as m_cushion:
@@ -325,7 +374,7 @@ async def test_windfall_asis_button_applies_computed_plan():
 
     m_cushion.assert_awaited_once()
     assert m_cushion.call_args.args[1] == 60000
-    assert 42 not in finance._pending_windfall_manual
+    assert _kv.get(42, finance._PK_WINDFALL) is None
     assert "распределён" in call.message.edit_text.call_args.args[0]
 
 

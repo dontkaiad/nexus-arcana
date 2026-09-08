@@ -38,7 +38,9 @@ def _make_engine():
             "amount REAL NOT NULL, "
             "source TEXT NOT NULL DEFAULT 'manual', "
             "note TEXT NOT NULL DEFAULT '', "
-            "created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)"
+            "created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, "
+            # CHECK как после миграции c3d4e5f6a7b8 (#123/#208)
+            "CHECK (source IN ('manual','payday_auto','debt_overpaid','windfall_income')))"
         ))
     return eng
 

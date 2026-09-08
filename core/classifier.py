@@ -1328,22 +1328,13 @@ async def process_item(data: Dict[str, Any], original_text: str, msg, clarify: d
                 except Exception as e:
                     logger.debug("list cross-off check: %s", e)
             elif kind == "income":
-                # Любой доход (кроме ЗП/аренды/практики) → предложить пересчёт бюджета
-                _skip_cats = {"💰 Зарплата", "🔮 Практика", "🏠 Жильё"}
-                _skip_desc = {"аренда", "зарплата", "зп"}
-                title_lower = (title or "").lower()
-                if category not in _skip_cats and not any(w in title_lower for w in _skip_desc):
-                    try:
-                        from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-                        await msg.answer(
-                            "📊 Пересчитать бюджет с учётом дохода?",
-                            reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
-                                InlineKeyboardButton(text="📊 Да", callback_data="budget_recalc_full"),
-                                InlineKeyboardButton(text="❌ Нет", callback_data="msg_hide"),
-                            ]]),
-                        )
-                    except Exception as e:
-                        logger.error("income recalc prompt error: %s", e)
+                # Непредвиденный доход (не ЗП/практика/жильё) → распределить:
+                # тихо (< 50k) или с кнопками ручного выбора (>= 50k). #208.
+                try:
+                    from nexus.handlers.finance import handle_windfall_income
+                    await handle_windfall_income(msg, amount, category, title, user_id)
+                except Exception as e:
+                    logger.error("windfall income handler error: %s", e, exc_info=True)
             return f"{icon} <b>{sign}{amount:,.0f}₽</b> · <b>{title}</b>\n🏷 {category} <i>{source}</i>"
         
         logged = await log_error(original_text, "processing_error", _classify_last_raw,

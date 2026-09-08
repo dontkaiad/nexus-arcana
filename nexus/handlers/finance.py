@@ -1027,9 +1027,14 @@ async def _add_impulse_windfall_bonus(user_id: str, period_start: str, amount: f
 # молчаливого распределения (#часть2, коммит после 206f118).
 WINDFALL_MANUAL_THRESHOLD = 50000.0
 
-# uid → {"amount", "plan", "user_id"} — между сообщением-предпросмотром
-# и нажатием одной из 4 кнопок ручного распределения крупной суммы.
-_pending_windfall_manual: Dict[int, dict] = {}
+# #208: pending между предпросмотром крупного дохода и нажатием кнопки —
+# на SQLite (core.pending_kv), не в память. {"amount", "plan", "user_id"}.
+_PK_WINDFALL = "nexus_windfall_manual"
+
+# Доход этих категорий НЕ считается «непредвиденным»: зарплата (свой триггер),
+# практика (уходит в кассу Арканы), жильё/аренда (регулярный доход).
+_WINDFALL_SKIP_CATEGORIES = ("Зарплата", "Практика", "Жильё")
+_WINDFALL_SKIP_DESC = ("аренда", "зарплата", "зп")
 
 
 async def _compute_windfall_plan(amount: float, user_id: str, tz_offset: int) -> dict:
@@ -1163,7 +1168,7 @@ async def _send_windfall_manual_prompt(message: Message, amount: float, uid: int
     предпросмотр авто-разбивки + кнопки ручного выбора."""
     tz_offset = await _get_user_tz(uid)
     plan = await _compute_windfall_plan(amount, user_id, tz_offset)
-    _pending_windfall_manual[uid] = {"amount": amount, "plan": plan, "user_id": user_id}
+    _pkv.save(uid, _PK_WINDFALL, {"amount": amount, "plan": plan, "user_id": user_id}, ttl=1800)
     preview = _format_windfall_preview(plan)
     text = (
         "💰 <b>Крупное поступление: {:,.0f}₽</b>\n\n"
@@ -1176,7 +1181,7 @@ async def _send_windfall_manual_prompt(message: Message, amount: float, uid: int
 @router.callback_query(F.data == "windfall_all_cushion")
 async def on_windfall_all_cushion(call: CallbackQuery, user_id: str = "") -> None:
     uid = call.from_user.id
-    pending = _pending_windfall_manual.pop(uid, None)
+    pending = _pkv.pop(uid, _PK_WINDFALL, ttl=1800)
     if not pending:
         await call.answer("Нет данных.")
         return
@@ -1196,7 +1201,7 @@ async def on_windfall_all_cushion(call: CallbackQuery, user_id: str = "") -> Non
 @router.callback_query(F.data == "windfall_close_debts")
 async def on_windfall_close_debts(call: CallbackQuery, user_id: str = "") -> None:
     uid = call.from_user.id
-    pending = _pending_windfall_manual.pop(uid, None)
+    pending = _pkv.pop(uid, _PK_WINDFALL, ttl=1800)
     if not pending:
         await call.answer("Нет данных.")
         return
@@ -1232,27 +1237,104 @@ async def on_windfall_close_debts(call: CallbackQuery, user_id: str = "") -> Non
 
 @router.callback_query(F.data == "windfall_split")
 async def on_windfall_split(call: CallbackQuery) -> None:
-    """Уточняющий вопрос текстом — Кай сама пишет разбивку (тот же паттерн,
-    что у других уточнений в файле: свободный текст, не форма)."""
+    """Кай пишет разбивку свободным текстом; ответ ловит handle_finance_pending
+    (gate в nexus_bot.handle_text) по флагу mode='split' в pending."""
     uid = call.from_user.id
-    pending = _pending_windfall_manual.get(uid)
+    pending = _pkv.get(uid, _PK_WINDFALL, ttl=1800)
     if not pending:
         await call.answer("Нет данных.")
         return
+    pending["mode"] = "split"
+    _pkv.save(uid, _PK_WINDFALL, pending, ttl=1800)
     amount = pending["amount"]
     half = amount / 2
     await call.message.edit_text(
-        "⚖️ Раздели {:,.0f}₽ между подушкой и целями текстом, например:\n"
-        "«{:,.0f} в подушку, {:,.0f} на цель Х»".format(amount, half, half),
+        "⚖️ Раздели {:,.0f}₽ текстом, например:\n"
+        "«{:,.0f} в подушку, {:,.0f} на цель телефон»".format(amount, half, half),
         parse_mode="HTML",
     )
     await call.answer()
 
 
+_WF_CUSHION_RE = re.compile(r"(\d[\d\s.,]*)\s*(?:₽|руб\w*)?\s*(?:в|на)?\s*подушк", re.I)
+_WF_GOAL_RE = re.compile(r"(\d[\d\s.,]*)\s*(?:₽|руб\w*)?\s*(?:на|в)?\s*цел[ьи]\s+([\wа-яё-]+)", re.I)
+
+
+def _wf_num(s: str) -> float:
+    s = s.strip().replace(" ", "").replace(",", "").rstrip(".")
+    try:
+        return float(s)
+    except ValueError:
+        return 0.0
+
+
+async def handle_windfall_split_text(message: Message, user_id: str = "") -> bool:
+    """Gate: ждём ли мы разбивку крупного дохода (mode='split')?"""
+    uid = message.from_user.id
+    pending = _pkv.get(uid, _PK_WINDFALL, ttl=1800)
+    if not pending or pending.get("mode") != "split":
+        return False
+    text = message.text or ""
+    if text.strip().lower() in ("отмена", "стоп", "cancel"):
+        _pkv.delete(uid, _PK_WINDFALL)
+        await message.answer("❌ Отмена. Доход записан, но не распределён.")
+        return True
+
+    total = float(pending["amount"])
+    unid = pending.get("user_id") or user_id
+    cm = _WF_CUSHION_RE.search(text)
+    gm = _WF_GOAL_RE.search(text)
+    to_cushion = _wf_num(cm.group(1)) if cm else 0.0
+    to_goal = _wf_num(gm.group(1)) if gm else 0.0
+    goal_name = gm.group(2) if gm else ""
+
+    if to_cushion <= 0 and to_goal <= 0:
+        await message.answer(
+            "🤔 Не разобрала. Формат: «{:,.0f} в подушку, {:,.0f} на цель телефон». "
+            "Или «отмена».".format(total / 2, total / 2)
+        )
+        return True
+
+    # Остаток (если сумма разбивки < дохода) → в подушку.
+    used = to_cushion + to_goal
+    if used < total - 0.5:
+        to_cushion += total - used
+
+    from core.repos.pg_cushion_repo import _repo as _cushion_repo
+    lines = []
+    if to_cushion > 0:
+        bal = await _cushion_repo.add_to_balance(
+            unid, to_cushion, source="windfall_income", note="крупный доход — разбивка",
+        )
+        lines.append("→ 🛡️ Подушка +{:,.0f}₽ (баланс {:,.0f}₽)".format(to_cushion, bal))
+    if to_goal > 0 and goal_name:
+        try:
+            from core.repos.pg_goals_repo import _repo as _goals_repo
+            saved = await _goals_repo.add_saved(unid, goal_name, to_goal)
+            if saved is not None:
+                lines.append("→ 🎯 Цель «{}» +{:,.0f}₽ (накоплено {:,.0f}₽)".format(
+                    goal_name, to_goal, saved))
+            else:
+                # Цель не нашли — деньги не теряем, доливаем в подушку.
+                bal = await _cushion_repo.add_to_balance(
+                    unid, to_goal, source="windfall_income",
+                    note="цель не найдена — в подушку",
+                )
+                lines.append("→ 🛡️ Цель «{}» не нашла, {:,.0f}₽ → подушка (баланс {:,.0f}₽)".format(
+                    goal_name, to_goal, bal))
+        except Exception as e:
+            logger.warning("windfall split goal deposit failed: %s", e)
+
+    _pkv.delete(uid, _PK_WINDFALL)
+    await message.answer("💰 Крупный доход {:,.0f}₽:\n{}".format(total, "\n".join(lines)),
+                         parse_mode="HTML")
+    return True
+
+
 @router.callback_query(F.data == "windfall_asis")
 async def on_windfall_asis(call: CallbackQuery, user_id: str = "") -> None:
     uid = call.from_user.id
-    pending = _pending_windfall_manual.pop(uid, None)
+    pending = _pkv.pop(uid, _PK_WINDFALL, ttl=1800)
     if not pending:
         await call.answer("Нет данных.")
         return
@@ -1277,6 +1359,44 @@ async def _distribute_windfall_income(amount: float, uid: int, user_id: str) -> 
     tz_offset = await _get_user_tz(uid)
     plan = await _compute_windfall_plan(amount, user_id, tz_offset)
     return await _apply_windfall_plan(amount, user_id, plan)
+
+
+def _is_windfall_income(category: str, title: str) -> bool:
+    """Доход считается «непредвиденным» (подлежит распределению), если это НЕ
+    зарплата / практика / жильё-аренда — ни по категории, ни по описанию."""
+    cat = category or ""
+    ttl = (title or "").lower()
+    if any(x in cat for x in _WINDFALL_SKIP_CATEGORIES):
+        return False
+    if any(w in ttl for w in _WINDFALL_SKIP_DESC):
+        return False
+    return True
+
+
+async def handle_windfall_income(
+    message: Message, amount: float, category: str, title: str, user_id: str = "",
+) -> bool:
+    """Единая точка входа для непредвиденного дохода (из core/classifier).
+
+    < WINDFALL_MANUAL_THRESHOLD → тихо распределяем (импульсивные в тяжёлый
+    месяц → горящий долг → подушка), шлём отчёт.
+    >= порога → предпросмотр + 4 кнопки ручного выбора.
+    Возвращает True если что-то показали/сделали (не зарплата/практика/жильё)."""
+    amount = float(amount or 0)
+    if amount <= 0 or not _is_windfall_income(category, title):
+        return False
+    uid = message.from_user.id
+    try:
+        if amount >= WINDFALL_MANUAL_THRESHOLD:
+            await _send_windfall_manual_prompt(message, amount, uid, user_id)
+        else:
+            msg = await _distribute_windfall_income(amount, uid, user_id)
+            if msg:
+                await message.answer(msg, parse_mode="HTML")
+    except Exception as e:
+        logger.error("handle_windfall_income failed: %s", e, exc_info=True)
+        return False
+    return True
 
 
 async def handle_finance_text(message: Message, text: str, bot_label: str = "☀️ Nexus",
@@ -1497,8 +1617,13 @@ _PK_LIMIT = "nexus_fin_limit_custom"
 
 
 async def handle_finance_pending(message: Message, user_id: str = "") -> bool:
-    """Gate для nexus_bot.handle_text: ждём ли мы сумму кастомного лимита?
+    """Gate для nexus_bot.handle_text: ждём ли мы ввод, привязанный к
+    финансовому диалогу (сумма кастомного лимита / разбивка крупного дохода)?
     True — сообщение обработано, дальше не роутить."""
+    # #208: разбивка крупного дохода после кнопки «⚖️ Разделить»
+    if await handle_windfall_split_text(message, user_id):
+        return True
+
     uid = message.from_user.id
     _p = _pkv.get(uid, _PK_LIMIT, ttl=600)
     if not _p:

@@ -151,7 +151,7 @@ async def test_zero_or_negative_amount_returns_empty():
         assert await finance._distribute_windfall_income(-100, uid=1, user_id="u-1") == ""
 
 
-# ── Регресс: Зарплата/Практика НЕ триггерят windfall-логику ─────────────────
+# ── handle_windfall_income: единая точка входа (из core/classifier) ──────────
 
 def _msg():
     m = MagicMock()
@@ -160,38 +160,62 @@ def _msg():
     return m
 
 
-def _sonnet_json(amount, category, type_="💰 Доход"):
-    return json.dumps({
-        "amount": amount, "description": "test", "type_": type_,
-        "category": category, "source": "💳 Карта", "confidence": "high",
-    })
+@pytest.mark.parametrize("cat,title,expect", [
+    ("💰 Зарплата", "зарплата", False),
+    ("🔮 Практика", "расклад", False),
+    ("🏠 Жильё", "аренда квартиры", False),
+    ("🎁 Подарок", "подарок от бабушки", True),
+    ("💳 Прочее", "вернули за телефон", True),
+    ("💳 Прочее", "зарплата аванс", False),   # по описанию
+])
+def test_is_windfall_income(cat, title, expect):
+    assert finance._is_windfall_income(cat, title) is expect
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("category", ["💰 Зарплата", "🔮 Практика"])
-async def test_regular_income_categories_do_not_trigger_windfall(category):
-    """Зарплата/Практика — НЕ триггерят _distribute_windfall_income вообще."""
-    with patch.object(finance, "ask_claude", AsyncMock(return_value=_sonnet_json(50000, category))), \
-         patch.object(finance, "_save_finance", AsyncMock(return_value="page-1")), \
-         patch.object(finance, "react", AsyncMock()), \
-         patch.object(finance, "build_budget_message", AsyncMock(return_value=None)), \
-         patch.object(finance, "_distribute_windfall_income", AsyncMock()) as m_windfall:
-        await finance.handle_finance_text(_msg(), "зарплата 50000", user_id="u-1")
-
-    m_windfall.assert_not_called()
+async def test_handle_windfall_small_distributes_and_replies():
+    msg = _msg()
+    with patch.object(finance, "_distribute_windfall_income",
+                      AsyncMock(return_value="💰 распределён: → 🛡️ Подушка +2,000₽")) as m_d:
+        ok = await finance.handle_windfall_income(msg, 2000, "🎁 Подарок", "подарок", "u-1")
+    assert ok is True
+    m_d.assert_awaited_once_with(2000, 42, "u-1")
+    assert "Подушка" in msg.answer.await_args.args[0]
 
 
 @pytest.mark.asyncio
-async def test_windfall_category_does_trigger():
-    """Непредвиденный доход, category НЕ в списке исключений → триггерит
-    _distribute_windfall_income."""
-    with patch.object(finance, "ask_claude",
-                       AsyncMock(return_value=_sonnet_json(2000, "🎁 Подарок"))), \
-         patch.object(finance, "_save_finance", AsyncMock(return_value="page-1")), \
-         patch.object(finance, "react", AsyncMock()), \
-         patch.object(finance, "_distribute_windfall_income",
-                       AsyncMock(return_value="💰 ...")) as m_windfall:
-        msg = _msg()
-        await finance.handle_finance_text(msg, "подарок 2000", user_id="u-1")
+async def test_handle_windfall_large_shows_manual_prompt():
+    msg = _msg()
+    with patch.object(finance, "_send_windfall_manual_prompt", AsyncMock()) as m_p, \
+         patch.object(finance, "_distribute_windfall_income", AsyncMock()) as m_d:
+        ok = await finance.handle_windfall_income(msg, 60000, "🎁 Подарок", "наследство", "u-1")
+    assert ok is True
+    m_p.assert_awaited_once()
+    m_d.assert_not_awaited()
 
-    m_windfall.assert_awaited_once_with(2000, 42, "u-1")
+
+@pytest.mark.asyncio
+async def test_handle_windfall_skips_salary():
+    msg = _msg()
+    with patch.object(finance, "_distribute_windfall_income", AsyncMock()) as m_d, \
+         patch.object(finance, "_send_windfall_manual_prompt", AsyncMock()) as m_p:
+        ok = await finance.handle_windfall_income(msg, 60000, "💰 Зарплата", "зарплата", "u-1")
+    assert ok is False
+    m_d.assert_not_awaited()
+    m_p.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_classifier_income_calls_windfall():
+    """core/classifier.process_item на income → handle_windfall_income."""
+    import core.classifier as clf
+    msg = _msg()
+    data = {"type": "income", "amount": 3000, "category": "🎁 Подарок",
+            "title": "подарок", "confidence": "high", "source": "💳 Карта"}
+    with patch.object(clf, "_fin_repo") as m_repo, \
+         patch("nexus.handlers.finance.handle_windfall_income", AsyncMock()) as m_wf, \
+         patch.object(clf, "react", AsyncMock()):
+        m_repo.add = AsyncMock(return_value="fin-1")
+        await clf.process_item(data, "подарок 3000", msg, {}, user_id="u-1")
+    m_wf.assert_awaited_once()
+    assert m_wf.await_args.args[1] == 3000

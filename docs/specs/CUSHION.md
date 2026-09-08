@@ -1,6 +1,6 @@
 # CUSHION — data-model contract (финансовая подушка)
 
-Code conforms to: HEAD of the `budget: динамический взнос в подушку` change.  (+ #144: user_notion_id → user_id; + #123: `POST /finance/cushion/deposit`, debt-overpaid → cushion.)
+Code conforms to: HEAD of the `budget: динамический взнос в подушку` change.  (+ #144: user_notion_id → user_id; + #123: `POST /finance/cushion/deposit`, debt-overpaid → cushion; + #208: `source` CHECK expanded to also allow `debt_overpaid` / `windfall_income` — migration `c3d4e5f6a7b8`; windfall income distribution credits `source='windfall_income'`.)
 Update this spec in the same PR that changes the model.
 
 > Contract, not snapshot. Describes the derived model and the guarantees of each
@@ -122,7 +122,7 @@ Row is lazily created on first write (`_ensure_row_sync`).
 | column | meaning |
 |---|---|
 | `amount` | credited amount |
-| `source` | `'manual'` \| `'payday_auto'` (`ck_cushion_tx_source`) |
+| `source` | `'manual'` \| `'payday_auto'` \| `'debt_overpaid'` \| `'windfall_income'` (`ck_cushion_tx_source`; expanded by migration `c3d4e5f6a7b8` — the code wrote the last two since #123/#208 while the CHECK still had two) |
 | `note` | free-text detail (period tag, plan/underspend breakdown) |
 | `created_at` | index `ix_cushion_tx_owner_created` |
 
@@ -147,6 +147,7 @@ transaction** as the increment.
 |---|---|---|
 | manual deposit | `handle_cushion_command` (deposit branch) / `POST /finance/cushion/deposit` → `add_to_balance(source='manual')` | `balance += amount`; log row |
 | debt-overpaid deposit | Mini App: `POST /finance/cushion/deposit` with `source='debt_overpaid'` after a repayment closed a debt with change (#123) — mirrors the bot's `overpaid_cushion` callback | `balance += overpaid`; log row |
+| windfall distribution | `nexus/handlers/finance.py:_apply_windfall_plan` / `on_windfall_*` / `handle_windfall_split_text` → `add_to_balance(source='windfall_income')` — remainder of an unplanned income after impulse-cap + burning-debt payoff (#208) | `balance += remainder`; log row |
 | set target | `handle_cushion_command` (target branch) / `POST /finance/cushion/target` → `set_target` | `target` set (or cleared on 0/null); **balance untouched, no log row** |
 | plan accepted | `_save_budget_plan` → `set_planned_contribution(plan["cushion_contribution"])` | `planned_contribution` overwritten; **balance untouched** |
 | period rollover | `_send_payday_review` → `add_to_balance(planned + total_saved, source='payday_auto')` | one credit = accepted plan's contribution + positive real underspend; one log row; one message |
@@ -189,7 +190,8 @@ transaction** as the increment.
 - `core/classifier.py` — `_CUSHION_CMD_RE`, cushion routing
 - `alembic/versions/b8c9d0e1f2a3_cushion.py`,
   `c9d0e1f2a3b4_cushion_transactions.py`,
-  `d0e1f2a3b4c5_cushion_planned_contribution.py`
+  `d0e1f2a3b4c5_cushion_planned_contribution.py`,
+  `c3d4e5f6a7b8_cushion_tx_source_expand.py` (source CHECK +debt_overpaid +windfall_income, #208)
 - `miniapp/backend/routes/finance.py` (`_view_cushion`),
   `miniapp/backend/routes/writes.py` (`finance_cushion_set_target`,
   `finance_cushion_deposit` — #123)

@@ -26,7 +26,9 @@ cushion = Table(
 
 # Лог каждого пополнения баланса подушки — отдельно от cushion (текущий срез).
 # source: 'manual' (команда «положила в подушку X») | 'payday_auto' (кредит
-# месячным взносом на payday-переходе).
+# при закрытии периода месячным взносом) | 'debt_overpaid' (#123, переплата
+# по закрытому долгу) | 'windfall_income' (#208, распределение непредвиденного
+# дохода). CHECK на все четыре — миграция c3d4e5f6a7b8.
 cushion_transactions = Table(
     "cushion_transactions", metadata,
     Column("id",             BigInteger, primary_key=True, autoincrement=True),
