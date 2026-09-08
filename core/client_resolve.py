@@ -94,7 +94,8 @@ async def client_find(name: str, user_id: str = "") -> Optional[dict]:
 
 
 async def resolve_self_client(user_id: str = "") -> Optional[str]:
-    """Найти self-клиента в PG. Возвращает str(pg_id) или None."""
+    """Найти self-клиента в PG; создать «Кай» (🌟 Self) если его нет (#154).
+    Возвращает str(pg_id) или None."""
     cache_key = user_id or "_default_"
     cached = _SELF_CLIENT_CACHE.get(cache_key)
     if cached:
@@ -105,10 +106,20 @@ async def resolve_self_client(user_id: str = "") -> Optional[str]:
         if c:
             _SELF_CLIENT_CACHE[cache_key] = c.id
             return c.id
-        logger.warning(
-            "resolve_self_client: self-клиент не найден в PG — "
-            "создай клиента с type_code=self"
+        # #154 стадия 1: self-карточки нет — заводим её сами (раньше только
+        # логировали и возвращали None → личные записи оставались сиротами).
+        new_id = await _PGC().create(
+            name="Кай",
+            type_code="self",
+            request="Личные ритуалы и расклады",
+            user_id=user_id or None,
         )
+        if new_id:
+            sid = str(new_id)
+            _SELF_CLIENT_CACHE[cache_key] = sid
+            logger.info("resolve_self_client: создала 🌟 Self-карточку (id=%s)", sid)
+            return sid
+        logger.warning("resolve_self_client: не удалось создать 🌟 Self-карточку")
         return None
     except Exception as e:
         logger.warning("resolve_self_client failed: %s", e)

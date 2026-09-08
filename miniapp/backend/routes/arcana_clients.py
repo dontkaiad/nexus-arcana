@@ -14,6 +14,7 @@ from arcana.repos.clients_repo import ClientsRepo
 from arcana.repos.pg_clients_repo import TYPE_CODE_TO_FULL, STATUS_CODE_TO_LABEL
 from arcana.repos.pg_rituals_repo import PgRitualsRepo
 from arcana.repos.pg_sessions_repo import PgSessionsRepo
+from arcana.repos.pg_works_repo import PgWorksRepo
 from core.user_manager import get_user_id
 
 from miniapp.backend.auth import current_user_id
@@ -25,6 +26,9 @@ router = APIRouter()
 _clients_repo = ClientsRepo()
 _rituals_repo = PgRitualsRepo()
 _sessions_repo = PgSessionsRepo()
+_works_repo = PgWorksRepo()
+
+_WORK_TERMINAL = ("done", "archived")
 
 
 def _initial(name: str) -> str:
@@ -162,6 +166,22 @@ async def client_dossier(
     history.sort(key=lambda e: e["date"] or "", reverse=True)
     history = history[:20]
 
+    # #154 C4: Работы клиента (все, разбивка на активные/завершённые на фронте)
+    try:
+        client_works = await _works_repo.list_by_client(client_id, user_id)
+    except Exception:
+        logger.warning("client works lookup failed", exc_info=True)
+        client_works = []
+    works_out = [{
+        "id": w.id,
+        "title": w.title,
+        "category": w.category_str or w.category or None,
+        "deadline": w.deadline_iso or (w.deadline_str or None),
+        "priority": w.priority or None,
+        "done": (w.status in _WORK_TERMINAL),
+        "status": w.status,
+    } for w in client_works]
+
     type_full = TYPE_CODE_TO_FULL.get(c.type_code or "", "")
     from core.client_object_photos import parse as _parse_objects
     photos = _parse_objects(c.object_photos or "")
@@ -189,6 +209,8 @@ async def client_dossier(
             "rituals": len(my_rituals),
             "total_paid": int(round(total_paid)),
             "debt": int(round(debt)),
+            "works_active": sum(1 for w in works_out if not w["done"]),
         },
         "history": history,
+        "works": works_out,
     }

@@ -6855,6 +6855,7 @@ function RitualDetail({ s, id }) {
 function ClientDetail({ s, id }) {
   const { data, loading, error, refetch } = useApi(id ? `/api/arcana/clients/${id}` : null, [id]);
   const [editOpen, setEditOpen] = useState(false);
+  const [wSeg, setWSeg] = useState("active");  // #154 C4: таб Работ клиента
   if (loading) return <Empty s={s} text="Загружаю..." />;
   if (error) return <ErrorBox s={s} error={error} refetch={refetch} />;
   const c = adaptClientDossier(data);
@@ -6990,6 +6991,46 @@ function ClientDetail({ s, id }) {
       )}
 
       <ClientBarter s={s} clientName={c.name} />
+
+      {c.works.length > 0 && (() => {
+        const active = c.works.filter((w) => !w.done);
+        const doneW = c.works.filter((w) => w.done);
+        const shown = wSeg === "done" ? doneW : active;
+        return (
+          <>
+            <SectionLabel s={s} meta={`${active.length} активных`}>🔮 Работы</SectionLabel>
+            <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
+              <Pill s={s} active={wSeg === "active"} onClick={() => setWSeg("active")}>
+                Активные{active.length ? ` · ${active.length}` : ""}
+              </Pill>
+              {doneW.length > 0 && (
+                <Pill s={s} active={wSeg === "done"} onClick={() => setWSeg("done")}>
+                  Завершённые · {doneW.length}
+                </Pill>
+              )}
+            </div>
+            {shown.length === 0 && (
+              <div style={{ fontSize: fs(12), color: s.tM, padding: "4px 2px 10px" }}>
+                {wSeg === "done" ? "Нет завершённых" : "Нет активных работ"}
+              </div>
+            )}
+            {shown.map((w) => (
+              <div key={w.id} style={{
+                display: "flex", gap: 8, alignItems: "center",
+                padding: "8px 2px", borderBottom: `1px solid ${s.brd}`,
+                fontSize: fs(12), opacity: w.done ? 0.6 : 1,
+              }}>
+                <span>{w.done ? "✅" : (w.category ? String(w.category).split(" ")[0] : "🔮")}</span>
+                <span style={{
+                  color: s.text, flex: 1,
+                  textDecoration: w.done ? "line-through" : "none",
+                }}>{w.title}</span>
+                {w.deadline && <span style={{ color: s.tM }}>{w.deadline}</span>}
+              </div>
+            ))}
+          </>
+        );
+      })()}
 
       <SectionLabel s={s}>История</SectionLabel>
       {c.history.map((h, i) => (

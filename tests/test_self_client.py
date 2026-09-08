@@ -37,12 +37,34 @@ async def test_resolve_self_client_caches_result():
 
 
 @pytest.mark.asyncio
-async def test_resolve_self_client_returns_none_when_not_found():
+async def test_resolve_self_client_creates_when_not_found():
+    """#154 стадия 1: self-карточки нет → создаём «Кай» (🌟 Self)."""
+    from core.client_resolve import resolve_self_client, _SELF_CLIENT_CACHE
+
+    _SELF_CLIENT_CACHE.clear()
+    create = AsyncMock(return_value=77)
+    with patch(
+        "arcana.repos.pg_clients_repo.PgClientsRepo.find_self",
+        AsyncMock(return_value=None),
+    ), patch(
+        "arcana.repos.pg_clients_repo.PgClientsRepo.create", create,
+    ):
+        cid = await resolve_self_client(user_id="u-missing")
+    assert cid == "77"
+    kw = create.await_args.kwargs
+    assert kw["name"] == "Кай" and kw["type_code"] == "self"
+
+
+@pytest.mark.asyncio
+async def test_resolve_self_client_none_when_create_fails():
     from core.client_resolve import resolve_self_client, _SELF_CLIENT_CACHE
 
     _SELF_CLIENT_CACHE.clear()
     with patch(
         "arcana.repos.pg_clients_repo.PgClientsRepo.find_self",
+        AsyncMock(return_value=None),
+    ), patch(
+        "arcana.repos.pg_clients_repo.PgClientsRepo.create",
         AsyncMock(return_value=None),
     ):
         cid = await resolve_self_client(user_id="u-missing")

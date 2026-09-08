@@ -598,9 +598,12 @@ def test_arcana_dossier_counts_sessions_not_triplets(client):
     mock_sess = _mock_sessions_repo_all(all_result=sess)
     mock_rit = _mock_rituals_repo(list_all_result=[])
     mock_rit.list_by_client = AsyncMock(return_value=[])
+    mock_w = MagicMock()
+    mock_w.list_by_client = AsyncMock(return_value=[])
     with patch("miniapp.backend.routes.arcana_clients._clients_repo", mock_cl), \
          patch("miniapp.backend.routes.arcana_clients._sessions_repo", mock_sess), \
          patch("miniapp.backend.routes.arcana_clients._rituals_repo", mock_rit), \
+         patch("miniapp.backend.routes.arcana_clients._works_repo", mock_w), \
          patch("miniapp.backend.routes.arcana_clients.get_user_id",
                AsyncMock(return_value=FAKE_USER_ID)):
         r = client.get("/api/arcana/clients/1")
@@ -627,9 +630,12 @@ def test_arcana_client_dossier_mixes_history(client):
     mock_rit = _mock_rituals_repo(list_all_result=rits)
     mock_rit.list_by_client = AsyncMock(return_value=rits)
 
+    mock_w = MagicMock()
+    mock_w.list_by_client = AsyncMock(return_value=[])
     with patch("miniapp.backend.routes.arcana_clients._clients_repo", mock_cl), \
          patch("miniapp.backend.routes.arcana_clients._sessions_repo", mock_sess), \
          patch("miniapp.backend.routes.arcana_clients._rituals_repo", mock_rit), \
+         patch("miniapp.backend.routes.arcana_clients._works_repo", mock_w), \
          patch("miniapp.backend.routes.arcana_clients.get_user_id",
                AsyncMock(return_value=FAKE_USER_ID)):
         r = client.get("/api/arcana/clients/1")
@@ -637,6 +643,7 @@ def test_arcana_client_dossier_mixes_history(client):
     assert r.status_code == 200
     data = r.json()
     assert data["name"] == "Анна"
+    assert data["works"] == []
     assert data["contact"] == "@anna"
     assert data["stats"]["debt"] == 3000
     assert data["stats"]["total_paid"] == 5000
@@ -646,6 +653,41 @@ def test_arcana_client_dossier_mixes_history(client):
     session_hist = data["history"][0]
     assert session_hist["paid"] is False  # 0 < 3000
     assert data["history"][1]["paid"] is True
+
+
+def _make_work(wid, title, *, status="open", category="✨ Ритуал", deadline_iso=""):
+    from arcana.repos.works_repo import Work
+    return Work(id=wid, title=title, priority="Важно", deadline_str="",
+                category_str=category, has_client=True, status=status,
+                client_id="1", category=category, deadline_iso=deadline_iso)
+
+
+def test_arcana_client_dossier_works_tabbed(client):
+    """#154 C4: карточка клиента отдаёт все Работы + счётчик активных."""
+    c_obj = _make_client("1", "Анна")
+    works = [
+        _make_work("w1", "Приворот", status="open", deadline_iso="2026-06-01"),
+        _make_work("w2", "Диагностика", status="done"),
+        _make_work("w3", "Чистка", status="open"),
+    ]
+    mock_w = MagicMock()
+    mock_w.list_by_client = AsyncMock(return_value=works)
+    mock_rit = _mock_rituals_repo(list_all_result=[])
+    mock_rit.list_by_client = AsyncMock(return_value=[])
+    with patch("miniapp.backend.routes.arcana_clients._clients_repo",
+               _mock_clients_repo(find_by_id_result=c_obj)), \
+         patch("miniapp.backend.routes.arcana_clients._sessions_repo",
+               _mock_sessions_repo_all(all_result=[])), \
+         patch("miniapp.backend.routes.arcana_clients._rituals_repo", mock_rit), \
+         patch("miniapp.backend.routes.arcana_clients._works_repo", mock_w), \
+         patch("miniapp.backend.routes.arcana_clients.get_user_id",
+               AsyncMock(return_value=FAKE_USER_ID)):
+        d = client.get("/api/arcana/clients/1").json()
+
+    assert len(d["works"]) == 3
+    assert d["stats"]["works_active"] == 2
+    by_id = {w["id"]: w for w in d["works"]}
+    assert by_id["w2"]["done"] is True and by_id["w1"]["done"] is False
 
 
 def test_arcana_client_dossier_404_not_found(client):

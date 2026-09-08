@@ -750,8 +750,17 @@ export function adaptClientDossier(data) {
     rituals: data.stats?.rituals ?? 0,
     debt: data.stats?.debt ?? 0,
     total: data.stats?.total_paid ?? 0,
+    worksActive: data.stats?.works_active ?? 0,
     self: typeFull.includes('Self')
       || (data.name || '').toLowerCase() === 'кай',
+    works: (data.works || []).map((w) => ({          // #154 C4
+      id: w.id,
+      title: w.title || '—',
+      category: w.category || null,
+      deadline: w.deadline ? formatShortDate(w.deadline) : null,
+      priority: w.priority || null,
+      done: !!w.done,
+    })),
     history: (data.history || []).map((h) => ({
       id: h.id,
       date: h.date ? formatShortDate(h.date) : '—',

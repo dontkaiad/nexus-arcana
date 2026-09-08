@@ -177,6 +177,27 @@ async def handle_client_info(message: Message, text: str, user_id: str = "") -> 
 
     n_sessions = len(sessions)
     n_rituals = len(rituals)
+
+    # #154 C4: Работы клиента (активные + счётчик завершённых).
+    works_block = ""
+    try:
+        from arcana.repos.pg_works_repo import PgWorksRepo
+        import html as _html
+        cw = await PgWorksRepo().list_by_client(client.id, user_id)
+        active = [w for w in cw if w.status not in ("done", "archived")]
+        done_n = len(cw) - len(active)
+        if active or done_n:
+            lines = [
+                f"  ◦ {_html.escape(w.title)}"
+                + (f" — до {w.deadline_str}" if w.deadline_str else "")
+                for w in active[:5]
+            ]
+            tail = f"\n  ✅ завершено: {done_n}" if done_n else ""
+            body = ("\n".join(lines) or "  (активных нет)") + tail
+            works_block = f"\n\n🔮 <b>Работы:</b>\n{body}"
+    except Exception as e:
+        logger.warning("client card works block failed: %s", e)
+
     await message.answer(
         f"👤 <b>{client.name}</b>\n"
         f"📱 {client.contact or '—'} · с {client.since or '—'}\n"
@@ -185,6 +206,7 @@ async def handle_client_info(message: Message, text: str, user_id: str = "") -> 
         f"💰 Всего: {total:,.0f}₽ | Долг: {debt_str}\n"
         f"🃏 Сеансов: {n_sessions} | 🕯 Ритуалов: {n_rituals}\n\n"
         f"<b>История:</b>\n{hist_str}"
+        f"{works_block}"
         f"{mem_block}",
         parse_mode="HTML",
     )

@@ -151,6 +151,24 @@ class PgWorksRepo:
             rows = conn.execute(stmt).fetchall()
         return [_row_to_work(r) for r in rows]
 
+    def _list_by_client_sync(self, client_id: str, user_id: str) -> List[Work]:
+        """#154 C4: ВСЕ Работы клиента (включая done/archived) — для карточки
+        клиента с табами Активные/Завершённые. Сорт: дедлайн desc."""
+        try:
+            cid = int(client_id)
+        except (ValueError, TypeError):
+            return []
+        stmt = (
+            _select_works()
+            .where(works.c.client_id == cid)
+            .order_by(works.c.deadline.desc().nullslast(), works.c.id.desc())
+        )
+        if user_id:
+            stmt = stmt.where(works.c.user_id == user_id)
+        with get_engine().connect() as conn:
+            rows = conn.execute(stmt).fetchall()
+        return [_row_to_work(r) for r in rows]
+
     def _find_active_for_client_sync(
         self, client_id: str, category: str, user_id: str
     ) -> Optional[Work]:
@@ -432,6 +450,9 @@ class PgWorksRepo:
         return await asyncio.to_thread(
             self._find_active_for_client_sync, client_id, category, user_id
         )
+
+    async def list_by_client(self, client_id: str, user_id: str = "") -> List[Work]:
+        return await asyncio.to_thread(self._list_by_client_sync, client_id, user_id)
 
     async def set_status(self, work_id: str, status_code: str) -> bool:
         return await asyncio.to_thread(self._set_status_sync, work_id, status_code)
