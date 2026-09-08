@@ -760,7 +760,7 @@ async def process_text(msg: Message, text: str, user_id: str = "") -> None:
                         await delete_task_reminder(_task_id)
                         phrase = _random.choice(_DONE_PHRASES)
                         title_line = f"\n✅ {_task_title} — выполнено" if _task_title else "\n✅ Выполнено"
-                        streak_line = await _update_streak_line(uid, _task_id)
+                        streak_line = await _update_streak_line(msg.from_user.id, _task_id)
                         await react(msg, "🔥")
                         await msg.reply(f"{phrase}{title_line}{streak_line}")
                     else:

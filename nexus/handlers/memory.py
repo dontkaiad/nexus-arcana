@@ -5,7 +5,7 @@ import logging
 from typing import Dict
 
 from aiogram import Router, F
-from aiogram.types import Message, CallbackQuery
+from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup
 from nexus.handlers.utils import react
 
 import core.memory as mem
@@ -276,14 +276,14 @@ async def suggest_memory(message: Message, text: str, user_id: str = "") -> None
 
 # ── Callbacks ────────────────────────────────────────────────────────────────
 
-def _search_kb(uid: int) -> "InlineKeyboardMarkup":
+def _search_kb(uid: int) -> InlineKeyboardMarkup:
     return mem._build_delete_keyboard(
         uid, mem._mem_delete_pages.get(uid, []),
         reactivate_cb="mem_reactivate_selected",
     )
 
 
-def _delete_kb(uid: int) -> "InlineKeyboardMarkup":
+def _delete_kb(uid: int) -> InlineKeyboardMarkup:
     return mem._build_delete_keyboard(
         uid, mem._mem_delete_pages.get(uid, []),
         toggle_prefix="mem_del_toggle",

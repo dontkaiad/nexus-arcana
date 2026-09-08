@@ -534,18 +534,6 @@ async def _check_budget_limit(category: str, message: Message, user_id: str = ""
     await message.answer("\n".join(parts), parse_mode="HTML")
 
 
-async def _show_free_remaining(message: Message, user_id: str = "") -> None:
-    """Показать остаток свободных денег после расхода."""
-    try:
-        result = await _calc_free_remaining(user_id, tz_offset)
-        if result:
-            free_left, days_rem = result
-            daily = free_left / max(days_rem, 1)
-            await message.answer(f"💳 Свободных: {free_left:,.0f}₽ · {daily:,.0f}₽/день")
-    except Exception as e:
-        logger.debug("free remaining skip: %s", e)
-
-
 async def get_finance_period(start_date: str, end_date: str, label: str,
                              user_id: str = "", show_daily_avg: bool = False) -> str:
     """Сводка за произвольный период. start_date/end_date = 'YYYY-MM-DD'."""
