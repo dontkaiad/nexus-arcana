@@ -100,7 +100,8 @@ PARSE_SESSION_SYSTEM = (
     "Одна строка/абзац, один вопрос:\n"
     "  «устроюсь ли на работу — жрица суд шут дно король кубков»\n"
     "Возврат:\n"
-    '{"client_name": "имя или null", "spread_type": "тип расклада", '
+    '{"client_name": "имя или null", "after_ritual": true/false, '
+    '"spread_type": "тип расклада", '
     '"question": "конкретный вопрос", "cards": ["карта1","карта2","карта3"] или null, '
     '"bottom_card": "карта или null", '
     '"area": "Отношения|Финансы|Работа|Здоровье|Род|Общая ситуация", '
@@ -125,6 +126,7 @@ PARSE_SESSION_SYSTEM = (
     "а «чётная» содержит ≥3 карт или слово «дно» — это формат B.\n\n"
     "Возврат для форматов A и B (одинаковый):\n"
     '{"session_name": "название группы раскладов (см. правила ниже)", '
+    '"after_ritual": true/false, '
     '"session_category": "Сфера жизни|Отношения|Работа|Финансы|Здоровье|Род|'
     'Магические воздействия|Диагностика|Кельтский крест или null", '
     '"client_name": "имя или null", '
@@ -251,7 +253,14 @@ PARSE_SESSION_SYSTEM = (
     "'Уэйт' (не 'Уэйта'/'Уэйту'), 'Dark Wood', 'Ленорман', 'Игральные', 'Deviant Moon'.\n"
     "Если в тексте есть упоминание 'дно', 'дно колоды', 'bottom' — "
     "выдели эту карту отдельно в поле bottom_card. Это НЕ позиция расклада, "
-    "а фоновая карта, её нельзя включать в cards."
+    "а фоновая карта, её нельзя включать в cards.\n\n"
+    "═══ ПОЛЕ after_ritual (связь с ритуалом, #84) ═══\n"
+    "Верни after_ritual: true, если расклад — ПРОСМОТР до/после магической "
+    "работы: 'после ритуала', 'как лёг ритуал', 'спустя N дней после "
+    "приворота/работы', 'заключительный просмотр', 'проверка ритуала', "
+    "'перед ритуалом', 'диагностика перед работой'. Иначе after_ritual: "
+    "false. Это поле — в КОРНЕ JSON (и для формата C, и для A/B), рядом с "
+    "client_name."
 )
 
 
@@ -871,6 +880,27 @@ async def _resolve_triplet_page(short_id: str, user_id: str) -> Optional[Triplet
     return entry
 
 
+async def _link_session_to_ritual(
+    page_ids: List[str], client_id: Optional[str], user_id: str,
+) -> Optional[str]:
+    """#84: расклад-просмотр «до/после ритуала» → проставить ritual_id на всех
+    его записях. Ищем свежий ритуал того же клиента. Возвращает title ритуала
+    (для сообщения) либо None. Провал не роняет сохранение расклада."""
+    if not client_id or not page_ids:
+        return None
+    try:
+        from arcana.repos.pg_rituals_repo import PgRitualsRepo
+        rit = await PgRitualsRepo().find_recent_for_client(client_id, user_id)
+        if not rit or not getattr(rit, "id", None):
+            return None
+        for pid in page_ids:
+            await _repo.set_ritual_id(pid, str(rit.id))
+        return getattr(rit, "name", None) or "ритуал"
+    except Exception as e:
+        logger.warning("session→ritual relation failed: %s", e)
+        return None
+
+
 async def _save_and_post_triplet(
     message: Message,
     *,
@@ -892,6 +922,7 @@ async def _save_and_post_triplet(
     self_client_missing: bool = False,
     category_id: Optional[int] = None,
     category_label: str = "",
+    link_ritual: bool = False,
 ) -> Optional[str]:
     """Унифицированный путь: канон → Sonnet-трактовка уже готова → Haiku-саммари
     → запись в Notion → пост в чат с кнопками [Поправить/Удалить] (+оплата
@@ -969,6 +1000,12 @@ async def _save_and_post_triplet(
         except Exception as e:
             logger.warning("session→work relation failed: %s", e)
 
+    # #84: расклад-просмотр «после ритуала» → привязать к записи ритуала.
+    linked_ritual = (
+        await _link_session_to_ritual([page_id], client_id, user_id)
+        if link_ritual else None
+    )
+
     # Сообщение в чат: вопрос + карты + дно + трактовка (telegram-safe).
     interp_tg = html_to_telegram(interpretation)
     cards_line = ", ".join(c.strip() for c in cards_text.split(",") if c.strip())
@@ -992,6 +1029,8 @@ async def _save_and_post_triplet(
         )
     if work_closed:
         head_lines.append("✅ Связанная Работа закрыта")
+    if linked_ritual:
+        head_lines.append(f"🕯️ Связала с ритуалом «{html.escape(linked_ritual)}»")
     head = "\n".join(head_lines)
 
     body = f"{head}\n\n{interp_tg}"
@@ -1315,6 +1354,7 @@ async def handle_add_session(
             self_client_missing=self_client_missing,
             category_id=category_id,
             category_label=category_label,
+            link_ritual=bool(data.get("after_ritual")),
         )
 
         # Фото расклада приложено к сообщению → в Cloudinary + на запись (#161).
@@ -1748,6 +1788,14 @@ async def _handle_multi_session(
     except Exception:
         pass
 
+    # #84: сессия-просмотр «до/после ритуала» → привязать все триплеты
+    # к записи свежего ритуала того же клиента.
+    linked_ritual = None
+    if data.get("after_ritual") and client_id and saved_page_ids:
+        linked_ritual = await _link_session_to_ritual(
+            saved_page_ids, client_id, user_id
+        )
+
     bullet_list = "\n".join(f"• {html.escape(t)}" for t in saved_titles[:12])
     if len(saved_titles) > 12:
         bullet_list += f"\n• … и ещё {len(saved_titles) - 12}"
@@ -1756,6 +1804,8 @@ async def _handle_multi_session(
         f"✅ Сессия «{html.escape(session_name or '—')}» · "
         f"{saved_n} триплетов сохранены\n"
     )
+    if linked_ritual:
+        final_msg += f"🕯️ Связала с ритуалом «{html.escape(linked_ritual)}»\n"
     if bullet_list:
         final_msg += bullet_list + "\n"
     if session_summary_text:

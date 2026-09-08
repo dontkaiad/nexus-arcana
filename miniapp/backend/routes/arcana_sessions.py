@@ -189,6 +189,11 @@ def _serialize_triplet_pg(
         "from_work": ({"id": t.work_id, "title": t.work_title}
                       if getattr(t, "work_id", None) and getattr(t, "work_title", None)
                       else None),
+        # #84: ритуал, до/после которого сделан этот расклад-просмотр
+        # (sessions.ritual_id → rituals). title только на detail-путях.
+        "from_ritual": ({"id": t.ritual_id, "title": t.ritual_title}
+                        if getattr(t, "ritual_id", None) and getattr(t, "ritual_title", None)
+                        else None),
         "photo_url": t.photo_url,
     }
 

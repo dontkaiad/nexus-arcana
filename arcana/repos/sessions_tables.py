@@ -73,6 +73,9 @@ sessions = Table(
     Column("client_id",       BigInteger,   ForeignKey("clients.id")),
     # work_id: FK → works.id на уровне БД (миграция s9t0u1v2w3x4); связь #151.
     Column("work_id",          BigInteger),
+    # ritual_id: FK → rituals.id на уровне БД (миграция b2c3d4e5f6a7); связь
+    # «расклад-просмотр до/после ритуала» (#84). NULL = самостоятельный расклад.
+    Column("ritual_id",        BigInteger),
 
     Column("barter_what",      Text),
     Column("photo_url",        Text),

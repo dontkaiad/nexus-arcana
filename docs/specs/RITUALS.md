@@ -2,8 +2,11 @@
 
 Code conforms to: 0bc132e (+ #7/#8: Mini App finance serialization, shared
 `source_label`; + #8: `consumables_written_off` timestamp; + #10: `work_id`
-reverse-link surfaced in Mini App; + #153: `?result=` outcome filter). This spec describes the rituals data
-model; update it in the same PR that changes the model.
+reverse-link surfaced in Mini App; + #153: `?result=` outcome filter; + #84:
+readings (`sessions`) can link back to a ritual — `linked_sessions` on the
+ritual card, `PgRitualsRepo.find_recent_for_client` for auto-linking). This
+spec describes the rituals data model; update it in the same PR that changes
+the model.
 
 > Contract, not snapshot. Describes the persistent model, the guarantees of
 > each operation, and the invariants. Enumerations point at the owning code
@@ -113,6 +116,12 @@ non-exhaustive:
   rite. On save, `core/work_relation.py` finds the one open Work for that
   client+category, stamps `rituals.work_id`, and closes the Work (#151).
   Mini App surfaces this as `from_work` on the ritual card.
+- **Readings link to rituals, not the other way (#84).** `rituals` has no
+  column pointing at readings; the link lives on `sessions.ritual_id`. A
+  ritual's "просмотры" tail (`linked_sessions` on the Mini App card) is a
+  reverse query `PgSessionsRepo.list_by_ritual(ritual_id)`. Auto-linking on
+  reading creation uses `PgRitualsRepo.find_recent_for_client` (most recent
+  non-archived ritual for that client within 120 days).
 - **Outcome uses `outcome_status`** (distinct from sessions' `session_outcome`).
 - **Barter is Arcana-only**: `payment_source` code `barter` + `barter_what`.
 - **`payment_source` display label** comes from `core.payment.source_label`
@@ -160,7 +169,9 @@ Reads/writes are pure SQL.
 - `alembic/versions/d4f5e6a7b8c9_clients_pg_native.py` — `fk_rituals_client_id`
 - `alembic/versions/f1a2b3c4d5e6_rituals_consumables_written_off.py` — `consumables_written_off` (#8)
 - `arcana/repos/rituals_tables.py` — SQLAlchemy Core mirror
-- `arcana/repos/pg_rituals_repo.py` — `PgRitualsRepo` (create/result/delete/photo)
+- `arcana/repos/pg_rituals_repo.py` — `PgRitualsRepo` (create/result/delete/photo),
+  `find_recent_for_client` (#84)
+- `alembic/versions/b2c3d4e5f6a7_sessions_ritual_id.py` — `sessions.ritual_id` (#84, reverse link)
 - `arcana/repos/rituals_repo.py` — seam + `Ritual` object
 - `arcana/handlers/rituals.py` — parse (Haiku) + save/result
 - `arcana/handlers/ritual_writeoff.py` — inventory decrement (operational link)

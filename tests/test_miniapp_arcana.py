@@ -173,7 +173,8 @@ def _make_triplet(sid, question, *, client_id=None, date=None, amount=0, paid=0,
                   interpretation="", barter_what="", session_name="",
                   deck="Уэйт", photo_url=None, bottom_card="", triplet_summary="",
                   subject_id=None, payment_source=None,
-                  work_id=None, work_title=None):
+                  work_id=None, work_title=None,
+                  ritual_id=None, ritual_title=None):
     from arcana.repos.sessions_repo import TripletEntry
     from decimal import Decimal
     return TripletEntry(
@@ -186,6 +187,7 @@ def _make_triplet(sid, question, *, client_id=None, date=None, amount=0, paid=0,
         bottom_card=bottom_card, photo_url=photo_url,
         triplet_summary=triplet_summary, payment_source=payment_source,
         work_id=work_id, work_title=work_title,
+        ritual_id=ritual_id, ritual_title=ritual_title,
     )
 
 
@@ -201,12 +203,14 @@ def _mock_clients_repo(list_all_result=None, find_by_id_result=None,
     return repo
 
 
-def _mock_sessions_repo_all(all_result=None, find_result=None, slug_result=None):
+def _mock_sessions_repo_all(all_result=None, find_result=None, slug_result=None,
+                            by_ritual_result=None):
     repo = MagicMock()
     repo.list_all = AsyncMock(return_value=all_result or [])
     repo.list_by_client = AsyncMock(return_value=[])
     repo.find_by_id = AsyncMock(return_value=find_result)
     repo.list_by_slug = AsyncMock(return_value=slug_result or [])
+    repo.list_by_ritual = AsyncMock(return_value=by_ritual_result or [])
     repo.set_photo_url = AsyncMock(return_value=True)
     repo.update_summary = AsyncMock(return_value=None)
     repo.set_outcome = AsyncMock(return_value=True)
@@ -496,6 +500,23 @@ def test_arcana_session_detail_from_work(client):
     assert d["from_work"] == {"id": "9", "title": "Разложить на Олю"}
 
 
+def test_arcana_session_detail_from_ritual(client):
+    """#84: расклад-просмотр показывает связанный ритуал (ritual_title заполнен)."""
+    today = _today_date(3)
+    triplet = _make_triplet("sRt", "Как лёг приворот", date=today.isoformat(),
+                            ritual_id="42", ritual_title="Приворот на Олю")
+    with patch("miniapp.backend.routes.arcana_sessions._sessions_repo",
+               _mock_sessions_repo_all(find_result=triplet)), \
+         patch("miniapp.backend.routes.arcana_sessions._clients_repo",
+               _mock_clients_repo(list_all_result=[])), \
+         patch("miniapp.backend.routes.arcana_sessions.today_user_tz",
+               AsyncMock(return_value=(today, 3))), \
+         patch("miniapp.backend.routes.arcana_sessions.get_user_id",
+               AsyncMock(return_value=FAKE_USER_ID)):
+        d = client.get("/api/arcana/sessions/sRt").json()
+    assert d["from_ritual"] == {"id": "42", "title": "Приворот на Олю"}
+
+
 def test_arcana_session_detail_404_not_found(client):
     mock_sess = _mock_sessions_repo_all(find_result=None)
     with patch("miniapp.backend.routes.arcana_sessions._sessions_repo", mock_sess), \
@@ -756,6 +777,29 @@ def test_arcana_ritual_detail_from_work_and_writeoff(client):
         d = client.get("/api/arcana/rituals/rW").json()
     assert d["from_work"] == {"id": "42", "title": "Сделать ритуал защиты"}
     assert d["consumables_written_off"] is True
+
+
+def test_arcana_ritual_detail_linked_sessions(client):
+    """#84: карточка ритуала показывает расклады-просмотры (sessions.ritual_id)."""
+    entry = _make_ritual("rS", "Приворот", date="2026-04-19")
+    trips = [
+        _make_triplet("t1", "Как лёг", session_name="Оля — приворот", date="2026-05-30"),
+        _make_triplet("t2", "Динамика", session_name="Оля — приворот", date="2026-05-30"),
+    ]
+    fake_sess_repo = MagicMock()
+    fake_sess_repo.list_by_ritual = AsyncMock(return_value=trips)
+    with patch("miniapp.backend.routes.arcana_rituals._rituals_repo",
+               _mock_rituals_repo(find_by_id_result=entry)), \
+         patch("arcana.repos.pg_sessions_repo.PgSessionsRepo",
+               MagicMock(return_value=fake_sess_repo)), \
+         patch("miniapp.backend.routes.arcana_rituals.today_user_tz",
+               AsyncMock(return_value=(_today_date(3), 3))), \
+         patch("miniapp.backend.routes.arcana_rituals.get_user_id",
+               AsyncMock(return_value=FAKE_USER_ID)):
+        d = client.get("/api/arcana/rituals/rS").json()
+    # два триплета одной сессии схлопываются в одну строку
+    assert len(d["linked_sessions"]) == 1
+    assert d["linked_sessions"][0]["name"] == "Оля — приворот"
 
 
 def test_arcana_ritual_list_omits_from_work_without_title(client):

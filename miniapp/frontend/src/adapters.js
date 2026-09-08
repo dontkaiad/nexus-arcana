@@ -696,6 +696,7 @@ export function adaptSessionDetail(data) {
     source: data.source || null,  // #7: Источник оплаты
     barterWhat: data.barter_what || null,  // #7
     fromWork: data.from_work || null,      // #10: {id, title} плановой Работы
+    fromRitual: data.from_ritual || null,  // #84: {id, title} ритуала-просмотра
     photo_url: data.photo_url || null,
   }
 }
@@ -813,6 +814,7 @@ export function adaptRitualDetail(data) {
     structure: data.structure || [],
     fromWork: data.from_work || null,                  // #10: {id, title}
     writtenOff: !!data.consumables_written_off,        // #8: расходники списаны
+    linkedSessions: data.linked_sessions || [],        // #84: расклады-просмотры
     photo_url: data.photo_url || null,
   }
 }

@@ -38,6 +38,9 @@ class TripletEntry:
     # #10: обратная связь на плановую Работу (sessions.work_id → works, #151)
     work_id: Optional[str] = None
     work_title: Optional[str] = None
+    # #84: связь расклада-просмотра с ритуалом (sessions.ritual_id → rituals)
+    ritual_id: Optional[str] = None
+    ritual_title: Optional[str] = None
 
 
 @dataclass
@@ -203,3 +206,7 @@ class SessionsRepo:
         """Последние непустые area темы — контекстная подсказка для
         area-классификатора, НЕ анкер (#190)."""
         return await _pg_repo().recent_areas_for_subject(subject_id, limit)
+
+    async def set_ritual_id(self, page_id: str, ritual_id: str) -> bool:
+        """#84: привязать расклад-просмотр к записи ритуала."""
+        return await _pg_repo().set_ritual_id(page_id, ritual_id)

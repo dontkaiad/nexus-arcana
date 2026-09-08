@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Optional, List
 
@@ -383,6 +383,30 @@ class PgRitualsRepo:
             rows = conn.execute(stmt).fetchall()
         return [_row_to_ritual(r) for r in rows]
 
+    def _find_recent_for_client_sync(
+        self,
+        client_id: str,
+        user_id: str,
+        within_days: int,
+    ) -> Optional[Ritual]:
+        """#84: самый свежий не-архивный ритуал клиента за последние
+        within_days (по occurred_at). None — если нет."""
+        cid_int = _client_id_int(client_id)
+        if cid_int is None:
+            return None
+        cutoff = datetime.now(timezone.utc) - timedelta(days=max(within_days, 1))
+        stmt = (
+            _select_rituals()
+            .where(rituals.c.client_id == cid_int)
+            .where(rituals.c.archived == False)  # noqa: E712
+            .where(rituals.c.occurred_at.isnot(None))
+            .where(rituals.c.occurred_at >= cutoff)
+            .limit(1)
+        )
+        with get_engine().connect() as conn:
+            row = conn.execute(stmt).fetchone()
+        return _row_to_ritual(row) if row else None
+
     def _list_all_sync(
         self,
         user_id: str,
@@ -471,6 +495,16 @@ class PgRitualsRepo:
     ) -> List[Ritual]:
         return await asyncio.to_thread(
             self._list_by_client_sync, client_id, user_id
+        )
+
+    async def find_recent_for_client(
+        self,
+        client_id: str,
+        user_id: str = "",
+        within_days: int = 120,
+    ) -> Optional[Ritual]:
+        return await asyncio.to_thread(
+            self._find_recent_for_client_sync, client_id, user_id, within_days
         )
 
     async def list_all(

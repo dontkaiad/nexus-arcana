@@ -3,7 +3,8 @@
 Code conforms to: a0b0f64 (+ #144: user_notion_id → user_id; + #7: payment_source
 read-path + Mini App finance serialization; + #10: `work_id` reverse-link
 surfaced in Mini App; + #85: `🎭 Фигуранты` codeword dictionary fed into the
-Haiku parser and Sonnet interpretation). This spec describes the sessions
+Haiku parser and Sonnet interpretation; + #84: `sessions.ritual_id` — a reading
+linked to the ritual it is a просмотр of). This spec describes the sessions
 (tarot spreads) data model; update it in the same PR that changes the model.
 
 > Contract, not snapshot. Describes the persistent model, the guarantees of
@@ -51,11 +52,17 @@ SQLAlchemy Core mirror: `arcana/repos/sessions_tables.py`.
 | `photo_url` | Text | Cloudinary URL |
 | `user_id` | Text | owner |
 | `work_id` | BigInteger | FK → `works.id` (ON DELETE SET NULL, indexed; #151) |
+| `ritual_id` | BigInteger | FK → `rituals.id` (ON DELETE SET NULL, indexed; #84) — the ritual this reading is a просмотр of; NULL = standalone reading |
 | `archived` | Boolean | default false — soft-delete |
 | `created_at` / `updated_at` | TIMESTAMP(tz) | default `now()` |
 
 Indexes: `idx_sessions_client_id`, `idx_sessions_occurred_at`,
-`idx_sessions_user`, `idx_sessions_work_id`. No `notion_id` column.
+`idx_sessions_user`, `idx_sessions_work_id`, `ix_sessions_ritual_id`.
+No `notion_id` column.
+
+`ritual_id` migration:
+`alembic/versions/b2c3d4e5f6a7_sessions_ritual_id.py` (down_revision
+`a1b2c3d4e5f6`).
 
 ### Enumerated lookups
 
@@ -206,6 +213,19 @@ After the loop, one batch embed call: `core/rag.index_triplets_batch(rag_batch)`
 (N triplets = 1 Voyage call). `session_name` slug is Haiku-generated once
 per multi-session to group all rows under one name.
 
+**Ritual link (#84).** The Haiku parser returns `after_ritual: true` when the
+text marks the reading as a просмотр before/after a magical working («после
+ритуала», «как лёг ритуал», «спустя N дней после приворота», «заключительный
+просмотр»). When set and the client is resolved, `_link_session_to_ritual`
+looks up the client's most recent non-archived ritual within 120 days
+(`PgRitualsRepo.find_recent_for_client`) and stamps its id onto
+`sessions.ritual_id` of every saved row (single path via
+`_save_and_post_triplet(link_ritual=...)`, multi path after the triplet loop).
+No recent ritual → `ritual_id` stays NULL. The Mini App shows the link both
+ways: `from_ritual` on the session card (`arcana_sessions.py`) and
+`linked_sessions` on the ritual card (`arcana_rituals.py`, via
+`PgSessionsRepo.list_by_ritual`).
+
 **Codeword dictionary (#85).** Before the parse call, `handle_add_session`
 fetches the user's `🎭 Фигуранты` memory rows (`core/memory.get_figurant_facts`)
 and appends `figurant_prompt_block(...)` to `PARSE_SESSION_SYSTEM`. When the
@@ -274,8 +294,15 @@ sessions repo. Outcome can be revised via `set_outcome`.
   `_attach_work_titles` (`work_id` → Work title on detail paths, #10)
 - `arcana/repos/sessions_repo.py` — seam + `Session` object
 - `arcana/handlers/sessions.py` — card parsing, modes A/B, RAG gate, multi-flow, summary,
-  `🎭 Фигуранты` codeword dictionary in the parser + Sonnet context (#85)
+  `🎭 Фигуранты` codeword dictionary in the parser + Sonnet context (#85),
+  `after_ritual` + `_link_session_to_ritual` (#84)
 - `core/memory.py` — `get_figurant_facts` / `figurant_prompt_block` (#85)
+- `alembic/versions/b2c3d4e5f6a7_sessions_ritual_id.py` — `ritual_id` column (#84)
+- `arcana/repos/pg_sessions_repo.py` — `set_ritual_id`, `list_by_ritual`,
+  `_attach_titles` (work + ritual) (#84)
+- `arcana/repos/pg_rituals_repo.py` — `find_recent_for_client` (#84)
+- `miniapp/backend/routes/arcana_sessions.py` — `from_ritual` serialization (#84)
+- `miniapp/backend/routes/arcana_rituals.py` — `linked_sessions` on ritual detail (#84)
 - `core/waite_cards.py` — deterministic Waite parser (ADR-0013)
 - `core/card_grounding.py` — SequenceMatcher grounding for authored/other decks
 - `core/rag.py` — `index_triplet`, `index_triplets_batch`, `search_triplets`

@@ -29,11 +29,12 @@ from core.payment import source_label
 logger = logging.getLogger("arcana.pg_sessions")
 
 
-def _attach_work_titles(entries: "List[TripletEntry]") -> None:
-    """#10: заполнить work_title у триплетов с work_id — отдельным запросом.
-    works не джойнится в _select_sessions (FK works→clients ломал бы
-    sessions-only тестовые схемы). None при любой ошибке."""
-    ids = {e.work_id for e in entries if getattr(e, "work_id", None)}
+def _attach_titles(entries: "List[TripletEntry]", *, id_attr: str, title_attr: str,
+                    table: str) -> None:
+    """Заполнить <title_attr> у триплетов с непустым <id_attr> отдельным
+    запросом к <table>(id, title). Таблица не джойнится в _select_sessions
+    (FK works/rituals ломали бы sessions-only тестовые схемы). None при ошибке."""
+    ids = {getattr(e, id_attr, None) for e in entries if getattr(e, id_attr, None)}
     if not ids:
         return
     try:
@@ -42,14 +43,20 @@ def _attach_work_titles(entries: "List[TripletEntry]") -> None:
         in_clause = ",".join(str(i) for i in int_ids)
         with get_engine().connect() as conn:
             rows = conn.execute(
-                _sql_text("SELECT id, title FROM works WHERE id IN (%s)" % in_clause)
+                _sql_text("SELECT id, title FROM %s WHERE id IN (%s)" % (table, in_clause))
             ).fetchall()
         title_by_id = {str(r[0]): r[1] for r in rows}
         for e in entries:
-            if getattr(e, "work_id", None):
-                e.work_title = title_by_id.get(str(e.work_id))
+            if getattr(e, id_attr, None):
+                setattr(e, title_attr, title_by_id.get(str(getattr(e, id_attr))))
     except Exception as exc:  # pragma: no cover - defensive
-        logger.debug("_attach_work_titles failed: %s", exc)
+        logger.debug("_attach_titles(%s) failed: %s", table, exc)
+
+
+def _attach_work_titles(entries: "List[TripletEntry]") -> None:
+    """#10: work_title у триплетов с work_id. #84: и ritual_title у ritual_id."""
+    _attach_titles(entries, id_attr="work_id", title_attr="work_title", table="works")
+    _attach_titles(entries, id_attr="ritual_id", title_attr="ritual_title", table="rituals")
 
 # ── Code maps ─────────────────────────────────────────────────────────────────
 
@@ -146,6 +153,8 @@ def _row_to_triplet(row) -> TripletEntry:
         payment_source=source_label(getattr(row, "payment_code", None)),  # #7
         work_id=str(row.work_id) if getattr(row, "work_id", None) else None,   # #10
         work_title=getattr(row, "work_title", None) or None,                    # #10
+        ritual_id=str(row.ritual_id) if getattr(row, "ritual_id", None) else None,  # #84
+        ritual_title=getattr(row, "ritual_title", None) or None,                    # #84
     )
 
 
@@ -202,6 +211,7 @@ def _select_sessions():
             sessions.c.client_id,
             sessions.c.user_id,
             sessions.c.work_id,
+            sessions.c.ritual_id,
             session_outcome.c.code.label("outcome_code"),
             session_category.c.emoji.label("category_emoji"),
             session_category.c.label.label("category_label_col"),
@@ -519,6 +529,17 @@ class PgSessionsRepo:
         _attach_work_titles(result)
         return result
 
+    def _list_by_ritual_sync(self, ritual_id: str, user_id: str) -> List[TripletEntry]:
+        """#84: все триплеты, привязанные к записи ритуала (sessions.ritual_id)."""
+        try:
+            rid = int(ritual_id)
+        except (ValueError, TypeError):
+            return []
+        stmt = _select_sessions().where(sessions.c.ritual_id == rid)
+        with get_engine().connect() as conn:
+            rows = conn.execute(stmt).fetchall()
+        return [_row_to_triplet(r) for r in rows]
+
     def _archive_sync(self, session_id: str) -> bool:
         try:
             sid = int(session_id)
@@ -666,6 +687,11 @@ class PgSessionsRepo:
     ) -> List[TripletEntry]:
         return await asyncio.to_thread(self._list_by_slug_sync, slug, user_id)
 
+    async def list_by_ritual(
+        self, ritual_id: str, user_id: str = "",
+    ) -> "List[TripletEntry]":
+        return await asyncio.to_thread(self._list_by_ritual_sync, ritual_id, user_id)
+
     async def list_by_subject(
         self, subject_id: int, user_id: str = ""
     ) -> List[TripletEntry]:
@@ -692,6 +718,22 @@ class PgSessionsRepo:
     async def set_work_id(self, session_id: str, work_id: str) -> bool:
         """Привязать расклад к Работе (#151): set work_id."""
         return await asyncio.to_thread(self._set_work_id_sync, session_id, work_id)
+
+    def _set_ritual_id_sync(self, session_id: str, ritual_id: str) -> bool:
+        try:
+            sid = int(session_id)
+            rid = int(ritual_id)
+        except (ValueError, TypeError):
+            return False
+        with get_engine().begin() as conn:
+            res = conn.execute(
+                sessions.update().where(sessions.c.id == sid).values(ritual_id=rid)
+            )
+        return res.rowcount > 0
+
+    async def set_ritual_id(self, session_id: str, ritual_id: str) -> bool:
+        """Привязать расклад-просмотр к ритуалу (#84): set ritual_id."""
+        return await asyncio.to_thread(self._set_ritual_id_sync, session_id, ritual_id)
 
     def _get_mode_category_for_client_sync(self, client_id: str):
         """SELECT mode (category_id, category_code) for client — anchor (#174)."""

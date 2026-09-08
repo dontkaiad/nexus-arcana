@@ -6254,6 +6254,12 @@ function TripletSlide({ s, t, deckId, onVerdict }) {
             🔮 из работы «{t.fromWork.title}»
           </div>
         )}
+        {/* #84: расклад-просмотр до/после ритуала (sessions.ritual_id → rituals) */}
+        {t.fromRitual && (
+          <div style={{ fontSize: fs(11), color: s.tS, marginTop: 4 }}>
+            🕯️ просмотр ритуала «{t.fromRitual.title}»
+          </div>
+        )}
       </Glass>
 
       <SectionLabel s={s}>Карты</SectionLabel>
@@ -6322,6 +6328,12 @@ function SessionPagerOverview({ s, group, onJump, onSummarize, summarizing }) {
         {group.triplets[0]?.fromWork && (
           <div style={{ fontSize: fs(11), color: s.tS, marginTop: 4 }}>
             🔮 из работы «{group.triplets[0].fromWork.title}»
+          </div>
+        )}
+        {/* #84: сессия-просмотр до/после ритуала (sessions.ritual_id → rituals) */}
+        {group.triplets[0]?.fromRitual && (
+          <div style={{ fontSize: fs(11), color: s.tS, marginTop: 4 }}>
+            🕯️ просмотр ритуала «{group.triplets[0].fromRitual.title}»
           </div>
         )}
         {/* #204: финансы расклада (Источник · Сумма · долг / бартер) */}
@@ -6703,6 +6715,26 @@ function RitualDetail({ s, id }) {
             alt="Фото ритуала"
             style={{ width: "100%", borderRadius: 8, display: "block" }}
           />
+        </Glass>
+      )}
+
+      {/* #84: расклады-просмотры до/после этого ритуала (sessions.ritual_id) */}
+      {r.linkedSessions && r.linkedSessions.length > 0 && (
+        <Glass s={s} style={{ padding: "12px 14px", marginBottom: 10 }}>
+          <div style={{ fontSize: fs(13), color: s.text, fontWeight: 500, marginBottom: 8 }}>
+            🃏 Просмотры ({r.linkedSessions.length})
+          </div>
+          {r.linkedSessions.map((x, i) => (
+            <div key={x.id || i} style={{
+              fontSize: fs(12), color: s.tS, marginTop: i ? 4 : 0,
+              display: "flex", justifyContent: "space-between", gap: 8,
+            }}>
+              <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {x.name}
+              </span>
+              {x.date && <span style={{ flexShrink: 0, opacity: 0.7 }}>{fmtDate(x.date)}</span>}
+            </div>
+          ))}
         </Glass>
       )}
 

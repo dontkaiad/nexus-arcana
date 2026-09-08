@@ -133,6 +133,22 @@ async def ritual_detail(
     supplies, supplies_total = parse_supplies(r.consumables or "")
     structure = split_lines(r.structure or "")
 
+    # #84: расклады-просмотры, привязанные к этому ритуалу (sessions.ritual_id).
+    linked_sessions: list = []
+    try:
+        from arcana.repos.pg_sessions_repo import PgSessionsRepo
+        trips = await PgSessionsRepo().list_by_ritual(str(r.id))
+        seen: set = set()
+        for t in sorted(trips, key=lambda x: x.date or "", reverse=True):
+            name = t.session_name or t.question or "Расклад"
+            key = (name, t.date)
+            if key in seen:
+                continue
+            seen.add(key)
+            linked_sessions.append({"id": t.id, "name": name, "date": t.date or None})
+    except Exception:
+        logger.warning("ritual linked-sessions lookup failed", exc_info=True)
+
     return {
         "id": r.id,
         "name": r.name,
@@ -161,4 +177,6 @@ async def ritual_detail(
         "from_work": ({"id": r.work_id, "title": r.work_title or "Работа"}
                       if getattr(r, "work_id", None) else None),
         "consumables_written_off": bool(getattr(r, "consumables_written_off", None)),
+        # #84: расклады-просмотры до/после этого ритуала
+        "linked_sessions": linked_sessions,
     }
