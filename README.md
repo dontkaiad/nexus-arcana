@@ -125,17 +125,32 @@ location). `nexus/` and `arcana/` are domain packages that only talk to `core/`
 interfaces. The Mini App backend (`miniapp/backend/`) runs as a separate FastAPI
 process but shares the same Postgres and `core/` modules.
 
-**16 Architecture Decision Records** in [`docs/CASES/`](docs/CASES/) covering:
+**24 Architecture Decision Records** in [`docs/CASES/`](docs/CASES/) covering:
 RAG vector backend and right-sizing, voice authorship and RAG corpus gating,
 deterministic card parser, CI/CD forced-command deploy, single-writer location,
 Notion→PG migration strategy and execution, access model, and more. Each ADR states
 the rejected alternatives and the trade-offs — not just what was chosen.
 
-**10 domain specs** in [`docs/specs/`](docs/specs/) — Tasks, Finance, Sessions,
-Rituals, Clients, Memory, Lists, Grimoire, Works, Budget — each pinned to a commit
-hash and updated in the same PR that changes the model.
+**11 domain specs** in [`docs/specs/`](docs/specs/) — Tasks, Finance, Sessions,
+Rituals, Clients, Memory, Lists, Grimoire, Works, Budget, Cushion — each pinned to a
+commit hash and updated in the same PR that changes the model.
 
-→ [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
+```mermaid
+flowchart LR
+    TG([Telegram]) --> H[aiogram handlers<br/>Nexus · Arcana]
+    WA([Mini App · React/Vite]) --> API[FastAPI routes]
+    H --> CORE[core/ shared logic]
+    API --> CORE
+    H -. voice .-> WH[[Whisper]]
+    CORE -. classify · parse · interpret .-> LLM{{Claude · Haiku default<br/>Sonnet targeted · Vision}}
+    CORE --> PORT[repo seam / ports]
+    API --> PORT
+    PORT --> ADP[pg_*_repo · SQLAlchemy Core]
+    ADP --> DB[(PostgreSQL 16<br/>+ pgvector)]
+```
+
+→ [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — full diagram, model-routing table,
+state-outside-Postgres inventory, patterns & anti-patterns.
 
 ---
 
@@ -194,12 +209,30 @@ mapping.
 - Python 3.9, aiogram 3.x, FastAPI
 - SQLAlchemy Core + Alembic
 - PostgreSQL 16 + pgvector extension
-- SQLite (pending state: 8 in-process stores)
+- SQLite — process-local pending-dialog + cache stores, TTL-swept, rebuildable
 
 **Infrastructure**
 - Docker + docker-compose, Vultr VPS
 - GitHub Actions (CI/CD), forced-command deploy
 - Cloudinary (media storage)
+
+---
+
+## Running it
+
+Single-tenant by design (see *Status*), so this is a "clone and read" repo more than a
+"deploy your own" one — but it does run from a clean checkout:
+
+```bash
+cp .env.example .env          # bot tokens, ANTHROPIC_API_KEY, DATABASE_URL, Cloudinary
+python3 -m pip install -r requirements.txt
+python3 -m alembic upgrade head
+./run.sh                       # both bots, hot-reload via watchfiles
+```
+
+Mini App front end: `cd miniapp/frontend && npm i && npm run build` (or `npm run dev`).
+Backend: `uvicorn miniapp.backend.app:app`. Tests: `python3 -m pytest tests/` — the full
+suite is green and zero-skipped on every commit; a red suite blocks the push.
 
 ---
 

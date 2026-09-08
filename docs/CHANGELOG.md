@@ -9,6 +9,11 @@ Lists vN.x, Memory vN.x).
 ## [Unreleased]
 
 ### Added
+- 🔮 Работы-как-задачи: self-клиент «Кай» авто-создаётся при первом личном расклад/ритуале ([#154]); done-оркестратор — любое выполненное событие без открытой Работы заводит и закрывает её (`link_practice_record`) ([#154]); вопрос `[🌟 Себе] / [👤 Для клиента]` только при полной неоднозначности ([#154]); Работы клиента на карточке (бот + Mini App, табы Активные/Завершённые, `list_by_client`) ([#154]).
+- 🃏 Расклады: `sessions.ritual_id` — связь расклада-просмотра с ритуалом (маркеры «после ритуала / спустя N дней»), обе стороны в Mini App (`from_ritual` / `linked_sessions`); миграция `b2c3d4e5f6a7` ([#84]).
+- 🧠 Память: категория `🎭 Фигуранты` — словарь «кодовое слово → фигурант», парсер сессий Арканы тянет её в промпт (`get_figurant_facts`), `session_name` = `{Клиент} — {кодовое} ({фигурант})` ([#85]).
+- 🗒️ Списки: Mini App — тапабельные карточки Покупок/Инвентаря → шит правки (магазин / заметка / категория), `PATCH /api/lists/{id}` ([#45]); Arcana 🛒 Покупки + 📋 Чеклисты по контексту ([#45]).
+- 🎨 Единая типо-шкала: CSS-токены `--t-*` + JS-зеркало `T`, 3-уровневая иерархия во всём Mini App ([#60]).
 - 🧠 Память Mini App: RAG semantic-fallback (Voyage + Haiku-реранк) в `GET /api/memory` при <3 ILIKE-хитах; создание записи из FAB через общее ядро бота (`parse_and_store`), уведомление в Nexus; обратимая «неактуально» (`PATCH /api/memory/{id}`, `include_inactive=1`) ([#6]).
 - 🔮 Работы / 📖 Гримуар: создание из Mini App — структурные формы `POST /api/arcana/works` и `POST /api/arcana/grimoire` (без Haiku), `/api/categories?type=work|grimoire` ([#203]).
 - 🃏 Расклады / 🕯 Ритуалы: финансы на карточках Mini App — `debt` / `source` / `barter_what`, общий `core.payment.source_label` ([#7], [#8]).
@@ -18,11 +23,16 @@ Lists vN.x, Memory vN.x).
 - `core/ru_morph.py` — падежный стеммер (вынесен из `core/memory`), общий с матчером имён долгов ([#136]).
 
 ### Changed
+- 💰 Цели вынесены из `memories` в таблицу `goals` (миграция `a1b2c3d4e5f6`, backfill из `цель_*` фактов) — как долги в `debts`; `цель_` диверсится на записи ([#205]).
+- 📅 Календарь Nexus: page-title, ровный ритм блоков, единый цветовой словарь сетки месяца, читаемая карточка «сегодня» в Неделе (плотный фон вместо стекла) ([#50]).
+- 🔥 Карточка стрика в «Мой день» — fluid: тянется как соседние плитки, солнечный сигил фикс. размера и всегда внутри ([#207]).
+- `docs/ARCHITECTURE.md`: таблица роутинга моделей, инвентарь SQLite-состояния вне Postgres, секции паттернов и анти-паттернов; README — mermaid-диаграмма + quick-start ([#17]).
 - Owner-key колонка `user_notion_id` → `user_id` во всех 14 таблицах ([#144]); PK `core_identity.notion_id` имя сохраняет ([ADR-0024]).
 - Два Telegram-аккаунта владельца сведены в один `user_id` — owner-scoped чтение памяти больше не фрагментируется по устройствам (миграция `e067a1b2c3d4`) ([#202]).
 - `GET /api/memory`: любая строка категории «💰 Лимит» уходит в сгруппированный вид, не протекает карточкой во flat-список ([#6]).
 
 ### Fixed
+- Напоминания Nexus: пропущенное одноразовое уведо больше не дублируется «⏰ Пропущено» на каждом рестарте — `reminder` обнуляется после отправки (`clear_reminder`) ([#206]).
 - Гримуар: декартово произведение в `_list_by_category_sync` (SAWarning в тестах) ([#9]).
 - Работы: архивные (soft-deleted) работы протекали в `/works` — унифицировано на `_TERMINAL_STATUS = ("done", "archived")` ([#95]).
 - Долги: матч имени теперь падеже-независимый («долг Ивану» ↔ «вернула Ивана»), без фаззи-матча опечаток ([#136]).
@@ -204,4 +214,14 @@ Lists vN.x, Memory vN.x).
 [#202]: https://github.com/dontkaiad/nexus-arcana/issues/202
 [#203]: https://github.com/dontkaiad/nexus-arcana/issues/203
 [#204]: https://github.com/dontkaiad/nexus-arcana/issues/204
+[#45]: https://github.com/dontkaiad/nexus-arcana/issues/45
+[#50]: https://github.com/dontkaiad/nexus-arcana/issues/50
+[#60]: https://github.com/dontkaiad/nexus-arcana/issues/60
+[#84]: https://github.com/dontkaiad/nexus-arcana/issues/84
+[#85]: https://github.com/dontkaiad/nexus-arcana/issues/85
+[#154]: https://github.com/dontkaiad/nexus-arcana/issues/154
+[#205]: https://github.com/dontkaiad/nexus-arcana/issues/205
+[#206]: https://github.com/dontkaiad/nexus-arcana/issues/206
+[#207]: https://github.com/dontkaiad/nexus-arcana/issues/207
+[#17]: https://github.com/dontkaiad/nexus-arcana/issues/17
 [ADR-0024]: CASES/0024-identity-pk-keeps-notion-id-name.md

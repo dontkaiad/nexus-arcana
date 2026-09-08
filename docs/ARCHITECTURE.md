@@ -1,9 +1,9 @@
 # Architecture
 
-> Code conforms to: `e511859` · Update in the same PR that changes the architecture.
+> Code conforms to: `0680150` · Update in the same PR that changes the architecture.
 > This is an engineering overview, not a developer spec. For the data model and
-> contracts, see [`docs/specs/`](specs/) (10 domain specs) and the ADRs in
-> [`docs/CASES/`](CASES/). Read time: ~10–12 min.
+> contracts, see [`docs/specs/`](specs/) (11 domain specs) and the ADRs in
+> [`docs/CASES/`](CASES/) (24). Read time: ~12–15 min.
 
 ## What this is
 
@@ -226,7 +226,7 @@ flowchart TD
 ```
 
 **Stack.** Python 3.9, aiogram 3.13 (bots), FastAPI + React/Vite (Mini App),
-PostgreSQL 16, SQLAlchemy Core + Alembic (21 migrations and counting). Claude API
+PostgreSQL 16, SQLAlchemy Core + Alembic (40+ migrations and counting). Claude API
 (Haiku 4.5 / Sonnet 4.6) for language, plus **Claude Vision** for photos — parsing
 receipts and tarot spreads. Voice notes are transcribed via the **OpenAI Whisper API**
 (`whisper-1`), wired through `core/voice.py` — supported in both bots. Media (client /
@@ -296,6 +296,113 @@ The 11 specs in [`docs/specs/`](specs/) are written the same way: each one docum
 code as it *is*, carries a conforms-to hash, and points at the files you can check it
 against — no aspirational data models, no "known limitations" prose (those are issues).
 A spec that describes the ideal instead of the real is a lie with a nice font.
+
+## Reference
+
+Onboarding-level detail: where the model calls go, what state lives outside Postgres,
+the patterns worth learning once, and the mistakes the codebase has already made.
+
+### Model routing
+
+Haiku by default, Sonnet only where reasoning or empathy earns the price (decision 6).
+[`tests/test_models_audit.py`](../tests/test_models_audit.py) fails the build if this
+table drifts.
+
+| Where | Model | Why |
+|---|---|---|
+| Intent router (`arcana/handlers/base.py`, Nexus dispatch) | **Haiku** | 8-shot classification into a fixed label set |
+| All JSON field parsers — sessions, rituals, works, clients, lists, reply-update, delete-intent | **Haiku** | pull 2–8 named fields out of one message |
+| Spell-correction (`core/preprocess.py`) | **Haiku** | whitelist-guarded typo fix over a closed vocabulary |
+| Keyboard-layout convert (`core/layout.py`) | *no LLM* | deterministic QWERTY↔ЙЦУКЕН map |
+| Waite card parser (`core/waite_cards.py`) | *no LLM* | 78-card closed set, decision-tree + fuzzy match ([ADR-0013](CASES/0013-waite-deterministic-card-parser.md)) |
+| ADHD tip on the Mini App home | **Haiku** | one 15-word line |
+| Tarot interpretation — mode A expand & mode B generate (`arcana/handlers/sessions.py`) | **Sonnet** | narrative + the practitioner's voice ([ADR-0015](CASES/0015-voice-authorship-mode-a.md)) |
+| Session summary (`miniapp/backend/routes/arcana_sessions.py`) | **Sonnet** | synthesise across N triplets |
+| Budget analysis (`core/budget.py`) | **Sonnet** | multi-constraint planning narrative ([ADR-0022](CASES/0022-budget-arithmetic-determinism.md) keeps the *arithmetic* deterministic) |
+| Long-form ADHD advice, category 🦋 (`core/memory.py`) | **Sonnet** | empathy + length |
+| Vision — receipts, tarot-spread photos, TG screenshots (`core/vision.py`) | **Sonnet** | tier is non-negotiable for image input |
+
+Every call goes through `core/claude_client.py` (`retry_transient`: 3 tries, backoff+jitter,
+`Retry-After` honoured, 60 s timeout, SDK retries off). A raw `client.messages.create`
+outside it is a bug — [`tests/test_llm_retry.py`](../tests/test_llm_retry.py) enforces it.
+Voyage (`voyage-4-lite`, dim 1024) for embeddings + a Haiku reranker over its candidates
+([ADR-0021](CASES/0021-memory-rag-reranking.md)); Whisper `whisper-1` for voice.
+
+### State outside Postgres
+
+Postgres is the source of truth for every domain. A handful of **process-local SQLite
+files** hold interaction state and caches — auto-created on first run (`CREATE TABLE IF
+NOT EXISTS`), TTL-swept, safe to delete. Ephemeral by design: losing them costs an
+in-progress dialog or a cache warm-up, never a record.
+
+**Pending-dialog stores** (a bot question is open, waiting for the next message /
+button):
+
+| File | Flow | TTL |
+|---|---|---|
+| `pending_tarot.db` | Arcana session parse / preview / intent & client disambiguation | 1 h |
+| `pending_works.db` | Arcana work preview-flow (`work_preview.py`) | 30 m |
+| `pending_tasks.db` | Nexus task preview & deadline/clarification | 30 m |
+| `pending_lists.db` | «📋 Подзадачи» checklist input (`subtasks_handler`) | 30 m |
+| `pending_clients.db` | Client info-collection dialog | 10 m |
+| `pending_client_photo.db` | `/client_photo` name + photo flow | 10 m |
+| `pending_writeoff.db` | Ritual consumables write-off edit | 30 m |
+| `pending_barter.db` | «Что в бартере?» reply | 30 m |
+| `pending_grimoire_search.db` | Grimoire search query input | 10 m |
+| `pending_note_edit.db` | Nexus note tag edit | 10 m |
+
+**Caches / mappings** (rebuildable, not dialog state): `message_pages.db` — `chat:msg_id
+→ page_id` so a reply to any bot message edits that record (30 d); `session_cache.db` —
+session/theme summary cache; `spell_whitelist.db` — the spell-correction whitelist
+(cards + terms + client names), invalidated on client create (1 h); `task_reminder_msg.db`
+— reminder-message tracking; `ru_calendar.db` — RU work-calendar holidays (30 d);
+`nexus_streaks.db` — per-task + global daily streak store (persistent, [ADR-0023](CASES/0023-streaks-out-of-scope-for-arcana-works.md)).
+
+> One known wart: a couple of Nexus finance sub-flows still hold pending state in an
+> **in-memory dict** — lost on restart. It's on the list, not in this table.
+
+### Patterns worth learning once
+
+Both bots are sisters — most UX primitives are shared and live in `core/`. Reimplementing
+one per-bot is treated as a bug.
+
+- **Preview-flow** (`arcana/handlers/work_preview.py`, Nexus tasks) — parse → show a
+  preview with `[✅ Сохранить]` → only then write. Nothing hits the DB before confirmation.
+- **`resolve_or_create` / `resolve_self_client`** (`core/client_resolve.py`) — any client
+  name a parser extracts goes through one resolver that finds-or-creates exactly one row,
+  announces «🆕 Создала клиента X», and wires a reply hook to change the type. No handler
+  writes a client-typed record without a client relation.
+- **`work_relation.link_practice_record`** (`core/work_relation.py`) — on a done
+  session/ritual, find the client's open Work of that category *or create one*, link the
+  event's `work_id`, close the Work — one transaction. Every performed event ends up with
+  a Work in history.
+- **`message_pages` + `reply_update`** — the reply-to-edit spine. `message_pages.db` maps
+  a bot message back to its record; `core/reply_update.py` parses the reply and applies a
+  field-level patch. Works across tasks, notes, sessions, rituals, clients.
+- **`message_collector`** (`core/message_collector.py`) — 5-second debounce so a burst of
+  quick lines is processed as one thought, not five.
+- **Reminder scheduler** (`core/reminder_scheduler.py`) — one APScheduler flow for both
+  bots. Jobs are in-memory (lost on restart) and **restored from the columns on startup**;
+  a fired one-off reminder nulls its column so a restart can't re-send it (#206).
+- **Subtasks factory** (`core/subtasks_handler.py`) — one `make_subtasks_router()` factory,
+  not one Router mounted twice (aiogram forbids that).
+- **Lookup tables, not enums** — a new status/category is an INSERT, and the schema
+  enforces the set ([ADR-0008](CASES/0008-lookup-tables.md)).
+
+### Anti-patterns (the codebase has made these)
+
+- **Handler calls the PG adapter directly** — persistence detail back in business logic,
+  the exact coupling the seam exists to prevent.
+- **Parallel per-bot implementation** of a shared primitive — if Arcana seems to need
+  different UX than Nexus, that's a question for the owner, not a fork.
+- **Pending state in an in-memory dict** — vanishes on restart / redeploy; use a
+  `pending_*.db`.
+- **Deleting a "dead" code path on a guess** — prove it unreachable first (canary grep,
+  prod has no token for it), then remove. Two "dead" Notion paths turned out live.
+- **Sonnet where a regex or Haiku would do**, or a bare `client.messages.create` — both
+  fail a guard test.
+- **A spec that describes the ideal instead of the real** — every spec pins a commit hash
+  and a file list you can check it against.
 
 ## What's next
 
