@@ -351,6 +351,10 @@ button):
 | `pending_grimoire_search.db` | Grimoire search query input | 10 m |
 | `pending_note_edit.db` | Nexus note tag edit | 10 m |
 
+`pending_kv.db` is the generic version of the pattern (`core/pending_kv.py`): one table
+keyed `(uid, kind)`, JSON value, per-call TTL — new pending flows use it instead of
+hand-rolling a store or an in-memory dict.
+
 **Caches / mappings** (rebuildable, not dialog state): `message_pages.db` — `chat:msg_id
 → page_id` so a reply to any bot message edits that record (30 d); `session_cache.db` —
 session/theme summary cache; `spell_whitelist.db` — the spell-correction whitelist
@@ -358,8 +362,9 @@ session/theme summary cache; `spell_whitelist.db` — the spell-correction white
 — reminder-message tracking; `ru_calendar.db` — RU work-calendar holidays (30 d);
 `nexus_streaks.db` — per-task + global daily streak store (persistent, [ADR-0023](CASES/0023-streaks-out-of-scope-for-arcana-works.md)).
 
-> One known wart: a couple of Nexus finance sub-flows still hold pending state in an
-> **in-memory dict** — lost on restart. It's on the list, not in this table.
+> One known wart: a few Nexus **finance** sub-flows still hold pending state in an
+> in-memory dict — lost on restart (issue #208). The non-money clarify-dialogs were
+> moved to `pending_kv`.
 
 ### Patterns worth learning once
 
@@ -395,8 +400,8 @@ one per-bot is treated as a bug.
   the exact coupling the seam exists to prevent.
 - **Parallel per-bot implementation** of a shared primitive — if Arcana seems to need
   different UX than Nexus, that's a question for the owner, not a fork.
-- **Pending state in an in-memory dict** — vanishes on restart / redeploy; use a
-  `pending_*.db`.
+- **Pending state in an in-memory dict** — vanishes on restart / redeploy; use
+  `core/pending_kv.py` (or a dedicated `pending_*.db`).
 - **Deleting a "dead" code path on a guess** — prove it unreachable first (canary grep,
   prod has no token for it), then remove. Two "dead" Notion paths turned out live.
 - **Sonnet where a regex or Haiku would do**, or a bare `client.messages.create` — both

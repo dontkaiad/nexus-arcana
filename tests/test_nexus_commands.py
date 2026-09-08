@@ -199,13 +199,13 @@ class TestQuickCreateTasksPG:
 
     @pytest.mark.asyncio
     async def test_arcana_choice_no_creates_task_in_pg(self, mock_callback):
-        from nexus.nexus_bot import on_arcana_choice, _pending_arcana
+        from nexus.nexus_bot import on_arcana_choice, _pkv, _PK_ARCANA
         from nexus.repos.pg_tasks_repo import (
             _extract_title, _extract_status, _extract_select,
         )
 
         uid = 67686090
-        _pending_arcana[uid] = "купить молоко"
+        _pkv.save(uid, _PK_ARCANA, {"text": "купить молоко"}, ttl=600)
         cb = mock_callback(data="arcana_choice_no", from_id=uid)
 
         p_create, p_lr, p_lt, p_smp = self._patches()
@@ -226,10 +226,10 @@ class TestQuickCreateTasksPG:
 
     @pytest.mark.asyncio
     async def test_arcana_choice_no_without_uid_omits_relation(self, mock_callback):
-        from nexus.nexus_bot import on_arcana_choice, _pending_arcana
+        from nexus.nexus_bot import on_arcana_choice, _pkv, _PK_ARCANA
 
         uid = 67686090
-        _pending_arcana[uid] = "позвонить в банк"
+        _pkv.save(uid, _PK_ARCANA, {"text": "позвонить в банк"}, ttl=600)
         cb = mock_callback(data="arcana_choice_no", from_id=uid)
 
         p_create, p_lr, p_lt, p_smp = self._patches()
@@ -240,14 +240,13 @@ class TestQuickCreateTasksPG:
 
     @pytest.mark.asyncio
     async def test_unknown_clarify_task_creates_task_in_pg(self, mock_callback):
-        import time as _time
-        from nexus.nexus_bot import on_unknown_clarify, _pending_unknown
+        from nexus.nexus_bot import on_unknown_clarify, _pkv, _PK_UNKNOWN
         from nexus.repos.pg_tasks_repo import (
             _extract_title, _extract_status, _extract_select,
         )
 
         uid = 67686090
-        _pending_unknown[uid] = ("сделать отчёт", "u-2", _time.time())
+        _pkv.save(uid, _PK_UNKNOWN, {"text": "сделать отчёт", "user_id": "u-2"}, ttl=300)
         cb = mock_callback(data="unk_task_1", from_id=uid)
 
         p_create, p_lr, p_lt, p_smp = self._patches()

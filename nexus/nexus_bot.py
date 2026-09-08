@@ -66,8 +66,12 @@ _TYPE_CORRECTION_RE = _re_nexus.compile(
     r"^\s*(нет[,\s]+)?(это|был[аи]?|на самом деле)?\s*(это\s+)?(доход|расход)\s*$",
     _re_nexus.IGNORECASE,
 )
-_pending_arcana: dict = {}  # user_id → text (оригинальный для arcana_clarify)
-_pending_unknown: dict = {}  # user_id → (text, user_id, ts)
+# arcana/unknown clarify-pending — на SQLite (core.pending_kv), а не в память:
+# это состояние «висит inline-кнопка, жду выбор», и частый auto-reload на
+# деплое иначе роняет диалог (#206-класс).
+from core import pending_kv as _pkv
+_PK_ARCANA = "nexus_arcana_clarify"    # {"text": str}
+_PK_UNKNOWN = "nexus_unknown_clarify"  # {"text": str, "user_id": str}
 
 
 @dp.message(Command("start"))
@@ -862,11 +866,13 @@ async def process_text(msg: Message, text: str, user_id: str = "") -> None:
                 parts = line.split(":", 1)
                 if len(parts) == 2:
                     arcana_clarify_text = parts[1]
-                    _pending_arcana[msg.from_user.id] = arcana_clarify_text
+                    _pkv.save(msg.from_user.id, _PK_ARCANA,
+                              {"text": arcana_clarify_text}, ttl=600)
             elif line and line.startswith("unknown_clarify:"):
                 unknown_clarify_text = line.split(":", 1)[1]
-                import time as _time
-                _pending_unknown[msg.from_user.id] = (unknown_clarify_text, user_id, _time.time())
+                _pkv.save(msg.from_user.id, _PK_UNKNOWN,
+                          {"text": unknown_clarify_text, "user_id": user_id or ""},
+                          ttl=_UNKNOWN_TTL)
             elif line:
                 lines.append(line)
                 # Запомнить время последней финансовой записи для контекста редактирования
@@ -1369,11 +1375,12 @@ async def on_page_callback(query: CallbackQuery, user_id: str = "") -> None:
 async def on_arcana_choice(query: CallbackQuery, user_id: str = "") -> None:
     """Handle: выбор между Аркана и Задача."""
     uid = query.from_user.id
-    if uid not in _pending_arcana:
+    _p = _pkv.pop(uid, _PK_ARCANA, ttl=600)
+    if not _p:
         await query.answer("⏱ Время истекло, попробуй снова")
         return
 
-    text = _pending_arcana.pop(uid)
+    text = _p["text"]
     parts = query.data.split("_")
     choice = parts[2]  # yes или no
 
@@ -1484,16 +1491,14 @@ _UNKNOWN_TTL = 300  # 5 min
 @dp.callback_query(lambda c: c.data and c.data.startswith("unk_"))
 async def on_unknown_clarify(query: CallbackQuery, user_id: str = "") -> None:
     """Handle unknown text → user chose action type."""
-    import time as _time
-
     uid = query.from_user.id
-    pending = _pending_unknown.pop(uid, None)
-    if not pending or _time.time() - pending[2] > _UNKNOWN_TTL:
+    pending = _pkv.pop(uid, _PK_UNKNOWN, ttl=_UNKNOWN_TTL)
+    if not pending:
         await query.answer("⏰ Время истекло, отправь текст ещё раз")
         return
 
-    original_text, stored_uid, _ = pending
-    notion_id = stored_uid or user_id
+    original_text = pending["text"]
+    notion_id = pending.get("user_id") or user_id
 
     # Parse action: unk_buy_123, unk_task_123, unk_note_123, unk_mem_123
     action = query.data.split("_")[1]  # buy, task, note, mem
