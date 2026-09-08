@@ -1,8 +1,11 @@
 # CLIENTS — data-model contract (👥 Клиенты)
 
 Code conforms to: 0bc132e. (+ #144: user_notion_id → user_id; + #101: note
-merge on fresh pending state; + #102: birthday overwrite confirm.) This spec describes the clients data model as of
-that commit; update it in the same PR that changes the model.
+merge on fresh pending state; + #102: birthday overwrite confirm; + #154:
+`resolve_self_client` auto-creates the 🌟 Self client, `list_by_client` for
+the client card, self/client disambiguation dialog gated to full ambiguity.)
+This spec describes the clients data model as of that commit; update it in
+the same PR that changes the model.
 
 > Contract, not snapshot. Describes the persistent model, the guarantees of
 > each operation, and the invariants. Enumerations point at the owning code
@@ -67,6 +70,9 @@ sync SQLAlchemy). Notion-style type/status labels are mapped to codes via
 - **resolve / find** — `find(name)` matches `name ILIKE %name%`, ordered by
   `id`, limit 1 (lowest-id wins). `find_by_id(pg_id)` returns the full
   profile. `find_self(user_id)` returns the `self`-type client.
+- **list by client** — `list_by_client(client_id)` on `PgWorksRepo` /
+  `PgRitualsRepo` / `PgSessionsRepo` return that client's rows (works: **all
+  statuses**, #154 C4). Used for the client card / Mini App dossier.
 - **create (with dedup guard)** — `create(name, type_code, …)` first checks
   `name ILIKE name` (case-insensitive exact) and **returns the existing id if
   found**, else inserts (default `type='paid'`, `status='active'`). This
@@ -93,8 +99,14 @@ sync SQLAlchemy). Notion-style type/status labels are mapped to codes via
   rituals, and works each carry a `client_id` FK → `clients.id` (see those
   specs). Clients do not back-reference them.
 - **Type/status are FK-constrained** to `client_type` / `client_status`.
-- **`self`-type client is special**: the practitioner's own client, found by
-  `find_self`; excluded from P&L (see `core/cash_register.py`, FINANCE.md).
+- **`self`-type client is special**: the practitioner's own client
+  («Кай»), found by `find_self`; excluded from P&L (see
+  `core/cash_register.py`, FINANCE.md). Since #154 `resolve_self_client`
+  **creates it on first use** (`create(name="Кай", type_code="self")`,
+  process-cached) instead of returning `None` — so a reading/ritual with no
+  named заказчик is grouped to it rather than left orphaned. The self/client
+  disambiguation dialog fires only at full ambiguity — see SESSIONS.md /
+  RITUALS.md invariants (#154 stage 4).
 - **`object_photos` is a serialized text field**, one `URL | note` per line
   (parsed by `core/client_object_photos.py`); photos upload via
   `core/cloudinary_client.py`.
@@ -123,7 +135,10 @@ delete/archive method in `PgClientsRepo` — a client persists once created.
 - Cross-domain — sessions/rituals/works handlers resolve a client on create;
   `core/cash_register.py` (self-client exclusion).
 - Mini App — `miniapp/backend/routes/arcana_clients.py`
-  (`GET /api/arcana/clients`, `GET /api/arcana/clients/{client_id}`).
+  (`GET /api/arcana/clients`, `GET /api/arcana/clients/{client_id}` — the
+  dossier returns `works[]` + `stats.works_active`, #154 C4).
+  `App.jsx:ClientDetail` renders a `🔮 Работы` section with
+  Активные/Завершённые tabs.
 
 ## Model routing (from code)
 
@@ -139,7 +154,11 @@ Reads/writes are pure SQL.
 - `arcana/repos/clients_tables.py` — SQLAlchemy Core mirror
 - `arcana/repos/pg_clients_repo.py` — `PgClientsRepo`, find/create dedup guard, profile
 - `arcana/repos/clients_repo.py` — seam + `Client` object
-- `core/client_resolve.py` — `resolve_or_create` + announce
+- `core/client_resolve.py` — `resolve_or_create` + announce;
+  `resolve_self_client` (creates 🌟 Self on first use, #154)
+- `arcana/handlers/intent_resolve.py` — `is_self_marked`,
+  `ask_ritual_self_or_client` / `_resolve_dialog_kb` (self/client dialog, #154 stage 4)
+- `arcana/repos/pg_works_repo.py` — `list_by_client` (all statuses, #154 C4)
 - `core/notion_client.py` — `find_or_create_client`, `client_find`
 - `core/client_object_photos.py` — `URL | note` serialization
 - `core/cloudinary_client.py` — photo upload

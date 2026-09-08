@@ -5,9 +5,10 @@ Code conforms to: 0bc132e. (+ #144: user_notion_id → user_id; + #10: Mini App
 tasks; + #8/#10: planned-practice badge + `from_work` reverse-link shown on
 the event card; + #95: `_TERMINAL_STATUS` excludes archived from open-work
 reads; + #203: Mini App create endpoint; + #153: `?filter=` status tabs
-(active/overdue/done/all).) This
-spec describes the works data model as of
-that commit; update it in the same PR that changes the model.
+(active/overdue/done/all); + #154: `link_practice_record` creates+closes a
+Work for every performed event, `list_by_client` for the client card.) This
+spec describes the works data model as of that commit; update it in the same
+PR that changes the model.
 
 > Contract, not snapshot. Describes the persistent model, the guarantees of
 > each operation, and the invariants. Enumerations point at the owning code
@@ -70,7 +71,9 @@ Owned by the migrations (source of truth). Examples, non-exhaustive:
   "open work" query (list + title-search) excludes a single
   `_TERMINAL_STATUS = ("done", "archived")` constant — a new terminal code is
   hidden everywhere by adding it there (#95; before, only `!= "done"` was
-  filtered and archived works leaked into `/works`).
+  filtered and archived works leaked into `/works`). `list_by_client(id)` is
+  the exception — it returns the client's works of **all** statuses (client
+  card / dossier, #154 C4).
 - **status** — `set_status(id, code)`, `mark_done(id)` (status → `done`).
 - **schedule** — `set_deadline(id, …)`; `reminder` drives APScheduler jobs
   (the shared reminder flow, `core/reminder_scheduler.py`).
@@ -88,6 +91,13 @@ Owned by the migrations (source of truth). Examples, non-exhaustive:
   form of that practice (Mini App marks it `🔵 запланирован`); once performed
   it closes and the event card shows the reverse link (`from_work` — see
   SESSIONS.md / RITUALS.md).
+- **Every performed event has a Work (#154 stage 5).**
+  `core/work_relation.link_practice_record` is the entry point: it finds the
+  client's open Work of the right category **or creates one**, links every
+  passed record id, and closes it Done. A done-in-one-pass reading/rite
+  therefore still produces a Work row (needed for the client card and RAG),
+  not just the event. The bot distinguishes «🔮 Работа заведена и закрыта»
+  (created) from «✅ Связанная Работа закрыта» (reused).
 - **`engagement_type` (client/personal) is NOT on works.** That lookup lives
   on `sessions`/`rituals` (`type_id`). A work carries only `priority`/`status`
   plus a `category` label; client attribution is via `client_id` only.
@@ -113,9 +123,10 @@ attributes; reminder jobs are derived from the columns, not stored.
 - Bot — `arcana/handlers/works.py`, `arcana/handlers/work_preview.py`
   (preview-then-save flow), `arcana/handlers/work_kb.py` (inline keyboards).
 - Cross-domain — `core/client_resolve.py` (client),
-  `core/work_relation.py` (Notion-era auto-relation + auto-close; see #151),
-  `core/reminder_scheduler.py` (reminders).
-- Mini App — reads via Arcana today/aggregate routes
+  `core/work_relation.py` (PG auto-relation + find-or-create + auto-close;
+  #151 / #154), `core/reminder_scheduler.py` (reminders).
+- Mini App — reads via Arcana today/aggregate routes; client dossier
+  `works[]` (`arcana_clients.py`, #154 C4)
   (`miniapp/backend/routes/arcana_today.py`). `GET /api/arcana/works?filter=`
   takes `active` (default — open, not overdue) / `overdue` (open, past
   deadline) / `done` (done + archived, last 40) / `all` (all open), the
@@ -145,10 +156,13 @@ Reads/writes are pure SQL.
 - `alembic/versions/g7b8c9d0e1f2_works_add_reminder.py` — `reminder`
 - `alembic/versions/o5h6i7j8k9l0_works_add_archived_status.py` — `archived` status
 - `arcana/repos/works_tables.py` — SQLAlchemy Core mirror
-- `arcana/repos/pg_works_repo.py` — `PgWorksRepo` (create/status/deadline/mark_done)
+- `arcana/repos/pg_works_repo.py` — `PgWorksRepo` (create/status/deadline/mark_done),
+  `list_by_client` (all statuses, #154 C4)
 - `arcana/repos/works_repo.py` — seam + `Work` object
 - `arcana/handlers/works.py`, `arcana/handlers/work_preview.py` — Haiku parse + preview
-- `core/work_relation.py` — Notion-era session/ritual → work relation (#151)
+- `core/work_relation.py` — PG session/ritual → work relation (#151);
+  `link_practice_record` finds-or-creates + closes a Work (#154 stage 5)
+- `miniapp/backend/routes/arcana_clients.py` — client dossier `works[]` (#154 C4)
 - `arcana/repos/sessions_tables.py`, `arcana/repos/rituals_tables.py` — confirm no `works_id`
 - `core/client_resolve.py` — client resolution on create
 - `miniapp/backend/routes/arcana_today.py` — `/api/arcana/works` `?filter=` (active/overdue/done/all), counts, serialization (#10, #153)
