@@ -5,6 +5,7 @@ import json
 import logging
 import traceback as tb
 from datetime import datetime, timezone, timedelta
+from typing import Optional
 
 from aiogram.types import Message
 from core.claude_client import ask_claude
@@ -25,7 +26,11 @@ PAYMENT_SOURCE_MAP = {
 
 PARSE_RITUAL_SYSTEM = (
     "Извлеки данные ритуала. Ответь ТОЛЬКО JSON без markdown:\n"
-    '{"client_name": "имя или null", "name": "название", '
+    '{"client_name": "имя ЗАКАЗЧИКА ритуала или null", '
+    '"subject_name": "имя человека, НА которого направлен ритуал (цель '
+    'приворота/защиты/чистки), в именительном падеже, или null — НЕ путай '
+    'с client_name (кто заказал)", '
+    '"name": "название", '
     '"goal": "привлечение|защита|очищение|любовь|финансы|деструктив|развязка|приворот|другое или null", '
     '"place": "дома|лес|погост|перекрёсток|церковь|водоём|поле|другое или null", '
     '"consumables": "расходники строкой", "consumables_cost": число, '
@@ -61,7 +66,11 @@ CLARIFICATION_TEXT = (
 )
 
 
-async def handle_add_ritual(message: Message, text: str, user_id: str = "") -> None:
+async def handle_add_ritual(
+    message: Message, text: str, user_id: str = "", *,
+    forced_client_name: Optional[str] = None,
+    forced_self: bool = False,
+) -> None:
     try:
         tg_id = message.from_user.id
         tz_offset = await get_user_tz(tg_id)
@@ -99,8 +108,22 @@ async def handle_add_ritual(message: Message, text: str, user_id: str = "") -> N
         if pending and pending.get("type") == "awaiting_ritual_clarification":
             await delete_pending(tg_id)
 
-        client_name = data.get("client_name")
+        client_name = forced_client_name or data.get("client_name")
+        subject_name = (data.get("subject_name") or "").strip() or None
         client_id = None
+
+        # #154 стадия 4: полная неоднозначность — нет заказчика, есть человек-
+        # цель ритуала, в тексте нет self-маркера → спросить [Себе]/[Клиент].
+        if not forced_self and not forced_client_name and not client_name and subject_name:
+            from arcana.handlers.intent_resolve import (
+                is_self_marked, ask_ritual_self_or_client,
+            )
+            if not is_self_marked(accumulated_text):
+                await ask_ritual_self_or_client(
+                    message, accumulated_text, user_id, subject_name,
+                )
+                return
+
         if client_name:
             from core.client_resolve import resolve_or_create, is_valid_client_name
             if not is_valid_client_name(client_name):
@@ -109,6 +132,10 @@ async def handle_add_ritual(message: Message, text: str, user_id: str = "") -> N
             client_id = await resolve_or_create(
                 message, client_name, user_id=user_id,
             )
+        else:
+            # Личный ритуал → на self-клиента «Кай» (группировка + Работа, #154).
+            from core.client_resolve import resolve_self_client
+            client_id = await resolve_self_client(user_id=user_id)
 
         goal = data.get("goal") or None
         place = data.get("place") or None

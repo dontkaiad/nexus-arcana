@@ -450,6 +450,13 @@ async def route_message(
             await react(message, reaction_for("ritual"))
             return
 
+        # ── Pending: имя клиента для ритуала (#154 стадия 4) ──────────────
+        if pending and pending.get("type") == "awaiting_ritual_client_name":
+            from arcana.handlers.intent_resolve import handle_ritual_client_name
+            if await handle_ritual_client_name(message, text, user_id):
+                await react(message, reaction_for("ritual"))
+                return
+
         # ── Pending: правка трактовки уже сохранённого триплета ───────────
         if pending and pending.get("awaiting_triplet_edit"):
             from arcana.handlers.sessions import handle_triplet_correction

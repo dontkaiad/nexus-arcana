@@ -4,9 +4,11 @@ Code conforms to: 0bc132e (+ #7/#8: Mini App finance serialization, shared
 `source_label`; + #8: `consumables_written_off` timestamp; + #10: `work_id`
 reverse-link surfaced in Mini App; + #153: `?result=` outcome filter; + #84:
 readings (`sessions`) can link back to a ritual — `linked_sessions` on the
-ritual card, `PgRitualsRepo.find_recent_for_client` for auto-linking). This
-spec describes the rituals data model; update it in the same PR that changes
-the model.
+ritual card, `PgRitualsRepo.find_recent_for_client` for auto-linking; + #154:
+every rite has a `client_id` (self-client fallback) and a Work
+(`link_practice_record` creates+closes one when none is open); parser gained
+`subject_name` + a self/client question). This spec describes the rituals
+data model; update it in the same PR that changes the model.
 
 > Contract, not snapshot. Describes the persistent model, the guarantees of
 > each operation, and the invariants. Enumerations point at the owning code
@@ -81,8 +83,17 @@ non-exhaustive:
 
 `PgRitualsRepo` (`arcana/repos/pg_rituals_repo.py`):
 
-- **create** — inserts a ritual; the client (if any) is resolved beforehand
-  via `core/client_resolve.py` and passed as `client_id`.
+- **create** — inserts a ritual; the client is resolved beforehand via
+  `core/client_resolve.py` and passed as `client_id`. Since #154 a ritual
+  **always** has a `client_id`: a named заказчик → `resolve_or_create`; no
+  name → the 🌟 Self client («Кай», auto-created by `resolve_self_client`).
+  When the Haiku parse yields no `client_name` but a `subject_name` (the
+  person the rite targets) and the text carries no self-marker
+  (`intent_resolve.is_self_marked`), `handle_add_ritual` asks
+  `[🌟 Себе] / [👤 Для клиента]` (`ask_ritual_self_or_client`) before saving —
+  «Для клиента» then asks the client name via a `awaiting_ritual_client_name`
+  pending; the buttons re-enter `handle_add_ritual` with `forced_self` /
+  `forced_client_name`.
 - **read** — `find_by_id`, `list_by_client(client_id)`, `list_all`.
   `find_by_id` additionally resolves `work_id` → the linked Work's title via a
   separate `SELECT` (`_work_title`; `works` is **not** joined into
@@ -122,6 +133,12 @@ non-exhaustive:
   reverse query `PgSessionsRepo.list_by_ritual(ritual_id)`. Auto-linking on
   reading creation uses `PgRitualsRepo.find_recent_for_client` (most recent
   non-archived ritual for that client within 120 days).
+- **Every performed ritual gets a Work (#154 stage 5).** On save
+  `core/work_relation.link_practice_record("ritual", …)` finds the client's
+  open `✨ Ритуал` Work, or **creates one**, links `rituals.work_id`, and
+  closes it Done. So a done-in-one-pass rite still leaves a Work in history
+  (client card, RAG). The bot line is «🔮 Работа заведена и закрыта» when it
+  created one, «✅ Связанная Работа закрыта» when it reused an open one.
 - **Outcome uses `outcome_status`** (distinct from sessions' `session_outcome`).
 - **Barter is Arcana-only**: `payment_source` code `barter` + `barter_what`.
 - **`payment_source` display label** comes from `core.payment.source_label`
@@ -173,7 +190,11 @@ Reads/writes are pure SQL.
   `find_recent_for_client` (#84)
 - `alembic/versions/b2c3d4e5f6a7_sessions_ritual_id.py` — `sessions.ritual_id` (#84, reverse link)
 - `arcana/repos/rituals_repo.py` — seam + `Ritual` object
-- `arcana/handlers/rituals.py` — parse (Haiku) + save/result
+- `arcana/handlers/rituals.py` — parse (Haiku, `subject_name`) + save/result,
+  `forced_self` / `forced_client_name`, self-client fallback (#154)
+- `arcana/handlers/intent_resolve.py` — `is_self_marked`,
+  `ask_ritual_self_or_client`, `handle_ritual_client_name` (#154 stage 4)
+- `core/work_relation.py` — `link_practice_record` (#154 stage 5)
 - `arcana/handlers/ritual_writeoff.py` — inventory decrement (operational link)
 - `core/client_resolve.py` — client resolution on create
 - `core/cash_register.py` — P&L reads ritual rows (see FINANCE.md)

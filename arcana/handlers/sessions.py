@@ -1459,32 +1459,37 @@ async def _handle_multi_session(
     # Клиент / личный — если уже резолвлен через dialog, используем как есть.
     client_id: Optional[str] = forced_client_id
     if not client_id and not forced_is_personal:
-        # Сначала пробуем по client_name (если задан) или session_name (для format A/B)
-        lookup_name = client_name or session_name
-        if lookup_name:
-            c = await _client_repo.find(lookup_name, user_id=user_id)
-            if c:
-                client_id = c.id
-                client_name = c.name or client_name
-            else:
-                # Не нашли — спрашиваем Кай через resolve-диалог.
-                from arcana.pending_tarot import save_pending
-                slug = _short_resolve_slug()
-                await save_pending(tg_id, {
-                    "type": "client_resolve_pending",
-                    "slug": slug,
-                    "data": data,
-                    "tz_offset": tz_offset,
-                    "user_id": user_id,
-                })
-                await message.answer(
-                    f"«{html.escape(lookup_name)}» — это:",
-                    parse_mode="HTML",
-                    reply_markup=_resolve_dialog_kb(slug),
-                )
-                return
+        # #154 стадия 4: диалог self/клиент — только при ПОЛНОЙ неоднозначности.
+        # Есть имя человека (client_name или subject_name — фигурант вопроса),
+        # оно не матчит существующего клиента, и в тексте нет self-маркера
+        # («себе»/«личный»/…). Тема-только session_name («Работа», «Финансы»)
+        # без имени и без self-маркера → это личный расклад, спрашивать нечего.
+        from arcana.handlers.intent_resolve import is_self_marked
+        person = client_name or (subject_name or None)
+        lookup_name = client_name or (subject_name or None) or session_name
+        c = await _client_repo.find(lookup_name, user_id=user_id) if lookup_name else None
+        if c:
+            client_id = c.id
+            client_name = c.name or client_name
+        elif person and not is_self_marked((message.text or "") + " " + session_name):
+            # Не нашли, но это про конкретного человека — спрашиваем Кай.
+            from arcana.pending_tarot import save_pending
+            slug = _short_resolve_slug()
+            await save_pending(tg_id, {
+                "type": "client_resolve_pending",
+                "slug": slug,
+                "data": data,
+                "tz_offset": tz_offset,
+                "user_id": user_id,
+            })
+            await message.answer(
+                f"«{html.escape(person)}» — это:",
+                parse_mode="HTML",
+                reply_markup=_resolve_dialog_kb(slug),
+            )
+            return
         else:
-            # session_name пустой → self-сессия по умолчанию.
+            # Тема без человека / есть self-маркер → self-сессия.
             from core.client_resolve import resolve_self_client
             client_id = await resolve_self_client(user_id=user_id)
 

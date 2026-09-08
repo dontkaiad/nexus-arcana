@@ -24,6 +24,18 @@ logger = logging.getLogger("arcana.intent_resolve")
 
 router = Router()
 
+# #154 стадия 4: явный маркер «это про меня» — тогда self/клиент не спрашиваем.
+_SELF_MARKER = _re.compile(
+    r"(\bсебе\b|на\s+себя|для\s+себя|\bсебя\b|\bмне\b|\bя\b|\bмой\b|\bмоя\b|"
+    r"\bмоё\b|\bмоего\b|\bсвой\b|\bсвою\b|личн(ый|ая|ое|ым|ого))",
+    _re.IGNORECASE,
+)
+
+
+def is_self_marked(text: str) -> bool:
+    """Текст явно говорит, что расклад/ритуал для самой Кай."""
+    return bool(_SELF_MARKER.search(text or ""))
+
 
 def _slug(text: str) -> str:
     return hashlib.sha1(
@@ -265,6 +277,85 @@ async def cb_clarify_new(call: CallbackQuery) -> None:
     call.message.from_user = call.from_user
     from arcana.handlers.base import route_message
     await route_message(call.message, user_id="")
+
+
+# ── #154 стадия 4: ритуал — self или клиент ─────────────────────────────────
+
+def _ritual_sc_kb(slug: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text="🌟 Себе", callback_data=f"rit_sc_self:{slug}"),
+        InlineKeyboardButton(text="👤 Для клиента", callback_data=f"rit_sc_client:{slug}"),
+    ]])
+
+
+async def ask_ritual_self_or_client(
+    message: Message, text: str, user_id: str, subject: str,
+) -> None:
+    from arcana.pending_tarot import save_pending
+    slug = _slug(text)
+    await save_pending(message.from_user.id, {
+        "type": "ritual_self_or_client_pending",
+        "slug": slug,
+        "text": text,
+        "user_id": user_id,
+        "subject": subject,
+    })
+    await message.answer(
+        f"🕯️ Ритуал на «{subject}» — это для тебя или для клиента?",
+        reply_markup=_ritual_sc_kb(slug),
+    )
+
+
+async def _ritual_sc_resume(call: CallbackQuery, slug: str, choice: str) -> None:
+    from arcana.pending_tarot import get_pending, delete_pending, save_pending
+    pending = await get_pending(call.from_user.id) or {}
+    if pending.get("slug") != slug or pending.get("type") != "ritual_self_or_client_pending":
+        return
+    text = pending.get("text") or ""
+    user_id = pending.get("user_id") or ""
+    await delete_pending(call.from_user.id)
+    try:
+        await call.message.edit_reply_markup(reply_markup=None)
+    except Exception:
+        pass
+    call.message.from_user = call.from_user
+    from arcana.handlers.rituals import handle_add_ritual
+    if choice == "self":
+        await handle_add_ritual(call.message, text, user_id, forced_self=True)
+    else:
+        # Просим имя клиента следующим сообщением.
+        await save_pending(call.from_user.id, {
+            "type": "awaiting_ritual_client_name",
+            "text": text,
+            "user_id": user_id,
+        })
+        await call.message.answer("👤 Напиши имя клиента:")
+
+
+async def handle_ritual_client_name(message: Message, text: str, user_id: str) -> bool:
+    """route_message: pending «жду имя клиента для ритуала» → досохранить."""
+    from arcana.pending_tarot import get_pending, delete_pending
+    pending = await get_pending(message.from_user.id) or {}
+    if pending.get("type") != "awaiting_ritual_client_name":
+        return False
+    orig = pending.get("text") or ""
+    uid = pending.get("user_id") or user_id
+    await delete_pending(message.from_user.id)
+    from arcana.handlers.rituals import handle_add_ritual
+    await handle_add_ritual(message, orig, uid, forced_client_name=text.strip())
+    return True
+
+
+@router.callback_query(F.data.startswith("rit_sc_self:"))
+async def cb_rit_sc_self(call: CallbackQuery) -> None:
+    await call.answer()
+    await _ritual_sc_resume(call, call.data.split(":", 1)[1], "self")
+
+
+@router.callback_query(F.data.startswith("rit_sc_client:"))
+async def cb_rit_sc_client(call: CallbackQuery) -> None:
+    await call.answer()
+    await _ritual_sc_resume(call, call.data.split(":", 1)[1], "client")
 
 
 @router.callback_query(F.data.startswith("intent_planned:"))

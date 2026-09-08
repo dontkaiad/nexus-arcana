@@ -98,7 +98,14 @@ Owned by the migrations (source of truth). Examples, non-exhaustive:
 - **Client attribution by FK.** `client_id` → `clients.id`. A session with an
   extracted `client_name` must resolve through `find_or_create_client`
   (CLIENTS.md); leaving a client-type session without a client relation is
-  the "orphan" anti-pattern (CLAUDE.md).
+  the "orphan" anti-pattern (CLAUDE.md). A reading with no `client_name`
+  falls back to the 🌟 Self client (`resolve_self_client`, #154). The
+  self/client dialog (`_resolve_dialog_kb`) fires only at **full ambiguity**
+  (#154 stage 4): there is a person — `client_name` or `subject_name` — that
+  doesn't match an existing client, **and** the text has no self-marker
+  (`intent_resolve.is_self_marked`). A topic-only `session_name` («Работа»,
+  «Финансы») with no person and no self-marker goes straight to the Self
+  client — no question.
 - **Finance is stored locally, not in the ledger.** `amount`/`paid` live on
   the session row; sessions do **not** write to `arcana_pnl`. The P&L
   aggregates session rows separately (see FINANCE.md, `core/cash_register.py`).
@@ -117,8 +124,12 @@ Owned by the migrations (source of truth). Examples, non-exhaustive:
   Before #7 it was written on create but never read back.
 - **`work_id` is the reverse of the plan.** A *planned* reading lives in
   `works` (category `🃏 Расклад`); a `sessions` row is always a *done*
-  reading. `core/work_relation.py` stamps `sessions.work_id` and closes the
-  Work on save (#151). `work_id` is **not** joined into `_select_sessions`
+  reading. `core/work_relation.link_practice_record` stamps `sessions.work_id`
+  and closes the Work on save — finding the client's open `🃏 Расклад` Work
+  or **creating one** if none is open (#151 + #154 stage 5). The single-
+  triplet path links its one row; `_handle_multi_session` links the whole
+  session (all `saved_page_ids`) to one Work. `work_id` is **not** joined
+  into `_select_sessions`
   (the `works → clients` FK would leak into sessions-only test schemas); the
   detail paths (`list_by_slug` / `list_by_subject` / `find_by_id`) fill
   `TripletEntry.work_title` via a separate `SELECT` (`_attach_work_titles`).
