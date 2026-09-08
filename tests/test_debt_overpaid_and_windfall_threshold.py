@@ -15,6 +15,13 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from nexus.handlers import finance
+import core.pending_kv as _kv
+
+
+@pytest.fixture(autouse=True)
+def _kv_tmp(tmp_path):
+    with patch.object(_kv, "_DB_PATH", str(tmp_path / "pk.db")):
+        yield
 
 
 def _msg(uid: int = 42):
@@ -83,8 +90,8 @@ async def test_debt_command_overpaid_shows_buttons():
     calls = [c.args[0] for c in msg.answer.call_args_list]
     assert any("закрыт" in t for t in calls)
     assert any("Переплата 2,000₽" in t for t in calls)
-    assert finance._pending_overpaid.get(42) == 2000.0
-    finance._pending_overpaid.pop(42, None)
+    assert _kv.get(42, finance._PK_OVERPAID) == {'overpaid': 2000.0}
+    _kv.delete(42, finance._PK_OVERPAID)
 
 
 @pytest.mark.asyncio
@@ -101,7 +108,7 @@ async def test_they_owe_overpaid_shows_buttons():
     calls = [c.args[0] for c in msg.answer.call_args_list]
     assert any("полностью" in t for t in calls)
     assert any("Переплата 2,000₽" in t for t in calls)
-    finance._pending_overpaid.pop(42, None)
+    _kv.delete(42, finance._PK_OVERPAID)
 
 
 @pytest.mark.asyncio
@@ -121,7 +128,7 @@ async def test_debt_command_no_overpaid_no_extra_message():
 
 @pytest.mark.asyncio
 async def test_overpaid_cushion_button_adds_to_balance():
-    finance._pending_overpaid[42] = 2000.0
+    _kv.save(42, finance._PK_OVERPAID, {'overpaid': 2000.0}, ttl=900)
     call = _call(42, "overpaid_cushion")
     with patch("core.repos.pg_cushion_repo._repo.add_to_balance",
                AsyncMock(return_value=9000.0)) as m_cushion:
@@ -130,19 +137,19 @@ async def test_overpaid_cushion_button_adds_to_balance():
     m_cushion.assert_awaited_once()
     assert m_cushion.call_args.args[0] == "u-1"
     assert m_cushion.call_args.args[1] == 2000.0
-    assert 42 not in finance._pending_overpaid
+    assert _kv.get(42, finance._PK_OVERPAID) is None
     assert "9,000" in call.message.edit_text.call_args.args[0]
 
 
 @pytest.mark.asyncio
 async def test_overpaid_keep_button_does_nothing_extra():
-    finance._pending_overpaid[42] = 2000.0
+    _kv.save(42, finance._PK_OVERPAID, {'overpaid': 2000.0}, ttl=900)
     call = _call(42, "overpaid_keep")
     with patch("core.repos.pg_cushion_repo._repo.add_to_balance", AsyncMock()) as m_cushion:
         await finance.on_overpaid_keep(call)
 
     m_cushion.assert_not_called()
-    assert 42 not in finance._pending_overpaid
+    assert _kv.get(42, finance._PK_OVERPAID) is None
 
 
 # ── Часть 2: порог 50 000₽ ───────────────────────────────────────────────────

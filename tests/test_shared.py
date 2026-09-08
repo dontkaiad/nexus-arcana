@@ -105,18 +105,17 @@ class TestSQLitePending:
         """Проверить что ЗАДАЧИ не хранятся в in-memory dict (допустимы UI-state dict)."""
         import os
 
-        # Эти in-memory dict допустимы — краткоживущий UI state, не персистентные данные
+        # Эти in-memory dict допустимы — краткоживущий UI state, не персистентные данные.
+        # #206/#208: live pending-диалоги переведены на core.pending_kv (SQLite);
+        # оставшиеся здесь — либо dead-код (finance windfall/_pending_finance —
+        # см. #208), либо не критичны к рестарту (timestamps, авто-предложение).
         ALLOWED_PATTERNS = {
-            "_pending_finance",   # UI: ожидание уточнения тип расхода/дохода
-            "_pending_limit",     # UI: ожидание ввода лимита
-            "_pending_auto",      # UI: авто-предложение запомнить
-            "_clarify",           # UI: ожидание уточнения
-            "_pending_arcana",    # UI: перенаправление в Аркану
-            "_pending_unknown",   # UI: ожидание выбора категории
+            "_pending_finance",   # dead в prod (только handle_finance_text/тесты), #208
+            "_pending_auto",      # UI: авто-предложение запомнить (потеря = нет предложения)
+            "_clarify",           # UI: буфер классификатора
             "_last_finance_ts",   # rate-limit timestamp
             "_photo_pending",     # UI: ожидание фото
-            "_pending_overpaid",  # UI: ожидание выбора кнопки после переплаты по долгу
-            "_pending_windfall_manual",  # UI: ожидание выбора кнопки для крупного дохода
+            "_pending_windfall_manual",  # dead в prod (windfall не подключён), #208
         }
 
         suspicious = []

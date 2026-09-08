@@ -58,7 +58,6 @@ from core.location import get_user_tz as _get_user_tz
 def _user_tz(tz_offset: int) -> timezone:
     return timezone(timedelta(hours=tz_offset))
 _clarify: dict = {}
-_pending_finance: dict = {}  # user_id → (kind, amount, category, source, title)
 _last_finance_ts: dict = {}  # user_id → timestamp последней записанной финансовой записи
 
 import re as _re_nexus
@@ -66,12 +65,13 @@ _TYPE_CORRECTION_RE = _re_nexus.compile(
     r"^\s*(нет[,\s]+)?(это|был[аи]?|на самом деле)?\s*(это\s+)?(доход|расход)\s*$",
     _re_nexus.IGNORECASE,
 )
-# arcana/unknown clarify-pending — на SQLite (core.pending_kv), а не в память:
-# это состояние «висит inline-кнопка, жду выбор», и частый auto-reload на
-# деплое иначе роняет диалог (#206-класс).
+# clarify-pending — на SQLite (core.pending_kv), а не в память: это состояние
+# «висит inline-кнопка, жду выбор», частый auto-reload на деплое иначе роняет
+# диалог (#206/#208).
 from core import pending_kv as _pkv
 _PK_ARCANA = "nexus_arcana_clarify"    # {"text": str}
 _PK_UNKNOWN = "nexus_unknown_clarify"  # {"text": str, "user_id": str}
+_PK_FIN_TYPE = "nexus_fin_type"        # {"data": {...}, "text": str, "user_id": str}
 
 
 @dp.message(Command("start"))
@@ -557,6 +557,12 @@ async def handle_text(msg: Message, user_id: str = "") -> None:
         await react(msg, "⚡")
         return
 
+    # Finance pending — сумма кастомного лимита после кнопки «Другая сумма» (#208)
+    from nexus.handlers.finance import handle_finance_pending
+    if await handle_finance_pending(msg, user_id):
+        await react(msg, "👌")
+        return
+
     # Lists pending — чеклист пункты, срок годности
     from nexus.handlers.lists import handle_list_pending
     if await handle_list_pending(msg, user_id):
@@ -860,7 +866,9 @@ async def process_text(msg: Message, text: str, user_id: str = "") -> None:
                         "source": source,
                         "title": title,
                     }
-                    _pending_finance[msg.from_user.id] = (finance_data, text, user_id)
+                    _pkv.save(msg.from_user.id, _PK_FIN_TYPE,
+                              {"data": finance_data, "text": text, "user_id": user_id or ""},
+                              ttl=600)
                     has_clarify = True
             elif line and line.startswith("arcana_clarify:"):
                 parts = line.split(":", 1)
@@ -1427,7 +1435,8 @@ async def on_finance_clarify(query: CallbackQuery, user_id: str = "") -> None:
     from core.repos.finance_repo import _repo as _fin_repo
 
     uid = query.from_user.id
-    if uid not in _pending_finance:
+    _p = _pkv.pop(uid, _PK_FIN_TYPE, ttl=600)
+    if not _p:
         await query.answer("⏱ Время истекло, попробуй снова")
         return
 
@@ -1438,13 +1447,9 @@ async def on_finance_clarify(query: CallbackQuery, user_id: str = "") -> None:
         return
 
     fin_type = parts[2]  # expense, income, barter
-    pending_entry = _pending_finance.pop(uid)
-    # Support both old (2-tuple) and new (3-tuple with user_id) formats
-    if len(pending_entry) == 3:
-        finance_data, original_text, stored_uid = pending_entry
-    else:
-        finance_data, original_text = pending_entry
-        stored_uid = user_id
+    finance_data = _p["data"]
+    original_text = _p.get("text", "")
+    stored_uid = _p.get("user_id") or user_id
 
     if fin_type == "expense":
         type_label = "💸 Расход"

@@ -22,6 +22,7 @@ from core.props import _title, _number, _select, _date, _text
 from core.repos.finance_repo import _repo
 from core.config import FINANCE_CATEGORIES as CATEGORIES
 from core.location import get_user_tz as _get_user_tz  # личный tz юзера (дефолт 3)
+from core import pending_kv as _pkv  # persist-pending поверх SQLite (переживает рестарт, #208)
 
 # Парсинг бюджета вынесен в core.budget — здесь re-export под старыми именами
 # для backward compat с существующими call-sites в модуле.
@@ -1461,104 +1462,6 @@ async def handle_finance_text(message: Message, text: str, bot_label: str = "☀
             logger.error("windfall income distribution error: %s", e, exc_info=True)
 
 
-@router.message(F.text)
-async def handle_finance_clarification(message: Message, user_id: str = "") -> None:
-    """Текстовые ответы на уточнение: вместо кнопок или уточнение данных."""
-    from core.config import config
-
-    uid = message.from_user.id
-    _tz = await _get_user_tz(uid)
-
-    # Перехват "это доход" / "это расход" — исправляем тип последней записи
-    m = _TYPE_CORRECTION_RE.match((message.text or "").strip())
-    if m:
-        type_word = m.group(4).lower()
-        new_type = "💰 Доход" if type_word == "доход" else "💸 Расход"
-        ok = await _update_last_finance(uid, "type_", new_type)
-        if ok:
-            await message.answer(f"✏️ Тип исправлен → <b>{new_type}</b>", parse_mode="HTML")
-        else:
-            await message.answer("⚠️ Нет последней записи для обновления.")
-        return
-
-    # Обработка ввода кастомного лимита
-    cat_link = _pending_limit.get(uid)
-    if cat_link:
-        text_raw = (message.text or "").strip().replace(" ", "")
-        if text_raw.isdigit():
-            _pending_limit.pop(uid, None)
-            amount = int(text_raw)
-            await _save_limit_to_memory(cat_link, amount, user_id)
-            await message.answer(f"✅ Лимит на {cat_link}: <b>{amount:,}₽/мес</b>")
-            return
-        elif text_raw.lower() in ("отмена", "нет", "cancel"):
-            _pending_limit.pop(uid, None)
-            await message.answer("❌ Отмена.")
-            return
-
-    pending_entry = _pending_finance.get(uid)
-    if not pending_entry:
-        return
-    # Support both formats: data dict (old) or (data, user_id) tuple (new)
-    if isinstance(pending_entry, tuple):
-        pending, stored_uid = pending_entry
-    else:
-        pending = pending_entry
-        stored_uid = user_id
-
-    text_lower = (message.text or "").strip().lower()
-
-    if text_lower in ("отмена", "нет", "cancel", "❌"):
-        _pending_finance.pop(uid, None)
-        await message.answer("❌ Отменено.")
-        return
-
-    if text_lower in ("записать", "да", "ок", "ok", "✅", "записать как есть"):
-        _pending_finance.pop(uid, None)
-        page_id = await _save_finance(pending, config.nexus.db_finance, user_id=stored_uid, uid=uid)
-        if page_id:
-            _last_page_id[uid] = page_id
-            await react(message, "👌" if "Расход" in pending.get("type_", "") else "🏆")
-            await message.answer(_format_record(pending))
-            if "Расход" in pending.get("type_", ""):
-                try:
-                    await _check_budget_limit(pending.get("category", ""), message, stored_uid, tz_offset=_tz)
-                except Exception as e:
-                    logger.debug("budget check skip: %s", e)
-        else:
-            await message.answer("⚠️ Ошибка записи в Notion.")
-        return
-
-    # Уточнение через Claude
-    UPDATE_SYSTEM = (
-        f"У тебя финансовая запись и уточнение от пользователя. "
-        f"Обнови нужные поля. Ответь ТОЛЬКО JSON без markdown:\n"
-        f'{{"description":"...","category":"одна из: {", ".join(CATEGORIES)}",'
-        f'"type_":"💰 Доход или 💸 Расход","source":"одна из: {", ".join(SOURCES)}"}}\n'
-        f"Текущая запись: {json.dumps(pending, ensure_ascii=False)}"
-    )
-    raw = await ask_claude(message.text.strip(), system=UPDATE_SYSTEM, max_tokens=200, temperature=0)
-    try:
-        raw = raw.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
-        pending.update(json.loads(raw))
-    except Exception:
-        pass
-
-    _pending_finance.pop(uid, None)
-    page_id = await _save_finance(pending, config.nexus.db_finance, user_id=stored_uid, uid=uid)
-    if not page_id:
-        await message.answer("⚠️ Ошибка записи в Notion.")
-        return
-
-    _last_page_id[uid] = page_id
-    await message.answer(_format_record(pending))
-    if "Расход" in pending.get("type_", ""):
-        try:
-            await _check_budget_limit(pending.get("category", ""), message, stored_uid, tz_offset=_tz)
-        except Exception as e:
-            logger.debug("budget check skip: %s", e)
-
-
 @router.callback_query(F.data == "fin_save_asis")
 async def fin_save_asis(call: CallbackQuery) -> None:
     from core.config import config
@@ -1585,8 +1488,37 @@ async def fin_save_asis(call: CallbackQuery) -> None:
     await call.answer()
 
 
-# ── Pending custom limit: uid → cat_link (ждём число от пользователя) ─────────
-_pending_limit: Dict[int, str] = {}
+# ── Pending «Другая сумма» для лимита: {"cat_link": str} на SQLite ────────────
+# #208: раньше жило в памяти + единственный потребитель (handle_finance_
+# clarification, @router.message(F.text)) был мёртв из-за порядка роутеров —
+# ввод суммы после кнопки «Другая сумма» никуда не шёл. Теперь kv-стор +
+# явный gate `handle_finance_pending` в nexus_bot.handle_text.
+_PK_LIMIT = "nexus_fin_limit_custom"
+
+
+async def handle_finance_pending(message: Message, user_id: str = "") -> bool:
+    """Gate для nexus_bot.handle_text: ждём ли мы сумму кастомного лимита?
+    True — сообщение обработано, дальше не роутить."""
+    uid = message.from_user.id
+    _p = _pkv.get(uid, _PK_LIMIT, ttl=600)
+    if not _p:
+        return False
+    cat_link = _p.get("cat_link", "")
+    raw = (message.text or "").strip().replace(" ", "").replace("₽", "")
+    low = raw.lower()
+    if low in ("отмена", "нет", "cancel", "стоп"):
+        _pkv.delete(uid, _PK_LIMIT)
+        await message.answer("❌ Отмена.")
+        return True
+    digits = raw.rstrip("кk")
+    if digits.isdigit():
+        amount = int(digits) * (1000 if raw[-1:].lower() in ("к", "k") else 1)
+        _pkv.delete(uid, _PK_LIMIT)
+        await _save_limit_to_memory(cat_link, amount, user_id)
+        await message.answer(f"✅ Лимит на {cat_link}: <b>{amount:,}₽/мес</b>", parse_mode="HTML")
+        return True
+    await message.answer("🤔 Нужно число (в рублях). Или «отмена».")
+    return True
 
 
 @router.callback_query(F.data == "fin_cancel")
@@ -1623,8 +1555,11 @@ async def on_set_limit(call: CallbackQuery, user_id: str = "") -> None:
     value = parts[2]
 
     if value == "custom":
-        _pending_limit[call.from_user.id] = cat_link
-        await call.message.edit_text(f"💬 Напиши сумму лимита на <b>{cat_link}</b> (число в рублях):")
+        _pkv.save(call.from_user.id, _PK_LIMIT, {"cat_link": cat_link}, ttl=600)
+        await call.message.edit_text(
+            f"💬 Напиши сумму лимита на <b>{cat_link}</b> (число в рублях):",
+            parse_mode="HTML",
+        )
         await call.answer()
         return
 
@@ -2252,7 +2187,9 @@ def _recalc_keyboard() -> InlineKeyboardMarkup:
 
 # ── Переплата при закрытии долга (reduce_amount overpaid) ────────────────────
 # uid → overpaid₽, между сообщением-предупреждением и нажатием кнопки.
-_pending_overpaid: Dict[int, float] = {}
+# #208: pending «долг закрыт с переплатой, что с ней делать?» — на SQLite,
+# не в память (частый auto-reload на деплое иначе роняет диалог).
+_PK_OVERPAID = "nexus_debt_overpaid"   # {"overpaid": float}
 
 
 def _overpaid_keyboard() -> InlineKeyboardMarkup:
@@ -2264,7 +2201,7 @@ def _overpaid_keyboard() -> InlineKeyboardMarkup:
 
 async def _notify_overpaid(message: Message, overpaid: float) -> None:
     """Долг закрыт с излишком — не молчим, спрашиваем что с ним делать."""
-    _pending_overpaid[message.from_user.id] = overpaid
+    _pkv.save(message.from_user.id, _PK_OVERPAID, {"overpaid": float(overpaid)}, ttl=900)
     await message.answer(
         "Переплата {:,.0f}₽ — долг закрыт, остаток не потерян, что с ним делать?".format(overpaid),
         reply_markup=_overpaid_keyboard(), parse_mode="HTML",
@@ -2274,7 +2211,8 @@ async def _notify_overpaid(message: Message, overpaid: float) -> None:
 @router.callback_query(F.data == "overpaid_cushion")
 async def on_overpaid_cushion(call: CallbackQuery, user_id: str = "") -> None:
     uid = call.from_user.id
-    overpaid = _pending_overpaid.pop(uid, None)
+    _p = _pkv.pop(uid, _PK_OVERPAID, ttl=900)
+    overpaid = _p["overpaid"] if _p else None
     if not overpaid:
         await call.answer("Нет данных.")
         return
@@ -2291,7 +2229,7 @@ async def on_overpaid_cushion(call: CallbackQuery, user_id: str = "") -> None:
 
 @router.callback_query(F.data == "overpaid_keep")
 async def on_overpaid_keep(call: CallbackQuery) -> None:
-    _pending_overpaid.pop(call.from_user.id, None)
+    _pkv.delete(call.from_user.id, _PK_OVERPAID)
     await call.message.edit_text("✅ Ок, оставляю как есть.", parse_mode="HTML")
     await call.answer()
 

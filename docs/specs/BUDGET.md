@@ -1,6 +1,6 @@
 # BUDGET — data-model contract (бюджет / day limit)
 
-Code conforms to: 5a57b8c (+ this change: _calc_free_remaining formula). (+ #144: user_notion_id → user_id; + #6: debt free-text path via `parse_and_store`; + #136: debt-name morphology match; + #44: goal create/edit/close from the Mini App; + #123: debt 4-direction form + close from the Mini App, `they_owe` list; + #205: goals move from `цель_*` Memory facts to the `goals` table, `saved` tracking + `goal/contribute`.) This spec describes the budget data model as of
+Code conforms to: 5a57b8c (+ this change: _calc_free_remaining formula). (+ #144: user_notion_id → user_id; + #6: debt free-text path via `parse_and_store`; + #136: debt-name morphology match; + #44: goal create/edit/close from the Mini App; + #123: debt 4-direction form + close from the Mini App, `they_owe` list; + #205: goals move from `цель_*` Memory facts to the `goals` table, `saved` tracking + `goal/contribute`; + #208: `handle_finance_clarification` deleted, `_pending_finance` clarify + debt-overpaid + custom-limit input moved to `core.pending_kv`, windfall module documented as dead.) This spec describes the budget data model as of
 that commit; update it in the same PR that changes the model.
 
 > Contract, not snapshot. Describes the derived model and the guarantees of
@@ -125,6 +125,28 @@ that commit; update it in the same PR that changes the model.
   «Принять» новые лимиты/долги/цели снова записываются как факты.
 - Пока не нажала «Принять» — план существует только в текущей сессии
   (не в Памяти), можно свободно «✏️ Изменить данные» или пересчитать заново.
+
+### Незапланированный доход — что реально происходит
+
+Логируешь доход, который не Зарплата / не Практика / не Жильё
+(«подарок 5000», «вернули за телефон 8000») →
+
+1. Транзакция уходит в 💰 Финансы как обычный `💰 Доход` (это делает
+   `core/classifier.py:process_item`, не отдельный windfall-код).
+2. Бот спрашивает **«📊 Пересчитать бюджет с учётом дохода?»** →
+   `[📊 Да] / [❌ Нет]`.
+3. «Да» → `on_budget_recalc_full` запускает **полный пересчёт /budget через
+   Sonnet** — то же, что `/budget` → «🔄 Пересчитать»: новые лимиты по
+   категориям, взнос в подушку, платёж по горящему долгу. Дальше как обычно:
+   посмотреть вариант (если тяжёлый месяц) → «✅ Принять».
+4. «Нет» → доход просто остался в ленте, план не тронут.
+
+**Нет** никакого «автоматически разложить подарок: 3000 в импульсивные,
+остаток в долг, хвост в подушку». Модуль на это в коде **есть**
+(`_distribute_windfall_income` / `_compute_windfall_plan` / порог 50 000₽ +
+4 кнопки ручного выбора / `_IMPULSE_WINDFALL_CAP`), но подключён он только к
+`handle_finance_text`, а этот путь в проде мёртв (вызывается лишь тестами) —
+см. issue #208.
 
 ### Полный цикл /budget
 
@@ -283,6 +305,23 @@ that commit; update it in the same PR that changes the model.
   finance-транзакция типа «Доход», не персистентная). Если решишь это
   переименовать так же, как «обязательные → постоянные» — заводи отдельную
   задачу, здесь только зафиксировано наблюдение.
+- **Windfall-модуль в `finance.py` мёртв в проде** (#208):
+  `_distribute_windfall_income`, `_compute_windfall_plan`,
+  `_apply_windfall_plan`, `_send_windfall_manual_prompt`, порог
+  `WINDFALL_MANUAL_THRESHOLD = 50000`, `_IMPULSE_WINDFALL_CAP = 3000`,
+  4 кнопки (`windfall_all_cushion` / `windfall_close_debts` /
+  `windfall_split` / `windfall_asis`) — вызываются только из
+  `handle_finance_text`, а его в проде никто не дёргает (лишь тесты).
+  Живой путь незапланированного дохода — прост: транзакция + предложение
+  «📊 Пересчитать бюджет?» (см. «Незапланированный доход — что реально
+  происходит» выше). Удалить или подключить — решение Кай, поэтому пока
+  зафиксировано.
+- Так же мёртвы `handle_finance_clarification` (был `@router.message(F.text)`
+  — перебивался `handle_text` на уровне dp) — **удалён** в #208 — и
+  `finance._pending_finance` + callbacks `fin_expense` / `fin_income` /
+  `fin_barter` / `fin_save_asis` / `fin_cancel` (читают этот мёртвый dict).
+  Живой clarify доход/расход — `nexus_bot.on_finance_clarify` (`fin_type_*`),
+  pending на `core.pending_kv`.
 - ~~Утечка полного списка категорий (19 шт., с 🔮 Практика / 🕯️ Расходники
   Арканы, 💰 Зарплата, 💼 Фриланс) в бюджетные промпты; `_BUDGET_VARIABLE_CATS`
   — мёртвая константа~~ — **исправлено**. Оба промпта теперь получают
@@ -694,8 +733,15 @@ expense items → `_ONE_TIME_PARSE_SYSTEM`).
   `_BUDGET_VARIABLE_CATS` (the 8 limit categories fed to both prompts),
   `_apply_computed_limits`/`_limits_fields` (deterministic limit math),
   `BUDGET_TIGHT_WARN` (alias of `core.budget.BUDGET_TIGHT_THRESHOLD`),
-  `_bdb`/`_BUDGET_DB` (session store), `_send_payday_review`
-- `nexus/nexus_bot.py` — `/budget` wiring, startup `proactive_budget_review`
+  `_bdb`/`_BUDGET_DB` (session store), `_send_payday_review`,
+  `handle_finance_pending` (custom-limit amount gate — `core.pending_kv`,
+  #208), `_notify_overpaid` / `on_overpaid_*` (debt-overpaid dialog, kv),
+  `_distribute_windfall_income` & friends (dead in prod — #208)
+- `nexus/nexus_bot.py` — `/budget` wiring, startup `proactive_budget_review`,
+  `on_finance_clarify` (`fin_type_*`, live доход/расход clarify — `core.pending_kv`)
+- `core/pending_kv.py` — SQLite-backed pending store for the clarify dialogs (#208)
+- `core/classifier.py:process_item` — the LIVE unplanned-income path
+  (transaction + «📊 Пересчитать бюджет?»)
 - `miniapp/backend/routes/finance.py` — limits/goals views (`_serialize_goal`), day limit
 - `miniapp/backend/routes/writes.py` — `POST /api/finance/goal` (+`/close`, `/contribute` — #44/#205); `POST /api/finance/debt` (4 directions), `/api/finance/debt/close` (#123); `/api/finance/cushion/target`, `/api/finance/cushion/deposit`
 - `miniapp/backend/routes/finance.py` — `_view_goals` (`debts` / `debts_incoming` / `goals` / closed), `_serialize_debt` / `_serialize_goal`
