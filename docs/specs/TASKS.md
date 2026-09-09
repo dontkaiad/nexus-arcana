@@ -152,9 +152,18 @@ No amount in `note` → nothing written, completion is never blocked.
   pass 2 delivers it late as «⏰ Пропущено», `reminder` is set to `NULL`
   afterwards — otherwise `active_with_past_reminder` (filters only
   `Done`/`Archived`) would return the task again on the next restart and
-  re-send the missed ping. Recurring tasks are untouched here: their
-  `reminder` is advanced to the next cycle by pass 2 / the callback
+  re-send the missed ping. Recurring tasks are untouched by `clear_reminder`:
+  their `reminder` is advanced to the next cycle by pass 2 / the callback
   handlers instead.
+- **Pass 2 advances a recurring reminder in PG *before* sending the late
+  «⏰ Пропущено» notification** (#206 follow-up). If the process is
+  auto-reloaded (frequent deploys → auto-pull + watchfiles) between the
+  `send_message` and the `set_props` that moves the reminder forward, the
+  next pass 2 would see the reminder still in the past and send «⏰ Пропущено»
+  again — the same duplication `clear_reminder` fixed for one-off reminders.
+  Ordering the PG advance first makes it idempotent across restarts; the
+  cost is losing a single missed-notification if `send_message` then fails
+  (the next cycle still pings).
 - **Streaks are not in `tasks`.** They live in two SQLite tables in
   `data/nexus_streaks.db` (per-task + global daily); verified no other streak
   writer in the codebase as of e938907 (only `core/task_streaks.py` writes

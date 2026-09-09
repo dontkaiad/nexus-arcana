@@ -379,7 +379,16 @@ async def restore_reminders_on_startup() -> None:
                         except Exception as e:
                             logger.error("restore pass2: failed to send missed '%s': %s", title, e)
                     else:
-                        # ── Повторяющаяся задача — уведомить + сдвинуть ──
+                        # ── Повторяющаяся задача — СНАЧАЛА сдвинуть, потом увед ──
+                        # Порядок важен: если auto-reload (частые деплои →
+                        # auto-pull + watchfiles) перезапустит процесс между
+                        # send_message и set_props, следующий restore-pass2
+                        # снова увидит reminder в прошлом и пришлёт «⏰ Пропущено»
+                        # ещё раз — тот же спам, что чинили в #206 для одноразовых.
+                        # Двигаем reminder в PG до отправки: даже при краше сразу
+                        # после — следующий рестарт увидит future-reminder (pass1),
+                        # дубля не будет. Максимум потеряем одно «Пропущено» при
+                        # сбое send — приемлемо, следующий цикл всё равно пингнёт.
                         try:
                             _rs = _ensure_datetime(_to_local_wall(reminder_start, tz_offset))
                             rem_dt = datetime.strptime(_rs, "%Y-%m-%dT%H:%M").replace(
@@ -389,28 +398,9 @@ async def restore_reminders_on_startup() -> None:
                         except ValueError:
                             missed_time = reminder_start[:16]
 
-                        kb = InlineKeyboardMarkup(inline_keyboard=[
-                            [
-                                InlineKeyboardButton(text="✅ Сделано!", callback_data=f"task_complete_{task_id}"),
-                                cancel_button("❌ Не сделал", f"task_failed_{task_id}"),
-                            ],
-                            [InlineKeyboardButton(text="⏳ В процессе", callback_data=f"task_wip_{task_id}")],
-                        ])
                         # Read interval for display
                         _, ivl_days_pre = _parse_repeat_time(task.repeat_time)
                         repeat_display = _interval_label(ivl_days_pre) if ivl_days_pre > 1 else repeat
-
-                        try:
-                            _m = await _bot.send_message(
-                                tg_id,
-                                f"⏰ <b>Пропущено ({missed_time}):</b> {title}\n"
-                                f"🔄 Повтор: {repeat_display} — переношу.\n\nСделано?",
-                                parse_mode="HTML",
-                                reply_markup=kb,
-                            )
-                            await save_task_reminder(task_id, _m.chat.id, _m.message_id, title)
-                        except Exception as e:
-                            logger.error("restore pass2: failed to send missed repeat '%s': %s", title, e)
 
                         # Сдвигаем до ближайшей будущей даты
                         canon_time, ivl_days = _parse_repeat_time(task.repeat_time)
@@ -448,6 +438,27 @@ async def restore_reminders_on_startup() -> None:
 
                         await _repo.set_props(task_id, update_props)
                         await _schedule_reminder(tg_id, title, new_reminder, task_id, tz_offset)
+
+                        # reminder уже сдвинут в PG — теперь можно слать «Пропущено»
+                        kb = InlineKeyboardMarkup(inline_keyboard=[
+                            [
+                                InlineKeyboardButton(text="✅ Сделано!", callback_data=f"task_complete_{task_id}"),
+                                cancel_button("❌ Не сделал", f"task_failed_{task_id}"),
+                            ],
+                            [InlineKeyboardButton(text="⏳ В процессе", callback_data=f"task_wip_{task_id}")],
+                        ])
+                        try:
+                            _m = await _bot.send_message(
+                                tg_id,
+                                f"⏰ <b>Пропущено ({missed_time}):</b> {title}\n"
+                                f"🔄 Повтор: {repeat_display} — переношу.\n\nСделано?",
+                                parse_mode="HTML",
+                                reply_markup=kb,
+                            )
+                            await save_task_reminder(task_id, _m.chat.id, _m.message_id, title)
+                        except Exception as e:
+                            logger.error("restore pass2: failed to send missed repeat '%s': %s", title, e)
+
                         logger.info("restore pass2: rescheduled '%s' repeat=%s ivl=%d next=%s deadline=%s",
                                      title, repeat, ivl_days, new_reminder, deadline_start or "none")
                         restored += 1
