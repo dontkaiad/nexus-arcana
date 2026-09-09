@@ -158,8 +158,21 @@ mode» — ломаться и утекать особо нечему.
 - **`heylark-infra`** — платформа: Caddy vhost `booking.heylark.dev`, фронт
   `booking.heylark.dev` (3 лица), `grants` (`app='booking'`), `login`.
   Тонкий указатель-ADR со ссылкой сюда.
-- **`@heylark_booking_bot`** — тонкий, потребляет Booking API + `grants`.
+- **`@heylark_booking_bot`** (Zarya) — тонкий, потребляет Booking API + `grants`.
   Свой мини-репо или в `heylark-infra`.
+
+**Как бот зовёт API:** по внутренней Docker-сети `nexus-arcana_default`
+(`external: true`, как `heylark-login`) — `http://nexus-bot:8000/api/booking/*`,
+без публичного хопа. Auth бот↔API — service-to-service: общий секрет
+`BOOKING_SERVICE_TOKEN` (в обоих `.env`, `openssl rand -hex 32`). Бот сам
+резолвит роль через `grants` (он в той же `auth` БД) и передаёт
+`tg_id`/`role`/`context`; API доверяет service-токену. Веб-юзеры — сессией
+(`hl_session`), бот — токеном и «ручается» за своих.
+
+**Секреты (сводка):** `BOOKING_BOT_TOKEN` (BotFather, в `.env` бота) ·
+`BOOKING_SERVICE_TOKEN` (общий, бот↔API) · `AUTH_DATABASE_URL` (строка
+подключения к `grants`) · `.ics`-фид токен — **не секрет**, HMAC от
+существующего `SESSION_SECRET`.
 
 ## Альтернативы отвергнуты
 
@@ -205,12 +218,17 @@ mode» — ломаться и утекать особо нечему.
 
 ## Verify against code
 
-Дизайн-фаза, кода ещё нет. По мере реализации (B1–B8):
-- `core/booking/` — движок free/busy, агрегатор внутренних событий
-- `alembic/versions/*booking*` — `booking_*` таблицы, `works.scheduled_at`
-- `miniapp/backend/routes/calendar*.py` — публичные/friend/admin роуты, `.ics`-фид
-- `core/auth_grants.py` — `calendar_role(tg_id)` (admin/friend/guest), `grants` (сделано)
-- `miniapp/backend/routes/calendar*.py` `booking_principal` — seam роли для веба
-- `heylark_booking_bot/` (новый бот-процесс) — гейт по `grants`, ЛС-пульт + группа-консьерж
-- `miniapp/frontend/calendar/` — отдельный Vite-entry
+- `alembic/versions/d4e5f6a7b8c9_booking_tables.py` — `booking_*` + `works.scheduled_at` ✅
+- `core/booking/busy.py` — агрегатор занятости (задачи-дедлайны 1ч, works,
+  брони, блоки) ✅
+- `core/booking/slots.py` — окна доступности → свободные слоты ✅
+- `core/booking/ics.py` + `miniapp/backend/routes/booking.py` — `.ics`-фид
+  (`GET /feed/<token>.ics`, HMAC от `SESSION_SECRET`) + `GET /api/booking/feed-url` ✅
+- `core/auth_grants.py` — `booking_role(tg_id)` (admin/friend/guest), `grants`;
+  `/grant` в `nexus_bot.py` ✅
+- **⬜** `miniapp/backend/routes/booking.py` — `/api/booking/slots` `/public`
+  `/book`, `booking_principal` seam, service-token для бота
+- **⬜** `heylark_booking_bot/` (Zarya, новый процесс) — гейт по `grants`, ЛС-пульт
+  + группа-консьерж
+- **⬜** `booking.heylark.dev` фронт (3 лица) + Caddy vhost — heylark-infra
 - эпик #23 — полный дизайн, фазы, разведка planerka/Яндекс

@@ -70,12 +70,15 @@ app.add_middleware(
 # it, so serving it unauthenticated leaks nothing.
 app.include_router(login_routes.router)  # /login, /logout — no /api prefix
 
+from miniapp.backend.routes import booking as booking_routes  # noqa: E402
+app.include_router(booking_routes.feed_router)  # /feed/<token>.ics — no /api prefix (#23)
+
 for _r in (
     today, tasks, finance, lists, memory, cal, categories, streaks, weather,
     arcana_today, arcana_sessions, arcana_clients,
     arcana_rituals, arcana_grimoire,
     arcana_inventory, arcana_finance, arcana_barter, arcana_debts,
-    writes,
+    writes, booking_routes,
 ):
     app.include_router(_r.router, prefix="/api")
 
