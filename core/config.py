@@ -133,6 +133,9 @@ class AppConfig:
     session_secret: str = ""
     cookie_domain: str = ".heylark.dev"
     login_base_url: str = "https://login.heylark.dev"
+    # ── Shared heylark auth DB (grants/people) — separate Postgres. Unset →
+    # every non-owner resolves to guest (see core/auth_grants.py, #23). ──
+    auth_database_url: str = ""
 
 
 def load_config() -> AppConfig:
@@ -150,6 +153,7 @@ def load_config() -> AppConfig:
         session_secret       = _optional("SESSION_SECRET"),
         cookie_domain        = _optional("COOKIE_DOMAIN", ".heylark.dev"),
         login_base_url       = _optional("LOGIN_BASE_URL", "https://login.heylark.dev"),
+        auth_database_url    = _optional("AUTH_DATABASE_URL"),
         nexus = NexusConfig(
             tg_token     = _require("NEXUS_BOT_TOKEN"),
             db_finance   = _optional("NOTION_DB_FINANCE"),

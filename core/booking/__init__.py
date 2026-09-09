@@ -9,5 +9,6 @@ availability→slots layer, backend routes, Nexus booking-skill and the web
 entry land in later phases (B3–B8).
 """
 from core.booking.busy import BusyInterval, busy_intervals
+from core.booking.slots import Slot, free_slots
 
-__all__ = ["BusyInterval", "busy_intervals"]
+__all__ = ["BusyInterval", "busy_intervals", "Slot", "free_slots"]
