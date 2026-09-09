@@ -91,6 +91,8 @@ async def test_restore_pass1_utc_reminder_no_shift():
          patch.object(pgt.PgTasksRepo, "active_with_past_reminder",
                       AsyncMock(return_value=[])), \
          patch.object(pgt.PgTasksRepo, "active_recurring_without_reminder",
+                      AsyncMock(return_value=[])), \
+         patch.object(pgt.PgTasksRepo, "active_with_future_deadline_no_reminder",
                       AsyncMock(return_value=[])):
         await tasks.restore_reminders_on_startup()
 

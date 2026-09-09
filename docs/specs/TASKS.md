@@ -147,6 +147,13 @@ No amount in `note` → nothing written, completion is never blocked.
   persisted to `reminder`, and scheduled
   (`active_recurring_without_reminder`). Pass 1 reschedules future
   reminders; pass 2 advances/handles past-due ones.
+- **Deadline pings are re-armed on startup too** (pass 4,
+  `active_with_future_deadline_no_reminder`, #212). A deadline job is only
+  created when the task has no reminder (#69) and was previously never
+  rebuilt after a restart — so a deadline-only ping was lost silently on
+  every deploy. Pass 4 reschedules `_schedule_deadline_check` (with the same
+  `recipients` fan-out as reminders). A deadline already in the past is not
+  re-sent as a late ping — only future ones are re-armed.
 - **Reminder jobs are re-armed from PG every 90 s, not only on startup**
   (`reminder_resync` `IntervalTrigger`, `restore_reminders_on_startup(periodic=True)`,
   #210). APScheduler keeps jobs in memory and loses them on every restart
@@ -256,13 +263,16 @@ category resolution on completion also runs on Haiku
 - `alembic/versions/a7b8c9d0e1f2_tasks_note.py` — `note` column
 - `nexus/repos/tasks_tables.py` — SQLAlchemy Core definitions
 - `nexus/repos/pg_tasks_repo.py` — `Task` dataclass, lookup cache, `_match`,
-  create/status/props/repeat, reminder-restore queries, `clear_reminder` (#206)
+  create/status/props/repeat, reminder-restore queries, `clear_reminder` (#206),
+  `active_with_future_deadline_no_reminder` (#212)
 - `nexus/repos/tasks_repo.py` — repository seam (`clear_reminder`)
 - `nexus/handlers/tasks.py` — create/complete/recurring reset
   (`_handle_recurring_task_reset`, `_handle_recurring_reminder_done`),
-  `restore_reminders_on_startup` (`periodic` param — #210), `_parse_repeat_time`,
-  `_reschedule_all_for_tz`, `_update_streak_line`, Haiku `ask_claude` calls
-- `nexus/nexus_bot.py` — `reminder_resync` interval job (5 min, #210)
+  `restore_reminders_on_startup` (`periodic` param — #210; pass 4 deadline
+  re-arm — #212), `_schedule_reminder`/`_schedule_deadline_check` (`recipients`
+  fan-out — #211), `_parse_repeat_time`, `_reschedule_all_for_tz`,
+  `_update_streak_line`, Haiku `ask_claude` calls
+- `nexus/nexus_bot.py` — `reminder_resync` interval job (90 s, #210)
 - `core/classifier.py` — `build_system` future-task-money → `note` rule
 - `nexus/handlers/finance.py` — `expense_from_task_note`, `_write_one_time_expense`
 - `core/task_streaks.py` — per-task streak store + rules

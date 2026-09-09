@@ -297,6 +297,8 @@ async def restore_reminders_on_startup(periodic: bool = False) -> None:
               повторяющиеся: сдвигаем до ближайшей будущей даты + шлём увед.
     Проход 3: задачи с repeat_time, но reminder IS NULL — оживляем,
               вычисляем первый future-run, записываем в PG и планируем.
+    Проход 4: задачи с будущим deadline и без reminder (#212) —
+              пересобираем дедлайн-пинг (job тоже теряется при рестарте).
 
     ``periodic=True`` — вызов из интервального re-arm (#210), не со старта:
     APScheduler теряет in-memory job'ы при рестарте, поэтому pass 1/3 гоняем
@@ -536,6 +538,23 @@ async def restore_reminders_on_startup(periodic: bool = False) -> None:
                 logger.info("restore pass3: revived %d recurring tasks without reminder", revived)
                 restored += revived
 
+            # ── Проход 4: будущий дедлайн без напоминания — восстановить пинг ───
+            # Дедлайн-job (#69: ставится только без reminder) нигде не
+            # пересобирался при рестарте — APScheduler теряет его in-memory.
+            for task in await _pg.active_with_future_deadline_no_reminder(user_id):
+                try:
+                    dl = task.deadline
+                    if not dl:
+                        continue
+                    await _schedule_deadline_check(
+                        tg_id, task.title or "Задача",
+                        _to_local_wall(dl, tz_offset), task.id, tz_offset,
+                        recipients=tgids,
+                    )
+                    restored += 1
+                except Exception as e:
+                    logger.error("restore pass4: task %s error: %s", task.id, e)
+
         except Exception as e:
             logger.error("restore_reminders_on_startup: tg_id=%s error: %s", tg_id, e)
 
@@ -711,9 +730,11 @@ async def _schedule_reminder(chat_id: int, title: str, reminder_dt: str, task_id
     except Exception as e:
         logger.error("Schedule reminder error: %s", e)
 
-async def _schedule_deadline_check(chat_id: int, title: str, deadline_dt: str, task_id: str, tz_offset: int = 3) -> None:
+async def _schedule_deadline_check(chat_id: int, title: str, deadline_dt: str, task_id: str, tz_offset: int = 3,
+                                   recipients: Optional[List[int]] = None) -> None:
     if not _scheduler or not _bot:
         return
+    _targets = [t for t in (recipients or [chat_id]) if t]
     try:
         deadline_dt = _ensure_datetime(deadline_dt)
         dt = datetime.strptime(deadline_dt, "%Y-%m-%dT%H:%M").replace(
@@ -739,16 +760,26 @@ async def _schedule_deadline_check(chat_id: int, title: str, deadline_dt: str, t
                 InlineKeyboardButton(text="✅ Выполнено!", callback_data=f"task_complete_{task_id}"),
                 InlineKeyboardButton(text="⏳ Отложить", callback_data=f"task_reschedule_{task_id}"),
             ]])
-            _m = await _bot.send_message(
-                chat_id,
-                f"⏰ <b>Дедлайн:</b> {title}\n\nСделал?",
-                parse_mode="HTML",
-                reply_markup=kb
-            )
-            await save_task_reminder(task_id, _m.chat.id, _m.message_id, title)
+            _first = None
+            for _t in _targets:
+                try:
+                    _m = await _bot.send_message(
+                        _t,
+                        f"⏰ <b>Дедлайн:</b> {title}\n\nСделал?",
+                        parse_mode="HTML",
+                        reply_markup=kb
+                    )
+                    if _first is None:
+                        _first = _m
+                except Exception as e:
+                    logger.warning("check_deadline: send to %s failed: %s", _t, e)
+            if _first is None:
+                logger.error("check_deadline: all targets failed for task %s", task_id)
+                return
+            await save_task_reminder(task_id, _first.chat.id, _first.message_id, title)
 
         job_id = f"deadline_{task_id}" if task_id else f"deadline_{chat_id}_{title[:15]}_{deadline_dt}"
-        logger.info("scheduling deadline: task_id=%s chat_id=%s job_id=%s callback_data=task_complete_%s", task_id, chat_id, job_id, task_id)
+        logger.info("scheduling deadline: task_id=%s targets=%s job_id=%s callback_data=task_complete_%s", task_id, _targets, job_id, task_id)
         _scheduler.add_job(check_deadline, trigger="date", run_date=dt,
                            id=job_id, replace_existing=True)
         logger.info("Deadline check scheduled: %s at %s", title, dt)

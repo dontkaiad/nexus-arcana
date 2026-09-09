@@ -445,6 +445,30 @@ def _active_with_past_reminder_sync(user_id: str) -> List[Task]:
     return [_to_task(r) for r in rows]
 
 
+def _active_with_future_deadline_no_reminder_sync(user_id: str) -> List[Task]:
+    """Активные задачи с будущим deadline и БЕЗ напоминания (#212).
+
+    Дедлайн-пинг ставится только когда у задачи нет reminder (issue #69),
+    и раньше нигде не восстанавливался при рестарте — APScheduler теряет
+    in-memory job. Этот запрос кормит новый проход restore.
+    """
+    _ensure_lookups()
+    done_ids = select(task_status.c.id).where(
+        task_status.c.code.in_(["Done", "Archived"])
+    )
+    q = (
+        select(tasks)
+        .where(tasks.c.status_id.notin_(done_ids))
+        .where(tasks.c.deadline > text("now()"))
+        .where(tasks.c.reminder.is_(None))
+    )
+    if user_id:
+        q = q.where(tasks.c.user_id == user_id)
+    with get_engine().connect() as conn:
+        rows = conn.execute(q).fetchall()
+    return [_to_task(r) for r in rows]
+
+
 def _clear_reminder_sync(task_id: str) -> bool:
     """Обнулить tasks.reminder (напоминание отработало — как missed или live)."""
     try:
@@ -554,6 +578,9 @@ class PgTasksRepo:
 
     async def active_recurring_without_reminder(self, user_id: str = "") -> List[Task]:
         return await asyncio.to_thread(_active_recurring_without_reminder_sync, user_id)
+
+    async def active_with_future_deadline_no_reminder(self, user_id: str = "") -> List[Task]:
+        return await asyncio.to_thread(_active_with_future_deadline_no_reminder_sync, user_id)
 
     async def clear_reminder(self, task_id: str) -> bool:
         return await asyncio.to_thread(_clear_reminder_sync, task_id)

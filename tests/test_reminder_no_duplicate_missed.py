@@ -35,6 +35,7 @@ async def test_restore_pass2_oneoff_clears_reminder_after_send():
          patch.object(pgt.PgTasksRepo, "active_with_future_reminder", AsyncMock(return_value=[])), \
          patch.object(pgt.PgTasksRepo, "active_with_past_reminder", AsyncMock(return_value=[task])), \
          patch.object(pgt.PgTasksRepo, "active_recurring_without_reminder", AsyncMock(return_value=[])), \
+         patch.object(pgt.PgTasksRepo, "active_with_future_deadline_no_reminder", AsyncMock(return_value=[])), \
          patch.object(pgt.PgTasksRepo, "clear_reminder", clear), \
          patch("nexus.repos.tasks_repo.TasksRepo.set_in_progress", AsyncMock()):
         m_bot.send_message = AsyncMock(return_value=sent_msg)
@@ -108,6 +109,7 @@ async def test_restore_pass2_recurring_advances_reminder_before_send():
          patch.object(pgt.PgTasksRepo, "active_with_future_reminder", AsyncMock(return_value=[])), \
          patch.object(pgt.PgTasksRepo, "active_with_past_reminder", AsyncMock(return_value=[task])), \
          patch.object(pgt.PgTasksRepo, "active_recurring_without_reminder", AsyncMock(return_value=[])), \
+         patch.object(pgt.PgTasksRepo, "active_with_future_deadline_no_reminder", AsyncMock(return_value=[])), \
          patch.object(trepo.TasksRepo, "set_props", _set_props):
         m_bot.send_message = _send
         await tasks.restore_reminders_on_startup()
@@ -152,6 +154,7 @@ async def test_restore_fans_out_to_all_tgids_of_one_user():
          patch.object(pgt.PgTasksRepo, "active_with_future_reminder", AsyncMock(return_value=[task])), \
          patch.object(pgt.PgTasksRepo, "active_with_past_reminder", AsyncMock(return_value=[])), \
          patch.object(pgt.PgTasksRepo, "active_recurring_without_reminder", AsyncMock(return_value=[])), \
+         patch.object(pgt.PgTasksRepo, "active_with_future_deadline_no_reminder", AsyncMock(return_value=[])), \
          patch.object(trepo.TasksRepo, "retrieve_page", AsyncMock(return_value=task)), \
          patch.object(trepo.TasksRepo, "set_in_progress", AsyncMock()), \
          patch.object(trepo.TasksRepo, "clear_reminder", AsyncMock()):
@@ -165,6 +168,37 @@ async def test_restore_fans_out_to_all_tgids_of_one_user():
         await added["fn"]()
         sent_to = {c.args[0] for c in m_bot.send_message.call_args_list}
         assert sent_to == {111, 222}
+
+
+@pytest.mark.asyncio
+async def test_restore_pass4_rearms_deadline_ping(monkeypatch):
+    """#212: задача с будущим deadline и без reminder — дедлайн-пинг
+    пересобирается при рестарте (раньше нигде не восстанавливался)."""
+    from nexus.handlers import tasks
+    from nexus.repos.pg_tasks_repo import Task
+    import nexus.repos.pg_tasks_repo as pgt
+
+    fut = (datetime.now(timezone.utc) + timedelta(hours=6)).strftime("%Y-%m-%dT%H:%M:%S+00:00")
+    task = Task(id="t-dl", title="сдать отчёт", deadline=fut, reminder="")
+    fake_user = {"permissions": {"nexus": True}, "user_id": "u-1"}
+    dl_calls = []
+
+    async def _fake_deadline(chat_id, title, dl, task_id, tz_offset=3, recipients=None):
+        dl_calls.append((task_id, recipients))
+
+    with patch("core.config.config.allowed_ids", [111, 222]), \
+         patch("core.user_manager.get_user", AsyncMock(return_value=fake_user)), \
+         patch.object(tasks, "_scheduler", MagicMock()), \
+         patch.object(tasks, "_bot", MagicMock()), \
+         patch.object(tasks, "_get_user_tz", AsyncMock(return_value=3)), \
+         patch.object(tasks, "_schedule_deadline_check", _fake_deadline), \
+         patch.object(pgt.PgTasksRepo, "active_with_future_reminder", AsyncMock(return_value=[])), \
+         patch.object(pgt.PgTasksRepo, "active_with_past_reminder", AsyncMock(return_value=[])), \
+         patch.object(pgt.PgTasksRepo, "active_recurring_without_reminder", AsyncMock(return_value=[])), \
+         patch.object(pgt.PgTasksRepo, "active_with_future_deadline_no_reminder", AsyncMock(return_value=[task])):
+        await tasks.restore_reminders_on_startup()
+
+    assert dl_calls == [("t-dl", [111, 222])]
 
 
 @pytest.mark.asyncio
@@ -193,6 +227,7 @@ async def test_periodic_resync_skips_missed_recurring():
          patch.object(pgt.PgTasksRepo, "active_with_future_reminder", AsyncMock(return_value=[])), \
          patch.object(pgt.PgTasksRepo, "active_with_past_reminder", AsyncMock(return_value=[rec])), \
          patch.object(pgt.PgTasksRepo, "active_recurring_without_reminder", AsyncMock(return_value=[])), \
+         patch.object(pgt.PgTasksRepo, "active_with_future_deadline_no_reminder", AsyncMock(return_value=[])), \
          patch.object(trepo.TasksRepo, "set_props", set_props):
         m_bot.send_message = AsyncMock()
         await tasks.restore_reminders_on_startup(periodic=True)

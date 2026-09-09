@@ -501,6 +501,7 @@ async def test_restore_pass3_revives_recurring_without_reminder():
     fake_pg.active_with_future_reminder = AsyncMock(return_value=[])
     fake_pg.active_with_past_reminder = AsyncMock(return_value=[])
     fake_pg.active_recurring_without_reminder = AsyncMock(return_value=[orphan])
+    fake_pg.active_with_future_deadline_no_reminder = AsyncMock(return_value=[])
 
     fake_bot = MagicMock()
     fake_scheduler = MagicMock()
@@ -565,6 +566,9 @@ async def test_reschedule_all_for_tz_preserves_local_clock_time():
 
     fake_pg = MagicMock()
     fake_pg.active_with_future_reminder = AsyncMock(return_value=[task_with_reminder])
+    fake_pg.active_with_future_deadline_no_reminder = AsyncMock(return_value=[])
+    fake_pg.active_recurring_without_reminder = AsyncMock(return_value=[])
+    fake_pg.active_with_past_reminder = AsyncMock(return_value=[])
 
     fake_scheduler = MagicMock()
 
