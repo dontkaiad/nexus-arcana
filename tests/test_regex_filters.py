@@ -161,6 +161,23 @@ async def test_classify_done_still_routes_to_task_done():
     assert res and res[0]["type"] == "task_done", res
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("text", [
+    "в сбер я сходила",
+    "сходила в сбербанк",
+    "съездила на почту",
+    "заехала в аптеку",
+    "зашла в магазин",
+    "оплатила интернет",
+])
+async def test_classify_motion_verbs_route_to_task_done(text):
+    """#213: глаголы движения в прошедшем (сходила/съездила/заехала), любой
+    порядок слов — задача выполнена, не «не понял»."""
+    from core.classifier import classify
+    res = await classify(text)
+    assert res and res[0]["type"] == "task_done", res
+
+
 @pytest.mark.parametrize("text,group1,group2", [
     pytest.param("лимит на кафе 5000", "кафе", "5000", id="limit-cafe-5000"),
     pytest.param("лимит привычки 15к", "привычки", None, id="limit-habit-short"),
