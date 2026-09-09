@@ -47,18 +47,6 @@ logger = logging.getLogger("nexus.finance")
 MOSCOW_TZ = timezone(timedelta(hours=3))
 
 router = Router()
-_INCOME_MARKERS_RE = re.compile(
-    r'\b(получила|получил|заработала|заработал|зарплата|доход|перевели|перевёл|перевел'
-    r'|вернули|вернул|пришло|пришла|поступил[аио]?|аванс)\b',
-    re.IGNORECASE,
-)
-_BARTER_MARKERS_RE = re.compile(r'\b(бартер|обмен|в\s+обмен)\b', re.IGNORECASE)
-
-# Слова-амбиваленты: без контекста "получила/пришло" непонятно — расход или доход
-_AMBIGUOUS_RE = re.compile(
-    r'\b(аренд[аы]|арендую|сдаю|сдала|займ|долг)\b',
-    re.IGNORECASE,
-)
 
 # ── Бюджет: предупреждения по привычкам ──────────────────────────────────────
 HABIT_WARNINGS = [
@@ -907,7 +895,6 @@ PARSE_SYSTEM = f"""Извлеки финансовую запись. Испра�
 "это был доход" → is_update=true, update_field="type_", update_value="💰 Доход", amount=0"""
 
 # Pending-записи до уточнения: {{user_id: data}}
-_pending_finance: dict = {}
 # Последняя записанная страница: {{user_id: page_id}}
 _last_page_id: dict = {}
 
@@ -968,18 +955,7 @@ async def _update_last_finance(uid: int, field: str, value: str) -> bool:
     return await _repo.update_field(page_id, field, value)
 
 
-_TYPE_CORRECTION_RE = re.compile(
-    r"^\s*(нет[,\s]+)?(это|был[аи]?|на самом деле)?\s*(это\s+)?(доход|расход)\s*$",
-    re.IGNORECASE,
-)
-
 # ── Непредвиденный доход: авто-распределение ─────────────────────────────────
-#
-# Регулярные категории дохода — НЕ «непредвиденные», их не трогаем (для
-# Зарплаты уже есть отдельный триггер выше/ниже). «Аренда» как income-категория
-# в кодовой базе не существует (core/config.py INCOME_CATEGORIES её не
-# содержит) — если такая категория появится, добавить сюда.
-_WINDFALL_EXCLUDED_CATEGORIES = ("Зарплата", "Практика")
 
 # Потолок бонуса в 🎲 Импульсивные из windfall-доходов ЗА ПЕРИОД (не за раз).
 _IMPULSE_WINDFALL_CAP = 3000.0
@@ -1399,215 +1375,6 @@ async def handle_windfall_income(
     return True
 
 
-async def handle_finance_text(message: Message, text: str, bot_label: str = "☀️ Nexus",
-                              user_id: str = "") -> None:
-    from core.config import config
-    uid = message.from_user.id
-
-    # Перехват "это доход" / "это расход" до Claude — исправляем тип последней записи
-    m = _TYPE_CORRECTION_RE.match(text.strip())
-    if m:
-        type_word = m.group(4).lower()
-        new_type = "💰 Доход" if type_word == "доход" else "💸 Расход"
-        ok = await _update_last_finance(uid, "type_", new_type)
-        if ok:
-            await message.answer(f"✏️ Обновлено: Тип → <b>{new_type}</b>", parse_mode="HTML")
-        else:
-            await message.answer("⚠️ Нет последней записи для обновления.")
-        return
-
-    raw = await ask_claude(text, system=PARSE_SYSTEM, max_tokens=400, temperature=0)
-    try:
-        raw = raw.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
-        data = json.loads(raw)
-    except Exception:
-        await log_error(text, "parse_error", raw)
-        await message.answer("⚠️ Не смог разобрать. Попробуй: «450р такси»")
-        return
-
-    # ── Post-processing: форсируем Расход если явные признаки ───────────────
-    _EXPENSE_VERBS = re.compile(
-        r"\b(купил[аи]?|потратил[аи]?|заплатил[аи]?|оплатил[аи]?|"
-        r"потрачено|расход|заплачено|сняла|сняли?)\b",
-        re.IGNORECASE,
-    )
-    raw_amount = data.get("amount", 0)
-    # Отрицательная сумма → всегда расход
-    if isinstance(raw_amount, (int, float)) and raw_amount < 0:
-        data["amount"] = abs(raw_amount)
-        data["type_"] = "💸 Расход"
-        data["confidence"] = "high"
-    # Явный глагол расхода → форсируем тип и убираем вопрос о типе
-    elif _EXPENSE_VERBS.search(text):
-        data["type_"] = "💸 Расход"
-        data["confidence"] = "high"
-    # ── Конец post-processing ────────────────────────────────────────────────
-
-    # Запрос на изменение последней записи
-    if data.get("is_update"):
-        field = data.get("update_field", "")
-        value = data.get("update_value", "")
-        ok = await _update_last_finance(uid, field, value)
-        if ok:
-            labels = {"source": "Источник", "category": "Категория",
-                      "description": "Описание", "amount": "Сумма", "type_": "Тип"}
-            await message.answer(f"✏️ Обновлено: {labels.get(field, field)} → <b>{value}</b>")
-        else:
-            await message.answer("⚠️ Нет последней записи для обновления.")
-        return
-
-    if not data.get("amount"):
-        await message.answer("⚠️ Не нашёл сумму.")
-        return
-
-    # Ambiguous слова (аренда, займ и т.п.) без явного контекста → всегда уточнять
-    if data.get("confidence") == "high" and bool(_AMBIGUOUS_RE.search(text)):
-        has_income_ctx = bool(_INCOME_MARKERS_RE.search(text))
-        if not has_income_ctx:
-            data["confidence"] = "low"
-            data["question"] = "Это доход или расход?"
-
-    # Низкая уверенность — уточняем только если есть маркеры дохода/бартера или ambiguous
-    if data.get("confidence") == "low" and data.get("question"):
-        explicit_income = bool(_INCOME_MARKERS_RE.search(text))
-        is_ambiguous = bool(_AMBIGUOUS_RE.search(text))
-        has_barter = bool(_BARTER_MARKERS_RE.search(text))
-        if not explicit_income and not is_ambiguous and not has_barter:
-            # Нет маркеров дохода/бартера/ambiguous → автоматически расход
-            logger.info("finance: low confidence but no income/barter markers → auto-expense")
-            data["type_"] = "💸 Расход"
-            data["confidence"] = "high"
-        elif explicit_income and not is_ambiguous and not has_barter:
-            # Явный маркер дохода (доход/получила/зарплата/перевели/вернули/...)
-            # без ambiguous-слов и без бартера → однозначно доход, не спрашиваем
-            logger.info("finance: explicit income marker, no ambiguity/barter → auto-income")
-            data["type_"] = "💰 Доход"
-            data["confidence"] = "high"
-        else:
-            _pending_finance[uid] = (data, user_id)
-            amount = data.get("amount", 0)
-            description = data.get("description", "?")
-            kb = InlineKeyboardMarkup(inline_keyboard=[
-                [
-                    InlineKeyboardButton(text="💸 Расход", callback_data="fin_expense"),
-                    InlineKeyboardButton(text="💰 Доход", callback_data="fin_income"),
-                    InlineKeyboardButton(text="🔄 Бартер", callback_data="fin_barter"),
-                ]
-            ])
-            await message.answer(
-                f"❓ <b>{amount:,.0f}₽ — {description}</b>\n\n"
-                f"Это доход, расход или бартер?",
-                reply_markup=kb,
-            )
-            return
-
-    # Высокая уверенность — пишем сразу
-    page_id = await _save_finance(data, config.nexus.db_finance, bot_label, user_id, uid=uid)
-    if not page_id:
-        await message.answer("⚠️ Ошибка записи в Notion.")
-        return
-
-    _last_page_id[uid] = page_id
-    await react(message, "👌" if "Расход" in data.get("type_", "") else "🏆")
-    await message.answer(_format_record(data))
-
-    # Smart recall: ищем в памяти по описанию покупки
-    try:
-        desc = (data.get("description") or "").strip()
-        if desc and "Расход" in data.get("type_", ""):
-            from core.memory import recall_from_memory
-            _fact = await recall_from_memory(desc)
-            if _fact:
-                await message.answer(f"💡 <i>{_fact} — как обычно?</i>")
-    except Exception as e:
-        logger.debug("finance recall skip: %s", e)
-
-    if "Расход" in data.get("type_", ""):
-        logger.info("finance saved: category=%s — calling budget check", data.get("category", ""))
-        try:
-            await _check_budget_limit(data.get("category", ""), message, user_id,
-                                      tz_offset=await _get_user_tz(uid))
-        except Exception as e:
-            logger.error("budget check error: %s", e, exc_info=True)
-        # Предложить вычеркнуть из списка покупок
-        try:
-            from core.list_manager import find_matching_items
-            desc = (data.get("description") or "").strip()
-            cat = data.get("category") or ""
-            if desc:
-                matches = await find_matching_items(desc, cat, bot_label, user_id)
-                if matches:
-                    buttons = []
-                    item_names = []
-                    for m in matches[:3]:
-                        cat_e = (m.get("category") or "").split(" ")[0]
-                        item_names.append(f"◻️ {m['name']} · {cat_e}")
-                        buttons.append([InlineKeyboardButton(
-                            text=f"✅ {m['name']}",
-                            callback_data=f"list_cross_{m['id'][:28]}",
-                        )])
-                    buttons.append([InlineKeyboardButton(text="Нет", callback_data="list_cross_no")])
-                    await message.answer(
-                        f"🛒 Есть в списке:\n" + "\n".join(item_names),
-                        reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons),
-                        parse_mode="HTML",
-                    )
-        except Exception as e:
-            logger.debug("list cross-off check: %s", e)
-
-    # Триггер при зарплате: показать краткий бюджет
-    if "Доход" in data.get("type_", "") and "Зарплата" in data.get("category", ""):
-        try:
-            budget_msg = await build_budget_message(user_id, await _get_user_tz(uid))
-            if budget_msg:
-                await message.answer(f"💰 Зарплата получена! Твой бюджет на месяц:\n\n{budget_msg}", parse_mode="HTML")
-        except Exception as e:
-            logger.debug("salary budget trigger: %s", e)
-    # Непредвиденный доход — та же проверка "необычного" дохода, что у
-    # зарплатного триггера выше, расширенная под остальные регулярные категории.
-    elif "Доход" in data.get("type_", "") and not any(
-        exc in data.get("category", "") for exc in _WINDFALL_EXCLUDED_CATEGORIES
-    ):
-        try:
-            windfall_amount = float(data.get("amount", 0) or 0)
-            if windfall_amount >= WINDFALL_MANUAL_THRESHOLD:
-                await _send_windfall_manual_prompt(message, windfall_amount, uid, user_id)
-            else:
-                windfall_msg = await _distribute_windfall_income(
-                    windfall_amount, uid, user_id,
-                )
-                if windfall_msg:
-                    await message.answer(windfall_msg, parse_mode="HTML")
-        except Exception as e:
-            logger.error("windfall income distribution error: %s", e, exc_info=True)
-
-
-@router.callback_query(F.data == "fin_save_asis")
-async def fin_save_asis(call: CallbackQuery) -> None:
-    from core.config import config
-    uid = call.from_user.id
-    pending_entry = _pending_finance.pop(uid, None)
-    if not pending_entry:
-        await call.answer("Нет данных.")
-        return
-    if isinstance(pending_entry, tuple):
-        pending, stored_uid = pending_entry
-    else:
-        pending, stored_uid = pending_entry, ""
-    page_id = await _save_finance(pending, config.nexus.db_finance, user_id=stored_uid, uid=uid)
-    if page_id:
-        _last_page_id[uid] = page_id
-    await call.message.edit_text(_format_record(pending))
-    if "Расход" in pending.get("type_", ""):
-        logger.info("finance saved (asis): category=%s — calling budget check", pending.get("category", ""))
-        try:
-            await _check_budget_limit(pending.get("category", ""), call.message, stored_uid,
-                                      tz_offset=await _get_user_tz(uid))
-        except Exception as e:
-            logger.error("budget check error: %s", e, exc_info=True)
-    await call.answer()
-
-
 # ── Pending «Другая сумма» для лимита: {"cat_link": str} на SQLite ────────────
 # #208: раньше жило в памяти + единственный потребитель (handle_finance_
 # clarification, @router.message(F.text)) был мёртв из-за порядка роутеров —
@@ -1645,12 +1412,6 @@ async def handle_finance_pending(message: Message, user_id: str = "") -> bool:
     await message.answer("🤔 Нужно число (в рублях). Или «отмена».")
     return True
 
-
-@router.callback_query(F.data == "fin_cancel")
-async def fin_cancel(call: CallbackQuery) -> None:
-    _pending_finance.pop(call.from_user.id, None)
-    await call.message.edit_text("❌ Отмена.")
-    await call.answer()
 
 
 @router.callback_query(F.data == "msg_hide")
@@ -1712,71 +1473,6 @@ async def _save_limit_to_memory(cat_link: str, amount: int, user_id: str = "") -
         )
     except Exception as e:
         logger.error("_save_limit_to_memory: %s", e)
-
-
-@router.callback_query(F.data.startswith("fin_expense") | F.data.startswith("fin_income") | F.data.startswith("fin_barter"))
-async def handle_finance_clarify(call: CallbackQuery, user_id: str = "") -> None:
-    """Обработчик уточнения доход/расход/бартер для неясных операций."""
-    from core.config import config
-
-    action = call.data.split("_")[1]  # expense, income или barter
-    uid = call.from_user.id
-
-    pending_entry = _pending_finance.get(uid)
-    if not pending_entry:
-        await call.answer("⚠️ Сессия истекла. Отправь операцию ещё раз.")
-        await call.message.edit_text("⚠️ Сессия истекла.")
-        return
-
-    await call.answer()
-
-    # Support both formats
-    if isinstance(pending_entry, tuple):
-        pending, stored_uid = pending_entry
-    else:
-        pending = pending_entry
-        stored_uid = user_id
-
-    amount = float(pending.get("amount", 0))
-    category = pending.get("category", "💳 Прочее")
-    source = pending.get("source", "💳 Карта")
-    description = pending.get("description", "")
-
-    db_id = config.nexus.db_finance
-
-    if action == "barter":
-        type_label = "💸 Расход"
-        source = "🔄 Бартер"
-    elif action == "income":
-        type_label = "💰 Доход"
-    else:
-        type_label = "💸 Расход"
-
-    eff_uid = stored_uid or user_id
-    result = await _repo.create_entry(
-        db_id,
-        description=description,
-        date=_today(await _get_user_tz(uid)),
-        amount=amount,
-        category=category,
-        type_=type_label,
-        source=source,
-        bot_label="☀️ Nexus",
-        user_id=eff_uid,
-    )
-
-    if result:
-        from nexus.handlers.tasks import last_record_set
-        last_record_set(uid, "finance", result)
-        sign = "−" if action != "income" else "+"
-        icon = "💸" if action != "income" else "💰"
-        text = f"{icon} <b>{sign}{amount:,.0f}₽</b> · <b>{description}</b>\n🏷 {category} <i>{source}</i>"
-        await call.message.edit_text(text, parse_mode="HTML")
-        _pending_finance.pop(uid, None)
-        if action != "income":
-            await _check_budget_limit(category, call.message, tz_offset=await _get_user_tz(uid))
-    else:
-        await call.message.edit_text("⚠️ Ошибка записи. Попробуй позже.")
 
 
 async def handle_bank_screenshot(message: Message, bot_label: str = "☀️ Nexus") -> None:

@@ -326,12 +326,6 @@ class TestNexusIntegration:
     # ═══════════════════════════════════════════════════════════════════
 
     @pytest.mark.asyncio
-    async def test_cb_fin_cancel(self):
-        """fin_cancel без pending — не крашит."""
-        r = await self.send_cb("fin_cancel")
-        assert "traceback" not in (r or "").lower()
-
-    @pytest.mark.asyncio
     async def test_cb_msg_hide(self):
         """msg_hide — скрыть сообщение."""
         r = await self.send_cb("msg_hide")

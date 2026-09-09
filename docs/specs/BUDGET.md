@@ -320,13 +320,11 @@ pending крупной суммы между предпросмотром и к�
   `finance.handle_windfall_income` зовётся из `core/classifier.py` на любом
   income-событии кроме ЗП/практики/жилья (см. «Незапланированный доход —
   что происходит» выше). Заменил прежнее «📊 Пересчитать бюджет?».
-- `handle_finance_clarification` (был `@router.message(F.text)`, перебивался
-  `handle_text` на уровне dp) — **удалён** (#208). Живой clarify доход/
-  расход — `nexus_bot.on_finance_clarify` (`fin_type_*`), pending на
-  `core.pending_kv`. `finance._pending_finance` + callbacks `fin_expense` /
-  `fin_income` / `fin_barter` / `fin_save_asis` / `fin_cancel` и
-  `handle_finance_text` остаются мёртвыми (test-only) — на удаление
-  отдельной чисткой.
+- ~~`handle_finance_clarification` (`@router.message(F.text)`, перебивался
+  `handle_text` на уровне dp); `handle_finance_text`, `finance._pending_finance`
+  и callbacks `fin_expense`/`fin_income`/`fin_barter`/`fin_save_asis`/`fin_cancel`
+  — все мёртвы~~ — **удалены** (#208). Живой clarify доход/расход —
+  `nexus_bot.on_finance_clarify` (`fin_type_*`), pending на `core.pending_kv`.
 - ~~Утечка полного списка категорий (19 шт., с 🔮 Практика / 🕯️ Расходники
   Арканы, 💰 Зарплата, 💼 Фриланс) в бюджетные промпты; `_BUDGET_VARIABLE_CATS`
   — мёртвая константа~~ — **исправлено**. Оба промпта теперь получают

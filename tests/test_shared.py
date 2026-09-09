@@ -106,16 +106,13 @@ class TestSQLitePending:
         import os
 
         # Эти in-memory dict допустимы — краткоживущий UI state, не персистентные данные.
-        # #206/#208: live pending-диалоги переведены на core.pending_kv (SQLite);
-        # оставшиеся здесь — либо dead-код (finance windfall/_pending_finance —
-        # см. #208), либо не критичны к рестарту (timestamps, авто-предложение).
+        # #206/#208: все live pending-диалоги переведены на core.pending_kv (SQLite);
+        # оставшиеся здесь не критичны к рестарту (timestamps, авто-предложение).
         ALLOWED_PATTERNS = {
-            "_pending_finance",   # dead в prod (только handle_finance_text/тесты), #208
             "_pending_auto",      # UI: авто-предложение запомнить (потеря = нет предложения)
             "_clarify",           # UI: буфер классификатора
             "_last_finance_ts",   # rate-limit timestamp
             "_photo_pending",     # UI: ожидание фото
-            "_pending_windfall_manual",  # dead в prod (windfall не подключён), #208
         }
 
         suspicious = []
