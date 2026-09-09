@@ -1614,16 +1614,21 @@ async def main() -> None:
             id="budget_payday_review",
             replace_existing=True,
         )
-        # Напоминания: периодический re-arm из PG каждые 5 минут (#210).
-        # APScheduler теряет in-memory job'ы при рестарте, а restore со старта
-        # ловит только момент рестарта — sweep закрывает окно между деплоями.
+        # Напоминания: периодический re-arm из PG каждые 90 секунд (#210).
+        # APScheduler теряет in-memory job'ы при рестарте (частый auto-pull +
+        # watchfiles на nexus/core/miniapp), а restore со старта ловит только
+        # момент рестарта. Короткий интервал + 120с grace в _schedule_reminder
+        # → пропущенное напоминание доезжает максимум через ~90с, а не «на
+        # следующем деплое».
         from apscheduler.triggers.interval import IntervalTrigger
         nexus_scheduler.add_job(
             restore_reminders_on_startup,
             kwargs={"periodic": True},
-            trigger=IntervalTrigger(minutes=5),
+            trigger=IntervalTrigger(seconds=90),
             id="reminder_resync",
             replace_existing=True,
+            max_instances=1,
+            coalesce=True,
         )
     # Логируем все запланированные cron jobs
     if nexus_scheduler:

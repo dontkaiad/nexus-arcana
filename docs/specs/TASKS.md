@@ -147,10 +147,12 @@ No amount in `note` → nothing written, completion is never blocked.
   persisted to `reminder`, and scheduled
   (`active_recurring_without_reminder`). Pass 1 reschedules future
   reminders; pass 2 advances/handles past-due ones.
-- **Reminder jobs are re-armed from PG every 5 min, not only on startup**
+- **Reminder jobs are re-armed from PG every 90 s, not only on startup**
   (`reminder_resync` `IntervalTrigger`, `restore_reminders_on_startup(periodic=True)`,
-  #210). APScheduler keeps jobs in memory and loses them on restart; the
-  interval sweep closes the window between deploys. In `periodic` mode pass 1
+  #210). APScheduler keeps jobs in memory and loses them on every restart
+  (frequent `auto-pull` + `watchfiles` on `nexus/`/`core/`/`miniapp/`); the
+  interval sweep + the 120 s grace in `_schedule_reminder` mean a missed
+  reminder arrives within ~90 s instead of on the next deploy. In `periodic` mode pass 1
   (re-arm future, `replace_existing`) and pass 3 (revive `reminder IS NULL`)
   run as normal, and pass 2 handles missed **one-off** reminders; missed
   **recurring** reminders are left for the next real startup — a periodic
