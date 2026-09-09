@@ -158,6 +158,17 @@ No amount in `note` → nothing written, completion is never blocked.
   **recurring** reminders are left for the next real startup — a periodic
   pass 2 would fire «⏰ Пропущено … переношу» on top of the live «🔔
   Напоминание» before the user answers.
+- **`restore_reminders_on_startup` iterates distinct `user_id`s, not raw
+  `allowed_ids`, and a reminder fans out to every TG chat of its owner**
+  (#211). Kai's two Telegram accounts share one `user_id` (#202); the old
+  per-`tg_id` loop scheduled each task once per account under the same job id
+  `reminder_<task>`, so the second `add_job(replace_existing=True)` clobbered
+  the first and the reminder reached only the last account in `allowed_ids`.
+  Now there is one job per task; `_schedule_reminder(recipients=[...])`
+  delivers the ping to all of the owner's chats at fire time (a per-target
+  `send_message`, failures logged and skipped). The live create path still
+  schedules to the single creating chat; the 90 s sweep upgrades it to the
+  fan-out job on its next pass.
 - **A one-off reminder is nulled once it has fired** (`clear_reminder`, #206).
   Both when it fires live (`_schedule_reminder.send_reminder`) and when
   pass 2 delivers it late as «⏰ Пропущено», `reminder` is set to `NULL`

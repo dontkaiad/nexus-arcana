@@ -7,7 +7,7 @@ import logging
 import sqlite3 as _sqlite3
 import time as _time
 from datetime import datetime, timezone, timedelta
-from typing import Optional
+from typing import List, Optional
 
 from aiogram import Router, F, Bot
 from aiogram.filters import BaseFilter
@@ -318,13 +318,31 @@ async def restore_reminders_on_startup(periodic: bool = False) -> None:
     now_utc = datetime.now(timezone.utc)
     restored = 0
 
-    for tg_id in config.allowed_ids:
+    # Группируем allowed_ids по user_id: два TG-аккаунта Кай делят один
+    # user_id (#202). Раньше цикл шёл по tg_id и планировал одну задачу по
+    # разу на каждый аккаунт с ОДНИМ job_id `reminder_<task>` → второй проход
+    # replace_existing перетирал первый, напоминание уходило только в
+    # последний чат из allowed_ids. Теперь — один проход на user_id, рассылка
+    # во все его чаты (recipients).
+    _groups: dict = {}
+    _tz_by_tg: dict = {}
+    for _tg in config.allowed_ids:
+        _ud = await get_user(_tg)
+        if not _ud:
+            continue
+        _uid = _ud.get("user_id", "")
+        if not _uid:
+            continue
+        _groups.setdefault(_uid, []).append(_tg)
         try:
-            user_data = await get_user(tg_id)
-            if not user_data:
-                continue
-            user_id = user_data.get("user_id", "")
-            tz_offset = await _get_user_tz(tg_id)
+            _tz_by_tg[_tg] = await _get_user_tz(_tg)
+        except Exception:
+            _tz_by_tg[_tg] = 3
+
+    for user_id, tgids in _groups.items():
+        try:
+            tg_id = tgids[0]  # primary chat для одиночных send/логов
+            tz_offset = _tz_by_tg.get(tg_id, 3)
 
             # ── Проход 1: будущие напоминания ────────────────────────────────────
             for task in await _pg.active_with_future_reminder(user_id):
@@ -333,7 +351,7 @@ async def restore_reminders_on_startup(periodic: bool = False) -> None:
                     title = task.title or "Задача"
                     reminder_start = task.reminder
                     if reminder_start:
-                        await _schedule_reminder(tg_id, title, _to_local_wall(reminder_start, tz_offset), task_id, tz_offset)
+                        await _schedule_reminder(tg_id, title, _to_local_wall(reminder_start, tz_offset), task_id, tz_offset, recipients=tgids)
                         restored += 1
                 except Exception as e:
                     logger.error("restore pass1: task %s error: %s", task.id, e)
@@ -370,23 +388,29 @@ async def restore_reminders_on_startup(periodic: bool = False) -> None:
                             ],
                             [InlineKeyboardButton(text="⏳ В процессе", callback_data=f"task_wip_{task_id}")],
                         ])
-                        try:
-                            _m = await _bot.send_message(
-                                tg_id,
-                                f"⏰ <b>Пропущено ({missed_time}):</b> {title}\n\nСделано?",
-                                parse_mode="HTML",
-                                reply_markup=kb,
-                            )
-                            await save_task_reminder(task_id, _m.chat.id, _m.message_id, title)
+                        _first = None
+                        for _tg in tgids:
+                            try:
+                                _m = await _bot.send_message(
+                                    _tg,
+                                    f"⏰ <b>Пропущено ({missed_time}):</b> {title}\n\nСделано?",
+                                    parse_mode="HTML",
+                                    reply_markup=kb,
+                                )
+                                if _first is None:
+                                    _first = _m
+                            except Exception as e:
+                                logger.warning("restore pass2: send missed '%s' to %s failed: %s", title, _tg, e)
+                        if _first is not None:
+                            await save_task_reminder(task_id, _first.chat.id, _first.message_id, title)
                             # Обнуляем напоминание: оно отработало (как missed).
                             # Иначе _active_with_past_reminder вернёт задачу
-                            # снова при СЛЕДУЮЩЕМ рестарте → дубли «⏰ Пропущено»
-                            # на каждый деплой (частые auto-reload = спам).
+                            # снова при СЛЕДУЮЩЕМ рестарте → дубли «⏰ Пропущено».
                             await _pg.clear_reminder(task_id)
                             logger.info("restore pass2: sent missed reminder '%s' (was at %s)", title, missed_time)
                             restored += 1
-                        except Exception as e:
-                            logger.error("restore pass2: failed to send missed '%s': %s", title, e)
+                        else:
+                            logger.error("restore pass2: all targets failed for missed '%s'", title)
                     else:
                         if periodic:
                             # periodic re-arm: пропущенные повторяющиеся не трогаем
@@ -450,7 +474,7 @@ async def restore_reminders_on_startup(periodic: bool = False) -> None:
                             update_props["Дедлайн"] = _date_with_tz(new_deadline[:10], tz_offset)
 
                         await _repo.set_props(task_id, update_props)
-                        await _schedule_reminder(tg_id, title, new_reminder, task_id, tz_offset)
+                        await _schedule_reminder(tg_id, title, new_reminder, task_id, tz_offset, recipients=tgids)
 
                         # reminder уже сдвинут в PG — теперь можно слать «Пропущено»
                         kb = InlineKeyboardMarkup(inline_keyboard=[
@@ -460,17 +484,22 @@ async def restore_reminders_on_startup(periodic: bool = False) -> None:
                             ],
                             [InlineKeyboardButton(text="⏳ В процессе", callback_data=f"task_wip_{task_id}")],
                         ])
-                        try:
-                            _m = await _bot.send_message(
-                                tg_id,
-                                f"⏰ <b>Пропущено ({missed_time}):</b> {title}\n"
-                                f"🔄 Повтор: {repeat_display} — переношу.\n\nСделано?",
-                                parse_mode="HTML",
-                                reply_markup=kb,
-                            )
-                            await save_task_reminder(task_id, _m.chat.id, _m.message_id, title)
-                        except Exception as e:
-                            logger.error("restore pass2: failed to send missed repeat '%s': %s", title, e)
+                        _first = None
+                        for _tg in tgids:
+                            try:
+                                _m = await _bot.send_message(
+                                    _tg,
+                                    f"⏰ <b>Пропущено ({missed_time}):</b> {title}\n"
+                                    f"🔄 Повтор: {repeat_display} — переношу.\n\nСделано?",
+                                    parse_mode="HTML",
+                                    reply_markup=kb,
+                                )
+                                if _first is None:
+                                    _first = _m
+                            except Exception as e:
+                                logger.warning("restore pass2: send missed repeat '%s' to %s failed: %s", title, _tg, e)
+                        if _first is not None:
+                            await save_task_reminder(task_id, _first.chat.id, _first.message_id, title)
 
                         logger.info("restore pass2: rescheduled '%s' repeat=%s ivl=%d next=%s deadline=%s",
                                      title, repeat, ivl_days, new_reminder, deadline_start or "none")
@@ -497,7 +526,7 @@ async def restore_reminders_on_startup(periodic: bool = False) -> None:
                         first_run = first_run + timedelta(days=1)
                     new_reminder = first_run.strftime("%Y-%m-%dT%H:%M")
                     await _repo.set_props(task.id, {"Напоминание": _date_with_tz(new_reminder, tz_offset)})
-                    await _schedule_reminder(tg_id, task.title or "Задача", new_reminder, task.id, tz_offset)
+                    await _schedule_reminder(tg_id, task.title or "Задача", new_reminder, task.id, tz_offset, recipients=tgids)
                     revived += 1
                     logger.info("restore pass3: revived '%s' repeat_time=%s next=%s",
                                 task.title, repeat_time_raw, new_reminder)
@@ -593,9 +622,16 @@ def _format_task_dates(
     return " · ".join(parts)
 
 
-async def _schedule_reminder(chat_id: int, title: str, reminder_dt: str, task_id: str, tz_offset: int = 3) -> None:
+async def _schedule_reminder(chat_id: int, title: str, reminder_dt: str, task_id: str, tz_offset: int = 3,
+                             recipients: Optional[List[int]] = None) -> None:
     if not _scheduler or not _bot:
         return
+    # recipients — все TG-чаты владельца задачи (два аккаунта Кай делят один
+    # user_id, #202). Раньше restore планировал job per-tg_id с одним job_id
+    # `reminder_<task>` → второй проход replace_existing перетирал первый и
+    # напоминание уходило только в последний чат из allowed_ids. Теперь один
+    # job, а рассылка на fire-time идёт во все чаты.
+    _targets = [t for t in (recipients or [chat_id]) if t]
     try:
         reminder_dt = _ensure_datetime(reminder_dt)
         dt = datetime.strptime(reminder_dt, "%Y-%m-%dT%H:%M").replace(
@@ -629,13 +665,23 @@ async def _schedule_reminder(chat_id: int, title: str, reminder_dt: str, task_id
                 ],
                 [InlineKeyboardButton(text="⏳ В процессе", callback_data=f"task_wip_{task_id}")],
             ])
-            _m = await _bot.send_message(
-                chat_id,
-                f"🔔 <b>Напоминание:</b> {title}\n\nСделано?",
-                parse_mode="HTML",
-                reply_markup=kb
-            )
-            await save_task_reminder(task_id, _m.chat.id, _m.message_id, title)
+            _first = None
+            for _t in _targets:
+                try:
+                    _m = await _bot.send_message(
+                        _t,
+                        f"🔔 <b>Напоминание:</b> {title}\n\nСделано?",
+                        parse_mode="HTML",
+                        reply_markup=kb
+                    )
+                    if _first is None:
+                        _first = _m
+                except Exception as e:
+                    logger.warning("send_reminder: send to %s failed: %s", _t, e)
+            if _first is None:
+                logger.error("send_reminder: all targets failed for task %s", task_id)
+                return
+            await save_task_reminder(task_id, _first.chat.id, _first.message_id, title)
             # Одноразовое напоминание отработало — обнуляем колонку, иначе
             # при следующем рестарте restore-pass2 пришлёт «⏰ Пропущено»
             # дубль (частые auto-reload = спам одним и тем же уведом).
@@ -658,7 +704,7 @@ async def _schedule_reminder(chat_id: int, title: str, reminder_dt: str, task_id
             return
 
         job_id = f"reminder_{task_id}" if task_id else f"rem_{chat_id}_{title[:15]}_{reminder_dt}"
-        logger.info("scheduling reminder: task_id=%s chat_id=%s job_id=%s callback_data=task_complete_%s", task_id, chat_id, job_id, task_id)
+        logger.info("scheduling reminder: task_id=%s targets=%s job_id=%s callback_data=task_complete_%s", task_id, _targets, job_id, task_id)
         _scheduler.add_job(send_reminder, trigger="date", run_date=dt,
                            id=job_id, replace_existing=True)
         logger.info("Reminder scheduled: %s at %s", title, dt)

@@ -119,6 +119,55 @@ async def test_restore_pass2_recurring_advances_reminder_before_send():
 
 
 @pytest.mark.asyncio
+async def test_restore_fans_out_to_all_tgids_of_one_user():
+    """Два TG-аккаунта Кай делят один user_id (#202). restore планирует
+    задачу ОДИН раз, но fire-time рассылка идёт во все чаты — раньше второй
+    проход по tg_id перетирал job (один job_id) и увед уходил лишь в один."""
+    from nexus.handlers import tasks
+    from nexus.repos.pg_tasks_repo import Task
+    import nexus.repos.pg_tasks_repo as pgt
+    import nexus.repos.tasks_repo as trepo
+
+    fut = (datetime.now(timezone.utc) + timedelta(hours=2)).strftime("%Y-%m-%dT%H:%M:%S+00:00")
+    task = Task(id="t-1", title="позвонить", repeat="Нет", reminder=fut)
+
+    async def _get_user(tg_id):
+        return {"permissions": {"nexus": True}, "user_id": "u-1"}
+
+    added = {}
+
+    def _add_job(fn, **kw):
+        added["fn"] = fn
+        added["id"] = kw.get("id")
+
+    sched = MagicMock()
+    sched.add_job.side_effect = _add_job
+
+    with patch("core.config.config.allowed_ids", [111, 222]), \
+         patch("core.user_manager.get_user", _get_user), \
+         patch.object(tasks, "_scheduler", sched), \
+         patch.object(tasks, "_bot") as m_bot, \
+         patch.object(tasks, "_get_user_tz", AsyncMock(return_value=3)), \
+         patch.object(tasks, "save_task_reminder", AsyncMock()), \
+         patch.object(pgt.PgTasksRepo, "active_with_future_reminder", AsyncMock(return_value=[task])), \
+         patch.object(pgt.PgTasksRepo, "active_with_past_reminder", AsyncMock(return_value=[])), \
+         patch.object(pgt.PgTasksRepo, "active_recurring_without_reminder", AsyncMock(return_value=[])), \
+         patch.object(trepo.TasksRepo, "retrieve_page", AsyncMock(return_value=task)), \
+         patch.object(trepo.TasksRepo, "set_in_progress", AsyncMock()), \
+         patch.object(trepo.TasksRepo, "clear_reminder", AsyncMock()):
+        m_bot.send_message = AsyncMock(return_value=MagicMock(chat=MagicMock(id=111), message_id=1))
+        await tasks.restore_reminders_on_startup()
+
+        # ровно один job на задачу (не перезатёрт вторым аккаунтом)
+        assert sched.add_job.call_count == 1
+        assert added["id"] == "reminder_t-1"
+        # fire-time — рассылка в оба чата
+        await added["fn"]()
+        sent_to = {c.args[0] for c in m_bot.send_message.call_args_list}
+        assert sent_to == {111, 222}
+
+
+@pytest.mark.asyncio
 async def test_periodic_resync_skips_missed_recurring():
     """periodic=True (интервальный re-arm, #210): пропущенное повторяющееся
     напоминание НЕ шлётся как «⏰ Пропущено» — иначе sweep дублировал бы

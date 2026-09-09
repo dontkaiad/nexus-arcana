@@ -494,7 +494,7 @@ async def test_restore_pass3_revives_recurring_without_reminder():
     async def fake_set_props(task_id, props):
         set_props_calls.append((task_id, props))
 
-    async def fake_schedule(chat_id, title, reminder_dt, task_id, tz_offset=3):
+    async def fake_schedule(chat_id, title, reminder_dt, task_id, tz_offset=3, recipients=None):
         schedule_calls.append((task_id, reminder_dt))
 
     fake_pg = MagicMock()
@@ -560,7 +560,7 @@ async def test_reschedule_all_for_tz_preserves_local_clock_time():
     async def fake_set_props(task_id, props):
         set_props_calls.append((task_id, props))
 
-    async def fake_schedule(chat_id, title, reminder_dt, task_id, tz_offset=3):
+    async def fake_schedule(chat_id, title, reminder_dt, task_id, tz_offset=3, recipients=None):
         schedule_calls.append((task_id, reminder_dt, tz_offset))
 
     fake_pg = MagicMock()
