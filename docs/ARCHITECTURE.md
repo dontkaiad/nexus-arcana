@@ -1,6 +1,6 @@
 # Architecture
 
-> Code conforms to: `0680150` · Update in the same PR that changes the architecture.
+> Code conforms to: `e68baf5` · Update in the same PR that changes the architecture.
 > This is an engineering overview, not a developer spec. For the data model and
 > contracts, see [`docs/specs/`](specs/) (11 domain specs) and the ADRs in
 > [`docs/CASES/`](CASES/) (24). Read time: ~12–15 min.
@@ -350,6 +350,7 @@ button):
 | `pending_barter.db` | «Что в бартере?» reply | 30 m |
 | `pending_grimoire_search.db` | Grimoire search query input | 10 m |
 | `pending_note_edit.db` | Nexus note tag edit | 10 m |
+| `pending_kv.db` | shared KV — finance clarify / custom-limit / windfall-manual / debt-overpaid, arcana & nexus "не поняла" button dialogs | per-call |
 
 `pending_kv.db` is the generic version of the pattern (`core/pending_kv.py`): one table
 keyed `(uid, kind)`, JSON value, per-call TTL — new pending flows use it instead of
@@ -362,9 +363,12 @@ session/theme summary cache; `spell_whitelist.db` — the spell-correction white
 — reminder-message tracking; `ru_calendar.db` — RU work-calendar holidays (30 d);
 `nexus_streaks.db` — per-task + global daily streak store (persistent, [ADR-0023](CASES/0023-streaks-out-of-scope-for-arcana-works.md)).
 
-> One known wart: a few Nexus **finance** sub-flows still hold pending state in an
-> in-memory dict — lost on restart (issue #208). The non-money clarify-dialogs were
-> moved to `pending_kv`.
+Every button-driven "waiting for the next message / tap" dialog now lives in
+`pending_kv` or a dedicated `pending_*.db` — [`tests/test_shared.py`](../tests/test_shared.py)
+fails the build if a new module-level `_pending_*` dict shows up in a handler
+package or a bot entrypoint (#206/#208). A couple of remaining in-memory dicts
+are deliberately allowed there — timestamps and the classifier's own hand-off
+buffer, where a lost value costs nothing.
 
 ### Patterns worth learning once
 

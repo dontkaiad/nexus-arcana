@@ -57,7 +57,6 @@ from core.location import get_user_tz as _get_user_tz
 
 def _user_tz(tz_offset: int) -> timezone:
     return timezone(timedelta(hours=tz_offset))
-_clarify: dict = {}
 _last_finance_ts: dict = {}  # user_id → timestamp последней записанной финансовой записи
 
 import re as _re_nexus
@@ -792,33 +791,6 @@ async def process_text(msg: Message, text: str, user_id: str = "") -> None:
     from nexus.handlers.tasks import _get_user_tz
     tz_offset = await _get_user_tz(uid)
 
-    if uid in _clarify:
-        original = _clarify.pop(uid)
-        combined = f"{original}\nУточнение: {text}"
-        try:
-            items = await classify(combined, tz_offset=tz_offset, user_id=user_id)
-            if items and items[0].get("type") not in ("unknown", "parse_error", None):
-                lines = []
-                for data in items:
-                    line = await process_item(data, combined, msg, _clarify, user_id=user_id)
-                    if line:
-                        lines.append(line)
-                if lines:
-                    if len(lines) == 1:
-                        await msg.answer(lines[0])
-                    else:
-                        body = "\n".join(f"{i+1}. {l}" for i, l in enumerate(lines))
-                        await msg.answer(f"Записано {len(lines)} операций:\n\n{body}")
-                # react уже вызван в process_item
-                return
-        except Exception:
-            pass
-        logged = await log_error(combined, "unknown_type", "", error_code="–")
-        notion_status = "залогировано"
-        await msg.answer(f"🌒 Так и не понял · {notion_status}")
-        await react(msg, "🤔")
-        return
-
     # ── URL + note keywords → быстрый путь в заметки ─────────────────────
     import re as _re_url
     _URL_PAT = _re_url.compile(r'https?://\S+')
@@ -851,7 +823,7 @@ async def process_text(msg: Message, text: str, user_id: str = "") -> None:
 
         for data in items:
             logger.info("handle_text: processing item type=%s", data.get("type"))
-            line = await process_item(data, original_text, msg, _clarify, user_id=user_id)
+            line = await process_item(data, original_text, msg, {}, user_id=user_id)
             logger.info("handle_text: process_item returned: %s", line[:50] if line else "None/empty")
 
             if line and line.startswith("finance_clarify:"):

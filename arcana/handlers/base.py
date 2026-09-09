@@ -17,8 +17,11 @@ from core.utils import react
 router = Router()
 logger = logging.getLogger("arcana.base")
 
-_clarify: dict = {}  # user_id → original_text
-_pending_unknown: dict = {}  # user_id → (text, user_id, ts)
+# #206/#208: «не поняла, висят кнопки» — на SQLite (core.pending_kv), не в
+# память: частый auto-reload на деплое иначе роняет диалог.
+from core import pending_kv as _pkv
+_PK_UNKNOWN = "arcana_unknown_clarify"   # {"text": str, "user_id": str}
+_UNKNOWN_TTL = 300  # 5 мин
 
 ROUTER_SYSTEM = """Сначала исправь опечатки, потом определи тип. Ответь ТОЛЬКО одним словом.
 
@@ -487,30 +490,12 @@ async def route_message(
             if handled:
                 return
 
-        # ── Флоу переспроса ──────────────────────────────────────────────────
-        if uid in _clarify:
-            original = _clarify.pop(uid)
-            combined = f"{original}\nУточнение: {text}"
-            intent2 = (await ask_claude(
-                combined, system=ROUTER_SYSTEM, max_tokens=10,
-                model="claude-haiku-4-5-20251001",
-                temperature=0,
-            )).strip().lower()
-
-            if intent2 not in ("unknown", ""):
-                text = combined
-                intent = intent2
-            else:
-                logged = await log_error(combined, "unknown_type", bot_label="🌒 Arcana", error_code="–")
-                notion_status = "залогировано"
-                await message.answer(f"🌒 Так и не поняла · {notion_status}")
-                return
-        else:
-            intent = (await ask_claude(
-                text, system=ROUTER_SYSTEM, max_tokens=10,
-                model="claude-haiku-4-5-20251001",
-                temperature=0,
-            )).strip().lower()
+        # ── Классификация intent ─────────────────────────────────────────────
+        intent = (await ask_claude(
+            text, system=ROUTER_SYSTEM, max_tokens=10,
+            model="claude-haiku-4-5-20251001",
+            temperature=0,
+        )).strip().lower()
 
         logger.info("intent=%s | %s", intent, text[:60])
 
@@ -626,9 +611,9 @@ async def route_message(
             _final_emoji = reaction_for("nexus")
         elif intent in ("unknown", "") or not intent:
             # Первый раз не поняла — показать кнопки
-            import time as _time
             from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-            _pending_unknown[uid] = (text, user_id, _time.time())
+            _pkv.save(uid, _PK_UNKNOWN, {"text": text, "user_id": user_id or ""},
+                      ttl=_UNKNOWN_TTL)
             short = text[:60]
             kb = InlineKeyboardMarkup(inline_keyboard=[
                 [
@@ -646,9 +631,8 @@ async def route_message(
             )
             _final_emoji = reaction_for("unknown")
         else:
-            logged = await log_error(text, "parse_error", bot_label="🌒 Arcana", error_code="–")
-            notion_status = "залогировано"
-            await message.answer(f"❌ Не так ответил Claude · пусть Кай правит промпт · {notion_status}")
+            await log_error(text, "parse_error", bot_label="🌒 Arcana", error_code="–")
+            await message.answer("❌ Не так ответил Claude · пусть Кай правит промпт · залогировано")
             _final_emoji = reaction_for("parse_error")
 
         await react(message, _final_emoji)
@@ -667,31 +651,25 @@ async def route_message(
             code, suffix = "4xx", "ошибка конфигурации · пусть Кай правит код"
         else:
             code, suffix = "–", "что-то сломалось · пусть Кай правит код"
-        logged = await log_error(
+        await log_error(
             (message.text or "")[:200], "processing_error",
             traceback=trace, bot_label="🌒 Arcana", error_code=code
         )
-        notion_status = "залогировано"
-        await message.answer(f"❌ {suffix} · {notion_status}")
+        await message.answer(f"❌ {suffix} · залогировано")
         await react(message, reaction_for("error"))
-
-
-_UNKNOWN_TTL = 300  # 5 min
 
 
 @router.callback_query(lambda c: c.data and c.data.startswith("aunk_"))
 async def on_arcana_unknown(query: CallbackQuery, user_id: str = "") -> None:
     """Handle arcana unknown text → user chose action type."""
-    import time as _time
-
     uid = query.from_user.id
-    pending = _pending_unknown.pop(uid, None)
-    if not pending or _time.time() - pending[2] > _UNKNOWN_TTL:
+    pending = _pkv.pop(uid, _PK_UNKNOWN, ttl=_UNKNOWN_TTL)
+    if not pending:
         await query.answer("⏰ Время истекло, отправь текст ещё раз")
         return
 
-    original_text, stored_uid, _ = pending
-    notion_id = stored_uid or user_id
+    original_text = pending["text"]
+    notion_id = pending.get("user_id") or user_id
 
     # Parse action: aunk_session_123, aunk_ritual_123, etc.
     action = query.data.split("_")[1]  # session, ritual, client, tarot

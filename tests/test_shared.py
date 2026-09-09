@@ -102,41 +102,41 @@ class TestSQLitePending:
 
     @pytest.mark.asyncio
     async def test_no_dangerous_in_memory_state(self):
-        """Проверить что ЗАДАЧИ не хранятся в in-memory dict (допустимы UI-state dict)."""
+        """Диалоговый pending «жду ответ/кнопку» не должен жить в module-level
+        dict — теряется при рестарте (частый auto-reload на деплое = потерянный
+        диалог). Используй core.pending_kv или dedicated pending_*.db (#206/#208)."""
         import os
 
-        # Эти in-memory dict допустимы — краткоживущий UI state, не персистентные данные.
-        # #206/#208: все live pending-диалоги переведены на core.pending_kv (SQLite);
-        # оставшиеся здесь не критичны к рестарту (timestamps, авто-предложение).
+        # Допустимы: не критичны к рестарту (потеря = мелкое неудобство).
         ALLOWED_PATTERNS = {
-            "_pending_auto",      # UI: авто-предложение запомнить (потеря = нет предложения)
-            "_clarify",           # UI: буфер классификатора
+            "_pending_auto",      # авто-предложение запомнить (потеря = нет предложения)
             "_last_finance_ts",   # rate-limit timestamp
-            "_photo_pending",     # UI: ожидание фото
+            "_photo_pending",     # ожидание фото (короткое окно)
+            "_pending",           # work_reminder_kb / delete — TTL-swept, окно секунды
         }
 
+        roots = ("nexus/handlers", "arcana/handlers")
+        extra_files = ("nexus/nexus_bot.py", "arcana/bot.py")
+        paths = list(extra_files)
+        for r in roots:
+            for root, _dirs, files in os.walk(r):
+                paths += [os.path.join(root, f) for f in files if f.endswith(".py")]
+
         suspicious = []
-        for root, dirs, files in os.walk("nexus/handlers"):
-            for f in files:
-                if f.endswith(".py"):
-                    path = os.path.join(root, f)
-                    with open(path) as fh:
-                        content = fh.read()
-                    if "pending_" in content and "= {}" in content:
-                        for i, line in enumerate(content.split("\n")):
-                            if "pending_" in line and "= {}" in line:
-                                stripped = line.lstrip()
-                                indent = len(line) - len(stripped)
-                                if indent == 0:
-                                    # Проверить что это допустимый паттерн
-                                    var_name = stripped.split(":")[0].split("=")[0].strip()
-                                    if var_name not in ALLOWED_PATTERNS:
-                                        suspicious.append(
-                                            f"{path}:{i+1}: {stripped}"
-                                        )
+        for path in paths:
+            with open(path) as fh:
+                content = fh.read()
+            for i, line in enumerate(content.split("\n")):
+                if "pending_" in line and "= {}" in line:
+                    stripped = line.lstrip()
+                    if len(line) - len(stripped) != 0:  # только module-level
+                        continue
+                    var_name = stripped.split(":")[0].split("=")[0].strip()
+                    if var_name not in ALLOWED_PATTERNS:
+                        suspicious.append(f"{path}:{i+1}: {stripped}")
 
         assert len(suspicious) == 0, \
-            f"Найден недопустимый in-memory pending state!\n" + "\n".join(suspicious)
+            "Диалоговый pending в in-memory dict (переживёт ли рестарт?):\n" + "\n".join(suspicious)
 
 
 class TestLayoutModule:
