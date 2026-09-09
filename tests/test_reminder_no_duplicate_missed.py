@@ -119,6 +119,40 @@ async def test_restore_pass2_recurring_advances_reminder_before_send():
 
 
 @pytest.mark.asyncio
+async def test_periodic_resync_skips_missed_recurring():
+    """periodic=True (интервальный re-arm, #210): пропущенное повторяющееся
+    напоминание НЕ шлётся как «⏰ Пропущено» — иначе sweep дублировал бы
+    живой пинг. Одноразовые — обрабатываются как обычно."""
+    from nexus.handlers import tasks
+    from nexus.repos.pg_tasks_repo import Task
+    import nexus.repos.pg_tasks_repo as pgt
+    import nexus.repos.tasks_repo as trepo
+
+    past = (datetime.now(timezone.utc) - timedelta(hours=3)).strftime("%Y-%m-%dT%H:%M:%S+00:00")
+    rec = Task(id="t-r", title="полить цветы", repeat="Ежедневно",
+               repeat_time="09:00", reminder=past)
+    fake_user = {"permissions": {"nexus": True}, "user_id": "u-1"}
+    set_props = AsyncMock()
+
+    with patch("core.config.config.allowed_ids", [7]), \
+         patch("core.user_manager.get_user", AsyncMock(return_value=fake_user)), \
+         patch.object(tasks, "_scheduler", MagicMock()), \
+         patch.object(tasks, "_bot") as m_bot, \
+         patch.object(tasks, "_get_user_tz", AsyncMock(return_value=3)), \
+         patch.object(tasks, "_schedule_reminder", AsyncMock()), \
+         patch.object(tasks, "save_task_reminder", AsyncMock()), \
+         patch.object(pgt.PgTasksRepo, "active_with_future_reminder", AsyncMock(return_value=[])), \
+         patch.object(pgt.PgTasksRepo, "active_with_past_reminder", AsyncMock(return_value=[rec])), \
+         patch.object(pgt.PgTasksRepo, "active_recurring_without_reminder", AsyncMock(return_value=[])), \
+         patch.object(trepo.TasksRepo, "set_props", set_props):
+        m_bot.send_message = AsyncMock()
+        await tasks.restore_reminders_on_startup(periodic=True)
+
+    m_bot.send_message.assert_not_awaited()
+    set_props.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_live_reminder_fire_keeps_recurring_reminder():
     """Повторяющуюся задачу send_reminder НЕ трогает — её reminder двигает
     cb-обработчик после ответа пользователя."""

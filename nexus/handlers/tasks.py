@@ -288,14 +288,23 @@ def _remove_task_jobs(task_id: str) -> None:
             pass
 
 
-async def restore_reminders_on_startup() -> None:
+async def restore_reminders_on_startup(periodic: bool = False) -> None:
     """Восстановить APScheduler jobs для задач с напоминаниями.
 
     Проход 1: задачи с будущим напоминанием — планируем как есть.
-    Проход 2: повторяющиеся задачи с прошедшим напоминанием —
-              сдвигаем до ближайшей будущей даты, обновляем PG, планируем.
+    Проход 2: задачи с прошедшим напоминанием —
+              одноразовые: шлём «⏰ Пропущено» + обнуляем reminder;
+              повторяющиеся: сдвигаем до ближайшей будущей даты + шлём увед.
     Проход 3: задачи с repeat_time, но reminder IS NULL — оживляем,
               вычисляем первый future-run, записываем в PG и планируем.
+
+    ``periodic=True`` — вызов из интервального re-arm (#210), не со старта:
+    APScheduler теряет in-memory job'ы при рестарте, поэтому pass 1/3 гоняем
+    периодически (идемпотентны: ``replace_existing`` / reminder IS NULL).
+    Pass 2 для ПОВТОРЯЮЩИХСЯ в periodic-режиме пропускаем — иначе sweep
+    через несколько минут после живого «🔔 Напоминание» пришлёт ещё и
+    «⏰ Пропущено … переношу», пока пользователь не нажал кнопку. Пропущенные
+    повторяющиеся подхватит pass 2 на ближайшем рестарте.
     """
     from core.config import config
     from core.user_manager import get_user
@@ -379,6 +388,10 @@ async def restore_reminders_on_startup() -> None:
                         except Exception as e:
                             logger.error("restore pass2: failed to send missed '%s': %s", title, e)
                     else:
+                        if periodic:
+                            # periodic re-arm: пропущенные повторяющиеся не трогаем
+                            # (см. docstring) — подхватит pass 2 на рестарте.
+                            continue
                         # ── Повторяющаяся задача — СНАЧАЛА сдвинуть, потом увед ──
                         # Порядок важен: если auto-reload (частые деплои →
                         # auto-pull + watchfiles) перезапустит процесс между

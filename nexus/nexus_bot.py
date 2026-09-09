@@ -1614,6 +1614,17 @@ async def main() -> None:
             id="budget_payday_review",
             replace_existing=True,
         )
+        # Напоминания: периодический re-arm из PG каждые 5 минут (#210).
+        # APScheduler теряет in-memory job'ы при рестарте, а restore со старта
+        # ловит только момент рестарта — sweep закрывает окно между деплоями.
+        from apscheduler.triggers.interval import IntervalTrigger
+        nexus_scheduler.add_job(
+            restore_reminders_on_startup,
+            kwargs={"periodic": True},
+            trigger=IntervalTrigger(minutes=5),
+            id="reminder_resync",
+            replace_existing=True,
+        )
     # Логируем все запланированные cron jobs
     if nexus_scheduler:
         cron_jobs = [(j.id, str(j.trigger), str(j.next_run_time)) for j in nexus_scheduler.get_jobs()]

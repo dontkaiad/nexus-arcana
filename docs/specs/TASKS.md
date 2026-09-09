@@ -147,6 +147,15 @@ No amount in `note` → nothing written, completion is never blocked.
   persisted to `reminder`, and scheduled
   (`active_recurring_without_reminder`). Pass 1 reschedules future
   reminders; pass 2 advances/handles past-due ones.
+- **Reminder jobs are re-armed from PG every 5 min, not only on startup**
+  (`reminder_resync` `IntervalTrigger`, `restore_reminders_on_startup(periodic=True)`,
+  #210). APScheduler keeps jobs in memory and loses them on restart; the
+  interval sweep closes the window between deploys. In `periodic` mode pass 1
+  (re-arm future, `replace_existing`) and pass 3 (revive `reminder IS NULL`)
+  run as normal, and pass 2 handles missed **one-off** reminders; missed
+  **recurring** reminders are left for the next real startup — a periodic
+  pass 2 would fire «⏰ Пропущено … переношу» on top of the live «🔔
+  Напоминание» before the user answers.
 - **A one-off reminder is nulled once it has fired** (`clear_reminder`, #206).
   Both when it fires live (`_schedule_reminder.send_reminder`) and when
   pass 2 delivers it late as «⏰ Пропущено», `reminder` is set to `NULL`
@@ -238,8 +247,9 @@ category resolution on completion also runs on Haiku
 - `nexus/repos/tasks_repo.py` — repository seam (`clear_reminder`)
 - `nexus/handlers/tasks.py` — create/complete/recurring reset
   (`_handle_recurring_task_reset`, `_handle_recurring_reminder_done`),
-  `restore_reminders_on_startup`, `_parse_repeat_time`, `_reschedule_all_for_tz`,
-  `_update_streak_line`, Haiku `ask_claude` calls
+  `restore_reminders_on_startup` (`periodic` param — #210), `_parse_repeat_time`,
+  `_reschedule_all_for_tz`, `_update_streak_line`, Haiku `ask_claude` calls
+- `nexus/nexus_bot.py` — `reminder_resync` interval job (5 min, #210)
 - `core/classifier.py` — `build_system` future-task-money → `note` rule
 - `nexus/handlers/finance.py` — `expense_from_task_note`, `_write_one_time_expense`
 - `core/task_streaks.py` — per-task streak store + rules
