@@ -538,14 +538,14 @@ async def cmd_list(msg: Message, user_id: str = "") -> None:
 
 @dp.message(Command("grant"))
 async def cmd_grant(msg: Message) -> None:
-    """Owner-only. /grant <tg_id> friend calendar — выдать доступ к календарю.
+    """Owner-only. /grant <tg_id> friend booking — выдать доступ к календарю.
 
     Пишет в общую heylark `grants`-базу (#23 / ADR-0026). Только owner доходит
     сюда — WhitelistMiddleware отсекает всех остальных.
     """
     parts = (msg.text or "").split()
     if len(parts) < 2:
-        await msg.answer("Формат: /grant <tg_id> [friend] [calendar]\nПример: /grant 12345678 friend calendar")
+        await msg.answer("Формат: /grant <tg_id> [friend] [booking]\nПример: /grant 12345678 friend booking")
         return
     try:
         tg_id = int(parts[1])
@@ -553,14 +553,14 @@ async def cmd_grant(msg: Message) -> None:
         await msg.answer("tg_id должен быть числом.")
         return
     role = parts[2] if len(parts) > 2 else "friend"
-    app = parts[3] if len(parts) > 3 else "calendar"
-    if app != "calendar":
-        await msg.answer("Через бота выдаётся только `app=calendar`. Другие — вручную в БД.")
+    app = parts[3] if len(parts) > 3 else "booking"
+    if app != "booking":
+        await msg.answer("Через бота выдаётся только `app=booking`. Другие — вручную в БД.")
         return
-    from core.auth_grants import upsert_calendar_grant
-    ok = await upsert_calendar_grant(tg_id, role=role)
+    from core.auth_grants import upsert_booking_grant
+    ok = await upsert_booking_grant(tg_id, role=role)
     if ok:
-        await msg.answer(f"✅ grant: tg_id={tg_id} · calendar · {role} · approved")
+        await msg.answer(f"✅ grant: tg_id={tg_id} · booking · {role} · approved")
     else:
         await msg.answer("⚠️ AUTH_DATABASE_URL не настроен — грант не записан.")
 

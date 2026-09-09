@@ -10,7 +10,7 @@ import pytest
 import sqlalchemy as sa
 from sqlalchemy.pool import StaticPool
 
-from core.auth_grants import calendar_role, grant_role, upsert_calendar_grant
+from core.auth_grants import booking_role, grant_role, upsert_booking_grant
 
 OWNER_A, OWNER_B = 111, 222
 FRIEND = 333
@@ -29,10 +29,10 @@ def _make_engine(seed_calendar_friend=True):
             "INSERT INTO grants VALUES (999, 'cats', 'resident', 'approved', 'x', 'x')"))
         if seed_calendar_friend:
             c.execute(sa.text(
-                "INSERT INTO grants VALUES (:t, 'calendar', 'friend', 'approved', 'x', 'x')"),
+                "INSERT INTO grants VALUES (:t, 'booking', 'friend', 'approved', 'x', 'x')"),
                 {"t": FRIEND})
             c.execute(sa.text(
-                "INSERT INTO grants VALUES (555, 'calendar', 'friend', 'pending', 'x', 'x')"))
+                "INSERT INTO grants VALUES (555, 'booking', 'friend', 'pending', 'x', 'x')"))
     return eng
 
 
@@ -45,27 +45,27 @@ def _cfg():
 @pytest.mark.asyncio
 async def test_owner_is_admin_without_grant_row(_cfg):
     eng = _make_engine()
-    assert await calendar_role(OWNER_A, engine=eng) == "admin"
-    assert await calendar_role(OWNER_B, engine=eng) == "admin"
+    assert await booking_role(OWNER_A, engine=eng) == "admin"
+    assert await booking_role(OWNER_B, engine=eng) == "admin"
 
 
 @pytest.mark.asyncio
 async def test_approved_calendar_grant_is_friend(_cfg):
     eng = _make_engine()
-    assert await calendar_role(FRIEND, engine=eng) == "friend"
+    assert await booking_role(FRIEND, engine=eng) == "friend"
 
 
 @pytest.mark.asyncio
 async def test_pending_or_missing_grant_is_guest(_cfg):
     eng = _make_engine()
-    assert await calendar_role(555, engine=eng) == "guest"       # pending
-    assert await calendar_role(STRANGER, engine=eng) == "guest"  # no row
+    assert await booking_role(555, engine=eng) == "guest"       # pending
+    assert await booking_role(STRANGER, engine=eng) == "guest"  # no row
 
 
 @pytest.mark.asyncio
 async def test_cats_grant_does_not_grant_calendar(_cfg):
     eng = _make_engine()
-    assert await calendar_role(999, engine=eng) == "guest"
+    assert await booking_role(999, engine=eng) == "guest"
     assert await grant_role(999, "cats", engine=eng) == "resident"
 
 
@@ -73,19 +73,19 @@ async def test_cats_grant_does_not_grant_calendar(_cfg):
 async def test_no_auth_engine_everyone_is_guest(_cfg):
     # engine=None and AUTH_DATABASE_URL unset
     with patch("core.auth_grants.get_auth_engine", return_value=None):
-        assert await calendar_role(FRIEND) == "guest"
-        assert await calendar_role(OWNER_A) == "admin"  # owner still works
+        assert await booking_role(FRIEND) == "guest"
+        assert await booking_role(OWNER_A) == "admin"  # owner still works
 
 
 @pytest.mark.asyncio
 async def test_upsert_grant_creates_and_updates(_cfg):
     eng = _make_engine(seed_calendar_friend=False)
-    assert await calendar_role(FRIEND, engine=eng) == "guest"
-    assert await upsert_calendar_grant(FRIEND, engine=eng) is True
-    assert await calendar_role(FRIEND, engine=eng) == "friend"
+    assert await booking_role(FRIEND, engine=eng) == "guest"
+    assert await upsert_booking_grant(FRIEND, engine=eng) is True
+    assert await booking_role(FRIEND, engine=eng) == "friend"
     # idempotent re-grant
-    assert await upsert_calendar_grant(FRIEND, engine=eng) is True
+    assert await upsert_booking_grant(FRIEND, engine=eng) is True
     with eng.connect() as c:
-        n = c.execute(sa.text("SELECT COUNT(*) FROM grants WHERE tg_id=:t AND app='calendar'"),
+        n = c.execute(sa.text("SELECT COUNT(*) FROM grants WHERE tg_id=:t AND app='booking'"),
                       {"t": FRIEND}).scalar()
     assert n == 1

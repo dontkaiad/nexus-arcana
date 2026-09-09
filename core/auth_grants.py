@@ -1,7 +1,7 @@
 """core/auth_grants.py — role resolution against the shared heylark auth DB (#23 / ADR-0026).
 
 The `grants` table lives in a SEPARATE Postgres database (`AUTH_DATABASE_URL`,
-db `auth`), shared across heylark products (`cats`, and now `calendar`). It is
+db `auth`), shared across heylark products (`cats`, and now `booking`). It is
 owned by `authsvc`; this module needs `CONNECT` on that DB plus
 `SELECT/INSERT/UPDATE` on `grants`.
 
@@ -79,12 +79,12 @@ async def grant_role(tg_id: int, app: str, *, engine: Optional[Engine] = None) -
         return None
 
 
-async def calendar_role(tg_id: int, *, engine: Optional[Engine] = None) -> str:
-    """'admin' | 'friend' | 'guest' for the calendar app."""
+async def booking_role(tg_id: int, *, engine: Optional[Engine] = None) -> str:
+    """'admin' | 'friend' | 'guest' for the booking app."""
     from core.config import config
     if tg_id and tg_id in config.allowed_ids:
         return "admin"
-    role = await grant_role(tg_id, "calendar", engine=engine)
+    role = await grant_role(tg_id, "booking", engine=engine)
     if role == "admin":
         return "admin"
     return "friend" if role else "guest"
@@ -105,17 +105,17 @@ def _upsert_grant_sync(engine: Engine, tg_id: int, app: str, role: str, status: 
         conn.execute(stmt, {"tg": tg_id, "app": app, "role": role, "status": status, "now": now})
 
 
-async def upsert_calendar_grant(
+async def upsert_booking_grant(
     tg_id: int,
     role: str = "friend",
     status: str = "approved",
     *,
     engine: Optional[Engine] = None,
 ) -> bool:
-    """Grant (or update) calendar access for a tg_id. Returns False if no auth DB."""
+    """Grant (or update) booking access for a tg_id. Returns False if no auth DB."""
     eng = engine or get_auth_engine()
     if eng is None:
-        logger.warning("upsert_calendar_grant: AUTH_DATABASE_URL unset")
+        logger.warning("upsert_booking_grant: AUTH_DATABASE_URL unset")
         return False
-    await asyncio.to_thread(_upsert_grant_sync, eng, tg_id, "calendar", role, status)
+    await asyncio.to_thread(_upsert_grant_sync, eng, tg_id, "booking", role, status)
     return True
