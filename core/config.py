@@ -127,6 +127,7 @@ class AppConfig:
     log_chat_id: str = ""
     log_thread_nexus: str = ""
     log_thread_arcana: str = ""
+    log_thread_booking: str = ""  # топик Zarya/Booking в лог-группе (#23)
     # ── Единый вход heylark.dev: cookie hl_session ставит login.heylark.dev,
     # nexus-arcana только проверяет её (см. miniapp/backend/auth.py) и
     # редиректит неавторизованных на LOGIN_BASE_URL/login?next=... ──
@@ -136,6 +137,9 @@ class AppConfig:
     # ── Shared heylark auth DB (grants/people) — separate Postgres. Unset →
     # every non-owner resolves to guest (see core/auth_grants.py, #23). ──
     auth_database_url: str = ""
+    # ── Service-to-service secret: the Zarya booking bot → Booking API
+    # (`X-Booking-Service-Token`). Same value in the bot's env. #23. ──
+    booking_service_token: str = ""
 
 
 def load_config() -> AppConfig:
@@ -150,6 +154,7 @@ def load_config() -> AppConfig:
         log_chat_id      = _optional("TG_LOG_CHAT_ID"),
         log_thread_nexus = _optional("TG_LOG_THREAD_NEXUS"),
         log_thread_arcana = _optional("TG_LOG_THREAD_ARCANA"),
+        log_thread_booking = _optional("TG_LOG_THREAD_BOOKING"),
         session_secret       = _optional("SESSION_SECRET"),
         cookie_domain        = _optional("COOKIE_DOMAIN", ".heylark.dev"),
         login_base_url       = _optional("LOGIN_BASE_URL", "https://login.heylark.dev"),

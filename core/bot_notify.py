@@ -98,6 +98,12 @@ async def notify_log_group(text: str, thread_id: str = "") -> bool:
         return False
 
 
+async def notify_booking_log(text: str) -> bool:
+    """Ошибки / деплои / события букинга (Zarya) → отдельный топик лог-группы
+    (`TG_LOG_THREAD_BOOKING`, #23). Fail-safe как notify_log_group."""
+    return await notify_log_group(text, config.log_thread_booking)
+
+
 def _version_stamp() -> str:
     """Версия для старт-пинга. В контейнере — время сборки из /app/BUILD_STAMP
     (.git в образ не копируется, git внутри не работает). Локально — git-хэш.
@@ -134,6 +140,8 @@ async def notify_startup(bot: str) -> bool:
     """
     if bot == "arcana":
         label, thread = "🌒 <b>Arcana</b>", config.log_thread_arcana
+    elif bot in ("booking", "zarya"):
+        label, thread = "⭐ <b>Zarya</b>", config.log_thread_booking
     else:
         label, thread = "☀️ <b>Nexus</b>", config.log_thread_nexus
     try:
