@@ -125,7 +125,7 @@ location). `nexus/` and `arcana/` are domain packages that only talk to `core/`
 interfaces. The Mini App backend (`miniapp/backend/`) runs as a separate FastAPI
 process but shares the same Postgres and `core/` modules.
 
-**24 Architecture Decision Records** in [`docs/CASES/`](docs/CASES/) covering:
+**25 Architecture Decision Records** in [`docs/CASES/`](docs/CASES/) covering:
 RAG vector backend and right-sizing, voice authorship and RAG corpus gating,
 deterministic card parser, CI/CD forced-command deploy, single-writer location,
 Notion→PG migration strategy and execution, access model, and more. Each ADR states

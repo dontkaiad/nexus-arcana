@@ -189,6 +189,7 @@ text). No Sonnet, no Opus. Reads/writes/status are pure SQL.
   update), `PgNexusListsRepo`/`PgArcanaInventoryRepo`, barter guard
 - `miniapp/backend/routes/writes.py` — `list_patch` (`PATCH /api/lists/{id}`, #45),
   `list_create` / `list_done` / `list_checkout` / `list_delete`
+  (`list_create` idempotency-guarded — offline write queue, #189 / ADR-0025)
 - `core/repos/lists_repo.py` — seam (`ListsRepo`, `record_purchase`, PG writes)
 - `core/list_manager.py` — add/check/checklist/inventory/recurring/expiry flows
 - `core/lists_parser.py` — Haiku buy-text parser

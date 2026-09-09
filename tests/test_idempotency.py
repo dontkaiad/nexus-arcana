@@ -204,6 +204,89 @@ def test_finance_without_idempotency_key_works(client):
     assert "_replay" not in data
 
 
+# ── #189: idempotency на «на бегу» create-эндпоинтах (offline-очередь) ────────
+
+def _idem_patches():
+    tr, fr, sr = _make_idem_store()
+    return [
+        patch.object(_idem_mod._idem_repo, "try_reserve", tr),
+        patch.object(_idem_mod._idem_repo, "fetch_result", fr),
+        patch.object(_idem_mod._idem_repo, "store_result", sr),
+        patch("miniapp.backend.routes.writes.get_user_id",
+              AsyncMock(return_value=FAKE_USER_ID)),
+    ]
+
+
+def test_task_create_same_key_creates_one(client):
+    from miniapp.backend.routes import writes as _w
+    from contextlib import ExitStack
+    n = {"c": 0}
+
+    async def fake_create(_db, _props):
+        n["c"] += 1
+        return f"task-{n['c']}"
+
+    with ExitStack() as st:
+        for p in _idem_patches():
+            st.enter_context(p)
+        st.enter_context(patch.object(_w._tasks_pg_repo, "create", AsyncMock(side_effect=fake_create)))
+        st.enter_context(patch("miniapp.backend.routes.writes.notify_user", AsyncMock()))
+        h = {"Idempotency-Key": "task-k1"}
+        r1 = client.post("/api/tasks", json={"title": "позвонить в банк"}, headers=h)
+        r2 = client.post("/api/tasks", json={"title": "позвонить в банк"}, headers=h)
+
+    assert r1.status_code == 200 and r2.status_code == 200
+    assert n["c"] == 1
+    assert r1.json()["id"] == r2.json()["id"]
+    assert r2.json().get("_replay") is True
+
+
+def test_list_create_same_key_creates_one(client):
+    from miniapp.backend.routes import writes as _w
+    from core.repos.pg_nexus_lists_repo import ListItem
+    from contextlib import ExitStack
+    n = {"c": 0}
+
+    async def fake_add(**kw):
+        n["c"] += 1
+        return ListItem(id=f"li-{n['c']}", name=kw.get("name", ""), list_type="покупки",
+                        status="not_started", category="", note="", user_id=FAKE_USER_ID)
+
+    with ExitStack() as st:
+        for p in _idem_patches():
+            st.enter_context(p)
+        st.enter_context(patch.object(_w._nexus_lists_repo, "add_item", AsyncMock(side_effect=fake_add)))
+        h = {"Idempotency-Key": "list-k1"}
+        r1 = client.post("/api/lists", json={"type": "buy", "name": "молоко"}, headers=h)
+        r2 = client.post("/api/lists", json={"type": "buy", "name": "молоко"}, headers=h)
+
+    assert r1.status_code == 200 and r2.status_code == 200
+    assert n["c"] == 1
+    assert r2.json().get("_replay") is True
+
+
+def test_memory_create_same_key_creates_one(client):
+    from contextlib import ExitStack
+    n = {"c": 0}
+
+    async def fake_parse(text, user_id, bot_label="☀️ Nexus"):
+        n["c"] += 1
+        return {"kind": "memory", "memory_id": f"mem-{n['c']}", "fact": text}
+
+    with ExitStack() as st:
+        for p in _idem_patches():
+            st.enter_context(p)
+        st.enter_context(patch("core.memory.parse_and_store", AsyncMock(side_effect=fake_parse)))
+        st.enter_context(patch("miniapp.backend.routes.writes.notify_user", AsyncMock()))
+        h = {"Idempotency-Key": "mem-k1"}
+        r1 = client.post("/api/memory", json={"text": "кот боится пылесоса"}, headers=h)
+        r2 = client.post("/api/memory", json={"text": "кот боится пылесоса"}, headers=h)
+
+    assert r1.status_code == 200 and r2.status_code == 200
+    assert n["c"] == 1
+    assert r2.json().get("_replay") is True
+
+
 # ── Test 5: race resolves on 2nd poll ─────────────────────────────────────────
 
 def test_race_resolves_on_second_poll():

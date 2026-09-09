@@ -177,7 +177,8 @@ transaction** as the increment.
 - `core/budget.py` — `compute_limits`, `load_budget_data`
 - `miniapp/backend/routes/finance.py` — `_view_cushion`
 - `miniapp/backend/routes/writes.py` — `POST /finance/cushion/target`,
-  `POST /finance/cushion/deposit` (#123)
+  `POST /finance/cushion/deposit` (#123; `deposit` idempotency-guarded for the
+  offline write queue — #189 / ADR-0025)
 - `miniapp/frontend/src/App.jsx` — `CushionScreen`, `DebtDrillSheet`
   (debt-overpaid → cushion prompt); `adapters.js` — `adaptFinanceCushion`
 

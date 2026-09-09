@@ -203,7 +203,9 @@ Mini App uses to hide the task until the next run.
   → `nexus/repos/tasks_tables.py`.
 - Mini App — `miniapp/backend/routes/tasks.py` (`GET /api/tasks`,
   serialize), `miniapp/backend/routes/writes.py` (status write +
-  per-task/global streak update), `miniapp/backend/routes/streaks.py`
+  per-task/global streak update; `POST /api/tasks` create is
+  idempotency-guarded for the offline write queue — #189 / ADR-0025),
+  `miniapp/backend/routes/streaks.py`
   (`reset_broken_streaks` + `get_user_task_streaks`).
 
 ## Model routing (from code)

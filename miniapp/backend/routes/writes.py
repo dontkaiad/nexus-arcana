@@ -385,7 +385,12 @@ async def task_edit(
 async def task_create(
     body: TaskCreateBody,
     tg_id: int = Depends(current_user_id),
+    idempotency_key: Optional[str] = Header(None, alias="Idempotency-Key"),
 ) -> dict[str, Any]:
+    return await idempotent(tg_id, idempotency_key, lambda: _task_create(body, tg_id))
+
+
+async def _task_create(body: "TaskCreateBody", tg_id: int) -> dict[str, Any]:
     user_id = (await get_user_id(tg_id)) or ""
     # База задач — Nexus-only, поле "Бот" отсутствует в её схеме.
     props: dict = {
@@ -518,10 +523,15 @@ class DebtCloseBody(BaseModel):
 async def finance_debt_create(
     body: DebtBody,
     tg_id: int = Depends(current_user_id),
+    idempotency_key: Optional[str] = Header(None, alias="Idempotency-Key"),
 ) -> dict[str, Any]:
     """Долговое движение из Mini App (#123). `direction` ∈ borrowed / repaid /
     lent / received. create → upsert в `debts`; reduce → частичное/полное
     погашение (404 если такого долга нет)."""
+    return await idempotent(tg_id, idempotency_key, lambda: _finance_debt_create(body, tg_id))
+
+
+async def _finance_debt_create(body: "DebtBody", tg_id: int) -> dict[str, Any]:
     from core.repos.pg_debts_repo import _repo as _debt_repo
 
     if body.direction not in _DEBT_DIRECTIONS:
@@ -670,9 +680,14 @@ class GoalContributeBody(BaseModel):
 async def finance_goal_contribute(
     body: GoalContributeBody,
     tg_id: int = Depends(current_user_id),
+    idempotency_key: Optional[str] = Header(None, alias="Idempotency-Key"),
 ) -> dict[str, Any]:
     """#205: ручной взнос в накопление цели (`goals.saved += amount`).
     Достигли `target` → цель авто-переходит в `achieved`."""
+    return await idempotent(tg_id, idempotency_key, lambda: _finance_goal_contribute(body, tg_id))
+
+
+async def _finance_goal_contribute(body: "GoalContributeBody", tg_id: int) -> dict[str, Any]:
     from core.repos.pg_goals_repo import _repo as _goals_repo
 
     user_id = (await get_user_id(tg_id)) or ""
@@ -724,10 +739,15 @@ class CushionDepositBody(BaseModel):
 async def finance_cushion_deposit(
     body: CushionDepositBody,
     tg_id: int = Depends(current_user_id),
+    idempotency_key: Optional[str] = Header(None, alias="Idempotency-Key"),
 ) -> dict[str, Any]:
     """Пополнить баланс подушки из Mini App (инкремент + строка в
     cushion_transactions). Используется для переплаты по долгу (#123,
     `source="debt_overpaid"`) и вручную."""
+    return await idempotent(tg_id, idempotency_key, lambda: _finance_cushion_deposit(body, tg_id))
+
+
+async def _finance_cushion_deposit(body: "CushionDepositBody", tg_id: int) -> dict[str, Any]:
     from core.repos.pg_cushion_repo import _repo as _cushion_repo
     user_id = (await get_user_id(tg_id)) or ""
     amount = int(round(body.amount))
@@ -1415,7 +1435,12 @@ class ListCreateBody(BaseModel):
 async def list_create(
     body: ListCreateBody,
     tg_id: int = Depends(current_user_id),
+    idempotency_key: Optional[str] = Header(None, alias="Idempotency-Key"),
 ) -> dict[str, Any]:
+    return await idempotent(tg_id, idempotency_key, lambda: _list_create(body, tg_id))
+
+
+async def _list_create(body: "ListCreateBody", tg_id: int) -> dict[str, Any]:
     if body.type not in _LIST_TYPES:
         raise HTTPException(status_code=400, detail=f"type must be one of {sorted(_LIST_TYPES)}")
     user_id = (await get_user_id(tg_id)) or ""
@@ -1664,10 +1689,15 @@ class NoteBody(BaseModel):
 async def memory_create(
     body: NoteBody,
     tg_id: int = Depends(current_user_id),
+    idempotency_key: Optional[str] = Header(None, alias="Idempotency-Key"),
 ) -> dict[str, Any]:
     """FAB «В память» — как в боте: Haiku парсит текст (категория/связь/ключ),
     долги уходят в `debts`, алиас канонизируется, потом уведомление в Nexus
     (#6). `body.cat` из формы игнорируется — категорию ставит парсер."""
+    return await idempotent(tg_id, idempotency_key, lambda: _memory_create(body, tg_id))
+
+
+async def _memory_create(body: "NoteBody", tg_id: int) -> dict[str, Any]:
     user_id = (await get_user_id(tg_id)) or ""
     from core.memory import parse_and_store
     r = await parse_and_store(body.text, user_id, bot_label="☀️ Nexus")

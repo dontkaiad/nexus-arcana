@@ -1,9 +1,9 @@
 # Architecture
 
-> Code conforms to: `e68baf5` · Update in the same PR that changes the architecture.
+> Code conforms to: `3978bdd` · Update in the same PR that changes the architecture.
 > This is an engineering overview, not a developer spec. For the data model and
 > contracts, see [`docs/specs/`](specs/) (11 domain specs) and the ADRs in
-> [`docs/CASES/`](CASES/) (24). Read time: ~12–15 min.
+> [`docs/CASES/`](CASES/) (25). Read time: ~12–15 min.
 
 ## What this is
 
@@ -429,6 +429,12 @@ In order — because sequencing is part of the engineering:
   foundation is in place and the Mini App now surfaces both directions (planned badge,
   `from_work` reverse-link, create-from-app, a "done" tail so finished practice stays
   visible); next is richer planning ergonomics on top of it.
+- **Offline for the Mini App.** Phase 1 (shipped, [ADR-0025](CASES/0025-offline-write-queue-scope.md))
+  is a write outbox: tasks / finance / lists / memory recorded with no connection go to
+  a `localStorage` queue and flush on reconnect, deduped by idempotency key. Phase 2 —
+  offline *reads* (service worker + PWA). Phase 3 — Arcana rituals/sessions offline
+  (their write is text-plus-parse, not an append, and has no Mini App create endpoint
+  yet). This is what "record a ritual in the forest where there's no signal" needs.
 - **Apple-ecosystem integration** (planned, not built) — native reach into the
   macOS/iOS side I actually live in, so the assistant meets me where I work.
 

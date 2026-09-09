@@ -13,7 +13,7 @@ import {
   adaptGrimoire, adaptGrimoireDetail,
   formatMonth, formatDate, formatShortDate,
 } from "./adapters";
-import { apiGet, apiPost, apiDelete, apiPatch, apiStream } from "./api";
+import { apiGet, apiPost, apiDelete, apiPatch, apiStream, flushOfflineQueue, outboxCount } from "./api";
 import { SelfListCard, SelfDetailHeader } from "./components/self/SelfClientCard.jsx";
 import {
   Sun, Moon as LucideMoon, Check, Coins, List as ListIcon, Brain, Calendar,
@@ -229,6 +229,41 @@ function groupByCat(items) {
     if (wa !== wb) return wa - wb;
     return a.localeCompare(b, "ru");
   });
+}
+
+// #189: офлайн-очередь на запись. Держит счётчик, флашит при появлении сети /
+// при монтировании / раз в 30с. Возвращает { queued, online, flushNow }.
+function useOfflineQueue() {
+  const [queued, setQueued] = useState(() => outboxCount());
+  const [online, setOnline] = useState(() =>
+    typeof navigator === "undefined" ? true : navigator.onLine !== false);
+
+  const flushNow = React.useCallback(async () => {
+    const r = await flushOfflineQueue();
+    setQueued(outboxCount());
+    return r;
+  }, []);
+
+  useEffect(() => {
+    const sync = () => setQueued(outboxCount());
+    const onOnline = () => { setOnline(true); flushNow(); };
+    const onOffline = () => setOnline(false);
+    window.addEventListener("online", onOnline);
+    window.addEventListener("offline", onOffline);
+    // счётчик мог измениться из apiPost в другом компоненте — опрашиваем
+    const poll = setInterval(() => {
+      sync();
+      if (outboxCount() > 0 && (navigator.onLine !== false)) flushNow();
+    }, 30000);
+    flushNow();          // при монтировании
+    return () => {
+      window.removeEventListener("online", onOnline);
+      window.removeEventListener("offline", onOffline);
+      clearInterval(poll);
+    };
+  }, [flushNow]);
+
+  return { queued, online, flushNow, refresh: () => setQueued(outboxCount()) };
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -7596,7 +7631,13 @@ function QuickForm({ s, kind, onDone, botType = "nexus" }) {
       idemKeyRef.current = crypto.randomUUID();
       onDone();
     } catch (e) {
-      alert(`Не получилось: ${e.message}`);
+      // #189: нет сети → запись легла в офлайн-очередь, это не ошибка
+      if (e && e.queued) {
+        idemKeyRef.current = crypto.randomUUID();
+        onDone();
+      } else {
+        alert(`Не получилось: ${e.message}`);
+      }
     } finally {
       setBusy(false);
     }
@@ -7952,7 +7993,7 @@ function TaskForm({ s, onSubmit, busy }) {
         s={s}
         disabled={!valid || busy}
         label={busy ? "Сохраняю..." : "Добавить задачу"}
-        onClick={onSubmit(async () => {
+        onClick={onSubmit(async (idemKey) => {
           // Собираем дату+время в ISO, если есть
           let dateValue = date || null;
           if (date && time) {
@@ -7963,7 +8004,7 @@ function TaskForm({ s, onSubmit, busy }) {
             cat: cat || null,
             prio,
             date: dateValue,
-          });
+          }, { idempotencyKey: idemKey });
         })}
       />
     </div>
@@ -8110,11 +8151,11 @@ function NoteForm({ s, onSubmit, busy }) {
         s={s}
         disabled={!valid || busy}
         label={busy ? "Сохраняю..." : "Сохранить"}
-        onClick={onSubmit(async () => {
+        onClick={onSubmit(async (idemKey) => {
           await apiPost("/api/memory", {
             text: text.trim(),
             cat: cat || null,
-          });
+          }, { idempotencyKey: idemKey });
         })}
       />
     </div>
@@ -8348,17 +8389,17 @@ function ListAddForm({ s, onSubmit, busy }) {
         s={s}
         disabled={!valid || busy}
         label={busy ? "Сохраняю..." : (validNames.length > 1 ? `Добавить ${validNames.length} шт.` : "Добавить")}
-        onClick={onSubmit(async () => {
+        onClick={onSubmit(async (idemKey) => {
           const noteCombined = [location && `место: ${location}`, note].filter(Boolean).join(" · ") || null;
-          for (const nm of validNames) {
+          for (let i = 0; i < validNames.length; i++) {
             await apiPost("/api/lists", {
               type,
-              name: nm,
+              name: validNames[i],
               cat: cat || null,
               qty: qty ? parseFloat(qty) : null,
               expires: expires || null,
               note: noteCombined,
-            });
+            }, { idempotencyKey: idemKey ? `${idemKey}-${i}` : undefined });
           }
         })}
       />
@@ -8750,6 +8791,7 @@ function AppShell() {
   const [fabOpen, setFabOpen] = useState(false);
   const [fabForm, setFabForm] = useState(null);
   const aRef = useRef(null);
+  const offline = useOfflineQueue();
 
   const go = (toN) => {
     if (aRef.current) cancelAnimationFrame(aRef.current);
@@ -8960,6 +9002,23 @@ function AppShell() {
           }}
         >
           {isDay ? <NexusLogo /> : <ArcanaLogo />}
+          {(offline.queued > 0 || !offline.online) && (
+            <div
+              onClick={() => offline.flushNow()}
+              title={offline.online ? "Отправить отложенные записи" : "Нет сети — записи в очереди"}
+              style={{
+                display: "inline-flex", alignItems: "center", gap: 4,
+                padding: "3px 8px", borderRadius: 999, cursor: "pointer",
+                fontSize: fs(10), fontWeight: 600, letterSpacing: "0.2px",
+                background: offline.online ? `${sky.amber}22` : `${sky.red}22`,
+                color: offline.online ? sky.amber : sky.red,
+                border: `0.5px solid ${offline.online ? sky.amber : sky.red}55`,
+                whiteSpace: "nowrap",
+              }}
+            >
+              📴 {offline.queued > 0 ? offline.queued : ""}{offline.online && offline.queued > 0 ? " ↑" : ""}
+            </div>
+          )}
         </div>
         <div
           className="mode-toggle"

@@ -1,3 +1,5 @@
+import { enqueue, flushOutbox, isOfflineEligible, outboxCount } from './outbox'
+
 const BASE = import.meta.env.VITE_API_BASE || ''
 
 function getInitData() {
@@ -7,15 +9,86 @@ function getInitData() {
   return import.meta.env.VITE_DEV_INIT_DATA || ''
 }
 
-export async function apiGet(path) {
+// Бросается когда мутация не ушла из-за отсутствия сети, но легла в
+// офлайн-очередь (#189). UI показывает «📴 сохранено локально», не «ошибка».
+export class OfflineQueuedError extends Error {
+  constructor(entry) {
+    super('offline — записано локально, отправлю при связи')
+    this.name = 'OfflineQueuedError'
+    this.queued = true
+    this.entry = entry
+  }
+}
+
+// Ошибка от сервера (2xx не пришёл). permanent=true для 4xx (не ретраить).
+class HttpError extends Error {
+  constructor(status, statusText, bodyText) {
+    super(`${status} ${statusText}${bodyText ? ` — ${bodyText.slice(0, 120)}` : ''}`)
+    this.name = 'HttpError'
+    this.status = status
+    this.permanent = status >= 400 && status < 500 && status !== 429
+  }
+}
+
+function isNetworkError(e) {
+  // fetch() бросает TypeError при обрыве сети / DNS / CORS-preflight fail
+  return e instanceof TypeError || /network|failed to fetch|load failed/i.test(e?.message || '')
+}
+
+async function _raw(method, path, { body, headers = {}, idempotencyKey } = {}) {
+  const h = { 'X-Telegram-Init-Data': getInitData(), ...headers }
+  if (body !== undefined) h['Content-Type'] = 'application/json'
+  if (idempotencyKey) h['Idempotency-Key'] = idempotencyKey
   const r = await fetch(`${BASE}${path}`, {
-    headers: { 'X-Telegram-Init-Data': getInitData() },
+    method,
+    headers: h,
+    body: body !== undefined ? JSON.stringify(body ?? {}) : undefined,
   })
   if (!r.ok) {
     const text = await r.text().catch(() => '')
-    throw new Error(`${r.status} ${r.statusText}${text ? ` — ${text.slice(0, 120)}` : ''}`)
+    throw new HttpError(r.status, r.statusText, text)
   }
   return r.json()
+}
+
+// Мутация с офлайн-очередью. offline или сетевая ошибка на eligible-пути →
+// enqueue + OfflineQueuedError.
+async function _mutate(method, path, body, opts = {}) {
+  const offline =
+    typeof navigator !== 'undefined' && navigator.onLine === false
+  const eligible = isOfflineEligible(path)
+
+  if (offline && eligible) {
+    const entry = enqueue({ method, path, body, label: opts.label })
+    throw new OfflineQueuedError(entry)
+  }
+  try {
+    return await _raw(method, path, { body, idempotencyKey: opts.idempotencyKey })
+  } catch (e) {
+    if (isNetworkError(e) && eligible) {
+      const entry = enqueue({ method, path, body, label: opts.label })
+      throw new OfflineQueuedError(entry)
+    }
+    throw e
+  }
+}
+
+// ── Публичный API ───────────────────────────────────────────────────────────
+
+export async function apiGet(path) {
+  return _raw('GET', path)
+}
+
+export async function apiPost(path, body, opts = {}) {
+  return _mutate('POST', path, body, opts)
+}
+
+export async function apiPatch(path, body, opts = {}) {
+  return _mutate('PATCH', path, body, opts)
+}
+
+export async function apiDelete(path, opts = {}) {
+  return _mutate('DELETE', path, undefined, opts)
 }
 
 // SSE-поток (#191): парсит "data: {...}\n\n" построчно и допечатывает через
@@ -58,50 +131,29 @@ export async function apiStream(path, onDelta) {
   return finalEvent
 }
 
-export async function apiDelete(path) {
-  const r = await fetch(`${BASE}${path}`, {
-    method: 'DELETE',
-    headers: { 'X-Telegram-Init-Data': getInitData() },
-  })
-  if (!r.ok) {
-    const text = await r.text().catch(() => '')
-    throw new Error(`${r.status} ${r.statusText}${text ? ` — ${text.slice(0, 120)}` : ''}`)
+// ── Офлайн-очередь: досыл ──────────────────────────────────────────────────
+
+async function _sendQueued(entry) {
+  try {
+    return await _raw(entry.method, entry.path, {
+      body: entry.method === 'DELETE' ? undefined : entry.body,
+      idempotencyKey: entry.idempotencyKey,
+    })
+  } catch (e) {
+    if (e instanceof HttpError && e.permanent) {
+      e.permanent = true
+      throw e
+    }
+    // сетевая / 5xx / 429 — оставить в очереди
+    throw e
   }
-  return r.json()
 }
 
-export async function apiPost(path, body, opts = {}) {
-  const headers = {
-    'Content-Type': 'application/json',
-    'X-Telegram-Init-Data': getInitData(),
+export async function flushOfflineQueue() {
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+    return { sent: 0, failed: 0, remaining: outboxCount(), offline: true }
   }
-  if (opts.idempotencyKey) {
-    headers['Idempotency-Key'] = opts.idempotencyKey
-  }
-  const r = await fetch(`${BASE}${path}`, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify(body || {}),
-  })
-  if (!r.ok) {
-    const text = await r.text().catch(() => '')
-    throw new Error(`${r.status} ${r.statusText}${text ? ` — ${text.slice(0, 120)}` : ''}`)
-  }
-  return r.json()
+  return flushOutbox(_sendQueued)
 }
 
-export async function apiPatch(path, body) {
-  const r = await fetch(`${BASE}${path}`, {
-    method: 'PATCH',
-    headers: {
-      'Content-Type': 'application/json',
-      'X-Telegram-Init-Data': getInitData(),
-    },
-    body: JSON.stringify(body || {}),
-  })
-  if (!r.ok) {
-    const text = await r.text().catch(() => '')
-    throw new Error(`${r.status} ${r.statusText}${text ? ` — ${text.slice(0, 120)}` : ''}`)
-  }
-  return r.json()
-}
+export { outboxCount, isOfflineEligible } from './outbox'

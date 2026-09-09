@@ -345,6 +345,8 @@ name-matcher) → `search`.
     (category / связь / ключ), `долг_` → `debts` / `цель_` → `goals` table,
     alias canonicalization, then `notify_user(bot="nexus")` (#6). The form's
     `cat` field is ignored — the parser assigns the category.
+    Idempotency-guarded (`Idempotency-Key` header → `idempotent()`) for the
+    offline write queue (#189 / ADR-0025).
   - `PATCH /api/memory/{id}` (`routes/writes.py`, #6) — `{is_current: bool}`,
     ownership check, `PgMemoryRepo.set_current`. Reversible "неактуально"
     (the row stays; `include_inactive=1` lists it back for reactivation) —

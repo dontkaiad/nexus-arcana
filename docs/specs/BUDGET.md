@@ -749,7 +749,10 @@ expense items → `_ONE_TIME_PARSE_SYSTEM`).
 - `core/pending_kv.py` — SQLite-backed pending store for the clarify / windfall dialogs (#208)
 - `core/classifier.py:process_item` — income branch → `finance.handle_windfall_income` (#208)
 - `miniapp/backend/routes/finance.py` — limits/goals views (`_serialize_goal`), day limit
-- `miniapp/backend/routes/writes.py` — `POST /api/finance/goal` (+`/close`, `/contribute` — #44/#205); `POST /api/finance/debt` (4 directions), `/api/finance/debt/close` (#123); `/api/finance/cushion/target`, `/api/finance/cushion/deposit`
+- `miniapp/backend/routes/writes.py` — `POST /api/finance/goal` (+`/close`, `/contribute` — #44/#205); `POST /api/finance/debt` (4 directions), `/api/finance/debt/close` (#123); `/api/finance/cushion/target`, `/api/finance/cushion/deposit`.
+  `POST /api/finance`, `/api/finance/debt`, `/api/finance/goal/contribute`,
+  `/api/finance/cushion/deposit` are idempotency-guarded (`Idempotency-Key` header
+  → `idempotent()`) for the offline write queue (#189 / ADR-0025)
 - `miniapp/backend/routes/finance.py` — `_view_goals` (`debts` / `debts_incoming` / `goals` / closed), `_serialize_debt` / `_serialize_goal`
 - `miniapp/backend/routes/today.py` — `budget_day_limit_from_plan` (day limit)
 - `docs/specs/MEMORY.md` — budget facts live in the `memories` table
