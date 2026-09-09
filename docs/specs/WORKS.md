@@ -28,7 +28,8 @@ One table `works` plus two seeded lookup tables. Migrations:
 `alembic/versions/b2f3e4d5c6a7_works_slice_schema.py` (table +
 `work_priority`/`work_status`), `g7b8c9d0e1f2_works_add_reminder.py` (adds
 `reminder`), `o5h6i7j8k9l0_works_add_archived_status.py` (adds the `archived`
-status code). SQLAlchemy Core mirror: `arcana/repos/works_tables.py`.
+status code), `d4e5f6a7b8c9_booking_tables.py` (adds `scheduled_at`, #23).
+SQLAlchemy Core mirror: `arcana/repos/works_tables.py`.
 
 ### `works`
 
@@ -42,6 +43,7 @@ status code). SQLAlchemy Core mirror: `arcana/repos/works_tables.py`.
 | `status_id` | SmallInteger | FK → `work_status.id` |
 | `client_id` | BigInteger | FK → `clients.id` |
 | `reminder` | TIMESTAMP(tz) | nullable |
+| `scheduled_at` | TIMESTAMP(tz) | nullable — forward-looking appointment time for an esoteric booking (#23 / ADR-0026); `works` is otherwise retrospective |
 | `user_id` | Text | owner |
 | `created_at` / `updated_at` | TIMESTAMP(tz) | default `now()` |
 

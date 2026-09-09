@@ -70,6 +70,7 @@ works = Table(
     Column("repeat_time",    Text),
 
     Column("reminder",     TIMESTAMP(timezone=True)),
+    Column("scheduled_at", TIMESTAMP(timezone=True)),  # #23/ADR-0026 — booking appointment time
     Column("user_id", Text),
 
     Column("created_at", TIMESTAMP(timezone=True), server_default=text("now()")),

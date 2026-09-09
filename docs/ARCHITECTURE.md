@@ -1,6 +1,6 @@
 # Architecture
 
-> Code conforms to: `3eaf455` · Update in the same PR that changes the architecture.
+> Code conforms to: `26d5d4c` · Update in the same PR that changes the architecture.
 > This is an engineering overview, not a developer spec. For the data model and
 > contracts, see [`docs/specs/`](specs/) (11 domain specs) and the ADRs in
 > [`docs/CASES/`](CASES/) (26). Read time: ~12–15 min.
