@@ -153,15 +153,14 @@
   .empty{border:1px dashed var(--glass-line);border-radius:10px;padding:11px;font-size:.82rem;color:var(--muted)}
 
   /* header */
-  .head{display:flex;align-items:center;gap:11px;padding:20px 30px 0}
+  .head{display:flex;align-items:center;gap:11px;padding:16px 26px 0}
   .head .sp{flex:1}
   .brand{display:flex;align-items:center;gap:11px;min-width:0}
   .orb-mark{flex:none;filter:drop-shadow(0 2px 8px rgba(0,0,0,.25));animation:orbfade .55s ease}
   @keyframes orbfade{from{opacity:0;transform:rotate(-25deg) scale(.8)}to{opacity:1;transform:none}}
   .bwrap{display:flex;flex-direction:column;min-width:0}
-  .bname{font-size:1.34rem;line-height:1.16;color:#f2efe6;text-shadow:0 1px 3px rgba(0,0,0,.42)}
-  .brole{font-family:"JetBrains Mono",monospace;font-size:.72rem;letter-spacing:.01em;
-    color:rgba(242,239,230,.86);text-shadow:0 1px 2px rgba(0,0,0,.38)}
+  .bname{font-size:1.34rem;line-height:1.16;color:var(--ink);text-shadow:0 1px 3px var(--shadowc)}
+  .brole{font-family:"JetBrains Mono",monospace;font-size:.72rem;letter-spacing:.01em;color:var(--muted)}
   .brole .tg{opacity:.72}
   .mode-toggle{margin-left:auto;display:inline-flex;align-items:center;gap:8px;padding:8px 15px;
     border-radius:100px;flex:none;color:var(--ink);
@@ -174,21 +173,21 @@
   .mode-toggle .t-day{display:inline-flex;align-items:center;gap:8px}
 
   /* main */
-  .main{padding:16px 30px 40px;display:flex;gap:18px;align-items:flex-start}
+  .main{padding:12px 26px 20px;display:flex;gap:16px;align-items:flex-start}
   @media(max-width:760px){.main{flex-direction:column}}
   .calcol{flex:1 1 auto;min-width:0}
-  .card{background:var(--card-bg,var(--glass));border:1px solid var(--glass-line);border-radius:18px;padding:18px 19px;
+  .card{background:var(--card-bg,var(--glass));border:1px solid var(--glass-line);border-radius:18px;padding:14px 16px;
     backdrop-filter:blur(14px) saturate(125%);-webkit-backdrop-filter:blur(14px) saturate(125%);
     box-shadow:inset 0 1px 0 var(--glass-hi),0 24px 60px -18px var(--glow),0 2px 12px var(--shadowc)}
-  .cnav{display:flex;align-items:center;gap:.5rem;margin-bottom:14px}
+  .cnav{display:flex;align-items:center;gap:.5rem;margin-bottom:10px}
   .cnav .t{font-size:1.22rem;text-transform:capitalize;min-width:9.4rem}
   .cnav .sp{flex:1}
-  .dowrow{display:grid;grid-template-columns:repeat(7,1fr);gap:8px;margin-bottom:7px}
+  .dowrow{display:grid;grid-template-columns:repeat(7,1fr);gap:6px;margin-bottom:5px}
   .dow{font-family:"JetBrains Mono",monospace;font-size:.68rem;letter-spacing:.06em;text-transform:uppercase;
     color:var(--ink-soft);text-align:center}
-  .grid{display:grid;grid-template-columns:repeat(7,1fr);gap:8px}
+  .grid{display:grid;grid-template-columns:repeat(7,1fr);gap:6px}
   .day{position:relative;background:var(--cell-bg);border:1px solid var(--glass-line);border-radius:12px;
-    min-height:92px;padding:8px 9px;display:flex;flex-direction:column;gap:5px;text-align:left;overflow:hidden;color:var(--ink)}
+    min-height:80px;padding:7px 9px;display:flex;flex-direction:column;gap:4px;text-align:left;overflow:hidden;color:var(--ink)}
   .day:hover{border-color:var(--accent)}
   .day.out{opacity:.3}
   .day.k-sun{background:var(--wash-sun)}
@@ -274,9 +273,13 @@
 const API="/api/booking";
 const $=s=>document.querySelector(s);
 const pad=n=>String(n).padStart(2,"0");
-// times are always shown in Кай's zone (MSK / UTC+3), regardless of the viewer's browser
-const MSK_TF=new Intl.DateTimeFormat("ru-RU",{timeZone:"Europe/Moscow",hour:"2-digit",minute:"2-digit",hour12:false});
-const T=s=>MSK_TF.format(new Date(s));
+// All times are shown in Кай's zone — MSK / UTC+3, no DST — regardless of the viewer's browser.
+// Shift the absolute instant by +3h, then read UTC fields = Moscow wall-clock. Works even where
+// Intl timeZone is flaky (some in-app webviews). API sends tz-aware ISO (…+00:00).
+const MSK=s=>new Date(new Date(s).getTime()+3*3600e3);
+const T=s=>{const d=MSK(s);return isNaN(d)?"":pad(d.getUTCHours())+":"+pad(d.getUTCMinutes());};
+const mskDateTime=s=>{const d=MSK(s);return isNaN(d)?"":pad(d.getUTCDate())+"."+pad(d.getUTCMonth()+1)+", "+T(s);};
+const mskDate=s=>{const d=MSK(s);return isNaN(d)?"":pad(d.getUTCDate())+"."+pad(d.getUTCMonth()+1)+"."+d.getUTCFullYear();};
 const sameDay=(a,b)=>a.getFullYear()==b.getFullYear()&&a.getMonth()==b.getMonth()&&a.getDate()==b.getDate();
 const MON=["январь","февраль","март","апрель","май","июнь","июль","август","сентябрь","октябрь","ноябрь","декабрь"];
 const DOW=["пн","вт","ср","чт","пт","сб","вс"];
@@ -526,7 +529,7 @@ async function reqBox(){const el=$("#reqBox");try{
   const d=await api("/requests?status=open");
   const p=d.requests.filter(r=>r.status==="pending");
   el.innerHTML = p.length ? p.map(r=>`<div class="item">
-    <div class="top"><b>${r.requester_name}</b><span class="muted">${new Date(r.start).toLocaleString("ru",{timeZone:"Europe/Moscow",day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"})}</span></div>
+    <div class="top"><b>${r.requester_name}</b><span class="muted">${mskDateTime(r.start)}</span></div>
     ${r.note?`<div class="muted">${r.note}</div>`:""}
     <div class="top" style="margin-top:.4rem"><button class="primary mini" data-ok="${r.id}">✅ да</button>
       <button class="mini" data-no="${r.id}">❌ нет</button></div></div>`).join("")
@@ -557,7 +560,7 @@ async function typBox(){const el=$("#typBox");try{
 async function offBox(){const el=$("#offBox");try{
   const d=await api("/blocks");
   el.innerHTML = d.blocks.length ? d.blocks.map(b=>`<div class="item"><div class="top">
-    <span>${new Date(b.start_at).toLocaleDateString("ru",{timeZone:"Europe/Moscow"})} – ${new Date(b.end_at).toLocaleDateString("ru",{timeZone:"Europe/Moscow"})} · ${b.reason||"—"}</span>
+    <span>${mskDate(b.start_at)} – ${mskDate(b.end_at)} · ${b.reason||"—"}</span>
     <button class="mini" data-db="${b.id}">✕</button></div></div>`).join("")
     : `<div class="empty">Ничего не отмечено</div>`;
   el.querySelectorAll("[data-db]").forEach(b=>b.onclick=async()=>{await api("/blocks/"+b.dataset.db,{method:"DELETE"});offBox();load().then(gridR);});
