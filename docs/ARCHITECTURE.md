@@ -1,6 +1,6 @@
 # Architecture
 
-> Code conforms to: `26d5d4c` · Update in the same PR that changes the architecture.
+> Code conforms to: `c1ba2e6` · Update in the same PR that changes the architecture.
 > This is an engineering overview, not a developer spec. For the data model and
 > contracts, see [`docs/specs/`](specs/) (11 domain specs) and the ADRs in
 > [`docs/CASES/`](CASES/) (26). Read time: ~12–15 min.
@@ -435,13 +435,18 @@ In order — because sequencing is part of the engineering:
   offline *reads* (service worker + PWA). Phase 3 — Arcana rituals/sessions offline
   (their write is text-plus-parse, not an append, and has no Mini App create endpoint
   yet). This is what "record a ritual in the forest where there's no signal" needs.
-- **Lark Booking** (designed, [ADR-0026](CASES/0026-booking-architecture.md), epic #23) —
-  a calendar on `calendar.heylark.dev` where friends see busy/free and book meetings and
-  esoteric clients book readings/rituals, visibility by role. Roles come from the shared
-  heylark `grants` table (not `core_identity`), keyed on the sender's `tg_id`, never on
-  Telegram-group membership. Free/busy is computed from internal Nexus/Arcana events (no
-  Google Calendar — Apple is the target, reached via one outbound `.ics` subscription
-  feed). A gated booking-skill inside the Nexus bot handles group-chat requests.
+- **heylark Booking** (backend in progress, [ADR-0026](CASES/0026-booking-architecture.md), epic #23) —
+  `booking.heylark.dev` where friends see busy/free and book meetings and esoteric clients
+  book readings/rituals, visibility by role. Roles come from the shared heylark `grants`
+  table (not `core_identity`), keyed on the sender's `tg_id`, never on Telegram-group
+  membership. Free/busy is computed from internal Nexus/Arcana events (no Google Calendar —
+  Apple is the target, reached via one outbound `.ics` subscription feed). Built: `core/booking/`
+  (busy + slots engine), migration `d4e5f6a7b8c9` (`booking_*` + `works.scheduled_at`),
+  `core/auth_grants.py`, `miniapp/backend/routes/booking.py` (`/api/booking/*` + `/feed/*.ics`,
+  `booking_principal` seam, owner CRUD). Pending: `⭐ Zarya` (`@heylark_booking_bot`, a
+  separate bot — the Nexus `WhitelistMiddleware` blocks non-owner messages, so a group-chat
+  concierge can't live inside Nexus), the web frontend, and linking a confirmed booking to a
+  Nexus task / 🔮 Work.
 - **Apple-ecosystem integration** (planned, not built) — native reach into the
   macOS/iOS side I actually live in, so the assistant meets me where I work.
 
