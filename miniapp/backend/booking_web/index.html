@@ -17,7 +17,7 @@
     --glass-line:rgba(36,70,58,.2); --glass-hi:rgba(255,255,255,.5);
     --cell-bg:rgba(238,247,240,.42); --wash-sun:rgba(63,122,94,.17); --wash-moon:rgba(138,109,176,.16);
     --glow:rgba(63,122,94,.22); --shadowc:rgba(20,45,35,.14); --ring-tick:rgba(255,255,255,.7);
-    --paper:#7ba996;
+    --paper:#7ba996; --card-bg:rgba(255,255,255,.13);
     --nexus:var(--sun); --arcana:var(--moon); --book:var(--tide); --busy:var(--muted);
     --radius:16px; color-scheme:light;
   }
@@ -29,11 +29,12 @@
     --glass-line:rgba(180,188,215,.2); --glass-hi:rgba(255,240,220,.07);
     --cell-bg:rgba(180,188,215,.08); --wash-sun:rgba(127,200,154,.18); --wash-moon:rgba(195,174,240,.22);
     --glow:rgba(138,168,200,.24); --shadowc:rgba(0,0,0,.34); --ring-tick:rgba(195,205,235,.4);
-    --paper:#0d1120; color-scheme:dark;
+    --card-bg:rgba(18,24,38,.44); --paper:#0d1120; color-scheme:dark;
   }
   *{box-sizing:border-box}
-  html,body{height:100%}
-  body{margin:0;color:var(--ink);background:var(--paper);
+  html,body{min-height:100%;overscroll-behavior:none}
+  html{background:var(--paper)}
+  body{margin:0;color:var(--ink);overflow-x:hidden;
     font:15px/1.5 "Manrope","Helvetica Neue",Arial,sans-serif;-webkit-font-smoothing:antialiased}
   a{color:var(--accent);text-decoration:none}
   h1,h2,h3{margin:0;font-weight:500;letter-spacing:0}
@@ -60,61 +61,49 @@
   .form,.form .two{min-width:0}
   .form>button{width:100%}
 
-  /* ── sky — reused from Nexus / Arcana, cross-fades on theme switch ── */
-  .sky{position:fixed;inset:0;z-index:-1;overflow:hidden;transition:opacity 1.4s ease}
-  .sky::after{content:"";position:absolute;inset:0;animation:shine 8s ease-in-out infinite alternate}
-  @keyframes shine{from{opacity:.55}to{opacity:1}}
-  .sky.day{background:
-    radial-gradient(1100px 640px at 88% -10%,rgba(255,236,190,.28),transparent 46%),
-    radial-gradient(1000px 700px at 8% 110%,rgba(90,150,120,.35),transparent 56%),
-    linear-gradient(180deg,#487d76 0%,#5c928a 28%,#79aa98 60%,#93bda6 100%)}
-  .sky.day::after{background:radial-gradient(circle at 84% 12%,rgba(255,236,180,.3),transparent 40%)}
-  .sky.night{background:linear-gradient(180deg,#0a0e18 0%,#101828 24%,#1a2240 54%,#2a1a3a 76%,#0e1119 100%);opacity:0}
-  .sky.night::after{background:radial-gradient(circle at 24% 20%,rgba(140,170,200,.2),transparent 52%)}
-  :root[data-theme="dark"] .sky.day{opacity:0}
-  :root[data-theme="dark"] .sky.night{opacity:1}
-  /* celestial disc — sun ⇄ moon, transitions on theme switch (as in Nexus / Arcana) */
-  .orb{position:fixed;right:9%;border-radius:50%;pointer-events:none;z-index:-1;
-    transition:opacity 1.5s ease, transform 1.2s cubic-bezier(.4,0,.2,1)}
-  .orb.sun{bottom:20%;width:150px;height:150px;filter:blur(10px);opacity:1;
-    background:radial-gradient(circle,rgba(255,235,180,.5),rgba(244,200,120,.28) 34%,rgba(244,200,120,0) 72%)}
-  .orb.moon{top:10%;width:120px;height:120px;filter:blur(7px);opacity:0;transform:translateY(-26px);
-    background:radial-gradient(circle,rgba(220,230,250,.42),rgba(180,200,235,.24) 36%,rgba(140,160,200,0) 78%)}
-  :root[data-theme="dark"] .orb.sun{opacity:0;transform:translateY(34px)}
-  :root[data-theme="dark"] .orb.moon{opacity:1;transform:translateY(0)}
-  @media (prefers-reduced-motion:reduce){.orb{transition:none}}
+  /* ── sky + celestial disc — JS-driven morph, ported from Nexus / Arcana (App.jsx getSky/getOrb) ── */
+  #sky{position:fixed;inset:0;z-index:0;pointer-events:none}
+  #sun,#moon{position:fixed;border-radius:50%;pointer-events:none;z-index:1;
+    transform:translate(-50%,-50%);will-change:left,top,opacity}
+  #sun{width:min(200px,34vw);height:min(200px,34vw);filter:blur(14px);
+    background:radial-gradient(circle,rgba(255,238,190,.62),rgba(246,202,120,.32) 34%,transparent 72%)}
+  #moon{width:min(150px,26vw);height:min(150px,26vw);filter:blur(9px);
+    background:radial-gradient(circle,rgba(224,232,252,.55),rgba(184,202,238,.3) 38%,transparent 78%)}
+  #stars{position:fixed;inset:0;z-index:1;pointer-events:none}
+  .app{position:relative;z-index:2}
   .star{position:absolute;width:2px;height:2px;border-radius:50%;background:#fff;
     animation:tw 3.6s ease-in-out infinite alternate}
   @keyframes tw{from{opacity:.2;transform:scale(.8)}to{opacity:.95;transform:scale(1.1)}}
-  @media (prefers-reduced-motion:reduce){.sky,.sky::after,.star{animation:none;transition:none}}
+  @media (prefers-reduced-motion:reduce){.star{animation:none}}
 
   .glass{position:relative;border-radius:16px;padding:14px 16px;background:var(--glass);
-    border:1px solid var(--glass-line);backdrop-filter:blur(24px) saturate(140%);
-    -webkit-backdrop-filter:blur(24px) saturate(140%);
+    border:1px solid var(--glass-line);backdrop-filter:blur(14px) saturate(125%);
+    -webkit-backdrop-filter:blur(14px) saturate(125%);
     box-shadow:inset 0 1px 0 var(--glass-hi),0 2px 16px var(--shadowc)}
 
   .app{display:grid;grid-template-columns:292px minmax(0,1fr);align-items:start;min-height:100vh}
   @media(max-width:960px){.app{grid-template-columns:1fr}}
   .rail{align-self:start;padding:20px 16px;display:flex;flex-direction:column;gap:11px}
 
-  /* ── profile — portrait in a glowing sigil ring ── */
+  /* ── profile — portrait in an SSS holo-foil ring (from login.heylark.dev) ── */
   .me{display:flex;flex-direction:column;align-items:center;text-align:center;gap:9px;padding:16px 0 2px}
-  .me .ring{position:relative;width:126px;height:126px;border-radius:50%;padding:3px;
-    background:conic-gradient(from -50deg,var(--accent),var(--gold),var(--accent));
-    box-shadow:0 14px 34px -10px var(--glow)}
-  .me .ring::before{content:"";position:absolute;inset:-6px;border-radius:50%;z-index:-1;
-    background:conic-gradient(from 0deg,transparent,var(--accent),transparent 42%);
-    filter:blur(4px);opacity:.75;animation:spin 12s linear infinite}
-  @keyframes spin{to{transform:rotate(360deg)}}
-  @media (prefers-reduced-motion:reduce){.me .ring::before{animation:none}}
-  .me .ring::after{content:"";position:absolute;inset:-6px;border-radius:50%;
-    border:1px dashed var(--ring-tick);opacity:.9}
-  .me .ava{width:100%;height:100%;border-radius:50%;object-fit:cover;object-position:50% 30%;display:block}
+  .me .ring{position:relative;width:144px;height:144px;border-radius:50%;padding:5px;overflow:hidden;
+    background:linear-gradient(160deg,rgba(13,31,26,.45),rgba(26,13,46,.4));
+    box-shadow:0 0 34px -6px rgba(123,223,209,.32), 0 16px 38px -14px rgba(0,0,0,.45)}
+  .me .ring::before{content:"";position:absolute;inset:0;border-radius:50%;padding:2px;
+    background:linear-gradient(120deg,#7bdfd1,#d97ec9,#e8c887,#9d7be0,#7bdfd1);background-size:300% 100%;
+    -webkit-mask:linear-gradient(#fff,#fff) content-box,linear-gradient(#fff,#fff);
+    -webkit-mask-composite:xor;mask-composite:exclude;
+    animation:holoBorder 5s linear infinite;z-index:3;pointer-events:none}
+  .me .ring::after{content:"";position:absolute;inset:0;border-radius:50%;z-index:2;pointer-events:none;
+    background:linear-gradient(115deg,transparent 30%,rgba(255,255,255,.16) 50%,transparent 70%);background-size:250% 100%;
+    animation:holoShine 6s ease-in-out infinite}
+  @keyframes holoBorder{to{background-position:300% 0}}
+  @keyframes holoShine{0%,100%{background-position:120% 0;opacity:0}35%,65%{opacity:1}50%{background-position:-40% 0}}
+  @media (prefers-reduced-motion:reduce){.me .ring::before,.me .ring::after{animation:none}}
+  .me .ava{width:100%;height:100%;border-radius:50%;object-fit:cover;object-position:50% 30%;display:block;position:relative;z-index:1}
   .me .pname{font-size:1.62rem;line-height:1.06;color:var(--ink);text-shadow:0 1px 2px var(--shadowc)}
   .me .psub{font-size:.83rem;line-height:1.42;color:var(--ink-soft);max-width:25ch;margin-top:1px}
-  :root:not([data-theme="dark"]) .me .ring{box-shadow:0 0 0 1px rgba(255,255,255,.55),
-    0 16px 36px -8px rgba(74,122,94,.5),0 0 30px rgba(201,138,46,.32)}
-  :root:not([data-theme="dark"]) .me .ring::before{opacity:.95;filter:blur(5px)}
 
   .eyebrow{font-size:.67rem;letter-spacing:.13em;text-transform:uppercase;color:var(--muted);font-weight:500}
   .blk>.eyebrow{display:block;margin-bottom:9px}
@@ -153,9 +142,10 @@
   .orb-mark{flex:none;filter:drop-shadow(0 2px 8px rgba(0,0,0,.25));animation:orbfade .55s ease}
   @keyframes orbfade{from{opacity:0;transform:rotate(-25deg) scale(.8)}to{opacity:1;transform:none}}
   .bwrap{display:flex;flex-direction:column;min-width:0}
-  .bname{font-size:1.34rem;line-height:1.16;color:var(--ink);text-shadow:0 1px 2px var(--shadowc)}
-  .brole{font-family:"JetBrains Mono",monospace;font-size:.72rem;letter-spacing:.01em;color:var(--muted)}
-  .brole .tg{opacity:.8}
+  .bname{font-size:1.34rem;line-height:1.16;color:#f2efe6;text-shadow:0 1px 3px rgba(0,0,0,.42)}
+  .brole{font-family:"JetBrains Mono",monospace;font-size:.72rem;letter-spacing:.01em;
+    color:rgba(242,239,230,.86);text-shadow:0 1px 2px rgba(0,0,0,.38)}
+  .brole .tg{opacity:.72}
   .mode-toggle{margin-left:auto;display:inline-flex;align-items:center;gap:8px;padding:8px 15px;
     border-radius:100px;flex:none;color:var(--ink);
     backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);
@@ -170,8 +160,8 @@
   .main{padding:16px 30px 40px;display:flex;gap:18px;align-items:flex-start}
   @media(max-width:760px){.main{flex-direction:column}}
   .calcol{flex:1 1 auto;min-width:0}
-  .card{background:var(--glass);border:1px solid var(--glass-line);border-radius:18px;padding:18px 19px;
-    backdrop-filter:blur(24px) saturate(140%);-webkit-backdrop-filter:blur(24px) saturate(140%);
+  .card{background:var(--card-bg,var(--glass));border:1px solid var(--glass-line);border-radius:18px;padding:18px 19px;
+    backdrop-filter:blur(14px) saturate(125%);-webkit-backdrop-filter:blur(14px) saturate(125%);
     box-shadow:inset 0 1px 0 var(--glass-hi),0 24px 60px -18px var(--glow),0 2px 12px var(--shadowc)}
   .cnav{display:flex;align-items:center;gap:.5rem;margin-bottom:14px}
   .cnav .t{font-size:1.22rem;text-transform:capitalize;min-width:9.4rem}
@@ -216,10 +206,10 @@
 </style>
 </head>
 <body>
-<div class="sky day"></div>
-<div class="sky night"><span id="stars"></span></div>
-<span class="orb sun"></span>
-<span class="orb moon"></span>
+<div id="sky"></div>
+<div id="sun"></div>
+<div id="moon"></div>
+<div id="stars"></div>
 
 <div class="app">
   <aside class="rail" id="rail"></aside>
@@ -267,7 +257,9 @@
 const API="/api/booking";
 const $=s=>document.querySelector(s);
 const pad=n=>String(n).padStart(2,"0");
-const T=s=>{const d=new Date(s);return pad(d.getHours())+":"+pad(d.getMinutes())};
+// times are always shown in Кай's zone (MSK / UTC+3), regardless of the viewer's browser
+const MSK_TF=new Intl.DateTimeFormat("ru-RU",{timeZone:"Europe/Moscow",hour:"2-digit",minute:"2-digit",hour12:false});
+const T=s=>MSK_TF.format(new Date(s));
 const sameDay=(a,b)=>a.getFullYear()==b.getFullYear()&&a.getMonth()==b.getMonth()&&a.getDate()==b.getDate();
 const MON=["январь","февраль","март","апрель","май","июнь","июль","август","сентябрь","октябрь","ноябрь","декабрь"];
 const DOW=["пн","вт","ср","чт","пт","сб","вс"];
@@ -293,23 +285,96 @@ function loginUrl(){return "https://login.heylark.dev/?next="+encodeURIComponent
 
 function stars(){
   let s=7,out="";const rnd=()=>(s=(s*1103515245+12345)&0x7fffffff)/0x7fffffff;
-  for(let i=0;i<18;i++){out+=`<span class="star" style="left:${(rnd()*96+2).toFixed(1)}%;top:${(rnd()*58+2).toFixed(1)}%;animation-delay:${(rnd()*3).toFixed(1)}s"></span>`;}
+  for(let i=0;i<20;i++){out+=`<span class="star" style="left:${(rnd()*96+2).toFixed(1)}%;top:${(rnd()*62+2).toFixed(1)}%;animation-delay:${(rnd()*3).toFixed(1)}s"></span>`;}
   $("#stars").innerHTML=out;
 }
-function renderChrome(){
-  const dark=document.documentElement.dataset.theme==="dark";
+function renderChrome(dark){
   $("#brandOrb").innerHTML=dark?ORB_MOON:ORB_SUN;
   $("#theme .t-day").innerHTML=sv(ICO.moon)+sv(ICO.arrR);
   $("#theme .t-night").innerHTML=sv(ICO.arrL)+sv(ICO.sun);
 }
-function initTheme(){
-  const s=localStorage.getItem("z-th");
-  document.documentElement.dataset.theme=s||(matchMedia("(prefers-color-scheme:dark)").matches?"dark":"light");
-  $("#theme").onclick=()=>{
-    const n=document.documentElement.dataset.theme==="dark"?"light":"dark";
-    document.documentElement.dataset.theme=n;localStorage.setItem("z-th",n);renderChrome();
+
+/* ── sky morph — ported verbatim from miniapp/frontend/src/App.jsx (getSky/getOrb) ── */
+const lerp=(a,b,t)=>a+(b-a)*t;
+const lerpC=(c1,c2,t)=>{const p=(c,i)=>parseInt(c.replace("#","").slice(i,i+2),16);
+  return "#"+[0,2,4].map(i=>Math.round(lerp(p(c1,i),p(c2,i),t)).toString(16).padStart(2,"0")).join("");};
+const getOrb=(pr,isSun)=>{const t=isSun?pr:1-pr;const a=Math.PI*0.15+t*Math.PI*0.7;
+  const x=(0.5+0.42*Math.cos(a))*100, y=(0.92-0.82*Math.sin(a))*100;
+  return {x:Math.max(6,Math.min(94,x)),y};};
+function getSky(p){
+  let d,m,w,g,b,card,text,tS,tM,acc,brd,amber;
+  amber=lerpC("#b8822a","#d4a458",p);
+  if(p<0.3){const t=p/0.3;
+    d=lerpC("#4a7a78","#3a6a72",t); m=lerpC("#5a8a7a","#5a7a88",t); w=lerpC("#8ab4a0","#c4a060",t);
+    g=lerpC("#c4c898","#d4884a",t); b=lerpC("#dce8dc","#e8dcc8",t);
+    text="#1f4a3a"; tS="#2d6a50"; tM="#4a7a62"; acc=lerpC("#6b8f71","#7a9068",t);
+    card="rgba(255,255,255,"+(0.30+t*0.06).toFixed(2)+")"; brd="rgba(255,255,255,0.42)";
+  }else if(p<0.6){const t=(p-0.3)/0.3;
+    d=lerpC("#3a6a72","#2a3a5a",t); m=lerpC("#5a7a88","#3a4a6a",t); w=lerpC("#c4a060","#c46040",t);
+    g=lerpC("#d4884a","#a04048",t); b=lerpC("#e8dcc8","#2a2838",t);
+    text=lerpC("#1f4a3a","#d4ccc0",t); tS=lerpC("#2d6a50","#b0a898",t); tM=lerpC("#4a7a62","#807868",t);
+    acc=lerpC("#7a9068","#5a8a80",t);
+    brd="rgba("+Math.round(lerp(255,60,t))+","+Math.round(lerp(255,65,t))+","+Math.round(lerp(255,80,t))+","+lerp(0.42,0.42,t).toFixed(2)+")";
+    card="rgba("+Math.round(lerp(255,22,t))+","+Math.round(lerp(255,27,t))+","+Math.round(lerp(255,40,t))+","+lerp(0.36,0.62,t).toFixed(2)+")";
+  }else{const t=(p-0.6)/0.4;
+    d=lerpC("#2a3a5a","#0a0e18",t); m=lerpC("#3a4a6a","#101828",t); w=lerpC("#c46040","#1a2240",t);
+    g=lerpC("#a04048","#2a1a3a",t); b=lerpC("#2a2838","#0e1119",t);
+    text="#e0d8cc"; tS="#b0a898"; tM="#807868"; acc=lerpC("#5a8a80","#5a9a8a",t);
+    brd="rgba(150,160,190,0.22)"; card="rgba(22,27,40,"+(0.62+t*0.16).toFixed(2)+")";
+  }
+  return {deep:d,mid:m,warm:w,glow:g,base:b,card,text,tS,tM,acc,brd,amber};
+}
+function paintSky(p){
+  const s=getSky(p), r=document.documentElement.style;
+  $("#sky").style.background=`linear-gradient(180deg,${s.deep} 0%,${s.mid} 25%,${s.warm} 55%,${s.glow} 75%,${s.base} 100%)`;
+  const su=getOrb(p,true), mo=getOrb(p,false);
+  $("#sun").style.cssText+=`;left:${su.x}%;top:${su.y}%;opacity:${p<0.7?1:Math.max(0,1-(p-0.7)/0.3)}`;
+  $("#moon").style.cssText+=`;left:${mo.x}%;top:${mo.y}%;opacity:${p>0.3?Math.min(1,(p-0.3)/0.3):0}`;
+  $("#stars").style.opacity = p>0.5?((p-0.5)*2).toFixed(2):0;
+  r.setProperty("--paper",s.base);
+  r.setProperty("--glass",s.card);
+  r.setProperty("--glass-strong",s.card);
+  r.setProperty("--glass-line",s.brd);
+  r.setProperty("--ink",s.text);
+  r.setProperty("--ink-soft",s.tS);
+  r.setProperty("--muted",s.tM);
+  r.setProperty("--faint",s.tM);
+  r.setProperty("--accent",s.acc);
+  r.setProperty("--accent-2",s.acc);
+  r.setProperty("--gold",s.amber);
+  r.setProperty("--glow",p<0.5?"rgba(63,122,94,.22)":"rgba(138,168,200,.24)");
+  r.setProperty("--cell-bg",p<0.5?"rgba(255,255,255,0.08)":"rgba(150,162,195,0.06)");
+  r.setProperty("--card-bg",p<0.5?"rgba(255,255,255,0.13)":"rgba(18,24,38,0.44)");
+  r.setProperty("--glass-hi",p<0.5?"rgba(255,255,255,0.5)":"rgba(255,240,220,0.07)");
+  r.setProperty("--shadowc",p<0.5?"rgba(20,45,35,.14)":"rgba(0,0,0,.34)");
+}
+let _prog=0, _raf=0;
+function animTheme(toDark){
+  const from=_prog, to=toDark?1:0, st=performance.now();
+  document.documentElement.dataset.theme=toDark?"dark":"light";
+  renderChrome(toDark);
+  if(matchMedia("(prefers-reduced-motion:reduce)").matches){_prog=to;paintSky(to);return;}
+  cancelAnimationFrame(_raf);
+  const step=now=>{
+    const t=Math.min((now-st)/1200,1);
+    const e=t<0.5?2*t*t:1-Math.pow(-2*t+2,2)/2;
+    _prog=lerp(from,to,e); paintSky(_prog);
+    if(t<1) _raf=requestAnimationFrame(step);
   };
-  renderChrome();
+  _raf=requestAnimationFrame(step);
+}
+function initTheme(){
+  const saved=localStorage.getItem("z-th");
+  const dark = saved ? saved==="dark" : matchMedia("(prefers-color-scheme:dark)").matches;
+  _prog = dark?1:0;
+  document.documentElement.dataset.theme = dark?"dark":"light";
+  renderChrome(dark);
+  paintSky(_prog);
+  $("#theme").onclick=()=>{
+    const next = document.documentElement.dataset.theme!=="dark";
+    localStorage.setItem("z-th", next?"dark":"light");
+    animTheme(next);
+  };
 }
 
 /* ── rail ─────────────────────────────────────────────────────────── */
@@ -415,7 +480,7 @@ async function reqBox(){const el=$("#reqBox");try{
   const d=await api("/requests?status=open");
   const p=d.requests.filter(r=>r.status==="pending");
   el.innerHTML = p.length ? p.map(r=>`<div class="item">
-    <div class="top"><b>${r.requester_name}</b><span class="muted">${new Date(r.start).toLocaleString("ru",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"})}</span></div>
+    <div class="top"><b>${r.requester_name}</b><span class="muted">${new Date(r.start).toLocaleString("ru",{timeZone:"Europe/Moscow",day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"})}</span></div>
     ${r.note?`<div class="muted">${r.note}</div>`:""}
     <div class="top" style="margin-top:.4rem"><button class="primary mini" data-ok="${r.id}">✅ да</button>
       <button class="mini" data-no="${r.id}">❌ нет</button></div></div>`).join("")
@@ -446,7 +511,7 @@ async function typBox(){const el=$("#typBox");try{
 async function offBox(){const el=$("#offBox");try{
   const d=await api("/blocks");
   el.innerHTML = d.blocks.length ? d.blocks.map(b=>`<div class="item"><div class="top">
-    <span>${new Date(b.start_at).toLocaleDateString("ru")} – ${new Date(b.end_at).toLocaleDateString("ru")} · ${b.reason||"—"}</span>
+    <span>${new Date(b.start_at).toLocaleDateString("ru",{timeZone:"Europe/Moscow"})} – ${new Date(b.end_at).toLocaleDateString("ru",{timeZone:"Europe/Moscow"})} · ${b.reason||"—"}</span>
     <button class="mini" data-db="${b.id}">✕</button></div></div>`).join("")
     : `<div class="empty">Ничего не отмечено</div>`;
   el.querySelectorAll("[data-db]").forEach(b=>b.onclick=async()=>{await api("/blocks/"+b.dataset.db,{method:"DELETE"});offBox();load().then(gridR);});
