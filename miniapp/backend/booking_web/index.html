@@ -1,0 +1,421 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Zarya · Календарь Кай</title>
+<style>
+  :root{
+    --bg:#f3ece0; --panel:#ece1cd; --panel-2:#f7f1e6; --line:#d8c8ad;
+    --tx:#3a2f24; --tx-mute:#8a7860; --acc:#b8822a; --acc-soft:#e7d3ab;
+    --ev-nexus:#5a8c62; --ev-nexus-bg:#dcebd7;
+    --ev-arcana:#7a6bb0; --ev-arcana-bg:#e4def2;
+    --ev-generic:#9a8c78; --ev-generic-bg:#e6ddce;
+    --ev-booking:#3f7a8c; --ev-booking-bg:#d6e8ec;
+    --radius:14px; --shadow:0 1px 3px #0000001a, 0 8px 24px #00000012;
+  }
+  :root[data-theme="dark"]{
+    --bg:#0e1226; --panel:#171c33; --panel-2:#1d2340; --line:#2b3357;
+    --tx:#d8d4c8; --tx-mute:#7d8098; --acc:#5a9a8a; --acc-soft:#26324a;
+    --ev-nexus:#7fbf8a; --ev-nexus-bg:#1f3a2a;
+    --ev-arcana:#b39ddb; --ev-arcana-bg:#2c2647;
+    --ev-generic:#8b8ea6; --ev-generic-bg:#252a45;
+    --ev-booking:#6fb6c6; --ev-booking-bg:#1c3540;
+    --shadow:0 1px 3px #0006, 0 8px 24px #0004;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--tx);
+    font:15px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Inter,sans-serif;}
+  a{color:var(--acc);text-decoration:none}
+  button{font:inherit;cursor:pointer;border:1px solid var(--line);background:var(--panel-2);
+    color:var(--tx);border-radius:10px;padding:.5em .9em}
+  button:hover{border-color:var(--acc)}
+  button.primary{background:var(--acc);color:#fff;border-color:var(--acc)}
+  input,select{font:inherit;padding:.45em .6em;border:1px solid var(--line);border-radius:9px;
+    background:var(--panel-2);color:var(--tx);width:100%}
+  header{display:flex;align-items:center;gap:.7rem;padding:.7rem 1rem;border-bottom:1px solid var(--line);
+    background:var(--panel);position:sticky;top:0;z-index:5}
+  header h1{font-size:1.05rem;margin:0;font-weight:650;letter-spacing:.2px}
+  header .sp{flex:1}
+  .layout{display:grid;grid-template-columns:300px 1fr;gap:1rem;padding:1rem;max-width:1100px;margin:0 auto}
+  @media(max-width:820px){.layout{grid-template-columns:1fr}}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);
+    padding:1rem;box-shadow:var(--shadow)}
+  .side .card + .card{margin-top:1rem}
+  .muted{color:var(--tx-mute)}
+  .tip{background:var(--acc-soft);border-radius:10px;padding:.7rem .8rem;font-size:.92rem}
+  .legend{display:flex;flex-direction:column;gap:.4rem;font-size:.9rem;margin-top:.6rem}
+  .legend i{display:inline-block;width:12px;height:12px;border-radius:4px;margin-right:.5rem;vertical-align:-1px}
+  .seg{display:flex;border:1px solid var(--line);border-radius:10px;overflow:hidden;margin-top:.6rem}
+  .seg button{border:0;border-radius:0;flex:1;background:transparent}
+  .seg button.on{background:var(--acc);color:#fff}
+  /* calendar */
+  .cal-nav{display:flex;align-items:center;gap:.5rem;margin-bottom:.8rem}
+  .cal-nav .title{font-weight:650;font-size:1.05rem;text-transform:capitalize}
+  .grid{display:grid;grid-template-columns:repeat(7,1fr);gap:6px}
+  .dow{font-size:.75rem;color:var(--tx-mute);text-align:center;padding-bottom:.2rem;text-transform:uppercase}
+  .day{background:var(--panel-2);border:1px solid transparent;border-radius:10px;min-height:76px;
+    padding:.35rem .4rem;display:flex;flex-direction:column;gap:3px;text-align:left;align-items:stretch}
+  .day.out{opacity:.4}
+  .day.today{border-color:var(--acc)}
+  .day .dn{font-size:.8rem;font-weight:600}
+  .day.sel{outline:2px solid var(--acc);outline-offset:1px}
+  .bar{height:5px;border-radius:3px;background:var(--ev-generic);opacity:.9}
+  .bar.nexus{background:var(--ev-nexus)} .bar.arcana{background:var(--ev-arcana)}
+  .bar.booking{background:var(--ev-booking)} .bar.block{background:var(--ev-generic)}
+  .free-dot{margin-top:auto;font-size:.7rem;color:var(--acc);font-weight:600}
+  /* day panel */
+  .slots{display:flex;flex-wrap:wrap;gap:.5rem;margin-top:.6rem}
+  .slots button{padding:.4em .7em}
+  .ev-list{margin-top:.5rem;display:flex;flex-direction:column;gap:.3rem;font-size:.9rem}
+  .ev-row{display:flex;gap:.5rem;align-items:center}
+  .ev-row i{width:10px;height:10px;border-radius:3px;flex:none}
+  .ev-row i.nexus{background:var(--ev-nexus)} .ev-row i.arcana{background:var(--ev-arcana)}
+  .ev-row i.booking{background:var(--ev-booking)} .ev-row i.busy,.ev-row i.block{background:var(--ev-generic)}
+  .tabs{display:flex;gap:.4rem;flex-wrap:wrap;margin-bottom:.8rem}
+  .tabs button.on{background:var(--acc);color:#fff;border-color:var(--acc)}
+  .row2{display:grid;grid-template-columns:1fr 1fr;gap:.5rem}
+  .list-item{border:1px solid var(--line);border-radius:10px;padding:.6rem;margin-top:.5rem;font-size:.9rem}
+  .list-item .act{display:flex;gap:.4rem;margin-top:.4rem}
+  .toast{position:fixed;left:50%;bottom:1.2rem;transform:translateX(-50%);background:var(--tx);color:var(--bg);
+    padding:.6rem 1rem;border-radius:10px;box-shadow:var(--shadow);z-index:20;opacity:0;transition:opacity .2s}
+  .toast.show{opacity:1}
+</style>
+</head>
+<body>
+<header>
+  <span style="font-size:1.2rem">⭐</span>
+  <h1>Календарь Кай</h1>
+  <span class="sp"></span>
+  <span id="who" class="muted" style="font-size:.85rem"></span>
+  <button id="themeBtn" title="Тема">◐</button>
+</header>
+
+<div class="layout">
+  <aside class="side" id="side"></aside>
+  <main>
+    <div class="card">
+      <div class="cal-nav">
+        <button id="prev">‹</button>
+        <span class="title" id="calTitle"></span>
+        <button id="next">›</button>
+        <span class="sp" style="flex:1"></span>
+        <button id="todayBtn">Сегодня</button>
+      </div>
+      <div class="grid" id="dow"></div>
+      <div class="grid" id="grid" style="margin-top:6px"></div>
+    </div>
+    <div class="card" id="dayPanel" style="margin-top:1rem;display:none"></div>
+  </main>
+</div>
+<div class="toast" id="toast"></div>
+
+<script>
+const API = "/api/booking";
+const state = {
+  me:{role:"guest",tg_id:null}, ctx:"friends", month:new Date(),
+  events:[], slots:[], selDay:null, admin:{tab:"requests"}
+};
+const $ = s => document.querySelector(s);
+const pad = n => String(n).padStart(2,"0");
+const iso = d => d.toISOString();
+const fmtTime = s => { const d=new Date(s); return pad(d.getHours())+":"+pad(d.getMinutes()); };
+const sameDay = (a,b)=>a.getFullYear()==b.getFullYear()&&a.getMonth()==b.getMonth()&&a.getDate()==b.getDate();
+const MONTHS=["январь","февраль","март","апрель","май","июнь","июль","август","сентябрь","октябрь","ноябрь","декабрь"];
+const DOW=["пн","вт","ср","чт","пт","сб","вс"];
+
+function toast(t){ const e=$("#toast"); e.textContent=t; e.classList.add("show"); setTimeout(()=>e.classList.remove("show"),2600); }
+async function api(path,opts){ const r=await fetch(API+path,{credentials:"include",...opts});
+  if(!r.ok){ const b=await r.text().catch(()=>""); throw new Error(r.status+" "+b); } return r.json(); }
+
+// ── theme ──
+function initTheme(){
+  const saved = localStorage.getItem("zarya-theme");
+  if(saved) document.documentElement.dataset.theme = saved;
+  else if(matchMedia("(prefers-color-scheme:dark)").matches) document.documentElement.dataset.theme="dark";
+  $("#themeBtn").onclick=()=>{
+    const cur = document.documentElement.dataset.theme==="dark"?"light":"dark";
+    document.documentElement.dataset.theme=cur; localStorage.setItem("zarya-theme",cur);
+  };
+}
+
+// ── calendar render ──
+function monthGrid(base){
+  const first=new Date(base.getFullYear(),base.getMonth(),1);
+  let startDow=(first.getDay()+6)%7; // mon=0
+  const cells=[];
+  for(let i=0;i<42;i++){
+    const d=new Date(first); d.setDate(1-startDow+i); cells.push(d);
+  }
+  return cells;
+}
+function eventsForDay(d){
+  return state.events.filter(e=>{
+    const s=new Date(e.start), en=new Date(e.end);
+    return s < new Date(d.getFullYear(),d.getMonth(),d.getDate()+1) &&
+           en > new Date(d.getFullYear(),d.getMonth(),d.getDate());
+  });
+}
+function slotsForDay(d){
+  return state.slots.filter(s=>sameDay(new Date(s.start),d));
+}
+function renderCal(){
+  $("#calTitle").textContent = MONTHS[state.month.getMonth()]+" "+state.month.getFullYear();
+  $("#dow").innerHTML = DOW.map(x=>`<div class="dow">${x}</div>`).join("");
+  const today=new Date();
+  $("#grid").innerHTML = monthGrid(state.month).map(d=>{
+    const out = d.getMonth()!==state.month.getMonth();
+    const evs = eventsForDay(d);
+    const kinds=[...new Set(evs.map(e=>e.kind||"busy"))].slice(0,4);
+    const bars = kinds.map(k=>`<div class="bar ${k}"></div>`).join("");
+    const free = slotsForDay(d).length;
+    const cls = ["day", out?"out":"", sameDay(d,today)?"today":"",
+      state.selDay&&sameDay(d,state.selDay)?"sel":""].join(" ");
+    return `<button class="${cls}" data-d="${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}">
+      <span class="dn">${d.getDate()}</span>${bars}
+      ${free?`<span class="free-dot">${free} своб.</span>`:``}</button>`;
+  }).join("");
+  $("#grid").querySelectorAll(".day").forEach(b=>b.onclick=()=>{
+    const [y,m,dd]=b.dataset.d.split("-").map(Number);
+    state.selDay=new Date(y,m-1,dd); renderCal(); renderDay();
+  });
+}
+
+function renderDay(){
+  const p=$("#dayPanel");
+  if(!state.selDay){ p.style.display="none"; return; }
+  p.style.display="block";
+  const d=state.selDay;
+  const evs=eventsForDay(d), slots=slotsForDay(d);
+  const evHtml = evs.length ? `<div class="ev-list">`+evs.map(e=>{
+    const k=e.kind||"busy";
+    const label = e.title ? e.title : (k==="nexus"?"дела Nexus":k==="arcana"?"практика Arcana":k==="booking"?"бронь":"занято");
+    return `<div class="ev-row"><i class="${k}"></i>${fmtTime(e.start)}–${fmtTime(e.end)} · ${label}</div>`;
+  }).join("")+`</div>` : `<p class="muted">Свободный день.</p>`;
+
+  let slotHtml="";
+  if(state.me.role==="admin"||state.me.role==="friend"||state.ctx==="arcana"){
+    slotHtml = slots.length
+      ? `<div class="slots">`+slots.map(s=>
+          `<button data-s="${s.start}">${fmtTime(s.start)}</button>`).join("")+`</div>`
+      : `<p class="muted">Свободных слотов на этот день нет.</p>`;
+  } else {
+    slotHtml = `<p class="muted">Чтобы записаться — <a href="${loginUrl()}">войти через Telegram</a>.</p>`;
+  }
+
+  p.innerHTML = `<b>${d.getDate()} ${MONTHS[d.getMonth()]}</b>
+    ${evHtml}
+    <div style="margin-top:.8rem"><b>Записаться${state.ctx==="arcana"?" (расклад/ритуал)":""}:</b></div>
+    ${slotHtml}`;
+  p.querySelectorAll(".slots button").forEach(b=>b.onclick=()=>startBook(b.dataset.s));
+}
+
+function loginUrl(){ return "https://login.heylark.dev/?next="+encodeURIComponent(location.href); }
+
+// ── booking flow ──
+async function startBook(startIso){
+  if(state.me.role==="guest" && state.ctx==="friends"){ location.href=loginUrl(); return; }
+  let hours=1;
+  if(state.ctx==="friends"){
+    hours = await pickHours();
+    if(!hours) return;
+  }
+  try{
+    const b = await api("/book",{method:"POST",headers:{"content-type":"application/json"},
+      body:JSON.stringify({context:state.ctx,start:startIso,hours})});
+    toast(b.status==="confirmed" ? "Записано ✅" : "Заявка отправлена, ждём подтверждения");
+    await loadCalendar(); renderDay();
+  }catch(e){
+    toast(String(e).includes("409")?"Слот только что заняли":"Не вышло: "+e.message);
+    await loadCalendar(); renderDay();
+  }
+}
+function pickHours(){
+  return new Promise(res=>{
+    const p=$("#dayPanel");
+    const bak=p.innerHTML;
+    p.innerHTML=`<b>На сколько часов тебя занять?</b>
+      <div class="slots">${[1,2,3,4].map(h=>`<button data-h="${h}">${h} ч</button>`).join("")}
+      <button data-h="0">отмена</button></div>`;
+    p.querySelectorAll("button").forEach(b=>b.onclick=()=>{ p.innerHTML=bak;
+      const h=+b.dataset.h; res(h||null); });
+  });
+}
+
+// ── sidebar ──
+function renderSide(){
+  const s=$("#side");
+  if(state.me.role==="admin"){ s.innerHTML = adminHtml(); wireAdmin(); return; }
+  const legend = (state.me.role==="friend") ? `
+    <div class="legend">
+      <span><i style="background:var(--ev-nexus)"></i>☀️ дела Nexus</span>
+      <span><i style="background:var(--ev-arcana)"></i>🌒 практика Arcana</span>
+      <span><i style="background:var(--ev-booking)"></i>брони</span>
+    </div>` : `
+    <div class="legend"><span><i style="background:var(--ev-generic)"></i>занято</span></div>`;
+  s.innerHTML = `
+    <div class="card">
+      <b>О Кай</b>
+      <p class="muted" style="font-size:.92rem">Ассистент/таролог. Здесь — её свободное время.
+      ${state.me.role==="friend"?"Ты — друг, можешь бронировать напрямую.":
+        state.me.role==="guest"?"Войди через Telegram, чтобы записаться.":""}</p>
+      <div class="tip" id="tip">…</div>
+      ${legend}
+      <div class="seg">
+        <button data-c="friends" class="${state.ctx==="friends"?"on":""}">Встреча</button>
+        <button data-c="arcana" class="${state.ctx==="arcana"?"on":""}">Расклад/ритуал</button>
+      </div>
+      ${state.me.role==="guest"?`<div style="margin-top:.7rem"><a class="primary" style="display:inline-block;padding:.5em .9em;border-radius:10px;color:#fff" href="${loginUrl()}">Войти через Telegram</a></div>`:``}
+    </div>`;
+  s.querySelectorAll(".seg button").forEach(b=>b.onclick=async()=>{
+    state.ctx=b.dataset.c; await loadCalendar(); renderSide(); renderDay();
+  });
+  loadTip();
+}
+async function loadTip(){ try{ const t=await api("/tip?context="+state.ctx); const e=$("#tip"); if(e) e.textContent=t.tip; }catch(_){} }
+
+// ── admin panel ──
+function adminHtml(){
+  const tab=state.admin.tab;
+  const T=(k,l)=>`<button class="${tab===k?"on":""}" data-t="${k}">${l}</button>`;
+  return `<div class="card">
+    <b>Панель Кай</b>
+    <div class="tabs" style="margin-top:.6rem">
+      ${T("requests","Заявки")}${T("windows","Окна")}${T("types","Типы")}${T("blocks","Блоки")}
+    </div>
+    <div id="adminBody" class="muted">…</div>
+  </div>`;
+}
+function wireAdmin(){
+  $("#side").querySelectorAll(".tabs button").forEach(b=>b.onclick=()=>{
+    state.admin.tab=b.dataset.t; renderSide();
+  });
+  const body=$("#adminBody");
+  const t=state.admin.tab;
+  if(t==="requests") loadRequests(body);
+  else if(t==="windows") loadWindows(body);
+  else if(t==="types") loadTypes(body);
+  else if(t==="blocks") loadBlocks(body);
+}
+async function loadRequests(el){
+  try{
+    const d=await api("/requests?status=open");
+    el.innerHTML = d.requests.length ? d.requests.map(r=>`
+      <div class="list-item">
+        <b>${r.requester_name}</b> · ${new Date(r.start).toLocaleString("ru")} · ${r.status}
+        ${r.note?`<div class="muted">${r.note}</div>`:``}
+        ${r.status==="pending"?`<div class="act">
+          <button data-ok="${r.id}">✅</button><button data-no="${r.id}">❌</button></div>`:``}
+      </div>`).join("") : `<p class="muted">Заявок нет.</p>`;
+    el.querySelectorAll("[data-ok]").forEach(b=>b.onclick=()=>decide(b.dataset.ok,"confirm"));
+    el.querySelectorAll("[data-no]").forEach(b=>b.onclick=()=>decide(b.dataset.no,"decline"));
+  }catch(e){ el.textContent="Ошибка: "+e.message; }
+}
+async function decide(id,act){
+  try{ await api(`/requests/${id}/${act}`,{method:"POST"}); toast("Готово"); wireAdmin(); loadCalendar(); }
+  catch(e){ toast("Ошибка: "+e.message); }
+}
+async function loadWindows(el){
+  try{
+    const d=await api("/availability");
+    el.innerHTML = `
+      <div class="row2" style="margin-top:.5rem">
+        <select id="w_ctx"><option value="friends">Встреча</option><option value="arcana">Расклад</option></select>
+        <select id="w_wd">${DOW.map((x,i)=>`<option value="${i}">${x}</option>`).join("")}</select>
+      </div>
+      <div class="row2" style="margin-top:.4rem">
+        <input id="w_s" placeholder="12:00"><input id="w_e" placeholder="18:00">
+      </div>
+      <div class="row2" style="margin-top:.4rem">
+        <input id="w_slot" type="number" placeholder="слот, мин" value="60">
+        <button class="primary" id="w_add">+ окно</button>
+      </div>
+      ${d.windows.map(w=>`<div class="list-item">${DOW[w.weekday]} ${w.start_time}–${w.end_time}
+        · ${w.context} · ${w.slot_minutes}м <div class="act"><button data-del="${w.id}">удалить</button></div></div>`).join("")}`;
+    $("#w_add").onclick=async()=>{
+      try{
+        await api("/availability",{method:"POST",headers:{"content-type":"application/json"},
+          body:JSON.stringify({context:$("#w_ctx").value,weekday:+$("#w_wd").value,
+            start_time:$("#w_s").value,end_time:$("#w_e").value,slot_minutes:+$("#w_slot").value})});
+        toast("Окно добавлено"); wireAdmin(); loadCalendar();
+      }catch(e){ toast("Ошибка: "+e.message); }
+    };
+    el.querySelectorAll("[data-del]").forEach(b=>b.onclick=async()=>{
+      await api("/availability/"+b.dataset.del,{method:"DELETE"}); wireAdmin(); loadCalendar();
+    });
+  }catch(e){ el.textContent="Ошибка: "+e.message; }
+}
+async function loadTypes(el){
+  try{
+    const d=await api("/meeting-types");
+    el.innerHTML=`
+      <div class="row2" style="margin-top:.5rem">
+        <input id="t_slug" placeholder="slug (coffee)"><input id="t_title" placeholder="Кофе">
+      </div>
+      <div class="row2" style="margin-top:.4rem">
+        <select id="t_ctx"><option value="friends">Встреча</option><option value="arcana">Расклад</option></select>
+        <input id="t_dur" type="number" value="60" placeholder="мин">
+      </div>
+      <button class="primary" id="t_add" style="margin-top:.4rem">+ тип</button>
+      ${d.types.map(m=>`<div class="list-item">${m.title||m.slug} · ${m.context} · ${m.duration_min}м
+        <div class="act"><button data-delt="${m.id}">удалить</button></div></div>`).join("")}`;
+    $("#t_add").onclick=async()=>{
+      try{ await api("/meeting-types",{method:"POST",headers:{"content-type":"application/json"},
+        body:JSON.stringify({slug:$("#t_slug").value,title:$("#t_title").value,
+          context:$("#t_ctx").value,duration_min:+$("#t_dur").value})});
+        toast("Тип добавлен"); wireAdmin();
+      }catch(e){ toast("Ошибка: "+e.message); }
+    };
+    el.querySelectorAll("[data-delt]").forEach(b=>b.onclick=async()=>{
+      await api("/meeting-types/"+b.dataset.delt,{method:"DELETE"}); wireAdmin();
+    });
+  }catch(e){ el.textContent="Ошибка: "+e.message; }
+}
+async function loadBlocks(el){
+  try{
+    const d=await api("/blocks");
+    el.innerHTML=`
+      <input id="b_s" placeholder="2026-10-01T00:00" style="margin-top:.5rem">
+      <input id="b_e" placeholder="2026-10-05T00:00" style="margin-top:.4rem">
+      <input id="b_r" placeholder="причина (отпуск)" style="margin-top:.4rem">
+      <button class="primary" id="b_add" style="margin-top:.4rem">+ блок</button>
+      ${d.blocks.map(b=>`<div class="list-item">${new Date(b.start_at).toLocaleDateString("ru")}–${new Date(b.end_at).toLocaleDateString("ru")}
+        · ${b.reason||"—"} <div class="act"><button data-delb="${b.id}">удалить</button></div></div>`).join("")}`;
+    $("#b_add").onclick=async()=>{
+      try{ await api("/blocks",{method:"POST",headers:{"content-type":"application/json"},
+        body:JSON.stringify({start:$("#b_s").value,end:$("#b_e").value,reason:$("#b_r").value})});
+        toast("Блок добавлен"); wireAdmin(); loadCalendar();
+      }catch(e){ toast("Ошибка: "+e.message); }
+    };
+    el.querySelectorAll("[data-delb]").forEach(b=>b.onclick=async()=>{
+      await api("/blocks/"+b.dataset.delb,{method:"DELETE"}); wireAdmin(); loadCalendar();
+    });
+  }catch(e){ el.textContent="Ошибка: "+e.message; }
+}
+
+// ── data ──
+async function loadCalendar(){
+  try{
+    const cal=await api("/calendar?days=90&back=14");
+    state.events=cal.events; state.me.role=cal.role;
+  }catch(e){ toast("Календарь не загрузился"); }
+  try{
+    const sl=await api(`/slots?context=${state.ctx}&days=60`);
+    state.slots = sl.slots||[];
+  }catch(e){ state.slots=[]; }
+  renderCal();
+}
+async function boot(){
+  initTheme();
+  try{ state.me = await api("/me"); }catch(_){}
+  $("#who").textContent = state.me.role==="admin"?"Кай":state.me.role==="friend"?"друг":"гость";
+  $("#prev").onclick=()=>{ state.month.setMonth(state.month.getMonth()-1); renderCal(); };
+  $("#next").onclick=()=>{ state.month.setMonth(state.month.getMonth()+1); renderCal(); };
+  $("#todayBtn").onclick=()=>{ state.month=new Date(); state.selDay=new Date(); renderCal(); renderDay(); };
+  renderSide();
+  await loadCalendar();
+}
+boot();
+</script>
+</body>
+</html>

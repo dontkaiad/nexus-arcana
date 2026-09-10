@@ -155,6 +155,47 @@ async def booking_feed(token: str) -> Response:
     )
 
 
+_KIND = {"task": "nexus", "work": "arcana", "booking": "booking", "block": "block"}
+
+
+@router.get("/booking/me")
+async def booking_me(p: Principal = Depends(booking_principal)) -> dict:
+    return {"role": p.role, "tg_id": p.tg_id}
+
+
+@router.get("/booking/calendar")
+async def booking_calendar(
+    days: int = Query(45, ge=7, le=120),
+    back: int = Query(7, ge=0, le=31),
+    p: Principal = Depends(booking_principal),
+) -> dict:
+    """Role-aware events for the month grid.
+    guest → {start,end} only · friend → +kind (nexus/arcana/…) · admin → +title."""
+    uid = await _owner_user_id()
+    if not uid:
+        return {"role": p.role, "events": []}
+    now = datetime.now(_UTC)
+    start = now - timedelta(days=back)
+    ivs = await busy_intervals(uid, start, now + timedelta(days=days))
+    out = []
+    for iv in ivs:
+        e = {"start": iv.start.isoformat(), "end": iv.end.isoformat()}
+        if p.role in ("friend", "admin"):
+            e["kind"] = _KIND.get(iv.source, "busy")
+        if p.role == "admin":
+            e["title"] = iv.label
+        out.append(e)
+    return {"role": p.role, "events": out}
+
+
+@router.get("/booking/tip")
+async def booking_tip(context: str = Query("friends")) -> dict:
+    from core.booking.tips import compute_tip
+    uid = await _owner_user_id()
+    windows = await bkrepo.list_availability(uid or "") if uid else []
+    return {"tip": compute_tip(windows, context=context if context in _CONTEXTS else "friends")}
+
+
 @router.get("/booking/public")
 async def booking_public(
     context: str = Query("friends"),
