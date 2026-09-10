@@ -17,7 +17,7 @@
     --glass-line:rgba(36,70,58,.2); --glass-hi:rgba(255,255,255,.5);
     --cell-bg:rgba(238,247,240,.42); --wash-sun:rgba(63,122,94,.17); --wash-moon:rgba(138,109,176,.16);
     --glow:rgba(63,122,94,.22); --shadowc:rgba(20,45,35,.14); --ring-tick:rgba(255,255,255,.7);
-    --paper:#7ba996; --card-bg:rgba(255,255,255,.13); --dd-bg:rgba(240,247,242,.97);
+    --paper:#7ba996; --card-bg:rgba(255,255,255,.13); --dd-bg:#eef6f0;
     --nexus:var(--sun); --arcana:var(--moon); --book:var(--tide); --busy:var(--muted);
     --radius:16px; color-scheme:light;
   }
@@ -29,7 +29,7 @@
     --glass-line:rgba(180,188,215,.2); --glass-hi:rgba(255,240,220,.07);
     --cell-bg:rgba(180,188,215,.08); --wash-sun:rgba(127,200,154,.18); --wash-moon:rgba(195,174,240,.22);
     --glow:rgba(138,168,200,.24); --shadowc:rgba(0,0,0,.34); --ring-tick:rgba(195,205,235,.4);
-    --card-bg:rgba(18,24,38,.44); --dd-bg:rgba(22,28,42,.97); --paper:#0d1120; color-scheme:dark;
+    --card-bg:rgba(18,24,38,.44); --dd-bg:#141a28; --paper:#0d1120; color-scheme:dark;
   }
   *{box-sizing:border-box}
   html,body{min-height:100%;overscroll-behavior:none}
@@ -160,7 +160,7 @@
   @keyframes orbfade{from{opacity:0;transform:rotate(-25deg) scale(.8)}to{opacity:1;transform:none}}
   .bwrap{display:flex;flex-direction:column;min-width:0}
   .bname{font-size:1.34rem;line-height:1.16;color:var(--ink);text-shadow:0 1px 3px var(--shadowc)}
-  .brole{font-family:"JetBrains Mono",monospace;font-size:.72rem;letter-spacing:.01em;color:var(--muted)}
+  .brole{font-family:"JetBrains Mono",monospace;font-size:.74rem;letter-spacing:.01em;color:var(--ink)}
   .brole .tg{opacity:.72}
   .mode-toggle{margin-left:auto;display:inline-flex;align-items:center;gap:8px;padding:8px 15px;
     border-radius:100px;flex:none;color:var(--ink);
@@ -368,7 +368,7 @@ function paintSky(p){
   r.setProperty("--glass-line",light?"rgba(40,80,62,0.28)":"rgba(160,175,205,0.2)");
   r.setProperty("--glass-hi",light?"rgba(255,255,255,0.5)":"rgba(255,240,220,0.07)");
   r.setProperty("--shadowc",light?"rgba(20,45,35,.14)":"rgba(0,0,0,.34)");
-  r.setProperty("--dd-bg",light?"rgba(240,247,242,0.97)":"rgba(22,28,42,0.97)");
+  r.setProperty("--dd-bg",light?"#eef6f0":"#141a28");
 }
 let _prog=0, _raf=0;
 function animTheme(toDark){
@@ -442,7 +442,7 @@ async function loadTip(){try{const t=await api("/tip?context="+st.ctx);const e=$
 /* ── admin: collapsible sections ──────────────────────────────────── */
 function adminSections(){
   return `
-  <details class="glass sec" open><summary>📥 Заявки</summary><div class="body">
+  <details class="glass sec" id="secReq"><summary>📥 Заявки</summary><div class="body">
     <p class="hint">записи на расклады ждут твоего «да»</p>
     <div class="stack" id="reqBox">…</div>
   </div></details>
@@ -485,24 +485,32 @@ function dd(id,opts,init){
   </div>`;
 }
 const ddVal=id=>$("#"+id).dataset.val;
+function ddCloseAll(){
+  document.querySelectorAll(".dd-list").forEach(l=>l.hidden=true);
+  document.querySelectorAll(".dd").forEach(x=>x.classList.remove("open"));
+  // release the raised stacking context (backdrop-filter cards trap the popup otherwise)
+  document.querySelectorAll("details.sec").forEach(s=>{s.style.zIndex="";s.style.position="";});
+}
 function wireDD(scope){
   (scope||document).querySelectorAll(".dd").forEach(d=>{
     const btn=d.querySelector(".dd-btn"), list=d.querySelector(".dd-list");
-    btn.onclick=e=>{e.stopPropagation();const open=!list.hidden;
-      document.querySelectorAll(".dd-list").forEach(l=>l.hidden=true);
-      document.querySelectorAll(".dd").forEach(x=>x.classList.remove("open"));
-      if(open)return; list.hidden=false; d.classList.add("open");};
+    btn.onclick=e=>{e.stopPropagation();const wasOpen=!list.hidden;
+      ddCloseAll();
+      if(wasOpen)return;
+      list.hidden=false; d.classList.add("open");
+      const sec=d.closest("details.sec"); if(sec){sec.style.position="relative";sec.style.zIndex="40";}};
     list.querySelectorAll(".dd-opt").forEach(o=>o.onclick=e=>{
       e.stopPropagation(); d.dataset.val=o.dataset.v;
       d.querySelector(".dd-lbl").textContent=o.textContent;
       list.querySelectorAll(".dd-opt").forEach(x=>x.classList.toggle("sel",x===o));
-      list.hidden=true; d.classList.remove("open");
+      ddCloseAll();
     });
   });
 }
 document.addEventListener("click",()=>{
   document.querySelectorAll(".dd-list").forEach(l=>l.hidden=true);
   document.querySelectorAll(".dd").forEach(x=>x.classList.remove("open"));
+  document.querySelectorAll("details.sec").forEach(s=>{s.style.zIndex="";s.style.position="";});
 });
 
 function wireAdmin(){
@@ -528,6 +536,7 @@ function wireAdmin(){
 async function reqBox(){const el=$("#reqBox");try{
   const d=await api("/requests?status=open");
   const p=d.requests.filter(r=>r.status==="pending");
+  const sec=document.getElementById("secReq"); if(sec&&p.length) sec.open=true;
   el.innerHTML = p.length ? p.map(r=>`<div class="item">
     <div class="top"><b>${r.requester_name}</b><span class="muted">${mskDateTime(r.start)}</span></div>
     ${r.note?`<div class="muted">${r.note}</div>`:""}
