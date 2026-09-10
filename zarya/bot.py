@@ -17,12 +17,19 @@ logging.basicConfig(
 logger = logging.getLogger("zarya.bot")
 
 
-async def _on_startup() -> None:
+async def _on_startup(**kwargs) -> None:
+    bot = kwargs.get("bot")
     try:
         from core.heartbeat import start_heartbeat
         start_heartbeat()
     except Exception as e:
         logger.warning("heartbeat start failed: %s", e)
+    try:
+        from zarya import scheduler
+        scheduler.init(bot)
+        await scheduler.restore_on_startup()
+    except Exception as e:
+        logger.warning("booking reminder restore failed: %s", e)
     try:
         from core.bot_notify import notify_startup
         await notify_startup("zarya")

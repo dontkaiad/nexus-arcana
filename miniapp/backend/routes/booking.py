@@ -308,6 +308,15 @@ async def booking_book(body: BookBody, p: Principal = Depends(booking_principal)
         source="web",
     )
 
+    if status == "confirmed":
+        # B6: link to a Nexus task / 🔮 Work. Zarya's reminder sweep picks the
+        # new confirmed row up within ~5 min and arms the T-24h / T-2h pings.
+        try:
+            from core.booking.linkage import link_booking
+            b = await link_booking(b)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("booking link failed: %s", e)
+
     try:
         from core.bot_notify import notify_booking_log
         when = start.astimezone(timezone(timedelta(hours=3))).strftime("%d.%m %H:%M")
@@ -353,8 +362,17 @@ async def _decide(booking_id: int, new_status: str) -> dict:
     if not b:
         raise HTTPException(status_code=404, detail="not found")
     try:
+        if new_status == "confirmed":
+            from core.booking.linkage import link_booking
+            b = await link_booking(b)
+        elif new_status in ("declined", "cancelled_by_owner", "cancelled_by_requester"):
+            from core.booking.linkage import unlink_booking
+            await unlink_booking(b)
+    except Exception as e:  # noqa: BLE001
+        logger.warning("decide link/unlink failed: %s", e)
+    try:
         from core.bot_notify import notify_booking_log
-        verb = "подтверждена" if new_status == "confirmed" else "отклонена"
+        verb = {"confirmed": "подтверждена", "declined": "отклонена"}.get(new_status, "отменена")
         await notify_booking_log(f"🃏 Заявка #{b.id} ({b.requester_name}) — {verb}")
     except Exception as e:
         logger.warning("decide notify failed: %s", e)
@@ -369,6 +387,31 @@ async def booking_confirm(booking_id: int, tg_id: int = Depends(current_user_id)
 @router.post("/booking/requests/{booking_id}/decline")
 async def booking_decline(booking_id: int, tg_id: int = Depends(current_user_id)) -> dict:
     return await _decide(booking_id, "declined")
+
+
+@router.get("/booking/mine")
+async def booking_mine(tg_id: int = Depends(current_user_id)) -> dict:
+    """The caller's own upcoming bookings (pending + confirmed), so the web can
+    show a «мои брони» list with a cancel button across sessions."""
+    if not tg_id:
+        return {"bookings": []}
+    rows = await list_bookings(statuses=("pending", "confirmed"), upcoming_only=True)
+    mine = [b for b in rows if b.requester_tg_id == tg_id]
+    return {"bookings": [_booking_view(b) for b in mine]}
+
+
+@router.post("/booking/{token}/cancel")
+async def booking_cancel(token: str, tg_id: int = Depends(current_user_id)) -> dict:
+    """Cancel a booking by its token. The requester (matching tg_id) or the
+    owner may cancel; Zarya's reminder guard no-ops the armed jobs afterwards."""
+    b = await get_booking(token=token)
+    if not b or b.status not in ("pending", "confirmed"):
+        raise HTTPException(status_code=404, detail="not found")
+    is_owner = tg_id in config.allowed_ids
+    if not (is_owner or (tg_id and tg_id == b.requester_tg_id)):
+        raise HTTPException(status_code=403, detail="not your booking")
+    new_status = "cancelled_by_owner" if is_owner else "cancelled_by_requester"
+    return await _decide(b.id, new_status)
 
 
 # ── owner config: availability windows / meeting types / manual blocks ──────

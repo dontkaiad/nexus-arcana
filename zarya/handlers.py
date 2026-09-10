@@ -19,9 +19,13 @@ from aiogram.types import (
 
 from core.auth_grants import booking_role
 from core.booking.busy import busy_intervals, merge_intervals
-from core.booking.repo import create_booking, list_bookings, set_booking_status
+from core.booking.linkage import link_booking, unlink_booking
+from core.booking.repo import (
+    create_booking, get_booking, list_bookings, set_booking_status,
+)
 from core.booking.slots import free_slots
 from core.config import config
+from zarya import scheduler
 from zarya.formatting import (
     MSK, epoch, from_epoch, group_slots_by_day, slot_label, wants_slots,
 )
@@ -68,12 +72,40 @@ async def _owner_user_id() -> Optional[str]:
     return None
 
 
-async def _notify_owner(text: str) -> None:
+async def _dm(bot, tg_id: int, text: str, kb=None) -> bool:
+    """Send a DM, swallowing 'chat not found' / blocked-bot errors."""
+    if not tg_id:
+        return False
+    try:
+        await bot.send_message(tg_id, text, reply_markup=kb, disable_web_page_preview=True)
+        return True
+    except Exception as e:  # noqa: BLE001
+        logger.info("dm to %s failed: %s", tg_id, e)
+        return False
+
+
+async def _notify_owner(text: str, bot=None) -> None:
+    """Booking event → DM to every owner tg_id + an audit line in topic 1182."""
+    if bot:
+        for owner in config.allowed_ids:
+            await _dm(bot, owner, text)
     try:
         from core.bot_notify import notify_booking_log
         await notify_booking_log(text)
-    except Exception as e:
-        logger.warning("owner notify failed: %s", e)
+    except Exception as e:  # noqa: BLE001
+        logger.warning("owner log-topic notify failed: %s", e)
+
+
+def _cancel_kb(booking_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text="❌ Отменить бронь", callback_data=f"z:cx:{booking_id}"),
+    ]])
+
+
+async def _confirm_flow(b, bot) -> None:
+    """Shared: booking just became confirmed → link to task/work + arm reminders."""
+    linked = await link_booking(b)
+    scheduler.schedule(linked)
 
 
 def _slots_kb(ctx: str, slots) -> InlineKeyboardMarkup:
@@ -92,6 +124,7 @@ async def cmd_start(msg: Message, role: str = "guest") -> None:
         await msg.answer(
             "⭐ <b>Zarya</b> — пульт букинга.\n"
             "/requests — заявки на подтверждение\n"
+            "/bookings — подтверждённые встречи (можно отменить)\n"
             "/slots — посмотреть свободное"
         )
         return
@@ -200,16 +233,28 @@ async def _do_book(call: CallbackQuery, ctx: str, ep: str, hours: float, role: s
         source="tg_group" if call.message.chat.type in ("group", "supergroup") else "tg_dm",
     )
     when = slot_label(start, hours=hours)
+    in_group = call.message.chat.type in ("group", "supergroup")
     if status == "confirmed":
-        await call.message.edit_text(f"✅ Записала: {when}")
-        await _notify_owner(f"⭐ <b>{name}</b> записался · {when}")
+        await call.message.edit_text(
+            f"✅ Записала: {when}\nНапомню за сутки и за 2 часа 💫",
+            reply_markup=_cancel_kb(b.id),
+        )
+        await _confirm_flow(b, call.bot)
+        await _notify_owner(f"⭐ <b>{name}</b> записался · {when}", bot=call.bot)
+        if in_group:  # requester booked in a group chat → confirm in DM too
+            await _dm(
+                call.bot, call.from_user.id,
+                f"✅ Записала тебя к Кай: {when} (МСК). Напомню заранее.",
+                _cancel_kb(b.id),
+            )
     else:
         await call.message.edit_text(
             f"📝 Заявка на {when} принята. Кай подтвердит — я напишу."
         )
         await _notify_owner(
             f"🃏 <b>Заявка</b>: {name} · {when}\n"
-            f"/requests чтобы подтвердить (#{b.id})"
+            f"/requests чтобы подтвердить (#{b.id})",
+            bot=call.bot,
         )
 
 
@@ -243,7 +288,18 @@ async def on_approve(call: CallbackQuery, role: str = "guest") -> None:
         await call.answer("Не тебе.", show_alert=True)
         return
     b = await set_booking_status(int(call.data.split(":")[2]), "confirmed")
-    await call.message.edit_text(f"✅ #{b.id} подтверждена — {b.requester_name}")
+    if not b:
+        await call.answer("Не нашла заявку", show_alert=True)
+        return
+    when = slot_label(b.start_at, hours=b.hours or 1)
+    await call.message.edit_text(f"✅ #{b.id} подтверждена — {b.requester_name} · {when}")
+    await _confirm_flow(b, call.bot)
+    await _dm(
+        call.bot, b.requester_tg_id or 0,
+        f"✅ Кай подтвердила твою запись: {when} (МСК).\n"
+        f"Напомню за сутки и за 2 часа 💫",
+        _cancel_kb(b.id),
+    )
     await call.answer()
 
 
@@ -254,4 +310,65 @@ async def on_reject(call: CallbackQuery, role: str = "guest") -> None:
         return
     b = await set_booking_status(int(call.data.split(":")[2]), "declined")
     await call.message.edit_text(f"❌ #{b.id} отклонена — {b.requester_name}")
+    if b:
+        when = slot_label(b.start_at, hours=b.hours or 1)
+        await _dm(
+            call.bot, b.requester_tg_id or 0,
+            f"К сожалению, {when} не выйдет 🙏\nПосмотри другие окна: /slots",
+        )
     await call.answer()
+
+
+@router.callback_query(F.data.startswith("z:cx:"))
+async def on_cancel(call: CallbackQuery, role: str = "guest", tg_id: int = 0) -> None:
+    bid = int(call.data.split(":")[2])
+    b = await get_booking(booking_id=bid)
+    if not b:
+        await call.answer("Бронь не найдена", show_alert=True)
+        return
+    if b.status not in ("pending", "confirmed"):
+        await call.answer("Бронь уже неактуальна", show_alert=True)
+        return
+    is_owner = role == "admin"
+    is_requester = bool(tg_id) and tg_id == b.requester_tg_id
+    if not (is_owner or is_requester):
+        await call.answer("Это не твоя бронь", show_alert=True)
+        return
+    status = "cancelled_by_owner" if is_owner else "cancelled_by_requester"
+    b2 = await set_booking_status(bid, status) or b
+    scheduler.cancel(bid)
+    await unlink_booking(b2)
+    when = slot_label(b.start_at, hours=b.hours or 1)
+    try:
+        await call.message.edit_text(f"❌ Бронь #{bid} отменена — {when}")
+    except Exception:  # noqa: BLE001 — message may be too old to edit
+        pass
+    if is_owner:
+        await _dm(
+            call.bot, b.requester_tg_id or 0,
+            f"❌ Кай отменила встречу {when} (МСК). Извини!\nМожно выбрать другое: /slots",
+        )
+    else:
+        await _notify_owner(
+            f"❌ <b>{b.requester_name}</b> отменил(а) бронь · {when}", bot=call.bot
+        )
+    await call.answer("Отменено")
+
+
+@router.message(Command("bookings"))
+async def cmd_bookings(msg: Message, role: str = "guest") -> None:
+    if role != "admin":
+        await msg.answer("Только для Кай.")
+        return
+    uid = await _owner_user_id()
+    up = await list_bookings(uid or "", statuses=("confirmed",), upcoming_only=True)
+    if not up:
+        await msg.answer("Подтверждённых встреч впереди нет ✨")
+        return
+    for b in up:
+        when = slot_label(b.start_at, hours=b.hours or 1)
+        await msg.answer(
+            f"✅ #{b.id} · <b>{b.requester_name}</b> · {when}"
+            + (f"\n💬 {b.note}" if b.note else ""),
+            reply_markup=_cancel_kb(b.id),
+        )

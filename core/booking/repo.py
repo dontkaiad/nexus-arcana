@@ -43,12 +43,14 @@ class Booking:
     arcana_work_id: Optional[str]
     created_at: Optional[datetime]
     decided_at: Optional[datetime]
+    user_id: str = ""  # owner key — appended (kept last so callers that omit it still work)
 
 
 def _row_to_booking(r) -> Booking:
     m = r._mapping
     return Booking(
-        id=m["id"], context=m["context"], meeting_type_id=m["meeting_type_id"],
+        id=m["id"], user_id=m["user_id"] or "", context=m["context"],
+        meeting_type_id=m["meeting_type_id"],
         requester_tg_id=m["requester_tg_id"], requester_name=m["requester_name"] or "",
         requester_contact=m["requester_contact"] or "",
         start_at=m["start_at"], end_at=m["end_at"],
@@ -109,6 +111,21 @@ def _set_status_sync(engine, booking_id: int, status: str) -> Optional[Booking]:
     return _row_to_booking(row) if row else None
 
 
+def _set_link_sync(engine, booking_id: int, *, nexus_task_id=None, arcana_work_id=None) -> Optional[Booking]:
+    vals = {}
+    if nexus_task_id is not None:
+        vals["nexus_task_id"] = str(nexus_task_id)
+    if arcana_work_id is not None:
+        vals["arcana_work_id"] = str(arcana_work_id)
+    if not vals:
+        return None
+    with engine.begin() as conn:
+        row = conn.execute(
+            booking.update().where(booking.c.id == booking_id).values(**vals).returning(booking)
+        ).first()
+    return _row_to_booking(row) if row else None
+
+
 async def create_booking(
     *,
     user_id: str,
@@ -154,6 +171,17 @@ async def list_bookings(
 async def set_booking_status(booking_id: int, status: str, *, engine=None) -> Optional[Booking]:
     eng = engine or _engine()
     return await asyncio.to_thread(_set_status_sync, eng, booking_id, status)
+
+
+async def set_booking_link(
+    booking_id: int, *, nexus_task_id=None, arcana_work_id=None, engine=None
+) -> Optional[Booking]:
+    """Store the linked Nexus task / 🔮 Work id back on the booking row (B6)."""
+    eng = engine or _engine()
+    return await asyncio.to_thread(
+        _set_link_sync, eng, booking_id,
+        nexus_task_id=nexus_task_id, arcana_work_id=arcana_work_id,
+    )
 
 
 # ── config tables: availability windows / meeting types / manual blocks ──────
@@ -278,5 +306,5 @@ __all__ = [
     "create_booking", "get_booking", "list_bookings", "set_booking_status",
     "list_availability", "add_availability", "edit_availability", "del_availability",
     "list_meeting_types", "add_meeting_type", "edit_meeting_type", "del_meeting_type",
-    "list_blocks", "add_block", "del_block",
+    "list_blocks", "add_block", "del_block", "set_booking_link",
 ]

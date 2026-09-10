@@ -312,7 +312,7 @@ const sv=p=>`<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke=
 const ORB_SUN='<svg class="orb-mark" width="40" height="40" viewBox="0 0 54 54"><defs><radialGradient id="sg" cx="35%" cy="30%" r="70%"><stop offset="0" stop-color="#fff2c8"/><stop offset=".4" stop-color="#f4c66e"/><stop offset="1" stop-color="#b07a2e"/></radialGradient></defs><circle cx="27" cy="27" r="22" fill="#f4c66e" opacity=".2"/><circle cx="27" cy="27" r="17" fill="none" stroke="#f4c66e" stroke-width=".8" opacity=".6"/><circle cx="27" cy="27" r="13" fill="url(#sg)"/></svg>';
 const ORB_MOON='<svg class="orb-mark" width="40" height="40" viewBox="0 0 54 54"><defs><radialGradient id="mg" cx="35%" cy="30%" r="70%"><stop offset="0" stop-color="#fff"/><stop offset=".4" stop-color="#d4dce8"/><stop offset="1" stop-color="#6b7590"/></radialGradient></defs><circle cx="27" cy="27" r="22" fill="#d4dce8" opacity=".15"/><circle cx="27" cy="27" r="17" fill="none" stroke="#d4dce8" stroke-width=".8" opacity=".5"/><circle cx="27" cy="27" r="13" fill="url(#mg)"/></svg>';
 
-const st={me:{role:"guest"},ctx:"friends",month:new Date(),events:[],slots:[],windows:[],sel:null};
+const st={me:{role:"guest"},ctx:"friends",month:new Date(),events:[],slots:[],windows:[],mine:[],sel:null};
 
 function toast(t){const e=$("#toast");e.textContent=t;e.classList.add("show");setTimeout(()=>e.classList.remove("show"),2600);}
 async function api(p,o){const r=await fetch(API+p,{credentials:"include",...o});
@@ -446,14 +446,25 @@ function rail(){
       <p class="hintline">выбери день → появятся свободные слоты · время по UTC+3</p>
     </div>
     <div class="glass blk"><span class="eyebrow">обозначения</span>${legend}</div>
+    ${mineBlock()}
     <div class="glass blk"><span class="eyebrow">бронь</span>
       <p class="hintline" style="margin-top:0">${BOOK_NOTE}</p>
       ${st.me.role==="guest"?`<button class="primary" style="margin-top:10px;width:100%" onclick="location.href='${loginUrl()}'">Бронь</button>`:""}
     </div>`;
   r.querySelectorAll(".seg button").forEach(b=>b.onclick=async()=>{st.ctx=b.dataset.c;await load();rail();detail();});
+  r.querySelectorAll("[data-cancel]").forEach(b=>b.onclick=()=>cancelMine(b.dataset.cancel));
   loadTip();
 }
 async function loadTip(){try{const t=await api("/tip?context="+st.ctx);const e=$("#tip p");if(e)e.textContent=t.tip;}catch(_){}}
+function mineBlock(){
+  const up=st.mine.filter(m=>m.date>new Date());
+  if(!up.length) return "";
+  return `<div class="glass blk"><span class="eyebrow">мои брони</span>`+up.map(m=>
+    `<div class="item" style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-top:6px">
+       <span>${m.date.toLocaleDateString("ru",{day:"2-digit",month:"2-digit",timeZone:"Europe/Moscow"})} · ${m.when}${m.status==="pending"?" · ждёт":""}</span>
+       <button class="mini" data-cancel="${m.token}">отменить</button>
+     </div>`).join("")+`</div>`;
+}
 
 /* ── admin: collapsible sections ──────────────────────────────────── */
 function adminSections(){
@@ -698,6 +709,13 @@ async function book(startIso){
   }catch(e){toast(String(e).includes("409")?"Слот только что заняли":"Не вышло");}
   await load();gridR();detail();
 }
+async function cancelMine(token){
+  if(!confirm("Отменить эту бронь?"))return;
+  try{ await api("/"+token+"/cancel",{method:"POST"});
+    st.mine=st.mine.filter(m=>m.token!==token); toast("Бронь отменена");
+  }catch(e){ toast("Не вышло отменить"); }
+  await load();gridR();detail();
+}
 function askHours(){return new Promise(res=>{
   const el=$("#detail"),bak=el.innerHTML;
   el.innerHTML=`<h3 class="bookh" style="margin-top:0">На сколько часов тебя занять?</h3>
@@ -712,6 +730,11 @@ async function load(){
   try{const s=await api(`/slots?context=${st.ctx}&days=75`);st.slots=s.slots||[];}catch(_){st.slots=[];}
   if(st.me.role==="admin"){try{st.windows=(await api("/availability")).windows||[];}catch(_){st.windows=[];}}
   else st.windows=[];
+  if(st.me.role!=="guest"){
+    try{const m=await api("/mine");
+      st.mine=(m.bookings||[]).map(b=>({token:b.token,when:T(b.start),date:new Date(b.start),status:b.status}));
+    }catch(_){}
+  }
 }
 async function boot(){
   initTheme();stars();

@@ -1,7 +1,9 @@
 # ADR-0026 — heylark Booking: веб-календарь на `booking.heylark.dev` + бот-консьерж `@heylark_booking_bot`, роли из общей `grants`, free/busy на внутренних событиях
 
 **Date:** 2026-09-10 (§6 пересмотрен 2026-09-10 — бот вынесен из Nexus)
-**Status:** Accepted — backend + Zarya-бот построены (сен 2026); фронт (B5) и линковка задач (B6) — в работе. Эпик #23.
+**Status:** Accepted — backend + фронт (B5) + линковка задач (B6) + Zarya
+как двусторонний букинг-менеджер (Z1–Z4: уведы обеим сторонам, напоминания
+T-24ч/T-2ч, отмена) построены (сен 2026). Эпик #23.
 **Domain:** новый `core.booking` + `miniapp/backend` + `heylark_booking_bot` (новый бот) + отдельный Vite-entry
 **Issue:** #23 (эпик), развивает [ADR-0012](0012-access-model.md)
 
@@ -238,15 +240,26 @@ localStorage. Месяц-грид ‹›, клик по дню → слоты + 
   service-token), `GET /api/booking/public` `/slots`, `POST /api/booking/book`
   (friends auto-confirm / arcana pending, 409 conflict), `/requests` +
   `/requests/<id>/confirm|decline` (owner), `/booking/request/<token>` ✅
-- `core/booking/repo.py` — `booking` CRUD; `core/bot_notify.py:notify_booking_log`
+- `core/booking/repo.py` — `booking` CRUD (+ `set_booking_link`); `core/bot_notify.py:notify_booking_log`
   → topic `TG_LOG_THREAD_BOOKING` ✅
-- **⬜** linkage confirmed booking → Nexus-задача / 🔮 Работа + inline
-  approve/decline buttons (B6)
+- `core/booking/linkage.py` — **B6**: confirmed `friends` → `tasks` (deadline =
+  старт, без reminder — напоминалки у Зари), confirmed `arcana` → `works`
+  (status `scheduled` 🗓 Запланировано, `scheduled_at` = старт); id пишется
+  назад в `booking.nexus_task_id/arcana_work_id`; `unlink_booking` архивирует
+  при отмене. `f7c8b9a0d1e2` сидит `work_status('scheduled')` ✅
 - `zarya/` (Zarya, `@heylark_booking_bot`) — `RoleMiddleware` (роль из `grants`),
-  `/start` `/slots` + NL, слот→длительность→бронь, `/requests` пульт Кай;
-  `zarya/Dockerfile` (узкий контекст) + compose-сервис `zarya`. Прямые вызовы
-  `core/booking/` (шарит БД), не HTTP. ✅
-- **⬜** линковка confirmed → Nexus-задача / 🔮 Работа; групповой UX обкатать;
-  фронт `booking.heylark.dev` (3 лица) — heylark-infra
-- **⬜** `booking.heylark.dev` фронт (3 лица) + Caddy vhost — heylark-infra
+  `/start` `/slots` + NL, слот→длительность→бронь, `/requests` + `/bookings`
+  пульт Кай; `zarya/Dockerfile` (узкий контекст) + compose-сервис `zarya`.
+  Прямые вызовы `core/booking/` (шарит БД), не HTTP. ✅
+- `zarya/scheduler.py` — **Z2**: booking-напоминания T-24ч + T-2ч, ЛС инициатору
+  И всем owner tg_id, in-memory APScheduler, `restore_on_startup()` +
+  5-мин sweep (подхватывает брони с веба, [[nexus-reminder-scheduler-fragility]]) ✅
+- Двусторонние уведомления (**Z1**): `_notify_owner` → ЛС всем owner tg_id +
+  строка в топик 1182; approve/decline/авто-бронь → ЛС инициатору с кнопкой
+  «❌ Отменить»; `z:cx:<id>` — отмена любой из сторон → ЛС другой стороне +
+  снять напоминания + `unlink_booking` ✅
+- `miniapp/backend/routes/booking.py` — `/book` + `/requests/<id>/confirm` →
+  `link_booking`; `GET /booking/mine`; `POST /booking/<token>/cancel`;
+  фронт `booking_web` — блок «мои брони» + кнопка отмены ✅
+- **⬜** `booking.heylark.dev` — Caddy vhost + фронт `booking_web` (3 лица) живут в nexus-arcana (пересмотр §10); групповой UX обкатать
 - эпик #23 — полный дизайн, фазы, разведка planerka/Яндекс
