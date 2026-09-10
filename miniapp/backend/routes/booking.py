@@ -22,6 +22,7 @@ from pydantic import BaseModel, Field
 from core.auth_grants import booking_role
 from core.booking.busy import BusyInterval, busy_intervals, merge_intervals
 from core.booking.ics import IcsEvent, build_ics
+from core.booking import repo as bkrepo
 from core.booking.repo import (
     Booking, create_booking, get_booking, list_bookings, set_booking_status,
 )
@@ -327,6 +328,136 @@ async def booking_confirm(booking_id: int, tg_id: int = Depends(current_user_id)
 @router.post("/booking/requests/{booking_id}/decline")
 async def booking_decline(booking_id: int, tg_id: int = Depends(current_user_id)) -> dict:
     return await _decide(booking_id, "declined")
+
+
+# ── owner config: availability windows / meeting types / manual blocks ──────
+
+class AvailBody(BaseModel):
+    context: str = "friends"
+    weekday: int = Field(ge=0, le=6)
+    start_time: str          # "HH:MM"
+    end_time: str
+    tz: str = "Europe/Moscow"
+    slot_minutes: int = 60
+    min_notice_hours: int = 12
+    max_advance_days: int = 60
+    buffer_before_min: int = 0
+    buffer_after_min: int = 0
+    active: bool = True
+
+
+class MeetingTypeBody(BaseModel):
+    context: str = "friends"
+    slug: str
+    title: str = ""
+    duration_min: int = 60
+    location_kind: str = "call"
+    location_value: str = ""
+    requires_approval: bool = False
+    description: str = ""
+    color: str = ""
+    active: bool = True
+
+
+class BlockBody(BaseModel):
+    start: str
+    end: str
+    reason: str = ""
+
+
+async def _owner_uid_or_404(tg_id: int) -> str:
+    from core.user_manager import get_user_id
+    uid = await get_user_id(tg_id)
+    if not uid:
+        raise HTTPException(status_code=404, detail="no user")
+    return uid
+
+
+@router.get("/booking/availability")
+async def avail_list(tg_id: int = Depends(current_user_id)) -> dict:
+    uid = await _owner_uid_or_404(tg_id)
+    return {"windows": await bkrepo.list_availability(uid)}
+
+
+@router.post("/booking/availability")
+async def avail_add(body: AvailBody, tg_id: int = Depends(current_user_id)) -> dict:
+    uid = await _owner_uid_or_404(tg_id)
+    if body.context not in _CONTEXTS:
+        raise HTTPException(status_code=400, detail="bad context")
+    return await bkrepo.add_availability(uid, body.model_dump())
+
+
+@router.patch("/booking/availability/{row_id}")
+async def avail_edit(row_id: int, body: dict, tg_id: int = Depends(current_user_id)) -> dict:
+    uid = await _owner_uid_or_404(tg_id)
+    row = await bkrepo.edit_availability(row_id, uid, body)
+    if not row:
+        raise HTTPException(status_code=404, detail="not found")
+    return row
+
+
+@router.delete("/booking/availability/{row_id}")
+async def avail_del(row_id: int, tg_id: int = Depends(current_user_id)) -> dict:
+    uid = await _owner_uid_or_404(tg_id)
+    return {"deleted": await bkrepo.del_availability(row_id, uid)}
+
+
+@router.get("/booking/meeting-types")
+async def mt_list(context: str = Query(""), p: Principal = Depends(booking_principal)) -> dict:
+    uid = await _owner_user_id()
+    items = await bkrepo.list_meeting_types(uid or "")
+    if context:
+        items = [m for m in items if m.get("context") == context]
+    if p.role not in ("admin",):
+        items = [m for m in items if m.get("active")]
+    return {"types": items}
+
+
+@router.post("/booking/meeting-types")
+async def mt_add(body: MeetingTypeBody, tg_id: int = Depends(current_user_id)) -> dict:
+    uid = await _owner_uid_or_404(tg_id)
+    if body.context not in _CONTEXTS:
+        raise HTTPException(status_code=400, detail="bad context")
+    return await bkrepo.add_meeting_type(uid, body.model_dump())
+
+
+@router.patch("/booking/meeting-types/{row_id}")
+async def mt_edit(row_id: int, body: dict, tg_id: int = Depends(current_user_id)) -> dict:
+    uid = await _owner_uid_or_404(tg_id)
+    row = await bkrepo.edit_meeting_type(row_id, uid, body)
+    if not row:
+        raise HTTPException(status_code=404, detail="not found")
+    return row
+
+
+@router.delete("/booking/meeting-types/{row_id}")
+async def mt_del(row_id: int, tg_id: int = Depends(current_user_id)) -> dict:
+    uid = await _owner_uid_or_404(tg_id)
+    return {"deleted": await bkrepo.del_meeting_type(row_id, uid)}
+
+
+@router.get("/booking/blocks")
+async def block_list(tg_id: int = Depends(current_user_id)) -> dict:
+    uid = await _owner_uid_or_404(tg_id)
+    return {"blocks": await bkrepo.list_blocks(uid)}
+
+
+@router.post("/booking/blocks")
+async def block_add(body: BlockBody, tg_id: int = Depends(current_user_id)) -> dict:
+    uid = await _owner_uid_or_404(tg_id)
+    try:
+        s, e = _parse_dt(body.start), _parse_dt(body.end)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="bad datetime")
+    if e <= s:
+        raise HTTPException(status_code=400, detail="end before start")
+    return await bkrepo.add_block(uid, s, e, body.reason.strip())
+
+
+@router.delete("/booking/blocks/{row_id}")
+async def block_del(row_id: int, tg_id: int = Depends(current_user_id)) -> dict:
+    uid = await _owner_uid_or_404(tg_id)
+    return {"deleted": await bkrepo.del_block(row_id, uid)}
 
 
 @router.get("/booking/feed-url")

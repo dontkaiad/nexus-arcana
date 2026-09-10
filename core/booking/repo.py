@@ -11,12 +11,15 @@ from __future__ import annotations
 import asyncio
 import secrets
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, time, timezone
 from typing import List, Optional
 
 import sqlalchemy as sa
 
-from core.booking.tables import BLOCKING_BOOKING_STATUSES, booking
+from core.booking.tables import (
+    BLOCKING_BOOKING_STATUSES, booking, booking_availability, booking_block,
+    booking_meeting_type,
+)
 
 _UTC = timezone.utc
 
@@ -153,7 +156,127 @@ async def set_booking_status(booking_id: int, status: str, *, engine=None) -> Op
     return await asyncio.to_thread(_set_status_sync, eng, booking_id, status)
 
 
+# ── config tables: availability windows / meeting types / manual blocks ──────
+# Thin dict-in/dict-out CRUD — the owner-only admin API is the only caller.
+
+_AVAIL_FIELDS = {
+    "context", "weekday", "start_time", "end_time", "tz", "slot_minutes",
+    "min_notice_hours", "max_advance_days", "buffer_before_min",
+    "buffer_after_min", "active",
+}
+_MT_FIELDS = {
+    "context", "slug", "title", "duration_min", "location_kind",
+    "location_value", "requires_approval", "description", "color", "active",
+}
+
+
+def _rows(engine, table, user_id: str) -> List[dict]:
+    q = sa.select(table)
+    if user_id and "user_id" in table.c:
+        q = q.where(table.c.user_id.in_([user_id, ""]))
+    with engine.connect() as conn:
+        return [dict(r._mapping) for r in conn.execute(q.order_by(table.c.id))]
+
+
+def _insert(engine, table, user_id: str, vals: dict, allowed: set) -> dict:
+    clean = {k: v for k, v in vals.items() if k in allowed}
+    clean["user_id"] = user_id
+    with engine.begin() as conn:
+        row = conn.execute(table.insert().values(**clean).returning(table)).first()
+    return dict(row._mapping)
+
+
+def _update(engine, table, row_id: int, user_id: str, vals: dict, allowed: set) -> Optional[dict]:
+    clean = {k: v for k, v in vals.items() if k in allowed}
+    if not clean:
+        return None
+    if "updated_at" in table.c:
+        clean["updated_at"] = datetime.now(_UTC)
+    q = table.update().where(table.c.id == row_id)
+    if user_id and "user_id" in table.c:
+        q = q.where(table.c.user_id.in_([user_id, ""]))
+    with engine.begin() as conn:
+        row = conn.execute(q.values(**clean).returning(table)).first()
+    return dict(row._mapping) if row else None
+
+
+def _delete(engine, table, row_id: int, user_id: str) -> bool:
+    q = table.delete().where(table.c.id == row_id)
+    if user_id and "user_id" in table.c:
+        q = q.where(table.c.user_id.in_([user_id, ""]))
+    with engine.begin() as conn:
+        return conn.execute(q).rowcount > 0
+
+
+def _coerce_time(vals: dict) -> dict:
+    out = dict(vals)
+    for k in ("start_time", "end_time"):
+        v = out.get(k)
+        if isinstance(v, str) and ":" in v:
+            hh, mm = v.split(":")[:2]
+            out[k] = time(int(hh), int(mm))
+    return out
+
+
+async def list_availability(user_id: str, *, engine=None) -> List[dict]:
+    rows = await asyncio.to_thread(_rows, engine or _engine(), booking_availability, user_id)
+    for r in rows:  # times → "HH:MM" for JSON
+        for k in ("start_time", "end_time"):
+            if isinstance(r.get(k), time):
+                r[k] = r[k].strftime("%H:%M")
+    return rows
+
+
+async def add_availability(user_id: str, vals: dict, *, engine=None) -> dict:
+    return await asyncio.to_thread(_insert, engine or _engine(), booking_availability, user_id, _coerce_time(vals), _AVAIL_FIELDS)
+
+
+async def edit_availability(row_id: int, user_id: str, vals: dict, *, engine=None) -> Optional[dict]:
+    return await asyncio.to_thread(_update, engine or _engine(), booking_availability, row_id, user_id, _coerce_time(vals), _AVAIL_FIELDS)
+
+
+async def del_availability(row_id: int, user_id: str, *, engine=None) -> bool:
+    return await asyncio.to_thread(_delete, engine or _engine(), booking_availability, row_id, user_id)
+
+
+async def list_meeting_types(user_id: str, *, engine=None) -> List[dict]:
+    return await asyncio.to_thread(_rows, engine or _engine(), booking_meeting_type, user_id)
+
+
+async def add_meeting_type(user_id: str, vals: dict, *, engine=None) -> dict:
+    return await asyncio.to_thread(_insert, engine or _engine(), booking_meeting_type, user_id, vals, _MT_FIELDS)
+
+
+async def edit_meeting_type(row_id: int, user_id: str, vals: dict, *, engine=None) -> Optional[dict]:
+    return await asyncio.to_thread(_update, engine or _engine(), booking_meeting_type, row_id, user_id, vals, _MT_FIELDS)
+
+
+async def del_meeting_type(row_id: int, user_id: str, *, engine=None) -> bool:
+    return await asyncio.to_thread(_delete, engine or _engine(), booking_meeting_type, row_id, user_id)
+
+
+async def list_blocks(user_id: str, *, engine=None) -> List[dict]:
+    return await asyncio.to_thread(_rows, engine or _engine(), booking_block, user_id)
+
+
+async def add_block(user_id: str, start_at: datetime, end_at: datetime, reason: str = "", *, engine=None) -> dict:
+    def _go(eng):
+        with eng.begin() as conn:
+            row = conn.execute(booking_block.insert().values(
+                user_id=user_id, start_at=start_at, end_at=end_at, reason=reason,
+            ).returning(booking_block)).first()
+        return dict(row._mapping)
+    return await asyncio.to_thread(_go, engine or _engine())
+
+
+async def del_block(row_id: int, user_id: str, *, engine=None) -> bool:
+    return await asyncio.to_thread(_delete, engine or _engine(), booking_block, row_id, user_id)
+
+
 __all__ = [
     "Booking", "BLOCKING_BOOKING_STATUSES",
     "create_booking", "get_booking", "list_bookings", "set_booking_status",
+    "list_availability", "add_availability", "edit_availability", "del_availability",
+    "list_meeting_types", "add_meeting_type", "edit_meeting_type", "del_meeting_type",
+    "list_blocks", "add_block", "del_block",
 ]
