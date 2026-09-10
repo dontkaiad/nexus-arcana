@@ -226,8 +226,14 @@ mode» — ломаться и утекать особо нечему.
   (`GET /feed/<token>.ics`, HMAC от `SESSION_SECRET`) + `GET /api/booking/feed-url` ✅
 - `core/auth_grants.py` — `booking_role(tg_id)` (admin/friend/guest), `grants`;
   `/grant` в `nexus_bot.py` ✅
-- **⬜** `miniapp/backend/routes/booking.py` — `/api/booking/slots` `/public`
-  `/book`, `booking_principal` seam, service-token для бота
+- `miniapp/backend/routes/booking.py` — `booking_principal` seam (session /
+  service-token), `GET /api/booking/public` `/slots`, `POST /api/booking/book`
+  (friends auto-confirm / arcana pending, 409 conflict), `/requests` +
+  `/requests/<id>/confirm|decline` (owner), `/booking/request/<token>` ✅
+- `core/booking/repo.py` — `booking` CRUD; `core/bot_notify.py:notify_booking_log`
+  → topic `TG_LOG_THREAD_BOOKING` ✅
+- **⬜** linkage confirmed booking → Nexus-задача / 🔮 Работа + inline
+  approve/decline buttons (B6)
 - **⬜** `heylark_booking_bot/` (Zarya, новый процесс) — гейт по `grants`, ЛС-пульт
   + группа-консьерж
 - **⬜** `booking.heylark.dev` фронт (3 лица) + Caddy vhost — heylark-infra
