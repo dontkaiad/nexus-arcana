@@ -44,13 +44,14 @@
   input,select,textarea{font:inherit;width:100%;padding:.5em .65em;border:1px solid var(--line);
     border-radius:10px;background:var(--card);color:var(--tx)}
   .muted{color:var(--tx-mute)}
-  .app{display:grid;grid-template-columns:340px 1fr;min-height:100%}
-  @media(max-width:900px){.app{grid-template-columns:1fr}}
+  .app{display:grid;grid-template-columns:300px minmax(0,1fr);min-height:100%}
+  @media(max-width:960px){.app{grid-template-columns:1fr}}
 
-  /* ── left rail — full height ─────────────────────────────────────── */
-  .rail{background:var(--rail);border-right:1px solid var(--line);padding:1.4rem 1.2rem;
-    display:flex;flex-direction:column;gap:1.1rem}
-  @media(max-width:900px){.rail{border-right:0;border-bottom:1px solid var(--line)}}
+  /* ── left rail — full height, own scroll ─────────────────────────── */
+  .rail{background:var(--rail);border-right:1px solid var(--line);padding:1.3rem 1.1rem;
+    display:flex;flex-direction:column;gap:1rem;
+    height:100vh;position:sticky;top:0;overflow-y:auto}
+  @media(max-width:960px){.rail{height:auto;position:static;border-right:0;border-bottom:1px solid var(--line)}}
   .me{display:flex;flex-direction:column;align-items:center;text-align:center;gap:.6rem}
   .me .ava{width:104px;height:104px;border-radius:50%;object-fit:cover;border:2px solid var(--acc-soft)}
   .me h2{font-size:1.15rem}
@@ -72,19 +73,23 @@
   .seg button.on{background:var(--acc);color:var(--acc-ink);font-weight:600}
   .rail .foot{margin-top:auto;font-size:.78rem;color:var(--tx-mute)}
 
-  /* ── main ───────────────────────────────────────────────────────── */
-  .main{padding:1.4rem;max-width:820px}
+  /* ── main: calendar + slide-in detail on the right ──────────────── */
+  .main{padding:1.4rem;display:flex;gap:1rem;align-items:flex-start}
+  @media(max-width:760px){.main{flex-direction:column}}
+  .calcol{flex:1 1 auto;min-width:0}
+  .detailcol{flex:0 0 320px;position:sticky;top:1.4rem}
+  @media(max-width:760px){.detailcol{flex:1 1 auto;position:static;width:100%}}
   .bar{display:flex;align-items:center;gap:.6rem;margin-bottom:1rem}
-  .bar h1{font-size:1.1rem}
+  .bar h1{font-size:1.15rem}
   .bar .sp{flex:1}
   .card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);
     padding:1.1rem;box-shadow:var(--shadow)}
   .cnav{display:flex;align-items:center;gap:.5rem;margin-bottom:.9rem}
-  .cnav .t{font-weight:640;font-size:1.05rem;text-transform:capitalize;min-width:9.5rem}
-  .grid{display:grid;grid-template-columns:repeat(7,1fr);gap:6px}
-  .dow{font-size:.72rem;color:var(--tx-mute);text-align:center;text-transform:uppercase;padding-bottom:2px}
-  .day{position:relative;background:var(--bg);border:1px solid transparent;border-radius:11px;
-    min-height:70px;padding:.35rem .4rem;display:flex;flex-direction:column;gap:3px;text-align:left;overflow:hidden}
+  .cnav .t{font-weight:640;font-size:1.1rem;text-transform:capitalize;min-width:9.5rem}
+  .grid{display:grid;grid-template-columns:repeat(7,1fr);gap:7px}
+  .dow{font-size:.74rem;color:var(--tx-mute);text-align:center;text-transform:uppercase;padding-bottom:2px}
+  .day{position:relative;background:var(--bg);border:1px solid transparent;border-radius:12px;
+    min-height:96px;padding:.45rem .5rem;display:flex;flex-direction:column;gap:4px;text-align:left;overflow:hidden}
   .day.avail{background:linear-gradient(0deg,var(--avail),var(--avail)),var(--bg)}
   .day.out{opacity:.35}
   .day.today .dn{color:var(--acc);font-weight:700}
@@ -113,23 +118,33 @@
 <div class="app">
   <aside class="rail" id="rail"></aside>
   <main class="main">
-    <div class="bar">
-      <span style="font-size:1.25rem">⭐</span>
-      <h1>Календарь Кай</h1>
-      <span class="sp"></span>
-      <button id="theme" class="mini" title="Тема">◐ тема</button>
-    </div>
-    <div class="card">
-      <div class="cnav">
-        <button id="prev" class="mini">‹</button>
-        <span class="t" id="mtitle"></span>
-        <button id="next" class="mini">›</button>
-        <span class="sp" style="flex:1"></span>
-        <button id="today" class="mini">сегодня</button>
+    <div class="calcol">
+      <div class="bar">
+        <span style="font-size:1.25rem">⭐</span>
+        <h1>Календарь Кай</h1>
+        <span class="sp"></span>
+        <button id="theme" class="mini" title="Тема">◐ тема</button>
       </div>
-      <div class="grid" id="dow"></div>
-      <div class="grid" id="grid" style="margin-top:6px"></div>
-      <div class="detail" id="detail"></div>
+      <div class="card">
+        <div class="cnav">
+          <button id="prev" class="mini">‹</button>
+          <span class="t" id="mtitle"></span>
+          <button id="next" class="mini">›</button>
+          <span class="sp" style="flex:1"></span>
+          <button id="today" class="mini">сегодня</button>
+        </div>
+        <div class="grid" id="dow"></div>
+        <div class="grid" id="grid" style="margin-top:6px"></div>
+      </div>
+    </div>
+    <div class="detailcol" id="detailcol" style="display:none">
+      <div class="card">
+        <div style="display:flex;align-items:center">
+          <h3 id="detailTitle" style="font-size:1rem;flex:1"></h3>
+          <button class="mini" id="detailClose">✕</button>
+        </div>
+        <div class="detail" id="detail"></div>
+      </div>
     </div>
   </main>
 </div>
@@ -335,9 +350,11 @@ function gridR(){
 }
 
 function detail(){
-  const el=$("#detail");
-  if(!st.sel){el.innerHTML="";return;}
+  const col=$("#detailcol"), el=$("#detail");
+  if(!st.sel){col.style.display="none";return;}
+  col.style.display="block";
   const d=st.sel, evs=evsDay(d), sl=slotsDay(d);
+  $("#detailTitle").textContent = `${d.getDate()} ${MON[d.getMonth()]}, ${DOW[(d.getDay()+6)%7]}`;
   const canBook = st.me.role==="admin"||st.me.role==="friend"||st.ctx==="arcana";
   const evH = evs.length ? evs.map(e=>{
     const k=e.kind||"busy";
@@ -348,9 +365,8 @@ function detail(){
   if(!canBook) slH=`<div class="muted" style="font-size:.9rem;margin-top:.6rem">Чтобы записаться — <a href="${loginUrl()}">войти через Telegram</a>.</div>`;
   else if(!sl.length) slH=`<div class="muted" style="font-size:.9rem;margin-top:.6rem">Свободных слотов нет.${st.me.role==="admin"?" Добавь окно на "+DOW[(d.getDay()+6)%7]+".":""}</div>`;
   else slH=`<div class="slotwrap">${sl.map(s=>`<button data-s="${s.start}">${T(s.start)}</button>`).join("")}</div>`;
-  el.innerHTML = `<h3 style="font-size:1rem">${d.getDate()} ${MON[d.getMonth()]}</h3>
-    <div style="margin-top:.4rem">${evH}</div>
-    <div style="margin-top:.8rem;font-weight:600">Записаться${st.ctx==="arcana"?" · расклад/ритуал":""}:</div>${slH}`;
+  el.innerHTML = `<div>${evH}</div>
+    <div style="margin-top:.9rem;font-weight:600">Записаться${st.ctx==="arcana"?" · расклад/ритуал":""}:</div>${slH}`;
   el.querySelectorAll(".slotwrap button").forEach(b=>b.onclick=()=>book(b.dataset.s));
 }
 
@@ -388,6 +404,7 @@ async function boot(){
   $("#prev").onclick=()=>{st.month.setMonth(st.month.getMonth()-1);gridR();};
   $("#next").onclick=()=>{st.month.setMonth(st.month.getMonth()+1);gridR();};
   $("#today").onclick=()=>{st.month=new Date();st.sel=new Date();gridR();detail();};
+  $("#detailClose").onclick=()=>{st.sel=null;gridR();detail();};
   await load();
   rail();gridR();
 }
