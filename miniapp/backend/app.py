@@ -4,8 +4,9 @@ from __future__ import annotations
 import os
 import pathlib
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
@@ -86,6 +87,42 @@ for _r in (
 @app.get("/health")
 async def health() -> dict:
     return {"ok": True}
+
+
+# booking.heylark.dev пока указывает на этот же бэкенд (API + .ics живут, фронт —
+# B5). До фронта отдаём заглушку Zarya, а не оболочку Mini App. #23.
+_ZARYA_PLACEHOLDER = """<!doctype html><meta charset=utf-8>
+<meta name=viewport content="width=device-width,initial-scale=1">
+<title>Zarya · heylark Booking</title>
+<style>
+  :root{color-scheme:dark}
+  body{margin:0;min-height:100vh;display:grid;place-items:center;
+    font:16px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+    background:radial-gradient(1200px 600px at 50% -10%,#1a2340,#0b1020);color:#d8d4c8}
+  .c{max-width:32rem;padding:2rem;text-align:center}
+  h1{font-size:2rem;margin:.2rem 0}
+  p{color:#8b93a7}
+  code{background:#ffffff14;padding:.15em .4em;border-radius:6px;font-size:.85em}
+</style>
+<div class=c>
+  <div style="font-size:3rem">⭐</div>
+  <h1>Zarya</h1>
+  <p>heylark Booking — календарь и запись. Страница в разработке.</p>
+  <p style="font-size:.85em">API уже живёт: <code>/api/booking/*</code> · <code>/feed/&lt;token&gt;.ics</code></p>
+</div>
+"""
+
+
+@app.get("/", include_in_schema=False)
+async def root(request: Request):
+    """`/` host-aware: booking.* → заглушка Zarya; остальное → оболочка Mini App
+    (то же поведение, что раньше давал SPA-fallback для корня)."""
+    if (request.headers.get("host", "") or "").split(":")[0].startswith("booking."):
+        return HTMLResponse(_ZARYA_PLACEHOLDER)
+    _idx = _DIST / "index.html"
+    if _idx.is_file():
+        return FileResponse(str(_idx), headers={"Cache-Control": "no-cache, must-revalidate"})
+    return JSONResponse({"ok": True, "app": "nexus-arcana"})
 
 
 class SPAStaticFiles(StaticFiles):

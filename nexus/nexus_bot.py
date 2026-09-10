@@ -1679,6 +1679,17 @@ async def main() -> None:
         except Exception as e:
             logger.error("proactive_budget_review on startup failed: %s", e)
         await notify_startup("nexus")  # стартовый пинг в лог-группу (fail-safe)
+        # Booking API живёт в этом же процессе (FastAPI на :8000). Если топик
+        # букинга настроен — пингуем что он поднялся вместе с бэкендом (#23).
+        if config.log_thread_booking:
+            try:
+                from core.bot_notify import notify_booking_log, _version_stamp
+                await notify_booking_log(
+                    f"⭐ <b>Booking API</b> up · 🔖 <code>{_version_stamp()}</code>\n"
+                    f"booking.heylark.dev"
+                )
+            except Exception as e:
+                logger.warning("booking startup ping failed: %s", e)
         start_heartbeat()  # фоновый heartbeat для docker healthcheck
 
     dp.startup.register(_on_startup)

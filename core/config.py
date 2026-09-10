@@ -159,6 +159,7 @@ def load_config() -> AppConfig:
         cookie_domain        = _optional("COOKIE_DOMAIN", ".heylark.dev"),
         login_base_url       = _optional("LOGIN_BASE_URL", "https://login.heylark.dev"),
         auth_database_url    = _optional("AUTH_DATABASE_URL"),
+        booking_service_token = _optional("BOOKING_SERVICE_TOKEN"),
         nexus = NexusConfig(
             tg_token     = _require("NEXUS_BOT_TOKEN"),
             db_finance   = _optional("NOTION_DB_FINANCE"),
