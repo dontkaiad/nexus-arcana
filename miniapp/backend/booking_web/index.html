@@ -77,6 +77,20 @@
   .dd-opt{padding:.5em .7em;font-size:.9rem;cursor:pointer;color:var(--ink)}
   .dd-opt:hover{background:var(--cell-bg)}
   .dd-opt.sel{background:var(--accent);color:var(--accent-ink)}
+  .dd-cal{position:absolute;z-index:25;left:0;top:calc(100% + 4px);width:232px;max-width:80vw;padding:10px;
+    background:var(--dd-bg);border:1px solid var(--glass-line);border-radius:12px;
+    box-shadow:0 14px 34px -10px var(--shadowc), 0 0 0 1px var(--glass-hi) inset;color:var(--ink)}
+  .cal-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;font-size:.9rem}
+  .cal-nav{border:0;background:none;color:var(--ink);cursor:pointer;padding:2px 10px;font-size:1rem;border-radius:6px}
+  .cal-nav:hover{background:var(--cell-bg)}
+  .cal-dow{display:grid;grid-template-columns:repeat(7,1fr);gap:2px;margin-bottom:3px;
+    font-size:.6rem;text-transform:uppercase;color:var(--muted);text-align:center}
+  .cal-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:2px}
+  .cal-d{text-align:center;padding:5px 0;border-radius:7px;font-size:.82rem;cursor:pointer}
+  .cal-d:hover{background:var(--cell-bg)}
+  .cal-d.sel{background:var(--accent);color:var(--accent-ink)}
+  .cal-d.out{visibility:hidden;cursor:default}
+  .two>.ddd:last-child .dd-cal{left:auto;right:0}
 
   /* ── sky + celestial disc — JS-driven morph, ported from Nexus / Arcana (App.jsx getSky/getOrb) ── */
   #sky{position:fixed;inset:0;z-index:0;pointer-events:none}
@@ -452,7 +466,7 @@ function adminSections(){
     <div class="form">
       <div class="two">${dd("w_ctx",[["friends","для встреч"],["arcana","для раскладов"]],"friends")}
         ${dd("w_wd",DOW.map((d,i)=>[String(i),d]),"0")}</div>
-      <div class="two"><input id="w_s" type="time" value="14:00"><input id="w_e" type="time" value="20:00"></div>
+      <div class="two">${ddTime("w_s","14:00")}${ddTime("w_e","20:00")}</div>
       <button class="primary mini" id="w_add">＋ добавить окно</button>
     </div>
   </div></details>
@@ -470,7 +484,7 @@ function adminSections(){
     <p class="hint">отпуск, поездки — эти даты просто не показываются для записи</p>
     <div class="stack" id="offBox">…</div>
     <div class="form">
-      <div class="two"><input id="o_s" type="date"><input id="o_e" type="date"></div>
+      <div class="two">${ddDate("o_s","")}${ddDate("o_e","")}</div>
       <input id="o_r" placeholder="причина (отпуск)">
       <button class="primary mini" id="o_add">＋ отметить</button>
     </div>
@@ -485,8 +499,50 @@ function dd(id,opts,init){
   </div>`;
 }
 const ddVal=id=>$("#"+id).dataset.val;
+
+// time picker — same widget, 30-min steps
+const _TIMES=(()=>{const a=[];for(let h=0;h<24;h++)for(const m of[0,30])a.push([pad(h)+":"+pad(m),pad(h)+":"+pad(m)]);return a;})();
+const ddTime=(id,init)=>dd(id,_TIMES,init);
+
+// date picker — custom mini-calendar (native type=date popup can't be themed)
+const _dLbl=iso=>{const[y,m,d]=iso.split("-");return d+"."+m+"."+y;};
+function ddDate(id,init){
+  return `<div class="dd ddd" id="${id}" data-val="${init||""}">
+    <button type="button" class="dd-btn"><span class="dd-lbl">${init?_dLbl(init):"дата"}</span><span class="dd-cx">▾</span></button>
+    <div class="dd-cal" hidden></div>
+  </div>`;
+}
+function _calHTML(view,sel){
+  const y=view.getFullYear(), m=view.getMonth();
+  const lead=(new Date(y,m,1).getDay()+6)%7, dim=new Date(y,m+1,0).getDate();
+  let c="";
+  for(let i=0;i<lead;i++) c+='<span class="cal-d out"></span>';
+  for(let d=1;d<=dim;d++){const iso=y+"-"+pad(m+1)+"-"+pad(d);
+    c+=`<span class="cal-d${iso===sel?" sel":""}" data-d="${iso}">${d}</span>`;}
+  return `<div class="cal-head"><button type="button" class="cal-nav" data-m="-1">‹</button>
+    <span>${MON[m]} ${y}</span><button type="button" class="cal-nav" data-m="1">›</button></div>
+    <div class="cal-dow">${DOW.map(x=>`<span>${x}</span>`).join("")}</div>
+    <div class="cal-grid">${c}</div>`;
+}
+function wireDDate(scope){
+  (scope||document).querySelectorAll(".ddd").forEach(d=>{
+    const btn=d.querySelector(".dd-btn"), cal=d.querySelector(".dd-cal");
+    let view=d.dataset.val?new Date(d.dataset.val):new Date();
+    const draw=()=>cal.innerHTML=_calHTML(view,d.dataset.val);
+    btn.onclick=e=>{e.stopPropagation();const wasOpen=!cal.hidden;ddCloseAll();
+      if(wasOpen)return; draw(); cal.hidden=false; d.classList.add("open");
+      const sec=d.closest("details.sec"); if(sec){sec.style.position="relative";sec.style.zIndex="40";}};
+    cal.onclick=e=>{e.stopPropagation();
+      const nav=e.target.closest(".cal-nav");
+      if(nav){view.setMonth(view.getMonth()+ +nav.dataset.m); draw(); return;}
+      const day=e.target.closest(".cal-d[data-d]");
+      if(day){d.dataset.val=day.dataset.d; d.querySelector(".dd-lbl").textContent=_dLbl(day.dataset.d); ddCloseAll();}
+    };
+  });
+}
+
 function ddCloseAll(){
-  document.querySelectorAll(".dd-list").forEach(l=>l.hidden=true);
+  document.querySelectorAll(".dd-list,.dd-cal").forEach(l=>l.hidden=true);
   document.querySelectorAll(".dd").forEach(x=>x.classList.remove("open"));
   // release the raised stacking context (backdrop-filter cards trap the popup otherwise)
   document.querySelectorAll("details.sec").forEach(s=>{s.style.zIndex="";s.style.position="";});
@@ -507,18 +563,14 @@ function wireDD(scope){
     });
   });
 }
-document.addEventListener("click",()=>{
-  document.querySelectorAll(".dd-list").forEach(l=>l.hidden=true);
-  document.querySelectorAll(".dd").forEach(x=>x.classList.remove("open"));
-  document.querySelectorAll("details.sec").forEach(s=>{s.style.zIndex="";s.style.position="";});
-});
+document.addEventListener("click",ddCloseAll);
 
 function wireAdmin(){
-  reqBox(); winBox(); typBox(); offBox(); wireDD($("#rail"));
+  reqBox(); winBox(); typBox(); offBox(); wireDD($("#rail")); wireDDate($("#rail"));
   $("#w_add").onclick=async()=>{try{
     await api("/availability",{method:"POST",headers:{"content-type":"application/json"},
       body:JSON.stringify({context:ddVal("w_ctx"),weekday:+ddVal("w_wd"),
-        start_time:$("#w_s").value,end_time:$("#w_e").value})});
+        start_time:ddVal("w_s"),end_time:ddVal("w_e")})});
     toast("окно добавлено");winBox();load().then(gridR);
   }catch(e){toast("не вышло: "+e.message);}};
   $("#t_add").onclick=async()=>{try{
@@ -529,7 +581,7 @@ function wireAdmin(){
   }catch(e){toast("не вышло: "+e.message);}};
   $("#o_add").onclick=async()=>{try{
     await api("/blocks",{method:"POST",headers:{"content-type":"application/json"},
-      body:JSON.stringify({start:$("#o_s").value+"T00:00",end:$("#o_e").value+"T23:59",reason:$("#o_r").value})});
+      body:JSON.stringify({start:ddVal("o_s")+"T00:00",end:ddVal("o_e")+"T23:59",reason:$("#o_r").value})});
     toast("отмечено");offBox();load().then(gridR);
   }catch(e){toast("не вышло: "+e.message);}};
 }
