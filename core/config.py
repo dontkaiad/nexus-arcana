@@ -140,6 +140,9 @@ class AppConfig:
     # ── Service-to-service secret: the Zarya booking bot → Booking API
     # (`X-Booking-Service-Token`). Same value in the bot's env. #23. ──
     booking_service_token: str = ""
+    # ── ⭐ Zarya booking bot (@heylark_booking_bot). Пусто → бот не стартует. ──
+    booking_bot_token: str = ""
+    booking_api_base: str = "http://nexus-bot:8000"
 
 
 def load_config() -> AppConfig:
@@ -160,6 +163,8 @@ def load_config() -> AppConfig:
         login_base_url       = _optional("LOGIN_BASE_URL", "https://login.heylark.dev"),
         auth_database_url    = _optional("AUTH_DATABASE_URL"),
         booking_service_token = _optional("BOOKING_SERVICE_TOKEN"),
+        booking_bot_token    = _optional("BOOKING_BOT_TOKEN"),
+        booking_api_base     = _optional("BOOKING_API_BASE", "http://nexus-bot:8000"),
         nexus = NexusConfig(
             tg_token     = _require("NEXUS_BOT_TOKEN"),
             db_finance   = _optional("NOTION_DB_FINANCE"),

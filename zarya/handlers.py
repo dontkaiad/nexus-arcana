@@ -1,0 +1,257 @@
+"""zarya/handlers.py — Zarya's router, role middleware and flows.
+
+Role comes from the shared `grants` table (`core.auth_grants.booking_role`),
+keyed on the sender's tg_id. Nobody is blocked outright — a guest just gets
+the public view and a nudge. Group chats: only replies to /commands, an
+@mention or a reply to the bot (Telegram privacy mode does most of this).
+"""
+from __future__ import annotations
+
+import logging
+from datetime import date, datetime, timedelta, timezone
+from typing import Any, Awaitable, Callable, Dict, Optional
+
+from aiogram import BaseMiddleware, F, Router
+from aiogram.filters import Command
+from aiogram.types import (
+    CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message, TelegramObject,
+)
+
+from core.auth_grants import booking_role
+from core.booking.busy import busy_intervals, merge_intervals
+from core.booking.repo import create_booking, list_bookings, set_booking_status
+from core.booking.slots import free_slots
+from core.config import config
+from zarya.formatting import (
+    MSK, epoch, from_epoch, group_slots_by_day, slot_label, wants_slots,
+)
+
+logger = logging.getLogger("zarya.handlers")
+router = Router()
+
+_SLOT_DAYS = 21
+_MAX_SLOT_BUTTONS = 8
+_FRIEND_HOURS = (1, 2, 3, 4)
+
+
+class RoleMiddleware(BaseMiddleware):
+    async def __call__(
+        self,
+        handler: Callable[[TelegramObject, Dict[str, Any]], Awaitable[Any]],
+        event: TelegramObject,
+        data: Dict[str, Any],
+    ) -> Any:
+        user = data.get("event_from_user")
+        tg_id = user.id if user else 0
+        data["tg_id"] = tg_id
+        try:
+            data["role"] = await booking_role(tg_id) if tg_id else "guest"
+        except Exception as e:
+            logger.warning("role resolve failed for %s: %s", tg_id, e)
+            data["role"] = "guest"
+        return await handler(event, data)
+
+
+def _ctx_for(role: str) -> str:
+    return "friends" if role in ("friend", "admin") else "arcana"
+
+
+async def _owner_user_id() -> Optional[str]:
+    from core.user_manager import get_user_id
+    for tg in config.allowed_ids:
+        try:
+            uid = await get_user_id(tg)
+        except Exception:
+            uid = None
+        if uid:
+            return uid
+    return None
+
+
+async def _notify_owner(text: str) -> None:
+    try:
+        from core.bot_notify import notify_booking_log
+        await notify_booking_log(text)
+    except Exception as e:
+        logger.warning("owner notify failed: %s", e)
+
+
+def _slots_kb(ctx: str, slots) -> InlineKeyboardMarkup:
+    rows = []
+    for s in slots[:_MAX_SLOT_BUTTONS]:
+        rows.append([InlineKeyboardButton(
+            text=slot_label(s), callback_data=f"z:slot:{ctx}:{epoch(s)}")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+# ── /start ──────────────────────────────────────────────────────────────────
+
+@router.message(Command("start"))
+async def cmd_start(msg: Message, role: str = "guest") -> None:
+    if role == "admin":
+        await msg.answer(
+            "⭐ <b>Zarya</b> — пульт букинга.\n"
+            "/requests — заявки на подтверждение\n"
+            "/slots — посмотреть свободное"
+        )
+        return
+    who = "друг" if role == "friend" else "гость"
+    await msg.answer(
+        f"⭐ Привет! Я <b>Zarya</b> — веду календарь Кай.\n"
+        f"Ты сейчас: <b>{who}</b>.\n\n"
+        "Спроси «когда у Кай окно» или напиши /slots — покажу свободное время "
+        "и помогу записаться."
+    )
+
+
+# ── show slots ──────────────────────────────────────────────────────────────
+
+async def _show_slots(msg: Message, role: str) -> None:
+    uid = await _owner_user_id()
+    if not uid:
+        await msg.answer("Пока не могу — календарь не готов.")
+        return
+    ctx = _ctx_for(role)
+    today = date.today()
+    slots = await free_slots(uid, ctx, day_from=today, day_to=today + timedelta(days=_SLOT_DAYS))
+    if not slots:
+        # gib the opaque busy view as a fallback so the answer isn't empty
+        now = datetime.now(timezone.utc)
+        merged = merge_intervals(await busy_intervals(uid, now, now + timedelta(days=7)))
+        if role == "guest":
+            await msg.answer(
+                "Свободных окон под запись сейчас нет 🙈\n"
+                "Публичная запись: <a href=\"https://booking.heylark.dev\">booking.heylark.dev</a>"
+            )
+        else:
+            busy_txt = "\n".join(
+                f"• занято {s.astimezone(MSK):%d.%m %H:%M}–{e.astimezone(MSK):%H:%M}"
+                for s, e in merged[:6]
+            ) or "• ближайшая неделя свободна, но окна не настроены"
+            await msg.answer("Настроенных окон под запись нет. Занятость:\n" + busy_txt)
+        return
+
+    by_day = group_slots_by_day(slots)
+    flat = [s for _, day in by_day for s in day]
+    lines = ["🗓 <b>Свободно:</b>"]
+    for header, day in by_day:
+        lines.append(f"\n<b>{header}</b>: " + ", ".join(f"{s.astimezone(MSK):%H:%M}" for s in day))
+    kb = _slots_kb(ctx, flat)
+    tail = "\n\nВыбери слот 👇" if kb.inline_keyboard else ""
+    await msg.answer("\n".join(lines) + tail, reply_markup=kb, disable_web_page_preview=True)
+
+
+@router.message(Command("slots"))
+async def cmd_slots(msg: Message, role: str = "guest") -> None:
+    await _show_slots(msg, role)
+
+
+@router.message(F.text.func(lambda t: wants_slots(t or "")))
+async def nl_slots(msg: Message, role: str = "guest") -> None:
+    await _show_slots(msg, role)
+
+
+# ── slot picked ─────────────────────────────────────────────────────────────
+
+@router.callback_query(F.data.startswith("z:slot:"))
+async def on_slot(call: CallbackQuery, role: str = "guest") -> None:
+    _, _, ctx, ep = call.data.split(":", 3)
+    if ctx == "friends" and role not in ("friend", "admin"):
+        await call.answer("Нужен доступ friend. Напиши Кай.", show_alert=True)
+        return
+    if ctx == "friends":
+        rows = [[InlineKeyboardButton(text=f"{h} ч", callback_data=f"z:book:{ctx}:{ep}:{h}")]
+                for h in _FRIEND_HOURS]
+        await call.message.edit_text(
+            f"На сколько часов тебя занять? ({slot_label(from_epoch(ep))})",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=rows),
+        )
+    else:
+        await _do_book(call, ctx, ep, 1.0, role)
+    await call.answer()
+
+
+@router.callback_query(F.data.startswith("z:book:"))
+async def on_book(call: CallbackQuery, role: str = "guest") -> None:
+    parts = call.data.split(":")
+    ctx, ep = parts[2], parts[3]
+    hours = float(parts[4]) if len(parts) > 4 else 1.0
+    await _do_book(call, ctx, ep, hours, role)
+    await call.answer()
+
+
+async def _do_book(call: CallbackQuery, ctx: str, ep: str, hours: float, role: str) -> None:
+    uid = await _owner_user_id()
+    start = from_epoch(ep)
+    end = start + timedelta(hours=hours)
+    if start <= datetime.now(timezone.utc):
+        await call.message.edit_text("Этот слот уже прошёл 🙈")
+        return
+    clash = await busy_intervals(uid, start, end)
+    if any(iv.overlaps(start, end) for iv in clash):
+        await call.message.edit_text("Упс, слот только что заняли. Спроси окна ещё раз.")
+        return
+
+    status = "confirmed" if ctx == "friends" else "pending"
+    name = (call.from_user.full_name or "").strip() or f"tg:{call.from_user.id}"
+    b = await create_booking(
+        user_id=uid, context=ctx, start_at=start, end_at=end, status=status,
+        hours=hours, requester_tg_id=call.from_user.id, requester_name=name,
+        source="tg_group" if call.message.chat.type in ("group", "supergroup") else "tg_dm",
+    )
+    when = slot_label(start, hours=hours)
+    if status == "confirmed":
+        await call.message.edit_text(f"✅ Записала: {when}")
+        await _notify_owner(f"⭐ <b>{name}</b> записался · {when}")
+    else:
+        await call.message.edit_text(
+            f"📝 Заявка на {when} принята. Кай подтвердит — я напишу."
+        )
+        await _notify_owner(
+            f"🃏 <b>Заявка</b>: {name} · {when}\n"
+            f"/requests чтобы подтвердить (#{b.id})"
+        )
+
+
+# ── admin cockpit ───────────────────────────────────────────────────────────
+
+@router.message(Command("requests"))
+async def cmd_requests(msg: Message, role: str = "guest") -> None:
+    if role != "admin":
+        await msg.answer("Только для Кай.")
+        return
+    uid = await _owner_user_id()
+    pend = await list_bookings(uid or "", statuses=("pending",), upcoming_only=True)
+    if not pend:
+        await msg.answer("Заявок на подтверждение нет ✨")
+        return
+    for b in pend:
+        kb = InlineKeyboardMarkup(inline_keyboard=[[
+            InlineKeyboardButton(text="✅ Подтвердить", callback_data=f"z:ok:{b.id}"),
+            InlineKeyboardButton(text="❌ Отклонить", callback_data=f"z:no:{b.id}"),
+        ]])
+        await msg.answer(
+            f"🃏 #{b.id} · <b>{b.requester_name}</b> · {slot_label(b.start_at, hours=b.hours or 1)}"
+            + (f"\n💬 {b.note}" if b.note else ""),
+            reply_markup=kb,
+        )
+
+
+@router.callback_query(F.data.startswith("z:ok:"))
+async def on_approve(call: CallbackQuery, role: str = "guest") -> None:
+    if role != "admin":
+        await call.answer("Не тебе.", show_alert=True)
+        return
+    b = await set_booking_status(int(call.data.split(":")[2]), "confirmed")
+    await call.message.edit_text(f"✅ #{b.id} подтверждена — {b.requester_name}")
+    await call.answer()
+
+
+@router.callback_query(F.data.startswith("z:no:"))
+async def on_reject(call: CallbackQuery, role: str = "guest") -> None:
+    if role != "admin":
+        await call.answer("Не тебе.", show_alert=True)
+        return
+    b = await set_booking_status(int(call.data.split(":")[2]), "declined")
+    await call.message.edit_text(f"❌ #{b.id} отклонена — {b.requester_name}")
+    await call.answer()

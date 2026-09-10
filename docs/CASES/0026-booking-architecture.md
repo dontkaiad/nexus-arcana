@@ -1,7 +1,7 @@
 # ADR-0026 — heylark Booking: веб-календарь на `booking.heylark.dev` + бот-консьерж `@heylark_booking_bot`, роли из общей `grants`, free/busy на внутренних событиях
 
 **Date:** 2026-09-10 (§6 пересмотрен 2026-09-10 — бот вынесен из Nexus)
-**Status:** Accepted (design) — реализация по эпику #23, дочерние B1–B9
+**Status:** Accepted — backend + Zarya-бот построены (сен 2026); фронт (B5) и линковка задач (B6) — в работе. Эпик #23.
 **Domain:** новый `core.booking` + `miniapp/backend` + `heylark_booking_bot` (новый бот) + отдельный Vite-entry
 **Issue:** #23 (эпик), развивает [ADR-0012](0012-access-model.md)
 
@@ -234,7 +234,11 @@ mode» — ломаться и утекать особо нечему.
   → topic `TG_LOG_THREAD_BOOKING` ✅
 - **⬜** linkage confirmed booking → Nexus-задача / 🔮 Работа + inline
   approve/decline buttons (B6)
-- **⬜** `heylark_booking_bot/` (Zarya, новый процесс) — гейт по `grants`, ЛС-пульт
-  + группа-консьерж
+- `zarya/` (Zarya, `@heylark_booking_bot`) — `RoleMiddleware` (роль из `grants`),
+  `/start` `/slots` + NL, слот→длительность→бронь, `/requests` пульт Кай;
+  `zarya/Dockerfile` (узкий контекст) + compose-сервис `zarya`. Прямые вызовы
+  `core/booking/` (шарит БД), не HTTP. ✅
+- **⬜** линковка confirmed → Nexus-задача / 🔮 Работа; групповой UX обкатать;
+  фронт `booking.heylark.dev` (3 лица) — heylark-infra
 - **⬜** `booking.heylark.dev` фронт (3 лица) + Caddy vhost — heylark-infra
 - эпик #23 — полный дизайн, фазы, разведка planerka/Яндекс

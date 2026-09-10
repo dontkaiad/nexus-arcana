@@ -78,6 +78,30 @@ services:
       retries: 3
       start_period: 40s
 
+  # ⭐ Zarya — heylark Booking concierge bot (@heylark_booking_bot). #23.
+  # Свой узкий Dockerfile → образ пересобирается только на изменения core/,
+  # zarya/ и table-defs; правки nexus/arcana handlers Zarya не рестартят.
+  zarya:
+    build:
+      context: .
+      dockerfile: zarya/Dockerfile
+      args:
+        GIT_SHA: ${GIT_SHA:-}
+    image: zarya-bot
+    container_name: zarya-bot
+    command: ["python", "-m", "zarya"]
+    env_file: .env
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "test $$(( $$(date +%s) - $$(cat /tmp/heartbeat) )) -lt 90"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 40s
+
 volumes:
   pgdata:
   nexus_sqlite_data:
