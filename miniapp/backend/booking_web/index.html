@@ -5,415 +5,391 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Zarya · Календарь Кай</title>
 <style>
+  /* ── LIGHT = Nexus (мягкая зелень) ───────────────────────────────── */
   :root{
-    --bg:#f3ece0; --panel:#ece1cd; --panel-2:#f7f1e6; --line:#d8c8ad;
-    --tx:#3a2f24; --tx-mute:#8a7860; --acc:#b8822a; --acc-soft:#e7d3ab;
-    --ev-nexus:#5a8c62; --ev-nexus-bg:#dcebd7;
-    --ev-arcana:#7a6bb0; --ev-arcana-bg:#e4def2;
-    --ev-generic:#9a8c78; --ev-generic-bg:#e6ddce;
-    --ev-booking:#3f7a8c; --ev-booking-bg:#d6e8ec;
-    --radius:14px; --shadow:0 1px 3px #0000001a, 0 8px 24px #00000012;
+    --bg:#eef3ea; --rail:#e3ecdd; --card:#f6f9f3; --line:#cfe0c6;
+    --tx:#2f3a2c; --tx-mute:#6f8168; --acc:#4c8a5e; --acc-ink:#fff;
+    --acc-soft:#dcecd3; --ring:#4c8a5e66;
+    --nexus:#4c8a5e; --nexus-bg:#d7ead0;
+    --arcana:#7b6bb2; --arcana-bg:#e5dff3;
+    --busy:#9aa892; --busy-bg:#e2e8dc;
+    --book:#3f7f8c; --book-bg:#d6e9ec;
+    --avail:#4c8a5e1f;
+    --radius:16px; --shadow:0 1px 2px #0000000f,0 10px 30px #0000000d;
   }
+  /* ── DARK = Arcana (глубокая синь) ───────────────────────────────── */
   :root[data-theme="dark"]{
-    --bg:#0e1226; --panel:#171c33; --panel-2:#1d2340; --line:#2b3357;
-    --tx:#d8d4c8; --tx-mute:#7d8098; --acc:#5a9a8a; --acc-soft:#26324a;
-    --ev-nexus:#7fbf8a; --ev-nexus-bg:#1f3a2a;
-    --ev-arcana:#b39ddb; --ev-arcana-bg:#2c2647;
-    --ev-generic:#8b8ea6; --ev-generic-bg:#252a45;
-    --ev-booking:#6fb6c6; --ev-booking-bg:#1c3540;
-    --shadow:0 1px 3px #0006, 0 8px 24px #0004;
+    --bg:#0d1122; --rail:#141a30; --card:#171d34; --line:#293154;
+    --tx:#d9d5ca; --tx-mute:#7c839c; --acc:#5a9a8a; --acc-ink:#08110e;
+    --acc-soft:#1c2b3d; --ring:#5a9a8a55;
+    --nexus:#84c58f; --nexus-bg:#1e3a2a;
+    --arcana:#b6a0e0; --arcana-bg:#2c2650;
+    --busy:#8a90a8; --busy-bg:#242a45;
+    --book:#6fb6c6; --book-bg:#1a3540;
+    --avail:#5a9a8a1c;
+    --shadow:0 1px 2px #0007,0 12px 34px #0005;
   }
   *{box-sizing:border-box}
+  html,body{height:100%}
   body{margin:0;background:var(--bg);color:var(--tx);
-    font:15px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Inter,sans-serif;}
+    font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Inter,system-ui,sans-serif}
   a{color:var(--acc);text-decoration:none}
-  button{font:inherit;cursor:pointer;border:1px solid var(--line);background:var(--panel-2);
-    color:var(--tx);border-radius:10px;padding:.5em .9em}
+  h1,h2,h3{margin:0;font-weight:640;letter-spacing:.1px}
+  button{font:inherit;cursor:pointer;border:1px solid var(--line);background:var(--card);
+    color:var(--tx);border-radius:10px;padding:.5em .85em;transition:border-color .12s,background .12s}
   button:hover{border-color:var(--acc)}
-  button.primary{background:var(--acc);color:#fff;border-color:var(--acc)}
-  input,select{font:inherit;padding:.45em .6em;border:1px solid var(--line);border-radius:9px;
-    background:var(--panel-2);color:var(--tx);width:100%}
-  header{display:flex;align-items:center;gap:.7rem;padding:.7rem 1rem;border-bottom:1px solid var(--line);
-    background:var(--panel);position:sticky;top:0;z-index:5}
-  header h1{font-size:1.05rem;margin:0;font-weight:650;letter-spacing:.2px}
-  header .sp{flex:1}
-  .layout{display:grid;grid-template-columns:300px 1fr;gap:1rem;padding:1rem;max-width:1100px;margin:0 auto}
-  @media(max-width:820px){.layout{grid-template-columns:1fr}}
-  .card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);
-    padding:1rem;box-shadow:var(--shadow)}
-  .side .card + .card{margin-top:1rem}
+  button.primary{background:var(--acc);color:var(--acc-ink);border-color:var(--acc);font-weight:600}
+  button.mini{padding:.3em .6em;font-size:.85em;border-radius:8px}
+  button:focus-visible{outline:2px solid var(--ring);outline-offset:2px}
+  input,select,textarea{font:inherit;width:100%;padding:.5em .65em;border:1px solid var(--line);
+    border-radius:10px;background:var(--card);color:var(--tx)}
   .muted{color:var(--tx-mute)}
-  .tip{background:var(--acc-soft);border-radius:10px;padding:.7rem .8rem;font-size:.92rem}
-  .legend{display:flex;flex-direction:column;gap:.4rem;font-size:.9rem;margin-top:.6rem}
-  .legend i{display:inline-block;width:12px;height:12px;border-radius:4px;margin-right:.5rem;vertical-align:-1px}
-  .seg{display:flex;border:1px solid var(--line);border-radius:10px;overflow:hidden;margin-top:.6rem}
+  .app{display:grid;grid-template-columns:340px 1fr;min-height:100%}
+  @media(max-width:900px){.app{grid-template-columns:1fr}}
+
+  /* ── left rail — full height ─────────────────────────────────────── */
+  .rail{background:var(--rail);border-right:1px solid var(--line);padding:1.4rem 1.2rem;
+    display:flex;flex-direction:column;gap:1.1rem}
+  @media(max-width:900px){.rail{border-right:0;border-bottom:1px solid var(--line)}}
+  .me{display:flex;flex-direction:column;align-items:center;text-align:center;gap:.6rem}
+  .me .ava{width:104px;height:104px;border-radius:50%;object-fit:cover;border:2px solid var(--acc-soft)}
+  .me h2{font-size:1.15rem}
+  .me .role{font-size:.78rem;color:var(--tx-mute);text-transform:uppercase;letter-spacing:.6px}
+  .me .bio{font-size:.92rem;color:var(--tx-mute);line-height:1.5}
+  .tip{background:var(--acc-soft);border-radius:12px;padding:.75rem .85rem;font-size:.9rem}
+  .sec{border-top:1px solid var(--line);padding-top:1rem}
+  .sec h3{font-size:.95rem;display:flex;align-items:center;gap:.4rem;margin-bottom:.55rem}
+  .sec .hint{font-size:.82rem;color:var(--tx-mute);margin:-.3rem 0 .55rem}
+  .stack{display:flex;flex-direction:column;gap:.5rem}
+  .item{border:1px solid var(--line);border-radius:11px;padding:.55rem .65rem;font-size:.9rem;background:var(--card)}
+  .item .top{display:flex;justify-content:space-between;align-items:center;gap:.5rem}
+  .form{display:flex;flex-direction:column;gap:.45rem;margin-top:.55rem}
+  .form .two{display:grid;grid-template-columns:1fr 1fr;gap:.45rem}
+  .legend{display:flex;flex-direction:column;gap:.35rem;font-size:.88rem}
+  .legend i{width:12px;height:12px;border-radius:4px;display:inline-block;margin-right:.5rem;vertical-align:-1px}
+  .seg{display:flex;border:1px solid var(--line);border-radius:10px;overflow:hidden}
   .seg button{border:0;border-radius:0;flex:1;background:transparent}
-  .seg button.on{background:var(--acc);color:#fff}
-  /* calendar */
-  .cal-nav{display:flex;align-items:center;gap:.5rem;margin-bottom:.8rem}
-  .cal-nav .title{font-weight:650;font-size:1.05rem;text-transform:capitalize}
+  .seg button.on{background:var(--acc);color:var(--acc-ink);font-weight:600}
+  .rail .foot{margin-top:auto;font-size:.78rem;color:var(--tx-mute)}
+
+  /* ── main ───────────────────────────────────────────────────────── */
+  .main{padding:1.4rem;max-width:820px}
+  .bar{display:flex;align-items:center;gap:.6rem;margin-bottom:1rem}
+  .bar h1{font-size:1.1rem}
+  .bar .sp{flex:1}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);
+    padding:1.1rem;box-shadow:var(--shadow)}
+  .cnav{display:flex;align-items:center;gap:.5rem;margin-bottom:.9rem}
+  .cnav .t{font-weight:640;font-size:1.05rem;text-transform:capitalize;min-width:9.5rem}
   .grid{display:grid;grid-template-columns:repeat(7,1fr);gap:6px}
-  .dow{font-size:.75rem;color:var(--tx-mute);text-align:center;padding-bottom:.2rem;text-transform:uppercase}
-  .day{background:var(--panel-2);border:1px solid transparent;border-radius:10px;min-height:76px;
-    padding:.35rem .4rem;display:flex;flex-direction:column;gap:3px;text-align:left;align-items:stretch}
-  .day.out{opacity:.4}
-  .day.today{border-color:var(--acc)}
-  .day .dn{font-size:.8rem;font-weight:600}
-  .day.sel{outline:2px solid var(--acc);outline-offset:1px}
-  .bar{height:5px;border-radius:3px;background:var(--ev-generic);opacity:.9}
-  .bar.nexus{background:var(--ev-nexus)} .bar.arcana{background:var(--ev-arcana)}
-  .bar.booking{background:var(--ev-booking)} .bar.block{background:var(--ev-generic)}
-  .free-dot{margin-top:auto;font-size:.7rem;color:var(--acc);font-weight:600}
-  /* day panel */
-  .slots{display:flex;flex-wrap:wrap;gap:.5rem;margin-top:.6rem}
-  .slots button{padding:.4em .7em}
-  .ev-list{margin-top:.5rem;display:flex;flex-direction:column;gap:.3rem;font-size:.9rem}
-  .ev-row{display:flex;gap:.5rem;align-items:center}
-  .ev-row i{width:10px;height:10px;border-radius:3px;flex:none}
-  .ev-row i.nexus{background:var(--ev-nexus)} .ev-row i.arcana{background:var(--ev-arcana)}
-  .ev-row i.booking{background:var(--ev-booking)} .ev-row i.busy,.ev-row i.block{background:var(--ev-generic)}
-  .tabs{display:flex;gap:.4rem;flex-wrap:wrap;margin-bottom:.8rem}
-  .tabs button.on{background:var(--acc);color:#fff;border-color:var(--acc)}
-  .row2{display:grid;grid-template-columns:1fr 1fr;gap:.5rem}
-  .list-item{border:1px solid var(--line);border-radius:10px;padding:.6rem;margin-top:.5rem;font-size:.9rem}
-  .list-item .act{display:flex;gap:.4rem;margin-top:.4rem}
-  .toast{position:fixed;left:50%;bottom:1.2rem;transform:translateX(-50%);background:var(--tx);color:var(--bg);
-    padding:.6rem 1rem;border-radius:10px;box-shadow:var(--shadow);z-index:20;opacity:0;transition:opacity .2s}
+  .dow{font-size:.72rem;color:var(--tx-mute);text-align:center;text-transform:uppercase;padding-bottom:2px}
+  .day{position:relative;background:var(--bg);border:1px solid transparent;border-radius:11px;
+    min-height:70px;padding:.35rem .4rem;display:flex;flex-direction:column;gap:3px;text-align:left;overflow:hidden}
+  .day.avail{background:linear-gradient(0deg,var(--avail),var(--avail)),var(--bg)}
+  .day.out{opacity:.35}
+  .day.today .dn{color:var(--acc);font-weight:700}
+  .day.sel{border-color:var(--acc);box-shadow:0 0 0 2px var(--ring)}
+  .day .dn{font-size:.82rem;font-weight:600}
+  .dots{display:flex;gap:3px;flex-wrap:wrap}
+  .dot{width:6px;height:6px;border-radius:50%;background:var(--busy)}
+  .dot.nexus{background:var(--nexus)} .dot.arcana{background:var(--arcana)}
+  .dot.booking{background:var(--book)}
+  .day .free{margin-top:auto;font-size:.68rem;color:var(--acc);font-weight:700}
+  .detail{margin-top:1rem}
+  .detail .ev{display:flex;gap:.5rem;align-items:center;font-size:.92rem;padding:.15rem 0}
+  .detail .ev i{width:10px;height:10px;border-radius:3px;flex:none;background:var(--busy)}
+  .detail .ev i.nexus{background:var(--nexus)} .detail .ev i.arcana{background:var(--arcana)}
+  .detail .ev i.booking{background:var(--book)}
+  .slotwrap{display:flex;flex-wrap:wrap;gap:.5rem;margin-top:.7rem}
+  .slotwrap button{padding:.45em .8em}
+  .toast{position:fixed;left:50%;bottom:1.4rem;transform:translateX(-50%);background:var(--tx);
+    color:var(--bg);padding:.65rem 1.1rem;border-radius:12px;box-shadow:var(--shadow);z-index:30;
+    opacity:0;pointer-events:none;transition:opacity .2s}
   .toast.show{opacity:1}
+  .empty{border:1px dashed var(--line);border-radius:12px;padding:.9rem;font-size:.9rem;color:var(--tx-mute)}
 </style>
 </head>
 <body>
-<header>
-  <span style="font-size:1.2rem">⭐</span>
-  <h1>Календарь Кай</h1>
-  <span class="sp"></span>
-  <span id="who" class="muted" style="font-size:.85rem"></span>
-  <button id="themeBtn" title="Тема">◐</button>
-</header>
-
-<div class="layout">
-  <aside class="side" id="side"></aside>
-  <main>
+<div class="app">
+  <aside class="rail" id="rail"></aside>
+  <main class="main">
+    <div class="bar">
+      <span style="font-size:1.25rem">⭐</span>
+      <h1>Календарь Кай</h1>
+      <span class="sp"></span>
+      <button id="theme" class="mini" title="Тема">◐ тема</button>
+    </div>
     <div class="card">
-      <div class="cal-nav">
-        <button id="prev">‹</button>
-        <span class="title" id="calTitle"></span>
-        <button id="next">›</button>
+      <div class="cnav">
+        <button id="prev" class="mini">‹</button>
+        <span class="t" id="mtitle"></span>
+        <button id="next" class="mini">›</button>
         <span class="sp" style="flex:1"></span>
-        <button id="todayBtn">Сегодня</button>
+        <button id="today" class="mini">сегодня</button>
       </div>
       <div class="grid" id="dow"></div>
       <div class="grid" id="grid" style="margin-top:6px"></div>
+      <div class="detail" id="detail"></div>
     </div>
-    <div class="card" id="dayPanel" style="margin-top:1rem;display:none"></div>
   </main>
 </div>
 <div class="toast" id="toast"></div>
 
 <script>
-const API = "/api/booking";
-const state = {
-  me:{role:"guest",tg_id:null}, ctx:"friends", month:new Date(),
-  events:[], slots:[], selDay:null, admin:{tab:"requests"}
-};
-const $ = s => document.querySelector(s);
-const pad = n => String(n).padStart(2,"0");
-const iso = d => d.toISOString();
-const fmtTime = s => { const d=new Date(s); return pad(d.getHours())+":"+pad(d.getMinutes()); };
-const sameDay = (a,b)=>a.getFullYear()==b.getFullYear()&&a.getMonth()==b.getMonth()&&a.getDate()==b.getDate();
-const MONTHS=["январь","февраль","март","апрель","май","июнь","июль","август","сентябрь","октябрь","ноябрь","декабрь"];
+const API="/api/booking";
+const $=s=>document.querySelector(s);
+const pad=n=>String(n).padStart(2,"0");
+const T=s=>{const d=new Date(s);return pad(d.getHours())+":"+pad(d.getMinutes())};
+const sameDay=(a,b)=>a.getFullYear()==b.getFullYear()&&a.getMonth()==b.getMonth()&&a.getDate()==b.getDate();
+const MON=["январь","февраль","март","апрель","май","июнь","июль","август","сентябрь","октябрь","ноябрь","декабрь"];
 const DOW=["пн","вт","ср","чт","пт","сб","вс"];
+const AVA="data:image/svg+xml;utf8,"+encodeURIComponent(
+ `<svg xmlns='http://www.w3.org/2000/svg' width='120' height='120'><rect width='120' height='120' rx='60' fill='%23d7ead0'/><circle cx='60' cy='46' r='22' fill='%234c8a5e'/><path d='M18 108c6-24 24-34 42-34s36 10 42 34z' fill='%234c8a5e'/></svg>`);
 
-function toast(t){ const e=$("#toast"); e.textContent=t; e.classList.add("show"); setTimeout(()=>e.classList.remove("show"),2600); }
-async function api(path,opts){ const r=await fetch(API+path,{credentials:"include",...opts});
-  if(!r.ok){ const b=await r.text().catch(()=>""); throw new Error(r.status+" "+b); } return r.json(); }
+const st={me:{role:"guest"},ctx:"friends",month:new Date(),events:[],slots:[],windows:[],sel:null};
 
-// ── theme ──
+function toast(t){const e=$("#toast");e.textContent=t;e.classList.add("show");setTimeout(()=>e.classList.remove("show"),2600);}
+async function api(p,o){const r=await fetch(API+p,{credentials:"include",...o});
+  if(!r.ok)throw new Error(r.status+" "+await r.text().catch(()=>""));return r.json();}
+function loginUrl(){return "https://login.heylark.dev/?next="+encodeURIComponent(location.href);}
+
 function initTheme(){
-  const saved = localStorage.getItem("zarya-theme");
-  if(saved) document.documentElement.dataset.theme = saved;
-  else if(matchMedia("(prefers-color-scheme:dark)").matches) document.documentElement.dataset.theme="dark";
-  $("#themeBtn").onclick=()=>{
-    const cur = document.documentElement.dataset.theme==="dark"?"light":"dark";
-    document.documentElement.dataset.theme=cur; localStorage.setItem("zarya-theme",cur);
-  };
+  const s=localStorage.getItem("z-th");
+  document.documentElement.dataset.theme = s || (matchMedia("(prefers-color-scheme:dark)").matches?"dark":"light");
+  $("#theme").onclick=()=>{const n=document.documentElement.dataset.theme==="dark"?"light":"dark";
+    document.documentElement.dataset.theme=n;localStorage.setItem("z-th",n);};
 }
 
-// ── calendar render ──
-function monthGrid(base){
-  const first=new Date(base.getFullYear(),base.getMonth(),1);
-  let startDow=(first.getDay()+6)%7; // mon=0
-  const cells=[];
-  for(let i=0;i<42;i++){
-    const d=new Date(first); d.setDate(1-startDow+i); cells.push(d);
-  }
-  return cells;
-}
-function eventsForDay(d){
-  return state.events.filter(e=>{
-    const s=new Date(e.start), en=new Date(e.end);
-    return s < new Date(d.getFullYear(),d.getMonth(),d.getDate()+1) &&
-           en > new Date(d.getFullYear(),d.getMonth(),d.getDate());
-  });
-}
-function slotsForDay(d){
-  return state.slots.filter(s=>sameDay(new Date(s.start),d));
-}
-function renderCal(){
-  $("#calTitle").textContent = MONTHS[state.month.getMonth()]+" "+state.month.getFullYear();
-  $("#dow").innerHTML = DOW.map(x=>`<div class="dow">${x}</div>`).join("");
-  const today=new Date();
-  $("#grid").innerHTML = monthGrid(state.month).map(d=>{
-    const out = d.getMonth()!==state.month.getMonth();
-    const evs = eventsForDay(d);
-    const kinds=[...new Set(evs.map(e=>e.kind||"busy"))].slice(0,4);
-    const bars = kinds.map(k=>`<div class="bar ${k}"></div>`).join("");
-    const free = slotsForDay(d).length;
-    const cls = ["day", out?"out":"", sameDay(d,today)?"today":"",
-      state.selDay&&sameDay(d,state.selDay)?"sel":""].join(" ");
-    return `<button class="${cls}" data-d="${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}">
-      <span class="dn">${d.getDate()}</span>${bars}
-      ${free?`<span class="free-dot">${free} своб.</span>`:``}</button>`;
-  }).join("");
-  $("#grid").querySelectorAll(".day").forEach(b=>b.onclick=()=>{
-    const [y,m,dd]=b.dataset.d.split("-").map(Number);
-    state.selDay=new Date(y,m-1,dd); renderCal(); renderDay();
-  });
-}
+/* ── rail ─────────────────────────────────────────────────────────── */
+const BIO="Ассистент и таролог. Здесь — моё свободное время: посмотреть можно без входа, "
+  +"для записи нужна авторизация через Telegram.";
 
-function renderDay(){
-  const p=$("#dayPanel");
-  if(!state.selDay){ p.style.display="none"; return; }
-  p.style.display="block";
-  const d=state.selDay;
-  const evs=eventsForDay(d), slots=slotsForDay(d);
-  const evHtml = evs.length ? `<div class="ev-list">`+evs.map(e=>{
-    const k=e.kind||"busy";
-    const label = e.title ? e.title : (k==="nexus"?"дела Nexus":k==="arcana"?"практика Arcana":k==="booking"?"бронь":"занято");
-    return `<div class="ev-row"><i class="${k}"></i>${fmtTime(e.start)}–${fmtTime(e.end)} · ${label}</div>`;
-  }).join("")+`</div>` : `<p class="muted">Свободный день.</p>`;
-
-  let slotHtml="";
-  if(state.me.role==="admin"||state.me.role==="friend"||state.ctx==="arcana"){
-    slotHtml = slots.length
-      ? `<div class="slots">`+slots.map(s=>
-          `<button data-s="${s.start}">${fmtTime(s.start)}</button>`).join("")+`</div>`
-      : `<p class="muted">Свободных слотов на этот день нет.</p>`;
-  } else {
-    slotHtml = `<p class="muted">Чтобы записаться — <a href="${loginUrl()}">войти через Telegram</a>.</p>`;
-  }
-
-  p.innerHTML = `<b>${d.getDate()} ${MONTHS[d.getMonth()]}</b>
-    ${evHtml}
-    <div style="margin-top:.8rem"><b>Записаться${state.ctx==="arcana"?" (расклад/ритуал)":""}:</b></div>
-    ${slotHtml}`;
-  p.querySelectorAll(".slots button").forEach(b=>b.onclick=()=>startBook(b.dataset.s));
-}
-
-function loginUrl(){ return "https://login.heylark.dev/?next="+encodeURIComponent(location.href); }
-
-// ── booking flow ──
-async function startBook(startIso){
-  if(state.me.role==="guest" && state.ctx==="friends"){ location.href=loginUrl(); return; }
-  let hours=1;
-  if(state.ctx==="friends"){
-    hours = await pickHours();
-    if(!hours) return;
-  }
-  try{
-    const b = await api("/book",{method:"POST",headers:{"content-type":"application/json"},
-      body:JSON.stringify({context:state.ctx,start:startIso,hours})});
-    toast(b.status==="confirmed" ? "Записано ✅" : "Заявка отправлена, ждём подтверждения");
-    await loadCalendar(); renderDay();
-  }catch(e){
-    toast(String(e).includes("409")?"Слот только что заняли":"Не вышло: "+e.message);
-    await loadCalendar(); renderDay();
-  }
-}
-function pickHours(){
-  return new Promise(res=>{
-    const p=$("#dayPanel");
-    const bak=p.innerHTML;
-    p.innerHTML=`<b>На сколько часов тебя занять?</b>
-      <div class="slots">${[1,2,3,4].map(h=>`<button data-h="${h}">${h} ч</button>`).join("")}
-      <button data-h="0">отмена</button></div>`;
-    p.querySelectorAll("button").forEach(b=>b.onclick=()=>{ p.innerHTML=bak;
-      const h=+b.dataset.h; res(h||null); });
-  });
-}
-
-// ── sidebar ──
-function renderSide(){
-  const s=$("#side");
-  if(state.me.role==="admin"){ s.innerHTML = adminHtml(); wireAdmin(); return; }
-  const legend = (state.me.role==="friend") ? `
-    <div class="legend">
-      <span><i style="background:var(--ev-nexus)"></i>☀️ дела Nexus</span>
-      <span><i style="background:var(--ev-arcana)"></i>🌒 практика Arcana</span>
-      <span><i style="background:var(--ev-booking)"></i>брони</span>
-    </div>` : `
-    <div class="legend"><span><i style="background:var(--ev-generic)"></i>занято</span></div>`;
-  s.innerHTML = `
-    <div class="card">
-      <b>О Кай</b>
-      <p class="muted" style="font-size:.92rem">Ассистент/таролог. Здесь — её свободное время.
-      ${state.me.role==="friend"?"Ты — друг, можешь бронировать напрямую.":
-        state.me.role==="guest"?"Войди через Telegram, чтобы записаться.":""}</p>
-      <div class="tip" id="tip">…</div>
-      ${legend}
-      <div class="seg">
-        <button data-c="friends" class="${state.ctx==="friends"?"on":""}">Встреча</button>
-        <button data-c="arcana" class="${state.ctx==="arcana"?"on":""}">Расклад/ритуал</button>
-      </div>
-      ${state.me.role==="guest"?`<div style="margin-top:.7rem"><a class="primary" style="display:inline-block;padding:.5em .9em;border-radius:10px;color:#fff" href="${loginUrl()}">Войти через Telegram</a></div>`:``}
+function rail(){
+  const r=$("#rail");
+  const head=`
+    <div class="me">
+      <img class="ava" src="${AVA}" alt="Кай">
+      <h2>Кай</h2>
+      <div class="role">${st.me.role==="admin"?"это ты":st.me.role==="friend"?"друг":"гость"}</div>
+      <div class="bio">${BIO}</div>
     </div>`;
-  s.querySelectorAll(".seg button").forEach(b=>b.onclick=async()=>{
-    state.ctx=b.dataset.c; await loadCalendar(); renderSide(); renderDay();
-  });
+  if(st.me.role==="admin"){ r.innerHTML = head + adminSections(); wireAdmin(); return; }
+
+  const legend = st.me.role==="friend" ? `
+    <div class="legend">
+      <span><i style="background:var(--nexus)"></i>☀️ дела Nexus</span>
+      <span><i style="background:var(--arcana)"></i>🌒 практика Arcana</span>
+      <span><i style="background:var(--book)"></i>брони</span>
+    </div>` : `
+    <div class="legend"><span><i style="background:var(--busy)"></i>занято</span></div>`;
+
+  r.innerHTML = head + `
+    <div class="tip" id="tip">…</div>
+    <div class="sec">
+      <h3>Записаться на…</h3>
+      <div class="seg">
+        <button data-c="friends" class="${st.ctx==="friends"?"on":""}">встречу</button>
+        <button data-c="arcana" class="${st.ctx==="arcana"?"on":""}">расклад / ритуал</button>
+      </div>
+      <p class="hint" style="margin-top:.55rem">Выбери день в календаре → появятся свободные слоты.</p>
+    </div>
+    <div class="sec"><h3>Что как показано</h3>${legend}</div>
+    ${st.me.role==="guest" ? `<div class="sec"><button class="primary" onclick="location.href='${loginUrl()}'">Войти через Telegram</button></div>`:""}
+    <div class="foot">powered by ⭐ Zarya</div>`;
+  r.querySelectorAll(".seg button").forEach(b=>b.onclick=async()=>{st.ctx=b.dataset.c;await load();rail();detail();});
   loadTip();
 }
-async function loadTip(){ try{ const t=await api("/tip?context="+state.ctx); const e=$("#tip"); if(e) e.textContent=t.tip; }catch(_){} }
+async function loadTip(){try{const t=await api("/tip?context="+st.ctx);const e=$("#tip");if(e)e.textContent=t.tip;}catch(_){}}
 
-// ── admin panel ──
-function adminHtml(){
-  const tab=state.admin.tab;
-  const T=(k,l)=>`<button class="${tab===k?"on":""}" data-t="${k}">${l}</button>`;
-  return `<div class="card">
-    <b>Панель Кай</b>
-    <div class="tabs" style="margin-top:.6rem">
-      ${T("requests","Заявки")}${T("windows","Окна")}${T("types","Типы")}${T("blocks","Блоки")}
+/* ── admin: vertical always-open sections ─────────────────────────── */
+function adminSections(){
+  return `
+  <div class="sec" id="s-req">
+    <h3>📥 Заявки</h3>
+    <p class="hint">записи на расклады ждут твоего «да»</p>
+    <div class="stack" id="reqBox">…</div>
+  </div>
+  <div class="sec" id="s-win">
+    <h3>🗓 Когда я свободна</h3>
+    <p class="hint">окна по дням недели — из них считаются слоты для записи</p>
+    <div class="stack" id="winBox">…</div>
+    <div class="form">
+      <div class="two"><select id="w_ctx"><option value="friends">для встреч</option><option value="arcana">для раскладов</option></select>
+        <select id="w_wd">${DOW.map((d,i)=>`<option value="${i}">${d}</option>`).join("")}</select></div>
+      <div class="two"><input id="w_s" type="time" value="14:00"><input id="w_e" type="time" value="20:00"></div>
+      <button class="primary mini" id="w_add">＋ добавить окно</button>
     </div>
-    <div id="adminBody" class="muted">…</div>
-  </div>`;
+  </div>
+  <div class="sec" id="s-typ">
+    <h3>☕ Типы встреч</h3>
+    <p class="hint">кофе, созвон, расклад… клиент выбирает при записи</p>
+    <div class="stack" id="typBox">…</div>
+    <div class="form">
+      <div class="two"><input id="t_title" placeholder="Название (Кофе)"><input id="t_slug" placeholder="slug (coffee)"></div>
+      <div class="two"><select id="t_ctx"><option value="friends">для встреч</option><option value="arcana">для раскладов</option></select>
+        <input id="t_dur" type="number" value="60" placeholder="минут"></div>
+      <button class="primary mini" id="t_add">＋ добавить тип</button>
+    </div>
+  </div>
+  <div class="sec" id="s-off">
+    <h3>🚫 Когда я недоступна</h3>
+    <p class="hint">отпуск, поездки — эти даты просто не показываются для записи</p>
+    <div class="stack" id="offBox">…</div>
+    <div class="form">
+      <div class="two"><input id="o_s" type="date"><input id="o_e" type="date"></div>
+      <input id="o_r" placeholder="причина (отпуск)">
+      <button class="primary mini" id="o_add">＋ отметить</button>
+    </div>
+  </div>
+  <div class="foot">powered by ⭐ Zarya</div>`;
 }
 function wireAdmin(){
-  $("#side").querySelectorAll(".tabs button").forEach(b=>b.onclick=()=>{
-    state.admin.tab=b.dataset.t; renderSide();
-  });
-  const body=$("#adminBody");
-  const t=state.admin.tab;
-  if(t==="requests") loadRequests(body);
-  else if(t==="windows") loadWindows(body);
-  else if(t==="types") loadTypes(body);
-  else if(t==="blocks") loadBlocks(body);
+  reqBox(); winBox(); typBox(); offBox();
+  $("#w_add").onclick=async()=>{try{
+    await api("/availability",{method:"POST",headers:{"content-type":"application/json"},
+      body:JSON.stringify({context:$("#w_ctx").value,weekday:+$("#w_wd").value,
+        start_time:$("#w_s").value,end_time:$("#w_e").value})});
+    toast("окно добавлено");winBox();load().then(gridR);
+  }catch(e){toast("не вышло: "+e.message);}};
+  $("#t_add").onclick=async()=>{try{
+    await api("/meeting-types",{method:"POST",headers:{"content-type":"application/json"},
+      body:JSON.stringify({title:$("#t_title").value,slug:$("#t_slug").value,
+        context:$("#t_ctx").value,duration_min:+$("#t_dur").value})});
+    toast("тип добавлен");typBox();
+  }catch(e){toast("не вышло: "+e.message);}};
+  $("#o_add").onclick=async()=>{try{
+    await api("/blocks",{method:"POST",headers:{"content-type":"application/json"},
+      body:JSON.stringify({start:$("#o_s").value+"T00:00",end:$("#o_e").value+"T23:59",reason:$("#o_r").value})});
+    toast("отмечено");offBox();load().then(gridR);
+  }catch(e){toast("не вышло: "+e.message);}};
 }
-async function loadRequests(el){
-  try{
-    const d=await api("/requests?status=open");
-    el.innerHTML = d.requests.length ? d.requests.map(r=>`
-      <div class="list-item">
-        <b>${r.requester_name}</b> · ${new Date(r.start).toLocaleString("ru")} · ${r.status}
-        ${r.note?`<div class="muted">${r.note}</div>`:``}
-        ${r.status==="pending"?`<div class="act">
-          <button data-ok="${r.id}">✅</button><button data-no="${r.id}">❌</button></div>`:``}
-      </div>`).join("") : `<p class="muted">Заявок нет.</p>`;
-    el.querySelectorAll("[data-ok]").forEach(b=>b.onclick=()=>decide(b.dataset.ok,"confirm"));
-    el.querySelectorAll("[data-no]").forEach(b=>b.onclick=()=>decide(b.dataset.no,"decline"));
-  }catch(e){ el.textContent="Ошибка: "+e.message; }
+async function reqBox(){const el=$("#reqBox");try{
+  const d=await api("/requests?status=open");
+  const p=d.requests.filter(r=>r.status==="pending");
+  el.innerHTML = p.length ? p.map(r=>`<div class="item">
+    <div class="top"><b>${r.requester_name}</b><span class="muted">${new Date(r.start).toLocaleString("ru",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"})}</span></div>
+    ${r.note?`<div class="muted">${r.note}</div>`:""}
+    <div class="top" style="margin-top:.4rem"><button class="primary mini" data-ok="${r.id}">✅ да</button>
+      <button class="mini" data-no="${r.id}">❌ нет</button></div></div>`).join("")
+    : `<div class="empty">Заявок нет</div>`;
+  el.querySelectorAll("[data-ok]").forEach(b=>b.onclick=()=>dec(b.dataset.ok,"confirm"));
+  el.querySelectorAll("[data-no]").forEach(b=>b.onclick=()=>dec(b.dataset.no,"decline"));
+}catch(e){el.innerHTML=`<div class="empty">${e.message}</div>`;}}
+async function dec(id,a){try{await api(`/requests/${id}/${a}`,{method:"POST"});toast("готово");reqBox();load().then(gridR);}catch(e){toast(e.message);}}
+
+async function winBox(){const el=$("#winBox");try{
+  const d=await api("/availability");st.windows=d.windows;
+  el.innerHTML = d.windows.length ? d.windows.map(w=>`<div class="item"><div class="top">
+    <span>${DOW[w.weekday]} ${w.start_time}–${w.end_time} · ${w.context==="arcana"?"расклады":"встречи"}</span>
+    <button class="mini" data-d="${w.id}">✕</button></div></div>`).join("")
+    : `<div class="empty">Нет окон — добавь первое, и друзья смогут записываться 👇</div>`;
+  el.querySelectorAll("[data-d]").forEach(b=>b.onclick=async()=>{await api("/availability/"+b.dataset.d,{method:"DELETE"});winBox();load().then(gridR);});
+}catch(e){el.innerHTML=`<div class="empty">${e.message}</div>`;}}
+
+async function typBox(){const el=$("#typBox");try{
+  const d=await api("/meeting-types");
+  el.innerHTML = d.types.length ? d.types.map(m=>`<div class="item"><div class="top">
+    <span>${m.title||m.slug} · ${m.duration_min}м · ${m.context==="arcana"?"расклады":"встречи"}</span>
+    <button class="mini" data-dt="${m.id}">✕</button></div></div>`).join("")
+    : `<div class="empty">Типов нет — необязательно, но клиенту удобнее выбрать</div>`;
+  el.querySelectorAll("[data-dt]").forEach(b=>b.onclick=async()=>{await api("/meeting-types/"+b.dataset.dt,{method:"DELETE"});typBox();});
+}catch(e){el.innerHTML=`<div class="empty">${e.message}</div>`;}}
+
+async function offBox(){const el=$("#offBox");try{
+  const d=await api("/blocks");
+  el.innerHTML = d.blocks.length ? d.blocks.map(b=>`<div class="item"><div class="top">
+    <span>${new Date(b.start_at).toLocaleDateString("ru")} – ${new Date(b.end_at).toLocaleDateString("ru")} · ${b.reason||"—"}</span>
+    <button class="mini" data-db="${b.id}">✕</button></div></div>`).join("")
+    : `<div class="empty">Ничего не отмечено</div>`;
+  el.querySelectorAll("[data-db]").forEach(b=>b.onclick=async()=>{await api("/blocks/"+b.dataset.db,{method:"DELETE"});offBox();load().then(gridR);});
+}catch(e){el.innerHTML=`<div class="empty">${e.message}</div>`;}}
+
+/* ── calendar ─────────────────────────────────────────────────────── */
+function monthCells(base){
+  const f=new Date(base.getFullYear(),base.getMonth(),1);
+  const sd=(f.getDay()+6)%7, out=[];
+  for(let i=0;i<42;i++){const d=new Date(f);d.setDate(1-sd+i);out.push(d);}
+  return out;
 }
-async function decide(id,act){
-  try{ await api(`/requests/${id}/${act}`,{method:"POST"}); toast("Готово"); wireAdmin(); loadCalendar(); }
-  catch(e){ toast("Ошибка: "+e.message); }
-}
-async function loadWindows(el){
-  try{
-    const d=await api("/availability");
-    el.innerHTML = `
-      <div class="row2" style="margin-top:.5rem">
-        <select id="w_ctx"><option value="friends">Встреча</option><option value="arcana">Расклад</option></select>
-        <select id="w_wd">${DOW.map((x,i)=>`<option value="${i}">${x}</option>`).join("")}</select>
-      </div>
-      <div class="row2" style="margin-top:.4rem">
-        <input id="w_s" placeholder="12:00"><input id="w_e" placeholder="18:00">
-      </div>
-      <div class="row2" style="margin-top:.4rem">
-        <input id="w_slot" type="number" placeholder="слот, мин" value="60">
-        <button class="primary" id="w_add">+ окно</button>
-      </div>
-      ${d.windows.map(w=>`<div class="list-item">${DOW[w.weekday]} ${w.start_time}–${w.end_time}
-        · ${w.context} · ${w.slot_minutes}м <div class="act"><button data-del="${w.id}">удалить</button></div></div>`).join("")}`;
-    $("#w_add").onclick=async()=>{
-      try{
-        await api("/availability",{method:"POST",headers:{"content-type":"application/json"},
-          body:JSON.stringify({context:$("#w_ctx").value,weekday:+$("#w_wd").value,
-            start_time:$("#w_s").value,end_time:$("#w_e").value,slot_minutes:+$("#w_slot").value})});
-        toast("Окно добавлено"); wireAdmin(); loadCalendar();
-      }catch(e){ toast("Ошибка: "+e.message); }
-    };
-    el.querySelectorAll("[data-del]").forEach(b=>b.onclick=async()=>{
-      await api("/availability/"+b.dataset.del,{method:"DELETE"}); wireAdmin(); loadCalendar();
-    });
-  }catch(e){ el.textContent="Ошибка: "+e.message; }
-}
-async function loadTypes(el){
-  try{
-    const d=await api("/meeting-types");
-    el.innerHTML=`
-      <div class="row2" style="margin-top:.5rem">
-        <input id="t_slug" placeholder="slug (coffee)"><input id="t_title" placeholder="Кофе">
-      </div>
-      <div class="row2" style="margin-top:.4rem">
-        <select id="t_ctx"><option value="friends">Встреча</option><option value="arcana">Расклад</option></select>
-        <input id="t_dur" type="number" value="60" placeholder="мин">
-      </div>
-      <button class="primary" id="t_add" style="margin-top:.4rem">+ тип</button>
-      ${d.types.map(m=>`<div class="list-item">${m.title||m.slug} · ${m.context} · ${m.duration_min}м
-        <div class="act"><button data-delt="${m.id}">удалить</button></div></div>`).join("")}`;
-    $("#t_add").onclick=async()=>{
-      try{ await api("/meeting-types",{method:"POST",headers:{"content-type":"application/json"},
-        body:JSON.stringify({slug:$("#t_slug").value,title:$("#t_title").value,
-          context:$("#t_ctx").value,duration_min:+$("#t_dur").value})});
-        toast("Тип добавлен"); wireAdmin();
-      }catch(e){ toast("Ошибка: "+e.message); }
-    };
-    el.querySelectorAll("[data-delt]").forEach(b=>b.onclick=async()=>{
-      await api("/meeting-types/"+b.dataset.delt,{method:"DELETE"}); wireAdmin();
-    });
-  }catch(e){ el.textContent="Ошибка: "+e.message; }
-}
-async function loadBlocks(el){
-  try{
-    const d=await api("/blocks");
-    el.innerHTML=`
-      <input id="b_s" placeholder="2026-10-01T00:00" style="margin-top:.5rem">
-      <input id="b_e" placeholder="2026-10-05T00:00" style="margin-top:.4rem">
-      <input id="b_r" placeholder="причина (отпуск)" style="margin-top:.4rem">
-      <button class="primary" id="b_add" style="margin-top:.4rem">+ блок</button>
-      ${d.blocks.map(b=>`<div class="list-item">${new Date(b.start_at).toLocaleDateString("ru")}–${new Date(b.end_at).toLocaleDateString("ru")}
-        · ${b.reason||"—"} <div class="act"><button data-delb="${b.id}">удалить</button></div></div>`).join("")}`;
-    $("#b_add").onclick=async()=>{
-      try{ await api("/blocks",{method:"POST",headers:{"content-type":"application/json"},
-        body:JSON.stringify({start:$("#b_s").value,end:$("#b_e").value,reason:$("#b_r").value})});
-        toast("Блок добавлен"); wireAdmin(); loadCalendar();
-      }catch(e){ toast("Ошибка: "+e.message); }
-    };
-    el.querySelectorAll("[data-delb]").forEach(b=>b.onclick=async()=>{
-      await api("/blocks/"+b.dataset.delb,{method:"DELETE"}); wireAdmin(); loadCalendar();
-    });
-  }catch(e){ el.textContent="Ошибка: "+e.message; }
+const evsDay=d=>st.events.filter(e=>new Date(e.start)<new Date(d.getFullYear(),d.getMonth(),d.getDate()+1)
+  && new Date(e.end)>new Date(d.getFullYear(),d.getMonth(),d.getDate()));
+const slotsDay=d=>st.slots.filter(s=>sameDay(new Date(s.start),d));
+const hasWindow=d=>st.windows.some(w=>+w.weekday===((d.getDay()+6)%7));
+
+function gridR(){
+  $("#mtitle").textContent = MON[st.month.getMonth()]+" "+st.month.getFullYear();
+  $("#dow").innerHTML = DOW.map(x=>`<div class="dow">${x}</div>`).join("");
+  const today=new Date();
+  $("#grid").innerHTML = monthCells(st.month).map(d=>{
+    const out=d.getMonth()!==st.month.getMonth();
+    const kinds=[...new Set(evsDay(d).map(e=>e.kind||"busy"))].slice(0,5);
+    const free=slotsDay(d).length;
+    const cls=["day",out?"out":"",sameDay(d,today)?"today":"",
+      st.sel&&sameDay(d,st.sel)?"sel":"", (!out&&hasWindow(d))?"avail":""].join(" ");
+    return `<button class="${cls}" data-k="${d.getTime()}">
+      <span class="dn">${d.getDate()}</span>
+      <span class="dots">${kinds.map(k=>`<span class="dot ${k}"></span>`).join("")}</span>
+      ${free?`<span class="free">${free} своб.</span>`:""}</button>`;
+  }).join("");
+  $("#grid").querySelectorAll(".day").forEach(b=>b.onclick=()=>{st.sel=new Date(+b.dataset.k);gridR();detail();});
 }
 
-// ── data ──
-async function loadCalendar(){
+function detail(){
+  const el=$("#detail");
+  if(!st.sel){el.innerHTML="";return;}
+  const d=st.sel, evs=evsDay(d), sl=slotsDay(d);
+  const canBook = st.me.role==="admin"||st.me.role==="friend"||st.ctx==="arcana";
+  const evH = evs.length ? evs.map(e=>{
+    const k=e.kind||"busy";
+    const lbl=e.title||(k==="nexus"?"дела Nexus":k==="arcana"?"практика Arcana":k==="booking"?"бронь":"занято");
+    return `<div class="ev"><i class="${k}"></i>${T(e.start)}–${T(e.end)} · ${lbl}</div>`;
+  }).join("") : `<div class="muted" style="font-size:.9rem">Свободный день.</div>`;
+  let slH;
+  if(!canBook) slH=`<div class="muted" style="font-size:.9rem;margin-top:.6rem">Чтобы записаться — <a href="${loginUrl()}">войти через Telegram</a>.</div>`;
+  else if(!sl.length) slH=`<div class="muted" style="font-size:.9rem;margin-top:.6rem">Свободных слотов нет.${st.me.role==="admin"?" Добавь окно на "+DOW[(d.getDay()+6)%7]+".":""}</div>`;
+  else slH=`<div class="slotwrap">${sl.map(s=>`<button data-s="${s.start}">${T(s.start)}</button>`).join("")}</div>`;
+  el.innerHTML = `<h3 style="font-size:1rem">${d.getDate()} ${MON[d.getMonth()]}</h3>
+    <div style="margin-top:.4rem">${evH}</div>
+    <div style="margin-top:.8rem;font-weight:600">Записаться${st.ctx==="arcana"?" · расклад/ритуал":""}:</div>${slH}`;
+  el.querySelectorAll(".slotwrap button").forEach(b=>b.onclick=()=>book(b.dataset.s));
+}
+
+async function book(startIso){
+  if(st.me.role==="guest"&&st.ctx==="friends"){location.href=loginUrl();return;}
+  let hours=1;
+  if(st.ctx==="friends"){hours=await askHours();if(!hours)return;}
   try{
-    const cal=await api("/calendar?days=90&back=14");
-    state.events=cal.events; state.me.role=cal.role;
-  }catch(e){ toast("Календарь не загрузился"); }
-  try{
-    const sl=await api(`/slots?context=${state.ctx}&days=60`);
-    state.slots = sl.slots||[];
-  }catch(e){ state.slots=[]; }
-  renderCal();
+    const b=await api("/book",{method:"POST",headers:{"content-type":"application/json"},
+      body:JSON.stringify({context:st.ctx,start:startIso,hours})});
+    toast(b.status==="confirmed"?"Записано ✅":"Заявка отправлена — Кай подтвердит");
+  }catch(e){toast(String(e).includes("409")?"Слот только что заняли":"Не вышло");}
+  await load();gridR();detail();
+}
+function askHours(){return new Promise(res=>{
+  const el=$("#detail"),bak=el.innerHTML;
+  el.innerHTML=`<h3 style="font-size:1rem">На сколько часов тебя занять?</h3>
+    <div class="slotwrap">${[1,2,3,4].map(h=>`<button data-h="${h}">${h} ч</button>`).join("")}
+    <button data-h="0">отмена</button></div>`;
+  el.querySelectorAll("button").forEach(b=>b.onclick=()=>{el.innerHTML=bak;res(+b.dataset.h||null);});
+});}
+
+/* ── data ─────────────────────────────────────────────────────────── */
+async function load(){
+  try{const c=await api("/calendar?days=90&back=14");st.events=c.events;st.me.role=c.role;}catch(_){}
+  try{const s=await api(`/slots?context=${st.ctx}&days=75`);st.slots=s.slots||[];}catch(_){st.slots=[];}
+  // окна доступности — только для admin (роут owner-only); гостю/другу
+  // достаточно самих слотов
+  if(st.me.role==="admin"){try{st.windows=(await api("/availability")).windows||[];}catch(_){st.windows=[];}}
+  else st.windows=[];
 }
 async function boot(){
   initTheme();
-  try{ state.me = await api("/me"); }catch(_){}
-  $("#who").textContent = state.me.role==="admin"?"Кай":state.me.role==="friend"?"друг":"гость";
-  $("#prev").onclick=()=>{ state.month.setMonth(state.month.getMonth()-1); renderCal(); };
-  $("#next").onclick=()=>{ state.month.setMonth(state.month.getMonth()+1); renderCal(); };
-  $("#todayBtn").onclick=()=>{ state.month=new Date(); state.selDay=new Date(); renderCal(); renderDay(); };
-  renderSide();
-  await loadCalendar();
+  try{st.me=await api("/me");}catch(_){}
+  $("#prev").onclick=()=>{st.month.setMonth(st.month.getMonth()-1);gridR();};
+  $("#next").onclick=()=>{st.month.setMonth(st.month.getMonth()+1);gridR();};
+  $("#today").onclick=()=>{st.month=new Date();st.sel=new Date();gridR();detail();};
+  await load();
+  rail();gridR();
 }
 boot();
 </script>
