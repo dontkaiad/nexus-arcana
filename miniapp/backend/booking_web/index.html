@@ -548,7 +548,7 @@ function ddCloseAll(){
   document.querySelectorAll("details.sec").forEach(s=>{s.style.zIndex="";s.style.position="";});
 }
 function wireDD(scope){
-  (scope||document).querySelectorAll(".dd").forEach(d=>{
+  (scope||document).querySelectorAll(".dd:not(.ddd)").forEach(d=>{
     const btn=d.querySelector(".dd-btn"), list=d.querySelector(".dd-list");
     btn.onclick=e=>{e.stopPropagation();const wasOpen=!list.hidden;
       ddCloseAll();
@@ -719,7 +719,8 @@ async function boot(){
   $("#today").onclick=()=>{st.month=new Date();st.sel=new Date();gridR();detail();};
   $("#detailClose").onclick=()=>{st.sel=null;gridR();detail();};
   await load();
-  rail();gridR();
+  gridR();
+  try{ rail(); }catch(e){ console.error("rail()",e); }
 }
 boot();
 </script>
