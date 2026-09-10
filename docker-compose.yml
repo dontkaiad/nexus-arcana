@@ -85,8 +85,6 @@ services:
     build:
       context: .
       dockerfile: zarya/Dockerfile
-      args:
-        GIT_SHA: ${GIT_SHA:-}
     image: zarya-bot
     container_name: zarya-bot
     command: ["python", "-m", "zarya"]

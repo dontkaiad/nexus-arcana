@@ -21,7 +21,10 @@ COPY nexus/repos/__init__.py nexus/repos/tasks_tables.py ./nexus/repos/
 COPY arcana/__init__.py ./arcana/__init__.py
 COPY arcana/repos/__init__.py arcana/repos/rituals_tables.py arcana/repos/works_tables.py ./arcana/repos/
 
-ARG GIT_SHA=
-RUN printf 'built %s%s' "$(date -u +%Y-%m-%dT%H:%MZ)" "${GIT_SHA:+ · $GIT_SHA}" > /app/BUILD_STAMP
+# NO build-time version stamp here on purpose: `ARG GIT_SHA` + a `RUN` consuming
+# it would bust this layer on EVERY deploy (deploy.sh passes a fresh SHA),
+# defeating the narrow-context caching above — Zarya would rebuild + restart +
+# ping "поднялся" on unrelated commits (favicon, nexus/handlers, …). Instead the
+# stamp is written at container start (zarya/bot.py) — runtime, no layer.
 
 CMD ["python", "-m", "zarya"]

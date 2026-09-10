@@ -30,7 +30,19 @@ async def _on_startup() -> None:
         logger.warning("startup ping failed: %s", e)
 
 
+def _write_build_stamp() -> None:
+    """Runtime version stamp (no Docker layer — see zarya/Dockerfile note).
+    `core.bot_notify._version_stamp()` reads /app/BUILD_STAMP for the «поднялся» ping."""
+    try:
+        from datetime import datetime, timezone
+        with open("/app/BUILD_STAMP", "w", encoding="utf-8") as f:
+            f.write("started " + datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%MZ"))
+    except Exception as e:
+        logger.warning("build stamp write failed: %s", e)
+
+
 async def main() -> None:
+    _write_build_stamp()
     token = config.booking_bot_token
     if not token:
         logger.error("BOOKING_BOT_TOKEN not set — Zarya cannot start")
