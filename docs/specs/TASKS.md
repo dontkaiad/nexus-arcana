@@ -1,6 +1,6 @@
 # TASKS — data-model contract (Nexus ✅ Задачи)
 
-Code conforms to: b9d3367 (+ this change: #149 — notion_id column dropped). (+ #144: user_notion_id → user_id.) This spec describes the tasks data model as of
+Code conforms to: b9d3367 (+ this change: #149 — notion_id column dropped). (+ #144: user_notion_id → user_id.) (+ #241/#242, 24cb626: `duration_min`, `shared` columns.) This spec describes the tasks data model as of
 that commit; update it in the same PR that changes the model.
 
 > Contract, not snapshot. Describes the persistent model, the guarantees of
@@ -41,6 +41,8 @@ down_revision `g7b8c9d0e1f2`). SQLAlchemy Core mirror:
 | `repeat_time` | Text | nullable — free-form repeat spec (see Recurring) |
 | `note` | Text | nullable — raw money/other detail that is neither deadline nor priority (see Deferred expense) |
 | `parent_task_id` | BigInteger | self-FK → `tasks.id` `ON DELETE SET NULL` |
+| `duration_min` | Integer | nullable — overrides the default 1h busy-interval length used by `core/booking/busy.py` when this task has a deadline (#241); `None` → default |
+| `shared` | Boolean | NOT NULL, default `false` — visible to friends via Zarya's chat context (#242, see `docs/specs/BOOKING.md` § Shared items) |
 | `user_id` | Text | NOT NULL, default `''` |
 | `created_at` | TIMESTAMP(tz) | NOT NULL, default `now()` |
 | `updated_at` | TIMESTAMP(tz) | NOT NULL, default `now()` |
@@ -261,6 +263,7 @@ category resolution on completion also runs on Haiku
 - `alembic/versions/cd34ef56a1b2_drop_dead_notion_id_columns.py` — notion_id dropped (#149)
 - `alembic/versions/df56a1b2c3d4_rename_user_notion_id_to_user_id.py` — user_notion_id → user_id (#144)
 - `alembic/versions/a7b8c9d0e1f2_tasks_note.py` — `note` column
+- `alembic/versions/b1c2d3e4f5a6_task_duration_and_shared.py` — `duration_min`, `shared` (#241/#242)
 - `nexus/repos/tasks_tables.py` — SQLAlchemy Core definitions
 - `nexus/repos/pg_tasks_repo.py` — `Task` dataclass, lookup cache, `_match`,
   create/status/props/repeat, reminder-restore queries, `clear_reminder` (#206),
@@ -271,7 +274,13 @@ category resolution on completion also runs on Haiku
   `restore_reminders_on_startup` (`periodic` param — #210; pass 4 deadline
   re-arm — #212), `_schedule_reminder`/`_schedule_deadline_check` (`recipients`
   fan-out — #211), `_parse_repeat_time`, `_reschedule_all_for_tz`,
-  `_update_streak_line`, Haiku `ask_claude` calls
+  `_update_streak_line`, Haiku `ask_claude` calls; `_apply_edit` — NL field
+  edits, incl. `duration` (#241) and `shared` (#242)
+- `core/duration.py` — `parse_duration_minutes`/`format_duration` (#241)
+- `core/shared_items.py` — `shared_items_summary` reads `tasks.shared` (+
+  `nexus_lists.shared`) for Zarya's friend-chat context (#242, see
+  `docs/specs/BOOKING.md`)
+- `core/booking/busy.py` — busy-interval length honors `duration_min` (#241)
 - `nexus/nexus_bot.py` — `reminder_resync` interval job (90 s, #210)
 - `core/classifier.py` — `build_system` future-task-money → `note` rule
 - `nexus/handlers/finance.py` — `expense_from_task_note`, `_write_one_time_expense`

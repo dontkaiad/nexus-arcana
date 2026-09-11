@@ -6,7 +6,8 @@ tasks; + #8/#10: planned-practice badge + `from_work` reverse-link shown on
 the event card; + #95: `_TERMINAL_STATUS` excludes archived from open-work
 reads; + #203: Mini App create endpoint; + #153: `?filter=` status tabs
 (active/overdue/done/all); + #154: `link_practice_record` creates+closes a
-Work for every performed event, `list_by_client` for the client card.) This
+Work for every performed event, `list_by_client` for the client card.)
+(+ #241, 24cb626: `duration_min` column.) This
 spec describes the works data model as of that commit; update it in the same
 PR that changes the model.
 
@@ -44,6 +45,7 @@ SQLAlchemy Core mirror: `arcana/repos/works_tables.py`.
 | `client_id` | BigInteger | FK → `clients.id` |
 | `reminder` | TIMESTAMP(tz) | nullable |
 | `scheduled_at` | TIMESTAMP(tz) | nullable — forward-looking appointment time for an esoteric booking (#23 / ADR-0026); `works` is otherwise retrospective |
+| `duration_min` | Integer | nullable — overrides the default 1h busy-interval length used by `core/booking/busy.py` when `scheduled_at` is set (#241); no NL setter yet, column + busy-calculator only |
 | `user_id` | Text | owner |
 | `created_at` / `updated_at` | TIMESTAMP(tz) | default `now()` |
 
@@ -157,6 +159,8 @@ Reads/writes are pure SQL.
 - `alembic/versions/b2f3e4d5c6a7_works_slice_schema.py` — table + lookups
 - `alembic/versions/g7b8c9d0e1f2_works_add_reminder.py` — `reminder`
 - `alembic/versions/o5h6i7j8k9l0_works_add_archived_status.py` — `archived` status
+- `alembic/versions/b1c2d3e4f5a6_task_duration_and_shared.py` — `duration_min` (#241)
+- `core/booking/busy.py` — busy-interval length honors `duration_min` (#241)
 - `arcana/repos/works_tables.py` — SQLAlchemy Core mirror
 - `arcana/repos/pg_works_repo.py` — `PgWorksRepo` (create/status/deadline/mark_done),
   `list_by_client` (all statuses, #154 C4)

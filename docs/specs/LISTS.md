@@ -1,6 +1,6 @@
 # LISTS — data-model contract (🗒️ Списки)
 
-Code conforms to: b9d3367 (+ this change: #149 — notion_id column dropped). (+ #144: user_notion_id → user_id; + #45: Mini App `PATCH /api/lists/{id}` edit; + #45/C: Arcana 🛒 Покупки + 📋 Чеклисты surfaced in the Ритуалы / Работы tabs.) This spec describes the lists data model as of
+Code conforms to: b9d3367 (+ this change: #149 — notion_id column dropped). (+ #144: user_notion_id → user_id; + #45: Mini App `PATCH /api/lists/{id}` edit; + #45/C: Arcana 🛒 Покупки + 📋 Чеклисты surfaced in the Ритуалы / Работы tabs.) (+ #242, 24cb626: `nexus_lists.shared` column.) This spec describes the lists data model as of
 that commit; update it in the same PR that changes the model.
 
 > Contract, not snapshot. Describes the persistent model, the guarantees of
@@ -45,6 +45,7 @@ Two tables. Migration:
 | `stage` | BigInteger | nullable |
 | `task_id` | Text | NOT NULL, default `''` — ✅ Задачи page_id |
 | `works_id` | Text | NOT NULL, default `''` — 🔮 Работы page_id |
+| `shared` | Boolean | NOT NULL, default `false` — visible to friends via Zarya's chat context (#242, `nexus_lists` only, see `docs/specs/BOOKING.md` § Shared items). No NL setter yet — column only. |
 | `user_id` | Text | NOT NULL, default `''` |
 | `created_at` | TIMESTAMP(tz) | default `now()` |
 | `updated_at` | TIMESTAMP(tz) | default `now()` |
@@ -183,7 +184,10 @@ text). No Sonnet, no Opus. Reads/writes/status are pure SQL.
 - `alembic/versions/k1d2e3f4g5h6_nexus_lists_arcana_inventory_pg.py` — tables + indexes
 - `alembic/versions/cd34ef56a1b2_drop_dead_notion_id_columns.py` — notion_id dropped (#149)
 - `alembic/versions/df56a1b2c3d4_rename_user_notion_id_to_user_id.py` — user_notion_id → user_id (#144)
+- `alembic/versions/b1c2d3e4f5a6_task_duration_and_shared.py` — `nexus_lists.shared` (#242)
 - `core/repos/lists_table.py` — SQLAlchemy Core definitions + column comments
+- `core/shared_items.py` — reads `nexus_lists.shared` for Zarya's friend-chat
+  context alongside `tasks.shared` (#242, see `docs/specs/BOOKING.md`)
 - `core/repos/pg_nexus_lists_repo.py` — `ListItem`/`InventoryItem`, value maps,
   sync helpers (`_nl_update_sync` / `_ai_update_sync` — generic column
   update), `PgNexusListsRepo`/`PgArcanaInventoryRepo`, barter guard
