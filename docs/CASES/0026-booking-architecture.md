@@ -157,27 +157,37 @@ localStorage. Месяц-грид ‹›, клик по дню → слоты + 
 `+kind` / admin `+title`), `/me`, `/tip` (`core/booking/tips.py` —
 детерминированный совет из окон доступности, без LLM).
 
-### 10. Топология по репозиториям
+### 10. Топология по репозиториям (план ниже — пересмотрен при реализации)
 
-Эпик разбит:
-- **`nexus-arcana`** (этот ADR) — доменная логика: `core/booking/` (движок
-  free/busy), `booking_*` таблицы + `works.scheduled_at`, approval-петля
-  (трогает `tasks`/`works`), **Booking API** (роут-группа в `miniapp/backend`
-  или отдельный FastAPI). «Занято» = задачи Кай + работы Арканы → движок
-  обязан жить там, где эта схема; вынос = хрупкая кросс-репо связь.
-- **`heylark-infra`** — платформа: Caddy vhost `booking.heylark.dev`, фронт
-  `booking.heylark.dev` (3 лица), `grants` (`app='booking'`), `login`.
-  Тонкий указатель-ADR со ссылкой сюда.
-- **`@heylark_booking_bot`** (Zarya) — тонкий, потребляет Booking API + `grants`.
-  Свой мини-репо или в `heylark-infra`.
+Изначальный план разбивал эпик на три репо с HTTP между ботом и API (см.
+зачёркнутое ниже). **По факту вышло проще**, и это финальная топология:
 
-**Как бот зовёт API:** по внутренней Docker-сети `nexus-arcana_default`
+- **`nexus-arcana`** — всё доменное И прикладное: `core/booking/` (движок
+  free/busy + `linkage.py`), `booking_*` таблицы + `works.scheduled_at`,
+  Booking API (`miniapp/backend/routes/booking.py`, роут-группа в общем
+  FastAPI на `:8000`), фронт `booking_web/` (3 лица, single-file), **и сам
+  бот `zarya/`** (не тонкий клиент API — отдельный процесс/контейнер в этом
+  же compose, зовёт `core/booking/` **напрямую** по общей БД, без HTTP-хопа
+  вообще). «Занято» = задачи Кай + работы Арканы → всё живёт там, где эта
+  схема; вынос = хрупкая кросс-репо связь.
+- **`heylark-infra`** — только платформа: Caddy vhost `booking.heylark.dev`
+  → `nexus-bot:8000`, `grants`/`people` (`app='booking'`), `login.heylark.dev`
+  SSO. Никакой доменной логики.
+
+Почему не по плану: бот и API решают одну и ту же задачу над одной БД —
+HTTP между ними добавлял бы сеть, сериализацию и отдельный auth-контур без
+выгоды (нет внешнего потребителя API, кроме этого бота и веба). Прямой вызов
+`core/booking/` из бота = один источник правды, один деплой, без
+service-токена между процессами (`BOOKING_SERVICE_TOKEN` остался только для
+внешних вызовов вроде feed/admin, не для бот↔API).
+
+~~**Как бот зовёт API:** по внутренней Docker-сети `nexus-arcana_default`
 (`external: true`, как `heylark-login`) — `http://nexus-bot:8000/api/booking/*`,
 без публичного хопа. Auth бот↔API — service-to-service: общий секрет
 `BOOKING_SERVICE_TOKEN` (в обоих `.env`, `openssl rand -hex 32`). Бот сам
 резолвит роль через `grants` (он в той же `auth` БД) и передаёт
 `tg_id`/`role`/`context`; API доверяет service-токену. Веб-юзеры — сессией
-(`hl_session`), бот — токеном и «ручается» за своих.
+(`hl_session`), бот — токеном и «ручается» за своих.~~
 
 **Секреты (сводка):** `BOOKING_BOT_TOKEN` (BotFather, в `.env` бота) ·
 `BOOKING_SERVICE_TOKEN` (общий, бот↔API) · `AUTH_DATABASE_URL` (строка
@@ -261,5 +271,7 @@ localStorage. Месяц-грид ‹›, клик по дню → слоты + 
 - `miniapp/backend/routes/booking.py` — `/book` + `/requests/<id>/confirm` →
   `link_booking`; `GET /booking/mine`; `POST /booking/<token>/cancel`;
   фронт `booking_web` — блок «мои брони» + кнопка отмены ✅
-- **⬜** `booking.heylark.dev` — Caddy vhost + фронт `booking_web` (3 лица) живут в nexus-arcana (пересмотр §10); групповой UX обкатать
+- `booking.heylark.dev` — Caddy vhost (heylark-infra) → `nexus-bot:8000`; фронт
+  `booking_web` (3 лица, тема Nexus/Arcana) — оба в nexus-arcana (пересмотр §10) ✅
+- **⬜** групповой UX (Заря в общем чате друзей) — не обкатан живыми людьми
 - эпик #23 — полный дизайн, фазы, разведка planerka/Яндекс
