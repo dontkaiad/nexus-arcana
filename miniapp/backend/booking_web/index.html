@@ -519,8 +519,14 @@ function adminSections(){
       <input id="o_r" placeholder="причина (отпуск)">
       <button class="primary mini" id="o_add">＋ отметить</button>
     </div>
+  </div></details>
+  <details class="glass sec"><summary>📜 История броней</summary><div class="body">
+    <p class="hint">последние 50 — любой статус, прошлые и будущие</p>
+    <div class="stack" id="histBox">…</div>
   </div></details>`;
 }
+const STATUS_RU={pending:"⏳ ожидает",confirmed:"✅ подтверждено",declined:"❌ отклонено",
+  cancelled_by_owner:"❌ отменено (я)",cancelled_by_requester:"❌ отменено (гость)"};
 /* ── custom dropdown (native <select> option-lists can't be themed) ── */
 function dd(id,opts,init){
   const cur=opts.find(o=>o[0]===init)||opts[0];
@@ -597,7 +603,7 @@ function wireDD(scope){
 document.addEventListener("click",ddCloseAll);
 
 function wireAdmin(){
-  reqBox(); winBox(); typBox(); offBox(); wireDD($("#rail")); wireDDate($("#rail"));
+  reqBox(); winBox(); typBox(); offBox(); histBox(); wireDD($("#rail")); wireDDate($("#rail"));
   $("#w_add").onclick=async()=>{try{
     await api("/availability",{method:"POST",headers:{"content-type":"application/json"},
       body:JSON.stringify({context:ddVal("w_ctx"),weekday:+ddVal("w_wd"),
@@ -663,6 +669,36 @@ async function offBox(){const el=$("#offBox");try{
     <button class="mini" data-db="${b.id}">✕</button></div></div>`).join("")
     : `<div class="empty">Ничего не отмечено</div>`;
   el.querySelectorAll("[data-db]").forEach(b=>b.onclick=async()=>{await api("/blocks/"+b.dataset.db,{method:"DELETE"});offBox();load().then(gridR);});
+}catch(e){el.innerHTML=`<div class="empty">${e.message}</div>`;}}
+
+/* #220 (B7): история броней + перенос времени */
+async function histBox(){const el=$("#histBox");try{
+  const d=await api("/history");
+  el.innerHTML = d.bookings.length ? d.bookings.map(b=>`<div class="item">
+    <div class="top"><b>${b.requester_name}</b><span class="muted">${mskDateTime(b.start)} · ${STATUS_RU[b.status]||b.status}</span></div>
+    ${b.note?`<div class="muted">${b.note}</div>`:""}
+    <div class="top" style="margin-top:.4rem">
+      <button class="mini" data-resched="${b.id}">🔄 перенести</button>
+    </div>
+    <div id="resch-${b.id}" hidden style="margin-top:6px;display:flex;gap:6px;align-items:center">
+      <input type="datetime-local" class="reschInput" style="padding:6px;border-radius:8px;
+        border:1px solid var(--glass-line);background:var(--glass);color:var(--ink)">
+      <button class="mini primary" data-save="${b.id}">Сохранить</button>
+    </div>
+  </div>`).join("") : `<div class="empty">Броней пока не было</div>`;
+  el.querySelectorAll("[data-resched]").forEach(btn=>btn.onclick=()=>{
+    const box=document.getElementById("resch-"+btn.dataset.resched); box.hidden=!box.hidden;
+  });
+  el.querySelectorAll("[data-save]").forEach(btn=>btn.onclick=async()=>{
+    const id=btn.dataset.save, box=document.getElementById("resch-"+id);
+    const v=box.querySelector(".reschInput").value;
+    if(!v){toast("выбери дату и время");return;}
+    try{
+      await api(`/${id}/reschedule`,{method:"POST",headers:{"content-type":"application/json"},
+        body:JSON.stringify({start:v+":00+03:00"})});
+      toast("перенесено");histBox();load().then(gridR);
+    }catch(e){toast(String(e).includes("409")?"новое время занято":"не вышло");}
+  });
 }catch(e){el.innerHTML=`<div class="empty">${e.message}</div>`;}}
 
 /* ── calendar ─────────────────────────────────────────────────────── */

@@ -11,8 +11,8 @@ import pytest
 import sqlalchemy as sa
 from sqlalchemy.pool import StaticPool
 
-from core.booking.linkage import link_booking, unlink_booking
-from core.booking.repo import create_booking
+from core.booking.linkage import link_booking, unlink_booking, update_linked_time
+from core.booking.repo import create_booking, reschedule_booking
 
 UTC = timezone.utc
 START = datetime(2026, 10, 1, 12, 0, tzinfo=UTC)
@@ -147,3 +147,38 @@ async def test_unlink_noop_when_unlinked():
     eng = _engine()
     b = await _booking(eng, "friends")
     await unlink_booking(b, engine=eng)  # must not raise
+
+
+# ── #220 (B7): reschedule → синк дедлайна задачи / scheduled_at Работы ──────
+
+@pytest.mark.asyncio
+async def test_reschedule_friends_updates_task_deadline():
+    eng = _engine()
+    b = await link_booking(await _booking(eng, "friends"), engine=eng)
+    new_start = START + timedelta(days=3)
+    moved = await reschedule_booking(b.id, new_start, new_start + timedelta(hours=1), engine=eng)
+    await update_linked_time(moved, engine=eng)
+    with eng.connect() as c:
+        row = c.execute(sa.text("SELECT deadline FROM tasks WHERE id = :i"),
+                        {"i": int(b.nexus_task_id)}).first()
+    assert str(row.deadline).startswith("2026-10-04 12:00")
+
+
+@pytest.mark.asyncio
+async def test_reschedule_arcana_updates_work_scheduled_at():
+    eng = _engine()
+    b = await link_booking(await _booking(eng, "arcana"), engine=eng)
+    new_start = START + timedelta(days=3)
+    moved = await reschedule_booking(b.id, new_start, new_start + timedelta(hours=1), engine=eng)
+    await update_linked_time(moved, engine=eng)
+    with eng.connect() as c:
+        row = c.execute(sa.text("SELECT scheduled_at FROM works WHERE id = :i"),
+                        {"i": int(b.arcana_work_id)}).first()
+    assert str(row.scheduled_at).startswith("2026-10-04 12:00")
+
+
+@pytest.mark.asyncio
+async def test_update_linked_time_noop_when_unlinked():
+    eng = _engine()
+    b = await _booking(eng, "friends")
+    await update_linked_time(b, engine=eng)  # must not raise, nothing to update

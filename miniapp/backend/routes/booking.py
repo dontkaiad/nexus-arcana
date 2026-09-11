@@ -24,7 +24,8 @@ from core.booking.busy import BusyInterval, busy_intervals, merge_intervals
 from core.booking.ics import IcsEvent, build_ics
 from core.booking import repo as bkrepo
 from core.booking.repo import (
-    Booking, create_booking, get_booking, list_bookings, set_booking_status,
+    Booking, create_booking, get_booking, list_bookings, reschedule_booking,
+    set_booking_status,
 )
 from core.booking.slots import free_slots
 from core.config import config
@@ -391,6 +392,59 @@ async def booking_request_status(token: str) -> dict:
     if not b:
         raise HTTPException(status_code=404, detail="not found")
     return _booking_view(b)
+
+
+@router.get("/booking/history")
+async def booking_history(tg_id: int = Depends(current_user_id)) -> dict:
+    """#220 (B7): admin — история броней, любой статус, прошлые и будущие."""
+    uid = await _owner_user_id()
+    items = await list_bookings(uid or "", statuses=None, upcoming_only=False)
+    items.sort(key=lambda b: b.start_at, reverse=True)
+    return {"bookings": [_booking_view(b) for b in items[:50]]}
+
+
+class RescheduleBody(BaseModel):
+    start: str
+    hours: Optional[float] = Field(None, gt=0, le=12)
+
+
+@router.post("/booking/{booking_id}/reschedule")
+async def booking_reschedule(
+    booking_id: int, body: RescheduleBody, tg_id: int = Depends(current_user_id),
+) -> dict:
+    """#220 (B7): admin переносит бронь на другое время — обновляет саму бронь
+    и (если уже связана) дедлайн Nexus-задачи / scheduled_at 🔮 Работы."""
+    b = await get_booking(booking_id=booking_id)
+    if not b:
+        raise HTTPException(status_code=404, detail="not found")
+    try:
+        start = _parse_dt(body.start)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="bad start datetime")
+    hours = body.hours or b.hours or 1.0
+    end = start + timedelta(hours=hours)
+
+    uid = await _owner_user_id()
+    ivs = await busy_intervals(uid, start, end)
+    if any(iv.overlaps(start, end) for iv in ivs if not (iv.source == "booking" and iv.ref_id == str(booking_id))):
+        raise HTTPException(status_code=409, detail="slot taken")
+
+    updated = await reschedule_booking(booking_id, start, end)
+    if not updated:
+        raise HTTPException(status_code=404, detail="not found")
+
+    try:
+        from core.booking.linkage import update_linked_time
+        await update_linked_time(updated)
+    except Exception as e:  # noqa: BLE001
+        logger.warning("reschedule relink failed: %s", e)
+
+    when_msk = start.astimezone(timezone(timedelta(hours=3))).strftime("%d.%m %H:%M")
+    await _zarya_dm(
+        updated.requester_tg_id,
+        f"🔄 Кай перенесла встречу на {when_msk} (МСК). Если не подходит — напиши ей.",
+    )
+    return _booking_view(updated)
 
 
 @router.get("/booking/requests")

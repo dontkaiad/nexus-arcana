@@ -246,6 +246,96 @@ def test_book_arcana_without_note_is_fine(_book_env):
     assert r.status_code == 200
 
 
+# ── #220 (B7): история броней + перенос времени ─────────────────────────────
+
+def test_history_owner_only():
+    from miniapp.backend.auth import current_user_id
+    c = TestClient(app)
+    assert c.get("/api/booking/history").status_code in (401, 403)
+
+
+def test_history_returns_any_status_sorted_desc():
+    from miniapp.backend.auth import current_user_id
+    older = _mk_booking(bid=1, status="declined", start_at=_FUT - timedelta(days=5),
+                        end_at=_FUT - timedelta(days=5) + timedelta(hours=1))
+    newer = _mk_booking(bid=2, status="confirmed", start_at=_FUT)
+    with patch("miniapp.backend.routes.booking._owner_user_id", AsyncMock(return_value="uid-1")), \
+         patch("miniapp.backend.routes.booking.list_bookings",
+               AsyncMock(return_value=[older, newer])):
+        app.dependency_overrides[current_user_id] = lambda: 111
+        try:
+            r = TestClient(app).get("/api/booking/history")
+        finally:
+            app.dependency_overrides.clear()
+    assert r.status_code == 200
+    ids = [b["id"] for b in r.json()["bookings"]]
+    assert ids == [2, 1]  # newest first
+
+
+def test_reschedule_owner_only():
+    c = TestClient(app)
+    assert c.post("/api/booking/7/reschedule", json={"start": _FUT.isoformat()}).status_code in (401, 403)
+
+
+def test_reschedule_moves_booking_and_relinks():
+    from miniapp.backend.auth import current_user_id
+    new_start = _FUT + timedelta(days=1)
+    existing = _mk_booking(bid=7, status="confirmed", nexus_task_id="42")
+    moved = _mk_booking(bid=7, status="confirmed", nexus_task_id="42",
+                        start_at=new_start, end_at=new_start + timedelta(hours=1))
+    with patch("miniapp.backend.routes.booking._owner_user_id", AsyncMock(return_value="uid-1")), \
+         patch("miniapp.backend.routes.booking.get_booking", AsyncMock(return_value=existing)), \
+         patch("miniapp.backend.routes.booking.busy_intervals", AsyncMock(return_value=[])), \
+         patch("miniapp.backend.routes.booking.reschedule_booking",
+               AsyncMock(return_value=moved)) as resched, \
+         patch("core.booking.linkage.update_linked_time", AsyncMock()) as relink, \
+         patch("core.bot_notify.notify_user", AsyncMock(return_value=True)):
+        app.dependency_overrides[current_user_id] = lambda: 111
+        try:
+            r = TestClient(app).post("/api/booking/7/reschedule",
+                                     json={"start": new_start.isoformat()})
+        finally:
+            app.dependency_overrides.clear()
+    assert r.status_code == 200
+    resched.assert_awaited_once()
+    relink.assert_awaited_once_with(moved)
+    assert r.json()["start"] == moved.start_at.isoformat()
+
+
+def test_reschedule_conflict_409_excludes_self():
+    """Новое время не должно ложно конфликтовать с СВОЕЙ же старой бронью."""
+    from miniapp.backend.auth import current_user_id
+    from core.booking.busy import BusyInterval
+    existing = _mk_booking(bid=7, status="confirmed")
+    new_start = _FUT + timedelta(days=1)
+    self_iv = BusyInterval(new_start, new_start + timedelta(hours=1), "booking", "Аня", "7")
+    other_iv = BusyInterval(new_start, new_start + timedelta(hours=1), "task", "x", "99")
+    moved = _mk_booking(bid=7, status="confirmed", start_at=new_start, end_at=new_start + timedelta(hours=1))
+    with patch("miniapp.backend.routes.booking._owner_user_id", AsyncMock(return_value="uid-1")), \
+         patch("miniapp.backend.routes.booking.get_booking", AsyncMock(return_value=existing)), \
+         patch("miniapp.backend.routes.booking.busy_intervals", AsyncMock(return_value=[self_iv])), \
+         patch("miniapp.backend.routes.booking.reschedule_booking", AsyncMock(return_value=moved)), \
+         patch("core.bot_notify.notify_user", AsyncMock(return_value=True)):
+        app.dependency_overrides[current_user_id] = lambda: 111
+        try:
+            r = TestClient(app).post("/api/booking/7/reschedule",
+                                     json={"start": new_start.isoformat()})
+        finally:
+            app.dependency_overrides.clear()
+    assert r.status_code == 200  # self-overlap ignored
+
+    with patch("miniapp.backend.routes.booking._owner_user_id", AsyncMock(return_value="uid-1")), \
+         patch("miniapp.backend.routes.booking.get_booking", AsyncMock(return_value=existing)), \
+         patch("miniapp.backend.routes.booking.busy_intervals", AsyncMock(return_value=[other_iv])):
+        app.dependency_overrides[current_user_id] = lambda: 111
+        try:
+            r2 = TestClient(app).post("/api/booking/7/reschedule",
+                                      json={"start": new_start.isoformat()})
+        finally:
+            app.dependency_overrides.clear()
+    assert r2.status_code == 409  # a REAL conflict still blocks
+
+
 def test_confirm_decline_owner_only():
     from miniapp.backend.auth import current_user_id
     with patch("miniapp.backend.routes.booking._owner_user_id", AsyncMock(return_value="uid-1")), \

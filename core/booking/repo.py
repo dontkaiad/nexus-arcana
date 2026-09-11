@@ -111,6 +111,17 @@ def _set_status_sync(engine, booking_id: int, status: str) -> Optional[Booking]:
     return _row_to_booking(row) if row else None
 
 
+def _reschedule_sync(engine, booking_id: int, start_at: datetime, end_at: datetime) -> Optional[Booking]:
+    with engine.begin() as conn:
+        row = conn.execute(
+            booking.update()
+            .where(booking.c.id == booking_id)
+            .values(start_at=start_at, end_at=end_at)
+            .returning(booking)
+        ).first()
+    return _row_to_booking(row) if row else None
+
+
 def _set_link_sync(engine, booking_id: int, *, nexus_task_id=None, arcana_work_id=None) -> Optional[Booking]:
     vals = {}
     if nexus_task_id is not None:
@@ -171,6 +182,16 @@ async def list_bookings(
 async def set_booking_status(booking_id: int, status: str, *, engine=None) -> Optional[Booking]:
     eng = engine or _engine()
     return await asyncio.to_thread(_set_status_sync, eng, booking_id, status)
+
+
+async def reschedule_booking(
+    booking_id: int, start_at: datetime, end_at: datetime, *, engine=None,
+) -> Optional[Booking]:
+    """#220 (B7): admin переносит бронь на другое время. Не трогает status —
+    линковка (Nexus-задача / 🔮 Работа) обновляется отдельно вызывающим
+    кодом через core.booking.linkage.update_linked_time."""
+    eng = engine or _engine()
+    return await asyncio.to_thread(_reschedule_sync, eng, booking_id, start_at, end_at)
 
 
 async def set_booking_link(
@@ -307,6 +328,7 @@ async def del_block(row_id: int, user_id: str, *, engine=None) -> bool:
 __all__ = [
     "Booking", "BLOCKING_BOOKING_STATUSES",
     "create_booking", "get_booking", "list_bookings", "set_booking_status",
+    "reschedule_booking",
     "list_availability", "add_availability", "edit_availability", "del_availability",
     "list_meeting_types", "add_meeting_type", "edit_meeting_type", "del_meeting_type",
     "list_blocks", "add_block", "del_block", "set_booking_link",

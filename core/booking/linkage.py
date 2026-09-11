@@ -126,3 +126,29 @@ async def unlink_booking(b: Booking, *, engine=None) -> None:
         logger.info("booking #%s unlinked (archived task/work)", b.id)
     except Exception as e:  # noqa: BLE001
         logger.warning("unlink_booking #%s failed: %s", b.id, e)
+
+
+def _retime_sync(eng, b: Booking) -> None:
+    with eng.begin() as conn:
+        if b.nexus_task_id:
+            from nexus.repos.tasks_tables import tasks
+            conn.execute(
+                tasks.update().where(tasks.c.id == int(b.nexus_task_id)).values(deadline=b.start_at)
+            )
+        if b.arcana_work_id:
+            from arcana.repos.works_tables import works
+            conn.execute(
+                works.update().where(works.c.id == int(b.arcana_work_id)).values(scheduled_at=b.start_at)
+            )
+
+
+async def update_linked_time(b: Booking, *, engine=None) -> None:
+    """#220 (B7): admin перенёс бронь на другое время — синкнуть дедлайн
+    Nexus-задачи / scheduled_at Работы на новое b.start_at. Never raises."""
+    if not (b.nexus_task_id or b.arcana_work_id):
+        return
+    try:
+        await asyncio.to_thread(_retime_sync, engine or _engine(), b)
+        logger.info("booking #%s retimed linked task/work → %s", b.id, b.start_at)
+    except Exception as e:  # noqa: BLE001
+        logger.warning("update_linked_time #%s failed: %s", b.id, e)
