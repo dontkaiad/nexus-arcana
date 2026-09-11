@@ -483,7 +483,7 @@ async def on_unrecognized(msg: Message, role: str = "guest") -> None:
         return
     try:
         from zarya.classifier import classify_zarya
-        result = await classify_zarya(msg.text or "")
+        result = await classify_zarya(msg.text or "", role=role)
     except Exception as e:
         logger.warning("zarya classify failed: %s", e)
         result = {"intent": "chat", "reply": ""}

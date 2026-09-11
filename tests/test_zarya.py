@@ -212,10 +212,11 @@ async def test_unrecognized_routes_to_slots():
     from zarya.handlers import on_unrecognized
     m = _msg()
     m.text = "и где"
-    with patch("zarya.classifier.classify_zarya", AsyncMock(return_value={"intent": "slots", "reply": ""})), \
+    with patch("zarya.classifier.classify_zarya", AsyncMock(return_value={"intent": "slots", "reply": ""})) as clf, \
          patch("zarya.handlers._show_slots", AsyncMock()) as show_slots:
         await on_unrecognized(m, role="friend")
     show_slots.assert_awaited_once_with(m, "friend")
+    clf.assert_awaited_once_with("и где", role="friend")  # Заря знает КТО спрашивает
 
 
 @pytest.mark.asyncio
@@ -296,3 +297,25 @@ async def test_group_unaddressed_message_gets_no_reply():
     m = _group_msg("го обедать")
     await on_unrecognized(m, role="guest")
     m.answer.assert_not_awaited()
+
+
+# ── classify_zarya: знает КТО пишет (admin = сама Кай) ───────────────────────
+
+@pytest.mark.asyncio
+async def test_classify_zarya_tags_role_in_prompt():
+    from zarya.classifier import classify_zarya
+    with patch("zarya.classifier.ask_claude",
+               AsyncMock(return_value='{"intent":"chat","reply":"ок"}')) as ask:
+        await classify_zarya("тупая машина", role="admin")
+    prompt = ask.call_args[0][0]
+    assert prompt.startswith("Роль пишущего: admin\n")
+    assert "тупая машина" in prompt
+
+
+@pytest.mark.asyncio
+async def test_classify_zarya_defaults_to_guest_role():
+    from zarya.classifier import classify_zarya
+    with patch("zarya.classifier.ask_claude",
+               AsyncMock(return_value='{"intent":"chat","reply":"ок"}')) as ask:
+        await classify_zarya("привет")
+    assert ask.call_args[0][0].startswith("Роль пишущего: guest\n")
