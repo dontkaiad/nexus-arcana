@@ -1,14 +1,15 @@
 """tests/test_zarya.py — ⭐ Zarya pure helpers + role middleware (#23 / ADR-0026)."""
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import pytest
 
 from zarya.formatting import (
-    epoch, from_epoch, group_slots_by_day, slot_label, wants_slots,
+    day_phrase, epoch, extract_asked_date, from_epoch, group_slots_by_day,
+    slot_label, wants_slots,
 )
 from zarya.handlers import (
     RoleMiddleware, _bot_addressed, _ctx_for, cmd_help, cmd_start,
@@ -29,6 +30,39 @@ UTC = timezone.utc
 ])
 def test_wants_slots(t, hit):
     assert wants_slots(t) is hit
+
+
+# ── extract_asked_date (#235) ────────────────────────────────────────────────
+
+_MON = date(2026, 9, 14)  # Monday, matches NOW's week elsewhere in this file
+
+
+@pytest.mark.parametrize("t,expected_delta", [
+    ("есть слоты на вторник?", 1),
+    ("а в среду?", 1 + 1),
+    ("что по четвергам", 3),
+    ("завтра свободна?", 1),
+    ("послезавтра норм?", 2),
+    ("сегодня есть окно?", 0),
+    ("в понедельник заняты все", 0),  # today IS Monday → nearest = today
+])
+def test_extract_asked_date(t, expected_delta):
+    assert extract_asked_date(t, _MON) == _MON + timedelta(days=expected_delta)
+
+
+def test_extract_asked_date_none_when_not_mentioned():
+    assert extract_asked_date("когда у Кай окно на этой неделе", _MON) is None
+
+
+def test_extract_asked_date_weekday_wraps_to_next_week():
+    # Monday asking about Sunday → +6 days (nearest upcoming Sunday, not -1)
+    assert extract_asked_date("а в воскресенье?", _MON) == _MON + timedelta(days=6)
+
+
+def test_day_phrase_forms():
+    assert day_phrase(_MON) == "в понедельник"
+    assert day_phrase(_MON + timedelta(days=1)) == "во вторник"
+    assert day_phrase(_MON + timedelta(days=6)) == "в воскресенье"
 
 
 def test_epoch_roundtrip():
@@ -88,6 +122,7 @@ def _msg():
     m.chat = SimpleNamespace(type="private")  # DM by default — _bot_addressed() always True there
     m.entities = None
     m.reply_to_message = None
+    m.text = ""
     return m
 
 
@@ -434,7 +469,7 @@ async def test_empty_kai_context_no_crash():
 @pytest.mark.asyncio
 async def test_show_slots_handles_slot_objects():
     from zarya.handlers import _show_slots
-    from datetime import datetime, timedelta, timezone as tz
+    from datetime import date, datetime, timedelta, timezone as tz
     from types import SimpleNamespace as NS
 
     start = datetime.now(tz.utc) + timedelta(days=1)
@@ -444,3 +479,46 @@ async def test_show_slots_handles_slot_objects():
          patch("zarya.handlers.free_slots", AsyncMock(return_value=[fake_slot])):
         await _show_slots(m, "admin")  # не должно бросить AttributeError
     m.answer.assert_awaited_once()
+
+
+# ── _show_slots + specific day (#235) — реальный баг: "слоты на вторник"
+# отвечала общим дампом на 4 дня, вторник мог туда не попасть ────────────────
+
+@pytest.mark.asyncio
+async def test_show_slots_answers_specific_day_directly():
+    from zarya.handlers import _show_slots
+    from datetime import date as _date, datetime as _dt, timezone as _tz
+    from types import SimpleNamespace as NS
+
+    m = _msg()
+    m.text = "заря дорогая у меня есть слоты на вторник?"
+    fake_start = _dt(2026, 9, 15, 11, 0, tzinfo=_tz.utc)  # a Tuesday
+    fake_slot = NS(start=fake_start, end=fake_start)
+    with patch("zarya.handlers._owner_user_id", AsyncMock(return_value="uid")), \
+         patch("zarya.handlers.date") as fake_date_mod, \
+         patch("zarya.handlers.free_slots", AsyncMock(return_value=[fake_slot])) as fs:
+        fake_date_mod.today.return_value = _date(2026, 9, 14)  # Monday
+        fake_date_mod.side_effect = lambda *a, **k: _date(*a, **k)
+        await _show_slots(m, "admin")
+    # спросили КОНКРЕТНО вторник → free_slots должен звать day_from=day_to=вторник
+    called_kwargs = fs.call_args.kwargs
+    assert called_kwargs["day_from"] == called_kwargs["day_to"] == _date(2026, 9, 15)
+    text = m.answer.call_args[0][0]
+    assert "вторник" in text and "Да!" in text
+
+
+@pytest.mark.asyncio
+async def test_show_slots_specific_day_no_slots_says_no():
+    from zarya.handlers import _show_slots
+    from datetime import date as _date
+
+    m = _msg()
+    m.text = "есть слоты на вторник?"
+    with patch("zarya.handlers._owner_user_id", AsyncMock(return_value="uid")), \
+         patch("zarya.handlers.date") as fake_date_mod, \
+         patch("zarya.handlers.free_slots", AsyncMock(return_value=[])):
+        fake_date_mod.today.return_value = _date(2026, 9, 14)  # Monday
+        fake_date_mod.side_effect = lambda *a, **k: _date(*a, **k)
+        await _show_slots(m, "admin")
+    text = m.answer.call_args[0][0]
+    assert "вторник" in text and "Не," in text

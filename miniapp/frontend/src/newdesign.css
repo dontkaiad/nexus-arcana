@@ -190,7 +190,7 @@
 .hero-metrics {
   display: flex;
   gap: 8px;
-  align-items: flex-start;   /* карточка стрика чуть выше плиток — не растягивать плитки под неё */
+  align-items: stretch;   /* карточка стрика = высота/ширина соседних .metric при любом размере */
 }
 .hero-budget {
   margin-top: 14px;
@@ -202,10 +202,16 @@
 
 .metric {
   flex: 1;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
   text-align: center;
   padding: 14px 8px;
   border-radius: 14px;
   position: relative;
+  box-sizing: border-box;
 }
 .day .metric {
   background: rgba(255, 255, 254, 0.42);

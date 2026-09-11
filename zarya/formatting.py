@@ -5,12 +5,21 @@ No aiogram / DB imports here so it stays trivially testable.
 from __future__ import annotations
 
 import re
-from datetime import datetime, timedelta, timezone
-from typing import List
+from datetime import date, datetime, timedelta, timezone
+from typing import List, Optional
 
 MSK = timezone(timedelta(hours=3))
 
 _DOW = ["пн", "вт", "ср", "чт", "пт", "сб", "вс"]
+# предложный/винительный падеж — «в понедельник», «во вторник», «в среду»...
+_DOW_PHRASE = [
+    "в понедельник", "во вторник", "в среду", "в четверг",
+    "в пятницу", "в субботу", "в воскресенье",
+]
+
+
+def day_phrase(d: date) -> str:
+    return _DOW_PHRASE[d.weekday()]
 
 # «когда у Кай окно», «свободные слоты», «когда свободна», «запиши меня»…
 _ASK_SLOTS_RE = re.compile(
@@ -22,6 +31,41 @@ _ASK_SLOTS_RE = re.compile(
 
 def wants_slots(text: str) -> bool:
     return bool(_ASK_SLOTS_RE.search(text or ""))
+
+
+# #235: «есть слоты на вторник» — раньше отдавала общий список на 4 дня
+# вперёд, даже если вторник туда не попадал. Теперь понимает КАКОЙ день
+# спрашивают и отвечает конкретно про него.
+_WEEKDAY_RE = [
+    (re.compile(r"понедельник\w*", re.IGNORECASE), 0),
+    (re.compile(r"вторник\w*", re.IGNORECASE), 1),
+    (re.compile(r"сред\w*", re.IGNORECASE), 2),
+    (re.compile(r"четверг\w*", re.IGNORECASE), 3),
+    (re.compile(r"пятниц\w*", re.IGNORECASE), 4),
+    (re.compile(r"суббот\w*", re.IGNORECASE), 5),
+    (re.compile(r"воскресень\w*", re.IGNORECASE), 6),
+]
+_POSLEZAVTRA_RE = re.compile(r"послезавтра", re.IGNORECASE)
+_ZAVTRA_RE = re.compile(r"\bзавтра\b", re.IGNORECASE)
+_SEGODNYA_RE = re.compile(r"сегодня", re.IGNORECASE)
+
+
+def extract_asked_date(text: str, today: date) -> Optional[date]:
+    """Если в тексте явно назван день (сегодня/завтра/послезавтра/день недели)
+    — вернуть его дату. Название дня недели без уточнения «на следующей
+    неделе» — ближайшее вхождение (сегодня, если сегодня тот же день)."""
+    t = text or ""
+    if _POSLEZAVTRA_RE.search(t):
+        return today + timedelta(days=2)
+    if _ZAVTRA_RE.search(t):
+        return today + timedelta(days=1)
+    if _SEGODNYA_RE.search(t):
+        return today
+    for pattern, wd in _WEEKDAY_RE:
+        if pattern.search(t):
+            delta = (wd - today.weekday()) % 7
+            return today + timedelta(days=delta)
+    return None
 
 
 def slot_label(start: datetime, *, hours: float = 1.0) -> str:

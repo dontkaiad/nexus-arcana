@@ -29,7 +29,8 @@ from core.booking.slots import free_slots
 from core.config import config
 from zarya import scheduler
 from zarya.formatting import (
-    MSK, epoch, from_epoch, group_slots_by_day, slot_label, wants_slots,
+    MSK, day_phrase, epoch, extract_asked_date, from_epoch, group_slots_by_day,
+    slot_label, wants_slots,
 )
 
 logger = logging.getLogger("zarya.handlers")
@@ -234,6 +235,13 @@ async def _show_slots(msg: Message, role: str) -> None:
         return
     ctx = _ctx_for(role)
     today = date.today()
+    # #235: «есть слоты на вторник» раньше игнорировался — отдавала общий
+    # список на _SLOT_DAYS дней вперёд, даже если вторник туда не попадал.
+    # Явно назван день → отвечаем прямо про него (да/нет), без общего дампа.
+    asked = extract_asked_date(msg.text or "", today)
+    if asked is not None:
+        await _show_slots_for_day(msg, role, ctx, uid, asked)
+        return
     # #229: free_slots() возвращает Slot(start, end) объекты, а весь
     # zarya/formatting.py (group_slots_by_day/slot_label/epoch) исторически
     # писан под голые datetime — .astimezone() падал с AttributeError. Раньше
@@ -264,6 +272,19 @@ async def _show_slots(msg: Message, role: str) -> None:
     kb = _slots_kb(ctx, flat)
     tail = "\n\nВыбери слот 👇" if kb.inline_keyboard else ""
     await msg.answer("\n".join(lines) + tail, reply_markup=kb, disable_web_page_preview=True)
+
+
+async def _show_slots_for_day(msg: Message, role: str, ctx: str, uid: str, asked) -> None:
+    """#235: спросили про конкретный день — прямой да/нет, без общего дампа."""
+    when = f"{day_phrase(asked)} ({asked:%d.%m})"
+    slots = [s.start for s in await free_slots(uid, ctx, day_from=asked, day_to=asked)]
+    if not slots:
+        await msg.answer(f"Не, {when} не выйдет — плотно занята 💅")
+        return
+    times = ", ".join(f"{s.astimezone(MSK):%H:%M}" for s in slots)
+    kb = _slots_kb(ctx, slots)
+    tail = "\n\nВыбери слот 👇" if kb.inline_keyboard else ""
+    await msg.answer(f"Да! {when} свободна: {times}{tail}", reply_markup=kb)
 
 
 @router.message(Command("slots"))

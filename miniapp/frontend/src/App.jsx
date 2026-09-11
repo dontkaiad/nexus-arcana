@@ -1325,10 +1325,11 @@ function StreakAchievedCard({ current, best, lastDateIso, todayIso, onClick }) {
         <span>{badge}</span>
       </div>
 
-      {/* центр — как у `.metric`: крупное число + подпись */}
+      {/* число+подпись смещены к низу — не перекрывают солнечный сигил-watermark
+          в центре карточки (было: точно по центру, глушило рисунок) */}
       <div style={{
-        position: "absolute", inset: 0, padding: "14px 8px", color: "#3d2a10",
-        display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
+        position: "absolute", inset: 0, padding: "14px 8px 10px", color: "#3d2a10",
+        display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "flex-end",
       }}>
         <span style={{
           fontFamily: "var(--f-display)", fontSize: 28, fontWeight: 500, lineHeight: 1,
