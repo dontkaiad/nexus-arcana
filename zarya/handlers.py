@@ -224,7 +224,11 @@ async def _show_slots(msg: Message, role: str) -> None:
         return
     ctx = _ctx_for(role)
     today = date.today()
-    slots = await free_slots(uid, ctx, day_from=today, day_to=today + timedelta(days=_SLOT_DAYS))
+    # #229: free_slots() возвращает Slot(start, end) объекты, а весь
+    # zarya/formatting.py (group_slots_by_day/slot_label/epoch) исторически
+    # писан под голые datetime — .astimezone() падал с AttributeError. Раньше
+    # сюда просто никогда не доходило (identity_repo падал раньше, #228).
+    slots = [s.start for s in await free_slots(uid, ctx, day_from=today, day_to=today + timedelta(days=_SLOT_DAYS))]
     if not slots:
         # gib the opaque busy view as a fallback so the answer isn't empty
         now = datetime.now(timezone.utc)

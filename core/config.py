@@ -143,6 +143,10 @@ class AppConfig:
     # ── ⭐ Zarya booking bot (@heylark_booking_bot). Пусто → бот не стартует. ──
     booking_bot_token: str = ""
     booking_api_base: str = "http://nexus-bot:8000"
+    # Свободный текст о Кай для Zarya-промпта (#228). НИКОГДА не хардкодить
+    # реальные факты в коде — репо публичный. Живёт только в .env на сервере,
+    # правится напрямую там; пусто → Заря просто без доп. контекста о Кай.
+    zarya_kai_context: str = ""
 
 
 def load_config() -> AppConfig:
@@ -165,6 +169,7 @@ def load_config() -> AppConfig:
         booking_service_token = _optional("BOOKING_SERVICE_TOKEN"),
         booking_bot_token    = _optional("BOOKING_BOT_TOKEN"),
         booking_api_base     = _optional("BOOKING_API_BASE", "http://nexus-bot:8000"),
+        zarya_kai_context    = _optional("ZARYA_KAI_CONTEXT"),
         nexus = NexusConfig(
             tg_token     = _require("NEXUS_BOT_TOKEN"),
             db_finance   = _optional("NOTION_DB_FINANCE"),

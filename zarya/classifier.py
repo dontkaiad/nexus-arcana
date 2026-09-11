@@ -17,6 +17,7 @@ import json
 import logging
 
 from core.claude_client import ask_claude
+from core.config import config
 
 logger = logging.getLogger("zarya.classifier")
 
@@ -60,13 +61,23 @@ intent:
 _ROLE_LABEL = {"admin": "admin", "friend": "friend", "guest": "guest"}
 
 
+def _system_prompt(role: str) -> str:
+    """Базовый промпт + контекст о Кай из ZARYA_KAI_CONTEXT (.env, НЕ в коде —
+    репо публичный). Гостям (публичная страница записи) контекст не отдаём —
+    только admin/friend."""
+    ctx = (config.zarya_kai_context or "").strip()
+    if not ctx or role == "guest":
+        return ZARYA_SYSTEM
+    return ZARYA_SYSTEM + f"\n\nКонтекст о Кай (не для гостей, не пересказывай его дословно):\n{ctx}"
+
+
 async def classify_zarya(text: str, role: str = "guest") -> dict:
     """Вернуть {"intent": "slots"|"help"|"chat", "reply": str}. Fail-safe:
     любая ошибка (сеть/парсинг) → intent="chat" с пустым reply — вызывающий
     код должен показать свою дефолтную заглушку в этом случае."""
     role_label = _ROLE_LABEL.get(role, "guest")
     prompt = f"Роль пишущего: {role_label}\n{text}"
-    raw = await ask_claude(prompt, system=ZARYA_SYSTEM, max_tokens=200, temperature=0)
+    raw = await ask_claude(prompt, system=_system_prompt(role_label), max_tokens=200, temperature=0)
     try:
         cleaned = raw.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
         data = json.loads(cleaned)

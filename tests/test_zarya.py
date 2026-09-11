@@ -393,3 +393,54 @@ async def test_membership_change_ignored_when_not_a_join():
     with patch("zarya.handlers.config.allowed_ids", [67686090, 790273371]):
         await on_membership_changed(u)
     u.bot.leave_chat.assert_not_awaited()
+
+
+# ── ZARYA_KAI_CONTEXT (.env, никогда в коде — #228) ──────────────────────────
+
+@pytest.mark.asyncio
+async def test_kai_context_injected_for_admin():
+    from zarya.classifier import classify_zarya
+    with patch("zarya.classifier.config.zarya_kai_context", "любит котов"), \
+         patch("zarya.classifier.ask_claude",
+               AsyncMock(return_value='{"intent":"chat","reply":"ок"}')) as ask:
+        await classify_zarya("привет", role="admin")
+    assert "любит котов" in ask.call_args.kwargs["system"]
+
+
+@pytest.mark.asyncio
+async def test_kai_context_hidden_from_guest():
+    from zarya.classifier import classify_zarya
+    with patch("zarya.classifier.config.zarya_kai_context", "любит котов"), \
+         patch("zarya.classifier.ask_claude",
+               AsyncMock(return_value='{"intent":"chat","reply":"ок"}')) as ask:
+        await classify_zarya("привет", role="guest")
+    assert "любит котов" not in ask.call_args.kwargs["system"]
+
+
+@pytest.mark.asyncio
+async def test_empty_kai_context_no_crash():
+    from zarya.classifier import classify_zarya
+    with patch("zarya.classifier.config.zarya_kai_context", ""), \
+         patch("zarya.classifier.ask_claude",
+               AsyncMock(return_value='{"intent":"chat","reply":"ок"}')):
+        result = await classify_zarya("привет", role="admin")
+    assert result["intent"] == "chat"
+
+
+# ── _show_slots regression: free_slots() returns Slot objects, not bare
+# datetimes — #229 (AttributeError: 'Slot' object has no attribute
+# 'astimezone', masked earlier by the #228 identity_repo bug) ───────────────
+
+@pytest.mark.asyncio
+async def test_show_slots_handles_slot_objects():
+    from zarya.handlers import _show_slots
+    from datetime import datetime, timedelta, timezone as tz
+    from types import SimpleNamespace as NS
+
+    start = datetime.now(tz.utc) + timedelta(days=1)
+    fake_slot = NS(start=start, end=start + timedelta(hours=1))
+    m = _msg()
+    with patch("zarya.handlers._owner_user_id", AsyncMock(return_value="uid")), \
+         patch("zarya.handlers.free_slots", AsyncMock(return_value=[fake_slot])):
+        await _show_slots(m, "admin")  # не должно бросить AttributeError
+    m.answer.assert_awaited_once()
