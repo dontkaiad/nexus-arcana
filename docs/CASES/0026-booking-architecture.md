@@ -275,3 +275,23 @@ service-токена между процессами (`BOOKING_SERVICE_TOKEN` о
   `booking_web` (3 лица, тема Nexus/Arcana) — оба в nexus-arcana (пересмотр §10) ✅
 - **⬜** групповой UX (Заря в общем чате друзей) — не обкатан живыми людьми
 - эпик #23 — полный дизайн, фазы, разведка planerka/Яндекс
+
+### Bot-approval login (#23 follow-up)
+
+Telegram Login Widget на десктопе/в приватной вкладке без живой сессии
+`web.telegram.org` всегда падал в резервный веб-flow с номером телефона
+(поведение Telegram, не наше — воспроизведено на `login.heylark.dev`).
+Заменён на подтверждение через Зарю: `POST /auth/tg/start` минтит токен →
+deep link в `@heylark_booking_bot` → Заря спрашивает «это ты?» → тап →
+страница поллит `GET /auth/tg/poll` и получает `hl_session`-куку.
+
+Общая таблица `login_tokens` в БД `auth` (та же, что `grants`/`invites`/
+`people`) — как и `grants`, читается/пишется НАПРЯМУЮ с обеих сторон, без
+HTTP между репами:
+- `heylark-infra` (`heylark_auth/tg_auth.py`): `init_auth_schema` +
+  `create_login_token`/`poll_login_token`/`mark_login_token_used`; роуты
+  `login/login_service.py` `/auth/tg/start` + `/auth/tg/poll`; кнопка
+  «Войти через Зарю» заменила виджет в `heylark_auth/templates/login.html` ✅
+- `nexus-arcana` (`core/login_tokens.py`): `get_pending`/`approve`/`deny`;
+  `zarya/handlers.py` — `/start login_<token>` deep-link + `z:login_ok:`/
+  `z:login_no:` callbacks ✅

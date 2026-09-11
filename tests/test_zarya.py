@@ -10,7 +10,9 @@ import pytest
 from zarya.formatting import (
     epoch, from_epoch, group_slots_by_day, slot_label, wants_slots,
 )
-from zarya.handlers import RoleMiddleware, _ctx_for
+from zarya.handlers import (
+    RoleMiddleware, _ctx_for, cmd_start, on_login_confirm, on_login_deny,
+)
 
 UTC = timezone.utc
 
@@ -74,3 +76,96 @@ async def test_role_middleware_attaches_role_and_never_raises():
     with patch("zarya.handlers.booking_role", AsyncMock(side_effect=RuntimeError("db down"))):
         assert await mw(_handler, object(), data2) == "ok"
     assert seen["role"] == "guest"
+
+
+# ── /start login_<token> — bot-approval login (#23 follow-up) ───────────────
+
+
+def _msg():
+    m = SimpleNamespace()
+    m.answer = AsyncMock()
+    return m
+
+
+def _cmd(args):
+    return SimpleNamespace(args=args)
+
+
+@pytest.mark.asyncio
+async def test_start_plain_ignores_login_flow():
+    m = _msg()
+    await cmd_start(m, command=_cmd(None), role="guest")
+    m.answer.assert_awaited_once()
+    assert "Zarya" in m.answer.call_args[0][0]  # normal /start greeting, not the login flow
+
+
+@pytest.mark.asyncio
+async def test_start_login_unknown_token():
+    m = _msg()
+    with patch("zarya.handlers.login_tokens_mod.get_pending", AsyncMock(return_value=None)):
+        await cmd_start(m, command=_cmd("login_bogus"), role="guest")
+    assert "не найдена" in m.answer.call_args[0][0]
+
+
+@pytest.mark.asyncio
+async def test_start_login_expired_token():
+    m = _msg()
+    pending = {"status": "expired", "tg_id": None}
+    with patch("zarya.handlers.login_tokens_mod.get_pending", AsyncMock(return_value=pending)):
+        await cmd_start(m, command=_cmd("login_tok1"), role="guest")
+    assert "устарела" in m.answer.call_args[0][0]
+
+
+@pytest.mark.asyncio
+async def test_start_login_already_used_token():
+    m = _msg()
+    pending = {"status": "approved", "tg_id": 111}
+    with patch("zarya.handlers.login_tokens_mod.get_pending", AsyncMock(return_value=pending)):
+        await cmd_start(m, command=_cmd("login_tok1"), role="guest")
+    assert "использована" in m.answer.call_args[0][0]
+
+
+@pytest.mark.asyncio
+async def test_start_login_pending_shows_confirm_buttons():
+    m = _msg()
+    pending = {"status": "pending", "tg_id": None}
+    with patch("zarya.handlers.login_tokens_mod.get_pending", AsyncMock(return_value=pending)):
+        await cmd_start(m, command=_cmd("login_tok1"), role="guest")
+    text, kwargs = m.answer.call_args[0][0], m.answer.call_args[1]
+    assert "Это ты?" in text
+    kb = kwargs["reply_markup"].inline_keyboard
+    assert kb[0][0].callback_data == "z:login_ok:tok1"
+    assert kb[0][1].callback_data == "z:login_no:tok1"
+
+
+def _call(data, tg_id=67686090):
+    c = SimpleNamespace()
+    c.data = data
+    c.message = SimpleNamespace(edit_text=AsyncMock())
+    c.answer = AsyncMock()
+    return c
+
+
+@pytest.mark.asyncio
+async def test_on_login_confirm_success():
+    c = _call("z:login_ok:tok1")
+    with patch("zarya.handlers.login_tokens_mod.approve", AsyncMock(return_value=True)):
+        await on_login_confirm(c, tg_id=67686090)
+    assert "подтверждён" in c.message.edit_text.call_args[0][0]
+
+
+@pytest.mark.asyncio
+async def test_on_login_confirm_stale():
+    c = _call("z:login_ok:tok1")
+    with patch("zarya.handlers.login_tokens_mod.approve", AsyncMock(return_value=False)):
+        await on_login_confirm(c, tg_id=67686090)
+    assert "неактуальна" in c.message.edit_text.call_args[0][0]
+
+
+@pytest.mark.asyncio
+async def test_on_login_deny():
+    c = _call("z:login_no:tok1")
+    with patch("zarya.handlers.login_tokens_mod.deny", AsyncMock(return_value=True)) as deny_mock:
+        await on_login_deny(c, tg_id=67686090)
+    deny_mock.assert_awaited_once_with("tok1", 67686090)
+    assert "отклонён" in c.message.edit_text.call_args[0][0]

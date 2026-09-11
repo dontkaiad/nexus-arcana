@@ -12,12 +12,13 @@ from datetime import date, datetime, timedelta, timezone
 from typing import Any, Awaitable, Callable, Dict, Optional
 
 from aiogram import BaseMiddleware, F, Router
-from aiogram.filters import Command
+from aiogram.filters import Command, CommandObject
 from aiogram.types import (
     CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message, TelegramObject,
 )
 
 from core.auth_grants import booking_role
+from core import login_tokens as login_tokens_mod
 from core.booking.busy import busy_intervals, merge_intervals
 from core.booking.linkage import link_booking, unlink_booking
 from core.booking.repo import (
@@ -118,8 +119,36 @@ def _slots_kb(ctx: str, slots) -> InlineKeyboardMarkup:
 
 # ── /start ──────────────────────────────────────────────────────────────────
 
+def _login_kb(token: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text="✅ Да, это я", callback_data=f"z:login_ok:{token}"),
+        InlineKeyboardButton(text="❌ Не я", callback_data=f"z:login_no:{token}"),
+    ]])
+
+
 @router.message(Command("start"))
-async def cmd_start(msg: Message, role: str = "guest") -> None:
+async def cmd_start(msg: Message, command: CommandObject = None, role: str = "guest") -> None:
+    # #23 follow-up: /start login_<token> deep link from login.heylark.dev —
+    # Заря подтверждает вход вместо номера телефона в Telegram Login Widget.
+    payload = (command.args if command else None) or ""
+    if payload.startswith("login_"):
+        token = payload[len("login_"):]
+        pending = await login_tokens_mod.get_pending(token)
+        if pending is None:
+            await msg.answer("⚠️ Ссылка на вход не найдена — попробуй войти заново на сайте.")
+            return
+        if pending["status"] == "expired":
+            await msg.answer("⏱ Ссылка на вход устарела — обнови страницу логина и попробуй снова.")
+            return
+        if pending["status"] != "pending":
+            await msg.answer("Эта ссылка уже использована.")
+            return
+        await msg.answer(
+            "🔐 Кто-то пытается войти на heylark.dev с твоего аккаунта.\n"
+            "Это ты?",
+            reply_markup=_login_kb(token),
+        )
+        return
     if role == "admin":
         await msg.answer(
             "⭐ <b>Zarya</b> — пульт букинга.\n"
@@ -353,6 +382,28 @@ async def on_cancel(call: CallbackQuery, role: str = "guest", tg_id: int = 0) ->
             f"❌ <b>{b.requester_name}</b> отменил(а) бронь · {when}", bot=call.bot
         )
     await call.answer("Отменено")
+
+
+# ── /start login_<token> confirm/deny ────────────────────────────────────────
+
+@router.callback_query(F.data.startswith("z:login_ok:"))
+async def on_login_confirm(call: CallbackQuery, tg_id: int = 0) -> None:
+    token = call.data.split(":", 2)[2]
+    ok = await login_tokens_mod.approve(token, tg_id)
+    if not ok:
+        await call.message.edit_text("⚠️ Ссылка уже неактуальна.")
+        await call.answer()
+        return
+    await call.message.edit_text("✅ Вход подтверждён — вернись на сайт, там уже пустило.")
+    await call.answer()
+
+
+@router.callback_query(F.data.startswith("z:login_no:"))
+async def on_login_deny(call: CallbackQuery, tg_id: int = 0) -> None:
+    token = call.data.split(":", 2)[2]
+    await login_tokens_mod.deny(token, tg_id)
+    await call.message.edit_text("❌ Вход отклонён.")
+    await call.answer()
 
 
 @router.message(Command("bookings"))
