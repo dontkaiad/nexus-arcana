@@ -45,6 +45,14 @@ async function _raw(method, path, { body, headers = {}, idempotencyKey } = {}) {
     body: body !== undefined ? JSON.stringify(body ?? {}) : undefined,
   })
   if (!r.ok) {
+    // #222: браузерный доступ (core.heylark.dev) без Telegram initData и без
+    // валидной hl_session-куки — не показываем голый JSON 401, а уводим на
+    // единый SSO-логин. Внутри настоящего Telegram Mini App initData всегда
+    // есть, там 401 (и тем более 403 — не тот tg_id) остаётся обычной ошибкой.
+    if (r.status === 401 && !getInitData()) {
+      window.location.href = 'https://login.heylark.dev/?next=' + encodeURIComponent(window.location.href)
+      return new Promise(() => {}) // навигация уже пошла — не резолвим, чтобы UI не мигнул ошибкой
+    }
     const text = await r.text().catch(() => '')
     throw new HttpError(r.status, r.statusText, text)
   }
