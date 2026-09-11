@@ -17,7 +17,7 @@ from typing import Optional
 
 from fastapi import APIRouter, Cookie, Depends, Header, HTTPException, Query, Request
 from fastapi.responses import Response
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from core.auth_grants import booking_role
 from core.booking.busy import BusyInterval, busy_intervals, merge_intervals
@@ -457,7 +457,10 @@ async def booking_cancel(token: str, tg_id: int = Depends(current_user_id)) -> d
 
 class AvailBody(BaseModel):
     context: str = "friends"
-    weekday: int = Field(ge=0, le=6)
+    # #232: ровно одно из двух — weekday (повторяется каждую неделю) или
+    # specific_date (разовое окно на конкретную дату, "YYYY-MM-DD").
+    weekday: Optional[int] = Field(default=None, ge=0, le=6)
+    specific_date: Optional[str] = None
     start_time: str          # "HH:MM"
     end_time: str
     tz: str = "Europe/Moscow"
@@ -467,6 +470,12 @@ class AvailBody(BaseModel):
     buffer_before_min: int = 0
     buffer_after_min: int = 0
     active: bool = True
+
+    @model_validator(mode="after")
+    def _exactly_one_day_kind(self) -> "AvailBody":
+        if (self.weekday is None) == (self.specific_date is None):
+            raise ValueError("укажи ровно одно: weekday или specific_date")
+        return self
 
 
 class MeetingTypeBody(BaseModel):

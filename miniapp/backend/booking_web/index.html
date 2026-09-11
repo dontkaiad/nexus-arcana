@@ -485,13 +485,20 @@ function adminSections(){
     <div class="stack" id="reqBox">…</div>
   </div></details>
   <details class="glass sec"><summary>🗓 Когда я свободна</summary><div class="body">
-    <p class="hint">окна по дням недели — из них считаются слоты для записи</p>
+    <p class="hint">повторяются каждую неделю по дню недели — из них считаются слоты для записи</p>
     <div class="stack" id="winBox">…</div>
     <div class="form">
       <div class="two">${dd("w_ctx",[["friends","для встреч"],["arcana","для раскладов"]],"friends")}
         ${dd("w_wd",DOW.map((d,i)=>[String(i),d]),"0")}</div>
       <div class="two">${ddTime("w_s","14:00")}${ddTime("w_e","20:00")}</div>
-      <button class="primary mini" id="w_add">＋ добавить окно</button>
+      <button class="primary mini" id="w_add">＋ добавить окно (каждую неделю)</button>
+    </div>
+    <p class="hint" style="margin-top:12px">или разово — на конкретную дату, без повтора</p>
+    <div class="form">
+      <div class="two">${dd("wd_ctx",[["friends","для встреч"],["arcana","для раскладов"]],"friends")}
+        ${ddDate("wd_date","")}</div>
+      <div class="two">${ddTime("wd_s","14:00")}${ddTime("wd_e","20:00")}</div>
+      <button class="primary mini" id="wd_add">＋ добавить окно (разово)</button>
     </div>
   </div></details>
   <details class="glass sec"><summary>☕ Типы встреч</summary><div class="body">
@@ -597,6 +604,13 @@ function wireAdmin(){
         start_time:ddVal("w_s"),end_time:ddVal("w_e")})});
     toast("окно добавлено");winBox();load().then(gridR);
   }catch(e){toast("не вышло: "+e.message);}};
+  $("#wd_add").onclick=async()=>{try{
+    const dt=ddVal("wd_date"); if(!dt){toast("выбери дату");return;}
+    await api("/availability",{method:"POST",headers:{"content-type":"application/json"},
+      body:JSON.stringify({context:ddVal("wd_ctx"),specific_date:dt,
+        start_time:ddVal("wd_s"),end_time:ddVal("wd_e")})});
+    toast("разовое окно добавлено");winBox();load().then(gridR);
+  }catch(e){toast("не вышло: "+e.message);}};
   $("#t_add").onclick=async()=>{try{
     await api("/meeting-types",{method:"POST",headers:{"content-type":"application/json"},
       body:JSON.stringify({title:$("#t_title").value,slug:$("#t_slug").value,
@@ -627,7 +641,7 @@ async function dec(id,a){try{await api(`/requests/${id}/${a}`,{method:"POST"});t
 async function winBox(){const el=$("#winBox");try{
   const d=await api("/availability");st.windows=d.windows;
   el.innerHTML = d.windows.length ? d.windows.map(w=>`<div class="item"><div class="top">
-    <span>${DOW[w.weekday]} ${w.start_time}–${w.end_time} · ${w.context==="arcana"?"расклады":"встречи"}</span>
+    <span>${w.weekday!=null?DOW[w.weekday]+" · каждую неделю":mskDate(w.specific_date)+" · разово"} ${w.start_time}–${w.end_time} · ${w.context==="arcana"?"расклады":"встречи"}</span>
     <button class="mini" data-d="${w.id}">✕</button></div></div>`).join("")
     : `<div class="empty">Нет окон — добавь первое, и друзья смогут записываться 👇</div>`;
   el.querySelectorAll("[data-d]").forEach(b=>b.onclick=async()=>{await api("/availability/"+b.dataset.d,{method:"DELETE"});winBox();load().then(gridR);});

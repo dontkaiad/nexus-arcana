@@ -1,6 +1,9 @@
 """tests/test_booking_slots.py — core.booking.slots.free_slots (#23 B2 / ADR-0026).
 
-In-memory SQLite; availability windows → slots, minus busy, minus notice/advance.
+In-memory SQLite. Two algorithms by context (#233): "arcana" (guest/public) —
+availability windows → slots, minus busy, minus notice/advance, тестируются
+здесь как раньше. "friends" (also admin) — no manual windows, any free hour
+is bookable — see the TestFriendsAnyTime class below.
 """
 from __future__ import annotations
 
@@ -48,7 +51,7 @@ def _make_engine():
             "start_at TEXT NOT NULL, end_at TEXT NOT NULL, reason TEXT DEFAULT '')"))
         c.execute(sa.text(
             "CREATE TABLE booking_availability (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id TEXT DEFAULT '', "
-            "context TEXT NOT NULL, weekday INTEGER NOT NULL, start_time TEXT NOT NULL, end_time TEXT NOT NULL, "
+            "context TEXT NOT NULL, weekday INTEGER, specific_date TEXT, start_time TEXT NOT NULL, end_time TEXT NOT NULL, "
             "tz TEXT NOT NULL DEFAULT 'Europe/Moscow', slot_minutes INTEGER NOT NULL DEFAULT 60, "
             "min_notice_hours INTEGER NOT NULL DEFAULT 12, max_advance_days INTEGER NOT NULL DEFAULT 60, "
             "buffer_before_min INTEGER NOT NULL DEFAULT 0, buffer_after_min INTEGER NOT NULL DEFAULT 0, "
@@ -57,7 +60,7 @@ def _make_engine():
 
 
 def _add_window(eng, **kw):
-    kw.setdefault("user_id", "u1"); kw.setdefault("context", "friends")
+    kw.setdefault("user_id", "u1"); kw.setdefault("context", "arcana")
     kw.setdefault("tz", "+03:00"); kw.setdefault("slot_minutes", 60)
     kw.setdefault("min_notice_hours", 12); kw.setdefault("max_advance_days", 60)
     kw.setdefault("buffer_before_min", 0); kw.setdefault("buffer_after_min", 0)
@@ -67,7 +70,7 @@ def _add_window(eng, **kw):
         c.execute(sa.text(f"INSERT INTO booking_availability ({cols}) VALUES ({ph})"), kw)
 
 
-async def _run(eng, d_from=date(2026, 9, 14), d_to=date(2026, 9, 14), ctx="friends"):
+async def _run(eng, d_from=date(2026, 9, 14), d_to=date(2026, 9, 14), ctx="arcana"):
     return await free_slots("u1", ctx, day_from=d_from, day_to=d_to, now=NOW, engine=eng)
 
 
@@ -109,7 +112,7 @@ async def test_min_notice_cuts_near_slots():
     eng = _make_engine()
     _add_window(eng, weekday=0, start_time="09:00", end_time="23:00", min_notice_hours=12)
     # now = 2026-09-14 06:00 UTC → notice cut 18:00 UTC → only slots >= 18:00 UTC
-    slots = await free_slots("u1", "friends", day_from=date(2026, 9, 14), day_to=date(2026, 9, 14),
+    slots = await free_slots("u1", "arcana", day_from=date(2026, 9, 14), day_to=date(2026, 9, 14),
                              now=datetime(2026, 9, 14, 6, 0, tzinfo=UTC), engine=eng)
     assert slots and min(s.start.hour for s in slots) >= 18
 
@@ -147,3 +150,51 @@ async def test_buffer_widens_busy_check():
     # 11:00 (ends 12:00, +45m buffer → 12:45) hits the 12:40 block → killed
     # 12:00 hits directly → killed.  13:00 (starts 13:00, buffer_before 0) → free
     assert [s.start.hour for s in slots] == [13]
+
+
+# ── #233: friends/admin — любое свободное от дел время, без ручных окон ──────
+
+@pytest.mark.asyncio
+async def test_friends_no_windows_needed_at_all():
+    eng = _make_engine()  # no booking_availability rows at all
+    slots = await free_slots("u1", "friends", day_from=date(2026, 9, 14),
+                              day_to=date(2026, 9, 14), now=NOW, engine=eng)
+    assert len(slots) > 0  # a whole free day → hourly slots, no windows configured
+
+
+@pytest.mark.asyncio
+async def test_friends_busy_task_blocks_its_hour():
+    eng = _make_engine()
+    ns = None
+    with eng.connect() as c:
+        ns = c.execute(sa.text("SELECT id FROM task_status WHERE code='Not started'")).scalar()
+    with eng.begin() as c:
+        c.execute(sa.text("INSERT INTO tasks (title, deadline, status_id, user_id) VALUES "
+                          "('созвон', :d, :s, 'u1')"),
+                  {"d": _iso(datetime(2026, 9, 14, 12, 0, tzinfo=UTC)), "s": ns})
+    slots = await free_slots("u1", "friends", day_from=date(2026, 9, 14),
+                              day_to=date(2026, 9, 14), now=NOW, engine=eng)
+    starts = [s.start.hour for s in slots]
+    assert 12 not in starts and 11 in starts and 13 in starts
+
+
+@pytest.mark.asyncio
+async def test_friends_min_notice_cuts_near_hours():
+    eng = _make_engine()
+    now = datetime(2026, 9, 14, 6, 0, tzinfo=UTC)
+    slots = await free_slots("u1", "friends", day_from=date(2026, 9, 14),
+                              day_to=date(2026, 9, 14), now=now, engine=eng)
+    # _FRIENDS_MIN_NOTICE_HOURS = 2 → nothing before 08:00 UTC
+    assert all(s.start.hour >= 8 for s in slots)
+
+
+@pytest.mark.asyncio
+async def test_friends_ignores_configured_windows():
+    """Окна, настроенные под context='arcana', не влияют на друзей — и
+    наоборот (полное разделение моделей, #233)."""
+    eng = _make_engine()
+    _add_window(eng, weekday=0, start_time="14:00", end_time="15:00", context="arcana")
+    slots = await free_slots("u1", "friends", day_from=date(2026, 9, 14),
+                              day_to=date(2026, 9, 14), now=NOW, engine=eng)
+    # friends видит куда больше одного часа — окно arcana тут ни при чём
+    assert len(slots) > 1

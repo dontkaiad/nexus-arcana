@@ -19,7 +19,7 @@ def _make_engine():
     with eng.begin() as c:
         c.execute(sa.text(
             "CREATE TABLE booking_availability (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id TEXT DEFAULT '', "
-            "context TEXT NOT NULL, weekday INTEGER NOT NULL, start_time TEXT NOT NULL, end_time TEXT NOT NULL, "
+            "context TEXT NOT NULL, weekday INTEGER, specific_date TEXT, start_time TEXT NOT NULL, end_time TEXT NOT NULL, "
             "tz TEXT NOT NULL DEFAULT 'Europe/Moscow', slot_minutes INTEGER NOT NULL DEFAULT 60, "
             "min_notice_hours INTEGER NOT NULL DEFAULT 12, max_advance_days INTEGER NOT NULL DEFAULT 60, "
             "buffer_before_min INTEGER NOT NULL DEFAULT 0, buffer_after_min INTEGER NOT NULL DEFAULT 0, "
@@ -53,6 +53,19 @@ async def test_availability_crud():
     assert await repo.list_availability("u1", engine=eng) == []
     # delete of a non-owner row → False
     assert await repo.del_availability(999, "u1", engine=eng) is False
+
+
+@pytest.mark.asyncio
+async def test_availability_specific_date_coerced_from_iso_string():
+    """#232: разовое окно на дату — specific_date идёт строкой "YYYY-MM-DD"
+    с фронта, repo коэрсит в date() как и start_time/end_time."""
+    eng = _make_engine()
+    row = await repo.add_availability("u1", {
+        "context": "arcana", "specific_date": "2026-09-16",
+        "start_time": "12:00", "end_time": "18:00",
+    }, engine=eng)
+    assert row["id"] and str(row["specific_date"]) == "2026-09-16"
+    assert row["weekday"] is None
 
 
 @pytest.mark.asyncio

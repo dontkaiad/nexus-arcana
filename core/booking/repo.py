@@ -11,7 +11,7 @@ from __future__ import annotations
 import asyncio
 import secrets
 from dataclasses import dataclass
-from datetime import datetime, time, timezone
+from datetime import date, datetime, time, timezone
 from typing import List, Optional
 
 import sqlalchemy as sa
@@ -188,9 +188,9 @@ async def set_booking_link(
 # Thin dict-in/dict-out CRUD — the owner-only admin API is the only caller.
 
 _AVAIL_FIELDS = {
-    "context", "weekday", "start_time", "end_time", "tz", "slot_minutes",
-    "min_notice_hours", "max_advance_days", "buffer_before_min",
-    "buffer_after_min", "active",
+    "context", "weekday", "specific_date", "start_time", "end_time", "tz",
+    "slot_minutes", "min_notice_hours", "max_advance_days",
+    "buffer_before_min", "buffer_after_min", "active",
 }
 _MT_FIELDS = {
     "context", "slug", "title", "duration_min", "location_kind",
@@ -243,6 +243,9 @@ def _coerce_time(vals: dict) -> dict:
         if isinstance(v, str) and ":" in v:
             hh, mm = v.split(":")[:2]
             out[k] = time(int(hh), int(mm))
+    v = out.get("specific_date")
+    if isinstance(v, str) and v:
+        out["specific_date"] = date.fromisoformat(v)
     return out
 
 

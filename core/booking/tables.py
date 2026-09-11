@@ -6,7 +6,7 @@ Update both in the same PR.
 from __future__ import annotations
 
 from sqlalchemy import (
-    BigInteger, Boolean, Column, ForeignKey, Integer, MetaData, Numeric,
+    BigInteger, Boolean, Column, Date, ForeignKey, Integer, MetaData, Numeric,
     SmallInteger, Table, Text, Time, TIMESTAMP, text,
 )
 
@@ -19,7 +19,10 @@ booking_availability = Table(
     Column("id", BigInteger, primary_key=True, autoincrement=True),
     Column("user_id", Text, nullable=False, server_default=""),
     Column("context", Text, nullable=False),
-    Column("weekday", SmallInteger, nullable=False),  # 0=Mon .. 6=Sun
+    # #232: ровно один из weekday / specific_date — recurring vs one-off
+    # (CHECK booking_availability_day_xor). weekday: 0=Mon .. 6=Sun.
+    Column("weekday", SmallInteger, nullable=True),
+    Column("specific_date", Date, nullable=True),
     Column("start_time", Time, nullable=False),
     Column("end_time", Time, nullable=False),
     Column("tz", Text, nullable=False, server_default="Europe/Moscow"),
