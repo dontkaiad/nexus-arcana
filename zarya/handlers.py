@@ -177,7 +177,7 @@ async def cmd_start(msg: Message, command: CommandObject = None, role: str = "gu
         return
     if role == "admin":
         await msg.answer(
-            "⭐ Привет, это я! Держу твой календарь под контролем.\n\n"
+            "⭐ Привет, это я! Держу твой календарь в идеальном порядке 💅\n\n"
             "/requests — заявки, которые ждут подтверждения\n"
             "/bookings — что уже подтверждено (можно отменить)\n"
             "/slots — глянуть свободное время\n"
