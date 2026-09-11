@@ -188,3 +188,14 @@ async def test_help_friend_no_admin_commands():
     text = m.answer.call_args[0][0]
     assert "/slots" in text
     assert "/requests" not in text
+
+
+# ── fallback: unrecognized text никогда не пропадает молча (#226) ───────────
+
+@pytest.mark.asyncio
+async def test_unrecognized_text_gets_a_reply():
+    from zarya.handlers import on_unrecognized
+    m = _msg()
+    await on_unrecognized(m, role="guest")
+    m.answer.assert_awaited_once()
+    assert "/help" in m.answer.call_args[0][0]

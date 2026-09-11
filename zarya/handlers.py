@@ -446,3 +446,13 @@ async def cmd_bookings(msg: Message, role: str = "guest") -> None:
             + (f"\n💬 {b.note}" if b.note else ""),
             reply_markup=_cancel_kb(b.id),
         )
+
+
+# ── fallback: любой текст, что не подошёл ни под одно из выше — ЗАРЕГИСТРИРОВАН
+# ПОСЛЕДНИМ (aiogram матчит хендлеры по порядку сверху вниз, первый матч выигрывает).
+# Без этого в группе (где Telegram и так фильтрует по privacy-mode — сюда доходит
+# только команда/@упоминание/реплай боту) любое сообщение мимо wants_slots()
+# просто пропадало без ответа. #226.
+@router.message(F.text)
+async def on_unrecognized(msg: Message, role: str = "guest") -> None:
+    await msg.answer("Не поняла 🙈 Спроси «когда у Кай окно» или напиши /help — покажу что умею.")

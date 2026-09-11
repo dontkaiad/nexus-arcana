@@ -2839,6 +2839,28 @@ def _task_score(task_title: str, hint_words) -> int:
     return sum(1 for w in hint_words if w in title_low)
 
 
+async def find_task_matches_for_finance(text: str, user_id: str, limit: int = 3):
+    """Открытые задачи, чьё название пересекается словами с text — линковка
+    трата/доход ↔ задача (issue: «продала телевизор 4000» должен предложить
+    закрыть задачу «продать телевизор», а не тихо записать деньги отдельно).
+    Используется классификатором для kind in (expense, income). Возвращает
+    [(task_id, title), ...] по убыванию скора, максимум limit штук."""
+    hint_words = _hint_words(text)
+    if not hint_words:
+        return []
+    tasks = await _repo.active(user_id=user_id)
+    scored = []
+    for t in tasks:
+        title = t.title
+        if not title:
+            continue
+        score = _task_score(title, hint_words)
+        if score > 0:
+            scored.append((score, t.id, title))
+    scored.sort(key=lambda x: x[0], reverse=True)
+    return [(tid, title) for _, tid, title in scored[:limit]]
+
+
 _CANCEL_STOP_WORDS = {
     "отмени", "отменить", "отмена", "отменил", "отменила", "отменили",
     "отмените", "сними", "снять", "удали", "убери", "задачу", "задачи", "задач",
@@ -3079,6 +3101,44 @@ async def cb_done_multi_cancel(call: CallbackQuery) -> None:
     _done_multi_tasks.pop(uid, None)
     _done_multi_selected.pop(uid, None)
     await call.message.edit_reply_markup()
+
+
+# ── Трата/доход ↔ задача (find_task_matches_for_finance) ────────────────────
+
+@router.callback_query(F.data.startswith("task_cross_") & (F.data != "task_cross_no"))
+async def on_task_cross(query: CallbackQuery) -> None:
+    task_id = query.data[len("task_cross_"):]
+    uid = query.from_user.id
+    task = await _repo.retrieve_page(task_id)
+    if not task:
+        await query.answer("❓ Уже закрыта или не найдена.")
+        try:
+            await query.message.edit_reply_markup(reply_markup=None)
+        except Exception:
+            pass
+        return
+    result = await _repo.set_status(task_id, "Done")
+    if not result:
+        await query.answer("⚠️ Не получилось.")
+        return
+    _remove_task_jobs(task_id)
+    streak_line = await _update_streak_line(uid, task_id)
+    # NB: деньги уже записаны классификатором (это и вызвало кнопку) —
+    # _expense_from_note_on_done тут НЕ вызываем, иначе задвоим транзакцию.
+    await query.answer(f"✅ {task.title} закрыта")
+    try:
+        await query.message.edit_text(f"✅ <b>{task.title}</b> — закрыта{streak_line}", parse_mode="HTML")
+    except Exception:
+        pass
+
+
+@router.callback_query(F.data == "task_cross_no")
+async def on_task_cross_no(query: CallbackQuery) -> None:
+    await query.answer("👌")
+    try:
+        await query.message.edit_reply_markup(reply_markup=None)
+    except Exception:
+        pass
 
 
 # ── Edit record (fuzzy) ────────────────────────────────────────────────────────

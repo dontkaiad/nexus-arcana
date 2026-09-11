@@ -1345,6 +1345,27 @@ async def process_item(data: Dict[str, Any], original_text: str, msg, clarify: d
                     await handle_windfall_income(msg, amount, category, title, user_id)
                 except Exception as e:
                     logger.error("windfall income handler error: %s", e, exc_info=True)
+            # Предложить закрыть подходящую открытую задачу — "продала телевизор
+            # 4000" должен спросить какую из "продать телевизор большой"/"на кухне"
+            # закрыть, а не тихо записать деньги отдельно от задач (для обоих типов).
+            try:
+                from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+                from nexus.handlers.tasks import find_task_matches_for_finance
+                task_matches = await find_task_matches_for_finance(title, user_id)
+                if task_matches:
+                    buttons = [
+                        [InlineKeyboardButton(text=f"✅ {t_title}", callback_data=f"task_cross_{t_id}")]
+                        for t_id, t_title in task_matches
+                    ]
+                    buttons.append([InlineKeyboardButton(text="Нет", callback_data="task_cross_no")])
+                    await msg.answer(
+                        "✅ Похоже на задачу — закрыть какую-то из них?\n" +
+                        "\n".join(f"◻️ {t_title}" for _, t_title in task_matches),
+                        reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons),
+                        parse_mode="HTML",
+                    )
+            except Exception as e:
+                logger.debug("task cross-off check: %s", e)
             return f"{icon} <b>{sign}{amount:,.0f}₽</b> · <b>{title}</b>\n🏷 {category} <i>{source}</i>"
         
         logged = await log_error(original_text, "processing_error", _classify_last_raw,
