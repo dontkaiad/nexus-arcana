@@ -65,13 +65,13 @@ gains `scheduled`), `a8b9c0d1e2f3` (`booking_availability.specific_date`,
 #232), `b1c2d3e4f5a6` (`tasks.duration_min`/`shared`, `works.duration_min`,
 `nexus_lists.shared`, #241/#242). SQLAlchemy Core mirror: `core/booking/tables.py`.
 
-### `booking_availability` — arcana-context windows only (see above)
+### `booking_availability` — windows, both contexts (see above)
 
 | Column | Type | Notes |
 |---|---|---|
 | `id` | BigInteger | PK |
 | `user_id` | Text | owner |
-| `context` | Text | `'friends'` \| `'arcana'` — in practice only `arcana` rows drive slots |
+| `context` | Text | `'friends'` \| `'arcana'` — each context's slots come only from its own rows |
 | `weekday` | SmallInteger | nullable, 0=Mon..6=Sun — XOR with `specific_date` (CHECK `booking_availability_day_xor`, #232) |
 | `specific_date` | Date | nullable — one-off window, XOR with `weekday` |
 | `start_time` / `end_time` | Time | window bounds |
