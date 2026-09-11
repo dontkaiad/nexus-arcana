@@ -10,7 +10,7 @@ import pytest
 import sqlalchemy as sa
 from sqlalchemy.pool import StaticPool
 
-from core.auth_grants import booking_role, grant_role, upsert_booking_grant
+from core.auth_grants import booking_role, get_display_name, grant_role, upsert_booking_grant
 
 OWNER_A, OWNER_B = 111, 222
 FRIEND = 333
@@ -89,3 +89,32 @@ async def test_upsert_grant_creates_and_updates(_cfg):
         n = c.execute(sa.text("SELECT COUNT(*) FROM grants WHERE tg_id=:t AND app='booking'"),
                       {"t": FRIEND}).scalar()
     assert n == 1
+
+
+# ── get_display_name (#237) ──────────────────────────────────────────────────
+
+def _make_people_engine():
+    eng = sa.create_engine("sqlite:///:memory:",
+                           connect_args={"check_same_thread": False}, poolclass=StaticPool)
+    with eng.begin() as c:
+        c.execute(sa.text("CREATE TABLE people (tg_id BIGINT PRIMARY KEY, display_name TEXT)"))
+        c.execute(sa.text("INSERT INTO people VALUES (:t, :n)"), {"t": FRIEND, "n": "Мишган Роман"})
+    return eng
+
+
+@pytest.mark.asyncio
+async def test_get_display_name_found():
+    eng = _make_people_engine()
+    assert await get_display_name(FRIEND, engine=eng) == "Мишган Роман"
+
+
+@pytest.mark.asyncio
+async def test_get_display_name_missing_row_returns_none():
+    eng = _make_people_engine()
+    assert await get_display_name(STRANGER, engine=eng) is None
+
+
+@pytest.mark.asyncio
+async def test_get_display_name_no_engine_returns_none():
+    with patch("core.auth_grants.get_auth_engine", return_value=None):
+        assert await get_display_name(FRIEND) is None

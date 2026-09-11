@@ -29,16 +29,15 @@ async def test_get_limits_reads_pg_ignoring_env(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_calc_free_remaining_not_gated_by_env(monkeypatch):
+    # #237: _calc_free_remaining теперь тонкая обёртка над
+    # core.budget.discretionary_free — читает лимиты из PG через get_limits(),
+    # который сам игнорирует NOTION_DB_MEMORY (test_get_limits_reads_pg_ignoring_env
+    # выше). Здесь просто проверяем что обёртка доходит до результата, когда
+    # лимиты настроены, независимо от env.
     monkeypatch.delenv("NOTION_DB_MEMORY", raising=False)
     from nexus.handlers import finance
-    budget = {"постоянные": [{"amount": 1000}], "цели": [{"saving": 0}],
-              "доходы": [], "долги": [], "лимиты": []}
-    # income → 5000, expenses → []  (раньше gate возвращал None ещё до этого)
-    income = [SimpleNamespace(amount=5000)]
-    with patch.object(finance, "_load_budget_data", AsyncMock(return_value=budget)), \
-         patch.object(finance._repo, "query_records",
-                      AsyncMock(side_effect=[income, []])):
+    with patch("core.budget.get_limits", AsyncMock(return_value={"продукты": 15000.0})), \
+         patch("core.repos.pg_finance_repo.PgNexusBudgetRepo.query", AsyncMock(return_value=[])):
         res = await finance._calc_free_remaining("u")
     assert res is not None   # дошли до расчёта — gate на NOTION_DB_MEMORY снят
-    # BUDGET_SPEC: 5000 income − 1000 fixed − 0 debt − 0 expenses = 4000
-    assert res[0] == 4000.0
+    assert res[0] == 15000.0

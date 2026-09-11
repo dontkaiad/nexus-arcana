@@ -40,6 +40,14 @@ grants = Table(
     Column("updated_at", Text, nullable=False),
 )
 
+# Общий реестр отображаемых имён — НЕ app-scoped (та же auth DB, владелец
+# authsvc; см. heylark_auth/tg_auth.py в heylark-infra, которая пишет сюда).
+people = Table(
+    "people", _metadata,
+    Column("tg_id", BigInteger, primary_key=True),
+    Column("display_name", Text),
+)
+
 _auth_engine: Optional[Engine] = None
 
 
@@ -88,6 +96,28 @@ async def booking_role(tg_id: int, *, engine: Optional[Engine] = None) -> str:
     if role == "admin":
         return "admin"
     return "friend" if role else "guest"
+
+
+def _display_name_sync(engine: Engine, tg_id: int) -> Optional[str]:
+    with engine.connect() as conn:
+        row = conn.execute(
+            select(people.c.display_name).where(people.c.tg_id == tg_id)
+        ).first()
+    return (row[0] or "").strip() or None if row else None
+
+
+async def get_display_name(tg_id: int, *, engine: Optional[Engine] = None) -> Optional[str]:
+    """Имя, которое Кай сама вписала для tg_id (people.display_name), иначе None.
+    Booking-флоу (#237) предпочитает его тегу/имени из Telegram, чтобы не
+    путать друзей с одинаковыми/похожими никами."""
+    eng = engine or get_auth_engine()
+    if eng is None:
+        return None
+    try:
+        return await asyncio.to_thread(_display_name_sync, eng, tg_id)
+    except Exception as e:
+        logger.warning("get_display_name(%s) failed: %s", tg_id, e)
+        return None
 
 
 def _upsert_grant_sync(engine: Engine, tg_id: int, app: str, role: str, status: str) -> None:

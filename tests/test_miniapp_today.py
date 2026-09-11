@@ -201,8 +201,7 @@ def test_today_progress_total_excludes_no_date_tasks(client):
     with patch("miniapp.backend.routes.today._tasks_repo.active", AsyncMock(return_value=tasks)), \
          patch("miniapp.backend.routes.today._budget_repo.query", AsyncMock(return_value=[])), \
          patch("miniapp.backend.routes.today.budget_day_limit_from_plan", AsyncMock(return_value=0)), \
-         patch("miniapp.backend.routes.today.get_limits", AsyncMock(return_value={})), \
-         patch("miniapp.backend.routes.today._budget_payday", AsyncMock(return_value=1)), \
+         patch("core.budget.get_limits", AsyncMock(return_value={})), \
          patch("miniapp.backend.routes.today.ask_claude", AsyncMock(return_value="tip")), \
          patch("miniapp.backend.routes.today.today_user_tz",
                AsyncMock(return_value=(_today_local_date(tz), tz))), \
@@ -288,8 +287,9 @@ def _today_ctx(tz=3, expenses_by_from=None, limits=None, day_limit=5000, payday=
         patch("miniapp.backend.routes.today._tasks_repo.active", AsyncMock(return_value=[])),
         patch("miniapp.backend.routes.today._budget_repo.query", AsyncMock(side_effect=fake_query)),
         patch("miniapp.backend.routes.today.budget_day_limit_from_plan", AsyncMock(return_value=day_limit)),
-        patch("miniapp.backend.routes.today.get_limits", AsyncMock(return_value=(limits or {}))),
-        patch("miniapp.backend.routes.today._budget_payday", AsyncMock(return_value=payday)),
+        patch("core.budget.get_limits", AsyncMock(return_value=(limits or {}))),
+        patch("core.budget._budget_payday", AsyncMock(return_value=payday)),
+        patch("core.repos.pg_finance_repo.PgNexusBudgetRepo.query", AsyncMock(side_effect=fake_query)),
         patch("miniapp.backend.routes.today.ask_claude", AsyncMock(return_value="tip")),
         patch("miniapp.backend.routes.today.today_user_tz",
               AsyncMock(return_value=(_today_local_date(tz), tz))),
@@ -347,8 +347,10 @@ def test_discretionary_free_subtracts_period_spending(client):
     assert b["discretionary_free"] == 14350
 
 
-def test_discretionary_free_ignores_parallel_categories(client):
-    """Транзакция 9313₽ категории 📦 Разовые НЕ влияет на «свободно» вообще."""
+def test_discretionary_free_subtracts_one_off_too(client):
+    """#237: 📦 Разовые ТЕПЕРЬ вычитается из «свободно» — раньше нигде не
+    вычиталась (ни тут, ни в боте), отчего Кай видела завышенный остаток
+    относительно реальной карты. 16350 − 9313 = 7037."""
     tz = 3
     today = _today_local_iso(tz)
     period_start = today[:8] + "01"
@@ -364,7 +366,7 @@ def test_discretionary_free_ignores_parallel_categories(client):
             st.enter_context(p)
         b = client.get("/api/today").json()["budget"]
 
-    assert b["discretionary_free"] == 16350   # без изменений
+    assert b["discretionary_free"] == 7037
 
 
 def test_spent_today_excludes_parallel_categories(client):

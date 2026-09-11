@@ -522,3 +522,47 @@ async def test_show_slots_specific_day_no_slots_says_no():
         await _show_slots(m, "admin")
     text = m.answer.call_args[0][0]
     assert "вторник" in text and "Не," in text
+
+
+# ── _do_book: display-name override (#237) ──────────────────────────────────
+
+def _booking_call(tg_id=777, full_name="random_nickname_42"):
+    c = SimpleNamespace()
+    c.from_user = SimpleNamespace(id=tg_id, full_name=full_name)
+    c.message = SimpleNamespace(edit_text=AsyncMock(), chat=SimpleNamespace(type="private"))
+    c.bot = SimpleNamespace()
+    return c
+
+
+@pytest.mark.asyncio
+async def test_booking_uses_people_display_name_over_telegram_name():
+    from zarya.handlers import _do_book
+    from zarya.formatting import epoch as _epoch
+    future_ep = str(_epoch(datetime.now(timezone.utc) + timedelta(days=1)))
+    c = _booking_call()
+    fake_booking = SimpleNamespace(id=1)
+    with patch("zarya.handlers._owner_user_id", AsyncMock(return_value="uid")), \
+         patch("zarya.handlers.busy_intervals", AsyncMock(return_value=[])), \
+         patch("core.auth_grants.get_display_name", AsyncMock(return_value="Мишган Роман")), \
+         patch("zarya.handlers.create_booking", AsyncMock(return_value=fake_booking)) as cb, \
+         patch("zarya.handlers._confirm_flow", AsyncMock()), \
+         patch("zarya.handlers._notify_owner", AsyncMock()):
+        await _do_book(c, "friends", future_ep, 1.0, "friend")
+    assert cb.call_args.kwargs["requester_name"] == "Мишган Роман"
+
+
+@pytest.mark.asyncio
+async def test_booking_falls_back_to_telegram_name_without_override():
+    from zarya.handlers import _do_book
+    from zarya.formatting import epoch as _epoch
+    future_ep = str(_epoch(datetime.now(timezone.utc) + timedelta(days=1)))
+    c = _booking_call(full_name="Вася с улицы")
+    fake_booking = SimpleNamespace(id=1)
+    with patch("zarya.handlers._owner_user_id", AsyncMock(return_value="uid")), \
+         patch("zarya.handlers.busy_intervals", AsyncMock(return_value=[])), \
+         patch("core.auth_grants.get_display_name", AsyncMock(return_value=None)), \
+         patch("zarya.handlers.create_booking", AsyncMock(return_value=fake_booking)) as cb, \
+         patch("zarya.handlers._confirm_flow", AsyncMock()), \
+         patch("zarya.handlers._notify_owner", AsyncMock()):
+        await _do_book(c, "friends", future_ep, 1.0, "friend")
+    assert cb.call_args.kwargs["requester_name"] == "Вася с улицы"

@@ -178,7 +178,7 @@ async def cmd_start(msg: Message, command: CommandObject = None, role: str = "gu
         return
     if role == "admin":
         await msg.answer(
-            "⭐ Привет, это я! Держу твой календарь в идеальном порядке 💅\n\n"
+            "⭐ Привет, это я! У Кай под контролем 💅\n\n"
             "/requests — заявки, которые ждут подтверждения\n"
             "/bookings — что уже подтверждено (можно отменить)\n"
             "/slots — глянуть свободное время\n"
@@ -187,7 +187,7 @@ async def cmd_start(msg: Message, command: CommandObject = None, role: str = "gu
         return
     who = "друг" if role == "friend" else "гость"
     await msg.answer(
-        f"⭐ Привет! Я Заря — веду календарь Кай.\n"
+        f"⭐ Привет! Я Заря — личная ассистентка Кай.\n"
         f"Сейчас ты у меня как <b>{who}</b>.\n\n"
         "Спроси «когда у Кай окно» или напиши /slots — покажу свободное время "
         "и помогу записаться. /help — если что-то непонятно."
@@ -206,12 +206,12 @@ async def cmd_help(msg: Message, role: str = "guest") -> None:
             "(там же настройки окон).\n\n"
             "Подтверждённым — напоминаю за сутки и за 2 часа, обеим сторонам. "
             "Отмена — кнопкой у брони, с обеих сторон.\n\n"
-            "И да, можешь просто поболтать со мной — не обязательно строго по календарю 💅"
+            "И вообще — можешь просто поболтать со мной, не только по делу 💅"
         )
         return
     who = "как другу" if role == "friend" else "как гостю"
     tail = (
-        "\n\nИ можно просто поболтать 💅 не только по календарю."
+        "\n\nИ можно просто поболтать 💅 не только по записи."
         if role == "friend" else ""
     )
     await msg.answer(
@@ -231,7 +231,7 @@ async def cmd_help(msg: Message, role: str = "guest") -> None:
 async def _show_slots(msg: Message, role: str) -> None:
     uid = await _owner_user_id()
     if not uid:
-        await msg.answer("Так, минутку — доступа к календарю Кай сейчас нет. Загляни чуть позже 💅")
+        await msg.answer("Так, минутку — данные Кай сейчас недоступны. Загляни чуть позже 💅")
         return
     ctx = _ctx_for(role)
     today = date.today()
@@ -344,7 +344,11 @@ async def _do_book(call: CallbackQuery, ctx: str, ep: str, hours: float, role: s
         return
 
     status = "confirmed" if ctx == "friends" else "pending"
-    name = (call.from_user.full_name or "").strip() or f"tg:{call.from_user.id}"
+    # #237: имя, которое Кай сама вписала (people.display_name) — вместо
+    # ника/имени в Telegram, чтобы не путать друзей.
+    from core.auth_grants import get_display_name
+    override_name = await get_display_name(call.from_user.id)
+    name = override_name or (call.from_user.full_name or "").strip() or f"tg:{call.from_user.id}"
     b = await create_booking(
         user_id=uid, context=ctx, start_at=start, end_at=end, status=status,
         hours=hours, requester_tg_id=call.from_user.id, requester_name=name,

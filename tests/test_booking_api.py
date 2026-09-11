@@ -147,6 +147,72 @@ def test_book_slot_conflict_409(_book_env):
     assert r.status_code == 409
 
 
+# ── #238: display-name override + личка владельцу для веб-брони ────────────
+
+def test_book_web_uses_people_display_name_not_tg_id(_book_env):
+    """Раньше веб-бронь без имени в форме сохраняла requester_name='tg:<id>' —
+    Кай видела только айдишник, даже для гранченного друга с именем в people."""
+    captured = {}
+
+    async def fake_create_booking(**kw):
+        captured.update(kw)
+        return _mk_booking(requester_name=kw.get("requester_name", ""))
+
+    with patch("miniapp.backend.routes.booking.booking_role", AsyncMock(return_value="friend")), \
+         patch("miniapp.backend.routes.booking.create_booking", AsyncMock(side_effect=fake_create_booking)), \
+         patch("core.auth_grants.get_display_name", AsyncMock(return_value="Мишган Роман")):
+        r = _book_env.post(
+            "/api/booking/book",
+            json={"context": "friends", "start": _FUT.isoformat(), "hours": 1},
+            headers={"X-Booking-Service-Token": "svc-secret", "X-Booking-As-Tg": "555001"},
+        )
+    assert r.status_code == 200
+    assert captured["requester_name"] == "Мишган Роман"
+
+
+def test_book_web_falls_back_to_tg_id_without_override(_book_env):
+    captured = {}
+
+    async def fake_create_booking(**kw):
+        captured.update(kw)
+        return _mk_booking(requester_name=kw.get("requester_name", ""))
+
+    with patch("miniapp.backend.routes.booking.booking_role", AsyncMock(return_value="friend")), \
+         patch("miniapp.backend.routes.booking.create_booking", AsyncMock(side_effect=fake_create_booking)), \
+         patch("core.auth_grants.get_display_name", AsyncMock(return_value=None)):
+        r = _book_env.post(
+            "/api/booking/book",
+            json={"context": "friends", "start": _FUT.isoformat(), "hours": 1},
+            headers={"X-Booking-Service-Token": "svc-secret", "X-Booking-As-Tg": "555001"},
+        )
+    assert r.status_code == 200
+    assert captured["requester_name"] == "tg:555001"
+
+
+def test_book_web_dms_every_owner_not_just_log_topic(_book_env):
+    """Раньше веб-бронь шла ТОЛЬКО в лог-топик — Кай видела запись только в
+    логах, ни разу лично в чате."""
+    with patch("miniapp.backend.routes.booking.booking_role", AsyncMock(return_value="friend")), \
+         patch("core.auth_grants.get_display_name", AsyncMock(return_value="Мишган Роман")), \
+         patch("core.config.config.allowed_ids", [111, 222]), \
+         patch("core.bot_notify.notify_user", AsyncMock(return_value=True)) as notify_mock:
+        r = _book_env.post(
+            "/api/booking/book",
+            json={"context": "friends", "start": _FUT.isoformat(), "hours": 1},
+            headers={"X-Booking-Service-Token": "svc-secret", "X-Booking-As-Tg": "555001"},
+        )
+    assert r.status_code == 200
+    # notify_user также шлёт подтверждение самому бронирующему (555001) —
+    # тут проверяем именно что ОБА owner-а из этого получили личку с именем.
+    dmed = {c.args[0] for c in notify_mock.await_args_list}
+    assert {111, 222} <= dmed
+    owner_calls = [c for c in notify_mock.await_args_list if c.args[0] in (111, 222)]
+    assert len(owner_calls) == 2
+    for c in owner_calls:
+        assert c.kwargs.get("bot") == "zarya"
+        assert "Мишган Роман" in c.args[1]
+
+
 def test_confirm_decline_owner_only():
     from miniapp.backend.auth import current_user_id
     with patch("miniapp.backend.routes.booking._owner_user_id", AsyncMock(return_value="uid-1")), \

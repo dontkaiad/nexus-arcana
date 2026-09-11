@@ -525,6 +525,71 @@ def _period_days_remaining(payday: int, tz_offset: int = 3) -> int:
     return max(1, (period_end - today_start).days)
 
 
+def _period_start_iso(payday: int, tz_offset: int) -> str:
+    """Начало текущего платёжного периода (payday → payday) по личному tz."""
+    now = datetime.now(_tz(timedelta(hours=tz_offset)))
+    if now.day >= payday:
+        y, m = now.year, now.month
+    elif now.month == 1:
+        y, m = now.year - 1, 12
+    else:
+        y, m = now.year, now.month - 1
+    import calendar as _cal
+    d = min(payday, _cal.monthrange(y, m)[1])
+    return "{:04d}-{:02d}-{:02d}".format(y, m, d)
+
+
+async def discretionary_free(user_id: str, tz_offset: int = 3):
+    """Единая величина «Свободных» — общая для бота (/budget) и Mini App
+    («Мой день»), #237 follow-up. Раньше бот считал свою версию (Доход −
+    Фикс − долг − дискреционные траты) и не вычитал 📦 Разовые вообще —
+    Mini App считал другую версию (Σ лимитов − траты по лимит-категориям), и
+    ТОЖЕ не трогал Разовые. Числа расходились (60к в боте vs 6к в приложении)
+    и оба завышали остаток относительно реальной карты, потому что реальные
+    разовые траты нигде не вычитались.
+
+        свободно = max(0, Σ дискреционных лимитов
+                          − Σ трат по лимит-категориям с начала периода
+                          − Σ фактических трат 📦 Разовые за период)
+
+    Возвращает (свободно, дней_до_конца_периода) или None — лимиты не
+    настроены, считать не из чего.
+    """
+    from core.repos.pg_finance_repo import PgNexusBudgetRepo
+    budget_repo = PgNexusBudgetRepo()
+
+    limits = await get_limits()
+    disc_total = sum(amt for link, amt in limits.items() if not is_parallel_limit(link))
+    if disc_total <= 0:
+        return None
+
+    payday = await _budget_payday()
+    days_remaining = _period_days_remaining(payday, tz_offset)
+    period_start = _period_start_iso(payday, tz_offset)
+    today_iso = datetime.now(_tz(timedelta(hours=tz_offset))).strftime("%Y-%m-%d")
+
+    try:
+        entries = await budget_repo.query(
+            date_from=period_start, date_to=today_iso, type_="💸 Расход",
+            page_size=1000, user_id=user_id,
+        )
+    except Exception as e:
+        logger.warning("discretionary_free: query failed: %s", e)
+        entries = []
+
+    disc_cats = set(LIMIT_CATEGORIES)
+    disc_spent = sum(
+        float(e.amount or 0) for e in entries
+        if (e.category or "") in disc_cats and not is_parallel_limit(e.category or "")
+    )
+    one_off_spent = sum(
+        float(e.amount or 0) for e in entries if (e.category or "").strip() == "📦 Разовые"
+    )
+
+    free = max(0.0, disc_total - disc_spent - one_off_spent)
+    return (free, days_remaining)
+
+
 async def budget_day_limit_from_plan(user_id: str, tz_offset: int = 3) -> int:
     """«Бюджет дня» — сколько можно тратить в день на повседневное.
 

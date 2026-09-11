@@ -313,7 +313,16 @@ async def booking_book(body: BookBody, p: Principal = Depends(booking_principal)
         raise HTTPException(status_code=409, detail="slot taken")
 
     status = "confirmed" if body.context == "friends" else "pending"
-    name = (body.requester_name or "").strip()
+    # #238: имя, вписанное Кай в people (тот же грант, что даёт доступ) —
+    # приоритет над формой/тегом, иначе видно только "tg:<id>".
+    override_name = None
+    if p.tg_id:
+        try:
+            from core.auth_grants import get_display_name
+            override_name = await get_display_name(p.tg_id)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("display name lookup failed: %s", e)
+    name = override_name or (body.requester_name or "").strip()
     if not name and p.tg_id:
         name = f"tg:{p.tg_id}"
     b = await create_booking(
@@ -341,19 +350,26 @@ async def booking_book(body: BookBody, p: Principal = Depends(booking_principal)
         )
 
     try:
-        from core.bot_notify import notify_booking_log
+        from core.bot_notify import notify_booking_log, notify_user
+        from core.config import config
         when = start.astimezone(timezone(timedelta(hours=3))).strftime("%d.%m %H:%M")
         if status == "confirmed":
-            await notify_booking_log(
+            owner_text = (
                 f"⭐ <b>{name}</b> записался · {when} ({body.hours:g}ч)"
                 + (f"\n💬 {body.note}" if body.note else "")
             )
         else:
-            await notify_booking_log(
+            owner_text = (
                 f"🃏 <b>Заявка</b> на эзо-запись · {name} · {when}\n"
                 f"Подтверди: <code>POST /api/booking/requests/{b.id}/confirm</code>"
                 + (f"\n💬 {body.note}" if body.note else "")
             )
+        await notify_booking_log(owner_text)
+        # #238: раньше веб-бронь шла ТОЛЬКО в лог-топик — Кай видела запись
+        # только в логах, ни разу лично. Теперь дублируем личкой каждому
+        # owner tg_id, как это уже делает бот-флоу Зари (_notify_owner).
+        for owner in config.allowed_ids:
+            await notify_user(owner, owner_text, bot="zarya")
     except Exception as e:
         logger.warning("booking notify failed: %s", e)
 

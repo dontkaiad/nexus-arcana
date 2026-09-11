@@ -10,10 +10,7 @@ from fastapi import APIRouter, Depends
 from core.claude_client import ask_claude
 from core.user_manager import get_user_id
 from core.budget import (
-    LIMIT_CATEGORIES,
-    _budget_payday,
     budget_day_limit_from_plan,
-    get_limits,
     is_parallel_limit,
 )
 from core.repos.pg_finance_repo import PgNexusBudgetRepo
@@ -111,51 +108,14 @@ async def _spent_today(user_id: str, today_iso: str, tomorrow_iso: str) -> int:
         return 0
 
 
-def _period_start_iso(payday: int, tz_offset: int) -> str:
-    """Начало текущего платёжного периода (payday → payday) по личному tz."""
-    from datetime import datetime, timezone
-    now = datetime.now(timezone(timedelta(hours=tz_offset)))
-    if now.day >= payday:
-        y, m = now.year, now.month
-    elif now.month == 1:
-        y, m = now.year - 1, 12
-    else:
-        y, m = now.year, now.month - 1
-    import calendar as _cal
-    d = min(payday, _cal.monthrange(y, m)[1])
-    return "{:04d}-{:02d}-{:02d}".format(y, m, d)
-
-
 async def _discretionary_free(user_id: str, today_iso: str, tz_offset: int) -> int:
-    """«Свободно» в «Мой день» — НАКОПИТЕЛЬНЫЙ остаток дискреционных лимитов за
-    период (Продукты/Привычки/Транспорт/Кафе/Бьюти/Здоровье/Гардероб/Хобби/
-    Импульсивные). Отдельная величина от «Бюджета дня» (day_limit − spent_today).
-
-      свободно = max(0, Σ дискреционных лимитов
-                        − Σ реальных 💸 Расход этих категорий с начала периода)
-
-    🔒 Фикс / 📦 Разовые в расчёт НЕ входят (свой лимит на весь период).
-    """
+    """«Свободно» в «Мой день» — теперь та же величина, что бот показывает как
+    «Свободных» (#237: core.budget.discretionary_free, единая формула для
+    обеих сторон — раньше расходились и обе игнорировали 📦 Разовые)."""
     try:
-        limits = await get_limits()   # {cat_link: amount}
-        disc_total = sum(amt for link, amt in limits.items()
-                         if not is_parallel_limit(link))
-        if disc_total <= 0:
-            return 0
-
-        payday = await _budget_payday()
-        period_start = _period_start_iso(payday, tz_offset)
-        disc_cats = set(LIMIT_CATEGORIES)   # 9 канонических дискреционных категорий
-
-        entries = await _budget_repo.query(
-            date_from=period_start, date_to=today_iso,
-            type_="💸 Расход", page_size=1000, user_id=user_id,
-        )
-        spent = sum(
-            e.amount for e in entries
-            if (e.category in disc_cats) and not is_parallel_limit(e.category or "")
-        )
-        return int(round(max(0, disc_total - spent)))
+        from core.budget import discretionary_free
+        res = await discretionary_free(user_id, tz_offset)
+        return int(round(res[0])) if res else 0
     except Exception as e:
         logger.warning("_discretionary_free failed: %s", e)
         return 0

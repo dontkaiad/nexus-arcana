@@ -41,6 +41,7 @@ from core.budget import (
     BUDGET_TIGHT_THRESHOLD,
     is_parallel_limit as _is_parallel_limit_name,
     _period_days_remaining as _budget_period_days_remaining,
+    discretionary_free as _discretionary_free,
 )
 
 logger = logging.getLogger("nexus.finance")
@@ -103,64 +104,15 @@ def _parse_user_amount(text: str) -> Optional[int]:
 async def _calc_free_remaining(user_id: str = "", tz_offset: int = 3) -> Optional[Tuple[float, int]]:
     """(Свободных, дней до конца платёжного периода) или None.
 
-    Формула BUDGET_SPEC / BUDGET_IDEAL_SPEC:
-
-        Остаток на жизнь = Доход − Фикс − платёж по активному долгу
-        Свободных        = Остаток на жизнь − Σ(дискреционные траты периода)
-        /день            = Свободных / дней_до_конца_периода
-
-    Термы income/fixed/debt — те же источники, что `_do_budget_calc` и
-    `core.budget.budget_day_limit_from_plan` (плановый доход/фикс + первый
-    горящий долг через `pick_debt_payment`). Цели (savings) в «Свободных» НЕ
-    входят — они после долгов, не часть остатка на жизнь.
-
-    Окно и делитель — платёжный ПЕРИОД (`_period_bounds` / `_period_days_remaining`),
-    не календарный месяц (issue: раньше `%Y-%m-01` + `days_in_month`).
-
-    Дискреционные траты = 💸 Расход периода МИНУС 🔒 Фикс / 📦 Разовые
-    (`is_parallel_limit`) — иначе Фикс вычелся бы дважды (как терм и как
-    транзакция). Тот же предикат, что в `_spent_today` виджета «Мой день».
-
-    tz_offset — личный tz пользователя (границы периода по его дню).
+    #237: раньше бот и Mini App считали ДВЕ РАЗНЫЕ величины под одной
+    подписью «Свободных»/«Свободно» — бот (Доход − Фикс − долг − траты) и
+    приложение (Σ лимитов − траты по лимит-категориям), оба не вычитали
+    реальные 📦 Разовые траты. Теперь оба зовут ОДНУ функцию —
+    `core.budget.discretionary_free` — число в боте и в приложении всегда
+    совпадает. Сигнатура/возврат этой обёртки не изменились ради 5 вызывающих
+    мест (nexus_bot.py, finance.py, tasks.py).
     """
-    budget = await _load_budget_data(user_id)
-    fixed_total = sum(float(o.get("amount", 0) or 0) for o in budget.get("постоянные", []))
-    debt_payment = _pick_debt_payment(budget.get("долги", []))
-
-    payday = await _get_payday()
-    period_start, _period_end = _period_bounds(payday, tz_offset=tz_offset)
-    now = datetime.now(_user_tz(tz_offset))
-    today_str = now.strftime("%Y-%m-%d")
-    days_remaining = _budget_period_days_remaining(payday, tz_offset)
-
-    # Доход за период
-    try:
-        income_records = await _repo.query_records(
-            type_="💰 Доход", date_from=period_start, date_to=today_str, page_size=200,
-            user_id=user_id,
-        )
-        total_income = sum(float(p.amount or 0) for p in income_records)
-    except Exception:
-        total_income = 0
-
-    if total_income == 0:
-        return None  # нет дохода — нечего считать
-
-    # Дискреционные траты за период (Фикс/Разовые исключены — свой лимит)
-    try:
-        expense_records = await _repo.query_records(
-            type_="💸 Расход", date_from=period_start, date_to=today_str, page_size=500,
-            user_id=user_id,
-        )
-        period_expenses = sum(
-            float(p.amount or 0) for p in expense_records
-            if not _is_parallel_limit_name(p.category or "")
-        )
-    except Exception:
-        period_expenses = 0
-
-    free_left = total_income - fixed_total - debt_payment - period_expenses
-    return (free_left, days_remaining)
+    return await _discretionary_free(user_id, tz_offset)
 
 
 async def build_budget_message(user_id: str = "", tz_offset: int = 3) -> Optional[str]:
