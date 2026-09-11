@@ -11,7 +11,8 @@ from zarya.formatting import (
     epoch, from_epoch, group_slots_by_day, slot_label, wants_slots,
 )
 from zarya.handlers import (
-    RoleMiddleware, _ctx_for, cmd_help, cmd_start, on_login_confirm, on_login_deny,
+    RoleMiddleware, _bot_addressed, _ctx_for, cmd_help, cmd_start,
+    on_login_confirm, on_login_deny,
 )
 
 UTC = timezone.utc
@@ -84,6 +85,9 @@ async def test_role_middleware_attaches_role_and_never_raises():
 def _msg():
     m = SimpleNamespace()
     m.answer = AsyncMock()
+    m.chat = SimpleNamespace(type="private")  # DM by default — _bot_addressed() always True there
+    m.entities = None
+    m.reply_to_message = None
     return m
 
 
@@ -193,9 +197,102 @@ async def test_help_friend_no_admin_commands():
 # ── fallback: unrecognized text никогда не пропадает молча (#226) ───────────
 
 @pytest.mark.asyncio
-async def test_unrecognized_text_gets_a_reply():
+async def test_unrecognized_text_falls_back_when_classify_fails():
     from zarya.handlers import on_unrecognized
     m = _msg()
-    await on_unrecognized(m, role="guest")
+    m.text = "какая-то дичь"
+    with patch("zarya.classifier.classify_zarya", AsyncMock(return_value={"intent": "chat", "reply": ""})):
+        await on_unrecognized(m, role="guest")
     m.answer.assert_awaited_once()
     assert "/help" in m.answer.call_args[0][0]
+
+
+@pytest.mark.asyncio
+async def test_unrecognized_routes_to_slots():
+    from zarya.handlers import on_unrecognized
+    m = _msg()
+    m.text = "и где"
+    with patch("zarya.classifier.classify_zarya", AsyncMock(return_value={"intent": "slots", "reply": ""})), \
+         patch("zarya.handlers._show_slots", AsyncMock()) as show_slots:
+        await on_unrecognized(m, role="friend")
+    show_slots.assert_awaited_once_with(m, "friend")
+
+
+@pytest.mark.asyncio
+async def test_unrecognized_routes_to_help():
+    from zarya.handlers import on_unrecognized
+    m = _msg()
+    m.text = "что ты умеешь вообще"
+    with patch("zarya.classifier.classify_zarya", AsyncMock(return_value={"intent": "help", "reply": ""})), \
+         patch("zarya.handlers.cmd_help", AsyncMock()) as help_mock:
+        await on_unrecognized(m, role="guest")
+    help_mock.assert_awaited_once_with(m, role="guest")
+
+
+@pytest.mark.asyncio
+async def test_unrecognized_chat_reply_in_character():
+    from zarya.handlers import on_unrecognized
+    m = _msg()
+    m.text = "тупая машина"
+    with patch("zarya.classifier.classify_zarya",
+               AsyncMock(return_value={"intent": "chat", "reply": "Ауч 🙈 Не машина!"})):
+        await on_unrecognized(m, role="guest")
+    m.answer.assert_awaited_once_with("Ауч 🙈 Не машина!")
+
+
+@pytest.mark.asyncio
+async def test_unrecognized_swallows_classify_exception():
+    from zarya.handlers import on_unrecognized
+    m = _msg()
+    m.text = "что-нибудь"
+    with patch("zarya.classifier.classify_zarya", AsyncMock(side_effect=RuntimeError("api down"))):
+        await on_unrecognized(m, role="guest")
+    m.answer.assert_awaited_once()
+    assert "/help" in m.answer.call_args[0][0]
+
+
+# ── _bot_addressed: group privacy теперь off → всё видит, но молчит если не
+# обратились явно (#226 follow-up — иначе лезла бы с «не поняла» на любую
+# реплику между людьми в группе) ────────────────────────────────────────────
+
+def _group_msg(text="", mention=False, reply_to_bot=False):
+    m = SimpleNamespace()
+    m.answer = AsyncMock()
+    m.chat = SimpleNamespace(type="group")
+    m.text = text
+    m.bot = SimpleNamespace(id=999)
+    m.reply_to_message = SimpleNamespace(from_user=SimpleNamespace(id=999)) if reply_to_bot else None
+    if mention:
+        needle = "@heylark_booking_bot"
+        offset = text.find(needle)
+        m.entities = [SimpleNamespace(type="mention", offset=offset, length=len(needle))]
+    else:
+        m.entities = []
+    return m
+
+
+def test_dm_always_addressed():
+    assert _bot_addressed(_msg()) is True
+
+
+def test_group_plain_chatter_not_addressed():
+    m = _group_msg("не, я на созвоне в 3")
+    assert _bot_addressed(m) is False
+
+
+def test_group_mention_is_addressed():
+    m = _group_msg("@heylark_booking_bot когда у меня свободные окна", mention=True)
+    assert _bot_addressed(m) is True
+
+
+def test_group_reply_to_bot_is_addressed():
+    m = _group_msg("и где", reply_to_bot=True)
+    assert _bot_addressed(m) is True
+
+
+@pytest.mark.asyncio
+async def test_group_unaddressed_message_gets_no_reply():
+    from zarya.handlers import on_unrecognized
+    m = _group_msg("го обедать")
+    await on_unrecognized(m, role="guest")
+    m.answer.assert_not_awaited()

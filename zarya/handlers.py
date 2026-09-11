@@ -34,6 +34,7 @@ from zarya.formatting import (
 logger = logging.getLogger("zarya.handlers")
 router = Router()
 
+_ZARYA_USERNAME = "heylark_booking_bot"
 _SLOT_DAYS = 21
 _MAX_SLOT_BUTTONS = 8
 _FRIEND_HOURS = (1, 2, 3, 4)
@@ -194,7 +195,7 @@ async def cmd_help(msg: Message, role: str = "guest") -> None:
 async def _show_slots(msg: Message, role: str) -> None:
     uid = await _owner_user_id()
     if not uid:
-        await msg.answer("Ой, у меня пока нет доступа к календарю Кай 🙈 Попробуй чуть позже.")
+        await msg.answer("Так, минутку — доступа к календарю Кай сейчас нет. Загляни чуть позже 💅")
         return
     ctx = _ctx_for(role)
     today = date.today()
@@ -205,7 +206,7 @@ async def _show_slots(msg: Message, role: str) -> None:
         merged = merge_intervals(await busy_intervals(uid, now, now + timedelta(days=7)))
         if role == "guest":
             await msg.answer(
-                "Свободных окон под запись сейчас нет 🙈\n"
+                "Свободных окон под запись сейчас нет 💅\n"
                 "Публичная запись: <a href=\"https://booking.heylark.dev\">booking.heylark.dev</a>"
             )
         else:
@@ -270,11 +271,11 @@ async def _do_book(call: CallbackQuery, ctx: str, ep: str, hours: float, role: s
     start = from_epoch(ep)
     end = start + timedelta(hours=hours)
     if start <= datetime.now(timezone.utc):
-        await call.message.edit_text("Этот слот уже прошёл 🙈")
+        await call.message.edit_text("Этот слот уже пролетел 💅")
         return
     clash = await busy_intervals(uid, start, end)
     if any(iv.overlaps(start, end) for iv in clash):
-        await call.message.edit_text("Ой, слот только что увели! Спроси окна ещё раз — /slots")
+        await call.message.edit_text("Слот только что увели из-под носа. Спроси окна ещё раз — /slots 💅")
         return
 
     status = "confirmed" if ctx == "friends" else "pending"
@@ -453,6 +454,45 @@ async def cmd_bookings(msg: Message, role: str = "guest") -> None:
 # Без этого в группе (где Telegram и так фильтрует по privacy-mode — сюда доходит
 # только команда/@упоминание/реплай боту) любое сообщение мимо wants_slots()
 # просто пропадало без ответа. #226.
+#
+# #226 follow-up: ОДИН Haiku-вызов (zarya/classifier.py) только для того, что
+# уже не поймал бесплатный regex/команды — обычный трафик по-прежнему стоит
+# ноль токенов. Haiku либо роутит в существующий детерминированный хендлер
+# (slots/help), либо сама пишет короткий ответ в характере (intent=chat).
+def _bot_addressed(msg: Message) -> bool:
+    """В группе — только явное обращение (тег/реплай боту), иначе она читает
+    ВСЁ (Group Privacy теперь выключен, #226) и лезла бы с «не поняла» на
+    любую реплику между людьми. В ЛС — всегда обращаются к ней."""
+    if msg.chat.type not in ("group", "supergroup"):
+        return True
+    reply = getattr(msg, "reply_to_message", None)
+    if reply and getattr(reply, "from_user", None) and reply.from_user.id == msg.bot.id:
+        return True
+    text_low = (msg.text or "").lower()
+    for ent in msg.entities or []:
+        if ent.type == "mention":
+            mention = text_low[ent.offset:ent.offset + ent.length]
+            if mention == f"@{_ZARYA_USERNAME}":
+                return True
+    return False
+
+
 @router.message(F.text)
 async def on_unrecognized(msg: Message, role: str = "guest") -> None:
-    await msg.answer("Не поняла 🙈 Спроси «когда у Кай окно» или напиши /help — покажу что умею.")
+    if not _bot_addressed(msg):
+        return
+    try:
+        from zarya.classifier import classify_zarya
+        result = await classify_zarya(msg.text or "")
+    except Exception as e:
+        logger.warning("zarya classify failed: %s", e)
+        result = {"intent": "chat", "reply": ""}
+
+    if result["intent"] == "slots":
+        await _show_slots(msg, role)
+    elif result["intent"] == "help":
+        await cmd_help(msg, role=role)
+    elif result["reply"]:
+        await msg.answer(result["reply"])
+    else:
+        await msg.answer("Не поняла 💅 Спроси «когда у Кай окно» или напиши /help — покажу что умею.")
