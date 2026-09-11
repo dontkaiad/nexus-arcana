@@ -121,8 +121,8 @@ def _slots_kb(ctx: str, slots) -> InlineKeyboardMarkup:
 
 def _login_kb(token: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[[
-        InlineKeyboardButton(text="✅ Да, это я", callback_data=f"z:login_ok:{token}"),
-        InlineKeyboardButton(text="❌ Не я", callback_data=f"z:login_no:{token}"),
+        InlineKeyboardButton(text="✅ Войти", callback_data=f"z:login_ok:{token}"),
+        InlineKeyboardButton(text="❌ Отмена", callback_data=f"z:login_no:{token}"),
     ]])
 
 
@@ -144,8 +144,8 @@ async def cmd_start(msg: Message, command: CommandObject = None, role: str = "gu
             await msg.answer("Эта ссылка уже использована.")
             return
         await msg.answer(
-            "🔐 Кто-то пытается войти на heylark.dev с твоего аккаунта.\n"
-            "Это ты?",
+            "⭐ Привет! Я Заря — личный ассистент Кай Ларк.\n"
+            "Жми кнопку ниже, чтобы войти в сервисы heylark.dev 👇",
             reply_markup=_login_kb(token),
         )
         return

@@ -132,7 +132,7 @@ async def test_start_login_pending_shows_confirm_buttons():
     with patch("zarya.handlers.login_tokens_mod.get_pending", AsyncMock(return_value=pending)):
         await cmd_start(m, command=_cmd("login_tok1"), role="guest")
     text, kwargs = m.answer.call_args[0][0], m.answer.call_args[1]
-    assert "Это ты?" in text
+    assert "Я Заря" in text
     kb = kwargs["reply_markup"].inline_keyboard
     assert kb[0][0].callback_data == "z:login_ok:tok1"
     assert kb[0][1].callback_data == "z:login_no:tok1"
