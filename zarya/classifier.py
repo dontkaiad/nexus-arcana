@@ -102,18 +102,18 @@ def _system_prompt(role: str, shared_summary: str = "") -> str:
 
 
 async def _friend_shared_summary() -> str:
-    """#242: короткая сводка расшаренных задач Кай — только для role=friend.
-    Fail-safe: любая ошибка (нет owner/БД недоступна) → пустая строка."""
+    """#242: короткая сводка расшаренных задач + пунктов списков Кай — только
+    для role=friend. Fail-safe: любая ошибка (нет owner/БД недоступна) → ''."""
     try:
         from core.config import config as _cfg
         from core.user_manager import get_user_id
-        from core.shared_items import shared_tasks_summary
+        from core.shared_items import shared_items_summary
         if not _cfg.allowed_ids:
             return ""
         owner_uid = await get_user_id(_cfg.allowed_ids[0])
         if not owner_uid:
             return ""
-        return await shared_tasks_summary(owner_uid)
+        return await shared_items_summary(owner_uid)
     except Exception:
         logger.warning("_friend_shared_summary: failed", exc_info=True)
         return ""
