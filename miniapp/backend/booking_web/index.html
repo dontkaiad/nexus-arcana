@@ -163,7 +163,10 @@
   .sec .hint{font-size:.78rem;color:var(--ink-soft);margin:0 0 9px;line-height:1.4}
   .stack{display:flex;flex-direction:column;gap:7px}
   .item{border:1px solid var(--glass-line);border-radius:10px;padding:8px 11px;font-size:.85rem;background:var(--cell-bg)}
-  .item .top{display:flex;justify-content:space-between;align-items:center;gap:.5rem}
+  .item .top{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:.5rem}
+  /* #240: нативный datetime-local не сжимается — на узком экране распирал карточку истории */
+  .item .resch{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-top:6px}
+  .item .resch input{flex:1 1 160px;min-width:0;box-sizing:border-box}
   .form{display:flex;flex-direction:column;gap:.45rem;margin-top:.6rem}
   .form .two{display:grid;grid-template-columns:1fr 1fr;gap:.45rem}
   .empty{border:1px dashed var(--glass-line);border-radius:10px;padding:11px;font-size:.82rem;color:var(--muted)}
@@ -624,8 +627,10 @@ function wireAdmin(){
     toast("тип добавлен");typBox();
   }catch(e){toast("не вышло: "+e.message);}};
   $("#o_add").onclick=async()=>{try{
+    // #240: без "+03:00" бэкенд (_parse_dt) трактует naive-строку как UTC, а
+    // Кай выбирает даты в МСК — блок уезжал на 3ч позже и "13-14" рисовался как "13-15".
     await api("/blocks",{method:"POST",headers:{"content-type":"application/json"},
-      body:JSON.stringify({start:ddVal("o_s")+"T00:00",end:ddVal("o_e")+"T23:59",reason:$("#o_r").value})});
+      body:JSON.stringify({start:ddVal("o_s")+"T00:00+03:00",end:ddVal("o_e")+"T23:59+03:00",reason:$("#o_r").value})});
     toast("отмечено");offBox();load().then(gridR);
   }catch(e){toast("не вышло: "+e.message);}};
 }
@@ -680,7 +685,7 @@ async function histBox(){const el=$("#histBox");try{
     <div class="top" style="margin-top:.4rem">
       <button class="mini" data-resched="${b.id}">🔄 перенести</button>
     </div>
-    <div id="resch-${b.id}" hidden style="margin-top:6px;display:flex;gap:6px;align-items:center">
+    <div id="resch-${b.id}" hidden class="resch">
       <input type="datetime-local" class="reschInput" style="padding:6px;border-radius:8px;
         border:1px solid var(--glass-line);background:var(--glass);color:var(--ink)">
       <button class="mini primary" data-save="${b.id}">Сохранить</button>
@@ -708,9 +713,15 @@ function monthCells(base){
   for(let i=0;i<42;i++){const d=new Date(f);d.setDate(1-sd+i);out.push(d);}
   return out;
 }
-const evsDay=d=>st.events.filter(e=>new Date(e.start)<new Date(d.getFullYear(),d.getMonth(),d.getDate()+1)
-  && new Date(e.end)>new Date(d.getFullYear(),d.getMonth(),d.getDate()));
-const slotsDay=d=>st.slots.filter(s=>sameDay(new Date(s.start),d));
+// #240: границы дня грид считал в ЛОКАЛЬНОМ часовом поясе браузера — у Кай в
+// поездке (СПБ) устройство может быть не в МСК, и слот 22:00 МСК (=19:00 UTC)
+// уезжал в соседнюю календарную ячейку. Бронь всегда в МСК — считаем день по МСК.
+function mskDayBounds(d){
+  const startUtc=Date.UTC(d.getFullYear(),d.getMonth(),d.getDate())-3*3600e3;
+  return [new Date(startUtc),new Date(startUtc+24*3600e3)];
+}
+const evsDay=d=>{const[s,e]=mskDayBounds(d);return st.events.filter(x=>new Date(x.start)<e&&new Date(x.end)>s);};
+const slotsDay=d=>{const[s,e]=mskDayBounds(d);return st.slots.filter(x=>{const t=new Date(x.start);return t>=s&&t<e;});};
 const hasWindow=d=>st.windows.some(w=>+w.weekday===((d.getDay()+6)%7));
 
 function washClass(kinds){
@@ -722,7 +733,9 @@ function washClass(kinds){
 function gridR(){
   $("#mtitle").textContent = MON[st.month.getMonth()]+" "+st.month.getFullYear();
   $("#dow").innerHTML = DOW.map(x=>`<div class="dow">${x}</div>`).join("");
-  const today=new Date();
+  // #240: "сегодня" тоже по МСК, не по часовому поясу устройства
+  const nowMsk=MSK(new Date().toISOString());
+  const today=new Date(nowMsk.getUTCFullYear(),nowMsk.getUTCMonth(),nowMsk.getUTCDate());
   $("#grid").innerHTML = monthCells(st.month).map(d=>{
     const out=d.getMonth()!==st.month.getMonth();
     const kinds=[...new Set(evsDay(d).map(e=>e.kind||"busy"))].slice(0,5);
