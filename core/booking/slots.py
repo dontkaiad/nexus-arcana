@@ -40,6 +40,10 @@ _MSK = timezone(timedelta(hours=3))  # fallback
 _FRIENDS_SLOT_MINUTES = 60
 _FRIENDS_MIN_NOTICE_HOURS = 2
 _FRIENDS_MAX_ADVANCE_DAYS = 60
+# Кай: бронировать можно с 13:00 до 23:00 (МСК) каждый день; вне этого —
+# только по запросу (руками, не через авто-слоты).
+_FRIENDS_DAY_START = time(13, 0)
+_FRIENDS_DAY_END = time(23, 0)
 
 
 @dataclass(frozen=True)
@@ -132,21 +136,27 @@ def _slots_for_window(row: dict, day: date, now: datetime) -> List[Slot]:
 async def _free_slots_any_time(
     user_id: str, day_from: date, day_to: date, now: datetime, engine,
 ) -> List[Slot]:
-    """friends/admin: любой час, свободный от busy_intervals — без ручных окон."""
+    """friends/admin: любой час 13:00–23:00 МСК, свободный от busy_intervals —
+    без ручных окон. Вне 13–23 — только по запросу, не в авто-слотах."""
     step = timedelta(minutes=_FRIENDS_SLOT_MINUTES)
-    day_start = datetime.combine(day_from, time(0, 0), tzinfo=_MSK).astimezone(UTC)
-    day_end = datetime.combine(day_to + timedelta(days=1), time(0, 0), tzinfo=_MSK).astimezone(UTC)
+    span_start = datetime.combine(day_from, _FRIENDS_DAY_START, tzinfo=_MSK).astimezone(UTC)
+    span_end = datetime.combine(day_to, _FRIENDS_DAY_END, tzinfo=_MSK).astimezone(UTC)
     notice_cut = now + timedelta(hours=_FRIENDS_MIN_NOTICE_HOURS)
     advance_cut = now + timedelta(days=_FRIENDS_MAX_ADVANCE_DAYS)
 
-    busy = merge_intervals(await busy_intervals(user_id, day_start, day_end, engine=engine))
+    busy = merge_intervals(await busy_intervals(user_id, span_start, span_end, engine=engine))
 
     out: List[Slot] = []
-    t = day_start
-    while t + step <= day_end:
-        if notice_cut <= t <= advance_cut and not any(a < t + step and b > t for a, b in busy):
-            out.append(Slot(t, t + step))
-        t += step
+    d = day_from
+    while d <= day_to:
+        day_start = datetime.combine(d, _FRIENDS_DAY_START, tzinfo=_MSK).astimezone(UTC)
+        day_end = datetime.combine(d, _FRIENDS_DAY_END, tzinfo=_MSK).astimezone(UTC)
+        t = day_start
+        while t + step <= day_end:
+            if notice_cut <= t <= advance_cut and not any(a < t + step and b > t for a, b in busy):
+                out.append(Slot(t, t + step))
+            t += step
+        d += timedelta(days=1)
     return out
 
 

@@ -163,6 +163,17 @@ async def test_friends_no_windows_needed_at_all():
 
 
 @pytest.mark.asyncio
+async def test_friends_bounded_to_13_23_msk():
+    """Кай: бронировать можно 13:00–23:00 МСК = 10:00–20:00 UTC, вне — по запросу."""
+    eng = _make_engine()
+    slots = await free_slots("u1", "friends", day_from=date(2026, 9, 14),
+                              day_to=date(2026, 9, 14), now=NOW, engine=eng)
+    hours = [s.start.hour for s in slots]
+    assert hours and min(hours) == 10 and max(hours) == 19  # last slot starts 19:00 → ends 20:00
+    assert all(10 <= h <= 19 for h in hours)
+
+
+@pytest.mark.asyncio
 async def test_friends_busy_task_blocks_its_hour():
     eng = _make_engine()
     ns = None
