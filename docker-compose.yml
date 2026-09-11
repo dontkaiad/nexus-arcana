@@ -91,6 +91,12 @@ services:
   # (таймштамп/builder id) к КАЖДОЙ сборке, даже когда все слои CACHED. Это меняет
   # digest образа на каждом деплое → `up -d` видел «новый образ» и пересоздавал
   # (рестарт+пинг) Зарю на посторонних коммитах, хотя ни один слой не менялся.
+  # #222: этих флагов ЗДЕСЬ недостаточно — `docker compose build` (compose v5,
+  # bake-режим) их игнорирует и всё равно штампует attestation-manifest, digest
+  # всё равно скачет. Реальный деплой (~/deploy.sh на VPS, вне репо) поэтому
+  # собирает образы напрямую через `docker buildx build --provenance=false
+  # --sbom=false --load` в обход `docker compose build` — только это стабильно.
+  # Эти YAML-флаги оставлены как fallback для локального `docker compose build`.
   zarya:
     build:
       context: .
