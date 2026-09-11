@@ -14,7 +14,8 @@ from typing import Any, Awaitable, Callable, Dict, Optional
 from aiogram import BaseMiddleware, F, Router
 from aiogram.filters import Command, CommandObject
 from aiogram.types import (
-    CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message, TelegramObject,
+    CallbackQuery, ChatMemberUpdated, InlineKeyboardButton, InlineKeyboardMarkup,
+    Message, TelegramObject,
 )
 
 from core.auth_grants import booking_role
@@ -60,6 +61,30 @@ class RoleMiddleware(BaseMiddleware):
 
 def _ctx_for(role: str) -> str:
     return "friends" if role in ("friend", "admin") else "arcana"
+
+
+# ── защита от добавления в чужие конфы ───────────────────────────────────────
+# Заря теперь знает больше про Кай (#228) — её нельзя пускать в группу, куда
+# добавила не сама Кай, иначе личный контекст утечёт кому попало.
+
+@router.my_chat_member()
+async def on_membership_changed(update: ChatMemberUpdated) -> None:
+    if update.chat.type not in ("group", "supergroup"):
+        return
+    if update.new_chat_member.status not in ("member", "administrator"):
+        return  # не "добавили", а что-то другое (кикнули/вышла и т.п.)
+    adder_id = update.from_user.id if update.from_user else 0
+    if adder_id in config.allowed_ids:
+        return
+    logger.warning("Zarya added to chat %s by non-owner tg_id=%s — leaving", update.chat.id, adder_id)
+    try:
+        await update.bot.send_message(update.chat.id, "Меня добавляет только Кай 💅 Ухожу.")
+    except Exception:
+        pass
+    try:
+        await update.bot.leave_chat(update.chat.id)
+    except Exception as e:
+        logger.warning("leave_chat(%s) failed: %s", update.chat.id, e)
 
 
 async def _owner_user_id() -> Optional[str]:
@@ -234,6 +259,11 @@ async def cmd_slots(msg: Message, role: str = "guest") -> None:
 
 @router.message(F.text.func(lambda t: wants_slots(t or "")))
 async def nl_slots(msg: Message, role: str = "guest") -> None:
+    # #228: с выключенным Group Privacy бот видит ВСЮ переписку группы — обычная
+    # реплика ("открой окно", "у меня свободное время сегодня") легко матчит
+    # regex без всякого обращения к боту. Тот же гейт, что и в on_unrecognized.
+    if not _bot_addressed(msg):
+        return
     await _show_slots(msg, role)
 
 

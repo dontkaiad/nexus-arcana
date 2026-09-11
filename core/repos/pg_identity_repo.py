@@ -20,7 +20,11 @@ logger = logging.getLogger("core.pg_identity_repo")
 
 
 def _get_engine():
-    from arcana.repos.pg_sessions_repo import get_engine
+    # #228: get_engine реально живёт в core/db.py — arcana.repos.pg_sessions_repo
+    # его просто ре-экспортирует. Импорт через arcana ломал Зарю (узкий образ,
+    # arcana/repos/pg_sessions_repo.py туда не копируется, ImportError на
+    # ЛЮБОЙ вызов, который трогает identity_repo — включая _owner_user_id()).
+    from core.db import get_engine
     return get_engine()
 
 

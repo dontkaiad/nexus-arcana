@@ -12,7 +12,7 @@ from zarya.formatting import (
 )
 from zarya.handlers import (
     RoleMiddleware, _bot_addressed, _ctx_for, cmd_help, cmd_start,
-    on_login_confirm, on_login_deny,
+    on_login_confirm, on_login_deny, on_membership_changed,
 )
 
 UTC = timezone.utc
@@ -319,3 +319,77 @@ async def test_classify_zarya_defaults_to_guest_role():
                AsyncMock(return_value='{"intent":"chat","reply":"ок"}')) as ask:
         await classify_zarya("привет")
     assert ask.call_args[0][0].startswith("Роль пишущего: guest\n")
+
+
+# ── nl_slots тоже требует обращения в группе (#228 — та же дыра, что была
+# в on_unrecognized: с Privacy off регэксп ловит обычную переписку) ──────────
+
+@pytest.mark.asyncio
+async def test_nl_slots_ignores_unaddressed_group_chatter():
+    from zarya.handlers import nl_slots
+    m = _group_msg("у меня сегодня свободное время вечером")
+    with patch("zarya.handlers._show_slots", AsyncMock()) as show_slots:
+        await nl_slots(m, role="guest")
+    show_slots.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_nl_slots_fires_when_mentioned():
+    from zarya.handlers import nl_slots
+    m = _group_msg("@heylark_booking_bot когда у меня свободные окна", mention=True)
+    with patch("zarya.handlers._show_slots", AsyncMock()) as show_slots:
+        await nl_slots(m, role="admin")
+    show_slots.assert_awaited_once_with(m, "admin")
+
+
+@pytest.mark.asyncio
+async def test_nl_slots_always_fires_in_dm():
+    from zarya.handlers import nl_slots
+    m = _msg()
+    with patch("zarya.handlers._show_slots", AsyncMock()) as show_slots:
+        await nl_slots(m, role="guest")
+    show_slots.assert_awaited_once_with(m, "guest")
+
+
+# ── on_membership_changed: только Кай может добавлять Зарю в конфы (#228) ───
+
+def _membership_update(adder_id, status="member", chat_type="group"):
+    m = SimpleNamespace()
+    m.chat = SimpleNamespace(id=-100, type=chat_type)
+    m.new_chat_member = SimpleNamespace(status=status)
+    m.from_user = SimpleNamespace(id=adder_id)
+    m.bot = SimpleNamespace(send_message=AsyncMock(), leave_chat=AsyncMock())
+    return m
+
+
+@pytest.mark.asyncio
+async def test_owner_can_add_zarya_to_group():
+    u = _membership_update(67686090)
+    with patch("zarya.handlers.config.allowed_ids", [67686090, 790273371]):
+        await on_membership_changed(u)
+    u.bot.leave_chat.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_stranger_adding_zarya_gets_kicked_out():
+    u = _membership_update(999999)
+    with patch("zarya.handlers.config.allowed_ids", [67686090, 790273371]):
+        await on_membership_changed(u)
+    u.bot.send_message.assert_awaited_once()
+    u.bot.leave_chat.assert_awaited_once_with(-100)
+
+
+@pytest.mark.asyncio
+async def test_membership_change_ignored_in_dm():
+    u = _membership_update(999999, chat_type="private")
+    with patch("zarya.handlers.config.allowed_ids", [67686090, 790273371]):
+        await on_membership_changed(u)
+    u.bot.leave_chat.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_membership_change_ignored_when_not_a_join():
+    u = _membership_update(999999, status="left")
+    with patch("zarya.handlers.config.allowed_ids", [67686090, 790273371]):
+        await on_membership_changed(u)
+    u.bot.leave_chat.assert_not_awaited()
