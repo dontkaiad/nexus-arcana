@@ -725,11 +725,14 @@ function detail(){
 
 async function book(startIso){
   if(st.me.role==="guest"&&st.ctx==="friends"){location.href=loginUrl();return;}
-  let hours=1;
-  if(st.ctx==="friends"){hours=await askHours();if(!hours)return;}
+  let hours=1,note="";
+  if(st.ctx==="friends"){
+    hours=await askHours();if(!hours)return;
+    note=await askPurpose();if(!note)return;
+  }
   try{
     const b=await api("/book",{method:"POST",headers:{"content-type":"application/json"},
-      body:JSON.stringify({context:st.ctx,start:startIso,hours})});
+      body:JSON.stringify({context:st.ctx,start:startIso,hours,note})});
     toast(b.status==="confirmed"?"Записано ✅":"Заявка отправлена — Кай подтвердит");
     if(b.zarya_dm_sent===false) st.needsZaryaStart=true;
   }catch(e){toast(String(e).includes("409")?"Слот только что заняли":"Не вышло");}
@@ -748,6 +751,23 @@ function askHours(){return new Promise(res=>{
     <div class="slotwrap">${[1,2,3,4].map(h=>`<button data-h="${h}">${h} ч</button>`).join("")}
     <button data-h="0">отмена</button></div>`;
   el.querySelectorAll("button").forEach(b=>b.onclick=()=>{el.innerHTML=bak;res(+b.dataset.h||null);});
+});}
+/* #239: обязательный повод встречи — "не просто встреча, а НА ЧТО".
+   Идёт в booking.note → становится названием задачи у Кай в Nexus. */
+function askPurpose(){return new Promise(res=>{
+  const el=$("#detail"),bak=el.innerHTML;
+  el.innerHTML=`<h3 class="bookh" style="margin-top:0">На что бронируешь?</h3>
+    <p class="hintline">Коротко — станет названием встречи у Кай (например: «шашлыки», «созвон по проекту»).</p>
+    <input id="purposeInput" type="text" maxlength="120" placeholder="шашлыки в Токсово"
+      style="width:100%;box-sizing:border-box;padding:10px 12px;border-radius:10px;margin:8px 0;
+             border:1px solid var(--glass-line);background:var(--glass);color:var(--ink);font-size:15px" />
+    <div class="slotwrap"><button data-ok="1">Записать</button><button data-cancel="1">отмена</button></div>`;
+  const inp=el.querySelector("#purposeInput");
+  inp.focus();
+  const submit=()=>{const v=inp.value.trim();if(!v){inp.style.borderColor="var(--gold)";return;}el.innerHTML=bak;res(v);};
+  inp.addEventListener("keydown",e=>{if(e.key==="Enter")submit();});
+  el.querySelector("[data-ok]").onclick=submit;
+  el.querySelector("[data-cancel]").onclick=()=>{el.innerHTML=bak;res(null);};
 });}
 
 /* ── data ─────────────────────────────────────────────────────────── */

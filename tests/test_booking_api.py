@@ -101,7 +101,7 @@ def _book_env():
 
 
 def test_book_friends_needs_grant_guest_403(_book_env):
-    r = _book_env.post("/api/booking/book", json={"context": "friends", "start": _FUT.isoformat()})
+    r = _book_env.post("/api/booking/book", json={"context": "friends", "start": _FUT.isoformat(), "note": "созвон"})
     assert r.status_code == 403
 
 
@@ -109,7 +109,7 @@ def test_book_friends_auto_confirms_for_friend(_book_env):
     with patch("miniapp.backend.routes.booking.booking_role", AsyncMock(return_value="friend")):
         r = _book_env.post(
             "/api/booking/book",
-            json={"context": "friends", "start": _FUT.isoformat(), "hours": 2},
+            json={"context": "friends", "start": _FUT.isoformat(), "hours": 2, "note": "созвон"},
             headers={"X-Booking-Service-Token": "svc-secret", "X-Booking-As-Tg": "555001"},
         )
     assert r.status_code == 200
@@ -131,7 +131,7 @@ def test_book_past_start_400(_book_env):
     past = (datetime.now(UTC) - timedelta(hours=1)).isoformat()
     with patch("miniapp.backend.routes.booking.booking_role", AsyncMock(return_value="admin")):
         r = _book_env.post("/api/booking/book",
-                           json={"context": "friends", "start": past},
+                           json={"context": "friends", "start": past, "note": "созвон"},
                            headers={"X-Booking-Service-Token": "svc-secret", "X-Booking-As-Tg": "1"})
     assert r.status_code == 400
 
@@ -142,7 +142,7 @@ def test_book_slot_conflict_409(_book_env):
     with patch("miniapp.backend.routes.booking.busy_intervals", AsyncMock(return_value=clash)), \
          patch("miniapp.backend.routes.booking.booking_role", AsyncMock(return_value="friend")):
         r = _book_env.post("/api/booking/book",
-                           json={"context": "friends", "start": _FUT.isoformat()},
+                           json={"context": "friends", "start": _FUT.isoformat(), "note": "созвон"},
                            headers={"X-Booking-Service-Token": "svc-secret", "X-Booking-As-Tg": "1"})
     assert r.status_code == 409
 
@@ -163,7 +163,7 @@ def test_book_web_uses_people_display_name_not_tg_id(_book_env):
          patch("core.auth_grants.get_display_name", AsyncMock(return_value="Мишган Роман")):
         r = _book_env.post(
             "/api/booking/book",
-            json={"context": "friends", "start": _FUT.isoformat(), "hours": 1},
+            json={"context": "friends", "start": _FUT.isoformat(), "hours": 1, "note": "шашлыки"},
             headers={"X-Booking-Service-Token": "svc-secret", "X-Booking-As-Tg": "555001"},
         )
     assert r.status_code == 200
@@ -182,7 +182,7 @@ def test_book_web_falls_back_to_tg_id_without_override(_book_env):
          patch("core.auth_grants.get_display_name", AsyncMock(return_value=None)):
         r = _book_env.post(
             "/api/booking/book",
-            json={"context": "friends", "start": _FUT.isoformat(), "hours": 1},
+            json={"context": "friends", "start": _FUT.isoformat(), "hours": 1, "note": "шашлыки"},
             headers={"X-Booking-Service-Token": "svc-secret", "X-Booking-As-Tg": "555001"},
         )
     assert r.status_code == 200
@@ -198,7 +198,7 @@ def test_book_web_dms_every_owner_not_just_log_topic(_book_env):
          patch("core.bot_notify.notify_user", AsyncMock(return_value=True)) as notify_mock:
         r = _book_env.post(
             "/api/booking/book",
-            json={"context": "friends", "start": _FUT.isoformat(), "hours": 1},
+            json={"context": "friends", "start": _FUT.isoformat(), "hours": 1, "note": "шашлыки"},
             headers={"X-Booking-Service-Token": "svc-secret", "X-Booking-As-Tg": "555001"},
         )
     assert r.status_code == 200
@@ -211,6 +211,39 @@ def test_book_web_dms_every_owner_not_just_log_topic(_book_env):
     for c in owner_calls:
         assert c.kwargs.get("bot") == "zarya"
         assert "Мишган Роман" in c.args[1]
+
+
+# ── #239: обязательный повод встречи для friends, не для arcana ────────────
+
+def test_book_friends_without_note_422(_book_env):
+    """«Не просто встреча с тем-то, а НА ЧТО» — обязательно для друзей."""
+    with patch("miniapp.backend.routes.booking.booking_role", AsyncMock(return_value="friend")):
+        r = _book_env.post(
+            "/api/booking/book",
+            json={"context": "friends", "start": _FUT.isoformat(), "hours": 1},
+            headers={"X-Booking-Service-Token": "svc-secret", "X-Booking-As-Tg": "555001"},
+        )
+    assert r.status_code == 422
+
+
+def test_book_friends_blank_note_422(_book_env):
+    with patch("miniapp.backend.routes.booking.booking_role", AsyncMock(return_value="friend")):
+        r = _book_env.post(
+            "/api/booking/book",
+            json={"context": "friends", "start": _FUT.isoformat(), "hours": 1, "note": "   "},
+            headers={"X-Booking-Service-Token": "svc-secret", "X-Booking-As-Tg": "555001"},
+        )
+    assert r.status_code == 422
+
+
+def test_book_arcana_without_note_is_fine(_book_env):
+    """Публичная эзо-запись не требует повода — там свой meeting_type."""
+    with patch("miniapp.backend.routes.booking.create_booking",
+               AsyncMock(return_value=_mk_booking(status="pending", context="arcana"))):
+        r = _book_env.post("/api/booking/book",
+                           json={"context": "arcana", "start": _FUT.isoformat(),
+                                 "requester_name": "Клиент", "requester_contact": "@x"})
+    assert r.status_code == 200
 
 
 def test_confirm_decline_owner_only():

@@ -35,17 +35,24 @@ def _link_sync(eng, b: Booking):
     if b.context == "friends":
         from nexus.repos.tasks_tables import task_status, tasks
 
+        # #239: заголовок = ПОВОД встречи (обязателен для друзей — Кай
+        # хочет видеть "шашлыки", а не безликое "Встреча: Мишаня"), имя —
+        # в заметке вместе с технической меткой брони.
+        purpose = (b.note or "").strip()
+        title = f"☕ {purpose}" if purpose else f"☕ Встреча: {b.requester_name}"
+        task_note = f"с {b.requester_name} · бронь #{b.id} · {b.hours or 1:g} ч · {b.source}"
+
         with eng.begin() as conn:
             sid = conn.execute(
                 sa.select(task_status.c.id).where(task_status.c.code == "Not started")
             ).scalar()
             row = conn.execute(
                 tasks.insert().values(
-                    title=f"☕ Встреча: {b.requester_name}",
+                    title=title,
                     status_id=sid,
                     deadline=b.start_at,
                     user_id=uid or "",
-                    note=f"бронь #{b.id} · {b.hours or 1:g} ч · {b.source}",
+                    note=task_note,
                 ).returning(tasks.c.id)
             ).first()
         return ("nexus_task_id", str(row[0]))

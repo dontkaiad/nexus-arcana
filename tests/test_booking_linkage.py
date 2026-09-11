@@ -83,6 +83,25 @@ async def test_friends_booking_creates_task():
 
 
 @pytest.mark.asyncio
+async def test_friends_booking_title_uses_purpose_when_present():
+    """#239: "не просто встреча с тем-то, а НА ЧТО" — заголовок задачи =
+    повод встречи (booking.note), имя уходит в заметку задачи."""
+    eng = _engine()
+    b = await create_booking(
+        user_id="u1", context="friends", start_at=START, end_at=START + timedelta(hours=2),
+        status="confirmed", hours=2, requester_name="Мишаня", requester_tg_id=5,
+        note="шашлыки в Токсово", source="tg_dm", engine=eng,
+    )
+    linked = await link_booking(b, engine=eng)
+    with eng.connect() as c:
+        row = c.execute(sa.text(
+            "SELECT title, note FROM tasks WHERE id = :i"),
+            {"i": int(linked.nexus_task_id)}).first()
+    assert row.title == "☕ шашлыки в Токсово"
+    assert "Мишаня" in row.note
+
+
+@pytest.mark.asyncio
 async def test_arcana_booking_creates_scheduled_work():
     eng = _engine()
     b = await _booking(eng, "arcana")

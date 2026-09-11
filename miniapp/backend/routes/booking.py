@@ -251,6 +251,15 @@ class BookBody(BaseModel):
     requester_contact: str = ""
     note: str = ""
 
+    @model_validator(mode="after")
+    def _friends_need_a_purpose(self) -> "BookBody":
+        # #239: "не просто встреча с тем-то, а НА ЧТО" — обязательно для
+        # друзей (личные встречи с Кай); публичная эзо-запись (arcana) не
+        # требует — там повод описывает тип сеанса/meeting_type.
+        if self.context == "friends" and not self.note.strip():
+            raise ValueError("на что бронируешь? опиши коротко (note)")
+        return self
+
 
 def _parse_dt(s: str) -> datetime:
     v = (s or "").strip()

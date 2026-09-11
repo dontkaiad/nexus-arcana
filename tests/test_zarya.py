@@ -547,7 +547,9 @@ async def test_booking_uses_people_display_name_over_telegram_name():
          patch("zarya.handlers.create_booking", AsyncMock(return_value=fake_booking)) as cb, \
          patch("zarya.handlers._confirm_flow", AsyncMock()), \
          patch("zarya.handlers._notify_owner", AsyncMock()):
-        await _do_book(c, "friends", future_ep, 1.0, "friend")
+        await _do_book("friends", future_ep, 1.0, "friend",
+                       from_user=c.from_user, chat_type=c.message.chat.type,
+                       reply=c.message.edit_text, bot=c.bot, purpose="шашлыки")
     assert cb.call_args.kwargs["requester_name"] == "Мишган Роман"
 
 
@@ -564,5 +566,81 @@ async def test_booking_falls_back_to_telegram_name_without_override():
          patch("zarya.handlers.create_booking", AsyncMock(return_value=fake_booking)) as cb, \
          patch("zarya.handlers._confirm_flow", AsyncMock()), \
          patch("zarya.handlers._notify_owner", AsyncMock()):
-        await _do_book(c, "friends", future_ep, 1.0, "friend")
+        await _do_book("friends", future_ep, 1.0, "friend",
+                       from_user=c.from_user, chat_type=c.message.chat.type,
+                       reply=c.message.edit_text, bot=c.bot, purpose="созвон")
     assert cb.call_args.kwargs["requester_name"] == "Вася с улицы"
+
+
+# ── #239: обязательный повод встречи (pending-purpose flow) ─────────────────
+
+@pytest.mark.asyncio
+async def test_on_book_friends_asks_for_purpose_instead_of_booking():
+    from zarya.handlers import on_book, _pending_purpose
+    c = SimpleNamespace()
+    c.data = "z:book:friends:1234567890:2"
+    c.from_user = SimpleNamespace(id=42, full_name="Кто-то")
+    c.message = SimpleNamespace(edit_text=AsyncMock(), chat=SimpleNamespace(type="private"))
+    c.bot = SimpleNamespace()
+    c.answer = AsyncMock()
+    with patch("zarya.handlers.create_booking", AsyncMock()) as cb:
+        await on_book(c, role="friend")
+    cb.assert_not_awaited()  # бронь ещё не создана — ждём текст повода
+    assert _pending_purpose[42] == {"ctx": "friends", "ep": "1234567890", "hours": 2.0, "role": "friend"}
+    assert "На что бронируешь" in c.message.edit_text.call_args[0][0]
+    _pending_purpose.clear()
+
+
+@pytest.mark.asyncio
+async def test_on_book_arcana_books_immediately_no_purpose_asked():
+    from zarya.handlers import on_book, _pending_purpose
+    c = SimpleNamespace()
+    c.data = "z:book:arcana:1234567890:1"
+    c.from_user = SimpleNamespace(id=42, full_name="Гость")
+    c.message = SimpleNamespace(edit_text=AsyncMock(), chat=SimpleNamespace(type="private"))
+    c.bot = SimpleNamespace()
+    c.answer = AsyncMock()
+    with patch("zarya.handlers._do_book", AsyncMock()) as db:
+        await on_book(c, role="guest")
+    db.assert_awaited_once()
+    assert 42 not in _pending_purpose
+
+
+@pytest.mark.asyncio
+async def test_purpose_text_completes_the_booking():
+    from zarya.handlers import on_purpose_text, _pending_purpose
+    _pending_purpose[42] = {"ctx": "friends", "ep": "1234567890", "hours": 2.0, "role": "friend"}
+    m = _msg()
+    m.text = "шашлыки в Токсово"
+    m.from_user = SimpleNamespace(id=42, full_name="Кто-то")
+    m.bot = SimpleNamespace()
+    with patch("zarya.handlers._do_book", AsyncMock()) as db:
+        await on_purpose_text(m, role="friend")
+    db.assert_awaited_once()
+    assert db.call_args.kwargs["purpose"] == "шашлыки в Токсово"
+    assert 42 not in _pending_purpose
+
+
+@pytest.mark.asyncio
+async def test_purpose_text_empty_reprompts_and_keeps_pending():
+    from zarya.handlers import on_purpose_text, _pending_purpose
+    _pending_purpose[42] = {"ctx": "friends", "ep": "1234567890", "hours": 2.0, "role": "friend"}
+    m = _msg()
+    m.text = "   "
+    m.from_user = SimpleNamespace(id=42, full_name="Кто-то")
+    with patch("zarya.handlers._do_book", AsyncMock()) as db:
+        await on_purpose_text(m, role="friend")
+    db.assert_not_awaited()
+    assert 42 in _pending_purpose  # осталось ждать текст
+    m.answer.assert_awaited_once()
+    _pending_purpose.clear()
+
+
+def test_has_pending_purpose_filter():
+    from zarya.handlers import _has_pending_purpose, _pending_purpose
+    _pending_purpose[999] = {}
+    yes = SimpleNamespace(from_user=SimpleNamespace(id=999))
+    no = SimpleNamespace(from_user=SimpleNamespace(id=1))
+    assert _has_pending_purpose(yes) is True
+    assert _has_pending_purpose(no) is False
+    _pending_purpose.clear()

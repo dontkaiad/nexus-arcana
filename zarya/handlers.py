@@ -41,6 +41,14 @@ _SLOT_DAYS = 21
 _MAX_SLOT_BUTTONS = 8
 _FRIEND_HOURS = (1, 2, 3, 4)
 
+# #239: друзья обязаны написать НА ЧТО бронируют (не просто "встреча с X") —
+# tg_id → {ctx, ep, hours, role} между выбором часов и текстом цели.
+_pending_purpose: dict = {}
+
+
+def _has_pending_purpose(message: Message) -> bool:
+    return bool(message.from_user and message.from_user.id in _pending_purpose)
+
 
 class RoleMiddleware(BaseMiddleware):
     async def __call__(
@@ -151,6 +159,27 @@ def _login_kb(token: str) -> InlineKeyboardMarkup:
         InlineKeyboardButton(text="✅ Войти", callback_data=f"z:login_ok:{token}"),
         InlineKeyboardButton(text="❌ Отмена", callback_data=f"z:login_no:{token}"),
     ]])
+
+
+# #239: ЗАРЕГИСТРИРОВАН ПЕРВЫМ среди @router.message — если у юзера висит
+# незакрытый вопрос "на что бронируешь", следующее его сообщение ВСЕГДА
+# уходит сюда, а не в nl_slots/on_unrecognized (иначе "шашлыки в среду"
+# улетело бы в показ слотов по слову "сред").
+@router.message(_has_pending_purpose)
+async def on_purpose_text(msg: Message, role: str = "guest") -> None:
+    pending = _pending_purpose.pop(msg.from_user.id, None)
+    if not pending:
+        return
+    purpose = (msg.text or "").strip()
+    if not purpose:
+        _pending_purpose[msg.from_user.id] = pending
+        await msg.answer("Текстом, пожалуйста — на что бронируешь? Например: «шашлыки».")
+        return
+    await _do_book(
+        pending["ctx"], pending["ep"], pending["hours"], pending["role"],
+        from_user=msg.from_user, chat_type=msg.chat.type, reply=msg.answer,
+        bot=msg.bot, purpose=purpose,
+    )
 
 
 @router.message(Command("start"))
@@ -318,7 +347,11 @@ async def on_slot(call: CallbackQuery, role: str = "guest") -> None:
             reply_markup=InlineKeyboardMarkup(inline_keyboard=rows),
         )
     else:
-        await _do_book(call, ctx, ep, 1.0, role)
+        await _do_book(
+            ctx, ep, 1.0, role,
+            from_user=call.from_user, chat_type=call.message.chat.type,
+            reply=call.message.edit_text, bot=call.bot,
+        )
     await call.answer()
 
 
@@ -327,56 +360,73 @@ async def on_book(call: CallbackQuery, role: str = "guest") -> None:
     parts = call.data.split(":")
     ctx, ep = parts[2], parts[3]
     hours = float(parts[4]) if len(parts) > 4 else 1.0
-    await _do_book(call, ctx, ep, hours, role)
+    if ctx == "friends":
+        # #239: друзья обязаны написать НА ЧТО бронируют — не создаём бронь,
+        # пока не пришёл текст. Следующее сообщение этого юзера ловит
+        # on_purpose_text (зарегистрирован рано, до nl_slots/фолбэка).
+        _pending_purpose[call.from_user.id] = {"ctx": ctx, "ep": ep, "hours": hours, "role": role}
+        await call.message.edit_text(
+            "На что бронируешь? Опиши коротко одним сообщением — станет "
+            "названием встречи у Кай (например: «шашлыки», «созвон по проекту», «др у Ромы»)."
+        )
+        await call.answer()
+        return
+    await _do_book(
+        ctx, ep, hours, role,
+        from_user=call.from_user, chat_type=call.message.chat.type,
+        reply=call.message.edit_text, bot=call.bot,
+    )
     await call.answer()
 
 
-async def _do_book(call: CallbackQuery, ctx: str, ep: str, hours: float, role: str) -> None:
+async def _do_book(ctx: str, ep: str, hours: float, role: str, *,
+                    from_user, chat_type: str, reply, bot, purpose: str = "") -> None:
     uid = await _owner_user_id()
     start = from_epoch(ep)
     end = start + timedelta(hours=hours)
     if start <= datetime.now(timezone.utc):
-        await call.message.edit_text("Этот слот уже пролетел 💅")
+        await reply("Этот слот уже пролетел 💅")
         return
     clash = await busy_intervals(uid, start, end)
     if any(iv.overlaps(start, end) for iv in clash):
-        await call.message.edit_text("Слот только что увели из-под носа. Спроси окна ещё раз — /slots 💅")
+        await reply("Слот только что увели из-под носа. Спроси окна ещё раз — /slots 💅")
         return
 
     status = "confirmed" if ctx == "friends" else "pending"
     # #237: имя, которое Кай сама вписала (people.display_name) — вместо
     # ника/имени в Telegram, чтобы не путать друзей.
     from core.auth_grants import get_display_name
-    override_name = await get_display_name(call.from_user.id)
-    name = override_name or (call.from_user.full_name or "").strip() or f"tg:{call.from_user.id}"
+    override_name = await get_display_name(from_user.id)
+    name = override_name or (from_user.full_name or "").strip() or f"tg:{from_user.id}"
     b = await create_booking(
         user_id=uid, context=ctx, start_at=start, end_at=end, status=status,
-        hours=hours, requester_tg_id=call.from_user.id, requester_name=name,
-        source="tg_group" if call.message.chat.type in ("group", "supergroup") else "tg_dm",
+        hours=hours, requester_tg_id=from_user.id, requester_name=name, note=purpose,
+        source="tg_group" if chat_type in ("group", "supergroup") else "tg_dm",
     )
     when = slot_label(start, hours=hours)
-    in_group = call.message.chat.type in ("group", "supergroup")
+    in_group = chat_type in ("group", "supergroup")
+    purpose_line = f"\n💬 {purpose}" if purpose else ""
     if status == "confirmed":
-        await call.message.edit_text(
-            f"✅ Записала: {when}\nНапомню за сутки и за 2 часа 💫",
+        await reply(
+            f"✅ Записала: {when}{purpose_line}\nНапомню за сутки и за 2 часа 💫",
             reply_markup=_cancel_kb(b.id),
         )
-        await _confirm_flow(b, call.bot)
-        await _notify_owner(f"⭐ <b>{name}</b> записался · {when}", bot=call.bot)
+        await _confirm_flow(b, bot)
+        await _notify_owner(f"⭐ <b>{name}</b> записался · {when}{purpose_line}", bot=bot)
         if in_group:  # requester booked in a group chat → confirm in DM too
             await _dm(
-                call.bot, call.from_user.id,
-                f"✅ Записала тебя к Кай: {when} (МСК). Напомню заранее.",
+                bot, from_user.id,
+                f"✅ Записала тебя к Кай: {when} (МСК).{purpose_line}\nНапомню заранее.",
                 _cancel_kb(b.id),
             )
     else:
-        await call.message.edit_text(
-            f"📝 Заявка на {when} принята! Как только Кай подтвердит — сразу напишу тебе."
+        await reply(
+            f"📝 Заявка на {when} принята!{purpose_line}\nКак только Кай подтвердит — сразу напишу тебе."
         )
         await _notify_owner(
-            f"🃏 <b>Заявка</b>: {name} · {when}\n"
+            f"🃏 <b>Заявка</b>: {name} · {when}{purpose_line}\n"
             f"/requests чтобы подтвердить (#{b.id})",
-            bot=call.bot,
+            bot=bot,
         )
 
 
