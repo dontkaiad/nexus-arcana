@@ -1,6 +1,6 @@
 # BOOKING — data-model contract (heylark Booking, #23 / ADR-0026)
 
-Code conforms to: 24cb626. This spec describes the booking data model as of
+Code conforms to: 6d03370. This spec describes the booking data model as of
 that commit; update it in the same PR that changes the model.
 
 > Contract, not snapshot. Describes the persistent model, the guarantees of
