@@ -1335,7 +1335,10 @@ function StreakAchievedCard({ current, best, lastDateIso, todayIso, onClick }) {
           fontFamily: "var(--f-display)", fontSize: 28, fontWeight: 500, lineHeight: 1,
           display: "inline-flex", alignItems: "flex-end", gap: 2,
         }}>
-          <LucideFlame size={18} fill="currentColor" style={{ color: "#b07a2e", flexShrink: 0 }} />
+          {/* тот же ~-5px translateY, что .streak-v .flame — визуальный низ
+              пламени (не геометрический бокс SVG) на одной линии с цифрой */}
+          <LucideFlame size={18} fill="currentColor"
+            style={{ color: "#b07a2e", flexShrink: 0, transform: "translateY(-5px)" }} />
           {cur}
         </span>
         <span style={{
@@ -1401,7 +1404,10 @@ function NxDay({ s, openTask, navigate, openStreaks }) {
             <Metric s={s} v={doneCount} unit={`/${total}`} sub="задачи" />
           </div>
           <div style={{ flex: 1, minWidth: 0, cursor: "pointer" }} onClick={() => navigate?.("fin")}>
-            <Metric s={s} v={`${Math.round(t.discretionaryFree / 1000)}к`} unit="₽" sub="свободно" />
+            {/* было sub="свободно" — путалось с ботовским «Свободных» (другая
+                величина: доход−фикс−долг−траты, а тут только остаток лимитов
+                по категориям). Разные подписи — разные метрики. */}
+            <Metric s={s} v={`${Math.round(t.discretionaryFree / 1000)}к`} unit="₽" sub="по лимитам" />
           </div>
           {t.streak >= 3 ? (
             <div style={{ flex: 1, minWidth: 0, display: "flex" }}>
