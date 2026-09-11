@@ -1,9 +1,9 @@
 """tests/test_booking_slots.py — core.booking.slots.free_slots (#23 B2 / ADR-0026).
 
-In-memory SQLite. Two algorithms by context (#233): "arcana" (guest/public) —
-availability windows → slots, minus busy, minus notice/advance, тестируются
-здесь как раньше. "friends" (also admin) — no manual windows, any free hour
-is bookable — see the TestFriendsAnyTime class below.
+In-memory SQLite. One windows-based algorithm for both contexts (#243 —
+reverts #233's "friends: any free time" pivot): availability windows →
+slots, minus busy, minus notice/advance. No `booking_availability` row for
+a given context/day → zero slots, opt-in by design.
 """
 from __future__ import annotations
 
@@ -152,30 +152,32 @@ async def test_buffer_widens_busy_check():
     assert [s.start.hour for s in slots] == [13]
 
 
-# ── #233: friends/admin — любое свободное от дел время, без ручных окон ──────
+# ── #243: friends — снова явные окна (opt-in), как arcana ────────────────────
 
 @pytest.mark.asyncio
-async def test_friends_no_windows_needed_at_all():
+async def test_friends_no_windows_means_no_slots():
+    """Опт-ин по умолчанию: без настроенного окна friends не видит НИЧЕГО —
+    ровно та жалоба Кай, которую #243 исправляет наоборот (было наоборот:
+    всё свободно по умолчанию)."""
     eng = _make_engine()  # no booking_availability rows at all
     slots = await free_slots("u1", "friends", day_from=date(2026, 9, 14),
                               day_to=date(2026, 9, 14), now=NOW, engine=eng)
-    assert len(slots) > 0  # a whole free day → hourly slots, no windows configured
+    assert slots == []
 
 
 @pytest.mark.asyncio
-async def test_friends_bounded_to_13_23_msk():
-    """Кай: бронировать можно 13:00–23:00 МСК = 10:00–20:00 UTC, вне — по запросу."""
+async def test_friends_window_expands_to_hourly_slots():
     eng = _make_engine()
+    _add_window(eng, weekday=0, start_time="14:00", end_time="17:00", context="friends")
     slots = await free_slots("u1", "friends", day_from=date(2026, 9, 14),
                               day_to=date(2026, 9, 14), now=NOW, engine=eng)
-    hours = [s.start.hour for s in slots]
-    assert hours and min(hours) == 10 and max(hours) == 19  # last slot starts 19:00 → ends 20:00
-    assert all(10 <= h <= 19 for h in hours)
+    assert [s.start.hour for s in slots] == [11, 12, 13]
 
 
 @pytest.mark.asyncio
 async def test_friends_busy_task_blocks_its_hour():
     eng = _make_engine()
+    _add_window(eng, weekday=0, start_time="14:00", end_time="17:00", context="friends")
     ns = None
     with eng.connect() as c:
         ns = c.execute(sa.text("SELECT id FROM task_status WHERE code='Not started'")).scalar()
@@ -190,22 +192,10 @@ async def test_friends_busy_task_blocks_its_hour():
 
 
 @pytest.mark.asyncio
-async def test_friends_min_notice_cuts_near_hours():
+async def test_friends_windows_do_not_leak_into_arcana():
+    """Разделение по context остаётся — окно под 'friends' не даёт слотов arcana."""
     eng = _make_engine()
-    now = datetime(2026, 9, 14, 6, 0, tzinfo=UTC)
-    slots = await free_slots("u1", "friends", day_from=date(2026, 9, 14),
-                              day_to=date(2026, 9, 14), now=now, engine=eng)
-    # _FRIENDS_MIN_NOTICE_HOURS = 2 → nothing before 08:00 UTC
-    assert all(s.start.hour >= 8 for s in slots)
-
-
-@pytest.mark.asyncio
-async def test_friends_ignores_configured_windows():
-    """Окна, настроенные под context='arcana', не влияют на друзей — и
-    наоборот (полное разделение моделей, #233)."""
-    eng = _make_engine()
-    _add_window(eng, weekday=0, start_time="14:00", end_time="15:00", context="arcana")
-    slots = await free_slots("u1", "friends", day_from=date(2026, 9, 14),
+    _add_window(eng, weekday=0, start_time="14:00", end_time="15:00", context="friends")
+    slots = await free_slots("u1", "arcana", day_from=date(2026, 9, 14),
                               day_to=date(2026, 9, 14), now=NOW, engine=eng)
-    # friends видит куда больше одного часа — окно arcana тут ни при чём
-    assert len(slots) > 1
+    assert slots == []

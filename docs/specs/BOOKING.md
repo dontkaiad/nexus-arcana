@@ -20,27 +20,26 @@ directly to the same `core/booking/` domain (PG) — no HTTP between them.
 Free/busy is computed from Kai's own internal events (Nexus tasks, Arcana
 works, other bookings, manual blocks), not an external calendar.
 
-## Two contexts, two slot models
+## One slot model, opt-in per context
 
-`context ∈ ('friends', 'arcana')` on every table row. The two contexts use
-**different slot-generation algorithms** — this is the central fork the rest
-of this spec hangs off:
+`context ∈ ('friends', 'arcana')` on every table row, both driven by the
+**same windows-based algorithm** (`core.booking.slots.free_slots`):
+`booking_availability` rows for that `context` (recurring by `weekday` XOR
+one-off by `specific_date`, #232) → concrete slots (stepped by
+`slot_minutes`, meeting must fit before the window closes) → drop slots
+inside `min_notice_hours` / past `max_advance_days` → drop slots overlapping
+`busy_intervals()` (below), widened by each window's own buffers. **A day
+with no matching `booking_availability` row shows zero slots** — nothing is
+bookable until Kai explicitly opens a window for it.
 
-- **`friends`** — Kai or an approved friend (`core.auth_grants.booking_role`)
-  can book **any free hour**, no configured windows needed. Bounded 13:00–23:00
-  Europe/Moscow, hourly steps, `min_notice_hours=2`, `max_advance_days=60`
-  (`core/booking/slots.py:_FRIENDS_DAY_START/_FRIENDS_DAY_END/_FRIENDS_SLOT_MINUTES/
-  _FRIENDS_MIN_NOTICE_HOURS/_FRIENDS_MAX_ADVANCE_DAYS`, `_free_slots_any_time`).
-  `booking_availability` rows are **not consulted** for this context.
-- **`arcana`** — guest tarot/ritual booking, still windows-based:
-  `booking_availability` rows (recurring by `weekday` XOR one-off by
-  `specific_date`, #232) expand into concrete slots
-  (`core/booking/slots.py:free_slots`, `_slots_for_window`), gated by each
-  window's own `slot_minutes`/`min_notice_hours`/`max_advance_days`/buffers.
-
-Both algorithms subtract the same `busy_intervals()` (below) and both are
-reached through the one entry point `core.booking.slots.free_slots(user_id,
-context, day_from, day_to, now, engine)`.
+#243 note: friends briefly had a windows-free "any free hour 13:00–23:00 MSK
+is bookable" model (#233) — reverted after Kai found an always-wide-open
+calendar unwelcome ("было бы лучше чтобы по умолчанию всё было занято и я
+сама решала какие слоты выкатить"). Friends and Arcana now share the exact
+same mechanism (add a window via `POST /booking/availability` with
+`context="friends"` or `"arcana"`) — the only difference is who's allowed to
+see/book the resulting slots (`core.auth_grants.booking_role`) and what
+confirming a booking creates (Linkage, below).
 
 ## Free/busy aggregation
 
@@ -203,7 +202,7 @@ to a group (`on_membership_changed` kicks her back out).
 
 - `core/booking/tables.py` + `alembic/versions/{d4e5f6a7b8c9,f7c8b9a0d1e2,a8b9c0d1e2f3,b1c2d3e4f5a6}` — schema
 - `core/booking/busy.py` — free/busy aggregator, per-row duration
-- `core/booking/slots.py` — `free_slots`, `_free_slots_any_time` (friends), windows algorithm (arcana)
+- `core/booking/slots.py` — `free_slots`, one windows-based algorithm for both contexts (#243)
 - `core/booking/repo.py` — CRUD, `reschedule_booking`
 - `core/booking/linkage.py` — `link_booking`/`unlink_booking`/`update_linked_time`
 - `core/auth_grants.py` — `booking_role`, `get_display_name` (`people` registry)

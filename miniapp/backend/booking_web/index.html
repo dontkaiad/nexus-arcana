@@ -655,7 +655,10 @@ async function winBox(){const el=$("#winBox");try{
     <span>${w.weekday!=null?DOW[w.weekday]+" · каждую неделю":mskDate(w.specific_date)+" · разово"} ${w.start_time}–${w.end_time} · ${w.context==="arcana"?"расклады":"встречи"}</span>
     <button class="mini" data-d="${w.id}">✕</button></div></div>`).join("")
     : `<div class="empty">Нет окон — добавь первое, и друзья смогут записываться 👇</div>`;
-  el.querySelectorAll("[data-d]").forEach(b=>b.onclick=async()=>{await api("/availability/"+b.dataset.d,{method:"DELETE"});winBox();load().then(gridR);});
+  // #243: без try/catch неудачное удаление молчало — кнопка выглядела нерабочей
+  el.querySelectorAll("[data-d]").forEach(b=>b.onclick=async()=>{try{
+    await api("/availability/"+b.dataset.d,{method:"DELETE"});toast("окно удалено");winBox();load().then(gridR);
+  }catch(e){toast("не вышло удалить: "+e.message);}});
 }catch(e){el.innerHTML=`<div class="empty">${e.message}</div>`;}}
 
 async function typBox(){const el=$("#typBox");try{
@@ -664,7 +667,9 @@ async function typBox(){const el=$("#typBox");try{
     <span>${m.title||m.slug} · ${m.duration_min}м · ${m.context==="arcana"?"расклады":"встречи"}</span>
     <button class="mini" data-dt="${m.id}">✕</button></div></div>`).join("")
     : `<div class="empty">Типов нет — необязательно, но клиенту удобнее выбрать</div>`;
-  el.querySelectorAll("[data-dt]").forEach(b=>b.onclick=async()=>{await api("/meeting-types/"+b.dataset.dt,{method:"DELETE"});typBox();});
+  el.querySelectorAll("[data-dt]").forEach(b=>b.onclick=async()=>{try{
+    await api("/meeting-types/"+b.dataset.dt,{method:"DELETE"});typBox();
+  }catch(e){toast("не вышло удалить: "+e.message);}});
 }catch(e){el.innerHTML=`<div class="empty">${e.message}</div>`;}}
 
 async function offBox(){const el=$("#offBox");try{
@@ -673,7 +678,9 @@ async function offBox(){const el=$("#offBox");try{
     <span>${mskDate(b.start_at)} – ${mskDate(b.end_at)} · ${b.reason||"—"}</span>
     <button class="mini" data-db="${b.id}">✕</button></div></div>`).join("")
     : `<div class="empty">Ничего не отмечено</div>`;
-  el.querySelectorAll("[data-db]").forEach(b=>b.onclick=async()=>{await api("/blocks/"+b.dataset.db,{method:"DELETE"});offBox();load().then(gridR);});
+  el.querySelectorAll("[data-db]").forEach(b=>b.onclick=async()=>{try{
+    await api("/blocks/"+b.dataset.db,{method:"DELETE"});toast("отметка снята");offBox();load().then(gridR);
+  }catch(e){toast("не вышло удалить: "+e.message);}});
 }catch(e){el.innerHTML=`<div class="empty">${e.message}</div>`;}}
 
 /* #220 (B7): история броней + перенос времени */

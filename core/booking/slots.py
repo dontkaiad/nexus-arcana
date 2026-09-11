@@ -1,19 +1,17 @@
 """core/booking/slots.py — availability windows → bookable slots (#23 B2 / ADR-0026).
 
-`free_slots(user_id, context, day_from, day_to)` — two algorithms by context
-(#233, Kai's explicit priority: friends see real freedom, guests see only
-what she curates):
+`free_slots(user_id, context, day_from, day_to)` — one windows-based
+algorithm for both contexts (#243 — reverts the #233 "friends: any free
+time" pivot; Kai, after living with it: "было бы лучше чтобы по умолчанию
+всё было занято и я сама решала какие слоты выкатить" — opt-in, not
+opt-out, for friends too now):
 
-- **context == "friends"** (also admin — `_ctx_for` maps admin→friends):
-  no manual windows at all. Any hour not covered by `busy_intervals()` is
-  bookable, full stop — `_free_slots_any_time`.
-- **context == "arcana"** (guest / public Arcana booking): the original
-  windows model — weekly `booking_availability` rows (recurring by weekday,
-  or one-off by `specific_date`, #232) → concrete slots (stepped by
-  `slot_minutes`, meeting must fit before the window closes) → drop slots
-  inside `min_notice_hours` / past `max_advance_days` → drop slots
-  overlapping `busy_intervals()`, widened by the window's before/after
-  buffers.
+weekly `booking_availability` rows (recurring by `weekday`, or one-off by
+`specific_date`, #232) → concrete slots (stepped by `slot_minutes`, meeting
+must fit before the window closes) → drop slots inside `min_notice_hours` /
+past `max_advance_days` → drop slots overlapping `busy_intervals()`, widened
+by the window's before/after buffers. A day with no `booking_availability`
+row for that context shows zero slots — nothing is bookable by default.
 
 Everything is computed in UTC; the window's `tz` places its wall-clock hours.
 """
@@ -26,25 +24,11 @@ from typing import List, Optional
 
 import sqlalchemy as sa
 
-from core.booking.busy import busy_intervals, merge_intervals
+from core.booking.busy import busy_intervals
 from core.booking.tables import booking_availability
 
 UTC = timezone.utc
 _MSK = timezone(timedelta(hours=3))  # fallback
-
-# #233: friends/admin ("friends" context) не настраивают окна вручную — им
-# бронируемо ЛЮБОЕ время, свободное от дел (инверсия busy_intervals). Только
-# guest/Arcana context ("arcana") остаётся на явных окнах booking_availability
-# — приоритет по просьбе Кай: друзья видят реальную свободу, гости — только
-# то, что она сама выставила.
-_FRIENDS_SLOT_MINUTES = 60
-_FRIENDS_MIN_NOTICE_HOURS = 2
-_FRIENDS_MAX_ADVANCE_DAYS = 60
-# Кай: бронировать можно с 13:00 до 23:00 (МСК) каждый день; вне этого —
-# только по запросу (руками, не через авто-слоты).
-_FRIENDS_DAY_START = time(13, 0)
-_FRIENDS_DAY_END = time(23, 0)
-
 
 @dataclass(frozen=True)
 class Slot:
@@ -133,33 +117,6 @@ def _slots_for_window(row: dict, day: date, now: datetime) -> List[Slot]:
     return out
 
 
-async def _free_slots_any_time(
-    user_id: str, day_from: date, day_to: date, now: datetime, engine,
-) -> List[Slot]:
-    """friends/admin: любой час 13:00–23:00 МСК, свободный от busy_intervals —
-    без ручных окон. Вне 13–23 — только по запросу, не в авто-слотах."""
-    step = timedelta(minutes=_FRIENDS_SLOT_MINUTES)
-    span_start = datetime.combine(day_from, _FRIENDS_DAY_START, tzinfo=_MSK).astimezone(UTC)
-    span_end = datetime.combine(day_to, _FRIENDS_DAY_END, tzinfo=_MSK).astimezone(UTC)
-    notice_cut = now + timedelta(hours=_FRIENDS_MIN_NOTICE_HOURS)
-    advance_cut = now + timedelta(days=_FRIENDS_MAX_ADVANCE_DAYS)
-
-    busy = merge_intervals(await busy_intervals(user_id, span_start, span_end, engine=engine))
-
-    out: List[Slot] = []
-    d = day_from
-    while d <= day_to:
-        day_start = datetime.combine(d, _FRIENDS_DAY_START, tzinfo=_MSK).astimezone(UTC)
-        day_end = datetime.combine(d, _FRIENDS_DAY_END, tzinfo=_MSK).astimezone(UTC)
-        t = day_start
-        while t + step <= day_end:
-            if notice_cut <= t <= advance_cut and not any(a < t + step and b > t for a, b in busy):
-                out.append(Slot(t, t + step))
-            t += step
-        d += timedelta(days=1)
-    return out
-
-
 async def free_slots(
     user_id: str,
     context: str,
@@ -177,9 +134,6 @@ async def free_slots(
     now = now.astimezone(UTC)
     if day_to < day_from:
         return []
-
-    if context == "friends":
-        return await _free_slots_any_time(user_id, day_from, day_to, now, engine)
 
     rows = await asyncio.to_thread(_rows_sync, engine, user_id, context)
     if not rows:
