@@ -11,7 +11,7 @@ from zarya.formatting import (
     epoch, from_epoch, group_slots_by_day, slot_label, wants_slots,
 )
 from zarya.handlers import (
-    RoleMiddleware, _ctx_for, cmd_start, on_login_confirm, on_login_deny,
+    RoleMiddleware, _ctx_for, cmd_help, cmd_start, on_login_confirm, on_login_deny,
 )
 
 UTC = timezone.utc
@@ -96,7 +96,7 @@ async def test_start_plain_ignores_login_flow():
     m = _msg()
     await cmd_start(m, command=_cmd(None), role="guest")
     m.answer.assert_awaited_once()
-    assert "Zarya" in m.answer.call_args[0][0]  # normal /start greeting, not the login flow
+    assert "Заря" in m.answer.call_args[0][0]  # normal /start greeting, not the login flow
 
 
 @pytest.mark.asyncio
@@ -169,3 +169,22 @@ async def test_on_login_deny():
         await on_login_deny(c, tg_id=67686090)
     deny_mock.assert_awaited_once_with("tok1", 67686090)
     assert "отклонён" in c.message.edit_text.call_args[0][0]
+
+
+# ── /help ────────────────────────────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_help_admin_lists_commands():
+    m = _msg()
+    await cmd_help(m, role="admin")
+    text = m.answer.call_args[0][0]
+    assert "/requests" in text and "/bookings" in text and "/slots" in text
+
+
+@pytest.mark.asyncio
+async def test_help_friend_no_admin_commands():
+    m = _msg()
+    await cmd_help(m, role="friend")
+    text = m.answer.call_args[0][0]
+    assert "/slots" in text
+    assert "/requests" not in text

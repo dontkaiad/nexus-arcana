@@ -151,18 +151,41 @@ async def cmd_start(msg: Message, command: CommandObject = None, role: str = "gu
         return
     if role == "admin":
         await msg.answer(
-            "⭐ <b>Zarya</b> — пульт букинга.\n"
-            "/requests — заявки на подтверждение\n"
-            "/bookings — подтверждённые встречи (можно отменить)\n"
-            "/slots — посмотреть свободное"
+            "⭐ Привет, это я! Держу твой календарь под контролем.\n\n"
+            "/requests — заявки, которые ждут подтверждения\n"
+            "/bookings — что уже подтверждено (можно отменить)\n"
+            "/slots — глянуть свободное время\n"
+            "/help — если забыла, что я умею"
         )
         return
     who = "друг" if role == "friend" else "гость"
     await msg.answer(
-        f"⭐ Привет! Я <b>Zarya</b> — веду календарь Кай.\n"
-        f"Ты сейчас: <b>{who}</b>.\n\n"
+        f"⭐ Привет! Я Заря — веду календарь Кай.\n"
+        f"Сейчас ты у меня как <b>{who}</b>.\n\n"
         "Спроси «когда у Кай окно» или напиши /slots — покажу свободное время "
-        "и помогу записаться."
+        "и помогу записаться. /help — если что-то непонятно."
+    )
+
+
+@router.message(Command("help"))
+async def cmd_help(msg: Message, role: str = "guest") -> None:
+    if role == "admin":
+        await msg.answer(
+            "⭐ Вот что я умею:\n\n"
+            "/requests — заявки на подтверждение (от гостей — из Арканы)\n"
+            "/bookings — подтверждённые встречи, отмена по кнопке\n"
+            "/slots — твоё свободное время как ты его увидят другие\n\n"
+            "Подтверждённым — напоминаю за сутки и за 2 часа, обеим сторонам. "
+            "Отмена — кнопкой у брони, с обеих сторон."
+        )
+        return
+    who = "как другу" if role == "friend" else "как гостю"
+    await msg.answer(
+        f"⭐ Вот что я умею ({who}):\n\n"
+        "/slots — покажу свободные окна у Кай\n"
+        "Просто спроси «когда у Кай окно» — тоже сработает.\n"
+        "Выбираешь слот → жмёшь кнопку → готово, я записала.\n\n"
+        "Захочешь отменить — кнопка «❌ Отменить бронь» будет прямо у записи."
     )
 
 
@@ -171,7 +194,7 @@ async def cmd_start(msg: Message, command: CommandObject = None, role: str = "gu
 async def _show_slots(msg: Message, role: str) -> None:
     uid = await _owner_user_id()
     if not uid:
-        await msg.answer("Пока не могу — календарь не готов.")
+        await msg.answer("Ой, у меня пока нет доступа к календарю Кай 🙈 Попробуй чуть позже.")
         return
     ctx = _ctx_for(role)
     today = date.today()
@@ -190,7 +213,7 @@ async def _show_slots(msg: Message, role: str) -> None:
                 f"• занято {s.astimezone(MSK):%d.%m %H:%M}–{e.astimezone(MSK):%H:%M}"
                 for s, e in merged[:6]
             ) or "• ближайшая неделя свободна, но окна не настроены"
-            await msg.answer("Настроенных окон под запись нет. Занятость:\n" + busy_txt)
+            await msg.answer("Окна под запись ещё не настроены, но вот что вижу в календаре:\n" + busy_txt)
         return
 
     by_day = group_slots_by_day(slots)
@@ -219,13 +242,13 @@ async def nl_slots(msg: Message, role: str = "guest") -> None:
 async def on_slot(call: CallbackQuery, role: str = "guest") -> None:
     _, _, ctx, ep = call.data.split(":", 3)
     if ctx == "friends" and role not in ("friend", "admin"):
-        await call.answer("Нужен доступ friend. Напиши Кай.", show_alert=True)
+        await call.answer("Для этого нужен доступ друга — напиши Кай 🙂", show_alert=True)
         return
     if ctx == "friends":
         rows = [[InlineKeyboardButton(text=f"{h} ч", callback_data=f"z:book:{ctx}:{ep}:{h}")]
                 for h in _FRIEND_HOURS]
         await call.message.edit_text(
-            f"На сколько часов тебя занять? ({slot_label(from_epoch(ep))})",
+            f"Отлично! На сколько часов тебя занять? ({slot_label(from_epoch(ep))})",
             reply_markup=InlineKeyboardMarkup(inline_keyboard=rows),
         )
     else:
@@ -251,7 +274,7 @@ async def _do_book(call: CallbackQuery, ctx: str, ep: str, hours: float, role: s
         return
     clash = await busy_intervals(uid, start, end)
     if any(iv.overlaps(start, end) for iv in clash):
-        await call.message.edit_text("Упс, слот только что заняли. Спроси окна ещё раз.")
+        await call.message.edit_text("Ой, слот только что увели! Спроси окна ещё раз — /slots")
         return
 
     status = "confirmed" if ctx == "friends" else "pending"
@@ -278,7 +301,7 @@ async def _do_book(call: CallbackQuery, ctx: str, ep: str, hours: float, role: s
             )
     else:
         await call.message.edit_text(
-            f"📝 Заявка на {when} принята. Кай подтвердит — я напишу."
+            f"📝 Заявка на {when} принята! Как только Кай подтвердит — сразу напишу тебе."
         )
         await _notify_owner(
             f"🃏 <b>Заявка</b>: {name} · {when}\n"
@@ -292,7 +315,7 @@ async def _do_book(call: CallbackQuery, ctx: str, ep: str, hours: float, role: s
 @router.message(Command("requests"))
 async def cmd_requests(msg: Message, role: str = "guest") -> None:
     if role != "admin":
-        await msg.answer("Только для Кай.")
+        await msg.answer("Это только для Кай 🙂")
         return
     uid = await _owner_user_id()
     pend = await list_bookings(uid or "", statuses=("pending",), upcoming_only=True)
@@ -314,7 +337,7 @@ async def cmd_requests(msg: Message, role: str = "guest") -> None:
 @router.callback_query(F.data.startswith("z:ok:"))
 async def on_approve(call: CallbackQuery, role: str = "guest") -> None:
     if role != "admin":
-        await call.answer("Не тебе.", show_alert=True)
+        await call.answer("Это не тебе 🙂", show_alert=True)
         return
     b = await set_booking_status(int(call.data.split(":")[2]), "confirmed")
     if not b:
@@ -335,7 +358,7 @@ async def on_approve(call: CallbackQuery, role: str = "guest") -> None:
 @router.callback_query(F.data.startswith("z:no:"))
 async def on_reject(call: CallbackQuery, role: str = "guest") -> None:
     if role != "admin":
-        await call.answer("Не тебе.", show_alert=True)
+        await call.answer("Это не тебе 🙂", show_alert=True)
         return
     b = await set_booking_status(int(call.data.split(":")[2]), "declined")
     await call.message.edit_text(f"❌ #{b.id} отклонена — {b.requester_name}")
@@ -394,7 +417,7 @@ async def on_login_confirm(call: CallbackQuery, tg_id: int = 0) -> None:
         await call.message.edit_text("⚠️ Ссылка уже неактуальна.")
         await call.answer()
         return
-    await call.message.edit_text("✅ Вход подтверждён — вернись на сайт, там уже пустило.")
+    await call.message.edit_text("✅ Вход подтверждён! Возвращайся на сайт — там уже открыто.")
     await call.answer()
 
 
@@ -409,7 +432,7 @@ async def on_login_deny(call: CallbackQuery, tg_id: int = 0) -> None:
 @router.message(Command("bookings"))
 async def cmd_bookings(msg: Message, role: str = "guest") -> None:
     if role != "admin":
-        await msg.answer("Только для Кай.")
+        await msg.answer("Это только для Кай 🙂")
         return
     uid = await _owner_user_id()
     up = await list_bookings(uid or "", statuses=("confirmed",), upcoming_only=True)
