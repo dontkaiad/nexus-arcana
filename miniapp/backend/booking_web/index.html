@@ -312,7 +312,7 @@ const sv=p=>`<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke=
 const ORB_SUN='<svg class="orb-mark" width="40" height="40" viewBox="0 0 54 54"><defs><radialGradient id="sg" cx="35%" cy="30%" r="70%"><stop offset="0" stop-color="#fff2c8"/><stop offset=".4" stop-color="#f4c66e"/><stop offset="1" stop-color="#b07a2e"/></radialGradient></defs><circle cx="27" cy="27" r="22" fill="#f4c66e" opacity=".2"/><circle cx="27" cy="27" r="17" fill="none" stroke="#f4c66e" stroke-width=".8" opacity=".6"/><circle cx="27" cy="27" r="13" fill="url(#sg)"/></svg>';
 const ORB_MOON='<svg class="orb-mark" width="40" height="40" viewBox="0 0 54 54"><defs><radialGradient id="mg" cx="35%" cy="30%" r="70%"><stop offset="0" stop-color="#fff"/><stop offset=".4" stop-color="#d4dce8"/><stop offset="1" stop-color="#6b7590"/></radialGradient></defs><circle cx="27" cy="27" r="22" fill="#d4dce8" opacity=".15"/><circle cx="27" cy="27" r="17" fill="none" stroke="#d4dce8" stroke-width=".8" opacity=".5"/><circle cx="27" cy="27" r="13" fill="url(#mg)"/></svg>';
 
-const st={me:{role:"guest"},ctx:"friends",month:new Date(),events:[],slots:[],windows:[],mine:[],sel:null};
+const st={me:{role:"guest"},ctx:"friends",month:new Date(),events:[],slots:[],windows:[],mine:[],sel:null,needsZaryaStart:false};
 
 function toast(t){const e=$("#toast");e.textContent=t;e.classList.add("show");setTimeout(()=>e.classList.remove("show"),2600);}
 async function api(p,o){const r=await fetch(API+p,{credentials:"include",...o});
@@ -446,6 +446,7 @@ function rail(){
       <p class="hintline">выбери день → появятся свободные слоты · время по UTC+3</p>
     </div>
     <div class="glass blk"><span class="eyebrow">обозначения</span>${legend}</div>
+    ${zaryaNudge()}
     ${mineBlock()}
     <div class="glass blk"><span class="eyebrow">бронь</span>
       <p class="hintline" style="margin-top:0">${BOOK_NOTE}</p>
@@ -456,6 +457,16 @@ function rail(){
   loadTip();
 }
 async function loadTip(){try{const t=await api("/tip?context="+st.ctx);const e=$("#tip p");if(e)e.textContent=t.tip;}catch(_){}}
+function zaryaNudge(){
+  if(!st.needsZaryaStart) return "";
+  return `<div class="glass blk" style="border-color:var(--gold)">
+    <span class="eyebrow" style="color:var(--gold)">⭐ открой Зарю</span>
+    <p class="hintline" style="margin-top:4px">
+      Не смогла написать тебе в Telegram — открой
+      <a href="https://t.me/heylark_booking_bot" target="_blank">@heylark_booking_bot</a>
+      и нажми <b>/start</b>, иначе не пришлю напоминания о встрече.</p>
+  </div>`;
+}
 function mineBlock(){
   const up=st.mine.filter(m=>m.date>new Date());
   if(!up.length) return "";
@@ -706,8 +717,9 @@ async function book(startIso){
     const b=await api("/book",{method:"POST",headers:{"content-type":"application/json"},
       body:JSON.stringify({context:st.ctx,start:startIso,hours})});
     toast(b.status==="confirmed"?"Записано ✅":"Заявка отправлена — Кай подтвердит");
+    if(b.zarya_dm_sent===false) st.needsZaryaStart=true;
   }catch(e){toast(String(e).includes("409")?"Слот только что заняли":"Не вышло");}
-  await load();gridR();detail();
+  await load();gridR();detail();rail();
 }
 async function cancelMine(token){
   if(!confirm("Отменить эту бронь?"))return;

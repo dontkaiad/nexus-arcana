@@ -96,6 +96,15 @@ async def test_notify_user_no_token_for_arcana():
     assert ok is False
 
 
+@pytest.mark.parametrize("bot", ["booking", "zarya"])
+def test_token_for_booking_uses_zarya_bot_token(bot):
+    # #23: Zarya sends her own DMs (booking confirmations/reminders) via her own
+    # bot token, not the nexus/arcana bots — Telegram identity must match @heylark_booking_bot.
+    from core import bot_notify
+    with patch.object(bot_notify.config, "booking_bot_token", "zarya-token-abc"):
+        assert bot_notify._token_for(bot) == "zarya-token-abc"
+
+
 # ── routes call notify_user ──────────────────────────────────────────────────
 
 def test_task_done_notifies(client):

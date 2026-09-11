@@ -262,12 +262,28 @@ def _parse_dt(s: str) -> datetime:
     return dt.astimezone(_UTC)
 
 
-def _booking_view(b: Booking) -> dict:
-    return {
+def _booking_view(b: Booking, *, zarya_dm_sent: Optional[bool] = None) -> dict:
+    v = {
         "id": b.id, "token": b.token, "status": b.status, "context": b.context,
         "start": b.start_at.isoformat(), "end": b.end_at.isoformat(),
         "requester_name": b.requester_name, "note": b.note,
     }
+    if zarya_dm_sent is not None:
+        # False → the web should nudge: «открой @heylark_booking_bot и /start» —
+        # Telegram bots can't message a user who never started them.
+        v["zarya_dm_sent"] = zarya_dm_sent
+    return v
+
+
+async def _zarya_dm(tg_id: Optional[int], text: str) -> Optional[bool]:
+    if not tg_id:
+        return None
+    try:
+        from core.bot_notify import notify_user
+        return await notify_user(tg_id, text, bot="zarya")
+    except Exception as e:  # noqa: BLE001
+        logger.warning("zarya dm failed: %s", e)
+        return False
 
 
 @router.post("/booking/book")
@@ -308,6 +324,7 @@ async def booking_book(body: BookBody, p: Principal = Depends(booking_principal)
         source="web",
     )
 
+    zarya_dm_sent = None
     if status == "confirmed":
         # B6: link to a Nexus task / 🔮 Work. Zarya's reminder sweep picks the
         # new confirmed row up within ~5 min and arms the T-24h / T-2h pings.
@@ -316,6 +333,12 @@ async def booking_book(body: BookBody, p: Principal = Depends(booking_principal)
             b = await link_booking(b)
         except Exception as e:  # noqa: BLE001
             logger.warning("booking link failed: %s", e)
+        when_msk = start.astimezone(timezone(timedelta(hours=3))).strftime("%d.%m %H:%M")
+        zarya_dm_sent = await _zarya_dm(
+            p.tg_id,
+            f"✅ Заря подтверждает: встреча {when_msk} (МСК).\n"
+            f"Напомню за сутки и за 2 часа 💫",
+        )
 
     try:
         from core.bot_notify import notify_booking_log
@@ -334,7 +357,7 @@ async def booking_book(body: BookBody, p: Principal = Depends(booking_principal)
     except Exception as e:
         logger.warning("booking notify failed: %s", e)
 
-    return _booking_view(b)
+    return _booking_view(b, zarya_dm_sent=zarya_dm_sent)
 
 
 @router.get("/booking/request/{token}")
@@ -361,13 +384,29 @@ async def _decide(booking_id: int, new_status: str) -> dict:
     b = await set_booking_status(booking_id, new_status)
     if not b:
         raise HTTPException(status_code=404, detail="not found")
+    zarya_dm_sent = None
     try:
         if new_status == "confirmed":
             from core.booking.linkage import link_booking
             b = await link_booking(b)
+            when_msk = b.start_at.astimezone(timezone(timedelta(hours=3))).strftime("%d.%m %H:%M")
+            zarya_dm_sent = await _zarya_dm(
+                b.requester_tg_id,
+                f"✅ Кай подтвердила: {when_msk} (МСК).\nНапомню за сутки и за 2 часа 💫",
+            )
         elif new_status in ("declined", "cancelled_by_owner", "cancelled_by_requester"):
             from core.booking.linkage import unlink_booking
             await unlink_booking(b)
+            if new_status == "declined":
+                when_msk = b.start_at.astimezone(timezone(timedelta(hours=3))).strftime("%d.%m %H:%M")
+                await _zarya_dm(b.requester_tg_id, f"К сожалению, {when_msk} не выйдет 🙏 /slots за другим временем")
+            elif new_status == "cancelled_by_owner":
+                when_msk = b.start_at.astimezone(timezone(timedelta(hours=3))).strftime("%d.%m %H:%M")
+                await _zarya_dm(b.requester_tg_id, f"❌ Кай отменила встречу {when_msk} (МСК). Извини!")
+            elif new_status == "cancelled_by_requester":
+                when_msk = b.start_at.astimezone(timezone(timedelta(hours=3))).strftime("%d.%m %H:%M")
+                for owner in config.allowed_ids:
+                    await _zarya_dm(owner, f"❌ <b>{b.requester_name}</b> отменил(а) бронь · {when_msk} (МСК)")
     except Exception as e:  # noqa: BLE001
         logger.warning("decide link/unlink failed: %s", e)
     try:
@@ -376,7 +415,7 @@ async def _decide(booking_id: int, new_status: str) -> dict:
         await notify_booking_log(f"🃏 Заявка #{b.id} ({b.requester_name}) — {verb}")
     except Exception as e:
         logger.warning("decide notify failed: %s", e)
-    return _booking_view(b)
+    return _booking_view(b, zarya_dm_sent=zarya_dm_sent)
 
 
 @router.post("/booking/requests/{booking_id}/confirm")

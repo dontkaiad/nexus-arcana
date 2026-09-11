@@ -27,6 +27,8 @@ _EDIT_API = "https://api.telegram.org/bot{token}/editMessageText"
 def _token_for(bot: str) -> str:
     if bot == "arcana":
         return config.arcana.tg_token or ""
+    if bot in ("booking", "zarya"):
+        return config.booking_bot_token or ""
     return config.nexus.tg_token or ""
 
 
