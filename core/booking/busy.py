@@ -29,8 +29,13 @@ from arcana.repos.works_tables import works, work_status
 from core.booking.tables import BLOCKING_BOOKING_STATUSES, booking, booking_block
 from nexus.repos.tasks_tables import tasks, task_status
 
-# A Nexus task / Arcana work is a point in time; treat it as this long.
+# A Nexus task / Arcana work is a point in time; treat it as this long by
+# default (#241: overridable per-row via tasks.duration_min / works.duration_min).
 DEFAULT_BUSY_MINUTES = 60
+# #241: widen the point-event fetch window so a task/work with a long custom
+# duration, starting just before `start`, is still caught. A day is generous —
+# nothing books longer than that.
+_MAX_PLAUSIBLE_DURATION_MIN = 24 * 60
 
 _DONE_CODES = ("Done", "Archived")
 
@@ -70,17 +75,17 @@ def _busy_sync(engine, user_id: str, start: datetime, end: datetime) -> List[Bus
     if start is None or end is None or start >= end:
         return []
 
-    dur = timedelta(minutes=DEFAULT_BUSY_MINUTES)
+    default_dur = timedelta(minutes=DEFAULT_BUSY_MINUTES)
     # widen the point-event fetch so an event starting just before `start`
-    # whose 1h tail reaches into the window is still caught
-    fetch_from = start - dur
+    # whose tail (max plausible duration) reaches into the window is still caught
+    fetch_from = start - timedelta(minutes=_MAX_PLAUSIBLE_DURATION_MIN)
     out: List[BusyInterval] = []
 
     with engine.connect() as conn:
         # ── Nexus tasks with a deadline ─────────────────────────────────────
         done_ids = sa.select(task_status.c.id).where(task_status.c.code.in_(_DONE_CODES))
         q = (
-            sa.select(tasks.c.id, tasks.c.title, tasks.c.deadline)
+            sa.select(tasks.c.id, tasks.c.title, tasks.c.deadline, tasks.c.duration_min)
             .where(tasks.c.status_id.notin_(done_ids))
             .where(tasks.c.deadline.isnot(None))
             .where(tasks.c.deadline >= fetch_from)
@@ -92,6 +97,8 @@ def _busy_sync(engine, user_id: str, start: datetime, end: datetime) -> List[Bus
             d = _as_utc(row.deadline)
             if d is None:
                 continue
+            # #241: своя длительность задачи, если Кай её выставила — иначе дефолт 1ч
+            dur = timedelta(minutes=row.duration_min) if row.duration_min else default_dur
             iv = BusyInterval(d, d + dur, "task", row.title or "Задача", str(row.id))
             if iv.overlaps(start, end):
                 out.append(iv)
@@ -99,7 +106,7 @@ def _busy_sync(engine, user_id: str, start: datetime, end: datetime) -> List[Bus
         # ── Arcana works with scheduled_at ─────────────────────────────────
         wdone = sa.select(work_status.c.id).where(work_status.c.code.in_(_DONE_CODES))
         wq = (
-            sa.select(works.c.id, works.c.title, works.c.scheduled_at)
+            sa.select(works.c.id, works.c.title, works.c.scheduled_at, works.c.duration_min)
             .where(works.c.scheduled_at.isnot(None))
             .where(works.c.scheduled_at >= fetch_from)
             .where(works.c.scheduled_at < end)
@@ -113,6 +120,7 @@ def _busy_sync(engine, user_id: str, start: datetime, end: datetime) -> List[Bus
             s = _as_utc(row.scheduled_at)
             if s is None:
                 continue
+            dur = timedelta(minutes=row.duration_min) if row.duration_min else default_dur
             iv = BusyInterval(s, s + dur, "work", row.title or "Работа", str(row.id))
             if iv.overlaps(start, end):
                 out.append(iv)

@@ -181,11 +181,13 @@ def build_system(tz_offset: int = 3) -> str:
         "Примеры: исправь на налик/карту → field=source; на категорию → field=category; сумму → field=amount",
         "",
         "edit_record — изменить поле существующей записи (задачи или финансовой):",
-        '{"type":"edit_record","record_type":"task|finance","record_hint":"поисковые слова","field":"category|priority|title|deadline|status","new_value":"новое значение"}',
+        '{"type":"edit_record","record_type":"task|finance","record_hint":"поисковые слова","field":"category|priority|title|deadline|status|duration|shared","new_value":"новое значение"}',
         "Примеры: 'поменяй категорию задачи купить корм на продукты' → edit_record",
         "         'переименуй задачу купить корм в купить корм котам' → edit_record",
         "         'смени приоритет купить молоко на срочно' → edit_record field=priority new_value=Срочно",
         "         'поставь статус в процессе для купить корм' → edit_record field=status new_value=В процессе",
+        "         'поставь длительность 2 часа для встречи с Мишаней' → edit_record field=duration new_value='2 часа'",
+        "         'расшарь задачу сходить в кино' → edit_record field=shared new_value='true'",
         "ВАЖНО: edit_record только если явно упомянуто изменение поля существующей записи!",
         "",
         'Вход: "погладить кота каждый день в 9" → {"type":"task","title":"погладить кота","category":"🐾 Коты","priority":"Можно потом","deadline":null,"repeat":"Ежедневно","repeat_time":"09:00","day_of_week":null,"confidence":"high"}',
@@ -509,10 +511,10 @@ def _budget_positions_prompt(fixed: "list[str]", one_time: "list[str]") -> str:
 
 
 _EDIT_RE = re.compile(
-    r"\b(поменяй|измени|обнови|исправь|смени|замени|измените|обновите|исправьте|сменить|изменить|поменять)\b"
-    r".{0,50}\b(категорию|категория|приоритет|название|заголовок|дедлайн|имя|источник|статус)\b"
+    r"\b(поменяй|измени|обнови|исправь|смени|замени|измените|обновите|исправьте|сменить|изменить|поменять|поставь|установи)\b"
+    r".{0,50}\b(категорию|категория|приоритет|название|заголовок|дедлайн|имя|источник|статус|длительность|продолжительность)\b"
     r"|"
-    r"\b(категорию|приоритет|название|дедлайн|источник)\b.{0,30}\b(поменяй|измени|обнови|исправь|смени)\b"
+    r"\b(категорию|приоритет|название|дедлайн|источник|длительность|продолжительность)\b.{0,30}\b(поменяй|измени|обнови|исправь|смени|поставь|установи)\b"
     r"|"
     # "перенеси X на 28.08 10:00 (и напоминалку в 9:30)" — без реплая раньше
     # проваливалось в общий classify(), который не умеет несколько правок
@@ -520,6 +522,17 @@ _EDIT_RE = re.compile(
     # edits-список для этого). Реплай-версия этой же фразы работает через
     # core/reply_update.py — эта ветка приводит native-путь к паритету с ним.
     r"\bперенес(и|ите|ти)\b.{0,80}\bна\b",
+    re.IGNORECASE,
+)
+
+# #242: "расшарь задачу X" / "убери из расшаренного" — отдельно от _EDIT_RE,
+# т.к. это глагол без поля-существительного (field=shared, не поле в тексте).
+_SHARE_RE = re.compile(
+    r"\b(расшарь|расшарить|расшарь(?:те)?|поделись|сделай\s+(?:это\s+)?(?:видимой|публичной)|"
+    r"покажи\s+друзьям|видимо?\s+друзьям)\b"
+    r"|"
+    r"\b(скрой|убери\s+из\s+расшаренн\w*|сделай\s+(?:это\s+)?приватной|перестань\s+делиться|"
+    r"больше\s+не\s+расшаривай)\b",
     re.IGNORECASE,
 )
 
@@ -751,12 +764,14 @@ _STATS_RE = re.compile(
 
 _EDIT_PARSE_SYSTEM = (
     "Извлеки параметры редактирования записи. Если несколько изменений — верни все в списке edits. Ответь ТОЛЬКО JSON без markdown:\n"
-    '{"type":"edit_record","record_type":"task","record_hint":"ключевые слова для поиска","edits":[{"field":"category|priority|title|deadline|reminder|status","new_value":"новое значение"}]}\n'
+    '{"type":"edit_record","record_type":"task","record_hint":"ключевые слова для поиска","edits":[{"field":"category|priority|title|deadline|reminder|status|duration|shared","new_value":"новое значение"}]}\n'
     "\nПравила:\n"
     "- record_type: 'task' если о задаче, 'finance' если о финансовой записи\n"
-    "- field: 'category' для категории; 'priority' для приоритета (Срочно/Важно/Можно потом); 'title' или 'name' для переименования; 'deadline' для дедлайна; 'reminder' для напоминания (напоминалку/напомни/напоминание); 'status' для статуса (Not started/In progress/Done/Archived)\n"
+    "- field: 'category' для категории; 'priority' для приоритета (Срочно/Важно/Можно потом); 'title' или 'name' для переименования; 'deadline' для дедлайна; 'reminder' для напоминания (напоминалку/напомни/напоминание); 'status' для статуса (Not started/In progress/Done/Archived); 'duration' для длительности/продолжительности (сколько времени занимает — для букинга); 'shared' для видимости друзьям (расшарь/покажи друзьям/сделай видимой vs скрой/убери из расшаренного/сделай приватной)\n"
     "- record_hint: фраза для поиска записи (название задачи/финансовой операции), пустая строка если не указано\n"
     "- edits: список всех изменений (одно или несколько)\n"
+    "- для field='duration' new_value — как в тексте пользователя (\"2 часа\", \"30 минут\", \"полчаса\") — не конвертируй сам\n"
+    "- для field='shared' new_value — строго 'true' или 'false'\n"
     "\nПримеры:\n"
     "'поменяй категорию задачи купить корм на Продукты' → record_hint='купить корм', edits=[{\"field\":\"category\",\"new_value\":\"Продукты\"}]\n"
     "'переименуй задачу купить корм в купить корм котам' → record_hint='купить корм', edits=[{\"field\":\"title\",\"new_value\":\"купить корм котам\"}]\n"
@@ -765,6 +780,9 @@ _EDIT_PARSE_SYSTEM = (
     "'измени название на Икеа и категорию на Хобби' → record_hint='', edits=[{\"field\":\"title\",\"new_value\":\"Икеа\"},{\"field\":\"category\",\"new_value\":\"Хобби\"}]\n"
     "'поменяй категорию на привычки и источник на нал' → record_hint='', edits=[{\"field\":\"category\",\"new_value\":\"привычки\"},{\"field\":\"source\",\"new_value\":\"нал\"}]\n"
     "'поставь дедлайн 15 мая и напоминалку 1 мая для задачи гардероб' → record_hint='гардероб', edits=[{\"field\":\"deadline\",\"new_value\":\"15 мая\"},{\"field\":\"reminder\",\"new_value\":\"1 мая\"}]\n"
+    "'поставь длительность 2 часа для встречи с Мишаней' → record_hint='встреча с Мишаней', edits=[{\"field\":\"duration\",\"new_value\":\"2 часа\"}]\n"
+    "'расшарь задачу сходить в кино' → record_hint='сходить в кино', edits=[{\"field\":\"shared\",\"new_value\":\"true\"}]\n"
+    "'убери задачу купить корм из расшаренного' → record_hint='купить корм', edits=[{\"field\":\"shared\",\"new_value\":\"false\"}]\n"
 )
 
 
@@ -879,8 +897,9 @@ async def classify(text: str, tz_offset: int = 3, user_id: str = "") -> list[dic
             hint = "последняя"
         return [{"type": "edit_note", "hint": hint, "field": "tags", "new_value": new_value}]
 
-    # Быстрый pre-фильтр: изменение записи ("поменяй категорию X на Y", "переименуй X в Y")
-    if _EDIT_RE.search(text) or _RENAME_RE.search(text):
+    # Быстрый pre-фильтр: изменение записи ("поменяй категорию X на Y", "переименуй X в Y",
+    # "расшарь задачу X" — #242)
+    if _EDIT_RE.search(text) or _RENAME_RE.search(text) or _SHARE_RE.search(text):
         logger.info("classify: edit_record pattern matched")
         parsed = await _parse_edit_record(text)
         return [parsed]

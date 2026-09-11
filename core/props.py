@@ -25,6 +25,10 @@ def _number(value: float) -> dict:
     return {"number": value}
 
 
+def _checkbox(value: bool) -> dict:
+    return {"checkbox": bool(value)}
+
+
 def _select(name: str) -> dict:
     return {"select": {"name": name}}
 

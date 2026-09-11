@@ -13,7 +13,7 @@ from aiogram import Router, F, Bot
 from aiogram.filters import BaseFilter
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from core.claude_client import ask_claude
-from core.props import _title, _select, _date, _status, _relation, _text
+from core.props import _title, _select, _date, _status, _relation, _text, _number, _checkbox
 from core.recurrence import (
     parse_repeat_time as _parse_repeat_time,
     interval_label as _interval_label,
@@ -3312,8 +3312,21 @@ async def _apply_edit(
             else:
                 await _repo.set_props(page_id, {"Напоминание": _date(iso_value)})
                 await message.answer(f"✏️ Напоминание{ctx_label}:\n📌 {label}\n🔔 → {iso_value}")
+        elif field == "duration":
+            from core.duration import parse_duration_minutes, format_duration
+            minutes = parse_duration_minutes(new_value)
+            if not minutes:
+                await message.answer(f"⚠️ Не поняла длительность: «{new_value}» (например: 2 часа, 30 минут).")
+                return
+            await _repo.set_props(page_id, {"Длительность": _number(minutes)})
+            await message.answer(f"✏️ Длительность{ctx_label}:\n📌 {label}\n⏱ → {format_duration(minutes)}")
+        elif field == "shared":
+            val = new_value.strip().lower() in ("true", "1", "да", "yes")
+            await _repo.set_props(page_id, {"Расшарено": _checkbox(val)})
+            verb = "🔗 Теперь видно друзьям" if val else "🔒 Скрыла от друзей"
+            await message.answer(f"✏️ {verb}{ctx_label}:\n📌 {label}")
         else:
-            await message.answer(f"⚠️ Не знаю поле «{field}». Могу менять: категорию, приоритет, название, дедлайн.")
+            await message.answer(f"⚠️ Не знаю поле «{field}». Могу менять: категорию, приоритет, название, дедлайн, длительность, видимость друзьям.")
     except Exception as e:
         logger.error("_apply_edit error: %s", e)
         await message.answer("⚠️ Ошибка при обновлении.")

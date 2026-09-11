@@ -38,10 +38,10 @@ def _make_engine():
             c.execute(sa.text("INSERT INTO work_status (code, label) VALUES (:c, :c)"), {"c": code})
         c.execute(sa.text(
             "CREATE TABLE tasks (id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT NOT NULL, "
-            "deadline TEXT, reminder TEXT, status_id INTEGER, user_id TEXT DEFAULT '')"))
+            "deadline TEXT, reminder TEXT, status_id INTEGER, duration_min INTEGER, user_id TEXT DEFAULT '')"))
         c.execute(sa.text(
             "CREATE TABLE works (id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT NOT NULL, "
-            "deadline TEXT, scheduled_at TEXT, status_id INTEGER, user_id TEXT DEFAULT '')"))
+            "deadline TEXT, scheduled_at TEXT, status_id INTEGER, duration_min INTEGER, user_id TEXT DEFAULT '')"))
         c.execute(sa.text(
             "CREATE TABLE booking (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id TEXT DEFAULT '', "
             "context TEXT, start_at TEXT NOT NULL, end_at TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending', "

@@ -41,6 +41,7 @@ def _make_engine():
             "is_recurring INTEGER DEFAULT 0, remind_days INTEGER, "
             "expires_at DATE, stage INTEGER, "
             "task_id TEXT DEFAULT '', works_id TEXT DEFAULT '', "
+            "shared INTEGER NOT NULL DEFAULT 0, "
             "user_id TEXT DEFAULT '', "
             "created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, "
             "updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)"

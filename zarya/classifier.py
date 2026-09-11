@@ -84,14 +84,39 @@ intent:
 _ROLE_LABEL = {"admin": "admin", "friend": "friend", "guest": "guest"}
 
 
-def _system_prompt(role: str) -> str:
+def _system_prompt(role: str, shared_summary: str = "") -> str:
     """Базовый промпт + контекст о Кай из ZARYA_KAI_CONTEXT (.env, НЕ в коде —
     репо публичный). Гостям (публичная страница записи) контекст не отдаём —
-    только admin/friend."""
+    только admin/friend. #242: друзьям (не admin — Кай не рассказывает себе
+    про себя в третьем лице) добавляем расшаренные активные задачи Кай."""
+    prompt = ZARYA_SYSTEM
     ctx = (config.zarya_kai_context or "").strip()
-    if not ctx or role == "guest":
-        return ZARYA_SYSTEM
-    return ZARYA_SYSTEM + f"\n\nКонтекст о Кай (не для гостей, не пересказывай его дословно):\n{ctx}"
+    if ctx and role != "guest":
+        prompt += f"\n\nКонтекст о Кай (не для гостей, не пересказывай его дословно):\n{ctx}"
+    if shared_summary and role == "friend":
+        prompt += (
+            "\n\nКай расшарила эти свои планы — если к месту в разговоре, "
+            "упомяни их своими словами (не зачитывай списком):\n" + shared_summary
+        )
+    return prompt
+
+
+async def _friend_shared_summary() -> str:
+    """#242: короткая сводка расшаренных задач Кай — только для role=friend.
+    Fail-safe: любая ошибка (нет owner/БД недоступна) → пустая строка."""
+    try:
+        from core.config import config as _cfg
+        from core.user_manager import get_user_id
+        from core.shared_items import shared_tasks_summary
+        if not _cfg.allowed_ids:
+            return ""
+        owner_uid = await get_user_id(_cfg.allowed_ids[0])
+        if not owner_uid:
+            return ""
+        return await shared_tasks_summary(owner_uid)
+    except Exception:
+        logger.warning("_friend_shared_summary: failed", exc_info=True)
+        return ""
 
 
 async def classify_zarya(text: str, role: str = "guest") -> dict:
@@ -99,8 +124,9 @@ async def classify_zarya(text: str, role: str = "guest") -> dict:
     любая ошибка (сеть/парсинг) → intent="chat" с пустым reply — вызывающий
     код должен показать свою дефолтную заглушку в этом случае."""
     role_label = _ROLE_LABEL.get(role, "guest")
+    shared_summary = await _friend_shared_summary() if role_label == "friend" else ""
     prompt = f"Роль пишущего: {role_label}\n{text}"
-    raw = await ask_claude(prompt, system=_system_prompt(role_label), max_tokens=200, temperature=0)
+    raw = await ask_claude(prompt, system=_system_prompt(role_label, shared_summary), max_tokens=200, temperature=0)
     try:
         cleaned = raw.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
         data = json.loads(cleaned)

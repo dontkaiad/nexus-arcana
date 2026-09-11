@@ -5,7 +5,7 @@ Mirrors migration b2f3e4d5c6a7 exactly.
 from __future__ import annotations
 
 from sqlalchemy import (
-    BigInteger, Column, ForeignKey, MetaData,
+    BigInteger, Column, ForeignKey, Integer, MetaData,
     SmallInteger, Table, Text, TIMESTAMP, text,
 )
 
@@ -71,6 +71,9 @@ works = Table(
 
     Column("reminder",     TIMESTAMP(timezone=True)),
     Column("scheduled_at", TIMESTAMP(timezone=True)),  # #23/ADR-0026 — booking appointment time
+    # #241: минуты — сколько работа реально держит время (booking busy-калькулятор).
+    # None → дефолт 1ч (DEFAULT_BUSY_MINUTES, core/booking/busy.py).
+    Column("duration_min", Integer),
     Column("user_id", Text),
 
     Column("created_at", TIMESTAMP(timezone=True), server_default=text("now()")),

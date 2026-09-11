@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from sqlalchemy import (
-    BigInteger, Column, ForeignKey, MetaData, SmallInteger,
+    BigInteger, Boolean, Column, ForeignKey, Integer, MetaData, SmallInteger,
     Table, Text, TIMESTAMP, text,
 )
 
@@ -53,6 +53,11 @@ tasks = Table(
     Column("repeat_time", Text),
     Column("note", Text),
     Column("parent_task_id", BigInteger, ForeignKey("tasks.id")),
+    # #241: минуты — сколько задача реально держит время (для booking busy-калькулятора,
+    # core/booking/busy.py). None → дефолт 1ч (DEFAULT_BUSY_MINUTES).
+    Column("duration_min", Integer),
+    # #242: видно ли задачу Заре для упоминания друзьям ("Кай хочет в кино на выходных").
+    Column("shared", Boolean, nullable=False, server_default=text("false")),
     Column("user_id", Text, nullable=False, server_default=text("''")),
     Column("created_at", TIMESTAMP(timezone=True), nullable=False,
            server_default=text("now()")),

@@ -49,6 +49,8 @@ class Task:
     created_at: str = ""     # ISO string from created_at
     archived: bool = False
     user_id: str = "" # Notion UUID of owning user
+    duration_min: Optional[int] = None  # #241: занимает время (booking busy) — None → дефолт 1ч
+    shared: bool = False                # #242: видна Заре для упоминания друзьям
 
 
 # ── Lookup caches (loaded once per process) ────────────────────────────────────
@@ -152,6 +154,14 @@ def _extract_text(prop: dict) -> str:
     return ""
 
 
+def _extract_number(prop: dict) -> Optional[float]:
+    return prop.get("number")
+
+
+def _extract_checkbox(prop: dict) -> bool:
+    return bool(prop.get("checkbox"))
+
+
 def _parse_iso(s: Optional[str]) -> Optional[datetime]:
     """Parse ISO datetime string (with or without TZ) to datetime."""
     if not s:
@@ -201,6 +211,8 @@ def _to_task(row) -> Task:
         created_at=_fmt(created),
         archived=False,
         user_id=getattr(row, "user_id", "") or "",
+        duration_min=getattr(row, "duration_min", None),
+        shared=bool(getattr(row, "shared", False)),
     )
 
 
@@ -367,6 +379,11 @@ def _set_props_sync(task_id: str, props: dict) -> None:
             vals["completed_at"] = _parse_iso(_extract_date(prop))
         elif field == "Заметка":
             vals["note"] = _extract_text(prop) or None
+        elif field == "Длительность":
+            n = _extract_number(prop)
+            vals["duration_min"] = int(n) if n is not None else None
+        elif field == "Расшарено":
+            vals["shared"] = _extract_checkbox(prop)
 
     if len(vals) <= 1:
         return

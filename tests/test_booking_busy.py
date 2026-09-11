@@ -41,10 +41,10 @@ def _make_engine():
             c.execute(sa.text("INSERT INTO work_status (code, label) VALUES (:c, :c)"), {"c": code})
         c.execute(sa.text(
             "CREATE TABLE tasks (id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT NOT NULL, "
-            "deadline TEXT, reminder TEXT, status_id INTEGER, user_id TEXT DEFAULT '')"))
+            "deadline TEXT, reminder TEXT, status_id INTEGER, duration_min INTEGER, user_id TEXT DEFAULT '')"))
         c.execute(sa.text(
             "CREATE TABLE works (id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT NOT NULL, "
-            "deadline TEXT, scheduled_at TEXT, status_id INTEGER, user_id TEXT DEFAULT '')"))
+            "deadline TEXT, scheduled_at TEXT, status_id INTEGER, duration_min INTEGER, user_id TEXT DEFAULT '')"))
         c.execute(sa.text(
             "CREATE TABLE booking (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id TEXT DEFAULT '', "
             "context TEXT, start_at TEXT NOT NULL, end_at TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending', "
@@ -157,6 +157,45 @@ async def test_other_users_tasks_excluded():
         c.execute(sa.text("INSERT INTO tasks (title, deadline, status_id, user_id) VALUES "
                           "('чужое', :d, :s, 'u2')"), {"d": _iso(T0 + timedelta(hours=1)), "s": ns})
     assert await _run(eng, user="u1") == []
+
+
+@pytest.mark.asyncio
+async def test_task_duration_min_overrides_default_hour():
+    """#241: Кай выставила длительность — busy-интервал берёт её, не дефолтный час."""
+    eng = _make_engine()
+    ns = _status_id(eng, "task_status", "Not started")
+    with eng.begin() as c:
+        c.execute(sa.text("INSERT INTO tasks (title, deadline, status_id, duration_min, user_id) VALUES "
+                          "('встреча с Мишаней', :d, :s, 120, 'u1')"),
+                  {"d": _iso(T0 + timedelta(hours=5)), "s": ns})
+    res = await _run(eng)
+    assert len(res) == 1
+    assert res[0].end - res[0].start == timedelta(hours=2)
+
+
+@pytest.mark.asyncio
+async def test_work_duration_min_overrides_default_hour():
+    eng = _make_engine()
+    ns = _status_id(eng, "work_status", "Not started")
+    with eng.begin() as c:
+        c.execute(sa.text("INSERT INTO works (title, scheduled_at, status_id, duration_min, user_id) VALUES "
+                          "('расклад Ане', :d, :s, 30, 'u1')"),
+                  {"d": _iso(T0 + timedelta(hours=8)), "s": ns})
+    res = await _run(eng)
+    assert len(res) == 1
+    assert res[0].end - res[0].start == timedelta(minutes=30)
+
+
+@pytest.mark.asyncio
+async def test_task_without_duration_min_still_defaults_to_hour():
+    eng = _make_engine()
+    ns = _status_id(eng, "task_status", "Not started")
+    with eng.begin() as c:
+        c.execute(sa.text("INSERT INTO tasks (title, deadline, status_id, user_id) VALUES "
+                          "('без длительности', :d, :s, 'u1')"),
+                  {"d": _iso(T0 + timedelta(hours=5)), "s": ns})
+    res = await _run(eng)
+    assert res[0].end - res[0].start == timedelta(hours=1)
 
 
 def test_merge_intervals():
