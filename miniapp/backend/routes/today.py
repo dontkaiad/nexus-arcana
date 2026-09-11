@@ -204,6 +204,13 @@ _TIP_SYSTEM = (
     "СДВГ-friendly совет на сегодня. Женский род. Конкретный, практичный.\n"
     "ЗАПРЕЩЕНО: плейсхолдеры ('штука', 'вещь', 'что-то', 'нечто'), "
     "общие фразы ('что-то делать'), markdown, эмодзи, двоеточия в начале.\n"
+    "У каждой задачи в списке указан срок (или его отсутствие) — сверяй с "
+    "сегодняшней датой. НЕЛЬЗЯ советовать делать что-то \"прямо сейчас\", "
+    "если её срок НЕ сегодня (другой день или без срока вообще) — для таких "
+    "давай совет по подготовке/планированию, не по немедленному действию.\n"
+    "ЗАПРЕЩЕНЫ двусмысленные/пошлые слова со случайным вторым значением "
+    "(например \"кончишь\" вместо \"закончишь\"/\"завершишь\") — только "
+    "нейтральная лексика.\n"
     "Примеры качества:\n"
     "ХОРОШО: «Поставь телефон на видное место у кровати — иначе утром "
     "забудешь дома.»\n"
@@ -211,7 +218,9 @@ _TIP_SYSTEM = (
     "три, готово.»\n"
     "ПЛОХО: «Положи штуку в одно место рядом с вещами — будет удобно.» "
     "(плейсхолдеры)\n"
-    "ПЛОХО: «Не забывай про важные дела.» (общая фраза без конкретики)"
+    "ПЛОХО: «Не забывай про важные дела.» (общая фраза без конкретики)\n"
+    "ПЛОХО: «Позвони Михаилу прямо сейчас» когда его срок — другой день "
+    "(врёт про срочность)"
 )
 
 
@@ -227,7 +236,7 @@ async def _ask_tip(prompt: str) -> str:
 
 
 async def _generate_adhd_tip(tg_id: int, today_str: str,
-                             active_titles: list[str], user_id: str) -> str:
+                             task_summaries: list[dict], user_id: str) -> str:
     cached = cache.get_tip(tg_id, today_str)
     # wave8.6: старые кэшированные советы с markdown (звёздочки, длинные) —
     # игнорируем. wave8.62: не отдаём кэш, не прошедший валидацию (issue #71).
@@ -235,7 +244,22 @@ async def _generate_adhd_tip(tg_id: int, today_str: str,
         return cached
 
     memories = await _adhd_context_memories(user_id)
-    tasks_ctx = "\n".join(f"- {t}" for t in active_titles[:10]) or "нет активных задач"
+    # #234: раньше сюда шли голые title без срока — Haiku не могла понять,
+    # что задача на другой день, и советовала "звони Михаилу прямо сейчас"
+    # для задачи с дедлайном через неделю. Теперь срок явный в каждой строке.
+    lines = []
+    for t in task_summaries[:10]:
+        title = t.get("title") or ""
+        if not title:
+            continue
+        deadline = (t.get("deadline_raw") or "")[:10]
+        if deadline == today_str:
+            lines.append(f"- {title} (срок: сегодня)")
+        elif deadline:
+            lines.append(f"- {title} (срок: {deadline}, НЕ сегодня)")
+        else:
+            lines.append(f"- {title} (без срока)")
+    tasks_ctx = "\n".join(lines) or "нет активных задач"
     mem_ctx = "\n".join(f"- {m}" for m in memories) or "нет"
 
     prompt = (
@@ -268,8 +292,7 @@ async def refresh_tip(tg_id: int = Depends(current_user_id)) -> dict[str, Any]:
     user_id = (await get_user_id(tg_id)) or ""
     tasks_raw = await _fetch_nexus_tasks(user_id)
     summaries = [_task_summary(t, 3) for t in tasks_raw]
-    active_titles = [s["title"] for s in summaries if s["title"]]
-    tip = await _generate_adhd_tip(tg_id, today_str, active_titles, user_id)
+    tip = await _generate_adhd_tip(tg_id, today_str, summaries, user_id)
     return {"tip": tip}
 
 
@@ -425,8 +448,7 @@ async def get_today(tg_id: int = Depends(current_user_id)) -> dict[str, Any]:
     streak_data = get_streak(tg_id)
     rest_available = is_rest_day_available(tg_id)
 
-    active_titles = [s["title"] for s in summaries if s["title"]]
-    tip = await _generate_adhd_tip(tg_id, today_str, active_titles, user_id)
+    tip = await _generate_adhd_tip(tg_id, today_str, summaries, user_id)
 
     return {
         "date": today_str,

@@ -117,3 +117,46 @@ async def test_bad_cache_not_served():
         tip = await today_mod._generate_adhd_tip(1, "2026-05-20", [], "")
     assert tip == GOOD
     assert claude_mock.await_count == 1
+
+
+# ─── #234: срок задачи должен доходить до промпта ──────────────────────────
+
+@pytest.mark.asyncio
+async def test_task_deadline_marked_not_today_in_prompt():
+    """Задача с дедлайном на другой день помечена явно — иначе Haiku
+    советует «звони прямо сейчас» задаче через неделю (реальный баг)."""
+    claude_mock = AsyncMock(return_value=GOOD)
+    tasks = [{"title": "позвони Михаилу", "deadline_raw": "2026-05-27"}]
+    with patch.object(today_mod, "ask_claude", claude_mock), \
+         patch.object(today_mod, "_adhd_context_memories", AsyncMock(return_value=[])), \
+         patch.object(today_mod.cache, "get_tip", lambda *a, **k: None), \
+         patch.object(today_mod.cache, "set_tip", lambda *a, **k: None):
+        await today_mod._generate_adhd_tip(1, "2026-05-20", tasks, "")
+    prompt = claude_mock.call_args.kwargs["prompt"]
+    assert "позвони Михаилу (срок: 2026-05-27, НЕ сегодня)" in prompt
+
+
+@pytest.mark.asyncio
+async def test_task_deadline_today_marked_as_such():
+    claude_mock = AsyncMock(return_value=GOOD)
+    tasks = [{"title": "сдать отчёт", "deadline_raw": "2026-05-20"}]
+    with patch.object(today_mod, "ask_claude", claude_mock), \
+         patch.object(today_mod, "_adhd_context_memories", AsyncMock(return_value=[])), \
+         patch.object(today_mod.cache, "get_tip", lambda *a, **k: None), \
+         patch.object(today_mod.cache, "set_tip", lambda *a, **k: None):
+        await today_mod._generate_adhd_tip(1, "2026-05-20", tasks, "")
+    prompt = claude_mock.call_args.kwargs["prompt"]
+    assert "сдать отчёт (срок: сегодня)" in prompt
+
+
+@pytest.mark.asyncio
+async def test_task_without_deadline_marked_as_such():
+    claude_mock = AsyncMock(return_value=GOOD)
+    tasks = [{"title": "разобрать шкаф", "deadline_raw": ""}]
+    with patch.object(today_mod, "ask_claude", claude_mock), \
+         patch.object(today_mod, "_adhd_context_memories", AsyncMock(return_value=[])), \
+         patch.object(today_mod.cache, "get_tip", lambda *a, **k: None), \
+         patch.object(today_mod.cache, "set_tip", lambda *a, **k: None):
+        await today_mod._generate_adhd_tip(1, "2026-05-20", tasks, "")
+    prompt = claude_mock.call_args.kwargs["prompt"]
+    assert "разобрать шкаф (без срока)" in prompt
