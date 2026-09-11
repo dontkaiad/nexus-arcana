@@ -5,6 +5,8 @@ services:
     # REINDEX не нужен. deploy.yml `up -d --build` пересоберёт db автоматически.
     build:
       context: docker/postgres
+      provenance: false
+      sbom: false
     container_name: nexus-arcana-db
     environment:
       POSTGRES_USER: kai
@@ -28,6 +30,8 @@ services:
       context: .
       args:
         GIT_SHA: ${GIT_SHA:-}
+      provenance: false
+      sbom: false
     image: nexus-arcana-bots
     container_name: nexus-bot
     command: ["python", "-m", "nexus.nexus_bot"]
@@ -56,6 +60,8 @@ services:
       context: .
       args:
         GIT_SHA: ${GIT_SHA:-}
+      provenance: false
+      sbom: false
     image: nexus-arcana-bots
     container_name: arcana-bot
     command: ["python", "-m", "arcana.bot"]
@@ -81,10 +87,16 @@ services:
   # ⭐ Zarya — heylark Booking concierge bot (@heylark_booking_bot). #23.
   # Свой узкий Dockerfile → образ пересобирается только на изменения core/,
   # zarya/ и table-defs; правки nexus/arcana handlers Zarya не рестартят.
+  # provenance/sbom: false — BuildKit по умолчанию прикладывает build-attestation
+  # (таймштамп/builder id) к КАЖДОЙ сборке, даже когда все слои CACHED. Это меняет
+  # digest образа на каждом деплое → `up -d` видел «новый образ» и пересоздавал
+  # (рестарт+пинг) Зарю на посторонних коммитах, хотя ни один слой не менялся.
   zarya:
     build:
       context: .
       dockerfile: zarya/Dockerfile
+      provenance: false
+      sbom: false
     image: zarya-bot
     container_name: zarya-bot
     command: ["python", "-m", "zarya"]
