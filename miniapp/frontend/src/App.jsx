@@ -1325,11 +1325,14 @@ function StreakAchievedCard({ current, best, lastDateIso, todayIso, onClick }) {
         <span>{badge}</span>
       </div>
 
-      {/* число+подпись смещены к низу — не перекрывают солнечный сигил-watermark
-          в центре карточки (было: точно по центру, глушило рисунок) */}
+      {/* число+подпись центрированы — на одной высоте с подписями соседних
+          .metric (align-items:stretch + justify-content:center там же).
+          Раньше блок был прижат к низу, чтобы не перекрывать солнечный
+          сигил-watermark, но сигил — кольцо с пустой серединой, число туда
+          и так попадает не перекрывая лучи (#207/#236). */}
       <div style={{
-        position: "absolute", inset: 0, padding: "14px 8px 10px", color: "#3d2a10",
-        display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "flex-end",
+        position: "absolute", inset: 0, padding: 8, color: "#3d2a10",
+        display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
       }}>
         <span style={{
           fontFamily: "var(--f-display)", fontSize: 28, fontWeight: 500, lineHeight: 1,
