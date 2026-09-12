@@ -277,6 +277,7 @@ def _booking_view(b: Booking, *, zarya_dm_sent: Optional[bool] = None) -> dict:
         "id": b.id, "token": b.token, "status": b.status, "context": b.context,
         "start": b.start_at.isoformat(), "end": b.end_at.isoformat(),
         "requester_name": b.requester_name, "note": b.note,
+        "hours": b.hours,
     }
     if zarya_dm_sent is not None:
         # False → the web should nudge: «открой @heylark_booking_bot и /start» —

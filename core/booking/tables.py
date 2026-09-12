@@ -86,6 +86,9 @@ booking_block = Table(
     Column("end_at", TIMESTAMP(timezone=True), nullable=False),
     Column("reason", Text, nullable=False, server_default=""),
     Column("created_at", TIMESTAMP(timezone=True), server_default=text("now()")),
+    # #249: линк на созданную в Nexus задачу — блок виден в «Мой день», не
+    # только в свободных/занятых слотах букинга. См. core/booking/linkage.py.
+    Column("nexus_task_id", Text),
 )
 
 # statuses that hold a slot (block the calendar)

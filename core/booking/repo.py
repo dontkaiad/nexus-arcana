@@ -318,11 +318,25 @@ async def add_block(user_id: str, start_at: datetime, end_at: datetime, reason: 
                 user_id=user_id, start_at=start_at, end_at=end_at, reason=reason,
             ).returning(booking_block)).first()
         return dict(row._mapping)
-    return await asyncio.to_thread(_go, engine or _engine())
+    eng = engine or _engine()
+    block = await asyncio.to_thread(_go, eng)
+    # #249: блок сам по себе уже занимает слоты (busy_intervals source='block')
+    # — линкованная задача нужна ТОЛЬКО чтобы Кай видела его в «Мой день»
+    # (она ориентируется на Nexus, не на страницу букинга). Никогда не роняет
+    # создание блока — см. link_block.
+    from core.booking.linkage import link_block
+    return await link_block(block, engine=eng)
 
 
 async def del_block(row_id: int, user_id: str, *, engine=None) -> bool:
-    return await asyncio.to_thread(_delete, engine or _engine(), booking_block, row_id, user_id)
+    eng = engine or _engine()
+    block = await asyncio.to_thread(_rows, eng, booking_block, user_id)
+    task_id = next((b.get("nexus_task_id") for b in block if b["id"] == row_id), None)
+    deleted = await asyncio.to_thread(_delete, eng, booking_block, row_id, user_id)
+    if deleted and task_id:
+        from core.booking.linkage import unlink_block
+        await unlink_block(task_id, engine=eng)
+    return deleted
 
 
 __all__ = [

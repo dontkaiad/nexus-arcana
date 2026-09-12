@@ -52,7 +52,8 @@ def _engine():
                       {"c": code, "l": label})
         c.execute(sa.text(
             "CREATE TABLE tasks (id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT NOT NULL, "
-            "deadline TEXT, reminder TEXT, status_id INTEGER, note TEXT, user_id TEXT DEFAULT '')"))
+            "deadline TEXT, reminder TEXT, status_id INTEGER, note TEXT, user_id TEXT DEFAULT '', "
+            "duration_min INTEGER)"))
         c.execute(sa.text(
             "CREATE TABLE works (id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT NOT NULL, "
             "deadline TEXT, scheduled_at TEXT, category TEXT, status_id INTEGER, user_id TEXT DEFAULT '')"))

@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from typing import Optional
 
 import sqlalchemy as sa
 
@@ -41,6 +42,9 @@ def _link_sync(eng, b: Booking):
         purpose = (b.note or "").strip()
         title = f"☕ {purpose}" if purpose else f"☕ Встреча: {b.requester_name}"
         task_note = f"с {b.requester_name} · бронь #{b.id} · {b.hours or 1:g} ч · {b.source}"
+        # #249: длительность брони → duration_min задачи (busy-калькулятор,
+        # core/booking/busy.py, брал раньше жёсткий 1ч на любую задачу — #241).
+        duration_min = int(round(b.hours * 60)) if b.hours else None
 
         with eng.begin() as conn:
             sid = conn.execute(
@@ -53,6 +57,7 @@ def _link_sync(eng, b: Booking):
                     deadline=b.start_at,
                     user_id=uid or "",
                     note=task_note,
+                    duration_min=duration_min,
                 ).returning(tasks.c.id)
             ).first()
         return ("nexus_task_id", str(row[0]))
@@ -129,11 +134,16 @@ async def unlink_booking(b: Booking, *, engine=None) -> None:
 
 
 def _retime_sync(eng, b: Booking) -> None:
+    # #249: перенос брони может поменять и длительность (RescheduleBody.hours)
+    # — синкаем duration_min вместе с временем, иначе Nexus-задача врёт про
+    # занятость дольше/короче реального нового окна.
+    duration_min = int(round(b.hours * 60)) if b.hours else None
     with eng.begin() as conn:
         if b.nexus_task_id:
             from nexus.repos.tasks_tables import tasks
             conn.execute(
-                tasks.update().where(tasks.c.id == int(b.nexus_task_id)).values(deadline=b.start_at)
+                tasks.update().where(tasks.c.id == int(b.nexus_task_id))
+                .values(deadline=b.start_at, duration_min=duration_min)
             )
         if b.arcana_work_id:
             from arcana.repos.works_tables import works
@@ -152,3 +162,90 @@ async def update_linked_time(b: Booking, *, engine=None) -> None:
         logger.info("booking #%s retimed linked task/work → %s", b.id, b.start_at)
     except Exception as e:  # noqa: BLE001
         logger.warning("update_linked_time #%s failed: %s", b.id, e)
+
+
+# ── booking_block (#249) — тот же паттерн, что confirmed booking → task ──────
+#
+# "я ставлю в букинг что я занята весь день ... у меня нет задачи в нексусе
+# на это — неудобно, я же на нексус ориентируюсь". Ручной блок в букинге уже
+# блокирует слоты (core/booking/busy.py source='block'), но был невидим в
+# Nexus. Здесь — только создание/архивация линкованной задачи; сам блок
+# CRUD (booking_block-строка) остаётся в core/booking/repo.py.
+
+_MAX_TASK_DURATION_MIN = 24 * 60  # #249: дольше суток — просто не проставляем
+
+
+def _link_block_sync(eng, block: dict) -> Optional[str]:
+    from nexus.repos.tasks_tables import task_status, tasks
+
+    start_at, end_at = block["start_at"], block["end_at"]
+    reason = (block.get("reason") or "").strip()
+    title = f"🚫 {reason}" if reason else "🚫 Занята (букинг)"
+    span_days = (end_at.date() - start_at.date()).days
+    note = f"букинг-блок #{block['id']}"
+    if span_days > 0:
+        note += f" · {start_at:%d.%m} – {end_at:%d.%m}"
+    duration_min = int((end_at - start_at).total_seconds() // 60)
+    if duration_min <= 0 or duration_min > _MAX_TASK_DURATION_MIN:
+        duration_min = None
+
+    with eng.begin() as conn:
+        sid = conn.execute(
+            sa.select(task_status.c.id).where(task_status.c.code == "Not started")
+        ).scalar()
+        row = conn.execute(
+            tasks.insert().values(
+                title=title,
+                status_id=sid,
+                deadline=start_at,
+                user_id=block.get("user_id") or "",
+                note=note,
+                duration_min=duration_min,
+            ).returning(tasks.c.id)
+        ).first()
+    return str(row[0]) if row else None
+
+
+def _set_block_link_sync(eng, block_id: int, task_id: str) -> None:
+    from core.booking.tables import booking_block
+    with eng.begin() as conn:
+        conn.execute(
+            booking_block.update().where(booking_block.c.id == block_id)
+            .values(nexus_task_id=task_id)
+        )
+
+
+async def link_block(block: dict, *, engine=None) -> dict:
+    """Create the linked Nexus task for a just-created booking_block, write its
+    id back onto the block row. Never raises — a failed link must not break
+    the block itself (booking still blocks slots either way)."""
+    eng = engine or _engine()
+    try:
+        task_id = await asyncio.to_thread(_link_block_sync, eng, block)
+        if task_id:
+            await asyncio.to_thread(_set_block_link_sync, eng, block["id"], task_id)
+            block = dict(block, nexus_task_id=task_id)
+            logger.info("booking_block #%s linked → nexus_task_id=%s", block["id"], task_id)
+    except Exception as e:  # noqa: BLE001
+        logger.warning("link_block #%s failed: %s", block.get("id"), e)
+    return block
+
+
+def _unlink_block_sync(eng, task_id: str) -> None:
+    from nexus.repos.tasks_tables import task_status, tasks
+    with eng.begin() as conn:
+        aid = conn.execute(
+            sa.select(task_status.c.id).where(task_status.c.code == "Archived")
+        ).scalar()
+        conn.execute(tasks.update().where(tasks.c.id == int(task_id)).values(status_id=aid))
+
+
+async def unlink_block(nexus_task_id: Optional[str], *, engine=None) -> None:
+    """Archive the linked task when a booking_block is removed. Never raises."""
+    if not nexus_task_id:
+        return
+    try:
+        await asyncio.to_thread(_unlink_block_sync, engine or _engine(), nexus_task_id)
+        logger.info("booking_block task #%s archived (block removed)", nexus_task_id)
+    except Exception as e:  # noqa: BLE001
+        logger.warning("unlink_block task #%s failed: %s", nexus_task_id, e)

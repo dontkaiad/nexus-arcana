@@ -93,6 +93,7 @@ def _serialize_pg_task(task: PgTask, today_date, tz_offset: int) -> dict:
         "reminder_min": _compute_reminder_min(deadline_raw, reminder_raw),
         "closed_at": closed_at,
         "streak": None,
+        "duration_min": task.duration_min,
     }
 
 

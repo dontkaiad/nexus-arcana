@@ -32,7 +32,18 @@ def _make_engine():
             "created_at TEXT, updated_at TEXT)"))
         c.execute(sa.text(
             "CREATE TABLE booking_block (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id TEXT DEFAULT '', "
-            "start_at TEXT NOT NULL, end_at TEXT NOT NULL, reason TEXT DEFAULT '', created_at TEXT)"))
+            "start_at TEXT NOT NULL, end_at TEXT NOT NULL, reason TEXT DEFAULT '', created_at TEXT, "
+            "nexus_task_id TEXT)"))
+        # #249: минимальная схема tasks/task_status — link_block/unlink_block
+        # (core/booking/linkage.py) пишут прямым SQLAlchemy Core, тем же
+        # паттерном, что confirmed booking → task.
+        c.execute(sa.text(
+            "CREATE TABLE task_status (id INTEGER PRIMARY KEY AUTOINCREMENT, code TEXT NOT NULL UNIQUE)"))
+        c.execute(sa.text("INSERT INTO task_status (code) VALUES ('Not started'), ('Archived')"))
+        c.execute(sa.text(
+            "CREATE TABLE tasks (id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT NOT NULL, "
+            "status_id INTEGER NOT NULL, deadline TEXT, note TEXT, duration_min INTEGER, "
+            "user_id TEXT DEFAULT '')"))
     return eng
 
 
@@ -87,3 +98,28 @@ async def test_block_crud():
     assert b["reason"] == "отпуск"
     assert len(await repo.list_blocks("u1", engine=eng)) == 1
     assert await repo.del_block(b["id"], "u1", engine=eng) is True
+
+
+@pytest.mark.asyncio
+async def test_block_links_nexus_task_visible_in_day():
+    """#249: "я ставлю в букинг что занята весь день ... у меня нет задачи в
+    нексусе на это" — add_block теперь линкует задачу (видна в «Мой день»),
+    del_block архивирует её при снятии блока."""
+    eng = _make_engine()
+    s = datetime(2026, 10, 1, tzinfo=UTC)
+    b = await repo.add_block("u1", s, s + timedelta(days=1), "возвращение в СПБ", engine=eng)
+    assert b["nexus_task_id"]
+
+    with eng.connect() as conn:
+        row = conn.execute(sa.text(
+            "SELECT title, duration_min FROM tasks WHERE id = :id"
+        ), {"id": int(b["nexus_task_id"])}).first()
+    assert "возвращение в СПБ" in row[0]
+    assert row[1] == 24 * 60  # ровно сутки
+
+    await repo.del_block(b["id"], "u1", engine=eng)
+    with eng.connect() as conn:
+        archived = conn.execute(sa.text(
+            "SELECT s.code FROM tasks t JOIN task_status s ON s.id = t.status_id WHERE t.id = :id"
+        ), {"id": int(b["nexus_task_id"])}).scalar()
+    assert archived == "Archived"

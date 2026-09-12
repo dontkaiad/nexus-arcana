@@ -695,6 +695,9 @@ async function histBox(){const el=$("#histBox");try{
     <div id="resch-${b.id}" hidden class="resch">
       <input type="datetime-local" class="reschInput" style="padding:6px;border-radius:8px;
         border:1px solid var(--glass-line);background:var(--glass);color:var(--ink)">
+      <input type="number" class="reschHours" placeholder="ч" min="0.5" max="12" step="0.5"
+        value="${b.hours || 1}" style="width:52px;padding:6px;border-radius:8px;
+        border:1px solid var(--glass-line);background:var(--glass);color:var(--ink)">
       <button class="mini primary" data-save="${b.id}">Сохранить</button>
     </div>
   </div>`).join("") : `<div class="empty">Броней пока не было</div>`;
@@ -704,10 +707,11 @@ async function histBox(){const el=$("#histBox");try{
   el.querySelectorAll("[data-save]").forEach(btn=>btn.onclick=async()=>{
     const id=btn.dataset.save, box=document.getElementById("resch-"+id);
     const v=box.querySelector(".reschInput").value;
+    const hrs=+box.querySelector(".reschHours").value||null;
     if(!v){toast("выбери дату и время");return;}
     try{
       await api(`/${id}/reschedule`,{method:"POST",headers:{"content-type":"application/json"},
-        body:JSON.stringify({start:v+":00+03:00"})});
+        body:JSON.stringify({start:v+":00+03:00",hours:hrs})});
       toast("перенесено");histBox();load().then(gridR);
     }catch(e){toast(String(e).includes("409")?"новое время занято":"не вышло");}
   });

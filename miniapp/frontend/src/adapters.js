@@ -306,6 +306,7 @@ export function adaptTasks(data) {
       rpt: ivl ? `🔄 ${ivl}` : undefined,
       streak: t.streak || 0,
       closedAt: t.closed_at || null,
+      duration_min: t.duration_min != null ? t.duration_min : null,
     }
   })
 }

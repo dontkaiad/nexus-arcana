@@ -298,6 +298,11 @@ class TaskEditBody(BaseModel):
     deadline_time: Optional[str] = None  # HH:MM — время дедлайна (см. task_edit)
     time: Optional[str] = None           # HH:MM — время напоминания
     reminder_date: Optional[str] = None  # YYYY-MM-DD — дата напоминания (независимо от дедлайна)
+    # #241/#249: длительность в минутах — busy-калькулятор букинга берёт её
+    # вместо дефолтного 1ч (core/booking/busy.py). explicit_duration отличает
+    # "поле не тронуто" (None) от "юзер стёр значение, вернуть дефолт" (0/null).
+    duration_min: Optional[int] = None
+    explicit_duration: bool = False
 
 
 @router.post("/tasks/{task_id}/edit")
@@ -362,6 +367,12 @@ async def task_edit(
             remind_local_dt = f"{rdate.isoformat()}T{int(hh):02d}:{int(mm):02d}"
         except (ValueError, TypeError):
             raise HTTPException(status_code=400, detail="invalid reminder, expected date YYYY-MM-DD + time HH:MM")
+
+    if body.explicit_duration:
+        if body.duration_min is not None and body.duration_min > 0:
+            props["Длительность"] = _number(body.duration_min)
+        else:
+            props["Длительность"] = {"number": None}
 
     if not props:
         return {"ok": True, "noop": True}

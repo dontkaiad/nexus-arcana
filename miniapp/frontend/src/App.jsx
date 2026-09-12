@@ -8039,6 +8039,11 @@ function TaskEditForm({ s, task, busy, onSave }) {
   const [dlTime, setDlTime] = useState(task?.deadlineTime || "");
   const [remDate, setRemDate] = useState(task?.reminderDateRaw || "");
   const [remTime, setRemTime] = useState(task?.reminderTimeRaw || "");
+  // #249: длительность в минутах — используется в booking busy-калькуляторе
+  // (core/booking/busy.py) вместо дефолтного 1ч. Пусто = дефолт (не трогаем).
+  const [duration, setDuration] = useState(
+    task?.duration_min != null ? String(task.duration_min) : ""
+  );
   const [cats, setCats] = useState([]);
 
   useEffect(() => {
@@ -8087,6 +8092,8 @@ function TaskEditForm({ s, task, busy, onSave }) {
           <Input s={s} value={remTime} onChange={setRemTime} placeholder="чч:мм" type="time" />
         </div>
       </div>
+      <div style={{ fontSize: fs(11), color: s.tS }}>⏱ Длительность (мин)</div>
+      <Input s={s} value={duration} onChange={setDuration} placeholder="занимает ~1ч, если пусто" type="number" />
       <SubmitBtn
         s={s}
         disabled={!valid || busy}
@@ -8098,6 +8105,7 @@ function TaskEditForm({ s, task, busy, onSave }) {
           // Дата без времени → дефолт 09:00 (как в боте). reminder_date пуст →
           // бэкенд берёт дату дедлайна как якорь.
           const rTime = wantsReminder ? (remTime || "09:00") : null;
+          const initialDuration = task?.duration_min != null ? String(task.duration_min) : "";
           onSave({
             title: title.trim(),
             cat: cat || null,
@@ -8106,6 +8114,8 @@ function TaskEditForm({ s, task, busy, onSave }) {
             deadline_time: date ? (dlTime || null) : null,
             reminder_date: wantsReminder ? (remDate || null) : null,
             time: rTime,
+            duration_min: duration ? parseInt(duration, 10) : null,
+            explicit_duration: duration !== initialDuration,
           });
         }}
       />
