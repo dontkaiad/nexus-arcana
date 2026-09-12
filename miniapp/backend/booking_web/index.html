@@ -784,22 +784,27 @@ function detail(){
   let slH;
   if(!canBook) slH=`<p class="hintline">${BOOK_NOTE}</p><button class="primary" style="margin-top:9px" onclick="location.href='${loginUrl()}'">Бронь</button>`;
   else if(!sl.length) slH=`<div class="muted" style="font-size:.9rem;margin-top:.6rem">Свободных слотов нет.${st.me.role==="admin"?" Добавь окно на "+DOW[(d.getDay()+6)%7]+".":""}</div>`;
-  else slH=`<div class="slotwrap">${sl.map((s,i)=>`<button data-s="${s.start}" class="${i===0?"pri":""}">${T(s.start)}</button>`).join("")}</div>`;
+  // #251: у admin слоты смешаны из обоих контекстов — помечаем каждую
+  // кнопку эмодзи её контекста, иначе непонятно, встреча это или расклад.
+  else slH=`<div class="slotwrap">${sl.map((s,i)=>`<button data-s="${s.start}" data-ctx="${s._ctx||st.ctx}" class="${i===0?"pri":""}">${
+    st.me.role==="admin"?(s._ctx==="arcana"?"🌒 ":"☕ "):""}${T(s.start)}</button>`).join("")}</div>`;
+  const bookHdr = st.me.role==="admin" ? "Свободные окна" : `Записаться${st.ctx==="arcana"?" · расклад / ритуал":""}`;
   el.innerHTML = `<div>${evH}</div>
-    <div class="bookh">Записаться${st.ctx==="arcana"?" · расклад / ритуал":""}</div>${slH}`;
-  el.querySelectorAll(".slotwrap button").forEach(b=>b.onclick=()=>book(b.dataset.s));
+    <div class="bookh">${bookHdr}</div>${slH}`;
+  el.querySelectorAll(".slotwrap button").forEach(b=>b.onclick=()=>book(b.dataset.s,b.dataset.ctx));
 }
 
-async function book(startIso){
-  if(st.me.role==="guest"&&st.ctx==="friends"){location.href=loginUrl();return;}
+async function book(startIso,ctx){
+  ctx=ctx||st.ctx;
+  if(st.me.role==="guest"&&ctx==="friends"){location.href=loginUrl();return;}
   let hours=1,note="";
-  if(st.ctx==="friends"){
+  if(ctx==="friends"){
     hours=await askHours();if(!hours)return;
     note=await askPurpose();if(!note)return;
   }
   try{
     const b=await api("/book",{method:"POST",headers:{"content-type":"application/json"},
-      body:JSON.stringify({context:st.ctx,start:startIso,hours,note})});
+      body:JSON.stringify({context:ctx,start:startIso,hours,note})});
     toast(b.status==="confirmed"?"Записано ✅":"Заявка отправлена — Кай подтвердит");
     if(b.zarya_dm_sent===false) st.needsZaryaStart=true;
   }catch(e){toast(String(e).includes("409")?"Слот только что заняли":"Не вышло");}
@@ -840,7 +845,23 @@ function askPurpose(){return new Promise(res=>{
 /* ── data ─────────────────────────────────────────────────────────── */
 async function load(){
   try{const c=await api("/calendar?days=90&back=14");st.events=c.events;st.me.role=c.role;}catch(_){}
-  try{const s=await api(`/slots?context=${st.ctx}&days=75`);st.slots=s.slots||[];}catch(_){st.slots=[];}
+  // #251: владелица видит СВОЁ расписание — свободные слоты обоих контекстов
+  // сразу, без тумблера (он остаётся только для гостей, у которых он выбирает
+  // ЧТО бронировать). Каждый слот помечен своим контекстом (_ctx), чтобы book()
+  // отправил бронь под правильный тип, если Кай всё же бронирует сама.
+  try{
+    if(st.me.role==="admin"){
+      const [f,a]=await Promise.all([
+        api("/slots?context=friends&days=75"), api("/slots?context=arcana&days=75"),
+      ]);
+      st.slots=[...(f.slots||[]).map(s=>({...s,_ctx:"friends"})),
+                ...(a.slots||[]).map(s=>({...s,_ctx:"arcana"}))]
+        .sort((x,y)=>x.start<y.start?-1:1);
+    }else{
+      const s=await api(`/slots?context=${st.ctx}&days=75`);
+      st.slots=(s.slots||[]).map(it=>({...it,_ctx:st.ctx}));
+    }
+  }catch(_){st.slots=[];}
   if(st.me.role==="admin"){try{st.windows=(await api("/availability")).windows||[];}catch(_){st.windows=[];}}
   else st.windows=[];
   if(st.me.role!=="guest"){
