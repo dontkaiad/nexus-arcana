@@ -72,6 +72,53 @@ async def test_no_markers_auto_expense():
 
 
 @pytest.mark.asyncio
+async def test_zero_amount_offers_list_cross_off():
+    """«купила сигареты энергетики и хлеб» без цены → amount=0, expense не
+    пишем (нечего), но раньше это молча проглатывалось (только реакция) —
+    теперь предлагаем вычеркнуть совпавшие позиции из 🛒 Покупки."""
+    msg = _msg()
+    data = {
+        "type": "expense", "amount": 0, "title": "сигареты энергетики хлеб",
+        "category": "💳 Прочее", "source": "💳 Карта", "confidence": "high",
+    }
+    matches = [
+        {"id": "item-1", "name": "сигареты", "category": "🛒 Покупки"},
+        {"id": "item-2", "name": "хлеб", "category": "🛒 Покупки"},
+    ]
+    with patch.object(clf, "_fin_repo") as m_repo, \
+         patch.object(clf, "react", AsyncMock()), \
+         patch("core.list_manager.find_matching_items", AsyncMock(return_value=matches)) as m_find:
+        m_repo.add = AsyncMock(return_value="page-1")
+        line = await clf.process_item(
+            data, "купила сигареты энергетики и хлеб", msg, {}, user_id="u-1")
+    m_repo.add.assert_not_awaited()
+    m_find.assert_awaited_once()
+    assert m_find.await_args.args[0] == "купила сигареты энергетики и хлеб"
+    assert line == ""
+    msg.answer.assert_awaited_once()
+    sent_text = msg.answer.await_args.args[0]
+    assert "сигареты" in sent_text and "хлеб" in sent_text
+
+
+@pytest.mark.asyncio
+async def test_zero_amount_no_list_match_stays_silent():
+    """Без совпадений в списке покупок — как раньше, ничего не пишем."""
+    msg = _msg()
+    data = {
+        "type": "expense", "amount": 0, "title": "погуляла",
+        "category": "💳 Прочее", "source": "💳 Карта", "confidence": "high",
+    }
+    with patch.object(clf, "_fin_repo") as m_repo, \
+         patch.object(clf, "react", AsyncMock()), \
+         patch("core.list_manager.find_matching_items", AsyncMock(return_value=[])):
+        m_repo.add = AsyncMock(return_value="page-1")
+        line = await clf.process_item(data, "погуляла", msg, {}, user_id="u-1")
+    m_repo.add.assert_not_awaited()
+    msg.answer.assert_not_awaited()
+    assert line == ""
+
+
+@pytest.mark.asyncio
 async def test_explicit_income_high_confidence_saved_as_income():
     """Haiku вернул confidence=high для «доход 3000» → сразу income, windfall-путь."""
     msg = _msg()

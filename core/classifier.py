@@ -1397,9 +1397,40 @@ async def process_item(data: Dict[str, Any], original_text: str, msg, clarify: d
                 logger.info("process_item: low confidence finance, showing UI for clarification")
                 return f"finance_clarify:{kind}:{amount}:{category}:{source}:{title}"
 
-        # High confidence + amount=0 → пропустить
+        # High confidence + amount=0 → траты не пишем (нечего писать), но
+        # текст всё равно может называть купленные позиции из 🛒 Покупки
+        # ("купила сигареты энергетики и хлеб" без цены) — раньше это молча
+        # проглатывалось (только реакция 👌, ни слова в ответ, список не
+        # трогался), Кай приходилось находить и вычёркивать эти же позиции
+        # вручную при следующем внесении расхода.
         if amount == 0:
-            logger.info("process_item: high confidence but amount=0, skipping")
+            logger.info("process_item: high confidence but amount=0, skipping finance write")
+            try:
+                from core.list_manager import find_matching_items
+                from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+                # original_text, не title: Haiku может суммаризировать
+                # "купила сигареты энергетики и хлеб" в укороченный title,
+                # теряя часть перечисленных позиций — original_text держит
+                # все слова, а find_matching_items матчит по подстроке.
+                matches = await find_matching_items(original_text, category, "☀️ Nexus", user_id)
+                if matches:
+                    buttons = []
+                    item_names = []
+                    for m in matches[:3]:
+                        cat_e = (m.get("category") or "").split(" ")[0]
+                        item_names.append(f"◻️ {m['name']} · {cat_e}")
+                        buttons.append([InlineKeyboardButton(
+                            text=f"✅ {m['name']}",
+                            callback_data=f"list_cross_{m['id'][:28]}",
+                        )])
+                    buttons.append([InlineKeyboardButton(text="Нет", callback_data="list_cross_no")])
+                    await msg.answer(
+                        f"🛒 Есть в списке (без цены не записала в расходы):\n" + "\n".join(item_names),
+                        reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons),
+                        parse_mode="HTML",
+                    )
+            except Exception as e:
+                logger.debug("amount=0 list cross-off check: %s", e)
             return ""
 
         # High confidence + amount > 0 → сохранить в Notion
