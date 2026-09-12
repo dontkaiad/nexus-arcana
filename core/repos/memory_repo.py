@@ -117,8 +117,9 @@ class MemoryRepo:
         scope: str = "",
         user_id: str = "",
         page_size: int = 10,
+        match_all: bool = False,
     ) -> List[Memory]:
-        return await self._pg.search(terms, scope, user_id, page_size)
+        return await self._pg.search(terms, scope, user_id, page_size, match_all)
 
     async def find_by_category(
         self,

@@ -347,10 +347,10 @@ def test_discretionary_free_subtracts_period_spending(client):
     assert b["discretionary_free"] == 14350
 
 
-def test_discretionary_free_subtracts_one_off_too(client):
-    """#237: 📦 Разовые ТЕПЕРЬ вычитается из «свободно» — раньше нигде не
-    вычиталась (ни тут, ни в боте), отчего Кай видела завышенный остаток
-    относительно реальной карты. 16350 − 9313 = 7037."""
+def test_discretionary_free_ignores_one_off(client):
+    """Bugfix (после #237): 📦 Разовые — параллельный счётчик со своим лимитом,
+    НЕ дискреционная трата. Крупная разовая трата не должна обнулять
+    «Свободно» (16350 остаётся 16350, а не 16350 − 9313)."""
     tz = 3
     today = _today_local_iso(tz)
     period_start = today[:8] + "01"
@@ -366,7 +366,7 @@ def test_discretionary_free_subtracts_one_off_too(client):
             st.enter_context(p)
         b = client.get("/api/today").json()["budget"]
 
-    assert b["discretionary_free"] == 7037
+    assert b["discretionary_free"] == 16350
 
 
 def test_spent_today_excludes_parallel_categories(client):

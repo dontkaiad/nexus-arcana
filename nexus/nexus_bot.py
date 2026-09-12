@@ -1490,6 +1490,16 @@ async def on_finance_clarify(query: CallbackQuery, user_id: str = "") -> None:
     await query.message.edit_text(text_msg)
     await query.answer("✅ Сохранено")
 
+    if result:
+        # Раньше кнопочный выбор типа не запускал ни бюджет-чек/список покупок
+        # (expense), ни подушку/предложение закрыть задачу (income) — общая
+        # логика с прямым classify()-путём вынесена в core.classifier.finance_post_save.
+        from core.classifier import finance_post_save
+        await finance_post_save(
+            fin_type, finance_data["category"], finance_data["title"],
+            finance_data["amount"], query.message, stored_uid or user_id, _tz,
+        )
+
 
 _UNKNOWN_TTL = 300  # 5 min
 

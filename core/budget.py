@@ -549,8 +549,14 @@ async def discretionary_free(user_id: str, tz_offset: int = 3):
     разовые траты нигде не вычитались.
 
         свободно = max(0, Σ дискреционных лимитов
-                          − Σ трат по лимит-категориям с начала периода
-                          − Σ фактических трат 📦 Разовые за период)
+                          − Σ трат по лимит-категориям с начала периода)
+
+    🔒 Фикс / 📦 Разовые — параллельные счётчики со своим лимитом (см.
+    is_parallel_limit) и НЕ вычитаются здесь: это дискреционный пул
+    compute_limits(), Разовые в него не входят ни рублём бюджета, ни рублём
+    траты. (Bugfix: #237 по ошибке вычитал реальные траты 📦 Разовые из этого
+    пула — крупная разовая трата обнуляла «Свободно», хотя у Разовых свой
+    собственный лимит.)
 
     Возвращает (свободно, дней_до_конца_периода) или None — лимиты не
     настроены, считать не из чего.
@@ -582,11 +588,8 @@ async def discretionary_free(user_id: str, tz_offset: int = 3):
         float(e.amount or 0) for e in entries
         if (e.category or "") in disc_cats and not is_parallel_limit(e.category or "")
     )
-    one_off_spent = sum(
-        float(e.amount or 0) for e in entries if (e.category or "").strip() == "📦 Разовые"
-    )
 
-    free = max(0.0, disc_total - disc_spent - one_off_spent)
+    free = max(0.0, disc_total - disc_spent)
     return (free, days_remaining)
 
 

@@ -651,9 +651,20 @@ _NOTE_DELETE_RE = re.compile(
     re.IGNORECASE,
 )
 
-# Удаление из памяти: "удали из памяти ...", "забудь про ...", "убери запись ..."
+# Удаление из памяти: "удали из памяти ...", "забудь про ...", "убери запись ...".
+# "забудь" однозначно про память (больше нигде не используется как триггер) —
+# матчится всегда. "удали/удалить/стёр/убери" — двусмысленные глаголы (их же
+# ждут generic /delete для задач/заметок/финансов и _SHARE_RE для "убери из
+# расшаренного") — раньше маркер-группа была optional (`?`), поэтому ЛЮБОЕ
+# "удали X" без "из памяти/факт/запись" ВСЁ РАВНО матчилось сюда первым и
+# уводило командой delete_memory с произвольным hint (баг: "удали доход робот
+# пылесос" удалило совсем не связанный факт "доход: Наследство — 100000₽/мес"
+# — единственное реальное слово-пересечение было "доход"). Теперь для этих
+# глаголов маркер ("из памяти"/"факт"/"запись") ОБЯЗАТЕЛЕН.
 _MEMORY_DELETE_RE = re.compile(
-    r"^\s*(удали|забудь|удалить|стёр|убери)\s+(из\s+памяти|из\s+памят\w+|факт|запись)?",
+    r"^\s*забудь\b"
+    r"|"
+    r"^\s*(удали|удалить|стёр|убери)\s+(из\s+памяти|из\s+памят\w+|факт\w*|запис\w*)\b",
     re.IGNORECASE,
 )
 
@@ -1067,6 +1078,79 @@ async def classify(text: str, tz_offset: int = 3, user_id: str = "") -> list[dic
         return [{"type": "parse_error"}]
 
 
+async def finance_post_save(kind: str, category: str, title: str, amount: float,
+                            msg, user_id: str, tz_offset: int = 3) -> None:
+    """Действия после сохранения финансовой записи — общие для прямого
+    classify()-пути (высокая confidence) и кнопочного finance_clarify
+    (nexus_bot.py:on_finance_clarify, низкая confidence + явный выбор кнопкой).
+
+    Раньше кнопочный путь просто писал запись в Финансы и на этом
+    останавливался — без бюджет-чека/списка покупок (expense) и без
+    непредвиденного дохода в подушку/предложения закрыть задачу (income).
+    kind == "barter" считается как expense (запись и так идёт как 💸 Расход).
+    """
+    if kind in ("expense", "barter"):
+        logger.info("finance_post_save: expense/barter category=%s — calling budget check", category)
+        try:
+            from nexus.handlers.finance import _check_budget_limit
+            await _check_budget_limit(category, msg, user_id, amount=amount, tz_offset=tz_offset)
+        except Exception as e:
+            logger.error("budget check error: %s", e, exc_info=True)
+        # Предложить вычеркнуть из списка покупок
+        try:
+            from core.list_manager import find_matching_items
+            from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+            matches = await find_matching_items(title, category, "☀️ Nexus", user_id)
+            if matches:
+                buttons = []
+                item_names = []
+                for m in matches[:3]:
+                    cat_e = (m.get("category") or "").split(" ")[0]
+                    item_names.append(f"◻️ {m['name']} · {cat_e}")
+                    buttons.append([InlineKeyboardButton(
+                        text=f"✅ {m['name']}",
+                        callback_data=f"list_cross_{m['id'][:28]}",
+                    )])
+                buttons.append([InlineKeyboardButton(text="Нет", callback_data="list_cross_no")])
+                await msg.answer(
+                    f"🛒 Есть в списке:\n" + "\n".join(item_names),
+                    reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons),
+                    parse_mode="HTML",
+                )
+        except Exception as e:
+            logger.debug("list cross-off check: %s", e)
+    elif kind == "income":
+        # Непредвиденный доход (не ЗП/практика/жильё) → распределить:
+        # тихо (< 50k) или с кнопками ручного выбора (>= 50k). #208.
+        try:
+            from nexus.handlers.finance import handle_windfall_income
+            await handle_windfall_income(msg, amount, category, title, user_id)
+        except Exception as e:
+            logger.error("windfall income handler error: %s", e, exc_info=True)
+
+    # Предложить закрыть подходящую открытую задачу — "продала телевизор
+    # 4000" должен спросить какую из "продать телевизор большой"/"на кухне"
+    # закрыть, а не тихо записать деньги отдельно от задач (для всех типов).
+    try:
+        from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+        from nexus.handlers.tasks import find_task_matches_for_finance
+        task_matches = await find_task_matches_for_finance(title, user_id)
+        if task_matches:
+            buttons = [
+                [InlineKeyboardButton(text=f"✅ {t_title}", callback_data=f"task_cross_{t_id}")]
+                for t_id, t_title in task_matches
+            ]
+            buttons.append([InlineKeyboardButton(text="Нет", callback_data="task_cross_no")])
+            await msg.answer(
+                "✅ Похоже на задачу — закрыть какую-то из них?\n" +
+                "\n".join(f"◻️ {t_title}" for _, t_title in task_matches),
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons),
+                parse_mode="HTML",
+            )
+    except Exception as e:
+        logger.debug("task cross-off check: %s", e)
+
+
 async def process_item(data: Dict[str, Any], original_text: str, msg, clarify: dict, user_id: str = "") -> str:
     """Обработка классифицированного элемента."""
     kind = data.get("type", "unknown")
@@ -1276,6 +1360,20 @@ async def process_item(data: Dict[str, Any], original_text: str, msg, clarify: d
         logger.info("process_item: finance %s - amount=%.0f category=%r source=%r confidence=%r",
                    kind, amount, category, source, confidence)
 
+        # Явное слово "доход"/"расход" в тексте — приоритет НАД тем, что вернул
+        # Haiku (kind/confidence): промпт просит confidence=high для явного
+        # маркера, но Haiku не детерминирован и иногда всё равно даёт low —
+        # тогда ниже по коду уходило в finance_clarify вместо прямого income
+        # (жалоба: "доход X" с явным словом всё равно спрашивает расход/доход/бартер).
+        if re.search(r'\bдоход\b', original_text, re.IGNORECASE):
+            kind = "income"
+            confidence = "high"
+            type_label = "💰 Доход"
+        elif re.search(r'\bрасход\b', original_text, re.IGNORECASE):
+            kind = "expense"
+            confidence = "high"
+            type_label = "💸 Расход"
+
         # Ambiguous слова без явного дохода-контекста → принудительно low confidence
         _ambiguous_m = re.compile(r'\b(аренд[аы]|арендую|сдаю|сдала|займ)\b', re.IGNORECASE)
         _income_ctx_m = re.compile(
@@ -1326,65 +1424,7 @@ async def process_item(data: Dict[str, Any], original_text: str, msg, clarify: d
         if result:
             sign = "−" if kind == "expense" else "+"
             icon = "💸" if kind == "expense" else "💰"
-            if kind == "expense":
-                logger.info("finance saved via classifier: category=%s — calling budget check", category)
-                try:
-                    from nexus.handlers.finance import _check_budget_limit
-                    await _check_budget_limit(category, msg, user_id, amount=amount, tz_offset=_fin_tz)
-                except Exception as e:
-                    logger.error("budget check error: %s", e, exc_info=True)
-                # Предложить вычеркнуть из списка покупок
-                try:
-                    from core.list_manager import find_matching_items
-                    from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-                    matches = await find_matching_items(title, category, "☀️ Nexus", user_id)
-                    if matches:
-                        buttons = []
-                        item_names = []
-                        for m in matches[:3]:
-                            cat_e = (m.get("category") or "").split(" ")[0]
-                            item_names.append(f"◻️ {m['name']} · {cat_e}")
-                            buttons.append([InlineKeyboardButton(
-                                text=f"✅ {m['name']}",
-                                callback_data=f"list_cross_{m['id'][:28]}",
-                            )])
-                        buttons.append([InlineKeyboardButton(text="Нет", callback_data="list_cross_no")])
-                        await msg.answer(
-                            f"🛒 Есть в списке:\n" + "\n".join(item_names),
-                            reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons),
-                            parse_mode="HTML",
-                        )
-                except Exception as e:
-                    logger.debug("list cross-off check: %s", e)
-            elif kind == "income":
-                # Непредвиденный доход (не ЗП/практика/жильё) → распределить:
-                # тихо (< 50k) или с кнопками ручного выбора (>= 50k). #208.
-                try:
-                    from nexus.handlers.finance import handle_windfall_income
-                    await handle_windfall_income(msg, amount, category, title, user_id)
-                except Exception as e:
-                    logger.error("windfall income handler error: %s", e, exc_info=True)
-            # Предложить закрыть подходящую открытую задачу — "продала телевизор
-            # 4000" должен спросить какую из "продать телевизор большой"/"на кухне"
-            # закрыть, а не тихо записать деньги отдельно от задач (для обоих типов).
-            try:
-                from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-                from nexus.handlers.tasks import find_task_matches_for_finance
-                task_matches = await find_task_matches_for_finance(title, user_id)
-                if task_matches:
-                    buttons = [
-                        [InlineKeyboardButton(text=f"✅ {t_title}", callback_data=f"task_cross_{t_id}")]
-                        for t_id, t_title in task_matches
-                    ]
-                    buttons.append([InlineKeyboardButton(text="Нет", callback_data="task_cross_no")])
-                    await msg.answer(
-                        "✅ Похоже на задачу — закрыть какую-то из них?\n" +
-                        "\n".join(f"◻️ {t_title}" for _, t_title in task_matches),
-                        reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons),
-                        parse_mode="HTML",
-                    )
-            except Exception as e:
-                logger.debug("task cross-off check: %s", e)
+            await finance_post_save(kind, category, title, amount, msg, user_id, _fin_tz)
             return f"{icon} <b>{sign}{amount:,.0f}₽</b> · <b>{title}</b>\n🏷 {category} <i>{source}</i>"
         
         logged = await log_error(original_text, "processing_error", _classify_last_raw,

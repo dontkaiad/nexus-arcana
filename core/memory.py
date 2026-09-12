@@ -304,8 +304,18 @@ async def _find_pages_by_hint(
     logger.info("memory _find_pages_by_hint: hint=%r tokens=%s", hint, tokens)
 
     search_terms = tokens if tokens else [hint.strip()]
+    # use_semantic=False → деструктивный путь (удаление/деактивация/алиас,
+    # см. вызовы ниже по файлу) — там match_all=True (AND по токенам).
+    # Иначе общее слово вроде «доход» ILIKE-OR матчило ЛЮБОЙ факт с «доход» —
+    # включая единственный текущий income_-факт, даже без остальных слов
+    # хинта в нём (баг: «удали доход робот пылесос» снесло факт «Наследство»,
+    # хотя «робот»/«пылесос» в нём нет). use_semantic=True (информационный
+    # поиск, показывает список на выбор) — recall важнее, оставляем OR.
     try:
-        results = await _mem_repo.search(search_terms, user_id=user_id, page_size=page_size)
+        results = await _mem_repo.search(
+            search_terms, user_id=user_id, page_size=page_size,
+            match_all=not use_semantic,
+        )
         logger.info("_find_pages_by_hint: found=%d for terms=%s", len(results), search_terms)
         if use_semantic:
             results = await _semantic_search_memory(hint, results, user_id=user_id, cap=page_size)

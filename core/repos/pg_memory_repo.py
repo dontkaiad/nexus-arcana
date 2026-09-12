@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Dict, List, Optional, Tuple
 
-from sqlalchemy import select, text, or_
+from sqlalchemy import select, text, or_, and_
 from sqlalchemy.engine import Engine
 
 from core.repos.memories_table import memories
@@ -309,16 +309,39 @@ def _search_sync(
     scope: str = "",
     user_id: str = "",
     page_size: int = 10,
+    match_all: bool = False,
 ) -> List[Memory]:
+    """match_all=False (по умолчанию): OR по всем терминам — широкий recall
+    для информационного поиска («напомни про X»), где результат — список на
+    выбор, а не немедленное действие.
+
+    match_all=True: КАЖДЫЙ термин должен встретиться хоть в одном из полей —
+    для деструктивных путей (удаление/деактивация/резолв алиаса, все они
+    зовут с use_semantic=False в core.memory._find_pages_by_hint). Без этого
+    общее слово вроде «доход» в hint («удали доход робот пылесос») ILIKE-OR
+    матчило ЛЮБОЙ факт с «доход» — включая единственный текущий income_-факт,
+    даже когда «робот»/«пылесос» в нём вообще нет (баг: снесло «Наследство»
+    вместо несуществующего совпадения по «робот пылесос»)."""
     if not terms:
         return []
-    conditions = []
-    for term in terms:
-        like = f"%{term}%"
-        conditions.append(memories.c.fact_text.ilike(like))
-        conditions.append(memories.c.key_name.ilike(like))
-        conditions.append(memories.c.related_to.ilike(like))
-    q = _base_active_q().where(or_(*conditions))
+    if match_all:
+        term_conditions = [
+            or_(
+                memories.c.fact_text.ilike(f"%{term}%"),
+                memories.c.key_name.ilike(f"%{term}%"),
+                memories.c.related_to.ilike(f"%{term}%"),
+            )
+            for term in terms
+        ]
+        q = _base_active_q().where(and_(*term_conditions))
+    else:
+        conditions = []
+        for term in terms:
+            like = f"%{term}%"
+            conditions.append(memories.c.fact_text.ilike(like))
+            conditions.append(memories.c.key_name.ilike(like))
+            conditions.append(memories.c.related_to.ilike(like))
+        q = _base_active_q().where(or_(*conditions))
     if scope and scope != "global":
         q = q.where(or_(memories.c.scope == scope, memories.c.scope == "global"))
     if user_id:
@@ -519,8 +542,9 @@ class PgMemoryRepo:
         scope: str = "",
         user_id: str = "",
         page_size: int = 10,
+        match_all: bool = False,
     ) -> List[Memory]:
-        return await asyncio.to_thread(_search_sync, terms, scope, user_id, page_size)
+        return await asyncio.to_thread(_search_sync, terms, scope, user_id, page_size, match_all)
 
     async def find_by_category(
         self,
