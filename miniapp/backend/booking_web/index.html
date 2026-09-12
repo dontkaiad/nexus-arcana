@@ -733,7 +733,14 @@ function mskDayBounds(d){
 }
 const evsDay=d=>{const[s,e]=mskDayBounds(d);return st.events.filter(x=>new Date(x.start)<e&&new Date(x.end)>s);};
 const slotsDay=d=>{const[s,e]=mskDayBounds(d);return st.slots.filter(x=>{const t=new Date(x.start);return t>=s&&t<e;});};
-const hasWindow=d=>st.windows.some(w=>+w.weekday===((d.getDay()+6)%7));
+// #251: раньше проверял только недельные окна (weekday) — разовые окна на
+// конкретную дату (specific_date) вообще не учитывались: weekday у них null,
+// а `+null===0` ложно совпадал с понедельником вместо нужного дня.
+const hasWindow=d=>{
+  const wd=(d.getDay()+6)%7;
+  const iso=d.getFullYear()+"-"+pad(d.getMonth()+1)+"-"+pad(d.getDate());
+  return st.windows.some(w=>w.weekday!=null ? +w.weekday===wd : w.specific_date===iso);
+};
 
 function washClass(kinds){
   if(!kinds.length) return "";
