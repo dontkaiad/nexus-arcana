@@ -425,13 +425,32 @@ async def _check_budget_limit(category: str, message: Message, user_id: str = ""
                 imp_ind = "🟢" if imp_pct < 60 else ("🟡" if imp_pct < 85 else "🔴")
                 parts.append(f"  → overflow {over:,.0f}₽ → импульсивный")
                 parts.append(f"🎲 Импульсивный: {impulse_used:,.0f} / {impulse_limit:,.0f}₽ ({imp_pct:.0f}%) {imp_ind}")
-                if impulse_left <= 0:
-                    parts.append("🚨 Импульсивный бюджет исчерпан!")
-                # Auto-create impulse expense for overflow
+                # #258: перерасход сначала съедает остаток импульсивных;
+                # то, что туда не влезло — списывается из подушки (раньше
+                # просто молча дописывалось в импульсивные без потолка).
+                to_impulse = min(over, max(0.0, impulse_left))
+                to_cushion = over - to_impulse
                 try:
-                    await _handle_impulse_overflow(category, over, message, user_id, period_start, tz_offset)
+                    if to_impulse > 0:
+                        await _handle_impulse_overflow(category, to_impulse, message, user_id, period_start, tz_offset)
                 except Exception as _oe:
                     logger.debug("impulse overflow create: %s", _oe)
+                if to_cushion > 0:
+                    try:
+                        from core.repos.pg_cushion_repo import _repo as _cushion_repo
+                        new_balance = await _cushion_repo.add_to_balance(
+                            user_id, -to_cushion, source="overflow",
+                            note=f"Перерасход {category} — импульсивные исчерпаны",
+                        )
+                        parts.append(
+                            f"🛡️ Импульсивный бюджет исчерпан → списано {to_cushion:,.0f}₽ из подушки "
+                            f"(баланс: {new_balance:,.0f}₽)"
+                        )
+                    except Exception as _ce:
+                        logger.debug("cushion overflow withdraw: %s", _ce)
+                        parts.append("🚨 Импульсивный бюджет исчерпан!")
+                elif impulse_left <= 0:
+                    parts.append("🚨 Импульсивный бюджет исчерпан!")
             else:
                 parts.append(f"  → overflow {over:,.0f}₽ (нет импульсивного резерва)")
         except Exception as _e:

@@ -71,6 +71,22 @@ logger = logging.getLogger("miniapp.writes")
 router = APIRouter()
 
 
+# #258: nexus.handlers.finance._check_budget_limit ожидает aiogram Message
+# (message.answer(...) / message.from_user.id) — у Mini App нет чата, только
+# tg_id. Вместо рефакторинга _check_budget_limit под message-агностичный
+# интерфейс (много вызывающих мест в боте) — тонкая заглушка: .answer()
+# уходит в notify_user (та же личка), .from_user.id — для внутреннего
+# анти-спам сета _limit_suggested. reply_markup игнорируется (кнопка «хочешь
+# лимит?» неинтерактивна без чата) — это единственная урезанная часть.
+def _fake_bot_message(tg_id: int):
+    from types import SimpleNamespace
+
+    async def _answer(text, parse_mode=None, reply_markup=None):
+        await notify_user(tg_id, text, bot="nexus")
+
+    return SimpleNamespace(from_user=SimpleNamespace(id=tg_id), answer=_answer)
+
+
 # ── Ownership check (PG tasks) ───────────────────────────────────────────────
 
 async def _load_owned_task(task_id: str, user_id: str) -> _PgTask:
@@ -497,6 +513,18 @@ async def finance_create(
         )
         if not page_id:
             raise HTTPException(status_code=500, detail="failed to create finance entry")
+        # #258: расход через Mini App раньше вообще не проверял лимит категории
+        # (только классификатор бота это делал) — перерасход/overflow-в-импульсивные/
+        # автосписание из подушки молча не срабатывали для трат, внесённых в вебе.
+        if body.type == "expense" and bot_label == BOT_NEXUS:
+            try:
+                from nexus.handlers.finance import _check_budget_limit
+                await _check_budget_limit(
+                    category, _fake_bot_message(tg_id), user_id,
+                    amount=body.amount, tz_offset=_tz,
+                )
+            except Exception as e:
+                logger.warning("finance_create: budget limit check failed: %s", e)
         return {"ok": True, "id": page_id, "type": body.type}
 
     return await idempotent(tg_id, idempotency_key, _run)

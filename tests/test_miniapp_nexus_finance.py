@@ -598,6 +598,91 @@ def test_finance_post_expense_routes_to_finance_add(client):
     assert captured["bot_label"] == "☀️ Nexus"
 
 
+# ── #258: Mini App expense теперь тоже проверяет лимит категории ───────────
+
+def test_finance_post_expense_calls_budget_limit_check(client):
+    """Раньше расход через Mini App вообще не проверял лимит категории —
+    перерасход/overflow-в-импульсивные/списание из подушки молча не
+    срабатывали для трат, внесённых в вебе (только для трат через бота)."""
+    from miniapp.backend.routes import writes as _writes_mod
+
+    fa = AsyncMock(return_value="page-id")
+    m_check = AsyncMock()
+    with patch.object(_writes_mod._fin_repo, "add", fa), \
+         patch("miniapp.backend.routes.writes.today_user_tz",
+               AsyncMock(return_value=(_today_date(), 3))), \
+         patch("miniapp.backend.routes.writes.get_user_id",
+               AsyncMock(return_value=FAKE_USER_ID)), \
+         patch("nexus.handlers.finance._check_budget_limit", m_check):
+        r = client.post("/api/finance", json={
+            "type": "expense", "amount": 500, "cat": "🍜 Продукты", "desc": "Магнит",
+        })
+
+    assert r.status_code == 200, r.text
+    m_check.assert_awaited_once()
+    args, kwargs = m_check.await_args
+    assert args[0] == "🍜 Продукты"
+    assert kwargs["amount"] == 500
+    assert kwargs["tz_offset"] == 3
+
+
+def test_finance_post_income_skips_budget_limit_check(client):
+    """Доход не тратит лимит — проверка не должна вызываться."""
+    from miniapp.backend.routes import writes as _writes_mod
+
+    fa = AsyncMock(return_value="inc-id")
+    m_check = AsyncMock()
+    with patch.object(_writes_mod._fin_repo, "add", fa), \
+         patch("miniapp.backend.routes.writes.today_user_tz",
+               AsyncMock(return_value=(_today_date(), 3))), \
+         patch("miniapp.backend.routes.writes.get_user_id",
+               AsyncMock(return_value=FAKE_USER_ID)), \
+         patch("nexus.handlers.finance._check_budget_limit", m_check):
+        r = client.post("/api/finance", json={"type": "income", "amount": 80000})
+
+    assert r.status_code == 200, r.text
+    m_check.assert_not_awaited()
+
+
+def test_finance_post_practice_income_skips_budget_limit_check(client):
+    """Практика (Arcana) не влияет на Nexus-лимиты — проверка не вызывается."""
+    from miniapp.backend.routes import writes as _writes_mod
+
+    fa = AsyncMock(return_value="practice-id")
+    m_check = AsyncMock()
+    with patch.object(_writes_mod._fin_repo, "add", fa), \
+         patch("miniapp.backend.routes.writes.today_user_tz",
+               AsyncMock(return_value=(_today_date(), 3))), \
+         patch("miniapp.backend.routes.writes.get_user_id",
+               AsyncMock(return_value=FAKE_USER_ID)), \
+         patch("nexus.handlers.finance._check_budget_limit", m_check):
+        r = client.post("/api/finance", json={
+            "type": "practice_income", "amount": 3500, "bot": "nexus",
+        })
+
+    assert r.status_code == 200, r.text
+    m_check.assert_not_awaited()
+
+
+def test_finance_post_expense_ignores_budget_limit_check_failure(client):
+    """Сбой проверки лимита не должен ронять сохранение траты."""
+    from miniapp.backend.routes import writes as _writes_mod
+
+    fa = AsyncMock(return_value="page-id")
+    with patch.object(_writes_mod._fin_repo, "add", fa), \
+         patch("miniapp.backend.routes.writes.today_user_tz",
+               AsyncMock(return_value=(_today_date(), 3))), \
+         patch("miniapp.backend.routes.writes.get_user_id",
+               AsyncMock(return_value=FAKE_USER_ID)), \
+         patch("nexus.handlers.finance._check_budget_limit", AsyncMock(side_effect=RuntimeError("boom"))):
+        r = client.post("/api/finance", json={
+            "type": "expense", "amount": 500, "cat": "🍜 Продукты",
+        })
+
+    assert r.status_code == 200, r.text
+    assert r.json()["ok"] is True
+
+
 def test_finance_post_income_default_category(client):
     from miniapp.backend.routes import writes as _writes_mod
     captured = {}
