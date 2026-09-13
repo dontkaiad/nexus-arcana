@@ -101,6 +101,41 @@ async def test_block_crud():
 
 
 @pytest.mark.asyncio
+async def test_block_edit_updates_fields_and_relinks_task():
+    """#253: правка блока из списка (сабпанель, как DetailPanel в job-hunter) —
+    даты/повод меняются, линкованная задача (#249) перевыпускается на новые."""
+    eng = _make_engine()
+    s = datetime(2026, 10, 1, tzinfo=UTC)
+    b = await repo.add_block("u1", s, s + timedelta(days=1), "отпуск", engine=eng)
+    old_task_id = b["nexus_task_id"]
+    assert old_task_id
+
+    new_s = datetime(2026, 10, 10, tzinfo=UTC)
+    updated = await repo.edit_block(
+        b["id"], "u1", start_at=new_s, end_at=new_s + timedelta(days=2),
+        reason="возвращение в СПБ", engine=eng,
+    )
+    assert updated["reason"] == "возвращение в СПБ"
+    assert updated["nexus_task_id"] and updated["nexus_task_id"] != old_task_id
+
+    with eng.connect() as conn:
+        old_status = conn.execute(sa.text(
+            "SELECT s.code FROM tasks t JOIN task_status s ON s.id = t.status_id WHERE t.id = :i"
+        ), {"i": int(old_task_id)}).scalar()
+        new_row = conn.execute(sa.text(
+            "SELECT title FROM tasks WHERE id = :i"
+        ), {"i": int(updated["nexus_task_id"])}).first()
+    assert old_status == "Archived"
+    assert "возвращение в СПБ" in new_row[0]
+
+
+@pytest.mark.asyncio
+async def test_block_edit_missing_row_returns_none():
+    eng = _make_engine()
+    assert await repo.edit_block(999, "u1", reason="x", engine=eng) is None
+
+
+@pytest.mark.asyncio
 async def test_block_links_nexus_task_visible_in_day():
     """#249: "я ставлю в букинг что занята весь день ... у меня нет задачи в
     нексусе на это" — add_block теперь линкует задачу (видна в «Мой день»),

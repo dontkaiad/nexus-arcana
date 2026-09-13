@@ -690,40 +690,120 @@ async function reqBox(){try{
 }catch(e){const el=$("#reqBox"); if(el) el.innerHTML=`<div class="empty">${e.message}</div>`;}}
 async function dec(id,a){try{await api(`/requests/${id}/${a}`,{method:"POST"});toast("готово");reqBox();load().then(gridR);}catch(e){toast(e.message);}}
 
+// #253: клик по строке открывает саб-панель редактирования (как DetailPanel
+// в job-hunter) — раньше можно было только удалить и добавить заново.
+// Бэкенд уже умел PATCH /availability и /meeting-types (repo.edit_*),
+// фронт просто никогда это не показывал.
 async function winBox(){try{
   const d=await api("/availability");st.windows=d.windows;
   const el=$("#winBox"); if(!el) return;
-  el.innerHTML = d.windows.length ? d.windows.map(w=>`<div class="item"><div class="top">
-    <span>${w.weekday!=null?DOW[w.weekday]+" · каждую неделю":mskDate(w.specific_date)+" · разово"} ${w.start_time}–${w.end_time} · ${w.context==="arcana"?"расклады":"встречи"}</span>
-    <button class="mini" data-d="${w.id}">✕</button></div></div>`).join("")
+  el.innerHTML = d.windows.length ? d.windows.map(w=>`<div class="item">
+    <div class="top">
+      <span>${w.weekday!=null?DOW[w.weekday]+" · каждую неделю":mskDate(w.specific_date)+" · разово"} ${w.start_time}–${w.end_time} · ${w.context==="arcana"?"расклады":"встречи"}</span>
+      <span><button class="mini" data-e="${w.id}">✏️</button> <button class="mini" data-d="${w.id}">✕</button></span>
+    </div>
+    <div id="win-edit-${w.id}" hidden class="resch">
+      <input type="time" class="winEditS" value="${w.start_time}" style="padding:6px;border-radius:8px;
+        border:1px solid var(--glass-line);background:var(--glass);color:var(--ink)">
+      <input type="time" class="winEditE" value="${w.end_time}" style="padding:6px;border-radius:8px;
+        border:1px solid var(--glass-line);background:var(--glass);color:var(--ink)">
+      <button class="mini primary" data-save-win="${w.id}">Сохранить</button>
+    </div>
+  </div>`).join("")
     : `<div class="empty">Нет окон — добавь первое, и друзья смогут записываться 👇</div>`;
+  el.querySelectorAll("[data-e]").forEach(b=>b.onclick=()=>{
+    const box=document.getElementById("win-edit-"+b.dataset.e); box.hidden=!box.hidden;
+  });
   // #243: без try/catch неудачное удаление молчало — кнопка выглядела нерабочей
   el.querySelectorAll("[data-d]").forEach(b=>b.onclick=async()=>{try{
     await api("/availability/"+b.dataset.d,{method:"DELETE"});toast("окно удалено");winBox();load().then(gridR);
   }catch(e){toast("не вышло удалить: "+e.message);}});
+  el.querySelectorAll("[data-save-win]").forEach(b=>b.onclick=async()=>{
+    const id=b.dataset.saveWin, box=document.getElementById("win-edit-"+id);
+    const s=box.querySelector(".winEditS").value, e2=box.querySelector(".winEditE").value;
+    if(!s||!e2){toast("укажи время");return;}
+    try{
+      await api("/availability/"+id,{method:"PATCH",headers:{"content-type":"application/json"},
+        body:JSON.stringify({start_time:s,end_time:e2})});
+      toast("сохранено");winBox();load().then(gridR);
+    }catch(e){toast("не вышло: "+e.message);}
+  });
 }catch(e){const el=$("#winBox"); if(el) el.innerHTML=`<div class="empty">${e.message}</div>`;}}
 
-async function typBox(){const el=$("#typBox");try{
+async function typBox(){try{
   const d=await api("/meeting-types");
-  el.innerHTML = d.types.length ? d.types.map(m=>`<div class="item"><div class="top">
-    <span>${m.title||m.slug} · ${m.duration_min}м · ${m.context==="arcana"?"расклады":"встречи"}</span>
-    <button class="mini" data-dt="${m.id}">✕</button></div></div>`).join("")
+  const el=$("#typBox"); if(!el) return;
+  el.innerHTML = d.types.length ? d.types.map(m=>`<div class="item">
+    <div class="top">
+      <span>${m.title||m.slug} · ${m.duration_min}м · ${m.context==="arcana"?"расклады":"встречи"}</span>
+      <span><button class="mini" data-e="${m.id}">✏️</button> <button class="mini" data-dt="${m.id}">✕</button></span>
+    </div>
+    <div id="typ-edit-${m.id}" hidden class="resch">
+      <input type="text" class="typEditTitle" value="${(m.title||"").replace(/"/g,"&quot;")}" placeholder="Название"
+        style="flex:1 1 120px;padding:6px;border-radius:8px;border:1px solid var(--glass-line);background:var(--glass);color:var(--ink)">
+      <input type="number" class="typEditDur" value="${m.duration_min}" placeholder="минут"
+        style="width:64px;padding:6px;border-radius:8px;border:1px solid var(--glass-line);background:var(--glass);color:var(--ink)">
+      <button class="mini primary" data-save-typ="${m.id}">Сохранить</button>
+    </div>
+  </div>`).join("")
     : `<div class="empty">Типов нет — необязательно, но клиенту удобнее выбрать</div>`;
+  el.querySelectorAll("[data-e]").forEach(b=>b.onclick=()=>{
+    const box=document.getElementById("typ-edit-"+b.dataset.e); box.hidden=!box.hidden;
+  });
   el.querySelectorAll("[data-dt]").forEach(b=>b.onclick=async()=>{try{
     await api("/meeting-types/"+b.dataset.dt,{method:"DELETE"});typBox();
   }catch(e){toast("не вышло удалить: "+e.message);}});
-}catch(e){el.innerHTML=`<div class="empty">${e.message}</div>`;}}
+  el.querySelectorAll("[data-save-typ]").forEach(b=>b.onclick=async()=>{
+    const id=b.dataset.saveTyp, box=document.getElementById("typ-edit-"+id);
+    const title=box.querySelector(".typEditTitle").value.trim();
+    const dur=+box.querySelector(".typEditDur").value||60;
+    try{
+      await api("/meeting-types/"+id,{method:"PATCH",headers:{"content-type":"application/json"},
+        body:JSON.stringify({title,duration_min:dur})});
+      toast("сохранено");typBox();
+    }catch(e){toast("не вышло: "+e.message);}
+  });
+}catch(e){const el=$("#typBox"); if(el) el.innerHTML=`<div class="empty">${e.message}</div>`;}}
 
-async function offBox(){const el=$("#offBox");try{
+async function offBox(){try{
   const d=await api("/blocks");
-  el.innerHTML = d.blocks.length ? d.blocks.map(b=>`<div class="item"><div class="top">
-    <span>${mskDate(b.start_at)} – ${mskDate(b.end_at)} · ${b.reason||"—"}</span>
-    <button class="mini" data-db="${b.id}">✕</button></div></div>`).join("")
+  const el=$("#offBox"); if(!el) return;
+  const iso=s=>s.slice(0,10); // "2026-10-01T00:00:00+03:00" → "2026-10-01" для <input type=date>
+  el.innerHTML = d.blocks.length ? d.blocks.map(b=>`<div class="item">
+    <div class="top">
+      <span>${mskDate(b.start_at)} – ${mskDate(b.end_at)} · ${b.reason||"—"}</span>
+      <span><button class="mini" data-e="${b.id}">✏️</button> <button class="mini" data-db="${b.id}">✕</button></span>
+    </div>
+    <div id="off-edit-${b.id}" hidden class="resch">
+      <input type="date" class="offEditS" value="${iso(b.start_at)}" style="padding:6px;border-radius:8px;
+        border:1px solid var(--glass-line);background:var(--glass);color:var(--ink)">
+      <input type="date" class="offEditE" value="${iso(b.end_at)}" style="padding:6px;border-radius:8px;
+        border:1px solid var(--glass-line);background:var(--glass);color:var(--ink)">
+      <input type="text" class="offEditR" value="${(b.reason||"").replace(/"/g,"&quot;")}" placeholder="причина"
+        style="flex:1 1 100px;padding:6px;border-radius:8px;border:1px solid var(--glass-line);background:var(--glass);color:var(--ink)">
+      <button class="mini primary" data-save-off="${b.id}">Сохранить</button>
+    </div>
+  </div>`).join("")
     : `<div class="empty">Ничего не отмечено</div>`;
+  el.querySelectorAll("[data-e]").forEach(b=>b.onclick=()=>{
+    const box=document.getElementById("off-edit-"+b.dataset.e); box.hidden=!box.hidden;
+  });
   el.querySelectorAll("[data-db]").forEach(b=>b.onclick=async()=>{try{
     await api("/blocks/"+b.dataset.db,{method:"DELETE"});toast("отметка снята");offBox();load().then(gridR);
   }catch(e){toast("не вышло удалить: "+e.message);}});
-}catch(e){el.innerHTML=`<div class="empty">${e.message}</div>`;}}
+  el.querySelectorAll("[data-save-off]").forEach(b=>b.onclick=async()=>{
+    const id=b.dataset.saveOff, box=document.getElementById("off-edit-"+id);
+    const s=box.querySelector(".offEditS").value, e2=box.querySelector(".offEditE").value;
+    const r=box.querySelector(".offEditR").value;
+    if(!s||!e2){toast("укажи даты");return;}
+    try{
+      // #240: naive-строка без offset трактуется бэкендом как UTC — те же +03:00, что и при создании.
+      await api("/blocks/"+id,{method:"PATCH",headers:{"content-type":"application/json"},
+        body:JSON.stringify({start:s+"T00:00+03:00",end:e2+"T23:59+03:00",reason:r})});
+      toast("сохранено");offBox();load().then(gridR);
+    }catch(e){toast("не вышло: "+e.message);}
+  });
+}catch(e){const el=$("#offBox"); if(el) el.innerHTML=`<div class="empty">${e.message}</div>`;}}
 
 /* #220 (B7): история броней + перенос времени */
 async function histBox(){const el=$("#histBox");try{

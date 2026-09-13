@@ -328,6 +328,39 @@ async def add_block(user_id: str, start_at: datetime, end_at: datetime, reason: 
     return await link_block(block, engine=eng)
 
 
+async def edit_block(
+    row_id: int, user_id: str,
+    start_at: Optional[datetime] = None, end_at: Optional[datetime] = None,
+    reason: Optional[str] = None, *, engine=None,
+) -> Optional[dict]:
+    """#253: правка существующего блока (даты/повод) прямо из списка, без
+    удали-и-создай-заново. Линкованная задача (#249) перевыпускается —
+    архивируем старую и создаём свежую тем же link_block(), которым и так
+    создаётся задача при add_block; меньше кода, тот же протестированный путь."""
+    eng = engine or _engine()
+    rows = await asyncio.to_thread(_rows, eng, booking_block, user_id)
+    current = next((b for b in rows if b["id"] == row_id), None)
+    if not current:
+        return None
+    vals = {}
+    if start_at is not None:
+        vals["start_at"] = start_at
+    if end_at is not None:
+        vals["end_at"] = end_at
+    if reason is not None:
+        vals["reason"] = reason
+    if not vals:
+        return current
+    updated = await asyncio.to_thread(
+        _update, eng, booking_block, row_id, user_id, vals, {"start_at", "end_at", "reason"},
+    )
+    if not updated:
+        return None
+    from core.booking.linkage import unlink_block, link_block
+    await unlink_block(current.get("nexus_task_id"), engine=eng)
+    return await link_block(dict(updated, nexus_task_id=None), engine=eng)
+
+
 async def del_block(row_id: int, user_id: str, *, engine=None) -> bool:
     eng = engine or _engine()
     block = await asyncio.to_thread(_rows, eng, booking_block, user_id)

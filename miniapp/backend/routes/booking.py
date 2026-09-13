@@ -577,6 +577,12 @@ class BlockBody(BaseModel):
     reason: str = ""
 
 
+class BlockEditBody(BaseModel):
+    start: Optional[str] = None
+    end: Optional[str] = None
+    reason: Optional[str] = None
+
+
 async def _owner_uid_or_404(tg_id: int) -> str:
     from core.user_manager import get_user_id
     uid = await get_user_id(tg_id)
@@ -664,6 +670,22 @@ async def block_add(body: BlockBody, tg_id: int = Depends(current_user_id)) -> d
     if e <= s:
         raise HTTPException(status_code=400, detail="end before start")
     return await bkrepo.add_block(uid, s, e, body.reason.strip())
+
+
+@router.patch("/booking/blocks/{row_id}")
+async def block_edit(row_id: int, body: BlockEditBody, tg_id: int = Depends(current_user_id)) -> dict:
+    uid = await _owner_uid_or_404(tg_id)
+    try:
+        s = _parse_dt(body.start) if body.start else None
+        e = _parse_dt(body.end) if body.end else None
+    except ValueError:
+        raise HTTPException(status_code=400, detail="bad datetime")
+    if s and e and e <= s:
+        raise HTTPException(status_code=400, detail="end before start")
+    row = await bkrepo.edit_block(row_id, uid, start_at=s, end_at=e, reason=body.reason)
+    if not row:
+        raise HTTPException(status_code=404, detail="not found")
+    return row
 
 
 @router.delete("/booking/blocks/{row_id}")
