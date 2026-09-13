@@ -7,7 +7,10 @@ the event card; + #95: `_TERMINAL_STATUS` excludes archived from open-work
 reads; + #203: Mini App create endpoint; + #153: `?filter=` status tabs
 (active/overdue/done/all); + #154: `link_practice_record` creates+closes a
 Work for every performed event, `list_by_client` for the client card.)
-(+ #241, 24cb626: `duration_min` column.) This
+(+ #241, 24cb626: `duration_min` column.) (+ #26x: `work_preview.get_effective_tz`
+— explicit zone/city mention in free text overrides stored `tz_{tg_id}` for a
+single parse, sister to `nexus/handlers/tasks.py:_get_effective_tz`, see
+`docs/specs/TASKS.md`.) This
 spec describes the works data model as of that commit; update it in the same
 PR that changes the model.
 
@@ -165,7 +168,9 @@ Reads/writes are pure SQL.
 - `arcana/repos/pg_works_repo.py` — `PgWorksRepo` (create/status/deadline/mark_done),
   `list_by_client` (all statuses, #154 C4)
 - `arcana/repos/works_repo.py` — seam + `Work` object
-- `arcana/handlers/works.py`, `arcana/handlers/work_preview.py` — Haiku parse + preview
+- `arcana/handlers/works.py`, `arcana/handlers/work_preview.py` — Haiku parse + preview;
+  `work_preview.get_effective_tz` (#26x)
+- `core/location.py` — `resolve_offset`, `get_user_tz` (#26x)
 - `core/work_relation.py` — PG session/ritual → work relation (#151);
   `link_practice_record` finds-or-creates + closes a Work (#154 stage 5)
 - `miniapp/backend/routes/arcana_clients.py` — client dossier `works[]` (#154 C4)

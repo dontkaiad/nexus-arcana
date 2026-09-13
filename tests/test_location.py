@@ -182,6 +182,49 @@ async def test_invalidate_forces_reread():
     assert find.await_count == 2
 
 
+# ── get_effective_tz: per-message override для перелётов (#26x) ──────────────
+
+@pytest.mark.asyncio
+async def test_get_effective_tz_uses_stored_when_no_override_in_text():
+    loc.invalidate_tz_cache(94)
+    find = AsyncMock(return_value=[Memory(id="1", fact="5", key="tz_94")])
+    with patch.object(loc.PgMemoryRepo, "find_by_exact_key", find):
+        offset, label = await loc.get_effective_tz(94, "забрать воду")
+        assert offset == 5
+        assert label == "UTC+5"
+
+
+@pytest.mark.asyncio
+async def test_get_effective_tz_explicit_city_in_text_overrides_stored():
+    loc.invalidate_tz_cache(95)
+    find = AsyncMock(return_value=[Memory(id="1", fact="5", key="tz_95")])
+    with patch.object(loc.PgMemoryRepo, "find_by_exact_key", find):
+        offset, label = await loc.get_effective_tz(95, "забрать воду с 13 до 18 мск")
+        assert offset == 3
+        assert label == "мск"
+
+
+@pytest.mark.asyncio
+async def test_get_effective_tz_explicit_utc_pattern_overrides_stored():
+    loc.invalidate_tz_cache(96)
+    find = AsyncMock(return_value=[Memory(id="1", fact="5", key="tz_96")])
+    with patch.object(loc.PgMemoryRepo, "find_by_exact_key", find):
+        offset, label = await loc.get_effective_tz(96, "встреча в 10:00 UTC+2")
+        assert offset == 2
+        assert label == "UTC+2"
+
+
+@pytest.mark.asyncio
+async def test_get_effective_tz_override_does_not_persist_stored_tz():
+    loc.invalidate_tz_cache(97)
+    find = AsyncMock(return_value=[Memory(id="1", fact="5", key="tz_97")])
+    with patch.object(loc.PgMemoryRepo, "find_by_exact_key", find):
+        await loc.get_effective_tz(97, "с 13 до 18 мск")
+        # Override не должен писать в память/кеш — повторное чтение
+        # сохранённого tz всё ещё возвращает старое значение (5), а не 3.
+        assert await loc.get_user_tz(97) == 5
+
+
 # ── Мини-апп set_weather_city: теперь пишет tz_ (главный фикс) ─────────────────
 
 @pytest.mark.asyncio

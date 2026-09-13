@@ -7,7 +7,7 @@ import logging
 import sqlite3 as _sqlite3
 import time as _time
 from datetime import datetime, timezone, timedelta
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 from aiogram import Router, F, Bot
 from aiogram.filters import BaseFilter
@@ -791,6 +791,24 @@ async def _get_user_tz(uid: int) -> int:
     return await _location_get_user_tz(uid)
 
 
+async def _get_effective_tz(uid: int, text: str) -> Tuple[int, str]:
+    """tz ДЛЯ РАЗБОРА ЭТОГО КОНКРЕТНОГО текста — явная зона/город в самом
+    сообщении ("13:00 мск", "по питерскому времени") побеждает сохранённый
+    tz_{uid}, БЕЗ побочной записи в память (перелёты: пишет ДО прилёта в
+    старом поясе про время в целевом, #26x). Возвращает (offset, label —
+    для подстановки в Haiku-промпт вместо старого захардкоженного "МСК").
+
+    Фолбэк идёт через локальный `_get_user_tz` (не напрямую
+    `core.location.get_user_tz`) — многие тесты мокают именно
+    `tasks._get_user_tz`; вызов напрямую тихо ломал бы им фолбэк на
+    реальную PG (Connection refused в тестовом окружении без Postgres)."""
+    override, city = _resolve_offset(text or "")
+    if override is not None:
+        return override, (city or f"UTC{override:+d}")
+    stored = await _get_user_tz(uid)
+    return stored, f"UTC{stored:+d}"
+
+
 async def _reschedule_all_for_tz(uid: int, chat_id: int, old_offset: int, new_offset: int) -> None:
     """Пересобрать APScheduler jobs при смене часового пояса.
 
@@ -1126,7 +1144,7 @@ def _is_clarification_not_new_task(text: str) -> bool:
     return len(lead_words) <= 2
 
 
-async def _haiku_parse_reminder_dt(text: str, tz_offset: int) -> Optional[str]:
+async def _haiku_parse_reminder_dt(text: str, tz_offset: int, tz_label: str = "") -> Optional[str]:
     """Абсолютное время напоминания через Haiku — фолбэк когда
     `_CLARIFY_REMINDER_RE` не подходит (день месяца, дни недели и т.п.).
 
@@ -1154,7 +1172,7 @@ async def _haiku_parse_reminder_dt(text: str, tz_offset: int) -> Optional[str]:
 - reminder_time ВСЕГДА строго в будущем относительно "Сейчас".
 {tomorrow_note}
 
-Сейчас: {now_str} (МСК, UTC+{tz_offset})"""
+Сейчас: {now_str} ({tz_label or f"UTC{tz_offset:+d}"})"""
     try:
         raw = await ask_claude(text, system=system, max_tokens=100,
                                model="claude-haiku-4-5-20251001", temperature=0)
@@ -1188,7 +1206,7 @@ async def handle_last_task_clarify(
     if not _is_clarification_not_new_task(text):
         return False
 
-    tz_offset = await _get_user_tz(uid)
+    tz_offset, tz_label = await _get_effective_tz(uid, text)
     now = datetime.now(timezone(timedelta(hours=tz_offset)))
 
     update_props: dict = {}
@@ -1212,7 +1230,7 @@ async def handle_last_task_clarify(
 
     elif _REMINDER_KW_RE.search(text):
         # Быстрый regex не подошёл (день месяца, день недели и т.п.) — Haiku.
-        dt_str = await _haiku_parse_reminder_dt(text, tz_offset)
+        dt_str = await _haiku_parse_reminder_dt(text, tz_offset, tz_label)
         if dt_str:
             update_props["Напоминание"] = _date_with_tz(dt_str, tz_offset)
             reschedule_reminder = (dt_str, page_id)
@@ -1557,6 +1575,17 @@ async def handle_task_parsed(message: Message, data: dict, original_text: str = 
 
     data.setdefault("for_practice", False)
 
+    # Авторитетный текст от classifier (транскрипт для голосовых); fallback
+    # на message.text для прямых вызовов/текстовых сообщений. Считаем ОДИН
+    # эффективный tz для всей функции (включая ветку repeat и итоговый
+    # _do_save_task ниже) — явная зона в тексте ("13:00 мск") побеждает
+    # сохранённый tz_{uid}, перелёты (#26x). Кладём в data["_tz_offset"], т.к.
+    # _do_save_task не видит original_text и иначе переоткрыл бы сохранённый.
+    original_text = original_text or message.text or ""
+    tz_offset, _tz_label = await _get_effective_tz(uid, original_text)
+    data["_tz_offset"] = tz_offset
+    has_remind = _has_remind_word(original_text)
+
     repeat = data.get("repeat") or "Нет"
     if repeat and repeat != "Нет":
         repeat_time_raw = data.get("repeat_time") or "09:00"
@@ -1565,7 +1594,6 @@ async def handle_task_parsed(message: Message, data: dict, original_text: str = 
             h, m = map(int, time_str.split(":"))
         except Exception:
             h, m = 9, 0
-        tz_offset = await _get_user_tz(uid)
         user_tz = timezone(timedelta(hours=tz_offset))
         now = datetime.now(user_tz)
         first_run = now.replace(hour=h, minute=m, second=0, microsecond=0)
@@ -1580,11 +1608,6 @@ async def handle_task_parsed(message: Message, data: dict, original_text: str = 
                      repeat, _ivl, first_run, data["deadline"], repeat_time_raw)
         await _do_save_task(message, data, chat_id=message.chat.id, uid=uid)
         return
-
-    # Авторитетный текст от classifier (транскрипт для голосовых); fallback
-    # на message.text для прямых вызовов/текстовых сообщений.
-    original_text = original_text or message.text or ""
-    has_remind = _has_remind_word(original_text)
 
     # Гвард: если Haiku додумал reminder, но в тексте нет слова «напомни» —
     # отбрасываем галлюцинированное напоминание (issue #33).
@@ -1611,7 +1634,6 @@ async def handle_task_parsed(message: Message, data: dict, original_text: str = 
 
     # Pre-filter: "через N мин/часов/дней" → вычислить до Claude
     # Баг Claude: "через 2 мин" → "00:02" вместо now+2min
-    tz_offset = await _get_user_tz(uid)
     rel_match = _REL_TIME_RE.search(original_text)
     if rel_match:
         relative_time = _parse_relative_time(original_text, tz_offset)
@@ -1849,7 +1871,8 @@ async def handle_task_clarification(message: Message) -> None:
         return
 
     try:
-        tz_offset = await _get_user_tz(uid)
+        tz_offset, tz_label = await _get_effective_tz(uid, text)
+        pending["_tz_offset"] = tz_offset
 
         # Быстрый парсер для "через N мин/часов/дней" — не доверяем Claude
         relative = _parse_relative_time(text, tz_offset)
@@ -1875,7 +1898,7 @@ async def handle_task_clarification(message: Message) -> None:
 - "завтра в 15:00" → завтра в 15:00
 {tomorrow_note}
 
-Сейчас: {now_str} (UTC+{tz_offset})
+Сейчас: {now_str} ({tz_label})
 Дедлайн: {deadline_str}"""
         
         raw = await ask_claude(text, system=system, max_tokens=100, model="claude-haiku-4-5-20251001", temperature=0)
@@ -1907,7 +1930,8 @@ async def _handle_awaiting_reminder_time(message: Message, text: str, pending: d
     того чтобы заново прогонять весь ответ через Claude без контекста о дате —
     именно там дата пользователя молча терялась и подставлялось «сегодня»."""
     known_date = (pending.get("reminder_time") or "")[:10]
-    tz_offset = await _get_user_tz(uid)
+    tz_offset, tz_label = await _get_effective_tz(uid, text)
+    pending["_tz_offset"] = tz_offset
 
     # 1) "через N мин/часов/дней" — самостоятельная точка отсчёта, дата тут не нужна
     relative = _parse_relative_time(text, tz_offset)
@@ -1936,7 +1960,7 @@ async def _handle_awaiting_reminder_time(message: Message, text: str, pending: d
 УЖЕ ИЗВЕСТНА ({known_date or "не важно"}), нужно определить ТОЛЬКО время суток.
 Верни ТОЛЬКО JSON без markdown: {{"time": "HH:MM или null"}}
 Примеры: "в 10 утра"→"10:00", "вечером"→"19:00", "днём"→"13:00", "в 18:30"→"18:30"
-Сейчас: {now_str} (UTC+{tz_offset})"""
+Сейчас: {now_str} ({tz_label})"""
         raw = await ask_claude(text, system=system, max_tokens=50, model="claude-haiku-4-5-20251001", temperature=0)
         raw = raw.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
         parsed = json.loads(raw)
@@ -1959,7 +1983,8 @@ async def _handle_awaiting_reminder_time(message: Message, text: str, pending: d
 async def _handle_task_refinement(message: Message, text: str, pending: dict, uid: int) -> None:
     """Уточнение задачи в режиме подтверждения — парсим любые поля через Haiku."""
     try:
-        tz_offset = await _get_user_tz(uid)
+        tz_offset, tz_label = await _get_effective_tz(uid, text)
+        pending["_tz_offset"] = tz_offset
 
         # Быстрый парсер для "через N мин/часов/дней" → treat as reminder
         relative = _parse_relative_time(text, tz_offset)
@@ -1994,7 +2019,7 @@ async def _handle_task_refinement(message: Message, text: str, pending: dict, ui
 - ВАЖНО: если в тексте несколько уточнений ("приоритет срочно дедлайн 13 сентября") — верни ВСЕ поля сразу, не только одно
 - Если текст НЕ похож на уточнение задачи (новая задача, вопрос, другая тема) → not_refinement=true
 {tomorrow_note}
-Сейчас: {now_str} (UTC+{tz_offset})"""
+Сейчас: {now_str} ({tz_label})"""
 
         raw = await ask_claude(text, system=system, max_tokens=200, model="claude-haiku-4-5-20251001", temperature=0)
         raw = raw.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
@@ -2068,7 +2093,8 @@ async def _handle_task_refinement(message: Message, text: str, pending: dict, ui
 async def _handle_combined_clarification(message: Message, text: str, pending: dict, uid: int) -> None:
     """Парсим и дедлайн и напоминание из одного сообщения пользователя."""
     try:
-        tz_offset = await _get_user_tz(uid)
+        tz_offset, tz_label = await _get_effective_tz(uid, text)
+        pending["_tz_offset"] = tz_offset
 
         # Быстрый парсер для "через N мин/часов/дней" → treat as reminder
         relative = _parse_relative_time(text, tz_offset)
@@ -2094,7 +2120,7 @@ async def _handle_combined_clarification(message: Message, text: str, pending: d
 - "в 10:00" → deadline=null, reminder_time=сегодня или завтра в 10:00
 - "через 2 дня" → deadline=через 2 дня, reminder_time=null
 {tomorrow_note}
-Сейчас: {now_str} (UTC+{tz_offset})"""
+Сейчас: {now_str} ({tz_label})"""
 
         raw = await ask_claude(text, system=system, max_tokens=150, model="claude-haiku-4-5-20251001", temperature=0)
         raw = raw.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
@@ -2570,8 +2596,8 @@ async def handle_reschedule_reminder(message: Message, text: Optional[str] = Non
             except Exception:
                 pass
 
-        tz_offset = await _get_user_tz(uid)
         text = maybe_convert(text if text is not None else message.text)
+        tz_offset, tz_label = await _get_effective_tz(uid, text)
 
         # Вместо даты пользователь просит отменить задачу целиком —
         # не пытаемся парсить это как время, а сразу архивируем.
@@ -2600,7 +2626,7 @@ async def handle_reschedule_reminder(message: Message, text: Optional[str] = Non
             await message.answer(f"✅ Напоминание перенесено на {relative.replace('T', ' ')}")
             return
 
-        reminder_time = await _haiku_parse_reminder_dt(text, tz_offset)
+        reminder_time = await _haiku_parse_reminder_dt(text, tz_offset, tz_label)
 
         if reminder_time:
             # Anti-loop: перенос в прошлое сработает мгновенно → петля. Переспросить,
@@ -2630,7 +2656,13 @@ async def _do_save_task(message: Message, data: dict, chat_id: int = None, uid: 
     from nexus.repos.pg_tasks_repo import (
         _match_code, _priority_id, _category_id, _ensure_lookups,
     )
-    tz_offset = await _get_user_tz(uid)
+    # #26x: если дедлайн/напоминание парсились по tz-override из текста
+    # сообщения (перелёты — "13:00 мск" пока сама ещё в другом поясе), этот
+    # же offset нужно использовать при финальном крепеже tz к времени —
+    # иначе повторный запрос СОХРАНЁННОГО tz здесь молча откатит override.
+    tz_offset = data.get("_tz_offset")
+    if tz_offset is None:
+        tz_offset = await _get_user_tz(uid)
     await asyncio.to_thread(_ensure_lookups)
     real_priority = _match_code(_priority_id, data.get("priority") or "Важно", "🟡 Важно")
     real_category = _match_code(_category_id, data.get("category") or "💳 Прочее", "💳 Прочее")

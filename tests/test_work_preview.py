@@ -203,3 +203,24 @@ async def test_work_cancel_deletes_pending_without_notion_write():
 
     add_mock.assert_not_called()
     assert wp._pending_get(42) is None
+
+
+# ── get_effective_tz: явная зона в тексте побеждает сохранённый (#26x) ────────
+# Сестринская фича к nexus/handlers/tasks.py:_get_effective_tz — перелёты,
+# работа записывается ДО прилёта про время в целевом поясе.
+
+@pytest.mark.asyncio
+async def test_get_effective_tz_explicit_zone_overrides_stored():
+    with patch.object(wp, "get_user_tz", AsyncMock(return_value=5)) as stored:
+        offset, label = await wp.get_effective_tz(42, "сеанс завтра в 15:00 мск")
+    assert offset == 3
+    assert label == "мск"
+    stored.assert_not_awaited()  # override нашёлся — к сохранённому не ходили
+
+
+@pytest.mark.asyncio
+async def test_get_effective_tz_falls_back_to_stored_without_zone_mention():
+    with patch.object(wp, "get_user_tz", AsyncMock(return_value=5)):
+        offset, label = await wp.get_effective_tz(42, "сеанс завтра в 15:00")
+    assert offset == 5
+    assert label == "UTC+5"

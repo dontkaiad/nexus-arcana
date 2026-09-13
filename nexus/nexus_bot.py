@@ -817,8 +817,8 @@ async def process_text(msg: Message, text: str, user_id: str = "") -> None:
     await msg.bot.send_chat_action(msg.chat.id, "typing")
     uid = msg.from_user.id
 
-    from nexus.handlers.tasks import _get_user_tz
-    tz_offset = await _get_user_tz(uid)
+    from nexus.handlers.tasks import _get_effective_tz
+    tz_offset, _tz_label = await _get_effective_tz(uid, original_text)
 
     # ── URL + note keywords → быстрый путь в заметки ─────────────────────
     import re as _re_url

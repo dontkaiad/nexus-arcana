@@ -1,6 +1,6 @@
 # TASKS — data-model contract (Nexus ✅ Задачи)
 
-Code conforms to: b9d3367 (+ this change: #149 — notion_id column dropped). (+ #144: user_notion_id → user_id.) (+ #241/#242, 24cb626: `duration_min`, `shared` columns.) This spec describes the tasks data model as of
+Code conforms to: b9d3367 (+ this change: #149 — notion_id column dropped). (+ #144: user_notion_id → user_id.) (+ #241/#242, 24cb626: `duration_min`, `shared` columns.) (+ #26x: per-message timezone override for deadline/reminder parsing.) This spec describes the tasks data model as of
 that commit; update it in the same PR that changes the model.
 
 > Contract, not snapshot. Describes the persistent model, the guarantees of
@@ -125,6 +125,34 @@ non-recurring task, `tasks._expense_from_note_on_done` →
 dated today (reusing `_write_one_time_expense`) with a Haiku-picked category
 (`_ONE_TIME_PARSE_SYSTEM`, default `💳 Прочее`) and posts "📤 Записал расход".
 No amount in `note` → nothing written, completion is never blocked.
+
+## Timezone resolution for deadline/reminder parsing (#26x)
+
+All Haiku prompts that extract a clock time from free text embed a "Сейчас:
+..." anchor built from a resolved offset — never the raw stored `tz_{tg_id}`
+directly. `nexus/handlers/tasks.py:_get_effective_tz(uid, text)` (Arcana
+sister: `arcana/handlers/work_preview.py:get_effective_tz`) resolves:
+
+1. **Override** — an explicit zone/city mention in `text` itself
+   (`core.location.resolve_offset`, e.g. "13:00 мск", "по питерскому
+   времени", "UTC+3") wins, with no side-effect write to `tz_{tg_id}` (that
+   remains the exclusive job of `/tz` / "я в Питере" → `set_user_location`).
+   Needed for travel: a message can be sent from the *old* stored timezone
+   about a time meant in the *destination* one.
+2. **Stored fallback** — no override in `text` → `_get_user_tz(uid)` as
+   before.
+
+The resolved offset must be threaded consistently from parse to persistence
+within one user turn — a second, unrelated fetch of the stored tz at save
+time would silently discard the override. The multi-step
+clarification/refinement handlers (`_handle_task_clarification`,
+`_handle_awaiting_reminder_time`, `_handle_task_refinement`,
+`_handle_combined_clarification`, `handle_task_parsed`) stash the resolved
+offset on `pending["_tz_offset"]` / `data["_tz_offset"]`; `_do_save_task`
+prefers that value over a fresh `_get_user_tz` call. Single-turn paths
+(`handle_last_task_clarify`, `handle_reschedule_reminder`, the entry point
+`nexus_bot.process_text` that computes `tz_offset` for `classify()`) resolve
+once and use the same local variable throughout.
 
 ## Invariants
 
@@ -275,7 +303,9 @@ category resolution on completion also runs on Haiku
   re-arm — #212), `_schedule_reminder`/`_schedule_deadline_check` (`recipients`
   fan-out — #211), `_parse_repeat_time`, `_reschedule_all_for_tz`,
   `_update_streak_line`, Haiku `ask_claude` calls; `_apply_edit` — NL field
-  edits, incl. `duration` (#241) and `shared` (#242)
+  edits, incl. `duration` (#241) and `shared` (#242); `_get_effective_tz`,
+  `_haiku_parse_reminder_dt` (#26x — per-message tz override)
+- `core/location.py` — `resolve_offset`, `get_user_tz`, `CITY_TZ` (#26x)
 - `core/duration.py` — `parse_duration_minutes`/`format_duration` (#241)
 - `core/shared_items.py` — `shared_items_summary` reads `tasks.shared` (+
   `nexus_lists.shared`) for Zarya's friend-chat context (#242, see

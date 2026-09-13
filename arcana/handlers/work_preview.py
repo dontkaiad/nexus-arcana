@@ -35,10 +35,23 @@ from core.claude_client import ask_claude
 from core.client_resolve import client_find  # noqa: F401  # client_find via mock.patch
 from core.error_log import log_error
 from core.shared_handlers import get_user_tz
+from core.location import resolve_offset as _resolve_offset
 from core.utils import cancel_button, react
 from arcana.repos.pg_works_repo import PgWorksRepo
 
 logger = logging.getLogger("arcana.work_preview")
+
+
+async def get_effective_tz(uid: int, text: str) -> tuple:
+    """tz для разбора ЭТОГО текста — явная зона/город в сообщении побеждает
+    сохранённый tz_{uid}, без записи в память (перелёты, #26x). Фоллбэк идёт
+    через модульный `get_user_tz` (не `core.location` напрямую) — тесты
+    мокают именно `work_preview.get_user_tz`."""
+    override, city = _resolve_offset(text or "")
+    if override is not None:
+        return override, (city or f"UTC{override:+d}")
+    stored = await get_user_tz(uid)
+    return stored, f"UTC{stored:+d}"
 
 _works_repo = PgWorksRepo()
 router = Router()
@@ -388,7 +401,7 @@ async def handle_add_work_preview(
     """Создать pending + показать превью. НЕ пишет в Notion."""
     try:
         uid = message.from_user.id
-        tz_offset = await get_user_tz(uid)
+        tz_offset, _tz_label = await get_effective_tz(uid, text)
 
         try:
             data = await _parse_work_text(text, tz_offset)
@@ -483,7 +496,7 @@ async def handle_work_clarification(message: Message) -> bool:
         )
         return True
 
-    tz_offset = await get_user_tz(uid)
+    tz_offset, _tz_label = await get_effective_tz(uid, text)
     try:
         upd = await _parse_clarification(text, tz_offset)
     except Exception as e:

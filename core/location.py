@@ -172,6 +172,26 @@ async def get_user_tz(tg_id: int) -> int:
     return 3
 
 
+async def get_effective_tz(tg_id: int, text: str = "") -> Tuple[int, str]:
+    """tz для ОДНОГО парсинга времени из `text` — если в самом сообщении явно
+    названа зона/город (`resolve_offset`), используем её вместо сохранённой,
+    БЕЗ побочной записи в `tz_{tg_id}` (её делает только `set_user_location`,
+    отдельный явный путь — "я в Питере"/`/tz`). Нужно для юзеров в перелётах:
+    сообщение написано ДО прилёта в сохранённом (старом) поясе, но время в
+    нём указано в поясе места назначения ("с 13 до 18 мск", пока сама ещё
+    физически в другом часовом поясе) — раньше это ошибочно парсилось по
+    старому сохранённому offset (#26x).
+
+    Возвращает (offset, label) — label подставляется в Haiku-промпты
+    вместо ранее захардкоженного "МСК" (было верно только для UTC+3).
+    """
+    override, city = resolve_offset(text)
+    if override is not None:
+        return override, (city or f"UTC{override:+d}")
+    stored = await get_user_tz(tg_id)
+    return stored, f"UTC{stored:+d}"
+
+
 async def set_user_location(
     tg_id: int,
     *,
