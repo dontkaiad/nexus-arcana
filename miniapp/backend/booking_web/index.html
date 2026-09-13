@@ -34,6 +34,13 @@
     --card-bg:rgba(18,24,38,.44); --dd-bg:#141a28; --paper:#0d1120; color-scheme:dark;
   }
   *{box-sizing:border-box}
+  /* #255: [hidden] проигрывал по специфичности любому селектору класса/id со
+     своим display (#calView{display:flex}, .item .resch{display:flex}) —
+     атрибут hidden молча ничего не скрывал. Поймано скриншот-тестом ДО
+     деплоя (иначе повторило бы жалобу «ничего не поменялось»); заодно чинит
+     тот же класс бага в уже существующей истории броней (.resch там не
+     реально скрывался до клика «перенести» — тоже эта причина). */
+  [hidden]{display:none!important}
   html,body{min-height:100%;overscroll-behavior:none}
   html{background:var(--paper)}
   body{margin:0;color:var(--ink);overflow-x:hidden;
@@ -202,6 +209,9 @@
   /* main */
   .main{padding:12px 26px 20px;display:flex;gap:16px;align-items:flex-start}
   @media(max-width:760px){.main{flex-direction:column}}
+  #calView{display:flex;gap:16px;align-items:flex-start;flex:1 1 auto;min-width:0}
+  @media(max-width:760px){#calView{flex-direction:column}}
+  #adminView{flex:1 1 auto;min-width:0}
   .calcol{flex:1 1 auto;min-width:0}
   .card{background:var(--card-bg,var(--glass));border:1px solid var(--glass-line);border-radius:18px;padding:14px 16px;
     backdrop-filter:blur(14px) saturate(125%);-webkit-backdrop-filter:blur(14px) saturate(125%);
@@ -269,28 +279,34 @@
       </button>
     </header>
     <main class="main">
-      <div class="calcol">
-        <div class="card">
-          <div class="cnav">
-            <button id="prev" class="mini">‹</button>
-            <span class="t" id="mtitle"></span>
-            <button id="next" class="mini">›</button>
-            <span class="sp"></span>
-            <button id="today" class="mini">сегодня</button>
+      <!-- #255: у admin вкладка «Календарь» — один из равноправных верхнеуровневых
+           разделов (как Пайплайн/Пограничные в job-hunter), а не постоянный
+           центр экрана — остальные вкладки подменяют этот блок целиком. -->
+      <div id="calView">
+        <div class="calcol">
+          <div class="card">
+            <div class="cnav">
+              <button id="prev" class="mini">‹</button>
+              <span class="t" id="mtitle"></span>
+              <button id="next" class="mini">›</button>
+              <span class="sp"></span>
+              <button id="today" class="mini">сегодня</button>
+            </div>
+            <div class="dowrow" id="dow"></div>
+            <div class="grid" id="grid"></div>
           </div>
-          <div class="dowrow" id="dow"></div>
-          <div class="grid" id="grid"></div>
+        </div>
+        <div class="detailcol" id="detailcol" style="display:none">
+          <div class="card">
+            <div class="detailh">
+              <h3 id="detailTitle"></h3>
+              <button class="mini" id="detailClose">✕</button>
+            </div>
+            <div id="detail"></div>
+          </div>
         </div>
       </div>
-      <div class="detailcol" id="detailcol" style="display:none">
-        <div class="card">
-          <div class="detailh">
-            <h3 id="detailTitle"></h3>
-            <button class="mini" id="detailClose">✕</button>
-          </div>
-          <div id="detail"></div>
-        </div>
-      </div>
+      <div id="adminView" class="glass sec tabpane" hidden></div>
     </main>
   </div>
 </div>
@@ -436,7 +452,13 @@ function meBlock(){
 }
 function rail(){
   const r=$("#rail");
-  if(st.me.role==="admin"){ r.innerHTML=meBlock()+adminSections(); wireAdmin(); return; }
+  if(st.me.role==="admin"){
+    r.innerHTML=meBlock()+adminNav();
+    r.querySelectorAll(".tabbtn").forEach(b=>b.onclick=()=>{ st.adminTab=b.dataset.tab; rail(); });
+    reqBox(); winBox(); // бейдж заявок и st.windows (подсветка календаря) — всегда, вне зависимости от вкладки
+    renderMain();
+    return;
+  }
 
   const legend = st.me.role==="friend" ? `
     <div class="legend">
@@ -488,22 +510,35 @@ function mineBlock(){
      </div>`).join("")+`</div>`;
 }
 
-/* ── admin: collapsible sections ──────────────────────────────────── */
-// #252: вкладки вместо стопки collapsible-панелей (как в job-hunter — один
-// список разделов слева/сверху, одна активная панель, а не всё сразу).
+/* ── admin: top-level nav (как Пайплайн/Пограничные/… в job-hunter — весь
+   main меняется целиком, «Календарь» такой же раздел, как остальные, а не
+   постоянный центр экрана; #255 после #252 переносил ту же идею только на
+   маленькую панель внутри rail — этого было не видно/недостаточно). ── */
 const _ADMIN_TABS=[
+  ["cal","📅","Календарь"],
   ["req","📥","Заявки"],
   ["win","🗓","Окна"],
   ["types","☀️","Типы"],
   ["off","🚫","Недоступна"],
   ["hist","📜","История"],
 ];
-function adminSections(){
-  if(!st.adminTab) st.adminTab="req";
-  const tabs=_ADMIN_TABS.map(([id,ic,lbl])=>
+function adminNav(){
+  if(!st.adminTab) st.adminTab="cal";
+  return `<div class="tabs">${_ADMIN_TABS.map(([id,ic,lbl])=>
     `<button class="tabbtn${st.adminTab===id?" on":""}" data-tab="${id}">${ic} ${lbl}${
-      id==="req"?'<span class="badge" id="reqBadge" hidden>0</span>':""}</button>`).join("");
-  return `<div class="tabs">${tabs}</div><div class="glass sec tabpane">${_adminTabBody(st.adminTab)}</div>`;
+      id==="req"?'<span class="badge" id="reqBadge" hidden>0</span>':""}</button>`).join("")}</div>`;
+}
+// Показать нужный верхнеуровневый раздел в <main>: календарь (разметка уже в
+// DOM, просто показать/скрыть) или один из admin-разделов (заполнить #adminView).
+function renderMain(){
+  const calV=$("#calView"), adminV=$("#adminView");
+  if(st.me.role==="admin" && st.adminTab && st.adminTab!=="cal"){
+    calV.hidden=true; adminV.hidden=false;
+    adminV.innerHTML=_adminTabBody(st.adminTab);
+    wireAdminPane();
+  }else{
+    calV.hidden=false; adminV.hidden=true;
+  }
 }
 function _adminTabBody(tab){
   if(tab==="win") return `<div class="body">
@@ -629,21 +664,16 @@ function wireDD(scope){
 }
 document.addEventListener("click",ddCloseAll);
 
-function wireAdmin(){
-  // #252: только активная вкладка есть в DOM — каждый *Box()/кнопка ниже
-  // сама себя защищает (`if(!el) return`), т.к. остальные 4 вкладки сейчас
-  // не отрендерены вообще (не просто скрыты).
-  document.querySelectorAll(".tabbtn").forEach(b=>b.onclick=()=>{
-    st.adminTab=b.dataset.tab; rail();
-  });
-  // reqBox/winBox всегда — бейдж заявок и st.windows (подсветка календаря)
-  // нужны независимо от того, какая вкладка сейчас открыта. Остальные три —
-  // только когда их вкладка реально в DOM (незачем дёргать API впустую).
-  reqBox(); winBox();
-  if(st.adminTab==="types") typBox();
-  if(st.adminTab==="off") offBox();
-  if(st.adminTab==="hist") histBox();
-  wireDD($("#rail")); wireDDate($("#rail"));
+// #255: вызывается из renderMain() ПОСЛЕ того как _adminTabBody() вставлен в
+// #adminView — только тогда там реально есть #reqBox/#winBox/… и кнопки-add.
+function wireAdminPane(){
+  const tab=st.adminTab;
+  if(tab==="req") reqBox();
+  else if(tab==="win") winBox();
+  else if(tab==="types") typBox();
+  else if(tab==="off") offBox();
+  else if(tab==="hist") histBox();
+  wireDD($("#adminView")); wireDDate($("#adminView"));
   if($("#w_add")) $("#w_add").onclick=async()=>{try{
     await api("/availability",{method:"POST",headers:{"content-type":"application/json"},
       body:JSON.stringify({context:ddVal("w_ctx"),weekday:+ddVal("w_wd"),
