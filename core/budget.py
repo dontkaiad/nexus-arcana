@@ -28,6 +28,7 @@ BUDGET_ALL_CATEGORIES: List[str] = list(BUDGET_KEY_TO_CATEGORY.values())
 # ── Display mapping для лимитов ──────────────────────────────────────────────
 
 LIMIT_DISPLAY: Dict[str, str] = {
+    "бюджет на жизнь": "🏠 Бюджет на жизнь",
     "привычки": "🚬 Привычки",
     "продукты": "🍜 Продукты",
     "кафе": "🍱 Кафе/Доставка",

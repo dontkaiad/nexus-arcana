@@ -287,6 +287,20 @@ pending крупной суммы между предпросмотром и к�
   промежуточный шаг убран вместе с самой категорией (`_calc_impulse_status`
   / `_handle_impulse_overflow` удалены, больше не существуют).
 
+**Mini App display (`miniapp/backend/routes/finance.py`, #259):**
+- `_view_month()` — строка «Привычки» в разбивке по категориям месяца
+  показывается БЕЗ `limit`/`pct` (`limit = None`): сравнивать недельный лимит
+  Привычек с месячной суммой трат дало бы бессмысленно раздутый процент.
+  Корректный (по календарной неделе) расчёт живёт отдельно в `_view_limits()`.
+- `_view_limits()` — делает ДВА запроса вместо одного: за платёжный период
+  (для агрегата `CAT_LIFE`, суммирует траты по всем `LIFE_BUDGET_CATEGORIES`
+  в один синтетический `spent_by_link[cat_link(CAT_LIFE)]`, т.к. ни одна
+  реальная трата не имеет категорию-агрегат) и отдельно за календарную
+  неделю (`calendar_week_start_iso`) только для Привычек. `LIMIT_DISPLAY`
+  (core/budget.py) содержит `"бюджет на жизнь": "🏠 Бюджет на жизнь"` —
+  без этой записи `display_limit_name()` возвращает сырой ключ факта вместо
+  человекочитаемого названия, и агрегатная строка не попадает в ответ API.
+
 **`discretionary_free()` (core/budget.py, «Свободно» в Mini App/боте):**
 Привычки исключены из суммы (и из лимита, и из факта потраченного) —
 недельная цифра не имеет смысла внутри величины за весь платёжный период
@@ -777,6 +791,9 @@ expense items → `_ONE_TIME_PARSE_SYSTEM`).
   `_HABITS_WEEKLY_DIVISOR`), `_check_budget_limit` (роутинг Привычки/агрегат/
   ручной лимит на категорию, окно недели vs периода, перерасход → подушка
   напрямую); `_calc_impulse_status`/`_handle_impulse_overflow` удалены
+- `miniapp/backend/routes/finance.py` — #259: `_view_month` (Привычки без
+  limit/pct), `_view_limits` (два запроса: платёжный период для агрегата
+  `CAT_LIFE`, календарная неделя для Привычек)
 - `core/memory.py` — `CATEGORIES`, `_PARSE_SYSTEM` (постоянно_/долг_/цель_/
   income_ examples), `save_memory` → `parse_and_store`: `долг_` →
   `_parse_debt_from_fact` + `pg_debts_repo` (#6); `цель_` →

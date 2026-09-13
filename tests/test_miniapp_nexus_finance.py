@@ -174,7 +174,10 @@ def test_finance_view_today_no_date_param_defaults_to_today(client):
 
 
 def test_finance_view_month_calculates_income_expense_and_limits(client):
-    """income = sum Доход, expense = sum Расход, by_category маппится на лимиты."""
+    """income = sum Доход, expense = sum Расход. #259: месячный view больше НЕ
+    показывает лимит ни для одной категории — Привычки теперь недельный лимит
+    (сравнение с месячным spent было бы бессмысленно раздутым, свой корректный
+    расчёт живёт в view=limits), остальные категории лимита не имеют вовсе."""
     tz = 3
     month = _today_iso(tz)[:7]
 
@@ -202,8 +205,8 @@ def test_finance_view_month_calculates_income_expense_and_limits(client):
     habits = next((c for c in data["by_category"] if c["cat"]["full"] == "🚬 Привычки"), None)
     assert habits is not None
     assert habits["spent"] == 14200
-    assert habits["limit"] == 17685
-    assert habits["pct"] == round(14200 / 17685 * 100)
+    assert habits["limit"] is None
+    assert habits["pct"] is None
     food = next(c for c in data["by_category"] if c["cat"]["full"] == "🍜 Продукты")
     assert food["limit"] is None
     assert food["pct"] is None
@@ -234,6 +237,41 @@ def test_finance_view_limits_only_shows_categories_with_limit(client):
     habits = data["categories"][0]
     assert habits["cat"]["full"] == "🚬 Привычки"
     assert habits["zone"] == "yellow"  # 14200/17685 ≈ 80%
+
+
+def test_finance_view_limits_aggregates_life_budget_and_uses_weekly_habits_window(client):
+    """#259: 🏠 Бюджет на жизнь суммирует ВСЕ LIFE_BUDGET_CATEGORIES (ни одна
+    трата не имеет этот category буквально), 🚬 Привычки считается ЗА
+    КАЛЕНДАРНУЮ НЕДЕЛЮ — отдельным запросом, не месячным."""
+    from unittest.mock import AsyncMock as _AM
+    tz = 3
+    month = _today_iso(tz)[:7]
+
+    # Месячный запрос: много категорий + Привычки со старой (месячной) суммой,
+    # которая НЕ должна попасть в итог — недельная должна победить.
+    month_entries = [
+        _budget_entry(2000, cat="🍜 Продукты", eid="m1"),
+        _budget_entry(1500, cat="🚕 Транспорт", eid="m2"),
+        _budget_entry(9000, cat="🚬 Привычки", eid="m3"),  # за весь месяц — игнорируется
+    ]
+    week_entries = [
+        _budget_entry(300, cat="🚬 Привычки", eid="w1"),  # только эта неделя
+    ]
+
+    with patch("miniapp.backend.routes.finance._budget_repo.query",
+               _AM(side_effect=[month_entries, week_entries])), \
+         patch("miniapp.backend.routes.finance.get_limits",
+               _AM(return_value={"бюджет на жизнь": 5000, "привычки": 1000})), \
+         patch("miniapp.backend.routes.finance.today_user_tz",
+               _AM(return_value=(_today_date(tz), tz))), \
+         patch("miniapp.backend.routes.finance.get_user_id",
+               _AM(return_value=FAKE_USER_ID)):
+        r = client.get(f"/api/finance?view=limits&month={month}")
+
+    assert r.status_code == 200, r.text
+    by_cat = {c["cat"]["full"]: c for c in r.json()["categories"]}
+    assert by_cat["🏠 Бюджет на жизнь"]["spent"] == 3500  # 2000 + 1500, Привычки не в агрегате
+    assert by_cat["🚬 Привычки"]["spent"] == 300  # неделя, не 9000 за месяц
 
 
 def test_finance_view_goals(client):

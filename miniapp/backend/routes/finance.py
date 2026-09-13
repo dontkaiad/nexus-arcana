@@ -11,12 +11,16 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from core.user_manager import get_user_id
 from core.budget import (
     budget_day_limit_from_plan,
+    calendar_week_start_iso,
     cat_link,
     display_limit_name,
     get_limits,
     is_parallel_limit,
     load_budget_data,
     parse_amount,
+    CAT_HABITS,
+    CAT_LIFE,
+    LIFE_BUDGET_CATEGORIES,
 )
 from core.repos.pg_finance_repo import BudgetEntry, PgNexusBudgetRepo
 from core.repos.pg_memory_repo import PgMemoryRepo, Memory
@@ -174,7 +178,11 @@ async def _view_month(tg_id: int, month: str) -> dict:
 
     by_category: List[dict] = []
     for cat_full, spent in sorted(by_cat.items(), key=lambda kv: -kv[1]):
-        limit = limits_map.get(cat_link(cat_full))
+        # #259: Привычки — недельный лимит; сравнивать его с МЕСЯЧНЫМ spent
+        # этого view дало бы бессмысленно раздутый %. Свой корректный (по
+        # календарной неделе) расчёт живёт в _view_limits — здесь просто не
+        # показываем limit для этой строки.
+        limit = None if cat_full == CAT_HABITS else limits_map.get(cat_link(cat_full))
         item = {
             "cat": cat_from_notion(cat_full),
             "spent": int(round(spent)),
@@ -196,16 +204,38 @@ async def _view_month(tg_id: int, month: str) -> dict:
 # ── View: limits ─────────────────────────────────────────────────────────────
 
 async def _view_limits(tg_id: int, month: str) -> dict:
+    """#259: лимиты теперь 2 агрегата, не 9 категорий — "spent" для каждого
+    должен считаться на том же ОКНЕ, на котором задан лимит:
+    - 🏠 Бюджет на жизнь — весь месяц, но SUM по всем LIFE_BUDGET_CATEGORIES
+      (ни одна реальная трата не имеет category="🏠 Бюджет на жизнь" — это
+      синтетический ярлык агрегата, а не категория трат).
+    - 🚬 Привычки — календарная НЕДЕЛЯ (пн–вс), не месяц; иначе месяц трат
+      сравнивался бы с недельным лимитом, завышая % в разы.
+    Обычная per-category разбивка (spent_by_link) остаётся как была — Кай
+    прямо просила видеть траты по категориям, лимит убрали, видимость нет."""
     user_id = (await get_user_id(tg_id)) or ""
     start, end = _month_bounds(month)
 
     records = await _nexus_finance_records(user_id, start, end,
                                            type_filter="💸 Расход")
     spent_by_link: dict = {}
+    life_total = 0.0
     for entry in records:
         if entry.category:
             link = cat_link(entry.category)
             spent_by_link[link] = spent_by_link.get(link, 0) + entry.amount
+            if entry.category in LIFE_BUDGET_CATEGORIES:
+                life_total += entry.amount
+    spent_by_link[cat_link(CAT_LIFE)] = life_total
+
+    today_date, tz_offset = await today_user_tz(tg_id)
+    week_start = calendar_week_start_iso(tz_offset)
+    tomorrow_iso = (today_date + timedelta(days=1)).isoformat()
+    week_records = await _nexus_finance_records(user_id, week_start, tomorrow_iso,
+                                                type_filter="💸 Расход")
+    spent_by_link[cat_link(CAT_HABITS)] = sum(
+        e.amount for e in week_records if e.category == CAT_HABITS
+    )
 
     limits_map = await get_limits()
 
