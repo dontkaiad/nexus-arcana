@@ -36,6 +36,25 @@ async def test_classify_cushion_needs_a_number():
     assert not re.search(r"\d", "сколько в подушке")
 
 
+@pytest.mark.asyncio
+async def test_classify_multiline_task_with_pillow_word_not_hijacked_as_cushion():
+    """#257: "задача X\\n\\n<19 строк чеклиста>" с "подушки" (бельё, не
+    финансовая подушка) в одной из строк и цифрой ("3 штуки") в другой —
+    раньше улетало в cushion_command и портило реальную цель подушки
+    (set_target(3) вместо создания задачи). Многострочный текст никогда не
+    должен матчить эти keyword-based фаст-пасы."""
+    from core.classifier import classify
+    text = (
+        "задача подготовиться к поездке\n\n"
+        "забрать пепельницы (3 штуки)\n"
+        "выкинуть постельное и собрать подушки и одеяло в шкаф\n"
+        "помыться\n"
+    )
+    with patch("core.claude_client.ask_claude", AsyncMock(return_value='{"type":"note","text":"stub"}')):
+        res = await classify(text)
+    assert res != [{"type": "cushion_command", "text": text}]
+
+
 def test_classify_cushion_before_goal_and_memory():
     from core.classifier import _CUSHION_CMD_RE, _GOAL_CMD_RE, _MEMORY_SAVE_RE
     t = "подушка 300000"

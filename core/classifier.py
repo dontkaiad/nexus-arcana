@@ -841,29 +841,39 @@ async def classify(text: str, tz_offset: int = 3, user_id: str = "") -> list[dic
         logger.info("classify: memory_delete matched, hint=%r", hint)
         return [{"type": "memory_delete", "hint": hint, "text": text}]
 
+    # Быстрые Budget v2 / they_owe фаст-пасы ниже матчят ключевое слово ГДЕ
+    # УГОДНО в тексте (search, не match) — на короткой одной строке это ОК,
+    # но на многострочном дампе (задача + список подзадач одним сообщением)
+    # случайное слово-омоним («подушки» = бельё, не финансовая подушка) уводило
+    # ВЕСЬ текст в cushion_command вместо создания задачи (баг: 19-строчный
+    # чеклист поездки → "🛡️ Цель подушки: 3₽" из "3 штуки" в одной из строк).
+    # Настоящие эти команды — всегда короткая одна строка, поэтому многострочный
+    # текст сюда в принципе не должен попадать.
+    _is_bulk_text = text.count("\n") >= 3
+
     # they_owe: «мне должны» / «дала Маше 5к» / «Маша вернула 2к» — ПЕРЕД i_owe
-    if _THEY_OWE_CMD_RE.search(text):
+    if not _is_bulk_text and _THEY_OWE_CMD_RE.search(text):
         logger.info("classify: they_owe_command matched")
         return [{"type": "they_owe_command", "text": text}]
 
     # Budget v2: подушка (ПЕРЕД целями/долгами/memory_save — иначе "подушка 300к"
     # уедет в цель_подушка через LLM-classify)
-    if _CUSHION_CMD_RE.search(text) and re.search(r"\d", text):
+    if not _is_bulk_text and _CUSHION_CMD_RE.search(text) and re.search(r"\d", text):
         logger.info("classify: cushion_command matched")
         return [{"type": "cushion_command", "text": text}]
 
     # Budget v2: команды долгов → budget handler (ПЕРЕД budget и memory_save!)
-    if _DEBT_CMD_RE.search(text):
+    if not _is_bulk_text and _DEBT_CMD_RE.search(text):
         logger.info("classify: debt_command matched")
         return [{"type": "debt_command", "text": text}]
 
     # Budget v2: команды целей → budget handler
-    if _GOAL_CMD_RE.search(text):
+    if not _is_bulk_text and _GOAL_CMD_RE.search(text):
         logger.info("classify: goal_command matched")
         return [{"type": "goal_command", "text": text}]
 
     # Budget v2: ручной лимит → budget handler (ПЕРЕД memory_save "лимит...")
-    m = _LIMIT_OVERRIDE_RE.search(text)
+    m = None if _is_bulk_text else _LIMIT_OVERRIDE_RE.search(text)
     if m:
         logger.info("classify: limit_override matched cat=%s amt=%s", m.group(1), m.group(2))
         return [{"type": "limit_override", "text": text, "category": m.group(1), "amount": m.group(2)}]
