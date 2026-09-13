@@ -184,6 +184,26 @@ def _list_reply_system(tz_offset: int = 3) -> str:  # tz_offset unused, matches 
     )
 
 
+# #256: reply на подтверждение подзадач/чеклиста («📋 X — N подзадач:») раньше
+# вообще не был зарегистрирован в message_pages — "добавь ещё пункты" падал
+# в обычный classify() как новое сообщение, который на многострочный текст
+# создавал отдельные новые задачи вместо того чтобы дописать в тот же чеклист
+# (незаложенная логика, не просто баг: reply-дополнение для чеклиста-группы
+# из НЕСКОЛЬКИХ пунктов не поддерживалось, в отличие от _list_reply_system,
+# который умеет добавить только ОДНУ позицию к одиночной записи).
+def _checklist_reply_system(tz_offset: int = 3) -> str:  # tz_offset unused, matches dynamic-system signature
+    return (
+        "Ты обрабатываешь reply на подтверждение созданного чеклиста/подзадач "
+        "(«📋 Название — N подзадач:» или «📋 Название (N пунктов)»). "
+        "Ответь ТОЛЬКО JSON без markdown:\n"
+        '{"add_items": ["новый пункт 1", "новый пункт 2", ...] или []}\n\n'
+        "add_items — пункты, которые явно просят добавить В ТОТ ЖЕ чеклист "
+        "(«добавь ещё пункты», перечисление новых строк, «и ещё X, Y»). "
+        "Каждая строка/перечисленный пункт — отдельный элемент массива. "
+        "Если просьба неясна или это не про добавление пунктов — add_items=[]."
+    )
+
+
 _TYPE_TO_SYSTEM = {
     "ritual":  _RITUAL_REPLY_SYSTEM,
     "session": _SESSION_REPLY_SYSTEM,
@@ -198,6 +218,7 @@ _TYPE_TO_DYNAMIC_SYSTEM = {
     "work": _work_reply_system,
     "memory": _memory_reply_system,
     "list": _list_reply_system,
+    "checklist": _checklist_reply_system,
 }
 
 
@@ -338,6 +359,8 @@ async def apply_updates(
         return await _apply_memory(page_id, updates)
     if page_type == "list":
         return await _apply_list(page_id, updates)
+    if page_type == "checklist":
+        return await _apply_checklist(page_id, updates)
     return {}
 
 
@@ -503,6 +526,40 @@ async def _apply_list(page_id: str, updates: Dict[str, Any]) -> Dict[str, Any]:
     if not created:
         return {}
     return {"Добавлено": str(add_item_text)}
+
+
+async def _apply_checklist(page_id: str, updates: Dict[str, Any]) -> Dict[str, Any]:
+    """checklist page_type → добавить НЕСКОЛЬКО новых пунктов в тот же
+    чеклист-группу (#256). page_id = "task:<id>" (rel_type:task_id, записано
+    save_message_page при отправке подтверждения — см.
+    nexus/handlers/lists.py:subtask_items/checklist_items). Группа/юзер
+    берутся с уже существующих пунктов чеклиста (get_items_for_task) — reply
+    не обязан их повторять, как и в _apply_list.
+
+    Только rel_type="task" (Nexus) — у Arcana add_items() уводит "🌒 Arcana"
+    bot_name в _arcana_repo (arcana_inventory), не в тот же nexus_lists-путь
+    с work_rel; чинить это — отдельная задача, не расширять непроверенным
+    кодом здесь."""
+    add_items = updates.get("add_items")
+    if not add_items:
+        return {}
+    rel_type, _, ref_id = page_id.partition(":")
+    if rel_type != "task" or not ref_id:
+        return {}
+    from core import list_manager as _lm
+    from core.repos.lists_repo import _repo as lists_repo
+
+    existing = await _lm._nexus_repo.get_items_for_task(ref_id)
+    if not existing:
+        return {}
+    group = existing[0].group_name or "Подзадачи"
+    user_id = existing[0].user_id or ""
+
+    items = [{"name": str(it), "group": group, "task_rel": ref_id} for it in add_items]
+    created = await lists_repo.add(items, "📋 Чеклист", "☀️ Nexus", user_id)
+    if not created:
+        return {}
+    return {f"пункт {i + 1}": c["name"] for i, c in enumerate(created)}
 
 
 async def _apply_session(

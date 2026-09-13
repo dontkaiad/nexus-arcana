@@ -1421,7 +1421,19 @@ async def handle_list_pending(msg: Message, user_id: str = "") -> bool:
         lines = [f"📋 <b>{group}</b> ({len(created)} пунктов)"]
         for c in created:
             lines.append(f"  ◻️ {c['name']}")
-        await msg.answer("\n".join(lines), parse_mode="HTML")
+        sent = await msg.answer("\n".join(lines), parse_mode="HTML")
+        # #256: реплай на эту плашку («добавь ещё пункты») раньше падал в
+        # обычный classify() как новое сообщение — маппим на чеклист-группу,
+        # чтобы reply дописывал сюда же (core.reply_update._apply_checklist).
+        if parent_task_id:
+            try:
+                from core.message_pages import save_message_page
+                await save_message_page(
+                    chat_id=sent.chat.id, message_id=sent.message_id,
+                    page_id=f"task:{parent_task_id}", page_type="checklist", bot="nexus",
+                )
+            except Exception as e:
+                logger.warning("checklist_items: save_message_page failed: %s", e)
         return True
 
     if action == "subtask_items":
@@ -1447,7 +1459,20 @@ async def handle_list_pending(msg: Message, user_id: str = "") -> bool:
         lines = [f"📋 <b>{task_name}</b> — {len(created)} подзадач:"]
         for c in created:
             lines.append(f"  ⬜ {c['name']}")
-        await msg.answer("\n".join(lines), parse_mode="HTML")
+        sent = await msg.answer("\n".join(lines), parse_mode="HTML")
+        # #256: "написала подзадачи -> реплаем 'добавь ещё пункты'" раньше
+        # спавнило отдельные новые задачи вместо дописывания в тот же чеклист
+        # (не было message_pages-маппинга вообще) — теперь reply уходит в
+        # core.reply_update._apply_checklist.
+        if task_id and rel_type == "task":
+            try:
+                from core.message_pages import save_message_page
+                await save_message_page(
+                    chat_id=sent.chat.id, message_id=sent.message_id,
+                    page_id=f"task:{task_id}", page_type="checklist", bot="nexus",
+                )
+            except Exception as e:
+                logger.warning("subtask_items: save_message_page failed: %s", e)
         return True
 
     if action == "list_checkout":
