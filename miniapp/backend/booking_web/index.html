@@ -154,13 +154,18 @@
   .legend i{width:11px;height:11px;border-radius:4px;flex:none}
   .foot{margin-top:6px;text-align:center;font-size:.8rem;color:var(--ink-soft)}
 
-  /* admin sections — #252: вкладки вместо стопки collapsible-панелей */
-  .tabs{display:flex;flex-wrap:wrap;gap:6px}
-  .tabbtn{position:relative;display:flex;align-items:center;gap:5px;padding:8px 11px;
-    font-size:.8rem;line-height:1.15;color:var(--ink-soft);background:var(--cell-bg);
-    border:1px solid var(--glass-line);border-radius:10px;cursor:pointer}
-  .tabbtn.on{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
-  .tabbtn .badge{position:absolute;top:-5px;right:-5px;min-width:16px;height:16px;padding:0 3px;
+  /* admin sections — #252/#253: вертикальный список вкладок (разметка как
+     nav-list в job-hunter: .nav/.nav-link — стопка блочных строк с левым
+     бордером на активной, не ряд отдельных кнопок-пилюль), одна активная
+     панель под списком вместо стопки collapsible-панелей. */
+  .tabs{display:flex;flex-direction:column;gap:2px;margin-bottom:2px}
+  .tabbtn{display:flex;align-items:center;gap:8px;width:100%;text-align:left;
+    padding:9px 10px 9px 12px;font-size:.85rem;color:var(--ink-soft);
+    background:none;border:none;border-left:2px solid transparent;
+    border-radius:0 10px 10px 0;cursor:pointer}
+  .tabbtn:hover{color:var(--ink);background:var(--cell-bg)}
+  .tabbtn.on{color:var(--ink);font-weight:600;background:var(--cell-bg);border-left-color:var(--accent)}
+  .tabbtn .badge{margin-left:auto;min-width:16px;height:16px;padding:0 3px;
     border-radius:999px;background:var(--warn,#d4574a);color:#fff;font-size:.66rem;line-height:16px;text-align:center}
   .tabpane .body{padding:14px 15px}
   .sec .hint{font-size:.78rem;color:var(--ink-soft);margin:0 0 9px;line-height:1.4}
