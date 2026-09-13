@@ -786,29 +786,32 @@ def test_format_plan_fixed_total_excludes_one_time_regression():
 
 # ── Нулевые категории лимитов не пропадают из вывода ─────────────────────────
 
-def test_limits_fields_keeps_zero_categories():
-    """_limits_fields показывает ВСЕ категории compute_limits, включая нулевые —
-    прозрачность: видно, что категория получила 0₽ осознанно, а не потерялась."""
+def test_limits_fields_splits_into_life_and_habits():
+    """#259: 9 категорий compute_limits() схлопнуты в 🏠 Бюджет на жизнь (сумма
+    всех кроме Привычек) + 🚬 Привычки (в НЕДЕЛЮ — /4 от месячной суммы,
+    _HABITS_WEEKLY_DIVISOR). compute_limits() сама не меняется — сверяем
+    агрегацию поверх её же результата, не хардкодим числа вручную."""
     from nexus.handlers.finance import _limits_fields
-    from core.budget import PRIORITY_CHAIN, CAT_PRODUCTS, CAT_HABITS
+    from core.budget import compute_limits as _cl, CAT_LIFE, CAT_HABITS
 
-    # discretionary 15 350 → priority-цепочка вся по нулям, продукты/привычки делят пополам
     fields = _limits_fields(15350, 0)
     by_cat = {i["category"]: i["amount"] for i in fields["limits"]}
-    for cat in PRIORITY_CHAIN:
-        assert cat in by_cat, f"категория {cat} потерялась"
-        assert by_cat[cat] == 0
-    assert by_cat[CAT_PRODUCTS] == 6425
-    assert by_cat[CAT_HABITS] == 6425
-    # транспорт 1500 + продукты 6425 + привычки 6425; нули цепочки не влияют
-    assert fields["limits_total"] == 1500 + 6425 + 6425
-    assert fields["impulse_budget"] == 1000
+    assert set(by_cat) == {CAT_LIFE, CAT_HABITS}
+
+    raw = _cl(15350, 0, 0.0)["limits"]
+    expected_life = sum(v for k, v in raw.items() if k != CAT_HABITS)
+    expected_habits_weekly = round(raw[CAT_HABITS] / 4)
+    assert by_cat[CAT_LIFE] == round(expected_life)
+    assert by_cat[CAT_HABITS] == expected_habits_weekly
+    assert fields["limits_total"] == by_cat[CAT_LIFE] + by_cat[CAT_HABITS]
+    # #259: Импульсивные слиты в CAT_LIFE, больше не отдельная строка/факт.
+    assert fields["impulse_budget"] == 0
 
 
 def test_limits_fields_all_zero_when_no_money():
     from nexus.handlers.finance import _limits_fields
     fields = _limits_fields(0, 0)
-    assert len(fields["limits"]) == 8  # все переменные категории, кроме импульсивных
+    assert len(fields["limits"]) == 2  # #259: Бюджет на жизнь + Привычки
     assert all(i["amount"] == 0 for i in fields["limits"])
     assert fields["limits_total"] == 0
 

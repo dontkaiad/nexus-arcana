@@ -312,6 +312,23 @@ PRIORITY_CHAIN = [
 # Все категории, которые compute_limits() всегда возвращает (0, если не профинансированы).
 LIMIT_CATEGORIES = [CAT_TRANSPORT, CAT_IMPULSE, CAT_PRODUCTS, CAT_HABITS] + PRIORITY_CHAIN
 
+# #259: девять отдельных лимитов ощущались как постоянное давление ("контроль
+# ради контроля"), а реально важно отслеживать только Привычки (то, от чего
+# Кай хочет отходить) — остальное сливается в один общий "Бюджет на жизнь":
+# траты по-прежнему видно по категориям (обычный breakdown трат), но лимит и
+# перерасход считаются на СУММУ, не на каждую категорию отдельно.
+# compute_limits() САМ не меняется (арифметика/тесты те же) — агрегация это
+# отдельный шаг НАД её результатом, см. split_life_and_habits().
+CAT_LIFE = "🏠 Бюджет на жизнь"
+LIFE_BUDGET_CATEGORIES = [c for c in LIMIT_CATEGORIES if c != CAT_HABITS]
+
+
+def split_life_and_habits(limits: Dict[str, float]) -> Dict[str, float]:
+    """9 категорий compute_limits() → 2: CAT_LIFE (сумма всех кроме Привычек)
+    + CAT_HABITS (без изменений). Чистая функция, не трогает compute_limits."""
+    life_total = sum(amt for cat, amt in limits.items() if cat != CAT_HABITS)
+    return {CAT_LIFE: int(round(life_total)), CAT_HABITS: int(round(limits.get(CAT_HABITS, 0)))}
+
 
 def _distribute_limits(discretionary: int) -> Dict[str, int]:
     """Разложить discretionary по категориям. Сумма значений ТОЧНО равна
@@ -525,6 +542,14 @@ def _period_days_remaining(payday: int, tz_offset: int = 3) -> int:
     return max(1, (period_end - today_start).days)
 
 
+def calendar_week_start_iso(tz_offset: int = 3) -> str:
+    """#259: понедельник текущей календарной недели по личному tz — окно для
+    еженедельного лимита Привычек (не платёжный период, а обычная нед.)."""
+    now = datetime.now(_tz(timedelta(hours=tz_offset)))
+    monday = now - timedelta(days=now.weekday())
+    return monday.strftime("%Y-%m-%d")
+
+
 def _period_start_iso(payday: int, tz_offset: int) -> str:
     """Начало текущего платёжного периода (payday → payday) по личному tz."""
     now = datetime.now(_tz(timedelta(hours=tz_offset)))
@@ -558,6 +583,13 @@ async def discretionary_free(user_id: str, tz_offset: int = 3):
     пула — крупная разовая трата обнуляла «Свободно», хотя у Разовых свой
     собственный лимит.)
 
+    #259: 🚬 Привычки тоже исключены — с #259 это НЕДЕЛЬНЫЙ лимит (см.
+    core.budget.split_life_and_habits / nexus.handlers.finance._check_budget_limit),
+    а «Свободно» здесь — величина за весь платёжный ПЕРИОД (месяц); смешивать
+    недельную цифру в месячную сумму давало бы бессмысленный результат
+    (месячные траты на привычки почти всегда «съедали» бы недельный лимит).
+    У Привычек — свой отдельный еженедельный сигнал, не эта карточка.
+
     Возвращает (свободно, дней_до_конца_периода) или None — лимиты не
     настроены, считать не из чего.
     """
@@ -565,7 +597,10 @@ async def discretionary_free(user_id: str, tz_offset: int = 3):
     budget_repo = PgNexusBudgetRepo()
 
     limits = await get_limits()
-    disc_total = sum(amt for link, amt in limits.items() if not is_parallel_limit(link))
+    disc_total = sum(
+        amt for link, amt in limits.items()
+        if not is_parallel_limit(link) and link != cat_link(CAT_HABITS)
+    )
     if disc_total <= 0:
         return None
 
@@ -583,7 +618,7 @@ async def discretionary_free(user_id: str, tz_offset: int = 3):
         logger.warning("discretionary_free: query failed: %s", e)
         entries = []
 
-    disc_cats = set(LIMIT_CATEGORIES)
+    disc_cats = set(LIFE_BUDGET_CATEGORIES)  # #259: без Привычек — свой недельный лимит
     disc_spent = sum(
         float(e.amount or 0) for e in entries
         if (e.category or "") in disc_cats and not is_parallel_limit(e.category or "")

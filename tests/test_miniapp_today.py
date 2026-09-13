@@ -307,14 +307,15 @@ def _entry(amount, cat, date):
 
 
 def test_discretionary_free_no_spending(client):
-    """Реальный случай Кай: дискр. лимиты 16350, трат по ним 0 → свободно = 16350.
+    """Реальный случай Кай: дискр. лимиты 10000 (без привычек — #259, свой
+    недельный лимит), трат по ним 0 → свободно = 10000.
     Отдельно от «Бюджета дня» (day_limit)."""
     tz = 3
     today = _today_local_iso(tz)
     period_start = today[:8] + "01"  # payday=1
     ctx = _today_ctx(tz=tz, day_limit=628,
                      limits={"продукты": 10000, "привычки": 6350,
-                             "фикс": 40000, "разовые": 43650},   # фикс/разовые фильтруются
+                             "фикс": 40000, "разовые": 43650},   # фикс/разовые/привычки фильтруются
                      expenses_by_from={today: [], period_start: []})
     import contextlib
     with contextlib.ExitStack() as st:
@@ -322,13 +323,13 @@ def test_discretionary_free_no_spending(client):
             st.enter_context(p)
         b = client.get("/api/today").json()["budget"]
 
-    assert b["discretionary_free"] == 16350
+    assert b["discretionary_free"] == 10000
     assert b["day"] == 628                       # «Бюджет дня» не тронут
     assert b["spent_today"] == 0
 
 
 def test_discretionary_free_subtracts_period_spending(client):
-    """Транзакция 2000₽ 🍜 Продукты в этом периоде → свободно 16350 − 2000 = 14350."""
+    """Транзакция 2000₽ 🍜 Продукты в этом периоде → свободно 10000 − 2000 = 8000."""
     tz = 3
     today = _today_local_iso(tz)
     period_start = today[:8] + "01"
@@ -344,13 +345,13 @@ def test_discretionary_free_subtracts_period_spending(client):
             st.enter_context(p)
         b = client.get("/api/today").json()["budget"]
 
-    assert b["discretionary_free"] == 14350
+    assert b["discretionary_free"] == 8000
 
 
 def test_discretionary_free_ignores_one_off(client):
     """Bugfix (после #237): 📦 Разовые — параллельный счётчик со своим лимитом,
     НЕ дискреционная трата. Крупная разовая трата не должна обнулять
-    «Свободно» (16350 остаётся 16350, а не 16350 − 9313)."""
+    «Свободно» (10000 остаётся 10000, а не 10000 − 9313)."""
     tz = 3
     today = _today_local_iso(tz)
     period_start = today[:8] + "01"
@@ -366,7 +367,7 @@ def test_discretionary_free_ignores_one_off(client):
             st.enter_context(p)
         b = client.get("/api/today").json()["budget"]
 
-    assert b["discretionary_free"] == 16350
+    assert b["discretionary_free"] == 10000
 
 
 def test_spent_today_excludes_parallel_categories(client):

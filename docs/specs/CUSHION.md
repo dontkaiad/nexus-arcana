@@ -1,6 +1,6 @@
 # CUSHION — data-model contract (финансовая подушка)
 
-Code conforms to: HEAD of the `budget: динамический взнос в подушку` change.  (+ #144: user_notion_id → user_id; + #123: `POST /finance/cushion/deposit`, debt-overpaid → cushion; + #208: `source` CHECK expanded to also allow `debt_overpaid` / `windfall_income` — migration `c3d4e5f6a7b8`; windfall income distribution credits `source='windfall_income'`.)
+Code conforms to: HEAD of the `budget: динамический взнос в подушку` change.  (+ #144: user_notion_id → user_id; + #123: `POST /finance/cushion/deposit`, debt-overpaid → cushion; + #208: `source` CHECK expanded to also allow `debt_overpaid` / `windfall_income` — migration `c3d4e5f6a7b8`; windfall income distribution credits `source='windfall_income'`.) (+ #259: `source` CHECK expanded again for `overflow` — migration `d1e2f3a4b5c6`; budget overflow now debits the cushion directly, `balance` is no longer strictly monotonic.)
 Update this spec in the same PR that changes the model.
 
 > Contract, not snapshot. Describes the derived model and the guarantees of each
@@ -122,7 +122,7 @@ Row is lazily created on first write (`_ensure_row_sync`).
 | column | meaning |
 |---|---|
 | `amount` | credited amount |
-| `source` | `'manual'` \| `'payday_auto'` \| `'debt_overpaid'` \| `'windfall_income'` (`ck_cushion_tx_source`; expanded by migration `c3d4e5f6a7b8` — the code wrote the last two since #123/#208 while the CHECK still had two) |
+| `source` | `'manual'` \| `'payday_auto'` \| `'debt_overpaid'` \| `'windfall_income'` \| `'overflow'` (`ck_cushion_tx_source`; expanded by `c3d4e5f6a7b8` then `d1e2f3a4b5c6` (#259) — the code wrote the new value before the CHECK had it each time) |
 | `note` | free-text detail (period tag, plan/underspend breakdown) |
 | `created_at` | index `ix_cushion_tx_owner_created` |
 
@@ -151,12 +151,19 @@ transaction** as the increment.
 | set target | `handle_cushion_command` (target branch) / `POST /finance/cushion/target` → `set_target` | `target` set (or cleared on 0/null); **balance untouched, no log row** |
 | plan accepted | `_save_budget_plan` → `set_planned_contribution(plan["cushion_contribution"])` | `planned_contribution` overwritten; **balance untouched** |
 | period rollover | `_send_payday_review` → `add_to_balance(planned + total_saved, source='payday_auto')` | one credit = accepted plan's contribution + positive real underspend; one log row; one message |
+| overflow withdrawal (#259) | `nexus/handlers/finance.py:_check_budget_limit` → `add_to_balance(user_id, -over, source='overflow')` when 🏠 Бюджет на жизнь (aggregate, whole pay period) or 🚬 Привычки (weekly, calendar Mon–Sun) is exceeded on a logged expense | `balance -= over` (only debit path, can go negative); one log row; chat message with new balance |
 | read (bot) | `core/budget.py::load_budget_data` → `result["подушка"]` | `{balance, target, planned_contribution}`; absent key if no row |
 | read (Mini App) | `GET /api/finance?view=cushion` | `{balance, target, planned_contribution, page, has_more, transactions[]}` |
 
 ## Invariants
 
-- `balance` is monotonic non-decreasing (no operation debits it).
+- `balance` is monotonic non-decreasing **except** `source='overflow'` (#259):
+  a budget overflow (🏠 Бюджет на жизнь aggregate or 🚬 Привычки weekly limit
+  exceeded — `nexus/handlers/finance.py:_check_budget_limit`) debits the
+  exact overage via `add_to_balance(user_id, -over, source="overflow")`. This
+  is the **only** negative-amount write path; every other `source` is a
+  deposit. `balance` can go negative (no floor guard) — read as "borrowed
+  from future savings", not clamped to 0.
 - `set_target` and `set_planned_contribution` never touch `balance` and never
   write a `cushion_transactions` row.
 - Payday credit fires **at most once per budget period** — `_send_payday_review`
@@ -171,7 +178,8 @@ transaction** as the increment.
 
 - `nexus/handlers/finance.py` — `handle_cushion_command`, `_apply_computed_limits`,
   `_limits_fields`, `_format_plan`, `_save_budget_plan`, `_send_payday_review`,
-  `_budget_period_review` (cushion-aware advice)
+  `_budget_period_review` (cushion-aware advice), `_check_budget_limit` (#259:
+  overflow withdrawal, the one debit path)
 - `core/classifier.py` — `_CUSHION_CMD_RE`, `classify()` / `process_item()` routing
   (`cushion_command`, before goal/debt/memory)
 - `core/budget.py` — `compute_limits`, `load_budget_data`

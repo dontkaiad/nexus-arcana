@@ -166,8 +166,9 @@ async def test_check_budget_limit_period_total_isolated_between_users(monkeypatc
     period_totals = []
 
     def fake_log_info(fmt, *args):
-        if fmt.startswith("_check_budget_limit: period_total="):
-            period_totals.append(args[0])  # period_total значение
+        # #259: лог теперь "_check_budget_limit: bucket=%s period_total=%.0f limit=%.0f"
+        if fmt.startswith("_check_budget_limit: bucket="):
+            period_totals.append(args[1])  # period_total значение
 
     with patch.object(fr._nexus_repo, "query", AsyncMock(side_effect=fake_nexus_query)), \
          patch.object(fr._arcana_repo, "query", AsyncMock(side_effect=fake_arcana_query)), \

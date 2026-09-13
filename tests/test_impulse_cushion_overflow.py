@@ -1,9 +1,9 @@
-"""tests/test_impulse_cushion_overflow.py — перерасход категории списывается
-сначала из импульсивных, а то, что не влезло — из подушки (#258).
+"""tests/test_impulse_cushion_overflow.py — перерасход агрегатного лимита
+("🏠 Бюджет на жизнь" / "🚬 Привычки" — #259) списывается из подушки.
 
-Раньше "то, что не влезло" просто дописывалось в импульсивные без потолка
-(лимит импульсивных мог уйти сколь угодно далеко в минус), а из подушки
-ничего не списывалось вообще — этого шага не было в коде.
+История: #258 сначала съедал overflow остатком лимита 🎲 Импульсивные, потом
+из подушки. #259 убрал отдельный лимит Импульсивные вообще (слит в "Бюджет
+на жизнь") — механизм упростился до "перерасход агрегата → сразу подушка".
 """
 from __future__ import annotations
 
@@ -22,62 +22,78 @@ def _msg():
 
 
 @pytest.mark.asyncio
-async def test_overflow_fits_entirely_in_impulse_no_cushion_touch():
-    """Перерасход 200₽, у импульсивных есть 800₽ места — всё уходит туда,
-    подушка не трогается."""
+async def test_life_budget_overflow_spills_into_cushion():
+    """Трата "🍜 Продукты" толкает СУММУ всех Бюджет-на-жизнь категорий за
+    лимит — overflow целиком списывается из подушки (нет больше отдельного
+    импульсивного буфера, который бы его сначала поглощал)."""
     msg = _msg()
-    rec = MagicMock(amount=5200.0)  # period_total = 5200, limit 5000 → over=200
-    with patch.object(finance, "_get_limits", AsyncMock(return_value={"продукты": 5000.0})), \
-         patch.object(finance._repo, "query_records", AsyncMock(return_value=[rec])), \
+    rec_products = MagicMock(amount=6000.0, category="🍜 Продукты")
+    rec_cafe = MagicMock(amount=1200.0, category="🍱 Кафе/Доставка")
+    with patch.object(finance, "_get_limits", AsyncMock(return_value={"бюджет на жизнь": 5000.0})), \
+         patch.object(finance._repo, "query_records", AsyncMock(return_value=[rec_products, rec_cafe])), \
          patch.object(finance, "_get_payday", AsyncMock(return_value=1)), \
-         patch.object(finance, "_calc_impulse_status", AsyncMock(return_value=(1000.0, 200.0))), \
-         patch.object(finance, "_handle_impulse_overflow", AsyncMock()) as m_impulse, \
-         patch("core.repos.pg_cushion_repo._repo.add_to_balance", AsyncMock()) as m_cushion:
-        await finance._check_budget_limit("🍜 Продукты", msg, "u-1", amount=200)
+         patch("core.repos.pg_cushion_repo._repo.add_to_balance", AsyncMock(return_value=11800.0)) as m_cushion:
+        await finance._check_budget_limit("🍜 Продукты", msg, "u-1", amount=6000)
 
-    m_impulse.assert_awaited_once()
-    assert m_impulse.await_args.args[1] == 200.0  # весь overflow ушёл в импульсивные
-    m_cushion.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-async def test_overflow_exceeds_impulse_room_spills_into_cushion():
-    """Перерасход 2000₽, у импульсивных остаётся только 200₽ места —
-    200₽ в импульсивные, 1800₽ списывается из подушки."""
-    msg = _msg()
-    rec = MagicMock(amount=7000.0)  # limit 5000 → over=2000
-    with patch.object(finance, "_get_limits", AsyncMock(return_value={"продукты": 5000.0})), \
-         patch.object(finance._repo, "query_records", AsyncMock(return_value=[rec])), \
-         patch.object(finance, "_get_payday", AsyncMock(return_value=1)), \
-         patch.object(finance, "_calc_impulse_status", AsyncMock(return_value=(1000.0, 800.0))), \
-         patch.object(finance, "_handle_impulse_overflow", AsyncMock()) as m_impulse, \
-         patch("core.repos.pg_cushion_repo._repo.add_to_balance", AsyncMock(return_value=12200.0)) as m_cushion:
-        await finance._check_budget_limit("🍜 Продукты", msg, "u-1", amount=2000)
-
-    m_impulse.assert_awaited_once()
-    assert m_impulse.await_args.args[1] == 200.0  # то, что влезло в импульсивные
     m_cushion.assert_awaited_once()
     args, kwargs = m_cushion.await_args
     assert args[0] == "u-1"
-    assert args[1] == -1800.0  # то, что не влезло — списано из подушки
+    assert args[1] == -2200.0  # (6000+1200) - 5000 = 2200 перерасход
     out = " ".join(c.args[0] for c in msg.answer.await_args_list if c.args)
-    assert "1,800₽" in out or "1800₽" in out
-    assert "12,200₽" in out or "12200₽" in out
+    assert "2,200₽" in out or "2200₽" in out
+    assert "🏠 Бюджет на жизнь" in out
 
 
 @pytest.mark.asyncio
-async def test_no_impulse_reserve_no_cushion_touch():
-    """Нет лимита на импульсивные вообще (impulse_limit=0) — старое поведение,
-    подушка не трогается (нечем сравнивать, не наша забота чинить здесь)."""
+async def test_life_budget_within_limit_no_cushion_touch():
     msg = _msg()
-    rec = MagicMock(amount=6000.0)
-    with patch.object(finance, "_get_limits", AsyncMock(return_value={"продукты": 5000.0})), \
+    rec = MagicMock(amount=3000.0, category="🍜 Продукты")
+    with patch.object(finance, "_get_limits", AsyncMock(return_value={"бюджет на жизнь": 5000.0})), \
          patch.object(finance._repo, "query_records", AsyncMock(return_value=[rec])), \
          patch.object(finance, "_get_payday", AsyncMock(return_value=1)), \
-         patch.object(finance, "_calc_impulse_status", AsyncMock(return_value=(0.0, 0.0))), \
-         patch.object(finance, "_handle_impulse_overflow", AsyncMock()) as m_impulse, \
          patch("core.repos.pg_cushion_repo._repo.add_to_balance", AsyncMock()) as m_cushion:
-        await finance._check_budget_limit("🍜 Продукты", msg, "u-1", amount=1000)
+        await finance._check_budget_limit("🍜 Продукты", msg, "u-1", amount=3000)
 
-    m_impulse.assert_not_awaited()
     m_cushion.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_habits_overflow_uses_calendar_week_not_full_period():
+    """Привычки проверяются по календарной неделе, не по всему платёжному
+    периоду — трата ВНЕ этой недели (пришедшая в query_records по более
+    широкому окну, если бы окно было period-wide) не должна учитываться."""
+    msg = _msg()
+    rec_this_week = MagicMock(amount=1500.0, category="🚬 Привычки")
+    with patch.object(finance, "_get_limits", AsyncMock(return_value={"привычки": 1000.0})), \
+         patch.object(finance._repo, "query_records", AsyncMock(return_value=[rec_this_week])) as m_query, \
+         patch("core.repos.pg_cushion_repo._repo.add_to_balance", AsyncMock(return_value=8500.0)) as m_cushion:
+        await finance._check_budget_limit("🚬 Привычки", msg, "u-1", amount=1500)
+
+    # окно запроса — понедельник этой недели, не начало платёжного периода
+    date_from = m_query.await_args.kwargs["date_from"]
+    from core.budget import calendar_week_start_iso
+    assert date_from == calendar_week_start_iso(3)
+    m_cushion.assert_awaited_once()
+    args, _ = m_cushion.await_args
+    assert args[1] == -500.0  # 1500 - 1000 перерасход
+
+
+@pytest.mark.asyncio
+async def test_manual_override_limit_on_single_life_category_still_specific():
+    """Если Кай вручную ставит лимит на ОДНУ категорию (например «лимит кафе
+    5000»), она проверяется отдельно от агрегата "Бюджет на жизнь", как и
+    раньше — специфичный факт побеждает агрегатный."""
+    msg = _msg()
+    rec_cafe = MagicMock(amount=6000.0, category="🍱 Кафе/Доставка")
+    rec_products = MagicMock(amount=100.0, category="🍜 Продукты")
+    with patch.object(finance, "_get_limits", AsyncMock(
+             return_value={"бюджет на жизнь": 50000.0, "кафе": 5000.0})), \
+         patch.object(finance._repo, "query_records", AsyncMock(return_value=[rec_cafe, rec_products])), \
+         patch.object(finance, "_get_payday", AsyncMock(return_value=1)), \
+         patch("core.repos.pg_cushion_repo._repo.add_to_balance", AsyncMock(return_value=9000.0)) as m_cushion:
+        await finance._check_budget_limit("🍱 Кафе/Доставка", msg, "u-1", amount=6000)
+
+    # 6000 (только кафе, НЕ 6000+100 продуктов) - 5000 = 1000 перерасход
+    m_cushion.assert_awaited_once()
+    args, _ = m_cushion.await_args
+    assert args[1] == -1000.0

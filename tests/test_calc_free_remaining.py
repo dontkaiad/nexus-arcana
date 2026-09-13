@@ -56,12 +56,14 @@ async def test_bot_delegates_to_shared_formula():
 
 @pytest.mark.asyncio
 async def test_limits_minus_category_spend():
+    # #259: "привычки" исключены из disc_total/disc_spent — свой недельный
+    # лимит, отдельный от месячного "Свободно" (не смешиваем таймфреймы).
     limits = {"продукты": 10000, "привычки": 5000}
     entries = [_entry(3000, "🍜 Продукты")]
     (res, _q) = await _call(limits, entries)
     assert res is not None
     free, _days = res
-    assert free == 12000.0  # 15000 лимитов − 3000 потрачено
+    assert free == 7000.0  # 10000 (без привычек) − 3000 потрачено
 
 
 # ── (3) декремент: трата 500₽ уменьшает «свободно» ровно на 500 ────────────

@@ -1,6 +1,6 @@
 # BUDGET — data-model contract (бюджет / day limit)
 
-Code conforms to: 5a57b8c (+ this change: _calc_free_remaining formula). (+ #144: user_notion_id → user_id; + #6: debt free-text path via `parse_and_store`; + #136: debt-name morphology match; + #44: goal create/edit/close from the Mini App; + #123: debt 4-direction form + close from the Mini App, `they_owe` list; + #205: goals move from `цель_*` Memory facts to the `goals` table, `saved` tracking + `goal/contribute`; + #208: `handle_finance_clarification` deleted; clarify / debt-overpaid / custom-limit / windfall-manual pending moved to `core.pending_kv`; windfall auto-distribution wired live via `core/classifier.py` → `finance.handle_windfall_income`.) This spec describes the budget data model as of
+Code conforms to: 5a57b8c (+ this change: _calc_free_remaining formula). (+ #144: user_notion_id → user_id; + #6: debt free-text path via `parse_and_store`; + #136: debt-name morphology match; + #44: goal create/edit/close from the Mini App; + #123: debt 4-direction form + close from the Mini App, `they_owe` list; + #205: goals move from `цель_*` Memory facts to the `goals` table, `saved` tracking + `goal/contribute`; + #208: `handle_finance_clarification` deleted; clarify / debt-overpaid / custom-limit / windfall-manual pending moved to `core.pending_kv`; windfall auto-distribution wired live via `core/classifier.py` → `finance.handle_windfall_income`.) (+ #259: 9 discretionary limits collapsed to 2 — 🏠 Бюджет на жизнь (aggregate) + 🚬 Привычки (weekly, the only one with real enforcement); overflow goes straight to cushion, no more separate 🎲 Импульсивные buffer.) This spec describes the budget data model as of
 that commit; update it in the same PR that changes the model.
 
 > Contract, not snapshot. Describes the derived model and the guarantees of
@@ -233,11 +233,85 @@ pending крупной суммы между предпросмотром и к�
   с нуля, `_BUDGET_PARSE_PROMPT_LEGACY`, шаг 3). Одно место расчёта
   специально, чтобы не разъезжались как порог 18500/15500 ниже.
 
+### #259 (2026-09-14): 9 лимитов → 2 (Бюджет на жизнь + Привычки)
+
+Девять отдельных дискреционных лимитов ощущались как постоянное давление
+("контроль ради контроля"), при этом реально важно отслеживать только
+**Привычки** (то, от чего Кай хочет отходить) — остальное просто нужно
+**видеть** (обычная разбивка трат по категориям), без отдельного потолка на
+каждую. Договорённость с Кай: траты по-прежнему логируются в те же 9
+категорий (`_BUDGET_VARIABLE_CATS`, разбивка по месяцу видна как раньше) —
+меняется только то, что СЧИТАЕТСЯ лимитом/перерасходом.
+
+`core/budget.py:compute_limits()` **сама не изменилась** — все константы,
+арифметика, `_distribute_limits`, комфортный/тяжёлый месяц — как в разделе
+ниже. Агрегация — отдельный чистый шаг **над** её результатом:
+
+- `core.budget.CAT_LIFE = "🏠 Бюджет на жизнь"`,
+  `LIFE_BUDGET_CATEGORIES = LIMIT_CATEGORIES минус CAT_HABITS`.
+- `core.budget.split_life_and_habits(limits)` → `{CAT_LIFE: сумма всех кроме
+  Привычек, CAT_HABITS: Привычки без изменений}`.
+- `nexus/handlers/finance.py:_limits_fields()` зовёт эту функцию и ДОПОЛНИТЕЛЬНО
+  делит Привычки на `_HABITS_WEEKLY_DIVISOR` (4, "недель в месяце" —
+  грубое допущение, не точный подсчёт календарных недель периода) — Привычки
+  хранятся и проверяются как **недельный**, а не месячный лимит.
+- Раньше отдельная строка `impulse_budget` (🎲 Импульсивный — резерв на
+  превышения) — теперь всегда `0`: слит в `CAT_LIFE`. Все три места, что её
+  показывали/сохраняли (`_format_plan` ×2, `_save_budget_plan`), уже были
+  написаны как `if impulse: ...` — с `impulse=0` эти ветки просто не
+  выполняются, никакой отдельной правки не понадобилось.
+- На Accept пишутся **два** факта-лимита вместо девяти:
+  `лимит_бюджет на жизнь` (месяц) и `лимит_привычки` (**неделя**, не месяц —
+  единственный лимит с реальным enforcement). Формат факта тот же
+  (`лимит: <cat> — N₽/мес` / `.../неделю`), `get_limits()`/`LIMIT_AMOUNT_RE`
+  не изменились — читают по тому же regex независимо от подписи периода.
+
+**`_check_budget_limit` (реактивный чек после траты, #259):**
+- Категория `🚬 Привычки` → окно **календарная неделя** (понедельник 00:00
+  по личному tz, `core.budget.calendar_week_start_iso`, НЕ платёжный
+  период) — перерасход виден быстрее, не только под конец месяца.
+- Категория ∈ `LIFE_BUDGET_CATEGORIES` (Продукты/Транспорт/Кафе/Бьюти/
+  Здоровье/Гардероб/Хобби/Импульсивные) → сумма трат по **ВСЕМ** этим
+  категориям сразу за платёжный период, сверяется с `лимит_бюджет на жизнь`.
+  Одна купленная категория может утопить лимит из-за трат в других — это
+  осознанно (весь смысл в том, что это ОДИН бюджет на всё).
+- **Ручной лимит на одну конкретную категорию побеждает агрегат.** Если
+  Кай позже поставит `лимит кафе 5000` (`_LIMIT_OVERRIDE_RE`, как раньше),
+  `_check_budget_limit` находит именно этот факт (substring-матч, исключая
+  сам агрегатный ключ) и проверяет Кафе отдельно, весь платёжный период —
+  старое поведение сохранено для любой вручную заданной категории.
+- **Перерасход** (любого из трёх случаев — Привычки/агрегат/ручной лимит на
+  категорию) списывается **прямо из подушки** (`cushion.add_to_balance`,
+  отрицательным инкрементом, с уведомлением о новом балансе). Раньше (#258)
+  overflow сначала съедал остаток отдельного лимита 🎲 Импульсивные — этот
+  промежуточный шаг убран вместе с самой категорией (`_calc_impulse_status`
+  / `_handle_impulse_overflow` удалены, больше не существуют).
+
+**`discretionary_free()` (core/budget.py, «Свободно» в Mini App/боте):**
+Привычки исключены из суммы (и из лимита, и из факта потраченного) —
+недельная цифра не имеет смысла внутри величины за весь платёжный период
+(месячные траты на привычки почти всегда «съели» бы недельный лимит,
+обнуляя «Свободно» без всякой связи с реальным перерасходом). У Привычек
+свой отдельный еженедельный сигнал (`_check_budget_limit`), не эта карточка.
+
+**Что не тронуто:** Фикс/Разовые (свои факты, `is_parallel_limit`, весь
+платёжный период) — без изменений. `_BUDGET_VARIABLE_CATS` (категории,
+которые Sonnet может присвоить трате) — без изменений, 8 категорий по-прежнему
+живые для классификации. Windfall-распределение (`handle_windfall_income`,
+раздел «Незапланированный доход» выше) читало `лимит_импульсивные` для
+топ-апа в тяжёлый месяц (`_IMPULSE_WINDFALL_CAP`) — с #259 такого факта
+больше нет, `current_impulse` в `_distribute_windfall_income` всегда `0`,
+шаг "докинуть в импульсивный" тихо пропускается (деньги идут сразу в
+долг/подушку, как при отсутствующем импульсивном резерве раньше) — это
+осознанно принятое упрощение, не полноценно адаптированная логика.
+
 ### Как Python распределяет лимиты по категориям
 
 Считает **только** `core/budget.py:compute_limits()` (Sonnet цифры лимитов
 не выдаёт). Все числа — именованные константы в начале `core/budget.py`,
-менять там. Логика одна для комфортного месяца и для варианта А/Б тяжёлого:
+менять там. Логика одна для комфортного месяца и для варианта А/Б тяжёлого
+(#259: этот расчёт НЕ изменился — агрегация в 2 категории идёт поверх его
+результата, см. предыдущий раздел):
 
 1. `discretionary = distributable_pool − total_debt_payment` (это
    `free_after_debts`).
@@ -697,7 +771,12 @@ expense items → `_ONE_TIME_PARSE_SYSTEM`).
   limit-math constants (`IRON_TRANSPORT`/`IRON_IMPULSE`/`IRON_TOTAL`,
   `PRODUCTS_TARGET`, `HABITS_CEILING`, `_PRIORITY_FLOOR`,
   `CUSHION_COMFORTABLE_RATE`, `BUDGET_TIGHT_THRESHOLD`), `compute_limits`,
-  `_distribute_limits`, `PRIORITY_CHAIN`
+  `_distribute_limits`, `PRIORITY_CHAIN`; #259: `CAT_LIFE`,
+  `LIFE_BUDGET_CATEGORIES`, `split_life_and_habits`, `calendar_week_start_iso`
+- `nexus/handlers/finance.py` — #259: `_limits_fields` (аггрегация +
+  `_HABITS_WEEKLY_DIVISOR`), `_check_budget_limit` (роутинг Привычки/агрегат/
+  ручной лимит на категорию, окно недели vs периода, перерасход → подушка
+  напрямую); `_calc_impulse_status`/`_handle_impulse_overflow` удалены
 - `core/memory.py` — `CATEGORIES`, `_PARSE_SYSTEM` (постоянно_/долг_/цель_/
   income_ examples), `save_memory` → `parse_and_store`: `долг_` →
   `_parse_debt_from_fact` + `pg_debts_repo` (#6); `цель_` →

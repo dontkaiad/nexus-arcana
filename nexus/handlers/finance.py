@@ -37,12 +37,25 @@ from core.budget import (
     pick_debt_payment as _pick_debt_payment,
     parse_deadline as _parse_deadline,
     CAT_IMPULSE as _CAT_IMPULSE,
+    CAT_HABITS as _CAT_HABITS,
+    CAT_LIFE as _CAT_LIFE,
+    LIFE_BUDGET_CATEGORIES as _LIFE_BUDGET_CATEGORIES,
+    split_life_and_habits as _split_life_and_habits,
+    calendar_week_start_iso as _calendar_week_start_iso,
     CUSHION_COMFORTABLE_RATE as _CUSHION_RATE,
     BUDGET_TIGHT_THRESHOLD,
     is_parallel_limit as _is_parallel_limit_name,
     _period_days_remaining as _budget_period_days_remaining,
     discretionary_free as _discretionary_free,
 )
+
+# #259: 9 отдельных лимитов → 2 (Бюджет на жизнь + Привычки). Привычки —
+# единственная категория с реальным enforcement, вдобавок по календарной
+# неделе, а не по всему платёжному периоду (Кай хочет видеть перерасход
+# быстрее, не ждать конца месяца). HABITS_WEEKLY_DIVISOR — грубое допущение
+# "4 недели в месяце" (не точный подсчёт недель периода) — сознательно просто,
+# можно уточнить позже, если понадобится.
+_HABITS_WEEKLY_DIVISOR = 4
 
 logger = logging.getLogger("nexus.finance")
 MOSCOW_TZ = timezone(timedelta(hours=3))
@@ -326,11 +339,30 @@ async def _check_budget_limit(category: str, message: Message, user_id: str = ""
     link = _cat_link(category)
     limits = await _get_limits("")
     logger.info("_check_budget_limit: limits=%s link=%r", limits, link)
+    # #259: Привычки — свой факт (недельный, см. ниже). «Жизнь»-категории по
+    # умолчанию идут на общий агрегат — НО если Кай позже вручную поставит
+    # лимит на конкретную (лимит кафе 5000 → своя лимит_кафе), specific_key
+    # находит его substring-матчем и он побеждает агрегат: ручной лимит на
+    # категорию всегда приоритетнее общего. Фикс/Разовые — та же логика,
+    # у них всегда есть свой факт, агрегата не касаются вообще.
+    is_habits = category == _CAT_HABITS
+    specific_key: Optional[str] = None
+    if not is_habits:
+        life_agg_key = _cat_link(_CAT_LIFE)
+        for key, val in limits.items():
+            if key == life_agg_key:
+                continue
+            if key in link or link in key:
+                specific_key = key
+                break
+    is_life_aggregate = (not is_habits) and (specific_key is None) and (category in _LIFE_BUDGET_CATEGORIES)
     limit_amount: Optional[float] = None
-    for key, val in limits.items():
-        if key in link or link in key:
-            limit_amount = val
-            break
+    if is_habits:
+        limit_amount = limits.get(_cat_link(_CAT_HABITS))
+    elif specific_key:
+        limit_amount = limits[specific_key]
+    elif is_life_aggregate:
+        limit_amount = limits.get(_cat_link(_CAT_LIFE))
     if not limit_amount:
         logger.info("_check_budget_limit: no limit for category=%r, skip", category)
         # Показать остаток свободных даже без лимита
@@ -383,19 +415,36 @@ async def _check_budget_limit(category: str, message: Message, user_id: str = ""
                 logger.debug("limit suggest error: %s", e)
         return
 
+    # #259: Привычки — окно календарная неделя (перерасход виден быстрее, не
+    # только под конец месяца). Агрегат «жизнь» считается на СУММУ трат по
+    # всем LIFE_BUDGET_CATEGORIES сразу, не по одной только что залогированной.
+    # specific_key (Фикс/Разовые/ручной лимит на одну категорию) — как раньше,
+    # весь платёжный период, только эта одна категория.
     now = datetime.now(_user_tz(tz_offset))
-    payday = await _get_payday()
-    period_start, period_end = _period_bounds(payday, tz_offset=tz_offset)
     today_str = now.strftime("%Y-%m-%d")
+    if is_habits:
+        window_start = _calendar_week_start_iso(tz_offset)
+        bucket_label = "🚬 Привычки (неделя)"
+        sum_categories = {_CAT_HABITS}
+    elif is_life_aggregate:
+        payday = await _get_payday()
+        window_start, _period_end = _period_bounds(payday, tz_offset=tz_offset)
+        bucket_label = _CAT_LIFE
+        sum_categories = set(_LIFE_BUDGET_CATEGORIES)
+    else:
+        payday = await _get_payday()
+        window_start, _period_end = _period_bounds(payday, tz_offset=tz_offset)
+        bucket_label = category
+        sum_categories = {category}
     try:
         records = await _repo.query_records(
-            type_="💸 Расход", category=category,
-            date_from=period_start, date_to=today_str, page_size=200,
+            type_="💸 Расход",
+            date_from=window_start, date_to=today_str, page_size=500,
             user_id=user_id,
         )
-        period_total = sum(float(p.amount or 0) for p in records)
-        logger.info("_check_budget_limit: period_total=%.0f limit=%.0f category=%s",
-                    period_total, limit_amount, category)
+        period_total = sum(float(p.amount or 0) for p in records if p.category in sum_categories)
+        logger.info("_check_budget_limit: bucket=%s period_total=%.0f limit=%.0f",
+                    bucket_label, period_total, limit_amount)
     except Exception as e:
         logger.error("_check_budget_limit db_query: %s", e, exc_info=True)
         return
@@ -415,50 +464,25 @@ async def _check_budget_limit(category: str, message: Message, user_id: str = ""
 
     if pct >= 100:
         over = period_total - limit_amount
-        parts.append(f"🚨 {category}: <b>{period_total:,.0f} / {limit_amount:,.0f}₽</b> ({pct:.0f}%!) +{over:,.0f}₽ overflow")
-        # Impulse overflow
+        parts.append(f"🚨 {bucket_label}: <b>{period_total:,.0f} / {limit_amount:,.0f}₽</b> ({pct:.0f}%!) +{over:,.0f}₽ overflow")
+        # #258/#259: нет больше отдельного "импульсивного" буфера (слит в
+        # Бюджет на жизнь) — перерасход любого из двух лимитов списывается
+        # прямо из подушки.
         try:
-            impulse_limit, impulse_used = await _calc_impulse_status(period_start, user_id, tz_offset)
-            if impulse_limit > 0:
-                impulse_left = impulse_limit - impulse_used
-                imp_pct = impulse_used / impulse_limit * 100
-                imp_ind = "🟢" if imp_pct < 60 else ("🟡" if imp_pct < 85 else "🔴")
-                parts.append(f"  → overflow {over:,.0f}₽ → импульсивный")
-                parts.append(f"🎲 Импульсивный: {impulse_used:,.0f} / {impulse_limit:,.0f}₽ ({imp_pct:.0f}%) {imp_ind}")
-                # #258: перерасход сначала съедает остаток импульсивных;
-                # то, что туда не влезло — списывается из подушки (раньше
-                # просто молча дописывалось в импульсивные без потолка).
-                to_impulse = min(over, max(0.0, impulse_left))
-                to_cushion = over - to_impulse
-                try:
-                    if to_impulse > 0:
-                        await _handle_impulse_overflow(category, to_impulse, message, user_id, period_start, tz_offset)
-                except Exception as _oe:
-                    logger.debug("impulse overflow create: %s", _oe)
-                if to_cushion > 0:
-                    try:
-                        from core.repos.pg_cushion_repo import _repo as _cushion_repo
-                        new_balance = await _cushion_repo.add_to_balance(
-                            user_id, -to_cushion, source="overflow",
-                            note=f"Перерасход {category} — импульсивные исчерпаны",
-                        )
-                        parts.append(
-                            f"🛡️ Импульсивный бюджет исчерпан → списано {to_cushion:,.0f}₽ из подушки "
-                            f"(баланс: {new_balance:,.0f}₽)"
-                        )
-                    except Exception as _ce:
-                        logger.debug("cushion overflow withdraw: %s", _ce)
-                        parts.append("🚨 Импульсивный бюджет исчерпан!")
-                elif impulse_left <= 0:
-                    parts.append("🚨 Импульсивный бюджет исчерпан!")
-            else:
-                parts.append(f"  → overflow {over:,.0f}₽ (нет импульсивного резерва)")
-        except Exception as _e:
-            logger.debug("impulse calc: %s", _e)
+            from core.repos.pg_cushion_repo import _repo as _cushion_repo
+            new_balance = await _cushion_repo.add_to_balance(
+                user_id, -over, source="overflow",
+                note=f"Перерасход {bucket_label}",
+            )
+            parts.append(
+                f"🛡️ Перерасход → списано {over:,.0f}₽ из подушки (баланс: {new_balance:,.0f}₽)"
+            )
+        except Exception as _ce:
+            logger.debug("cushion overflow withdraw: %s", _ce)
     elif pct >= 85:
-        parts.append(f"⚠️ {category}: {period_total:,.0f} / {limit_amount:,.0f}₽ ({pct:.0f}%) {indicator}")
+        parts.append(f"⚠️ {bucket_label}: {period_total:,.0f} / {limit_amount:,.0f}₽ ({pct:.0f}%) {indicator}")
     else:
-        parts.append(f"📊 {category}: {period_total:,.0f} / {limit_amount:,.0f}₽ ({pct:.0f}%) {indicator}")
+        parts.append(f"📊 {bucket_label}: {period_total:,.0f} / {limit_amount:,.0f}₽ ({pct:.0f}%) {indicator}")
 
     # Debt remaining — только если в этом периоде есть хоть один долг с активным
     # платежом. Все долги отложены (monthly_payment=0) → строку не показываем:
@@ -2535,44 +2559,6 @@ async def expense_from_task_note(note: str, user_id: str = "", uid: int = 0,
     return (note, amount, cat)
 
 
-# ── Budget: Impulse Overflow ─────────────────────────────────────────────────
-
-
-async def _handle_impulse_overflow(category: str, overflow: float, message: Message,
-                                    user_id: str, period_start: str, tz_offset: int = 3) -> None:
-    """Auto-create impulse expense for overspend."""
-    await _repo.add(
-        date=datetime.now(_user_tz(tz_offset)).strftime("%Y-%m-%d"),
-        amount=overflow,
-        category="🎲 Импульсивные",
-        type_="💸 Расход",
-        source="💳 Карта",
-        description=f"Превышение {category}: {overflow:.0f}₽",
-        user_id=user_id,
-    )
-
-
-async def _calc_impulse_status(period_start: str, user_id: str = "",
-                               tz_offset: int = 3) -> Tuple[float, float]:
-    """Calculate impulse budget limit and usage for period."""
-    impulse_limit = 0.0
-    limits = await _get_limits("")
-    for k, v in limits.items():
-        if "импульсивн" in k.lower():
-            impulse_limit = v
-            break
-    if impulse_limit == 0:
-        return 0.0, 0.0
-    now = datetime.now(_user_tz(tz_offset))
-    records = await _repo.query_records(
-        type_="💸 Расход", category="🎲 Импульсивные",
-        date_from=period_start, date_to=now.strftime("%Y-%m-%d"), page_size=200,
-        user_id=user_id,
-    )
-    impulse_used = sum(float(p.amount or 0) for p in records)
-    return impulse_limit, impulse_used
-
-
 # ── Budget Setup: One-Shot Free-Form ─────────────────────────────────────────
 
 # ── Budget Setup State ───────────────────────────────────────────────────────
@@ -3571,18 +3557,23 @@ def _plan_distributable(plan: dict) -> float:
 def _limits_fields(distributable: float, debt_payment: float,
                    income_total: float = 0.0) -> dict:
     """compute_limits → поля плана: limits[], limits_total, impulse_budget,
-    cushion_contribution (20% дохода в комфортный месяц, 0 в тяжёлый)."""
+    cushion_contribution (20% дохода в комфортный месяц, 0 в тяжёлый).
+
+    #259: девять категорий compute_limits() схлопнуты в две — 🏠 Бюджет на
+    жизнь (сумма всех дискреционных, включая бывший 🎲 Импульсивный резерв —
+    он больше не отдельная строка, impulse_budget теперь всегда 0) и
+    🚬 Привычки (единственная с реальным enforcement, в НЕДЕЛЮ, не в месяц —
+    _HABITS_WEEKLY_DIVISOR). compute_limits() сама не меняется — агрегация
+    поверх её результата, см. core.budget.split_life_and_habits."""
     res = _compute_limits(distributable, debt_payment, income_total)
-    lim = dict(res["limits"])
-    impulse = int(lim.pop(_CAT_IMPULSE, 0))
-    # Показываем ВСЕ категории, включая нулевые — прозрачность важнее компактности:
-    # видно, что категория получила 0₽ осознанно, а не потерялась.
-    items = [{"category": cat, "amount": int(amt), "change": "new"}
-             for cat, amt in lim.items()]
+    split = _split_life_and_habits(res["limits"])
+    split[_CAT_HABITS] = int(round(split[_CAT_HABITS] / _HABITS_WEEKLY_DIVISOR))
+    items = [{"category": cat, "amount": amt, "change": "new"}
+             for cat, amt in split.items()]
     return {
         "limits": items,
         "limits_total": sum(i["amount"] for i in items),
-        "impulse_budget": impulse,
+        "impulse_budget": 0,
         "cushion_contribution": int(res["cushion_contribution"]),
     }
 
