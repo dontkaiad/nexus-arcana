@@ -154,12 +154,15 @@
   .legend i{width:11px;height:11px;border-radius:4px;flex:none}
   .foot{margin-top:6px;text-align:center;font-size:.8rem;color:var(--ink-soft)}
 
-  /* admin sections */
-  .sec>summary{list-style:none;cursor:pointer;padding:12px 15px;display:flex;align-items:center;gap:8px;font-size:.95rem}
-  .sec>summary::-webkit-details-marker{display:none}
-  .sec>summary::after{content:"⌄";margin-left:auto;color:var(--muted);transition:transform .2s}
-  .sec[open]>summary::after{transform:rotate(180deg)}
-  .sec .body{padding:0 15px 14px}
+  /* admin sections — #252: вкладки вместо стопки collapsible-панелей */
+  .tabs{display:flex;flex-wrap:wrap;gap:6px}
+  .tabbtn{position:relative;display:flex;align-items:center;gap:5px;padding:8px 11px;
+    font-size:.8rem;line-height:1.15;color:var(--ink-soft);background:var(--cell-bg);
+    border:1px solid var(--glass-line);border-radius:10px;cursor:pointer}
+  .tabbtn.on{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+  .tabbtn .badge{position:absolute;top:-5px;right:-5px;min-width:16px;height:16px;padding:0 3px;
+    border-radius:999px;background:var(--warn,#d4574a);color:#fff;font-size:.66rem;line-height:16px;text-align:center}
+  .tabpane .body{padding:14px 15px}
   .sec .hint{font-size:.78rem;color:var(--ink-soft);margin:0 0 9px;line-height:1.4}
   .stack{display:flex;flex-direction:column;gap:7px}
   .item{border:1px solid var(--glass-line);border-radius:10px;padding:8px 11px;font-size:.85rem;background:var(--cell-bg)}
@@ -481,13 +484,24 @@ function mineBlock(){
 }
 
 /* ── admin: collapsible sections ──────────────────────────────────── */
+// #252: вкладки вместо стопки collapsible-панелей (как в job-hunter — один
+// список разделов слева/сверху, одна активная панель, а не всё сразу).
+const _ADMIN_TABS=[
+  ["req","📥","Заявки"],
+  ["win","🗓","Окна"],
+  ["types","☀️","Типы"],
+  ["off","🚫","Недоступна"],
+  ["hist","📜","История"],
+];
 function adminSections(){
-  return `
-  <details class="glass sec" id="secReq"><summary>📥 Заявки</summary><div class="body">
-    <p class="hint">записи на расклады ждут твоего «да»</p>
-    <div class="stack" id="reqBox">…</div>
-  </div></details>
-  <details class="glass sec"><summary>🗓 Когда я свободна</summary><div class="body">
+  if(!st.adminTab) st.adminTab="req";
+  const tabs=_ADMIN_TABS.map(([id,ic,lbl])=>
+    `<button class="tabbtn${st.adminTab===id?" on":""}" data-tab="${id}">${ic} ${lbl}${
+      id==="req"?'<span class="badge" id="reqBadge" hidden>0</span>':""}</button>`).join("");
+  return `<div class="tabs">${tabs}</div><div class="glass sec tabpane">${_adminTabBody(st.adminTab)}</div>`;
+}
+function _adminTabBody(tab){
+  if(tab==="win") return `<div class="body">
     <p class="hint">повторяются каждую неделю по дню недели — из них считаются слоты для записи</p>
     <div class="stack" id="winBox">…</div>
     <div class="form">
@@ -503,8 +517,8 @@ function adminSections(){
       <div class="two">${ddTime("wd_s","14:00")}${ddTime("wd_e","20:00")}</div>
       <button class="primary mini" id="wd_add">＋ добавить окно (разово)</button>
     </div>
-  </div></details>
-  <details class="glass sec"><summary>☕ Типы встреч</summary><div class="body">
+  </div>`;
+  if(tab==="types") return `<div class="body">
     <p class="hint">кофе, созвон, расклад… клиент выбирает при записи</p>
     <div class="stack" id="typBox">…</div>
     <div class="form">
@@ -513,8 +527,8 @@ function adminSections(){
         <input id="t_dur" type="number" value="60" placeholder="минут"></div>
       <button class="primary mini" id="t_add">＋ добавить тип</button>
     </div>
-  </div></details>
-  <details class="glass sec"><summary>🚫 Когда я недоступна</summary><div class="body">
+  </div>`;
+  if(tab==="off") return `<div class="body">
     <p class="hint">отпуск, поездки — эти даты просто не показываются для записи</p>
     <div class="stack" id="offBox">…</div>
     <div class="form">
@@ -522,11 +536,16 @@ function adminSections(){
       <input id="o_r" placeholder="причина (отпуск)">
       <button class="primary mini" id="o_add">＋ отметить</button>
     </div>
-  </div></details>
-  <details class="glass sec"><summary>📜 История броней</summary><div class="body">
+  </div>`;
+  if(tab==="hist") return `<div class="body">
     <p class="hint">последние 50 — любой статус, прошлые и будущие</p>
     <div class="stack" id="histBox">…</div>
-  </div></details>`;
+  </div>`;
+  // req — дефолт
+  return `<div class="body">
+    <p class="hint">записи на расклады ждут твоего «да»</p>
+    <div class="stack" id="reqBox">…</div>
+  </div>`;
 }
 const STATUS_RU={pending:"⏳ ожидает",confirmed:"✅ подтверждено",declined:"❌ отклонено",
   cancelled_by_owner:"❌ отменено (я)",cancelled_by_requester:"❌ отменено (гость)"};
@@ -571,7 +590,7 @@ function wireDDate(scope){
     const draw=()=>cal.innerHTML=_calHTML(view,d.dataset.val);
     btn.onclick=e=>{e.stopPropagation();const wasOpen=!cal.hidden;ddCloseAll();
       if(wasOpen)return; draw(); cal.hidden=false; d.classList.add("open");
-      const sec=d.closest("details.sec"); if(sec){sec.style.position="relative";sec.style.zIndex="40";}};
+      const sec=d.closest(".tabpane"); if(sec){sec.style.position="relative";sec.style.zIndex="40";}};
     cal.onclick=e=>{e.stopPropagation();
       const nav=e.target.closest(".cal-nav");
       if(nav){view.setMonth(view.getMonth()+ +nav.dataset.m); draw(); return;}
@@ -585,7 +604,7 @@ function ddCloseAll(){
   document.querySelectorAll(".dd-list,.dd-cal").forEach(l=>l.hidden=true);
   document.querySelectorAll(".dd").forEach(x=>x.classList.remove("open"));
   // release the raised stacking context (backdrop-filter cards trap the popup otherwise)
-  document.querySelectorAll("details.sec").forEach(s=>{s.style.zIndex="";s.style.position="";});
+  document.querySelectorAll(".tabpane").forEach(s=>{s.style.zIndex="";s.style.position="";});
 }
 function wireDD(scope){
   (scope||document).querySelectorAll(".dd:not(.ddd)").forEach(d=>{
@@ -594,7 +613,7 @@ function wireDD(scope){
       ddCloseAll();
       if(wasOpen)return;
       list.hidden=false; d.classList.add("open");
-      const sec=d.closest("details.sec"); if(sec){sec.style.position="relative";sec.style.zIndex="40";}};
+      const sec=d.closest(".tabpane"); if(sec){sec.style.position="relative";sec.style.zIndex="40";}};
     list.querySelectorAll(".dd-opt").forEach(o=>o.onclick=e=>{
       e.stopPropagation(); d.dataset.val=o.dataset.v;
       d.querySelector(".dd-lbl").textContent=o.textContent;
@@ -606,27 +625,40 @@ function wireDD(scope){
 document.addEventListener("click",ddCloseAll);
 
 function wireAdmin(){
-  reqBox(); winBox(); typBox(); offBox(); histBox(); wireDD($("#rail")); wireDDate($("#rail"));
-  $("#w_add").onclick=async()=>{try{
+  // #252: только активная вкладка есть в DOM — каждый *Box()/кнопка ниже
+  // сама себя защищает (`if(!el) return`), т.к. остальные 4 вкладки сейчас
+  // не отрендерены вообще (не просто скрыты).
+  document.querySelectorAll(".tabbtn").forEach(b=>b.onclick=()=>{
+    st.adminTab=b.dataset.tab; rail();
+  });
+  // reqBox/winBox всегда — бейдж заявок и st.windows (подсветка календаря)
+  // нужны независимо от того, какая вкладка сейчас открыта. Остальные три —
+  // только когда их вкладка реально в DOM (незачем дёргать API впустую).
+  reqBox(); winBox();
+  if(st.adminTab==="types") typBox();
+  if(st.adminTab==="off") offBox();
+  if(st.adminTab==="hist") histBox();
+  wireDD($("#rail")); wireDDate($("#rail"));
+  if($("#w_add")) $("#w_add").onclick=async()=>{try{
     await api("/availability",{method:"POST",headers:{"content-type":"application/json"},
       body:JSON.stringify({context:ddVal("w_ctx"),weekday:+ddVal("w_wd"),
         start_time:ddVal("w_s"),end_time:ddVal("w_e")})});
     toast("окно добавлено");winBox();load().then(gridR);
   }catch(e){toast("не вышло: "+e.message);}};
-  $("#wd_add").onclick=async()=>{try{
+  if($("#wd_add")) $("#wd_add").onclick=async()=>{try{
     const dt=ddVal("wd_date"); if(!dt){toast("выбери дату");return;}
     await api("/availability",{method:"POST",headers:{"content-type":"application/json"},
       body:JSON.stringify({context:ddVal("wd_ctx"),specific_date:dt,
         start_time:ddVal("wd_s"),end_time:ddVal("wd_e")})});
     toast("разовое окно добавлено");winBox();load().then(gridR);
   }catch(e){toast("не вышло: "+e.message);}};
-  $("#t_add").onclick=async()=>{try{
+  if($("#t_add")) $("#t_add").onclick=async()=>{try{
     await api("/meeting-types",{method:"POST",headers:{"content-type":"application/json"},
       body:JSON.stringify({title:$("#t_title").value,slug:$("#t_slug").value,
         context:ddVal("t_ctx"),duration_min:+$("#t_dur").value})});
     toast("тип добавлен");typBox();
   }catch(e){toast("не вышло: "+e.message);}};
-  $("#o_add").onclick=async()=>{try{
+  if($("#o_add")) $("#o_add").onclick=async()=>{try{
     // #240: без "+03:00" бэкенд (_parse_dt) трактует naive-строку как UTC, а
     // Кай выбирает даты в МСК — блок уезжал на 3ч позже и "13-14" рисовался как "13-15".
     await api("/blocks",{method:"POST",headers:{"content-type":"application/json"},
@@ -634,10 +666,14 @@ function wireAdmin(){
     toast("отмечено");offBox();load().then(gridR);
   }catch(e){toast("не вышло: "+e.message);}};
 }
-async function reqBox(){const el=$("#reqBox");try{
+async function reqBox(){try{
   const d=await api("/requests?status=open");
   const p=d.requests.filter(r=>r.status==="pending");
-  const sec=document.getElementById("secReq"); if(sec&&p.length) sec.open=true;
+  // #252: аккордеон раньше сам разворачивался при наличии заявок — вкладку
+  // так не переключить, вместо этого бейдж-счётчик на самой вкладке.
+  const badge=$("#reqBadge");
+  if(badge){badge.hidden=!p.length; badge.textContent=p.length;}
+  const el=$("#reqBox"); if(!el) return;
   el.innerHTML = p.length ? p.map(r=>`<div class="item">
     <div class="top"><b>${r.requester_name}</b><span class="muted">${mskDateTime(r.start)}</span></div>
     ${r.note?`<div class="muted">${r.note}</div>`:""}
@@ -646,11 +682,12 @@ async function reqBox(){const el=$("#reqBox");try{
     : `<div class="empty">Заявок нет</div>`;
   el.querySelectorAll("[data-ok]").forEach(b=>b.onclick=()=>dec(b.dataset.ok,"confirm"));
   el.querySelectorAll("[data-no]").forEach(b=>b.onclick=()=>dec(b.dataset.no,"decline"));
-}catch(e){el.innerHTML=`<div class="empty">${e.message}</div>`;}}
+}catch(e){const el=$("#reqBox"); if(el) el.innerHTML=`<div class="empty">${e.message}</div>`;}}
 async function dec(id,a){try{await api(`/requests/${id}/${a}`,{method:"POST"});toast("готово");reqBox();load().then(gridR);}catch(e){toast(e.message);}}
 
-async function winBox(){const el=$("#winBox");try{
+async function winBox(){try{
   const d=await api("/availability");st.windows=d.windows;
+  const el=$("#winBox"); if(!el) return;
   el.innerHTML = d.windows.length ? d.windows.map(w=>`<div class="item"><div class="top">
     <span>${w.weekday!=null?DOW[w.weekday]+" · каждую неделю":mskDate(w.specific_date)+" · разово"} ${w.start_time}–${w.end_time} · ${w.context==="arcana"?"расклады":"встречи"}</span>
     <button class="mini" data-d="${w.id}">✕</button></div></div>`).join("")
@@ -659,7 +696,7 @@ async function winBox(){const el=$("#winBox");try{
   el.querySelectorAll("[data-d]").forEach(b=>b.onclick=async()=>{try{
     await api("/availability/"+b.dataset.d,{method:"DELETE"});toast("окно удалено");winBox();load().then(gridR);
   }catch(e){toast("не вышло удалить: "+e.message);}});
-}catch(e){el.innerHTML=`<div class="empty">${e.message}</div>`;}}
+}catch(e){const el=$("#winBox"); if(el) el.innerHTML=`<div class="empty">${e.message}</div>`;}}
 
 async function typBox(){const el=$("#typBox");try{
   const d=await api("/meeting-types");
@@ -787,7 +824,7 @@ function detail(){
   // #251: у admin слоты смешаны из обоих контекстов — помечаем каждую
   // кнопку эмодзи её контекста, иначе непонятно, встреча это или расклад.
   else slH=`<div class="slotwrap">${sl.map((s,i)=>`<button data-s="${s.start}" data-ctx="${s._ctx||st.ctx}" class="${i===0?"pri":""}">${
-    st.me.role==="admin"?(s._ctx==="arcana"?"🌒 ":"☕ "):""}${T(s.start)}</button>`).join("")}</div>`;
+    st.me.role==="admin"?(s._ctx==="arcana"?"🌒 ":"☀️ "):""}${T(s.start)}</button>`).join("")}</div>`;
   const bookHdr = st.me.role==="admin" ? "Свободные окна" : `Записаться${st.ctx==="arcana"?" · расклад / ритуал":""}`;
   el.innerHTML = `<div>${evH}</div>
     <div class="bookh">${bookHdr}</div>${slH}`;

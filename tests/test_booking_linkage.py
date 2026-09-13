@@ -78,7 +78,7 @@ async def test_friends_booking_creates_task():
         row = c.execute(sa.text(
             "SELECT title, deadline, reminder FROM tasks WHERE id = :i"),
             {"i": int(linked.nexus_task_id)}).first()
-    assert row.title == "☕ Встреча: Марина"
+    assert row.title == "☀️ Встреча: Марина"
     assert str(row.deadline).startswith("2026-10-01 12:00")
     assert row.reminder is None  # Zarya owns reminders, not the task
 
@@ -98,7 +98,7 @@ async def test_friends_booking_title_uses_purpose_when_present():
         row = c.execute(sa.text(
             "SELECT title, note FROM tasks WHERE id = :i"),
             {"i": int(linked.nexus_task_id)}).first()
-    assert row.title == "☕ шашлыки в Токсово"
+    assert row.title == "☀️ шашлыки в Токсово"
     assert "Мишаня" in row.note
 
 

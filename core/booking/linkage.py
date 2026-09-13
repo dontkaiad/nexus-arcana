@@ -40,7 +40,7 @@ def _link_sync(eng, b: Booking):
         # хочет видеть "шашлыки", а не безликое "Встреча: Мишаня"), имя —
         # в заметке вместе с технической меткой брони.
         purpose = (b.note or "").strip()
-        title = f"☕ {purpose}" if purpose else f"☕ Встреча: {b.requester_name}"
+        title = f"☀️ {purpose}" if purpose else f"☀️ Встреча: {b.requester_name}"
         task_note = f"с {b.requester_name} · бронь #{b.id} · {b.hours or 1:g} ч · {b.source}"
         # #249: длительность брони → duration_min задачи (busy-калькулятор,
         # core/booking/busy.py, брал раньше жёсткий 1ч на любую задачу — #241).
