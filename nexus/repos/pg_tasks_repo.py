@@ -299,6 +299,7 @@ def _create_sync(
     reminder: Optional[str],
     user_id: str,
     note: Optional[str] = None,
+    duration_min: Optional[int] = None,
 ) -> Optional[int]:
     _ensure_lookups()
     status_id = _match(_status_id, status, "Not started")
@@ -313,6 +314,7 @@ def _create_sync(
         "reminder": _parse_iso(reminder),
         "user_id": user_id or "",
         "note": (note or "").strip() or None,
+        "duration_min": duration_min,
     }
     with get_engine().begin() as conn:
         result = conn.execute(tasks.insert().values(**vals).returning(tasks.c.id))
@@ -547,6 +549,7 @@ class PgTasksRepo:
         deadline = _extract_date(props.get("Дедлайн", {}))
         reminder = _extract_date(props.get("Напоминание", {}))
         note = _extract_text(props.get("Заметка", {}))
+        duration = _extract_number(props.get("Длительность", {}))
         user_id = ""
         rel = props.get("🪪 Пользователи", {})
         if rel:
@@ -557,6 +560,7 @@ class PgTasksRepo:
         pid = await asyncio.to_thread(
             _create_sync, title, status, priority, category,
             deadline, reminder, user_id, note,
+            int(duration) if duration is not None else None,
         )
         return str(pid) if pid else None
 

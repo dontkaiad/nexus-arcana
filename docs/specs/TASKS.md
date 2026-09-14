@@ -1,6 +1,7 @@
 # TASKS — data-model contract (Nexus ✅ Задачи)
 
-Code conforms to: b9d3367 (+ this change: #149 — notion_id column dropped). (+ #144: user_notion_id → user_id.) (+ #241/#242, 24cb626: `duration_min`, `shared` columns.) (+ #26x: per-message timezone override for deadline/reminder parsing.) This spec describes the tasks data model as of
+Code conforms to: b9d3367 (+ this change: #149 — notion_id column dropped). (+ #144: user_notion_id → user_id.) (+ #241/#242, 24cb626: `duration_min`, `shared` columns.) (+ #26x: per-message timezone override for deadline/reminder parsing; duration
+parseable at creation time, not just via later edit.) This spec describes the tasks data model as of
 that commit; update it in the same PR that changes the model.
 
 > Contract, not snapshot. Describes the persistent model, the guarantees of
@@ -79,11 +80,19 @@ case-insensitive substring either direction, then a default
 extracts/normalizes them — a leftover of the Notion-era interface.
 
 - **create** — `create(_db_id, props)`. Extracts `Задача`/`Статус`/
-  `Приоритет`/`Категория`/`Дедлайн`/`Напоминание` and the owning user from
-  the `🪪 Пользователи` relation. Guarantees: `status` defaults to
-  `Not started`, `priority` to `🟡 Важно`, `category` to `💳 Прочее` when
-  unresolved; dates parsed via `_parse_iso` (naive → UTC). Returns the new
-  id as `str`, or `None`. `repeat_*`/`parent_task_id` are NOT set on create.
+  `Приоритет`/`Категория`/`Дедлайн`/`Напоминание`/`Длительность` and the
+  owning user from the `🪪 Пользователи` relation. Guarantees: `status`
+  defaults to `Not started`, `priority` to `🟡 Важно`, `category` to
+  `💳 Прочее` when unresolved; dates parsed via `_parse_iso` (naive → UTC).
+  Returns the new id as `str`, or `None`. `repeat_*`/`parent_task_id` are NOT
+  set on create. `duration_min` at creation was a gap fixed by #26x — the
+  classifier's task schema now has a `duration` field
+  (raw text, e.g. "2 часа") that `handle_task_parsed`
+  (`core.duration.parse_duration_minutes`) converts to minutes and threads
+  through to `create()`'s `props["Длительность"]`; before that, duration
+  mentioned in the same message as task creation was silently dropped
+  (only settable afterward via the `_apply_edit` `field == "duration"`
+  edit command).
 - **subtasks** — the "📋 Подзадачи" button (`core/subtasks_handler.py`,
   one factory router shared by both bots) writes child items into 🗒️ Списки
   with a relation back to the parent task/work. It does NOT create `tasks`
@@ -295,7 +304,8 @@ category resolution on completion also runs on Haiku
 - `nexus/repos/tasks_tables.py` — SQLAlchemy Core definitions
 - `nexus/repos/pg_tasks_repo.py` — `Task` dataclass, lookup cache, `_match`,
   create/status/props/repeat, reminder-restore queries, `clear_reminder` (#206),
-  `active_with_future_deadline_no_reminder` (#212)
+  `active_with_future_deadline_no_reminder` (#212); `create`/`_create_sync`
+  accept `duration_min` from `props["Длительность"]` (#26x)
 - `nexus/repos/tasks_repo.py` — repository seam (`clear_reminder`)
 - `nexus/handlers/tasks.py` — create/complete/recurring reset
   (`_handle_recurring_task_reset`, `_handle_recurring_reminder_done`),
@@ -304,15 +314,18 @@ category resolution on completion also runs on Haiku
   fan-out — #211), `_parse_repeat_time`, `_reschedule_all_for_tz`,
   `_update_streak_line`, Haiku `ask_claude` calls; `_apply_edit` — NL field
   edits, incl. `duration` (#241) and `shared` (#242); `_get_effective_tz`,
-  `_haiku_parse_reminder_dt` (#26x — per-message tz override)
+  `_haiku_parse_reminder_dt` (#26x — per-message tz override);
+  `handle_task_parsed` converts `data["duration"]` → `data["duration_min"]`
+  at creation time (#26x), `_do_save_task`/`_show_task_confirm` persist/display it
 - `core/location.py` — `resolve_offset`, `get_user_tz`, `CITY_TZ` (#26x)
-- `core/duration.py` — `parse_duration_minutes`/`format_duration` (#241)
+- `core/duration.py` — `parse_duration_minutes`/`format_duration` (#241, #26x)
 - `core/shared_items.py` — `shared_items_summary` reads `tasks.shared` (+
   `nexus_lists.shared`) for Zarya's friend-chat context (#242, see
   `docs/specs/BOOKING.md`)
 - `core/booking/busy.py` — busy-interval length honors `duration_min` (#241)
 - `nexus/nexus_bot.py` — `reminder_resync` interval job (90 s, #210)
-- `core/classifier.py` — `build_system` future-task-money → `note` rule
+- `core/classifier.py` — `build_system` future-task-money → `note` rule;
+  `type=task` schema `duration` field (#26x)
 - `nexus/handlers/finance.py` — `expense_from_task_note`, `_write_one_time_expense`
 - `core/task_streaks.py` — per-task streak store + rules
 - `nexus/handlers/streaks.py` — global daily streak

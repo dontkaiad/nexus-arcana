@@ -24,6 +24,7 @@ from nexus.handlers.utils import react
 from core.layout import maybe_convert
 from core.utils import cancel_button, secondary_button
 from core.task_reminder_msg import save_task_reminder, delete_task_reminder
+from core.duration import parse_duration_minutes, format_duration
 from core.location import (
     CITY_TZ as _CITY_TZ,
     get_user_tz as _location_get_user_tz,
@@ -1575,6 +1576,14 @@ async def handle_task_parsed(message: Message, data: dict, original_text: str = 
 
     data.setdefault("for_practice", False)
 
+    # #26x: длительность (raw text "2 часа" от classifier, поле "duration"
+    # в схеме task) — детерминированный regex-парсинг, а не Haiku, тем же
+    # `parse_duration_minutes`, что и в _apply_edit (issue: раньше поля
+    # "duration" в схеме создания не было вообще — "длительность 2 часа"
+    # молча терялось, не попадая ни в дедлайн, ни в note).
+    if data.get("duration"):
+        data["duration_min"] = parse_duration_minutes(data["duration"])
+
     # Авторитетный текст от classifier (транскрипт для голосовых); fallback
     # на message.text для прямых вызовов/текстовых сообщений. Считаем ОДИН
     # эффективный tz для всей функции (включая ветку repeat и итоговый
@@ -1799,13 +1808,14 @@ async def _show_task_confirm(message: Message, pending: dict, uid: int) -> None:
     reminder_display = (pending.get("reminder_time") or "нет").replace("T", " ")
     note_val = (pending.get("note") or "").strip()
     note_line = f"📝 Заметка: {note_val}\n" if note_val else ""
+    duration_line = f"⏱ Длительность: {format_duration(pending['duration_min'])}\n" if pending.get("duration_min") else ""
 
     text_content = (
         f"📌 <b>{pending['title']}</b>\n"
         f"🏷 {pending.get('category', '?')} · {_priority_display(pending.get('priority'))}\n"
         f"📅 Дедлайн: {deadline_display}\n"
         f"🔔 Напомню: {reminder_display}\n"
-        f"{note_line}\n"
+        f"{duration_line}{note_line}\n"
     )
     if is_practice_cat:
         text_content += "🕯️ Это для практики (Arcana) или для себя?"
@@ -2678,6 +2688,8 @@ async def _do_save_task(message: Message, data: dict, chat_id: int = None, uid: 
         props["Дедлайн"] = _date_with_tz(data["deadline"], tz_offset)
     if data.get("reminder_time"):
         props["Напоминание"] = _date_with_tz(data["reminder_time"], tz_offset)
+    if data.get("duration_min"):
+        props["Длительность"] = _number(data["duration_min"])
     note = (data.get("note") or "").strip()
     if note:
         props["Заметка"] = _text(note)
@@ -2736,6 +2748,7 @@ async def _do_save_task(message: Message, data: dict, chat_id: int = None, uid: 
         repeat_line = f"\n🔄 Повтор: {' '.join(repeat_parts)}"
 
     note_line = f"\n📝 Заметка: {note}" if note else ""
+    duration_line = f"\n⏱ Длительность: {format_duration(data['duration_min'])}" if data.get("duration_min") else ""
 
     msg_id = data.get("msg_id")
     text_content = (
@@ -2743,7 +2756,7 @@ async def _do_save_task(message: Message, data: dict, chat_id: int = None, uid: 
         f"📌 {data['title']}\n"
         f"🏷 {real_category} · {_priority_display(real_priority)}\n"
         f"📅 Дедлайн: {deadline_display}\n"
-        f"🔔 Напоминание: {reminder_display}{repeat_line}{note_line}"
+        f"🔔 Напоминание: {reminder_display}{duration_line}{repeat_line}{note_line}"
     )
 
     # Inline-кнопки: предложить разбить на подзадачи
@@ -3345,7 +3358,6 @@ async def _apply_edit(
                 await _repo.set_props(page_id, {"Напоминание": _date(iso_value)})
                 await message.answer(f"✏️ Напоминание{ctx_label}:\n📌 {label}\n🔔 → {iso_value}")
         elif field == "duration":
-            from core.duration import parse_duration_minutes, format_duration
             minutes = parse_duration_minutes(new_value)
             if not minutes:
                 await message.answer(f"⚠️ Не поняла длительность: «{new_value}» (например: 2 часа, 30 минут).")
