@@ -112,7 +112,7 @@ Optional labeled meeting kinds a guest/friend can pick (`slug`, `title`,
 | `start_at` / `end_at` | TIMESTAMP(tz) | NOT NULL |
 | `hours` | Numeric | nullable |
 | `status` | Text | `'pending'` \| `'confirmed'` \| `'declined'` \| `'cancelled_by_owner'` \| `'cancelled_by_requester'` — see `BLOCKING_BOOKING_STATUSES` for which hold a slot |
-| `note` | Text | **the meeting's purpose**, not the requester's name (#239) — "шашлыки в Токсово", not "встреча с Мишаней"; required (non-empty) for `context='friends'` (`BookBody` model_validator) |
+| `note` | Text | **the meeting's purpose**, not the requester's name (#239) — "barbecue at the park", not "meeting with Alex"; required (non-empty) for `context='friends'` (`BookBody` model_validator) |
 | `source` | Text | `'web'` \| `'tg_dm'` \| … — where the booking came from |
 | `hold_expires_at` | TIMESTAMP(tz) | nullable |
 | `nexus_task_id` / `arcana_work_id` | Text | set by `link_booking` once confirmed (see Linkage) |

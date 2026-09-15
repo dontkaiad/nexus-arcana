@@ -92,16 +92,16 @@ async def test_friends_booking_title_uses_purpose_when_present():
     eng = _engine()
     b = await create_booking(
         user_id="u1", context="friends", start_at=START, end_at=START + timedelta(hours=2),
-        status="confirmed", hours=2, requester_name="Мишаня", requester_tg_id=5,
-        note="шашлыки в Токсово", source="tg_dm", engine=eng,
+        status="confirmed", hours=2, requester_name="Ваня", requester_tg_id=5,
+        note="шашлыки в парке", source="tg_dm", engine=eng,
     )
     linked = await link_booking(b, engine=eng)
     with eng.connect() as c:
         row = c.execute(sa.text(
             "SELECT title, note FROM tasks WHERE id = :i"),
             {"i": int(linked.nexus_task_id)}).first()
-    assert row.title == "☀️ шашлыки в Токсово"
-    assert "Мишаня" in row.note
+    assert row.title == "☀️ шашлыки в парке"
+    assert "Ваня" in row.note
 
 
 @pytest.mark.asyncio

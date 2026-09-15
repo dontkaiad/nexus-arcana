@@ -17,14 +17,14 @@ from a prompt-engineering standpoint.
 |---|---|---|
 | Cost-aware model routing | `core/config.py`, `core/claude_client.py`, `tests/test_models_audit.py` | Haiku by default + a static test guard against "leaking" onto Sonnet |
 | Two-tier intent classification | `core/classifier.py`, `arcana/handlers/base.py` | Regex pre-filter → Haiku few-shot; verb tense = planned/done |
-| Layered context injection (RAG) | `arcana/handlers/sessions.py:1170-1175` | One system-prompt assembled from 4 sources on the fly |
+| Layered context injection (RAG) | `arcana/handlers/sessions.py:1297-1301` | One system-prompt assembled from 4 sources on the fly |
 | Vector semantic recall | `core/rag.py`, `core/memory_rag.py` | Reading triplets **and** memory facts embedded into pgvector (Voyage), similarity search + Haiku rerank |
 | Hybrid memory search | `core/memory.py`, `core/memory_rag.py` | ILIKE-first (normalization + alias-resolution); Voyage + Haiku-rerank semantic fallback when <3 hits |
 | Whitelist spell-correction guard | `core/preprocess.py` | Haiku typo-correction that does NOT touch the 78 Tarot cards + client names |
 | Constraint-based generation | `miniapp/backend/routes/today.py` | ADHD tip: ≤15 words, validator + retry + fallback, temperature=0.4 |
-| Vision parsers | `core/vision.py`, `arcana/handlers/sessions.py:287`, `arcana/handlers/clients.py` | Receipts, reading photos, profile screenshots → JSON |
-| Chain-of-thought | `arcana/handlers/sessions.py:254`, `nexus/handlers/finance.py:2313` | Step-by-step Tarot interpretation and budget algorithm |
-| Behavioral evals | `tests/` (~1600 test functions, ~180 files) | Mock-API contracts on intents, max_tokens, output quality |
+| Vision parsers | `core/vision.py`, `arcana/handlers/sessions.py:450`, `arcana/handlers/clients.py` | Receipts, reading photos, profile screenshots → JSON |
+| Chain-of-thought | `arcana/handlers/sessions.py:346`, `nexus/handlers/finance.py:2313` | Step-by-step Tarot interpretation and budget algorithm |
+| Behavioral evals | `tests/` (~2100 test functions, ~210 files) | Mock-API contracts on intents, max_tokens, output quality |
 
 **Model stack:** Claude Haiku `claude-haiku-4-5-20251001` (routine),
 Claude Sonnet `claude-sonnet-4-6` / `claude-sonnet-4-20250514` (deep
@@ -38,7 +38,7 @@ The user pays for every token out of pocket, so model choice is not a detail but
 architectural invariant, guarded by a test.
 
 ### 1.1 Default is Haiku, Sonnet only when explicit
-- **`core/config.py:65-66`** — the single source of model ids:
+- **`core/config.py:84-85`** — the single source of model ids:
   ```python
   MODEL_HAIKU  = "claude-haiku-4-5-20251001"
   MODEL_SONNET = "claude-sonnet-4-6"
@@ -67,8 +67,8 @@ architectural invariant, guarded by a test.
 ### 1.3 Where Sonnet is justified (and why exactly there)
 | Place | File:line | Why not Haiku |
 |---|---|---|
-| Tarot interpretation | `arcana/handlers/sessions.py:254 (TAROT_SYSTEM)`, calls `:744, :974, :1412, :1635` | Narrative + empathy + tying into the client's history |
-| Budget analytics | `nexus/handlers/finance.py:2313 (BUDGET_SONNET_SYSTEM)`, call `:3196` | Multi-step algorithm, debt re-planning, two output variants |
+| Tarot interpretation | `arcana/handlers/sessions.py:346 (TAROT_SYSTEM)` | Narrative + empathy + tying into the client's history |
+| Budget analytics | `nexus/handlers/finance.py:2699 (BUDGET_SONNET_SYSTEM)` | Multi-step algorithm, debt re-planning, two output variants |
 | Vision (receipts) | `core/vision.py:22-103` | Image understanding |
 | Session summary (Mini App) | `miniapp/backend/routes/arcana_sessions.py:481` | Narrative synthesis over N triplets |
 | Long-form ADHD advice | `core/memory.py` — `_get_adhd_tip` (`config.model_sonnet`) | Context-aware generation against the profile |
@@ -87,7 +87,7 @@ Two independent classifiers, one per bot, with a shared technique: **a cheap reg
 layer catches the obvious before the LLM**, and the LLM only sees the ambiguous.
 
 ### 2.1 Nexus: the classifier mega-prompt
-- **`core/classifier.py:88` — `build_system(tz_offset)`** builds a large dynamic
+- **`core/classifier.py:137` — `build_system(tz_offset)`** builds a large dynamic
   system-prompt (the file is ~1470 lines): 13+ types (expense / income /
   task / note / memory_save / memory_search / stats / list_* / arcana_redirect…),
   dozens of few-shot examples, injection of the current date/time.
@@ -104,7 +104,7 @@ layer catches the obvious before the LLM**, and the LLM only sees the ambiguous.
   directions while accounting for the time of day; the "hot path" (regex) is free.
 
 ### 2.2 Arcana: ROUTER + disambiguation by verb tense
-- **`arcana/handlers/base.py:21` — `ROUTER_SYSTEM`** (Haiku, `max_tokens=10`,
+- **`arcana/handlers/base.py:26` — `ROUTER_SYSTEM`** (Haiku, `max_tokens=10`,
   calls `:446, :460`): ~21 intents (`session_done/planned/search`,
   `ritual_done/planned/ambiguous`, `new_client`, `grimoire*`, `memory_*`,
   `verify`, `stats`, `nexus_redirect`…). The answer is **a single word**.
@@ -128,7 +128,7 @@ Few-shot is the primary technique for structured parsers. Examples:
 - **`arcana/handlers/works.py:15-41` — `PARSE_WORK_SYSTEM`**: input→output right in
   the prompt, including relative dates ("tomorrow" → `YYYY-MM-DDT18:00`, "on Friday"
   → the nearest Friday).
-- **`arcana/handlers/sessions.py:117` — `PARSE_SESSION_SYSTEM`**: three input formats
+- **`arcana/handlers/sessions.py:96` — `PARSE_SESSION_SYSTEM`**: three input formats
   for readings (single triplet / numbered session / free form
   "question → cards"), with an example for each. `max_tokens=4000` (call `:649`).
 - **`core/lists_parser.py` (`_PARSE_*`)**: categorization examples (energy drinks →
@@ -137,7 +137,7 @@ Few-shot is the primary technique for structured parsers. Examples:
 - **`tests/test_lists_parser_tech_category.py`**: a few-shot fix for a hallucination —
   explicit examples "iPhone/laptop = 💻 Tech, don't confuse with 💻 Subscriptions" +
   a negative instruction "don't confuse a one-off purchase with a subscription".
-- **`arcana/handlers/sessions.py:242 (SESSION_SEARCH_PARSE_SYSTEM)`**: examples of
+- **`arcana/handlers/sessions.py:334 (SESSION_SEARCH_PARSE_SYSTEM)`**: examples of
   keyword extraction ("readings about work" → `["work"]`).
 - **Why it's interesting:** few-shot is applied surgically — where the format is
   ambiguous — and backed by tests that pin down specific hallucination cases
@@ -148,7 +148,7 @@ Few-shot is the primary technique for structured parsers. Examples:
 ## 4. Chain-of-Thought / structured reasoning
 
 ### 4.1 Tarot interpretation — numbered rules + a strict format
-- **`arcana/handlers/sessions.py:254` — `TAROT_SYSTEM`** (Sonnet, `max_tokens=2000`):
+- **`arcana/handlers/sessions.py:346` — `TAROT_SYSTEM`** (Sonnet, `max_tokens=2000`):
   - 6 numbered rules: meanings STRICTLY from the reference, each card
     "Position → Name → meaning in this position", tie into past readings,
     a short conclusion of 2-3 sentences, "NO poetry, no filler".
@@ -178,7 +178,7 @@ Few-shot is the primary technique for structured parsers. Examples:
 ## 5. Context Injection / RAG patterns
 
 ### 5.1 Layered system-prompt assembly (Tarot)
-- **`arcana/handlers/sessions.py:1170-1175`** — one prompt assembled on the fly
+- **`arcana/handlers/sessions.py:1297-1301`** — one prompt assembled on the fly
   (the section markers are the verbatim Russian strings from the code):
   ```python
   system = TAROT_SYSTEM
@@ -252,7 +252,7 @@ Few-shot is the primary technique for structured parsers. Examples:
 | Task | File:line | Model | Prompt specifics |
 |---|---|---|---|
 | Receipts/bank transactions | `core/vision.py:22 (_RECEIPT_SYSTEM)`, parse `:71-103` | Sonnet, `max_tokens=2048` | Category whitelist; income vs expense by sign; `math.ceil(abs(amt))` — conservative round-up; unknown category → 💳 Other + `need_clarify` |
-| Tarot reading photo | `arcana/handlers/sessions.py:287 (VISION_SYSTEM)`, call `:1483` | Vision | Card order "left-to-right, top-to-bottom"; heuristic "an extra 4th card in a triplet = bottom of the deck → into `bottom_card`" |
+| Tarot reading photo | `arcana/handlers/sessions.py:450 (VISION_SYSTEM)` | Vision | Card order "left-to-right, top-to-bottom"; heuristic "an extra 4th card in a triplet = bottom of the deck → into `bottom_card`" |
 | Client TG-profile screenshot | `arcana/handlers/clients.py (VISION_CONTACT)` | Vision | Extract name/username/birthday/contacts → JSON, everything `or null` |
 - **Why it's interesting:** not "one vision prompt for everything", but three
   specialized ones with built-in domain heuristics (rounding amounts up, layout
@@ -280,7 +280,7 @@ is the *technique*, not the data.)
 
 - **Feminine gender + name + direct "you"** in generative prompts:
   `core/memory.py:459` (`_ADHD_TIP_SYSTEM`), `nexus/handlers/tasks.py:1069`
-  (`_NUDGE_SYSTEM`), `:2763, :2997`, `miniapp/backend/routes/today.py:177`
+  (`_NUDGE_SYSTEM`), `:2763, :2997`, `miniapp/backend/routes/today.py:162`
   (`_TIP_SYSTEM`).
 - **Neuro-profile injection**: into `_ADHD_TIP_SYSTEM` / `_NUDGE_SYSTEM` a
   structured profile is fed (procrastination patterns, triggers) → advice
@@ -352,7 +352,7 @@ The most "engineering" part: every LLM output is wrapped in protection.
 
 ## 10. Evals — tests that check model behavior
 
-~1600 test functions across ~180 files; parametrize expands that to ~2170
+~2100 test functions across ~210 files; parametrize expands that to ~2575
 passing cases. The AI-specific ones:
 
 | Test | What it checks | Why it's an eval |

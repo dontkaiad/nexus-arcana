@@ -611,13 +611,13 @@ async def test_purpose_text_completes_the_booking():
     from zarya.handlers import on_purpose_text, _pending_purpose
     _pending_purpose[42] = {"ctx": "friends", "ep": "1234567890", "hours": 2.0, "role": "friend"}
     m = _msg()
-    m.text = "шашлыки в Токсово"
+    m.text = "шашлыки в парке"
     m.from_user = SimpleNamespace(id=42, full_name="Кто-то")
     m.bot = SimpleNamespace()
     with patch("zarya.handlers._do_book", AsyncMock()) as db:
         await on_purpose_text(m, role="friend")
     db.assert_awaited_once()
-    assert db.call_args.kwargs["purpose"] == "шашлыки в Токсово"
+    assert db.call_args.kwargs["purpose"] == "шашлыки в парке"
     assert 42 not in _pending_purpose
 
 

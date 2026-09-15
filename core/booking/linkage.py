@@ -39,7 +39,7 @@ def _link_sync(eng, b: Booking):
         from nexus.repos.tasks_tables import task_status, tasks
 
         # #239: заголовок = ПОВОД встречи (обязателен для друзей — Кай
-        # хочет видеть "шашлыки", а не безликое "Встреча: Мишаня"), имя —
+        # хочет видеть "шашлыки", а не безликое "Встреча: Ваня"), имя —
         # в заметке вместе с технической меткой брони.
         purpose = (b.note or "").strip()
         title = f"☀️ {purpose}" if purpose else f"☀️ Встреча: {b.requester_name}"

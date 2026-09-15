@@ -415,7 +415,8 @@ name-matcher) → `search`.
 
 ---
 
-Verify against code:
+## Verify against code
+
 - `alembic/versions/j0c1d2e3f4g5_core_memories_pg.py` — table migration
 - `alembic/versions/bc23de45f012_drop_memories_value_text.py` — `value_text` dropped (#146)
 - `alembic/versions/cd34ef56a1b2_drop_dead_notion_id_columns.py` — `notion_id` dropped (#149)

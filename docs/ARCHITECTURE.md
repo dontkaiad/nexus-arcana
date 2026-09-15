@@ -2,7 +2,7 @@
 
 > Code conforms to: `c1ba2e6` · Update in the same PR that changes the architecture.
 > This is an engineering overview, not a developer spec. For the data model and
-> contracts, see [`docs/specs/`](specs/) (11 domain specs) and the ADRs in
+> contracts, see [`docs/specs/`](specs/) (12 domain specs) and the ADRs in
 > [`docs/CASES/`](CASES/) (26). Read time: ~12–15 min.
 
 ## What this is
@@ -292,7 +292,7 @@ over-provisioned from day one or wedged onto hardware it had outgrown. Always-av
 first, then right-sized — I'd rather upgrade infrastructure when the system earns it than
 pay for scale I'm only guessing at.
 
-The 11 specs in [`docs/specs/`](specs/) are written the same way: each one documents the
+The 12 specs in [`docs/specs/`](specs/) are written the same way: each one documents the
 code as it *is*, carries a conforms-to hash, and points at the files you can check it
 against — no aspirational data models, no "known limitations" prose (those are issues).
 A spec that describes the ideal instead of the real is a lie with a nice font.
@@ -388,8 +388,6 @@ one per-bot is treated as a bug.
 - **`message_pages` + `reply_update`** — the reply-to-edit spine. `message_pages.db` maps
   a bot message back to its record; `core/reply_update.py` parses the reply and applies a
   field-level patch. Works across tasks, notes, sessions, rituals, clients.
-- **`message_collector`** (`core/message_collector.py`) — 5-second debounce so a burst of
-  quick lines is processed as one thought, not five.
 - **Reminder scheduler** (`core/reminder_scheduler.py`) — one APScheduler flow for both
   bots. Jobs are in-memory (lost on restart) and **restored from the columns on startup**;
   a fired one-off reminder nulls its column so a restart can't re-send it (#206).
