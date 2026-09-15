@@ -443,7 +443,7 @@ async def route_message(
             from arcana.handlers.payment import handle_payment_text
             handled = await handle_payment_text(message, text, pending, user_id)
             if handled:
-                await react(message, "💰")
+                await react(message, "🏆")
                 return
 
         # ── Pending: уточнение ритуала (after needs_clarification) ────────

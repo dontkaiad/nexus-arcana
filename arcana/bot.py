@@ -146,7 +146,7 @@ def create_dp_and_bot():
         content = file_io.read()
 
         try:
-            await msg.react([{"type": "emoji", "emoji": "👂"}])
+            await msg.react([{"type": "emoji", "emoji": "👀"}])
         except Exception:
             pass
 

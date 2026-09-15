@@ -1014,7 +1014,7 @@ async def handle_voice(msg: Message, user_id: str = "") -> None:
     file_io = await msg.bot.download_file(file.file_path)
     content = file_io.read()
 
-    await react(msg, "👂")
+    await react(msg, "👀")
 
     text = await transcribe(content)
     if text is None:

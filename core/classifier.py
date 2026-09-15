@@ -1290,7 +1290,7 @@ async def process_item(data: Dict[str, Any], original_text: str, msg, clarify: d
         return ""
 
     if kind in ("list_done", "list_done_bulk"):
-        await react(msg, "💸")
+        await react(msg, "🏆")
         from nexus.handlers.lists import handle_list_done
         await handle_list_done(msg, data, user_id=user_id)
         return ""
