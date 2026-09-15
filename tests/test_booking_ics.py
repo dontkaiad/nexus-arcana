@@ -33,6 +33,18 @@ def test_build_ics_structure_and_utc_format():
     assert "UID:a@heylark" in out
 
 
+def test_build_ics_all_day_event_uses_value_date():
+    """Регрессия: дедлайн без времени рендерился как часовой слот в 03:00 МСК —
+    all-day событие должно идти DTSTART/DTEND;VALUE=DATE, не таймстампом."""
+    day_start = datetime(2026, 9, 17, 21, 0, tzinfo=UTC)  # MSK midnight 2026-09-18
+    day_end = datetime(2026, 9, 18, 21, 0, tzinfo=UTC)
+    ev = IcsEvent(uid="d@heylark", start=day_start, end=day_end, summary="до пятницы", all_day=True)
+    out = build_ics([ev])
+    assert "DTSTART;VALUE=DATE:20260918" in out
+    assert "DTEND;VALUE=DATE:20260919" in out
+    assert "DTSTART:2026" not in out
+
+
 def test_build_ics_escapes_special_chars():
     ev = IcsEvent(uid="b", start=T0, end=T0, summary="кофе, чай; с\\кем-то\nвторая строка")
     out = build_ics([ev])

@@ -39,6 +39,11 @@ _MAX_PLAUSIBLE_DURATION_MIN = 24 * 60
 
 _DONE_CODES = ("Done", "Archived")
 
+# Kai's display zone for the booking UI/ICS/Zarya (no per-user tz lookup here —
+# busy.py runs sync in a thread off a plain SQLAlchemy engine, and the whole
+# booking surface already hardcodes MSK, e.g. booking_web/index.html's MSK()).
+_DISPLAY_TZ = timezone(timedelta(hours=3))
+
 
 @dataclass
 class BusyInterval:
@@ -47,9 +52,18 @@ class BusyInterval:
     source: str              # 'task' | 'work' | 'booking' | 'block'
     label: str = ""          # title / reason — hide from non-admin viewers
     ref_id: str = ""
+    all_day: bool = False    # deadline given with no time — blocks the whole local day
 
     def overlaps(self, start: datetime, end: datetime) -> bool:
         return self.start < end and self.end > start
+
+
+def _all_day_span(d: datetime) -> tuple:
+    """Local (Kai's display tz) midnight-to-midnight span covering `d`'s date."""
+    local_date = d.astimezone(_DISPLAY_TZ).date()
+    start = datetime(local_date.year, local_date.month, local_date.day,
+                      tzinfo=_DISPLAY_TZ).astimezone(timezone.utc)
+    return start, start + timedelta(days=1)
 
 
 def _as_utc(value) -> Optional[datetime]:
@@ -97,7 +111,8 @@ def _busy_sync(engine, user_id: str, start: datetime, end: datetime) -> List[Bus
         )
         done_ids = sa.select(task_status.c.id).where(task_status.c.code.in_(_DONE_CODES))
         q = (
-            sa.select(tasks.c.id, tasks.c.title, tasks.c.deadline, tasks.c.duration_min)
+            sa.select(tasks.c.id, tasks.c.title, tasks.c.deadline, tasks.c.duration_min,
+                      tasks.c.deadline_all_day)
             .where(tasks.c.status_id.notin_(done_ids))
             .where(tasks.c.deadline.isnot(None))
             .where(tasks.c.deadline >= fetch_from)
@@ -110,9 +125,14 @@ def _busy_sync(engine, user_id: str, start: datetime, end: datetime) -> List[Bus
             d = _as_utc(row.deadline)
             if d is None:
                 continue
-            # #241: своя длительность задачи, если Кай её выставила — иначе дефолт 1ч
-            dur = timedelta(minutes=row.duration_min) if row.duration_min else default_dur
-            iv = BusyInterval(d, d + dur, "task", row.title or "Задача", str(row.id))
+            if getattr(row, "deadline_all_day", False):
+                day_start, day_end = _all_day_span(d)
+                iv = BusyInterval(day_start, day_end, "task", row.title or "Задача",
+                                   str(row.id), all_day=True)
+            else:
+                # #241: своя длительность задачи, если Кай её выставила — иначе дефолт 1ч
+                dur = timedelta(minutes=row.duration_min) if row.duration_min else default_dur
+                iv = BusyInterval(d, d + dur, "task", row.title or "Задача", str(row.id))
             if iv.overlaps(start, end):
                 out.append(iv)
 

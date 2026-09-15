@@ -7,10 +7,11 @@ manual blocks. No dependency — iCal is line-based text.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Iterable, List
 
 PRODID = "-//heylark//Booking//RU"
+_MSK = timezone(timedelta(hours=3))  # display zone for all-day VALUE=DATE, same convention as busy.py
 
 
 @dataclass(frozen=True)
@@ -20,6 +21,7 @@ class IcsEvent:
     end: datetime        # tz-aware
     summary: str
     description: str = ""
+    all_day: bool = False  # VALUE=DATE, no time-of-day
 
 
 def _esc(text: str) -> str:
@@ -66,12 +68,20 @@ def build_ics(events: Iterable[IcsEvent], *, cal_name: str = "heylark Booking") 
         f"X-WR-CALNAME:{_esc(cal_name)}",
     ]
     for ev in events:
+        if ev.all_day:
+            # exclusive end per RFC 5545 (DTEND;VALUE=DATE is the day AFTER
+            # the last all-day day) — `ev.end` is already the next midnight.
+            dtstart = f"DTSTART;VALUE=DATE:{ev.start.astimezone(_MSK).strftime('%Y%m%d')}"
+            dtend = f"DTEND;VALUE=DATE:{ev.end.astimezone(_MSK).strftime('%Y%m%d')}"
+        else:
+            dtstart = f"DTSTART:{_dt(ev.start)}"
+            dtend = f"DTEND:{_dt(ev.end)}"
         lines += [
             "BEGIN:VEVENT",
             f"UID:{_esc(ev.uid)}",
             f"DTSTAMP:{now}",
-            f"DTSTART:{_dt(ev.start)}",
-            f"DTEND:{_dt(ev.end)}",
+            dtstart,
+            dtend,
             f"SUMMARY:{_esc(ev.summary)}",
         ]
         if ev.description:

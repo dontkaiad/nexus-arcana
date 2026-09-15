@@ -142,6 +142,7 @@ async def booking_feed(token: str) -> Response:
             start=iv.start,
             end=iv.end,
             summary=_summary(iv),
+            all_day=iv.all_day,
         )
         for iv in ivs
     ]
@@ -181,6 +182,8 @@ async def booking_calendar(
     out = []
     for iv in ivs:
         e = {"start": iv.start.isoformat(), "end": iv.end.isoformat()}
+        if iv.all_day:
+            e["allDay"] = True
         if p.role in ("friend", "admin"):
             e["kind"] = _KIND.get(iv.source, "busy")
         if p.role == "admin":

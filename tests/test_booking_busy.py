@@ -41,7 +41,8 @@ def _make_engine():
             c.execute(sa.text("INSERT INTO work_status (code, label) VALUES (:c, :c)"), {"c": code})
         c.execute(sa.text(
             "CREATE TABLE tasks (id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT NOT NULL, "
-            "deadline TEXT, reminder TEXT, status_id INTEGER, duration_min INTEGER, user_id TEXT DEFAULT '')"))
+            "deadline TEXT, reminder TEXT, status_id INTEGER, duration_min INTEGER, user_id TEXT DEFAULT '', "
+            "deadline_all_day INTEGER NOT NULL DEFAULT 0)"))
         c.execute(sa.text(
             "CREATE TABLE works (id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT NOT NULL, "
             "deadline TEXT, scheduled_at TEXT, status_id INTEGER, duration_min INTEGER, user_id TEXT DEFAULT '')"))
@@ -76,6 +77,26 @@ async def test_task_deadline_becomes_one_hour_busy():
     assert res[0].source == "task"
     assert res[0].start == T0 + timedelta(hours=5)
     assert res[0].end == T0 + timedelta(hours=6)
+
+
+@pytest.mark.asyncio
+async def test_deadline_without_time_blocks_whole_local_day_not_3am():
+    """Регрессия: дедлайн без времени ("до пятницы") хранится как UTC-полночь
+    даты — раньше это давало часовую занятость 00:00-01:00 UTC, что в MSK
+    (+3ч, отображение букинга) выглядело как встреча 03:00-04:00. С флагом
+    deadline_all_day занятость — весь МСК-день, а не фейковый час в 3 ночи."""
+    eng = _make_engine()
+    ns = _status_id(eng, "task_status", "Not started")
+    with eng.begin() as c:
+        c.execute(sa.text(
+            "INSERT INTO tasks (title, deadline, status_id, user_id, deadline_all_day) VALUES "
+            "('до пятницы', '2026-09-18 00:00:00+00:00', :s, 'u1', 1)"), {"s": ns})
+    res = await _run(eng, start=T0, end=T0 + timedelta(days=7))
+    assert len(res) == 1
+    assert res[0].all_day is True
+    # MSK midnight of 2026-09-18 == 2026-09-17T21:00:00Z; a full day long.
+    assert res[0].start == datetime(2026, 9, 17, 21, 0, tzinfo=UTC)
+    assert res[0].end == datetime(2026, 9, 18, 21, 0, tzinfo=UTC)
 
 
 @pytest.mark.asyncio

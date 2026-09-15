@@ -51,6 +51,7 @@ class Task:
     user_id: str = "" # Notion UUID of owning user
     duration_min: Optional[int] = None  # #241: занимает время (booking busy) — None → дефолт 1ч
     shared: bool = False                # #242: видна Заре для упоминания друзьям
+    deadline_all_day: bool = False      # дедлайн задан без времени ("до пятницы") — весь день
 
 
 # ── Lookup caches (loaded once per process) ────────────────────────────────────
@@ -162,6 +163,11 @@ def _extract_checkbox(prop: dict) -> bool:
     return bool(prop.get("checkbox"))
 
 
+def _is_date_only(s: Optional[str]) -> bool:
+    """True for a bare 'YYYY-MM-DD' deadline string — no time was given."""
+    return bool(s) and "T" not in s
+
+
 def _parse_iso(s: Optional[str]) -> Optional[datetime]:
     """Parse ISO datetime string (with or without TZ) to datetime."""
     if not s:
@@ -213,6 +219,7 @@ def _to_task(row) -> Task:
         user_id=getattr(row, "user_id", "") or "",
         duration_min=getattr(row, "duration_min", None),
         shared=bool(getattr(row, "shared", False)),
+        deadline_all_day=bool(getattr(row, "deadline_all_day", False)),
     )
 
 
@@ -311,6 +318,7 @@ def _create_sync(
         "priority_id": _match(_priority_id, priority, "🟡 Важно"),
         "category_id": _match(_category_id, category, "💳 Прочее"),
         "deadline": _parse_iso(deadline),
+        "deadline_all_day": _is_date_only(deadline),
         "reminder": _parse_iso(reminder),
         "user_id": user_id or "",
         "note": (note or "").strip() or None,
@@ -374,7 +382,9 @@ def _set_props_sync(task_id: str, props: dict) -> None:
         elif field == "Время повтора":
             vals["repeat_time"] = _extract_text(prop) or None
         elif field == "Дедлайн":
-            vals["deadline"] = _parse_iso(_extract_date(prop))
+            raw = _extract_date(prop)
+            vals["deadline"] = _parse_iso(raw)
+            vals["deadline_all_day"] = _is_date_only(raw)
         elif field == "Напоминание":
             vals["reminder"] = _parse_iso(_extract_date(prop))
         elif field == "Время завершения":

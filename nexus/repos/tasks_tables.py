@@ -48,6 +48,9 @@ tasks = Table(
     Column("priority_id", SmallInteger, ForeignKey("task_priority.id")),
     Column("category_id", SmallInteger, ForeignKey("task_category.id")),
     Column("deadline", TIMESTAMP(timezone=True)),
+    # дедлайн задан без времени ("до пятницы") — весь день, не точка
+    # в 00:00 (см. core/booking/busy.py:_busy_sync).
+    Column("deadline_all_day", Boolean, nullable=False, server_default=text("false")),
     Column("reminder", TIMESTAMP(timezone=True)),
     Column("completed_at", TIMESTAMP(timezone=True)),
     Column("repeat_time", Text),
