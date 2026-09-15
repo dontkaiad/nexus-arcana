@@ -1,7 +1,8 @@
 # BOOKING — data-model contract (heylark Booking, #23 / ADR-0026)
 
-Code conforms to: 6d03370. This spec describes the booking data model as of
-that commit; update it in the same PR that changes the model.
+Code conforms to: 6d03370. (+ #26x: linked-task exclusion in `busy_intervals`
+to stop double-counting a booked meeting.) This spec describes the booking
+data model as of that commit; update it in the same PR that changes the model.
 
 > Contract, not snapshot. Describes the persistent model, the guarantees of
 > each operation, and the invariants — the things that should not drift with
@@ -49,7 +50,14 @@ committed to in `[start, end)`, merged via `merge_intervals()`:
 
 - **Nexus tasks** — any active (not `Done`/`Archived`) task with a `deadline`
   is a busy point. A task with only a `reminder` is **not** busy (a reminder
-  is a poke, not a commitment).
+  is a poke, not a commitment). **Excluded**: a task referenced by
+  `booking.nexus_task_id` on an active booking — that task was auto-created
+  by `linkage.py` to mirror the booking in "Мой день", and the `booking`
+  source below already represents the same real-world commitment with its
+  own authoritative span. Without this exclusion the same meeting showed up
+  as two separate intervals (#26x) — a short "task" block (its shadow
+  task's own `duration_min`, wrong or missing) alongside the correct-length
+  "booking" block.
 - **Arcana works** — any active work with `scheduled_at` set.
 - **Bookings** — rows in `BLOCKING_BOOKING_STATUSES = ("pending", "confirmed")`,
   using their real `start_at`/`end_at`.
@@ -201,7 +209,9 @@ to a group (`on_membership_changed` kicks her back out).
 ## Verify against code
 
 - `core/booking/tables.py` + `alembic/versions/{d4e5f6a7b8c9,f7c8b9a0d1e2,a8b9c0d1e2f3,b1c2d3e4f5a6}` — schema
-- `core/booking/busy.py` — free/busy aggregator, per-row duration
+- `core/booking/busy.py` — free/busy aggregator, per-row duration;
+  `linked_task_ids` exclusion of `booking.nexus_task_id` from the task
+  source (#26x)
 - `core/booking/slots.py` — `free_slots`, one windows-based algorithm for both contexts (#243)
 - `core/booking/repo.py` — CRUD, `reschedule_booking`
 - `core/booking/linkage.py` — `link_booking`/`unlink_booking`/`update_linked_time`

@@ -48,7 +48,7 @@ def _make_engine():
         c.execute(sa.text(
             "CREATE TABLE booking (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id TEXT DEFAULT '', "
             "context TEXT, start_at TEXT NOT NULL, end_at TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending', "
-            "requester_name TEXT DEFAULT '', token TEXT NOT NULL DEFAULT '')"))
+            "requester_name TEXT DEFAULT '', token TEXT NOT NULL DEFAULT '', nexus_task_id TEXT)"))
         c.execute(sa.text(
             "CREATE TABLE booking_block (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id TEXT DEFAULT '', "
             "start_at TEXT NOT NULL, end_at TEXT NOT NULL, reason TEXT DEFAULT '')"))
@@ -196,6 +196,48 @@ async def test_task_without_duration_min_still_defaults_to_hour():
                   {"d": _iso(T0 + timedelta(hours=5)), "s": ns})
     res = await _run(eng)
     assert res[0].end - res[0].start == timedelta(hours=1)
+
+
+@pytest.mark.asyncio
+async def test_linked_task_excluded_avoids_double_counting_booking():
+    """Регрессия: подтверждённая бронь на 4ч создаёт линкованную Nexus-задачу
+    (core/booking/linkage.py) — если задача проставлена как "task"-источник
+    ЕЩЁ и отдельно, получаются ДВА блока на одну реальную встречу (короткий
+    "task" по старой/неверной длительности + правильный "booking"). Задача,
+    на которую ссылается booking.nexus_task_id, должна попадать в busy
+    ТОЛЬКО через booking-источник."""
+    eng = _make_engine()
+    ns = _status_id(eng, "task_status", "Not started")
+    with eng.begin() as c:
+        row = c.execute(sa.text(
+            "INSERT INTO tasks (title, deadline, status_id, user_id, duration_min) VALUES "
+            "('встреча с Никитой', :d, :s, 'u1', 60) RETURNING id"),
+            {"d": _iso(T0 + timedelta(hours=4)), "s": ns}).fetchone()
+        task_id = row[0]
+        c.execute(sa.text(
+            "INSERT INTO booking (user_id, start_at, end_at, status, token, nexus_task_id) VALUES "
+            "('u1', :s, :e, 'confirmed', 't-nikita', :tid)"),
+            {"s": _iso(T0 + timedelta(hours=4)), "e": _iso(T0 + timedelta(hours=8)),
+             "tid": str(task_id)})
+    res = await _run(eng)
+    assert len(res) == 1
+    assert res[0].source == "booking"
+    assert res[0].end - res[0].start == timedelta(hours=4)
+
+
+@pytest.mark.asyncio
+async def test_unlinked_task_still_shows_as_task_source():
+    """Убедиться, что исключение задевает ТОЛЬКО задачи из активных броней —
+    обычная (не привязанная) задача по-прежнему считается занятостью."""
+    eng = _make_engine()
+    ns = _status_id(eng, "task_status", "Not started")
+    with eng.begin() as c:
+        c.execute(sa.text(
+            "INSERT INTO tasks (title, deadline, status_id, user_id) VALUES "
+            "('обычная задача', :d, :s, 'u1')"), {"d": _iso(T0 + timedelta(hours=3)), "s": ns})
+    res = await _run(eng)
+    assert len(res) == 1
+    assert res[0].source == "task"
 
 
 def test_merge_intervals():

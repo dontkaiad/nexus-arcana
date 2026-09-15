@@ -45,7 +45,7 @@ def _make_engine():
         c.execute(sa.text(
             "CREATE TABLE booking (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id TEXT DEFAULT '', "
             "context TEXT, start_at TEXT NOT NULL, end_at TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending', "
-            "requester_name TEXT DEFAULT '', token TEXT NOT NULL DEFAULT '')"))
+            "requester_name TEXT DEFAULT '', token TEXT NOT NULL DEFAULT '', nexus_task_id TEXT)"))
         c.execute(sa.text(
             "CREATE TABLE booking_block (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id TEXT DEFAULT '', "
             "start_at TEXT NOT NULL, end_at TEXT NOT NULL, reason TEXT DEFAULT '')"))

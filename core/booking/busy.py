@@ -83,6 +83,18 @@ def _busy_sync(engine, user_id: str, start: datetime, end: datetime) -> List[Bus
 
     with engine.connect() as conn:
         # ── Nexus tasks with a deadline ─────────────────────────────────────
+        # A task auto-created by linkage.py for a confirmed/held booking
+        # (`booking.nexus_task_id`) is EXCLUDED here — the "Bookings" source
+        # below already represents that same real-world commitment with its
+        # own authoritative start_at/end_at. Without this exclusion, one
+        # booked meeting showed up TWICE: once as a 1h "task" block (the
+        # task's own duration_min at creation was a separate, since-fixed
+        # bug — #26x) and once as the correct-length "booking" block.
+        linked_task_ids = (
+            sa.select(booking.c.nexus_task_id)
+            .where(booking.c.status.in_(BLOCKING_BOOKING_STATUSES))
+            .where(booking.c.nexus_task_id.isnot(None))
+        )
         done_ids = sa.select(task_status.c.id).where(task_status.c.code.in_(_DONE_CODES))
         q = (
             sa.select(tasks.c.id, tasks.c.title, tasks.c.deadline, tasks.c.duration_min)
@@ -90,6 +102,7 @@ def _busy_sync(engine, user_id: str, start: datetime, end: datetime) -> List[Bus
             .where(tasks.c.deadline.isnot(None))
             .where(tasks.c.deadline >= fetch_from)
             .where(tasks.c.deadline < end)
+            .where(sa.cast(tasks.c.id, sa.Text).notin_(linked_task_ids))
         )
         if user_id:
             q = q.where(tasks.c.user_id.in_([user_id, ""]))
