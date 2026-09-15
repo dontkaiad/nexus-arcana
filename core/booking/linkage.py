@@ -21,7 +21,9 @@ from typing import Optional
 
 import sqlalchemy as sa
 
-from core.booking.repo import Booking, _set_link_sync
+from core.booking.repo import (
+    Booking, BLOCKING_BOOKING_STATUSES, _set_link_sync, get_booking_by_link, set_booking_status,
+)
 
 logger = logging.getLogger("booking.linkage")
 
@@ -150,6 +152,31 @@ def _retime_sync(eng, b: Booking) -> None:
             conn.execute(
                 works.update().where(works.c.id == int(b.arcana_work_id)).values(scheduled_at=b.start_at)
             )
+
+
+async def complete_linked_booking(
+    *, nexus_task_id: Optional[str] = None, arcana_work_id: Optional[str] = None, engine=None,
+) -> None:
+    """Task/work marked Done → the booking it was auto-created from (B6) is
+    'completed', not cancelled — the meeting happened, it just isn't upcoming
+    anymore. Deliberately does NOT reuse declined/cancelled_by_owner: those
+    trigger a "встреча отменена" DM to the requester, which would be a lie
+    for a meeting that already took place. 'completed' isn't in
+    BLOCKING_BOOKING_STATUSES, so it stops showing as busy by omission — no
+    busy.py change needed. Never raises — a failed sync must not break the
+    task-done flow that triggered it."""
+    if not (nexus_task_id or arcana_work_id):
+        return
+    try:
+        b = await get_booking_by_link(
+            nexus_task_id=nexus_task_id, arcana_work_id=arcana_work_id, engine=engine,
+        )
+        if b and b.status in BLOCKING_BOOKING_STATUSES:
+            await set_booking_status(b.id, "completed", engine=engine)
+            logger.info("booking #%s completed (linked task/work marked Done)", b.id)
+    except Exception as e:  # noqa: BLE001
+        logger.warning("complete_linked_booking failed (task=%s work=%s): %s",
+                       nexus_task_id, arcana_work_id, e)
 
 
 async def update_linked_time(b: Booking, *, engine=None) -> None:

@@ -11,8 +11,10 @@ import pytest
 import sqlalchemy as sa
 from sqlalchemy.pool import StaticPool
 
-from core.booking.linkage import link_booking, unlink_booking, update_linked_time
-from core.booking.repo import create_booking, reschedule_booking
+from core.booking.linkage import (
+    complete_linked_booking, link_booking, unlink_booking, update_linked_time,
+)
+from core.booking.repo import create_booking, get_booking, reschedule_booking
 
 UTC = timezone.utc
 START = datetime(2026, 10, 1, 12, 0, tzinfo=UTC)
@@ -183,3 +185,44 @@ async def test_update_linked_time_noop_when_unlinked():
     eng = _engine()
     b = await _booking(eng, "friends")
     await update_linked_time(b, engine=eng)  # must not raise, nothing to update
+
+
+# ── task/work marked Done → linked booking 'completed', not cancelled ───────
+# Регрессия: Кай отметила "встреча с Mihail Roman" сделанной в Nexus, но
+# букинг продолжал показывать её как занято — не было моста обратно.
+
+@pytest.mark.asyncio
+async def test_task_done_completes_linked_friends_booking():
+    eng = _engine()
+    b = await link_booking(await _booking(eng, "friends"), engine=eng)
+    await complete_linked_booking(nexus_task_id=b.nexus_task_id, engine=eng)
+    updated = await get_booking(booking_id=b.id, engine=eng)
+    assert updated.status == "completed"
+
+
+@pytest.mark.asyncio
+async def test_work_done_completes_linked_arcana_booking():
+    eng = _engine()
+    b = await link_booking(await _booking(eng, "arcana"), engine=eng)
+    await complete_linked_booking(arcana_work_id=b.arcana_work_id, engine=eng)
+    updated = await get_booking(booking_id=b.id, engine=eng)
+    assert updated.status == "completed"
+
+
+@pytest.mark.asyncio
+async def test_complete_linked_booking_noop_when_unlinked():
+    eng = _engine()
+    await complete_linked_booking(nexus_task_id=None, engine=eng)  # must not raise
+
+
+@pytest.mark.asyncio
+async def test_complete_linked_booking_does_not_touch_already_terminal_status():
+    """Не перезаписываем cancelled/declined обратно в completed, если задачу
+    отметили Done уже ПОСЛЕ того как бронь отменили вручную."""
+    eng = _engine()
+    b = await link_booking(await _booking(eng, "friends"), engine=eng)
+    from core.booking.repo import set_booking_status
+    await set_booking_status(b.id, "cancelled_by_owner", engine=eng)
+    await complete_linked_booking(nexus_task_id=b.nexus_task_id, engine=eng)
+    updated = await get_booking(booking_id=b.id, engine=eng)
+    assert updated.status == "cancelled_by_owner"

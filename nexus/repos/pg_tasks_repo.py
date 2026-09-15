@@ -575,7 +575,14 @@ class PgTasksRepo:
         return str(pid) if pid else None
 
     async def set_status(self, page_id: str, status: str) -> bool:
-        return await asyncio.to_thread(_set_status_sync, page_id, status)
+        ok = await asyncio.to_thread(_set_status_sync, page_id, status)
+        if ok and status == "Done":
+            # Задача могла быть авто-создана подтверждённой бронью
+            # (core/booking/linkage.py, #23 B6) — тогда встреча уже
+            # состоялась, и её пора убрать из "занято" в букинге.
+            from core.booking.linkage import complete_linked_booking
+            await complete_linked_booking(nexus_task_id=page_id)
+        return ok
 
     async def set_in_progress(self, page_id: str) -> None:
         await asyncio.to_thread(_set_status_sync, page_id, "In progress")

@@ -122,6 +122,21 @@ def _reschedule_sync(engine, booking_id: int, start_at: datetime, end_at: dateti
     return _row_to_booking(row) if row else None
 
 
+def _get_by_link_sync(
+    engine, *, nexus_task_id: Optional[str] = None, arcana_work_id: Optional[str] = None,
+) -> Optional[Booking]:
+    q = sa.select(booking)
+    if nexus_task_id is not None:
+        q = q.where(booking.c.nexus_task_id == str(nexus_task_id))
+    elif arcana_work_id is not None:
+        q = q.where(booking.c.arcana_work_id == str(arcana_work_id))
+    else:
+        return None
+    with engine.connect() as conn:
+        row = conn.execute(q).first()
+    return _row_to_booking(row) if row else None
+
+
 def _set_link_sync(engine, booking_id: int, *, nexus_task_id=None, arcana_work_id=None) -> Optional[Booking]:
     vals = {}
     if nexus_task_id is not None:
@@ -182,6 +197,15 @@ async def list_bookings(
 async def set_booking_status(booking_id: int, status: str, *, engine=None) -> Optional[Booking]:
     eng = engine or _engine()
     return await asyncio.to_thread(_set_status_sync, eng, booking_id, status)
+
+
+async def get_booking_by_link(
+    *, nexus_task_id: Optional[str] = None, arcana_work_id: Optional[str] = None, engine=None,
+) -> Optional[Booking]:
+    eng = engine or _engine()
+    return await asyncio.to_thread(
+        _get_by_link_sync, eng, nexus_task_id=nexus_task_id, arcana_work_id=arcana_work_id,
+    )
 
 
 async def reschedule_booking(
@@ -374,7 +398,7 @@ async def del_block(row_id: int, user_id: str, *, engine=None) -> bool:
 
 __all__ = [
     "Booking", "BLOCKING_BOOKING_STATUSES",
-    "create_booking", "get_booking", "list_bookings", "set_booking_status",
+    "create_booking", "get_booking", "get_booking_by_link", "list_bookings", "set_booking_status",
     "reschedule_booking",
     "list_availability", "add_availability", "edit_availability", "del_availability",
     "list_meeting_types", "add_meeting_type", "edit_meeting_type", "del_meeting_type",
