@@ -60,7 +60,9 @@ committed to in `[start, end)`, merged via `merge_intervals()`:
   "booking" block.
 - **Arcana works** — any active work with `scheduled_at` set.
 - **Bookings** — rows in `BLOCKING_BOOKING_STATUSES = ("pending", "confirmed")`,
-  using their real `start_at`/`end_at`.
+  using their real `start_at`/`end_at`. `label` is `"{requester_name} · {note}"`
+  (name + booking topic/reason) when both are set, else whichever is present
+  (#26x — previously name only, the topic was invisible in the booking view).
 - **Manual blocks** — `booking_block` rows (vacation, "не беспокоить").
 
 Task/work duration: `tasks.duration_min` / `works.duration_min` if set,
@@ -105,7 +107,7 @@ Optional labeled meeting kinds a guest/friend can pick (`slug`, `title`,
 | `context` | Text | `'friends'` \| `'arcana'` |
 | `meeting_type_id` | BigInteger | FK → `booking_meeting_type.id`, `ON DELETE SET NULL` |
 | `requester_tg_id` | BigInteger | nullable |
-| `requester_name` | Text | resolved via `core.auth_grants.get_display_name(tg_id)` first (the `people` registry), falls back to whatever the caller passed |
+| `requester_name` | Text | resolved via `core.auth_grants.get_display_name(tg_id)` first (the `people` registry), falls back to whatever the caller passed, then `"tg:<id>"`. Resolved ONCE at booking creation and baked into the row — adding/editing a `people.display_name` entry later does NOT retroactively update `requester_name` on existing bookings; those need a manual backfill (#26x) |
 | `requester_contact` | Text | free-form |
 | `start_at` / `end_at` | TIMESTAMP(tz) | NOT NULL |
 | `hours` | Numeric | nullable |

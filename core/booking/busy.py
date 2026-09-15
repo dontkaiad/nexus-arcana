@@ -141,7 +141,7 @@ def _busy_sync(engine, user_id: str, start: datetime, end: datetime) -> List[Bus
         # ── Bookings holding a slot ────────────────────────────────────────
         bq = (
             sa.select(booking.c.id, booking.c.start_at, booking.c.end_at,
-                      booking.c.requester_name, booking.c.status)
+                      booking.c.requester_name, booking.c.note, booking.c.status)
             .where(booking.c.status.in_(BLOCKING_BOOKING_STATUSES))
             .where(booking.c.start_at < end)
             .where(booking.c.end_at > start)
@@ -152,7 +152,14 @@ def _busy_sync(engine, user_id: str, start: datetime, end: datetime) -> List[Bus
             bs, be = _as_utc(row.start_at), _as_utc(row.end_at)
             if bs is None or be is None:
                 continue
-            out.append(BusyInterval(bs, be, "booking", row.requester_name or "", str(row.id)))
+            # #26x: раньше label = только requester_name ("Никита") — тема
+            # брони (note, "зачем забронировали") нигде не показывалась,
+            # хотя для линкованной Nexus-задачи в этот же label шёл title
+            # (повод). Формат "Имя · тема" — симметрично с task/work.
+            name = (row.requester_name or "").strip()
+            topic = (row.note or "").strip()
+            label = f"{name} · {topic}" if name and topic else (name or topic)
+            out.append(BusyInterval(bs, be, "booking", label, str(row.id)))
 
         # ── Manual blocks ─────────────────────────────────────────────────
         kq = (

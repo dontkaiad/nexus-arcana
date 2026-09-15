@@ -48,7 +48,7 @@ def _make_engine():
         c.execute(sa.text(
             "CREATE TABLE booking (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id TEXT DEFAULT '', "
             "context TEXT, start_at TEXT NOT NULL, end_at TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending', "
-            "requester_name TEXT DEFAULT '', token TEXT NOT NULL DEFAULT '', nexus_task_id TEXT)"))
+            "requester_name TEXT DEFAULT '', note TEXT DEFAULT '', token TEXT NOT NULL DEFAULT '', nexus_task_id TEXT)"))
         c.execute(sa.text(
             "CREATE TABLE booking_block (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id TEXT DEFAULT '', "
             "start_at TEXT NOT NULL, end_at TEXT NOT NULL, reason TEXT DEFAULT '')"))
@@ -126,6 +126,33 @@ async def test_pending_and_confirmed_bookings_hold_slot_with_real_span():
     res = await _run(eng)
     assert [r.source for r in res] == ["booking", "booking"]
     assert res[0].end - res[0].start == timedelta(hours=2)
+
+
+@pytest.mark.asyncio
+async def test_booking_label_combines_requester_name_and_topic():
+    """Регрессия: label показывал ТОЛЬКО имя забронировавшего ("Никита"),
+    без темы встречи (booking.note, "зачем забронировали") — Кай хотела
+    видеть и то, и другое."""
+    eng = _make_engine()
+    with eng.begin() as c:
+        c.execute(sa.text(
+            "INSERT INTO booking (user_id, start_at, end_at, status, token, requester_name, note) "
+            "VALUES ('u1', :s, :e, 'confirmed', 't1', 'Никита', 'Секс в Актобе')"),
+            {"s": _iso(T0 + timedelta(hours=2)), "e": _iso(T0 + timedelta(hours=4))})
+    res = await _run(eng)
+    assert res[0].label == "Никита · Секс в Актобе"
+
+
+@pytest.mark.asyncio
+async def test_booking_label_falls_back_to_whichever_field_is_present():
+    eng = _make_engine()
+    with eng.begin() as c:
+        c.execute(sa.text(
+            "INSERT INTO booking (user_id, start_at, end_at, status, token, requester_name, note) "
+            "VALUES ('u1', :s, :e, 'confirmed', 't1', 'Никита', '')"),
+            {"s": _iso(T0 + timedelta(hours=2)), "e": _iso(T0 + timedelta(hours=4))})
+    res = await _run(eng)
+    assert res[0].label == "Никита"
 
 
 @pytest.mark.asyncio
