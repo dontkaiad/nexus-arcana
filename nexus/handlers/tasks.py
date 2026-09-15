@@ -3210,6 +3210,7 @@ async def handle_edit_record(
         "напомни": "reminder", "напомнить": "reminder",
         "источник": "source",
         "статус": "status", "status": "status",
+        "заметка": "note", "заметку": "note", "примечание": "note",
     }
     if not edits:
         if field and new_value:
@@ -3279,6 +3280,7 @@ async def _apply_edit(
 
     try:
         # Проверяем что страница не архивирована
+        page = None
         try:
             page = await _repo.retrieve_page(page_id)
             if page and page.archived:
@@ -3369,8 +3371,15 @@ async def _apply_edit(
             await _repo.set_props(page_id, {"Расшарено": _checkbox(val)})
             verb = "🔗 Теперь видно друзьям" if val else "🔒 Скрыла от друзей"
             await message.answer(f"✏️ {verb}{ctx_label}:\n📌 {label}")
+        elif field == "note":
+            # "добавь заметку" — дописываем к существующей, как в reply-flow
+            # (core/reply_update.py:_TASK_FIELDS["note"]), не затираем старое.
+            existing = (page.note if page else "") or ""
+            merged = f"{existing}\n{new_value.strip()}" if existing else new_value.strip()
+            await _repo.set_props(page_id, {"Заметка": _text(merged)})
+            await message.answer(f"✏️ Заметка{ctx_label}:\n📌 {label}\n📝 {new_value.strip()}")
         else:
-            await message.answer(f"⚠️ Не знаю поле «{field}». Могу менять: категорию, приоритет, название, дедлайн, длительность, видимость друзьям.")
+            await message.answer(f"⚠️ Не знаю поле «{field}». Могу менять: категорию, приоритет, название, дедлайн, длительность, заметку, видимость друзьям.")
     except Exception as e:
         logger.error("_apply_edit error: %s", e)
         await message.answer("⚠️ Ошибка при обновлении.")
