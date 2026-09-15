@@ -19,7 +19,7 @@ from miniapp.backend.auth import current_user_id
 from arcana.repos.clients_repo import Client as _ArcanaClient
 
 
-FAKE_TG_ID = 67686090
+FAKE_TG_ID = 700000001
 FAKE_USER_ID = "user-notion-id-42"
 
 

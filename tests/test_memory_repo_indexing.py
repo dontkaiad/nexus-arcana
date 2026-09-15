@@ -181,7 +181,7 @@ async def test_upsert_finds_row_by_key_even_after_category_renamed():
     with eng.begin() as conn:
         conn.execute(sa.text(
             "INSERT INTO memories (key_name, category, fact_text, user_id, is_current) "
-            "VALUES ('tz_67686090', 'Настройки', '5', 'u1', 1)"
+            "VALUES ('tz_700000001', 'Настройки', '5', 'u1', 1)"
         ))
 
     with patch.object(pgmod, "get_engine", return_value=eng), \
@@ -189,14 +189,14 @@ async def test_upsert_finds_row_by_key_even_after_category_renamed():
         idx.return_value = True
         repo = PgMemoryRepo()
         mem_id, was_updated = await repo.upsert(
-            "5", key="tz_67686090", category="🏠 Быт", user_id="u1",
+            "5", key="tz_700000001", category="🏠 Быт", user_id="u1",
         )
         await _drain_index_tasks()
 
     assert was_updated is True
     with eng.connect() as conn:
         rows = conn.execute(sa.text(
-            "SELECT category FROM memories WHERE key_name='tz_67686090'"
+            "SELECT category FROM memories WHERE key_name='tz_700000001'"
         )).fetchall()
     # Одна строка, не две — старая обновлена на месте, не осиротела.
     assert len(rows) == 1

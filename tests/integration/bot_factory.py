@@ -103,7 +103,7 @@ class FakeSession(BaseSession):
         self.reactions.clear()
 
 
-def make_update(text: str, user_id: int = 67686090,
+def make_update(text: str, user_id: int = 700000001,
                 update_id: int = 1, message_id: int = 1) -> Update:
     """Создать фейковый Update с текстовым сообщением."""
     return Update(
@@ -123,7 +123,7 @@ def make_update(text: str, user_id: int = 67686090,
     )
 
 
-def make_callback_update(data: str, user_id: int = 67686090,
+def make_callback_update(data: str, user_id: int = 700000001,
                          update_id: int = 1,
                          original_text: str = "") -> Update:
     """Создать фейковый Update с callback query."""

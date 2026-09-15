@@ -69,7 +69,7 @@ async def test_reply_напоминание_reschedules_reminder_job_not_deadlin
     reply_msg.chat = MagicMock(id=111)
     reply_msg.text = "напоминание завтра в 11"
     reply_msg.caption = None
-    reply_msg.from_user = MagicMock(id=67686090)
+    reply_msg.from_user = MagicMock(id=700000001)
     reply_msg.answer = AsyncMock()
 
     mapping = {"page_id": "pgtask-1", "page_type": "task", "bot": "nexus"}

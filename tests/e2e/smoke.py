@@ -178,16 +178,16 @@ async def main():
     user_id = ""
     try:
         from core.user_manager import get_user
-        user = await get_user(67686090)
+        user = await get_user(700000001)
         if user:
             user_id = user.get("user_id", "")
             name = user.get("name", "?")
-            log_pass("get_user(67686090)",
+            log_pass("get_user(700000001)",
                      f"найден: {name}, notion_id={user_id[:12]}...")
         else:
-            log_fail("get_user(67686090)", "пользователь не найден")
+            log_fail("get_user(700000001)", "пользователь не найден")
     except Exception as e:
-        log_fail("get_user(67686090)", str(e)[:120])
+        log_fail("get_user(700000001)", str(e)[:120])
 
     # ═══════════════════════════════════════
     # БЛОК 5: TIMEZONE
@@ -196,7 +196,7 @@ async def main():
 
     try:
         from core.shared_handlers import get_user_tz
-        tz = await get_user_tz(67686090)
+        tz = await get_user_tz(700000001)
         if isinstance(tz, (int, float)):
             log_pass("get_user_tz", f"UTC+{tz}")
         else:

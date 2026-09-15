@@ -62,7 +62,7 @@ async def test_reply_to_confirm_message_routes_to_task_update():
     reply_msg.chat = MagicMock(id=111)
     reply_msg.text = "перенеси на среду"
     reply_msg.caption = None
-    reply_msg.from_user = MagicMock(id=67686090)
+    reply_msg.from_user = MagicMock(id=700000001)
     reply_msg.answer = AsyncMock()
 
     mapping = {"page_id": "pgtask-1", "page_type": "task", "bot": "nexus"}

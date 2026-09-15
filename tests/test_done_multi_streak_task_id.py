@@ -21,7 +21,7 @@ async def test_streak_uses_actually_completed_task_not_last_candidate():
     import nexus.handlers.tasks as tasks_mod
     from nexus.repos.pg_tasks_repo import Task
 
-    uid = 67686090
+    uid = 700000001
     task_a = Task(id="a", title="задача A", repeat="Нет")
     task_b = Task(id="b", title="задача B", repeat="Нет")  # selected + done
     task_c = Task(id="c", title="задача C", repeat="Нет")  # last in list, NOT selected

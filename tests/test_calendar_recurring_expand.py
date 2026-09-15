@@ -22,7 +22,7 @@ from miniapp.backend.routes.calendar import (
 from nexus.repos.pg_tasks_repo import Task as PgTask
 
 
-FAKE_TG = 67686090
+FAKE_TG = 700000001
 FAKE_NOTION = "user-notion-id-42"
 
 

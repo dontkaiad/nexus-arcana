@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, patch
 import json
 
 
-def _fake_user_data(tg_id: int = 67686090) -> dict:
+def _fake_user_data(tg_id: int = 700000001) -> dict:
     """Данные пользователя как из get_user()."""
     return {
         "user_id": "test-user-notion-id",

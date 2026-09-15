@@ -22,7 +22,7 @@ from nexus.repos.pg_tasks_repo import Task as PgTask
 from core.repos.pg_memory_repo import Memory
 
 
-FAKE_TG_ID = 67686090
+FAKE_TG_ID = 700000001
 FAKE_USER_ID = "user-notion-id-42"
 
 
@@ -646,8 +646,8 @@ def test_memory_excludes_tz_and_city_system_keys(client):
     как голые "5"/"Гай" — Кай приняла их за мусор/баг."""
     mems = [
         _mem_pg("m1", "Chapman = сигареты", cat="🛒 Предпочтения", key="chapman"),
-        _mem_pg("m2", "5", cat="🏠 Быт", key="tz_67686090"),
-        _mem_pg("m3", "Гай", cat="🛒 Предпочтения", key="city_67686090"),
+        _mem_pg("m2", "5", cat="🏠 Быт", key="tz_700000001"),
+        _mem_pg("m3", "Гай", cat="🛒 Предпочтения", key="city_700000001"),
     ]
 
     with patch("miniapp.backend.routes.memory._memory_repo.find_recent",

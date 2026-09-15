@@ -17,12 +17,12 @@ class TestTimezone:
                 mock_qp.return_value = [{
                     "properties": {
                         "Текст": {"title": [{"plain_text": "3"}]},
-                        "Ключ": {"rich_text": [{"plain_text": "tz_67686090"}]},
+                        "Ключ": {"rich_text": [{"plain_text": "tz_700000001"}]},
                         "Актуально": {"checkbox": True}
                     }
                 }]
 
-                tz = await get_user_tz(67686090)
+                tz = await get_user_tz(700000001)
                 assert isinstance(tz, (int, float)), f"TZ не число: {type(tz)}"
         except ImportError:
             pytest.skip("get_user_tz не найден")

@@ -254,7 +254,7 @@ async def test_completion_timestamp_uses_user_tz(tz, expected_off):
 
 # ── Fix B: today.py фильтр completed_today ──────────────────────────────────
 
-FAKE_TG_ID = 67686090
+FAKE_TG_ID = 700000001
 FAKE_USER_ID = "user-notion-id-fix-1"
 
 

@@ -204,7 +204,7 @@ class TestQuickCreateTasksPG:
             _extract_title, _extract_status, _extract_select,
         )
 
-        uid = 67686090
+        uid = 700000001
         _pkv.save(uid, _PK_ARCANA, {"text": "купить молоко"}, ttl=600)
         cb = mock_callback(data="arcana_choice_no", from_id=uid)
 
@@ -228,7 +228,7 @@ class TestQuickCreateTasksPG:
     async def test_arcana_choice_no_without_uid_omits_relation(self, mock_callback):
         from nexus.nexus_bot import on_arcana_choice, _pkv, _PK_ARCANA
 
-        uid = 67686090
+        uid = 700000001
         _pkv.save(uid, _PK_ARCANA, {"text": "позвонить в банк"}, ttl=600)
         cb = mock_callback(data="arcana_choice_no", from_id=uid)
 
@@ -245,7 +245,7 @@ class TestQuickCreateTasksPG:
             _extract_title, _extract_status, _extract_select,
         )
 
-        uid = 67686090
+        uid = 700000001
         _pkv.save(uid, _PK_UNKNOWN, {"text": "сделать отчёт", "user_id": "u-2"}, ttl=300)
         cb = mock_callback(data="unk_task_1", from_id=uid)
 

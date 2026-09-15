@@ -13,7 +13,7 @@ from sqlalchemy.pool import StaticPool
 
 from core.login_tokens import approve, deny, get_pending
 
-TG_ID = 67686090
+TG_ID = 700000001
 
 
 def _make_engine():

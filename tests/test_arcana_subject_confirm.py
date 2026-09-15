@@ -29,7 +29,7 @@ async def test_prompt_sent_when_memory_match_found(mock_message):
                AsyncMock(return_value=[_Mem()])), \
          patch("arcana.pending_tarot.save_pending", AsyncMock()) as save_pending:
         await sess_mod._maybe_prompt_subject_match(
-            msg, 67686090,
+            msg, 700000001,
             subject_name="Вадим", session_name="Вадим — диагностика",
             client_id=None, user_id="u-1", page_ids=["1", "2"],
         )
@@ -51,7 +51,7 @@ async def test_no_prompt_when_no_memory_match(mock_message):
                AsyncMock(return_value=[])), \
          patch("arcana.pending_tarot.save_pending", AsyncMock()) as save_pending:
         await sess_mod._maybe_prompt_subject_match(
-            msg, 67686090,
+            msg, 700000001,
             subject_name="Незнакомец", session_name="Незнакомец — тема",
             client_id=None, user_id="u-1", page_ids=["1"],
         )

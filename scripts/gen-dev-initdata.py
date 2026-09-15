@@ -7,7 +7,7 @@ import hmac, hashlib, json, time, urllib.parse
 from pathlib import Path
 
 PROJECT_DIR = Path("/Users/dontkaiad/PROJECTS/ai-agents/AI_AGENTS")
-YOUR_TG_ID = 67686090
+YOUR_TG_ID = 700000001
 YOUR_FIRST_NAME = "Kai"
 YOUR_USERNAME = "dontkaiad"
 

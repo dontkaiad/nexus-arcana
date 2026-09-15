@@ -22,7 +22,7 @@ from miniapp.backend.auth import current_user_id
 from nexus.repos.pg_tasks_repo import Task as PgTask
 
 
-FAKE_TG_ID = 67686090
+FAKE_TG_ID = 700000001
 FAKE_USER_ID = "user-notion-id-42"
 
 
@@ -349,7 +349,7 @@ def test_done_filter_includes_done_and_archived_sorted_by_closed_at_desc(client)
 def test_task_done_updates_status(client):
     # CRITICAL: мокать update_streak. Иначе тест дёргает реальный
     # nexus.handlers.streaks.update_streak, который пишет в prod-файл
-    # data/nexus_streaks.db под FAKE_TG_ID=67686090 (= реальный tg Кай).
+    # data/nexus_streaks.db под FAKE_TG_ID=700000001 (= реальный tg Кай).
     # См. issue #65 — это и есть «стрик без Done» из обследования.
     task = _pg_task("task-1", "Test", user_id=FAKE_USER_ID)
     with patch("miniapp.backend.routes.writes._tasks_pg_repo.retrieve_page",
@@ -715,7 +715,7 @@ async def test_nexus_today_digest_complete_ending():
 def test_streaks_endpoint_returns_current_and_best(client):
     # #65 regression: reset_broken_streaks/get_user_task_streaks (core.task_streaks)
     # были незамоканы и писали/читали PROD data/nexus_streaks.db под
-    # FAKE_TG_ID=67686090 (= реальный tg Кай) на каждый прогон этого теста.
+    # FAKE_TG_ID=700000001 (= реальный tg Кай) на каждый прогон этого теста.
     with patch("nexus.handlers.streaks.get_streak",
                return_value={"streak": 12, "best": 30, "last_activity_date": "2026-04-21",
                              "rest_day_date": None, "rest_days_used": 0,

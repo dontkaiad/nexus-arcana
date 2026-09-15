@@ -177,7 +177,7 @@ async def test_start_login_pending_shows_confirm_buttons():
     assert kb[0][1].callback_data == "z:login_no:tok1"
 
 
-def _call(data, tg_id=67686090):
+def _call(data, tg_id=700000001):
     c = SimpleNamespace()
     c.data = data
     c.message = SimpleNamespace(edit_text=AsyncMock())
@@ -189,7 +189,7 @@ def _call(data, tg_id=67686090):
 async def test_on_login_confirm_success():
     c = _call("z:login_ok:tok1")
     with patch("zarya.handlers.login_tokens_mod.approve", AsyncMock(return_value=True)):
-        await on_login_confirm(c, tg_id=67686090)
+        await on_login_confirm(c, tg_id=700000001)
     assert "подтверждён" in c.message.edit_text.call_args[0][0]
 
 
@@ -197,7 +197,7 @@ async def test_on_login_confirm_success():
 async def test_on_login_confirm_stale():
     c = _call("z:login_ok:tok1")
     with patch("zarya.handlers.login_tokens_mod.approve", AsyncMock(return_value=False)):
-        await on_login_confirm(c, tg_id=67686090)
+        await on_login_confirm(c, tg_id=700000001)
     assert "неактуальна" in c.message.edit_text.call_args[0][0]
 
 
@@ -205,8 +205,8 @@ async def test_on_login_confirm_stale():
 async def test_on_login_deny():
     c = _call("z:login_no:tok1")
     with patch("zarya.handlers.login_tokens_mod.deny", AsyncMock(return_value=True)) as deny_mock:
-        await on_login_deny(c, tg_id=67686090)
-    deny_mock.assert_awaited_once_with("tok1", 67686090)
+        await on_login_deny(c, tg_id=700000001)
+    deny_mock.assert_awaited_once_with("tok1", 700000001)
     assert "отклонён" in c.message.edit_text.call_args[0][0]
 
 
@@ -399,8 +399,8 @@ def _membership_update(adder_id, status="member", chat_type="group"):
 
 @pytest.mark.asyncio
 async def test_owner_can_add_zarya_to_group():
-    u = _membership_update(67686090)
-    with patch("zarya.handlers.config.allowed_ids", [67686090, 790273371]):
+    u = _membership_update(700000001)
+    with patch("zarya.handlers.config.allowed_ids", [700000001, 790273371]):
         await on_membership_changed(u)
     u.bot.leave_chat.assert_not_awaited()
 
@@ -408,7 +408,7 @@ async def test_owner_can_add_zarya_to_group():
 @pytest.mark.asyncio
 async def test_stranger_adding_zarya_gets_kicked_out():
     u = _membership_update(999999)
-    with patch("zarya.handlers.config.allowed_ids", [67686090, 790273371]):
+    with patch("zarya.handlers.config.allowed_ids", [700000001, 790273371]):
         await on_membership_changed(u)
     u.bot.send_message.assert_awaited_once()
     u.bot.leave_chat.assert_awaited_once_with(-100)
@@ -417,7 +417,7 @@ async def test_stranger_adding_zarya_gets_kicked_out():
 @pytest.mark.asyncio
 async def test_membership_change_ignored_in_dm():
     u = _membership_update(999999, chat_type="private")
-    with patch("zarya.handlers.config.allowed_ids", [67686090, 790273371]):
+    with patch("zarya.handlers.config.allowed_ids", [700000001, 790273371]):
         await on_membership_changed(u)
     u.bot.leave_chat.assert_not_awaited()
 
@@ -425,7 +425,7 @@ async def test_membership_change_ignored_in_dm():
 @pytest.mark.asyncio
 async def test_membership_change_ignored_when_not_a_join():
     u = _membership_update(999999, status="left")
-    with patch("zarya.handlers.config.allowed_ids", [67686090, 790273371]):
+    with patch("zarya.handlers.config.allowed_ids", [700000001, 790273371]):
         await on_membership_changed(u)
     u.bot.leave_chat.assert_not_awaited()
 

@@ -31,7 +31,7 @@ from arcana.repos.clients_repo import Client
 from core.repos.pg_finance_repo import PnlEntry, BudgetEntry
 
 
-FAKE_TG_ID = 67686090
+FAKE_TG_ID = 700000001
 FAKE_USER_ID = "user-notion-id-42"
 
 

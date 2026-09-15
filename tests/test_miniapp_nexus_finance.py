@@ -20,7 +20,7 @@ from core.repos.pg_finance_repo import BudgetEntry
 from core.repos.pg_memory_repo import Memory
 
 
-FAKE_TG_ID = 67686090
+FAKE_TG_ID = 700000001
 FAKE_USER_ID = "user-notion-id-42"
 
 

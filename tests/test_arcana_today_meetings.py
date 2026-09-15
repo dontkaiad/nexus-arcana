@@ -18,7 +18,7 @@ from miniapp.backend.app import app
 from miniapp.backend.auth import current_user_id
 from miniapp.backend.routes import arcana_today as at
 
-FAKE_TG = 67686090
+FAKE_TG = 700000001
 TODAY = date(2026, 6, 22)
 
 

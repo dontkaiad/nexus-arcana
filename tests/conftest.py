@@ -12,7 +12,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 _TEST_ENV = {
     "NEXUS_BOT_TOKEN": "123456789:ABCdefGHIjklMNOpqrsTUVwxyz012345678",
     "ARCANA_BOT_TOKEN": "987654321:ABCdefGHIjklMNOpqrsTUVwxyz012345678",
-    "ALLOWED_TELEGRAM_IDS": "67686090",
+    "ALLOWED_TELEGRAM_IDS": "700000001",
     "ANTHROPIC_API_KEY": "fake-key",
     "CLAUDE_HAIKU": "claude-haiku-4-5-20251001",
     "CLAUDE_SONNET": "claude-sonnet-4-20250514",
@@ -75,7 +75,7 @@ def _mute_bot_notify():
 @pytest.fixture
 def mock_message():
     """Создать мок aiogram Message."""
-    def _make(text="", from_id=67686090, first_name="Кай", chat_id=67686090):
+    def _make(text="", from_id=700000001, first_name="Кай", chat_id=700000001):
         msg = AsyncMock()
         msg.text = text
         msg.from_user = MagicMock()
@@ -103,7 +103,7 @@ def mock_message():
 @pytest.fixture
 def mock_callback():
     """Создать мок CallbackQuery."""
-    def _make(data="", from_id=67686090, message_text=""):
+    def _make(data="", from_id=700000001, message_text=""):
         cb = AsyncMock()
         cb.data = data
         cb.from_user = MagicMock()

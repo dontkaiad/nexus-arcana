@@ -125,7 +125,7 @@ function V1HoloDetailCard({ animated, eye }) {
         <div style={{ display: 'grid', gap: 6, fontFamily: FONT_UI, fontSize: 12, color: ARCANA.textDim }}>
           <div>𝕏 @dontplayad</div>
           <div>𝕏 @hey_lark</div>
-          <div style={{ fontFamily: FONT_MONO, fontSize: 11 }}>+7 961 931 12 60</div>
+          <div style={{ fontFamily: FONT_MONO, fontSize: 11 }}>+7 900 000 00 00</div>
           <div style={{ marginTop: 2, fontStyle: 'italic', color: ARCANA.holoGold, opacity: 0.8 }}>с начала всего</div>
         </div>
       </div>
@@ -238,7 +238,7 @@ function V2ConstDetailCard({ animated }) {
         <div style={{ marginTop: 14, padding: '10px 12px', borderRadius: 10, background: 'rgba(255,255,255,0.03)', border: `0.5px solid ${ARCANA.border}` }}>
           <div style={{ fontFamily: FONT_UI, fontSize: 11.5, color: ARCANA.textDim, lineHeight: 1.6 }}>
             𝕏 @dontplayad · @hey_lark<br/>
-            <span style={{ fontFamily: FONT_MONO }}>+7 961 931 12 60</span>
+            <span style={{ fontFamily: FONT_MONO }}>+7 900 000 00 00</span>
           </div>
         </div>
       </div>
@@ -359,7 +359,7 @@ function V3AuroraDetailCard({ animated, eye }) {
           <div style={{ fontFamily: FONT_UI, fontSize: 12, color: ARCANA.textDim, lineHeight: 1.7 }}>
             𝕏 @dontplayad<br/>
             𝕏 @hey_lark<br/>
-            <span style={{ fontFamily: FONT_MONO, fontSize: 11 }}>+7 961 931 12 60</span>
+            <span style={{ fontFamily: FONT_MONO, fontSize: 11 }}>+7 900 000 00 00</span>
           </div>
         </div>
       </div>
@@ -497,7 +497,7 @@ function V4SigilDetailCard({ animated, eye }) {
         }} />
         <div style={{ marginTop: 14, fontFamily: FONT_MONO, fontSize: 10.5, color: ARCANA.textDim, lineHeight: 1.9, letterSpacing: '0.05em' }}>
           @dontplayad &nbsp;·&nbsp; @hey_lark<br/>
-          +7 961 931 12 60
+          +7 900 000 00 00
         </div>
       </div>
     </div>
@@ -647,7 +647,7 @@ function V5LivingDetailCard({ animated }) {
         }}>
           <div style={{ fontFamily: FONT_UI, fontSize: 12, color: ARCANA.textDim, lineHeight: 1.7 }}>
             𝕏 @dontplayad · @hey_lark<br/>
-            <span style={{ fontFamily: FONT_MONO, fontSize: 11 }}>+7 961 931 12 60</span>
+            <span style={{ fontFamily: FONT_MONO, fontSize: 11 }}>+7 900 000 00 00</span>
           </div>
         </div>
       </div>
@@ -1003,7 +1003,7 @@ function V6OneDetailCard({ animated, bg = 'glow' }) {
         }}>
           <div style={{ fontFamily: FONT_UI, fontSize: 12, color: ARCANA.textDim, lineHeight: 1.7 }}>
             𝕏 @dontplayad · @hey_lark<br/>
-            <span style={{ fontFamily: FONT_MONO, fontSize: 11 }}>+7 961 931 12 60</span>
+            <span style={{ fontFamily: FONT_MONO, fontSize: 11 }}>+7 900 000 00 00</span>
           </div>
         </div>
       </div>

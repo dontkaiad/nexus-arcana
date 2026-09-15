@@ -16,7 +16,7 @@ logger = logging.getLogger("tests.integration.conftest")
 _TEST_ENV = {
     "NEXUS_BOT_TOKEN": "123456789:ABCdefGHIjklMNOpqrsTUVwxyz123456789",
     "ARCANA_BOT_TOKEN": "987654321:ABCdefGHIjklMNOpqrsTUVwxyz987654321",
-    "ALLOWED_TELEGRAM_IDS": "67686090",
+    "ALLOWED_TELEGRAM_IDS": "700000001",
     "ANTHROPIC_API_KEY": "sk-ant-test-fake-key",
     "CLAUDE_HAIKU": "claude-haiku-4-5-20251001",
     "CLAUDE_SONNET": "claude-sonnet-4-20250514",

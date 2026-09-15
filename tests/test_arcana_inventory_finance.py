@@ -18,7 +18,7 @@ from miniapp.backend.app import app
 from miniapp.backend.auth import current_user_id
 
 
-FAKE_TG_ID = 67686090
+FAKE_TG_ID = 700000001
 FAKE_USER_ID = "user-notion-id-42"
 
 

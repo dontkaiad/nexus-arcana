@@ -336,7 +336,7 @@ async def test_handle_list_inv_add_batch_does_not_ask_expiry():
     ]
 
     msg = AsyncMock()
-    msg.from_user.id = 67686090
+    msg.from_user.id = 700000001
     msg.text = "занеси в инвентарь\nменовазин 2 шт\n..."
 
     with patch.object(lists_mod, "_haiku_parse", AsyncMock(return_value=parsed)), \
@@ -362,7 +362,7 @@ async def test_handle_list_inv_add_single_asks_expiry():
     created = [{"id": "page-1", "name": "парацетамол", "type": "📦 Инвентарь", "category": "🏥 Здоровье"}]
 
     msg = AsyncMock()
-    msg.from_user.id = 67686090
+    msg.from_user.id = 700000001
     msg.text = "дома есть парацетамол"
 
     with patch.object(lists_mod, "_haiku_parse", AsyncMock(return_value=parsed)), \
@@ -389,7 +389,7 @@ async def test_handle_list_inv_add_empty_parse_responds_gracefully():
     тоже вернёт [], потому что body_lines пуст.
     """
     msg = AsyncMock()
-    msg.from_user.id = 67686090
+    msg.from_user.id = 700000001
     msg.text = "занеси в инвентарь"
 
     with patch.object(lists_mod, "_haiku_parse", AsyncMock(return_value={"items": []})), \
@@ -420,7 +420,7 @@ async def test_handle_list_inv_add_uses_fallback_when_haiku_returns_empty():
     ]
 
     msg = AsyncMock()
-    msg.from_user.id = 67686090
+    msg.from_user.id = 700000001
     msg.text = text
 
     with patch.object(lists_mod, "_haiku_parse", AsyncMock(return_value={"items": []})), \
@@ -450,7 +450,7 @@ async def test_handle_inv_add_single_with_expiry_does_not_ask():
     created = [{"id": "p1", "name": "гексаспрей", "type": "📦 Инвентарь", "category": "🏥 Здоровье"}]
 
     msg = AsyncMock()
-    msg.from_user.id = 67686090
+    msg.from_user.id = 700000001
     msg.text = "гексаспрей 30гр годен до 03.2027"
 
     with patch.object(lists_mod, "_haiku_parse", AsyncMock(return_value=parsed)), \
@@ -476,7 +476,7 @@ async def test_handle_list_inv_add_uses_fallback_when_haiku_raises():
     text = "занеси в инвентарь лекарства\nпарацетамол"
 
     msg = AsyncMock()
-    msg.from_user.id = 67686090
+    msg.from_user.id = 700000001
     msg.text = text
 
     with patch.object(lists_mod, "_haiku_parse", AsyncMock(side_effect=ValueError("bad json"))), \

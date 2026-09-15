@@ -368,7 +368,7 @@ class TestArcanaIntegration:
     @pytest.mark.asyncio
     async def test_cb_photo_cancel_no_pending(self):
         """photo_cancel без pending — корректный ответ."""
-        r = await self.send_cb("photo_cancel:67686090")
+        r = await self.send_cb("photo_cancel:700000001")
         assert "traceback" not in (r or "").lower()
 
     # ═══════════════════════════════════════════════════════════════════
