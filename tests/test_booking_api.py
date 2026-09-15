@@ -92,10 +92,17 @@ def _mk_booking(status="confirmed", bid=7, **kw):
 
 @pytest.fixture
 def _book_env():
+    # Регрессия: раньше здесь мокался только notify_booking_log — notify_user
+    # (личка каждому owner'у, #238) и config.allowed_ids оставались настоящими,
+    # так что прогон этого файла в окружении с реальным ботом (не просто
+    # "нет сети локально") реально слал Кай в Telegram фейковые "брони" из
+    # тестовых фикстур ("Мишган Роман", "шашлыки", "созвон", заявки на эзо).
     with patch("miniapp.backend.routes.booking._owner_user_id", AsyncMock(return_value="uid-1")), \
          patch("miniapp.backend.routes.booking.busy_intervals", AsyncMock(return_value=[])), \
          patch("miniapp.backend.routes.booking.create_booking", AsyncMock(return_value=_mk_booking())), \
          patch("core.bot_notify.notify_booking_log", AsyncMock(return_value=True)), \
+         patch("core.bot_notify.notify_user", AsyncMock(return_value=True)), \
+         patch("core.config.config.allowed_ids", []), \
          patch("core.config.config.booking_service_token", "svc-secret"):
         yield TestClient(app)
 
