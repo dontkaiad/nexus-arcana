@@ -183,7 +183,7 @@ async def test_restore_pass4_rearms_deadline_ping(monkeypatch):
     fake_user = {"permissions": {"nexus": True}, "user_id": "u-1"}
     dl_calls = []
 
-    async def _fake_deadline(chat_id, title, dl, task_id, tz_offset=3, recipients=None):
+    async def _fake_deadline(chat_id, title, dl, task_id, tz_offset=3, recipients=None, duration_min=None):
         dl_calls.append((task_id, recipients))
 
     with patch("core.config.config.allowed_ids", [111, 222]), \

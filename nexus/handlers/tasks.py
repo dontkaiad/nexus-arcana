@@ -550,7 +550,7 @@ async def restore_reminders_on_startup(periodic: bool = False) -> None:
                     await _schedule_deadline_check(
                         tg_id, task.title or "Задача",
                         _to_local_wall(dl, tz_offset), task.id, tz_offset,
-                        recipients=tgids,
+                        recipients=tgids, duration_min=task.duration_min,
                     )
                     restored += 1
                 except Exception as e:
@@ -732,7 +732,8 @@ async def _schedule_reminder(chat_id: int, title: str, reminder_dt: str, task_id
         logger.error("Schedule reminder error: %s", e)
 
 async def _schedule_deadline_check(chat_id: int, title: str, deadline_dt: str, task_id: str, tz_offset: int = 3,
-                                   recipients: Optional[List[int]] = None) -> None:
+                                   recipients: Optional[List[int]] = None,
+                                   duration_min: Optional[int] = None) -> None:
     if not _scheduler or not _bot:
         return
     _targets = [t for t in (recipients or [chat_id]) if t]
@@ -741,6 +742,11 @@ async def _schedule_deadline_check(chat_id: int, title: str, deadline_dt: str, t
         dt = datetime.strptime(deadline_dt, "%Y-%m-%dT%H:%M").replace(
             tzinfo=timezone(timedelta(hours=tz_offset))
         )
+        if duration_min:
+            # deadline — начало дела («с 14 до 17» → deadline=14:00,
+            # duration=3ч, как в booking busy-view #241). Спрашивать «Сделал?»
+            # ровно в момент начала — рано, дело ещё длится; сдвигаем на конец.
+            dt = dt + timedelta(minutes=duration_min)
         if dt <= _now():
             logger.warning("Deadline in the past: %s", deadline_dt)
             return
@@ -757,10 +763,13 @@ async def _schedule_deadline_check(chat_id: int, title: str, deadline_dt: str, t
                         return
                 except Exception as e:
                     logger.warning("check_deadline: status check failed: %s", e)
-            kb = InlineKeyboardMarkup(inline_keyboard=[[
-                InlineKeyboardButton(text="✅ Выполнено!", callback_data=f"task_complete_{task_id}"),
-                InlineKeyboardButton(text="⏳ Отложить", callback_data=f"task_reschedule_{task_id}"),
-            ]])
+            kb = InlineKeyboardMarkup(inline_keyboard=[
+                [
+                    InlineKeyboardButton(text="✅ Выполнено!", callback_data=f"task_complete_{task_id}"),
+                    InlineKeyboardButton(text="⏳ Отложить", callback_data=f"task_reschedule_{task_id}"),
+                ],
+                [InlineKeyboardButton(text="🔧 В процессе", callback_data=f"task_wip_{task_id}")],
+            ])
             _first = None
             for _t in _targets:
                 try:
@@ -1420,7 +1429,8 @@ async def _handle_recurring_task_reset(
                 except Exception:
                     pass
                 if not new_reminder:
-                    await _schedule_deadline_check(chat_id, title, new_deadline, task_id, tz_offset)
+                    await _schedule_deadline_check(chat_id, title, new_deadline, task_id, tz_offset,
+                                                    duration_min=task.duration_min if task else None)
 
         await message.answer(f"🔄 Повторяющаяся задача сброшена. Следующий раз: {next_display}")
     except Exception as e:
@@ -2435,6 +2445,8 @@ async def task_wip(call: CallbackQuery) -> None:
     task_title = ""
     if "Напоминание:" in msg_text:
         task_title = msg_text.split("Напоминание:")[1].strip().split("\n")[0].strip()
+    elif "Дедлайн:" in msg_text:
+        task_title = msg_text.split("Дедлайн:")[1].strip().split("\n")[0].strip()
     elif "Пропущено" in msg_text:
         # "⏰ Пропущено (25.06 в 20:00): заголовок"
         parts = msg_text.split(":", 1)
@@ -2471,7 +2483,7 @@ async def task_reschedule(call: CallbackQuery) -> None:
     msg_text = call.message.text or ""
     task_title = ""
     if "Дедлайн:" in msg_text:
-        task_title = msg_text.split("Дедлайн:")[1].strip().split(".")[0].strip()
+        task_title = msg_text.split("Дедлайн:")[1].strip().split("\n")[0].strip()
 
     _pending_set(uid, {"task_id": task_id, "action": "reschedule", "title": task_title})
     await call.message.edit_reply_markup()
@@ -2724,7 +2736,8 @@ async def _do_save_task(message: Message, data: dict, chat_id: int = None, uid: 
         if "T" not in deadline:
             deadline = deadline + "T09:00"
         logger.info("_do_save_task: scheduling deadline task_id=%s deadline=%s", result[:8], deadline)
-        await _schedule_deadline_check(cid, data["title"], deadline, result, tz_offset)
+        await _schedule_deadline_check(cid, data["title"], deadline, result, tz_offset,
+                                        duration_min=data.get("duration_min"))
 
     deadline_display = (data.get("deadline") or "без даты").replace("T", " ")
     reminder_display = (data.get("reminder_time") or "").replace("T", " ")
