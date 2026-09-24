@@ -3362,15 +3362,23 @@ async def _apply_edit(
             await message.answer(f"✏️ Статус{ctx_label}:\n📌 {label}\n📊 → {real_status}")
         elif field in ("deadline", "reminder"):
             # Конвертируем человекочитаемые даты в ISO
-            iso_value = await _human_date_to_iso(new_value, message.from_user.id if message.from_user else 0)
+            _uid = message.from_user.id if message.from_user else 0
+            iso_value = await _human_date_to_iso(new_value, _uid)
             if not iso_value:
                 await message.answer(f"⚠️ Не удалось распарсить дату: «{new_value}»")
                 return
+            # #263: раньше писали голым _date() — datetime-строка без offset'а
+            # уходила в PG как naive → _parse_iso трактовал её как UTC вместо
+            # локального времени (тот же класс бага, что чинили в
+            # _date_with_tz для create/clarify-флоу). Итог: дедлайн/напоминание,
+            # поставленные через "поставь X на ...", срабатывали на tz_offset
+            # часов раньше — вплоть до "уже в прошлом" → тихо пропускались.
+            tz_offset = await _get_user_tz(_uid)
             if field == "deadline":
-                await _repo.set_props(page_id, {"Дедлайн": _date(iso_value)})
+                await _repo.set_props(page_id, {"Дедлайн": _date_with_tz(iso_value, tz_offset)})
                 await message.answer(f"✏️ Дедлайн{ctx_label}:\n📌 {label}\n📅 → {iso_value}")
             else:
-                await _repo.set_props(page_id, {"Напоминание": _date(iso_value)})
+                await _repo.set_props(page_id, {"Напоминание": _date_with_tz(iso_value, tz_offset)})
                 await message.answer(f"✏️ Напоминание{ctx_label}:\n📌 {label}\n🔔 → {iso_value}")
         elif field == "duration":
             minutes = parse_duration_minutes(new_value)

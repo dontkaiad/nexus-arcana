@@ -90,6 +90,37 @@ async def test_note_edit_routes_to_edits_list_parser():
 
 
 @pytest.mark.asyncio
+async def test_apply_edit_reminder_writes_with_tz_suffix_not_bare_utc():
+    """Регрессия (#263): 'поставь напоминание на ...' писало голый _date(iso) —
+    datetime-строка без offset'а уходила в PG как naive → трактовалась как UTC
+    вместо МСК, напоминание срабатывало на tz_offset часов раньше (вплоть до
+    "уже в прошлом" → тихо пропускалось 90-секундным sweep'ом)."""
+    from unittest.mock import AsyncMock, MagicMock
+    from nexus.handlers import tasks
+    from nexus.repos import pg_tasks_repo
+
+    calls = []
+
+    async def capture(pid, props):
+        calls.append((pid, props))
+
+    msg = MagicMock()
+    msg.answer = AsyncMock()
+    msg.from_user = MagicMock(id=1)
+
+    with patch.object(tasks._repo, "retrieve_page", AsyncMock(return_value=None)), \
+         patch.object(tasks._repo, "set_props", AsyncMock(side_effect=capture)), \
+         patch.object(tasks, "_human_date_to_iso", AsyncMock(return_value="2026-09-21T20:00")), \
+         patch.object(tasks, "_get_user_tz", AsyncMock(return_value=3)), \
+         patch.object(pg_tasks_repo, "_ensure_lookups", MagicMock()):
+        await tasks._apply_edit(msg, "task", "102", "забрать загран", "reminder", "21 сентября в 20:00")
+
+    assert len(calls) == 1
+    pid, props = calls[0]
+    assert props["Напоминание"]["date"]["start"] == "2026-09-21T20:00+03:00"
+
+
+@pytest.mark.asyncio
 async def test_apply_edit_appends_note_instead_of_unknown_field_error():
     """Регрессия: '_apply_edit' не знал field='note' → отвечал
     '⚠️ Не знаю поле «note»' пользователю (сырой внутренний ключ, да ещё
