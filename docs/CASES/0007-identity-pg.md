@@ -66,7 +66,7 @@ sufficient for single-owner use case.
 
 **Store tz_offset in core_identity** — deferred. Timezone is currently stored in `core_memories`
 under key `tz_{tg_id}` and read via `_get_user_tz()`. Moving it would require migrating the
-memory read path. Out of scope for this ADR.
+memory read path. Out of scope for this ADR (tracked as #260).
 
 ## Consequences
 
