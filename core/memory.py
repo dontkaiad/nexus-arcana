@@ -48,7 +48,8 @@ _CATEGORIES_STR = " / ".join(CATEGORIES)
 
 _PARSE_SYSTEM = (
     "Ты парсишь факт для сохранения в долгосрочную память.\n"
-    "Отвечай ТОЛЬКО валидным JSON без пояснений, без markdown:\n"
+    "Отвечай ТОЛЬКО валидным JSON без пояснений, без markdown — ВСЕГДА один "
+    "объект, НЕ массив (несколько фактов — склей в один fact):\n"
     '{"fact": "краткий факт одной строкой",\n'
     ' "category": "одна из категорий ниже",\n'
     ' "связь": "имя человека/кота/объекта или пустая строка",\n'
@@ -178,6 +179,22 @@ def _parse_goal_from_fact(fact: str, fallback_name: str) -> Tuple[str, float, fl
 
 # ── Парсинг факта через Haiku ──────────────────────────────────────────────────
 
+def _single_fact(parsed) -> dict:
+    """Haiku иногда отвечает массивом фактов вместо одного объекта (баг:
+    "'list' object has no attribute 'get'"). Берём категорию/ключ первого,
+    факты склеиваем — ничего из сказанного не теряем."""
+    if isinstance(parsed, dict):
+        return parsed
+    items = [p for p in parsed if isinstance(p, dict)] if isinstance(parsed, list) else []
+    if not items:
+        return {}
+    first = dict(items[0])
+    if len(items) > 1:
+        facts = [(p.get("fact") or "").strip() for p in items]
+        first["fact"] = "; ".join(f for f in facts if f)
+    return first
+
+
 async def _parse_fact(text: str) -> Tuple[str, str, str, str]:
     """Возвращает (fact, category, связь, ключ)."""
     try:
@@ -189,7 +206,7 @@ async def _parse_fact(text: str) -> Tuple[str, str, str, str]:
             temperature=0,
         )
         raw = raw.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
-        parsed = json.loads(raw)
+        parsed = _single_fact(json.loads(raw))
         fact     = (parsed.get("fact")     or "").strip()
         category = (parsed.get("category") or "").strip()
         связь    = (parsed.get("связь")    or "").strip()
