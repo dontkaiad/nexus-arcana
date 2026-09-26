@@ -343,6 +343,7 @@ def build_system(tz_offset: int = 3) -> str:
         "  Примеры: 'кинуть 5$ на OpenAI'→task, 'оплатить интернет'→task, 'пополнить баланс'→task",
         "  Примеры: '500р такси'→expense, 'заплатила 3000 за ногти'→expense, 'потратила 500 на еду'→expense",
         "- НЕ ПУТАТЬ игровые очки с рублями: 'рп'/'lp'/'мамр'/'mmr'/'эло'/'elo' в контексте игр (тфт, лол, дота, valorant) — это игровая валюта/рейтинг, НЕ рубли → note, НЕ expense/income. Пример: '24300 рп гарант в тфт' → {\"type\":\"note\",\"text\":\"24300 RP гарант в TFT\",\"tags\":\"тфт,игры\"}",
+        "- task vs task_done: фраза НАЧИНАЕТСЯ с инфинитива (пофиксить/сделать/написать …) → task, даже если дальше в описании есть прошедшее время ('пофиксить баг когда она не закончила X' = task)!",
         "- task_done: глагол прошедшего времени (сделала/выполнила/купила/написала/позвонила/закончила/отправила/сходила/съездила/заехала/зашла) БЕЗ суммы → task_done, НЕ task!",
         "- task_cancel vs task_done: глагол ОТМЕНЫ (отменила/отменил/отменили/отмени/сними/убери) → task_cancel (задачу убирают), НЕ task_done и НЕ task!",
         "- task_done vs expense: 'купила корм' БЕЗ суммы → task_done; 'купила корм 500₽' → expense",
@@ -583,6 +584,23 @@ _DONE_RE = re.compile(
     re.IGNORECASE,
 )
 
+
+
+_INFINITIVE_START_RE = re.compile(r"^\s*\w+(?:ть|ти|чь)(?:ся)?\b", re.IGNORECASE)
+
+
+def _done_signal(text: str) -> bool:
+    """_DONE_RE, но без отрицаний и не для фраз с инфинитивом в начале:
+    «пофиксить баг когда не закончила бронирование… написала в чат» — это
+    новая задача с описанием, а не отчёт о выполнении."""
+    if _INFINITIVE_START_RE.match(text):
+        return False
+    for m in _DONE_RE.finditer(text):
+        if not re.search(r"\bне\s+$", text[:m.start()], re.IGNORECASE):
+            return True
+    return False
+
+
 # Тексты начинающиеся с "запомни" — это память (memory_save), НЕ task_done и НЕ note
 _ZAPOMNI_RE = re.compile(r"^\s*запомни\b", re.IGNORECASE)
 
@@ -686,8 +704,11 @@ _CURRENCY_RE = re.compile(r"\d+\s*(₽|руб\.?|р\b)", re.IGNORECASE)
 # явное добавление задачи: «добавь/поставь/создай задачу X» или «задача: X»
 # Матчит только add-команды — не поиск («покажи задачи»), не удаление («удали задачу»).
 _TASK_EXPLICIT_RE = re.compile(
-    r"^\s*(?:(?:добавь|добавить|поставь|поставить|создай|создать)\s+задач[уие]\s*[:：]?\s*"
-    r"|задача\s*[:：]\s*)(.+)",
+    r"^\s*(?:(?:добавь|добавить|поставь|поставить|создай|создать|заведи|завести)"
+    r"\s+(?:новую\s+)?задач[уие]\s*[:：]?\s*"
+    r"|задача\s*[:：]\s*"
+    # «задача пофиксить X» — без двоеточия, но следом инфинитив
+    r"|задача\s+(?=\w+(?:ть|ти|чь)\b))(.+)",
     re.IGNORECASE,
 )
 
@@ -945,7 +966,11 @@ async def classify(text: str, tz_offset: int = 3, user_id: str = "") -> list[dic
     # Быстрый pre-фильтр: задача выполнена ("сделала X", "X готово")
     # Исключение: "запомни ..." → это заметка, пропустить к Claude
     # Исключение: "купила X 89р" (с ценой) → это list_done, пропустить к списковым фильтрам
-    if _DONE_RE.search(text) and not _ZAPOMNI_RE.search(text) and not _CURRENCY_RE.search(text):
+    # Исключение: явное «создай/заведи задачу X» — это создание, даже если в X
+    # есть «закончила/сделала» (баг: «создай задачу пофиксить баг когда не
+    # закончила бронирование» → 🔍 Не нашёл задачу).
+    if (_done_signal(text) and not _ZAPOMNI_RE.search(text) and not _CURRENCY_RE.search(text)
+            and not _TASK_EXPLICIT_RE.match(text)):
         logger.info("classify: task_done pattern matched")
         return [{"type": "task_done", "task_hint": text}]
 

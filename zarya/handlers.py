@@ -42,12 +42,35 @@ _MAX_SLOT_BUTTONS = 8
 _FRIEND_HOURS = (1, 2, 3, 4)
 
 # #239: друзья обязаны написать НА ЧТО бронируют (не просто "встреча с X") —
-# tg_id → {ctx, ep, hours, role} между выбором часов и текстом цели.
+# tg_id → {ctx, ep, hours, role, chat_id, ts} между выбором часов и текстом цели.
 _pending_purpose: dict = {}
+# Недописанная бронь протухает — иначе через час случайное сообщение
+# превращается в бронь.
+_PURPOSE_TTL_SEC = 15 * 60
 
 
 def _has_pending_purpose(message: Message) -> bool:
-    return bool(message.from_user and message.from_user.id in _pending_purpose)
+    """Ждём повод только в ТОМ ЖЕ чате, где нажали слот, и не дольше TTL.
+
+    Баг: начала бронь в ЛС, не дописала повод, написала в общий чат где есть
+    Заря — и та забронировала по тексту из чата. Команды тоже не перехватываем.
+    """
+    if not message.from_user:
+        return False
+    pending = _pending_purpose.get(message.from_user.id)
+    if pending is None:
+        return False
+    ts = pending.get("ts")
+    if ts is not None and datetime.now(timezone.utc).timestamp() - ts > _PURPOSE_TTL_SEC:
+        _pending_purpose.pop(message.from_user.id, None)
+        return False
+    chat_id = pending.get("chat_id")
+    chat = getattr(message, "chat", None)
+    if chat_id is not None and getattr(chat, "id", None) != chat_id:
+        return False
+    if (getattr(message, "text", None) or "").lstrip().startswith("/"):
+        return False
+    return True
 
 
 class RoleMiddleware(BaseMiddleware):
@@ -364,7 +387,11 @@ async def on_book(call: CallbackQuery, role: str = "guest") -> None:
         # #239: друзья обязаны написать НА ЧТО бронируют — не создаём бронь,
         # пока не пришёл текст. Следующее сообщение этого юзера ловит
         # on_purpose_text (зарегистрирован рано, до nl_slots/фолбэка).
-        _pending_purpose[call.from_user.id] = {"ctx": ctx, "ep": ep, "hours": hours, "role": role}
+        _pending_purpose[call.from_user.id] = {
+            "ctx": ctx, "ep": ep, "hours": hours, "role": role,
+            "chat_id": getattr(call.message.chat, "id", None),
+            "ts": datetime.now(timezone.utc).timestamp(),
+        }
         await call.message.edit_text(
             "На что бронируешь? Опиши коротко одним сообщением — станет "
             "названием встречи у Кай (например: «шашлыки», «созвон по проекту», «др у Ромы»)."

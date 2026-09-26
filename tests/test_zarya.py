@@ -580,13 +580,15 @@ async def test_on_book_friends_asks_for_purpose_instead_of_booking():
     c = SimpleNamespace()
     c.data = "z:book:friends:1234567890:2"
     c.from_user = SimpleNamespace(id=42, full_name="Кто-то")
-    c.message = SimpleNamespace(edit_text=AsyncMock(), chat=SimpleNamespace(type="private"))
+    c.message = SimpleNamespace(edit_text=AsyncMock(), chat=SimpleNamespace(type="private", id=42))
     c.bot = SimpleNamespace()
     c.answer = AsyncMock()
     with patch("zarya.handlers.create_booking", AsyncMock()) as cb:
         await on_book(c, role="friend")
     cb.assert_not_awaited()  # бронь ещё не создана — ждём текст повода
-    assert _pending_purpose[42] == {"ctx": "friends", "ep": "1234567890", "hours": 2.0, "role": "friend"}
+    p = dict(_pending_purpose[42])
+    assert p.pop("ts") > 0
+    assert p == {"ctx": "friends", "ep": "1234567890", "hours": 2.0, "role": "friend", "chat_id": 42}
     assert "На что бронируешь" in c.message.edit_text.call_args[0][0]
     _pending_purpose.clear()
 
@@ -644,3 +646,31 @@ def test_has_pending_purpose_filter():
     assert _has_pending_purpose(yes) is True
     assert _has_pending_purpose(no) is False
     _pending_purpose.clear()
+
+
+def test_pending_purpose_ignores_other_chats():
+    """Бронь начата в ЛС, повод не дописан → сообщение в групповом чате,
+    где есть Заря, НЕ должно становиться поводом брони."""
+    import time
+    from zarya.handlers import _has_pending_purpose, _pending_purpose
+    _pending_purpose[42] = {"ctx": "friends", "ep": "1", "hours": 1.0, "role": "friend",
+                            "chat_id": 42, "ts": time.time()}
+    user = SimpleNamespace(id=42)
+    group_msg = SimpleNamespace(from_user=user, chat=SimpleNamespace(id=-100500), text="го в кино")
+    dm_msg = SimpleNamespace(from_user=user, chat=SimpleNamespace(id=42), text="кино")
+    cmd_msg = SimpleNamespace(from_user=user, chat=SimpleNamespace(id=42), text="/slots")
+    assert _has_pending_purpose(group_msg) is False
+    assert _has_pending_purpose(cmd_msg) is False
+    assert _has_pending_purpose(dm_msg) is True
+    assert 42 in _pending_purpose  # в ЛС всё ещё ждём повод
+    _pending_purpose.clear()
+
+
+def test_pending_purpose_expires():
+    import time
+    from zarya.handlers import _has_pending_purpose, _pending_purpose, _PURPOSE_TTL_SEC
+    _pending_purpose[42] = {"ctx": "friends", "ep": "1", "hours": 1.0, "role": "friend",
+                            "chat_id": 42, "ts": time.time() - _PURPOSE_TTL_SEC - 1}
+    m = SimpleNamespace(from_user=SimpleNamespace(id=42), chat=SimpleNamespace(id=42), text="кино")
+    assert _has_pending_purpose(m) is False
+    assert 42 not in _pending_purpose
