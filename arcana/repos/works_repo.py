@@ -28,6 +28,7 @@ class Work:
     repeat: str = "Нет"
     day_of_week: str = ""
     repeat_time: str = ""
+    notes: str = ""
 
 
 def _pg_repo():
