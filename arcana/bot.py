@@ -21,6 +21,7 @@ from arcana.handlers.payment import router as payment_router
 from arcana.handlers.intent_resolve import router as intent_resolve_router
 from arcana.handlers.work_kb import router as work_kb_router
 from arcana.handlers.work_preview import router as work_preview_router
+from arcana.handlers.work_report import router as work_report_router
 from arcana.handlers.work_reminder_kb import router as work_reminder_kb_router
 from core.subtasks_handler import make_subtasks_router
 
@@ -92,6 +93,7 @@ def create_dp_and_bot():
     dp.include_router(intent_resolve_router)  # intent_planned/intent_done callbacks
     dp.include_router(work_kb_router)          # legacy (заглушка)
     dp.include_router(work_preview_router)    # work_save / work_cancel callbacks
+    dp.include_router(work_report_router)     # wrep_*/wrep callbacks (#301)
     dp.include_router(work_reminder_kb_router)  # work_complete/reschedule/delete/wip callbacks
     dp.include_router(make_subtasks_router())  # task_subtask_* (общий с Nexus)
     dp.include_router(grimoire_router)   # callbacks grim_* — до base router

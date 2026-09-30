@@ -460,6 +460,13 @@ async def route_message(
                 await react(message, reaction_for("ritual"))
                 return
 
+        # ── Pending: пошаговый отчёт по Работе-ритуалу (#301) ──────────────
+        if pending and pending.get("type") == "work_report":
+            from arcana.handlers.work_report import handle_pending_text
+            if await handle_pending_text(message, text, user_id):
+                await react(message, reaction_for("ritual"))
+                return
+
         # ── Pending: правка трактовки уже сохранённого триплета ───────────
         if pending and pending.get("awaiting_triplet_edit"):
             from arcana.handlers.sessions import handle_triplet_correction

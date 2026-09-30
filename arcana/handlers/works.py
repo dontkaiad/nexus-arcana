@@ -140,6 +140,14 @@ async def handle_work_done(message: Message, text: str, user_id: str = "") -> No
             await message.answer(f"❌ Не нашла работу по «{hint}».")
             return
 
+        # #301: Работа категории ✨ Ритуал — не просто mark_done, а пошаговый
+        # отчёт по полям таблицы rituals (иначе расходники/силы/структура
+        # никогда никуда не попадают — для них в Работе нет места вообще).
+        if best.category == "✨ Ритуал" and not (best.repeat and best.repeat != "Нет"):
+            from arcana.handlers.work_report import start_work_report
+            await start_work_report(message, best, user_id)
+            return
+
         # Повторяющаяся Работа → следующий цикл, не закрываем (ADR-0023: repeat
         # да, стрики нет). `best` из list_open уже несёт repeat/repeat_time.
         if best.repeat and best.repeat != "Нет":
