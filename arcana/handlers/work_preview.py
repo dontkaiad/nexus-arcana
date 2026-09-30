@@ -184,6 +184,7 @@ def _format_preview(data: dict) -> str:
     reminder = data.get("reminder")
     work_type = data.get("work_type") or "🌟 Личная"
     client_name = data.get("client_name")
+    notes = data.get("notes")
 
     deadline_disp = (deadline or "не указан").replace("T", " ")
     reminder_disp = (reminder or "нет").replace("T", " ")
@@ -207,6 +208,8 @@ def _format_preview(data: dict) -> str:
         lines.append(f"📅 Дедлайн: {deadline_disp}")
     lines.append(f"🔔 Напоминание: {reminder_disp}")
     lines.append(f"👥 {work_type}" + (f" · {client_name}" if client_name else ""))
+    if notes:
+        lines.append(f"📝 {notes}")
 
     # Спрашиваем уточнение ТОЛЬКО для одноразовой работы без дедлайна.
     # Повторяющуюся не дёргаем — repeat_time/дефолт 09:00 подставится сам.
@@ -258,6 +261,7 @@ async def _parse_work_text(text: str, tz_offset: int) -> dict:
     category_raw = (data.get("category") or "").lower()
     client_name = data.get("client_name") or None
     type_raw = (data.get("type") or "личная").lower()
+    notes = data.get("notes") or None
 
     priority = WORK_PRIORITY_MAP.get(priority_raw, "Можно потом")
     category = WORK_CATEGORY_MAP.get(category_raw) if category_raw else None
@@ -284,6 +288,7 @@ async def _parse_work_text(text: str, tz_offset: int) -> dict:
         "repeat": repeat,
         "repeat_time": repeat_time,
         "day_of_week": day_of_week,
+        "notes": notes,
     }
 
 
@@ -380,6 +385,7 @@ async def _save_partial_pending(
         "repeat": (parsed or {}).get("repeat") or "Нет",
         "repeat_time": (parsed or {}).get("repeat_time"),
         "day_of_week": (parsed or {}).get("day_of_week"),
+        "notes": (parsed or {}).get("notes"),
         "user_id": user_id,
         "msg_id": None,
         "chat_id": message.chat.id,
@@ -579,6 +585,7 @@ async def cb_work_save(call: CallbackQuery) -> None:
             repeat=repeat,
             repeat_time=data.get("repeat_time"),
             day_of_week=data.get("day_of_week"),
+            notes=data.get("notes"),
         )
     except Exception as e:
         logger.error("works_repo.create failed: %s", e)
@@ -635,6 +642,7 @@ async def cb_work_save(call: CallbackQuery) -> None:
     title = data.get("title") or "Работа"
     work_type = data.get("work_type") or "🌟 Личная"
     client_name = data.get("client_name")
+    notes = data.get("notes")
 
     if repeat != "Нет":
         _rt = data.get("repeat_time")
@@ -652,6 +660,7 @@ async def cb_work_save(call: CallbackQuery) -> None:
         f"🔔 Напоминание: {reminder_disp}\n"
         f"👥 {work_type}"
         + (f" · {client_name}" if client_name else "")
+        + (f"\n📝 {notes}" if notes else "")
     )
 
     if category == "✨ Ритуал":

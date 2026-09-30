@@ -10,7 +10,11 @@ Work for every performed event, `list_by_client` for the client card.)
 (+ #241, 24cb626: `duration_min` column.) (+ #26x: `work_preview.get_effective_tz`
 — explicit zone/city mention in free text overrides stored `tz_{tg_id}` for a
 single parse, sister to `nexus/handlers/tasks.py:_get_effective_tz`, see
-`docs/specs/TASKS.md`.) This
+`docs/specs/TASKS.md`.) (+ #300, `e1f2a3b4c5d6_works_add_notes.py`: `notes`
+column — free-form details (расходники/карты/пожелания клиента/context) that
+don't fit title/category/priority/client; Kai reported a detailed "работа"
+saving only title+date, root cause was there was nowhere structural to put
+the rest.) This
 spec describes the works data model as of that commit; update it in the same
 PR that changes the model.
 
@@ -32,7 +36,8 @@ One table `works` plus two seeded lookup tables. Migrations:
 `alembic/versions/b2f3e4d5c6a7_works_slice_schema.py` (table +
 `work_priority`/`work_status`), `g7b8c9d0e1f2_works_add_reminder.py` (adds
 `reminder`), `o5h6i7j8k9l0_works_add_archived_status.py` (adds the `archived`
-status code), `d4e5f6a7b8c9_booking_tables.py` (adds `scheduled_at`, #23).
+status code), `d4e5f6a7b8c9_booking_tables.py` (adds `scheduled_at`, #23),
+`e1f2a3b4c5d6_works_add_notes.py` (adds `notes`, #300).
 SQLAlchemy Core mirror: `arcana/repos/works_tables.py`.
 
 ### `works`
@@ -43,6 +48,7 @@ SQLAlchemy Core mirror: `arcana/repos/works_tables.py`.
 | `title` | Text | NOT NULL |
 | `deadline` | TIMESTAMP(tz) | nullable |
 | `category` | Text | free-text label (see Invariants) |
+| `notes` | Text | nullable — free-form details the Haiku parser (`PARSE_WORK_SYSTEM`, `arcana/handlers/works.py`) lifts out when they don't fit any other field (consumables, cards/deck, client wishes, context); shown in the preview card and the "Работа создана" confirmation (#300) |
 | `priority_id` | SmallInteger | FK → `work_priority.id` |
 | `status_id` | SmallInteger | FK → `work_status.id` |
 | `client_id` | BigInteger | FK → `clients.id` |
@@ -163,6 +169,7 @@ Reads/writes are pure SQL.
 - `alembic/versions/g7b8c9d0e1f2_works_add_reminder.py` — `reminder`
 - `alembic/versions/o5h6i7j8k9l0_works_add_archived_status.py` — `archived` status
 - `alembic/versions/b1c2d3e4f5a6_task_duration_and_shared.py` — `duration_min` (#241)
+- `alembic/versions/e1f2a3b4c5d6_works_add_notes.py` — `notes` (#300)
 - `core/booking/busy.py` — busy-interval length honors `duration_min` (#241)
 - `arcana/repos/works_tables.py` — SQLAlchemy Core mirror
 - `arcana/repos/pg_works_repo.py` — `PgWorksRepo` (create/status/deadline/mark_done),

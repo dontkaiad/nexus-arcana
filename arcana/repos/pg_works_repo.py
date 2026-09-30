@@ -96,6 +96,7 @@ def _row_to_work(row) -> Work:
         repeat=getattr(row, "repeat_label", None) or "Нет",
         day_of_week=getattr(row, "dow_label", None) or "",
         repeat_time=getattr(row, "repeat_time", None) or "",
+        notes=getattr(row, "notes", None) or "",
     )
 
 
@@ -110,6 +111,7 @@ def _select_works():
             works.c.deadline,
             works.c.reminder,
             works.c.category,
+            works.c.notes,
             works.c.client_id,
             works.c.repeat_time,
             p.c.label.label("priority_label"),
@@ -204,6 +206,7 @@ class PgWorksRepo:
         repeat: str = "Нет",
         repeat_time: Optional[str] = None,
         day_of_week: Optional[str] = None,
+        notes: Optional[str] = None,
     ) -> Optional[str]:
         pcode = _code_for(_PRIORITY_TO_CODE, priority) or "later"
         rcode = _code_for(_REPEAT_TO_CODE, repeat)
@@ -219,6 +222,7 @@ class PgWorksRepo:
                     title=title,
                     deadline=deadline,
                     category=category or None,
+                    notes=notes or None,
                     priority_id=prio_id,
                     status_id=open_id,
                     client_id=cid_int,
@@ -344,6 +348,9 @@ class PgWorksRepo:
             cat = fields.get("category")
             if cat is not None:
                 vals["category"] = str(cat)
+            nt = fields.get("notes")
+            if nt is not None:
+                vals["notes"] = str(nt)
             pr = fields.get("priority")
             if pr is not None:
                 pcode = _code_for(_PRIORITY_TO_CODE, pr)
@@ -422,8 +429,8 @@ class PgWorksRepo:
         """Обновить поля Работы (reply-правка #156; переиспользуемо #154).
 
         Поля: category (Text), priority ('срочно/важно/можно потом'),
-        deadline ('YYYY-MM-DD[ HH:MM]'). `tz_offset` — часовой пояс юзера,
-        применяется к naive deadline (см. _set_props_sync).
+        deadline ('YYYY-MM-DD[ HH:MM]'), notes (Text, #300). `tz_offset` —
+        часовой пояс юзера, применяется к naive deadline (см. _set_props_sync).
         """
         return await asyncio.to_thread(self._set_props_sync, work_id, fields, tz_offset)
 
@@ -471,11 +478,12 @@ class PgWorksRepo:
         repeat: str = "Нет",
         repeat_time: Optional[str] = None,
         day_of_week: Optional[str] = None,
+        notes: Optional[str] = None,
     ) -> Optional[str]:
         return await asyncio.to_thread(
             self._create_sync,
             title, priority, deadline, category, client_id, user_id,
-            repeat, repeat_time, day_of_week,
+            repeat, repeat_time, day_of_week, notes,
         )
 
     async def mark_done(self, work_id: str) -> bool:

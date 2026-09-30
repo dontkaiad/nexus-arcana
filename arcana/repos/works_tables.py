@@ -60,6 +60,7 @@ works = Table(
     Column("title",       Text,         nullable=False),
     Column("deadline",    TIMESTAMP(timezone=True)),
     Column("category",    Text),
+    Column("notes",       Text),  # #300: свободные детали, не влезающие в структурные поля
 
     Column("priority_id", SmallInteger, ForeignKey("work_priority.id")),
     Column("status_id",   SmallInteger, ForeignKey("work_status.id")),
