@@ -2589,6 +2589,16 @@ def _bdb() -> _sqlite3.Connection:
         "CREATE TABLE IF NOT EXISTS payday_sent "
         "(uid INTEGER PRIMARY KEY, date TEXT, ts REAL)"
     )
+    # #302: гейт на РЕВЬЮ-сообщение ключуется по tg_id (uid) — так и задумано,
+    # сообщения фан-аутятся на оба tg_id одного user_id. Но начисление в
+    # подушку — это движение денег, а не уведомление: Кай торс аккаунта с
+    # одним user_id и двумя tg_id (#202) получала его ДВАЖДЫ, потому что
+    # proactive_budget_review дедупит только по tg_id, а не по user_id.
+    # Отдельная таблица — ключ user_id (TEXT), не uid.
+    con.execute(
+        "CREATE TABLE IF NOT EXISTS payday_cushion_credited "
+        "(user_id TEXT PRIMARY KEY, date TEXT, ts REAL)"
+    )
     con.commit()
     return con
 
@@ -2607,6 +2617,33 @@ def _payday_already_sent(uid: int, date_str: str) -> bool:
     with _bdb() as con:
         row = con.execute(
             "SELECT ts FROM payday_sent WHERE uid=? AND date=?", (uid, date_str)
+        ).fetchone()
+    if not row:
+        return False
+    if _time.time() - row[0] > _PAYDAY_TTL:
+        return False
+    return True
+
+
+def _payday_cushion_mark(user_id: str, date_str: str) -> None:
+    """#302: записать что подушка за date_str уже кредитована этому user_id."""
+    with _bdb() as con:
+        con.execute(
+            "INSERT OR REPLACE INTO payday_cushion_credited (user_id, date, ts) VALUES (?,?,?)",
+            (user_id, date_str, _time.time()),
+        )
+
+
+def _payday_cushion_already_credited(user_id: str, date_str: str) -> bool:
+    """#302: защита от двойного начисления, когда один user_id фан-аутится
+    на несколько tg_id (#202) — каждый вызов _send_payday_review иначе кредитовал
+    подушку отдельно."""
+    if not user_id:
+        return False
+    with _bdb() as con:
+        row = con.execute(
+            "SELECT ts FROM payday_cushion_credited WHERE user_id=? AND date=?",
+            (user_id, date_str),
         ).fetchone()
     if not row:
         return False
@@ -4642,33 +4679,43 @@ async def _send_payday_review(uid: int, user_id: str = "", bot=None,
         logger.error("payday review error: %s", e, exc_info=True)
         _budget_set(uid, state)
 
-    # Кредитуем подушку на payday-переходе ОДИН раз за период (функция под guard'ом
-    # _payday_already_sent). Повторное Принятие плана в течение месяца баланс не
-    # двигает — только этот переход. Сумма = взнос принятого плана прошлого периода
-    # (20% дохода в комфортный месяц) ПЛЮС реальная экономия периода (total_saved
-    # из ревью, если > 0 — работает в обоих типах месяца).
+    # Кредитуем подушку на payday-переходе ОДИН раз за период — ПО user_id,
+    # не по uid/tg_id (#302: _payday_already_sent выше гейтит только отправку
+    # сообщения ЭТОМУ tg_id; один user_id с несколькими tg_id (#202) иначе
+    # кредитовался на каждый tg_id отдельно — задвоенное начисление). Повторное
+    # Принятие плана в течение месяца баланс не двигает — только этот переход.
+    # Сумма = взнос принятого плана прошлого периода (20% дохода в комфортный
+    # месяц) ПЛЮС реальная экономия периода (total_saved из ревью, если > 0 —
+    # работает в обоих типах месяца).
     try:
-        from core.repos.pg_cushion_repo import _repo as _cushion_repo
-        c = await _cushion_repo.get(user_id)
-        planned = float(c.planned_contribution) if c else 0.0
-        saved = float(savings_total) if savings_total and savings_total > 0 else 0.0
-        total = int(round(planned + saved))
-        if total > 0:
-            _prev_start, _prev_end = _period_bounds(await _get_payday(), previous=True, tz_offset=tz_offset)
-            new_balance = await _cushion_repo.add_to_balance(
-                user_id, total, source="payday_auto",
-                note="план {:.0f} + экономия {:.0f} · период {}".format(
-                    planned, saved, _prev_start[:7]),
+        if _payday_cushion_already_credited(user_id, today_str):
+            logger.info(
+                "payday cushion credit skipped (already credited): user_id=%s date=%s",
+                user_id, today_str,
             )
-            await bot.send_message(
-                uid,
-                "🛡️ Расчёт подушки: +<b>{:,}₽</b> (план: {:,.0f}₽ + экономия: {:,.0f}₽). "
-                "В трекере теперь: <b>{:,.0f}₽</b>.\n"
-                "💳 Не забудь перевести {:,}₽ на реальный счёт подушки вручную — "
-                "трекер сам деньги не двигает, только считает.".format(
-                    total, planned, saved, new_balance, total),
-                parse_mode="HTML",
-            )
+        else:
+            from core.repos.pg_cushion_repo import _repo as _cushion_repo
+            c = await _cushion_repo.get(user_id)
+            planned = float(c.planned_contribution) if c else 0.0
+            saved = float(savings_total) if savings_total and savings_total > 0 else 0.0
+            total = int(round(planned + saved))
+            _payday_cushion_mark(user_id, today_str)
+            if total > 0:
+                _prev_start, _prev_end = _period_bounds(await _get_payday(), previous=True, tz_offset=tz_offset)
+                new_balance = await _cushion_repo.add_to_balance(
+                    user_id, total, source="payday_auto",
+                    note="план {:.0f} + экономия {:.0f} · период {}".format(
+                        planned, saved, _prev_start[:7]),
+                )
+                await bot.send_message(
+                    uid,
+                    "🛡️ Расчёт подушки: +<b>{:,}₽</b> (план: {:,.0f}₽ + экономия: {:,.0f}₽). "
+                    "В трекере теперь: <b>{:,.0f}₽</b>.\n"
+                    "💳 Не забудь перевести {:,}₽ на реальный счёт подушки вручную — "
+                    "трекер сам деньги не двигает, только считает.".format(
+                        total, planned, saved, new_balance, total),
+                    parse_mode="HTML",
+                )
     except Exception as e:
         logger.error("payday cushion credit error: %s", e)
 
