@@ -118,6 +118,15 @@ def test_pure_layout_pflfxf_still_converts():
     assert out == "задача"
 
 
+def test_pure_layout_y_not_counted_as_vowel():
+    """#305: «rfrjq e vtyz rp yjvth» (= «какой у меня кз номер») раньше НЕ
+    конвертировалось — 'vtyz' и 'yjvth' считались «похожими на English» из-за
+    буквы 'y' (под ней на QWERTY сидит частая русская 'н'), guard 3 срабатывал
+    на en_count=2 и блокировал конверсию целиком."""
+    assert _english_word_count("rfrjq e vtyz rp yjvth") == 0
+    assert maybe_convert("rfrjq e vtyz rp yjvth") == "какой у меня кз номер"
+
+
 def test_pure_layout_multiple_words_no_vowels():
     """«pf,erm vjkjrj» — должен конвертиться.
 

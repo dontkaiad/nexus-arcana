@@ -69,7 +69,13 @@ _BRAND_WHITELIST = frozenset({
 # токен по \s остаётся «Apple-стек» — его проверяет mixed-script.).
 _WORD_RE = re.compile(r"[A-Za-zЀ-ӿ0-9]+")
 _LATIN_RE = re.compile(r"^[A-Za-z]+$")
-_VOWELS = set("aeiouyAEIOUY")
+# 'y' deliberately excluded (#305): on QWERTY it sits under 'н', one of the
+# most common Cyrillic letters, so layout-mistyped Russian words routinely
+# contain it ("vtyz" = "меня", "yjvth" = "номер") — counting it as a vowel
+# made Guard 3 misfire on plain Russian typed in the wrong layout, treating
+# it as "real English" and skipping the conversion entirely (Kai: «rfrjq e
+# vtyz rp yjvth» never converted to «какой у меня кз номер»).
+_VOWELS = set("aeiouAEIOU")
 
 
 def _ru_ratio(text: str) -> float:
