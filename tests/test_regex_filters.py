@@ -98,6 +98,12 @@ from core.classifier import (
     pytest.param(_MEMORY_SEARCH_RE, "search", "что ты помнишь обо мне", id="memory-search-pomnish"),
     pytest.param(_MEMORY_SEARCH_RE, "search", "расскажи про кота", id="memory-search-rasskazhi"),
     pytest.param(_MEMORY_SEARCH_RE, "search", "покажи память", id="memory-search-show"),
+    # #304: «какой у меня X» — прямой вопрос о сохранённом факте, не только
+    # «что ты помнишь о X» (Кай: «какой у меня кз номер» уходило в unknown
+    # хотя факт был в памяти).
+    pytest.param(_MEMORY_SEARCH_RE, "search", "какой у меня кз номер", id="memory-search-kakoy-u-menya"),
+    pytest.param(_MEMORY_SEARCH_RE, "search", "какой мой снилс", id="memory-search-kakoy-moy"),
+    pytest.param(_MEMORY_SEARCH_RE, "search", "какая у меня почта", id="memory-search-kakaya-u-menya"),
     # _TZ_RE — часовой пояс / переезд
     pytest.param(_TZ_RE, "search", "мой часовой пояс UTC+5", id="tz-utc"),
     pytest.param(_TZ_RE, "search", "живу в Москве", id="tz-zhivu"),
@@ -132,6 +138,11 @@ def test_regex_matches(regex, method, text):
     pytest.param(_TASK_EXPLICIT_RE, "match", "покажи задачи на сегодня", id="task-explicit-no-show"),
     pytest.param(_TASK_EXPLICIT_RE, "match", "задачи на сегодня", id="task-explicit-no-plural"),
     pytest.param(_TASK_EXPLICIT_RE, "match", "удали задачу X", id="task-explicit-no-delete"),
+    # #304: «какой у меня X» не должен цеплять обычные вопросы без факт-слова
+    # (номер/код/пароль/снилс/инн/паспорт/email/почта/адрес) на конце.
+    pytest.param(_MEMORY_SEARCH_RE, "search", "какой у меня баланс", id="memory-search-no-balance"),
+    pytest.param(_MEMORY_SEARCH_RE, "search", "какой сегодня день", id="memory-search-no-today"),
+    pytest.param(_MEMORY_SEARCH_RE, "search", "какой у меня план на день", id="memory-search-no-plan"),
 ])
 def test_regex_no_match(regex, method, text):
     """Негативные кейсы: фильтр НЕ должен срабатывать на этом тексте."""
