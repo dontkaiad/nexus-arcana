@@ -48,6 +48,15 @@ async def restore_work_reminders() -> int:
 
     Ключ джобы (`reminder_{page_id}`, page_id=str(work.id)) совпадает с тем,
     что ставит cb_work_save → replace_existing, без дублей.
+
+    Группируем allowed_ids по user_id (#202/#306: Кай делит один user_id
+    между двумя TG-аккаунтами — тот же паттерн, что чинили в
+    nexus/handlers/tasks.py restore_reminders_on_startup). Раньше цикл шёл
+    по tg_id и планировал КАЖДУЮ Работу заново на каждый tg_id с ОДНИМ
+    job_id `reminder_<id>` → replace_existing на втором tg_id перетирал
+    первый, и напоминание уходило только в чат ПОСЛЕДНЕГО tg_id из
+    allowed_ids (а не туда, где Кай реально смотрит). Теперь один проход
+    на user_id, рассылка во все его чаты через recipients.
     """
     from core.config import config as _cfg
     from core.user_manager import get_user
@@ -56,28 +65,37 @@ async def restore_work_reminders() -> int:
 
     _pg = PgWorksRepo()
     restored = 0
+
+    _groups: dict = {}
     for tg_id in _cfg.allowed_ids:
+        user_data = await get_user(tg_id)
+        if not user_data or not user_data.get("permissions", {}).get("arcana", False):
+            continue
+        user_id = user_data.get("user_id", "")
+        if not user_id:
+            continue
+        _groups.setdefault(user_id, []).append(tg_id)
+
+    for user_id, tg_ids in _groups.items():
         try:
-            user_data = await get_user(tg_id)
-            if not user_data or not user_data.get("permissions", {}).get("arcana", False):
-                continue
-            user_id = user_data.get("user_id", "")
-            tz_offset = await get_user_tz(tg_id)
+            primary_tg = tg_ids[0]
+            tz_offset = await get_user_tz(primary_tg)
             for w in await _pg.active_with_future_reminder(user_id):
                 if not w.reminder_dt:
                     continue
                 reminder_iso = w.reminder_dt.strftime("%Y-%m-%dT%H:%M")
                 ok = await arcana_reminder_flow.schedule_reminder(
-                    chat_id=tg_id,
+                    chat_id=primary_tg,
                     title=w.title or "Работа",
                     reminder_dt=reminder_iso,
                     page_id=str(w.id),
                     tz_offset=int(tz_offset),
+                    recipients=tg_ids,
                 )
                 if ok:
                     restored += 1
         except Exception as e:
-            logger.warning("restore_work_reminders for %s failed: %s", tg_id, e)
+            logger.warning("restore_work_reminders for user_id=%s failed: %s", user_id, e)
     logger.info("restored %d work reminders on startup", restored)
     return restored
 

@@ -89,18 +89,23 @@ async def handle_reply_update(message: Message, user_id: str = "") -> bool:
                 from arcana.bot import arcana_reminder_flow
                 from arcana.repos.works_tables import works as t_works
                 from core.db import get_engine
+                from core.user_manager import get_tg_ids_for_user
 
                 deadline = applied.get("Дедлайн") or ""
                 iso = deadline if "T" in deadline else f"{deadline[:10]}T09:00"
                 dt = datetime.strptime(iso[:16], "%Y-%m-%dT%H:%M")
                 reminder = (dt - timedelta(days=1)).strftime("%Y-%m-%dT%H:%M")
                 reminder_tz_offset = await get_user_tz(message.from_user.id)
+                # #306: рассылаем во все чаты владельца, не только в тот,
+                # откуда пришёл reply (см. work_preview.cb_work_save).
+                recipients = await get_tg_ids_for_user(user_id or "")
                 await arcana_reminder_flow.schedule_reminder(
                     chat_id=message.chat.id,
                     title=applied.get("Работа") or "Работа",
                     reminder_dt=reminder,
                     page_id=page_id,
                     tz_offset=int(reminder_tz_offset),
+                    recipients=recipients or None,
                 )
 
                 def _set_reminder():

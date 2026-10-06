@@ -103,6 +103,50 @@ async def test_restore_reschedules_with_matching_key():
     assert kwargs["chat_id"] == 7
     assert kwargs["tz_offset"] == 3
     assert kwargs["reminder_dt"] == "2026-12-31T17:00"
+    assert kwargs["recipients"] == [7]
+
+
+@pytest.mark.asyncio
+async def test_restore_fans_out_to_all_tg_ids_of_same_user(monkeypatch):
+    """#306: Кай делит один user_id между двумя tg_id (#202). Раньше цикл шёл
+    по tg_id и планировал ОДНУ И ТУ ЖЕ Работу заново на каждый — с одним
+    job_id `reminder_<id>`, так что replace_existing на втором tg_id
+    перетирал первый, и напоминание доезжало только до ПОСЛЕДНЕГО tg_id в
+    allowed_ids. Теперь один проход на user_id, recipients = ВСЕ его tg_id."""
+    import arcana.bot as abot
+    from core.config import config
+
+    w = Work(
+        id="42", title="Расклад Оле", priority="Можно потом",
+        deadline_str="", category_str="", has_client=True,
+        reminder_dt=datetime(2026, 12, 31, 17, 0),
+    )
+
+    # Два tg_id (основной аккаунт + второй) делят один user_id.
+    users_by_tg = {
+        111: {"permissions": {"arcana": True}, "user_id": "u-shared"},
+        222: {"permissions": {"arcana": True}, "user_id": "u-shared"},
+    }
+
+    async def fake_get_user(tg_id):
+        return users_by_tg.get(tg_id)
+
+    with patch.object(config, "allowed_ids", [111, 222]), \
+         patch("core.user_manager.get_user", AsyncMock(side_effect=fake_get_user)), \
+         patch("core.shared_handlers.get_user_tz", AsyncMock(return_value=3)), \
+         patch.object(pgw.PgWorksRepo, "active_with_future_reminder",
+                      AsyncMock(return_value=[w])), \
+         patch.object(abot.arcana_reminder_flow, "schedule_reminder",
+                      AsyncMock(return_value=True)) as m_sched:
+        n = await abot.restore_work_reminders()
+
+    assert n == 1
+    # ОДИН вызов на Работу (не по разу на каждый tg_id — иначе replace_existing
+    # job_id перетирает предыдущий и второй аккаунт никогда её не видит).
+    m_sched.assert_awaited_once()
+    kwargs = m_sched.await_args.kwargs
+    assert kwargs["chat_id"] == 111  # primary = первый tg_id группы
+    assert sorted(kwargs["recipients"]) == [111, 222]  # но уходит в ОБА чата
 
 
 @pytest.mark.asyncio

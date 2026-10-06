@@ -106,6 +106,69 @@ async def test_schedule_reminder_skips_if_far_in_past():
     assert ok is False
 
 
+@pytest.mark.asyncio
+async def test_schedule_reminder_fans_out_to_recipients():
+    """#306: recipients=[a, b] → оба получают сообщение, не только chat_id."""
+    f = ReminderScheduler()
+    bot = MagicMock()
+    bot.send_message = AsyncMock()
+    sched = MagicMock()
+    sched.add_job = MagicMock()
+    f.init(bot, sched)
+
+    past = (datetime.now(timezone(timedelta(hours=3))) - timedelta(seconds=10)).strftime("%Y-%m-%dT%H:%M")
+    ok = await f.schedule_reminder(
+        chat_id=111, title="x", reminder_dt=past, page_id="p", tz_offset=3,
+        recipients=[111, 222],
+    )
+    assert ok is True
+    sent_to = [c.args[0] for c in bot.send_message.await_args_list]
+    assert sent_to == [111, 222]
+
+
+@pytest.mark.asyncio
+async def test_schedule_reminder_no_recipients_falls_back_to_chat_id():
+    """recipients=None (старое поведение) → шлём только в chat_id."""
+    f = ReminderScheduler()
+    bot = MagicMock()
+    bot.send_message = AsyncMock()
+    sched = MagicMock()
+    sched.add_job = MagicMock()
+    f.init(bot, sched)
+
+    past = (datetime.now(timezone(timedelta(hours=3))) - timedelta(seconds=10)).strftime("%Y-%m-%dT%H:%M")
+    await f.schedule_reminder(
+        chat_id=111, title="x", reminder_dt=past, page_id="p", tz_offset=3,
+    )
+    sent_to = [c.args[0] for c in bot.send_message.await_args_list]
+    assert sent_to == [111]
+
+
+@pytest.mark.asyncio
+async def test_schedule_reminder_one_target_fails_other_still_sent():
+    """Один из recipients упал (например заблокировал бота) — второй всё
+    равно получает сообщение, send_reminder не падает целиком."""
+    f = ReminderScheduler()
+    bot = MagicMock()
+
+    async def _send(chat_id, *a, **kw):
+        if chat_id == 111:
+            raise RuntimeError("blocked")
+    bot.send_message = AsyncMock(side_effect=_send)
+    sched = MagicMock()
+    sched.add_job = MagicMock()
+    f.init(bot, sched)
+
+    past = (datetime.now(timezone(timedelta(hours=3))) - timedelta(seconds=10)).strftime("%Y-%m-%dT%H:%M")
+    ok = await f.schedule_reminder(
+        chat_id=111, title="x", reminder_dt=past, page_id="p", tz_offset=3,
+        recipients=[111, 222],
+    )
+    assert ok is True
+    sent_to = [c.args[0] for c in bot.send_message.await_args_list]
+    assert sent_to == [111, 222]  # обе попытки сделаны, несмотря на фейл первой
+
+
 def test_remove_jobs_calls_remove_for_both_prefixes():
     f = ReminderScheduler()
     sched = MagicMock()

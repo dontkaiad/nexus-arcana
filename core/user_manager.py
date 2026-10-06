@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import Dict, Optional
+from typing import Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -66,6 +66,29 @@ async def get_user_id(tg_id: int) -> Optional[str]:
     if user is None:
         return None
     return user.get("user_id")
+
+
+async def get_tg_ids_for_user(user_id: str) -> List[int]:
+    """Вернуть все tg_id, резолвящиеся в этот user_id (#202/#306: Кай делит
+    один user_id между двумя TG-аккаунтами). Нужно для рассылки напоминаний
+    во ВСЕ чаты владельца, а не только в тот, откуда пришло действие —
+    иначе напоминание уходит в один конкретный чат (какой — зависит от
+    порядка ALLOWED_TELEGRAM_IDS / от того, с какого аккаунта создавалась
+    запись), а не туда, где Кай реально смотрит уведомления.
+
+    Итерирует config.allowed_ids и резолвит каждый через get_user (кэш TTL
+    5 мин, так что повторные вызовы почти бесплатны). Пустой/неизвестный
+    user_id → [].
+    """
+    if not user_id:
+        return []
+    from core.config import config
+    out: List[int] = []
+    for tg_id in config.allowed_ids:
+        u = await get_user(tg_id)
+        if u and u.get("user_id") == user_id:
+            out.append(tg_id)
+    return out
 
 
 def invalidate_cache(tg_id: int = 0) -> None:

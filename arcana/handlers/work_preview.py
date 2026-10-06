@@ -613,13 +613,19 @@ async def cb_work_save(call: CallbackQuery) -> None:
             from arcana.bot import arcana_reminder_flow
             from arcana.repos.works_tables import works as t_works
             from core.db import get_engine
+            from core.user_manager import get_tg_ids_for_user
 
+            # #306: рассылаем во ВСЕ чаты владельца (Кай делит один user_id
+            # между двумя tg_id, #202), а не только в тот, откуда создавалась
+            # Работа — иначе напоминание уходит в "другой" аккаунт.
+            recipients = await get_tg_ids_for_user(data.get("user_id") or "")
             await arcana_reminder_flow.schedule_reminder(
                 chat_id=call.message.chat.id,
                 title=data.get("title") or "Работа",
                 reminder_dt=reminder,
                 page_id=result,
                 tz_offset=int(tz_offset),
+                recipients=recipients or None,
             )
 
             def _set_reminder():

@@ -167,9 +167,15 @@ async def _handle_recurring_work_done(
         pass
     if new_reminder:
         try:
+            # #306: рассылаем во все чаты владельца, не только в чат, где
+            # нажали «Сделала» (см. work_preview.cb_work_save).
+            from core.user_manager import get_user_id, get_tg_ids_for_user
+            owner_user_id = await get_user_id(message.from_user.id)
+            recipients = await get_tg_ids_for_user(owner_user_id or "")
             await arcana_reminder_flow.schedule_reminder(
                 chat_id=message.chat.id, title=title, reminder_dt=new_reminder,
                 page_id=work_id, tz_offset=tz_offset,
+                recipients=recipients or None,
             )
         except Exception as e:
             logger.warning("_handle_recurring_work_done: schedule failed: %s", e)
@@ -342,14 +348,20 @@ async def _do_reschedule(
         from arcana.bot import arcana_reminder_flow
         from arcana.repos.works_tables import works as t_works
         from core.db import get_engine
+        from core.user_manager import get_user_id, get_tg_ids_for_user
         import asyncio
 
+        # #306: рассылаем во все чаты владельца, не только в чат, где
+        # перенесли напоминание (см. work_preview.cb_work_save).
+        owner_user_id = await get_user_id(uid)
+        recipients = await get_tg_ids_for_user(owner_user_id or "")
         ok = await arcana_reminder_flow.schedule_reminder(
             chat_id=message.chat.id,
             title=title,
             reminder_dt=reminder_iso,
             page_id=work_id,
             tz_offset=tz_offset,
+            recipients=recipients or None,
         )
         if not ok:
             await message.answer("⚠️ Не удалось запланировать напоминание — дата в прошлом?")

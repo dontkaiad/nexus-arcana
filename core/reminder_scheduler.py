@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timedelta, timezone
-from typing import Optional
+from typing import List, Optional
 
 from aiogram import Bot
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
@@ -98,8 +98,17 @@ class ReminderScheduler:
         reminder_dt: str,
         page_id: str,
         tz_offset: int = 3,
+        recipients: Optional[List[int]] = None,
     ) -> bool:
         """Поставить APScheduler-job на reminder_dt (ISO YYYY-MM-DDTHH:MM).
+
+        ``recipients`` — список tg_id, которым реально уйдёт сообщение
+        (#306: один владелец может иметь несколько tg_id, делящих один
+        user_id — см. core.user_manager.get_tg_ids_for_user). По умолчанию
+        (``None``) шлём только в ``chat_id`` — старое поведение для
+        вызывающих, которые ещё не передают recipients. ``chat_id`` всегда
+        используется как ключ job_id и как fallback, если recipients пуст.
+
         Возвращает True если запланировано, False если scheduler ещё не
         инициализирован, дата в прошлом и >2мин назад, или ошибка."""
         if not self.ready:
@@ -116,17 +125,23 @@ class ReminderScheduler:
 
         bot = self._bot
         kb = self._build_reminder_kb(page_id)
+        targets = [t for t in (recipients or [chat_id]) if t]
 
         async def send_reminder() -> None:
-            try:
-                await bot.send_message(
-                    chat_id,
-                    f"🔔 <b>Напоминание:</b> {title}\n\nСделано?",
-                    parse_mode="HTML",
-                    reply_markup=kb,
-                )
-            except Exception as e:
-                logger.error("send_reminder failed: %s", e)
+            sent = False
+            for target in targets:
+                try:
+                    await bot.send_message(
+                        target,
+                        f"🔔 <b>Напоминание:</b> {title}\n\nСделано?",
+                        parse_mode="HTML",
+                        reply_markup=kb,
+                    )
+                    sent = True
+                except Exception as e:
+                    logger.error("send_reminder failed for %s: %s", target, e)
+            if not sent:
+                logger.error("send_reminder: all targets failed for %s", page_id)
 
         now = self._now()
         if dt <= now:
@@ -157,7 +172,9 @@ class ReminderScheduler:
         deadline_dt: str,
         page_id: str,
         tz_offset: int = 3,
+        recipients: Optional[List[int]] = None,
     ) -> bool:
+        """См. schedule_reminder — тот же fan-out через ``recipients``."""
         if not self.ready:
             return False
         try:
@@ -174,17 +191,23 @@ class ReminderScheduler:
 
         bot = self._bot
         kb = self._build_deadline_kb(page_id)
+        targets = [t for t in (recipients or [chat_id]) if t]
 
         async def check_deadline() -> None:
-            try:
-                await bot.send_message(
-                    chat_id,
-                    f"⏰ <b>Дедлайн:</b> {title}\n\nСделала?",
-                    parse_mode="HTML",
-                    reply_markup=kb,
-                )
-            except Exception as e:
-                logger.error("check_deadline failed: %s", e)
+            sent = False
+            for target in targets:
+                try:
+                    await bot.send_message(
+                        target,
+                        f"⏰ <b>Дедлайн:</b> {title}\n\nСделала?",
+                        parse_mode="HTML",
+                        reply_markup=kb,
+                    )
+                    sent = True
+                except Exception as e:
+                    logger.error("check_deadline failed for %s: %s", target, e)
+            if not sent:
+                logger.error("check_deadline: all targets failed for %s", page_id)
 
         job_id = f"deadline_{page_id}"
         try:

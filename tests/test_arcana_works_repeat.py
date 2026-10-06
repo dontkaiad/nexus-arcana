@@ -51,7 +51,7 @@ def engine():
         conn.execute(sa.text(
             "CREATE TABLE works (id INTEGER PRIMARY KEY AUTOINCREMENT, "
             "title TEXT NOT NULL, deadline TIMESTAMP, reminder TIMESTAMP, "
-            "category TEXT, priority_id INTEGER, status_id INTEGER, client_id INTEGER, "
+            "category TEXT, notes TEXT, priority_id INTEGER, status_id INTEGER, client_id INTEGER, "
             "repeat_id INTEGER, day_of_week_id INTEGER, repeat_time TEXT, "
             "user_id TEXT, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, "
             "updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)"
