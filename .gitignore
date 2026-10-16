@@ -242,3 +242,9 @@ dev-db.dump
 # случайно подтянутое — не коммитить (PDF/договоры/дистрибутивы)
 *.dmg
 *.pdf
+
+# tools/people_import — личные данные (экспорты, сессии, staging)
+tools/people_import/data/
+*.session
+*.jsonl
+result.json
