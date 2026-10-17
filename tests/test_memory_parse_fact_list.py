@@ -33,3 +33,20 @@ async def test_parse_fact_empty_list_falls_back():
     with patch("core.memory.ask_claude", AsyncMock(return_value="[]")):
         fact, category, _, key = await _parse_fact("запомни что-то")
     assert category == "💡 Инсайт" and key == "факт"
+
+
+@pytest.mark.asyncio
+async def test_parse_fact_restores_name_dropped_from_fact():
+    raw = '{"fact":"день рождения 17 октября 2004","category":"👥 Люди","связь":"Хен","ключ":"хен_др"}'
+    with patch("core.memory.ask_claude", AsyncMock(return_value=raw)):
+        fact, _, link, _ = await _parse_fact("у Хена др 17 октября 2004")
+    assert fact == "Хен: день рождения 17 октября 2004"
+    assert link == "Хен"
+
+
+@pytest.mark.asyncio
+async def test_parse_fact_keeps_name_already_in_fact_declined():
+    raw = '{"fact":"у Хена день рождения 17 октября 2004","category":"👥 Люди","связь":"Хен","ключ":"хен_др"}'
+    with patch("core.memory.ask_claude", AsyncMock(return_value=raw)):
+        fact, *_ = await _parse_fact("у Хена др 17 октября 2004")
+    assert fact == "у Хена день рождения 17 октября 2004"
