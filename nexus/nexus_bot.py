@@ -1644,6 +1644,16 @@ async def main() -> None:
             id="list_expiry",
             replace_existing=True,
         )
+        # 🗓 Инвентарь: раз в месяц (1-го, 07:20 UTC = 10:20 СПб) — что выкинуть
+        # (просрочено) и что скоро испортится; нечего сказать — молчим.
+        from core.list_manager import monthly_expiry_digest
+        nexus_scheduler.add_job(
+            monthly_expiry_digest,
+            args=[bot, 3],
+            trigger=CronTrigger(day=1, hour=7, minute=20),
+            id="list_expiry_monthly",
+            replace_existing=True,
+        )
         # 💰 Бюджет: ревью в день зарплаты — ежедневно 07:30 UTC (10:30 МСК), внутри проверяет payday
         from nexus.handlers.finance import proactive_budget_review
         nexus_scheduler.add_job(

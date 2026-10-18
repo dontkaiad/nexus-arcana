@@ -837,6 +837,63 @@ async def get_list_summary(
     }
 
 
+def build_expiry_digest(items, today, horizon_days: int = 30) -> str:
+    """Текст ежемесячного итога по срокам годности или "" если сказать нечего.
+
+    items — ListItem'ы инвентаря с expires_at. Просроченные → «выкинуть»,
+    истекающие в ближайшие horizon_days → «использовать». Остальное молчим."""
+    import html
+    from datetime import date as date_type
+
+    expired, soon = [], []
+    for it in items:
+        try:
+            d = date_type.fromisoformat((it.expires_at or "")[:10])
+        except ValueError:
+            continue
+        if d < today:
+            expired.append((d, it))
+        elif (d - today).days <= horizon_days:
+            soon.append((d, it))
+    if not expired and not soon:
+        return ""
+
+    def _qty(it) -> str:
+        return f" × {int(it.quantity)}" if it.quantity and it.quantity != 1 else ""
+
+    lines = ["🗓 <b>Сроки годности — ежемесячная проверка</b>"]
+    if expired:
+        lines.append("\n🗑 <b>Пора выкинуть (просрочено):</b>")
+        for d, it in sorted(expired, key=lambda x: x[0]):
+            lines.append(f"  • {html.escape(it.name)}{_qty(it)} — с {d.isoformat()}")
+    if soon:
+        lines.append(f"\n⏳ <b>Скоро испортится (до {horizon_days} дн.):</b>")
+        for d, it in sorted(soon, key=lambda x: x[0]):
+            lines.append(
+                f"  • {html.escape(it.name)}{_qty(it)} — до {d.isoformat()} (через {(d - today).days} дн.)"
+            )
+    return "\n".join(lines)
+
+
+async def monthly_expiry_digest(bot, user_tz_offset: int = 3) -> int:
+    """Cron раз в месяц: пройтись по ВСЕМУ инвентарю Nexus со сроком годности и
+    написать, что выкинуть и что скоро испортится. Ничего такого нет → молчим.
+    Возвращает число отправленных сообщений."""
+    today = datetime.now(timezone(timedelta(hours=user_tz_offset))).date()
+    items = await _nexus_repo.get_expiry_due(today)
+    text = build_expiry_digest(items, today)
+    if not text:
+        return 0
+    sent = 0
+    for tg_id in config.allowed_ids:
+        try:
+            await bot.send_message(tg_id, text, parse_mode="HTML")
+            sent += 1
+        except Exception as e:
+            logger.error("monthly_expiry_digest: send error to %s: %s", tg_id, e)
+    return sent
+
+
 async def check_expiry(bot, user_tz_offset: int = 3) -> int:
     """Cron: найти инвентарь где срок годности подходит → уведомить."""
     from datetime import date as date_type
