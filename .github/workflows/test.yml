@@ -36,3 +36,20 @@ jobs:
       - run: python -m pip install -r requirements.txt -r requirements-dev.txt
       - run: python -m alembic upgrade head
       - run: python -m pytest tests -q -p no:cacheprovider
+
+      - name: Notify Telegram on failure
+        # Только push в main (там блокируется деплой); PR-ранов не спамим.
+        if: failure() && github.event_name == 'push'
+        run: |
+          send() {
+            curl -s -X POST "https://api.telegram.org/bot${{ secrets.TG_LOG_BOT_TOKEN }}/sendMessage" \
+              --data-urlencode "chat_id=${{ secrets.TG_LOG_CHAT_ID }}" \
+              --data-urlencode "message_thread_id=$1" \
+              --data-urlencode "parse_mode=HTML" \
+              --data-urlencode "text=❌ <b>Тесты упали — деплой не запущен</b>
+          commit: <code>${{ github.sha }}</code>
+          автор: ${{ github.actor }}
+          <a href=\"${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}\">открыть run</a>"
+          }
+          send "${{ secrets.TG_LOG_THREAD_NEXUS }}"
+          send "${{ secrets.TG_LOG_THREAD_ARCANA }}"
