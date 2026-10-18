@@ -29,7 +29,8 @@ def main() -> None:
                         f.get("screen_name", "")],
             "type": "birthday",
             "fact": birthday_fact(int(parts[0]), int(parts[1]), int(parts[2]) if len(parts) > 2 else None),
-            "quote": "", "source": "vk",
+            "quote": "", "source": "vk", "origin": "api",
+            "vk_id": f.get("id"), "vk_screen": f.get("screen_name") or None,
         })
     print("VK: друзей=%d, с ДР=%d, добавлено в staging=%d" % (len(items), len(records), append_staging(records)))
 

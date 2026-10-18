@@ -54,7 +54,8 @@ async def main() -> None:
             records.append({
                 "name": _name(u), "aliases": aliases, "type": "birthday",
                 "fact": birthday_fact(b.day, b.month, getattr(b, "year", None)),
-                "quote": "", "source": "tg",
+                "quote": "", "source": "tg", "origin": "api",
+                "tg_id": u.id, "tg_username": u.username or None,
             })
             await asyncio.sleep(0.3)
         print("TG: людей=%d, с ДР=%d, добавлено в staging=%d" % (len(users), len(records), append_staging(records)))

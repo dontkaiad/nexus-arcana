@@ -7,7 +7,8 @@ import os
 import re
 import sys
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional
+from datetime import date
+from typing import Dict, Iterable, List, Optional, Tuple
 
 ROOT = Path(__file__).resolve().parents[2]  # AI_AGENTS/
 DATA_DIR = Path(__file__).resolve().parent / "data"
@@ -82,29 +83,108 @@ def _dedup_id(rec: Dict) -> str:
     return "%s|%s|%s" % (rec["name"].lower(), rec["type"], norm_fact(rec["fact"]))
 
 
+# Идентичность человека в staging: жёсткие ключи tg_id / vk_id (+ username'ы
+# для автосклейки VK↔TG). origin: api — ДР из TG/VK API, chat — извлечено из переписки.
+IDENT_FIELDS = ("tg_id", "tg_username", "vk_id", "vk_screen")
+
+
+def _enrich(old: Dict, new: Dict) -> bool:
+    """Дополняет существующую запись недостающими id/алиасами. True если изменили."""
+    changed = False
+    for f in IDENT_FIELDS:
+        if not old.get(f) and new.get(f):
+            old[f] = new[f]
+            changed = True
+    if new.get("origin") == "api" and old.get("origin") != "api":
+        old["origin"] = "api"
+        changed = True
+    merged = clean_aliases(old["name"], list(old.get("aliases") or []) + list(new.get("aliases") or []))
+    if merged != list(old.get("aliases") or []):
+        old["aliases"] = merged
+        changed = True
+    return changed
+
+
 def append_staging(records: Iterable[Dict]) -> int:
-    """Дописывает новые записи; дубли (имя+тип+факт) пропускает. approved=None."""
-    have = {_dedup_id(r) for r in load_staging()}
-    added = 0
-    with STAGING.open("a", encoding="utf-8") as f:
-        for r in records:
-            rec = {
-                "name": r["name"],
-                "aliases": clean_aliases(r["name"], r.get("aliases") or []),
-                "fact": r["fact"],
-                "type": r["type"] if r["type"] in TYPES else "other",
-                "quote": r.get("quote", ""),
-                "source": r.get("source", ""),
-                "approved": None,
-            }
-            k = _dedup_id(rec)
-            if k in have:
-                continue
-            have.add(k)
+    """Дописывает новые записи; дубль (имя+тип+факт) не плодит, а ДОПОЛНЯЕТ
+    существующую недостающими id/алиасами. Возвращает число новых записей."""
+    existing = load_staging()
+    index = {_dedup_id(r): r for r in existing}
+    added, dirty = [], False
+    for r in records:
+        rec = {
+            "name": r["name"],
+            "aliases": clean_aliases(r["name"], r.get("aliases") or []),
+            "fact": r["fact"],
+            "type": r["type"] if r["type"] in TYPES else "other",
+            "quote": r.get("quote", ""),
+            "source": r.get("source", ""),
+            "origin": r.get("origin") or ("api" if not r.get("quote") else "chat"),
+            "approved": None,
+        }
+        for f in IDENT_FIELDS:
+            rec[f] = r.get(f)
+        k = _dedup_id(rec)
+        if k in index:
+            dirty = _enrich(index[k], rec) or dirty
+            continue
+        index[k] = rec
+        added.append(rec)
+    if dirty:
+        write_staging(existing + added)
+    elif added:
+        with STAGING.open("a", encoding="utf-8") as f:
+            for rec in added:
+                f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+    return len(added)
+
+
+def write_staging(rows: List[Dict]) -> None:
+    tmp = STAGING.with_suffix(".jsonl.tmp")
+    with tmp.open("w", encoding="utf-8") as f:
+        for rec in rows:
             f.write(json.dumps(rec, ensure_ascii=False) + "\n")
-            added += 1
-    return added
+    tmp.replace(STAGING)
 
 
 def birthday_fact(day: int, month: int, year: Optional[int] = None) -> str:
     return "День рождения: %02d.%02d%s" % (day, month, ".%d" % year if year else "")
+
+
+# ── даты рождения ───────────────────────────────────────────────────────────
+
+UNKNOWN_YEAR = 1904  # високосный: год ДР неизвестен (см. ADR-0027)
+
+_MONTHS = {
+    "январ": 1, "феврал": 2, "март": 3, "апрел": 4, "ма": 5, "июн": 6,
+    "июл": 7, "август": 8, "сентябр": 9, "октябр": 10, "ноябр": 11, "декабр": 12,
+}
+_NUM_DATE = re.compile(r"(?<!\d)(\d{1,2})\.(\d{1,2})(?:\.(\d{4}))?(?!\d)")
+_WORD_DATE = re.compile(r"(?<!\d)(\d{1,2})\s+([а-яё]+)(?:\s+(\d{4}))?", re.IGNORECASE)
+
+
+def parse_birthday(fact: str) -> Optional[Tuple[date, bool]]:
+    """Дата из текста факта → (date, year_known). None если дату не достать
+    (нет числа+месяца). Год неизвестен → UNKNOWN_YEAR."""
+    text_ = fact.lower()
+    cands = []  # type: List[Tuple[int, int, Optional[int]]]
+    for m in _NUM_DATE.finditer(text_):
+        cands.append((int(m.group(1)), int(m.group(2)), int(m.group(3)) if m.group(3) else None))
+    for m in _WORD_DATE.finditer(text_):
+        word = m.group(2)
+        mon = next((n for stem, n in _MONTHS.items() if word.startswith(stem) and (stem != "ма" or word in ("мая", "май"))), None)
+        if mon:
+            cands.append((int(m.group(1)), mon, int(m.group(3)) if m.group(3) else None))
+    if len(cands) != 1:  # ноль или несколько дат — неоднозначно
+        return None
+    d, mth, y = cands[0]
+    try:
+        return date(y or UNKNOWN_YEAR, mth, d), bool(y)
+    except ValueError:
+        return None
+
+
+def name_key(name: str) -> str:
+    """Нормализованное имя для сравнения: lower, ё→е, схлопнутые пробелы,
+    токены без падежных окончаний не режем (имя+фамилия сравниваются как есть)."""
+    return re.sub(r"\s+", " ", name.lower().replace("ё", "е")).strip()

@@ -47,14 +47,14 @@ def _tg_text(t) -> str:
     return "".join(p if isinstance(p, str) else p.get("text", "") for p in t)
 
 
-def iter_tg(path: Path) -> Iterator[Tuple[str, List[Tuple[str, str]]]]:
+def iter_tg(path: Path) -> Iterator[Tuple[str, int, List[Tuple[str, str]]]]:
     data = json.loads(path.read_text(encoding="utf-8"))
     for chat in data.get("chats", {}).get("list", []):
         if chat.get("type") != "personal_chat" or not chat.get("name"):
             continue
         msgs = [(m.get("from") or "", _tg_text(m.get("text", "")))
                 for m in chat.get("messages", []) if m.get("type") == "message"]
-        yield chat["name"], msgs
+        yield chat["name"], chat.get("id"), msgs
 
 
 # ── VK HTML ─────────────────────────────────────────────────────────────────
@@ -112,7 +112,7 @@ class _VkParser(HTMLParser):
             self._buf.append(data)
 
 
-def iter_vk(root: Path) -> Iterator[Tuple[str, List[Tuple[str, str]]]]:
+def iter_vk(root: Path) -> Iterator[Tuple[str, int, List[Tuple[str, str]]]]:
     """Архив VK: messages/<peer_id>/messages*.html (cp1251). Групповые (id>=2e9) и сообщества пропускаем."""
     msg_dir = next((p for p in root.rglob("*") if p.is_dir() and p.name.lower() == "messages"), None)
     if not msg_dir:
@@ -127,7 +127,7 @@ def iter_vk(root: Path) -> Iterator[Tuple[str, List[Tuple[str, str]]]]:
             title = title or parser.title
             msgs += parser.msgs
         if title and msgs:
-            yield title, msgs
+            yield title, int(d.name), msgs
 
 
 # ── окна + Haiku ────────────────────────────────────────────────────────────
@@ -156,7 +156,7 @@ def _parse_json(raw: str) -> List[Dict]:
         return []
 
 
-async def extract_batch(partner: str, source: str, wins: List[str]) -> List[Dict]:
+async def extract_batch(partner: str, source: str, wins: List[str], pid: Optional[int] = None) -> List[Dict]:
     prompt = "\n\n".join("### Фрагмент %d (partner: %s)\n%s" % (i, partner, w[:1500]) for i, w in enumerate(wins))
     items = _parse_json(await ask_claude(prompt, system=SYSTEM, max_tokens=2000, temperature=0))
     out = []
@@ -166,25 +166,28 @@ async def extract_batch(partner: str, source: str, wins: List[str]) -> List[Dict
         t = it.get("type") if it.get("type") in TYPES else "other"
         out.append({"name": (it.get("name") or partner).strip(), "aliases": [partner] if it.get("name") else [],
                     "fact": it["fact"].strip(), "type": t, "quote": (it.get("quote") or "")[:300],
-                    "source": source})
+                    "source": source, "origin": "chat",
+                    # id собеседника относится только к самому собеседнику
+                    "tg_id": pid if source == "tg" and not it.get("name") else None,
+                    "vk_id": pid if source == "vk" and not it.get("name") else None})
     return out
 
 
 async def run(tg: str, vk: str, max_windows: int) -> None:
     chats = []
     if tg:
-        chats += [("tg", n, m) for n, m in iter_tg(Path(tg))]
+        chats += [("tg", n, i, m) for n, i, m in iter_tg(Path(tg))]
     if vk:
-        chats += [("vk", n, m) for n, m in iter_vk(Path(vk))]
+        chats += [("vk", n, i, m) for n, i, m in iter_vk(Path(vk))]
     total_w = added = 0
-    for source, name, msgs in chats:
+    for source, name, pid, msgs in chats:
         wins = windows(msgs)
         if not wins:
             continue
         wins = wins[: max(0, max_windows - total_w)]
         total_w += len(wins)
         for i in range(0, len(wins), BATCH):
-            added += append_staging(await extract_batch(name, source, wins[i:i + BATCH]))
+            added += append_staging(await extract_batch(name, source, wins[i:i + BATCH], pid))
         print("%s %s: окон=%d" % (source, name, len(wins)))
         if total_w >= max_windows:
             print("Достигнут --max-windows")
@@ -192,10 +195,46 @@ async def run(tg: str, vk: str, max_windows: int) -> None:
     print("Всего окон=%d, добавлено в staging=%d" % (total_w, added))
 
 
+def backfill_ids(tg: str, vk: str) -> None:
+    """Без LLM: проставляет tg_id/vk_id в уже извлечённые записи по названию
+    чата (имя собеседника). Неоднозначные названия (два чата с одним именем) не трогает."""
+    from tools.people_import.common import load_staging, write_staging
+    ids = {"tg": {}, "vk": {}}  # type: Dict[str, Dict[str, List[int]]]
+    if tg:
+        for n, i, _ in iter_tg(Path(tg)):
+            ids["tg"].setdefault(n, []).append(i)
+    if vk:
+        for n, i, _ in iter_vk(Path(vk)):
+            ids["vk"].setdefault(n, []).append(i)
+    rows = load_staging()
+    filled = ambiguous = 0
+    for r in rows:
+        src = r.get("source")
+        field = "tg_id" if src == "tg" else "vk_id" if src == "vk" else None
+        if not field or r.get(field) or r.get("origin") == "api":
+            continue
+        for key in [r["name"]] + list(r.get("aliases") or []):
+            cands = ids[src].get(key)
+            if cands:
+                if len(cands) == 1:
+                    r[field] = cands[0]
+                    filled += 1
+                else:
+                    ambiguous += 1
+                break
+        r.setdefault("origin", "chat" if r.get("quote") else "api")
+    write_staging(rows)
+    print("backfill: id проставлен=%d, неоднозначных названий=%d" % (filled, ambiguous))
+
+
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--tg", default="", help="путь к result.json (TG export)")
     ap.add_argument("--vk", default="", help="папка VK-архива")
     ap.add_argument("--max-windows", type=int, default=400, help="потолок окон (деньги!)")
+    ap.add_argument("--backfill-ids", action="store_true", help="без LLM: проставить tg_id/vk_id в staging")
     a = ap.parse_args()
-    asyncio.run(run(a.tg, a.vk, a.max_windows))
+    if a.backfill_ids:
+        backfill_ids(a.tg, a.vk)
+    else:
+        asyncio.run(run(a.tg, a.vk, a.max_windows))

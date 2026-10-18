@@ -39,6 +39,9 @@ class MemoryRepo:
         user_id: str = "",
         upsert: bool = False,
         source: str = "manual",
+        person_id: Optional[int] = None,
+        review_status: str = "confirmed",
+        index: bool = True,
     ) -> Optional[str]:
         """Save a pre-parsed memory fact. Returns memory_id or None.
 
@@ -49,11 +52,13 @@ class MemoryRepo:
         try:
             if upsert:
                 pid, _ = await self._pg.upsert(
-                    fact, ключ, category, scope, связь, source, user_id
+                    fact, ключ, category, scope, связь, source, user_id,
+                    person_id=person_id, review_status=review_status, index=index,
                 )
                 return pid
             return await self._pg.add(
-                fact, ключ, category, scope, связь, source, user_id
+                fact, ключ, category, scope, связь, source, user_id,
+                person_id=person_id, review_status=review_status, index=index,
             )
         except Exception as e:
             logger.error("MemoryRepo.save_parsed: %s", e)
