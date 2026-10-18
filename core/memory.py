@@ -294,12 +294,17 @@ async def _semantic_search_memory(
 
 async def _find_pages_by_hint(
     hint: str, page_size: int = 10, use_semantic: bool = True, user_id: str = "",
+    confirmed_only: bool = True,
 ) -> List[Memory]:
     """Умный поиск по hint через PG. Возвращает List[Memory].
 
     `user_id` — owner-ключ (#202): пусто → поиск по всей памяти владельца
     (текущее поведение для одного владельца на нескольких устройствах —
     все identity-строки делят один user_id). Непусто → фильтр по владельцу.
+
+    `confirmed_only` (ADR-0027): чтение для контекста/поиска видит только
+    review_status='confirmed'. Деструктивные пути (забудь/удали) передают
+    False — pending-факт тоже должен быть удаляем.
 
     Функция оставлена module-level: тесты test_memory_aliases патчат её.
     """
@@ -319,6 +324,7 @@ async def _find_pages_by_hint(
         try:
             results = await _mem_repo.find_by_category(
                 matched_cat, is_current=True, user_id=user_id, page_size=100,
+                confirmed_only=confirmed_only,
             )
             logger.info("_find_pages_by_hint category shortcut: found=%d", len(results))
             return results
@@ -339,7 +345,7 @@ async def _find_pages_by_hint(
     try:
         results = await _mem_repo.search(
             search_terms, user_id=user_id, page_size=page_size,
-            match_all=not use_semantic,
+            match_all=not use_semantic, confirmed_only=confirmed_only,
         )
         logger.info("_find_pages_by_hint: found=%d for terms=%s", len(results), search_terms)
         if use_semantic:
@@ -768,7 +774,9 @@ async def deactivate_memory(
         # use_semantic=False: деактивация применяется КО ВСЕМ найденным без
         # подтверждения — semantic-довесок (top-K ближайших БЕЗ порога
         # похожести) может подмешать нерелевантные факты (#184).
-        mems = await _find_pages_by_hint(hint, use_semantic=False, user_id=user_id) if hint else []
+        mems = await _find_pages_by_hint(
+            hint, use_semantic=False, user_id=user_id, confirmed_only=False,
+        ) if hint else []
         if not mems:
             tokens = _tokenize_hint(hint)
             subject = tokens[0] if tokens else hint
@@ -870,7 +878,9 @@ async def delete_memory(
         # use_semantic=False: ровно один матч архивируется НЕМЕДЛЕННО без
         # подтверждения — semantic-сосед (без порога похожести) на пустом
         # ILIKE снёс бы не тот факт (#184).
-        mems = await _find_pages_by_hint(hint, use_semantic=False, user_id=user_id) if hint else []
+        mems = await _find_pages_by_hint(
+            hint, use_semantic=False, user_id=user_id, confirmed_only=False,
+        ) if hint else []
         if not mems:
             tokens = _tokenize_hint(hint)
             subject = tokens[0] if tokens else hint

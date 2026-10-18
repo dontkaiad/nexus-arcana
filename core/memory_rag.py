@@ -170,6 +170,7 @@ def search_memory_semantic(
             WHERE embedding IS NOT NULL
               AND is_archived = false
               AND is_current = true
+              AND review_status = 'confirmed'
               {where_extra}
             ORDER BY embedding <=> CAST(:q AS vector)
             LIMIT :k

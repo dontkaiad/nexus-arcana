@@ -56,6 +56,8 @@ class Memory:
     user_id: str = ""
     date: str = ""           # created_at[:10]
     updated_at: str = ""     # ISO string from updated_at column
+    person_id: Optional[int] = None   # People domain (ADR-0027)
+    review_status: str = "confirmed"  # pending | confirmed | rejected
 
 
 # ── Row → domain object ───────────────────────────────────────────────────────
@@ -78,6 +80,8 @@ def _row_to_memory(row) -> Memory:
         user_id=row.user_id or "",
         date=date_str,
         updated_at=updated_str,
+        person_id=getattr(row, "person_id", None),
+        review_status=getattr(row, "review_status", None) or "confirmed",
     )
 
 
@@ -296,12 +300,18 @@ def _delete_sync(memory_id: str) -> bool:
         return False
 
 
-def _base_active_q():
-    return (
+def _base_active_q(confirmed_only: bool = True):
+    """Active memories. `confirmed_only` (default) hides pending/rejected
+    facts (ADR-0027): every read for context/search goes through here.
+    Destructive paths (forget/delete) pass False to see everything."""
+    q = (
         select(memories)
         .where(memories.c.is_current == True)   # noqa: E712
         .where(memories.c.is_archived == False)  # noqa: E712
     )
+    if confirmed_only:
+        q = q.where(memories.c.review_status == "confirmed")
+    return q
 
 
 def _search_sync(
@@ -310,6 +320,7 @@ def _search_sync(
     user_id: str = "",
     page_size: int = 10,
     match_all: bool = False,
+    confirmed_only: bool = True,
 ) -> List[Memory]:
     """match_all=False (по умолчанию): OR по всем терминам — широкий recall
     для информационного поиска («напомни про X»), где результат — список на
@@ -333,7 +344,7 @@ def _search_sync(
             )
             for term in terms
         ]
-        q = _base_active_q().where(and_(*term_conditions))
+        q = _base_active_q(confirmed_only).where(and_(*term_conditions))
     else:
         conditions = []
         for term in terms:
@@ -341,7 +352,7 @@ def _search_sync(
             conditions.append(memories.c.fact_text.ilike(like))
             conditions.append(memories.c.key_name.ilike(like))
             conditions.append(memories.c.related_to.ilike(like))
-        q = _base_active_q().where(or_(*conditions))
+        q = _base_active_q(confirmed_only).where(or_(*conditions))
     if scope and scope != "global":
         q = q.where(or_(memories.c.scope == scope, memories.c.scope == "global"))
     if user_id:
@@ -358,12 +369,15 @@ def _find_by_category_sync(
     scope: str = "",
     user_id: str = "",
     page_size: int = 100,
+    confirmed_only: bool = True,
 ) -> List[Memory]:
     q = (
         select(memories)
         .where(memories.c.is_archived == False)  # noqa: E712
         .where(memories.c.is_current == is_current)
     )
+    if confirmed_only:
+        q = q.where(memories.c.review_status == "confirmed")
     if category:
         q = q.where(memories.c.category == category)
     if scope and scope != "global":
@@ -419,8 +433,11 @@ def _find_recent_sync(
     scope: str = "",
     user_id: str = "",
     page_size: int = 10,
+    confirmed_only: bool = True,
 ) -> List[Memory]:
     q = select(memories).where(memories.c.is_archived == False)  # noqa: E712
+    if confirmed_only:
+        q = q.where(memories.c.review_status == "confirmed")
     if is_current is not None:
         q = q.where(memories.c.is_current == is_current)
     if scope and scope != "global":
@@ -543,8 +560,11 @@ class PgMemoryRepo:
         user_id: str = "",
         page_size: int = 10,
         match_all: bool = False,
+        confirmed_only: bool = True,
     ) -> List[Memory]:
-        return await asyncio.to_thread(_search_sync, terms, scope, user_id, page_size, match_all)
+        return await asyncio.to_thread(
+            _search_sync, terms, scope, user_id, page_size, match_all, confirmed_only
+        )
 
     async def find_by_category(
         self,
@@ -553,9 +573,11 @@ class PgMemoryRepo:
         scope: str = "",
         user_id: str = "",
         page_size: int = 100,
+        confirmed_only: bool = True,
     ) -> List[Memory]:
         return await asyncio.to_thread(
-            _find_by_category_sync, category, is_current, scope, user_id, page_size
+            _find_by_category_sync, category, is_current, scope, user_id, page_size,
+            confirmed_only,
         )
 
     async def find_by_key_prefixes(
@@ -579,7 +601,8 @@ class PgMemoryRepo:
         scope: str = "",
         user_id: str = "",
         page_size: int = 10,
+        confirmed_only: bool = True,
     ) -> List[Memory]:
         return await asyncio.to_thread(
-            _find_recent_sync, is_current, scope, user_id, page_size
+            _find_recent_sync, is_current, scope, user_id, page_size, confirmed_only
         )

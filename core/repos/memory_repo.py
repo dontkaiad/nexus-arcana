@@ -119,8 +119,9 @@ class MemoryRepo:
         user_id: str = "",
         page_size: int = 10,
         match_all: bool = False,
+        confirmed_only: bool = True,
     ) -> List[Memory]:
-        return await self._pg.search(terms, scope, user_id, page_size, match_all)
+        return await self._pg.search(terms, scope, user_id, page_size, match_all, confirmed_only)
 
     async def find_by_category(
         self,
@@ -129,8 +130,11 @@ class MemoryRepo:
         scope: str = "",
         user_id: str = "",
         page_size: int = 100,
+        confirmed_only: bool = True,
     ) -> List[Memory]:
-        return await self._pg.find_by_category(category, is_current, scope, user_id, page_size)
+        return await self._pg.find_by_category(
+            category, is_current, scope, user_id, page_size, confirmed_only
+        )
 
     async def find_by_key_prefixes(
         self,
@@ -145,8 +149,9 @@ class MemoryRepo:
         scope: str = "",
         user_id: str = "",
         page_size: int = 10,
+        confirmed_only: bool = True,
     ) -> List[Memory]:
-        return await self._pg.find_recent(is_current, scope, user_id, page_size)
+        return await self._pg.find_recent(is_current, scope, user_id, page_size, confirmed_only)
 
 
 _repo = MemoryRepo()
