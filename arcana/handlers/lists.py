@@ -904,7 +904,7 @@ async def handle_list_inv_search(msg: Message, data: dict, user_id: str = "") ->
     lines = [f"📦 <b>Инвентарь: {query}</b>"]
     for r in results:
         qty = f" × {int(r['quantity'])}" if r.get("quantity") else ""
-        note = f" — {r['note']}" if r.get("note") else ""
+        note = f" — {r['why']}" if r.get("why") else (f" — {r['note']}" if r.get("note") else "")
         lines.append(f"  ✓ {r['name']}{qty}{note}")
     await msg.answer("\n".join(lines), parse_mode="HTML")
 

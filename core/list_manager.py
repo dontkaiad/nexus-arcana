@@ -680,10 +680,38 @@ async def inventory_search(
         items = await _nexus_repo.search(
             query, list_type="📦 Инвентарь", user_id=user_page_id, page_size=20
         )
-        return [_item_to_dict(it) for it in items]
+        if items or not query:
+            return [_item_to_dict(it) for it in items]
+        all_items = await _nexus_repo.search(
+            "", list_type="📦 Инвентарь", user_id=user_page_id, page_size=_AI_POOL
+        )
+        return await _inventory_ai_fallback(query, [_item_to_dict(it) for it in all_items])
     else:
         items = await _arcana_repo.search(query, user_id=user_page_id, page_size=20)
-        return [_inv_to_dict(it) for it in items]
+        if items or not query:
+            return [_inv_to_dict(it) for it in items]
+        all_items = await _arcana_repo.search("", user_id=user_page_id, page_size=_AI_POOL)
+        # Бартер-чеклисты лежат в той же таблице, но это не «вещи дома».
+        pool = [
+            _inv_to_dict(it) for it in all_items
+            if it.list_type == "инвентарь" and it.category != "🔄 Бартер"
+        ]
+        return await _inventory_ai_fallback(query, pool)
+
+
+_AI_POOL = 300
+
+
+async def _inventory_ai_fallback(query: str, pool: list) -> list:
+    """ILIKE ничего не нашёл («от похмелья» ≠ «Алка-Зельцер») → Haiku смотрит
+    на весь инвентарь и сам подбирает подходящее с пояснением (key "why").
+    Любой сбой → [] (остаётся обычное «не найден»)."""
+    try:
+        from core import inventory_ai
+        return await inventory_ai.suggest_from_inventory(query, pool)
+    except Exception as e:
+        logger.warning("inventory AI fallback failed: %s", e)
+        return []
 
 
 async def inventory_update(
