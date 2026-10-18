@@ -588,37 +588,6 @@ def _ai_get_open_barter_sync(user_id: str) -> List[InventoryItem]:
     return [_row_to_inventory_item(r) for r in rows]
 
 
-# ── Embedding-индексация инвентаря (core/inventory_rag.py) ─────────────────────
-# Fire-and-forget: пользователь не ждёт Voyage; сбой — warning, строка остаётся
-# с embedding=NULL и подберётся scripts/migrate_inventory_embeddings.py.
-
-_index_tasks: set = set()  # ссылки на task'и, иначе GC снимет незавершённые
-_EMBED_FIELDS = ("name", "category", "note")
-
-
-async def _index_inventory_safe(item_id: str) -> None:
-    try:
-        # Лениво: core.inventory_rag импортирует ListItem из ЭТОГО модуля.
-        from core import inventory_rag
-        item = await asyncio.to_thread(_nl_get_by_id_sync, item_id)
-        if item is None or item.list_type != inventory_rag.INVENTORY_TYPE:
-            return
-        text_ = inventory_rag.embed_text(item.name, item.category, item.note)
-        await asyncio.to_thread(inventory_rag.index_item, item_id, text_)
-    except Exception as e:
-        logger.warning("inventory embedding index failed for %s: %s", item_id, e)
-
-
-def _spawn_inventory_index(item_id: str) -> None:
-    try:
-        loop = asyncio.get_running_loop()
-    except RuntimeError:
-        return
-    task = loop.create_task(_index_inventory_safe(item_id))
-    _index_tasks.add(task)
-    task.add_done_callback(_index_tasks.discard)
-
-
 # ── Public async repos ─────────────────────────────────────────────────────────
 
 class PgNexusListsRepo:
@@ -645,7 +614,7 @@ class PgNexusListsRepo:
         works_id: str = "",
         user_id: str = "",
     ) -> ListItem:
-        item = await asyncio.to_thread(
+        return await asyncio.to_thread(
             _nl_add_sync,
             name, _pg_type(list_type), _pg_status(status),
             category, quantity, note, price_actual, price_plan,
@@ -653,9 +622,6 @@ class PgNexusListsRepo:
             is_recurring, remind_days, expires_at, stage,
             task_id, works_id, user_id,
         )
-        if item.list_type == "инвентарь":
-            _spawn_inventory_index(item.id)
-        return item
 
     async def get_list(
         self,
@@ -684,16 +650,7 @@ class PgNexusListsRepo:
         return await asyncio.to_thread(_nl_get_by_id_sync, item_id)
 
     async def update(self, item_id: str, **fields) -> bool:
-        ok = await asyncio.to_thread(_nl_update_sync, item_id, **fields)
-        if ok and any(f in fields for f in _EMBED_FIELDS):
-            # Текст сменился → старый вектор недействителен; переиндексируем.
-            try:
-                from core import inventory_rag
-                await asyncio.to_thread(inventory_rag.reset_embedding, item_id)
-            except Exception as e:
-                logger.warning("inventory embedding reset failed for %s: %s", item_id, e)
-            _spawn_inventory_index(item_id)
-        return ok
+        return await asyncio.to_thread(_nl_update_sync, item_id, **fields)
 
     async def update_status(self, item_id: str, status: str) -> bool:
         return await self.update(item_id, status=_pg_status(status))

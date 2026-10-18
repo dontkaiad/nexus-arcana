@@ -6,7 +6,6 @@ finance_add → routes to PG via finance_repo (nexus_budget or arcana_pnl by bot
 """
 from __future__ import annotations
 
-import asyncio
 import json
 import logging
 import os
@@ -681,26 +680,10 @@ async def inventory_search(
         items = await _nexus_repo.search(
             query, list_type="📦 Инвентарь", user_id=user_page_id, page_size=20
         )
-        if not items and query:
-            items = await _inventory_semantic_fallback(query, user_page_id)
         return [_item_to_dict(it) for it in items]
     else:
         items = await _arcana_repo.search(query, user_id=user_page_id, page_size=20)
         return [_inv_to_dict(it) for it in items]
-
-
-async def _inventory_semantic_fallback(query: str, user_page_id: str) -> list:
-    """ILIKE ничего не нашёл («от похмелья» ≠ «Алка-Зельцер») → pgvector top-K
-    + Haiku-реранк. Любой сбой → [] (остаётся обычное «не найден»)."""
-    try:
-        from core import inventory_rag
-        candidates = await asyncio.to_thread(
-            inventory_rag.search_inventory_semantic, query, user_page_id
-        )
-        return await inventory_rag.rerank_inventory_candidates(query, candidates)
-    except Exception as e:
-        logger.warning("inventory semantic fallback failed: %s", e)
-        return []
 
 
 async def inventory_update(
