@@ -17,7 +17,7 @@ from core.repos.lists_repo import (
     CATEGORY_TO_FINANCE,
     pending_get, pending_set, pending_del,
 )
-from core.lists_parser import parse_buy_text, format_rub, format_expiry
+from core.lists_parser import parse_buy_text, format_rub
 from core.list_classifier import extract_inventory_query
 
 logger = logging.getLogger("arcana.lists")
@@ -906,7 +906,7 @@ async def handle_list_inv_search(msg: Message, data: dict, user_id: str = "") ->
     for r in results:
         qty = f" × {int(r['quantity'])}" if r.get("quantity") else ""
         note = f" — {r['why']}" if r.get("why") else (f" — {r['note']}" if r.get("note") else "")
-        lines.append(f"  ✓ {r['name']}{qty}{note}{format_expiry(r.get('expiry'))}")
+        lines.append(f"  ✓ {r['name']}{qty}{note}")
     await msg.answer("\n".join(lines), parse_mode="HTML")
 
 
