@@ -28,6 +28,8 @@ memories = Table(
     Column("person_id",      BigInteger),
     # pending | confirmed | rejected. Every read for context/search shows
     # only 'confirmed'; destructive paths see all.
+    # цитата-основание автоизвлечённого факта (показывается при ревью); ADR-0027
+    Column("source_quote",   Text),
     Column("review_status",  Text,       nullable=False, server_default=text("'confirmed'")),
     Column("created_at",     TIMESTAMP(timezone=True), server_default=text("now()")),
     Column("updated_at",     TIMESTAMP(timezone=True), server_default=text("now()")),

@@ -131,3 +131,25 @@ def find_duplicates(rows: Iterable[Dict[str, Any]], limit: int = DUP_LIMIT) -> L
         out.append({"a": by_id[i], "b": by_id[j], "score": round(1 - miss, 3), "reasons": reasons})
     out.sort(key=lambda d: (-d["score"], d["a"]["id"], d["b"]["id"]))
     return out[:limit]
+
+
+# ── факты: ключ и текст (общие для импорта и ручного ввода) ─────────────────
+
+import hashlib as _hashlib
+
+
+def fact_hash(fact: str) -> str:
+    """hash8 от нормализованного факта (lower, strip, схлопнутые пробелы)."""
+    return _hashlib.sha1(_re.sub(r"\s+", " ", fact.lower().strip()).encode("utf-8")).hexdigest()[:8]
+
+
+def fact_text(name: str, fact: str) -> str:
+    """Факт без имени бесполезен в контексте бота («любит кофе» — кто?). Если имени
+    (по первым 4 буквам первого слова) в факте нет — ставим префикс."""
+    first = (name.split() or [""])[0]
+    stem = _norm(first)[:4]
+    return fact if not stem or stem in _norm(fact) else "%s: %s" % (first, fact)
+
+
+def related_to_str(name: str, aliases: Iterable[str]) -> str:
+    return " | ".join([name] + [a for a in aliases if a])

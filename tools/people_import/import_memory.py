@@ -28,6 +28,7 @@ from tools.people_import.common import (
 )
 
 from core.db import get_engine
+from core.people import fact_text as _fact_text, related_to_str
 from core.memory_rag import _embed_text, index_memories_batch
 from core.repos import pg_people_repo as prepo
 from core.repos.pg_memory_repo import PgMemoryRepo, bot_to_scope
@@ -60,7 +61,7 @@ def _absorb(c: Dict, r: Dict) -> None:
         else:
             c["bday_api" if r.get("origin") == "api" else "bday_chat"].append(parsed)
     else:
-        c["facts"].append((r["type"], r["fact"].strip()))
+        c["facts"].append((r["type"], r["fact"].strip(), (r.get("quote") or "").strip()))
 
 
 def _keys_of(c: Dict) -> Set[str]:
@@ -166,11 +167,11 @@ def finalize(c: Dict) -> Dict:
             seen.add(a.lower())
             alias_list.append(a)
     facts, uniq = [], set()
-    for t, f in c["facts"]:
+    for t, f, quote in c["facts"]:
         h = (t, fact_hash(f))
         if h not in uniq:
             uniq.add(h)
-            facts.append((t, f, h[1]))
+            facts.append((t, f, h[1], quote))
     bd = _birthday(c)
     return {"name": name, "aliases": alias_list, "tg_id": c["tg_id"],
             "tg_username": c["tg_username"], "vk_id": c["vk_id"], "birthday": bd[0] if bd else None,
@@ -179,15 +180,11 @@ def finalize(c: Dict) -> Dict:
             "facts": facts, "sources": sorted(c["sources"]), "bday_unparsed": c["bday_unparsed"]}
 
 
-def fact_text(name: str, fact: str) -> str:
-    """Факт без имени бесполезен в контексте бота («любит кофе» — кто?).
-    Если имени (по первым 4 буквам имени) в факте нет — ставим префикс."""
-    stem = name_key(name.split()[0])[:4]
-    return fact if stem and stem in name_key(fact) else "%s: %s" % (name.split()[0], fact)
+fact_text = _fact_text  # общая реализация: core.people.fact_text (и для ручного ввода в API)
 
 
 def related_to(p: Dict) -> str:
-    return " | ".join([p["name"]] + p["aliases"])
+    return related_to_str(p["name"], p["aliases"])
 
 
 def memory_key(person_id: int, type_: str, h8: str) -> str:
@@ -231,11 +228,21 @@ def counts(user_id: str) -> Dict[str, int]:
     return {"confirmed_visible": row[0], "pending": row[1]}
 
 
-def existing_keys(user_id: str) -> Set[str]:
+def existing_keys(user_id: str) -> Dict[str, Optional[str]]:
+    """key_name → source_quote уже импортированных фактов."""
     with get_engine().connect() as c:
-        return {r[0] for r in c.execute(sa.text(
-            "SELECT key_name FROM memories WHERE user_id=:u AND key_name LIKE 'person\\_%' AND NOT is_archived"
+        return {r[0]: r[1] for r in c.execute(sa.text(
+            "SELECT key_name, source_quote FROM memories "
+            "WHERE user_id=:u AND key_name LIKE 'person\\_%' AND NOT is_archived"
         ), {"u": user_id})}
+
+
+def set_quote(user_id: str, key: str, quote: str) -> None:
+    """Дописывает цитату уже существующему факту, НЕ трогая текст/эмбеддинг/статус
+    (upsert сбросил бы эмбеддинг: текст «изменился»)."""
+    with get_engine().begin() as c:
+        c.execute(sa.text("UPDATE memories SET source_quote=:q WHERE user_id=:u AND key_name=:k "
+                          "AND source_quote IS NULL AND NOT is_archived"), {"q": quote, "u": user_id, "k": key})
 
 
 def embed_missing(ids: List[str], batch_size: int, pause: float) -> Tuple[int, int]:
@@ -300,16 +307,22 @@ async def run(dry: bool, no_embed: bool, batch_size: int, pause: float) -> int:
         if len(p["sources"]) > 1:
             st["people_both_sources"] += 1
 
-        for type_, fact, h8 in p["facts"]:
+        for type_, fact, h8, quote in p["facts"]:
             fact_types[type_] += 1
             key = memory_key(pid, type_, h8) if pid is not None else None
             is_new = key is None or key not in keys_have
             fact_new[type_] += is_new
             if dry:
                 continue
+            if not is_new:
+                # уже импортирован: не upsert (он обнулил бы эмбеддинг), только цитата
+                if quote and not keys_have.get(key):
+                    set_quote(user_id, key, quote)
+                    st["quotes_filled"] += 1
+                continue
             mid, was_updated = await repo.upsert(
                 fact_text(p["name"], fact), key, CATEGORY, scope, related_to(p), SOURCE, user_id,
-                person_id=pid, review_status="pending", index=False,
+                person_id=pid, review_status="pending", index=False, source_quote=quote or None,
             )
             new_ids.append(str(mid))
             st["facts_updated" if was_updated else "facts_created"] += 1
@@ -329,7 +342,8 @@ async def run(dry: bool, no_embed: bool, batch_size: int, pause: float) -> int:
         print("DRY-RUN: в БД ничего не писал")
         return 0
 
-    print("— факты записаны: создано=%d, обновлено=%d" % (st["facts_created"], st["facts_updated"]))
+    print("— факты записаны: создано=%d, обновлено=%d, цитат дописано=%d"
+          % (st["facts_created"], st["facts_updated"], st["quotes_filled"]))
     if not no_embed:
         done, total = embed_missing(new_ids, batch_size, pause)
         print("— эмбеддинги: %d/%d (остаток подберёт scripts/migrate_memory_embeddings.py)" % (done, total))

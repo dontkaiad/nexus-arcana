@@ -31,7 +31,7 @@ def _make_engine():
             "is_current INTEGER NOT NULL DEFAULT 1, "
             "is_archived INTEGER NOT NULL DEFAULT 0, "
             "user_id TEXT NOT NULL DEFAULT '', "
-            "person_id INTEGER, "
+            "person_id INTEGER, source_quote TEXT, "
             "review_status TEXT NOT NULL DEFAULT 'confirmed', "
             "created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, "
             "updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)"

@@ -263,3 +263,108 @@ def test_review_all_scoped_and_404(client):
     with get_engine().connect() as c:
         assert c.execute(text("SELECT review_status FROM memories WHERE id=:i"), {"i": f}).scalar_one() == "pending"
     assert client.post("/api/people/999999999/reject-all").status_code == 404
+
+
+# ── PR-6: батч-ревью, ручной факт, цитата ────────────────────────────────────
+
+def _statuses(pid):
+    with get_engine().connect() as c:
+        return dict(c.execute(text("SELECT id, review_status FROM memories WHERE person_id=:p"), {"p": pid}).all())
+
+
+def test_review_batch_applies_everything_in_one_go(client):
+    pid = mk_person()
+    a, b, c_ = mk_fact(pid), mk_fact(pid, "important"), mk_fact(pid, "dislikes")
+    r = client.post("/api/people/%d/review" % pid, json={"approve": [a, b], "reject": [c_]})
+    assert r.status_code == 200, r.text
+    assert r.json()["status"] == "confirmed"
+    assert r.json()["counts"] == {"pending": 0, "confirmed": 2, "rejected": 1}
+    assert _statuses(pid) == {a: "confirmed", b: "confirmed", c_: "rejected"}
+
+
+@pytest.mark.asyncio
+async def test_review_batch_visibility_to_bot(client):
+    pid = mk_person()
+    ok = mk_fact(pid, text_="зюзябрикс-принят"); bad = mk_fact(pid, text_="зюзябрикс-снят")
+    client.post("/api/people/%d/review" % pid, json={"approve": [ok], "reject": [bad]})
+    got = {m.fact for m in await PgMemoryRepo().search(["зюзябрикс"], user_id=MARK)}
+    assert got == {"зюзябрикс-принят"}
+
+
+def test_review_batch_undo_restores_pending(client):
+    pid = mk_person()
+    a, b = mk_fact(pid), mk_fact(pid)
+    client.post("/api/people/%d/review" % pid, json={"approve": [a], "reject": [b]})
+    r = client.post("/api/people/%d/review" % pid, json={"reset": [a, b], "person_status": "pending"})
+    assert r.json()["status"] == "pending" and r.json()["counts"]["pending"] == 2
+    assert _statuses(pid) == {a: "pending", b: "pending"}
+
+
+def test_review_batch_is_atomic_on_foreign_or_unknown_fact(client):
+    pid = mk_person(); mine = mk_fact(pid)
+    other_p = mk_person(); theirs = mk_fact(other_p)
+    foreign_p = mk_person(user=OTHER); foreign = mk_fact(foreign_p, user=OTHER)
+    for bad in (theirs, foreign, 999999999):
+        r = client.post("/api/people/%d/review" % pid, json={"approve": [mine], "reject": [bad]})
+        assert r.status_code == 404
+    assert _statuses(pid) == {mine: "pending"}                     # approve из того же запроса не применился
+    assert client.get("/api/people/%d" % pid).json()["status"] == "pending"
+
+
+def test_review_batch_validation(client):
+    pid = mk_person(); f = mk_fact(pid)
+    assert client.post("/api/people/%d/review" % pid, json={"approve": [f], "reject": [f]}).status_code == 422
+    assert client.post("/api/people/%d/review" % pid, json={"person_status": "weird"}).status_code == 422
+    assert client.post("/api/people/999999999/review", json={}).status_code == 404
+    foreign = mk_person(user=OTHER)
+    assert client.post("/api/people/%d/review" % foreign, json={}).status_code == 404
+    # пустой батч = просто подтвердить человека без фактов
+    assert client.post("/api/people/%d/review" % pid, json={}).json()["status"] == "confirmed"
+
+
+def test_card_exposes_quote(client):
+    pid = mk_person()
+    mk_fact(pid, source_quote="цитата-основание")
+    mk_fact(pid, "other")
+    items = client.get("/api/people/%d" % pid).json()["facts"]
+    quotes = sorted((i["quote"] or "") for g in items for i in g["items"])
+    assert quotes == ["", "цитата-основание"]
+
+
+@pytest.mark.asyncio
+async def test_manual_fact_is_confirmed_visible_idempotent(client):
+    pid = mk_person("Мария Иванова", aliases=["Машка"])
+    r = client.post("/api/people/%d/facts" % pid, json={"text": "  зюзябрикс  любит чай ", "type": "likes"})
+    assert r.status_code == 200, r.text
+    fid = r.json()["fact_id"]
+    assert r.json()["counts"]["confirmed"] == 1
+    with get_engine().connect() as c:
+        row = c.execute(text("SELECT fact_text, key_name, source, review_status, related_to, scope, person_id "
+                             "FROM memories WHERE id=:i"), {"i": fid}).one()
+    assert row.fact_text == "Мария: зюзябрикс любит чай"          # имя подставлено
+    assert row.key_name.startswith("person_%d_likes_" % pid)
+    assert (row.source, row.review_status, row.scope, row.person_id) == ("manual", "confirmed", "nexus", pid)
+    assert row.related_to == "Мария Иванова | Машка"
+    assert [m.id for m in await PgMemoryRepo().search(["зюзябрикс"], user_id=MARK)] == [str(fid)]
+    again = client.post("/api/people/%d/facts" % pid, json={"text": "зюзябрикс любит чай", "type": "likes"}).json()
+    assert again["fact_id"] == fid and again["counts"]["confirmed"] == 1
+
+
+def test_manual_fact_validation_and_resurrects_rejected(client):
+    pid = mk_person()
+    assert client.post("/api/people/%d/facts" % pid, json={"text": " ", "type": "likes"}).status_code == 422
+    assert client.post("/api/people/%d/facts" % pid, json={"text": "x", "type": "weird"}).status_code == 422
+    assert client.post("/api/people/999999999/facts", json={"text": "x"}).status_code == 404
+    foreign = mk_person(user=OTHER)
+    assert client.post("/api/people/%d/facts" % foreign, json={"text": "x"}).status_code == 404
+    fid = client.post("/api/people/%d/facts" % pid, json={"text": "аллергия на орехи", "type": "important"}).json()["fact_id"]
+    client.post("/api/people/%d/facts/%d/reject" % (pid, fid))
+    client.post("/api/people/%d/facts" % pid, json={"text": "аллергия на орехи", "type": "important"})
+    assert _statuses(pid)[fid] == "confirmed"                     # повторный ручной ввод возвращает факт
+
+
+def test_patch_name_refreshes_related_to_of_facts(client):
+    pid = mk_person("Старое Имя", aliases=["А"]); f = mk_fact(pid)
+    client.patch("/api/people/%d" % pid, json={"name": "Новое Имя", "aliases": ["Б"]})
+    with get_engine().connect() as c:
+        assert c.execute(text("SELECT related_to FROM memories WHERE id=:i"), {"i": f}).scalar_one() == "Новое Имя | Б"

@@ -98,7 +98,7 @@ def test_birthday_facts_never_become_facts_and_api_beats_chat():
             row("Имя Ф", "любит чай", tg_id=1)]
     p = im.finalize(im.group_candidates(rows)[0][0])
     assert p["birthday"] == date(1999, 4, 3) and p["bday_origin"] == "api"
-    assert [t for t, _, _ in p["facts"]] == ["likes"]
+    assert [t for t, *_ in p["facts"]] == ["likes"]
 
 
 def test_fact_text_prefixes_name_only_when_missing():
@@ -224,3 +224,28 @@ def test_embed_missing_batches_and_paces(staging, monkeypatch):
     monkeypatch.setattr(im.time, "sleep", lambda s: sleeps.append(s))
     done, total = im.embed_missing(ids, 2, 21.0)
     assert (done, total) == (5, 5) and calls == [2, 2, 1] and sleeps == [21.0, 21.0]
+
+
+def test_import_stores_quote_and_rerun_fills_missing_quote_without_touching_embedding(staging):
+    from core import memory_rag
+    staging["rows"] = [row("Имя1 Фамилия1", "любит чай", tg_id=1, quote="")]
+    _run()
+    assert _state()[1][0].source_quote is None
+    vec = memory_rag._vec_literal([1.0] + [0.0] * 1023)
+    with get_engine().begin() as c:
+        c.execute(text("UPDATE memories SET embedding = CAST(:e AS vector) WHERE user_id=:u"), {"e": vec, "u": MARK})
+    staging["rows"] = [row("Имя1 Фамилия1", "любит чай", tg_id=1, quote="цитата из чата")]
+    _run()
+    ppl, mem = _state()
+    assert len(mem) == 1 and mem[0].source_quote == "цитата из чата"
+    with get_engine().connect() as c:
+        assert c.execute(text("SELECT embedding IS NOT NULL FROM memories WHERE user_id=:u"), {"u": MARK}).scalar_one()
+    staging["rows"] = [row("Имя1 Фамилия1", "любит чай", tg_id=1, quote="другая цитата")]
+    _run()
+    assert _state()[1][0].source_quote == "цитата из чата"      # первая цитата не затирается
+
+
+def test_new_import_saves_quote(staging):
+    staging["rows"] = [row("Имя1 Фамилия1", "любит чай", tg_id=1, quote="так и сказал")]
+    _run()
+    assert _state()[1][0].source_quote == "так и сказал"

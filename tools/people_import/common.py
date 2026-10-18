@@ -1,7 +1,6 @@
 """Общее для people_import: пути, .env, staging (people_staging.jsonl), slug/ключи."""
 from __future__ import annotations
 
-import hashlib
 import json
 import os
 import re
@@ -50,8 +49,7 @@ def norm_fact(fact: str) -> str:
     return re.sub(r"\s+", " ", fact.lower().strip())
 
 
-def fact_hash(fact: str) -> str:
-    return hashlib.sha1(norm_fact(fact).encode("utf-8")).hexdigest()[:8]
+from core.people import fact_hash  # noqa: E402  (одна реализация для импорта и ручного ввода)
 
 
 def memory_key(name: str, type_: str, fact: str) -> str:

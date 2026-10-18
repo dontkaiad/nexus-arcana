@@ -11,10 +11,13 @@ from datetime import date
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.exc import IntegrityError
 
-from core.people import UNKNOWN_YEAR, age, birthday_iso, find_duplicates
+from core.people import (
+    UNKNOWN_YEAR, age, birthday_iso, fact_hash, fact_text, find_duplicates, related_to_str,
+)
+from core.repos.pg_memory_repo import PgMemoryRepo, bot_to_scope
 from core.repos import pg_people_repo as repo
 from core.user_manager import get_user_id
 
@@ -71,7 +74,7 @@ def _group_facts(facts: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     by: Dict[str, List[Dict[str, Any]]] = {}
     for f in facts:
         by.setdefault(f["type"], []).append({
-            "id": f["id"], "text": f["text"], "review_status": f["review_status"],
+            "id": f["id"], "text": f["text"], "quote": f.get("quote"), "review_status": f["review_status"],
             "is_current": f["is_current"], "source": f["source"],
             "created_at": f["created_at"].isoformat() if f.get("created_at") else None,
         })
@@ -212,3 +215,60 @@ async def merge_person(person_id: int, body: MergeBody,
         raise HTTPException(status_code=status, detail=e.code)
     target = await asyncio.to_thread(repo.get_person, user_id, body.into_id)
     return {"ok": True, **stats, "person": _person_out(target)}
+
+
+class ReviewBody(BaseModel):
+    approve: List[int] = Field(default_factory=list)
+    reject: List[int] = Field(default_factory=list)
+    reset: List[int] = Field(default_factory=list)      # → pending (undo)
+    person_status: str = "confirmed"
+
+
+@router.post("/people/{person_id}/review")
+async def review_person(person_id: int, body: ReviewBody,
+                        tg_id: int = Depends(current_user_id)) -> Dict[str, Any]:
+    """Пакетное ревью: approve + reject отмеченных/снятых и статус человека — одной
+    транзакцией. `reset` + `person_status: pending` — откат (undo) прошлого действия."""
+    if body.person_status not in PERSON_STATUSES:
+        raise HTTPException(status_code=422, detail="bad person_status")
+    groups = (set(body.approve), set(body.reject), set(body.reset))
+    if sum(len(g) for g in groups) != len(groups[0] | groups[1] | groups[2]):
+        raise HTTPException(status_code=422, detail="a fact id is in several lists")
+    user_id = await _owner(tg_id)
+    try:
+        p = await asyncio.to_thread(repo.review_batch, user_id, person_id, body.approve,
+                                    body.reject, body.reset, body.person_status)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="fact not found")
+    if not p:
+        raise HTTPException(status_code=404, detail="person not found")
+    return {"ok": True, "status": p["status"], "counts": p["counts"]}
+
+
+FACT_TYPES = ("important", "likes", "dislikes", "other")
+
+
+class FactBody(BaseModel):
+    text: str = Field(min_length=1, max_length=500)
+    type: str = "other"
+
+
+@router.post("/people/{person_id}/facts")
+async def add_fact(person_id: int, body: FactBody, tg_id: int = Depends(current_user_id)) -> Dict[str, Any]:
+    """Ручной факт: source=manual, сразу confirmed (виден ботам). Повтор того же текста идемпотентен."""
+    user_id = await _owner(tg_id)
+    text_ = " ".join(body.text.split())
+    if not text_ or body.type not in FACT_TYPES:
+        raise HTTPException(status_code=422, detail="bad fact")
+    p = await asyncio.to_thread(repo.get_person, user_id, person_id)
+    if not p:
+        raise HTTPException(status_code=404, detail="person not found")
+    key = "person_%d_%s_%s" % (person_id, body.type, fact_hash(text_))
+    mid, _ = await PgMemoryRepo().upsert(
+        fact_text(p["name"], text_), key, "👥 Люди", bot_to_scope("☀️ Nexus"),
+        related_to_str(p["name"], p.get("aliases") or []), "manual", user_id,
+        person_id=person_id, review_status="confirmed",
+    )
+    await asyncio.to_thread(repo.set_fact_status, user_id, person_id, int(mid), "confirmed")
+    p = await asyncio.to_thread(repo.get_person, user_id, person_id)
+    return {"ok": True, "fact_id": int(mid), "counts": p["counts"]}

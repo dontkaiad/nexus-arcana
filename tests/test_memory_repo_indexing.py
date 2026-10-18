@@ -45,7 +45,7 @@ def _make_engine():
             "is_archived INTEGER NOT NULL DEFAULT 0, "
             "user_id TEXT NOT NULL DEFAULT '', "
             "embedding TEXT, "  # SQLite: просто колонка, не pgvector — под NULL-reset
-            "person_id INTEGER, review_status TEXT NOT NULL DEFAULT 'confirmed', "
+            "person_id INTEGER, source_quote TEXT, review_status TEXT NOT NULL DEFAULT 'confirmed', "
             "created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, "
             "updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)"
         ))
@@ -141,7 +141,7 @@ async def test_upsert_update_path_survives_missing_embedding_column():
             "scope TEXT NOT NULL DEFAULT 'global', source TEXT NOT NULL DEFAULT 'manual', "
             "related_to TEXT NOT NULL DEFAULT '', is_current INTEGER NOT NULL DEFAULT 1, "
             "is_archived INTEGER NOT NULL DEFAULT 0, user_id TEXT NOT NULL DEFAULT '', "
-            "person_id INTEGER, review_status TEXT NOT NULL DEFAULT 'confirmed', "
+            "person_id INTEGER, source_quote TEXT, review_status TEXT NOT NULL DEFAULT 'confirmed', "
             "created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, "
             "updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)"  # НЕТ embedding
         ))

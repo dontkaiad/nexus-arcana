@@ -154,12 +154,12 @@ def get_person(user_id: str, person_id: int) -> Optional[Dict]:
 def list_facts(person_id: int) -> List[Dict]:
     with get_engine().connect() as c:
         rows = c.execute(text(
-            "SELECT id, fact_text, key_name, review_status, is_current, source, created_at "
+            "SELECT id, fact_text, key_name, review_status, is_current, source, created_at, source_quote "
             "FROM memories WHERE person_id = :p AND NOT is_archived ORDER BY created_at, id"
         ), {"p": person_id}).all()
     return [{"id": r.id, "text": r.fact_text, "type": fact_type(r.key_name),
              "review_status": r.review_status, "is_current": r.is_current, "source": r.source,
-             "created_at": r.created_at} for r in rows]
+             "created_at": r.created_at, "quote": r.source_quote} for r in rows]
 
 
 EDITABLE = ("name", "aliases", "birthday", "birthday_year_known", "tg_id", "tg_username",
@@ -176,6 +176,8 @@ def update_person(user_id: str, person_id: int, values: Dict) -> Optional[Dict]:
                             .values(**vals))
             if res.rowcount == 0:
                 return None
+            if "name" in vals or "aliases" in vals:
+                refresh_related(c, person_id)
         elif c.execute(select(people.c.id).where(and_(people.c.id == person_id,
                                                       people.c.user_id == user_id))).first() is None:
             return None
@@ -206,6 +208,40 @@ def review_all(user_id: str, person_id: int, to_status: str) -> Optional[int]:
             "WHERE person_id = :p AND user_id = :u AND review_status = 'pending' AND NOT is_archived"
         ), {"st": to_status, "p": person_id, "u": user_id})
     return r.rowcount
+
+
+def refresh_related(conn, person_id: int) -> None:
+    """related_to фактов человека = «имя | алиасы» (ILIKE-поиск ботов и эмбеддинг-текст
+    живут от него). Зовётся после правки имени/алиасов и после merge."""
+    from core.people import related_to_str
+    row = conn.execute(select(people.c.name, people.c.aliases).where(people.c.id == person_id)).first()
+    if row:
+        conn.execute(text("UPDATE memories SET related_to = :r WHERE person_id = :p"),
+                     {"r": related_to_str(row.name, row.aliases or []), "p": person_id})
+
+
+def review_batch(user_id: str, person_id: int, approve: List[int], reject: List[int],
+                 reset: List[int], person_status: str) -> Optional[Dict]:
+    """Ревью человека ОДНОЙ транзакцией: approve → confirmed, reject → rejected,
+    reset → pending (для undo), статус человека. Любой id, не принадлежащий этому
+    человеку/владельцу, → ValueError и полный откат. None если человека нет."""
+    ids = list(approve) + list(reject) + list(reset)
+    with get_engine().begin() as c:
+        if c.execute(select(people.c.id).where(and_(people.c.id == person_id, people.c.user_id == user_id))
+                     .with_for_update()).first() is None:
+            return None
+        if ids:
+            have = {r[0] for r in c.execute(text(
+                "SELECT id FROM memories WHERE id = ANY(:ids) AND person_id = :p AND user_id = :u AND NOT is_archived"
+            ), {"ids": ids, "p": person_id, "u": user_id})}
+            if have != set(ids):
+                raise ValueError("fact does not belong to person")
+        for fact_ids, status in ((approve, "confirmed"), (reject, "rejected"), (reset, "pending")):
+            if fact_ids:
+                c.execute(text("UPDATE memories SET review_status = :st, updated_at = now() WHERE id = ANY(:ids)"),
+                          {"st": status, "ids": list(fact_ids)})
+        c.execute(update(people).where(people.c.id == person_id).values(status=person_status, updated_at=func.now()))
+    return get_person(user_id, person_id)
 
 
 # ── merge двух людей (PR-5) ──────────────────────────────────────────────────
@@ -296,4 +332,5 @@ def merge_people(user_id: str, source_id: int, target_id: int) -> Dict:
         elif sn and dn and sn != dn:
             vals["notes"] = dn + "\n" + sn
         conn.execute(update(people).where(people.c.id == target_id).values(**vals))
+        refresh_related(conn, target_id)
     return stats
