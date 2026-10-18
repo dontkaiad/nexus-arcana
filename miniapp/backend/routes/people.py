@@ -14,7 +14,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy.exc import IntegrityError
 
-from core.people import UNKNOWN_YEAR, age, birthday_iso
+from core.people import UNKNOWN_YEAR, age, birthday_iso, find_duplicates
 from core.repos import pg_people_repo as repo
 from core.user_manager import get_user_id
 
@@ -77,6 +77,20 @@ def _group_facts(facts: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         })
     order = [t for t in repo.FACT_TYPE_ORDER if t in by] + sorted(t for t in by if t not in repo.FACT_TYPE_ORDER)
     return [{"type": t, "items": by[t]} for t in order]
+
+
+@router.get("/people/duplicates")
+async def duplicates(tg_id: int = Depends(current_user_id)) -> Dict[str, Any]:
+    """Пары-кандидаты в один человек (подсказка; ничего не склеивает).
+    Объявлен ДО /people/{person_id}, иначе «duplicates» уйдёт в int-параметр."""
+    user_id = await _owner(tg_id)
+    rows = await asyncio.to_thread(repo.list_people, user_id, None, None)
+    pairs = find_duplicates(rows)
+    brief = lambda p: {"id": p["id"], "name": p["name"], "aliases": list(p.get("aliases") or []),
+                       "birthday": birthday_iso(p.get("birthday"), bool(p.get("birthday_year_known", True))),
+                       "status": p["status"], "counts": p.get("counts", {})}
+    return {"total": len(pairs), "pairs": [
+        {"a": brief(d["a"]), "b": brief(d["b"]), "score": d["score"], "reasons": d["reasons"]} for d in pairs]}
 
 
 @router.get("/people/{person_id}")
@@ -180,3 +194,21 @@ async def approve_all(person_id: int, tg_id: int = Depends(current_user_id)):
 @router.post("/people/{person_id}/reject-all")
 async def reject_all(person_id: int, tg_id: int = Depends(current_user_id)):
     return await _review_all(person_id, "rejected", tg_id)
+
+
+class MergeBody(BaseModel):
+    into_id: int
+
+
+@router.post("/people/{person_id}/merge")
+async def merge_person(person_id: int, body: MergeBody,
+                       tg_id: int = Depends(current_user_id)) -> Dict[str, Any]:
+    """Склеить person_id В into_id (источник удаляется). Одна транзакция."""
+    user_id = await _owner(tg_id)
+    try:
+        stats = await asyncio.to_thread(repo.merge_people, user_id, person_id, body.into_id)
+    except repo.MergeError as e:
+        status = {"not_found": 404, "same": 422, "conflicting_ids": 409}[e.code]
+        raise HTTPException(status_code=status, detail=e.code)
+    target = await asyncio.to_thread(repo.get_person, user_id, body.into_id)
+    return {"ok": True, **stats, "person": _person_out(target)}

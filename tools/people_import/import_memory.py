@@ -206,9 +206,18 @@ def resolve_existing(user_id: str, p: Dict, idless_cache: List[Dict], stats: Cou
         return pt or pv
     if not p["tg_id"] and not p["vk_id"]:
         keys = {name_key(p["name"])} | {name_key(a) for a in p["aliases"]}
+        primary = name_key(p["name"])
+        hits = []
         for q in idless_cache:
-            if name_key(q["name"]) in keys:
-                return q
+            alias_keys = {name_key(a) for a in (q.get("aliases") or [])}
+            is_idless = not q.get("tg_id") and not q.get("vk_id")
+            # (а) такой же id-less человек по имени/алиасу; (б) человек с id — ТОЛЬКО если имя
+            # кандидата лежит у него в алиасах (так выглядит склеенный merge'ем источник).
+            # Совпадение одного имени с id-человеком — не повод склеивать.
+            if (is_idless and (name_key(q["name"]) in keys or alias_keys & keys)) or primary in alias_keys:
+                hits.append(q)
+        if len(hits) == 1:
+            return hits[0]
     return None
 
 
@@ -259,7 +268,7 @@ async def run(dry: bool, no_embed: bool, batch_size: int, pause: float) -> int:
     people_plan = [p for p in people_plan if p["facts"] or p["birthday"]]
 
     st: Counter = Counter()
-    idless_cache = prepo.find_idless(user_id)
+    idless_cache = prepo.find_named(user_id)
     keys_have = existing_keys(user_id)
     before = counts(user_id)
     repo = PgMemoryRepo()

@@ -28,6 +28,15 @@ def find_by_vk(user_id: str, vk_id: int) -> Optional[Dict]:
     return _row(r) if r else None
 
 
+def find_named(user_id: str) -> List[Dict]:
+    """Все не отклонённые люди — для матча id-less строк по имени/алиасу (после merge
+    имя склеенного источника живёт алиасом цели)."""
+    with get_engine().connect() as c:
+        rows = c.execute(select(people).where(and_(
+            people.c.user_id == user_id, people.c.status != "rejected"))).all()
+    return [_row(r) for r in rows]
+
+
 def find_idless(user_id: str) -> List[Dict]:
     """Люди без tg_id и vk_id — кандидаты для повторного матча по имени."""
     with get_engine().connect() as c:
@@ -197,3 +206,94 @@ def review_all(user_id: str, person_id: int, to_status: str) -> Optional[int]:
             "WHERE person_id = :p AND user_id = :u AND review_status = 'pending' AND NOT is_archived"
         ), {"st": to_status, "p": person_id, "u": user_id})
     return r.rowcount
+
+
+# ── merge двух людей (PR-5) ──────────────────────────────────────────────────
+
+class MergeError(Exception):
+    """code: not_found | same | conflicting_ids"""
+
+    def __init__(self, code: str):
+        super().__init__(code)
+        self.code = code
+
+
+_KEY_TAIL = re.compile(r"^person_\d+_([a-z]+_[0-9a-f]{8})$")
+
+
+def _lock_person(conn, user_id: str, pid: int) -> Optional[Dict]:
+    r = conn.execute(select(people).where(and_(people.c.id == pid, people.c.user_id == user_id)).with_for_update()).first()
+    return _row(r) if r else None
+
+
+def _move_facts(conn, user_id: str, src: int, dst: int) -> Dict[str, int]:
+    """Факты src → dst. Ключ person_{id}_{type}_{hash8} переписывается на dst; если у dst
+    уже есть факт с таким ключом (то же type+hash8 — тот же факт) — остаётся ЦЕЛЕВОЙ,
+    факт источника удаляется. Не-импортные ключи переезжают как есть (конфликт — те же правила)."""
+    moved = dropped = 0
+    rows = conn.execute(text(
+        "SELECT id, key_name FROM memories WHERE person_id = :s AND user_id = :u ORDER BY id"
+    ), {"s": src, "u": user_id}).all()
+    for fid, key in rows:
+        m = _KEY_TAIL.match(key or "")
+        new_key = "person_%d_%s" % (dst, m.group(1)) if m else key
+        clash = new_key and conn.execute(text(
+            "SELECT 1 FROM memories WHERE key_name = :k AND user_id = :u AND id <> :i AND NOT is_archived LIMIT 1"
+        ), {"k": new_key, "u": user_id, "i": fid}).first()
+        if clash:
+            conn.execute(text("DELETE FROM memories WHERE id = :i"), {"i": fid})
+            dropped += 1
+        else:
+            conn.execute(text(
+                "UPDATE memories SET person_id = :d, key_name = :k, updated_at = now() WHERE id = :i"
+            ), {"d": dst, "k": new_key, "i": fid})
+            moved += 1
+    return {"moved": moved, "dropped_duplicates": dropped}
+
+
+def _delete_person(conn, pid: int) -> None:
+    conn.execute(people.delete().where(people.c.id == pid))
+
+
+def merge_people(user_id: str, source_id: int, target_id: int) -> Dict:
+    """Склеивает source в target ОДНОЙ транзакцией; любое исключение → полный откат.
+
+    Факты переезжают (см. _move_facts); алиасы — union (имя источника тоже становится
+    алиасом); пустые поля цели заполняются из источника, заметки при различии склеиваются;
+    имя/статус цели не меняются. У обоих разные tg_id (или vk_id) → MergeError('conflicting_ids'):
+    это разные аккаунты, и потерянный id при повторном импорте воскресил бы дубль."""
+    if source_id == target_id:
+        raise MergeError("same")
+    with get_engine().begin() as conn:
+        first, second = sorted((source_id, target_id))
+        locked = {pid: _lock_person(conn, user_id, pid) for pid in (first, second)}
+        src, dst = locked[source_id], locked[target_id]
+        if not src or not dst:
+            raise MergeError("not_found")
+        for f in ("tg_id", "vk_id"):
+            if src.get(f) and dst.get(f) and src[f] != dst[f]:
+                raise MergeError("conflicting_ids")
+
+        stats = _move_facts(conn, user_id, source_id, target_id)
+        _delete_person(conn, source_id)          # раньше UPDATE цели: освобождает уникальные tg_id/vk_id
+
+        aliases = list(dst.get("aliases") or [])
+        seen = {a.lower() for a in aliases} | {dst["name"].lower()}
+        for a in list(src.get("aliases") or []) + [src["name"]]:
+            if a and a.lower() not in seen:
+                seen.add(a.lower())
+                aliases.append(a)
+        vals: Dict = {"aliases": aliases, "updated_at": func.now()}
+        if src.get("birthday") and not dst.get("birthday"):
+            vals["birthday"] = src["birthday"]
+            vals["birthday_year_known"] = src.get("birthday_year_known", True)
+        for f in ("tg_id", "tg_username", "vk_id"):
+            if src.get(f) and not dst.get(f):
+                vals[f] = src[f]
+        sn, dn = (src.get("notes") or "").strip(), (dst.get("notes") or "").strip()
+        if sn and not dn:
+            vals["notes"] = sn
+        elif sn and dn and sn != dn:
+            vals["notes"] = dn + "\n" + sn
+        conn.execute(update(people).where(people.c.id == target_id).values(**vals))
+    return stats
