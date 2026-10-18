@@ -19,7 +19,7 @@ from core.repos.lists_repo import (
     CATEGORY_TO_FINANCE, LIST_CATEGORIES,
     pending_get, pending_set, pending_del,
 )
-from core.lists_parser import parse_buy_text, format_rub, match_sum_command
+from core.lists_parser import parse_buy_text, format_rub, format_expiry, match_sum_command
 from core.list_classifier import extract_inventory_query
 from nexus.handlers.utils import react
 
@@ -1356,8 +1356,7 @@ async def handle_list_inv_search(msg: Message, data: dict, user_id: str = "") ->
     for r in results:
         qty = f" × {int(r['quantity'])}" if r.get("quantity") else ""
         note = f" — {r['why']}" if r.get("why") else (f" — {r['note']}" if r.get("note") else "")
-        expiry = f" · до {r['expiry'][:10]}" if r.get("expiry") else ""
-        lines.append(f"  ✓ {r['name']}{qty}{note}{expiry}")
+        lines.append(f"  ✓ {r['name']}{qty}{note}{format_expiry(r.get('expiry'))}")
     await msg.answer("\n".join(lines), parse_mode="HTML")
 
 

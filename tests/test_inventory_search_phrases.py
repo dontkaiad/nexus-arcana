@@ -61,3 +61,18 @@ def test_classify_routes_to_inventory_search_without_haiku(text):
         out = asyncio.run(clf.classify(text, tz_offset=3))
     assert out and out[0]["type"] == "list_inventory_search"
     haiku.assert_not_awaited()
+
+
+# ── срок годности рядом с найденным ──────────────────────────────────────────
+
+def test_format_expiry():
+    from datetime import date
+    from core.lists_parser import format_expiry
+    today = date(2026, 10, 18)
+    assert format_expiry("2026-12-01", today) == " · до 2026-12-01"
+    assert format_expiry("2026-12-01T00:00:00", today) == " · до 2026-12-01"
+    assert format_expiry("2026-10-18", today) == " · до 2026-10-18"  # сегодня ещё годен
+    assert format_expiry("2026-06-15", today) == " · ⚠️ просрочено (2026-06-15)"
+    assert format_expiry("", today) == ""
+    assert format_expiry(None, today) == ""
+    assert format_expiry("мусор", today) == ""

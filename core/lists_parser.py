@@ -322,6 +322,22 @@ async def parse_buy_text(
 
 # ── Форматирование сумм ───────────────────────────────────────────────────────
 
+def format_expiry(expiry: str, today=None) -> str:
+    """Срок годности для строки инвентаря: « · до 2026-06-15» или
+    « · ⚠️ просрочено (2026-06-15)». Пусто/невалидно → ""."""
+    from datetime import date
+    raw = (expiry or "")[:10]
+    if not raw:
+        return ""
+    try:
+        d = date.fromisoformat(raw)
+    except ValueError:
+        return ""
+    if d < (today or date.today()):
+        return f" · ⚠️ просрочено ({raw})"
+    return f" · до {raw}"
+
+
 def format_rub(amount: float) -> str:
     """108600 → '108 600'. Целые отображаются без копеек."""
     n = int(round(amount or 0))
