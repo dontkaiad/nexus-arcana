@@ -18,6 +18,7 @@ from core.repos.lists_repo import (
     pending_get, pending_set, pending_del,
 )
 from core.lists_parser import parse_buy_text, format_rub
+from core.list_classifier import extract_inventory_query
 
 logger = logging.getLogger("arcana.lists")
 router = Router()
@@ -890,7 +891,7 @@ async def handle_list_inv_add(msg: Message, data: dict, user_id: str = "") -> No
 
 async def handle_list_inv_search(msg: Message, data: dict, user_id: str = "") -> None:
     text = data.get("text", msg.text or "")
-    query = re.sub(r"(?:дома\s+)?есть\s*(?:ли)?\s*(?:у меня)?\s*(?:дома)?\s*", "", text, flags=re.IGNORECASE).strip().rstrip("?")
+    query = extract_inventory_query(text)
     results = await _repo.inventory_search(query, BOT_NAME, user_id)
     if not results:
         existing_buy = await _repo.get(list_type="🛒 Покупки", bot_name=BOT_NAME,
