@@ -231,8 +231,16 @@ python3 -m alembic upgrade head
 ```
 
 Mini App front end: `cd miniapp/frontend && npm i && npm run build` (or `npm run dev`).
-Backend: `uvicorn miniapp.backend.app:app`. Tests: `python3 -m pytest tests/` — the full
-suite is green and zero-skipped on every commit; a red suite blocks the push.
+Backend: `uvicorn miniapp.backend.app:app`.
+
+Tests need Postgres + pgvector on `localhost:5432` (the `db` compose service) with the
+schema at head. One command:
+
+```bash
+docker compose up -d --build db && python3 -m pip install -r requirements-dev.txt && python3 -m alembic upgrade head && python3 -m pytest tests/
+```
+
+The full suite is green and zero-skipped on every commit; a red suite blocks the push.
 
 ---
 
