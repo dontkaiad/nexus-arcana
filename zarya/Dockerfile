@@ -4,7 +4,7 @@
 # zarya/ or the handful of SQLAlchemy table defs it needs change — so a change
 # to nexus/handlers or arcana/handlers does NOT trigger a Zarya redeploy,
 # even though it lives in the same repo + compose.
-FROM python:3.9-slim
+FROM python:3.12-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1

@@ -5,7 +5,7 @@
 > **☀️ Nexus** is my ADHD assistant: tasks, finances, budgets, reminders.
 > **🌒 Arcana** is the CRM for a small esoteric practice: clients, tarot sessions, rituals.
 
-![Python](https://img.shields.io/badge/Python-3.9-3776AB?logo=python&logoColor=white)
+![Python](https://img.shields.io/badge/Python-3.12-3776AB?logo=python&logoColor=white)
 ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-4169E1?logo=postgresql&logoColor=white)
 ![FastAPI](https://img.shields.io/badge/FastAPI-009688?logo=fastapi&logoColor=white)
 ![React](https://img.shields.io/badge/React-Vite-61DAFB?logo=react&logoColor=white)
@@ -206,7 +206,7 @@ mapping.
 - OpenAI Whisper — voice transcription
 
 **Backend**
-- Python 3.9, aiogram 3.x, FastAPI
+- Python 3.12, aiogram 3.x, FastAPI
 - SQLAlchemy Core + Alembic
 - PostgreSQL 16 + pgvector extension
 - SQLite — process-local pending-dialog + cache stores, TTL-swept, rebuildable
