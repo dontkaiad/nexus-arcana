@@ -1,9 +1,18 @@
 name: Deploy
+# Деплой идёт ТОЛЬКО после зелёного workflow «Tests» на main (test.yml).
+# workflow_dispatch — ручной передеплой без тестов (осознанно).
 on:
-  push:
+  workflow_run:
+    workflows: ["Tests"]
+    types: [completed]
     branches: [main]
+  workflow_dispatch:
+concurrency:
+  group: deploy
+  cancel-in-progress: false
 jobs:
   deploy:
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     steps:
       - name: Deploy over SSH
