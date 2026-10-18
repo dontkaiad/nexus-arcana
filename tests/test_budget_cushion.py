@@ -232,6 +232,8 @@ async def test_payday_cushion_message_plan_plus_saved_and_manual_reminder():
 
     with patch.object(finance, "_payday_already_sent", lambda *a: False), \
          patch.object(finance, "_payday_mark", lambda *a: None), \
+         patch.object(finance, "_payday_cushion_already_credited", lambda *a: False), \
+         patch.object(finance, "_payday_cushion_mark", lambda *a: None), \
          patch.object(finance, "_budget_get", lambda uid: {"notion_uid": "u"}), \
          patch.object(finance, "_budget_set", lambda uid, st: None), \
          patch.object(finance, "_get_payday", AsyncMock(return_value=1)), \

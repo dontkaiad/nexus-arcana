@@ -5,7 +5,7 @@
 > **☀️ Nexus** is my ADHD assistant: tasks, finances, budgets, reminders.
 > **🌒 Arcana** is the CRM for a small esoteric practice: clients, tarot sessions, rituals.
 
-![Python](https://img.shields.io/badge/Python-3.9-3776AB?logo=python&logoColor=white)
+![Python](https://img.shields.io/badge/Python-3.12-3776AB?logo=python&logoColor=white)
 ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-4169E1?logo=postgresql&logoColor=white)
 ![FastAPI](https://img.shields.io/badge/FastAPI-009688?logo=fastapi&logoColor=white)
 ![React](https://img.shields.io/badge/React-Vite-61DAFB?logo=react&logoColor=white)
@@ -206,7 +206,7 @@ mapping.
 - OpenAI Whisper — voice transcription
 
 **Backend**
-- Python 3.9, aiogram 3.x, FastAPI
+- Python 3.12, aiogram 3.x, FastAPI
 - SQLAlchemy Core + Alembic
 - PostgreSQL 16 + pgvector extension
 - SQLite — process-local pending-dialog + cache stores, TTL-swept, rebuildable
@@ -231,8 +231,16 @@ python3 -m alembic upgrade head
 ```
 
 Mini App front end: `cd miniapp/frontend && npm i && npm run build` (or `npm run dev`).
-Backend: `uvicorn miniapp.backend.app:app`. Tests: `python3 -m pytest tests/` — the full
-suite is green and zero-skipped on every commit; a red suite blocks the push.
+Backend: `uvicorn miniapp.backend.app:app`.
+
+Tests need Postgres + pgvector on `localhost:5432` (the `db` compose service) with the
+schema at head. One command:
+
+```bash
+docker compose up -d --build db && python3 -m pip install -r requirements-dev.txt && python3 -m alembic upgrade head && python3 -m pytest tests/
+```
+
+The full suite is green and zero-skipped on every commit; a red suite blocks the push.
 
 ---
 
