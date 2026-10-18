@@ -153,7 +153,7 @@ def birthday_fact(day: int, month: int, year: Optional[int] = None) -> str:
 
 # ── даты рождения ───────────────────────────────────────────────────────────
 
-UNKNOWN_YEAR = 1904  # високосный: год ДР неизвестен (см. ADR-0027)
+from core.people import UNKNOWN_YEAR  # noqa: E402  (1904 — год ДР неизвестен, ADR-0027)
 
 _MONTHS = {
     "январ": 1, "феврал": 2, "март": 3, "апрел": 4, "ма": 5, "июн": 6,

@@ -190,6 +190,7 @@ def test_chat_birthday_fills_only_when_empty_and_does_not_overwrite(staging):
                        row("Имя1 Фамилия1", "др 01.02", "birthday", tg_id=1)]
     _run()
     assert _state()[0][0].birthday == date(1904, 2, 1)
+    assert _state()[0][0].birthday_year_known is False        # год неизвестен → флаг, не только заглушка
     with get_engine().begin() as c:
         c.execute(text("UPDATE people SET birthday='1990-06-07' WHERE user_id=:u"), {"u": MARK})
     staging["rows"][1] = row("Имя1 Фамилия1", "День рождения: 03.04.1999", "birthday", tg_id=1, origin="api", quote="")

@@ -1,0 +1,182 @@
+"""miniapp/backend/routes/people.py — /api/people: домен «Люди» (ADR-0027, PR-4).
+
+Список, карточка, правка, ревью фактов (approve/reject, approve-all/reject-all).
+Владелец: current_user_id → user_id; чужая/несуществующая запись → 404.
+"""
+from __future__ import annotations
+
+import asyncio
+import logging
+from datetime import date
+from typing import Any, Dict, List, Optional
+
+from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel
+from sqlalchemy.exc import IntegrityError
+
+from core.people import UNKNOWN_YEAR, age, birthday_iso
+from core.repos import pg_people_repo as repo
+from core.user_manager import get_user_id
+
+from miniapp.backend.auth import current_user_id
+
+logger = logging.getLogger("miniapp.people")
+
+router = APIRouter()
+
+PERSON_STATUSES = ("pending", "confirmed", "rejected")
+
+
+async def _owner(tg_id: int) -> str:
+    user_id = await get_user_id(tg_id)
+    if not user_id:
+        raise HTTPException(status_code=403, detail="forbidden")
+    return user_id
+
+
+def _person_out(p: Dict[str, Any]) -> Dict[str, Any]:
+    known = bool(p.get("birthday_year_known", True))
+    return {
+        "id": p["id"],
+        "name": p["name"],
+        "aliases": list(p.get("aliases") or []),
+        "birthday": birthday_iso(p.get("birthday"), known),
+        "birthday_year_known": known,
+        "age": age(p.get("birthday"), known),
+        "tg_id": p.get("tg_id"),
+        "tg_username": p.get("tg_username"),
+        "vk_id": p.get("vk_id"),
+        "notes": p.get("notes"),
+        "status": p["status"],
+        "counts": p.get("counts", {}),
+        "by_type": p.get("by_type", {}),
+    }
+
+
+@router.get("/people")
+async def list_people(
+    status: Optional[str] = Query(None),
+    q: Optional[str] = Query(None),
+    tg_id: int = Depends(current_user_id),
+) -> Dict[str, Any]:
+    if status and status not in PERSON_STATUSES:
+        raise HTTPException(status_code=422, detail="bad status")
+    user_id = await _owner(tg_id)
+    rows = await asyncio.to_thread(repo.list_people, user_id, status, q)
+    return {"total": len(rows), "people": [_person_out(p) for p in rows]}
+
+
+def _group_facts(facts: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Группы по type; important первым, затем likes/dislikes/other, прочие по алфавиту."""
+    by: Dict[str, List[Dict[str, Any]]] = {}
+    for f in facts:
+        by.setdefault(f["type"], []).append({
+            "id": f["id"], "text": f["text"], "review_status": f["review_status"],
+            "is_current": f["is_current"], "source": f["source"],
+            "created_at": f["created_at"].isoformat() if f.get("created_at") else None,
+        })
+    order = [t for t in repo.FACT_TYPE_ORDER if t in by] + sorted(t for t in by if t not in repo.FACT_TYPE_ORDER)
+    return [{"type": t, "items": by[t]} for t in order]
+
+
+@router.get("/people/{person_id}")
+async def person_card(person_id: int, tg_id: int = Depends(current_user_id)) -> Dict[str, Any]:
+    user_id = await _owner(tg_id)
+    p = await asyncio.to_thread(repo.get_person, user_id, person_id)
+    if not p:
+        raise HTTPException(status_code=404, detail="person not found")
+    facts = await asyncio.to_thread(repo.list_facts, person_id)
+    return {**_person_out(p), "facts": _group_facts(facts)}
+
+
+class PersonPatch(BaseModel):
+    name: Optional[str] = None
+    aliases: Optional[List[str]] = None
+    birthday: Optional[date] = None
+    birthday_year_known: Optional[bool] = None
+    tg_id: Optional[int] = None
+    tg_username: Optional[str] = None
+    vk_id: Optional[int] = None
+    notes: Optional[str] = None
+    status: Optional[str] = None
+
+
+@router.patch("/people/{person_id}")
+async def patch_person(person_id: int, body: PersonPatch,
+                       tg_id: int = Depends(current_user_id)) -> Dict[str, Any]:
+    user_id = await _owner(tg_id)
+    sent = body.model_fields_set          # отличаем «не прислали» от «обнулить»
+    vals: Dict[str, Any] = {}
+    for f in sent:
+        vals[f] = getattr(body, f)
+    if "name" in vals and not (vals["name"] or "").strip():
+        raise HTTPException(status_code=422, detail="name must not be empty")
+    if "name" in vals:
+        vals["name"] = vals["name"].strip()
+    if "status" in vals and vals["status"] not in PERSON_STATUSES:
+        raise HTTPException(status_code=422, detail="bad status")
+    if "aliases" in vals:
+        vals["aliases"] = [a.strip() for a in (vals["aliases"] or []) if a and a.strip()]
+    if vals.get("birthday_year_known") is None:
+        vals.pop("birthday_year_known", None)
+    # год неизвестен → заглушка 1904 (ADR-0027); ДР обнулён → флаг сбрасываем в true
+    if "birthday" in vals:
+        if vals["birthday"] is None:
+            vals["birthday_year_known"] = True
+        elif vals.get("birthday_year_known") is False:
+            vals["birthday"] = vals["birthday"].replace(year=UNKNOWN_YEAR) \
+                if not (vals["birthday"].month == 2 and vals["birthday"].day == 29) \
+                else date(UNKNOWN_YEAR, 2, 29)
+        else:
+            vals.setdefault("birthday_year_known", True)
+    elif vals.get("birthday_year_known") is False:
+        # только флаг: переписываем год у существующей даты
+        cur = await asyncio.to_thread(repo.get_person, user_id, person_id)
+        if cur and cur.get("birthday"):
+            b = cur["birthday"]
+            vals["birthday"] = date(UNKNOWN_YEAR, b.month, b.day)
+    try:
+        p = await asyncio.to_thread(repo.update_person, user_id, person_id, vals)
+    except IntegrityError:
+        raise HTTPException(status_code=409, detail="tg_id/vk_id already belongs to another person")
+    if not p:
+        raise HTTPException(status_code=404, detail="person not found")
+    return _person_out(p)
+
+
+async def _fact_review(person_id: int, fact_id: int, status: str, tg_id: int) -> Dict[str, Any]:
+    user_id = await _owner(tg_id)
+    ok = await asyncio.to_thread(repo.set_fact_status, user_id, person_id, fact_id, status)
+    if not ok:
+        raise HTTPException(status_code=404, detail="fact not found")
+    p = await asyncio.to_thread(repo.get_person, user_id, person_id)
+    return {"ok": True, "fact_id": fact_id, "review_status": status, "counts": p["counts"]}
+
+
+@router.post("/people/{person_id}/facts/{fact_id}/approve")
+async def approve_fact(person_id: int, fact_id: int, tg_id: int = Depends(current_user_id)):
+    return await _fact_review(person_id, fact_id, "confirmed", tg_id)
+
+
+@router.post("/people/{person_id}/facts/{fact_id}/reject")
+async def reject_fact(person_id: int, fact_id: int, tg_id: int = Depends(current_user_id)):
+    return await _fact_review(person_id, fact_id, "rejected", tg_id)
+
+
+async def _review_all(person_id: int, to_status: str, tg_id: int) -> Dict[str, Any]:
+    user_id = await _owner(tg_id)
+    n = await asyncio.to_thread(repo.review_all, user_id, person_id, to_status)
+    if n is None:
+        raise HTTPException(status_code=404, detail="person not found")
+    p = await asyncio.to_thread(repo.get_person, user_id, person_id)
+    return {"ok": True, "changed": n, "status": p["status"], "counts": p["counts"]}
+
+
+@router.post("/people/{person_id}/approve-all")
+async def approve_all(person_id: int, tg_id: int = Depends(current_user_id)):
+    return await _review_all(person_id, "confirmed", tg_id)
+
+
+@router.post("/people/{person_id}/reject-all")
+async def reject_all(person_id: int, tg_id: int = Depends(current_user_id)):
+    return await _review_all(person_id, "rejected", tg_id)

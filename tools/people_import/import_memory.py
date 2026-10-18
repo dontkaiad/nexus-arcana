@@ -174,6 +174,7 @@ def finalize(c: Dict) -> Dict:
     bd = _birthday(c)
     return {"name": name, "aliases": alias_list, "tg_id": c["tg_id"],
             "tg_username": c["tg_username"], "vk_id": c["vk_id"], "birthday": bd[0] if bd else None,
+            "bday_known": bd[1] if bd else True,
             "bday_origin": "api" if c["bday_api"] else "chat" if bd else None,
             "facts": facts, "sources": sorted(c["sources"]), "bday_unparsed": c["bday_unparsed"]}
 
@@ -275,13 +276,15 @@ async def run(dry: bool, no_embed: bool, batch_size: int, pause: float) -> int:
             pid = person["id"]
             if not dry:
                 if prepo.fill_missing(person, aliases=p["aliases"], birthday=p["birthday"],
-                                      tg_id=p["tg_id"], tg_username=p["tg_username"], vk_id=p["vk_id"]):
+                                      tg_id=p["tg_id"], tg_username=p["tg_username"], vk_id=p["vk_id"],
+                                      birthday_year_known=p["bday_known"]):
                     st["people_updated"] += 1
         else:
             st["people_new"] += 1
             if not dry:
                 pid = prepo.create(user_id, p["name"], p["aliases"], birthday=p["birthday"],
-                                   tg_id=p["tg_id"], tg_username=p["tg_username"], vk_id=p["vk_id"])
+                                   tg_id=p["tg_id"], tg_username=p["tg_username"], vk_id=p["vk_id"],
+                                   birthday_year_known=p["bday_known"])
         if p["birthday"]:
             st["bday_from_" + p["bday_origin"]] += 1
         st["bday_unparsed"] += p["bday_unparsed"]

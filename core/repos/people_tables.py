@@ -6,14 +6,14 @@ core/auth_grants.py — that one lives in the separate `auth` database.
 from __future__ import annotations
 
 from sqlalchemy import (
-    BigInteger, CheckConstraint, Column, Date, MetaData, Table, Text,
+    BigInteger, Boolean, CheckConstraint, Column, Date, MetaData, Table, Text,
     TIMESTAMP, text,
 )
 from sqlalchemy.dialects.postgresql import ARRAY
 
 metadata = MetaData()
 
-PEOPLE_STATUSES = ("pending", "confirmed")
+PEOPLE_STATUSES = ("pending", "confirmed", "rejected")
 
 people = Table(
     "people", metadata,
@@ -22,6 +22,8 @@ people = Table(
     Column("name",        Text,       nullable=False),
     Column("aliases",     ARRAY(Text), nullable=False, server_default=text("'{}'::text[]")),
     Column("birthday",    Date),
+    # False → год неизвестен, в `birthday` стоит заглушка 1904 (ADR-0027).
+    Column("birthday_year_known", Boolean, nullable=False, server_default=text("true")),
     Column("tg_id",       BigInteger),
     Column("tg_username", Text),
     Column("vk_id",       BigInteger),
@@ -29,5 +31,5 @@ people = Table(
     Column("status",      Text,       nullable=False, server_default=text("'pending'")),
     Column("created_at",  TIMESTAMP(timezone=True), server_default=text("now()")),
     Column("updated_at",  TIMESTAMP(timezone=True), server_default=text("now()")),
-    CheckConstraint("status IN ('pending','confirmed')", name="ck_people_status"),
+    CheckConstraint("status IN ('pending','confirmed','rejected')", name="ck_people_status"),
 )

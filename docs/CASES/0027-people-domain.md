@@ -99,6 +99,20 @@ Mini App. Промежуточное одобрение в `people_staging.jsonl
   контексте бота). Эмбеддинги — пачками (`index_memories_batch`), по одному
   запросу Voyage на пачку, с паузой под лимит.
 
+### 8. API Mini App (PR-4) и явный флаг года
+
+- `people.birthday_year_known boolean` вместо неявной заглушки: при `false` в
+  `birthday` лежит 1904, а API отдаёт `--MM-DD` и `age=null` (`core/people.age()`
+  возвращает `None` без года). Заглушка наружу не утекает.
+- `people.status` допускает `rejected` (`reject-all`). Список по умолчанию
+  скрывает `rejected`, показывает при явном `?status=rejected`.
+- `/api/people`: список (сортировка по числу pending-фактов), карточка (факты
+  группами `important → likes → dislikes → other`), PATCH, approve/reject факта,
+  approve-all/reject-all (меняют и `status` человека). Тип факта выводится из
+  `key_name` (`person_{id}_{type}_{hash8}`); ручные факты считаются `other`.
+- Чужая или несуществующая запись всегда 404 (не 403), владелец —
+  `current_user_id → user_id`.
+
 ## Рассмотренные альтернативы
 
 - **`is_current=false` для непроверенных** — отвергнуто: конфликт с
