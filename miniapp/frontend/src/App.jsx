@@ -15,6 +15,7 @@ import {
 } from "./adapters";
 import { apiGet, apiPost, apiDelete, apiPatch, apiStream, flushOfflineQueue, outboxCount } from "./api";
 import { SelfListCard, SelfDetailHeader } from "./components/self/SelfClientCard.jsx";
+import PeopleTab from "./people/PeopleTab.jsx";
 import {
   Sun, Moon as LucideMoon, Check, Coins, List as ListIcon, Brain, Calendar,
   Sparkles as LucideSparkles, Users, Flame as LucideFlame, BookOpen as LucideBookOpen,
@@ -3309,6 +3310,8 @@ function NxMemory({ s, openAdhd }) {
   const [patchingId, setPatchingId] = useState(null);
   const [expandedId, setExpandedId] = useState(null);
   const [showInactive, setShowInactive] = useState(false);
+  const [peopleOpen, setPeopleOpen] = useState(false);
+  const peoplePending = useApi("/api/people?status=pending");
   const params = [];
   if (cat !== "all") params.push(`cat=${encodeURIComponent(cat)}`);
   if (q) params.push(`q=${encodeURIComponent(q)}`);
@@ -3369,6 +3372,21 @@ function NxMemory({ s, openAdhd }) {
           <ChevronRight size={fs(16)} color={s.tS} />
         </div>
       </Glass>
+      <Glass s={s} accent={s.acc} onClick={() => setPeopleOpen(true)} style={{ padding: "10px 14px" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <div>
+            <div style={{ fontSize: fs(11), color: s.acc, fontWeight: 500 }}>👥 Люди</div>
+            <div style={{ fontSize: fs(12), color: s.text, marginTop: 2 }}>
+              {peoplePending.data?.total > 0 ? `На проверке: ${peoplePending.data.total}` : "Факты о близких и знакомых"}
+            </div>
+          </div>
+          <ChevronRight size={fs(16)} color={s.tS} />
+        </div>
+      </Glass>
+      {peopleOpen && createPortal(
+        <div className="day" style={{ fontFamily: B }}>
+          <PeopleTab s={s} Sheet={Sheet} onClose={() => setPeopleOpen(false)} onChanged={peoplePending.refetch} />
+        </div>, document.body)}
       <SearchInput s={s} value={q} onChange={setQ} placeholder="Поиск по памяти" />
       {/* #6: показать записи, помеченные «неактуально» (is_current=false) */}
       <div style={{ alignSelf: "flex-start" }}>
