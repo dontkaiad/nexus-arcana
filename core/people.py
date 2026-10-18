@@ -106,11 +106,20 @@ def find_duplicates(rows: Iterable[Dict[str, Any]], limit: int = DUP_LIMIT) -> L
             for b in group[i + 1:]:
                 if _same_bday(a, b):
                     add(a, b, "name_birthday")
+    # «Популярное» имя несут многие (имя-алиас у десятков людей) — это не сигнал дубля:
+    # засчитываем алиас=имя только если ключ принадлежит не более чем двум людям.
+    carriers: Dict[str, set] = {}
+    for p in people_:
+        for k in {" ".join(_tokens(p["name"]))} | {" ".join(_tokens(x)) for x in p.get("aliases") or []}:
+            if k:
+                carriers.setdefault(k, set()).add(p["id"])
     for a in people_:
         for alias in a.get("aliases") or []:
             ak = " ".join(_tokens(alias))
+            if not ak or len(carriers.get(ak, ())) > 2:
+                continue
             for b in by_name.get(ak, []):
-                if ak and ak != " ".join(_tokens(a["name"])):
+                if ak != " ".join(_tokens(a["name"])):
                     add(a, b, "alias_is_name")
 
     by_id = {p["id"]: p for p in people_}

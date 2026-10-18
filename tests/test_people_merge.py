@@ -58,6 +58,13 @@ def test_dup_alias_equals_other_name():
     assert len(d) == 1 and d[0]["reasons"] == ["alias_is_name"]
 
 
+def test_dup_popular_alias_is_not_a_signal():
+    # «Маша» — алиас у троих и имя ещё одного: общее имя, а не дубль
+    rows = [P(1, "Мария Иванова", aliases=["Маша"]), P(2, "Мария Петрова", aliases=["Маша"]),
+            P(3, "Мария Сидорова", aliases=["Маша"]), P(4, "Маша")]
+    assert find_duplicates(rows) == []
+
+
 def test_dup_combined_signals_raise_score_and_sort_first():
     strong = [P(1, "Мария Иванова", birthday=date(1990, 3, 5), aliases=["Машка"]),
               P(2, "Иванова Мария", birthday=date(1990, 3, 5))]
