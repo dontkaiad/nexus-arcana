@@ -21,7 +21,7 @@ from dotenv import load_dotenv  # noqa: E402
 load_dotenv(ROOT / ".env")
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 
-TYPES = ("likes", "dislikes", "birthday", "other")
+TYPES = ("likes", "dislikes", "birthday", "important", "other")
 
 _TR = dict(zip(
     "абвгдеёжзийклмнопрстуфхцчшщъыьэюя",
