@@ -193,7 +193,8 @@ def memory_key(person_id: int, type_: str, h8: str) -> str:
 
 # ── БД ──────────────────────────────────────────────────────────────────────
 
-def resolve_existing(user_id: str, p: Dict, idless_cache: List[Dict], stats: Counter) -> Optional[Dict]:
+def resolve_existing(user_id: str, p: Dict, idless_cache: List[Dict], stats: Counter,
+                     keys_have: Optional[Dict[str, Optional[str]]] = None) -> Optional[Dict]:
     pt = prepo.find_by_tg(user_id, p["tg_id"]) if p["tg_id"] else None
     pv = prepo.find_by_vk(user_id, p["vk_id"]) if p["vk_id"] else None
     if pt and pv and pt["id"] != pv["id"]:
@@ -201,21 +202,28 @@ def resolve_existing(user_id: str, p: Dict, idless_cache: List[Dict], stats: Cou
         return pt
     if pt or pv:
         return pt or pv
-    if not p["tg_id"] and not p["vk_id"]:
-        keys = {name_key(p["name"])} | {name_key(a) for a in p["aliases"]}
-        primary = name_key(p["name"])
-        hits = []
-        for q in idless_cache:
-            alias_keys = {name_key(a) for a in (q.get("aliases") or [])}
-            is_idless = not q.get("tg_id") and not q.get("vk_id")
-            # (а) такой же id-less человек по имени/алиасу; (б) человек с id — ТОЛЬКО если имя
-            # кандидата лежит у него в алиасах (так выглядит склеенный merge'ем источник).
-            # Совпадение одного имени с id-человеком — не повод склеивать.
-            if (is_idless and (name_key(q["name"]) in keys or alias_keys & keys)) or primary in alias_keys:
-                hits.append(q)
-        if len(hits) == 1:
-            return hits[0]
-    return None
+    if p["tg_id"] or p["vk_id"]:
+        return None
+    # id-less кандидат. Сопоставляем по ТОЧНОМУ имени, а не по алиасам: общий алиас
+    # (первое имя) совпадает с десятками людей — «ровно одно попадание» не выполнялось и
+    # повторный импорт плодил дубли.
+    primary = name_key(p["name"])
+    exact = [q for q in idless_cache
+             if not q.get("tg_id") and not q.get("vk_id") and name_key(q["name"]) == primary]
+    if len(exact) == 1:
+        return exact[0]
+    if len(exact) > 1:
+        # одноимённые id-less люди (из TG и из VK) — разные записи; берём ту, у которой
+        # уже лежат факты этого кандидата. Нет совпадений — не гадаем (новый человек).
+        have = keys_have or {}
+        scored = [(sum(memory_key(q["id"], t, h8) in have for t, _f, h8, _q in p["facts"]), -q["id"], q)
+                  for q in exact]
+        best = max(scored, key=lambda x: (x[0], x[1]))
+        return best[2] if best[0] > 0 else None
+    # человек с id, у которого имя кандидата — алиас (так выглядит склеенный merge'ем
+    # источник); только при единственном совпадении.
+    alias_hits = [q for q in idless_cache if primary in {name_key(a) for a in (q.get("aliases") or [])}]
+    return alias_hits[0] if len(alias_hits) == 1 else None
 
 
 def counts(user_id: str) -> Dict[str, int]:
@@ -285,7 +293,7 @@ async def run(dry: bool, no_embed: bool, batch_size: int, pause: float) -> int:
     fact_new: Counter = Counter()
 
     for p in people_plan:
-        person = resolve_existing(user_id, p, idless_cache, st)
+        person = resolve_existing(user_id, p, idless_cache, st, keys_have)
         pid = None
         if person:
             st["people_existing"] += 1

@@ -249,3 +249,31 @@ def test_new_import_saves_quote(staging):
     staging["rows"] = [row("Имя1 Фамилия1", "любит чай", tg_id=1, quote="так и сказал")]
     _run()
     assert _state()[1][0].source_quote == "так и сказал"
+
+
+def test_rerun_is_idempotent_when_another_idless_person_has_a_name_equal_to_the_alias(staging):
+    # В БД уже есть посторонний id-less «Имя1», а у кандидата «Имя1 Ф» алиас «Имя1». Раньше
+    # сопоставление по алиасам давало 2 попадания и повторный импорт плодил дубль «Имя1 Ф».
+    with get_engine().begin() as c:
+        c.execute(people.insert().values(user_id=MARK, name="Имя1", aliases=[]))
+    staging["rows"] = [row("Имя1 Ф", "любит чай", aliases=["Имя1"]),
+                       row("Имя1 Ф", "аллергия на орехи", "important", aliases=["Имя1"])]
+    _run()
+    ppl1, mem1 = _state()
+    assert len(ppl1) == 2 and len(mem1) == 2
+    _run(); _run()
+    ppl2, mem2 = _state()
+    assert [p.id for p in ppl2] == [p.id for p in ppl1] and [m.id for m in mem2] == [m.id for m in mem1]
+    assert {m.person_id for m in mem2} == {next(p.id for p in ppl2 if p.name == "Имя1 Ф")}
+
+
+def test_rerun_keeps_same_name_idless_people_from_two_sources_separate(staging):
+    staging["rows"] = [row("Имя Ф", "любит чай", source="tg"), row("Имя Ф", "не ест рыбу", "dislikes", source="vk")]
+    _run()
+    ppl1, mem1 = _state()
+    assert len(ppl1) == 2                                          # тёзки без id не склеиваются
+    owner = {m.fact_text: m.person_id for m in mem1}
+    _run(); _run()
+    ppl2, mem2 = _state()
+    assert len(ppl2) == 2 and len(mem2) == 2
+    assert {m.fact_text: m.person_id for m in mem2} == owner       # факты остались у «своих» людей
