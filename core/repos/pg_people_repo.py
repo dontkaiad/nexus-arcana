@@ -16,6 +16,26 @@ def _row(r) -> Dict:
     return dict(r._mapping)
 
 
+def find_self(user_id: str) -> Optional[Dict]:
+    with get_engine().connect() as c:
+        r = c.execute(select(people).where(and_(people.c.user_id == user_id, people.c.is_self))).first()
+    return _row(r) if r else None
+
+
+def get_or_create_self(user_id: str, name: str, aliases: List[str], *, tg_id: Optional[int] = None,
+                       tg_username: Optional[str] = None, vk_id: Optional[int] = None) -> int:
+    """Единственная карточка владельца: status=confirmed, is_self. Есть — дополняем алиасы/id."""
+    me = find_self(user_id)
+    if me:
+        fill_missing(me, aliases=aliases, birthday=None, tg_id=tg_id, tg_username=tg_username, vk_id=vk_id)
+        return me["id"]
+    pid = create(user_id, name, aliases, tg_id=tg_id, tg_username=tg_username, vk_id=vk_id,
+                 status="confirmed", is_self=True)
+    with get_engine().begin() as c:
+        refresh_related(c, pid)
+    return pid
+
+
 def find_by_tg(user_id: str, tg_id: int) -> Optional[Dict]:
     with get_engine().connect() as c:
         r = c.execute(select(people).where(and_(people.c.user_id == user_id, people.c.tg_id == tg_id))).first()
@@ -49,11 +69,11 @@ def find_idless(user_id: str) -> List[Dict]:
 def create(user_id: str, name: str, aliases: List[str], *, birthday: Optional[date] = None,
            tg_id: Optional[int] = None, tg_username: Optional[str] = None,
            vk_id: Optional[int] = None, status: str = "pending",
-           birthday_year_known: bool = True) -> int:
+           birthday_year_known: bool = True, is_self: bool = False) -> int:
     with get_engine().begin() as c:
         return c.execute(insert(people).values(
             user_id=user_id, name=name, aliases=aliases, birthday=birthday,
-            birthday_year_known=birthday_year_known, tg_id=tg_id,
+            birthday_year_known=birthday_year_known, is_self=is_self, tg_id=tg_id,
             tg_username=tg_username, vk_id=vk_id, status=status,
         ).returning(people.c.id)).scalar_one()
 
@@ -134,10 +154,14 @@ def list_people(user_id: str, status: Optional[str] = None, q: Optional[str] = N
     with get_engine().connect() as c:
         rows = [_row(r) for r in c.execute(text(
             "SELECT * FROM people WHERE " + " AND ".join(where)), params)]
+    if not (q and q.strip()) and not any(r["is_self"] for r in rows):
+        me = find_self(user_id)                      # карточка «Я» закреплена сверху при любом фильтре
+        if me:
+            rows.append(me)
     cnt = counts_for([r["id"] for r in rows])
     for r in rows:
         r.update(cnt[r["id"]])
-    rows.sort(key=lambda r: (-r["counts"]["pending"], (r["name"] or "").lower(), r["id"]))
+    rows.sort(key=lambda r: (not r["is_self"], -r["counts"]["pending"], (r["name"] or "").lower(), r["id"]))
     return rows
 
 
@@ -154,12 +178,18 @@ def get_person(user_id: str, person_id: int) -> Optional[Dict]:
 def list_facts(person_id: int) -> List[Dict]:
     with get_engine().connect() as c:
         rows = c.execute(text(
-            "SELECT id, fact_text, key_name, review_status, is_current, source, created_at, source_quote "
+            "SELECT id, fact_text, key_name, review_status, is_current, source, created_at, source_quote, "
+            "source_chat_id, source_message_date, quote_author, source_platform, "
+            "mention_count, first_mention_date, last_mention_date "
             "FROM memories WHERE person_id = :p AND NOT is_archived ORDER BY created_at, id"
         ), {"p": person_id}).all()
     return [{"id": r.id, "text": r.fact_text, "type": fact_type(r.key_name),
              "review_status": r.review_status, "is_current": r.is_current, "source": r.source,
-             "created_at": r.created_at, "quote": r.source_quote} for r in rows]
+             "created_at": r.created_at, "quote": r.source_quote,
+             "chat_id": r.source_chat_id, "message_date": r.source_message_date,
+             "quote_author": r.quote_author, "platform": r.source_platform,
+             "mention_count": r.mention_count, "first_mention": r.first_mention_date,
+             "last_mention": r.last_mention_date} for r in rows]
 
 
 EDITABLE = ("name", "aliases", "birthday", "birthday_year_known", "tg_id", "tg_username",
@@ -169,6 +199,10 @@ EDITABLE = ("name", "aliases", "birthday", "birthday_year_known", "tg_id", "tg_u
 def update_person(user_id: str, person_id: int, values: Dict) -> Optional[Dict]:
     """Частичное обновление. IntegrityError (дубль tg_id/vk_id, CHECK) пробрасывается."""
     vals = {k: v for k, v in values.items() if k in EDITABLE}
+    if vals.get("status") in ("rejected", "pending"):
+        me = find_self(user_id)
+        if me and me["id"] == person_id:
+            raise ValueError("self_status")          # карточку «Я» нельзя отклонить/вернуть в pending
     with get_engine().begin() as c:
         if vals:
             vals["updated_at"] = func.now()
@@ -198,6 +232,9 @@ def review_all(user_id: str, person_id: int, to_status: str) -> Optional[int]:
     """approve-all / reject-all: все pending-факты человека → to_status и
     status человека (confirmed|rejected) — одной транзакцией. None если человека нет."""
     person_status = {"confirmed": "confirmed", "rejected": "rejected"}[to_status]
+    me = find_self(user_id)
+    if to_status == "rejected" and me and me["id"] == person_id:
+        raise ValueError("self_status")
     with get_engine().begin() as c:
         res = c.execute(update(people).where(and_(people.c.id == person_id, people.c.user_id == user_id))
                         .values(status=person_status, updated_at=func.now()))
@@ -226,6 +263,9 @@ def review_batch(user_id: str, person_id: int, approve: List[int], reject: List[
     reset → pending (для undo), статус человека. Любой id, не принадлежащий этому
     человеку/владельцу, → ValueError и полный откат. None если человека нет."""
     ids = list(approve) + list(reject) + list(reset)
+    me = find_self(user_id)
+    if me and me["id"] == person_id:
+        person_status = "confirmed"                  # ревью «Я» статус карточки не меняет
     with get_engine().begin() as c:
         if c.execute(select(people.c.id).where(and_(people.c.id == person_id, people.c.user_id == user_id))
                      .with_for_update()).first() is None:
@@ -300,6 +340,9 @@ def merge_people(user_id: str, source_id: int, target_id: int) -> Dict:
     это разные аккаунты, и потерянный id при повторном импорте воскресил бы дубль."""
     if source_id == target_id:
         raise MergeError("same")
+    me = find_self(user_id)
+    if me and me["id"] == source_id:
+        raise MergeError("self")                      # «Я» нельзя влить в кого-то; в «Я» вливать можно
     with get_engine().begin() as conn:
         first, second = sorted((source_id, target_id))
         locked = {pid: _lock_person(conn, user_id, pid) for pid in (first, second)}

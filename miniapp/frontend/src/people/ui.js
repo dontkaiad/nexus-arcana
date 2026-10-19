@@ -40,3 +40,53 @@ export const statusColor = (s, status) =>
   status === 'confirmed' ? s.good : status === 'rejected' ? s.red : s.amber
 
 export const STATUS_LABEL = { pending: 'на проверке', confirmed: 'подтверждён', rejected: 'отклонён' }
+
+// 'YYYY-MM-DD' → 'дд.мм.гггг'
+export function fmtDate(iso) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso || '')
+  return m ? `${m[3]}.${m[2]}.${m[1]}` : ''
+}
+
+export const PLATFORM = { vk: 'VK', tg: 'TG' }
+
+// Под цитатой: «VK · 12.03.2021» (+ «· написала Кай», если цитата — её реплика)
+export function provenanceLine(f) {
+  const parts = []
+  const pf = PLATFORM[f.platform]
+  if (pf) parts.push(pf)
+  const d = fmtDate(f.message_date)
+  if (d) parts.push(d)
+  if (parts.length === 0) return ''
+  if (f.quote_author === 'kai') parts.push('написала Кай')
+  return parts.join(' · ')
+}
+
+// Метка упоминаний факта: «×7 · последнее 2023»
+export function mentionLabel(f) {
+  const n = f.mention_count || 1
+  const y = (f.last_mention || '').slice(0, 4)
+  return `×${n}${y ? ` · последнее ${y}` : ''}`
+}
+
+// Ссылки на источник человека: «TG · @username» / «TG · id123» и «VK · id456»
+export function sourceLinks(p) {
+  const out = []
+  if (p.vk_id) out.push({ key: 'vk', label: `VK · id${p.vk_id}`, href: `https://vk.com/id${p.vk_id}` })
+  if (p.tg_id || p.tg_username) {
+    out.push({
+      key: 'tg',
+      label: p.tg_username ? `TG · @${p.tg_username}` : `TG · id${p.tg_id}`,
+      href: p.tg_username ? `https://t.me/${p.tg_username}` : `tg://user?id=${p.tg_id}`,
+    })
+  }
+  return out
+}
+
+export function openLink(e, href) {
+  e.stopPropagation()
+  e.preventDefault()
+  try {
+    if (window.Telegram?.WebApp?.openLink && /^https?:/.test(href)) { window.Telegram.WebApp.openLink(href); return }
+  } catch { /* ignore */ }
+  window.open(href, '_blank', 'noopener')
+}

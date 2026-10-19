@@ -368,3 +368,86 @@ def test_patch_name_refreshes_related_to_of_facts(client):
     client.patch("/api/people/%d" % pid, json={"name": "Новое Имя", "aliases": ["Б"]})
     with get_engine().connect() as c:
         assert c.execute(text("SELECT related_to FROM memories WHERE id=:i"), {"i": f}).scalar_one() == "Новое Имя | Б"
+
+
+# ── PR-6b: «Я», происхождение фактов, упоминания ─────────────────────────────
+
+def mk_self(user=MARK, **kw) -> int:
+    return mk_person("Кай", user=user, is_self=True, status="confirmed", **kw)
+
+
+def test_self_card_is_pinned_first_even_when_filtered_out(client):
+    me = mk_self()
+    a = mk_person("Аа Аа"); mk_fact(a)
+    mk_fact(me, status="pending")
+    ids = [p["id"] for p in client.get("/api/people?status=pending").json()["people"]]
+    assert ids[0] == me and a in ids                       # self подмешан при любом фильтре и стоит первым
+    first = client.get("/api/people").json()["people"][0]
+    assert first["id"] == me and first["is_self"] is True
+    assert [p["id"] for p in client.get("/api/people?q=аа").json()["people"]] == [a]   # при поиске — как обычно
+
+
+def test_self_card_cannot_be_rejected_merged_away_or_listed_as_duplicate(client):
+    me = mk_self(); other = mk_person("Кай")              # «одноимённый» человек
+    assert client.post("/api/people/%d/reject-all" % me).status_code == 409
+    assert client.patch("/api/people/%d" % me, json={"status": "rejected"}).status_code == 409
+    assert client.post("/api/people/%d/merge" % me, json={"into_id": other}).status_code == 409
+    assert client.get("/api/people/duplicates").json()["total"] == 0
+    r = client.post("/api/people/%d/review" % me, json={"person_status": "rejected"})
+    assert r.status_code == 200 and r.json()["status"] == "confirmed"          # ревью «Я» статус не меняет
+    assert client.post("/api/people/%d/merge" % other, json={"into_id": me}).status_code == 200   # В «Я» вливать можно
+
+
+def test_card_exposes_provenance_and_mentions_and_self_sorts_by_last_mention(client):
+    me = mk_self()
+    old = mk_fact(me, text_="старое", n="aaaa1111", mention_count=3, last_mention_date=date(2019, 5, 1),
+                  first_mention_date=date(2018, 1, 1))
+    new = mk_fact(me, text_="свежее", n="bbbb2222", mention_count=7, last_mention_date=date(2023, 6, 1),
+                  first_mention_date=date(2020, 1, 1), source_platform="vk", source_chat_id=42,
+                  source_message_date=date(2023, 6, 1), quote_author="partner")
+    card = client.get("/api/people/%d" % me).json()
+    items = card["facts"][0]["items"]
+    assert [i["id"] for i in items] == [new, old]                                  # свежие упоминания сверху
+    f = items[0]
+    assert (f["mention_count"], f["last_mention"], f["first_mention"]) == (7, "2023-06-01", "2020-01-01")
+    assert (f["platform"], f["chat_id"], f["message_date"], f["quote_author"]) == ("vk", 42, "2023-06-01", "partner")
+    plain = mk_person("Обычный"); mk_fact(plain)
+    g = client.get("/api/people/%d" % plain).json()["facts"][0]["items"][0]
+    assert g["mention_count"] == 1 and g["platform"] is None and g["last_mention"] is None
+
+
+def test_self_is_scoped_to_owner(client):
+    mk_self(user=OTHER)
+    assert all(not p["is_self"] for p in client.get("/api/people").json()["people"])
+
+
+def test_migration_adds_provenance_and_self_columns_reversibly():
+    from alembic.migration import MigrationContext
+    from alembic.operations import Operations
+
+    mods = []
+    for pat in ("*_memories_provenance.py", "*_people_self_mentions.py"):
+        path = next((REPO / "alembic" / "versions").glob(pat))
+        spec = importlib.util.spec_from_file_location("_m_" + pat[2:8], path)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        mods.append(mod)
+    prov, selfm = mods
+    assert selfm.down_revision == prov.revision
+    with get_engine().connect() as conn:
+        trans = conn.begin()
+        try:
+            with Operations.context(MigrationContext.configure(conn)):
+                selfm.downgrade(); prov.downgrade()
+                cols = {c["name"] for c in inspect(conn).get_columns("memories")}
+                assert not cols & {"source_chat_id", "quote_author", "mention_count", "source_platform"}
+                assert "is_self" not in {c["name"] for c in inspect(conn).get_columns("people")}
+                prov.upgrade(); selfm.upgrade()
+                cols = {c["name"] for c in inspect(conn).get_columns("memories")}
+                assert {"source_chat_id", "source_message_date", "quote_author", "source_platform",
+                        "mention_count", "first_mention_date", "last_mention_date"} <= cols
+                with pytest.raises(IntegrityError):
+                    with conn.begin_nested():
+                        conn.execute(text("INSERT INTO memories (fact_text, user_id, quote_author) VALUES ('x','t','bogus')"))
+        finally:
+            trans.rollback()

@@ -46,15 +46,6 @@ def test_two_people_same_name_different_ids_stay_separate():
     assert len(cands) == 2
 
 
-def test_idless_rows_attach_only_to_unique_id_candidate():
-    one = [row("Имя Ф", "a", tg_id=1), row("Имя Ф", "b")]
-    cands, st = im.group_candidates(one)
-    assert len(cands) == 1 and len(cands[0]["facts"]) == 2
-
-    two = [row("Имя Ф", "a", tg_id=1), row("Имя Ф", "b", tg_id=2), row("Имя Ф", "c")]
-    cands, st = im.group_candidates(two)
-    assert len(cands) == 3 and st["ambiguous_idless"] == 1  # не гадаем, чья «c»
-
 
 def _pair(tg_bday=None, vk_bday=None, tg_user=None, vk_screen=None, vk_name="Имя1 Фамилия1"):
     rows = [row("Имя1 Фамилия1", "t-fact", tg_id=10, tg_username=tg_user)]
@@ -98,7 +89,7 @@ def test_birthday_facts_never_become_facts_and_api_beats_chat():
             row("Имя Ф", "любит чай", tg_id=1)]
     p = im.finalize(im.group_candidates(rows)[0][0])
     assert p["birthday"] == date(1999, 4, 3) and p["bday_origin"] == "api"
-    assert [t for t, *_ in p["facts"]] == ["likes"]
+    assert [f["type"] for f in p["facts"]] == ["likes"]
 
 
 def test_fact_text_prefixes_name_only_when_missing():
@@ -198,11 +189,6 @@ def test_chat_birthday_fills_only_when_empty_and_does_not_overwrite(staging):
     assert _state()[0][0].birthday == date(1990, 6, 7)        # ручная правка не затёрта
 
 
-def test_idless_person_is_matched_by_name_on_rerun(staging):
-    staging["rows"] = [row("Имя Ф", "любит чай")]
-    _run(); _run()
-    assert len(_state()[0]) == 1
-
 
 def test_confirmed_visible_count_unchanged_by_import(staging):
     with get_engine().begin() as c:
@@ -226,24 +212,6 @@ def test_embed_missing_batches_and_paces(staging, monkeypatch):
     assert (done, total) == (5, 5) and calls == [2, 2, 1] and sleeps == [21.0, 21.0]
 
 
-def test_import_stores_quote_and_rerun_fills_missing_quote_without_touching_embedding(staging):
-    from core import memory_rag
-    staging["rows"] = [row("Имя1 Фамилия1", "любит чай", tg_id=1, quote="")]
-    _run()
-    assert _state()[1][0].source_quote is None
-    vec = memory_rag._vec_literal([1.0] + [0.0] * 1023)
-    with get_engine().begin() as c:
-        c.execute(text("UPDATE memories SET embedding = CAST(:e AS vector) WHERE user_id=:u"), {"e": vec, "u": MARK})
-    staging["rows"] = [row("Имя1 Фамилия1", "любит чай", tg_id=1, quote="цитата из чата")]
-    _run()
-    ppl, mem = _state()
-    assert len(mem) == 1 and mem[0].source_quote == "цитата из чата"
-    with get_engine().connect() as c:
-        assert c.execute(text("SELECT embedding IS NOT NULL FROM memories WHERE user_id=:u"), {"u": MARK}).scalar_one()
-    staging["rows"] = [row("Имя1 Фамилия1", "любит чай", tg_id=1, quote="другая цитата")]
-    _run()
-    assert _state()[1][0].source_quote == "цитата из чата"      # первая цитата не затирается
-
 
 def test_new_import_saves_quote(staging):
     staging["rows"] = [row("Имя1 Фамилия1", "любит чай", tg_id=1, quote="так и сказал")]
@@ -251,29 +219,120 @@ def test_new_import_saves_quote(staging):
     assert _state()[1][0].source_quote == "так и сказал"
 
 
-def test_rerun_is_idempotent_when_another_idless_person_has_a_name_equal_to_the_alias(staging):
-    # В БД уже есть посторонний id-less «Имя1», а у кандидата «Имя1 Ф» алиас «Имя1». Раньше
-    # сопоставление по алиасам давало 2 попадания и повторный импорт плодил дубль «Имя1 Ф».
+
+
+# ── PR-6b: «Я», пропуск без id, происхождение, дедуп ────────────────────────
+
+from datetime import date as _date  # noqa: E402
+from tools.people_import.selfblock import SelfBlock, load_selfblock  # noqa: E402
+
+
+def _sb(**kw):
+    sb = SelfBlock()
+    sb.add_names(["Кай", "Kai", "Kai Lark", "Вы"] + kw.get("names", []))
+    sb.tg_ids |= set(kw.get("tg", []))
+    sb.vk_ids |= set(kw.get("vk", []))
+    sb.usernames |= set(kw.get("users", []))
+    return sb
+
+
+def test_rows_without_id_never_create_people():
+    cands, st = im.group_candidates([row("Имя Ф", "любит чай")], _sb())
+    assert cands == [] and st["skipped_no_id"] == 1
+
+
+def test_self_by_about_name_or_ids_goes_to_single_self_candidate():
+    sb = _sb(names=["Свойимя"], tg=[777], vk=[888])
+    rows = [row("Кай", "аллергия на пыль", "important", about="kai"),
+            row("Имя Ф", "любит кошек", about="kai", tg_id=1),            # о Кай, сказано в чужом чате
+            row("Свойимя", "любит чай", tg_id=5),                         # чат по имени владельца
+            row("Чужое", "любит кофе", tg_id=777),                        # второй аккаунт владельца по id
+            row("Чужое2", "любит йогурт", source="vk", vk_id=888),
+            row("Имя Ф", "любит джаз", tg_id=1)]
+    cands, _ = im.group_candidates(rows, sb)
+    selfs = [c for c in cands if c["is_self"]]
+    assert len(selfs) == 1 and len(selfs[0]["facts"]) == 5
+    assert [c for c in cands if not c["is_self"]][0]["tg_id"] == 1
+    assert len(cands) == 2                                               # «Я» и один человек
+
+
+def test_self_card_is_created_once_confirmed_and_facts_attach_to_it(staging, monkeypatch):
+    sb = _sb(names=["Свойимя"], tg=[777])
+    monkeypatch.setattr(im, "load_selfblock", lambda *a, **k: sb)
+    staging["rows"] = [row("Кай", "аллергия на пыль", "important", about="kai", source_chat_id=11,
+                           source_message_date="2022-05-01", quote_author="kai"),
+                       row("Имя Ф", "любит джаз", tg_id=1)]
+    _run(); _run()
+    ppl, mem = _state()
+    me = [p for p in ppl if p.is_self]
+    assert len(ppl) == 2 and len(me) == 1 and me[0].status == "confirmed" and me[0].name == "Кай"
+    assert "Свойимя" in me[0].aliases and "Kai" in me[0].aliases
+    self_facts = [m for m in mem if m.person_id == me[0].id]
+    assert len(self_facts) == 1 and self_facts[0].review_status == "pending"
+    assert self_facts[0].related_to.startswith("Кай | ")
+
+
+def test_second_self_card_is_impossible():
+    from sqlalchemy.exc import IntegrityError
     with get_engine().begin() as c:
-        c.execute(people.insert().values(user_id=MARK, name="Имя1", aliases=[]))
-    staging["rows"] = [row("Имя1 Ф", "любит чай", aliases=["Имя1"]),
-                       row("Имя1 Ф", "аллергия на орехи", "important", aliases=["Имя1"])]
-    _run()
-    ppl1, mem1 = _state()
-    assert len(ppl1) == 2 and len(mem1) == 2
-    _run(); _run()
-    ppl2, mem2 = _state()
-    assert [p.id for p in ppl2] == [p.id for p in ppl1] and [m.id for m in mem2] == [m.id for m in mem1]
-    assert {m.person_id for m in mem2} == {next(p.id for p in ppl2 if p.name == "Имя1 Ф")}
+        c.execute(people.insert().values(user_id=MARK, name="Кай", is_self=True))
+    try:
+        with pytest.raises(IntegrityError):
+            with get_engine().begin() as c:
+                c.execute(people.insert().values(user_id=MARK, name="Кай2", is_self=True))
+    finally:
+        with get_engine().begin() as c:
+            c.execute(delete(people).where(people.c.user_id == MARK))
 
 
-def test_rerun_keeps_same_name_idless_people_from_two_sources_separate(staging):
-    staging["rows"] = [row("Имя Ф", "любит чай", source="tg"), row("Имя Ф", "не ест рыбу", "dislikes", source="vk")]
+def test_provenance_and_mentions_are_stored(staging):
+    staging["rows"] = [row("Имя Ф", "любит чай", tg_id=1, source_chat_id=1, source_message_date="2021-03-12",
+                           quote_author="partner", quote="люблю чай")]
     _run()
-    ppl1, mem1 = _state()
-    assert len(ppl1) == 2                                          # тёзки без id не склеиваются
-    owner = {m.fact_text: m.person_id for m in mem1}
-    _run(); _run()
-    ppl2, mem2 = _state()
-    assert len(ppl2) == 2 and len(mem2) == 2
-    assert {m.fact_text: m.person_id for m in mem2} == owner       # факты остались у «своих» людей
+    m = _state()[1][0]
+    assert (m.source_chat_id, m.source_message_date, m.quote_author, m.source_platform) == (1, _date(2021, 3, 12), "partner", "tg")
+    assert (m.mention_count, m.first_mention_date, m.last_mention_date) == (1, _date(2021, 3, 12), _date(2021, 3, 12))
+
+
+def _vec(*xs):
+    return list(xs)
+
+
+def test_cluster_facts_by_cosine_same_type_and_polarity():
+    def f(t, text, d):
+        return {"type": t, "fact": text, "date": _date.fromisoformat(d)}
+    facts = [f("likes", "любит чай", "2020-01-01"), f("likes", "обожает чай", "2023-01-01"),
+             f("dislikes", "не любит чай", "2022-01-01"), f("likes", "не пьёт чай", "2022-06-01"),
+             f("likes", "любит футбол", "2021-01-01")]
+    # почти одинаковые векторы у всех «чайных»; футбол — другой
+    vecs = [_vec(1, 0.01), _vec(1, 0.02), _vec(1, 0.015), _vec(1, 0.012), _vec(0, 1)]
+    cl = im.cluster_facts(facts, vecs, 0.9)
+    groups = sorted(sorted(c) for c in cl)
+    assert groups == [[0, 1], [2], [3], [4]]          # разные type и полярность не склеиваются
+    merged = {m["mentions"]: m for m in im.merge_clusters(facts, cl)}
+    top = merged[2]
+    assert top["fact"] == "обожает чай"               # представитель — самое свежее упоминание
+    assert (top["first"], top["last"]) == (_date(2020, 1, 1), _date(2023, 1, 1))
+
+
+def test_dedupe_self_falls_back_to_exact_without_embeddings():
+    facts = [{"type": "likes", "fact": "Любит  чай", "date": _date(2020, 1, 1)},
+             {"type": "likes", "fact": "любит чай", "date": _date(2022, 1, 1)},
+             {"type": "likes", "fact": "любит кофе", "date": None}]
+    out, how = im.dedupe_self(facts, 0.9, embed=lambda texts: [])
+    assert how == "exact" and sorted(f["mentions"] for f in out) == [1, 2]
+
+
+def test_self_facts_are_deduplicated_with_mention_counts_on_import(staging, monkeypatch):
+    monkeypatch.setattr(im, "load_selfblock", lambda *a, **k: _sb())
+    staging["rows"] = [row("Кай", "любит чай", about="kai", source_chat_id=11, source_message_date="2019-01-01", quote="a1"),
+                       row("Кай", "обожает чай", about="kai", source_chat_id=12, source_message_date="2023-07-01", quote="a2"),
+                       row("Кай", "любит кофе", about="kai", source_chat_id=13, source_message_date="2021-01-01", quote="a3")]
+    emb = {"любит чай": [1, 0.01], "обожает чай": [1, 0.02], "любит кофе": [0, 1]}
+    asyncio.run(im.run(False, True, 20, 0, 0.9, embed=lambda texts: [emb[t] for t in texts]))
+    ppl, mem = _state()
+    by = {m.fact_text: m for m in mem}
+    assert set(by) == {"обожает чай", "любит кофе"}
+    tea = by["обожает чай"]
+    assert (tea.mention_count, tea.first_mention_date, tea.last_mention_date) == (2, _date(2019, 1, 1), _date(2023, 7, 1))
+    assert tea.source_chat_id == 12 and tea.source_quote == "a2"

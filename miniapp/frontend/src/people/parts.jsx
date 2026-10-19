@@ -1,6 +1,6 @@
 import React from 'react'
 import { Check } from 'lucide-react'
-import { fs } from './ui'
+import { fs, openLink, sourceLinks } from './ui'
 
 // Кнопки/поля раздела «Люди»: цель касания ≥ 44px (Telegram WebView), без жёстких ширин.
 export function Btn({ s, kind = 'ghost', onClick, disabled, children, style }) {
@@ -66,3 +66,19 @@ export const Label = ({ s, children }) => (
 export const Note = ({ s, children, color }) => (
   <div style={{ fontSize: fs(12), color: color || s.tS, textAlign: 'center', padding: '24px 8px', lineHeight: 1.45 }}>{children}</div>
 )
+
+// «TG · @username» / «VK · id…» — тап открывает источник (чтобы понять, кто это)
+export function SourceLinks({ s, p, style }) {
+  const links = sourceLinks(p)
+  if (p.is_self || links.length === 0) return null
+  return (
+    <span style={{ display: 'inline-flex', gap: 8, flexWrap: 'wrap', ...style }}>
+      {links.map((l) => (
+        <a key={l.key} href={l.href} onClick={(e) => openLink(e, l.href)}
+          style={{ color: s.text, fontWeight: 600, textDecoration: 'underline', textDecorationStyle: 'dotted', textUnderlineOffset: 2 }}>
+          {l.label}
+        </a>
+      ))}
+    </span>
+  )
+}

@@ -29,6 +29,8 @@ people = Table(
     Column("vk_id",       BigInteger),
     Column("notes",       Text),
     Column("status",      Text,       nullable=False, server_default=text("'pending'")),
+    # карточка владельца («Я»): не больше одной на user_id (частичный unique в миграции)
+    Column("is_self",     Boolean,    nullable=False, server_default=text("false")),
     Column("created_at",  TIMESTAMP(timezone=True), server_default=text("now()")),
     Column("updated_at",  TIMESTAMP(timezone=True), server_default=text("now()")),
     CheckConstraint("status IN ('pending','confirmed','rejected')", name="ck_people_status"),

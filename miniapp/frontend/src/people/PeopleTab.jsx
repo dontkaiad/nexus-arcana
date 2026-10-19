@@ -2,9 +2,9 @@ import React, { useEffect, useState } from 'react'
 import { Search, X } from 'lucide-react'
 import PersonCard, { Header } from './PersonCard'
 import ReviewMode from './ReviewMode'
-import { Btn, Chip, Note, inputStyle } from './parts'
+import { Btn, Chip, Note, SourceLinks, inputStyle } from './parts'
 import { listPeople } from './peopleApi'
-import { fmtBirthday, fs, pendingOf, plural, sourcesOf } from './ui'
+import { fmtBirthday, fs, pendingOf, plural } from './ui'
 
 const FILTERS = [
   { k: 'all', l: 'Все', status: undefined },
@@ -36,7 +36,7 @@ export default function PeopleTab({ s, Sheet, onClose, onChanged }) {
     const f = FILTERS.find((x) => x.k === filter)
     listPeople({ status: f.status, q: dq }).then((d) => !dead && setRows(d.people || []))
       .catch((e) => !dead && (setErr(String(e.message || e)), setRows([])))
-    listPeople({ status: 'pending' }).then((d) => !dead && setPendingTotal(d.total)).catch(() => {})
+    listPeople({ status: 'pending' }).then((d) => !dead && setPendingTotal((d.people || []).filter((x) => !x.is_self).length)).catch(() => {})
     return () => { dead = true }
   }, [filter, dq, tick, view.name])
 
@@ -49,8 +49,9 @@ export default function PeopleTab({ s, Sheet, onClose, onChanged }) {
       padding: '10px 14px calc(env(safe-area-inset-bottom, 0px) + 24px)',
       background: `linear-gradient(180deg, ${s.deep} 0%, ${s.mid} 25%, ${s.warm} 55%, ${s.glow} 75%, ${s.base} 100%)`,
     }}>
-      {view.name === 'review' && <ReviewMode s={s} Sheet={Sheet} onExit={back} />}
-      {view.name === 'card' && <PersonCard s={s} Sheet={Sheet} id={view.id} onBack={back} onChanged={onChanged} />}
+      {view.name === 'review' && <ReviewMode s={s} Sheet={Sheet} onExit={back} only={view.only} />}
+      {view.name === 'card' && <PersonCard s={s} Sheet={Sheet} id={view.id} onBack={back} onChanged={onChanged}
+        onStartReview={(id) => setView({ name: 'review', only: id })} />}
       {view.name === 'list' && (
         <div>
           <Header s={s} onBack={onClose} title="Люди"
@@ -79,15 +80,17 @@ export default function PeopleTab({ s, Sheet, onClose, onChanged }) {
             const n = pendingOf(p)
             return (
               <div key={p.id} className="glass tap" onClick={() => setView({ name: 'card', id: p.id })}
-                style={{ padding: '10px 14px', marginBottom: 6, minHeight: 56 }}>
+                style={{ padding: '10px 14px', marginBottom: 6, minHeight: 56, ...(p.is_self ? { border: `1.5px solid ${s.acc}`, marginBottom: 10 } : {}) }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  {p.is_self && <Chip s={s} color={s.acc}>Я</Chip>}
                   <div style={{ flex: 1, minWidth: 0, fontSize: fs(15), fontWeight: 500, color: s.text, wordBreak: 'break-word' }}>{p.name}</div>
                   {n > 0 && <Chip s={s} color={s.amber}>●{n}</Chip>}
                   {p.status === 'rejected' && <Chip s={s} color={s.red}>отклонён</Chip>}
                 </div>
-                <div style={{ fontSize: fs(11), color: s.tS, marginTop: 2 }}>
-                  🎂 {fmtBirthday(p.birthday)}{sourcesOf(p).length ? ' · ' + sourcesOf(p).join(' · ') : ''}
-                  {p.counts?.confirmed > 0 ? ` · ✓ ${p.counts.confirmed} ${plural(p.counts.confirmed, 'факт', 'факта', 'фактов')}` : ''}
+                <div style={{ fontSize: fs(11), color: s.text, marginTop: 2, display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+                  {!p.is_self && <span>🎂 {fmtBirthday(p.birthday)}</span>}
+                  <SourceLinks s={s} p={p} />
+                  {p.counts?.confirmed > 0 && <span>✓ {p.counts.confirmed} {plural(p.counts.confirmed, 'факт', 'факта', 'фактов')}</span>}
                 </div>
               </div>
             )

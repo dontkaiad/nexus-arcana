@@ -78,12 +78,15 @@ def load_staging() -> List[Dict]:
 
 
 def _dedup_id(rec: Dict) -> str:
-    return "%s|%s|%s" % (rec["name"].lower(), rec["type"], norm_fact(rec["fact"]))
+    # источник-чат входит в ключ: одноимённые собеседники из разных чатов не схлопываются
+    return "%s|%s|%s|%s" % (rec["name"].lower(), rec.get("source_chat_id") or "", rec["type"], norm_fact(rec["fact"]))
 
 
 # Идентичность человека в staging: жёсткие ключи tg_id / vk_id (+ username'ы
 # для автосклейки VK↔TG). origin: api — ДР из TG/VK API, chat — извлечено из переписки.
 IDENT_FIELDS = ("tg_id", "tg_username", "vk_id", "vk_screen")
+# происхождение факта: чат, дата сообщения-цитаты, автор цитаты (kai|partner|mixed|unknown)
+PROVENANCE_FIELDS = ("source_chat_id", "source_message_date", "quote_author", "about")
 
 
 def _enrich(old: Dict, new: Dict) -> bool:
@@ -120,7 +123,7 @@ def append_staging(records: Iterable[Dict]) -> int:
             "origin": r.get("origin") or ("api" if not r.get("quote") else "chat"),
             "approved": None,
         }
-        for f in IDENT_FIELDS:
+        for f in IDENT_FIELDS + PROVENANCE_FIELDS:
             rec[f] = r.get(f)
         k = _dedup_id(rec)
         if k in index:

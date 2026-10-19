@@ -98,10 +98,12 @@ def _add_sync(
     person_id: Optional[int] = None,
     review_status: str = "confirmed",
     source_quote: Optional[str] = None,
+    provenance: Optional[dict] = None,
 ) -> str:
     with get_engine().begin() as conn:
         result = conn.execute(
             memories.insert().values(
+                **(provenance or {}),
                 source_quote=source_quote,
                 person_id=person_id,
                 review_status=review_status or "confirmed",
@@ -130,6 +132,7 @@ def _upsert_sync(
     person_id: Optional[int] = None,
     review_status: str = "confirmed",
     source_quote: Optional[str] = None,
+    provenance: Optional[dict] = None,
 ) -> Tuple[str, bool]:
     """Find existing by key (+ owner), update; else create. Returns (id, was_updated).
 
@@ -162,6 +165,7 @@ def _upsert_sync(
             extra = {"person_id": person_id} if person_id is not None else {}
             if source_quote is not None:
                 extra["source_quote"] = source_quote
+            extra.update(provenance or {})
             with get_engine().begin() as conn:
                 conn.execute(
                     memories.update()
@@ -196,7 +200,7 @@ def _upsert_sync(
                 logger.warning("memory upsert: embedding NULL-reset failed for %s: %s", mem_id, e)
             return str(mem_id), True
     mem_id = _add_sync(fact, key, category, scope, related_to, source, user_id,
-                       person_id, review_status, source_quote)
+                       person_id, review_status, source_quote, provenance)
     return mem_id, False
 
 
@@ -517,10 +521,11 @@ class PgMemoryRepo:
         review_status: str = "confirmed",
         index: bool = True,
         source_quote: Optional[str] = None,
+        provenance: Optional[dict] = None,
     ) -> str:
         mem_id = await asyncio.to_thread(
             _add_sync, fact, key, category, scope, related_to, source, user_id,
-            person_id, review_status, source_quote,
+            person_id, review_status, source_quote, provenance,
         )
         if mem_id and index:
             _spawn_index(mem_id, fact, related_to, category)
@@ -539,12 +544,13 @@ class PgMemoryRepo:
         review_status: str = "confirmed",
         index: bool = True,
         source_quote: Optional[str] = None,
+        provenance: Optional[dict] = None,
     ) -> Tuple[str, bool]:
         """index=False — не спавнить эмбеддинг (массовый импорт индексирует
         пачками через index_memories_batch)."""
         mem_id, was_updated = await asyncio.to_thread(
             _upsert_sync, fact, key, category, scope, related_to, source, user_id,
-            person_id, review_status, source_quote,
+            person_id, review_status, source_quote, provenance,
         )
         if mem_id and index:
             _spawn_index(mem_id, fact, related_to, category)

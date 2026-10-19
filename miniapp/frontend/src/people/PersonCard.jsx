@@ -3,14 +3,14 @@ import { ArrowLeft, Pencil } from 'lucide-react'
 import FactGroups from './FactGroups'
 import MergePicker from './MergePicker'
 import PersonEdit from './PersonEdit'
-import { Btn, Chip, Note, inputStyle, Label } from './parts'
+import { Btn, Chip, Note, SourceLinks, inputStyle, Label } from './parts'
 import {
   addFact, approveAll, approveFact, errText, getPerson, rejectAll, rejectFact,
 } from './peopleApi'
-import { STATUS_LABEL, TYPE_CHOICES, fmtBirthday, fs, haptic, plural, sourcesOf, statusColor, typeMeta } from './ui'
+import { STATUS_LABEL, TYPE_CHOICES, fmtBirthday, fs, haptic, plural, statusColor, typeMeta } from './ui'
 
 // Карточка человека вне режима разбора: правка, ручной факт, склейка, ревью по одному факту.
-export default function PersonCard({ s, Sheet, id, onBack, onChanged }) {
+export default function PersonCard({ s, Sheet, id, onBack, onChanged, onStartReview }) {
   const [p, setP] = useState(null)
   const [err, setErr] = useState('')
   const [expanded, setExpanded] = useState(new Set())
@@ -51,11 +51,14 @@ export default function PersonCard({ s, Sheet, id, onBack, onChanged }) {
         right={<div onClick={() => setEdit(true)} style={{ width: 44, height: 44, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}><Pencil size={fs(17)} color={s.tS} /></div>} />
 
       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center', margin: '2px 0 6px' }}>
-        <Chip s={s} color={statusColor(s, p.status)}>{STATUS_LABEL[p.status] || p.status}</Chip>
+        {p.is_self
+          ? <Chip s={s} color={s.acc}>Я</Chip>
+          : <Chip s={s} color={statusColor(s, p.status)}>{STATUS_LABEL[p.status] || p.status}</Chip>}
         <span style={{ fontSize: fs(12), color: s.text, fontWeight: 500 }}>
-          🎂 {fmtBirthday(p.birthday)}{age}{sourcesOf(p).length ? ' · ' + sourcesOf(p).join(' · ') : ''}{p.tg_username ? ' · @' + p.tg_username : ''}
+          🎂 {fmtBirthday(p.birthday)}{age}
         </span>
       </div>
+      <div style={{ fontSize: fs(12), marginBottom: 6 }}><SourceLinks s={s} p={p} /></div>
       {p.aliases?.length > 0 && (
         <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginBottom: 6 }}>
           {p.aliases.map((a) => <Chip key={a} s={s}>{a}</Chip>)}
@@ -66,7 +69,7 @@ export default function PersonCard({ s, Sheet, id, onBack, onChanged }) {
       {err && <Note s={s} color={s.red}>{err}</Note>}
 
       {p.facts.length === 0 && <Note s={s}>Фактов пока нет</Note>}
-      <FactGroups s={s} groups={p.facts} expanded={expanded} onToggle={toggle}
+      <FactGroups s={s} groups={p.facts} expanded={expanded} onToggle={toggle} showMentions={p.is_self}
         right={(f) => (
           <div style={{ display: 'flex', alignItems: 'center', flexShrink: 0 }}>
             {f.review_status !== 'confirmed' && (
@@ -105,17 +108,20 @@ export default function PersonCard({ s, Sheet, id, onBack, onChanged }) {
       )}
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 16 }}>
-        {pend > 0 && (
-          <Btn s={s} kind="primary" disabled={busy} onClick={() => act(() => approveAll(p.id))}>✓ Принять все ({pend}) и подтвердить</Btn>
+        {p.is_self && pend > 0 && onStartReview && (
+          <Btn s={s} kind="primary" onClick={() => onStartReview(p.id)}>Разобрать по одному ({pend})</Btn>
         )}
-        <div style={{ display: 'flex', gap: 8 }}>
+        {pend > 0 && (
+          <Btn s={s} kind={p.is_self ? 'ghost' : 'primary'} disabled={busy} onClick={() => act(() => approveAll(p.id))}>✓ Принять все ({pend}){p.is_self ? '' : ' и подтвердить'}</Btn>
+        )}
+        {!p.is_self && <div style={{ display: 'flex', gap: 8 }}>
           <Btn s={s} style={{ flex: 1 }} onClick={() => setMerge(true)}>Склеить с…</Btn>
           {p.status === 'rejected'
             ? <Btn s={s} style={{ flex: 1 }} disabled={busy} onClick={() => act(() => approveAll(p.id))}>Вернуть</Btn>
             : confirmRej
               ? <Btn s={s} kind="danger" style={{ flex: 1 }} disabled={busy} onClick={() => act(async () => { await rejectAll(p.id); setConfirmRej(false) })}>Точно отклонить?</Btn>
               : <Btn s={s} kind="danger" style={{ flex: 1 }} onClick={() => setConfirmRej(true)}>Не мой чел</Btn>}
-        </div>
+        </div>}
       </div>
 
       <PersonEdit s={s} Sheet={Sheet} person={p} open={edit} onClose={() => setEdit(false)}

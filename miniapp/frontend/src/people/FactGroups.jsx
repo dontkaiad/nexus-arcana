@@ -1,9 +1,9 @@
 import React from 'react'
-import { fs, typeMeta } from './ui'
+import { fs, mentionLabel, provenanceLine, typeMeta } from './ui'
 
 // Группы фактов (important первым — порядок задаёт API). Тап по тексту раскрывает
 // цитату-основание; управление слева/справа (галочка, кнопки) приходит рендер-пропсами.
-export default function FactGroups({ s, groups, expanded, onToggle, left, right }) {
+export default function FactGroups({ s, groups, expanded, onToggle, left, right, showMentions }) {
   return (
     <div>
       {groups.map((g) => {
@@ -21,6 +21,9 @@ export default function FactGroups({ s, groups, expanded, onToggle, left, right 
                     {left && left(f, g.type)}
                     <div onClick={() => onToggle(f.id)} style={{ flex: 1, minWidth: 0, padding: '8px 4px', cursor: 'pointer' }}>
                       <div style={{ fontSize: fs(14), color: s.text, lineHeight: 1.35, wordBreak: 'break-word' }}>{f.text}</div>
+                      {showMentions && (
+                        <div style={{ fontSize: fs(10), color: s.text, opacity: 0.7, marginTop: 2, fontWeight: 600 }}>{mentionLabel(f)}</div>
+                      )}
                     </div>
                     {right && right(f, g.type)}
                   </div>
@@ -30,6 +33,9 @@ export default function FactGroups({ s, groups, expanded, onToggle, left, right 
                       color: s.tS, background: 'rgba(0,0,0,0.06)', wordBreak: 'break-word', fontStyle: f.quote ? 'italic' : 'normal',
                     }}>
                       {f.quote ? `«${f.quote}»` : 'Цитаты нет — факт добавлен вручную или импортирован до сохранения цитат'}
+                      {provenanceLine(f) && (
+                        <div style={{ fontStyle: 'normal', fontWeight: 600, marginTop: 4, fontSize: fs(11) }}>{provenanceLine(f)}</div>
+                      )}
                     </div>
                   )}
                 </div>

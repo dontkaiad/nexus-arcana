@@ -4,9 +4,9 @@ import FactGroups from './FactGroups'
 import MergePicker from './MergePicker'
 import PersonEdit from './PersonEdit'
 import { Header } from './PersonCard'
-import { Btn, Chip, Note, Tick } from './parts'
+import { Btn, Chip, Note, SourceLinks, Tick } from './parts'
 import { errText, getPerson, listPeople, rejectAll, reviewPerson } from './peopleApi'
-import { fmtBirthday, fs, haptic, sourcesOf } from './ui'
+import { fmtBirthday, fs, haptic } from './ui'
 
 // Режим разбора: один человек за раз, все галочки по умолчанию стоят — снимаешь только
 // мусор и жмёшь одну кнопку. Очередь = люди со статусом pending (сервер хранит прогресс:
@@ -21,7 +21,7 @@ const pendingFacts = (card) => flat(card).filter((f) => f.review_status === 'pen
 const pendingGroups = (card) =>
   (card?.facts || []).map((g) => ({ ...g, items: g.items.filter((f) => f.review_status === 'pending') })).filter((g) => g.items.length)
 
-export default function ReviewMode({ s, Sheet, onExit }) {
+export default function ReviewMode({ s, Sheet, onExit, only }) {
   const [queue, setQueue] = useState(null)
   const [total, setTotal] = useState(0)
   const [card, setCard] = useState(null)
@@ -37,8 +37,12 @@ export default function ReviewMode({ s, Sheet, onExit }) {
   const cur = queue && queue[0]
 
   useEffect(() => {
+    if (only) {                                    // разбор одной карточки («Я»): без общей очереди и счётчика
+      getPerson(only).then((p) => { setTotal(1); setQueue([p]) }).catch((e) => { setErr(errText(e)); setQueue([]) })
+      return
+    }
     listPeople({ status: 'pending' }).then((d) => {
-      const ppl = d.people || []
+      const ppl = (d.people || []).filter((x) => !x.is_self)
       const t = ppl.length ? Math.max(readTotal(), ppl.length) : 0
       writeTotal(t); setTotal(t); setQueue(ppl)
     }).catch((e) => { setErr(errText(e)); setQueue([]) })
@@ -135,9 +139,9 @@ export default function ReviewMode({ s, Sheet, onExit }) {
   return (
     <div style={{ paddingBottom: 230 }}>
       <Header s={s} onBack={onExit} title={cur.name}
-        sub={<div style={{ fontSize: fs(11), color: s.text, fontWeight: 500 }}>🎂 {fmtBirthday(cur.birthday)}{sourcesOf(cur).length ? ' · ' + sourcesOf(cur).join(' · ') : ''}</div>}
+        sub={<div style={{ fontSize: fs(11), color: s.text, fontWeight: 500 }}>{cur.is_self ? 'Я' : <>🎂 {fmtBirthday(cur.birthday)}  <SourceLinks s={s} p={cur} /></>}</div>}
         right={<>
-          <span style={{ fontSize: fs(13), color: s.text, fontWeight: 700, whiteSpace: 'nowrap', margin: '0 2px' }}>{position} / {total}</span>
+          {!only && <span style={{ fontSize: fs(13), color: s.text, fontWeight: 700, whiteSpace: 'nowrap', margin: '0 2px' }}>{position} / {total}</span>}
           <div onClick={() => setEdit(true)} style={{ width: 44, height: 44, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}><Pencil size={fs(17)} color={s.tS} /></div>
         </>} />
 
@@ -150,7 +154,7 @@ export default function ReviewMode({ s, Sheet, onExit }) {
       {!card && <Note s={s} color={err ? s.red : undefined}>{err || 'Загружаю…'}</Note>}
       {card && pend.length === 0 && <Note s={s}>Новых фактов нет — можно просто подтвердить человека</Note>}
       {card && (
-        <FactGroups s={s} groups={pendingGroups(card)} expanded={expanded} onToggle={toggleOpen}
+        <FactGroups s={s} groups={pendingGroups(card)} expanded={expanded} onToggle={toggleOpen} showMentions={card.is_self}
           left={(f, t) => <Tick s={s} on={checked.has(f.id)} onClick={() => toggleCheck(f.id)} color={t === 'important' ? s.red : undefined} />} />
       )}
       {card && done > 0 && <div style={{ fontSize: fs(11), color: s.text, opacity: 0.7, textAlign: 'center', marginTop: 6 }}>Уже принято ранее: {done}</div>}
@@ -167,12 +171,14 @@ export default function ReviewMode({ s, Sheet, onExit }) {
             fontSize: fs(12), color: s.text, fontWeight: 600, cursor: 'pointer',
           }}><Undo2 size={fs(14)} /> Отменить: {last.item.name}</div>
         )}
-        <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
-          <Btn s={s} style={{ flex: 1 }} onClick={() => setMerge(true)}>Склеить с…</Btn>
-          {confirmRej
-            ? <Btn s={s} kind="danger" style={{ flex: 1, background: `${s.red}22` }} disabled={busy || !card} onClick={notMine}>Точно отклонить?</Btn>
-            : <Btn s={s} kind="danger" style={{ flex: 1 }} disabled={busy || !card} onClick={() => setConfirmRej(true)}>Не мой чел</Btn>}
-        </div>
+        {!cur.is_self && (
+          <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
+            <Btn s={s} style={{ flex: 1 }} onClick={() => setMerge(true)}>Склеить с…</Btn>
+            {confirmRej
+              ? <Btn s={s} kind="danger" style={{ flex: 1, background: `${s.red}22` }} disabled={busy || !card} onClick={notMine}>Точно отклонить?</Btn>
+              : <Btn s={s} kind="danger" style={{ flex: 1 }} disabled={busy || !card} onClick={() => setConfirmRej(true)}>Не мой чел</Btn>}
+          </div>
+        )}
         <Btn s={s} kind="primary" style={{ width: '100%' }} disabled={busy || !card} onClick={accept}>
           {busy ? '…' : pend.length ? `✓ Принять отмеченные (${nChecked}/${pend.length})` : '✓ Подтвердить человека'}
         </Btn>

@@ -51,6 +51,7 @@ def _person_out(p: Dict[str, Any]) -> Dict[str, Any]:
         "vk_id": p.get("vk_id"),
         "notes": p.get("notes"),
         "status": p["status"],
+        "is_self": bool(p.get("is_self")),
         "counts": p.get("counts", {}),
         "by_type": p.get("by_type", {}),
     }
@@ -69,15 +70,28 @@ async def list_people(
     return {"total": len(rows), "people": [_person_out(p) for p in rows]}
 
 
-def _group_facts(facts: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """Группы по type; important первым, затем likes/dislikes/other, прочие по алфавиту."""
+def _iso(d) -> Any:
+    return d.isoformat() if d else None
+
+
+def _group_facts(facts: List[Dict[str, Any]], is_self: bool = False) -> List[Dict[str, Any]]:
+    """Группы по type; important первым, затем likes/dislikes/other, прочие по алфавиту.
+    Для карточки «Я» внутри группы — по последнему упоминанию (свежие сверху)."""
     by: Dict[str, List[Dict[str, Any]]] = {}
     for f in facts:
         by.setdefault(f["type"], []).append({
             "id": f["id"], "text": f["text"], "quote": f.get("quote"), "review_status": f["review_status"],
             "is_current": f["is_current"], "source": f["source"],
             "created_at": f["created_at"].isoformat() if f.get("created_at") else None,
+            # происхождение («VK · 12.03.2021») и упоминания («×7 · последнее 2023»)
+            "platform": f.get("platform"), "chat_id": f.get("chat_id"),
+            "message_date": _iso(f.get("message_date")), "quote_author": f.get("quote_author"),
+            "mention_count": f.get("mention_count") or 1,
+            "first_mention": _iso(f.get("first_mention")), "last_mention": _iso(f.get("last_mention")),
         })
+    if is_self:
+        for items in by.values():
+            items.sort(key=lambda i: (i["last_mention"] or i["message_date"] or ""), reverse=True)
     order = [t for t in repo.FACT_TYPE_ORDER if t in by] + sorted(t for t in by if t not in repo.FACT_TYPE_ORDER)
     return [{"type": t, "items": by[t]} for t in order]
 
@@ -103,7 +117,7 @@ async def person_card(person_id: int, tg_id: int = Depends(current_user_id)) -> 
     if not p:
         raise HTTPException(status_code=404, detail="person not found")
     facts = await asyncio.to_thread(repo.list_facts, person_id)
-    return {**_person_out(p), "facts": _group_facts(facts)}
+    return {**_person_out(p), "facts": _group_facts(facts, bool(p.get("is_self")))}
 
 
 class PersonPatch(BaseModel):
@@ -156,6 +170,8 @@ async def patch_person(person_id: int, body: PersonPatch,
         p = await asyncio.to_thread(repo.update_person, user_id, person_id, vals)
     except IntegrityError:
         raise HTTPException(status_code=409, detail="tg_id/vk_id already belongs to another person")
+    except ValueError:
+        raise HTTPException(status_code=409, detail="self_status")
     if not p:
         raise HTTPException(status_code=404, detail="person not found")
     return _person_out(p)
@@ -182,7 +198,10 @@ async def reject_fact(person_id: int, fact_id: int, tg_id: int = Depends(current
 
 async def _review_all(person_id: int, to_status: str, tg_id: int) -> Dict[str, Any]:
     user_id = await _owner(tg_id)
-    n = await asyncio.to_thread(repo.review_all, user_id, person_id, to_status)
+    try:
+        n = await asyncio.to_thread(repo.review_all, user_id, person_id, to_status)
+    except ValueError:
+        raise HTTPException(status_code=409, detail="self_status")
     if n is None:
         raise HTTPException(status_code=404, detail="person not found")
     p = await asyncio.to_thread(repo.get_person, user_id, person_id)
@@ -211,7 +230,7 @@ async def merge_person(person_id: int, body: MergeBody,
     try:
         stats = await asyncio.to_thread(repo.merge_people, user_id, person_id, body.into_id)
     except repo.MergeError as e:
-        status = {"not_found": 404, "same": 422, "conflicting_ids": 409}[e.code]
+        status = {"not_found": 404, "same": 422, "conflicting_ids": 409, "self": 409}[e.code]
         raise HTTPException(status_code=status, detail=e.code)
     target = await asyncio.to_thread(repo.get_person, user_id, body.into_id)
     return {"ok": True, **stats, "person": _person_out(target)}

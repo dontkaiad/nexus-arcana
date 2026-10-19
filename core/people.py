@@ -73,7 +73,7 @@ def find_duplicates(rows: Iterable[Dict[str, Any]], limit: int = DUP_LIMIT) -> L
 
     Сигналы: совпала нормализованная пара имя+фамилия; общий токен имени и одинаковый ДР;
     алиас одного равен имени другого. Отклонённых (rejected) пропускаем."""
-    people_ = [r for r in rows if r.get("status") != "rejected"]
+    people_ = [r for r in rows if r.get("status") != "rejected" and not r.get("is_self")]
     pairs: Dict[Tuple[int, int], List[str]] = {}
 
     def add(a, b, reason):
