@@ -96,7 +96,7 @@ def unique_facts(rows: List[Dict]) -> List[Dict]:
         if r["type"] == "birthday":
             continue
         ident = ("tg", r.get("tg_id")) if r.get("tg_id") else ("vk", r.get("vk_id")) if r.get("vk_id") else ("name", r["name"].lower())
-        k = (ident, r["type"], fact_hash(r["fact"]))
+        k = (ident, r.get("about"), r.get("source_chat_id"), r["type"], fact_hash(r["fact"]))
         if k in seen:
             continue
         seen.add(k)
@@ -111,7 +111,7 @@ def run(tg_path: str, vk_path: str, out_path: Path) -> None:
     stat, author_c, results = Counter(), Counter(), []
     for r in facts:
         src = r["source"]
-        cid = r.get("tg_id") if src == "tg" else r.get("vk_id")
+        cid = r.get("source_chat_id") or (r.get("tg_id") if src == "tg" else r.get("vk_id"))
         how = "id"
         if not cid:
             cands = [i for i, c in chats[src].items() if c.title == r["name"] and titles[src][c.title] == 1]
@@ -131,7 +131,7 @@ def run(tg_path: str, vk_path: str, out_path: Path) -> None:
         author_c[a] += 1
         results.append({"source": src, "person_chat": cid, "type": r["type"], "hash": fact_hash(r["fact"]),
                         "match": how, "author": a, "date": m["date"] if m else "",
-                        "found_in_own_chat": bool(m), "found_elsewhere": elsewhere,
+                        "about": r.get("about"), "found_in_own_chat": bool(m), "found_elsewhere": elsewhere,
                         "first_person_kai": first_person_by_kai(r.get("quote", ""), a)})
     with out_path.open("w", encoding="utf-8") as f:
         for x in results:
@@ -140,7 +140,13 @@ def run(tg_path: str, vk_path: str, out_path: Path) -> None:
     pct = lambda k: "%d (%.1f%%)" % (k, 100.0 * k / n)
     print("фактов (уникальных, без ДР): %d" % len(results))
     print("автор цитаты:", {k: pct(v) for k, v in author_c.most_common()})
-    print("первое лицо от Кай:", pct(sum(x["first_person_kai"] for x in results)))
+    partner = [x for x in results if x.get("about") == "partner"]
+    fp = sum(x["first_person_kai"] for x in partner)
+    print("about: partner=%d, kai=%d, без метки (старые строки)=%d" % (
+        len(partner), sum(1 for x in results if x.get("about") == "kai"), sum(1 for x in results if not x.get("about"))))
+    print("ТОРМОЗ: about=partner с цитатой Кай в первом лице: %d из %d (%.1f%%) — порог <5%%: %s" % (
+        fp, len(partner), 100.0 * fp / max(len(partner), 1), "ПРОЙДЕН" if fp * 20 < max(len(partner), 1) else "НЕ ПРОЙДЕН"))
+    print("первое лицо от Кай (все факты, справочно):", pct(sum(x["first_person_kai"] for x in results)))
     print("не найдена в своём чате:", pct(sum(not x["found_in_own_chat"] for x in results)),
           "| из них найдена в другом чате:", pct(sum(1 for x in results if not x["found_in_own_chat"] and x["found_elsewhere"])))
 

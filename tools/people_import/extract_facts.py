@@ -22,7 +22,7 @@ from collections import Counter
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
-from tools.people_import.attribute_quotes import expected_about, first_person_by_kai, verify
+from tools.people_import.attribute_quotes import expected_about, first_person_by_kai, locate, verify
 from tools.people_import.chats import Chat, Msg, load_chats
 from tools.people_import.common import DATA_DIR, STAGING, TYPES, append_staging, load_staging, write_staging
 from tools.people_import.selfblock import SelfBlock, load_selfblock
@@ -183,6 +183,74 @@ async def extract_windows(chat: Chat, ranges: List[Tuple[int, int]], stats: Coun
     return out
 
 
+# ── какие пачки потерялись ───────────────────────────────────────────────────
+
+def batch_marks(chats: Dict[str, Dict[int, Chat]]) -> List[Tuple[str, Chat, int, List[Tuple[int, int]]]]:
+    """Все пачки в порядке обработки: (метка, чат, start, диапазоны окон). Тот же порядок и то же
+    разбиение, что у run_full, — поэтому метки стабильны между запусками."""
+    out = []
+    for cs in chats.values():
+        for c in cs.values():
+            r = window_ranges(c.msgs)
+            for s in range(0, len(r), BATCH):
+                out.append(("%s:%s:%d" % (c.source, c.id, s), c, s, r[s:s + BATCH]))
+    return out
+
+
+def find_failed_batches(chats: Dict[str, Dict[int, Chat]], rows: List[Dict]) -> Dict:
+    """Пачки БЕЗ единой записи в staging. Чекпойнта у прогона, в котором кончился баланс, не было,
+    но пачка, давшая факт, определяется по цитате: найдена в окне пачки → вызов удался.
+    Остаются пачки без записей: упавшие вызовы + удавшиеся, но пустые (их мало; перезапуск
+    идемпотентен — дубли отсекает staging, пустые снова вернутся пустыми)."""
+    by_chat: Dict[Tuple[str, int], List[Dict]] = {}
+    for r in rows:
+        if r.get("origin") == "chat" and r.get("source_chat_id"):
+            by_chat.setdefault((r["source"], int(r["source_chat_id"])), []).append(r)
+    all_batches = batch_marks(chats)
+    has: Dict[str, bool] = {}
+    for mark, chat, s, part in all_batches:
+        hit = False
+        for r in by_chat.get((chat.source, chat.id), []):
+            if any(locate(chat.msgs, r.get("quote", ""), lo, hi) for lo, hi in part):
+                hit = True
+                break
+        has[mark] = hit
+    empty = [m for m, *_ in all_batches if not has[m]]
+    order = {m: i for i, (m, *_) in enumerate(all_batches)}
+    last_ok = max((order[m] for m in has if has[m]), default=-1)
+    return {"total": len(all_batches), "with_records": sum(has.values()), "empty": empty,
+            "empty_after_last_ok": [m for m in empty if order[m] > last_ok],
+            "last_ok_index": last_ok}
+
+
+# Цены Haiku 4.5, $ за 1M токенов (вход / выход); токены считаем с запасом: кириллица ≈ 2.2 симв./токен.
+PRICE_IN, PRICE_OUT = 1.0, 5.0
+CHARS_PER_TOKEN = 2.2
+OUT_TOKENS_PER_CALL = 800        # по факту прошлого прогона: ~6.6 факта на вызов × ~90 токенов + служебное
+
+
+def estimate_cost(chats, marks) -> Dict:
+    want = set(marks)
+    in_chars = n = 0
+    for m, chat, s, part in batch_marks(chats):
+        if m in want:
+            n += 1
+            in_chars += len(SYSTEM) + sum(len("### Фрагмент %d\n" % i) + len(render_window(chat.msgs, lo, hi)[:1500])
+                                           for i, (lo, hi) in enumerate(part))
+    tin, tout = in_chars / CHARS_PER_TOKEN, n * OUT_TOKENS_PER_CALL
+    return {"вызовов": n, "вход, токенов": int(tin), "выход, токенов": tout,
+            "стоимость $ (верхняя оценка)": round(tin / 1e6 * PRICE_IN + tout / 1e6 * PRICE_OUT, 2)}
+
+
+def print_failed_report(chats) -> None:
+    rep = find_failed_batches(chats, load_staging())
+    (DATA_DIR / "failed_batches.json").write_text(json.dumps(rep, ensure_ascii=False), encoding="utf-8")
+    print("пачек всего (= число вызовов прошлого прогона):", rep["total"])
+    print("пачек с записями в staging (вызов удался):", rep["with_records"])
+    print("пачек без записей:", len(rep["empty"]), "| из них после последней успешной:", len(rep["empty_after_last_ok"]))
+    print("оценка для всех «без записей»:", estimate_cost(chats, rep["empty"]))
+
+
 # ── метрики ─────────────────────────────────────────────────────────────────
 
 def metrics(records: List[Dict], stats: Counter) -> Dict:
@@ -232,7 +300,7 @@ async def run_sample(chats, n: int, seed: int, out: Path) -> None:
     print(json.dumps(metrics(recs, stats), ensure_ascii=False, indent=1))
 
 
-async def run_full(chats, fresh: bool, resume: bool = False) -> None:
+async def run_full(chats, fresh: bool, resume: bool = False, only: Optional[set] = None) -> None:
     jobs = []
     for cs in chats.values():
         for c in cs.values():
@@ -245,8 +313,11 @@ async def run_full(chats, fresh: bool, resume: bool = False) -> None:
         (DATA_DIR / "people_staging.old.jsonl").write_text(
             "\n".join(json.dumps(x, ensure_ascii=False) for x in old), encoding="utf-8")
         write_staging([x for x in old if x.get("origin") == "api"])
-    done = _done_batches() if resume else set()
-    if not resume and CHECKPOINT.exists():
+    done = _done_batches() if (resume or only) else set()
+    if only:                                         # только перечисленные пачки: остальные считаем выполненными
+        done |= {m for m, *_ in batch_marks(chats)} - set(only)
+        stats["windows"] = sum(len(p) for m, c, s, p in batch_marks(chats) if m in only)
+    if not (resume or only) and CHECKPOINT.exists():
         CHECKPOINT.unlink()                          # новый прогон — новый чекпойнт
     added = Counter()
 
@@ -275,9 +346,16 @@ if __name__ == "__main__":
     ap.add_argument("--seed", type=int, default=7)
     ap.add_argument("--fresh", action="store_true", help="staging заменить заново (ДР из API сохраняются)")
     ap.add_argument("--resume", action="store_true", help="продолжить: пропустить пачки из extract_done.txt")
+    ap.add_argument("--find-failed", action="store_true", help="найти пачки без записей в staging + оценка $; API не трогает")
+    ap.add_argument("--only-batches", default="", help="JSON-файл со списком меток пачек (ключ 'empty'): прогнать только их")
     a = ap.parse_args()
     ch = load_chats(a.tg, a.vk)
-    if a.sample:
+    if a.find_failed:
+        print_failed_report(ch)
+    elif a.sample:
         asyncio.run(run_sample(ch, a.sample, a.seed, DATA_DIR / "sample_facts.jsonl"))
+    elif a.only_batches:
+        marks = set(json.loads(Path(a.only_batches).read_text(encoding="utf-8"))["empty"])
+        asyncio.run(run_full(ch, False, True, marks))
     else:
         asyncio.run(run_full(ch, a.fresh and not a.resume, a.resume))

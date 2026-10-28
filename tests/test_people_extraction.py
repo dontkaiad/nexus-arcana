@@ -272,3 +272,32 @@ def test_batch_is_not_marked_done_if_saving_its_records_fails(tmp_path, monkeypa
         with pytest.raises(OSError):
             asyncio.run(ef.extract_windows(chat, ranges, Counter(), SB, done, broken_sink))
     assert done == set() and not (tmp_path / "done.txt").exists()
+
+
+# ── поиск упавших пачек без чекпойнта ───────────────────────────────────────
+
+def test_find_failed_batches_by_missing_records_and_cost_estimate():
+    chat = _many_windows_chat(30)                            # 30 окон → 3 пачки по 12 (12+12+6)
+    chats = {"tg": {7: chat}, "vk": {}}
+    marks = [m for m, *_ in ef.batch_marks(chats)]
+    assert marks == ["tg:7:0", "tg:7:12", "tg:7:24"]
+    # запись есть только у цитаты из первого окна второй пачки (12-е окно) → пачки 0 и 2 «без записей»
+    lo, hi = ef.window_ranges(chat.msgs)[12]
+    quote = next(m.text for m in chat.msgs[lo:hi] if "обожаю" in m.text)
+    rows = [{"origin": "chat", "source": "tg", "source_chat_id": 7, "quote": quote}]
+    rep = ef.find_failed_batches(chats, rows)
+    assert rep["total"] == 3 and rep["with_records"] == 1
+    assert rep["empty"] == ["tg:7:0", "tg:7:24"] and rep["empty_after_last_ok"] == ["tg:7:24"]
+    est = ef.estimate_cost(chats, rep["empty"])
+    assert est["вызовов"] == 2 and est["вход, токенов"] > 0 and 0 < est["стоимость $ (верхняя оценка)"] < 0.05
+
+
+def test_only_batches_run_skips_everything_else(tmp_path, monkeypatch):
+    monkeypatch.setattr(ef, "CHECKPOINT", tmp_path / "done.txt")
+    monkeypatch.setattr(ef, "STAGING", tmp_path / "staging.jsonl")
+    monkeypatch.setattr("tools.people_import.common.STAGING", tmp_path / "staging.jsonl")
+    chat = _many_windows_chat(30)
+    fake = AsyncMock(return_value="[]")
+    with patch.object(ef, "ask_claude", fake):
+        asyncio.run(ef.run_full({"tg": {7: chat}, "vk": {}}, False, True, {"tg:7:12"}))
+    assert fake.await_count == 1                              # из трёх пачек запущена только перечисленная
