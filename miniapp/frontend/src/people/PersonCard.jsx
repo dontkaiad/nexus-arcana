@@ -11,7 +11,7 @@ import {
 import { STATUS_LABEL, TYPE_CHOICES, fmtBirthday, fs, haptic, plural, statusColor, typeMeta } from './ui'
 
 // Карточка человека вне режима разбора: правка, ручной факт, склейка, ревью по одному факту.
-export default function PersonCard({ s, Sheet, id, onBack, onChanged, onStartReview }) {
+export default function PersonCard({ s, Sheet, id, onBack, onChanged, onStartReview, onOpenClient }) {
   const [p, setP] = useState(null)
   const [err, setErr] = useState('')
   const [expanded, setExpanded] = useState(new Set())
@@ -59,6 +59,11 @@ export default function PersonCard({ s, Sheet, id, onBack, onChanged, onStartRev
         <span style={{ fontSize: fs(12), color: s.text, fontWeight: 500 }}>
           🎂 {fmtBirthday(p.birthday)}{age}
         </span>
+        {p.client_id && (
+          <span role="button" onClick={() => onOpenClient?.(p.client_id)} style={{ cursor: 'pointer', minHeight: 32, display: 'inline-flex', alignItems: 'center' }}>
+            <Chip s={s} color={s.acc}>🌒 Клиент Арканы ›</Chip>
+          </span>
+        )}
       </div>
       <Accounts s={s} person={p} onChanged={() => { load(); onChanged?.() }} />
       {p.aliases?.length > 0 && (

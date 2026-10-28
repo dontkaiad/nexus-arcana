@@ -16,6 +16,7 @@ import {
 import { apiGet, apiPost, apiDelete, apiPatch, apiStream, flushOfflineQueue, outboxCount } from "./api";
 import { SelfListCard, SelfDetailHeader } from "./components/self/SelfClientCard.jsx";
 import PeopleTab from "./people/PeopleTab.jsx";
+import { LinkBar, FromPeopleBlock } from "./people/ClientLink.jsx";
 import {
   Sun, Moon as LucideMoon, Check, Coins, List as ListIcon, Brain, Calendar,
   Sparkles as LucideSparkles, Users, Flame as LucideFlame, BookOpen as LucideBookOpen,
@@ -3303,7 +3304,7 @@ function SearchInput({ s, value, onChange, placeholder }) {
 // NEXUS — MEMORY
 // ═══════════════════════════════════════════════════════════════
 
-function NxMemory({ s, openAdhd }) {
+function NxMemory({ s, openAdhd, openClientFromPeople }) {
   const [cat, setCat] = useState("all");
   const [q, setQ] = useState("");
   const [deletingId, setDeletingId] = useState(null);
@@ -3385,7 +3386,8 @@ function NxMemory({ s, openAdhd }) {
       </Glass>
       {peopleOpen && createPortal(
         <div className="day" style={{ fontFamily: B }}>
-          <PeopleTab s={s} Sheet={Sheet} onClose={() => setPeopleOpen(false)} onChanged={peoplePending.refetch} />
+          <PeopleTab s={s} Sheet={Sheet} onClose={() => setPeopleOpen(false)} onChanged={peoplePending.refetch}
+            onOpenClient={(cid) => { setPeopleOpen(false); openClientFromPeople?.(cid); }} />
         </div>, document.body)}
       <SearchInput s={s} value={q} onChange={setQ} placeholder="Поиск по памяти" />
       {/* #6: показать записи, помеченные «неактуально» (is_current=false) */}
@@ -6863,7 +6865,7 @@ function RitualDetail({ s, id }) {
 // CLIENT DETAIL SHEET (из v2)
 // ═══════════════════════════════════════════════════════════════
 
-function ClientDetail({ s, id }) {
+function ClientDetail({ s, id, onOpenPerson }) {
   const { data, loading, error, refetch } = useApi(id ? `/api/arcana/clients/${id}` : null, [id]);
   const [editOpen, setEditOpen] = useState(false);
   const [wSeg, setWSeg] = useState("active");  // #154 C4: таб Работ клиента
@@ -6958,6 +6960,8 @@ function ClientDetail({ s, id }) {
       </div>
       )}
 
+      <LinkBar s={s} Sheet={Sheet} client={c} onChanged={refetch} onOpenPerson={onOpenPerson} />
+
       {editOpen && (
         <ClientEditForm
           s={s}
@@ -6991,6 +6995,8 @@ function ClientDetail({ s, id }) {
         </div>
         <div style={{ fontSize: fs(13), color: s.text, lineHeight: 1.55 }}>{c.notes || "—"}</div>
       </Glass>
+
+      <FromPeopleBlock s={s} person={c.person} />
 
       {c.photos.length > 0 && (
         <ObjectPhotosGallery
@@ -8826,6 +8832,8 @@ function AppShell() {
   // проставленных внутри открытого шита. Бампаем при закрытии шита сессии,
   // чтобы список перезапросил актуальный статус.
   const [sessChangedSig, setSessChangedSig] = useState(0);
+  // PR-8: «Открыть в Людях» из досье / «Клиент Арканы» из карточки человека (в любом режиме)
+  const [peopleReq, setPeopleReq] = useState(null);
   const [fabOpen, setFabOpen] = useState(false);
   const [fabForm, setFabForm] = useState(null);
   const aRef = useRef(null);
@@ -8900,8 +8908,18 @@ function AppShell() {
     return v;
   };
 
+  // из карточки человека → досье клиента в Аркане (переключаем на ночь, если сейчас день)
+  const openClientFromPeople = (cid) => {
+    if (isDay) go(true);
+    setModal({ type: "client", payload: { id: String(cid) } });
+  };
+  const openPersonFromClient = (pid) => {
+    setModal(null);
+    setPeopleReq({ id: pid });
+  };
+
   const shared = {
-    s: sky, openTask, openAdhd, openClient, openSession, openRitual, openGrimoire, openWork,
+    s: sky, openClientFromPeople, openTask, openAdhd, openClient, openSession, openRitual, openGrimoire, openWork,
     openStreaks, openMoonPhases,
     taskClosedSig,
     sessChangedSig,
@@ -9183,8 +9201,14 @@ function AppShell() {
         onClose={() => setModal(null)}
         title="Клиент"
       >
-        {modal?.payload?.id && <ClientDetail s={sky} id={modal.payload.id} />}
+        {modal?.payload?.id && <ClientDetail s={sky} id={modal.payload.id} onOpenPerson={openPersonFromClient} />}
       </Sheet>
+
+      {peopleReq && createPortal(
+        <div className={isDay ? "day" : "night"} style={{ fontFamily: B }}>
+          <PeopleTab s={sky} Sheet={Sheet} initialId={peopleReq.id} onClose={() => setPeopleReq(null)}
+            onOpenClient={(cid) => { setPeopleReq(null); openClientFromPeople(cid); }} />
+        </div>, document.body)}
 
       <Sheet
         s={sky}

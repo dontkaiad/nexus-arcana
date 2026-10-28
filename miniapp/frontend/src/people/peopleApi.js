@@ -28,10 +28,19 @@ export const addAccount = (id, body) => apiPost(`/api/people/${id}/accounts`, bo
 export const removeAccount = (id, accId) => apiDelete(`/api/people/${id}/accounts/${accId}`)
 export const setPrimaryAccount = (id, accId) => apiPost(`/api/people/${id}/accounts/${accId}/primary`, {})
 
+// Связь клиент Арканы ↔ человек (PR-8): кандидаты — только подсказка, связывает владелец.
+export const clientCandidates = (cid) => apiGet(`/api/arcana/clients/${cid}/person-candidates`)
+export const linkClient = (cid, personId) => apiPost(`/api/arcana/clients/${cid}/link`, { person_id: personId })
+export const unlinkClient = (cid) => apiDelete(`/api/arcana/clients/${cid}/link`)
+export const resolveClientBirthday = (cid, use) => apiPost(`/api/arcana/clients/${cid}/link/birthday`, { use })
+
 // Человекочитаемая ошибка из HttpError ("409 Conflict — {...}") и пр.
 export function errText(e) {
   const m = String(e?.message || e || '')
   if (/already belongs/.test(m)) return 'Этот аккаунт уже у другого человека'
+  if (/both_clients/.test(m)) return 'У обоих людей уже есть клиент Арканы — сначала отвяжи одного из них'
+  if (/person_taken/.test(m)) return 'Этот человек уже связан с другим клиентом'
+  if (/person_rejected/.test(m)) return 'Отклонённого человека связать нельзя'
   if (/^404/.test(m)) return 'Не найдено (возможно, уже изменено)'
   return m.replace(/^\d+\s+[^—]*—\s*/, '') || 'Ошибка'
 }

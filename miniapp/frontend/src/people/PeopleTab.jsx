@@ -16,8 +16,8 @@ const FILTERS = [
 // Раздел «Люди»: полноэкранный оверлей над Mini App (7-я вкладка в нижней панели на 375px
 // не помещается). Список → «Разобрать» (ReviewMode) или карточка человека.
 // `Sheet` и тема `s` приходят из App.jsx — циклического импорта нет.
-export default function PeopleTab({ s, Sheet, onClose, onChanged }) {
-  const [view, setView] = useState({ name: 'list' })
+export default function PeopleTab({ s, Sheet, onClose, onChanged, initialId, onOpenClient }) {
+  const [view, setView] = useState(initialId ? { name: 'card', id: initialId } : { name: 'list' })
   const [filter, setFilter] = useState('all')
   const [q, setQ] = useState('')
   const [searchOpen, setSearchOpen] = useState(false)
@@ -50,7 +50,7 @@ export default function PeopleTab({ s, Sheet, onClose, onChanged }) {
       background: `linear-gradient(180deg, ${s.deep} 0%, ${s.mid} 25%, ${s.warm} 55%, ${s.glow} 75%, ${s.base} 100%)`,
     }}>
       {view.name === 'review' && <ReviewMode s={s} Sheet={Sheet} onExit={back} only={view.only} />}
-      {view.name === 'card' && <PersonCard s={s} Sheet={Sheet} id={view.id} onBack={back} onChanged={onChanged}
+      {view.name === 'card' && <PersonCard s={s} Sheet={Sheet} id={view.id} onBack={back} onChanged={onChanged} onOpenClient={onOpenClient}
         onStartReview={(id) => setView({ name: 'review', only: id })} />}
       {view.name === 'list' && (
         <div>
@@ -85,6 +85,7 @@ export default function PeopleTab({ s, Sheet, onClose, onChanged }) {
                   {p.is_self && <Chip s={s} color={s.acc}>Я</Chip>}
                   <div style={{ flex: 1, minWidth: 0, fontSize: fs(15), fontWeight: 500, color: s.text, wordBreak: 'break-word' }}>{p.name}</div>
                   {n > 0 && <Chip s={s} color={s.amber}>●{n}</Chip>}
+                  {p.client_id && <Chip s={s} color={s.acc}>🌒 Клиент</Chip>}
                   {p.status === 'rejected' && <Chip s={s} color={s.red}>отклонён</Chip>}
                 </div>
                 <div style={{ fontSize: fs(11), color: s.text, marginTop: 2, display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>

@@ -44,6 +44,9 @@ def clients_by_person(user_id: str, person_ids: List[int]) -> Dict[int, int]:
             {"u": user_id, "ids": list(person_ids)})}
 
 
+_TYPE_ORDER = ("important", "likes", "dislikes", "other")
+
+
 def person_ids_by_client(user_id: str) -> Dict[str, int]:
     with get_engine().connect() as c:
         return {str(r[0]): r[1] for r in c.execute(text(
@@ -60,6 +63,30 @@ def person_brief(user_id: str, client_id) -> Optional[Dict]:
         return None
     p = prepo.get_person(user_id, cl["person_id"])
     return {"id": p["id"], "name": p["name"]} if p else None
+
+
+def person_block(user_id: str, client_id) -> Optional[Dict]:
+    """Блок «Из Людей» для досье Арканы (read-only): человек, ДР, аккаунты со ссылками и подтверждённые
+    факты (важные первыми). Pending/rejected не попадают."""
+    try:
+        cl = get_client(user_id, int(client_id))
+    except (TypeError, ValueError):
+        return None
+    if not cl or not cl["person_id"]:
+        return None
+    p = prepo.get_person(user_id, cl["person_id"])
+    if not p:
+        return None
+    facts = [f for f in prepo.list_facts(p["id"]) if f["review_status"] == "confirmed" and f["is_current"] is not False]
+    facts.sort(key=lambda f: (_TYPE_ORDER.index(f["type"]) if f["type"] in _TYPE_ORDER else len(_TYPE_ORDER), f["id"]))
+    return {
+        "id": p["id"], "name": p["name"], "is_self": bool(p.get("is_self")),
+        "birthday": birthday_iso(p.get("birthday"), p.get("birthday_year_known", True)),
+        "accounts": [{"platform": a["platform"], "username": a.get("username"), "external_id": a["external_id"],
+                      "url": prepo.account_url(a["platform"], a["external_id"], a.get("username"))}
+                     for a in p.get("accounts", [])],
+        "facts": [{"id": f["id"], "type": f["type"], "text": f["text"]} for f in facts],
+    }
 
 
 def ensure_self_link(user_id: str) -> Optional[Dict]:
@@ -199,9 +226,6 @@ def effective_birthday(user_id: str, client_id, own_iso: Optional[str]) -> Optio
 
 
 # ── контекст для трактовок: подтверждённые факты связанного человека ─────────
-
-_TYPE_ORDER = ("important", "likes", "dislikes", "other")
-
 
 def person_context(user_id: str, client_id) -> str:
     """Текст для промпта таро: «ДР» и подтверждённые (confirmed) факты связанного человека, важные первыми.

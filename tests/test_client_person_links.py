@@ -327,3 +327,17 @@ def test_api_birthday_resolve_and_dossier_uses_person_birthday(api):
     assert api.post(f"/api/arcana/clients/{c}/link/birthday", json={"use": "x"}).status_code == 422
     assert api.post(f"/api/arcana/clients/{c}/link/birthday", json={"use": "client"}).status_code == 200
     assert bday_of_person(p)[0] == date(1990, 3, 5)
+
+
+def test_dossier_person_block_confirmed_only_and_unlinked_none(api):
+    from tests.test_people_api import mk_fact
+    p = insert_person(MARK, "Имя2", tg_id=111111, tg_username="nick_one", birthday=date(1990, 3, 5))
+    c = mk_client("A", person_id=p)
+    mk_fact(p, "likes", "confirmed", "любит чай", user=MARK)
+    mk_fact(p, "important", "confirmed", "важное", user=MARK)
+    mk_fact(p, "other", "pending", "не проверено", user=MARK)
+    blk = api.get(f"/api/arcana/clients/{c}").json()["person"]
+    assert blk["id"] == p and blk["birthday"] == "1990-03-05"
+    assert [f["text"] for f in blk["facts"]] == ["важное", "любит чай"]
+    assert blk["accounts"][0]["url"]
+    assert api.get(f"/api/arcana/clients/{mk_client('B')}").json()["person"] is None

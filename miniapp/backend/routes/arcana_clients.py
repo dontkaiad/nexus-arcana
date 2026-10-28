@@ -120,7 +120,7 @@ async def client_dossier(
     c = await _clients_repo.find_by_id(client_id)
     if not c:
         raise HTTPException(status_code=404, detail="client not found")
-    person_link = await asyncio.to_thread(client_links.person_brief, user_id, client_id)
+    person_link = await asyncio.to_thread(client_links.person_block, user_id, client_id)
 
     # Load all sessions for this user, filter by client_id (gets TripletEntry with id + amount/paid)
     all_sessions = await _sessions_repo.list_all(user_id)
