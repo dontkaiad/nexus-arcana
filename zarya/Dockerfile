@@ -29,7 +29,7 @@ COPY arcana/repos/__init__.py arcana/repos/rituals_tables.py arcana/repos/works_
 #
 # GIT_SHA is the exception that is cheap: ARG+ENV as the LAST instructions, no RUN, so every
 # content layer above stays cached. It changes the image config though, so deploy.sh must pass
-# the last commit that touched Zarya's own build inputs (not HEAD), otherwise the image ID —
+# the last commit that touched the paths listed in zarya/build-inputs.txt (not HEAD), otherwise the image ID —
 # and the container — would change on every unrelated deploy (see deploy.sh).
 ARG GIT_SHA=
 ENV GIT_SHA=${GIT_SHA}
