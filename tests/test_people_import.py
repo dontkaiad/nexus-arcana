@@ -336,3 +336,18 @@ def test_self_facts_are_deduplicated_with_mention_counts_on_import(staging, monk
     tea = by["обожает чай"]
     assert (tea.mention_count, tea.first_mention_date, tea.last_mention_date) == (2, _date(2019, 1, 1), _date(2023, 7, 1))
     assert tea.source_chat_id == 12 and tea.source_quote == "a2"
+
+
+def test_related_to_uses_existing_person_name_when_candidate_name_is_empty(staging):
+    """VK-диалог без названия даёт кандидата с пустым именем; у существующей карточки имя есть —
+    факты не должны получать пустой related_to."""
+    pid = None
+    with get_engine().begin() as c:
+        pid = c.execute(people.insert().values(user_id=MARK, name="Имя Из Api", aliases=["Алиас"], vk_id=77)
+                        .returning(people.c.id)).scalar_one()
+    staging["rows"] = [row("", "любит чай", source="vk", vk_id=77, source_chat_id=77)]
+    _run()
+    mem = _state()[1]
+    assert len(mem) == 1 and mem[0].person_id == pid
+    assert mem[0].related_to == "Имя Из Api | Алиас"
+    assert not any(m.related_to.strip() == "" for m in mem)

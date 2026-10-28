@@ -420,6 +420,12 @@ async def run(dry: bool, no_embed: bool, batch_size: int, pause: float, threshol
         if len(p["sources"]) > 1:
             st["people_both_sources"] += 1
 
+        # related_to — от УЖЕ существующей карточки (её имя и алиасы), а не от кандидата: у VK-диалога без
+        # названия имя кандидата пустое, и факты получали пустой related_to, хотя у человека имя есть.
+        rel = related_to(p)
+        if person and not p["is_self"]:
+            seen_al = list(dict.fromkeys(list(person.get("aliases") or []) + p["aliases"]))
+            rel = related_to_str(person.get("name") or p["name"], seen_al)
         for f in p["facts"]:
             key = memory_key(pid, f["type"], f["h8"]) if pid is not None else None
             is_new = key is None or key not in keys_have
@@ -430,7 +436,7 @@ async def run(dry: bool, no_embed: bool, batch_size: int, pause: float, threshol
                 continue
             text_ = f["fact"] if p["is_self"] else fact_text(p["name"], f["fact"])
             mid, was_updated = await repo.upsert(
-                text_, key, CATEGORY, scope, related_to(p), SOURCE, user_id, person_id=pid,
+                text_, key, CATEGORY, scope, rel, SOURCE, user_id, person_id=pid,
                 review_status="pending", index=False,
                 source_quote=f["quote"] or None, provenance=provenance(f),
             )
