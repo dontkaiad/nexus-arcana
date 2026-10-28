@@ -33,6 +33,7 @@ from tools.people_import.selfblock import SelfBlock, load_selfblock
 from core.db import get_engine
 from core.memory_rag import _embed_text, index_memories_batch
 from core.people import fact_text as _fact_text, related_to_str
+from core.repos import pg_client_links as client_links
 from core.repos import pg_people_repo as prepo
 from core.repos.pg_memory_repo import PgMemoryRepo, bot_to_scope
 
@@ -401,6 +402,7 @@ async def run(dry: bool, no_embed: bool, batch_size: int, pause: float, threshol
                 pid = prepo.get_or_create_self(user_id, p["name"], p["aliases"], tg_id=p["tg_id"],
                                                tg_username=p["tg_username"], vk_id=p["vk_id"],
                                                accounts=p.get("accounts"))
+                client_links.ensure_self_link(user_id)      # клиент `self` ↔ «Я» без вопросов
             else:
                 pid = person["id"] if person else None
         elif person:

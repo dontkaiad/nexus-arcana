@@ -450,7 +450,7 @@ def review_batch(user_id: str, person_id: int, approve: List[int], reject: List[
 # ── merge двух людей (PR-5) ──────────────────────────────────────────────────
 
 class MergeError(Exception):
-    """code: not_found | same | self"""
+    """code: not_found | same | self | both_clients"""
 
     def __init__(self, code: str):
         super().__init__(code)
@@ -531,8 +531,21 @@ def merge_people(user_id: str, source_id: int, target_id: int) -> Dict:
         if not src or not dst:
             raise MergeError("not_found")
 
+        # связь с клиентом Арканы переезжает к цели; у обоих по клиенту — склеить нельзя (не больше одного
+        # клиента на человека): сначала нужно отвязать один из клиентов
+        src_cl = conn.execute(text("SELECT id FROM clients WHERE person_id = :p AND user_id = :u"),
+                              {"p": source_id, "u": user_id}).scalar()
+        if src_cl:
+            if conn.execute(text("SELECT 1 FROM clients WHERE person_id = :p AND user_id = :u"),
+                            {"p": target_id, "u": user_id}).first():
+                raise MergeError("both_clients")
+            conn.execute(text("UPDATE clients SET person_id = :t WHERE id = :c"), {"t": target_id, "c": src_cl})
+            stats_client = 1
+        else:
+            stats_client = 0
         stats = _move_facts(conn, user_id, source_id, target_id)
         stats["accounts_moved"] = _move_accounts(conn, source_id, target_id)
+        stats["client_link_moved"] = stats_client
         _delete_person(conn, source_id)          # аккаунты уже переехали — каскад ничего не заберёт
 
         aliases = list(dst.get("aliases") or [])
@@ -572,6 +585,13 @@ def absorb_into_self(user_id: str, source_id: int) -> Optional[Dict]:
         ), {"p": source_id}).scalar_one()
         if protected:
             raise ValueError("protected_facts")
+        src_cl = conn.execute(text("SELECT id FROM clients WHERE person_id = :p AND user_id = :u"),
+                              {"p": source_id, "u": user_id}).scalar()
+        if src_cl:
+            if conn.execute(text("SELECT 1 FROM clients WHERE person_id = :p AND user_id = :u"),
+                            {"p": me["id"], "u": user_id}).first():
+                raise ValueError("client_link")        # у «Я» уже есть свой клиент — разобрать руками
+            conn.execute(text("UPDATE clients SET person_id = :t WHERE id = :c"), {"t": me["id"], "c": src_cl})
         stats = _move_facts(conn, user_id, source_id, me["id"])
         stats["accounts_moved"] = _move_accounts(conn, source_id, me["id"])
         _delete_person(conn, source_id)

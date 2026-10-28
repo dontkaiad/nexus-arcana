@@ -78,6 +78,11 @@ def test_migration_up_down_reversible():
     acc_spec = importlib.util.spec_from_file_location("_mig_accounts", acc_path)
     acc = importlib.util.module_from_spec(acc_spec)
     acc_spec.loader.exec_module(acc)
+    # clients.person_id (PR-8a) тоже держит FK на people
+    cl_path = next((REPO / "alembic" / "versions").glob("*_clients_person_link.py"))
+    cl_spec = importlib.util.spec_from_file_location("_mig_clients_link", cl_path)
+    clm = importlib.util.module_from_spec(cl_spec)
+    cl_spec.loader.exec_module(clm)
 
     eng = get_engine()
     with eng.connect() as conn:
@@ -85,6 +90,7 @@ def test_migration_up_down_reversible():
         try:
             ctx = MigrationContext.configure(conn)
             with Operations.context(ctx):
+                clm.downgrade()
                 acc.downgrade()
                 mig.downgrade()
                 insp = inspect(conn)

@@ -18,6 +18,7 @@ from core.people import (
     UNKNOWN_YEAR, age, birthday_iso, fact_hash, fact_text, find_duplicates, related_to_str, strip_name_prefix,
 )
 from core.repos.pg_memory_repo import PgMemoryRepo, bot_to_scope
+from core.repos import pg_client_links as client_links
 from core.repos import pg_people_repo as repo
 from core.user_manager import get_user_id
 
@@ -28,6 +29,12 @@ logger = logging.getLogger("miniapp.people")
 router = APIRouter()
 
 PERSON_STATUSES = ("pending", "confirmed", "rejected")
+
+
+async def _attach_clients(user_id: str, rows: List[Dict[str, Any]]) -> None:
+    by = await asyncio.to_thread(client_links.clients_by_person, user_id, [r["id"] for r in rows])
+    for r in rows:
+        r["client_id"] = by.get(r["id"])
 
 
 async def _owner(tg_id: int) -> str:
@@ -52,6 +59,8 @@ def _person_out(p: Dict[str, Any]) -> Dict[str, Any]:
         "vk_id": p.get("vk_id"),
         "accounts": [{**a, "url": repo.account_url(a["platform"], a["external_id"], a.get("username"))}
                      for a in p.get("accounts", [])],
+        # бейдж «Клиент Арканы»: наружу только id клиента — без сеансов, оплат и прочего из Арканы
+        "client_id": p.get("client_id"),
         "notes": p.get("notes"),
         "status": p["status"],
         "is_self": bool(p.get("is_self")),
@@ -69,7 +78,9 @@ async def list_people(
     if status and status not in PERSON_STATUSES:
         raise HTTPException(status_code=422, detail="bad status")
     user_id = await _owner(tg_id)
+    await asyncio.to_thread(client_links.ensure_self_link, user_id)
     rows = await asyncio.to_thread(repo.list_people, user_id, status, q)
+    await _attach_clients(user_id, rows)
     return {"total": len(rows), "people": [_person_out(p) for p in rows]}
 
 
@@ -123,6 +134,7 @@ async def person_card(person_id: int, tg_id: int = Depends(current_user_id)) -> 
     p = await asyncio.to_thread(repo.get_person, user_id, person_id)
     if not p:
         raise HTTPException(status_code=404, detail="person not found")
+    await _attach_clients(user_id, [p])
     facts = await asyncio.to_thread(repo.list_facts, person_id)
     return {**_person_out(p), "facts": _group_facts(facts, bool(p.get("is_self")), p["name"], p.get("aliases"))}
 
@@ -251,7 +263,7 @@ async def merge_person(person_id: int, body: MergeBody,
     try:
         stats = await asyncio.to_thread(repo.merge_people, user_id, person_id, body.into_id)
     except repo.MergeError as e:
-        status = {"not_found": 404, "same": 422, "self": 409}[e.code]
+        status = {"not_found": 404, "same": 422, "self": 409, "both_clients": 409}[e.code]
         raise HTTPException(status_code=status, detail=e.code)
     target = await asyncio.to_thread(repo.get_person, user_id, body.into_id)
     return {"ok": True, **stats, "person": _person_out(target)}
