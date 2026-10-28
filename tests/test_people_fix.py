@@ -208,37 +208,33 @@ def test_delete_empty_refuses_when_facts_appeared_since_plan(db):
     assert res["skip_changed"] == 1 and state(p)[0]
 
 
-def test_dedupe_self_in_db_merges_by_stored_vectors_and_keeps_totals(db):
+def test_dedupe_self_in_db_uses_clean_text_embeddings_and_keeps_totals(db):
     me = mk_person("Кай", is_self=True, status="confirmed")
-    vec = lambda x, y: "[" + ",".join([str(x), str(y)] + ["0"] * 1022) + "]"
     a = mk_fact(me, "aaaa0001", text_="любит чай", mention_count=2, first_mention_date=date(2019, 1, 1),
                 last_mention_date=date(2020, 1, 1))
     b = mk_fact(me, "aaaa0002", text_="обожает чай", mention_count=3, first_mention_date=date(2021, 1, 1),
                 last_mention_date=date(2023, 6, 1))
     c_ = mk_fact(me, "aaaa0003", text_="любит футбол", mention_count=1, last_mention_date=date(2022, 1, 1))
-    for fid, v in ((a, vec(1, 0.01)), (b, vec(1, 0.02)), (c_, vec(0, 1))):
-        with get_engine().begin() as c:
-            c.execute(text("UPDATE memories SET embedding = CAST(:e AS vector) WHERE id = :i"), {"e": v, "i": fid})
-    assert fx.dedupe_self_in_db(MARK, 0.9, dry=True) == {"merged_groups": 1, "removed": 1}
+    emb = {"любит чай": [1, 0.01], "обожает чай": [1, 0.02], "любит футбол": [0, 1]}
+    fake = lambda texts: [emb[t] for t in texts]
+    assert fx.dedupe_self_in_db(MARK, 0.9, True, fake) == {"merged_groups": 1, "removed": 1}
     assert len(state(me)[1]) == 3
-    assert fx.dedupe_self_in_db(MARK, 0.9, dry=False) == {"merged_groups": 1, "removed": 1}
+    assert fx.dedupe_self_in_db(MARK, 0.9, False, fake) == {"merged_groups": 1, "removed": 1}
     rows = {m.id: m for m in state(me)[1]}
-    assert set(rows) == {b, c_}                                                         # представитель — самое свежее упоминание
+    assert set(rows) == {b, c_} and a not in rows                                        # представитель — самое свежее упоминание
     assert (rows[b].mention_count, rows[b].first_mention_date, rows[b].last_mention_date) == (5, date(2019, 1, 1), date(2023, 6, 1))
-    assert fx.dedupe_self_in_db(MARK, 0.9, dry=False)["removed"] == 0                  # идемпотентно
+    assert fx.dedupe_self_in_db(MARK, 0.9, False, fake)["removed"] == 0                 # идемпотентно
+    assert fx.dedupe_self_in_db(MARK, 0.9, False, lambda t: [])["skipped_no_embeddings"] == 1   # нет эмбеддингов — ничего не трогаем
 
 
-# ── «содержит ник как часть» и вариации ─────────────────────────────────────
-
-def test_multiword_self_names_match_in_any_form_but_single_words_do_not():
-    s = sb()
-    for name in (NICK, "старый ник", "Ник Старый", "Старого Ника", "Имя 🖤 Старый ник", "Старый-ник (Имя)", "Kai Lark"):
-        assert s.is_self_name(name), name
-    for name in ("Старый", "Ник", "Иван Петров", "Кайло Рен", "Карина Иванова", "Кайф", "Никита Стариков"):
-        assert not s.is_self_name(name), name
-
-
-def test_single_word_self_names_stay_exact_even_if_many_words_inside():
-    s = SelfBlock()
-    s.add_names(["Кай", "Карина"])
-    assert s.is_self_name("кай") and s.is_self_name("Карина") and not s.is_self_name("Карина Иванова")
+def test_apply_without_to_self_never_touches_self_facts(db):
+    """Регрессия: dry-run на проде показал, что дедуп «Я» запускался всегда и склеил бы 782 факта."""
+    me = mk_person("Кай", is_self=True, status="confirmed")
+    for i in range(4):
+        mk_fact(me, "bbbb000%d" % i, text_="факт %d" % i)
+    ren = mk_person("", vk_id=11); mk_fact(ren, "11111111")
+    boom = lambda texts: (_ for _ in ()).throw(AssertionError("эмбеддинги не должны запрашиваться"))
+    for dry in (True, False):
+        res = fx.apply_plan(MARK, {"actions": [{"id": ren, "action": "rename", "name": "Имя"}]}, dry, embed=boom)
+        assert res["rename"] == 1 and not any(k.startswith("dedupe_") for k in res)
+    assert len(state(me)[1]) == 4

@@ -65,28 +65,31 @@ def plan_fixes(chats, people_rows: List[Dict], sb: SelfBlock) -> Dict:
 
 # ── применение (прод) ───────────────────────────────────────────────────────
 
-def _vec(s: str) -> List[float]:
-    return [float(x) for x in s.strip("[]").split(",")]
-
-
-def dedupe_self_in_db(user_id: str, threshold: float, dry: bool) -> Dict:
-    """Схлопывает pending-факты «Я» по ХРАНИМЫМ эмбеддингам (API не нужен): после переноса фактов из
-    чатов с другим аккаунтом они могут дублировать уже существующие. Подтверждённые не трогает."""
-    from tools.people_import.import_memory import cluster_facts
+def dedupe_self_in_db(user_id: str, threshold: float, dry: bool, embed=None) -> Dict:
+    """Схлопывает pending-факты «Я» после переноса в неё фактов из чатов с другим аккаунтом.
+    Эмбеддинги берём от ЧИСТОГО текста факта (как при импорте), а НЕ хранимые в БД: те посчитаны
+    по «факт + алиасы + категория», общий хвост делает все факты «Я» похожими, и порог 0,9 склеил бы
+    разные факты (dry-run на проде показал бы 782 ложных удаления). Нужен вызов Voyage (не Anthropic).
+    Подтверждённые не трогает. Без embed используется Voyage."""
+    from tools.people_import.import_memory import cluster_facts, embed_texts
+    embed = embed or embed_texts
     me = prepo.find_self(user_id)
     if not me:
         return {"merged_groups": 0, "removed": 0}
     with get_engine().connect() as c:
         rows = c.execute(sa.text(
             "SELECT id, fact_text, key_name, mention_count, first_mention_date, last_mention_date, "
-            "source_message_date, embedding::text AS emb FROM memories "
-            "WHERE person_id = :p AND review_status = 'pending' AND source = 'auto' AND NOT is_archived "
-            "AND embedding IS NOT NULL"), {"p": me["id"]}).all()
+            "source_message_date FROM memories "
+            "WHERE person_id = :p AND review_status = 'pending' AND source = 'auto' AND NOT is_archived"),
+            {"p": me["id"]}).all()
     facts = [{"type": prepo.fact_type(r.key_name), "fact": r.fact_text,
               "date": r.last_mention_date or r.source_message_date, "row": r} for r in rows]
     if len(facts) < 2:
         return {"merged_groups": 0, "removed": 0}
-    clusters = [cl for cl in cluster_facts(facts, [_vec(f["row"].emb) for f in facts], threshold) if len(cl) > 1]
+    vecs = embed([f["fact"] for f in facts])
+    if not vecs or len(vecs) != len(facts):
+        return {"merged_groups": 0, "removed": 0, "skipped_no_embeddings": 1}
+    clusters = [cl for cl in cluster_facts(facts, vecs, threshold) if len(cl) > 1]
     removed = sum(len(cl) - 1 for cl in clusters)
     if dry or not clusters:
         return {"merged_groups": len(clusters), "removed": removed}
@@ -105,7 +108,7 @@ def dedupe_self_in_db(user_id: str, threshold: float, dry: bool) -> Dict:
     return {"merged_groups": len(clusters), "removed": removed}
 
 
-def apply_plan(user_id: str, plan: Dict, dry: bool, threshold: float = 0.9) -> Dict:
+def apply_plan(user_id: str, plan: Dict, dry: bool, threshold: float = 0.9, embed=None) -> Dict:
     st: Counter = Counter()
     for a in plan["actions"]:
         pid, act = a["id"], a["action"]
@@ -144,7 +147,8 @@ def apply_plan(user_id: str, plan: Dict, dry: bool, threshold: float = 0.9) -> D
                 with get_engine().begin() as c:
                     c.execute(sa.text("DELETE FROM people WHERE id = :i AND status = 'pending' AND NOT is_self"), {"i": pid})
             st["delete_empty"] += 1
-    st.update({"dedupe_" + k: v for k, v in dedupe_self_in_db(user_id, threshold, dry).items()})
+    if st["to_self"]:                      # дедуп нужен ТОЛЬКО если в «Я» что-то перенесли; иначе «Я» не трогаем
+        st.update({"dedupe_" + k: v for k, v in dedupe_self_in_db(user_id, threshold, dry, embed).items()})
     return dict(st)
 
 
