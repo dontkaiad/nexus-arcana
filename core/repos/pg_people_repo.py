@@ -377,3 +377,26 @@ def merge_people(user_id: str, source_id: int, target_id: int) -> Dict:
         conn.execute(update(people).where(people.c.id == target_id).values(**vals))
         refresh_related(conn, target_id)
     return stats
+
+
+def absorb_into_self(user_id: str, source_id: int) -> Optional[Dict]:
+    """Человек оказался самой владелицей (чат с её другим аккаунтом): его pending-факты → карточка «Я»,
+    карточка человека удаляется. В отличие от merge_people НЕ копирует id/ДР/алиасы и не упирается
+    в разные tg_id (аккаунт другой — это и есть случай). Подтверждённые/ручные факты не трогает:
+    при их наличии → ValueError (человека нужно разобрать руками). None, если «Я»/человека нет."""
+    me = find_self(user_id)
+    if not me or me["id"] == source_id:
+        return None
+    with get_engine().begin() as conn:
+        src = _lock_person(conn, user_id, source_id)
+        if not src:
+            return None
+        protected = conn.execute(text(
+            "SELECT count(*) FROM memories WHERE person_id = :p AND (review_status <> 'pending' OR source <> 'auto')"
+        ), {"p": source_id}).scalar_one()
+        if protected:
+            raise ValueError("protected_facts")
+        stats = _move_facts(conn, user_id, source_id, me["id"])
+        _delete_person(conn, source_id)
+        refresh_related(conn, me["id"])
+    return stats

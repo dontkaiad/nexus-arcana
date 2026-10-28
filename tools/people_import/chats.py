@@ -13,9 +13,10 @@ from __future__ import annotations
 import html
 import json
 import re
+from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 _MONTHS = {"янв": 1, "фев": 2, "мар": 3, "апр": 4, "мая": 5, "июн": 6,
            "июл": 7, "авг": 8, "сен": 9, "окт": 10, "ноя": 11, "дек": 12}
@@ -44,8 +45,45 @@ class Msg:
 class Chat:
     source: str          # tg | vk
     id: int              # TG: id собеседника; VK: peer_id
-    title: str
+    title: str           # название диалога как в экспорте (может быть пустым — у VK часто нет ui_crumb)
     msgs: List[Msg]
+    partner_names: Counter = field(default_factory=Counter)   # как подписаны реплики собеседника
+
+
+PLATFORM_LABEL = {"tg": "TG", "vk": "VK"}
+_DELETED = re.compile(r"^\s*(deleted(\s+(account|user))?|удал[её]нн\w*\s+(аккаунт|пользователь))\s*$", re.I)
+
+
+def is_deleted_like(name: str) -> bool:
+    return bool(_DELETED.match(name or ""))
+
+
+def usable_name(name: str, is_self_name=None) -> bool:
+    """Имя годится для карточки: есть буквы/цифры, не «Deleted Account», не мой алиас."""
+    n = (name or "").strip()
+    return bool(re.search(r"[^\W_]", n)) and not is_deleted_like(n) and not (is_self_name and is_self_name(n))
+
+
+def classify_chat(chat: "Chat", sb) -> Tuple[str, str]:
+    """('self', '') — чат с самой собой; ('person', имя) — обычный собеседник.
+
+    1) id собеседника ∈ моих id → «Я» (saved_messages сюда не попадают — они не личные чаты);
+    2) название нормальное (не пусто, не мой алиас, не «Deleted Account») → оно;
+    3) иначе имя собеседника из подписи его реплик (TG: from, VK: имя в ссылке заголовка);
+    4) название — мой алиас и другого имени нет → это мой же второй аккаунт → «Я»;
+    5) иначе «Удалённый аккаунт · <платформа>» (карточка создаётся только если у неё есть факты)."""
+    is_self_name = sb.is_self_name if sb else None
+    if sb and sb.is_self(tg_id=chat.id if chat.source == "tg" else None,
+                         vk_id=chat.id if chat.source == "vk" else None):
+        return "self", ""
+    if usable_name(chat.title, is_self_name):
+        return "person", chat.title.strip()
+    for n, _cnt in chat.partner_names.most_common():
+        if usable_name(n, is_self_name):
+            return "person", n.strip()
+    if is_self_name and is_self_name(chat.title or ""):
+        return "self", ""
+    return "person", "Удалённый аккаунт · %s" % PLATFORM_LABEL.get(chat.source, chat.source.upper())
 
 
 def _tg_text(t) -> str:
@@ -63,17 +101,20 @@ def load_tg(path: Path) -> Dict[int, Chat]:
     out = ChatMap()
     out.owner = d.get("personal_information")
     for c in d["chats"]["list"]:
-        if c.get("type") != "personal_chat" or not c.get("name"):
+        if c.get("type") != "personal_chat":      # saved_messages, боты, группы — не люди
             continue
         partner = "user%s" % c["id"]
         msgs = []
+        names: Counter = Counter()
         for m in c.get("messages", []):
             if m.get("type") != "message":
                 continue
             fid = m.get("from_id")
             who = "kai" if fid == kai else "partner" if fid == partner else "other"
+            if who == "partner" and m.get("from"):
+                names[m["from"]] += 1
             msgs.append(Msg(who, (m.get("date") or "")[:10], _tg_text(m.get("text", "")).strip()))
-        out[c["id"]] = Chat("tg", c["id"], c["name"], msgs)
+        out[c["id"]] = Chat("tg", c["id"], c.get("name") or "", msgs, names)
     return out
 
 
@@ -93,7 +134,7 @@ def _vk_date(s: str) -> str:
     return "%s-%02d-%02d" % (m.group(3), _MONTHS[m.group(2)[:3]], int(m.group(1)))
 
 
-def parse_vk_page(page: str, peer_id: int) -> List[Msg]:
+def parse_vk_page(page: str, peer_id: int, names: Optional[Counter] = None) -> List[Msg]:
     msgs: List[Msg] = []
     for blk in page.split('<div class="message" data-id=')[1:]:
         h = _HDR.search(blk)
@@ -102,6 +143,8 @@ def parse_vk_page(page: str, peer_id: int) -> List[Msg]:
         head = html.unescape(_TAG.sub("", h.group(1))).strip()
         label, _, rest = head.partition(", ")
         href = _HREF.search(h.group(1))
+        if href and int(href.group(1)) == peer_id and names is not None and label.strip():
+            names[label.strip()] += 1                  # имя собеседника — текст его ссылки в заголовке
         if label.strip() == "Вы":
             who = "kai"
         elif href and int(href.group(1)) == peer_id:
@@ -128,15 +171,16 @@ def load_vk(root: Path) -> Dict[int, Chat]:
             continue
         msgs: List[Msg] = []
         title = ""
+        names: Counter = Counter()
         # messages0.html — самые новые; в хронологию переворачиваем по возрастанию номера файла
         for f in sorted(d.glob("messages*.html"), key=lambda p: int(re.sub(r"\D", "", p.stem) or 0)):
             page = f.read_bytes().decode("cp1251", errors="replace")
             if not title:
                 m = re.search(r'ui_crumb">([^<]*)<', page)
                 title = html.unescape(m.group(1)).strip() if m else ""
-            msgs.extend(parse_vk_page(page, peer))
+            msgs.extend(parse_vk_page(page, peer, names))
         if msgs:
-            out[peer] = Chat("vk", peer, title, msgs)
+            out[peer] = Chat("vk", peer, title, msgs, names)
     return out
 
 

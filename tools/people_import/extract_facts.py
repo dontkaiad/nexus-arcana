@@ -23,7 +23,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 from tools.people_import.attribute_quotes import expected_about, first_person_by_kai, locate, verify
-from tools.people_import.chats import Chat, Msg, load_chats
+from tools.people_import.chats import Chat, Msg, classify_chat, load_chats
 from tools.people_import.common import DATA_DIR, STAGING, TYPES, append_staging, load_staging, write_staging
 from tools.people_import.selfblock import SelfBlock, load_selfblock
 
@@ -100,8 +100,8 @@ def build_records(chat: Chat, ranges: List[Tuple[int, int]], items: List[Dict], 
     автором и местоимениями цитаты (Кай «я…» не может быть фактом о собеседнике). Факты о Кай
     (about=kai) остаются — они пойдут в карточку «Я»."""
     sb = sb or load_selfblock()
-    partner_is_self = sb.is_self(name=chat.title, tg_id=chat.id if chat.source == "tg" else None,
-                                 vk_id=chat.id if chat.source == "vk" else None)
+    kind, partner_name = classify_chat(chat, sb)      # self | person (+ имя: title → имя из реплик → «Удалённый аккаунт»)
+    partner_is_self = kind == "self"
     out = []
     for it in items:
         if not isinstance(it, dict) or not it.get("fact") or not it.get("quote"):
@@ -126,7 +126,7 @@ def build_records(chat: Chat, ranges: List[Tuple[int, int]], items: List[Dict], 
             stats["about_mismatch"] += 1
             continue
         t = it.get("type") if it.get("type") in TYPES else "other"
-        rec = {"name": SELF_NAME if about == "kai" else chat.title, "aliases": [], "fact": str(it["fact"]).strip(),
+        rec = {"name": SELF_NAME if about == "kai" else partner_name, "aliases": [], "fact": str(it["fact"]).strip(),
                "type": t, "quote": quote[:300], "about": about, "source": chat.source, "origin": "chat",
                "source_chat_id": chat.id, "source_message_date": found["date"] or None,
                "quote_author": found["author"],

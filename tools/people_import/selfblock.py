@@ -35,6 +35,7 @@ def _ids(name: str) -> Set[int]:
 class SelfBlock:
     names: Set[str] = field(default_factory=set)          # нормализованные
     display: List[str] = field(default_factory=list)      # как написаны (для алиасов карточки «Я»)
+    phrases: List[tuple] = field(default_factory=list)    # [(основа, макс.длина), …] многословных имён: вхождение в любой форме
     tg_ids: Set[int] = field(default_factory=set)
     vk_ids: Set[int] = field(default_factory=set)
     usernames: Set[str] = field(default_factory=set)      # lower, без @
@@ -46,6 +47,14 @@ class SelfBlock:
                 self.names.add(k)
                 if n.strip() not in self.display:
                     self.display.append(n.strip())
+                words = [w for w in k.split() if len(w) >= 3]
+                if len(k.split()) >= 2 and len(words) == len(k.split()):
+                    # «Асоциальный контракт»: ловим и «Контрактом Асоциальным», и «… 🖤 Имя Асоциальный контракт»;
+                    # однословные имена («Кай», «Карина») так не ловим — слишком много ложных совпадений
+                    # (основа из ≤4 букв, макс. длина формы): «ника» — форма «ник», «никита» — нет
+                    stems = tuple(sorted({(w[:4] if len(w) >= 5 else w, len(w) + 2) for w in words}))
+                    if stems not in self.phrases:
+                        self.phrases.append(stems)
 
     # Карточка «Я»: алиасы и «основные» идентификаторы. Реальные имена приходят из окружения/экспорта
     # и попадают только в БД — в репозитории лежат лишь «Кай/Kai/Kai Lark».
@@ -79,7 +88,10 @@ class SelfBlock:
         if k in self.names:
             return True
         words = k.split()
-        return len(words) == 2 and " ".join(reversed(words)) in self.names
+        if len(words) == 2 and " ".join(reversed(words)) in self.names:
+            return True
+        return any(all(any(w.startswith(s) and len(w) <= mx for w in words) for s, mx in stems)
+                   for stems in self.phrases)
 
     def is_self(self, name: str = "", tg_id: Optional[int] = None, vk_id: Optional[int] = None,
                 username: str = "") -> bool:
