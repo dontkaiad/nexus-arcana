@@ -1,6 +1,6 @@
-import React, { useState } from 'react'
+import React from 'react'
 import { Check } from 'lucide-react'
-import { copyText, fs, haptic, openExternal, openLink, openTelegramLink, sourceActions, sourceLinks } from './ui'
+import { fs, openLink, sourceLinks } from './ui'
 
 // Кнопки/поля раздела «Люди»: цель касания ≥ 44px (Telegram WebView), без жёстких ширин.
 export function Btn({ s, kind = 'ghost', onClick, disabled, children, style }) {
@@ -73,42 +73,12 @@ export function SourceLinks({ s, p, style }) {
   if (p.is_self || links.length === 0) return null
   return (
     <span style={{ display: 'inline-flex', gap: 8, flexWrap: 'wrap', ...style }}>
-      {links.map((l) => (
+      {links.map((l) => (l.href == null ? <span key={l.key}>{l.label}</span> : (
         <a key={l.key} href={l.href} onClick={(e) => openLink(e, l.href)}
           style={{ color: s.text, fontWeight: 600, textDecoration: 'underline', textDecorationStyle: 'dotted', textUnderlineOffset: 2 }}>
           {l.label}
         </a>
-      ))}
+      )))}
     </span>
-  )
-}
-
-// Кнопки источника в карточке: VK → vk.com, TG с username → t.me через openTelegramLink,
-// TG только с id → тап копирует id. У «Удалённого аккаунта» и у «Я» кнопок нет.
-export function SourceButtons({ s, p }) {
-  const [copied, setCopied] = useState(null)
-  const actions = sourceActions(p)
-  if (actions.length === 0) return null
-  const press = async (a) => {
-    haptic()
-    if (a.kind === 'tg') openTelegramLink(a.url)
-    else if (a.kind === 'vk') openExternal(a.url)
-    else if (await copyText(a.text)) {
-      setCopied(a.key)
-      setTimeout(() => setCopied((c) => (c === a.key ? null : c)), 1500)
-    }
-  }
-  return (
-    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-      {actions.map((a) => (
-        <div key={a.key} role="button" onClick={() => press(a)} style={{
-          minHeight: 36, padding: '6px 12px', borderRadius: 999, display: 'inline-flex', alignItems: 'center',
-          fontSize: fs(12), fontWeight: 600, cursor: 'pointer', userSelect: 'none', color: s.text,
-          border: `1px solid ${s.brd}`, background: 'rgba(255,255,255,0.28)', WebkitTapHighlightColor: 'transparent',
-        }}>
-          {copied === a.key ? '✓ id скопирован' : a.label}
-        </div>
-      ))}
-    </div>
   )
 }

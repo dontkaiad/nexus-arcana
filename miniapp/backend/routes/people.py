@@ -46,9 +46,12 @@ def _person_out(p: Dict[str, Any]) -> Dict[str, Any]:
         "birthday": birthday_iso(p.get("birthday"), known),
         "birthday_year_known": known,
         "age": age(p.get("birthday"), known),
+        # производные от ОСНОВНЫХ аккаунтов (для списка и обратной совместимости)
         "tg_id": p.get("tg_id"),
         "tg_username": p.get("tg_username"),
         "vk_id": p.get("vk_id"),
+        "accounts": [{**a, "url": repo.account_url(a["platform"], a["external_id"], a.get("username"))}
+                     for a in p.get("accounts", [])],
         "notes": p.get("notes"),
         "status": p["status"],
         "is_self": bool(p.get("is_self")),
@@ -125,9 +128,6 @@ class PersonPatch(BaseModel):
     aliases: Optional[List[str]] = None
     birthday: Optional[date] = None
     birthday_year_known: Optional[bool] = None
-    tg_id: Optional[int] = None
-    tg_username: Optional[str] = None
-    vk_id: Optional[int] = None
     notes: Optional[str] = None
     status: Optional[str] = None
 
@@ -168,8 +168,6 @@ async def patch_person(person_id: int, body: PersonPatch,
             vals["birthday"] = date(UNKNOWN_YEAR, b.month, b.day)
     try:
         p = await asyncio.to_thread(repo.update_person, user_id, person_id, vals)
-    except IntegrityError:
-        raise HTTPException(status_code=409, detail="tg_id/vk_id already belongs to another person")
     except ValueError:
         raise HTTPException(status_code=409, detail="self_status")
     if not p:
@@ -230,7 +228,7 @@ async def merge_person(person_id: int, body: MergeBody,
     try:
         stats = await asyncio.to_thread(repo.merge_people, user_id, person_id, body.into_id)
     except repo.MergeError as e:
-        status = {"not_found": 404, "same": 422, "conflicting_ids": 409, "self": 409}[e.code]
+        status = {"not_found": 404, "same": 422, "self": 409}[e.code]
         raise HTTPException(status_code=status, detail=e.code)
     target = await asyncio.to_thread(repo.get_person, user_id, body.into_id)
     return {"ok": True, **stats, "person": _person_out(target)}
@@ -291,3 +289,48 @@ async def add_fact(person_id: int, body: FactBody, tg_id: int = Depends(current_
     await asyncio.to_thread(repo.set_fact_status, user_id, person_id, int(mid), "confirmed")
     p = await asyncio.to_thread(repo.get_person, user_id, person_id)
     return {"ok": True, "fact_id": int(mid), "counts": p["counts"]}
+
+
+# ── аккаунты человека: несколько TG/VK на одного человека (PR-7) ─────────────
+
+class AccountBody(BaseModel):
+    platform: str
+    external_id: int = Field(gt=0)
+    username: Optional[str] = Field(default=None, max_length=64)
+    is_primary: bool = False
+
+
+@router.post("/people/{person_id}/accounts")
+async def add_account(person_id: int, body: AccountBody, tg_id: int = Depends(current_user_id)) -> Dict[str, Any]:
+    if body.platform not in repo.PLATFORMS:
+        raise HTTPException(status_code=422, detail="bad platform")
+    username = (body.username or "").strip().lstrip("@") or None
+    if username and body.platform != "tg":
+        raise HTTPException(status_code=422, detail="username is for tg only")
+    user_id = await _owner(tg_id)
+    try:
+        p = await asyncio.to_thread(repo.add_account, user_id, person_id, body.platform, body.external_id,
+                                    username, body.is_primary)
+    except IntegrityError:
+        raise HTTPException(status_code=409, detail="account already belongs to another person")
+    if not p:
+        raise HTTPException(status_code=404, detail="person not found")
+    return _person_out(p)
+
+
+@router.delete("/people/{person_id}/accounts/{account_id}")
+async def remove_account(person_id: int, account_id: int, tg_id: int = Depends(current_user_id)) -> Dict[str, Any]:
+    user_id = await _owner(tg_id)
+    p = await asyncio.to_thread(repo.remove_account, user_id, person_id, account_id)
+    if not p:
+        raise HTTPException(status_code=404, detail="account not found")
+    return _person_out(p)
+
+
+@router.post("/people/{person_id}/accounts/{account_id}/primary")
+async def make_primary_account(person_id: int, account_id: int, tg_id: int = Depends(current_user_id)) -> Dict[str, Any]:
+    user_id = await _owner(tg_id)
+    p = await asyncio.to_thread(repo.set_primary_account, user_id, person_id, account_id)
+    if not p:
+        raise HTTPException(status_code=404, detail="account not found")
+    return _person_out(p)

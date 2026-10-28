@@ -22,6 +22,7 @@ from sqlalchemy.exc import IntegrityError
 from core import memory as mem
 from core import memory_rag
 from core.db import get_engine
+from tests._people_helpers import insert_person
 from core.repos.memories_table import memories
 from core.repos.people_tables import people
 from core.repos.pg_memory_repo import PgMemoryRepo
@@ -72,18 +73,26 @@ def test_migration_up_down_reversible():
     spec.loader.exec_module(mig)
     assert mig.down_revision == "e1f2a3b4c5d6"
 
+    # person_accounts (PR-7) держит FK на people: откатываем её первой, как при настоящем даунгрейде цепочки
+    acc_path = next((REPO / "alembic" / "versions").glob("*_person_accounts.py"))
+    acc_spec = importlib.util.spec_from_file_location("_mig_accounts", acc_path)
+    acc = importlib.util.module_from_spec(acc_spec)
+    acc_spec.loader.exec_module(acc)
+
     eng = get_engine()
     with eng.connect() as conn:
         trans = conn.begin()
         try:
             ctx = MigrationContext.configure(conn)
             with Operations.context(ctx):
+                acc.downgrade()
                 mig.downgrade()
                 insp = inspect(conn)
                 assert "people" not in insp.get_table_names()
                 cols = [c["name"] for c in insp.get_columns("memories")]
                 assert "person_id" not in cols and "review_status" not in cols
                 mig.upgrade()
+                acc.upgrade()
                 insp = inspect(conn)
                 assert "people" in insp.get_table_names()
                 cols = [c["name"] for c in insp.get_columns("memories")]
@@ -108,27 +117,29 @@ def test_review_status_check_rejects_garbage():
         _ins("maybe")
 
 
-def test_people_status_check_and_partial_uniques():
+def test_people_status_check_and_account_uniques():
     eng = get_engine()
     with pytest.raises(IntegrityError):
         with eng.begin() as conn:
             conn.execute(insert(people).values(user_id=MARK, name="X", status="weird"))
-    # одинаковые имена без tg/vk — можно (однофамильцы)
+    # одинаковые имена без аккаунтов — можно (однофамильцы)
     with eng.begin() as conn:
         conn.execute(insert(people), [
             {"user_id": MARK, "name": "Одноимённый"},
             {"user_id": MARK, "name": "Одноимённый"},
         ])
-        # tg_id уникален в рамках user_id
-        conn.execute(insert(people).values(user_id=MARK, name="A", tg_id=424242))
+    insert_person(MARK, "A", tg_id=424242)
+    with pytest.raises(IntegrityError):                                   # (владелец, платформа, id) уникален
+        insert_person(MARK, "B", tg_id=424242)
+    insert_person(MARK, "C", vk_id=777001)
     with pytest.raises(IntegrityError):
-        with eng.begin() as conn:
-            conn.execute(insert(people).values(user_id=MARK, name="B", tg_id=424242))
-    with eng.begin() as conn:
-        conn.execute(insert(people).values(user_id=MARK, name="C", vk_id=777001))
-    with pytest.raises(IntegrityError):
-        with eng.begin() as conn:
-            conn.execute(insert(people).values(user_id=MARK, name="D", vk_id=777001))
+        insert_person(MARK, "D", vk_id=777001)
+    insert_person(MARK, "E", vk_id=424242)                                # тот же id на другой платформе — можно
+    with pytest.raises(IntegrityError):                                   # не больше одного основного на (человек, платформа)
+        insert_person(MARK, "F", accounts=[{"platform": "tg", "external_id": 1, "is_primary": True},
+                                           {"platform": "tg", "external_id": 2, "is_primary": True}])
+    with pytest.raises(IntegrityError):                                   # платформа только tg|vk
+        insert_person(MARK, "G", accounts=[{"platform": "ok", "external_id": 3}])
 
 
 def test_deleting_person_nulls_person_id():

@@ -60,14 +60,6 @@ def _same_bday(a: Dict[str, Any], b: Dict[str, Any]) -> bool:
     return True
 
 
-def _distinct_accounts(a: Dict[str, Any], b: Dict[str, Any]) -> bool:
-    """У обоих есть tg_id (или vk_id), и они разные → разные аккаунты, не дубль."""
-    for f in ("tg_id", "vk_id"):
-        if a.get(f) and b.get(f) and a[f] != b[f]:
-            return True
-    return False
-
-
 def find_duplicates(rows: Iterable[Dict[str, Any]], limit: int = DUP_LIMIT) -> List[Dict[str, Any]]:
     """Пары-кандидаты в один человек. НИЧЕГО не склеивает — только подсказка для merge.
 
@@ -77,7 +69,7 @@ def find_duplicates(rows: Iterable[Dict[str, Any]], limit: int = DUP_LIMIT) -> L
     pairs: Dict[Tuple[int, int], List[str]] = {}
 
     def add(a, b, reason):
-        if a["id"] == b["id"] or _distinct_accounts(a, b):
+        if a["id"] == b["id"]:
             return
         key = (min(a["id"], b["id"]), max(a["id"], b["id"]))
         reasons = pairs.setdefault(key, [])

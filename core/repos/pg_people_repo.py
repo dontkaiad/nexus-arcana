@@ -1,5 +1,9 @@
 """core/repos/pg_people_repo.py — People domain storage (ADR-0027). Sync SQLAlchemy Core;
-async callers wrap in asyncio.to_thread. API/merge land in later PRs."""
+async callers wrap in asyncio.to_thread.
+
+Аккаунты (TG/VK) лежат в `person_accounts` (PR-7): у человека их может быть несколько, у каждой
+платформы один основной (`is_primary`). В словарях людей `accounts` — полный список, а `tg_id`,
+`tg_username`, `vk_id` — производные от основных аккаунтов (для UI и инструментов)."""
 from __future__ import annotations
 
 import re
@@ -7,88 +11,164 @@ from datetime import date
 from typing import Dict, List, Optional
 
 from sqlalchemy import and_, func, insert, select, text, update
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from core.db import get_engine
-from core.repos.people_tables import people
+from core.repos.people_tables import people, person_accounts
+
+PLATFORMS = ("tg", "vk")
 
 
 def _row(r) -> Dict:
     return dict(r._mapping)
 
 
+def account_url(platform: str, external_id: int, username: Optional[str]) -> Optional[str]:
+    """Ссылка на аккаунт: VK — vk.com/id<id>; TG — t.me/<username>; TG только с id — None (копируется id)."""
+    if platform == "vk":
+        return "https://vk.com/id%d" % external_id
+    return "https://t.me/%s" % username if username else None
+
+
+def attach_accounts(rows: List[Dict]) -> List[Dict]:
+    """Кладёт в каждую строку `accounts` и производные tg_id/tg_username/vk_id (основные аккаунты)."""
+    ids = [r["id"] for r in rows]
+    by: Dict[int, List[Dict]] = {i: [] for i in ids}
+    if ids:
+        with get_engine().connect() as c:
+            for a in c.execute(select(person_accounts).where(person_accounts.c.person_id.in_(ids))
+                               .order_by(person_accounts.c.platform, person_accounts.c.is_primary.desc(),
+                                         person_accounts.c.id)):
+                by[a.person_id].append({"id": a.id, "platform": a.platform, "external_id": a.external_id,
+                                        "username": a.username, "is_primary": a.is_primary})
+    for r in rows:
+        accs = by.get(r["id"], [])
+        r["accounts"] = accs
+        tg = next((a for a in accs if a["platform"] == "tg"), None)       # основной идёт первым
+        vk = next((a for a in accs if a["platform"] == "vk"), None)
+        r["tg_id"] = tg["external_id"] if tg else None
+        r["tg_username"] = tg["username"] if tg else None
+        r["vk_id"] = vk["external_id"] if vk else None
+    return rows
+
+
+def _accounts_from(tg_id=None, tg_username=None, vk_id=None, accounts=None) -> List[Dict]:
+    out: List[Dict] = []
+    if tg_id:
+        out.append({"platform": "tg", "external_id": int(tg_id), "username": tg_username or None, "is_primary": True})
+    if vk_id:
+        out.append({"platform": "vk", "external_id": int(vk_id), "username": None, "is_primary": True})
+    out += [dict(a) for a in (accounts or [])]
+    return out
+
+
+def _insert_accounts(conn, user_id: str, person_id: int, accs: List[Dict]) -> int:
+    """Вставляет аккаунты, пропуская уже существующие (у любого человека этого владельца). Основным
+    становится первый аккаунт платформы, если основного у человека ещё нет. Возвращает число вставленных."""
+    primary_taken = {r[0] for r in conn.execute(
+        select(person_accounts.c.platform).where(and_(person_accounts.c.person_id == person_id,
+                                                      person_accounts.c.is_primary)))}
+    n = 0
+    for a in accs:
+        want_primary = bool(a.get("is_primary")) and a["platform"] not in primary_taken
+        res = conn.execute(pg_insert(person_accounts).values(
+            user_id=user_id, person_id=person_id, platform=a["platform"], external_id=a["external_id"],
+            username=a.get("username"), is_primary=want_primary,
+        ).on_conflict_do_nothing(index_elements=["user_id", "platform", "external_id"]))
+        if res.rowcount:
+            n += 1
+            if want_primary:
+                primary_taken.add(a["platform"])
+    # первый аккаунт платформы без основного — делаем основным (даже если флаг не был передан)
+    for plat in PLATFORMS:
+        if plat not in primary_taken:
+            first = conn.execute(select(person_accounts.c.id).where(and_(
+                person_accounts.c.person_id == person_id, person_accounts.c.platform == plat))
+                .order_by(person_accounts.c.id).limit(1)).scalar()
+            if first:
+                conn.execute(update(person_accounts).where(person_accounts.c.id == first).values(is_primary=True))
+    return n
+
+
 def find_self(user_id: str) -> Optional[Dict]:
     with get_engine().connect() as c:
         r = c.execute(select(people).where(and_(people.c.user_id == user_id, people.c.is_self))).first()
-    return _row(r) if r else None
+    return attach_accounts([_row(r)])[0] if r else None
 
 
 def get_or_create_self(user_id: str, name: str, aliases: List[str], *, tg_id: Optional[int] = None,
-                       tg_username: Optional[str] = None, vk_id: Optional[int] = None) -> int:
-    """Единственная карточка владельца: status=confirmed, is_self. Есть — дополняем алиасы/id."""
+                       tg_username: Optional[str] = None, vk_id: Optional[int] = None,
+                       accounts: Optional[List[Dict]] = None) -> int:
+    """Единственная карточка владельца: status=confirmed, is_self. Есть — дополняем алиасы/аккаунты."""
     me = find_self(user_id)
     if me:
-        fill_missing(me, aliases=aliases, birthday=None, tg_id=tg_id, tg_username=tg_username, vk_id=vk_id)
+        fill_missing(me, aliases=aliases, birthday=None, tg_id=tg_id, tg_username=tg_username, vk_id=vk_id,
+                     accounts=accounts)
         return me["id"]
-    pid = create(user_id, name, aliases, tg_id=tg_id, tg_username=tg_username, vk_id=vk_id,
+    pid = create(user_id, name, aliases, tg_id=tg_id, tg_username=tg_username, vk_id=vk_id, accounts=accounts,
                  status="confirmed", is_self=True)
     with get_engine().begin() as c:
         refresh_related(c, pid)
     return pid
 
 
-def find_by_tg(user_id: str, tg_id: int) -> Optional[Dict]:
+def find_by_account(user_id: str, platform: str, external_id: int) -> Optional[Dict]:
     with get_engine().connect() as c:
-        r = c.execute(select(people).where(and_(people.c.user_id == user_id, people.c.tg_id == tg_id))).first()
-    return _row(r) if r else None
+        r = c.execute(select(people).join(person_accounts, person_accounts.c.person_id == people.c.id).where(and_(
+            people.c.user_id == user_id, person_accounts.c.user_id == user_id,
+            person_accounts.c.platform == platform, person_accounts.c.external_id == external_id))).first()
+    return attach_accounts([_row(r)])[0] if r else None
+
+
+def find_by_tg(user_id: str, tg_id: int) -> Optional[Dict]:
+    return find_by_account(user_id, "tg", tg_id)
 
 
 def find_by_vk(user_id: str, vk_id: int) -> Optional[Dict]:
-    with get_engine().connect() as c:
-        r = c.execute(select(people).where(and_(people.c.user_id == user_id, people.c.vk_id == vk_id))).first()
-    return _row(r) if r else None
+    return find_by_account(user_id, "vk", vk_id)
 
 
 def find_named(user_id: str) -> List[Dict]:
-    """Все не отклонённые люди — для матча id-less строк по имени/алиасу (после merge
-    имя склеенного источника живёт алиасом цели)."""
+    """Все не отклонённые люди."""
     with get_engine().connect() as c:
         rows = c.execute(select(people).where(and_(
             people.c.user_id == user_id, people.c.status != "rejected"))).all()
-    return [_row(r) for r in rows]
+    return attach_accounts([_row(r) for r in rows])
 
 
 def find_idless(user_id: str) -> List[Dict]:
-    """Люди без tg_id и vk_id — кандидаты для повторного матча по имени."""
+    """Люди без единого аккаунта."""
     with get_engine().connect() as c:
         rows = c.execute(select(people).where(and_(
-            people.c.user_id == user_id, people.c.tg_id.is_(None), people.c.vk_id.is_(None),
+            people.c.user_id == user_id,
+            ~select(person_accounts.c.id).where(person_accounts.c.person_id == people.c.id).exists(),
         ))).all()
-    return [_row(r) for r in rows]
+    return attach_accounts([_row(r) for r in rows])
 
 
 def create(user_id: str, name: str, aliases: List[str], *, birthday: Optional[date] = None,
            tg_id: Optional[int] = None, tg_username: Optional[str] = None,
            vk_id: Optional[int] = None, status: str = "pending",
-           birthday_year_known: bool = True, is_self: bool = False) -> int:
+           birthday_year_known: bool = True, is_self: bool = False,
+           accounts: Optional[List[Dict]] = None) -> int:
     with get_engine().begin() as c:
-        return c.execute(insert(people).values(
+        pid = c.execute(insert(people).values(
             user_id=user_id, name=name, aliases=aliases, birthday=birthday,
-            birthday_year_known=birthday_year_known, is_self=is_self, tg_id=tg_id,
-            tg_username=tg_username, vk_id=vk_id, status=status,
+            birthday_year_known=birthday_year_known, is_self=is_self, status=status,
         ).returning(people.c.id)).scalar_one()
+        _insert_accounts(c, user_id, pid, _accounts_from(tg_id, tg_username, vk_id, accounts))
+    return pid
 
 
 def fill_missing(person: Dict, *, aliases: List[str], birthday: Optional[date],
                  tg_id: Optional[int], tg_username: Optional[str], vk_id: Optional[int],
-                 birthday_year_known: bool = True) -> bool:
-    """Дополняет ТОЛЬКО пустые поля и объединяет алиасы; имя/статус не трогает."""
+                 birthday_year_known: bool = True, accounts: Optional[List[Dict]] = None) -> bool:
+    """Дополняет ТОЛЬКО пустое: ДР, недостающие аккаунты, алиасы. Имя/статус/основные аккаунты не трогает."""
     vals: Dict = {}
+    changed = False
     if birthday and not person.get("birthday"):
         vals["birthday"] = birthday
         vals["birthday_year_known"] = birthday_year_known
-    for f, v in (("tg_id", tg_id), ("tg_username", tg_username), ("vk_id", vk_id)):
-        if v and not person.get(f):
-            vals[f] = v
     merged = list(person.get("aliases") or [])
     seen = {a.lower() for a in merged} | {person["name"].lower()}
     for a in aliases:
@@ -97,12 +177,73 @@ def fill_missing(person: Dict, *, aliases: List[str], birthday: Optional[date],
             merged.append(a)
     if merged != list(person.get("aliases") or []):
         vals["aliases"] = merged
-    if not vals:
-        return False
-    vals["updated_at"] = func.now()
     with get_engine().begin() as c:
-        c.execute(update(people).where(people.c.id == person["id"]).values(**vals))
-    return True
+        if _insert_accounts(c, person["user_id"], person["id"], _accounts_from(tg_id, tg_username, vk_id, accounts)):
+            changed = True
+        if tg_username:                              # username основного TG, если его ещё нет
+            r = c.execute(update(person_accounts).where(and_(
+                person_accounts.c.person_id == person["id"], person_accounts.c.platform == "tg",
+                person_accounts.c.is_primary, person_accounts.c.external_id == tg_id,
+                person_accounts.c.username.is_(None))).values(username=tg_username))
+            changed = changed or bool(r.rowcount)
+        if vals:
+            vals["updated_at"] = func.now()
+            c.execute(update(people).where(people.c.id == person["id"]).values(**vals))
+            changed = True
+    return changed
+
+
+# ── аккаунты человека (PR-7) ────────────────────────────────────────────────
+
+def add_account(user_id: str, person_id: int, platform: str, external_id: int,
+                username: Optional[str] = None, make_primary: bool = False) -> Optional[Dict]:
+    """Добавляет аккаунт. Дубль (владелец, платформа, id) → IntegrityError (роут → 409). None, если человека нет."""
+    with get_engine().begin() as c:
+        if c.execute(select(people.c.id).where(and_(people.c.id == person_id, people.c.user_id == user_id))
+                     .with_for_update()).first() is None:
+            return None
+        has_primary = c.execute(select(person_accounts.c.id).where(and_(
+            person_accounts.c.person_id == person_id, person_accounts.c.platform == platform,
+            person_accounts.c.is_primary))).first()
+        if make_primary and has_primary:
+            c.execute(update(person_accounts).where(person_accounts.c.id == has_primary[0]).values(is_primary=False))
+        c.execute(insert(person_accounts).values(
+            user_id=user_id, person_id=person_id, platform=platform, external_id=external_id,
+            username=(username or None), is_primary=bool(make_primary or not has_primary)))
+        c.execute(update(people).where(people.c.id == person_id).values(updated_at=func.now()))
+    return get_person(user_id, person_id)
+
+
+def remove_account(user_id: str, person_id: int, account_id: int) -> Optional[Dict]:
+    """Удаляет аккаунт; если он был основным — основным становится следующий той же платформы."""
+    with get_engine().begin() as c:
+        gone = c.execute(person_accounts.delete().where(and_(
+            person_accounts.c.id == account_id, person_accounts.c.person_id == person_id,
+            person_accounts.c.user_id == user_id)).returning(person_accounts.c.platform,
+                                                             person_accounts.c.is_primary)).first()
+        if gone is None:
+            return None
+        if gone.is_primary:
+            nxt = c.execute(select(person_accounts.c.id).where(and_(
+                person_accounts.c.person_id == person_id, person_accounts.c.platform == gone.platform))
+                .order_by(person_accounts.c.id).limit(1)).scalar()
+            if nxt:
+                c.execute(update(person_accounts).where(person_accounts.c.id == nxt).values(is_primary=True))
+    return get_person(user_id, person_id)
+
+
+def set_primary_account(user_id: str, person_id: int, account_id: int) -> Optional[Dict]:
+    with get_engine().begin() as c:
+        acc = c.execute(select(person_accounts.c.platform).where(and_(
+            person_accounts.c.id == account_id, person_accounts.c.person_id == person_id,
+            person_accounts.c.user_id == user_id))).first()
+        if acc is None:
+            return None
+        c.execute(update(person_accounts).where(and_(
+            person_accounts.c.person_id == person_id, person_accounts.c.platform == acc.platform,
+            person_accounts.c.is_primary)).values(is_primary=False))
+        c.execute(update(person_accounts).where(person_accounts.c.id == account_id).values(is_primary=True))
+    return get_person(user_id, person_id)
 
 
 # ── чтение/правка для API Mini App (PR-4) ───────────────────────────────────
@@ -149,7 +290,8 @@ def list_people(user_id: str, status: Optional[str] = None, q: Optional[str] = N
         where.append("status <> 'rejected'")
     if q and q.strip():
         where.append("(name ILIKE :q ESCAPE '\\' OR EXISTS "
-                     "(SELECT 1 FROM unnest(aliases) a WHERE a ILIKE :q ESCAPE '\\'))")
+                     "(SELECT 1 FROM unnest(aliases) a WHERE a ILIKE :q ESCAPE '\\') OR EXISTS "
+                     "(SELECT 1 FROM person_accounts pa WHERE pa.person_id = people.id AND pa.username ILIKE :q ESCAPE '\\'))")
         params["q"] = _like(q.strip())
     with get_engine().connect() as c:
         rows = [_row(r) for r in c.execute(text(
@@ -158,6 +300,7 @@ def list_people(user_id: str, status: Optional[str] = None, q: Optional[str] = N
         me = find_self(user_id)                      # карточка «Я» закреплена сверху при любом фильтре
         if me:
             rows.append(me)
+    attach_accounts(rows)
     cnt = counts_for([r["id"] for r in rows])
     for r in rows:
         r.update(cnt[r["id"]])
@@ -170,7 +313,7 @@ def get_person(user_id: str, person_id: int) -> Optional[Dict]:
         r = c.execute(select(people).where(and_(people.c.id == person_id, people.c.user_id == user_id))).first()
     if not r:
         return None
-    d = _row(r)
+    d = attach_accounts([_row(r)])[0]
     d.update(counts_for([person_id])[person_id])
     return d
 
@@ -192,12 +335,11 @@ def list_facts(person_id: int) -> List[Dict]:
              "last_mention": r.last_mention_date} for r in rows]
 
 
-EDITABLE = ("name", "aliases", "birthday", "birthday_year_known", "tg_id", "tg_username",
-            "vk_id", "notes", "status")
+EDITABLE = ("name", "aliases", "birthday", "birthday_year_known", "notes", "status")
 
 
 def update_person(user_id: str, person_id: int, values: Dict) -> Optional[Dict]:
-    """Частичное обновление. IntegrityError (дубль tg_id/vk_id, CHECK) пробрасывается."""
+    """Частичное обновление полей карточки (аккаунты — отдельные функции add/remove/set_primary_account)."""
     vals = {k: v for k, v in values.items() if k in EDITABLE}
     if vals.get("status") in ("rejected", "pending"):
         me = find_self(user_id)
@@ -287,7 +429,7 @@ def review_batch(user_id: str, person_id: int, approve: List[int], reject: List[
 # ── merge двух людей (PR-5) ──────────────────────────────────────────────────
 
 class MergeError(Exception):
-    """code: not_found | same | conflicting_ids"""
+    """code: not_found | same | self"""
 
     def __init__(self, code: str):
         super().__init__(code)
@@ -327,6 +469,24 @@ def _move_facts(conn, user_id: str, src: int, dst: int) -> Dict[str, int]:
     return {"moved": moved, "dropped_duplicates": dropped}
 
 
+def _move_accounts(conn, src: int, dst: int) -> int:
+    """Аккаунты src → dst (ДО удаления src: person_accounts удаляются каскадом). Основной аккаунт
+    цели на платформе сохраняется; основной аккаунт источника становится основным только если у цели
+    на этой платформе основного нет."""
+    primary_taken = {r[0] for r in conn.execute(select(person_accounts.c.platform).where(and_(
+        person_accounts.c.person_id == dst, person_accounts.c.is_primary)))}
+    moved = 0
+    for a in conn.execute(select(person_accounts.c.id, person_accounts.c.platform, person_accounts.c.is_primary)
+                          .where(person_accounts.c.person_id == src).order_by(person_accounts.c.id)).all():
+        becomes_primary = bool(a.is_primary) and a.platform not in primary_taken
+        conn.execute(update(person_accounts).where(person_accounts.c.id == a.id)
+                     .values(person_id=dst, is_primary=becomes_primary))
+        if becomes_primary:
+            primary_taken.add(a.platform)
+        moved += 1
+    return moved
+
+
 def _delete_person(conn, pid: int) -> None:
     conn.execute(people.delete().where(people.c.id == pid))
 
@@ -335,9 +495,9 @@ def merge_people(user_id: str, source_id: int, target_id: int) -> Dict:
     """Склеивает source в target ОДНОЙ транзакцией; любое исключение → полный откат.
 
     Факты переезжают (см. _move_facts); алиасы — union (имя источника тоже становится
-    алиасом); пустые поля цели заполняются из источника, заметки при различии склеиваются;
-    имя/статус цели не меняются. У обоих разные tg_id (или vk_id) → MergeError('conflicting_ids'):
-    это разные аккаунты, и потерянный id при повторном импорте воскресил бы дубль."""
+    алиасом); аккаунты объединяются (основные аккаунты цели сохраняются); пустые поля цели
+    заполняются из источника, заметки при различии склеиваются; имя/статус цели не меняются.
+    Аккаунты не теряются: потерянный id при повторном импорте воскресил бы дубль."""
     if source_id == target_id:
         raise MergeError("same")
     me = find_self(user_id)
@@ -349,12 +509,10 @@ def merge_people(user_id: str, source_id: int, target_id: int) -> Dict:
         src, dst = locked[source_id], locked[target_id]
         if not src or not dst:
             raise MergeError("not_found")
-        for f in ("tg_id", "vk_id"):
-            if src.get(f) and dst.get(f) and src[f] != dst[f]:
-                raise MergeError("conflicting_ids")
 
         stats = _move_facts(conn, user_id, source_id, target_id)
-        _delete_person(conn, source_id)          # раньше UPDATE цели: освобождает уникальные tg_id/vk_id
+        stats["accounts_moved"] = _move_accounts(conn, source_id, target_id)
+        _delete_person(conn, source_id)          # аккаунты уже переехали — каскад ничего не заберёт
 
         aliases = list(dst.get("aliases") or [])
         seen = {a.lower() for a in aliases} | {dst["name"].lower()}
@@ -366,9 +524,6 @@ def merge_people(user_id: str, source_id: int, target_id: int) -> Dict:
         if src.get("birthday") and not dst.get("birthday"):
             vals["birthday"] = src["birthday"]
             vals["birthday_year_known"] = src.get("birthday_year_known", True)
-        for f in ("tg_id", "tg_username", "vk_id"):
-            if src.get(f) and not dst.get(f):
-                vals[f] = src[f]
         sn, dn = (src.get("notes") or "").strip(), (dst.get("notes") or "").strip()
         if sn and not dn:
             vals["notes"] = sn
@@ -381,8 +536,8 @@ def merge_people(user_id: str, source_id: int, target_id: int) -> Dict:
 
 def absorb_into_self(user_id: str, source_id: int) -> Optional[Dict]:
     """Человек оказался самой владелицей (чат с её другим аккаунтом): его pending-факты → карточка «Я»,
-    карточка человека удаляется. В отличие от merge_people НЕ копирует id/ДР/алиасы и не упирается
-    в разные tg_id (аккаунт другой — это и есть случай). Подтверждённые/ручные факты не трогает:
+    карточка человека удаляется; его аккаунты становятся аккаунтами «Я». В отличие от merge_people
+    НЕ копирует ДР/алиасы. Подтверждённые/ручные факты не трогает:
     при их наличии → ValueError (человека нужно разобрать руками). None, если «Я»/человека нет."""
     me = find_self(user_id)
     if not me or me["id"] == source_id:
@@ -397,6 +552,7 @@ def absorb_into_self(user_id: str, source_id: int) -> Optional[Dict]:
         if protected:
             raise ValueError("protected_facts")
         stats = _move_facts(conn, user_id, source_id, me["id"])
+        stats["accounts_moved"] = _move_accounts(conn, source_id, me["id"])
         _delete_person(conn, source_id)
         refresh_related(conn, me["id"])
     return stats

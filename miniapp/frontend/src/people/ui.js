@@ -72,18 +72,32 @@ export function mentionLabel(f) {
 // [а-яё]* вместо \w: в JS \w без флага u не знает кириллицу
 export const isDeletedAccount = (p) => /^\s*удал[её]нн[а-яё]*\s+аккаунт/i.test(p?.name || '')
 
-// Ссылки на источник человека: «TG · @username» / «TG · id123» и «VK · id456»
+// Ссылки на источник человека (список, разбор): основной TG и основной VK + «+N» остальных аккаунтов.
+// У «Удалённого аккаунта» ссылок нет.
 export function sourceLinks(p) {
   const out = []
   if (isDeletedAccount(p)) return out
-  if (p.vk_id) out.push({ key: 'vk', label: `VK · id${p.vk_id}`, href: `https://vk.com/id${p.vk_id}` })
-  if (p.tg_id || p.tg_username) {
+  const accs = p.accounts && p.accounts.length ? p.accounts : legacyAccounts(p)
+  const prim = (plat) => accs.find((a) => a.platform === plat && a.is_primary) || accs.find((a) => a.platform === plat)
+  const vk = prim('vk'), tg = prim('tg')
+  if (vk) out.push({ key: 'vk', label: `VK · id${vk.external_id}`, href: `https://vk.com/id${vk.external_id}` })
+  if (tg) {
     out.push({
       key: 'tg',
-      label: p.tg_username ? `TG · @${p.tg_username}` : `TG · id${p.tg_id}`,
-      href: p.tg_username ? `https://t.me/${p.tg_username}` : `tg://user?id=${p.tg_id}`,
+      label: tg.username ? `TG · @${tg.username}` : `TG · id${tg.external_id}`,
+      href: tg.username ? `https://t.me/${tg.username}` : `tg://user?id=${tg.external_id}`,
     })
   }
+  const extra = accs.length - out.length
+  if (extra > 0) out.push({ key: 'more', label: `+${extra}`, href: null })
+  return out
+}
+
+// старые ответы без `accounts` (tg_id/vk_id в самой записи)
+function legacyAccounts(p) {
+  const out = []
+  if (p.tg_id) out.push({ platform: 'tg', external_id: p.tg_id, username: p.tg_username || null, is_primary: true })
+  if (p.vk_id) out.push({ platform: 'vk', external_id: p.vk_id, username: null, is_primary: true })
   return out
 }
 
@@ -96,21 +110,21 @@ export function openLink(e, href) {
   window.open(href, '_blank', 'noopener')
 }
 
-// ── кнопки источника в карточке человека ────────────────────────────────────
+// ── аккаунты человека в карточке ────────────────────────────────────────────
 //   VK                      → vk.com/id<id>           (внешняя ссылка)
 //   TG с username           → t.me/<username>         (Telegram.WebApp.openTelegramLink)
 //   TG только с id          → тап копирует id         (профиль по одному id не открыть)
-//   «Удалённый аккаунт», «Я» → ничего
-export function sourceActions(p) {
-  if (!p || p.is_self || isDeletedAccount(p)) return []
-  const out = []
-  if (p.vk_id) out.push({ key: 'vk', kind: 'vk', label: `VK · id${p.vk_id}`, url: `https://vk.com/id${p.vk_id}` })
-  if (p.tg_username) {
-    out.push({ key: 'tg', kind: 'tg', label: `TG · @${p.tg_username}`, url: `https://t.me/${p.tg_username}` })
-  } else if (p.tg_id) {
-    out.push({ key: 'tg', kind: 'copy', label: `TG · id${p.tg_id}`, text: String(p.tg_id) })
-  }
-  return out
+//   «Удалённый аккаунт», «Я» → без ссылок (аккаунты показываем текстом)
+export function accountAction(a) {
+  if (a.platform === 'vk') return { kind: 'vk', label: `VK · id${a.external_id}`, url: `https://vk.com/id${a.external_id}` }
+  if (a.username) return { kind: 'tg', label: `TG · @${a.username}`, url: `https://t.me/${a.username}` }
+  return { kind: 'copy', label: `TG · id${a.external_id}`, text: String(a.external_id) }
+}
+
+export const accountsOf = (p) => (p?.accounts && p.accounts.length ? p.accounts : legacyAccounts(p || {}))
+
+export function linksAllowed(p) {
+  return !(!p || p.is_self || isDeletedAccount(p))
 }
 
 export function openTelegramLink(url) {

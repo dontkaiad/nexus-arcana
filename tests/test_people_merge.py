@@ -11,6 +11,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import delete, insert, select, text
 
 from core.db import get_engine
+from tests._people_helpers import insert_person
 from core.people import find_duplicates
 from core.repos import pg_people_repo as repo
 from core.repos.memories_table import memories
@@ -74,9 +75,10 @@ def test_dup_combined_signals_raise_score_and_sort_first():
     assert set(d[0]["reasons"]) == {"full_name", "name_birthday"}
 
 
-def test_dup_skips_different_accounts_and_rejected():
-    assert find_duplicates([P(1, "Мария Иванова", tg_id=1), P(2, "Мария Иванова", tg_id=2)]) == []
-    assert find_duplicates([P(1, "Мария Иванова", vk_id=1), P(2, "Мария Иванова", vk_id=2)]) == []
+def test_dup_candidates_ignore_account_differences_but_skip_rejected():
+    # аккаунты при merge объединяются, поэтому «разные tg_id/vk_id» больше не повод прятать пару
+    assert len(find_duplicates([P(1, "Мария Иванова", tg_id=1), P(2, "Мария Иванова", tg_id=2)])) == 1
+    assert len(find_duplicates([P(1, "Мария Иванова", vk_id=1), P(2, "Мария Иванова", vk_id=2)])) == 1
     assert len(find_duplicates([P(1, "Мария Иванова", tg_id=1), P(2, "Мария Иванова", vk_id=2)])) == 1
     assert find_duplicates([P(1, "Мария Иванова"), P(2, "Мария Иванова", status="rejected")]) == []
 
@@ -102,8 +104,7 @@ def _wipe():
 
 
 def mk_person(name="Имя1 Фамилия1", user=MARK, **kw) -> int:
-    with get_engine().begin() as c:
-        return c.execute(insert(people).values(user_id=user, name=name, **kw).returning(people.c.id)).scalar_one()
+    return insert_person(user, name, **kw)
 
 
 def mk_fact(pid, type_="likes", h8="aaaaaaaa", status="pending", text_="факт", user=MARK, key=None) -> int:
@@ -117,6 +118,14 @@ def person_row(pid):
     with get_engine().connect() as c:
         r = c.execute(select(people).where(people.c.id == pid)).first()
     return dict(r._mapping) if r else None
+
+
+def accts_of(pid):
+    """[(platform, external_id, username, is_primary)] — стабильно отсортировано."""
+    with get_engine().connect() as c:
+        return [tuple(r) for r in c.execute(text(
+            "SELECT platform, external_id, username, is_primary FROM person_accounts WHERE person_id=:p "
+            "ORDER BY platform, external_id"), {"p": pid})]
 
 
 def facts_of(pid):
@@ -155,7 +164,8 @@ def test_merge_moves_rekeys_and_drops_conflicts_keeping_target(client):
     assert t["name"] == "Мария Иванова" and t["status"] == "pending"        # имя/статус цели не тронуты
     assert t["aliases"] == ["М", "Машка", "Мария И"]
     assert (t["birthday"], t["birthday_year_known"]) == (date(1990, 3, 5), True)
-    assert (t["tg_id"], t["tg_username"], t["vk_id"]) == (111, "mash", 222)  # tg_id переехал без unique-ошибки
+    assert accts_of(dst) == [("tg", 111, "mash", True), ("vk", 222, None, True)]   # аккаунты объединились
+    assert body["accounts_moved"] == 1
     assert t["notes"] == "заметка 2\nзаметка 1"
     fs = facts_of(dst)
     assert f_conf_src not in fs and fs[f_conf_dst][1:] == ("pending", "общий (цель)")      # остаётся целевой
@@ -166,15 +176,14 @@ def test_merge_moves_rekeys_and_drops_conflicts_keeping_target(client):
 
 def test_merge_fills_only_empty_target_fields(client):
     src = mk_person("А Б", birthday=date(1990, 1, 1), tg_id=5, notes="x")
-    dst = mk_person("А Б", birthday=date(1985, 2, 2), tg_id=None, notes="x")
+    dst = mk_person("А Б", birthday=date(1985, 2, 2), notes="x")
     assert client.post("/api/people/%d/merge" % src, json={"into_id": dst}).status_code == 200
     t = person_row(dst)
-    assert t["birthday"] == date(1985, 2, 2) and t["tg_id"] == 5 and t["notes"] == "x"
+    assert t["birthday"] == date(1985, 2, 2) and t["notes"] == "x" and accts_of(dst) == [("tg", 5, None, True)]
 
 
 def test_merge_errors_leave_state_untouched(client):
     a = mk_person(tg_id=1); b = mk_person(tg_id=2); fa = mk_fact(a)
-    assert client.post("/api/people/%d/merge" % a, json={"into_id": b}).status_code == 409    # разные tg-аккаунты
     assert client.post("/api/people/%d/merge" % a, json={"into_id": a}).status_code == 422
     assert client.post("/api/people/%d/merge" % a, json={"into_id": 999999999}).status_code == 404
     foreign = mk_person(user=OTHER)
@@ -191,11 +200,32 @@ def test_merge_is_atomic_rolls_back_on_failure():
         with patch.object(repo, "_delete_person", side_effect=RuntimeError("boom")):
             with pytest.raises(RuntimeError):
                 repo.merge_people(MARK, src, dst)
-        assert person_row(src) is not None and person_row(src)["tg_id"] == 7
-        assert facts_of(src) == before and facts_of(dst) == {}      # факты не уехали, ключи не переписаны
+        assert person_row(src) is not None and accts_of(src) == [("tg", 7, None, True)]
+        assert facts_of(src) == before and facts_of(dst) == {} and accts_of(dst) == []   # ничего не уехало, ключи не переписаны
         assert f1 in facts_of(src) and f2 in facts_of(src)
     finally:
         _wipe()
+
+
+def test_merge_two_tg_and_vk_accounts_keeps_target_primary_and_removes_old_409(client):
+    a = mk_person("Имя1 Фамилия1", tg_id=1, tg_username="first")
+    b = mk_person("Имя1 Ф", tg_id=2, tg_username="second", vk_id=3)
+    c3 = mk_person("Имя1", accounts=[{"platform": "tg", "external_id": 4, "username": None, "is_primary": True}])
+    assert client.post("/api/people/%d/merge" % b, json={"into_id": a}).status_code == 200   # раньше — 409 «разные аккаунты»
+    assert accts_of(a) == [("tg", 1, "first", True), ("tg", 2, "second", False), ("vk", 3, None, True)]
+    assert client.post("/api/people/%d/merge" % c3, json={"into_id": a}).status_code == 200
+    assert accts_of(a) == [("tg", 1, "first", True), ("tg", 2, "second", False), ("tg", 4, None, False),
+                           ("vk", 3, None, True)]                       # основной аккаунт цели сохранён
+    got = client.get("/api/people/%d" % a).json()
+    assert [(x["platform"], x["external_id"], x["is_primary"]) for x in got["accounts"]][0] == ("tg", 1, True)
+    assert got["tg_id"] == 1 and got["tg_username"] == "first" and got["vk_id"] == 3    # производные от основных
+
+
+def test_merge_source_primary_becomes_primary_only_when_target_has_none(client):
+    a = mk_person("А", tg_id=1)                       # у цели есть основной TG, VK нет
+    b = mk_person("Б", tg_id=2, vk_id=9)
+    client.post("/api/people/%d/merge" % b, json={"into_id": a})
+    assert accts_of(a) == [("tg", 1, None, True), ("tg", 2, None, False), ("vk", 9, None, True)]
 
 
 def test_reimport_after_merge_does_not_resurrect_duplicate(monkeypatch):
@@ -207,22 +237,29 @@ def test_reimport_after_merge_does_not_resurrect_duplicate(monkeypatch):
         base.update(kw)
         return base
     rows = [row("Имя1 Фамилия1", "любит чай", tg_id=1),
-            row("Имя1 Ф", "не ест рыбу", source="vk", vk_id=2),
-            row("Имя1 Ф", "любит чай", source="vk", vk_id=2)]
+            row("Имя1 Ф", "не ест рыбу", tg_id=2),                                   # второй TG-аккаунт
+            row("Имя1 Ф", "любит чай", source="vk", vk_id=3),
+            row("Имя1 Ф", "любит джаз", source="vk", vk_id=3)]
     monkeypatch.setattr(im, "load_staging", lambda: rows)
+
+    def n(table):
+        with get_engine().connect() as c:
+            return c.execute(text("SELECT count(*) FROM %s WHERE user_id=:u" % table), {"u": MARK}).scalar_one()
+
+    def pid_by(platform, ext):
+        with get_engine().connect() as c:
+            return c.execute(text("SELECT person_id FROM person_accounts WHERE user_id=:u AND platform=:p AND external_id=:e"),
+                             {"u": MARK, "p": platform, "e": ext}).scalar_one()
     try:
         asyncio.run(im.run(False, True, 20, 0))
-        with get_engine().connect() as c:
-            ids = dict(c.execute(text("SELECT tg_id, id FROM people WHERE user_id=:u AND tg_id IS NOT NULL"), {"u": MARK}).all())
-            vk_id_person = c.execute(text("SELECT id FROM people WHERE user_id=:u AND vk_id=2"), {"u": MARK}).scalar_one()
-        repo.merge_people(MARK, vk_id_person, ids[1])
-        with get_engine().connect() as c:
-            n_people = c.execute(text("SELECT count(*) FROM people WHERE user_id=:u"), {"u": MARK}).scalar_one()
-            n_facts = c.execute(text("SELECT count(*) FROM memories WHERE user_id=:u"), {"u": MARK}).scalar_one()
-        assert n_people == 1
-        asyncio.run(im.run(False, True, 20, 0))                       # повторный импорт после merge
-        with get_engine().connect() as c:
-            assert c.execute(text("SELECT count(*) FROM people WHERE user_id=:u"), {"u": MARK}).scalar_one() == 1
-            assert c.execute(text("SELECT count(*) FROM memories WHERE user_id=:u"), {"u": MARK}).scalar_one() == n_facts
+        assert n("people") == 3 and n("person_accounts") == 3
+        a, b, c3 = pid_by("tg", 1), pid_by("tg", 2), pid_by("vk", 3)
+        repo.merge_people(MARK, b, a)
+        repo.merge_people(MARK, c3, a)
+        facts_before, accounts_before = n("memories"), accts_of(a)
+        assert n("people") == 1 and accounts_before == [("tg", 1, None, True), ("tg", 2, None, False), ("vk", 3, None, True)]
+        asyncio.run(im.run(False, True, 20, 0))                                      # повторный импорт после merge
+        assert n("people") == 1 and n("memories") == facts_before and accts_of(a) == accounts_before
+        assert {pid_by("tg", 1), pid_by("tg", 2), pid_by("vk", 3)} == {a}            # все три аккаунта ведут к цели
     finally:
         _wipe()

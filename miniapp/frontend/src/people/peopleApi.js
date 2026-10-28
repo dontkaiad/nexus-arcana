@@ -1,6 +1,6 @@
 // Тонкая обёртка над /api/people. Мутации идут мимо офлайн-очереди (путь не в whitelist
 // outbox): ревью должно либо пройти сразу, либо показать ошибку — не «записано локально».
-import { apiGet, apiPost, apiPatch } from '../api'
+import { apiDelete, apiGet, apiPatch, apiPost } from '../api'
 
 const qs = (o) => {
   const p = Object.entries(o).filter(([, v]) => v !== undefined && v !== null && v !== '')
@@ -22,12 +22,14 @@ export const rejectAll = (id) => apiPost(`/api/people/${id}/reject-all`, {})
 export const addFact = (id, text, type) => apiPost(`/api/people/${id}/facts`, { text, type })
 export const duplicates = () => apiGet('/api/people/duplicates')
 export const mergePerson = (id, intoId) => apiPost(`/api/people/${id}/merge`, { into_id: intoId })
+export const addAccount = (id, body) => apiPost(`/api/people/${id}/accounts`, body)
+export const removeAccount = (id, accId) => apiDelete(`/api/people/${id}/accounts/${accId}`)
+export const setPrimaryAccount = (id, accId) => apiPost(`/api/people/${id}/accounts/${accId}/primary`, {})
 
 // Человекочитаемая ошибка из HttpError ("409 Conflict — {...}") и пр.
 export function errText(e) {
   const m = String(e?.message || e || '')
-  if (/conflicting_ids/.test(m)) return 'У людей разные Telegram/VK-аккаунты — склеить нельзя'
-  if (/already belongs/.test(m)) return 'Этот tg_id/vk_id уже у другого человека'
+  if (/already belongs/.test(m)) return 'Этот аккаунт уже у другого человека'
   if (/^404/.test(m)) return 'Не найдено (возможно, уже изменено)'
   return m.replace(/^\d+\s+[^—]*—\s*/, '') || 'Ошибка'
 }

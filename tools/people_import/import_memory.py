@@ -273,7 +273,8 @@ def finalize(c: Dict, sb: Optional[SelfBlock] = None, threshold: float = 0.9,
     if c["is_self"]:
         facts, dedupe_how = dedupe_self(c["facts"], threshold, embed)
         name, aliases = SELF_NAME, sb.display_names()
-        ids = {"tg_id": sb.primary_tg_id(), "tg_username": sb.primary_username(), "vk_id": sb.primary_vk_id()}
+        ids = {"tg_id": sb.primary_tg_id(), "tg_username": sb.primary_username(), "vk_id": sb.primary_vk_id(),
+               "accounts": sb.account_list()}                # все аккаунты владельца → person_accounts «Я»
         bd, bd_origin, bday_known = None, None, True
     else:
         name = _primary_name(c)
@@ -398,7 +399,8 @@ async def run(dry: bool, no_embed: bool, batch_size: int, pause: float, threshol
                 st["dedupe_" + p["dedupe"]] += 1
             if not dry:
                 pid = prepo.get_or_create_self(user_id, p["name"], p["aliases"], tg_id=p["tg_id"],
-                                               tg_username=p["tg_username"], vk_id=p["vk_id"])
+                                               tg_username=p["tg_username"], vk_id=p["vk_id"],
+                                               accounts=p.get("accounts"))
             else:
                 pid = person["id"] if person else None
         elif person:

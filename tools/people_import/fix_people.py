@@ -167,12 +167,17 @@ def fetch_people(user_id: str) -> List[Dict]:
     """pending-люди с id чата + счётчики фактов (имя нужно для проверки «плохое ли»; наружу не печатаем)."""
     with get_engine().connect() as c:
         rows = c.execute(sa.text("""
-            SELECT p.id, p.name, p.tg_id, p.vk_id, (p.birthday IS NOT NULL) AS has_birthday,
+            SELECT p.id, p.name,
+                   (SELECT a.external_id FROM person_accounts a WHERE a.person_id = p.id AND a.platform = 'tg'
+                      ORDER BY a.is_primary DESC, a.id LIMIT 1) AS tg_id,
+                   (SELECT a.external_id FROM person_accounts a WHERE a.person_id = p.id AND a.platform = 'vk'
+                      ORDER BY a.is_primary DESC, a.id LIMIT 1) AS vk_id,
+                   (p.birthday IS NOT NULL) AS has_birthday,
                    (SELECT count(*) FROM memories m WHERE m.person_id = p.id) AS facts,
                    (SELECT count(*) FROM memories m WHERE m.person_id = p.id
                       AND (m.review_status <> 'pending' OR m.source <> 'auto')) AS nonpending_facts
             FROM people p WHERE p.user_id = :u AND p.status = 'pending' AND NOT p.is_self
-              AND (p.tg_id IS NOT NULL OR p.vk_id IS NOT NULL) ORDER BY p.id"""), {"u": user_id}).all()
+              AND EXISTS (SELECT 1 FROM person_accounts a WHERE a.person_id = p.id) ORDER BY p.id"""), {"u": user_id}).all()
     return [dict(r._mapping) for r in rows]
 
 

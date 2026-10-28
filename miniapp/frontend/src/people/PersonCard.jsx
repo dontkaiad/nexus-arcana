@@ -3,7 +3,8 @@ import { ArrowLeft, Pencil } from 'lucide-react'
 import FactGroups from './FactGroups'
 import MergePicker from './MergePicker'
 import PersonEdit from './PersonEdit'
-import { Btn, Chip, Note, SourceButtons, inputStyle, Label } from './parts'
+import Accounts from './Accounts'
+import { Btn, Chip, Note, inputStyle, Label } from './parts'
 import {
   addFact, approveAll, approveFact, errText, getPerson, rejectAll, rejectFact,
 } from './peopleApi'
@@ -58,7 +59,7 @@ export default function PersonCard({ s, Sheet, id, onBack, onChanged, onStartRev
           🎂 {fmtBirthday(p.birthday)}{age}
         </span>
       </div>
-      <div style={{ marginBottom: 8 }}><SourceButtons s={s} p={p} /></div>
+      <Accounts s={s} person={p} onChanged={() => { load(); onChanged?.() }} />
       {p.aliases?.length > 0 && (
         <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginBottom: 6 }}>
           {p.aliases.map((a) => <Chip key={a} s={s}>{a}</Chip>)}

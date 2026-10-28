@@ -14,6 +14,7 @@ from sqlalchemy import delete, insert, inspect, text
 from sqlalchemy.exc import IntegrityError
 
 from core.db import get_engine
+from tests._people_helpers import insert_person
 from core.people import age, birthday_iso
 from core.repos.memories_table import memories
 from core.repos.people_tables import people
@@ -48,8 +49,7 @@ def client(owner):
 
 
 def mk_person(name="Имя1 Фамилия1", user=MARK, **kw) -> int:
-    with get_engine().begin() as c:
-        return c.execute(insert(people).values(user_id=user, name=name, **kw).returning(people.c.id)).scalar_one()
+    return insert_person(user, name, **kw)
 
 
 def mk_fact(pid, type_="likes", status="pending", text_="факт", user=MARK, n=None, **kw) -> int:
@@ -200,14 +200,85 @@ def test_patch_birthday_flow(client):
     assert r["birthday"] is None and r["birthday_year_known"] is True
 
 
-def test_patch_validation_and_conflicts(client):
-    a = mk_person(tg_id=555001); b = mk_person()
+def test_patch_validation_and_ignores_removed_account_fields(client):
+    b = mk_person()
     assert client.patch("/api/people/%d" % b, json={"status": "weird"}).status_code == 422
     assert client.patch("/api/people/%d" % b, json={"name": "  "}).status_code == 422
-    assert client.patch("/api/people/%d" % b, json={"tg_id": 555001}).status_code == 409
-    assert client.patch("/api/people/%d" % b, json={"tg_id": 555002}).status_code == 200
+    r = client.patch("/api/people/%d" % b, json={"tg_id": 555002, "name": "Новое"})       # поля аккаунтов убраны из PATCH
+    assert r.status_code == 200 and r.json()["name"] == "Новое" and r.json()["accounts"] == []
     foreign = mk_person(user=OTHER)
     assert client.patch("/api/people/%d" % foreign, json={"name": "x"}).status_code == 404
+
+
+# ── аккаунты человека (PR-7) ────────────────────────────────────────────────
+
+def test_card_exposes_accounts_with_urls_and_derived_primary_fields(client):
+    pid = mk_person(tg_id=11, tg_username="nick", vk_id=22)
+    add = client.post("/api/people/%d/accounts" % pid, json={"platform": "tg", "external_id": 33})
+    assert add.status_code == 200
+    got = client.get("/api/people/%d" % pid).json()
+    accs = {(a["platform"], a["external_id"]): a for a in got["accounts"]}
+    assert accs[("tg", 11)]["url"] == "https://t.me/nick" and accs[("tg", 11)]["is_primary"] is True
+    assert accs[("vk", 22)]["url"] == "https://vk.com/id22"
+    assert accs[("tg", 33)]["url"] is None and accs[("tg", 33)]["is_primary"] is False   # только id — ссылки нет
+    assert (got["tg_id"], got["tg_username"], got["vk_id"]) == (11, "nick", 22)
+    row = [p for p in client.get("/api/people").json()["people"] if p["id"] == pid][0]
+    assert len(row["accounts"]) == 3 and row["tg_id"] == 11
+
+
+def test_add_account_validation_conflicts_and_ownership(client):
+    a = mk_person(tg_id=555001); b = mk_person()
+    assert client.post("/api/people/%d/accounts" % b, json={"platform": "tg", "external_id": 555001}).status_code == 409
+    assert client.post("/api/people/%d/accounts" % b, json={"platform": "vk", "external_id": 555001}).status_code == 200   # другая платформа
+    assert client.post("/api/people/%d/accounts" % b, json={"platform": "ok", "external_id": 1}).status_code == 422
+    assert client.post("/api/people/%d/accounts" % b, json={"platform": "tg", "external_id": 0}).status_code == 422
+    assert client.post("/api/people/%d/accounts" % b, json={"platform": "vk", "external_id": 5, "username": "x"}).status_code == 422
+    assert client.post("/api/people/999999999/accounts", json={"platform": "tg", "external_id": 7}).status_code == 404
+    foreign = mk_person(user=OTHER)
+    assert client.post("/api/people/%d/accounts" % foreign, json={"platform": "tg", "external_id": 8}).status_code == 404
+    mk_person(user=OTHER, tg_id=999)                                                        # у другого владельца тот же id — не конфликт
+    assert client.post("/api/people/%d/accounts" % a, json={"platform": "tg", "external_id": 999}).status_code == 200
+    r = client.post("/api/people/%d/accounts" % b, json={"platform": "tg", "external_id": 31, "username": "@With_At"})
+    assert [x["username"] for x in r.json()["accounts"] if x["external_id"] == 31] == ["With_At"]   # @ срезается
+
+
+def test_first_account_of_platform_is_primary_and_primary_can_be_switched(client):
+    pid = mk_person()
+    r1 = client.post("/api/people/%d/accounts" % pid, json={"platform": "tg", "external_id": 1}).json()
+    r2 = client.post("/api/people/%d/accounts" % pid, json={"platform": "tg", "external_id": 2}).json()
+    acc = {a["external_id"]: a for a in r2["accounts"]}
+    assert acc[1]["is_primary"] and not acc[2]["is_primary"] and r1["tg_id"] == 1
+    r3 = client.post("/api/people/%d/accounts/%d/primary" % (pid, acc[2]["id"])).json()
+    flags = {a["external_id"]: a["is_primary"] for a in r3["accounts"]}
+    assert flags == {1: False, 2: True} and r3["tg_id"] == 2                              # ровно один основной на платформу
+    r4 = client.post("/api/people/%d/accounts" % pid, json={"platform": "tg", "external_id": 3, "is_primary": True}).json()
+    assert {a["external_id"]: a["is_primary"] for a in r4["accounts"]} == {1: False, 2: False, 3: True}
+    assert client.post("/api/people/%d/accounts/999999999/primary" % pid).status_code == 404
+
+
+def test_removing_primary_promotes_next_and_unknown_or_foreign_is_404(client):
+    pid = mk_person(tg_id=1); other = mk_person(tg_id=77)
+    client.post("/api/people/%d/accounts" % pid, json={"platform": "tg", "external_id": 2})
+    first = [a for a in client.get("/api/people/%d" % pid).json()["accounts"] if a["external_id"] == 1][0]
+    r = client.delete("/api/people/%d/accounts/%d" % (pid, first["id"])).json()
+    assert [(a["external_id"], a["is_primary"]) for a in r["accounts"]] == [(2, True)]        # второй стал основным
+    foreign_acc = client.get("/api/people/%d" % other).json()["accounts"][0]["id"]
+    assert client.delete("/api/people/%d/accounts/%d" % (pid, foreign_acc)).status_code == 404   # аккаунт чужого человека
+    assert client.delete("/api/people/%d/accounts/999999999" % pid).status_code == 404
+    last = r["accounts"][0]["id"]
+    assert client.delete("/api/people/%d/accounts/%d" % (pid, last)).json()["accounts"] == []   # можно удалить и последний
+
+
+def test_deleting_person_cascades_accounts(client):
+    pid = mk_person(tg_id=1, vk_id=2)
+    with get_engine().begin() as c:
+        c.execute(delete(people).where(people.c.id == pid))
+        assert c.execute(text("SELECT count(*) FROM person_accounts WHERE person_id=:p"), {"p": pid}).scalar_one() == 0
+
+
+def test_search_finds_person_by_account_username(client):
+    pid = mk_person("Имя Без Совпадений", tg_id=5, tg_username="unique_handle_xyz")
+    assert [p["id"] for p in client.get("/api/people?q=handle_xyz").json()["people"]] == [pid]
 
 
 # ── ревью фактов ─────────────────────────────────────────────────────────────

@@ -70,6 +70,18 @@ class SelfBlock:
     def primary_username(self) -> Optional[str]:
         return sorted(self.usernames)[0] if self.usernames else None
 
+    def account_list(self) -> List[dict]:
+        """Все аккаунты владельца для person_accounts: каждый tg_id и vk_id; основной — наименьший id,
+        username (если задан) — у основного TG."""
+        out: List[dict] = []
+        p_tg, p_vk, uname = self.primary_tg_id(), self.primary_vk_id(), self.primary_username()
+        for i in sorted(self.tg_ids):
+            out.append({"platform": "tg", "external_id": i, "username": uname if i == p_tg else None,
+                        "is_primary": i == p_tg})
+        for i in sorted(self.vk_ids):
+            out.append({"platform": "vk", "external_id": i, "username": None, "is_primary": i == p_vk})
+        return out
+
     def with_tg_owner(self, owner: Optional[dict]) -> "SelfBlock":
         """Дополняет блок-лист данными владельца из personal_information TG-экспорта."""
         if owner:

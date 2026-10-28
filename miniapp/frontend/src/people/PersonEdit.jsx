@@ -22,14 +22,12 @@ export default function PersonEdit({ s, Sheet, person, open, onClose, onSaved })
       aliases: (person.aliases || []).join(', '),
       birthday: toDateInput(person.birthday),
       unknownYear: person.birthday ? person.birthday_year_known === false : false,
-      tg_id: person.tg_id ?? '', tg_username: person.tg_username || '', vk_id: person.vk_id ?? '',
       notes: person.notes || '',
     })
   }, [open, person?.id])
 
   if (!f) return null
   const set = (k) => (e) => setF({ ...f, [k]: e.target.type === 'checkbox' ? e.target.checked : e.target.value })
-  const num = (v) => (String(v).trim() === '' ? null : Number(v))
 
   const save = async () => {
     const body = {}
@@ -43,9 +41,6 @@ export default function PersonEdit({ s, Sheet, person, open, onClose, onSaved })
       body.birthday = f.birthday || null
       if (f.birthday) body.birthday_year_known = !f.unknownYear
     }
-    if (num(f.tg_id) !== (person.tg_id ?? null)) body.tg_id = num(f.tg_id)
-    if (f.tg_username.trim() !== (person.tg_username || '')) body.tg_username = f.tg_username.trim() || null
-    if (num(f.vk_id) !== (person.vk_id ?? null)) body.vk_id = num(f.vk_id)
     if (f.notes !== (person.notes || '')) body.notes = f.notes || null
     if (Object.keys(body).length === 0) { onClose(); return }
     setBusy(true); setErr('')
@@ -64,13 +59,6 @@ export default function PersonEdit({ s, Sheet, person, open, onClose, onSaved })
         <input type="checkbox" checked={f.unknownYear} onChange={set('unknownYear')} style={{ width: 20, height: 20 }} />
         Год неизвестен
       </label>
-      <Label s={s}>Telegram id · username</Label>
-      <div style={{ display: 'flex', gap: 8 }}>
-        <input value={f.tg_id} onChange={set('tg_id')} inputMode="numeric" placeholder="tg_id" style={{ ...inputStyle(s), flex: 1, minWidth: 0 }} />
-        <input value={f.tg_username} onChange={set('tg_username')} placeholder="username" style={{ ...inputStyle(s), flex: 1, minWidth: 0 }} />
-      </div>
-      <Label s={s}>VK id</Label>
-      <input value={f.vk_id} onChange={set('vk_id')} inputMode="numeric" placeholder="vk_id" style={inputStyle(s)} />
       <Label s={s}>Заметки</Label>
       <textarea value={f.notes} onChange={set('notes')} rows={3} style={{ ...inputStyle(s), resize: 'vertical' }} />
       {err && <Note s={s} color={s.red}>{err}</Note>}

@@ -12,6 +12,7 @@ import pytest
 from sqlalchemy import delete, select, text
 
 from core.db import get_engine
+from tests._people_helpers import insert_person
 from core.repos.memories_table import memories
 from core.repos.people_tables import people
 from tools.people_import import import_memory as im
@@ -119,6 +120,13 @@ def _run(dry=False):
     return asyncio.run(im.run(dry, True, 20, 0))
 
 
+def _accounts(pid):
+    with get_engine().connect() as c:
+        return [tuple(r) for r in c.execute(text(
+            "SELECT platform, external_id, username, is_primary FROM person_accounts WHERE person_id=:p "
+            "ORDER BY platform, id"), {"p": pid})]
+
+
 def _state():
     with get_engine().connect() as c:
         ppl = c.execute(select(people).where(people.c.user_id == MARK).order_by(people.c.id)).all()
@@ -135,7 +143,8 @@ def test_import_creates_pending_people_and_pending_facts(staging):
     ]
     assert _run() == 0
     ppl, mem = _state()
-    assert len(ppl) == 1 and ppl[0].status == "pending" and ppl[0].tg_id == 1
+    assert len(ppl) == 1 and ppl[0].status == "pending"
+    assert _accounts(ppl[0].id) == [("tg", 1, "nick1", True)]               # аккаунт и username — в person_accounts
     assert ppl[0].birthday == date(1990, 3, 5)
     assert "@nick1" in ppl[0].aliases and "Имя1" in ppl[0].aliases
     assert len(mem) == 2
@@ -341,10 +350,7 @@ def test_self_facts_are_deduplicated_with_mention_counts_on_import(staging, monk
 def test_related_to_uses_existing_person_name_when_candidate_name_is_empty(staging):
     """VK-диалог без названия даёт кандидата с пустым именем; у существующей карточки имя есть —
     факты не должны получать пустой related_to."""
-    pid = None
-    with get_engine().begin() as c:
-        pid = c.execute(people.insert().values(user_id=MARK, name="Имя Из Api", aliases=["Алиас"], vk_id=77)
-                        .returning(people.c.id)).scalar_one()
+    pid = insert_person(MARK, "Имя Из Api", aliases=["Алиас"], vk_id=77)
     staging["rows"] = [row("", "любит чай", source="vk", vk_id=77, source_chat_id=77)]
     _run()
     mem = _state()[1]

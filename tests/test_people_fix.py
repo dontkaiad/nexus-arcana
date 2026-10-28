@@ -13,6 +13,7 @@ import pytest
 from sqlalchemy import delete, insert, select, text
 
 from core.db import get_engine
+from tests._people_helpers import insert_person
 from core.repos import pg_people_repo as prepo
 from core.repos.memories_table import memories
 from core.repos.people_tables import people
@@ -146,8 +147,7 @@ def db():
 
 
 def mk_person(name, **kw):
-    with get_engine().begin() as c:
-        return c.execute(insert(people).values(user_id=MARK, name=name, **kw).returning(people.c.id)).scalar_one()
+    return insert_person(MARK, name, **kw)
 
 
 def mk_fact(pid, h8="aaaaaaaa", type_="likes", status="pending", source="auto", text_="факт", **kw):
