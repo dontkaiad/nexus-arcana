@@ -17,6 +17,8 @@ export const reviewPerson = (id, { approve = [], reject = [], reset = [], person
 
 export const approveFact = (id, fid) => apiPost(`/api/people/${id}/facts/${fid}/approve`, {})
 export const rejectFact = (id, fid) => apiPost(`/api/people/${id}/facts/${fid}/reject`, {})
+export const restoreFact = (id, fid) => apiPost(`/api/people/${id}/facts/${fid}/restore`, {})
+export const eraseFact = (id, fid) => apiPost(`/api/people/${id}/facts/${fid}/erase`, {})
 export const approveAll = (id) => apiPost(`/api/people/${id}/approve-all`, {})
 export const rejectAll = (id) => apiPost(`/api/people/${id}/reject-all`, {})
 export const addFact = (id, text, type) => apiPost(`/api/people/${id}/facts`, { text, type })

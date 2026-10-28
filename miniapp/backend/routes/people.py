@@ -15,7 +15,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.exc import IntegrityError
 
 from core.people import (
-    UNKNOWN_YEAR, age, birthday_iso, fact_hash, fact_text, find_duplicates, related_to_str,
+    UNKNOWN_YEAR, age, birthday_iso, fact_hash, fact_text, find_duplicates, related_to_str, strip_name_prefix,
 )
 from core.repos.pg_memory_repo import PgMemoryRepo, bot_to_scope
 from core.repos import pg_people_repo as repo
@@ -77,13 +77,17 @@ def _iso(d) -> Any:
     return d.isoformat() if d else None
 
 
-def _group_facts(facts: List[Dict[str, Any]], is_self: bool = False) -> List[Dict[str, Any]]:
+def _group_facts(facts: List[Dict[str, Any]], is_self: bool = False, name: str = "",
+                 aliases: Optional[List[str]] = None) -> List[Dict[str, Any]]:
     """Группы по type; important первым, затем likes/dislikes/other, прочие по алфавиту.
     Для карточки «Я» внутри группы — по последнему упоминанию (свежие сверху)."""
     by: Dict[str, List[Dict[str, Any]]] = {}
     for f in facts:
         by.setdefault(f["type"], []).append({
-            "id": f["id"], "text": f["text"], "quote": f.get("quote"), "review_status": f["review_status"],
+            "id": f["id"],
+            # в карточке самого человека префикс «Имя: » лишний (он нужен только контексту бота)
+            "text": f["text"] if is_self else strip_name_prefix(f["text"], name, aliases or []),
+            "quote": f.get("quote"), "review_status": f["review_status"],
             "is_current": f["is_current"], "source": f["source"],
             "created_at": f["created_at"].isoformat() if f.get("created_at") else None,
             # происхождение («VK · 12.03.2021») и упоминания («×7 · последнее 2023»)
@@ -120,7 +124,7 @@ async def person_card(person_id: int, tg_id: int = Depends(current_user_id)) -> 
     if not p:
         raise HTTPException(status_code=404, detail="person not found")
     facts = await asyncio.to_thread(repo.list_facts, person_id)
-    return {**_person_out(p), "facts": _group_facts(facts, bool(p.get("is_self")))}
+    return {**_person_out(p), "facts": _group_facts(facts, bool(p.get("is_self")), p["name"], p.get("aliases"))}
 
 
 class PersonPatch(BaseModel):
@@ -192,6 +196,25 @@ async def approve_fact(person_id: int, fact_id: int, tg_id: int = Depends(curren
 @router.post("/people/{person_id}/facts/{fact_id}/reject")
 async def reject_fact(person_id: int, fact_id: int, tg_id: int = Depends(current_user_id)):
     return await _fact_review(person_id, fact_id, "rejected", tg_id)
+
+
+@router.post("/people/{person_id}/facts/{fact_id}/restore")
+async def restore_fact(person_id: int, fact_id: int, tg_id: int = Depends(current_user_id)):
+    """Отклонённый факт возвращается на проверку (pending)."""
+    return await _fact_review(person_id, fact_id, "pending", tg_id)
+
+
+@router.post("/people/{person_id}/facts/{fact_id}/erase")
+async def erase_fact(person_id: int, fact_id: int, tg_id: int = Depends(current_user_id)) -> Dict[str, Any]:
+    """Стереть ОТКЛОНЁННЫЙ факт безвозвратно (остаётся tombstone: ключ + rejected)."""
+    user_id = await _owner(tg_id)
+    res = await asyncio.to_thread(repo.erase_fact, user_id, person_id, fact_id)
+    if res == "not_found":
+        raise HTTPException(status_code=404, detail="fact not found")
+    if res == "not_rejected":
+        raise HTTPException(status_code=409, detail="only rejected facts can be erased")
+    p = await asyncio.to_thread(repo.get_person, user_id, person_id)
+    return {"ok": True, "fact_id": fact_id, "counts": p["counts"]}
 
 
 async def _review_all(person_id: int, to_status: str, tg_id: int) -> Dict[str, Any]:

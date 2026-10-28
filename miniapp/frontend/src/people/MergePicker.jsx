@@ -65,7 +65,7 @@ export default function MergePicker({ s, Sheet, person, open, onClose, onMerged 
         <div>
           <div style={{ fontSize: fs(13), color: s.text, lineHeight: 1.5 }}>
             Влить <b>{person.name}</b> в <b>{pick.name}</b>?<br />
-            <span style={{ color: s.tS }}>«{person.name}» исчезнет: факты, алиасы и пустые поля перейдут к «{pick.name}». Отменить нельзя.</span>
+            <span style={{ color: s.tS }}>«{person.name}» исчезнет: факты, другие имена и пустые поля перейдут к «{pick.name}». Отменить нельзя.</span>
           </div>
           {err && <Note s={s} color={s.red}>{err}</Note>}
           <div style={{ display: 'flex', gap: 8, marginTop: 14 }}>
@@ -83,7 +83,7 @@ export default function MergePicker({ s, Sheet, person, open, onClose, onMerged 
           )}
           <div style={{ position: 'relative', margin: '10px 0' }}>
             <Search size={fs(15)} color={s.tM} style={{ position: 'absolute', left: 12, top: 15 }} />
-            <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Найти человека по имени или алиасу"
+            <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Найти человека по имени или другому имени"
               style={{ ...inputStyle(s), paddingLeft: 34 }} />
           </div>
           {found && found.length === 0 && <Note s={s}>Никого не нашла</Note>}

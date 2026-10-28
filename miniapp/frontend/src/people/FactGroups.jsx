@@ -3,7 +3,7 @@ import { fs, mentionLabel, provenanceLine, typeMeta } from './ui'
 
 // Группы фактов (important первым — порядок задаёт API). Тап по тексту раскрывает
 // цитату-основание; управление слева/справа (галочка, кнопки) приходит рендер-пропсами.
-export default function FactGroups({ s, groups, expanded, onToggle, left, right, showMentions }) {
+export default function FactGroups({ s, groups, expanded, onToggle, left, right, showMentions, textStyle, caption }) {
   return (
     <div>
       {groups.map((g) => {
@@ -20,13 +20,14 @@ export default function FactGroups({ s, groups, expanded, onToggle, left, right,
                   <div style={{ display: 'flex', alignItems: 'center', minHeight: 44 }}>
                     {left && left(f, g.type)}
                     <div onClick={() => onToggle(f.id)} style={{ flex: 1, minWidth: 0, padding: '8px 4px', cursor: 'pointer' }}>
-                      <div style={{ fontSize: fs(14), color: s.text, lineHeight: 1.35, wordBreak: 'break-word' }}>{f.text}</div>
+                      <div style={{ fontSize: fs(14), color: s.text, lineHeight: 1.35, wordBreak: 'break-word', ...(textStyle ? textStyle(f) : {}) }}>{f.text}</div>
                       {showMentions && (
                         <div style={{ fontSize: fs(10), color: s.text, opacity: 0.7, marginTop: 2, fontWeight: 600 }}>{mentionLabel(f)}</div>
                       )}
                     </div>
                     {right && right(f, g.type)}
                   </div>
+                  {caption && caption(f)}
                   {open && (
                     <div style={{
                       margin: '0 4px 8px 44px', padding: '8px 10px', borderRadius: 10, fontSize: fs(12), lineHeight: 1.45,

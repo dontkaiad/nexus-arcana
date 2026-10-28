@@ -7,7 +7,7 @@ const toDateInput = (iso) => {
   return m ? `${m[1] === '-' ? '2000' : m[1]}-${m[2]}-${m[3]}` : ''
 }
 
-// Правка карточки: имя, алиасы, ДР (+ «год неизвестен»), tg/vk, заметки.
+// Правка карточки: имя, другие имена, ДР (+ «год неизвестен»), tg/vk, заметки.
 // Шлём только изменённые поля (PATCH: не присланное не трогается, null — обнуляет).
 export default function PersonEdit({ s, Sheet, person, open, onClose, onSaved }) {
   const [f, setF] = useState(null)
@@ -51,8 +51,11 @@ export default function PersonEdit({ s, Sheet, person, open, onClose, onSaved })
     <Sheet s={s} open={open} onClose={onClose} title="Правка">
       <Label s={s}>Имя</Label>
       <input value={f.name} onChange={set('name')} style={inputStyle(s)} />
-      <Label s={s}>Алиасы (через запятую)</Label>
+      <Label s={s}>Другие имена (через запятую)</Label>
       <input value={f.aliases} onChange={set('aliases')} placeholder="Машка, Мария, @nick" style={inputStyle(s)} />
+      <div style={{ fontSize: 12, color: s.text, opacity: 0.7, margin: '4px 2px 0', lineHeight: 1.35 }}>
+        Как ты зовёшь человека — чтобы бот понимал, о ком речь.
+      </div>
       <Label s={s}>День рождения</Label>
       <input type="date" value={f.birthday} onChange={set('birthday')} style={inputStyle(s)} />
       <label style={{ display: 'flex', alignItems: 'center', gap: 8, minHeight: 44, color: s.text, fontSize: 14 }}>

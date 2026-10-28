@@ -6,7 +6,7 @@ import PersonEdit from './PersonEdit'
 import Accounts from './Accounts'
 import { Btn, Chip, Note, inputStyle, Label } from './parts'
 import {
-  addFact, approveAll, approveFact, errText, getPerson, rejectAll, rejectFact,
+  addFact, approveAll, approveFact, eraseFact, errText, getPerson, rejectAll, rejectFact, restoreFact,
 } from './peopleApi'
 import { STATUS_LABEL, TYPE_CHOICES, fmtBirthday, fs, haptic, plural, statusColor, typeMeta } from './ui'
 
@@ -22,6 +22,7 @@ export default function PersonCard({ s, Sheet, id, onBack, onChanged, onStartRev
   const [type, setType] = useState('other')
   const [busy, setBusy] = useState(false)
   const [confirmRej, setConfirmRej] = useState(false)
+  const [eraseId, setEraseId] = useState(null)        // факт, для которого ждём второй тап «Стереть»
 
   const load = useCallback(async () => {
     try { setP(await getPerson(id)); setErr('') } catch (e) { setErr(errText(e)) }
@@ -71,18 +72,33 @@ export default function PersonCard({ s, Sheet, id, onBack, onChanged, onStartRev
 
       {p.facts.length === 0 && <Note s={s}>Фактов пока нет</Note>}
       <FactGroups s={s} groups={p.facts} expanded={expanded} onToggle={toggle} showMentions={p.is_self}
+        textStyle={(f) => (f.review_status === 'rejected' ? { textDecoration: 'line-through', opacity: 0.5 } : {})}
+        left={(f) => (
+          <div title={f.review_status} style={{ width: 10, height: 10, borderRadius: 5, margin: '0 10px 0 6px', flexShrink: 0, background: statusColor(s, f.review_status) }} />
+        )}
         right={(f) => (
           <div style={{ display: 'flex', alignItems: 'center', flexShrink: 0 }}>
-            {f.review_status !== 'confirmed' && (
-              <div onClick={() => act(() => approveFact(p.id, f.id))} style={iconBtn(s.good)}>✓</div>
-            )}
-            {f.review_status !== 'rejected' && (
-              <div onClick={() => act(() => rejectFact(p.id, f.id))} style={iconBtn(s.red)}>✕</div>
+            {f.review_status === 'pending' && (<>
+              <div role="button" aria-label="принять" onClick={() => act(() => approveFact(p.id, f.id))} style={iconBtn(s.tS)}>✓</div>
+              <div role="button" aria-label="отклонить" onClick={() => act(() => rejectFact(p.id, f.id))} style={iconBtn(s.red)}>✕</div>
+            </>)}
+            {f.review_status === 'confirmed' && (
+              <div role="button" onClick={() => act(() => rejectFact(p.id, f.id))} style={textBtn(s.red)}>✕ убрать</div>
             )}
           </div>
         )}
-        left={(f) => (
-          <div title={f.review_status} style={{ width: 10, height: 10, borderRadius: 5, margin: '0 10px 0 6px', flexShrink: 0, background: statusColor(s, f.review_status) }} />
+        caption={(f) => (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', margin: '-4px 0 6px 26px' }}>
+            <span style={{ fontSize: fs(10), fontWeight: 700, letterSpacing: '0.3px', color: s.text, opacity: 0.75 }}>
+              {f.review_status === 'pending' ? 'на проверке' : f.review_status === 'confirmed' ? 'принят' : 'отклонён'}
+            </span>
+            {f.review_status === 'rejected' && (<>
+              <div role="button" onClick={() => act(() => restoreFact(p.id, f.id))} style={pillBtn(s, s.text)}>вернуть</div>
+              {eraseId === f.id
+                ? <div role="button" onClick={() => { setEraseId(null); act(() => eraseFact(p.id, f.id)) }} style={pillBtn(s, s.red, true)}>Стереть навсегда?</div>
+                : <div role="button" onClick={() => setEraseId(f.id)} style={pillBtn(s, s.red)}>Стереть</div>}
+            </>)}
+          </div>
         )}
       />
 
@@ -132,6 +148,16 @@ export default function PersonCard({ s, Sheet, id, onBack, onChanged, onStartRev
     </div>
   )
 }
+
+const textBtn = (c) => ({
+  minHeight: 44, padding: '0 10px', display: 'flex', alignItems: 'center', fontSize: 13, fontWeight: 700, color: c,
+  cursor: 'pointer', whiteSpace: 'nowrap',
+})
+
+const pillBtn = (s, c, strong) => ({
+  minHeight: 36, padding: '6px 12px', borderRadius: 999, display: 'inline-flex', alignItems: 'center', fontSize: 12, fontWeight: 600,
+  color: c, border: `1px solid ${c}66`, cursor: 'pointer', background: strong ? `${c}22` : 'transparent',
+})
 
 const iconBtn = (c) => ({
   width: 40, height: 44, display: 'flex', alignItems: 'center', justifyContent: 'center',

@@ -145,3 +145,17 @@ def fact_text(name: str, fact: str) -> str:
 
 def related_to_str(name: str, aliases: Iterable[str]) -> str:
     return " | ".join([name] + [a for a in aliases if a])
+
+
+def strip_name_prefix(fact: str, name: str, aliases: Iterable[str] = ()) -> str:
+    """Убирает префикс «Имя: » из текста факта ВНУТРИ карточки этого человека. Префикс ставит
+    `fact_text()` при импорте/ручном вводе ради контекста бота («любит кофе» — чей?), а в самой карточке
+    он лишний. Срезаем только если слово перед двоеточием — слово из имени или другого имени человека
+    (так «Важно: …» не пострадает)."""
+    m = _re.match(r"^\s*([^\s:]{1,40}):\s+(.+)$", fact or "", _re.S)
+    if not m:
+        return fact
+    known = set()
+    for src in [name] + list(aliases or []):
+        known.update(_tokens(src))
+    return m.group(2) if _norm(m.group(1)) in known else fact

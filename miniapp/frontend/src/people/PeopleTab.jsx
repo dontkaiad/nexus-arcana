@@ -60,7 +60,7 @@ export default function PeopleTab({ s, Sheet, onClose, onChanged }) {
               {searchOpen ? <X size={fs(19)} color={s.tS} /> : <Search size={fs(19)} color={s.tS} />}
             </div>} />
           {searchOpen && (
-            <input autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder="Имя или алиас"
+            <input autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder="Имя или другое имя"
               style={{ ...inputStyle(s), marginBottom: 8 }} />
           )}
 

@@ -12,6 +12,7 @@ import pytest
 from sqlalchemy import delete, select, text
 
 from core.db import get_engine
+from core.repos import pg_people_repo as prepo
 from tests._people_helpers import insert_person
 from core.repos.memories_table import memories
 from core.repos.people_tables import people
@@ -357,3 +358,20 @@ def test_related_to_uses_existing_person_name_when_candidate_name_is_empty(stagi
     assert len(mem) == 1 and mem[0].person_id == pid
     assert mem[0].related_to == "Имя Из Api | Алиас"
     assert not any(m.related_to.strip() == "" for m in mem)
+
+
+def test_erased_fact_is_not_resurrected_by_reimport(staging):
+    """«Стереть» оставляет tombstone (ключ + rejected): повторный импорт тот же ключ пропускает."""
+    staging["rows"] = [row("Имя1 Фамилия1", "любит чай", tg_id=1, source_chat_id=1, quote="люблю чай"),
+                       row("Имя1 Фамилия1", "не ест рыбу", "dislikes", tg_id=1, quote="рыбу не ем")]
+    _run()
+    ppl, mem = _state()
+    victim = next(m for m in mem if "чай" in m.fact_text)
+    prepo.set_fact_status(MARK, ppl[0].id, victim.id, "rejected")
+    assert prepo.erase_fact(MARK, ppl[0].id, victim.id) == "ok"
+    before = [(m.id, m.key_name, m.fact_text, m.review_status) for m in _state()[1]]
+    _run(); _run()
+    after = [(m.id, m.key_name, m.fact_text, m.review_status) for m in _state()[1]]
+    assert after == before                                              # ни новой строки, ни возвращённого текста
+    assert [f["text"] for f in prepo.list_facts(ppl[0].id)] == ["Имя1: не ест рыбу"]   # в выдаче стёртого нет
+    assert prepo.counts_for([ppl[0].id])[ppl[0].id]["counts"] == {"pending": 1, "confirmed": 0, "rejected": 0}

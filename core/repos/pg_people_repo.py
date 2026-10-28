@@ -271,7 +271,7 @@ def counts_for(person_ids: List[int]) -> Dict[int, Dict]:
     with get_engine().connect() as c:
         rows = c.execute(text(
             "SELECT person_id, review_status, %s AS t, count(*) FROM memories "
-            "WHERE person_id = ANY(:ids) AND NOT is_archived GROUP BY 1, 2, 3" % _TYPE_SQL
+            "WHERE person_id = ANY(:ids) AND NOT is_archived AND fact_text <> '' GROUP BY 1, 2, 3" % _TYPE_SQL
         ), {"ids": list(person_ids)}).all()
     for pid, st, t, n in rows:
         out[pid]["counts"][st] = out[pid]["counts"].get(st, 0) + n
@@ -324,7 +324,7 @@ def list_facts(person_id: int) -> List[Dict]:
             "SELECT id, fact_text, key_name, review_status, is_current, source, created_at, source_quote, "
             "source_chat_id, source_message_date, quote_author, source_platform, "
             "mention_count, first_mention_date, last_mention_date "
-            "FROM memories WHERE person_id = :p AND NOT is_archived ORDER BY created_at, id"
+            "FROM memories WHERE person_id = :p AND NOT is_archived AND fact_text <> '' ORDER BY created_at, id"
         ), {"p": person_id}).all()
     return [{"id": r.id, "text": r.fact_text, "type": fact_type(r.key_name),
              "review_status": r.review_status, "is_current": r.is_current, "source": r.source,
@@ -365,9 +365,30 @@ def set_fact_status(user_id: str, person_id: int, fact_id: int, status: str) -> 
     with get_engine().begin() as c:
         res = c.execute(text(
             "UPDATE memories SET review_status = :st, updated_at = now() "
-            "WHERE id = :f AND person_id = :p AND user_id = :u AND NOT is_archived"
+            "WHERE id = :f AND person_id = :p AND user_id = :u AND NOT is_archived AND fact_text <> ''"
         ), {"st": status, "f": fact_id, "p": person_id, "u": user_id})
     return res.rowcount > 0
+
+
+def erase_fact(user_id: str, person_id: int, fact_id: int) -> str:
+    """«Стереть» отклонённый факт: удаляет текст, цитату, эмбеддинг, related_to и происхождение, оставляя
+    ТОЛЬКО ключ и review_status='rejected' (tombstone): импорт пропускает существующие ключи, поэтому
+    факт не воскреснет при повторном импорте. Не архивируем (архивные ключи импорт не видит и создал бы заново).
+    Возвращает 'ok' | 'not_found' | 'not_rejected'."""
+    with get_engine().begin() as c:
+        row = c.execute(text(
+            "SELECT review_status, fact_text FROM memories WHERE id = :f AND person_id = :p AND user_id = :u "
+            "AND NOT is_archived FOR UPDATE"), {"f": fact_id, "p": person_id, "u": user_id}).first()
+        if row is None or row.fact_text == "":
+            return "not_found"
+        if row.review_status != "rejected":
+            return "not_rejected"
+        c.execute(text(
+            "UPDATE memories SET fact_text = '', source_quote = NULL, related_to = '', embedding = NULL, "
+            "source_chat_id = NULL, source_message_date = NULL, quote_author = NULL, source_platform = NULL, "
+            "mention_count = 1, first_mention_date = NULL, last_mention_date = NULL, updated_at = now() "
+            "WHERE id = :f"), {"f": fact_id})
+    return "ok"
 
 
 def review_all(user_id: str, person_id: int, to_status: str) -> Optional[int]:

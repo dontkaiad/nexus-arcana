@@ -522,3 +522,65 @@ def test_migration_adds_provenance_and_self_columns_reversibly():
                         conn.execute(text("INSERT INTO memories (fact_text, user_id, quote_author) VALUES ('x','t','bogus')"))
         finally:
             trans.rollback()
+
+
+# ── правки UI Людей: возврат, «Стереть», префикс «Имя:» ─────────────────────
+
+def _raw(fid):
+    with get_engine().connect() as c:
+        return c.execute(text(
+            "SELECT fact_text, key_name, review_status, source_quote, related_to, embedding IS NULL AS no_emb, "
+            "source_chat_id, quote_author, source_platform, mention_count, is_archived, person_id "
+            "FROM memories WHERE id = :i"), {"i": fid}).one()
+
+
+def test_restore_returns_rejected_fact_to_pending(client):
+    pid = mk_person(); f = mk_fact(pid, status="rejected")
+    r = client.post("/api/people/%d/facts/%d/restore" % (pid, f))
+    assert r.status_code == 200 and r.json()["review_status"] == "pending" and r.json()["counts"]["pending"] == 1
+    assert client.post("/api/people/%d/facts/999999999/restore" % pid).status_code == 404
+    foreign = mk_person(user=OTHER); ff = mk_fact(foreign, status="rejected", user=OTHER)
+    assert client.post("/api/people/%d/facts/%d/restore" % (foreign, ff)).status_code == 404
+
+
+def test_erase_only_rejected_clears_everything_but_key_and_status(client):
+    pid = mk_person()
+    f = mk_fact(pid, n="11111111", status="rejected", text_="секретный текст", source_quote="цитата",
+                source_chat_id=5, quote_author="kai", source_platform="vk", mention_count=4)
+    with get_engine().begin() as c:
+        c.execute(text("UPDATE memories SET embedding = CAST(:e AS vector) WHERE id = :i"),
+                  {"e": "[" + ",".join(["1"] + ["0"] * 1023) + "]", "i": f})
+    pending = mk_fact(pid, n="22222222", status="pending"); confirmed = mk_fact(pid, n="33333333", status="confirmed")
+    assert client.post("/api/people/%d/facts/%d/erase" % (pid, pending)).status_code == 409          # только отклонённые
+    assert client.post("/api/people/%d/facts/%d/erase" % (pid, confirmed)).status_code == 409
+    r = client.post("/api/people/%d/facts/%d/erase" % (pid, f))
+    assert r.status_code == 200 and r.json()["counts"] == {"pending": 1, "confirmed": 1, "rejected": 0}   # стёртый не считается
+    row = _raw(f)
+    assert row.fact_text == "" and row.source_quote is None and row.related_to == "" and row.no_emb
+    assert (row.source_chat_id, row.quote_author, row.source_platform, row.mention_count) == (None, None, None, 1)
+    assert row.key_name == "person_%d_likes_11111111" % pid and row.review_status == "rejected"      # tombstone
+    assert row.is_archived is False and row.person_id == pid                                         # не архив: импорт видит ключ
+    shown = [i["id"] for g in client.get("/api/people/%d" % pid).json()["facts"] for i in g["items"]]
+    assert f not in shown and set(shown) == {pending, confirmed}                                     # в UI не показывается
+    assert client.post("/api/people/%d/facts/%d/erase" % (pid, f)).status_code == 404                # повтор
+    assert client.post("/api/people/%d/facts/%d/restore" % (pid, f)).status_code == 404              # стёртое не вернуть
+    assert client.post("/api/people/%d/facts/%d/approve" % (pid, f)).status_code == 404
+    foreign = mk_person(user=OTHER); ff = mk_fact(foreign, status="rejected", user=OTHER)
+    assert client.post("/api/people/%d/facts/%d/erase" % (foreign, ff)).status_code == 404
+    assert _raw(ff).fact_text != ""                                                                   # чужое не тронуто
+
+
+def test_card_strips_name_prefix_only_for_known_words_and_not_for_self(client):
+    pid = mk_person("Мария Иванова", aliases=["Машка"])
+    a = mk_fact(pid, n="aaaa0001", text_="Мария: любит кофе")
+    b = mk_fact(pid, n="aaaa0002", text_="Машка: не ест рыбу")
+    c_ = mk_fact(pid, n="aaaa0003", text_="Важно: аллергия на орехи")
+    d = mk_fact(pid, n="aaaa0004", text_="Мария Иванова: ничего не режем без слова в двоеточии")
+    me = mk_person("Кай", is_self=True, status="confirmed"); e = mk_fact(me, n="bbbb0001", text_="Кай: пример")
+    texts = {i["id"]: i["text"] for g in client.get("/api/people/%d" % pid).json()["facts"] for i in g["items"]}
+    assert texts[a] == "любит кофе" and texts[b] == "не ест рыбу"
+    assert texts[c_] == "Важно: аллергия на орехи" and texts[d].startswith("Мария Иванова:")
+    self_texts = [i["text"] for g in client.get("/api/people/%d" % me).json()["facts"] for i in g["items"]]
+    assert self_texts == ["Кай: пример"]                                                             # «Я» не трогаем
+    with get_engine().connect() as c:                                                                # в БД префикс остаётся (нужен боту)
+        assert c.execute(text("SELECT fact_text FROM memories WHERE id=:i"), {"i": a}).scalar_one() == "Мария: любит кофе"
