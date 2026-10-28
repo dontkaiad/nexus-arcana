@@ -21,6 +21,8 @@ people = Table(
     Column("user_id",     Text,       nullable=False, server_default=text("''")),
     Column("name",        Text,       nullable=False),
     Column("aliases",     ARRAY(Text), nullable=False, server_default=text("'{}'::text[]")),
+    # нормализованные формы имени+«Других имён» для резолва упоминаний (PR-3, GIN); ведёт pg_people_repo.sync_norm
+    Column("aliases_norm", ARRAY(Text), nullable=False, server_default=text("'{}'::text[]")),
     Column("birthday",    Date),
     # False → год неизвестен, в `birthday` стоит заглушка 1904 (ADR-0027).
     Column("birthday_year_known", Boolean, nullable=False, server_default=text("true")),

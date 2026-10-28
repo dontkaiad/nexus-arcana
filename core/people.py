@@ -159,3 +159,95 @@ def strip_name_prefix(fact: str, name: str, aliases: Iterable[str] = ()) -> str:
     for src in [name] + list(aliases or []):
         known.update(_tokens(src))
     return m.group(2) if _norm(m.group(1)) in known else fact
+
+
+# ── нормализация имён/алиасов для резолва упоминаний (PR-3) ─────────────────
+# people.aliases_norm = нормализованные формы имени+алиасов; упоминание из текста
+# («Маше», «с Машей») приводится к тем же формам и ищется оператором && (GIN).
+# Правила:
+#   • слово режется через strip_case_ending (основа ≥ 3 букв);
+#   • КОРОТКОЕ имя (основа < 3 букв: «Оля», «Ася», «Ян») — только точная форма, она
+#     хранится с префиксом "=" («=оля»): «Оле»/«Олей» её не находят — слишком много
+#     ложных совпадений;
+#   • @username — как есть;
+#   • для многословного имени добавляется и форма фразы целиком, и форма каждого слова.
+
+from core.ru_morph import _CASE_SUFFIXES, strip_case_ending as _strip
+
+_WORD = _re.compile(r"@?[\w\-]+", _re.UNICODE)
+
+
+def _words(text: str) -> List[str]:
+    t = (text or "").lower().replace("ё", "е")
+    return [w.strip("-_") for w in _WORD.findall(t) if len(w.strip("-_")) >= 2]
+
+
+def _is_short(word: str) -> bool:
+    if len(word) < 3:
+        return True
+    return _strip(word) == word and any(word.endswith(s) and len(word) - len(s) < 3 for s in _CASE_SUFFIXES)
+
+
+def _short_declensions(word: str) -> List[str]:
+    """Падежные формы КОРОТКОГО имени, перечисленные явно («Оля» → Оле/Олей/Олю/Оли…): точный матч по списку,
+    а не по основе — «Олег»/«Олеся» не цепляются."""
+    if word[-1] in "ая":
+        st, ya = word[:-1], word[-1] == "я"
+        return [st + x for x in ("е", "и", "ю" if ya else "у", "ей" if ya else "ой", "ею" if ya else "ою")]
+    if word[-1] == "ь":
+        return [word[:-1] + x for x in ("я", "ю", "ем", "е")]
+    if word[-1] in "аеёиоуыэюя":
+        return []
+    return [word + x for x in ("а", "у", "ом", "е")]
+
+
+def _forms(word: str, expand: bool) -> List[str]:
+    if word.startswith("@"):
+        return [word]
+    if not _is_short(word):
+        return [_strip(word)]
+    out = ["=" + word]
+    if expand:                                   # только для хранимых имён; упоминание ищется как есть
+        out += ["=" + f for f in _short_declensions(word)]
+    return out
+
+
+def norm_forms(text: str, expand: bool = False) -> List[str]:
+    """Формы одного имени/алиаса/упоминания (без дублей, порядок стабилен)."""
+    words = _words(text)
+    out: List[str] = []
+    if len(words) > 1:
+        out.append(" ".join(_forms(w, False)[0] for w in words))
+    for w in words:
+        for f in _forms(w, expand):
+            if f not in out:
+                out.append(f)
+    return out
+
+
+def aliases_norm_for(name: str, aliases: Iterable[str]) -> List[str]:
+    """Формы имени и «Других имён» (username'ы аккаунтов сюда не входят: тема PR-7 — отдельная таблица)."""
+    seen: List[str] = []
+    for s_ in [name] + list(aliases or []):
+        for f in norm_forms(s_, expand=True):
+            if f not in seen:
+                seen.append(f)
+    return seen
+
+
+def birthday_context(birthday: Optional[date], year_known: bool = True) -> str:
+    """«ДР: 05.03» (+ «.1990», только если год известен) для контекста бота; пусто без ДР."""
+    if not birthday:
+        return ""
+    known = year_known and birthday.year != UNKNOWN_YEAR
+    return "ДР: %02d.%02d%s" % (birthday.day, birthday.month, (".%d" % birthday.year) if known else "")
+
+
+def mention_candidates(mentions: Iterable[str]) -> List[str]:
+    """Формы упоминаний для поиска по aliases_norm (&&). Одиночные слова и фраза целиком."""
+    seen: List[str] = []
+    for m in mentions or []:
+        for f in norm_forms(m):
+            if f not in seen:
+                seen.append(f)
+    return seen

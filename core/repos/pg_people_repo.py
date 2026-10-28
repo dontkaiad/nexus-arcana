@@ -14,6 +14,7 @@ from sqlalchemy import and_, func, insert, select, text, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from core.db import get_engine
+from core.people import aliases_norm_for, mention_candidates
 from core.repos.people_tables import people, person_accounts
 
 PLATFORMS = ("tg", "vk")
@@ -146,6 +147,45 @@ def find_idless(user_id: str) -> List[Dict]:
     return attach_accounts([_row(r) for r in rows])
 
 
+def sync_norm(conn, person_id: int) -> None:
+    """Пересчитывает aliases_norm из текущих name+aliases (вызывать в той же транзакции после их изменения)."""
+    r = conn.execute(text("SELECT name, aliases FROM people WHERE id = :i"), {"i": person_id}).first()
+    if r:
+        conn.execute(text("UPDATE people SET aliases_norm = :n WHERE id = :i"),
+                     {"n": aliases_norm_for(r.name, r.aliases or []), "i": person_id})
+
+
+# ── резолв упоминаний (PR-3) ────────────────────────────────────────────────
+
+FACT_TYPE_RANK = {"important": 0, "likes": 1, "dislikes": 2, "other": 3}
+
+
+def resolve(user_id: str, mentions: List[str]) -> List[Dict]:
+    """Люди владельца, упомянутые в тексте: пересечение нормализованных форм (GIN &&). Отклонённые и «Я»
+    не резолвятся. Порядок стабилен (по id). Несколько совпадений = тёзки/общая основа — решает вызывающий."""
+    forms = mention_candidates(mentions)
+    if not forms:
+        return []
+    with get_engine().connect() as c:
+        rows = c.execute(text(
+            "SELECT id, name, birthday, birthday_year_known FROM people "
+            "WHERE user_id = :u AND status <> 'rejected' AND NOT is_self AND aliases_norm && CAST(:f AS text[]) "
+            "ORDER BY id"), {"u": user_id, "f": forms}).all()
+    return [{"id": r.id, "name": r.name, "birthday": r.birthday, "birthday_year_known": r.birthday_year_known}
+            for r in rows]
+
+
+def confirmed_facts(person_id: int, limit: int = 20) -> List[Dict]:
+    """Подтверждённые, актуальные, не стёртые (tombstone = пустой текст) факты; важные первыми."""
+    with get_engine().connect() as c:
+        rows = c.execute(text(
+            "SELECT id, fact_text, key_name FROM memories WHERE person_id = :p AND review_status = 'confirmed' "
+            "AND NOT is_archived AND is_current AND fact_text <> '' ORDER BY id"), {"p": person_id}).all()
+    facts = [{"id": r.id, "text": r.fact_text, "type": fact_type(r.key_name)} for r in rows]
+    facts.sort(key=lambda f: (FACT_TYPE_RANK.get(f["type"], 9), f["id"]))
+    return facts[:limit]
+
+
 def create(user_id: str, name: str, aliases: List[str], *, birthday: Optional[date] = None,
            tg_id: Optional[int] = None, tg_username: Optional[str] = None,
            vk_id: Optional[int] = None, status: str = "pending",
@@ -157,6 +197,7 @@ def create(user_id: str, name: str, aliases: List[str], *, birthday: Optional[da
             birthday_year_known=birthday_year_known, is_self=is_self, status=status,
         ).returning(people.c.id)).scalar_one()
         _insert_accounts(c, user_id, pid, _accounts_from(tg_id, tg_username, vk_id, accounts))
+        sync_norm(c, pid)
     return pid
 
 
@@ -189,6 +230,8 @@ def fill_missing(person: Dict, *, aliases: List[str], birthday: Optional[date],
         if vals:
             vals["updated_at"] = func.now()
             c.execute(update(people).where(people.c.id == person["id"]).values(**vals))
+            if "aliases" in vals:
+                sync_norm(c, person["id"])
             changed = True
     return changed
 
@@ -353,6 +396,7 @@ def update_person(user_id: str, person_id: int, values: Dict) -> Optional[Dict]:
             if res.rowcount == 0:
                 return None
             if "name" in vals or "aliases" in vals:
+                sync_norm(c, person_id)
                 refresh_related(c, person_id)
         elif c.execute(select(people.c.id).where(and_(people.c.id == person_id,
                                                       people.c.user_id == user_id))).first() is None:
@@ -564,6 +608,7 @@ def merge_people(user_id: str, source_id: int, target_id: int) -> Dict:
         elif sn and dn and sn != dn:
             vals["notes"] = dn + "\n" + sn
         conn.execute(update(people).where(people.c.id == target_id).values(**vals))
+        sync_norm(conn, target_id)
         refresh_related(conn, target_id)
     return stats
 

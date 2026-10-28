@@ -974,6 +974,32 @@ def extract_context_keywords(data: dict, client_name: Optional[str] = None) -> L
     return keywords
 
 
+def _people_context_block(user_id: str, keywords: List[str], seen_ids: Set[str]) -> str:
+    """Блок «Из Людей» для найденных по упоминанию людей. Один человек — его факты и ДР; несколько
+    (тёзки / общая основа) — наборы всех, каждый с пометкой, кто это. Заполняет seen_ids id'ами фактов."""
+    from core.people import birthday_context
+    from core.repos import pg_people_repo as prepo
+    people_ = prepo.resolve(user_id, [k for k in keywords if k])
+    if not people_:
+        return ""
+    multi = len(people_) > 1
+    out = ["Из «Людей» (подтверждённые факты о упомянутых людях)" +
+           (" — совпало несколько человек, неясно, о ком речь:" if multi else ":")]
+    for p in people_:
+        facts = prepo.confirmed_facts(p["id"])
+        bd = birthday_context(p["birthday"], p["birthday_year_known"])
+        if not facts and not bd:
+            continue
+        if multi:
+            out.append(f"[{p['name']}]")
+        if bd:
+            out.append(f"- {bd}")
+        for f in facts:
+            seen_ids.add(str(f["id"]))
+            out.append(f"- {f['text'][:200]}")
+    return "\n".join(out) if len(out) > 1 else ""
+
+
 async def get_memories_for_context(
     user_id: str,
     keywords: List[str],
@@ -987,6 +1013,14 @@ async def get_memories_for_context(
     try:
         seen_ids: Set[str] = set()
         mems: List[Memory] = []
+        # PR-3: упоминание человека («Маше», «с Машей») → его подтверждённые факты + ДР из карточки.
+        # Идут мимо фильтра scope (факты о людях общие для обоих ботов) и вне лимита max_results;
+        # id попадают в seen_ids, чтобы обычный поиск не дублировал те же записи.
+        people_block = ""
+        try:
+            people_block = await asyncio.to_thread(_people_context_block, user_id, keywords, seen_ids)
+        except Exception:
+            logger.warning("people mention resolve failed, continuing without it", exc_info=True)
         for kw in keywords:
             if not kw or len(kw) < 2:
                 continue
@@ -1004,13 +1038,15 @@ async def get_memories_for_context(
             if len(mems) >= max_results:
                 break
 
-        if not mems:
+        if not mems and not people_block:
             return ""
 
         lines = ["Контекст из памяти:"]
         for m in mems:
             cat_str = f" [{m.category}]" if m.category else ""
             lines.append(f"- {m.fact[:200]}{cat_str}")
+        if people_block:
+            lines.append(people_block)
 
         return "\n".join(lines)
     except Exception:
