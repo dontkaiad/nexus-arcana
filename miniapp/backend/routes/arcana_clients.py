@@ -202,7 +202,7 @@ async def client_dossier(
         "type_full": type_full,
         "contact": c.contact or None,
         "since": since,
-        "birthday": c.birthday,
+        "birthday": await asyncio.to_thread(client_links.effective_birthday, user_id, client_id, c.birthday),
         "request": c.request or None,
         "notes": c.notes or None,
         "photo_url": c.photo_url,
@@ -226,7 +226,8 @@ async def client_dossier(
 
 def _link_error(e: "client_links.LinkError") -> HTTPException:
     status = {"client_not_found": 404, "person_not_found": 404, "person_rejected": 409,
-              "person_taken": 409, "already_linked": 409, "self_client": 409}[e.code]
+              "person_taken": 409, "already_linked": 409, "self_client": 409,
+              "not_linked": 409, "nothing_to_resolve": 422}[e.code]
     return HTTPException(status_code=status, detail=e.code)
 
 
@@ -263,7 +264,21 @@ async def client_link_person(client_id: str, body: dict, tg_id: int = Depends(cu
         person = await asyncio.to_thread(client_links.link, user_id, _client_int(client_id), pid)
     except client_links.LinkError as e:
         raise _link_error(e)
-    return {"ok": True, "person": {"id": person["id"], "name": person["name"]}}
+    return {"ok": True, "person": {"id": person["id"], "name": person["name"]},
+            "birthday": person.get("birthday_sync")}
+
+
+@router.post("/arcana/clients/{client_id}/link/birthday")
+async def client_link_birthday(client_id: str, body: dict, tg_id: int = Depends(current_user_id)) -> dict[str, Any]:
+    """Конфликт ДР при связи: владелец выбирает, какая дата верна ('client' | 'person')."""
+    user_id = (await get_user_id(tg_id)) or ""
+    use = body.get("use")
+    if use not in ("client", "person"):
+        raise HTTPException(status_code=422, detail="use must be client|person")
+    try:
+        return {"ok": True, **await asyncio.to_thread(client_links.resolve_birthday, user_id, _client_int(client_id), use)}
+    except client_links.LinkError as e:
+        raise _link_error(e)
 
 
 @router.delete("/arcana/clients/{client_id}/link")

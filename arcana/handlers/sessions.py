@@ -1,6 +1,7 @@
 """arcana/handlers/sessions.py"""
 from __future__ import annotations
 
+import asyncio
 import base64
 import html
 import json
@@ -1270,6 +1271,16 @@ async def handle_add_session(
                 f"- {f}" for f in figurant_facts
             )
             memory_context = (fig_ctx + "\n\n" + memory_context).strip()
+
+        # #ADR-0027 PR-8b: подтверждённые факты человека, явно связанного с клиентом (без угадывания по имени)
+        if client_id:
+            try:
+                from core.repos.pg_client_links import person_context
+                pctx = await asyncio.to_thread(person_context, user_id, client_id)
+                if pctx:
+                    memory_context = (memory_context + "\n\nИз «Людей» (о клиенте):\n" + pctx).strip()
+            except Exception:
+                pass
 
         # 4. Предыдущие расклады клиента
         prev_context = ""

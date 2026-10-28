@@ -6,10 +6,13 @@ from __future__ import annotations
 
 from typing import Dict, List, Optional
 
+from datetime import date
+
 from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 
 from core.db import get_engine
+from core.people import _same_bday, birthday_iso
 from core.people_links import rank_candidates
 from core.repos import pg_people_repo as prepo
 
@@ -116,7 +119,110 @@ def link(user_id: str, client_id: int, person_id: int) -> Dict:
                       {"p": person_id, "i": client_id, "u": user_id})
     except IntegrityError:
         raise LinkError("person_taken")
+    person["birthday_sync"] = _sync_birthday_on_link(user_id, cl, person)
     return person
+
+
+# ── ДР: единственный источник — people.birthday (после связи) ────────────────
+
+def _sync_birthday_on_link(user_id: str, cl: Dict, person: Dict) -> Dict:
+    """При связи: у человека ДР пуст, у клиента есть → копируем клиентский человеку.
+    Оба заданы и различаются → ничего не меняем, отдаём конфликт: выбирает владелец (resolve_birthday)."""
+    cb, pb = cl.get("birthday"), person.get("birthday")
+    pk = person.get("birthday_year_known", True)
+    out = {"state": "none", "client": cb.isoformat() if cb else None, "person": birthday_iso(pb, pk)}
+    if cb and not pb:
+        with get_engine().begin() as c:
+            c.execute(text("UPDATE people SET birthday = :b, birthday_year_known = TRUE WHERE id = :p AND user_id = :u"),
+                      {"b": cb, "p": person["id"], "u": user_id})
+        out.update(state="copied", person=cb.isoformat())
+    elif cb and pb:
+        same = _same_bday({"birthday": cb, "birthday_year_known": True}, {"birthday": pb, "birthday_year_known": pk})
+        out["state"] = "same" if same else "conflict"
+    return out
+
+
+def resolve_birthday(user_id: str, client_id: int, use: str) -> Dict:
+    """Конфликт ДР решает владелец: use='client' — берём дату клиента, use='person' — дату человека.
+    Итог: people.birthday = выбранная; clients.birthday приводится к ней (чтобы после отвязки не было расхождения)."""
+    cl = get_client(user_id, client_id)
+    if not cl:
+        raise LinkError("client_not_found")
+    if not cl["person_id"]:
+        raise LinkError("not_linked")
+    person = prepo.get_person(user_id, cl["person_id"])
+    if use == "client" and cl["birthday"]:
+        with get_engine().begin() as c:
+            c.execute(text("UPDATE people SET birthday = :b, birthday_year_known = TRUE WHERE id = :p AND user_id = :u"),
+                      {"b": cl["birthday"], "p": person["id"], "u": user_id})
+        return {"birthday": cl["birthday"].isoformat()}
+    if use == "person" and person.get("birthday"):
+        with get_engine().begin() as c:
+            c.execute(text("UPDATE clients SET birthday = :b WHERE id = :i AND user_id = :u"),
+                      {"b": person["birthday"] if person.get("birthday_year_known", True) else None,
+                       "i": client_id, "u": user_id})
+        return {"birthday": birthday_iso(person["birthday"], person.get("birthday_year_known", True))}
+    raise LinkError("nothing_to_resolve")
+
+
+def set_linked_birthday(user_id: str, client_id, iso: Optional[str]) -> bool:
+    """Правка ДР клиента, связанного с человеком, пишется в people.birthday. False — клиент не связан
+    (вызывающий пишет в clients.birthday как раньше)."""
+    try:
+        cl = get_client(user_id, int(client_id))
+    except (TypeError, ValueError):
+        return False
+    if not cl or not cl["person_id"]:
+        return False
+    try:
+        b = date.fromisoformat(iso) if iso else None
+    except ValueError:
+        return True                                   # мусорная дата: не пишем никуда
+    with get_engine().begin() as c:
+        c.execute(text("UPDATE people SET birthday = :b, birthday_year_known = TRUE WHERE id = :p AND user_id = :u"),
+                  {"b": b, "p": cl["person_id"], "u": user_id})
+    return True
+
+
+def effective_birthday(user_id: str, client_id, own_iso: Optional[str]) -> Optional[str]:
+    """Для показа: у связанного клиента ДР берётся из карточки человека, иначе — собственный."""
+    try:
+        cl = get_client(user_id, int(client_id))
+    except (TypeError, ValueError):
+        return own_iso
+    if not cl or not cl["person_id"]:
+        return own_iso
+    p = prepo.get_person(user_id, cl["person_id"])
+    if not p or not p.get("birthday"):
+        return own_iso
+    return birthday_iso(p["birthday"], p.get("birthday_year_known", True))
+
+
+# ── контекст для трактовок: подтверждённые факты связанного человека ─────────
+
+_TYPE_ORDER = ("important", "likes", "dislikes", "other")
+
+
+def person_context(user_id: str, client_id) -> str:
+    """Текст для промпта таро: «ДР» и подтверждённые (confirmed) факты связанного человека, важные первыми.
+    Pending/rejected не попадают. Без связи — пустая строка (контекст не придумываем по имени)."""
+    try:
+        cl = get_client(user_id, int(client_id))
+    except (TypeError, ValueError):
+        return ""
+    if not cl or not cl["person_id"]:
+        return ""
+    p = prepo.get_person(user_id, cl["person_id"])
+    if not p:
+        return ""
+    lines = []
+    if p.get("birthday"):
+        b, known = p["birthday"], p.get("birthday_year_known", True) and p["birthday"].year != 1904
+        lines.append("ДР: %02d.%02d%s" % (b.day, b.month, (".%d" % b.year) if known else ""))
+    facts = [f for f in prepo.list_facts(p["id"]) if f["review_status"] == "confirmed" and f["is_current"] is not False]
+    facts.sort(key=lambda f: (_TYPE_ORDER.index(f["type"]) if f["type"] in _TYPE_ORDER else len(_TYPE_ORDER), f["id"]))
+    lines += ["- " + f["text"] for f in facts]
+    return "\n".join(lines)
 
 
 def unlink(user_id: str, client_id: int) -> bool:

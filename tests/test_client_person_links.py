@@ -247,3 +247,83 @@ def test_api_merge_both_clients_409(api):
     mk_client("B", person_id=b)
     r = api.post(f"/api/people/{a}/merge", json={"into_id": b})
     assert r.status_code == 409
+
+
+# ── PR-8b: ДР и контекст трактовки ───────────────────────────────────────────
+
+def bday_of_person(pid):
+    with get_engine().connect() as c:
+        r = c.execute(text("SELECT birthday, birthday_year_known FROM people WHERE id=:i"), {"i": pid}).first()
+    return r[0], r[1]
+
+
+def test_link_copies_client_birthday_when_person_empty():
+    pid = insert_person(MARK, "Имя2")
+    c = mk_client("A", birthday=date(1990, 3, 5))
+    out = cl.link(MARK, c, pid)["birthday_sync"]
+    assert out["state"] == "copied" and bday_of_person(pid) == (date(1990, 3, 5), True)
+
+
+def test_link_same_and_conflict_birthday_do_not_overwrite():
+    p1 = insert_person(MARK, "Имя2", birthday=date(1990, 3, 5))
+    c1 = mk_client("A", birthday=date(1990, 3, 5))
+    assert cl.link(MARK, c1, p1)["birthday_sync"]["state"] == "same"
+    p2 = insert_person(MARK, "Имя3", birthday=date(1991, 4, 6))
+    c2 = mk_client("B", birthday=date(1990, 3, 5))
+    out = cl.link(MARK, c2, p2)["birthday_sync"]
+    assert out["state"] == "conflict" and bday_of_person(p2)[0] == date(1991, 4, 6)
+
+
+def test_link_year_unknown_person_matches_client_day_month():
+    p = insert_person(MARK, "Имя2", birthday=date(1904, 3, 5), birthday_year_known=False)
+    c = mk_client("A", birthday=date(1990, 3, 5))
+    assert cl.link(MARK, c, p)["birthday_sync"]["state"] == "same"
+
+
+def test_resolve_birthday_client_or_person():
+    p = insert_person(MARK, "Имя2", birthday=date(1991, 4, 6))
+    c = mk_client("A", birthday=date(1990, 3, 5))
+    cl.link(MARK, c, p)
+    cl.resolve_birthday(MARK, c, "client")
+    assert bday_of_person(p)[0] == date(1990, 3, 5)
+    with get_engine().begin() as conn:
+        conn.execute(text("UPDATE people SET birthday='1991-04-06' WHERE id=:i"), {"i": p})
+    cl.resolve_birthday(MARK, c, "person")
+    with get_engine().connect() as conn:
+        assert conn.execute(text("SELECT birthday FROM clients WHERE id=:i"), {"i": c}).scalar() == date(1991, 4, 6)
+    unl = mk_client("B")
+    with pytest.raises(cl.LinkError):
+        cl.resolve_birthday(MARK, unl, "client")
+
+
+def test_linked_birthday_edit_writes_to_person_unlinked_does_not():
+    p = insert_person(MARK, "Имя2")
+    c, u = mk_client("A", person_id=p), mk_client("B")
+    assert cl.set_linked_birthday(MARK, c, "1992-02-03") is True
+    assert bday_of_person(p)[0] == date(1992, 2, 3)
+    assert cl.set_linked_birthday(MARK, u, "1992-02-03") is False
+    assert cl.effective_birthday(MARK, c, "2000-01-01") == "1992-02-03"
+    assert cl.effective_birthday(MARK, u, "2000-01-01") == "2000-01-01"
+
+
+def test_person_context_only_confirmed_important_first_and_birthday():
+    from tests.test_people_api import mk_fact
+    p = insert_person(MARK, "Имя2", birthday=date(1904, 3, 5), birthday_year_known=False)
+    c = mk_client("A", person_id=p)
+    mk_fact(p, "likes", "confirmed", "любит чай", user=MARK)
+    mk_fact(p, "important", "confirmed", "важное", user=MARK)
+    mk_fact(p, "other", "pending", "не проверено", user=MARK)
+    mk_fact(p, "other", "rejected", "отклонено", user=MARK)
+    assert cl.person_context(MARK, c) == "ДР: 05.03\n- важное\n- любит чай"
+    assert cl.person_context(MARK, mk_client("B")) == ""            # без явной связи ничего не подмешиваем
+    assert cl.person_context(OTHER, c) == ""
+
+
+def test_api_birthday_resolve_and_dossier_uses_person_birthday(api):
+    p = insert_person(MARK, "Имя2", birthday=date(1991, 4, 6))
+    c = mk_client("A", birthday=date(1990, 3, 5))
+    r = api.post(f"/api/arcana/clients/{c}/link", json={"person_id": p})
+    assert r.json()["birthday"]["state"] == "conflict"
+    assert api.post(f"/api/arcana/clients/{c}/link/birthday", json={"use": "x"}).status_code == 422
+    assert api.post(f"/api/arcana/clients/{c}/link/birthday", json={"use": "client"}).status_code == 200
+    assert bday_of_person(p)[0] == date(1990, 3, 5)
