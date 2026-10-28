@@ -161,3 +161,36 @@ async def test_context_no_person_regular_search_unchanged():
     out = await ctx("слово-которого-нет")
     assert out == ""
     assert await mem.get_memories_for_context(MARK, []) == ""
+
+
+# ── факты отклонённых людей скрыты во всех путях чтения ─────────────────────
+
+@pytest.mark.asyncio
+async def test_facts_of_rejected_person_hidden_in_all_search_paths():
+    from core.repos.pg_memory_repo import PgMemoryRepo
+    rej = mk("Зоя Один", status="rejected")
+    ok = mk("Зоя Два")
+    f_rej = mk_fact(rej, "likes", "confirmed", "ЗоЯ-токен отклонённый", user=MARK)     # confirmed, но человек отклонён
+    f_ok = mk_fact(ok, "likes", "confirmed", "ЗоЯ-токен нормальный", user=MARK)
+    repo = PgMemoryRepo()
+    got = {m.id for m in await repo.search(["ЗоЯ-токен"], user_id=MARK)}
+    assert str(f_ok) in got and str(f_rej) not in got
+    got = {m.id for m in await repo.find_recent(user_id=MARK, page_size=50)}
+    assert str(f_ok) in got and str(f_rej) not in got
+    got = {m.id for m in await repo.find_by_category("👥 Люди", user_id=MARK)}
+    assert str(f_ok) in got and str(f_rej) not in got
+    # деструктивные пути видят всё (confirmed_only=False)
+    got = {m.id for m in await repo.search(["ЗоЯ-токен"], user_id=MARK, confirmed_only=False)}
+    assert {str(f_ok), str(f_rej)} <= got
+
+
+def test_semantic_search_hides_rejected_person(monkeypatch):
+    from core import memory_rag
+    vec = [1.0] + [0.0] * 1023
+    monkeypatch.setattr(memory_rag, "_embed", lambda *a, **k: [vec])
+    rej = mk("Зоя Один", status="rejected")
+    f = mk_fact(rej, "likes", "confirmed", "семантика отклонённого", user=MARK)
+    with get_engine().begin() as c:
+        c.execute(text("UPDATE memories SET embedding = CAST(:e AS vector) WHERE id = :i"),
+                  {"e": memory_rag._vec_literal(vec), "i": f})
+    assert str(f) not in {str(m.id) for m in memory_rag.search_memory_semantic("что угодно", user_id=MARK)}

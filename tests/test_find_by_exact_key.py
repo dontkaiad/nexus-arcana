@@ -36,6 +36,7 @@ def _make_engine():
             "created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, "
             "updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)"
         ))
+        conn.execute(sa.text("CREATE TABLE people (id INTEGER PRIMARY KEY, status TEXT NOT NULL DEFAULT 'pending')"))
         # Ложное совпадение: key_name != "tz_123", но fact_text содержит "tz_123"
         conn.execute(sa.text(
             "INSERT INTO memories (key_name, fact_text, is_current) "
