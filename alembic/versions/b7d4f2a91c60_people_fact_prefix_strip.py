@@ -11,7 +11,7 @@ Changed rows that had an embedding get it cleared and are queued in `people_reem
 Downgrade drops the queue only: stripped text is still valid, the prefix is not restored.
 
 Revision ID: b7d4f2a91c60
-Revises: a3c9e1d47b52
+Revises: 7e3b9a41c5d2
 Create Date: 2026-10-30
 
 """
@@ -23,7 +23,7 @@ import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
 revision: str = 'b7d4f2a91c60'
-down_revision: Union[str, Sequence[str], None] = 'a3c9e1d47b52'
+down_revision: Union[str, Sequence[str], None] = '7e3b9a41c5d2'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
