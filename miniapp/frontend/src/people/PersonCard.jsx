@@ -6,7 +6,7 @@ import PersonEdit from './PersonEdit'
 import Accounts from './Accounts'
 import { Btn, Chip, Note, inputStyle, Label } from './parts'
 import {
-  addFact, approveAll, approveFact, eraseFact, errText, getPerson, rejectAll, rejectFact, restoreFact,
+  addFact, approveAll, approveFact, eraseFact, errText, getPerson, rejectAll, rejectFact, removeAlias, resetAliases, restoreFact,
 } from './peopleApi'
 import { STATUS_LABEL, TYPE_CHOICES, fmtBirthday, fs, haptic, plural, primaryColors, redText, statusColor, typeMeta } from './ui'
 
@@ -66,11 +66,7 @@ export default function PersonCard({ s, Sheet, id, onBack, onChanged, onStartRev
         )}
       </div>
       <Accounts s={s} person={p} onChanged={() => { load(); onChanged?.() }} />
-      {p.aliases?.length > 0 && (
-        <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginBottom: 6 }}>
-          {p.aliases.map((a) => <Chip key={a} s={s}>{a}</Chip>)}
-        </div>
-      )}
+      <Aliases s={s} p={p} busy={busy} act={act} />
       {p.notes && <div style={{ fontSize: fs(12), color: s.text, whiteSpace: 'pre-wrap', margin: '4px 0 8px', wordBreak: 'break-word' }}>{p.notes}</div>}
 
       {err && <Note s={s} color={redText(s)}>{err}</Note>}
@@ -150,6 +146,47 @@ export default function PersonCard({ s, Sheet, id, onBack, onChanged, onStartRev
         onSaved={() => { setEdit(false); load(); onChanged?.() }} />
       <MergePicker s={s} Sheet={Sheet} person={p} open={merge} onClose={() => setMerge(false)}
         onMerged={() => { setMerge(false); onChanged?.(); onBack() }} />
+    </div>
+  )
+}
+
+const RESET_OVER = 5       // больше стольких «других имён» — показываем «Сбросить»
+
+// «Другие имена»: обычные — чипы; спорные (совпали с именем/алиасом другого) — строка с подписью «также у: …» и ✕ в один тап.
+function Aliases({ s, p, busy, act }) {
+  const [confirmReset, setConfirmReset] = useState(false)
+  const info = p.aliases_info || (p.aliases || []).map((a) => ({ alias: a, also: [] }))
+  if (info.length === 0) return null
+  const plain = info.filter((i) => i.also.length === 0)
+  const disputed = info.filter((i) => i.also.length > 0)
+  return (
+    <div style={{ marginBottom: 6 }}>
+      {plain.length > 0 && (
+        <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginBottom: 4 }}>
+          {plain.map((i) => <Chip key={i.alias} s={s}>{i.alias}</Chip>)}
+        </div>
+      )}
+      {disputed.map((i) => (
+        <div key={i.alias} data-disputed="1" style={{
+          display: 'flex', alignItems: 'center', gap: 8, minHeight: 44, padding: '2px 4px 2px 12px', marginBottom: 4, borderRadius: 12,
+          border: `1px solid ${s.amber}`, background: `${s.amber}26`,
+        }}>
+          <div style={{ flex: 1, minWidth: 0, wordBreak: 'break-word' }}>
+            <div style={{ fontSize: fs(13), fontWeight: 600, color: s.text }}>{i.alias}</div>
+            <div style={{ fontSize: fs(11), color: s.text }}>
+              также у: {i.also.map((o) => (o.is_self ? 'Я' : o.name)).join(', ')}
+            </div>
+          </div>
+          <div role="button" aria-label="убрать другое имя" onClick={() => !busy && act(() => removeAlias(p.id, i.alias))}
+            style={{ width: 44, height: 44, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18, fontWeight: 700, color: redText(s), cursor: 'pointer', flexShrink: 0 }}>✕</div>
+        </div>
+      ))}
+      {!p.is_self && info.length > RESET_OVER && (
+        confirmReset
+          ? <Btn s={s} kind="danger" style={{ marginTop: 4 }} disabled={busy}
+              onClick={() => act(async () => { await resetAliases(p.id); setConfirmReset(false) })}>Точно сбросить {info.length} имён? Останется только имя</Btn>
+          : <Btn s={s} style={{ marginTop: 4 }} onClick={() => setConfirmReset(true)}>Сбросить другие имена ({info.length})</Btn>
+      )}
     </div>
   )
 }

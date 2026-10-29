@@ -15,7 +15,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.exc import IntegrityError
 
 from core.people import (
-    UNKNOWN_YEAR, age, birthday_iso, fact_hash, find_duplicates, related_to_str, strip_name_prefix,
+    UNKNOWN_YEAR, age, alias_disputes, birthday_iso, fact_hash, find_duplicates, related_to_str, strip_name_prefix,
 )
 from core.repos.pg_memory_repo import PgMemoryRepo, bot_to_scope
 from core.repos import pg_client_links as client_links
@@ -128,6 +128,25 @@ async def duplicates(tg_id: int = Depends(current_user_id)) -> Dict[str, Any]:
         {"a": brief(d["a"]), "b": brief(d["b"]), "score": d["score"], "reasons": d["reasons"]} for d in pairs]}
 
 
+@router.get("/people/alias-disputes")
+async def alias_disputes_summary(tg_id: int = Depends(current_user_id)) -> Dict[str, Any]:
+    """Сколько «Других имён» спорные (совпали с именем/алиасом другого) и у кого. Бейдж «Спорные имена: N».
+    Объявлен ДО /people/{person_id}."""
+    user_id = await _owner(tg_id)
+    rows = await asyncio.to_thread(repo.alias_rows, user_id)
+    disp = alias_disputes(rows)
+    by_id = {r["id"]: r for r in rows}
+    people_ = sorted(({"id": pid, "disputed": len(v), "aliases": len(by_id[pid]["aliases"])} for pid, v in disp.items()),
+                     key=lambda d: (-d["disputed"], d["id"]))
+    return {"total": sum(len(v) for v in disp.values()), "people": people_}
+
+
+async def _aliases_info(user_id: str, person_id: int, aliases: List[str]) -> List[Dict[str, Any]]:
+    rows = await asyncio.to_thread(repo.alias_rows, user_id)
+    disp = {d["alias"]: d["also"] for d in alias_disputes(rows).get(person_id, [])}
+    return [{"alias": a, "also": disp.get(a, [])} for a in aliases]
+
+
 @router.get("/people/{person_id}")
 async def person_card(person_id: int, tg_id: int = Depends(current_user_id)) -> Dict[str, Any]:
     user_id = await _owner(tg_id)
@@ -136,7 +155,39 @@ async def person_card(person_id: int, tg_id: int = Depends(current_user_id)) -> 
         raise HTTPException(status_code=404, detail="person not found")
     await _attach_clients(user_id, [p])
     facts = await asyncio.to_thread(repo.list_facts, person_id)
-    return {**_person_out(p), "facts": _group_facts(facts, bool(p.get("is_self")), p["name"], p.get("aliases"))}
+    return {**_person_out(p), "aliases_info": await _aliases_info(user_id, person_id, list(p.get("aliases") or [])),
+            "facts": _group_facts(facts, bool(p.get("is_self")), p["name"], p.get("aliases"))}
+
+
+class AliasBody(BaseModel):
+    alias: str = Field(min_length=1, max_length=200)
+
+
+@router.post("/people/{person_id}/aliases/remove")
+async def remove_alias(person_id: int, body: AliasBody, tg_id: int = Depends(current_user_id)) -> Dict[str, Any]:
+    """Убрать одно «другое имя» (крестик у спорного). aliases_norm и related_to пересчитывает update_person."""
+    user_id = await _owner(tg_id)
+    p = await asyncio.to_thread(repo.get_person, user_id, person_id)
+    if not p:
+        raise HTTPException(status_code=404, detail="person not found")
+    new = [a for a in (p.get("aliases") or []) if a != body.alias]
+    if len(new) == len(p.get("aliases") or []):
+        raise HTTPException(status_code=404, detail="alias not found")
+    p = await asyncio.to_thread(repo.update_person, user_id, person_id, {"aliases": new})
+    return {**_person_out(p), "aliases_info": await _aliases_info(user_id, person_id, new)}
+
+
+@router.post("/people/{person_id}/aliases/reset")
+async def reset_aliases(person_id: int, tg_id: int = Depends(current_user_id)) -> Dict[str, Any]:
+    """«Сбросить другие имена»: остаётся имя (+ аккаунты — они в отдельной таблице). Карточку «Я» не сбрасываем."""
+    user_id = await _owner(tg_id)
+    p = await asyncio.to_thread(repo.get_person, user_id, person_id)
+    if not p:
+        raise HTTPException(status_code=404, detail="person not found")
+    if p.get("is_self"):
+        raise HTTPException(status_code=409, detail="self_aliases")
+    p = await asyncio.to_thread(repo.update_person, user_id, person_id, {"aliases": []})
+    return {**_person_out(p), "aliases_info": []}
 
 
 class PersonPatch(BaseModel):

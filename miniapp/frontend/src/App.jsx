@@ -3316,6 +3316,7 @@ function NxMemory({ s, openAdhd, openClientFromPeople }) {
   const [peopleId, setPeopleId] = useState(null);   // карточка человека из 👥 на записи памяти
   const peoplePending = useApi("/api/people?status=pending");
   const peopleAll = useApi("/api/people");
+  const peopleDisp = useApi("/api/people/alias-disputes");
   const params = [];
   if (cat !== "all") params.push(`cat=${encodeURIComponent(cat)}`);
   if (q) params.push(`q=${encodeURIComponent(q)}`);
@@ -3387,6 +3388,11 @@ function NxMemory({ s, openAdhd, openClientFromPeople }) {
                 ● На проверке: {peoplePending.data.total}
               </div>
             )}
+            {peopleDisp.data?.total > 0 && (
+              <div style={{ fontSize: fs(12), color: s.text, marginTop: 2, fontWeight: 600 }}>
+                ⚠ Спорные имена: {peopleDisp.data.total}
+              </div>
+            )}
           </div>
           <ChevronRight size={fs(16)} color={s.tS} />
         </div>
@@ -3394,7 +3400,7 @@ function NxMemory({ s, openAdhd, openClientFromPeople }) {
       {peopleOpen && createPortal(
         <div className="day" style={{ fontFamily: B }}>
           <PeopleTab s={s} Sheet={Sheet} initialId={peopleId} onClose={() => { setPeopleOpen(false); setPeopleId(null); }}
-            onChanged={() => { peoplePending.refetch(); peopleAll.refetch(); }}
+            onChanged={() => { peoplePending.refetch(); peopleAll.refetch(); peopleDisp.refetch(); }}
             onOpenClient={(cid) => { setPeopleOpen(false); setPeopleId(null); openClientFromPeople?.(cid); }} />
         </div>, document.body)}
       <SearchInput s={s} value={q} onChange={setQ} placeholder="Поиск по памяти" />

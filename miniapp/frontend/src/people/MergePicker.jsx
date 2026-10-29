@@ -21,8 +21,8 @@ export default function MergePicker({ s, Sheet, person, open, onClose, onMerged 
     duplicates().then((d) => {
       const mine = []
       for (const p of d.pairs || []) {
-        if (p.a.id === person.id) mine.push({ ...p.b, score: p.score })
-        else if (p.b.id === person.id) mine.push({ ...p.a, score: p.score })
+        if (p.a.id === person.id) mine.push({ ...p.b, score: p.score, reasons: p.reasons })
+        else if (p.b.id === person.id) mine.push({ ...p.a, score: p.score, reasons: p.reasons })
       }
       setCands(mine)
     }).catch(() => setCands([]))
@@ -78,7 +78,10 @@ export default function MergePicker({ s, Sheet, person, open, onClose, onMerged 
           {cands.length > 0 && (
             <>
               <div style={{ fontSize: fs(10), fontWeight: 600, letterSpacing: '0.4px', color: s.tM, margin: '0 0 6px' }}>ПОХОЖИЕ</div>
-              {cands.map((c) => row(c, <Chip s={s} color={s.amber}>{Math.round(c.score * 100)}%</Chip>))}
+              {cands.map((c) => row(c, <span style={{ display: 'inline-flex', gap: 4, alignItems: 'center' }}>
+                {(c.reasons || []).includes('shared_names') && <Chip s={s}>общие имена</Chip>}
+                <Chip s={s} color={s.amber}>{Math.round(c.score * 100)}%</Chip>
+              </span>))}
             </>
           )}
           <div style={{ position: 'relative', margin: '10px 0' }}>

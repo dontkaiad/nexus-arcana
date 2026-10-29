@@ -283,3 +283,70 @@ def test_guess_fact_type():
     assert guess_fact_type("не любит звонки") == "dislikes"
     assert guess_fact_type("обожает чай") == "likes"
     assert guess_fact_type("работает в банке") == "other"
+
+
+# ── Спорные «Другие имена» в Mini App ────────────────────────────────────────
+
+def test_alias_disputes_pure():
+    from core.people import alias_disputes
+    rows = [_p(1, "Кай Тестова", ["Каюшка"], self_=True),
+            _p(2, "Оля Первая", ["Оля", "Кай", "Вадима", "Каюшка"]),             # «Оля» — свой; «Вадима» ≈ «Вадим»
+            _p(3, "Вадим Второй", []),
+            _p(4, "Вадим", [], status="rejected"),                                # rejected не участвует
+            _p(5, "Маша", ["Оля Первая"])]
+    d = alias_disputes(rows)
+    assert 1 not in d                                                              # алиасы «Я» не проверяем
+    got = {a["alias"]: [x["id"] for x in a["also"]] for a in d[2]}
+    assert got == {"Кай": [1], "Каюшка": [1]}                                      # «Вадима»: «Вадим Второй» — не целиком
+    assert [a["also"][0]["is_self"] for a in d[2]] == [True, True]
+    assert {a["alias"]: [x["id"] for x in a["also"]] for a in d[5]} == {"Оля Первая": [2]}
+    assert 3 not in d and 4 not in d
+
+
+def test_alias_disputes_stem_match_and_own_name():
+    from core.people import alias_disputes
+    rows = [_p(1, "Вадим", []), _p(2, "Оля", ["Вадима", "Оля"])]
+    assert [a["alias"] for a in alias_disputes(rows)[2]] == ["Вадима"]
+
+
+def test_duplicates_shared_names_only_when_mutual():
+    from core.people import find_duplicates
+    rows = [_p(1, "Первый", ["Второй"]), _p(2, "Второй", ["Первый"]),           # взаимно → «общие имена»
+            _p(3, "Третий", ["Четвёртый"]), _p(4, "Четвёртый", [])]               # в одну сторону → не shared_names
+    pairs = {(d["a"]["id"], d["b"]["id"]): d["reasons"] for d in find_duplicates(rows)}
+    assert "shared_names" in pairs[(1, 2)]
+    assert "shared_names" not in pairs.get((3, 4), [])
+
+
+@pytest.fixture
+def papi():
+    from miniapp.backend.routes import people as route
+    app.dependency_overrides[current_user_id] = lambda: TG
+    with patch.object(route, "get_user_id", AsyncMock(return_value=MARK)):
+        try:
+            yield TestClient(app)
+        finally:
+            app.dependency_overrides.clear()
+
+
+def test_api_summary_card_remove_reset(papi):
+    me = mk("Кай Тестова", is_self=True)
+    x = mk("Оля Первая", ["Кай Тестова", "Свой", "Вадим"])
+    y = mk("Вадим Второй", ["Вадим"])
+    mk_fact(x, status="confirmed", text_="любит зюзячай")
+    s = papi.get("/api/people/alias-disputes").json()
+    assert s["total"] == 3 and s["people"][0]["id"] == x and (s["people"][0]["disputed"], s["people"][0]["aliases"]) == (2, 3)
+    card = papi.get("/api/people/%d" % x).json()
+    info = {a["alias"]: [o["id"] for o in a["also"]] for a in card["aliases_info"]}
+    assert info == {"Кай Тестова": [me], "Свой": [], "Вадим": [y]}
+    r = papi.post("/api/people/%d/aliases/remove" % x, json={"alias": "Кай Тестова"})
+    assert r.status_code == 200 and r.json()["aliases"] == ["Свой", "Вадим"]
+    assert [p["id"] for p in prepo.resolve(MARK, ["Свой"])] == [x]
+    with get_engine().connect() as c:
+        assert c.execute(text("SELECT related_to FROM memories WHERE person_id = :p"), {"p": x}).scalar() == "Оля Первая | Свой | Вадим"
+    assert papi.get("/api/people/alias-disputes").json()["total"] == 2      # остался взаимный «Вадим» у обоих
+    assert papi.post("/api/people/%d/aliases/remove" % x, json={"alias": "нет такого"}).status_code == 404
+    assert papi.post("/api/people/%d/aliases/reset" % x).json()["aliases"] == []
+    assert prepo.resolve(MARK, ["Свой"]) == []                                     # aliases_norm пересчитан
+    assert papi.post("/api/people/%d/aliases/reset" % me).status_code == 409        # «Я» не сбрасываем
+    assert papi.post("/api/people/999999999/aliases/reset").status_code == 404

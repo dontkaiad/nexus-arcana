@@ -33,7 +33,7 @@ import re as _re
 from typing import Any, Dict, Iterable, List, Tuple
 
 # Вес каждого независимого сигнала; score = 1 − Π(1 − w), max 1.0.
-DUP_WEIGHTS = {"full_name": 0.7, "name_birthday": 0.6, "alias_is_name": 0.5}
+DUP_WEIGHTS = {"full_name": 0.7, "name_birthday": 0.6, "alias_is_name": 0.5, "shared_names": 0.5}
 DUP_LIMIT = 200
 
 
@@ -43,6 +43,41 @@ def _norm(s: str) -> str:
 
 def _tokens(s: str) -> List[str]:
     return [t for t in _norm(s).split() if t]
+
+
+def alias_key(s: str) -> str:
+    """Ключ имени/алиаса для сравнения «у двоих одно и то же имя»: слова в нижнем регистре, падежное окончание
+    у слов ≥4 букв срезано («Вадима» == «Вадим»). Короткие слова сравниваются как есть."""
+    return " ".join(_strip(w) if len(w) >= 4 else w for w in _tokens(s))
+
+
+def alias_disputes(rows: Iterable[Dict[str, Any]]) -> Dict[int, List[Dict[str, Any]]]:
+    """Спорные «Другие имена»: алиас человека целиком совпадает с именем или алиасом ДРУГОГО человека
+    (в том числе «Я»). {person_id: [{"alias", "also": [{"id","name","is_self"}]}]}; отклонённые не участвуют,
+    свои алиасы «Я» не проверяются, алиас = собственное имя — не спор."""
+    people_ = [r for r in rows if r.get("status") != "rejected"]
+    owners: Dict[str, List[Dict[str, Any]]] = {}
+    for p in people_:
+        keys = {alias_key(p["name"])} | {alias_key(a) for a in p.get("aliases") or []}
+        if p.get("is_self"):                  # «Я» откликается и на отдельное слово имени («Кай» для «Кай Тестова»)
+            keys |= {alias_key(w) for w in _tokens(p["name"])}
+        for k in keys:
+            if k:
+                owners.setdefault(k, []).append(p)
+    out: Dict[int, List[Dict[str, Any]]] = {}
+    for x in people_:
+        if x.get("is_self"):
+            continue
+        own = alias_key(x["name"])
+        for alias in x.get("aliases") or []:
+            k = alias_key(alias)
+            if not k or k == own:
+                continue
+            also = [{"id": y["id"], "name": y["name"], "is_self": bool(y.get("is_self"))}
+                    for y in owners.get(k, []) if y["id"] != x["id"]]
+            if also:
+                out.setdefault(x["id"], []).append({"alias": alias, "also": also})
+    return out
 
 
 def full_name_key(name: str) -> Optional[str]:
@@ -113,6 +148,21 @@ def find_duplicates(rows: Iterable[Dict[str, Any]], limit: int = DUP_LIMIT) -> L
             for b in by_name.get(ak, []):
                 if ak != " ".join(_tokens(a["name"])):
                     add(a, b, "alias_is_name")
+
+    # «общие имена»: взаимно — алиас каждого равен имени/алиасу другого (дубль или остаток склейки)
+    ident = {p["id"]: ({alias_key(p["name"])} | {alias_key(a) for a in p.get("aliases") or []}) - {""} for p in people_}
+    own_al = {p["id"]: {alias_key(a) for a in p.get("aliases") or []} - {""} for p in people_}
+    carriers_k: Dict[str, List[Dict]] = {}
+    for p in people_:
+        for k in ident[p["id"]]:
+            carriers_k.setdefault(k, []).append(p)
+    # популярное имя (у троих и более) — не сигнал, как и в alias_is_name
+    rare_al = {i: {k for k in ks if len(carriers_k.get(k, ())) <= 2} for i, ks in own_al.items()}
+    for a in people_:
+        for k in rare_al[a["id"]]:
+            for b in carriers_k.get(k, []):
+                if b["id"] > a["id"] and rare_al[b["id"]] & ident[a["id"]]:
+                    add(a, b, "shared_names")
 
     by_id = {p["id"]: p for p in people_}
     out = []

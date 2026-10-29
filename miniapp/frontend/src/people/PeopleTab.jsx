@@ -3,8 +3,8 @@ import { Search, X } from 'lucide-react'
 import PersonCard, { Header } from './PersonCard'
 import ReviewMode from './ReviewMode'
 import { Btn, Chip, Note, SourceLinks, inputStyle } from './parts'
-import { listPeople } from './peopleApi'
-import { fmtBirthday, fs, overlayBg, pendingOf, plural, redText } from './ui'
+import { aliasDisputes, listPeople } from './peopleApi'
+import { fmtBirthday, fs, overlayBg, pendingOf, plural, primaryColors, redText } from './ui'
 
 const FILTERS = [
   { k: 'all', l: 'Все', status: undefined },
@@ -24,6 +24,7 @@ export default function PeopleTab({ s, Sheet, onClose, onChanged, initialId, onO
   const [dq, setDq] = useState('')
   const [rows, setRows] = useState(null)
   const [pendingTotal, setPendingTotal] = useState(null)
+  const [disp, setDisp] = useState(null)          // {total, people:[{id,disputed,aliases}]} — спорные «Другие имена»
   const [err, setErr] = useState('')
   const [tick, setTick] = useState(0)
 
@@ -33,9 +34,13 @@ export default function PeopleTab({ s, Sheet, onClose, onChanged, initialId, onO
     if (view.name !== 'list') return undefined
     let dead = false
     setErr('')
-    const f = FILTERS.find((x) => x.k === filter)
-    listPeople({ status: f.status, q: dq }).then((d) => !dead && setRows(d.people || []))
-      .catch((e) => !dead && (setErr(String(e.message || e)), setRows([])))
+    const f = FILTERS.find((x) => x.k === filter)          // у 'disputed' нет статуса — берём всех и режем по id
+    Promise.all([listPeople({ status: f?.status, q: dq }), aliasDisputes().catch(() => null)]).then(([d, dd]) => {
+      if (dead) return
+      if (dd) setDisp(dd)
+      const only = filter === 'disputed' && dd ? new Set((dd.people || []).map((x) => x.id)) : null
+      setRows((d.people || []).filter((x) => !only || only.has(x.id)))
+    }).catch((e) => !dead && (setErr(String(e.message || e)), setRows([])))
     listPeople({ status: 'pending' }).then((d) => !dead && setPendingTotal((d.people || []).filter((x) => !x.is_self).length)).catch(() => {})
     return () => { dead = true }
   }, [filter, dq, tick, view.name])
@@ -67,9 +72,19 @@ export default function PeopleTab({ s, Sheet, onClose, onChanged, initialId, onO
           <Btn s={s} kind="primary" disabled={!pendingTotal} onClick={() => setView({ name: 'review' })} style={{ width: '100%', marginBottom: 8 }}>
             {pendingTotal ? `Разобрать: ${pendingTotal}` : pendingTotal === 0 ? 'Разбирать нечего' : 'Разобрать…'}
           </Btn>
+          {disp?.total > 0 && (
+            <div role="button" onClick={() => setFilter(filter === 'disputed' ? 'all' : 'disputed')} style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between', minHeight: 44, padding: '6px 12px', marginBottom: 8, borderRadius: 12, cursor: 'pointer',
+              border: `1px solid ${s.amber}`, background: filter === 'disputed' ? `${s.amber}40` : `${s.amber}1f`, color: s.text, fontSize: fs(13), fontWeight: 600,
+            }}>
+              <span>⚠ Спорные имена: {disp.total}</span>
+              <span style={{ fontSize: fs(11), fontWeight: 500 }}>{filter === 'disputed' ? 'показать всех' : 'у кого'}</span>
+            </div>
+          )}
           <div style={{ display: 'flex', gap: 6, overflowX: 'auto', margin: '0 -14px 10px', padding: '0 14px', scrollbarWidth: 'none' }}>
             {FILTERS.map((f) => (
-              <div key={f.k} className={`pill${filter === f.k ? ' active' : ''}`} onClick={() => setFilter(f.k)} style={{ flexShrink: 0, minHeight: 36 }}>{f.l}</div>
+              <div key={f.k} className={`pill${filter === f.k ? ' active' : ''}`} onClick={() => setFilter(f.k)}
+                style={{ flexShrink: 0, minHeight: 36, color: s.text, ...(filter === f.k ? { ...primaryColors(s), fontWeight: 600 } : {}) }}>{f.l}</div>
             ))}
           </div>
 

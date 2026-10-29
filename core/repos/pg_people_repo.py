@@ -351,6 +351,15 @@ def list_people(user_id: str, status: Optional[str] = None, q: Optional[str] = N
     return rows
 
 
+def alias_rows(user_id: str) -> List[Dict]:
+    """Минимум полей для аудита «Других имён» (без счётчиков и аккаунтов)."""
+    with get_engine().connect() as c:
+        rows = c.execute(text("SELECT id, name, aliases, is_self, status FROM people WHERE user_id = :u ORDER BY id"),
+                         {"u": user_id}).all()
+    return [{"id": r.id, "name": r.name, "aliases": list(r.aliases or []), "is_self": bool(r.is_self), "status": r.status}
+            for r in rows]
+
+
 def get_person(user_id: str, person_id: int) -> Optional[Dict]:
     with get_engine().connect() as c:
         r = c.execute(select(people).where(and_(people.c.id == person_id, people.c.user_id == user_id))).first()

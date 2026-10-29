@@ -23,6 +23,10 @@ export const approveAll = (id) => apiPost(`/api/people/${id}/approve-all`, {})
 export const rejectAll = (id) => apiPost(`/api/people/${id}/reject-all`, {})
 export const addFact = (id, text, type) => apiPost(`/api/people/${id}/facts`, { text, type })
 export const duplicates = () => apiGet('/api/people/duplicates')
+// Спорные «Другие имена» (совпали с именем/алиасом другого): сводка, убрать один, сбросить все
+export const aliasDisputes = () => apiGet('/api/people/alias-disputes')
+export const removeAlias = (id, alias) => apiPost(`/api/people/${id}/aliases/remove`, { alias })
+export const resetAliases = (id) => apiPost(`/api/people/${id}/aliases/reset`, {})
 export const mergePerson = (id, intoId) => apiPost(`/api/people/${id}/merge`, { into_id: intoId })
 export const addAccount = (id, body) => apiPost(`/api/people/${id}/accounts`, body)
 export const removeAccount = (id, accId) => apiDelete(`/api/people/${id}/accounts/${accId}`)
@@ -41,6 +45,7 @@ export function errText(e) {
   if (/both_clients/.test(m)) return 'У обоих людей уже есть клиент Арканы — сначала отвяжи одного из них'
   if (/person_taken/.test(m)) return 'Этот человек уже связан с другим клиентом'
   if (/person_rejected/.test(m)) return 'Отклонённого человека связать нельзя'
+  if (/self_aliases/.test(m)) return 'У карточки «Я» другие имена не сбрасываются'
   if (/^404/.test(m)) return 'Не найдено (возможно, уже изменено)'
   return m.replace(/^\d+\s+[^—]*—\s*/, '') || 'Ошибка'
 }
