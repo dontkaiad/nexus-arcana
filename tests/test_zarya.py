@@ -572,11 +572,31 @@ async def test_booking_falls_back_to_telegram_name_without_override():
     assert cb.call_args.kwargs["requester_name"] == "Вася с улицы"
 
 
-# ── #239: обязательный повод встречи (pending-purpose flow) ─────────────────
+# ── #239: обязательный повод встречи (pending-purpose flow, Postgres) ───────
+
+@pytest.fixture
+def pp_store():
+    """In-memory stand-in for core.booking.pending_purpose (same async API)."""
+    store: dict = {}
+
+    async def _set(tg_id, data):
+        store[tg_id] = dict(data)
+
+    async def _get(tg_id):
+        return store.get(tg_id)
+
+    async def _pop(tg_id):
+        return store.pop(tg_id, None)
+
+    with patch("zarya.handlers.set_pending", _set), \
+         patch("zarya.handlers.get_pending", _get), \
+         patch("zarya.handlers.pop_pending", _pop):
+        yield store
+
 
 @pytest.mark.asyncio
-async def test_on_book_friends_asks_for_purpose_instead_of_booking():
-    from zarya.handlers import on_book, _pending_purpose
+async def test_on_book_friends_asks_for_purpose_instead_of_booking(pp_store):
+    from zarya.handlers import on_book
     c = SimpleNamespace()
     c.data = "z:book:friends:1234567890:2"
     c.from_user = SimpleNamespace(id=42, full_name="Кто-то")
@@ -586,16 +606,15 @@ async def test_on_book_friends_asks_for_purpose_instead_of_booking():
     with patch("zarya.handlers.create_booking", AsyncMock()) as cb:
         await on_book(c, role="friend")
     cb.assert_not_awaited()  # бронь ещё не создана — ждём текст повода
-    p = dict(_pending_purpose[42])
+    p = dict(pp_store[42])
     assert p.pop("ts") > 0
     assert p == {"ctx": "friends", "ep": "1234567890", "hours": 2.0, "role": "friend", "chat_id": 42}
     assert "На что бронируешь" in c.message.edit_text.call_args[0][0]
-    _pending_purpose.clear()
 
 
 @pytest.mark.asyncio
-async def test_on_book_arcana_books_immediately_no_purpose_asked():
-    from zarya.handlers import on_book, _pending_purpose
+async def test_on_book_arcana_books_immediately_no_purpose_asked(pp_store):
+    from zarya.handlers import on_book
     c = SimpleNamespace()
     c.data = "z:book:arcana:1234567890:1"
     c.from_user = SimpleNamespace(id=42, full_name="Гость")
@@ -605,13 +624,13 @@ async def test_on_book_arcana_books_immediately_no_purpose_asked():
     with patch("zarya.handlers._do_book", AsyncMock()) as db:
         await on_book(c, role="guest")
     db.assert_awaited_once()
-    assert 42 not in _pending_purpose
+    assert 42 not in pp_store
 
 
 @pytest.mark.asyncio
-async def test_purpose_text_completes_the_booking():
-    from zarya.handlers import on_purpose_text, _pending_purpose
-    _pending_purpose[42] = {"ctx": "friends", "ep": "1234567890", "hours": 2.0, "role": "friend"}
+async def test_purpose_text_completes_the_booking(pp_store):
+    from zarya.handlers import on_purpose_text
+    pp_store[42] = {"ctx": "friends", "ep": "1234567890", "hours": 2.0, "role": "friend"}
     m = _msg()
     m.text = "шашлыки в парке"
     m.from_user = SimpleNamespace(id=42, full_name="Кто-то")
@@ -620,57 +639,207 @@ async def test_purpose_text_completes_the_booking():
         await on_purpose_text(m, role="friend")
     db.assert_awaited_once()
     assert db.call_args.kwargs["purpose"] == "шашлыки в парке"
-    assert 42 not in _pending_purpose
+    assert 42 not in pp_store
 
 
 @pytest.mark.asyncio
-async def test_purpose_text_empty_reprompts_and_keeps_pending():
-    from zarya.handlers import on_purpose_text, _pending_purpose
-    _pending_purpose[42] = {"ctx": "friends", "ep": "1234567890", "hours": 2.0, "role": "friend"}
+async def test_purpose_text_empty_reprompts_and_keeps_pending(pp_store):
+    from zarya.handlers import on_purpose_text
+    pp_store[42] = {"ctx": "friends", "ep": "1234567890", "hours": 2.0, "role": "friend"}
     m = _msg()
     m.text = "   "
     m.from_user = SimpleNamespace(id=42, full_name="Кто-то")
     with patch("zarya.handlers._do_book", AsyncMock()) as db:
         await on_purpose_text(m, role="friend")
     db.assert_not_awaited()
-    assert 42 in _pending_purpose  # осталось ждать текст
+    assert 42 in pp_store  # осталось ждать текст
     m.answer.assert_awaited_once()
-    _pending_purpose.clear()
 
 
-def test_has_pending_purpose_filter():
-    from zarya.handlers import _has_pending_purpose, _pending_purpose
-    _pending_purpose[999] = {}
+@pytest.mark.asyncio
+async def test_has_pending_purpose_filter(pp_store):
+    from zarya.handlers import _has_pending_purpose
+    pp_store[999] = {}
     yes = SimpleNamespace(from_user=SimpleNamespace(id=999))
     no = SimpleNamespace(from_user=SimpleNamespace(id=1))
-    assert _has_pending_purpose(yes) is True
-    assert _has_pending_purpose(no) is False
-    _pending_purpose.clear()
+    assert await _has_pending_purpose(yes) is True
+    assert await _has_pending_purpose(no) is False
 
 
-def test_pending_purpose_ignores_other_chats():
+@pytest.mark.asyncio
+async def test_pending_purpose_ignores_other_chats(pp_store):
     """Бронь начата в ЛС, повод не дописан → сообщение в групповом чате,
     где есть Заря, НЕ должно становиться поводом брони."""
     import time
-    from zarya.handlers import _has_pending_purpose, _pending_purpose
-    _pending_purpose[42] = {"ctx": "friends", "ep": "1", "hours": 1.0, "role": "friend",
-                            "chat_id": 42, "ts": time.time()}
+    from zarya.handlers import _has_pending_purpose
+    pp_store[42] = {"ctx": "friends", "ep": "1", "hours": 1.0, "role": "friend",
+                    "chat_id": 42, "ts": time.time()}
     user = SimpleNamespace(id=42)
     group_msg = SimpleNamespace(from_user=user, chat=SimpleNamespace(id=-100500), text="го в кино")
     dm_msg = SimpleNamespace(from_user=user, chat=SimpleNamespace(id=42), text="кино")
     cmd_msg = SimpleNamespace(from_user=user, chat=SimpleNamespace(id=42), text="/slots")
-    assert _has_pending_purpose(group_msg) is False
-    assert _has_pending_purpose(cmd_msg) is False
-    assert _has_pending_purpose(dm_msg) is True
-    assert 42 in _pending_purpose  # в ЛС всё ещё ждём повод
-    _pending_purpose.clear()
+    assert await _has_pending_purpose(group_msg) is False
+    assert await _has_pending_purpose(cmd_msg) is False
+    assert await _has_pending_purpose(dm_msg) is True
+    assert 42 in pp_store  # в ЛС всё ещё ждём повод
 
 
-def test_pending_purpose_expires():
-    import time
-    from zarya.handlers import _has_pending_purpose, _pending_purpose, _PURPOSE_TTL_SEC
-    _pending_purpose[42] = {"ctx": "friends", "ep": "1", "hours": 1.0, "role": "friend",
-                            "chat_id": 42, "ts": time.time() - _PURPOSE_TTL_SEC - 1}
-    m = SimpleNamespace(from_user=SimpleNamespace(id=42), chat=SimpleNamespace(id=42), text="кино")
-    assert _has_pending_purpose(m) is False
-    assert 42 not in _pending_purpose
+def test_pending_purpose_store_ttl_decode():
+    import json, time
+    from core.booking.pending_purpose import PURPOSE_TTL_SEC, _decode
+    fresh = json.dumps({"ts": time.time(), "ep": "1"})
+    stale = json.dumps({"ts": time.time() - PURPOSE_TTL_SEC - 5, "ep": "1"})
+    assert _decode(fresh)["ep"] == "1"
+    assert _decode(stale) is None
+    assert _decode(None) is None
+    assert _decode("{not json") is None
+
+
+# ── one-shot booking parser ─────────────────────────────────────────────────
+
+@pytest.mark.parametrize("t,day_delta,hm,hours,note", [
+    ("завтра в 19 шашлыки", 1, (19, 0), None, "шашлыки"),
+    ("запиши меня в пятницу с 19 до 23 др у Ромы", 1, (19, 0), 4.0, "др у Ромы"),
+    ("послезавтра в 12:30 на 3ч созвон", 2, (12, 30), 3.0, "созвон"),
+    ("завтра в 19", 1, (19, 0), None, ""),
+])
+def test_parse_quick_booking(t, day_delta, hm, hours, note):
+    from zarya.formatting import parse_quick_booking
+    today = date(2026, 10, 29)  # Thursday → «пятницу» = +1
+    q = parse_quick_booking(t, today)
+    assert q.day == today + timedelta(days=day_delta)
+    assert (q.hour, q.minute) == hm
+    assert q.hours == hours
+    assert q.note == note
+
+
+@pytest.mark.parametrize("t", ["завтра шашлыки", "в 19 шашлыки", "когда у Кай окно", "", "завтра в 25"])
+def test_parse_quick_booking_needs_date_and_time(t):
+    from zarya.formatting import parse_quick_booking
+    assert parse_quick_booking(t, date(2026, 10, 29)) is None
+
+
+# ── one-shot handler: admin fast-path / friend / partial / no self-notify ───
+
+def _quick_msg(text, tg_id=42):
+    m = _msg()
+    m.text = text
+    m.from_user = SimpleNamespace(id=tg_id, full_name="Кто-то")
+    m.chat = SimpleNamespace(type="private", id=tg_id)
+    m.bot = SimpleNamespace()
+    return m
+
+
+def _future_text(extra=""):
+    # «завтра» всегда в будущем → тест не зависит от текущего времени суток
+    return f"завтра в 19 {extra}".strip()
+
+
+@pytest.mark.asyncio
+async def test_admin_fast_path_books_confirmed_without_slots_or_notify(pp_store):
+    from zarya.handlers import on_quick_booking
+    m = _quick_msg(_future_text("с 19 до 23 шашлыки").replace("в 19 с 19", "с 19"))
+    fake = SimpleNamespace(id=7)
+    with patch("zarya.handlers._owner_user_id", AsyncMock(return_value="uid")), \
+         patch("core.auth_grants.get_display_name", AsyncMock(return_value=None)), \
+         patch("zarya.handlers.create_booking", AsyncMock(return_value=fake)) as cb, \
+         patch("zarya.handlers._confirm_flow", AsyncMock()) as cf, \
+         patch("zarya.handlers._notify_owner", AsyncMock()) as no, \
+         patch("zarya.handlers.free_slots", AsyncMock()) as fs:
+        await on_quick_booking(m, role="admin")
+    kw = cb.call_args.kwargs
+    assert kw["status"] == "confirmed" and kw["context"] == "friends"
+    assert kw["hours"] == 4.0 and kw["note"] == "шашлыки"
+    cf.assert_awaited_once()
+    no.assert_not_awaited()
+    fs.assert_not_awaited()
+    text = m.answer.call_args[0][0]
+    assert text.startswith("✅ ") and "\n💬 шашлыки" in text
+    assert m.answer.call_args.kwargs["reply_markup"] is not None
+
+
+@pytest.mark.asyncio
+async def test_admin_fast_path_default_hours_and_empty_note(pp_store):
+    from zarya.handlers import on_quick_booking
+    m = _quick_msg("запиши меня завтра в 19")
+    with patch("zarya.handlers._owner_user_id", AsyncMock(return_value="uid")), \
+         patch("core.auth_grants.get_display_name", AsyncMock(return_value=None)), \
+         patch("zarya.handlers.create_booking", AsyncMock(return_value=SimpleNamespace(id=1))) as cb, \
+         patch("zarya.handlers._confirm_flow", AsyncMock()):
+        await on_quick_booking(m, role="admin")
+    assert cb.call_args.kwargs["hours"] == 4.0
+    assert cb.call_args.kwargs["note"] == ""
+    assert "💬" not in m.answer.call_args[0][0]
+
+
+@pytest.mark.asyncio
+async def test_friend_one_shot_books_without_buttons_or_questions(pp_store):
+    from zarya.handlers import on_quick_booking
+    m = _quick_msg("завтра в 19 на 2ч шашлыки", tg_id=555)
+    with patch("zarya.handlers._do_book", AsyncMock()) as db:
+        await on_quick_booking(m, role="friend")
+    db.assert_awaited_once()
+    assert db.call_args.args[0] == "friends"
+    assert db.call_args.args[2] == 2.0
+    assert db.call_args.kwargs["purpose"] == "шашлыки"
+    assert 555 not in pp_store
+    m.answer.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_friend_one_shot_busy_slot_is_rejected(pp_store):
+    from zarya.handlers import on_quick_booking
+    from core.booking.busy import BusyInterval
+    m = _quick_msg("завтра в 19 шашлыки", tg_id=555)
+    day = datetime.now(timezone.utc) + timedelta(days=1)
+    busy = BusyInterval(day - timedelta(days=2), day + timedelta(days=2), "task", "x", "1")
+    with patch("zarya.handlers._owner_user_id", AsyncMock(return_value="uid")), \
+         patch("zarya.handlers.busy_intervals", AsyncMock(return_value=[busy])), \
+         patch("core.auth_grants.get_display_name", AsyncMock(return_value=None)), \
+         patch("zarya.handlers.create_booking", AsyncMock()) as cb:
+        await on_quick_booking(m, role="friend")
+    cb.assert_not_awaited()
+    assert "увели" in m.answer.call_args[0][0]
+
+
+@pytest.mark.asyncio
+async def test_friend_partial_input_asks_only_for_purpose(pp_store):
+    from zarya.handlers import on_quick_booking
+    m = _quick_msg("завтра в 19", tg_id=555)
+    with patch("zarya.handlers._do_book", AsyncMock()) as db:
+        await on_quick_booking(m, role="friend")
+    db.assert_not_awaited()
+    assert pp_store[555]["ctx"] == "friends" and pp_store[555]["chat_id"] == 555
+    assert "На что бронируешь" in m.answer.call_args[0][0]
+
+
+def test_quick_filter_only_for_complete_input_and_trusted_roles():
+    from zarya.handlers import _is_quick_booking
+    ok = _quick_msg("завтра в 19 шашлыки")
+    assert _is_quick_booking(ok, role="friend") is True
+    assert _is_quick_booking(ok, role="admin") is True
+    assert _is_quick_booking(ok, role="guest") is False
+    assert _is_quick_booking(_quick_msg("завтра шашлыки"), role="friend") is False  # нет времени
+    assert _is_quick_booking(_quick_msg("/slots завтра в 19"), role="friend") is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("who,notified", [(700000001, False), (555, True)])
+async def test_no_self_notify_for_owner_booking(who, notified):
+    from zarya.handlers import _do_book
+    from zarya.formatting import epoch as _epoch
+    ep = str(_epoch(datetime.now(timezone.utc) + timedelta(days=1)))
+    c = _booking_call(tg_id=who)
+    with patch("zarya.handlers._owner_user_id", AsyncMock(return_value="uid")), \
+         patch("zarya.handlers.busy_intervals", AsyncMock(return_value=[])), \
+         patch("core.auth_grants.get_display_name", AsyncMock(return_value="Рома")), \
+         patch("zarya.handlers.create_booking", AsyncMock(return_value=SimpleNamespace(id=1))), \
+         patch("zarya.handlers._confirm_flow", AsyncMock()), \
+         patch("zarya.handlers._notify_owner", AsyncMock()) as no, \
+         patch("zarya.handlers.config") as cfg:
+        cfg.allowed_ids = [700000001]
+        await _do_book("friends", ep, 1.0, "friend", from_user=c.from_user,
+                       chat_type="private", reply=c.message.edit_text, bot=c.bot, purpose="кино")
+    assert no.await_count == (1 if notified else 0)
+    if notified:
+        assert no.call_args[0][0].startswith("⭐ Новая бронь: <b>Рома</b>")

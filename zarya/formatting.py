@@ -5,7 +5,8 @@ No aiogram / DB imports here so it stays trivially testable.
 from __future__ import annotations
 
 import re
-from datetime import date, datetime, timedelta, timezone
+from dataclasses import dataclass
+from datetime import date, datetime, time, timedelta, timezone
 from typing import List, Optional
 
 MSK = timezone(timedelta(hours=3))
@@ -97,3 +98,76 @@ def epoch(dt: datetime) -> int:
 
 def from_epoch(v: str | int) -> datetime:
     return datetime.fromtimestamp(int(v), tz=timezone.utc)
+
+
+# ── one-shot booking parser: «завтра в 19 шашлыки», «в пятницу с 19 до 23 др» ─
+# Детерминированно, без LLM. Нужны дата + время; остаток текста — повод.
+
+_DATE_WORDS = (
+    r"послезавтра|завтра|сегодня|понедельник\w*|вторник\w*|сред\w*|четверг\w*|"
+    r"пятниц\w*|суббот\w*|воскресень\w*"
+)
+_DATE_STRIP_RE = re.compile(rf"(?:\b(?:в|во|на)\s+)?\b(?:{_DATE_WORDS})", re.IGNORECASE)
+_RANGE_RE = re.compile(
+    r"(?:\bс\s+)?\b(\d{1,2})(?::(\d{2}))?\s*(?:до|-|–)\s*(\d{1,2})(?::(\d{2}))?\b",
+    re.IGNORECASE,
+)
+_AT_RE = re.compile(r"\b(?:в|к)\s+(\d{1,2})(?::(\d{2}))?(?:\s*(?:ч\b|час\w*))?(?!\d)", re.IGNORECASE)
+_DURATION_RE = re.compile(
+    r"(?:\bна\s+)?\b(\d+(?:[.,]\d+)?)\s*(?:ч\b|час\w*)", re.IGNORECASE)
+_FILLER_RE = re.compile(
+    r"\b(?:запиши|записать|запишите|забронируй|забронировать|поставь|меня|мне|пожалуйста|плиз)\b",
+    re.IGNORECASE,
+)
+
+
+@dataclass
+class QuickBooking:
+    day: date
+    hour: int
+    minute: int
+    hours: Optional[float]  # None → не названа
+    note: str
+
+    def start(self) -> datetime:
+        return datetime.combine(self.day, time(self.hour, self.minute), tzinfo=MSK)
+
+
+def parse_quick_booking(text: str, today: date) -> Optional[QuickBooking]:
+    """Дата (extract_asked_date) + время («в 19», «с 19 до 23») → QuickBooking.
+    Нет даты или времени → None (идёт обычный показ слотов)."""
+    t = text or ""
+    day = extract_asked_date(t, today)
+    if day is None:
+        return None
+    hours: Optional[float] = None
+    m = _RANGE_RE.search(t)
+    if m:
+        h1, m1 = int(m.group(1)), int(m.group(2) or 0)
+        h2, m2 = int(m.group(3)), int(m.group(4) or 0)
+        if not (0 <= h1 < 24 and 0 <= h2 <= 24 and m1 < 60 and m2 < 60):
+            return None
+        span = (h2 * 60 + m2) - (h1 * 60 + m1)
+        if span <= 0:
+            span += 24 * 60
+        hours = span / 60
+        hour, minute = h1, m1
+        t = t[:m.start()] + " " + t[m.end():]
+    else:
+        m = _AT_RE.search(t)
+        if not m:
+            return None
+        hour, minute = int(m.group(1)), int(m.group(2) or 0)
+        if hour > 23 or minute > 59:
+            return None
+        t = t[:m.start()] + " " + t[m.end():]
+        d = _DURATION_RE.search(t)
+        if d:
+            hours = float(d.group(1).replace(",", "."))
+            t = t[:d.start()] + " " + t[d.end():]
+    if hours is not None and not (0 < hours <= 12):
+        return None
+    t = _DATE_STRIP_RE.sub(" ", t)
+    t = _FILLER_RE.sub(" ", t)
+    note = re.sub(r"\s+", " ", t).strip(" ,.;:—-")
+    return QuickBooking(day=day, hour=hour, minute=minute, hours=hours, note=note)
