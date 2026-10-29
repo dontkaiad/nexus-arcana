@@ -29,6 +29,8 @@ logger = logging.getLogger("zarya.scheduler")
 
 _LEADS = ((24, "за сутки"), (2, "через 2 часа"))
 _SWEEP_MIN = 5
+_FIRE_TOLERANCE = timedelta(minutes=10)   # _fire молчит, если время брони уехало
+_REARM_TOLERANCE = timedelta(minutes=1)   # sweep пересобирает job при большем расхождении
 _UTC = timezone.utc
 
 _scheduler: "AsyncIOScheduler | None" = None
@@ -48,11 +50,17 @@ async def _send(tg_id: int, text: str) -> None:
         logger.warning("reminder send to %s failed: %s", tg_id, e)
 
 
-async def _fire(booking_id: int, phrase: str) -> None:
+async def _fire(booking_id: int, phrase: str, hours: int) -> None:
     from core.booking.repo import get_booking
 
     b = await get_booking(booking_id=booking_id)
     if not b or b.status != "confirmed":
+        return
+    # Бронь могли передвинуть в БД (веб, Nexus), а job ещё со старым временем —
+    # sweep поправит, но до него напоминание про прежнее время слать нельзя.
+    expected = b.start_at - timedelta(hours=hours)
+    if abs(datetime.now(_UTC) - expected) > _FIRE_TOLERANCE:
+        logger.info("skip stale reminder bk#%s lead=%sh (fire time moved)", booking_id, hours)
         return
     when = b.start_at.astimezone(MSK).strftime("%d.%m в %H:%M")
     kb = _cancel_kb(b.id)
@@ -98,7 +106,7 @@ def schedule(b) -> None:
         try:
             _scheduler.add_job(
                 _fire, DateTrigger(run_date=fire_at),
-                args=[b.id, phrase], id=jid, replace_existing=True,
+                args=[b.id, phrase, hours], id=jid, replace_existing=True,
                 misfire_grace_time=3600,
             )
         except Exception as e:  # noqa: BLE001
@@ -136,8 +144,10 @@ async def restore_on_startup() -> None:
 
 
 async def _sweep() -> None:
-    """Belt-and-braces: re-arm confirmed bookings whose jobs are missing
-    (added via web while Zarya was down, or a lost in-memory job)."""
+    """Belt-and-braces: re-arm confirmed bookings whose jobs are missing (added
+    via web while Zarya was down, a lost in-memory job) or stand on a stale time
+    (booking moved in the DB): job.next_run_time off by >1 min from
+    start − lead → rebuilt; lead already in the past but job exists → dropped."""
     if not _scheduler:
         return
     try:
@@ -146,8 +156,28 @@ async def _sweep() -> None:
         logger.warning("sweep list failed: %s", e)
         return
     for b in rows:
+        now = datetime.now(_UTC)
+        rearm = False
         for hours, _ in _LEADS:
             fire_at = b.start_at - timedelta(hours=hours)
-            if fire_at > datetime.now(_UTC) and not _scheduler.get_job(_job_id(b.id, hours)):
-                schedule(b)
-                break
+            jid = _job_id(b.id, hours)
+            job = _scheduler.get_job(jid)
+            if job is None:
+                rearm = rearm or fire_at > now
+                continue
+            if fire_at <= now:
+                _remove(jid)
+                continue
+            nrt = getattr(job, "next_run_time", None)
+            if nrt is not None and abs(nrt - fire_at) > _REARM_TOLERANCE:
+                _remove(jid)
+                rearm = True
+        if rearm:
+            schedule(b)
+
+
+def _remove(jid: str) -> None:
+    try:
+        _scheduler.remove_job(jid)
+    except Exception:  # noqa: BLE001 — already fired / gone
+        pass
