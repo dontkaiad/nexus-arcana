@@ -59,6 +59,9 @@ class Memory:
     updated_at: str = ""     # ISO string from updated_at column
     person_id: Optional[int] = None   # People domain (ADR-0027)
     review_status: str = "confirmed"  # pending | confirmed | rejected
+    source_quote: str = ""            # провенанс факта о человеке (цитата / платформа / дата сообщения)
+    source_platform: str = ""
+    source_message_date: str = ""     # ISO yyyy-mm-dd
 
 
 # ── Row → domain object ───────────────────────────────────────────────────────
@@ -83,6 +86,9 @@ def _row_to_memory(row) -> Memory:
         updated_at=updated_str,
         person_id=getattr(row, "person_id", None),
         review_status=getattr(row, "review_status", None) or "confirmed",
+        source_quote=getattr(row, "source_quote", None) or "",
+        source_platform=getattr(row, "source_platform", None) or "",
+        source_message_date=(getattr(row, "source_message_date", None) or "") and row.source_message_date.isoformat(),
     )
 
 

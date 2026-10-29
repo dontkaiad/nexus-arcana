@@ -438,7 +438,7 @@ async def run(dry: bool, no_embed: bool, batch_size: int, pause: float, threshol
             fact_new[tag] += is_new
             if dry or not is_new:
                 continue
-            text_ = f["fact"] if p["is_self"] else fact_text(p["name"], f["fact"])
+            text_ = f["fact"]    # без префикса «Имя: » — имя рисуется из person
             mid, was_updated = await repo.upsert(
                 text_, key, CATEGORY, scope, rel, SOURCE, user_id, person_id=pid,
                 review_status="pending", index=False,

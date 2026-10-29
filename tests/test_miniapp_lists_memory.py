@@ -625,13 +625,13 @@ def test_memory_excludes_budget_and_adhd_categories(client):
     assert r.status_code == 200
     data = r.json()
     names = {i["id"] for i in data["items"]}
-    assert names == {"m1", "m4"}
+    assert names == {"m1"}      # m4 («👥 Люди») — в разделе «Люди», не в общем списке
     # #49: API теперь всегда возвращает канонический список категорий
     # (минус бюджетные/ADHD), даже если в данных пусто — фронт показывает
     # все табы и ставит empty state в пустые. Проверяем что обе категории
     # с реальными данными присутствуют + бюджетные/ADHD исключены.
     cats = set(data["categories"])
-    assert {"🛒 Предпочтения", "👥 Люди"}.issubset(cats)
+    assert "🛒 Предпочтения" in cats and "👥 Люди" not in cats
     # "💰 Лимит" теперь всегда в списке (спец-сгруппированный вид); остальные
     # бюджетные/ADHD — по-прежнему исключены из плоского списка.
     assert cats.isdisjoint({"🦋 СДВГ", "📥 Доход", "🔒 Постоянные", "📋 Долги", "🎯 Цели"})
@@ -689,11 +689,13 @@ def test_memory_cat_filter(client):
                AsyncMock(return_value=mems)), \
          patch("miniapp.backend.routes.memory.get_user_id",
                AsyncMock(return_value="")):
-        r = client.get("/api/memory?cat=%F0%9F%91%A5%20%D0%9B%D1%8E%D0%B4%D0%B8")  # 👥 Люди
+        r = client.get("/api/memory?cat=%F0%9F%9B%92%20%D0%9F%D1%80%D0%B5%D0%B4%D0%BF%D0%BE%D1%87%D1%82%D0%B5%D0%BD%D0%B8%D1%8F")  # 🛒 Предпочтения
 
     assert r.status_code == 200
     items = r.json()["items"]
-    assert len(items) == 1 and items[0]["id"] == "m2"
+    assert len(items) == 1 and items[0]["id"] == "m1"
+    # факты «👥 Люди» живут в разделе «Люди»: не в общем списке и не отдельным чипом
+    assert "👥 Люди" not in r.json()["categories"]
 
 
 # ── «💰 Лимит» — сгруппированный спец-вид ──────────────────────────────────

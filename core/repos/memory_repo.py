@@ -90,10 +90,13 @@ class MemoryRepo:
         related_to: str,
         source: str,
         user_id: str,
+        person_id: Optional[int] = None,
+        review_status: str = "confirmed",
     ) -> Tuple[Optional[str], bool]:
         """Upsert (find by key+category → update; else create). Returns (id, was_updated)."""
         try:
-            return await self._pg.upsert(fact, key, category, scope, related_to, source, user_id)
+            return await self._pg.upsert(fact, key, category, scope, related_to, source, user_id,
+                                         person_id=person_id, review_status=review_status)
         except Exception as e:
             logger.error("MemoryRepo.upsert: %s", e)
             return None, False

@@ -412,7 +412,7 @@ async def test_manual_fact_is_confirmed_visible_idempotent(client):
     with get_engine().connect() as c:
         row = c.execute(text("SELECT fact_text, key_name, source, review_status, related_to, scope, person_id "
                              "FROM memories WHERE id=:i"), {"i": fid}).one()
-    assert row.fact_text == "Мария: зюзябрикс любит чай"          # имя подставлено
+    assert row.fact_text == "зюзябрикс любит чай"                  # без префикса «Имя: » — имя рисуется из person
     assert row.key_name.startswith("person_%d_likes_" % pid)
     assert (row.source, row.review_status, row.scope, row.person_id) == ("manual", "confirmed", "nexus", pid)
     assert row.related_to == "Мария Иванова | Машка"

@@ -15,7 +15,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.exc import IntegrityError
 
 from core.people import (
-    UNKNOWN_YEAR, age, birthday_iso, fact_hash, fact_text, find_duplicates, related_to_str, strip_name_prefix,
+    UNKNOWN_YEAR, age, birthday_iso, fact_hash, find_duplicates, related_to_str, strip_name_prefix,
 )
 from core.repos.pg_memory_repo import PgMemoryRepo, bot_to_scope
 from core.repos import pg_client_links as client_links
@@ -316,8 +316,9 @@ async def add_fact(person_id: int, body: FactBody, tg_id: int = Depends(current_
     if not p:
         raise HTTPException(status_code=404, detail="person not found")
     key = "person_%d_%s_%s" % (person_id, body.type, fact_hash(text_))
+    # текст без префикса «Имя: » — имя рисуется из person
     mid, _ = await PgMemoryRepo().upsert(
-        fact_text(p["name"], text_), key, "👥 Люди", bot_to_scope("☀️ Nexus"),
+        text_, key, "👥 Люди", bot_to_scope("☀️ Nexus"),
         related_to_str(p["name"], p.get("aliases") or []), "manual", user_id,
         person_id=person_id, review_status="confirmed",
     )

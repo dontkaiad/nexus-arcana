@@ -512,6 +512,12 @@ export function adaptMemory(data) {
       key: m.key || null,           // #6: ключ — там же
       date: m.date || null,         // #6: created_at[:10] — в детализации по тапу
       isCurrent: m.is_current !== false,  // #6: обратимая «неактуально»
+      // факт о человеке: кнопка 👥 → карточка; провенанс — в раскрытии
+      personId: m.person_id || null,
+      personName: m.person_name || null,
+      quote: m.source_quote || null,
+      platform: m.source_platform || null,
+      messageDate: m.source_message_date || null,
     })),
     categories: data.categories || [],
     // «💰 Лимит» — сгруппированный спец-вид (Постоянные/Разовые/Лимиты/Доход)

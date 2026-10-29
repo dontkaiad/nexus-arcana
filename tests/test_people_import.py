@@ -373,5 +373,5 @@ def test_erased_fact_is_not_resurrected_by_reimport(staging):
     _run(); _run()
     after = [(m.id, m.key_name, m.fact_text, m.review_status) for m in _state()[1]]
     assert after == before                                              # ни новой строки, ни возвращённого текста
-    assert [f["text"] for f in prepo.list_facts(ppl[0].id)] == ["Имя1: не ест рыбу"]   # в выдаче стёртого нет
+    assert [f["text"] for f in prepo.list_facts(ppl[0].id)] == ["не ест рыбу"]   # в выдаче стёртого нет; без префикса «Имя: »
     assert prepo.counts_for([ppl[0].id])[ppl[0].id]["counts"] == {"pending": 1, "confirmed": 0, "rejected": 0}

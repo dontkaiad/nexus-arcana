@@ -8,7 +8,7 @@ import { Btn, Chip, Note, inputStyle, Label } from './parts'
 import {
   addFact, approveAll, approveFact, eraseFact, errText, getPerson, rejectAll, rejectFact, restoreFact,
 } from './peopleApi'
-import { STATUS_LABEL, TYPE_CHOICES, fmtBirthday, fs, haptic, plural, statusColor, typeMeta } from './ui'
+import { STATUS_LABEL, TYPE_CHOICES, fmtBirthday, fs, haptic, plural, primaryColors, redText, statusColor, typeMeta } from './ui'
 
 // Карточка человека вне режима разбора: правка, ручной факт, склейка, ревью по одному факту.
 export default function PersonCard({ s, Sheet, id, onBack, onChanged, onStartReview, onOpenClient }) {
@@ -40,7 +40,7 @@ export default function PersonCard({ s, Sheet, id, onBack, onChanged, onStartRev
     return (
       <div>
         <Header s={s} onBack={onBack} title="" />
-        <Note s={s} color={err ? s.red : undefined}>{err || 'Загружаю…'}</Note>
+        <Note s={s} color={err ? redText(s) : undefined}>{err || 'Загружаю…'}</Note>
       </div>
     )
   }
@@ -71,37 +71,37 @@ export default function PersonCard({ s, Sheet, id, onBack, onChanged, onStartRev
           {p.aliases.map((a) => <Chip key={a} s={s}>{a}</Chip>)}
         </div>
       )}
-      {p.notes && <div style={{ fontSize: fs(12), color: s.tS, whiteSpace: 'pre-wrap', margin: '4px 0 8px', wordBreak: 'break-word' }}>{p.notes}</div>}
+      {p.notes && <div style={{ fontSize: fs(12), color: s.text, whiteSpace: 'pre-wrap', margin: '4px 0 8px', wordBreak: 'break-word' }}>{p.notes}</div>}
 
-      {err && <Note s={s} color={s.red}>{err}</Note>}
+      {err && <Note s={s} color={redText(s)}>{err}</Note>}
 
       {p.facts.length === 0 && <Note s={s}>Фактов пока нет</Note>}
       <FactGroups s={s} groups={p.facts} expanded={expanded} onToggle={toggle} showMentions={p.is_self}
-        textStyle={(f) => (f.review_status === 'rejected' ? { textDecoration: 'line-through', opacity: 0.5 } : {})}
+        textStyle={(f) => (f.review_status === 'rejected' ? { textDecoration: 'line-through', color: s.tS } : {})}
         left={(f) => (
           <div title={f.review_status} style={{ width: 10, height: 10, borderRadius: 5, margin: '0 10px 0 6px', flexShrink: 0, background: statusColor(s, f.review_status) }} />
         )}
         right={(f) => (
           <div style={{ display: 'flex', alignItems: 'center', flexShrink: 0 }}>
             {f.review_status === 'pending' && (<>
-              <div role="button" aria-label="принять" onClick={() => act(() => approveFact(p.id, f.id))} style={iconBtn(s.tS)}>✓</div>
-              <div role="button" aria-label="отклонить" onClick={() => act(() => rejectFact(p.id, f.id))} style={iconBtn(s.red)}>✕</div>
+              <div role="button" aria-label="принять" onClick={() => act(() => approveFact(p.id, f.id))} style={iconBtn(s.text)}>✓</div>
+              <div role="button" aria-label="отклонить" onClick={() => act(() => rejectFact(p.id, f.id))} style={iconBtn(redText(s))}>✕</div>
             </>)}
             {f.review_status === 'confirmed' && (
-              <div role="button" onClick={() => act(() => rejectFact(p.id, f.id))} style={textBtn(s.red)}>✕ убрать</div>
+              <div role="button" onClick={() => act(() => rejectFact(p.id, f.id))} style={textBtn(redText(s))}>✕ убрать</div>
             )}
           </div>
         )}
         caption={(f) => (
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', margin: '-4px 0 6px 26px' }}>
-            <span style={{ fontSize: fs(10), fontWeight: 700, letterSpacing: '0.3px', color: s.text, opacity: 0.75 }}>
+            <span style={{ fontSize: fs(10), fontWeight: 700, letterSpacing: '0.3px', color: s.text }}>
               {f.review_status === 'pending' ? 'на проверке' : f.review_status === 'confirmed' ? 'принят' : 'отклонён'}
             </span>
             {f.review_status === 'rejected' && (<>
               <div role="button" onClick={() => act(() => restoreFact(p.id, f.id))} style={pillBtn(s, s.text)}>вернуть</div>
               {eraseId === f.id
-                ? <div role="button" onClick={() => { setEraseId(null); act(() => eraseFact(p.id, f.id)) }} style={pillBtn(s, s.red, true)}>Стереть навсегда?</div>
-                : <div role="button" onClick={() => setEraseId(f.id)} style={pillBtn(s, s.red)}>Стереть</div>}
+                ? <div role="button" onClick={() => { setEraseId(null); act(() => eraseFact(p.id, f.id)) }} style={pillBtn(s, redText(s), true)}>Стереть навсегда?</div>
+                : <div role="button" onClick={() => setEraseId(f.id)} style={pillBtn(s, redText(s))}>Стереть</div>}
             </>)}
           </div>
         )}
@@ -115,7 +115,7 @@ export default function PersonCard({ s, Sheet, id, onBack, onChanged, onStartRev
             {TYPE_CHOICES.map((t) => (
               <div key={t} onClick={() => setType(t)} style={{
                 padding: '8px 12px', minHeight: 36, borderRadius: 999, fontSize: fs(12), cursor: 'pointer',
-                border: `1px solid ${type === t ? s.acc : s.tS}`, background: type === t ? s.acc : 'transparent', color: type === t ? '#fff' : s.text,
+                border: `1px solid ${type === t ? primaryColors(s).background : s.tS}`, background: type === t ? primaryColors(s).background : 'transparent', color: type === t ? primaryColors(s).color : s.text,
               }}>{typeMeta(t).icon} {typeMeta(t).label.toLowerCase()}</div>
             ))}
           </div>

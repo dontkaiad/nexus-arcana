@@ -143,6 +143,32 @@ def fact_text(name: str, fact: str) -> str:
     return fact if not stem or stem in _norm(fact) else "%s: %s" % (first, fact)
 
 
+_FT_IMPORTANT = _re.compile(r"аллерги|нельзя|противопоказ|непереносим|болеет|диабет|беремен|важно", _re.I)
+_FT_DISLIKES = _re.compile(r"\bне\s+(любит|ест|пьёт|пьет|терпит|переносит|выносит)|ненавидит|бесит|раздража", _re.I)
+_FT_LIKES = _re.compile(r"\b(любит|обожает|нравится|фанат)", _re.I)
+
+
+def guess_fact_type(fact: str) -> str:
+    """Тип факта для ручной записи из чата («запомни, что Оля любит чай»): important | dislikes | likes | other.
+    Регулярки, без LLM; ошибиться не страшно — тип правится в карточке."""
+    if _FT_IMPORTANT.search(fact or ""):
+        return "important"
+    if _FT_DISLIKES.search(fact or ""):
+        return "dislikes"
+    if _FT_LIKES.search(fact or ""):
+        return "likes"
+    return "other"
+
+
+def owner_fact(fact: str, related_to: str = "", person_id=None) -> str:
+    """Текст факта для чтения ботами. Факты людей хранятся БЕЗ префикса «Имя: » — имя берём из `related_to`
+    («Имя | другое имя | …»), как и в карточке. Не факт человека или имя уже есть в тексте — без изменений."""
+    if not person_id:
+        return fact
+    name = (related_to or "").split(" | ")[0].strip()
+    return fact_text(name, fact) if name else fact
+
+
 def related_to_str(name: str, aliases: Iterable[str]) -> str:
     return " | ".join([name] + [a for a in aliases if a])
 

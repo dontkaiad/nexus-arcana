@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react'
 import { Search } from 'lucide-react'
 import { duplicates, listPeople, mergePerson, errText } from './peopleApi'
 import { Btn, Chip, Note, inputStyle } from './parts'
-import { fs, fmtBirthday, sourcesOf, pendingOf } from './ui'
+import { fs, fmtBirthday, sourcesOf, pendingOf, redText } from './ui'
 
 // «Склеить с…»: текущий человек (`person`) вливается в выбранного. Сверху — кандидаты
 // из /people/duplicates, ниже — поиск по всем людям (VK «Мария Иванова» ↔ TG «Маша🌸»
@@ -67,7 +67,7 @@ export default function MergePicker({ s, Sheet, person, open, onClose, onMerged 
             Влить <b>{person.name}</b> в <b>{pick.name}</b>?<br />
             <span style={{ color: s.tS }}>«{person.name}» исчезнет: факты, другие имена и пустые поля перейдут к «{pick.name}». Отменить нельзя.</span>
           </div>
-          {err && <Note s={s} color={s.red}>{err}</Note>}
+          {err && <Note s={s} color={redText(s)}>{err}</Note>}
           <div style={{ display: 'flex', gap: 8, marginTop: 14 }}>
             <Btn s={s} style={{ flex: 1 }} onClick={() => setPick(null)}>Назад</Btn>
             <Btn s={s} kind="primary" style={{ flex: 1 }} disabled={busy} onClick={doMerge}>{busy ? '…' : 'Склеить'}</Btn>

@@ -16,6 +16,7 @@ import {
 import { apiGet, apiPost, apiDelete, apiPatch, apiStream, flushOfflineQueue, outboxCount } from "./api";
 import { SelfListCard, SelfDetailHeader } from "./components/self/SelfClientCard.jsx";
 import PeopleTab from "./people/PeopleTab.jsx";
+import { provenanceLine } from "./people/ui.js";
 import { LinkBar, FromPeopleBlock } from "./people/ClientLink.jsx";
 import {
   Sun, Moon as LucideMoon, Check, Coins, List as ListIcon, Brain, Calendar,
@@ -3312,7 +3313,9 @@ function NxMemory({ s, openAdhd, openClientFromPeople }) {
   const [expandedId, setExpandedId] = useState(null);
   const [showInactive, setShowInactive] = useState(false);
   const [peopleOpen, setPeopleOpen] = useState(false);
+  const [peopleId, setPeopleId] = useState(null);   // карточка человека из 👥 на записи памяти
   const peoplePending = useApi("/api/people?status=pending");
+  const peopleAll = useApi("/api/people");
   const params = [];
   if (cat !== "all") params.push(`cat=${encodeURIComponent(cat)}`);
   if (q) params.push(`q=${encodeURIComponent(q)}`);
@@ -3376,18 +3379,23 @@ function NxMemory({ s, openAdhd, openClientFromPeople }) {
       <Glass s={s} accent={s.acc} onClick={() => setPeopleOpen(true)} style={{ padding: "10px 14px" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <div>
-            <div style={{ fontSize: fs(11), color: s.acc, fontWeight: 500 }}>👥 Люди</div>
-            <div style={{ fontSize: fs(12), color: s.text, marginTop: 2 }}>
-              {peoplePending.data?.total > 0 ? `На проверке: ${peoplePending.data.total}` : "Факты о близких и знакомых"}
+            <div style={{ fontSize: fs(13), color: s.text, fontWeight: 500 }}>
+              👥 Люди{peopleAll.data ? ` · ${peopleAll.data.total}` : ""}
             </div>
+            {peoplePending.data?.total > 0 && (
+              <div style={{ fontSize: fs(12), color: s.text, marginTop: 2, fontWeight: 600 }}>
+                ● На проверке: {peoplePending.data.total}
+              </div>
+            )}
           </div>
           <ChevronRight size={fs(16)} color={s.tS} />
         </div>
       </Glass>
       {peopleOpen && createPortal(
         <div className="day" style={{ fontFamily: B }}>
-          <PeopleTab s={s} Sheet={Sheet} onClose={() => setPeopleOpen(false)} onChanged={peoplePending.refetch}
-            onOpenClient={(cid) => { setPeopleOpen(false); openClientFromPeople?.(cid); }} />
+          <PeopleTab s={s} Sheet={Sheet} initialId={peopleId} onClose={() => { setPeopleOpen(false); setPeopleId(null); }}
+            onChanged={() => { peoplePending.refetch(); peopleAll.refetch(); }}
+            onOpenClient={(cid) => { setPeopleOpen(false); setPeopleId(null); openClientFromPeople?.(cid); }} />
         </div>, document.body)}
       <SearchInput s={s} value={q} onChange={setQ} placeholder="Поиск по памяти" />
       {/* #6: показать записи, помеченные «неактуально» (is_current=false) */}
@@ -3453,7 +3461,7 @@ function NxMemory({ s, openAdhd, openClientFromPeople }) {
         const catEmojiOnly = m.cat ? String(m.cat).split(" ")[0] : "";
         const busy = deletingId === m.id || patchingId === m.id;
         const dim = m.isCurrent === false;
-        const sub = [m.key && `🔑 ${m.key}`, m.related && `👤 ${m.related}`]
+        const sub = [m.key && !m.personId && `🔑 ${m.key}`, m.related && !m.personId && `👤 ${m.related}`]
           .filter(Boolean).join("  ·  ");
         const expanded = expandedId === m.id;
         return (
@@ -3463,7 +3471,7 @@ function NxMemory({ s, openAdhd, openClientFromPeople }) {
                 onClick={() => setExpandedId(expanded ? null : m.id)}
                 style={{ flex: 1, minWidth: 0, fontSize: fs(13), color: s.text, wordBreak: "break-word", cursor: "pointer" }}
               >
-                {m.text}
+                {m.personName && <b>{m.personName}: </b>}{m.text}
                 {dim && <span style={{ color: s.tS, fontSize: fs(11) }}>  (неактуально)</span>}
                 {/* #6 (1a): ключ / связь — мелкой строкой под текстом */}
                 {sub && (
@@ -3477,8 +3485,19 @@ function NxMemory({ s, openAdhd, openClientFromPeople }) {
                     📅 {m.date}
                   </span>
                 )}
+                {/* провенанс (факты о людях): цитата-основание, платформа, дата сообщения */}
+                {expanded && (m.quote || m.platform || m.messageDate) && (
+                  <span style={{ display: "block", marginTop: 4, fontSize: fs(11), color: s.tS, lineHeight: 1.4 }}>
+                    {m.quote && <span style={{ display: "block", fontStyle: "italic" }}>«{m.quote}»</span>}
+                    {provenanceLine({ platform: m.platform, message_date: m.messageDate }) && (
+                      <span style={{ display: "block", fontWeight: 600 }}>
+                        {provenanceLine({ platform: m.platform, message_date: m.messageDate })}
+                      </span>
+                    )}
+                  </span>
+                )}
               </span>
-              {catEmojiOnly && (
+              {catEmojiOnly && !m.personId && (
                 <span title={m.cat} style={{
                   display: "inline-flex", alignItems: "center",
                   padding: "3px 9px", borderRadius: 10,
@@ -3487,6 +3506,13 @@ function NxMemory({ s, openAdhd, openClientFromPeople }) {
                 }}>
                   {catEmojiOnly}
                 </span>
+              )}
+              {m.personId && (
+                <span
+                  role="button" aria-label="Открыть карточку человека" title="Открыть карточку человека"
+                  onClick={() => { setPeopleId(m.personId); setPeopleOpen(true); }}
+                  style={{ flexShrink: 0, cursor: "pointer", fontSize: fs(15), lineHeight: 1 }}
+                >👥</span>
               )}
               {/* #6 (3): обратимая «неактуально» */}
               {m.isCurrent === false ? (

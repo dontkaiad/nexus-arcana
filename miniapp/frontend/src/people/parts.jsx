@@ -1,6 +1,6 @@
 import React from 'react'
 import { Check } from 'lucide-react'
-import { fs, openLink, sourceLinks } from './ui'
+import { fs, openLink, sourceLinks, redText, primaryColors } from './ui'
 
 // Кнопки/поля раздела «Люди»: цель касания ≥ 44px (Telegram WebView), без жёстких ширин.
 export function Btn({ s, kind = 'ghost', onClick, disabled, children, style }) {
@@ -12,8 +12,8 @@ export function Btn({ s, kind = 'ghost', onClick, disabled, children, style }) {
     border: `1px solid ${s.brd}`, background: 'transparent', color: s.text,
   }
   const kinds = {
-    primary: { background: s.acc, color: '#fff', border: `1px solid ${s.acc}` },
-    danger: { color: s.red, border: `1px solid ${s.red}66` },
+    primary: { ...primaryColors(s), border: `1px solid ${primaryColors(s).background}` },
+    danger: { color: redText(s), border: `1px solid ${s.red}66` },
     ghost: {},
   }
   return (
@@ -41,7 +41,7 @@ export function Tick({ s, on, onClick, color }) {
 
 export function Chip({ s, color, children, style }) {
   const c = color || s.text
-  const txt = color === s.good ? s.text : c      // зелёный текст на зелёном фоне не читается
+  const txt = color === s.red ? redText(s) : s.text      // текст чипа — всегда контрастный; цвет статуса только в рамке/подложке
   return (
     <span style={{
       display: 'inline-flex', alignItems: 'center', padding: '3px 9px', borderRadius: 999,
@@ -58,13 +58,13 @@ export const inputStyle = (s) => ({
 })
 
 export const Label = ({ s, children }) => (
-  <div style={{ fontSize: fs(10), fontWeight: 600, letterSpacing: '0.4px', textTransform: 'uppercase', color: s.text, opacity: 0.75, margin: '10px 0 4px' }}>
+  <div style={{ fontSize: fs(10), fontWeight: 600, letterSpacing: '0.4px', textTransform: 'uppercase', color: s.text, margin: '10px 0 4px' }}>
     {children}
   </div>
 )
 
 export const Note = ({ s, children, color }) => (
-  <div style={{ fontSize: fs(12), color: color || s.tS, textAlign: 'center', padding: '24px 8px', lineHeight: 1.45 }}>{children}</div>
+  <div style={{ fontSize: fs(12), color: color || s.text, textAlign: 'center', padding: '24px 8px', lineHeight: 1.45 }}>{children}</div>
 )
 
 // «TG · @username» / «VK · id…» — тап открывает источник (чтобы понять, кто это)

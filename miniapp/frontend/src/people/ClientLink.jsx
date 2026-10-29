@@ -4,7 +4,7 @@ import { Btn, Chip, Note, inputStyle } from './parts'
 import {
   clientCandidates, errText, linkClient, listPeople, resolveClientBirthday, unlinkClient,
 } from './peopleApi'
-import { fmtBirthday, fs, openLink, typeMeta } from './ui'
+import { fmtBirthday, fs, openLink, typeMeta, redText } from './ui'
 
 const REASON = { account: 'совпал аккаунт', full_name: 'то же имя', name_birthday: 'имя и ДР', alias: 'другое имя', self: 'это ты' }
 
@@ -36,7 +36,7 @@ export function LinkBar({ s, Sheet, client, onChanged, onOpenPerson }) {
       ) : !client.self && (
         <Btn s={s} onClick={() => setPick(true)} style={{ width: '100%' }}>👥 Связать с человеком</Btn>
       )}
-      {err && <Note s={s} color={s.red}>{err}</Note>}
+      {err && <Note s={s} color={redText(s)}>{err}</Note>}
       {pick && <LinkPicker s={s} Sheet={Sheet} client={client} onClose={() => setPick(false)}
         onLinked={() => { setPick(false); onChanged?.() }} />}
     </div>
@@ -105,7 +105,7 @@ function LinkPicker({ s, Sheet, client, onClose, onLinked }) {
             <Btn s={s} disabled={busy} onClick={() => choose('client')}>Из клиента: {fmtBirthday(conflict.client)}</Btn>
             <Btn s={s} disabled={busy} onClick={() => choose('person')}>Из Людей: {fmtBirthday(conflict.person)}</Btn>
           </div>
-          {err && <Note s={s} color={s.red}>{err}</Note>}
+          {err && <Note s={s} color={redText(s)}>{err}</Note>}
         </div>
       ) : pick ? (
         <div>
@@ -113,7 +113,7 @@ function LinkPicker({ s, Sheet, client, onClose, onLinked }) {
             Связать клиента <b>{client.name}</b> с человеком <b>{pick.name}</b>?<br />
             <span style={{ color: s.tS }}>Один человек — один клиент. Подтверждённые факты из Людей попадут в контекст трактовок. День рождения будет храниться в карточке человека.</span>
           </div>
-          {err && <Note s={s} color={s.red}>{err}</Note>}
+          {err && <Note s={s} color={redText(s)}>{err}</Note>}
           <div style={{ display: 'flex', gap: 8, marginTop: 14 }}>
             <Btn s={s} style={{ flex: 1 }} onClick={() => setPick(null)}>Назад</Btn>
             <Btn s={s} kind="primary" style={{ flex: 1 }} disabled={busy} onClick={doLink}>{busy ? '…' : 'Связать'}</Btn>

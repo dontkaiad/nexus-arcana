@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react'
+import { redText } from './ui'
 import { patchPerson, errText } from './peopleApi'
 import { Btn, Label, Note, inputStyle } from './parts'
 
@@ -53,7 +54,7 @@ export default function PersonEdit({ s, Sheet, person, open, onClose, onSaved })
       <input value={f.name} onChange={set('name')} style={inputStyle(s)} />
       <Label s={s}>Другие имена (через запятую)</Label>
       <input value={f.aliases} onChange={set('aliases')} placeholder="Машка, Мария, @nick" style={inputStyle(s)} />
-      <div style={{ fontSize: 12, color: s.text, opacity: 0.7, margin: '4px 2px 0', lineHeight: 1.35 }}>
+      <div style={{ fontSize: 12, color: s.text, margin: '4px 2px 0', lineHeight: 1.35 }}>
         Как ты зовёшь человека — чтобы бот понимал, о ком речь.
       </div>
       <Label s={s}>День рождения</Label>
@@ -64,7 +65,7 @@ export default function PersonEdit({ s, Sheet, person, open, onClose, onSaved })
       </label>
       <Label s={s}>Заметки</Label>
       <textarea value={f.notes} onChange={set('notes')} rows={3} style={{ ...inputStyle(s), resize: 'vertical' }} />
-      {err && <Note s={s} color={s.red}>{err}</Note>}
+      {err && <Note s={s} color={redText(s)}>{err}</Note>}
       <div style={{ display: 'flex', gap: 8, marginTop: 14 }}>
         <Btn s={s} style={{ flex: 1 }} onClick={onClose}>Отмена</Btn>
         <Btn s={s} kind="primary" style={{ flex: 1 }} disabled={busy} onClick={save}>{busy ? '…' : 'Сохранить'}</Btn>

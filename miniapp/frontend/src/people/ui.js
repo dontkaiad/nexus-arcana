@@ -35,6 +35,31 @@ export function haptic(kind = 'light') {
   try { window.Telegram?.WebApp?.HapticFeedback?.impactOccurred(kind) } catch { /* вне Telegram */ }
 }
 
+// Красный ТЕКСТ (✕, «важно», ошибки) на стеклянной подложке: s.red — акцентный токен, на светлой
+// карточке даёт <4.5:1, поэтому для текста берём тёмный/светлый вариант по яркости s.text (WCAG AA).
+const _lum = (hex) => {
+  const m = /^#?([0-9a-f]{6})$/i.exec(hex || '')
+  if (!m) return 0
+  const v = [0, 2, 4].map((i) => parseInt(m[1].slice(i, i + 2), 16) / 255).map((c) => (c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4))
+  return 0.2126 * v[0] + 0.7152 * v[1] + 0.0722 * v[2]
+}
+export const isDay = (s) => _lum(s.text) < 0.35
+export const redText = (s) => (isDay(s) ? '#8a2a1e' : '#ffa592')
+
+// Подложка оверлея «Люди». Днём небо идёт от тёмно-бирюзового к светлому, и тёмный текст на верхней половине
+// выходил <4.5:1 — поэтому днём градиент разбавлен белым (текст читается на любой высоте), ночью небо уже тёмное.
+const _mix = (hex, k) => {
+  const m = /^#?([0-9a-f]{6})$/i.exec(hex || '')
+  if (!m) return hex
+  return '#' + [0, 2, 4].map((i) => Math.round(parseInt(m[1].slice(i, i + 2), 16) * (1 - k) + 255 * k).toString(16).padStart(2, '0')).join('')
+}
+export const overlayBg = (s) => (isDay(s)
+  ? `linear-gradient(180deg, ${_mix(s.warm, 0.62)} 0%, ${_mix(s.glow, 0.6)} 55%, ${_mix(s.base, 0.35)} 100%)`
+  : `linear-gradient(180deg, ${s.deep} 0%, ${s.mid} 25%, ${s.warm} 55%, ${s.glow} 75%, ${s.base} 100%)`)
+
+// Главная кнопка: белый текст на s.acc даёт ~3.4:1 — днём берём тёмный акцент, ночью тёмный текст на светлом акценте.
+export const primaryColors = (s) => (isDay(s) ? { background: '#3d6a55', color: '#fff' } : { background: s.acc, color: '#08110e' })
+
 // Статус → цвет по токенам темы s.
 export const statusColor = (s, status) =>
   status === 'confirmed' ? s.good : status === 'rejected' ? s.red : s.amber

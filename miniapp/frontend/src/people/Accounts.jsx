@@ -1,7 +1,7 @@
 import React, { useState } from 'react'
 import { Btn, Chip, Label, Note, inputStyle } from './parts'
 import { addAccount, errText, removeAccount, setPrimaryAccount } from './peopleApi'
-import { accountAction, accountsOf, copyText, fs, haptic, linksAllowed, openExternal, openTelegramLink } from './ui'
+import { accountAction, accountsOf, copyText, fs, haptic, linksAllowed, openExternal, openTelegramLink, primaryColors, redText } from './ui'
 
 // Аккаунты человека (TG/VK): кликабельные t.me/<username> и vk.com/id<id>, TG только с id — тап копирует id.
 // Можно добавить аккаунт, удалить (двумя тапами) и сделать основным (основной на платформу — один).
@@ -59,34 +59,34 @@ export default function Accounts({ s, person, onChanged }) {
             {a.is_primary && sameCount(a.platform) > 1 && <Chip s={s} color={s.acc}>основной</Chip>}
             {!a.is_primary && (
               <div role="button" onClick={() => run(() => setPrimaryAccount(person.id, a.id))}
-                style={{ minHeight: 36, padding: '6px 10px', fontSize: fs(11), color: s.text, opacity: busy ? 0.5 : 0.8, cursor: 'pointer', textDecoration: 'underline', textDecorationStyle: 'dotted' }}>
+                style={{ minHeight: 36, padding: '6px 10px', fontSize: fs(11), color: s.text, opacity: busy ? 0.5 : 1, cursor: 'pointer', textDecoration: 'underline', textDecorationStyle: 'dotted' }}>
                 сделать основным
               </div>
             )}
             <div style={{ flex: 1 }} />
             {confirmDel === a.id ? (
               <div role="button" onClick={() => { setConfirmDel(null); run(() => removeAccount(person.id, a.id)) }}
-                style={{ minHeight: 36, padding: '6px 12px', borderRadius: 999, fontSize: fs(11), fontWeight: 700, color: s.red, border: `1px solid ${s.red}66`, cursor: 'pointer' }}>
+                style={{ minHeight: 36, padding: '6px 12px', borderRadius: 999, fontSize: fs(11), fontWeight: 700, color: redText(s), border: `1px solid ${s.red}66`, cursor: 'pointer' }}>
                 Удалить?
               </div>
             ) : (
               <div role="button" aria-label="удалить аккаунт" onClick={() => setConfirmDel(a.id)}
-                style={{ width: 40, height: 44, display: 'flex', alignItems: 'center', justifyContent: 'center', color: s.red, fontSize: 18, fontWeight: 700, cursor: 'pointer' }}>
+                style={{ width: 40, height: 44, display: 'flex', alignItems: 'center', justifyContent: 'center', color: redText(s), fontSize: 18, fontWeight: 700, cursor: 'pointer' }}>
                 ✕
               </div>
             )}
           </div>
         )
       })}
-      {err && <Note s={s} color={s.red}>{err}</Note>}
+      {err && <Note s={s} color={redText(s)}>{err}</Note>}
       {adding ? (
         <div style={{ marginTop: 6 }}>
           <div style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
             {['tg', 'vk'].map((p) => (
               <div key={p} role="button" onClick={() => setPlatform(p)} style={{
                 padding: '8px 16px', minHeight: 36, borderRadius: 999, fontSize: fs(12), fontWeight: 600, cursor: 'pointer',
-                border: `1px solid ${platform === p ? s.acc : s.tS}`, background: platform === p ? s.acc : 'transparent',
-                color: platform === p ? '#fff' : s.text,
+                border: `1px solid ${platform === p ? primaryColors(s).background : s.tS}`, background: platform === p ? primaryColors(s).background : 'transparent',
+                color: platform === p ? primaryColors(s).color : s.text,
               }}>{p === 'tg' ? 'Telegram' : 'VK'}</div>
             ))}
           </div>
@@ -103,7 +103,7 @@ export default function Accounts({ s, person, onChanged }) {
         </div>
       ) : (
         <div role="button" onClick={() => setAdding(true)}
-          style={{ minHeight: 36, padding: '6px 2px', fontSize: fs(12), fontWeight: 600, color: s.text, cursor: 'pointer', opacity: 0.85 }}>
+          style={{ minHeight: 36, padding: '6px 2px', fontSize: fs(12), fontWeight: 600, color: s.text, cursor: 'pointer' }}>
           ＋ Аккаунт
         </div>
       )}

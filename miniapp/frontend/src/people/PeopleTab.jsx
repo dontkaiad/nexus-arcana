@@ -4,7 +4,7 @@ import PersonCard, { Header } from './PersonCard'
 import ReviewMode from './ReviewMode'
 import { Btn, Chip, Note, SourceLinks, inputStyle } from './parts'
 import { listPeople } from './peopleApi'
-import { fmtBirthday, fs, pendingOf, plural } from './ui'
+import { fmtBirthday, fs, overlayBg, pendingOf, plural, redText } from './ui'
 
 const FILTERS = [
   { k: 'all', l: 'Все', status: undefined },
@@ -47,7 +47,7 @@ export default function PeopleTab({ s, Sheet, onClose, onChanged, initialId, onO
     <div style={{
       position: 'fixed', inset: 0, zIndex: 60, overflowY: 'auto', overflowX: 'hidden', WebkitOverflowScrolling: 'touch',
       padding: '10px 14px calc(env(safe-area-inset-bottom, 0px) + 24px)',
-      background: `linear-gradient(180deg, ${s.deep} 0%, ${s.mid} 25%, ${s.warm} 55%, ${s.glow} 75%, ${s.base} 100%)`,
+      background: overlayBg(s),
     }}>
       {view.name === 'review' && <ReviewMode s={s} Sheet={Sheet} onExit={back} only={view.only} />}
       {view.name === 'card' && <PersonCard s={s} Sheet={Sheet} id={view.id} onBack={back} onChanged={onChanged} onOpenClient={onOpenClient}
@@ -74,7 +74,7 @@ export default function PeopleTab({ s, Sheet, onClose, onChanged, initialId, onO
           </div>
 
           {rows === null && <Note s={s}>Загружаю…</Note>}
-          {err && <Note s={s} color={s.red}>{err}</Note>}
+          {err && <Note s={s} color={redText(s)}>{err}</Note>}
           {rows && rows.length === 0 && !err && <Note s={s}>{dq ? 'Никого не нашла' : 'Здесь пока пусто'}</Note>}
           {(rows || []).map((p) => {
             const n = pendingOf(p)

@@ -6,7 +6,7 @@ import PersonEdit from './PersonEdit'
 import { Header } from './PersonCard'
 import { Btn, Chip, Note, SourceLinks, Tick } from './parts'
 import { errText, getPerson, listPeople, rejectAll, reviewPerson } from './peopleApi'
-import { fmtBirthday, fs, haptic } from './ui'
+import { fmtBirthday, fs, haptic, redText } from './ui'
 
 // Режим разбора: один человек за раз, все галочки по умолчанию стоят — снимаешь только
 // мусор и жмёшь одну кнопку. Очередь = люди со статусом pending (сервер хранит прогресс:
@@ -118,7 +118,7 @@ export default function ReviewMode({ s, Sheet, onExit, only }) {
   const toggleCheck = (id) => setChecked((p) => { const n = new Set(p); n.has(id) ? n.delete(id) : n.add(id); return n })
   const toggleOpen = (id) => setExpanded((p) => { const n = new Set(p); n.has(id) ? n.delete(id) : n.add(id); return n })
 
-  if (queue === null) return <div><Header s={s} onBack={onExit} title="Разбор" /><Note s={s} color={err ? s.red : undefined}>{err || 'Загружаю…'}</Note></div>
+  if (queue === null) return <div><Header s={s} onBack={onExit} title="Разбор" /><Note s={s} color={err ? redText(s) : undefined}>{err || 'Загружаю…'}</Note></div>
 
   if (!cur) {
     return (
@@ -126,7 +126,7 @@ export default function ReviewMode({ s, Sheet, onExit, only }) {
         <Header s={s} onBack={onExit} title="Разбор" />
         <Note s={s}>{total ? 'Всё разобрано 🎉' : 'Разбирать нечего — очередь пуста'}</Note>
         {last && <Btn s={s} onClick={undo} disabled={busy}><Undo2 size={fs(15)} /> Отменить последнее</Btn>}
-        {err && <Note s={s} color={s.red}>{err}</Note>}
+        {err && <Note s={s} color={redText(s)}>{err}</Note>}
         <Btn s={s} kind="primary" style={{ marginTop: 10 }} onClick={onExit}>К списку</Btn>
       </div>
     )
@@ -151,14 +151,14 @@ export default function ReviewMode({ s, Sheet, onExit, only }) {
         </div>
       )}
 
-      {!card && <Note s={s} color={err ? s.red : undefined}>{err || 'Загружаю…'}</Note>}
+      {!card && <Note s={s} color={err ? redText(s) : undefined}>{err || 'Загружаю…'}</Note>}
       {card && pend.length === 0 && <Note s={s}>Новых фактов нет — можно просто подтвердить человека</Note>}
       {card && (
         <FactGroups s={s} groups={pendingGroups(card)} expanded={expanded} onToggle={toggleOpen} showMentions={card.is_self}
           left={(f, t) => <Tick s={s} on={checked.has(f.id)} onClick={() => toggleCheck(f.id)} color={t === 'important' ? s.red : undefined} />} />
       )}
-      {card && done > 0 && <div style={{ fontSize: fs(11), color: s.text, opacity: 0.7, textAlign: 'center', marginTop: 6 }}>Уже принято ранее: {done}</div>}
-      {card && err && <Note s={s} color={s.red}>{err}</Note>}
+      {card && done > 0 && <div style={{ fontSize: fs(11), color: s.text, textAlign: 'center', marginTop: 6 }}>Уже принято ранее: {done}</div>}
+      {card && err && <Note s={s} color={redText(s)}>{err}</Note>}
 
       <div style={{
         position: 'fixed', left: 0, right: 0, bottom: 0, zIndex: 5,
