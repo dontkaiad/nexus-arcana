@@ -31,7 +31,7 @@ from core.config import config
 from zarya import scheduler
 from zarya.formatting import (
     MSK, day_phrase, epoch, extract_asked_date, from_epoch, group_slots_by_day,
-    parse_quick_booking, slot_label, wants_slots,
+    agenda_range, format_agenda, parse_quick_booking, slot_label, wants_agenda, wants_slots,
 )
 
 logger = logging.getLogger("zarya.handlers")
@@ -410,6 +410,36 @@ async def cmd_slots(msg: Message, role: str = "guest") -> None:
     await _show_slots(msg, role)
 
 
+# ── admin agenda: задачи/брони/работы Кай по дням (read-only) ───────────────
+# Названия задач видит ТОЛЬКО admin: фильтр режет friend/guest ещё до хендлера,
+# а классификатор/on_unrecognized дублируют проверку роли.
+
+def _is_agenda(message: Message, role: str = "guest") -> bool:
+    if role != "admin":
+        return False
+    text = getattr(message, "text", None) or ""
+    return not text.lstrip().startswith("/") and wants_agenda(text)
+
+
+async def _show_agenda(msg: Message) -> None:
+    from core.booking.agenda import day_agenda
+    uid = await _owner_user_id()
+    if not uid:
+        await msg.answer("Так, минутку — данные Кай сейчас недоступны. Загляни чуть позже 💅")
+        return
+    today = datetime.now(MSK).date()
+    day_from, day_to = agenda_range(msg.text or "", today)
+    items = await day_agenda(uid, day_from, day_to)
+    await msg.answer(format_agenda(items, day_from, day_to, today))
+
+
+@router.message(_is_agenda)
+async def nl_agenda(msg: Message, role: str = "guest") -> None:
+    if not _bot_addressed(msg):
+        return
+    await _show_agenda(msg)
+
+
 @router.message(F.text.func(lambda t: wants_slots(t or "")))
 async def nl_slots(msg: Message, role: str = "guest") -> None:
     # #228: с выключенным Group Privacy бот видит ВСЮ переписку группы — обычная
@@ -707,7 +737,9 @@ async def on_unrecognized(msg: Message, role: str = "guest") -> None:
         logger.warning("zarya classify failed: %s", e)
         result = {"intent": "chat", "reply": ""}
 
-    if result["intent"] == "slots":
+    if result["intent"] == "agenda" and role == "admin":
+        await _show_agenda(msg)
+    elif result["intent"] == "slots":
         await _show_slots(msg, role)
     elif result["intent"] == "help":
         await cmd_help(msg, role=role)

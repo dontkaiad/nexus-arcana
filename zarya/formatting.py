@@ -171,3 +171,65 @@ def parse_quick_booking(text: str, today: date) -> Optional[QuickBooking]:
     t = _FILLER_RE.sub(" ", t)
     note = re.sub(r"\s+", " ", t).strip(" ,.;:—-")
     return QuickBooking(day=day, hour=hour, minute=minute, hours=hours, note=note)
+
+
+# ── admin agenda: «что у меня завтра», «задачи на неделе» ────────────────────
+
+_AGENDA_RE = re.compile(
+    r"(задач|(?<!как )\bдел[аоы]\b|что\s+у\s+меня|\bплан\w*|расписан|занят)", re.IGNORECASE)
+# «свободные окна / запиши» — это про слоты, не про повестку
+_SLOTS_WORDS_RE = re.compile(r"(свободн|окн[оа]|слот|запиш|забронир)", re.IGNORECASE)
+_WEEK_RE = re.compile(r"недел", re.IGNORECASE)
+
+
+def wants_agenda(text: str) -> bool:
+    t = text or ""
+    return bool(_AGENDA_RE.search(t)) and not _SLOTS_WORDS_RE.search(t)
+
+
+def agenda_range(text: str, today: date) -> "tuple[date, date]":
+    """Диапазон дней повестки: «неделя» → 7 дней, назван день → он, иначе сегодня."""
+    t = text or ""
+    asked = extract_asked_date(t, today)
+    if _WEEK_RE.search(t):
+        start = asked or today
+        return start, start + timedelta(days=6)
+    d = asked or today
+    return d, d
+
+
+_WEEKDAY_NOM = [("Понедельник", "чистый"), ("Вторник", "чистый"), ("Среда", "чистая"),
+                ("Четверг", "чистый"), ("Пятница", "чистая"), ("Суббота", "чистая"),
+                ("Воскресенье", "чистое")]
+
+
+def _empty_phrase(day_from: date, day_to: date, today: date) -> str:
+    if day_from != day_to:
+        return "Неделя чистая 💅"
+    if day_from == today:
+        return "Сегодня чисто 💅"
+    if day_from == today + timedelta(days=1):
+        return "Завтра чисто 💅"
+    name, adj = _WEEKDAY_NOM[day_from.weekday()]
+    return f"{name} {adj} 💅"
+
+
+def format_agenda(items, day_from: date, day_to: date, today: date) -> str:
+    """items — AgendaItem-подобные (day/kind/title/start/end/all_day), отсортированы."""
+    import html
+    if not items:
+        return _empty_phrase(day_from, day_to, today)
+    blocks: List[str] = []
+    for day in sorted({i.day for i in items}):
+        lines = [f"🗓 <b>{_DOW[day.weekday()]} {day.day:02d}.{day.month:02d}</b>"]
+        for i in (x for x in items if x.day == day):
+            title = html.escape(i.title)
+            icon = "🔮" if i.kind == "work" else "•"
+            if i.all_day:
+                when = "весь день:"
+            else:
+                s = i.start.astimezone(MSK)
+                when = f"{s:%H:%M}" + (f"–{i.end.astimezone(MSK):%H:%M}" if i.end else "")
+            lines.append(f"{icon} {when} {title}")
+        blocks.append("\n".join(lines))
+    return "\n\n".join(blocks)
