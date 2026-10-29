@@ -743,6 +743,7 @@ async def test_admin_fast_path_books_confirmed_without_slots_or_notify(pp_store)
     with patch("zarya.handlers._owner_user_id", AsyncMock(return_value="uid")), \
          patch("core.auth_grants.get_display_name", AsyncMock(return_value=None)), \
          patch("zarya.handlers.create_booking", AsyncMock(return_value=fake)) as cb, \
+         patch("zarya.handlers.busy_intervals", AsyncMock(return_value=[])), \
          patch("zarya.handlers._confirm_flow", AsyncMock()) as cf, \
          patch("zarya.handlers._notify_owner", AsyncMock()) as no, \
          patch("zarya.handlers.free_slots", AsyncMock()) as fs:
@@ -759,11 +760,29 @@ async def test_admin_fast_path_books_confirmed_without_slots_or_notify(pp_store)
 
 
 @pytest.mark.asyncio
+async def test_admin_fast_path_overlap_warns_but_still_books(pp_store):
+    from zarya.handlers import on_quick_booking
+    from core.booking.busy import BusyInterval
+    m = _quick_msg("завтра в 19 шашлыки")
+    day = datetime.now(timezone.utc) + timedelta(days=1)
+    busy = BusyInterval(day - timedelta(days=2), day + timedelta(days=2), "task", "Стоматолог", "1")
+    with patch("zarya.handlers._owner_user_id", AsyncMock(return_value="uid")), \
+         patch("zarya.handlers.busy_intervals", AsyncMock(return_value=[busy])), \
+         patch("core.auth_grants.get_display_name", AsyncMock(return_value=None)), \
+         patch("zarya.handlers.create_booking", AsyncMock(return_value=SimpleNamespace(id=1))) as cb, \
+         patch("zarya.handlers._confirm_flow", AsyncMock()):
+        await on_quick_booking(m, role="admin")
+    cb.assert_awaited_once()  # бронь создана несмотря на пересечение
+    assert "⚠️ пересекается с: Стоматолог " in m.answer.call_args[0][0]
+
+
+@pytest.mark.asyncio
 async def test_admin_fast_path_default_hours_and_empty_note(pp_store):
     from zarya.handlers import on_quick_booking
     m = _quick_msg("запиши меня завтра в 19")
     with patch("zarya.handlers._owner_user_id", AsyncMock(return_value="uid")), \
          patch("core.auth_grants.get_display_name", AsyncMock(return_value=None)), \
+         patch("zarya.handlers.busy_intervals", AsyncMock(return_value=[])), \
          patch("zarya.handlers.create_booking", AsyncMock(return_value=SimpleNamespace(id=1))) as cb, \
          patch("zarya.handlers._confirm_flow", AsyncMock()):
         await on_quick_booking(m, role="admin")

@@ -237,15 +237,23 @@ async def on_quick_booking(msg: Message, role: str = "guest") -> None:
         from core.auth_grants import get_display_name
         name = (await get_display_name(msg.from_user.id)
                 or (msg.from_user.full_name or "").strip() or f"tg:{msg.from_user.id}")
+        end = start + timedelta(hours=hours)
+        # Пересечение не блокирует (Кай решает сама), но предупреждаем.
+        clash = [iv for iv in await busy_intervals(uid, start, end) if iv.overlaps(start, end)]
         b = await create_booking(
             user_id=uid, context="friends", start_at=start,
-            end_at=start + timedelta(hours=hours), status="confirmed", hours=hours,
+            end_at=end, status="confirmed", hours=hours,
             requester_tg_id=msg.from_user.id, requester_name=name, note=q.note,
             source="tg_group" if msg.chat.type in ("group", "supergroup") else "tg_dm",
         )
         await _confirm_flow(b, msg.bot)
         note_line = f"\n💬 {q.note}" if q.note else ""
-        await msg.answer(f"✅ {slot_label(start, hours=hours)}{note_line}",
+        warn = "".join(
+            f"\n⚠️ пересекается с: {iv.label or 'занято'} "
+            f"{iv.start.astimezone(MSK):%H:%M}–{iv.end.astimezone(MSK):%H:%M}"
+            for iv in clash[:3]
+        )
+        await msg.answer(f"✅ {slot_label(start, hours=hours)}{note_line}{warn}",
                          reply_markup=_cancel_kb(b.id))
         return
     ep = str(epoch(start))
