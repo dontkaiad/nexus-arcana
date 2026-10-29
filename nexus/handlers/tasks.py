@@ -36,6 +36,12 @@ from core.location import (
 logger = logging.getLogger("nexus.tasks")
 MOSCOW_TZ = timezone(timedelta(hours=3))
 
+# Дефолтное напоминание для задачи с дедлайном, но без явного «напомни»:
+# дедлайн со временем → за DEFAULT_REMINDER_LEAD_MIN минут; дедлайн на весь
+# день → в DEFAULT_ALLDAY_REMINDER_HOUR:00 дня дедлайна. Уже прошло → без.
+DEFAULT_REMINDER_LEAD_MIN = 60
+DEFAULT_ALLDAY_REMINDER_HOUR = 10
+
 
 def _tz_suffix(tz_offset: int) -> str:
     """Format tz offset as '+03:00' / '-05:00' for ISO 8601."""
@@ -642,6 +648,26 @@ def _format_task_dates(
     return " · ".join(parts)
 
 
+def _default_reminder(deadline: str, tz_offset: int) -> Optional[str]:
+    """Дефолтное напоминание по дедлайну ('YYYY-MM-DD[THH:MM]', локальное время)
+    или None, если оно уже в прошлом / дедлайн не разобрать."""
+    if not deadline:
+        return None
+    tz = timezone(timedelta(hours=tz_offset))
+    try:
+        if "T" in deadline:
+            dl = datetime.strptime(deadline[:16], "%Y-%m-%dT%H:%M").replace(tzinfo=tz)
+            rem = dl - timedelta(minutes=DEFAULT_REMINDER_LEAD_MIN)
+        else:
+            day = datetime.strptime(deadline[:10], "%Y-%m-%d")
+            rem = day.replace(hour=DEFAULT_ALLDAY_REMINDER_HOUR, tzinfo=tz)
+    except ValueError:
+        return None
+    if rem <= datetime.now(tz):
+        return None
+    return rem.strftime("%Y-%m-%dT%H:%M")
+
+
 async def _schedule_reminder(chat_id: int, title: str, reminder_dt: str, task_id: str, tz_offset: int = 3,
                              recipients: Optional[List[int]] = None) -> None:
     if not _scheduler or not _bot:
@@ -925,7 +951,7 @@ _HUMAN_DATE_MAP = {
 }
 _WEEKDAY_MAP = {
     "понедельник": 0, "вторник": 1, "среда": 2, "четверг": 3,
-    "пятница": 4, "пятницу": 4, "суббота": 5, "субботу": 5,
+    "среду": 2, "пятница": 4, "пятницу": 4, "суббота": 5, "субботу": 5,
     "воскресенье": 6, "воскресение": 6,
 }
 
@@ -1782,13 +1808,15 @@ async def handle_task_parsed(message: Message, data: dict, original_text: str = 
         return
 
     # Нет "напомни" и нет reminder_time.
-    # Если дедлайн уже назван пользователем — вопрос «когда сделать?» вводит в
-    # заблуждение (дата на карточке уже стоит). Показываем обычную карточку
-    # подтверждения «Всё верно?» — любой follow-up текст («напомни в 15»,
-    # «срочно») уйдёт в _handle_task_refinement как в confirm-режиме.
+    # Дедлайн назван → сохраняем сразу, без «Всё верно?»: дефолтное напоминание
+    # (за час / в 10:00 для дедлайна на весь день; прошло → без него). Правка —
+    # кнопками на карточке («🔕 Без напоминания», «✏️ Изменить» = старый confirm).
     if data.get("deadline"):
-        _pending_set(uid, data)
-        await _show_task_confirm(message, data, uid)
+        _rem = _default_reminder(data["deadline"], tz_offset)
+        if _rem:
+            data["reminder_time"] = _rem
+        data["_auto_reminder"] = True
+        await _do_save_task(message, data, chat_id=message.chat.id, uid=uid)
         return
 
     # Дедлайна нет и напоминания нет → один объединённый вопрос.
@@ -2290,6 +2318,77 @@ async def task_save(call: CallbackQuery) -> None:
     await _do_save_task(call.message, data, chat_id=call.message.chat.id, uid=uid)
     await call.answer()
 
+def _deadline_wall(task, tz_offset: int) -> str:
+    """Дедлайн задачи как локальная настенная строка: дата для «весь день»,
+    иначе 'YYYY-MM-DDTHH:MM'. Пусто, если дедлайна нет."""
+    if not task or not task.deadline:
+        return ""
+    if getattr(task, "deadline_all_day", False):
+        return task.deadline[:10]
+    return _to_local_wall(task.deadline, tz_offset)
+
+
+@router.callback_query(F.data.startswith("task_noremind_"))
+async def task_noremind(call: CallbackQuery) -> None:
+    """🔕 на карточке авто-сохранённой задачи: убрать напоминание, оставить
+    дедлайн-пинг (без него задача вообще никого не напомнит)."""
+    tid = call.data[len("task_noremind_"):]
+    tz_offset = await _get_user_tz(call.from_user.id)
+    await _repo.clear_reminder(tid)
+    _remove_task_jobs(tid)
+    task = await _repo.retrieve_page(tid)
+    if task and task.deadline:
+        await _schedule_deadline_check(
+            call.message.chat.id, task.title or "Задача", _deadline_wall(task, tz_offset),
+            tid, tz_offset, duration_min=task.duration_min,
+        )
+    body = call.message.html_text or ""
+    body = _re.sub(r"🔔 Напомню:[^\n]*", "🔕 Без напоминания", body)
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="✏️ Изменить", callback_data=f"task_edit_{tid}")],
+        [cancel_button("❌ Отмена", f"task_undo_{tid}"),
+         InlineKeyboardButton(text="📋 Подзадачи", callback_data=f"task_subtask_task_{tid}"),
+         InlineKeyboardButton(text="👌 Ок", callback_data="task_ok")],
+    ])
+    await call.message.edit_text(body, parse_mode="HTML", reply_markup=kb)
+    await call.answer("🔕 Без напоминания")
+
+
+@router.callback_query(F.data.startswith("task_edit_"))
+async def task_edit(call: CallbackQuery) -> None:
+    """✏️ Изменить: старый confirm-режим. Сохранённая задача архивируется,
+    её данные возвращаются в pending — «✅ Сохранить» создаст её заново."""
+    tid = call.data[len("task_edit_"):]
+    uid = call.from_user.id
+    task = await _repo.retrieve_page(tid)
+    if not task:
+        await call.answer("Не нашла задачу.", show_alert=True)
+        return
+    tz_offset = await _get_user_tz(uid)
+    pending = {
+        "title": task.title, "category": task.category, "priority": task.priority,
+        "deadline": _deadline_wall(task, tz_offset) or None,
+        "reminder_time": _to_local_wall(task.reminder, tz_offset) if task.reminder else None,
+        "duration_min": task.duration_min, "note": task.note, "user_id": task.user_id,
+        "for_practice": False, "_tz_offset": tz_offset, "msg_id": call.message.message_id,
+    }
+    await _repo.set_archived(tid)
+    _remove_task_jobs(tid)
+    _pending_set(uid, pending)
+    await _show_task_confirm(call.message, pending, uid)
+    await call.answer()
+
+
+@router.callback_query(F.data.startswith("task_undo_"))
+async def task_undo(call: CallbackQuery) -> None:
+    """❌ Отмена на карточке уже сохранённой задачи: убрать задачу и jobs."""
+    tid = call.data[len("task_undo_"):]
+    await _repo.set_archived(tid)
+    _remove_task_jobs(tid)
+    await call.message.edit_text("❌ Отмена.")
+    await call.answer()
+
+
 @router.callback_query(F.data == "task_cancel")
 async def task_cancel(call: CallbackQuery) -> None:
     _pending_del(call.from_user.id)
@@ -2764,21 +2863,37 @@ async def _do_save_task(message: Message, data: dict, chat_id: int = None, uid: 
     duration_line = f"\n⏱ Длительность: {format_duration(data['duration_min'])}" if data.get("duration_min") else ""
 
     msg_id = data.get("msg_id")
+    _auto = bool(data.get("_auto_reminder"))
+    if _auto:
+        _rem_line = f"🔔 Напомню: {reminder_display}" if reminder_display else "🔔 Без напоминания"
+    else:
+        _rem_line = f"🔔 Напоминание: {reminder_display}"
     text_content = (
         f"⚡ <b>Задача создана!</b>\n"
         f"📌 {data['title']}\n"
         f"🏷 {real_category} · {_priority_display(real_priority)}\n"
         f"📅 Дедлайн: {deadline_display}\n"
-        f"🔔 Напоминание: {reminder_display}{duration_line}{repeat_line}{note_line}"
+        f"{_rem_line}{duration_line}{repeat_line}{note_line}"
     )
 
     # Inline-кнопки: предложить разбить на подзадачи
     _rel = "task"
     _tid = result
-    _suggest_kb = InlineKeyboardMarkup(inline_keyboard=[[
-        InlineKeyboardButton(text="📋 Подзадачи", callback_data=f"task_subtask_{_rel}_{_tid}"),
-        InlineKeyboardButton(text="👌 Ок", callback_data="task_ok"),
-    ]])
+    _subtask_btn = InlineKeyboardButton(text="📋 Подзадачи", callback_data=f"task_subtask_{_rel}_{_tid}")
+    if _auto:
+        _first_row = [InlineKeyboardButton(text="✏️ Изменить", callback_data=f"task_edit_{_tid}")]
+        if reminder_display:
+            _first_row.insert(0, InlineKeyboardButton(text="🔕 Без напоминания", callback_data=f"task_noremind_{_tid}"))
+        _suggest_kb = InlineKeyboardMarkup(inline_keyboard=[
+            _first_row,
+            [cancel_button("❌ Отмена", f"task_undo_{_tid}"), _subtask_btn,
+             InlineKeyboardButton(text="👌 Ок", callback_data="task_ok")],
+        ])
+    else:
+        _suggest_kb = InlineKeyboardMarkup(inline_keyboard=[[
+            _subtask_btn,
+            InlineKeyboardButton(text="👌 Ок", callback_data="task_ok"),
+        ]])
 
     await react(message, "⚡")
 
@@ -3276,6 +3391,123 @@ async def handle_edit_record(
                           user_id=user_id)
 
 
+_MONTHS_RE = r"январ|феврал|март|апрел|ма[йя]|июн|июл|август|сентябр|октябр|ноябр|декабр"
+_HHMM_RE = _re.compile(r"(?:\b(?:в|на|к)\s+)?\b([01]?\d|2[0-3])[:.]([0-5]\d)\b", _re.IGNORECASE)
+_HOUR_RE = _re.compile(
+    r"\b(?:в|на|к)\s+([01]?\d|2[0-3])(?:\s*(?:ч\b|час\w*))?(?![\d:.])|^\s*([01]?\d|2[0-3])\s*(?:ч\b|час\w*)?\s*$",
+    _re.IGNORECASE,
+)
+
+
+def _wall_dt(s: str) -> datetime:
+    return datetime.strptime(_ensure_datetime(s), "%Y-%m-%dT%H:%M")
+
+
+async def _resolve_new_deadline(new_value: str, old_wall: str, uid: int, tz_offset: int) -> Optional[str]:
+    """«среду» / «18:00» / «в среду в 18» → новый дедлайн ('YYYY-MM-DD[THH:MM]').
+
+    Не названо время — остаётся старое (если у дедлайна оно было); не названа
+    дата — остаётся старая («сдвинь на 18» = та же дата, 18:00)."""
+    v = (new_value or "").strip()
+    if _re.match(r"^\d{4}-\d{2}-\d{2}", v):
+        return v
+    hm = None
+    rest = v
+    m = _HHMM_RE.search(rest)
+    if m:
+        hm = (int(m.group(1)), int(m.group(2)))
+    elif not _re.search(rf"\b\d{{1,2}}\s*(?:{_MONTHS_RE})", rest, _re.IGNORECASE):
+        m = _HOUR_RE.search(rest)
+        if m:
+            hm = (int(m.group(1) or m.group(2)), 0)
+    if m:
+        rest = (rest[:m.start()] + " " + rest[m.end():])
+    rest = _re.sub(r"\b(?:в|на|к)\b", " ", rest).strip(" ,.")
+    if rest:
+        d = await _human_date_to_iso(rest, uid)
+        if not d:
+            return None
+        if "T" in d:
+            return d
+        day = d[:10]
+    elif old_wall:
+        day = old_wall[:10]
+    elif hm:
+        day = datetime.now(timezone(timedelta(hours=tz_offset))).strftime("%Y-%m-%d")
+    else:
+        return None
+    if hm:
+        return f"{day}T{hm[0]:02d}:{hm[1]:02d}"
+    if old_wall and "T" in old_wall:
+        return f"{day}T{old_wall[11:16]}"
+    return day
+
+
+async def _edit_deadline(message: Message, page, page_id: str, label: str, new_value: str, ctx_label: str) -> None:
+    """Перенос дедлайна: двигает напоминание на ту же дельту, перепланирует
+    jobs и, если задача слинкована с бронью Зари, двигает и бронь."""
+    uid = message.from_user.id if message.from_user else 0
+    tz_offset = await _get_user_tz(uid)
+    old_wall = _deadline_wall(page, tz_offset)
+    new_iso = await _resolve_new_deadline(new_value, old_wall, uid, tz_offset)
+    if not new_iso:
+        await message.answer(f"⚠️ Не удалось распарсить дату: «{new_value}»")
+        return
+    new_all_day = "T" not in new_iso
+    old_all_day = bool(page and page.deadline_all_day)
+
+    # напоминание — на ту же дельту; тип дедлайна сменился (весь день ↔ время) → дефолт
+    old_rem = _to_local_wall(page.reminder, tz_offset) if page and page.reminder else ""
+    new_rem: Optional[str] = None
+    rem_changed = False
+    if old_rem and old_wall:
+        rem_changed = True
+        if new_all_day == old_all_day:
+            new_rem = (_wall_dt(old_rem) + (_wall_dt(new_iso) - _wall_dt(old_wall))).strftime("%Y-%m-%dT%H:%M")
+        else:
+            new_rem = _default_reminder(new_iso, tz_offset)
+        if new_rem and not _is_future_dt(new_rem, tz_offset):
+            new_rem = None
+
+    await _repo.set_props(page_id, {"Дедлайн": _date_with_tz(new_iso, tz_offset)})
+    if rem_changed:
+        if new_rem:
+            await _repo.set_props(page_id, {"Напоминание": _date_with_tz(new_rem, tz_offset)})
+        else:
+            await _repo.clear_reminder(page_id)
+
+    # jobs: сперва снять старые, затем как при создании — напоминание, иначе дедлайн-пинг
+    _remove_task_jobs(page_id)
+    title = (page.title if page else "") or label or "Задача"
+    final_rem = new_rem if rem_changed else (old_rem if old_rem and _is_future_dt(old_rem, tz_offset) else "")
+    if final_rem:
+        await _schedule_reminder(message.chat.id, title, final_rem, page_id, tz_offset)
+    else:
+        await _schedule_deadline_check(message.chat.id, title, new_iso, page_id, tz_offset,
+                                       duration_min=page.duration_min if page else None)
+
+    booking_moved = False
+    if not new_all_day:
+        try:
+            from core.booking.repo import get_booking_by_link, reschedule_booking
+            from core.booking.tables import BLOCKING_BOOKING_STATUSES
+            b = await get_booking_by_link(nexus_task_id=page_id)
+            if b and b.status in BLOCKING_BOOKING_STATUSES:
+                start = datetime.strptime(new_iso, "%Y-%m-%dT%H:%M").replace(
+                    tzinfo=timezone(timedelta(hours=tz_offset)))
+                await reschedule_booking(b.id, start, start + (b.end_at - b.start_at))
+                booking_moved = True
+        except Exception as e:
+            logger.warning("_edit_deadline: booking sync failed for task %s: %s", page_id, e)
+
+    lines = [f"✏️ Дедлайн{ctx_label}:", f"📌 {label}", f"📅 → {new_iso.replace('T', ' ')}"]
+    if rem_changed:
+        lines.append(f"🔔 → {new_rem.replace('T', ' ')}" if new_rem else "🔕 Напоминание сняла (уже в прошлом)")
+    if booking_moved:
+        lines.append("🗓 Бронь тоже перенесена")
+    await message.answer("\n".join(lines))
+
+
 async def _apply_edit(
     message: Message,
     record_type: str,
@@ -3360,7 +3592,9 @@ async def _apply_edit(
             real_status = _status_map.get(new_value.lower(), new_value)
             await _repo.set_props(page_id, {"Статус": _status(real_status)})
             await message.answer(f"✏️ Статус{ctx_label}:\n📌 {label}\n📊 → {real_status}")
-        elif field in ("deadline", "reminder"):
+        elif field == "deadline":
+            await _edit_deadline(message, page, page_id, label, new_value, ctx_label)
+        elif field == "reminder":
             # Конвертируем человекочитаемые даты в ISO
             _uid = message.from_user.id if message.from_user else 0
             iso_value = await _human_date_to_iso(new_value, _uid)
@@ -3374,12 +3608,8 @@ async def _apply_edit(
             # поставленные через "поставь X на ...", срабатывали на tz_offset
             # часов раньше — вплоть до "уже в прошлом" → тихо пропускались.
             tz_offset = await _get_user_tz(_uid)
-            if field == "deadline":
-                await _repo.set_props(page_id, {"Дедлайн": _date_with_tz(iso_value, tz_offset)})
-                await message.answer(f"✏️ Дедлайн{ctx_label}:\n📌 {label}\n📅 → {iso_value}")
-            else:
-                await _repo.set_props(page_id, {"Напоминание": _date_with_tz(iso_value, tz_offset)})
-                await message.answer(f"✏️ Напоминание{ctx_label}:\n📌 {label}\n🔔 → {iso_value}")
+            await _repo.set_props(page_id, {"Напоминание": _date_with_tz(iso_value, tz_offset)})
+            await message.answer(f"✏️ Напоминание{ctx_label}:\n📌 {label}\n🔔 → {iso_value}")
         elif field == "duration":
             minutes = parse_duration_minutes(new_value)
             if not minutes:

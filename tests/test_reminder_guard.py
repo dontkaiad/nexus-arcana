@@ -151,12 +151,14 @@ class TestVoiceTranscriptReachesGuard:
             await tasks.handle_task_parsed(
                 msg, data, original_text="купить корм коту завтра",
             )
-        save.assert_not_awaited()  # reminder выброшен → не explicit-save
-        sent = msg.answer.await_args.args[0]
-        # Дедлайн уже назван → карточка подтверждения «Всё верно?»
-        # (не объединённый вопрос «когда сделать?»). Главное — напоминания нет.
-        assert "Напомню: нет" in sent
-        assert "Дедлайн: 2026-07-28" in sent
+        # Галлюцинированный reminder выброшен. Дедлайн назван (на весь день) →
+        # задача сохраняется сразу с ДЕФОЛТНЫМ напоминанием (10:00 дня дедлайна),
+        # а не с галлюцинированным 09:00.
+        save.assert_awaited_once()
+        saved = save.await_args.args[1]
+        assert saved.get("reminder_time") != "2026-07-28T09:00"
+        assert saved.get("reminder_time") in (None, "2026-07-28T10:00")
+        assert saved["_auto_reminder"] is True
 
 
 class TestExtractExplicitClock:

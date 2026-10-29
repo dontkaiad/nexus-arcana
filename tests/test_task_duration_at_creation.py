@@ -19,8 +19,7 @@ from nexus.handlers import tasks as T
 @pytest.mark.asyncio
 async def test_handle_task_parsed_converts_duration_text_to_minutes():
     """data["duration"]="2 часа" (как отдаёт classifier) → data["duration_min"]=120,
-    которое доезжает до pending (карточка "Всё верно?" — есть deadline, нет
-    reminder/repeat, значит save случится позже по кнопке "✅ Сохранить")."""
+    которое доезжает до _do_save_task (дедлайн назван → сохраняем сразу)."""
     msg = MagicMock()
     msg.from_user = MagicMock(id=777)
     msg.chat = MagicMock(id=777)
@@ -31,15 +30,14 @@ async def test_handle_task_parsed_converts_duration_text_to_minutes():
     }
 
     with patch.object(T, "_get_user_tz", AsyncMock(return_value=3)), \
-         patch.object(T, "_pending_set") as pset, \
-         patch.object(T, "_show_task_confirm", AsyncMock()), \
+         patch.object(T, "_do_save_task", AsyncMock()) as save, \
          patch.object(T, "_has_remind_word", lambda *a, **k: False):
         await T.handle_task_parsed(
             msg, data, original_text="встреча с Анубис завтра в 17:30 длительность 2 часа",
         )
 
-    pset.assert_called_once()
-    saved_data = pset.call_args.args[1]
+    save.assert_awaited_once()
+    saved_data = save.await_args.args[1]
     assert saved_data["duration_min"] == 120
 
 
@@ -53,12 +51,11 @@ async def test_handle_task_parsed_no_duration_mentioned_stays_unset():
             "deadline": "2026-09-15", "repeat": "Нет"}
 
     with patch.object(T, "_get_user_tz", AsyncMock(return_value=3)), \
-         patch.object(T, "_pending_set") as pset, \
-         patch.object(T, "_show_task_confirm", AsyncMock()), \
+         patch.object(T, "_do_save_task", AsyncMock()) as save, \
          patch.object(T, "_has_remind_word", lambda *a, **k: False):
         await T.handle_task_parsed(msg, data, original_text="купить корм завтра")
 
-    saved_data = pset.call_args.args[1]
+    saved_data = save.await_args.args[1]
     assert "duration_min" not in saved_data or saved_data.get("duration_min") is None
 
 
