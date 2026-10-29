@@ -29,7 +29,7 @@ logger = logging.getLogger("zarya.scheduler")
 
 _LEADS = ((24, "за сутки"), (2, "через 2 часа"))
 _SWEEP_MIN = 5
-_FIRE_TOLERANCE = timedelta(minutes=10)   # _fire молчит, если время брони уехало
+_FIRE_TOLERANCE = timedelta(minutes=1)    # job считается устаревшим при большем расхождении
 _REARM_TOLERANCE = timedelta(minutes=1)   # sweep пересобирает job при большем расхождении
 _UTC = timezone.utc
 
@@ -50,18 +50,24 @@ async def _send(tg_id: int, text: str) -> None:
         logger.warning("reminder send to %s failed: %s", tg_id, e)
 
 
-async def _fire(booking_id: int, phrase: str, hours: int) -> None:
+async def _fire(booking_id: int, phrase: str, hours: int, planned_fire_at: str) -> None:
     from core.booking.repo import get_booking
 
     b = await get_booking(booking_id=booking_id)
     if not b or b.status != "confirmed":
         return
-    # Бронь могли передвинуть в БД (веб, Nexus), а job ещё со старым временем —
-    # sweep поправит, но до него напоминание про прежнее время слать нельзя.
-    expected = b.start_at - timedelta(hours=hours)
-    if abs(datetime.now(_UTC) - expected) > _FIRE_TOLERANCE:
-        logger.info("skip stale reminder bk#%s lead=%sh (fire time moved)", booking_id, hours)
+    # Бронь двигали после постановки job'а → он про прежнее время, слать нельзя
+    # (sweep пересоберёт). Сравниваем с тем, на что job ставился, а не с now:
+    # опоздавшее из-за рестарта напоминание (misfire_grace_time) всё ещё нужно.
+    try:
+        planned = datetime.fromisoformat(planned_fire_at)
+    except (TypeError, ValueError):
+        planned = None
+    if planned is None or abs(planned - (b.start_at - timedelta(hours=hours))) > _FIRE_TOLERANCE:
+        logger.info("skip stale reminder bk#%s lead=%sh (booking moved)", booking_id, hours)
         return
+    if datetime.now(_UTC) >= b.start_at:
+        return  # встреча уже началась — напоминать поздно
     when = b.start_at.astimezone(MSK).strftime("%d.%m в %H:%M")
     kb = _cancel_kb(b.id)
     await _send(
@@ -106,7 +112,7 @@ def schedule(b) -> None:
         try:
             _scheduler.add_job(
                 _fire, DateTrigger(run_date=fire_at),
-                args=[b.id, phrase, hours], id=jid, replace_existing=True,
+                args=[b.id, phrase, hours, fire_at.isoformat()], id=jid, replace_existing=True,
                 misfire_grace_time=3600,
             )
         except Exception as e:  # noqa: BLE001
