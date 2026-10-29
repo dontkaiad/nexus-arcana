@@ -216,7 +216,8 @@ async def test_reschedule_moves_linked_booking():
                 end_at=datetime(2030, 1, 1, 16, tzinfo=timezone.utc), hours=2.0, status="confirmed",
                 note="", source="tg_dm", token="t", nexus_task_id="9", arcana_work_id=None,
                 created_at=None, decided_at=None)
-    msg, _, _, _, _, rb = await _edit(_task(), "среду", human="2030-01-09", booking=b)
+    with patch.object(T, "_notify_friend_via_zarya", AsyncMock(return_value=True)):
+        msg, _, _, _, _, rb = await _edit(_task(), "среду", human="2030-01-09", booking=b)
     rb.assert_awaited_once()
     bid, start, end = rb.await_args.args
     assert bid == 5
@@ -255,3 +256,98 @@ def test_move_phrases_hit_edit_prefilter(text):
 def test_edit_prompt_has_move_examples():
     assert "перенеси созвон на среду" in clf._EDIT_PARSE_SYSTEM
     assert "сдвинь стоматолога на 18" in clf._EDIT_PARSE_SYSTEM
+
+
+# ── уведомление друга через Зарю ────────────────────────────────────────────
+
+def _booking(tg=4242, status="confirmed", note="шашлыки"):
+    from core.booking.repo import Booking
+    return Booking(id=5, context="friends", meeting_type_id=None, requester_tg_id=tg, requester_name="Рома",
+                   requester_contact="", start_at=datetime(2030, 1, 1, 14, tzinfo=timezone.utc),
+                   end_at=datetime(2030, 1, 1, 16, tzinfo=timezone.utc), hours=2.0, status=status,
+                   note=note, source="tg_dm", token="t", nexus_task_id="9", arcana_work_id=None,
+                   created_at=None, decided_at=None)
+
+
+def _fake_bot(send=None):
+    bot = MagicMock()
+    bot.send_message = send or AsyncMock()
+    bot.session.close = AsyncMock()
+    return bot
+
+
+@pytest.mark.asyncio
+async def test_move_sends_dm_to_friend_via_zarya_with_cancel_button():
+    bot = _fake_bot()
+    with patch("core.config.config.booking_bot_token", "zarya-token"), \
+         patch("core.config.config.allowed_ids", [1]), \
+         patch.object(T, "Bot", MagicMock(return_value=bot)) as bot_cls:
+        msg, *_ = await _edit(_task(), "среду", human="2030-01-09", booking=_booking())
+    bot_cls.assert_called_once_with(token="zarya-token")
+    args, kwargs = bot.send_message.await_args
+    assert args[0] == 4242
+    assert args[1] == ("⭐ Кай перенесла встречу: вт 01.01 17:00–19:00 → "
+                       "ср 09.01 17:00–19:00\n💬 шашлыки")
+    assert kwargs["reply_markup"].inline_keyboard[0][0].callback_data == "z:cx:5"
+    bot.session.close.assert_awaited_once()  # сессия закрыта
+    assert "⚠️" not in msg.answer.await_args.args[0]
+
+
+@pytest.mark.asyncio
+async def test_dm_failure_keeps_move_and_warns():
+    bot = _fake_bot(AsyncMock(side_effect=RuntimeError("blocked")))
+    with patch("core.config.config.booking_bot_token", "zarya-token"), \
+         patch("core.config.config.allowed_ids", [1]), \
+         patch.object(T, "Bot", MagicMock(return_value=bot)):
+        msg, repo, _, _, _, rb = await _edit(_task(), "среду", human="2030-01-09", booking=_booking())
+    rb.assert_awaited_once()                 # бронь перенесена
+    assert repo.set_props.await_count >= 1   # дедлайн сохранён
+    out = msg.answer.await_args.args[0]
+    assert "Бронь тоже перенесена" in out and "⚠️ не смогла уведомить Рома" in out
+    bot.session.close.assert_awaited_once()  # сессия закрыта и при ошибке
+
+
+@pytest.mark.asyncio
+async def test_no_dm_when_requester_is_owner():
+    with patch("core.config.config.booking_bot_token", "zarya-token"), \
+         patch("core.config.config.allowed_ids", [4242]), \
+         patch.object(T, "Bot", MagicMock()) as bot_cls:
+        msg, *_ = await _edit(_task(), "среду", human="2030-01-09", booking=_booking(tg=4242))
+    bot_cls.assert_not_called()
+    assert "⚠️" not in msg.answer.await_args.args[0]
+
+
+@pytest.mark.asyncio
+async def test_cancel_task_cancels_booking_and_notifies_friend():
+    bot = _fake_bot()
+    sbs = AsyncMock()
+    with patch("core.config.config.booking_bot_token", "zarya-token"), \
+         patch("core.config.config.allowed_ids", [1]), \
+         patch.object(T, "Bot", MagicMock(return_value=bot)), \
+         patch("core.booking.repo.get_booking_by_link", AsyncMock(return_value=_booking())), \
+         patch("core.booking.repo.set_booking_status", sbs):
+        extra = await T._cancel_linked_booking("9")
+    sbs.assert_awaited_once_with(5, "cancelled_by_owner")
+    assert bot.send_message.await_args.args[0] == 4242
+    assert bot.send_message.await_args.args[1].startswith("❌ Кай отменила встречу вт 01.01 17:00–19:00")
+    assert "Бронь тоже отменена" in extra and "⚠️" not in extra
+
+
+@pytest.mark.asyncio
+async def test_cancel_task_dm_failure_warns_but_booking_cancelled():
+    bot = _fake_bot(AsyncMock(side_effect=RuntimeError("blocked")))
+    sbs = AsyncMock()
+    with patch("core.config.config.booking_bot_token", "zarya-token"), \
+         patch("core.config.config.allowed_ids", [1]), \
+         patch.object(T, "Bot", MagicMock(return_value=bot)), \
+         patch("core.booking.repo.get_booking_by_link", AsyncMock(return_value=_booking())), \
+         patch("core.booking.repo.set_booking_status", sbs):
+        extra = await T._cancel_linked_booking("9")
+    sbs.assert_awaited_once()
+    assert "⚠️ не смогла уведомить Рома" in extra
+
+
+@pytest.mark.asyncio
+async def test_cancel_task_without_booking_is_silent():
+    with patch("core.booking.repo.get_booking_by_link", AsyncMock(return_value=None)):
+        assert await T._cancel_linked_booking("9") == ""

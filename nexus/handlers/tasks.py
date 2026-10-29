@@ -2318,6 +2318,38 @@ async def task_save(call: CallbackQuery) -> None:
     await _do_save_task(call.message, data, chat_id=call.message.chat.id, uid=uid)
     await call.answer()
 
+async def _notify_friend_via_zarya(b, text: str, *, cancel_kb: bool = False) -> Optional[bool]:
+    """DM другу от имени Зари о том, что Кай сдвинула/отменила его встречу.
+
+    None — уведомлять некого (нет requester_tg_id или это сама Кай);
+    True — отправлено; False — не вышло (нет токена / Telegram отказал).
+    Никогда не бросает: перенос/отмена от ошибки отправки не откатываются."""
+    from core.config import config
+    tg = getattr(b, "requester_tg_id", None)
+    if not tg or tg in config.allowed_ids:
+        return None
+    if not config.booking_bot_token:
+        logger.warning("notify friend: BOOKING_BOT_TOKEN not set (booking #%s)", b.id)
+        return False
+    kb = None
+    if cancel_kb:
+        kb = InlineKeyboardMarkup(inline_keyboard=[[
+            InlineKeyboardButton(text="❌ Отменить бронь", callback_data=f"z:cx:{b.id}"),
+        ]])
+    bot = Bot(token=config.booking_bot_token)
+    try:
+        await bot.send_message(tg, text, reply_markup=kb, disable_web_page_preview=True)
+        return True
+    except Exception as e:
+        logger.warning("notify friend via Zarya failed (booking #%s, tg %s): %s", b.id, tg, e)
+        return False
+    finally:
+        try:
+            await bot.session.close()
+        except Exception:
+            pass
+
+
 def _deadline_wall(task, tz_offset: int) -> str:
     """Дедлайн задачи как локальная настенная строка: дата для «весь день»,
     иначе 'YYYY-MM-DDTHH:MM'. Пусто, если дедлайна нет."""
@@ -3040,6 +3072,27 @@ _CANCEL_STOP_WORDS = {
 }
 
 
+async def _cancel_linked_booking(task_id: str) -> str:
+    """Задача отменена → слинкованная бронь cancelled_by_owner + DM другу от
+    Зари. Возвращает хвост для ответа Кай ('' если брони нет). Не бросает."""
+    try:
+        from core.booking.repo import get_booking_by_link, set_booking_status
+        from core.booking.tables import BLOCKING_BOOKING_STATUSES
+        from zarya.formatting import slot_label
+        b = await get_booking_by_link(nexus_task_id=task_id)
+        if not b or b.status not in BLOCKING_BOOKING_STATUSES:
+            return ""
+        await set_booking_status(b.id, "cancelled_by_owner")
+        when = slot_label(b.start_at, hours=b.hours or 1)
+        extra = "\n🗓 Бронь тоже отменена"
+        if await _notify_friend_via_zarya(b, f"❌ Кай отменила встречу {when} (МСК). Извини!") is False:
+            extra += f"\n⚠️ не смогла уведомить {b.requester_name or 'друга'}"
+        return extra
+    except Exception as e:
+        logger.warning("_cancel_linked_booking failed for task %s: %s", task_id, e)
+        return ""
+
+
 async def handle_task_cancel(message: Message, task_hint: str, user_id: str = "") -> None:
     """Найти активную задачу по ключевым словам и отменить (статус Archived)."""
     # Убираем стоп-слова отмены из hint
@@ -3084,7 +3137,8 @@ async def handle_task_cancel(message: Message, task_hint: str, user_id: str = ""
                     logger.info("Cancelled %s job: %s%s", prefix.rstrip("_"), prefix, task_id)
                 except Exception:
                     pass
-        await message.answer(f"🗑️ Задача «{title}» отменена")
+        extra = await _cancel_linked_booking(task_id)
+        await message.answer(f"🗑️ Задача «{title}» отменена{extra}")
     except Exception as e:
         logger.error("handle_task_cancel error: %s", e)
         await message.answer("⚠️ Ошибка при отмене задачи.")
@@ -3487,6 +3541,7 @@ async def _edit_deadline(message: Message, page, page_id: str, label: str, new_v
                                        duration_min=page.duration_min if page else None)
 
     booking_moved = False
+    notify_warn = ""
     if not new_all_day:
         try:
             from core.booking.repo import get_booking_by_link, reschedule_booking
@@ -3495,8 +3550,17 @@ async def _edit_deadline(message: Message, page, page_id: str, label: str, new_v
             if b and b.status in BLOCKING_BOOKING_STATUSES:
                 start = datetime.strptime(new_iso, "%Y-%m-%dT%H:%M").replace(
                     tzinfo=timezone(timedelta(hours=tz_offset)))
-                await reschedule_booking(b.id, start, start + (b.end_at - b.start_at))
+                length = b.end_at - b.start_at
+                await reschedule_booking(b.id, start, start + length)
                 booking_moved = True
+                from zarya.formatting import slot_label
+                hours = b.hours or length.total_seconds() / 3600
+                text = (f"⭐ Кай перенесла встречу: {slot_label(b.start_at, hours=hours)} → "
+                        f"{slot_label(start, hours=hours)}")
+                if (b.note or "").strip():
+                    text += f"\n💬 {b.note.strip()}"
+                if await _notify_friend_via_zarya(b, text, cancel_kb=True) is False:
+                    notify_warn = f"⚠️ не смогла уведомить {b.requester_name or 'друга'}"
         except Exception as e:
             logger.warning("_edit_deadline: booking sync failed for task %s: %s", page_id, e)
 
@@ -3505,6 +3569,8 @@ async def _edit_deadline(message: Message, page, page_id: str, label: str, new_v
         lines.append(f"🔔 → {new_rem.replace('T', ' ')}" if new_rem else "🔕 Напоминание сняла (уже в прошлом)")
     if booking_moved:
         lines.append("🗓 Бронь тоже перенесена")
+    if notify_warn:
+        lines.append(notify_warn)
     await message.answer("\n".join(lines))
 
 
