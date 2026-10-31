@@ -46,6 +46,8 @@ person_accounts = Table(
     Column("platform",    Text, nullable=False),           # tg | vk
     Column("external_id", BigInteger, nullable=False),
     Column("username",    Text),
+    # имя, под которым аккаунт виден в чате (display name): им подписывались факты при импорте («Имя: …»)
+    Column("display_name", Text),
     Column("is_primary",  Boolean, nullable=False, server_default=text("false")),
     Column("created_at",  TIMESTAMP(timezone=True), server_default=text("now()")),
     CheckConstraint("platform IN ('tg','vk')", name="ck_person_accounts_platform"),

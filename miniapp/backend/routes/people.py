@@ -390,6 +390,26 @@ async def add_fact(person_id: int, body: FactBody, tg_id: int = Depends(current_
     return {"ok": True, "fact_id": int(mid), "counts": p["counts"]}
 
 
+class FactTypeBody(BaseModel):
+    type: str
+
+
+@router.post("/people/{person_id}/facts/{fact_id}/type")
+async def set_fact_type(person_id: int, fact_id: int, body: FactTypeBody,
+                        tg_id: int = Depends(current_user_id)) -> Dict[str, Any]:
+    """Ручная смена типа факта (тап по иконке типа в карточке). Ключ факта переписывается."""
+    user_id = await _owner(tg_id)
+    res = await asyncio.to_thread(repo.set_fact_type, user_id, person_id, fact_id, body.type)
+    if res == "bad_type":
+        raise HTTPException(status_code=422, detail="bad type")
+    if res == "not_found":
+        raise HTTPException(status_code=404, detail="fact not found")
+    if res == "conflict":
+        raise HTTPException(status_code=409, detail="same fact already has this type")
+    p = await asyncio.to_thread(repo.get_person, user_id, person_id)
+    return {"ok": True, "fact_id": fact_id, "type": body.type, "counts": p["counts"]}
+
+
 # ── аккаунты человека: несколько TG/VK на одного человека (PR-7) ─────────────
 
 class AccountBody(BaseModel):

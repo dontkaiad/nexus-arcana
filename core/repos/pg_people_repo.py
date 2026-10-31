@@ -41,7 +41,8 @@ def attach_accounts(rows: List[Dict]) -> List[Dict]:
                                .order_by(person_accounts.c.platform, person_accounts.c.is_primary.desc(),
                                          person_accounts.c.id)):
                 by[a.person_id].append({"id": a.id, "platform": a.platform, "external_id": a.external_id,
-                                        "username": a.username, "is_primary": a.is_primary})
+                                        "username": a.username, "display_name": a.display_name,
+                                        "is_primary": a.is_primary})
     for r in rows:
         accs = by.get(r["id"], [])
         r["accounts"] = accs
@@ -74,7 +75,7 @@ def _insert_accounts(conn, user_id: str, person_id: int, accs: List[Dict]) -> in
         want_primary = bool(a.get("is_primary")) and a["platform"] not in primary_taken
         res = conn.execute(pg_insert(person_accounts).values(
             user_id=user_id, person_id=person_id, platform=a["platform"], external_id=a["external_id"],
-            username=a.get("username"), is_primary=want_primary,
+            username=a.get("username"), display_name=a.get("display_name") or None, is_primary=want_primary,
         ).on_conflict_do_nothing(index_elements=["user_id", "platform", "external_id"]))
         if res.rowcount:
             n += 1
@@ -488,14 +489,63 @@ def review_all(user_id: str, person_id: int, to_status: str) -> Optional[int]:
     return r.rowcount
 
 
+def account_display_names(conn, person_id: int) -> List[str]:
+    """Display name всех аккаунтов человека (под ними подписывались факты при импорте)."""
+    rows = conn.execute(select(person_accounts.c.display_name).where(and_(
+        person_accounts.c.person_id == person_id, person_accounts.c.display_name.isnot(None)))
+        .order_by(person_accounts.c.id)).all()
+    return [r[0].strip() for r in rows if r[0] and r[0].strip()]
+
+
 def refresh_related(conn, person_id: int) -> None:
-    """related_to фактов человека = «имя | алиасы» (ILIKE-поиск ботов и эмбеддинг-текст
-    живут от него). Зовётся после правки имени/алиасов и после merge."""
+    """related_to фактов человека = «имя | алиасы | display name аккаунтов» (ILIKE/FTS-поиск ботов, эмбеддинг-текст
+    и срезание старых префиксов «Имя: » в core.people.owner_fact живут от него). Зовётся после правки
+    имени/алиасов/аккаунтов и после merge."""
     from core.people import related_to_str
     row = conn.execute(select(people.c.name, people.c.aliases).where(people.c.id == person_id)).first()
     if row:
+        seen = {row.name.lower()} | {a.lower() for a in (row.aliases or [])}
+        extra = [d for d in account_display_names(conn, person_id) if d.lower() not in seen]
         conn.execute(text("UPDATE memories SET related_to = :r WHERE person_id = :p"),
-                     {"r": related_to_str(row.name, row.aliases or []), "p": person_id})
+                     {"r": related_to_str(row.name, list(row.aliases or []) + extra), "p": person_id})
+
+
+def set_account_display_name(user_id: str, person_id: int, account_id: int, display_name: Optional[str]) -> bool:
+    """Задаёт display name аккаунта человека и обновляет related_to его фактов. False — аккаунта нет."""
+    name = " ".join((display_name or "").split()) or None
+    with get_engine().begin() as c:
+        res = c.execute(update(person_accounts).where(and_(
+            person_accounts.c.id == account_id, person_accounts.c.person_id == person_id,
+            person_accounts.c.user_id == user_id)).values(display_name=name))
+        if not res.rowcount:
+            return False
+        refresh_related(c, person_id)
+    return True
+
+
+def set_fact_type(user_id: str, person_id: int, fact_id: int, new_type: str) -> str:
+    """Вручную меняет тип факта: переписывает ключ person_<id>_<type>_<hash>. 'ok' | 'not_found' | 'bad_type' |
+    'conflict' (у человека уже есть живой факт с таким ключом). Стёртые (tombstone) не трогаем."""
+    from core.people import FACT_TYPES, retype_key
+    if new_type not in FACT_TYPES:
+        return "bad_type"
+    with get_engine().begin() as c:
+        row = c.execute(text(
+            "SELECT key_name, fact_text FROM memories WHERE id = :f AND person_id = :p AND user_id = :u "
+            "AND NOT is_archived FOR UPDATE"), {"f": fact_id, "p": person_id, "u": user_id}).first()
+        if row is None or row.fact_text == "":
+            return "not_found"
+        new_key = retype_key(row.key_name, new_type)
+        if new_key is None:
+            return "not_found"
+        if new_key == row.key_name:
+            return "ok"
+        if c.execute(text("SELECT 1 FROM memories WHERE user_id = :u AND key_name = :k AND NOT is_archived "
+                          "AND id <> :f"), {"u": user_id, "k": new_key, "f": fact_id}).first():
+            return "conflict"
+        c.execute(text("UPDATE memories SET key_name = :k, updated_at = now() WHERE id = :f"),
+                  {"k": new_key, "f": fact_id})
+    return "ok"
 
 
 def review_batch(user_id: str, person_id: int, approve: List[int], reject: List[int],

@@ -584,3 +584,24 @@ def test_card_strips_name_prefix_only_for_known_words_and_not_for_self(client):
     assert self_texts == ["Кай: пример"]                                                             # «Я» не трогаем
     with get_engine().connect() as c:                                                                # в БД префикс остаётся (нужен боту)
         assert c.execute(text("SELECT fact_text FROM memories WHERE id=:i"), {"i": a}).scalar_one() == "Мария: любит кофе"
+
+
+def test_set_fact_type_endpoint_rewrites_key_and_regroups(client):
+    pid = mk_person()
+    f = mk_fact(pid, type_="likes", n="a1a1a1a1", status="confirmed", text_="не любит ходить один")
+    r = client.post("/api/people/%d/facts/%d/type" % (pid, f), json={"type": "dislikes"})
+    assert r.status_code == 200 and r.json()["type"] == "dislikes"
+    assert _raw(f).key_name == "person_%d_dislikes_a1a1a1a1" % pid
+    groups = client.get("/api/people/%d" % pid).json()["facts"]
+    assert [g["type"] for g in groups] == ["dislikes"] and groups[0]["items"][0]["id"] == f
+
+
+def test_set_fact_type_endpoint_errors(client):
+    pid = mk_person()
+    f = mk_fact(pid, type_="likes", n="b2b2b2b2", status="confirmed", text_="x")
+    tomb = mk_fact(pid, type_="likes", n="c3c3c3c3", status="rejected", text_="")
+    assert client.post("/api/people/%d/facts/%d/type" % (pid, f), json={"type": "nope"}).status_code == 422
+    assert client.post("/api/people/%d/facts/%d/type" % (pid, tomb), json={"type": "dislikes"}).status_code == 404
+    assert client.post("/api/people/%d/facts/%d/type" % (pid, 999999999), json={"type": "dislikes"}).status_code == 404
+    mk_fact(pid, type_="dislikes", n="b2b2b2b2", status="confirmed", text_="x")          # ключ занят
+    assert client.post("/api/people/%d/facts/%d/type" % (pid, f), json={"type": "dislikes"}).status_code == 409

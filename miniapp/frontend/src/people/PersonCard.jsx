@@ -6,7 +6,7 @@ import PersonEdit from './PersonEdit'
 import Accounts from './Accounts'
 import { Btn, Chip, Note, inputStyle, Label } from './parts'
 import {
-  addFact, approveAll, approveFact, eraseFact, errText, getPerson, rejectAll, rejectFact, removeAlias, resetAliases, restoreFact, aliasOk,
+  addFact, approveAll, approveFact, eraseFact, errText, getPerson, rejectAll, rejectFact, removeAlias, resetAliases, restoreFact, aliasOk, setFactType,
 } from './peopleApi'
 import { STATUS_LABEL, TYPE_CHOICES, fmtBirthday, fs, haptic, plural, primaryColors, redText, statusColor, typeMeta } from './ui'
 
@@ -73,6 +73,7 @@ export default function PersonCard({ s, Sheet, id, onBack, onChanged, onStartRev
 
       {p.facts.length === 0 && <Note s={s}>Фактов пока нет</Note>}
       <FactGroups s={s} groups={p.facts} expanded={expanded} onToggle={toggle} showMentions={p.is_self}
+        onChangeType={(f, t) => act(() => setFactType(p.id, f.id, t))}
         textStyle={(f) => (f.review_status === 'rejected' ? { textDecoration: 'line-through', color: s.tS } : {})}
         left={(f) => (
           <div title={f.review_status} style={{ width: 10, height: 10, borderRadius: 5, margin: '0 10px 0 6px', flexShrink: 0, background: statusColor(s, f.review_status) }} />

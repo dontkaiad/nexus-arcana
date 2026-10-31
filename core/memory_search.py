@@ -329,8 +329,6 @@ from core import query_parse  # noqa: E402  (после определения H
 
 DIRECT_LIMIT = 20
 _TYPE_SQL = "COALESCE(substring(key_name from '^person_[0-9]+_([a-z]+)_[0-9a-f]{8}$'), 'other')"
-_TYPE_RANK_SQL = ("CASE {t} WHEN 'important' THEN 0 WHEN 'likes' THEN 1 WHEN 'dislikes' THEN 2 ELSE 3 END"
-                  .format(t=_TYPE_SQL))
 
 
 @dataclass
@@ -398,21 +396,37 @@ def _people_labels(person_ids: Sequence[int]) -> Dict[int, str]:
     return out
 
 
+def effective_type(fact_text: str, stored: str) -> str:
+    """Тип факта для выдачи: ТЕКСТ перекрывает тип, поставленный Haiku при импорте, где лексикон сработал
+    («не любит X» не бывает likes); где не сработал — остаётся сохранённый тип."""
+    return query_parse.fact_type_from_text(fact_text) or stored
+
+
 def _direct_facts(person_id: int, types: Sequence[str], user_id: str) -> List[Memory]:
     """Подтверждённые факты человека нужных типов, важные первыми. Только общие фильтры чтения
-    (confirmed, не tombstone, не rejected-человек, is_current, не archived)."""
-    params: dict = {"pid": int(person_id), "types": list(types), "n": DIRECT_LIMIT}
+    (confirmed, не tombstone, не rejected-человек, is_current, не archived). Тип — по тексту (лексикон),
+    а где лексикон молчит — по ключу person_<id>_<type>_<hash>."""
+    params: dict = {"pid": int(person_id)}
     extra = _scope_sql("", params, user_id)
     sql = sa.text(f"""
-        SELECT id FROM memories
-        WHERE person_id = :pid AND {_FILTERS_SQL} {extra} AND {_TYPE_SQL} = ANY(:types)
-        ORDER BY {_TYPE_RANK_SQL}, id
-        LIMIT :n
+        SELECT id, {_TYPE_SQL} AS t FROM memories
+        WHERE person_id = :pid AND {_FILTERS_SQL} {extra}
+        ORDER BY id
     """)
     with get_engine().connect() as conn:
-        ids = [r[0] for r in conn.execute(sql, params).all()]
-    loaded = _load(ids)
-    return [loaded[i] for i in ids if i in loaded]
+        rows = [(r[0], r[1]) for r in conn.execute(sql, params).all()]
+    loaded = _load([i for i, _ in rows])
+    rank = {"important": 0, "likes": 1, "dislikes": 2}
+    picked = []
+    for i, stored in rows:
+        m = loaded.get(i)
+        if m is None:
+            continue
+        t = effective_type(m.fact, stored)
+        if t in types:
+            picked.append((rank.get(t, 3), i, m))
+    picked.sort(key=lambda x: (x[0], x[1]))
+    return [m for _, _, m in picked[:DIRECT_LIMIT]]
 
 
 def _hint_for(plan) -> str:

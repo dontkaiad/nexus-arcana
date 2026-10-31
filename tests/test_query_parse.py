@@ -82,22 +82,26 @@ def test_nothing_parsed_is_unclear():
 # ── тип ─────────────────────────────────────────────────────────────────────
 
 @pytest.mark.parametrize("q,types", [
-    ("что не любит оля", ("important", "dislikes")),
-    ("что не ест оля", ("important", "dislikes")),
-    ("у оли аллергия", ("important", "dislikes")),
-    ("что нельзя оле", ("important", "dislikes")),
-    ("что бесит олю", ("important", "dislikes")),
+    ("что не любит оля", ("dislikes",)),
+    ("что не ест оля", ("dislikes",)),
+    ("что бесит олю", ("dislikes",)),
+    ("что оле не нравится", ("dislikes",)),
+    ("кого ненавидит оля", ("dislikes",)),
+    ("у оли аллергия", ("important",)),
+    ("что нельзя оле", ("important",)),
+    ("что важно про олю", ("important",)),
+    ("как у оли со здоровьем", ("important",)),
     ("что любит оля", ("likes",)),
     ("что обожает оля", ("likes",)),
-    ("что важно про олю", ("important",)),
+    ("аллергия и что не ест оля", ("important", "dislikes")),
 ])
 def test_types(q, types):
     assert plan(q).types == types
 
 
-def test_negation_flips_like_to_dislike_regardless_of_word_order():
-    assert plan("что оля не любит").types == ("important", "dislikes")
-    assert plan("что любит оля").types == ("likes",)
+def test_dislike_words_never_pull_important_and_vice_versa():
+    assert "important" not in plan("что не любит оля").types
+    assert "dislikes" not in plan("что у оли аллергия").types
 
 
 def test_no_type_for_plain_topic():

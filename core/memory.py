@@ -665,7 +665,7 @@ def _structured_text(result, arcana: bool = False) -> str:
         if not g.hits:
             empty.append(g.label)
             continue
-        rows = [f"{_TYPE_MARK.get(fact_type(h.memory.key), '•')} {escape(owner_fact(h.memory.fact, h.memory.related_to, h.memory.person_id))}"
+        rows = [f"{_TYPE_MARK.get(_memory_search.effective_type(h.memory.fact, fact_type(h.memory.key)), '•')} {escape(owner_fact(h.memory.fact, h.memory.related_to, h.memory.person_id))}"
                 for h in g.hits]
         blocks.append(f"👤 <b>{escape(g.label)}</b>:\n" + "\n".join(rows))
     if empty and not blocks:

@@ -189,6 +189,16 @@ def fact_hash(fact: str) -> str:
     return _hashlib.sha1(_re.sub(r"\s+", " ", fact.lower().strip()).encode("utf-8")).hexdigest()[:8]
 
 
+_KEY_RE = _re.compile(r"^(person_\d+_)([a-z]+)(_[0-9a-f]{8})$")
+FACT_TYPES = ("important", "likes", "dislikes", "other")
+
+
+def retype_key(key: str, new_type: str) -> Optional[str]:
+    """Ключ факта человека person_<id>_<type>_<hash8> с другим типом. None — ключ не такого вида."""
+    m = _KEY_RE.match(key or "")
+    return "%s%s%s" % (m.group(1), new_type, m.group(3)) if m and new_type in FACT_TYPES else None
+
+
 def fact_text(name: str, fact: str) -> str:
     """Факт без имени бесполезен в контексте бота («любит кофе» — кто?). Если имени
     (по первым 4 буквам первого слова) в факте нет — ставим префикс."""

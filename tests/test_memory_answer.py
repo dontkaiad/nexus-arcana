@@ -84,8 +84,10 @@ def test_direct_returns_only_requested_types_in_importance_order():
     lk = _fact(p, "likes", "любит чай")
     res = run("что не любит оля")
     assert res.route == "direct" and res.kind == "facts" and res.subject == "person"
-    assert [h.memory.id for h in res.hits] == [str(im), str(dl)]       # important первым, likes нет
-    assert str(lk) not in memids(res)
+    assert [h.memory.id for h in res.hits] == [str(dl)]                # «не любит» — только dislikes
+    assert str(lk) not in memids(res) and str(im) not in memids(res)
+    assert [h.memory.id for h in run("что у оли аллергия").hits] == [str(im)]
+    assert [h.memory.id for h in run("аллергия и что не ест оля").hits] == [str(im), str(dl)]   # важное первым
     assert run("что любит оле").hits[0].memory.id == str(lk)
 
 

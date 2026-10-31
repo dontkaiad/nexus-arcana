@@ -19,6 +19,7 @@ export const approveFact = (id, fid) => apiPost(`/api/people/${id}/facts/${fid}/
 export const rejectFact = (id, fid) => apiPost(`/api/people/${id}/facts/${fid}/reject`, {})
 export const restoreFact = (id, fid) => apiPost(`/api/people/${id}/facts/${fid}/restore`, {})
 export const eraseFact = (id, fid) => apiPost(`/api/people/${id}/facts/${fid}/erase`, {})
+export const setFactType = (id, fid, type) => apiPost(`/api/people/${id}/facts/${fid}/type`, { type })
 export const approveAll = (id) => apiPost(`/api/people/${id}/approve-all`, {})
 export const rejectAll = (id) => apiPost(`/api/people/${id}/reject-all`, {})
 export const addFact = (id, text, type) => apiPost(`/api/people/${id}/facts`, { text, type })

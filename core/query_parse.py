@@ -19,14 +19,17 @@ _WORD = re.compile(r"[\w\-]+", re.UNICODE)
 # ── лексикон ────────────────────────────────────────────────────────────────
 
 _NEG = {"не", "нет", "никогда", "ни"}
-_LIKE_STEM = ("люб", "обожа", "нрав", "фанат", "предпочита")          # любит / любишь / люблю / нравится
+_LIKE_STEM = ("любит", "любишь", "люблю", "любят", "любил", "обожа", "нравит", "нравят", "нравил", "фанат",
+             "предпочита")                       # любит / любишь / люблю / нравится; НЕ «любимый», «любовь»
 _EAT_STEM = ("ест", "ем", "ешь", "пью", "пьет", "пьешь", "переноси", "переношу",
              "терпит", "терплю", "выносит", "выношу", "хочет", "хочу", "курит", "курю", "употребляет")
 _HATE_STEM = ("ненавиж", "ненавидит", "бесит", "раздража", "достает", "противно")
 _EXACT = {"ем", "ест", "ешь", "пью"}    # короткие основы — только точное слово, остальные — префикс
+# «важное» — ТОЛЬКО здоровье / запреты / явное «важно»: аллергия, нельзя, противопоказано, диагнозы
 _IMPORTANT_HARD = ("аллерг", "нельзя", "противопоказ", "непереносим", "болеет", "болен", "болею", "диабет",
-                   "беремен", "астм", "инвалид")
+                   "беремен", "астм", "инвалид", "здоровь")
 _IMPORTANT_SOFT = ("важн", "главное", "критичн")
+_NEG_WINDOW = 3          # отрицание ищем в трёх словах ПЕРЕД глаголом: «совсем не любит», «не очень любит»
 
 _BIRTHDAY = re.compile(r"\bдр\b|день\s+рожд|д\.\s?р\.|родил(ась|ся|ись)|сколько\s+(ей|ему|ей\s+лет|лет)|"
                        r"\bвозраст|именин", re.I)
@@ -81,24 +84,63 @@ def _has(stems: Sequence[str], words: Sequence[str]) -> bool:
     return False
 
 
-def detect_types(words: Sequence[str]) -> Tuple[Tuple[str, ...], bool]:
-    """(типы по приоритету important > dislikes > likes, есть_ли_отрицание)."""
+def _negated(w: Sequence[str], i: int) -> bool:
+    return any(x in _NEG for x in w[max(0, i - _NEG_WINDOW):i])
+
+
+def signals(words: Sequence[str]) -> Tuple[bool, bool, bool, bool]:
+    """(отрицание_в_тексте, dislikes, likes, important) по лексикону — для запроса И для текста факта.
+
+    dislikes — «не любит / не нравится / не ест / не пьёт / не переносит», «ненавидит / бесит / раздражает»,
+    «терпеть не может»; likes — «любит / обожает / нравится / фанат» БЕЗ отрицания перед глаголом;
+    important — только здоровье/запрет/«важно» (аллергия, нельзя, противопоказано, диагноз, здоровье)."""
     w = [x.replace("ё", "е") for x in words]
-    neg = any(x in _NEG for x in w)
-    like = _has(_LIKE_STEM, w)
-    eat = _has(_EAT_STEM, w)
-    hate = _has(_HATE_STEM, w)
-    imp_hard = _has(_IMPORTANT_HARD, w)
-    imp_soft = _has(_IMPORTANT_SOFT, w)
-    if imp_hard:
-        return (IMPORTANT, DISLIKES), neg           # аллергия / нельзя — это и «важное», и «не ем»
-    if hate or (neg and (like or eat)):
+    neg_any = any(x in _NEG for x in w)
+    dis = likes = False
+    for i, x in enumerate(w):
+        if _has(_HATE_STEM, [x]):
+            dis = True
+        elif x.startswith("терпет") and any(y in _NEG for y in w[i + 1:i + 3]):
+            dis = True
+        elif _has(_LIKE_STEM + _EAT_STEM, [x]):
+            if _negated(w, i):
+                dis = True
+            elif _has(_LIKE_STEM, [x]):
+                likes = True               # «ест» без любви/нелюбви — не сигнал
+    imp = _has(_IMPORTANT_HARD + _IMPORTANT_SOFT, w)
+    return neg_any, dis, likes, imp
+
+
+def detect_types(words: Sequence[str]) -> Tuple[Tuple[str, ...], bool]:
+    """Типы фактов, которые просит вопрос, и есть ли в нём отрицание.
+    «не любит / ненавидит / бесит / не нравится / не ест» → ТОЛЬКО dislikes; important — только по
+    «аллергия / нельзя / важно / здоровье»; обе группы в одном вопросе → оба типа."""
+    neg, dis, likes, imp = signals(words)
+    if imp and dis:
         return (IMPORTANT, DISLIKES), neg
-    if imp_soft:
+    if imp:
         return (IMPORTANT,), neg
-    if like and not neg:
+    if dis:
+        return (DISLIKES,), neg
+    if likes:
         return (LIKES,), neg
     return (), neg
+
+
+def fact_type_from_text(text: str) -> Optional[str]:
+    """Тип факта ПО ТЕКСТУ, детерминированно (без LLM). None — лексикон не сработал или факт двусмыслен
+    («любит чай, но не любит кофе»): тогда тип не трогаем. Приоритет как у guess_fact_type:
+    important > dislikes > likes; «не любит X» никогда не likes."""
+    _neg, dis, likes, imp = signals(tokens(text))
+    if imp:
+        return IMPORTANT
+    if dis and likes:
+        return None
+    if dis:
+        return DISLIKES
+    if likes:
+        return LIKES
+    return None
 
 
 def _is_self(words: Sequence[str]) -> bool:

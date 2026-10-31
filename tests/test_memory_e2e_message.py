@@ -85,6 +85,10 @@ def world():
         "m2_like": _fact(misha2, "likes", "любит рок"),
         "o_imp": _fact(olya, "important", "аллергия на орехи"),
         "o_like": _fact(olya, "likes", "любит чай"),
+        # типы, неверно поставленные Haiku при импорте (проверка пункта «без мусора»)
+        "m1_scold": _fact(misha1, "important", "мать ругала"),
+        "m1_pills": _fact(misha1, "important", "пьёт таблетки"),
+        "m1_alone": _fact(misha1, "likes", "не любит ходить один"),
         "own": _own("не ем сладкое"),
         "olya": olya,
     }
@@ -158,6 +162,8 @@ def test_dislikes_of_homonyms_two_labeled_groups(world):
     assert "не любит опозданий" in t and "не любит жару" in t
     assert "любит джаз" not in t and "любит рок" not in t     # likes не подмешиваются
     assert "👥 Люди (" not in t                                # не старый групповой заголовок
+    assert "мать ругала" not in t and "пьёт таблетки" not in t    # important по ошибке Haiku ≠ «не любит»
+    assert "не любит ходить один" in t                         # likes по ошибке Haiku, но текст — dislikes
     assert bot.results[0].route == "direct"
 
 
@@ -166,6 +172,7 @@ def test_likes_of_homonyms(world):
     t = bot.text
     assert "любит джаз" in t and "любит рок" in t
     assert "не любит" not in t.replace("любит джаз", "").replace("любит рок", "")
+    assert "не любит ходить один" not in t and "мать ругала" not in t and "пьёт таблетки" not in t
     assert bot.results[0].route == "direct" and bot.results[0].types == ("likes",)
 
 
