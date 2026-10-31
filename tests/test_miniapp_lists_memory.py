@@ -798,6 +798,13 @@ def test_memory_limit_category_in_category_list(client):
     assert data.get("grouped") is None
 
 
+def _res(mems, route="hybrid", kind=None):
+    from core.memory_search import Group, Hit, Result
+    hits = [Hit(memory_id=int(m.id) if str(m.id).isdigit() else 0, score=0.0, memory=m) for m in mems]
+    return Result(route=route, kind=kind or ("facts" if mems else "none"), subject="unclear",
+                  groups=[Group(hits=hits)] if hits else [])
+
+
 def test_memory_search_uses_hybrid_search_in_ranked_order(client):
     """Mini App ?q= идёт через единый гибрид (как бот): порядок = порядок ранжирования,
     kwargs = user_id / k=20 / Haiku-реранк."""
@@ -806,10 +813,10 @@ def test_memory_search_uses_hybrid_search_in_ranked_order(client):
         _mem_pg("m2", "любит тёмный шоколад", cat="🛒 Предпочтения", related="Аня"),
         _mem_pg("m3", "не относится", cat="🏠 Быт"),
     ]
-    hybrid = AsyncMock(return_value=[mems[1], mems[0]])
+    hybrid = AsyncMock(return_value=_res([mems[1], mems[0]]))
     with patch("miniapp.backend.routes.memory._memory_repo.find_recent",
                AsyncMock(return_value=mems)), \
-         patch("miniapp.backend.routes.memory.search_memories", hybrid), \
+         patch("miniapp.backend.routes.memory.answer", hybrid), \
          patch("miniapp.backend.routes.memory.get_user_id",
                AsyncMock(return_value=FAKE_USER_ID)):
         r = client.get("/api/memory?q=шоколад")
@@ -822,7 +829,7 @@ def test_memory_search_empty_result(client):
     mems = [_mem_pg("m1", "что-то", cat="🏠 Быт")]
     with patch("miniapp.backend.routes.memory._memory_repo.find_recent",
                AsyncMock(return_value=mems)), \
-         patch("miniapp.backend.routes.memory.search_memories", AsyncMock(return_value=[])), \
+         patch("miniapp.backend.routes.memory.answer", AsyncMock(return_value=_res([]))), \
          patch("miniapp.backend.routes.memory.get_user_id",
                AsyncMock(return_value=FAKE_USER_ID)):
         r = client.get("/api/memory?q=zzzz")
@@ -935,6 +942,21 @@ def test_memory_include_inactive_lists_deactivated(client):
     assert fr.await_args.kwargs["is_current"] is None
 
 
+def test_memory_search_structured_empty_result_carries_note(client):
+    """Понятый запрос без фактов («не знаю») / неизвестное имя → пустой список + note для UI."""
+    from core.memory_search import Result
+    res = Result(route="unknown_person", kind="unknown_person", subject="unknown_person",
+                 unknown_name="ваня")
+    with patch("miniapp.backend.routes.memory._memory_repo.find_recent",
+               AsyncMock(return_value=[_mem_pg("m1", "что-то", cat="🏠 Быт")])), \
+         patch("miniapp.backend.routes.memory.answer", AsyncMock(return_value=res)), \
+         patch("miniapp.backend.routes.memory.get_user_id",
+               AsyncMock(return_value=FAKE_USER_ID)):
+        r = client.get("/api/memory?q=что не любит ваня")
+    body = r.json()
+    assert body["items"] == [] and "ваня" in body["note"] and "Людях" in body["note"]
+
+
 def test_memory_search_hybrid_hit_outside_visible_is_dropped(client):
     """Гибрид вернул запись, которой нет среди видимых (служебная категория и т.п.) —
     в выдачу не попадает."""
@@ -942,8 +964,8 @@ def test_memory_search_hybrid_hit_outside_visible_is_dropped(client):
     hidden = _mem_pg("hid", "служебное", cat="🏠 Быт")
     with patch("miniapp.backend.routes.memory._memory_repo.find_recent",
                AsyncMock(return_value=visible)), \
-         patch("miniapp.backend.routes.memory.search_memories",
-               AsyncMock(return_value=[hidden, visible[0]])), \
+         patch("miniapp.backend.routes.memory.answer",
+               AsyncMock(return_value=_res([hidden, visible[0]]))), \
          patch("miniapp.backend.routes.memory.get_user_id",
                AsyncMock(return_value=FAKE_USER_ID)):
         r = client.get("/api/memory?q=напиток")

@@ -251,6 +251,26 @@ by «Стереть»), and not a `rejected` person. `scope` matches OR `global`
 Graceful: no Voyage key → FTS only; Haiku failure → RRF order; DB error → `[]`.
 Hooks reserved for later stages: `person_ids` (subject filter) and `trace`.
 
+### Query understanding before retrieval (`core/query_parse.py`, `memory_search.answer`)
+
+`search_memory` (bot) and Mini App `GET /memory?q=` call `answer()`, which first parses the
+question deterministically (no LLM): **subject** (`self` / person via `pg_people_repo.resolve` /
+`ambiguous` homonyms / `unknown_person` / `unclear`) and **type** (negation or allergy →
+`important`+`dislikes`; «любит» → `likes`; «важно» → `important`) and **intent** (facts / birthday).
+Case of letters is never used; people are found by `resolve` only.
+
+| Parsed | Route | Empty result |
+|---|---|---|
+| person(s) + type | `direct`: SQL by `person_id` + type from `key_name`, one labeled group per person | «не знаю», no similar facts |
+| person(s) + birthday | `birthday`: card (`birthday_context`) | «ДР не указан» |
+| self | `hybrid_self`: hybrid restricted to own facts (`person_id IS NULL` or the self card), strict rerank | none |
+| person, no type | `hybrid_person` (`person_ids`) | none |
+| unresolved name in subject position and not found in facts | `unknown_person` | — |
+| anything else | `hybrid` (stage 1) | none |
+
+Rerank prompt rules: negation vs affirmation mismatch = irrelevant; another person = irrelevant;
+empty beats wrong. Env `MEMORY_QUERY_UNDERSTANDING=0` falls back to plain hybrid. No schema changes.
+
 Opted out of hybrid (exact ILIKE, `use_semantic=False`): `_resolve_alias`
 (alias recall must stay exact) and the destructive flows `deactivate_memory` /
 `delete_memory` (they act on every / the-only found row without

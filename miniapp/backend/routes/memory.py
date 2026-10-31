@@ -11,7 +11,7 @@ from datetime import datetime
 
 from core.config import config
 from core.claude_client import ask_claude
-from core.memory_search import search_memories
+from core.memory_search import answer
 from core.user_manager import get_user_id
 from core.repos.pg_memory_repo import PgMemoryRepo, Memory
 from core.budget import (
@@ -250,22 +250,38 @@ async def get_memory(
 
     if cat:
         visible = [m for m in visible if (m.category or None) == cat]
+    note = ""
     if q and q.strip():
-        # Единый поиск с ботом (core.memory_search): FTS + vector → RRF → Haiku-реранк,
-        # потом пересечение с видимыми (категории/люди без q и т.п. уже отфильтрованы).
+        # Единый поиск с ботом (core.memory_search.answer): понимание вопроса → прямой запрос по
+        # человеку ИЛИ гибрид (FTS + vector → RRF → Haiku-реранк); потом пересечение с видимыми.
         # Ищет только по актуальным (is_current) записям, include_inactive на поиск не влияет.
         by_id = {m.id: m for m in visible}
         try:
-            found = await search_memories(q, user_id=user_id, k=20, do_rerank=True)
+            res = await answer(q, user_id=user_id, k=20, do_rerank=True)
         except Exception as e:
-            logger.warning("get_memory hybrid search failed: %s", e)
-            found = []
+            logger.warning("get_memory search failed: %s", e)
+            res = None
+        found = res.memories if res else []
         visible = [by_id[m.id] for m in found if m.id in by_id]
+        if res is not None and not visible:
+            note = _search_note(res)
 
-    return {
+    out = {
         "items": [_serialize_memory(m) for m in visible],
         "categories": _all_categories(categories),
     }
+    if note:
+        out["note"] = note
+    return out
+
+
+def _search_note(res) -> str:
+    """Короткое пояснение к пустой выдаче поиска (понятый запрос без фактов / неизвестное имя / ДР)."""
+    from core.memory import _structured_text
+    if res.route in ("direct", "birthday", "unknown_person"):
+        import re as _re
+        return _re.sub(r"<[^>]+>", "", _structured_text(res))
+    return ""
 
 
 # ── /api/memory/adhd ────────────────────────────────────────────────────────

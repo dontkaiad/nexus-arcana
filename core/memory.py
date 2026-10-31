@@ -633,21 +633,75 @@ async def _search_finance(query: str, page_size: int = 5) -> list:
         return []
 
 
+_STRUCTURED_ROUTES = {"direct", "birthday", "unknown_person"}
+_TYPE_MARK = {"important": "⚠️", "dislikes": "🚫", "likes": "👍"}
+
+
+def _what(types) -> str:
+    t = set(types or ())
+    if t == {"likes"}:
+        return "что любит"
+    if t == {"important"}:
+        return "важное"
+    return "что не любит / важное"
+
+
+def _structured_text(result, arcana: bool = False) -> str:
+    """Текст ответа для маршрутов с понятой структурой (HTML). Пусто → честное «не знаю»."""
+    from html import escape
+    from core.repos.pg_people_repo import fact_type
+    if result.route == "unknown_person":
+        verb = "Не нашла" if arcana else "Не нашёл"
+        return f"🧠 {verb} в Людях «{escape(result.unknown_name)}»"
+    if result.route == "birthday":
+        lines = []
+        for g in result.groups:
+            lines.append(f"🎂 <b>{escape(g.label)}</b>: {g.birthday if g.birthday else 'ДР не указан'}")
+        return "\n".join(lines) or "🧠 Не знаю"
+    # direct
+    blocks = []
+    empty = []
+    for g in result.groups:
+        if not g.hits:
+            empty.append(g.label)
+            continue
+        rows = [f"{_TYPE_MARK.get(fact_type(h.memory.key), '•')} {escape(owner_fact(h.memory.fact, h.memory.related_to, h.memory.person_id))}"
+                for h in g.hits]
+        blocks.append(f"👤 <b>{escape(g.label)}</b>:\n" + "\n".join(rows))
+    if empty and not blocks:
+        who = " и ".join(f"<b>{escape(x)}</b>" for x in empty)
+        return f"🧠 Не знаю: у {who} нет подтверждённых фактов ({_what(result.types)})"
+    if empty:
+        blocks.append("Нет подтверждённых фактов (" + _what(result.types) + "): "
+                      + ", ".join(escape(x) for x in empty))
+    return "\n\n".join(blocks)
+
+
 async def search_memory(
     message: Message,
     query: str,
     user_id: str,
     del_prefix: str = "mem_del",
 ) -> None:
-    """Поиск по памяти + финансам параллельно."""
+    """Поиск по памяти + финансам. Вопрос сперва разбирается (core.query_parse): ясный субъект+тип →
+    прямой запрос по человеку, «не знаю» вместо похожих фактов; иначе — единый гибрид."""
     query = query.strip()
+    result = None
 
     if query:
-        mem_coro = _memory_search.search_memories(query, user_id=user_id, k=5, do_rerank=True)
-        fin_coro = _search_finance(query, page_size=5)
-        mems, fin_pages = await asyncio.gather(mem_coro, fin_coro)
-        logger.info("memory search: hint=%r mems=%d fin=%d",
-                    query, len(mems), len(fin_pages))
+        fin_task = asyncio.ensure_future(_search_finance(query, page_size=5))
+        result = await _memory_search.answer(query, user_id=user_id, k=5, do_rerank=True)
+        if result.route in _STRUCTURED_ROUTES:
+            fin_task.cancel()
+            fin_pages: list = []
+        else:
+            fin_pages = await fin_task
+        mems = result.memories
+        logger.info("memory search: hint=%r route=%s mems=%d fin=%d",
+                    query, result.route, len(mems), len(fin_pages))
+        if result.route in _STRUCTURED_ROUTES and not mems:
+            await message.answer(_structured_text(result, arcana=del_prefix.startswith("arc")))
+            return
     else:
         try:
             mems = await _mem_repo.find_recent(is_current=True, user_id=user_id, page_size=10)
@@ -667,6 +721,12 @@ async def search_memory(
     _mem_selected[uid] = set()
 
     parts: List[str] = []
+
+    if result is not None and result.route == "direct" and mems:
+        text = _structured_text(result, arcana=del_prefix.startswith("arc"))
+        await message.answer(text, reply_markup=_build_delete_keyboard(
+            uid, list(mems), reactivate_cb="mem_reactivate_selected"))
+        return
 
     # ── Память ──
     if mems:
