@@ -84,12 +84,18 @@ def test_migration_up_down_reversible():
     clm = importlib.util.module_from_spec(cl_spec)
     cl_spec.loader.exec_module(clm)
 
+    ok_path = next((REPO / "alembic" / "versions").glob("*_people_alias_ok.py"))
+    ok_spec = importlib.util.spec_from_file_location("_mig_alias_ok", ok_path)
+    okm = importlib.util.module_from_spec(ok_spec)
+    ok_spec.loader.exec_module(okm)
+
     eng = get_engine()
     with eng.connect() as conn:
         trans = conn.begin()
         try:
             ctx = MigrationContext.configure(conn)
             with Operations.context(ctx):
+                okm.downgrade()                 # people_alias_ok держит FK на people
                 clm.downgrade()
                 acc.downgrade()
                 mig.downgrade()

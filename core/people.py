@@ -51,10 +51,13 @@ def alias_key(s: str) -> str:
     return " ".join(_strip(w) if len(w) >= 4 else w for w in _tokens(s))
 
 
-def alias_disputes(rows: Iterable[Dict[str, Any]]) -> Dict[int, List[Dict[str, Any]]]:
+def alias_disputes(rows: Iterable[Dict[str, Any]], reviewed: Iterable[Tuple[int, int, str]] = ()) -> Dict[int, List[Dict[str, Any]]]:
     """Спорные «Другие имена»: алиас человека целиком совпадает с именем или алиасом ДРУГОГО человека
     (в том числе «Я»). {person_id: [{"alias", "also": [{"id","name","is_self"}]}]}; отклонённые не участвуют,
-    свои алиасы «Я» не проверяются, алиас = собственное имя — не спор."""
+    свои алиасы «Я» не проверяются, алиас = собственное имя — не спор.
+    `reviewed` — пары «Тёзки, ок» (меньший id, больший id, alias_key): такое совпадение не спорное; новый
+    человек с тем же именем в пару не входит и снова подсвечивается."""
+    ok = set(reviewed)
     people_ = [r for r in rows if r.get("status") != "rejected"]
     owners: Dict[str, List[Dict[str, Any]]] = {}
     for p in people_:
@@ -74,7 +77,8 @@ def alias_disputes(rows: Iterable[Dict[str, Any]]) -> Dict[int, List[Dict[str, A
             if not k or k == own:
                 continue
             also = [{"id": y["id"], "name": y["name"], "is_self": bool(y.get("is_self"))}
-                    for y in owners.get(k, []) if y["id"] != x["id"]]
+                    for y in owners.get(k, []) if y["id"] != x["id"]
+                    and (min(x["id"], y["id"]), max(x["id"], y["id"]), k) not in ok]
             if also:
                 out.setdefault(x["id"], []).append({"alias": alias, "also": also})
     return out

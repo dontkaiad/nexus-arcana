@@ -360,6 +360,31 @@ def alias_rows(user_id: str) -> List[Dict]:
             for r in rows]
 
 
+def alias_ok_pairs(user_id: str) -> set:
+    """Пары «Тёзки, ок» владельца: {(меньший id, больший id, alias_key)}."""
+    with get_engine().connect() as c:
+        rows = c.execute(text("SELECT o.person_a, o.person_b, o.alias_key FROM people_alias_ok o "
+                              "JOIN people p ON p.id = o.person_a WHERE p.user_id = :u"), {"u": user_id}).all()
+    return {(r.person_a, r.person_b, r.alias_key) for r in rows}
+
+
+def mark_alias_ok(user_id: str, person_id: int, alias: str) -> Optional[int]:
+    """«Тёзки, ок»: все ТЕКУЩИЕ совпадения этого алиаса помечаются проверенными. None — у человека нет такого
+    спорного алиаса; иначе число помеченных пар."""
+    from core.people import alias_disputes, alias_key
+    rows = alias_rows(user_id)
+    hit = next((d for d in alias_disputes(rows, alias_ok_pairs(user_id)).get(person_id, []) if d["alias"] == alias), None)
+    if not hit:
+        return None
+    k = alias_key(alias)
+    with get_engine().begin() as c:
+        for o in hit["also"]:
+            a, b = sorted((person_id, o["id"]))
+            c.execute(text("INSERT INTO people_alias_ok (person_a, person_b, alias_key) VALUES (:a, :b, :k) "
+                           "ON CONFLICT DO NOTHING"), {"a": a, "b": b, "k": k})
+    return len(hit["also"])
+
+
 def get_person(user_id: str, person_id: int) -> Optional[Dict]:
     with get_engine().connect() as c:
         r = c.execute(select(people).where(and_(people.c.id == person_id, people.c.user_id == user_id))).first()

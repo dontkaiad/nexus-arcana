@@ -134,7 +134,7 @@ async def alias_disputes_summary(tg_id: int = Depends(current_user_id)) -> Dict[
     Объявлен ДО /people/{person_id}."""
     user_id = await _owner(tg_id)
     rows = await asyncio.to_thread(repo.alias_rows, user_id)
-    disp = alias_disputes(rows)
+    disp = alias_disputes(rows, await asyncio.to_thread(repo.alias_ok_pairs, user_id))
     by_id = {r["id"]: r for r in rows}
     people_ = sorted(({"id": pid, "disputed": len(v), "aliases": len(by_id[pid]["aliases"])} for pid, v in disp.items()),
                      key=lambda d: (-d["disputed"], d["id"]))
@@ -143,7 +143,7 @@ async def alias_disputes_summary(tg_id: int = Depends(current_user_id)) -> Dict[
 
 async def _aliases_info(user_id: str, person_id: int, aliases: List[str]) -> List[Dict[str, Any]]:
     rows = await asyncio.to_thread(repo.alias_rows, user_id)
-    disp = {d["alias"]: d["also"] for d in alias_disputes(rows).get(person_id, [])}
+    disp = {d["alias"]: d["also"] for d in alias_disputes(rows, await asyncio.to_thread(repo.alias_ok_pairs, user_id)).get(person_id, [])}
     return [{"alias": a, "also": disp.get(a, [])} for a in aliases]
 
 
@@ -175,6 +175,18 @@ async def remove_alias(person_id: int, body: AliasBody, tg_id: int = Depends(cur
         raise HTTPException(status_code=404, detail="alias not found")
     p = await asyncio.to_thread(repo.update_person, user_id, person_id, {"aliases": new})
     return {**_person_out(p), "aliases_info": await _aliases_info(user_id, person_id, new)}
+
+
+@router.post("/people/{person_id}/aliases/ok")
+async def alias_ok(person_id: int, body: AliasBody, tg_id: int = Depends(current_user_id)) -> Dict[str, Any]:
+    """«Тёзки, ок»: совпадение имени проверено — не подсвечивать и не считать в бейдже. Новое совпадение подсветится."""
+    user_id = await _owner(tg_id)
+    p = await asyncio.to_thread(repo.get_person, user_id, person_id)
+    if not p:
+        raise HTTPException(status_code=404, detail="person not found")
+    if await asyncio.to_thread(repo.mark_alias_ok, user_id, person_id, body.alias) is None:
+        raise HTTPException(status_code=404, detail="alias not disputed")
+    return {**_person_out(p), "aliases_info": await _aliases_info(user_id, person_id, list(p.get("aliases") or []))}
 
 
 @router.post("/people/{person_id}/aliases/reset")

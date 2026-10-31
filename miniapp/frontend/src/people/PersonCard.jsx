@@ -6,7 +6,7 @@ import PersonEdit from './PersonEdit'
 import Accounts from './Accounts'
 import { Btn, Chip, Note, inputStyle, Label } from './parts'
 import {
-  addFact, approveAll, approveFact, eraseFact, errText, getPerson, rejectAll, rejectFact, removeAlias, resetAliases, restoreFact,
+  addFact, approveAll, approveFact, eraseFact, errText, getPerson, rejectAll, rejectFact, removeAlias, resetAliases, restoreFact, aliasOk,
 } from './peopleApi'
 import { STATUS_LABEL, TYPE_CHOICES, fmtBirthday, fs, haptic, plural, primaryColors, redText, statusColor, typeMeta } from './ui'
 
@@ -177,6 +177,8 @@ function Aliases({ s, p, busy, act }) {
               также у: {i.also.map((o) => (o.is_self ? 'Я' : o.name)).join(', ')}
             </div>
           </div>
+          <div role="button" aria-label="тёзки, ок" onClick={() => !busy && act(() => aliasOk(p.id, i.alias))}
+            style={{ minHeight: 44, padding: '0 10px', display: 'flex', alignItems: 'center', fontSize: fs(12), fontWeight: 700, color: s.text, cursor: 'pointer', flexShrink: 0, textDecoration: 'underline', textDecorationStyle: 'dotted', textUnderlineOffset: 3 }}>Тёзки, ок</div>
           <div role="button" aria-label="убрать другое имя" onClick={() => !busy && act(() => removeAlias(p.id, i.alias))}
             style={{ width: 44, height: 44, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18, fontWeight: 700, color: redText(s), cursor: 'pointer', flexShrink: 0 }}>✕</div>
         </div>

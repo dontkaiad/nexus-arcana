@@ -350,3 +350,41 @@ def test_api_summary_card_remove_reset(papi):
     assert prepo.resolve(MARK, ["Свой"]) == []                                     # aliases_norm пересчитан
     assert papi.post("/api/people/%d/aliases/reset" % me).status_code == 409        # «Я» не сбрасываем
     assert papi.post("/api/people/999999999/aliases/reset").status_code == 404
+
+
+def test_alias_ok_pure_pair_review_and_new_match_rehighlights():
+    from core.people import alias_disputes, alias_key
+    rows = [_p(1, "Первая", ["Тёзка"]), _p(2, "Тёзка", [])]
+    k = alias_key("Тёзка")
+    assert 1 in alias_disputes(rows)
+    assert alias_disputes(rows, {(1, 2, k)}) == {}                             # пара проверена
+    rows.append(_p(3, "Тёзка", []))                                            # появился ещё один → снова спорно, но только он
+    d = alias_disputes(rows, {(1, 2, k)})
+    assert [o["id"] for o in d[1][0]["also"]] == [3]
+    assert alias_disputes(rows, {(1, 2, k), (1, 3, k)}) == {}
+
+
+def test_api_alias_ok_hides_from_card_and_badge_and_survives_until_new_match(papi):
+    x = mk("Оля Первая", ["Вадим"])
+    y = mk("Вадим Второй", ["Вадим"])
+    assert papi.get("/api/people/alias-disputes").json()["total"] == 2
+    r = papi.post("/api/people/%d/aliases/ok" % x, json={"alias": "Вадим"})
+    assert r.status_code == 200 and r.json()["aliases_info"] == [{"alias": "Вадим", "also": []}]
+    assert r.json()["aliases"] == ["Вадим"]                                     # сам алиас остаётся
+    assert papi.get("/api/people/alias-disputes").json()["total"] == 0          # пара проверена с обеих сторон
+    assert papi.get("/api/people/%d" % y).json()["aliases_info"][0]["also"] == []
+    z = mk("Вадим Третий", ["Вадим"])                                           # новое совпадение → снова подсвечено
+    info = papi.get("/api/people/%d" % x).json()["aliases_info"][0]
+    assert [o["id"] for o in info["also"]] == [z]
+    assert papi.get("/api/people/alias-disputes").json()["total"] >= 2
+    assert papi.post("/api/people/%d/aliases/ok" % x, json={"alias": "нет такого"}).status_code == 404
+    assert papi.post("/api/people/999999999/aliases/ok", json={"alias": "Вадим"}).status_code == 404
+
+
+def test_alias_ok_rows_are_removed_with_the_person(papi):
+    x = mk("Оля Первая", ["Вадим"])
+    y = mk("Вадим")
+    assert papi.post("/api/people/%d/aliases/ok" % x, json={"alias": "Вадим"}).status_code == 200
+    with get_engine().begin() as c:
+        c.execute(delete(people).where(people.c.id == y))
+        assert c.execute(text("SELECT count(*) FROM people_alias_ok")).scalar() == 0

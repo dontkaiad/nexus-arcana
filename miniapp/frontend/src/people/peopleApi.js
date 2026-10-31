@@ -26,6 +26,7 @@ export const duplicates = () => apiGet('/api/people/duplicates')
 // Спорные «Другие имена» (совпали с именем/алиасом другого): сводка, убрать один, сбросить все
 export const aliasDisputes = () => apiGet('/api/people/alias-disputes')
 export const removeAlias = (id, alias) => apiPost(`/api/people/${id}/aliases/remove`, { alias })
+export const aliasOk = (id, alias) => apiPost(`/api/people/${id}/aliases/ok`, { alias })
 export const resetAliases = (id) => apiPost(`/api/people/${id}/aliases/reset`, {})
 export const mergePerson = (id, intoId) => apiPost(`/api/people/${id}/merge`, { into_id: intoId })
 export const addAccount = (id, body) => apiPost(`/api/people/${id}/accounts`, body)
