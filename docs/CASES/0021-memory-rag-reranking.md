@@ -7,6 +7,13 @@
   `rerank_memory_candidates`), `core/memory.py` (`_semantic_search_memory`)
 - Update this ADR in the same PR that changes the memory-RAG ranking
   strategy.
+- **Amended (hybrid search):** the semantic *fallback* gate («only when ILIKE found
+  < 3 hits») is gone. Retrieval is now always hybrid — Postgres FTS + vector →
+  RRF — in `core/memory_search.py`; the Haiku reranker (`memory_search.rerank`)
+  now *orders* ≤k candidates instead of only filtering, runs for `search_memory`
+  and Mini App, and is skipped on the prompt-context path. The Voyage 3-RPM
+  rationale below is obsolete (rate limit depends on the key's plan). The
+  widened-pool and category/relation-context reasoning still holds.
 
 ## Context
 

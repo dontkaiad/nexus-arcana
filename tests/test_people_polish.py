@@ -102,7 +102,7 @@ def test_owner_fact_renders_name_only_for_person_facts():
 async def test_bot_context_shows_name_for_bare_person_facts():
     pid = mk("Зюзя Тестова")
     mk_fact(pid, status="confirmed", text_="любит кардамон")
-    with patch.object(mem, "_semantic_search_memory", AsyncMock(side_effect=lambda q, ex, **k: ex)):
+    with patch("core.memory_search._vector_leg", return_value=[]):
         ctx = await mem.get_memories_for_context(MARK, ["Зюзе"], bot_label="☀️ Nexus")
     assert "Зюзя: любит кардамон" in ctx
 
@@ -152,7 +152,7 @@ def test_migration_strips_prefix_queues_only_embedded_and_is_reversible():
             with patch.object(rs, "get_engine", return_value=_BoundEngine(conn)):
                 items, mode = rs.plan()
             assert mode == "queue" and {i["id"] for i in items} >= {a} and not ({b, c_, d, s} & {i["id"] for i in items})
-            assert next(i for i in items if i["id"] == a)["embed_text"].startswith("любит чай ")
+            assert next(i for i in items if i["id"] == a)["embed_text"].endswith("любит чай")
             with Operations.context(MigrationContext.configure(conn)):
                 mig.downgrade()
             assert conn.execute(text("SELECT to_regclass('people_reembed_queue') IS NULL")).scalar()

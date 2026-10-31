@@ -76,7 +76,7 @@ async def test_add_spawns_index_task():
     idx.assert_called_once()
     called_id, embed_text = idx.call_args[0]
     assert called_id == mem_id
-    assert embed_text == "новый факт связь 🏠 Быт"
+    assert embed_text == "новый факт"  # только факт: ни связь, ни категория в вектор не идут
 
 
 @pytest.mark.asyncio
@@ -121,7 +121,7 @@ async def test_upsert_update_path_nulls_stale_embedding_then_reindexes():
     idx.assert_called_once()
     called_id, embed_text = idx.call_args[0]
     assert called_id == mem_id
-    assert embed_text == "лимит: кафе 5000 💰 Лимит"  # переиндексирован НОВЫЙ текст
+    assert embed_text == "лимит: кафе 5000"  # переиндексирован НОВЫЙ текст (только факт)
 
 
 @pytest.mark.asyncio
@@ -268,7 +268,7 @@ async def test_update_fields_by_id_updates_fact_and_reindexes():
     idx.assert_called_once()
     called_id, embed_text = idx.call_args[0]
     assert called_id == "1"
-    assert embed_text == "новый текст S7 🐾 Коты"  # переиндексирован свежий (не старый) факт
+    assert embed_text == "новый текст"  # переиндексирован свежий (не старый) факт, без связи/категории
 
 
 @pytest.mark.asyncio

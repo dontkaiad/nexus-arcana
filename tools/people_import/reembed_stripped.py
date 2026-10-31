@@ -29,18 +29,18 @@ def plan() -> tuple[list[dict], str]:
     with get_engine().connect() as c:
         if _queue_exists(c):
             rows = c.execute(sa.text(
-                "SELECT m.id, m.fact_text, m.related_to, m.category FROM memories m "
+                "SELECT m.id, m.fact_text, m.related_to, m.category, m.person_id FROM memories m "
                 f"JOIN {QUEUE} q ON q.memory_id = m.id WHERE m.fact_text <> '' ORDER BY m.id")).all()
-            return [{"id": r.id, "embed_text": _embed_text(r.fact_text, r.related_to, r.category)} for r in rows], "queue"
+            return [{"id": r.id, "embed_text": _embed_text(r.fact_text, r.related_to, r.category, r.person_id)} for r in rows], "queue"
         rows = c.execute(sa.text(
-            "SELECT m.id, m.fact_text, m.related_to, m.category, p.name, p.aliases FROM memories m "
+            "SELECT m.id, m.fact_text, m.related_to, m.category, m.person_id, p.name, p.aliases FROM memories m "
             "JOIN people p ON p.id = m.person_id WHERE m.fact_text <> '' AND NOT p.is_self "
             "AND m.embedding IS NOT NULL ORDER BY m.id")).all()
     out = []
     for r in rows:
         new = strip_name_prefix(r.fact_text, r.name, r.aliases or [])
         if new != r.fact_text and new.strip():
-            out.append({"id": r.id, "embed_text": _embed_text(new, r.related_to, r.category)})
+            out.append({"id": r.id, "embed_text": _embed_text(new, r.related_to, r.category, r.person_id)})
     return out, "live"
 
 
@@ -48,7 +48,7 @@ def main(argv=None) -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--apply", action="store_true")
     ap.add_argument("--batch", type=int, default=64)
-    ap.add_argument("--sleep", type=float, default=21.0, help="пауза между батчами (free-tier 3 RPM)")
+    ap.add_argument("--sleep", type=float, default=21.0, help="пауза между батчами (лимит зависит от тарифа ключа)")
     a = ap.parse_args(argv)
     items, mode = plan()
     chars = sum(len(i["embed_text"]) for i in items)

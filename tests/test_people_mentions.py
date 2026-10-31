@@ -42,7 +42,7 @@ def ids(mentions, user=MARK):
 
 
 async def ctx(*kw):
-    with patch.object(mem, "_semantic_search_memory", AsyncMock(side_effect=lambda q, ex, **k: ex)):
+    with patch("core.memory_search._vector_leg", return_value=[]):
         return await mem.get_memories_for_context(MARK, list(kw), bot_label="☀️ Nexus")
 
 

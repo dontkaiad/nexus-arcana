@@ -10,6 +10,11 @@
   `scripts/migrate_memory_embeddings.py`
 - Update this ADR in the same PR that changes the memory-RAG schema or
   search strategy.
+- **Amended (hybrid search):** embedding text is now the fact only (person facts
+  carry the name; no alias tail, no category), the «<3 ILIKE hits» gate and the
+  ILIKE-first design are replaced by always-on hybrid search (FTS + vector + RRF,
+  `core/memory_search.py`), and `memories.fts` + GIN index were added
+  (migration `3a926d9ddaf7`). See ADR-0021 amendment.
 
 ## Context
 

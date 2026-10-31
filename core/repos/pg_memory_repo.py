@@ -216,11 +216,11 @@ def _update_fields_sync(
     fact: Optional[str] = None,
     category: Optional[str] = None,
     related_to: Optional[str] = None,
-) -> Optional[Tuple[str, str, str]]:
+) -> Optional[Tuple[str, str, str, Optional[int]]]:
     """Точечная правка уже существующей строки ПО ID (не по key+category, в
     отличие от upsert) — используется reply-исправлением памяти (#188).
     Только переданные (не-None) поля меняются. Возвращает (fact, related_to,
-    category) АКТУАЛЬНЫЕ после апдейта (для переиндексации) — None, если id
+    category, person_id) АКТУАЛЬНЫЕ после апдейта (для переиндексации) — None, если id
     не найден или нечего менять."""
     try:
         mid = int(memory_id)
@@ -243,7 +243,7 @@ def _update_fields_sync(
             return None
     with get_engine().connect() as conn:
         row = conn.execute(
-            select(memories.c.fact_text, memories.c.related_to, memories.c.category)
+            select(memories.c.fact_text, memories.c.related_to, memories.c.category, memories.c.person_id)
             .where(memories.c.id == mid)
         ).fetchone()
     if not row:
@@ -259,7 +259,7 @@ def _update_fields_sync(
             )
     except Exception as e:
         logger.warning("memory update_fields: embedding NULL-reset failed for %s: %s", mid, e)
-    return row[0] or "", row[1] or "", row[2] or ""
+    return row[0] or "", row[1] or "", row[2] or "", row[3]
 
 
 def _set_current_sync(memory_ids: List[str], is_current: bool) -> int:
@@ -494,18 +494,18 @@ _index_tasks: set = set()  # держим ссылки, иначе GC сниме
 
 
 async def _index_embedding_safe(
-    memory_id: str, fact: str, related_to: str, category: str
+    memory_id: str, fact: str, related_to: str, category: str, person_id=None
 ) -> None:
     try:
         # Лениво: core.memory_rag импортирует Memory из ЭТОГО модуля.
         from core import memory_rag
-        embed_text = memory_rag._embed_text(fact, related_to, category)
+        embed_text = memory_rag._embed_text(fact, related_to, category, person_id)
         await asyncio.to_thread(memory_rag.index_memory, memory_id, embed_text)
     except Exception as e:
         logger.warning("memory embedding index failed for %s: %s", memory_id, e)
 
 
-def _spawn_index(memory_id: str, fact: str, related_to: str, category: str) -> None:
+def _spawn_index(memory_id: str, fact: str, related_to: str, category: str, person_id=None) -> None:
     # add/upsert сами async — вызывающий loop всегда есть на момент вызова.
     # get_running_loop() тут не может бросить, но по-минимуму защищаемся —
     # без loop эта строка всё равно подберётся backfill-скриптом.
@@ -513,7 +513,7 @@ def _spawn_index(memory_id: str, fact: str, related_to: str, category: str) -> N
         loop = asyncio.get_running_loop()
     except RuntimeError:
         return
-    task = loop.create_task(_index_embedding_safe(memory_id, fact, related_to, category))
+    task = loop.create_task(_index_embedding_safe(memory_id, fact, related_to, category, person_id))
     _index_tasks.add(task)
     task.add_done_callback(_index_tasks.discard)
 
@@ -541,7 +541,7 @@ class PgMemoryRepo:
             person_id, review_status, source_quote, provenance,
         )
         if mem_id and index:
-            _spawn_index(mem_id, fact, related_to, category)
+            _spawn_index(mem_id, fact, related_to, category, person_id)
         return mem_id
 
     async def upsert(
@@ -566,7 +566,7 @@ class PgMemoryRepo:
             person_id, review_status, source_quote, provenance,
         )
         if mem_id and index:
-            _spawn_index(mem_id, fact, related_to, category)
+            _spawn_index(mem_id, fact, related_to, category, person_id)
         return mem_id, was_updated
 
     async def update_fields(
@@ -584,8 +584,8 @@ class PgMemoryRepo:
         )
         if fresh is None:
             return False
-        fresh_fact, fresh_related, fresh_category = fresh
-        _spawn_index(memory_id, fresh_fact, fresh_related, fresh_category)
+        fresh_fact, fresh_related, fresh_category, fresh_person = fresh
+        _spawn_index(memory_id, fresh_fact, fresh_related, fresh_category, fresh_person)
         return True
 
     async def set_current(self, memory_ids: List[str], is_current: bool) -> int:

@@ -4,7 +4,7 @@
 `arcana_triplets`, только Arcana). Эмбеддинг-клиент и низкоуровневые
 хелперы (`_embed`, `_vec_literal`, Voyage-модель/dim) переиспользуются ИЗ
 `core.rag` напрямую — не дублируются, это один и тот же Voyage-клиент с
-общим 3 RPM free-tier бюджетом на ОБА RAG-потребителя.
+общим Voyage-ключом на ОБА RAG-потребителя.
 
 Отличие от `core/rag.py`: там своя таблица `arcana_triplets` (derived
 read-model над sessions, отдельный upsert по session_id). Здесь —
@@ -20,18 +20,17 @@ embedding живёт КАК КОЛОНКА в самой таблице `memorie
 
 Принципы — те же, что в `core/rag.py`: всё graceful (нет ключа / БД
 недоступна / pgvector не стоит → warning в лог + пусто/no-op, без
-исключений — боты не падают, память работает без RAG на чистом ILIKE).
+исключений — боты не падают, память работает без векторов, на одном FTS).
 """
 from __future__ import annotations
 
-import json
 import logging
 from typing import List, Optional
 
 import sqlalchemy as sa
 
-from core.claude_client import ask_claude
 from core.db import get_engine
+from core.people import owner_fact
 from core.rag import _embed, _vec_literal
 from core.repos.pg_memory_repo import Memory
 
@@ -39,30 +38,21 @@ logger = logging.getLogger("core.memory_rag")
 
 TABLE_MEMORIES = "memories"
 
-# Дефолт top_k для search_memory_semantic (ADR-0021): шире сеть кандидатов
-# от pgvector, т.к. на коротких фактах правильный ответ не всегда топ-5 по
-# чистому cosine distance — реранк ниже отбирает смысл, не расстояние.
+# Дефолт top_k для search_memory_semantic. Информационный поиск теперь идёт через
+# core/memory_search.py (гибрид FTS+vector+RRF); эта функция остаётся
+# низкоуровневым векторным запросом и в тестах/инструментах.
 DEFAULT_TOP_K = 10
 
-_RERANK_SYSTEM = (
-    "Ты фильтруешь кандидатов семантического поиска по личным заметкам "
-    "пользователя (🧠 Память). Тебе даны запрос и список кандидатов с "
-    "полями id/факт/категория/связь. Категория и связь — это контекст, "
-    "которого не хватает эмбеддингу на коротких фактах: например категория "
-    "«🐾 Коты» рядом со словом «луна» явно указывает на кличку питомца, а "
-    "не на слово «луна» в бытовом или ином смысле.\n"
-    "Верни ТОЛЬКО JSON-массив id тех кандидатов, что РЕАЛЬНО релевантны "
-    "запросу по смыслу. Если релевантных нет — верни []. Никакого текста "
-    "до или после JSON, никакого markdown."
-)
 
-
-def _embed_text(fact: str, related_to: str = "", category: str = "") -> str:
-    """Текст для эмбеддинга факта — непустые части {fact, related_to,
-    category} через пробел. category/related_to добавляют сигнал (напр.
-    факт про место находится лучше, если вектор кодирует и категорию)."""
-    parts = [str(p).strip() for p in (fact, related_to, category) if p and str(p).strip()]
-    return " ".join(parts)
+def _embed_text(fact: str, related_to: str = "", category: str = "", person_id=None) -> str:
+    """Текст для эмбеддинга факта: ТОЛЬКО сам факт. Для факта человека — с именем
+    (`owner_fact`: имя хранится в related_to, а в fact_text его нет — без него
+    вектор «др 5 мая» безымянный). Хвост алиасов и category в вектор НЕ идут
+    (category остаётся в промпте реранка). `category` принят ради совместимости
+    вызовов и игнорируется. Tombstone (пустой факт) → '' (индексация пропустится)."""
+    if not fact or not str(fact).strip():
+        return ""
+    return owner_fact(str(fact).strip(), related_to or "", person_id).strip()
 
 
 def index_memory(memory_id: str, embed_text: str) -> bool:
@@ -91,7 +81,7 @@ def index_memory(memory_id: str, embed_text: str) -> bool:
 
 def index_memories_batch(items: List[dict]) -> int:
     """Индексирует N памятей ОДНИМ запросом Voyage (батч-эмбеддинг) — под
-    лимит 3 RPM: N памятей = 1 запрос Voyage. Используется бэкфиллом.
+    экономии запросов: N памятей = 1 запрос Voyage. Используется бэкфиллом.
 
     items: [{"memory_id": ..., "embed_text": ...}, ...]. Пустой текст —
     пропуск. Возвращает число проиндексированных строк. Graceful: 0 при
@@ -133,10 +123,10 @@ def search_memory_semantic(
 ) -> List[Memory]:
     """Семантический поиск похожих memory-фактов (косинус). Возвращает
     `Memory` (тот же тип, что `PgMemoryRepo`) для прямого мержа с
-    ILIKE-результатами вызывающей стороной.
+    другими результатами вызывающей стороной.
 
     scope задан → доп. фильтр (scope=:scope OR scope='global'); пусто →
-    без фильтра scope (как текущий ILIKE-путь). Только is_current и не
+    без фильтра scope. Только is_current и не
     is_archived. Graceful: БД/Voyage недоступны → [].
 
     min_score (#185, ADR-0021): на реальных данных top-1 по cosine distance
@@ -144,9 +134,8 @@ def search_memory_semantic(
     слишком обще, «луна» путается со словом и с кличкой кота) — порог
     расстояния тут не разделяет релевантное от нерелевантного, поэтому
     остаётся отключённым (None) по умолчанию. Отбор смысла делает
-    `rerank_memory_candidates` НАД top_k результатами этой функции, а не
-    сама эта функция. min_score остаётся доступным параметром на случай,
-    если понадобится совсем грубый предфильтр перед реранком."""
+    `core.memory_search.rerank` (Haiku) над кандидатами гибрида, а не
+    эта функция. min_score — опциональный грубый предфильтр."""
     if not query_text or not str(query_text).strip():
         return []
     vecs = _embed(query_text, input_type="query")
@@ -171,6 +160,7 @@ def search_memory_semantic(
               AND is_archived = false
               AND is_current = true
               AND review_status = 'confirmed'
+              AND fact_text <> ''
               AND NOT EXISTS (SELECT 1 FROM people p WHERE p.id = memories.person_id AND p.status = 'rejected')
               {where_extra}
             ORDER BY embedding <=> CAST(:q AS vector)
@@ -215,53 +205,3 @@ def search_memory_semantic(
     except Exception as e:
         logger.warning("search_memory_semantic failed: %s", e)
         return []
-
-
-def _rerank_candidate_line(m: Memory) -> str:
-    parts = [f"id={m.id}", f'факт="{m.fact}"']
-    if m.category:
-        parts.append(f'категория="{m.category}"')
-    if m.related_to:
-        parts.append(f'связь="{m.related_to}"')
-    return " ".join(parts)
-
-
-async def rerank_memory_candidates(query: str, candidates: List[Memory]) -> List[Memory]:
-    """Haiku-реранк top-K кандидатов pgvector (ADR-0021, #185): cosine
-    distance топ-1 не гарантирует смысловую релевантность — general-purpose
-    эмбеддинг не различает «луна-слово» и «Луна-кличка кота». category/
-    related_to дают Haiku контекст, которого не хватает самому эмбеддингу.
-
-    Возвращает подмножество candidates, которое Haiku пометил релевантным
-    запросу (порядок как в candidates). Graceful: пустой список кандидатов,
-    ошибка Haiku или невалидный JSON в ответе → [] — вызывающая сторона
-    (core/memory.py) в этом случае просто не добавляет semantic-довесок,
-    без сообщения-заглушки."""
-    if not candidates:
-        return []
-    prompt = (
-        f"Запрос пользователя: {query!r}\n\nКандидаты:\n"
-        + "\n".join(_rerank_candidate_line(m) for m in candidates)
-    )
-    raw = await ask_claude(
-        prompt=prompt,
-        system=_RERANK_SYSTEM,
-        model="claude-haiku-4-5-20251001",
-        max_tokens=200,
-        temperature=0,
-    )
-    try:
-        cleaned = raw.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
-        ids = json.loads(cleaned)
-        if not isinstance(ids, list):
-            raise ValueError("rerank JSON is not a list")
-    except (json.JSONDecodeError, ValueError, AttributeError) as e:
-        logger.warning("rerank_memory_candidates: bad JSON from Haiku: %r (%s)", raw, e)
-        return []
-    relevant_ids = {str(i) for i in ids}
-    relevant = [m for m in candidates if m.id in relevant_ids]
-    logger.info(
-        "rerank_memory_candidates: query=%r candidate_ids=%s relevant_ids=%s",
-        query[:60], [m.id for m in candidates], [m.id for m in relevant],
-    )
-    return relevant

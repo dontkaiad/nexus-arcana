@@ -798,31 +798,35 @@ def test_memory_limit_category_in_category_list(client):
     assert data.get("grouped") is None
 
 
-def test_memory_search_matches_key_and_related(client):
-    # #6: поиск Mini App должен матчить Текст+Ключ+Связь, как бот.
+def test_memory_search_uses_hybrid_search_in_ranked_order(client):
+    """Mini App ?q= идёт через единый гибрид (как бот): порядок = порядок ранжирования,
+    kwargs = user_id / k=20 / Haiku-реранк."""
     mems = [
         _mem_pg("m1", "ходить раз в полгода", cat="🏥 Здоровье", key="невролог"),
         _mem_pg("m2", "любит тёмный шоколад", cat="🛒 Предпочтения", related="Аня"),
         _mem_pg("m3", "не относится", cat="🏠 Быт"),
     ]
-
+    hybrid = AsyncMock(return_value=[mems[1], mems[0]])
     with patch("miniapp.backend.routes.memory._memory_repo.find_recent",
                AsyncMock(return_value=mems)), \
+         patch("miniapp.backend.routes.memory.search_memories", hybrid), \
          patch("miniapp.backend.routes.memory.get_user_id",
                AsyncMock(return_value=FAKE_USER_ID)):
-        # совпадение по Ключу (в тексте слова «невролог» нет)
-        r_key = client.get("/api/memory?q=невролог")
-        # совпадение по Связи
-        r_rel = client.get("/api/memory?q=аня")
-        # совпадение по тексту (как раньше)
-        r_txt = client.get("/api/memory?q=шоколад")
-        # ничего не нашли
-        r_none = client.get("/api/memory?q=zzzz")
+        r = client.get("/api/memory?q=шоколад")
+    assert [i["id"] for i in r.json()["items"]] == ["m2", "m1"]
+    kw = hybrid.await_args.kwargs
+    assert kw["user_id"] == FAKE_USER_ID and kw["k"] == 20 and kw["do_rerank"] is True
 
-    assert {i["id"] for i in r_key.json()["items"]} == {"m1"}
-    assert {i["id"] for i in r_rel.json()["items"]} == {"m2"}
-    assert {i["id"] for i in r_txt.json()["items"]} == {"m2"}
-    assert r_none.json()["items"] == []
+
+def test_memory_search_empty_result(client):
+    mems = [_mem_pg("m1", "что-то", cat="🏠 Быт")]
+    with patch("miniapp.backend.routes.memory._memory_repo.find_recent",
+               AsyncMock(return_value=mems)), \
+         patch("miniapp.backend.routes.memory.search_memories", AsyncMock(return_value=[])), \
+         patch("miniapp.backend.routes.memory.get_user_id",
+               AsyncMock(return_value=FAKE_USER_ID)):
+        r = client.get("/api/memory?q=zzzz")
+    assert r.json()["items"] == []
 
 
 def test_memory_adhd_returns_records_and_uses_cache(client):
@@ -931,21 +935,20 @@ def test_memory_include_inactive_lists_deactivated(client):
     assert fr.await_args.kwargs["is_current"] is None
 
 
-def test_memory_search_semantic_fallback_when_few_ilike_hits(client):
-    """#6: <3 ILIKE-хитов → semantic-фоллбэк (Voyage+rerank), отфильтрованный
-    по видимым записям."""
-    visible = [_mem_pg("m1", "любит зелёный чай", cat="🛒 Предпочтения"),
-               _mem_pg("m2", "не относится", cat="🏠 Быт")]
-    sem = AsyncMock(return_value=[visible[0]])  # rerank оставил m1
+def test_memory_search_hybrid_hit_outside_visible_is_dropped(client):
+    """Гибрид вернул запись, которой нет среди видимых (служебная категория и т.п.) —
+    в выдачу не попадает."""
+    visible = [_mem_pg("m1", "любит зелёный чай", cat="🛒 Предпочтения")]
+    hidden = _mem_pg("hid", "служебное", cat="🏠 Быт")
     with patch("miniapp.backend.routes.memory._memory_repo.find_recent",
                AsyncMock(return_value=visible)), \
-         patch("core.memory._semantic_search_memory", sem), \
+         patch("miniapp.backend.routes.memory.search_memories",
+               AsyncMock(return_value=[hidden, visible[0]])), \
          patch("miniapp.backend.routes.memory.get_user_id",
                AsyncMock(return_value=FAKE_USER_ID)):
-        r = client.get("/api/memory?q=напиток")   # нет ILIKE-совпадений
+        r = client.get("/api/memory?q=напиток")
     assert r.status_code == 200
-    assert {i["id"] for i in r.json()["items"]} == {"m1"}
-    assert sem.await_args.kwargs["user_id"] == FAKE_USER_ID
+    assert [i["id"] for i in r.json()["items"]] == ["m1"]
 
 
 # ── DELETE /api/memory/{id} ──────────────────────────────────────────────────
