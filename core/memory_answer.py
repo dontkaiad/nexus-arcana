@@ -72,6 +72,9 @@ SYSTEM = (
     "своей группы.\n"
     "5. Имена, числа и даты бери только из фактов. id в текст фраз не пиши.\n"
     "6. Если ни один факт не отвечает на вопрос — верни {\"blocks\": []}.\n"
+    "7. КОРОТКО: на каждую группу не больше 6 фраз и не больше ~500 символов вместе, каждая фраза — словосочетание "
+    "до 12 слов. Когда фактов много, объединяй близкие по смыслу в одну фразу через запятую, а менее значимые "
+    "опускай (полный список пользователь откроет кнопкой «Все факты»).\n"
     "Верни ТОЛЬКО JSON без markdown: "
     "{\"blocks\":[{\"group\":1,\"lines\":[{\"t\":\"…\",\"ids\":[1,2]}]}]}"
 )
@@ -108,6 +111,7 @@ class Outcome:
     text: str = ""                       # готовый HTML-текст (ответ + строка источника), если ok
     used_ids: List[int] = field(default_factory=list)
     reason: str = ""                     # при fallback: timeout | api_error | bad_json | check_N
+    detail: str = ""
     check: str = ""                      # номер проверки при нарушении grounding
     bad_ids: List[int] = field(default_factory=list)
     n_facts: int = 0
@@ -197,6 +201,7 @@ class Check:
     check: str = ""
     bad_ids: List[int] = field(default_factory=list)
     used_ids: List[int] = field(default_factory=list)
+    detail: str = ""                     # подробность нарушения БЕЗ текстов фактов (для лога): lines/chars/word_len
 
 
 def validate(data, groups: List[GGroup], has_input: bool = True) -> Check:
@@ -215,7 +220,7 @@ def validate(data, groups: List[GGroup], has_input: bool = True) -> Check:
         if g is None:
             return Check(False, "1")
         if len(b["lines"]) > MAX_LINES_PER_BLOCK:
-            return Check(False, "5")
+            return Check(False, "5", detail=f"lines={len(b['lines'])}")
         label_stems = _stems(g.label, 4)
         for ln in b["lines"]:
             if not isinstance(ln, dict) or not isinstance(ln.get("t"), str) or not isinstance(ln.get("ids"), list):
@@ -242,14 +247,14 @@ def validate(data, groups: List[GGroup], has_input: bool = True) -> Check:
                 if len(w) >= 2 and w[0].isupper() and not w.isdigit() and _stem(w, 4) not in src_stems4:
                     return Check(False, "4b", bad_ids=list(ids))
             # 4c — значимые слова
-            src_stems5 = _stems(src, 5)
+            src_stems = _stems(src, 4)
             for w in words:
                 lw = w.lower().replace("ё", "е")
-                if len(lw) >= 5 and not lw.isdigit() and lw not in _FUNC_WORDS and _stem(lw, 5) not in src_stems5:
-                    return Check(False, "4c", bad_ids=list(ids))
+                if len(lw) >= 5 and not lw.isdigit() and lw not in _FUNC_WORDS and _stem(lw, 4) not in src_stems:
+                    return Check(False, "4c", bad_ids=list(ids), detail=f"word_len={len(lw)}")
             used.extend(ids)
     if total > MAX_CHARS:
-        return Check(False, "5")
+        return Check(False, "5", detail=f"chars={total}")
     return Check(True, used_ids=sorted(set(used)))
 
 
@@ -382,14 +387,14 @@ async def generate(result, query: str, *, arcana: bool = False, trace: Optional[
                 else:
                     o.reason, o.check = "check_6", "6"
             else:
-                o.reason, o.check, o.bad_ids = f"check_{chk.check}", chk.check, chk.bad_ids
+                o.reason, o.check, o.bad_ids, o.detail = f"check_{chk.check}", chk.check, chk.bad_ids, chk.detail
     if o.ok:
         logger.info("memory_answer ok: route=%s bot=%s facts=%d used=%s latency=%dms tokens=%d/%d", result.route, bot,
                     n_facts, o.used_ids, o.latency_ms, o.in_tokens, o.out_tokens)
         _t("gen_output", {"ok": True, "used_ids": o.used_ids, "chars": len(o.text)})
     else:
-        logger.warning("memory_answer fallback: reason=%s check=%s ids=%s route=%s bot=%s facts=%d",
-                       o.reason, o.check or "-", o.bad_ids or all_ids, result.route, bot, n_facts)
+        logger.warning("memory_answer fallback: reason=%s check=%s detail=%s ids=%s route=%s bot=%s facts=%d",
+                       o.reason, o.check or "-", o.detail or "-", o.bad_ids or all_ids, result.route, bot, n_facts)
         _t("gen_fallback", {"reason": o.reason, "check": o.check, "ids": o.bad_ids})
     await asyncio.to_thread(_record, bot, result.route, o)
     return o
