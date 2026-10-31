@@ -132,6 +132,16 @@ def _version_stamp() -> str:
         return "unknown"
 
 
+def git_sha() -> str:
+    """Коммит, запечённый в образ (ENV GIT_SHA из build-arg deploy.sh); пусто → 'unknown'."""
+    import os
+    return os.environ.get("GIT_SHA", "").strip() or "unknown"
+
+
+def log_version(bot: str) -> None:
+    logger.info("startup: bot=%s GIT_SHA=%s", bot, git_sha())
+
+
 async def notify_startup(bot: str) -> bool:
     """Стартовый пинг в общую TG-группу логов (как klgpff «поднялся»).
 
@@ -140,6 +150,7 @@ async def notify_startup(bot: str) -> bool:
     no-op'ит без TG_LOG_BOT_TOKEN/TG_LOG_CHAT_ID, поэтому старт бота НЕ падает,
     если лог-группа не настроена. Старт важнее лога.
     """
+    log_version(bot)
     if bot == "arcana":
         label, thread = "🌒 <b>Arcana</b>", config.log_thread_arcana
     elif bot in ("booking", "zarya"):

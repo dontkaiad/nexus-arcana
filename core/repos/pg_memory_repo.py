@@ -7,10 +7,11 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Dict, List, Optional, Tuple
 
-from sqlalchemy import select, text, or_, and_
+from sqlalchemy import select, text, or_, and_, exists
 from sqlalchemy.engine import Engine
 
 from core.repos.memories_table import memories
+from core.repos.people_tables import people
 
 logger = logging.getLogger("core.pg_memory_repo")
 
@@ -56,6 +57,11 @@ class Memory:
     user_id: str = ""
     date: str = ""           # created_at[:10]
     updated_at: str = ""     # ISO string from updated_at column
+    person_id: Optional[int] = None   # People domain (ADR-0027)
+    review_status: str = "confirmed"  # pending | confirmed | rejected
+    source_quote: str = ""            # провенанс факта о человеке (цитата / платформа / дата сообщения)
+    source_platform: str = ""
+    source_message_date: str = ""     # ISO yyyy-mm-dd
 
 
 # ── Row → domain object ───────────────────────────────────────────────────────
@@ -78,6 +84,11 @@ def _row_to_memory(row) -> Memory:
         user_id=row.user_id or "",
         date=date_str,
         updated_at=updated_str,
+        person_id=getattr(row, "person_id", None),
+        review_status=getattr(row, "review_status", None) or "confirmed",
+        source_quote=getattr(row, "source_quote", None) or "",
+        source_platform=getattr(row, "source_platform", None) or "",
+        source_message_date=(getattr(row, "source_message_date", None) or "") and row.source_message_date.isoformat(),
     )
 
 
@@ -91,10 +102,18 @@ def _add_sync(
     related_to: str,
     source: str,
     user_id: str,
+    person_id: Optional[int] = None,
+    review_status: str = "confirmed",
+    source_quote: Optional[str] = None,
+    provenance: Optional[dict] = None,
 ) -> str:
     with get_engine().begin() as conn:
         result = conn.execute(
             memories.insert().values(
+                **(provenance or {}),
+                source_quote=source_quote,
+                person_id=person_id,
+                review_status=review_status or "confirmed",
                 fact_text=fact,
                 key_name=key or "",
                 category=category or "",
@@ -117,6 +136,10 @@ def _upsert_sync(
     related_to: str,
     source: str,
     user_id: str,
+    person_id: Optional[int] = None,
+    review_status: str = "confirmed",
+    source_quote: Optional[str] = None,
+    provenance: Optional[dict] = None,
 ) -> Tuple[str, bool]:
     """Find existing by key (+ owner), update; else create. Returns (id, was_updated).
 
@@ -128,7 +151,9 @@ def _upsert_sync(
     зависала в БД навсегда (is_current=true, показывалась в Mini App).
     key_name уже несёт достаточно семантики сам по себе (лимит_еда,
     tz_700000001, цель_вес) — категория одного и того же ключа не должна
-    определять, это ли та же запись. Также добавлен user_id в матч:
+    определять, это ли та же запись. `review_status` ставится только при
+    СОЗДАНИИ: повторный upsert не откатывает подтверждённый/отклонённый факт
+    в pending (ADR-0027). Также добавлен user_id в матч:
     без него совпадение key_name у двух РАЗНЫХ юзеров (напр. одинаковый
     сгенерированный ключ бюджетного лимита) перезаписало бы чужую запись.
     """
@@ -144,11 +169,16 @@ def _upsert_sync(
             ).fetchone()
         if row:
             mem_id = row[0]
+            extra = {"person_id": person_id} if person_id is not None else {}
+            if source_quote is not None:
+                extra["source_quote"] = source_quote
+            extra.update(provenance or {})
             with get_engine().begin() as conn:
                 conn.execute(
                     memories.update()
                     .where(memories.c.id == mem_id)
                     .values(
+                        **extra,
                         fact_text=fact,
                         key_name=key,
                         category=category,
@@ -176,7 +206,8 @@ def _upsert_sync(
             except Exception as e:
                 logger.warning("memory upsert: embedding NULL-reset failed for %s: %s", mem_id, e)
             return str(mem_id), True
-    mem_id = _add_sync(fact, key, category, scope, related_to, source, user_id)
+    mem_id = _add_sync(fact, key, category, scope, related_to, source, user_id,
+                       person_id, review_status, source_quote, provenance)
     return mem_id, False
 
 
@@ -296,12 +327,24 @@ def _delete_sync(memory_id: str) -> bool:
         return False
 
 
-def _base_active_q():
-    return (
+def _not_rejected_person():
+    """Факты человека со status=rejected («не мой чел») не показываем нигде в чтении, даже если сам факт
+    остался confirmed. Тот же фильтр, что review_status, и под тем же флагом confirmed_only."""
+    return ~exists().where(and_(people.c.id == memories.c.person_id, people.c.status == "rejected"))
+
+
+def _base_active_q(confirmed_only: bool = True):
+    """Active memories. `confirmed_only` (default) hides pending/rejected
+    facts (ADR-0027): every read for context/search goes through here.
+    Destructive paths (forget/delete) pass False to see everything."""
+    q = (
         select(memories)
         .where(memories.c.is_current == True)   # noqa: E712
         .where(memories.c.is_archived == False)  # noqa: E712
     )
+    if confirmed_only:
+        q = q.where(memories.c.review_status == "confirmed").where(_not_rejected_person())
+    return q
 
 
 def _search_sync(
@@ -310,6 +353,7 @@ def _search_sync(
     user_id: str = "",
     page_size: int = 10,
     match_all: bool = False,
+    confirmed_only: bool = True,
 ) -> List[Memory]:
     """match_all=False (по умолчанию): OR по всем терминам — широкий recall
     для информационного поиска («напомни про X»), где результат — список на
@@ -333,7 +377,7 @@ def _search_sync(
             )
             for term in terms
         ]
-        q = _base_active_q().where(and_(*term_conditions))
+        q = _base_active_q(confirmed_only).where(and_(*term_conditions))
     else:
         conditions = []
         for term in terms:
@@ -341,7 +385,7 @@ def _search_sync(
             conditions.append(memories.c.fact_text.ilike(like))
             conditions.append(memories.c.key_name.ilike(like))
             conditions.append(memories.c.related_to.ilike(like))
-        q = _base_active_q().where(or_(*conditions))
+        q = _base_active_q(confirmed_only).where(or_(*conditions))
     if scope and scope != "global":
         q = q.where(or_(memories.c.scope == scope, memories.c.scope == "global"))
     if user_id:
@@ -358,12 +402,15 @@ def _find_by_category_sync(
     scope: str = "",
     user_id: str = "",
     page_size: int = 100,
+    confirmed_only: bool = True,
 ) -> List[Memory]:
     q = (
         select(memories)
         .where(memories.c.is_archived == False)  # noqa: E712
         .where(memories.c.is_current == is_current)
     )
+    if confirmed_only:
+        q = q.where(memories.c.review_status == "confirmed").where(_not_rejected_person())
     if category:
         q = q.where(memories.c.category == category)
     if scope and scope != "global":
@@ -419,8 +466,11 @@ def _find_recent_sync(
     scope: str = "",
     user_id: str = "",
     page_size: int = 10,
+    confirmed_only: bool = True,
 ) -> List[Memory]:
     q = select(memories).where(memories.c.is_archived == False)  # noqa: E712
+    if confirmed_only:
+        q = q.where(memories.c.review_status == "confirmed").where(_not_rejected_person())
     if is_current is not None:
         q = q.where(memories.c.is_current == is_current)
     if scope and scope != "global":
@@ -480,11 +530,17 @@ class PgMemoryRepo:
         related_to: str = "",
         source: str = "manual",
         user_id: str = "",
+        person_id: Optional[int] = None,
+        review_status: str = "confirmed",
+        index: bool = True,
+        source_quote: Optional[str] = None,
+        provenance: Optional[dict] = None,
     ) -> str:
         mem_id = await asyncio.to_thread(
-            _add_sync, fact, key, category, scope, related_to, source, user_id
+            _add_sync, fact, key, category, scope, related_to, source, user_id,
+            person_id, review_status, source_quote, provenance,
         )
-        if mem_id:
+        if mem_id and index:
             _spawn_index(mem_id, fact, related_to, category)
         return mem_id
 
@@ -497,11 +553,19 @@ class PgMemoryRepo:
         related_to: str = "",
         source: str = "manual",
         user_id: str = "",
+        person_id: Optional[int] = None,
+        review_status: str = "confirmed",
+        index: bool = True,
+        source_quote: Optional[str] = None,
+        provenance: Optional[dict] = None,
     ) -> Tuple[str, bool]:
+        """index=False — не спавнить эмбеддинг (массовый импорт индексирует
+        пачками через index_memories_batch)."""
         mem_id, was_updated = await asyncio.to_thread(
-            _upsert_sync, fact, key, category, scope, related_to, source, user_id
+            _upsert_sync, fact, key, category, scope, related_to, source, user_id,
+            person_id, review_status, source_quote, provenance,
         )
-        if mem_id:
+        if mem_id and index:
             _spawn_index(mem_id, fact, related_to, category)
         return mem_id, was_updated
 
@@ -543,8 +607,11 @@ class PgMemoryRepo:
         user_id: str = "",
         page_size: int = 10,
         match_all: bool = False,
+        confirmed_only: bool = True,
     ) -> List[Memory]:
-        return await asyncio.to_thread(_search_sync, terms, scope, user_id, page_size, match_all)
+        return await asyncio.to_thread(
+            _search_sync, terms, scope, user_id, page_size, match_all, confirmed_only
+        )
 
     async def find_by_category(
         self,
@@ -553,9 +620,11 @@ class PgMemoryRepo:
         scope: str = "",
         user_id: str = "",
         page_size: int = 100,
+        confirmed_only: bool = True,
     ) -> List[Memory]:
         return await asyncio.to_thread(
-            _find_by_category_sync, category, is_current, scope, user_id, page_size
+            _find_by_category_sync, category, is_current, scope, user_id, page_size,
+            confirmed_only,
         )
 
     async def find_by_key_prefixes(
@@ -579,7 +648,8 @@ class PgMemoryRepo:
         scope: str = "",
         user_id: str = "",
         page_size: int = 10,
+        confirmed_only: bool = True,
     ) -> List[Memory]:
         return await asyncio.to_thread(
-            _find_recent_sync, is_current, scope, user_id, page_size
+            _find_recent_sync, is_current, scope, user_id, page_size, confirmed_only
         )

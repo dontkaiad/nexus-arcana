@@ -14,3 +14,9 @@ pgdata/
 .DS_Store
 miniapp/frontend/node_modules
 miniapp/frontend/dist
+
+# People import: личные данные и сессии не должны попадать в образ
+tools/people_import/data/
+*.session
+*.jsonl
+.venv312/

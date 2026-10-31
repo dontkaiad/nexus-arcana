@@ -22,6 +22,7 @@ from core.auth_grants import booking_role
 from core import login_tokens as login_tokens_mod
 from core.booking.busy import busy_intervals, merge_intervals
 from core.booking.linkage import link_booking, unlink_booking
+from core.booking.pending_purpose import get_pending, pop_pending, set_pending
 from core.booking.repo import (
     create_booking, get_booking, list_bookings, set_booking_status,
 )
@@ -30,7 +31,7 @@ from core.config import config
 from zarya import scheduler
 from zarya.formatting import (
     MSK, day_phrase, epoch, extract_asked_date, from_epoch, group_slots_by_day,
-    slot_label, wants_slots,
+    agenda_range, format_agenda, parse_quick_booking, slot_label, wants_agenda, wants_slots,
 )
 
 logger = logging.getLogger("zarya.handlers")
@@ -41,15 +42,16 @@ _SLOT_DAYS = 21
 _MAX_SLOT_BUTTONS = 8
 _FRIEND_HOURS = (1, 2, 3, 4)
 
+_QUICK_DEFAULT_HOURS = 4.0
+
 # #239: друзья обязаны написать НА ЧТО бронируют (не просто "встреча с X") —
 # tg_id → {ctx, ep, hours, role, chat_id, ts} между выбором часов и текстом цели.
-_pending_purpose: dict = {}
-# Недописанная бронь протухает — иначе через час случайное сообщение
-# превращается в бронь.
-_PURPOSE_TTL_SEC = 15 * 60
+# Живёт в Postgres (core/booking/pending_purpose.py, TTL 15 мин) — переживает
+# рестарт бота. Недописанная бронь протухает, иначе через час случайное
+# сообщение превращается в бронь.
 
 
-def _has_pending_purpose(message: Message) -> bool:
+async def _has_pending_purpose(message: Message) -> bool:
     """Ждём повод только в ТОМ ЖЕ чате, где нажали слот, и не дольше TTL.
 
     Баг: начала бронь в ЛС, не дописала повод, написала в общий чат где есть
@@ -57,12 +59,8 @@ def _has_pending_purpose(message: Message) -> bool:
     """
     if not message.from_user:
         return False
-    pending = _pending_purpose.get(message.from_user.id)
+    pending = await get_pending(message.from_user.id)
     if pending is None:
-        return False
-    ts = pending.get("ts")
-    if ts is not None and datetime.now(timezone.utc).timestamp() - ts > _PURPOSE_TTL_SEC:
-        _pending_purpose.pop(message.from_user.id, None)
         return False
     chat_id = pending.get("chat_id")
     chat = getattr(message, "chat", None)
@@ -190,18 +188,86 @@ def _login_kb(token: str) -> InlineKeyboardMarkup:
 # улетело бы в показ слотов по слову "сред").
 @router.message(_has_pending_purpose)
 async def on_purpose_text(msg: Message, role: str = "guest") -> None:
-    pending = _pending_purpose.pop(msg.from_user.id, None)
+    pending = await pop_pending(msg.from_user.id)
     if not pending:
         return
     purpose = (msg.text or "").strip()
     if not purpose:
-        _pending_purpose[msg.from_user.id] = pending
+        await set_pending(msg.from_user.id, pending)
         await msg.answer("Текстом, пожалуйста — на что бронируешь? Например: «шашлыки».")
         return
     await _do_book(
         pending["ctx"], pending["ep"], pending["hours"], pending["role"],
         from_user=msg.from_user, chat_type=msg.chat.type, reply=msg.answer,
         bot=msg.bot, purpose=purpose,
+    )
+
+
+# ── one-shot: «завтра в 19 шашлыки» → бронь без кнопок (admin / friend) ─────
+
+def _is_quick_booking(message: Message, role: str = "guest") -> bool:
+    if role not in ("friend", "admin") or not message.from_user:
+        return False
+    text = getattr(message, "text", None) or ""
+    if text.lstrip().startswith("/"):
+        return False
+    return parse_quick_booking(text, datetime.now(MSK).date()) is not None
+
+
+@router.message(_is_quick_booking)
+async def on_quick_booking(msg: Message, role: str = "guest") -> None:
+    # Тот же гейт, что у nl_slots: в группе с выключенным Privacy не реагируем
+    # на обычную болтовню, пока к Заре не обратились.
+    if not _bot_addressed(msg):
+        return
+    q = parse_quick_booking(msg.text or "", datetime.now(MSK).date())
+    if q is None:
+        return
+    start = q.start()
+    hours = q.hours or _QUICK_DEFAULT_HOURS
+    if start <= datetime.now(timezone.utc):
+        await msg.answer("Это время уже пролетело 💅")
+        return
+    if role == "admin":
+        # Кай бронирует себе сама: сразу confirmed, без слотов и без уведомления.
+        uid = await _owner_user_id()
+        if not uid:
+            await msg.answer("Так, минутку — данные Кай сейчас недоступны. Загляни чуть позже 💅")
+            return
+        from core.auth_grants import get_display_name
+        name = (await get_display_name(msg.from_user.id)
+                or (msg.from_user.full_name or "").strip() or f"tg:{msg.from_user.id}")
+        end = start + timedelta(hours=hours)
+        # Пересечение не блокирует (Кай решает сама), но предупреждаем.
+        clash = [iv for iv in await busy_intervals(uid, start, end) if iv.overlaps(start, end)]
+        b = await create_booking(
+            user_id=uid, context="friends", start_at=start,
+            end_at=end, status="confirmed", hours=hours,
+            requester_tg_id=msg.from_user.id, requester_name=name, note=q.note,
+            source="tg_group" if msg.chat.type in ("group", "supergroup") else "tg_dm",
+        )
+        await _confirm_flow(b, msg.bot)
+        note_line = f"\n💬 {q.note}" if q.note else ""
+        warn = "".join(
+            f"\n⚠️ пересекается с: {iv.label or 'занято'} "
+            f"{iv.start.astimezone(MSK):%H:%M}–{iv.end.astimezone(MSK):%H:%M}"
+            for iv in clash[:3]
+        )
+        await msg.answer(f"✅ {slot_label(start, hours=hours)}{note_line}{warn}",
+                         reply_markup=_cancel_kb(b.id))
+        return
+    ep = str(epoch(start))
+    if not q.note:  # друг: не хватает только повода — спрашиваем ровно его
+        await _ask_purpose(msg.from_user.id, "friends", ep, hours, role, getattr(msg.chat, "id", None))
+        await msg.answer(
+            f"Записываю на {slot_label(start, hours=hours)}. На что бронируешь? "
+            "Одним сообщением — станет названием встречи (например: «шашлыки»)."
+        )
+        return
+    await _do_book(
+        "friends", ep, hours, role,
+        from_user=msg.from_user, chat_type=msg.chat.type, reply=msg.answer,
+        bot=msg.bot, purpose=q.note,
     )
 
 
@@ -344,6 +410,36 @@ async def cmd_slots(msg: Message, role: str = "guest") -> None:
     await _show_slots(msg, role)
 
 
+# ── admin agenda: задачи/брони/работы Кай по дням (read-only) ───────────────
+# Названия задач видит ТОЛЬКО admin: фильтр режет friend/guest ещё до хендлера,
+# а классификатор/on_unrecognized дублируют проверку роли.
+
+def _is_agenda(message: Message, role: str = "guest") -> bool:
+    if role != "admin":
+        return False
+    text = getattr(message, "text", None) or ""
+    return not text.lstrip().startswith("/") and wants_agenda(text)
+
+
+async def _show_agenda(msg: Message) -> None:
+    from core.booking.agenda import day_agenda
+    uid = await _owner_user_id()
+    if not uid:
+        await msg.answer("Так, минутку — данные Кай сейчас недоступны. Загляни чуть позже 💅")
+        return
+    today = datetime.now(MSK).date()
+    day_from, day_to = agenda_range(msg.text or "", today)
+    items = await day_agenda(uid, day_from, day_to)
+    await msg.answer(format_agenda(items, day_from, day_to, today))
+
+
+@router.message(_is_agenda)
+async def nl_agenda(msg: Message, role: str = "guest") -> None:
+    if not _bot_addressed(msg):
+        return
+    await _show_agenda(msg)
+
+
 @router.message(F.text.func(lambda t: wants_slots(t or "")))
 async def nl_slots(msg: Message, role: str = "guest") -> None:
     # #228: с выключенным Group Privacy бот видит ВСЮ переписку группы — обычная
@@ -387,11 +483,8 @@ async def on_book(call: CallbackQuery, role: str = "guest") -> None:
         # #239: друзья обязаны написать НА ЧТО бронируют — не создаём бронь,
         # пока не пришёл текст. Следующее сообщение этого юзера ловит
         # on_purpose_text (зарегистрирован рано, до nl_slots/фолбэка).
-        _pending_purpose[call.from_user.id] = {
-            "ctx": ctx, "ep": ep, "hours": hours, "role": role,
-            "chat_id": getattr(call.message.chat, "id", None),
-            "ts": datetime.now(timezone.utc).timestamp(),
-        }
+        await _ask_purpose(call.from_user.id, ctx, ep, hours, role,
+                           getattr(call.message.chat, "id", None))
         await call.message.edit_text(
             "На что бронируешь? Опиши коротко одним сообщением — станет "
             "названием встречи у Кай (например: «шашлыки», «созвон по проекту», «др у Ромы»)."
@@ -404,6 +497,13 @@ async def on_book(call: CallbackQuery, role: str = "guest") -> None:
         reply=call.message.edit_text, bot=call.bot,
     )
     await call.answer()
+
+
+async def _ask_purpose(tg_id: int, ctx: str, ep: str, hours: float, role: str, chat_id) -> None:
+    await set_pending(tg_id, {
+        "ctx": ctx, "ep": ep, "hours": hours, "role": role, "chat_id": chat_id,
+        "ts": datetime.now(timezone.utc).timestamp(),
+    })
 
 
 async def _do_book(ctx: str, ep: str, hours: float, role: str, *,
@@ -439,7 +539,9 @@ async def _do_book(ctx: str, ep: str, hours: float, role: str, *,
             reply_markup=_cancel_kb(b.id),
         )
         await _confirm_flow(b, bot)
-        await _notify_owner(f"⭐ <b>{name}</b> записался · {when}{purpose_line}", bot=bot)
+        # Кай, бронирующая сама, не получает уведомление о собственной брони.
+        if from_user.id not in config.allowed_ids:
+            await _notify_owner(f"⭐ Новая бронь: <b>{name}</b> · {when}{purpose_line}", bot=bot)
         if in_group:  # requester booked in a group chat → confirm in DM too
             await _dm(
                 bot, from_user.id,
@@ -450,11 +552,12 @@ async def _do_book(ctx: str, ep: str, hours: float, role: str, *,
         await reply(
             f"📝 Заявка на {when} принята!{purpose_line}\nКак только Кай подтвердит — сразу напишу тебе."
         )
-        await _notify_owner(
-            f"🃏 <b>Заявка</b>: {name} · {when}{purpose_line}\n"
-            f"/requests чтобы подтвердить (#{b.id})",
-            bot=bot,
-        )
+        if from_user.id not in config.allowed_ids:
+            await _notify_owner(
+                f"🃏 <b>Заявка</b>: {name} · {when}{purpose_line}\n"
+                f"/requests чтобы подтвердить (#{b.id})",
+                bot=bot,
+            )
 
 
 # ── admin cockpit ───────────────────────────────────────────────────────────
@@ -634,7 +737,9 @@ async def on_unrecognized(msg: Message, role: str = "guest") -> None:
         logger.warning("zarya classify failed: %s", e)
         result = {"intent": "chat", "reply": ""}
 
-    if result["intent"] == "slots":
+    if result["intent"] == "agenda" and role == "admin":
+        await _show_agenda(msg)
+    elif result["intent"] == "slots":
         await _show_slots(msg, role)
     elif result["intent"] == "help":
         await cmd_help(msg, role=role)

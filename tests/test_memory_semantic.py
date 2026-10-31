@@ -157,7 +157,9 @@ def test_deactivate_memory_hint_path_disables_semantic():
         mem_repo.set_active = AsyncMock(return_value=1)
         from core.memory import deactivate_memory
         asyncio.run(deactivate_memory(msg, "какой-то хинт", "u1"))
-    find.assert_called_once_with("какой-то хинт", use_semantic=False, user_id="u1")
+    find.assert_called_once_with(
+        "какой-то хинт", use_semantic=False, user_id="u1", confirmed_only=False,
+    )
 
 
 def test_parse_and_store_diverts_debt_to_debts_table():
@@ -207,4 +209,6 @@ def test_delete_memory_hint_path_disables_semantic():
         mem_repo.archive = AsyncMock(return_value=True)
         from core.memory import delete_memory
         asyncio.run(delete_memory(msg, "какой-то хинт", "u1"))
-    find.assert_called_once_with("какой-то хинт", use_semantic=False, user_id="u1")
+    find.assert_called_once_with(
+        "какой-то хинт", use_semantic=False, user_id="u1", confirmed_only=False,
+    )

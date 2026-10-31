@@ -5,6 +5,7 @@ sessions/rituals агрегируются из PG repos по client_id.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any
 
@@ -15,6 +16,7 @@ from arcana.repos.pg_clients_repo import TYPE_CODE_TO_FULL, STATUS_CODE_TO_LABEL
 from arcana.repos.pg_rituals_repo import PgRitualsRepo
 from arcana.repos.pg_sessions_repo import PgSessionsRepo
 from arcana.repos.pg_works_repo import PgWorksRepo
+from core.repos import pg_client_links as client_links
 from core.user_manager import get_user_id
 
 from miniapp.backend.auth import current_user_id
@@ -44,7 +46,9 @@ def _type_icon(type_full: str) -> str:
 async def list_clients(tg_id: int = Depends(current_user_id)) -> dict[str, Any]:
     user_id = (await get_user_id(tg_id)) or ""
 
+    await asyncio.to_thread(client_links.ensure_self_link, user_id)   # self-клиент ↔ «Я», без вопросов
     clients_list = await _clients_repo.list_all(user_id)
+    links = await asyncio.to_thread(client_links.person_ids_by_client, user_id)
     all_sessions = await _sessions_repo.list_all(user_id)
     all_rituals = await _rituals_repo.list_all(user_id)
 
@@ -94,6 +98,7 @@ async def list_clients(tg_id: int = Depends(current_user_id)) -> dict[str, Any]:
             "barter_count": 0,
             "total_paid": int(round(b["paid"])),
             "photo_url": c.photo_url,
+            "person_id": links.get(str(c.id)),
         })
     out.sort(key=lambda x: x["name"])
     return {
@@ -111,9 +116,11 @@ async def client_dossier(
 ) -> dict[str, Any]:
     user_id = (await get_user_id(tg_id)) or ""
 
+    await asyncio.to_thread(client_links.ensure_self_link, user_id)
     c = await _clients_repo.find_by_id(client_id)
     if not c:
         raise HTTPException(status_code=404, detail="client not found")
+    person_link = await asyncio.to_thread(client_links.person_block, user_id, client_id)
 
     # Load all sessions for this user, filter by client_id (gets TripletEntry with id + amount/paid)
     all_sessions = await _sessions_repo.list_all(user_id)
@@ -195,11 +202,12 @@ async def client_dossier(
         "type_full": type_full,
         "contact": c.contact or None,
         "since": since,
-        "birthday": c.birthday,
+        "birthday": await asyncio.to_thread(client_links.effective_birthday, user_id, client_id, c.birthday),
         "request": c.request or None,
         "notes": c.notes or None,
         "photo_url": c.photo_url,
         "photos": photos,
+        "person": person_link,
         "stats": {
             # СЕССИИ, не триплеты (триплеты одной сессии = один сеанс), #164.
             "sessions": len({
@@ -214,3 +222,70 @@ async def client_dossier(
         "history": history,
         "works": works_out,
     }
+
+
+def _link_error(e: "client_links.LinkError") -> HTTPException:
+    status = {"client_not_found": 404, "person_not_found": 404, "person_rejected": 409,
+              "person_taken": 409, "already_linked": 409, "self_client": 409,
+              "not_linked": 409, "nothing_to_resolve": 422}[e.code]
+    return HTTPException(status_code=status, detail=e.code)
+
+
+def _client_int(client_id: str) -> int:
+    try:
+        return int(client_id)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="client_not_found")
+
+
+@router.get("/arcana/clients/{client_id}/person-candidates")
+async def client_person_candidates(client_id: str, tg_id: int = Depends(current_user_id)) -> dict[str, Any]:
+    """Подсказка «похожие люди» для связи клиент ↔ человек. Сама ничего не связывает."""
+    user_id = (await get_user_id(tg_id)) or ""
+    res = await asyncio.to_thread(client_links.candidates, user_id, _client_int(client_id))
+    if res is None:
+        raise HTTPException(status_code=404, detail="client_not_found")
+    return {
+        "linked": res["linked"] and {"id": res["linked"]["id"], "name": res["linked"]["name"]},
+        "candidates": [{"id": c["person"]["id"], "name": c["person"]["name"], "score": c["score"],
+                        "reasons": c["reasons"], "birthday": c["person"].get("birthday")}
+                       for c in res["candidates"]],
+    }
+
+
+@router.post("/arcana/clients/{client_id}/link")
+async def client_link_person(client_id: str, body: dict, tg_id: int = Depends(current_user_id)) -> dict[str, Any]:
+    user_id = (await get_user_id(tg_id)) or ""
+    try:
+        pid = int(body.get("person_id"))
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=422, detail="person_id required")
+    try:
+        person = await asyncio.to_thread(client_links.link, user_id, _client_int(client_id), pid)
+    except client_links.LinkError as e:
+        raise _link_error(e)
+    return {"ok": True, "person": {"id": person["id"], "name": person["name"]},
+            "birthday": person.get("birthday_sync")}
+
+
+@router.post("/arcana/clients/{client_id}/link/birthday")
+async def client_link_birthday(client_id: str, body: dict, tg_id: int = Depends(current_user_id)) -> dict[str, Any]:
+    """Конфликт ДР при связи: владелец выбирает, какая дата верна ('client' | 'person')."""
+    user_id = (await get_user_id(tg_id)) or ""
+    use = body.get("use")
+    if use not in ("client", "person"):
+        raise HTTPException(status_code=422, detail="use must be client|person")
+    try:
+        return {"ok": True, **await asyncio.to_thread(client_links.resolve_birthday, user_id, _client_int(client_id), use)}
+    except client_links.LinkError as e:
+        raise _link_error(e)
+
+
+@router.delete("/arcana/clients/{client_id}/link")
+async def client_unlink_person(client_id: str, tg_id: int = Depends(current_user_id)) -> dict[str, Any]:
+    user_id = (await get_user_id(tg_id)) or ""
+    try:
+        await asyncio.to_thread(client_links.unlink, user_id, _client_int(client_id))
+    except client_links.LinkError as e:
+        raise _link_error(e)
+    return {"ok": True}

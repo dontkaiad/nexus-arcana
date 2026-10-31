@@ -31,9 +31,12 @@ def _make_engine():
             "is_current INTEGER NOT NULL DEFAULT 1, "
             "is_archived INTEGER NOT NULL DEFAULT 0, "
             "user_id TEXT NOT NULL DEFAULT '', "
+            "person_id INTEGER, source_quote TEXT, source_chat_id INTEGER, source_message_date DATE, quote_author TEXT, source_platform TEXT, mention_count INTEGER NOT NULL DEFAULT 1, first_mention_date DATE, last_mention_date DATE, "
+            "review_status TEXT NOT NULL DEFAULT 'confirmed', "
             "created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, "
             "updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)"
         ))
+        conn.execute(sa.text("CREATE TABLE people (id INTEGER PRIMARY KEY, status TEXT NOT NULL DEFAULT 'pending')"))
         # Ложное совпадение: key_name != "tz_123", но fact_text содержит "tz_123"
         conn.execute(sa.text(
             "INSERT INTO memories (key_name, fact_text, is_current) "

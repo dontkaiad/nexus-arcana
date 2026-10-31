@@ -150,7 +150,6 @@ EXCLUDED_KEY_PREFIXES = ("tz_", "city_", "impulse_windfall_", "цель_")
 # без бюджетных/ADHD). Возвращаем всегда, чтобы фронт показывал все табы,
 # даже если в какой-то категории пусто.
 CANONICAL_CATEGORIES = [
-    "👥 Люди",
     "🏥 Здоровье",
     "🛒 Предпочтения",
     "💼 Работа",
@@ -162,10 +161,13 @@ CANONICAL_CATEGORIES = [
 ]
 
 
+PEOPLE_CATEGORY = "👥 Люди"
+
+
 def _all_categories(present: set[str]) -> list[str]:
     """#49(b): канонический список + реально встреченные + всегда «💰 Лимит» (спец-вид)."""
     seen = set(CANONICAL_CATEGORIES)
-    extra = sorted(c for c in present if c not in seen and c != LIMIT_CATEGORY)
+    extra = sorted(c for c in present if c not in seen and c not in (LIMIT_CATEGORY, PEOPLE_CATEGORY))
     return list(CANONICAL_CATEGORIES) + extra + [LIMIT_CATEGORY]
 
 
@@ -178,6 +180,12 @@ def _serialize_memory(mem: Memory) -> dict:
         "key": mem.key or None,
         "date": mem.date or None,   # created_at[:10]; front decides whether to show (#6)
         "is_current": bool(mem.is_current),   # #6: обратимая «неактуально»
+        # Факт о человеке: открыть карточку (👥) + провенанс при раскрытии
+        "person_id": mem.person_id,
+        "person_name": (mem.related_to.split(" | ")[0] or None) if mem.person_id and mem.related_to else None,
+        "source_quote": mem.source_quote or None,
+        "source_platform": mem.source_platform or None,
+        "source_message_date": mem.source_message_date or None,
     }
 
 
@@ -220,6 +228,9 @@ async def get_memory(
                 budget_mems.append(mem)
             continue
         if c in EXCLUDED_CATEGORIES:
+            continue
+        # Факты о людях живут в разделе «Люди» (единый вход): в общем списке их нет, находятся только поиском.
+        if not q and (c == PEOPLE_CATEGORY or mem.person_id):
             continue
         if (mem.key or "").startswith(EXCLUDED_KEY_PREFIXES):
             continue

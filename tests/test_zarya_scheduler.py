@@ -17,7 +17,7 @@ class _FakeSched:
         self.jobs = {}
 
     def add_job(self, fn, trigger, args=None, id=None, **kw):
-        self.jobs[id] = (fn, args)
+        self.jobs[id] = SimpleNamespace(fn=fn, args=args, next_run_time=getattr(trigger, "run_date", None))
 
     def remove_job(self, jid):
         if jid not in self.jobs:
@@ -82,8 +82,9 @@ async def test_fire_dms_requester_and_all_owners(monkeypatch):
 
     sch._bot = _Bot()
     monkeypatch.setattr(sch.config, "allowed_ids", [111, 222])
-    monkeypatch.setattr("core.booking.repo.get_booking", AsyncMock(return_value=_bk()))
-    await sch._fire(7, "через 2 часа")
+    soon = _bk(start_at=datetime.now(UTC) + timedelta(hours=2))
+    monkeypatch.setattr("core.booking.repo.get_booking", AsyncMock(return_value=soon))
+    await sch._fire(7, "через 2 часа", 2, (soon.start_at - timedelta(hours=2)).isoformat())
     assert set(sent) == {100, 111, 222}
 
 
@@ -98,5 +99,103 @@ async def test_fire_noop_if_booking_cancelled(monkeypatch):
     sch._bot = _Bot()
     monkeypatch.setattr("core.booking.repo.get_booking",
                         AsyncMock(return_value=_bk(status="cancelled_by_owner")))
-    await sch._fire(7, "за сутки")
+    await sch._fire(7, "за сутки", 24, "2099-01-01T00:00:00+00:00")
     assert sent == []
+
+
+def _run_at(job):
+    return job.next_run_time
+
+
+@pytest.mark.asyncio
+async def test_sweep_rearms_moved_booking_to_new_time(monkeypatch):
+    b = _bk()
+    sch.schedule(b)
+    old = {k: _run_at(v) for k, v in sch._scheduler.jobs.items()}
+    moved = _bk(start_at=b.start_at + timedelta(days=1))     # передвинули в БД
+    monkeypatch.setattr(sch, "list_bookings", AsyncMock(return_value=[moved]))
+    await sch._sweep()
+    assert _run_at(sch._scheduler.jobs["bk:7:24"]) == moved.start_at - timedelta(hours=24)
+    assert _run_at(sch._scheduler.jobs["bk:7:2"]) == moved.start_at - timedelta(hours=2)
+    assert _run_at(sch._scheduler.jobs["bk:7:2"]) != old["bk:7:2"]
+
+
+@pytest.mark.asyncio
+async def test_sweep_leaves_correct_jobs_alone(monkeypatch):
+    b = _bk()
+    sch.schedule(b)
+    before = dict(sch._scheduler.jobs)
+    monkeypatch.setattr(sch, "list_bookings", AsyncMock(return_value=[b]))
+    await sch._sweep()
+    assert all(sch._scheduler.jobs[k] is before[k] for k in before)   # не пересоздавались
+
+
+@pytest.mark.asyncio
+async def test_sweep_tolerates_sub_minute_drift(monkeypatch):
+    b = _bk()
+    sch.schedule(b)
+    before = dict(sch._scheduler.jobs)
+    drifted = _bk(start_at=b.start_at + timedelta(seconds=30))
+    monkeypatch.setattr(sch, "list_bookings", AsyncMock(return_value=[drifted]))
+    await sch._sweep()
+    assert all(sch._scheduler.jobs[k] is before[k] for k in before)
+
+
+@pytest.mark.asyncio
+async def test_sweep_drops_job_whose_lead_moved_into_the_past(monkeypatch):
+    b = _bk()
+    sch.schedule(b)
+    # встречу придвинули к «через 1 час»: оба lead'а в прошлом, jobs должны уйти
+    moved = _bk(start_at=datetime.now(UTC) + timedelta(hours=1))
+    monkeypatch.setattr(sch, "list_bookings", AsyncMock(return_value=[moved]))
+    await sch._sweep()
+    assert sch._scheduler.jobs == {}
+
+
+class _Rec:
+    def __init__(self):
+        self.sent = []
+
+    async def send_message(self, cid, text, **kw):
+        self.sent.append(cid)
+
+
+@pytest.mark.asyncio
+async def test_fire_with_old_planned_time_stays_silent(monkeypatch):
+    sch._bot = bot = _Rec()
+    old_start = datetime.now(UTC) + timedelta(hours=2)
+    planned = (old_start - timedelta(hours=2)).isoformat()      # job ставился под старое время
+    moved = _bk(start_at=old_start + timedelta(days=1))          # бронь передвинули
+    monkeypatch.setattr("core.booking.repo.get_booking", AsyncMock(return_value=moved))
+    await sch._fire(7, "через 2 часа", 2, planned)
+    assert bot.sent == []
+
+
+@pytest.mark.asyncio
+async def test_late_fire_after_restart_still_sends(monkeypatch):
+    sch._bot = bot = _Rec()
+    monkeypatch.setattr(sch.config, "allowed_ids", [111])
+    start = datetime.now(UTC) + timedelta(hours=1, minutes=20)   # lead 2ч был 40 мин назад
+    b = _bk(start_at=start)
+    monkeypatch.setattr("core.booking.repo.get_booking", AsyncMock(return_value=b))
+    await sch._fire(7, "через 2 часа", 2, (start - timedelta(hours=2)).isoformat())
+    assert set(bot.sent) == {100, 111}
+
+
+@pytest.mark.asyncio
+async def test_fire_silent_once_meeting_started(monkeypatch):
+    sch._bot = bot = _Rec()
+    start = datetime.now(UTC) - timedelta(minutes=5)
+    monkeypatch.setattr("core.booking.repo.get_booking", AsyncMock(return_value=_bk(start_at=start)))
+    await sch._fire(7, "через 2 часа", 2, (start - timedelta(hours=2)).isoformat())
+    assert bot.sent == []
+
+
+@pytest.mark.asyncio
+async def test_schedule_passes_hours_and_planned_time_to_fire():
+    b = _bk()
+    sch.schedule(b)
+    assert sch._scheduler.jobs["bk:7:2"].args == [
+        7, "через 2 часа", 2, (b.start_at - timedelta(hours=2)).isoformat()]
+    assert sch._scheduler.jobs["bk:7:24"].args == [
+        7, "за сутки", 24, (b.start_at - timedelta(hours=24)).isoformat()]

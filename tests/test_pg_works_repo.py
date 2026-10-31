@@ -56,7 +56,7 @@ def engine():
             "deadline TIMESTAMP, reminder TIMESTAMP, category TEXT, "
             "priority_id INTEGER, status_id INTEGER, client_id INTEGER, "
             "repeat_id INTEGER, day_of_week_id INTEGER, repeat_time TEXT, "
-            "user_id TEXT, "
+            "user_id TEXT, notes TEXT, "
             "created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, "
             "updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)"
         ))

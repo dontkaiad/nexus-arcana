@@ -15,6 +15,7 @@ from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
 from core.claude_client import ask_claude
 from core.config import config as _cfg
 from core.layout import maybe_convert
+from core.people import owner_fact
 from core import memory_rag as _memory_rag
 from core.repos.memory_repo import _repo as _mem_repo
 from core.repos.pg_memory_repo import Memory, bot_to_scope
@@ -294,12 +295,17 @@ async def _semantic_search_memory(
 
 async def _find_pages_by_hint(
     hint: str, page_size: int = 10, use_semantic: bool = True, user_id: str = "",
+    confirmed_only: bool = True,
 ) -> List[Memory]:
     """Умный поиск по hint через PG. Возвращает List[Memory].
 
     `user_id` — owner-ключ (#202): пусто → поиск по всей памяти владельца
     (текущее поведение для одного владельца на нескольких устройствах —
     все identity-строки делят один user_id). Непусто → фильтр по владельцу.
+
+    `confirmed_only` (ADR-0027): чтение для контекста/поиска видит только
+    review_status='confirmed'. Деструктивные пути (забудь/удали) передают
+    False — pending-факт тоже должен быть удаляем.
 
     Функция оставлена module-level: тесты test_memory_aliases патчат её.
     """
@@ -319,6 +325,7 @@ async def _find_pages_by_hint(
         try:
             results = await _mem_repo.find_by_category(
                 matched_cat, is_current=True, user_id=user_id, page_size=100,
+                confirmed_only=confirmed_only,
             )
             logger.info("_find_pages_by_hint category shortcut: found=%d", len(results))
             return results
@@ -339,7 +346,7 @@ async def _find_pages_by_hint(
     try:
         results = await _mem_repo.search(
             search_terms, user_id=user_id, page_size=page_size,
-            match_all=not use_semantic,
+            match_all=not use_semantic, confirmed_only=confirmed_only,
         )
         logger.info("_find_pages_by_hint: found=%d for terms=%s", len(results), search_terms)
         if use_semantic:
@@ -468,6 +475,22 @@ async def _get_adhd_tip(fact: str) -> str:
     return tip.strip()
 
 
+PEOPLE_CATEGORY = "👥 Люди"
+
+
+def _single_person(user_id: str, mention: str) -> Optional[dict]:
+    """Ровно один не-rejected, не-self человек по упоминанию → его карточка; иначе None (без догадок)."""
+    try:
+        from core.repos import pg_people_repo as prepo
+        found = prepo.resolve(user_id, [mention])
+        if len(found) != 1:
+            return None
+        return prepo.get_person(user_id, found[0]["id"])
+    except Exception:
+        logger.warning("person resolve for memory save failed, saving as plain fact", exc_info=True)
+        return None
+
+
 async def parse_and_store(text: str, user_id: str, bot_label: str) -> dict:
     """Message-free ядро сохранения памяти: раскладка → Haiku-парс →
     диверсия долгов в `debts` → канонизация алиаса → запись.
@@ -520,9 +543,25 @@ async def parse_and_store(text: str, user_id: str, bot_label: str) -> dict:
             logger.info("memory: canonicalized link %r→%r, key %r→%r",
                         original_link, canonical_link, old_key, ключ)
 
+    # PR-3b: «запомни, что Оля любит X» → ровно один человек из «Людей» ⇒ факт привязан к нему
+    # (person_id, confirmed, source=manual, ключ карточки). Ноль/несколько совпадений — как раньше.
+    person = None
+    if category == PEOPLE_CATEGORY and связь:
+        person = await asyncio.to_thread(_single_person, user_id, связь)
+
     try:
         was_updated = False
-        if category == "💰 Лимит" and ключ:
+        if person:
+            from core.people import fact_hash, guess_fact_type, related_to_str
+            from core.repos import pg_people_repo as prepo
+            ключ = "person_%d_%s_%s" % (person["id"], guess_fact_type(fact), fact_hash(fact))
+            mid, was_updated = await _mem_repo.upsert(
+                fact, ключ, category, scope, related_to_str(person["name"], person.get("aliases") or []),
+                "manual", user_id, person_id=person["id"], review_status="confirmed",
+            )
+            if mid:                                  # вернуть отклонённый раньше факт (как ручной ввод в карточке)
+                await asyncio.to_thread(prepo.set_fact_status, user_id, person["id"], int(mid), "confirmed")
+        elif category == "💰 Лимит" and ключ:
             mid, was_updated = await _mem_repo.upsert(
                 fact, ключ, category, scope, связь, "manual", user_id
             )
@@ -535,7 +574,8 @@ async def parse_and_store(text: str, user_id: str, bot_label: str) -> dict:
         return {"kind": "error", "fact": fact, "category": category, "key": ключ,
                 "memory_id": None, "was_updated": False, "debt_name": "", "link": связь}
     return {"kind": "memory" if mid else "error", "fact": fact, "category": category,
-            "key": ключ, "memory_id": mid, "was_updated": was_updated, "debt_name": "", "link": связь}
+            "key": ключ, "memory_id": mid, "was_updated": was_updated, "debt_name": "", "link": связь,
+            "person_id": person["id"] if person else None}
 
 
 async def save_memory(
@@ -700,7 +740,7 @@ async def search_memory(
                 cat_emoji = m.category.split(" ")[0] if m.category else "💡"
                 inactive_mark = " <i>(неактуально)</i>" if not m.is_current else ""
                 line2 = f"<i>{m.category} · {m.date}</i>" if m.category else f"<i>{m.date}</i>"
-                lines.append(f"{cat_emoji} {m.fact}{inactive_mark}\n{line2}")
+                lines.append(f"{cat_emoji} {owner_fact(m.fact, m.related_to, m.person_id)}{inactive_mark}\n{line2}")
         except Exception as e:
             logger.error("search_memory formatting error: %s", e, exc_info=True)
             lines = []
@@ -708,7 +748,7 @@ async def search_memory(
                 cat_emoji = m.category.split(" ")[0] if m.category else "💡"
                 inactive_mark = " <i>(неактуально)</i>" if not m.is_current else ""
                 line2 = f"<i>{m.category} · {m.date}</i>" if m.category else f"<i>{m.date}</i>"
-                lines.append(f"{cat_emoji} {m.fact}{inactive_mark}\n{line2}")
+                lines.append(f"{cat_emoji} {owner_fact(m.fact, m.related_to, m.person_id)}{inactive_mark}\n{line2}")
 
         all_cats = set(m.category for m in mems)
         if len(all_cats) == 1:
@@ -768,7 +808,9 @@ async def deactivate_memory(
         # use_semantic=False: деактивация применяется КО ВСЕМ найденным без
         # подтверждения — semantic-довесок (top-K ближайших БЕЗ порога
         # похожести) может подмешать нерелевантные факты (#184).
-        mems = await _find_pages_by_hint(hint, use_semantic=False, user_id=user_id) if hint else []
+        mems = await _find_pages_by_hint(
+            hint, use_semantic=False, user_id=user_id, confirmed_only=False,
+        ) if hint else []
         if not mems:
             tokens = _tokenize_hint(hint)
             subject = tokens[0] if tokens else hint
@@ -870,7 +912,9 @@ async def delete_memory(
         # use_semantic=False: ровно один матч архивируется НЕМЕДЛЕННО без
         # подтверждения — semantic-сосед (без порога похожести) на пустом
         # ILIKE снёс бы не тот факт (#184).
-        mems = await _find_pages_by_hint(hint, use_semantic=False, user_id=user_id) if hint else []
+        mems = await _find_pages_by_hint(
+            hint, use_semantic=False, user_id=user_id, confirmed_only=False,
+        ) if hint else []
         if not mems:
             tokens = _tokenize_hint(hint)
             subject = tokens[0] if tokens else hint
@@ -964,6 +1008,32 @@ def extract_context_keywords(data: dict, client_name: Optional[str] = None) -> L
     return keywords
 
 
+def _people_context_block(user_id: str, keywords: List[str], seen_ids: Set[str]) -> str:
+    """Блок «Из Людей» для найденных по упоминанию людей. Один человек — его факты и ДР; несколько
+    (тёзки / общая основа) — наборы всех, каждый с пометкой, кто это. Заполняет seen_ids id'ами фактов."""
+    from core.people import birthday_context, fact_text
+    from core.repos import pg_people_repo as prepo
+    people_ = prepo.resolve(user_id, [k for k in keywords if k])
+    if not people_:
+        return ""
+    multi = len(people_) > 1
+    out = ["Из «Людей» (подтверждённые факты о упомянутых людях)" +
+           (" — совпало несколько человек, неясно, о ком речь:" if multi else ":")]
+    for p in people_:
+        facts = prepo.confirmed_facts(p["id"])
+        bd = birthday_context(p["birthday"], p["birthday_year_known"])
+        if not facts and not bd:
+            continue
+        if multi:
+            out.append(f"[{p['name']}]")
+        if bd:
+            out.append(f"- {bd}")
+        for f in facts:
+            seen_ids.add(str(f["id"]))
+            out.append(f"- {fact_text(p['name'], f['text'])[:200]}")
+    return "\n".join(out) if len(out) > 1 else ""
+
+
 async def get_memories_for_context(
     user_id: str,
     keywords: List[str],
@@ -977,6 +1047,14 @@ async def get_memories_for_context(
     try:
         seen_ids: Set[str] = set()
         mems: List[Memory] = []
+        # PR-3: упоминание человека («Маше», «с Машей») → его подтверждённые факты + ДР из карточки.
+        # Идут мимо фильтра scope (факты о людях общие для обоих ботов) и вне лимита max_results;
+        # id попадают в seen_ids, чтобы обычный поиск не дублировал те же записи.
+        people_block = ""
+        try:
+            people_block = await asyncio.to_thread(_people_context_block, user_id, keywords, seen_ids)
+        except Exception:
+            logger.warning("people mention resolve failed, continuing without it", exc_info=True)
         for kw in keywords:
             if not kw or len(kw) < 2:
                 continue
@@ -994,13 +1072,15 @@ async def get_memories_for_context(
             if len(mems) >= max_results:
                 break
 
-        if not mems:
+        if not mems and not people_block:
             return ""
 
         lines = ["Контекст из памяти:"]
         for m in mems:
             cat_str = f" [{m.category}]" if m.category else ""
-            lines.append(f"- {m.fact[:200]}{cat_str}")
+            lines.append(f"- {owner_fact(m.fact, m.related_to, m.person_id)[:200]}{cat_str}")
+        if people_block:
+            lines.append(people_block)
 
         return "\n".join(lines)
     except Exception:

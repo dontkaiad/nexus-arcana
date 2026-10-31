@@ -18,7 +18,8 @@ is_archived = false`) генерирует Voyage-эмбеддинг (`core.memo
     python3 scripts/migrate_memory_embeddings.py --apply --limit 50
 
 CLI:
-    --dry-run     (default): count + 3 сэмпла embed_text + оценка запросов, без записи
+    --dry-run     (default): count + 3 сэмпла (только id, категория, длина — БЕЗ содержимого записей:
+                             в памяти лежат личные данные) + оценка запросов, без записи
     --apply                  (опасно): реально пишет embedding в Postgres
     --limit N                (default: без лимита) сколько строк просканировать
     --batch-size N            (default 20) строк на один Voyage-запрос
@@ -60,6 +61,9 @@ def _fetch_unindexed(limit: Optional[int]) -> List[dict]:
         {
             "memory_id": str(r.id),
             "embed_text": _embed_text(r.fact_text, r.related_to, r.category),
+            # только метаданные для вывода: само содержимое записи в консоль не попадает
+            "category": r.category or "",
+            "length": len(r.fact_text or ""),
         }
         for r in rows
     ]
@@ -85,6 +89,11 @@ def run(limit: Optional[int], apply: bool, batch_size: int) -> dict:
     return summary
 
 
+def format_sample(item: dict) -> str:
+    """Строка сэмпла: id, категория, длина факта. Содержимое записи НЕ печатаем."""
+    return f"id={item['memory_id']} category={item.get('category') or '—'} len={item.get('length', '?')}"
+
+
 def _print_summary(summary: dict, apply: bool, batch_size: int) -> None:
     print()
     print("=" * 60)
@@ -97,9 +106,9 @@ def _print_summary(summary: dict, apply: bool, batch_size: int) -> None:
         print(f"  ОЦЕНКА Voyage-вызовов:    {est_calls} (батч={batch_size}, ~{_RATE_LIMIT_SEC:.0f}с между)")
     print("=" * 60)
     if summary["sample"]:
-        print("\nSAMPLE (first 3 embed_text):")
+        print("\nSAMPLE (first 3; только id / категория / длина, без содержимого):")
         for s in summary["sample"]:
-            print(f"  id={s['memory_id']}: {s['embed_text'][:120]!r}")
+            print(f"  {format_sample(s)}")
 
 
 def main() -> None:

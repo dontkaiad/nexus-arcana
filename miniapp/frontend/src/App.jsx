@@ -15,6 +15,9 @@ import {
 } from "./adapters";
 import { apiGet, apiPost, apiDelete, apiPatch, apiStream, flushOfflineQueue, outboxCount } from "./api";
 import { SelfListCard, SelfDetailHeader } from "./components/self/SelfClientCard.jsx";
+import PeopleTab from "./people/PeopleTab.jsx";
+import { provenanceLine } from "./people/ui.js";
+import { LinkBar, FromPeopleBlock } from "./people/ClientLink.jsx";
 import {
   Sun, Moon as LucideMoon, Check, Coins, List as ListIcon, Brain, Calendar,
   Sparkles as LucideSparkles, Users, Flame as LucideFlame, BookOpen as LucideBookOpen,
@@ -3302,13 +3305,18 @@ function SearchInput({ s, value, onChange, placeholder }) {
 // NEXUS — MEMORY
 // ═══════════════════════════════════════════════════════════════
 
-function NxMemory({ s, openAdhd }) {
+function NxMemory({ s, openAdhd, openClientFromPeople }) {
   const [cat, setCat] = useState("all");
   const [q, setQ] = useState("");
   const [deletingId, setDeletingId] = useState(null);
   const [patchingId, setPatchingId] = useState(null);
   const [expandedId, setExpandedId] = useState(null);
   const [showInactive, setShowInactive] = useState(false);
+  const [peopleOpen, setPeopleOpen] = useState(false);
+  const [peopleId, setPeopleId] = useState(null);   // карточка человека из 👥 на записи памяти
+  const peoplePending = useApi("/api/people?status=pending");
+  const peopleAll = useApi("/api/people");
+  const peopleDisp = useApi("/api/people/alias-disputes");
   const params = [];
   if (cat !== "all") params.push(`cat=${encodeURIComponent(cat)}`);
   if (q) params.push(`q=${encodeURIComponent(q)}`);
@@ -3369,6 +3377,32 @@ function NxMemory({ s, openAdhd }) {
           <ChevronRight size={fs(16)} color={s.tS} />
         </div>
       </Glass>
+      <Glass s={s} accent={s.acc} onClick={() => setPeopleOpen(true)} style={{ padding: "10px 14px" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <div>
+            <div style={{ fontSize: fs(13), color: s.text, fontWeight: 500 }}>
+              👥 Люди{peopleAll.data ? ` · ${peopleAll.data.total}` : ""}
+            </div>
+            {peoplePending.data?.total > 0 && (
+              <div style={{ fontSize: fs(12), color: s.text, marginTop: 2, fontWeight: 600 }}>
+                ● На проверке: {peoplePending.data.total}
+              </div>
+            )}
+            {peopleDisp.data?.total > 0 && (
+              <div style={{ fontSize: fs(12), color: s.text, marginTop: 2, fontWeight: 600 }}>
+                ⚠ Спорные имена: {peopleDisp.data.total}
+              </div>
+            )}
+          </div>
+          <ChevronRight size={fs(16)} color={s.tS} />
+        </div>
+      </Glass>
+      {peopleOpen && createPortal(
+        <div className="day" style={{ fontFamily: B }}>
+          <PeopleTab s={s} Sheet={Sheet} initialId={peopleId} onClose={() => { setPeopleOpen(false); setPeopleId(null); }}
+            onChanged={() => { peoplePending.refetch(); peopleAll.refetch(); peopleDisp.refetch(); }}
+            onOpenClient={(cid) => { setPeopleOpen(false); setPeopleId(null); openClientFromPeople?.(cid); }} />
+        </div>, document.body)}
       <SearchInput s={s} value={q} onChange={setQ} placeholder="Поиск по памяти" />
       {/* #6: показать записи, помеченные «неактуально» (is_current=false) */}
       <div style={{ alignSelf: "flex-start" }}>
@@ -3433,7 +3467,7 @@ function NxMemory({ s, openAdhd }) {
         const catEmojiOnly = m.cat ? String(m.cat).split(" ")[0] : "";
         const busy = deletingId === m.id || patchingId === m.id;
         const dim = m.isCurrent === false;
-        const sub = [m.key && `🔑 ${m.key}`, m.related && `👤 ${m.related}`]
+        const sub = [m.key && !m.personId && `🔑 ${m.key}`, m.related && !m.personId && `👤 ${m.related}`]
           .filter(Boolean).join("  ·  ");
         const expanded = expandedId === m.id;
         return (
@@ -3443,7 +3477,7 @@ function NxMemory({ s, openAdhd }) {
                 onClick={() => setExpandedId(expanded ? null : m.id)}
                 style={{ flex: 1, minWidth: 0, fontSize: fs(13), color: s.text, wordBreak: "break-word", cursor: "pointer" }}
               >
-                {m.text}
+                {m.personName && <b>{m.personName}: </b>}{m.text}
                 {dim && <span style={{ color: s.tS, fontSize: fs(11) }}>  (неактуально)</span>}
                 {/* #6 (1a): ключ / связь — мелкой строкой под текстом */}
                 {sub && (
@@ -3457,8 +3491,19 @@ function NxMemory({ s, openAdhd }) {
                     📅 {m.date}
                   </span>
                 )}
+                {/* провенанс (факты о людях): цитата-основание, платформа, дата сообщения */}
+                {expanded && (m.quote || m.platform || m.messageDate) && (
+                  <span style={{ display: "block", marginTop: 4, fontSize: fs(11), color: s.tS, lineHeight: 1.4 }}>
+                    {m.quote && <span style={{ display: "block", fontStyle: "italic" }}>«{m.quote}»</span>}
+                    {provenanceLine({ platform: m.platform, message_date: m.messageDate }) && (
+                      <span style={{ display: "block", fontWeight: 600 }}>
+                        {provenanceLine({ platform: m.platform, message_date: m.messageDate })}
+                      </span>
+                    )}
+                  </span>
+                )}
               </span>
-              {catEmojiOnly && (
+              {catEmojiOnly && !m.personId && (
                 <span title={m.cat} style={{
                   display: "inline-flex", alignItems: "center",
                   padding: "3px 9px", borderRadius: 10,
@@ -3467,6 +3512,13 @@ function NxMemory({ s, openAdhd }) {
                 }}>
                   {catEmojiOnly}
                 </span>
+              )}
+              {m.personId && (
+                <span
+                  role="button" aria-label="Открыть карточку человека" title="Открыть карточку человека"
+                  onClick={() => { setPeopleId(m.personId); setPeopleOpen(true); }}
+                  style={{ flexShrink: 0, cursor: "pointer", fontSize: fs(15), lineHeight: 1 }}
+                >👥</span>
               )}
               {/* #6 (3): обратимая «неактуально» */}
               {m.isCurrent === false ? (
@@ -6845,7 +6897,7 @@ function RitualDetail({ s, id }) {
 // CLIENT DETAIL SHEET (из v2)
 // ═══════════════════════════════════════════════════════════════
 
-function ClientDetail({ s, id }) {
+function ClientDetail({ s, id, onOpenPerson }) {
   const { data, loading, error, refetch } = useApi(id ? `/api/arcana/clients/${id}` : null, [id]);
   const [editOpen, setEditOpen] = useState(false);
   const [wSeg, setWSeg] = useState("active");  // #154 C4: таб Работ клиента
@@ -6940,6 +6992,8 @@ function ClientDetail({ s, id }) {
       </div>
       )}
 
+      <LinkBar s={s} Sheet={Sheet} client={c} onChanged={refetch} onOpenPerson={onOpenPerson} />
+
       {editOpen && (
         <ClientEditForm
           s={s}
@@ -6973,6 +7027,8 @@ function ClientDetail({ s, id }) {
         </div>
         <div style={{ fontSize: fs(13), color: s.text, lineHeight: 1.55 }}>{c.notes || "—"}</div>
       </Glass>
+
+      <FromPeopleBlock s={s} person={c.person} />
 
       {c.photos.length > 0 && (
         <ObjectPhotosGallery
@@ -8808,6 +8864,8 @@ function AppShell() {
   // проставленных внутри открытого шита. Бампаем при закрытии шита сессии,
   // чтобы список перезапросил актуальный статус.
   const [sessChangedSig, setSessChangedSig] = useState(0);
+  // PR-8: «Открыть в Людях» из досье / «Клиент Арканы» из карточки человека (в любом режиме)
+  const [peopleReq, setPeopleReq] = useState(null);
   const [fabOpen, setFabOpen] = useState(false);
   const [fabForm, setFabForm] = useState(null);
   const aRef = useRef(null);
@@ -8882,8 +8940,18 @@ function AppShell() {
     return v;
   };
 
+  // из карточки человека → досье клиента в Аркане (переключаем на ночь, если сейчас день)
+  const openClientFromPeople = (cid) => {
+    if (isDay) go(true);
+    setModal({ type: "client", payload: { id: String(cid) } });
+  };
+  const openPersonFromClient = (pid) => {
+    setModal(null);
+    setPeopleReq({ id: pid });
+  };
+
   const shared = {
-    s: sky, openTask, openAdhd, openClient, openSession, openRitual, openGrimoire, openWork,
+    s: sky, openClientFromPeople, openTask, openAdhd, openClient, openSession, openRitual, openGrimoire, openWork,
     openStreaks, openMoonPhases,
     taskClosedSig,
     sessChangedSig,
@@ -9165,8 +9233,14 @@ function AppShell() {
         onClose={() => setModal(null)}
         title="Клиент"
       >
-        {modal?.payload?.id && <ClientDetail s={sky} id={modal.payload.id} />}
+        {modal?.payload?.id && <ClientDetail s={sky} id={modal.payload.id} onOpenPerson={openPersonFromClient} />}
       </Sheet>
+
+      {peopleReq && createPortal(
+        <div className={isDay ? "day" : "night"} style={{ fontFamily: B }}>
+          <PeopleTab s={sky} Sheet={Sheet} initialId={peopleReq.id} onClose={() => setPeopleReq(null)}
+            onOpenClient={(cid) => { setPeopleReq(null); openClientFromPeople(cid); }} />
+        </div>, document.body)}
 
       <Sheet
         s={sky}

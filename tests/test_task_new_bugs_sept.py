@@ -100,8 +100,8 @@ def test_pure_clarifications_recognised(text):
 async def test_deadline_in_text_skips_when_to_do_question():
     """Со скрина: «подготовить … дедлайн 13 сентября» — дата уже распознана и
     стоит на карточке, но бот всё равно спрашивал «Когда сделать?».
-    Теперь при известном дедлайне (и без «напомни») показываем обычную
-    карточку подтверждения «Всё верно?», как во flow работ Arcana."""
+    Теперь при известном дедлайне (и без «напомни») задача сохраняется сразу
+    (с дефолтным напоминанием), без вопросов и без «Всё верно?»."""
     msg = MagicMock()
     msg.chat = MagicMock(id=999)
     msg.text = "подготовить предмет к продаже дедлайн 13 сентября"
@@ -116,11 +116,9 @@ async def test_deadline_in_text_skips_when_to_do_question():
         await T.handle_task_parsed(msg, data,
                                    original_text="подготовить предмет к продаже дедлайн 13 сентября")
 
-    save.assert_not_awaited()
-    sent = msg.answer.await_args.args[0]
-    assert "Когда сделать" not in sent
-    assert "Всё верно" in sent
-    assert "2026-09-13" in sent
+    save.assert_awaited_once()
+    assert save.await_args.args[1]["deadline"] == "2026-09-13"
+    msg.answer.assert_not_awaited()  # ни «Когда сделать?», ни «Всё верно?»
 
 
 @pytest.mark.parametrize("text", [

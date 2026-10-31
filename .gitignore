@@ -248,3 +248,4 @@ tools/people_import/data/
 *.session
 *.jsonl
 result.json
+.venv312/

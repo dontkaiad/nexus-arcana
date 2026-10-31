@@ -39,6 +39,9 @@ class MemoryRepo:
         user_id: str = "",
         upsert: bool = False,
         source: str = "manual",
+        person_id: Optional[int] = None,
+        review_status: str = "confirmed",
+        index: bool = True,
     ) -> Optional[str]:
         """Save a pre-parsed memory fact. Returns memory_id or None.
 
@@ -49,11 +52,13 @@ class MemoryRepo:
         try:
             if upsert:
                 pid, _ = await self._pg.upsert(
-                    fact, ключ, category, scope, связь, source, user_id
+                    fact, ключ, category, scope, связь, source, user_id,
+                    person_id=person_id, review_status=review_status, index=index,
                 )
                 return pid
             return await self._pg.add(
-                fact, ключ, category, scope, связь, source, user_id
+                fact, ключ, category, scope, связь, source, user_id,
+                person_id=person_id, review_status=review_status, index=index,
             )
         except Exception as e:
             logger.error("MemoryRepo.save_parsed: %s", e)
@@ -85,10 +90,13 @@ class MemoryRepo:
         related_to: str,
         source: str,
         user_id: str,
+        person_id: Optional[int] = None,
+        review_status: str = "confirmed",
     ) -> Tuple[Optional[str], bool]:
         """Upsert (find by key+category → update; else create). Returns (id, was_updated)."""
         try:
-            return await self._pg.upsert(fact, key, category, scope, related_to, source, user_id)
+            return await self._pg.upsert(fact, key, category, scope, related_to, source, user_id,
+                                         person_id=person_id, review_status=review_status)
         except Exception as e:
             logger.error("MemoryRepo.upsert: %s", e)
             return None, False
@@ -119,8 +127,9 @@ class MemoryRepo:
         user_id: str = "",
         page_size: int = 10,
         match_all: bool = False,
+        confirmed_only: bool = True,
     ) -> List[Memory]:
-        return await self._pg.search(terms, scope, user_id, page_size, match_all)
+        return await self._pg.search(terms, scope, user_id, page_size, match_all, confirmed_only)
 
     async def find_by_category(
         self,
@@ -129,8 +138,11 @@ class MemoryRepo:
         scope: str = "",
         user_id: str = "",
         page_size: int = 100,
+        confirmed_only: bool = True,
     ) -> List[Memory]:
-        return await self._pg.find_by_category(category, is_current, scope, user_id, page_size)
+        return await self._pg.find_by_category(
+            category, is_current, scope, user_id, page_size, confirmed_only
+        )
 
     async def find_by_key_prefixes(
         self,
@@ -145,8 +157,9 @@ class MemoryRepo:
         scope: str = "",
         user_id: str = "",
         page_size: int = 10,
+        confirmed_only: bool = True,
     ) -> List[Memory]:
-        return await self._pg.find_recent(is_current, scope, user_id, page_size)
+        return await self._pg.find_recent(is_current, scope, user_id, page_size, confirmed_only)
 
 
 _repo = MemoryRepo()

@@ -1,0 +1,55 @@
+name: Tests
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: kai
+          POSTGRES_PASSWORD: ci
+          POSTGRES_DB: nexus_arcana
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U kai -d nexus_arcana"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql+psycopg2://kai:ci@localhost:5432/nexus_arcana
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+      - run: python -m pip install -r requirements.txt -r requirements-dev.txt
+      - run: python -m alembic upgrade head
+      - run: python -m pytest tests -q -p no:cacheprovider
+
+      - name: Notify Telegram on failure
+        # Только push в main (там блокируется деплой); PR-ранов не спамим.
+        if: failure() && github.event_name == 'push'
+        run: |
+          send() {
+            curl -s -X POST "https://api.telegram.org/bot${{ secrets.TG_LOG_BOT_TOKEN }}/sendMessage" \
+              --data-urlencode "chat_id=${{ secrets.TG_LOG_CHAT_ID }}" \
+              --data-urlencode "message_thread_id=$1" \
+              --data-urlencode "parse_mode=HTML" \
+              --data-urlencode "text=❌ <b>Тесты упали — деплой не запущен</b>
+          commit: <code>${{ github.sha }}</code>
+          автор: ${{ github.actor }}
+          <a href=\"${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}\">открыть run</a>"
+          }
+          send "${{ secrets.TG_LOG_THREAD_NEXUS }}"
+          send "${{ secrets.TG_LOG_THREAD_ARCANA }}"

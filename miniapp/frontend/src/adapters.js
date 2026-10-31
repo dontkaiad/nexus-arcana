@@ -512,6 +512,12 @@ export function adaptMemory(data) {
       key: m.key || null,           // #6: ключ — там же
       date: m.date || null,         // #6: created_at[:10] — в детализации по тапу
       isCurrent: m.is_current !== false,  // #6: обратимая «неактуально»
+      // факт о человеке: кнопка 👥 → карточка; провенанс — в раскрытии
+      personId: m.person_id || null,
+      personName: m.person_name || null,
+      quote: m.source_quote || null,
+      platform: m.source_platform || null,
+      messageDate: m.source_message_date || null,
     })),
     categories: data.categories || [],
     // «💰 Лимит» — сгруппированный спец-вид (Постоянные/Разовые/Лимиты/Доход)
@@ -723,6 +729,7 @@ export function adaptClients(data) {
       barter_count: c.barter_count ?? 0,
       total: c.total_paid ?? 0,
       photoUrl: c.photo_url || null,
+      personId: c.person_id || null,
       self: (c.type_full || c.status || '').includes('Self')
         || (c.status || '').includes('Я')
         || (c.name || '').toLowerCase() === 'кай',
@@ -747,6 +754,7 @@ export function adaptClientDossier(data) {
     notes: data.notes || '',
     photo_url: data.photo_url || null,
     photos: Array.isArray(data.photos) ? data.photos : [],
+    person: data.person || null,               // PR-8: связь с «Людьми» + блок «Из Людей»
     sessions: data.stats?.sessions ?? 0,
     rituals: data.stats?.rituals ?? 0,
     debt: data.stats?.debt ?? 0,

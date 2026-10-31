@@ -7,6 +7,7 @@
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import datetime, timedelta, timezone
 from html import escape as _esc
@@ -1408,13 +1409,19 @@ async def arcana_client_edit(
     if not has_update:
         return {"ok": True, "noop": True}
 
+    # связанный с человеком клиент: единственный источник ДР — people.birthday (ADR-0027, PR-8b)
+    birthday_own = body.birthday if body.birthday else None
+    if body.birthday is not None:
+        from core.repos import pg_client_links
+        if await asyncio.to_thread(pg_client_links.set_linked_birthday, user_id, client_id, birthday_own):
+            birthday_own = None
     try:
         await _clients_repo.update_profile(
             client_id,
             notes=body.notes,
             request=body.request,
             contact=body.contact,
-            birthday=body.birthday if body.birthday else None,
+            birthday=birthday_own,
             type_code=type_code_update,
         )
     except Exception as e:

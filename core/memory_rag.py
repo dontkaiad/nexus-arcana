@@ -170,6 +170,8 @@ def search_memory_semantic(
             WHERE embedding IS NOT NULL
               AND is_archived = false
               AND is_current = true
+              AND review_status = 'confirmed'
+              AND NOT EXISTS (SELECT 1 FROM people p WHERE p.id = memories.person_id AND p.status = 'rejected')
               {where_extra}
             ORDER BY embedding <=> CAST(:q AS vector)
             LIMIT :k

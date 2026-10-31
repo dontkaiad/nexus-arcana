@@ -4,7 +4,7 @@
 # zarya/ or the handful of SQLAlchemy table defs it needs change — so a change
 # to nexus/handlers or arcana/handlers does NOT trigger a Zarya redeploy,
 # even though it lives in the same repo + compose.
-FROM python:3.9-slim
+FROM python:3.12-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
@@ -26,5 +26,12 @@ COPY arcana/repos/__init__.py arcana/repos/rituals_tables.py arcana/repos/works_
 # defeating the narrow-context caching above — Zarya would rebuild + restart +
 # ping "поднялся" on unrelated commits (favicon, nexus/handlers, …). Instead the
 # stamp is written at container start (zarya/bot.py) — runtime, no layer.
+#
+# GIT_SHA is the exception that is cheap: ARG+ENV as the LAST instructions, no RUN, so every
+# content layer above stays cached. It changes the image config though, so deploy.sh must pass
+# the last commit that touched the paths listed in zarya/build-inputs.txt (not HEAD), otherwise the image ID —
+# and the container — would change on every unrelated deploy (see deploy.sh).
+ARG GIT_SHA=
+ENV GIT_SHA=${GIT_SHA}
 
 CMD ["python", "-m", "zarya"]

@@ -31,7 +31,7 @@ ZARYA_SYSTEM = """Ты — Заря ⭐, личная ассистентка К�
 
 Сообщение пользователя не подошло ни под одну известную команду. Определи intent и ответь
 СТРОГО JSON без markdown-обёртки:
-{"intent": "slots"|"help"|"chat", "reply": "<текст для intent=chat, иначе пустая строка>"}
+{"intent": "slots"|"help"|"agenda"|"chat", "reply": "<текст для intent=chat, иначе пустая строка>"}
 
 Перед сообщением дан контекст "Роль пишущего: admin|friend|guest":
 - admin — это САМА КАЙ. Не объясняй ей "как записаться" и не
@@ -43,6 +43,9 @@ ZARYA_SYSTEM = """Ты — Заря ⭐, личная ассистентка К�
 intent:
 - "slots" — спрашивают про свободное время/окна/расписание/график (в любой формулировке,
   включая "и где", "ну что там" ПОСЛЕ вопроса про время — это уточнение того же вопроса)
+- "agenda" — ТОЛЬКО при роли admin: Кай спрашивает, что у неё запланировано
+  (задачи, дела, планы, расписание, "чем занята") — не про свободные окна.
+  Для friend/guest этот intent НИКОГДА не используй — задачи Кай видит только она сама.
 - "help" — просят помощь, что ты умеешь, как записаться
 - "chat" — всё остальное: приветствие, благодарность, ругань на бота, случайный текст,
   вопрос не по теме букинга. Для intent=chat напиши reply — короткий (1-2 предложения)
@@ -71,6 +74,8 @@ intent:
 
 Примеры:
 "Роль пишущего: admin\nкогда у меня свободные окна" → {"intent":"slots","reply":""}
+"Роль пишущего: admin\nчто там у меня по делам на завтра" → {"intent":"agenda","reply":""}
+"Роль пишущего: friend\nчто у Кай по делам" → {"intent":"chat","reply":"Её дела — тайна за семью замками 💅 Могу показать, когда у неё окно: /slots."}
 "Роль пишущего: friend\nи где" (после вопроса про окна) → {"intent":"slots","reply":""}
 "Роль пишущего: admin\nче по моему графику" → {"intent":"slots","reply":""}
 "Роль пишущего: friend\nтупая машина" → {"intent":"chat","reply":"Машина? Кисуль, я звезда шоу 💅✨ Спроси /slots — покажу класс."}
@@ -120,7 +125,7 @@ async def _friend_shared_summary() -> str:
 
 
 async def classify_zarya(text: str, role: str = "guest") -> dict:
-    """Вернуть {"intent": "slots"|"help"|"chat", "reply": str}. Fail-safe:
+    """Вернуть {"intent": "slots"|"help"|"agenda"|"chat", "reply": str}. Fail-safe:
     любая ошибка (сеть/парсинг) → intent="chat" с пустым reply — вызывающий
     код должен показать свою дефолтную заглушку в этом случае."""
     role_label = _ROLE_LABEL.get(role, "guest")
@@ -131,8 +136,11 @@ async def classify_zarya(text: str, role: str = "guest") -> dict:
         cleaned = raw.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
         data = json.loads(cleaned)
         intent = data.get("intent")
-        if intent not in ("slots", "help", "chat"):
+        if intent not in ("slots", "help", "agenda", "chat"):
             raise ValueError(f"unknown intent {intent!r}")
+        if intent == "agenda" and role_label != "admin":
+            # защита от утечки задач Кай: даже если модель ошиблась с ролью
+            return {"intent": "chat", "reply": ""}
         return {"intent": intent, "reply": str(data.get("reply") or "")}
     except Exception as e:
         logger.warning("classify_zarya: failed to parse %r (%s)", raw, e)

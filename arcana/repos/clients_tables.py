@@ -39,4 +39,7 @@ clients = Table(
     Column("photo_url",      Text),
     Column("object_photos",  Text),
     Column("user_id", Text),
+    # связь с карточкой в «Людях» (миграция *_clients_person_link: FK → people ON DELETE SET NULL,
+    # не больше одного клиента на человека). Plain BigInteger: people лежит в другом MetaData.
+    Column("person_id",      BigInteger),
 )

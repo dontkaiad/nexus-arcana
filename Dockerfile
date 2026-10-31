@@ -7,7 +7,7 @@ COPY miniapp/frontend/ .
 RUN npm run build
 
 # ── Stage 2: Python runtime ───────────────────────────────────────────────────
-FROM python:3.9-slim
+FROM python:3.12-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
@@ -29,6 +29,8 @@ COPY --from=frontend /frontend/dist /app/miniapp/frontend/dist
 # деплой = свежий BUILD_STAMP. Старое время в мониторинге = контейнер не
 # перечитал код. GIT_SHA пуст → стамп = только время сборки, без мусора.
 ARG GIT_SHA=
+# ENV — чтобы `docker exec … printenv GIT_SHA` и лог старта показывали, какой коммит реально крутится.
+ENV GIT_SHA=${GIT_SHA}
 RUN printf 'built %s%s' "$(date -u +%Y-%m-%dT%H:%MZ)" "${GIT_SHA:+ · $GIT_SHA}" > /app/BUILD_STAMP
 
 CMD ["python", "-m", "nexus.nexus_bot"]

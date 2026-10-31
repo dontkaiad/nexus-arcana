@@ -5,7 +5,8 @@ No aiogram / DB imports here so it stays trivially testable.
 from __future__ import annotations
 
 import re
-from datetime import date, datetime, timedelta, timezone
+from dataclasses import dataclass
+from datetime import date, datetime, time, timedelta, timezone
 from typing import List, Optional
 
 MSK = timezone(timedelta(hours=3))
@@ -97,3 +98,138 @@ def epoch(dt: datetime) -> int:
 
 def from_epoch(v: str | int) -> datetime:
     return datetime.fromtimestamp(int(v), tz=timezone.utc)
+
+
+# ── one-shot booking parser: «завтра в 19 шашлыки», «в пятницу с 19 до 23 др» ─
+# Детерминированно, без LLM. Нужны дата + время; остаток текста — повод.
+
+_DATE_WORDS = (
+    r"послезавтра|завтра|сегодня|понедельник\w*|вторник\w*|сред\w*|четверг\w*|"
+    r"пятниц\w*|суббот\w*|воскресень\w*"
+)
+_DATE_STRIP_RE = re.compile(rf"(?:\b(?:в|во|на)\s+)?\b(?:{_DATE_WORDS})", re.IGNORECASE)
+_RANGE_RE = re.compile(
+    r"(?:\bс\s+)?\b(\d{1,2})(?::(\d{2}))?\s*(?:до|-|–)\s*(\d{1,2})(?::(\d{2}))?\b",
+    re.IGNORECASE,
+)
+_AT_RE = re.compile(r"\b(?:в|к)\s+(\d{1,2})(?::(\d{2}))?(?:\s*(?:ч\b|час\w*))?(?!\d)", re.IGNORECASE)
+_DURATION_RE = re.compile(
+    r"(?:\bна\s+)?\b(\d+(?:[.,]\d+)?)\s*(?:ч\b|час\w*)", re.IGNORECASE)
+_FILLER_RE = re.compile(
+    r"\b(?:запиши|записать|запишите|забронируй|забронировать|поставь|меня|мне|пожалуйста|плиз)\b",
+    re.IGNORECASE,
+)
+
+
+@dataclass
+class QuickBooking:
+    day: date
+    hour: int
+    minute: int
+    hours: Optional[float]  # None → не названа
+    note: str
+
+    def start(self) -> datetime:
+        return datetime.combine(self.day, time(self.hour, self.minute), tzinfo=MSK)
+
+
+def parse_quick_booking(text: str, today: date) -> Optional[QuickBooking]:
+    """Дата (extract_asked_date) + время («в 19», «с 19 до 23») → QuickBooking.
+    Нет даты или времени → None (идёт обычный показ слотов)."""
+    t = text or ""
+    day = extract_asked_date(t, today)
+    if day is None:
+        return None
+    hours: Optional[float] = None
+    m = _RANGE_RE.search(t)
+    if m:
+        h1, m1 = int(m.group(1)), int(m.group(2) or 0)
+        h2, m2 = int(m.group(3)), int(m.group(4) or 0)
+        if not (0 <= h1 < 24 and 0 <= h2 <= 24 and m1 < 60 and m2 < 60):
+            return None
+        span = (h2 * 60 + m2) - (h1 * 60 + m1)
+        if span <= 0:
+            span += 24 * 60
+        hours = span / 60
+        hour, minute = h1, m1
+        t = t[:m.start()] + " " + t[m.end():]
+    else:
+        m = _AT_RE.search(t)
+        if not m:
+            return None
+        hour, minute = int(m.group(1)), int(m.group(2) or 0)
+        if hour > 23 or minute > 59:
+            return None
+        t = t[:m.start()] + " " + t[m.end():]
+        d = _DURATION_RE.search(t)
+        if d:
+            hours = float(d.group(1).replace(",", "."))
+            t = t[:d.start()] + " " + t[d.end():]
+    if hours is not None and not (0 < hours <= 12):
+        return None
+    t = _DATE_STRIP_RE.sub(" ", t)
+    t = _FILLER_RE.sub(" ", t)
+    note = re.sub(r"\s+", " ", t).strip(" ,.;:—-")
+    return QuickBooking(day=day, hour=hour, minute=minute, hours=hours, note=note)
+
+
+# ── admin agenda: «что у меня завтра», «задачи на неделе» ────────────────────
+
+_AGENDA_RE = re.compile(
+    r"(задач|(?<!как )\bдел[аоы]\b|что\s+у\s+меня|\bплан\w*|расписан|занят)", re.IGNORECASE)
+# «свободные окна / запиши» — это про слоты, не про повестку
+_SLOTS_WORDS_RE = re.compile(r"(свободн|окн[оа]|слот|запиш|забронир)", re.IGNORECASE)
+_WEEK_RE = re.compile(r"недел", re.IGNORECASE)
+
+
+def wants_agenda(text: str) -> bool:
+    t = text or ""
+    return bool(_AGENDA_RE.search(t)) and not _SLOTS_WORDS_RE.search(t)
+
+
+def agenda_range(text: str, today: date) -> "tuple[date, date]":
+    """Диапазон дней повестки: «неделя» → 7 дней, назван день → он, иначе сегодня."""
+    t = text or ""
+    asked = extract_asked_date(t, today)
+    if _WEEK_RE.search(t):
+        start = asked or today
+        return start, start + timedelta(days=6)
+    d = asked or today
+    return d, d
+
+
+_WEEKDAY_NOM = [("Понедельник", "чистый"), ("Вторник", "чистый"), ("Среда", "чистая"),
+                ("Четверг", "чистый"), ("Пятница", "чистая"), ("Суббота", "чистая"),
+                ("Воскресенье", "чистое")]
+
+
+def _empty_phrase(day_from: date, day_to: date, today: date) -> str:
+    if day_from != day_to:
+        return "Неделя чистая 💅"
+    if day_from == today:
+        return "Сегодня чисто 💅"
+    if day_from == today + timedelta(days=1):
+        return "Завтра чисто 💅"
+    name, adj = _WEEKDAY_NOM[day_from.weekday()]
+    return f"{name} {adj} 💅"
+
+
+def format_agenda(items, day_from: date, day_to: date, today: date) -> str:
+    """items — AgendaItem-подобные (day/kind/title/start/end/all_day), отсортированы."""
+    import html
+    if not items:
+        return _empty_phrase(day_from, day_to, today)
+    blocks: List[str] = []
+    for day in sorted({i.day for i in items}):
+        lines = [f"🗓 <b>{_DOW[day.weekday()]} {day.day:02d}.{day.month:02d}</b>"]
+        for i in (x for x in items if x.day == day):
+            title = html.escape(i.title)
+            icon = "🔮" if i.kind == "work" else "•"
+            if i.all_day:
+                when = "весь день:"
+            else:
+                s = i.start.astimezone(MSK)
+                when = f"{s:%H:%M}" + (f"–{i.end.astimezone(MSK):%H:%M}" if i.end else "")
+            lines.append(f"{icon} {when} {title}")
+        blocks.append("\n".join(lines))
+    return "\n\n".join(blocks)
