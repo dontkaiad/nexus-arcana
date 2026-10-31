@@ -11,12 +11,21 @@ from tests._rag_fake_engine import FakeEngine, boom_engine
 
 # ── _embed_text ──────────────────────────────────────────────────────────────
 
-def test_embed_text_joins_nonempty_parts():
-    assert memory_rag._embed_text("факт", "связь", "🏠 Быт") == "факт связь 🏠 Быт"
+def test_embed_text_is_fact_only_no_related_no_category():
+    # не-человек: ни связь, ни категория в вектор не идут
+    assert memory_rag._embed_text("факт", "связь", "🏠 Быт") == "факт"
 
 
-def test_embed_text_skips_empty_parts():
-    assert memory_rag._embed_text("факт", "", "") == "факт"
+def test_embed_text_person_fact_gets_name_but_no_alias_tail():
+    # факт человека хранится без имени; имя = первое в related_to («Имя | алиасы»)
+    assert memory_rag._embed_text("любит чай", "Оля | Олечка", "👥 Люди", person_id=5) == "Оля: любит чай"
+    # имя уже в тексте — без дубля
+    assert memory_rag._embed_text("Оля любит чай", "Оля | Олечка", "", person_id=5) == "Оля любит чай"
+
+
+def test_embed_text_tombstone_is_empty():
+    assert memory_rag._embed_text("", "Оля | Олечка", "👥 Люди", person_id=5) == ""
+    assert memory_rag._embed_text("   ", "", "") == ""
 
 
 def test_embed_text_empty_fact_empty_result():
@@ -180,53 +189,3 @@ def test_search_memory_semantic_min_score_filters_low_scores(monkeypatch):
 
     out = memory_rag.search_memory_semantic("гай", min_score=0.5)
     assert len(out) == 1 and out[0].id == "1"
-
-
-# ── rerank_memory_candidates (ADR-0021, #185) ────────────────────────────────
-
-import asyncio
-from unittest.mock import AsyncMock, patch
-
-from core.repos.pg_memory_repo import Memory
-
-
-def _mem(id_="1", fact="факт", category="", related_to=""):
-    return Memory(id=id_, fact=fact, category=category, related_to=related_to)
-
-
-def test_rerank_filters_out_rejected_top_candidate():
-    """Топ-1 по cosine distance («луна-хронотип», СДВГ-заметка), но
-    семантически не про то — Haiku его отклоняет, остаётся только кот."""
-    top1 = _mem("1", fact="совиный хронотип, поздний подъём", category="🦋 СДВГ")
-    cat = _mem("2", fact="Луна — кличка кота", category="🐾 Коты")
-    with patch.object(memory_rag, "ask_claude", AsyncMock(return_value='["2"]')):
-        out = asyncio.run(
-            memory_rag.rerank_memory_candidates("что я помню про луну", [top1, cat])
-        )
-    assert [m.id for m in out] == ["2"]
-
-
-def test_rerank_invalid_json_returns_empty():
-    with patch.object(memory_rag, "ask_claude", AsyncMock(return_value="не JSON, просто текст")):
-        out = asyncio.run(memory_rag.rerank_memory_candidates("запрос", [_mem("1")]))
-    assert out == []
-
-
-def test_rerank_json_not_a_list_returns_empty():
-    with patch.object(memory_rag, "ask_claude", AsyncMock(return_value='{"ids": ["1"]}')):
-        out = asyncio.run(memory_rag.rerank_memory_candidates("запрос", [_mem("1")]))
-    assert out == []
-
-
-def test_rerank_empty_candidates_no_call():
-    ask = AsyncMock()
-    with patch.object(memory_rag, "ask_claude", ask):
-        out = asyncio.run(memory_rag.rerank_memory_candidates("запрос", []))
-    assert out == []
-    ask.assert_not_called()
-
-
-def test_rerank_markdown_fenced_json_parsed():
-    with patch.object(memory_rag, "ask_claude", AsyncMock(return_value='```json\n["1"]\n```')):
-        out = asyncio.run(memory_rag.rerank_memory_candidates("запрос", [_mem("1"), _mem("2")]))
-    assert [m.id for m in out] == ["1"]

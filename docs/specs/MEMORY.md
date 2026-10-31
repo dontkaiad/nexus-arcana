@@ -6,10 +6,10 @@
 > migration is complete. Schema: `value_text` dropped (#146), `notion_id`
 > dropped (#149), `user_notion_id`→`user_id` (#144). `долг_` / `цель_` facts
 > are diverted to the `debts` / `goals` tables and never persist here
-> (#6 / #205). Search: the semantic
-> layer (ADR-0006 pgvector backend, applied to memory by ADR-0020) plus a
-> Haiku reranker over its candidates (ADR-0021). Update this spec in the
-> same PR that changes the memory schema or search strategy.
+> (#6 / #205). Search: one hybrid path
+> (`core/memory_search.py`: Postgres FTS + pgvector → RRF → optional Haiku
+> rerank; ADR-0020/0021 as amended), exact ILIKE only on destructive paths.
+> Update this spec in the same PR that changes the memory schema or search strategy.
 
 > Source of truth is the code, not Notion specs. Every statement is
 > verifiable against the files in the "Verify against code" section at the
@@ -167,7 +167,9 @@ effects (replies, СДВГ tip, `message_pages` plaque). The Mini App FAB calls
 Every write that reaches `PgMemoryRepo.add`/`.upsert` — not just
 `save_memory()` — spawns a fire-and-forget `asyncio` task
 (`core/repos/pg_memory_repo.py:_spawn_index`) that embeds
-`fact_text + " " + related_to + " " + category` via Voyage
+`core/memory_rag.py:_embed_text` — the fact text only (a person's fact gets
+the person's name via `owner_fact`, because person facts are stored without
+it; the alias tail and category are NOT embedded; a tombstone embeds nothing) — via Voyage
 (`voyage-4-lite`, dim 1024, client shared with `core/rag.py`) and writes it
 to the `embedding` column. This covers `save_memory()`, auto-suggest
 confirm (`save_parsed`), budget upserts (`_save_memory_entry`), and
@@ -220,51 +222,43 @@ exception — it stays owner-wide (inline, latency-sensitive, read-only hint).
    `tz_{tg_id}` (timezone — `core/shared_handlers.py`,
    `nexus/handlers/tasks.py`, `miniapp/.../weather.py`),
    `budget_payday` (`nexus/handlers/finance.py`).
-2. Substring search — `search(terms, scope, user_id, page_size)`:
-   `OR` of `ILIKE %term%` over `fact_text`, `key_name`, `related_to`;
-   activity filter (`is_current=True`, `is_archived=False`); optional
-   `scope` (match OR `global`) and `user_id`; sorted by
-   `created_at desc`.
+2. Substring search — `search(terms, scope, user_id, page_size, match_all)`:
+   `ILIKE %term%` over `fact_text`, `key_name`, `related_to` (AND over terms
+   with `match_all=True`); activity filter (`is_current=True`,
+   `is_archived=False`); optional `scope` and `user_id`; sorted by
+   `created_at desc`. **Destructive / exact-recall paths only** (see below);
+   informational search does NOT use it.
 
-### Semantic fallback (ADR-0020) + Haiku rerank (ADR-0021)
+### Hybrid search (`core/memory_search.py`; ADR-0020, ADR-0021 as amended)
 
-`search`/`_find_pages_by_hint` results are ILIKE-only by construction (see
-above) — semantics is layered on top by the *caller*, in
-`core/memory.py:_semantic_search_memory`, not inside the repo query.
-Contract: **ILIKE-first, semantic only as a thin fallback**. The pipeline
-when the ILIKE result has fewer than 3 rows:
+One path for `search_memory` (bot), `get_memories_for_context` (prompt
+injection) and Mini App `GET /memory?q=`:
 
-1. `core/memory_rag.py:search_memory_semantic` — Voyage query embedding,
-   pgvector cosine over `embedding`, returns `DEFAULT_TOP_K` (10) nearest
-   candidates (a wide net — top-1 by cosine distance is not always top-1 by
-   meaning on short facts).
-2. `core/memory_rag.py:rerank_memory_candidates` — **Haiku**
-   (`claude-haiku-4-5-20251001`, temp 0) is handed the query and the
-   candidate lines (`id` / `факт` / `категория` / `связь`) and returns a
-   JSON id-list of the ones that are actually relevant. Rationale
-   (ADR-0021): a general-purpose embedding cannot tell «луна»-the-word from
-   «Луна»-the-cat's-name; the category/relation give Haiku the context the
-   vector lacks.
-3. Merge: ILIKE hits first, then the rerank-approved semantic rows deduped
-   by id, capped at the caller's page size.
+1. **FTS leg** — generated column `memories.fts` (`tsvector`, config
+   `russian`: `fact_text` weight A, `related_to` weight C; `key_name` is not
+   indexed; GIN `idx_memories_fts`). Query = significant words OR-ed
+   (`fts_query`), ranked by `ts_rank`, top 20.
+2. **Vector leg** — Voyage query embedding, pgvector cosine, top 20.
+3. **RRF** (k=60) fuses the two rankings.
+4. **Haiku rerank** (`rerank`, temp 0) orders the top ≤25 candidates and
+   returns ≤k ids (valid `[]` = nothing relevant; bad answer → RRF order).
+   Enabled for `search_memory` (k=5) and Mini App (k=20); the context path
+   runs without it (an LLM downstream does the filtering).
 
-Graceful at every step — Voyage down / Haiku error / bad JSON / rerank
-culls everything to zero → the original ILIKE list is returned unchanged,
-no placeholder message.
+Shared read filters (one SQL fragment for both legs): `is_current`, not
+`is_archived`, `review_status='confirmed'`, `fact_text <> ''` (tombstones left
+by «Стереть»), and not a `rejected` person. `scope` matches OR `global`.
+Graceful: no Voyage key → FTS only; Haiku failure → RRF order; DB error → `[]`.
+Hooks reserved for later stages: `person_ids` (subject filter) and `trace`.
 
-Callers of the fallback: `search_memory` (`/memory`) and
-`get_memories_for_context` (prompt injection, via `_find_pages_by_hint`).
-Opted out (`use_semantic=False`): `_resolve_alias` (alias recall must stay
-exact, not "closest match") and the destructive flows `deactivate_memory` /
+Opted out of hybrid (exact ILIKE, `use_semantic=False`): `_resolve_alias`
+(alias recall must stay exact) and the destructive flows `deactivate_memory` /
 `delete_memory` (they act on every / the-only found row without
 confirmation — a nearest-neighbor false positive would silently
 deactivate/archive the wrong fact).
 
-`search_memory_semantic` still accepts an optional `min_score` cosine
-cutoff and no caller passes one — with the Haiku reranker now doing the
-relevance filtering, a raw distance threshold is redundant; `min_score`
-stays as a coarse pre-filter option and the score distribution is still
-logged (#185).
+`search_memory_semantic` (`core/memory_rag.py`) remains as a low-level vector
+query; `min_score` is an optional coarse pre-filter nobody passes.
 
 Derived reads:
 - `find_by_category(category, is_current, scope, user_id, page_size)`

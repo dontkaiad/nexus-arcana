@@ -11,6 +11,7 @@ from datetime import datetime
 
 from core.config import config
 from core.claude_client import ask_claude
+from core.memory_search import search_memories
 from core.user_manager import get_user_id
 from core.repos.pg_memory_repo import PgMemoryRepo, Memory
 from core.budget import (
@@ -249,25 +250,17 @@ async def get_memory(
 
     if cat:
         visible = [m for m in visible if (m.category or None) == cat]
-    if q:
-        # Выравнивание с ботом: ILIKE по Текст+Ключ+Связь, потом — если хитов
-        # < 3 — semantic-фоллбэк (Voyage + Haiku-реранк), как в core.memory (#6).
-        needle = q.lower().strip()
-        hits = [
-            m for m in visible
-            if needle in (m.fact or "").lower()
-            or needle in (m.key or "").lower()
-            or needle in (m.related_to or "").lower()
-        ]
-        if len(hits) < 3:
-            try:
-                from core.memory import _semantic_search_memory
-                merged = await _semantic_search_memory(q, hits, user_id=user_id, cap=20)
-                allowed = {m.id for m in visible}
-                hits = [m for m in merged if m.id in allowed]
-            except Exception as e:
-                logger.warning("get_memory semantic fallback failed: %s", e)
-        visible = hits
+    if q and q.strip():
+        # Единый поиск с ботом (core.memory_search): FTS + vector → RRF → Haiku-реранк,
+        # потом пересечение с видимыми (категории/люди без q и т.п. уже отфильтрованы).
+        # Ищет только по актуальным (is_current) записям, include_inactive на поиск не влияет.
+        by_id = {m.id: m for m in visible}
+        try:
+            found = await search_memories(q, user_id=user_id, k=20, do_rerank=True)
+        except Exception as e:
+            logger.warning("get_memory hybrid search failed: %s", e)
+            found = []
+        visible = [by_id[m.id] for m in found if m.id in by_id]
 
     return {
         "items": [_serialize_memory(m) for m in visible],

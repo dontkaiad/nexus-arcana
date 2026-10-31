@@ -1,5 +1,6 @@
-"""tests/test_memory_semantic.py — semantic-фоллбэк в поиске core/memory.py
-(#184) + guard'ы, что деструктивные операции его не используют.
+"""tests/test_memory_semantic.py — информационный поиск core/memory.py идёт через
+единый гибрид (core.memory_search) + guard'ы, что деструктивные операции его
+не используют (#184).
 
 Индексация на запись живёт в PgMemoryRepo.add/upsert (#186) —
 см. tests/test_memory_repo_indexing.py.
@@ -11,7 +12,7 @@ from __future__ import annotations
 import asyncio
 from unittest.mock import AsyncMock, patch
 
-from core.memory import _semantic_search_memory, save_memory, parse_and_store
+from core.memory import save_memory, parse_and_store
 from core.repos.pg_memory_repo import Memory
 
 
@@ -25,84 +26,33 @@ def _mk_message():
     return msg
 
 
-# ── _semantic_search_memory ──────────────────────────────────────────────────
+# ── информационный путь = гибрид; деструктивный = ILIKE ───────────────────────
 
-def test_semantic_search_skipped_when_ilike_found_enough():
-    existing = [_mk_page("1"), _mk_page("2"), _mk_page("3")]
-    with patch("core.memory_rag.search_memory_semantic") as sem:
-        out = asyncio.run(_semantic_search_memory("запрос", existing))
-    sem.assert_not_called()
-    assert out == existing
-
-
-def test_semantic_search_called_when_ilike_thin():
-    existing = [_mk_page("1")]
-    candidates = [_mk_page("2"), _mk_page("1")]  # "1" дубль — должен схлопнуться
-    with patch("core.memory_rag.search_memory_semantic", return_value=candidates), \
-         patch("core.memory_rag.rerank_memory_candidates", AsyncMock(return_value=candidates)):
-        out = asyncio.run(_semantic_search_memory("запрос", existing))
-    ids = [m.id for m in out]
-    assert ids == ["1", "2"]  # ILIKE-хиты первыми, дубли не повторяются
-
-
-def test_semantic_search_empty_query_noop():
-    existing = []
-    with patch("core.memory_rag.search_memory_semantic") as sem:
-        out = asyncio.run(_semantic_search_memory("", existing))
-    sem.assert_not_called()
-    assert out == []
-
-
-def test_semantic_search_failure_returns_existing():
-    existing = [_mk_page("1")]
-    with patch("core.memory_rag.search_memory_semantic", side_effect=RuntimeError("boom")):
-        out = asyncio.run(_semantic_search_memory("запрос", existing))
-    assert out == existing  # сбой semantic не всплывает
-
-
-# ── реранк (ADR-0021, #185): pgvector top_k=10 → Haiku отбирает по смыслу ──
-
-def test_semantic_search_uses_reranked_subset_only():
-    """Топ-1 по cosine distance («2»), отклонённый Haiku, не должен попасть
-    в результат — только то, что реранк подтвердил («3»)."""
-    existing = [_mk_page("1")]
-    candidates = [_mk_page("2"), _mk_page("3")]
-    with patch("core.memory_rag.search_memory_semantic", return_value=candidates), \
-         patch("core.memory_rag.rerank_memory_candidates", AsyncMock(return_value=[_mk_page("3")])):
-        out = asyncio.run(_semantic_search_memory("что я помню про луну", existing))
-    assert [m.id for m in out] == ["1", "3"]
-
-
-def test_semantic_search_reranker_empty_keeps_only_ilike():
-    """Реранк отфильтровал всё в ноль → semantic-довесок не добавляется
-    вообще, без сообщения-заглушки — пользователь видит только ILIKE-хиты."""
-    existing = [_mk_page("1")]
-    candidates = [_mk_page("2"), _mk_page("3")]
-    with patch("core.memory_rag.search_memory_semantic", return_value=candidates), \
-         patch("core.memory_rag.rerank_memory_candidates", AsyncMock(return_value=[])):
-        out = asyncio.run(_semantic_search_memory("запрос", existing))
+def test_find_pages_by_hint_semantic_uses_hybrid_without_rerank():
+    from core.memory import _find_pages_by_hint
+    hybrid = AsyncMock(return_value=[_mk_page("1")])
+    with patch("core.memory._memory_search.search_memories", hybrid), \
+         patch("core.memory._mem_repo") as mem_repo:
+        mem_repo.search = AsyncMock()
+        out = asyncio.run(_find_pages_by_hint("запрос", page_size=7, user_id="u1"))
     assert [m.id for m in out] == ["1"]
+    kw = hybrid.await_args.kwargs
+    assert kw["user_id"] == "u1" and kw["k"] == 7 and kw["do_rerank"] is False
+    mem_repo.search.assert_not_called()   # ILIKE в информационном пути больше не участвует
 
 
-def test_semantic_search_no_candidates_skips_rerank_call():
-    """pgvector не нашёл кандидатов → реранк вообще не дёргается (нечего
-    ранжировать, лишний Haiku-вызов не нужен)."""
-    existing = [_mk_page("1")]
-    rerank = AsyncMock()
-    with patch("core.memory_rag.search_memory_semantic", return_value=[]), \
-         patch("core.memory_rag.rerank_memory_candidates", rerank):
-        out = asyncio.run(_semantic_search_memory("запрос", existing))
-    assert out == existing
-    rerank.assert_not_called()
-
-
-def test_semantic_search_rerank_failure_returns_existing():
-    existing = [_mk_page("1")]
-    candidates = [_mk_page("2")]
-    with patch("core.memory_rag.search_memory_semantic", return_value=candidates), \
-         patch("core.memory_rag.rerank_memory_candidates", AsyncMock(side_effect=RuntimeError("boom"))):
-        out = asyncio.run(_semantic_search_memory("запрос", existing))
-    assert out == existing  # сбой реранка не всплывает
+def test_find_pages_by_hint_destructive_keeps_ilike_match_all():
+    from core.memory import _find_pages_by_hint
+    search = AsyncMock(return_value=[_mk_page("5")])
+    with patch("core.memory._memory_search.search_memories", AsyncMock()) as hybrid, \
+         patch("core.memory._mem_repo") as mem_repo:
+        mem_repo.search = search
+        out = asyncio.run(_find_pages_by_hint("удали X", use_semantic=False, user_id="u1",
+                                              confirmed_only=False))
+    assert [m.id for m in out] == ["5"]
+    hybrid.assert_not_called()
+    assert search.await_args.kwargs["match_all"] is True
+    assert search.await_args.kwargs["confirmed_only"] is False
 
 
 # ── save_memory: ответ пользователю не зависит от индексации ────────────────
@@ -183,19 +133,6 @@ def test_parse_and_store_writes_plain_fact():
         r = asyncio.run(parse_and_store("люблю чай", "owner-1", "☀️ Nexus"))
     assert r["kind"] == "memory" and r["memory_id"] == "m-9"
     assert mem_repo.add.await_args.args[6] == "owner-1"  # user_id threaded
-
-
-def test_find_pages_by_hint_forwards_user_id_to_repo():
-    """#202: owner-ключ пробрасывается в ILIKE и в semantic-фоллбэк, а не
-    теряется на уровне core/memory.py."""
-    from core.memory import _find_pages_by_hint
-    search = AsyncMock(return_value=[])
-    with patch("core.memory._mem_repo") as mem_repo, \
-         patch("core.memory._semantic_search_memory", AsyncMock(return_value=[])) as sem:
-        mem_repo.search = search
-        asyncio.run(_find_pages_by_hint("маша", page_size=5, user_id="owner-1"))
-    assert search.await_args.kwargs["user_id"] == "owner-1"
-    assert sem.await_args.kwargs["user_id"] == "owner-1"
 
 
 def test_delete_memory_hint_path_disables_semantic():

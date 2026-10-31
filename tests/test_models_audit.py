@@ -18,7 +18,7 @@ HAIKU_REQUIRED = [
     "core/router.py",
     "core/deleter.py",
     "core/reply_update.py",
-    "core/memory_rag.py",  # rerank_memory_candidates (ADR-0021, #185)
+    "core/memory_search.py",  # rerank (ADR-0021 → hybrid search)
     "arcana/handlers/finance.py",
     "arcana/handlers/stats.py",
     "arcana/handlers/works.py",

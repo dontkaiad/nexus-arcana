@@ -55,7 +55,7 @@ def get_voyage_client():
     try:
         import voyageai
         # max_retries>0 включает нативный wait-and-retry SDK на rate-limit (429).
-        # Дефолт 0 (не повторяет) — под бесплатный тир 3 RPM это критично.
+        # Ретраи на 429 (backoff): лимит RPM зависит от тарифа ключа (без привязанной карты — единицы RPM).
         _voyage_client = voyageai.Client(api_key=key, max_retries=5)
         return _voyage_client
     except Exception as e:  # SDK не установлен / иная ошибка инициализации
@@ -89,7 +89,7 @@ def _embed(
         if _is_rate_limit(e):
             # max_retries=5 в клиенте уже исчерпан → точку(и) пропускаем.
             logger.warning(
-                "Voyage rate limit (3 RPM) исчерпан после ретраев — %s текст(ов) "
+                "Voyage rate limit исчерпан после ретраев — %s текст(ов) "
                 "пропущено", len(texts),
             )
         else:
@@ -238,7 +238,7 @@ def index_triplet(
 
 def index_triplets_batch(triplets: List[dict]) -> int:
     """Индексирует N триплетов ОДНИМ запросом Voyage (батч-эмбеддинг) + одним
-    executemany INSERT. Критично под лимит 3 RPM: N триплетов = 1 запрос Voyage.
+    executemany INSERT. Экономит запросы: N триплетов = 1 запрос Voyage.
 
     triplets: список dict с ключами triplet_id, cards, question, interpretation,
     client_id, session_name, occurred_at. Пустой текст — пропуск. Возвращает число

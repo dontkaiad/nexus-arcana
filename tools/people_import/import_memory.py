@@ -227,7 +227,7 @@ def merge_clusters(facts: List[Dict], clusters: List[List[int]]) -> List[Dict]:
 
 
 def embed_texts(texts: List[str], batch: int = 128, pause: float = 21.0) -> List[List[float]]:
-    """Voyage-эмбеддинги пачками (1 запрос на batch; free tier — 3 RPM → пауза). [] если недоступно."""
+    """Voyage-эмбеддинги пачками (1 запрос на batch; при низком лимите RPM — пауза). [] если недоступно."""
     from core.rag import _embed
     out: List[List[float]] = []
     for i in range(0, len(texts), batch):
@@ -359,9 +359,9 @@ def embed_missing(ids: List[str], batch_size: int, pause: float) -> Tuple[int, i
         return 0, 0
     with get_engine().connect() as c:
         rows = c.execute(sa.text(
-            "SELECT id, fact_text, related_to, category FROM memories "
+            "SELECT id, fact_text, related_to, category, person_id FROM memories "
             "WHERE id = ANY(:ids) AND embedding IS NULL"), {"ids": [int(i) for i in ids]}).all()
-    items = [{"memory_id": str(r.id), "embed_text": _embed_text(r.fact_text, r.related_to, r.category)} for r in rows]
+    items = [{"memory_id": str(r.id), "embed_text": _embed_text(r.fact_text, r.related_to, r.category, r.person_id)} for r in rows]
     done = 0
     for i in range(0, len(items), batch_size):
         if i:
@@ -497,7 +497,7 @@ if __name__ == "__main__":
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--no-embed", action="store_true", help="не считать эмбеддинги записанных фактов")
     ap.add_argument("--batch-size", type=int, default=20, help="строк на один запрос Voyage")
-    ap.add_argument("--sleep", type=float, default=21.0, help="пауза между пачками (Voyage free 3 RPM)")
+    ap.add_argument("--sleep", type=float, default=21.0, help="пауза между пачками (лимит зависит от тарифа ключа)")
     ap.add_argument("--dedupe-threshold", type=float, default=0.9)
     ap.add_argument("--dedupe-report", action="store_true", help="таблица порогов для подбора, без записи")
     a = ap.parse_args()

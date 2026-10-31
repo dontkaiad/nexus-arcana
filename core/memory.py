@@ -17,6 +17,7 @@ from core.config import config as _cfg
 from core.layout import maybe_convert
 from core.people import owner_fact
 from core import memory_rag as _memory_rag
+from core import memory_search as _memory_search
 from core.repos.memory_repo import _repo as _mem_repo
 from core.repos.pg_memory_repo import Memory, bot_to_scope
 from core.ru_morph import strip_case_ending as _normalize_word  # #136: вынесено в core/ru_morph
@@ -250,49 +251,6 @@ def _tokenize_hint(hint: str) -> List[str]:
     return tokens
 
 
-async def _semantic_search_memory(
-    query: str,
-    existing: List[Memory],
-    scope: str = "",
-    user_id: str = "",
-    cap: int = 10,
-) -> List[Memory]:
-    """Semantic-фоллбэк (#184) + Haiku-реранк (ADR-0021, #185): дёргаем
-    Voyage ТОЛЬКО если ILIKE уже нашёл < 3 совпадений (экономим 3 RPM
-    free-tier). pgvector отдаёт top_k=10 кандидатов (шире сеть — топ-1 по
-    cosine distance не всегда топ-1 по смыслу), Haiku отфильтровывает
-    нерелевантные по факту/категории/связи. Мердж по id, ILIKE-хиты
-    первыми, semantic-довесок — только то, что подтвердил реранк.
-
-    Graceful: сбой Voyage/Haiku/JSON → исходный список без изменений,
-    пользователь ничего не замечает. Если реранк отфильтровал всё в ноль —
-    semantic-довесок просто не добавляется (без сообщения-заглушки)."""
-    if len(existing) >= 3 or not query or not query.strip():
-        return existing
-    try:
-        candidates = await asyncio.to_thread(
-            _memory_rag.search_memory_semantic, query, scope, user_id,
-            _memory_rag.DEFAULT_TOP_K,
-        )
-    except Exception as e:
-        logger.warning("memory: semantic search fallback failed: %s", e)
-        return existing
-    if not candidates:
-        return existing
-    try:
-        extra = await _memory_rag.rerank_memory_candidates(query, candidates)
-    except Exception as e:
-        logger.warning("memory: rerank fallback failed: %s", e)
-        return existing
-    seen = {m.id for m in existing}
-    merged = list(existing)
-    for m in extra:
-        if m.id not in seen:
-            merged.append(m)
-            seen.add(m.id)
-    return merged[:cap]
-
-
 async def _find_pages_by_hint(
     hint: str, page_size: int = 10, use_semantic: bool = True, user_id: str = "",
     confirmed_only: bool = True,
@@ -335,22 +293,32 @@ async def _find_pages_by_hint(
     tokens = _tokenize_hint(hint)
     logger.info("memory _find_pages_by_hint: hint=%r tokens=%s", hint, tokens)
 
+    # use_semantic=True — информационный поиск: единый гибрид (FTS + vector + RRF),
+    # без Haiku-реранка (вызывающему дальше всё равно LLM). Показывает список.
+    if use_semantic:
+        try:
+            found_hits = await _memory_search.search_memories(
+                hint, user_id=user_id, k=page_size, do_rerank=False,
+            )
+            logger.info("_find_pages_by_hint: hybrid found=%d", len(found_hits))
+            return found_hits
+        except Exception as e:
+            logger.error("memory _find_pages_by_hint hybrid: %s", e, exc_info=True)
+            return []
+
     search_terms = tokens if tokens else [hint.strip()]
     # use_semantic=False → деструктивный путь (удаление/деактивация/алиас,
-    # см. вызовы ниже по файлу) — там match_all=True (AND по токенам).
+    # см. вызовы ниже по файлу) — точный ILIKE, match_all=True (AND по токенам).
     # Иначе общее слово вроде «доход» ILIKE-OR матчило ЛЮБОЙ факт с «доход» —
     # включая единственный текущий income_-факт, даже без остальных слов
     # хинта в нём (баг: «удали доход робот пылесос» снесло факт «Наследство»,
-    # хотя «робот»/«пылесос» в нём нет). use_semantic=True (информационный
-    # поиск, показывает список на выбор) — recall важнее, оставляем OR.
+    # хотя «робот»/«пылесос» в нём нет). Это поведение НЕ менять.
     try:
         results = await _mem_repo.search(
             search_terms, user_id=user_id, page_size=page_size,
-            match_all=not use_semantic, confirmed_only=confirmed_only,
+            match_all=True, confirmed_only=confirmed_only,
         )
         logger.info("_find_pages_by_hint: found=%d for terms=%s", len(results), search_terms)
-        if use_semantic:
-            results = await _semantic_search_memory(hint, results, user_id=user_id, cap=page_size)
         return results
     except Exception as e:
         logger.error("memory _find_pages_by_hint: %s", e, exc_info=True)
@@ -675,11 +643,9 @@ async def search_memory(
     query = query.strip()
 
     if query:
-        tokens = _tokenize_hint(query) or [query]
-        mem_coro = _mem_repo.search(tokens, user_id=user_id, page_size=10)
+        mem_coro = _memory_search.search_memories(query, user_id=user_id, k=5, do_rerank=True)
         fin_coro = _search_finance(query, page_size=5)
         mems, fin_pages = await asyncio.gather(mem_coro, fin_coro)
-        mems = await _semantic_search_memory(query, mems, user_id=user_id)
         logger.info("memory search: hint=%r mems=%d fin=%d",
                     query, len(mems), len(fin_pages))
     else:
@@ -1055,22 +1021,22 @@ async def get_memories_for_context(
             people_block = await asyncio.to_thread(_people_context_block, user_id, keywords, seen_ids)
         except Exception:
             logger.warning("people mention resolve failed, continuing without it", exc_info=True)
-        for kw in keywords:
-            if not kw or len(kw) < 2:
-                continue
-            found = await _find_pages_by_hint(kw, page_size=max_results, user_id=user_id)
+        # Один гибридный запрос по всем ключевым словам (а не N по одному): без
+        # Haiku-реранка (дальше всё равно LLM-промпт, она сама отфильтрует), RRF top-N.
+        # scope — в самом SQL, поэтому top-N заполняется только подходящими фактами.
+        query = " ".join(kw.strip() for kw in keywords if kw and len(kw.strip()) >= 2)
+        if query:
+            found = await _memory_search.search_memories(
+                query, user_id=user_id, scope=scope if scope != "global" else "",
+                k=max_results, do_rerank=False,
+            )
             for m in found:
                 if m.id in seen_ids:
-                    continue
-                # Фильтр по scope: оставить если scope совпадает ИЛИ global
-                if m.scope and m.scope != "global" and m.scope != scope:
                     continue
                 seen_ids.add(m.id)
                 mems.append(m)
                 if len(mems) >= max_results:
                     break
-            if len(mems) >= max_results:
-                break
 
         if not mems and not people_block:
             return ""

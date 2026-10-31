@@ -213,7 +213,7 @@ def test_semantic_search_hides_pending(three, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_context_excludes_pending(three):
-    with patch.object(mem, "_semantic_search_memory", AsyncMock(side_effect=lambda q, ex, **k: ex)):
+    with patch("core.memory_search._vector_leg", return_value=[]):
         ctx = await mem.get_memories_for_context(MARK, [TOKEN], bot_label="☀️ Nexus")
     assert f"{TOKEN} confirmed" in ctx
     assert f"{TOKEN} pending" not in ctx
