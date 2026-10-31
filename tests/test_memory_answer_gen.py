@@ -184,6 +184,17 @@ def test_check5_absurd_format_only(res):
     _bad(res, [{"group": 1, "lines": [{"t": "очереди " * 60, "ids": [2]}]}], "5")
 
 
+def test_long_line_allowed_when_cited_facts_are_long():
+    long_fact = "не ем " + "очень длинный пересказ факта " * 12            # ~350 символов
+    r = result([("", None, [mem(41, long_fact, person=None), mem(42, "не ем рыбу", person=None)])],
+               types=("dislikes",), route="hybrid_self", subject="self")
+    line = long_fact[:330]
+    out, _ = gen(r, {"blocks": [{"group": 1, "lines": [{"t": line, "ids": [41]}]}]})
+    assert out.ok
+    out2, _ = gen(r, {"blocks": [{"group": 1, "lines": [{"t": "рыбу " * 80, "ids": [42]}]}]})    # длиннее источника → нет
+    assert not out2.ok and out2.check == "5"
+
+
 def test_size_overflow_is_trimmed_not_dropped():
     facts = [mem(100 + i, f"не любит вещь{chr(97 + i)}{chr(97 + i)}{chr(97 + i)}") for i in range(10)]
     r = result([("Миша", 1, facts)])
