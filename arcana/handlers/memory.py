@@ -156,3 +156,9 @@ async def cb_arcmem_auto_no(call: CallbackQuery) -> None:
     uid = int(call.data.split(":", 1)[1])
     _pending_auto.pop(uid, None)
     await call.message.edit_text("✗ Не сохраняю.")
+
+
+@router.callback_query(F.data.startswith("memall:"))
+async def cb_memall(call: CallbackQuery) -> None:
+    """«Все факты (N)» под ответом своими словами (общая логика — core.memory.expand_all_facts)."""
+    await mem.expand_all_facts(call)

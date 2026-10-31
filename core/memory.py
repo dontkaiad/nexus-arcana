@@ -8,6 +8,7 @@ import asyncio
 import json
 import logging
 import re
+import secrets
 from typing import Dict, List, Optional, Set, Tuple
 
 from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
@@ -17,7 +18,9 @@ from core.config import config as _cfg
 from core.layout import maybe_convert
 from core.people import owner_fact
 from core import memory_rag as _memory_rag
+from core import memory_answer as _memory_answer
 from core import memory_search as _memory_search
+from core import pending_kv as _pkv
 from core.repos.memory_repo import _repo as _mem_repo
 from core.repos.pg_memory_repo import Memory, bot_to_scope
 from core.ru_morph import strip_case_ending as _normalize_word  # #136: вынесено в core/ru_morph
@@ -634,6 +637,7 @@ async def _search_finance(query: str, page_size: int = 5) -> list:
 
 
 _STRUCTURED_ROUTES = {"direct", "birthday", "unknown_person"}
+_MEMALL_TTL = 7 * 24 * 3600      # кнопка «Все факты» живёт неделю и переживает рестарт (SQLite pending_kv)
 _TYPE_MARK = {"important": "⚠️", "dislikes": "🚫", "likes": "👍"}
 
 
@@ -695,6 +699,63 @@ def _fit_telegram(text: str) -> str:
     return "\n".join(out)
 
 
+def _format_memory_list(mems: List[Memory]) -> str:
+    """Текст списка найденных записей памяти (HTML): СДВГ по группам, остальные с категорией и датой."""
+    lines = []
+    try:
+        adhd_mems = [m for m in mems if m.category == "🦋 СДВГ"]
+        other_mems = [m for m in mems if m.category != "🦋 СДВГ"]
+
+        if adhd_mems:
+            _ADHD_GROUPS = [
+                ("🔄 Паттерны", ["паттерн", "забыва", "теря", "откладыва", "не существует", "неосознанно"]),
+                ("💡 Стратегии", ["помога", "стратеги", "лучше", "кольц", "витамин", "таймер"]),
+                ("⚡ Триггеры", ["мешает", "триггер", "хуже", "не могу", "белый", "шум", "раздраж"]),
+            ]
+            grouped: dict = {}
+            for m in adhd_mems:
+                low = m.fact.lower()
+                placed = False
+                for group_name, keywords in _ADHD_GROUPS:
+                    if any(kw in low for kw in keywords):
+                        grouped.setdefault(group_name, []).append(m.fact)
+                        placed = True
+                        break
+                if not placed:
+                    grouped.setdefault("📌 Особенности", []).append(m.fact)
+
+            adhd_lines = ["🧠 <b>СДВГ:</b>"]
+            for group_name in ["🔄 Паттерны", "💡 Стратегии", "⚡ Триггеры", "📌 Особенности"]:
+                items = grouped.get(group_name, [])
+                if items:
+                    adhd_lines.append(f"  <b>{group_name}:</b>")
+                    for item in items:
+                        adhd_lines.append(f"    • {item}")
+            lines.append("\n".join(adhd_lines))
+
+        for m in other_mems:
+            cat_emoji = m.category.split(" ")[0] if m.category else "💡"
+            inactive_mark = " <i>(неактуально)</i>" if not m.is_current else ""
+            line2 = f"<i>{m.category} · {m.date}</i>" if m.category else f"<i>{m.date}</i>"
+            lines.append(f"{cat_emoji} {owner_fact(m.fact, m.related_to, m.person_id)}{inactive_mark}\n{line2}")
+    except Exception as e:
+        logger.error("search_memory formatting error: %s", e, exc_info=True)
+        lines = []
+        for m in mems:
+            cat_emoji = m.category.split(" ")[0] if m.category else "💡"
+            inactive_mark = " <i>(неактуально)</i>" if not m.is_current else ""
+            line2 = f"<i>{m.category} · {m.date}</i>" if m.category else f"<i>{m.date}</i>"
+            lines.append(f"{cat_emoji} {owner_fact(m.fact, m.related_to, m.person_id)}{inactive_mark}\n{line2}")
+
+    all_cats = set(m.category for m in mems)
+    if len(all_cats) == 1:
+        single_cat = all_cats.pop()
+        header = f"{single_cat} ({len(mems)} зап.)"
+    else:
+        header = f"🧠 <b>Память</b> (найдено {len(mems)})"
+    return f"{header}:\n\n" + "\n\n".join(lines)
+
+
 async def search_memory(
     message: Message,
     query: str,
@@ -740,6 +801,26 @@ async def search_memory(
 
     parts: List[str] = []
 
+    # ── Ответ своими словами (этап 4): только факты из Result; любой сбой/нарушение grounding → список ──
+    if result is not None and mems and _memory_answer.eligible(result):
+        arcana = del_prefix.startswith("arc")
+        try:
+            await message.bot.send_chat_action(message.chat.id, "typing")
+        except Exception:
+            pass
+        outcome = await _memory_answer.generate(result, query, arcana=arcana)
+        if outcome.ok:
+            token = secrets.token_hex(4)
+            _pkv.save(uid, f"memall_{token}", {
+                "route": result.route, "types": list(result.types), "subject": result.subject,
+                "groups": [{"label": g.label, "person_id": g.person_id, "ids": [int(h.memory.id) for h in g.hits]}
+                           for g in result.groups if g.hits],
+            }, ttl=_MEMALL_TTL)
+            kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(
+                text=f"Все факты ({len(mems)})", callback_data=f"memall:{token}")]])
+            await message.answer(outcome.text, reply_markup=kb)
+            return
+
     if result is not None and result.route == "direct" and mems:
         text = _structured_text(result, arcana=del_prefix.startswith("arc"))
         await message.answer(text, reply_markup=_build_delete_keyboard(
@@ -748,59 +829,7 @@ async def search_memory(
 
     # ── Память ──
     if mems:
-        lines = []
-        try:
-            adhd_mems = [m for m in mems if m.category == "🦋 СДВГ"]
-            other_mems = [m for m in mems if m.category != "🦋 СДВГ"]
-
-            if adhd_mems:
-                _ADHD_GROUPS = [
-                    ("🔄 Паттерны", ["паттерн", "забыва", "теря", "откладыва", "не существует", "неосознанно"]),
-                    ("💡 Стратегии", ["помога", "стратеги", "лучше", "кольц", "витамин", "таймер"]),
-                    ("⚡ Триггеры", ["мешает", "триггер", "хуже", "не могу", "белый", "шум", "раздраж"]),
-                ]
-                grouped: dict = {}
-                for m in adhd_mems:
-                    low = m.fact.lower()
-                    placed = False
-                    for group_name, keywords in _ADHD_GROUPS:
-                        if any(kw in low for kw in keywords):
-                            grouped.setdefault(group_name, []).append(m.fact)
-                            placed = True
-                            break
-                    if not placed:
-                        grouped.setdefault("📌 Особенности", []).append(m.fact)
-
-                adhd_lines = ["🧠 <b>СДВГ:</b>"]
-                for group_name in ["🔄 Паттерны", "💡 Стратегии", "⚡ Триггеры", "📌 Особенности"]:
-                    items = grouped.get(group_name, [])
-                    if items:
-                        adhd_lines.append(f"  <b>{group_name}:</b>")
-                        for item in items:
-                            adhd_lines.append(f"    • {item}")
-                lines.append("\n".join(adhd_lines))
-
-            for m in other_mems:
-                cat_emoji = m.category.split(" ")[0] if m.category else "💡"
-                inactive_mark = " <i>(неактуально)</i>" if not m.is_current else ""
-                line2 = f"<i>{m.category} · {m.date}</i>" if m.category else f"<i>{m.date}</i>"
-                lines.append(f"{cat_emoji} {owner_fact(m.fact, m.related_to, m.person_id)}{inactive_mark}\n{line2}")
-        except Exception as e:
-            logger.error("search_memory formatting error: %s", e, exc_info=True)
-            lines = []
-            for m in mems:
-                cat_emoji = m.category.split(" ")[0] if m.category else "💡"
-                inactive_mark = " <i>(неактуально)</i>" if not m.is_current else ""
-                line2 = f"<i>{m.category} · {m.date}</i>" if m.category else f"<i>{m.date}</i>"
-                lines.append(f"{cat_emoji} {owner_fact(m.fact, m.related_to, m.person_id)}{inactive_mark}\n{line2}")
-
-        all_cats = set(m.category for m in mems)
-        if len(all_cats) == 1:
-            single_cat = all_cats.pop()
-            header = f"{single_cat} ({len(mems)} зап.)"
-        else:
-            header = f"🧠 <b>Память</b> (найдено {len(mems)})"
-        parts.append(f"{header}:\n\n" + "\n\n".join(lines))
+        parts.append(_format_memory_list(mems))
 
     # ── Финансы ──
     if fin_pages:
@@ -1194,3 +1223,36 @@ async def auto_suggest_memory(
         f"💡 Сохранить в память?\n<i>{text[:100]}</i>",
         reply_markup=kb,
     )
+
+
+async def expand_all_facts(call) -> None:
+    """Кнопка «Все факты (N)» под сгенерированным ответом: показывает прежний список с чекбоксами
+    («неактуально» / удаление / восстановление работают как в обычном поиске)."""
+    await call.answer()
+    uid = call.from_user.id
+    token = (call.data or "").split(":", 1)[-1]
+    st = _pkv.get(uid, f"memall_{token}", ttl=_MEMALL_TTL)
+    if not st:
+        await call.message.answer("⏱ Этот список уже устарел — спроси ещё раз.")
+        return
+    ids = [i for g in st.get("groups", []) for i in g.get("ids", [])]
+    loaded = await asyncio.to_thread(_memory_search._load, ids)
+    mems = [loaded[i] for i in ids if i in loaded]
+    if not mems:
+        await call.message.answer("🧠 Этих записей уже нет.")
+        return
+    _last_memory_results[uid] = list(mems)
+    _mem_delete_pages[uid] = list(mems)
+    _mem_selected[uid] = set()
+    if st.get("route") == "direct":
+        by_id = {m.id: m for m in mems}
+        groups = [_memory_search.Group(label=g["label"], person_id=g.get("person_id"), hits=[
+            _memory_search.Hit(memory_id=i, score=0.0, memory=by_id[str(i)]) for i in g["ids"] if str(i) in by_id])
+            for g in st["groups"]]
+        res = _memory_search.Result(route="direct", kind="facts", subject=st.get("subject", "person"),
+                                    types=tuple(st.get("types") or ()), groups=groups)
+        text = _structured_text(res)
+    else:
+        text = _format_memory_list(mems)
+    await call.message.answer(text, reply_markup=_build_delete_keyboard(
+        uid, list(mems), reactivate_cb="mem_reactivate_selected"))

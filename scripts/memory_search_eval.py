@@ -26,6 +26,7 @@ import argparse
 import asyncio
 import sys
 
+GEN_STATS: list = []        # Outcome всех генераций за прогон (для сводки p50/max)
 QUERIES = ["что не любит миша", "что любит миша", "что я не ем", "что важно про олю"]
 
 _TYPE_SQL = ("CASE WHEN person_id IS NULL THEN 'self' ELSE "
@@ -79,7 +80,9 @@ async def run_answer(q, user_id):
 
 async def run_flow(q, user_id):
     """Реальный путь сообщения. Возвращает (шапка, строки) как другие режимы + печатает диагностику."""
+    import os
     from unittest.mock import AsyncMock, MagicMock, patch
+    os.environ["MEMORY_ANSWER_LOG"] = "0"      # прогоны eval не попадают в дневной счётчик успех/fallback
     from core import classifier, memory_search
 
     msg = MagicMock()
@@ -87,7 +90,7 @@ async def run_flow(q, user_id):
     msg.from_user.id = 1
     msg.answer = AsyncMock()
     msg.reply = AsyncMock()
-    seen = {"answer_queries": [], "results": []}
+    seen = {"answer_queries": [], "results": [], "gen": []}
     real_answer = memory_search.answer
     real_ask = classifier.ask_claude
     haiku_calls = []
@@ -102,9 +105,19 @@ async def run_flow(q, user_id):
         haiku_calls.append(1)
         return await real_ask(*a, **kw)
 
+    from core import memory_answer
+    real_generate = memory_answer.generate
+
+    async def spy_generate(result, query, **kw):
+        o = await real_generate(result, query, **kw)
+        seen["gen"].append(o)
+        GEN_STATS.append(o)
+        return o
+
     items = []
     with patch.object(classifier, "ask_claude", spy_ask), \
          patch("core.memory._memory_search.answer", spy_answer), \
+         patch("core.memory._memory_answer.generate", spy_generate), \
          patch("nexus.handlers.utils.react", AsyncMock()):
         items = await classifier.classify(q, tz_offset=3, user_id=user_id)
         for data in items:
@@ -120,12 +133,19 @@ async def run_flow(q, user_id):
     verdict = ("NOT-EXECUTED(non-memory intent: %s)" % ",".join(skipped)) if skipped and not got else "-" if not got else ("ORIGINAL" if got == [q] else f"NOT-ORIGINAL got={got!r}")
     sent = "\n".join(str(c.args[0]) for c in msg.answer.await_args_list if c.args)
     old_header = "зап.)" in sent
+    gen = ""
+    if seen["gen"]:
+        o = seen["gen"][0]
+        gen = (f" | gen={'ok' if o.ok else 'fallback:' + o.reason} answer_len={len(sent)} used_ids={o.used_ids} "
+               f"latency={o.latency_ms}ms tokens_in={o.in_tokens} tokens_out={o.out_tokens}")
+    else:
+        gen = f" | gen=none(no-llm) answer_len={len(sent)}"
     head = (f"classify={path} items={types} query_from_classifier={[i.get('query') for i in items]!r} "
             f"answer_got={verdict} old_group_header={old_header}")
     rows = []
     if seen["results"]:
         res = seen["results"][0]
-        head += f" | route={res.route} kind={res.kind} subject={res.subject} types={','.join(res.types) or '-'}"
+        head += gen + f" | route={res.route} kind={res.kind} subject={res.subject} types={','.join(res.types) or '-'}"
         for g in res.groups:
             for h in g.hits:
                 rows.append((h.memory.id, None, f"grp={g.person_id or '-'}"))
@@ -158,5 +178,24 @@ async def main():
             print(f"  {i}. id={mid} type={typ} cat={cat} score={sc} src={src}")
 
 
+def _print_gen_summary() -> None:
+    if not GEN_STATS:
+        return
+    lat = sorted(o.latency_ms for o in GEN_STATS if o.latency_ms)
+    ok = sum(1 for o in GEN_STATS if o.ok)
+    print("\n=== генерация ответа: сводка ===")
+    print(f"  вызовов: {len(GEN_STATS)}  ok: {ok}  fallback: {len(GEN_STATS) - ok}")
+    if lat:
+        p50 = lat[len(lat) // 2]
+        print(f"  латентность p50={p50}ms max={lat[-1]}ms")
+    print(f"  токены: вход={sum(o.in_tokens for o in GEN_STATS)} выход={sum(o.out_tokens for o in GEN_STATS)} "
+          f"(thinking выключен: в выход не входит; usage отдельно его не показывает)")
+    for o in GEN_STATS:
+        if not o.ok:
+            print(f"  fallback: {o.reason} check={o.check or '-'} ids={o.bad_ids}")
+
+
 if __name__ == "__main__":
-    sys.exit(asyncio.run(main()) or 0)
+    rc = asyncio.run(main()) or 0
+    _print_gen_summary()
+    sys.exit(rc)

@@ -273,6 +273,19 @@ Person facts are shown through `owner_fact`, which replaces any old `Name:` pref
 Rerank prompt rules: negation vs affirmation mismatch = irrelevant; another person = irrelevant;
 empty beats wrong. Env `MEMORY_QUERY_UNDERSTANDING=0` falls back to plain hybrid. No schema changes.
 
+### Answer in the bot's own words (`core/memory_answer.py`)
+
+After `answer()` the bot paraphrases the found facts (Haiku 5.5, thinking off, no `temperature`; `MEMORY_ANSWER_MODEL`
+rolls back, `MEMORY_GENERATE_ANSWER=0` disables). The model sees only the structured `Result` (groups, fact id/text/
+date/platform/quote) and returns lines with the fact ids each line rests on. A strict grounding check discards the
+answer (the previous list is shown) on: bad format, a foreign/other-group id, a line without ids, a number / capitalised
+name / meaningful word not present in the cited facts, size limits, or an empty answer for non-empty input; also on
+timeout (8 s) or API error. Facts-free branches (birthday, "don't know", unknown name, empty, a single fact) never call
+the model. Every attempt is recorded in `memory_answer_log` (outcome, reason `check_N`/`timeout`/`api_error`, fact
+ids, latency, tokens — no texts); `scripts/memory_answer_stats.py` prints the daily success/fallback split.
+The answer carries a "Все факты (N)" button (state in SQLite `pending_kv`) that opens the usual checkbox list;
+the source line ("по фактам из TG/VK, 2024–2025") is built from the facts, not by the model. Mini App does not generate.
+
 Opted out of hybrid (exact ILIKE, `use_semantic=False`): `_resolve_alias`
 (alias recall must stay exact) and the destructive flows `deactivate_memory` /
 `delete_memory` (they act on every / the-only found row without

@@ -89,14 +89,65 @@ async def _create_message(**kwargs):
     return await get_anthropic().messages.create(**kwargs)
 
 
+# ── Модели 5.x: единая обработка параметров ──────────────────────────────────
+# Haiku 5.5 / Sonnet 5.5 / Opus 5.x / Fable: `temperature` → 400 («deprecated for this model»; проверено на
+# проде), мышление включено по умолчанию (адаптивное: ~3 с на короткий JSON против ~0.7 с с выключенным).
+# Установленный SDK (anthropic==0.40.0) не знает полей thinking/output_config — они идут через extra_body.
+_GEN5_PREFIXES = ("claude-haiku-5", "claude-sonnet-5", "claude-opus-5", "claude-fable", "claude-mythos")
+
+
+def is_gen5(model: str) -> bool:
+    return (model or "").startswith(_GEN5_PREFIXES)
+
+
+def apply_model_params(kwargs: Dict, model: str, temperature: Optional[float], thinking: Optional[str]) -> Dict:
+    """Добавляет в kwargs температуру/мышление с учётом поколения модели.
+
+    thinking: None — по умолчанию модели; "off" — выключить (где скорость важнее глубины); "low" — минимальное.
+    Старые модели (4.x): thinking игнорируется, temperature как раньше. 5.x: temperature НЕ шлём;
+    "off" → Haiku 5.x: thinking disabled; Sonnet 5.5: between_tools (disabled там 400); Opus/Fable не выключаются —
+    для них "off" и "low" означают effort=low."""
+    if not is_gen5(model):
+        if temperature is not None:
+            kwargs["temperature"] = temperature
+        return kwargs
+    extra: Dict = dict(kwargs.get("extra_body") or {})
+    if thinking == "off":
+        if model.startswith("claude-haiku-5"):
+            extra["thinking"] = {"type": "disabled"}
+        elif model.startswith("claude-sonnet-5-5"):
+            extra["thinking"] = {"type": "between_tools"}
+        else:
+            extra["output_config"] = {"effort": "low"}
+    elif thinking == "low":
+        extra["output_config"] = {"effort": "low"}
+    if extra:
+        kwargs["extra_body"] = extra
+    return kwargs
+
+
+def _first_text(resp) -> str:
+    """Первый text-блок (у 5.x ответ может начинаться с thinking-блока)."""
+    blocks = resp.content or []
+    for b in blocks:
+        if getattr(b, "type", None) == "text":
+            return b.text
+    return blocks[0].text if blocks and hasattr(blocks[0], "text") else ""
+
+
 async def ask_claude(
     prompt: str,
     system: str = "",
     model: str = "",
     max_tokens: int = 1024,
     temperature: Optional[float] = None,
+    thinking: Optional[str] = None,
+    usage_out: Optional[Dict] = None,
 ) -> str:
-    """Простой текстовый запрос. Возвращает строку."""
+    """Простой текстовый запрос. Возвращает строку.
+
+    thinking — см. apply_model_params (только для моделей 5.x). usage_out — если передан dict, в него кладутся
+    input_tokens / output_tokens (output включает мышление, если оно было)."""
     used_model = model or config.model_haiku
 
     kwargs: Dict = {
@@ -106,12 +157,15 @@ async def ask_claude(
     }
     if system:
         kwargs["system"] = system
-    if temperature is not None:
-        kwargs["temperature"] = temperature
+    apply_model_params(kwargs, used_model, temperature, thinking)
 
     try:
         resp = await _create_message(**kwargs)
-        return resp.content[0].text
+        if usage_out is not None:
+            u = getattr(resp, "usage", None)
+            usage_out["input_tokens"] = getattr(u, "input_tokens", 0) or 0
+            usage_out["output_tokens"] = getattr(u, "output_tokens", 0) or 0
+        return _first_text(resp)
     except anthropic.APIError as e:
         logger.error("Claude API error: %s", e)
         return ""

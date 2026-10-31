@@ -49,6 +49,17 @@ def test_file_uses_haiku_for_ask_claude(rel_path: str):
     )
 
 
+# Генерация ответа по памяти (этап 4) — на Haiku 5.5: модель задаётся в одном месте (DEFAULT_MODEL, откат
+# переменной MEMORY_ANSWER_MODEL), temperature не шлётся, мышление выключено (claude_client.apply_model_params).
+def test_memory_answer_uses_haiku_55_without_temperature_and_with_thinking_off():
+    src = (REPO / "core/memory_answer.py").read_text(encoding="utf-8")
+    assert 'DEFAULT_MODEL = "claude-haiku-5-5"' in src
+    assert "model=model()" in src and "ask_claude" in src
+    assert 'thinking="off"' in src, "для 5.5 мышление выключается явно (скорость ≈0.7 с против ≈3 с)"
+    cc = (REPO / "core/claude_client.py").read_text(encoding="utf-8")
+    assert "_GEN5_PREFIXES" in cc and "temperature" in cc
+
+
 # Контрольные: файлы где Sonnet легитимен (CLAUDE.md разрешает).
 # Если Haiku появится — пусть тест упадёт и Кай решит сама.
 SONNET_LEGIT = [
