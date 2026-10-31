@@ -674,7 +674,25 @@ def _structured_text(result, arcana: bool = False) -> str:
     if empty:
         blocks.append("Нет подтверждённых фактов (" + _what(result.types) + "): "
                       + ", ".join(escape(x) for x in empty))
-    return "\n\n".join(blocks)
+    return _fit_telegram("\n\n".join(blocks))
+
+
+_TG_LIMIT = 3900          # у Telegram лимит 4096 символов на сообщение; запас под разметку и клавиатуру
+
+
+def _fit_telegram(text: str) -> str:
+    """Режет по границе строки и пишет, сколько строк не поместилось (HTML-теги не рвём: режем только целые строки)."""
+    if len(text) <= _TG_LIMIT:
+        return text
+    lines = text.split("\n")
+    out, size = [], 0
+    for i, line in enumerate(lines):
+        if size + len(line) + 1 > _TG_LIMIT - 40:
+            out.append(f"… и ещё {len(lines) - i} стр.")
+            break
+        out.append(line)
+        size += len(line) + 1
+    return "\n".join(out)
 
 
 async def search_memory(

@@ -77,3 +77,12 @@ def test_html_in_labels_and_facts_is_escaped():
                  groups=[Group(label="<b>x</b>", person_id=3, hits=[_hit(1, "a < b & c", "likes")])])
     text = _run(res).args[0]
     assert "&lt;b&gt;x&lt;/b&gt;" in text and "a &lt; b &amp; c" in text
+
+
+def test_long_answer_fits_telegram_limit_and_keeps_whole_lines():
+    hits = [_hit(i, ("не любит что-то очень длинное и подробное " * 3) + str(i), "dislikes", 3) for i in range(1, 60)]
+    res = Result(route="direct", kind="facts", subject="person", types=("dislikes",),
+                 groups=[Group(label="Ольга", person_id=3, hits=hits)])
+    text = _run(res).args[0]
+    assert len(text) <= 4096 and "и ещё" in text
+    assert text.count("<b>") == text.count("</b>")                 # теги не порваны
