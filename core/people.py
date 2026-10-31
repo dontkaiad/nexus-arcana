@@ -216,11 +216,15 @@ def guess_fact_type(fact: str) -> str:
 
 def owner_fact(fact: str, related_to: str = "", person_id=None) -> str:
     """Текст факта для чтения ботами. Факты людей хранятся БЕЗ префикса «Имя: » — имя берём из `related_to`
-    («Имя | другое имя | …»), как и в карточке. Не факт человека или имя уже есть в тексте — без изменений."""
+    («Имя | другое имя | …»), как и в карточке. Не факт человека или имя уже есть в тексте — без изменений.
+    Старый префикс «Другое имя: » (имя/алиас этой карточки, в том числе пришедший со склеенной карточкой)
+    срезается, а потом ставится основное имя — иначе в ответе «Черепашка: …» у карточки «Ольга»."""
     if not person_id:
         return fact
-    name = (related_to or "").split(" | ")[0].strip()
-    return fact_text(name, fact) if name else fact
+    names = [n.strip() for n in (related_to or "").split(" | ") if n.strip()]
+    if not names:
+        return fact
+    return fact_text(names[0], strip_name_prefix(fact, names[0], names[1:]))
 
 
 def related_to_str(name: str, aliases: Iterable[str]) -> str:

@@ -258,6 +258,8 @@ question deterministically (no LLM): **subject** (`self` / person via `pg_people
 `ambiguous` homonyms / `unknown_person` / `unclear`) and **type** (negation or allergy →
 `important`+`dislikes`; «любит» → `likes`; «важно» → `important`) and **intent** (facts / birthday).
 Case of letters is never used; people are found by `resolve` only.
+**Input is the original message text** — the classifier (regex prefilter or Haiku) only decides "this is a memory search"; its `query` (trimmed keywords) is never passed to `answer()` (`core/classifier.py:process_item` puts the original text into `data["text"]`; the Nexus/Arcana handlers read `text` first).
+Person facts are shown through `owner_fact`, which replaces any old `Name:` prefix belonging to the card's name/aliases with the primary name.
 
 | Parsed | Route | Empty result |
 |---|---|---|

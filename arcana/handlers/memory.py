@@ -73,7 +73,8 @@ async def handle_memory_search(
     data: dict,
     user_id: str = "",
 ) -> None:
-    query = (data.get("query") or data.get("text") or "").strip()
+    # Исходный текст сообщения, а не `query` классификатора (см. core.classifier.process_item).
+    query = (data.get("text") or data.get("query") or "").strip()
     await mem.search_memory(message, query, user_id, del_prefix="arcmem_del")
 
 

@@ -574,7 +574,7 @@ async def route_message(
             "grimoire":        lambda: handle_grimoire_menu(message, user_id),
             "grimoire_search": lambda: handle_grimoire_search(message, text, user_id),
             "memory_save":       lambda: handle_memory_save(message, {"text": text}, user_id),
-            "memory_search":     lambda: handle_memory_search(message, {"query": text}, user_id),
+            "memory_search":     lambda: handle_memory_search(message, {"text": text}, user_id),
             "memory_deactivate": lambda: handle_memory_deactivate(message, {"hint": text}, user_id),
             "memory_delete":     lambda: handle_memory_delete(message, {"hint": text}, user_id),
             "verify":          lambda: handle_verify(message, text, user_id),

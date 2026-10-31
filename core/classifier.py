@@ -1310,6 +1310,10 @@ async def process_item(data: Dict[str, Any], original_text: str, msg, clarify: d
     # ПАМЯТЬ (memory_search)
     if kind == "memory_search":
         from nexus.handlers.memory import handle_memory_search
+        # Классификатор (regex-префильтр и Haiku) только решает «это поиск по памяти». Поиск получает
+        # ИСХОДНЫЙ текст: его `query` — обрезанные ключевые слова («миша»), в них уже нет ни типа, ни
+        # полярности вопроса («не любит», «важно»), а именно их разбирает core.query_parse.
+        data["text"] = data.get("text") or original_text
         await handle_memory_search(msg, data, user_id=user_id)
         return ""
 
