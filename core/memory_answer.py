@@ -206,18 +206,40 @@ class Check:
     bad_ids: List[int] = field(default_factory=list)
     used_ids: List[int] = field(default_factory=list)
     detail: str = ""                     # подробность нарушения БЕЗ текстов фактов (для лога): lines/chars/word_len
+    data: Optional[dict] = None          # ответ после отбрасывания необоснованных фраз
+    dropped: List[str] = field(default_factory=list)   # номера проверок отброшенных фраз
+
+
+def _line_check(t: str, ids: List[int], g: GGroup, label_stems: set) -> Tuple[str, str]:
+    """Проверки 4a–4c одной фразы. ('', '') — фраза обоснована; иначе (номер проверки, detail)."""
+    src = " ".join(g.by_id()[i].fact for i in ids)
+    if any(n not in set(_NUM.findall(src)) for n in _NUM.findall(t)):                       # 4a — числа
+        return "4a", ""
+    words = _WORD.findall(t)
+    src4 = _stems(src, 4) | label_stems
+    for w in words[1:]:                                                                      # 4b — имена с заглавной
+        if len(w) >= 2 and w[0].isupper() and not w.isdigit() and _stem(w, 4) not in src4:
+            return "4b", ""
+    src_stems = _stems(src, 4)
+    for w in words:                                                                          # 4c — значимые слова
+        lw = w.lower().replace("ё", "е")
+        if len(lw) >= 5 and not lw.isdigit() and lw not in _FUNC_WORDS and _stem(lw, 4) not in src_stems:
+            return "4c", f"word_len={len(lw)}"
+    return "", ""
 
 
 def validate(data, groups: List[GGroup], has_input: bool = True) -> Check:
+    """Формат / чужие id / размер — нарушение ВСЕГО ответа (1, 2, 5). Фраза без опоры (3, 4a–4c) отбрасывается
+    ОДНА: оставшиеся фразы целиком обоснованы, так что показывать их безопасно. Не осталось ни одной → fallback
+    с номером проверки первой отброшенной фразы. Отфильтрованный ответ — в Check.data, число отброшенных — dropped."""
     by_n = {g.n: g for g in groups}
     if not isinstance(data, dict) or not isinstance(data.get("blocks"), list):
         return Check(False, "1")
-    blocks = data["blocks"]
-    if not blocks:
+    if not data["blocks"]:
         return Check(False, "6") if has_input else Check(True)
-    used: List[int] = []
-    total = 0
-    for b in blocks:
+    kept_blocks: List[dict] = []
+    dropped: List[Tuple[str, List[int], str]] = []
+    for b in data["blocks"]:
         if not isinstance(b, dict) or not isinstance(b.get("lines"), list) or not isinstance(b.get("group"), int):
             return Check(False, "1")
         g = by_n.get(b["group"])
@@ -226,40 +248,34 @@ def validate(data, groups: List[GGroup], has_input: bool = True) -> Check:
         if len(b["lines"]) > MAX_LINES_PER_BLOCK:
             return Check(False, "5", detail=f"lines={len(b['lines'])}")
         label_stems = _stems(g.label, 4)
+        kept = []
         for ln in b["lines"]:
             if not isinstance(ln, dict) or not isinstance(ln.get("t"), str) or not isinstance(ln.get("ids"), list):
                 return Check(False, "1")
             ids = ln["ids"]
             if not all(isinstance(i, int) and not isinstance(i, bool) for i in ids):
                 return Check(False, "1")
-            if not ids:
-                return Check(False, "3")
             foreign = [i for i in ids if i not in g.ids()]
-            if foreign:
+            if foreign:                                       # чужой id — признак, что модель потеряла опору: всё прочь
                 return Check(False, "2", bad_ids=foreign)
             t = ln["t"].strip()
             if len(t) > MAX_LINE_CHARS:
                 return Check(False, "5", detail=f"line_chars={len(t)}")
-            total += len(t)
-            src = " ".join(g.by_id()[i].fact for i in ids)
-            # 4a — числа
-            src_nums = set(_NUM.findall(src))
-            if any(n not in src_nums for n in _NUM.findall(t)):
-                return Check(False, "4a", bad_ids=list(ids))
-            words = _WORD.findall(t)
-            # 4b — слова с заглавной (кроме первого слова фразы)
-            src_stems4 = _stems(src, 4) | label_stems
-            for w in words[1:]:
-                if len(w) >= 2 and w[0].isupper() and not w.isdigit() and _stem(w, 4) not in src_stems4:
-                    return Check(False, "4b", bad_ids=list(ids))
-            # 4c — значимые слова
-            src_stems = _stems(src, 4)
-            for w in words:
-                lw = w.lower().replace("ё", "е")
-                if len(lw) >= 5 and not lw.isdigit() and lw not in _FUNC_WORDS and _stem(lw, 4) not in src_stems:
-                    return Check(False, "4c", bad_ids=list(ids), detail=f"word_len={len(lw)}")
-            used.extend(ids)
-    return Check(True, used_ids=sorted(set(used)))
+            if not ids:
+                dropped.append(("3", [], ""))
+                continue
+            chk, detail = _line_check(t, ids, g, label_stems)
+            if chk:
+                dropped.append((chk, list(ids), detail))
+                continue
+            kept.append(ln)
+        if kept:
+            kept_blocks.append({"group": b["group"], "lines": kept})
+    if not kept_blocks:
+        first = dropped[0] if dropped else ("6", [], "")
+        return Check(False, first[0], bad_ids=first[1], detail=first[2])
+    used = sorted({i for kb in kept_blocks for ln in kb["lines"] for i in ln["ids"]})
+    return Check(True, used_ids=used, data={"blocks": kept_blocks}, dropped=[d[0] for d in dropped])
 
 
 # ── сборка текста ────────────────────────────────────────────────────────────
@@ -369,41 +385,55 @@ async def generate(result, query: str, *, arcana: bool = False, trace: Optional[
     voice = ("Бот — Arcana, говорит в женском роде." if arcana else "Бот — Nexus, говорит в мужском роде.")
     prompt = build_prompt(query, groups, result.types)
     t0 = time.monotonic()
-    raw = ""
-    usage: dict = {}
-    try:
-        raw = await asyncio.wait_for(
-            ask_claude(prompt=prompt, system=SYSTEM + "\n" + voice, model=model(), max_tokens=700,
-                       temperature=0, thinking="off", usage_out=usage),
-            timeout=GEN_TIMEOUT)
-    except asyncio.TimeoutError:
-        o.reason = "timeout"
-    except Exception as e:                                # pragma: no cover — ask_claude сам гасит APIError
-        o.reason = "api_error"
-        logger.warning("memory_answer: LLM call failed: %s", e)
-    o.latency_ms = int((time.monotonic() - t0) * 1000)
-    o.out_chars = len(raw or "")
-    o.in_tokens, o.out_tokens = usage.get("input_tokens", 0), usage.get("output_tokens", 0)
-    if not o.reason and not (raw or "").strip():
-        o.reason = "api_error"
-    if not o.reason:
+
+    async def _attempt(timeout: float) -> None:
+        o.ok, o.text, o.used_ids, o.reason, o.check, o.bad_ids, o.detail = False, "", [], "", "", [], ""
+        raw = ""
+        usage: dict = {}
         try:
-            data = _parse(raw)
-        except Exception:
-            data = None
-            o.reason, o.check = "check_1", "1"
-        if data is not None:
-            chk = validate(data, groups)
-            if chk.ok:
-                body, shown = assemble(data, groups, result.types)
-                if body.strip():
-                    o.ok = True
-                    o.used_ids = shown
-                    o.text = body + "\n\n" + source_line(groups, shown)
+            raw = await asyncio.wait_for(
+                ask_claude(prompt=prompt, system=SYSTEM + "\n" + voice, model=model(), max_tokens=700,
+                           temperature=0, thinking="off", usage_out=usage),
+                timeout=timeout)
+        except asyncio.TimeoutError:
+            o.reason = "timeout"
+        except Exception as e:                                # pragma: no cover — ask_claude сам гасит APIError
+            o.reason = "api_error"
+            logger.warning("memory_answer: LLM call failed: %s", e)
+        o.latency_ms = int((time.monotonic() - t0) * 1000)
+        o.out_chars = len(raw or "")
+        o.in_tokens, o.out_tokens = usage.get("input_tokens", 0), usage.get("output_tokens", 0)
+        if not o.reason and not (raw or "").strip():
+            o.reason = "api_error"
+        if not o.reason:
+            try:
+                data = _parse(raw)
+            except Exception:
+                data = None
+                o.reason, o.check = "check_1", "1"
+            if data is not None:
+                chk = validate(data, groups)
+                if chk.ok:
+                    body, shown = assemble(chk.data or data, groups, result.types)
+                    if body.strip():
+                        o.ok = True
+                        o.used_ids = shown
+                        if chk.dropped:
+                            o.reason = "dropped:" + ",".join(chk.dropped)       # успех, но часть фраз отброшена (виден в журнале)
+                            o.detail = f"dropped={len(chk.dropped)}"
+                        o.text = body + "\n\n" + source_line(groups, shown)
+                    else:
+                        o.reason, o.check = "check_6", "6"
                 else:
-                    o.reason, o.check = "check_6", "6"
-            else:
-                o.reason, o.check, o.bad_ids, o.detail = f"check_{chk.check}", chk.check, chk.bad_ids, chk.detail
+                    o.reason, o.check, o.bad_ids, o.detail = f"check_{chk.check}", chk.check, chk.bad_ids, chk.detail
+
+    await _attempt(GEN_TIMEOUT)
+    # Битый формат (check_1) — обычный сбой генерации без температуры: один повтор, если остался запас по времени.
+    left = GEN_TIMEOUT - (time.monotonic() - t0)
+    if not o.ok and o.check == "1" and left > 3.0:
+        logger.info("memory_answer: bad format, retry once (%.1fs left)", left)
+        await _attempt(left)
+    o.latency_ms = int((time.monotonic() - t0) * 1000)
     if o.ok:
         logger.info("memory_answer ok: route=%s bot=%s facts=%d used=%s latency=%dms tokens=%d/%d", result.route, bot,
                     n_facts, o.used_ids, o.latency_ms, o.in_tokens, o.out_tokens)

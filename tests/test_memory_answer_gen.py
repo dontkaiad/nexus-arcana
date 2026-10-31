@@ -292,3 +292,64 @@ def test_trace_hooks_called(res):
     gen(res, GOOD, trace=lambda s, d: steps.append(s))
     gen(res, "x", trace=lambda s, d: steps.append(s))
     assert steps == ["gen_input", "gen_output", "gen_input", "gen_fallback"]
+
+
+# ── фразы без опоры отбрасываются по одной; один повтор при битом формате ────
+
+def test_unsupported_line_dropped_good_lines_kept(res):
+    raw = {"blocks": [{"group": 1, "lines": [
+        {"t": "спешку и смену планов", "ids": [1]},
+        {"t": "очереди и чрезмерную критику", "ids": [2]},        # 4c — выдумка
+        {"t": "очереди дольше 20 минут", "ids": [2]},             # 4a — выдумка
+        {"t": "очереди", "ids": [2]}]}]}
+    out, _ = gen(res, raw)
+    assert out.ok and out.used_ids == [1, 2]
+    body = out.text.split("\n\n")[0]
+    assert "спешку и смену планов, очереди." in body and "критику" not in body and "20" not in body
+    assert out.reason == "dropped:4c,4a" and out.detail == "dropped=2"
+
+
+def test_all_lines_unsupported_still_falls_back_with_first_check(res):
+    out, _ = gen(res, {"blocks": [{"group": 1, "lines": [{"t": "чрезмерную критику", "ids": [2]},
+                                                          {"t": "дольше 20 минут", "ids": [2]}]}]})
+    assert not out.ok and out.check == "4c"
+
+
+def test_foreign_id_in_any_line_discards_everything_even_if_other_lines_fine(res):
+    out, _ = gen(res, {"blocks": [{"group": 1, "lines": [{"t": "очереди", "ids": [2]},
+                                                          {"t": "спешку", "ids": [1, 999]}]}]})
+    assert not out.ok and out.check == "2" and out.bad_ids == [999]
+
+
+def test_bad_format_retried_once_then_ok(res):
+    ask = AsyncMock(side_effect=["не JSON", json.dumps(GOOD, ensure_ascii=False)])
+    with patch.object(ma, "ask_claude", ask):
+        out = asyncio.run(ma.generate(res, "q"))
+    assert out.ok and ask.await_count == 2
+
+
+def test_bad_format_twice_falls_back(res):
+    ask = AsyncMock(return_value="не JSON")
+    with patch.object(ma, "ask_claude", ask):
+        out = asyncio.run(ma.generate(res, "q"))
+    assert not out.ok and out.check == "1" and ask.await_count == 2
+
+
+def test_grounding_violation_is_not_retried(res):
+    ask = AsyncMock(return_value=json.dumps({"blocks": [{"group": 1, "lines": [{"t": "очереди", "ids": [2, 999]}]}]}))
+    with patch.object(ma, "ask_claude", ask):
+        out = asyncio.run(ma.generate(res, "q"))
+    assert not out.ok and out.check == "2" and ask.await_count == 1
+
+
+def test_timeout_is_not_retried(monkeypatch, res):
+    async def slow(**kw):
+        await asyncio.sleep(1)
+    monkeypatch.setattr(ma, "GEN_TIMEOUT", 0.05)
+    calls = []
+    async def counting(**kw):
+        calls.append(1)
+        await slow(**kw)
+    with patch.object(ma, "ask_claude", counting):
+        out = asyncio.run(ma.generate(res, "q"))
+    assert out.reason == "timeout" and len(calls) == 1
