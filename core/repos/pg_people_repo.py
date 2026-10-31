@@ -628,7 +628,14 @@ def merge_people(user_id: str, source_id: int, target_id: int) -> Dict:
 
         aliases = list(dst.get("aliases") or [])
         seen = {a.lower() for a in aliases} | {dst["name"].lower()}
-        for a in list(src.get("aliases") or []) + [src["name"]]:
+        # Многословный алиас индексируется только фразой (core.people.alias_forms), поэтому имя
+        # присоединяемого человека («Вера Пять») добавляем и целиком, и первым словом («Вера») —
+        # иначе после слияния «Вере» перестала бы находить целевую карточку.
+        src_name_words = (src["name"] or "").split()
+        dst_words = {w.lower() for w in (dst["name"] or "").split()}   # имя цели и так ищется по словам
+        first = src_name_words[:1] if len(src_name_words) > 1 and src_name_words[0].lower() not in dst_words else []
+        extra = [src["name"]] + first
+        for a in list(src.get("aliases") or []) + extra:
             if a and a.lower() not in seen:
                 seen.add(a.lower())
                 aliases.append(a)

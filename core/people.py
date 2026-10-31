@@ -305,11 +305,27 @@ def norm_forms(text: str, expand: bool = False) -> List[str]:
     return out
 
 
-def aliases_norm_for(name: str, aliases: Iterable[str]) -> List[str]:
-    """Формы имени и «Других имён» (username'ы аккаунтов сюда не входят: тема PR-7 — отдельная таблица)."""
+def alias_forms(alias: str, phrase_only: bool = True) -> List[str]:
+    """Формы ОДНОГО «другого имени». Однословный алиас — как имя (слово + падежные формы). Многословный
+    («муж Оли», «сестра Маши», «Маша с работы») — только фраза целиком: слова по отдельности не
+    индексируются, иначе описание «муж Оли» откликалось бы на «Оля» и плодило ложных тёзок.
+    phrase_only=False — прежнее поведение (нужно только для отката миграции)."""
+    words = _words(alias)
+    if len(words) > 1 and phrase_only:
+        return [" ".join(_forms(w, False)[0] for w in words)]
+    return norm_forms(alias, expand=True)
+
+
+def aliases_norm_for(name: str, aliases: Iterable[str], phrase_only: bool = True) -> List[str]:
+    """Формы имени и «Других имён» (username'ы аккаунтов сюда не входят: тема PR-7 — отдельная таблица).
+    Имя из нескольких слов ищется и по отдельным словам («Миша Ари» ← «Миша»); многословные алиасы — только
+    фразой целиком (см. alias_forms)."""
     seen: List[str] = []
-    for s_ in [name] + list(aliases or []):
-        for f in norm_forms(s_, expand=True):
+    for f in norm_forms(name, expand=True):
+        if f not in seen:
+            seen.append(f)
+    for a in aliases or []:
+        for f in alias_forms(a, phrase_only):
             if f not in seen:
                 seen.append(f)
     return seen
