@@ -10,7 +10,8 @@ Grounding (строгий; любое нарушение → ответ отбр
   4a число во фразе есть в цитируемых фактах
   4b имя/слово с заглавной во фразе есть в цитируемых фактах или в подписи группы
   4c значимое слово (≥5 букв) есть в цитируемых фактах (по основе)
-  5  лимиты: ≤ 8 фраз на блок, ≤ 900 символов всего
+  5  формат: фраза длиннее 220 символов или > 30 фраз на блок (обычные излишки не ошибка: при сборке режем до
+     6 фраз на группу и ~700 символов, и в «использованные» попадают только оставленные фразы)
   6  пустой ответ при непустом входе («ничего не нашла») — не выдумываем, показываем список
 Дополнительно: таймаут (GEN_TIMEOUT), битый JSON, пустой ответ API.
 
@@ -51,8 +52,10 @@ GEN_TIMEOUT = 8.0
 MAX_PER_GROUP = 20
 MAX_FACTS = 40
 QUOTE_LEN = 160
-MAX_LINES_PER_BLOCK = 8
-MAX_CHARS = 900
+MAX_LINES_PER_BLOCK = 30        # «абсурдно много» — формат нарушен; обычные излишки аккуратно режутся при сборке
+MAX_LINE_CHARS = 220            # одна фраза длиннее — это не фраза, а пересказ
+KEEP_LINES = 6                  # сколько фраз на группу показываем
+KEEP_CHARS = 700                # и сколько символов всего
 GENERATED_ROUTES = {"direct", "hybrid", "hybrid_self", "hybrid_person"}
 
 Trace = Callable[[str, dict], None]
@@ -62,7 +65,8 @@ SYSTEM = (
     "о людях у тебя нет.\n"
     "ПРАВИЛА:\n"
     "1. Каждая фраза ответа опирается на факты и указывает их id. Ничего не добавляй от себя: не обобщай, не "
-    "оценивай, не делай выводов, не придумывай причин и примеров.\n"
+    "оценивай, не делай выводов, не придумывай причин и примеров. Используй слова самих фактов: не подбирай "
+    "синонимов, не поясняй и не переформулируй сложнее, чем в факте.\n"
     "2. Сохраняй смысл и полярность: «не любит» остаётся «не любит», «любит» — «любит», «аллергия» — «аллергия». "
     "Не заменяй слова более сильными или мягкими.\n"
     "3. Близкие факты объединяй в одну короткую фразу. Фраза — это то, что идёт ПОСЛЕ слов «не любит:» / «любит:» "
@@ -234,6 +238,8 @@ def validate(data, groups: List[GGroup], has_input: bool = True) -> Check:
             if foreign:
                 return Check(False, "2", bad_ids=foreign)
             t = ln["t"].strip()
+            if len(t) > MAX_LINE_CHARS:
+                return Check(False, "5", detail=f"line_chars={len(t)}")
             total += len(t)
             src = " ".join(g.by_id()[i].fact for i in ids)
             # 4a — числа
@@ -253,8 +259,6 @@ def validate(data, groups: List[GGroup], has_input: bool = True) -> Check:
                 if len(lw) >= 5 and not lw.isdigit() and lw not in _FUNC_WORDS and _stem(lw, 4) not in src_stems:
                     return Check(False, "4c", bad_ids=list(ids), detail=f"word_len={len(lw)}")
             used.extend(ids)
-    if total > MAX_CHARS:
-        return Check(False, "5", detail=f"chars={total}")
     return Check(True, used_ids=sorted(set(used)))
 
 
@@ -273,12 +277,24 @@ def _lead(types: Sequence[str]) -> str:
     return ""
 
 
-def assemble(data: dict, groups: List[GGroup], types: Sequence[str]) -> str:
+def assemble(data: dict, groups: List[GGroup], types: Sequence[str]) -> Tuple[str, List[int]]:
+    """Текст ответа и id реально показанных фраз. Излишки по размеру режем здесь: это подача, а не grounding."""
     by_n = {g.n: g for g in groups}
     paras = []
+    shown: List[int] = []
+    budget = KEEP_CHARS
     for b in data["blocks"]:
         g = by_n[b["group"]]
-        items = [ln["t"].strip().rstrip(".,;") for ln in b["lines"] if ln["t"].strip()]
+        items = []
+        for ln in b["lines"]:
+            t = ln["t"].strip().rstrip(".,;")
+            if not t:
+                continue
+            if len(items) >= KEEP_LINES or (items and budget - len(t) < 0):
+                break
+            items.append(t)
+            budget -= len(t)
+            shown.extend(ln["ids"])
         if not items:
             continue
         body = ", ".join(items)
@@ -286,7 +302,7 @@ def assemble(data: dict, groups: List[GGroup], types: Sequence[str]) -> str:
             paras.append(f"<b>{escape(g.label)}</b>{escape(_lead(types))}: {escape(body)}.")
         else:
             paras.append(escape(body[:1].upper() + body[1:]) + ".")
-    return "\n\n".join(paras)
+    return "\n\n".join(paras), sorted(set(shown))
 
 
 def source_line(groups: List[GGroup], used: Sequence[int]) -> str:
@@ -379,11 +395,11 @@ async def generate(result, query: str, *, arcana: bool = False, trace: Optional[
         if data is not None:
             chk = validate(data, groups)
             if chk.ok:
-                body = assemble(data, groups, result.types)
+                body, shown = assemble(data, groups, result.types)
                 if body.strip():
                     o.ok = True
-                    o.used_ids = chk.used_ids
-                    o.text = body + "\n\n" + source_line(groups, chk.used_ids)
+                    o.used_ids = shown
+                    o.text = body + "\n\n" + source_line(groups, shown)
                 else:
                     o.reason, o.check = "check_6", "6"
             else:

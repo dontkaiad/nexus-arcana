@@ -179,11 +179,19 @@ def test_check4c_invented_concept(res):
     _bad(res, [{"group": 1, "lines": [{"t": "очереди и чрезмерную критику", "ids": [2]}]}], "4c", [2])
 
 
-def test_check5_limits(res):
-    many = [{"t": "очереди", "ids": [2]}] * (ma.MAX_LINES_PER_BLOCK + 1)
-    _bad(res, [{"group": 1, "lines": many}], "5")
-    long_line = {"t": "очереди " * 150, "ids": [2]}
-    _bad(res, [{"group": 1, "lines": [long_line]}], "5")
+def test_check5_absurd_format_only(res):
+    _bad(res, [{"group": 1, "lines": [{"t": "очереди", "ids": [2]}] * (ma.MAX_LINES_PER_BLOCK + 1)}], "5")
+    _bad(res, [{"group": 1, "lines": [{"t": "очереди " * 60, "ids": [2]}]}], "5")
+
+
+def test_size_overflow_is_trimmed_not_dropped():
+    facts = [mem(100 + i, f"не любит вещь{chr(97 + i)}{chr(97 + i)}{chr(97 + i)}") for i in range(10)]
+    r = result([("Миша", 1, facts)])
+    lines = [{"t": f"вещь{chr(97 + i)}{chr(97 + i)}{chr(97 + i)}", "ids": [100 + i]} for i in range(10)]
+    out, _ = gen(r, {"blocks": [{"group": 1, "lines": lines}]})
+    assert out.ok
+    assert out.used_ids == [100 + i for i in range(ma.KEEP_LINES)]          # показаны (и учтены) только оставленные
+    assert out.text.split("\n\n")[0].count(",") == ma.KEEP_LINES - 1             # запятые только в самом ответе, не в источнике
 
 
 def test_check6_empty_blocks_do_not_invent(res):
