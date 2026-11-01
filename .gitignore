@@ -249,3 +249,6 @@ tools/people_import/data/
 *.jsonl
 result.json
 .venv312/
+
+# Приватные данные эвалов (реальные сообщения / id фактов владельца) — НЕ в репозиторий
+/data/evals/

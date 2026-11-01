@@ -1,0 +1,36 @@
+{
+  "note": "Синтетика. Факты вымышленные. expect: accept — ответ проходит целиком; partial — часть фраз отбрасывается, остальное проходит; reject — весь ответ отброшен (fallback на список). check — номер проверки grounding (1..6, 4a/4b/4c), на которой это ловится.",
+  "facts": [
+    {"id": 1, "text": "не любит спешку и смену планов"},
+    {"id": 2, "text": "не любит очереди"},
+    {"id": 3, "text": "не любит, когда его считают тупым"},
+    {"id": 4, "text": "встреча в 18:30 у входа"}
+  ],
+  "group_label": "Миша Образцов",
+  "cases": [
+    {"name": "ok_all_lines", "expect": "accept",
+     "answer": {"blocks": [{"group": 1, "lines": [{"t": "Планы", "n": "спешка, смена планов", "ids": [1]}, {"t": "Очереди", "n": "не любит очереди", "ids": [2]}]}]}},
+    {"name": "ok_abstract_theme_is_allowed", "expect": "accept",
+     "answer": {"blocks": [{"group": 1, "lines": [{"t": "Ожидание", "n": "не любит очереди", "ids": [2]}]}]}},
+    {"name": "foreign_id", "expect": "reject", "check": "2",
+     "answer": {"blocks": [{"group": 1, "lines": [{"t": "Планы", "n": "спешка", "ids": [1, 99]}]}]}},
+    {"name": "wrong_group", "expect": "reject", "check": "1",
+     "answer": {"blocks": [{"group": 7, "lines": [{"t": "Планы", "n": "спешка", "ids": [1]}]}]}},
+    {"name": "not_json_structure", "expect": "reject", "check": "1", "answer": {"blocks": "x"}},
+    {"name": "empty_answer_for_nonempty_input", "expect": "reject", "check": "6", "answer": {"blocks": []}},
+    {"name": "line_without_ids", "expect": "reject", "check": "3",
+     "answer": {"blocks": [{"group": 1, "lines": [{"t": "Планы", "n": "спешка", "ids": []}]}]}},
+    {"name": "invented_number", "expect": "reject", "check": "4a",
+     "answer": {"blocks": [{"group": 1, "lines": [{"t": "Очереди", "n": "дольше 20 минут", "ids": [2]}]}]}},
+    {"name": "invented_name", "expect": "reject", "check": "4b",
+     "answer": {"blocks": [{"group": 1, "lines": [{"t": "Очереди", "n": "как у Ивана", "ids": [2]}]}]}},
+    {"name": "invented_concept", "expect": "reject", "check": "4c",
+     "answer": {"blocks": [{"group": 1, "lines": [{"t": "Очереди", "n": "чрезмерную критику", "ids": [2]}]}]}},
+    {"name": "one_bad_line_among_good", "expect": "partial", "check": "4c",
+     "answer": {"blocks": [{"group": 1, "lines": [{"t": "Планы", "n": "спешка, смена планов", "ids": [1]}, {"t": "Критика", "n": "чрезмерную критику", "ids": [2]}]}]}},
+    {"name": "time_is_a_number_from_the_fact", "expect": "accept",
+     "answer": {"blocks": [{"group": 1, "lines": [{"t": "Встреча", "n": "в 18:30 у входа", "ids": [4]}]}]}},
+    {"name": "time_changed", "expect": "reject", "check": "4a",
+     "answer": {"blocks": [{"group": 1, "lines": [{"t": "Встреча", "n": "в 19:30 у входа", "ids": [4]}]}]}}
+  ]
+}

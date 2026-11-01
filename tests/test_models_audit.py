@@ -17,7 +17,8 @@ import pytest
 from core import models
 
 REPO = Path(__file__).resolve().parent.parent
-SKIP_DIRS = ("tests", "venv", "node_modules", "alembic", "scripts", "tools", ".git", "miniapp/frontend")
+# evals/ — не продуктовый код: A/B-сравнение моделей по определению называет модели явно
+SKIP_DIRS = ("tests", "venv", "node_modules", "alembic", "scripts", "tools", "evals", ".git", "miniapp/frontend")
 CALLS = {"ask_claude", "ask_claude_stream", "ask_claude_vision"}
 LITERAL_OK = {"core/models.py", "core/config.py"}
 
