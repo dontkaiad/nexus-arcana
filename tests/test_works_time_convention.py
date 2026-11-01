@@ -78,3 +78,21 @@ async def test_cb_work_save_writes_real_utc_for_deadline_and_reminder():
     assert _utc(eng.params[0]["reminder"]) == "2026-11-01T16:30"  # 19:30 МСК
     # а планировщику уходит локальное настенное время (как и раньше)
     assert flow.schedule_reminder.await_args.kwargs["reminder_dt"] == "2026-11-01T19:30"
+
+
+def test_row_to_work_shows_local_time_for_utc_deadline():
+    from datetime import datetime
+    from types import SimpleNamespace
+    from arcana.repos.pg_works_repo import _row_to_work
+    row = SimpleNamespace(
+        id=5, title="t", deadline=datetime(2026, 11, 1, 16, 45, tzinfo=timezone.utc),
+        reminder=None, category="", notes="", client_id=None, repeat_time="",
+        priority_label="Срочно", status_code="open", repeat_label="Нет", dow_label="",
+    )
+    assert _row_to_work(row).deadline_str.endswith("01.11 19:45")
+
+
+def test_relative_time_shared_with_core():
+    import arcana.handlers.work_reminder_kb as kb
+    from core.date_extract import parse_relative_time
+    assert kb._parse_relative_time is parse_relative_time

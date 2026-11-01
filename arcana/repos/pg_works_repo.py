@@ -64,15 +64,22 @@ def _resolve(conn, table, code: Optional[str]) -> Optional[int]:
     return row[0] if row else None
 
 
-def _row_to_work(row) -> Work:
+# Пояс по умолчанию для текстового deadline_str (репозиторий не знает пользователя;
+# так же `tz_offset: int = 3` по умолчанию во всём Arcana-коде).
+_DEFAULT_DISPLAY_TZ = 3
+
+
+def _row_to_work(row, tz_offset: int = _DEFAULT_DISPLAY_TZ) -> Work:
     deadline_str = ""
     deadline_dt = None
     deadline_iso = ""
     if row.deadline:
         d = row.deadline
-        deadline_str = f" · 📅 {d.day:02d}.{d.month:02d}"
-        if d.hour or d.minute:
-            deadline_str += f" {d.hour:02d}:{d.minute:02d}"
+        # В PG настоящий UTC (соглашение Nexus, #267) → показываем локальное время.
+        ld = d.astimezone(timezone(timedelta(hours=tz_offset))) if d.tzinfo else d
+        deadline_str = f" · 📅 {ld.day:02d}.{ld.month:02d}"
+        if ld.hour or ld.minute:
+            deadline_str += f" {ld.hour:02d}:{ld.minute:02d}"
         deadline_dt = d
         try:
             deadline_iso = d.isoformat()
