@@ -169,11 +169,11 @@ def resolve(user_id: str, mentions: List[str]) -> List[Dict]:
         return []
     with get_engine().connect() as c:
         rows = c.execute(text(
-            "SELECT id, name, birthday, birthday_year_known FROM people "
+            "SELECT id, name, birthday, birthday_year_known, relation, about FROM people "
             "WHERE user_id = :u AND status <> 'rejected' AND NOT is_self AND aliases_norm && CAST(:f AS text[]) "
             "ORDER BY id"), {"u": user_id, "f": forms}).all()
-    return [{"id": r.id, "name": r.name, "birthday": r.birthday, "birthday_year_known": r.birthday_year_known}
-            for r in rows]
+    return [{"id": r.id, "name": r.name, "birthday": r.birthday, "birthday_year_known": r.birthday_year_known,
+             "relation": r.relation, "about": r.about} for r in rows]
 
 
 def confirmed_facts(person_id: int, limit: int = 20) -> List[Dict]:
@@ -191,11 +191,13 @@ def create(user_id: str, name: str, aliases: List[str], *, birthday: Optional[da
            tg_id: Optional[int] = None, tg_username: Optional[str] = None,
            vk_id: Optional[int] = None, status: str = "pending",
            birthday_year_known: bool = True, is_self: bool = False,
-           accounts: Optional[List[Dict]] = None) -> int:
+           accounts: Optional[List[Dict]] = None,
+           relation: Optional[str] = None, about: Optional[str] = None) -> int:
     with get_engine().begin() as c:
         pid = c.execute(insert(people).values(
             user_id=user_id, name=name, aliases=aliases, birthday=birthday,
             birthday_year_known=birthday_year_known, is_self=is_self, status=status,
+            relation=relation, about=about,
         ).returning(people.c.id)).scalar_one()
         _insert_accounts(c, user_id, pid, _accounts_from(tg_id, tg_username, vk_id, accounts))
         sync_norm(c, pid)
@@ -413,7 +415,7 @@ def list_facts(person_id: int) -> List[Dict]:
              "last_mention": r.last_mention_date} for r in rows]
 
 
-EDITABLE = ("name", "aliases", "birthday", "birthday_year_known", "notes", "status")
+EDITABLE = ("name", "aliases", "birthday", "birthday_year_known", "notes", "status", "relation", "about")
 
 
 def update_person(user_id: str, person_id: int, values: Dict) -> Optional[Dict]:

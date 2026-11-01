@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react'
 import { redText } from './ui'
 import { patchPerson, errText } from './peopleApi'
 import { Btn, Label, Note, inputStyle } from './parts'
+import RelationPicker from './RelationPicker'
 
 const toDateInput = (iso) => {
   const m = /^(\d{4}|-)-(\d{2})-(\d{2})$/.exec(iso || '')
@@ -24,10 +25,13 @@ export default function PersonEdit({ s, Sheet, person, open, onClose, onSaved })
       birthday: toDateInput(person.birthday),
       unknownYear: person.birthday ? person.birthday_year_known === false : false,
       notes: person.notes || '',
+      relation: person.relation || null,
+      about: person.about || '',
     })
   }, [open, person?.id])
 
   if (!f) return null
+  const setV = (k) => (v) => setF({ ...f, [k]: v })
   const set = (k) => (e) => setF({ ...f, [k]: e.target.type === 'checkbox' ? e.target.checked : e.target.value })
 
   const save = async () => {
@@ -43,6 +47,8 @@ export default function PersonEdit({ s, Sheet, person, open, onClose, onSaved })
       if (f.birthday) body.birthday_year_known = !f.unknownYear
     }
     if (f.notes !== (person.notes || '')) body.notes = f.notes || null
+    if ((f.relation || null) !== (person.relation || null)) body.relation = f.relation
+    if (f.about.trim() !== (person.about || '')) body.about = f.about.trim() || null
     if (Object.keys(body).length === 0) { onClose(); return }
     setBusy(true); setErr('')
     try { onSaved(await patchPerson(person.id, body)) } catch (e) { setErr(errText(e)) } finally { setBusy(false) }
@@ -52,6 +58,7 @@ export default function PersonEdit({ s, Sheet, person, open, onClose, onSaved })
     <Sheet s={s} open={open} onClose={onClose} title="Правка">
       <Label s={s}>Имя</Label>
       <input value={f.name} onChange={set('name')} style={inputStyle(s)} />
+      {!person.is_self && <RelationPicker s={s} relation={f.relation} about={f.about} onRelation={setV('relation')} onAbout={setV('about')} />}
       <Label s={s}>Другие имена (через запятую)</Label>
       <input value={f.aliases} onChange={set('aliases')} placeholder="Машка, Мария, @nick" style={inputStyle(s)} />
       <div style={{ fontSize: 12, color: s.text, margin: '4px 2px 0', lineHeight: 1.35 }}>

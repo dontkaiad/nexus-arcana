@@ -8,6 +8,7 @@ const qs = (o) => {
 }
 
 export const listPeople = ({ status, q } = {}) => apiGet('/api/people' + qs({ status, q }))
+export const createPerson = (body) => apiPost('/api/people', body)
 export const getPerson = (id) => apiGet(`/api/people/${id}`)
 export const patchPerson = (id, body) => apiPatch(`/api/people/${id}`, body)
 

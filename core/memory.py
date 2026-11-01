@@ -1084,7 +1084,7 @@ def extract_context_keywords(data: dict, client_name: Optional[str] = None) -> L
 def _people_context_block(user_id: str, keywords: List[str], seen_ids: Set[str]) -> str:
     """Блок «Из Людей» для найденных по упоминанию людей. Один человек — его факты и ДР; несколько
     (тёзки / общая основа) — наборы всех, каждый с пометкой, кто это. Заполняет seen_ids id'ами фактов."""
-    from core.people import birthday_context, fact_text
+    from core.people import birthday_context, fact_text, person_label
     from core.repos import pg_people_repo as prepo
     people_ = prepo.resolve(user_id, [k for k in keywords if k])
     if not people_:
@@ -1097,8 +1097,9 @@ def _people_context_block(user_id: str, keywords: List[str], seen_ids: Set[str])
         bd = birthday_context(p["birthday"], p["birthday_year_known"])
         if not facts and not bd:
             continue
-        if multi:
-            out.append(f"[{p['name']}]")
+        label = person_label(p["name"], p.get("relation"), p.get("about"))
+        if multi or label != p["name"]:          # тёзки или есть «кто это» — подписываем, о ком речь
+            out.append(f"[{label}]")
         if bd:
             out.append(f"- {bd}")
         for f in facts:

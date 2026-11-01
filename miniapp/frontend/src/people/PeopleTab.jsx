@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react'
 import { Search, X } from 'lucide-react'
 import PersonCard, { Header } from './PersonCard'
 import ReviewMode from './ReviewMode'
+import PersonCreate from './PersonCreate'
 import { Btn, Chip, Note, SourceLinks, inputStyle } from './parts'
 import { aliasDisputes, listPeople } from './peopleApi'
 import { fmtBirthday, fs, overlayBg, pendingOf, plural, primaryColors, redText } from './ui'
@@ -27,6 +28,7 @@ export default function PeopleTab({ s, Sheet, onClose, onChanged, initialId, onO
   const [disp, setDisp] = useState(null)          // {total, people:[{id,disputed,aliases}]} — спорные «Другие имена»
   const [err, setErr] = useState('')
   const [tick, setTick] = useState(0)
+  const [creating, setCreating] = useState(false)
 
   useEffect(() => { const t = setTimeout(() => setDq(q.trim()), 250); return () => clearTimeout(t) }, [q])
 
@@ -69,6 +71,9 @@ export default function PeopleTab({ s, Sheet, onClose, onChanged, initialId, onO
               style={{ ...inputStyle(s), marginBottom: 8 }} />
           )}
 
+          <Btn s={s} style={{ width: '100%', marginBottom: 8 }} onClick={() => setCreating(true)}>+ Человек</Btn>
+          <PersonCreate s={s} Sheet={Sheet} open={creating} onClose={() => setCreating(false)}
+            onCreated={(p) => { setCreating(false); refresh(); setView({ name: 'card', id: p.id }) }} />
           <Btn s={s} kind="primary" disabled={!pendingTotal} onClick={() => setView({ name: 'review' })} style={{ width: '100%', marginBottom: 8 }}>
             {pendingTotal ? `Разобрать: ${pendingTotal}` : pendingTotal === 0 ? 'Разбирать нечего' : 'Разобрать…'}
           </Btn>
@@ -103,6 +108,7 @@ export default function PeopleTab({ s, Sheet, onClose, onChanged, initialId, onO
                   {p.client_id && <Chip s={s} color={s.acc}>🌒 Клиент</Chip>}
                   {p.status === 'rejected' && <Chip s={s} color={s.red}>отклонён</Chip>}
                 </div>
+                {p.label && p.label !== p.name && <div style={{ fontSize: fs(12), color: s.text, marginTop: 1 }}>{p.label.slice(p.name.length + 3)}</div>}
                 <div style={{ fontSize: fs(11), color: s.text, marginTop: 2, display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
                   {!p.is_self && <span>🎂 {fmtBirthday(p.birthday)}</span>}
                   <SourceLinks s={s} p={p} />

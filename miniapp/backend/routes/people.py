@@ -15,7 +15,8 @@ from pydantic import BaseModel, Field
 from sqlalchemy.exc import IntegrityError
 
 from core.people import (
-    UNKNOWN_YEAR, age, alias_disputes, birthday_iso, fact_hash, find_duplicates, related_to_str, strip_name_prefix,
+    RELATIONS, UNKNOWN_YEAR, age, alias_disputes, birthday_iso, clean_about, ABOUT_MAX, fact_hash, find_duplicates, person_label,
+    related_to_str, strip_name_prefix,
 )
 from core.repos.pg_memory_repo import PgMemoryRepo, bot_to_scope
 from core.repos import pg_client_links as client_links
@@ -62,6 +63,9 @@ def _person_out(p: Dict[str, Any]) -> Dict[str, Any]:
         # бейдж «Клиент Арканы»: наружу только id клиента — без сеансов, оплат и прочего из Арканы
         "client_id": p.get("client_id"),
         "notes": p.get("notes"),
+        "relation": p.get("relation"),
+        "about": p.get("about"),
+        "label": person_label(p["name"], p.get("relation"), p.get("about")),
         "status": p["status"],
         "is_self": bool(p.get("is_self")),
         "counts": p.get("counts", {}),
@@ -209,6 +213,42 @@ class PersonPatch(BaseModel):
     birthday_year_known: Optional[bool] = None
     notes: Optional[str] = None
     status: Optional[str] = None
+    relation: Optional[str] = None
+    about: Optional[str] = None
+
+
+def _check_who(vals: Dict[str, Any]) -> None:
+    """«Кто это»: relation — из списка (или null), about — одна строка ≤120 (пусто → null)."""
+    if "relation" in vals and vals["relation"] is not None and vals["relation"] not in RELATIONS:
+        raise HTTPException(status_code=422, detail="bad relation")
+    if "about" in vals:
+        if len(" ".join((vals["about"] or "").split())) > ABOUT_MAX:
+            raise HTTPException(status_code=422, detail="about too long")
+        vals["about"] = clean_about(vals["about"])
+
+
+class PersonCreate(BaseModel):
+    name: str
+    relation: Optional[str] = None
+    about: Optional[str] = None
+    aliases: List[str] = Field(default_factory=list)
+
+
+@router.post("/people")
+async def create_person(body: PersonCreate, tg_id: int = Depends(current_user_id)) -> Dict[str, Any]:
+    """«+ Человек»: подтверждённая карточка (ручной ввод владельца). Тёзки разрешены; id уже существующих с таким же именем — в homonym_ids."""
+    user_id = await _owner(tg_id)
+    name = (body.name or "").strip()
+    if not name:
+        raise HTTPException(status_code=422, detail="name must not be empty")
+    vals: Dict[str, Any] = {"relation": body.relation, "about": body.about}
+    _check_who(vals)
+    aliases = [a.strip() for a in body.aliases if a and a.strip()]
+    same = await asyncio.to_thread(repo.resolve, user_id, [name])     # тёзки бывают настоящими — не блокируем
+    pid = await asyncio.to_thread(repo.create, user_id, name, aliases, status="confirmed",
+                                  relation=vals["relation"], about=vals["about"])
+    p = await asyncio.to_thread(repo.get_person, user_id, pid)
+    return {**_person_out(p), "homonym_ids": [h["id"] for h in same]}
 
 
 @router.patch("/people/{person_id}")
@@ -219,6 +259,7 @@ async def patch_person(person_id: int, body: PersonPatch,
     vals: Dict[str, Any] = {}
     for f in sent:
         vals[f] = getattr(body, f)
+    _check_who(vals)
     if "name" in vals and not (vals["name"] or "").strip():
         raise HTTPException(status_code=422, detail="name must not be empty")
     if "name" in vals:

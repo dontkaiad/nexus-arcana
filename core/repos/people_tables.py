@@ -27,6 +27,9 @@ people = Table(
     # False → год неизвестен, в `birthday` стоит заглушка 1904 (ADR-0027).
     Column("birthday_year_known", Boolean, nullable=False, server_default=text("true")),
     Column("notes",       Text),
+    # «кто это»: relation ∈ RELATIONS (core/people.py), about — одна строка до 120 символов (миграция *_people_relation_about)
+    Column("relation",    Text),
+    Column("about",       Text),
     Column("status",      Text,       nullable=False, server_default=text("'pending'")),
     # карточка владельца («Я»): не больше одной на user_id (частичный unique в миграции)
     Column("is_self",     Boolean,    nullable=False, server_default=text("false")),

@@ -6,6 +6,28 @@ from typing import Optional
 
 UNKNOWN_YEAR = 1904  # заглушка года в people.birthday, когда год неизвестен
 
+# «Кто это»: код хранится в people.relation, подпись показывается человеку.
+RELATIONS = {"friend": "друг", "family": "семья", "colleague": "коллега", "neighbor": "сосед", "ex": "бывший",
+             "other": "другое"}
+ABOUT_MAX = 120
+
+
+def clean_about(about: Optional[str]) -> Optional[str]:
+    """Одна строка, схлопнутые пробелы, не длиннее ABOUT_MAX; пусто → None."""
+    a = " ".join((about or "").split())[:ABOUT_MAX].strip()
+    return a or None
+
+
+def person_label(name: str, relation: Optional[str] = None, about: Optional[str] = None) -> str:
+    """«Миша Ари — друг, коллега по проекту». Без relation/about — просто имя. «другое» отдельно не пишем,
+    если есть about (about и так объясняет), и пишем «другое» только когда пояснения нет."""
+    rel = RELATIONS.get(relation or "")
+    ab = clean_about(about)
+    if rel == "другое" and ab:
+        rel = None
+    tail = ", ".join(x for x in (rel, ab) if x)
+    return f"{name} — {tail}" if tail else name
+
 
 def age(birthday: Optional[date], year_known: bool = True, today: Optional[date] = None) -> Optional[int]:
     """Полных лет на `today`. None, если ДР нет или год неизвестен

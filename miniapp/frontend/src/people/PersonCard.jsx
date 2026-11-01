@@ -70,6 +70,7 @@ export default function PersonCard({ s, Sheet, id, onBack, onChanged, onStartRev
       <Header s={s} onBack={onBack} title={p.name}
         right={<div onClick={() => setEdit(true)} style={{ width: 44, height: 44, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}><Pencil size={fs(17)} color={s.tS} /></div>} />
 
+      {p.label && p.label !== p.name && <div style={{ fontSize: fs(13), color: s.text, margin: '0 2px 4px' }}>{p.label.slice(p.name.length + 3)}</div>}
       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center', margin: '2px 0 6px' }}>
         {p.is_self
           ? <Chip s={s} color={s.acc}>Я</Chip>

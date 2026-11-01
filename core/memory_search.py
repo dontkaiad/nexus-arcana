@@ -38,7 +38,7 @@ import sqlalchemy as sa
 
 from core.claude_client import ask_claude
 from core.db import get_engine
-from core.people import owner_fact
+from core.people import owner_fact, person_label
 from core.rag import _embed, _vec_literal
 from core.repos.memories_table import memories
 from core.repos.pg_memory_repo import Memory, _row_to_memory
@@ -387,11 +387,14 @@ def _people_labels(person_ids: Sequence[int]) -> Dict[int, str]:
     if not person_ids:
         return {}
     with get_engine().connect() as conn:
-        rows = conn.execute(sa.text("SELECT id, name, notes FROM people WHERE id = ANY(:i)"),
+        rows = conn.execute(sa.text("SELECT id, name, notes, relation, about FROM people WHERE id = ANY(:i)"),
                             {"i": [int(i) for i in person_ids]}).all()
     out = {}
     for r in rows:
-        note = " ".join((r.notes or "").split())[:40]
+        if r.relation or r.about:               # «Миша Ари — друг, …» (карточка «кто это»)
+            out[r.id] = person_label(r.name, r.relation, r.about)
+            continue
+        note = " ".join((r.notes or "").split())[:40]   # карточки без «кто это» — как раньше
         out[r.id] = f"{r.name} ({note})" if note else r.name
     return out
 
