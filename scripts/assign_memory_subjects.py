@@ -7,7 +7,7 @@
 Разбор (review_status) не трогается никогда. «Разное», «Коты», бюджет — без записи.
 
 Фильтр рода (Кай пишет о себе в женском роде): факт «Я» с мужскими маркерами — это чужой факт, попавший в «Я».
-Если в том же чате (source_chat_id) pending-факты ровно ОДНОГО человека — факт переезжает на его карточку; иначе
+Если в том же чате (source_chat_id) факты (любого статуса) ровно ОДНОГО не отклонённого человека — факт переезжает на его карточку; иначе
 (чат не сопоставлен / несколько людей) — review_status = rejected. Временные состояния («сейчас находится»…)
 только перечисляются отдельным списком — автоматически не применяются.
 Ручные правки старых памятей: --manual "140:delete,3:misc,25:self,222:person:Имя".
@@ -69,10 +69,11 @@ def _parse_manual(arg):
 
 
 def _chat_people(c, sa, chats, me_id):
-    """source_chat_id → {person_id: имя} по pending-фактам других людей в том же чате."""
+    """source_chat_id → {person_id: имя}: не отклонённые люди, у которых есть факты (любого статуса) из того же чата.
+    Фильтр «pending» не годится: факты других людей из этих чатов уже разобраны (confirmed/rejected)."""
     rows = c.execute(sa.text(
         "SELECT m.source_chat_id AS chat, p.id AS pid, p.name FROM memories m JOIN people p ON p.id = m.person_id "
-        "WHERE m.source_chat_id = ANY(:c) AND m.review_status = 'pending' AND NOT m.is_archived "
+        "WHERE m.source_chat_id = ANY(:c) AND NOT m.is_archived "
         "AND NOT p.is_self AND p.status <> 'rejected' GROUP BY 1, 2, 3"), {"c": list(chats)}).all()
     out: dict = {}
     for r in rows:
