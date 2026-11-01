@@ -83,7 +83,9 @@ async def restore_work_reminders() -> int:
             for w in await _pg.active_with_future_reminder(user_id):
                 if not w.reminder_dt:
                     continue
-                reminder_iso = w.reminder_dt.strftime("%Y-%m-%dT%H:%M")
+                from core.date_extract import dt_to_local_wall
+                # PG отдаёт настоящий UTC (соглашение Nexus, #267) → локальное настенное
+                reminder_iso = dt_to_local_wall(w.reminder_dt, int(tz_offset))
                 ok = await arcana_reminder_flow.schedule_reminder(
                     chat_id=primary_tg,
                     title=w.title or "Работа",

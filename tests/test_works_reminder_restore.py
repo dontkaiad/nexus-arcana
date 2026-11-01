@@ -166,3 +166,22 @@ async def test_restore_skips_non_arcana_user():
     assert n == 0
     m_q.assert_not_called()
     m_sched.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_restore_utc_reminder_1930_msk_is_not_shifted():
+    """#267: reminder 16:30 UTC = 19:30 МСК; восстановление не должно считать его 16:30 МСК."""
+    import arcana.bot as abot
+    from datetime import timezone
+    from core.config import config
+
+    w = Work(id="5", title="Ритуал", priority="Срочно", deadline_str="", category_str="",
+             has_client=False, reminder_dt=datetime(2026, 11, 1, 16, 30, tzinfo=timezone.utc))
+    with patch.object(config, "allowed_ids", [7]), \
+         patch("core.user_manager.get_user",
+               AsyncMock(return_value={"permissions": {"arcana": True}, "user_id": "u-1"})), \
+         patch("core.shared_handlers.get_user_tz", AsyncMock(return_value=3)), \
+         patch.object(pgw.PgWorksRepo, "active_with_future_reminder", AsyncMock(return_value=[w])), \
+         patch.object(abot.arcana_reminder_flow, "schedule_reminder", AsyncMock(return_value=True)) as m:
+        await abot.restore_work_reminders()
+    assert m.await_args.kwargs["reminder_dt"] == "2026-11-01T19:30"
