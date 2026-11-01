@@ -56,10 +56,10 @@ def collect(stream, limit: int) -> List[Dict[str, Any]]:
 
 async def classify_once(text: str, model: str, user_id: str = "") -> Dict[str, Any]:
     """classify() выбранной моделью. Возвращает items, дошло ли до LLM, латентность, токены."""
-    from core import classifier
+    from core import claude_client, classifier
     os.environ["MODEL_CLASSIFY"] = model
     stat = {"llm": False, "ms": 0, "in": 0, "cw": 0, "cr": 0, "out": 0}
-    real = classifier.ask_claude
+    real = claude_client.ask_claude          # оригинал, а не текущая привязка в classifier (там может стоять чужая обёртка)
 
     async def spy(*a, **kw):
         import time
@@ -80,16 +80,14 @@ def _types(items) -> List[str]:
     return [i.get("type", "?") for i in items]
 
 
-async def _ab(cases, a: str, b: str, user_id: str, concurrency: int = 3):
-    sem = asyncio.Semaphore(concurrency)
-
-    async def one(c):
-        async with sem:
-            ra = await classify_once(c["text"], a, user_id)
-            rb = await classify_once(c["text"], b, user_id)
-            return c, ra, rb
-
-    return await asyncio.gather(*[one(c) for c in cases])
+async def _ab(cases, a: str, b: str, user_id: str):
+    """Строго последовательно: модель выбирается переменной окружения MODEL_CLASSIFY, параллельные задачи гонялись бы."""
+    out = []
+    for c in cases:
+        ra = await classify_once(c["text"], a, user_id)
+        rb = await classify_once(c["text"], b, user_id)
+        out.append((c, ra, rb))
+    return out
 
 
 def run_ab(cases, a: str, b: str, user_id: str, out: Optional[str]) -> Dict[str, Any]:
