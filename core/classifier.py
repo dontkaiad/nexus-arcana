@@ -1164,6 +1164,11 @@ async def classify(text: str, tz_offset: int = 3, user_id: str = "") -> list[dic
         if recovered:
             logger.warning("classify: recovered %d items from multi-block response for %r", len(recovered), text)
             return recovered
+        if "{" not in stripped and "[" not in stripped:
+            # Модель ответила обычным текстом («Пожалуйста!», «Понял, хорошего дня!») на реплику без команды —
+            # это не сломанный JSON, а «команды нет»: unknown, без записи в журнал ошибок.
+            logger.warning("classify: conversational reply instead of JSON for %r → unknown", text)
+            return [{"type": "unknown"}]
         logger.warning("classify: bad JSON for %r → %r", text, stripped)
         await log_error(text, "parse_error", stripped, str(e), error_code="–")
         return [{"type": "parse_error"}]

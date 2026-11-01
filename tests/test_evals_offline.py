@@ -141,3 +141,21 @@ def test_synthetic_ab_cases_cover_the_llm_path():
             asyncio.run(classifier.classify(c["text"], tz_offset=3, user_id=""))
             reached += int(called.await_count > before)
     assert reached / len(cases) >= 0.7, f"только {reached}/{len(cases)} дошли до LLM"
+
+
+# ── A/B коротких ролей: обвязка ──────────────────────────────────────────────
+
+def test_role_eval_harness_compares_normalized_outputs(monkeypatch):
+    import asyncio
+    from evals import role_eval
+
+    async def fn_factory(text):
+        # «модель» задаётся переменной окружения роли — как в боте
+        m = __import__("os").environ["MODEL_PARSE"]
+        return {"title": text.upper() if m == "A" else text.upper() + " ", "confidence": "high" if m == "A" else "low"}
+
+    monkeypatch.setattr(role_eval, "_functions", lambda: {"parse_task": ("parse", fn_factory)})
+    res = asyncio.run(role_eval.run({"parse_task": ["один", "два"]}, "A", "B"))
+    assert res["parse_task"]["agree_pct"] == 100.0               # пробелы и «volatile»-поля не считаются расхождением
+    assert res["_overall"]["n"] == 2 and res["_diffs"] == []
+    assert "MODEL_PARSE" not in __import__("os").environ        # переменная роли после прогона убрана
