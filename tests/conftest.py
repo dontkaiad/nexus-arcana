@@ -46,6 +46,91 @@ for k, v in _TEST_ENV.items():
 collect_ignore = ["e2e"]
 
 
+# Приложение (pydantic-модели с полями date/datetime) импортируем ДО любой заморозки: иначе модель, впервые
+# собранная под freezegun, видит подменённый datetime.date и падает «Unable to generate pydantic-core schema».
+try:  # noqa: SIM105
+    import miniapp.backend.app  # noqa: F401
+    from pydantic import BaseModel as _BM
+
+    # Модели с отложенными аннотациями (`from __future__ import annotations`) достраиваются лениво — достроим сейчас,
+    # пока `date`/`datetime` в модулях настоящие (под freezegun имя `date` в модуле — это FakeDate).
+    _seen, _stack = set(), [_BM]
+    while _stack:
+        for _sub in _stack.pop().__subclasses__():
+            if _sub not in _seen:
+                _seen.add(_sub)
+                _stack.append(_sub)
+                try:
+                    _sub.model_rebuild()
+                except Exception:
+                    pass
+    # FastAPI строит TypeAdapter поля тела/параметров лениво, при ПЕРВОМ запросе. Под freezegun `datetime.date`
+    # подменён, и pydantic не узнаёт свой же тип date. Поэтому «прогреваем» адаптеры заранее, на настоящих часах.
+    from miniapp.backend.app import app as _app
+
+    def _warm(field):
+        try:
+            if field is not None:
+                field._type_adapter  # noqa: B018  (cached_property)
+        except Exception:
+            pass
+
+    try:
+        from fastapi._compat import get_cached_model_fields as _gcmf
+    except Exception:  # pragma: no cover
+        _gcmf = None
+
+    for _r in getattr(_app, "routes", []):
+        _dep = getattr(_r, "dependant", None)
+        _bf = getattr(_r, "body_field", None)
+        _bt = getattr(_bf, "type_", None)
+        if _gcmf and isinstance(_bt, type) and issubclass(_bt, _BM):
+            try:
+                _gcmf(_bt)          # поля модели тела строятся лениво при первом запросе (кеш lru) — греем заранее
+            except Exception:
+                pass
+        _warm(_bf)
+        _warm(getattr(_r, "response_field", None))
+        if _dep is not None:
+            for _group in (_dep.path_params, _dep.query_params, _dep.header_params, _dep.cookie_params, _dep.body_params):
+                for _f in _group:
+                    _warm(_f)
+except Exception:  # pragma: no cover — отдельные наборы тестов могут жить без зависимостей Mini App
+    pass
+
+
+# ── Часы тестов ──────────────────────────────────────────────────────────────
+# Тесты не должны зависеть от даты запуска (раньше CI краснел 1-го числа: периоды бюджета, «сегодня», календарь).
+# Все тесты идут на ЗАМОРОЖЕННЫХ часах (freezegun, tick=True: время идёт вперёд от точки старта, так что таймауты,
+# TTL и сортировки по времени работают). Дата по умолчанию — середина месяца, будний день, 12:00 МСК.
+# TEST_NOW="2026-12-31 09:00:00" — прогнать набор на другой дате (UTC); TEST_REAL_CLOCK=1 — настоящие часы;
+# @pytest.mark.real_clock — настоящие часы для конкретного теста.
+DEFAULT_TEST_NOW = "2026-11-18 09:00:00"          # среда, 12:00 МСК
+
+
+def clock_base():
+    """Точка старта тестовых часов (aware UTC): TEST_NOW / дата по умолчанию, либо настоящее время при TEST_REAL_CLOCK=1.
+    Для констант уровня модуля, которые считаются при импорте теста (до заморозки)."""
+    from datetime import datetime, timezone
+    if os.environ.get("TEST_REAL_CLOCK") == "1":
+        return datetime.now(timezone.utc).replace(microsecond=0)
+    return datetime.fromisoformat(os.environ.get("TEST_NOW", DEFAULT_TEST_NOW)).replace(tzinfo=timezone.utc)
+
+
+def pytest_configure(config):
+    config.addinivalue_line("markers", "real_clock: тест идёт на настоящих часах (без freezegun)")
+
+
+@pytest.fixture(autouse=True)
+def _frozen_clock(request):
+    if os.environ.get("TEST_REAL_CLOCK") == "1" or request.node.get_closest_marker("real_clock"):
+        yield None
+        return
+    from freezegun import freeze_time
+    with freeze_time(os.environ.get("TEST_NOW", DEFAULT_TEST_NOW), tick=True) as frozen:
+        yield frozen
+
+
 @pytest.fixture(autouse=True)
 def _mute_bot_notify():
     """Заглушить notify_user во всех роут-модулях Mini App.

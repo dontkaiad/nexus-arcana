@@ -77,7 +77,10 @@ def test_service_token_mismatch_falls_back_to_guest(_env):
 
 from core.booking.repo import Booking as _Bk  # noqa: E402
 
-_FUT = (datetime.now(UTC) + timedelta(days=3)).replace(microsecond=0)
+# Будущее относительно стартовой точки тестовых часов (tests/conftest.py: freezegun), а не настоящего времени
+from tests.conftest import clock_base  # noqa: E402
+
+_FUT = clock_base() + timedelta(days=3)
 
 
 def _mk_booking(status="confirmed", bid=7, **kw):

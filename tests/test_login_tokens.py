@@ -9,6 +9,9 @@ from __future__ import annotations
 
 import sqlalchemy as sa
 import pytest
+
+# Токены лежат в SQLite с НАСТОЯЩИМ datetime('now'), TTL считает Python — заморозка часов их рассинхронизирует.
+pytestmark = pytest.mark.real_clock
 from sqlalchemy.pool import StaticPool
 
 from core.login_tokens import approve, deny, get_pending
