@@ -262,4 +262,9 @@ AI/LLM engineering proving ground. Architecture, specs, UX decisions, and code r
 are mine; execution is AI-augmented under detailed specs, and every change ships with
 a green test suite.
 
+**Work tracking:** all tasks — bugs, features, tech debt, deferred ideas — live only in
+[GitHub Issues](https://github.com/dontkaiad/nexus-arcana/issues) (labels `bug`, `feature`, `tech-debt`, `priority:*`).
+There are no backlog files in the repository; decisions and their rationale are recorded as ADRs in
+[`docs/CASES/`](docs/CASES/).
+
 By Kai Lark ([@hey_lark](https://t.me/hey_lark))
