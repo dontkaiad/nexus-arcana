@@ -232,6 +232,34 @@ def _kb(slug: str) -> InlineKeyboardMarkup:
 
 # ── Парсеры ───────────────────────────────────────────────────────────────────
 
+_LLM_HEAD_CHARS = 400      # сколько символов ввода видит парсер
+_PARSE_MAX_TOKENS = 600    # запас под JSON
+_LONG_FALLBACK_MIN = 300   # длиннее — при битом JSON не переспрашиваем
+
+
+def _fallback_long_work(text: str) -> dict:
+    """Детерминированный разбор длинного ввода, когда LLM-JSON сломан:
+    title = первая строка (≤80), notes = весь текст, category по ключевому слову."""
+    from arcana.handlers.works import WORK_CATEGORY_MAP
+
+    first = next((ln.strip() for ln in text.splitlines() if ln.strip()), text.strip())
+    low = first.lower()
+    category = next((v for k, v in WORK_CATEGORY_MAP.items() if k in low), None)
+    return {
+        "title": first[:80],
+        "category": category,
+        "priority": "Можно потом",
+        "work_type": "🌟 Личная",
+        "client_name": None,
+        "deadline": None,
+        "reminder": None,
+        "repeat": "Нет",
+        "repeat_time": None,
+        "day_of_week": None,
+        "notes": text.strip(),
+    }
+
+
 async def _parse_work_text(text: str, tz_offset: int) -> dict:
     """Первичный парсинг через Haiku — короткая структура, Sonnet излишне.
 
@@ -247,11 +275,23 @@ async def _parse_work_text(text: str, tz_offset: int) -> dict:
     tz = timezone(timedelta(hours=tz_offset))
     now_str = datetime.now(tz).strftime("%Y-%m-%d %H:%M")
     system = PARSE_WORK_SYSTEM + f"\n\nСейчас: {now_str} (UTC+{tz_offset})"
+    # В LLM уходит только «голова» (название/дата/клиент); хвост кодом → notes.
+    head, tail = text, ""
+    if len(text) > _LLM_HEAD_CHARS:
+        head, tail = text[:_LLM_HEAD_CHARS], text[_LLM_HEAD_CHARS:].strip()
+    usage: dict = {}
     raw = await ask_claude(
-        text, system=system, max_tokens=300,
+        head, system=system, max_tokens=_PARSE_MAX_TOKENS,
         role="parse",
         temperature=0,
+        usage_out=usage,
     )
+    # ask_claude отдаёт только текст (без stop_reason): output_tokens >= лимита ≡ max_tokens.
+    if usage.get("output_tokens", 0) >= _PARSE_MAX_TOKENS:
+        logger.warning(
+            "work parse hit max_tokens (%s): ответ обрезан, len(text)=%s",
+            _PARSE_MAX_TOKENS, len(text),
+        )
     raw = raw.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
     data = json.loads(raw)
 
@@ -262,6 +302,8 @@ async def _parse_work_text(text: str, tz_offset: int) -> dict:
     client_name = data.get("client_name") or None
     type_raw = (data.get("type") or "личная").lower()
     notes = data.get("notes") or None
+    if tail:
+        notes = f"{notes}\n{tail}" if notes else tail
 
     priority = WORK_PRIORITY_MAP.get(priority_raw, "Можно потом")
     category = WORK_CATEGORY_MAP.get(category_raw) if category_raw else None
@@ -412,11 +454,18 @@ async def handle_add_work_preview(
         try:
             data = await _parse_work_text(text, tz_offset)
         except json.JSONDecodeError:
-            # Короткий/неоднозначный ввод без структуры — сохраняем фрагмент
-            # как pending и просим Кай дописать детали. В ⚠️ Ошибки НЕ пишем,
-            # это нормальный пользовательский кейс, не сбой.
-            await _save_partial_pending(message, text, user_id)
-            return
+            if len(text) > _LONG_FALLBACK_MIN:
+                # Длинный детальный ввод — не «короткий/неоднозначный»: не переспрашиваем.
+                logger.warning(
+                    "work parse: битый JSON на длинном вводе (%s симв.) — fallback", len(text)
+                )
+                data = _fallback_long_work(text)
+            else:
+                # Короткий/неоднозначный ввод без структуры — сохраняем фрагмент
+                # как pending и просим Кай дописать детали. В ⚠️ Ошибки НЕ пишем,
+                # это нормальный пользовательский кейс, не сбой.
+                await _save_partial_pending(message, text, user_id)
+                return
         # Парсер вернул JSON, но без сути (дефолтный title + нет категории/клиента/дедлайна)
         # — фрагментарный ввод, просим уточнить.
         is_partial = (
