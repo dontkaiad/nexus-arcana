@@ -100,3 +100,44 @@ def test_private_outputs_can_only_go_to_data_evals(tmp_path):
 def test_gitignore_covers_private_eval_dir():
     gi = (common.ROOT / ".gitignore").read_text(encoding="utf-8")
     assert "/data/evals/" in gi
+
+
+# ── сбор сообщений для эвала (опт-ин) ────────────────────────────────────────
+
+def test_capture_is_off_by_default_and_writes_only_when_enabled(tmp_path, monkeypatch):
+    from core import classifier
+    target = common.PRIVATE / "captured_messages.jsonl"
+    before = target.read_text(encoding="utf-8") if target.exists() else None
+    try:
+        monkeypatch.delenv("EVAL_CAPTURE", raising=False)
+        classifier._capture_for_eval("секретное сообщение ноль")
+        assert (target.read_text(encoding="utf-8") if target.exists() else None) == before     # выключено → не пишет
+        monkeypatch.setenv("EVAL_CAPTURE", "1")
+        classifier._capture_for_eval("проверочное сообщение раз")
+        rows = [json.loads(l) for l in target.read_text(encoding="utf-8").splitlines() if l.strip()]
+        assert rows[-1]["text"] == "проверочное сообщение раз" and set(rows[-1]) == {"ts", "text"}   # user_id не пишем
+        got = classifier_eval.collect_captured(str(target), 10)
+        assert got[-1]["text"] == "проверочное сообщение раз"
+    finally:
+        if before is None:
+            target.unlink(missing_ok=True)
+        else:
+            target.write_text(before, encoding="utf-8")
+
+
+def test_synthetic_ab_cases_cover_the_llm_path():
+    """Синтетические сообщения для A/B должны идти в LLM (а не ловиться regex-префильтрами) — иначе A/B ничего не меряет."""
+    import asyncio
+    from unittest.mock import AsyncMock
+    from core import classifier
+    cases = common.load_jsonl(str(common.SYNTHETIC / "classifier_ab_cases.jsonl"))
+    assert len(cases) >= 40
+    called = AsyncMock(return_value='[{"type":"unknown"}]')
+    reached = 0
+    with patch.object(classifier, "ask_claude", called), \
+         patch.object(classifier, "_known_budget_positions", AsyncMock(return_value=([], []))):
+        for c in cases:
+            before = called.await_count
+            asyncio.run(classifier.classify(c["text"], tz_offset=3, user_id=""))
+            reached += int(called.await_count > before)
+    assert reached / len(cases) >= 0.7, f"только {reached}/{len(cases)} дошли до LLM"

@@ -1,6 +1,6 @@
 """evals/classifier_eval.py — классификатор сообщений: A/B-реплей двух моделей и офлайн-проверка детерминированных ветвей.
 
-  collect  — из логов бота (stdin) выбрать N последних РАЗНЫХ входящих сообщений → JSONL (приватно: data/evals/).
+  collect  — из логов бота (stdin) или из файла сбора (--captured, EVAL_CAPTURE=1) выбрать N последних РАЗНЫХ входящих сообщений → JSONL (приватно: data/evals/).
              docker logs --since 30d nexus-bot 2>&1 | python -m evals.classifier_eval collect --limit 100
   run      — прогнать каждое сообщение через classify() моделью A и моделью B (роль classify, MODEL_CLASSIFY в окружении):
              % совпадений по типам и «строго» (весь JSON), долю сообщений, дошедших до LLM, латентность p50/p95, токены, $.
@@ -22,6 +22,18 @@ from unittest.mock import AsyncMock, patch
 from evals.common import PRIVATE, SYNTHETIC, dump_jsonl, load_jsonl, pct, percentile, report
 
 _LOG_RE = re.compile(r"classify: input text=(?P<q>'(?:[^'\\]|\\.)*'|\"(?:[^\"\\]|\\.)*\")")
+
+
+def collect_captured(path: str, limit: int) -> List[Dict[str, Any]]:
+    """Сообщения из data/evals/captured_messages.jsonl (включается EVAL_CAPTURE=1): последние N разных."""
+    seen, out = set(), []
+    for r in load_jsonl(path):
+        t = (r.get("text") or "").strip()
+        if len(t) < 3 or t in seen:
+            continue
+        seen.add(t)
+        out.append({"text": t, "note": "captured"})
+    return out[-limit:]
 
 
 def collect(stream, limit: int) -> List[Dict[str, Any]]:
@@ -129,6 +141,7 @@ def main() -> int:
     ap = argparse.ArgumentParser(prog="evals.classifier_eval")
     sub = ap.add_subparsers(dest="cmd", required=True)
     c = sub.add_parser("collect"); c.add_argument("--limit", type=int, default=100)
+    c.add_argument("--captured", default="", help="вместо логов (stdin) — файл data/evals/captured_messages.jsonl")
     r = sub.add_parser("run")
     r.add_argument("--cases", default=str(PRIVATE / "classifier_cases.jsonl"))
     r.add_argument("--a", default="claude-haiku-4-5-20251001"); r.add_argument("--b", default="claude-haiku-5-5")
@@ -138,7 +151,8 @@ def main() -> int:
     a = ap.parse_args()
     if a.cmd == "collect":
         import sys
-        n = dump_jsonl(collect(sys.stdin, a.limit), "-")
+        rows = collect_captured(a.captured, a.limit) if a.captured else collect(sys.stdin, a.limit)
+        n = dump_jsonl(rows, "-")
         print(f"собрано {n}", file=sys.stderr)
     elif a.cmd == "run":
         import sys

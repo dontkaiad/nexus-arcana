@@ -862,9 +862,30 @@ async def _parse_edit_record(text: str) -> dict:
         return {"type": "edit_record", "record_hint": text, "edits": [{"field": "unknown", "new_value": ""}]}
 
 
+def _capture_for_eval(text: str) -> None:
+    """ОПТ-ИН (EVAL_CAPTURE=1): дописать входящее сообщение в data/evals/captured_messages.jsonl — сырьё для эвала
+    классификатора (A/B двух моделей на реальных сообщениях). По умолчанию выключено. Файл живёт в постоянном томе
+    /app/data на сервере и в git не попадает (/data/evals/ в .gitignore); user_id не пишем. Сбой записи молча игнорируем.
+    Выключить и удалить: EVAL_CAPTURE=0 и rm data/evals/captured_messages.jsonl."""
+    import os
+    if os.environ.get("EVAL_CAPTURE", "0").strip().lower() not in ("1", "true", "on", "yes"):
+        return
+    try:
+        import json
+        import time
+        from pathlib import Path
+        p = Path(__file__).resolve().parent.parent / "data" / "evals" / "captured_messages.jsonl"
+        p.parent.mkdir(parents=True, exist_ok=True)
+        with open(p, "a", encoding="utf-8") as f:
+            f.write(json.dumps({"ts": int(time.time()), "text": text[:600]}, ensure_ascii=False) + "\n")
+    except Exception:
+        pass
+
+
 async def classify(text: str, tz_offset: int = 3, user_id: str = "") -> list[dict]:
     """Классифицировать текст через Claude."""
     logger.info("classify: input text=%r tz_offset=%d", text[:100], tz_offset)
+    _capture_for_eval(text)
 
     # ПЕРВЫЙ pre-фильтр: деактивация записи памяти ("неактуально", "неактуально 1")
     if _DEACTIVATE_RE.match(text):
