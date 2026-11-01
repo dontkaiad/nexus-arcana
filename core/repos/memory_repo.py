@@ -73,10 +73,11 @@ class MemoryRepo:
         related_to: str,
         source: str,
         user_id: str,
+        cat_id: Optional[int] = None,
     ) -> Optional[str]:
         """Lower-level add (used by save_memory directly)."""
         try:
-            return await self._pg.add(fact, key, category, scope, related_to, source, user_id)
+            return await self._pg.add(fact, key, category, scope, related_to, source, user_id, cat_id=cat_id)
         except Exception as e:
             logger.error("MemoryRepo.add: %s", e)
             return None

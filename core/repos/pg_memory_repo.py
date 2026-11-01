@@ -58,6 +58,7 @@ class Memory:
     date: str = ""           # created_at[:10]
     updated_at: str = ""     # ISO string from updated_at column
     person_id: Optional[int] = None   # People domain (ADR-0027)
+    cat_id: Optional[int] = None      # Cats subject (миграция *_cats_subject)
     review_status: str = "confirmed"  # pending | confirmed | rejected
     source_quote: str = ""            # провенанс факта о человеке (цитата / платформа / дата сообщения)
     source_platform: str = ""
@@ -85,6 +86,7 @@ def _row_to_memory(row) -> Memory:
         date=date_str,
         updated_at=updated_str,
         person_id=getattr(row, "person_id", None),
+        cat_id=getattr(row, "cat_id", None),
         review_status=getattr(row, "review_status", None) or "confirmed",
         source_quote=getattr(row, "source_quote", None) or "",
         source_platform=getattr(row, "source_platform", None) or "",
@@ -106,6 +108,7 @@ def _add_sync(
     review_status: str = "confirmed",
     source_quote: Optional[str] = None,
     provenance: Optional[dict] = None,
+    cat_id: Optional[int] = None,
 ) -> str:
     with get_engine().begin() as conn:
         result = conn.execute(
@@ -113,6 +116,7 @@ def _add_sync(
                 **(provenance or {}),
                 source_quote=source_quote,
                 person_id=person_id,
+                cat_id=cat_id,
                 review_status=review_status or "confirmed",
                 fact_text=fact,
                 key_name=key or "",
@@ -140,6 +144,7 @@ def _upsert_sync(
     review_status: str = "confirmed",
     source_quote: Optional[str] = None,
     provenance: Optional[dict] = None,
+    cat_id: Optional[int] = None,
 ) -> Tuple[str, bool]:
     """Find existing by key (+ owner), update; else create. Returns (id, was_updated).
 
@@ -170,6 +175,8 @@ def _upsert_sync(
         if row:
             mem_id = row[0]
             extra = {"person_id": person_id} if person_id is not None else {}
+            if cat_id is not None:
+                extra["cat_id"] = cat_id
             if source_quote is not None:
                 extra["source_quote"] = source_quote
             extra.update(provenance or {})
@@ -207,7 +214,7 @@ def _upsert_sync(
                 logger.warning("memory upsert: embedding NULL-reset failed for %s: %s", mem_id, e)
             return str(mem_id), True
     mem_id = _add_sync(fact, key, category, scope, related_to, source, user_id,
-                       person_id, review_status, source_quote, provenance)
+                       person_id, review_status, source_quote, provenance, cat_id)
     return mem_id, False
 
 
@@ -535,10 +542,11 @@ class PgMemoryRepo:
         index: bool = True,
         source_quote: Optional[str] = None,
         provenance: Optional[dict] = None,
+        cat_id: Optional[int] = None,
     ) -> str:
         mem_id = await asyncio.to_thread(
             _add_sync, fact, key, category, scope, related_to, source, user_id,
-            person_id, review_status, source_quote, provenance,
+            person_id, review_status, source_quote, provenance, cat_id,
         )
         if mem_id and index:
             _spawn_index(mem_id, fact, related_to, category, person_id)
@@ -558,12 +566,13 @@ class PgMemoryRepo:
         index: bool = True,
         source_quote: Optional[str] = None,
         provenance: Optional[dict] = None,
+        cat_id: Optional[int] = None,
     ) -> Tuple[str, bool]:
         """index=False — не спавнить эмбеддинг (массовый импорт индексирует
         пачками через index_memories_batch)."""
         mem_id, was_updated = await asyncio.to_thread(
             _upsert_sync, fact, key, category, scope, related_to, source, user_id,
-            person_id, review_status, source_quote, provenance,
+            person_id, review_status, source_quote, provenance, cat_id,
         )
         if mem_id and index:
             _spawn_index(mem_id, fact, related_to, category, person_id)
