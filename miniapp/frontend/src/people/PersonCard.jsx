@@ -4,9 +4,11 @@ import FactGroups from './FactGroups'
 import MergePicker from './MergePicker'
 import PersonEdit from './PersonEdit'
 import Accounts from './Accounts'
+import BulkReview from './BulkReview'
+import { EMPTY_FILTER, applyFilter, flatten, regroup } from './bulkFilter'
 import { Btn, Chip, Note, inputStyle, Label } from './parts'
 import {
-  addFact, approveAll, approveFact, eraseFact, errText, getPerson, rejectAll, rejectFact, removeAlias, resetAliases, restoreFact, aliasOk, setFactType,
+  addFact, approveAll, approveFact, eraseFact, errText, getPerson, rejectAll, rejectFact, removeAlias, resetAliases, restoreFact, aliasOk, setFactType, reviewPerson,
 } from './peopleApi'
 import { STATUS_LABEL, TYPE_CHOICES, fmtBirthday, fs, haptic, plural, primaryColors, redText, statusColor, typeMeta } from './ui'
 
@@ -23,6 +25,7 @@ export default function PersonCard({ s, Sheet, id, onBack, onChanged, onStartRev
   const [busy, setBusy] = useState(false)
   const [confirmRej, setConfirmRej] = useState(false)
   const [eraseId, setEraseId] = useState(null)        // факт, для которого ждём второй тап «Стереть»
+  const [flt, setFlt] = useState(EMPTY_FILTER)        // фильтры массового разбора (только карточка «Я»)
 
   const load = useCallback(async () => {
     try { setP(await getPerson(id)); setErr('') } catch (e) { setErr(errText(e)) }
@@ -45,6 +48,11 @@ export default function PersonCard({ s, Sheet, id, onBack, onChanged, onStartRev
     )
   }
   const pend = p.counts?.pending || 0
+  const allFacts = p.is_self ? flatten(p.facts) : []
+  const bulkOn = p.is_self && allFacts.length > 0
+  const SHOW_MAX = 120                                 // сколько фактов рисуем (остальные — только под действие по фильтру)
+  const filteredFacts = bulkOn ? applyFilter(allFacts, flt) : []
+  const shownGroups = bulkOn ? regroup(filteredFacts.slice(0, SHOW_MAX)) : p.facts
   const age = p.age != null ? ` · ${p.age} ${plural(p.age, 'год', 'года', 'лет')}` : ''
 
   return (
@@ -72,7 +80,16 @@ export default function PersonCard({ s, Sheet, id, onBack, onChanged, onStartRev
       {err && <Note s={s} color={redText(s)}>{err}</Note>}
 
       {p.facts.length === 0 && <Note s={s}>Фактов пока нет</Note>}
-      <FactGroups s={s} groups={p.facts} expanded={expanded} onToggle={toggle} showMentions={p.is_self}
+      {bulkOn && (
+        <BulkReview s={s} facts={allFacts} flt={flt} setFlt={setFlt} busy={busy}
+          onApprove={(ids) => act(() => reviewPerson(p.id, { approve: ids }))}
+          onReject={(ids) => act(() => reviewPerson(p.id, { reject: ids }))}
+          onReset={(ids) => act(() => reviewPerson(p.id, { reset: ids }))} />
+      )}
+      {bulkOn && filteredFacts.length > SHOW_MAX && (
+        <Note s={s}>Показано {SHOW_MAX} из {filteredFacts.length}: действия выше применяются ко всем {filteredFacts.length}</Note>
+      )}
+      <FactGroups s={s} groups={shownGroups} expanded={expanded} onToggle={toggle} showMentions={p.is_self}
         onChangeType={(f, t) => act(() => setFactType(p.id, f.id, t))}
         textStyle={(f) => (f.review_status === 'rejected' ? { textDecoration: 'line-through', color: s.tS } : {})}
         left={(f) => (
@@ -130,7 +147,7 @@ export default function PersonCard({ s, Sheet, id, onBack, onChanged, onStartRev
         {p.is_self && pend > 0 && onStartReview && (
           <Btn s={s} kind="primary" onClick={() => onStartReview(p.id)}>Разобрать по одному ({pend})</Btn>
         )}
-        {pend > 0 && (
+        {pend > 0 && !p.is_self && (
           <Btn s={s} kind={p.is_self ? 'ghost' : 'primary'} disabled={busy} onClick={() => act(() => approveAll(p.id))}>✓ Принять все ({pend}){p.is_self ? '' : ' и подтвердить'}</Btn>
         )}
         {!p.is_self && <div style={{ display: 'flex', gap: 8 }}>

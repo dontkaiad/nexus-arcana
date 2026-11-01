@@ -605,3 +605,26 @@ def test_set_fact_type_endpoint_errors(client):
     assert client.post("/api/people/%d/facts/%d/type" % (pid, 999999999), json={"type": "dislikes"}).status_code == 404
     mk_fact(pid, type_="dislikes", n="b2b2b2b2", status="confirmed", text_="x")          # ключ занят
     assert client.post("/api/people/%d/facts/%d/type" % (pid, f), json={"type": "dislikes"}).status_code == 409
+
+
+def test_self_bulk_review_large_lists_is_reversible_and_keeps_card_status(client):
+    """Массовый разбор «Я» (сотни pending): принять / отклонить по спискам id, вернуть на проверку; статус карточки
+    «Я» не меняется; счётчики сходятся; чужой id откатывает всё."""
+    me = mk_person("Кай Тестова", is_self=True, status="confirmed")
+    ids = [mk_fact(me, "likes" if i % 2 else "dislikes", mention_count=1 + i % 4) for i in range(300)]
+    approve, reject, rest = ids[:120], ids[120:220], ids[220:]
+    r = client.post("/api/people/%d/review" % me, json={"approve": approve, "reject": reject})
+    assert r.status_code == 200, r.text
+    assert r.json()["status"] == "confirmed"                                    # статус «Я» не трогается
+    assert r.json()["counts"] == {"pending": 80, "confirmed": 120, "rejected": 100}
+    # обратимо: отклонённые возвращаются на проверку
+    r = client.post("/api/people/%d/review" % me, json={"reset": reject})
+    assert r.json()["counts"] == {"pending": 180, "confirmed": 120, "rejected": 0}
+    assert set(_statuses(me).values()) == {"pending", "confirmed"}
+    # один чужой id → ошибка и полный откат
+    other = mk_person("Чужой")
+    foreign = mk_fact(other)
+    before = _statuses(me)
+    r = client.post("/api/people/%d/review" % me, json={"approve": rest + [foreign]})
+    assert r.status_code in (404, 409, 422)
+    assert _statuses(me) == before
