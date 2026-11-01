@@ -36,7 +36,7 @@ def _gen(monkeypatch, tmp_path):
 
 def _gen_reply(by_group_text):
     """Мок генерации: строит валидный JSON из подготовленных фраз {номер группы: [(фраза, [ids])]}"""
-    return json.dumps({"blocks": [{"group": g, "lines": [{"t": t, "ids": ids} for t, ids in lines]}
+    return json.dumps({"blocks": [{"group": g, "lines": [{"t": t, "n": n, "ids": ids} for t, n, ids in lines]}
                                   for g, lines in by_group_text.items()]}, ensure_ascii=False)
 
 
@@ -73,8 +73,9 @@ def sent(bot):
 
 def test_dislikes_of_homonyms_generated_paragraphs_and_button(world):
     ids = lambda *ks: [world[k] for k in ks]
-    raw = _gen_reply({1: [("опоздания", ids("m1_dis")), ("ходить один", ids("m1_alone"))],
-                      2: [("жару", ids("m2_dis"))]})
+    raw = _gen_reply({1: [("Опоздания", "не любит опозданий", ids("m1_dis")),
+                          ("Одиночество", "не любит ходить один", ids("m1_alone"))],
+                      2: [("Жара", "не любит жару", ids("m2_dis"))]})
     # группы идут в порядке resolve (по id людей): первый — Михаил Тестов, второй — Миша Образцов
     bot = run("что не любит миша", raw)
     text_, kb = sent(bot)
@@ -83,8 +84,9 @@ def test_dislikes_of_homonyms_generated_paragraphs_and_button(world):
     assert "что не любит" in gen_prompt and "не любит опозданий" in gen_prompt
     assert "мать ругала" not in gen_prompt and "пьёт таблетки" not in gen_prompt   # неверно типизированные не входят
     paras = text_.split("\n\n")
-    assert paras[0].startswith("<b>Михаил Тестов (коллега)</b> не любит: опоздания, ходить один.")
-    assert paras[1].startswith("<b>Миша Образцов</b> не любит: жару.") and "добавлено вручную" in text_
+    assert paras[0].startswith("<b>Михаил Тестов (коллега)</b> не любит:\n• <b>Опоздания</b> — не любит опозданий")
+    assert "• <b>Одиночество</b>" in paras[0]
+    assert paras[1].startswith("<b>Миша Образцов</b> не любит:\n• <b>Жара</b>") and "добавлено вручную" in text_
     assert kb is not None and kb.inline_keyboard[0][0].text.startswith("Все факты (")
     assert kb.inline_keyboard[0][0].callback_data.startswith("memall:")
 
@@ -110,10 +112,10 @@ def test_two_facts_generated_and_kb_expands_with_checkboxes(world):
     probe = run("что важно про олю", "[]")
     ids = _group_ids(world, probe)[0]
     assert sorted(ids) == sorted([world["o_imp"], extra])
-    raw = _gen_reply({1: [("аллергия на орехи", [world["o_imp"]]), ("кофеин нельзя", [extra])]})
+    raw = _gen_reply({1: [("Аллергия", "аллергия на орехи", [world["o_imp"]]), ("Кофеин", "нельзя кофеин", [extra])]})
     bot = run("что важно про олю", raw)
     text_, kb = sent(bot)
-    assert text_.startswith("<b>Ольга</b>, важное: аллергия на орехи, кофеин нельзя.")
+    assert text_.startswith("<b>Ольга</b>, важное:\n• <b>Аллергия</b> — аллергия на орехи\n• <b>Кофеин</b> — нельзя кофеин")
     assert "добавлено вручную" in text_                 # у фикстур нет платформы → источник «вручную»
 
     # нажатие «Все факты (2)»
@@ -133,7 +135,7 @@ def test_two_facts_generated_and_kb_expands_with_checkboxes(world):
 def test_button_state_survives_restart(world, tmp_path):
     olya = world["olya"]
     extra = _fact(olya, "important", "нельзя кофеин")
-    raw = _gen_reply({1: [("аллергия на орехи", [world["o_imp"]]), ("кофеин нельзя", [extra])]})
+    raw = _gen_reply({1: [("Аллергия", "аллергия на орехи", [world["o_imp"]]), ("Кофеин", "нельзя кофеин", [extra])]})
     bot = run("что важно про олю", raw)
     _, kb = sent(bot)
     token = kb.inline_keyboard[0][0].callback_data.split(":")[1]
@@ -150,7 +152,7 @@ def test_expired_button_is_polite():
 
 
 def test_grounding_violation_falls_back_to_current_list(world):
-    bad = _gen_reply({1: [("опоздания", [world["m1_dis"], 999999])]})
+    bad = _gen_reply({1: [("Опоздания", "не любит опозданий", [world["m1_dis"], 999999])]})
     bot = run("что не любит миша", bad)
     text_, kb = sent(bot)
     assert "Михаил Тестов (коллега)" in text_ and "не любит опозданий" in text_      # прежний структурный список
@@ -183,13 +185,13 @@ def test_i_dont_eat_generated_only_from_my_facts(world):
     probe = run("что я не ем", "[]")
     ids = _group_ids(world, probe)[0]
     assert set(ids) <= {world["own"], own2}
-    raw = _gen_reply({1: [("сладкое", [world["own"]]), ("рыбу", [own2])]})
+    raw = _gen_reply({1: [("Сладкое", "не ем сладкое", [world["own"]]), ("Рыба", "не ем рыбу", [own2])]})
     bot = run("что я не ем", raw)
     text_, kb = sent(bot)
-    assert text_.startswith("Сладкое, рыбу.") and kb.inline_keyboard[0][0].text.startswith("Все факты")
+    assert text_.startswith("• <b>Сладкое</b> — не ем сладкое\n• <b>Рыба</b> — не ем рыбу") and kb.inline_keyboard[0][0].text.startswith("Все факты")
 
 
 def test_flag_off_keeps_current_behavior(world, monkeypatch):
     monkeypatch.setenv("MEMORY_GENERATE_ANSWER", "0")
-    bot = run("что не любит миша", _gen_reply({1: [("x", [world["m1_dis"]])]}))
+    bot = run("что не любит миша", _gen_reply({1: [("Х", "не любит опозданий", [world["m1_dis"]])]}))
     assert bot.gen_ask.await_count == 0 and "не любит опозданий" in sent(bot)[0]

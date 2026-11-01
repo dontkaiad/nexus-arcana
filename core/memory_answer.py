@@ -10,7 +10,7 @@ Grounding (строгий; любое нарушение → ответ отбр
   4a число во фразе есть в цитируемых фактах
   4b имя/слово с заглавной во фразе есть в цитируемых фактах или в подписи группы
   4c значимое слово (≥5 букв) есть в цитируемых фактах (по основе)
-  5  формат: фраза длиннее max(220, длина цитируемых фактов + 40) символов или > 30 фраз на блок (обычные излишки не ошибка: при сборке режем до
+  5  формат: пункт (тема+пояснение) длиннее max(120, длина цитируемых фактов + 40) символов или > 30 пунктов (обычные излишки не ошибка: при сборке режем до
      6 фраз на группу и ~700 символов, и в «использованные» попадают только оставленные фразы)
   6  пустой ответ при непустом входе («ничего не нашла») — не выдумываем, показываем список
 Дополнительно: таймаут (GEN_TIMEOUT), битый JSON, пустой ответ API.
@@ -53,9 +53,11 @@ MAX_PER_GROUP = 20
 MAX_FACTS = 40
 QUOTE_LEN = 160
 MAX_LINES_PER_BLOCK = 30        # «абсурдно много» — формат нарушен; обычные излишки аккуратно режутся при сборке
-MAX_LINE_CHARS = 220            # одна фраза длиннее — это не фраза, а пересказ
-KEEP_LINES = 6                  # сколько фраз на группу показываем
-KEEP_CHARS = 700                # и сколько символов всего
+MAX_LINE_CHARS = 120            # тема + пояснение длиннее — это не пункт, а пересказ (см. также длину фактов)
+KEEP_LINES = 5                  # сколько пунктов на группу показываем
+KEEP_CHARS = 450                # и сколько символов на ГРУППУ (бюджет не общий: тёзки всегда оба)
+FALLBACK_FACTS = 3              # детерминированная строка группы: столько фактов дословно
+FALLBACK_CUT = 70
 GENERATED_ROUTES = {"direct", "hybrid", "hybrid_self", "hybrid_person"}
 
 Trace = Callable[[str, dict], None]
@@ -63,24 +65,22 @@ Trace = Callable[[str, dict], None]
 SYSTEM = (
     "Ты отвечаешь Кай (она, женский род) на вопрос по её личной памяти. Тебе даны ТОЛЬКО факты; других знаний "
     "о людях у тебя нет.\n"
+    "ЗАДАЧА: сгруппируй факты каждой группы по смысловым кластерам-темам и верни для каждой группы до 5 пунктов. "
+    "Пункт = тема (1–3 слова, нейтральное название кластера, без оценок) + пояснение (2–4 слова, "
+    "словами самих фактов) + ids фактов этого кластера.\n"
     "ПРАВИЛА:\n"
-    "1. Каждая фраза ответа опирается на факты и указывает их id. Ничего не добавляй от себя: не обобщай, не "
-    "оценивай, не делай выводов, не придумывай причин и примеров. Используй слова самих фактов: не подбирай "
-    "синонимов, не поясняй и не переформулируй сложнее, чем в факте.\n"
+    "1. Ничего не добавляй от себя: не оценивай, не делай выводов, не придумывай причин и примеров. Пояснение — "
+    "слова из самих фактов, без синонимов. Тема только называет кластер, но не добавляет новых утверждений.\n"
     "2. Сохраняй смысл и полярность: «не любит» остаётся «не любит», «любит» — «любит», «аллергия» — «аллергия». "
     "Не заменяй слова более сильными или мягкими.\n"
-    "3. Близкие факты объединяй в одну короткую фразу. Фраза — это то, что идёт ПОСЛЕ слов «не любит:» / «любит:» "
-    "/ «важное:», заголовок и вводные слова добавит программа (так что пиши «спешку и смену планов», а не "
-    "«Миша не любит спешку»).\n"
-    "4. Каждая группа (человек) — отдельный блок. Людей из разных групп не смешивай, ids бери только из "
-    "своей группы.\n"
-    "5. Имена, числа и даты бери только из фактов. id в текст фраз не пиши.\n"
+    "3. Каждый пункт указывает ids ТОЛЬКО фактов своего кластера из своей группы. Факты каждого человека — отдельный "
+    "блок; людей из разных групп не смешивай. Каждая группа должна получить хотя бы один пункт.\n"
+    "4. Не больше 5 пунктов на группу. Когда фактов много — выбери самые частые и важные кластеры; остальное "
+    "пользователь откроет кнопкой «Все факты».\n"
+    "5. Имена, числа и даты бери только из фактов. id в текст не пиши.\n"
     "6. Если ни один факт не отвечает на вопрос — верни {\"blocks\": []}.\n"
-    "7. КОРОТКО: на каждую группу не больше 6 фраз и не больше ~500 символов вместе, каждая фраза — словосочетание "
-    "до 12 слов. Когда фактов много, объединяй близкие по смыслу в одну фразу через запятую, а менее значимые "
-    "опускай (полный список пользователь откроет кнопкой «Все факты»).\n"
     "Верни ТОЛЬКО JSON без markdown: "
-    "{\"blocks\":[{\"group\":1,\"lines\":[{\"t\":\"…\",\"ids\":[1,2]}]}]}"
+    "{\"blocks\":[{\"group\":1,\"lines\":[{\"t\":\"тема\",\"n\":\"пояснение\",\"ids\":[1,2]}]}]}"
 )
 
 
@@ -210,21 +210,33 @@ class Check:
     dropped: List[str] = field(default_factory=list)   # номера проверок отброшенных фраз
 
 
-def _line_check(t: str, ids: List[int], g: GGroup, label_stems: set) -> Tuple[str, str]:
-    """Проверки 4a–4c одной фразы. ('', '') — фраза обоснована; иначе (номер проверки, detail)."""
-    src = " ".join(g.by_id()[i].fact for i in ids)
-    if any(n not in set(_NUM.findall(src)) for n in _NUM.findall(t)):                       # 4a — числа
+def _text_check(t: str, src: str, label_stems: set, strict_words: bool) -> Tuple[str, str]:
+    """Проверки текста против цитируемых фактов: 4a числа, 4b имена с заглавной, 4c значимые слова (только для
+    strict_words — пояснение; тема лишь называет кластер, её слова не обязаны быть в фактах)."""
+    if any(n not in set(_NUM.findall(src)) for n in _NUM.findall(t)):
         return "4a", ""
     words = _WORD.findall(t)
     src4 = _stems(src, 4) | label_stems
-    for w in words[1:]:                                                                      # 4b — имена с заглавной
+    for w in words[1:]:
         if len(w) >= 2 and w[0].isupper() and not w.isdigit() and _stem(w, 4) not in src4:
             return "4b", ""
-    src_stems = _stems(src, 4)
-    for w in words:                                                                          # 4c — значимые слова
-        lw = w.lower().replace("ё", "е")
-        if len(lw) >= 5 and not lw.isdigit() and lw not in _FUNC_WORDS and _stem(lw, 4) not in src_stems:
-            return "4c", f"word_len={len(lw)}"
+    if strict_words:
+        src_stems = _stems(src, 4)
+        for w in words:
+            lw = w.lower().replace("ё", "е")
+            if len(lw) >= 5 and not lw.isdigit() and lw not in _FUNC_WORDS and _stem(lw, 4) not in src_stems:
+                return "4c", f"word_len={len(lw)}"
+    return "", ""
+
+
+def _line_check(theme: str, note: str, ids: List[int], g: GGroup, label_stems: set) -> Tuple[str, str]:
+    """Проверки 4a–4c одного пункта. ('', '') — обоснован; иначе (номер проверки, detail)."""
+    src = " ".join(g.by_id()[i].fact for i in ids)
+    chk, d = _text_check(theme, src, label_stems, strict_words=False)
+    if chk:
+        return chk, d
+    if note:
+        return _text_check(note, src, label_stems, strict_words=True)
     return "", ""
 
 
@@ -250,7 +262,8 @@ def validate(data, groups: List[GGroup], has_input: bool = True) -> Check:
         label_stems = _stems(g.label, 4)
         kept = []
         for ln in b["lines"]:
-            if not isinstance(ln, dict) or not isinstance(ln.get("t"), str) or not isinstance(ln.get("ids"), list):
+            if (not isinstance(ln, dict) or not isinstance(ln.get("t"), str) or not isinstance(ln.get("ids"), list)
+                    or not isinstance(ln.get("n", ""), str)):
                 return Check(False, "1")
             ids = ln["ids"]
             if not all(isinstance(i, int) and not isinstance(i, bool) for i in ids):
@@ -258,15 +271,15 @@ def validate(data, groups: List[GGroup], has_input: bool = True) -> Check:
             foreign = [i for i in ids if i not in g.ids()]
             if foreign:                                       # чужой id — признак, что модель потеряла опору: всё прочь
                 return Check(False, "2", bad_ids=foreign)
-            t = ln["t"].strip()
-            # фраза не может быть заметно длиннее фактов, которые пересказывает (длинные факты → длинная фраза)
+            t, n = ln["t"].strip(), (ln.get("n") or "").strip()
+            # пункт не может быть заметно длиннее фактов, которые пересказывает
             cited = sum(len(g.by_id()[i].fact) for i in ids if i in g.ids())
-            if len(t) > max(MAX_LINE_CHARS, cited + 40):
-                return Check(False, "5", detail=f"line_chars={len(t)}")
-            if not ids:
+            if len(t) + len(n) > max(MAX_LINE_CHARS, cited + 40):
+                return Check(False, "5", detail=f"line_chars={len(t) + len(n)}")
+            if not ids or not t:
                 dropped.append(("3", [], ""))
                 continue
-            chk, detail = _line_check(t, ids, g, label_stems)
+            chk, detail = _line_check(t, n, ids, g, label_stems)
             if chk:
                 dropped.append((chk, list(ids), detail))
                 continue
@@ -295,31 +308,49 @@ def _lead(types: Sequence[str]) -> str:
     return ""
 
 
+def _fallback_group(g: GGroup, types: Sequence[str]) -> Tuple[str, List[int]]:
+    """Детерминированная строка группы, когда от модели по ней ничего не осталось: первые факты ДОСЛОВНО
+    (без LLM, поэтому всегда обоснованы). Тёзки обязаны присутствовать оба — хотя бы так."""
+    shown = g.facts[:FALLBACK_FACTS]
+    rows = ["• " + escape(f.fact if len(f.fact) <= FALLBACK_CUT else f.fact[:FALLBACK_CUT].rstrip() + "…") for f in shown]
+    rest = len(g.facts) - len(shown)
+    if rest > 0:
+        rows.append(f"<i>и ещё {rest} — в «Все факты»</i>")
+    head = f"<b>{escape(g.label)}</b>{escape(_lead(types))}:\n" if g.label else ""
+    return head + "\n".join(rows), [f.id for f in shown]
+
+
 def assemble(data: dict, groups: List[GGroup], types: Sequence[str]) -> Tuple[str, List[int]]:
-    """Текст ответа и id реально показанных фраз. Излишки по размеру режем здесь: это подача, а не grounding."""
-    by_n = {g.n: g for g in groups}
-    paras = []
+    """Текст ответа и id реально показанных пунктов. Формат группы:
+        <b>Имя</b> не любит:
+        • <b>тема</b> — пояснение
+    До KEEP_LINES пунктов и KEEP_CHARS символов НА ГРУППУ (излишки режем здесь — это подача, не grounding).
+    Группа, по которой модель ничего не вернула или все пункты не прошли проверку, не пропадает: для неё
+    детерминированная строка из первых фактов дословно."""
+    by_group = {b["group"]: b for b in data["blocks"]}
+    paras: List[str] = []
     shown: List[int] = []
-    budget = KEEP_CHARS
-    for b in data["blocks"]:
-        g = by_n[b["group"]]
-        items = []
-        for ln in b["lines"]:
-            t = ln["t"].strip().rstrip(".,;")
+    for g in groups:
+        b = by_group.get(g.n)
+        bullets: List[str] = []
+        budget = KEEP_CHARS
+        for ln in (b["lines"] if b else []):
+            t, n = ln["t"].strip().rstrip(".,;"), (ln.get("n") or "").strip().rstrip(".,;")
             if not t:
                 continue
-            if len(items) >= KEEP_LINES or (items and budget - len(t) < 0):
+            row = f"• <b>{escape(t)}</b>" + (f" — {escape(n)}" if n else "")
+            if len(bullets) >= KEEP_LINES or (bullets and budget - len(t) - len(n) < 0):
                 break
-            items.append(t)
-            budget -= len(t)
+            bullets.append(row)
+            budget -= len(t) + len(n)
             shown.extend(ln["ids"])
-        if not items:
-            continue
-        body = ", ".join(items)
-        if g.label:
-            paras.append(f"<b>{escape(g.label)}</b>{escape(_lead(types))}: {escape(body)}.")
+        if bullets:
+            head = f"<b>{escape(g.label)}</b>{escape(_lead(types))}:\n" if g.label else ""
+            paras.append(head + "\n".join(bullets))
         else:
-            paras.append(escape(body[:1].upper() + body[1:]) + ".")
+            text, ids = _fallback_group(g, types)
+            paras.append(text)
+            shown.extend(ids)
     return "\n\n".join(paras), sorted(set(shown))
 
 

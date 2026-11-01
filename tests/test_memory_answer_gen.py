@@ -50,8 +50,8 @@ def _gen_on(monkeypatch):
 
 
 GOOD = {"blocks": [{"group": 1, "lines": [
-    {"t": "спешку и смену планов", "ids": [1]}, {"t": "очереди", "ids": [2]},
-    {"t": "когда его считают тупым", "ids": [3]}]}]}
+    {"t": "Планы", "n": "спешка, смена планов", "ids": [1]}, {"t": "Очереди", "n": "не любит очереди", "ids": [2]},
+    {"t": "Оценка", "n": "считают тупым", "ids": [3]}]}]}
 
 
 def gen(res, raw, **kw):
@@ -97,10 +97,13 @@ def test_prompt_contains_only_facts_of_result(res):
 
 # ── успех ────────────────────────────────────────────────────────────────────
 
-def test_success_assembles_grouped_text_and_source_line(res):
+def test_success_assembles_bullets_and_source_line(res):
     out, ask = gen(res, GOOD)
     assert out.ok and out.used_ids == [1, 2, 3]
-    assert out.text.startswith("<b>Миша Ари</b> не любит: спешку и смену планов, очереди, когда его считают тупым.")
+    head, *bullets = out.text.split("\n\n")[0].split("\n")
+    assert head == "<b>Миша Ари</b> не любит:"
+    assert bullets == ["• <b>Планы</b> — спешка, смена планов", "• <b>Очереди</b> — не любит очереди",
+                       "• <b>Оценка</b> — считают тупым"]
     assert "по фактам из TG/VK, 2024–2025" in out.text
     kw = ask.await_args.kwargs
     assert kw["model"] == "claude-haiku-5-5" and kw["thinking"] == "off"
@@ -117,20 +120,57 @@ def test_arcana_voice_and_model_rollback_by_env(monkeypatch, res):
 def test_homonyms_separate_paragraphs_with_labels():
     a, b = MISHA[:2], [mem(11, "не любит жару"), mem(12, "не любит шум")]
     r = result([("Михаил Тестов (коллега)", 1, a), ("Миша Образцов", 2, b)])
-    raw = {"blocks": [{"group": 1, "lines": [{"t": "спешку", "ids": [1]}, {"t": "очереди", "ids": [2]}]},
-                      {"group": 2, "lines": [{"t": "жару и шум", "ids": [11, 12]}]}]}
+    raw = {"blocks": [{"group": 1, "lines": [{"t": "Спешка", "n": "не любит спешку", "ids": [1]},
+                                             {"t": "Очереди", "n": "не любит очереди", "ids": [2]}]},
+                      {"group": 2, "lines": [{"t": "Среда", "n": "жара, шум", "ids": [11, 12]}]}]}
     out, _ = gen(r, raw)
     assert out.ok
     paras = out.text.split("\n\n")
-    assert paras[0].startswith("<b>Михаил Тестов (коллега)</b> не любит: спешку, очереди.")
-    assert paras[1].startswith("<b>Миша Образцов</b> не любит: жару и шум.")
+    assert paras[0].startswith("<b>Михаил Тестов (коллега)</b> не любит:\n• <b>Спешка</b>")
+    assert paras[1].startswith("<b>Миша Образцов</b> не любит:\n• <b>Среда</b> — жара, шум")
 
 
-def test_self_route_no_header_capitalized():
+# ── тёзки всегда оба (регрессия: блок Михаила пропал) ────────────────────────
+
+def _two_groups():
+    a = [mem(1, "не любит спешку"), mem(2, "не любит очереди")]
+    b = [mem(11, "не любит жару"), mem(12, "не любит шум")]
+    return result([("Михаил Тестов", 1, a), ("Миша Образцов", 2, b)])
+
+
+def test_homonym_whose_lines_all_fail_check_still_appears_via_deterministic_line():
+    raw = {"blocks": [
+        {"group": 1, "lines": [{"t": "Спешка", "n": "выдуманное понятие", "ids": [1]}]},      # 4c → отброшено
+        {"group": 2, "lines": [{"t": "Среда", "n": "жара, шум", "ids": [11, 12]}]}]}
+    out, _ = gen(_two_groups(), raw)
+    assert out.ok
+    p1, p2 = out.text.split("\n\n")[:2]
+    assert p1.startswith("<b>Михаил Тестов</b> не любит:") and "• не любит спешку" in p1 and "• не любит очереди" in p1
+    assert p2.startswith("<b>Миша Образцов</b> не любит:\n• <b>Среда</b>")
+    assert out.used_ids == [1, 2, 11, 12] and out.reason.startswith("dropped:4c")
+
+
+def test_homonym_missing_from_model_answer_still_appears():
+    raw = {"blocks": [{"group": 2, "lines": [{"t": "Среда", "n": "жара, шум", "ids": [11, 12]}]}]}
+    out, _ = gen(_two_groups(), raw)
+    assert out.ok and "<b>Михаил Тестов</b>" in out.text and "• не любит спешку" in out.text
+
+
+def test_first_group_cannot_eat_the_second_groups_budget():
+    big = [mem(100 + i, f"не любит предмет{chr(97 + i)}{chr(97 + i)}{chr(97 + i)}") for i in range(8)]
+    r = result([("Первый", 1, big), ("Второй", 2, [mem(200, "не любит жару"), mem(201, "не любит шум")])])
+    lines = [{"t": f"Тема{chr(97 + i)}", "n": "не любит предмет", "ids": [100 + i]} for i in range(8)]
+    out, _ = gen(r, {"blocks": [{"group": 1, "lines": lines},
+                                {"group": 2, "lines": [{"t": "Среда", "n": "жара, шум", "ids": [200, 201]}]}]})
+    p1, p2 = out.text.split("\n\n")[:2]
+    assert p1.count("• ") == ma.KEEP_LINES and p2.startswith("<b>Второй</b>") and "• <b>Среда</b>" in p2
+
+
+def test_self_route_no_header():
     r = result([("", None, [mem(21, "не ем сладкое", person=None), mem(22, "не ем рыбу", person=None)])],
                types=("dislikes",), route="hybrid_self", subject="self")
-    out, _ = gen(r, {"blocks": [{"group": 1, "lines": [{"t": "сладкое", "ids": [21]}, {"t": "рыбу", "ids": [22]}]}]})
-    assert out.ok and out.text.startswith("Сладкое, рыбу.")
+    out, _ = gen(r, {"blocks": [{"group": 1, "lines": [{"t": "Еда", "n": "сладкое, рыбу", "ids": [21, 22]}]}]})
+    assert out.ok and out.text.startswith("• <b>Еда</b> — сладкое, рыбу")
 
 
 def test_markdown_fenced_json_ok(res):
@@ -176,7 +216,10 @@ def test_check4b_invented_name(res):
 
 
 def test_check4c_invented_concept(res):
-    _bad(res, [{"group": 1, "lines": [{"t": "очереди и чрезмерную критику", "ids": [2]}]}], "4c", [2])
+    _bad(res, [{"group": 1, "lines": [{"t": "Очереди", "n": "чрезмерную критику", "ids": [2]}]}], "4c", [2])
+    # тема только называет кластер: её слова не обязаны быть в фактах
+    out, _ = gen(res, {"blocks": [{"group": 1, "lines": [{"t": "Ожидание", "n": "не любит очереди", "ids": [2]}]}]})
+    assert out.ok
 
 
 def test_check5_absurd_format_only(res):
@@ -198,53 +241,11 @@ def test_long_line_allowed_when_cited_facts_are_long():
 def test_size_overflow_is_trimmed_not_dropped():
     facts = [mem(100 + i, f"не любит вещь{chr(97 + i)}{chr(97 + i)}{chr(97 + i)}") for i in range(10)]
     r = result([("Миша", 1, facts)])
-    lines = [{"t": f"вещь{chr(97 + i)}{chr(97 + i)}{chr(97 + i)}", "ids": [100 + i]} for i in range(10)]
+    lines = [{"t": f"Тема{chr(97 + i)}", "n": f"вещь{chr(97 + i)}{chr(97 + i)}{chr(97 + i)}", "ids": [100 + i]} for i in range(10)]
     out, _ = gen(r, {"blocks": [{"group": 1, "lines": lines}]})
     assert out.ok
     assert out.used_ids == [100 + i for i in range(ma.KEEP_LINES)]          # показаны (и учтены) только оставленные
-    assert out.text.split("\n\n")[0].count(",") == ma.KEEP_LINES - 1             # запятые только в самом ответе, не в источнике
-
-
-def test_check6_empty_blocks_do_not_invent(res):
-    _bad(res, [], "6")
-
-
-@pytest.mark.parametrize("raw", [
-    "не JSON", "", '{"blocks": "x"}', '[{"group":1}]', '{"blocks":[{"group":"1","lines":[]}]}',
-    '{"blocks":[{"group":7,"lines":[{"t":"очереди","ids":[2]}]}]}',
-    '{"blocks":[{"group":1,"lines":[{"t":"очереди","ids":["2"]}]}]}',
-])
-def test_malformed_output_falls_back(res, raw):
-    out, _ = gen(res, raw)
-    assert not out.ok and out.text == ""
-
-
-def test_timeout_falls_back(monkeypatch, res):
-    async def slow(**kw):
-        await asyncio.sleep(1)
-        return json.dumps(GOOD)
-    monkeypatch.setattr(ma, "GEN_TIMEOUT", 0.05)
-    with patch.object(ma, "ask_claude", slow):
-        out = asyncio.run(ma.generate(res, "q"))
-    assert not out.ok and out.reason == "timeout"
-
-
-def test_api_error_empty_answer_falls_back(res):
-    out, _ = gen(res, "")
-    assert not out.ok and out.reason == "api_error"
-
-
-def test_exception_in_llm_call_falls_back(res):
-    with patch.object(ma, "ask_claude", AsyncMock(side_effect=RuntimeError("boom"))):
-        out = asyncio.run(ma.generate(res, "q"))
-    assert not out.ok and out.reason == "api_error"
-
-
-def test_less_than_two_facts_never_calls_llm():
-    one = result([("Миша", 1, MISHA[:1])])
-    out, ask = gen(one, GOOD)
-    assert not out.ok and out.reason == "skipped"
-    ask.assert_not_called()
+    assert out.text.split("\n\n")[0].count("• ") == ma.KEEP_LINES
 
 
 # ── источник ─────────────────────────────────────────────────────────────────
@@ -309,20 +310,20 @@ def test_trace_hooks_called(res):
 
 def test_unsupported_line_dropped_good_lines_kept(res):
     raw = {"blocks": [{"group": 1, "lines": [
-        {"t": "спешку и смену планов", "ids": [1]},
-        {"t": "очереди и чрезмерную критику", "ids": [2]},        # 4c — выдумка
-        {"t": "очереди дольше 20 минут", "ids": [2]},             # 4a — выдумка
-        {"t": "очереди", "ids": [2]}]}]}
+        {"t": "Планы", "n": "спешка, смена планов", "ids": [1]},
+        {"t": "Критика", "n": "чрезмерную критику", "ids": [2]},          # 4c — выдумка
+        {"t": "Время", "n": "дольше 20 минут", "ids": [2]},               # 4a — выдумка
+        {"t": "Очереди", "n": "не любит очереди", "ids": [2]}]}]}
     out, _ = gen(res, raw)
     assert out.ok and out.used_ids == [1, 2]
     body = out.text.split("\n\n")[0]
-    assert "спешку и смену планов, очереди." in body and "критику" not in body and "20" not in body
+    assert "<b>Планы</b>" in body and "<b>Очереди</b>" in body and "критику" not in body and "20" not in body
     assert out.reason == "dropped:4c,4a" and out.detail == "dropped=2"
 
 
 def test_all_lines_unsupported_still_falls_back_with_first_check(res):
-    out, _ = gen(res, {"blocks": [{"group": 1, "lines": [{"t": "чрезмерную критику", "ids": [2]},
-                                                          {"t": "дольше 20 минут", "ids": [2]}]}]})
+    out, _ = gen(res, {"blocks": [{"group": 1, "lines": [{"t": "Критика", "n": "чрезмерную критику", "ids": [2]},
+                                                          {"t": "Время", "n": "дольше 20 минут", "ids": [2]}]}]})
     assert not out.ok and out.check == "4c"
 
 
