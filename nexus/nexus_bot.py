@@ -26,6 +26,9 @@ logging.basicConfig(
         logging.StreamHandler(),
     ],
 )
+from core.log_setup import quiet_http_loggers  # noqa: E402
+
+quiet_http_loggers()  # токен бота в URL httpx (#268)
 logger = logging.getLogger("nexus")
 
 from core.logging_notion import install as _install_notion_logging

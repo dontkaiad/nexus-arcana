@@ -392,6 +392,8 @@ def create_dp_and_bot():
 async def main():
     if not config.arcana.tg_token: return
     logging.basicConfig(level=logging.INFO)
+    from core.log_setup import quiet_http_loggers
+    quiet_http_loggers()  # токен бота в URL httpx (#268)
     from core.logging_notion import install as _install_notion_logging
     _install_notion_logging(bot_label="🌒 Arcana")
 

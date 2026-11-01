@@ -14,6 +14,9 @@ logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
 )
+from core.log_setup import quiet_http_loggers  # noqa: E402
+
+quiet_http_loggers()  # токен бота в URL httpx (#268)
 logger = logging.getLogger("zarya.bot")
 
 
