@@ -82,21 +82,7 @@ async def _get_tz(uid: int) -> int:
     return int(await get_user_tz(uid))
 
 
-def _parse_relative_time(text: str, tz_offset: int) -> Optional[str]:
-    import re
-    m = re.search(r"через\s+(\d+)\s*(мин\w*|час\w*|ч\b|дн\w*|день|дня|дней)", text, re.IGNORECASE)
-    if not m:
-        return None
-    n = int(m.group(1))
-    unit = m.group(2).lower()
-    now = datetime.now(timezone(timedelta(hours=tz_offset)))
-    if unit.startswith("мин"):
-        result = now + timedelta(minutes=n)
-    elif unit.startswith("ч") or unit.startswith("час"):
-        result = now + timedelta(hours=n)
-    else:
-        result = now + timedelta(days=n)
-    return result.strftime("%Y-%m-%dT%H:%M")
+from core.date_extract import parse_relative_time as _parse_relative_time  # noqa: E402  общий код (#267)
 
 
 # ── callbacks ──────────────────────────────────────────────────────────────────
