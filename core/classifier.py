@@ -863,21 +863,11 @@ async def _parse_edit_record(text: str) -> dict:
 
 
 def _capture_for_eval(text: str) -> None:
-    """ОПТ-ИН (EVAL_CAPTURE=1): дописать входящее сообщение в data/evals/captured_messages.jsonl — сырьё для эвала
-    классификатора (A/B двух моделей на реальных сообщениях). По умолчанию выключено. Файл живёт в постоянном томе
-    /app/data на сервере и в git не попадает (/data/evals/ в .gitignore); user_id не пишем. Сбой записи молча игнорируем.
-    Выключить и удалить: EVAL_CAPTURE=0 и rm data/evals/captured_messages.jsonl."""
-    import os
-    if os.environ.get("EVAL_CAPTURE", "0").strip().lower() not in ("1", "true", "on", "yes"):
-        return
+    """Сбор входящих сообщений для эвала классификатора (включается `python -m evals.capture enable`; по умолчанию выключен):
+    лимит сообщений и срок хранения заданы там. Только текст, без user_id; в git не попадает. Сбой не мешает обработке."""
     try:
-        import json
-        import time
-        from pathlib import Path
-        p = Path(__file__).resolve().parent.parent / "data" / "evals" / "captured_messages.jsonl"
-        p.parent.mkdir(parents=True, exist_ok=True)
-        with open(p, "a", encoding="utf-8") as f:
-            f.write(json.dumps({"ts": int(time.time()), "text": text[:600]}, ensure_ascii=False) + "\n")
+        from evals.capture import maybe_capture
+        maybe_capture(text)
     except Exception:
         pass
 

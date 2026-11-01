@@ -102,27 +102,7 @@ def test_gitignore_covers_private_eval_dir():
     assert "/data/evals/" in gi
 
 
-# ── сбор сообщений для эвала (опт-ин) ────────────────────────────────────────
-
-def test_capture_is_off_by_default_and_writes_only_when_enabled(tmp_path, monkeypatch):
-    from core import classifier
-    target = common.PRIVATE / "captured_messages.jsonl"
-    before = target.read_text(encoding="utf-8") if target.exists() else None
-    try:
-        monkeypatch.delenv("EVAL_CAPTURE", raising=False)
-        classifier._capture_for_eval("секретное сообщение ноль")
-        assert (target.read_text(encoding="utf-8") if target.exists() else None) == before     # выключено → не пишет
-        monkeypatch.setenv("EVAL_CAPTURE", "1")
-        classifier._capture_for_eval("проверочное сообщение раз")
-        rows = [json.loads(l) for l in target.read_text(encoding="utf-8").splitlines() if l.strip()]
-        assert rows[-1]["text"] == "проверочное сообщение раз" and set(rows[-1]) == {"ts", "text"}   # user_id не пишем
-        got = classifier_eval.collect_captured(str(target), 10)
-        assert got[-1]["text"] == "проверочное сообщение раз"
-    finally:
-        if before is None:
-            target.unlink(missing_ok=True)
-        else:
-            target.write_text(before, encoding="utf-8")
+# ── сбор сообщений для эвала: подробные тесты в tests/test_eval_capture.py ─────
 
 
 def test_synthetic_ab_cases_cover_the_llm_path():
@@ -171,3 +151,15 @@ def test_role_eval_targets_live_functions_only():
     assert not re.search(r"parse_finance|parse_task\(|analyze_message|parse_time_only", src), "мёртвые функции в эвале"
     cases = json.loads((common.SYNTHETIC / "role_cases.json").read_text(encoding="utf-8"))
     assert names <= set(cases)
+
+
+def test_sonnet_sidebyside_helpers():
+    from evals import sonnet_sidebyside as sbs
+    assert sbs._split_cards("Шут, Маг; Жрица / Император\nСила") == ["Шут", "Маг", "Жрица", "Император", "Сила"]
+    import os
+    sbs._set_role("narrative", "m-x", "low")
+    assert os.environ["MODEL_NARRATIVE"] == "m-x" and os.environ["THINKING_NARRATIVE"] == "low"
+    sbs._set_role("narrative", "m-y")
+    assert os.environ["MODEL_NARRATIVE"] == "m-y" and "THINKING_NARRATIVE" not in os.environ
+    os.environ.pop("MODEL_NARRATIVE", None)
+    assert [v[1] for v in sbs.VARIANTS] == ["claude-sonnet-4-6", "claude-sonnet-5-5", "claude-sonnet-5-5"]
