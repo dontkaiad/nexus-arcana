@@ -73,6 +73,12 @@ def test_parse_categorize_reply_falls_back():
     assert ms.parse_categorize_reply("не json", [1]) == {1: ms.FALLBACK_CATEGORY}
 
 
+def test_parse_categorize_reply_accepts_names_without_emoji():
+    # на пачке из 50 фактов модель опускает эмодзи — раньше это превращало весь остаток в «Прочее»
+    out = ms.parse_categorize_reply('{"1":"Здоровье","2":"сдвг","3":"🛒Предпочтения","4":null}', [1, 2, 3, 4])
+    assert out == {1: "🏥 Здоровье", 2: "🦋 СДВГ", 3: "🛒 Предпочтения", 4: ms.FALLBACK_CATEGORY}
+
+
 # ── скрипт на БД ─────────────────────────────────────────────────────────────
 
 @pytest.fixture

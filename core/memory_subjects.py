@@ -81,8 +81,20 @@ CATEGORIZE_SYSTEM = (
     "🔄 Паттерн — повторяющиеся модели поведения и реакции, не связанные с СДВГ\n"
     "🗂 Прочее — если ни одна не подходит (биография, отношения, планы)\n"
     "Вход: строки «id|факт». Ответ: ТОЛЬКО JSON-объект {\"id\":\"категория\"} — по ключу на каждую строку, "
-    "категория дословно из списка выше. Без пояснений."
+    "название категории из списка выше (можно без эмодзи). Без пояснений."
 )
+
+
+def _canonical(v) -> str:
+    """Название категории → каноническая строка с эмодзи. Модель то пишет «🏥 Здоровье», то просто «Здоровье»:
+    сравниваем по буквам названия. Неизвестное → 🗂 Прочее (чужое не пишем)."""
+    if not isinstance(v, str):
+        return FALLBACK_CATEGORY
+    name = re.sub(r"[^\w]+", "", v, flags=re.U).lower()
+    for cat in SELF_CATEGORIES:
+        if re.sub(r"[^\w]+", "", cat, flags=re.U).lower() == name:
+            return cat
+    return FALLBACK_CATEGORY
 
 
 def parse_categorize_reply(raw: str, ids: Sequence[int]) -> Dict[int, str]:
@@ -97,6 +109,5 @@ def parse_categorize_reply(raw: str, ids: Sequence[int]) -> Dict[int, str]:
             data = {}
     out: Dict[int, str] = {}
     for i in ids:
-        v = data.get(str(i))
-        out[i] = v if v in SELF_CATEGORIES else FALLBACK_CATEGORY
+        out[i] = _canonical(data.get(str(i)))
     return out
