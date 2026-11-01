@@ -111,6 +111,48 @@ _PRACTICE_KEYWORDS = _re.compile(
 )
 
 
+# ── Детерминированный pre-filter (как regex-pre-filter'ы Nexus classify) ─────
+# Решение «ритуал/расклад/сеанс …» не должно зависеть от LLM: при сбое/лимите API
+# роутер возвращал "" и пользователь получал меню «Не поняла». Принцип проекта —
+# детерминизм там, где признак читается из текста.
+
+_COMMAND_START_RE = _re.compile(r"^\s*(ритуал|расклад|сеанс)\b", _re.IGNORECASE)
+# Поиск/удаление/статистика/вопрос — не создание: оставляем LLM (как исключения в Nexus).
+_NOT_CREATE_RE = _re.compile(
+    r"(удали\w*|убери|покажи\w*|найди|поищи|статистик\w*|сколько|что\s+(было|падало|выпадало)|\?)",
+    _re.IGNORECASE,
+)
+# Строго глагольное прошедшее: base._PAST_TENSE_RE содержит ещё «вечером/утром/был»,
+# из-за чего «ритуал завтра вечером» читался как прошедшее.
+_PAST_VERB_RE = _re.compile(
+    r"\b(провел\w*|провёл\w*|сделал\w*|отработал\w*|законч\w+|разложил\w*|выпал\w*|делала)\b",
+    _re.IGNORECASE,
+)
+
+
+def deterministic_intent(text: str):
+    """Intent без LLM для сообщений, начинающихся с «ритуал / расклад / сеанс».
+
+    Возвращает intent роутера или None (тогда решает LLM):
+      - прошедшее время           → ritual_done / session_done
+      - дата/время (завтра, в 19:00, в пятницу…) → ritual_planned / session_planned
+      - «ритуал …» без времени и глагола → ritual_ambiguous (переспрос planned/done)
+      - «расклад/сеанс …» без признаков → None (может быть ввод карт — решает LLM)
+    Дата/время распознаётся общим regex'ом preview-flow (looks_like_deadline_clarification).
+    """
+    m = _COMMAND_START_RE.match(text or "")
+    if not m or _NOT_CREATE_RE.search(text):
+        return None
+    word = m.group(1).lower()
+    is_ritual = word == "ритуал"
+    if _PAST_VERB_RE.search(text):
+        return "ritual_done" if is_ritual else "session_done"
+    from arcana.handlers.work_preview import looks_like_deadline_clarification
+    if looks_like_deadline_clarification(text):
+        return "ritual_planned" if is_ritual else "session_planned"
+    return "ritual_ambiguous" if is_ritual else None
+
+
 def looks_like_practice(text: str) -> bool:
     """Текст содержит хотя бы один маркер эзотерической практики.
 

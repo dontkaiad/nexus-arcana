@@ -498,11 +498,18 @@ async def route_message(
                 return
 
         # ── Классификация intent ─────────────────────────────────────────────
-        intent = (await ask_claude(
-            text, system=ROUTER_SYSTEM, max_tokens=10,
-            role="route",
-            temperature=0,
-        )).strip().lower()
+        # Сначала детерминированный pre-filter («ритуал/расклад/сеанс …») — без LLM;
+        # LLM-роутер только если правило не сработало (или вернул пусто при сбое API).
+        from arcana.handlers.intent_resolve import deterministic_intent
+        intent = deterministic_intent(text)
+        if intent:
+            logger.info("deterministic intent=%s | %s", intent, text[:60])
+        else:
+            intent = (await ask_claude(
+                text, system=ROUTER_SYSTEM, max_tokens=10,
+                role="route",
+                temperature=0,
+            )).strip().lower()
 
         logger.info("intent=%s | %s", intent, text[:60])
 
