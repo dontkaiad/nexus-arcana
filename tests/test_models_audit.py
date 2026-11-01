@@ -28,6 +28,8 @@ def _py_files():
         rel = p.relative_to(REPO).as_posix()
         if any(rel == d or rel.startswith(d + "/") for d in SKIP_DIRS):
             continue
+        if any(part.startswith(".venv") for part in p.relative_to(REPO).parts):
+            continue  # любые виртуальные окружения (.venv, .venv312, …) — сторонний код
         yield rel, p
 
 
