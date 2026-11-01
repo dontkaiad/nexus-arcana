@@ -39,6 +39,8 @@ ROLES: Dict[str, Role] = {
     "memory_rerank": Role("haiku", "реранк кандидатов поиска по памяти", "off"),
     "memory_answer": Role("haiku", "ответ по памяти своими словами (строгий grounding)", "off",
                           default="claude-haiku-5-5"),      # уже на 5.5 (этап 4); откат: MODEL_MEMORY_ANSWER=<4.5>
+    "categorize":    Role("haiku", "разнос фактов по категориям (разовые скрипты разметки памяти, пакетами)", "off",
+                          default="claude-haiku-5-5"),      # одноразовая разметка; откат: MODEL_CATEGORIZE=<4.5>
     # ── Sonnet ──
     "narrative":     Role("sonnet", "трактовки таро и правки трактовок (глубина + эмпатия)"),
     "analysis":      Role("sonnet", "бюджетный анализ и его пересказ"),

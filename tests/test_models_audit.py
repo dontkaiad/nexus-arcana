@@ -122,7 +122,7 @@ def clean_env(monkeypatch):
 def test_default_models_per_tier(clean_env):
     for name, r in models.ROLES.items():
         m = models.model_for(name)
-        if name in ("memory_answer", "spell"):
+        if name in ("memory_answer", "spell", "categorize"):
             assert m == "claude-haiku-5-5"                 # memory_answer — с этапа 4; spell — пилот перехода на 5.5
         elif r.tier == "haiku":
             assert m == "claude-haiku-4-5-20251001", name
