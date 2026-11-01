@@ -376,13 +376,13 @@ def test_spent_today_excludes_parallel_categories(client):
     tz = 3
     today = _today_local_iso(tz)
     period_start = today[:8] + "01"
+    by_from = {today: [_entry(9313, "📦 Разовые", today),   # ← коммуналка, не в счёт
+                       _entry(1200, "🍜 Продукты", today)]}  # ← обычная, в счёт
+    if period_start != today:          # в первый день месяца ключи совпадают — второй затёр бы первый
+        by_from[period_start] = []
     ctx = _today_ctx(tz=tz, day_limit=628,
                      limits={"продукты": 10000, "привычки": 6350},
-                     expenses_by_from={
-                         today: [_entry(9313, "📦 Разовые", today),   # ← коммуналка, не в счёт
-                                 _entry(1200, "🍜 Продукты", today)],  # ← обычная, в счёт
-                         period_start: [],
-                     })
+                     expenses_by_from=by_from)
     import contextlib
     with contextlib.ExitStack() as st:
         for p in ctx:

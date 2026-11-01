@@ -20,15 +20,27 @@ def _rec(category: str, amount: float):
     return MagicMock(category=category, amount=amount)
 
 
+# Фиксированная «середина месяца»: в первый день периода бюджет-сообщение не показывает «Потрачено»
+# (day_of_period == 1), и тесты не должны зависеть от того, когда их запускают.
+_FIXED_NOW = datetime(2026, 11, 15, 12, 0, tzinfo=MOSCOW)
+
+
+class _FixedDatetime(datetime):
+    @classmethod
+    def now(cls, tz=None):
+        return _FIXED_NOW if tz is None else _FIXED_NOW.astimezone(tz)
+
+
 def _bounds():
-    today = datetime.now(MOSCOW).date()
+    today = _FIXED_NOW.date()
     return ((today - timedelta(days=10)).strftime("%Y-%m-%d"),
             (today + timedelta(days=10)).strftime("%Y-%m-%d"))
 
 
 async def _run(budget: dict, expenses: list) -> str:
     start, end = _bounds()
-    with patch.object(finance, "_load_budget_data", AsyncMock(return_value=budget)), \
+    with patch.object(finance, "datetime", _FixedDatetime), \
+         patch.object(finance, "_load_budget_data", AsyncMock(return_value=budget)), \
          patch.object(finance, "_get_payday", AsyncMock(return_value=1)), \
          patch.object(finance, "_period_bounds", lambda *a, **k: (start, end)), \
          patch.object(finance._repo, "query_records", AsyncMock(return_value=expenses)):
