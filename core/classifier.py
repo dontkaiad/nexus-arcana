@@ -1132,7 +1132,14 @@ async def classify(text: str, tz_offset: int = 3, user_id: str = "") -> list[dic
     # Prompt caching: ~11K токенов статичного промпта (меняется только датой/ночным правилом) — одним кешируемым блоком;
     # позиции бюджета пользователя — отдельным хвостом без кеша. Текст промпта для модели ТОТ ЖЕ (блоки склеиваются
     # через "\n", как раньше строка), поведение не меняется.
-    system_blocks = [{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}]
+    # Текущее время пользователя — в НЕкешируемый хвост (меняется каждую минуту): без него модель не может посчитать
+    # «через час / через 20 минут» (в статичном блоке только дата) и выдумывает время или шаблон вроде «{текущее_время+1ч}».
+    now_local = datetime.now(timezone(timedelta(hours=tz_offset)))
+    time_tail = (f"\nТЕКУЩЕЕ ВРЕМЯ пользователя: {now_local.strftime('%Y-%m-%d %H:%M')} (UTC{tz_offset:+d}). "
+                 "Относительные сроки («через час», «через 20 минут») считай от него и пиши конкретное время "
+                 "в формате YYYY-MM-DDTHH:MM — никаких шаблонов и плейсхолдеров в значениях.")
+    system_blocks = [{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}},
+                     {"type": "text", "text": time_tail}]
     if positions_prompt:
         system_blocks.append({"type": "text", "text": "\n" + positions_prompt})
     raw = await ask_claude(text, system=system_blocks, max_tokens=1024, temperature=0, label="classifier.classify", role="classify")

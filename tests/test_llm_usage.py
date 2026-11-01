@@ -89,10 +89,27 @@ def test_classifier_system_is_cached_static_block_plus_uncached_tail():
          patch.object(classifier, "_budget_positions_prompt", return_value="ПОЗИЦИИ-БЮДЖЕТА"):
         asyncio.run(classifier.classify("какой-то текст без шаблонов 123 qwe", user_id="u"))
     sysm = captured["system"]
-    assert isinstance(sysm, list) and len(sysm) == 2
+    assert isinstance(sysm, list) and len(sysm) == 3
     assert sysm[0]["cache_control"] == {"type": "ephemeral"} and len(sysm[0]["text"]) > 20000
-    assert "cache_control" not in sysm[1] and "ПОЗИЦИИ-БЮДЖЕТА" in sysm[1]["text"]
+    assert "ТЕКУЩЕЕ ВРЕМЯ" in sysm[1]["text"] and "cache_control" not in sysm[1]   # время — вне кеша (меняется каждую минуту)
+    assert "cache_control" not in sysm[2] and "ПОЗИЦИИ-БЮДЖЕТА" in sysm[2]["text"]
     assert captured["kw"]["temperature"] == 0 and captured["kw"]["label"] == "classifier.classify"
+
+
+def test_classifier_time_tail_carries_the_users_current_time():
+    from core import classifier
+    from freezegun import freeze_time
+    captured = {}
+
+    async def fake_ask(prompt, system="", **kw):
+        captured["system"] = system
+        return "[]"
+
+    with freeze_time("2026-11-18 09:30:00"), patch.object(classifier, "ask_claude", fake_ask), \
+         patch.object(classifier, "_known_budget_positions", AsyncMock(return_value=([], []))):
+        asyncio.run(classifier.classify("текст для проверки времени 777", tz_offset=3, user_id="u"))
+    tail = captured["system"][1]["text"]
+    assert "2026-11-18 12:30" in tail and "UTC+3" in tail                   # 09:30 UTC = 12:30 МСК
 
 
 def test_classifier_static_block_has_no_per_user_data():
