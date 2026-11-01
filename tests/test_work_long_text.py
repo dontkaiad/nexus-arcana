@@ -93,3 +93,18 @@ def test_extract_wall_datetime_cases():
     assert len(x("послезавтра", 3)) == 10  # только дата
     assert x("в 19:45 что-нибудь", 3) is None  # время без дня не угадываем
     assert x("", 3) is None
+
+
+def test_split_head_tail_does_not_cut_words():
+    text = ("слово " * 80).strip()  # 479 симв.; жёсткая позиция 400 приходится на середину слова
+    head, tail = wp._split_head_tail(text)
+    assert len(head) <= 400
+    assert head.split()[-1] == "слово" and tail.split()[0] == "слово"
+    assert " ".join(head.split() + tail.split()) == text
+
+
+def test_split_head_tail_short_and_no_boundary():
+    assert wp._split_head_tail("коротко") == ("коротко", "")
+    solid = "я" * 900
+    h, t = wp._split_head_tail(solid)
+    assert len(h) == 400 and h + t == solid

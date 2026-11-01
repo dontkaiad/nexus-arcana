@@ -237,6 +237,18 @@ _PARSE_MAX_TOKENS = 600    # запас под JSON
 _LONG_FALLBACK_MIN = 300   # длиннее — при битом JSON не переспрашиваем
 
 
+def _split_head_tail(text: str, limit: int = _LLM_HEAD_CHARS) -> tuple:
+    """Разрезать ввод на «голову» (≤limit, для LLM) и хвост (в notes) по границе
+    слова/строки, чтобы не рвать слова и время (19:4|5). Если подходящей
+    границы нет в правой половине окна — режем жёстко по limit."""
+    if len(text) <= limit:
+        return text, ""
+    cut = max(text.rfind("\n", 0, limit), text.rfind(" ", 0, limit))
+    if cut < limit // 2:
+        cut = limit
+    return text[:cut].rstrip(), text[cut:].strip()
+
+
 def _fallback_long_work(text: str, tz_offset: int = 3) -> dict:
     """Детерминированный разбор длинного ввода, когда LLM-JSON сломан:
     title = первая строка (≤80), notes = весь текст, category по ключевому слову,
@@ -279,9 +291,7 @@ async def _parse_work_text(text: str, tz_offset: int) -> dict:
     now_str = datetime.now(tz).strftime("%Y-%m-%d %H:%M")
     system = PARSE_WORK_SYSTEM + f"\n\nСейчас: {now_str} (UTC+{tz_offset})"
     # В LLM уходит только «голова» (название/дата/клиент); хвост кодом → notes.
-    head, tail = text, ""
-    if len(text) > _LLM_HEAD_CHARS:
-        head, tail = text[:_LLM_HEAD_CHARS], text[_LLM_HEAD_CHARS:].strip()
+    head, tail = _split_head_tail(text)
     usage: dict = {}
     raw = await ask_claude(
         head, system=system, max_tokens=_PARSE_MAX_TOKENS,
