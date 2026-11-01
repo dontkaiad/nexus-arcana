@@ -249,7 +249,7 @@ async def _parse_work_text(text: str, tz_offset: int) -> dict:
     system = PARSE_WORK_SYSTEM + f"\n\nСейчас: {now_str} (UTC+{tz_offset})"
     raw = await ask_claude(
         text, system=system, max_tokens=300,
-        model="claude-haiku-4-5-20251001",
+        role="parse",
         temperature=0,
     )
     raw = raw.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
@@ -315,7 +315,7 @@ async def _parse_clarification(text: str, tz_offset: int) -> dict:
     )
     raw = await ask_claude(
         text, system=system, max_tokens=120,
-        model="claude-haiku-4-5-20251001",
+        role="parse",
         temperature=0,
     )
     raw = raw.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()

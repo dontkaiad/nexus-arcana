@@ -141,7 +141,7 @@ async def get_arcana_tip(
     # Haiku: подпись-настроение это короткая фраза, Sonnet тут лишний (деньги).
     # Sonnet в Аркане — только трактовка/саммари сессий (#163).
     tip = await ask_claude(
-        prompt, model="claude-haiku-4-5-20251001", max_tokens=60, temperature=0.7
+        prompt, role="short_text", max_tokens=60, temperature=0.7
     )
     tip = tip.strip().rstrip(".!").lower() if tip else ""
     if tip:

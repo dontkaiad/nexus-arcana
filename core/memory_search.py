@@ -243,7 +243,7 @@ async def rerank(query: str, hits: List[Hit], top_n: int, hint: str = "") -> Lis
     try:
         raw = await ask_claude(
             prompt=prompt, system=_RERANK_SYSTEM,
-            model="claude-haiku-4-5-20251001", max_tokens=120, temperature=0,
+            role="memory_rerank", max_tokens=120, temperature=0,
         )
         cleaned = (raw or "").strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
         ids = json.loads(cleaned)

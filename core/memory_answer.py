@@ -40,12 +40,11 @@ from core.ru_morph import strip_case_ending
 
 logger = logging.getLogger("core.memory_answer")
 
-DEFAULT_MODEL = "claude-haiku-5-5"       # 5.5: без temperature, мышление выключено (claude_client.apply_model_params)
-
-
 def model() -> str:
-    """Модель генерации; откат на 4.5 — переменной окружения MEMORY_ANSWER_MODEL без правки кода."""
-    return os.environ.get("MEMORY_ANSWER_MODEL", DEFAULT_MODEL).strip() or DEFAULT_MODEL
+    """Модель генерации: MEMORY_ANSWER_MODEL (прежнее имя переменной) → роль memory_answer
+    (MODEL_MEMORY_ANSWER / по умолчанию Haiku 5.5, см. core.models)."""
+    from core import models
+    return os.environ.get("MEMORY_ANSWER_MODEL", "").strip() or models.model_for("memory_answer")
 
 
 GEN_TIMEOUT = 8.0
@@ -425,7 +424,7 @@ async def generate(result, query: str, *, arcana: bool = False, trace: Optional[
         usage: dict = {}
         try:
             raw = await asyncio.wait_for(
-                ask_claude(prompt=prompt, system=SYSTEM + "\n" + voice, model=model(), max_tokens=700,
+                ask_claude(prompt=prompt, system=SYSTEM + "\n" + voice, model=model(), role="memory_answer", max_tokens=700,
                            temperature=0, thinking="off", usage_out=usage),
                 timeout=timeout)
         except asyncio.TimeoutError:

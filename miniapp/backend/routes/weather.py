@@ -140,7 +140,7 @@ async def _generate_tip(kind: str, temp: int, description: str) -> str:
         "Напиши один короткий совет на день (5–8 слов, строчными буквами, без точки в конце, без смайлов). "
         "Совет — практический: что надеть, взять с собой или учесть. Только сам совет, без вводных слов."
     )
-    tip = await ask_claude(prompt, model=config.model_sonnet, max_tokens=60, temperature=0.5)
+    tip = await ask_claude(prompt, role="wellbeing", max_tokens=60, temperature=0.5)
     return tip.strip().rstrip(".!").lower() if tip else ""
 
 
@@ -157,7 +157,7 @@ async def _llm_normalize_city(raw_city: str) -> Optional[str]:
     )
     try:
         raw = await ask_claude(raw_city, system=system, max_tokens=20,
-                                model="claude-haiku-4-5-20251001", temperature=0)
+                                role="parse", temperature=0)
         name = raw.strip().strip(".,!?\"'")
         if not name or name.lower() == "unknown":
             return None

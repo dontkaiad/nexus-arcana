@@ -289,7 +289,7 @@ async def classify_waite_card_llm(phrase: str) -> Optional[str]:
         out = await ask_claude(
             phrase.strip(),
             system=_LLM_SYSTEM,
-            model="claude-haiku-4-5-20251001",
+            role="parse",
             max_tokens=20,
             temperature=0,
         )

@@ -209,7 +209,7 @@ async def _parse_fact(text: str) -> Tuple[str, str, str, str]:
             text,
             system=_PARSE_SYSTEM,
             max_tokens=200,
-            model="claude-haiku-4-5-20251001",
+            role="parse",
             temperature=0,
         )
         raw = raw.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
@@ -440,7 +440,7 @@ async def _get_adhd_tip(fact: str) -> str:
         fact,
         system=_ADHD_TIP_SYSTEM,
         max_tokens=150,
-        model=_cfg.model_sonnet,
+        role="wellbeing",
         temperature=0.7,
     )
     return tip.strip()

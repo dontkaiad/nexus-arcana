@@ -109,7 +109,7 @@ async def parse_supplies(text: str) -> List[dict]:
             f"Текст: {text}",
             system=PARSE_SUPPLIES_SYSTEM,
             max_tokens=300,
-            model="claude-haiku-4-5-20251001",
+            role="parse",
             temperature=0,
         )
         # Снимаем ```json ... ``` если есть

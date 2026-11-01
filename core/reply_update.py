@@ -316,7 +316,7 @@ async def parse_reply(page_type: str, reply_text: str, tz_offset: int = 3) -> Di
     if not system:
         return {}
     raw = await ask_claude(reply_text, system=system, max_tokens=300,
-                           model="claude-haiku-4-5-20251001", temperature=0)
+                           role="parse", temperature=0)
     data = _parse_json_safe(raw) or {}
     # Убрать null/пустые
     return {k: v for k, v in data.items() if v not in (None, "", [])}

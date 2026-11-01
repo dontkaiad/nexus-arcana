@@ -250,7 +250,7 @@ async def normalize_text(
     try:
         corrected = await ask_claude(
             converted, system=system, max_tokens=spell_max_tokens,
-            model="claude-haiku-4-5-20251001",
+            role="spell",
             temperature=0,
         )
     except Exception as e:

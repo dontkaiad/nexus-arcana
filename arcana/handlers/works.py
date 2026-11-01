@@ -113,7 +113,7 @@ async def handle_work_done(message: Message, text: str, user_id: str = "") -> No
             text,
             system="Извлеки ключевые слова названия выполненной работы/задачи. Ответь ТОЛЬКО ключевыми словами, без объяснений.",
             max_tokens=50,
-            model="claude-haiku-4-5-20251001",
+            role="parse",
             temperature=0,
         )).strip()
 

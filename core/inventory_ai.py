@@ -56,7 +56,7 @@ async def suggest_from_inventory(query: str, items: List[Dict]) -> List[Dict]:
         raw = await ask_claude(
             prompt=prompt,
             system=_SYSTEM,
-            model="claude-haiku-4-5-20251001",
+            role="parse",
             max_tokens=600,
             temperature=0,
         )

@@ -911,7 +911,7 @@ async def _update_user_tz(message: Message, text: str, user_id: str = "") -> Non
 "я в улан-баторе" → {"offset":8,"city":"Ulaanbaatar","confident":true}
 confident=false ТОЛЬКО если реально не можешь определить ни город, ни офсет по тексту (не путать с "непопулярный город" — если понял что за город, offset обычно ясен)."""
         try:
-            raw = await ask_claude(text, system=system, max_tokens=100, model="claude-haiku-4-5-20251001", temperature=0)
+            raw = await ask_claude(text, system=system, max_tokens=100, role="parse", temperature=0)
             parsed = json.loads(raw.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip())
             confident = bool(parsed.get("confident", True))
             if confident:
@@ -999,7 +999,7 @@ async def _human_date_to_iso(value: str, uid: int = 0) -> Optional[str]:
     try:
         now_str = now.strftime("%Y-%m-%d %H:%M")
         system = f"Пользователь указывает дату. Верни ТОЛЬКО дату в формате YYYY-MM-DD. Без объяснений.\nСейчас: {now_str} (UTC+{tz_offset})"
-        raw = await ask_claude(v, system=system, max_tokens=20, model="claude-haiku-4-5-20251001", temperature=0)
+        raw = await ask_claude(v, system=system, max_tokens=20, role="parse", temperature=0)
         raw = raw.strip()
         if _re.match(r"^\d{4}-\d{2}-\d{2}$", raw):
             return raw
@@ -1211,7 +1211,7 @@ async def _haiku_parse_reminder_dt(text: str, tz_offset: int, tz_label: str = ""
 Сейчас: {now_str} ({tz_label or f"UTC{tz_offset:+d}"})"""
     try:
         raw = await ask_claude(text, system=system, max_tokens=100,
-                               model="claude-haiku-4-5-20251001", temperature=0)
+                               role="parse", temperature=0)
         raw = raw.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
         parsed = json.loads(raw)
         val = parsed.get("reminder_time")
@@ -1581,7 +1581,7 @@ async def _check_procrastination_nudge(title: str, deadline: str = "", reminder_
             prompt,
             system=_NUDGE_SYSTEM,
             max_tokens=100,
-            model="claude-haiku-4-5-20251001",
+            role="short_text",
             temperature=0.5,
         )
         result = result.strip()
@@ -1949,7 +1949,7 @@ async def handle_task_clarification(message: Message) -> None:
 Сейчас: {now_str} ({tz_label})
 Дедлайн: {deadline_str}"""
         
-        raw = await ask_claude(text, system=system, max_tokens=100, model="claude-haiku-4-5-20251001", temperature=0)
+        raw = await ask_claude(text, system=system, max_tokens=100, role="parse", temperature=0)
         raw = raw.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
         logger.info("Claude returned: %s", raw)
         parsed = json.loads(raw)
@@ -2009,7 +2009,7 @@ async def _handle_awaiting_reminder_time(message: Message, text: str, pending: d
 Верни ТОЛЬКО JSON без markdown: {{"time": "HH:MM или null"}}
 Примеры: "в 10 утра"→"10:00", "вечером"→"19:00", "днём"→"13:00", "в 18:30"→"18:30"
 Сейчас: {now_str} ({tz_label})"""
-        raw = await ask_claude(text, system=system, max_tokens=50, model="claude-haiku-4-5-20251001", temperature=0)
+        raw = await ask_claude(text, system=system, max_tokens=50, role="parse", temperature=0)
         raw = raw.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
         parsed = json.loads(raw)
         parsed_time = parsed.get("time")
@@ -2069,7 +2069,7 @@ async def _handle_task_refinement(message: Message, text: str, pending: dict, ui
 {tomorrow_note}
 Сейчас: {now_str} ({tz_label})"""
 
-        raw = await ask_claude(text, system=system, max_tokens=200, model="claude-haiku-4-5-20251001", temperature=0)
+        raw = await ask_claude(text, system=system, max_tokens=200, role="parse", temperature=0)
         raw = raw.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
         logger.info("_handle_task_refinement Claude returned: %s", raw)
         parsed = json.loads(raw)
@@ -2170,7 +2170,7 @@ async def _handle_combined_clarification(message: Message, text: str, pending: d
 {tomorrow_note}
 Сейчас: {now_str} ({tz_label})"""
 
-        raw = await ask_claude(text, system=system, max_tokens=150, model="claude-haiku-4-5-20251001", temperature=0)
+        raw = await ask_claude(text, system=system, max_tokens=150, role="parse", temperature=0)
         raw = raw.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
         logger.info("_handle_combined_clarification Claude returned: %s", raw)
         parsed = json.loads(raw)
@@ -3886,7 +3886,7 @@ async def _build_today_digest(uid: int, user_id: str = "", greeting: str = "") -
             f"перечисление задач, советы поставить таймер/будильник/напоминание (Nexus и есть напоминалка). "
             f"Формат ответа: ровно одно предложение plain text, до 15 слов, заверши мысль целиком."
         )
-        advice = await ask_claude(prompt, max_tokens=200, model="claude-haiku-4-5-20251001", temperature=0.7)
+        advice = await ask_claude(prompt, max_tokens=200, role="short_text", temperature=0.7)
         if advice:
             clean = advice.strip().replace("**", "").replace("__", "")
             clean = clean.split("\n", 1)[0].strip()
@@ -3986,7 +3986,7 @@ async def handle_task_stats(message: Message, user_id: str = "") -> None:
             f"Кай (женский род, СДВГ). За неделю выполнено {done_week} задач, "
             f"стрик {streak} дней. Дай ОДИН короткий мотивирующий совет. Макс 1 предложение. "
             f"ЗАПРЕТ: не советуй ставить будильник/таймер/напоминание/календарь — бот уже это делает.",
-            max_tokens=80, model="claude-haiku-4-5-20251001",
+            max_tokens=80, role="short_text",
             temperature=0.7,
         )
     except Exception:

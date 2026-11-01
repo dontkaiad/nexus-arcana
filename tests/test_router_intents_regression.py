@@ -50,7 +50,7 @@ async def test_router_uses_haiku_model(common_patches):
     captured = {}
 
     async def fake_ask(prompt, **kw):
-        captured["model"] = kw.get("model")
+        captured["role"] = kw.get("role")
         captured["system"] = kw.get("system", "")
         return "ritual_planned"
 
@@ -59,8 +59,9 @@ async def test_router_uses_haiku_model(common_patches):
          patch("arcana.handlers.works.handle_add_work", AsyncMock()):
         await base.route_message(msg, user_id="u")
 
-    assert captured.get("model") == "claude-haiku-4-5-20251001", \
-        "ROUTER должен использовать Haiku, не Sonnet (деньги Кай)"
+    from core import models
+    assert captured.get("role") == "route" and models.ROLES["route"].tier == "haiku", \
+        "ROUTER должен идти ролью route (Haiku), не Sonnet (деньги Кай)"
 
 
 @pytest.mark.asyncio

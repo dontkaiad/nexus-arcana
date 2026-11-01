@@ -1561,7 +1561,7 @@ def _parse_month_from_query(text: str) -> str:
 async def _get_finance_advice(data: str) -> str:
     """Один конкретный финансовый инсайт от Claude на основе данных статистики."""
     try:
-        result = await ask_claude(data, system=ADVICE_SYSTEM, max_tokens=220, temperature=0.5)
+        result = await ask_claude(data, system=ADVICE_SYSTEM, max_tokens=220, temperature=0.5, role="short_text")
         result = result.strip()
         if result:
             return f"\n💡 {result}"
@@ -1684,7 +1684,7 @@ async def handle_finance_summary(query: str = "", user_id: str = "", uid: int = 
     description_search = None
     parsed: dict = {}
     if query:
-        raw = await ask_claude(query, system=STATS_SYSTEM, max_tokens=200, temperature=0)
+        raw = await ask_claude(query, system=STATS_SYSTEM, max_tokens=200, temperature=0, role="short_text")
         try:
             raw = raw.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
             parsed = json.loads(raw)
@@ -2467,7 +2467,7 @@ async def handle_one_time_expense(message: Message, text: str, bot_label: str = 
     """
     from core.config import config as _cfg
     uid = message.from_user.id
-    raw = await ask_claude(text, system=_ONE_TIME_PARSE_SYSTEM, model=_cfg.model_haiku,
+    raw = await ask_claude(text, system=_ONE_TIME_PARSE_SYSTEM, role="parse",
                            max_tokens=400, temperature=0)
     try:
         raw = raw.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
@@ -2536,7 +2536,7 @@ async def expense_from_task_note(note: str, user_id: str = "", uid: int = 0,
     amount = float(amount)
     cat = "💳 Прочее"
     try:
-        raw = await ask_claude(note, system=_ONE_TIME_PARSE_SYSTEM, model=_cfg.model_haiku,
+        raw = await ask_claude(note, system=_ONE_TIME_PARSE_SYSTEM, role="parse",
                                max_tokens=200, temperature=0)
         raw = raw.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
         items = json.loads(raw).get("items", [])
@@ -3044,7 +3044,7 @@ async def _extract_debts_from_text(user_text: str) -> list:
     from core.config import config as _cfg
     prompt = _DEBT_EXTRACT_HAIKU_PROMPT.format(user_text=user_text)
     try:
-        raw = await ask_claude(prompt, model=_cfg.model_haiku, max_tokens=512, temperature=0)
+        raw = await ask_claude(prompt, role="parse", max_tokens=512, temperature=0)
         raw = raw.strip()
         json_match = re.search(r'\[[\s\S]*\]', raw)
         if json_match:
@@ -3065,7 +3065,7 @@ async def _parse_debt_strategy_with_haiku(debts: list, user_text: str) -> list:
         user_text=user_text,
     )
     try:
-        raw = await ask_claude(prompt, model=_cfg.model_haiku, max_tokens=1024, temperature=0)
+        raw = await ask_claude(prompt, role="parse", max_tokens=1024, temperature=0)
         raw = raw.strip()
         json_match = re.search(r'\[[\s\S]*\]', raw)
         if json_match:
@@ -3695,7 +3695,7 @@ async def _budget_phase2_narration(plan: dict) -> None:
     try:
         raw = await ask_claude(
             json.dumps(plan, ensure_ascii=False), system=BUDGET_PHASE2_SYSTEM,
-            model=_cfg.model_sonnet, max_tokens=1500, temperature=0,
+            role="analysis", max_tokens=1500, temperature=0,
         )
         if not raw or not raw.strip():
             return
@@ -3740,7 +3740,7 @@ async def _run_budget_analysis(message: Message, uid: int) -> None:
         if has_existing_data:
             # Use new Sonnet system with full context from Memory + finance DB
             sonnet_input = await _build_sonnet_input(uid, notion_uid)
-            raw = await ask_claude(sonnet_input, system=BUDGET_SONNET_SYSTEM, model=_cfg.model_sonnet, max_tokens=4096, temperature=0)
+            raw = await ask_claude(sonnet_input, system=BUDGET_SONNET_SYSTEM, role="analysis", max_tokens=4096, temperature=0)
         else:
             # Legacy: setup flow with user messages only.
             # already_spent/savings_from_last_period — тот же класс данных, что и
@@ -3764,7 +3764,7 @@ async def _run_budget_analysis(message: Message, uid: int) -> None:
                 current_date=current_date,
                 already_spent=int(already_spent_legacy), savings_from_last_period=int(savings_legacy),
             )
-            raw = await ask_claude(prompt, model=_cfg.model_sonnet, max_tokens=4096, temperature=0)
+            raw = await ask_claude(prompt, role="analysis", max_tokens=4096, temperature=0)
 
         if not raw or not raw.strip():
             raise ValueError("Empty response from Sonnet")

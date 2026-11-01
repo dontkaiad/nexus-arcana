@@ -170,7 +170,7 @@ async def handle_adhd_command(message: Message, user_id: str = "") -> None:
             facts_text,
             system=_ADHD_SUMMARY_SYSTEM,
             max_tokens=200,
-            model=_cfg.model_sonnet,
+            role="wellbeing",
             temperature=0.7,
         )
     except Exception:

@@ -10,7 +10,7 @@ from typing import AsyncIterator, List, Dict, Optional, Union
 
 import anthropic
 
-from core import llm_usage
+from core import llm_usage, models
 from core.config import config
 
 logger = logging.getLogger(__name__)
@@ -159,15 +159,22 @@ async def ask_claude(
     usage_out: Optional[Dict] = None,
     cache_ttl: Optional[str] = None,
     label: str = "",
+    role: str = "",
 ) -> str:
     """Простой текстовый запрос. Возвращает строку.
+
+    role — роль вызова (core.models.ROLES): задаёт модель (MODEL_<РОЛЬ> в окружении переопределяет), режим мышления
+    и кеш по умолчанию. Явные model / thinking / cache_ttl сильнее роли.
 
     thinking — см. apply_model_params (только для моделей 5.x). usage_out — если передан dict, в него кладутся
     input_tokens / output_tokens (+ cache_*; output включает мышление, если оно было). cache_ttl — prompt caching
     системного промпта (см. cacheable_system; ниже минимума модели кеш молча не создаётся). label — метка роли
     для журнала llm_call_log; по умолчанию «модуль.функция» вызывающего."""
-    used_model = model or config.model_haiku
-    log_label = label or llm_usage.caller_label()
+    used_model = model or (models.model_for(role) if role else config.model_haiku)
+    if role:
+        thinking = thinking if thinking is not None else models.thinking_for(role)
+        cache_ttl = cache_ttl if cache_ttl is not None else models.cache_ttl_for(role)
+    log_label = label or (f"{role}:{llm_usage.caller_label()}" if role else llm_usage.caller_label())
 
     kwargs: Dict = {
         "model": used_model,
@@ -198,6 +205,8 @@ async def ask_claude_stream(
     model: str = "",
     max_tokens: int = 1024,
     temperature: Optional[float] = None,
+    role: str = "",
+    thinking: Optional[str] = None,
 ) -> AsyncIterator[str]:
     """Стримит текстовые дельты вместо возврата готовой строки — для SSE-
     эндпоинтов Mini App (Server-Sent Events), где текст должен допечатываться
@@ -210,7 +219,9 @@ async def ask_claude_stream(
     нельзя. При ошибке генератор просто останавливается; вызывающий SSE-
     эндпоинт закрывает поток с тем текстом, что успел прийти.
     """
-    used_model = model or config.model_haiku
+    used_model = model or (models.model_for(role) if role else config.model_haiku)
+    if role and thinking is None:
+        thinking = models.thinking_for(role)
 
     kwargs: Dict = {
         "model": used_model,
@@ -219,8 +230,7 @@ async def ask_claude_stream(
     }
     if system:
         kwargs["system"] = system
-    if temperature is not None:
-        kwargs["temperature"] = temperature
+    apply_model_params(kwargs, used_model, temperature, thinking)
 
     try:
         async with get_anthropic().messages.stream(**kwargs) as stream:
@@ -237,8 +247,9 @@ async def ask_claude_vision(
     media_type: str = "image/jpeg",
     system: str = "",
     temperature: Optional[float] = None,
+    role: str = "vision",
 ) -> str:
-    """Запрос с изображением (base64). Использует Sonnet."""
+    """Запрос с изображением (base64). Роль vision (Sonnet по умолчанию, MODEL_VISION переопределяет)."""
     messages: List[Dict] = [
         {
             "role": "user",
@@ -257,17 +268,16 @@ async def ask_claude_vision(
     ]
 
     kwargs: Dict = {
-        "model": config.model_sonnet,
+        "model": models.model_for(role),
         "max_tokens": 2048,
         "messages": messages,
     }
     if system:
         kwargs["system"] = system
-    if temperature is not None:
-        kwargs["temperature"] = temperature
+    apply_model_params(kwargs, kwargs["model"], temperature, models.thinking_for(role))
 
     t0 = time.monotonic()
-    log_label = llm_usage.caller_label()
+    log_label = f"{role}:{llm_usage.caller_label()}"
     try:
         resp = await _create_message(**kwargs)
         llm_usage.record(log_label, kwargs["model"], llm_usage.usage_numbers(resp),
@@ -296,7 +306,7 @@ async def parse_finance(text: str) -> Dict:
         "type_='💸 Расход', category='💳 Прочее', source='💳 Карта'."
     )
     import json
-    raw = await ask_claude(prompt=text, system=system, max_tokens=256)
+    raw = await ask_claude(prompt=text, system=system, max_tokens=256, role="parse")
     try:
         raw = raw.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
         return json.loads(raw)
@@ -320,7 +330,7 @@ async def parse_task(text: str) -> Dict:
         "  reminder: string (например 'за 1 час') или ''"
     )
     import json
-    raw = await ask_claude(prompt=text, system=system, max_tokens=256)
+    raw = await ask_claude(prompt=text, system=system, max_tokens=256, role="parse")
     try:
         raw = raw.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
         return json.loads(raw)

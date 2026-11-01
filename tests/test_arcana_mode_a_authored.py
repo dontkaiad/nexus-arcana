@@ -99,7 +99,7 @@ async def test_polish_passes_card_reference_and_personal_system():
     # авторский тезис передан как акцент
     assert "туз — прорыв" in ask.await_args.args[0]
     # Sonnet + temperature 0.5 (связность, не вольное сочинение)
-    assert ask.await_args.kwargs["model"] == sessions._cfg.model_sonnet
+    assert ask.await_args.kwargs["role"] == "narrative"      # трактовки — Sonnet-роль (модель задаёт core.models)
     assert ask.await_args.kwargs["temperature"] == 0.5
 
 

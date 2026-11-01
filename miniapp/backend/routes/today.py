@@ -194,7 +194,7 @@ async def _ask_tip(prompt: str) -> str:
     try:
         text = await ask_claude(prompt=prompt, system=_TIP_SYSTEM,
                                 max_tokens=80, temperature=0.4,
-                                model="claude-haiku-4-5-20251001")
+                                role="short_text")
     except Exception as e:
         logger.error("ADHD tip generation failed: %s", e)
         return ""

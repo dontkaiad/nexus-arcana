@@ -33,7 +33,7 @@ async def test_parse_card_edit_detects_card_change():
         out = await _parse_card_edit("королева кубков, а не король", "королева кубков, шут, маг", "")
     assert out == {"cards_ru": "король кубков, шут, маг", "bottom_ru": ""}
     # парсер карт — Haiku (дёшево), не Sonnet
-    assert ask.await_args.kwargs["model"] == "claude-haiku-4-5-20251001"
+    assert ask.await_args.kwargs["role"] == "parse"          # Haiku-роль
 
 
 @pytest.mark.asyncio

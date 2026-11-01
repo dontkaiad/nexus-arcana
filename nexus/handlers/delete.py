@@ -37,7 +37,7 @@ async def handle_delete(message: Message, text: str, user_id: str = "") -> None:
         await message.answer("⚠️ Не могу определить пользователя — удаление отменено.")
         return
 
-    target = (await ask_claude(text, system=PARSE_TARGET_SYSTEM, max_tokens=10, temperature=0)).strip().lower()
+    target = (await ask_claude(text, system=PARSE_TARGET_SYSTEM, max_tokens=10, temperature=0, role="parse")).strip().lower()
     if target not in NEXUS_DOMAINS:
         await message.answer("⚠️ Уточни что удалить: финансы, задачи или заметки.")
         return

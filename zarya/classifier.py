@@ -131,7 +131,7 @@ async def classify_zarya(text: str, role: str = "guest") -> dict:
     role_label = _ROLE_LABEL.get(role, "guest")
     shared_summary = await _friend_shared_summary() if role_label == "friend" else ""
     prompt = f"Роль пишущего: {role_label}\n{text}"
-    raw = await ask_claude(prompt, system=_system_prompt(role_label, shared_summary), max_tokens=200, temperature=0)
+    raw = await ask_claude(prompt, system=_system_prompt(role_label, shared_summary), max_tokens=200, temperature=0, role="route")
     try:
         cleaned = raw.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
         data = json.loads(cleaned)

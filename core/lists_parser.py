@@ -311,7 +311,7 @@ async def parse_buy_text(
         # → «Не смог разобрать список». См. issue #66.
         raw = await ask_claude(
             text, system=system, max_tokens=2000,
-            model="claude-haiku-4-5-20251001",
+            role="parse",
             temperature=0,
         )
     except Exception as e:

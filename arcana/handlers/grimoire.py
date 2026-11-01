@@ -294,7 +294,7 @@ async def handle_grimoire_add(message: Message, text: str, user_id: str = "") ->
             f"Текст: {text}",
             system=PARSE_GRIMOIRE_SYSTEM,
             max_tokens=400,
-            model="claude-haiku-4-5-20251001",
+            role="parse",
             temperature=0,
         )
         data = _parse_json_safe(raw)

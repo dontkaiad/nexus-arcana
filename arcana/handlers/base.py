@@ -225,7 +225,7 @@ async def _handle_tarot_correction(
     try:
         upd_raw = await ask_claude(
             correction_text, system=CORRECTION_PARSE_SYSTEM, max_tokens=200,
-            temperature=0,
+            temperature=0, role="parse",
         )
         upd = _parse_json_safe(upd_raw) or {}
     except Exception:
@@ -289,7 +289,7 @@ async def _handle_tarot_correction(
 
     new_interp = await ask_claude(
         prompt, system=system,
-        model=_cfg.model_sonnet,
+        role="narrative",
         max_tokens=2000,
         temperature=0.7,
     )
@@ -500,7 +500,7 @@ async def route_message(
         # ── Классификация intent ─────────────────────────────────────────────
         intent = (await ask_claude(
             text, system=ROUTER_SYSTEM, max_tokens=10,
-            model="claude-haiku-4-5-20251001",
+            role="route",
             temperature=0,
         )).strip().lower()
 

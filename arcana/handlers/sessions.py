@@ -536,7 +536,7 @@ async def _reclassify_area_with_subject_hint(question: str, subject_id: int) -> 
     hint = ", ".join(recent)
     user_prompt = f"Вопрос: {question}\nПодсказка (недавние area этой темы): {hint}"
     try:
-        raw = await ask_claude(user_prompt, system=AREA_HINT_SYSTEM, max_tokens=50, temperature=0)
+        raw = await ask_claude(user_prompt, system=AREA_HINT_SYSTEM, max_tokens=50, temperature=0, role="parse")
     except Exception as e:
         logger.warning("area hint reclassify failed: %s", e)
         return AREA_DEFAULT
@@ -655,7 +655,7 @@ async def _make_triplet_summary(
         out = await ask_claude(
             src,
             system=TRIPLET_SUMMARY_SYSTEM,
-            model="claude-haiku-4-5-20251001",
+            role="short_text",
             max_tokens=160,
             temperature=0.5,
         )
@@ -694,7 +694,7 @@ async def _polish_authored_interpretation(
     return await ask_claude(
         user_prompt,
         system=system,
-        model=_cfg.model_sonnet,
+        role="narrative",
         max_tokens=2000,
         temperature=0.5,
     )
@@ -721,7 +721,7 @@ async def _parse_card_edit(
             + (f"Текущее дно: {bottom_ru}\n" if bottom_ru else "")
             + f"Замечание: {correction_text}",
             system=CARD_EDIT_PARSE_SYSTEM,
-            model="claude-haiku-4-5-20251001",
+            role="parse",
             max_tokens=200,
             temperature=0,
         )
@@ -1103,7 +1103,7 @@ async def handle_add_session(
         figurant_facts = await get_figurant_facts(user_id)
         raw = await ask_claude(
             text, system=PARSE_SESSION_SYSTEM + figurant_prompt_block(figurant_facts),
-            max_tokens=4000, temperature=0,
+            max_tokens=4000, temperature=0, role="parse",
         )
         data = _parse_json_safe(raw)
         if data is None:
@@ -1325,7 +1325,7 @@ async def handle_add_session(
             interpretation = await ask_claude(
                 user_prompt,
                 system=system,
-                model=_cfg.model_sonnet,
+                role="narrative",
                 max_tokens=2000,
                 temperature=0.7,
             )
@@ -1627,7 +1627,7 @@ async def _handle_multi_session(
                     user_prompt += f"\nДно колоды: {bottom_card}"
                 interpretation = await ask_claude(
                     user_prompt, system=system,
-                    model=_cfg.model_sonnet, max_tokens=2000,
+                    role="narrative", max_tokens=2000,
                     temperature=0.7,
                 )
 
@@ -1768,7 +1768,7 @@ async def _handle_multi_session(
             )
             raw_summary = await ask_claude(
                 sess_prompt, max_tokens=400,
-                model=_cfg.model_sonnet,
+                role="narrative",
                 temperature=0.5,
             )
             from core.html_sanitize import sanitize_summary
@@ -2270,7 +2270,7 @@ async def _apply_triplet_correction(
     try:
         new_interp = await ask_claude(
             prompt, system=system,
-            model=_cfg.model_sonnet, max_tokens=2000,
+            role="narrative", max_tokens=2000,
             temperature=0.7,
         )
     except Exception as e:
@@ -2397,7 +2397,7 @@ async def handle_tarot_photo(message: Message, user_id: str = "") -> None:
         interpretation = await ask_claude(
             user_prompt,
             system=system,
-            model=_cfg.model_sonnet,
+            role="narrative",
             max_tokens=2000,
             temperature=0.7,
         )
@@ -2451,7 +2451,7 @@ async def handle_session_search(
     try:
         raw = await ask_claude(
             text, system=SESSION_SEARCH_PARSE_SYSTEM, max_tokens=150,
-            model="claude-haiku-4-5-20251001", temperature=0,
+            role="parse", temperature=0,
         )
         data = _parse_json_safe(raw) or {}
         keywords = [
@@ -2496,7 +2496,7 @@ async def handle_tarot_interpret(message: Message, text: str) -> None:
     interpretation = await ask_claude(
         f"Карты/расклад: {text}",
         system=TAROT_SYSTEM,
-        model=_cfg.model_sonnet,
+        role="narrative",
         max_tokens=2000,
         temperature=0.7,
     )

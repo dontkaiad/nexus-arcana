@@ -320,7 +320,7 @@ async def handle_work_reschedule_text(message: Message) -> bool:
     try:
         raw = await ask_claude(
             text, system=system, max_tokens=60,
-            model="claude-haiku-4-5-20251001", temperature=0,
+            role="parse", temperature=0,
         )
         raw = raw.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
         parsed = json.loads(raw)

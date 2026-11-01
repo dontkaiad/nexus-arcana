@@ -775,7 +775,7 @@ async def _haiku_task_category(title: str) -> str:
             title,
             system=_CATEGORY_SYSTEM,
             max_tokens=20,
-            model="claude-haiku-4-5-20251001",
+            role="parse",
             temperature=0,
         )
         raw = raw.strip()
@@ -847,7 +847,7 @@ _EDIT_PARSE_SYSTEM = (
 
 async def _parse_edit_record(text: str) -> dict:
     """Распарсить запрос на редактирование записи. Всегда возвращает edits-список."""
-    raw = await ask_claude(text, system=_EDIT_PARSE_SYSTEM, max_tokens=300, model="claude-haiku-4-5-20251001", temperature=0)
+    raw = await ask_claude(text, system=_EDIT_PARSE_SYSTEM, max_tokens=300, role="parse", temperature=0)
     try:
         raw = raw.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
         data = json.loads(raw)
@@ -1114,7 +1114,7 @@ async def classify(text: str, tz_offset: int = 3, user_id: str = "") -> list[dic
     system_blocks = [{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}]
     if positions_prompt:
         system_blocks.append({"type": "text", "text": "\n" + positions_prompt})
-    raw = await ask_claude(text, system=system_blocks, max_tokens=1024, temperature=0, label="classifier.classify")
+    raw = await ask_claude(text, system=system_blocks, max_tokens=1024, temperature=0, label="classifier.classify", role="classify")
     global _classify_last_raw
     _classify_last_raw = raw
 

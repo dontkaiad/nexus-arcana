@@ -584,7 +584,7 @@ async def session_summarize(
 
     try:
         summary = await ask_claude(
-            prep.prompt, max_tokens=500, model=_cfg.model_sonnet, temperature=0.5
+            prep.prompt, max_tokens=500, role="summary", temperature=0.5
         )
     except Exception as e:
         logger.error("session summarize failed: %s", e)
@@ -636,7 +636,7 @@ async def session_summarize_stream(
         chunks: List[str] = []
         try:
             async for delta in ask_claude_stream(
-                prep.prompt, max_tokens=500, model=_cfg.model_sonnet, temperature=0.5,
+                prep.prompt, max_tokens=500, role="summary", temperature=0.5,
             ):
                 chunks.append(delta)
                 yield f"data: {json.dumps({'delta': delta})}\n\n"

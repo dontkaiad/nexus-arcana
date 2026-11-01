@@ -349,7 +349,7 @@ async def _generate_adhd_profile(tg_id: int, records: List[Memory]) -> str:
         text = await ask_claude(
             prompt=prompt,
             system=system,
-            model=config.model_sonnet,
+            role="wellbeing",
             max_tokens=800,
             temperature=0,
         )
