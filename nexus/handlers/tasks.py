@@ -582,34 +582,7 @@ def _ensure_datetime(iso: str, default_time: str = "09:00") -> str:
     return iso
 
 
-def _to_local_wall(iso: str, tz_offset: int) -> str:
-    """Нормализовать сохранённую дату-время в НАИВНОЕ ЛОКАЛЬНОЕ настенное время
-    'YYYY-MM-DDTHH:MM' (issue #143).
-
-    PG отдаёт reminder/deadline с явным offset'ом (обычно UTC, '...+00:00').
-    Срез `[:16]` выбрасывал бы offset, а `_schedule_reminder` переклеивал его
-    как локальный `+tz_offset` → сдвиг на tz_offset часов раньше. Здесь honor'им
-    явный offset (`astimezone` → пояс пользователя) и отдаём наивное локальное
-    время. Наивные строки уже считаются локальными и возвращаются как есть.
-    Date-only (без 'T') — без изменений: нет времени, нечего сдвигать.
-
-    Свойство: корректно для '+00:00' (UTC), '+03:00' (локально) и наивных
-    строк — поэтому безопасно прогонять везде, где раньше резали `[:16]`.
-    """
-    if not iso:
-        return iso
-    s = iso.strip()
-    if s.endswith("Z"):
-        s = s[:-1] + "+00:00"
-    if "T" not in s:
-        return s[:10]
-    try:
-        dt = datetime.fromisoformat(s)
-    except ValueError:
-        return s[:16]
-    if dt.tzinfo is not None:
-        dt = dt.astimezone(timezone(timedelta(hours=tz_offset)))
-    return dt.strftime("%Y-%m-%dT%H:%M")
+from core.date_extract import to_local_wall as _to_local_wall  # noqa: E402  общий код Nexus/Arcana (#143, #267)
 
 
 def _format_task_dates(

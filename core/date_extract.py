@@ -88,3 +88,45 @@ def extract_wall_datetime(text: str, tz_offset: int) -> Optional[str]:
             return day.strftime("%Y-%m-%d")
         hh, mm = int(th.group(1)), 0
     return day.strftime("%Y-%m-%d") + f"T{hh:02d}:{mm:02d}"
+
+
+# ── Хранение времени: соглашение Nexus (настоящий UTC в PG) ─────────────────
+# Запись: локальное настенное время + пояс пользователя → aware-datetime (wall_to_aware).
+# Чтение: aware из PG → локальное настенное (to_local_wall / dt_to_local_wall).
+# Issue #143 (Nexus) и #267 (Arcana).
+
+def _tz(tz_offset: int) -> timezone:
+    return timezone(timedelta(hours=tz_offset))
+
+
+# to_local_wall живёт в core/recurrence.py (issue #143, общий код Nexus/Arcana) —
+# не дублируем, реэкспортируем рядом с остальными хелперами времени.
+from core.recurrence import to_local_wall  # noqa: E402,F401
+
+
+def dt_to_local_wall(dt: Optional[datetime], tz_offset: int) -> str:
+    """datetime из PG → локальное 'YYYY-MM-DDTHH:MM' ('' если None).
+    Наивный datetime считается уже локальным (как в to_local_wall)."""
+    if dt is None:
+        return ""
+    if dt.tzinfo is not None:
+        dt = dt.astimezone(_tz(tz_offset))
+    return dt.strftime("%Y-%m-%dT%H:%M")
+
+
+def wall_to_aware(iso: str, tz_offset: int) -> Optional[datetime]:
+    """Локальная настенная строка ('YYYY-MM-DDTHH:MM' | 'YYYY-MM-DD' | с offset'ом)
+    → aware-datetime для записи в PG (там это настоящий UTC). None, если не разобрать.
+    Date-only → полночь локального дня."""
+    if not iso:
+        return None
+    s = iso.strip().replace(" ", "T")
+    if s.endswith("Z"):
+        s = s[:-1] + "+00:00"
+    try:
+        dt = datetime.fromisoformat(s) if "T" in s else datetime.strptime(s[:10], "%Y-%m-%d")
+    except ValueError:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=_tz(tz_offset))
+    return dt
