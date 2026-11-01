@@ -38,6 +38,13 @@ def _script():
     ("работает из дома", "💼 Работа"),
     ("гиперфокус мешает ложиться спать", "🦋 СДВГ"),
     ("обычно откладывает звонки", "🔄 Паттерн"),
+    ("Кошка любит спать на подоконнике", "🐾 Коты"),
+    ("Луна не любит лоток", "🐾 Коты"),                          # имена котов — с заглавной
+    ("сделала тату на плече", "🪞 Внешность"),
+    ("у неё хорошие отношения с бывшим", "💞 Отношения"),
+    ("мама живёт в другом городе", "💞 Отношения"),
+    ("у неё мания величия", "🏥 Здоровье"),                       # мании/психиатрия — Здоровье, не СДВГ
+    ("в день рождения идёт к лор-хирургу", "🏥 Здоровье"),
 ])
 def test_keyword_category(fact, cat):
     assert ms.keyword_category(fact) == cat
@@ -46,6 +53,42 @@ def test_keyword_category(fact, cat):
 def test_keyword_category_leaves_ambiguous_to_haiku():
     assert ms.keyword_category("играет на гитаре") is None          # «игра» двусмысленно — не правило
     assert ms.keyword_category("красный цвет") is None
+
+
+def test_loves_depressive_is_a_taste_not_health():
+    assert ms.keyword_category("обожает депрессивного футболиста") == "🛒 Предпочтения"
+    assert ms.keyword_category("у неё депрессия") == "🏥 Здоровье"
+
+
+def test_ritual_needs_esoteric_context():
+    assert ms.keyword_category("не любит любовные ритуалы") == "🛒 Предпочтения"     # сам по себе «ритуал» ничего не значит
+    assert ms.keyword_category("делает ритуал на удачу со свечой") == "🔮 Практика"
+    assert ms.keyword_category("нравится лор игры") == "🛒 Предпочтения"               # «лор» сам не ключевое слово: не Здоровье
+
+
+def test_luna_lowercase_is_not_a_cat():
+    assert ms.keyword_category("любит смотреть на луну") != "🐾 Коты"
+
+
+@pytest.mark.parametrize("fact,signals", [
+    ("купил машину и уехал", ["глагол"]),
+    ("его брат работает в банке", ["он/его"]),
+    ("Собеседник любит чай", ["собеседник"]),
+    ("был в Москве, он вернулся", ["глагол", "он/его"]),
+    ("купила машину", []),
+    ("любит чай", []),
+    ("была в Москве и купил билет", []),                         # женская форма в том же факте снимает флаг глагола
+    ("делает ритуал на удачу", []),                              # «ритуал» оканчивается на -ал, но не глагол
+    ("очень нравился лор игры", []),
+])
+def test_male_signals(fact, signals):
+    assert ms.male_signals(fact) == signals
+
+
+def test_temp_signal():
+    assert ms.temp_signal("сейчас находится в Москве")
+    assert ms.temp_signal("яйца в холодильнике")
+    assert not ms.temp_signal("любит чай")
 
 
 def test_adhd_rule_not_triggered_by_substring_noise():
@@ -65,6 +108,11 @@ def test_adhd_rule_not_triggered_by_substring_noise():
 ])
 def test_legacy_target(cat, key, pids, want):
     assert ms.legacy_target(cat, key, pids) == want
+
+
+def test_parse_categorize_reply_new_categories():
+    out = ms.parse_categorize_reply('{"1":"Коты","2":"внешность","3":"Отношения"}', [1, 2, 3])
+    assert out == {1: "🐾 Коты", 2: "🪞 Внешность", 3: "💞 Отношения"}
 
 
 def test_parse_categorize_reply_falls_back():
@@ -88,11 +136,11 @@ def world(tmp_path):
     me = prepo.create(MARK, "Кай", ["каюшка"], is_self=True, status="confirmed")
     friend = prepo.create(MARK, "Оля", [], status="confirmed")
 
-    def mem(fact, cat, key="k", person=None, status="confirmed", related=""):
+    def mem(fact, cat, key="k", person=None, status="confirmed", related="", chat=None):
         with get_engine().begin() as c:
             return c.execute(insert(memories).values(
                 fact_text=fact, key_name=key, category=cat, related_to=related, person_id=person,
-                review_status=status, user_id=MARK, source="auto").returning(memories.c.id)).scalar_one()
+                review_status=status, user_id=MARK, source="auto", source_chat_id=chat).returning(memories.c.id)).scalar_one()
 
     w = {"sc": sc, "me": me, "friend": friend, "mem": mem}
     try:
@@ -101,6 +149,7 @@ def world(tmp_path):
         asyncio.set_event_loop(asyncio.new_event_loop())      # plan() делает asyncio.run → сбрасывает loop для тестов ниже
         with get_engine().begin() as c:
             c.execute(text("DROP TABLE IF EXISTS memories_subject_bak"))
+            c.execute(text("DROP TABLE IF EXISTS memories_deleted_bak"))
             c.execute(delete(memories).where(memories.c.user_id == MARK))
             c.execute(delete(people).where(people.c.user_id == MARK))
 
@@ -122,7 +171,7 @@ def test_plan_then_apply_keeps_review_status(world):
     old_sys = mem("лимит: кафе", "💰 Лимит", "лимит_кафе", None, "confirmed")
 
     with patch.object(sc, "_haiku", _haiku_stub("🏠 Быт")):
-        sc.plan()
+        sc.plan("")
     plan = json.loads(Path(sc.PLAN).read_text())
     assert {i["id"]: (i["cat"], i["by"]) for i in plan["self"]} == {a: ("🏥 Здоровье", "kw"), b: ("🏠 Быт", "haiku")}
     mine = {old_self, old_friend, old_misc, old_sys}                 # в тестовой БД могут лежать чужие строки
@@ -155,7 +204,7 @@ def test_apply_skips_rows_changed_since_plan(world):
     sc, me, mem = world["sc"], world["me"], world["mem"]
     a = mem("аллергия на пыль", "👥 Люди", f"person_{me}_important_aaaaaaaa", me, "pending")
     with patch.object(sc, "_haiku", _haiku_stub("🗂 Прочее")):
-        sc.plan()
+        sc.plan("")
     with get_engine().begin() as c:                                  # владелец успела вручную разнести в СДВГ
         c.execute(text("UPDATE memories SET category='🦋 СДВГ' WHERE id=:i"), {"i": a})
     sc.apply()
@@ -168,3 +217,64 @@ def test_apply_rejects_unknown_category(world):
     Path(sc.PLAN).write_text(json.dumps({"self_id": world["me"], "self": [{"id": 1, "cat": "💥", "by": "kw"}], "legacy": []}))
     with pytest.raises(SystemExit):
         sc.apply()
+
+
+def test_gender_filter_reassigns_by_chat_or_rejects(world):
+    sc, me, mem = world["sc"], world["me"], world["mem"]
+    friend, other = world["friend"], prepo.create(MARK, "Вадим", [], status="confirmed")
+    mem("любит чай", "👥 Люди", f"person_{friend}_likes_11111111", friend, "pending", chat=-501)        # чат 501 → только Оля
+    mem("любит кофе", "👥 Люди", f"person_{friend}_likes_22222222", friend, "pending", chat=-502)       # чат 502: Оля и Вадим
+    mem("любит чай", "👥 Люди", f"person_{other}_likes_33333333", other, "pending", chat=-502)
+    mapped = mem("купил машину", "👥 Люди", f"person_{me}_other_aaaaaaa1", me, "pending", "Кай", chat=-501)
+    ambiguous = mem("его брат уехал", "👥 Люди", f"person_{me}_other_aaaaaaa2", me, "pending", "Кай", chat=-502)
+    nochat = mem("Собеседник любит кино", "👥 Люди", f"person_{me}_other_aaaaaaa3", me, "pending", "Кай", chat=-999)
+    mine = mem("купила платье", "👥 Люди", f"person_{me}_other_aaaaaaa4", me, "pending", "Кай", chat=-501)
+    temp = mem("сейчас находится в отпуске", "👥 Люди", f"person_{me}_other_aaaaaaa5", me, "pending", "Кай", chat=-501)
+
+    with patch.object(sc, "_haiku", _haiku_stub("🗂 Прочее")):
+        sc.plan("")
+    plan = json.loads(Path(sc.PLAN).read_text())
+    g = {x["id"]: x for x in plan["gender"] if x["id"] in {mapped, ambiguous, nochat, mine}}
+    assert g[mapped]["action"] == "reassign" and g[mapped]["person_id"] == friend
+    assert g[ambiguous]["action"] == "reject" and "несколько" in g[ambiguous]["why"]
+    assert g[nochat]["action"] == "reject" and "не сопоставлен" in g[nochat]["why"]
+    assert mine not in g                                              # женская форма — остаётся «Я»
+    assert temp in plan["temp"] and temp in {i["id"] for i in plan["self"]}     # временное: только список, категория есть
+    sample = Path(sc.SAMPLE).read_text()
+    assert "купил машину" in sample and "→ rejected" in sample and "сейчас находится" in sample
+
+    sc.apply()
+    with get_engine().connect() as c:
+        rows = {r.id: r for r in c.execute(text(
+            "SELECT id, person_id, review_status, key_name, category FROM memories WHERE user_id=:u"), {"u": MARK})}
+    assert rows[mapped].person_id == friend and rows[mapped].review_status == "pending"
+    assert rows[mapped].key_name.startswith(f"person_{friend}_")
+    assert rows[ambiguous].review_status == "rejected" and rows[ambiguous].person_id == me
+    assert rows[nochat].review_status == "rejected"
+    assert rows[mine].person_id == me and rows[mine].review_status == "pending" and rows[mine].category != "👥 Люди"
+    assert rows[temp].review_status == "pending"                      # временные автоматически не отклоняются
+
+
+def test_manual_overrides_delete_misc_self_person(world):
+    sc, me, mem = world["sc"], world["me"], world["mem"]
+    ilya = prepo.create(MARK, "Илья", [], status="confirmed")
+    junk = mem("в процессе", "🦋 СДВГ", "x1", None, "confirmed")
+    misc = mem("Arcana — бот", "💡 Инсайт", "x2", None, "confirmed")
+    to_self = mem("любит Вадима", "👥 Люди", "x3", None, "confirmed", "Вадим")
+    card = mem("Илья друг, есть ключи", "👥 Люди", "x4", None, "confirmed")
+    noname = mem("Дима живёт рядом", "👥 Люди", "x5", None, "confirmed")
+    arg = f"{junk}:delete,{misc}:misc,{to_self}:self,{card}:person:Илья,{noname}:person:Никого"
+    with patch.object(sc, "_haiku", _haiku_stub("🗂 Прочее")):
+        sc.plan(arg)
+    plan = {i["id"]: i for i in json.loads(Path(sc.PLAN).read_text())["legacy"]}
+    assert [plan[junk]["to"], plan[misc]["to"], plan[to_self]["to"], plan[card]["to"]] == ["delete", "misc", "self", "person"]
+    assert plan[card]["person_id"] == ilya and plan[noname]["to"] == "misc"       # карточки нет — оставляем как есть
+    assert "карточка «Никого» не найдена" in Path(sc.SAMPLE).read_text()
+
+    sc.apply()
+    with get_engine().connect() as c:
+        left = {r.id: r for r in c.execute(text("SELECT id, person_id FROM memories WHERE user_id=:u"), {"u": MARK})}
+        assert junk not in left                                                     # удалено
+        assert c.execute(text("SELECT count(*) FROM memories_deleted_bak WHERE id=:i"), {"i": junk}).scalar() == 1
+    assert left[misc].person_id is None and left[to_self].person_id == me
+    assert left[card].person_id == ilya and left[noname].person_id is None
