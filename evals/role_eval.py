@@ -40,12 +40,19 @@ async def _timed(fn: Callable, *a, **kw):
 
 
 def _functions():
-    from core import claude_client, preprocess, router
+    """Функции, которые РЕАЛЬНО вызывает бот (не мёртвый код): роль → вызов."""
+    from arcana.handlers.base import ROUTER_SYSTEM
+    from core import classifier, deleter, memory, preprocess
+    from core.claude_client import ask_claude
+
+    async def route_intent(t):          # ровно тот вызов, что в arcana.handlers.base.route_message
+        return (await ask_claude(t, system=ROUTER_SYSTEM, max_tokens=10, role="route", temperature=0)).strip().lower()
+
     return {
-        "parse_finance": ("parse", lambda t: claude_client.parse_finance(t)),
-        "parse_task": ("parse", lambda t: claude_client.parse_task(t)),
-        "route_analyze": ("route", lambda t: router.analyze_message(t, 0)),
-        "route_time": ("route", lambda t: router.parse_time_only(t, 0)),
+        "route_intent": ("route", route_intent),
+        "parse_delete": ("parse", lambda t: deleter.parse_delete_intent(t)),
+        "parse_fact": ("parse", lambda t: memory._parse_fact(t)),
+        "task_category": ("parse", lambda t: classifier._haiku_task_category(t)),
         "spell": ("spell", lambda t: preprocess.normalize_text(t, user_id="")),
     }
 

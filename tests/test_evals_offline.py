@@ -154,8 +154,20 @@ def test_role_eval_harness_compares_normalized_outputs(monkeypatch):
         m = __import__("os").environ["MODEL_PARSE"]
         return {"title": text.upper() if m == "A" else text.upper() + " ", "confidence": "high" if m == "A" else "low"}
 
-    monkeypatch.setattr(role_eval, "_functions", lambda: {"parse_task": ("parse", fn_factory)})
-    res = asyncio.run(role_eval.run({"parse_task": ["один", "два"]}, "A", "B"))
-    assert res["parse_task"]["agree_pct"] == 100.0               # пробелы и «volatile»-поля не считаются расхождением
+    monkeypatch.setattr(role_eval, "_functions", lambda: {"parse_delete": ("parse", fn_factory)})
+    res = asyncio.run(role_eval.run({"parse_delete": ["один", "два"]}, "A", "B"))
+    assert res["parse_delete"]["agree_pct"] == 100.0               # пробелы и «volatile»-поля не считаются расхождением
     assert res["_overall"]["n"] == 2 and res["_diffs"] == []
     assert "MODEL_PARSE" not in __import__("os").environ        # переменная роли после прогона убрана
+
+
+def test_role_eval_targets_live_functions_only():
+    """Эвал ролей должен гонять функции, которые бот реально вызывает (иначе цифры ничего не значат)."""
+    import re
+    from evals import role_eval
+    names = set(role_eval._functions())
+    assert {"route_intent", "parse_delete", "parse_fact", "task_category", "spell"} <= names
+    src = (common.ROOT / "evals" / "role_eval.py").read_text(encoding="utf-8")
+    assert not re.search(r"parse_finance|parse_task\(|analyze_message|parse_time_only", src), "мёртвые функции в эвале"
+    cases = json.loads((common.SYNTHETIC / "role_cases.json").read_text(encoding="utf-8"))
+    assert names <= set(cases)
