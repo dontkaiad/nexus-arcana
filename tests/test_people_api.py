@@ -628,3 +628,27 @@ def test_self_bulk_review_large_lists_is_reversible_and_keeps_card_status(client
     r = client.post("/api/people/%d/review" % me, json={"approve": rest + [foreign]})
     assert r.status_code in (404, 409, 422)
     assert _statuses(me) == before
+
+
+def test_multiselect_mixed_two_actions_in_a_row_keep_person_status(client):
+    """Мультивыбор в карточке: часть выбранных принять, другую часть отклонить двумя вызовами подряд.
+    Фронт передаёт текущий статус человека — он не меняется; невыбранные факты не затрагиваются."""
+    for self_card in (False, True):
+        pid = mk_person("Кай Т" if self_card else "Маша Т", is_self=self_card,
+                        status="confirmed" if self_card else "pending")
+        ids = [mk_fact(pid, "likes" if i % 2 else "dislikes", text_=f"факт {i}") for i in range(10)]
+        first, second, untouched = ids[:4], ids[4:7], ids[7:]
+        status = "confirmed" if self_card else "pending"
+        r1 = client.post("/api/people/%d/review" % pid, json={"approve": first, "person_status": status})
+        assert r1.status_code == 200, r1.text
+        r2 = client.post("/api/people/%d/review" % pid, json={"reject": second, "person_status": status})
+        assert r2.status_code == 200, r2.text
+        assert r2.json()["status"] == status                                        # статус человека не тронут
+        assert r2.json()["counts"] == {"pending": 3, "confirmed": 4, "rejected": 3}
+        st = _statuses(pid)
+        assert [st[i] for i in first] == ["confirmed"] * 4
+        assert [st[i] for i in second] == ["rejected"] * 3
+        assert [st[i] for i in untouched] == ["pending"] * 3
+        # отклонение обратимо
+        r3 = client.post("/api/people/%d/review" % pid, json={"reset": second, "person_status": status})
+        assert r3.json()["counts"] == {"pending": 6, "confirmed": 4, "rejected": 0}

@@ -48,3 +48,15 @@ export function regroup(facts) {
     items: by[t].slice().sort((a, b) => (b.last_mention || b.message_date || '').localeCompare(a.last_mention || a.message_date || '')),
   }))
 }
+
+// ── Мультивыбор фактов (карточка человека и «Я») ─────────────────────────────
+export const idsOf = (groups) => (groups || []).flatMap((g) => (g.items || []).map((i) => i.id))
+
+export function toggleId(selected, id) {
+  const n = new Set(selected)
+  n.has(id) ? n.delete(id) : n.add(id)
+  return n
+}
+
+// Выбор живёт внутри текущего видимого набора: всё, чего не видно, из выбора выпадает.
+export const clampSelection = (selected, visibleIds) => new Set([...selected].filter((id) => visibleIds.includes(id)))

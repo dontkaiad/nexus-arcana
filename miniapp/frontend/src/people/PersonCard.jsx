@@ -5,8 +5,8 @@ import MergePicker from './MergePicker'
 import PersonEdit from './PersonEdit'
 import Accounts from './Accounts'
 import BulkReview from './BulkReview'
-import { EMPTY_FILTER, applyFilter, flatten, regroup } from './bulkFilter'
-import { Btn, Chip, Note, inputStyle, Label } from './parts'
+import { EMPTY_FILTER, applyFilter, clampSelection, flatten, idsOf, regroup, toggleId } from './bulkFilter'
+import { Btn, Chip, Note, Tick, inputStyle, Label } from './parts'
 import {
   addFact, approveAll, approveFact, eraseFact, errText, getPerson, rejectAll, rejectFact, removeAlias, resetAliases, restoreFact, aliasOk, setFactType, reviewPerson,
 } from './peopleApi'
@@ -26,6 +26,7 @@ export default function PersonCard({ s, Sheet, id, onBack, onChanged, onStartRev
   const [confirmRej, setConfirmRej] = useState(false)
   const [eraseId, setEraseId] = useState(null)        // факт, для которого ждём второй тап «Стереть»
   const [flt, setFlt] = useState(EMPTY_FILTER)        // фильтры массового разбора (только карточка «Я»)
+  const [selected, setSelected] = useState(new Set()) // мультивыбор фактов (чекбоксы)
 
   const load = useCallback(async () => {
     try { setP(await getPerson(id)); setErr('') } catch (e) { setErr(errText(e)) }
@@ -53,6 +54,15 @@ export default function PersonCard({ s, Sheet, id, onBack, onChanged, onStartRev
   const SHOW_MAX = 120                                 // сколько фактов рисуем (остальные — только под действие по фильтру)
   const filteredFacts = bulkOn ? applyFilter(allFacts, flt) : []
   const shownGroups = bulkOn ? regroup(filteredFacts.slice(0, SHOW_MAX)) : p.facts
+  const visibleIds = idsOf(shownGroups)
+  const sel = clampSelection(selected, visibleIds)     // выбор работает внутри текущего фильтра и видимого набора
+  const changeFlt = (f) => { setSelected(new Set()); setFlt(f) }
+  // person_status не трогаем: массовое ревью выбранных фактов не должно менять статус самого человека
+  const reviewSel = (kind) => act(async () => {
+    const ids = [...sel]
+    await reviewPerson(p.id, { [kind]: ids, person_status: p.status })
+    setSelected(new Set())
+  })
   const age = p.age != null ? ` · ${p.age} ${plural(p.age, 'год', 'года', 'лет')}` : ''
 
   return (
@@ -81,7 +91,7 @@ export default function PersonCard({ s, Sheet, id, onBack, onChanged, onStartRev
 
       {p.facts.length === 0 && <Note s={s}>Фактов пока нет</Note>}
       {bulkOn && (
-        <BulkReview s={s} facts={allFacts} flt={flt} setFlt={setFlt} busy={busy}
+        <BulkReview s={s} facts={allFacts} flt={flt} setFlt={changeFlt} busy={busy}
           onApprove={(ids) => act(() => reviewPerson(p.id, { approve: ids }))}
           onReject={(ids) => act(() => reviewPerson(p.id, { reject: ids }))}
           onReset={(ids) => act(() => reviewPerson(p.id, { reset: ids }))} />
@@ -89,11 +99,20 @@ export default function PersonCard({ s, Sheet, id, onBack, onChanged, onStartRev
       {bulkOn && filteredFacts.length > SHOW_MAX && (
         <Note s={s}>Показано {SHOW_MAX} из {filteredFacts.length}: действия выше применяются ко всем {filteredFacts.length}</Note>
       )}
+      {visibleIds.length > 0 && (
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', margin: '4px 0 6px' }}>
+          <Btn s={s} style={{ flex: 1, minWidth: 140 }} onClick={() => setSelected(new Set(visibleIds))}>☑︎ Выбрать все видимые ({visibleIds.length})</Btn>
+          {sel.size > 0 && <Btn s={s} style={{ flex: 1, minWidth: 120 }} onClick={() => setSelected(new Set())}>Снять выбор</Btn>}
+        </div>
+      )}
       <FactGroups s={s} groups={shownGroups} expanded={expanded} onToggle={toggle} showMentions={p.is_self}
         onChangeType={(f, t) => act(() => setFactType(p.id, f.id, t))}
         textStyle={(f) => (f.review_status === 'rejected' ? { textDecoration: 'line-through', color: s.tS } : {})}
-        left={(f) => (
-          <div title={f.review_status} style={{ width: 10, height: 10, borderRadius: 5, margin: '0 10px 0 6px', flexShrink: 0, background: statusColor(s, f.review_status) }} />
+        left={(f, t) => (
+          <>
+            <Tick s={s} on={sel.has(f.id)} onClick={() => setSelected(toggleId(sel, f.id))} color={t === 'important' ? s.red : undefined} />
+            <div title={f.review_status} style={{ width: 8, height: 8, borderRadius: 4, margin: '0 6px 0 0', flexShrink: 0, background: statusColor(s, f.review_status) }} />
+          </>
         )}
         right={(f) => (
           <div style={{ display: 'flex', alignItems: 'center', flexShrink: 0 }}>
@@ -141,6 +160,17 @@ export default function PersonCard({ s, Sheet, id, onBack, onChanged, onStartRev
         </div>
       ) : (
         <Btn s={s} style={{ marginTop: 6 }} onClick={() => setAdding(true)}>＋ Добавить факт</Btn>
+      )}
+
+      {sel.size > 0 && (
+        <div data-selection-bar="1" className="glass" style={{
+          position: 'sticky', bottom: 8, zIndex: 20, display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px', margin: '10px 0',
+          boxShadow: '0 4px 18px rgba(0,0,0,0.25)',
+        }}>
+          <span style={{ fontSize: fs(13), fontWeight: 700, color: s.text, flex: 1, minWidth: 0 }}>Выбрано {sel.size}:</span>
+          <Btn s={s} kind="primary" disabled={busy} style={{ minWidth: 104 }} onClick={() => reviewSel('approve')}>✓ Принять</Btn>
+          <Btn s={s} kind="danger" disabled={busy} style={{ minWidth: 104 }} onClick={() => reviewSel('reject')}>✕ Отклонить</Btn>
+        </div>
       )}
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 16 }}>
