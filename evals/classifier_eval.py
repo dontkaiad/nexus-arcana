@@ -114,7 +114,8 @@ def run_ab(cases, a: str, b: str, user_id: str, out: Optional[str]) -> Dict[str,
     summary["usd_a_per_1k_msgs"] = round(1000 * cost(a, summary["tokens_a"]["in"], summary["tokens_a"]["cw"], summary["tokens_a"]["cr"], summary["tokens_a"]["out"]) / max(1, len(llm)), 4)
     summary["usd_b_per_1k_msgs"] = round(1000 * cost(b, summary["tokens_b"]["in"], summary["tokens_b"]["cw"], summary["tokens_b"]["cr"], summary["tokens_b"]["out"]) / max(1, len(llm)), 4)
     if out:
-        summary["diff_file"] = out if out == "-" else f"{out} ({dump_jsonl(diffs, out)} строк)"
+        n_written = dump_jsonl(diffs, out)
+        summary["diff_file"] = f"{'stdout' if out == '-' else out} ({n_written} строк)"
     return summary
 
 
