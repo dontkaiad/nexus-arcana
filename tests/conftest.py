@@ -8,6 +8,7 @@ import sys
 # Генерация ответа по памяти (этап 4) в обычных тестах выключена: без сети и без реальных вызовов LLM.
 # Тесты генерации включают её явно (monkeypatch.setenv) и мокают ask_claude.
 os.environ.setdefault("MEMORY_GENERATE_ANSWER", "0")
+os.environ.setdefault("LLM_USAGE_LOG", "0")          # журнал вызовов LLM в БД — не в обычных тестах
 
 # Добавить корень проекта в path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))

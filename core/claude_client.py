@@ -5,10 +5,12 @@ import asyncio
 import functools
 import logging
 import random
-from typing import AsyncIterator, List, Dict, Optional
+import time
+from typing import AsyncIterator, List, Dict, Optional, Union
 
 import anthropic
 
+from core import llm_usage
 from core.config import config
 
 logger = logging.getLogger(__name__)
@@ -135,20 +137,37 @@ def _first_text(resp) -> str:
     return blocks[0].text if blocks and hasattr(blocks[0], "text") else ""
 
 
+def cacheable_system(system: Union[str, List[Dict]], cache_ttl: Optional[str]) -> Union[str, List[Dict]]:
+    """Prompt caching: строка system превращается в один блок с cache_control (кеш по неизменному префиксу).
+    cache_ttl: None — не кешировать; "5m" — обычный (запись 1.25× входа, чтение 0.1×); "1h" — долгий (запись 2×).
+    Список блоков вызывающий размечает сам (например, статичная часть с cache_control + динамический хвост)."""
+    if not cache_ttl or not system or not isinstance(system, str):
+        return system
+    cc: Dict = {"type": "ephemeral"}
+    if cache_ttl == "1h":
+        cc["ttl"] = "1h"
+    return [{"type": "text", "text": system, "cache_control": cc}]
+
+
 async def ask_claude(
     prompt: str,
-    system: str = "",
+    system: Union[str, List[Dict]] = "",
     model: str = "",
     max_tokens: int = 1024,
     temperature: Optional[float] = None,
     thinking: Optional[str] = None,
     usage_out: Optional[Dict] = None,
+    cache_ttl: Optional[str] = None,
+    label: str = "",
 ) -> str:
     """Простой текстовый запрос. Возвращает строку.
 
     thinking — см. apply_model_params (только для моделей 5.x). usage_out — если передан dict, в него кладутся
-    input_tokens / output_tokens (output включает мышление, если оно было)."""
+    input_tokens / output_tokens (+ cache_*; output включает мышление, если оно было). cache_ttl — prompt caching
+    системного промпта (см. cacheable_system; ниже минимума модели кеш молча не создаётся). label — метка роли
+    для журнала llm_call_log; по умолчанию «модуль.функция» вызывающего."""
     used_model = model or config.model_haiku
+    log_label = label or llm_usage.caller_label()
 
     kwargs: Dict = {
         "model": used_model,
@@ -156,18 +175,20 @@ async def ask_claude(
         "messages": [{"role": "user", "content": prompt}],
     }
     if system:
-        kwargs["system"] = system
+        kwargs["system"] = cacheable_system(system, cache_ttl)
     apply_model_params(kwargs, used_model, temperature, thinking)
 
+    t0 = time.monotonic()
     try:
         resp = await _create_message(**kwargs)
+        nums = llm_usage.usage_numbers(resp)
         if usage_out is not None:
-            u = getattr(resp, "usage", None)
-            usage_out["input_tokens"] = getattr(u, "input_tokens", 0) or 0
-            usage_out["output_tokens"] = getattr(u, "output_tokens", 0) or 0
+            usage_out.update(nums)
+        llm_usage.record(log_label, used_model, nums, int((time.monotonic() - t0) * 1000), True, cache_ttl, thinking)
         return _first_text(resp)
     except anthropic.APIError as e:
         logger.error("Claude API error: %s", e)
+        llm_usage.record(log_label, used_model, {}, int((time.monotonic() - t0) * 1000), False, cache_ttl, thinking)
         return ""
 
 
@@ -245,11 +266,16 @@ async def ask_claude_vision(
     if temperature is not None:
         kwargs["temperature"] = temperature
 
+    t0 = time.monotonic()
+    log_label = llm_usage.caller_label()
     try:
         resp = await _create_message(**kwargs)
+        llm_usage.record(log_label, kwargs["model"], llm_usage.usage_numbers(resp),
+                         int((time.monotonic() - t0) * 1000), True)
         return resp.content[0].text
     except anthropic.APIError as e:
         logger.error("Claude Vision error: %s", e)
+        llm_usage.record(log_label, kwargs["model"], {}, int((time.monotonic() - t0) * 1000), False)
         return ""
 
 

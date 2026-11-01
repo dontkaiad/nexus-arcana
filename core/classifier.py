@@ -1100,14 +1100,21 @@ async def classify(text: str, tz_offset: int = 3, user_id: str = "") -> list[dic
     system = build_system(tz_offset)
     # Сверка траты с заранее объявленными постоянными/разовыми расходами —
     # обогащаем ТОТ ЖЕ вызов (не отдельный LLM-запрос), см. _budget_positions_prompt.
+    positions_prompt = ""
     try:
         _fixed_pos, _one_time_pos = await _known_budget_positions(user_id)
         if _fixed_pos or _one_time_pos:
-            system += "\n" + _budget_positions_prompt(_fixed_pos, _one_time_pos)
+            positions_prompt = _budget_positions_prompt(_fixed_pos, _one_time_pos)
     except Exception as e:
         logger.error("classify: budget positions enrich failed: %s", e)
 
-    raw = await ask_claude(text, system=system, max_tokens=1024, temperature=0)
+    # Prompt caching: ~11K токенов статичного промпта (меняется только датой/ночным правилом) — одним кешируемым блоком;
+    # позиции бюджета пользователя — отдельным хвостом без кеша. Текст промпта для модели ТОТ ЖЕ (блоки склеиваются
+    # через "\n", как раньше строка), поведение не меняется.
+    system_blocks = [{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}]
+    if positions_prompt:
+        system_blocks.append({"type": "text", "text": "\n" + positions_prompt})
+    raw = await ask_claude(text, system=system_blocks, max_tokens=1024, temperature=0, label="classifier.classify")
     global _classify_last_raw
     _classify_last_raw = raw
 

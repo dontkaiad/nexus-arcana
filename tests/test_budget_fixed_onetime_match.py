@@ -13,6 +13,13 @@ import pytest
 from core import classifier as clf
 
 
+def _as_text(system):
+    """system классификатора — блоки (кешируемый статичный + хвост с позициями бюджета); для проверок склеиваем."""
+    if isinstance(system, str):
+        return system
+    return "\n".join(b["text"] for b in system)
+
+
 def _mem(key: str, fact: str):
     return MagicMock(key=key, fact=fact, is_current=True, id=key)
 
@@ -28,7 +35,7 @@ async def test_classify_prompt_enriched_with_known_positions():
     captured = {}
 
     async def fake_ask(text, system="", **kw):
-        captured["system"] = system
+        captured["system"] = _as_text(system)
         return '{"type":"expense","amount":8000,"category":"📦 Разовые","source":"💳 Карта","confidence":"high"}'
 
     with patch("core.repos.memory_repo._repo.find_by_key_prefixes", AsyncMock(return_value=mems)), \
@@ -52,7 +59,7 @@ async def test_classify_repeat_expense_same_position_still_matches():
     seen = []
 
     async def fake_ask(text, system="", **kw):
-        seen.append(system)
+        seen.append(_as_text(system))
         return '{"type":"expense","amount":10000,"category":"📦 Разовые","source":"💳 Карта","confidence":"high"}'
 
     with patch("core.repos.memory_repo._repo.find_by_key_prefixes", AsyncMock(return_value=mems)), \
@@ -70,7 +77,7 @@ async def test_classify_no_positions_prompt_not_enriched():
     captured = {}
 
     async def fake_ask(text, system="", **kw):
-        captured["system"] = system
+        captured["system"] = _as_text(system)
         return '{"type":"expense","amount":500,"category":"🚕 Транспорт","source":"💳 Карта","confidence":"high"}'
 
     with patch("core.repos.memory_repo._repo.find_by_key_prefixes", AsyncMock(return_value=[])), \

@@ -65,7 +65,7 @@ def test_ask_claude_haiku55_request_shape_and_usage():
                                         thinking="off", usage_out=usage))
     kw = create.await_args.kwargs
     assert out == "{}" and "temperature" not in kw and kw["extra_body"] == {"thinking": {"type": "disabled"}}
-    assert usage == {"input_tokens": 48, "output_tokens": 14}
+    assert usage["input_tokens"] == 48 and usage["output_tokens"] == 14 and usage["cache_read_input_tokens"] == 0
 
 
 def test_ask_claude_old_model_unchanged():
