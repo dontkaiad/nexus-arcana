@@ -34,6 +34,7 @@ from aiogram.types import (
 from core.claude_client import ask_claude
 from core.client_resolve import client_find  # noqa: F401  # client_find via mock.patch
 from core.error_log import log_error
+from core.llm_json import parse_llm_json
 from core.shared_handlers import get_user_tz
 from core.location import resolve_offset as _resolve_offset
 from core.utils import cancel_button, react
@@ -305,8 +306,7 @@ async def _parse_work_text(text: str, tz_offset: int) -> dict:
             "work parse hit max_tokens (%s): ответ обрезан, len(text)=%s",
             _PARSE_MAX_TOKENS, len(text),
         )
-    raw = raw.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
-    data = json.loads(raw)
+    data = parse_llm_json(raw, label="work_parse")
 
     title = data.get("title") or "Работа"
     deadline_raw = data.get("deadline") or None
@@ -373,8 +373,7 @@ async def _parse_clarification(text: str, tz_offset: int) -> dict:
         role="parse",
         temperature=0,
     )
-    raw = raw.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
-    parsed = json.loads(raw)
+    parsed = parse_llm_json(raw, label="work_clarification")
     out = {}
     dl = parsed.get("deadline")
     rm = parsed.get("reminder")
