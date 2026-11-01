@@ -33,7 +33,8 @@ ROLES: Dict[str, Role] = {
     "classify":      Role("haiku", "классификатор сообщений Nexus (промпт ~14K токенов)", "off", "5m"),
     "route":         Role("haiku", "короткая маршрутизация интента (Arcana-роутер, парсер времени, Zarya)", "off"),
     "parse":         Role("haiku", "JSON-парсеры и короткие извлечения (задачи, финансы, списки, клиенты, ритуалы…)", "off"),
-    "spell":         Role("haiku", "исправление опечаток (preprocess.normalize_text)", "off"),
+    "spell":         Role("haiku", "исправление опечаток (preprocess.normalize_text)", "off",
+                          default="claude-haiku-5-5"),      # пилот перехода на 5.5: A/B 5/5 совпало; откат: MODEL_SPELL=<4.5>
     "short_text":    Role("haiku", "короткий живой текст: дайджест дня, статистика, nudge, tip, резюме", "off"),
     "memory_rerank": Role("haiku", "реранк кандидатов поиска по памяти", "off"),
     "memory_answer": Role("haiku", "ответ по памяти своими словами (строгий grounding)", "off",

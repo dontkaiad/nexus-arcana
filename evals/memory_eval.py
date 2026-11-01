@@ -6,6 +6,7 @@
   precision@5  = |ожидаемые ∩ первые 5| / |первые 5|;
   route_acc    = маршрут (direct / birthday / hybrid_self / hybrid …) совпал с ожидаемым (если задан).
 Режимы:
+  compare   — legacy ILIKE → гибрид → понимание вопроса на одной синтетике (цифры для docs/EVALS.md);
   offline   — синтетика (evals/synthetic/memory_world.py), Postgres как в CI, вектор выключен (только FTS и разбор вопроса);
   run       — приватные кейсы data/evals/memory_cases.jsonl {"query","expected_ids":[…],"route"?}: на проде, реальные id;
   suggest   — для вопроса печатает кандидатов (id / тип / категория / группа), без текстов — помочь разметить expected_ids;
@@ -71,6 +72,39 @@ def run_offline() -> Dict[str, Any]:
             return asyncio.run(_run(cases, SYN_USER, rerank=False))
 
 
+def run_compare() -> Dict[str, Any]:
+    """Три поколения поиска на одних и тех же синтетических вопросах (recall@5, precision@5):
+      legacy  — до переделки: ILIKE-подстрока OR по токенам, сортировка по свежести, limit 10, без разбора вопроса;
+      hybrid  — FTS (+ вектор в проде) → RRF, без разбора вопроса (MEMORY_QUERY_UNDERSTANDING=0);
+      current — разбор вопроса (субъект + тип) → прямой запрос либо гибрид.
+    Вектор выключен (нет сети): гибрид здесь = только FTS, на проде он сильнее — цифры консервативны для hybrid/current."""
+    from unittest.mock import patch
+    from core import memory as mem
+    from core import memory_search as ms
+    from evals.synthetic.memory_world import CASES, SYN_USER, world
+
+    async def legacy(cases):
+        rec, prec = [], []
+        for c in cases:
+            toks = mem._tokenize_hint(c["query"]) or [c["query"]]
+            found = await mem._mem_repo.search(toks, user_id=SYN_USER, page_size=10)
+            sc = score(c["expected_ids"], [int(m.id) for m in found])
+            rec.append(sc["recall"]); prec.append(sc["precision"])
+        n = len(cases)
+        return {"questions": n, "recall_at_5_pct": pct(sum(rec), n), "precision_at_5_pct": pct(sum(prec), n)}
+
+    with world() as ids:
+        cases = [{"query": q, "expected_ids": [ids[k] for k in exp], "route": route} for q, exp, route in CASES]
+        with patch.object(ms, "_embed", return_value=[]):
+            out = {"legacy_ilike": asyncio.run(legacy(cases))}
+            with patch.dict(os.environ, {"MEMORY_QUERY_UNDERSTANDING": "0"}):
+                r = asyncio.run(_run(cases, SYN_USER, rerank=False))
+            out["hybrid_fts_only"] = {k: r[k] for k in ("questions", "recall_at_5_pct", "precision_at_5_pct")}
+            r = asyncio.run(_run(cases, SYN_USER, rerank=False))
+            out["current_understanding"] = {k: r[k] for k in ("questions", "recall_at_5_pct", "precision_at_5_pct")}
+    return out
+
+
 def _owner(sa, get_engine) -> str:
     with get_engine().connect() as c:
         row = c.execute(sa.text("SELECT user_id FROM memories WHERE is_current AND NOT is_archived "
@@ -82,6 +116,7 @@ def main() -> int:
     ap = argparse.ArgumentParser(prog="evals.memory_eval")
     sub = ap.add_subparsers(dest="cmd", required=True)
     sub.add_parser("offline")
+    sub.add_parser("compare")
     r = sub.add_parser("run"); r.add_argument("--cases", default=str(PRIVATE / "memory_cases.jsonl"))
     r.add_argument("--user-id", default=""); r.add_argument("--rerank", action="store_true")
     s = sub.add_parser("suggest"); s.add_argument("query", nargs="+"); s.add_argument("--user-id", default="")
@@ -90,6 +125,9 @@ def main() -> int:
     a = ap.parse_args()
     if a.cmd == "offline":
         report("memory retrieval (offline, синтетика, без вектора)", run_offline())
+        return 0
+    if a.cmd == "compare":
+        report("memory retrieval: legacy → hybrid → current (синтетика)", run_compare())
         return 0
     import sqlalchemy as sa
     from core.db import get_engine

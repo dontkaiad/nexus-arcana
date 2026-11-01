@@ -1,5 +1,5 @@
 {"text": "неактуально 2", "expected_types": ["memory_deactivate"]}
-{"text": "напомни про машу", "expected_types": ["memory_search"]}
+{"text": "напомни про дантиста", "expected_types": ["memory_search"]}
 {"text": "расскажи про кота", "expected_types": ["memory_search"]}
 {"text": "какой у меня кз номер", "expected_types": ["memory_search"]}
 {"text": "что ты помнишь о тесте", "expected_types": ["memory_search"]}
@@ -7,7 +7,7 @@
 {"text": "удали заметку про рецепт", "expected_types": ["note_delete"]}
 {"text": "удали все заметки", "expected_types": ["note_delete"]}
 {"text": "запомни что я не ем сладкое", "expected_types": ["memory_save"]}
-{"text": "запомни: у Маши аллергия на орехи", "expected_types": ["memory_save"]}
+{"text": "запомни: у соседа аллергия на орехи", "expected_types": ["memory_save"]}
 {"text": "купи молоко", "expected_types": ["list_buy"]}
 {"text": "дома есть: парацетамол", "expected_types": ["list_inventory_add"]}
 {"text": "что есть дома от кашля", "expected_types": ["list_inventory_search"]}

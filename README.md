@@ -43,6 +43,17 @@ are not decisions.
 
 → [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
 
+### Evals, not vibes
+
+Retrieval, the classifier and the grounding of generated answers are each measured by a small repeatable eval; the
+synthetic versions run in CI (`python -m evals offline`), the private ones on the server. A model change is decided by
+the numbers: Haiku 5.5 is **~9× cheaper** on the classifier, yet the evals show it is not a drop-in for every role.
+On a synthetic set, memory retrieval went **72% → 100% recall@5** by understanding the question before searching.
+
+![evals](https://img.shields.io/badge/evals%20%28offline%2C%20synthetic%29-recall%405%20100%25%20%C2%B7%20grounding%20100%25%20%C2%B7%20classifier%20100%25-brightgreen)
+
+→ [docs/EVALS.md](docs/EVALS.md) · [ADR-0030](docs/CASES/0030-evals.md) · [why memory RAG "did not work"](docs/CASES/0031-why-memory-rag-failed.md)
+
 ### Vector semantic recall
 
 Past tarot readings are indexed as triplets (cards · question · interpretation)

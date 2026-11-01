@@ -36,17 +36,17 @@ FACTS = [
     ("own_flat", None, None, "номер квартиры 42, этаж 5", "confirmed"),
     ("own_cat", None, None, "кота зовут Барсик", "confirmed"),
 ]
-PEOPLE = [("misha1", "Михаил Тестов", ["Миша"], None), ("misha2", "Миша Образцов", ["Миша"], None),
-          ("olya", "Ольга", ["Оля"], date(1990, 3, 5))]
+PEOPLE = [("misha1", "Алекс Тестов", ["Алекс"], None), ("misha2", "Алекс Образцов", ["Алекс"], None),
+          ("olya", "Вера Тестова", ["Верочка"], date(1990, 3, 5))]
 
 # query, ожидаемые символьные id (порядок не важен), ожидаемый route
 CASES = [
-    ("что не любит миша", ["m1_dis1", "m1_dis2", "m1_wrongtype", "m2_dis"], "direct"),
-    ("что любит миша", ["m1_like", "m2_like"], "direct"),
-    ("что важно про олю", ["o_imp", "o_imp2"], "direct"),
-    ("у оли аллергия", ["o_imp", "o_imp2"], "direct"),
-    ("что любит оля", ["o_like"], "direct"),
-    ("когда у оли др", [], "birthday"),
+    ("что не любит алекс", ["m1_dis1", "m1_dis2", "m1_wrongtype", "m2_dis"], "direct"),
+    ("что любит алекс", ["m1_like", "m2_like"], "direct"),
+    ("что важно про веру", ["o_imp", "o_imp2"], "direct"),
+    ("у веры аллергия", ["o_imp", "o_imp2"], "direct"),
+    ("что любит вера", ["o_like"], "direct"),
+    ("когда у веры др", [], "birthday"),
     ("что я не ем", ["own_food", "own_food2"], "hybrid_self"),
     ("номер квартиры", ["own_flat"], "hybrid"),
     ("как зовут кота", ["own_cat"], "hybrid"),
