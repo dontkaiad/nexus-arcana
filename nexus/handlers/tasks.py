@@ -946,14 +946,10 @@ confident=false ТОЛЬКО если реально не можешь опре�
 
 # ── Human date → ISO converter ────────────────────────────────────────────────
 
-_HUMAN_DATE_MAP = {
-    "сегодня": 0, "завтра": 1, "послезавтра": 2,
-}
-_WEEKDAY_MAP = {
-    "понедельник": 0, "вторник": 1, "среда": 2, "четверг": 3,
-    "среду": 2, "пятница": 4, "пятницу": 4, "суббота": 5, "субботу": 5,
-    "воскресенье": 6, "воскресение": 6,
-}
+from core.date_extract import (  # общий код Nexus/Arcana
+    HUMAN_DATE_MAP as _HUMAN_DATE_MAP,
+    WEEKDAY_MAP as _WEEKDAY_MAP,
+)
 
 
 async def _human_date_to_iso(value: str, uid: int = 0) -> Optional[str]:
@@ -1013,31 +1009,10 @@ async def _human_date_to_iso(value: str, uid: int = 0) -> Optional[str]:
 
 import re as _re
 
-_REL_TIME_RE = _re.compile(
-    r"через\s+(\d+)\s*(мин[а-я]*|час[а-я]*|ч\b|дн[а-я]*|день|дней)",
-    _re.IGNORECASE,
+from core.date_extract import (  # noqa: E402  общий код Nexus/Arcana
+    REL_TIME_RE as _REL_TIME_RE,
+    parse_relative_time as _parse_relative_time,
 )
-
-
-def _parse_relative_time(text: str, tz_offset: int) -> Optional[str]:
-    """Парсить 'через N минут/часов/дней' → 'YYYY-MM-DDTHH:MM'.
-
-    Возвращает строку или None если паттерн не найден.
-    Не использует Claude — вычисляет offset от datetime.now().
-    """
-    m = _REL_TIME_RE.search(text)
-    if not m:
-        return None
-    n = int(m.group(1))
-    unit = m.group(2).lower()
-    now = datetime.now(timezone(timedelta(hours=tz_offset)))
-    if unit.startswith("мин"):
-        result = now + timedelta(minutes=n)
-    elif unit.startswith("ч") or unit.startswith("час"):
-        result = now + timedelta(hours=n)
-    else:  # день / дней / дня
-        result = now + timedelta(days=n)
-    return result.strftime("%Y-%m-%dT%H:%M")
 
 
 # Ночная логика «завтра» = «сегодня» (до 05:00) — детерминированная страховка

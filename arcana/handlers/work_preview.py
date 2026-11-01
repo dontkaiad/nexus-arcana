@@ -237,10 +237,13 @@ _PARSE_MAX_TOKENS = 600    # запас под JSON
 _LONG_FALLBACK_MIN = 300   # длиннее — при битом JSON не переспрашиваем
 
 
-def _fallback_long_work(text: str) -> dict:
+def _fallback_long_work(text: str, tz_offset: int = 3) -> dict:
     """Детерминированный разбор длинного ввода, когда LLM-JSON сломан:
-    title = первая строка (≤80), notes = весь текст, category по ключевому слову."""
+    title = первая строка (≤80), notes = весь текст, category по ключевому слову,
+    deadline — общим детерминированным парсером Nexus/Arcana (core.date_extract)
+    по «голове» текста (≤400 симв.), чтобы дата из тела молитвы/шагов не мешала."""
     from arcana.handlers.works import WORK_CATEGORY_MAP
+    from core.date_extract import extract_wall_datetime
 
     first = next((ln.strip() for ln in text.splitlines() if ln.strip()), text.strip())
     low = first.lower()
@@ -251,7 +254,7 @@ def _fallback_long_work(text: str) -> dict:
         "priority": "Можно потом",
         "work_type": "🌟 Личная",
         "client_name": None,
-        "deadline": None,
+        "deadline": extract_wall_datetime(text[:_LLM_HEAD_CHARS], tz_offset),
         "reminder": None,
         "repeat": "Нет",
         "repeat_time": None,
@@ -459,7 +462,7 @@ async def handle_add_work_preview(
                 logger.warning(
                     "work parse: битый JSON на длинном вводе (%s симв.) — fallback", len(text)
                 )
-                data = _fallback_long_work(text)
+                data = _fallback_long_work(text, tz_offset)
             else:
                 # Короткий/неоднозначный ввод без структуры — сохраняем фрагмент
                 # как pending и просим Кай дописать детали. В ⚠️ Ошибки НЕ пишем,

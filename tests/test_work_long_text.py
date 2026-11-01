@@ -76,3 +76,20 @@ async def test_llm_gets_only_head_and_tail_goes_to_notes():
     assert data["notes"].endswith(LONG[400:].strip())
     assert data["category"] == "✨ Ритуал"
     assert data["work_type"] == "🌟 Личная"
+
+
+@pytest.mark.asyncio
+async def test_fallback_extracts_deadline_from_head():
+    msg = await _run(TRUNCATED, LONG)
+    data = wp._pending_get(77)
+    assert data["deadline"] and data["deadline"].endswith("T19:45")
+    assert "Дедлайн: не указан" not in msg.answer.await_args.args[0]
+
+
+def test_extract_wall_datetime_cases():
+    from core.date_extract import extract_wall_datetime as x
+    assert x("сделать завтра в 18", 3).endswith("T18:00")
+    assert x("ритуал сегодня в 19:45 (день помина)", 3).endswith("T19:45")
+    assert len(x("послезавтра", 3)) == 10  # только дата
+    assert x("в 19:45 что-нибудь", 3) is None  # время без дня не угадываем
+    assert x("", 3) is None
