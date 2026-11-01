@@ -625,16 +625,14 @@ async def cb_work_save(call: CallbackQuery) -> None:
         await call.answer("Не твой превью.", show_alert=True)
         return
 
+    tz_offset = await get_user_tz(uid)
+
     try:
-        from datetime import datetime as _dt, timezone as _tz
+        from core.date_extract import wall_to_aware
         deadline_str = data.get("deadline") or ""
-        deadline_dt = None
-        if deadline_str:
-            try:
-                fmt = "%Y-%m-%dT%H:%M" if "T" in deadline_str else "%Y-%m-%d"
-                deadline_dt = _dt.strptime(deadline_str[:16], fmt).replace(tzinfo=_tz.utc)
-            except ValueError:
-                pass
+        # Соглашение Nexus (#267): локальное настенное + пояс юзера → aware,
+        # в PG лежит настоящий UTC (раньше локальное клеилось как UTC).
+        deadline_dt = wall_to_aware(deadline_str, int(tz_offset)) if deadline_str else None
         repeat = data.get("repeat") or "Нет"
         result = await _works_repo.create(
             title=data.get("title") or "Работа",
@@ -657,8 +655,6 @@ async def cb_work_save(call: CallbackQuery) -> None:
         return
 
     _pending_del(uid)
-
-    tz_offset = await get_user_tz(uid)
 
     # Reminder: указанное юзером ИЛИ (одноразовая) deadline - 1 день ИЛИ
     # (повторяющаяся) первый future-run из repeat_time / дефолт 09:00.
@@ -690,7 +686,8 @@ async def cb_work_save(call: CallbackQuery) -> None:
             )
 
             def _set_reminder():
-                rd = _dt.strptime(reminder[:16], "%Y-%m-%dT%H:%M")
+                from core.date_extract import wall_to_aware
+                rd = wall_to_aware(reminder[:16], int(tz_offset))
                 with get_engine().begin() as conn:
                     conn.execute(
                         t_works.update()

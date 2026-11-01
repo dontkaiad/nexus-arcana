@@ -1222,10 +1222,10 @@ async def arcana_work_create(
         if "T" not in raw and body.deadline_time:
             raw = f"{raw}T{body.deadline_time}"
         try:
-            if "T" in raw:
-                deadline_dt = datetime.strptime(raw[:16], "%Y-%m-%dT%H:%M")
-            else:
-                deadline_dt = datetime.strptime(raw[:10], "%Y-%m-%d")
+            from core.date_extract import wall_to_aware
+            deadline_dt = wall_to_aware(raw[:16] if "T" in raw else raw[:10], int(tz_offset))
+            if deadline_dt is None:
+                raise ValueError(raw)
         except ValueError:
             raise HTTPException(status_code=400, detail="invalid date")
 
@@ -1254,7 +1254,8 @@ async def arcana_work_create(
             import asyncio as _asyncio
 
             def _set_reminder() -> None:
-                rdt = datetime.strptime(reminder_iso[:16], "%Y-%m-%dT%H:%M")
+                from core.date_extract import wall_to_aware
+                rdt = wall_to_aware(reminder_iso[:16], int(tz_offset))
                 with _get_engine().begin() as conn:
                     conn.execute(
                         _t_works.update()

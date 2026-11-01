@@ -1607,3 +1607,26 @@ def test_categories_work_and_grimoire(client):
         rg = client.get("/api/categories?type=grimoire").json()
     assert "🃏 Расклад" in rw["categories"]
     assert any("Заговор" in c for c in rg["categories"])
+
+
+# ── #267: соглашение Nexus (настоящий UTC) ──────────────────────────────────
+
+def test_miniapp_create_writes_real_utc(client):
+    from tests.test_works_time_convention import _FakeEngine, _utc
+    eng = _FakeEngine()
+    with patch("miniapp.backend.routes.writes._works_pg_repo.create",
+               AsyncMock(return_value="9")) as create, \
+         patch("miniapp.backend.routes.writes.today_user_tz",
+               AsyncMock(return_value=(_today_date(3), 3))), \
+         patch("miniapp.backend.routes.writes.get_user_id", AsyncMock(return_value=FAKE_USER_ID)), \
+         patch("core.db.get_engine", lambda: eng), \
+         patch("arcana.bot.arcana_reminder_flow") as flow:
+        flow.schedule_reminder = AsyncMock(return_value=True)
+        r = client.post("/api/arcana/works", json={
+            "title": "Ритуал", "category": "✨ Ритуал",
+            "date": "2026-11-01", "deadline_time": "19:45",
+            "reminder_date": "2026-11-01", "reminder_time": "19:30",
+        })
+    assert r.status_code == 200, r.text
+    assert _utc(create.await_args.kwargs["deadline"]) == "2026-11-01T16:45"
+    assert _utc(eng.params[0]["reminder"]) == "2026-11-01T16:30"

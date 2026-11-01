@@ -369,8 +369,8 @@ async def _do_reschedule(
             return True
 
         def _save_reminder():
-            from datetime import datetime as _dt
-            rd = _dt.strptime(reminder_iso[:16], "%Y-%m-%dT%H:%M")
+            from core.date_extract import wall_to_aware
+            rd = wall_to_aware(reminder_iso[:16], int(tz_offset))
             with get_engine().begin() as conn:
                 conn.execute(
                     t_works.update()
