@@ -162,3 +162,21 @@ async def cb_arcmem_auto_no(call: CallbackQuery) -> None:
 async def cb_memall(call: CallbackQuery) -> None:
     """«Все факты (N)» под ответом своими словами (общая логика — core.memory.expand_all_facts)."""
     await mem.expand_all_facts(call)
+
+
+# ── Список найденных записей: чекбоксы / «неактуально» / восстановить / закрыть ─────
+# core.memory.search_memory строит клавиатуру (`_build_delete_keyboard`) с callback'ами mem_toggle / mem_deactivate_* /
+# mem_reactivate_* / mem_cancel одинаково для обоих ботов, а обработчики жили только в Nexus — в Arcana нажатия на
+# галочки не обрабатывались. Регистрируем ТЕ ЖЕ функции (общая логика, без копирования): они работают только с
+# общим состоянием core.memory и репозиторием памяти.
+from nexus.handlers import memory as _nexus_mem  # noqa: E402
+
+for _prefix, _handler in (
+    ("mem_toggle:", _nexus_mem.cb_mem_toggle),
+    ("mem_deactivate_selected:", _nexus_mem.cb_mem_deactivate_selected),
+    ("mem_deactivate_all:", _nexus_mem.cb_mem_deactivate_all),
+    ("mem_reactivate_selected:", _nexus_mem.cb_mem_reactivate_selected),
+    ("mem_reactivate_all:", _nexus_mem.cb_mem_reactivate_all),
+    ("mem_cancel:", _nexus_mem.cb_mem_cancel),
+):
+    router.callback_query(F.data.startswith(_prefix))(_handler)
