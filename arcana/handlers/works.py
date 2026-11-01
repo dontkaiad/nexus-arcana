@@ -198,11 +198,14 @@ async def handle_works_list(message: Message, user_id: str = "") -> None:
             await message.answer("📋 Работ нет.")
             return
 
+        from arcana.repos.works_repo import work_deadline_str
+        from core.shared_handlers import get_user_tz
+        tz_offset = int(await get_user_tz(message.from_user.id))
         groups: dict = {"Срочно": [], "Важно": [], "Можно потом": []}
         for item in items:
             client_str = " · 👤 …" if item.has_client else ""
             groups[item.priority].append(
-                f"  • {item.title}{item.deadline_str}{item.category_str}{client_str}"
+                f"  • {item.title}{work_deadline_str(item, tz_offset)}{item.category_str}{client_str}"
             )
 
         lines = ["📋 <b>Работы:</b>\n"]

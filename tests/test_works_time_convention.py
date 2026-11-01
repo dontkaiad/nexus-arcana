@@ -80,16 +80,58 @@ async def test_cb_work_save_writes_real_utc_for_deadline_and_reminder():
     assert flow.schedule_reminder.await_args.kwargs["reminder_dt"] == "2026-11-01T19:30"
 
 
-def test_row_to_work_shows_local_time_for_utc_deadline():
+def _work(deadline_dt):
+    from arcana.repos.works_repo import Work
+    return Work(id="5", title="t", priority="Срочно", deadline_str="", category_str="",
+                has_client=False, deadline_dt=deadline_dt)
+
+
+def test_deadline_str_uses_user_tz_like_nexus():
     from datetime import datetime
-    from types import SimpleNamespace
-    from arcana.repos.pg_works_repo import _row_to_work
-    row = SimpleNamespace(
-        id=5, title="t", deadline=datetime(2026, 11, 1, 16, 45, tzinfo=timezone.utc),
-        reminder=None, category="", notes="", client_id=None, repeat_time="",
-        priority_label="Срочно", status_code="open", repeat_label="Нет", dow_label="",
-    )
-    assert _row_to_work(row).deadline_str.endswith("01.11 19:45")
+    from arcana.repos.works_repo import work_deadline_str
+    from nexus.handlers.tasks import _to_local_wall
+    dt = datetime(2026, 11, 1, 16, 45, tzinfo=timezone.utc)
+    s3, s4 = work_deadline_str(_work(dt), 3), work_deadline_str(_work(dt), 4)
+    assert s3.endswith("01.11 19:45") and s4.endswith("01.11 20:45") and s3 != s4
+    # то же время, что показал бы Nexus (_to_local_wall над тем же UTC-значением)
+    for tz, s in ((3, s3), (4, s4)):
+        assert s.endswith(_to_local_wall(dt.isoformat(), tz)[11:16])
+
+
+def test_deadline_str_date_only_and_empty():
+    from datetime import datetime
+    from arcana.repos.works_repo import work_deadline_str
+    midnight_msk = datetime(2026, 10, 31, 21, 0, tzinfo=timezone.utc)  # 00:00 МСК 01.11
+    assert work_deadline_str(_work(midnight_msk), 3) == " · 📅 01.11"
+    assert work_deadline_str(_work(None), 3) == ""
+
+
+@pytest.mark.asyncio
+async def test_cb_work_save_passes_user_tz_to_repo():
+    if os.path.exists(_TMP_DB):
+        os.remove(_TMP_DB)
+    slug = wp._make_slug(43)
+    wp._pending_set(43, slug, {"title": "Р", "category": "✨ Ритуал", "priority": "Срочно",
+                               "deadline": "2026-11-01T19:45", "reminder": None,
+                               "msg_id": 1, "chat_id": 1, "user_id": "u"})
+    call = MagicMock()
+    call.from_user.id = 43
+    call.data = f"work_save:{slug}"
+    call.message = MagicMock()
+    call.message.chat.id = 1
+    call.message.edit_text = AsyncMock()
+    call.message.answer = AsyncMock()
+    call.answer = AsyncMock()
+    flow = MagicMock()
+    flow.schedule_reminder = AsyncMock(return_value=True)
+    with patch.object(wp._works_repo, "create", AsyncMock(return_value="5")) as create, \
+         patch.dict("sys.modules", {"arcana.bot": MagicMock(arcana_reminder_flow=flow)}), \
+         patch("arcana.handlers.work_preview.get_user_tz", AsyncMock(return_value=4)), \
+         patch("core.db.get_engine", lambda: _FakeEngine()), \
+         patch("core.user_manager.get_tg_ids_for_user", AsyncMock(return_value=[1])), \
+         patch("core.message_pages.save_message_page", AsyncMock()):
+        await wp.cb_work_save(call)
+    assert create.await_args.kwargs["tz_offset"] == 4
 
 
 def test_relative_time_shared_with_core():

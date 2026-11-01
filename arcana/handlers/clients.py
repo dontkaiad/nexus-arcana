@@ -183,13 +183,16 @@ async def handle_client_info(message: Message, text: str, user_id: str = "") -> 
     try:
         from arcana.repos.pg_works_repo import PgWorksRepo
         import html as _html
+        from arcana.repos.works_repo import work_deadline_str
+        from core.shared_handlers import get_user_tz
+        _tz = int(await get_user_tz(message.from_user.id))
         cw = await PgWorksRepo().list_by_client(client.id, user_id)
         active = [w for w in cw if w.status not in ("done", "archived")]
         done_n = len(cw) - len(active)
         if active or done_n:
             lines = [
                 f"  ◦ {_html.escape(w.title)}"
-                + (f" — до {w.deadline_str}" if w.deadline_str else "")
+                + (f" — до {work_deadline_str(w, _tz).replace(' · 📅 ', '')}" if w.deadline_dt else "")
                 for w in active[:5]
             ]
             tail = f"\n  ✅ завершено: {done_n}" if done_n else ""

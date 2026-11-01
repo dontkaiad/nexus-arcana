@@ -42,3 +42,19 @@ class WorksRepo:
 
     async def mark_done(self, work_id: str) -> bool:
         return await _pg_repo().mark_done(work_id)
+
+
+def work_deadline_str(work: "Work", tz_offset: int) -> str:
+    """Текст дедлайна для списков (' · 📅 dd.mm[ HH:MM]') в поясе ПОЛЬЗОВАТЕЛЯ.
+
+    Как Nexus при показе списков: настоящий UTC из PG → локальное настенное время
+    (core.date_extract.dt_to_local_wall = to_local_wall для datetime). Пусто, если
+    дедлайна нет. 00:00 локально = «без времени» → показываем только дату.
+    """
+    from core.date_extract import dt_to_local_wall
+    wall = dt_to_local_wall(work.deadline_dt, tz_offset) if work.deadline_dt else ""
+    if not wall:
+        return ""
+    day = f"{wall[8:10]}.{wall[5:7]}"
+    hhmm = wall[11:16]
+    return f" · 📅 {day}" + (f" {hhmm}" if hhmm and hhmm != "00:00" else "")

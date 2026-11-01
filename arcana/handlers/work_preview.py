@@ -645,6 +645,7 @@ async def cb_work_save(call: CallbackQuery) -> None:
             repeat_time=data.get("repeat_time"),
             day_of_week=data.get("day_of_week"),
             notes=data.get("notes"),
+            tz_offset=int(tz_offset),
         )
     except Exception as e:
         logger.error("works_repo.create failed: %s", e)

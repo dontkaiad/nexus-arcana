@@ -64,22 +64,35 @@ def _resolve(conn, table, code: Optional[str]) -> Optional[int]:
     return row[0] if row else None
 
 
-# Пояс по умолчанию для текстового deadline_str (репозиторий не знает пользователя;
-# так же `tz_offset: int = 3` по умолчанию во всём Arcana-коде).
-_DEFAULT_DISPLAY_TZ = 3
+# ── Слот Зари (#272) ────────────────────────────────────────────────────────
+# busy.py блокирует работы только по scheduled_at. Ритуал/расклад с ЯВНЫМ временем
+# (не 00:00 локально) ставит scheduled_at = deadline и duration_min = 60 — busy.py
+# при этом не меняется. Другие категории и даты без времени слот не занимают.
+_SLOT_CATEGORY_MARKERS = ("Ритуал", "Расклад")
+DEFAULT_SLOT_MINUTES = 60
 
 
-def _row_to_work(row, tz_offset: int = _DEFAULT_DISPLAY_TZ) -> Work:
+def _slot_fields(category: Optional[str], deadline: Optional[datetime], tz_offset: int):
+    """(scheduled_at, duration_min) для работы, занимающей слот, иначе None."""
+    if not category or deadline is None or deadline.tzinfo is None:
+        return None
+    if not any(m in category for m in _SLOT_CATEGORY_MARKERS):
+        return None
+    local = deadline.astimezone(timezone(timedelta(hours=tz_offset)))
+    if local.hour == 0 and local.minute == 0:
+        return None
+    return deadline, DEFAULT_SLOT_MINUTES
+
+
+def _row_to_work(row) -> Work:
+    # deadline_str здесь НЕ считаем: репозиторий не знает пояс пользователя.
+    # Текст дедлайна формирует вызывающий код через work_deadline_str(work, tz_offset)
+    # (arcana/repos/works_repo.py) — как Nexus: пояс юзера + to_local_wall.
     deadline_str = ""
     deadline_dt = None
     deadline_iso = ""
     if row.deadline:
         d = row.deadline
-        # В PG настоящий UTC (соглашение Nexus, #267) → показываем локальное время.
-        ld = d.astimezone(timezone(timedelta(hours=tz_offset))) if d.tzinfo else d
-        deadline_str = f" · 📅 {ld.day:02d}.{ld.month:02d}"
-        if ld.hour or ld.minute:
-            deadline_str += f" {ld.hour:02d}:{ld.minute:02d}"
         deadline_dt = d
         try:
             deadline_iso = d.isoformat()
@@ -131,6 +144,19 @@ def _select_works():
         .outerjoin(rp,          works.c.repeat_id   == rp.c.id)
         .outerjoin(dw,          works.c.day_of_week_id == dw.c.id)
     )
+
+
+def _release_auto_slot(conn, wid: int, vals: dict) -> dict:
+    """Закрытая/архивная работа не должна занимать слот Зари. busy.py сравнивает коды
+    статусов регистрозависимо ('Done'), а у работ они в нижнем регистре ('done') —
+    поэтому слот снимаем у писателя: только «наш» (scheduled_at == deadline),
+    scheduled_at брони не трогаем."""
+    cur = conn.execute(
+        select(works.c.deadline, works.c.scheduled_at).where(works.c.id == wid)
+    ).fetchone()
+    if cur and cur.scheduled_at is not None and cur.scheduled_at == cur.deadline:
+        vals["scheduled_at"] = None
+    return vals
 
 
 class PgWorksRepo:
@@ -214,8 +240,10 @@ class PgWorksRepo:
         repeat_time: Optional[str] = None,
         day_of_week: Optional[str] = None,
         notes: Optional[str] = None,
+        tz_offset: Optional[int] = None,
     ) -> Optional[str]:
         pcode = _code_for(_PRIORITY_TO_CODE, priority) or "later"
+        slot = _slot_fields(category, deadline, tz_offset) if tz_offset is not None else None
         rcode = _code_for(_REPEAT_TO_CODE, repeat)
         dcode = _code_for(_DOW_TO_CODE, day_of_week)
         with get_engine().begin() as conn:
@@ -224,6 +252,9 @@ class PgWorksRepo:
             rep_id   = _resolve(conn, work_repeat,   rcode) if rcode else None
             dow_id   = _resolve(conn, work_day_of_week, dcode) if dcode else None
             cid_int  = int(client_id) if client_id and client_id.isdigit() else None
+            extra = (
+                {"scheduled_at": slot[0], "duration_min": slot[1]} if slot else {}
+            )
             row = conn.execute(
                 works.insert().values(
                     title=title,
@@ -237,6 +268,7 @@ class PgWorksRepo:
                     day_of_week_id=dow_id,
                     repeat_time=repeat_time or None,
                     user_id=user_id or None,
+                    **extra,
                 ).returning(works.c.id)
             ).fetchone()
         return str(row[0]) if row else None
@@ -274,10 +306,11 @@ class PgWorksRepo:
             return False
         with get_engine().begin() as conn:
             done_id = _resolve(conn, work_status, "done")
+            vals = _release_auto_slot(conn, wid, {"status_id": done_id})
             res = conn.execute(
                 works.update()
                 .where(works.c.id == wid)
-                .values(status_id=done_id)
+                .values(**vals)
             )
         return res.rowcount > 0
 
@@ -321,10 +354,13 @@ class PgWorksRepo:
             return False
         with get_engine().begin() as conn:
             sid = _resolve(conn, work_status, status_code)
+            vals = {"status_id": sid}
+            if status_code in ("done", "archived"):
+                vals = _release_auto_slot(conn, wid, vals)
             res = conn.execute(
                 works.update()
                 .where(works.c.id == wid)
-                .values(status_id=sid)
+                .values(**vals)
             )
         return res.rowcount > 0
 
@@ -338,11 +374,15 @@ class PgWorksRepo:
             tzinfo=timezone.utc,
         )
         with get_engine().begin() as conn:
-            res = conn.execute(
-                works.update()
-                .where(works.c.id == wid)
-                .values(deadline=new_dt)
-            )
+            cur = conn.execute(
+                select(works.c.deadline, works.c.scheduled_at).where(works.c.id == wid)
+            ).fetchone()
+            vals = {"deadline": new_dt}
+            # Перенос на дату без времени: авто-слот (scheduled_at == прежний deadline)
+            # снимаем; слот брони/ручной scheduled_at не трогаем.
+            if cur and cur.scheduled_at is not None and cur.scheduled_at == cur.deadline:
+                vals["scheduled_at"] = None
+            res = conn.execute(works.update().where(works.c.id == wid).values(**vals))
         return res.rowcount > 0
 
     def _set_props_sync(self, work_id: str, fields: dict, tz_offset: int = 3) -> bool:
@@ -386,6 +426,22 @@ class PgWorksRepo:
                     vals["deadline"] = parsed
             if not vals:
                 return False
+            if "deadline" in vals or "category" in vals:
+                cur = conn.execute(
+                    select(works.c.category, works.c.deadline,
+                           works.c.scheduled_at, works.c.duration_min)
+                    .where(works.c.id == wid)
+                ).fetchone()
+                # Слот двигаем только если он «наш» (пуст или равен прежнему deadline);
+                # scheduled_at брони (linkage) не трогаем.
+                if cur and (cur.scheduled_at is None or cur.scheduled_at == cur.deadline):
+                    slot = _slot_fields(
+                        vals.get("category", cur.category),
+                        vals.get("deadline", cur.deadline), tz_offset,
+                    )
+                    vals["scheduled_at"] = slot[0] if slot else None
+                    if slot and not cur.duration_min:
+                        vals["duration_min"] = slot[1]
             res = conn.execute(works.update().where(works.c.id == wid).values(**vals))
         return res.rowcount > 0
 
@@ -486,11 +542,12 @@ class PgWorksRepo:
         repeat_time: Optional[str] = None,
         day_of_week: Optional[str] = None,
         notes: Optional[str] = None,
+        tz_offset: Optional[int] = None,
     ) -> Optional[str]:
         return await asyncio.to_thread(
             self._create_sync,
             title, priority, deadline, category, client_id, user_id,
-            repeat, repeat_time, day_of_week, notes,
+            repeat, repeat_time, day_of_week, notes, tz_offset,
         )
 
     async def mark_done(self, work_id: str) -> bool:

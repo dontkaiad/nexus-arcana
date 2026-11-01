@@ -1236,6 +1236,7 @@ async def arcana_work_create(
         category=body.category or None,
         client_id=body.client_id or None,
         user_id=user_id,
+        tz_offset=int(tz_offset),
     )
     if not work_id:
         raise HTTPException(status_code=500, detail="failed to create work")
