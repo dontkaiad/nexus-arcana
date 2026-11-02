@@ -118,7 +118,7 @@ async def _haiku(rows, usage):
 def plan(manual_arg: str = "", keep_temp: str = "") -> int:
     import sqlalchemy as sa
     from core.db import get_engine
-    from core.memory_subjects import keyword_category, legacy_target, gender_verdict, temp_signal
+    from core.memory_subjects import keyword_category, legacy_target, gender_verdict, temp_signal, load_cat_names
     from core.repos import pg_people_repo as prepo
 
     manual = _parse_manual(manual_arg)
@@ -151,8 +151,9 @@ def plan(manual_arg: str = "", keep_temp: str = "") -> int:
     temp_set = set(temp_ids)
     cat_rows = [r for r in rest_rows if r.id not in temp_set]
     kw, rest = {}, []
+    cat_names = load_cat_names(me.user_id)                      # имена и клички котов владельца — из таблицы cats
     for r in cat_rows:
-        cat = keyword_category(r.fact_text)
+        cat = keyword_category(r.fact_text, cat_names)
         if cat:
             kw[r.id] = cat
         else:

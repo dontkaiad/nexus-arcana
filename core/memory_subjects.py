@@ -1,4 +1,4 @@
-"""core/memory_subjects.py — разделы Памяти по субъекту и категории фактов «Я» (чистые функции, без БД).
+"""core/memory_subjects.py — разделы Памяти по субъекту и категории фактов «Я» (чистые функции; БД трогает только load_cat_names).
 
 Раздел выводится, а не хранится: Я = person.is_self, Люди = person_id задан, Коты = категория 🐾 Коты,
 Разное = всё остальное; бюджетные категории — системные и в разделы не входят.
@@ -8,7 +8,8 @@
 from __future__ import annotations
 
 import re
-from typing import Dict, List, Optional, Sequence
+from functools import lru_cache
+from typing import Dict, List, Optional, Sequence, Tuple
 
 # Категории «Я». 🐾 Коты — целевая категория для кошачьего (раздел «Коты»), факт остаётся привязан к карточке «Я».
 SELF_CATEGORIES: List[str] = [
@@ -25,9 +26,25 @@ SYSTEM_KEY_PREFIXES = ("income_", "постоянно_", "разовый_", "л�
 SELF_LEGACY = {"🦋 СДВГ", "🏥 Здоровье", "🛒 Предпочтения", "💼 Работа", "🔄 Паттерн", "💡 Инсайт", "🔮 Практика"}
 
 _I = re.I
-# Имена котов — с заглавной (регистр важен: «луна» — это ещё и небесное тело).
-# Кличка — только как подлежащее в начале факта и не часть названия («Стивен Юниверс»: следом идёт слово с заглавной).
-_CAT_NAMES = re.compile(r"^\W*(?:Луна|Селя|Стивен)\b(?!\s+[А-ЯЁA-Z])")
+# Имена и клички котов в коде не хранятся: их даёт таблица `cats` (load_cat_names → keyword_category(cat_names=…)).
+# Имя — с заглавной (регистр важен: «тучка» — это ещё и облачко); кличка — только как подлежащее в начале факта и
+# не часть названия («Тучка Юниверс»: следом идёт слово с заглавной).
+@lru_cache(maxsize=32)
+def _cat_names_re(names: Tuple[str, ...]):
+    if not names:
+        return None
+    return re.compile(r"^\W*(?:%s)(?!\w)(?!\s+[А-ЯЁA-Z])" % "|".join(re.escape(n) for n in sorted(names, key=len, reverse=True)))
+
+
+def load_cat_names(user_id: str) -> List[str]:
+    """Имена и клички котов владельца из таблицы cats. Нет БД, нет таблицы, нет котов — пустой список, без падения."""
+    try:
+        from core.repos import pg_cats_repo
+        return pg_cats_repo.cat_names(user_id)
+    except Exception:
+        return []
+
+
 _CAT_WORDS = re.compile(r"\bкот(?:а|у|ом|е|ы|ов|ам|ик\w*|ёнок|ёнк\w*)?\b|кошк|кошеч|котят|лоток|\bкорм(?:а|у|ом)?\b для (?:кош|кот)",
                         _I)
 _PSYCH = re.compile(r"\bман(?:ия|ии|ией|ию|иакальн\w*)\b|маниак|биполяр|психиатр|психоз|шизо|суицид|самоповрежд|"
@@ -58,14 +75,16 @@ _HOBBY = re.compile(r"\bигр(?:а|ы|у|е|ой)\b|игра(?:ет|ть|ю)\s+
 _TACTILE = re.compile(r"тактильн|трога|касан|касат|глад|перебира|щупа|на ощупь|прикосновен|мягк|шелков", _I)
 
 
-def keyword_category(fact: str) -> Optional[str]:
+def keyword_category(fact: str, cat_names: Sequence[str] = ()) -> Optional[str]:
     """Категория «Я» по ключевым словам или None (тогда решает Haiku). Порядок важен: первый сработавший.
+    `cat_names` — имена и клички котов владельца (load_cat_names); без них кот определяется только по словам «кот», «лоток»…
     Коты (слово или кличка в начале) → психиатрия/мании (Здоровье, не СДВГ) → хобби → практика (только эзотерика;
     «ритуал» сам по себе ничего не значит) → отношения → внешность → СДВГ → здоровье → работа → предпочтения → быт → паттерн.
     «депрессивный» в «любит/обожает …» — вкус, не здоровье."""
     raw = fact or ""
     t = raw.lower()
-    if _CAT_NAMES.search(raw) or _CAT_WORDS.search(t):
+    names_re = _cat_names_re(tuple(cat_names)) if cat_names else None
+    if (names_re and names_re.search(raw)) or _CAT_WORDS.search(t):
         return CATS_CATEGORY
     if _PSYCH.search(t) and not (re.search(r"депресс", t) and _LIKES_CTX.search(t) and not re.search(r"мани|психиатр|диагноз|лекарств", t)):
         return "🏥 Здоровье"
