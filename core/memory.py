@@ -713,6 +713,13 @@ def _what(types) -> str:
     return "что не любит / важное"
 
 
+def _stored_type(m) -> str:
+    """Сохранённый тип факта: у кота — из ключа cat_<id>_<тип>_<hash>, у человека — person_<id>_<тип>_<hash>."""
+    from core.cats import cat_key_type
+    from core.repos.pg_people_repo import fact_type
+    return (cat_key_type(m.key) or "other") if getattr(m, "cat_id", None) else fact_type(m.key)
+
+
 def _structured_text(result, arcana: bool = False) -> str:
     """Текст ответа для маршрутов с понятой структурой (HTML). Пусто → честное «не знаю»."""
     from html import escape
@@ -732,9 +739,9 @@ def _structured_text(result, arcana: bool = False) -> str:
         if not g.hits:
             empty.append(g.label)
             continue
-        rows = [f"{_TYPE_MARK.get(_memory_search.effective_type(h.memory.fact, fact_type(h.memory.key)), '•')} {escape(owner_fact(h.memory.fact, h.memory.related_to, h.memory.person_id))}"
+        rows = [f"{_TYPE_MARK.get(_memory_search.effective_type(h.memory.fact, _stored_type(h.memory)), '•')} {escape(owner_fact(h.memory.fact, h.memory.related_to, h.memory.person_id))}"
                 for h in g.hits]
-        blocks.append(f"👤 <b>{escape(g.label)}</b>:\n" + "\n".join(rows))
+        blocks.append(f"{'🐈' if g.cat_id else '👤'} <b>{escape(g.label)}</b>:\n" + "\n".join(rows))
     if empty and not blocks:
         who = " и ".join(f"<b>{escape(x)}</b>" for x in empty)
         return f"🧠 Не знаю: у {who} нет подтверждённых фактов ({_what(result.types)})"
@@ -876,7 +883,8 @@ async def search_memory(
             token = secrets.token_hex(4)
             _pkv.save(uid, f"memall_{token}", {
                 "route": result.route, "types": list(result.types), "subject": result.subject,
-                "groups": [{"label": g.label, "person_id": g.person_id, "ids": [int(h.memory.id) for h in g.hits]}
+                "groups": [{"label": g.label, "person_id": g.person_id, "cat_id": g.cat_id,
+                            "ids": [int(h.memory.id) for h in g.hits]}
                            for g in result.groups if g.hits],
             }, ttl=_MEMALL_TTL)
             kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(
@@ -1310,7 +1318,7 @@ async def expand_all_facts(call) -> None:
     _mem_selected[uid] = set()
     if st.get("route") == "direct":
         by_id = {m.id: m for m in mems}
-        groups = [_memory_search.Group(label=g["label"], person_id=g.get("person_id"), hits=[
+        groups = [_memory_search.Group(label=g["label"], person_id=g.get("person_id"), cat_id=g.get("cat_id"), hits=[
             _memory_search.Hit(memory_id=i, score=0.0, memory=by_id[str(i)]) for i in g["ids"] if str(i) in by_id])
             for g in st["groups"]]
         res = _memory_search.Result(route="direct", kind="facts", subject=st.get("subject", "person"),

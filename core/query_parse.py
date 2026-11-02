@@ -1,10 +1,12 @@
 """core/query_parse.py — понимание вопроса к 🧠 Памяти ДО поиска (этап 2). Без LLM, без сети.
 
-parse(query, resolve) -> Plan: субъект (я / человек(и) / неизвестное имя / неясно),
+parse(query, resolve) -> Plan: субъект (я / человек(и) / кот / неизвестное имя / неясно),
 тип факта (dislikes / important / likes), intent (facts / birthday / other).
 
 Субъект-человек определяет единственный источник правды — `pg_people_repo.resolve`
-(формы имён, падежи, отказ rejected и «Я»). Заглавные буквы НЕ используются: пишут строчными.
+(формы имён, падежи, отказ rejected и «Я»); субъект-кот — `pg_cats_repo.resolve_cat` (тот же нормализатор,
+имя и клички). Совпали и человек, и кот (или несколько) — «ambiguous»: показываем всех, не выбираем за владельца.
+Заглавные буквы НЕ используются: пишут строчными.
 Парсер получает `resolve` и `name_in_facts` как функции — нет жёсткой зависимости от БД, тестируется таблицей.
 Маршрутизацию (прямой запрос / гибрид) делает `core.memory_search.answer`.
 """
@@ -57,8 +59,9 @@ DISLIKES, LIKES, IMPORTANT = "dislikes", "likes", "important"
 
 @dataclass
 class Plan:
-    subject: str                       # self | person | ambiguous | unknown_person | unclear
+    subject: str                       # self | person | cat | ambiguous | unknown_person | unclear
     people: List[Dict] = field(default_factory=list)   # резолвнутые люди (dict из prepo.resolve)
+    cats: List[Dict] = field(default_factory=list)     # резолвнутые коты (dict из pg_cats_repo.resolve_cat)
     unknown_name: str = ""             # для unknown_person
     types: Tuple[str, ...] = ()        # () = тип не распознан
     intent: str = "facts"              # facts | birthday
@@ -67,7 +70,10 @@ class Plan:
 
     @property
     def structured(self) -> bool:
-        """Субъект и (тип ИЛИ ДР) ясны — можно идти прямым запросом без гибрида."""
+        """Субъект и (тип ИЛИ ДР) ясны — можно идти прямым запросом без гибрида. У кота ДР не хранится:
+        для него структура — только тип факта."""
+        if not self.people:
+            return self.subject in ("cat", "ambiguous") and bool(self.types)
         return self.subject in ("person", "ambiguous") and bool(self.types or self.intent == "birthday")
 
 
@@ -155,6 +161,7 @@ def parse(
     query: str,
     resolve: Callable[[List[str]], List[Dict]],
     name_in_facts: Optional[Callable[[str], bool]] = None,
+    resolve_cats: Optional[Callable[[List[str]], List[Dict]]] = None,
 ) -> Plan:
     words = tokens(query)
     if not words:
@@ -173,14 +180,19 @@ def parse(
     cand = [w for w in words if not _known(w)]
 
     people: List[Dict] = resolve(cand) if cand else []
+    cats: List[Dict] = resolve_cats(cand) if (cand and resolve_cats) else []
     self_marked = _is_self(words)
 
-    if people and self_marked:
+    if (people or cats) and self_marked:
         # «что я люблю из того, что любит X» — смешанный субъект: не гадаем
-        return Plan(subject="unclear", people=people, types=types, intent=intent, negated=neg, residual=cand)
-    if people:
-        # слова, не объяснённые резолвом (остаток) — информация для логов
-        return Plan(subject="person" if len(people) == 1 else "ambiguous", people=people, types=types,
+        return Plan(subject="unclear", people=people, cats=cats, types=types, intent=intent, negated=neg,
+                    residual=cand)
+    if people or cats:
+        # слова, не объяснённые резолвом (остаток) — информация для логов.
+        # Один человек → person, один кот → cat; тёзки, кот и человек с одним именем → ambiguous (не выбираем).
+        n = len(people) + len(cats)
+        subject = "ambiguous" if n > 1 else ("person" if people else "cat")
+        return Plan(subject=subject, people=people, cats=cats, types=types,
                     intent=intent, negated=neg, residual=[])
     if self_marked:
         return Plan(subject="self", types=types, intent=intent, negated=neg, residual=cand)
