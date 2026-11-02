@@ -57,7 +57,7 @@ KEEP_LINES = 5                  # сколько пунктов на групп�
 KEEP_CHARS = 450                # и сколько символов на ГРУППУ (бюджет не общий: тёзки всегда оба)
 FALLBACK_FACTS = 3              # детерминированная строка группы: столько фактов дословно
 FALLBACK_CUT = 70
-GENERATED_ROUTES = {"direct", "hybrid", "hybrid_self", "hybrid_person"}
+GENERATED_ROUTES = {"direct", "hybrid", "hybrid_self", "hybrid_person", "hybrid_cat"}
 
 Trace = Callable[[str, dict], None]
 

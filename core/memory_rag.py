@@ -162,6 +162,7 @@ def search_memory_semantic(
               AND review_status = 'confirmed'
               AND fact_text <> ''
               AND NOT EXISTS (SELECT 1 FROM people p WHERE p.id = memories.person_id AND p.status = 'rejected')
+              AND NOT EXISTS (SELECT 1 FROM cats ct WHERE ct.id = memories.cat_id AND ct.status = 'rejected')
               {where_extra}
             ORDER BY embedding <=> CAST(:q AS vector)
             LIMIT :k

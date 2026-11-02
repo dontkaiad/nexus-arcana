@@ -11,6 +11,7 @@ from sqlalchemy import select, text, or_, and_, exists
 from sqlalchemy.engine import Engine
 
 from core.repos.memories_table import memories
+from core.repos.cats_tables import cats
 from core.repos.people_tables import people
 
 logger = logging.getLogger("core.pg_memory_repo")
@@ -340,6 +341,11 @@ def _not_rejected_person():
     return ~exists().where(and_(people.c.id == memories.c.person_id, people.c.status == "rejected"))
 
 
+def _not_rejected_cat():
+    """Факты кота, чья карточка убрана (status=rejected), не показываем в чтении — как факты отклонённого человека."""
+    return ~exists().where(and_(cats.c.id == memories.c.cat_id, cats.c.status == "rejected"))
+
+
 def _base_active_q(confirmed_only: bool = True):
     """Active memories. `confirmed_only` (default) hides pending/rejected
     facts (ADR-0027): every read for context/search goes through here.
@@ -350,7 +356,7 @@ def _base_active_q(confirmed_only: bool = True):
         .where(memories.c.is_archived == False)  # noqa: E712
     )
     if confirmed_only:
-        q = q.where(memories.c.review_status == "confirmed").where(_not_rejected_person())
+        q = q.where(memories.c.review_status == "confirmed").where(_not_rejected_person()).where(_not_rejected_cat())
     return q
 
 
@@ -417,7 +423,7 @@ def _find_by_category_sync(
         .where(memories.c.is_current == is_current)
     )
     if confirmed_only:
-        q = q.where(memories.c.review_status == "confirmed").where(_not_rejected_person())
+        q = q.where(memories.c.review_status == "confirmed").where(_not_rejected_person()).where(_not_rejected_cat())
     if category:
         q = q.where(memories.c.category == category)
     if scope and scope != "global":
@@ -477,7 +483,7 @@ def _find_recent_sync(
 ) -> List[Memory]:
     q = select(memories).where(memories.c.is_archived == False)  # noqa: E712
     if confirmed_only:
-        q = q.where(memories.c.review_status == "confirmed").where(_not_rejected_person())
+        q = q.where(memories.c.review_status == "confirmed").where(_not_rejected_person()).where(_not_rejected_cat())
     if is_current is not None:
         q = q.where(memories.c.is_current == is_current)
     if scope and scope != "global":

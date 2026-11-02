@@ -72,6 +72,8 @@ _FILTERS_SQL = """
     AND fact_text <> ''
     AND NOT EXISTS (SELECT 1 FROM people p
                     WHERE p.id = memories.person_id AND p.status = 'rejected')
+    AND NOT EXISTS (SELECT 1 FROM cats ct
+                    WHERE ct.id = memories.cat_id AND ct.status = 'rejected')
 """
 
 
@@ -114,24 +116,30 @@ def _scope_sql(scope: str, params: dict, user_id: str) -> str:
     return sql
 
 
-def _person_sql(person_ids: Optional[Sequence[int]], params: dict, subject_self: bool = False) -> str:
-    """person_ids — только факты этих людей; subject_self — только факты владельца: без person_id
-    ЛИБО привязанные к карточке «Я»."""
+def _person_sql(person_ids: Optional[Sequence[int]], params: dict, subject_self: bool = False,
+                cat_ids: Optional[Sequence[int]] = None) -> str:
+    """person_ids — только факты этих людей; cat_ids — только факты этих котов (оба набора — «или»: имя совпало
+    и с человеком, и с котом); subject_self — только факты владельца: без person_id ЛИБО привязанные к карточке «Я»."""
     if subject_self:
         return (" AND (person_id IS NULL OR EXISTS (SELECT 1 FROM people s "
                 "WHERE s.id = memories.person_id AND s.is_self))")
-    if not person_ids:
-        return ""
-    params["pids"] = [int(p) for p in person_ids]
-    return " AND person_id = ANY(:pids)"
+    conds = []
+    if person_ids:
+        params["pids"] = [int(p) for p in person_ids]
+        conds.append("person_id = ANY(:pids)")
+    if cat_ids:
+        params["cids"] = [int(c) for c in cat_ids]
+        conds.append("cat_id = ANY(:cids)")
+    return (" AND (" + " OR ".join(conds) + ")") if conds else ""
 
 
-def _fts_leg(query: str, scope: str, user_id: str, person_ids, n: int, subject_self: bool = False) -> List[int]:
+def _fts_leg(query: str, scope: str, user_id: str, person_ids, n: int, subject_self: bool = False,
+             cat_ids=None) -> List[int]:
     tsq = fts_query(query)
     if not tsq:
         return []
     params: dict = {"tsq": tsq, "n": n}
-    extra = _scope_sql(scope, params, user_id) + _person_sql(person_ids, params, subject_self)
+    extra = _scope_sql(scope, params, user_id) + _person_sql(person_ids, params, subject_self, cat_ids)
     sql = sa.text(f"""
         SELECT id FROM memories, to_tsquery('russian', :tsq) q
         WHERE fts @@ q AND {_FILTERS_SQL} {extra}
@@ -146,13 +154,14 @@ def _fts_leg(query: str, scope: str, user_id: str, person_ids, n: int, subject_s
         return []
 
 
-def _vector_leg(query: str, scope: str, user_id: str, person_ids, n: int, subject_self: bool = False) -> List[tuple]:
+def _vector_leg(query: str, scope: str, user_id: str, person_ids, n: int, subject_self: bool = False,
+                cat_ids=None) -> List[tuple]:
     """[(id, cosine_similarity)] по убыванию близости."""
     vecs = _embed(query, input_type="query")
     if not vecs:
         return []
     params: dict = {"q": _vec_literal(vecs[0]), "n": n}
-    extra = _scope_sql(scope, params, user_id) + _person_sql(person_ids, params, subject_self)
+    extra = _scope_sql(scope, params, user_id) + _person_sql(person_ids, params, subject_self, cat_ids)
     sql = sa.text(f"""
         SELECT id, 1 - (embedding <=> CAST(:q AS vector)) AS score
         FROM memories
@@ -276,6 +285,7 @@ async def hybrid_search(
     trace: Optional[Trace] = None,
     subject_self: bool = False,
     hint: str = "",
+    cat_ids: Optional[Sequence[int]] = None,
 ) -> List[Hit]:
     """FTS top-20 + vector top-20 → RRF → [Haiku-реранк] → top-k."""
     query = (query or "").strip()
@@ -290,8 +300,8 @@ async def hybrid_search(
                 pass
 
     fts_ids, vec = await asyncio.gather(
-        asyncio.to_thread(_fts_leg, query, scope, user_id, person_ids, FTS_TOP, subject_self),
-        asyncio.to_thread(_vector_leg, query, scope, user_id, person_ids, VEC_TOP, subject_self),
+        asyncio.to_thread(_fts_leg, query, scope, user_id, person_ids, FTS_TOP, subject_self, cat_ids),
+        asyncio.to_thread(_vector_leg, query, scope, user_id, person_ids, VEC_TOP, subject_self, cat_ids),
     )
     hits = rrf_fuse(fts_ids, vec)
     _t("legs", {"fts": list(fts_ids), "vec": [i for i, _ in vec]})
@@ -329,22 +339,24 @@ from core import query_parse  # noqa: E402  (после определения H
 
 DIRECT_LIMIT = 20
 _TYPE_SQL = "COALESCE(substring(key_name from '^person_[0-9]+_([a-z]+)_[0-9a-f]{8}$'), 'other')"
+_CAT_TYPE_SQL = "COALESCE(substring(key_name from '^cat_[0-9]+_([a-z]+)_[0-9a-f]{8}$'), 'other')"
 
 
 @dataclass
 class Group:
-    """Блок результата: один человек (тёзки → несколько блоков) либо общий набор (person_id=None)."""
+    """Блок результата: один человек или кот (тёзки → несколько блоков) либо общий набор (оба id пусты)."""
     label: str = ""
     person_id: Optional[int] = None
+    cat_id: Optional[int] = None
     hits: List[Hit] = field(default_factory=list)
     birthday: str = ""        # «ДР: 05.03» (intent=birthday)
 
 
 @dataclass
 class Result:
-    route: str                # direct | birthday | hybrid | hybrid_self | hybrid_person | unknown_person | none
+    route: str                # direct | birthday | hybrid | hybrid_self | hybrid_person | hybrid_cat | unknown_person | none
     kind: str                 # facts | birthday | none | unknown_person
-    subject: str              # self | person | ambiguous | unknown_person | unclear
+    subject: str              # self | person | cat | ambiguous | unknown_person | unclear
     types: Tuple[str, ...] = ()
     groups: List[Group] = field(default_factory=list)
     unknown_name: str = ""
@@ -383,6 +395,16 @@ def _word_in_facts(user_id: str, word: str) -> bool:
         return True       # при сомнении не объявляем «такого человека нет»
 
 
+def _resolve_cats(user_id: str, mentions: List[str]) -> List[Dict]:
+    """Коты владельца по упоминанию (имя, клички, падежи). Любой сбой (нет таблицы, БД) — пусто: поиск идёт как раньше."""
+    try:
+        from core.repos import pg_cats_repo
+        return pg_cats_repo.resolve_cat(user_id, mentions)
+    except Exception:
+        logger.warning("cat resolve for memory search failed, searching without cats", exc_info=True)
+        return []
+
+
 def _people_labels(person_ids: Sequence[int]) -> Dict[int, str]:
     if not person_ids:
         return {}
@@ -409,11 +431,20 @@ def _direct_facts(person_id: int, types: Sequence[str], user_id: str) -> List[Me
     """Подтверждённые факты человека нужных типов, важные первыми. Только общие фильтры чтения
     (confirmed, не tombstone, не rejected-человек, is_current, не archived). Тип — по тексту (лексикон),
     а где лексикон молчит — по ключу person_<id>_<type>_<hash>."""
-    params: dict = {"pid": int(person_id)}
+    return _direct_rows("person_id", person_id, _TYPE_SQL, types, user_id)
+
+
+def _direct_cat_facts(cat_id: int, types: Sequence[str], user_id: str) -> List[Memory]:
+    """То же для кота: факты с cat_id, тип — по тексту, иначе по ключу cat_<id>_<type>_<hash>."""
+    return _direct_rows("cat_id", cat_id, _CAT_TYPE_SQL, types, user_id)
+
+
+def _direct_rows(col: str, ent_id: int, type_sql: str, types: Sequence[str], user_id: str) -> List[Memory]:
+    params: dict = {"eid": int(ent_id)}
     extra = _scope_sql("", params, user_id)
     sql = sa.text(f"""
-        SELECT id, {_TYPE_SQL} AS t FROM memories
-        WHERE person_id = :pid AND {_FILTERS_SQL} {extra}
+        SELECT id, {type_sql} AS t FROM memories
+        WHERE {col} = :eid AND {_FILTERS_SQL} {extra}
         ORDER BY id
     """)
     with get_engine().connect() as conn:
@@ -473,18 +504,19 @@ async def answer(query: str, user_id: str = "", scope: str = "", k: int = DEFAUL
         query_parse.parse, query,
         lambda cand: _resolve_people(user_id, cand),
         lambda w: _word_in_facts(user_id, w),
+        lambda cand: _resolve_cats(user_id, cand),
     )
     _t("parse", {"subject": plan.subject, "types": list(plan.types), "intent": plan.intent,
-                 "people": [p["id"] for p in plan.people]})
+                 "people": [p["id"] for p in plan.people], "cats": [c["id"] for c in plan.cats]})
     hint = _hint_for(plan)
 
     if plan.subject == "unknown_person":
         return Result(route="unknown_person", kind="unknown_person", subject=plan.subject,
                       types=plan.types, unknown_name=plan.unknown_name)
 
-    if plan.subject in ("person", "ambiguous"):
+    if plan.subject in ("person", "ambiguous", "cat"):
         labels = await asyncio.to_thread(_people_labels, [p["id"] for p in plan.people])
-        if plan.intent == "birthday":
+        if plan.intent == "birthday" and plan.people:        # у кота ДР не хранится: только блоки людей
             from core.people import birthday_context
             groups = [Group(label=labels.get(p["id"], p["name"]), person_id=p["id"],
                             birthday=birthday_context(p["birthday"], p["birthday_year_known"]))
@@ -498,13 +530,18 @@ async def answer(query: str, user_id: str = "", scope: str = "", k: int = DEFAUL
                 mems = await asyncio.to_thread(_direct_facts, p["id"], plan.types, user_id)
                 groups.append(Group(label=labels.get(p["id"], p["name"]), person_id=p["id"],
                                     hits=[Hit(memory_id=int(m.id), score=0.0, memory=m) for m in mems]))
+            for c in plan.cats:                                  # блоки котов — после блоков людей
+                mems = await asyncio.to_thread(_direct_cat_facts, c["id"], plan.types, user_id)
+                groups.append(Group(label=c["name"], cat_id=c["id"],
+                                    hits=[Hit(memory_id=int(m.id), score=0.0, memory=m) for m in mems]))
             _t("direct", {"ids": [h.memory.id for g in groups for h in g.hits]})
             any_hits = any(g.hits for g in groups)
             return Result(route="direct", kind="facts" if any_hits else "none", subject=plan.subject,
                           types=plan.types, groups=groups)
-        # человек ясен, тип нет → гибрид только внутри его фактов
-        return await _hybrid("hybrid_person", plan.subject, plan.types,
-                             person_ids=[p["id"] for p in plan.people], hint=hint)
+        # субъект ясен, тип нет → гибрид только внутри фактов этого человека / кота (или обоих при совпадении имён)
+        return await _hybrid("hybrid_person" if plan.people else "hybrid_cat", plan.subject, plan.types,
+                             person_ids=[p["id"] for p in plan.people] or None,
+                             cat_ids=[c["id"] for c in plan.cats] or None, hint=hint)
 
     if plan.subject == "self":
         return await _hybrid("hybrid_self", "self", plan.types, subject_self=True, hint=hint)
