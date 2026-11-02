@@ -1,0 +1,104 @@
+"""core/repos/pg_cats_repo.py — Cats subject storage (карточка кота; факты живут в memories.cat_id).
+
+Sync SQLAlchemy Core, как pg_people_repo; async-вызывающие оборачивают в asyncio.to_thread.
+Нормализатор имён и склонений — тот же, что у людей (core.people.aliases_norm_for / mention_candidates),
+поэтому «Тучке» находит «Тучка» ровно так же, как «Оле» находит «Оля».
+"""
+from __future__ import annotations
+
+from typing import Dict, List, Optional
+
+from sqlalchemy import insert, select, text, update
+
+from core.db import get_engine
+from core.people import aliases_norm_for, mention_candidates
+from core.repos.cats_tables import CAT_STATUSES, cats
+
+EDITABLE = ("name", "aliases", "photo_url", "status")
+
+
+def _row(r) -> Dict:
+    return dict(r._mapping)
+
+
+def sync_norm(conn, cat_id: int) -> None:
+    """Пересчитывает aliases_norm из текущих name+aliases (в той же транзакции после их изменения)."""
+    r = conn.execute(text("SELECT name, aliases FROM cats WHERE id = :i"), {"i": cat_id}).first()
+    if r:
+        conn.execute(text("UPDATE cats SET aliases_norm = :n WHERE id = :i"),
+                     {"n": aliases_norm_for(r.name, r.aliases or []), "i": cat_id})
+
+
+def create(user_id: str, name: str, aliases: Optional[List[str]] = None, *,
+           photo_url: Optional[str] = None, status: str = "confirmed") -> int:
+    name = (name or "").strip()
+    if not name:
+        raise ValueError("cat name is empty")
+    if status not in CAT_STATUSES:
+        raise ValueError("bad status")
+    with get_engine().begin() as c:
+        cid = c.execute(insert(cats).values(
+            user_id=user_id, name=name, aliases=[a.strip() for a in (aliases or []) if a and a.strip()],
+            photo_url=photo_url, status=status,
+        ).returning(cats.c.id)).scalar_one()
+        sync_norm(c, cid)
+    return cid
+
+
+def get_cat(user_id: str, cat_id: int) -> Optional[Dict]:
+    with get_engine().connect() as c:
+        r = c.execute(select(cats).where(cats.c.id == cat_id, cats.c.user_id == user_id)).first()
+    return _row(r) if r else None
+
+
+def list_cats(user_id: str, status: Optional[str] = None) -> List[Dict]:
+    """Коты владельца (по умолчанию все, кроме отклонённых), стабильно по id."""
+    q = select(cats).where(cats.c.user_id == user_id).order_by(cats.c.id)
+    q = q.where(cats.c.status == status) if status else q.where(cats.c.status != "rejected")
+    with get_engine().connect() as c:
+        return [_row(r) for r in c.execute(q)]
+
+
+def update_cat(user_id: str, cat_id: int, values: Dict) -> Optional[Dict]:
+    vals = {k: v for k, v in values.items() if k in EDITABLE}
+    if "status" in vals and vals["status"] not in CAT_STATUSES:
+        raise ValueError("bad status")
+    if "name" in vals:
+        vals["name"] = (vals["name"] or "").strip()
+        if not vals["name"]:
+            raise ValueError("cat name is empty")
+    if "aliases" in vals:
+        vals["aliases"] = [a.strip() for a in (vals["aliases"] or []) if a and a.strip()]
+    with get_engine().begin() as c:
+        if vals:
+            res = c.execute(update(cats).where(cats.c.id == cat_id, cats.c.user_id == user_id)
+                            .values(**vals, updated_at=text("now()")))
+            if not res.rowcount:
+                return None
+        if "name" in vals or "aliases" in vals:
+            sync_norm(c, cat_id)
+    return get_cat(user_id, cat_id)
+
+
+def resolve_cat(user_id: str, mentions: List[str]) -> List[Dict]:
+    """Коты владельца, упомянутые в тексте: пересечение нормализованных форм (GIN &&). Отклонённые не
+    резолвятся. Порядок стабилен (по id). Не ровно один результат — решает вызывающий (без догадок)."""
+    forms = mention_candidates(mentions)
+    if not forms:
+        return []
+    with get_engine().connect() as c:
+        rows = c.execute(text(
+            "SELECT id, name, aliases, photo_url FROM cats "
+            "WHERE user_id = :u AND status <> 'rejected' AND aliases_norm && CAST(:f AS text[]) "
+            "ORDER BY id"), {"u": user_id, "f": forms}).all()
+    return [{"id": r.id, "name": r.name, "aliases": list(r.aliases or []), "photo_url": r.photo_url} for r in rows]
+
+
+def cat_names(user_id: str) -> List[str]:
+    """Имя + клички всех не отклонённых котов владельца — для подсказки промпту parse (без дублей, по порядку)."""
+    seen: List[str] = []
+    for c in list_cats(user_id):
+        for n in [c["name"], *(c.get("aliases") or [])]:
+            if n and n not in seen:
+                seen.append(n)
+    return seen

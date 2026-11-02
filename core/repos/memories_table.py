@@ -26,6 +26,8 @@ memories = Table(
     # NULL) lives in the migration; `people` is in another MetaData, so the
     # Core column stays a plain BigInteger.
     Column("person_id",      BigInteger),
+    # Cat subject (миграция *_cats_subject): FK memories.cat_id → cats.id (ON DELETE SET NULL) — в миграции.
+    Column("cat_id",         BigInteger),
     # pending | confirmed | rejected. Every read for context/search shows
     # only 'confirmed'; destructive paths see all.
     # цитата-основание автоизвлечённого факта (показывается при ревью); ADR-0027

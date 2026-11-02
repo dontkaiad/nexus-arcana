@@ -9,6 +9,7 @@ import json
 import logging
 import re
 import secrets
+from html import escape
 from typing import Dict, List, Optional, Set, Tuple
 
 from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
@@ -202,12 +203,28 @@ def _single_fact(parsed) -> dict:
     return first
 
 
-async def _parse_fact(text: str) -> Tuple[str, str, str, str]:
-    """Возвращает (fact, category, связь, ключ)."""
+CATS_CATEGORY = "🐾 Коты"
+# Общие слова вместо имени кота: «кот боится пылесоса» — не неизвестный кот, а просто факт без привязки.
+_GENERIC_CAT_WORDS = {"кот", "кота", "коту", "котом", "коты", "котов", "котам", "кошка", "кошки", "кошку", "кошке",
+                      "кошкой", "кошек", "котик", "котика", "котику", "котики", "котёнок", "котенок", "котята",
+                      "питомец", "питомцы", "питомца", "животное", "животные", "все", "оба", "обе"}
+
+
+def _cat_names_block(cat_names: Optional[List[str]]) -> str:
+    """Имена котов пользователя для промпта parse (из таблицы cats на лету, в репо их нет). Пусто — без блока."""
+    names = [n.strip() for n in (cat_names or []) if n and n.strip()]
+    if not names:
+        return ""
+    return ("\nКоты пользователя: " + ", ".join(names) + ". Факт про одного из них — категория 🐾 Коты, "
+            "связь = имя кота; про кота без имени — связь «кот».")
+
+
+async def _parse_fact(text: str, cat_names: Optional[List[str]] = None) -> Tuple[str, str, str, str]:
+    """Возвращает (fact, category, связь, ключ). `cat_names` — имена и клички котов владельца (необязательно)."""
     try:
         raw = await ask_claude(
             text,
-            system=_PARSE_SYSTEM,
+            system=_PARSE_SYSTEM + _cat_names_block(cat_names),
             max_tokens=200,
             role="parse",
             temperature=0,
@@ -462,6 +479,25 @@ def _single_person(user_id: str, mention: str) -> Optional[dict]:
         return None
 
 
+def _cat_names(user_id: str) -> List[str]:
+    """Имена и клички котов владельца для промпта parse. Любой сбой (нет таблицы, БД) — пусто, парс идёт как раньше."""
+    try:
+        from core.repos import pg_cats_repo
+        return pg_cats_repo.cat_names(user_id)
+    except Exception:
+        logger.warning("cat names for parse prompt failed, parsing without them", exc_info=True)
+        return []
+
+
+def _resolve_cats(user_id: str, mention: str) -> List[dict]:
+    try:
+        from core.repos import pg_cats_repo
+        return pg_cats_repo.resolve_cat(user_id, [mention])
+    except Exception:
+        logger.warning("cat resolve for memory save failed, saving as plain fact", exc_info=True)
+        return []
+
+
 async def parse_and_store(text: str, user_id: str, bot_label: str) -> dict:
     """Message-free ядро сохранения памяти: раскладка → Haiku-парс →
     диверсия долгов в `debts` → канонизация алиаса → запись.
@@ -471,7 +507,8 @@ async def parse_and_store(text: str, user_id: str, bot_label: str) -> dict:
     `save_memory` (бот) вызывает то же и добавляет реплаи/СДВГ-совет/плашку.
     """
     text = maybe_convert(text.strip())
-    fact, category, связь, ключ = await _parse_fact(text)
+    cat_names = await asyncio.to_thread(_cat_names, user_id)
+    fact, category, связь, ключ = await _parse_fact(text, cat_names)
     scope = bot_to_scope(bot_label)
 
     if ключ.startswith("долг_"):
@@ -520,6 +557,18 @@ async def parse_and_store(text: str, user_id: str, bot_label: str) -> dict:
     if category == PEOPLE_CATEGORY and связь:
         person = await asyncio.to_thread(_single_person, user_id, связь)
 
+    # Коты: ровно один кот по имени/кличке ⇒ cat_id. Ноль или несколько — факт сохраняется без cat_id (без
+    # догадок). Имя, которого нет в карточках (и это не «кот»/«коты»), уходит в ответ подсказкой завести карточку.
+    cat = None
+    cat_unknown = None
+    if category == CATS_CATEGORY and связь:
+        found = await asyncio.to_thread(_resolve_cats, user_id, связь)
+        if len(found) == 1:
+            cat = found[0]
+        elif not found and _normalize_word(связь.lower().replace("ё", "е")) not in _GENERIC_CAT_WORDS \
+                and связь.lower() not in _GENERIC_CAT_WORDS:
+            cat_unknown = связь
+
     try:
         was_updated = False
         if person:
@@ -536,6 +585,10 @@ async def parse_and_store(text: str, user_id: str, bot_label: str) -> dict:
             mid, was_updated = await _mem_repo.upsert(
                 fact, ключ, category, scope, связь, "manual", user_id
             )
+        elif cat:
+            mid = await _mem_repo.add(
+                fact, ключ, category, scope, cat["name"], "manual", user_id, cat_id=cat["id"]
+            )
         else:
             mid = await _mem_repo.add(
                 fact, ключ, category, scope, связь, "manual", user_id
@@ -546,7 +599,8 @@ async def parse_and_store(text: str, user_id: str, bot_label: str) -> dict:
                 "memory_id": None, "was_updated": False, "debt_name": "", "link": связь}
     return {"kind": "memory" if mid else "error", "fact": fact, "category": category,
             "key": ключ, "memory_id": mid, "was_updated": was_updated, "debt_name": "", "link": связь,
-            "person_id": person["id"] if person else None}
+            "person_id": person["id"] if person else None,
+            "cat_id": cat["id"] if cat else None, "cat_unknown": cat_unknown}
 
 
 async def save_memory(
@@ -590,7 +644,10 @@ async def save_memory(
                     await message.answer(f"📌 Добавил постоянный расход: {fact}")
                 else:
                     cat_label = f" [{category}]" if category else ""
-                    sent = await message.answer(f"🧠 Запомнил{cat_label}: {fact}")
+                    hint = ""
+                    if r.get("cat_unknown"):
+                        hint = f"\n💡 Кота {escape(r['cat_unknown'])} нет в карточках, заведи в Mini App → Коты"
+                    sent = await message.answer(f"🧠 Запомнил{cat_label}: {fact}{hint}")
                     # Регистрируем плашку для reply-исправлений (#188) — БЕЗ
                     # этого reply на «🧠 Запомнил» падал в общий classify() с
                     # текстом-контекстом, который Haiku не понимал ({"type":
