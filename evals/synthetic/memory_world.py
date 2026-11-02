@@ -12,8 +12,11 @@ from typing import Dict, List
 import sqlalchemy as sa
 from sqlalchemy import delete, insert
 
+from core.cats import cat_fact_key
 from core.db import get_engine
+from core.repos import pg_cats_repo as crepo
 from core.repos import pg_people_repo as prepo
+from core.repos.cats_tables import cats
 from core.repos.memories_table import memories
 from core.repos.people_tables import people
 
@@ -35,9 +38,29 @@ FACTS = [
     ("own_food2", None, None, "не ем рыбу", "confirmed"),
     ("own_flat", None, None, "номер квартиры 42, этаж 5", "confirmed"),
     ("own_cat", None, None, "кота зовут Барсик", "confirmed"),
+    # человек с тем же именем, что у кота (ловушка «неоднозначно»)
+    ("tp_dis", "tp", "dislikes", "не ест мясо", "confirmed"),
+    ("tp_like", "tp", "likes", "любит борщ", "confirmed"),
 ]
 PEOPLE = [("misha1", "Алекс Тестов", ["Алекс"], None), ("misha2", "Алекс Образцов", ["Алекс"], None),
-          ("olya", "Вера Тестова", ["Верочка"], date(1990, 3, 5))]
+          ("olya", "Вера Тестова", ["Верочка"], date(1990, 3, 5)),
+          ("tp", "Тучка Тестова", ["Тучка"], None)]
+
+# Коты (вымышленные): (символьное имя, имя, клички, статус карточки). «Рыжик» — карточка убрана (rejected).
+CATS = [("tuchka", "Тучка", ["Туча"], "confirmed"), ("ponchik", "Пончик", ["Пончо"], "confirmed"),
+        ("ryzhik", "Рыжик", [], "rejected")]
+# (символьное имя, кот|None, тип|None, текст факта); кот=None — «общее про котов», без cat_id
+CAT_FACTS = [
+    ("t_dis", "tuchka", "dislikes", "Тучка не ест курицу"),
+    ("t_like", "tuchka", "likes", "Тучка любит окно"),
+    ("t_imp", "tuchka", "important", "у Тучки аллергия на курицу"),
+    ("t_med", "tuchka", "other", "Тучка принимает лекарства по утрам"),
+    ("p_dis", "ponchik", "dislikes", "Пончик не ест сыр"),
+    ("p_like", "ponchik", "likes", "Пончик любит коробки"),
+    ("p_med", "ponchik", "other", "Пончик принимает лекарства вечером"),
+    ("r_dis", "ryzhik", "dislikes", "Рыжик не ест рыбу"),                  # кот убран: факт не должен всплывать
+    ("cat_general", None, None, "кот боится пылесоса"),                    # без привязки к коту
+]
 
 # query, ожидаемые символьные id (порядок не важен), ожидаемый route
 CASES = [
@@ -52,6 +75,21 @@ CASES = [
     ("как зовут кота", ["own_cat"], "hybrid"),
 ]
 
+# Вопросы про котов: query, ожидаемые символьные id, route, extra. extra: {"ambiguous": N} — вопрос неоднозначен,
+# ожидается subject=ambiguous и N блоков (показать всех, не выбирать).
+CASES_CATS = [
+    ("что не ест пончик", ["p_dis"], "direct", {}),                         # прямой запрос по cat_id + тип
+    ("что важно про туча", ["t_imp"], "direct", {}),                        # по кличке
+    ("что любит пончику", ["p_like"], "direct", {}),                        # падеж
+    ("какие лекарства у пончика", ["p_med"], "hybrid_cat", {}),             # тип не распознан → гибрид внутри фактов кота
+    ("что не ест тучка", ["t_dis", "tp_dis"], "direct", {"ambiguous": 2}),  # кот = человек: показать обоих
+    ("что любит тучка", ["t_like", "tp_like"], "direct", {"ambiguous": 2}),
+    ("что не ест мурка", [], "unknown_person", {}),                         # такого кота нет
+    ("что не ест рыжик", [], "unknown_person", {}),                         # карточка убрана: факт не всплывает
+    ("что важно про пончика", [], "direct", {}),                            # важных фактов нет → честное «не знаю»
+    ("чего боится кот", ["cat_general"], "hybrid", {}),                     # имени нет, факт без привязки
+]
+
 
 @contextmanager
 def world():
@@ -59,6 +97,7 @@ def world():
     with get_engine().begin() as c:
         c.execute(delete(memories).where(memories.c.user_id == SYN_USER))
         c.execute(delete(people).where(people.c.user_id == SYN_USER))
+        c.execute(delete(cats).where(cats.c.user_id == SYN_USER))
         for key, name, aliases, bday in PEOPLE:
             pid = c.execute(insert(people).values(user_id=SYN_USER, name=name, aliases=aliases, status="confirmed",
                                                   birthday=bday, birthday_year_known=True).returning(people.c.id)).scalar_one()
@@ -75,9 +114,22 @@ def world():
                 related_to=(f"{dict((p[0], p[1]) for p in PEOPLE)[who]}" if who else "")).returning(memories.c.id)).scalar_one()
         for key, name, aliases, bday in PEOPLE:
             prepo.refresh_related(c, ids[key])
+        cat_names = {}
+        for key, name, aliases, status in CATS:
+            cid = c.execute(insert(cats).values(user_id=SYN_USER, name=name, aliases=aliases, status=status)
+                            .returning(cats.c.id)).scalar_one()
+            crepo.sync_norm(c, cid)
+            ids[key], cat_names[key] = cid, name
+        for key, cat, typ, text in CAT_FACTS:
+            cid = ids.get(cat) if cat else None
+            ids[key] = c.execute(insert(memories).values(
+                fact_text=text, key_name=cat_fact_key(cid, typ, text) if cid else "", category="🐾 Коты", cat_id=cid,
+                related_to=cat_names.get(cat, ""), user_id=SYN_USER, review_status="confirmed")
+                .returning(memories.c.id)).scalar_one()
     try:
         yield ids
     finally:
         with get_engine().begin() as c:
             c.execute(delete(memories).where(memories.c.user_id == SYN_USER))
             c.execute(delete(people).where(people.c.user_id == SYN_USER))
+            c.execute(delete(cats).where(cats.c.user_id == SYN_USER))

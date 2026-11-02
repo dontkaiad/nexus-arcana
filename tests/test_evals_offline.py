@@ -18,6 +18,11 @@ def test_offline_evals_meet_thresholds():
     res = run_all()
     assert res["classifier"]["accuracy_pct"] == 100.0 and res["classifier"]["llm_calls"] == 0
     assert res["memory_retrieval"]["recall_at_5_pct"] == 100.0 and res["memory_retrieval"]["route_acc_pct"] == 100.0
+    mr = res["memory_retrieval"]
+    assert mr["ambiguity_acc_pct"] == 100.0                                      # имя кота = имя человека: показаны оба
+    assert mr["by_group"]["people"]["questions"] == 9 and mr["by_group"]["cats"]["questions"] == 10
+    for g in ("people", "cats"):                                                 # новая группа не маскирует регресс старой
+        assert mr["by_group"][g]["recall_at_5_pct"] == 100.0 and mr["by_group"][g]["route_acc_pct"] == 100.0
     assert res["grounding"]["accept_rate_pct"] == 100.0 and res["grounding"]["reject_recall_pct"] == 100.0
     assert res["grounding"]["check_match_pct"] == 100.0 and res["grounding"]["wrong"] == []
 
@@ -50,6 +55,30 @@ def test_recall_is_sensitive_to_a_broken_pipeline():
     with patch.dict("os.environ", {"MEMORY_QUERY_UNDERSTANDING": "0"}):
         res = memory_eval.run_offline()
     assert res["recall_at_5_pct"] < 100.0 or res["route_acc_pct"] < 100.0
+
+
+def test_cat_questions_fail_the_eval_when_cat_resolution_is_broken():
+    """Эвал котов не должен быть декоративным: без резолва котов вопросы про них уходят в гибрид, а «кот = человек»
+    решается в пользу человека — recall, route_acc и ambiguity_acc падают."""
+    from core import memory_search as ms
+    with patch.object(ms, "_resolve_cats", return_value=[]):
+        res = memory_eval.run_offline()
+    assert res["by_group"]["cats"]["route_acc_pct"] < 100.0
+    assert res["ambiguity_acc_pct"] == 0.0
+    assert res["by_group"]["people"]["recall_at_5_pct"] == 100.0                 # люди от этого не зависят
+
+
+def test_ambiguity_metric_counts_only_flagged_cases():
+    import asyncio
+    from evals.synthetic.memory_world import CASES_CATS, SYN_USER, world
+    from unittest.mock import patch as _p
+    from core import memory_search as ms
+    flagged = [c for c in CASES_CATS if c[3].get("ambiguous")]
+    assert len(flagged) == 2 and all(c[3]["ambiguous"] == 2 for c in flagged)
+    with world() as ids, _p.object(ms, "_embed", return_value=[]):
+        plain = [{"query": q, "expected_ids": [ids[k] for k in exp], "route": r} for q, exp, r, ex in CASES_CATS if not ex]
+        res = asyncio.run(memory_eval._run(plain, SYN_USER, rerank=False))
+    assert res["ambiguity_acc_pct"] is None                                      # без помеченных вопросов метрики нет
 
 
 # ── классификатор: сбор и A/B ────────────────────────────────────────────────

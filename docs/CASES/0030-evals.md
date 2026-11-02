@@ -2,7 +2,7 @@
 
 - **Status:** Accepted
 - **Date:** 2026-11-01
-- **Relates to:** ADR-0020/0021 (memory search), ADR-0028 (query understanding), ADR-0029 (grounded answers)
+- **Relates to:** ADR-0020/0021 (memory search), ADR-0028 (query understanding), ADR-0029 (grounded answers), Case 0032 (cats group, ambiguity metric)
 - **Code conforms to:** `evals/` (`classifier_eval.py`, `memory_eval.py`, `grounding_eval.py`, `role_eval.py`),
   `tests/test_evals_offline.py`, `.github/workflows/test.yml` (offline evals step), `core/models.py`, `core/llm_usage.py`
 - Update this ADR in the same PR that adds an eval or changes what an existing eval measures.
@@ -22,7 +22,7 @@ CI** and a **private version on real data** that never enters the repository.
 | Eval | Question it answers | Metric | CI (synthetic, offline) | Private / live |
 |---|---|---|---|---|
 | Classifier | Does a model/prompt change alter what the bot understands? | agreement of intent types between two models, latency, tokens, $ | deterministic branches return the expected type with **zero** LLM calls | A/B replay of real messages on the server |
-| Memory retrieval | Is the right fact among the top 5? | recall@5, precision@5, route accuracy | synthetic people/facts, FTS only | owner's questions with expected fact ids |
+| Memory retrieval | Is the right fact among the top 5? | recall@5, precision@5, route accuracy, ambiguity handling (per group: people, cats) | synthetic people/facts, FTS only | owner's questions with expected fact ids |
 | Answer grounding | Does the validator reject invented content and accept honest paraphrase? | accept rate, reject recall, check-id match | good + adversarial answers | fallback rate, dropped phrases, latency on real questions |
 | Short roles | Does a cheaper model keep parsers/router stable? | agreement on the functions the bot really calls | harness only | A/B on synthetic inputs |
 

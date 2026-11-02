@@ -4,7 +4,11 @@
   recall@5     = |ожидаемые ∩ первые 5 выданных| / min(5, |ожидаемые|)  (если ожидаемых нет — вопрос «правильно ничего»:
                  1.0, когда выдача пуста);
   precision@5  = |ожидаемые ∩ первые 5| / |первые 5|;
-  route_acc    = маршрут (direct / birthday / hybrid_self / hybrid …) совпал с ожидаемым (если задан).
+  route_acc    = маршрут (direct / birthday / hybrid_self / hybrid …) совпал с ожидаемым (если задан);
+  ambiguity_acc = для вопросов, помеченных "ambiguous": N (имя совпало с несколькими людьми/котами) — субъект
+                 «ambiguous» и не меньше N блоков в ответе (показали всех, не выбрали за владельца).
+  by_group     = те же recall / route_acc отдельно по группам кейсов (people, cats), чтобы новая группа
+                 не маскировала регресс старой.
 Режимы:
   compare   — legacy ILIKE → гибрид → понимание вопроса на одной синтетике (цифры для docs/EVALS.md);
   offline   — синтетика (evals/synthetic/memory_world.py), Postgres как в CI, вектор выключен (только FTS и разбор вопроса);
@@ -42,31 +46,52 @@ def score(expected: List[int], got_ids: List[int], k: int = 5) -> Dict[str, floa
 async def _run(cases: List[Dict[str, Any]], user_id: str, rerank: bool, k: int = 5) -> Dict[str, Any]:
     from core import memory_search
     rec, prec, route_ok, route_n, bad = [], [], 0, 0, []
+    amb_ok = amb_n = 0
+    groups: Dict[str, Dict[str, list]] = {}
     routes: Dict[str, int] = {}
     for c in cases:
         res = await memory_search.answer(c["query"], user_id=user_id, k=k, do_rerank=rerank)
         s = score(c["expected_ids"], _flat_ids(res), k)
         rec.append(s["recall"]); prec.append(s["precision"])
         routes[res.route] = routes.get(res.route, 0) + 1
+        g = groups.setdefault(c.get("group", "people"), {"rec": [], "prec": [], "route": []})
+        g["rec"].append(s["recall"]); g["prec"].append(s["precision"])
         if c.get("route"):
             route_n += 1
             route_ok += int(res.route == c["route"])
-        if s["recall"] < 1.0 or (c.get("route") and res.route != c["route"]):
+            g["route"].append(int(res.route == c["route"]))
+        amb_miss = False
+        if c.get("ambiguous"):
+            amb_n += 1
+            ok = res.subject == "ambiguous" and len(res.groups) >= int(c["ambiguous"])
+            amb_ok += int(ok)
+            amb_miss = not ok
+        if s["recall"] < 1.0 or (c.get("route") and res.route != c["route"]) or amb_miss:
             bad.append({"query_idx": cases.index(c), "route": res.route, "recall": round(s["recall"], 2),
-                        "expected": len(c["expected_ids"]), "got": len(_flat_ids(res))})
+                        "expected": len(c["expected_ids"]), "got": len(_flat_ids(res)),
+                        **({"subject": res.subject, "groups": len(res.groups)} if amb_miss else {})})
     n = len(cases)
+    by_group = {name: {"questions": len(v["rec"]), "recall_at_5_pct": pct(sum(v["rec"]), len(v["rec"])),
+                       "precision_at_5_pct": pct(sum(v["prec"]), len(v["prec"])),
+                       "route_acc_pct": pct(sum(v["route"]), len(v["route"])) if v["route"] else None}
+                for name, v in groups.items()}
     return {"questions": n, "recall_at_5_pct": pct(sum(rec), n), "precision_at_5_pct": pct(sum(prec), n),
-            "route_acc_pct": pct(route_ok, route_n) if route_n else None, "routes": routes, "misses": bad}
+            "route_acc_pct": pct(route_ok, route_n) if route_n else None,
+            "ambiguity_acc_pct": pct(amb_ok, amb_n) if amb_n else None, "by_group": by_group,
+            "routes": routes, "misses": bad}
 
 
 def run_offline() -> Dict[str, Any]:
     """Синтетический мир → recall@5 без вектора и без LLM (детерминированно)."""
-    from evals.synthetic.memory_world import CASES, SYN_USER, world
+    from evals.synthetic.memory_world import CASES, CASES_CATS, SYN_USER, world
     os.environ.setdefault("MEMORY_QUERY_UNDERSTANDING", "1")
     from unittest.mock import patch
     from core import memory_search as ms
     with world() as ids:
-        cases = [{"query": q, "expected_ids": [ids[k] for k in exp], "route": route} for q, exp, route in CASES]
+        cases = [{"query": q, "expected_ids": [ids[k] for k in exp], "route": route, "group": "people"}
+                 for q, exp, route in CASES]
+        cases += [{"query": q, "expected_ids": [ids[k] for k in exp], "route": route, "group": "cats", **extra}
+                  for q, exp, route, extra in CASES_CATS]
         # вектор выключаем (нет ключа Voyage в CI): оцениваем разбор вопроса + FTS + прямой путь
         with patch.object(ms, "_embed", return_value=[]):
             return asyncio.run(_run(cases, SYN_USER, rerank=False))

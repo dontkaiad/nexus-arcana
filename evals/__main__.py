@@ -19,6 +19,7 @@ def main() -> int:
     res = run_all()
     print(json.dumps(res, ensure_ascii=False, indent=2))
     ok = (res["classifier"]["accuracy_pct"] == 100.0 and res["memory_retrieval"]["recall_at_5_pct"] == 100.0
+          and res["memory_retrieval"]["ambiguity_acc_pct"] in (None, 100.0)
           and res["grounding"]["accept_rate_pct"] == 100.0 and res["grounding"]["reject_recall_pct"] == 100.0)
     return 0 if ok else 1
 
