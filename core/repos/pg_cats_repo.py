@@ -102,3 +102,49 @@ def cat_names(user_id: str) -> List[str]:
             if n and n not in seen:
                 seen.append(n)
     return seen
+
+
+# ── факты кота ───────────────────────────────────────────────────────────────
+
+CATS_CATEGORY = "🐾 Коты"
+_FACT_COLS = ("id, fact_text, key_name, is_current, source, created_at, updated_at, related_to, "
+              "scope, review_status")
+
+
+def _fact(r) -> Dict:
+    return {"id": r.id, "text": r.fact_text, "key": r.key_name, "is_current": r.is_current, "source": r.source,
+            "created_at": r.created_at, "updated_at": r.updated_at, "related_to": r.related_to}
+
+
+def list_facts(user_id: str, cat_id: int) -> List[Dict]:
+    """Факты кота: не архивные, не стёртые (пустой текст = tombstone), не rejected; по времени создания."""
+    with get_engine().connect() as c:
+        rows = c.execute(text(
+            f"SELECT {_FACT_COLS} FROM memories WHERE cat_id = :c AND user_id = :u AND NOT is_archived "
+            "AND fact_text <> '' AND review_status <> 'rejected' ORDER BY created_at, id"),
+            {"c": cat_id, "u": user_id}).all()
+    return [_fact(r) for r in rows]
+
+
+def list_general_facts(user_id: str) -> List[Dict]:
+    """«Общее про котов»: категория «🐾 Коты» без cat_id (про всех сразу или про кота без карточки)."""
+    with get_engine().connect() as c:
+        rows = c.execute(text(
+            f"SELECT {_FACT_COLS} FROM memories WHERE category = :cat AND cat_id IS NULL AND user_id = :u "
+            "AND NOT is_archived AND fact_text <> '' AND review_status <> 'rejected' ORDER BY created_at, id"),
+            {"cat": CATS_CATEGORY, "u": user_id}).all()
+    return [_fact(r) for r in rows]
+
+
+def facts_count(user_id: str, cat_ids: List[int]) -> Dict[int, int]:
+    """{cat_id: число видимых фактов} (те же условия, что у list_facts); коты без фактов — 0."""
+    out = {int(i): 0 for i in cat_ids}
+    if not out:
+        return out
+    with get_engine().connect() as c:
+        for r in c.execute(text(
+                "SELECT cat_id, count(*) AS n FROM memories WHERE cat_id = ANY(:ids) AND user_id = :u AND NOT is_archived "
+                "AND fact_text <> '' AND review_status <> 'rejected' GROUP BY cat_id"),
+                {"ids": list(out), "u": user_id}):
+            out[int(r.cat_id)] = int(r.n)
+    return out
