@@ -16,6 +16,7 @@ import {
 import { apiGet, apiPost, apiDelete, apiPatch, apiStream, flushOfflineQueue, outboxCount } from "./api";
 import { SelfListCard, SelfDetailHeader } from "./components/self/SelfClientCard.jsx";
 import PeopleTab from "./people/PeopleTab.jsx";
+import CatsTab from "./cats/CatsTab.jsx";
 import { provenanceLine } from "./people/ui.js";
 import { LinkBar, FromPeopleBlock } from "./people/ClientLink.jsx";
 import {
@@ -3317,6 +3318,8 @@ function NxMemory({ s, openAdhd, openClientFromPeople }) {
   const peoplePending = useApi("/api/people?status=pending");
   const peopleAll = useApi("/api/people");
   const peopleDisp = useApi("/api/people/alias-disputes");
+  const [catsOpen, setCatsOpen] = useState(false);
+  const catsAll = useApi("/api/cats");
   const params = [];
   if (cat !== "all") params.push(`cat=${encodeURIComponent(cat)}`);
   if (q) params.push(`q=${encodeURIComponent(q)}`);
@@ -3397,6 +3400,25 @@ function NxMemory({ s, openAdhd, openClientFromPeople }) {
           <ChevronRight size={fs(16)} color={s.tS} />
         </div>
       </Glass>
+      <Glass s={s} accent={s.acc} onClick={() => setCatsOpen(true)} style={{ padding: "10px 14px" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <div>
+            <div style={{ fontSize: fs(13), color: s.text, fontWeight: 500 }}>
+              🐈 Коты{catsAll.data ? ` · ${catsAll.data.total}` : ""}
+            </div>
+            {catsAll.data?.general_count > 0 && (
+              <div style={{ fontSize: fs(12), color: s.text, marginTop: 2, fontWeight: 600 }}>
+                ● Общее без привязки: {catsAll.data.general_count}
+              </div>
+            )}
+          </div>
+          <ChevronRight size={fs(16)} color={s.tS} />
+        </div>
+      </Glass>
+      {catsOpen && createPortal(
+        <div className="day" style={{ fontFamily: B }}>
+          <CatsTab s={s} Sheet={Sheet} onClose={() => setCatsOpen(false)} onChanged={() => { catsAll.refetch(); refetch(); }} />
+        </div>, document.body)}
       {peopleOpen && createPortal(
         <div className="day" style={{ fontFamily: B }}>
           <PeopleTab s={s} Sheet={Sheet} initialId={peopleId} onClose={() => { setPeopleOpen(false); setPeopleId(null); }}

@@ -77,6 +77,9 @@ def update_cat(user_id: str, cat_id: int, values: Dict) -> Optional[Dict]:
                 return None
         if "name" in vals or "aliases" in vals:
             sync_norm(c, cat_id)
+        if "name" in vals:                     # related_to у фактов кота = его имя (для старого поиска и контекста)
+            c.execute(text("UPDATE memories SET related_to = :n WHERE cat_id = :c AND user_id = :u"),
+                      {"n": vals["name"], "c": cat_id, "u": user_id})
     return get_cat(user_id, cat_id)
 
 
@@ -102,3 +105,85 @@ def cat_names(user_id: str) -> List[str]:
             if n and n not in seen:
                 seen.append(n)
     return seen
+
+
+# ── факты кота ───────────────────────────────────────────────────────────────
+
+CATS_CATEGORY = "🐾 Коты"
+_FACT_COLS = ("id, fact_text, key_name, is_current, source, created_at, updated_at, related_to, "
+              "scope, review_status")
+
+
+def _fact(r) -> Dict:
+    return {"id": r.id, "text": r.fact_text, "key": r.key_name, "is_current": r.is_current, "source": r.source,
+            "created_at": r.created_at, "updated_at": r.updated_at, "related_to": r.related_to}
+
+
+def list_facts(user_id: str, cat_id: int) -> List[Dict]:
+    """Факты кота: не архивные, не стёртые (пустой текст = tombstone), не rejected; по времени создания."""
+    with get_engine().connect() as c:
+        rows = c.execute(text(
+            f"SELECT {_FACT_COLS} FROM memories WHERE cat_id = :c AND user_id = :u AND NOT is_archived "
+            "AND fact_text <> '' AND review_status <> 'rejected' ORDER BY created_at, id"),
+            {"c": cat_id, "u": user_id}).all()
+    return [_fact(r) for r in rows]
+
+
+def list_general_facts(user_id: str) -> List[Dict]:
+    """«Общее про котов»: категория «🐾 Коты» без cat_id (про всех сразу или про кота без карточки)."""
+    with get_engine().connect() as c:
+        rows = c.execute(text(
+            f"SELECT {_FACT_COLS} FROM memories WHERE category = :cat AND cat_id IS NULL AND user_id = :u "
+            "AND NOT is_archived AND fact_text <> '' AND review_status <> 'rejected' ORDER BY created_at, id"),
+            {"cat": CATS_CATEGORY, "u": user_id}).all()
+    return [_fact(r) for r in rows]
+
+
+def facts_count(user_id: str, cat_ids: List[int]) -> Dict[int, int]:
+    """{cat_id: число видимых фактов} (те же условия, что у list_facts); коты без фактов — 0."""
+    out = {int(i): 0 for i in cat_ids}
+    if not out:
+        return out
+    with get_engine().connect() as c:
+        for r in c.execute(text(
+                "SELECT cat_id, count(*) AS n FROM memories WHERE cat_id = ANY(:ids) AND user_id = :u AND NOT is_archived "
+                "AND fact_text <> '' AND review_status <> 'rejected' GROUP BY cat_id"),
+                {"ids": list(out), "u": user_id}):
+            out[int(r.cat_id)] = int(r.n)
+    return out
+
+
+def name_taken(user_id: str, name: str, exclude_id: Optional[int] = None) -> bool:
+    """Есть ли у владельца другой не отклонённый кот с таким именем (без учёта регистра)."""
+    with get_engine().connect() as c:
+        return c.execute(text(
+            "SELECT 1 FROM cats WHERE user_id = :u AND status <> 'rejected' AND lower(name) = lower(:n) "
+            "AND (CAST(:x AS bigint) IS NULL OR id <> :x) LIMIT 1"),
+            {"u": user_id, "n": name.strip(), "x": exclude_id}).first() is not None
+
+
+def attach_fact(user_id: str, cat: Dict, memory_id: int) -> str:
+    """Привязывает «общий» факт категории «🐾 Коты» к коту: cat_id, related_to = имя, ключ cat_<id>_<тип>_<hash>.
+    Статусы: ok | same (уже привязан к этому коту) | not_found | not_cat_fact | taken (другой кот/человек) |
+    conflict (у кота уже есть такой же факт)."""
+    from core.cats import cat_fact_key, fact_kind
+    with get_engine().begin() as c:
+        r = c.execute(text(
+            "SELECT id, fact_text, key_name, category, cat_id, person_id FROM memories "
+            "WHERE id = :i AND user_id = :u AND NOT is_archived AND fact_text <> '' FOR UPDATE"),
+            {"i": memory_id, "u": user_id}).first()
+        if not r:
+            return "not_found"
+        if r.cat_id == cat["id"]:
+            return "same"
+        if r.cat_id is not None or r.person_id is not None:
+            return "taken"
+        if r.category != CATS_CATEGORY:
+            return "not_cat_fact"
+        key = cat_fact_key(cat["id"], fact_kind(r.key_name, r.fact_text), r.fact_text)
+        if c.execute(text("SELECT 1 FROM memories WHERE key_name = :k AND user_id = :u AND NOT is_archived AND id <> :i"),
+                     {"k": key, "u": user_id, "i": memory_id}).first():
+            return "conflict"
+        c.execute(text("UPDATE memories SET cat_id = :c, related_to = :n, key_name = :k, updated_at = now() "
+                       "WHERE id = :i"), {"c": cat["id"], "n": cat["name"], "k": key, "i": memory_id})
+    return "ok"

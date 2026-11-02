@@ -231,7 +231,9 @@ async def get_memory(
         if c in EXCLUDED_CATEGORIES:
             continue
         # Факты о людях живут в разделе «Люди» (единый вход): в общем списке их нет, находятся только поиском.
-        if not q and (c == PEOPLE_CATEGORY or mem.person_id):
+        # Так же с котами: факт, привязанный к карточке кота (cat_id), живёт в «Коты»; факты категории «Коты»
+        # без кота остаются в списке (в «Коты» они в блоке «Общее про котов»).
+        if not q and (c == PEOPLE_CATEGORY or mem.person_id or mem.cat_id):
             continue
         if (mem.key or "").startswith(EXCLUDED_KEY_PREFIXES):
             continue

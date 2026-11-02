@@ -15,6 +15,7 @@ from miniapp.backend.routes import calendar as cal
 from miniapp.backend.routes import categories
 from miniapp.backend.routes import streaks
 from miniapp.backend.routes import people as people_routes
+from miniapp.backend.routes import cats as cats_routes
 from miniapp.backend.routes import weather
 from miniapp.backend.routes import login as login_routes
 from miniapp.backend.routes import (
@@ -80,7 +81,7 @@ for _r in (
     arcana_today, arcana_sessions, arcana_clients,
     arcana_rituals, arcana_grimoire,
     arcana_inventory, arcana_finance, arcana_barter, arcana_debts,
-    writes, booking_routes, people_routes,
+    writes, booking_routes, people_routes, cats_routes,
 ):
     app.include_router(_r.router, prefix="/api")
 

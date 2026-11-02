@@ -586,7 +586,11 @@ async def parse_and_store(text: str, user_id: str, bot_label: str) -> dict:
                 fact, ключ, category, scope, связь, "manual", user_id
             )
         elif cat:
-            mid = await _mem_repo.add(
+            # ключ cat_<id>_<тип>_<hash>: тот же факт не дублируется, тип читается из ключа (как у людей)
+            from core.cats import cat_fact_key
+            from core.people import guess_fact_type
+            ключ = cat_fact_key(cat["id"], guess_fact_type(fact), fact)
+            mid, was_updated = await _mem_repo.upsert(
                 fact, ключ, category, scope, cat["name"], "manual", user_id, cat_id=cat["id"]
             )
         else:
@@ -631,7 +635,9 @@ async def save_memory(
     try:
         if result:
             logger.info("memory save: %s id=%s", "updated" if was_updated else "created", result)
-            if was_updated:
+            if was_updated and r.get("cat_id"):
+                await message.answer(f"🧠 Уже знаю про кота: {fact}")
+            elif was_updated:
                 if ключ.startswith("постоянно_"):
                     if "0₽" in fact or "— 0" in fact:
                         await message.answer(f"🧠 Убрал постоянный расход: {связь or ключ}")
