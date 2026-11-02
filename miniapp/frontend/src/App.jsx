@@ -3417,7 +3417,7 @@ function NxMemory({ s, openAdhd, openClientFromPeople }) {
       </Glass>
       {catsOpen && createPortal(
         <div className="day" style={{ fontFamily: B }}>
-          <CatsTab s={s} Sheet={Sheet} onClose={() => setCatsOpen(false)} onChanged={() => catsAll.refetch()} />
+          <CatsTab s={s} Sheet={Sheet} onClose={() => setCatsOpen(false)} onChanged={() => { catsAll.refetch(); refetch(); }} />
         </div>, document.body)}
       {peopleOpen && createPortal(
         <div className="day" style={{ fontFamily: B }}>
