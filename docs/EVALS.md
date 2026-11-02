@@ -5,6 +5,8 @@ feel. Only **synthetic** cases live in this repository; real-data cases and resu
 (gitignored) and appear here as aggregates only. Design rationale: [ADR-0030](CASES/0030-evals.md). A worked example
 of what these evals are for: [why memory RAG "did not work"](CASES/0031-why-memory-rag-failed.md).
 
+**Rule:** any change that touches evals (dataset, metrics, thresholds) ships with a case in `docs/CASES/` (same format as the existing ones): what is checked, metrics before/after, 2–3 input → expected-output examples, fictional names only (Тучка, Пончик, Рыжик). Example: [Case 0032](CASES/0032-cats-subject.md).
+
 ```bash
 python -m evals offline        # all offline evals, ~2 s, no LLM and no network (needs Postgres, like the tests)
 ```
