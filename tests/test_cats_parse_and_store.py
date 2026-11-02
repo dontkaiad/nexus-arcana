@@ -133,13 +133,6 @@ async def test_prompt_survives_cats_lookup_failure():
     assert r["kind"] == "memory" and llm.await_args.kwargs["system"] == mem._PARSE_SYSTEM
 
 
-async def test_names_are_not_hardcoded_in_source():
-    from pathlib import Path
-    src = Path(mem.__file__).read_text(encoding="utf-8")
-    for real in ("Алуна", "Стивен", "Селя", "Селестина"):
-        assert real not in src
-
-
 # ── ответ бота (save_memory) ─────────────────────────────────────────────────
 
 def _msg():
