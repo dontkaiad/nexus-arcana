@@ -72,7 +72,10 @@ Real messages: set `EVAL_CAPTURE=1` on the server to append incoming message tex
 correctly (direct lookup / birthday / "me" / hybrid).
 
 **Metrics.** `recall@5 = |expected ∩ top5| / min(5, |expected|)` (capped: five slots is all the bot shows);
-`precision@5`; route accuracy. A question with no expected facts scores 1.0 only if nothing is returned.
+`precision@5`; route accuracy; **ambiguity handling** (for questions flagged ambiguous: subject `ambiguous` and at least
+the expected number of labelled blocks, i.e. everyone is shown and nobody is chosen). A question with no expected facts
+scores 1.0 only if nothing is returned. Results are also reported per case group (`people`, `cats`) so a new group cannot
+hide a regression in an old one.
 
 ```bash
 python -m evals.memory_eval offline        # synthetic world, vector off (FTS + question understanding)
@@ -85,17 +88,24 @@ python -m evals.memory_eval run --cases data/evals/memory_cases.jsonl    # priva
 
 ```python
 ("what does alex not like", ["m1_dis1", "m1_dis2", "m1_wrongtype", "m2_dis"], "direct")
+# cats: query, expected facts, route, extra (a cat and a person share a name -> two blocks expected)
+("что не ест тучка", ["t_dis", "tp_dis"], "direct", {"ambiguous": 2})
 ```
 
 **Example output:**
 
 ```json
-{ "questions": 9, "recall_at_5_pct": 100.0, "precision_at_5_pct": 100.0, "route_acc_pct": 100.0,
-  "routes": {"direct": 5, "birthday": 1, "hybrid_self": 1, "hybrid": 2}, "misses": [] }
+{ "questions": 19, "recall_at_5_pct": 100.0, "precision_at_5_pct": 91.2, "route_acc_pct": 100.0,
+  "ambiguity_acc_pct": 100.0,
+  "by_group": {"people": {"questions": 9, "recall_at_5_pct": 100.0, "precision_at_5_pct": 94.4, "route_acc_pct": 100.0},
+               "cats": {"questions": 10, "recall_at_5_pct": 100.0, "precision_at_5_pct": 88.3, "route_acc_pct": 100.0}},
+  "routes": {"direct": 11, "birthday": 1, "hybrid_self": 1, "hybrid": 3, "hybrid_cat": 1, "unknown_person": 2}, "misses": [] }
 ```
 
 The synthetic world deliberately contains traps: two people called Alex (both must appear), a fact whose stored type
-is wrong ("does not like" typed as "likes"), a pending fact that must never show up, the owner's own facts.
+is wrong ("does not like" typed as "likes"), a pending fact that must never show up, the owner's own facts. The cats
+group adds a person named like a cat, a removed cat card whose fact must not surface, a cat fact with no card, and
+nickname / declension lookups (see [Case 0032](CASES/0032-cats-subject.md)).
 
 ## 3. Grounding eval — `evals/grounding_eval.py`
 
@@ -140,6 +150,7 @@ not as quality claims; real-data numbers are tracked privately.
 | 2026-11-01 | Classifier branches (offline, CI) | regex, no LLM | **100%** (15/15), 0 LLM calls |
 | 2026-11-01 | Retrieval (offline, CI) | FTS + question understanding | recall@5 **100%**, precision@5 100%, route accuracy 100% (9 questions) |
 | 2026-11-01 | Retrieval: legacy → hybrid → current | `ILIKE` → FTS+RRF → +understanding | recall@5 **72.2% → 86.1% → 100%**; precision@5 59.3% → 61.5% → 100% |
+| 2026-11-02 | Retrieval, cats (offline, CI; before = code without search by cat) | FTS + question understanding | recall@5 **78.9% → 100%** (19 questions), route accuracy 68.4% → 100%, ambiguity handling 0% → 100% ([Case 0032](CASES/0032-cats-subject.md)). Note: the synthetic world gained cat rows, so `compare` precision now reads 51.9% / 54.1% / 94.4% (recall unchanged: 72.2% / 86.1% / 100%) |
 | 2026-11-01 | Grounding (offline, CI) | validator | accept 100%, reject recall 100%, check match 100% (13 cases) |
 | 2026-11-01 | Classifier A/B | Haiku 4.5 vs 5.5 | type agreement **93.9–100%** over three runs (33 LLM-path messages; the misses are two budget phrasings: `stats` vs `unknown`); latency p50 ≈ 0.93–1.0 s vs 0.92–0.98 s |
 | 2026-11-01 | Classifier cost | Haiku 4.5 / 5.5 | **$2.2 → $0.27** per 1,000 LLM-path messages (both with prompt cache) |
