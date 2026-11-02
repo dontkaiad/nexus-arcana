@@ -24,9 +24,9 @@ the query always returns its `top_k` nearest neighbors, even when none of
 them are actually relevant to the query.
 
 Investigating a concrete failure closed that open question in an
-unexpected direction. For the query "что я помню про луну", pgvector's
+unexpected direction. For the query "что я помню про тучку", pgvector's
 top-1 result by cosine distance was an unrelated 🦋 СДВГ chronotype note —
-not either of the two facts that are actually about "Луна" (a cat's name
+not either of the two facts that are actually about "Тучка" (a cat's name
 and its medication). Comparing the raw score log
 (`search_memory_semantic`'s `ids=... scores=...` line) confirmed the
 gap: the irrelevant note's score was not a clear outlier in the tail of
@@ -34,8 +34,8 @@ the distribution — it was close enough to the genuinely relevant facts
 that no single cutoff value separates them on this data. The failure mode
 isn't "the correct answer barely misses the cutoff," it's "distance
 ranking and semantic relevance disagree at the top of the list." A
-general-purpose embedding model does not reliably distinguish "луна" the
-common noun from "Луна" the pet's name — short, atomic facts like this one
+general-purpose embedding model does not reliably distinguish "тучка" the
+common noun from "Тучка" the pet's name — short, atomic facts like this one
 carry little enough distinguishing text that the vector alone can't
 separate them.
 
@@ -53,7 +53,7 @@ filtering) with a structured-JSON prompt (same pattern as
 `id`s of candidates that are actually relevant, nothing else. Each
 candidate line includes `fact_text` **and** `category`/`related_to` —
 this is the signal the embedding lost: a fact tagged 🐾 Коты next to the
-word "луна" unambiguously reads as a pet's name to a model that can read
+word "тучка" unambiguously reads as a pet's name to a model that can read
 the category, even when the vector alone couldn't encode that
 distinction from a three-word fact.
 
@@ -88,7 +88,7 @@ investigation doesn't need to re-derive either from scratch.
 - **Cosine distance threshold (`min_score`, the #185-proposed fix)** —
   rejected for this problem specifically. The mechanism already exists
   (`search_memory_semantic(min_score=...)`, unused by any caller) and
-  would have been the cheaper fix if it worked, but the "луна" score log
+  would have been the cheaper fix if it worked, but the "тучка" score log
   showed the irrelevant top-1 sitting inside the same score band as the
   relevant results — there is no threshold value that keeps the cat facts
   and drops the chronotype note on this data. A threshold fixes "the tail

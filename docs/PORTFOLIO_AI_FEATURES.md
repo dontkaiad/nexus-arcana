@@ -209,7 +209,7 @@ Few-shot is the primary technique for structured parsers. Examples:
     `core/memory_rag.py:search_memory_semantic` (Voyage query embedding, pgvector
     cosine over `memories.embedding`) → `rerank_memory_candidates` (**Haiku** picks
     the genuinely relevant ids from the candidate lines — a general embedding can't
-    tell «Луна»-the-cat from «луна»-the-word). Merge: ILIKE hits first, then
+    tell «Тучка»-the-cat from «тучка»-the-word). Merge: ILIKE hits first, then
     rerank-approved semantic rows. Graceful — any failure returns the ILIKE list
     unchanged.
   - `get_memories_for_context` filters by owner (`user_id`, one shared id per

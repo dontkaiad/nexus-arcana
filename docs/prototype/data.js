@@ -20,7 +20,7 @@ window.NX_DATA = {
   tasks: [
     { id: 101, title: "позвонить нотариусу", cat: "👥", prio: "high", date: "1 июня", status: "active" },
     { id: 102, title: "разобраться с тараканами", cat: "🏠", prio: "high", status: "active" },
-    { id: 103, title: "сводить луну к ветеринару", cat: "🐾", prio: "high", status: "active" },
+    { id: 103, title: "сводить тучку к ветеринару", cat: "🐾", prio: "high", status: "active" },
     { id: 104, title: "выставить вещи на продажу", cat: "💳", prio: "medium", date: "1 июня", status: "active" },
     { id: 105, title: "переделать свой гитхаб", cat: "💻", prio: "medium", status: "active" },
     { id: 106, title: "пополнить Claude API", cat: "💻", prio: "medium", status: "active" },
@@ -52,9 +52,9 @@ window.NX_DATA = {
     { text: "курит только сигареты марки Chapman Green", cat: "🛒 Предпочтения" },
     { text: "кола, черноголовка, cola, пепси — привычки (газированные напитки)", cat: "🛒 Предпочтения" },
     { text: "монстры/monster/монстр = энергетики, категория привычки", cat: "🛒 Предпочтения" },
-    { text: "луне нужен габапентин (противотревожное)", cat: "🐾 Коты" },
+    { text: "тучке нужен габапентин (противотревожное)", cat: "🐾 Коты" },
     { text: "любит Вадима", cat: "👥 Люди" },
-    { text: "у алуны краткая кличка луна", cat: "🐾 Коты" },
+    { text: "у тучки краткая кличка туча", cat: "🐾 Коты" },
     { text: "в Санкт-Петербурге", cat: "🏠 Быт" },
   ],
   // arcana

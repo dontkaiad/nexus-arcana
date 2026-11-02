@@ -39,7 +39,7 @@ def _script():
     ("гиперфокус мешает ложиться спать", "🦋 СДВГ"),
     ("обычно откладывает звонки", "🔄 Паттерн"),
     ("Кошка любит спать на подоконнике", "🐾 Коты"),
-    ("Луна не любит лоток", "🐾 Коты"),                          # имена котов — с заглавной
+    ("Тучка не любит лоток", "🐾 Коты"),                          # имена котов — с заглавной
     ("сделала тату на плече", "🪞 Внешность"),
     ("у неё хорошие отношения с бывшим", "💞 Отношения"),
     ("мама живёт в другом городе", "💞 Отношения"),
@@ -66,8 +66,8 @@ def test_ritual_needs_esoteric_context():
     assert ms.keyword_category("нравится лор игры") == "🎮 Хобби"                      # «лор» сам не ключевое слово: не Здоровье
 
 
-def test_luna_lowercase_is_not_a_cat():
-    assert ms.keyword_category("любит смотреть на луну") != "🐾 Коты"
+def test_lowercase_cat_name_is_not_a_cat():
+    assert ms.keyword_category("любит смотреть на тучку", ["Тучка"]) != "🐾 Коты"      # слово с маленькой — облачко, не кличка
 
 
 @pytest.mark.parametrize("fact,verdict", [
@@ -89,10 +89,24 @@ def test_gender_verdict(fact, verdict):
 
 
 def test_cat_names_only_as_nickname():
-    assert ms.keyword_category("Луна не любит лоток") == "🐾 Коты"
-    assert ms.keyword_category("Стивен Юниверс любимый мультик") != "🐾 Коты"
-    assert ms.keyword_category("не нравится мультик «Стивен Юниверс»") == "🎮 Хобби"
-    assert ms.keyword_category("Илюша спит") != "🐾 Коты"
+    names = ["Тучка", "Туча"]
+    assert ms.keyword_category("Тучка не любит воду", names) == "🐾 Коты"
+    assert ms.keyword_category("Туча не любит воду", names) == "🐾 Коты"                   # кличка из таблицы
+    assert ms.keyword_category("Тучка Юниверс любимый мультик", names) != "🐾 Коты"
+    assert ms.keyword_category("не нравится мультик «Тучка Юниверс»", names) == "🎮 Хобби"
+    assert ms.keyword_category("Илюша спит", names) != "🐾 Коты"
+
+
+def test_cat_names_are_not_hardcoded_without_names_only_cat_words_work():
+    assert ms.keyword_category("Тучка не любит воду") != "🐾 Коты"                         # имён нет → по имени не определить
+    assert ms.keyword_category("Тучка не любит воду", []) != "🐾 Коты"
+    assert ms.keyword_category("Тучка не любит лоток") == "🐾 Коты"                        # слова «лоток», «кот» работают без имён
+    assert ms.keyword_category("кот боится пылесоса") == "🐾 Коты"
+
+
+def test_cat_names_regex_escapes_special_characters():
+    assert ms.keyword_category("Тучка (мини) спит", ["Тучка (мини)"]) == "🐾 Коты"
+    assert ms.keyword_category("Тучка+ спит", ["Тучка+"]) == "🐾 Коты"
 
 
 def test_new_category_rules():
@@ -332,3 +346,57 @@ def test_manual_birthday_moves_date_into_person_card(world):
     assert left[a] == anna                                             # остаток факта («подруга с синими волосами») сохранён
     assert left[b] is None                                             # вторая дата противоречит первой — не перезаписываем, факт остаётся
     assert str(boris_bd) == "1990-05-18" and left[c_] is None           # чужая дата не перезаписана, факт остался
+
+
+# ── имена котов — из таблицы cats ────────────────────────────────────────────
+
+CAT_MARK = "test-assign-subjects-cats"
+
+
+@pytest.fixture
+def cats_cleanup():
+    yield
+    with get_engine().begin() as c:
+        c.execute(text("DELETE FROM cats WHERE user_id IN (:a, :b)"), {"a": MARK, "b": CAT_MARK})
+
+
+def test_load_cat_names_from_table_per_owner(cats_cleanup):
+    from core.repos import pg_cats_repo as crepo
+    crepo.create(MARK, "Тучка", ["Туча"])
+    crepo.create(MARK, "Пончик")
+    gone = crepo.create(MARK, "Рыжик")
+    crepo.update_cat(MARK, gone, {"status": "rejected"})
+    crepo.create(CAT_MARK, "Чужекот")
+    assert ms.load_cat_names(MARK) == ["Тучка", "Туча", "Пончик"]       # без убранных и без чужих
+    assert ms.load_cat_names("test-assign-subjects-nobody") == []         # котов нет — пустой набор
+
+
+def test_load_cat_names_never_raises():
+    with patch("core.repos.pg_cats_repo.cat_names", side_effect=RuntimeError("db down")):
+        assert ms.load_cat_names(MARK) == []
+    with patch("core.repos.pg_cats_repo.cat_names", side_effect=Exception("no such table: cats")):
+        assert ms.load_cat_names(MARK) == []
+
+
+def test_plan_takes_cat_names_from_table(world, cats_cleanup):
+    from core.repos import pg_cats_repo as crepo
+    sc, me, mem = world["sc"], world["me"], world["mem"]
+    crepo.create(MARK, "Рыжик", ["Рыжуля"])
+    named = mem("Рыжик спит на диване", "👥 Люди", f"person_{me}_other_aaaaaaa1", me, "pending", "Кай")
+    alias = mem("Рыжуля любит окно", "👥 Люди", f"person_{me}_other_aaaaaaa2", me, "pending", "Кай")
+    other = mem("Барсик спит на диване", "👥 Люди", f"person_{me}_other_aaaaaaa3", me, "pending", "Кай")   # такого кота нет
+    with patch.object(sc, "_haiku", _haiku_stub("🏠 Быт")):
+        sc.plan("")
+    plan = json.loads(Path(sc.PLAN).read_text())
+    got = {i["id"]: (i["cat"], i["by"]) for i in plan["self"]}
+    assert got[named] == ("🐾 Коты", "kw") and got[alias] == ("🐾 Коты", "kw")
+    assert got[other] == ("🏠 Быт", "haiku")                               # неизвестная кличка — решает Haiku, не правило
+
+
+def test_plan_without_cats_table_rows_still_works(world):
+    sc, me, mem = world["sc"], world["me"], world["mem"]
+    x = mem("Рыжик спит на диване", "👥 Люди", f"person_{me}_other_bbbbbbb1", me, "pending", "Кай")
+    with patch.object(sc, "_haiku", _haiku_stub("🏠 Быт")), patch("core.repos.pg_cats_repo.cat_names", side_effect=RuntimeError("x")):
+        sc.plan("")
+    plan = json.loads(Path(sc.PLAN).read_text())
+    assert {i["id"]: i["by"] for i in plan["self"]}[x] == "haiku"           # сбой таблицы cats не роняет разметку

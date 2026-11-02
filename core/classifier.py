@@ -278,7 +278,7 @@ def build_system(tz_offset: int = 3) -> str:
         "  'что ты помнишь о маше' → {\"type\":\"memory_search\",\"query\":\"маша\"}",
         "  'напомни про котов' → {\"type\":\"memory_search\",\"query\":\"коты\"}",
         "  'что знаешь о батоне' → {\"type\":\"memory_search\",\"query\":\"батон\"}",
-        "  'расскажи про алуну' → {\"type\":\"memory_search\",\"query\":\"алуна\"}",
+        "  'расскажи про тучку' → {\"type\":\"memory_search\",\"query\":\"тучка\"}",
         "  'какой у меня кз номер' → {\"type\":\"memory_search\",\"query\":\"кз номер\"}",
         "  'какой мой снилс' → {\"type\":\"memory_search\",\"query\":\"снилс\"}",
         "ПРАВИЛО memory_search: прямой вопрос «какой у меня / какой мой [X]?» про сохранённый "
