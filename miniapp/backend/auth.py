@@ -10,7 +10,7 @@ import time
 from typing import List, Optional
 from urllib.parse import parse_qsl
 
-from fastapi import Cookie, Header, HTTPException
+from fastapi import Cookie, Header, HTTPException, Request
 
 from core.config import config
 from miniapp.backend import tg_auth
@@ -84,8 +84,16 @@ def verify_init_data(init_data: str, extra_tokens: Optional[List[str]] = None) -
 async def current_user_id(
     x_telegram_init_data: Optional[str] = Header(None, alias="X-Telegram-Init-Data"),
     hl_session: Optional[str] = Cookie(None),
+    request: Request = None,  # type: ignore[assignment]  # None — прямой вызов в тестах
 ) -> int:
-    """FastAPI dependency: validate tg_id from X-Telegram-Init-Data header or hl_session cookie."""
+    """FastAPI dependency: validate tg_id from X-Telegram-Init-Data header or hl_session cookie.
+
+    Служебный доступ: только если шлюз `cats_read_gate` (подключён лишь к двум GET /api/cats) уже проверил Bearer-токен,
+    он кладёт владельца в request.state. Больше нигде это поле не выставляется."""
+    if request is not None:
+        owner = getattr(request.state, "cats_read_owner", None)
+        if owner:
+            return int(owner)
     if x_telegram_init_data:
         try:
             tg_id = verify_init_data(x_telegram_init_data)

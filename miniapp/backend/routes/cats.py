@@ -9,16 +9,17 @@ import asyncio
 import logging
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from pydantic import BaseModel, Field
 
-from core.cats import cat_fact_key, group_facts
+from core.cats import cat_fact_key, group_facts, safe_photo_url
 from core.cloudinary_client import cloudinary_upload
 from core.people import FACT_TYPES, fact_text
 from core.repos import pg_cats_repo as repo
 from core.repos.pg_memory_repo import PgMemoryRepo, bot_to_scope
 from core.user_manager import get_user_id
 from miniapp.backend.auth import current_user_id
+from miniapp.backend.cats_read_auth import cats_read_gate
 
 logger = logging.getLogger("miniapp.cats")
 
@@ -40,20 +41,30 @@ def _cat_out(c: Dict[str, Any], facts_count: int = 0) -> Dict[str, Any]:
         "id": c["id"],
         "name": c["name"],
         "aliases": list(c.get("aliases") or []),
-        "photo_url": c.get("photo_url"),           # None → фронт рисует заглушку и кнопку «Загрузить фото»
+        # Только безопасный https-адрес, иначе None (фронт рисует заглушку и кнопку «Загрузить фото»)
+        "photo_url": safe_photo_url(c.get("photo_url")),
         "status": c["status"],
         "facts_count": facts_count,
     }
 
 
-@router.get("/cats")
-async def list_cats(tg_id: int = Depends(current_user_id)) -> Dict[str, Any]:
+@router.get("/cats", dependencies=[Depends(cats_read_gate)])
+async def list_cats(with_facts: bool = Query(False, description="добавить факты по типам каждому коту (один запрос)"),
+                    tg_id: int = Depends(current_user_id)) -> Dict[str, Any]:
     user_id = await _owner(tg_id)
     rows: List[Dict[str, Any]] = await asyncio.to_thread(repo.list_cats, user_id)
-    counts = await asyncio.to_thread(repo.facts_count, user_id, [r["id"] for r in rows])
+    ids = [r["id"] for r in rows]
     general = await asyncio.to_thread(repo.list_general_facts, user_id)
-    return {"total": len(rows), "cats": [_cat_out(r, counts.get(r["id"], 0)) for r in rows],
-            "general_count": len(general)}
+    if not with_facts:
+        counts = await asyncio.to_thread(repo.facts_count, user_id, ids)
+        out = [_cat_out(r, counts.get(r["id"], 0)) for r in rows]
+    else:
+        by_cat = await asyncio.to_thread(repo.list_facts_many, user_id, ids)
+        out = []
+        for r in rows:
+            facts = by_cat.get(r["id"], [])
+            out.append({**_cat_out(r, len(facts)), "facts": group_facts(facts, r["name"], r.get("aliases"))})
+    return {"total": len(rows), "cats": out, "general_count": len(general)}
 
 
 @router.get("/cats/general")
@@ -64,7 +75,7 @@ async def general_facts(tg_id: int = Depends(current_user_id)) -> Dict[str, Any]
     return {"total": len(facts), "facts": group_facts(facts, strip_name=False)}
 
 
-@router.get("/cats/{cat_id}")
+@router.get("/cats/{cat_id}", dependencies=[Depends(cats_read_gate)])
 async def cat_card(cat_id: int, tg_id: int = Depends(current_user_id)) -> Dict[str, Any]:
     user_id = await _owner(tg_id)
     c = await asyncio.to_thread(repo.get_cat, user_id, cat_id)
@@ -169,6 +180,8 @@ async def upload_cat_photo(cat_id: int, file: UploadFile = File(...),
     url = await cloudinary_upload(content, file.filename or "cat.jpg", folder=PHOTO_FOLDER)
     if not url:
         raise HTTPException(status_code=501, detail="cloudinary not configured")
+    if safe_photo_url(url) is None:                                # ответ хранилища с небезопасным адресом не сохраняем
+        raise HTTPException(status_code=502, detail="storage returned an unsafe url")
     await asyncio.to_thread(repo.update_cat, user_id, cat_id, {"photo_url": url})
     return {"ok": True, "url": url}
 

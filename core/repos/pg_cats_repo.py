@@ -129,6 +129,21 @@ def list_facts(user_id: str, cat_id: int) -> List[Dict]:
     return [_fact(r) for r in rows]
 
 
+def list_facts_many(user_id: str, cat_ids: List[int]) -> Dict[int, List[Dict]]:
+    """Факты сразу нескольких котов одним запросом ({cat_id: [факты по времени создания]}); те же условия, что у list_facts."""
+    out: Dict[int, List[Dict]] = {int(i): [] for i in cat_ids}
+    if not out:
+        return out
+    with get_engine().connect() as c:
+        rows = c.execute(text(
+            f"SELECT cat_id, {_FACT_COLS} FROM memories WHERE cat_id = ANY(:ids) AND user_id = :u AND NOT is_archived "
+            "AND fact_text <> '' AND review_status <> 'rejected' ORDER BY created_at, id"),
+            {"ids": list(out), "u": user_id}).all()
+    for r in rows:
+        out[int(r.cat_id)].append(_fact(r))
+    return out
+
+
 def list_general_facts(user_id: str) -> List[Dict]:
     """«Общее про котов»: категория «🐾 Коты» без cat_id (про всех сразу или про кота без карточки)."""
     with get_engine().connect() as c:

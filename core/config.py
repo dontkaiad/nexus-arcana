@@ -21,6 +21,14 @@ def _optional(key: str, default: str = "") -> str:
     return os.getenv(key, default)
 
 
+def _int_or_zero(value: str) -> int:
+    """Целое из env; пусто или мусор → 0 (функция выключена, без падения при старте)."""
+    try:
+        return int(str(value).strip())
+    except ValueError:
+        return 0
+
+
 def _id_list(key: str) -> List[int]:
     raw = _require(key)
     seen: set[int] = set()
@@ -143,6 +151,11 @@ class AppConfig:
     # ── ⭐ Zarya booking bot (@heylark_booking_bot). Пусто → бот не стартует. ──
     booking_bot_token: str = ""
     booking_api_base: str = "http://nexus-bot:8000"
+    # ── Служебное чтение карточек котов (GET /api/cats): приложение heylark_cats ходит с
+    # `Authorization: Bearer <CATS_READ_TOKEN>` от имени владельца CATS_READ_OWNER_TG_ID (его tg_id должен быть
+    # в ALLOWED_TELEGRAM_IDS). Пусто / короче 32 символов / владелец не задан → доступ по токену выключен. ──
+    cats_read_token: str = ""
+    cats_read_owner_tg_id: int = 0
     # Свободный текст о Кай для Zarya-промпта (#228). НИКОГДА не хардкодить
     # реальные факты в коде — репо публичный. Живёт только в .env на сервере,
     # правится напрямую там; пусто → Заря просто без доп. контекста о Кай.
@@ -167,6 +180,8 @@ def load_config() -> AppConfig:
         login_base_url       = _optional("LOGIN_BASE_URL", "https://login.heylark.dev"),
         auth_database_url    = _optional("AUTH_DATABASE_URL"),
         booking_service_token = _optional("BOOKING_SERVICE_TOKEN"),
+        cats_read_token      = _optional("CATS_READ_TOKEN").strip(),
+        cats_read_owner_tg_id = _int_or_zero(_optional("CATS_READ_OWNER_TG_ID")),
         booking_bot_token    = _optional("BOOKING_BOT_TOKEN"),
         booking_api_base     = _optional("BOOKING_API_BASE", "http://nexus-bot:8000"),
         zarya_kai_context    = _optional("ZARYA_KAI_CONTEXT"),
