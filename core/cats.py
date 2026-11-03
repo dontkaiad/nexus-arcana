@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import re
 from typing import Optional
+from urllib.parse import urlsplit
 
 from core.people import FACT_TYPES, fact_hash, guess_fact_type
 
@@ -53,3 +54,22 @@ def group_facts(facts, name: str = "", aliases=None, strip_name: bool = True):
         })
     order = [t for t in FACT_TYPE_ORDER if t in by] + sorted(t for t in by if t not in FACT_TYPE_ORDER)
     return [{"type": t, "items": by[t]} for t in order]
+
+
+_PHOTO_BAD = re.compile(r"""[\s"'<>\\`\x00-\x1f\x7f]""")
+PHOTO_URL_MAX = 2048
+
+
+def safe_photo_url(url: object) -> Optional[str]:
+    """Адрес фото, который безопасно отдать потребителю, иначе None. Только абсолютный https с хостом и без учётных
+    данных; пробелы, кавычки, скобки тегов, обратная косая, управляющие символы и слишком длинные адреса — отбрасываются
+    (javascript:, data:, //host/x, http:// тоже). Адрес не «чинится»: либо как есть, либо None."""
+    if not isinstance(url, str) or not url or len(url) > PHOTO_URL_MAX or _PHOTO_BAD.search(url):
+        return None
+    try:
+        parts = urlsplit(url)
+    except ValueError:
+        return None
+    if parts.scheme.lower() != "https" or not parts.hostname or "@" in parts.netloc:
+        return None
+    return url

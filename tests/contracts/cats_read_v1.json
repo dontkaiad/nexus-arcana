@@ -1,0 +1,160 @@
+{
+  "version": 1,
+  "list_with_facts": {
+    "total": 2,
+    "cats": [
+      {
+        "id": 1,
+        "name": "Тучка",
+        "aliases": [
+          "Туча"
+        ],
+        "photo_url": "https://res.cloudinary.com/demo-cloud/image/upload/v1/cats/example-1.jpg",
+        "status": "confirmed",
+        "facts_count": 4,
+        "facts": [
+          {
+            "type": "important",
+            "items": [
+              {
+                "id": 101,
+                "text": "прячется под диван при гостях",
+                "type": "important",
+                "is_current": true,
+                "source": "manual",
+                "created_at": "<timestamp>"
+              }
+            ]
+          },
+          {
+            "type": "likes",
+            "items": [
+              {
+                "id": 102,
+                "text": "Тучка любит окно",
+                "type": "likes",
+                "is_current": true,
+                "source": "manual",
+                "created_at": "<timestamp>"
+              }
+            ]
+          },
+          {
+            "type": "dislikes",
+            "items": [
+              {
+                "id": 103,
+                "text": "Тучка не ест курицу",
+                "type": "dislikes",
+                "is_current": true,
+                "source": "manual",
+                "created_at": "<timestamp>"
+              }
+            ]
+          },
+          {
+            "type": "other",
+            "items": [
+              {
+                "id": 104,
+                "text": "серая, пушистая, белое пятно на груди",
+                "type": "other",
+                "is_current": true,
+                "source": "manual",
+                "created_at": "<timestamp>"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": 2,
+        "name": "Пончик",
+        "aliases": [],
+        "photo_url": null,
+        "status": "confirmed",
+        "facts_count": 1,
+        "facts": [
+          {
+            "type": "other",
+            "items": [
+              {
+                "id": 105,
+                "text": "Пончик рыжий, короткая шерсть",
+                "type": "other",
+                "is_current": true,
+                "source": "manual",
+                "created_at": "<timestamp>"
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "general_count": 1
+  },
+  "card": {
+    "id": 1,
+    "name": "Тучка",
+    "aliases": [
+      "Туча"
+    ],
+    "photo_url": "https://res.cloudinary.com/demo-cloud/image/upload/v1/cats/example-1.jpg",
+    "status": "confirmed",
+    "facts_count": 4,
+    "facts": [
+      {
+        "type": "important",
+        "items": [
+          {
+            "id": 101,
+            "text": "прячется под диван при гостях",
+            "type": "important",
+            "is_current": true,
+            "source": "manual",
+            "created_at": "<timestamp>"
+          }
+        ]
+      },
+      {
+        "type": "likes",
+        "items": [
+          {
+            "id": 102,
+            "text": "Тучка любит окно",
+            "type": "likes",
+            "is_current": true,
+            "source": "manual",
+            "created_at": "<timestamp>"
+          }
+        ]
+      },
+      {
+        "type": "dislikes",
+        "items": [
+          {
+            "id": 103,
+            "text": "Тучка не ест курицу",
+            "type": "dislikes",
+            "is_current": true,
+            "source": "manual",
+            "created_at": "<timestamp>"
+          }
+        ]
+      },
+      {
+        "type": "other",
+        "items": [
+          {
+            "id": 104,
+            "text": "серая, пушистая, белое пятно на груди",
+            "type": "other",
+            "is_current": true,
+            "source": "manual",
+            "created_at": "<timestamp>"
+          }
+        ]
+      }
+    ]
+  }
+}
