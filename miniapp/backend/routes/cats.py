@@ -19,6 +19,7 @@ from core.repos import pg_cats_repo as repo
 from core.repos.pg_memory_repo import PgMemoryRepo, bot_to_scope
 from core.user_manager import get_user_id
 from miniapp.backend.auth import current_user_id
+from miniapp.backend.cats_read_auth import cats_read_gate
 
 logger = logging.getLogger("miniapp.cats")
 
@@ -46,7 +47,7 @@ def _cat_out(c: Dict[str, Any], facts_count: int = 0) -> Dict[str, Any]:
     }
 
 
-@router.get("/cats")
+@router.get("/cats", dependencies=[Depends(cats_read_gate)])
 async def list_cats(tg_id: int = Depends(current_user_id)) -> Dict[str, Any]:
     user_id = await _owner(tg_id)
     rows: List[Dict[str, Any]] = await asyncio.to_thread(repo.list_cats, user_id)
@@ -64,7 +65,7 @@ async def general_facts(tg_id: int = Depends(current_user_id)) -> Dict[str, Any]
     return {"total": len(facts), "facts": group_facts(facts, strip_name=False)}
 
 
-@router.get("/cats/{cat_id}")
+@router.get("/cats/{cat_id}", dependencies=[Depends(cats_read_gate)])
 async def cat_card(cat_id: int, tg_id: int = Depends(current_user_id)) -> Dict[str, Any]:
     user_id = await _owner(tg_id)
     c = await asyncio.to_thread(repo.get_cat, user_id, cat_id)
