@@ -72,3 +72,21 @@ class WhitelistMiddleware(BaseMiddleware):
         data["user_data"] = user_data
 
         return await handler(event, data)
+
+
+class LlmNoticeMiddleware(BaseMiddleware):
+    """Если во время обработки сообщения ИИ оказался недоступен (billing/auth), отвечает вместо тишины:
+    «🧠 ИИ временно недоступен, работают кнопки и Mini App». Ставится ВНУТРИ WhitelistMiddleware."""
+
+    async def __call__(self, handler, event, data):
+        from core import llm_health
+        llm_health.begin_update()
+        result = await handler(event, data)
+        if llm_health.hit_in_update():
+            try:
+                target = getattr(event, "message", None) or event          # callback → его сообщение; message → сам event
+                if target is not None:
+                    await target.answer(llm_health.USER_NOTICE)
+            except Exception as e:                       # уведомление не должно ломать обработку
+                logger.warning("LlmNoticeMiddleware: не отправилось: %s", e)
+        return result

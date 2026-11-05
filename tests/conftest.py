@@ -281,3 +281,10 @@ def mock_claude():
 def user_id():
     """Фейковый Notion user ID."""
     return "fake-user-notion-id"
+
+
+@pytest.fixture(autouse=True)
+def _no_tools_key_scope(monkeypatch):
+    """evals/scripts при импорте ставят LLM_KEY_SCOPE=tools (ключ только ANTHROPIC_API_KEY_TOOLS). Остальным тестам это
+    не нужно: тесты, проверяющие изоляцию ключа, выставляют переменную сами."""
+    monkeypatch.delenv("LLM_KEY_SCOPE", raising=False)

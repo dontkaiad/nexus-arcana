@@ -12,7 +12,7 @@ from aiogram.filters import Command
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 
 from core.config import config
-from core.middleware import WhitelistMiddleware
+from core.middleware import LlmNoticeMiddleware, WhitelistMiddleware
 from core.error_log import log_error
 from core.bot_notify import notify_startup
 from core.heartbeat import start_heartbeat
@@ -41,6 +41,7 @@ bot = Bot(
 dp = Dispatcher()
 dp.message.middleware(WhitelistMiddleware())
 dp.callback_query.middleware(WhitelistMiddleware())
+dp.message.middleware(LlmNoticeMiddleware())
 
 from nexus.handlers.tasks import router as tasks_router
 from nexus.handlers.finance import router as finance_router

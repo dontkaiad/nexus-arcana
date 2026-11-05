@@ -17,3 +17,7 @@ for _k, _v in {
 }.items():
     if not _os.environ.get(_k):
         _os.environ[_k] = _v
+
+# LLM-вызовы из evals идут ТОЛЬКО через ANTHROPIC_API_KEY_TOOLS (core.claude_client._api_key): без отката на основной
+# ключ бота. Офлайн-прогоны LLM не зовут, поэтому им ключ не нужен.
+_os.environ.setdefault("LLM_KEY_SCOPE", "tools")

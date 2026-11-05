@@ -10,7 +10,7 @@ from typing import AsyncIterator, List, Dict, Optional, Union
 
 import anthropic
 
-from core import llm_usage, models
+from core import llm_health, llm_usage, models
 from core.config import config
 
 logger = logging.getLogger(__name__)
@@ -25,11 +25,30 @@ _BACKOFF_BASE = 1.0
 _BACKOFF_CAP = 30.0
 
 
+def _api_key() -> str:
+    """Ключ API. Процессы tools/evals/scripts (LLM_KEY_SCOPE=tools) берут ТОЛЬКО ANTHROPIC_API_KEY_TOOLS — без отката на
+    основной ключ бота: нет ключа → отказ запускаться, а не молчаливая трата боевого баланса."""
+    import os
+    if os.environ.get("LLM_KEY_SCOPE") == "tools":
+        key = (os.environ.get("ANTHROPIC_API_KEY_TOOLS") or "").strip()
+        if not key:
+            try:
+                from dotenv import dotenv_values
+                key = (dotenv_values(".env").get("ANTHROPIC_API_KEY_TOOLS") or "").strip()
+            except Exception:
+                key = ""
+        if not key:
+            raise RuntimeError("ANTHROPIC_API_KEY_TOOLS не задан: tools/evals/scripts не используют основной ключ бота. "
+                               "Заведи отдельный ключ в .env (ANTHROPIC_API_KEY_TOOLS=…) или не запускай LLM-режим.")
+        return key
+    return config.anthropic_key
+
+
 def get_anthropic() -> anthropic.AsyncAnthropic:
     global _client
     if _client is None:
         _client = anthropic.AsyncAnthropic(
-            api_key=config.anthropic_key,
+            api_key=_api_key(),
             timeout=REQUEST_TIMEOUT,
             max_retries=0,
         )
@@ -192,9 +211,11 @@ async def ask_claude(
         if usage_out is not None:
             usage_out.update(nums)
         llm_usage.record(log_label, used_model, nums, int((time.monotonic() - t0) * 1000), True, cache_ttl, thinking)
+        llm_health.on_ok()
         return _first_text(resp)
     except anthropic.APIError as e:
         logger.error("Claude API error: %s", e)
+        llm_health.on_error(e)
         llm_usage.record(log_label, used_model, {}, int((time.monotonic() - t0) * 1000), False, cache_ttl, thinking)
         return ""
 
@@ -238,6 +259,7 @@ async def ask_claude_stream(
                 yield text
     except anthropic.APIError as e:
         logger.error("Claude API stream error: %s", e)
+        llm_health.on_error(e)
         return
 
 
@@ -282,9 +304,11 @@ async def ask_claude_vision(
         resp = await _create_message(**kwargs)
         llm_usage.record(log_label, kwargs["model"], llm_usage.usage_numbers(resp),
                          int((time.monotonic() - t0) * 1000), True)
+        llm_health.on_ok()
         return resp.content[0].text
     except anthropic.APIError as e:
         logger.error("Claude Vision error: %s", e)
+        llm_health.on_error(e)
         llm_usage.record(log_label, kwargs["model"], {}, int((time.monotonic() - t0) * 1000), False)
         return ""
 
