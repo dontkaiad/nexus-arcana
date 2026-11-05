@@ -79,7 +79,10 @@ def test_lowercase_cat_name_is_not_a_cat():
     ("жила в городе", "жила в городе раньше", "kai", "keep", "kai_first"),
     ("любит кофе", "ты любишь кофе", "kai", "to_chat", "kai_about_other"),               # Кай про собеседника → на человека чата
     ("любит руки", "Я обожаю твои руки", "partner", "check", "partner_both_persons"),    # оба лица → не угадываем
-    ("любит тебя", "люблю тебя за честность", "kai", "check", "kai_both_persons"),
+    ("любит тебя", "люблю тебя за честность", "kai", "keep", "kai_first_addressee"),
+    ("любит когда обнимают", "я люблю, когда ты меня обнимаешь", "kai", "keep", "kai_first_addressee"),
+    ("бесит рф", "тебя же бесит рф как и меня", "kai", "check", "kai_both_persons"),
+    ("флиртовал", "ты флиртовал со мной", "kai", "check", "kai_both_persons"),
     ("бесит", "тебя бесит шум", "kai", "to_chat", "kai_about_other"),
     ("любит твои руки", "твои руки классные", "kai", "check", "kai_second_object"),
     ("работает дома", "ты работаешь дома", "partner", "keep", "partner_about_me"),
@@ -99,8 +102,8 @@ def test_attribution_by_quote(fact, quote, author, verdict, why):
 def test_both_persons_always_check():
     q = "люблю маму, а ты любишь папу"
     for fact in ("любит маму", "любит папу"):
-        for author in ("kai", "partner"):
-            assert ms.attribution(fact, q, author)[0] == "check"
+        assert ms.attribution(fact, q, "partner")[0] == "check"
+        assert ms.attribution(fact, q, "kai") == ("keep", "kai_first_addressee")      # у Кай подлежащее «я» → про неё
 
 
 def test_elided_kai_fragment_stays_unless_other_person_named():

@@ -168,6 +168,8 @@ def attribution(fact: str, quote: str, quote_author: str):
     f = bool(_S1.search(q) or _O1.search(q)) or _verb1(q)
     s2 = bool(_S2.search(q) or _O2.search(q)) or _verb2(q)
     if f and s2:
+        if author == "kai" and (_S1.search(q) or _verb1(q)):
+            return "keep", "kai_first_addressee"   # «я …, когда ты …»: подлежащее — я, «ты» — адресат
         return "check", f"{author}_both_persons"
     if not f and not s2:
         if author == "kai" and q.strip() and not _OTHER_SUBJ.search(q) and not _OTHER_NAME.search(q):

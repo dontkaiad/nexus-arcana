@@ -329,13 +329,21 @@ def apply() -> int:
                 "INSERT INTO memories_deleted_bak SELECT * FROM memories WHERE id = ANY(:i) AND person_id IS NULL "
                 "AND id NOT IN (SELECT id FROM memories_deleted_bak)"), {"i": dels})
 
-        for lk in data.get("chat_links", []):                      # «tg-chat: ID» в заметках карточки — привязка чата к человеку
-            tag = "tg-chat: %d" % lk["chat_id"]
-            row = c.execute(sa.text("SELECT notes FROM people WHERE id = :p"), {"p": lk["person_id"]}).first()
-            if row is not None and tag not in (row.notes or ""):
-                c.execute(sa.text("UPDATE people SET notes = :n WHERE id = :p"),
-                          {"n": ((row.notes or "").rstrip() + "\n" + tag).strip(), "p": lk["person_id"]})
-                print("чат %d привязан к «%s»" % (lk["chat_id"], lk["person"]))
+        c.execute(sa.text("CREATE TABLE IF NOT EXISTS person_accounts_bak AS SELECT * FROM person_accounts WHERE false"))
+        for lk in data.get("chat_links", []):                      # чат → TG-аккаунт карточки (person_accounts); чужой аккаунт переносим с бэкапом
+            acc = c.execute(sa.text("SELECT * FROM person_accounts WHERE platform = 'tg' AND external_id = :e"),
+                            {"e": lk["chat_id"]}).first()
+            if acc is None:
+                c.execute(sa.text(
+                    "INSERT INTO person_accounts (user_id, person_id, platform, external_id, is_primary) "
+                    "SELECT user_id, id, 'tg', :e, NOT EXISTS (SELECT 1 FROM person_accounts a WHERE a.person_id = :p AND a.platform = 'tg') "
+                    "FROM people WHERE id = :p"), {"e": lk["chat_id"], "p": lk["person_id"]})
+                print("чат %d → TG-аккаунт «%s» (создан)" % (lk["chat_id"], lk["person"]))
+            elif acc.person_id != lk["person_id"]:
+                c.execute(sa.text("INSERT INTO person_accounts_bak SELECT * FROM person_accounts WHERE id = :i"), {"i": acc.id})
+                c.execute(sa.text("UPDATE person_accounts SET person_id = :p, is_primary = NOT EXISTS (SELECT 1 FROM person_accounts a "
+                                  "WHERE a.person_id = :p AND a.platform = 'tg') WHERE id = :i"), {"p": lk["person_id"], "i": acc.id})
+                print("чат %d: аккаунт перенесён с карточки #%d на «%s» (бэкап person_accounts_bak)" % (lk["chat_id"], acc.person_id, lk["person"]))
 
         live = {(r.user_id, r.key_name) for r in c.execute(sa.text(
             "SELECT user_id, key_name FROM memories WHERE NOT is_archived AND key_name LIKE 'person\\_%'"))}
