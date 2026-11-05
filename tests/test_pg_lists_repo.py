@@ -43,6 +43,7 @@ def _make_engine():
             "task_id TEXT DEFAULT '', works_id TEXT DEFAULT '', "
             "shared INTEGER NOT NULL DEFAULT 0, "
             "for_sitter INTEGER NOT NULL DEFAULT 0, "
+            "sitter_hidden INTEGER NOT NULL DEFAULT 0, "
             "user_id TEXT DEFAULT '', "
             "created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, "
             "updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)"

@@ -201,7 +201,7 @@ def test_response_has_exactly_allowed_fields_no_ids_prices_or_internal_refs():
        task_id="TASK-SECRET", works_id="WORK-SECRET", priority="срочно", category="Дом", shared=True, status="done")
     r = api().get("/api/sitter/lists", headers=OK)
     body = r.json()
-    assert set(body) == {"lists", "count"}
+    assert set(body) == {"lists", "count", "inventory", "inventory_count"}
     item = body["lists"][0]["items"][0]
     assert set(item) == {"name", "note", "quantity", "done", "kind"} and item["done"] is True and item["quantity"] == 2.0
     assert set(body["lists"][0]) == {"name", "items"}
@@ -219,9 +219,10 @@ def test_items_grouped_by_group_name_in_stable_order():
 
 def test_empty_when_nothing_flagged_and_when_owner_unknown(monkeypatch):
     mk(for_sitter=False)
-    assert api().get("/api/sitter/lists", headers=OK).json() == {"lists": [], "count": 0}
+    empty = {"lists": [], "count": 0, "inventory": [], "inventory_count": 0}
+    assert api().get("/api/sitter/lists", headers=OK).json() == empty
     with patch("miniapp.backend.routes.sitter.get_user_id", AsyncMock(return_value=None)):
-        assert api().get("/api/sitter/lists", headers=OK).json() == {"lists": [], "count": 0}
+        assert api().get("/api/sitter/lists", headers=OK).json() == empty
 
 
 def test_no_access_to_memory_or_other_lists_in_payload():

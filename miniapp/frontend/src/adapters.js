@@ -451,6 +451,7 @@ export function adaptLists(data) {
       expires: x.expires ?? null,
       recurring: !!x.recurring,
       forSitter: !!x.for_sitter,
+      sitterHidden: !!x.sitter_hidden,
     }
     if (type === 'inv') {
       return {
