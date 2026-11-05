@@ -78,7 +78,10 @@ def test_lowercase_cat_name_is_not_a_cat():
     ("жила в городе", "жил в городе раньше", "kai", "keep", "kai_first"),                # прош. вр. в любом роде
     ("жила в городе", "жила в городе раньше", "kai", "keep", "kai_first"),
     ("любит кофе", "ты любишь кофе", "kai", "to_chat", "kai_about_other"),               # Кай про собеседника → на человека чата
-    ("любит руки", "Я обожаю твои руки", "partner", "to_chat", "partner_first"),       # подлежащее «я»: партнёр о себе
+    ("любит руки", "Я обожаю твои руки", "partner", "check", "partner_both_persons"),    # оба лица → не угадываем
+    ("любит тебя", "люблю тебя за честность", "kai", "check", "kai_both_persons"),
+    ("бесит", "тебя бесит шум", "kai", "to_chat", "kai_about_other"),
+    ("любит твои руки", "твои руки классные", "kai", "check", "kai_second_object"),
     ("работает дома", "ты работаешь дома", "partner", "keep", "partner_about_me"),
     ("устаёт от небритости", "я через неделю устаю от небритости", "partner", "to_chat", "partner_first"),
     ("не ест мясо", "не ем мясо", "partner", "to_chat", "partner_first"),
@@ -93,12 +96,11 @@ def test_attribution_by_quote(fact, quote, author, verdict, why):
     assert ms.attribution(fact, quote, author) == (verdict, why)
 
 
-def test_both_persons_decided_by_clause_of_fact():
+def test_both_persons_always_check():
     q = "люблю маму, а ты любишь папу"
-    assert ms.attribution("любит маму", q, "kai") == ("keep", "kai_first")
-    assert ms.attribution("любит папу", q, "kai") == ("to_chat", "kai_about_other")
-    assert ms.attribution("любит папу", q, "partner") == ("keep", "partner_about_me")
-    assert ms.attribution("любит что-то", "я и ты любим что-то", "kai") == ("check", "kai_both_unclear")
+    for fact in ("любит маму", "любит папу"):
+        for author in ("kai", "partner"):
+            assert ms.attribution(fact, q, author)[0] == "check"
 
 
 def test_elided_kai_fragment_stays_unless_other_person_named():
@@ -294,7 +296,7 @@ def test_attribution_by_quote_end_to_end(world):
     mine = mem("купил машину", P, f"person_{me}_other_aaaaaaa1", me, "pending", "Кай", chat=-501,
                quote="я купила машину", author="kai")                       # текст факта в м.р., но цитата Кай → остаётся
     about_me = mem("любит руки", P, f"person_{me}_other_aaaaaaa2", me, "pending", "Кай", chat=-501,
-                   quote="ты обожаешь мои руки", author="partner")           # «ты» → обо мне со слов собеседника
+                   quote="ты обожаешь руки", author="partner")           # «ты» → обо мне со слов собеседника
     mapped = mem("устаёт от жары", P, f"person_{me}_other_aaaaaaa3", me, "pending", "Кай", chat=-501,
                  quote="я устаю от жары", author="partner")                  # партнёр о себе, чат сопоставлен → на Олю
     nochat = mem("устаёт от шума", P, f"person_{me}_other_aaaaaaa4", me, "pending", "Кай", chat=-999,

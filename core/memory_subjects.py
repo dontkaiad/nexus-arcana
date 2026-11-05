@@ -144,82 +144,40 @@ def _verb2(q):
     return any(len(w) >= 5 and _V2.match(w) for w in _words(q))
 
 
-def person_of(q: str):
-    """Лицо, о котором говорит цитата: 'first' | 'second' | 'both' | None. Сначала подлежащее (я/ты, глагол), потом косвенные формы."""
-    s1, s2 = bool(_S1.search(q or "")) or _verb1(q), bool(_S2.search(q or "")) or _verb2(q)
-    if not (s1 or s2):
-        s1, s2 = bool(_O1.search(q or "")), bool(_O2.search(q or ""))
-    return "both" if s1 and s2 else "first" if s1 else "second" if s2 else None
+_SUBJ2 = re.compile(r"\b(?:ты|вы|тебя|тебе|вам|вас)\b", re.I)       # ты как подлежащее / субъект чувства («ты любишь», «тебя бесит»)
 
 
-def has_first(q: str) -> bool:
-    return person_of(q) in ("first", "both")
-
-
-def has_second(q: str) -> bool:
-    return person_of(q) in ("second", "both")
-
-
-def _stem_set(t):
-    return {w[:5] for w in _words(t) if len(w) >= 4}
-
-
-def _clause_person(fact: str, quote: str):
-    """Оба лица в цитате: берём клаузу, лучше всего совпавшую с фактом по основам слов, и смотрим лицо в ней.
-    → 'first' | 'second' | None (неясно)."""
-    # сначала сказуемое: единственный глагол цитаты с той же основой, что глагол факта («мечтает» ↔ «мечтаю»), решает лицо
-    found = set()
-    for fw in _words(fact):
-        if len(fw) < 4:
-            continue
-        for qw in _words(quote):
-            if qw[:3] == fw[:3] and len(qw) >= 3:
-                if _V2.match(qw):
-                    found.add("second")
-                elif _V1_PRES.match(qw) or _V_PAST.match(qw):
-                    found.add("first")
-    if len(found) == 1:
-        return found.pop()
-    fs = _stem_set(fact)
-    best, score = None, 0
-    for cl in re.split(r"[.!?;,\n]| и | а | но ", quote or ""):
-        sc = len(fs & _stem_set(cl))
-        if sc > score:
-            best, score = cl, sc
-    if not best:
-        return None
-    p = person_of(best)
-    return p if p in ("first", "second") else None
+def second_is_subject(q: str) -> bool:
+    return bool(_SUBJ2.search(q or "")) or _verb2(q)
 
 
 def attribution(fact: str, quote: str, quote_author: str):
     """(вердикт, причина) для факта карточки «Я». Решает ЦИТАТА (кто сказал + о ком), текст факта и род не используются.
-    interloc      — «Собеседник» в тексте факта: смысл перевёрнут → rejected;
-    keep          — факт про Кай: kai + 1-е лицо, либо partner + 2-е лицо («ты работаешь» — обо мне со слов собеседника);
-    to_chat       — факт про собеседника: partner + 1-е лицо, либо kai + 2-е лицо («ты любишь…») → на человека этого чата;
-    check         — не ясно → «❓ Проверить автора».
-    Если в цитате оба лица — по клаузе, где сказуемое факта; не нашли — check."""
+    interloc  — «Собеседник» в тексте факта: смысл перевёрнут → rejected;
+    keep      — про Кай: kai + только 1-е лицо; partner + только 2-е лицо («ты работаешь» — обо мне со слов собеседника);
+                kai без лиц и без других людей — обрывок, написанный самой Кай (kai_elided);
+    to_chat   — про собеседника, авто-перенос только в двух случаях: partner + только 1-е лицо; kai + только 2-е лицо
+                как подлежащее/субъект чувства («ты любишь», «тебя бесит»);
+    check     — всё остальное, в т.ч. ОБА лица в одной цитате (не угадываем) → «❓ Проверить автора»."""
     if _INTERLOC.search(fact or ""):
         return "interloc", "собеседник в тексте"
     q = quote or ""
-    pq = person_of(q)
-    first, second = pq in ("first", "both"), pq in ("second", "both")
     author = (quote_author or "").lower()
     if author not in ("kai", "partner"):
         return "check", f"author_{author or 'unknown'}"
-    if first and second:
-        who = _clause_person(fact, q)
-        if who is None:
-            return "check", f"{author}_both_unclear"
-        first, second = who == "first", who == "second"
-    if not first and not second:
+    f = bool(_S1.search(q) or _O1.search(q)) or _verb1(q)
+    s2 = bool(_S2.search(q) or _O2.search(q)) or _verb2(q)
+    if f and s2:
+        return "check", f"{author}_both_persons"
+    if not f and not s2:
         if author == "kai" and q.strip() and not _OTHER_SUBJ.search(q) and not _OTHER_NAME.search(q):
             return "keep", "kai_elided"          # обрывок без подлежащего и без других людей: Кай написала сама, значит про себя
         return "check", f"{author}_no_marker"
-    about_me = (author == "kai") == first            # kai+1л или partner+2л
-    if about_me:
-        return "keep", "kai_first" if author == "kai" else "partner_about_me"
-    return "to_chat", "kai_about_other" if author == "kai" else "partner_first"
+    if author == "kai":
+        if f:
+            return "keep", "kai_first"
+        return ("to_chat", "kai_about_other") if second_is_subject(q) else ("check", "kai_second_object")
+    return ("to_chat", "partner_first") if f else ("keep", "partner_about_me")
 
 
 # ── Временные состояния: кандидаты на отклонение (не категория, не применяется автоматически) ──

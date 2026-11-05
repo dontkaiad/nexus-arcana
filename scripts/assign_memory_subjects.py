@@ -136,11 +136,13 @@ def plan(manual_arg: str = "", keep_temp: str = "", stage: str = "attribution", 
                     for r in selfs}
         chats = {r.source_chat_id for r in selfs if verdicts[r.id][0] == "to_chat" and r.source_chat_id}
         by_chat = _chat_people(c, sa, chats, me.id) if chats else {}
+        chat_links = []
         for part in (chat_map or "").split(","):                  # «chat_id:Имя» — явная привязка чата к карточке (если по фактам не нашлось)
             cid, _, nm = part.partition(":")
             found = prepo.resolve(me.user_id, [nm.strip()]) if nm.strip() else []
             if cid.strip().lstrip("-").isdigit() and len(found) == 1 and not by_chat.get(int(cid)):
                 by_chat[int(cid)] = {found[0]["id"]: nm.strip()}
+                chat_links.append({"chat_id": int(cid), "person_id": found[0]["id"], "person": nm.strip()})
     gender, kept_reasons = [], {}
     for r in selfs:
         v, why = verdicts[r.id]
@@ -211,7 +213,7 @@ def plan(manual_arg: str = "", keep_temp: str = "", stage: str = "attribution", 
             notes.append(f"#{i}: нет среди активных старых памятей — ручная правка пропущена")
 
     json.dump({"self_id": me.id, "stage": stage, "self": self_plan, "gender": gender, "overridden": overridden, "temp": temp_ids,
-               "legacy": legacy_plan}, open(PLAN, "w"), ensure_ascii=False)
+               "legacy": legacy_plan, "chat_links": chat_links}, open(PLAN, "w"), ensure_ascii=False)
 
     texts = {r.id: r.fact_text for r in selfs}
     quotes = {r.id: " ".join((r.source_quote or "").split())[:220] for r in selfs}
@@ -326,6 +328,14 @@ def apply() -> int:
             c.execute(sa.text(
                 "INSERT INTO memories_deleted_bak SELECT * FROM memories WHERE id = ANY(:i) AND person_id IS NULL "
                 "AND id NOT IN (SELECT id FROM memories_deleted_bak)"), {"i": dels})
+
+        for lk in data.get("chat_links", []):                      # «tg-chat: ID» в заметках карточки — привязка чата к человеку
+            tag = "tg-chat: %d" % lk["chat_id"]
+            row = c.execute(sa.text("SELECT notes FROM people WHERE id = :p"), {"p": lk["person_id"]}).first()
+            if row is not None and tag not in (row.notes or ""):
+                c.execute(sa.text("UPDATE people SET notes = :n WHERE id = :p"),
+                          {"n": ((row.notes or "").rstrip() + "\n" + tag).strip(), "p": lk["person_id"]})
+                print("чат %d привязан к «%s»" % (lk["chat_id"], lk["person"]))
 
         live = {(r.user_id, r.key_name) for r in c.execute(sa.text(
             "SELECT user_id, key_name FROM memories WHERE NOT is_archived AND key_name LIKE 'person\\_%'"))}
