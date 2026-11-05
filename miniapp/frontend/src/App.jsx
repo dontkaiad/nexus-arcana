@@ -16,6 +16,7 @@ import {
 import { apiGet, apiPost, apiDelete, apiPatch, apiStream, flushOfflineQueue, outboxCount } from "./api";
 import { SelfListCard, SelfDetailHeader } from "./components/self/SelfClientCard.jsx";
 import PeopleTab from "./people/PeopleTab.jsx";
+import PersonCard from "./people/PersonCard.jsx";
 import CatsTab from "./cats/CatsTab.jsx";
 import { provenanceLine } from "./people/ui.js";
 import { LinkBar, FromPeopleBlock } from "./people/ClientLink.jsx";
@@ -3441,6 +3442,15 @@ function NxMemory({ s, openAdhd, openClientFromPeople }) {
   const peopleDisp = useApi("/api/people/alias-disputes");
   const [catsOpen, setCatsOpen] = useState(false);
   const catsAll = useApi("/api/cats");
+  // Разделы Памяти по субъекту: Я · Люди · Коты · Разное (счётчики из /api/memory/sections)
+  const secs = useApi("/api/memory/sections");
+  const [section, setSection] = useState(() => {
+    try { return localStorage.getItem("mem_section") || "me"; } catch (_) { return "me"; }
+  });
+  const pickSection = (k) => {
+    setSection(k);
+    try { localStorage.setItem("mem_section", k); } catch (_) { /* приватный режим */ }
+  };
   const params = [];
   if (cat !== "all") params.push(`cat=${encodeURIComponent(cat)}`);
   if (q) params.push(`q=${encodeURIComponent(q)}`);
@@ -3501,6 +3511,28 @@ function NxMemory({ s, openAdhd, openClientFromPeople }) {
           <ChevronRight size={fs(16)} color={s.tS} />
         </div>
       </Glass>
+      <SearchInput s={s} value={q} onChange={setQ} placeholder="Поиск по памяти" />
+      {!q && (
+        <div style={{ display: "flex", gap: 6, overflowX: "auto", flexWrap: "nowrap", margin: "0 -16px", padding: "0 16px", scrollbarWidth: "none", WebkitOverflowScrolling: "touch" }}>
+          {[["me", "👤 Я", secs.data?.me?.total, secs.data?.me?.pending],
+            ["people", "👥 Люди", secs.data?.people?.total, secs.data?.people?.pending],
+            ["cats", "🐾 Коты", secs.data?.cats?.total, 0],
+            ["misc", "📌 Разное", secs.data?.misc?.total, 0]].map(([k, label, n, pend]) => (
+            <div key={k} style={{ flexShrink: 0 }}>
+              <Pill s={s} active={section === k} onClick={() => pickSection(k)}>
+                {label}{n != null ? ` · ${n}` : ""}{pend > 0 ? ` ●${pend}` : ""}
+              </Pill>
+            </div>
+          ))}
+        </div>
+      )}
+      {!q && section === "me" && (
+        secs.data?.me?.id
+          ? <PersonCard key={secs.data.me.id} embedded s={s} Sheet={Sheet} id={secs.data.me.id}
+              onChanged={() => { secs.refetch(); peoplePending.refetch(); }} />
+          : <Empty s={s} emoji="👤" text={secs.loading ? "Загружаю..." : "Карточки «Я» ещё нет."} />
+      )}
+      {!q && section === "people" && (
       <Glass s={s} accent={s.acc} onClick={() => setPeopleOpen(true)} style={{ padding: "10px 14px" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <div>
@@ -3521,6 +3553,8 @@ function NxMemory({ s, openAdhd, openClientFromPeople }) {
           <ChevronRight size={fs(16)} color={s.tS} />
         </div>
       </Glass>
+      )}
+      {!q && section === "cats" && (
       <Glass s={s} accent={s.acc} onClick={() => setCatsOpen(true)} style={{ padding: "10px 14px" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <div>
@@ -3536,6 +3570,7 @@ function NxMemory({ s, openAdhd, openClientFromPeople }) {
           <ChevronRight size={fs(16)} color={s.tS} />
         </div>
       </Glass>
+      )}
       {catsOpen && createPortal(
         <div className="day" style={{ fontFamily: B }}>
           <CatsTab s={s} Sheet={Sheet} onClose={() => setCatsOpen(false)} onChanged={() => { catsAll.refetch(); refetch(); }} />
@@ -3546,7 +3581,7 @@ function NxMemory({ s, openAdhd, openClientFromPeople }) {
             onChanged={() => { peoplePending.refetch(); peopleAll.refetch(); peopleDisp.refetch(); }}
             onOpenClient={(cid) => { setPeopleOpen(false); setPeopleId(null); openClientFromPeople?.(cid); }} />
         </div>, document.body)}
-      <SearchInput s={s} value={q} onChange={setQ} placeholder="Поиск по памяти" />
+      {(q || section === "misc") && (<>
       {/* #6: показать записи, помеченные «неактуально» (is_current=false) */}
       <div style={{ alignSelf: "flex-start" }}>
         <Pill s={s} active={showInactive} onClick={() => setShowInactive((v) => !v)}>
@@ -3689,6 +3724,7 @@ function NxMemory({ s, openAdhd, openClientFromPeople }) {
           </Glass>
         );
       })}
+      </>)}
     </div>
   );
 }

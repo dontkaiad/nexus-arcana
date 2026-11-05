@@ -403,7 +403,7 @@ def list_facts(person_id: int) -> List[Dict]:
         rows = c.execute(text(
             "SELECT id, fact_text, key_name, review_status, is_current, source, created_at, source_quote, "
             "source_chat_id, source_message_date, quote_author, source_platform, "
-            "mention_count, first_mention_date, last_mention_date "
+            "mention_count, first_mention_date, last_mention_date, category "
             "FROM memories WHERE person_id = :p AND NOT is_archived AND fact_text <> '' ORDER BY created_at, id"
         ), {"p": person_id}).all()
     return [{"id": r.id, "text": r.fact_text, "type": fact_type(r.key_name),
@@ -412,7 +412,15 @@ def list_facts(person_id: int) -> List[Dict]:
              "chat_id": r.source_chat_id, "message_date": r.source_message_date,
              "quote_author": r.quote_author, "platform": r.source_platform,
              "mention_count": r.mention_count, "first_mention": r.first_mention_date,
-             "last_mention": r.last_mention_date} for r in rows]
+             "last_mention": r.last_mention_date, "category": r.category} for r in rows]
+
+
+def set_facts_category(user_id: str, person_id: int, ids: List[int], category: str) -> int:
+    """Категория фактов карточки (только свои: user_id + person_id); review_status не трогаем."""
+    with get_engine().begin() as c:
+        return c.execute(text(
+            "UPDATE memories SET category = :c, updated_at = now() WHERE id = ANY(:i) AND person_id = :p AND user_id = :u "
+            "AND NOT is_archived"), {"c": category, "i": list(ids), "p": person_id, "u": user_id}).rowcount
 
 
 EDITABLE = ("name", "aliases", "birthday", "birthday_year_known", "notes", "status", "relation", "about")

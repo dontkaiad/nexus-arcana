@@ -21,6 +21,8 @@ export const rejectFact = (id, fid) => apiPost(`/api/people/${id}/facts/${fid}/r
 export const restoreFact = (id, fid) => apiPost(`/api/people/${id}/facts/${fid}/restore`, {})
 export const eraseFact = (id, fid) => apiPost(`/api/people/${id}/facts/${fid}/erase`, {})
 export const setFactType = (id, fid, type) => apiPost(`/api/people/${id}/facts/${fid}/type`, { type })
+// Категория фактов карточки «Я»: один факт тапом или пачка («Перенести в категорию…»)
+export const setFactsCategory = (id, ids, category) => apiPost(`/api/people/${id}/facts/category`, { ids, category })
 export const approveAll = (id) => apiPost(`/api/people/${id}/approve-all`, {})
 export const rejectAll = (id) => apiPost(`/api/people/${id}/reject-all`, {})
 export const addFact = (id, text, type) => apiPost(`/api/people/${id}/facts`, { text, type })
