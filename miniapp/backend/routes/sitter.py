@@ -3,6 +3,7 @@
 • GET  /api/sitter/lists          — служебное чтение по отдельному Bearer-токену (sitter_lists_gate): помеченные покупки и
                                     чеклисты (`lists`) + видимый инвентарь по категориям (`inventory`); условие видимости одно
                                     (repo.sitter_visible_clause), без id, цен и остальных данных Nexus (память, прочие списки).
+• POST /api/sitter/ask            — поиск ситтера без LLM по тем же источникам (+ факты про котов), тем же читающим токеном.
 • GET  /api/lists/sitter-preview  — владелец видит ровно то же, что ситтер, + id для переключателей.
 • POST /api/lists/{id}/sitter     — владелец ставит / снимает пометку «для ситтера» (покупки, чеклист).
 • POST /api/lists/{id}/sitter-hidden — владелец скрывает / открывает пункт инвентаря.
@@ -14,8 +15,9 @@ import logging
 from typing import Any, Dict
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
+from core import sitter_search
 from core.repos import pg_sitter_lists_repo as repo
 from core.user_manager import get_user_id
 from miniapp.backend.auth import current_user_id
@@ -37,6 +39,26 @@ def _payload(user_id: str, with_ids: bool) -> Dict[str, Any]:
     inv = repo.list_inventory(user_id, with_ids)
     return {"lists": repo.group_by(items, "group", "name"), "count": len(items),
             "inventory": repo.group_by(inv, "category", "category"), "inventory_count": len(inv)}
+
+
+_budget = sitter_search.QueryBudget()
+
+
+class AskBody(BaseModel):
+    q: str = Field(min_length=1, max_length=2000)
+
+
+@router.post("/sitter/ask")
+async def sitter_ask(body: AskBody, owner_tg_id: int = Depends(sitter_lists_gate)) -> Dict[str, Any]:
+    """Поиск ситтера без LLM: факты про котов, «Общее про котов» и видимые ситтеру пункты списков (см. core/sitter_search.py)."""
+    q = sitter_search.clean_query(body.q)
+    if not q:
+        raise HTTPException(status_code=422, detail="empty query")
+    wait = _budget.take()
+    if wait:
+        raise HTTPException(status_code=429, detail="too many questions", headers={"Retry-After": str(wait)})
+    user_id = (await get_user_id(owner_tg_id)) or ""
+    return await sitter_search.ask(user_id, q)
 
 
 @router.get("/lists/sitter-preview")
