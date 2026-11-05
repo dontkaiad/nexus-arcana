@@ -1,14 +1,16 @@
 """miniapp/backend/routes/sitter.py — списки «для ситтера».
 
-• GET  /api/sitter/lists          — служебное чтение по отдельному Bearer-токену (sitter_lists_gate); только пункты
-                                    с пометкой for_sitter, без id, цен и остальных данных Nexus (память, прочие списки).
-• POST /api/lists/{id}/sitter     — владелец (обычный вход) ставит / снимает пометку у своего пункта.
+• GET  /api/sitter/lists          — служебное чтение по отдельному Bearer-токену (sitter_lists_gate): помеченные покупки и
+                                    чеклисты (`lists`) + видимый инвентарь по категориям (`inventory`); условие видимости одно
+                                    (repo.sitter_visible_clause), без id, цен и остальных данных Nexus (память, прочие списки).
+• GET  /api/lists/sitter-preview  — владелец видит ровно то же, что ситтер, + id для переключателей.
+• POST /api/lists/{id}/sitter     — владелец ставит / снимает пометку «для ситтера» (покупки, чеклист).
+• POST /api/lists/{id}/sitter-hidden — владелец скрывает / открывает пункт инвентаря.
 """
 from __future__ import annotations
 
 import asyncio
 import logging
-from itertools import groupby
 from typing import Any, Dict
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -26,11 +28,22 @@ router = APIRouter()
 
 @router.get("/sitter/lists")
 async def sitter_lists(owner_tg_id: int = Depends(sitter_lists_gate)) -> Dict[str, Any]:
-    user_id = await get_user_id(owner_tg_id)
-    items = await asyncio.to_thread(repo.list_for_sitter, user_id or "")
-    lists = [{"name": g or "", "items": [{k: v for k, v in i.items() if k != "group"} for i in grp]}
-             for g, grp in groupby(items, key=lambda i: i["group"])]
-    return {"lists": lists, "count": len(items)}
+    user_id = (await get_user_id(owner_tg_id)) or ""
+    return await asyncio.to_thread(_payload, user_id, False)
+
+
+def _payload(user_id: str, with_ids: bool) -> Dict[str, Any]:
+    items = repo.list_for_sitter(user_id, with_ids)
+    inv = repo.list_inventory(user_id, with_ids)
+    return {"lists": repo.group_by(items, "group", "name"), "count": len(items),
+            "inventory": repo.group_by(inv, "category", "category"), "inventory_count": len(inv)}
+
+
+@router.get("/lists/sitter-preview")
+async def sitter_preview(tg_id: int = Depends(current_user_id)) -> Dict[str, Any]:
+    """Владельцу: ровно то, что получит ситтер (тем же кодом), плюс id для переключателей."""
+    user_id = (await get_user_id(tg_id)) or ""
+    return await asyncio.to_thread(_payload, user_id, True)
 
 
 class SitterFlagBody(BaseModel):
@@ -53,6 +66,18 @@ async def set_sitter_group_flag(body: SitterGroupBody, tg_id: int = Depends(curr
     if not n:
         raise HTTPException(status_code=404, detail="not found")
     return {"ok": True, "for_sitter": body.for_sitter, "items": n}
+
+
+class SitterHiddenBody(BaseModel):
+    hidden: bool
+
+
+@router.post("/lists/{item_id}/sitter-hidden")
+async def set_sitter_hidden(item_id: int, body: SitterHiddenBody, tg_id: int = Depends(current_user_id)) -> Dict[str, Any]:
+    user_id = (await get_user_id(tg_id)) or ""
+    if not user_id or not await asyncio.to_thread(repo.set_hidden, user_id, item_id, body.hidden):
+        raise HTTPException(status_code=404, detail="not found")
+    return {"ok": True, "hidden": body.hidden}
 
 
 @router.post("/lists/{item_id}/sitter")
