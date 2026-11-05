@@ -144,6 +144,21 @@ def test_bot_scope_uses_main_key(monkeypatch):
     assert cc._api_key() == cc.config.anthropic_key
 
 
+def test_importing_evals_from_a_bot_does_not_switch_key_scope():
+    """classifier импортирует evals.capture внутри бота: это не должно переключать бота на ключ tools."""
+    import subprocess
+    out = subprocess.run([sys.executable, "-c", "import evals.capture, os; print(os.environ.get('LLM_KEY_SCOPE'))"],
+                         capture_output=True, text=True, env={k: v for k, v in __import__("os").environ.items()
+                                                              if k != "LLM_KEY_SCOPE"})
+    assert out.stdout.strip() == "None", out.stderr
+
+
+def test_running_as_evals_module_pins_tools_scope():
+    import evals
+    assert evals._running_as_evals("evals.classifier_eval") and evals._running_as_evals("evals")
+    assert not evals._running_as_evals("nexus.nexus_bot") and not evals._running_as_evals(None)
+
+
 def test_evals_and_llm_scripts_pin_tools_scope():
     import os
     from pathlib import Path

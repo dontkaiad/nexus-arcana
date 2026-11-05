@@ -19,5 +19,15 @@ for _k, _v in {
         _os.environ[_k] = _v
 
 # LLM-вызовы из evals идут ТОЛЬКО через ANTHROPIC_API_KEY_TOOLS (core.claude_client._api_key): без отката на основной
-# ключ бота. Офлайн-прогоны LLM не зовут, поэтому им ключ не нужен.
-_os.environ.setdefault("LLM_KEY_SCOPE", "tools")
+# ключ бота. Режим включается лишь когда процесс САМ запущен как `python -m evals…`: пакет evals импортируют и боты
+# (classifier → evals.capture), и там переменная ставиться не должна — иначе бот потерял бы свой ключ.
+import sys as _sys
+
+
+def _running_as_evals(main_spec_name) -> bool:
+    return (main_spec_name or "").split(".")[0] == "evals"
+
+
+_spec = getattr(_sys.modules.get("__main__"), "__spec__", None)
+if _running_as_evals(getattr(_spec, "name", None)):
+    _os.environ.setdefault("LLM_KEY_SCOPE", "tools")
