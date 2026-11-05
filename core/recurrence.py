@@ -70,9 +70,16 @@ def interval_label(interval_days: int) -> str:
     return f"каждые {interval_days} {word}"
 
 
+def _add_month(d, anchor_day: int):
+    """Тот же день месяца в следующем месяце; в коротком месяце — его последний день."""
+    y, m = (d.year + 1, 1) if d.month == 12 else (d.year, d.month + 1)
+    return d.replace(year=y, month=m, day=min(anchor_day, _calendar.monthrange(y, m)[1]))
+
+
 def next_cycle_date(current_date_str: str, repeat: str, tz_offset: int = 3,
                     interval_days: int = 0,
-                    override_time: Optional[str] = None) -> str:
+                    override_time: Optional[str] = None,
+                    anchor_day: Optional[int] = None) -> str:
     """Дата следующего цикла для повторяющейся записи.
 
     base = max(old_date, today) — не прыгаем в прошлое если запись просрочена.
@@ -81,6 +88,12 @@ def next_cycle_date(current_date_str: str, repeat: str, tz_offset: int = 3,
 
     ``override_time`` (HH:MM) — каноническое время из «Времени повтора»; если
     задано, заменяет HH:MM из current_date_str (нужно после снуза напоминания).
+
+    «Ежемесячно» держит число месяца от СТАРОЙ даты, а не от сегодняшней: запись на 25-е,
+    выполненная 27-го, следующий раз выпадает на 25-е, а не на 27-е (раньше число «уезжало» насовсем).
+    Если следующая дата уже не в будущем (запись просрочена больше чем на месяц) — берём первое такое число
+    строго после сегодня. ``anchor_day`` — исходное число месяца, если оно известно вызывающему (иначе берётся
+    число старой даты): после короткого месяца (31 → 28 фев) число возвращается на 31.
     """
     if current_date_str:
         current_date_str = to_local_wall(current_date_str, tz_offset)
@@ -104,16 +117,10 @@ def next_cycle_date(current_date_str: str, repeat: str, tz_offset: int = 3,
     elif repeat == "Еженедельно":
         next_date = base + timedelta(weeks=1)
     elif repeat == "Ежемесячно":
-        month = base.month + 1
-        year = base.year
-        if month > 12:
-            month = 1
-            year += 1
-        try:
-            next_date = base.replace(year=year, month=month)
-        except ValueError:
-            last_day = _calendar.monthrange(year, month)[1]
-            next_date = base.replace(year=year, month=month, day=last_day)
+        day = anchor_day if anchor_day and 1 <= anchor_day <= 31 else old_date.day
+        next_date = _add_month(old_date, day)
+        while next_date <= today:
+            next_date = _add_month(next_date, day)
     else:
         next_date = base + timedelta(days=1)
 
