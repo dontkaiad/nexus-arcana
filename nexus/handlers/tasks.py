@@ -14,6 +14,7 @@ from aiogram.filters import BaseFilter
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from core.claude_client import ask_claude
 from core.props import _title, _select, _date, _status, _relation, _text, _number, _checkbox
+from core import care as _care
 from core.recurrence import (
     parse_repeat_time as _parse_repeat_time,
     interval_label as _interval_label,
@@ -356,6 +357,8 @@ async def restore_reminders_on_startup(periodic: bool = False) -> None:
             # ── Проход 1: будущие напоминания ────────────────────────────────────
             for task in await _pg.active_with_future_reminder(user_id):
                 try:
+                    if await asyncio.to_thread(_care.is_muted, task, tz_offset):
+                        continue            # уход за котами: напоминание владельцу молчит
                     task_id = task.id
                     title = task.title or "Задача"
                     reminder_start = task.reminder
@@ -368,6 +371,8 @@ async def restore_reminders_on_startup(periodic: bool = False) -> None:
             # ── Проход 2: задачи с пропущенным напоминанием ─────────────────────
             for task in await _pg.active_with_past_reminder(user_id):
                 try:
+                    if await asyncio.to_thread(_care.is_muted, task, tz_offset):
+                        continue            # не «Пропущено» и не сдвиг серии: цикл ведёт ситтер
                     task_id = task.id
                     repeat = task.repeat
                     title = task.title or "Задача"
@@ -672,6 +677,11 @@ async def _schedule_reminder(chat_id: int, title: str, reminder_dt: str, task_id
                         return
                 except Exception as e:
                     logger.warning("send_reminder: status check failed: %s", e)
+            # Уход за котами: в период ухода напоминания задач ситтера владельцу молчат (задачу ведёт ситтер; о просрочке
+            # предупредит core.care.send_overdue_alerts). Статус и серия не трогаются.
+            if _cur is not None and await asyncio.to_thread(_care.is_muted, _cur, tz_offset):
+                logger.info("send_reminder: task %s is in the sitter schedule during the care period, muted", task_id)
+                return
             # Ставим статус "In progress" при срабатывании напоминания
             try:
                 await _repo.set_in_progress(task_id)

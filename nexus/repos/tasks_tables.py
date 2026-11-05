@@ -63,6 +63,8 @@ tasks = Table(
     Column("shared", Boolean, nullable=False, server_default=text("false")),
     # Задача про конкретного кота (миграция e6c9a2d4b831); NULL — не про кота / про всех.
     Column("cat_id", BigInteger, ForeignKey("cats.id", ondelete="SET NULL")),
+    # Задача входит в расписание ситтера (GET /api/care/schedule); миграция c1a7e3b9d204.
+    Column("for_sitter", Boolean, nullable=False, server_default=text("false")),
     Column("user_id", Text, nullable=False, server_default=text("''")),
     Column("created_at", TIMESTAMP(timezone=True), nullable=False,
            server_default=text("now()")),
@@ -79,4 +81,27 @@ task_completions = Table(
     Column("done_at", TIMESTAMP(timezone=True), nullable=False, server_default=text("now()")),
     Column("done_by", Text),
     Column("source", Text, nullable=False, server_default=text("'app'")),
+    # Цикл расписания, который закрыло это выполнение (NULL — выполнение вне расписания); unique (task_id, cycle_due).
+    Column("cycle_due", TIMESTAMP(timezone=True)),
+)
+
+# Период ухода: когда ситтер активен (одна строка на владельца).
+from sqlalchemy import Date, PrimaryKeyConstraint  # noqa: E402
+
+care_periods = Table(
+    "care_periods", metadata,
+    Column("id", BigInteger, primary_key=True, autoincrement=True),
+    Column("user_id", Text, nullable=False, unique=True),
+    Column("starts_on", Date, nullable=False),
+    Column("ends_on", Date, nullable=False),
+    Column("created_at", TIMESTAMP(timezone=True), nullable=False, server_default=text("now()")),
+)
+
+# Одно предупреждение владельцу о просрочке на цикл.
+care_alerts = Table(
+    "care_alerts", metadata,
+    Column("task_id", BigInteger, ForeignKey("tasks.id", ondelete="CASCADE"), nullable=False),
+    Column("cycle_due", TIMESTAMP(timezone=True), nullable=False),
+    Column("sent_at", TIMESTAMP(timezone=True), nullable=False, server_default=text("now()")),
+    PrimaryKeyConstraint("task_id", "cycle_due"),
 )

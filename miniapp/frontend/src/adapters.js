@@ -291,6 +291,7 @@ export function adaptTasks(data) {
       id: t.id,
       title: t.title || '',
       note: t.note || null,
+      forSitter: !!t.for_sitter,
       cat: catFull(t.cat),
       prio: t.prio || '⚪',
       status: t.status || 'active',

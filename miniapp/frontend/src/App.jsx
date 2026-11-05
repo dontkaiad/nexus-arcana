@@ -8140,6 +8140,15 @@ function TaskForm({ s, onSubmit, busy }) {
   const [reminderKey, setReminderKey] = useState("30");
   const [reminderCustom, setReminderCustom] = useState("");
   const [cats, setCats] = useState([]);
+  // «Для ситтера»: задача входит в расписание ситтера (ставится сразу, при ошибке откатывается).
+  const [forSitter, setForSitter] = useState(!!task?.forSitter);
+  const [sitterErr, setSitterErr] = useState("");
+  const toggleSitter = async (next) => {
+    if (busy) return;
+    setForSitter(next); setSitterErr("");
+    try { await apiPost(`/api/tasks/${task.id}/sitter`, { for_sitter: next }); }
+    catch (e) { setForSitter(!next); setSitterErr(e.message || "не получилось"); }
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -8291,6 +8300,13 @@ function TaskEditForm({ s, task, busy, onSave }) {
           <Input s={s} value={remTime} onChange={setRemTime} placeholder="чч:мм" type="time" />
         </div>
       </div>
+      {task?.id != null && (
+        <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: fs(12), color: s.text, cursor: "pointer" }}>
+          <input type="checkbox" checked={forSitter} onChange={(e) => toggleSitter(e.target.checked)} />
+          🐾 В расписании ситтера
+        </label>
+      )}
+      {sitterErr && <div style={{ fontSize: fs(12), color: s.red }}>{sitterErr}</div>}
       <div style={{ fontSize: fs(11), color: s.tS }}>⏱ Длительность (мин)</div>
       <Input s={s} value={duration} onChange={setDuration} placeholder="занимает ~1ч, если пусто" type="number" />
       <SubmitBtn
