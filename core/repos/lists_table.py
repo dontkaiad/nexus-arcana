@@ -40,6 +40,8 @@ nexus_lists = Table(
     Column("shared",         Boolean,    nullable=False, server_default=text("false")),
     # Пункт виден ситтеру через служебный эндпоинт GET /api/sitter/lists (миграция f7d0b3e5c942); по умолчанию закрыт.
     Column("for_sitter",     Boolean,    nullable=False, server_default=text("false")),
+    # Инвентарь виден ситтеру по умолчанию; true скрывает пункт (миграция b9f2d6a1c850).
+    Column("sitter_hidden",  Boolean,    nullable=False, server_default=text("false")),
     Column("user_id", Text,       nullable=False, server_default=text("''")),
     Column("created_at",     TIMESTAMP(timezone=True), server_default=text("now()")),
     Column("updated_at",     TIMESTAMP(timezone=True), server_default=text("now()")),
