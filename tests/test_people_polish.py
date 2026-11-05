@@ -256,12 +256,12 @@ async def test_remember_resurrects_previously_rejected_fact():
 
 @pytest.mark.asyncio
 async def test_remember_without_single_match_stays_a_plain_fact():
-    none = await _store("t", "Оля любит чай", "оля")                              # ноль людей
-    assert _row(none["memory_id"]).person_id is None and none["person_id"] is None
+    none = await _store("t", "Оля любит чай", "оля")                              # ноль людей → «Создать карточку?», не пишем
+    assert none["kind"] == "ask_person" and none["memory_id"] is None
     mk("Оля Первая")
-    mk("Оля Вторая")                                                              # тёзки → неоднозначно
+    mk("Оля Вторая")                                                              # тёзки → вопрос кнопками, не пишем
     two = await _store("t", "Оля любит кофе", "оля", key="оля_кофе")
-    assert _row(two["memory_id"]).person_id is None
+    assert two["kind"] == "choose_person" and two["memory_id"] is None and len(two["ask"]["candidates"]) == 2
 
 
 @pytest.mark.asyncio
@@ -269,7 +269,7 @@ async def test_remember_ignores_rejected_self_and_other_categories():
     rej = mk("Оля Отклонённая", status="rejected")
     me = mk("Оля Я", is_self=True)
     r = await _store("t", "Оля любит чай", "оля")
-    assert _row(r["memory_id"]).person_id is None                                 # rejected и «Я» не резолвятся
+    assert r["kind"] == "ask_person"                                              # rejected и «Я» не резолвятся → как неизвестная
     with get_engine().begin() as c:
         c.execute(delete(people).where(people.c.id.in_([rej, me])))
     pid = mk("Оля Зюзина")

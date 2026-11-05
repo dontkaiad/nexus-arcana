@@ -1781,8 +1781,28 @@ async def _memory_create(body: "NoteBody", tg_id: int) -> dict[str, Any]:
     if r["kind"] == "debt":
         await notify_user(tg_id, f"📋 Записала долг: <b>{_esc(r['fact'])}</b>", bot="nexus")
         return {"ok": True, "id": None, "kind": "debt"}
+    if r["kind"] in ("choose_person", "ask_person"):          # тёзки / неизвестное имя: ничего не записано, ждём ответ клиента
+        return {"ok": True, "id": None, "kind": r["kind"], "ask": r["ask"]}
     await notify_user(tg_id, f"🧠 Запомнила: <b>{_esc(r['fact'])}</b>", bot="nexus")
     return {"ok": True, "id": r["memory_id"]}
+
+
+class RouteFinishBody(BaseModel):
+    ask: dict[str, Any]
+    choice: dict[str, Any]
+
+
+@router.post("/memory/route/finish")
+async def memory_route_finish(body: RouteFinishBody, tg_id: int = Depends(current_user_id)) -> dict[str, Any]:
+    """Ответ на вопрос «какой из них / создать карточку?»: person_id (из кандидатов), create (+карточка) или misc (Разное)."""
+    user_id = (await get_user_id(tg_id)) or ""
+    from core.memory import finish_route
+    r = await finish_route(user_id, body.ask, body.choice)
+    if r["kind"] != "memory":
+        raise HTTPException(status_code=400, detail="route failed")
+    where = f" → {_esc(r['person_name'])}" if r.get("person_name") else " → Разное"
+    await notify_user(tg_id, f"🧠 Запомнила{where}: <b>{_esc(r['fact'])}</b>", bot="nexus")
+    return {"ok": True, "id": r["memory_id"], "person_id": r.get("person_id")}
 
 
 class MemoryPatchBody(BaseModel):

@@ -203,6 +203,8 @@ def _single_fact(parsed) -> dict:
     return first
 
 
+from core import memory_routing as _routing  # noqa: E402
+
 CATS_CATEGORY = "🐾 Коты"
 # Общие слова вместо имени кота: «кот боится пылесоса» — не неизвестный кот, а просто факт без привязки.
 _GENERIC_CAT_WORDS = {"кот", "кота", "коту", "котом", "коты", "котов", "котам", "кошка", "кошки", "кошку", "кошке",
@@ -479,6 +481,15 @@ def _single_person(user_id: str, mention: str) -> Optional[dict]:
         return None
 
 
+def _self_person(user_id: str) -> Optional[dict]:
+    try:
+        from core.repos import pg_people_repo as prepo
+        return prepo.find_self(user_id)
+    except Exception:
+        logger.warning("self person lookup failed, saving as plain fact", exc_info=True)
+        return None
+
+
 def _cat_names(user_id: str) -> List[str]:
     """Имена и клички котов владельца для промпта parse. Любой сбой (нет таблицы, БД) — пусто, парс идёт как раньше."""
     try:
@@ -496,6 +507,53 @@ def _resolve_cats(user_id: str, mention: str) -> List[dict]:
     except Exception:
         logger.warning("cat resolve for memory save failed, saving as plain fact", exc_info=True)
         return []
+
+
+async def _store_person_fact(fact: str, category: str, scope: str, user_id: str, person: dict):
+    """Факт человека (в т.ч. «Я»): ключ карточки, confirmed, source=manual. → (ключ, memory_id, was_updated)."""
+    from core.people import fact_hash, guess_fact_type, related_to_str
+    from core.repos import pg_people_repo as prepo
+    ключ = "person_%d_%s_%s" % (person["id"], guess_fact_type(fact), fact_hash(fact))
+    mid, was_updated = await _mem_repo.upsert(
+        fact, ключ, category, scope, related_to_str(person["name"], person.get("aliases") or []),
+        "manual", user_id, person_id=person["id"], review_status="confirmed",
+    )
+    if mid:                                          # вернуть отклонённый раньше факт (как ручной ввод в карточке)
+        await asyncio.to_thread(prepo.set_fact_status, user_id, person["id"], int(mid), "confirmed")
+    return ключ, mid, was_updated
+
+
+async def finish_route(user_id: str, ask: dict, choice: dict) -> dict:
+    """Ответ на вопрос маршрута: {"person_id": N} (тёзка) | {"create": true, "relation": …} (новая карточка) | {"misc": true}.
+    Возвращает словарь как parse_and_store. Чужие/неизвестные person_id не принимаются (только из ask["candidates"])."""
+    fact, category = ask.get("fact", ""), ask.get("category", "")
+    ключ, связь, scope = ask.get("key", ""), ask.get("link", ""), ask.get("scope") or "global"
+    base = {"fact": fact, "category": category, "key": ключ, "was_updated": False, "debt_name": "", "link": связь}
+    try:
+        if choice.get("misc"):
+            mid = await _mem_repo.add(fact, ключ, category, scope, связь, "manual", user_id)
+            return {**base, "kind": "memory" if mid else "error", "memory_id": mid, "person_id": None}
+        from core.repos import pg_people_repo as prepo
+        if choice.get("create"):
+            name = (ask.get("name") or "").strip()
+            if not name:
+                return {**base, "kind": "error", "memory_id": None}
+            pid = await asyncio.to_thread(
+                lambda: prepo.create(user_id, name[:1].upper() + name[1:], [name], status="confirmed",
+                                     relation=_routing.clean_relation(choice.get("relation"))))
+        else:
+            pid = int(choice.get("person_id") or 0)
+            if pid not in {int(c["id"]) for c in ask.get("candidates") or []}:
+                return {**base, "kind": "error", "memory_id": None}
+        person = await asyncio.to_thread(prepo.get_person, user_id, pid)
+        if not person:
+            return {**base, "kind": "error", "memory_id": None}
+        ключ, mid, was_updated = await _store_person_fact(fact, category, scope, user_id, person)
+        return {**base, "key": ключ, "kind": "memory" if mid else "error", "memory_id": mid, "was_updated": was_updated,
+                "person_id": pid, "person_name": person["name"]}
+    except Exception as e:
+        logger.error("finish_route error: %s", e)
+        return {**base, "kind": "error", "memory_id": None}
 
 
 async def parse_and_store(text: str, user_id: str, bot_label: str) -> dict:
@@ -551,10 +609,23 @@ async def parse_and_store(text: str, user_id: str, bot_label: str) -> dict:
             logger.info("memory: canonicalized link %r→%r, key %r→%r",
                         original_link, canonical_link, old_key, ключ)
 
+    # Маршрут по субъекту: про себя → «Я»; тёзки → вопрос кнопками; неизвестное имя → «Создать карточку?»; «мы» → Разное.
+    route = await asyncio.to_thread(_routing.route_subject, text, category, связь, ключ, user_id)
+    if route["to"] in ("choose", "ask"):
+        kind = "choose_person" if route["to"] == "choose" else "ask_person"
+        return {"kind": kind, "fact": fact, "category": category, "key": ключ, "memory_id": None, "was_updated": False,
+                "debt_name": "", "link": связь, "ask": _routing.ask_payload(kind, route, fact, category, ключ, связь, scope)}
+
     # PR-3b: «запомни, что Оля любит X» → ровно один человек из «Людей» ⇒ факт привязан к нему
     # (person_id, confirmed, source=manual, ключ карточки). Ноль/несколько совпадений — как раньше.
     person = None
-    if category == PEOPLE_CATEGORY and связь:
+    if route["to"] == "self":
+        person = await asyncio.to_thread(_self_person, user_id)
+        if person:
+            category = _routing.self_category(category, fact, await asyncio.to_thread(_cat_names, user_id))
+    elif route["to"] == "misc":
+        person = None
+    elif category == PEOPLE_CATEGORY and связь:
         person = await asyncio.to_thread(_single_person, user_id, связь)
 
     # Коты: ровно один кот по имени/кличке ⇒ cat_id. Ноль или несколько — факт сохраняется без cat_id (без
@@ -572,15 +643,7 @@ async def parse_and_store(text: str, user_id: str, bot_label: str) -> dict:
     try:
         was_updated = False
         if person:
-            from core.people import fact_hash, guess_fact_type, related_to_str
-            from core.repos import pg_people_repo as prepo
-            ключ = "person_%d_%s_%s" % (person["id"], guess_fact_type(fact), fact_hash(fact))
-            mid, was_updated = await _mem_repo.upsert(
-                fact, ключ, category, scope, related_to_str(person["name"], person.get("aliases") or []),
-                "manual", user_id, person_id=person["id"], review_status="confirmed",
-            )
-            if mid:                                  # вернуть отклонённый раньше факт (как ручной ввод в карточке)
-                await asyncio.to_thread(prepo.set_fact_status, user_id, person["id"], int(mid), "confirmed")
+            ключ, mid, was_updated = await _store_person_fact(fact, category, scope, user_id, person)
         elif category == "💰 Лимит" and ключ:
             mid, was_updated = await _mem_repo.upsert(
                 fact, ключ, category, scope, связь, "manual", user_id
@@ -625,6 +688,10 @@ async def save_memory(
         return
     if r["kind"] == "goal":
         await message.answer(f"🎯 Добавил цель: {fact}")
+        return
+    if r["kind"] in ("choose_person", "ask_person"):
+        from core import memory_route_ui
+        await memory_route_ui.ask_in_chat(message, r, user_id)
         return
     if r["kind"] == "error":
         await message.answer("⚠️ Ошибка записи в базу")
