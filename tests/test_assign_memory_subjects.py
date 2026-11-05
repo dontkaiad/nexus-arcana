@@ -300,7 +300,7 @@ def test_attribution_by_quote_end_to_end(world):
     nochat = mem("устаёт от шума", P, f"person_{me}_other_aaaaaaa4", me, "pending", "Кай", chat=-999,
                  quote="я устаю от шума", author="partner")                  # чат не сопоставлен → ❓
     nomark = mem("любит кино", P, f"person_{me}_other_aaaaaaa5", me, "pending", "Кай", chat=-501,
-                 quote="кино и сериалы", author="kai")                      # без маркера → ❓
+                 quote="он любит кино", author="kai")                      # без маркера → ❓
     other = mem("любит острое", P, f"person_{me}_other_aaaaaab1", me, "pending", "Кай", chat=-501,
                 quote="ты любишь острое", author="kai")                    # Кай про собеседника → на Олю (чат сопоставлен)
     interloc = mem("Собеседник любит чай", P, f"person_{me}_other_aaaaaaa6", me, "pending", "Кай", chat=-501,

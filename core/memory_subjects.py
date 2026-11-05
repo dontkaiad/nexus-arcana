@@ -167,16 +167,19 @@ def _stem_set(t):
 def _clause_person(fact: str, quote: str):
     """Оба лица в цитате: берём клаузу, лучше всего совпавшую с фактом по основам слов, и смотрим лицо в ней.
     → 'first' | 'second' | None (неясно)."""
-    # сначала сказуемое: слово цитаты с той же основой, что глагол факта («мечтает» ↔ «мечтаю») — его лицо и решает
+    # сначала сказуемое: единственный глагол цитаты с той же основой, что глагол факта («мечтает» ↔ «мечтаю»), решает лицо
+    found = set()
     for fw in _words(fact):
         if len(fw) < 4:
             continue
         for qw in _words(quote):
             if qw[:3] == fw[:3] and len(qw) >= 3:
                 if _V2.match(qw):
-                    return "second"
-                if _V1_PRES.match(qw) or _V_PAST.match(qw):
-                    return "first"
+                    found.add("second")
+                elif _V1_PRES.match(qw) or _V_PAST.match(qw):
+                    found.add("first")
+    if len(found) == 1:
+        return found.pop()
     fs = _stem_set(fact)
     best, score = None, 0
     for cl in re.split(r"[.!?;,\n]| и | а | но ", quote or ""):
