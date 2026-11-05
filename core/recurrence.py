@@ -132,3 +132,24 @@ def next_cycle_date(current_date_str: str, repeat: str, tz_offset: int = 3,
             time_part = current_date_str.split("T")[1][:5]
         result = result + "T" + time_part
     return result
+
+
+def next_cycle_anchored(cur: datetime, repeat: str, interval_days: int, now: datetime) -> datetime:
+    """Следующий срок от ИСХОДНОГО срока цикла `cur`, а не от «сегодня»: выполнение или перенос не сдвигают базу серии.
+
+    Шаг: «Ежедневно» (каждые N дней при interval_days > 1), «Еженедельно» = 7 дней, «Ежемесячно» = то же число следующего
+    месяца (в коротком месяце последний день, число возвращается). Пропущенные циклы перешагиваются: результат строго после `now`.
+    `cur` и `now` — aware-datetime (сравнимы между собой)."""
+    def step(d: datetime) -> datetime:
+        if repeat == "Еженедельно":
+            return d + timedelta(weeks=1)
+        if repeat == "Ежемесячно":
+            return _add_month(d, cur.day)
+        return d + timedelta(days=interval_days if interval_days > 1 else 1)
+
+    nxt = step(cur)
+    for _ in range(10_000):
+        if nxt > now:
+            return nxt
+        nxt = step(nxt)
+    return nxt
