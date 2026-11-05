@@ -450,6 +450,7 @@ export function adaptLists(data) {
       qty: x.qty ?? null,
       expires: x.expires ?? null,
       recurring: !!x.recurring,
+      forSitter: !!x.for_sitter,
     }
     if (type === 'inv') {
       return {
