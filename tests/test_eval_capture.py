@@ -102,3 +102,71 @@ def test_classifier_hook_uses_the_capture_module(monkeypatch):
     capture.enable()
     classifier._capture_for_eval("сообщение из classify")
     assert [r["text"] for r in lines()] == ["сообщение из classify"]
+
+
+# ── сбор срабатывает ДО вызова LLM: при упавшем API (billing) строка всё равно пишется ──────────────────────────
+
+BILLING_MSG = "Your credit balance is too low to access the Anthropic API."
+
+
+def _billing_error():
+    import anthropic
+    import httpx
+    req = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
+    resp = httpx.Response(400, request=req, json={"type": "error", "error": {"message": BILLING_MSG}})
+    return anthropic.BadRequestError(BILLING_MSG, response=resp, body={"error": {"message": BILLING_MSG}})
+
+
+def test_capture_happens_before_llm_even_when_api_is_down(monkeypatch):
+    """classify() первой строкой зовёт сбор, а уже потом ходит в LLM: при нулевом балансе строка в файле есть."""
+    import asyncio
+    from unittest.mock import AsyncMock, patch
+    from core import claude_client as cc, classifier, llm_health
+
+    capture.enable(limit=10, ttl_days=1)
+    with patch.object(cc, "_create_message", AsyncMock(side_effect=_billing_error())), \
+            patch.object(llm_health, "_send_alert", AsyncMock()):
+        asyncio.run(classifier.classify("купить молоко завтра", tz_offset=3, user_id="u-test"))
+    asyncio.set_event_loop(asyncio.new_event_loop())               # asyncio.run сбрасывает loop для соседних тестов
+    got = lines()
+    assert [g["text"] for g in got] == ["купить молоко завтра"] and "user_id" not in got[0]
+    assert capture.status()["count"] == 1
+
+
+def test_capture_on_the_bot_text_path_with_billing_error(monkeypatch):
+    """Путь бота: handle_text → нормализация (тоже LLM) → classify. API лежит — сообщение всё равно собрано."""
+    import asyncio
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock, patch
+    from core import claude_client as cc, llm_health
+    import nexus.nexus_bot as nb
+
+    capture.enable(limit=10, ttl_days=1)
+    msg = SimpleNamespace(
+        text="напомни позвонить маме", from_user=SimpleNamespace(id=700000001, is_bot=False),
+        chat=SimpleNamespace(id=700000001), reply_to_message=None, voice=None, photo=None,
+        bot=SimpleNamespace(send_chat_action=AsyncMock()), answer=AsyncMock(), reply=AsyncMock())
+    no = AsyncMock(return_value=False)
+    with patch.object(cc, "_create_message", AsyncMock(side_effect=_billing_error())), \
+            patch.object(llm_health, "_send_alert", AsyncMock()), \
+            patch("nexus.handlers.finance.maybe_payday_reminder", AsyncMock()), \
+            patch("nexus.handlers.finance.handle_budget_setup_text", no), \
+            patch("nexus.handlers.finance.handle_finance_pending", no), \
+            patch("nexus.handlers.lists.handle_list_pending", no), \
+            patch.object(nb, "_handle_receipt_clarify", no), \
+            patch("nexus.handlers.tasks.maybe_handle_reschedule_pending", no), \
+            patch("nexus.handlers.tasks._pending_has", lambda *_: False), \
+            patch("nexus.handlers.tasks._get_effective_tz", AsyncMock(return_value=(3, "MSK"))), \
+            patch("nexus.handlers.utils.react", AsyncMock()), \
+            patch.object(nb, "process_item", AsyncMock(return_value="")), \
+            patch.object(nb, "handle_last_task_clarify", no, create=True):
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            loop.run_until_complete(nb.handle_text(msg, user_id="u-test"))
+        except Exception:
+            pass                                                   # что бот ответит дальше — не предмет этого теста
+        finally:
+            loop.close()
+            asyncio.set_event_loop(asyncio.new_event_loop())
+    assert [g["text"] for g in lines()] == ["напомни позвонить маме"]

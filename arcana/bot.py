@@ -3,7 +3,7 @@ from aiogram import Bot, Dispatcher, F
 from aiogram.types import Message, CallbackQuery
 from aiogram.client.default import DefaultBotProperties
 from core.config import config
-from core.middleware import WhitelistMiddleware
+from core.middleware import LlmNoticeMiddleware, WhitelistMiddleware
 from core.bot_notify import notify_startup
 from core.heartbeat import start_heartbeat
 from arcana.handlers.base import router
@@ -108,6 +108,7 @@ def create_dp_and_bot():
     dp = Dispatcher()
     dp.message.middleware(WhitelistMiddleware(require_feature="arcana"))
     dp.callback_query.middleware(WhitelistMiddleware(require_feature="arcana"))
+    dp.message.middleware(LlmNoticeMiddleware())
     dp.include_router(sessions_router)   # callbacks tarot_save/edit/cancel — ПЕРВЫМ
     dp.include_router(payment_router)    # pay_*/barter_* callbacks
     dp.include_router(intent_resolve_router)  # intent_planned/intent_done callbacks

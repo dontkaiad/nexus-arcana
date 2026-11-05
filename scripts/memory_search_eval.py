@@ -22,6 +22,10 @@
 """
 from __future__ import annotations
 
+import os as _os
+
+_os.environ.setdefault("LLM_KEY_SCOPE", "tools")   # LLM только через ANTHROPIC_API_KEY_TOOLS, без отката на ключ бота
+
 import argparse
 import asyncio
 import sys
