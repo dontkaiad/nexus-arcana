@@ -1454,6 +1454,7 @@ async def _handle_recurring_deadline_done(
     затем сброс дедлайна на следующий цикл."""
     try:
         await _repo.set_in_progress(task_id)
+        await _repo.record_completion(task_id, done_by=str(uid or ""), source="bot")
     except Exception as e:
         logger.warning("_handle_recurring_deadline_done: failed to set In progress: %s", e)
     # #38 fix per TASKS_SPEC: дневной стрик считается от ЛЮБОЙ Done-задачи,

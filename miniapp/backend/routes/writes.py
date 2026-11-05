@@ -161,6 +161,8 @@ async def task_done(
     ok = await _tasks_pg_repo.set_status(task_id, new_status)
     if not ok:
         raise HTTPException(status_code=500, detail="failed to update status")
+    if new_status != "Done":      # Done уже записан журналом внутри set_status
+        await _tasks_pg_repo.record_completion(task_id, done_by=str(tg_id), source="miniapp")
     now_utc = datetime.now(timezone.utc)
     try:
         await _tasks_pg_repo.set_props(task_id, {"Время завершения": _date(now_utc.isoformat())})
