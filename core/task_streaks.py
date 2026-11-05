@@ -34,6 +34,7 @@ CREATE TABLE IF NOT EXISTS task_streaks (
     current_streak INTEGER DEFAULT 0,
     best_streak INTEGER DEFAULT 0,
     last_done_date TEXT,
+    interval_days INTEGER DEFAULT 0,
     PRIMARY KEY (user_id, task_id)
 );
 """
@@ -44,6 +45,10 @@ def _init_db() -> None:
     con = sqlite3.connect(_DB_PATH)
     try:
         con.execute(_CREATE_SQL)
+        # Существующие БД создавались без interval_days — добавляем колонку на месте.
+        cols = {r[1] for r in con.execute("PRAGMA table_info(task_streaks)")}
+        if "interval_days" not in cols:
+            con.execute("ALTER TABLE task_streaks ADD COLUMN interval_days INTEGER DEFAULT 0")
         con.commit()
     finally:
         con.close()
@@ -52,12 +57,17 @@ def _init_db() -> None:
 _init_db()
 
 
-def _period_days(repeat_kind: str) -> int:
+def _period_days(repeat_kind: str, interval_days: int = 0) -> int:
     """Шаг между двумя успешными выполнениями.
 
+    «Каждые N дней» (interval_days > 1, из «Времени повтора» HH:MM|every_Nd) → N —
+    «Повтор» у такой задачи остаётся «Ежедневно», и без этого шаг считался за 1 день:
+    стрик задачи «каждые 2 дня» никогда не рос выше 1.
     «Каждый день» → 1, «Каждую неделю» → 7. Иначе fallback 1
     (трактуем как daily-подобную).
     """
+    if interval_days and interval_days > 1:
+        return int(interval_days)
     rk = (repeat_kind or "").strip().lower()
     if "недел" in rk:
         return 7
@@ -86,10 +96,12 @@ def update_task_streak(
     task_title: str,
     repeat_kind: str,
     today_local: str,
+    interval_days: int = 0,
 ) -> Optional[dict]:
     """UPSERT стрика по задаче. Возвращает dict с новыми current/best или
     None если это дубль за день."""
-    period = _period_days(repeat_kind)
+    interval_days = max(int(interval_days or 0), 0)
+    period = _period_days(repeat_kind, interval_days)
     expected_prev = _date_minus(today_local, period)
 
     con = sqlite3.connect(_DB_PATH)
@@ -105,10 +117,10 @@ def update_task_streak(
             con.execute(
                 "INSERT INTO task_streaks "
                 "(user_id, task_id, task_title, repeat_kind, "
-                "current_streak, best_streak, last_done_date) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                "current_streak, best_streak, last_done_date, interval_days) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                 (user_id, task_id, task_title, repeat_kind,
-                 current, best, today_local),
+                 current, best, today_local, interval_days),
             )
             con.commit()
             return {"current": current, "best": best, "is_dup": False}
@@ -118,9 +130,9 @@ def update_task_streak(
             # Дубль за день — обновляем мета (title/repeat могли поменяться),
             # но счётчики не трогаем.
             con.execute(
-                "UPDATE task_streaks SET task_title = ?, repeat_kind = ? "
+                "UPDATE task_streaks SET task_title = ?, repeat_kind = ?, interval_days = ? "
                 "WHERE user_id = ? AND task_id = ?",
-                (task_title, repeat_kind, user_id, task_id),
+                (task_title, repeat_kind, interval_days, user_id, task_id),
             )
             con.commit()
             return None
@@ -131,10 +143,10 @@ def update_task_streak(
             new_current = 1
         new_best = max(cur_best or 0, new_current)
         con.execute(
-            "UPDATE task_streaks SET task_title = ?, repeat_kind = ?, "
+            "UPDATE task_streaks SET task_title = ?, repeat_kind = ?, interval_days = ?, "
             "current_streak = ?, best_streak = ?, last_done_date = ? "
             "WHERE user_id = ? AND task_id = ?",
-            (task_title, repeat_kind, new_current, new_best, today_local,
+            (task_title, repeat_kind, interval_days, new_current, new_best, today_local,
              user_id, task_id),
         )
         con.commit()
@@ -152,17 +164,23 @@ def reset_broken_streaks(user_id: int, today_local: str) -> int:
     con = sqlite3.connect(_DB_PATH)
     try:
         rows = con.execute(
-            "SELECT task_id, repeat_kind, current_streak, last_done_date "
+            "SELECT task_id, repeat_kind, current_streak, last_done_date, interval_days "
             "FROM task_streaks WHERE user_id = ? AND current_streak > 0",
             (user_id,),
         ).fetchall()
         reset = 0
-        for task_id, repeat_kind, _curr, last_date in rows:
-            if not _is_daily(repeat_kind or ""):
+        for task_id, repeat_kind, _curr, last_date, ivl in rows:
+            ivl = int(ivl or 0)
+            if ivl > 1:
+                # «Каждые N дней»: цепочка рвётся, если с последнего выполнения прошло больше N дней.
+                limit = _date_minus(today_local, ivl)
+            elif _is_daily(repeat_kind or ""):
+                limit = yesterday
+            else:
                 continue
             if not last_date:
                 continue
-            if last_date < yesterday:
+            if last_date < limit:
                 con.execute(
                     "UPDATE task_streaks SET current_streak = 0 "
                     "WHERE user_id = ? AND task_id = ?",
