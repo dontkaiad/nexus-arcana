@@ -84,3 +84,24 @@ class Tracer:
                      "gen": j(r["gen"]), "latency": j(r["latency"])})
         except Exception:
             logger.warning("memory_trace: запись не удалась", exc_info=True)
+
+
+RETENTION_DAYS = 30
+
+
+def purge_old(days: int = RETENTION_DAYS) -> int:
+    """Удалить трассы старше `days` дней. → сколько строк удалено."""
+    import sqlalchemy as sa
+    from core.db import get_engine
+    with get_engine().begin() as c:
+        return c.execute(sa.text("DELETE FROM memory_trace WHERE ts < now() - make_interval(days => :d)"), {"d": days}).rowcount
+
+
+async def purge_old_traces() -> None:
+    """Ежедневная задача планировщика: чистка memory_trace. Сбой не роняет планировщик."""
+    import asyncio
+    try:
+        n = await asyncio.to_thread(purge_old)
+        logger.info("memory_trace: удалено старше %d дней: %d", RETENTION_DAYS, n)
+    except Exception:
+        logger.warning("memory_trace purge failed", exc_info=True)

@@ -136,3 +136,20 @@ async def test_search_memory_records_error_name_not_text():
 ])
 def test_verdict_names_the_broken_step(row, part):
     assert part in _show_module().verdict(row)
+
+
+def test_purge_old_removes_only_old_rows():
+    from core.memory_trace import purge_old
+    with get_engine().begin() as c:
+        for ago in (45, 31, 29, 1):
+            c.execute(text("INSERT INTO memory_trace (bot, user_id, question, ts) VALUES ('nexus', :u, :q, now() - make_interval(days => :d))"),
+                      {"u": MARK, "q": f"q{ago}", "d": ago})
+    purge_old()
+    with get_engine().connect() as c:
+        left = sorted(r[0] for r in c.execute(text("SELECT question FROM memory_trace WHERE user_id = :u"), {"u": MARK}))
+    assert left == ["q1", "q29"]
+
+
+def test_purge_job_is_scheduled_daily():
+    src = (REPO / "nexus" / "nexus_bot.py").read_text(encoding="utf-8")
+    assert 'id="memory_trace_purge"' in src and "purge_old_traces" in src

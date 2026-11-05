@@ -3437,6 +3437,7 @@ function NxMemory({ s, openAdhd, openClientFromPeople }) {
   const [showInactive, setShowInactive] = useState(false);
   const [peopleOpen, setPeopleOpen] = useState(false);
   const [peopleId, setPeopleId] = useState(null);   // карточка человека из 👥 на записи памяти
+  const [reviewId, setReviewId] = useState(null);   // «Разобрать по одному» из раздела «Я»
   const peoplePending = useApi("/api/people?status=pending");
   const peopleAll = useApi("/api/people");
   const peopleDisp = useApi("/api/people/alias-disputes");
@@ -3529,7 +3530,8 @@ function NxMemory({ s, openAdhd, openClientFromPeople }) {
       {!q && section === "me" && (
         secs.data?.me?.id
           ? <PersonCard key={secs.data.me.id} embedded s={s} Sheet={Sheet} id={secs.data.me.id}
-              onChanged={() => { secs.refetch(); peoplePending.refetch(); }} />
+              onChanged={() => { secs.refetch(); peoplePending.refetch(); }}
+              onStartReview={(id) => { setReviewId(id); setPeopleOpen(true); }} />
           : <Empty s={s} emoji="👤" text={secs.loading ? "Загружаю..." : "Карточки «Я» ещё нет."} />
       )}
       {!q && section === "people" && (
@@ -3577,8 +3579,9 @@ function NxMemory({ s, openAdhd, openClientFromPeople }) {
         </div>, document.body)}
       {peopleOpen && createPortal(
         <div className="day" style={{ fontFamily: B }}>
-          <PeopleTab s={s} Sheet={Sheet} initialId={peopleId} onClose={() => { setPeopleOpen(false); setPeopleId(null); }}
-            onChanged={() => { peoplePending.refetch(); peopleAll.refetch(); peopleDisp.refetch(); }}
+          <PeopleTab s={s} Sheet={Sheet} initialId={peopleId} initialReviewId={reviewId} key={reviewId || "people"}
+            onClose={() => { setPeopleOpen(false); setPeopleId(null); setReviewId(null); secs.refetch(); }}
+            onChanged={() => { peoplePending.refetch(); peopleAll.refetch(); peopleDisp.refetch(); secs.refetch(); }}
             onOpenClient={(cid) => { setPeopleOpen(false); setPeopleId(null); openClientFromPeople?.(cid); }} />
         </div>, document.body)}
       {(q || section === "misc") && (<>

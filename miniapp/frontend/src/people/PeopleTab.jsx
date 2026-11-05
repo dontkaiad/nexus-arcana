@@ -17,8 +17,9 @@ const FILTERS = [
 // Раздел «Люди»: полноэкранный оверлей над Mini App (7-я вкладка в нижней панели на 375px
 // не помещается). Список → «Разобрать» (ReviewMode) или карточка человека.
 // `Sheet` и тема `s` приходят из App.jsx — циклического импорта нет.
-export default function PeopleTab({ s, Sheet, onClose, onChanged, initialId, onOpenClient }) {
-  const [view, setView] = useState(initialId ? { name: 'card', id: initialId } : { name: 'list' })
+// initialReviewId — сразу «Разобрать по одному» для этой карточки (вход из раздела «Я» в Памяти); выход из разбора закрывает оверлей.
+export default function PeopleTab({ s, Sheet, onClose, onChanged, initialId, initialReviewId, onOpenClient }) {
+  const [view, setView] = useState(initialReviewId ? { name: 'review', only: initialReviewId } : initialId ? { name: 'card', id: initialId } : { name: 'list' })
   const [filter, setFilter] = useState('all')
   const [q, setQ] = useState('')
   const [searchOpen, setSearchOpen] = useState(false)
@@ -48,7 +49,10 @@ export default function PeopleTab({ s, Sheet, onClose, onChanged, initialId, onO
   }, [filter, dq, tick, view.name])
 
   const refresh = () => { setTick((t) => t + 1); onChanged?.() }
-  const back = () => { setView({ name: 'list' }); refresh() }
+  const back = () => {
+    if (initialReviewId) { onChanged?.(); onClose(); return }
+    setView({ name: 'list' }); refresh()
+  }
 
   return (
     <div style={{
