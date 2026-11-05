@@ -103,31 +103,107 @@ def keyword_category(fact: str, cat_names: Sequence[str] = ()) -> Optional[str]:
 # ── Атрибуция по ЦИТАТЕ: чей это факт (quote_author + лицо цитаты), а не род в тексте факта ─────────────────
 # Текст факта Haiku пересказал сам (часто в мужском роде), поэтому по тексту автора не определить; цитата — слова
 # из переписки как есть, и quote_author говорит, кто их написал.
-_FIRST_PERSON = re.compile(r"\b(?:я|мне|меня|мной|мною|мо[йяеи]|моё|мое|моих|моим|моими|мою|моего|моему|моей|мы|нам|нас)\b",
-                           re.I)
-_SECOND_PERSON = re.compile(r"\b(?:ты|тебе|тебя|тобой|тобою|тв[оо]й|твоя|твоё|твое|твои|твоих|твоим|твою|твоего|твоей)\b", re.I)
+_S1 = re.compile(r"\b(?:я|мы)\b", re.I)                      # подлежащее 1 л.
+_S2 = re.compile(r"\b(?:ты|вы)\b", re.I)                      # подлежащее 2 л.
+_O1 = re.compile(r"\b(?:мне|меня|мной|мною|мо[йяеи]|моё|мое|моих|моим|моими|мою|моего|моему|моей|нам|нас|наш[аеиу]?)\b", re.I)
+_O2 = re.compile(r"\b(?:тебе|тебя|тобой|тобою|тв[оо]й|твоя|твоё|твое|твои|твоих|твоим|твою|твоего|твоей|вам|вас)\b", re.I)
+_FIRST_PRON = re.compile(_S1.pattern + "|" + _O1.pattern, re.I)
+_SECOND_PRON = re.compile(_S2.pattern + "|" + _O2.pattern, re.I)
+_OTHER_SUBJ = re.compile(r"\b(?:он|она|они|оно|его|её|ее|ему|ей|им|их)\b", re.I)
 _INTERLOC = re.compile(r"собеседник", re.I)
+# Глагол 1 л. ед.ч. (наст./буд.): -ю/-юсь, -усь, -жу/-шу/-чу/-щу, несколько неправильных; прош. вр. в любом роде (-л/-ла/-лся/-лась).
+# Род НЕ используется: Кай пишет о себе и в м.р., и в ж.р.
+_NOT_VERB_YU = {"семью", "неделю", "землю", "тётю", "тетю", "статью", "жизнью", "ночью", "дочь", "кухню", "мою", "твою", "свою", "нашу"}
+_V1_PRES = re.compile(r"^(?:[а-яё]{2,}(?:ю|юсь|усь)|[а-яё]{2,}[жшчщ]у|хочу|могу|ем|пью|жду|иду|еду|буду|пойду|найду|смогу|лягу|встану|"
+                      r"знаю|умею|терплю|люблю|ненавижу)$", re.I)
+_V_PAST = re.compile(r"^[а-яё]{1,}(?:[аяеиоуы]л|[аяеиоуы]ла|[аяеиоуы]ло|[аяеиоуы]ли|[аяеиоуы]лся|[аяеиоуы]лась|[аяеиоуы]лись)$", re.I)
+_NOT_PAST = {"стол", "угол", "осел", "козел", "козёл", "орел", "орёл", "котёл", "котел", "посол", "дол", "ствол", "подол", "пол", "укол",
+             "завод", "когда", "была", "было", "были", "было", "мало", "мыла", "зола", "школа", "метла", "скала", "ветла"}
+_V2 = re.compile(r"^[а-яё]{2,}(?:ешь|ёшь|ишь)(?:ся)?$", re.I)
+_WORD = re.compile(r"[а-яёА-ЯЁ]+")
+
+
+def _words(q):
+    return [w.lower() for w in _WORD.findall(q or "")]
+
+
+def _verb1(q):
+    other = bool(_OTHER_SUBJ.search(q or "") or _SECOND_PRON.search(q or ""))   # прош. вр. — только без другого подлежащего
+    for w in _words(q):
+        if w in _NOT_VERB_YU or w in _NOT_PAST:
+            continue
+        if w in ("ем", "пью", "жду", "иду", "еду"):
+            return True
+        if len(w) >= 3 and (_V1_PRES.match(w) or (not other and _V_PAST.match(w))):
+            return True
+    return False
+
+
+def _verb2(q):
+    return any(len(w) >= 5 and _V2.match(w) for w in _words(q))
+
+
+def person_of(q: str):
+    """Лицо, о котором говорит цитата: 'first' | 'second' | 'both' | None. Сначала подлежащее (я/ты, глагол), потом косвенные формы."""
+    s1, s2 = bool(_S1.search(q or "")) or _verb1(q), bool(_S2.search(q or "")) or _verb2(q)
+    if not (s1 or s2):
+        s1, s2 = bool(_O1.search(q or "")), bool(_O2.search(q or ""))
+    return "both" if s1 and s2 else "first" if s1 else "second" if s2 else None
+
+
+def has_first(q: str) -> bool:
+    return person_of(q) in ("first", "both")
+
+
+def has_second(q: str) -> bool:
+    return person_of(q) in ("second", "both")
+
+
+def _stem_set(t):
+    return {w[:5] for w in _words(t) if len(w) >= 4}
+
+
+def _clause_person(fact: str, quote: str):
+    """Оба лица в цитате: берём клаузу, лучше всего совпавшую с фактом по основам слов, и смотрим лицо в ней.
+    → 'first' | 'second' | None (неясно)."""
+    fs = _stem_set(fact)
+    best, score = None, 0
+    for cl in re.split(r"[.!?;,\n]| и | а | но ", quote or ""):
+        sc = len(fs & _stem_set(cl))
+        if sc > score:
+            best, score = cl, sc
+    if not best:
+        return None
+    p = person_of(best)
+    return p if p in ("first", "second") else None
 
 
 def attribution(fact: str, quote: str, quote_author: str):
-    """(вердикт, причина) для факта карточки «Я».
-    interloc       — «Собеседник» в тексте факта: смысл перевёрнут → rejected;
-    keep           — это Кай: автор kai + цитата от первого лица (kai_first), либо автор partner и цитата про «ты/тебе/тебя»
-                     (partner_about_me: собеседник говорит обо мне);
-    partner_self   — автор partner, первое лицо без «ты»: собеседник говорит о себе → на человека этого чата;
-    check          — всё остальное неоднозначное → «❓ Проверить автора» (kai_no_marker / partner_no_marker / mixed / unknown)."""
+    """(вердикт, причина) для факта карточки «Я». Решает ЦИТАТА (кто сказал + о ком), текст факта и род не используются.
+    interloc      — «Собеседник» в тексте факта: смысл перевёрнут → rejected;
+    keep          — факт про Кай: kai + 1-е лицо, либо partner + 2-е лицо («ты работаешь» — обо мне со слов собеседника);
+    to_chat       — факт про собеседника: partner + 1-е лицо, либо kai + 2-е лицо («ты любишь…») → на человека этого чата;
+    check         — не ясно → «❓ Проверить автора».
+    Если в цитате оба лица — по клаузе, где сказуемое факта; не нашли — check."""
     if _INTERLOC.search(fact or ""):
         return "interloc", "собеседник в тексте"
     q = quote or ""
-    first, second = bool(_FIRST_PERSON.search(q)), bool(_SECOND_PERSON.search(q))
+    pq = person_of(q)
+    first, second = pq in ("first", "both"), pq in ("second", "both")
     author = (quote_author or "").lower()
-    if author == "kai":
-        return ("keep", "kai_first") if first else ("check", "kai_no_marker")
-    if author == "partner":
-        if second:
-            return "keep", "partner_about_me"
-        return ("partner_self", "partner_first") if first else ("check", "partner_no_marker")
-    return "check", f"author_{author or 'unknown'}"
+    if author not in ("kai", "partner"):
+        return "check", f"author_{author or 'unknown'}"
+    if first and second:
+        who = _clause_person(fact, q)
+        if who is None:
+            return "check", f"{author}_both_unclear"
+        first, second = who == "first", who == "second"
+    if not first and not second:
+        return "check", f"{author}_no_marker"
+    about_me = (author == "kai") == first            # kai+1л или partner+2л
+    if about_me:
+        return "keep", "kai_first" if author == "kai" else "partner_about_me"
+    return "to_chat", "kai_about_other" if author == "kai" else "partner_first"
 
 
 # ── Временные состояния: кандидаты на отклонение (не категория, не применяется автоматически) ──

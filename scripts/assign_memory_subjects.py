@@ -134,7 +134,7 @@ def plan(manual_arg: str = "", keep_temp: str = "", stage: str = "attribution") 
         me, selfs, old = _load(c, sa)
         verdicts = {r.id: (attribution(r.fact_text, r.source_quote, r.quote_author) if do_attr else ("keep", "skip"))
                     for r in selfs}
-        chats = {r.source_chat_id for r in selfs if verdicts[r.id][0] == "partner_self" and r.source_chat_id}
+        chats = {r.source_chat_id for r in selfs if verdicts[r.id][0] == "to_chat" and r.source_chat_id}
         by_chat = _chat_people(c, sa, chats, me.id) if chats else {}
     gender, kept_reasons = [], {}
     for r in selfs:
@@ -143,7 +143,7 @@ def plan(manual_arg: str = "", keep_temp: str = "", stage: str = "attribution") 
             kept_reasons[r.id] = why
         elif v == "interloc":
             gender.append({"id": r.id, "action": "reject", "why": why})
-        elif v == "partner_self":
+        elif v == "to_chat":
             cand = by_chat.get(r.source_chat_id, {})
             if len(cand) == 1:
                 pid, pname = next(iter(cand.items()))

@@ -73,10 +73,17 @@ def test_lowercase_cat_name_is_not_a_cat():
 @pytest.mark.parametrize("fact,quote,author,verdict,why", [
     ("любит чай", "я обожаю чай", "kai", "keep", "kai_first"),
     ("купил машину", "у меня теперь есть машина", "kai", "keep", "kai_first"),          # факт в м.р., но цитата Кай от первого лица
-    ("любит чай", "люблю чай", "kai", "check", "kai_no_marker"),                         # без «я/мне» → на проверку
-    ("любит руки", "Я обожаю твои руки", "partner", "keep", "partner_about_me"),         # партнёр про «твои» → обо мне
-    ("устаёт от небритости", "я через неделю устаю от небритости", "partner", "partner_self", "partner_first"),
+    ("любит чай", "люблю чай", "kai", "keep", "kai_first"),                              # 1 л. по глаголу, без «я»
+    ("ненавидит жару", "ненавижу жару", "kai", "keep", "kai_first"),
+    ("жила в городе", "жил в городе раньше", "kai", "keep", "kai_first"),                # прош. вр. в любом роде
+    ("жила в городе", "жила в городе раньше", "kai", "keep", "kai_first"),
+    ("любит кофе", "ты любишь кофе", "kai", "to_chat", "kai_about_other"),               # Кай про собеседника → на человека чата
+    ("любит руки", "Я обожаю твои руки", "partner", "to_chat", "partner_first"),       # подлежащее «я»: партнёр о себе
+    ("работает дома", "ты работаешь дома", "partner", "keep", "partner_about_me"),
+    ("устаёт от небритости", "я через неделю устаю от небритости", "partner", "to_chat", "partner_first"),
+    ("не ест мясо", "не ем мясо", "partner", "to_chat", "partner_first"),
     ("уехал", "он уехал", "partner", "check", "partner_no_marker"),
+    ("уехал", "он уехал", "kai", "check", "kai_no_marker"),                              # другое подлежащее: прош. вр. не считается 1 л.
     ("любит кино", "я люблю кино", "mixed", "check", "author_mixed"),
     ("любит кино", "я люблю кино", None, "check", "author_unknown"),
     ("Собеседник любит чай", "я обожаю чай", "kai", "interloc", "собеседник в тексте"),   # «Собеседник» важнее цитаты
@@ -84,6 +91,20 @@ def test_lowercase_cat_name_is_not_a_cat():
 ])
 def test_attribution_by_quote(fact, quote, author, verdict, why):
     assert ms.attribution(fact, quote, author) == (verdict, why)
+
+
+def test_both_persons_decided_by_clause_of_fact():
+    q = "люблю маму, а ты любишь папу"
+    assert ms.attribution("любит маму", q, "kai") == ("keep", "kai_first")
+    assert ms.attribution("любит папу", q, "kai") == ("to_chat", "kai_about_other")
+    assert ms.attribution("любит папу", q, "partner") == ("keep", "partner_about_me")
+    assert ms.attribution("любит что-то", "я и ты любим что-то", "kai") == ("check", "kai_both_unclear")
+
+
+def test_gender_is_not_used():
+    # род в факте и в цитате ничего не значит: решает лицо
+    assert ms.attribution("купил машину", "купила машину", "kai") == ("keep", "kai_first")
+    assert ms.attribution("купила машину", "купил машину", "kai") == ("keep", "kai_first")
 
 
 def test_cat_names_only_as_nickname():
@@ -266,13 +287,15 @@ def test_attribution_by_quote_end_to_end(world):
     mine = mem("купил машину", P, f"person_{me}_other_aaaaaaa1", me, "pending", "Кай", chat=-501,
                quote="я купила машину", author="kai")                       # текст факта в м.р., но цитата Кай → остаётся
     about_me = mem("любит руки", P, f"person_{me}_other_aaaaaaa2", me, "pending", "Кай", chat=-501,
-                   quote="Я обожаю твои руки", author="partner")             # про «твои» → обо мне
+                   quote="ты обожаешь мои руки", author="partner")           # «ты» → обо мне со слов собеседника
     mapped = mem("устаёт от жары", P, f"person_{me}_other_aaaaaaa3", me, "pending", "Кай", chat=-501,
                  quote="я устаю от жары", author="partner")                  # партнёр о себе, чат сопоставлен → на Олю
     nochat = mem("устаёт от шума", P, f"person_{me}_other_aaaaaaa4", me, "pending", "Кай", chat=-999,
                  quote="я устаю от шума", author="partner")                  # чат не сопоставлен → ❓
     nomark = mem("любит кино", P, f"person_{me}_other_aaaaaaa5", me, "pending", "Кай", chat=-501,
-                 quote="люблю кино", author="kai")                           # без маркера → ❓
+                 quote="кино и сериалы", author="kai")                      # без маркера → ❓
+    other = mem("любит острое", P, f"person_{me}_other_aaaaaab1", me, "pending", "Кай", chat=-501,
+                quote="ты любишь острое", author="kai")                    # Кай про собеседника → на Олю (чат сопоставлен)
     interloc = mem("Собеседник любит чай", P, f"person_{me}_other_aaaaaaa6", me, "pending", "Кай", chat=-501,
                    quote="я люблю чай", author="kai")
     temp = mem("сейчас находится в отпуске", P, f"person_{me}_other_aaaaaaa7", me, "pending", "Кай", chat=-501,
@@ -285,6 +308,7 @@ def test_attribution_by_quote_end_to_end(world):
     plan = json.loads(Path(sc.PLAN).read_text())
     g = {x["id"]: x for x in plan["gender"]}
     assert g[mapped]["action"] == "reassign" and g[mapped]["person_id"] == friend
+    assert g[other]["action"] == "reassign" and g[other]["person_id"] == friend
     assert g[nochat]["action"] == "check" and "не сопоставлен" in g[nochat]["why"]
     assert g[nomark]["action"] == "check" and g[nomark]["why"] == "kai_no_marker"
     assert g[interloc]["action"] == "reject"
@@ -298,6 +322,7 @@ def test_attribution_by_quote_end_to_end(world):
     with get_engine().connect() as c:
         rows = {r.id: r for r in c.execute(text(
             "SELECT id, person_id, review_status, key_name, category FROM memories WHERE user_id=:u"), {"u": MARK})}
+    assert rows[other].person_id == friend
     assert rows[mapped].person_id == friend and rows[mapped].review_status == "pending"
     assert rows[nochat].person_id == me and rows[nochat].category == "❓ Проверить автора" and rows[nochat].review_status == "pending"
     assert rows[nomark].category == "❓ Проверить автора"
@@ -411,3 +436,15 @@ def test_plan_without_cats_table_rows_still_works(world):
         sc.plan("", "", "all")
     plan = json.loads(Path(sc.PLAN).read_text())
     assert {i["id"]: i["by"] for i in plan["self"]}[x] == "haiku"           # сбой таблицы cats не роняет разметку
+
+
+def test_chat_people_matches_confirmed_and_pending_but_not_rejected():
+    # регрессия v4: чат сопоставляется с человеком по фактам любого статуса, кроме rejected-людей и self
+    import os
+    import sqlalchemy as sa
+    if not os.getenv("DATABASE_URL"):
+        pytest.skip("нужна scratch-БД")
+    from scripts.assign_memory_subjects import _chat_people
+    from core.db import get_engine
+    with get_engine().connect() as c:
+        assert _chat_people(c, sa, {-1}, 0) == {}                   # чата без людей нет — пусто, а не ошибка
