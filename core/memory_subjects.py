@@ -109,12 +109,13 @@ _O1 = re.compile(r"\b(?:мне|меня|мной|мною|мо[йяеи]|моё|
 _O2 = re.compile(r"\b(?:тебе|тебя|тобой|тобою|тв[оо]й|твоя|твоё|твое|твои|твоих|твоим|твою|твоего|твоей|вам|вас)\b", re.I)
 _FIRST_PRON = re.compile(_S1.pattern + "|" + _O1.pattern, re.I)
 _SECOND_PRON = re.compile(_S2.pattern + "|" + _O2.pattern, re.I)
-_OTHER_SUBJ = re.compile(r"\b(?:он|она|они|оно|его|её|ее|ему|ей|им|их)\b", re.I)
+_OTHER_SUBJ = re.compile(r"\b(?:он|она|они|оно|его|её|ее|ему|ей|им|их|ним|нем|ней|нее|неё|них|ними|нему)\b", re.I)
 _INTERLOC = re.compile(r"собеседник", re.I)
+_OTHER_NAME = re.compile(r"(?<![\.!?]\s)(?<!^)\b[А-ЯЁ][а-яё]{2,}\b|@\w+")      # имя с заглавной в середине фразы или @ник
 # Глагол 1 л. ед.ч. (наст./буд.): -ю/-юсь, -усь, -жу/-шу/-чу/-щу, несколько неправильных; прош. вр. в любом роде (-л/-ла/-лся/-лась).
 # Род НЕ используется: Кай пишет о себе и в м.р., и в ж.р.
 _NOT_VERB_YU = {"семью", "неделю", "землю", "тётю", "тетю", "статью", "жизнью", "ночью", "дочь", "кухню", "мою", "твою", "свою", "нашу"}
-_V1_PRES = re.compile(r"^(?:[а-яё]{2,}(?:ю|юсь|усь)|[а-яё]{2,}[жшчщ]у|хочу|могу|ем|пью|жду|иду|еду|буду|пойду|найду|смогу|лягу|встану|"
+_V1_PRES = re.compile(r"^(?:[а-яё]{2,}(?:ю|юсь|усь)|[а-яё]+[жшчщ]у|съем|хочу|могу|ем|пью|жду|иду|еду|буду|пойду|найду|смогу|лягу|встану|"
                       r"знаю|умею|терплю|люблю|ненавижу)$", re.I)
 _V_PAST = re.compile(r"^[а-яё]{1,}(?:[аяеиоуы]л|[аяеиоуы]ла|[аяеиоуы]ло|[аяеиоуы]ли|[аяеиоуы]лся|[аяеиоуы]лась|[аяеиоуы]лись)$", re.I)
 _NOT_PAST = {"стол", "угол", "осел", "козел", "козёл", "орел", "орёл", "котёл", "котел", "посол", "дол", "ствол", "подол", "пол", "укол",
@@ -166,6 +167,16 @@ def _stem_set(t):
 def _clause_person(fact: str, quote: str):
     """Оба лица в цитате: берём клаузу, лучше всего совпавшую с фактом по основам слов, и смотрим лицо в ней.
     → 'first' | 'second' | None (неясно)."""
+    # сначала сказуемое: слово цитаты с той же основой, что глагол факта («мечтает» ↔ «мечтаю») — его лицо и решает
+    for fw in _words(fact):
+        if len(fw) < 4:
+            continue
+        for qw in _words(quote):
+            if qw[:3] == fw[:3] and len(qw) >= 3:
+                if _V2.match(qw):
+                    return "second"
+                if _V1_PRES.match(qw) or _V_PAST.match(qw):
+                    return "first"
     fs = _stem_set(fact)
     best, score = None, 0
     for cl in re.split(r"[.!?;,\n]| и | а | но ", quote or ""):
@@ -199,6 +210,8 @@ def attribution(fact: str, quote: str, quote_author: str):
             return "check", f"{author}_both_unclear"
         first, second = who == "first", who == "second"
     if not first and not second:
+        if author == "kai" and q.strip() and not _OTHER_SUBJ.search(q) and not _OTHER_NAME.search(q):
+            return "keep", "kai_elided"          # обрывок без подлежащего и без других людей: Кай написала сама, значит про себя
         return "check", f"{author}_no_marker"
     about_me = (author == "kai") == first            # kai+1л или partner+2л
     if about_me:

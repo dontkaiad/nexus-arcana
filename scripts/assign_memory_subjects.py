@@ -119,7 +119,7 @@ async def _haiku(rows, usage):
     return out
 
 
-def plan(manual_arg: str = "", keep_temp: str = "", stage: str = "attribution") -> int:
+def plan(manual_arg: str = "", keep_temp: str = "", stage: str = "attribution", chat_map: str = "") -> int:
     """stage: attribution — атрибуция по цитате, временные, старые памяти (БЕЗ LLM и без категорий);
     categories — только категории для оставшихся «Я» (ключевые слова + Haiku, нужен ключ tools); all — оба."""
     import sqlalchemy as sa
@@ -136,6 +136,11 @@ def plan(manual_arg: str = "", keep_temp: str = "", stage: str = "attribution") 
                     for r in selfs}
         chats = {r.source_chat_id for r in selfs if verdicts[r.id][0] == "to_chat" and r.source_chat_id}
         by_chat = _chat_people(c, sa, chats, me.id) if chats else {}
+        for part in (chat_map or "").split(","):                  # «chat_id:Имя» — явная привязка чата к карточке (если по фактам не нашлось)
+            cid, _, nm = part.partition(":")
+            found = prepo.resolve(me.user_id, [nm.strip()]) if nm.strip() else []
+            if cid.strip().lstrip("-").isdigit() and len(found) == 1 and not by_chat.get(int(cid)):
+                by_chat[int(cid)] = {found[0]["id"]: nm.strip()}
     gender, kept_reasons = [], {}
     for r in selfs:
         v, why = verdicts[r.id]
@@ -435,7 +440,8 @@ if __name__ == "__main__":
     g.add_argument("--apply", action="store_true")
     ap.add_argument("--manual", default="")
     ap.add_argument("--keep-temp", default="")
+    ap.add_argument("--chat-map", default="", help="chat_id:Имя,... — привязать чат к карточке человека")
     ap.add_argument("--stage", choices=["attribution", "categories", "all"], default="attribution",
                     help="attribution — без LLM (по умолчанию); categories/all — нужен ключ ANTHROPIC_API_KEY_TOOLS")
     a = ap.parse_args()
-    sys.exit(apply() if a.apply else plan(a.manual, a.keep_temp, a.stage))
+    sys.exit(apply() if a.apply else plan(a.manual, a.keep_temp, a.stage, a.chat_map))

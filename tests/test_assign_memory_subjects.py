@@ -87,7 +87,7 @@ def test_lowercase_cat_name_is_not_a_cat():
     ("любит кино", "я люблю кино", "mixed", "check", "author_mixed"),
     ("любит кино", "я люблю кино", None, "check", "author_unknown"),
     ("Собеседник любит чай", "я обожаю чай", "kai", "interloc", "собеседник в тексте"),   # «Собеседник» важнее цитаты
-    ("любит чай", "", "kai", "check", "kai_no_marker"),
+    ("любит чай", "", "kai", "check", "kai_no_marker"),             # пустая цитата — доказательств нет
 ])
 def test_attribution_by_quote(fact, quote, author, verdict, why):
     assert ms.attribution(fact, quote, author) == (verdict, why)
@@ -99,6 +99,13 @@ def test_both_persons_decided_by_clause_of_fact():
     assert ms.attribution("любит папу", q, "kai") == ("to_chat", "kai_about_other")
     assert ms.attribution("любит папу", q, "partner") == ("keep", "partner_about_me")
     assert ms.attribution("любит что-то", "я и ты любим что-то", "kai") == ("check", "kai_both_unclear")
+
+
+def test_elided_kai_fragment_stays_unless_other_person_named():
+    assert ms.attribution("не любит сигареты", "сигареты фу", "kai") == ("keep", "kai_elided")
+    assert ms.attribution("х", "бесит идти рядом с ним", "kai") == ("check", "kai_no_marker")   # «ним» — другой человек
+    assert ms.attribution("х", "надо было отобрать у Лехи", "kai") == ("check", "kai_no_marker")
+    assert ms.attribution("х", "сигареты фу", "partner") == ("check", "partner_no_marker")   # у партнёра обрывок не берём
 
 
 def test_gender_is_not_used():
