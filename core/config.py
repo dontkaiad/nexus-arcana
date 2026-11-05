@@ -156,6 +156,9 @@ class AppConfig:
     # в ALLOWED_TELEGRAM_IDS). Пусто / короче 32 символов / владелец не задан → доступ по токену выключен. ──
     cats_read_token: str = ""
     cats_read_owner_tg_id: int = 0
+    # Служебное чтение списков «для ситтера» по ОТДЕЛЬНОМУ Bearer-токену (не взаимозаменяем с CATS_READ_TOKEN).
+    sitter_lists_token: str = ""
+    sitter_lists_owner_tg_id: int = 0
     # Свободный текст о Кай для Zarya-промпта (#228). НИКОГДА не хардкодить
     # реальные факты в коде — репо публичный. Живёт только в .env на сервере,
     # правится напрямую там; пусто → Заря просто без доп. контекста о Кай.
@@ -182,6 +185,8 @@ def load_config() -> AppConfig:
         booking_service_token = _optional("BOOKING_SERVICE_TOKEN"),
         cats_read_token      = _optional("CATS_READ_TOKEN").strip(),
         cats_read_owner_tg_id = _int_or_zero(_optional("CATS_READ_OWNER_TG_ID")),
+        sitter_lists_token   = _optional("SITTER_LISTS_TOKEN").strip(),
+        sitter_lists_owner_tg_id = _int_or_zero(_optional("SITTER_LISTS_OWNER_TG_ID")),
         booking_bot_token    = _optional("BOOKING_BOT_TOKEN"),
         booking_api_base     = _optional("BOOKING_API_BASE", "http://nexus-bot:8000"),
         zarya_kai_context    = _optional("ZARYA_KAI_CONTEXT"),

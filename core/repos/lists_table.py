@@ -38,6 +38,8 @@ nexus_lists = Table(
     Column("works_id",       Text,       nullable=False, server_default=text("''")),   # 🔮 Работы page_id
     # #242: видно ли пункт списка Заре для упоминания друзьям.
     Column("shared",         Boolean,    nullable=False, server_default=text("false")),
+    # Пункт виден ситтеру через служебный эндпоинт GET /api/sitter/lists (миграция f7d0b3e5c942); по умолчанию закрыт.
+    Column("for_sitter",     Boolean,    nullable=False, server_default=text("false")),
     Column("user_id", Text,       nullable=False, server_default=text("''")),
     Column("created_at",     TIMESTAMP(timezone=True), server_default=text("now()")),
     Column("updated_at",     TIMESTAMP(timezone=True), server_default=text("now()")),
