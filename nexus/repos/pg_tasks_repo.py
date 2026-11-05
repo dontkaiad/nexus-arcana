@@ -12,7 +12,7 @@ from sqlalchemy.engine import Engine
 
 from nexus.repos.tasks_tables import (
     tasks, task_status, task_repeat, task_day_of_week,
-    task_priority, task_category,
+    task_priority, task_category, task_completions,
 )
 
 logger = logging.getLogger("nexus.pg_tasks_repo")
@@ -347,6 +347,18 @@ def _set_status_sync(task_id: str, status: str) -> bool:
         return False
 
 
+def _record_completion_sync(task_id: str, done_by: str, source: str) -> bool:
+    """Одна строка журнала выполнений. Никогда не бросает: сбой журнала не должен ломать закрытие задачи."""
+    try:
+        with get_engine().begin() as conn:
+            conn.execute(task_completions.insert().values(
+                task_id=int(task_id), done_by=(done_by or None), source=source or "app"))
+        return True
+    except Exception as e:
+        logger.warning("_record_completion_sync failed for task %s: %s", str(task_id)[:8], e)
+        return False
+
+
 def _set_props_sync(task_id: str, props: dict) -> None:
     """Parse Notion-format props dict and apply to PG."""
     _ensure_lookups()
@@ -577,12 +589,18 @@ class PgTasksRepo:
     async def set_status(self, page_id: str, status: str) -> bool:
         ok = await asyncio.to_thread(_set_status_sync, page_id, status)
         if ok and status == "Done":
+            await self.record_completion(page_id, source="status")
             # Задача могла быть авто-создана подтверждённой бронью
             # (core/booking/linkage.py, #23 B6) — тогда встреча уже
             # состоялась, и её пора убрать из "занято" в букинге.
             from core.booking.linkage import complete_linked_booking
             await complete_linked_booking(nexus_task_id=page_id)
         return ok
+
+    async def record_completion(self, page_id: str, done_by: str = "", source: str = "app") -> bool:
+        """Записать выполнение в журнал. Для повторяющихся задач статус не становится Done,
+        поэтому вызывается явно (Mini App «done», бот на дедлайн-пинге)."""
+        return await asyncio.to_thread(_record_completion_sync, page_id, str(done_by or ""), source)
 
     async def set_in_progress(self, page_id: str) -> None:
         await asyncio.to_thread(_set_status_sync, page_id, "In progress")

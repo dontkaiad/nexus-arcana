@@ -67,3 +67,14 @@ tasks = Table(
     Column("updated_at", TIMESTAMP(timezone=True), nullable=False,
            server_default=text("now()")),
 )
+
+
+# Журнал выполнений: одна строка на каждое выполнение задачи (миграция d5b8f1c3a720).
+task_completions = Table(
+    "task_completions", metadata,
+    Column("id", BigInteger, primary_key=True, autoincrement=True),
+    Column("task_id", BigInteger, ForeignKey("tasks.id", ondelete="CASCADE"), nullable=False),
+    Column("done_at", TIMESTAMP(timezone=True), nullable=False, server_default=text("now()")),
+    Column("done_by", Text),
+    Column("source", Text, nullable=False, server_default=text("'app'")),
+)

@@ -29,6 +29,9 @@ class TasksRepo:
     async def set_in_progress(self, page_id: str) -> None:
         await self._pg.set_in_progress(page_id)
 
+    async def record_completion(self, page_id: str, done_by: str = "", source: str = "app") -> bool:
+        return await self._pg.record_completion(page_id, done_by=done_by, source=source)
+
     async def set_archived(self, page_id: str) -> None:
         await self._pg.set_archived(page_id)
 
