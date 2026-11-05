@@ -21,6 +21,7 @@ from core.people import (
 from core.repos.pg_memory_repo import PgMemoryRepo, bot_to_scope
 from core.repos import pg_client_links as client_links
 from core.repos import pg_people_repo as repo
+from core import self_dedup
 from core.user_manager import get_user_id
 
 from miniapp.backend.auth import current_user_id
@@ -92,6 +93,20 @@ def _iso(d) -> Any:
     return d.isoformat() if d else None
 
 
+def _with_merged(facts: List[Dict[str, Any]], merged: Dict[int, List[Dict[str, Any]]]) -> None:
+    """Оставшийся факт показывает суммарные упоминания и крайние даты своих объединённых дублей (в БД ничего не меняется)."""
+    for f in facts:
+        kids = merged.get(f["id"])
+        if not kids:
+            continue
+        f["mention_count"] = (f.get("mention_count") or 1) + sum(k["mention_count"] for k in kids)
+        firsts = [d for d in [f.get("first_mention"), *[k["first_mention"] or k["message_date"] for k in kids]] if d]
+        lasts = [d for d in [f.get("last_mention"), *[k["last_mention"] or k["message_date"] for k in kids]] if d]
+        f["first_mention"], f["last_mention"] = (min(firsts) if firsts else None), (max(lasts) if lasts else None)
+        f["merged"] = [{"id": k["id"], "text": k["text"], "quote": k["quote"], "mention_count": k["mention_count"],
+                        "message_date": _iso(k["message_date"]), "platform": k["platform"]} for k in kids]
+
+
 def _group_facts(facts: List[Dict[str, Any]], is_self: bool = False, name: str = "",
                  aliases: Optional[List[str]] = None) -> List[Dict[str, Any]]:
     """Группы по type; important первым, затем likes/dislikes/other, прочие по алфавиту.
@@ -110,6 +125,7 @@ def _group_facts(facts: List[Dict[str, Any]], is_self: bool = False, name: str =
             "message_date": _iso(f.get("message_date")), "quote_author": f.get("quote_author"),
             "mention_count": f.get("mention_count") or 1,
             "first_mention": _iso(f.get("first_mention")), "last_mention": _iso(f.get("last_mention")),
+            "merged": f.get("merged") or [],
         })
     if is_self:
         for items in by.values():
@@ -159,6 +175,7 @@ async def person_card(person_id: int, tg_id: int = Depends(current_user_id)) -> 
         raise HTTPException(status_code=404, detail="person not found")
     await _attach_clients(user_id, [p])
     facts = await asyncio.to_thread(repo.list_facts, person_id)
+    _with_merged(facts, await asyncio.to_thread(self_dedup.merged_info, user_id, [f["id"] for f in facts]))
     return {**_person_out(p), "aliases_info": await _aliases_info(user_id, person_id, list(p.get("aliases") or [])),
             "facts": _group_facts(facts, bool(p.get("is_self")), p["name"], p.get("aliases"))}
 
@@ -494,3 +511,63 @@ async def make_primary_account(person_id: int, account_id: int, tg_id: int = Dep
     if not p:
         raise HTTPException(status_code=404, detail="account not found")
     return _person_out(p)
+
+
+# ── Похожие факты карточки: предложения, объединить, «Это разное», разъединить ───────────────────────────────────────
+@router.get("/people/{person_id}/similar")
+async def similar(person_id: int, threshold: float = Query(self_dedup.DEFAULT_THRESHOLD, ge=0.8, le=0.99),
+                  tg_id: int = Depends(current_user_id)) -> Dict[str, Any]:
+    user_id = await _owner(tg_id)
+    if not await asyncio.to_thread(repo.get_person, user_id, person_id):
+        raise HTTPException(status_code=404, detail="person not found")
+    groups = await asyncio.to_thread(self_dedup.similar_groups, person_id, user_id, threshold)
+    return {"count": len(groups), "groups": groups}
+
+
+class SimilarMergeBody(BaseModel):
+    keep_id: int
+    ids: List[int] = Field(min_length=2, max_length=50)
+
+
+class SimilarIdsBody(BaseModel):
+    ids: List[int] = Field(min_length=2, max_length=50)
+
+
+class SimilarUnmergeBody(BaseModel):
+    keep_id: int
+    id: Optional[int] = None            # без id — вернуть все объединённые дубли факта
+
+
+def _dedup_http(e: ValueError) -> HTTPException:
+    code = 404 if str(e) in ("not_found",) else 409 if str(e) in ("keep_hidden", "already_hidden") else 400
+    return HTTPException(status_code=code, detail=str(e))
+
+
+@router.post("/people/{person_id}/similar/merge")
+async def similar_merge(person_id: int, body: SimilarMergeBody, tg_id: int = Depends(current_user_id)) -> Dict[str, Any]:
+    user_id = await _owner(tg_id)
+    try:
+        n = await asyncio.to_thread(self_dedup.merge, user_id, person_id, body.keep_id, body.ids)
+    except ValueError as e:
+        raise _dedup_http(e)
+    return {"ok": True, "merged": n}
+
+
+@router.post("/people/{person_id}/similar/dismiss")
+async def similar_dismiss(person_id: int, body: SimilarIdsBody, tg_id: int = Depends(current_user_id)) -> Dict[str, Any]:
+    user_id = await _owner(tg_id)
+    try:
+        n = await asyncio.to_thread(self_dedup.dismiss, user_id, person_id, body.ids)
+    except ValueError as e:
+        raise _dedup_http(e)
+    return {"ok": True, "pairs": n}
+
+
+@router.post("/people/{person_id}/similar/unmerge")
+async def similar_unmerge(person_id: int, body: SimilarUnmergeBody, tg_id: int = Depends(current_user_id)) -> Dict[str, Any]:
+    user_id = await _owner(tg_id)
+    try:
+        n = await asyncio.to_thread(self_dedup.unmerge, user_id, person_id, body.keep_id, body.id)
+    except ValueError as e:
+        raise _dedup_http(e)
+    return {"ok": True, "restored": n}

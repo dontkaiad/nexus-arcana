@@ -4,7 +4,7 @@ import { TYPE_CHOICES, fs, mentionLabel, provenanceLine, redText, typeMeta } fro
 // Группы фактов (important первым — порядок задаёт API). Тап по тексту раскрывает
 // цитату-основание; управление слева/справа (галочка, кнопки) приходит рендер-пропсами.
 // onChangeType(fact, newType) — если передан, у каждого факта есть иконка типа: тап раскрывает выбор типа.
-export default function FactGroups({ s, groups, expanded, onToggle, left, right, showMentions, textStyle, caption, onChangeType }) {
+export default function FactGroups({ s, groups, expanded, onToggle, left, right, showMentions, textStyle, caption, onChangeType, onUnmerge }) {
   const [pickFor, setPickFor] = useState(null)
   return (
     <div>
@@ -60,6 +60,22 @@ export default function FactGroups({ s, groups, expanded, onToggle, left, right,
                       {f.quote ? `«${f.quote}»` : 'Цитаты нет — факт добавлен вручную или импортирован до сохранения цитат'}
                       {provenanceLine(f) && (
                         <div style={{ fontStyle: 'normal', fontWeight: 600, marginTop: 4, fontSize: fs(11) }}>{provenanceLine(f)}</div>
+                      )}
+                      {(f.merged || []).length > 0 && (
+                        <div style={{ fontStyle: 'normal', marginTop: 8, paddingTop: 6, borderTop: `0.5px solid ${s.brd}` }}>
+                          <div style={{ fontWeight: 700, fontSize: fs(11), marginBottom: 4 }}>Объединено ({f.merged.length})</div>
+                          {f.merged.map((m) => (
+                            <div key={m.id} style={{ marginBottom: 6 }}>
+                              <div>{m.text}{m.mention_count > 1 ? ` ×${m.mention_count}` : ''}</div>
+                              {m.quote && <div style={{ fontStyle: 'italic', opacity: 0.85 }}>«{m.quote}»</div>}
+                              {onUnmerge && (
+                                <div role="button" onClick={() => onUnmerge(f, m)} style={{ display: 'inline-flex', alignItems: 'center', minHeight: 36, fontWeight: 600, cursor: 'pointer', textDecoration: 'underline' }}>
+                                  Разъединить
+                                </div>
+                              )}
+                            </div>
+                          ))}
+                        </div>
                       )}
                     </div>
                   )}

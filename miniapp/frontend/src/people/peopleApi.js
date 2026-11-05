@@ -24,6 +24,11 @@ export const setFactType = (id, fid, type) => apiPost(`/api/people/${id}/facts/$
 export const approveAll = (id) => apiPost(`/api/people/${id}/approve-all`, {})
 export const rejectAll = (id) => apiPost(`/api/people/${id}/reject-all`, {})
 export const addFact = (id, text, type) => apiPost(`/api/people/${id}/facts`, { text, type })
+// «Похожие» факты карточки «Я»: группы, объединить (keep_id остаётся), «Это разное», разъединить
+export const similarFacts = (id) => apiGet(`/api/people/${id}/similar`)
+export const mergeSimilar = (id, keepId, ids) => apiPost(`/api/people/${id}/similar/merge`, { keep_id: keepId, ids })
+export const dismissSimilar = (id, ids) => apiPost(`/api/people/${id}/similar/dismiss`, { ids })
+export const unmergeSimilar = (id, keepId, childId) => apiPost(`/api/people/${id}/similar/unmerge`, { keep_id: keepId, id: childId })
 export const duplicates = () => apiGet('/api/people/duplicates')
 // Спорные «Другие имена» (совпали с именем/алиасом другого): сводка, убрать один, сбросить все
 export const aliasDisputes = () => apiGet('/api/people/alias-disputes')

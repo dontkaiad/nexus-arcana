@@ -5,10 +5,11 @@ import MergePicker from './MergePicker'
 import PersonEdit from './PersonEdit'
 import Accounts from './Accounts'
 import BulkReview from './BulkReview'
+import SimilarFacts from './SimilarFacts'
 import { EMPTY_FILTER, applyFilter, clampSelection, flatten, idsOf, regroup, toggleId } from './bulkFilter'
 import { Btn, Chip, Note, Tick, inputStyle, Label } from './parts'
 import {
-  addFact, approveAll, approveFact, eraseFact, errText, getPerson, rejectAll, rejectFact, removeAlias, resetAliases, restoreFact, aliasOk, setFactType, reviewPerson,
+  addFact, approveAll, approveFact, eraseFact, errText, getPerson, rejectAll, rejectFact, removeAlias, resetAliases, restoreFact, aliasOk, setFactType, reviewPerson, unmergeSimilar,
 } from './peopleApi'
 import { STATUS_LABEL, TYPE_CHOICES, fmtBirthday, fs, haptic, plural, primaryColors, redText, statusColor, typeMeta } from './ui'
 
@@ -91,6 +92,7 @@ export default function PersonCard({ s, Sheet, id, onBack, onChanged, onStartRev
       {err && <Note s={s} color={redText(s)}>{err}</Note>}
 
       {p.facts.length === 0 && <Note s={s}>Фактов пока нет</Note>}
+      {p.is_self && <SimilarFacts s={s} personId={p.id} onChanged={() => { load(); onChanged?.() }} />}
       {bulkOn && (
         <BulkReview s={s} facts={allFacts} flt={flt} setFlt={changeFlt} busy={busy}
           onApprove={(ids) => act(() => reviewPerson(p.id, { approve: ids }))}
@@ -108,6 +110,7 @@ export default function PersonCard({ s, Sheet, id, onBack, onChanged, onStartRev
       )}
       <FactGroups s={s} groups={shownGroups} expanded={expanded} onToggle={toggle} showMentions={p.is_self}
         onChangeType={(f, t) => act(() => setFactType(p.id, f.id, t))}
+        onUnmerge={(f, m) => act(() => unmergeSimilar(p.id, f.id, m.id))}
         textStyle={(f) => (f.review_status === 'rejected' ? { textDecoration: 'line-through', color: s.tS } : {})}
         left={(f, t) => (
           <>

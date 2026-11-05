@@ -42,6 +42,8 @@ memories = Table(
     Column("mention_count",       Integer, nullable=False, server_default=text("1")),
     Column("first_mention_date",  Date),
     Column("last_mention_date",   Date),
+    # скрытый дубль: id факта, в который он объединён (миграция *_memories_merged_into); сам дубль is_archived
+    Column("merged_into",         BigInteger),
     Column("review_status",  Text,       nullable=False, server_default=text("'confirmed'")),
     Column("created_at",     TIMESTAMP(timezone=True), server_default=text("now()")),
     Column("updated_at",     TIMESTAMP(timezone=True), server_default=text("now()")),
