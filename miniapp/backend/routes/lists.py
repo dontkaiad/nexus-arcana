@@ -95,6 +95,7 @@ def _serialize_pg(item) -> dict:
         "expires": item.expires_at or None,
         "group": item.group_name or None,
         "recurring": item.is_recurring,
+        "for_sitter": bool(getattr(item, "for_sitter", False)),
     }
 
 
