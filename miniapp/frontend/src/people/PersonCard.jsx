@@ -6,15 +6,16 @@ import PersonEdit from './PersonEdit'
 import Accounts from './Accounts'
 import BulkReview from './BulkReview'
 import SimilarFacts from './SimilarFacts'
-import { EMPTY_FILTER, applyFilter, clampSelection, flatten, idsOf, regroup, toggleId } from './bulkFilter'
+import { EMPTY_FILTER, applyFilter, clampSelection, flatten, idsOf, regroup, regroupByCategory, toggleId } from './bulkFilter'
 import { Btn, Chip, Note, Tick, inputStyle, Label } from './parts'
 import {
-  addFact, approveAll, approveFact, eraseFact, errText, getPerson, rejectAll, rejectFact, removeAlias, resetAliases, restoreFact, aliasOk, setFactType, reviewPerson, unmergeSimilar,
+  addFact, approveAll, approveFact, eraseFact, errText, getPerson, rejectAll, rejectFact, removeAlias, resetAliases, restoreFact, aliasOk, setFactType, reviewPerson, unmergeSimilar, setFactsCategory,
 } from './peopleApi'
 import { STATUS_LABEL, TYPE_CHOICES, fmtBirthday, fs, haptic, plural, primaryColors, redText, statusColor, typeMeta } from './ui'
 
 // Карточка человека вне режима разбора: правка, ручной факт, склейка, ревью по одному факту.
-export default function PersonCard({ s, Sheet, id, onBack, onChanged, onStartReview, onOpenClient }) {
+// embedded — «Я» внутри раздела Памяти: без шапки/аккаунтов, факты по категориям (смена тапом, «Перенести в категорию…»).
+export default function PersonCard({ s, Sheet, id, onBack, onChanged, onStartReview, onOpenClient, embedded = false }) {
   const [p, setP] = useState(null)
   const [err, setErr] = useState('')
   const [expanded, setExpanded] = useState(new Set())
@@ -28,6 +29,8 @@ export default function PersonCard({ s, Sheet, id, onBack, onChanged, onStartRev
   const [eraseId, setEraseId] = useState(null)        // факт, для которого ждём второй тап «Стереть»
   const [flt, setFlt] = useState(EMPTY_FILTER)        // фильтры массового разбора (только карточка «Я»)
   const [selected, setSelected] = useState(new Set()) // мультивыбор фактов (чекбоксы)
+  const [catFlt, setCatFlt] = useState('all')         // фильтр по категории «Я» (только embedded)
+  const [moveOpen, setMoveOpen] = useState(false)      // выбор категории для «Перенести…»
 
   const load = useCallback(async () => {
     try { setP(await getPerson(id)); setErr('') } catch (e) { setErr(errText(e)) }
@@ -53,8 +56,11 @@ export default function PersonCard({ s, Sheet, id, onBack, onChanged, onStartRev
   const allFacts = p.is_self ? flatten(p.facts) : []
   const bulkOn = p.is_self && allFacts.length > 0
   const SHOW_MAX = 120                                 // сколько фактов рисуем (остальные — только под действие по фильтру)
-  const filteredFacts = bulkOn ? applyFilter(allFacts, flt) : []
-  const shownGroups = bulkOn ? regroup(filteredFacts.slice(0, SHOW_MAX)) : p.facts
+  const catMode = embedded && p.is_self
+  const catChoices = p.category_choices || []
+  const byCat = (arr) => (catMode && catFlt !== 'all' ? arr.filter((f) => f.category === catFlt) : arr)
+  const filteredFacts = bulkOn ? byCat(applyFilter(allFacts, flt)) : []
+  const shownGroups = bulkOn ? (catMode ? regroupByCategory(filteredFacts.slice(0, SHOW_MAX), catChoices) : regroup(filteredFacts.slice(0, SHOW_MAX))) : p.facts
   const visibleIds = idsOf(shownGroups)
   const sel = clampSelection(selected, visibleIds)     // выбор работает внутри текущего фильтра и видимого набора
   const changeFlt = (f) => { setSelected(new Set()); setFlt(f) }
@@ -64,13 +70,18 @@ export default function PersonCard({ s, Sheet, id, onBack, onChanged, onStartRev
     await reviewPerson(p.id, { [kind]: ids, person_status: p.status })
     setSelected(new Set())
   })
+  const moveSel = (category) => act(async () => {
+    await setFactsCategory(p.id, [...sel], category)
+    setSelected(new Set()); setMoveOpen(false)
+  })
   const age = p.age != null ? ` · ${p.age} ${plural(p.age, 'год', 'года', 'лет')}` : ''
 
   return (
     <div>
-      <Header s={s} onBack={onBack} title={p.name}
-        right={<div onClick={() => setEdit(true)} style={{ width: 44, height: 44, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}><Pencil size={fs(17)} color={s.tS} /></div>} />
+      {!embedded && <Header s={s} onBack={onBack} title={p.name}
+        right={<div onClick={() => setEdit(true)} style={{ width: 44, height: 44, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}><Pencil size={fs(17)} color={s.tS} /></div>} />}
 
+      {!embedded && (<>
       {p.label && p.label !== p.name && <div style={{ fontSize: fs(13), color: s.text, margin: '0 2px 4px' }}>{p.label.slice(p.name.length + 3)}</div>}
       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center', margin: '2px 0 6px' }}>
         {p.is_self
@@ -89,10 +100,25 @@ export default function PersonCard({ s, Sheet, id, onBack, onChanged, onStartRev
       <Aliases s={s} p={p} busy={busy} act={act} />
       {p.notes && <div style={{ fontSize: fs(12), color: s.text, whiteSpace: 'pre-wrap', margin: '4px 0 8px', wordBreak: 'break-word' }}>{p.notes}</div>}
 
+      </>)}
+
       {err && <Note s={s} color={redText(s)}>{err}</Note>}
 
       {p.facts.length === 0 && <Note s={s}>Фактов пока нет</Note>}
       {p.is_self && <SimilarFacts s={s} personId={p.id} onChanged={() => { load(); onChanged?.() }} />}
+      {catMode && (p.categories || []).length > 0 && (
+        <div style={{ display: 'flex', gap: 6, overflowX: 'auto', flexWrap: 'nowrap', margin: '4px -16px 6px', padding: '0 16px', scrollbarWidth: 'none', WebkitOverflowScrolling: 'touch' }}>
+          {[{ name: 'all', count: (p.categories || []).reduce((n, c) => n + c.count, 0) }, ...p.categories].map((c) => {
+            const on = catFlt === c.name
+            return (
+              <span key={c.name} role="button" onClick={() => { setSelected(new Set()); setCatFlt(c.name) }} style={{
+                flexShrink: 0, minHeight: 34, padding: '6px 10px', borderRadius: 999, fontSize: fs(12), fontWeight: on ? 700 : 500, cursor: 'pointer',
+                display: 'inline-flex', alignItems: 'center', color: s.text, border: `1px solid ${on ? s.acc : s.brd}`, background: on ? `${s.acc}22` : 'transparent',
+              }}>{c.name === 'all' ? 'Все' : c.name} <span style={{ opacity: 0.7, marginLeft: 4 }}>{c.count}</span></span>
+            )
+          })}
+        </div>
+      )}
       {bulkOn && (
         <BulkReview s={s} facts={allFacts} flt={flt} setFlt={changeFlt} busy={busy}
           onApprove={(ids) => act(() => reviewPerson(p.id, { approve: ids }))}
@@ -109,7 +135,9 @@ export default function PersonCard({ s, Sheet, id, onBack, onChanged, onStartRev
         </div>
       )}
       <FactGroups s={s} groups={shownGroups} expanded={expanded} onToggle={toggle} showMentions={p.is_self}
-        onChangeType={(f, t) => act(() => setFactType(p.id, f.id, t))}
+        onChangeType={catMode ? undefined : (f, t) => act(() => setFactType(p.id, f.id, t))}
+        categories={catMode ? catChoices : undefined}
+        onChangeCategory={catMode ? (f, c) => act(() => setFactsCategory(p.id, [f.id], c)) : undefined}
         onUnmerge={(f, m) => act(() => unmergeSimilar(p.id, f.id, m.id))}
         textStyle={(f) => (f.review_status === 'rejected' ? { textDecoration: 'line-through', color: s.tS } : {})}
         left={(f, t) => (
@@ -174,11 +202,25 @@ export default function PersonCard({ s, Sheet, id, onBack, onChanged, onStartRev
           <span style={{ fontSize: fs(13), fontWeight: 700, color: s.text, flex: 1, minWidth: 0 }}>Выбрано {sel.size}:</span>
           <Btn s={s} kind="primary" disabled={busy} style={{ minWidth: 104 }} onClick={() => reviewSel('approve')}>✓ Принять</Btn>
           <Btn s={s} kind="danger" disabled={busy} style={{ minWidth: 104 }} onClick={() => reviewSel('reject')}>✕ Отклонить</Btn>
+          {catMode && <Btn s={s} disabled={busy} style={{ minWidth: 104 }} onClick={() => setMoveOpen(!moveOpen)}>Перенести…</Btn>}
+        </div>
+      )}
+      {catMode && sel.size > 0 && moveOpen && (
+        <div className="glass" style={{ padding: '8px 10px', margin: '0 0 10px' }}>
+          <div style={{ fontSize: fs(12), fontWeight: 700, color: s.text, marginBottom: 6 }}>Перенести {sel.size} в категорию:</div>
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+            {catChoices.map((c) => (
+              <span key={c} role="button" onClick={() => !busy && moveSel(c)} style={{
+                minHeight: 36, padding: '0 12px', borderRadius: 18, display: 'inline-flex', alignItems: 'center', cursor: 'pointer',
+                fontSize: fs(12), fontWeight: 600, color: s.text, border: `1px solid ${s.brd}`,
+              }}>{c}</span>
+            ))}
+          </div>
         </div>
       )}
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 16 }}>
-        {p.is_self && pend > 0 && onStartReview && (
+        {p.is_self && pend > 0 && onStartReview && !embedded && (
           <Btn s={s} kind="primary" onClick={() => onStartReview(p.id)}>Разобрать по одному ({pend})</Btn>
         )}
         {pend > 0 && !p.is_self && (

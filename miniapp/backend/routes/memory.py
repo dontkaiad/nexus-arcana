@@ -203,14 +203,59 @@ async def _fetch_rows(user_id: str, include_inactive: bool) -> List[Memory]:
         return []
 
 
+def _is_misc(mem: Memory) -> bool:
+    """«Разное»: факт без субъекта — не человек, не кот, не «Я», не бюджет и не СДВГ-профиль (у него свой экран)."""
+    c = mem.category or None
+    if c == LIMIT_CATEGORY or (mem.key or "").lower().startswith(_BUDGET_KEY_PREFIXES):
+        return False
+    if c in EXCLUDED_CATEGORIES or c == PEOPLE_CATEGORY or mem.person_id or mem.cat_id:
+        return False
+    return not (mem.key or "").startswith(EXCLUDED_KEY_PREFIXES)
+
+
+def _section_counts(user_id: str) -> dict:
+    """Счётчики разделов Памяти из БД: я / люди / коты. Разное считается отдельно (по тем же правилам, что список)."""
+    from sqlalchemy import text
+    from core.db import get_engine
+    with get_engine().connect() as c:
+        me = c.execute(text("SELECT id FROM people WHERE user_id = :u AND is_self"), {"u": user_id}).scalar()
+        mine = c.execute(text(
+            "SELECT count(*) FILTER (WHERE review_status <> 'rejected'), count(*) FILTER (WHERE review_status = 'pending'), "
+            "count(*) FILTER (WHERE review_status <> 'rejected' AND category = '❓ Проверить автора') FROM memories "
+            "WHERE person_id = :p AND NOT is_archived AND fact_text <> ''"), {"p": me}).one() if me else (0, 0, 0)
+        ppl = c.execute(text(
+            "SELECT count(*), count(*) FILTER (WHERE status = 'pending') FROM people "
+            "WHERE user_id = :u AND NOT is_self AND status <> 'rejected'"), {"u": user_id}).one()
+        try:
+            cats_n = c.execute(text("SELECT count(*) FROM cats WHERE user_id = :u"), {"u": user_id}).scalar()
+        except Exception:
+            cats_n = 0
+    return {"me": {"id": me, "total": mine[0], "pending": mine[1], "review": mine[2]},
+            "people": {"total": ppl[0], "pending": ppl[1]}, "cats": {"total": cats_n}}
+
+
+@router.get("/memory/sections")
+async def memory_sections(tg_id: int = Depends(current_user_id)) -> dict[str, Any]:
+    """Разделы Памяти по субъекту — 👤 Я · 👥 Люди · 🐾 Коты · 📌 Разное — со счётчиками (раздел выводится из данных)."""
+    import asyncio
+    user_id = (await get_user_id(tg_id)) or ""
+    counts = await asyncio.to_thread(_section_counts, user_id)
+    raw = await _fetch_rows(user_id, False)
+    counts["misc"] = {"total": sum(1 for m in raw if _is_misc(m))}
+    return counts
+
+
 @router.get("/memory")
 async def get_memory(
     tg_id: int = Depends(current_user_id),
     cat: Optional[str] = Query(None, description="фильтр по категории"),
     q: Optional[str] = Query(None, description="case-insensitive contains по тексту"),
     include_inactive: bool = Query(False, description="показать записи с is_current=False"),
+    section: Optional[str] = Query(None, description="me — факты «Я» (с cat=категория «Я»); misc/пусто — как раньше"),
 ) -> dict[str, Any]:
     user_id = (await get_user_id(tg_id)) or ""
+    if section == "me":
+        return await _self_section(user_id, cat)
     raw = await _fetch_rows(user_id, include_inactive)
 
     visible: list[Memory] = []
@@ -275,6 +320,23 @@ async def get_memory(
     if note:
         out["note"] = note
     return out
+
+
+async def _self_section(user_id: str, cat: Optional[str]) -> dict[str, Any]:
+    """Раздел «Я»: факты карточки «Я» (кроме отклонённых) плоским списком, фильтр по категории «Я» (cat)."""
+    import asyncio
+    from core.memory_subjects import SELF_CATEGORIES
+    from core.repos import pg_people_repo as prepo
+    me = await asyncio.to_thread(prepo.find_self, user_id)
+    if not me:
+        return {"items": [], "categories": list(SELF_CATEGORIES)}
+    facts = [f for f in await asyncio.to_thread(prepo.list_facts, me["id"]) if f["review_status"] != "rejected"]
+    present = {f["category"] for f in facts if f["category"]}
+    if cat:
+        facts = [f for f in facts if f["category"] == cat]
+    items = [{"id": f["id"], "text": f["text"], "cat": f["category"], "review_status": f["review_status"],
+              "person_id": me["id"], "mention_count": f["mention_count"] or 1} for f in facts]
+    return {"items": items, "categories": [c for c in SELF_CATEGORIES if c in present]}
 
 
 def _search_note(res) -> str:

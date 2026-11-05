@@ -22,6 +22,7 @@ from core.repos.pg_memory_repo import PgMemoryRepo, bot_to_scope
 from core.repos import pg_client_links as client_links
 from core.repos import pg_people_repo as repo
 from core import self_dedup
+from core.memory_subjects import SELF_CATEGORIES
 from core.user_manager import get_user_id
 
 from miniapp.backend.auth import current_user_id
@@ -125,7 +126,7 @@ def _group_facts(facts: List[Dict[str, Any]], is_self: bool = False, name: str =
             "message_date": _iso(f.get("message_date")), "quote_author": f.get("quote_author"),
             "mention_count": f.get("mention_count") or 1,
             "first_mention": _iso(f.get("first_mention")), "last_mention": _iso(f.get("last_mention")),
-            "merged": f.get("merged") or [],
+            "merged": f.get("merged") or [], "category": f.get("category"),
         })
     if is_self:
         for items in by.values():
@@ -176,8 +177,17 @@ async def person_card(person_id: int, tg_id: int = Depends(current_user_id)) -> 
     await _attach_clients(user_id, [p])
     facts = await asyncio.to_thread(repo.list_facts, person_id)
     _with_merged(facts, await asyncio.to_thread(self_dedup.merged_info, user_id, [f["id"] for f in facts]))
-    return {**_person_out(p), "aliases_info": await _aliases_info(user_id, person_id, list(p.get("aliases") or [])),
-            "facts": _group_facts(facts, bool(p.get("is_self")), p["name"], p.get("aliases"))}
+    out = {**_person_out(p), "aliases_info": await _aliases_info(user_id, person_id, list(p.get("aliases") or [])),
+           "facts": _group_facts(facts, bool(p.get("is_self")), p["name"], p.get("aliases"))}
+    if p.get("is_self"):                       # разделы «Я» в Памяти: категории и сколько фактов в каждой (без отклонённых)
+        counts: Dict[str, int] = {}
+        for f in facts:
+            if f["review_status"] != "rejected":
+                counts[f.get("category") or ""] = counts.get(f.get("category") or "", 0) + 1
+        out["categories"] = [{"name": c, "count": counts[c]} for c in SELF_CATEGORIES if c in counts] + \
+                            [{"name": c, "count": n} for c, n in sorted(counts.items()) if c not in SELF_CATEGORIES and c]
+        out["category_choices"] = list(SELF_CATEGORIES)
+    return out
 
 
 class AliasBody(BaseModel):
@@ -571,3 +581,23 @@ async def similar_unmerge(person_id: int, body: SimilarUnmergeBody, tg_id: int =
     except ValueError as e:
         raise _dedup_http(e)
     return {"ok": True, "restored": n}
+
+
+class FactCategoryBody(BaseModel):
+    ids: List[int] = Field(min_length=1, max_length=500)
+    category: str
+
+
+@router.post("/people/{person_id}/facts/category")
+async def set_facts_category(person_id: int, body: FactCategoryBody, tg_id: int = Depends(current_user_id)) -> Dict[str, Any]:
+    """Сменить категорию фактов карточки «Я» (один тап или «Перенести в категорию…» для выбранных). Только SELF_CATEGORIES."""
+    user_id = await _owner(tg_id)
+    p = await asyncio.to_thread(repo.get_person, user_id, person_id)
+    if not p:
+        raise HTTPException(status_code=404, detail="person not found")
+    if not p.get("is_self"):
+        raise HTTPException(status_code=400, detail="categories only for self")
+    if body.category not in SELF_CATEGORIES:
+        raise HTTPException(status_code=400, detail="unknown category")
+    n = await asyncio.to_thread(repo.set_facts_category, user_id, person_id, body.ids, body.category)
+    return {"ok": True, "moved": n}

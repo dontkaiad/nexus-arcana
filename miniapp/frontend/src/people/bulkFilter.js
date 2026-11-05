@@ -60,3 +60,14 @@ export function toggleId(selected, id) {
 
 // Выбор живёт внутри текущего видимого набора: всё, чего не видно, из выбора выпадает.
 export const clampSelection = (selected, visibleIds) => new Set([...selected].filter((id) => visibleIds.includes(id)))
+
+// Группы по категории «Я» (порядок задаёт `order`, неизвестные — в конце по алфавиту); внутри — свежие упоминания сверху.
+export function regroupByCategory(facts, order) {
+  const by = {}
+  for (const f of facts) (by[f.category || '—'] = by[f.category || '—'] || []).push(f)
+  const names = [...order.filter((c) => by[c]), ...Object.keys(by).filter((c) => !order.includes(c)).sort()]
+  return names.map((c) => ({
+    type: c,
+    items: by[c].slice().sort((a, b) => (b.last_mention || b.message_date || '').localeCompare(a.last_mention || a.message_date || '')),
+  }))
+}

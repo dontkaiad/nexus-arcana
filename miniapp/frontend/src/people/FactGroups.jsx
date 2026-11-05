@@ -4,12 +4,12 @@ import { TYPE_CHOICES, fs, mentionLabel, provenanceLine, redText, typeMeta } fro
 // Группы фактов (important первым — порядок задаёт API). Тап по тексту раскрывает
 // цитату-основание; управление слева/справа (галочка, кнопки) приходит рендер-пропсами.
 // onChangeType(fact, newType) — если передан, у каждого факта есть иконка типа: тап раскрывает выбор типа.
-export default function FactGroups({ s, groups, expanded, onToggle, left, right, showMentions, textStyle, caption, onChangeType, onUnmerge }) {
+export default function FactGroups({ s, groups, expanded, onToggle, left, right, showMentions, textStyle, caption, onChangeType, onUnmerge, categories, onChangeCategory }) {
   const [pickFor, setPickFor] = useState(null)
   return (
     <div>
       {groups.map((g) => {
-        const m = typeMeta(g.type)
+        const m = categories ? { icon: '', label: g.type } : typeMeta(g.type)
         return (
           // подложка как у карточек Памяти (.glass): текст фактов не лежит прямо на градиенте
           <div key={g.type} className="glass" style={{ marginBottom: 10, padding: '4px 12px 2px' }}>
@@ -22,10 +22,10 @@ export default function FactGroups({ s, groups, expanded, onToggle, left, right,
                 <div key={f.id} style={{ borderBottom: `0.5px solid ${s.brd}` }}>
                   <div style={{ display: 'flex', alignItems: 'center', minHeight: 44 }}>
                     {left && left(f, g.type)}
-                    {onChangeType && (
-                      <div role="button" aria-label="сменить тип" onClick={() => setPickFor(pickFor === f.id ? null : f.id)}
+                    {(onChangeType || onChangeCategory) && (
+                      <div role="button" aria-label={categories ? 'сменить категорию' : 'сменить тип'} onClick={() => setPickFor(pickFor === f.id ? null : f.id)}
                         style={{ width: 32, height: 44, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', flexShrink: 0, fontSize: fs(15) }}>
-                        {m.icon}
+                        {categories ? (g.type.split(' ')[0] || '•') : m.icon}
                       </div>
                     )}
                     <div onClick={() => onToggle(f.id)} style={{ flex: 1, minWidth: 0, padding: '8px 4px', cursor: 'pointer' }}>
@@ -36,7 +36,18 @@ export default function FactGroups({ s, groups, expanded, onToggle, left, right,
                     </div>
                     {right && right(f, g.type)}
                   </div>
-                  {onChangeType && pickFor === f.id && (
+                  {(onChangeType || onChangeCategory) && pickFor === f.id && categories && (
+                    <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', margin: '0 4px 8px 36px' }}>
+                      {categories.map((c) => (
+                        <div key={c} role="button" onClick={() => { setPickFor(null); if (c !== g.type) onChangeCategory(f, c) }}
+                          style={{ minHeight: 36, padding: '0 10px', display: 'inline-flex', alignItems: 'center', borderRadius: 18, cursor: 'pointer',
+                            fontSize: fs(12), fontWeight: 600, color: s.text, border: `1px solid ${c === g.type ? s.acc : s.brd}`, opacity: c === g.type ? 1 : 0.85 }}>
+                          {c}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  {onChangeType && !categories && pickFor === f.id && (
                     <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', margin: '0 4px 8px 36px' }}>
                       {TYPE_CHOICES.map((t) => {
                         const tm = typeMeta(t)
