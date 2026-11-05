@@ -105,3 +105,15 @@ care_alerts = Table(
     Column("sent_at", TIMESTAMP(timezone=True), nullable=False, server_default=text("now()")),
     PrimaryKeyConstraint("task_id", "cycle_due"),
 )
+
+
+# Разовый перенос одного цикла (миграция d2b8f4c0e315): база серии (tasks.reminder) не меняется.
+task_overrides = Table(
+    "task_overrides", metadata,
+    Column("task_id", BigInteger, ForeignKey("tasks.id", ondelete="CASCADE"), nullable=False),
+    Column("cycle_due", TIMESTAMP(timezone=True), nullable=False),
+    Column("new_due", TIMESTAMP(timezone=True), nullable=False),
+    Column("created_by", Text),
+    Column("created_at", TIMESTAMP(timezone=True), nullable=False, server_default=text("now()")),
+    PrimaryKeyConstraint("task_id", "cycle_due"),
+)

@@ -233,7 +233,8 @@ def test_schedule_payload_exact_fields_cadence_overdue_last_done_and_order():
     assert set(body) == {"active", "period", "now", "tasks"} and body["now"].endswith("Z")
     first, second = body["tasks"]
     assert (first["label"], second["label"]) == ("Поздняя", "Скорая")
-    assert set(first) == {"id", "label", "cycle_due", "overdue", "last_done_at", "cadence"}
+    assert set(first) == {"id", "label", "cycle_due", "due_at", "postponed", "overdue", "last_done_at", "cadence"}
+    assert first["due_at"] == first["cycle_due"] and first["postponed"] is False
     assert first["id"] == str(a) and first["overdue"] is True and first["cadence"] == "каждые 2 дня"
     assert first["last_done_at"].startswith(done.strftime("%Y-%m-%dT%H:%M")) and first["cycle_due"].endswith("Z")
     assert second["overdue"] is False and second["last_done_at"] is None and second["cadence"] == "еженедельно"

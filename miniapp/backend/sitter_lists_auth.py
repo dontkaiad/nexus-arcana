@@ -29,6 +29,7 @@ def _enabled() -> bool:
     tok = config.sitter_lists_token or ""
     return (len(tok) >= MIN_TOKEN_LEN
             and tok != (config.cats_read_token or "")             # токены не должны совпадать
+            and tok != (config.care_write_token or "")
             and bool(config.sitter_lists_owner_tg_id)
             and config.sitter_lists_owner_tg_id in config.allowed_ids)
 
