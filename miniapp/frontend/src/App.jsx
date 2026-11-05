@@ -2595,6 +2595,7 @@ function NxLists({ s }) {
   // в свёрнутой секции "Куплено/Выполнено (N)" внизу списка.
   const [showDone, setShowDone] = useState(false);
   const [editItem, setEditItem] = useState(null);  // #45: карточка → детали/правка
+  const [sitterPreview, setSitterPreview] = useState(false);  // «что видит ситтер»
   useEffect(() => { setOverrides({}); setSelectedChecklist(null); setShowDone(false); }, [tab]);
   useEffect(() => { setOverrides({}); }, [q]);
 
@@ -2657,6 +2658,7 @@ function NxLists({ s }) {
               {l}
             </Pill>
           ))}
+          <Pill s={s} active={false} onClick={() => setSitterPreview(true)}>👁 Ситтер</Pill>
         </div>
       )}
       <SearchInput s={s} value={q} onChange={setQ} placeholder="Поиск" />
@@ -2860,6 +2862,9 @@ function NxLists({ s }) {
         );
       })()}
 
+      <Sheet s={s} open={sitterPreview} onClose={() => { setSitterPreview(false); refetch(); }} title="👁 Что видит ситтер">
+        {sitterPreview && <SitterPreview s={s} />}
+      </Sheet>
       {/* #45: детали позиции — магазин / заметка / категория / срок и т.д. */}
       <Sheet
         s={s}
@@ -2872,6 +2877,7 @@ function NxLists({ s }) {
             s={s}
             item={editItem}
             isInv={tab === "inv"}
+            sitterMode={tab === "inv" ? "hide" : "show"}
             onDone={() => { setEditItem(null); refetch(); }}
           />
         )}
@@ -2880,7 +2886,67 @@ function NxLists({ s }) {
   );
 }
 
-function ListItemSheet({ s, item, isInv, onDone }) {
+// «Что видит ситтер»: ровно то, что отдаёт GET /api/sitter/lists (тем же кодом), + 🙈 у пунктов инвентаря.
+function SitterPreview({ s }) {
+  const { data, loading, error, refetch } = useApi("/api/lists/sitter-preview");
+  const [busyId, setBusyId] = useState(null);
+  const [err, setErr] = useState("");
+  const hide = async (id) => {
+    if (busyId) return;
+    setBusyId(id); setErr("");
+    try { await apiPost(`/api/lists/${id}/sitter-hidden`, { hidden: true }); refetch(); }
+    catch (e) { setErr(e.message || "не получилось"); }
+    finally { setBusyId(null); }
+  };
+  if (loading) return <Empty s={s} text="Загружаю..." />;
+  if (error) return <ErrorBox s={s} error={error} refetch={refetch} />;
+  const lists = data?.lists || [];
+  const inv = data?.inventory || [];
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+      <div style={{ fontSize: fs(12), color: s.tS }}>
+        Покупки и чеклисты — по 🐾, инвентарь виден по умолчанию (скрыть: 🙈).
+        Всего: списки {data?.count ?? 0}, инвентарь {data?.inventory_count ?? 0}.
+      </div>
+      {err && <div style={{ fontSize: fs(12), color: s.red }}>{err}</div>}
+      {lists.length === 0 && inv.length === 0 && <Empty s={s} text="Ситтер пока ничего не видит" />}
+      {lists.map((l, i) => (
+        <div key={`l${i}`}>
+          <div className="list-group-h">{l.name || "Список"}</div>
+          {l.items.map((x, j) => (
+            <div key={j} style={{ fontSize: fs(13), padding: "3px 0" }}>
+              {x.done ? "✓ " : ""}{x.name}{x.quantity != null ? ` × ${x.quantity}` : ""}
+              {x.note ? <span style={{ color: s.tS }}> — {x.note}</span> : null}
+            </div>
+          ))}
+        </div>
+      ))}
+      {inv.map((c, i) => (
+        <div key={`c${i}`}>
+          <div className="list-group-h">📦 {c.category || "Без категории"}</div>
+          {c.items.map((x) => (
+            <div key={x.id} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: fs(13), padding: "3px 0" }}>
+              <span style={{ flex: 1, minWidth: 0, wordBreak: "break-word" }}>
+                {x.name}{x.quantity != null ? ` × ${x.quantity}` : ""}
+                {x.note ? <span style={{ color: s.tS }}> — {x.note}</span> : null}
+              </span>
+              <span
+                onClick={() => hide(x.id)}
+                role="button"
+                aria-label="Скрыть от ситтера"
+                style={{ cursor: busyId ? "not-allowed" : "pointer", opacity: busyId === x.id ? 0.4 : 1, padding: "2px 6px" }}
+              >🙈</span>
+            </div>
+          ))}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// sitterMode: "show" (покупки/чеклист: 🐾 показывать) | "hide" (инвентарь Nexus: 🙈 скрыть) | undefined (экраны Arcana: переключателя нет,
+// у них другая таблица, id не совпадают с nexus_lists).
+function ListItemSheet({ s, item, isInv, onDone, sitterMode }) {
   const [name, setName] = useState(item.name || "");
   const [cat, setCat] = useState(item.catFull || "");
   const [note, setNote] = useState(item.note || "");
@@ -2891,6 +2957,7 @@ function ListItemSheet({ s, item, isInv, onDone }) {
   const [expires, setExpires] = useState((item.expires || "").slice(0, 10));
   const [recurring, setRecurring] = useState(!!item.recurring);
   const [forSitter, setForSitter] = useState(!!item.forSitter);
+  const [sitterHidden, setSitterHidden] = useState(!!item.sitterHidden);
   const [cats, setCats] = useState([]);
   const [busy, setBusy] = useState(null);
   const [err, setErr] = useState("");
@@ -2940,6 +3007,15 @@ function ListItemSheet({ s, item, isInv, onDone }) {
       await apiPost(`/api/lists/${item.id}/sitter`, { for_sitter: next });
     } catch (e) {
       setForSitter(!next); setErr(e.message || "не получилось");
+    }
+  };
+  const toggleHidden = async (next) => {
+    if (busy) return;
+    setSitterHidden(next); setErr("");
+    try {
+      await apiPost(`/api/lists/${item.id}/sitter-hidden`, { hidden: next });
+    } catch (e) {
+      setSitterHidden(!next); setErr(e.message || "не получилось");
     }
   };
 
@@ -3008,10 +3084,18 @@ function ListItemSheet({ s, item, isInv, onDone }) {
         🔁 Повторяющаяся
       </label>
 
-      <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: fs(12), color: s.text, cursor: "pointer" }}>
-        <input type="checkbox" checked={forSitter} onChange={(e) => toggleSitter(e.target.checked)} />
-        🐾 Показывать ситтеру
-      </label>
+      {sitterMode === "show" && (
+        <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: fs(12), color: s.text, cursor: "pointer" }}>
+          <input type="checkbox" checked={forSitter} onChange={(e) => toggleSitter(e.target.checked)} />
+          🐾 Показывать ситтеру
+        </label>
+      )}
+      {sitterMode === "hide" && (
+        <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: fs(12), color: s.text, cursor: "pointer" }}>
+          <input type="checkbox" checked={sitterHidden} onChange={(e) => toggleHidden(e.target.checked)} />
+          🙈 Скрыть от ситтера
+        </label>
+      )}
 
       {err && <div style={{ fontSize: fs(12), color: s.red }}>{err}</div>}
 
