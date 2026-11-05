@@ -37,6 +37,24 @@ class SitterFlagBody(BaseModel):
     for_sitter: bool
 
 
+class SitterGroupBody(BaseModel):
+    group: str
+    for_sitter: bool
+
+
+@router.post("/lists/sitter-group")
+async def set_sitter_group_flag(body: SitterGroupBody, tg_id: int = Depends(current_user_id)) -> Dict[str, Any]:
+    """Пометить / снять весь чеклист (все его активные пункты) для ситтера."""
+    group = (body.group or "").strip()
+    if not group:
+        raise HTTPException(status_code=400, detail="group required")
+    user_id = (await get_user_id(tg_id)) or ""
+    n = await asyncio.to_thread(repo.set_group_flag, user_id, group, body.for_sitter) if user_id else 0
+    if not n:
+        raise HTTPException(status_code=404, detail="not found")
+    return {"ok": True, "for_sitter": body.for_sitter, "items": n}
+
+
 @router.post("/lists/{item_id}/sitter")
 async def set_sitter_flag(item_id: int, body: SitterFlagBody, tg_id: int = Depends(current_user_id)) -> Dict[str, Any]:
     user_id = (await get_user_id(tg_id)) or ""

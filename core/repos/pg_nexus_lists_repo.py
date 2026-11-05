@@ -112,6 +112,7 @@ class ListItem:
     works_id: str = ""
     user_id: str = ""
     date: str = ""        # created_at[:10]
+    for_sitter: bool = False   # пункт виден ситтеру через GET /api/sitter/lists
 
 
 @dataclass
@@ -159,6 +160,7 @@ def _row_to_list_item(row) -> ListItem:
         works_id=row.works_id or "",
         user_id=row.user_id or "",
         date=date_str,
+        for_sitter=bool(getattr(row, "for_sitter", False)),
     )
 
 

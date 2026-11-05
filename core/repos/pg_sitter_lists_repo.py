@@ -38,3 +38,12 @@ def set_flag(user_id: str, item_id: int, value: bool) -> bool:
         r = c.execute(update(t).where(t.c.id == int(item_id), t.c.user_id == user_id)
                       .values(for_sitter=bool(value), updated_at=text("now()")))
     return bool(r.rowcount)
+
+
+def set_group_flag(user_id: str, group: str, value: bool) -> int:
+    """Пометить / снять весь чеклист (группу) владельца. Возвращает число затронутых пунктов (0 — группы нет)."""
+    with get_engine().begin() as c:
+        r = c.execute(update(t).where(t.c.user_id == user_id, t.c.group_name == group, t.c.list_type == "чеклист",
+                                      t.c.status != "archived")
+                      .values(for_sitter=bool(value), updated_at=text("now()")))
+    return int(r.rowcount or 0)

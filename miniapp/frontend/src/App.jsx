@@ -2679,7 +2679,13 @@ function NxLists({ s }) {
         return (
           <>
             <ChecklistHeader s={s} title={title} task={task} large
-              onBack={() => setSelectedChecklist(null)} />
+              onBack={() => setSelectedChecklist(null)}
+              sitterOn={group.length > 0 && group.every((x) => x.forSitter)}
+              onSitterToggle={async () => {
+                const next = !(group.length > 0 && group.every((x) => x.forSitter));
+                try { await apiPost("/api/lists/sitter-group", { group: title, for_sitter: next }); refetch(); }
+                catch (_) { /* пометка не поменялась — состояние перечитается при следующем открытии */ }
+              }} />
             {allDone ? (
               <Glass s={s} style={{ padding: "24px 14px", textAlign: "center" }}>
                 <div style={{ fontSize: fs(14), color: s.text }}>всё закрыто ✨</div>
@@ -2884,6 +2890,7 @@ function ListItemSheet({ s, item, isInv, onDone }) {
   const [qty, setQty] = useState(item.qty != null ? String(item.qty) : "");
   const [expires, setExpires] = useState((item.expires || "").slice(0, 10));
   const [recurring, setRecurring] = useState(!!item.recurring);
+  const [forSitter, setForSitter] = useState(!!item.forSitter);
   const [cats, setCats] = useState([]);
   const [busy, setBusy] = useState(null);
   const [err, setErr] = useState("");
@@ -2923,6 +2930,17 @@ function ListItemSheet({ s, item, isInv, onDone }) {
     } catch (e) {
       setErr(e.message || "не получилось");
     } finally { setBusy(null); }
+  };
+
+  // «Для ситтера»: пометка ставится сразу (не ждёт «Сохранить»), при ошибке возвращаем прежнее значение.
+  const toggleSitter = async (next) => {
+    if (busy) return;
+    setForSitter(next); setErr("");
+    try {
+      await apiPost(`/api/lists/${item.id}/sitter`, { for_sitter: next });
+    } catch (e) {
+      setForSitter(!next); setErr(e.message || "не получилось");
+    }
   };
 
   const remove = async () => {
@@ -2990,6 +3008,11 @@ function ListItemSheet({ s, item, isInv, onDone }) {
         🔁 Повторяющаяся
       </label>
 
+      <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: fs(12), color: s.text, cursor: "pointer" }}>
+        <input type="checkbox" checked={forSitter} onChange={(e) => toggleSitter(e.target.checked)} />
+        🐾 Показывать ситтеру
+      </label>
+
       {err && <div style={{ fontSize: fs(12), color: s.red }}>{err}</div>}
 
       <SubmitBtn s={s} disabled={!name.trim() || !!busy} label={busy === "save" ? "Сохраняю..." : "Сохранить"} onClick={save} />
@@ -3042,7 +3065,7 @@ function InvItemRow({ s, item: x, onEdit }) {
   );
 }
 
-function ChecklistHeader({ s, title, task, large, onBack }) {
+function ChecklistHeader({ s, title, task, large, onBack, sitterOn, onSitterToggle }) {
   const cat = task?.cat || "";
   const prio = task?.prio || null;
   const overdue = task?.status === "overdue";
@@ -3076,6 +3099,20 @@ function ChecklistHeader({ s, title, task, large, onBack }) {
           </span>
         )}
         {prio && <PrioDot s={s} prio={prio} />}
+        {onSitterToggle && (
+          <span
+            onClick={onSitterToggle}
+            role="switch"
+            aria-checked={!!sitterOn}
+            aria-label="Показывать ситтеру"
+            title={sitterOn ? "Ситтер видит этот список" : "Показать список ситтеру"}
+            style={{
+              cursor: "pointer", flexShrink: 0, padding: "3px 9px", borderRadius: 10, fontSize: fs(13),
+              background: sitterOn ? `${s.acc}55` : "transparent", border: `1px solid ${sitterOn ? s.acc : s.brd}`,
+              opacity: sitterOn ? 1 : 0.6,
+            }}
+          >🐾</span>
+        )}
       </div>
       {/* #61: формат даты как в Задачах. */}
       {(task?.date || task?.time || task?.rpt) && (
