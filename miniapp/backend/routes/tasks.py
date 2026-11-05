@@ -95,6 +95,7 @@ def _serialize_pg_task(task: PgTask, today_date, tz_offset: int) -> dict:
         "streak": None,
         "duration_min": task.duration_min,
         "cat_id": task.cat_id,
+        "for_sitter": bool(task.for_sitter),
     }
 
 
