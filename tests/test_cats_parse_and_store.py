@@ -107,7 +107,8 @@ async def test_other_users_cat_is_not_visible():
 async def test_non_cat_category_never_touches_cats():
     crepo.create(MARK, "Тучка")
     r, _ = await _store("Тучка — моя подруга", _haiku("Тучка — подруга", "тучка", "тучка", category="👥 Люди"))
-    assert r["cat_id"] is None and r["cat_unknown"] is None
+    # имени нет среди людей → вопрос «Создать карточку?», к котам факт не липнет
+    assert r["kind"] == "ask_person" and r.get("cat_id") is None
 
 
 # ── промпт ───────────────────────────────────────────────────────────────────

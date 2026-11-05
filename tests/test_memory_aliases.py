@@ -246,7 +246,7 @@ def test_save_memory_no_alias_does_not_change_link():
     msg.answer = AsyncMock()
 
     fact = "тестовый факт"
-    category = "👥 Люди"
+    category = "🏠 Быт"                     # не «Люди»: незнакомое имя человека теперь спрашивает «Создать карточку?»
     связь = "vasya"
     ключ = "vasya_fact"
 

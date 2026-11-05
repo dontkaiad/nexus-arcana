@@ -180,3 +180,8 @@ for _prefix, _handler in (
     ("mem_cancel:", _nexus_mem.cb_mem_cancel),
 ):
     router.callback_query(F.data.startswith(_prefix))(_handler)
+
+
+# Диалог маршрута «Запомни …» (тёзки / создать карточку?) — общий код в core.memory_route_ui
+from core import memory_route_ui  # noqa: E402
+memory_route_ui.register(router, "Запомнила")

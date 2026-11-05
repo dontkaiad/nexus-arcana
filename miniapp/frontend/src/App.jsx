@@ -7757,7 +7757,9 @@ function QuickForm({ s, kind, onDone, botType = "nexus" }) {
       onDone();
     } catch (e) {
       // #189: нет сети → запись легла в офлайн-очередь, это не ошибка
-      if (e && e.queued) {
+      if (e && e.keepOpen) {
+        idemKeyRef.current = crypto.randomUUID();     // форма ждёт ответа пользователя (кто это / создать карточку)
+      } else if (e && e.queued) {
         idemKeyRef.current = crypto.randomUUID();
         onDone();
       } else {
@@ -7770,7 +7772,7 @@ function QuickForm({ s, kind, onDone, botType = "nexus" }) {
 
   if (kind === "expense") return <ExpenseForm s={s} onSubmit={wrap} busy={busy} botType={botType} />;
   if (kind === "task") return <TaskForm s={s} onSubmit={wrap} busy={busy} />;
-  if (kind === "note" || kind === "memory") return <NoteForm s={s} onSubmit={wrap} busy={busy} />;
+  if (kind === "note" || kind === "memory") return <NoteForm s={s} onSubmit={wrap} busy={busy} onDone={onDone} />;
   if (kind === "list") return <ListAddForm s={s} onSubmit={wrap} busy={busy} />;
   if (kind === "client") return <ClientForm s={s} onSubmit={wrap} busy={busy} />;
   if (kind === "work") return <WorkForm s={s} onSubmit={wrap} busy={busy} />;
@@ -8238,7 +8240,50 @@ function TaskEditForm({ s, task, busy, onSave }) {
   );
 }
 
-function NoteForm({ s, onSubmit, busy }) {
+// «Запомни» упёрлось в неоднозначность: тёзки → выбрать, неизвестное имя → создать карточку? (бот делает то же кнопками)
+function MemoryAsk({ s, ask, onDone }) {
+  const [busy, setBusy] = useState(false);
+  const [rel, setRel] = useState(null);       // после создания карточки: id человека, ждём «кто это»
+  const RELS = [["friend", "друг"], ["family", "семья"], ["colleague", "коллега"], ["neighbor", "сосед"], ["ex", "бывший"], ["other", "другое"]];
+  const send = async (choice, keepOpen) => {
+    setBusy(true);
+    try {
+      const r = await apiPost("/api/memory/route/finish", { ask, choice });
+      if (keepOpen && r.person_id) setRel(r.person_id); else onDone();
+    } catch (e) { alert(`Не получилось: ${e.message}`); } finally { setBusy(false); }
+  };
+  const chip = (label, onClick) => (
+    <div key={label} onClick={busy ? undefined : onClick} style={{ minHeight: 44, padding: "0 14px", display: "inline-flex", alignItems: "center", borderRadius: 14, border: `1px solid ${s.brd}`, color: s.text, fontSize: fs(13), fontWeight: 600, cursor: "pointer" }}>{label}</div>
+  );
+  if (rel) {
+    return (
+      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+        <div style={{ color: s.text, fontSize: fs(13) }}>Карточка создана. Кто это?</div>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          {RELS.map(([k, l]) => chip(l, async () => { try { await apiPatch(`/api/people/${rel}`, { relation: k }); } catch (_) { /* не критично */ } onDone(); }))}
+          {chip("Пропустить", onDone)}
+        </div>
+      </div>
+    );
+  }
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+      <div style={{ color: s.text, fontSize: fs(13), lineHeight: 1.4 }}>
+        {ask.kind === "choose_person" ? `Какой из них — «${ask.link}»?` : `Не знаю «${ask.name}». Создать карточку?`}
+        <div style={{ opacity: 0.8, marginTop: 4 }}>🧠 {ask.fact}</div>
+      </div>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+        {ask.kind === "choose_person"
+          ? ask.candidates.map((c) => chip(c.label, () => send({ person_id: c.id })))
+          : chip("Да", () => send({ create: true }, true))}
+        {chip(ask.kind === "choose_person" ? "В «Разное»" : "Нет", () => send({ misc: true }))}
+      </div>
+    </div>
+  );
+}
+
+function NoteForm({ s, onSubmit, busy, onDone }) {
+  const [ask, setAsk] = useState(null);
   const [text, setText] = useState("");
   const [cat, setCat] = useState("");
   const [cats, setCats] = useState([]);
@@ -8254,6 +8299,7 @@ function NoteForm({ s, onSubmit, busy }) {
   }, []);
   const valid = text.trim().length > 0;
   const comingSoon = () => alert("Coming soon 🌱");
+  if (ask) return <MemoryAsk s={s} ask={ask} onDone={onDone} />;
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
       <div style={{ position: "relative" }}>
@@ -8287,10 +8333,14 @@ function NoteForm({ s, onSubmit, busy }) {
         disabled={!valid || busy}
         label={busy ? "Сохраняю..." : "Сохранить"}
         onClick={onSubmit(async (idemKey) => {
-          await apiPost("/api/memory", {
+          const res = await apiPost("/api/memory", {
             text: text.trim(),
             cat: cat || null,
           }, { idempotencyKey: idemKey });
+          if (res && res.ask) {
+            setAsk(res.ask);
+            const stop = new Error("ask"); stop.keepOpen = true; throw stop;
+          }
         })}
       />
     </div>
