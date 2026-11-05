@@ -53,6 +53,7 @@ class Task:
     shared: bool = False                # #242: видна Заре для упоминания друзьям
     deadline_all_day: bool = False      # дедлайн задан без времени ("до пятницы") — весь день
     cat_id: Optional[int] = None        # задача про конкретного кота (None — не про кота / про всех)
+    for_sitter: bool = False            # входит в расписание ситтера (GET /api/care/schedule)
 
 
 # ── Lookup caches (loaded once per process) ────────────────────────────────────
@@ -222,6 +223,7 @@ def _to_task(row) -> Task:
         shared=bool(getattr(row, "shared", False)),
         deadline_all_day=bool(getattr(row, "deadline_all_day", False)),
         cat_id=getattr(row, "cat_id", None),
+        for_sitter=bool(getattr(row, "for_sitter", False)),
     )
 
 

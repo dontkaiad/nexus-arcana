@@ -56,7 +56,7 @@ def test_migration_chain_and_columns():
     assert _load_migration().down_revision == "c4a7e2b95d13"
     insp = inspect(get_engine())
     cols = {c["name"]: c for c in insp.get_columns("task_completions")}
-    assert set(cols) == {"id", "task_id", "done_at", "done_by", "source"}
+    assert set(cols) == {"id", "task_id", "done_at", "done_by", "source", "cycle_due"}      # cycle_due добавлен миграцией c1a7e3b9d204
     assert cols["task_id"]["nullable"] is False and cols["done_by"]["nullable"] is True
     assert "ix_task_completions_task_done" in {i["name"] for i in insp.get_indexes("task_completions")}
 
