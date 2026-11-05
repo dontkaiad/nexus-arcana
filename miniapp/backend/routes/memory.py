@@ -303,11 +303,15 @@ async def get_memory(
         # человеку ИЛИ гибрид (FTS + vector → RRF → Haiku-реранк); потом пересечение с видимыми.
         # Ищет только по актуальным (is_current) записям, include_inactive на поиск не влияет.
         by_id = {m.id: m for m in visible}
+        from core.memory_trace import Tracer
+        import asyncio
+        tracer, err = Tracer("miniapp", user_id, q), None
         try:
-            res = await answer(q, user_id=user_id, k=20, do_rerank=True)
+            res = await answer(q, user_id=user_id, k=20, do_rerank=True, trace=tracer)
         except Exception as e:
             logger.warning("get_memory search failed: %s", e)
-            res = None
+            res, err = None, e
+        await asyncio.to_thread(tracer.finish, err)
         found = res.memories if res else []
         visible = [by_id[m.id] for m in found if m.id in by_id]
         if res is not None and not visible:

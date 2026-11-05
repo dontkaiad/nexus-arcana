@@ -237,7 +237,7 @@ def _candidate_line(m: Memory) -> str:
     return " ".join(parts)
 
 
-async def rerank(query: str, hits: List[Hit], top_n: int, hint: str = "") -> List[Hit]:
+async def rerank(query: str, hits: List[Hit], top_n: int, hint: str = "", trace: Optional[Trace] = None) -> List[Hit]:
     """Haiku упорядочивает/отсекает кандидатов. Валидный `[]` = «ничего
     релевантного» → []. Сбой Haiku/битый JSON → порядок RRF (top_n)."""
     if not hits:
@@ -260,6 +260,11 @@ async def rerank(query: str, hits: List[Hit], top_n: int, hint: str = "") -> Lis
             raise ValueError("rerank JSON is not a list")
     except Exception as e:
         logger.warning("memory_search rerank failed (%s) → RRF order", e)
+        if trace:
+            try:
+                trace("rerank_failed", {"reason": type(e).__name__})
+            except Exception:
+                pass
         return hits[:top_n]
     by_id = {str(h.memory.id): h for h in cands}
     out: List[Hit] = []
@@ -304,7 +309,7 @@ async def hybrid_search(
         asyncio.to_thread(_vector_leg, query, scope, user_id, person_ids, VEC_TOP, subject_self, cat_ids),
     )
     hits = rrf_fuse(fts_ids, vec)
-    _t("legs", {"fts": list(fts_ids), "vec": [i for i, _ in vec]})
+    _t("legs", {"fts": list(fts_ids), "vec": [i for i, _ in vec], "vec_scores": [sc for _, sc in vec]})
     if not hits:
         return []
     loaded = await asyncio.to_thread(_load, [h.memory_id for h in hits])
@@ -317,7 +322,7 @@ async def hybrid_search(
         final.append(h)
     _t("rrf", {"ids": [h.memory.id for h in final]})
     if do_rerank:
-        final = await rerank(query, final, k, hint)
+        final = await rerank(query, final, k, hint, trace)
         _t("rerank", {"ids": [h.memory.id for h in final]})
     else:
         final = final[:k]
@@ -474,6 +479,19 @@ def _hint_for(plan) -> str:
 
 async def answer(query: str, user_id: str = "", scope: str = "", k: int = DEFAULT_K,
                  do_rerank: bool = True, trace: Optional[Trace] = None) -> Result:
+    """Обёртка над `_answer`: после ответа отдаёт трассе событие «result» (маршрут, субъект, итоговые id) — только id."""
+    res = await _answer(query, user_id=user_id, scope=scope, k=k, do_rerank=do_rerank, trace=trace)
+    if trace:
+        try:
+            trace("result", {"route": res.route, "kind": res.kind, "subject": res.subject, "types": list(res.types),
+                             "ids": [int(h.memory.id) for h in res.hits]})
+        except Exception:
+            pass
+    return res
+
+
+async def _answer(query: str, user_id: str = "", scope: str = "", k: int = DEFAULT_K,
+                  do_rerank: bool = True, trace: Optional[Trace] = None) -> Result:
     """Единая точка входа информационного поиска: понять вопрос → прямой запрос ИЛИ гибрид.
 
     Прямой путь (субъект-человек + тип, либо ДР): без Voyage и Haiku; пусто → kind='none'

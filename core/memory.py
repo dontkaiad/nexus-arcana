@@ -20,6 +20,7 @@ from core.layout import maybe_convert
 from core.people import owner_fact
 from core import memory_rag as _memory_rag
 from core import memory_answer as _memory_answer
+from core import memory_trace as _memory_trace
 from core import memory_search as _memory_search
 from core import pending_kv as _pkv
 from core.repos.memory_repo import _repo as _mem_repo
@@ -899,6 +900,27 @@ async def search_memory(
     user_id: str,
     del_prefix: str = "mem_del",
 ) -> None:
+    """Поиск по памяти + финансам, с трассировкой вопроса в memory_trace (scripts/trace_show.py)."""
+    q = (query or "").strip()
+    tracer = _memory_trace.Tracer("arcana" if del_prefix.startswith("arc") else "nexus", user_id, q) if q else None
+    err = None
+    try:
+        await _search_memory(message, query, user_id, del_prefix, tracer)
+    except Exception as e:
+        err = e
+        raise
+    finally:
+        if tracer:
+            await asyncio.to_thread(tracer.finish, err)
+
+
+async def _search_memory(
+    message: Message,
+    query: str,
+    user_id: str,
+    del_prefix: str = "mem_del",
+    trace=None,
+) -> None:
     """Поиск по памяти + финансам. Вопрос сперва разбирается (core.query_parse): ясный субъект+тип →
     прямой запрос по человеку, «не знаю» вместо похожих фактов; иначе — единый гибрид."""
     query = query.strip()
@@ -906,7 +928,7 @@ async def search_memory(
 
     if query:
         fin_task = asyncio.ensure_future(_search_finance(query, page_size=5))
-        result = await _memory_search.answer(query, user_id=user_id, k=5, do_rerank=True)
+        result = await _memory_search.answer(query, user_id=user_id, k=5, do_rerank=True, trace=trace)
         if result.route in _STRUCTURED_ROUTES:
             fin_task.cancel()
             fin_pages: list = []
@@ -945,7 +967,7 @@ async def search_memory(
             await message.bot.send_chat_action(message.chat.id, "typing")
         except Exception:
             pass
-        outcome = await _memory_answer.generate(result, query, arcana=arcana)
+        outcome = await _memory_answer.generate(result, query, arcana=arcana, trace=trace)
         if outcome.ok:
             token = secrets.token_hex(4)
             _pkv.save(uid, f"memall_{token}", {
