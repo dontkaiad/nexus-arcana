@@ -1,0 +1,421 @@
+"""tests/test_sitter_ask.py — поиск ситтера POST /api/sitter/ask: источники только из трёх разрешённых, без LLM, пороги, ответ фрагментами,
+изоляция от людей/финансов/«Я»/скрытого инвентаря/чужих владельцев, токен (общий читающий), бюджет запросов.
+
+Реальная БД. Данные — вымышленный мир evals/synthetic/sitter_ask_world.py. Эмбеддинг подменён детерминированным (понятия по словам):
+настоящий Voyage в тестах не вызывается; пороги на настоящих эмбеддингах подобраны отдельно (docs/CASES/0034-sitter-ask.md).
+"""
+from __future__ import annotations
+
+import hashlib
+import math
+from datetime import datetime, timezone
+from unittest.mock import AsyncMock, patch
+
+import pytest
+from fastapi.testclient import TestClient
+from sqlalchemy import delete, insert, text
+
+from core import sitter_search as ss
+from core.config import config
+from core.db import get_engine
+from core.rag import _vec_literal
+from core.repos import pg_cats_repo as crepo
+from core.repos.cats_tables import cats
+from core.repos.lists_table import nexus_lists as nl
+from core.repos.memories_table import memories
+from evals.synthetic import sitter_ask_world as W
+from miniapp.backend import cats_read_auth as cats_gate
+from miniapp.backend import care_write_auth as wgate
+from miniapp.backend import sitter_lists_auth as gate
+from miniapp.backend.app import app
+from miniapp.backend.auth import current_user_id
+from miniapp.backend.routes import sitter as sitter_routes
+
+USER, OTHER = "test-sitter-ask", "test-sitter-ask-other"
+TOKEN = "test-only-sitter-" + "f1" * 12
+CATS_TOKEN = "test-only-cats-" + "f2" * 12
+WRITE_TOKEN = "test-only-write-" + "f3" * 12
+OWNER = 700000123
+OK = {"Authorization": f"Bearer {TOKEN}"}
+DIM = 1024
+CONCEPTS = {"таблетк": "мед", "голов": "мед", "болит": "мед", "цитрамон": "мед", "парацетамол": "мед", "температур": "мед", "уголь": "мед",
+            "порез": "рана", "йод": "рана", "бинт": "рана", "пластыр": "рана", "свет": "свет", "фонарик": "свет", "посветить": "свет"}
+CALLS = {"doc": 0, "query": 0}
+
+
+def fake_vec(text_: str):
+    toks = [w for w in "".join(ch if ch.isalnum() else " " for ch in text_.lower()).split() if len(w) > 2]
+    v = [0.0] * DIM
+    for t in toks:
+        v[int(hashlib.md5(t.encode()).hexdigest(), 16) % DIM] += 1.0
+        for k, concept in CONCEPTS.items():
+            if k in t:
+                v[int(hashlib.md5(concept.encode()).hexdigest(), 16) % DIM] += 2.0
+    n = math.sqrt(sum(x * x for x in v)) or 1.0
+    return [x / n for x in v]
+
+
+def fake_embed(texts, input_type="document"):
+    CALLS["query" if input_type == "query" else "doc"] += 1
+    if isinstance(texts, str):
+        texts = [texts]
+    return [fake_vec(t) for t in texts if t]
+
+
+@pytest.fixture(autouse=True)
+def _env(monkeypatch):
+    monkeypatch.setattr(config, "sitter_lists_token", TOKEN)
+    monkeypatch.setattr(config, "sitter_lists_owner_tg_id", OWNER)
+    monkeypatch.setattr(config, "cats_read_token", CATS_TOKEN)
+    monkeypatch.setattr(config, "care_write_token", WRITE_TOKEN)
+    monkeypatch.setattr(config, "care_write_owner_tg_id", OWNER)
+    monkeypatch.setattr(config, "allowed_ids", [OWNER])
+    for m in (gate, wgate):
+        monkeypatch.setattr(m, "_limiter", m.FailureLimiter())
+    monkeypatch.setattr(cats_gate, "_limiter", cats_gate.FailureLimiter())
+    monkeypatch.setattr(sitter_routes, "_budget", ss.QueryBudget())
+    monkeypatch.setattr(ss, "VEC_MIN", 0.50)
+    monkeypatch.setattr(ss, "_embed", fake_embed)
+    ss._ITEM_VEC.clear()
+    CALLS.update(doc=0, query=0)
+    app.dependency_overrides.pop(current_user_id, None)
+    with patch("miniapp.backend.routes.sitter.get_user_id", AsyncMock(return_value=USER)):
+        yield
+    with get_engine().begin() as c:
+        c.execute(delete(memories).where(memories.c.user_id.in_([USER, OTHER])))
+        c.execute(delete(nl).where(nl.c.user_id.in_([USER, OTHER])))
+        c.execute(delete(cats).where(cats.c.user_id.in_([USER, OTHER])))
+
+
+def add_fact(txt, user=USER, cat_id=None, category="🐾 Коты", embed=False, **kw):
+    vals = dict(fact_text=txt, user_id=user, cat_id=cat_id, category=category, related_to="", **kw)
+    with get_engine().begin() as c:
+        mid = c.execute(insert(memories).values(**vals).returning(memories.c.id)).scalar()
+        if embed:
+            c.execute(text("UPDATE memories SET embedding = CAST(:v AS vector) WHERE id = :i"), {"v": _vec_literal(fake_vec(txt)), "i": mid})
+    return mid
+
+
+def add_item(list_type, name, note="", category="", group="", user=USER, qty=None, **kw):
+    with get_engine().begin() as c:
+        return c.execute(insert(nl).values(list_type=list_type, name=name, note=note, category=category, group_name=group, user_id=user,
+                                           quantity=qty, **kw).returning(nl.c.id)).scalar()
+
+
+def build_world(embed_facts=True):
+    ids = {n: crepo.create(USER, n) for n in ("Тучка", "Пончик", "Рыжик")}
+    for cat, _t, txt in W.CAT_FACTS:
+        add_fact(txt, cat_id=ids[cat], embed=embed_facts)
+    for txt in W.GENERAL:
+        add_fact(txt, embed=embed_facts)
+    for category, name, note, qty in W.INVENTORY:
+        add_item("инвентарь", name, note, category=category, qty=qty)
+    for lt, grp, name, note in W.LISTS:
+        add_item(lt, name, note, group=grp, for_sitter=True)
+    # недоступное:
+    for category, name, note in W.HIDDEN_INVENTORY:
+        add_item("инвентарь", name, note, category=category, sitter_hidden=True)
+    for lt, grp, name, note in W.UNFLAGGED_LISTS:
+        add_item(lt, name, note, group=grp, for_sitter=False)
+    for kind, txt in W.OTHER_MEMORY:
+        add_fact(txt, category={"person": "Люди", "finance": "💰 Финансы", "self": "🪪 Я"}[kind], embed=embed_facts)
+    return ids
+
+
+def ask(q, headers=OK):
+    return TestClient(app).post("/api/sitter/ask", json={"q": q}, headers=headers)
+
+
+def texts(resp):
+    return " | ".join(h["text"] for h in resp.json()["hits"])
+
+
+# ── источники и изоляция ─────────────────────────────────────────────────────
+
+def test_inaccessible_data_is_never_returned_whatever_the_query():
+    build_world()
+    secrets = ("Успокоительное рецептурное", "секретный рецепт", "подарок на день рождения", "секретный подарок", "Мария", "пальто", "Кредит", "50000",
+               "пароль от почты", "блокнот")
+    probes = [q for q, _ in W.QUESTIONS] + W.NO_ANSWER + ["Мария пальто", "кредит 50000", "пароль почты", "подарок день рождения", "успокоительное",
+                                                           "секретный", "рецепт врача", "блокнот", "зелёный чай"]
+    for q in probes:
+        body = ask(q).json()
+        flat = str(body)
+        assert not any(s.lower() in flat.lower() for s in secrets), (q, flat)
+
+
+def test_every_allowed_source_is_reachable():
+    build_world()
+    cases = {"бинт": "inventory", "корм": "general", "пылесоса": "fact", "окна": "list", "котят": "list"}
+    for q, source in cases.items():
+        assert source in [h["source"] for h in ask(q).json()["hits"]], q
+
+
+def test_lexical_only_mode_without_embeddings_finds_and_rejects_correctly(monkeypatch):
+    monkeypatch.setattr(ss, "_embed", lambda *a, **k: [])
+    build_world(embed_facts=False)
+    lexical = [("где лежит бинт", "Бинт"), ("есть ли пластырь", "Пластырь"), ("чего боится Тучка", "пылесоса"), ("куда ставить наполнитель", "коридоре"),
+               ("как часто менять лотки", "раз в два дня"), ("где батарейки", "тумбочк"), ("можно ли кормить Пончика рыбой", "аллергия"),
+               ("что нужно закрыть перед сном", "Закрыть окна"), ("где лежит корм для котов", "кухонном шкафу")]
+    for q, need in lexical:
+        r = ask(q).json()
+        assert r["found"] and need.lower() in texts_of(r).lower(), q
+    for q in W.NO_ANSWER:
+        assert ask(q).json() == {"found": False, "hits": []}, q
+
+
+def texts_of(body):
+    return " | ".join(h["text"] for h in body["hits"])
+
+
+def test_vector_leg_finds_what_words_do_not():
+    build_world()
+    r = ask("что принять если болит голова").json()
+    assert r["found"] and "Цитрамон" in texts_of(r)
+    r = ask("чем посветить если выключили свет").json()
+    assert r["found"] and "Фонарик" in texts_of(r)
+
+
+def test_unrelated_questions_find_nothing_even_with_vectors():
+    build_world()
+    for q in W.NO_ANSWER:
+        assert ask(q).json() == {"found": False, "hits": []}, q
+
+
+def test_default_visibility_hidden_and_flagged_follow_the_shared_clause():
+    build_world()
+    iid = add_item("инвентарь", "Новая отвёртка", "в ящике")
+    assert "отвёртка" in texts_of(ask("отвёртка").json()).lower()                        # новый пункт виден без флагов
+    with get_engine().begin() as c:
+        c.execute(nl.update().where(nl.c.id == iid).values(sitter_hidden=True))
+    assert ask("отвёртка").json()["found"] is False
+    lid = add_item("покупки", "Купить шуруповёрт", "")
+    assert ask("шуруповёрт").json()["found"] is False                                    # покупка без пометки не видна
+    with get_engine().begin() as c:
+        c.execute(nl.update().where(nl.c.id == lid).values(for_sitter=True))
+    assert "шуруповёрт" in texts_of(ask("шуруповёрт").json()).lower()
+
+
+def test_search_hits_are_a_subset_of_what_sitter_lists_returns():
+    build_world()
+    listing = TestClient(app).get("/api/sitter/lists", headers=OK).json()
+    visible = {i["name"] for l in listing["lists"] for i in l["items"]} | {i["name"] for c in listing["inventory"] for i in c["items"]}
+    for q in ("бинт", "окна", "батарейки", "фонарик", "котят", "таблетки", "порез"):
+        for h in ask(q).json()["hits"]:
+            if h["source"] in ("inventory", "list"):
+                assert h["text"].split(" × ")[0].split(" — ")[0] in visible, (q, h)
+
+
+def test_fact_filters_archived_old_pending_rejected_tombstone_foreign_and_rejected_cat():
+    cid = crepo.create(USER, "Тучка")
+    rej = crepo.create(USER, "Пончик", status="rejected")
+    foreign_cat = crepo.create(OTHER, "Рыжик")
+    add_fact("видимый факт про зонтики", cat_id=cid)
+    add_fact("архивный факт про зонтики", cat_id=cid, is_archived=True)
+    add_fact("неактуальный факт про зонтики", cat_id=cid, is_current=False)
+    add_fact("ожидающий факт про зонтики", cat_id=cid, review_status="pending")
+    add_fact("отклонённый факт про зонтики", cat_id=cid, review_status="rejected")
+    add_fact("факт отклонённого кота про зонтики", cat_id=rej)
+    add_fact("чужой факт про зонтики", user=OTHER, cat_id=foreign_cat)
+    add_fact("чужое общее про зонтики", user=OTHER)
+    add_fact("факт человека про зонтики", category="Люди")
+    add_fact("факт про зонтики с чужой категорией, не про котов", category="💼 Работа")
+    got = [h["text"] for h in ask("зонтики").json()["hits"]]
+    assert got == ["видимый факт про зонтики"], got
+
+
+# ── ответ ─────────────────────────────────────────────────────────────────────
+
+def test_at_most_three_hits_with_exact_fields_and_clipped_text():
+    for i in range(6):
+        add_fact("общий факт про весы номер %d %s" % (i, "х" * 500), category="🐾 Коты")
+    r = ask("весы").json()
+    assert r["found"] and len(r["hits"]) == 3
+    for h in r["hits"]:
+        assert set(h) == {"source", "label", "text"} and len(h["text"]) <= 300
+
+
+def test_labels_and_inventory_format():
+    cid = crepo.create(USER, "Тучка")
+    add_fact("Тучка прячет фломастеры", cat_id=cid)
+    add_fact("общее про глобусы")
+    add_item("инвентарь", "Мячик", "в корзине", category="🏠 Дом", qty=3)
+    add_item("чеклист", "Убрать лейки", "", group="Вечером", for_sitter=True)
+    one = lambda q: ask(q).json()["hits"][0]
+    assert one("фломастеры")["label"] == "про кота Тучка" and one("глобусы")["label"] == "общее про котов"
+    inv = one("мячик")
+    assert inv["label"] == "инвентарь: 🏠 Дом" and inv["text"] == "Мячик × 3 — в корзине"
+    assert one("лейки")["label"] == "список: Вечером"
+
+
+def test_no_ids_prices_or_internal_fields_leak():
+    add_item("инвентарь", "Секундомер", "заметка", category="К", price_actual=777, price_plan=555, store="Магазин-секрет",
+             task_id="TASK-SECRET", works_id="WORK-SECRET")
+    flat = str(ask("секундомер").json())
+    assert "Секундомер" in flat
+    for secret in ("777", "555", "Магазин-секрет", "TASK-SECRET", "WORK-SECRET", USER):
+        assert secret not in flat
+
+
+def test_duplicate_texts_are_collapsed():
+    add_fact("одинаковый факт про компас")
+    add_fact("одинаковый факт про компас")
+    assert len(ask("компас").json()["hits"]) == 1
+
+
+def test_owner_without_profile_gets_nothing():
+    build_world()
+    with patch("miniapp.backend.routes.sitter.get_user_id", AsyncMock(return_value=None)):
+        assert ask("бинт").json() == {"found": False, "hits": []}
+
+
+# ── пороги ────────────────────────────────────────────────────────────────────
+
+def test_cosine_threshold_is_respected(monkeypatch):
+    def controlled(texts_, input_type="document"):
+        if isinstance(texts_, str):
+            texts_ = [texts_]
+        out = []
+        for t in texts_:
+            v = [0.0] * DIM
+            if t == "запрос":
+                v[0] = 1.0
+            elif t.startswith("мало"):
+                v[0], v[1] = 0.57, math.sqrt(1 - 0.57 ** 2)
+            elif t.startswith("много"):
+                v[0], v[1] = 0.59, math.sqrt(1 - 0.59 ** 2)
+            else:
+                v[2] = 1.0
+            out.append(v)
+        return out
+    monkeypatch.setattr(ss, "_embed", controlled)
+    monkeypatch.setattr(ss, "VEC_MIN", 0.58)
+    add_fact("мало совпадает")
+    add_fact("много совпадает")
+    with get_engine().begin() as c:
+        for t in ("мало совпадает", "много совпадает"):
+            c.execute(text("UPDATE memories SET embedding = CAST(:v AS vector) WHERE fact_text = :t AND user_id = :u"),
+                      {"v": _vec_literal(controlled(t)[0]), "t": t, "u": USER})
+    assert [h["text"] for h in ask("запрос").json()["hits"]] == ["много совпадает"]
+
+
+def test_lexical_match_passes_without_any_vector(monkeypatch):
+    monkeypatch.setattr(ss, "_embed", lambda *a, **k: [])
+    add_fact("запасной ключ под ковриком")
+    assert ask("ключ").json()["found"] is True
+
+
+def test_generic_question_words_do_not_match_by_themselves():
+    add_fact("корм лежит в шкафу")
+    add_fact("паспорт хранится в сейфе")
+    assert ss.sitter_fts_query("где лежит паспорт") == "паспорт"
+    assert ss.sitter_fts_query("что любит Мария") == "мария"
+    assert ask("лежит").json() == {"found": False, "hits": []}
+
+
+# ── эмбеддинг: кэш и сбои ────────────────────────────────────────────────────
+
+def test_item_vectors_cached_and_recomputed_only_when_item_changes():
+    iid = add_item("инвентарь", "Компас", "север", category="К")
+    ask("компас"); first = CALLS["doc"]
+    ask("компас"); assert CALLS["doc"] == first and first == 1
+    with get_engine().begin() as c:
+        c.execute(nl.update().where(nl.c.id == iid).values(note="юг", updated_at=text("now() + interval '1 minute'")))
+    ask("компас"); assert CALLS["doc"] == 2
+
+
+@pytest.mark.parametrize("failure", [lambda *a, **k: [], lambda *a, **k: (_ for _ in ()).throw(RuntimeError("voyage down"))])
+def test_embedding_failure_falls_back_to_lexical_search(monkeypatch, failure):
+    monkeypatch.setattr(ss, "_embed", failure)
+    add_item("инвентарь", "Компас", "север", category="К")
+    r = ask("компас")
+    assert r.status_code == 200 and r.json()["found"] is True
+
+
+# ── вход и защита ─────────────────────────────────────────────────────────────
+
+@pytest.mark.parametrize("body", [{}, {"q": ""}, {"q": 5}, {"q": None}, {"q": "x" * 2001}, {"query": "бинт"}, []])
+def test_bad_bodies_are_rejected(body):
+    r = TestClient(app).post("/api/sitter/ask", json=body, headers=OK)
+    assert r.status_code == 422
+
+
+def test_blank_and_control_only_queries_are_422():
+    for q in ("   ", "\x00\x07\n\t", "‮​"):
+        assert TestClient(app).post("/api/sitter/ask", json={"q": q}, headers=OK).status_code == 422
+
+
+def test_clean_query_strips_control_bidi_and_truncates():
+    assert ss.clean_query("  где\x07  бинт‮\n") == "где бинт"
+    assert len(ss.clean_query("а" * 1000)) == ss.MAX_Q
+    assert ss.clean_query(None) == "" and ss.clean_query(5) == ""
+
+
+HOSTILE = ["'; DROP TABLE memories; --", "бинт' OR '1'='1", "бинт & !йод | (пластырь):*", "бинт\" ; DELETE FROM nexus_lists; --", "${jndi:ldap://x}", "<script>alert(1)</script>",
+           "%s %d %(x)s", "бинт" * 80, "a:*b", "!!!", "()", "\\", "бинт<->йод", "бинт:A"]
+
+
+@pytest.mark.parametrize("q", HOSTILE)
+def test_hostile_queries_are_harmless(q):
+    build_world()
+    r = ask(q)
+    assert r.status_code == 200 and set(r.json()) == {"found", "hits"}
+    with get_engine().connect() as c:
+        assert c.execute(text("SELECT count(*) FROM memories WHERE user_id = :u"), {"u": USER}).scalar() > 0
+        assert c.execute(text("SELECT count(*) FROM nexus_lists WHERE user_id = :u"), {"u": USER}).scalar() > 0
+
+
+def test_query_text_never_reaches_logs(caplog):
+    caplog.set_level("DEBUG")
+    build_world()
+    ask("совершенно уникальная фраза-маркер про таблетки")
+    assert "фраза-маркер" not in caplog.text and "qlen=" in caplog.text
+
+
+# ── токен и бюджет ────────────────────────────────────────────────────────────
+
+def test_only_the_shared_read_token_works():
+    build_world()
+    for hdr in ({}, {"Authorization": "Bearer wrong"}, {"Authorization": f"Bearer {CATS_TOKEN}"}, {"Authorization": f"Bearer {WRITE_TOKEN}"}):
+        assert ask("бинт", headers=hdr).status_code == 401
+    app.dependency_overrides[current_user_id] = lambda: OWNER
+    assert ask("бинт", headers={}).status_code == 401                                     # владельческий вход без токена не пускает
+    app.dependency_overrides.pop(current_user_id, None)
+    r = ask("бинт")
+    assert r.status_code == 200 and r.headers["cache-control"] == "no-store" and r.headers["x-content-type-options"] == "nosniff"
+
+
+def test_get_is_not_allowed_and_unauthorised_calls_do_not_spend_the_budget():
+    assert TestClient(app).get("/api/sitter/ask", headers=OK).status_code in (404, 405)
+    for _ in range(40):
+        ask("бинт", headers={"Authorization": "Bearer wrong"})
+    assert sitter_routes._budget.take() == 0
+
+
+def test_query_budget_returns_429_with_retry_after_after_the_limit(monkeypatch):
+    monkeypatch.setattr(sitter_routes, "_budget", ss.QueryBudget(limit=3, window=60))
+    for _ in range(3):
+        assert ask("бинт").status_code == 200
+    r = ask("бинт")
+    assert r.status_code == 429 and int(r.headers["retry-after"]) >= 1
+
+
+def test_budget_window_slides():
+    t = {"now": 0.0}
+    b = ss.QueryBudget(limit=2, window=10, clock=lambda: t["now"])
+    assert (b.take(), b.take()) == (0, 0) and b.take() >= 1
+    t["now"] = 10.5
+    assert b.take() == 0
+
+
+def test_read_token_opens_exactly_three_routes_now():
+    from tests.test_care_write import _opened_by
+    assert _opened_by(OK) == {("GET", "/api/sitter/lists"), ("GET", "/api/care/schedule"), ("POST", "/api/sitter/ask")}
+
+
+def test_no_llm_is_called(monkeypatch):
+    """Поиск не должен обращаться к LLM: ломаем клиент, ответ всё равно приходит."""
+    import core.claude_client as cc
+    monkeypatch.setattr(cc, "ask_claude", AsyncMock(side_effect=AssertionError("LLM called")))
+    build_world()
+    assert ask("где таблетки от головы").status_code == 200
