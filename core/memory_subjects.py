@@ -100,59 +100,34 @@ def keyword_category(fact: str, cat_names: Sequence[str] = ()) -> Optional[str]:
     return None
 
 
-# ── Фильтр рода: Кай пишет о себе в женском роде ────────────────────────────
-
-_NOT_VERBS = {"канал", "финал", "стол", "угол", "стул", "вал", "зал", "металл", "портал", "терминал", "материал",
-              "журнал", "идеал", "сигнал", "оригинал", "персонал", "ментал", "кристалл", "капитал", "хохол", "котёл",
-              "посол", "осел", "козёл", "орёл", "осёл", "ствол", "иол", "вокал", "бокал", "фестиваль", "аналог", "ритуал",
-              "ритуалы", "нравился", "понравился", "казался", "показался", "оказался"}
-_MASC_PAST = re.compile(r"\b[а-яё]{2,}(?:ил|ыл|ал|ел|ул|ёл|ял|ол)(?:ся)?\b", _I)
-_MASC_EXTRA = re.compile(r"\b(?:был|мог|смог|помог|ушёл|ушел|пришёл|пришел|нашёл|нашел|шёл|вёл)\b", _I)
-_PRON_M = re.compile(r"\bон\b", _I)                     # только подлежащее; «его/ему» — чаще дополнение, не маркер
-_INTERLOC = re.compile(r"собеседник", _I)
-# Женские маркеры (говорит Кай): глагол прош. вр. ж.р., краткие прилагательные, «она/её/ей».
-_FEM_PAST = re.compile(r"\b[а-яё]+(?:ила|ыла|ала|ела|ула|ёла|яла|ола)(?:сь)?\b|\b[а-яё]+лась\b", _I)
-_FEM_ADJ = re.compile(r"\b(?:готова|рада|должна|уверена|согласна|способна|занята|свободна|одна|замужем|беременна|больна|"
-                      r"виновата|права|нужна|счастлива|уставшая)\b", _I)
-_PRON_F = re.compile(r"\b(?:она|её|ее|ей|неё|нее)\b", _I)
+# ── Атрибуция по ЦИТАТЕ: чей это факт (quote_author + лицо цитаты), а не род в тексте факта ─────────────────
+# Текст факта Haiku пересказал сам (часто в мужском роде), поэтому по тексту автора не определить; цитата — слова
+# из переписки как есть, и quote_author говорит, кто их написал.
+_FIRST_PERSON = re.compile(r"\b(?:я|мне|меня|мной|мною|мо[йяеи]|моё|мое|моих|моим|моими|мою|моего|моему|моей|мы|нам|нас)\b",
+                           re.I)
+_SECOND_PERSON = re.compile(r"\b(?:ты|тебе|тебя|тобой|тобою|тв[оо]й|твоя|твоё|твое|твои|твоих|твоим|твою|твоего|твоей)\b", re.I)
+_INTERLOC = re.compile(r"собеседник", re.I)
 
 
-def male_signals(fact: str) -> List[str]:
-    """Мужские маркеры у субъекта: глагол прошедшего времени м.р. (сказуемое) и «он»."""
-    t = fact or ""
-    out: List[str] = []
-    verbs = [w for w in _MASC_PAST.findall(t) if w.lower() not in _NOT_VERBS and len(w) >= 4] + _MASC_EXTRA.findall(t)
-    if verbs:
-        out.append("глагол")
-    if _PRON_M.search(t):
-        out.append("он")
-    return out
-
-
-def female_signals(fact: str) -> List[str]:
-    t = fact or ""
-    out: List[str] = []
-    if _FEM_PAST.search(t):
-        out.append("глагол-ж")
-    if _FEM_ADJ.search(t):
-        out.append("прил-ж")
-    if _PRON_F.search(t):
-        out.append("она/её")
-    return out
-
-
-def gender_verdict(fact: str):
-    """(вердикт, маркеры): 'interloc' — «Собеседник» (reject, смысл перевёрнут); 'male' — не про Кай (перевесить / проверить);
-    'kept' — мужской маркер перекрыт женским (это Кай); None — без маркеров."""
+def attribution(fact: str, quote: str, quote_author: str):
+    """(вердикт, причина) для факта карточки «Я».
+    interloc       — «Собеседник» в тексте факта: смысл перевёрнут → rejected;
+    keep           — это Кай: автор kai + цитата от первого лица (kai_first), либо автор partner и цитата про «ты/тебе/тебя»
+                     (partner_about_me: собеседник говорит обо мне);
+    partner_self   — автор partner, первое лицо без «ты»: собеседник говорит о себе → на человека этого чата;
+    check          — всё остальное неоднозначное → «❓ Проверить автора» (kai_no_marker / partner_no_marker / mixed / unknown)."""
     if _INTERLOC.search(fact or ""):
-        return "interloc", ["собеседник"]
-    m = male_signals(fact)
-    if not m:
-        return None, []
-    f = female_signals(fact)
-    if f:
-        return "kept", m + ["≠"] + f
-    return "male", m
+        return "interloc", "собеседник в тексте"
+    q = quote or ""
+    first, second = bool(_FIRST_PERSON.search(q)), bool(_SECOND_PERSON.search(q))
+    author = (quote_author or "").lower()
+    if author == "kai":
+        return ("keep", "kai_first") if first else ("check", "kai_no_marker")
+    if author == "partner":
+        if second:
+            return "keep", "partner_about_me"
+        return ("partner_self", "partner_first") if first else ("check", "partner_no_marker")
+    return "check", f"author_{author or 'unknown'}"
 
 
 # ── Временные состояния: кандидаты на отклонение (не категория, не применяется автоматически) ──

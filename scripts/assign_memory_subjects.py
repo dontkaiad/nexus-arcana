@@ -59,7 +59,7 @@ def _load(c, sa):
         sys.exit(f"ожидалась ровно одна карточка «Я», найдено {len(me)}")
     me = me[0]
     selfs = c.execute(sa.text(
-        "SELECT id, fact_text, source_chat_id FROM memories WHERE person_id = :p AND category = '👥 Люди' "
+        "SELECT id, fact_text, source_chat_id, source_quote, quote_author FROM memories WHERE person_id = :p AND category = '👥 Люди' "
         "AND review_status = 'pending' AND fact_text <> '' AND NOT is_archived ORDER BY id"), {"p": me.id}).all()
     old = c.execute(sa.text(
         "SELECT id, category, key_name, fact_text, related_to, user_id FROM memories WHERE person_id IS NULL "
@@ -119,43 +119,49 @@ async def _haiku(rows, usage):
     return out
 
 
-def plan(manual_arg: str = "", keep_temp: str = "") -> int:
+def plan(manual_arg: str = "", keep_temp: str = "", stage: str = "attribution") -> int:
+    """stage: attribution — атрибуция по цитате, временные, старые памяти (БЕЗ LLM и без категорий);
+    categories — только категории для оставшихся «Я» (ключевые слова + Haiku, нужен ключ tools); all — оба."""
     import sqlalchemy as sa
     from core.db import get_engine
-    from core.memory_subjects import keyword_category, legacy_target, gender_verdict, temp_signal, load_cat_names
+    from core.memory_subjects import keyword_category, legacy_target, attribution, temp_signal, load_cat_names
     from core.repos import pg_people_repo as prepo
 
+    do_attr, do_cats = stage in ("attribution", "all"), stage in ("categories", "all")
     manual = _parse_manual(manual_arg)
     keep = {int(x) for x in re.findall(r"\d+", keep_temp or "")}
     with get_engine().connect() as c:
         me, selfs, old = _load(c, sa)
-        verdicts = {r.id: gender_verdict(r.fact_text) for r in selfs}
-        chats = {r.source_chat_id for r in selfs if verdicts[r.id][0] == "male" and r.source_chat_id}
+        verdicts = {r.id: (attribution(r.fact_text, r.source_quote, r.quote_author) if do_attr else ("keep", "skip"))
+                    for r in selfs}
+        chats = {r.source_chat_id for r in selfs if verdicts[r.id][0] == "partner_self" and r.source_chat_id}
         by_chat = _chat_people(c, sa, chats, me.id) if chats else {}
-    gender, overridden = [], []
+    gender, kept_reasons = [], {}
     for r in selfs:
-        v, sig = verdicts[r.id]
-        if v == "kept":
-            overridden.append({"id": r.id, "signals": sig})
+        v, why = verdicts[r.id]
+        if v == "keep":
+            kept_reasons[r.id] = why
         elif v == "interloc":
-            gender.append({"id": r.id, "action": "reject", "why": "«Собеседник»: смысл перевёрнут", "signals": sig})
-        elif v == "male":
+            gender.append({"id": r.id, "action": "reject", "why": why})
+        elif v == "partner_self":
             cand = by_chat.get(r.source_chat_id, {})
             if len(cand) == 1:
                 pid, pname = next(iter(cand.items()))
-                gender.append({"id": r.id, "action": "reassign", "person_id": pid, "person": pname, "signals": sig})
+                gender.append({"id": r.id, "action": "reassign", "person_id": pid, "person": pname, "why": why})
             else:
-                gender.append({"id": r.id, "action": "check", "signals": sig,
-                               "why": "несколько людей в чате" if cand else "чат не сопоставлен"})
+                gender.append({"id": r.id, "action": "check", "why": "несколько людей в чате" if cand else "чат не сопоставлен"})
+        else:
+            gender.append({"id": r.id, "action": "check", "why": why})
     gender_ids = {g["id"] for g in gender}
+    overridden = []                                              # (v3-поле оставлено для совместимости плана; в v4 не используется)
 
     rest_rows = [r for r in selfs if r.id not in gender_ids]
-    temp_all = [r.id for r in rest_rows if temp_signal(r.fact_text)]
-    temp_ids = [i for i in temp_all if i not in keep]          # применяются; keep — остаются в категориях
+    temp_all = [r.id for r in rest_rows if temp_signal(r.fact_text)] if do_attr else []
+    temp_ids = [i for i in temp_all if i not in keep]          # применяются; keep — остаются в Я
     temp_set = set(temp_ids)
-    cat_rows = [r for r in rest_rows if r.id not in temp_set]
+    cat_rows = [r for r in rest_rows if r.id not in temp_set] if do_cats else []
     kw, rest = {}, []
-    cat_names = load_cat_names(me.user_id)                      # имена и клички котов владельца — из таблицы cats
+    cat_names = load_cat_names(me.user_id) if do_cats else []   # имена и клички котов владельца — из таблицы cats
     for r in cat_rows:
         cat = keyword_category(r.fact_text, cat_names)
         if cat:
@@ -199,47 +205,60 @@ def plan(manual_arg: str = "", keep_temp: str = "") -> int:
         if i not in {o.id for o in old}:
             notes.append(f"#{i}: нет среди активных старых памятей — ручная правка пропущена")
 
-    json.dump({"self_id": me.id, "self": self_plan, "gender": gender, "overridden": overridden, "temp": temp_ids,
+    json.dump({"self_id": me.id, "stage": stage, "self": self_plan, "gender": gender, "overridden": overridden, "temp": temp_ids,
                "legacy": legacy_plan}, open(PLAN, "w"), ensure_ascii=False)
 
     texts = {r.id: r.fact_text for r in selfs}
+    quotes = {r.id: " ".join((r.source_quote or "").split())[:220] for r in selfs}
+    authors = {r.id: r.quote_author for r in selfs}
     by_cat: dict = {}
     for it in self_plan:
         by_cat.setdefault(it["cat"], []).append(it)
     rnd = random.Random(7)
     olds = {r.id: r for r in old}
+
+    def line(i, tag):
+        return f"- #{i} [{tag}] {texts[i]}  ‖ цитата ({authors[i]}): «{quotes[i]}»\n"
+
     with open(SAMPLE, "w") as f:
-        f.write("# Разнос Памяти v3: выборка для проверки глазами (ЛОКАЛЬНО, не в git)\n\n")
-        f.write(f"## 1. Фильтр рода: {len(gender)} фактов «Я» с мужскими маркерами\n\n")
-        f.write("Формат: `#id [маркеры] текст` → куда\n\n")
-        titles = (("reassign", "Перевешено на человека из того же чата"),
-                  ("check", "Остаются pending в «Я», категория «❓ Проверить автора»"),
-                  ("reject", "Отклонено (rejected): «Собеседник»"))
-        for act, title in titles:
-            items = [g for g in gender if g["action"] == act]
-            f.write(f"### {title}: {len(items)}\n")
-            for g in items:
-                to = {"reassign": f"→ {g.get('person')} (карточка {g.get('person_id')})",
-                      "check": f"→ ❓ ({g.get('why')})", "reject": "→ rejected"}[act]
-                f.write(f"- #{g['id']} [{', '.join(g['signals'])}] {texts[g['id']]}  {to}\n")
-            f.write("\n")
-        f.write(f"## 1б. Женский маркер перекрыл мужской — остаются «Я», не трогаем: {len(overridden)}\n\n")
-        for o in overridden:
-            f.write(f"- #{o['id']} [{' '.join(o['signals'])}] {texts[o['id']]}\n")
-        f.write(f"\n## 2. Временные состояния → rejected: {len(temp_ids)} (оставлены по твоему списку: "
-                f"{len([i for i in temp_all if i in keep])})\n\n")
-        for i in temp_all:
-            f.write(f"- #{i} {'[ОСТАЮТСЯ]' if i in keep else '[→ rejected]'} {texts[i]}\n")
-        f.write("\n## 3. Факты «Я» → категория: до 25 случайных на категорию (без фильтра рода и временных)\n\n")
-        f.write("Формат: `#id [kw|haiku] текст`\n\n")
-        for cat in sorted(by_cat):
-            items = by_cat[cat]
-            pick = rnd.sample(items, min(PER_CAT, len(items)))
-            f.write(f"### {cat}  (всего {len(items)}, показано {len(pick)})\n")
-            for it in sorted(pick, key=lambda x: x["id"]):
-                f.write(f"- #{it['id']} [{it['by']}] {texts[it['id']]}\n")
-            f.write("\n")
-        f.write("## 4. Старые памяти без человека (все активные, кроме бюджета)\n\n")
+        f.write(f"# Разнос Памяти v4 (этап: {stage}): выборка для проверки глазами (ЛОКАЛЬНО, не в git)\n\n")
+        if do_attr:
+            f.write("## 1. Атрибуция по цитате (quote_author + лицо цитаты)\n\n")
+            f.write("Формат: `#id [причина] ФАКТ ‖ цитата (автор): «…»` → куда\n\n")
+            f.write("Правила: kai + «я/мне/у меня» в цитате → Я; partner + «ты/тебе/тебя» → Я (обо мне со слов собеседника); "
+                    "partner + первое лицо без «ты» → на человека чата, иначе ❓; «Собеседник» в тексте → rejected; "
+                    "остальное неоднозначное → ❓ Проверить автора.\n\n")
+            for act, title in (("reassign", "Перевешено на человека из того же чата"), ("reject", "Отклонено (rejected): «Собеседник»"),
+                               ("check", "→ «❓ Проверить автора» (pending остаётся в Я)")):
+                items = [g for g in gender if g["action"] == act]
+                f.write(f"### {title}: {len(items)}\n")
+                for g in items:
+                    to = {"reassign": f" → {g.get('person')} (карточка {g.get('person_id')})", "check": "", "reject": ""}[act]
+                    f.write(line(g["id"], g["why"]).rstrip("\n") + to + "\n")
+                f.write("\n")
+            f.write(f"### Остаются в «Я»: {len(kept_reasons)} — по причинам: {dict(Counter(kept_reasons.values()))}\n")
+            f.write("Выборка по 25 случайных на причину:\n\n")
+            for why in sorted(set(kept_reasons.values())):
+                ids_ = [i for i, w in kept_reasons.items() if w == why and i not in temp_set]
+                f.write(f"#### {why} (всего {len(ids_)})\n")
+                for i in sorted(rnd.sample(ids_, min(PER_CAT, len(ids_)))):
+                    f.write(line(i, why))
+                f.write("\n")
+            f.write(f"## 2. Временные состояния → rejected: {len(temp_ids)} (оставлены по твоему списку: "
+                    f"{len([i for i in temp_all if i in keep])})\n\n")
+            for i in temp_all:
+                f.write(f"- #{i} {'[ОСТАЮТСЯ]' if i in keep else '[→ rejected]'} {texts[i]}\n")
+        if do_cats:
+            f.write("\n## 3. Факты «Я» → категория: до 25 случайных на категорию\n\n")
+            f.write("Формат: `#id [kw|haiku] текст`\n\n")
+            for cat in sorted(by_cat):
+                items = by_cat[cat]
+                pick = rnd.sample(items, min(PER_CAT, len(items)))
+                f.write(f"### {cat}  (всего {len(items)}, показано {len(pick)})\n")
+                for it in sorted(pick, key=lambda x: x["id"]):
+                    f.write(f"- #{it['id']} [{it['by']}] {texts[it['id']]}\n")
+                f.write("\n")
+        f.write("\n## 4. Старые памяти без человека (все активные, кроме бюджета)\n\n")
         label = {"self": "→ Я", "person": "→ карточка", "cats": "→ Коты", "misc": "→ Разное", "delete": "→ УДАЛИТЬ",
                  "birthday": "→ ДР в карточку"}
         for it in legacy_plan:
@@ -253,13 +272,16 @@ def plan(manual_arg: str = "", keep_temp: str = "") -> int:
         for n in notes:
             f.write(f"\n> {n}\n")
 
-    print("факты «Я» (pending):", len(selfs))
-    print("  фильтр рода:", len(gender), dict(Counter(g["action"] for g in gender)),
-          "| женский маркер перекрыл мужской:", len(overridden))
-    print("  временные → rejected:", len(temp_ids), "| оставлены:", len([i for i in temp_all if i in keep]))
-    print("  остаток в категории:", len(self_plan), "| ключевые слова:", len(kw), "| Haiku:", len(rest))
-    for cat, n in Counter(i["cat"] for i in self_plan).most_common():
-        print(f"    {n:5d}  {cat}  (kw {sum(1 for i in by_cat[cat] if i['by']=='kw')}, haiku {sum(1 for i in by_cat[cat] if i['by']=='haiku')})")
+    print("факты «Я» (pending):", len(selfs), "| этап:", stage)
+    if do_attr:
+        print("  атрибуция по цитате:", dict(Counter(g["action"] for g in gender)), "| остаются в Я:", len(kept_reasons),
+              dict(Counter(kept_reasons.values())))
+        print("  причины ❓/rejected:", dict(Counter(g["why"] for g in gender if g["action"] in ("check", "reject"))))
+        print("  временные → rejected:", len(temp_ids), "| оставлены:", len([i for i in temp_all if i in keep]))
+    if do_cats:
+        print("  в категории:", len(self_plan), "| ключевые слова:", len(kw), "| Haiku:", len(rest))
+        for cat, n in Counter(i["cat"] for i in self_plan).most_common():
+            print(f"    {n:5d}  {cat}")
     print("старые памяти:", len(old), dict(Counter(i["to"] for i in legacy_plan)))
     for n in notes:
         print("  !", n)
@@ -413,5 +435,7 @@ if __name__ == "__main__":
     g.add_argument("--apply", action="store_true")
     ap.add_argument("--manual", default="")
     ap.add_argument("--keep-temp", default="")
+    ap.add_argument("--stage", choices=["attribution", "categories", "all"], default="attribution",
+                    help="attribution — без LLM (по умолчанию); categories/all — нужен ключ ANTHROPIC_API_KEY_TOOLS")
     a = ap.parse_args()
-    sys.exit(apply() if a.apply else plan(a.manual, a.keep_temp))
+    sys.exit(apply() if a.apply else plan(a.manual, a.keep_temp, a.stage))

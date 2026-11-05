@@ -70,22 +70,20 @@ def test_lowercase_cat_name_is_not_a_cat():
     assert ms.keyword_category("любит смотреть на тучку", ["Тучка"]) != "🐾 Коты"      # слово с маленькой — облачко, не кличка
 
 
-@pytest.mark.parametrize("fact,verdict", [
-    ("купил машину и уехал", "male"),
-    ("он вернулся домой", "male"),
-    ("любит его руки", None),                                    # «его/ему» — дополнение, не маркер
-    ("чистить его", None),
-    ("Собеседник любит чай", "interloc"),
-    ("был в Москве, а потом купила билет", "kept"),               # женский глагол перекрывает мужской
-    ("готова ехать, но ушёл", "kept"),                            # «готова» — женский маркер
-    ("она сказала, что он ушёл", "kept"),
-    ("купила машину", None),
-    ("любит чай", None),
-    ("делает ритуал на удачу", None),                             # «ритуал» оканчивается на -ал, но не глагол
-    ("очень нравился лор игры", None),
+@pytest.mark.parametrize("fact,quote,author,verdict,why", [
+    ("любит чай", "я обожаю чай", "kai", "keep", "kai_first"),
+    ("купил машину", "у меня теперь есть машина", "kai", "keep", "kai_first"),          # факт в м.р., но цитата Кай от первого лица
+    ("любит чай", "люблю чай", "kai", "check", "kai_no_marker"),                         # без «я/мне» → на проверку
+    ("любит руки", "Я обожаю твои руки", "partner", "keep", "partner_about_me"),         # партнёр про «твои» → обо мне
+    ("устаёт от небритости", "я через неделю устаю от небритости", "partner", "partner_self", "partner_first"),
+    ("уехал", "он уехал", "partner", "check", "partner_no_marker"),
+    ("любит кино", "я люблю кино", "mixed", "check", "author_mixed"),
+    ("любит кино", "я люблю кино", None, "check", "author_unknown"),
+    ("Собеседник любит чай", "я обожаю чай", "kai", "interloc", "собеседник в тексте"),   # «Собеседник» важнее цитаты
+    ("любит чай", "", "kai", "check", "kai_no_marker"),
 ])
-def test_gender_verdict(fact, verdict):
-    assert ms.gender_verdict(fact)[0] == verdict
+def test_attribution_by_quote(fact, quote, author, verdict, why):
+    assert ms.attribution(fact, quote, author) == (verdict, why)
 
 
 def test_cat_names_only_as_nickname():
@@ -175,11 +173,13 @@ def world(tmp_path):
     me = prepo.create(MARK, "Кай", ["каюшка"], is_self=True, status="confirmed")
     friend = prepo.create(MARK, "Оля", [], status="confirmed")
 
-    def mem(fact, cat, key="k", person=None, status="confirmed", related="", chat=None):
+    def mem(fact, cat, key="k", person=None, status="confirmed", related="", chat=None,
+            quote="я так считаю", author="kai"):
         with get_engine().begin() as c:
             return c.execute(insert(memories).values(
                 fact_text=fact, key_name=key, category=cat, related_to=related, person_id=person,
-                review_status=status, user_id=MARK, source="auto", source_chat_id=chat).returning(memories.c.id)).scalar_one()
+                review_status=status, user_id=MARK, source="auto", source_chat_id=chat,
+                source_quote=quote, quote_author=author).returning(memories.c.id)).scalar_one()
 
     w = {"sc": sc, "me": me, "friend": friend, "mem": mem}
     try:
@@ -210,7 +210,7 @@ def test_plan_then_apply_keeps_review_status(world):
     old_sys = mem("лимит: кафе", "💰 Лимит", "лимит_кафе", None, "confirmed")
 
     with patch.object(sc, "_haiku", _haiku_stub("🏠 Быт")):
-        sc.plan("")
+        sc.plan("", "", "all")
     plan = json.loads(Path(sc.PLAN).read_text())
     assert {i["id"]: (i["cat"], i["by"]) for i in plan["self"]} == {a: ("🏥 Здоровье", "kw"), b: ("🏠 Быт", "haiku")}
     mine = {old_self, old_friend, old_misc, old_sys}                 # в тестовой БД могут лежать чужие строки
@@ -243,7 +243,7 @@ def test_apply_skips_rows_changed_since_plan(world):
     sc, me, mem = world["sc"], world["me"], world["mem"]
     a = mem("аллергия на пыль", "👥 Люди", f"person_{me}_important_aaaaaaaa", me, "pending")
     with patch.object(sc, "_haiku", _haiku_stub("🗂 Прочее")):
-        sc.plan("")
+        sc.plan("", "", "all")
     with get_engine().begin() as c:                                  # владелец успела вручную разнести в СДВГ
         c.execute(text("UPDATE memories SET category='🦋 СДВГ' WHERE id=:i"), {"i": a})
     sc.apply()
@@ -258,42 +258,53 @@ def test_apply_rejects_unknown_category(world):
         sc.apply()
 
 
-def test_gender_filter_reassign_check_reject(world):
+def test_attribution_by_quote_end_to_end(world):
     sc, me, mem = world["sc"], world["me"], world["mem"]
     friend = world["friend"]
     mem("любит чай", "👥 Люди", f"person_{friend}_likes_11111111", friend, "confirmed", chat=-501)       # чат 501 → только Оля
-    mapped = mem("купил машину", "👥 Люди", f"person_{me}_other_aaaaaaa1", me, "pending", "Кай", chat=-501)
-    nochat = mem("он уехал", "👥 Люди", f"person_{me}_other_aaaaaaa2", me, "pending", "Кай", chat=-999)
-    interloc = mem("Собеседник любит кино", "👥 Люди", f"person_{me}_other_aaaaaaa3", me, "pending", "Кай", chat=-501)
-    mine = mem("купила платье", "👥 Люди", f"person_{me}_other_aaaaaaa4", me, "pending", "Кай", chat=-501)
-    fem = mem("была в Москве, потом купил билет и купила кофе", "👥 Люди", f"person_{me}_other_aaaaaaa5", me, "pending", "Кай", chat=-501)
-    temp = mem("сейчас находится в отпуске", "👥 Люди", f"person_{me}_other_aaaaaaa6", me, "pending", "Кай", chat=-501)
-    kept = mem("сейчас любит кофе", "👥 Люди", f"person_{me}_other_aaaaaaa7", me, "pending", "Кай", chat=-501)
+    P = "👥 Люди"
+    mine = mem("купил машину", P, f"person_{me}_other_aaaaaaa1", me, "pending", "Кай", chat=-501,
+               quote="я купила машину", author="kai")                       # текст факта в м.р., но цитата Кай → остаётся
+    about_me = mem("любит руки", P, f"person_{me}_other_aaaaaaa2", me, "pending", "Кай", chat=-501,
+                   quote="Я обожаю твои руки", author="partner")             # про «твои» → обо мне
+    mapped = mem("устаёт от жары", P, f"person_{me}_other_aaaaaaa3", me, "pending", "Кай", chat=-501,
+                 quote="я устаю от жары", author="partner")                  # партнёр о себе, чат сопоставлен → на Олю
+    nochat = mem("устаёт от шума", P, f"person_{me}_other_aaaaaaa4", me, "pending", "Кай", chat=-999,
+                 quote="я устаю от шума", author="partner")                  # чат не сопоставлен → ❓
+    nomark = mem("любит кино", P, f"person_{me}_other_aaaaaaa5", me, "pending", "Кай", chat=-501,
+                 quote="люблю кино", author="kai")                           # без маркера → ❓
+    interloc = mem("Собеседник любит чай", P, f"person_{me}_other_aaaaaaa6", me, "pending", "Кай", chat=-501,
+                   quote="я люблю чай", author="kai")
+    temp = mem("сейчас находится в отпуске", P, f"person_{me}_other_aaaaaaa7", me, "pending", "Кай", chat=-501,
+               quote="я сейчас в отпуске", author="kai")
+    kept = mem("сейчас любит кофе", P, f"person_{me}_other_aaaaaaa8", me, "pending", "Кай", chat=-501,
+               quote="я сейчас люблю кофе", author="kai")
 
-    with patch.object(sc, "_haiku", _haiku_stub("🗂 Прочее")):
-        sc.plan("", f"{kept}")
+    with patch.object(sc, "_haiku", side_effect=AssertionError("атрибуция идёт БЕЗ LLM")):
+        sc.plan("", f"{kept}")                                               # этап по умолчанию — attribution
     plan = json.loads(Path(sc.PLAN).read_text())
     g = {x["id"]: x for x in plan["gender"]}
     assert g[mapped]["action"] == "reassign" and g[mapped]["person_id"] == friend
-    assert g[nochat]["action"] == "check" and "не сопоставлен" in g[nochat]["why"]      # НЕ rejected: на проверку владельцу
+    assert g[nochat]["action"] == "check" and "не сопоставлен" in g[nochat]["why"]
+    assert g[nomark]["action"] == "check" and g[nomark]["why"] == "kai_no_marker"
     assert g[interloc]["action"] == "reject"
-    assert mine not in g and fem not in g
-    assert fem in {o["id"] for o in plan["overridden"]}                                  # отдельный список «женский перекрыл»
-    assert temp in plan["temp"] and kept not in plan["temp"] and kept in {i["id"] for i in plan["self"]}
+    assert mine not in g and about_me not in g
+    assert plan["self"] == []                                                 # категорий на этом этапе нет
+    assert temp in plan["temp"] and kept not in plan["temp"]
     sample = Path(sc.SAMPLE).read_text()
-    assert "купил машину" in sample and "Женский маркер перекрыл" in sample and "[ОСТАЮТСЯ]" in sample
+    assert "я устаю от жары" in sample and "kai_first" in sample and "[ОСТАЮТСЯ]" in sample
 
     sc.apply()
     with get_engine().connect() as c:
         rows = {r.id: r for r in c.execute(text(
             "SELECT id, person_id, review_status, key_name, category FROM memories WHERE user_id=:u"), {"u": MARK})}
     assert rows[mapped].person_id == friend and rows[mapped].review_status == "pending"
-    assert rows[nochat].person_id == me and rows[nochat].review_status == "pending" and rows[nochat].category == "❓ Проверить автора"
+    assert rows[nochat].person_id == me and rows[nochat].category == "❓ Проверить автора" and rows[nochat].review_status == "pending"
+    assert rows[nomark].category == "❓ Проверить автора"
     assert rows[interloc].review_status == "rejected"
-    assert rows[mine].person_id == me and rows[mine].review_status == "pending" and rows[mine].category != "👥 Люди"
-    assert rows[fem].category not in ("❓ Проверить автора",) and rows[fem].review_status == "pending"
-    assert rows[temp].review_status == "rejected"                 # временное применяется
-    assert rows[kept].review_status == "pending"                  # …кроме оставленного вручную
+    for keep_id in (mine, about_me, kept):
+        assert rows[keep_id].person_id == me and rows[keep_id].review_status == "pending" and rows[keep_id].category == P
+    assert rows[temp].review_status == "rejected"
 
 
 def test_manual_overrides_delete_misc_self_person(world):
@@ -386,7 +397,7 @@ def test_plan_takes_cat_names_from_table(world, cats_cleanup):
     alias = mem("Рыжуля любит окно", "👥 Люди", f"person_{me}_other_aaaaaaa2", me, "pending", "Кай")
     other = mem("Барсик спит на диване", "👥 Люди", f"person_{me}_other_aaaaaaa3", me, "pending", "Кай")   # такого кота нет
     with patch.object(sc, "_haiku", _haiku_stub("🏠 Быт")):
-        sc.plan("")
+        sc.plan("", "", "all")
     plan = json.loads(Path(sc.PLAN).read_text())
     got = {i["id"]: (i["cat"], i["by"]) for i in plan["self"]}
     assert got[named] == ("🐾 Коты", "kw") and got[alias] == ("🐾 Коты", "kw")
@@ -397,6 +408,6 @@ def test_plan_without_cats_table_rows_still_works(world):
     sc, me, mem = world["sc"], world["me"], world["mem"]
     x = mem("Рыжик спит на диване", "👥 Люди", f"person_{me}_other_bbbbbbb1", me, "pending", "Кай")
     with patch.object(sc, "_haiku", _haiku_stub("🏠 Быт")), patch("core.repos.pg_cats_repo.cat_names", side_effect=RuntimeError("x")):
-        sc.plan("")
+        sc.plan("", "", "all")
     plan = json.loads(Path(sc.PLAN).read_text())
     assert {i["id"]: i["by"] for i in plan["self"]}[x] == "haiku"           # сбой таблицы cats не роняет разметку
