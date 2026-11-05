@@ -14,12 +14,12 @@ import re
 import sys
 from collections import Counter
 
-THRESHOLDS = (0.76, 0.78, 0.80, 0.82, 0.85, 0.88, 0.90)
+THRESHOLDS = (0.84, 0.86, 0.88, 0.90, 0.92, 0.94)
 
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--threshold", type=float, default=0.82)
+    ap.add_argument("--threshold", type=float, default=0.90)
     ap.add_argument("--out", default="/tmp/dedup.md")
     a = ap.parse_args()
     import sqlalchemy as sa
@@ -48,9 +48,9 @@ def main() -> int:
             {"p": me, "t": min(THRESHOLDS)}).all()]
     edges = [e for e in edges if e[0] in by_id and e[1] in by_id]
     pol = {i: polarity(r.fact_text) for i, r in by_id.items()}
-    cross = sum(1 for x, y, cs in edges if cs >= 0.82 and pol[x] != pol[y])
+    cross = sum(1 for x, y, cs in edges if cs >= 0.90 and pol[x] != pol[y])
     print(f"фактов в расчёте: {len(by_id)} (без эмбеддинга: {sum(1 for r in by_id.values() if not r.emb)}) | "
-          f"полярность: {dict(Counter(pol.values()))} | пар ≥0.82 разной полярности (отброшены): {cross}")
+          f"полярность: {dict(Counter(pol.values()))} | пар ≥0.90 разной полярности (отброшены): {cross}")
     print(f"{'порог':>6} {'кластеров':>10} {'фактов в них':>13} {'макс. размер':>13} {'размеры (топ-8)':>20}")
     for t in THRESHOLDS:
         cl = clusters(edges, pol, threshold=t)

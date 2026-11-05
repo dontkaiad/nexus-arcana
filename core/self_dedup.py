@@ -1,14 +1,14 @@
 """core/self_dedup.py — дубли среди фактов «Я»: кластеры похожих по уже посчитанным эмбеддингам (без LLM и без Voyage).
 
-Объединяются только факты ОДНОЙ полярности («любит» не сливается с «не любит»). Кластеры — компоненты связности по
-парам с cosine ≥ порога; пары, помеченные «Это разное», в рёбра не попадают. Чистые функции — SQL (pgvector) в вызывающем коде.
+Объединяются только факты ОДНОЙ полярности («любит» не сливается с «не любит»). Кластеры — группы с полной связью (каждый
+с каждым cosine ≥ порога); пары, помеченные «Это разное», в рёбра не попадают. Чистые функции — SQL (pgvector) в вызывающем коде.
 """
 from __future__ import annotations
 
 import re
 from typing import Dict, Iterable, List, Sequence, Set, Tuple
 
-DEFAULT_THRESHOLD = 0.82
+DEFAULT_THRESHOLD = 0.90
 
 # Отрицание / неприязнь: такие факты не сливаются с утвердительными.
 _NEG = re.compile(r"\bне\b|\bни\b|ненавид|терпеть не|бесит|раздража|нельзя|избега|боится|\bбез\b|никогда", re.I)
@@ -20,29 +20,31 @@ def polarity(text: str) -> str:
 
 def clusters(edges: Iterable[Tuple[int, int, float]], pol: Dict[int, str],
              dismissed: Set[Tuple[int, int]] = frozenset(), threshold: float = DEFAULT_THRESHOLD) -> List[List[int]]:
-    """Компоненты связности. edges: (id_a, id_b, cosine). Пара пропускается, если cosine ниже порога, полярности разные
-    или пара в dismissed ((min,max)). Возвращает кластеры из ≥2 id, внутри — по возрастанию, кластеры — по убыванию размера."""
-    parent: Dict[int, int] = {}
-
-    def find(x: int) -> int:
-        parent.setdefault(x, x)
-        while parent[x] != x:
-            parent[x] = parent[parent[x]]
-            x = parent[x]
-        return x
-
+    """Жадная кластеризация с ПОЛНОЙ связью: факт входит в группу, только если похож (cosine ≥ порога, та же полярность,
+    пара не в dismissed) на КАЖДОГО её члена. Компоненты связности для коротких фактов не годятся: цепочка 0.83–0.83–0.83
+    сливает полтысячи разных фактов в одну «группу». edges: (id_a, id_b, cosine). Возвращает группы из ≥2 id (внутри — по
+    возрастанию; группы — по убыванию размера)."""
+    adj: Dict[int, Dict[int, float]] = {}
     for a, b, cos in edges:
-        if cos < threshold or pol.get(a) != pol.get(b):
+        if cos < threshold or pol.get(a) != pol.get(b) or (min(a, b), max(a, b)) in dismissed:
             continue
-        if (min(a, b), max(a, b)) in dismissed:
+        adj.setdefault(a, {})[b] = cos
+        adj.setdefault(b, {})[a] = cos
+    taken: Set[int] = set()
+    out: List[List[int]] = []
+    # сначала самые «связные» факты: они задают ядро группы
+    for seed in sorted(adj, key=lambda x: (-len(adj[x]), x)):
+        if seed in taken:
             continue
-        ra, rb = find(a), find(b)
-        if ra != rb:
-            parent[ra] = rb
-    groups: Dict[int, List[int]] = {}
-    for x in list(parent):
-        groups.setdefault(find(x), []).append(x)
-    out = [sorted(g) for g in groups.values() if len(g) >= 2]
+        group = [seed]
+        for cand in sorted(adj[seed], key=lambda x: (-adj[seed][x], x)):
+            if cand in taken:
+                continue
+            if all(cand in adj and m in adj[cand] for m in group):
+                group.append(cand)
+        if len(group) >= 2:
+            taken.update(group)
+            out.append(sorted(group))
     out.sort(key=lambda g: (-len(g), g[0]))
     return out
 
