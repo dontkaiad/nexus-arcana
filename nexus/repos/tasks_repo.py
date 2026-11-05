@@ -32,6 +32,9 @@ class TasksRepo:
     async def record_completion(self, page_id: str, done_by: str = "", source: str = "app") -> bool:
         return await self._pg.record_completion(page_id, done_by=done_by, source=source)
 
+    async def set_cat(self, page_id: str, cat_id: Optional[int]) -> bool:
+        return await self._pg.set_cat(page_id, cat_id)
+
     async def set_archived(self, page_id: str) -> None:
         await self._pg.set_archived(page_id)
 

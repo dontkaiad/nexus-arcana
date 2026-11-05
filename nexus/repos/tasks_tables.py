@@ -61,6 +61,8 @@ tasks = Table(
     Column("duration_min", Integer),
     # #242: видно ли задачу Заре для упоминания друзьям ("Кай хочет в кино на выходных").
     Column("shared", Boolean, nullable=False, server_default=text("false")),
+    # Задача про конкретного кота (миграция e6c9a2d4b831); NULL — не про кота / про всех.
+    Column("cat_id", BigInteger, ForeignKey("cats.id", ondelete="SET NULL")),
     Column("user_id", Text, nullable=False, server_default=text("''")),
     Column("created_at", TIMESTAMP(timezone=True), nullable=False,
            server_default=text("now()")),

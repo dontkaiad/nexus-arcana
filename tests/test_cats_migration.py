@@ -27,6 +27,14 @@ def _load_migration():
     return mig
 
 
+def _load_dependent_migration():
+    path = next((REPO / "alembic" / "versions").glob("*_tasks_cat_id.py"))
+    spec = importlib.util.spec_from_file_location("_mig_tasks_cat", path)
+    mig = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mig)
+    return mig
+
+
 @pytest.fixture(autouse=True)
 def _cleanup():
     yield
@@ -62,15 +70,20 @@ def test_migration_up_down_reversible():
         try:
             ctx = MigrationContext.configure(conn)
             with Operations.context(ctx):
+                # tasks.cat_id (FK на cats) появился позже — откатываем зависимое первым, как это делает alembic.
+                dep = _load_dependent_migration()
+                dep.downgrade()
                 mig.downgrade()
                 insp = inspect(conn)
                 assert "cats" not in insp.get_table_names()
                 assert "cat_id" not in [c["name"] for c in insp.get_columns("memories")]
                 assert "ix_memories_cat" not in {i["name"] for i in insp.get_indexes("memories")}
                 mig.upgrade()
+                dep.upgrade()
                 insp = inspect(conn)
                 assert "cats" in insp.get_table_names()
                 assert "cat_id" in [c["name"] for c in insp.get_columns("memories")]
+                assert "cat_id" in [c["name"] for c in insp.get_columns("tasks")]
         finally:
             trans.rollback()
 
