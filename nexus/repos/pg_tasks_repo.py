@@ -52,6 +52,7 @@ class Task:
     duration_min: Optional[int] = None  # #241: занимает время (booking busy) — None → дефолт 1ч
     shared: bool = False                # #242: видна Заре для упоминания друзьям
     deadline_all_day: bool = False      # дедлайн задан без времени ("до пятницы") — весь день
+    cat_id: Optional[int] = None        # задача про конкретного кота (None — не про кота / про всех)
 
 
 # ── Lookup caches (loaded once per process) ────────────────────────────────────
@@ -220,6 +221,7 @@ def _to_task(row) -> Task:
         duration_min=getattr(row, "duration_min", None),
         shared=bool(getattr(row, "shared", False)),
         deadline_all_day=bool(getattr(row, "deadline_all_day", False)),
+        cat_id=getattr(row, "cat_id", None),
     )
 
 
@@ -356,6 +358,17 @@ def _record_completion_sync(task_id: str, done_by: str, source: str) -> bool:
         return True
     except Exception as e:
         logger.warning("_record_completion_sync failed for task %s: %s", str(task_id)[:8], e)
+        return False
+
+
+def _set_cat_sync(task_id: str, cat_id: Optional[int]) -> bool:
+    try:
+        with get_engine().begin() as conn:
+            r = conn.execute(tasks.update().where(tasks.c.id == int(task_id))
+                             .values(cat_id=cat_id, updated_at=text("now()")))
+        return bool(r.rowcount)
+    except Exception as e:
+        logger.error("_set_cat_sync: %s", e)
         return False
 
 
@@ -601,6 +614,10 @@ class PgTasksRepo:
         """Записать выполнение в журнал. Для повторяющихся задач статус не становится Done,
         поэтому вызывается явно (Mini App «done», бот на дедлайн-пинге)."""
         return await asyncio.to_thread(_record_completion_sync, page_id, str(done_by or ""), source)
+
+    async def set_cat(self, page_id: str, cat_id: Optional[int]) -> bool:
+        """Привязать задачу к коту (None — отвязать). Принадлежность кота владельцу проверяет вызывающий."""
+        return await asyncio.to_thread(_set_cat_sync, page_id, cat_id)
 
     async def set_in_progress(self, page_id: str) -> None:
         await asyncio.to_thread(_set_status_sync, page_id, "In progress")

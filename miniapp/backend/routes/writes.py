@@ -326,6 +326,29 @@ class TaskEditBody(BaseModel):
     explicit_duration: bool = False
 
 
+class TaskCatBody(BaseModel):
+    cat_id: Optional[int] = None      # None — отвязать от кота
+
+
+@router.post("/tasks/{task_id}/cat")
+async def task_set_cat(
+    task_id: str,
+    body: TaskCatBody,
+    tg_id: int = Depends(current_user_id),
+) -> dict[str, Any]:
+    """Привязать задачу к коту «Задача про кота» (или отвязать). Кот должен быть карточкой владельца."""
+    user_id = (await get_user_id(tg_id)) or ""
+    await _load_owned_task(task_id, user_id)
+    if body.cat_id is not None:
+        from core.repos import pg_cats_repo
+        cat = await asyncio.to_thread(pg_cats_repo.get_cat, user_id, body.cat_id)
+        if not cat or cat.get("status") == "rejected":
+            raise HTTPException(status_code=404, detail="cat not found")
+    if not await _tasks_pg_repo.set_cat(task_id, body.cat_id):
+        raise HTTPException(status_code=500, detail="failed to update task")
+    return {"ok": True, "cat_id": body.cat_id}
+
+
 @router.post("/tasks/{task_id}/edit")
 async def task_edit(
     task_id: str,
