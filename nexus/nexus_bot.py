@@ -517,6 +517,37 @@ async def set_tz(msg: Message, user_id: str = "") -> None:
     await _update_user_tz(msg, msg.text.replace("/tz", "").strip(), user_id=user_id)
 
 
+@dp.message(Command("care_period"))
+async def cmd_care_period(msg: Message, user_id: str = "") -> None:
+    """Период ухода (ситтер активен): /care_period 2026-12-01 2027-01-31, /care_period (показать), /care_period off."""
+    import asyncio as _aio
+    from datetime import date as _date
+    from core import care
+    from core.location import get_user_tz
+    parts = (msg.text or "").split()[1:]
+    if not user_id:
+        await msg.answer("⚠️ Не нашла твой профиль.")
+        return
+    if parts and parts[0].lower() in ("off", "стоп", "нет"):
+        cleared = await _aio.to_thread(care.clear_period, user_id)
+        await msg.answer("Период ухода снят." if cleared else "Периода и не было.")
+        return
+    if len(parts) == 2:
+        try:
+            a, b = _date.fromisoformat(parts[0]), _date.fromisoformat(parts[1])
+            await _aio.to_thread(care.set_period, user_id, a, b)
+        except ValueError as e:
+            await msg.answer("⚠️ Формат: /care_period ГГГГ-ММ-ДД ГГГГ-ММ-ДД (конец не раньше начала, не больше года). %s" % e)
+            return
+        await msg.answer("✅ Период ухода: %s — %s. В это время напоминания задач ситтера тебе молчат." % (a, b))
+        return
+    p = await _aio.to_thread(care.get_period, user_id)
+    tz = await get_user_tz(msg.from_user.id)
+    active = await _aio.to_thread(care.is_active, user_id, tz)
+    await msg.answer(("Период ухода: %s — %s (%s)." % (p["starts_on"], p["ends_on"], "идёт сейчас" if active else "не идёт")) if p
+                     else "Период ухода не задан. /care_period 2026-12-01 2027-01-31")
+
+
 @dp.message(Command("setmenu"))
 async def cmd_setmenu(msg: Message) -> None:
     """Принудительно обновить кнопку миниаппа (восстановить иконку ☀️ Nexus)."""
@@ -1674,6 +1705,16 @@ async def main() -> None:
         # → пропущенное напоминание доезжает максимум через ~90с, а не «на
         # следующем деплое».
         from apscheduler.triggers.interval import IntervalTrigger
+        from core.care import send_overdue_alerts
+        # Уход за котами: одно предупреждение владельцу, если цикл расписания ситтера просрочен больше 3 часов.
+        nexus_scheduler.add_job(
+            send_overdue_alerts,
+            trigger=IntervalTrigger(minutes=15),
+            id="care_overdue",
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+        )
         nexus_scheduler.add_job(
             restore_reminders_on_startup,
             kwargs={"periodic": True},
