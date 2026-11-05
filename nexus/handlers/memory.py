@@ -478,3 +478,8 @@ async def cb_mem_auto_no(call: CallbackQuery) -> None:
 async def cb_memall(call: CallbackQuery) -> None:
     """«Все факты (N)» под ответом своими словами (общая логика — core.memory.expand_all_facts)."""
     await mem.expand_all_facts(call)
+
+
+# Диалог маршрута «Запомни …» (тёзки / создать карточку?) — общий код в core.memory_route_ui
+from core import memory_route_ui  # noqa: E402
+memory_route_ui.register(router, "Запомнил")
