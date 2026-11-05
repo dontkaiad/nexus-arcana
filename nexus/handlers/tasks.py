@@ -1481,6 +1481,7 @@ async def _handle_recurring_deadline_done(
                 task_title=title,
                 repeat_kind=repeat or "Ежедневно",
                 today_local=today_local,
+                interval_days=_parse_repeat_time(getattr(task, "repeat_time", "") or "")[1],
             )
         except Exception as e:
             logger.debug("per-task streak update error: %s", e)

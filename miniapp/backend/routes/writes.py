@@ -169,6 +169,7 @@ async def task_done(
     today_local, tz_offset = await today_user_tz(tg_id)
     if is_repeating:
         try:
+            from core.recurrence import parse_repeat_time
             from core.task_streaks import update_task_streak
             update_task_streak(
                 user_id=tg_id,
@@ -176,6 +177,7 @@ async def task_done(
                 task_title=task.title,
                 repeat_kind=repeat_kind or "Каждый день",
                 today_local=today_local.isoformat(),
+                interval_days=parse_repeat_time(repeat_time)[1],
             )
         except Exception as e:
             logger.warning("update_task_streak failed: %s", e)
