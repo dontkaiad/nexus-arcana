@@ -220,7 +220,7 @@ export default function PersonCard({ s, Sheet, id, onBack, onChanged, onStartRev
       )}
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 16 }}>
-        {p.is_self && pend > 0 && onStartReview && !embedded && (
+        {p.is_self && pend > 0 && onStartReview && (
           <Btn s={s} kind="primary" onClick={() => onStartReview(p.id)}>Разобрать по одному ({pend})</Btn>
         )}
         {pend > 0 && !p.is_self && (

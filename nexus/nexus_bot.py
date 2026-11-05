@@ -1698,6 +1698,16 @@ async def main() -> None:
             id="budget_payday_review",
             replace_existing=True,
         )
+        # 🔎 Трассы поиска по памяти: удалить старше 30 дней — ежедневно 03:30 UTC
+        from core.memory_trace import purge_old_traces
+        nexus_scheduler.add_job(
+            purge_old_traces,
+            trigger=CronTrigger(hour=3, minute=30),
+            id="memory_trace_purge",
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+        )
         # Напоминания: периодический re-arm из PG каждые 90 секунд (#210).
         # APScheduler теряет in-memory job'ы при рестарте (частый auto-pull +
         # watchfiles на nexus/core/miniapp), а restore со старта ловит только
