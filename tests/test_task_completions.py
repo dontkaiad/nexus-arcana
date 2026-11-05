@@ -62,6 +62,8 @@ def test_migration_chain_and_columns():
 
 
 def test_migration_up_down_reversible_and_backfill():
+    """Откат и накат в транзакции, которая НЕ коммитится: downgrade удаляет таблицу целиком, и пересоздание без поздних
+    миграций (колонка cycle_due и др.) испортило бы схему для остальных тестов."""
     from alembic.migration import MigrationContext
     from alembic.operations import Operations
 
@@ -69,15 +71,18 @@ def test_migration_up_down_reversible_and_backfill():
     done = datetime(2026, 11, 3, 13, 0, tzinfo=timezone.utc)
     tid = _mk_task(completed_at=done)
     tid_open = _mk_task("Открытая задача")
-    eng = get_engine()
-    with eng.begin() as conn:                                       # откат и повторный накат в одной транзакции
-        with Operations.context(MigrationContext.configure(conn)):
-            mig.downgrade()
-            assert "task_completions" not in inspect(conn).get_table_names()
-            mig.upgrade()
-        rows = conn.execute(text("SELECT source, done_at FROM task_completions WHERE task_id = :t"), {"t": tid}).all()
-        assert [(r.source, r.done_at) for r in rows] == [("backfill", done)]
-        assert conn.execute(text("SELECT count(*) FROM task_completions WHERE task_id = :t"), {"t": tid_open}).scalar() == 0
+    with get_engine().connect() as conn:
+        trans = conn.begin()
+        try:
+            with Operations.context(MigrationContext.configure(conn)):
+                mig.downgrade()
+                assert "task_completions" not in inspect(conn).get_table_names()
+                mig.upgrade()
+            rows = conn.execute(text("SELECT source, done_at FROM task_completions WHERE task_id = :t"), {"t": tid}).all()
+            assert [(r.source, r.done_at) for r in rows] == [("backfill", done)]
+            assert conn.execute(text("SELECT count(*) FROM task_completions WHERE task_id = :t"), {"t": tid_open}).scalar() == 0
+        finally:
+            trans.rollback()
 
 
 def test_backfill_is_idempotent_and_skips_tasks_that_already_have_rows():
