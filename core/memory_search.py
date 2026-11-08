@@ -338,6 +338,35 @@ async def search_memories(query: str, **kw) -> List[Memory]:
     return [h.memory for h in await hybrid_search(query, **kw)]
 
 
+# ── Подсказки по объекту (покупка «как обычно», предпочтения списков): тот же гибридный путь, что у вопросов ───────
+
+_NEGATIVE = re.compile(r"\bне\b|\bни\b|ненавид|терпеть не|бесит|раздража|нельзя|избега|боится|никогда", re.I)
+
+
+async def object_facts(obj: str, user_id: str = "", k: int = 3, positive_only: bool = True) -> List[Memory]:
+    """Факты ВЛАДЕЛЬЦА по объекту («молоко», «орехи»): FTS + вектор → RRF, без реранка (дёшево: один эмбеддинг запроса).
+    Берутся только факты с лексическим совпадением (FTS): вектор всегда найдёт «ближайший», даже нерелевантный.
+    positive_only: «не ем X», «ненавижу X», «аллергия на X» не должны превращаться в «как обычно X» — такие отбрасываются.
+    Фильтры чтения общие (confirmed, не tombstone, не rejected-человек); факты других людей не берутся (subject_self)."""
+    obj = (obj or "").strip()
+    if len(obj) < 2:
+        return []
+    hits = await hybrid_search(obj, user_id=user_id, k=max(k * 4, 8), do_rerank=False, subject_self=True)
+    out: List[Memory] = []
+    for h in hits:
+        m = h.memory
+        if h.fts_rank is None or m is None or not (m.fact or "").strip():
+            continue
+        if positive_only:
+            t = m.fact
+            if _NEGATIVE.search(t) or query_parse.fact_type_from_text(t) in (query_parse.DISLIKES, query_parse.IMPORTANT):
+                continue
+        out.append(m)
+        if len(out) >= k:
+            break
+    return out
+
+
 # ── Этап 2: понимание вопроса до поиска ───────────────────────────────────────
 
 from core import query_parse  # noqa: E402  (после определения Hit/гибрида — нет циклов)

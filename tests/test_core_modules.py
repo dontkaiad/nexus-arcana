@@ -36,7 +36,7 @@ class TestMemoryModule:
         """recall_from_memory — вернуть None если ничего не найдено."""
         import core.memory as cmem
         from core.memory import recall_from_memory
-        with patch.object(cmem._mem_repo, "search", new=AsyncMock(return_value=[])):
+        with patch.object(cmem._memory_search, "object_facts", new=AsyncMock(return_value=[])):
             result = await recall_from_memory("несуществующий_ключ")
             assert result is None
 

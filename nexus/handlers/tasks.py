@@ -2939,7 +2939,7 @@ async def _do_save_task(message: Message, data: dict, chat_id: int = None, uid: 
         if _purchase_match:
             from core.memory import recall_from_memory
             _obj = _purchase_match.group(2).strip()
-            _fact = await recall_from_memory(_obj)
+            _fact = await recall_from_memory(_obj, user_id=data.get("user_id", ""))
             if _fact:
                 await message.answer(f"💡 <i>{_fact} — как обычно?</i>")
                 _recall_shown = True

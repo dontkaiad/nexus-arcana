@@ -194,49 +194,48 @@ _PREF_KEYWORDS = re.compile(
 )
 
 
-async def _search_memory_for_prefs(item_name: str) -> str:
-    """Ищет предпочтения в 🧠 Память (PG) по названию айтема."""
-    from core.repos.memory_repo import _repo as _mem_repo
+async def _search_memory_for_prefs(item_name: str, user_id: str = "") -> str:
+    """Предпочтения по названию айтема из 🧠 Памяти: гибридный поиск (core.memory_search.object_facts), только положительные факты
+    владельца, где есть слова про бренд/размер/вкус и т.п."""
+    from core import memory_search
     if not item_name.strip():
         return ""
     try:
-        mems = await _mem_repo.search([item_name.lower().strip()], page_size=3)
-        texts = []
-        for m in mems:
-            fact = m.fact or ""
-            if not fact or len(fact) < 5:
-                continue
-            if _PREF_KEYWORDS.search(fact):
-                texts.append(fact)
+        mems = await memory_search.object_facts(item_name.strip(), user_id=user_id, k=3)
+        texts = [m.fact for m in mems if len(m.fact or "") >= 5 and _PREF_KEYWORDS.search(m.fact)]
         return "; ".join(texts) if texts else ""
     except Exception as e:
         logger.warning("_search_memory_for_prefs(%s): %s", item_name, e)
         return ""
 
 
-async def search_memory_categories(item_names: list) -> dict:
-    """Ищет в 🧠 Память (PG) маппинги категорий для списка айтемов."""
-    from core.repos.memory_repo import _repo as _mem_repo
-    if not item_names:
+async def search_memory_categories(item_names: list, user_id: str = "") -> dict:
+    """Маппинги категорий для айтемов из 🧠 Памяти: факт, найденный по айтему (гибридный поиск), называет категорию списка."""
+    import asyncio
+    from core import memory_search
+    names = [n for n in (item_names or []) if n and len(n.strip()) >= 2]
+    if not names:
         return {}
-    result: dict = {}
-    for name in item_names:
-        name_clean = name.lower().strip()
-        if not name_clean or len(name_clean) < 2:
-            continue
+
+    async def one(name):
         try:
-            mems = await _mem_repo.search([name_clean], page_size=3)
-            for m in mems:
-                fact_lower = (m.fact or "").lower()
-                for cat in LIST_CATEGORIES:
-                    cat_name = cat.split(" ", 1)[-1].lower() if " " in cat else cat.lower()
-                    if cat_name in fact_lower:
-                        result[name] = cat
-                        break
-                if name in result:
-                    break
+            return await memory_search.object_facts(name.lower().strip(), user_id=user_id, k=3, positive_only=False)
         except Exception as e:
             logger.warning("search_memory_categories(%s): %s", name, e)
+            return []
+
+    found = await asyncio.gather(*(one(n) for n in names))
+    result: dict = {}
+    for name, mems in zip(names, found):
+        for m in mems:
+            fact_lower = (m.fact or "").lower()
+            for cat in LIST_CATEGORIES:
+                cat_name = cat.split(" ", 1)[-1].lower() if " " in cat else cat.lower()
+                if cat_name in fact_lower:
+                    result[name] = cat
+                    break
+            if name in result:
+                break
     return result
 
 
@@ -295,7 +294,7 @@ async def add_items(
             category = ""
 
         if list_type == "🛒 Покупки" and is_nexus:
-            pref = await _search_memory_for_prefs(name)
+            pref = await _search_memory_for_prefs(name, user_page_id)
             if pref:
                 note = "%s; %s" % (note, pref) if note else pref
 

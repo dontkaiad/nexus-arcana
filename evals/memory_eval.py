@@ -81,9 +81,22 @@ async def _run(cases: List[Dict[str, Any]], user_id: str, rerank: bool, k: int =
             "routes": routes, "misses": bad}
 
 
+async def _run_hints(cases, ids, user_id: str) -> Dict[str, Any]:
+    """Подсказки по объекту покупки (core.memory_search.object_facts): нужное есть, ловушки (отрицание, аллергия, чужое) — нет."""
+    from core import memory_search
+    ok, bad = 0, []
+    for obj, want, forbid in cases:
+        got = {int(m.id) for m in await memory_search.object_facts(obj, user_id=user_id, k=3)}
+        good = {ids[k] for k in want} <= got and not ({ids[k] for k in forbid} & got) and (bool(want) or not got)
+        ok += int(good)
+        if not good:
+            bad.append({"object": obj, "got": sorted(got)})
+    return {"cases": len(cases), "pass_pct": pct(ok, len(cases)), "misses": bad}
+
+
 def run_offline() -> Dict[str, Any]:
     """Синтетический мир → recall@5 без вектора и без LLM (детерминированно)."""
-    from evals.synthetic.memory_world import CASES, CASES_CATS, SYN_USER, world
+    from evals.synthetic.memory_world import CASES, CASES_CATS, HINT_CASES, SYN_USER, world
     os.environ.setdefault("MEMORY_QUERY_UNDERSTANDING", "1")
     from unittest.mock import patch
     from core import memory_search as ms
@@ -94,7 +107,9 @@ def run_offline() -> Dict[str, Any]:
                   for q, exp, route, extra in CASES_CATS]
         # вектор выключаем (нет ключа Voyage в CI): оцениваем разбор вопроса + FTS + прямой путь
         with patch.object(ms, "_embed", return_value=[]):
-            return asyncio.run(_run(cases, SYN_USER, rerank=False))
+            res = asyncio.run(_run(cases, SYN_USER, rerank=False))
+            res["hints"] = asyncio.run(_run_hints(HINT_CASES, ids, SYN_USER))
+        return res
 
 
 def run_compare() -> Dict[str, Any]:
