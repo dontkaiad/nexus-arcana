@@ -24,13 +24,13 @@ SYN_USER = "eval-synthetic"
 
 # (символьное имя, человек|None, тип|None, текст факта, статус)
 FACTS = [
-    ("m1_dis1", "misha1", "dislikes", "не любит опоздания", "confirmed"),
-    ("m1_dis2", "misha1", "dislikes", "ненавидит шумные места", "confirmed"),
-    ("m1_like", "misha1", "likes", "любит джаз", "confirmed"),
-    ("m2_dis", "misha2", "dislikes", "не любит жару", "confirmed"),
-    ("m2_like", "misha2", "likes", "любит рок", "confirmed"),
-    ("m1_wrongtype", "misha1", "likes", "не любит ходить один", "confirmed"),      # тип Haiku неверный: по тексту — dislikes
-    ("m1_pending", "misha1", "dislikes", "не любит ожидание", "pending"),          # pending не должен попадать в выдачу
+    ("m1_dis1", "tyoma1", "dislikes", "не любит опоздания", "confirmed"),
+    ("m1_dis2", "tyoma1", "dislikes", "ненавидит шумные места", "confirmed"),
+    ("m1_like", "tyoma1", "likes", "любит джаз", "confirmed"),
+    ("m2_dis", "tyoma2", "dislikes", "не любит жару", "confirmed"),
+    ("m2_like", "tyoma2", "likes", "любит рок", "confirmed"),
+    ("m1_wrongtype", "tyoma1", "likes", "не любит ходить один", "confirmed"),      # тип Haiku неверный: по тексту — dislikes
+    ("m1_pending", "tyoma1", "dislikes", "не любит ожидание", "pending"),          # pending не должен попадать в выдачу
     ("o_imp", "olya", "important", "аллергия на орехи", "confirmed"),
     ("o_imp2", "olya", "important", "нельзя кофеин вечером", "confirmed"),
     ("o_like", "olya", "likes", "любит зелёный чай", "confirmed"),
@@ -47,7 +47,7 @@ FACTS = [
     ("tp_dis", "tp", "dislikes", "не ест мясо", "confirmed"),
     ("tp_like", "tp", "likes", "любит борщ", "confirmed"),
 ]
-PEOPLE = [("misha1", "Алекс Тестов", ["Алекс"], None), ("misha2", "Алекс Образцов", ["Алекс"], None),
+PEOPLE = [("tyoma1", "Алекс Тестов", ["Алекс"], None), ("tyoma2", "Алекс Образцов", ["Алекс"], None),
           ("olya", "Вера Тестова", ["Верочка"], date(1990, 3, 5)),
           ("tp", "Тучка Тестова", ["Тучка"], None)]
 

@@ -58,8 +58,8 @@ def test_description_alias_never_matches_its_inner_name(alias):
 
 
 def test_multiword_name_still_matches_by_single_word():
-    forms = set(aliases_norm_for("Миша Ари", []))
-    assert forms & set(mention_candidates(["Миша"])) and forms & set(mention_candidates(["Ари"]))
+    forms = set(aliases_norm_for("Тёма Лисов", []))
+    assert forms & set(mention_candidates(["Тёма"])) and forms & set(mention_candidates(["Лисов"]))
 
 
 # ── резолв на реальной БД ────────────────────────────────────────────────────

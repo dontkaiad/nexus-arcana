@@ -3,13 +3,14 @@
 Generate valid initData for local dev and write to .env.local
 Usage: python3 gen-dev-initdata.py
 """
-import hmac, hashlib, json, time, urllib.parse
+import hmac, hashlib, json, os, time, urllib.parse
 from pathlib import Path
 
-PROJECT_DIR = Path("/Users/dontkaiad/PROJECTS/ai-agents/AI_AGENTS")
+# Корень проекта: переменная PROJECT_DIR или каталог выше scripts/
+PROJECT_DIR = Path(os.environ.get("PROJECT_DIR") or Path(__file__).resolve().parent.parent)
 YOUR_TG_ID = 700000001
 YOUR_FIRST_NAME = "Kai"
-YOUR_USERNAME = "dontkaiad"
+YOUR_USERNAME = os.environ.get("TG_DEV_USERNAME", "dev_user")   # ник для dev-initData (из окружения)
 
 # Read bot token
 env_file = PROJECT_DIR / ".env"

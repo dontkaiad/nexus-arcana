@@ -1,7 +1,7 @@
 """tests/test_memory_e2e_message.py — сквозной путь: ТЕКСТ СООБЩЕНИЯ → классификатор → process_item → ответ бота.
 
 Классификатор замокан в прод-формате (Haiku возвращает JSON-массив; `query` — обрезанные
-ключевые слова, как в логах прода: «что не любит миша» → "миша"). Это ровно те две функции,
+ключевые слова, как в логах прода: «что не любит тёма» → "тёма"). Это ровно те две функции,
 которые зовёт nexus_bot.handle_text (classify → process_item). БД реальная (DATABASE_URL), Voyage
 выключен, Haiku-реранк замокан. Регрессия: answer() должен получать ИСХОДНЫЙ текст, а не query.
 
@@ -32,8 +32,8 @@ CAT = "👥 Люди"
 
 # Как отвечает прод-классификатор (по логам): query — только ключевые слова.
 HAIKU = {
-    "что не любит миша": [{"type": "memory_search", "query": "миша"}],
-    "что любит миша": [{"type": "memory_search", "query": "миша"}],
+    "что не любит тёма": [{"type": "memory_search", "query": "тёма"}],
+    "что любит тёма": [{"type": "memory_search", "query": "тёма"}],
     "что я не ем": [{"type": "memory_search", "query": "не ем"}],
     "что важно про олю": [{"type": "memory_search", "query": "оля"}],
     "когда у оли др": [{"type": "memory_search", "query": "оля день рождения"}],
@@ -75,20 +75,20 @@ def _own(text):
 
 @pytest.fixture
 def world():
-    misha1 = _person("Михаил Тестов", ["Миша"], notes="коллега")
-    misha2 = _person("Миша Образцов", ["Миша"])
+    tyoma1 = _person("Артём Тестов", ["Тёма"], notes="коллега")
+    tyoma2 = _person("Тёма Образцов", ["Тёма"])
     olya = _person("Ольга", ["Оля"], birthday=__import__("datetime").date(1990, 3, 5), birthday_year_known=True)
     return {
-        "m1_dis": _fact(misha1, "dislikes", "не любит опозданий"),
-        "m2_dis": _fact(misha2, "dislikes", "не любит жару"),
-        "m1_like": _fact(misha1, "likes", "любит джаз"),
-        "m2_like": _fact(misha2, "likes", "любит рок"),
+        "m1_dis": _fact(tyoma1, "dislikes", "не любит опозданий"),
+        "m2_dis": _fact(tyoma2, "dislikes", "не любит жару"),
+        "m1_like": _fact(tyoma1, "likes", "любит джаз"),
+        "m2_like": _fact(tyoma2, "likes", "любит рок"),
         "o_imp": _fact(olya, "important", "аллергия на орехи"),
         "o_like": _fact(olya, "likes", "любит чай"),
         # типы, неверно поставленные Haiku при импорте (проверка пункта «без мусора»)
-        "m1_scold": _fact(misha1, "important", "мать ругала"),
-        "m1_pills": _fact(misha1, "important", "пьёт таблетки"),
-        "m1_alone": _fact(misha1, "likes", "не любит ходить один"),
+        "m1_scold": _fact(tyoma1, "important", "мать ругала"),
+        "m1_pills": _fact(tyoma1, "important", "пьёт таблетки"),
+        "m1_alone": _fact(tyoma1, "likes", "не любит ходить один"),
         "own": _own("не ем сладкое"),
         "olya": olya,
     }
@@ -156,9 +156,9 @@ def test_answer_receives_original_text_not_classifier_query(world, text):
 
 
 def test_dislikes_of_homonyms_two_labeled_groups(world):
-    bot, _ = run_message("что не любит миша")
+    bot, _ = run_message("что не любит тёма")
     t = bot.text
-    assert "Михаил Тестов (коллега)" in t and "Миша Образцов" in t
+    assert "Артём Тестов (коллега)" in t and "Тёма Образцов" in t
     assert "не любит опозданий" in t and "не любит жару" in t
     assert "любит джаз" not in t and "любит рок" not in t     # likes не подмешиваются
     assert "👥 Люди (" not in t                                # не старый групповой заголовок
@@ -168,7 +168,7 @@ def test_dislikes_of_homonyms_two_labeled_groups(world):
 
 
 def test_likes_of_homonyms(world):
-    bot, _ = run_message("что любит миша")
+    bot, _ = run_message("что любит тёма")
     t = bot.text
     assert "любит джаз" in t and "любит рок" in t
     assert "не любит" not in t.replace("любит джаз", "").replace("любит рок", "")
@@ -211,8 +211,8 @@ def test_birthday_from_card(world):
 
 @pytest.mark.parametrize("text,route,needle", [
     ("напомни про олю что важно", "direct", "аллергия на орехи"),
-    ("расскажи про мишу что любит", "direct", "любит джаз"),
-    ("что ты помнишь о том что не любит миша", "direct", "не любит жару"),
+    ("расскажи про тёму что любит", "direct", "любит джаз"),
+    ("что ты помнишь о том что не любит тёма", "direct", "не любит жару"),
 ])
 def test_regex_prefilter_path_also_passes_original_text(world, text, route, needle):
     bot, classify_ask = run_message(text, haiku=[])

@@ -114,7 +114,7 @@ class TestVoiceTranscriptReachesGuard:
 
         msg = self._voice_msg()
         data = {
-            "title": "встреча с Мишей",
+            "title": "встреча с Тёмой",
             "deadline": "2026-07-27T15:30",
             "reminder": "2026-07-27T14:00",  # отдельное напоминание от Haiku
             "repeat": "Нет",
@@ -123,7 +123,7 @@ class TestVoiceTranscriptReachesGuard:
             await tasks.handle_task_parsed(
                 msg, data,
                 original_text=(
-                    "двадцать седьмого числа в пятнадцать тридцать встреча с мишей "
+                    "двадцать седьмого числа в пятнадцать тридцать встреча с тёмой "
                     "напомни мне двадцать седьмого числа в четырнадцать часов"
                 ),
             )

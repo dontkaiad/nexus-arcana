@@ -37,13 +37,13 @@ def client():
 
 
 def test_person_label_forms():
-    assert person_label("Миша Ари") == "Миша Ари"
-    assert person_label("Миша Ари", "friend") == "Миша Ари — друг"
-    assert person_label("Миша Ари", "friend", "коллега по проекту") == "Миша Ари — друг, коллега по проекту"
-    assert person_label("Миша", "other", "сосед снизу") == "Миша — сосед снизу"      # «другое» не дублирует пояснение
-    assert person_label("Миша", "other") == "Миша — другое"
-    assert person_label("Миша", None, "  из   клуба ") == "Миша — из клуба"
-    assert person_label("Миша", "bogus") == "Миша"
+    assert person_label("Тёма Лисов") == "Тёма Лисов"
+    assert person_label("Тёма Лисов", "friend") == "Тёма Лисов — друг"
+    assert person_label("Тёма Лисов", "friend", "коллега по проекту") == "Тёма Лисов — друг, коллега по проекту"
+    assert person_label("Тёма", "other", "сосед снизу") == "Тёма — сосед снизу"      # «другое» не дублирует пояснение
+    assert person_label("Тёма", "other") == "Тёма — другое"
+    assert person_label("Тёма", None, "  из   клуба ") == "Тёма — из клуба"
+    assert person_label("Тёма", "bogus") == "Тёма"
 
 
 def test_clean_about_one_line_and_limit():
@@ -53,13 +53,13 @@ def test_clean_about_one_line_and_limit():
 
 
 def test_create_person_plus_button(client):
-    r = client.post("/api/people", json={"name": "Миша Ари", "relation": "friend", "about": "из клуба"})
+    r = client.post("/api/people", json={"name": "Тёма Лисов", "relation": "friend", "about": "из клуба"})
     assert r.status_code == 200, r.text
     d = r.json()
     assert d["status"] == "confirmed" and d["relation"] == "friend" and d["about"] == "из клуба"
-    assert d["label"] == "Миша Ари — друг, из клуба" and d["homonym_ids"] == []
+    assert d["label"] == "Тёма Лисов — друг, из клуба" and d["homonym_ids"] == []
     # тёзка разрешён, но о существующем сообщаем
-    r2 = client.post("/api/people", json={"name": "Миша Ари", "relation": "colleague"})
+    r2 = client.post("/api/people", json={"name": "Тёма Лисов", "relation": "colleague"})
     assert r2.status_code == 200 and r2.json()["homonym_ids"] == [d["id"]]
 
 
@@ -80,23 +80,23 @@ def test_patch_who_and_clear(client):
 
 
 def test_homonym_labels_in_search_groups(client):
-    a = insert_person(MARK, "Миша", status="confirmed", relation="friend", about="из клуба")
-    b = insert_person(MARK, "Миша", status="confirmed", notes="старая заметка")
-    c = insert_person(MARK, "Миша", status="confirmed")
+    a = insert_person(MARK, "Тёма", status="confirmed", relation="friend", about="из клуба")
+    b = insert_person(MARK, "Тёма", status="confirmed", notes="старая заметка")
+    c = insert_person(MARK, "Тёма", status="confirmed")
     labels = _people_labels([a, b, c])
-    assert labels[a] == "Миша — друг, из клуба"
-    assert labels[b] == "Миша (старая заметка)"          # без «кто это» — как раньше
-    assert labels[c] == "Миша"
+    assert labels[a] == "Тёма — друг, из клуба"
+    assert labels[b] == "Тёма (старая заметка)"          # без «кто это» — как раньше
+    assert labels[c] == "Тёма"
 
 
 def test_bot_context_labels_person(client):
     from core.memory import _people_context_block
     from core.repos import pg_people_repo as prepo
-    a = prepo.create(MARK, "Миша", [], status="confirmed", relation="friend", about="из клуба")
+    a = prepo.create(MARK, "Тёма", [], status="confirmed", relation="friend", about="из клуба")
     mk_fact(a, "likes", "confirmed", "любит чай", user=MARK)
     seen = set()
-    block = _people_context_block(MARK, ["миша"], seen)
-    assert "[Миша — друг, из клуба]" in block and "любит чай" in block
+    block = _people_context_block(MARK, ["тёма"], seen)
+    assert "[Тёма — друг, из клуба]" in block and "любит чай" in block
     # человек без «кто это» и не тёзка — заголовка-скобок нет, как раньше
     b = prepo.create(MARK, "Оля", [], status="confirmed")
     mk_fact(b, "likes", "confirmed", "любит кофе", user=MARK)

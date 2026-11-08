@@ -447,7 +447,7 @@ def _people_labels(person_ids: Sequence[int]) -> Dict[int, str]:
                             {"i": [int(i) for i in person_ids]}).all()
     out = {}
     for r in rows:
-        if r.relation or r.about:               # «Миша Ари — друг, …» (карточка «кто это»)
+        if r.relation or r.about:               # «Тёма Лисов — друг, …» (карточка «кто это»)
             out[r.id] = person_label(r.name, r.relation, r.about)
             continue
         note = " ".join((r.notes or "").split())[:40]   # карточки без «кто это» — как раньше

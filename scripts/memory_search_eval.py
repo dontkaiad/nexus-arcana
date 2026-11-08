@@ -31,7 +31,7 @@ import asyncio
 import sys
 
 GEN_STATS: list = []        # Outcome всех генераций за прогон (для сводки p50/max)
-QUERIES = ["что не любит миша", "что любит миша", "что я не ем", "что важно про олю"]
+QUERIES = ["что не любит тёма", "что любит тёма", "что я не ем", "что важно про олю"]
 
 _TYPE_SQL = ("CASE WHEN person_id IS NULL THEN 'self' ELSE "
              "COALESCE(substring(key_name from '^person_[0-9]+_([a-z]+)_[0-9a-f]{8}$'), 'other') END")

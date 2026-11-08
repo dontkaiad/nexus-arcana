@@ -400,7 +400,7 @@ def _membership_update(adder_id, status="member", chat_type="group"):
 @pytest.mark.asyncio
 async def test_owner_can_add_zarya_to_group():
     u = _membership_update(700000001)
-    with patch("zarya.handlers.config.allowed_ids", [700000001, 790273371]):
+    with patch("zarya.handlers.config.allowed_ids", [700000001, 700000099]):
         await on_membership_changed(u)
     u.bot.leave_chat.assert_not_awaited()
 
@@ -408,7 +408,7 @@ async def test_owner_can_add_zarya_to_group():
 @pytest.mark.asyncio
 async def test_stranger_adding_zarya_gets_kicked_out():
     u = _membership_update(999999)
-    with patch("zarya.handlers.config.allowed_ids", [700000001, 790273371]):
+    with patch("zarya.handlers.config.allowed_ids", [700000001, 700000099]):
         await on_membership_changed(u)
     u.bot.send_message.assert_awaited_once()
     u.bot.leave_chat.assert_awaited_once_with(-100)
@@ -417,7 +417,7 @@ async def test_stranger_adding_zarya_gets_kicked_out():
 @pytest.mark.asyncio
 async def test_membership_change_ignored_in_dm():
     u = _membership_update(999999, chat_type="private")
-    with patch("zarya.handlers.config.allowed_ids", [700000001, 790273371]):
+    with patch("zarya.handlers.config.allowed_ids", [700000001, 700000099]):
         await on_membership_changed(u)
     u.bot.leave_chat.assert_not_awaited()
 
@@ -425,7 +425,7 @@ async def test_membership_change_ignored_in_dm():
 @pytest.mark.asyncio
 async def test_membership_change_ignored_when_not_a_join():
     u = _membership_update(999999, status="left")
-    with patch("zarya.handlers.config.allowed_ids", [700000001, 790273371]):
+    with patch("zarya.handlers.config.allowed_ids", [700000001, 700000099]):
         await on_membership_changed(u)
     u.bot.leave_chat.assert_not_awaited()
 
