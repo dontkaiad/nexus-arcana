@@ -37,7 +37,15 @@ DEFAULT_BUSY_MINUTES = 60
 # nothing books longer than that.
 _MAX_PLAUSIBLE_DURATION_MIN = 24 * 60
 
-_DONE_CODES = ("Done", "Archived")
+# Закрытые статусы. Регистр РАЗНЫЙ: у задач Nexus 'Done'/'Archived', у works в PG
+# 'done'/'archived' — поэтому сравниваем через lower() (#273). Единственное место,
+# agenda.py берёт отсюда же.
+DONE_CODES = ("done", "archived")
+
+
+def done_status_ids(status_table):
+    """SELECT id статусов «закрыто/архив» без учёта регистра кода (task_status / work_status)."""
+    return sa.select(status_table.c.id).where(sa.func.lower(status_table.c.code).in_(DONE_CODES))
 
 # Kai's display zone for the booking UI/ICS/Zarya (no per-user tz lookup here —
 # busy.py runs sync in a thread off a plain SQLAlchemy engine, and the whole
@@ -109,7 +117,7 @@ def _busy_sync(engine, user_id: str, start: datetime, end: datetime) -> List[Bus
             .where(booking.c.status.in_(BLOCKING_BOOKING_STATUSES))
             .where(booking.c.nexus_task_id.isnot(None))
         )
-        done_ids = sa.select(task_status.c.id).where(task_status.c.code.in_(_DONE_CODES))
+        done_ids = done_status_ids(task_status)
         q = (
             sa.select(tasks.c.id, tasks.c.title, tasks.c.deadline, tasks.c.duration_min,
                       tasks.c.deadline_all_day)
@@ -137,7 +145,7 @@ def _busy_sync(engine, user_id: str, start: datetime, end: datetime) -> List[Bus
                 out.append(iv)
 
         # ── Arcana works with scheduled_at ─────────────────────────────────
-        wdone = sa.select(work_status.c.id).where(work_status.c.code.in_(_DONE_CODES))
+        wdone = done_status_ids(work_status)
         wq = (
             sa.select(works.c.id, works.c.title, works.c.scheduled_at, works.c.duration_min)
             .where(works.c.scheduled_at.isnot(None))

@@ -15,12 +15,11 @@ from typing import List, Optional
 import sqlalchemy as sa
 
 from arcana.repos.works_tables import work_status, works
-from core.booking.busy import _as_utc
+from core.booking.busy import _as_utc, done_status_ids
 from core.booking.tables import BLOCKING_BOOKING_STATUSES, booking
 from nexus.repos.tasks_tables import task_status, tasks
 
 MSK = timezone(timedelta(hours=3))
-_DONE_CODES = ("Done", "Archived")
 
 
 @dataclass
@@ -49,7 +48,7 @@ def _agenda_sync(engine, user_id: str, day_from: date, day_to: date) -> List[Age
     owner = lambda col: col.in_([user_id, ""])  # noqa: E731
 
     with engine.connect() as conn:
-        done = sa.select(task_status.c.id).where(task_status.c.code.in_(_DONE_CODES))
+        done = done_status_ids(task_status)
         tq = (
             sa.select(tasks.c.title, tasks.c.deadline, tasks.c.duration_min, tasks.c.deadline_all_day)
             .where(tasks.c.status_id.notin_(done))
@@ -66,7 +65,7 @@ def _agenda_sync(engine, user_id: str, day_from: date, day_to: date) -> List[Age
             e = d + timedelta(minutes=r.duration_min) if (r.duration_min and not all_day) else None
             out.append(AgendaItem(d.astimezone(MSK).date(), "task", r.title or "Задача", d, e, all_day))
 
-        wdone = sa.select(work_status.c.id).where(work_status.c.code.in_(_DONE_CODES))
+        wdone = done_status_ids(work_status)
         wq = (
             sa.select(works.c.title, works.c.scheduled_at, works.c.duration_min)
             .where(works.c.scheduled_at >= start).where(works.c.scheduled_at < end)
