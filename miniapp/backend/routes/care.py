@@ -39,7 +39,7 @@ class PeriodBody(BaseModel):
 
 
 def _period_json(p: Optional[Dict[str, Any]]) -> Dict[str, Any]:
-    return {"period": {"starts_on": p["starts_on"].isoformat(), "ends_on": p["ends_on"].isoformat()} if p else None}
+    return {"period": {"starts_on": p["starts_on"].isoformat(), "ends_on": p["ends_on"].isoformat(), "source": p.get("source", "manual")} if p else None}
 
 
 @router.get("/care/period")
@@ -60,7 +60,7 @@ async def put_period(body: PeriodBody, tg_id: int = Depends(current_user_id)) ->
         await asyncio.to_thread(care.set_period, user_id, body.starts_on, body.ends_on)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
-    return {"ok": True, **_period_json({"starts_on": body.starts_on, "ends_on": body.ends_on})}
+    return {"ok": True, **_period_json({"starts_on": body.starts_on, "ends_on": body.ends_on, "source": "manual"})}
 
 
 @router.delete("/care/period")

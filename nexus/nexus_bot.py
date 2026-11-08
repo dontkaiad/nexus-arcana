@@ -530,7 +530,8 @@ async def cmd_care_period(msg: Message, user_id: str = "") -> None:
         return
     if parts and parts[0].lower() in ("off", "стоп", "нет"):
         cleared = await _aio.to_thread(care.clear_period, user_id)
-        await msg.answer("Период ухода снят." if cleared else "Периода и не было.")
+        await msg.answer("Период ухода снят. Если у ситтеров есть даты доступа, период снова подтянется из них при следующей синхронизации."
+                         if cleared else "Периода и не было.")
         return
     if len(parts) == 2:
         try:
@@ -539,12 +540,14 @@ async def cmd_care_period(msg: Message, user_id: str = "") -> None:
         except ValueError as e:
             await msg.answer("⚠️ Формат: /care_period ГГГГ-ММ-ДД ГГГГ-ММ-ДД (конец не раньше начала, не больше года). %s" % e)
             return
-        await msg.answer("✅ Период ухода: %s — %s. В это время напоминания задач ситтера тебе молчат." % (a, b))
+        await msg.answer("✅ Период ухода: %s — %s (ручной: даты доступа ситтеров его не меняют, пока не сделаешь /care_period off). "
+                         "В это время напоминания задач ситтера тебе молчат." % (a, b))
         return
     p = await _aio.to_thread(care.get_period, user_id)
     tz = await get_user_tz(msg.from_user.id)
     active = await _aio.to_thread(care.is_active, user_id, tz)
-    await msg.answer(("Период ухода: %s — %s (%s)." % (p["starts_on"], p["ends_on"], "идёт сейчас" if active else "не идёт")) if p
+    await msg.answer(("Период ухода: %s — %s (%s; %s)." % (p["starts_on"], p["ends_on"], "идёт сейчас" if active else "не идёт",
+                                                           "ручной" if p.get("source", "manual") == "manual" else "из дат доступа ситтеров")) if p
                      else "Период ухода не задан. /care_period 2026-12-01 2027-01-31")
 
 

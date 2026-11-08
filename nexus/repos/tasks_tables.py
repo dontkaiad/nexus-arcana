@@ -94,6 +94,8 @@ care_periods = Table(
     Column("user_id", Text, nullable=False, unique=True),
     Column("starts_on", Date, nullable=False),
     Column("ends_on", Date, nullable=False),
+    # 'manual' — задал владелец (/care_period, Mini App): переопределение; 'auto' — из дат доступа ситтеров (миграция a7c3e1b9d452).
+    Column("source", Text, nullable=False, server_default=text("'manual'")),
     Column("created_at", TIMESTAMP(timezone=True), nullable=False, server_default=text("now()")),
 )
 
