@@ -23,6 +23,10 @@ export const eraseFact = (id, fid) => apiPost(`/api/people/${id}/facts/${fid}/er
 export const setFactType = (id, fid, type) => apiPost(`/api/people/${id}/facts/${fid}/type`, { type })
 // Категория фактов карточки «Я»: один факт тапом или пачка («Перенести в категорию…»)
 export const setFactsCategory = (id, ids, category) => apiPost(`/api/people/${id}/facts/category`, { ids, category })
+// «Это про…»: отдать факты другому человеку (to — id карточки или {name, relation}); обратно в «Я» — to = id карточки «Я»
+export const suggestOwner = (id, ids) => apiPost(`/api/people/${id}/facts/suggest-owner`, { ids })
+export const giveFacts = (id, ids, to) =>
+  apiPost(`/api/people/${id}/facts/give`, typeof to === 'object' ? { ids, new_person: to } : { ids, to_person_id: to })
 export const approveAll = (id) => apiPost(`/api/people/${id}/approve-all`, {})
 export const rejectAll = (id) => apiPost(`/api/people/${id}/reject-all`, {})
 export const addFact = (id, text, type) => apiPost(`/api/people/${id}/facts`, { text, type })
