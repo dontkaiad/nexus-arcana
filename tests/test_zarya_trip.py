@@ -332,3 +332,51 @@ async def test_cancel_trip_never_deletes_a_block_that_is_not_a_trip():
     vacation = await add_block(MARK, datetime(2026, 12, 1, tzinfo=MSK), datetime(2026, 12, 3, tzinfo=MSK), "Свой отпуск")
     assert await T.cancel_trip(MARK, int(vacation["id"]), None) == (False, False)           # id чужого по смыслу блока (не «Отъезд»)
     assert len(_blocks()) == 1
+
+
+# ── сквозная проверка отмены: сообщение → кнопка «Отменить» → что осталось в БД (реальная БД, без моков create/cancel) ──
+
+@pytest.mark.asyncio
+async def test_cancel_button_end_to_end_removes_block_and_choose_task_and_leaves_everything_else():
+    from core.booking.repo import add_block
+    from zarya.handlers import on_trip, on_trip_cancel
+
+    now = datetime.now(MSK)
+    start, end = now.date() + timedelta(days=40), now.date() + timedelta(days=50)
+    # чужое и соседнее, что отмена трогать не должна
+    vacation = await add_block(MARK, datetime(2031, 1, 1, tzinfo=MSK), datetime(2031, 1, 3, tzinfo=MSK), "Свой отпуск")          # свой блок другого смысла
+    foreign_same = await T.create_trip(OTHER, T.Trip(start, end), now.date())                                                       # «Отъезд» тех же дат у другого пользователя
+    with get_engine().begin() as c:
+        sid = c.execute(sa.select(task_status.c.id).where(task_status.c.code == "Not started")).scalar()
+        c.execute(tasks.insert().values(title="Купить молоко", status_id=sid, user_id=MARK))
+    before_other = ({b.id for b in _blocks(OTHER)}, [(t.title, t.code) for t in _tasks(OTHER)])
+
+    m = _msg("уезжаю с %s по %s" % (start.strftime("%d.%m.%Y"), end.strftime("%d.%m.%Y")))
+    with patch("zarya.handlers._owner_user_id", AsyncMock(return_value=MARK)), patch("zarya.handlers._bot_addressed", return_value=True):
+        await on_trip(m, role="admin")
+        data = m.answer.await_args.kwargs["reply_markup"].inline_keyboard[0][0].callback_data
+        assert [b.reason for b in _blocks()].count("Отъезд") == 1 and any(t.title.startswith("Выбрать ситтера") and t.code == "Not started" for t in _tasks())
+        assert any(t.title.startswith("🚫") and t.code == "Not started" for t in _tasks())                                          # задача самого блока
+
+        c1 = _call(data)
+        await on_trip_cancel(c1, role="admin")
+
+    # отъезд: блок удалён, обе его задачи (🚫 и «Выбрать ситтера…») в архиве
+    assert [b.reason for b in _blocks()] == ["Свой отпуск"]
+    mine = {t.title: t.code for t in _tasks()}
+    assert {title: code for title, code in mine.items() if title == "🚫 Отъезд" or title.startswith("Выбрать ситтера")}.values() and \
+        {code for title, code in mine.items() if title == "🚫 Отъезд" or title.startswith("Выбрать ситтера")} == {"Archived"}
+    assert len([1 for title in mine if title == "🚫 Отъезд" or title.startswith("Выбрать ситтера")]) == 2
+    assert mine["🚫 Свой отпуск"] == "Not started"                                                                                  # задача чужого по смыслу блока жива
+    # чужие/соседние нетронуты
+    assert mine["Купить молоко"] == "Not started"
+    assert {b.id for b in _blocks(OTHER)} == before_other[0] and [(t.title, t.code) for t in _tasks(OTHER)] == before_other[1]
+    assert len(_blocks(OTHER)) == 1 and foreign_same.block_id in {b.id for b in _blocks(OTHER)}
+    assert "Отъезд отменён" in c1.message.edit_text.await_args.args[0]
+
+    # повторное нажатие безвредно и ничего не удаляет дальше
+    c2 = _call(data)
+    with patch("zarya.handlers._owner_user_id", AsyncMock(return_value=MARK)):
+        await on_trip_cancel(c2, role="admin")
+    assert "Уже отменено" in c2.message.edit_text.await_args.args[0]
+    assert [b.reason for b in _blocks()] == ["Свой отпуск"] and vacation["id"] in {b.id for b in _blocks()}
