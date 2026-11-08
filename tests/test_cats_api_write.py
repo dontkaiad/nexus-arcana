@@ -316,6 +316,120 @@ def test_attach_to_foreign_or_rejected_cat_is_404(api):
     assert row(fid).cat_id is None
 
 
+# ── факты карточки «Я» в «Общем про котов»: category сменили на «Коты», а person_id остался (баг: «уже привязан к другому коту или человеку») ──
+
+def mk_person(user=MARK, is_self=False, name="Человек"):
+    with get_engine().begin() as c:
+        return c.execute(insert(people).values(user_id=user, name=name, status="confirmed", is_self=is_self)
+                         .returning(people.c.id)).scalar_one()
+
+
+def self_fact(pid, text_, kind="likes", user=MARK, **kw):
+    """Как в проде: авто-факт про владельца (ключ person_<id>_<тип>_<hash>), категорию потом сменили на «Коты»."""
+    from core.people import fact_hash
+    return mk_fact(None, text_, user=user, key="person_%d_%s_%s" % (pid, kind, fact_hash(text_)), person_id=pid, source="auto", **kw)
+
+
+def person_row(mid):
+    with get_engine().connect() as c:
+        return c.execute(text("SELECT person_id, embedding IS NULL AS no_emb FROM memories WHERE id = :i"), {"i": int(mid)}).one()
+
+
+def with_embedding(mid):
+    with get_engine().begin() as c:
+        c.execute(text("UPDATE memories SET embedding = CAST(:v AS vector) WHERE id = :i"),
+                  {"v": "[" + ",".join(["0.01"] * 1024) + "]", "i": int(mid)})
+
+
+def test_self_card_fact_in_cats_category_is_attachable_and_leaves_the_self_card(api):
+    me = mk_person(is_self=True, name="Владелица")
+    cid = crepo.create(MARK, "Тучка")
+    fid = self_fact(me, "Тучка любит спать на подоконнике", "likes", review_status="pending")
+    with_embedding(fid)
+    shown = [i["id"] for g in api.get("/api/cats/general").json()["facts"] for i in g["items"]]
+    assert shown == [fid]                                                  # /general его показывает …
+    r = api.post(f"/api/cats/{cid}/facts/{fid}/attach")                    # … и теперь attach его принимает
+    assert r.status_code == 200 and r.json() == {"ok": True, "fact_id": fid, "attached": True, "facts_count": 1}
+    x = row(fid)
+    assert x.cat_id == cid and x.related_to == "Тучка" and x.review_status == "confirmed"
+    assert cat_key_type(x.key_name) == "likes"                              # тип взят из ключа карточки «Я»
+    pr = person_row(fid)
+    assert pr.person_id is None and pr.no_emb                               # person_id снят, эмбеддинг сброшен (в нём было имя)
+    assert api.get("/api/cats/general").json()["total"] == 0
+    assert api.get(f"/api/cats/{cid}").json()["facts"][0]["items"][0]["id"] == fid
+
+
+def test_batch_of_self_facts_all_attach_and_none_comes_back(api):
+    from core.repos import pg_people_repo as prepo
+    me = mk_person(is_self=True)
+    ryzhik = crepo.create(MARK, "Рыжик")
+    ids = [self_fact(me, "Рыжик факт номер %d" % i, ["important", "likes", "dislikes", "other"][i % 4]) for i in range(8)]
+    assert api.get("/api/cats/general").json()["total"] == 8
+    assert [api.post(f"/api/cats/{ryzhik}/facts/{i}/attach").status_code for i in ids] == [200] * 8
+    assert all(row(i).cat_id == ryzhik and person_row(i).person_id is None for i in ids)
+    assert [cat_key_type(row(i).key_name) for i in ids] == ["important", "likes", "dislikes", "other"] * 2      # тип из ключа «Я», а не из текста
+    # «разнос» / смена категории карточки «Я» больше эти факты не трогает: их там уже нет
+    assert prepo.set_facts_category(MARK, me, ids, "💼 Работа") == 0
+    assert all(row(i).category == CATEGORY for i in ids)
+    assert api.get("/api/cats/general").json()["total"] == 0
+
+
+def test_another_persons_fact_is_not_listed_and_still_409(api):
+    other_person = mk_person(is_self=False, name="Мария")
+    cid = crepo.create(MARK, "Тучка")
+    fid = self_fact(other_person, "про Марию и кота")
+    assert api.get("/api/cats/general").json()["total"] == 0                # принадлежит карточке человека: в «Общем» не показываем
+    assert api.post(f"/api/cats/{cid}/facts/{fid}/attach").status_code == 409
+    assert row(fid).cat_id is None and person_row(fid).person_id == other_person
+
+
+def test_person_of_another_user_is_not_a_self_card(api):
+    foreign_self = mk_person(user=OTHER, is_self=True)                      # битая ссылка: факт владельца указывает на «Я» чужого
+    cid = crepo.create(MARK, "Тучка")
+    fid = self_fact(foreign_self, "странный факт")
+    assert api.get("/api/cats/general").json()["total"] == 0
+    assert api.post(f"/api/cats/{cid}/facts/{fid}/attach").status_code == 409
+    assert person_row(fid).person_id == foreign_self
+
+
+def test_foreign_users_self_fact_is_404(api):
+    foreign_self = mk_person(user=OTHER, is_self=True)
+    cid = crepo.create(MARK, "Тучка")
+    fid = self_fact(foreign_self, "чужое про «Я»", user=OTHER)
+    assert api.post(f"/api/cats/{cid}/facts/{fid}/attach").status_code == 404
+    assert person_row(fid).person_id == foreign_self
+
+
+def test_self_fact_duplicate_of_cat_fact_is_409_and_untouched(api):
+    me = mk_person(is_self=True)
+    cid = crepo.create(MARK, "Тучка")
+    api.post(f"/api/cats/{cid}/facts", json={"text": "Тучка любит окно", "type": "likes"})
+    fid = self_fact(me, "Тучка любит окно", "likes")
+    assert api.post(f"/api/cats/{cid}/facts/{fid}/attach").status_code == 409
+    assert row(fid).cat_id is None and person_row(fid).person_id == me      # ничего не потеряно: факт остался в «Я»
+
+
+def test_self_fact_in_other_category_stays_422_and_untouched(api):
+    me = mk_person(is_self=True)
+    cid = crepo.create(MARK, "Тучка")
+    fid = self_fact(me, "про работу", category="💼 Работа")
+    assert api.post(f"/api/cats/{cid}/facts/{fid}/attach").status_code == 422
+    assert person_row(fid).person_id == me and row(fid).cat_id is None
+
+
+def test_concurrent_attach_of_one_self_fact_to_two_cats_wins_once():
+    from concurrent.futures import ThreadPoolExecutor
+    me = mk_person(is_self=True)
+    a, b = crepo.create(MARK, "Тучка"), crepo.create(MARK, "Пончик")
+    fid = self_fact(me, "общий факт про котов")
+    cats_ = [{"id": a, "name": "Тучка"}, {"id": b, "name": "Пончик"}]
+    with ThreadPoolExecutor(2) as ex:
+        res = sorted(ex.map(lambda c: crepo.attach_fact(MARK, c, fid), cats_))
+    assert res == ["ok", "taken"]
+    x = row(fid)
+    assert x.cat_id in (a, b) and person_row(fid).person_id is None
+
+
 # ── сквозной путь: бот не знает кота → карточка → привязка ──────────────────
 
 async def test_unknown_cat_then_create_card_then_attach():

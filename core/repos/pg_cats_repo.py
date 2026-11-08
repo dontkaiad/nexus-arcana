@@ -145,11 +145,14 @@ def list_facts_many(user_id: str, cat_ids: List[int]) -> Dict[int, List[Dict]]:
 
 
 def list_general_facts(user_id: str) -> List[Dict]:
-    """«Общее про котов»: категория «🐾 Коты» без cat_id (про всех сразу или про кота без карточки)."""
+    """«Общее про котов»: категория «🐾 Коты» без cat_id (про всех сразу или про кота без карточки).
+    Факты карточки «Я» владельца показываются (их можно привязать к коту, person_id при этом снимается); факты другого человека
+    принадлежат его карточке и сюда не попадают: привязать их к коту нельзя (attach_fact → taken)."""
     with get_engine().connect() as c:
         rows = c.execute(text(
             f"SELECT {_FACT_COLS} FROM memories WHERE category = :cat AND cat_id IS NULL AND user_id = :u "
-            "AND NOT is_archived AND fact_text <> '' AND review_status <> 'rejected' ORDER BY created_at, id"),
+            "AND NOT is_archived AND fact_text <> '' AND review_status <> 'rejected' "
+            "AND (person_id IS NULL OR person_id IN (SELECT id FROM people WHERE user_id = :u AND is_self)) ORDER BY created_at, id"),
             {"cat": CATS_CATEGORY, "u": user_id}).all()
     return [_fact(r) for r in rows]
 
@@ -179,26 +182,39 @@ def name_taken(user_id: str, name: str, exclude_id: Optional[int] = None) -> boo
 
 def attach_fact(user_id: str, cat: Dict, memory_id: int) -> str:
     """Привязывает «общий» факт категории «🐾 Коты» к коту: cat_id, related_to = имя, ключ cat_<id>_<тип>_<hash>.
+    Факт карточки «Я» владельца (person_id = людей.is_self) тоже привязывается: он попал в «Коты» сменой категории, а person_id остался;
+    person_id снимается, факт подтверждается (владелец указал сам), эмбеддинг сбрасывается (в нём имя). Факт другого человека — taken.
     Статусы: ok | same (уже привязан к этому коту) | not_found | not_cat_fact | taken (другой кот/человек) |
     conflict (у кота уже есть такой же факт)."""
-    from core.cats import cat_fact_key, fact_kind
+    import re
+    from core.cats import FACT_TYPES, cat_fact_key, fact_kind
     with get_engine().begin() as c:
         r = c.execute(text(
-            "SELECT id, fact_text, key_name, category, cat_id, person_id FROM memories "
-            "WHERE id = :i AND user_id = :u AND NOT is_archived AND fact_text <> '' FOR UPDATE"),
+            "SELECT m.id, m.fact_text, m.key_name, m.category, m.cat_id, m.person_id, COALESCE(p.is_self, false) AS self_card "
+            "FROM memories m LEFT JOIN people p ON p.id = m.person_id AND p.user_id = m.user_id "
+            "WHERE m.id = :i AND m.user_id = :u AND NOT m.is_archived AND m.fact_text <> '' FOR UPDATE OF m"),
             {"i": memory_id, "u": user_id}).first()
         if not r:
             return "not_found"
         if r.cat_id == cat["id"]:
             return "same"
-        if r.cat_id is not None or r.person_id is not None:
+        if r.cat_id is not None or (r.person_id is not None and not r.self_card):
             return "taken"
         if r.category != CATS_CATEGORY:
             return "not_cat_fact"
-        key = cat_fact_key(cat["id"], fact_kind(r.key_name, r.fact_text), r.fact_text)
+        kind = fact_kind(r.key_name, r.fact_text)
+        m = re.match(r"^person_\d+_([a-z]+)_[0-9a-f]{8}$", r.key_name or "")
+        if r.person_id is not None and m and m.group(1) in FACT_TYPES:
+            kind = m.group(1)                                                  # тип из ключа карточки «Я», не угадываем заново
+        key = cat_fact_key(cat["id"], kind, r.fact_text)
         if c.execute(text("SELECT 1 FROM memories WHERE key_name = :k AND user_id = :u AND NOT is_archived AND id <> :i"),
                      {"k": key, "u": user_id, "i": memory_id}).first():
             return "conflict"
-        c.execute(text("UPDATE memories SET cat_id = :c, related_to = :n, key_name = :k, updated_at = now() "
-                       "WHERE id = :i"), {"c": cat["id"], "n": cat["name"], "k": key, "i": memory_id})
+        if r.person_id is None:
+            c.execute(text("UPDATE memories SET cat_id = :c, related_to = :n, key_name = :k, updated_at = now() "
+                           "WHERE id = :i"), {"c": cat["id"], "n": cat["name"], "k": key, "i": memory_id})
+        else:
+            c.execute(text("UPDATE memories SET cat_id = :c, person_id = NULL, related_to = :n, key_name = :k, "
+                           "review_status = 'confirmed', embedding = NULL, updated_at = now() WHERE id = :i"),
+                      {"c": cat["id"], "n": cat["name"], "k": key, "i": memory_id})
     return "ok"
