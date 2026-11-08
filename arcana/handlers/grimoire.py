@@ -38,21 +38,71 @@ GRIMOIRE_THEMES = {
 
 PARSE_GRIMOIRE_SYSTEM = (
     "Извлеки данные для записи в гримуар. Ответь ТОЛЬКО JSON без markdown-заборов:\n"
-    '{"title": "короткое название (1-5 слов)", '
+    '{"title": "короткое название (1-5 слов, до 60 символов)", '
     '"category": "заговор|рецепт|комбинация|заметка", '
     '"themes": ["финансы","любовь","защита","деструктив","привлечение","очищение","другое"], '
-    '"text": "полный текст записи", '
     '"source": "откуда узнала или null"}\n\n'
     "Правила:\n"
-    "— title никогда не пустой; если явного нет — возьми первое короткое слово/фразу.\n"
-    "— text — всё остальное содержимое (что записать).\n"
+    "— title никогда не пустой и всегда короткий; если явного названия нет — "
+    "сформулируй по смыслу 1-5 слов. Никогда не копируй в title абзацы.\n"
+    "— Полный текст записи НЕ нужен: он сохраняется отдельно. Тебе дан только "
+    "начальный фрагмент текста.\n"
     "— category выбери одну из 4 опций по смыслу.\n"
     "— themes — массив подходящих тем (можно пустой).\n\n"
     "Пример:\n"
     'Текст: «тест — заговор на деньги, читать на убывающую луну»\n'
-    '{"title":"тест","category":"заговор","themes":["финансы"],'
-    '"text":"заговор на деньги, читать на убывающую луну","source":null}'
+    '{"title":"тест","category":"заговор","themes":["финансы"],"source":null}'
 )
+
+_TITLE_MAX = 80       # title в БД/списках — короткое название, не абзац
+_LLM_HEAD_CHARS = 400  # сколько символов ввода видит парсер (как в _parse_work_text)
+_PREFIX_RE = None
+
+
+def _strip_command_prefix(text: str) -> str:
+    import re as _re
+    return _re.sub(r"^\s*запиши\s+в\s+гримуар\s*[:\-—]?\s*", "", (text or ""),
+                   flags=_re.IGNORECASE).strip()
+
+
+def _clip_title(raw: str, limit: int = _TITLE_MAX) -> str:
+    """Первая непустая строка, схлопнутые пробелы, обрезка по границе слова ≤ limit."""
+    import re as _re
+    line = next((ln.strip() for ln in (raw or "").splitlines() if ln.strip()), "")
+    line = _re.sub(r"\s+", " ", line).strip(" —-:.,")
+    if len(line) <= limit:
+        return line
+    cut = line.rfind(" ", 0, limit - 1)
+    if cut < limit // 2:
+        cut = limit - 1
+    return line[:cut].rstrip(" ,;:—-") + "…"
+
+
+# Заголовки разделов: markdown (#), нумерованные короткие строки, короткие строки с «:» на конце.
+_HEADING_RE = None
+
+
+def split_sections(text: str) -> list:
+    """Разбить текст на разделы по заголовкам -> [(title, body)]. Пусто, если разделов < 3
+    (одна запись; вопрос «разбить?» задаём только когда тем явно несколько)."""
+    import re as _re
+    global _HEADING_RE
+    if _HEADING_RE is None:
+        _HEADING_RE = _re.compile(
+            r"^\s*(?:#{1,3}\s+\S.*|\d{1,2}[.)]\s+\S[^\n]{0,70}|[^\n]{3,60}:)\s*$"
+        )
+    lines = (text or "").splitlines()
+    idx = [i for i, ln in enumerate(lines) if _HEADING_RE.match(ln)]
+    if len(idx) < 3:
+        return []
+    sections = []
+    if idx[0] > 0 and "\n".join(lines[:idx[0]]).strip():
+        sections.append(("", "\n".join(lines[:idx[0]]).strip()))
+    for n, i in enumerate(idx):
+        end = idx[n + 1] if n + 1 < len(idx) else len(lines)
+        head = lines[i].strip().lstrip("#").strip().rstrip(":")
+        sections.append((head, "\n".join(lines[i + 1:end]).strip()))
+    return sections
 
 
 def _heuristic_grimoire_parse(text: str) -> dict:
@@ -67,16 +117,19 @@ def _heuristic_grimoire_parse(text: str) -> dict:
     if not src:
         return {}
     sep = _re.search(r"\s+[—–\-:]\s+", src)
-    if sep:
+    if sep and sep.start() <= _TITLE_MAX:
+        # «название — текст»: разделитель учитываем только в начале (иначе « - »
+        # из списка далеко внутри текста делал title из всего вступления)
         title = src[:sep.start()].strip(" —-:.,")
         body = src[sep.end():].strip()
     else:
-        # коротко → всё title, длинно → первые 4 слова → title
+        # коротко → всё title, длинно → первая строка/слова → title, текст целиком в body
         words = src.split()
         if len(words) <= 4:
             title, body = src, ""
         else:
             title, body = " ".join(words[:4]), src
+    title = _clip_title(title)
     low = (title + " " + body).lower()
     cat = "заметка"
     if "заговор" in low: cat = "заговор"
@@ -287,13 +340,53 @@ async def cb_grim_search(callback: CallbackQuery, user_id: str = "") -> None:
 
 # ── Text handlers (add / search) ──────────────────────────────────────────────
 
+_PK_SPLIT = "grimoire_split"
+_SPLIT_TTL = 1800
+
+
+def _normalise_themes(raw_themes) -> list:
+    """Только валидные темы из справочника (неизвестные отбрасываем, без дублей)."""
+    out: list = []
+    for t in raw_themes or []:
+        if not isinstance(t, str):
+            continue
+        val = GRIMOIRE_THEMES.get(t.strip().lower())
+        if val and val not in out:
+            out.append(val)
+    return out
+
+
+async def _save_entry(message: Message, *, title: str, category: str, themes: list,
+                      text: str, source: str, user_id: str) -> bool:
+    page_id = await _repo.add(
+        title=title, category=category, themes=themes if themes else None,
+        text=text or "", source=source or "", user_id=user_id,
+    )
+    if not page_id:
+        return False
+    import html as _html
+    reply = f"📖 Записано в гримуар: {category} <b>{_html.escape(title)}</b>"
+    if themes:
+        reply += f" [{' · '.join(themes)}]"
+    await message.answer(reply, parse_mode="HTML")
+    return True
+
+
 async def handle_grimoire_add(message: Message, text: str, user_id: str = "") -> None:
-    """Записать новую запись в гримуар. «запиши в гримуар: ...»"""
+    """Записать новую запись в гримуар. «запиши в гримуар: ...»
+
+    LLM видит только начало текста (название/категория/темы), полный текст
+    сохраняется кодом без потерь (как _parse_work_text). title всегда ≤ 80 символов.
+    Если в тексте явно несколько тем-разделов — не режем молча, а спрашиваем.
+    """
     try:
+        from arcana.handlers.work_preview import _split_head_tail
+        src = _strip_command_prefix(text)
+        head, _tail = _split_head_tail(src, _LLM_HEAD_CHARS)
         raw = await ask_claude(
-            f"Текст: {text}",
+            f"Текст: {head}",
             system=PARSE_GRIMOIRE_SYSTEM,
-            max_tokens=400,
+            max_tokens=200,
             role="parse",
             temperature=0,
         )
@@ -301,36 +394,79 @@ async def handle_grimoire_add(message: Message, text: str, user_id: str = "") ->
         if not data.get("title"):
             # Fallback — простой эвристический парсер, чтобы не «терять» запись.
             data = _heuristic_grimoire_parse(text)
-        if not data.get("title"):
+        title = _clip_title(data.get("title") or "")
+        if not title:
             await message.answer("Не смогла распознать запись. Попробуй написать подробнее.")
             return
 
-        cat_key = (data.get("category") or "заметка").lower()
-        category = GRIMOIRE_CATEGORIES.get(cat_key, "📝 Заметка")
+        category = GRIMOIRE_CATEGORIES.get(str(data.get("category") or "заметка").lower(), "📝 Заметка")
+        themes = _normalise_themes(data.get("themes"))
+        source = data.get("source") if isinstance(data.get("source"), str) else ""
+        body = src or text
 
-        raw_themes = data.get("themes") or []
-        themes = [GRIMOIRE_THEMES.get(t.lower(), t) for t in raw_themes if t]
+        sections = split_sections(body)
+        if sections:
+            from core import pending_kv as _pkv
+            import html as _html
+            uid = message.from_user.id
+            _pkv.save(uid, _PK_SPLIT, {
+                "title": title, "category": category, "themes": themes,
+                "text": body, "source": source or "", "user_id": user_id or "",
+                "sections": [list(x) for x in sections],
+            }, ttl=_SPLIT_TTL)
+            heads = [h or _clip_title(b, 40) for h, b in sections]
+            lines = "\n".join(f"• {_html.escape(h)}" for h in heads[:10])
+            kb = InlineKeyboardMarkup(inline_keyboard=[[
+                InlineKeyboardButton(text="📖 Одной записью", callback_data=f"grim_split_one:{uid}"),
+                InlineKeyboardButton(text=f"✂️ Разбить на {len(sections)}", callback_data=f"grim_split_many:{uid}"),
+            ]])
+            await message.answer(
+                f"📖 В тексте {len(sections)} раздела(ов):\n{lines}\n\n"
+                f"Записать одной записью «<b>{_html.escape(title)}</b>» или разбить?",
+                parse_mode="HTML", reply_markup=kb,
+            )
+            return
 
-        page_id = await _repo.add(
-            title=data["title"],
-            category=category,
-            themes=themes if themes else None,
-            text=data.get("text") or "",
-            source=data.get("source") or "",
-            user_id=user_id,
-        )
-        if page_id:
-            theme_str = (" · ".join(themes)) if themes else ""
-            reply = f"📖 Записано в гримуар: {category} <b>{data['title']}</b>"
-            if theme_str:
-                reply += f" [{theme_str}]"
-            await message.answer(reply, parse_mode="HTML")
-        else:
+        if not await _save_entry(message, title=title, category=category, themes=themes,
+                                 text=body, source=source or "", user_id=user_id):
             await message.answer("Не удалось записать в гримуар.")
     except Exception as e:
         logger.exception("handle_grimoire_add: %s", e)
         await log_error(str(e), context="handle_grimoire_add", bot_label="🌒 Arcana")
         await message.answer("Ошибка при записи в гримуар.")
+
+
+@router.callback_query(F.data.startswith("grim_split_"))
+async def cb_grimoire_split(query: CallbackQuery) -> None:
+    """Ответ на «одной записью или разбить?» для многотемного текста."""
+    from core import pending_kv as _pkv
+    mode, _, uid_s = query.data.partition(":")
+    uid = query.from_user.id
+    st = _pkv.pop(uid, _PK_SPLIT, ttl=_SPLIT_TTL)
+    if not st or uid_s != str(uid):
+        await query.answer("⏰ Устарело — отправь текст ещё раз", show_alert=True)
+        return
+    common = dict(category=st["category"], themes=st["themes"],
+                  source=st.get("source") or "", user_id=st.get("user_id") or "")
+    try:
+        if mode == "grim_split_many":
+            n = 0
+            for head, body in st["sections"]:
+                title = _clip_title(head or body)
+                if title and await _save_entry(query.message, title=title,
+                                               text=(body or head), **common):
+                    n += 1
+            await query.answer(f"✂️ Записано: {n}")
+        else:
+            await _save_entry(query.message, title=st["title"], text=st["text"], **common)
+            await query.answer("📖 Записано")
+        try:
+            await query.message.edit_reply_markup()
+        except Exception:
+            pass
+    except Exception as e:
+        logger.exception("cb_grimoire_split: %s", e)
+        await query.answer("⚠️ Ошибка записи", show_alert=True)
 
 
 async def handle_grimoire_search(message: Message, text: str, user_id: str = "") -> None:
