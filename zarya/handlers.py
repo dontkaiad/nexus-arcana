@@ -22,6 +22,7 @@ from core.auth_grants import booking_role
 from core import login_tokens as login_tokens_mod
 from core.booking.busy import busy_intervals, merge_intervals
 from core.booking.linkage import link_booking, unlink_booking
+from core.booking import trip as trip_mod
 from core.booking.pending_purpose import get_pending, pop_pending, set_pending
 from core.booking.repo import (
     create_booking, get_booking, list_bookings, set_booking_status,
@@ -203,6 +204,81 @@ async def on_purpose_text(msg: Message, role: str = "guest") -> None:
     )
 
 
+# ── «уезжаю с X по Y» (только admin): блок в букинге + задача «Выбрать ситтера для котов» ───────────
+
+_TRIP_ERRORS = {
+    "reversed": "«по» раньше «с» — проверь даты 💅",
+    "past": "Эти даты уже прошли — проверь год 💅",
+    "too_long": "Больше полугода? Проверь даты 💅",
+    "month": "Не поняла месяц. Напиши, например: «уезжаю с 20 ноября по 5 декабря» 💅",
+    "date": "Такой даты нет в календаре — проверь число и месяц 💅",
+}
+
+
+def _is_trip(message: Message, role: str = "guest") -> bool:
+    if role != "admin" or not message.from_user:
+        return False
+    text = getattr(message, "text", None) or ""
+    return not text.lstrip().startswith("/") and trip_mod.is_trip_text(text)
+
+
+def _trip_kb(block_id: int, task_id) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text="❌ Отменить", callback_data=f"z:trip_cx:{block_id}:{task_id or 0}"),
+    ]])
+
+
+# Регистрируется ДО быстрой брони: «уезжаю с 20 по 25 ноября» не должно уйти в показ слотов.
+@router.message(_is_trip)
+async def on_trip(msg: Message, role: str = "guest") -> None:
+    if not _bot_addressed(msg):
+        return
+    today = datetime.now(MSK).date()
+    try:
+        trip = trip_mod.parse_trip(msg.text or "", today)
+    except trip_mod.TripError as e:
+        await msg.answer(_TRIP_ERRORS.get(e.code, _TRIP_ERRORS["date"]))
+        return
+    if trip is None:
+        return
+    uid = await _owner_user_id()
+    if not uid:
+        await msg.answer("Так, минутку — данные Кай сейчас недоступны. Загляни чуть позже 💅")
+        return
+    res = await trip_mod.create_trip(uid, trip, today)
+    again = "Это уже было записано, ничего не дублирую. " if not (res.block_created or res.task_created) else ""
+    await msg.answer(
+        f"✅ {again}Отъезд {trip.start:%d.%m}–{trip.end:%d.%m} ({trip.days} дн.): занято в букинге, слоты закрыла.\n"
+        f"Напомню выбрать ситтера для котов {res.reminder.astimezone(MSK):%d.%m в %H:%M} МСК.",
+        reply_markup=_trip_kb(res.block_id, res.task_id))
+
+
+@router.callback_query(F.data.startswith("z:trip_cx:"))
+async def on_trip_cancel(call: CallbackQuery, role: str = "guest") -> None:
+    if role != "admin":
+        await call.answer("Это не твоё", show_alert=True)
+        return
+    parts = (call.data or "").split(":")
+    try:
+        block_id, task_id = int(parts[2]), int(parts[3])
+        if len(parts) != 4 or block_id <= 0 or task_id < 0:
+            raise ValueError
+    except (ValueError, IndexError):
+        await call.answer("Кнопка устарела", show_alert=True)
+        return
+    uid = await _owner_user_id()
+    if not uid:
+        await call.answer("Данные Кай недоступны, попробуй позже", show_alert=True)
+        return
+    block_gone, task_gone = await trip_mod.cancel_trip(uid, block_id, task_id or None)
+    try:
+        await call.message.edit_text("❌ Отъезд отменён: блок убрала, задачу про ситтера закрыла." if (block_gone or task_gone)
+                                     else "Уже отменено 💅")
+    except Exception:  # noqa: BLE001 — сообщение могло устареть
+        pass
+    await call.answer("Отменено" if (block_gone or task_gone) else "Уже отменено")
+
+
 # ── one-shot: «завтра в 19 шашлыки» → бронь без кнопок (admin / friend) ─────
 
 def _is_quick_booking(message: Message, role: str = "guest") -> bool:
@@ -320,6 +396,7 @@ async def cmd_help(msg: Message, role: str = "guest") -> None:
             "/requests — заявки на подтверждение (от гостей — из Арканы)\n"
             "/bookings — подтверждённые встречи, отмена по кнопке\n"
             "/slots — твоё свободное время как ты его увидят другие\n"
+            "«Уезжаю с 20 ноября по 5 декабря» — закрою эти даты в букинге и поставлю задачу выбрать ситтера для котов\n"
             "Или через браузер — <a href=\"https://booking.heylark.dev\">booking.heylark.dev</a> "
             "(там же настройки окон).\n\n"
             "Подтверждённым — напоминаю за сутки и за 2 часа, обеим сторонам. "

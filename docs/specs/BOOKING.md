@@ -131,6 +131,16 @@ Manual "unavailable" ranges (`start_at`, `end_at`, `reason`) — vacation, "не
 datetime must attach an explicit offset (`+03:00` for Kai's MSK-entered
 ranges) — `_parse_dt` treats a timezone-less string as UTC, not MSK (#240).
 
+## Trip phrase («уезжаю с X по Y», admin only)
+
+`core/booking/trip.py` + `zarya/handlers.py:on_trip` (registered before the quick-booking handler). No LLM: a trip verb (уезжаю, улетаю,
+отъезд …) AND a date range in one message. Year omitted → the **next** such date (today included); the end is the first such date not
+before the start. Refused with a message: "по" before "с", a past explicit year, longer than 180 days, no month anywhere, a non-existent
+date. Writes (direct SQL, no token): a `booking_block` "Отъезд" (00:00 start day – 23:59 end day MSK; the usual linked 🚫 task is created
+too) and a Nexus task «Выбрать ситтера для котов (dd.mm–dd.mm)» with a reminder: tomorrow 12:00 MSK, or 14 days before a departure that
+is more than 14 days away. Idempotent by block dates and task title (a Done task does not count as existing). The reply has a
+«❌ Отменить» button: removes the block (and its 🚫 task) and archives the sitter task unless it is already Done.
+
 ## Linkage (confirmed booking → Nexus/Arcana)
 
 `core/booking/linkage.py`, direct SQLAlchemy-Core writes (Zarya's narrow
