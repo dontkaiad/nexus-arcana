@@ -20,6 +20,17 @@ def _ms(delta: float) -> int:
     return max(0, min(int(delta * 1000), 3_600_000))
 
 
+def _ints(v):
+    """id из Memory бывают строками ('226') — колонки bigint[] и JSON держим числами. Не число → пропускаем."""
+    out = []
+    for x in v or []:
+        try:
+            out.append(int(x))
+        except (TypeError, ValueError):
+            continue
+    return out
+
+
 class Tracer:
     def __init__(self, bot: str, user_id: str, question: str) -> None:
         self.bot, self.user_id, self.question = bot, user_id or "", (question or "").strip()
@@ -43,7 +54,7 @@ class Tracer:
         rfail = self._ev("rerank_failed")
         direct = self._ev("direct")
         gen_in, gen_out, gen_fb = self._ev("gen_input"), self._ev("gen_output"), self._ev("gen_fallback")
-        vec_ids, scores = legs.get("vec") or [], legs.get("vec_scores") or []
+        vec_ids, scores = _ints(legs.get("vec")), legs.get("vec_scores") or []
         latency: Dict[str, int] = {}
         for s, _, ms in self.events:
             latency[s] = latency.get(s, 0) + ms
@@ -51,19 +62,19 @@ class Tracer:
         if gen_in is not None or gen_out is not None or gen_fb is not None:
             gen = {"attempted": gen_in is not None, "ok": gen_out is not None,
                    "reason": (gen_fb or {}).get("reason"), "check": (gen_fb or {}).get("check"),
-                   "used_ids": (gen_out or {}).get("used_ids") or [], "bad_ids": (gen_fb or {}).get("ids") or []}
+                   "used_ids": _ints((gen_out or {}).get("used_ids")), "bad_ids": _ints((gen_fb or {}).get("ids"))}
         return {
             "bot": self.bot, "user_id": self.user_id, "question": self.question,
             "subject": res.get("subject") or parse.get("subject"), "types": list(res.get("types") or parse.get("types") or []),
             "intent": parse.get("intent"), "route": res.get("route"), "kind": res.get("kind"),
-            "parse": {"people": parse.get("people") or [], "cats": parse.get("cats") or [],
-                      **({"direct_ids": direct.get("ids")} if direct else {})} if parse or direct else None,
-            "fts": [[i, r + 1] for r, i in enumerate(legs.get("fts") or [])] if legs else None,
+            "parse": {"people": _ints(parse.get("people")), "cats": _ints(parse.get("cats")),
+                      **({"direct_ids": _ints(direct.get("ids"))} if direct else {})} if parse or direct else None,
+            "fts": [[i, r + 1] for r, i in enumerate(_ints(legs.get("fts")))] if legs else None,
             "vec": [[i, r + 1, round(scores[r], 3) if r < len(scores) else None] for r, i in enumerate(vec_ids)] if legs else None,
-            "rrf_ids": (rrf or {}).get("ids"),
-            "rerank": ({"ran": True, "ids": rer.get("ids"), "failed": (rfail or {}).get("reason")} if rer is not None or rfail
+            "rrf_ids": _ints((rrf or {}).get("ids")) if rrf is not None else None,
+            "rerank": ({"ran": True, "ids": _ints((rer or {}).get("ids")), "failed": (rfail or {}).get("reason")} if rer is not None or rfail
                        else {"ran": False, "ids": None, "failed": None}) if legs else None,
-            "final_ids": res.get("ids"), "gen": gen, "latency": latency,
+            "final_ids": _ints(res.get("ids")) if res else None, "gen": gen, "latency": latency,
             "total_ms": _ms(time.monotonic() - self._t0),
             "error": type(error).__name__ if error else None,
         }

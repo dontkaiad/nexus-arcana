@@ -10,8 +10,13 @@
 """
 from __future__ import annotations
 
+import os
 import sys
 from typing import Any, Dict, List
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))) if "__file__" in globals() else "/app")
+if "/app" not in sys.path:
+    sys.path.insert(0, "/app")             # при запуске через stdin (`python -`) __file__ нет и PYTHONPATH пуст
 
 
 def verdict(r: Dict[str, Any]) -> str:
