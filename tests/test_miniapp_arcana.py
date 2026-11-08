@@ -258,7 +258,7 @@ def test_arcana_today_happy(client):
     today_iso = today.isoformat()
 
     sessions_pg = [
-        _make_triplet("s_today", "Что думает Вадим",
+        _make_triplet("s_today", "Что думает Олег",
                       client_id="c1", date=today_iso, area="Отношения",
                       category_display="🌐 Сфера жизни", outcome="unverified"),
         _make_triplet("s_old_pending", "Стар Q",
@@ -431,7 +431,7 @@ def test_arcana_session_detail_parses_cards_and_bottom(client):
     tz = 3
     today = _today_date(tz)
     triplet = _make_triplet(
-        "sX", "Планы Вадима",
+        "sX", "Планы Олега",
         client_id="c1", date=today.isoformat(),
         area="Отношения", deck="Dark Wood Tarot",
         category_display="🌐 Сфера жизни",
@@ -453,7 +453,7 @@ def test_arcana_session_detail_parses_cards_and_bottom(client):
 
     assert r.status_code == 200, r.text
     data = r.json()
-    assert data["question"] == "Планы Вадима"
+    assert data["question"] == "Планы Олега"
     assert data["client"] == "Кай"
     assert data["bottom"] == {"name": "Король Кубков", "icon": None}
     assert "Дно" not in (data["interpretation"] or "")
@@ -569,7 +569,7 @@ def test_arcana_clients_count_sessions_not_triplets(client):
     clients_list = [_make_client("1", "Кай")]
     sessions = [
         _make_triplet(f"t{i}", f"{i}) вопрос", client_id="1",
-                      date="2026-06-22", session_name="Вадим")
+                      date="2026-06-22", session_name="Олег")
         for i in range(5)
     ]
     mock_cl = _mock_clients_repo(list_all_result=clients_list)
@@ -591,7 +591,7 @@ def test_arcana_dossier_counts_sessions_not_triplets(client):
     c_obj = _make_client("1", "Кай")
     sess = [
         _make_triplet(f"t{i}", f"{i})", client_id="1",
-                      date="2026-06-22", session_name="Вадим")
+                      date="2026-06-22", session_name="Олег")
         for i in range(5)
     ]
     mock_cl = _mock_clients_repo(find_by_id_result=c_obj)

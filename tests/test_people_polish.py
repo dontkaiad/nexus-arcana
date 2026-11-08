@@ -181,15 +181,15 @@ def test_audit_finds_self_exact_other_exact_and_token_but_not_own_name():
     from tools.people_import.audit_aliases import audit, group_entries, mutual_pairs
     people_ = [
         _p(1, "Кай Тестова", ["Каюшка"], self_=True),
-        _p(2, "Оля Первая", ["Оля", "Кай", "Вадим", "Ильич"]),                 # свой алиас «Оля» ≠ находка
-        _p(3, "Вадим Ильич Тестов", ["Вадька"]),
+        _p(2, "Оля Первая", ["Оля", "Кай", "Олег", "Ильич"]),                 # свой алиас «Оля» ≠ находка
+        _p(3, "Олег Ильич Тестов", ["Олежка"]),
         _p(4, "Маша Вторая", ["Оля Первая"]),
         _p(5, "Другая", ["Маша Вторая"]),
     ]
     found = audit(people_)
     ent = {(e["person"], e["alias_idx"]): e for e in group_entries(found)}
     assert ent[(2, 1)]["self"] is True                                        # «Кай» = имя «Я»
-    assert ent[(2, 2)]["exact"] is False and ent[(2, 2)]["others"] == {3}      # «Вадим» — слово чужого имени
+    assert ent[(2, 2)]["exact"] is False and ent[(2, 2)]["others"] == {3}      # «Олег» — слово чужого имени
     assert ent[(2, 3)]["exact"] is False and ent[(2, 3)]["others"] == {3}      # «Ильич» — слово чужого имени
     assert (2, 0) not in ent                                                  # «Оля» — свой алиас
     assert ent[(4, 0)]["exact"] and ent[(4, 0)]["others"] == {2}               # целиком = чужое имя
@@ -201,19 +201,19 @@ def test_audit_finds_self_exact_other_exact_and_token_but_not_own_name():
 def test_audit_apply_removes_only_self_aliases_and_resyncs_norm():
     from tools.people_import import audit_aliases as au
     me = mk("Кай Тестова", ["Каюшка"], is_self=True)
-    x = mk("Оля Первая", ["Кай", "Вадим", "Каюшка"])
-    y = mk("Вадим Другой")
+    x = mk("Оля Первая", ["Кай", "Олег", "Каюшка"])
+    y = mk("Олег Другой")
     mk_fact(x, status="confirmed", text_="любит чай")
     assert au.main(["--user", MARK]) == 0                                       # dry-run: ничего не меняет
-    assert prepo.get_person(MARK, x)["aliases"] == ["Кай", "Вадим", "Каюшка"]
+    assert prepo.get_person(MARK, x)["aliases"] == ["Кай", "Олег", "Каюшка"]
     assert au.main(["--user", MARK, "--apply"]) == 0
     p = prepo.get_person(MARK, x)
-    assert p["aliases"] == ["Вадим"]                                           # чужие совпадения остались для ручного разбора
+    assert p["aliases"] == ["Олег"]                                           # чужие совпадения остались для ручного разбора
     assert [f["id"] for f in prepo.resolve(MARK, ["Кай"])] == []              # aliases_norm пересчитан, «Я» не резолвится
     assert [r["id"] for r in prepo.resolve(MARK, ["Оле"])] == [x]
     with get_engine().connect() as c:
         rel = c.execute(text("SELECT related_to FROM memories WHERE person_id = :p"), {"p": x}).scalar()
-    assert rel == "Оля Первая | Вадим"
+    assert rel == "Оля Первая | Олег"
     assert prepo.get_person(MARK, y)["aliases"] == []
 
 
@@ -290,14 +290,14 @@ def test_guess_fact_type():
 def test_alias_disputes_pure():
     from core.people import alias_disputes
     rows = [_p(1, "Кай Тестова", ["Каюшка"], self_=True),
-            _p(2, "Оля Первая", ["Оля", "Кай", "Вадима", "Каюшка"]),             # «Оля» — свой; «Вадима» ≈ «Вадим»
-            _p(3, "Вадим Второй", []),
-            _p(4, "Вадим", [], status="rejected"),                                # rejected не участвует
+            _p(2, "Оля Первая", ["Оля", "Кай", "Олега", "Каюшка"]),             # «Оля» — свой; «Олега» ≈ «Олег»
+            _p(3, "Олег Второй", []),
+            _p(4, "Олег", [], status="rejected"),                                # rejected не участвует
             _p(5, "Маша", ["Оля Первая"])]
     d = alias_disputes(rows)
     assert 1 not in d                                                              # алиасы «Я» не проверяем
     got = {a["alias"]: [x["id"] for x in a["also"]] for a in d[2]}
-    assert got == {"Кай": [1], "Каюшка": [1]}                                      # «Вадима»: «Вадим Второй» — не целиком
+    assert got == {"Кай": [1], "Каюшка": [1]}                                      # «Олега»: «Олег Второй» — не целиком
     assert [a["also"][0]["is_self"] for a in d[2]] == [True, True]
     assert {a["alias"]: [x["id"] for x in a["also"]] for a in d[5]} == {"Оля Первая": [2]}
     assert 3 not in d and 4 not in d
@@ -305,8 +305,8 @@ def test_alias_disputes_pure():
 
 def test_alias_disputes_stem_match_and_own_name():
     from core.people import alias_disputes
-    rows = [_p(1, "Вадим", []), _p(2, "Оля", ["Вадима", "Оля"])]
-    assert [a["alias"] for a in alias_disputes(rows)[2]] == ["Вадима"]
+    rows = [_p(1, "Олег", []), _p(2, "Оля", ["Олега", "Оля"])]
+    assert [a["alias"] for a in alias_disputes(rows)[2]] == ["Олега"]
 
 
 def test_duplicates_shared_names_only_when_mutual():
@@ -331,20 +331,20 @@ def papi():
 
 def test_api_summary_card_remove_reset(papi):
     me = mk("Кай Тестова", is_self=True)
-    x = mk("Оля Первая", ["Кай Тестова", "Свой", "Вадим"])
-    y = mk("Вадим Второй", ["Вадим"])
+    x = mk("Оля Первая", ["Кай Тестова", "Свой", "Олег"])
+    y = mk("Олег Второй", ["Олег"])
     mk_fact(x, status="confirmed", text_="любит зюзячай")
     s = papi.get("/api/people/alias-disputes").json()
     assert s["total"] == 3 and s["people"][0]["id"] == x and (s["people"][0]["disputed"], s["people"][0]["aliases"]) == (2, 3)
     card = papi.get("/api/people/%d" % x).json()
     info = {a["alias"]: [o["id"] for o in a["also"]] for a in card["aliases_info"]}
-    assert info == {"Кай Тестова": [me], "Свой": [], "Вадим": [y]}
+    assert info == {"Кай Тестова": [me], "Свой": [], "Олег": [y]}
     r = papi.post("/api/people/%d/aliases/remove" % x, json={"alias": "Кай Тестова"})
-    assert r.status_code == 200 and r.json()["aliases"] == ["Свой", "Вадим"]
+    assert r.status_code == 200 and r.json()["aliases"] == ["Свой", "Олег"]
     assert [p["id"] for p in prepo.resolve(MARK, ["Свой"])] == [x]
     with get_engine().connect() as c:
-        assert c.execute(text("SELECT related_to FROM memories WHERE person_id = :p"), {"p": x}).scalar() == "Оля Первая | Свой | Вадим"
-    assert papi.get("/api/people/alias-disputes").json()["total"] == 2      # остался взаимный «Вадим» у обоих
+        assert c.execute(text("SELECT related_to FROM memories WHERE person_id = :p"), {"p": x}).scalar() == "Оля Первая | Свой | Олег"
+    assert papi.get("/api/people/alias-disputes").json()["total"] == 2      # остался взаимный «Олег» у обоих
     assert papi.post("/api/people/%d/aliases/remove" % x, json={"alias": "нет такого"}).status_code == 404
     assert papi.post("/api/people/%d/aliases/reset" % x).json()["aliases"] == []
     assert prepo.resolve(MARK, ["Свой"]) == []                                     # aliases_norm пересчитан
@@ -365,26 +365,26 @@ def test_alias_ok_pure_pair_review_and_new_match_rehighlights():
 
 
 def test_api_alias_ok_hides_from_card_and_badge_and_survives_until_new_match(papi):
-    x = mk("Оля Первая", ["Вадим"])
-    y = mk("Вадим Второй", ["Вадим"])
+    x = mk("Оля Первая", ["Олег"])
+    y = mk("Олег Второй", ["Олег"])
     assert papi.get("/api/people/alias-disputes").json()["total"] == 2
-    r = papi.post("/api/people/%d/aliases/ok" % x, json={"alias": "Вадим"})
-    assert r.status_code == 200 and r.json()["aliases_info"] == [{"alias": "Вадим", "also": []}]
-    assert r.json()["aliases"] == ["Вадим"]                                     # сам алиас остаётся
+    r = papi.post("/api/people/%d/aliases/ok" % x, json={"alias": "Олег"})
+    assert r.status_code == 200 and r.json()["aliases_info"] == [{"alias": "Олег", "also": []}]
+    assert r.json()["aliases"] == ["Олег"]                                     # сам алиас остаётся
     assert papi.get("/api/people/alias-disputes").json()["total"] == 0          # пара проверена с обеих сторон
     assert papi.get("/api/people/%d" % y).json()["aliases_info"][0]["also"] == []
-    z = mk("Вадим Третий", ["Вадим"])                                           # новое совпадение → снова подсвечено
+    z = mk("Олег Третий", ["Олег"])                                           # новое совпадение → снова подсвечено
     info = papi.get("/api/people/%d" % x).json()["aliases_info"][0]
     assert [o["id"] for o in info["also"]] == [z]
     assert papi.get("/api/people/alias-disputes").json()["total"] >= 2
     assert papi.post("/api/people/%d/aliases/ok" % x, json={"alias": "нет такого"}).status_code == 404
-    assert papi.post("/api/people/999999999/aliases/ok", json={"alias": "Вадим"}).status_code == 404
+    assert papi.post("/api/people/999999999/aliases/ok", json={"alias": "Олег"}).status_code == 404
 
 
 def test_alias_ok_rows_are_removed_with_the_person(papi):
-    x = mk("Оля Первая", ["Вадим"])
-    y = mk("Вадим")
-    assert papi.post("/api/people/%d/aliases/ok" % x, json={"alias": "Вадим"}).status_code == 200
+    x = mk("Оля Первая", ["Олег"])
+    y = mk("Олег")
+    assert papi.post("/api/people/%d/aliases/ok" % x, json={"alias": "Олег"}).status_code == 200
     with get_engine().begin() as c:
         c.execute(delete(people).where(people.c.id == y))
         assert c.execute(text("SELECT count(*) FROM people_alias_ok")).scalar() == 0

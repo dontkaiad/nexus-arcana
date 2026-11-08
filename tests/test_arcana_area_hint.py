@@ -155,7 +155,7 @@ async def test_null_area_with_known_subject_uses_hint():
         "bottom_card": None, "area": None, "spread_type": "Триплет",
         "interpretation": None,
     }]
-    data = {"session_name": "Вадим — диагностика", "deck": "Уэйт"}
+    data = {"session_name": "Олег — диагностика", "deck": "Уэйт"}
 
     with ExitStack() as st:
         for p in _patches(repo, _fake_ask_for_multi("Отношения")):
@@ -180,7 +180,7 @@ async def test_explicit_area_wins_over_hint_even_with_known_subject():
         "bottom_card": None, "area": "Финансы", "spread_type": "Триплет",
         "interpretation": None,
     }]
-    data = {"session_name": "Вадим — финансы", "deck": "Уэйт"}
+    data = {"session_name": "Олег — финансы", "deck": "Уэйт"}
 
     with ExitStack() as st:
         for p in _patches(repo, _fake_ask_for_multi("Отношения")):
@@ -205,7 +205,7 @@ async def test_no_known_subject_keeps_old_default_behavior():
         "bottom_card": None, "area": None, "spread_type": "Триплет",
         "interpretation": None,
     }]
-    data = {"session_name": "Вадим — диагностика", "deck": "Уэйт"}
+    data = {"session_name": "Олег — диагностика", "deck": "Уэйт"}
 
     with ExitStack() as st:
         for p in _patches(repo, _fake_ask_for_multi("Отношения")):

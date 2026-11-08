@@ -2,7 +2,7 @@
 
 GET /api/arcana/sessions:
 - триплеты с одинаковым subject_id, но РАЗНЫМИ session_name схлопываются
-  в одну группу (фикс фрагментации «Вадим» / «Вадим — отношения» / …);
+  в одну группу (фикс фрагментации «Олег» / «Олег — отношения» / …);
 - slug такой группы — "subj-{subject_id}".
 
 GET /api/arcana/sessions/by-slug/{slug}:
@@ -51,13 +51,13 @@ def _ctx(mock_repo, mock_cl=None):
 
 def test_list_sessions_collapses_by_subject_id_despite_different_names(client):
     sessions_pg = [
-        _make_triplet("1", "Что думает Вадим", session_name="Вадим",
+        _make_triplet("1", "Что думает Олег", session_name="Олег",
                       subject_id=42, date="2026-05-01"),
-        _make_triplet("2", "Диагностика Вадима", session_name="Вадим — диагностика",
+        _make_triplet("2", "Диагностика Олега", session_name="Олег — диагностика",
                       subject_id=42, date="2026-05-02"),
-        _make_triplet("3", "Вадим и отношения", session_name="Вадим — отношения",
+        _make_triplet("3", "Олег и отношения", session_name="Олег — отношения",
                       subject_id=42, date="2026-05-03"),
-        _make_triplet("4", "Не Вадим", session_name="Другая тема",
+        _make_triplet("4", "Не Олег", session_name="Другая тема",
                       date="2026-05-01"),
     ]
     mock_repo = MagicMock()
@@ -80,8 +80,8 @@ def test_list_sessions_collapses_by_subject_id_despite_different_names(client):
 
 def test_by_slug_subj_prefix_uses_list_by_subject(client):
     matching = [
-        _make_triplet("1", "Q1", session_name="Вадим", subject_id=42, date="2026-05-01"),
-        _make_triplet("2", "Q2", session_name="Вадим — диагностика", subject_id=42,
+        _make_triplet("1", "Q1", session_name="Олег", subject_id=42, date="2026-05-01"),
+        _make_triplet("2", "Q2", session_name="Олег — диагностика", subject_id=42,
                       date="2026-05-02"),
     ]
     mock_repo = MagicMock()
@@ -100,7 +100,7 @@ def test_by_slug_subj_prefix_uses_list_by_subject(client):
 
     # events — по одному на каждый (session_name, client_id), хронологически.
     assert len(data["events"]) == 2
-    assert [e["session_name"] for e in data["events"]] == ["Вадим", "Вадим — диагностика"]
+    assert [e["session_name"] for e in data["events"]] == ["Олег", "Олег — диагностика"]
     assert [e["date"] for e in data["events"]] == ["2026-05-01", "2026-05-02"]
     assert all(e["triplet_count"] == 1 for e in data["events"])
     for e in data["events"]:

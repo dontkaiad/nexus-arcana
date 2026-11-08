@@ -16,7 +16,7 @@ from arcana.handlers import sessions as sess_mod
 
 
 class _Mem:
-    def __init__(self, id="777", fact="Вадим — бывший, тревожит", related_to="вадим"):
+    def __init__(self, id="777", fact="Олег — бывший, тревожит", related_to="олег"):
         self.id = id
         self.fact = fact
         self.related_to = related_to
@@ -30,13 +30,13 @@ async def test_prompt_sent_when_memory_match_found(mock_message):
          patch("arcana.pending_tarot.save_pending", AsyncMock()) as save_pending:
         await sess_mod._maybe_prompt_subject_match(
             msg, 700000001,
-            subject_name="Вадим", session_name="Вадим — диагностика",
+            subject_name="Олег", session_name="Олег — диагностика",
             client_id=None, user_id="u-1", page_ids=["1", "2"],
         )
 
     msg.answer.assert_awaited_once()
     text = msg.answer.await_args.args[0]
-    assert "Вадим" in text
+    assert "Олег" in text
     save_pending.assert_awaited_once()
     state = save_pending.await_args.args[1]
     assert state["type"] == "subject_confirm_pending"
@@ -65,7 +65,7 @@ async def test_confirm_yes_sets_subject_on_all_page_ids(mock_callback):
     cb = mock_callback(data="subj_yes:abc123")
     pending = {
         "type": "subject_confirm_pending", "slug": "abc123",
-        "memory_id": "777", "subject_name": "Вадим",
+        "memory_id": "777", "subject_name": "Олег",
         "page_ids": ["1", "2"],
     }
     set_subject = AsyncMock(return_value=2)
@@ -77,7 +77,7 @@ async def test_confirm_yes_sets_subject_on_all_page_ids(mock_callback):
     set_subject.assert_awaited_once_with(["1", "2"], 777)
     delete_pending.assert_awaited_once_with(cb.from_user.id)
     cb.message.answer.assert_awaited_once()
-    assert "Вадим" in cb.message.answer.await_args.args[0]
+    assert "Олег" in cb.message.answer.await_args.args[0]
 
 
 @pytest.mark.asyncio
@@ -85,7 +85,7 @@ async def test_confirm_yes_ignores_mismatched_slug(mock_callback):
     cb = mock_callback(data="subj_yes:wrong-slug")
     pending = {
         "type": "subject_confirm_pending", "slug": "abc123",
-        "memory_id": "777", "subject_name": "Вадим", "page_ids": ["1"],
+        "memory_id": "777", "subject_name": "Олег", "page_ids": ["1"],
     }
     set_subject = AsyncMock()
     with patch("arcana.pending_tarot.get_pending", AsyncMock(return_value=pending)), \
@@ -100,7 +100,7 @@ async def test_confirm_no_leaves_subject_untouched(mock_callback):
     cb = mock_callback(data="subj_no:abc123")
     pending = {
         "type": "subject_confirm_pending", "slug": "abc123",
-        "memory_id": "777", "subject_name": "Вадим", "page_ids": ["1"],
+        "memory_id": "777", "subject_name": "Олег", "page_ids": ["1"],
     }
     set_subject = AsyncMock()
     with patch("arcana.pending_tarot.get_pending", AsyncMock(return_value=pending)), \

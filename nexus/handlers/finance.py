@@ -776,7 +776,7 @@ STATS_SYSTEM = f"""Определи, запрашивает ли пользов�
 {{
   "category": "одна из: {', '.join(CATEGORIES)} или null если запрос общей сводки",
   "type_": "expense если спрашивает о расходах, income если о доходах, null если оба",
-  "description_search": "ключевое слово/имя для фильтра описания или null. Извлекай имена людей, магазины, организации после слов 'на/у/за/для/от'. Пример: 'у вадима' → 'вадим', 'на клинику' → 'клиника', 'за маму' → 'мама'",
+  "description_search": "ключевое слово/имя для фильтра описания или null. Извлекай имена людей, магазины, организации после слов 'на/у/за/для/от'. Пример: 'у олега' → 'олег', 'на клинику' → 'клиника', 'за маму' → 'мама'",
   "months": 1,
   "compare": false
 }}
@@ -784,7 +784,7 @@ STATS_SYSTEM = f"""Определи, запрашивает ли пользов�
 Правила:
 - Если в запросе есть имя/магазин/организация/объект рядом со словами 'на/у/за/для/от/по' → description_search = это слово
 - Для доходов: 'получила X', 'пришло X', 'заработала X', 'доход по X', 'аренда', 'аренды' → description_search = X, type_=income
-- Категория и description_search могут быть вместе: 'расходы на транспорт для вадима' → category=Транспорт, description_search=вадим
+- Категория и description_search могут быть вместе: 'расходы на транспорт для олега' → category=Транспорт, description_search=олег
 - Если категория явно указана (коты, транспорт, продукты...) → category; если имя/человек/объект → description_search
 - months: сколько месяцев захватить. "за 3 месяца" → 3, "за полгода" → 6, "за год" → 12. По умолчанию 1
 - compare=true если просят сравнить месяцы: "сравни", "сравнение", "как изменились расходы"
@@ -794,11 +794,11 @@ STATS_SYSTEM = f"""Определи, запрашивает ли пользов�
 "расходы на транспорт" → {{"category": "🚕 Транспорт", "type_": "expense", "description_search": null, "months": 1, "compare": false}}
 "кола" → {{"category": "🚬 Привычки", "type_": "expense", "description_search": null, "months": 1, "compare": false}}
 "заработала на практике" → {{"category": "🔮 Практика", "type_": "income", "description_search": null, "months": 1, "compare": false}}
-"сколько перевела вадиму" → {{"category": null, "type_": "expense", "description_search": "вадим", "months": 1, "compare": false}}
+"сколько перевела олегу" → {{"category": null, "type_": "expense", "description_search": "олег", "months": 1, "compare": false}}
 "расходы на клинику" → {{"category": "🏥 Здоровье", "type_": "expense", "description_search": "клиника", "months": 1, "compare": false}}
 "у мамы" → {{"category": null, "type_": null, "description_search": "мама", "months": 1, "compare": false}}
 "сколько получила аренды" → {{"category": null, "type_": "income", "description_search": "аренда", "months": 1, "compare": false}}
-"сколько пришло от вадима" → {{"category": null, "type_": "income", "description_search": "вадим", "months": 1, "compare": false}}
+"сколько пришло от олега" → {{"category": null, "type_": "income", "description_search": "олег", "months": 1, "compare": false}}
 "доход по аренде" → {{"category": null, "type_": "income", "description_search": "аренда", "months": 1, "compare": false}}
 "все доходы" → {{"category": null, "type_": "income", "description_search": null, "months": 1, "compare": false}}
 "сводка за месяц" → {{"category": null, "type_": null, "description_search": null, "months": 1, "compare": false}}
@@ -848,7 +848,7 @@ PARSE_SYSTEM = f"""Извлеки финансовую запись. Испра�
 
 Правила confidence:
 - confidence=HIGH (не спрашивай): если type_ понятен ИЛИ сумма+категория понятны
-- confidence=LOW (спроси): ТОЛЬКО если ВООБЩЕ непонятно — это доход или расход? (например "500р от вадима")
+- confidence=LOW (спроси): ТОЛЬКО если ВООБЩЕ непонятно — это доход или расход? (например "500р от олега")
 - НЕ ставь low только потому что не знаешь описание — description="?" и high достаточно
 
 Правила type_:
@@ -875,13 +875,13 @@ PARSE_SYSTEM = f"""Извлеки финансовую запись. Испра�
 - 💳 Прочее: ТОЛЬКО если ни одна категория выше не подходит вообще
 
 Примеры:
-"350 вадим" → description="Вадим", type_="💸 Расход", category="💳 Прочее", confidence="low", question="350р Вадиму — за что?"
+"350 олег" → description="Олег", type_="💸 Расход", category="💳 Прочее", confidence="low", question="350р Олегу — за что?"
 "450р такси" → description="Такси", type_="💸 Расход", category="🚕 Транспорт", confidence="high"
 "монстр 120" → description="Monster Energy", type_="💸 Расход", category="🚬 Привычки", confidence="high"
 "кофе 180р" → description="Кофе", type_="💸 Расход", category="🍱 Кафе/Доставка", confidence="high"
 "снеки 300" → description="Снеки", type_="💸 Расход", category="🍜 Продукты", confidence="high"
 "пришла зарплата 80к" → description="Зарплата", type_="💰 Доход", category="💰 Зарплата", confidence="high"
-"500р от вадима" → description="От Вадима", type_="💸 Расход", category="💳 Прочее", confidence="low", question="500р от Вадима — это доход или расход?"
+"500р от олега" → description="От Олега", type_="💸 Расход", category="💳 Прочее", confidence="low", question="500р от Олега — это доход или расход?"
 "измени карту на бартер" → is_update=true, update_field="source", update_value="🔄 Бартер", amount=0
 "поменяй категорию на продукты" → is_update=true, update_field="category", update_value="🍜 Продукты", amount=0
 "это доход" → is_update=true, update_field="type_", update_value="💰 Доход", amount=0
@@ -1719,7 +1719,7 @@ async def handle_finance_summary(query: str = "", user_id: str = "", uid: int = 
     # Месяц: из текста запроса или текущий
     month_str = _parse_month_from_query(query) if query else _month(tz_offset)
 
-    # Первые 4-5 символов для Notion title contains (fuzzy: "вадима" → "вади" → найдёт "вадиму")
+    # Первые 4-5 символов для Notion title contains (fuzzy: "олега" → "вади" → найдёт "олегу")
     notion_desc_kw = (description_search or "")[:5].strip() if description_search else ""
 
     # Notion делает фильтрацию по описанию и типу на стороне API

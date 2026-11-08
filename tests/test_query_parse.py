@@ -1,7 +1,7 @@
 """tests/test_query_parse.py — детерминированный разбор вопроса к 🧠 Памяти (core/query_parse.py).
 
 Резолв людей имитируется тем же кодом форм, что в проде (core.people.mention_candidates / aliases_norm_for),
-поэтому падежи («Мише», «Олю») и короткие имена проверяются по-настоящему. Запросы — строчными.
+поэтому падежи («Тёме», «Олю») и короткие имена проверяются по-настоящему. Запросы — строчными.
 Privacy: вымышленные имена.
 """
 from __future__ import annotations
@@ -12,10 +12,10 @@ from core import query_parse as qp
 from core.people import aliases_norm_for, mention_candidates
 
 PEOPLE = [
-    {"id": 1, "name": "Михаил Тестов", "aliases": ["Миша"]},
-    {"id": 2, "name": "Миша Образцов", "aliases": ["Миша"]},
+    {"id": 1, "name": "Артём Тестов", "aliases": ["Тёма"]},
+    {"id": 2, "name": "Тёма Образцов", "aliases": ["Тёма"]},
     {"id": 3, "name": "Ольга", "aliases": ["Оля"]},
-    {"id": 4, "name": "Мишаня", "aliases": []},
+    {"id": 4, "name": "Тёмыч", "aliases": []},
     {"id": 5, "name": "Олег", "aliases": []},
 ]
 for _p in PEOPLE:
@@ -46,15 +46,15 @@ def test_person_resolved_through_case_forms():
 
 
 def test_homonyms_are_ambiguous_not_guessed():
-    p = plan("что не любит миша")
+    p = plan("что не любит тёма")
     assert p.subject == "ambiguous" and sorted(ids(p)) == [1, 2]
 
 
 def test_diminutives_do_not_collapse_by_stem():
-    # «мишаня» ≠ «миша», «олег» ≠ «оля/ольга»: общая основа не склеивает людей
-    assert ids(plan("что любит мишаня")) == [4]
+    # «тёмыч» ≠ «тёма», «олег» ≠ «оля/ольга»: общая основа не склеивает людей
+    assert ids(plan("что любит тёмыч")) == [4]
     assert ids(plan("что любит олег")) == [5]
-    assert 5 not in ids(plan("что любит оля")) and 4 not in ids(plan("что любит миша"))
+    assert 5 not in ids(plan("что любит оля")) and 4 not in ids(plan("что любит тёма"))
 
 
 @pytest.mark.parametrize("q", ["что я не ем", "чего я не пью", "что мне нельзя", "что не ем", "что я не переношу"])
@@ -122,6 +122,6 @@ def test_birthday_intent(q):
 
 def test_structured_requires_person_and_type():
     assert plan("что любит оля").structured
-    assert plan("что не любит миша").structured            # тёзки тоже структурны (два блока)
+    assert plan("что не любит тёма").structured            # тёзки тоже структурны (два блока)
     assert not plan("что я не ем").structured              # «я» → гибрид внутри моих фактов
     assert not plan("номер квартиры").structured

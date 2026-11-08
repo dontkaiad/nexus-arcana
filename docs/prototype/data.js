@@ -53,7 +53,7 @@ window.NX_DATA = {
     { text: "кола, черноголовка, cola, пепси — привычки (газированные напитки)", cat: "🛒 Предпочтения" },
     { text: "монстры/monster/монстр = энергетики, категория привычки", cat: "🛒 Предпочтения" },
     { text: "тучке нужен габапентин (противотревожное)", cat: "🐾 Коты" },
-    { text: "любит Вадима", cat: "👥 Люди" },
+    { text: "любит Олега", cat: "👥 Люди" },
     { text: "у тучки краткая кличка туча", cat: "🐾 Коты" },
     { text: "в Санкт-Петербурге", cat: "🏠 Быт" },
   ],
@@ -68,8 +68,8 @@ window.NX_DATA = {
   },
   sessions: [
     { id: 301, q: "Общий расклад", area: "Общая ситуация", deck: "Уэйт", type: "🔺 Триплет", client: "ТестСмоук", date: "21 апреля", cards: [{ name: "The Fool" }, { name: "The Magician" }, { name: "The High Priestess" }], status: "unchecked" },
-    { id: 302, q: "Что думает Вадим", area: "Отношения", deck: "Уэйт", type: "🔺 Триплет", client: "Личный", date: "21 апреля", cards: [{ name: "The Fool" }, { name: "The Magician" }, { name: "The High Priestess" }], status: "unchecked" },
-    { id: 303, q: "Что думает Вадим", area: "Отношения", deck: "Уэйт", type: "🔺 Триплет", client: "Личный", date: "21 апреля", cards: [{ name: "The Fool" }, { name: "The Magician" }, { name: "The High Priestess" }], status: "unchecked" },
+    { id: 302, q: "Что думает Олег", area: "Отношения", deck: "Уэйт", type: "🔺 Триплет", client: "Личный", date: "21 апреля", cards: [{ name: "The Fool" }, { name: "The Magician" }, { name: "The High Priestess" }], status: "unchecked" },
+    { id: 303, q: "Что думает Олег", area: "Отношения", deck: "Уэйт", type: "🔺 Триплет", client: "Личный", date: "21 апреля", cards: [{ name: "The Fool" }, { name: "The Magician" }, { name: "The High Priestess" }], status: "unchecked" },
     { id: 304, q: "общий вопрос", area: "Общая ситуация", deck: "Уэйт", type: "🔺 Триплет", client: "Личный", date: "21 апреля", cards: [{ name: "The Fool" }, { name: "The Magician" }, { name: "The High Priestess" }], status: "unchecked" },
   ],
   clients: [
@@ -90,7 +90,7 @@ window.NX_DATA = {
     ],
     unchecked: [
       { id: 301, q: "Общий расклад", client: "ТестСмоук", date: "21 апреля" },
-      { id: 302, q: "Что думает Вадим", client: "Личный", date: "21 апреля" },
+      { id: 302, q: "Что думает Олег", client: "Личный", date: "21 апреля" },
     ],
   },
 };

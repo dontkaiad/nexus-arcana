@@ -26,7 +26,7 @@ Two failure modes shaped the design:
 marker printed to stdout.**
 
 - **Forced command in `~/.ssh/authorized_keys`:**
-  `command="/home/kai/deploy.sh"` — Actions authenticates with `SSH_PRIVATE_KEY` and
+  `command="<deploy user>/deploy.sh"` — Actions authenticates with `SSH_PRIVATE_KEY` and
   regardless of the `script:` body the action sends, the server runs only `deploy.sh`.
   This is least-privilege: the Actions key cannot execute arbitrary commands on prod,
   only this one auditable script.

@@ -349,7 +349,7 @@ def test_manual_overrides_delete_misc_self_person(world):
     ilya = prepo.create(MARK, "Илья", [], status="confirmed")
     junk = mem("в процессе", "🦋 СДВГ", "x1", None, "confirmed")
     misc = mem("Arcana — бот", "💡 Инсайт", "x2", None, "confirmed")
-    to_self = mem("любит Вадима", "👥 Люди", "x3", None, "confirmed", "Вадим")
+    to_self = mem("любит Олега", "👥 Люди", "x3", None, "confirmed", "Олег")
     card = mem("Илья друг, есть ключи", "👥 Люди", "x4", None, "confirmed")
     noname = mem("Дима живёт рядом", "👥 Люди", "x5", None, "confirmed")
     arg = f"{junk}:delete,{misc}:misc,{to_self}:self,{card}:person:Илья,{noname}:person:Никого"
