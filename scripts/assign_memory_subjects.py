@@ -53,14 +53,19 @@ PER_CAT = 25
 PRICE_IN, PRICE_OUT = 0.10, 0.50          # Haiku 5.5, $ за 1M токенов
 
 
+LEFTOVERS = False        # --leftovers: «Я» без категории, но уже разобранные (confirmed) и старые «Инсайт», а не только pending «Люди»
+
+
 def _load(c, sa):
     me = c.execute(sa.text("SELECT id, user_id, name, aliases FROM people WHERE is_self ORDER BY id")).all()
     if len(me) != 1:
         sys.exit(f"ожидалась ровно одна карточка «Я», найдено {len(me)}")
     me = me[0]
+    where = ("category IN ('👥 Люди', '💡 Инсайт') AND review_status <> 'rejected'" if LEFTOVERS
+             else "category = '👥 Люди' AND review_status = 'pending'")
     selfs = c.execute(sa.text(
-        "SELECT id, fact_text, source_chat_id, source_quote, quote_author FROM memories WHERE person_id = :p AND category = '👥 Люди' "
-        "AND review_status = 'pending' AND fact_text <> '' AND NOT is_archived ORDER BY id"), {"p": me.id}).all()
+        "SELECT id, fact_text, source_chat_id, source_quote, quote_author FROM memories WHERE person_id = :p AND " + where +
+        " AND fact_text <> '' AND NOT is_archived ORDER BY id"), {"p": me.id}).all()
     old = c.execute(sa.text(
         "SELECT id, category, key_name, fact_text, related_to, user_id FROM memories WHERE person_id IS NULL "
         "AND review_status = 'confirmed' AND NOT is_archived AND is_current ORDER BY id")).all()
@@ -398,7 +403,7 @@ def apply() -> int:
             if it["id"] in handled:
                 continue
             n = c.execute(sa.text(
-                "UPDATE memories SET category = :cat WHERE id = :id AND person_id = :p AND category = '👥 Люди'"),
+                "UPDATE memories SET category = :cat WHERE id = :id AND person_id = :p AND category IN ('👥 Люди', '💡 Инсайт')"),
                 {"cat": it["cat"], "id": it["id"], "p": me.id}).rowcount
             done["self_cat" if n else "self_skipped"] += 1
 
@@ -458,8 +463,10 @@ if __name__ == "__main__":
     g.add_argument("--apply", action="store_true")
     ap.add_argument("--manual", default="")
     ap.add_argument("--keep-temp", default="")
+    ap.add_argument("--leftovers", action="store_true", help="категоризовать оставшиеся «Я» с категорией «Люди»/«Инсайт» (в т.ч. принятые)")
     ap.add_argument("--chat-map", default="", help="chat_id:Имя,... — привязать чат к карточке человека")
     ap.add_argument("--stage", choices=["attribution", "categories", "all"], default="attribution",
                     help="attribution — без LLM (по умолчанию); categories/all — нужен ключ ANTHROPIC_API_KEY_TOOLS")
     a = ap.parse_args()
+    LEFTOVERS = a.leftovers
     sys.exit(apply() if a.apply else plan(a.manual, a.keep_temp, a.stage, a.chat_map))
