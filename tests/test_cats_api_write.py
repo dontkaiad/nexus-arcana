@@ -362,11 +362,11 @@ def test_self_card_fact_in_cats_category_is_attachable_and_leaves_the_self_card(
 def test_batch_of_self_facts_all_attach_and_none_comes_back(api):
     from core.repos import pg_people_repo as prepo
     me = mk_person(is_self=True)
-    luna = crepo.create(MARK, "Луна")
-    ids = [self_fact(me, "Луна факт номер %d" % i, ["important", "likes", "dislikes", "other"][i % 4]) for i in range(8)]
+    ryzhik = crepo.create(MARK, "Рыжик")
+    ids = [self_fact(me, "Рыжик факт номер %d" % i, ["important", "likes", "dislikes", "other"][i % 4]) for i in range(8)]
     assert api.get("/api/cats/general").json()["total"] == 8
-    assert [api.post(f"/api/cats/{luna}/facts/{i}/attach").status_code for i in ids] == [200] * 8
-    assert all(row(i).cat_id == luna and person_row(i).person_id is None for i in ids)
+    assert [api.post(f"/api/cats/{ryzhik}/facts/{i}/attach").status_code for i in ids] == [200] * 8
+    assert all(row(i).cat_id == ryzhik and person_row(i).person_id is None for i in ids)
     assert [cat_key_type(row(i).key_name) for i in ids] == ["important", "likes", "dislikes", "other"] * 2      # тип из ключа «Я», а не из текста
     # «разнос» / смена категории карточки «Я» больше эти факты не трогает: их там уже нет
     assert prepo.set_facts_category(MARK, me, ids, "💼 Работа") == 0
