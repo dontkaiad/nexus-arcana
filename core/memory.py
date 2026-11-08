@@ -1177,20 +1177,17 @@ async def delete_memory(
     )
 
 
-async def recall_from_memory(keyword: str) -> Optional[str]:
-    """Ищет в памяти факт по ключевому слову. Возвращает текст первого совпадения или None."""
-    if not keyword or not keyword.strip():
+async def recall_from_memory(keyword: str, user_id: str = "") -> Optional[str]:
+    """«Как обычно»: первый положительный факт владельца про объект покупки (гибридный поиск, core.memory_search.object_facts).
+    Отрицательные факты («не ем X»), аллергии и факты других людей не подсказываются. Нет совпадения → None."""
+    if not keyword or len(keyword.strip()) < 2:
         return None
-    norm = _normalize_word(keyword.lower().strip())
-    if len(norm) < 2:
+    try:
+        facts = await _memory_search.object_facts(keyword.strip(), user_id=user_id, k=1)
+    except Exception as e:
+        logger.warning("recall_from_memory(%r): %s", keyword[:40], e)
         return None
-    results = await _mem_repo.search([norm], page_size=3)
-    if not results:
-        results = await _mem_repo.search([keyword.strip()], page_size=3)
-    for m in results:
-        if m.is_current and m.fact:
-            return m.fact
-    return None
+    return facts[0].fact if facts else None
 
 
 async def find_memories_by_subject_name(

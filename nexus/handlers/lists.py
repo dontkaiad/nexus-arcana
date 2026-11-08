@@ -821,7 +821,7 @@ async def handle_list_buy(msg: Message, data: dict, user_id: str = "") -> None:
     memory_cats: dict[str, str] = {}
     if potential_items:
         try:
-            memory_cats = await _repo.search_memory_categories(potential_items)
+            memory_cats = await _repo.search_memory_categories(potential_items, user_id)
         except Exception as e:
             logger.debug("memory category search: %s", e)
 

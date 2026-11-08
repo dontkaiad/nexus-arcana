@@ -19,6 +19,7 @@ def test_offline_evals_meet_thresholds():
     assert res["classifier"]["accuracy_pct"] == 100.0 and res["classifier"]["llm_calls"] == 0
     assert res["memory_retrieval"]["recall_at_5_pct"] == 100.0 and res["memory_retrieval"]["route_acc_pct"] == 100.0
     mr = res["memory_retrieval"]
+    assert mr["hints"]["pass_pct"] == 100.0 and mr["hints"]["cases"] == 5, mr["hints"]     # «как обычно»: ловушки с отрицанием не подсказываются
     assert mr["ambiguity_acc_pct"] == 100.0                                      # имя кота = имя человека: показаны оба
     assert mr["by_group"]["people"]["questions"] == 9 and mr["by_group"]["cats"]["questions"] == 10
     for g in ("people", "cats"):                                                 # новая группа не маскирует регресс старой

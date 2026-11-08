@@ -99,8 +99,8 @@ class ListsRepo:
             query, user_page_id, db_id=db_id, title_prop=title_prop
         )
 
-    async def search_memory_categories(self, item_names: list) -> dict:
-        return await _lm.search_memory_categories(item_names)
+    async def search_memory_categories(self, item_names: list, user_id: str = "") -> dict:
+        return await _lm.search_memory_categories(item_names, user_id)
 
     async def get_summary(
         self,
