@@ -484,7 +484,24 @@ def test_location_is_searchable_and_clipped():
     add_item("инвентарь", "Зарядка", "", category="Дом", location="кладовка за дверью " + "х" * 400)
     r = ask("кладовка").json()
     assert r["found"] and r["hits"][0]["text"].startswith("Зарядка")
-    assert len(r["hits"][0]["location"]) <= 120
+    assert len(r["hits"][0]["location"]) == ss.MAX_LOC == 200
+
+
+@pytest.mark.parametrize("n", [119, 120, 121, 161, 199, 200])
+def test_location_up_to_the_column_limit_is_not_cut_in_ask_and_lists(n):
+    loc = ("слово " * 60)[:n]
+    loc = loc[:-1] + "я"                                        # не заканчивается пробелом: strip его не съест
+    add_item("инвентарь", "Градусник", "", category="Дом", location=loc)
+    hit = ask("градусник").json()["hits"][0]
+    assert hit["location"] == loc and len(hit["location"]) == n
+    inv = TestClient(app).get("/api/sitter/lists", headers=OK).json()["inventory"][0]["items"][0]
+    assert inv["location"] == loc
+
+
+def test_location_over_the_limit_is_cut_to_200_in_both_places():
+    add_item("инвентарь", "Градусник", "", category="Дом", location="я" * 201)
+    assert ask("градусник").json()["hits"][0]["location"] == "я" * 200
+    assert TestClient(app).get("/api/sitter/lists", headers=OK).json()["inventory"][0]["items"][0]["location"] == "я" * 200
 
 
 def test_hidden_items_location_does_not_leak():

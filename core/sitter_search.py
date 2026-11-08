@@ -29,7 +29,7 @@ from core.memory_search import fts_query
 from core import sitter_expand
 from core.rag import _embed, _vec_literal
 from core.repos.lists_table import nexus_lists as nl
-from core.repos.pg_sitter_lists_repo import INVENTORY, sitter_visible_clause
+from core.repos.pg_sitter_lists_repo import INVENTORY, MAX_LOC, sitter_visible_clause
 
 logger = logging.getLogger("core.sitter_search")
 
@@ -191,7 +191,7 @@ def _candidates(user_id: str, tsq: str, qvec: Optional[List[float]], extra: Opti
                     "label": ("инвентарь: " + _clip(r.category, 40)) if inv else ("список: " + _clip(r.group_name, 40)),
                     "text": _clip(txt, MAX_SNIPPET), "fts": float(r.fts or 0),
                     "cos": _cos(qvec, vecs[r.id]) if qvec and r.id in vecs else None,
-                    **({"location": _clip(r.location, 120)} if inv else {})})
+                    **({"location": _clip(r.location, MAX_LOC)} if inv else {})})
     return out
 
 
