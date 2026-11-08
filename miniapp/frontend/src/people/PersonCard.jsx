@@ -6,10 +6,11 @@ import PersonEdit from './PersonEdit'
 import Accounts from './Accounts'
 import BulkReview from './BulkReview'
 import SimilarFacts from './SimilarFacts'
+import GiveSheet from './GiveSheet'
 import { EMPTY_FILTER, applyFilter, clampSelection, flatten, idsOf, regroup, regroupByCategory, toggleId } from './bulkFilter'
 import { Btn, Chip, Note, Tick, inputStyle, Label } from './parts'
 import {
-  addFact, approveAll, approveFact, eraseFact, errText, getPerson, rejectAll, rejectFact, removeAlias, resetAliases, restoreFact, aliasOk, setFactType, reviewPerson, unmergeSimilar, setFactsCategory,
+  addFact, approveAll, approveFact, eraseFact, errText, getPerson, rejectAll, rejectFact, removeAlias, resetAliases, restoreFact, aliasOk, setFactType, reviewPerson, unmergeSimilar, setFactsCategory, giveFacts,
 } from './peopleApi'
 import { STATUS_LABEL, TYPE_CHOICES, fmtBirthday, fs, haptic, plural, primaryColors, redText, statusColor, typeMeta } from './ui'
 
@@ -31,6 +32,7 @@ export default function PersonCard({ s, Sheet, id, onBack, onChanged, onStartRev
   const [selected, setSelected] = useState(new Set()) // мультивыбор фактов (чекбоксы)
   const [catFlt, setCatFlt] = useState('all')         // фильтр по категории «Я» (только embedded)
   const [moveOpen, setMoveOpen] = useState(false)      // выбор категории для «Перенести…»
+  const [giveIds, setGiveIds] = useState(null)         // факты, которые отдаём другому человеку («Это про…»)
 
   const load = useCallback(async () => {
     try { setP(await getPerson(id)); setErr('') } catch (e) { setErr(errText(e)) }
@@ -148,6 +150,12 @@ export default function PersonCard({ s, Sheet, id, onBack, onChanged, onStartRev
         )}
         right={(f) => (
           <div style={{ display: 'flex', alignItems: 'center', flexShrink: 0 }}>
+            {p.is_self && f.review_status !== 'rejected' && (
+              <div role="button" aria-label="это про другого человека" title="Это про…" onClick={() => setGiveIds([f.id])} style={iconBtn(s.text)}>👤</div>
+            )}
+            {!p.is_self && p.self_id && f.review_status !== 'rejected' && (
+              <div role="button" aria-label="вернуть в Я" title="Вернуть в «Я»" onClick={() => act(() => giveFacts(p.id, [f.id], p.self_id))} style={textBtn(s.text)}>↩︎ в «Я»</div>
+            )}
             {f.review_status === 'pending' && (<>
               <div role="button" aria-label="принять" onClick={() => act(() => approveFact(p.id, f.id))} style={iconBtn(s.text)}>✓</div>
               <div role="button" aria-label="отклонить" onClick={() => act(() => rejectFact(p.id, f.id))} style={iconBtn(redText(s))}>✕</div>
@@ -203,6 +211,8 @@ export default function PersonCard({ s, Sheet, id, onBack, onChanged, onStartRev
           <Btn s={s} kind="primary" disabled={busy} style={{ minWidth: 104 }} onClick={() => reviewSel('approve')}>✓ Принять</Btn>
           <Btn s={s} kind="danger" disabled={busy} style={{ minWidth: 104 }} onClick={() => reviewSel('reject')}>✕ Отклонить</Btn>
           {catMode && <Btn s={s} disabled={busy} style={{ minWidth: 104 }} onClick={() => setMoveOpen(!moveOpen)}>Перенести…</Btn>}
+          {p.is_self && <Btn s={s} disabled={busy} style={{ minWidth: 104 }} onClick={() => setGiveIds([...sel])}>👤 Отдать…</Btn>}
+          {!p.is_self && p.self_id && <Btn s={s} disabled={busy} style={{ minWidth: 104 }} onClick={() => act(async () => { await giveFacts(p.id, [...sel], p.self_id); setSelected(new Set()) })}>↩︎ В «Я»</Btn>}
         </div>
       )}
       {catMode && sel.size > 0 && moveOpen && (
@@ -236,6 +246,8 @@ export default function PersonCard({ s, Sheet, id, onBack, onChanged, onStartRev
         </div>}
       </div>
 
+      {p.is_self && <GiveSheet s={s} Sheet={Sheet} personId={p.id} ids={giveIds} onClose={() => setGiveIds(null)}
+        onDone={() => { setGiveIds(null); setSelected(new Set()); load(); onChanged?.() }} />}
       <PersonEdit s={s} Sheet={Sheet} person={p} open={edit} onClose={() => setEdit(false)}
         onSaved={() => { setEdit(false); load(); onChanged?.() }} />
       <MergePicker s={s} Sheet={Sheet} person={p} open={merge} onClose={() => setMerge(false)}

@@ -177,7 +177,8 @@ async def person_card(person_id: int, tg_id: int = Depends(current_user_id)) -> 
     await _attach_clients(user_id, [p])
     facts = await asyncio.to_thread(repo.list_facts, person_id)
     _with_merged(facts, await asyncio.to_thread(self_dedup.merged_info, user_id, [f["id"] for f in facts]))
-    out = {**_person_out(p), "aliases_info": await _aliases_info(user_id, person_id, list(p.get("aliases") or [])),
+    me = await asyncio.to_thread(repo.find_self, user_id)
+    out = {**_person_out(p), "self_id": me["id"] if me else None, "aliases_info": await _aliases_info(user_id, person_id, list(p.get("aliases") or [])),
            "facts": _group_facts(facts, bool(p.get("is_self")), p["name"], p.get("aliases"))}
     if p.get("is_self"):                       # разделы «Я» в Памяти: категории и сколько фактов в каждой (без отклонённых)
         counts: Dict[str, int] = {}
@@ -601,3 +602,60 @@ async def set_facts_category(person_id: int, body: FactCategoryBody, tg_id: int 
         raise HTTPException(status_code=400, detail="unknown category")
     n = await asyncio.to_thread(repo.set_facts_category, user_id, person_id, body.ids, body.category)
     return {"ok": True, "moved": n}
+
+
+# ── «Это про…»: отдать факты другому человеку (и вернуть в «Я») ─────────────────────────────────────────────────────
+class NewPersonBody(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+    relation: Optional[str] = None
+    about: Optional[str] = None
+
+
+class GiveBody(BaseModel):
+    ids: List[int] = Field(min_length=1, max_length=500)
+    to_person_id: Optional[int] = None
+    new_person: Optional[NewPersonBody] = None
+
+
+class SuggestOwnerBody(BaseModel):
+    ids: List[int] = Field(min_length=1, max_length=500)
+
+
+@router.post("/people/{person_id}/facts/suggest-owner")
+async def suggest_owner(person_id: int, body: SuggestOwnerBody, tg_id: int = Depends(current_user_id)) -> Dict[str, Any]:
+    """Подсказка «чей это факт»: люди из того же чата (по аккаунту и по фактам из этого чата)."""
+    user_id = await _owner(tg_id)
+    if not await asyncio.to_thread(repo.get_person, user_id, person_id):
+        raise HTTPException(status_code=404, detail="person not found")
+    return {"candidates": await asyncio.to_thread(repo.suggest_owners, user_id, person_id, body.ids)}
+
+
+@router.post("/people/{person_id}/facts/give")
+async def give_facts(person_id: int, body: GiveBody, tg_id: int = Depends(current_user_id)) -> Dict[str, Any]:
+    """Факты → карточке другого человека (person_id, тип и категория сохраняются, статус confirmed) либо новому человеку.
+    Обратимо: та же ручка с to_person_id = карточка «Я» возвращает факты."""
+    user_id = await _owner(tg_id)
+    if not await asyncio.to_thread(repo.get_person, user_id, person_id):
+        raise HTTPException(status_code=404, detail="person not found")
+    if bool(body.to_person_id) == bool(body.new_person):
+        raise HTTPException(status_code=400, detail="to_person_id or new_person")
+    to_id = body.to_person_id
+    created = False
+    if body.new_person:
+        n = body.new_person
+        name = " ".join(n.name.split())
+        if not name or (n.relation is not None and n.relation not in RELATIONS):
+            raise HTTPException(status_code=400, detail="bad person")
+        to_id = await asyncio.to_thread(
+            lambda: repo.create(user_id, name, [name], status="confirmed", relation=n.relation, about=clean_about(n.about)))
+        created = True
+    try:
+        res = await asyncio.to_thread(repo.give_facts, user_id, person_id, body.ids, to_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="bad target")
+    from core.repos.pg_memory_repo import _spawn_index
+    for m in res["moved"]:                        # эмбеддинг сброшен (в нём имя) → переиндексация в фоне
+        _spawn_index(str(m["id"]), m["fact"], m["related"], m["category"] or "", m["person_id"])
+    p = await asyncio.to_thread(repo.get_person, user_id, person_id)
+    return {"ok": True, "moved": len(res["moved"]), "conflicts": res["conflicts"], "skipped": res["skipped"],
+            "to_person_id": to_id, "created": created, "counts": p["counts"] if p else None}

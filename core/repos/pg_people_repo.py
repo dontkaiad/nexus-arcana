@@ -423,6 +423,65 @@ def set_facts_category(user_id: str, person_id: int, ids: List[int], category: s
             "AND NOT is_archived"), {"c": category, "i": list(ids), "p": person_id, "u": user_id}).rowcount
 
 
+def give_facts(user_id: str, from_person_id: int, ids: List[int], to_person_id: int) -> Dict:
+    """Перенести факты из одной карточки в другую («Это про…», и обратно «в Я»). Факт подтверждается (владелец указал сам),
+    тип берётся из старого ключа, категория не меняется, эмбеддинг сбрасывается (в нём имя). Если у адресата уже есть
+    такой же факт (тот же ключ) — не трогаем и считаем конфликтом. → {moved:[{id,fact,related,category}], conflicts, skipped}."""
+    from core.people import fact_hash, related_to_str
+    out: Dict = {"moved": [], "conflicts": 0, "skipped": 0}
+    with get_engine().begin() as c:
+        to = c.execute(text("SELECT id, name, aliases, status FROM people WHERE id = :p AND user_id = :u"),
+                       {"p": to_person_id, "u": user_id}).first()
+        if not to or to.status == "rejected" or to.id == from_person_id:
+            raise ValueError("bad_target")
+        rows = c.execute(text(
+            "SELECT id, fact_text, key_name, category FROM memories WHERE id = ANY(:i) AND person_id = :f AND user_id = :u "
+            "AND NOT is_archived ORDER BY id"), {"i": list(ids), "f": from_person_id, "u": user_id}).all()
+        out["skipped"] = len(set(ids)) - len(rows)
+        live = {r[0] for r in c.execute(text(
+            "SELECT key_name FROM memories WHERE user_id = :u AND person_id = :t AND NOT is_archived"), {"u": user_id, "t": to.id})}
+        rel = related_to_str(to.name, to.aliases or [])
+        for r in rows:
+            key = "person_%d_%s_%s" % (to.id, fact_type(r.key_name), fact_hash(r.fact_text))
+            if key in live:
+                out["conflicts"] += 1
+                continue
+            c.execute(text(
+                "UPDATE memories SET person_id = :t, key_name = :k, related_to = :r, review_status = 'confirmed', embedding = NULL, "
+                "updated_at = now() WHERE id = :i"), {"t": to.id, "k": key, "r": rel, "i": r.id})
+            c.execute(text("UPDATE memories SET person_id = :t WHERE merged_into = :i"), {"t": to.id, "i": r.id})   # скрытые дубли едут следом
+            live.add(key)
+            out["moved"].append({"id": r.id, "fact": r.fact_text, "related": rel, "category": r.category, "person_id": to.id})
+    return out
+
+
+def suggest_owners(user_id: str, from_person_id: int, ids: List[int], limit: int = 5) -> List[Dict]:
+    """Кому, скорее всего, принадлежат факты: люди из ТОГО ЖЕ чата (source_chat_id) — по аккаунту (person_accounts.external_id
+    = id чата) и по другим фактам из этого чата. Чаще встречается — выше. Отклонённые и «Я» не предлагаются."""
+    from core.people import person_label
+    with get_engine().begin() as c:
+        chats = [r[0] for r in c.execute(text(
+            "SELECT DISTINCT source_chat_id FROM memories WHERE id = ANY(:i) AND person_id = :f AND user_id = :u "
+            "AND source_chat_id IS NOT NULL"), {"i": list(ids), "f": from_person_id, "u": user_id})]
+        if not chats:
+            return []
+        by_acc = {r.person_id: r for r in c.execute(text(
+            "SELECT person_id FROM person_accounts WHERE user_id = :u AND external_id = ANY(:c)"), {"u": user_id, "c": chats})}
+        by_fact = {r.pid: r.n for r in c.execute(text(
+            "SELECT person_id AS pid, count(*) AS n FROM memories WHERE user_id = :u AND source_chat_id = ANY(:c) "
+            "AND person_id IS NOT NULL AND person_id <> :f AND NOT is_archived GROUP BY 1"), {"u": user_id, "c": chats, "f": from_person_id})}
+        cand = set(by_acc) | set(by_fact)
+        if not cand:
+            return []
+        ppl = c.execute(text(
+            "SELECT id, name, relation, about FROM people WHERE id = ANY(:i) AND user_id = :u AND NOT is_self "
+            "AND status <> 'rejected'"), {"i": list(cand), "u": user_id}).all()
+    rows = [{"id": p.id, "name": p.name, "label": person_label(p.name, p.relation, p.about),
+             "why": "аккаунт этого чата" if p.id in by_acc else "факты из этого чата", "n": by_fact.get(p.id, 0)} for p in ppl]
+    rows.sort(key=lambda r: (r["why"] != "аккаунт этого чата", -r["n"], r["id"]))
+    return rows[:limit]
+
+
 EDITABLE = ("name", "aliases", "birthday", "birthday_year_known", "notes", "status", "relation", "about")
 
 
