@@ -428,9 +428,10 @@ def give_facts(user_id: str, from_person_id: int, ids: List[int], to_person_id: 
     тип берётся из старого ключа, категория не меняется, эмбеддинг сбрасывается (в нём имя). Если у адресата уже есть
     такой же факт (тот же ключ) — не трогаем и считаем конфликтом. → {moved:[{id,fact,related,category}], conflicts, skipped}."""
     from core.people import fact_hash, related_to_str
+    from core.memory_subjects import FALLBACK_CATEGORY, REVIEW_AUTHOR, SELF_CATEGORIES
     out: Dict = {"moved": [], "conflicts": 0, "skipped": 0}
     with get_engine().begin() as c:
-        to = c.execute(text("SELECT id, name, aliases, status FROM people WHERE id = :p AND user_id = :u"),
+        to = c.execute(text("SELECT id, name, aliases, status, is_self FROM people WHERE id = :p AND user_id = :u"),
                        {"p": to_person_id, "u": user_id}).first()
         if not to or to.status == "rejected" or to.id == from_person_id:
             raise ValueError("bad_target")
@@ -446,12 +447,18 @@ def give_facts(user_id: str, from_person_id: int, ids: List[int], to_person_id: 
             if key in live:
                 out["conflicts"] += 1
                 continue
+            cat = r.category
+            if to.is_self:                                   # в «Я»: «❓» не возвращаем; чужой категории «Я» (напр. «Люди») нет → Прочее
+                if cat == REVIEW_AUTHOR or cat not in SELF_CATEGORIES:
+                    cat = FALLBACK_CATEGORY
+            elif cat == REVIEW_AUTHOR:                       # человеку: «❓ Проверить автора» → обычная «Люди»
+                cat = "👥 Люди"
             c.execute(text(
                 "UPDATE memories SET person_id = :t, key_name = :k, related_to = :r, review_status = 'confirmed', embedding = NULL, "
-                "updated_at = now() WHERE id = :i"), {"t": to.id, "k": key, "r": rel, "i": r.id})
+                "category = :cat, updated_at = now() WHERE id = :i"), {"t": to.id, "k": key, "r": rel, "cat": cat, "i": r.id})
             c.execute(text("UPDATE memories SET person_id = :t WHERE merged_into = :i"), {"t": to.id, "i": r.id})   # скрытые дубли едут следом
             live.add(key)
-            out["moved"].append({"id": r.id, "fact": r.fact_text, "related": rel, "category": r.category, "person_id": to.id})
+            out["moved"].append({"id": r.id, "fact": r.fact_text, "related": rel, "category": cat, "person_id": to.id})
     return out
 
 

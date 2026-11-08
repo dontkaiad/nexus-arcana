@@ -61,7 +61,7 @@ def test_give_moves_fact_keeps_type_and_category_and_confirms(client):
     r = client.post(f"/api/people/{me}/facts/give", json={"ids": [f], "to_person_id": nik}).json()
     assert r["moved"] == 1 and r["to_person_id"] == nik
     row = _row(f)
-    assert row.person_id == nik and row.review_status == "confirmed" and row.category == "❓ Проверить автора"
+    assert row.person_id == nik and row.review_status == "confirmed" and row.category == "👥 Люди"          # «❓» → «Люди»
     assert row.key_name.startswith(f"person_{nik}_dislikes_") and row.related_to.startswith("Никита")      # тип из старого ключа
     client.spawn.assert_called_once()
     cards = [x["id"] for g in client.get(f"/api/people/{me}").json()["facts"] for x in g["items"]]
@@ -90,6 +90,17 @@ def test_give_is_reversible_back_to_self(client):
     assert r["moved"] == 1
     row = _row(f)
     assert row.person_id == me and row.key_name.startswith(f"person_{me}_dislikes_")
+    assert row.category == "🗂 Прочее"                                      # «Люди» в «Я» не категория; «❓» не возвращаем
+
+
+def test_other_self_category_is_kept_both_ways(client):
+    me = _me()
+    nik = prepo.create(MARK, "Никита", ["Никита"], status="confirmed")
+    f = _fact(me, "любит чай", cat="🛒 Предпочтения", typ="likes")
+    client.post(f"/api/people/{me}/facts/give", json={"ids": [f], "to_person_id": nik})
+    assert _row(f).category == "🛒 Предпочтения"                          # обычная категория сохраняется
+    client.post(f"/api/people/{nik}/facts/give", json={"ids": [f], "to_person_id": me})
+    assert _row(f).category == "🛒 Предпочтения"
 
 
 def test_duplicate_at_target_is_a_conflict_not_a_loss(client):
