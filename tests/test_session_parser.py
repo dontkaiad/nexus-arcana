@@ -36,7 +36,7 @@ def test_session_parse_error_class():
 
 
 def test_parse_help_text_contains_examples():
-    assert "Вадим" in PARSE_HELP_TEXT
+    assert "Олег" in PARSE_HELP_TEXT
     assert "устроюсь" in PARSE_HELP_TEXT
     assert "<b>" in PARSE_HELP_TEXT  # HTML formatting for telegram
 

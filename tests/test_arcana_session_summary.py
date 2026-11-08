@@ -65,7 +65,7 @@ def _patch_get(mock_repo):
 
 def test_get_prefers_db_summary_over_cache(client):
     # #165: summary группы берётся из theme_summary якоря (кросс-дневная тема).
-    sname = "Вадим"
+    sname = "Олег"
     slug = f"{slugify(sname)}__c-1"
     matching = [
         _pg_triplet("t1", sname, "c-1", "1) общее", theme_summary="ИЗ БД"),
@@ -88,7 +88,7 @@ def test_get_prefers_db_summary_over_cache(client):
 
 
 def test_get_falls_back_to_cache_when_db_empty(client):
-    sname = "Вадим"
+    sname = "Олег"
     slug = f"{slugify(sname)}__c-1"
     matching = [
         _pg_triplet("t1", sname, "c-1", "1) общее", session_summary=""),
@@ -111,7 +111,7 @@ def test_get_falls_back_to_cache_when_db_empty(client):
 
 
 def test_summarize_returns_db_summary_without_sonnet(client):
-    sname = "Вадим"
+    sname = "Олег"
     slug = f"{slugify(sname)}__c-1"
     matching = [
         _pg_triplet("t1", sname, "c-1", "1) общее", theme_summary="ГОТОВОЕ"),
@@ -137,7 +137,7 @@ def test_summarize_returns_db_summary_without_sonnet(client):
 
 
 def test_summarize_persists_fresh_to_db_anchor(client):
-    sname = "Вадим"
+    sname = "Олег"
     slug = f"{slugify(sname)}__c-1"
     matching = [
         _pg_triplet("t2", sname, "c-1", "2) чувства", session_summary=""),

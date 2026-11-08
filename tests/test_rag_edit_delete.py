@@ -19,7 +19,7 @@ def _entry():
     # cards в EN-canonical (как лежит в PG) — проверим, что reindex эмбедит RU.
     return TripletEntry(
         id="42", question="что чувствует", cards="Eight of Swords, The Lovers",
-        interpretation="<p>старое</p>", deck="Уэйт", session_name="Вадим",
+        interpretation="<p>старое</p>", deck="Уэйт", session_name="Олег",
         client_id="c1", date="2026-06-22",
         amount=Decimal("0"), paid=Decimal("0"),
     )
@@ -57,7 +57,7 @@ async def test_edit_reindexes_with_ru_cards_and_clears_theme(monkeypatch):
     assert "Мечей" in cards_arg and "Влюблённые" in cards_arg
     assert args[3] == "<p>новая трактовка</p>"  # новый interpretation
     # тема инвалидирована
-    clear_theme.assert_awaited_once_with("Вадим", "c1")
+    clear_theme.assert_awaited_once_with("Олег", "c1")
 
 
 @pytest.mark.asyncio
@@ -110,7 +110,7 @@ async def test_delete_removes_vector_and_clears_theme(monkeypatch):
     await S.cb_triplet_remove_yes(call)
 
     del_mock.assert_called_once_with("42")        # вектор убран по id
-    clear_theme.assert_awaited_once_with("Вадим", "c1")
+    clear_theme.assert_awaited_once_with("Олег", "c1")
     call.message.edit_text.assert_awaited()       # дошли до «удалён»
 
 

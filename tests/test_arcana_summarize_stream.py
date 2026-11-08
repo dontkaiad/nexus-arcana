@@ -94,7 +94,7 @@ def _ctx(repo, fake_stream):
 
 
 def test_stream_sends_deltas_then_done(client):
-    sname = "Вадим"
+    sname = "Олег"
     slug = f"{slugify(sname)}__c-1"
     matching = [
         _pg_triplet("t2", sname, "c-1", "2) чувства"),
@@ -184,7 +184,7 @@ def test_stream_final_text_matches_non_streaming_for_same_claude_output(client):
 
 
 def test_stream_returns_cached_without_calling_claude(client):
-    sname = "Вадим"
+    sname = "Олег"
     slug = f"{slugify(sname)}__c-1"
     matching = [_pg_triplet("t1", sname, "c-1", "1) общее", theme_summary="ГОТОВОЕ")]
     repo = MagicMock()
@@ -208,7 +208,7 @@ def test_stream_returns_cached_without_calling_claude(client):
 
 
 def test_stream_claude_failure_sends_error_and_persists_nothing(client):
-    sname = "Вадим"
+    sname = "Олег"
     slug = f"{slugify(sname)}__c-1"
     matching = [_pg_triplet("t1", sname, "c-1", "1) общее")]
     repo = MagicMock()

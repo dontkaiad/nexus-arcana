@@ -24,14 +24,14 @@ jobs:
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           command_timeout: "20m"
           # Сервер использует forced command (~/.ssh/authorized_keys:
-          # command="/home/kai/deploy.sh") → ЭТОТ script игнорируется, всегда
+          # command="<deploy user>/deploy.sh") → ЭТОТ script игнорируется, всегда
           # гоняется deploy.sh. ssh-action к тому же глотает exit-код. Детект
           # фейла — снаружи (Verify) по маркеру deploy.sh «deploy done», который
           # печатается ПОСЛЕДНЕЙ строкой только при успехе (set -euo pipefail).
           # capture_stdout кладёт вывод в steps.deploy.outputs.stdout для Verify.
           capture_stdout: true
           script: |
-            # Forced command in authorized_keys runs /home/kai/deploy.sh; script body ignored. See ADR-0014.
+            # Forced command in authorized_keys runs <deploy user>/deploy.sh; script body ignored. See ADR-0014.
 
       - name: Verify deploy marker
         if: always()

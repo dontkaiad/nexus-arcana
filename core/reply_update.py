@@ -57,7 +57,7 @@ _SESSION_REPLY_SYSTEM = (
     '"notes": "заметки или null"}\n\n'
     "Примеры client_name:\n"
     "- 'это для Маши' → client_name: 'Маша'\n"
-    "- 'расклад Вадиму' → client_name: 'Вадим'\n"
+    "- 'расклад Олегу' → client_name: 'Олег'\n"
     "- 'привязать к Ане' → client_name: 'Аня'\n"
     "- 'сделал личный' → client_name: null (это не имя)\n\n"
     "Примеры category:\n"

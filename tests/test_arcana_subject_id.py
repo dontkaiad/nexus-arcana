@@ -6,7 +6,7 @@
   (c) group_subject_id находит уже подтверждённый subject_id темы (ilike
       session_name+client), None если ни одна строка группы его не несёт;
   (d) list_by_subject собирает сессии с РАЗНЫМИ session_name (та самая
-      фрагментация — «Вадим» / «Вадим — диагностика» / …), если у них
+      фрагментация — «Олег» / «Олег — диагностика» / …), если у них
       общий subject_id — это и есть фикс #189.
 
 Все строки помечаются user_id=MARK и удаляются после каждого теста.
@@ -53,7 +53,7 @@ def _ins_session(conn, sname, *, client_id=None, subject_id=None, q="q",
     ).scalar_one()
 
 
-def _ins_memory(conn, fact="Вадим — бывший, тревожит", related_to="вадим"):
+def _ins_memory(conn, fact="Олег — бывший, тревожит", related_to="олег"):
     return conn.execute(
         insert(memories).values(
             fact_text=fact, related_to=related_to, category="👥 Люди",
@@ -100,8 +100,8 @@ def test_migration_subject_id_up_down_reversible():
 async def test_set_subject_updates_only_given_ids(repo):
     with get_engine().begin() as conn:
         mem_id = _ins_memory(conn)
-        sid1 = _ins_session(conn, "Вадим", client_id=None)
-        sid2 = _ins_session(conn, "Вадим — другая сессия", client_id=None)
+        sid1 = _ins_session(conn, "Олег", client_id=None)
+        sid2 = _ins_session(conn, "Олег — другая сессия", client_id=None)
         untouched = _ins_session(conn, "Другая тема", client_id=None)
 
     n = await repo.set_subject([str(sid1), str(sid2)], mem_id)
@@ -126,9 +126,9 @@ async def test_set_subject_updates_only_given_ids(repo):
 async def test_group_subject_id_found_after_confirm(repo):
     with get_engine().begin() as conn:
         mem_id = _ins_memory(conn)
-        _ins_session(conn, "Вадим — отношения", client_id=None, subject_id=mem_id)
+        _ins_session(conn, "Олег — отношения", client_id=None, subject_id=mem_id)
 
-    found = await repo.group_subject_id("Вадим — отношения", None, MARK)
+    found = await repo.group_subject_id("Олег — отношения", None, MARK)
     assert found == mem_id
 
 
@@ -145,19 +145,19 @@ async def test_group_subject_id_none_when_not_confirmed_yet(repo):
 
 @pytest.mark.asyncio
 async def test_list_by_subject_collapses_different_session_names(repo):
-    """Ровно баг из issue: «Вадим» / «Вадим — отношения» /
-    «Вадим — диагностика» / «Вадим — диагностика ситуации» — 4 разные строки
+    """Ровно баг из issue: «Олег» / «Олег — отношения» /
+    «Олег — диагностика» / «Олег — диагностика ситуации» — 4 разные строки
     session_name, но один subject_id → должны вернуться ВСЕ четыре."""
     with get_engine().begin() as conn:
         mem_id = _ins_memory(conn)
         ids = [
-            _ins_session(conn, "Вадим", subject_id=mem_id),
-            _ins_session(conn, "Вадим — отношения", subject_id=mem_id),
-            _ins_session(conn, "Вадим — диагностика", subject_id=mem_id),
-            _ins_session(conn, "Вадим — диагностика ситуации", subject_id=mem_id),
+            _ins_session(conn, "Олег", subject_id=mem_id),
+            _ins_session(conn, "Олег — отношения", subject_id=mem_id),
+            _ins_session(conn, "Олег — диагностика", subject_id=mem_id),
+            _ins_session(conn, "Олег — диагностика ситуации", subject_id=mem_id),
         ]
         # шум: другая тема, без subject_id — не должна попасть в выдачу.
-        _ins_session(conn, "Не Вадим")
+        _ins_session(conn, "Не Олег")
 
     got = await repo.list_by_subject(mem_id, MARK)
     assert {t.id for t in got} == {str(i) for i in ids}
@@ -172,14 +172,14 @@ async def test_recent_areas_for_subject_most_recent_first_deduped(repo):
 
     with get_engine().begin() as conn:
         mem_id = _ins_memory(conn)
-        _ins_session(conn, "Вадим", subject_id=mem_id, area="Отношения",
+        _ins_session(conn, "Олег", subject_id=mem_id, area="Отношения",
                      occurred_at=date(2026, 1, 1))
-        _ins_session(conn, "Вадим — деньги", subject_id=mem_id, area="Финансы",
+        _ins_session(conn, "Олег — деньги", subject_id=mem_id, area="Финансы",
                      occurred_at=date(2026, 2, 1))
-        _ins_session(conn, "Вадим — снова", subject_id=mem_id, area="Отношения",
+        _ins_session(conn, "Олег — снова", subject_id=mem_id, area="Отношения",
                      occurred_at=date(2026, 3, 1))
         # шум: пустая area не должна попасть в подсказку.
-        _ins_session(conn, "Вадим — без темы", subject_id=mem_id, area=None,
+        _ins_session(conn, "Олег — без темы", subject_id=mem_id, area=None,
                      occurred_at=date(2026, 3, 15))
         # другая тема — не должна попасть.
         other_mem = _ins_memory(conn, fact="Маша", related_to="маша")
@@ -198,7 +198,7 @@ async def test_recent_areas_for_subject_respects_limit(repo):
     with get_engine().begin() as conn:
         mem_id = _ins_memory(conn)
         for i, area in enumerate(["Отношения", "Финансы", "Здоровье", "Работа"]):
-            _ins_session(conn, f"Вадим — {i}", subject_id=mem_id, area=area,
+            _ins_session(conn, f"Олег — {i}", subject_id=mem_id, area=area,
                          occurred_at=date(2026, 1, i + 1))
 
     got = await repo.recent_areas_for_subject(mem_id, limit=2)
@@ -209,7 +209,7 @@ async def test_recent_areas_for_subject_respects_limit(repo):
 async def test_recent_areas_for_subject_empty_when_no_history(repo):
     with get_engine().begin() as conn:
         mem_id = _ins_memory(conn)
-        _ins_session(conn, "Вадим", subject_id=mem_id, area=None)
+        _ins_session(conn, "Олег", subject_id=mem_id, area=None)
 
     got = await repo.recent_areas_for_subject(mem_id, limit=3)
     assert got == []

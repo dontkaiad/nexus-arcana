@@ -118,8 +118,8 @@ async def test_nexus_bot_fin_type_reads_kv():
 
     kv.save(7, nb._PK_FIN_TYPE, {
         "data": {"amount": 500.0, "category": "💳 Прочее",
-                 "source": "💳 Карта", "title": "от вадима"},
-        "text": "500 от вадима", "user_id": "u-1",
+                 "source": "💳 Карта", "title": "от олега"},
+        "text": "500 от олега", "user_id": "u-1",
     }, ttl=600)
 
     fake_repo = MagicMock()

@@ -28,7 +28,7 @@ def test_index_triplet_text_from_nonempty_parts(monkeypatch):
 
     ok = rag.index_triplet(
         "42", "8 мечей, шут", "что чувствует", "",  # interpretation ПУСТОЙ
-        client_id="5", session_name="Вадим", occurred_at="2026-06-22",
+        client_id="5", session_name="Олег", occurred_at="2026-06-22",
     )
     assert ok is True
     # пустой interpretation НЕ попал в текст эмбеддинга

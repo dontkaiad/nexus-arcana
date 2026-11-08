@@ -64,7 +64,7 @@ def _call(client, triplets, clients_map):
 
 def test_self_session_is_not_a_meeting(client):
     """5 триплетов, одна self-сессия → встреч 0 (личный расклad ≠ встреча)."""
-    triplets = [_triplet(f"t{i}", "Вадим", "self-1") for i in range(5)]
+    triplets = [_triplet(f"t{i}", "Олег", "self-1") for i in range(5)]
     cmap = {"self-1": {"type_code": "self", "name": "Кай"}}
     body = _call(client, triplets, cmap)
     assert body["client_sessions_today"] == 0
