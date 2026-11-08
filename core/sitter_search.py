@@ -26,6 +26,7 @@ from sqlalchemy import func, literal_column, select, text
 
 from core.db import get_engine
 from core.memory_search import fts_query
+from core import sitter_expand
 from core.rag import _embed, _vec_literal
 from core.repos.lists_table import nexus_lists as nl
 from core.repos.pg_sitter_lists_repo import INVENTORY, sitter_visible_clause
@@ -35,6 +36,7 @@ logger = logging.getLogger("core.sitter_search")
 MAX_Q = 200
 MAX_HITS = 3
 MAX_OFFSET = 30
+MAX_EXTRA = 8
 MAX_SNIPPET = 300
 MAX_ITEMS_EMBEDDED = 400
 CATS_CATEGORY = "🐾 Коты"
@@ -132,9 +134,13 @@ def _item_vectors(items: List[Dict[str, Any]]) -> Dict[int, List[float]]:
     return out
 
 
-_FACTS_SQL = text("""
+def _facts_sql(n_extra: int):
+    # ts_rank по OR-запросу из N слов разбавляется, поэтому слова расширения ранжируются каждое отдельно, берётся лучший ранг
+    ranks = ["CASE WHEN :tsq <> '' THEN ts_rank(m.fts, to_tsquery('russian', :tsq)) ELSE 0 END"]
+    ranks += ["ts_rank(m.fts, to_tsquery('russian', :x%d))" % i for i in range(n_extra)]
+    return text("""
     SELECT m.id, m.fact_text, c.name AS cat_name, (m.cat_id IS NULL) AS general,
-           CASE WHEN :tsq <> '' THEN ts_rank(m.fts, to_tsquery('russian', :tsq)) ELSE 0 END AS fts,
+           GREATEST(%s) AS fts,
            CASE WHEN CAST(:q AS text) IS NOT NULL AND m.embedding IS NOT NULL
                 THEN 1 - (m.embedding <=> CAST(:q AS vector)) END AS cos
     FROM memories m LEFT JOIN cats c ON c.id = m.cat_id
@@ -142,20 +148,34 @@ _FACTS_SQL = text("""
       AND (m.cat_id IS NOT NULL OR m.category = :cat)
       AND m.is_current = true AND m.is_archived = false AND m.review_status = 'confirmed' AND m.fact_text <> ''
       AND (c.id IS NULL OR c.status <> 'rejected')
-""")
+""" % ", ".join(ranks))
 
 
-def _candidates(user_id: str, tsq: str, qvec: Optional[List[float]]) -> List[Dict[str, Any]]:
+def extra_terms(words: Optional[List[str]]) -> List[str]:
+    """Слова расширения → предметные слова для FTS (без вопросительных и «котовых» слов), ≤ MAX_EXTRA."""
+    out: List[str] = []
+    for w in sitter_fts_query(" ".join(words or [])).split(" | "):
+        if w and w not in out:
+            out.append(w)
+    return out[:MAX_EXTRA]
+
+
+def _candidates(user_id: str, tsq: str, qvec: Optional[List[float]], extra: Optional[List[str]] = None) -> List[Dict[str, Any]]:
     out: List[Dict[str, Any]] = []
     with get_engine().connect() as c:
-        for r in c.execute(_FACTS_SQL, {"tsq": tsq, "q": _vec_literal(qvec) if qvec else None, "u": user_id, "cat": CATS_CATEGORY}):
+        extra = extra or []
+        params = {"tsq": tsq, "q": _vec_literal(qvec) if qvec else None, "u": user_id, "cat": CATS_CATEGORY}
+        params.update({"x%d" % i: w for i, w in enumerate(extra)})
+        for r in c.execute(_facts_sql(len(extra)), params):
             out.append({"source": "general" if r.general else "fact",
                         "label": "общее про котов" if r.general else "про кота " + _clip(r.cat_name, 40),
                         "text": _clip(r.fact_text, MAX_SNIPPET), "fts": float(r.fts or 0), "cos": float(r.cos) if r.cos is not None else None})
         # вес 'A', как у fact_text в memories.fts: иначе ts_rank пунктов списков в ~10 раз ниже и пороги несравнимы
         doc = func.setweight(func.to_tsvector("russian", func.concat_ws(" ", nl.c.name, nl.c.note, nl.c.category, nl.c.group_name,
                                                                          nl.c.location)), "A")
-        rank = func.ts_rank(doc, func.to_tsquery("russian", tsq)) if tsq else literal_column("0.0")
+        ranks = ([func.ts_rank(doc, func.to_tsquery("russian", tsq))] if tsq else []) + \
+                [func.ts_rank(doc, func.to_tsquery("russian", w)) for w in extra]
+        rank = (func.greatest(*ranks) if len(ranks) > 1 else ranks[0]) if ranks else literal_column("0.0")
         rows = c.execute(select(nl.c.id, nl.c.name, nl.c.note, nl.c.category, nl.c.group_name, nl.c.list_type, nl.c.quantity,
                                 nl.c.location, nl.c.updated_at, rank.label("fts")).where(sitter_visible_clause(user_id))).all()
     items = [{"id": r.id, "stamp": str(r.updated_at), "row": r,
@@ -175,11 +195,11 @@ def _candidates(user_id: str, tsq: str, qvec: Optional[List[float]]) -> List[Dic
     return out
 
 
-def search_sync(user_id: str, q: str, qvec: Optional[List[float]], offset: int = 0) -> Dict[str, Any]:
+def search_sync(user_id: str, q: str, qvec: Optional[List[float]], offset: int = 0, words: Optional[List[str]] = None) -> Dict[str, Any]:
     """{found, hits (≤ MAX_HITS начиная с offset), more}: more — сколько ещё прошло пороги сверх показанных."""
     tsq = sitter_fts_query(q)
     scored = []
-    for cnd in _candidates(user_id, tsq, qvec) if user_id else []:
+    for cnd in _candidates(user_id, tsq, qvec, extra_terms(words)) if user_id else []:
         cos, fts = cnd["cos"], cnd["fts"]
         if (cos is not None and cos >= VEC_MIN) or fts >= FTS_MIN:
             scored.append(((cos or 0.0) + 0.5 * min(fts, 1.0), cnd))
@@ -204,12 +224,14 @@ async def ask(user_id: str, q: str, offset: int = 0) -> Dict[str, Any]:
     q = clean_query(q)
     if not q:
         return {"found": False, "hits": [], "more": 0}
-    try:
-        vecs = await asyncio.to_thread(_embed, q, "query")
-    except Exception:
-        logger.warning("sitter_search: query embedding failed", exc_info=True)
-        vecs = []
+    async def _qvec():
+        try:
+            return await asyncio.to_thread(_embed, q, "query")
+        except Exception:
+            logger.warning("sitter_search: query embedding failed", exc_info=True)
+            return []
+    vecs, words = await asyncio.gather(_qvec(), sitter_expand.expand(q))      # расширение не мешает вектору: параллельно
     qvec = vecs[0] if vecs else None
-    res = await asyncio.to_thread(search_sync, user_id, q, qvec, offset)
+    res = await asyncio.to_thread(search_sync, user_id, q, qvec, offset, words)
     logger.info("sitter_search: qlen=%d vector=%s hits=%d", len(q), "yes" if qvec else "no", len(res["hits"]))
     return res
