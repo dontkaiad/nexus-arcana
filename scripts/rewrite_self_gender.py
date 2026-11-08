@@ -58,29 +58,31 @@ def plan() -> int:
     usage = {"in": 0, "out": 0}
     got = asyncio.run(_llm(rows, usage))
     by = {r.id: r for r in rows}
-    changes, bad = [], []
+    changes, bad, pron = [], [], []
     for i, new in sorted(got.items()):
         r = by.get(i)
         if r is None:
             continue
         ok, why = validate(r.fact_text, new)
-        (changes if ok else bad).append({"id": i, "old": r.fact_text, "new": new, "why": why})
-    json.dump({"self_id": me.id, "changes": changes, "suspicious": bad}, open(PLAN, "w"), ensure_ascii=False)
+        item = {"id": i, "old": r.fact_text, "new": new, "why": why}
+        (changes if ok else pron if why.startswith("тронуто местоимение") else bad).append(item)
+    json.dump({"self_id": me.id, "changes": changes, "pronoun": pron, "suspicious": bad}, open(PLAN, "w"), ensure_ascii=False)
     cost = usage["in"] * PRICE_IN / 1e6 + usage["out"] * PRICE_OUT / 1e6
     lines = [f"# Перевод фактов «Я» м.р. → ж.р.: выборка (ЛОКАЛЬНО, не в git)\n",
              f"Фактов просмотрено: {len(rows)}; правок принято: {len(changes)}; подозрительных (не пишутся): {len(bad)}\n",
              "## Принятые правки: было → стало\n"]
     lines += [f"- #{x['id']}  {x['old']}  →  {x['new']}" for x in changes]
+    lines += ["\n## Местоимения его/ему → её/ей (решаешь ты: НЕ применяются без --with-pron)\n"] + [f"- #{x['id']}  {x['old']}  →  {x['new']}" for x in pron]
     lines += ["\n## Подозрительные (НЕ применяются)\n"] + [f"- #{x['id']} [{x['why']}]  {x['old']}  →  {x['new']}" for x in bad]
     open(SAMPLE, "w").write("\n".join(lines))
-    print(f"просмотрено {len(rows)} | правок {len(changes)} | подозрительных {len(bad)}")
+    print(f"просмотрено {len(rows)} | правок {len(changes)} | местоимения (на твоё решение) {len(pron)} | подозрительных {len(bad)}")
     print(f"Haiku: вход {usage['in']} ток, выход {usage['out']} ток → ${cost:.4f}")
     print("причины подозрительных:", dict(Counter(x["why"] for x in bad)))
     print(f"файлы: {PLAN} {SAMPLE}")
     return 0
 
 
-def apply() -> int:
+def apply(with_pron: str = "") -> int:
     import sqlalchemy as sa
     from core.db import get_engine
     from core.people import fact_hash
@@ -93,7 +95,9 @@ def apply() -> int:
             sys.exit("план составлен для другой карточки «Я»")
         c.execute(sa.text("CREATE TABLE IF NOT EXISTS memories_text_bak AS SELECT id, fact_text, key_name, embedding FROM memories WHERE false"))
         live = {r[0] for r in c.execute(sa.text("SELECT key_name FROM memories WHERE person_id = :p AND NOT is_archived"), {"p": me})}
-        for ch in data["changes"]:
+        want = {int(x) for x in with_pron.replace(",", " ").split() if x.isdigit()}
+        extra = [x for x in data.get("pronoun", []) if x["id"] in want]
+        for ch in list(data["changes"]) + extra:
             row = c.execute(sa.text("SELECT fact_text, key_name FROM memories WHERE id = :i AND person_id = :p AND NOT is_archived"),
                             {"i": ch["id"], "p": me}).first()
             if not row or row.fact_text != ch["old"]:
@@ -122,5 +126,6 @@ if __name__ == "__main__":
     g = ap.add_mutually_exclusive_group(required=True)
     g.add_argument("--plan", action="store_true")
     g.add_argument("--apply", action="store_true")
+    ap.add_argument("--with-pron", default="", help="id правок с его→её, которые ты одобрила (через запятую)")
     a = ap.parse_args()
-    sys.exit(apply() if a.apply else plan())
+    sys.exit(apply(a.with_pron) if a.apply else plan())

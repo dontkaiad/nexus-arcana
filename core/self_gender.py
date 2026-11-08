@@ -9,6 +9,9 @@ import json
 import re
 from typing import Dict, List, Sequence, Tuple
 
+# местоимения, которыми факт говорит о ДРУГОМ человеке: их род менять нельзя
+_OTHERS = {"он", "его", "ему", "им", "нём", "нем", "ним", "него"}
+
 SYSTEM = (
     "Ты правишь короткие факты о женщине (автор записей — она сама). Факт записан от третьего лица или без подлежащего; "
     "часть слов, относящихся к ней, ошибочно стоит в мужском роде.\n"
@@ -50,10 +53,14 @@ def validate(old: str, new: str) -> Tuple[bool, str]:
         return False, "число слов изменилось"
     if re.findall(r"\d+", o) != re.findall(r"\d+", n):
         return False, "цифры изменились"
+    if o.lower().replace("ё", "е") == n.lower().replace("ё", "е"):
+        return False, "только ё/е"
     if difflib.SequenceMatcher(None, o.lower(), n.lower()).ratio() < 0.8:
         return False, "слишком большая правка"
     # слово целиком заменено другим (не окончание): общий префикс слова ≥ 3 букв или слово совпадает
     for a, b in zip(o.lower().split(), n.lower().split()):
+        if a != b and a.strip(".,;:!?") in _OTHERS:
+            return False, f"тронуто местоимение другого человека: {a} → {b}"
         if a != b and len(a) > 3 and len(b) > 3 and a[:3] != b[:3]:
             return False, f"заменено слово целиком: {a} → {b}"
     return True, ""
