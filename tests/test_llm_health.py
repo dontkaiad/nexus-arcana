@@ -1,4 +1,4 @@
-"""tests/test_llm_health.py — «ИИ недоступен»: классификация ошибок, дроссель уведомлений (30 мин), ответ пользователю,
+"""tests/test_llm_health.py — «ИИ недоступен»: классификация ошибок, дроссель уведомлений (6 ч), ответ пользователю,
 изоляция ключа tools/evals. Без сети."""
 from __future__ import annotations
 
@@ -42,7 +42,7 @@ def test_classify_error():
     assert lh.classify_error(_api_error(anthropic.RateLimitError, 429, "slow down")) is None
 
 
-def test_alert_throttled_to_once_per_30_min():
+def test_alert_throttled_to_once_per_6_hours():
     sent = AsyncMock()
     with patch.object(lh, "_send_alert", sent):
         async def run():
@@ -58,7 +58,7 @@ def test_alert_goes_to_every_allowed_account():
     calls = []
 
     async def fake_notify(tg_id, text, bot="nexus"):
-        calls.append((tg_id, bot, "баланс" in text))
+        calls.append((tg_id, bot, "кончились кредиты" in text))
         return True
     cfg = SimpleNamespace(allowed_ids=[111, 222])
     with patch("core.bot_notify.notify_user", fake_notify), patch("core.config.config", cfg):

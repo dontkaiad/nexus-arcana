@@ -8,7 +8,8 @@ from typing import List, Optional
 from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 
-from core.claude_client import ask_claude
+from core import llm_health
+from core.claude_client import LLMUnavailable, ask_claude
 from core.error_log import log_error
 from arcana.repos.grimoire_repo import (
     GrimoireRepo, GrimoireEntry, RitualSummary,
@@ -389,6 +390,7 @@ async def handle_grimoire_add(message: Message, text: str, user_id: str = "") ->
             max_tokens=200,
             role="parse",
             temperature=0,
+            strict=True,
         )
         data = _parse_json_safe(raw)
         if not data.get("title"):
@@ -430,6 +432,10 @@ async def handle_grimoire_add(message: Message, text: str, user_id: str = "") ->
         if not await _save_entry(message, title=title, category=category, themes=themes,
                                  text=body, source=source or "", user_id=user_id):
             await message.answer("Не удалось записать в гримуар.")
+    except LLMUnavailable:
+        # Сбой API: не пишем запись из эвристического fallback и не логируем как «ошибку бота».
+        await message.answer(llm_health.UNAVAILABLE_REPLY)
+        llm_health.mark_notified()
     except Exception as e:
         logger.exception("handle_grimoire_add: %s", e)
         await log_error(str(e), context="handle_grimoire_add", bot_label="🌒 Arcana")

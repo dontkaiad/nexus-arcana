@@ -31,7 +31,8 @@ from aiogram.types import (
     Message,
 )
 
-from core.claude_client import ask_claude
+from core import llm_health
+from core.claude_client import LLMUnavailable, ask_claude
 from core.client_resolve import client_find  # noqa: F401  # client_find via mock.patch
 from core.error_log import log_error
 from core.llm_json import parse_llm_json
@@ -299,6 +300,7 @@ async def _parse_work_text(text: str, tz_offset: int) -> dict:
         role="parse",
         temperature=0,
         usage_out=usage,
+        strict=True,   # сбой API → LLMUnavailable, не пустой ответ (→ не «partial»/fallback)
     )
     # ask_claude отдаёт только текст (без stop_reason): output_tokens >= лимита ≡ max_tokens.
     if usage.get("output_tokens", 0) >= _PARSE_MAX_TOKENS:
@@ -465,6 +467,11 @@ async def handle_add_work_preview(
 
         try:
             data = await _parse_work_text(text, tz_offset)
+        except LLMUnavailable:
+            # LLM недоступен: ничего не создаём и не копим partial-pending из мусора.
+            await message.answer(llm_health.UNAVAILABLE_REPLY)
+            llm_health.mark_notified()
+            return
         except json.JSONDecodeError:
             if len(text) > _LONG_FALLBACK_MIN:
                 # Длинный детальный ввод — не «короткий/неоднозначный»: не переспрашиваем.

@@ -2,7 +2,7 @@
 
 Раньше при нулевом балансе API бот просто молчал (ask_claude глушит APIError и возвращает ""). Теперь:
   • ошибка billing («credit balance is too low») или auth (401/403) помечает ИИ недоступным (до первого успешного вызова);
-  • владельцу — Telegram-уведомление на ВСЕ его аккаунты (allowed_ids), не чаще раза в 30 минут (метка в SQLite
+  • владельцу — Telegram-уведомление на ВСЕ его аккаунты (allowed_ids), не чаще раза в 6 часов (метка в SQLite
     pending_kv, переживает рестарт);
   • пользователю — «🧠 ИИ временно недоступен, работают кнопки и Mini App» (core.middleware.LlmNoticeMiddleware):
     флаг обновления ставится в contextvar, middleware проверяет его после обработчика.
@@ -19,7 +19,9 @@ from typing import Optional
 logger = logging.getLogger("core.llm_health")
 
 USER_NOTICE = "🧠 ИИ временно недоступен, работают кнопки и Mini App"
-ALERT_EVERY_SEC = 30 * 60
+# Явный ответ там, где вызывающий сам поймал LLMUnavailable (Arcana route, парсеры работ/гримуара)
+UNAVAILABLE_REPLY = "⚠️ LLM сейчас недоступен (проверь баланс Anthropic или повтори позже)"
+ALERT_EVERY_SEC = 6 * 3600
 _KV_UID, _KV_KIND = 0, "llm_alert_sent"
 
 _state: dict = {"kind": None, "since": 0.0}
@@ -72,14 +74,19 @@ def on_ok() -> None:
 
 
 def _alert_text(kind: str) -> str:
+    # Без токенов, ключей и текста запроса.
     if kind == "billing":
-        return ("⚠️ <b>Anthropic API: закончился баланс</b>\nБот работает без ИИ (кнопки и Mini App — как обычно). "
-                "Пополни: console.anthropic.com → Plans &amp; Billing.")
-    return ("⚠️ <b>Anthropic API: ключ отклонён (auth)</b>\nБот работает без ИИ. Проверь ANTHROPIC_API_KEY на сервере.")
+        return "⚠️ Anthropic: кончились кредиты, LLM не работает"
+    return "⚠️ Anthropic: ключ отклонён (auth), LLM не работает"
+
+
+def mark_notified() -> None:
+    """Вызывающий уже ответил пользователю про недоступность — LlmNoticeMiddleware не дублирует."""
+    _hit.set(False)
 
 
 def should_alert(now: Optional[float] = None) -> bool:
-    """Не чаще раза в 30 минут; метка в pending_kv переживает рестарт процесса."""
+    """Не чаще раза в 6 часов; метка в pending_kv (SQLite) переживает рестарт процесса."""
     from core import pending_kv
     try:
         if pending_kv.has(_KV_UID, _KV_KIND, ttl=ALERT_EVERY_SEC):

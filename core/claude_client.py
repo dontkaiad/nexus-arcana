@@ -147,6 +147,17 @@ def apply_model_params(kwargs: Dict, model: str, temperature: Optional[float], t
     return kwargs
 
 
+class LLMUnavailable(Exception):
+    """Сбой LLM API (billing/auth, 429, 5xx, таймаут, сеть) при ask_claude(strict=True).
+
+    kind: 'billing' | 'auth' | 'api'. Отличает сбой API от пустого ответа модели
+    (обычный ask_claude глушит APIError и возвращает "" — поведение сохранено)."""
+
+    def __init__(self, kind: str, status: Optional[int] = None, error_type: str = ""):
+        self.kind, self.status, self.error_type = kind, status, error_type
+        super().__init__(f"LLM unavailable: kind={kind} status={status} type={error_type}")
+
+
 def _first_text(resp) -> str:
     """Первый text-блок (у 5.x ответ может начинаться с thinking-блока)."""
     blocks = resp.content or []
@@ -179,8 +190,13 @@ async def ask_claude(
     cache_ttl: Optional[str] = None,
     label: str = "",
     role: str = "",
+    strict: bool = False,
 ) -> str:
     """Простой текстовый запрос. Возвращает строку.
+
+    strict=False (по умолчанию) — как раньше: при APIError пишет лог и возвращает "".
+    strict=True — при APIError бросает LLMUnavailable (для мест, где "" нельзя путать с
+    ответом модели: Arcana route, парсеры работ/гримуара).
 
     role — роль вызова (core.models.ROLES): задаёт модель (MODEL_<РОЛЬ> в окружении переопределяет), режим мышления
     и кеш по умолчанию. Явные model / thinking / cache_ttl сильнее роли.
@@ -214,9 +230,14 @@ async def ask_claude(
         llm_health.on_ok()
         return _first_text(resp)
     except anthropic.APIError as e:
-        logger.error("Claude API error: %s", e)
+        # одна строка: код и тип, без текста ошибки (в нём может быть URL/тело запроса)
+        logger.error("Claude API error: status=%s type=%s kind=%s",
+                     getattr(e, "status_code", None), type(e).__name__, llm_health.classify_error(e) or "api")
         llm_health.on_error(e)
         llm_usage.record(log_label, used_model, {}, int((time.monotonic() - t0) * 1000), False, cache_ttl, thinking)
+        if strict:
+            raise LLMUnavailable(llm_health.classify_error(e) or "api",
+                                 getattr(e, "status_code", None), type(e).__name__) from None
         return ""
 
 

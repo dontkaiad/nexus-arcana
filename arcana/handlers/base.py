@@ -8,7 +8,8 @@ from aiogram import Router
 from aiogram.filters import CommandStart, Command
 from aiogram.types import Message, CallbackQuery
 from arcana.handlers.reactions import reaction_for
-from core.claude_client import ask_claude
+from core import llm_health
+from core.claude_client import LLMUnavailable, ask_claude
 from core.config import config as _cfg
 from core.error_log import log_error
 from core.tg_send import send_long
@@ -505,11 +506,18 @@ async def route_message(
         if intent:
             logger.info("deterministic intent=%s | %s", intent, text[:60])
         else:
-            intent = (await ask_claude(
-                text, system=ROUTER_SYSTEM, max_tokens=10,
-                role="route",
-                temperature=0,
-            )).strip().lower()
+            try:
+                intent = (await ask_claude(
+                    text, system=ROUTER_SYSTEM, max_tokens=10,
+                    role="route",
+                    temperature=0,
+                    strict=True,
+                )).strip().lower()
+            except LLMUnavailable:
+                # Сбой API ≠ «не поняла»: говорим как есть, меню «Не поняла» не показываем.
+                await message.answer(llm_health.UNAVAILABLE_REPLY)
+                llm_health.mark_notified()
+                return
 
         logger.info("intent=%s | %s", intent, text[:60])
 
