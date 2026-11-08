@@ -114,6 +114,7 @@ class ListItem:
     date: str = ""        # created_at[:10]
     for_sitter: bool = False   # покупки/чеклист: виден ситтеру через GET /api/sitter/lists
     sitter_hidden: bool = False  # инвентарь: скрыт от ситтера (по умолчанию виден)
+    location: str = ""           # инвентарь: где лежит ("" = не указано; в БД NULL)
 
 
 @dataclass
@@ -163,6 +164,7 @@ def _row_to_list_item(row) -> ListItem:
         date=date_str,
         for_sitter=bool(getattr(row, "for_sitter", False)),
         sitter_hidden=bool(getattr(row, "sitter_hidden", False)),
+        location=getattr(row, "location", None) or "",
     )
 
 

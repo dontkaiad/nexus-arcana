@@ -453,6 +453,7 @@ export function adaptLists(data) {
       recurring: !!x.recurring,
       forSitter: !!x.for_sitter,
       sitterHidden: !!x.sitter_hidden,
+      location: x.location ?? '',
     }
     if (type === 'inv') {
       return {

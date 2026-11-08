@@ -97,6 +97,7 @@ def _serialize_pg(item) -> dict:
         "recurring": item.is_recurring,
         "for_sitter": bool(getattr(item, "for_sitter", False)),
         "sitter_hidden": bool(getattr(item, "sitter_hidden", False)),
+        "location": getattr(item, "location", "") or None,
     }
 
 

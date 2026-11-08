@@ -42,6 +42,8 @@ nexus_lists = Table(
     Column("for_sitter",     Boolean,    nullable=False, server_default=text("false")),
     # Инвентарь виден ситтеру по умолчанию; true скрывает пункт (миграция b9f2d6a1c850).
     Column("sitter_hidden",  Boolean,    nullable=False, server_default=text("false")),
+    # Инвентарь: где лежит (миграция f4a8c2d6e913); NULL = не указано.
+    Column("location",       Text,       nullable=True),
     Column("user_id", Text,       nullable=False, server_default=text("''")),
     Column("created_at",     TIMESTAMP(timezone=True), server_default=text("now()")),
     Column("updated_at",     TIMESTAMP(timezone=True), server_default=text("now()")),
