@@ -153,3 +153,69 @@ def test_purge_old_removes_only_old_rows():
 def test_purge_job_is_scheduled_daily():
     src = (REPO / "nexus" / "nexus_bot.py").read_text(encoding="utf-8")
     assert 'id="memory_trace_purge"' in src and "purge_old_traces" in src
+
+
+def test_trace_row_is_written_on_the_real_bot_path_handle_text():
+    """Регрессия: Memory.id — строки, а rrf_ids/final_ids — bigint[]; запись падала молча, трасс не было вообще.
+    Путь: handle_text → classify → process_item → search_memory → answer (реальный гибрид) → generate (API лежит → fallback)."""
+    import asyncio
+    import re
+    from types import SimpleNamespace
+    from core import memory_answer, memory_search, classifier
+    from core.repos.memories_table import memories
+    from core.repos.people_tables import people
+    from sqlalchemy import delete, insert
+    import nexus.nexus_bot as nb
+
+    from tests._people_helpers import insert_person
+    me = insert_person(MARK, "Я", is_self=True, status="confirmed")
+    with get_engine().begin() as c:
+        for i, t in enumerate(("не ем сладкое", "не ем грибы", "не ем сыр")):
+            c.execute(insert(memories).values(fact_text=t, key_name="person_%d_dislikes_%08x" % (me, i), category="🛒 Предпочтения",
+                                               user_id=MARK, person_id=me, review_status="confirmed"))
+    msg = SimpleNamespace(
+        text="что я не ем", from_user=SimpleNamespace(id=700000002, is_bot=False), chat=SimpleNamespace(id=700000002),
+        reply_to_message=None, voice=None, photo=None, bot=SimpleNamespace(send_chat_action=AsyncMock()),
+        answer=AsyncMock(), reply=AsyncMock())
+    no = AsyncMock(return_value=False)
+
+    async def rerank_all(prompt="", **kw):
+        return json.dumps([int(x) for x in re.findall(r"id=(\d+)", prompt)])
+
+    cls = AsyncMock(return_value=json.dumps([{"type": "memory_search", "query": "не ем"}]))
+    try:
+        with patch.dict("os.environ", {"MEMORY_GENERATE_ANSWER": "1"}), \
+                patch.object(classifier, "ask_claude", cls), \
+                patch.object(memory_search, "_embed", return_value=[]), \
+                patch.object(memory_search, "ask_claude", AsyncMock(side_effect=rerank_all)), \
+                patch.object(memory_answer, "ask_claude", AsyncMock(side_effect=RuntimeError("api down"))), \
+                patch("core.memory._search_finance", AsyncMock(return_value=[])), \
+                patch("nexus.handlers.finance.maybe_payday_reminder", AsyncMock()), \
+                patch("nexus.handlers.finance.handle_budget_setup_text", no), \
+                patch("nexus.handlers.finance.handle_finance_pending", no), \
+                patch("nexus.handlers.lists.handle_list_pending", no), \
+                patch.object(nb, "_handle_receipt_clarify", no), \
+                patch("nexus.handlers.tasks.maybe_handle_reschedule_pending", no), \
+                patch("nexus.handlers.tasks._pending_has", lambda *_: False), \
+                patch("nexus.handlers.tasks._get_effective_tz", AsyncMock(return_value=(3, "MSK"))), \
+                patch("nexus.handlers.utils.react", AsyncMock()):
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                loop.run_until_complete(nb.handle_text(msg, user_id=MARK))
+            finally:
+                loop.close()
+                asyncio.set_event_loop(asyncio.new_event_loop())
+        with get_engine().connect() as c:
+            rows = c.execute(text("SELECT question, route, final_ids, rrf_ids, fts, gen, error FROM memory_trace "
+                                  "WHERE user_id = :u"), {"u": MARK}).all()
+        assert len(rows) == 1, "трасса не записалась на пути handle_text"
+        r = rows[0]
+        assert r.question == "что я не ем" and r.error is None and r.route == "hybrid_self"
+        assert len(r.final_ids) == 3 and all(isinstance(i, int) for i in r.final_ids)
+        assert sorted(r.rrf_ids) == sorted(r.final_ids) and r.fts and r.fts[0][1] == 1
+        assert r.gen and r.gen["attempted"] and not r.gen["ok"]            # генерация упала → fallback на список, причина в трассе
+    finally:
+        with get_engine().begin() as c:
+            c.execute(delete(memories).where(memories.c.user_id == MARK))
+            c.execute(delete(people).where(people.c.user_id == MARK))
