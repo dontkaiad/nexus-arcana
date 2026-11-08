@@ -146,7 +146,7 @@ def test_inaccessible_data_is_never_returned_whatever_the_query():
 
 def test_every_allowed_source_is_reachable():
     build_world()
-    cases = {"бинт": "inventory", "корм": "general", "пылесоса": "fact", "окна": "list", "котят": "list"}
+    cases = {"бинт": "inventory", "корм": "general", "пылесоса": "fact", "окна": "list", "купить": "list"}
     for q, source in cases.items():
         assert source in [h["source"] for h in ask(q).json()["hits"]], q
 
@@ -161,7 +161,7 @@ def test_lexical_only_mode_without_embeddings_finds_and_rejects_correctly(monkey
         r = ask(q).json()
         assert r["found"] and need.lower() in texts_of(r).lower(), q
     for q in W.NO_ANSWER:
-        assert ask(q).json() == {"found": False, "hits": []}, q
+        assert ask(q).json() == {"found": False, "hits": [], "more": 0}, q
 
 
 def texts_of(body):
@@ -179,7 +179,7 @@ def test_vector_leg_finds_what_words_do_not():
 def test_unrelated_questions_find_nothing_even_with_vectors():
     build_world()
     for q in W.NO_ANSWER:
-        assert ask(q).json() == {"found": False, "hits": []}, q
+        assert ask(q).json() == {"found": False, "hits": [], "more": 0}, q
 
 
 def test_default_visibility_hidden_and_flagged_follow_the_shared_clause():
@@ -266,7 +266,7 @@ def test_duplicate_texts_are_collapsed():
 def test_owner_without_profile_gets_nothing():
     build_world()
     with patch("miniapp.backend.routes.sitter.get_user_id", AsyncMock(return_value=None)):
-        assert ask("бинт").json() == {"found": False, "hits": []}
+        assert ask("бинт").json() == {"found": False, "hits": [], "more": 0}
 
 
 # ── пороги ────────────────────────────────────────────────────────────────────
@@ -310,7 +310,7 @@ def test_generic_question_words_do_not_match_by_themselves():
     add_fact("паспорт хранится в сейфе")
     assert ss.sitter_fts_query("где лежит паспорт") == "паспорт"
     assert ss.sitter_fts_query("что любит Мария") == "мария"
-    assert ask("лежит").json() == {"found": False, "hits": []}
+    assert ask("лежит").json() == {"found": False, "hits": [], "more": 0}
 
 
 # ── эмбеддинг: кэш и сбои ────────────────────────────────────────────────────
@@ -359,7 +359,7 @@ HOSTILE = ["'; DROP TABLE memories; --", "бинт' OR '1'='1", "бинт & !й�
 def test_hostile_queries_are_harmless(q):
     build_world()
     r = ask(q)
-    assert r.status_code == 200 and set(r.json()) == {"found", "hits"}
+    assert r.status_code == 200 and set(r.json()) == {"found", "hits", "more"}
     with get_engine().connect() as c:
         assert c.execute(text("SELECT count(*) FROM memories WHERE user_id = :u"), {"u": USER}).scalar() > 0
         assert c.execute(text("SELECT count(*) FROM nexus_lists WHERE user_id = :u"), {"u": USER}).scalar() > 0
@@ -419,3 +419,150 @@ def test_no_llm_is_called(monkeypatch):
     monkeypatch.setattr(cc, "ask_claude", AsyncMock(side_effect=AssertionError("LLM called")))
     build_world()
     assert ask("где таблетки от головы").status_code == 200
+
+
+# ── место (nexus_lists.location) ─────────────────────────────────────────────
+
+def _loc_mig():
+    import importlib.util
+    from pathlib import Path
+    path = next((Path(__file__).resolve().parent.parent / "alembic" / "versions").glob("*_nexus_lists_location.py"))
+    spec = importlib.util.spec_from_file_location("_mig_loc", path)
+    m = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(m)
+    return m
+
+
+def test_location_migration_nullable_and_reversible_in_a_rolled_back_transaction():
+    from alembic.migration import MigrationContext
+    from alembic.operations import Operations
+    from sqlalchemy import inspect
+
+    mig = _loc_mig()
+    col = {c["name"]: c for c in inspect(get_engine()).get_columns("nexus_lists")}["location"]
+    assert col["nullable"] is True and col["default"] is None
+    iid = add_item("инвентарь", "Пункт")
+    with get_engine().connect() as conn:
+        tx = conn.begin()
+        try:
+            assert conn.execute(text("SELECT location FROM nexus_lists WHERE id = :i"), {"i": iid}).scalar() is None
+            with Operations.context(MigrationContext.configure(conn)):
+                mig.downgrade()
+                assert "location" not in {c["name"] for c in inspect(conn).get_columns("nexus_lists")}
+                assert conn.execute(text("SELECT count(*) FROM nexus_lists WHERE id = :i"), {"i": iid}).scalar() == 1
+                mig.upgrade()
+                assert "location" in {c["name"] for c in inspect(conn).get_columns("nexus_lists")}
+        finally:
+            tx.rollback()
+
+
+def test_inventory_hit_carries_location_and_others_do_not():
+    add_item("инвентарь", "Цитрамон", "от головы", category="Здоровье", location="верхний ящик")
+    add_item("инвентарь", "Йод", "для порезов", category="Здоровье")
+    add_item("чеклист", "Закрыть окна", "", group="Перед сном", for_sitter=True)
+    add_fact("общий факт про занавески")
+    cit = ask("цитрамон").json()["hits"][0]
+    assert cit["source"] == "inventory" and cit["location"] == "верхний ящик"
+    iod = ask("йод").json()["hits"][0]
+    assert iod["source"] == "inventory" and iod["location"] == ""        # не указано: бот скажет «место не указано, спроси у Кай»
+    lst = ask("закрыть окна").json()["hits"][0]
+    gen = ask("занавески").json()["hits"][0]
+    assert lst["source"] == "list" and gen["source"] == "general"
+    assert "location" not in lst and "location" not in gen
+
+
+def test_location_is_searchable_and_clipped():
+    add_item("инвентарь", "Зарядка", "", category="Дом", location="кладовка за дверью " + "х" * 400)
+    r = ask("кладовка").json()
+    assert r["found"] and r["hits"][0]["text"].startswith("Зарядка")
+    assert len(r["hits"][0]["location"]) <= 120
+
+
+def test_hidden_items_location_does_not_leak():
+    add_item("инвентарь", "Сейф", "", category="Дом", location="секретная-полка", sitter_hidden=True)
+    for q in ("сейф", "секретная-полка", "где лежит сейф"):
+        assert "секретная-полка" not in str(ask(q).json())
+    assert "секретная-полка" not in str(TestClient(app).get("/api/sitter/lists", headers=OK).json())
+
+
+def test_sitter_lists_inventory_has_location():
+    add_item("инвентарь", "Лампа", "", category="Дом", location="комод")
+    add_item("инвентарь", "Свеча", "", category="Дом")
+    inv = TestClient(app).get("/api/sitter/lists", headers=OK).json()["inventory"][0]["items"]
+    assert {i["name"]: i["location"] for i in inv} == {"Лампа": "комод", "Свеча": ""}
+
+
+# ── относительный порог, «Есть ещё», стоп-слова про котов ───────────────────
+
+def _cnds(*scores):
+    return [{"source": "general", "label": "общее про котов", "text": "фрагмент %d" % i, "fts": 0.0, "cos": c}
+            for i, c in enumerate(scores)]
+
+
+def _run(monkeypatch, scores, offset=0):
+    monkeypatch.setattr(ss, "VEC_MIN", 0.50)
+    monkeypatch.setattr(ss, "_candidates", lambda *a, **k: _cnds(*scores))
+    return ss.search_sync("u", "вопрос", [1.0], offset)
+
+
+def test_relative_threshold_boundary(monkeypatch):
+    r = _run(monkeypatch, [1.0, 0.80, 0.7999])
+    assert [h["text"] for h in r["hits"]] == ["фрагмент 0", "фрагмент 1"] and r["more"] == 0     # ровно 0.8 от лучшего проходит, ниже нет
+    r = _run(monkeypatch, [0.9, 0.5])
+    assert [h["text"] for h in r["hits"]] == ["фрагмент 0"]
+
+
+def test_relative_threshold_does_not_override_absolute_one(monkeypatch):
+    r = _run(monkeypatch, [0.55, 0.52])
+    assert len(r["hits"]) == 2                        # 0.52 ≥ 0.8 × 0.55 и ≥ абсолютного порога
+    r = _run(monkeypatch, [0.49, 0.48])
+    assert r == {"found": False, "hits": [], "more": 0}
+
+
+def test_more_and_offset_paginate_without_gaps_or_repeats(monkeypatch):
+    sc = [1.0, 0.99, 0.98, 0.97, 0.96, 0.95, 0.94]
+    first = _run(monkeypatch, sc)
+    assert [h["text"] for h in first["hits"]] == ["фрагмент 0", "фрагмент 1", "фрагмент 2"] and first["more"] == 4
+    second = _run(monkeypatch, sc, offset=3)
+    assert [h["text"] for h in second["hits"]] == ["фрагмент 3", "фрагмент 4", "фрагмент 5"] and second["more"] == 1
+    third = _run(monkeypatch, sc, offset=6)
+    assert [h["text"] for h in third["hits"]] == ["фрагмент 6"] and third["more"] == 0
+    beyond = _run(monkeypatch, sc, offset=9)
+    assert beyond == {"found": False, "hits": [], "more": 0}
+
+
+def test_offset_is_clamped_and_validated(monkeypatch):
+    assert _run(monkeypatch, [1.0], offset=10 ** 9)["hits"] == []
+    assert _run(monkeypatch, [1.0], offset=-5)["hits"][0]["text"] == "фрагмент 0"
+    for bad in (-1, ss.MAX_OFFSET + 1, "x"):
+        assert TestClient(app).post("/api/sitter/ask", json={"q": "бинт", "offset": bad}, headers=OK).status_code == 422
+
+
+def test_endpoint_more_and_offset_end_to_end():
+    for i in range(5):
+        add_fact("общий факт про весы номер %d" % i, category="🐾 Коты")
+    a = ask("весы").json()
+    assert len(a["hits"]) == 3 and a["more"] == 2
+    b = TestClient(app).post("/api/sitter/ask", json={"q": "весы", "offset": 3}, headers=OK).json()
+    assert len(b["hits"]) == 2 and b["more"] == 0
+    assert not {h["text"] for h in a["hits"]} & {h["text"] for h in b["hits"]}
+
+
+def test_cat_words_are_stopped_only_for_the_sitter_search():
+    from core import memory_search
+    assert ss.sitter_fts_query("какой наполнитель у котов") == "наполнитель"
+    assert ss.sitter_fts_query("корм для кошки и котят") == "корм"
+    assert ss.sitter_fts_query("Тучка") == "тучка"                                     # имена котов остаются
+    # поиск по памяти владельца не меняется
+    assert "котов" in memory_search.fts_query("какой наполнитель у котов").split(" | ")
+    assert "кошки" in memory_search.fts_query("корм для кошки").split(" | ")
+    import inspect
+    assert "_CAT_WORDS" not in inspect.getsource(memory_search)
+
+
+def test_litter_question_does_not_pull_food(monkeypatch):
+    monkeypatch.setattr(ss, "_embed", lambda texts, t="document": [[0.0] * 1024 for _ in ([texts] if isinstance(texts, str) else texts)])
+    add_fact("Корм для котов лежит в кухонном шкафу")
+    add_fact("Наполнитель для лотка стоит в коридоре")
+    r = ask("какой наполнитель у котов").json()
+    assert [h["text"] for h in r["hits"]] == ["Наполнитель для лотка стоит в коридоре"]

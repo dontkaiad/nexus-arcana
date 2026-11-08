@@ -46,6 +46,7 @@ _budget = sitter_search.QueryBudget()
 
 class AskBody(BaseModel):
     q: str = Field(min_length=1, max_length=2000)
+    offset: int = Field(default=0, ge=0, le=sitter_search.MAX_OFFSET)     # «Показать ещё»: с какого фрагмента отдавать
 
 
 @router.post("/sitter/ask")
@@ -58,7 +59,7 @@ async def sitter_ask(body: AskBody, owner_tg_id: int = Depends(sitter_lists_gate
     if wait:
         raise HTTPException(status_code=429, detail="too many questions", headers={"Retry-After": str(wait)})
     user_id = (await get_user_id(owner_tg_id)) or ""
-    return await sitter_search.ask(user_id, q)
+    return await sitter_search.ask(user_id, q, body.offset)
 
 
 @router.get("/lists/sitter-preview")

@@ -44,6 +44,7 @@ def _make_engine():
             "shared INTEGER NOT NULL DEFAULT 0, "
             "for_sitter INTEGER NOT NULL DEFAULT 0, "
             "sitter_hidden INTEGER NOT NULL DEFAULT 0, "
+            "location TEXT, "
             "user_id TEXT DEFAULT '', "
             "created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, "
             "updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)"

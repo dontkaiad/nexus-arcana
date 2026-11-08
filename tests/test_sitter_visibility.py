@@ -145,7 +145,7 @@ def test_inventory_grouped_by_category_with_minimal_fields_and_no_leaks():
     assert [(c["category"], [i["name"] for i in c["items"]]) for c in body["inventory"]] == [("Дом", ["Аптечка", "Свеча"]), ("Спальня", ["Плед"])]
     assert body["inventory_count"] == 3 and body["count"] == 0
     item = body["inventory"][0]["items"][0]
-    assert set(item) == {"name", "note", "quantity"} and item["quantity"] == 1.0
+    assert set(item) == {"name", "note", "quantity", "location"} and item["quantity"] == 1.0
     flat = str(body)
     for secret in ("777", "555", "Магазин-секрет", "TASK-SECRET", "WORK-SECRET", "срочно", MARK):
         assert secret not in flat
@@ -253,3 +253,12 @@ def test_sitter_toggles_are_wired_only_to_nexus_lists_screen():
     sheet = _block(src, "function ListItemSheet")
     assert 'sitterMode === "show"' in sheet and 'sitterMode === "hide"' in sheet
     assert "/sitter-hidden" in sheet and "/sitter`" in sheet
+
+
+def test_location_field_only_for_nexus_inventory_sheet():
+    src = (REPO / "miniapp" / "frontend" / "src" / "App.jsx").read_text(encoding="utf-8")
+    sheet = _block(src, "function ListItemSheet")
+    assert 'if (sitterMode === "hide") body.location' in sheet           # в тело уходит только с экрана Nexus-инвентаря
+    assert "Где лежит" in sheet and "setLocation" in sheet
+    ad = (REPO / "miniapp" / "frontend" / "src" / "adapters.js").read_text(encoding="utf-8")
+    assert "location: x.location" in ad

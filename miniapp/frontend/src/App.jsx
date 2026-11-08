@@ -2951,6 +2951,7 @@ function ListItemSheet({ s, item, isInv, onDone, sitterMode }) {
   const [name, setName] = useState(item.name || "");
   const [cat, setCat] = useState(item.catFull || "");
   const [note, setNote] = useState(item.note || "");
+  const [location, setLocation] = useState(item.location || "");
   const [store, setStore] = useState(item.source || "");
   const [pricePlan, setPricePlan] = useState(item.pricePlan ? String(Math.round(item.pricePlan)) : "");
   const [prio, setPrio] = useState((item.priority || "").split(" ")[0] || "—");
@@ -2987,6 +2988,7 @@ function ListItemSheet({ s, item, isInv, onDone, sitterMode }) {
       expires: expires || "",
       recurring,
     };
+    if (sitterMode === "hide") body.location = location.trim();
     if (!isInv) {
       body.store = store;
       body.price_plan = pricePlan ? parseInt(pricePlan.replace(/\s/g, ""), 10) : 0;
@@ -3066,6 +3068,13 @@ function ListItemSheet({ s, item, isInv, onDone, sitterMode }) {
           <Input s={s} value={expires} onChange={setExpires} placeholder="дата" type="date" />
         </div>
       </div>
+
+      {sitterMode === "hide" && (
+        <>
+          <div style={{ fontSize: fs(11), color: s.tS }}>📍 Где лежит (увидит ситтер)</div>
+          <Input s={s} value={location} onChange={setLocation} placeholder="напр. верхний ящик комода" />
+        </>
+      )}
 
       <div style={{ fontSize: fs(11), color: s.tS }}>📝 Заметка</div>
       <textarea

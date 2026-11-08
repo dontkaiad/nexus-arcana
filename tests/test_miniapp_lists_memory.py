@@ -580,6 +580,32 @@ def test_list_patch_inventory_ignores_purchase_fields(client):
     assert "store" not in kw and "priority" not in kw
 
 
+def test_list_patch_location_for_nexus_inventory_set_and_clear(client):
+    from core.repos.pg_nexus_lists_repo import ListItem
+    it = ListItem(id="n1", name="Йод", list_type="инвентарь", status="not_started", user_id=FAKE_USER_ID)
+    st, mock_nx, _ = _patch_ctx(nx_item=it)
+    with st:
+        assert client.patch("/api/lists/n1", json={"location": "  верхний ящик "}).status_code == 200
+        assert mock_nx.update.await_args.kwargs["location"] == "верхний ящик"
+        assert client.patch("/api/lists/n1", json={"location": "   "}).status_code == 200
+        assert mock_nx.update.await_args.kwargs["location"] is None          # пусто = «не указано» (NULL)
+        assert client.patch("/api/lists/n1", json={"location": "х" * 201}).status_code == 422
+
+
+def test_list_patch_location_rejected_for_purchases_and_ignored_for_arcana(client):
+    from core.repos.pg_nexus_lists_repo import InventoryItem, ListItem
+    it = ListItem(id="p9", name="Молоко", list_type="покупки", status="not_started", user_id=FAKE_USER_ID)
+    st, mock_nx, _ = _patch_ctx(nx_item=it)
+    with st:
+        assert client.patch("/api/lists/p9", json={"location": "полка"}).status_code == 400
+    mock_nx.update.assert_not_awaited()
+    ai = InventoryItem(id="a1", name="Соль", list_type="инвентарь", status="not_started", user_id=FAKE_USER_ID)
+    st, _, mock_inv = _patch_ctx(ai_item=ai)
+    with st:
+        assert client.patch("/api/lists/a1", json={"location": "полка", "note": "x"}).status_code == 200
+    assert "location" not in mock_inv.update.await_args.kwargs
+
+
 def test_list_patch_barter_category_rejected_for_purchase(client):
     from core.repos.pg_nexus_lists_repo import ListItem
     it = ListItem(id="p2", name="X", list_type="покупки", status="not_started", user_id=FAKE_USER_ID)

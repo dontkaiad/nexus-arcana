@@ -18,7 +18,7 @@ from sqlalchemy import and_, not_, or_, select, text, update
 from core.db import get_engine
 from core.repos.lists_table import nexus_lists as t
 
-MAX_NAME, MAX_NOTE, MAX_GROUP = 120, 300, 60
+MAX_NAME, MAX_NOTE, MAX_GROUP, MAX_LOC = 120, 300, 60, 200
 INVENTORY = "инвентарь"
 FLAGGED_TYPES = ("покупки", "чеклист")
 
@@ -65,11 +65,11 @@ def list_inventory(user_id: str, with_ids: bool = False) -> List[Dict]:
     if not user_id:
         return []
     with get_engine().connect() as c:
-        rows = c.execute(select(t.c.id, t.c.category, t.c.name, t.c.note, t.c.quantity)
+        rows = c.execute(select(t.c.id, t.c.category, t.c.name, t.c.note, t.c.quantity, t.c.location)
                          .where(sitter_visible_clause(user_id), t.c.list_type == INVENTORY)
                          .order_by(t.c.category, t.c.id)).all()
     out = [{"category": _clip(r.category, MAX_GROUP), "name": _clip(r.name, MAX_NAME), "note": _clip(r.note, MAX_NOTE),
-            "quantity": _qty(r.quantity)} for r in rows]
+            "quantity": _qty(r.quantity), "location": _clip(r.location, MAX_LOC)} for r in rows]
     if with_ids:
         for o, r in zip(out, rows):
             o["id"] = int(r.id)

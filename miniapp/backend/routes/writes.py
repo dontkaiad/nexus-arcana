@@ -1690,6 +1690,7 @@ class ListItemPatchBody(BaseModel):
     store: Optional[str] = Field(default=None, max_length=200)   # только nexus_lists
     price_plan: Optional[float] = Field(default=None, ge=0)      # только nexus_lists; 0 → снять
     priority: Optional[str] = None      # "🔴"/"🟡"/"⚪"/"" — только nexus_lists
+    location: Optional[str] = Field(default=None, max_length=200)  # где лежит — только инвентарь nexus_lists; "" → снять
 
 
 @router.patch("/lists/{item_id}")
@@ -1736,6 +1737,10 @@ async def list_patch(
             fields["price_plan"] = body.price_plan or None
         if body.priority is not None:
             fields["priority"] = _LIST_PRIO_EMOJI_TO_PG.get(body.priority.strip(), "")
+        if body.location is not None:
+            if getattr(_item, "list_type", "") != "инвентарь":
+                raise HTTPException(status_code=400, detail="location is for inventory items only")
+            fields["location"] = body.location.strip() or None
 
     if not fields:
         return {"ok": True, "unchanged": True}
